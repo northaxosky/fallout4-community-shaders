@@ -1,0 +1,46 @@
+[mod]
+name = "FO4 Community Shaders"
+project_root_marker = "CMakeLists.txt"
+
+[build]
+preset = "default"
+config = "Release"
+build_dir = "build"
+
+[deploy]
+mod_dir_var = "MOD_DIR"
+
+[[deploy.dlls]]
+src = "build/Release/FO4CommunityShaders.dll"
+dst = "F4SE/Plugins/FO4CommunityShaders.dll"
+pdb = true
+
+# Future asset entries (HLSL shaders, settings INI defaults, runtime SDK DLLs)
+# will land here as features add them. Streamline / FidelityFX / XeSS runtime
+# DLLs already stage to package/F4SE/Plugins/ via fetch-sdks.sh; they'll be
+# wired through this manifest once Upscaling/FrameGeneration features are
+# proven at runtime.
+
+[launch]
+mo2_exe_var = "MO2_EXE"
+mo2_profile_var = "MO2_PROFILE"
+mo2_executable_var = "MO2_EXECUTABLE"
+process_name = "Fallout4.exe"
+
+[test]
+log_dir_var = "F4SE_LOG_DIR"
+
+[[test.logs]]
+name = "FO4CommunityShaders.log"
+copy_to_results = true
+
+[test.success_markers]
+data_loaded = '\[CS\] FO4CommunityShaders v.*loaded'
+rendering_active = '\[Menu\] ImGui initialized'
+
+[test.timeouts]
+launch_seconds = 30
+data_loaded_seconds = 60
+post_load_idle_seconds = 30
+stabilize_seconds = 10
+overall_seconds = 120
