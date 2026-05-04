@@ -56,7 +56,7 @@ struct hkD3D11CreateDeviceAndSwapChain
 		if (streamline->interposer){
 			cs::log::Get("cs.feature.upscaling.streamline")->info("Interposer present, initializing Streamline...");
 			streamline->Initialize();
-			// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+			// X2b-real cleanup: drops once CreateDXGIFactory1 + slot-10 hooks are unconditional.
 			if (!cs::env::IsENBLoaded() && !streamline->alreadyInitialized) {
 				cs::log::Get("cs.feature.upscaling.streamline")->info("Upgrading swap chain interface (no ENB)");
 				streamline->slUpgradeInterface((void**)&(*ppSwapChain));

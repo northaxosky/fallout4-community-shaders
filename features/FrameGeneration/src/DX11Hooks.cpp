@@ -231,7 +231,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			pFeatureLevels = &featureLevel;
 			FeatureLevels = 1;
 
-			// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+			// X2b-real cleanup: drops once CreateDXGIFactory1 + slot-10 hooks are unconditional.
 			if (cs::env::IsENBLoaded()) {
 				*(uintptr_t*)&ptrCreateSwapChain = Detours::X64::DetourClassVTable(*(uintptr_t*)dxgiFactory, &hk_IDXGIFactory_CreateSwapChain, 10);
 			}

@@ -18,6 +18,10 @@ class WrappedResource
 {
 public:
 	WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device);
+	~WrappedResource();
+
+	WrappedResource(const WrappedResource&) = delete;
+	WrappedResource& operator=(const WrappedResource&) = delete;
 
 	ID3D11Texture2D* resource11 = nullptr;
 	ID3D11ShaderResourceView* srv = nullptr;
@@ -109,8 +113,7 @@ public:
 
 	DXGI_SWAP_CHAIN_DESC1 swapChainDesc;
 
-	Texture2D* swapChainBufferProxy;
-	WrappedResource* swapChainBufferProxyENB;
+	WrappedResource* swapChainBufferProxy;
 
 	WrappedResource* swapChainBufferWrapped[2];
 

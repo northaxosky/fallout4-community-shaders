@@ -204,8 +204,6 @@ void DX12SwapChain::RecreateWrappedBuffers()
 	texDesc11.MiscFlags = 0;
 
 	// Drop any prior wrapped resources before re-allocation.
-	delete swapChainBufferProxyENB;
-	swapChainBufferProxyENB = nullptr;
 	delete swapChainBufferProxy;
 	swapChainBufferProxy = nullptr;
 	delete swapChainBufferWrapped[0];
@@ -213,21 +211,7 @@ void DX12SwapChain::RecreateWrappedBuffers()
 	delete swapChainBufferWrapped[1];
 	swapChainBufferWrapped[1] = nullptr;
 
-	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
-	if (cs::env::IsENBLoaded()) {
-		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
-	} else {
-		swapChainBufferProxy = new Texture2D(texDesc11);
-
-		// SRV needed by GenerateUIBuffer compute shader.
-		D3D11_SHADER_RESOURCE_VIEW_DESC proxySrvDesc{};
-		proxySrvDesc.Format = texDesc11.Format;
-		proxySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-		proxySrvDesc.Texture2D.MostDetailedMip = 0;
-		proxySrvDesc.Texture2D.MipLevels = 1;
-		swapChainBufferProxy->CreateSRV(proxySrvDesc);
-	}
-
+	swapChainBufferProxy = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 	swapChainBufferWrapped[0] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 	swapChainBufferWrapped[1] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 }
@@ -249,11 +233,7 @@ void DX12SwapChain::SetD3D11DeviceContext(ID3D11DeviceContext* a_d3d11Context)
 
 HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 {
-	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
-	if (cs::env::IsENBLoaded())
-		*ppSurface = swapChainBufferProxyENB->resource11;
-	else
-		*ppSurface = swapChainBufferProxy->resource.get();
+	*ppSurface = swapChainBufferProxy->resource11;
 	return S_OK;
 }
 
@@ -283,11 +263,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	else
 	{
 		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before.
-		// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
-		if (cs::env::IsENBLoaded())
-			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxyENB->resource11);
-		else
-			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource.get());
+		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
 	}
 
 	// Wait for D3D11 to finish
@@ -589,6 +565,14 @@ WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* 
 		rtvDesc.Texture2D.MipSlice = 0;
 		DX::ThrowIfFailed(a_d3d11Device->CreateRenderTargetView(resource11, &rtvDesc, &rtv));
 	}
+}
+
+WrappedResource::~WrappedResource()
+{
+	if (rtv) { rtv->Release(); rtv = nullptr; }
+	if (uav) { uav->Release(); uav = nullptr; }
+	if (srv) { srv->Release(); srv = nullptr; }
+	if (resource11) { resource11->Release(); resource11 = nullptr; }
 }
 
 DXGISwapChainProxy::DXGISwapChainProxy(IDXGISwapChain4* a_swapChain)

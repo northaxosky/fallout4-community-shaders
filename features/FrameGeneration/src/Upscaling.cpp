@@ -590,12 +590,7 @@ void Upscaling::GenerateUIBuffer()
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
 	// Get the backbuffer SRV (final frame with UI composited).
-	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
-	ID3D11ShaderResourceView* backbufferSRV = nullptr;
-	if (cs::env::IsENBLoaded())
-		backbufferSRV = dx12SwapChain->swapChainBufferProxyENB->srv;
-	else
-		backbufferSRV = dx12SwapChain->swapChainBufferProxy->srv.get();
+	ID3D11ShaderResourceView* backbufferSRV = dx12SwapChain->swapChainBufferProxy->srv;
 
 	if (!backbufferSRV) {
 		static bool loggedOnce = false;
