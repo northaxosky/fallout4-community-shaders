@@ -4,14 +4,13 @@
 #include <SimpleIni.h>
 
 #include "DX11Hooks.h"
-#include "ENB/ENBSeriesAPI.h"
+#include "Env.h"
 #include "Feature.h"
 #include "Log.h"
 
 namespace cs::features::Upscaling
 {
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling"); }
-	bool enbLoaded = false;
 
 
 /** @brief Hook for updating jitter, dynamic resolution, and resources */
@@ -964,21 +963,10 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 		currentUpscaleMethod = UpscaleMethod::kFSR;
 	}
 
-	// ENB compatibility: sub-native upscaling causes viewport compounding with ENB's pipeline.
-	// Native-resolution modes (DLAA / FSR Native AA) work since no render targets or viewports
-	// are modified. Quality mode is clamped to native AA in GetEffectiveQualityMode().
-	if (enbLoaded) {
-		static bool loggedENBActive = false;
-		if (!loggedENBActive) {
-			L->info("ENB detected - running in native AA mode (DLAA/FSR). Sub-native quality modes are not available with ENB.");
-			loggedENBActive = true;
-		}
-	}
-
 	static bool loggedOnce = false;
 	if (!loggedOnce && !a_checkMenu) {
-		L->info("GetUpscaleMethod resolved: method={} (0=Disabled, 1=FSR, 2=DLSS), preference={}, enbLoaded={}, dlssAvailable={}",
-			static_cast<uint>(currentUpscaleMethod), settings.upscaleMethodPreference, enbLoaded, streamline->featureDLSS);
+		L->info("GetUpscaleMethod resolved: method={} (0=Disabled, 1=FSR, 2=DLSS), preference={}, enb={}, dlssAvailable={}",
+			static_cast<uint>(currentUpscaleMethod), settings.upscaleMethodPreference, cs::env::IsENBLoaded(), streamline->featureDLSS);
 		loggedOnce = true;
 	}
 
@@ -987,7 +975,8 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 
 uint Upscaling::GetEffectiveQualityMode()
 {
-	if (enbLoaded && settings.qualityMode != 0) {
+	// X2+X3 cleanup: clamp drops once proxy completion (X2) and UI texture isolation (X3) eliminate viewport compounding.
+	if (cs::env::IsENBLoaded() && settings.qualityMode != 0) {
 		return 0;
 	}
 	return settings.qualityMode;
@@ -1128,8 +1117,8 @@ void Upscaling::UpdateUpscaling()
 	{
 		static float previousResolutionScale = -1.0f;
 		if (previousResolutionScale != resolutionScale) {
-			L->info("Resolution scale changed: {:.4f} -> {:.4f} (qualityMode={}, enbLoaded={}, method={})",
-				previousResolutionScale, resolutionScale, settings.qualityMode, enbLoaded, static_cast<uint>(upscaleMethodNoMenu));
+			L->info("Resolution scale changed: {:.4f} -> {:.4f} (qualityMode={}, enb={}, method={})",
+				previousResolutionScale, resolutionScale, settings.qualityMode, cs::env::IsENBLoaded(), static_cast<uint>(upscaleMethodNoMenu));
 			previousResolutionScale = resolutionScale;
 		}
 	}
@@ -1334,12 +1323,7 @@ void Upscaling::PatchSSRShader()
 
 	void Upscaling::Load()
 	{
-		if (ENB_API::RequestENBAPI()) {
-			L->info("ENB detected - native AA mode (DLAA/FSR)");
-			enbLoaded = true;
-		} else {
-			L->info("ENB not detected - full pipeline active");
-		}
+		L->info("ENB state: {}", cs::env::IsENBLoaded() ? "loaded (native AA only)" : "not loaded (full pipeline active)");
 
 		L->info("Installing DX11 hooks...");
 		DX11Hooks::Install();

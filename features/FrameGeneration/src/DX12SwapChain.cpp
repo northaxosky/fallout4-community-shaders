@@ -3,6 +3,7 @@
 #include <dx12/ffx_api_dx12.hpp>
 #include <dxgi1_6.h>
 
+#include "Env.h"
 #include "FidelityFX.h"
 #include "Log.h"
 #include "Streamline.h"
@@ -13,7 +14,6 @@
 namespace cs::features::FrameGeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx12"); }
-	extern bool enbLoaded;
 
 
 [[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
@@ -169,8 +169,9 @@ void DX12SwapChain::CreateInterop()
 	texDesc11.CPUAccessFlags = 0;
 	texDesc11.MiscFlags = 0;
 
-	// Create interop textures
-	if (enbLoaded) {
+	// Create interop textures.
+	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+	if (cs::env::IsENBLoaded()) {
 		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 	} else {
 		swapChainBufferProxy = new Texture2D(texDesc11);
@@ -205,7 +206,8 @@ void DX12SwapChain::SetD3D11DeviceContext(ID3D11DeviceContext* a_d3d11Context)
 
 HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 {
-	if (enbLoaded)
+	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+	if (cs::env::IsENBLoaded())
 		*ppSurface = swapChainBufferProxyENB->resource11;
 	else
 		*ppSurface = swapChainBufferProxy->resource.get();
@@ -237,8 +239,9 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	}
 	else
 	{
-		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before
-		if (enbLoaded)
+		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before.
+		// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+		if (cs::env::IsENBLoaded())
 			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxyENB->resource11);
 		else
 			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource.get());

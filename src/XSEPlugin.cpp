@@ -1,3 +1,4 @@
+#include "Env.h"
 #include "Feature.h"
 #include "Log.h"
 
@@ -48,6 +49,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	F4SE::Init(a_f4se, initInfo);
 
 	cs::log::AttachToDefaultLogger();
+	cs::env::DetectENB();
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded",
 		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);

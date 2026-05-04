@@ -9,7 +9,7 @@
 #include "Streamline.h"
 #include <nvsdk_ngx.h>
 
-#include "ENB/ENBSeriesAPI.h"
+#include "Env.h"
 #include "Log.h"
 #include "Menu.h"
 #include "XeSSFG.h"
@@ -18,7 +18,6 @@
 namespace cs::features::FrameGeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx11"); }
-	bool enbLoaded = false;
 
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;
@@ -232,7 +231,8 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			pFeatureLevels = &featureLevel;
 			FeatureLevels = 1;
 
-			if (enbLoaded) {
+			// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+			if (cs::env::IsENBLoaded()) {
 				*(uintptr_t*)&ptrCreateSwapChain = Detours::X64::DetourClassVTable(*(uintptr_t*)dxgiFactory, &hk_IDXGIFactory_CreateSwapChain, 10);
 			}
 			else {
@@ -353,12 +353,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 void DX11Hooks::Install()
 {
-	if (ENB_API::RequestENBAPI()) {
-		L->info("ENB detected, using alternative swap chain hook");
-		enbLoaded = true;
-	} else {
-		L->info("ENB not detected, using standard swap chain hook");
-	}
+	L->info("ENB state: {} swap chain hook", cs::env::IsENBLoaded() ? "loaded, using alternative" : "not loaded, using standard");
 
 	auto upscaling = Upscaling::GetSingleton();
 	auto fidelityFX = FidelityFX::GetSingleton();

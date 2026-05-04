@@ -2,8 +2,6 @@
 
 namespace cs::features::Upscaling
 {
-	extern bool enbLoaded;
-
 	namespace DX11Hooks
 	{
 		void Install();

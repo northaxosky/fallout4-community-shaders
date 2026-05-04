@@ -2,6 +2,7 @@
 
 #include <d3d11.h>
 
+#include "Env.h"
 #include "Log.h"
 #include "Menu.h"
 #include "Streamline.h"
@@ -9,7 +10,6 @@
 namespace cs::features::Upscaling
 {
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling.dx11"); }
-	extern bool enbLoaded;
 
 
 struct hkD3D11CreateDeviceAndSwapChain
@@ -56,7 +56,8 @@ struct hkD3D11CreateDeviceAndSwapChain
 		if (streamline->interposer){
 			cs::log::Get("cs.feature.upscaling.streamline")->info("Interposer present, initializing Streamline...");
 			streamline->Initialize();
-			if (!enbLoaded && !streamline->alreadyInitialized) {
+			// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
+			if (!cs::env::IsENBLoaded() && !streamline->alreadyInitialized) {
 				cs::log::Get("cs.feature.upscaling.streamline")->info("Upgrading swap chain interface (no ENB)");
 				streamline->slUpgradeInterface((void**)&(*ppSwapChain));
 			} else if (streamline->alreadyInitialized) {

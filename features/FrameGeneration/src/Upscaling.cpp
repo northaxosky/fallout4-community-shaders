@@ -4,6 +4,7 @@
 
 #include "DX12SwapChain.h"
 #include "DirectXMath.h"
+#include "Env.h"
 #include "Feature.h"
 #include "DX11Hooks.h"
 #include "Log.h"
@@ -588,9 +589,10 @@ void Upscaling::GenerateUIBuffer()
 
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
-	// Get the backbuffer SRV (final frame with UI composited)
+	// Get the backbuffer SRV (final frame with UI composited).
+	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
 	ID3D11ShaderResourceView* backbufferSRV = nullptr;
-	if (enbLoaded)
+	if (cs::env::IsENBLoaded())
 		backbufferSRV = dx12SwapChain->swapChainBufferProxyENB->srv;
 	else
 		backbufferSRV = dx12SwapChain->swapChainBufferProxy->srv.get();
