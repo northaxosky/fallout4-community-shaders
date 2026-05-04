@@ -15,6 +15,7 @@ namespace cs
 		virtual void Load() {}
 		virtual void OnDataLoaded() {}
 		virtual void OnPostPostLoad() {}
+		virtual void DrawMenu() {}
 	};
 
 	class FeatureManager
@@ -27,6 +28,8 @@ namespace cs
 		void LoadAll();
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
+
+		const std::vector<Feature*>& GetAll() const noexcept { return _features; }
 
 	private:
 		FeatureManager() = default;

@@ -16,6 +16,10 @@
     "directxtex",
     "directx-headers",
     "magic-enum",
-    "simpleini"
+    "simpleini",
+    {
+      "name": "imgui",
+      "features": [ "dx11-binding", "win32-binding", "docking-experimental" ]
+    }
   ]
 }

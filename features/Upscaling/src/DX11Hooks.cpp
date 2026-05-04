@@ -2,6 +2,7 @@
 
 #include <d3d11.h>
 
+#include "Menu.h"
 #include "Streamline.h"
 
 namespace cs::features::Upscaling
@@ -67,6 +68,9 @@ struct hkD3D11CreateDeviceAndSwapChain
 		} else {
 			REX::INFO("[SL] No interposer loaded, Streamline disabled");
 		}
+
+		cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
+		cs::Menu::Get().HookPresentOn(*ppSwapChain);
 
 		return S_OK;
 	}

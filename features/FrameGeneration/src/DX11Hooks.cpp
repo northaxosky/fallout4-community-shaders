@@ -10,6 +10,7 @@
 #include <nvsdk_ngx.h>
 
 #include "ENB/ENBSeriesAPI.h"
+#include "Menu.h"
 #include "XeSSFG.h"
 #include "UICompositor.h"
 
@@ -64,6 +65,12 @@ static HRESULT WINAPI hk_CreateSwapChainForHwnd(IDXGIFactory2* This, IUnknown* p
 	if (realSC4 && cmdQueue) {
 		UICompositor::GetSingleton()->SetRealSwapChain(realSC4, cmdQueue);
 		REX::INFO("[DLSSG-UI] Real swap chain Present hooked (vtable index 8)");
+
+		static bool warnedDLSSGMenu = false;
+		if (!warnedDLSSGMenu) {
+			REX::WARN("[Menu] DLSS-G active - menu drawn on proxy backbuffer; will warp until UICompositor integration lands");
+			warnedDLSSGMenu = true;
+		}
 	} else {
 		REX::WARN("[DLSSG-UI] Failed to QI swap chain ({:#x}) or command queue ({:#x})",
 			(uintptr_t)realSC4, (uintptr_t)cmdQueue);
@@ -151,6 +158,15 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	proxy->CreateInterop();
 
 	*ppSwapChain = proxy->GetSwapChainProxy();
+
+	{
+		ID3D11DeviceContext* menuContext = nullptr;
+		a_device->GetImmediateContext(&menuContext);
+		cs::Menu::Get().OnD3D11Ready(a_device, menuContext, pDesc->OutputWindow);
+		if (menuContext)
+			menuContext->Release();
+		cs::Menu::Get().HookPresentOn(*ppSwapChain);
+	}
 
 	return S_OK;
 }
@@ -304,7 +320,10 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				proxy->CreateInterop();
 
 				*ppSwapChain = proxy->GetSwapChainProxy();
-				
+
+				cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
+				cs::Menu::Get().HookPresentOn(*ppSwapChain);
+
 				return S_OK;
 			}
 

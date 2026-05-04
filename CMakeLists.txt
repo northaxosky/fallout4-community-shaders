@@ -31,6 +31,7 @@ find_package(directxtk CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 # SDK INTERFACE targets (header-only). Features link these directly.
 # FidelityFX-SDK is heavier and added by features that need it (currently Upscaling).
@@ -61,6 +62,7 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 	d3d12.lib
 	magic_enum::magic_enum
 	d3dcompiler.lib
+	imgui::imgui
 )
 
 # Features attach their sources to FO4CommunityShaders via target_sources.
