@@ -1,0 +1,51 @@
+# Build output
+build/
+build-*/
+out/
+*.exp
+*.lib
+*.obj
+*.pdb
+*.ilk
+
+# Vendored Detours static libs are NOT build output — track them
+!include/detours/**/*.lib
+!include/detours/**/*.pdb
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeUserPresets.json
+cmake_install.cmake
+Makefile
+*.cmake.in
+compile_commands.json
+
+# Visual Studio
+.vs/
+*.vcxproj.user
+*.suo
+
+# IDE
+.idea/
+.vscode/
+.cache/
+
+# Local config / secrets
+scripts/.env
+
+# SDK runtime DLL cache (per FO4Upscaling pattern)
+.sdk-cache/
+
+# Test output
+test-results/
+
+# Local agent / instruction files (private per global CLAUDE.md policy)
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.github/copilot-instructions.md
+
+# OS
+.DS_Store
+Thumbs.db

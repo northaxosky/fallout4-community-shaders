@@ -1,0 +1,12 @@
+[submodule "extern/CommonLibF4"]
+	path = extern/CommonLibF4
+	url = https://github.com/Dear-Modding-FO4/commonlibf4.git
+[submodule "extern/FidelityFX-SDK"]
+	path = extern/FidelityFX-SDK
+	url = https://github.com/MapleHinata/FidelityFX-SDK.git
+[submodule "extern/Streamline"]
+	path = extern/Streamline
+	url = https://github.com/NVIDIA-RTX/Streamline.git
+[submodule "extern/XeSS"]
+	path = extern/XeSS
+	url = https://github.com/intel/xess.git

@@ -1,0 +1,54 @@
+cmake_minimum_required(VERSION 3.21)
+
+project(
+	FO4CommunityShaders
+	LANGUAGES CXX
+)
+
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+
+set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
+
+set(Boost_USE_STATIC_LIBS ON)
+set(Boost_USE_STATIC_RUNTIME ON)
+
+# CommonLibF4 (Dear-Modding-FO4 fork)
+add_subdirectory(extern/CommonLibF4 CommonLibF4 EXCLUDE_FROM_ALL)
+
+# vcpkg packages
+find_package(directxtk CONFIG REQUIRED)
+find_package(directxtex CONFIG REQUIRED)
+find_package(directx-headers CONFIG REQUIRED)
+find_package(magic_enum CONFIG REQUIRED)
+
+# Single unified DLL target
+add_library(FO4CommunityShaders SHARED)
+
+# Core sources
+file(GLOB_RECURSE CORE_SOURCES
+	LIST_DIRECTORIES false
+	CONFIGURE_DEPENDS
+	"${CMAKE_SOURCE_DIR}/src/*.cpp"
+	"${CMAKE_SOURCE_DIR}/src/*.h"
+)
+target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
+
+include(Common)
+configure_xse_plugin(FO4CommunityShaders 0 1 0)
+
+target_link_libraries(FO4CommunityShaders PRIVATE
+	debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
+	optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
+	Microsoft::DirectXTK
+	Microsoft::DirectXTex
+	Microsoft::DirectX-Headers
+	d3d12.lib
+	magic_enum::magic_enum
+	d3dcompiler.lib
+)
+
+# Features attach their sources to FO4CommunityShaders via target_sources.
+register_feature(MotionVectorFixes)
