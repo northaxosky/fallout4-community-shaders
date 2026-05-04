@@ -1,0 +1,648 @@
+#include "DX12SwapChain.h"
+
+#include <dx12/ffx_api_dx12.hpp>
+#include <dxgi1_6.h>
+
+#include "FidelityFX.h"
+#include "Streamline.h"
+#include "UICompositor.h"
+#include "Upscaling.h"
+#include "XeSSFG.h"
+
+namespace cs::features::FrameGeneration
+{
+	extern bool enbLoaded;
+
+
+[[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
+{
+	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
+	return singleton.get();
+}
+
+[[nodiscard]] static RE::BSGraphics::RenderTargetManager* RenderTargetManager_GetSingleton()
+{
+	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
+	return singleton.get();
+}
+
+void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
+{
+	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
+	REX::INFO("[FG] D3D12 device created");
+}
+
+void DX12SwapChain::CreateD3D12CommandQueues()
+{
+	D3D12_COMMAND_QUEUE_DESC queueDesc = {};
+	queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+	queueDesc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
+	queueDesc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
+	queueDesc.NodeMask = 0;
+
+	DX::ThrowIfFailed(d3d12Device->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(&commandQueue)));
+
+	for (int i = 0; i < 2; i++) {
+		DX::ThrowIfFailed(d3d12Device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS(&commandAllocators[i])));
+		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
+		commandLists[i]->Close();
+	}
+	REX::INFO("[FG] D3D12 command queues created");
+}
+
+void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	swapChainDesc = {};
+	swapChainDesc.BufferCount = 2;
+	swapChainDesc.Width = a_swapChainDesc.BufferDesc.Width;
+	swapChainDesc.Height = a_swapChainDesc.BufferDesc.Height;
+	swapChainDesc.Format = a_swapChainDesc.BufferDesc.Format;
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+	swapChainDesc.SampleDesc.Count = 1;
+
+	BOOL allowTearing = FALSE;
+	DX::ThrowIfFailed(a_dxgiFactory->CheckFeatureSupport(
+		DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+		&allowTearing,
+		sizeof(allowTearing)
+	));
+
+	swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
+
+	auto upscaling = Upscaling::GetSingleton();
+
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
+	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+		if (!CreateSwapChainXeSS(a_dxgiFactory, a_swapChainDesc)) {
+			REX::WARN("[FG] XeSS-FG swap chain failed, falling back to FSR3");
+			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+			CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
+		}
+	} else {
+		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
+	}
+
+	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
+	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
+
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
+
+	swapChainProxy = new DXGISwapChainProxy(swapChain);
+}
+
+void DX12SwapChain::CreateSwapChainFSR3(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	REX::INFO("[FG] Creating FSR3 swap chain via FFX");
+
+	ffx::CreateContextDescFrameGenerationSwapChainForHwndDX12 ffxSwapChainDesc{};
+	ffxSwapChainDesc.desc = &swapChainDesc;
+	ffxSwapChainDesc.dxgiFactory = a_dxgiFactory;
+	ffxSwapChainDesc.fullscreenDesc = nullptr;
+	ffxSwapChainDesc.gameQueue = commandQueue.get();
+	ffxSwapChainDesc.hwnd = a_swapChainDesc.OutputWindow;
+	ffxSwapChainDesc.swapchain = &swapChain;
+
+	auto fidelityFX = FidelityFX::GetSingleton();
+
+	if (ffx::CreateContext(fidelityFX->swapChainContext, nullptr, ffxSwapChainDesc) != ffx::ReturnCode::Ok) {
+		REX::CRITICAL("[FidelityFX] Failed to create swap chain context!");
+	}
+
+	fidelityFX->SetupFrameGeneration();
+	REX::INFO("[FG] FSR3 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+}
+
+void DX12SwapChain::CreateSwapChainDLSSG(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	REX::INFO("[DLSSG] Creating standard D3D12 swap chain for Streamline interception");
+
+	winrt::com_ptr<IDXGISwapChain1> swapChain1;
+	DX::ThrowIfFailed(a_dxgiFactory->CreateSwapChainForHwnd(
+		commandQueue.get(),
+		a_swapChainDesc.OutputWindow,
+		&swapChainDesc,
+		nullptr,
+		nullptr,
+		swapChain1.put()
+	));
+
+	DX::ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain)));
+
+	REX::INFO("[DLSSG] D3D12 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+}
+
+bool DX12SwapChain::CreateSwapChainXeSS(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
+{
+	REX::INFO("[XeSS-FG] Creating XeSS-FG proxy swap chain");
+
+	auto xess = XeSSFG::GetSingleton();
+	if (!xess->InitSwapChain(commandQueue.get(), a_dxgiFactory, swapChainDesc, a_swapChainDesc.OutputWindow, &swapChain)) {
+		return false;
+	}
+
+	REX::INFO("[XeSS-FG] Swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+	return true;
+}
+
+void DX12SwapChain::CreateInterop()
+{
+	HANDLE sharedFenceHandle;
+	DX::ThrowIfFailed(d3d12Device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&d3d12Fence)));
+	DX::ThrowIfFailed(d3d12Device->CreateSharedHandle(d3d12Fence.get(), nullptr, GENERIC_ALL, nullptr, &sharedFenceHandle));
+	DX::ThrowIfFailed(d3d11Device->OpenSharedFence(sharedFenceHandle, IID_PPV_ARGS(&d3d11Fence)));
+	CloseHandle(sharedFenceHandle);
+
+	D3D11_TEXTURE2D_DESC texDesc11{};
+	texDesc11.Width = swapChainDesc.Width;
+	texDesc11.Height = swapChainDesc.Height;
+	texDesc11.MipLevels = 1;
+	texDesc11.ArraySize = 1;
+	texDesc11.Format = swapChainDesc.Format;
+	texDesc11.SampleDesc.Count = 1;
+	texDesc11.SampleDesc.Quality = 0;
+	texDesc11.Usage = D3D11_USAGE_DEFAULT;
+	texDesc11.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+	texDesc11.CPUAccessFlags = 0;
+	texDesc11.MiscFlags = 0;
+
+	// Create interop textures
+	if (enbLoaded) {
+		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
+	} else {
+		swapChainBufferProxy = new Texture2D(texDesc11);
+
+		// Create SRV for the proxy backbuffer — needed by GenerateUIBuffer compute shader
+		D3D11_SHADER_RESOURCE_VIEW_DESC proxySrvDesc{};
+		proxySrvDesc.Format = texDesc11.Format;
+		proxySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		proxySrvDesc.Texture2D.MostDetailedMip = 0;
+		proxySrvDesc.Texture2D.MipLevels = 1;
+		swapChainBufferProxy->CreateSRV(proxySrvDesc);
+	}
+
+	swapChainBufferWrapped[0] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
+	swapChainBufferWrapped[1] = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
+}
+
+DXGISwapChainProxy* DX12SwapChain::GetSwapChainProxy()
+{
+	return swapChainProxy;
+}
+
+void DX12SwapChain::SetD3D11Device(ID3D11Device* a_d3d11Device)
+{
+	DX::ThrowIfFailed(a_d3d11Device->QueryInterface(IID_PPV_ARGS(&d3d11Device)));
+}
+
+void DX12SwapChain::SetD3D11DeviceContext(ID3D11DeviceContext* a_d3d11Context)
+{
+	DX::ThrowIfFailed(a_d3d11Context->QueryInterface(IID_PPV_ARGS(&d3d11Context)));
+}
+
+HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
+{
+	if (enbLoaded)
+		*ppSurface = swapChainBufferProxyENB->resource11;
+	else
+		*ppSurface = swapChainBufferProxy->resource.get();
+	return S_OK;
+}
+
+HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
+{
+	auto upscalingForUI = Upscaling::GetSingleton();
+
+	// For DLSS-G: generate UI extraction buffer, then present the HUDLess (clean scene)
+	// to the swap chain instead of the full frame. DLSS-G warps whatever is in the swap chain,
+	// so presenting HUDLess prevents UI from being warped. UIColorAndAlpha tells DLSS-G
+	// to composite UI on top of both real and interpolated frames.
+	if (upscalingForUI->activeFrameGenType == Upscaling::FrameGenType::kDLSSG &&
+		upscalingForUI->setupBuffers && upscalingForUI->imagespaceComplete)
+	{
+		upscalingForUI->GenerateUIBuffer();
+
+		// Copy HUDLess (clean scene, no UI) to the D3D12 swap chain — NOT the proxy backbuffer
+		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11,
+			upscalingForUI->HUDLessBufferShared[frameIndex]->resource.get());
+
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::INFO("[FG] DLSS-G: presenting HUDLess to swap chain, UI composited via D3D12 compositor");
+			loggedOnce = true;
+		}
+	}
+	else
+	{
+		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before
+		if (enbLoaded)
+			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxyENB->resource11);
+		else
+			d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource.get());
+	}
+
+	// Wait for D3D11 to finish
+	DX::ThrowIfFailed(d3d11Context->Signal(d3d11Fence.get(), fenceValue));
+	DX::ThrowIfFailed(commandQueue->Wait(d3d12Fence.get(), fenceValue));
+	fenceValue++;
+
+	// New frame, reset
+	DX::ThrowIfFailed(commandAllocators[frameIndex]->Reset());
+	DX::ThrowIfFailed(commandLists[frameIndex]->Reset(commandAllocators[frameIndex].get(), nullptr));
+
+	// Transfer frame to swap chain buffer
+	{
+		auto srcResource = swapChainBufferWrapped[frameIndex]->resource.get();
+		auto dstResource = swapChainBuffers[frameIndex].get();
+
+		D3D12_RESOURCE_BARRIER barriers[2] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(srcResource, D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
+			CD3DX12_RESOURCE_BARRIER::Transition(dstResource, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
+		};
+		commandLists[frameIndex]->ResourceBarrier(2, barriers);
+
+		commandLists[frameIndex]->CopyResource(dstResource, srcResource);
+
+		D3D12_RESOURCE_BARRIER postBarriers[2] = {
+			CD3DX12_RESOURCE_BARRIER::Transition(srcResource, D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
+			CD3DX12_RESOURCE_BARRIER::Transition(dstResource, D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT)
+		};
+		commandLists[frameIndex]->ResourceBarrier(2, postBarriers);
+	}
+
+	auto upscaling = Upscaling::GetSingleton();
+	upscaling->ReloadSettingsIfNeeded();
+
+	bool useFrameGenerationThisFrame = false;
+	bool isDLSSGFrame = false;
+	bool isXeSSFrame = false;
+	static uint32_t xessFrameId = 0;
+
+	if (auto main = RE::Main::GetSingleton()) {
+		if (auto ui = RE::UI::GetSingleton()) {
+			bool menuBlock = upscaling->settings.disableInMenus && main->inMenuMode;
+			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !menuBlock && !ui->movementToDirectionalCount;
+		}
+	}
+
+	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+		auto dlssg = StreamlineFG::GetSingleton();
+
+		// Toggle DLSS-G on/off only on state changes (matches XeSS pattern)
+		static bool dlssgWasEnabled = false;
+		if (useFrameGenerationThisFrame != dlssgWasEnabled) {
+			dlssg->SetEnabled(useFrameGenerationThisFrame);
+			dlssgWasEnabled = useFrameGenerationThisFrame;
+		}
+
+		// Per-frame sequence matching NVIDIA sample ordering:
+		// 1. Frame token → 2. Sleep → 3. Sim markers → 4. Constants+tags → 5. Render markers → 6. Present markers
+		dlssg->AcquireFrameToken();
+
+		if (dlssg->slReflexSleep && dlssg->frameToken)
+			dlssg->slReflexSleep(*dlssg->frameToken);
+
+		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationStart);
+		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationEnd);
+
+		// Set constants and tag resources
+		static auto gameViewport = State_GetSingleton();
+		static auto renderTargetManager = RenderTargetManager_GetSingleton();
+
+		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+
+		float2 jitter;
+		jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
+		jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
+
+		float cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
+		float cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+
+		auto& camView = gameViewport->cameraState.camViewData;
+		auto& camState = gameViewport->cameraState;
+
+		StreamlineFG::CameraData camera;
+		camera.viewMat = camView.viewMat;
+		camera.viewProjUnjittered = camView.viewProjUnjittered;
+		camera.currentViewProjUnjittered = camView.currentViewProjUnjittered;
+		camera.previousViewProjUnjittered = camView.previousViewProjUnjittered;
+		camera.viewUp = &camView.viewUp;
+		camera.viewRight = &camView.viewRight;
+		camera.viewDir = &camView.viewDir;
+		camera.posX = camState.posAdjust.x;
+		camera.posY = camState.posAdjust.y;
+		camera.posZ = camState.posAdjust.z;
+
+		dlssg->Present(
+			commandLists[frameIndex].get(),
+			upscaling->depthBufferShared12[frameIndex].get(),
+			upscaling->motionVectorBufferShared12[frameIndex].get(),
+			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			upscaling->UIColorAlphaShared12[frameIndex].get(),
+			screenSize, jitter,
+			cameraNear, cameraFar, camera);
+
+		isDLSSGFrame = true;
+	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+		auto xess = XeSSFG::GetSingleton();
+		if (xess->initialized) {
+			// Toggle enable only on state changes
+			static bool xessFGWasEnabled = false;
+			if (useFrameGenerationThisFrame != xessFGWasEnabled) {
+				xess->SetEnabled(useFrameGenerationThisFrame ? 1 : 0);
+				xessFGWasEnabled = useFrameGenerationThisFrame;
+			}
+
+			xess->BeginFrame(xessFrameId);
+			xess->SetMarker(XELL_SIMULATION_END, xessFrameId);
+
+			isXeSSFrame = true;
+			xessFrameId++;
+		}
+	} else {
+		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
+	}
+
+	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
+
+	// Bracket GPU work submission with render markers
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_START, xessFrameId - 1);
+
+	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
+	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
+
+	// XeSS-FG: tag resources AFTER main command list execute (matching sample flow)
+	// Uses the other command list slot for tagging, submitted before Present
+	if (isXeSSFrame && useFrameGenerationThisFrame) {
+		auto xess = XeSSFG::GetSingleton();
+		int tagListIdx = (frameIndex + 1) % 2;
+
+		// NOTE: Resetting commandAllocators[tagListIdx] here without an explicit GPU fence wait.
+		// This is safe in practice because the tag list from the previous frame was submitted
+		// before Present, and the frame latency waitable object + Present sync guarantee the GPU
+		// has retired it by the time we reach this point in the next frame.
+		DX::ThrowIfFailed(commandAllocators[tagListIdx]->Reset());
+		DX::ThrowIfFailed(commandLists[tagListIdx]->Reset(commandAllocators[tagListIdx].get(), nullptr));
+
+		static auto gameViewport = State_GetSingleton();
+		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+
+		float2 jitterNorm;
+		jitterNorm.x = -gameViewport->offsetX / 2.0f;
+		jitterNorm.y = gameViewport->offsetY / 2.0f;
+
+		// Frame time delta
+		static LARGE_INTEGER frequency = []() {
+			LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f;
+		}();
+		static LARGE_INTEGER lastXeSSFrame = []() {
+			LARGE_INTEGER t; QueryPerformanceCounter(&t); return t;
+		}();
+		LARGE_INTEGER currentTime;
+		QueryPerformanceCounter(&currentTime);
+		float deltaMs = static_cast<float>(currentTime.QuadPart - lastXeSSFrame.QuadPart) /
+			static_cast<float>(frequency.QuadPart) * 1000.0f;
+		lastXeSSFrame = currentTime;
+
+		// Extract row-major view and projection matrices
+		auto& camView = gameViewport->cameraState.camViewData;
+		alignas(16) float viewMat[16];
+		alignas(16) float projMat[16];
+		for (int i = 0; i < 4; i++)
+			_mm_store_ps(&viewMat[i * 4], camView.viewMat[i]);
+
+		DirectX::XMMATRIX view = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewMat);
+		DirectX::XMMATRIX vpUnjittered = DirectX::XMLoadFloat4x4((DirectX::XMFLOAT4X4*)camView.viewProjUnjittered);
+		DirectX::XMMATRIX invView = DirectX::XMMatrixInverse(nullptr, view);
+		DirectX::XMMATRIX proj = DirectX::XMMatrixMultiply(invView, vpUnjittered);
+		DirectX::XMStoreFloat4x4((DirectX::XMFLOAT4X4*)projMat, proj);
+
+		xess->TagResources(xessFrameId - 1,
+			commandLists[tagListIdx].get(),
+			upscaling->depthBufferShared12[frameIndex].get(),
+			upscaling->motionVectorBufferShared12[frameIndex].get(),
+			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			screenSize, jitterNorm,
+			deltaMs, viewMat, projMat, false);
+
+		DX::ThrowIfFailed(commandLists[tagListIdx]->Close());
+
+		ID3D12CommandList* tagCmdLists[] = { commandLists[tagListIdx].get() };
+		commandQueue->ExecuteCommandLists(1, tagCmdLists);
+	}
+
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_END, xessFrameId - 1);
+
+	// Fix FPS cap being e.g. 55 instead of 60
+	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
+		SyncInterval = 1;
+
+	// Latch UI frame index for the compositor before Streamline's Present
+	// The real Present hook needs to know which UIColorAlpha buffer was last written
+	if (isDLSSGFrame) UICompositor::GetSingleton()->SetUIFrameIndex(frameIndex);
+
+	// Bracket Present with markers
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_START, xessFrameId - 1);
+
+	DX::ThrowIfFailed(swapChain->Present(SyncInterval, Flags));
+
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
+
+	// Wait for previous frame to have finished (handle may be null if swap chain
+	// was created without DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT —
+	// FSR3/DLSS-G wrapped swap chains manage latency internally)
+	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
+	if (frameLatencyWaitableObject)
+		WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
+
+	// Update the frame index
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
+
+	// Clear resources
+	upscaling->Reset();
+
+	// Fix game running too fast
+	if (!upscaling->highFPSPhysicsFixLoaded)
+		upscaling->GameFrameLimiter();
+
+	// If VSync is disabled and HighFPSPhysicsFix isn't handling pacing, use our limiter.
+	// Skip when HFPF is loaded — it handles pacing correctly including loading screens.
+	if (SyncInterval == 0 && !upscaling->highFPSPhysicsFixLoaded)
+		upscaling->FrameLimiter(useFrameGenerationThisFrame);
+
+	return S_OK;
+}
+
+HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
+{
+	if (uuid == __uuidof(ID3D11Device) || uuid == __uuidof(ID3D11Device1) || uuid == __uuidof(ID3D11Device2) || uuid == __uuidof(ID3D11Device3) || uuid == __uuidof(ID3D11Device4) || uuid == __uuidof(ID3D11Device5)) {
+		*ppDevice = d3d11Device.get();
+		return S_OK;
+	}
+
+	return swapChain->GetDevice(uuid, ppDevice);
+}
+
+WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device)
+{
+	// Create D3D11 shared texture directly instead of wrapping D3D12 resource
+	a_texDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+	DX::ThrowIfFailed(a_d3d11Device->CreateTexture2D(&a_texDesc, nullptr, &resource11));
+
+	// Get shared handle from D3D11 texture to enable D3D12 access
+	winrt::com_ptr<IDXGIResource1> dxgiResource;
+	DX::ThrowIfFailed(resource11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
+	HANDLE sharedHandle = nullptr;
+	DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &sharedHandle));
+
+	// Open the shared D3D11 texture as D3D12 resource
+	DX::ThrowIfFailed(a_d3d12Device->OpenSharedHandle(sharedHandle, IID_PPV_ARGS(resource.put())));
+	CloseHandle(sharedHandle);
+
+	if (a_texDesc.BindFlags & D3D11_BIND_SHADER_RESOURCE) {
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		srvDesc.Format = a_texDesc.Format;
+		srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		srvDesc.Texture2D.MostDetailedMip = 0;
+		srvDesc.Texture2D.MipLevels = 1;
+
+		DX::ThrowIfFailed(a_d3d11Device->CreateShaderResourceView(resource11, &srvDesc, &srv));
+	}
+
+	if (a_texDesc.BindFlags & D3D11_BIND_UNORDERED_ACCESS) {
+		if (a_texDesc.ArraySize > 1) {
+			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+			uavDesc.Format = a_texDesc.Format;
+			uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2DARRAY;
+			uavDesc.Texture2DArray.FirstArraySlice = 0;
+			uavDesc.Texture2DArray.ArraySize = a_texDesc.ArraySize;
+
+			DX::ThrowIfFailed(a_d3d11Device->CreateUnorderedAccessView(resource11, &uavDesc, &uav));
+		}
+		else {
+			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+			uavDesc.Format = a_texDesc.Format;
+			uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+			uavDesc.Texture2D.MipSlice = 0;
+
+			DX::ThrowIfFailed(a_d3d11Device->CreateUnorderedAccessView(resource11, &uavDesc, &uav));
+		}
+	}
+
+	if (a_texDesc.BindFlags & D3D11_BIND_RENDER_TARGET) {
+		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+		rtvDesc.Format = a_texDesc.Format;
+		rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
+		rtvDesc.Texture2D.MipSlice = 0;
+		DX::ThrowIfFailed(a_d3d11Device->CreateRenderTargetView(resource11, &rtvDesc, &rtv));
+	}
+}
+
+DXGISwapChainProxy::DXGISwapChainProxy(IDXGISwapChain4* a_swapChain)
+{
+	swapChain = a_swapChain;
+}
+
+/****IUknown****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void** ppvObj)
+{
+	auto ret = swapChain->QueryInterface(riid, ppvObj);
+	if (*ppvObj)
+		*ppvObj = this;
+	return ret;
+}
+
+ULONG STDMETHODCALLTYPE DXGISwapChainProxy::AddRef()
+{
+	return swapChain->AddRef();
+}
+
+ULONG STDMETHODCALLTYPE DXGISwapChainProxy::Release()
+{
+	return swapChain->Release();
+}
+
+/****IDXGIObject****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetPrivateData(_In_ REFGUID Name, UINT DataSize, _In_reads_bytes_(DataSize) const void* pData)
+{
+	return swapChain->SetPrivateData(Name, DataSize, pData);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetPrivateDataInterface(_In_ REFGUID Name, _In_opt_ const IUnknown* pUnknown)
+{
+	return swapChain->SetPrivateDataInterface(Name, pUnknown);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetPrivateData(_In_ REFGUID Name, _Inout_ UINT* pDataSize, _Out_writes_bytes_(*pDataSize) void* pData)
+{
+	return swapChain->GetPrivateData(Name, pDataSize, pData);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetParent(_In_ REFIID riid, _COM_Outptr_ void** ppParent)
+{
+	return swapChain->GetParent(riid, ppParent);
+}
+
+/****IDXGIDeviceSubObject****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDevice(_In_ REFIID riid, _COM_Outptr_ void** ppDevice)
+{
+	return DX12SwapChain::GetSingleton()->GetDevice(riid, ppDevice);
+}
+
+/****IDXGISwapChain****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::Present(UINT SyncInterval, UINT Flags)
+{
+	return DX12SwapChain::GetSingleton()->Present(SyncInterval, Flags);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBuffer(UINT, _In_ REFIID, _COM_Outptr_ void** ppSurface)
+{
+	return DX12SwapChain::GetSingleton()->GetBuffer(ppSurface);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetFullscreenState(BOOL, _In_opt_ IDXGIOutput*)
+{
+	return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFullscreenState(_Out_opt_ BOOL* pFullscreen, _COM_Outptr_opt_result_maybenull_ IDXGIOutput** ppTarget)
+{
+	return swapChain->GetFullscreenState(pFullscreen, ppTarget);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDesc(_Out_ DXGI_SWAP_CHAIN_DESC* pDesc)
+{
+	return swapChain->GetDesc(pDesc);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(UINT , UINT , UINT , DXGI_FORMAT , UINT )
+{
+	return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeTarget(_In_ const DXGI_MODE_DESC*)
+{
+	return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetContainingOutput(_COM_Outptr_ IDXGIOutput** ppOutput)
+{
+	return swapChain->GetContainingOutput(ppOutput);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFrameStatistics(_Out_ DXGI_FRAME_STATISTICS* pStats)
+{
+	return swapChain->GetFrameStatistics(pStats);
+}
+
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetLastPresentCount(_Out_ UINT* pLastPresentCount)
+{
+	return swapChain->GetLastPresentCount(pLastPresentCount);
+}
+
+}

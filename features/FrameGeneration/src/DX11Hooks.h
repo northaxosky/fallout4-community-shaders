@@ -1,6 +1,6 @@
 #pragma once
 
-namespace cs::features::Upscaling
+namespace cs::features::FrameGeneration
 {
 	extern bool enbLoaded;
 

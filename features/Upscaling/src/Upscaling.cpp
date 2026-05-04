@@ -7,10 +7,10 @@
 #include "ENB/ENBSeriesAPI.h"
 #include "Feature.h"
 
-bool enbLoaded = false;
-
 namespace cs::features::Upscaling
 {
+	bool enbLoaded = false;
+
 
 /** @brief Hook for updating jitter, dynamic resolution, and resources */
 struct BSGraphics_State_UpdateDynamicResolution

@@ -4,10 +4,10 @@
 
 #include "Streamline.h"
 
-extern bool enbLoaded;
-
 namespace cs::features::Upscaling
 {
+	extern bool enbLoaded;
+
 
 struct hkD3D11CreateDeviceAndSwapChain
 {

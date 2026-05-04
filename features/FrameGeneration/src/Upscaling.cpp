@@ -1,0 +1,761 @@
+#include "Upscaling.h"
+
+#include <d3dcompiler.h>
+
+#include "DX12SwapChain.h"
+#include "DirectXMath.h"
+#include "Feature.h"
+#include "DX11Hooks.h"
+
+namespace cs::features::FrameGeneration
+{
+
+enum class RenderTarget
+{
+	kFrameBuffer = 0,
+
+	kRefractionNormal = 1,
+	
+	kMainPreAlpha = 2,
+	kMain = 3,
+	kMainTemp = 4,
+
+	kSSRRaw = 7,
+	kSSRBlurred = 8,
+	kSSRBlurredExtra = 9,
+
+	kMainVerticalBlur = 14,
+	kMainHorizontalBlur = 15,
+
+	kSSRDirection = 10,
+	kSSRMask = 11,
+
+	kUI = 17,
+	kUITemp = 18,
+
+	kGbufferNormal = 20,
+	kGbufferNormalSwap = 21,
+	kGbufferAlbedo = 22,
+	kGbufferEmissive = 23,
+	kGbufferMaterial = 24, //  Glossiness, Specular, Backlighting, SSS
+
+	kSSAO = 28,
+
+	kTAAAccumulation = 26,
+	kTAAAccumulationSwap = 27,
+
+	kMotionVectors = 29,
+
+	kUIDownscaled = 36,
+	kUIDownscaledComposite = 37,
+
+	kMainDepthMips = 39,
+
+	kUnkMask = 57,
+
+	kSSAOTemp = 48,
+	kSSAOTemp2 = 49,
+	kSSAOTemp3 = 50,
+
+	kDiffuseBuffer = 58,
+	kSpecularBuffer = 59,
+
+	kDownscaledHDR = 64,
+	kDownscaledHDRLuminance2 = 65,
+	kDownscaledHDRLuminance3 = 66,
+	kDownscaledHDRLuminance4 = 67,
+	kDownscaledHDRLuminance5Adaptation = 68,
+	kDownscaledHDRLuminance6AdaptationSwap = 69,
+	kDownscaledHDRLuminance6 = 70,
+
+	kCount = 101
+};
+
+enum class DepthStencilTarget
+{
+	kMainOtherOther = 0,
+	kMainOther = 1,
+	kMain = 2,
+	kMainCopy = 3,
+	kMainCopyCopy = 4,
+
+	kShadowMap = 8,
+
+	kCount = 13
+};
+
+ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramType, const char* Program = "main")
+{
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto device = reinterpret_cast<ID3D11Device*>(rendererData->device);
+
+	// Compiler setup
+	uint32_t flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
+
+	ID3DBlob* shaderBlob = nullptr;
+	ID3DBlob* shaderErrors = nullptr;
+
+	std::string str;
+	std::wstring path{ FilePath };
+	std::transform(path.begin(), path.end(), std::back_inserter(str), [](wchar_t c) {
+		return (char)c;
+	});
+	if (!std::filesystem::exists(FilePath)) {
+		REX::ERROR("Failed to compile shader; {} does not exist", str);
+		return nullptr;
+	}
+	if (FAILED(D3DCompileFromFile(FilePath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, Program, ProgramType, flags, 0, &shaderBlob, &shaderErrors))) {
+		REX::WARN("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
+		if (shaderErrors) shaderErrors->Release();
+		if (shaderBlob) shaderBlob->Release();
+		return nullptr;
+	}
+	if (shaderErrors) {
+		REX::DEBUG("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
+		shaderErrors->Release();
+	}
+
+	ID3D11ComputeShader* regShader;
+	DX::ThrowIfFailed(device->CreateComputeShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &regShader));
+	shaderBlob->Release();
+	return regShader;
+}
+
+void Upscaling::LoadSettings()
+{
+	CSimpleIniA ini;
+	ini.SetUnicode();
+	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
+
+	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
+	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
+	settings.disableInMenus = ini.GetBoolValue("Settings", "bDisableInMenus", true);
+	settings.debugLogging = ini.GetBoolValue("Settings", "bEnableDebugLogging", false);
+	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
+	// configuration file stepper is 0-indexed (0=2x, 1=3x, 2=4x) but we store as numFramesToGenerate (1, 2, 3)
+	settings.frameGenFrames = std::clamp((int)ini.GetLongValue("Settings", "iFrameGenFrames", 0) + 1, 1, 3);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
+		REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
+		REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
+		REX::INFO("[Frame Generation] iFrameGenFrames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
+		loggedOnce = true;
+	}
+}
+
+void Upscaling::ReloadSettingsIfNeeded()
+{
+	static int frameCounter = 0;
+	if (++frameCounter % 60 != 0) return;
+	LoadSettings();
+}
+
+void Upscaling::OnPostPostLoad()
+{
+	highFPSPhysicsFixLoaded = GetModuleHandleA("Data\\F4SE\\Plugins\\HighFPSPhysicsFix.dll") != nullptr;
+
+	if (highFPSPhysicsFixLoaded)
+		REX::INFO("[Frame Generation] HighFPSPhysicsFix.dll is loaded");
+	else
+		REX::INFO("[Frame Generation] HighFPSPhysicsFix.dll is not loaded");
+
+	InstallHooks();
+}
+
+void Upscaling::CreateFrameGenerationResources()
+{
+	REX::INFO("[Frame Generation] Creating resources");
+	
+	setupBuffers = true;
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto& main = rendererData->renderTargets[(uint)RenderTarget::kMain];
+
+	for (int index = 0; index < 2; index++) {
+		D3D11_TEXTURE2D_DESC texDesc{};
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
+		D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
+
+		reinterpret_cast<ID3D11Texture2D*>(main.texture)->GetDesc(&texDesc);
+		reinterpret_cast<ID3D11ShaderResourceView*>(main.srView)->GetDesc(&srvDesc);
+		reinterpret_cast<ID3D11RenderTargetView*>(main.rtView)->GetDesc(&rtvDesc);
+
+		texDesc.BindFlags |= D3D11_BIND_UNORDERED_ACCESS;
+
+		uavDesc.Format = texDesc.Format;
+		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+		uavDesc.Texture2D.MipSlice = 0;
+
+		texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+
+		// Force RGBA8 for shared buffer — FSR3 requires it
+		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		srvDesc.Format = texDesc.Format;
+		rtvDesc.Format = texDesc.Format;
+		uavDesc.Format = texDesc.Format;
+
+		HUDLessBufferShared[index] = new Texture2D(texDesc);
+		HUDLessBufferShared[index]->CreateSRV(srvDesc);
+		HUDLessBufferShared[index]->CreateRTV(rtvDesc);
+		HUDLessBufferShared[index]->CreateUAV(uavDesc);
+
+		texDesc.Format = DXGI_FORMAT_R32_FLOAT;
+		srvDesc.Format = texDesc.Format;
+		rtvDesc.Format = texDesc.Format;
+		uavDesc.Format = texDesc.Format;
+
+		depthBufferShared[index] = new Texture2D(texDesc);
+		depthBufferShared[index]->CreateSRV(srvDesc);
+		depthBufferShared[index]->CreateRTV(rtvDesc);
+		depthBufferShared[index]->CreateUAV(uavDesc);
+
+		auto& motionVector = rendererData->renderTargets[(uint)RenderTarget::kMotionVectors];
+		D3D11_TEXTURE2D_DESC texDescMotionVector{};
+		reinterpret_cast<ID3D11Texture2D*>(motionVector.texture)->GetDesc(&texDescMotionVector);
+
+		texDesc.Format = texDescMotionVector.Format;
+		srvDesc.Format = texDesc.Format;
+		rtvDesc.Format = texDesc.Format;
+		uavDesc.Format = texDesc.Format;
+
+		motionVectorBufferShared[index] = new Texture2D(texDesc);
+		motionVectorBufferShared[index]->CreateSRV(srvDesc);
+		motionVectorBufferShared[index]->CreateRTV(rtvDesc);
+		motionVectorBufferShared[index]->CreateUAV(uavDesc);
+
+		// UIColorAndAlpha buffer — R8G8B8A8_UNORM for premultiplied alpha UI extraction
+		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		srvDesc.Format = texDesc.Format;
+		rtvDesc.Format = texDesc.Format;
+		uavDesc.Format = texDesc.Format;
+
+		UIColorAlphaShared[index] = new Texture2D(texDesc);
+		UIColorAlphaShared[index]->CreateSRV(srvDesc);
+		UIColorAlphaShared[index]->CreateRTV(rtvDesc);
+		UIColorAlphaShared[index]->CreateUAV(uavDesc);
+
+		auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+		{
+			IDXGIResource1* dxgiResource = nullptr;
+			DX::ThrowIfFailed(HUDLessBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+
+			if (dx12SwapChain->swapChain) {
+				HANDLE sharedHandle = nullptr;
+				DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
+					nullptr,
+					DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+					nullptr,
+					&sharedHandle));
+
+				DX::ThrowIfFailed(dx12SwapChain->d3d12Device->OpenSharedHandle(
+					sharedHandle,
+					IID_PPV_ARGS(&HUDLessBufferShared12[index])));
+
+				CloseHandle(sharedHandle);
+			}
+		}
+
+		{
+			IDXGIResource1* dxgiResource = nullptr;
+			DX::ThrowIfFailed(depthBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+
+			if (dx12SwapChain->swapChain) {
+				HANDLE sharedHandle = nullptr;
+				DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
+					nullptr,
+					DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+					nullptr,
+					&sharedHandle));
+
+				DX::ThrowIfFailed(dx12SwapChain->d3d12Device->OpenSharedHandle(
+					sharedHandle,
+					IID_PPV_ARGS(&depthBufferShared12[index])));
+
+				CloseHandle(sharedHandle);
+			}
+		}
+
+		{
+			IDXGIResource1* dxgiResource = nullptr;
+			DX::ThrowIfFailed(motionVectorBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+
+			if (dx12SwapChain->swapChain) {
+				HANDLE sharedHandle = nullptr;
+				DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
+					nullptr,
+					DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+					nullptr,
+					&sharedHandle));
+
+				DX::ThrowIfFailed(dx12SwapChain->d3d12Device->OpenSharedHandle(
+					sharedHandle,
+					IID_PPV_ARGS(&motionVectorBufferShared12[index])));
+
+				CloseHandle(sharedHandle);
+			}
+		}
+
+		{
+			IDXGIResource1* dxgiResource = nullptr;
+			DX::ThrowIfFailed(UIColorAlphaShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+
+			if (dx12SwapChain->swapChain) {
+				HANDLE sharedHandle = nullptr;
+				DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
+					nullptr,
+					DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+					nullptr,
+					&sharedHandle));
+
+				DX::ThrowIfFailed(dx12SwapChain->d3d12Device->OpenSharedHandle(
+					sharedHandle,
+					IID_PPV_ARGS(&UIColorAlphaShared12[index])));
+
+				CloseHandle(sharedHandle);
+			}
+		}
+	}
+
+	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", "cs_5_0");
+	generateSharedBuffersCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", "cs_5_0");
+	generateUIBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateUIBufferCS.hlsl", "cs_5_0");
+
+	REX::INFO("[FG] Frame generation resources created (HUDLess + Depth + MVec + UIColorAlpha)");
+}
+
+void Upscaling::PreAlpha()
+{
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+	
+	auto& colorMain = rendererData->renderTargets[(uint)RenderTarget::kMain];
+	auto& colorPostAlpha = rendererData->renderTargets[(uint)RenderTarget::kMainTemp];
+
+	context->CopyResource(reinterpret_cast<ID3D11Texture2D*>(colorMain.texture), reinterpret_cast<ID3D11Texture2D*>(colorPostAlpha.texture));
+}
+
+void Upscaling::PostAlpha()
+{
+	if (!d3d12Interop)
+		return;
+
+	if (!setupBuffers)
+		CreateFrameGenerationResources();
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+	context->OMSetRenderTargets(0, nullptr, nullptr);
+
+	{
+		auto& colorPreAlpha = rendererData->renderTargets[(uint)RenderTarget::kMain];
+		auto& colorPostAlpha = rendererData->renderTargets[(uint)RenderTarget::kMainTemp];
+
+		auto& motionVector = rendererData->renderTargets[(uint)RenderTarget::kMotionVectors];
+		auto& depth = rendererData->depthStencilTargets[(uint)DepthStencilTarget::kMain];
+
+		{
+			uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
+			uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);
+
+			ID3D11ShaderResourceView* views[4] = { 
+				reinterpret_cast<ID3D11ShaderResourceView*>(colorPreAlpha.srView),
+				reinterpret_cast<ID3D11ShaderResourceView*>(colorPostAlpha.srView),
+				reinterpret_cast<ID3D11ShaderResourceView*>(motionVector.srView),
+				reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth)
+			};
+
+			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
+
+			ID3D11UnorderedAccessView* uavs[2] = { motionVectorBufferShared[dx12SwapChain->frameIndex]->uav.get(), depthBufferShared[dx12SwapChain->frameIndex]->uav.get()};
+			context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
+
+			context->CSSetShader(generateSharedBuffersCS, nullptr, 0);
+
+			context->Dispatch(dispatchX, dispatchY, 1);
+		}
+
+		ID3D11ShaderResourceView* views[3] = { nullptr, nullptr, nullptr };
+		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
+
+		ID3D11UnorderedAccessView* uavs[2] = { nullptr, nullptr };
+		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
+
+		ID3D11ComputeShader* shader = nullptr;
+		context->CSSetShader(shader, nullptr, 0);
+	}
+}
+
+void Upscaling::CopyBuffersToSharedResources()
+{
+	if (!d3d12Interop)
+		return;
+
+	if (!setupBuffers)
+		CreateFrameGenerationResources();
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+	
+	context->OMSetRenderTargets(0, nullptr, nullptr);
+
+	auto& motionVector = rendererData->renderTargets[(uint)RenderTarget::kMotionVectors];
+	context->CopyResource(motionVectorBufferShared[dx12SwapChain->frameIndex]->resource.get(), reinterpret_cast<ID3D11Texture2D*>(motionVector.texture));
+		
+	{
+		auto& depth = rendererData->depthStencilTargets[(uint)DepthStencilTarget::kMain];
+
+		{
+			uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
+			uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);
+
+
+			ID3D11ShaderResourceView* views[1] = { reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth) };
+			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
+
+			ID3D11UnorderedAccessView* uavs[1] = { depthBufferShared[dx12SwapChain->frameIndex]->uav.get() };
+			context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
+
+			context->CSSetShader(copyDepthToSharedBufferCS, nullptr, 0);
+
+			context->Dispatch(dispatchX, dispatchY, 1);
+		}
+
+		ID3D11ShaderResourceView* views[1] = { nullptr };
+		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
+
+		ID3D11UnorderedAccessView* uavs[1] = { nullptr };
+		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
+
+		ID3D11ComputeShader* shader = nullptr;
+		context->CSSetShader(shader, nullptr, 0);
+	}	
+}
+
+void Upscaling::TimerSleepQPC(int64_t targetQPC)
+{
+	LARGE_INTEGER currentQPC;
+	do {
+		QueryPerformanceCounter(&currentQPC);
+	} while (currentQPC.QuadPart < targetQPC);
+}
+
+void Upscaling::FrameLimiter(bool a_useFrameGeneration)
+{
+	static LARGE_INTEGER lastFrame = {};
+
+	if (d3d12Interop && settings.frameLimitMode) {
+
+		// Stick within VRR bounds
+		double bestRefreshRate = refreshRate - (refreshRate * refreshRate) / 3600.0;
+
+		LARGE_INTEGER qpf;
+		QueryPerformanceFrequency(&qpf);
+
+		int64_t targetFrameTicks = int64_t(double(qpf.QuadPart) / (bestRefreshRate * (a_useFrameGeneration ? 0.5 : 1.0)));
+
+		LARGE_INTEGER timeNow;
+		QueryPerformanceCounter(&timeNow);
+		int64_t delta = timeNow.QuadPart - lastFrame.QuadPart;
+		if (delta < targetFrameTicks) {
+			TimerSleepQPC(lastFrame.QuadPart + targetFrameTicks);
+		}
+	}
+
+	QueryPerformanceCounter(&lastFrame);
+}
+
+void Upscaling::GameFrameLimiter()
+{
+	double bestRefreshRate = 60.0f;
+
+	LARGE_INTEGER qpf;
+	QueryPerformanceFrequency(&qpf);
+
+	int64_t targetFrameTicks = int64_t(double(qpf.QuadPart) / bestRefreshRate);
+
+	static LARGE_INTEGER lastFrame = {};
+	LARGE_INTEGER timeNow;
+	QueryPerformanceCounter(&timeNow);
+	int64_t delta = timeNow.QuadPart - lastFrame.QuadPart;
+	if (delta < targetFrameTicks) {
+		TimerSleepQPC(lastFrame.QuadPart + targetFrameTicks);
+	}
+	QueryPerformanceCounter(&lastFrame);	
+}
+
+/*
+* Copyright (c) 2022-2023 NVIDIA CORPORATION. All rights reserved
+*
+* Permission is hereby granted, free of charge, to any person obtaining a copy
+* of this software and associated documentation files (the "Software"), to deal
+* in the Software without restriction, including without limitation the rights
+* to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+* copies of the Software, and to permit persons to whom the Software is
+* furnished to do so, subject to the following conditions:
+*
+* The above copyright notice and this permission notice shall be included in all
+* copies or substantial portions of the Software.
+*
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+* IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+* FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+* AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+* LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+* OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+* SOFTWARE.
+*/
+
+double Upscaling::GetRefreshRate(HWND a_window)
+{
+	HMONITOR monitor = MonitorFromWindow(a_window, MONITOR_DEFAULTTONEAREST);
+	MONITORINFOEXW info;
+	info.cbSize = sizeof(info);
+	if (GetMonitorInfoW(monitor, &info) != 0) {
+		// using the CCD get the associated path and display configuration
+		UINT32 requiredPaths, requiredModes;
+		if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &requiredPaths, &requiredModes) == ERROR_SUCCESS) {
+			std::vector<DISPLAYCONFIG_PATH_INFO> paths(requiredPaths);
+			std::vector<DISPLAYCONFIG_MODE_INFO> modes2(requiredModes);
+			if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &requiredPaths, paths.data(), &requiredModes, modes2.data(), nullptr) == ERROR_SUCCESS) {
+				// iterate through all the paths until find the exact source to match
+				for (auto& p : paths) {
+					DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName;
+					sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+					sourceName.header.size = sizeof(sourceName);
+					sourceName.header.adapterId = p.sourceInfo.adapterId;
+					sourceName.header.id = p.sourceInfo.id;
+					if (DisplayConfigGetDeviceInfo(&sourceName.header) == ERROR_SUCCESS) {
+						// find the matched device which is associated with current device
+						// there may be the possibility that display may be duplicated and windows may be one of them in such scenario
+						// there may be two callback because source is same target will be different
+						// as window is on both the display so either selecting either one is ok
+						if (wcscmp(info.szDevice, sourceName.viewGdiDeviceName) == 0) {
+							// get the refresh rate
+							UINT numerator = p.targetInfo.refreshRate.Numerator;
+							UINT denominator = p.targetInfo.refreshRate.Denominator;
+							return (double)numerator / (double)denominator;
+						}
+					}
+				}
+			}
+		}
+	}
+	REX::ERROR("Failed to retrieve refresh rate from swap chain");
+	return 60;
+}
+
+void Upscaling::PostDisplay()
+{
+	if (!d3d12Interop)
+		return;
+
+	if (!setupBuffers)
+		CreateFrameGenerationResources();
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+
+	auto& swapChain = rendererData->renderTargets[(uint)RenderTarget::kFrameBuffer];
+	ID3D11Resource* swapChainResource;
+	reinterpret_cast<ID3D11RenderTargetView*>(swapChain.rtView)->GetResource(&swapChainResource);
+
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+	context->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[FG] PostDisplay captured HUDLess (frameIdx={})", dx12SwapChain->frameIndex);
+		loggedOnce = true;
+	}
+}
+
+void Upscaling::GenerateUIBuffer()
+{
+	if (!d3d12Interop || !setupBuffers || !generateUIBufferCS)
+		return;
+
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+	// Get the backbuffer SRV (final frame with UI composited)
+	ID3D11ShaderResourceView* backbufferSRV = nullptr;
+	if (enbLoaded)
+		backbufferSRV = dx12SwapChain->swapChainBufferProxyENB->srv;
+	else
+		backbufferSRV = dx12SwapChain->swapChainBufferProxy->srv.get();
+
+	if (!backbufferSRV) {
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			REX::WARN("[FG] GenerateUIBuffer: no backbuffer SRV available");
+			loggedOnce = true;
+		}
+		return;
+	}
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+	// Unbind render targets — the proxy backbuffer may still be bound as RTV from game rendering.
+	// D3D11 silently returns zeros when reading a resource that's simultaneously bound as RTV.
+	context->OMSetRenderTargets(0, nullptr, nullptr);
+
+	uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
+	uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);
+
+	// t0 = HUDLess (clean scene), t1 = Backbuffer (scene + UI)
+	ID3D11ShaderResourceView* srvs[2] = {
+		HUDLessBufferShared[dx12SwapChain->frameIndex]->srv.get(),
+		backbufferSRV
+	};
+	context->CSSetShaderResources(0, 2, srvs);
+
+	// u0 = UIColorAndAlpha output
+	ID3D11UnorderedAccessView* uavs[1] = {
+		UIColorAlphaShared[dx12SwapChain->frameIndex]->uav.get()
+	};
+	context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+
+	context->CSSetShader(generateUIBufferCS, nullptr, 0);
+	context->Dispatch(dispatchX, dispatchY, 1);
+
+	// Unbind
+	ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
+	context->CSSetShaderResources(0, 2, nullSRVs);
+	ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+	context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+	context->CSSetShader(nullptr, nullptr, 0);
+
+	static bool loggedOnce = false;
+	if (!loggedOnce) {
+		REX::INFO("[FG] GenerateUIBuffer: dispatch={}x{}", dispatchX, dispatchY);
+		loggedOnce = true;
+	}
+}
+
+void Upscaling::Reset()
+{
+	if (!d3d12Interop)
+		return;
+
+	if (!setupBuffers)
+		CreateFrameGenerationResources();
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+
+	FLOAT clearColor[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+	context->ClearRenderTargetView(HUDLessBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+	context->ClearRenderTargetView(depthBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+	context->ClearRenderTargetView(motionVectorBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+	context->ClearRenderTargetView(UIColorAlphaShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+}
+
+struct WindowSizeChanged
+{
+	static void thunk(RE::BSGraphics::Renderer*, unsigned int)
+	{
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct SetUseDynamicResolutionViewportAsDefaultViewport
+{
+	static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
+	{
+		auto upscaling = Upscaling::GetSingleton();
+
+		func(This, a_true);
+
+		if (!a_true) {
+			// Imagespace just completed — capture HUDLess (pre-UI scene)
+			upscaling->imagespaceComplete = true;
+			upscaling->PostDisplay();
+		} else {
+			upscaling->imagespaceComplete = false;
+		}
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+bool reticleFix = false;
+
+struct DrawWorld_Forward
+{
+	static void thunk(void* a1)
+	{		
+		func(a1);
+
+		if (!reticleFix)
+			Upscaling::GetSingleton()->CopyBuffersToSharedResources();
+
+		reticleFix = false;
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+struct DrawWorld_Reticle
+{
+	static void thunk(void* a1)
+	{
+		auto upscaling = Upscaling::GetSingleton();
+		upscaling->PreAlpha();
+		func(a1);
+		reticleFix = true;
+		upscaling->PostAlpha();
+	}
+	static inline REL::Relocation<decltype(thunk)> func;
+};
+
+void Upscaling::InstallHooks()
+{
+	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
+
+	// Fix game initialising twice
+	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));
+
+	// Watch frame presentation
+	constexpr std::ptrdiff_t dynResOffsets[] = { 0xE1, 0xC5, 0xC5 };
+	stl::write_thunk_call<SetUseDynamicResolutionViewportAsDefaultViewport>(
+		REL::ID({ 587723, 2318322, 2318322 }).address() + dynResOffsets[runtimeIdx]);
+
+	// Fix reticles on motion vectors and depth
+	stl::detour_thunk<DrawWorld_Forward>(REL::ID({ 656535, 2318315, 2318315 }));
+
+	constexpr std::ptrdiff_t reticleOffsets[] = { 0x253, 0x53D, 0x53D };
+	stl::write_thunk_call<DrawWorld_Reticle>(
+		REL::ID({ 338205, 2318315, 2318315 }).address() + reticleOffsets[runtimeIdx]);
+
+	REX::INFO("[Upscaling] Installed hooks");
+}
+
+	void Upscaling::Load()
+	{
+		LoadSettings();
+		DX11Hooks::Install();
+	}
+
+	namespace
+	{
+		struct AutoRegister
+		{
+			AutoRegister()
+			{
+				cs::FeatureManager::Get().Register(Upscaling::GetSingleton());
+			}
+		};
+		static AutoRegister _autoRegister;
+	}
+
+}
