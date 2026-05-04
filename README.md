@@ -29,11 +29,15 @@ More features coming as the port progresses.
 ```bash
 git clone --recursive https://github.com/<owner>/fallout4-community-shaders.git
 cd fallout4-community-shaders
+
+# Fetch proprietary SDK runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS)
+./scripts/fetch-sdks.sh
+
 cmake -S . --preset=default
 cmake --build build --config Release
 ```
 
-Output: `build/Release/FO4CommunityShaders.dll`
+Output: `build/Release/FO4CommunityShaders.dll` plus runtime SDK DLLs staged under `package/F4SE/Plugins/`.
 
 ## Deploy
 
