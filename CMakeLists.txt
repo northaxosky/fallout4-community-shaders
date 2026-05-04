@@ -32,6 +32,11 @@ find_package(directxtex CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 
+# SDK INTERFACE targets (header-only). Features link these directly.
+# FidelityFX-SDK is heavier and added by features that need it (currently Upscaling).
+add_subdirectory(cmake/Streamline)
+add_subdirectory(cmake/XeSS)
+
 # Single unified DLL target
 add_library(FO4CommunityShaders SHARED)
 

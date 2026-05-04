@@ -1,0 +1,14 @@
+cmake_minimum_required(VERSION 3.21)
+
+if(TARGET Streamline)
+  return()
+endif()
+
+add_library(Streamline INTERFACE)
+
+target_include_directories(
+  Streamline INTERFACE ${CMAKE_SOURCE_DIR}/extern/Streamline/include)
+
+if(MSVC)
+  target_compile_options(Streamline INTERFACE /wd5103)
+endif()
