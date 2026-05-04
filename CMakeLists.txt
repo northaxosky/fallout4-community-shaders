@@ -65,3 +65,4 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 
 # Features attach their sources to FO4CommunityShaders via target_sources.
 register_feature(MotionVectorFixes)
+register_feature(Upscaling)
