@@ -187,7 +187,7 @@ namespace cs
 
 			for (auto* feat : FeatureManager::Get().GetAll()) {
 				if (ImGui::CollapsingHeader(feat->GetName().data()))
-					feat->DrawMenu();
+					feat->DrawSettings();
 			}
 		}
 		ImGui::End();

@@ -15,7 +15,7 @@ namespace cs
 		virtual void Load() {}
 		virtual void OnDataLoaded() {}
 		virtual void OnPostPostLoad() {}
-		virtual void DrawMenu() {}
+		virtual void DrawSettings() {}
 	};
 
 	class FeatureManager
