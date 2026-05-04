@@ -11,7 +11,7 @@ target_include_directories(FO4CommunityShaders PRIVATE
 	${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-# FidelityFX-SDK (FSR3) — only the Upscaling feature consumes it, so add here.
+# FidelityFX-SDK (FSR3) is only consumed by the Upscaling feature, so it lives here, not at top level.
 if(NOT TARGET ffx_fsr3_x64)
 	set(FFX_API_VK OFF CACHE BOOL "" FORCE)
 	set(FFX_API_DX12 OFF CACHE BOOL "" FORCE)

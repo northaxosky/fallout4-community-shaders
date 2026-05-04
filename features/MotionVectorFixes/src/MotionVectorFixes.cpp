@@ -8,9 +8,7 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.mv"); }
 
-	// CommonLibF4 doesn't expose the flags field needed for the LOD/landscape check
-	// in BSLightingShaderProperty::GetRenderPasses. Defined locally until the header
-	// lands in Dear-Modding-FO4/commonlibf4.
+	// Local mirror until Dear-Modding-FO4/commonlibf4 exposes BSShaderProperty::flags.
 	struct __declspec(novtable) BSShaderProperty : public RE::NiShadeProperty
 	{
 	private:

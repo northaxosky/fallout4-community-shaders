@@ -15,30 +15,30 @@ src = "build/Release/FO4CommunityShaders.dll"
 dst = "F4SE/Plugins/FO4CommunityShaders.dll"
 pdb = true
 
-# HLSL shaders for the Upscaling feature (committed in this repo).
+# Upscaling HLSL shaders (committed).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/Upscaling/"
 dst = "F4SE/Plugins/Upscaling/"
 
-# HLSL shaders for the FrameGeneration feature (committed in this repo).
+# FrameGeneration HLSL shaders (committed).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/FrameGeneration/"
 dst = "F4SE/Plugins/FrameGeneration/"
 pattern = "*.hlsl"
 
-# NVIDIA Streamline runtime DLLs (not committed — fetched by scripts/fetch-sdks.sh).
+# NVIDIA Streamline runtime DLLs (fetched by scripts/fetch-sdks.sh).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/Streamline/"
 dst = "F4SE/Plugins/Streamline/"
 pattern = "*.dll"
 
-# AMD FidelityFX runtime DLL (not committed — fetched by scripts/fetch-sdks.sh).
+# AMD FidelityFX runtime DLL (fetched by scripts/fetch-sdks.sh).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/FrameGeneration/FidelityFX/"
 dst = "F4SE/Plugins/FrameGeneration/FidelityFX/"
 pattern = "*.dll"
 
-# Intel XeSS runtime DLLs (not committed — copied from extern/XeSS/bin via fetch-sdks.sh).
+# Intel XeSS runtime DLLs (copied from extern/XeSS/bin by scripts/fetch-sdks.sh).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/FrameGeneration/XeSS/"
 dst = "F4SE/Plugins/FrameGeneration/XeSS/"

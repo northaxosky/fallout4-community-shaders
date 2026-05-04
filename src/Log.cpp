@@ -6,9 +6,7 @@ namespace cs::log
 {
 	namespace
 	{
-		// Pattern includes logger name (%n) so we can see the subsystem in the log
-		// without manually prefixing every message. Mirrors F4SE's own pattern
-		// otherwise (timestamp, thread id, level).
+		// Override of F4SE's default pattern; %n surfaces the logger name per line.
 		constexpr const char* kPattern = "[%T.%e] [%=5t] [%L] [%n] %v";
 
 		void ConfigureFromDefault(spdlog::logger& a_logger, const spdlog::logger& a_default)

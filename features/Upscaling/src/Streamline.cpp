@@ -92,7 +92,7 @@ void Streamline::Initialize()
 	}
 
 	if (alreadyInitialized) {
-		L->info("Skipping slInit — already initialized by FrameGeneration plugin");
+		L->info("Skipping slInit - already initialized by FrameGeneration plugin");
 		initialized = true;
 	} else if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
 		L->critical("Failed to initialize Streamline");
@@ -238,7 +238,7 @@ void Streamline::UpdateConstants(float2 a_jitter)
 	slConstants.clipToPrevClip = {};
 	slConstants.depthInverted = sl::Boolean::eFalse;
 	slConstants.jitterOffset = { -a_jitter.x, -a_jitter.y};
-	slConstants.mvecScale = { 1, 1 };  // TODO(#20): verify mvec space — FSR uses renderSize scale, DLSS uses {1,1}
+	slConstants.mvecScale = { 1, 1 };  // TODO(#20): verify mvec space - FSR uses renderSize scale, DLSS uses {1,1}
 	slConstants.prevClipToClip = {};
 	slConstants.reset = sl::Boolean::eFalse;
 	slConstants.motionVectors3D = sl::Boolean::eFalse;

@@ -333,7 +333,7 @@ void Upscaling::InstallHooks()
 	}
 
 	// These hooks are not needed when using ENB because dynamic resolution is not supported
-	// Dynamic resolution hooks — installed regardless of ENB (render target swaps propagate through ENB's wrapper)
+	// Dynamic resolution hooks - installed regardless of ENB (render target swaps propagate through ENB's wrapper)
 	L->info("Installing 7 dynamic resolution hooks");
 
 	{
@@ -970,7 +970,7 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	if (enbLoaded) {
 		static bool loggedENBActive = false;
 		if (!loggedENBActive) {
-			L->info("ENB detected — running in native AA mode (DLAA/FSR). Sub-native quality modes are not available with ENB.");
+			L->info("ENB detected - running in native AA mode (DLAA/FSR). Sub-native quality modes are not available with ENB.");
 			loggedENBActive = true;
 		}
 	}
@@ -1335,10 +1335,10 @@ void Upscaling::PatchSSRShader()
 	void Upscaling::Load()
 	{
 		if (ENB_API::RequestENBAPI()) {
-			L->info("ENB detected — native AA mode (DLAA/FSR)");
+			L->info("ENB detected - native AA mode (DLAA/FSR)");
 			enbLoaded = true;
 		} else {
-			L->info("ENB not detected — full pipeline active");
+			L->info("ENB not detected - full pipeline active");
 		}
 
 		L->info("Installing DX11 hooks...");

@@ -8,7 +8,7 @@ out/
 *.pdb
 *.ilk
 
-# Vendored Detours static libs are NOT build output — track them
+# Vendored Detours static libs are NOT build output, track them.
 !include/detours/**/*.lib
 !include/detours/**/*.pdb
 

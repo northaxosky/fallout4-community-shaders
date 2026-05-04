@@ -168,7 +168,7 @@ void XeSSFG::BeginFrame(uint32_t a_frameId)
 {
 	if (!xellCtx) return;
 
-	// Skip xellSleep — cross-vendor mode caps at 60fps on NVIDIA.
+	// Skip xellSleep - cross-vendor mode caps at 60fps on NVIDIA.
 	// DXGI frame latency waitable handles pacing instead.
 	if (pfn_xellAddMarkerData)
 		pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
@@ -204,7 +204,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, nullptr, a_frameId, &colorData);
 	}
 
-	// Tag motion vectors (valid only now — need copy via command list)
+	// Tag motion vectors (valid only now - need copy via command list)
 	if (a_motionVectors) {
 		xefg_swapchain_d3d12_resource_data_t mvData{};
 		mvData.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
@@ -216,7 +216,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &mvData);
 	}
 
-	// Tag depth (valid only now — need copy via command list)
+	// Tag depth (valid only now - need copy via command list)
 	if (a_depth) {
 		xefg_swapchain_d3d12_resource_data_t depthData{};
 		depthData.type = XEFG_SWAPCHAIN_RES_DEPTH;
@@ -228,7 +228,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
 	}
 
-	// Tag frame constants — MV scale 1.0 per sample (MVs are in pixel space, normalized)
+	// Tag frame constants - MV scale 1.0 per sample (MVs are in pixel space, normalized)
 	if (pfn_xefgSwapChainTagFrameConstants) {
 		xefg_swapchain_frame_constant_data_t constants{};
 

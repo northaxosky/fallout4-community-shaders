@@ -86,7 +86,7 @@ static HRESULT WINAPI hk_CreateSwapChainForHwnd(IDXGIFactory2* This, IUnknown* p
 
 HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain)
 {
-	// ENB path: ENB's wrapped factory calls CreateSwapChain — we intercept to insert our D3D12 proxy
+	// ENB path: ENB's wrapped factory calls CreateSwapChain - we intercept to insert our D3D12 proxy
 	auto upscaling = Upscaling::GetSingleton();
 
 	IDXGIDevice* dxgiDevice = nullptr;
@@ -209,7 +209,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 		bool hasBackend = fidelityFX->module;
 
-		// For DLSS-G, tentatively enable — actual init after D3D12 device creation
+		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
 		if (upscaling->settings.frameGenType == 1) {
 			upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
 			hasBackend = true;

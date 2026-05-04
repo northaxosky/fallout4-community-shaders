@@ -114,7 +114,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		maxFrames = state.numFramesToGenerateMax;
 	}
 
-	// Enable DLSS-G — called once at init, not per-frame
+	// Enable DLSS-G - called once at init, not per-frame
 	// Clamp requested frames to hardware max (1 on RTX 40xx, up to 3 on RTX 50xx)
 	auto upscaling = Upscaling::GetSingleton();
 	uint32_t requestedFrames = std::clamp((uint32_t)upscaling->settings.frameGenFrames, 1u, maxFrames);
@@ -209,7 +209,7 @@ void StreamlineFG::Present(
 {
 	if (!featureDLSSG || !frameToken) return;
 
-	// Set per-frame constants — matrices MUST be unjittered per DLSS-G docs
+	// Set per-frame constants - matrices MUST be unjittered per DLSS-G docs
 	if (slSetConstants) {
 		sl::Constants constants{};
 

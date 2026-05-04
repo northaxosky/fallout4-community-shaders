@@ -15,10 +15,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
-# CommonLibF4 (Dear-Modding-FO4 fork)
-# The fork ships only xmake.lua, so drop our CMakeLists template into the
-# submodule before add_subdirectory. Mirrors the FO4Upscaling pattern, but
-# automated so fresh clones don't need a manual step.
+# Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so inject our CMakeLists template before add_subdirectory.
 configure_file(
 	${CMAKE_SOURCE_DIR}/cmake/CommonLibF4.cmake.txt
 	${CMAKE_SOURCE_DIR}/extern/CommonLibF4/CMakeLists.txt
@@ -33,15 +30,14 @@ find_package(directx-headers CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 
-# SDK INTERFACE targets (header-only). Features link these directly.
-# FidelityFX-SDK is heavier and added by features that need it (currently Upscaling).
+# Header-only INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
 add_subdirectory(cmake/Streamline)
 add_subdirectory(cmake/XeSS)
 
-# Single unified DLL target
+# Single unified DLL target.
 add_library(FO4CommunityShaders SHARED)
 
-# Core sources
+# Core sources.
 file(GLOB_RECURSE CORE_SOURCES
 	LIST_DIRECTORIES false
 	CONFIGURE_DEPENDS
@@ -65,7 +61,7 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 	imgui::imgui
 )
 
-# Features attach their sources to FO4CommunityShaders via target_sources.
+# Features attach their own sources to FO4CommunityShaders via target_sources.
 register_feature(MotionVectorFixes)
 register_feature(Upscaling)
 register_feature(FrameGeneration)

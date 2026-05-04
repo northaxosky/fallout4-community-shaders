@@ -139,7 +139,7 @@ namespace cs
 		if (!_imguiInited || !_chain || !_context)
 			return;
 
-		// MenuControls singleton may not exist at first present; retry until it does.
+		// MenuControls singleton may not exist at first present; retry each frame.
 		if (!_menuControlsHooked)
 			TryHookMenuControls();
 
@@ -206,7 +206,7 @@ namespace cs
 					spdlog::level::warn, spdlog::level::err, spdlog::level::critical, spdlog::level::off
 				};
 				if (_loggingLevelIdx < 0)
-					_loggingLevelIdx = 2;  // Info
+					_loggingLevelIdx = static_cast<int>(spdlog::level::info);
 				if (ImGui::Combo("Global level", &_loggingLevelIdx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
 					cs::log::SetGlobalLevel(kLevels[_loggingLevelIdx]);
 				}
@@ -248,7 +248,7 @@ namespace cs
 	{
 		auto& m = Menu::Get();
 
-		// Toggle key — eaten regardless of menu state so it never reaches the game.
+		// Toggle key, eaten regardless of menu state so the game never sees END.
 		if (a_msg == WM_KEYDOWN && a_wparam == VK_END && (HIWORD(a_lparam) & KF_REPEAT) == 0) {
 			m.Toggle();
 			return 0;
@@ -257,11 +257,7 @@ namespace cs
 		if (m._open && m._imguiInited) {
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-			// While the menu is open, the menu is fully modal for keyboard +
-			// mouse input — suppress every such message at the WndProc level so
-			// the game's WndProc never sees Escape (pause menu), tilde (console),
-			// WASD (movement), clicks, drags, etc. WM_SYSKEY* / WM_SYSCHAR pass
-			// through to preserve Alt+F4 / Alt+Tab / Alt+Enter.
+			// Menu is modal for game keys/mouse; SYSKEY+SYSCHAR fall through so Alt+F4/Tab/Enter still work.
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||
 				a_msg == WM_RBUTTONDOWN || a_msg == WM_RBUTTONUP ||

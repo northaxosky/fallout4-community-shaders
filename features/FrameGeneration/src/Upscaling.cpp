@@ -193,7 +193,7 @@ void Upscaling::CreateFrameGenerationResources()
 
 		texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
-		// Force RGBA8 for shared buffer — FSR3 requires it
+		// Force RGBA8 for shared buffer - FSR3 requires it
 		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		srvDesc.Format = texDesc.Format;
 		rtvDesc.Format = texDesc.Format;
@@ -228,7 +228,7 @@ void Upscaling::CreateFrameGenerationResources()
 		motionVectorBufferShared[index]->CreateRTV(rtvDesc);
 		motionVectorBufferShared[index]->CreateUAV(uavDesc);
 
-		// UIColorAndAlpha buffer — R8G8B8A8_UNORM for premultiplied alpha UI extraction
+		// UIColorAndAlpha buffer - R8G8B8A8_UNORM for premultiplied alpha UI extraction
 		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		srvDesc.Format = texDesc.Format;
 		rtvDesc.Format = texDesc.Format;
@@ -607,7 +607,7 @@ void Upscaling::GenerateUIBuffer()
 	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Unbind render targets — the proxy backbuffer may still be bound as RTV from game rendering.
+	// Unbind render targets - the proxy backbuffer may still be bound as RTV from game rendering.
 	// D3D11 silently returns zeros when reading a resource that's simultaneously bound as RTV.
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 
@@ -681,7 +681,7 @@ struct SetUseDynamicResolutionViewportAsDefaultViewport
 		func(This, a_true);
 
 		if (!a_true) {
-			// Imagespace just completed — capture HUDLess (pre-UI scene)
+			// Imagespace just completed - capture HUDLess (pre-UI scene)
 			upscaling->imagespaceComplete = true;
 			upscaling->PostDisplay();
 		} else {

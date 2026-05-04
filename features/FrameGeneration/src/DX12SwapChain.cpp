@@ -175,7 +175,7 @@ void DX12SwapChain::CreateInterop()
 	} else {
 		swapChainBufferProxy = new Texture2D(texDesc11);
 
-		// Create SRV for the proxy backbuffer — needed by GenerateUIBuffer compute shader
+		// Create SRV for the proxy backbuffer - needed by GenerateUIBuffer compute shader
 		D3D11_SHADER_RESOURCE_VIEW_DESC proxySrvDesc{};
 		proxySrvDesc.Format = texDesc11.Format;
 		proxySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -225,7 +225,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	{
 		upscalingForUI->GenerateUIBuffer();
 
-		// Copy HUDLess (clean scene, no UI) to the D3D12 swap chain — NOT the proxy backbuffer
+		// Copy HUDLess (clean scene, no UI) to the D3D12 swap chain - NOT the proxy backbuffer
 		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11,
 			upscalingForUI->HUDLessBufferShared[frameIndex]->resource.get());
 
@@ -456,7 +456,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
 	// Wait for previous frame to have finished (handle may be null if swap chain
-	// was created without DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT —
+	// was created without DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT -
 	// FSR3/DLSS-G wrapped swap chains manage latency internally)
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
 	if (frameLatencyWaitableObject)
@@ -473,7 +473,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		upscaling->GameFrameLimiter();
 
 	// If VSync is disabled and HighFPSPhysicsFix isn't handling pacing, use our limiter.
-	// Skip when HFPF is loaded — it handles pacing correctly including loading screens.
+	// Skip when HFPF is loaded - it handles pacing correctly including loading screens.
 	if (SyncInterval == 0 && !upscaling->highFPSPhysicsFixLoaded)
 		upscaling->FrameLimiter(useFrameGenerationThisFrame);
 

@@ -11,7 +11,7 @@ namespace cs::features::FrameGeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.ui"); }
 
-// Inline shader source — compiled at runtime with D3DCompile
+// Inline shader source - compiled at runtime with D3DCompile
 static const char* s_vsSource = R"(
 float4 mainVS(uint vertexId : SV_VertexID) : SV_POSITION {
     float2 uv = float2((vertexId & 1) * 2.0, (vertexId & 2) * 1.0);

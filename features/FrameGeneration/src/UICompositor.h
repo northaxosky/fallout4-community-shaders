@@ -24,7 +24,7 @@ public:
 	// Called from DX12SwapChain::Present before Streamline's Present
 	void SetUIFrameIndex(UINT a_index) { uiFrameIndex.store(a_index); }
 
-	// Called from real swap chain Present hook — composites UI onto backbuffer
+	// Called from real swap chain Present hook - composites UI onto backbuffer
 	void CompositeUI(IDXGISwapChain* a_swapChain);
 
 private:
