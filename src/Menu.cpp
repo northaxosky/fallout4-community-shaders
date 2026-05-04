@@ -257,19 +257,21 @@ namespace cs
 		if (m._open && m._imguiInited) {
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-			const ImGuiIO& io = ImGui::GetIO();
+			// While the menu is open, the menu is fully modal for keyboard +
+			// mouse input — suppress every such message at the WndProc level so
+			// the game's WndProc never sees Escape (pause menu), tilde (console),
+			// WASD (movement), clicks, drags, etc. WM_SYSKEY* / WM_SYSCHAR pass
+			// through to preserve Alt+F4 / Alt+Tab / Alt+Enter.
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||
 				a_msg == WM_RBUTTONDOWN || a_msg == WM_RBUTTONUP ||
 				a_msg == WM_MBUTTONDOWN || a_msg == WM_MBUTTONUP ||
 				a_msg == WM_MOUSEWHEEL || a_msg == WM_MOUSEHWHEEL ||
 				a_msg == WM_LBUTTONDBLCLK || a_msg == WM_RBUTTONDBLCLK || a_msg == WM_MBUTTONDBLCLK;
-			const bool isKey =
-				a_msg == WM_KEYDOWN || a_msg == WM_KEYUP ||
-				a_msg == WM_SYSKEYDOWN || a_msg == WM_SYSKEYUP ||
-				a_msg == WM_CHAR || a_msg == WM_SYSCHAR;
+			const bool isGameKey =
+				a_msg == WM_KEYDOWN || a_msg == WM_KEYUP || a_msg == WM_CHAR;
 
-			if ((isMouse && io.WantCaptureMouse) || (isKey && io.WantCaptureKeyboard))
+			if (isMouse || isGameKey)
 				return 0;
 		}
 
