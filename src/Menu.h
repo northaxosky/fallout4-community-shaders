@@ -43,6 +43,8 @@ namespace cs
 		bool    _menuControlsHooked = false;
 		bool    _open              = false;
 
+		float   _fontScale = 2.0f;
+
 		WNDPROC _origWndProc = nullptr;
 
 		using PFN_Present = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);

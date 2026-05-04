@@ -144,6 +144,8 @@ namespace cs
 		if (!_backbufferRTV)
 			return;
 
+		ImGui::GetIO().FontGlobalScale = _fontScale;
+
 		ImGui_ImplDX11_NewFrame();
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
@@ -184,6 +186,15 @@ namespace cs
 			ImGui::Text("FPS: %.1f", fps);
 			ImGui::Text("Frame: %.2f ms", fps > 0.0f ? 1000.0f / fps : 0.0f);
 			ImGui::Separator();
+
+			if (ImGui::CollapsingHeader("Menu Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
+				ImGui::SliderFloat("Font scale", &_fontScale, 0.5f, 4.0f, "%.2fx");
+				if (ImGui::Button("Reset to 2x"))
+					_fontScale = 2.0f;
+				ImGui::SameLine();
+				if (ImGui::Button("Reset to 1x"))
+					_fontScale = 1.0f;
+			}
 
 			for (auto* feat : FeatureManager::Get().GetAll()) {
 				if (ImGui::CollapsingHeader(feat->GetName().data()))
