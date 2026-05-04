@@ -22,6 +22,45 @@ namespace cs::features::FrameGeneration
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;
 decltype(&IDXGIFactory::CreateSwapChain) ptrCreateSwapChain;
+decltype(&CreateDXGIFactory1) ptrCreateDXGIFactory1;
+
+// Boot-time gate against double-install. Both call sites run on the main thread during init.
+static std::atomic<bool> slot10Installed{ false };
+
+HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain);
+
+static bool InstallSlot10Once(IDXGIFactory* a_factory)
+{
+	bool expected = false;
+	if (!slot10Installed.compare_exchange_strong(expected, true))
+		return false;
+	*(uintptr_t*)&ptrCreateSwapChain = Detours::X64::DetourClassVTable(
+		*(uintptr_t*)a_factory, &hk_IDXGIFactory_CreateSwapChain, 10);
+	return true;
+}
+
+// Catches factories created outside the engine path (ReShade, overlays, ENB late-init).
+static HRESULT WINAPI hk_CreateDXGIFactory1(REFIID riid, void** ppFactory)
+{
+	HRESULT hr = ptrCreateDXGIFactory1(riid, ppFactory);
+	if (!SUCCEEDED(hr) || !ppFactory || !*ppFactory)
+		return hr;
+
+	// Only known IDXGIFactory* IIDs share slot-10 = CreateSwapChain. Bail otherwise.
+	const bool isFactoryIid =
+		riid == __uuidof(IDXGIFactory) || riid == __uuidof(IDXGIFactory1) ||
+		riid == __uuidof(IDXGIFactory2) || riid == __uuidof(IDXGIFactory3) ||
+		riid == __uuidof(IDXGIFactory4) || riid == __uuidof(IDXGIFactory5) ||
+		riid == __uuidof(IDXGIFactory6) || riid == __uuidof(IDXGIFactory7);
+	if (!isFactoryIid)
+		return hr;
+
+	auto factory = static_cast<IDXGIFactory*>(*ppFactory);
+	if (InstallSlot10Once(factory))
+		L->info("CreateDXGIFactory1 returned factory {:#x}; slot-10 installed (orig {:#x})",
+			reinterpret_cast<uintptr_t>(factory), *(uintptr_t*)&ptrCreateSwapChain);
+	return hr;
+}
 
 // Real swap chain hooks for DLSS-G UI compositing
 using PFN_CreateSwapChainForHwnd = HRESULT(WINAPI*)(IDXGIFactory2*, IUnknown*, HWND,
@@ -231,11 +270,9 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			pFeatureLevels = &featureLevel;
 			FeatureLevels = 1;
 
-			// X2b-real cleanup: drops once CreateDXGIFactory1 + slot-10 hooks are unconditional.
-			if (cs::env::IsENBLoaded()) {
-				*(uintptr_t*)&ptrCreateSwapChain = Detours::X64::DetourClassVTable(*(uintptr_t*)dxgiFactory, &hk_IDXGIFactory_CreateSwapChain, 10);
-			}
-			else {
+			// Slot-10 install on the engine's adapter-parent factory. Atomic-once across both install sites.
+			InstallSlot10Once(dxgiFactory);
+			if (!cs::env::IsENBLoaded()) {
 				DX::ThrowIfFailed(D3D11CreateDevice(
 					pAdapter,
 					DriverType,
@@ -374,6 +411,13 @@ void DX11Hooks::Install()
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 
 	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
+
+	// Defensive CreateDXGIFactory1 hook only when an FG backend can actually use the proxy. Skip when no backend loaded so non-FG users don't get their dxgi calls intercepted.
+	if (fidelityFX->module ||
+		(upscaling->settings.frameGenType == 1 && StreamlineFG::GetSingleton()->interposer) ||
+		(upscaling->settings.frameGenType == 2 && XeSSFG::GetSingleton()->fgModule)) {
+		(uintptr_t&)ptrCreateDXGIFactory1 = Detours::IATHook(moduleBase, "dxgi.dll", "CreateDXGIFactory1", (uintptr_t)hk_CreateDXGIFactory1);
+	}
 }
 
 }

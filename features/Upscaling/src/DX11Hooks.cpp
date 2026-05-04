@@ -56,7 +56,7 @@ struct hkD3D11CreateDeviceAndSwapChain
 		if (streamline->interposer){
 			cs::log::Get("cs.feature.upscaling.streamline")->info("Interposer present, initializing Streamline...");
 			streamline->Initialize();
-			// X2b-real cleanup: drops once CreateDXGIFactory1 + slot-10 hooks are unconditional.
+			// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
 			if (!cs::env::IsENBLoaded() && !streamline->alreadyInitialized) {
 				cs::log::Get("cs.feature.upscaling.streamline")->info("Upgrading swap chain interface (no ENB)");
 				streamline->slUpgradeInterface((void**)&(*ppSwapChain));
