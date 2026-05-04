@@ -1,0 +1,143 @@
+cmake_minimum_required(VERSION 3.21)
+
+project(
+	CommonLibF4
+	LANGUAGES CXX
+)
+
+# ---- commonlib-shared (internal static lib) ----
+
+file(GLOB_RECURSE SHARED_SOURCES
+	LIST_DIRECTORIES false
+	CONFIGURE_DEPENDS
+	"lib/commonlib-shared/src/*.cpp"
+)
+
+file(GLOB_RECURSE SHARED_HEADERS
+	LIST_DIRECTORIES false
+	CONFIGURE_DEPENDS
+	"lib/commonlib-shared/include/*.h"
+)
+
+add_library(commonlib-shared STATIC
+	${SHARED_SOURCES}
+	${SHARED_HEADERS}
+)
+
+target_include_directories(commonlib-shared
+	PUBLIC
+		"${CMAKE_CURRENT_SOURCE_DIR}/lib/commonlib-shared/include"
+)
+
+target_compile_features(commonlib-shared
+	PUBLIC
+		cxx_std_23
+)
+
+target_precompile_headers(commonlib-shared
+	PRIVATE
+		"lib/commonlib-shared/src/REX/PCH.h"
+)
+
+# ---- commonlib-shared: find packages ----
+
+find_package(spdlog REQUIRED CONFIG)
+target_link_libraries(commonlib-shared PUBLIC spdlog::spdlog)
+
+find_package(xbyak CONFIG)
+if(xbyak_FOUND)
+	target_link_libraries(commonlib-shared PUBLIC xbyak::xbyak)
+	target_compile_definitions(commonlib-shared PUBLIC COMMONLIB_OPTION_XBYAK=1)
+endif()
+
+# ---- commonlib-shared: system libraries ----
+
+target_link_libraries(commonlib-shared
+	PUBLIC
+		advapi32
+		bcrypt
+		d3d11
+		d3dcompiler
+		dbghelp
+		dxgi
+		ole32
+		shell32
+		user32
+		version
+		ws2_32
+)
+
+# ---- commonlib-shared: compile options ----
+
+if(MSVC)
+	target_compile_options(commonlib-shared
+		PUBLIC
+			/EHsc
+			/permissive-
+			/Zc:preprocessor
+			/wd4200    # zero-sized array in struct/union
+			/wd4201    # nameless struct/union
+			/wd4324    # structure was padded due to alignment specifier
+			/we4715    # not all control paths return a value
+		PRIVATE
+			/bigobj
+			/utf-8
+	)
+endif()
+
+# ---- CommonLibF4 (main static lib) ----
+
+file(GLOB_RECURSE COMMONLIBF4_SOURCES
+	LIST_DIRECTORIES false
+	CONFIGURE_DEPENDS
+	"src/*.cpp"
+)
+
+file(GLOB_RECURSE COMMONLIBF4_HEADERS
+	LIST_DIRECTORIES false
+	CONFIGURE_DEPENDS
+	"include/*.h"
+)
+
+add_library(CommonLibF4 STATIC
+	${COMMONLIBF4_SOURCES}
+	${COMMONLIBF4_HEADERS}
+)
+
+add_library(CommonLibF4::CommonLibF4 ALIAS CommonLibF4)
+
+target_include_directories(CommonLibF4
+	PUBLIC
+		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+)
+
+target_compile_features(CommonLibF4
+	PUBLIC
+		cxx_std_23
+)
+
+target_link_libraries(CommonLibF4
+	PUBLIC
+		commonlib-shared
+)
+
+target_compile_definitions(CommonLibF4
+	PUBLIC
+		COMMONLIB_RUNTIMECOUNT=3
+		_UNICODE
+		NOMINMAX
+		WIN32_LEAN_AND_MEAN
+)
+
+target_precompile_headers(CommonLibF4
+	PRIVATE
+		"include/F4SE/Impl/PCH.h"
+)
+
+if(MSVC)
+	target_compile_options(CommonLibF4
+		PRIVATE
+			/bigobj
+			/utf-8
+	)
+endif()

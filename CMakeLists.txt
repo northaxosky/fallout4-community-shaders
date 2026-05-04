@@ -16,6 +16,14 @@ set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
 # CommonLibF4 (Dear-Modding-FO4 fork)
+# The fork ships only xmake.lua, so drop our CMakeLists template into the
+# submodule before add_subdirectory. Mirrors the FO4Upscaling pattern, but
+# automated so fresh clones don't need a manual step.
+configure_file(
+	${CMAKE_SOURCE_DIR}/cmake/CommonLibF4.cmake.txt
+	${CMAKE_SOURCE_DIR}/extern/CommonLibF4/CMakeLists.txt
+	COPYONLY
+)
 add_subdirectory(extern/CommonLibF4 CommonLibF4 EXCLUDE_FROM_ALL)
 
 # vcpkg packages
