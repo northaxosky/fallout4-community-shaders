@@ -86,11 +86,7 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 	}
 
-	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
-	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
-
-	frameIndex = swapChain->GetCurrentBackBufferIndex();
-
+	// Backbuffer acquisition lives in RecreateWrappedBuffers, called from CreateInterop and on resize.
 	swapChainProxy = new DXGISwapChainProxy(swapChain);
 }
 
@@ -156,6 +152,44 @@ void DX12SwapChain::CreateInterop()
 	DX::ThrowIfFailed(d3d11Device->OpenSharedFence(sharedFenceHandle, IID_PPV_ARGS(&d3d11Fence)));
 	CloseHandle(sharedFenceHandle);
 
+	RecreateWrappedBuffers();
+}
+
+void DX12SwapChain::OnPreResize()
+{
+	// DXGI requires no outstanding refs on the back buffers before ResizeBuffers.
+	swapChainBuffers[0] = nullptr;
+	swapChainBuffers[1] = nullptr;
+}
+
+void DX12SwapChain::WaitForGPU()
+{
+	if (!commandQueue || !d3d12Fence)
+		return;
+	const UINT64 value = ++fenceValue;
+	DX::ThrowIfFailed(commandQueue->Signal(d3d12Fence.get(), value));
+	if (d3d12Fence->GetCompletedValue() < value) {
+		HANDLE evt = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+		DX::ThrowIfFailed(d3d12Fence->SetEventOnCompletion(value, evt));
+		WaitForSingleObject(evt, INFINITE);
+		CloseHandle(evt);
+	}
+}
+
+void DX12SwapChain::RecreateWrappedBuffers()
+{
+	// Drain outstanding GPU work so the wrapped-resource deletes below don't race a still-in-flight frame.
+	WaitForGPU();
+
+	// Refresh swapChainDesc from the current chain so wrapped buffers match the live size.
+	DX::ThrowIfFailed(swapChain->GetDesc1(&swapChainDesc));
+
+	// Idempotent release before re-acquire; safe whether buffers are populated or empty.
+	OnPreResize();
+	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
+	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
+	frameIndex = swapChain->GetCurrentBackBufferIndex();
+
 	D3D11_TEXTURE2D_DESC texDesc11{};
 	texDesc11.Width = swapChainDesc.Width;
 	texDesc11.Height = swapChainDesc.Height;
@@ -169,14 +203,23 @@ void DX12SwapChain::CreateInterop()
 	texDesc11.CPUAccessFlags = 0;
 	texDesc11.MiscFlags = 0;
 
-	// Create interop textures.
+	// Drop any prior wrapped resources before re-allocation.
+	delete swapChainBufferProxyENB;
+	swapChainBufferProxyENB = nullptr;
+	delete swapChainBufferProxy;
+	swapChainBufferProxy = nullptr;
+	delete swapChainBufferWrapped[0];
+	swapChainBufferWrapped[0] = nullptr;
+	delete swapChainBufferWrapped[1];
+	swapChainBufferWrapped[1] = nullptr;
+
 	// X2 cleanup: drops once DXGISwapChainProxy is fully implemented (see findings/pdperf-symbol-analysis.md §5.3).
 	if (cs::env::IsENBLoaded()) {
 		swapChainBufferProxyENB = new WrappedResource(texDesc11, d3d11Device.get(), d3d12Device.get());
 	} else {
 		swapChainBufferProxy = new Texture2D(texDesc11);
 
-		// Create SRV for the proxy backbuffer - needed by GenerateUIBuffer compute shader
+		// SRV needed by GenerateUIBuffer compute shader.
 		D3D11_SHADER_RESOURCE_VIEW_DESC proxySrvDesc{};
 		proxySrvDesc.Format = texDesc11.Format;
 		proxySrvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -556,10 +599,53 @@ DXGISwapChainProxy::DXGISwapChainProxy(IDXGISwapChain4* a_swapChain)
 /****IUknown****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void** ppvObj)
 {
-	auto ret = swapChain->QueryInterface(riid, ppvObj);
-	if (*ppvObj)
-		*ppvObj = this;
-	return ret;
+	if (!ppvObj)
+		return E_INVALIDARG;
+
+	// Most-derived first so a request for IDXGISwapChain4 returns the v4 vtable, not a v0 stub.
+	if (riid == __uuidof(IDXGISwapChain4)) {
+		*ppvObj = static_cast<IDXGISwapChain4*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IDXGISwapChain3)) {
+		*ppvObj = static_cast<IDXGISwapChain3*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IDXGISwapChain2)) {
+		*ppvObj = static_cast<IDXGISwapChain2*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IDXGISwapChain1)) {
+		*ppvObj = static_cast<IDXGISwapChain1*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IDXGISwapChain)) {
+		*ppvObj = static_cast<IDXGISwapChain*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IDXGIDeviceSubObject)) {
+		*ppvObj = static_cast<IDXGIDeviceSubObject*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IDXGIObject)) {
+		*ppvObj = static_cast<IDXGIObject*>(this);
+		AddRef();
+		return S_OK;
+	}
+	if (riid == __uuidof(IUnknown)) {
+		*ppvObj = static_cast<IUnknown*>(this);
+		AddRef();
+		return S_OK;
+	}
+
+	// Unknown GUID (driver/ENB/overlay private interface): forward so it reaches the real chain.
+	return swapChain->QueryInterface(riid, ppvObj);
 }
 
 ULONG STDMETHODCALLTYPE DXGISwapChainProxy::AddRef()
@@ -610,9 +696,9 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBuffer(UINT, _In_ REFIID, _COM_
 	return DX12SwapChain::GetSingleton()->GetBuffer(ppSurface);
 }
 
-HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetFullscreenState(BOOL, _In_opt_ IDXGIOutput*)
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetFullscreenState(BOOL Fullscreen, _In_opt_ IDXGIOutput* pTarget)
 {
-	return S_OK;
+	return swapChain->SetFullscreenState(Fullscreen, pTarget);
 }
 
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFullscreenState(_Out_opt_ BOOL* pFullscreen, _COM_Outptr_opt_result_maybenull_ IDXGIOutput** ppTarget)
@@ -625,14 +711,19 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDesc(_Out_ DXGI_SWAP_CHAIN_DESC
 	return swapChain->GetDesc(pDesc);
 }
 
-HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(UINT , UINT , UINT , DXGI_FORMAT , UINT )
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT NewFormat, UINT SwapChainFlags)
 {
-	return S_OK;
+	auto& dx12 = *DX12SwapChain::GetSingleton();
+	dx12.OnPreResize();
+	HRESULT hr = swapChain->ResizeBuffers(BufferCount, Width, Height, NewFormat, SwapChainFlags);
+	if (SUCCEEDED(hr))
+		dx12.RecreateWrappedBuffers();
+	return hr;
 }
 
-HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeTarget(_In_ const DXGI_MODE_DESC*)
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeTarget(_In_ const DXGI_MODE_DESC* pNewTargetParameters)
 {
-	return S_OK;
+	return swapChain->ResizeTarget(pNewTargetParameters);
 }
 
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetContainingOutput(_COM_Outptr_ IDXGIOutput** ppOutput)
@@ -649,5 +740,44 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetLastPresentCount(_Out_ UINT* pL
 {
 	return swapChain->GetLastPresentCount(pLastPresentCount);
 }
+
+/****IDXGISwapChain1****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDesc1(_Out_ DXGI_SWAP_CHAIN_DESC1* pDesc) { return swapChain->GetDesc1(pDesc); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFullscreenDesc(_Out_ DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pDesc) { return swapChain->GetFullscreenDesc(pDesc); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetHwnd(_Out_ HWND* pHwnd) { return swapChain->GetHwnd(pHwnd); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetCoreWindow(_In_ REFIID refiid, _COM_Outptr_ void** ppUnk) { return swapChain->GetCoreWindow(refiid, ppUnk); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::Present1(UINT SyncInterval, UINT PresentFlags, _In_ const DXGI_PRESENT_PARAMETERS* pPresentParameters) { return swapChain->Present1(SyncInterval, PresentFlags, pPresentParameters); }
+BOOL STDMETHODCALLTYPE DXGISwapChainProxy::IsTemporaryMonoSupported() { return swapChain->IsTemporaryMonoSupported(); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetRestrictToOutput(_Out_ IDXGIOutput** ppRestrictToOutput) { return swapChain->GetRestrictToOutput(ppRestrictToOutput); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetBackgroundColor(_In_ const DXGI_RGBA* pColor) { return swapChain->SetBackgroundColor(pColor); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBackgroundColor(_Out_ DXGI_RGBA* pColor) { return swapChain->GetBackgroundColor(pColor); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetRotation(DXGI_MODE_ROTATION Rotation) { return swapChain->SetRotation(Rotation); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetRotation(_Out_ DXGI_MODE_ROTATION* pRotation) { return swapChain->GetRotation(pRotation); }
+
+/****IDXGISwapChain2****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetSourceSize(UINT Width, UINT Height) { return swapChain->SetSourceSize(Width, Height); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetSourceSize(_Out_ UINT* pWidth, _Out_ UINT* pHeight) { return swapChain->GetSourceSize(pWidth, pHeight); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetMaximumFrameLatency(UINT MaxLatency) { return swapChain->SetMaximumFrameLatency(MaxLatency); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetMaximumFrameLatency(_Out_ UINT* pMaxLatency) { return swapChain->GetMaximumFrameLatency(pMaxLatency); }
+HANDLE STDMETHODCALLTYPE DXGISwapChainProxy::GetFrameLatencyWaitableObject() { return swapChain->GetFrameLatencyWaitableObject(); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetMatrixTransform(const DXGI_MATRIX_3X2_F* pMatrix) { return swapChain->SetMatrixTransform(pMatrix); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetMatrixTransform(_Out_ DXGI_MATRIX_3X2_F* pMatrix) { return swapChain->GetMatrixTransform(pMatrix); }
+
+/****IDXGISwapChain3****/
+UINT STDMETHODCALLTYPE DXGISwapChainProxy::GetCurrentBackBufferIndex() { return swapChain->GetCurrentBackBufferIndex(); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::CheckColorSpaceSupport(DXGI_COLOR_SPACE_TYPE ColorSpace, _Out_ UINT* pColorSpaceSupport) { return swapChain->CheckColorSpaceSupport(ColorSpace, pColorSpaceSupport); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetColorSpace1(DXGI_COLOR_SPACE_TYPE ColorSpace) { return swapChain->SetColorSpace1(ColorSpace); }
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers1(UINT BufferCount, UINT Width, UINT Height, DXGI_FORMAT Format, UINT SwapChainFlags, _In_reads_(BufferCount) const UINT* pCreationNodeMask, _In_reads_(BufferCount) IUnknown* const* ppPresentQueue)
+{
+	auto& dx12 = *DX12SwapChain::GetSingleton();
+	dx12.OnPreResize();
+	HRESULT hr = swapChain->ResizeBuffers1(BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask, ppPresentQueue);
+	if (SUCCEEDED(hr))
+		dx12.RecreateWrappedBuffers();
+	return hr;
+}
+
+/****IDXGISwapChain4****/
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetHDRMetaData(DXGI_HDR_METADATA_TYPE Type, UINT Size, _In_reads_opt_(Size) void* pMetaData) { return swapChain->SetHDRMetaData(Type, Size, pMetaData); }
 
 }
