@@ -5,10 +5,13 @@
 #include "DX12SwapChain.h"
 #include <dx12/ffx_api_dx12.hpp>
 
+#include "Log.h"
+
 ffxFunctions ffxModule;
 
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen.fsr"); }
 
 void FidelityFX::LoadFFX()
 {
@@ -32,7 +35,7 @@ void FidelityFX::SetupFrameGeneration()
 	createBackend.device = dx12SwapChain->d3d12Device.get();
 
 	if (ffx::CreateContext(frameGenContext, nullptr, createFg, createBackend) != ffx::ReturnCode::Ok) {
-		REX::CRITICAL("[FidelityFX] Failed to create frame generation context!");
+		L->critical("Failed to create frame generation context!");
 	}
 }
 
@@ -97,7 +100,7 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 	configParameters.generationRect.height = dx12SwapChain->swapChainDesc.Height;
 
 	if (ffx::Configure(frameGenContext, configParameters) != ffx::ReturnCode::Ok) {
-		REX::CRITICAL("[FidelityFX] Failed to configure frame generation!");
+		L->critical("Failed to configure frame generation!");
 	}
 
 	static LARGE_INTEGER frequency = []() {
@@ -156,7 +159,7 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 		dispatchParameters.motionVectors = ffxApiGetResourceDX12(motionVectors);
 
 		if (ffx::Dispatch(frameGenContext, dispatchParameters) != ffx::ReturnCode::Ok) {
-			REX::CRITICAL("[FidelityFX] Failed to dispatch frame generation!");
+			L->critical("Failed to dispatch frame generation!");
 		}
 	}
 

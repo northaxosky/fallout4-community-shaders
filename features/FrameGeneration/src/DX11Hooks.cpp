@@ -10,12 +10,14 @@
 #include <nvsdk_ngx.h>
 
 #include "ENB/ENBSeriesAPI.h"
+#include "Log.h"
 #include "Menu.h"
 #include "XeSSFG.h"
 #include "UICompositor.h"
 
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx11"); }
 	bool enbLoaded = false;
 
 
@@ -40,13 +42,13 @@ static HRESULT WINAPI hk_CreateSwapChainForHwnd(IDXGIFactory2* This, IUnknown* p
 	const DXGI_SWAP_CHAIN_DESC1* pDesc, const DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pFullscreenDesc,
 	IDXGIOutput* pRestrictToOutput, IDXGISwapChain1** ppSwapChain)
 {
-	REX::INFO("[DLSSG-UI] CreateSwapChainForHwnd hook fired (factory={:#x})", (uintptr_t)This);
+	cs::log::Get("cs.feature.framegen.ui")->info("CreateSwapChainForHwnd hook fired (factory={:#x})", (uintptr_t)This);
 
 	HRESULT hr = ptrCreateSwapChainForHwnd(This, pDevice, hWnd, pDesc, pFullscreenDesc, pRestrictToOutput, ppSwapChain);
 	if (FAILED(hr) || !ppSwapChain || !*ppSwapChain)
 		return hr;
 
-	REX::INFO("[DLSSG-UI] Real swap chain created: {:#x}, format={}, {}x{}",
+	cs::log::Get("cs.feature.framegen.ui")->info("Real swap chain created: {:#x}, format={}, {}x{}",
 		(uintptr_t)*ppSwapChain, pDesc ? (int)pDesc->Format : -1,
 		pDesc ? pDesc->Width : 0, pDesc ? pDesc->Height : 0);
 
@@ -64,15 +66,15 @@ static HRESULT WINAPI hk_CreateSwapChainForHwnd(IDXGIFactory2* This, IUnknown* p
 
 	if (realSC4 && cmdQueue) {
 		UICompositor::GetSingleton()->SetRealSwapChain(realSC4, cmdQueue);
-		REX::INFO("[DLSSG-UI] Real swap chain Present hooked (vtable index 8)");
+		cs::log::Get("cs.feature.framegen.ui")->info("Real swap chain Present hooked (vtable index 8)");
 
 		static bool warnedDLSSGMenu = false;
 		if (!warnedDLSSGMenu) {
-			REX::WARN("[Menu] DLSS-G active - menu drawn on proxy backbuffer; will warp until UICompositor integration lands");
+			cs::log::Get("cs.menu")->warn("DLSS-G active - menu drawn on proxy backbuffer; will warp until UICompositor integration lands");
 			warnedDLSSGMenu = true;
 		}
 	} else {
-		REX::WARN("[DLSSG-UI] Failed to QI swap chain ({:#x}) or command queue ({:#x})",
+		cs::log::Get("cs.feature.framegen.ui")->warn("Failed to QI swap chain ({:#x}) or command queue ({:#x})",
 			(uintptr_t)realSC4, (uintptr_t)cmdQueue);
 	}
 
@@ -116,7 +118,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (!xess->CreateContexts(proxy->d3d12Device.get())) {
-			REX::WARN("[FG] XeSS-FG context creation failed (ENB path), falling back to FSR3");
+			L->warn("XeSS-FG context creation failed (ENB path), falling back to FSR3");
 			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 		}
 	}
@@ -130,7 +132,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 		if (!ptrCreateSwapChainForHwnd) {
 			*(uintptr_t*)&ptrCreateSwapChainForHwnd = Detours::X64::DetourClassVTable(
 				*(uintptr_t*)factory, &hk_CreateSwapChainForHwnd, 15);
-			REX::INFO("[DLSSG-UI] Hooked IDXGIFactory2::CreateSwapChainForHwnd (vtable 15) on original factory (ENB path)");
+			cs::log::Get("cs.feature.framegen.ui")->info("Hooked IDXGIFactory2::CreateSwapChainForHwnd (vtable 15) on original factory (ENB path)");
 		}
 
 		ID3D12Device* rawDevice = proxy->d3d12Device.get();
@@ -150,7 +152,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 		if (!dlssg->CheckAndEnableDLSSG()) {
-			REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");
+			L->warn("DLSS-G enable failed, falling back to FSR3");
 			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 		}
 	}
@@ -195,13 +197,13 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				std::string gpuName;
 				for (int i = 0; i < 128 && adapterDesc.Description[i]; i++)
 					gpuName += static_cast<char>(adapterDesc.Description[i]);
-				REX::INFO("[FG] GPU: {} (VRAM: {}MB, VendorId: {:#x}, DeviceId: {:#x})",
+				L->info("GPU: {} (VRAM: {}MB, VendorId: {:#x}, DeviceId: {:#x})",
 					gpuName, adapterDesc.DedicatedVideoMemory / (1024 * 1024),
 					adapterDesc.VendorId, adapterDesc.DeviceId);
 			}
 		}
 
-		REX::INFO("[Frame Generation] Frame Generation enabled, using D3D12 proxy");
+		L->info("Frame Generation enabled, using D3D12 proxy");
 
 		auto fidelityFX = FidelityFX::GetSingleton();
 
@@ -275,7 +277,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
 					auto xess = XeSSFG::GetSingleton();
 					if (!xess->CreateContexts(proxy->d3d12Device.get())) {
-						REX::WARN("[FG] XeSS-FG context creation failed, falling back to FSR3");
+						L->warn("XeSS-FG context creation failed, falling back to FSR3");
 						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 					}
 				}
@@ -291,7 +293,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 					if (!ptrCreateSwapChainForHwnd) {
 						*(uintptr_t*)&ptrCreateSwapChainForHwnd = Detours::X64::DetourClassVTable(
 							*(uintptr_t*)dxgiFactory, &hk_CreateSwapChainForHwnd, 15);
-						REX::INFO("[DLSSG-UI] Hooked IDXGIFactory2::CreateSwapChainForHwnd (vtable 15) on original factory");
+						cs::log::Get("cs.feature.framegen.ui")->info("Hooked IDXGIFactory2::CreateSwapChainForHwnd (vtable 15) on original factory");
 					}
 
 					ID3D12Device* rawDevice = proxy->d3d12Device.get();
@@ -312,7 +314,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 					auto dlssg = StreamlineFG::GetSingleton();
 
 					if (!dlssg->CheckAndEnableDLSSG()) {
-						REX::WARN("[FG] DLSS-G enable failed, falling back to FSR3");
+						L->warn("DLSS-G enable failed, falling back to FSR3");
 						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 					}
 				}
@@ -328,7 +330,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			}
 
 		} else {
-			REX::WARN("[Frame Generation] No frame generation backend available, skipping proxy");
+			L->warn("No frame generation backend available, skipping proxy");
 		}
 	}
 
@@ -352,10 +354,10 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 void DX11Hooks::Install()
 {
 	if (ENB_API::RequestENBAPI()) {
-		REX::INFO("ENB detected, using alternative swap chain hook");
+		L->info("ENB detected, using alternative swap chain hook");
 		enbLoaded = true;
 	} else {
-		REX::INFO("ENB not detected, using standard swap chain hook");
+		L->info("ENB not detected, using standard swap chain hook");
 	}
 
 	auto upscaling = Upscaling::GetSingleton();
@@ -365,11 +367,11 @@ void DX11Hooks::Install()
 	fidelityFX->LoadFFX();
 
 	if (upscaling->settings.frameGenType == 1) {
-		REX::INFO("[FG] DLSS-G requested, loading Streamline interposer");
+		L->info("DLSS-G requested, loading Streamline interposer");
 		auto dlssg = StreamlineFG::GetSingleton();
 		dlssg->LoadInterposer();
 	} else if (upscaling->settings.frameGenType == 2) {
-		REX::INFO("[FG] XeSS-FG requested, loading XeSS libraries");
+		L->info("XeSS-FG requested, loading XeSS libraries");
 		auto xess = XeSSFG::GetSingleton();
 		xess->LoadLibraries();
 	}

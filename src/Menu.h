@@ -3,6 +3,9 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
+#include <string>
+#include <vector>
+
 namespace cs
 {
 	class Menu
@@ -44,6 +47,8 @@ namespace cs
 		bool    _open              = false;
 
 		float   _fontScale = 2.0f;
+		int     _loggingLevelIdx = -1;
+		std::vector<std::string> _cachedLoggers;
 
 		WNDPROC _origWndProc = nullptr;
 

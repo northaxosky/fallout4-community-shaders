@@ -58,8 +58,8 @@ name = "FO4CommunityShaders.log"
 copy_to_results = true
 
 [test.success_markers]
-data_loaded = '\[CS\] FO4CommunityShaders v.*loaded'
-rendering_active = '\[Menu\] ImGui initialized'
+data_loaded = '\[cs\] FO4CommunityShaders v.*loaded'
+rendering_active = '\[cs\.menu\] ImGui initialized'
 
 [test.timeouts]
 launch_seconds = 30

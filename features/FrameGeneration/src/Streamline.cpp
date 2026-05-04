@@ -1,17 +1,20 @@
 #include "Streamline.h"
 #include "Upscaling.h"
 
+#include "Log.h"
+
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen.dlssg"); }
 
 void StreamlineFG::LoadInterposer()
 {
 	interposer = LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.interposer.dll");
 	if (!interposer) {
-		REX::WARN("[DLSSG] Failed to load interposer: {:#x}", GetLastError());
+		L->warn("Failed to load interposer: {:#x}", GetLastError());
 		return;
 	}
-	REX::INFO("[DLSSG] Interposer loaded");
+	L->info("Interposer loaded");
 
 	slInit = (PFun_slInit*)GetProcAddress(interposer, "slInit");
 	slShutdown = (PFun_slShutdown*)GetProcAddress(interposer, "slShutdown");
@@ -27,7 +30,7 @@ bool StreamlineFG::InitStreamline()
 {
 	if (!interposer || !slInit) return false;
 
-	REX::INFO("[DLSSG] Initializing Streamline");
+	L->info("Initializing Streamline");
 
 	// Pre-load plugin DLLs for MO2 USVFS compatibility
 	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
@@ -39,7 +42,7 @@ bool StreamlineFG::InitStreamline()
 	pref.logLevel = debugLogging ? sl::LogLevel::eVerbose : sl::LogLevel::eDefault;
 	if (debugLogging) {
 		pref.logMessageCallback = [](sl::LogType, const char* msg) {
-			REX::INFO("[SL-INT] {}", msg);
+			cs::log::Get("cs.feature.framegen.dlssg.internal")->info("{}", msg);
 		};
 	}
 	pref.engine = sl::EngineType::eCustom;
@@ -64,10 +67,10 @@ bool StreamlineFG::InitStreamline()
 	pref.numFeaturesToLoad = _countof(features);
 
 	auto result = slInit(pref, sl::kSDKVersion);
-	REX::INFO("[DLSSG] slInit result: {}", (int)result);
+	L->info("slInit result: {}", (int)result);
 
 	if (result != sl::Result::eOk) {
-		REX::ERROR("[DLSSG] Streamline init failed");
+		L->error("Streamline init failed");
 		return false;
 	}
 
@@ -80,7 +83,7 @@ void StreamlineFG::SetD3DDevice(ID3D12Device* a_device)
 	d3d12Device = a_device;
 	if (slSetD3DDevice && slInitialized) {
 		slSetD3DDevice(a_device);
-		REX::INFO("[DLSSG] D3D12 device set");
+		L->info("D3D12 device set");
 	}
 }
 
@@ -94,12 +97,12 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetOptions", (void*&)slReflexSetOptions);
 		slGetFeatureFunction(sl::kFeatureReflex, "slReflexSleep", (void*&)slReflexSleep);
 		slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetMarker", (void*&)slReflexSetMarker);
-		REX::INFO("[DLSSG] Feature functions loaded: SetOptions={:#x}, GetState={:#x}, ReflexMarker={:#x}",
+		L->info("Feature functions loaded: SetOptions={:#x}, GetState={:#x}, ReflexMarker={:#x}",
 			(uintptr_t)slDLSSGSetOptions, (uintptr_t)slDLSSGGetState, (uintptr_t)slReflexSetMarker);
 	}
 
 	if (!slDLSSGSetOptions || !slReflexSetMarker) {
-		REX::WARN("[DLSSG] Missing required function pointers");
+		L->warn("Missing required function pointers");
 		return false;
 	}
 
@@ -124,12 +127,12 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 
 	auto result = slDLSSGSetOptions(viewport, options);
 	if (result != sl::Result::eOk) {
-		REX::WARN("[DLSSG] Failed to enable DLSS-G: {}", (int)result);
+		L->warn("Failed to enable DLSS-G: {}", (int)result);
 		return false;
 	}
 
 	featureDLSSG = true;
-	REX::INFO("[DLSSG] DLSS-G enabled: {}x frame gen (requested {}, hardware max {})",
+	L->info("DLSS-G enabled: {}x frame gen (requested {}, hardware max {})",
 		requestedFrames + 1, upscaling->settings.frameGenFrames, maxFrames);
 
 	// Reflex must be active when DLSS-G is on
@@ -142,7 +145,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	if (slDLSSGGetState) {
 		sl::DLSSGState state{};
 		slDLSSGGetState(viewport, state, nullptr);
-		REX::INFO("[DLSSG] Status: {}, minDim: {}, maxFrames: {}",
+		L->info("Status: {}, minDim: {}, maxFrames: {}",
 			(int)state.status, state.minWidthOrHeight, state.numFramesToGenerateMax);
 	}
 
@@ -183,7 +186,7 @@ void StreamlineFG::AcquireFrameToken()
 
 	if (SL_FAILED(res, slGetNewFrameToken(frameToken, nullptr))) {
 		static bool loggedOnce = false;
-		if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to get frame token"); loggedOnce = true; }
+		if (!loggedOnce) { L->error("Failed to get frame token"); loggedOnce = true; }
 	}
 }
 
@@ -247,7 +250,7 @@ void StreamlineFG::Present(
 
 		if (SL_FAILED(res, slSetConstants(constants, *frameToken, viewport))) {
 			static bool loggedOnce = false;
-			if (!loggedOnce) { REX::ERROR("[DLSSG] Failed to set constants"); loggedOnce = true; }
+			if (!loggedOnce) { L->error("Failed to set constants"); loggedOnce = true; }
 		}
 	}
 

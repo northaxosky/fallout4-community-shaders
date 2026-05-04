@@ -6,9 +6,11 @@
 #include "DirectXMath.h"
 #include "Feature.h"
 #include "DX11Hooks.h"
+#include "Log.h"
 
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen"); }
 
 enum class RenderTarget
 {
@@ -101,17 +103,17 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 		return (char)c;
 	});
 	if (!std::filesystem::exists(FilePath)) {
-		REX::ERROR("Failed to compile shader; {} does not exist", str);
+		L->error("Failed to compile shader; {} does not exist", str);
 		return nullptr;
 	}
 	if (FAILED(D3DCompileFromFile(FilePath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, Program, ProgramType, flags, 0, &shaderBlob, &shaderErrors))) {
-		REX::WARN("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
+		L->warn("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
 		if (shaderErrors) shaderErrors->Release();
 		if (shaderBlob) shaderBlob->Release();
 		return nullptr;
 	}
 	if (shaderErrors) {
-		REX::DEBUG("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
+		L->debug("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
 		shaderErrors->Release();
 	}
 
@@ -137,10 +139,10 @@ void Upscaling::LoadSettings()
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
-		REX::INFO("[Frame Generation] bFrameGenerationMode: {}", settings.frameGenerationMode);
-		REX::INFO("[Frame Generation] bFrameLimitMode: {}", settings.frameLimitMode);
-		REX::INFO("[Frame Generation] iFrameGenType: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
-		REX::INFO("[Frame Generation] iFrameGenFrames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
+		L->info("bFrameGenerationMode: {}", settings.frameGenerationMode);
+		L->info("bFrameLimitMode: {}", settings.frameLimitMode);
+		L->info("iFrameGenType: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
+		L->info("iFrameGenFrames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
 		loggedOnce = true;
 	}
 }
@@ -157,16 +159,16 @@ void Upscaling::OnPostPostLoad()
 	highFPSPhysicsFixLoaded = GetModuleHandleA("Data\\F4SE\\Plugins\\HighFPSPhysicsFix.dll") != nullptr;
 
 	if (highFPSPhysicsFixLoaded)
-		REX::INFO("[Frame Generation] HighFPSPhysicsFix.dll is loaded");
+		L->info("HighFPSPhysicsFix.dll is loaded");
 	else
-		REX::INFO("[Frame Generation] HighFPSPhysicsFix.dll is not loaded");
+		L->info("HighFPSPhysicsFix.dll is not loaded");
 
 	InstallHooks();
 }
 
 void Upscaling::CreateFrameGenerationResources()
 {
-	REX::INFO("[Frame Generation] Creating resources");
+	L->info("Creating resources");
 	
 	setupBuffers = true;
 
@@ -324,7 +326,7 @@ void Upscaling::CreateFrameGenerationResources()
 	generateSharedBuffersCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", "cs_5_0");
 	generateUIBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateUIBufferCS.hlsl", "cs_5_0");
 
-	REX::INFO("[FG] Frame generation resources created (HUDLess + Depth + MVec + UIColorAlpha)");
+	L->info("Frame generation resources created (HUDLess + Depth + MVec + UIColorAlpha)");
 }
 
 void Upscaling::PreAlpha()
@@ -549,7 +551,7 @@ double Upscaling::GetRefreshRate(HWND a_window)
 			}
 		}
 	}
-	REX::ERROR("Failed to retrieve refresh rate from swap chain");
+	L->error("Failed to retrieve refresh rate from swap chain");
 	return 60;
 }
 
@@ -574,7 +576,7 @@ void Upscaling::PostDisplay()
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
-		REX::INFO("[FG] PostDisplay captured HUDLess (frameIdx={})", dx12SwapChain->frameIndex);
+		L->info("PostDisplay captured HUDLess (frameIdx={})", dx12SwapChain->frameIndex);
 		loggedOnce = true;
 	}
 }
@@ -596,7 +598,7 @@ void Upscaling::GenerateUIBuffer()
 	if (!backbufferSRV) {
 		static bool loggedOnce = false;
 		if (!loggedOnce) {
-			REX::WARN("[FG] GenerateUIBuffer: no backbuffer SRV available");
+			L->warn("GenerateUIBuffer: no backbuffer SRV available");
 			loggedOnce = true;
 		}
 		return;
@@ -637,7 +639,7 @@ void Upscaling::GenerateUIBuffer()
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
-		REX::INFO("[FG] GenerateUIBuffer: dispatch={}x{}", dispatchX, dispatchY);
+		L->info("GenerateUIBuffer: dispatch={}x{}", dispatchX, dispatchY);
 		loggedOnce = true;
 	}
 }
@@ -737,7 +739,7 @@ void Upscaling::InstallHooks()
 	stl::write_thunk_call<DrawWorld_Reticle>(
 		REL::ID({ 338205, 2318315, 2318315 }).address() + reticleOffsets[runtimeIdx]);
 
-	REX::INFO("[Upscaling] Installed hooks");
+	L->info("Installed hooks");
 }
 
 	void Upscaling::Load()

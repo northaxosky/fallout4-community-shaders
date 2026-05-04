@@ -5,8 +5,11 @@
 #include <d3dcompiler.h>
 #include <directx/d3dx12.h>
 
+#include "Log.h"
+
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen.ui"); }
 
 // Inline shader source — compiled at runtime with D3DCompile
 static const char* s_vsSource = R"(
@@ -48,7 +51,7 @@ void UICompositor::SetRealSwapChain(IDXGISwapChain4* a_swapChain, ID3D12CommandQ
 	backbufferFormat = desc.Format;
 	backbufferCount = desc.BufferCount;
 
-	REX::INFO("[DLSSG-UI] Real swap chain set: {:#x}, queue={:#x}, format={}, {}x{}, {} buffers",
+	L->info("Real swap chain set: {:#x}, queue={:#x}, format={}, {}x{}, {} buffers",
 		(uintptr_t)a_swapChain, (uintptr_t)a_queue,
 		(int)backbufferFormat, desc.Width, desc.Height, backbufferCount);
 }
@@ -56,11 +59,11 @@ void UICompositor::SetRealSwapChain(IDXGISwapChain4* a_swapChain, ID3D12CommandQ
 void UICompositor::InitResources()
 {
 	if (!device || !commandQueue) {
-		REX::ERROR("[DLSSG-UI] InitResources: no device or command queue");
+		L->error("InitResources: no device or command queue");
 		return;
 	}
 
-	REX::INFO("[DLSSG-UI] Initializing D3D12 UI compositor resources");
+	L->info("Initializing D3D12 UI compositor resources");
 
 	// Compile shaders
 	ID3DBlob* vsBlob = nullptr;
@@ -70,7 +73,7 @@ void UICompositor::InitResources()
 	HRESULT hr = D3DCompile(s_vsSource, strlen(s_vsSource), "UICompositeVS", nullptr, nullptr,
 		"mainVS", "vs_5_1", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &vsBlob, &errorBlob);
 	if (FAILED(hr)) {
-		REX::ERROR("[DLSSG-UI] VS compile failed: {}", errorBlob ? (char*)errorBlob->GetBufferPointer() : "unknown");
+		L->error("VS compile failed: {}", errorBlob ? (char*)errorBlob->GetBufferPointer() : "unknown");
 		if (errorBlob) errorBlob->Release();
 		return;
 	}
@@ -78,13 +81,13 @@ void UICompositor::InitResources()
 	hr = D3DCompile(s_psSource, strlen(s_psSource), "UICompositePS", nullptr, nullptr,
 		"mainPS", "ps_5_1", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &psBlob, &errorBlob);
 	if (FAILED(hr)) {
-		REX::ERROR("[DLSSG-UI] PS compile failed: {}", errorBlob ? (char*)errorBlob->GetBufferPointer() : "unknown");
+		L->error("PS compile failed: {}", errorBlob ? (char*)errorBlob->GetBufferPointer() : "unknown");
 		if (errorBlob) errorBlob->Release();
 		vsBlob->Release();
 		return;
 	}
 
-	REX::INFO("[DLSSG-UI] Shaders compiled (VS={} bytes, PS={} bytes)", vsBlob->GetBufferSize(), psBlob->GetBufferSize());
+	L->info("Shaders compiled (VS={} bytes, PS={} bytes)", vsBlob->GetBufferSize(), psBlob->GetBufferSize());
 
 	// Root signature: 1 descriptor table with 1 SRV
 	D3D12_DESCRIPTOR_RANGE1 range{};
@@ -112,7 +115,7 @@ void UICompositor::InitResources()
 	ID3DBlob* sigBlob = nullptr;
 	hr = D3D12SerializeVersionedRootSignature(&rsDesc, &sigBlob, &errorBlob);
 	if (FAILED(hr)) {
-		REX::ERROR("[DLSSG-UI] Root signature serialize failed: {:#x}", (uint32_t)hr);
+		L->error("Root signature serialize failed: {:#x}", (uint32_t)hr);
 		vsBlob->Release(); psBlob->Release();
 		return;
 	}
@@ -121,7 +124,7 @@ void UICompositor::InitResources()
 		IID_PPV_ARGS(rootSignature.put()));
 	sigBlob->Release();
 	if (FAILED(hr)) {
-		REX::ERROR("[DLSSG-UI] Root signature create failed: {:#x}", (uint32_t)hr);
+		L->error("Root signature create failed: {:#x}", (uint32_t)hr);
 		vsBlob->Release(); psBlob->Release();
 		return;
 	}
@@ -162,11 +165,11 @@ void UICompositor::InitResources()
 	vsBlob->Release();
 	psBlob->Release();
 	if (FAILED(hr)) {
-		REX::ERROR("[DLSSG-UI] PSO create failed: {:#x}", (uint32_t)hr);
+		L->error("PSO create failed: {:#x}", (uint32_t)hr);
 		return;
 	}
 
-	REX::INFO("[DLSSG-UI] PSO created successfully");
+	L->info("PSO created successfully");
 
 	// SRV descriptor heap (GPU-visible)
 	D3D12_DESCRIPTOR_HEAP_DESC srvHeapDesc{};
@@ -197,7 +200,7 @@ void UICompositor::InitResources()
 	fenceEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
 
 	initialized = true;
-	REX::INFO("[DLSSG-UI] Compositor fully initialized");
+	L->info("Compositor fully initialized");
 }
 
 void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
@@ -232,7 +235,7 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 	if (!uiResource) {
 		backbuffer->Release();
 		static int warnCount = 0;
-		if (++warnCount <= 3) REX::WARN("[DLSSG-UI] CompositeUI: no UIColorAlpha resource (frame idx={})", uiIdx);
+		if (++warnCount <= 3) L->warn("CompositeUI: no UIColorAlpha resource (frame idx={})", uiIdx);
 		return;
 	}
 
@@ -317,7 +320,7 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 	static int compCount = 0;
 	compCount++;
 	if (compCount <= 5) {
-		REX::INFO("[DLSSG-UI] CompositeUI executed (frame {}): backbuffer idx={}, uiIdx={}, bb={}x{}",
+		L->info("CompositeUI executed (frame {}): backbuffer idx={}, uiIdx={}, bb={}x{}",
 			compCount, bufIdx, uiIdx, (uint32_t)bbDesc.Width, (uint32_t)bbDesc.Height);
 	}
 }

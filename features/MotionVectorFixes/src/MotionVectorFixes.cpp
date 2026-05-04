@@ -2,8 +2,12 @@
 
 #include <unordered_map>
 
+#include "Log.h"
+
 namespace cs::features
 {
+	namespace { auto* L = cs::log::Get("cs.feature.mv"); }
+
 	// CommonLibF4 doesn't expose the flags field needed for the LOD/landscape check
 	// in BSLightingShaderProperty::GetRenderPasses. Defined locally until the header
 	// lands in Dear-Modding-FO4/commonlibf4.
@@ -175,13 +179,13 @@ namespace cs::features
 		// Fix vanilla motion vectors not updating in menus or when time is frozen
 		stl::write_vfunc<43, BSLightingShaderProperty_GetRenderPasses>(RE::VTABLE::BSLightingShaderProperty[0]);
 
-		REX::INFO("[MV] Installed hooks");
+		L->info("Installed hooks");
 	}
 
 	void MotionVectorFixes::OnDataLoaded()
 	{
 		RE::UI::GetSingleton()->RegisterSink<RE::MenuOpenCloseEvent>(MenuOpenCloseHandler::GetSingleton());
-		REX::INFO("[MV] Registered menu event listener");
+		L->info("Registered menu event listener");
 	}
 
 	namespace

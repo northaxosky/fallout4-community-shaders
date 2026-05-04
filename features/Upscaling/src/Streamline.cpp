@@ -2,10 +2,12 @@
 
 #include <magic_enum/magic_enum.hpp>
 
+#include "Log.h"
 #include "Util.h"
 
 namespace cs::features::Upscaling
 {
+	namespace { auto* L = cs::log::Get("cs.feature.upscaling.streamline"); }
 
 void Streamline::LoadInterposer()
 {
@@ -13,22 +15,22 @@ void Streamline::LoadInterposer()
 	interposer = GetModuleHandleW(L"sl.interposer.dll");
 	if (interposer) {
 		alreadyInitialized = true;
-		REX::INFO("[Streamline] Interposer already loaded by FrameGeneration plugin at {0:p}", static_cast<void*>(interposer));
+		L->info("Interposer already loaded by FrameGeneration plugin at {0:p}", static_cast<void*>(interposer));
 		return;
 	}
 
 	interposer = LoadLibraryW(L"Data/F4SE/Plugins/Streamline/sl.interposer.dll");
 	if (interposer == nullptr) {
 		DWORD errorCode = GetLastError();
-		REX::INFO("[Streamline] Failed to load interposer: Error Code {0:x}", errorCode);
+		L->info("Failed to load interposer: Error Code {0:x}", errorCode);
 	} else {
-		REX::INFO("[Streamline] Interposer loaded at address: {0:p}", static_cast<void*>(interposer));
+		L->info("Interposer loaded at address: {0:p}", static_cast<void*>(interposer));
 	}
 }
 
 void Streamline::Initialize()
 {
-	REX::INFO("[Streamline] Initializing Streamline");
+	L->info("Initializing Streamline");
 
 	sl::Preferences pref;
 
@@ -70,7 +72,7 @@ void Streamline::Initialize()
 	bool missingCritical = false;
 	auto check = [&](const void* ptr, const char* name) {
 		if (!ptr) {
-			REX::ERROR("[SL] Failed to resolve: {}", name);
+			L->error("Failed to resolve: {}", name);
 			missingCritical = true;
 		}
 	};
@@ -90,19 +92,19 @@ void Streamline::Initialize()
 	}
 
 	if (alreadyInitialized) {
-		REX::INFO("[Streamline] Skipping slInit — already initialized by FrameGeneration plugin");
+		L->info("Skipping slInit — already initialized by FrameGeneration plugin");
 		initialized = true;
 	} else if (SL_FAILED(res, slInit(pref, sl::kSDKVersion))) {
-		REX::CRITICAL("[Streamline] Failed to initialize Streamline");
+		L->critical("Failed to initialize Streamline");
 	} else {
 		initialized = true;
-		REX::INFO("[Streamline] Successfully initialized Streamline");
+		L->info("Successfully initialized Streamline");
 	}
 }
 
 void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 {
-	REX::INFO("[Streamline] Checking features");
+	L->info("Checking features");
 	DXGI_ADAPTER_DESC adapterDesc;
 	a_adapter->GetDesc(&adapterDesc);
 
@@ -112,19 +114,19 @@ void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 
 	slIsFeatureLoaded(sl::kFeatureDLSS, featureDLSS);
 	if (featureDLSS) {
-		REX::INFO("[Streamline] DLSS feature is loaded");
+		L->info("DLSS feature is loaded");
 		featureDLSS = slIsFeatureSupported(sl::kFeatureDLSS, adapterInfo) == sl::Result::eOk;
 	}
 	else {
-		REX::INFO("[Streamline] DLSS feature is not loaded");
+		L->info("DLSS feature is not loaded");
 		sl::FeatureRequirements featureRequirements;
 		sl::Result result = slGetFeatureRequirements(sl::kFeatureDLSS, featureRequirements);
 		if (result != sl::Result::eOk) {
-			REX::INFO("[Streamline] DLSS feature failed to load due to: {}", magic_enum::enum_name(result));
+			L->info("DLSS feature failed to load due to: {}", magic_enum::enum_name(result));
 		}
 	}
 
-	REX::INFO("[Streamline] DLSS {} available", featureDLSS ? "is" : "is not");
+	L->info("DLSS {} available", featureDLSS ? "is" : "is not");
 }
 
 void Streamline::PostDevice()
@@ -173,7 +175,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 		dlssOptions.colorBuffersHDR = sl::Boolean::eFalse;
 
 		if (SL_FAILED(result, slDLSSSetOptions(viewport, dlssOptions))) {
-			REX::CRITICAL("[Streamline] Could not enable DLSS");
+			L->critical("Could not enable DLSS");
 		}
 	}
 
@@ -197,7 +199,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
-		REX::INFO("[SL] First DLSS dispatch: renderSize={}x{}, outputSize={}x{}, mode={}, jitter=({}, {})",
+		L->info("First DLSS dispatch: renderSize={}x{}, outputSize={}x{}, mode={}, jitter=({}, {})",
 			(uint)a_renderSize.x, (uint)a_renderSize.y,
 			gameViewport->screenWidth, gameViewport->screenHeight,
 			a_qualityMode, a_jitter.x, a_jitter.y);
@@ -210,7 +212,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 
 	static bool evalLogged = false;
 	if (!evalLogged) {
-		REX::INFO("[SL] slEvaluateFeature result: {}", (int)evalResult);
+		L->info("slEvaluateFeature result: {}", (int)evalResult);
 		evalLogged = true;
 	}
 }
@@ -246,11 +248,11 @@ void Streamline::UpdateConstants(float2 a_jitter)
 	slConstants.motionVectorsJittered = sl::Boolean::eFalse;
 
 	if (SL_FAILED(res, slGetNewFrameToken(frameToken, nullptr))) {
-		REX::ERROR("[Streamline] Could not get frame token");
+		L->error("Could not get frame token");
 	}
 
 	if (SL_FAILED(res, slSetConstants(slConstants, *frameToken, viewport))) {
-		REX::ERROR("[Streamline] Could not set constants");
+		L->error("Could not set constants");
 	}
 }
 

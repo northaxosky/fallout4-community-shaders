@@ -4,6 +4,7 @@
 #include <dxgi1_6.h>
 
 #include "FidelityFX.h"
+#include "Log.h"
 #include "Streamline.h"
 #include "UICompositor.h"
 #include "Upscaling.h"
@@ -11,6 +12,7 @@
 
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx12"); }
 	extern bool enbLoaded;
 
 
@@ -29,7 +31,7 @@ namespace cs::features::FrameGeneration
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
 	DX::ThrowIfFailed(D3D12CreateDevice(a_adapter, D3D_FEATURE_LEVEL_12_0, IID_PPV_ARGS(&d3d12Device)));
-	REX::INFO("[FG] D3D12 device created");
+	L->info("D3D12 device created");
 }
 
 void DX12SwapChain::CreateD3D12CommandQueues()
@@ -47,7 +49,7 @@ void DX12SwapChain::CreateD3D12CommandQueues()
 		DX::ThrowIfFailed(d3d12Device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, commandAllocators[i].get(), nullptr, IID_PPV_ARGS(&commandLists[i])));
 		commandLists[i]->Close();
 	}
-	REX::INFO("[FG] D3D12 command queues created");
+	L->info("D3D12 command queues created");
 }
 
 void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
@@ -76,7 +78,7 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
 	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
 		if (!CreateSwapChainXeSS(a_dxgiFactory, a_swapChainDesc)) {
-			REX::WARN("[FG] XeSS-FG swap chain failed, falling back to FSR3");
+			L->warn("XeSS-FG swap chain failed, falling back to FSR3");
 			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
 			CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 		}
@@ -94,7 +96,7 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 void DX12SwapChain::CreateSwapChainFSR3(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
 {
-	REX::INFO("[FG] Creating FSR3 swap chain via FFX");
+	L->info("Creating FSR3 swap chain via FFX");
 
 	ffx::CreateContextDescFrameGenerationSwapChainForHwndDX12 ffxSwapChainDesc{};
 	ffxSwapChainDesc.desc = &swapChainDesc;
@@ -107,16 +109,16 @@ void DX12SwapChain::CreateSwapChainFSR3(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_
 	auto fidelityFX = FidelityFX::GetSingleton();
 
 	if (ffx::CreateContext(fidelityFX->swapChainContext, nullptr, ffxSwapChainDesc) != ffx::ReturnCode::Ok) {
-		REX::CRITICAL("[FidelityFX] Failed to create swap chain context!");
+		L->critical("Failed to create swap chain context!");
 	}
 
 	fidelityFX->SetupFrameGeneration();
-	REX::INFO("[FG] FSR3 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+	L->info("FSR3 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
 }
 
 void DX12SwapChain::CreateSwapChainDLSSG(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
 {
-	REX::INFO("[DLSSG] Creating standard D3D12 swap chain for Streamline interception");
+	L->info("Creating standard D3D12 swap chain for Streamline interception");
 
 	winrt::com_ptr<IDXGISwapChain1> swapChain1;
 	DX::ThrowIfFailed(a_dxgiFactory->CreateSwapChainForHwnd(
@@ -130,19 +132,19 @@ void DX12SwapChain::CreateSwapChainDLSSG(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP
 
 	DX::ThrowIfFailed(swapChain1->QueryInterface(IID_PPV_ARGS(&swapChain)));
 
-	REX::INFO("[DLSSG] D3D12 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+	L->info("D3D12 swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
 }
 
 bool DX12SwapChain::CreateSwapChainXeSS(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAIN_DESC a_swapChainDesc)
 {
-	REX::INFO("[XeSS-FG] Creating XeSS-FG proxy swap chain");
+	L->info("Creating XeSS-FG proxy swap chain");
 
 	auto xess = XeSSFG::GetSingleton();
 	if (!xess->InitSwapChain(commandQueue.get(), a_dxgiFactory, swapChainDesc, a_swapChainDesc.OutputWindow, &swapChain)) {
 		return false;
 	}
 
-	REX::INFO("[XeSS-FG] Swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
+	L->info("Swap chain created: {}x{}", swapChainDesc.Width, swapChainDesc.Height);
 	return true;
 }
 
@@ -229,7 +231,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 		static bool loggedOnce = false;
 		if (!loggedOnce) {
-			REX::INFO("[FG] DLSS-G: presenting HUDLess to swap chain, UI composited via D3D12 compositor");
+			L->info("DLSS-G: presenting HUDLess to swap chain, UI composited via D3D12 compositor");
 			loggedOnce = true;
 		}
 	}

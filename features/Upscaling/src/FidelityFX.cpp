@@ -1,10 +1,12 @@
 #include "FidelityFX.h"
 
+#include "Log.h"
 #include "Upscaling.h"
 #include "Util.h"
 
 namespace cs::features::Upscaling
 {
+	namespace { auto* L = cs::log::Get("cs.feature.upscaling.fsr"); }
 
 FfxResource ffxGetResource(ID3D11Resource* dx11Resource,
 	[[maybe_unused]] wchar_t const* ffxResName,
@@ -36,14 +38,14 @@ void FidelityFX::CreateFSRResources()
 	size_t scratchBufferSize = ffxGetScratchMemorySizeDX11(FFX_FSR3UPSCALER_CONTEXT_COUNT);
 	fsrScratchBuffer = calloc(scratchBufferSize, 1);
 	if (!fsrScratchBuffer) {
-		REX::CRITICAL("[FidelityFX] Failed to allocate FSR3 scratch buffer memory!");
+		L->critical("Failed to allocate FSR3 scratch buffer memory!");
 		return;
 	}
 	memset(fsrScratchBuffer, 0, scratchBufferSize);
 
 	FfxInterface fsrInterface{};
 	if (ffxGetInterfaceDX11(&fsrInterface, fsrDevice, fsrScratchBuffer, scratchBufferSize, FFX_FSR3UPSCALER_CONTEXT_COUNT) != FFX_OK) {
-		REX::CRITICAL("[FidelityFX] Failed to initialize FSR3 backend interface!");
+		L->critical("Failed to initialize FSR3 backend interface!");
 		free(fsrScratchBuffer);
 		fsrScratchBuffer = nullptr;
 		return;
@@ -72,13 +74,13 @@ void FidelityFX::CreateFSRResources()
 	reactiveMaskTexture = std::make_unique<Texture2D>(texDesc);
 
 	if (ffxFsr3ContextCreate(&fsrContext, &contextDescription) != FFX_OK) {
-		REX::CRITICAL("[FidelityFX] Failed to initialize FSR3 context!");
+		L->critical("Failed to initialize FSR3 context!");
 		free(fsrScratchBuffer);
 		fsrScratchBuffer = nullptr;
 		return;
 	}
 
-	REX::INFO("[FSR] FSR3 context created: maxRender={}x{}, maxUpscale={}x{}, display={}x{}",
+	L->info("FSR3 context created: maxRender={}x{}, maxUpscale={}x{}, display={}x{}",
 		contextDescription.maxRenderSize.width, contextDescription.maxRenderSize.height,
 		contextDescription.maxUpscaleSize.width, contextDescription.maxUpscaleSize.height,
 		contextDescription.displaySize.width, contextDescription.displaySize.height);
@@ -87,7 +89,7 @@ void FidelityFX::CreateFSRResources()
 void FidelityFX::DestroyFSRResources()
 {
 	if (ffxFsr3ContextDestroy(&fsrContext) != FFX_OK)
-		REX::CRITICAL("[FidelityFX] Failed to destroy FSR3 context!");
+		L->critical("Failed to destroy FSR3 context!");
 
 	free(fsrScratchBuffer);
 	fsrScratchBuffer = nullptr;
@@ -141,7 +143,7 @@ void FidelityFX::GenerateReactiveMask()
 	dispatchParameters.flags = FFX_FSR3UPSCALER_AUTOREACTIVEFLAGS_USE_COMPONENTS_MAX;
 
 	if (ffxFsr3ContextGenerateReactiveMask(&fsrContext, &dispatchParameters) != FFX_OK)
-		REX::CRITICAL("[FidelityFX] Failed to dispatch reactive mask!");
+		L->critical("Failed to dispatch reactive mask!");
 }
 
 void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize, float a_sharpness)
@@ -208,7 +210,7 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 
 		static bool loggedOnce = false;
 		if (!loggedOnce) {
-			REX::INFO("[FSR] First FSR3 dispatch: renderSize={}x{}, jitter=({}, {}), sharpness={}, deltaTime={:.3f}ms, cameraNear={}, cameraFar={}",
+			L->info("First FSR3 dispatch: renderSize={}x{}, jitter=({}, {}), sharpness={}, deltaTime={:.3f}ms, cameraNear={}, cameraFar={}",
 				dispatchParameters.renderSize.width, dispatchParameters.renderSize.height,
 				dispatchParameters.jitterOffset.x, dispatchParameters.jitterOffset.y,
 				dispatchParameters.sharpness, dispatchParameters.frameTimeDelta,
@@ -217,7 +219,7 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 		}
 
 		if (ffxFsr3ContextDispatchUpscale(&fsrContext, &dispatchParameters) != FFX_OK)
-			REX::CRITICAL("[FidelityFX] Failed to dispatch upscaling!");
+			L->critical("Failed to dispatch upscaling!");
 	}
 }
 

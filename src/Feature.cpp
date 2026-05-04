@@ -1,5 +1,9 @@
 #include "Feature.h"
 
+#include "Log.h"
+
+namespace { auto* L = cs::log::Get("cs"); }
+
 namespace cs
 {
 	FeatureManager& FeatureManager::Get()
@@ -16,7 +20,7 @@ namespace cs
 	void FeatureManager::LoadAll()
 	{
 		for (auto* feature : _features) {
-			REX::INFO("[CS] Loading feature: {}", feature->GetName());
+			L->info("Loading feature: {}", feature->GetName());
 			feature->Load();
 		}
 	}

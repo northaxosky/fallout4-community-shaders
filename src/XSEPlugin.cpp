@@ -1,4 +1,7 @@
 #include "Feature.h"
+#include "Log.h"
+
+namespace { auto* L = cs::log::Get("cs"); }
 
 extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface*, F4SE::PluginInfo* a_info)
 {
@@ -44,7 +47,9 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	initInfo.trampolineSize = 1 << 10;
 	F4SE::Init(a_f4se, initInfo);
 
-	REX::INFO("[CS] FO4CommunityShaders v{}.{}.{} loaded",
+	cs::log::AttachToDefaultLogger();
+
+	L->info("FO4CommunityShaders v{}.{}.{} loaded",
 		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
 
 	cs::FeatureManager::Get().LoadAll();

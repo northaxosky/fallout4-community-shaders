@@ -1,22 +1,25 @@
 #include "XeSSFG.h"
 #include "Upscaling.h"
 
+#include "Log.h"
+
 #define LOAD_FN(module, name) pfn_##name = reinterpret_cast<decltype(&name)>(GetProcAddress(module, #name))
 
 namespace cs::features::FrameGeneration
 {
+	namespace { auto* L = cs::log::Get("cs.feature.framegen.xess"); }
 
 bool XeSSFG::LoadLibraries()
 {
 	fgModule = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\XeSS\\libxess_fg.dll");
 	if (!fgModule) {
-		REX::WARN("[XeSS-FG] Failed to load libxess_fg.dll: {:#x}", GetLastError());
+		L->warn("Failed to load libxess_fg.dll: {:#x}", GetLastError());
 		return false;
 	}
 
 	xellModule = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\XeSS\\libxell.dll");
 	if (!xellModule) {
-		REX::WARN("[XeSS-FG] Failed to load libxell.dll: {:#x}", GetLastError());
+		L->warn("Failed to load libxell.dll: {:#x}", GetLastError());
 		FreeLibrary(fgModule);
 		fgModule = nullptr;
 		return false;
@@ -44,11 +47,11 @@ bool XeSSFG::LoadLibraries()
 	LOAD_FN(fgModule, xefgSwapChainDestroy);
 
 	if (!pfn_xellD3D12CreateContext || !pfn_xefgSwapChainD3D12CreateContext) {
-		REX::WARN("[XeSS-FG] Failed to resolve required function pointers");
+		L->warn("Failed to resolve required function pointers");
 		return false;
 	}
 
-	REX::INFO("[XeSS-FG] Libraries loaded, functions resolved");
+	L->info("Libraries loaded, functions resolved");
 	return true;
 }
 
@@ -60,25 +63,25 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 
 	auto xellResult = pfn_xellD3D12CreateContext(a_device, &xellCtx);
 	if (xellResult != XELL_RESULT_SUCCESS) {
-		REX::WARN("[XeSS-FG] XeLL context creation failed: {}", (int)xellResult);
+		L->warn("XeLL context creation failed: {}", (int)xellResult);
 		return false;
 	}
-	REX::INFO("[XeSS-FG] XeLL context created");
+	L->info("XeLL context created");
 
 	auto xefgResult = pfn_xefgSwapChainD3D12CreateContext(a_device, &xefgCtx);
 	if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-		REX::WARN("[XeSS-FG] Context creation failed: {}", (int)xefgResult);
+		L->warn("Context creation failed: {}", (int)xefgResult);
 		pfn_xellDestroyContext(xellCtx);
 		xellCtx = nullptr;
 		return false;
 	}
-	REX::INFO("[XeSS-FG] Context created");
+	L->info("Context created");
 
 	// Wire XeLL to XeSS-FG for latency reduction
 	if (pfn_xefgSwapChainSetLatencyReduction) {
 		xefgResult = pfn_xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
 		if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-			REX::WARN("[XeSS-FG] Failed to set latency reduction: {}", (int)xefgResult);
+			L->warn("Failed to set latency reduction: {}", (int)xefgResult);
 		}
 	}
 
@@ -89,14 +92,14 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 			pfn_xefgSwapChainSetLoggingCallback(xefgCtx,
 				XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG,
 				[](const char* msg, xefg_swapchain_logging_level_t, void*) {
-					REX::INFO("[XeSS-INT] {}", msg);
+					cs::log::Get("cs.feature.framegen.xess.internal")->info("{}", msg);
 				}, nullptr);
 		}
 		if (pfn_xellSetLoggingCallback) {
 			pfn_xellSetLoggingCallback(xellCtx,
 				XELL_LOGGING_LEVEL_DEBUG,
 				[](const char* msg, xell_logging_level_t) {
-					REX::INFO("[XeLL-INT] {}", msg);
+					cs::log::Get("cs.feature.framegen.xess.internal")->info("{}", msg);
 				});
 		}
 	}
@@ -113,7 +116,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	if (pfn_xefgSwapChainGetProperties) {
 		xefg_swapchain_properties_t props{};
 		if (pfn_xefgSwapChainGetProperties(xefgCtx, &props) == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-			REX::INFO("[XeSS-FG] Max supported interpolations: {}", props.maxSupportedInterpolations);
+			L->info("Max supported interpolations: {}", props.maxSupportedInterpolations);
 		}
 	}
 
@@ -143,13 +146,13 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 		a_cmdQueue, (IDXGIFactory2*)a_factory, &initParams);
 
 	if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-		REX::WARN("[XeSS-FG] Swap chain init failed: {}", (int)result);
+		L->warn("Swap chain init failed: {}", (int)result);
 		return false;
 	}
 
 	result = pfn_xefgSwapChainD3D12GetSwapChainPtr(xefgCtx, IID_PPV_ARGS(a_outSwapChain));
 	if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
-		REX::WARN("[XeSS-FG] Failed to get proxy swap chain: {}", (int)result);
+		L->warn("Failed to get proxy swap chain: {}", (int)result);
 		return false;
 	}
 
@@ -157,7 +160,7 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 	pfn_xefgSwapChainSetEnabled(xefgCtx, 1);
 
 	initialized = true;
-	REX::INFO("[XeSS-FG] Initialized and enabled");
+	L->info("Initialized and enabled");
 	return true;
 }
 

@@ -5,6 +5,9 @@
 #include <imgui_impl_win32.h>
 
 #include "Feature.h"
+#include "Log.h"
+
+namespace { auto* L = cs::log::Get("cs.menu"); }
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -43,7 +46,7 @@ namespace cs
 		HookWndProc();
 		TryHookMenuControls();
 
-		REX::INFO("[Menu] ImGui initialized on HWND {:#x}", reinterpret_cast<uintptr_t>(a_hwnd));
+		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<uintptr_t>(a_hwnd));
 	}
 
 	void Menu::HookPresentOn(IDXGISwapChain* a_chain)
@@ -57,7 +60,7 @@ namespace cs
 		*reinterpret_cast<uintptr_t*>(&_origPresent) =
 			Detours::X64::DetourClassVTable(*reinterpret_cast<uintptr_t*>(a_chain), &Menu::hkPresent, 8);
 
-		REX::INFO("[Menu] Present hooked on swap chain {:#x}", reinterpret_cast<uintptr_t>(a_chain));
+		L->info("Present hooked on swap chain {:#x}", reinterpret_cast<uintptr_t>(a_chain));
 	}
 
 	void Menu::InitImGui()
@@ -93,7 +96,7 @@ namespace cs
 			return;
 		stl::write_vfunc<0, hkMenuControlsPerformInputProcessing>(RE::VTABLE::MenuControls[0]);
 		_menuControlsHooked = true;
-		REX::INFO("[Menu] MenuControls input gate installed");
+		L->info("MenuControls input gate installed");
 	}
 
 	void Menu::EnsureBackbufferRTV()
@@ -145,6 +148,7 @@ namespace cs
 			return;
 
 		ImGui::GetIO().FontGlobalScale = _fontScale;
+		ImGui::GetIO().MouseDrawCursor = _open;
 
 		ImGui_ImplDX11_NewFrame();
 		ImGui_ImplWin32_NewFrame();
@@ -194,6 +198,30 @@ namespace cs
 				ImGui::SameLine();
 				if (ImGui::Button("Reset to 1x"))
 					_fontScale = 1.0f;
+
+				ImGui::SeparatorText("Logging");
+				static const char* kLevelNames[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };
+				static const spdlog::level::level_enum kLevels[] = {
+					spdlog::level::trace, spdlog::level::debug, spdlog::level::info,
+					spdlog::level::warn, spdlog::level::err, spdlog::level::critical, spdlog::level::off
+				};
+				if (_loggingLevelIdx < 0)
+					_loggingLevelIdx = 2;  // Info
+				if (ImGui::Combo("Global level", &_loggingLevelIdx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
+					cs::log::SetGlobalLevel(kLevels[_loggingLevelIdx]);
+				}
+				if (ImGui::TreeNode("Per-logger overrides")) {
+					_cachedLoggers = cs::log::ListLoggers();
+					for (const auto& name : _cachedLoggers) {
+						ImGui::PushID(name.c_str());
+						auto logger = spdlog::get(name);
+						int idx = logger ? static_cast<int>(logger->level()) : _loggingLevelIdx;
+						if (ImGui::Combo(name.c_str(), &idx, kLevelNames, IM_ARRAYSIZE(kLevelNames)))
+							cs::log::SetLevel(name.c_str(), kLevels[idx]);
+						ImGui::PopID();
+					}
+					ImGui::TreePop();
+				}
 			}
 
 			for (auto* feat : FeatureManager::Get().GetAll()) {

@@ -3,8 +3,11 @@
 #include <d3dcompiler.h>
 #include <winrt/base.h>
 
+#include "Log.h"
+
 namespace cs::features::Upscaling
 {
+	namespace { auto* L = cs::log::Get("cs.feature.upscaling.util"); }
 
 namespace Util
 {
@@ -34,15 +37,15 @@ namespace Util
 			return (char)c;
 		});
 		if (!std::filesystem::exists(FilePath)) {
-			REX::ERROR("Failed to compile shader; {} does not exist", str);
+			L->error("Failed to compile shader; {} does not exist", str);
 			return nullptr;
 		}
 		if (FAILED(D3DCompileFromFile(FilePath, macros.data(), D3D_COMPILE_STANDARD_FILE_INCLUDE, Program, ProgramType, flags, 0, shaderBlob.put(), shaderErrors.put()))) {
-			REX::WARN("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
+			L->warn("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
 			return nullptr;
 		}
 		if (shaderErrors)
-			REX::DEBUG("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
+			L->debug("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
 
 		if (!_stricmp(ProgramType, "ps_5_0")) {
 			ID3D11PixelShader* regShader;
