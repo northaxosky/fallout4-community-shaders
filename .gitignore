@@ -45,6 +45,7 @@ CLAUDE.md
 AGENTS.md
 GEMINI.md
 .github/copilot-instructions.md
+.agents/
 
 # OS
 .DS_Store
