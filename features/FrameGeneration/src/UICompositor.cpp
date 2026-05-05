@@ -4,8 +4,10 @@
 
 #include <d3dcompiler.h>
 #include <directx/d3dx12.h>
+#include <dxgi1_2.h>
 
 #include "Log.h"
+#include "UITextureIsolation.h"
 
 namespace cs::features::FrameGeneration
 {
@@ -229,13 +231,16 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 
 	if (!backbuffer) return;
 
-	// Get UIColorAlpha D3D12 resource (latched frame index)
+	// Prefer the engine-snapshot path; fall back to the colour-diff buffer if not yet shared.
 	UINT uiIdx = uiFrameIndex.load();
-	auto uiResource = upscaling->UIColorAlphaShared12[uiIdx].get();
+	ID3D12Resource* uiResource = GetOrOpenPrivateUIResource12();
+	const bool fromPrivate = (uiResource != nullptr);
+	if (!uiResource)
+		uiResource = upscaling->UIColorAlphaShared12[uiIdx].get();
 	if (!uiResource) {
 		backbuffer->Release();
 		static int warnCount = 0;
-		if (++warnCount <= 3) L->warn("CompositeUI: no UIColorAlpha resource (frame idx={})", uiIdx);
+		if (++warnCount <= 3) L->warn("CompositeUI: no UI resource (private and fallback both unavailable, frame idx={})", uiIdx);
 		return;
 	}
 
@@ -266,7 +271,9 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 
 	D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 	srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-	srvDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+	srvDesc.Format = fromPrivate
+		? cs::features::UITextureIsolation::Get()->GetFormat()
+		: DXGI_FORMAT_R8G8B8A8_UNORM;
 	srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
 	srvDesc.Texture2D.MipLevels = 1;
 	device->CreateShaderResourceView(uiResource, &srvDesc, srvCpu);
@@ -320,9 +327,83 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 	static int compCount = 0;
 	compCount++;
 	if (compCount <= 5) {
-		L->info("CompositeUI executed (frame {}): backbuffer idx={}, uiIdx={}, bb={}x{}",
-			compCount, bufIdx, uiIdx, (uint32_t)bbDesc.Width, (uint32_t)bbDesc.Height);
+		L->info("CompositeUI executed (frame {}): backbuffer idx={}, uiIdx={}, bb={}x{}, source={}",
+			compCount, bufIdx, uiIdx, (uint32_t)bbDesc.Width, (uint32_t)bbDesc.Height,
+			fromPrivate ? "private-snapshot" : "color-diff");
 	}
+}
+
+// Heap-pointer recycling can hand us the same ID3D11Texture2D address after a Reallocate, so cache by metadata too.
+static bool IsTypelessFormat(DXGI_FORMAT a_fmt) noexcept
+{
+	switch (a_fmt) {
+		case DXGI_FORMAT_R32G32B32A32_TYPELESS:
+		case DXGI_FORMAT_R16G16B16A16_TYPELESS:
+		case DXGI_FORMAT_R10G10B10A2_TYPELESS:
+		case DXGI_FORMAT_R8G8B8A8_TYPELESS:
+		case DXGI_FORMAT_B8G8R8A8_TYPELESS:
+		case DXGI_FORMAT_R16G16_TYPELESS:
+		case DXGI_FORMAT_R32_TYPELESS:
+		case DXGI_FORMAT_R24G8_TYPELESS:
+		case DXGI_FORMAT_R8G8_TYPELESS:
+		case DXGI_FORMAT_R16_TYPELESS:
+		case DXGI_FORMAT_R8_TYPELESS:
+			return true;
+		default:
+			return false;
+	}
+}
+
+ID3D12Resource* UICompositor::GetOrOpenPrivateUIResource12()
+{
+	if (!device)
+		return nullptr;
+
+	auto* feature  = cs::features::UITextureIsolation::Get();
+	auto* d3d11Tex = feature->GetD3D11Texture();
+	if (!d3d11Tex)
+		return nullptr;
+
+	const UINT       w   = feature->GetWidth();
+	const UINT       h   = feature->GetHeight();
+	const DXGI_FORMAT fmt = feature->GetFormat();
+	if (IsTypelessFormat(fmt))
+		return nullptr;
+
+	if (d3d11Tex == lastSeenUITexture && w == lastSeenWidth && h == lastSeenHeight && fmt == lastSeenFormat && privateUIResource12)
+		return privateUIResource12.get();
+
+	privateUIResource12 = nullptr;
+	lastSeenUITexture   = d3d11Tex;
+	lastSeenWidth       = w;
+	lastSeenHeight      = h;
+	lastSeenFormat      = fmt;
+
+	IDXGIResource1* dxgiRes = nullptr;
+	if (FAILED(d3d11Tex->QueryInterface(IID_PPV_ARGS(&dxgiRes))) || !dxgiRes)
+		return nullptr;
+
+	HANDLE sharedHandle = nullptr;
+	HRESULT hr = dxgiRes->CreateSharedHandle(
+		nullptr,
+		DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+		nullptr,
+		&sharedHandle);
+	dxgiRes->Release();
+	if (FAILED(hr) || !sharedHandle) {
+		L->warn("CreateSharedHandle on UITextureIsolation D3D11 texture failed: {:#x}", static_cast<uint32_t>(hr));
+		return nullptr;
+	}
+
+	hr = device->OpenSharedHandle(sharedHandle, IID_PPV_ARGS(privateUIResource12.put()));
+	CloseHandle(sharedHandle);
+	if (FAILED(hr)) {
+		L->warn("D3D12 OpenSharedHandle failed: {:#x}", static_cast<uint32_t>(hr));
+		return nullptr;
+	}
+
+	L->info("Private UI resource opened on D3D12 ({:#x})", reinterpret_cast<uintptr_t>(privateUIResource12.get()));
+	return privateUIResource12.get();
 }
 
 }

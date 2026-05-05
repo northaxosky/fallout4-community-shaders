@@ -83,7 +83,7 @@ namespace cs::features
 
 		D3D11_TEXTURE2D_DESC desc = a_engineDesc;
 		desc.BindFlags      = D3D11_BIND_SHADER_RESOURCE;
-		desc.MiscFlags      = 0;
+		desc.MiscFlags      = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 		desc.Usage          = D3D11_USAGE_DEFAULT;
 		desc.CPUAccessFlags = 0;
 
