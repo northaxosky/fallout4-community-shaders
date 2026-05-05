@@ -231,16 +231,14 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 
 	if (!backbuffer) return;
 
-	// Prefer the engine-snapshot path; fall back to the colour-diff buffer if not yet shared.
+	// Engine-snapshot path captures only kUI; ImGui, console, mouse cursor etc. live elsewhere, so the colour-diff buffer remains the correct DLSS-G source for now.
 	UINT uiIdx = uiFrameIndex.load();
-	ID3D12Resource* uiResource = GetOrOpenPrivateUIResource12();
-	const bool fromPrivate = (uiResource != nullptr);
-	if (!uiResource)
-		uiResource = upscaling->UIColorAlphaShared12[uiIdx].get();
+	ID3D12Resource* uiResource = upscaling->UIColorAlphaShared12[uiIdx].get();
+	const bool fromPrivate = false;
 	if (!uiResource) {
 		backbuffer->Release();
 		static int warnCount = 0;
-		if (++warnCount <= 3) L->warn("CompositeUI: no UI resource (private and fallback both unavailable, frame idx={})", uiIdx);
+		if (++warnCount <= 3) L->warn("CompositeUI: no UIColorAlpha resource (frame idx={})", uiIdx);
 		return;
 	}
 
