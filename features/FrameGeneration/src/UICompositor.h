@@ -21,10 +21,7 @@ public:
 	// Called from factory hook when real swap chain is created
 	void SetRealSwapChain(IDXGISwapChain4* a_swapChain, ID3D12CommandQueue* a_queue);
 
-	// Called from DX12SwapChain::Present before Streamline's Present
-	void SetUIFrameIndex(UINT a_index) { uiFrameIndex.store(a_index); }
-
-	// Called from real swap chain Present hook - composites UI onto backbuffer
+	// Called from real swap chain Present hook - currently a no-op since DLSS-G presents the full backbuffer.
 	void CompositeUI(IDXGISwapChain* a_swapChain);
 
 	// Lazy-opens a D3D12 view of UITextureIsolation's shared D3D11 texture; nullptr if unavailable.
@@ -63,7 +60,6 @@ private:
 	// State
 	bool initialized = false;
 	CRITICAL_SECTION initCS;
-	std::atomic<UINT> uiFrameIndex{ 0 };
 
 	winrt::com_ptr<ID3D12Resource> privateUIResource12;
 	void*                          lastSeenUITexture = nullptr;

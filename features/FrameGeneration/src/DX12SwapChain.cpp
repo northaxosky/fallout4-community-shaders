@@ -441,10 +441,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
-	// Latch UI frame index for the compositor before Streamline's Present
-	// The real Present hook needs to know which UIColorAlpha buffer was last written
-	if (isDLSSGFrame) UICompositor::GetSingleton()->SetUIFrameIndex(frameIndex);
-
 	// Bracket Present with markers
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_START, xessFrameId - 1);
