@@ -243,6 +243,7 @@ namespace cs
 
 	HRESULT WINAPI Menu::hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags)
 	{
+		cs::features::UITextureIsolation::Get()->OnPresent();
 		Menu::Get().Render();
 		return Menu::Get()._origPresent(a_chain, a_sync, a_flags);
 	}

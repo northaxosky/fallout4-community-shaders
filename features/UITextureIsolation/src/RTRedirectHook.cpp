@@ -18,10 +18,11 @@ namespace cs::features
 	static PFN_OMSetRenderTargets s_originalOMSetRenderTargets = nullptr;
 	static std::atomic<bool>      s_hookInstalled{ false };
 	static std::atomic<int>       s_hitCount{ 0 };
-	// Log first N for fast boot feedback, then every Mth so in-world hits also surface
-	// without flooding the log file at 60+ FPS.
-	static constexpr int          kLogFirst = 10;
-	static constexpr int          kLogEvery = 5000;
+	static std::atomic<bool>      s_uiActiveThisFrame{ false };
+
+	// Log first N at boot then every Mth for sampled in-world visibility.
+	static constexpr int kLogFirst = 10;
+	static constexpr int kLogEvery = 5000;
 
 	static void STDMETHODCALLTYPE hk_OMSetRenderTargets(
 		ID3D11DeviceContext* a_this,
@@ -33,6 +34,7 @@ namespace cs::features
 			auto* feature = UITextureIsolation::Get();
 			for (UINT i = 0; i < a_numViews && i < D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT; ++i) {
 				if (feature->MatchesEngineUI(a_rtvs[i])) {
+					s_uiActiveThisFrame.store(true, std::memory_order_release);
 					int hit = s_hitCount.fetch_add(1, std::memory_order_relaxed);
 					if (hit < kLogFirst || (hit % kLogEvery) == 0) {
 						L->info("kUI bind detected (hit {}, viewIdx={}, n={}, rtv={:#x})",
@@ -47,9 +49,6 @@ namespace cs::features
 
 	namespace UITextureIsolationDetail
 	{
-		// Install runs on the engine's render thread inside D3D11CreateDeviceAndSwapChain's
-		// hook, before any rendering commands are issued. D3D11 immediate-context calls are
-		// single-threaded by spec, so the install completes before the first hook fires.
 		void InstallOMSetRenderTargetsObserver(ID3D11DeviceContext* a_context)
 		{
 			bool expected = false;
@@ -64,6 +63,11 @@ namespace cs::features
 
 			L->info("OMSetRenderTargets observation hook installed (slot {}, original={:#x}, log first {} then every {}th)",
 				kSlot, reinterpret_cast<uintptr_t>(s_originalOMSetRenderTargets), kLogFirst, kLogEvery);
+		}
+
+		bool ConsumeUIActiveFlag()
+		{
+			return s_uiActiveThisFrame.exchange(false, std::memory_order_acquire);
 		}
 	}
 }
