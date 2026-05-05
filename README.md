@@ -9,8 +9,14 @@ Currently in early bootstrap. The first absorbed feature is **MotionVectorFixes*
 | Feature | Status | Description |
 |---------|--------|-------------|
 | MotionVectorFixes | Implemented | Fixes weapon ghosting, menu ghosting, animated objects, LOD motion vectors |
+| Upscaling | Implemented | DLSS / FSR3 / XeSS render-resolution scaling with mip-bias and dynamic-resolution support |
+| FrameGeneration | Implemented | DLSS-G / FSR3-FG / XeSS-FG frame interpolation via D3D11/D3D12 interop |
 
 More features coming as the port progresses.
+
+## Known issues
+
+- **DLSS-G UI ghosting.** DLSS-G interpolates the HUD as part of the scene, which produces mild UI ghosting during fast camera motion. FSR3 mode is unaffected. See `.local/findings/dlssg-flicker.md` for the investigation and current status.
 
 ## Requirements
 
