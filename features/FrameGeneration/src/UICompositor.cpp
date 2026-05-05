@@ -210,6 +210,7 @@ void UICompositor::CompositeUI(IDXGISwapChain* a_swapChain)
 	auto upscaling = Upscaling::GetSingleton();
 	if (!upscaling->d3d12Interop || !upscaling->setupBuffers) return;
 	if (upscaling->activeFrameGenType != Upscaling::FrameGenType::kDLSSG) return;
+	return; // FSR-like strategy: UI is already on the swap chain backbuffer; skip the redundant blit.
 
 	// Lazy init
 	if (!initialized) {

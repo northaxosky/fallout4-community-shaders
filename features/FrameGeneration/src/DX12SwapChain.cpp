@@ -239,32 +239,8 @@ HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 {
-	auto upscalingForUI = Upscaling::GetSingleton();
-
-	// For DLSS-G: generate UI extraction buffer, then present the HUDLess (clean scene)
-	// to the swap chain instead of the full frame. DLSS-G warps whatever is in the swap chain,
-	// so presenting HUDLess prevents UI from being warped. UIColorAndAlpha tells DLSS-G
-	// to composite UI on top of both real and interpolated frames.
-	if (upscalingForUI->activeFrameGenType == Upscaling::FrameGenType::kDLSSG &&
-		upscalingForUI->setupBuffers && upscalingForUI->imagespaceComplete)
-	{
-		upscalingForUI->GenerateUIBuffer();
-
-		// Copy HUDLess (clean scene, no UI) to the D3D12 swap chain - NOT the proxy backbuffer
-		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11,
-			upscalingForUI->HUDLessBufferShared[frameIndex]->resource.get());
-
-		static bool loggedOnce = false;
-		if (!loggedOnce) {
-			L->info("DLSS-G: presenting HUDLess to swap chain, UI composited via D3D12 compositor");
-			loggedOnce = true;
-		}
-	}
-	else
-	{
-		// FSR3 / XeSS / fallback: copy proxy backbuffer (full frame with UI) as before.
-		d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
-	}
+	// FSR-like strategy for all framegen modes: present the full proxy backbuffer (scene + UI) and let DLSS-G/FFX warp the entire image as one.
+	d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
 
 	// Wait for D3D11 to finish
 	DX::ThrowIfFailed(d3d11Context->Signal(d3d11Fence.get(), fenceValue));
@@ -358,12 +334,13 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		camera.posY = camState.posAdjust.y;
 		camera.posZ = camState.posAdjust.z;
 
+		// FSR-like: full image is on the swap chain, so don't separately tag UI for DLSS-G to recomposite.
 		dlssg->Present(
 			commandLists[frameIndex].get(),
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get(),
-			upscaling->UIColorAlphaShared12[frameIndex].get(),
+			nullptr,
 			screenSize, jitter,
 			cameraNear, cameraFar, camera);
 
