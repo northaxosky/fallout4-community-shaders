@@ -48,6 +48,7 @@ namespace cs::features
 
 	void UITextureIsolation::OnPresent()
 	{
+		// CopyResource must run on the engine's single immediate context so DX12SwapChain's downstream fence signal captures it.
 		if (!UITextureIsolationDetail::ConsumeUIActiveFlag())
 			return;
 		if (!_device || !_context)

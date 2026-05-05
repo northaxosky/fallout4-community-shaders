@@ -358,12 +358,15 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		camera.posY = camState.posAdjust.y;
 		camera.posZ = camState.posAdjust.z;
 
+		// Snapshot's D3D11 CopyResource was queued earlier on the engine's immediate context; the d3d11Fence signal above captures it before this command list executes.
+		ID3D12Resource* uiArg = UICompositor::GetSingleton()->GetOrOpenPrivateUIResource12();
+		if (!uiArg) uiArg = upscaling->UIColorAlphaShared12[frameIndex].get();
 		dlssg->Present(
 			commandLists[frameIndex].get(),
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get(),
-			upscaling->UIColorAlphaShared12[frameIndex].get(),
+			uiArg,
 			screenSize, jitter,
 			cameraNear, cameraFar, camera);
 

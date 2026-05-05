@@ -27,14 +27,14 @@ public:
 	// Called from real swap chain Present hook - composites UI onto backbuffer
 	void CompositeUI(IDXGISwapChain* a_swapChain);
 
+	// Lazy-opens a D3D12 view of UITextureIsolation's shared D3D11 texture; nullptr if unavailable.
+	ID3D12Resource* GetOrOpenPrivateUIResource12();
+
 private:
 	UICompositor();
 	~UICompositor();
 
 	void InitResources();
-
-	// Lazy-opens a D3D12 view of UITextureIsolation's shared D3D11 texture; nullptr if unavailable.
-	ID3D12Resource* GetOrOpenPrivateUIResource12();
 
 	// Real swap chain reference
 	IDXGISwapChain4* realSwapChain = nullptr;
