@@ -7,7 +7,6 @@
 #include "FidelityFX.h"
 #include "Log.h"
 #include "Streamline.h"
-#include "UICompositor.h"
 #include "Upscaling.h"
 #include "XeSSFG.h"
 
