@@ -6,6 +6,7 @@
 
 #include "Feature.h"
 #include "Log.h"
+#include "UITextureIsolation.h"
 
 namespace { auto* L = cs::log::Get("cs.menu"); }
 
@@ -45,6 +46,8 @@ namespace cs
 		InitImGui();
 		HookWndProc();
 		TryHookMenuControls();
+
+		cs::features::UITextureIsolation::Get()->OnD3D11Ready(a_device, a_context);
 
 		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<uintptr_t>(a_hwnd));
 	}

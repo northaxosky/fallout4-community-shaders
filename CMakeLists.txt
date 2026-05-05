@@ -65,3 +65,4 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 register_feature(MotionVectorFixes)
 register_feature(Upscaling)
 register_feature(FrameGeneration)
+register_feature(UITextureIsolation)
