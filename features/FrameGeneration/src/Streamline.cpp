@@ -124,6 +124,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	sl::DLSSGOptions options{};
 	options.mode = sl::DLSSGMode::eOn;
 	options.numFramesToGenerate = requestedFrames;
+	options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
 
 	auto result = slDLSSGSetOptions(viewport, options);
 	if (result != sl::Result::eOk) {
@@ -159,6 +160,7 @@ void StreamlineFG::SetEnabled(bool a_enabled)
 	sl::DLSSGOptions options{};
 	options.mode = a_enabled ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
 	options.numFramesToGenerate = configuredFrameCount;
+	options.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
 	slDLSSGSetOptions(viewport, options);
 }
 
