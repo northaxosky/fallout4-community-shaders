@@ -22,6 +22,7 @@ public:
 		std::string_view GetName() const override { return "FrameGeneration"; }
 		void Load() override;
 		void OnPostPostLoad() override;
+		void DrawSettings() override;
 
 	struct Settings
 	{
@@ -60,6 +61,7 @@ public:
 	bool imagespaceComplete = false;
 
 	void LoadSettings();
+	void SaveSettings();
 	void ReloadSettingsIfNeeded();
 
 	void CreateFrameGenerationResources();

@@ -13,5 +13,6 @@ namespace cs::features
 
 		void Load() override;
 		void OnDataLoaded() override;
+		void DrawSettings() override;
 	};
 }

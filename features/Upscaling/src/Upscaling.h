@@ -46,6 +46,7 @@ public:
 		std::string_view GetName() const override { return "Upscaling"; }
 		void Load() override;
 		void OnDataLoaded() override;
+		void DrawSettings() override;
 
 	/**
 	 * @brief Install all game engine hooks required for upscaling
@@ -89,6 +90,7 @@ public:
 	 * Reads Data/F4SE/Plugins/FO4CommunityShaders/Upscaling.ini and updates the settings struct
 	 */
 	void LoadSettings();
+	void SaveSettings();
 
 	/**
 	 * @brief Determine which upscaling method should be used

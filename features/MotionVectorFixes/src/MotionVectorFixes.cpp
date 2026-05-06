@@ -2,6 +2,8 @@
 
 #include <unordered_map>
 
+#include <imgui.h>
+
 #include "Log.h"
 
 namespace cs::features
@@ -184,6 +186,13 @@ namespace cs::features
 	{
 		RE::UI::GetSingleton()->RegisterSink<RE::MenuOpenCloseEvent>(MenuOpenCloseHandler::GetSingleton());
 		L->info("Registered menu event listener");
+	}
+
+	void MotionVectorFixes::DrawSettings()
+	{
+		ImGui::TextUnformatted("Active. No user-tunable options.");
+		ImGui::TextDisabled("Fixes weapon-idle motion vectors, animated-object previousWorld,");
+		ImGui::TextDisabled("and motion vectors during menus / time freeze.");
 	}
 
 	namespace

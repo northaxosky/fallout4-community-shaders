@@ -1,5 +1,7 @@
 #include "Upscaling.h"
 
+#include <imgui.h>
+
 #include <algorithm>
 #include <SimpleIni.h>
 
@@ -387,6 +389,53 @@ void Upscaling::LoadSettings()
 
 	L->info("Loaded: upscaleMethod={}, qualityMode={}, sharpness={:.2f}",
 		settings.upscaleMethodPreference, settings.qualityMode, settings.sharpness);
+}
+
+void Upscaling::SaveSettings()
+{
+	CSimpleIniA ini;
+	ini.SetUnicode();
+	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini");
+
+	ini.SetLongValue("Settings", "iUpscaleMethodPreference", settings.upscaleMethodPreference);
+	ini.SetLongValue("Settings", "iQualityMode", settings.qualityMode);
+	ini.SetDoubleValue("Settings", "fSharpness", settings.sharpness);
+
+	ini.SaveFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini");
+}
+
+void Upscaling::DrawSettings()
+{
+	const auto activeMethod = GetUpscaleMethod(false);
+	const char* activeStr = activeMethod == UpscaleMethod::kDLSS ? "DLSS"
+		: activeMethod == UpscaleMethod::kFSR ? "FSR3"
+		: "Disabled (native TAA)";
+	ImGui::Text("Active: %s", activeStr);
+	if (cs::env::IsENBLoaded())
+		ImGui::TextDisabled("ENB detected: forcing Native AA quality (sub-native modes disabled).");
+
+	ImGui::Separator();
+
+	static const char* methodLabels[] = { "Disabled (native TAA)", "FSR3", "DLSS" };
+	int method = static_cast<int>(settings.upscaleMethodPreference);
+	if (ImGui::Combo("Method", &method, methodLabels, IM_ARRAYSIZE(methodLabels))) {
+		settings.upscaleMethodPreference = static_cast<uint>(std::clamp(method, 0, 2));
+		SaveSettings();
+	}
+	if (settings.upscaleMethodPreference == static_cast<uint>(UpscaleMethod::kDLSS) && activeMethod != UpscaleMethod::kDLSS)
+		ImGui::TextDisabled("DLSS unavailable on this system; falling back to FSR3.");
+
+	static const char* qualityLabels[] = { "Native AA", "Quality", "Balanced", "Performance", "Ultra Performance" };
+	int qm = static_cast<int>(settings.qualityMode);
+	if (ImGui::Combo("Quality", &qm, qualityLabels, IM_ARRAYSIZE(qualityLabels))) {
+		settings.qualityMode = static_cast<uint>(std::clamp(qm, 0, 4));
+		SaveSettings();
+	}
+
+	if (ImGui::SliderFloat("Sharpness", &settings.sharpness, 0.0f, 1.0f, "%.2f")) {
+		settings.sharpness = std::clamp(settings.sharpness, 0.0f, 1.0f);
+		SaveSettings();
+	}
 }
 
 void Upscaling::OnDataLoaded()

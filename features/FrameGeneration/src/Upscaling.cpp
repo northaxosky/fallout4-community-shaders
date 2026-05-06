@@ -1,6 +1,7 @@
 #include "Upscaling.h"
 
 #include <d3dcompiler.h>
+#include <imgui.h>
 
 #include "DX12SwapChain.h"
 #include "DirectXMath.h"
@@ -153,6 +154,70 @@ void Upscaling::ReloadSettingsIfNeeded()
 	static int frameCounter = 0;
 	if (++frameCounter % 60 != 0) return;
 	LoadSettings();
+}
+
+void Upscaling::SaveSettings()
+{
+	CSimpleIniA ini;
+	ini.SetUnicode();
+	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
+
+	ini.SetBoolValue("Settings", "bFrameGenerationMode", settings.frameGenerationMode);
+	ini.SetBoolValue("Settings", "bFrameLimitMode", settings.frameLimitMode);
+	ini.SetBoolValue("Settings", "bDisableInMenus", settings.disableInMenus);
+	ini.SetBoolValue("Settings", "bEnableDebugLogging", settings.debugLogging);
+	ini.SetLongValue("Settings", "iFrameGenType", settings.frameGenType);
+	// INI stores 0-indexed (0=2x, 1=3x, 2=4x); settings.frameGenFrames is 1-indexed.
+	ini.SetLongValue("Settings", "iFrameGenFrames", settings.frameGenFrames - 1);
+
+	ini.SaveFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
+}
+
+void Upscaling::DrawSettings()
+{
+	const char* activeStr = "Inactive";
+	if (settings.frameGenerationMode) {
+		switch (activeFrameGenType) {
+			case FrameGenType::kFSR3:   activeStr = "FSR3"; break;
+			case FrameGenType::kDLSSG:  activeStr = "DLSS-G"; break;
+			case FrameGenType::kXeSSFG: activeStr = "XeSS-FG"; break;
+		}
+	}
+	ImGui::Text("Active: %s", activeStr);
+
+	ImGui::Separator();
+
+	if (ImGui::Checkbox("Enable frame generation", &settings.frameGenerationMode))
+		SaveSettings();
+
+	static const char* fgTypeLabels[] = {
+		"FSR3 (any GPU)",
+		"DLSS-G (RTX 40+ NVIDIA)",
+		"XeSS-FG (Intel Arc)"
+	};
+	int fgType = std::clamp(settings.frameGenType, 0, 2);
+	if (ImGui::Combo("Mode", &fgType, fgTypeLabels, IM_ARRAYSIZE(fgTypeLabels))) {
+		settings.frameGenType = fgType;
+		SaveSettings();
+	}
+
+	if (settings.frameGenType == 1) {
+		static const char* mfgLabels[] = { "2x", "3x (RTX 50+ only)", "4x (RTX 50+ only)" };
+		int mfgIdx = std::clamp(settings.frameGenFrames - 1, 0, 2);
+		if (ImGui::Combo("Multi-frame generation", &mfgIdx, mfgLabels, IM_ARRAYSIZE(mfgLabels))) {
+			settings.frameGenFrames = mfgIdx + 1;
+			SaveSettings();
+		}
+	}
+
+	if (ImGui::Checkbox("Disable in menus", &settings.disableInMenus))
+		SaveSettings();
+	if (ImGui::Checkbox("VRR-aware frame limiter", &settings.frameLimitMode))
+		SaveSettings();
+	if (ImGui::Checkbox("Streamline debug logging", &settings.debugLogging))
+		SaveSettings();
+
+	ImGui::TextDisabled("Mode and MFG changes take effect on next launch.");
 }
 
 void Upscaling::OnPostPostLoad()
