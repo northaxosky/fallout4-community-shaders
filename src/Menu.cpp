@@ -202,9 +202,14 @@ namespace cs
 				}
 			}
 
+			// PushID per feature so widgets in DrawSettings can't collide with widgets
+			// from other features or with the menu's own widgets above (e.g. the menu's
+			// "Font scale" slider sharing an ID with PerformanceOverlay's).
 			for (auto* feat : FeatureManager::Get().GetAll()) {
+				ImGui::PushID(feat->GetName().data());
 				if (ImGui::CollapsingHeader(feat->GetName().data()))
 					feat->DrawSettings();
+				ImGui::PopID();
 			}
 		}
 		ImGui::End();
