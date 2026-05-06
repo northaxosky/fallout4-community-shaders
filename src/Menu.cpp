@@ -14,20 +14,6 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM,
 
 namespace cs
 {
-	namespace
-	{
-		struct hkMenuControlsPerformInputProcessing
-		{
-			static void thunk(RE::MenuControls* a_self, const RE::InputEvent* a_queueHead)
-			{
-				if (Menu::Get().IsOpen())
-					a_queueHead = nullptr;
-				func(a_self, a_queueHead);
-			}
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-	}
-
 	Menu& Menu::Get()
 	{
 		static Menu instance;
@@ -45,7 +31,6 @@ namespace cs
 
 		InitImGui();
 		HookWndProc();
-		TryHookMenuControls();
 
 		cs::features::UITextureIsolation::Get()->OnD3D11Ready(a_device, a_context);
 
@@ -73,7 +58,9 @@ namespace cs
 		ImGuiIO& io = ImGui::GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-		io.IniFilename = nullptr;
+		// Persist window sizes/positions across sessions; sits beside our other plugin INIs.
+		static const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\imgui.ini";
+		io.IniFilename = kIniPath;
 
 		ImGui_ImplWin32_Init(_hwnd);
 		ImGui_ImplDX11_Init(_device, _context);
@@ -88,18 +75,6 @@ namespace cs
 		_origWndProc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
 			_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&Menu::hkWndProc)));
 		_wndProcHooked = (_origWndProc != nullptr);
-	}
-
-	void Menu::TryHookMenuControls()
-	{
-		if (_menuControlsHooked)
-			return;
-		auto* mc = RE::MenuControls::GetSingleton();
-		if (!mc)
-			return;
-		stl::write_vfunc<0, hkMenuControlsPerformInputProcessing>(RE::VTABLE::MenuControls[0]);
-		_menuControlsHooked = true;
-		L->info("MenuControls input gate installed");
 	}
 
 	void Menu::EnsureBackbufferRTV()
@@ -141,10 +116,6 @@ namespace cs
 	{
 		if (!_imguiInited || !_chain || !_context)
 			return;
-
-		// MenuControls singleton may not exist at first present; retry each frame.
-		if (!_menuControlsHooked)
-			TryHookMenuControls();
 
 		EnsureBackbufferRTV();
 		if (!_backbufferRTV)
@@ -258,21 +229,25 @@ namespace cs
 			return 0;
 		}
 
-		if (m._open && m._imguiInited) {
+		// Always feed input to ImGui so widgets respond when hovered/focused.
+		if (m._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-			// Menu is modal for game keys/mouse; SYSKEY+SYSCHAR fall through so Alt+F4/Tab/Enter still work.
+		// Only block the game's wndproc when ImGui is actively using the input (hover or text focus).
+		// Otherwise the game keeps responding to movement keys / mouselook while the menu is open.
+		if (m._open && m._imguiInited) {
+			const auto& io = ImGui::GetIO();
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||
 				a_msg == WM_RBUTTONDOWN || a_msg == WM_RBUTTONUP ||
 				a_msg == WM_MBUTTONDOWN || a_msg == WM_MBUTTONUP ||
 				a_msg == WM_MOUSEWHEEL || a_msg == WM_MOUSEHWHEEL ||
 				a_msg == WM_LBUTTONDBLCLK || a_msg == WM_RBUTTONDBLCLK || a_msg == WM_MBUTTONDBLCLK;
-			const bool isGameKey =
+			const bool isKey =
 				a_msg == WM_KEYDOWN || a_msg == WM_KEYUP || a_msg == WM_CHAR;
 
-			if (isMouse || isGameKey)
-				return 0;
+			if (isMouse && io.WantCaptureMouse)   return 0;
+			if (isKey   && io.WantCaptureKeyboard) return 0;
 		}
 
 		return CallWindowProcW(m._origWndProc, a_hwnd, a_msg, a_wparam, a_lparam);

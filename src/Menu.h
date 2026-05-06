@@ -26,7 +26,6 @@ namespace cs
 
 		void InitImGui();
 		void HookWndProc();
-		void TryHookMenuControls();
 		void Render();
 		void DrawDefaultUI();
 		void Toggle();
@@ -43,7 +42,6 @@ namespace cs
 
 		bool    _imguiInited       = false;
 		bool    _wndProcHooked     = false;
-		bool    _menuControlsHooked = false;
 		bool    _open              = false;
 
 		float   _fontScale = 2.0f;
