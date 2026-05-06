@@ -229,6 +229,17 @@ void Upscaling::CreateFrameGenerationResources()
 		motionVectorBufferShared[index]->CreateRTV(rtvDesc);
 		motionVectorBufferShared[index]->CreateUAV(uavDesc);
 
+		// Single-channel R8 alpha mask drives DLSS-G's kBufferTypeUIAlpha recomposition path.
+		texDesc.Format = DXGI_FORMAT_R8_UNORM;
+		srvDesc.Format = texDesc.Format;
+		rtvDesc.Format = texDesc.Format;
+		uavDesc.Format = texDesc.Format;
+
+		UIAlphaBufferShared[index] = new Texture2D(texDesc);
+		UIAlphaBufferShared[index]->CreateSRV(srvDesc);
+		UIAlphaBufferShared[index]->CreateRTV(rtvDesc);
+		UIAlphaBufferShared[index]->CreateUAV(uavDesc);
+
 		auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
 		{
@@ -290,12 +301,33 @@ void Upscaling::CreateFrameGenerationResources()
 				CloseHandle(sharedHandle);
 			}
 		}
+
+		{
+			IDXGIResource1* dxgiResource = nullptr;
+			DX::ThrowIfFailed(UIAlphaBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+
+			if (dx12SwapChain->swapChain) {
+				HANDLE sharedHandle = nullptr;
+				DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
+					nullptr,
+					DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
+					nullptr,
+					&sharedHandle));
+
+				DX::ThrowIfFailed(dx12SwapChain->d3d12Device->OpenSharedHandle(
+					sharedHandle,
+					IID_PPV_ARGS(&UIAlphaBufferShared12[index])));
+
+				CloseHandle(sharedHandle);
+			}
+		}
 	}
 
 	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", "cs_5_0");
 	generateSharedBuffersCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", "cs_5_0");
+	uiAlphaMaskCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\UIAlphaMaskCS.hlsl", "cs_5_0");
 
-	L->info("Frame generation resources created (HUDLess + Depth + MVec)");
+	L->info("Frame generation resources created (HUDLess + Depth + MVec + UIAlpha)");
 }
 
 void Upscaling::PreAlpha()
@@ -344,7 +376,11 @@ void Upscaling::PostAlpha()
 
 			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
-			ID3D11UnorderedAccessView* uavs[2] = { motionVectorBufferShared[dx12SwapChain->frameIndex]->uav.get(), depthBufferShared[dx12SwapChain->frameIndex]->uav.get()};
+			ID3D11UnorderedAccessView* uavs[3] = {
+				motionVectorBufferShared[dx12SwapChain->frameIndex]->uav.get(),
+				depthBufferShared[dx12SwapChain->frameIndex]->uav.get(),
+				UIAlphaBufferShared[dx12SwapChain->frameIndex]->uav.get()
+			};
 			context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
 
 			context->CSSetShader(generateSharedBuffersCS, nullptr, 0);
@@ -355,7 +391,7 @@ void Upscaling::PostAlpha()
 		ID3D11ShaderResourceView* views[3] = { nullptr, nullptr, nullptr };
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
-		ID3D11UnorderedAccessView* uavs[2] = { nullptr, nullptr };
+		ID3D11UnorderedAccessView* uavs[3] = { nullptr, nullptr, nullptr };
 		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
 
 		ID3D11ComputeShader* shader = nullptr;
@@ -550,6 +586,46 @@ void Upscaling::PostDisplay()
 	}
 }
 
+void Upscaling::GenerateUIAlphaMask()
+{
+	if (!d3d12Interop || !setupBuffers || !uiAlphaMaskCS)
+		return;
+
+	auto dx12SwapChain = DX12SwapChain::GetSingleton();
+	ID3D11ShaderResourceView* backbufferSRV = dx12SwapChain->swapChainBufferProxy ? dx12SwapChain->swapChainBufferProxy->srv : nullptr;
+	if (!backbufferSRV)
+		return;
+
+	auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+	// Proxy backbuffer may still be bound as RTV from game rendering; D3D11 returns zeros if read while bound.
+	context->OMSetRenderTargets(0, nullptr, nullptr);
+
+	uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
+	uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);
+
+	ID3D11ShaderResourceView* srvs[2] = {
+		HUDLessBufferShared[dx12SwapChain->frameIndex]->srv.get(),
+		backbufferSRV
+	};
+	context->CSSetShaderResources(0, 2, srvs);
+
+	ID3D11UnorderedAccessView* uavs[1] = {
+		UIAlphaBufferShared[dx12SwapChain->frameIndex]->uav.get()
+	};
+	context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+
+	context->CSSetShader(uiAlphaMaskCS, nullptr, 0);
+	context->Dispatch(dispatchX, dispatchY, 1);
+
+	ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
+	context->CSSetShaderResources(0, 2, nullSRVs);
+	ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+	context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+	context->CSSetShader(nullptr, nullptr, 0);
+}
+
 void Upscaling::Reset()
 {
 	if (!d3d12Interop)
@@ -567,6 +643,7 @@ void Upscaling::Reset()
 	context->ClearRenderTargetView(HUDLessBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
 	context->ClearRenderTargetView(depthBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
 	context->ClearRenderTargetView(motionVectorBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
+	context->ClearRenderTargetView(UIAlphaBufferShared[dx12SwapChain->frameIndex]->rtv.get(), clearColor);
 }
 
 struct WindowSizeChanged

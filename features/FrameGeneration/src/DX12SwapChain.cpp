@@ -238,6 +238,10 @@ HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 {
+	// DLSS-G recomposition needs a single-channel UI alpha tag; derive it before the cross-API fence.
+	if (Upscaling::GetSingleton()->activeFrameGenType == Upscaling::FrameGenType::kDLSSG)
+		Upscaling::GetSingleton()->GenerateUIAlphaMask();
+
 	// FSR-like strategy for all framegen modes: present the full proxy backbuffer (scene + UI) and let DLSS-G/FFX warp the entire image as one.
 	d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
 
@@ -333,13 +337,14 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		camera.posY = camState.posAdjust.y;
 		camera.posZ = camState.posAdjust.z;
 
-		// FSR-like: full image is on the swap chain, so don't separately tag UI for DLSS-G to recomposite.
+		// Full composite on swap chain; UI alpha mask drives DLSS-G recomposition for sharp UI on interpolated frames.
 		dlssg->Present(
 			commandLists[frameIndex].get(),
 			upscaling->depthBufferShared12[frameIndex].get(),
 			upscaling->motionVectorBufferShared12[frameIndex].get(),
 			upscaling->HUDLessBufferShared12[frameIndex].get(),
 			nullptr,
+			upscaling->UIAlphaBufferShared12[frameIndex].get(),
 			screenSize, jitter,
 			cameraNear, cameraFar, camera);
 

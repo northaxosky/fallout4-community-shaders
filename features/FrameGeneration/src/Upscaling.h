@@ -44,13 +44,16 @@ public:
 	Texture2D* HUDLessBufferShared[2];
 	Texture2D* depthBufferShared[2];
 	Texture2D* motionVectorBufferShared[2];
+	Texture2D* UIAlphaBufferShared[2];
 
 	winrt::com_ptr<ID3D12Resource> HUDLessBufferShared12[2];
 	winrt::com_ptr<ID3D12Resource> depthBufferShared12[2];
 	winrt::com_ptr<ID3D12Resource> motionVectorBufferShared12[2];
+	winrt::com_ptr<ID3D12Resource> UIAlphaBufferShared12[2];
 
 	ID3D11ComputeShader* copyDepthToSharedBufferCS = nullptr;
 	ID3D11ComputeShader* generateSharedBuffersCS = nullptr;
+	ID3D11ComputeShader* uiAlphaMaskCS = nullptr;
 
 	bool setupBuffers = false;
 
@@ -63,6 +66,7 @@ public:
 	void PreAlpha();
 	void PostAlpha();
 	void CopyBuffersToSharedResources();
+	void GenerateUIAlphaMask();
 
 	static void TimerSleepQPC(int64_t targetQPC);
 

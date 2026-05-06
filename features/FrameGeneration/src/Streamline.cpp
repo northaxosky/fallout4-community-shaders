@@ -204,6 +204,7 @@ void StreamlineFG::Present(
 	ID3D12Resource* a_motionVectors,
 	ID3D12Resource* a_hudlessColor,
 	ID3D12Resource* a_uiColorAlpha,
+	ID3D12Resource* a_uiAlpha,
 	float2 a_screenSize,
 	float2 a_jitter,
 	float a_cameraNear, float a_cameraFar,
@@ -265,25 +266,18 @@ void StreamlineFG::Present(
 		// Explicit extent matching screen size
 		sl::Extent fullExtent = { 0, 0, (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
 
-		if (a_uiColorAlpha) {
-			sl::Resource uiColor = { sl::ResourceType::eTex2d, a_uiColorAlpha, 0 };
+		// UIAlpha (single-channel) drives recomposition; DLSS-G prefers it over UIColorAndAlpha when both are tagged.
+		sl::Resource uiColorRes = { sl::ResourceType::eTex2d, a_uiColorAlpha, 0 };
+		sl::Resource uiAlphaRes = { sl::ResourceType::eTex2d, a_uiAlpha,      0 };
 
-			sl::ResourceTag tags[] = {
-				{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-				{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-				{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-				{ &uiColor, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-			};
-			slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
-		} else {
-			sl::ResourceTag tags[] = {
-				{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-				{ &mvec, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-				{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
-				{ nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
-			};
-			slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
-		}
+		sl::ResourceTag tags[] = {
+			{ &depth,                                sl::kBufferTypeDepth,           sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
+			{ &mvec,                                 sl::kBufferTypeMotionVectors,   sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
+			{ &hudless,                              sl::kBufferTypeHUDLessColor,    sl::ResourceLifecycle::eValidUntilPresent, &fullExtent },
+			{ a_uiColorAlpha ? &uiColorRes : nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, a_uiColorAlpha ? &fullExtent : nullptr },
+			{ a_uiAlpha      ? &uiAlphaRes : nullptr, sl::kBufferTypeUIAlpha,         sl::ResourceLifecycle::eValidUntilPresent, a_uiAlpha      ? &fullExtent : nullptr },
+		};
+		slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
 	}
 }
 

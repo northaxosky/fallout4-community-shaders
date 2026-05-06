@@ -5,6 +5,7 @@ Texture2D<float> InputDepth : register(t3);
 
 RWTexture2D<float2> OutputMotionVectors : register(u0);
 RWTexture2D<float> OutputDepth : register(u1);
+RWTexture2D<float> OutputUIAlpha : register(u2);
 
 [numthreads(8, 8, 1)] void main(uint3 DTid
 								: SV_DispatchThreadID) {
@@ -14,11 +15,13 @@ RWTexture2D<float> OutputDepth : register(u1);
 	float depth = InputDepth[DTid.xy];
 
 	float3 difference = abs(colorPreAlpha - colorPostAlpha);
-	
-	float mask = max(difference.x, max(difference.y, difference.z));
-	mask *= 1000.0;
-	mask = 1.0 - saturate(mask);
-	
+	float maxDiff = max(difference.x, max(difference.y, difference.z));
+
+	float mask = 1.0 - saturate(maxDiff * 1000.0);
+
 	OutputMotionVectors[DTid.xy] = lerp(0.0, InputMotionVectors[DTid.xy], mask);
 	OutputDepth[DTid.xy] = lerp(min(depth, 0.1), depth, mask);
+
+	// Reticle-pass pixels seed the UI alpha mask; UIAlphaMaskCS OR's the rest in at present-time.
+	OutputUIAlpha[DTid.xy] = maxDiff > 0.5f / 255.0f ? 1.0f : 0.0f;
 }
