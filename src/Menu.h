@@ -17,6 +17,7 @@ namespace cs
 		void HookPresentOn(IDXGISwapChain* a_chain);
 
 		bool IsOpen() const noexcept { return _open; }
+		bool IsOverlayVisible() const noexcept { return _overlayVisible; }
 
 	private:
 		Menu() = default;
@@ -43,6 +44,7 @@ namespace cs
 		bool    _imguiInited       = false;
 		bool    _wndProcHooked     = false;
 		bool    _open              = false;
+		bool    _overlayVisible    = true;
 
 		float   _fontScale = 2.0f;
 		int     _loggingLevelIdx = -1;

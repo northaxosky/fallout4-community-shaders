@@ -125,6 +125,13 @@ namespace cs
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
+		// Always-on overlays render every frame regardless of _open; features that don't
+		// want one have an empty default override and pay nothing.
+		if (_overlayVisible) {
+			for (auto* feat : FeatureManager::Get().GetAll())
+				feat->DrawOverlay();
+		}
+
 		if (_open)
 			DrawDefaultUI();
 
@@ -222,6 +229,14 @@ namespace cs
 		// Toggle key, eaten regardless of menu state so the game never sees END.
 		if (a_msg == WM_KEYDOWN && a_wparam == VK_END && (HIWORD(a_lparam) & KF_REPEAT) == 0) {
 			m.Toggle();
+			return 0;
+		}
+
+		// Shift+F11 toggles the always-on overlay. Modifier-gated to avoid colliding with
+		// mods that bind F11 (Place Everywhere, MCM) or with Windows fullscreen toggle.
+		if (a_msg == WM_KEYDOWN && a_wparam == VK_F11 && (HIWORD(a_lparam) & KF_REPEAT) == 0
+			&& (GetKeyState(VK_SHIFT) & 0x8000) != 0) {
+			m._overlayVisible = !m._overlayVisible;
 			return 0;
 		}
 

@@ -16,6 +16,10 @@ namespace cs
 		virtual void OnDataLoaded() {}
 		virtual void OnPostPostLoad() {}
 		virtual void DrawSettings() {}
+
+		// Always-on overlay rendered on top of the game even when the settings menu is closed.
+		// Default empty; features that want a HUD-style widget override this.
+		virtual void DrawOverlay() {}
 	};
 
 	class FeatureManager
