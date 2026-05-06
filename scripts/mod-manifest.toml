@@ -26,6 +26,12 @@ src = "package/F4SE/Plugins/FrameGeneration/"
 dst = "F4SE/Plugins/FrameGeneration/"
 pattern = "*.hlsl"
 
+# Screen-Space Shadows HLSL + Bend SSS hlsli (committed).
+[[deploy.assets]]
+src = "package/F4SE/Plugins/ScreenSpaceShadows/"
+dst = "F4SE/Plugins/ScreenSpaceShadows/"
+pattern = "*.hlsl*"
+
 # NVIDIA Streamline runtime DLLs (fetched by scripts/fetch-sdks.sh).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/Streamline/"
