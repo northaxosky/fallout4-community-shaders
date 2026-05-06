@@ -6,7 +6,6 @@
 
 #include "Feature.h"
 #include "Log.h"
-#include "UITextureIsolation.h"
 
 namespace { auto* L = cs::log::Get("cs.menu"); }
 
@@ -31,8 +30,6 @@ namespace cs
 
 		InitImGui();
 		HookWndProc();
-
-		cs::features::UITextureIsolation::Get()->OnD3D11Ready(a_device, a_context);
 
 		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<uintptr_t>(a_hwnd));
 	}
@@ -214,7 +211,6 @@ namespace cs
 
 	HRESULT WINAPI Menu::hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags)
 	{
-		cs::features::UITextureIsolation::Get()->OnPresent();
 		Menu::Get().Render();
 		return Menu::Get()._origPresent(a_chain, a_sync, a_flags);
 	}
