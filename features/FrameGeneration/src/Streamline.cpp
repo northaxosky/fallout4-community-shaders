@@ -62,7 +62,12 @@ bool StreamlineFG::InitStreamline()
 	pref.pathsToPlugins = pluginPaths;
 	pref.numPathsToPlugins = 1;
 
-	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL };
+	// Include DLSS even though FrameGeneration itself doesn't drive it. FrameGen typically
+	// initializes Streamline first; if we omit DLSS here the Upscaling feature's later
+	// LoadInterposer sees the module already loaded, sets alreadyInitialized=true, and
+	// skips its own slInit — so its kFeatureDLSS request is dropped and the DLSS plugin
+	// never loads, even on hardware that supports it.
+	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureDLSS, sl::kFeatureReflex, sl::kFeaturePCL };
 	pref.featuresToLoad = features;
 	pref.numFeaturesToLoad = _countof(features);
 

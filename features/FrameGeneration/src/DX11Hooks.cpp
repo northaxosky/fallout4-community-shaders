@@ -9,6 +9,10 @@
 #include "Streamline.h"
 #include <nvsdk_ngx.h>
 
+// Relative path because both features ship a "Streamline.h"; we want the Upscaling
+// feature's class (DLSS upscaler), not our local StreamlineFG (DLSS-G).
+#include "../../Upscaling/src/Streamline.h"
+
 #include "Env.h"
 #include "Log.h"
 #include "Menu.h"
@@ -285,6 +289,20 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
 				cs::Menu::Get().HookPresentOn(*ppSwapChain);
+
+				// We owned D3D11 creation in the proxy path and returned early instead of chaining
+				// to the Upscaling feature's IAT thunk. Drive its Streamline init directly so the
+				// DLSS upscaler plugin is detected even in FSR3 / XeSS-FG mode.
+				{
+					auto upscalingSL = cs::features::Upscaling::Streamline::GetSingleton();
+					if (upscalingSL->interposer) {
+						upscalingSL->Initialize();
+						if (upscalingSL->slSetD3DDevice)
+							upscalingSL->slSetD3DDevice(*ppDevice);
+						upscalingSL->CheckFeatures(pAdapter);
+						upscalingSL->PostDevice();
+					}
+				}
 
 				return S_OK;
 			}
