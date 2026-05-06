@@ -244,8 +244,11 @@ namespace cs::features
 		else
 			flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize;
 
+		// Pinned width keeps rows uniform regardless of which sections are enabled.
+		const float kContentWidth = 280.0f * settings.fontScale;
 		ImGui::SetNextWindowPos(pos, posCond, pivot);
 		ImGui::SetNextWindowBgAlpha(settings.opacity);
+		ImGui::SetNextWindowSizeConstraints(ImVec2(kContentWidth, 0.0f), ImVec2(kContentWidth, FLT_MAX));
 		if (ImGui::Begin("##PerfOverlay", nullptr, flags)) {
 			if (settings.freeDrag) {
 				const ImVec2 cur = ImGui::GetWindowPos();
@@ -289,12 +292,14 @@ namespace cs::features
 				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
 				const float ymax = std::max(refreshMs * 2.0f, _displayedFrameMs * 1.25f);
 				ImGui::PlotLines("##frametimegraph", linear.data(), _frameTimesCount, 0,
-					nullptr, 0.0f, ymax, ImVec2(180.0f * settings.fontScale, 40.0f * settings.fontScale));
+					nullptr, 0.0f, ymax, ImVec2(-FLT_MIN, 40.0f * settings.fontScale));
 			}
 
 			if (settings.showStats) {
-				ImGui::Text("avg %.2f / 1%% %.2f / 0.1%% %.2f ms",
-					_avgMs, _onePctLowMs, _pointOnePctLowMs);
+				// Stacked because the single-line form would exceed the pinned width.
+				ImGui::Text("avg     %5.2f ms", _avgMs);
+				ImGui::Text("1%% low  %5.2f ms", _onePctLowMs);
+				ImGui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
 			}
 
 			if (settings.showVram) {
@@ -320,7 +325,7 @@ namespace cs::features
 					std::snprintf(label, sizeof(label), "%.1f / %.1f GB",
 						_vramUsedBytes / (1024.0 * 1024.0 * 1024.0),
 						_vramBudgetBytes / (1024.0 * 1024.0 * 1024.0));
-					ImGui::ProgressBar(frac, ImVec2(180.0f * settings.fontScale, 0.0f), label);
+					ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0.0f), label);
 				}
 			}
 		}
