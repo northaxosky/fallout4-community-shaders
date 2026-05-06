@@ -9,6 +9,7 @@
 #include "Env.h"
 #include "Feature.h"
 #include "Log.h"
+#include "StreamlineCore.h"
 
 namespace cs::features::Upscaling
 {
@@ -985,8 +986,6 @@ void Upscaling::CopyDepth()
 
 Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 {
-	auto streamline = Streamline::GetSingleton();
-
 	static auto ui = RE::UI::GetSingleton();
 
 	// Disable the upscaling method when certain menus are open
@@ -1003,7 +1002,8 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	UpscaleMethod currentUpscaleMethod = (UpscaleMethod)settings.upscaleMethodPreference;
 
 	// If DLSS is not available, default to FSR
-	if (!streamline->featureDLSS && currentUpscaleMethod == UpscaleMethod::kDLSS) {
+	auto* core = cs::Streamline::GetSingleton();
+	if (!core->featureDLSS && currentUpscaleMethod == UpscaleMethod::kDLSS) {
 		static bool loggedDLSSFallback = false;
 		if (!loggedDLSSFallback) {
 			L->info("DLSS preferred but not available, falling back to FSR");
@@ -1015,7 +1015,7 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	static bool loggedOnce = false;
 	if (!loggedOnce && !a_checkMenu) {
 		L->info("GetUpscaleMethod resolved: method={} (0=Disabled, 1=FSR, 2=DLSS), preference={}, enb={}, dlssAvailable={}",
-			static_cast<uint>(currentUpscaleMethod), settings.upscaleMethodPreference, cs::env::IsENBLoaded(), streamline->featureDLSS);
+			static_cast<uint>(currentUpscaleMethod), settings.upscaleMethodPreference, cs::env::IsENBLoaded(), core->featureDLSS);
 		loggedOnce = true;
 	}
 
@@ -1319,7 +1319,7 @@ void Upscaling::Upscale()
 void Upscaling::CreateUpscalingResources()
 {
 	// Only create DLSS-specific resources if DLSS is available
-	if (Streamline::GetSingleton()->featureDLSS) {
+	if (cs::Streamline::GetSingleton()->featureDLSS) {
 		auto renderer = RE::BSGraphics::GetRendererData();
 		auto& main = renderer->renderTargets[(uint)Util::RenderTarget::kMain];
 
@@ -1356,9 +1356,14 @@ void Upscaling::CreateUpscalingResources()
 void Upscaling::DestroyUpscalingResources()
 {
 	// Clean up DLSS-specific resources
-	if (Streamline::GetSingleton()->featureDLSS) {
+	if (cs::Streamline::GetSingleton()->featureDLSS) {
 		dilatedMotionVectorTexture = nullptr;  // Smart pointer automatically releases D3D resources
 	}
+}
+
+void Upscaling::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
+{
+	Streamline::GetSingleton()->CacheDLSSFunctions();
 }
 
 void Upscaling::PatchSSRShader()
@@ -1390,6 +1395,7 @@ void Upscaling::PatchSSRShader()
 			AutoRegister()
 			{
 				cs::FeatureManager::Get().Register(Upscaling::GetSingleton());
+				cs::Streamline::GetSingleton()->RequestFeature(sl::kFeatureDLSS);
 			}
 		};
 		static AutoRegister _autoRegister;

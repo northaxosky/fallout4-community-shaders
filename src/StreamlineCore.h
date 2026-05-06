@@ -1,0 +1,93 @@
+#pragma once
+
+#include <vector>
+
+#include <Windows.h>
+#include <d3d11.h>
+#include <dxgi.h>
+
+#define NV_WINDOWS
+
+#pragma warning(push)
+#pragma warning(disable: 4471)
+#include <sl.h>
+#include <sl_consts.h>
+#include <sl_core_api.h>
+#include <sl_dlss.h>
+#include <sl_dlss_g.h>
+#include <sl_reflex.h>
+#include <sl_pcl.h>
+#include <sl_version.h>
+#pragma warning(pop)
+
+namespace cs
+{
+	using PFun_slSetTagForFrame2 = sl::Result(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
+	using PFun_slSetTag2 = sl::Result(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
+
+	// Owns the Streamline SDK plumbing shared by Upscaling (DLSS) and FrameGeneration (DLSS-G/Reflex/PCL).
+	class Streamline
+	{
+	public:
+		static Streamline* GetSingleton();
+
+		// Add to featuresToLoad. Must run before Initialize(). Deduplicated; safe to call repeatedly.
+		void RequestFeature(sl::Feature feature);
+
+		// Idempotent. Loads sl.interposer.dll when any feature has been requested.
+		void LoadInterposer();
+
+		// Idempotent. Invokes slInit with the aggregated featuresToLoad on first call.
+		bool Initialize();
+
+		// Two pieces, each idempotent: slSetD3DDevice runs once with the first device, the
+		// feature-availability sweep runs once against the adapter. Feature::OnD3D11Ready fires
+		// every call so the FG proxy path can re-trigger fan-out after binding D3D12.
+		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device);
+
+		// FG calls this after slSetD3DDevice(D3D12) so a later OnD3D11Ready on the D3D11
+		// device doesn't overwrite the D3D12 binding DLSS-G needs.
+		void MarkD3DDeviceRegistered();
+
+		bool IsInitialized() const noexcept { return _initialized; }
+
+		bool featureDLSS    = false;
+		bool featureDLSSG   = false;
+		bool featureReflex  = false;
+		bool featurePCL     = false;
+
+		HMODULE interposer = nullptr;
+
+		PFun_slInit*                 slInit{};
+		PFun_slShutdown*             slShutdown{};
+		PFun_slIsFeatureSupported*   slIsFeatureSupported{};
+		PFun_slIsFeatureLoaded*      slIsFeatureLoaded{};
+		PFun_slSetFeatureLoaded*     slSetFeatureLoaded{};
+		PFun_slEvaluateFeature*      slEvaluateFeature{};
+		PFun_slAllocateResources*    slAllocateResources{};
+		PFun_slFreeResources*        slFreeResources{};
+		PFun_slSetTag2*              slSetTag{};
+		PFun_slSetTagForFrame2*      slSetTagForFrame{};
+		PFun_slGetFeatureRequirements* slGetFeatureRequirements{};
+		PFun_slGetFeatureVersion*    slGetFeatureVersion{};
+		PFun_slUpgradeInterface*     slUpgradeInterface{};
+		PFun_slSetConstants*         slSetConstants{};
+		PFun_slGetNativeInterface*   slGetNativeInterface{};
+		PFun_slGetFeatureFunction*   slGetFeatureFunction{};
+		PFun_slGetNewFrameToken*     slGetNewFrameToken{};
+		PFun_slSetD3DDevice*         slSetD3DDevice{};
+
+	private:
+		Streamline() = default;
+		~Streamline();
+		Streamline(const Streamline&) = delete;
+		Streamline& operator=(const Streamline&) = delete;
+
+		bool   _interposerAttempted = false;
+		bool   _initAttempted = false;
+		bool   _d3dDeviceRegistered = false;
+		bool   _featureSweepDone = false;
+		bool   _initialized = false;
+		std::vector<sl::Feature> _requestedFeatures;
+	};
+}

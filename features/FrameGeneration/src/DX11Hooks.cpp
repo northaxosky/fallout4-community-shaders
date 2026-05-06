@@ -9,13 +9,10 @@
 #include "Streamline.h"
 #include <nvsdk_ngx.h>
 
-// Relative path because both features ship a "Streamline.h"; we want the Upscaling
-// feature's class (DLSS upscaler), not our local StreamlineFG (DLSS-G).
-#include "../../Upscaling/src/Streamline.h"
-
 #include "Env.h"
 #include "Log.h"
 #include "Menu.h"
+#include "StreamlineCore.h"
 #include "XeSSFG.h"
 
 namespace cs::features::FrameGeneration
@@ -88,8 +85,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 
 	// For DLSS-G: init Streamline BEFORE D3D12 device
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->InitStreamline();
+		cs::Streamline::GetSingleton()->Initialize();
 	}
 
 	proxy->CreateD3D12Device(adapter);
@@ -107,17 +103,17 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	// DLSS-G: upgrade device+factory via Streamline
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
 	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-		auto dlssg = StreamlineFG::GetSingleton();
+		auto* core = cs::Streamline::GetSingleton();
 
 		ID3D12Device* rawDevice = proxy->d3d12Device.get();
-		dlssg->slUpgradeInterface((void**)&rawDevice);
+		core->slUpgradeInterface((void**)&rawDevice);
 		proxy->d3d12Device.copy_from(rawDevice);
 
 		IDXGIFactory* rawFactory = (IDXGIFactory*)factory;
-		dlssg->slUpgradeInterface((void**)&rawFactory);
+		core->slUpgradeInterface((void**)&rawFactory);
 		factory = (IDXGIFactory5*)rawFactory;
 
-		dlssg->SetD3DDevice(proxy->d3d12Device.get());
+		StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
 	}
 
 	proxy->CreateD3D12CommandQueues();
@@ -239,8 +235,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-					auto dlssg = StreamlineFG::GetSingleton();
-					dlssg->InitStreamline();
+					cs::Streamline::GetSingleton()->Initialize();
 				}
 
 				proxy->CreateD3D12Device(adapter);
@@ -258,17 +253,17 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				// DLSS-G: upgrade device+factory via Streamline, then set device
 				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
 				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
-					auto dlssg = StreamlineFG::GetSingleton();
+					auto* core = cs::Streamline::GetSingleton();
 
 					ID3D12Device* rawDevice = proxy->d3d12Device.get();
-					dlssg->slUpgradeInterface((void**)&rawDevice);
+					core->slUpgradeInterface((void**)&rawDevice);
 					proxy->d3d12Device.copy_from(rawDevice);
 
 					IDXGIFactory* rawFactory = (IDXGIFactory*)dxgiFactory;
-					dlssg->slUpgradeInterface((void**)&rawFactory);
+					core->slUpgradeInterface((void**)&rawFactory);
 					dxgiFactory = (IDXGIFactory4*)rawFactory;
 
-					dlssg->SetD3DDevice(proxy->d3d12Device.get());
+					StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
 				}
 
 				proxy->CreateD3D12CommandQueues();
@@ -290,19 +285,9 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
 				cs::Menu::Get().HookPresentOn(*ppSwapChain);
 
-				// We owned D3D11 creation in the proxy path and returned early instead of chaining
-				// to the Upscaling feature's IAT thunk. Drive its Streamline init directly so the
-				// DLSS upscaler plugin is detected even in FSR3 / XeSS-FG mode.
-				{
-					auto upscalingSL = cs::features::Upscaling::Streamline::GetSingleton();
-					if (upscalingSL->interposer) {
-						upscalingSL->Initialize();
-						if (upscalingSL->slSetD3DDevice)
-							upscalingSL->slSetD3DDevice(*ppDevice);
-						upscalingSL->CheckFeatures(pAdapter);
-						upscalingSL->PostDevice();
-					}
-				}
+				// Proxy path returns early instead of chaining to Upscaling's IAT thunk; drive shared Streamline init here.
+				cs::Streamline::GetSingleton()->Initialize();
+				cs::Streamline::GetSingleton()->OnD3D11Ready(pAdapter, *ppDevice);
 
 				return S_OK;
 			}
@@ -340,9 +325,8 @@ void DX11Hooks::Install()
 	fidelityFX->LoadFFX();
 
 	if (upscaling->settings.frameGenType == 1) {
-		L->info("DLSS-G requested, loading Streamline interposer");
-		auto dlssg = StreamlineFG::GetSingleton();
-		dlssg->LoadInterposer();
+		L->info("DLSS-G requested, ensuring Streamline interposer is loaded");
+		cs::Streamline::GetSingleton()->LoadInterposer();
 	} else if (upscaling->settings.frameGenType == 2) {
 		L->info("XeSS-FG requested, loading XeSS libraries");
 		auto xess = XeSSFG::GetSingleton();
@@ -355,7 +339,7 @@ void DX11Hooks::Install()
 
 	// Defensive CreateDXGIFactory1 hook only when an FG backend can actually use the proxy. Skip when no backend loaded so non-FG users don't get their dxgi calls intercepted.
 	if (fidelityFX->module ||
-		(upscaling->settings.frameGenType == 1 && StreamlineFG::GetSingleton()->interposer) ||
+		(upscaling->settings.frameGenType == 1 && cs::Streamline::GetSingleton()->interposer) ||
 		(upscaling->settings.frameGenType == 2 && XeSSFG::GetSingleton()->fgModule)) {
 		(uintptr_t&)ptrCreateDXGIFactory1 = Detours::IATHook(moduleBase, "dxgi.dll", "CreateDXGIFactory1", (uintptr_t)hk_CreateDXGIFactory1);
 	}

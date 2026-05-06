@@ -11,14 +11,14 @@
 #include <sl_dlss_g.h>
 #include <sl_matrix_helpers.h>
 #include <sl_reflex.h>
+#include <sl_pcl.h>
 #include <sl_version.h>
 #pragma warning(pop)
 
 namespace cs::features::FrameGeneration
 {
 
-using PFun_slSetTagForFrame2 = sl::Result(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
-
+// DLSS-G / Reflex / PCL dispatch helper. SDK plumbing lives in cs::Streamline.
 class StreamlineFG
 {
 public:
@@ -28,9 +28,9 @@ public:
 		return &singleton;
 	}
 
-	void LoadInterposer();
-	bool InitStreamline();
+	// Binds the D3D12 proxy device for DLSS-G dispatch.
 	void SetD3DDevice(ID3D12Device* a_device);
+
 	bool CheckAndEnableDLSSG();
 	void SetEnabled(bool a_enabled);
 
@@ -63,31 +63,18 @@ public:
 
 	void Shutdown();
 
-	bool slInitialized = false;
-	bool featureDLSSG = false;
+	// Active for this session, distinct from cs::Streamline::featureDLSSG (loaded + supported).
+	bool sessionActive = false;
 	uint32_t configuredFrameCount = 1;
 	ID3D12Device* d3d12Device = nullptr;
-	HMODULE interposer = nullptr;
 	sl::ViewportHandle viewport{ 0 };
-	sl::FrameToken* frameToken{};
+	sl::FrameToken*    frameToken{};
 
-	// Core SL function pointers
-	PFun_slInit* slInit{};
-	PFun_slShutdown* slShutdown{};
-	PFun_slUpgradeInterface* slUpgradeInterface{};
-	PFun_slSetD3DDevice* slSetD3DDevice{};
-	PFun_slGetFeatureFunction* slGetFeatureFunction{};
-	PFun_slSetTagForFrame2* slSetTagForFrame{};
-	PFun_slSetConstants* slSetConstants{};
-	PFun_slGetNewFrameToken* slGetNewFrameToken{};
-
-	// DLSS-G function pointers
 	PFun_slDLSSGSetOptions* slDLSSGSetOptions{};
-	PFun_slDLSSGGetState* slDLSSGGetState{};
+	PFun_slDLSSGGetState*   slDLSSGGetState{};
 
-	// Reflex function pointers
 	PFun_slReflexSetOptions* slReflexSetOptions{};
-	PFun_slReflexSleep* slReflexSleep{};
+	PFun_slReflexSleep*      slReflexSleep{};
 
 	using PFun_slReflexSetMarker = sl::Result(sl::PCLMarker marker, const sl::FrameToken& frame);
 	PFun_slReflexSetMarker* slReflexSetMarker{};

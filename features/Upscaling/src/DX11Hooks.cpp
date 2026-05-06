@@ -5,7 +5,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "Menu.h"
-#include "Streamline.h"
+#include "StreamlineCore.h"
 
 namespace cs::features::Upscaling
 {
@@ -51,25 +51,19 @@ struct hkD3D11CreateDeviceAndSwapChain
 			L->info("SwapChain: {}x{}, format={}, bufferCount={}", pSwapChainDesc->BufferDesc.Width, pSwapChainDesc->BufferDesc.Height, static_cast<uint>(pSwapChainDesc->BufferDesc.Format), pSwapChainDesc->BufferCount);
 		}
 
-		auto streamline = Streamline::GetSingleton();
-
-		if (streamline->interposer){
-			cs::log::Get("cs.feature.upscaling.streamline")->info("Interposer present, initializing Streamline...");
-			streamline->Initialize();
+		auto* core = cs::Streamline::GetSingleton();
+		core->Initialize();
+		if (core->IsInitialized()) {
 			// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
-			if (!cs::env::IsENBLoaded() && !streamline->alreadyInitialized) {
+			if (!cs::env::IsENBLoaded() && core->slUpgradeInterface) {
 				cs::log::Get("cs.feature.upscaling.streamline")->info("Upgrading swap chain interface (no ENB)");
-				streamline->slUpgradeInterface((void**)&(*ppSwapChain));
-			} else if (streamline->alreadyInitialized) {
-				cs::log::Get("cs.feature.upscaling.streamline")->info("Skipping swap chain upgrade (FrameGen plugin owns Streamline)");
-			} else {
+				core->slUpgradeInterface((void**)&(*ppSwapChain));
+			} else if (cs::env::IsENBLoaded()) {
 				cs::log::Get("cs.feature.upscaling.streamline")->info("Skipping swap chain upgrade (ENB loaded)");
 			}
-			streamline->slSetD3DDevice(*ppDevice);
-			streamline->CheckFeatures(pAdapter);
-			streamline->PostDevice();
+			core->OnD3D11Ready(pAdapter, *ppDevice);
 		} else {
-			cs::log::Get("cs.feature.upscaling.streamline")->info("No interposer loaded, Streamline disabled");
+			cs::log::Get("cs.feature.upscaling.streamline")->info("Streamline not initialized, skipping device registration");
 		}
 
 		cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
@@ -84,9 +78,6 @@ namespace DX11Hooks
 {
 	void Install()
 	{
-		auto streamline = Streamline::GetSingleton();
-		streamline->LoadInterposer();
-
 		uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 		cs::log::Get("cs.feature.upscaling.hook")->info("Module base: {:#x}", moduleBase);
 

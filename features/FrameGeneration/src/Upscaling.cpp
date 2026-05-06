@@ -9,6 +9,8 @@
 #include "Feature.h"
 #include "DX11Hooks.h"
 #include "Log.h"
+#include "Streamline.h"
+#include "StreamlineCore.h"
 
 namespace cs::features::FrameGeneration
 {
@@ -792,6 +794,15 @@ void Upscaling::InstallHooks()
 	void Upscaling::Load()
 	{
 		LoadSettings();
+
+		// Gated: requesting DLSS-G triggers eUseFrameBasedResourceTagging on slInit, which breaks Upscaling's regular slSetTag path.
+		if (settings.frameGenType == 1) {
+			auto* core = cs::Streamline::GetSingleton();
+			core->RequestFeature(sl::kFeatureDLSS_G);
+			core->RequestFeature(sl::kFeatureReflex);
+			core->RequestFeature(sl::kFeaturePCL);
+		}
+
 		DX11Hooks::Install();
 	}
 

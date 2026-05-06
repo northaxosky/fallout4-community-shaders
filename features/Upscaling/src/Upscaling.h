@@ -47,6 +47,7 @@ public:
 		void Load() override;
 		void OnDataLoaded() override;
 		void DrawSettings() override;
+		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 
 	/**
 	 * @brief Install all game engine hooks required for upscaling

@@ -2,106 +2,34 @@
 #include "Upscaling.h"
 
 #include "Log.h"
+#include "StreamlineCore.h"
 
 namespace cs::features::FrameGeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dlssg"); }
 
-void StreamlineFG::LoadInterposer()
-{
-	interposer = LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.interposer.dll");
-	if (!interposer) {
-		L->warn("Failed to load interposer: {:#x}", GetLastError());
-		return;
-	}
-	L->info("Interposer loaded");
-
-	slInit = (PFun_slInit*)GetProcAddress(interposer, "slInit");
-	slShutdown = (PFun_slShutdown*)GetProcAddress(interposer, "slShutdown");
-	slUpgradeInterface = (PFun_slUpgradeInterface*)GetProcAddress(interposer, "slUpgradeInterface");
-	slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
-	slGetFeatureFunction = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
-	slSetTagForFrame = (PFun_slSetTagForFrame2*)GetProcAddress(interposer, "slSetTagForFrame");
-	slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
-	slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
-}
-
-bool StreamlineFG::InitStreamline()
-{
-	if (!interposer || !slInit) return false;
-
-	L->info("Initializing Streamline");
-
-	// Pre-load plugin DLLs for MO2 USVFS compatibility
-	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
-	LoadLibrary(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
-
-	sl::Preferences pref{};
-	pref.showConsole = false;
-	auto debugLogging = Upscaling::GetSingleton()->settings.debugLogging;
-	pref.logLevel = debugLogging ? sl::LogLevel::eVerbose : sl::LogLevel::eDefault;
-	if (debugLogging) {
-		pref.logMessageCallback = [](sl::LogType, const char* msg) {
-			cs::log::Get("cs.feature.framegen.dlssg.internal")->info("{}", msg);
-		};
-	}
-	pref.engine = sl::EngineType::eCustom;
-	pref.engineVersion = "1.0.0";
-	pref.projectId = "f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4f4";
-	pref.flags = sl::PreferenceFlags::eUseManualHooking | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
-	pref.renderAPI = sl::RenderAPI::eD3D12;
-
-	// Resolve real path where sl.interposer.dll lives (MO2 USVFS may virtualize it)
-	static wchar_t interposerDir[MAX_PATH];
-	GetModuleFileNameW(interposer, interposerDir, MAX_PATH);
-	wchar_t* lastSlash = wcsrchr(interposerDir, L'\\');
-	if (!lastSlash) lastSlash = wcsrchr(interposerDir, L'/');
-	if (lastSlash) *lastSlash = L'\0';
-
-	static const wchar_t* pluginPaths[] = { interposerDir };
-	pref.pathsToPlugins = pluginPaths;
-	pref.numPathsToPlugins = 1;
-
-	// Include DLSS even though FrameGeneration itself doesn't drive it. FrameGen typically
-	// initializes Streamline first; if we omit DLSS here the Upscaling feature's later
-	// LoadInterposer sees the module already loaded, sets alreadyInitialized=true, and
-	// skips its own slInit — so its kFeatureDLSS request is dropped and the DLSS plugin
-	// never loads, even on hardware that supports it.
-	static sl::Feature features[] = { sl::kFeatureDLSS_G, sl::kFeatureDLSS, sl::kFeatureReflex, sl::kFeaturePCL };
-	pref.featuresToLoad = features;
-	pref.numFeaturesToLoad = _countof(features);
-
-	auto result = slInit(pref, sl::kSDKVersion);
-	L->info("slInit result: {}", (int)result);
-
-	if (result != sl::Result::eOk) {
-		L->error("Streamline init failed");
-		return false;
-	}
-
-	slInitialized = true;
-	return true;
-}
-
 void StreamlineFG::SetD3DDevice(ID3D12Device* a_device)
 {
 	d3d12Device = a_device;
-	if (slSetD3DDevice && slInitialized) {
-		slSetD3DDevice(a_device);
+	auto* core = cs::Streamline::GetSingleton();
+	if (core->slSetD3DDevice && core->IsInitialized() && a_device) {
+		core->slSetD3DDevice(a_device);
+		core->MarkD3DDeviceRegistered();
 		L->info("D3D12 device set");
 	}
 }
 
 bool StreamlineFG::CheckAndEnableDLSSG()
 {
-	if (!slInitialized) return false;
+	auto* core = cs::Streamline::GetSingleton();
+	if (!core->IsInitialized()) return false;
 
-	if (slGetFeatureFunction) {
-		slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions", (void*&)slDLSSGSetOptions);
-		slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState", (void*&)slDLSSGGetState);
-		slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetOptions", (void*&)slReflexSetOptions);
-		slGetFeatureFunction(sl::kFeatureReflex, "slReflexSleep", (void*&)slReflexSleep);
-		slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetMarker", (void*&)slReflexSetMarker);
+	if (core->slGetFeatureFunction) {
+		core->slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGSetOptions",  (void*&)slDLSSGSetOptions);
+		core->slGetFeatureFunction(sl::kFeatureDLSS_G, "slDLSSGGetState",    (void*&)slDLSSGGetState);
+		core->slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetOptions", (void*&)slReflexSetOptions);
+		core->slGetFeatureFunction(sl::kFeatureReflex, "slReflexSleep",      (void*&)slReflexSleep);
+		core->slGetFeatureFunction(sl::kFeatureReflex, "slReflexSetMarker",  (void*&)slReflexSetMarker);
 		L->info("Feature functions loaded: SetOptions={:#x}, GetState={:#x}, ReflexMarker={:#x}",
 			(uintptr_t)slDLSSGSetOptions, (uintptr_t)slDLSSGGetState, (uintptr_t)slReflexSetMarker);
 	}
@@ -111,7 +39,6 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		return false;
 	}
 
-	// Query hardware capability for MFG
 	uint32_t maxFrames = 1;
 	if (slDLSSGGetState) {
 		sl::DLSSGState state{};
@@ -119,8 +46,6 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		maxFrames = state.numFramesToGenerateMax;
 	}
 
-	// Enable DLSS-G - called once at init, not per-frame
-	// Clamp requested frames to hardware max (1 on RTX 40xx, up to 3 on RTX 50xx)
 	auto upscaling = Upscaling::GetSingleton();
 	uint32_t requestedFrames = std::clamp((uint32_t)upscaling->settings.frameGenFrames, 1u, maxFrames);
 
@@ -137,11 +62,10 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		return false;
 	}
 
-	featureDLSSG = true;
+	sessionActive = true;
 	L->info("DLSS-G enabled: {}x frame gen (requested {}, hardware max {})",
 		requestedFrames + 1, upscaling->settings.frameGenFrames, maxFrames);
 
-	// Reflex must be active when DLSS-G is on
 	if (slReflexSetOptions) {
 		sl::ReflexOptions reflexOptions{};
 		reflexOptions.mode = sl::ReflexMode::eLowLatency;
@@ -160,7 +84,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 
 void StreamlineFG::SetEnabled(bool a_enabled)
 {
-	if (!slDLSSGSetOptions || !featureDLSSG) return;
+	if (!slDLSSGSetOptions || !sessionActive) return;
 
 	sl::DLSSGOptions options{};
 	options.mode = a_enabled ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
@@ -189,9 +113,10 @@ static sl::float3 toSLFloat3(const __m128* v)
 
 void StreamlineFG::AcquireFrameToken()
 {
-	if (!slGetNewFrameToken || !featureDLSSG) return;
+	auto* core = cs::Streamline::GetSingleton();
+	if (!core->slGetNewFrameToken || !sessionActive) return;
 
-	if (SL_FAILED(res, slGetNewFrameToken(frameToken, nullptr))) {
+	if (SL_FAILED(res, core->slGetNewFrameToken(frameToken, nullptr))) {
 		static bool loggedOnce = false;
 		if (!loggedOnce) { L->error("Failed to get frame token"); loggedOnce = true; }
 	}
@@ -215,10 +140,12 @@ void StreamlineFG::Present(
 	float a_cameraNear, float a_cameraFar,
 	const CameraData& a_camera)
 {
-	if (!featureDLSSG || !frameToken) return;
+	if (!sessionActive || !frameToken) return;
+
+	auto* core = cs::Streamline::GetSingleton();
 
 	// Set per-frame constants - matrices MUST be unjittered per DLSS-G docs
-	if (slSetConstants) {
+	if (core->slSetConstants) {
 		sl::Constants constants{};
 
 		// Derive unjittered projection: inv(viewMat) * viewProjUnjittered
@@ -243,7 +170,6 @@ void StreamlineFG::Present(
 		constants.cameraNear = a_cameraNear;
 		constants.cameraFar = a_cameraFar;
 		constants.cameraAspectRatio = a_screenSize.x / a_screenSize.y;
-		// Extract vertical FOV from unjittered projection matrix
 		constants.cameraFOV = 2.0f * std::atan(1.0f / constants.cameraViewToClip[1].y);
 		constants.cameraMotionIncluded = sl::Boolean::eTrue;
 		constants.cameraPinholeOffset = { 0.f, 0.f };
@@ -256,19 +182,17 @@ void StreamlineFG::Present(
 		constants.motionVectorsDilated = sl::Boolean::eFalse;
 		constants.motionVectorsJittered = sl::Boolean::eFalse;
 
-		if (SL_FAILED(res, slSetConstants(constants, *frameToken, viewport))) {
+		if (SL_FAILED(res, core->slSetConstants(constants, *frameToken, viewport))) {
 			static bool loggedOnce = false;
 			if (!loggedOnce) { L->error("Failed to set constants"); loggedOnce = true; }
 		}
 	}
 
-	// Tag D3D12 resources
-	if (a_depth && a_motionVectors && a_hudlessColor && slSetTagForFrame) {
+	if (a_depth && a_motionVectors && a_hudlessColor && core->slSetTagForFrame) {
 		sl::Resource depth = { sl::ResourceType::eTex2d, a_depth, 0 };
 		sl::Resource mvec = { sl::ResourceType::eTex2d, a_motionVectors, 0 };
 		sl::Resource hudless = { sl::ResourceType::eTex2d, a_hudlessColor, 0 };
 
-		// Explicit extent matching screen size
 		sl::Extent fullExtent = { 0, 0, (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
 
 		// UIAlpha (single-channel) drives recomposition; DLSS-G prefers it over UIColorAndAlpha when both are tagged.
@@ -282,15 +206,15 @@ void StreamlineFG::Present(
 			{ a_uiColorAlpha ? &uiColorRes : nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, a_uiColorAlpha ? &fullExtent : nullptr },
 			{ a_uiAlpha      ? &uiAlphaRes : nullptr, sl::kBufferTypeUIAlpha,         sl::ResourceLifecycle::eValidUntilPresent, a_uiAlpha      ? &fullExtent : nullptr },
 		};
-		slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
+		core->slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), (sl::CommandBuffer*)a_cmdList);
 	}
 }
 
 void StreamlineFG::Shutdown()
 {
-	if (slInitialized && slShutdown) {
-		slShutdown();
-		slInitialized = false;
+	auto* core = cs::Streamline::GetSingleton();
+	if (core->slShutdown && core->IsInitialized()) {
+		core->slShutdown();
 	}
 }
 
