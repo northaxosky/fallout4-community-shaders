@@ -33,7 +33,7 @@ namespace cs::features
 			float  previewScale = 0.30f;
 			bool   showPreview = true;
 
-			bool   applyToScene = true;     // Master toggle for the apply pass that multiplies the mask into kDiffuseBuffer.
+			bool   applyToScene = false;    // Off by default until visual validation passes; turn on in the menu to test.
 			bool   sunOnly = true;          // Gate apply by N.L vs sun; off = global multiply.
 			float  applyContrast = 1.0f;    // Apply-pass strength; 0 = no apply, 1 = full mask multiply.
 		};

@@ -395,6 +395,13 @@ namespace cs::features
 		ID3D11UnorderedAccessView* uavs[1] = { shadowsTexture->uav.get() };
 		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
+		// Bend only writes pixels covered by its dispatch quadrants; everything else (off-screen
+		// quadrants when the sun is behind the camera, pixels too far from the light) keeps its
+		// prior content. Clear to 1 so unwritten regions read as fully lit instead of inheriting
+		// last frame's values or uninitialized memory.
+		const float clearValue[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		context->ClearUnorderedAccessViewFloat(shadowsTexture->uav.get(), clearValue);
+
 		ID3D11SamplerState* samplers[1] = { pointBorderSampler.get() };
 		context->CSSetSamplers(0, 1, samplers);
 
