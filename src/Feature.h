@@ -17,7 +17,12 @@ namespace cs
 
 		virtual void Load() {}
 		virtual void OnDataLoaded() {}
+
+		// Runs after every feature's Load(). Use this for hooks that must wrap a hook another
+		// feature installs in its Load(): write_thunk_call patches in registration order, so
+		// installing later means your thunk wraps theirs (e.g. Imagespace wrapping Upscaling).
 		virtual void OnPostPostLoad() {}
+
 		virtual void DrawSettings() {}
 
 		// Always-on overlay rendered on top of the game even when the settings menu is closed.

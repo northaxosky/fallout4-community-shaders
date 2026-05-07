@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <imgui.h>
 
+#include "ComputeScope.h"
 #include "Env.h"
 #include "Log.h"
 #include "SimpleIni.h"
@@ -541,23 +542,7 @@ namespace cs::features
 		if (wantComposite && !compCS) return;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-
-		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-		ID3D11DepthStencilView* savedDSV = nullptr;
-		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
-		context->OMSetRenderTargets(0, nullptr, nullptr);
-
-		auto clearCSBindings = [&]() {
-			ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
-			context->CSSetShaderResources(0, 4, nullSRVs);
-			ID3D11SamplerState* nullSamp[1] = { nullptr };
-			context->CSSetSamplers(0, 1, nullSamp);
-			ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
-			context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
-			ID3D11Buffer* nullCBs[1] = { nullptr };
-			context->CSSetConstantBuffers(0, 1, nullCBs);
-			context->CSSetShader(nullptr, nullptr, 0);
-		};
+		cs::ComputeScope scope(context);
 
 		// === 1. Luminance pyramid ===
 		// Mip 0: kFrameBuffer -> half-res log-luma; mip k>0: 2x2 average of previous pyramid mip.
@@ -746,13 +731,6 @@ namespace cs::features
 			context->CSSetUnorderedAccessViews(0, 1, clearUAV, nullptr);
 			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
 		}
-
-		clearCSBindings();
-
-		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
-		for (auto* rtv : savedRTVs)
-			if (rtv) rtv->Release();
-		if (savedDSV) savedDSV->Release();
 
 		// One-shot CPU readback of the EMA scalar to log a probe value.
 		static int readbackCountdown = 60;

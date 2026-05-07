@@ -4,12 +4,11 @@
 #include <utility>
 #include <vector>
 
+#include "Engine.h"
+
 namespace cs::features::imagespace::Util
 {
-	enum class RenderTarget
-	{
-		kFrameBuffer = 0,
-	};
+	using RenderTarget = cs::engine::RenderTarget;
 
 	[[nodiscard]] inline RE::BSGraphics::State* State_GetSingleton()
 	{

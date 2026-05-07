@@ -12,6 +12,8 @@
 #include "bend_sss_cpu.h"
 #pragma warning(pop)
 
+#include "ComputeScope.h"
+#include "Engine.h"
 #include "Env.h"
 #include "Log.h"
 #include "RE/N/NiAVObject.h"
@@ -26,9 +28,8 @@ namespace cs::features
 
 	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.ini";
 
-	// FO4 RT enum slot indices (see features/Upscaling/src/Util.h for the canonical list).
-	constexpr uint32_t kRT_GbufferNormal = 20;
-	constexpr uint32_t kRT_DiffuseBuffer = 58;
+	constexpr uint32_t kRT_GbufferNormal = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
+	constexpr uint32_t kRT_DiffuseBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
 
 	struct RaymarchCB
 	{
@@ -549,14 +550,9 @@ namespace cs::features
 		if (!depthSRV)
 			return;
 
-		// Post-DeferredPrePass the depth target is still bound as a write-DSV to OM, which prevents
-		// the SRV bind from taking effect and depth reads silently return 0. Save the engine's OM
-		// state, unbind for our compute, and restore on exit so subsequent passes see the same
-		// render-target/DSV configuration the engine left.
-		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-		ID3D11DepthStencilView* savedDSV = nullptr;
-		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
-		context->OMSetRenderTargets(0, nullptr, nullptr);
+		// Post-DeferredPrePass the depth target is still bound as a write-DSV; ComputeScope unbinds
+		// so the SRV bind takes effect, then restores the engine's OM state on exit.
+		cs::ComputeScope scope(context);
 
 		static bool loggedDepth = false;
 		if (!loggedDepth) {
@@ -664,24 +660,6 @@ namespace cs::features
 			context->Dispatch(d.WaveCount[0], d.WaveCount[1], d.WaveCount[2]);
 		}
 
-		// Unbind so the engine's subsequent passes don't inherit our slot 0 SRV/UAV.
-		ID3D11ShaderResourceView* nullSRV[1] = { nullptr };
-		context->CSSetShaderResources(0, 1, nullSRV);
-		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
-		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		ID3D11SamplerState* nullSampler[1] = { nullptr };
-		context->CSSetSamplers(0, 1, nullSampler);
-		ID3D11Buffer* nullCB[1] = { nullptr };
-		context->CSSetConstantBuffers(1, 1, nullCB);
-		context->CSSetShader(nullptr, nullptr, 0);
-
-		// Restore the OM state we saved at entry. OMGetRenderTargets AddRef'd each non-null view;
-		// release after restoring.
-		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
-		for (auto* rtv : savedRTVs)
-			if (rtv) rtv->Release();
-		if (savedDSV) savedDSV->Release();
-
 		// One-shot CPU readback to log mask stats; lets the smoke harness verify shadows are written
 		// without requiring eyes-on-screen visual A/B.
 		static int readbackCountdown = 200;
@@ -784,13 +762,9 @@ namespace cs::features
 		cb.SunOnly = settings.sunOnly ? 1u : 0u;
 		applyCB->Update(cb);
 
-		// Same OM/SRV conflict as DrawShadows: kDiffuseBuffer is still bound as a write-RTV to OM
-		// after DeferredLightsImpl. Save state, unbind, restore on exit so subsequent passes see the
-		// engine's original render-target configuration.
-		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-		ID3D11DepthStencilView* savedDSV = nullptr;
-		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
-		context->OMSetRenderTargets(0, nullptr, nullptr);
+		// Same OM/RTV conflict as DrawShadows: kDiffuseBuffer is still bound as a write-RTV after
+		// DeferredLightsImpl. ComputeScope unbinds for our compute and restores on exit.
+		cs::ComputeScope scope(context);
 
 		ID3D11ShaderResourceView* srvs[3] = {
 			shadowsTexture->srv.get(),
@@ -814,19 +788,8 @@ namespace cs::features
 		// Unbind UAV before the CopyResource since the destination is the SRV input we just sampled from.
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		ID3D11ShaderResourceView* nullSRVs[3] = { nullptr, nullptr, nullptr };
-		context->CSSetShaderResources(0, 3, nullSRVs);
-		ID3D11Buffer* nullCB[1] = { nullptr };
-		context->CSSetConstantBuffers(0, 1, nullCB);
-		context->CSSetShader(nullptr, nullptr, 0);
 
 		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
-
-		// Restore OM state. OMGetRenderTargets AddRef'd each non-null view; release after restoring.
-		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
-		for (auto* rtv : savedRTVs)
-			if (rtv) rtv->Release();
-		if (savedDSV) savedDSV->Release();
 	}
 
 	void ScreenSpaceShadows::DrawSettings()
