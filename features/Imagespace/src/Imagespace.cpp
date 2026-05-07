@@ -811,6 +811,7 @@ namespace cs::features
 		ImGui::Separator();
 		ImGui::Text("Adaptive exposure");
 		dirty |= ImGui::Checkbox("Adaptive enable", &settings.bAdaptiveExposure);
+		ImGui::BeginDisabled(!settings.bAdaptiveExposure);
 		ImGui::SliderFloat("Adaptation speed (s)", &settings.fAdaptationSpeed, 0.1f, 5.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 		ImGui::SliderFloat("Key (mid-grey)", &settings.fExposureKey, 0.05f, 0.5f, "%.3f");
@@ -819,32 +820,42 @@ namespace cs::features
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 		ImGui::SliderFloat("Max adapted", &settings.fExposureMax, 1.0f, 16.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Bloom");
 		dirty |= ImGui::Checkbox("Bloom enable", &settings.bBloomEnable);
+		ImGui::BeginDisabled(!settings.bBloomEnable);
 		ImGui::SliderFloat("Threshold", &settings.fBloomThreshold, 0.0f, 2.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 		ImGui::SliderFloat("Intensity", &settings.fBloomIntensity, 0.0f, 0.3f, "%.3f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 		ImGui::SliderInt("Mips", &settings.iBloomMips, 3, 6);
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Lens");
 		dirty |= ImGui::Checkbox("Vignette", &settings.bVignetteEnable);
+		ImGui::BeginDisabled(!settings.bVignetteEnable);
 		ImGui::SliderFloat("Vignette intensity", &settings.fVignetteIntensity, 0.0f, 1.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Chromatic aberration", &settings.bCAEnable);
+		ImGui::BeginDisabled(!settings.bCAEnable);
 		ImGui::SliderFloat("CA intensity", &settings.fCAIntensity, 0.0f, 2.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
+		ImGui::BeginDisabled(!settings.bSharpenEnable);
 		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Color grading (LUT)");
 		dirty |= ImGui::Checkbox("LUT enabled", &settings.bLUTEnable);
+		ImGui::BeginDisabled(!settings.bLUTEnable);
 		char lutBuf[256] = {};
 		const auto lutLen = std::min(settings.sLUTPath.size(), sizeof(lutBuf) - 1);
 		std::memcpy(lutBuf, settings.sLUTPath.data(), lutLen);
@@ -863,6 +874,7 @@ namespace cs::features
 		else        ImGui::TextDisabled("no LUT loaded");
 		ImGui::SliderFloat("LUT strength", &settings.fLUTStrength, 0.0f, 1.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::EndDisabled();
 
 		if (dirty) SaveSettings();
 	}

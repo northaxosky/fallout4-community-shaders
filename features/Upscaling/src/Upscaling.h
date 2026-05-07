@@ -80,7 +80,6 @@ public:
 	{
 		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS; ///< Preferred upscaling method
 		uint qualityMode = 1;									   ///< Quality mode: 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance
-		float sharpness = 0.5f;									   ///< Post-upscale sharpening: 0.0=off, 1.0=max
 	};
 
 	Settings settings;
@@ -363,7 +362,6 @@ private:
 	// Shader Resources (Private)
 	// ========================================
 
-	winrt::com_ptr<ID3D11ComputeShader> rcas;                        ///< RCAS sharpening shader
 	winrt::com_ptr<ID3D11ComputeShader> dilateMotionVectorCS;        ///< Motion vector dilation shader
 	winrt::com_ptr<ID3D11ComputeShader> overrideLinearDepthCS;       ///< Linear depth upscaling shader
 	winrt::com_ptr<ID3D11ComputeShader> overrideDepthCS;             ///< Depth copy shader

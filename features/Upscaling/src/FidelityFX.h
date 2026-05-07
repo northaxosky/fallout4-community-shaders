@@ -89,12 +89,11 @@ public:
 	 * @param a_color Input color texture at render resolution
 	 * @param a_jitter Camera jitter offset for current frame
 	 * @param a_renderSize Render resolution dimensions
-	 * @param a_sharpness Sharpening amount (0.0-1.0)
 	 *
 	 * Performs temporal upscaling from render resolution to display resolution
 	 * using FSR3 algorithm with motion vectors, depth, and reactive mask.
 	 */
-	void Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize, float a_sharpness);
+	void Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize);
 
 	// ========================================
 	// Resources

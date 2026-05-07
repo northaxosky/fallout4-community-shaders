@@ -386,10 +386,9 @@ void Upscaling::LoadSettings()
 
 	settings.upscaleMethodPreference = static_cast<uint>(ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2));
 	settings.qualityMode = static_cast<uint>(ini.GetLongValue("Settings", "iQualityMode", 1));
-	settings.sharpness = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", 0.5)), 0.0f, 1.0f);
 
-	L->info("Loaded: upscaleMethod={}, qualityMode={}, sharpness={:.2f}",
-		settings.upscaleMethodPreference, settings.qualityMode, settings.sharpness);
+	L->info("Loaded: upscaleMethod={}, qualityMode={}",
+		settings.upscaleMethodPreference, settings.qualityMode);
 }
 
 void Upscaling::SaveSettings()
@@ -400,7 +399,6 @@ void Upscaling::SaveSettings()
 
 	ini.SetLongValue("Settings", "iUpscaleMethodPreference", settings.upscaleMethodPreference);
 	ini.SetLongValue("Settings", "iQualityMode", settings.qualityMode);
-	ini.SetDoubleValue("Settings", "fSharpness", settings.sharpness);
 
 	ini.SaveFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini");
 }
@@ -433,10 +431,7 @@ void Upscaling::DrawSettings()
 		SaveSettings();
 	}
 
-	if (ImGui::SliderFloat("Sharpness", &settings.sharpness, 0.0f, 1.0f, "%.2f")) {
-		settings.sharpness = std::clamp(settings.sharpness, 0.0f, 1.0f);
-		SaveSettings();
-	}
+	ImGui::TextDisabled("Sharpening moved to Imagespace -> Lens -> Sharpen (CAS).");
 }
 
 void Upscaling::OnDataLoaded()
@@ -1303,7 +1298,7 @@ void Upscaling::Upscale()
 	if (upscaleMethod == UpscaleMethod::kDLSS) {
 		Streamline::GetSingleton()->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
 	} else if (upscaleMethod == UpscaleMethod::kFSR) {
-		FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize, settings.sharpness);
+		FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize);
 	}
 
 	// Copy upscaled result back to the frame buffer

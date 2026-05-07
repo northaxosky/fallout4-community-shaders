@@ -146,7 +146,7 @@ void FidelityFX::GenerateReactiveMask()
 		L->critical("Failed to dispatch reactive mask!");
 }
 
-void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize, float a_sharpness)
+void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize)
 {
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
@@ -198,8 +198,7 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 		dispatchParameters.cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
 		dispatchParameters.cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
-		dispatchParameters.enableSharpening = true;
-		dispatchParameters.sharpness = a_sharpness;
+		dispatchParameters.enableSharpening = false;
 
 		dispatchParameters.cameraFovAngleVertical = 1.0f;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
@@ -210,10 +209,10 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 
 		static bool loggedOnce = false;
 		if (!loggedOnce) {
-			L->info("First FSR3 dispatch: renderSize={}x{}, jitter=({}, {}), sharpness={}, deltaTime={:.3f}ms, cameraNear={}, cameraFar={}",
+			L->info("First FSR3 dispatch: renderSize={}x{}, jitter=({}, {}), deltaTime={:.3f}ms, cameraNear={}, cameraFar={}",
 				dispatchParameters.renderSize.width, dispatchParameters.renderSize.height,
 				dispatchParameters.jitterOffset.x, dispatchParameters.jitterOffset.y,
-				dispatchParameters.sharpness, dispatchParameters.frameTimeDelta,
+				dispatchParameters.frameTimeDelta,
 				dispatchParameters.cameraNear, dispatchParameters.cameraFar);
 			loggedOnce = true;
 		}

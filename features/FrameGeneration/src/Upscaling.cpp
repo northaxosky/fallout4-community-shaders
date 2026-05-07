@@ -187,6 +187,9 @@ void Upscaling::DrawSettings()
 	}
 	ImGui::Text("Active: %s", activeStr);
 
+	if (cs::env::IsENBLoaded())
+		ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: frame generation routes through ENB's swap-chain wrapper; FSR3 path is most compatible.");
+
 	ImGui::Separator();
 
 	if (ImGui::Checkbox("Enable frame generation", &settings.frameGenerationMode))

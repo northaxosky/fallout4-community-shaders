@@ -27,7 +27,7 @@ namespace cs::features
 		{
 			bool        enabled            = true;
 
-			// Tonemap + LUT (Slice 2).
+			// Tonemap + LUT.
 			int         iOperator          = 1;
 			float       fExposure          = 1.0f;
 			bool        bLUTEnable         = false;
@@ -70,7 +70,7 @@ namespace cs::features
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);
 		bool LoadLUTFromDisk(const std::string& a_filename);
 
-		// Composite (Slice 2 + bundle extensions).
+		// Composite (tonemap + LUT + bloom-add + lens).
 		std::unique_ptr<imagespace::Texture2D>      compositeScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> compositeCB;
 		ID3D11ComputeShader*                        compositeCS = nullptr;
