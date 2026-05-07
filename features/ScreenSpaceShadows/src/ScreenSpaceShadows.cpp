@@ -438,8 +438,12 @@ namespace cs::features
 			return;
 
 		// Post-DeferredPrePass the depth target is still bound as a write-DSV to OM, which prevents
-		// the SRV bind from taking effect and depth reads silently return 0. Unbind OM so the SRV
-		// path works; the engine rebinds whatever it needs at the start of the next pipeline stage.
+		// the SRV bind from taking effect and depth reads silently return 0. Save the engine's OM
+		// state, unbind for our compute, and restore on exit so subsequent passes see the same
+		// render-target/DSV configuration the engine left.
+		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+		ID3D11DepthStencilView* savedDSV = nullptr;
+		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
 		context->OMSetRenderTargets(0, nullptr, nullptr);
 
 		static bool loggedDepth = false;
@@ -558,6 +562,13 @@ namespace cs::features
 		ID3D11Buffer* nullCB[1] = { nullptr };
 		context->CSSetConstantBuffers(1, 1, nullCB);
 		context->CSSetShader(nullptr, nullptr, 0);
+
+		// Restore the OM state we saved at entry. OMGetRenderTargets AddRef'd each non-null view;
+		// release after restoring.
+		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+		for (auto* rtv : savedRTVs)
+			if (rtv) rtv->Release();
+		if (savedDSV) savedDSV->Release();
 
 		// One-shot CPU readback to log mask stats; lets the smoke harness verify shadows are written
 		// without requiring eyes-on-screen visual A/B.
