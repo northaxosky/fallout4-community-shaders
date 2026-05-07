@@ -164,10 +164,19 @@ namespace cs::features
 		auto* lightObj = reinterpret_cast<RE::NiAVObject*>(sky->sun->light.get());
 		auto& rot = lightObj->world.rotate;
 
-		// Column 2 = local +Z axis in world space (the Bethesda directional-light forward).
-		float x = rot.entry[0].z;
-		float y = rot.entry[1].z;
-		float z = rot.entry[2].z;
+		static bool loggedMatrix = false;
+		if (!loggedMatrix) {
+			L->info("Sun rotation row0=({:.3f},{:.3f},{:.3f},{:.3f})", rot.entry[0].x, rot.entry[0].y, rot.entry[0].z, rot.entry[0].w);
+			L->info("Sun rotation row1=({:.3f},{:.3f},{:.3f},{:.3f})", rot.entry[1].x, rot.entry[1].y, rot.entry[1].z, rot.entry[1].w);
+			L->info("Sun rotation row2=({:.3f},{:.3f},{:.3f},{:.3f})", rot.entry[2].x, rot.entry[2].y, rot.entry[2].z, rot.entry[2].w);
+			loggedMatrix = true;
+		}
+
+		// FO4's directional light stores the world-space sun direction in row 0 of its NiTransform::rotate;
+		// rows 1 and 2 are identity placeholders, not a real rotation. Verified via runtime matrix dump.
+		float x = rot.entry[0].x;
+		float y = rot.entry[0].y;
+		float z = rot.entry[0].z;
 		const float invLen = 1.0f / std::max(std::sqrt(x * x + y * y + z * z), 1e-6f);
 		outX = x * invLen;
 		outY = y * invLen;
@@ -237,7 +246,7 @@ namespace cs::features
 			sd.AddressU = D3D11_TEXTURE_ADDRESS_BORDER;
 			sd.AddressV = D3D11_TEXTURE_ADDRESS_BORDER;
 			sd.AddressW = D3D11_TEXTURE_ADDRESS_BORDER;
-			// Border equals FarDepthValue so off-screen samples read as the far plane and produce no occluder.
+			// Border equals FarDepthValue (1.0 in standard depth) so off-screen samples produce no occluder.
 			sd.BorderColor[0] = 1.0f;
 			sd.BorderColor[1] = 1.0f;
 			sd.BorderColor[2] = 1.0f;
@@ -365,6 +374,8 @@ namespace cs::features
 		const auto* vpRows = reinterpret_cast<const float*>(camView.viewProjMat);
 
 		DirectX::XMMATRIX vpMat = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(vpRows));
+		// Bethesda's __m128[4] view-proj is column-major-stored; transpose to put it in the row-vector convention DirectXMath expects.
+		vpMat = DirectX::XMMatrixTranspose(vpMat);
 		// Skyrim CS does the negation here when packing the directional light into homogeneous (w=0) form.
 		DirectX::XMVECTOR lightDir = DirectX::XMVectorSet(-dirX, -dirY, -dirZ, 0.0f);
 		DirectX::XMVECTOR projected = DirectX::XMVector4Transform(lightDir, vpMat);
@@ -372,11 +383,34 @@ namespace cs::features
 		alignas(16) float lightProj[4];
 		DirectX::XMStoreFloat4(reinterpret_cast<DirectX::XMFLOAT4*>(lightProj), projected);
 
+		static bool loggedOnce = false;
+		if (!loggedOnce) {
+			L->info("Sun WS=({:.3f},{:.3f},{:.3f}) lightProj=({:.3f},{:.3f},{:.3f},{:.3f})",
+				dirX, dirY, dirZ, lightProj[0], lightProj[1], lightProj[2], lightProj[3]);
+			loggedOnce = true;
+		}
+
 		const int viewportSize[2] = { static_cast<int>(shadowsWidth), static_cast<int>(shadowsHeight) };
 		int minBounds[2] = { 0, 0 };
 		int maxBounds[2] = { viewportSize[0], viewportSize[1] };
 
 		auto dispatchList = Bend::BuildDispatchList(lightProj, const_cast<int*>(viewportSize), minBounds, maxBounds);
+
+		static bool loggedDispatch = false;
+		if (!loggedDispatch) {
+			L->info("DispatchCount={} viewport={}x{} lightCoord=({:.1f},{:.1f},{:.4f},{:.0f})",
+				dispatchList.DispatchCount, viewportSize[0], viewportSize[1],
+				dispatchList.LightCoordinate_Shader[0], dispatchList.LightCoordinate_Shader[1],
+				dispatchList.LightCoordinate_Shader[2], dispatchList.LightCoordinate_Shader[3]);
+			for (int i = 0; i < dispatchList.DispatchCount; ++i) {
+				const auto& d = dispatchList.Dispatch[i];
+				L->info("  dispatch[{}] WaveCount=({},{},{}) WaveOffset=({},{})",
+					i, d.WaveCount[0], d.WaveCount[1], d.WaveCount[2],
+					d.WaveOffset_Shader[0], d.WaveOffset_Shader[1]);
+			}
+			loggedDispatch = true;
+		}
+
 		if (dispatchList.DispatchCount == 0)
 			return;
 
@@ -389,16 +423,76 @@ namespace cs::features
 		auto* depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth);
 		if (!depthSRV)
 			return;
+
+		// Post-DeferredPrePass the depth target is still bound as a write-DSV to OM, which prevents
+		// the SRV bind from taking effect and depth reads silently return 0. Unbind OM so the SRV
+		// path works; the engine rebinds whatever it needs at the start of the next pipeline stage.
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+
+		static bool loggedDepth = false;
+		if (!loggedDepth) {
+			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+			depthSRV->GetDesc(&sd);
+			L->info("Depth SRV format={} dimension={}", static_cast<int>(sd.Format), static_cast<int>(sd.ViewDimension));
+
+			// Probe the actual depth-texture contents via a CPU readback. If Bend's early-out is
+			// firing for every pixel, the depth reads must be uniformly 0 or 1.
+			auto* depthSrcTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
+			if (depthSrcTex) {
+				D3D11_TEXTURE2D_DESC depthDesc{};
+				depthSrcTex->GetDesc(&depthDesc);
+				L->info("Depth texture format={} usage={} dims={}x{}",
+					static_cast<int>(depthDesc.Format), static_cast<int>(depthDesc.Usage), depthDesc.Width, depthDesc.Height);
+
+				// Allocate a staging texture in a typeless format compatible with R24_UNORM_X8_TYPELESS.
+				D3D11_TEXTURE2D_DESC stagingDesc = depthDesc;
+				stagingDesc.Usage = D3D11_USAGE_STAGING;
+				stagingDesc.BindFlags = 0;
+				stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+				stagingDesc.MiscFlags = 0;
+				auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
+				winrt::com_ptr<ID3D11Texture2D> staging;
+				if (SUCCEEDED(device->CreateTexture2D(&stagingDesc, nullptr, staging.put()))) {
+					context->CopyResource(staging.get(), depthSrcTex);
+					D3D11_MAPPED_SUBRESOURCE mapped{};
+					if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+						uint32_t minR = UINT32_MAX, maxR = 0;
+						uint64_t sum = 0, count = 0;
+						const uint8_t* rows = static_cast<const uint8_t*>(mapped.pData);
+						for (uint32_t y = 0; y < depthDesc.Height; y += 16) {
+							for (uint32_t x = 0; x < depthDesc.Width; x += 16) {
+								// R24_UNORM_X8: low 24 bits hold depth, high 8 hold stencil. Read 32-bit word.
+								uint32_t word = *reinterpret_cast<const uint32_t*>(rows + y * mapped.RowPitch + x * 4);
+								uint32_t d24 = word & 0x00FFFFFFu;
+								if (d24 < minR) minR = d24;
+								if (d24 > maxR) maxR = d24;
+								sum += d24;
+								++count;
+							}
+						}
+						context->Unmap(staging.get(), 0);
+						const double mean24 = count ? (double)sum / (double)count : 0.0;
+						const double max24 = double((1u << 24) - 1u);
+						L->info("Depth probe (sampled 1/256 px): min={:.4f} max={:.4f} mean={:.4f}",
+							minR / max24, maxR / max24, mean24 / max24);
+					} else {
+						L->info("Depth probe: Map failed");
+					}
+				} else {
+					L->info("Depth probe: CreateTexture2D(staging) failed");
+				}
+			}
+
+			loggedDepth = true;
+		}
 		ID3D11ShaderResourceView* srvs[1] = { depthSRV };
 		context->CSSetShaderResources(0, 1, srvs);
 
 		ID3D11UnorderedAccessView* uavs[1] = { shadowsTexture->uav.get() };
 		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
-		// Bend only writes pixels covered by its dispatch quadrants; everything else (off-screen
-		// quadrants when the sun is behind the camera, pixels too far from the light) keeps its
-		// prior content. Clear to 1 so unwritten regions read as fully lit instead of inheriting
-		// last frame's values or uninitialized memory.
+		// Bend only writes pixels its dispatch quadrants cover; clear to 1.0 (lit) so unwritten
+		// regions don't inherit last frame's values or uninitialized memory.
 		const float clearValue[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 		context->ClearUnorderedAccessViewFloat(shadowsTexture->uav.get(), clearValue);
 
@@ -423,6 +517,7 @@ namespace cs::features
 			cb.LightCoordinate[3] = dispatchList.LightCoordinate_Shader[3];
 			cb.WaveOffset[0] = d.WaveOffset_Shader[0];
 			cb.WaveOffset[1] = d.WaveOffset_Shader[1];
+			// FO4 uses standard depth convention (near=0, far=1); confirmed via depth-buffer probe (outdoor mean ~0.99).
 			cb.FarDepthValue = 1.0f;
 			cb.NearDepthValue = 0.0f;
 			cb.InvDepthTextureSize[0] = invW;
@@ -447,6 +542,53 @@ namespace cs::features
 		ID3D11Buffer* nullCB[1] = { nullptr };
 		context->CSSetConstantBuffers(1, 1, nullCB);
 		context->CSSetShader(nullptr, nullptr, 0);
+
+		// One-shot CPU readback to log mask stats; lets the smoke harness verify shadows are written
+		// without requiring eyes-on-screen visual A/B.
+		static int readbackCountdown = 200;
+		if (readbackCountdown > 0) {
+			--readbackCountdown;
+			if (readbackCountdown == 0) {
+				auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
+				D3D11_TEXTURE2D_DESC sd{};
+				sd.Width = shadowsWidth;
+				sd.Height = shadowsHeight;
+				sd.MipLevels = 1;
+				sd.ArraySize = 1;
+				sd.Format = DXGI_FORMAT_R8_UNORM;
+				sd.SampleDesc.Count = 1;
+				sd.Usage = D3D11_USAGE_STAGING;
+				sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+				winrt::com_ptr<ID3D11Texture2D> staging;
+				if (SUCCEEDED(device->CreateTexture2D(&sd, nullptr, staging.put()))) {
+					context->CopyResource(staging.get(), shadowsTexture->resource.get());
+					D3D11_MAPPED_SUBRESOURCE mapped{};
+					if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+						const uint8_t* rows = static_cast<const uint8_t*>(mapped.pData);
+						uint32_t minV = 255, maxV = 0;
+						uint64_t sum = 0;
+						uint64_t count = 0;
+						uint64_t lessThanOneCount = 0;
+						const uint32_t stride = mapped.RowPitch;
+						for (uint32_t y = 0; y < shadowsHeight; y += 4) {
+							for (uint32_t x = 0; x < shadowsWidth; x += 4) {
+								uint8_t v = rows[y * stride + x];
+								if (v < minV) minV = v;
+								if (v > maxV) maxV = v;
+								sum += v;
+								if (v < 255) ++lessThanOneCount;
+								++count;
+							}
+						}
+						context->Unmap(staging.get(), 0);
+						const double mean = count ? (double)sum / (double)count : 0.0;
+						const double pctShadowed = count ? 100.0 * (double)lessThanOneCount / (double)count : 0.0;
+						L->info("Mask stats (sampled 1/16 pixels): min={} max={} mean={:.1f} shadowedPct={:.2f}%",
+							minV, maxV, mean, pctShadowed);
+					}
+				}
+			}
+		}
 	}
 
 	void ScreenSpaceShadows::Apply()
