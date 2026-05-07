@@ -25,9 +25,7 @@ namespace Util
 		return singleton.get();
 	}
 
-	// CommonLibF4 has a 0x30 pad in RenderTargetManager that shifts dynamicWidthRatio
-	// to 0xFB8, but the OG game binary reads from 0xF88 (no pad). We must write to both
-	// the struct member (for our code) and the real game offset (for the game's code).
+	// CommonLibF4 has a 0x30 pad shifting dynamic-res offsets; OG binary reads the no-pad layout.
 	static constexpr std::ptrdiff_t GAME_DYNAMIC_WIDTH_RATIO_OFFSET = 0xF88;
 	static constexpr std::ptrdiff_t GAME_DYNAMIC_HEIGHT_RATIO_OFFSET = 0xF8C;
 	static constexpr std::ptrdiff_t GAME_IS_DYNAMIC_RES_ACTIVATED_OFFSET = 0xFA8;

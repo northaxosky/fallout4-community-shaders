@@ -4,10 +4,7 @@
 
 namespace cs
 {
-	// Saves the OM render-target binding on construction and unbinds RTVs/DSV so compute work
-	// can run without bind-conflicts on resources currently bound as RTV/DSV. On destruction:
-	// clears CS-stage bindings (SRVs, sampler, UAV, CB, shader) so the next pass doesn't see
-	// ours, restores the saved OM state, releases the AddRef'd RTVs/DSV.
+	// RAII: saves+unbinds OM on entry; clears CS-stage bindings and restores OM on exit. Not re-entrant.
 	class ComputeScope
 	{
 	public:

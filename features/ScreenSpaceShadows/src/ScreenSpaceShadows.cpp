@@ -127,9 +127,7 @@ namespace cs::features
 				static_cast<int>(Preset::kCustom), static_cast<int>(Preset::kCinematic));
 		}
 
-		// Smoke-harness override: the marker's presence forces all knobs to known values so the test
-		// is independent of whatever the user's INI happens to contain. Markers are deleted by the
-		// harness on exit, so interactive runs are unaffected.
+		// Smoke-harness override: marker presence forces all knobs to known values; cleared on harness exit.
 		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_force_apply";
 		constexpr const char* kExtremeMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_extreme";
 
@@ -295,9 +293,7 @@ namespace cs::features
 		if (!rendererData || !rendererData->device)
 			return false;
 
-		// Size the mask off the depth target rather than the back buffer. Under DRS the proxied
-		// targets (depth, kGbufferNormal, kDiffuseBuffer) all live at sub-native dimensions; using
-		// screenWidth/Height would put the mask in a different coordinate space than the apply pass.
+		// Size off the depth target so the mask matches the proxied DRS dims, not the back buffer.
 		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(sss::Util::DepthStencilTarget::kMain)];
 		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
 		if (!depthTex)
@@ -503,10 +499,7 @@ namespace cs::features
 			loggedOnce = true;
 		}
 
-		// Proxy-aware bounds: the depth texture is allocated at back-buffer size, but under DRS the
-		// engine only writes valid depth into the top-left proxy region. Probing kDiffuseBuffer gives
-		// the engine's actual render dims; dispatching outside that region reads stale memory and
-		// Bend's start_depth==0/1 early-out keeps the mask cleared.
+		// Under DRS the depth texture is back-buffer-sized but only valid in the top-left proxy region; use kDiffuseBuffer's dims as the render bounds.
 		uint32_t renderW = shadowsWidth;
 		uint32_t renderH = shadowsHeight;
 		auto& diffuseRT = rendererData->renderTargets[kRT_DiffuseBuffer];
@@ -629,9 +622,7 @@ namespace cs::features
 
 		context->CSSetShader(cs, nullptr, 0);
 
-		// InvDepthTextureSize is 1/full-mask-size: read_xy lives in mask pixel coords [0..proxy], and
-		// Bend converts to UV via read_xy * Inv. With DynamicRes=(1,1), UV reaches proxy/full = ratio,
-		// which lands UV [0,1] reads on the depth texture's actual content region.
+		// 1/full-mask-size: Bend's read_xy * Inv with DynamicRes=(1,1) lands UV reads on the depth texture's content region.
 		const float invW = 1.0f / static_cast<float>(shadowsWidth);
 		const float invH = 1.0f / static_cast<float>(shadowsHeight);
 

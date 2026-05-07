@@ -284,8 +284,7 @@ namespace cs::features
 
 		const bool dimChanged = (a_width != pyramidWidth || a_height != pyramidHeight);
 		if (dimChanged || !lumPyramid) {
-			// Pyramid texture starts at half-res (mip 0 = W/2 x H/2). Mip count picks up where
-			// D3D's natural layout takes us to 1x1 from the half-res base.
+			// Pyramid mip 0 = W/2 x H/2 so D3D's auto-mip layout matches our 2x downsample dispatch.
 			const uint32_t baseW  = std::max(1u, a_width  / 2);
 			const uint32_t baseH  = std::max(1u, a_height / 2);
 			const uint32_t maxDim = std::max(baseW, baseH);

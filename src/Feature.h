@@ -18,20 +18,15 @@ namespace cs
 		virtual void Load() {}
 		virtual void OnDataLoaded() {}
 
-		// Runs after every feature's Load(). Use this for hooks that must wrap a hook another
-		// feature installs in its Load(): write_thunk_call patches in registration order, so
-		// installing later means your thunk wraps theirs (e.g. Imagespace wrapping Upscaling).
+		// Runs after all features' Load(). Defer here to wrap hooks installed in another feature's Load().
 		virtual void OnPostPostLoad() {}
 
 		virtual void DrawSettings() {}
 
 		// Always-on overlay rendered on top of the game even when the settings menu is closed.
-		// Default empty; features that want a HUD-style widget override this.
 		virtual void DrawOverlay() {}
 
 		// Fired by cs::Streamline once the D3D11 device exists and the SDK is initialized.
-		// Features cache feature-specific Streamline entry points here via slGetFeatureFunction.
-		// Default empty; features that don't use Streamline ignore it.
 		virtual void OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* /*device*/) {}
 	};
 

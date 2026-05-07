@@ -40,13 +40,10 @@ namespace cs
 		// Idempotent. Invokes slInit with the aggregated featuresToLoad on first call.
 		bool Initialize();
 
-		// Two pieces, each idempotent: slSetD3DDevice runs once with the first device, the
-		// feature-availability sweep runs once against the adapter. Feature::OnD3D11Ready fires
-		// every call so the FG proxy path can re-trigger fan-out after binding D3D12.
+		// Idempotent device + feature-sweep registration; broadcasts to features each call so FG can re-trigger after D3D12 binding.
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device);
 
-		// FG calls this after slSetD3DDevice(D3D12) so a later OnD3D11Ready on the D3D11
-		// device doesn't overwrite the D3D12 binding DLSS-G needs.
+		// FG sets this after binding D3D12 so a later D3D11 OnD3D11Ready doesn't overwrite the D3D12 binding.
 		void MarkD3DDeviceRegistered();
 
 		bool IsInitialized() const noexcept { return _initialized; }

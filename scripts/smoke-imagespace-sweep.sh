@@ -128,10 +128,7 @@ run_diff "off vs reinhard"       "$OFF"       "$REI"      1    25
 run_diff "off vs lottes"         "$OFF"       "$LOT"      0.3  25
 run_diff "hable vs reinhard"     "$HAB"       "$REI"      1    25
 run_diff "hable vs lottes"       "$HAB"       "$LOT"      1    25
-# Bundle effects produce small deltas on this central-60 crop because: bloom is LDR-bounded
-# so threshold-knee filters most pixels; vignette darkens >= r=0.63 which is outside the crop;
-# CA + sharpen are per-pixel local effects with sub-1% global luminance signature. Plumbing is
-# verified by non-zero delta in the expected direction; visual quality is eyes-on.
+# Lens/bloom deltas are small on the central-60 crop; gates verify plumbing only, not visual quality.
 run_diff "bloom off vs on"       "$BLOOM_OFF" "$BLOOM_ON" 0.3  20
 run_diff "vignette off vs on"    "$VIG_OFF"   "$VIG_ON"   0.3  15
 run_diff "ca off vs on"          "$CA_OFF"    "$CA_ON"    0    15

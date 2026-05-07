@@ -2,9 +2,7 @@
 
 namespace cs::engine
 {
-	// FO4's render-target indices into RE::BSGraphics::RendererData::renderTargets[].
-	// Source of truth for cross-feature engine-RE constants; feature-local Util.h files
-	// alias this rather than redeclaring entries.
+	// FO4's render-target indices; canonical source for cross-feature engine-RE constants.
 	enum class RenderTarget
 	{
 		kFrameBuffer = 0,
