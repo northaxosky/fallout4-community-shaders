@@ -12,6 +12,7 @@
 #include "Log.h"
 #include "SimpleIni.h"
 #include "Util.h"
+#include "Weather.h"
 
 namespace cs::features
 {
@@ -496,6 +497,18 @@ namespace cs::features
 		if (!firstFireLogged) {
 			L->info("RunFrame first fire (post-Upscale chain validated)");
 			firstFireLogged = true;
+		}
+
+		static bool weatherProbeLogged = false;
+		if (!weatherProbeLogged) {
+			const auto w = cs::engine::SnapshotWeather();
+			if (w.current) {
+				L->info("Weather probe: current={} previous={} pct={:.3f}",
+					static_cast<const void*>(w.current),
+					static_cast<const void*>(w.previous),
+					w.transitionPct);
+				weatherProbeLogged = true;
+			}
 		}
 
 		auto& fb = rendererData->renderTargets[kRT_FrameBuffer];
