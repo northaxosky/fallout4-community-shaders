@@ -113,6 +113,21 @@ namespace cs::features
 		settings.sunOnly           = ini.GetBoolValue("Apply",      "bSunOnly",          settings.sunOnly);
 		settings.applyContrast     = std::clamp(static_cast<float>(ini.GetDoubleValue("Apply", "fApplyContrast", settings.applyContrast)), 0.0f, 2.0f);
 
+		// Marker file override: file contents "0" disables apply, "1" enables it. The smoke harness
+		// uses this to drive baseline-vs-applied diffs without mutating the user INI. Bash export
+		// doesn't propagate through MO2's launcher to the native Windows process so a file is more
+		// reliable than an env var.
+		{
+			constexpr const char* kMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_force_apply";
+			FILE* f = nullptr;
+			if (fopen_s(&f, kMarker, "r") == 0 && f) {
+				char c = static_cast<char>(fgetc(f));
+				fclose(f);
+				if (c == '0') settings.applyToScene = false;
+				else if (c == '1') settings.applyToScene = true;
+			}
+		}
+
 		settings.previewScale      = std::clamp(static_cast<float>(ini.GetDoubleValue("Debug", "fPreviewScale", settings.previewScale)), 0.05f, 1.0f);
 		settings.showPreview       = ini.GetBoolValue("Debug",      "bShowPreview",      settings.showPreview);
 	}
@@ -676,6 +691,14 @@ namespace cs::features
 		cb.SunOnly = settings.sunOnly ? 1u : 0u;
 		applyCB->Update(cb);
 
+		// Same OM/SRV conflict as DrawShadows: kDiffuseBuffer is still bound as a write-RTV to OM
+		// after DeferredLightsImpl. Save state, unbind, restore on exit so subsequent passes see the
+		// engine's original render-target configuration.
+		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+		ID3D11DepthStencilView* savedDSV = nullptr;
+		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
+		context->OMSetRenderTargets(0, nullptr, nullptr);
+
 		ID3D11ShaderResourceView* srvs[3] = {
 			shadowsTexture->srv.get(),
 			normalSRV,
@@ -705,6 +728,12 @@ namespace cs::features
 		context->CSSetShader(nullptr, nullptr, 0);
 
 		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
+
+		// Restore OM state. OMGetRenderTargets AddRef'd each non-null view; release after restoring.
+		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+		for (auto* rtv : savedRTVs)
+			if (rtv) rtv->Release();
+		if (savedDSV) savedDSV->Release();
 	}
 
 	void ScreenSpaceShadows::DrawSettings()
