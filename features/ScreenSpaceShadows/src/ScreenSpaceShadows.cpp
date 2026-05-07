@@ -113,18 +113,43 @@ namespace cs::features
 		settings.sunOnly           = ini.GetBoolValue("Apply",      "bSunOnly",          settings.sunOnly);
 		settings.applyContrast     = std::clamp(static_cast<float>(ini.GetDoubleValue("Apply", "fApplyContrast", settings.applyContrast)), 0.0f, 2.0f);
 
-		// Marker file override: file contents "0" disables apply, "1" enables it. The smoke harness
-		// uses this to drive baseline-vs-applied diffs without mutating the user INI. Bash export
-		// doesn't propagate through MO2's launcher to the native Windows process so a file is more
-		// reliable than an env var.
+		// Smoke-harness override: the marker's presence forces all knobs to known values so the test
+		// is independent of whatever the user's INI happens to contain. Markers are deleted by the
+		// harness on exit, so interactive runs are unaffected.
+		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_force_apply";
+		constexpr const char* kExtremeMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_extreme";
+
+		bool applyMarkerPresent = false;
+		bool applyMarkerEnable  = false;
 		{
-			constexpr const char* kMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_force_apply";
 			FILE* f = nullptr;
-			if (fopen_s(&f, kMarker, "r") == 0 && f) {
+			if (fopen_s(&f, kApplyMarker, "r") == 0 && f) {
 				char c = static_cast<char>(fgetc(f));
 				fclose(f);
-				if (c == '0') settings.applyToScene = false;
-				else if (c == '1') settings.applyToScene = true;
+				applyMarkerPresent = true;
+				applyMarkerEnable = (c == '1');
+			}
+		}
+
+		testModeActive = applyMarkerPresent;
+
+		if (applyMarkerPresent) {
+			// Reset every knob to canonical defaults so smoke A/B isn't polluted by INI drift.
+			settings.enabled           = true;
+			settings.sampleCount       = 1;
+			settings.surfaceThickness  = 0.020f;
+			settings.bilinearThreshold = 0.020f;
+			settings.shadowContrast    = 1.0f;
+			settings.applyToScene      = applyMarkerEnable;
+			settings.sunOnly           = true;
+			settings.applyContrast     = 1.0f;
+
+			FILE* f = nullptr;
+			if (fopen_s(&f, kExtremeMarker, "r") == 0 && f) {
+				fclose(f);
+				settings.shadowContrast = 4.0f;
+				settings.applyContrast  = 2.0f;
+				settings.sunOnly        = false;
 			}
 		}
 
@@ -134,6 +159,11 @@ namespace cs::features
 
 	void ScreenSpaceShadows::SaveSettings()
 	{
+		// Don't write back marker-overridden values to the user's INI. Markers are smoke-only;
+		// any persistence here would pollute the user's saved configuration.
+		if (testModeActive)
+			return;
+
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);

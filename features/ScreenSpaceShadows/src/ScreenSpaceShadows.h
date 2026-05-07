@@ -65,6 +65,8 @@ namespace cs::features
 		uint32_t                             shadowsWidth = 0;
 		uint32_t                             shadowsHeight = 0;
 
+		bool testModeActive = false;
+
 		// Apply-pass resources
 		std::unique_ptr<sss::Texture2D>      scratchDiffuse;
 		std::unique_ptr<sss::ConstantBuffer> applyCB;
