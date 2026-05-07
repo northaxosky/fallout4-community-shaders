@@ -47,7 +47,7 @@ namespace cs::features
 
 	struct ApplyShadowsCB
 	{
-		float    SunDirectionWS[3];
+		float    SunDirectionVS[3];
 		float    ApplyContrast;
 		float    ScreenSize[2];
 		uint32_t SunOnly;
@@ -390,7 +390,20 @@ namespace cs::features
 			loggedOnce = true;
 		}
 
-		const int viewportSize[2] = { static_cast<int>(shadowsWidth), static_cast<int>(shadowsHeight) };
+		// Proxy-aware bounds: the depth texture is allocated at back-buffer size, but under DRS the
+		// engine only writes valid depth into the top-left proxy region. Probing kDiffuseBuffer gives
+		// the engine's actual render dims; dispatching outside that region reads stale memory and
+		// Bend's start_depth==0/1 early-out keeps the mask cleared.
+		uint32_t renderW = shadowsWidth;
+		uint32_t renderH = shadowsHeight;
+		auto& diffuseRT = rendererData->renderTargets[kRT_DiffuseBuffer];
+		if (auto* diffuseTex = reinterpret_cast<ID3D11Texture2D*>(diffuseRT.texture)) {
+			D3D11_TEXTURE2D_DESC dd{};
+			diffuseTex->GetDesc(&dd);
+			renderW = dd.Width;
+			renderH = dd.Height;
+		}
+		const int viewportSize[2] = { static_cast<int>(renderW), static_cast<int>(renderH) };
 		int minBounds[2] = { 0, 0 };
 		int maxBounds[2] = { viewportSize[0], viewportSize[1] };
 
@@ -504,8 +517,11 @@ namespace cs::features
 
 		context->CSSetShader(cs, nullptr, 0);
 
-		const float invW = 1.0f / static_cast<float>(viewportSize[0]);
-		const float invH = 1.0f / static_cast<float>(viewportSize[1]);
+		// InvDepthTextureSize is 1/full-mask-size: read_xy lives in mask pixel coords [0..proxy], and
+		// Bend converts to UV via read_xy * Inv. With DynamicRes=(1,1), UV reaches proxy/full = ratio,
+		// which lands UV [0,1] reads on the depth texture's actual content region.
+		const float invW = 1.0f / static_cast<float>(shadowsWidth);
+		const float invH = 1.0f / static_cast<float>(shadowsHeight);
 
 		for (int i = 0; i < dispatchList.DispatchCount; ++i) {
 			const auto& d = dispatchList.Dispatch[i];
@@ -629,10 +645,20 @@ namespace cs::features
 		if (!cs)
 			return;
 
+		// Transform world-space sun into view space so the dot product with view-space gbuffer normals is meaningful.
+		auto* viewport = sss::Util::State_GetSingleton();
+		auto& camView = viewport->cameraState.camViewData;
+		DirectX::XMMATRIX viewMat = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(camView.viewMat));
+		viewMat = DirectX::XMMatrixTranspose(viewMat);
+		DirectX::XMVECTOR sunWS = DirectX::XMVectorSet(dirX, dirY, dirZ, 0.0f);
+		DirectX::XMVECTOR sunVS = DirectX::XMVector4Transform(sunWS, viewMat);
+		alignas(16) float vsArr[4];
+		DirectX::XMStoreFloat4(reinterpret_cast<DirectX::XMFLOAT4*>(vsArr), sunVS);
+
 		ApplyShadowsCB cb{};
-		cb.SunDirectionWS[0] = dirX;
-		cb.SunDirectionWS[1] = dirY;
-		cb.SunDirectionWS[2] = dirZ;
+		cb.SunDirectionVS[0] = vsArr[0];
+		cb.SunDirectionVS[1] = vsArr[1];
+		cb.SunDirectionVS[2] = vsArr[2];
 		cb.ApplyContrast = settings.applyContrast;
 		cb.ScreenSize[0] = static_cast<float>(scratchWidth);
 		cb.ScreenSize[1] = static_cast<float>(scratchHeight);

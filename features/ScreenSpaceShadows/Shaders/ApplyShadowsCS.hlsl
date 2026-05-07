@@ -9,7 +9,7 @@ RWTexture2D<float4>    Output         : register(u0);
 
 cbuffer PerFrame : register(b0)
 {
-	float3 SunDirectionWS;   // Normalized world-space sun direction (toward the sun is -SunDirectionWS).
+	float3 SunDirectionVS;   // Normalized view-space sun direction; matches the view-space normals in kGbufferNormal.
 	float  ApplyContrast;    // [0, 2]; 0 = no apply, 1 = full mask multiply, >1 darkens further.
 	float2 ScreenSize;
 	uint   SunOnly;          // bool32: 1 = gate by N.L, 0 = global multiply.
@@ -22,12 +22,14 @@ cbuffer PerFrame : register(b0)
 	if (px.x >= (int)ScreenSize.x || px.y >= (int)ScreenSize.y)
 		return;
 
-	float4 normalSample = NormalTexture.Load(int3(px, 0));
-	// Most Bethesda gbuffer normals are stored as [0,1]-encoded XYZ. If runtime probing
-	// reveals a different encoding we'll branch this; for now the simple decode covers it.
-	float3 N = normalize(normalSample.xyz * 2.0 - 1.0);
+	// FO4 stores view-space normals in kGbufferNormal as R16G16_UNORM: XY in [0,1], Z reconstructed
+	// with implicit +Z sign (toward the camera in view space).
+	float2 nxy = NormalTexture.Load(int3(px, 0)).xy * 2.0 - 1.0;
+	float3 N;
+	N.xy = nxy;
+	N.z = sqrt(saturate(1.0 - dot(nxy, nxy)));
 
-	float ndotl = saturate(dot(N, -SunDirectionWS));
+	float ndotl = saturate(dot(N, -SunDirectionVS));
 
 	float mask = ShadowsTexture.Load(int3(px, 0)).x;
 
