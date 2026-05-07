@@ -104,6 +104,12 @@ namespace cs::features
 		ini.LoadFile(kIniPath);
 
 		settings.enabled           = ini.GetBoolValue("Settings",   "bEnabled",          settings.enabled);
+
+		// First-launch detection: -1 sentinel means the key was absent. Existing INIs are trusted as-is
+		// to preserve any manual slider customisations the user has accumulated.
+		const long iniPreset = ini.GetLongValue("Settings", "iPreset", -1);
+		const bool firstLaunch = (iniPreset == -1);
+
 		settings.sampleCount       = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iSampleCount", settings.sampleCount)), 1, 4);
 		settings.surfaceThickness  = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSurfaceThickness", settings.surfaceThickness)), 0.001f, 0.1f);
 		settings.bilinearThreshold = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBilinearThreshold", settings.bilinearThreshold)), 0.001f, 1.0f);
@@ -112,6 +118,13 @@ namespace cs::features
 		settings.applyToScene      = ini.GetBoolValue("Apply",      "bApplyToScene",     settings.applyToScene);
 		settings.sunOnly           = ini.GetBoolValue("Apply",      "bSunOnly",          settings.sunOnly);
 		settings.applyContrast     = std::clamp(static_cast<float>(ini.GetDoubleValue("Apply", "fApplyContrast", settings.applyContrast)), 0.0f, 2.0f);
+
+		if (firstLaunch) {
+			ApplyPreset(Preset::kQuality);
+		} else {
+			settings.preset = std::clamp(static_cast<int>(iniPreset),
+				static_cast<int>(Preset::kCustom), static_cast<int>(Preset::kCinematic));
+		}
 
 		// Smoke-harness override: the marker's presence forces all knobs to known values so the test
 		// is independent of whatever the user's INI happens to contain. Markers are deleted by the
@@ -169,6 +182,7 @@ namespace cs::features
 		ini.LoadFile(kIniPath);
 
 		ini.SetBoolValue("Settings",   "bEnabled",           settings.enabled);
+		ini.SetLongValue("Settings",   "iPreset",            settings.preset);
 		ini.SetLongValue("Settings",   "iSampleCount",       settings.sampleCount);
 		ini.SetDoubleValue("Settings", "fSurfaceThickness",  settings.surfaceThickness);
 		ini.SetDoubleValue("Settings", "fBilinearThreshold", settings.bilinearThreshold);
@@ -182,6 +196,51 @@ namespace cs::features
 		ini.SetBoolValue("Debug",      "bShowPreview",       settings.showPreview);
 
 		ini.SaveFile(kIniPath);
+	}
+
+	struct PresetValues
+	{
+		int   sampleCount;
+		float surfaceThickness;
+		float bilinearThreshold;
+		float shadowContrast;
+		float applyContrast;
+	};
+
+	// Indexed by Preset enum. Keep BilinearThreshold near Bend's recommended 0.02 across the board;
+	// the cost knob is sample count + thickness, not bilinear sensitivity.
+	static constexpr PresetValues kPresets[4] = {
+		{ 0, 0.0f,    0.0f,    0.0f,    0.0f  },  // Custom: sentinel, never read.
+		{ 1, 0.030f,  0.040f,  0.75f,   0.7f  },  // Performance: looser thickness, slightly relaxed bilinear.
+		{ 1, 0.020f,  0.020f,  1.0f,    1.0f  },  // Quality (default).
+		{ 3, 0.010f,  0.020f,  1.5f,    1.2f  },  // Cinematic: more samples, tighter thickness, stronger contrast.
+	};
+
+	void ScreenSpaceShadows::ApplyPreset(Preset preset)
+	{
+		const int idx = static_cast<int>(preset);
+		if (preset != Preset::kCustom && idx >= 0 && idx < static_cast<int>(std::size(kPresets))) {
+			const auto& v = kPresets[idx];
+			settings.sampleCount       = v.sampleCount;
+			settings.surfaceThickness  = v.surfaceThickness;
+			settings.bilinearThreshold = v.bilinearThreshold;
+			settings.shadowContrast    = v.shadowContrast;
+			settings.applyContrast     = v.applyContrast;
+		}
+		settings.preset = idx;
+	}
+
+	bool ScreenSpaceShadows::SettingsMatchPreset(Preset preset) const
+	{
+		const int idx = static_cast<int>(preset);
+		if (preset == Preset::kCustom || idx < 0 || idx >= static_cast<int>(std::size(kPresets)))
+			return false;
+		const auto& v = kPresets[idx];
+		return settings.sampleCount == v.sampleCount
+			&& std::fabs(settings.surfaceThickness - v.surfaceThickness) < 1e-4f
+			&& std::fabs(settings.bilinearThreshold - v.bilinearThreshold) < 1e-4f
+			&& std::fabs(settings.shadowContrast - v.shadowContrast) < 1e-3f
+			&& std::fabs(settings.applyContrast - v.applyContrast) < 1e-3f;
 	}
 
 	uint32_t ScreenSpaceShadows::GetScaledSampleCount() const
@@ -403,6 +462,14 @@ namespace cs::features
 	{
 		if (!settings.enabled)
 			return;
+		// ENB ships its own SSS implementation; skip ours so we don't double up or stomp its passes.
+		if (cs::env::IsENBLoaded()) {
+			if (!enbWarningLogged) {
+				L->info("ENB detected; SSS disabled (ENB ships its own SSS)");
+				enbWarningLogged = true;
+			}
+			return;
+		}
 		if (!EnsureResources())
 			return;
 
@@ -670,13 +737,9 @@ namespace cs::features
 		if (!shadowsTexture || !shadowsTexture->srv)
 			return;
 
-		if (cs::env::IsENBLoaded()) {
-			if (!enbWarningLogged) {
-				L->info("ENB detected; SSS apply pass disabled (ENB rewires the deferred pipeline)");
-				enbWarningLogged = true;
-			}
+		// DrawShadows already logs and short-circuits on ENB; we just need to skip the apply path quietly.
+		if (cs::env::IsENBLoaded())
 			return;
-		}
 
 		if (!EnsureApplyResources())
 			return;
@@ -769,37 +832,76 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		bool dirty = false;
+
+		// Status panel: ENB takes precedence over our SSS, so flag it and grey out interactive controls.
+		const bool enbActive = cs::env::IsENBLoaded();
+		if (enbActive) {
+			ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "ENB detected: SSS skipped");
+			ImGui::TextDisabled("ENB ships its own screen-space shadow pass; we yield to avoid double-shadowing.");
+			ImGui::Separator();
+		}
+
+		ImGui::BeginDisabled(enbActive);
+
 		dirty |= ImGui::Checkbox("Enabled", &settings.enabled);
 
-		ImGui::SliderInt("Sample count multiplier", &settings.sampleCount, 1, 4);
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
-		ImGui::SliderFloat("Surface thickness", &settings.surfaceThickness, 0.001f, 0.1f, "%.4f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
-		ImGui::SliderFloat("Bilinear threshold", &settings.bilinearThreshold, 0.001f, 1.0f, "%.4f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
-		ImGui::SliderFloat("Shadow contrast", &settings.shadowContrast, 0.0f, 4.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::Separator();
+		ImGui::TextDisabled("Quality preset");
+		const char* presetNames[] = { "Custom", "Performance", "Quality", "Cinematic" };
+		int presetIdx = std::clamp(settings.preset, 0, 3);
+		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
+			if (presetIdx != static_cast<int>(Preset::kCustom)) {
+				ApplyPreset(static_cast<Preset>(presetIdx));
+			} else {
+				settings.preset = static_cast<int>(Preset::kCustom);
+			}
+			dirty = true;
+		}
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Apply pass");
+		ImGui::TextDisabled("Quality (manual)");
+		ImGui::TextDisabled("Editing any slider switches the preset to Custom.");
+
+		auto markCustomIfEdited = [&]() {
+			if (ImGui::IsItemDeactivatedAfterEdit()) {
+				if (!SettingsMatchPreset(static_cast<Preset>(settings.preset)))
+					settings.preset = static_cast<int>(Preset::kCustom);
+				dirty = true;
+			}
+		};
+
+		ImGui::SliderInt("Sample count multiplier", &settings.sampleCount, 1, 4);
+		markCustomIfEdited();
+		ImGui::SliderFloat("Surface thickness", &settings.surfaceThickness, 0.001f, 0.1f, "%.4f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("Bilinear threshold", &settings.bilinearThreshold, 0.001f, 1.0f, "%.4f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("Shadow contrast", &settings.shadowContrast, 0.0f, 4.0f, "%.2f");
+		markCustomIfEdited();
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Apply pass (writes attenuation into the diffuse light buffer)");
 		dirty |= ImGui::Checkbox("Apply mask to scene", &settings.applyToScene);
 		dirty |= ImGui::Checkbox("Sun-lit regions only", &settings.sunOnly);
 		ImGui::SliderFloat("Apply contrast", &settings.applyContrast, 0.0f, 2.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		markCustomIfEdited();
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Debug viewer");
+		ImGui::TextDisabled("Debug");
 		dirty |= ImGui::Checkbox("Show mask preview", &settings.showPreview);
-		ImGui::SliderFloat("Preview scale", &settings.previewScale, 0.05f, 1.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
-
-		if (settings.showPreview && shadowsTexture && shadowsTexture->srv) {
-			const float w = static_cast<float>(shadowsWidth) * settings.previewScale;
-			const float h = static_cast<float>(shadowsHeight) * settings.previewScale;
-			ImGui::Image(reinterpret_cast<ImTextureID>(shadowsTexture->srv.get()), ImVec2(w, h));
-		} else {
-			ImGui::TextDisabled("Mask not yet available (requires loaded scene with sky).");
+		if (settings.showPreview) {
+			ImGui::SliderFloat("Preview scale", &settings.previewScale, 0.05f, 1.0f, "%.2f");
+			if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+			if (shadowsTexture && shadowsTexture->srv) {
+				const float w = static_cast<float>(shadowsWidth) * settings.previewScale;
+				const float h = static_cast<float>(shadowsHeight) * settings.previewScale;
+				ImGui::Image(reinterpret_cast<ImTextureID>(shadowsTexture->srv.get()), ImVec2(w, h));
+			} else {
+				ImGui::TextDisabled("Mask not yet available (load an outdoor scene first).");
+			}
 		}
+
+		ImGui::EndDisabled();
 
 		if (dirty)
 			SaveSettings();

@@ -23,19 +23,31 @@ namespace cs::features
 		// Multiplies the mask into kDiffuseBuffer with N.L gating against the sun. Runs in the post-call thunk on DrawWorld::DeferredLightsImpl.
 		void Apply();
 
+		enum class Preset : int
+		{
+			kCustom      = 0,
+			kPerformance = 1,
+			kQuality     = 2,
+			kCinematic   = 3,
+		};
+
 		struct Settings
 		{
 			bool   enabled = true;
+			int    preset = static_cast<int>(Preset::kQuality);
+
+			// Quality knobs; preset switches these together. Manual slider edits flip preset to Custom.
 			int    sampleCount = 1;
 			float  surfaceThickness = 0.020f;
 			float  bilinearThreshold = 0.020f;
 			float  shadowContrast = 1.0f;
-			float  previewScale = 0.30f;
-			bool   showPreview = true;
 
-			bool   applyToScene = false;    // Off by default until visual validation passes; turn on in the menu to test.
-			bool   sunOnly = true;          // Gate apply by N.L vs sun; off = global multiply.
-			float  applyContrast = 1.0f;    // Apply-pass strength; 0 = no apply, 1 = full mask multiply.
+			bool   applyToScene = false;    // Off until user opts in.
+			bool   sunOnly = true;
+			float  applyContrast = 1.0f;
+
+			bool   showPreview = false;
+			float  previewScale = 0.30f;
 		};
 
 		Settings settings;
@@ -45,6 +57,9 @@ namespace cs::features
 
 		void LoadSettings();
 		void SaveSettings();
+
+		void ApplyPreset(Preset preset);
+		bool SettingsMatchPreset(Preset preset) const;
 
 		bool EnsureResources();
 		bool EnsureApplyResources();
