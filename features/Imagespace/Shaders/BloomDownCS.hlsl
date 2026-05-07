@@ -1,6 +1,4 @@
-// Kawase 4-tap downsample. Reads bloomChain[k] at half-pixel offsets, averages, writes to
-// bloomChain[k+1]. Cheaper than a full Gaussian; produces the soft halo bloom is known for.
-// Reference: Masaki Kawase, GDC 2003 "Frame Buffer Postprocessing Effects".
+// Kawase 4-tap downsample (Masaki Kawase, GDC 2003 "Frame Buffer Postprocessing Effects").
 
 Texture2D<float4>     SrcMip : register(t0);
 SamplerState          LinearClampSampler : register(s0);

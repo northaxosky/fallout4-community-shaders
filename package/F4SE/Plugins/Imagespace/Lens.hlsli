@@ -15,8 +15,8 @@ float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 
 {
     const float2 centred = uv * 2.0 - 1.0;
     const float2 toCenter = -centred;
-    const float  r = saturate(length(centred));
-    const float  mag = intensity * r * r * 0.01;
+    const float  r2 = saturate(dot(centred, centred));
+    const float  mag = intensity * r2 * 0.01;
 
     const float2 uvR = uv + toCenter * mag;
     const float2 uvB = uv - toCenter * mag;

@@ -76,7 +76,7 @@ LOG_S_OFF="$(mktemp)"; LOG_S_ON="$(mktemp)"
 trap 'rm -f "$LOG_OFF" "$LOG_HAB" "$LOG_REI" "$LOG_LOT" "$LOG_BL_OFF" "$LOG_BL_ON" "$LOG_V_OFF" "$LOG_V_ON" "$LOG_C_OFF" "$LOG_C_ON" "$LOG_S_OFF" "$LOG_S_ON"; clear_markers; restore_ini' EXIT
 backup_ini
 
-# Operator sweep (Slice 2 baseline gates).
+# Operator sweep.
 write_op 0 ; run_smoke "operator=off"      "$LOG_OFF" ; capture off      "$(extract_results_dir "$LOG_OFF")" "$OFF"
 write_op 1 ; run_smoke "operator=hable"    "$LOG_HAB" ; capture hable    "$(extract_results_dir "$LOG_HAB")" "$HAB"
 write_op 2 ; run_smoke "operator=reinhard" "$LOG_REI" ; capture reinhard "$(extract_results_dir "$LOG_REI")" "$REI"
@@ -116,9 +116,9 @@ run_diff() {
     local within
     within="$(awk -v v="$absL" -v lo="$want_min" -v hi="$want_max" 'BEGIN { print (v >= lo && v <= hi) ? 1 : 0 }')"
     if [ "$within" = "1" ]; then
-        echo "OPERATOR-SWEEP VERDICT: PASS (|dL|=${absL}% within slice gate)"
+        echo "OPERATOR-SWEEP VERDICT: PASS (|dL|=${absL}% within tolerance)"
     else
-        echo "OPERATOR-SWEEP VERDICT: FAIL (|dL|=${absL}% outside slice gate)"
+        echo "OPERATOR-SWEEP VERDICT: FAIL (|dL|=${absL}% outside tolerance)"
     fi
 }
 

@@ -213,6 +213,7 @@ void Upscaling::DrawSettings()
 			settings.frameGenFrames = mfgIdx + 1;
 			SaveSettings();
 		}
+		ImGui::SetItemTooltip("3x/4x require an RTX 50-series GPU; older GPUs silently fall back to 2x.");
 	}
 
 	if (ImGui::Checkbox("Disable in menus", &settings.disableInMenus))
@@ -221,6 +222,7 @@ void Upscaling::DrawSettings()
 		SaveSettings();
 	if (ImGui::Checkbox("Streamline debug logging", &settings.debugLogging))
 		SaveSettings();
+	ImGui::SetItemTooltip("Takes effect on next launch.");
 
 	ImGui::TextDisabled("Mode and MFG changes take effect on next launch.");
 }

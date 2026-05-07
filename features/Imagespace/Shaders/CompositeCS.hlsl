@@ -22,16 +22,15 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     const float2 uv = (float2(px) + 0.5) / float2(OutputDimensions);
 
-    // 1. Sharpening on input scene (CAS-first).
+    // CA resamples InputColor at radial offsets, so it would discard any CAS result. When CA is on,
+    // skip CAS entirely; when CA is off, CAS sharpens the input scene.
     float3 c;
-    if (SharpenEnable != 0)
+    if (CAEnable != 0)
+        c = SampleWithCA(InputColor, LinearClampSampler, uv, float2(OutputDimensions), CAIntensity);
+    else if (SharpenEnable != 0)
         c = ApplyCAS(InputColor, int2(px), Sharpness);
     else
         c = InputColor.Load(int3(px, 0)).rgb;
-
-    // 2. CA: resample the input scene at radial offsets to introduce fringing on bright edges.
-    if (CAEnable != 0)
-        c = SampleWithCA(InputColor, LinearClampSampler, uv, float2(OutputDimensions), CAIntensity);
 
     // 3. Operator path: linear domain.
     if (Operator != 0 || BloomEnable != 0) {

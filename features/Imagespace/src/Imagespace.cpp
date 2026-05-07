@@ -229,10 +229,9 @@ namespace cs::features
 
 	bool Imagespace::EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format)
 	{
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData || !rendererData->device)
+		auto* device = imagespace::Util::GetD3DDevice();
+		if (!device)
 			return false;
-		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
 		const bool dimChanged = (a_width != scratchWidth || a_height != scratchHeight || a_format != scratchFormat);
 		if (dimChanged || !compositeScratch) {
@@ -278,10 +277,9 @@ namespace cs::features
 
 	bool Imagespace::EnsurePyramidResources(uint32_t a_width, uint32_t a_height)
 	{
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData || !rendererData->device)
+		auto* device = imagespace::Util::GetD3DDevice();
+		if (!device)
 			return false;
-		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
 		const bool dimChanged = (a_width != pyramidWidth || a_height != pyramidHeight);
 		if (dimChanged || !lumPyramid) {
@@ -364,8 +362,7 @@ namespace cs::features
 
 	bool Imagespace::EnsureBloomResources(uint32_t a_width, uint32_t a_height, int a_mips)
 	{
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData || !rendererData->device)
+		if (!imagespace::Util::GetD3DDevice())
 			return false;
 
 		const uint32_t halfW = std::max(1u, a_width  / 2);
@@ -431,7 +428,6 @@ namespace cs::features
 	bool Imagespace::LoadLUTFromDisk(const std::string& a_filename)
 	{
 		if (a_filename.empty()) {
-			lutTexture = nullptr;
 			lutSRV = nullptr;
 			lutLoadedPath.clear();
 			return false;
@@ -442,10 +438,9 @@ namespace cs::features
 			return false;
 		}
 
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData || !rendererData->device)
+		auto* device = imagespace::Util::GetD3DDevice();
+		if (!device)
 			return false;
-		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
 		DirectX::ScratchImage img;
 		DirectX::TexMetadata  meta{};
@@ -482,7 +477,7 @@ namespace cs::features
 			return false;
 		}
 
-		lutTexture = tex;
+		// SRV holds a refcount on the underlying Texture3D for the lifetime of the SRV.
 		lutSRV     = srv;
 		lutLoadedPath = a_filename;
 		L->info("LUT loaded: {}", path);
@@ -565,13 +560,13 @@ namespace cs::features
 		};
 
 		// === 1. Luminance pyramid ===
-		// Convention: every mip is a 2x2 average. Mip 0 reads kFrameBuffer (full res input)
-		// and writes the half-res log-luma. Mip k>0 reads previous pyramid mip and halves again.
-		// pyramid texture dims = (W, H); pyramid mip 0 dims = (W/2, H/2) per D3D's auto-mip layout.
+		// Mip 0: kFrameBuffer -> half-res log-luma; mip k>0: 2x2 average of previous pyramid mip.
 		if (wantAdaptive) {
 			context->CSSetShader(lumCS, nullptr, 0);
 			ID3D11Buffer* pyrCBs[1] = { pyramidCB->CB() };
 			context->CSSetConstantBuffers(0, 1, pyrCBs);
+			ID3D11ShaderResourceView* srvs[2] = { fbSRV, lumPyramid->srv.get() };
+			context->CSSetShaderResources(0, 2, srvs);
 
 			for (uint32_t mip = 0; mip < pyramidMipCount; ++mip) {
 				const uint32_t dstW = std::max(1u, W >> (mip + 1));
@@ -584,8 +579,6 @@ namespace cs::features
 				cb.DstDimensions[1] = dstH;
 				pyramidCB->Update(cb);
 
-				ID3D11ShaderResourceView* srvs[2] = { fbSRV, lumPyramid->srv.get() };
-				context->CSSetShaderResources(0, 2, srvs);
 				ID3D11UnorderedAccessView* uavs[1] = { lumPyramidUAVs[mip].get() };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 				const uint32_t gx = (dstW + 7) / 8;
@@ -761,7 +754,7 @@ namespace cs::features
 			if (rtv) rtv->Release();
 		if (savedDSV) savedDSV->Release();
 
-		// One-shot CPU readback of the EMA scalar so smoke can confirm adaptive exposure path.
+		// One-shot CPU readback of the EMA scalar to log a probe value.
 		static int readbackCountdown = 60;
 		if (wantAdaptive && readbackCountdown > 0) {
 			--readbackCountdown;
@@ -793,6 +786,8 @@ namespace cs::features
 	void Imagespace::DrawSettings()
 	{
 		bool dirty = false;
+		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
+
 		dirty |= ImGui::Checkbox("Enabled", &settings.enabled);
 
 		if (cs::env::IsENBLoaded())
@@ -803,23 +798,25 @@ namespace cs::features
 		const char* opNames[] = { "Off (passthrough)", "Hable filmic", "Reinhard extended", "Lottes" };
 		if (ImGui::Combo("Operator", &settings.iOperator, opNames, IM_ARRAYSIZE(opNames)))
 			dirty = true;
+		ImGui::SetItemTooltip("Affects only the tonemap stage; bloom, LUT, and lens still run if their toggles are on.");
 
 		const char* expoLabel = settings.bAdaptiveExposure ? "Exposure bias" : "Exposure";
 		ImGui::SliderFloat(expoLabel, &settings.fExposure, 0.25f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 
 		ImGui::Separator();
 		ImGui::Text("Adaptive exposure");
 		dirty |= ImGui::Checkbox("Adaptive enable", &settings.bAdaptiveExposure);
 		ImGui::BeginDisabled(!settings.bAdaptiveExposure);
 		ImGui::SliderFloat("Adaptation speed (s)", &settings.fAdaptationSpeed, 0.1f, 5.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::SliderFloat("Key (mid-grey)", &settings.fExposureKey, 0.05f, 0.5f, "%.3f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SetItemTooltip("Target average luminance the EMA aims for. Lower = darker midtones, higher = brighter midtones.");
+		commitDirty();
 		ImGui::SliderFloat("Min adapted", &settings.fExposureMin, 0.01f, 1.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::SliderFloat("Max adapted", &settings.fExposureMax, 1.0f, 16.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -827,11 +824,12 @@ namespace cs::features
 		dirty |= ImGui::Checkbox("Bloom enable", &settings.bBloomEnable);
 		ImGui::BeginDisabled(!settings.bBloomEnable);
 		ImGui::SliderFloat("Threshold", &settings.fBloomThreshold, 0.0f, 2.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SetItemTooltip("Pixels brighter than this contribute to bloom. LDR-domain so values >1.0 give zero bloom.");
+		commitDirty();
 		ImGui::SliderFloat("Intensity", &settings.fBloomIntensity, 0.0f, 0.3f, "%.3f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::SliderInt("Mips", &settings.iBloomMips, 3, 6);
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -839,17 +837,17 @@ namespace cs::features
 		dirty |= ImGui::Checkbox("Vignette", &settings.bVignetteEnable);
 		ImGui::BeginDisabled(!settings.bVignetteEnable);
 		ImGui::SliderFloat("Vignette intensity", &settings.fVignetteIntensity, 0.0f, 1.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Chromatic aberration", &settings.bCAEnable);
 		ImGui::BeginDisabled(!settings.bCAEnable);
 		ImGui::SliderFloat("CA intensity", &settings.fCAIntensity, 0.0f, 2.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
 		ImGui::BeginDisabled(!settings.bSharpenEnable);
 		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -873,7 +871,7 @@ namespace cs::features
 		if (lutSRV) ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "loaded: %s", lutLoadedPath.c_str());
 		else        ImGui::TextDisabled("no LUT loaded");
 		ImGui::SliderFloat("LUT strength", &settings.fLUTStrength, 0.0f, 1.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		commitDirty();
 		ImGui::EndDisabled();
 
 		if (dirty) SaveSettings();

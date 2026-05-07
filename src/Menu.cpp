@@ -6,6 +6,7 @@
 
 #include "Feature.h"
 #include "Log.h"
+#include "Plugin.h"
 
 namespace { auto* L = cs::log::Get("cs.menu"); }
 
@@ -163,7 +164,10 @@ namespace cs
 
 	void Menu::DrawDefaultUI()
 	{
-		if (ImGui::Begin("FO4 Community Shaders v0.1.0")) {
+		char title[64];
+		std::snprintf(title, sizeof(title), "FO4 Community Shaders v%u.%u.%u",
+			Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
+		if (ImGui::Begin(title)) {
 			const float fps = ImGui::GetIO().Framerate;
 			ImGui::Text("FPS: %.1f", fps);
 			ImGui::Text("Frame: %.2f ms", fps > 0.0f ? 1000.0f / fps : 0.0f);

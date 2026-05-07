@@ -871,10 +871,13 @@ namespace cs::features
 		};
 
 		ImGui::SliderInt("Sample count multiplier", &settings.sampleCount, 1, 4);
+		ImGui::SetItemTooltip("Multiplied by 60 and scaled by viewport area; rounded to multiples of 8.");
 		markCustomIfEdited();
 		ImGui::SliderFloat("Surface thickness", &settings.surfaceThickness, 0.001f, 0.1f, "%.4f");
+		ImGui::SetItemTooltip("How far behind a surface a sample is treated as occluder. Lower = harsher contact shadow, higher = softer falloff.");
 		markCustomIfEdited();
 		ImGui::SliderFloat("Bilinear threshold", &settings.bilinearThreshold, 0.001f, 1.0f, "%.4f");
+		ImGui::SetItemTooltip("Depth gap at which bilinear depth filtering is rejected. Bend recommends ~0.02.");
 		markCustomIfEdited();
 		ImGui::SliderFloat("Shadow contrast", &settings.shadowContrast, 0.0f, 4.0f, "%.2f");
 		markCustomIfEdited();

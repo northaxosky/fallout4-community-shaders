@@ -414,6 +414,7 @@ namespace cs::features
 
 		if (ImGui::CollapsingHeader("Tracking")) {
 			ImGui::SliderFloat("Update interval (s)", &settings.updateInterval, 0.05f, 2.0f, "%.2f");
+			ImGui::SetItemTooltip("How often the displayed FPS/frametime number refreshes. The history graph updates every frame.");
 			const bool intervalCommitted = sliderCommit();
 			ImGui::SliderInt("History size (frames)", &settings.historySize, 30, kHistoryCapacity);
 			const bool historyCommitted = sliderCommit();

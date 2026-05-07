@@ -1,7 +1,4 @@
-// Builds a log-luma pyramid from the post-engine-tonemap kFrameBuffer.
-// One dispatch per output mip; SrcIsLDR=1 reads kFrameBuffer (encoded sRGB),
-// SrcIsLDR=0 reads previous mip of the pyramid as a 2x2 average. Output is
-// log2(luma) so EMA can do a true geometric-mean.
+// Log-luma pyramid: SrcIsLDR=1 reads kFrameBuffer, =0 reads previous pyramid mip (2x2 avg). log2 so EMA computes a geometric mean.
 
 Texture2D<float4>   SrcSRGB     : register(t0);   // kFrameBuffer
 Texture2D<float>    SrcPyramid  : register(t1);   // lumPyramid (full-mip SRV)

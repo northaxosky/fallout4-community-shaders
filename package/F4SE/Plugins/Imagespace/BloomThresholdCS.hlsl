@@ -1,6 +1,4 @@
-// Reads kFrameBuffer (LDR sRGB), applies a soft-knee threshold, downsamples 2x.
-// Output goes into bloomChain[0] (R11G11B10_FLOAT). Operates in linear domain so subsequent
-// blur and additive composite produce physically meaningful (if LDR-bounded) bloom.
+// Soft-knee threshold + 2x downsample into bloomChain[0] (R11G11B10F, linear).
 
 Texture2D<float4>     InputColor : register(t0);
 RWTexture2D<float4>   OutputBloom : register(u0);

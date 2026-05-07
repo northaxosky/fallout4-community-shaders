@@ -74,7 +74,6 @@ namespace cs::features
 		std::unique_ptr<imagespace::Texture2D>      compositeScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> compositeCB;
 		ID3D11ComputeShader*                        compositeCS = nullptr;
-		winrt::com_ptr<ID3D11Texture3D>             lutTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView>    lutSRV;
 		winrt::com_ptr<ID3D11SamplerState>          lutSampler;
 		std::string                                 lutLoadedPath;
@@ -88,7 +87,7 @@ namespace cs::features
 		std::unique_ptr<imagespace::ConstantBuffer> exposureCB;
 		ID3D11ComputeShader*                        exposureCS = nullptr;
 		uint32_t                                    pyramidMipCount  = 0;
-		int                                         expoFrameIdx     = 0;       // toggles 0/1
+		int                                         expoFrameIdx     = 0;
 
 		// Bloom chain + scratch.
 		std::array<std::unique_ptr<imagespace::Texture2D>, 6> bloomChain;
