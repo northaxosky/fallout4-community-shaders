@@ -12,6 +12,7 @@
 #include "bend_sss_cpu.h"
 #pragma warning(pop)
 
+#include "Env.h"
 #include "Log.h"
 #include "RE/N/NiAVObject.h"
 #include "RE/S/Sky.h"
@@ -24,6 +25,10 @@ namespace cs::features
 	namespace { auto* L = cs::log::Get("cs.feature.sss"); }
 
 	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.ini";
+
+	// FO4 RT enum slot indices (see features/Upscaling/src/Util.h for the canonical list).
+	constexpr uint32_t kRT_GbufferNormal = 20;
+	constexpr uint32_t kRT_DiffuseBuffer = 58;
 
 	struct RaymarchCB
 	{
@@ -40,6 +45,16 @@ namespace cs::features
 	};
 	static_assert(sizeof(RaymarchCB) % 16 == 0, "RaymarchCB must be 16-byte aligned");
 
+	struct ApplyShadowsCB
+	{
+		float    SunDirectionWS[3];
+		float    ApplyContrast;
+		float    ScreenSize[2];
+		uint32_t SunOnly;
+		uint32_t pad0;
+	};
+	static_assert(sizeof(ApplyShadowsCB) % 16 == 0, "ApplyShadowsCB must be 16-byte aligned");
+
 	// DrawWorld::DeferredPrePass(): free function, void(void); REL::IDs cross-validated in cs-render-subsystem-ids.json.
 	struct DrawWorld_DeferredPrePass_Hook
 	{
@@ -47,6 +62,17 @@ namespace cs::features
 		{
 			func();
 			ScreenSpaceShadows::GetSingleton()->DrawShadows();
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
+	// DrawWorld::DeferredLightsImpl(): free function, void(void); confirmed in cs-render-subsystem-ids.json.
+	struct DrawWorld_DeferredLightsImpl_Hook
+	{
+		static void thunk()
+		{
+			func();
+			ScreenSpaceShadows::GetSingleton()->Apply();
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -60,11 +86,15 @@ namespace cs::features
 	void ScreenSpaceShadows::Load()
 	{
 		LoadSettings();
-		L->info("Loaded: enabled={} sampleCount={} thickness={} contrast={}",
-			settings.enabled, settings.sampleCount, settings.surfaceThickness, settings.shadowContrast);
+		L->info("Loaded: enabled={} sampleCount={} thickness={} contrast={} apply={} sunOnly={}",
+			settings.enabled, settings.sampleCount, settings.surfaceThickness, settings.shadowContrast,
+			settings.applyToScene, settings.sunOnly);
 
 		stl::detour_thunk<DrawWorld_DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
 		L->info("Hook installed on DrawWorld::DeferredPrePass");
+
+		stl::detour_thunk<DrawWorld_DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
+		L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 	}
 
 	void ScreenSpaceShadows::LoadSettings()
@@ -78,7 +108,12 @@ namespace cs::features
 		settings.surfaceThickness  = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSurfaceThickness", settings.surfaceThickness)), 0.001f, 0.1f);
 		settings.bilinearThreshold = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBilinearThreshold", settings.bilinearThreshold)), 0.001f, 1.0f);
 		settings.shadowContrast    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fShadowContrast", settings.shadowContrast)), 0.0f, 4.0f);
-		settings.previewScale      = std::clamp(static_cast<float>(ini.GetDoubleValue("Debug",    "fPreviewScale", settings.previewScale)), 0.05f, 1.0f);
+
+		settings.applyToScene      = ini.GetBoolValue("Apply",      "bApplyToScene",     settings.applyToScene);
+		settings.sunOnly           = ini.GetBoolValue("Apply",      "bSunOnly",          settings.sunOnly);
+		settings.applyContrast     = std::clamp(static_cast<float>(ini.GetDoubleValue("Apply", "fApplyContrast", settings.applyContrast)), 0.0f, 2.0f);
+
+		settings.previewScale      = std::clamp(static_cast<float>(ini.GetDoubleValue("Debug", "fPreviewScale", settings.previewScale)), 0.05f, 1.0f);
 		settings.showPreview       = ini.GetBoolValue("Debug",      "bShowPreview",      settings.showPreview);
 	}
 
@@ -93,6 +128,11 @@ namespace cs::features
 		ini.SetDoubleValue("Settings", "fSurfaceThickness",  settings.surfaceThickness);
 		ini.SetDoubleValue("Settings", "fBilinearThreshold", settings.bilinearThreshold);
 		ini.SetDoubleValue("Settings", "fShadowContrast",    settings.shadowContrast);
+
+		ini.SetBoolValue("Apply",      "bApplyToScene",      settings.applyToScene);
+		ini.SetBoolValue("Apply",      "bSunOnly",           settings.sunOnly);
+		ini.SetDoubleValue("Apply",    "fApplyContrast",     settings.applyContrast);
+
 		ini.SetDoubleValue("Debug",    "fPreviewScale",      settings.previewScale);
 		ini.SetBoolValue("Debug",      "bShowPreview",       settings.showPreview);
 
@@ -114,15 +154,45 @@ namespace cs::features
 		return std::max<uint32_t>(scaled, 8u);
 	}
 
+	bool ScreenSpaceShadows::GetSunDirectionWS(float& outX, float& outY, float& outZ) const
+	{
+		auto* sky = RE::Sky::GetSingleton();
+		if (!sky || !sky->sun || !sky->sun->light)
+			return false;
+
+		// NiDirectionalLight is only forward-declared in CommonLibF4; cast through NiAVObject for the world transform.
+		auto* lightObj = reinterpret_cast<RE::NiAVObject*>(sky->sun->light.get());
+		auto& rot = lightObj->world.rotate;
+
+		// Column 2 = local +Z axis in world space (the Bethesda directional-light forward).
+		float x = rot.entry[0].z;
+		float y = rot.entry[1].z;
+		float z = rot.entry[2].z;
+		const float invLen = 1.0f / std::max(std::sqrt(x * x + y * y + z * z), 1e-6f);
+		outX = x * invLen;
+		outY = y * invLen;
+		outZ = z * invLen;
+		return true;
+	}
+
 	bool ScreenSpaceShadows::EnsureResources()
 	{
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData || !rendererData->device)
 			return false;
 
-		auto state = sss::Util::State_GetSingleton();
-		const uint32_t w = state->screenWidth;
-		const uint32_t h = state->screenHeight;
+		// Size the mask off the depth target rather than the back buffer. Under DRS the proxied
+		// targets (depth, kGbufferNormal, kDiffuseBuffer) all live at sub-native dimensions; using
+		// screenWidth/Height would put the mask in a different coordinate space than the apply pass.
+		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(sss::Util::DepthStencilTarget::kMain)];
+		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
+		if (!depthTex)
+			return false;
+
+		D3D11_TEXTURE2D_DESC dd{};
+		depthTex->GetDesc(&dd);
+		const uint32_t w = dd.Width;
+		const uint32_t h = dd.Height;
 		if (w == 0 || h == 0)
 			return false;
 
@@ -180,6 +250,70 @@ namespace cs::features
 		return true;
 	}
 
+	bool ScreenSpaceShadows::EnsureApplyResources()
+	{
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData || !rendererData->device)
+			return false;
+
+		auto& diffuse = rendererData->renderTargets[kRT_DiffuseBuffer];
+		auto* diffuseTex = reinterpret_cast<ID3D11Texture2D*>(diffuse.texture);
+		if (!diffuseTex)
+			return false;
+
+		D3D11_TEXTURE2D_DESC dd{};
+		diffuseTex->GetDesc(&dd);
+		const uint32_t w = dd.Width;
+		const uint32_t h = dd.Height;
+
+		// Reallocate scratch when the diffuse buffer's size or format changes (DRS, mode switch, ENB load).
+		if (!scratchDiffuse || scratchWidth != w || scratchHeight != h || diffuseBufferFormat != dd.Format) {
+			D3D11_TEXTURE2D_DESC td{};
+			td.Width = w;
+			td.Height = h;
+			td.MipLevels = 1;
+			td.ArraySize = 1;
+			td.Format = dd.Format;
+			td.SampleDesc.Count = 1;
+			td.Usage = D3D11_USAGE_DEFAULT;
+			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+			scratchDiffuse = std::make_unique<sss::Texture2D>(td);
+
+			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+			sd.Format = dd.Format;
+			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			sd.Texture2D.MipLevels = 1;
+			scratchDiffuse->CreateSRV(sd);
+
+			D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+			ud.Format = dd.Format;
+			ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+			scratchDiffuse->CreateUAV(ud);
+
+			scratchWidth = w;
+			scratchHeight = h;
+			diffuseBufferFormat = dd.Format;
+			L->info("Apply scratch allocated {}x{} format={}", w, h, static_cast<int>(dd.Format));
+		}
+
+		if (!applyCB) {
+			applyCB = std::make_unique<sss::ConstantBuffer>(sss::ConstantBufferDesc(sizeof(ApplyShadowsCB)));
+		}
+
+		if (!gbufferFormatLogged) {
+			auto& normal = rendererData->renderTargets[kRT_GbufferNormal];
+			if (auto* normalTex = reinterpret_cast<ID3D11Texture2D*>(normal.texture)) {
+				D3D11_TEXTURE2D_DESC nd{};
+				normalTex->GetDesc(&nd);
+				L->info("kGbufferNormal format={} ({}x{})", static_cast<int>(nd.Format), nd.Width, nd.Height);
+				gbufferFormatLogged = true;
+			}
+		}
+
+		return true;
+	}
+
 	ID3D11ComputeShader* ScreenSpaceShadows::GetRaymarchCS()
 	{
 		const uint32_t scaled = GetScaledSampleCount();
@@ -200,6 +334,17 @@ namespace cs::features
 		return raymarchCS;
 	}
 
+	ID3D11ComputeShader* ScreenSpaceShadows::GetApplyCS()
+	{
+		if (!applyCS) {
+			std::vector<std::pair<const char*, const char*>> defines;
+			applyCS = reinterpret_cast<ID3D11ComputeShader*>(
+				sss::Util::CompileShader(L"Data\\F4SE\\Plugins\\ScreenSpaceShadows\\ApplyShadowsCS.hlsl", defines, "cs_5_0"));
+			if (applyCS) L->info("Compiled ApplyShadowsCS");
+		}
+		return applyCS;
+	}
+
 	void ScreenSpaceShadows::DrawShadows()
 	{
 		if (!settings.enabled)
@@ -210,19 +355,9 @@ namespace cs::features
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-		auto* sky = RE::Sky::GetSingleton();
-		if (!sky || !sky->sun || !sky->sun->light)
+		float dirX, dirY, dirZ;
+		if (!GetSunDirectionWS(dirX, dirY, dirZ))
 			return;
-
-		// NiDirectionalLight is only forward-declared in CommonLibF4; cast through NiAVObject for the world transform.
-		auto* lightObj = reinterpret_cast<RE::NiAVObject*>(sky->sun->light.get());
-		auto& rot = lightObj->world.rotate;
-		// Column 2 = local +Z axis in world space (the Bethesda directional-light forward).
-		float dirX = rot.entry[0].z;
-		float dirY = rot.entry[1].z;
-		float dirZ = rot.entry[2].z;
-		const float invLen = 1.0f / std::max(std::sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ), 1e-6f);
-		dirX *= invLen; dirY *= invLen; dirZ *= invLen;
 
 		// Project against the jittered view-proj since the depth buffer SSS samples was rasterized with jitter applied.
 		auto* viewport = sss::Util::State_GetSingleton();
@@ -307,6 +442,85 @@ namespace cs::features
 		context->CSSetShader(nullptr, nullptr, 0);
 	}
 
+	void ScreenSpaceShadows::Apply()
+	{
+		if (!settings.enabled || !settings.applyToScene)
+			return;
+		if (!shadowsTexture || !shadowsTexture->srv)
+			return;
+
+		if (cs::env::IsENBLoaded()) {
+			if (!enbWarningLogged) {
+				L->info("ENB detected; SSS apply pass disabled (ENB rewires the deferred pipeline)");
+				enbWarningLogged = true;
+			}
+			return;
+		}
+
+		if (!EnsureApplyResources())
+			return;
+
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+		auto& diffuse = rendererData->renderTargets[kRT_DiffuseBuffer];
+		auto& normal  = rendererData->renderTargets[kRT_GbufferNormal];
+
+		auto* diffuseSRV = reinterpret_cast<ID3D11ShaderResourceView*>(diffuse.srView);
+		auto* normalSRV  = reinterpret_cast<ID3D11ShaderResourceView*>(normal.srView);
+		auto* diffuseTex = reinterpret_cast<ID3D11Texture2D*>(diffuse.texture);
+		if (!diffuseSRV || !normalSRV || !diffuseTex)
+			return;
+
+		float dirX, dirY, dirZ;
+		if (!GetSunDirectionWS(dirX, dirY, dirZ))
+			return;
+
+		auto* cs = GetApplyCS();
+		if (!cs)
+			return;
+
+		ApplyShadowsCB cb{};
+		cb.SunDirectionWS[0] = dirX;
+		cb.SunDirectionWS[1] = dirY;
+		cb.SunDirectionWS[2] = dirZ;
+		cb.ApplyContrast = settings.applyContrast;
+		cb.ScreenSize[0] = static_cast<float>(scratchWidth);
+		cb.ScreenSize[1] = static_cast<float>(scratchHeight);
+		cb.SunOnly = settings.sunOnly ? 1u : 0u;
+		applyCB->Update(cb);
+
+		ID3D11ShaderResourceView* srvs[3] = {
+			shadowsTexture->srv.get(),
+			normalSRV,
+			diffuseSRV,
+		};
+		context->CSSetShaderResources(0, 3, srvs);
+
+		ID3D11UnorderedAccessView* uavs[1] = { scratchDiffuse->uav.get() };
+		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+
+		ID3D11Buffer* cbufs[1] = { applyCB->CB() };
+		context->CSSetConstantBuffers(0, 1, cbufs);
+
+		context->CSSetShader(cs, nullptr, 0);
+
+		const uint32_t groupsX = (scratchWidth  + 7u) / 8u;
+		const uint32_t groupsY = (scratchHeight + 7u) / 8u;
+		context->Dispatch(groupsX, groupsY, 1);
+
+		// Unbind UAV before the CopyResource since the destination is the SRV input we just sampled from.
+		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+		ID3D11ShaderResourceView* nullSRVs[3] = { nullptr, nullptr, nullptr };
+		context->CSSetShaderResources(0, 3, nullSRVs);
+		ID3D11Buffer* nullCB[1] = { nullptr };
+		context->CSSetConstantBuffers(0, 1, nullCB);
+		context->CSSetShader(nullptr, nullptr, 0);
+
+		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
+	}
+
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		bool dirty = false;
@@ -322,6 +536,13 @@ namespace cs::features
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 
 		ImGui::Separator();
+		ImGui::TextDisabled("Apply pass");
+		dirty |= ImGui::Checkbox("Apply mask to scene", &settings.applyToScene);
+		dirty |= ImGui::Checkbox("Sun-lit regions only", &settings.sunOnly);
+		ImGui::SliderFloat("Apply contrast", &settings.applyContrast, 0.0f, 2.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+
+		ImGui::Separator();
 		ImGui::TextDisabled("Debug viewer");
 		dirty |= ImGui::Checkbox("Show mask preview", &settings.showPreview);
 		ImGui::SliderFloat("Preview scale", &settings.previewScale, 0.05f, 1.0f, "%.2f");
@@ -334,9 +555,6 @@ namespace cs::features
 		} else {
 			ImGui::TextDisabled("Mask not yet available (requires loaded scene with sky).");
 		}
-
-		ImGui::Separator();
-		ImGui::TextDisabled("Phase 2: SSS mask runs in compute, no engine integration. Phase 3 wires into deferred lighting.");
 
 		if (dirty)
 			SaveSettings();
