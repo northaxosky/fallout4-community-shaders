@@ -4,10 +4,27 @@ cbuffer CompositeCB : register(b0)
 {
     uint  Operator;
     uint  LUTEnable;
-    float Exposure;
+    uint  AdaptiveExposureEnable;
+    uint  BloomEnable;
+
+    float ExposureManual;
     float LUTStrength;
+    float ExposureKey;
+    float BloomIntensity;
+
+    uint  VignetteEnable;
+    uint  CAEnable;
+    uint  SharpenEnable;
+    uint  _Pad0;
+
+    float VignetteIntensity;
+    float CAIntensity;
+    float Sharpness;
+    float ExposureMin;
+
+    float ExposureMax;
     uint2 OutputDimensions;
-    uint2 _Pad0;
+    float _Pad1;
 };
 
 // Approximation: pure power, not the piecewise sRGB curve. Adequate for grading work.

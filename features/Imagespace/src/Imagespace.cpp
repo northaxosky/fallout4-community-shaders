@@ -2,6 +2,7 @@
 
 #include <DirectXTex.h>
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <imgui.h>
@@ -17,30 +18,75 @@ namespace cs::features
 
 	constexpr const char* kIniPath  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.ini";
 	constexpr const char* kLUTDir   = "Data\\F4SE\\Plugins\\Imagespace\\LUTs\\";
-	constexpr const char* kOpMarker  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
-	constexpr const char* kLutMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_lut";
+	constexpr const char* kOpMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
+	constexpr const char* kLutMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_lut";
+	constexpr const char* kAdaptMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_adaptive_exposure";
+	constexpr const char* kBloomMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_bloom";
+	constexpr const char* kVignMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_vignette";
+	constexpr const char* kCAMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_ca";
+	constexpr const char* kSharpenMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_sharpen";
 	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
-
-	struct LumCB
-	{
-		uint32_t InputDimensions[2];
-		uint32_t pad0[2];
-	};
-	static_assert(sizeof(LumCB) % 16 == 0, "LumCB must be 16-byte aligned");
 
 	struct CompositeCB
 	{
 		uint32_t Operator;
 		uint32_t LUTEnable;
-		float    Exposure;
+		uint32_t AdaptiveExposureEnable;
+		uint32_t BloomEnable;
+
+		float    ExposureManual;
 		float    LUTStrength;
+		float    ExposureKey;
+		float    BloomIntensity;
+
+		uint32_t VignetteEnable;
+		uint32_t CAEnable;
+		uint32_t SharpenEnable;
+		uint32_t Pad0;
+
+		float    VignetteIntensity;
+		float    CAIntensity;
+		float    Sharpness;
+		float    ExposureMin;
+
+		float    ExposureMax;
 		uint32_t OutputDimensions[2];
-		uint32_t Pad0[2];
+		float    Pad1;
 	};
 	static_assert(sizeof(CompositeCB) % 16 == 0, "CompositeCB must be 16-byte aligned");
 
-	// Hooks Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport (REL::ID 587723 OG / 2318322 NG/AE).
-	// Installed in OnPostPostLoad so our thunk wraps Upscaling's; chain is original-engine -> Upscale -> RunFrame.
+	struct PyramidCB
+	{
+		uint32_t SrcIsLDR;
+		uint32_t SrcMipIdx;
+		uint32_t DstDimensions[2];
+	};
+	static_assert(sizeof(PyramidCB) % 16 == 0);
+
+	struct ExposureCB
+	{
+		float    DeltaTime;
+		float    Tau;
+		uint32_t TailMipIdx;
+		uint32_t Pad0;
+	};
+	static_assert(sizeof(ExposureCB) % 16 == 0);
+
+	struct BloomThresholdCB
+	{
+		float    Threshold;
+		float    SoftKnee;
+		uint32_t OutputDimensions[2];
+	};
+	static_assert(sizeof(BloomThresholdCB) % 16 == 0);
+
+	struct BloomCB
+	{
+		uint32_t SrcDimensions[2];
+		uint32_t DstDimensions[2];
+	};
+	static_assert(sizeof(BloomCB) % 16 == 0);
+
 	struct Imagespace_PostUpscale_Hook
 	{
 		static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
@@ -60,19 +106,27 @@ namespace cs::features
 	void Imagespace::Load()
 	{
 		LoadSettings();
-		L->info("Loaded: enabled={} op={} exposure={:.2f} lut={} lutPath='{}' lutStrength={:.2f}",
+		L->info("Loaded: enabled={} op={} exposure={:.2f} adaptive={} bloom={} vig={} ca={} sharp={}",
 			settings.enabled, settings.iOperator, settings.fExposure,
-			settings.bLUTEnable, settings.sLUTPath, settings.fLUTStrength);
+			settings.bAdaptiveExposure, settings.bBloomEnable,
+			settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable);
 	}
 
 	void Imagespace::OnPostPostLoad()
 	{
-		// Install AFTER Upscaling::Load() (which runs in LoadAll()) so our thunk wraps Upscaling's,
-		// causing RunFrame() to fire post-Upscale dispatch (sees upscaled output).
 		const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 		constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
 		stl::write_thunk_call<Imagespace_PostUpscale_Hook>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
 		L->info("Hook installed on Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport");
+	}
+
+	static bool ReadMarker(const char* a_path, char& out_value)
+	{
+		FILE* f = nullptr;
+		if (fopen_s(&f, a_path, "r") != 0 || !f) return false;
+		out_value = static_cast<char>(fgetc(f));
+		fclose(f);
+		return true;
 	}
 
 	void Imagespace::LoadSettings()
@@ -80,95 +134,97 @@ namespace cs::features
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);
-		settings.enabled      = ini.GetBoolValue("Settings",  "bEnabled",     settings.enabled);
-		settings.iOperator    = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iOperator", settings.iOperator)), 0, 3);
-		settings.fExposure    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposure", settings.fExposure)), 0.25f, 4.0f);
-		settings.bLUTEnable   = ini.GetBoolValue("Settings",  "bLUTEnable",   settings.bLUTEnable);
-		settings.sLUTPath     = ini.GetValue("Settings",      "sLUTPath",     settings.sLUTPath.c_str());
-		settings.fLUTStrength = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLUTStrength", settings.fLUTStrength)), 0.0f, 1.0f);
+		settings.enabled            = ini.GetBoolValue("Settings",   "bEnabled",            settings.enabled);
+		settings.iOperator          = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iOperator", settings.iOperator)), 0, 3);
+		settings.fExposure          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposure", settings.fExposure)), 0.25f, 4.0f);
+		settings.bLUTEnable         = ini.GetBoolValue("Settings",   "bLUTEnable",          settings.bLUTEnable);
+		settings.sLUTPath           = ini.GetValue("Settings",       "sLUTPath",            settings.sLUTPath.c_str());
+		settings.fLUTStrength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLUTStrength", settings.fLUTStrength)), 0.0f, 1.0f);
 
-		bool opMarkerPresent = false;
-		int  opMarkerValue   = 0;
-		{
-			FILE* f = nullptr;
-			if (fopen_s(&f, kOpMarker, "r") == 0 && f) {
-				char c = static_cast<char>(fgetc(f));
-				fclose(f);
-				opMarkerPresent = true;
-				if (c >= '0' && c <= '3') opMarkerValue = c - '0';
-			}
-		}
-		bool lutMarkerPresent = false;
-		bool lutMarkerEnable  = false;
-		{
-			FILE* f = nullptr;
-			if (fopen_s(&f, kLutMarker, "r") == 0 && f) {
-				char c = static_cast<char>(fgetc(f));
-				fclose(f);
-				lutMarkerPresent = true;
-				lutMarkerEnable = (c == '1');
-			}
-		}
+		settings.bAdaptiveExposure  = ini.GetBoolValue("Settings",   "bAdaptiveExposure",   settings.bAdaptiveExposure);
+		settings.fAdaptationSpeed   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", settings.fAdaptationSpeed)), 0.1f, 5.0f);
+		settings.fExposureKey       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureKey", settings.fExposureKey)), 0.05f, 0.5f);
+		settings.fExposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.fExposureMin)), 0.01f, 1.0f);
+		settings.fExposureMax       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMax", settings.fExposureMax)), 1.0f, 16.0f);
 
-		testModeActive = opMarkerPresent || lutMarkerPresent;
+		settings.bBloomEnable       = ini.GetBoolValue("Settings",   "bBloomEnable",        settings.bBloomEnable);
+		settings.fBloomThreshold    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomThreshold", settings.fBloomThreshold)), 0.0f, 2.0f);
+		settings.fBloomIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomIntensity", settings.fBloomIntensity)), 0.0f, 0.3f);
+		settings.iBloomMips         = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iBloomMips",      settings.iBloomMips)), 3, 6);
+
+		settings.bVignetteEnable    = ini.GetBoolValue("Settings",   "bVignetteEnable",     settings.bVignetteEnable);
+		settings.fVignetteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fVignetteIntensity", settings.fVignetteIntensity)), 0.0f, 1.0f);
+		settings.bCAEnable          = ini.GetBoolValue("Settings",   "bCAEnable",           settings.bCAEnable);
+		settings.fCAIntensity       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCAIntensity", settings.fCAIntensity)), 0.0f, 2.0f);
+		settings.bSharpenEnable     = ini.GetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
+		settings.fSharpness         = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", settings.fSharpness)), 0.0f, 1.0f);
+
+		// Smoke-harness markers.
+		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0;
+		const bool opP    = ReadMarker(kOpMarker,      op_c);
+		const bool lutP   = ReadMarker(kLutMarker,     lut_c);
+		const bool adaptP = ReadMarker(kAdaptMarker,   adapt_c);
+		const bool bloomP = ReadMarker(kBloomMarker,   bloom_c);
+		const bool vigP   = ReadMarker(kVignMarker,    vig_c);
+		const bool caP    = ReadMarker(kCAMarker,      ca_c);
+		const bool sharpP = ReadMarker(kSharpenMarker, sharp_c);
+
+		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP;
 
 		if (testModeActive) {
-			settings.enabled      = true;
-			settings.iOperator    = opMarkerPresent ? opMarkerValue : 0;
-			settings.fExposure    = 1.0f;
-			settings.bLUTEnable   = lutMarkerPresent ? lutMarkerEnable : false;
-			settings.fLUTStrength = 1.0f;
-			L->info("Test mode: op={} lut={}", settings.iOperator, settings.bLUTEnable);
+			// Reset to deterministic baseline.
+			settings.enabled            = true;
+			settings.iOperator          = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
+			settings.fExposure          = 1.0f;
+			settings.bLUTEnable         = lutP && (lut_c == '1');
+			settings.fLUTStrength       = 1.0f;
+			settings.bAdaptiveExposure  = adaptP && (adapt_c == '1');
+			settings.fAdaptationSpeed   = 1.0f;
+			settings.fExposureKey       = 0.18f;
+			settings.bBloomEnable       = bloomP && (bloom_c == '1');
+			settings.fBloomIntensity    = settings.bBloomEnable ? 0.15f : 0.05f;
+			settings.bVignetteEnable    = vigP && (vig_c == '1');
+			settings.fVignetteIntensity = settings.bVignetteEnable ? 0.6f : 0.3f;
+			settings.bCAEnable          = caP && (ca_c == '1');
+			settings.fCAIntensity       = settings.bCAEnable ? 1.5f : 0.5f;
+			settings.bSharpenEnable     = sharpP && (sharp_c == '1');
+			settings.fSharpness         = settings.bSharpenEnable ? 0.8f : 0.4f;
+			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={}",
+				settings.iOperator, settings.bLUTEnable, settings.bAdaptiveExposure,
+				settings.bBloomEnable, settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable);
 		}
 	}
 
 	void Imagespace::SaveSettings()
 	{
-		// Markers are smoke-only; persisting marker-induced values would pollute the user INI.
 		if (testModeActive)
 			return;
 
 		CSimpleIniA ini;
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);
-		ini.SetBoolValue("Settings",   "bEnabled",     settings.enabled);
-		ini.SetLongValue("Settings",   "iOperator",    settings.iOperator);
-		ini.SetDoubleValue("Settings", "fExposure",    settings.fExposure);
-		ini.SetBoolValue("Settings",   "bLUTEnable",   settings.bLUTEnable);
-		ini.SetValue("Settings",       "sLUTPath",     settings.sLUTPath.c_str());
-		ini.SetDoubleValue("Settings", "fLUTStrength", settings.fLUTStrength);
+		ini.SetBoolValue("Settings",   "bEnabled",            settings.enabled);
+		ini.SetLongValue("Settings",   "iOperator",           settings.iOperator);
+		ini.SetDoubleValue("Settings", "fExposure",           settings.fExposure);
+		ini.SetBoolValue("Settings",   "bLUTEnable",          settings.bLUTEnable);
+		ini.SetValue("Settings",       "sLUTPath",            settings.sLUTPath.c_str());
+		ini.SetDoubleValue("Settings", "fLUTStrength",        settings.fLUTStrength);
+		ini.SetBoolValue("Settings",   "bAdaptiveExposure",   settings.bAdaptiveExposure);
+		ini.SetDoubleValue("Settings", "fAdaptationSpeed",    settings.fAdaptationSpeed);
+		ini.SetDoubleValue("Settings", "fExposureKey",        settings.fExposureKey);
+		ini.SetDoubleValue("Settings", "fExposureMin",        settings.fExposureMin);
+		ini.SetDoubleValue("Settings", "fExposureMax",        settings.fExposureMax);
+		ini.SetBoolValue("Settings",   "bBloomEnable",        settings.bBloomEnable);
+		ini.SetDoubleValue("Settings", "fBloomThreshold",     settings.fBloomThreshold);
+		ini.SetDoubleValue("Settings", "fBloomIntensity",     settings.fBloomIntensity);
+		ini.SetLongValue("Settings",   "iBloomMips",          settings.iBloomMips);
+		ini.SetBoolValue("Settings",   "bVignetteEnable",     settings.bVignetteEnable);
+		ini.SetDoubleValue("Settings", "fVignetteIntensity",  settings.fVignetteIntensity);
+		ini.SetBoolValue("Settings",   "bCAEnable",           settings.bCAEnable);
+		ini.SetDoubleValue("Settings", "fCAIntensity",        settings.fCAIntensity);
+		ini.SetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
+		ini.SetDoubleValue("Settings", "fSharpness",          settings.fSharpness);
 		ini.SaveFile(kIniPath);
-	}
-
-	bool Imagespace::EnsureResources()
-	{
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData || !rendererData->device)
-			return false;
-
-		if (!lumProbeTexture) {
-			D3D11_TEXTURE2D_DESC td{};
-			td.Width = 1;
-			td.Height = 1;
-			td.MipLevels = 1;
-			td.ArraySize = 1;
-			td.Format = DXGI_FORMAT_R32_FLOAT;
-			td.SampleDesc.Count = 1;
-			td.Usage = D3D11_USAGE_DEFAULT;
-			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-			lumProbeTexture = std::make_unique<imagespace::Texture2D>(td);
-
-			D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
-			ud.Format = DXGI_FORMAT_R32_FLOAT;
-			ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-			lumProbeTexture->CreateUAV(ud);
-		}
-
-		if (!lumProbeCB) {
-			lumProbeCB = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(LumCB)));
-		}
-
-		return true;
 	}
 
 	bool Imagespace::EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format)
@@ -220,26 +276,156 @@ namespace cs::features
 		return true;
 	}
 
-	ID3D11ComputeShader* Imagespace::GetLumPyramidCS()
+	bool Imagespace::EnsurePyramidResources(uint32_t a_width, uint32_t a_height)
 	{
-		if (!lumProbeCS) {
-			std::vector<std::pair<const char*, const char*>> defines;
-			lumProbeCS = reinterpret_cast<ID3D11ComputeShader*>(
-				imagespace::Util::CompileShader(L"Data\\F4SE\\Plugins\\Imagespace\\LumPyramidCS.hlsl", defines, "cs_5_0"));
-			if (lumProbeCS) L->info("Compiled LumPyramidCS");
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData || !rendererData->device)
+			return false;
+		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
+
+		const bool dimChanged = (a_width != pyramidWidth || a_height != pyramidHeight);
+		if (dimChanged || !lumPyramid) {
+			// Pyramid texture starts at half-res (mip 0 = W/2 x H/2). Mip count picks up where
+			// D3D's natural layout takes us to 1x1 from the half-res base.
+			const uint32_t baseW  = std::max(1u, a_width  / 2);
+			const uint32_t baseH  = std::max(1u, a_height / 2);
+			const uint32_t maxDim = std::max(baseW, baseH);
+			pyramidMipCount = std::max(1u, static_cast<uint32_t>(std::floor(std::log2(static_cast<double>(maxDim)))) + 1u);
+			pyramidMipCount = std::min(pyramidMipCount, 14u);
+
+			D3D11_TEXTURE2D_DESC td{};
+			td.Width = baseW;
+			td.Height = baseH;
+			td.MipLevels = pyramidMipCount;
+			td.ArraySize = 1;
+			td.Format = DXGI_FORMAT_R16_FLOAT;
+			td.SampleDesc.Count = 1;
+			td.Usage = D3D11_USAGE_DEFAULT;
+			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			lumPyramid = std::make_unique<imagespace::Texture2D>(td);
+
+			// SRV covers the full mip chain.
+			D3D11_SHADER_RESOURCE_VIEW_DESC srvd{};
+			srvd.Format = DXGI_FORMAT_R16_FLOAT;
+			srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			srvd.Texture2D.MostDetailedMip = 0;
+			srvd.Texture2D.MipLevels = pyramidMipCount;
+			lumPyramid->CreateSRV(srvd);
+
+			// Per-mip UAVs.
+			lumPyramidUAVs.clear();
+			lumPyramidUAVs.resize(pyramidMipCount);
+			for (uint32_t i = 0; i < pyramidMipCount; ++i) {
+				D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+				ud.Format = DXGI_FORMAT_R16_FLOAT;
+				ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+				ud.Texture2D.MipSlice = i;
+				DX::ThrowIfFailed(device->CreateUnorderedAccessView(
+					lumPyramid->resource.get(), &ud, lumPyramidUAVs[i].put()));
+			}
+
+			// Ping-pong exposure scalars (1x1 R32F SRV+UAV).
+			for (auto& ep : expoPingPong) {
+				D3D11_TEXTURE2D_DESC etd{};
+				etd.Width = 1;
+				etd.Height = 1;
+				etd.MipLevels = 1;
+				etd.ArraySize = 1;
+				etd.Format = DXGI_FORMAT_R32_FLOAT;
+				etd.SampleDesc.Count = 1;
+				etd.Usage = D3D11_USAGE_DEFAULT;
+				etd.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+				ep = std::make_unique<imagespace::Texture2D>(etd);
+				D3D11_SHADER_RESOURCE_VIEW_DESC esrvd{};
+				esrvd.Format = DXGI_FORMAT_R32_FLOAT;
+				esrvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				esrvd.Texture2D.MipLevels = 1;
+				ep->CreateSRV(esrvd);
+				D3D11_UNORDERED_ACCESS_VIEW_DESC eud{};
+				eud.Format = DXGI_FORMAT_R32_FLOAT;
+				eud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+				ep->CreateUAV(eud);
+			}
+
+			pyramidWidth  = a_width;
+			pyramidHeight = a_height;
+			L->info("LumPyramid (re)allocated {}x{} half-base, {} mips", baseW, baseH, pyramidMipCount);
 		}
-		return lumProbeCS;
+
+		if (!pyramidCB) {
+			pyramidCB = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(PyramidCB)));
+		}
+		if (!exposureCB) {
+			exposureCB = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(ExposureCB)));
+		}
+
+		return true;
 	}
 
-	ID3D11ComputeShader* Imagespace::GetCompositeCS()
+	bool Imagespace::EnsureBloomResources(uint32_t a_width, uint32_t a_height, int a_mips)
 	{
-		if (!compositeCS) {
-			std::vector<std::pair<const char*, const char*>> defines;
-			compositeCS = reinterpret_cast<ID3D11ComputeShader*>(
-				imagespace::Util::CompileShader(L"Data\\F4SE\\Plugins\\Imagespace\\CompositeCS.hlsl", defines, "cs_5_0"));
-			if (compositeCS) L->info("Compiled CompositeCS");
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData || !rendererData->device)
+			return false;
+
+		const uint32_t halfW = std::max(1u, a_width  / 2);
+		const uint32_t halfH = std::max(1u, a_height / 2);
+		const bool dimChanged = (halfW != bloomWidth || halfH != bloomHeight || a_mips != bloomMipsAlloc);
+
+		if (dimChanged || !bloomChain[0]) {
+			for (auto& t : bloomChain)  t.reset();
+			for (auto& t : bloomScratch) t.reset();
+
+			uint32_t w = halfW, h = halfH;
+			for (int i = 0; i < a_mips && i < static_cast<int>(bloomChain.size()); ++i) {
+				D3D11_TEXTURE2D_DESC td{};
+				td.Width = w;
+				td.Height = h;
+				td.MipLevels = 1;
+				td.ArraySize = 1;
+				td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+				td.SampleDesc.Count = 1;
+				td.Usage = D3D11_USAGE_DEFAULT;
+				td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+				bloomChain[i]   = std::make_unique<imagespace::Texture2D>(td);
+				bloomScratch[i] = std::make_unique<imagespace::Texture2D>(td);
+
+				D3D11_SHADER_RESOURCE_VIEW_DESC srvd{};
+				srvd.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+				srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				srvd.Texture2D.MipLevels = 1;
+				bloomChain[i]->CreateSRV(srvd);
+				bloomScratch[i]->CreateSRV(srvd);
+
+				D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+				ud.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+				ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+				bloomChain[i]->CreateUAV(ud);
+				bloomScratch[i]->CreateUAV(ud);
+
+				w = std::max(1u, w / 2);
+				h = std::max(1u, h / 2);
+			}
+			bloomWidth  = halfW;
+			bloomHeight = halfH;
+			bloomMipsAlloc = a_mips;
+			L->info("Bloom chain (re)allocated half-base={}x{}, {} mips", halfW, halfH, a_mips);
 		}
-		return compositeCS;
+
+		if (!bloomCB)          bloomCB          = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(BloomCB)));
+		if (!bloomThresholdCB) bloomThresholdCB = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(BloomThresholdCB)));
+		return true;
+	}
+
+	ID3D11ComputeShader* Imagespace::GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name)
+	{
+		if (!a_slot) {
+			std::vector<std::pair<const char*, const char*>> defines;
+			a_slot = reinterpret_cast<ID3D11ComputeShader*>(
+				imagespace::Util::CompileShader(a_path, defines, "cs_5_0"));
+			if (a_slot) L->info("Compiled {}", a_name);
+		}
+		return a_slot;
 	}
 
 	bool Imagespace::LoadLUTFromDisk(const std::string& a_filename)
@@ -322,8 +508,6 @@ namespace cs::features
 		if (!fbSRV)
 			return;
 
-		// Derive dims from the SRV's resource: kFrameBuffer's raw `texture` pointer is null at this
-		// hook point (engine swaps it during the imagespace setup), but the SRV remains valid.
 		winrt::com_ptr<ID3D11Resource> fbResource;
 		fbSRV->GetResource(fbResource.put());
 		if (!fbResource)
@@ -334,22 +518,32 @@ namespace cs::features
 
 		D3D11_TEXTURE2D_DESC fbDesc{};
 		fbTex2->GetDesc(&fbDesc);
-		probeWidth  = fbDesc.Width;
-		probeHeight = fbDesc.Height;
+		const uint32_t W = fbDesc.Width;
+		const uint32_t H = fbDesc.Height;
 
-		if (!EnsureResources())
-			return;
-
-		const bool wantComposite = (settings.iOperator != 0) || (settings.bLUTEnable && lutSRV);
-		if (wantComposite && !EnsureCompositeResources(fbDesc.Width, fbDesc.Height, fbDesc.Format))
+		if (!EnsureCompositeResources(W, H, fbDesc.Format))
 			return;
 
-		auto* lumCS = GetLumPyramidCS();
-		if (!lumCS)
+		const bool wantAdaptive = settings.bAdaptiveExposure;
+		const bool wantBloom    = settings.bBloomEnable;
+		const bool wantComposite = (settings.iOperator != 0) || wantBloom || settings.bVignetteEnable
+			|| settings.bCAEnable || settings.bSharpenEnable || (settings.bLUTEnable && lutSRV);
+
+		if (wantAdaptive && !EnsurePyramidResources(W, H))
 			return;
-		auto* compCS = wantComposite ? GetCompositeCS() : nullptr;
-		if (wantComposite && !compCS)
+		if (wantBloom && !EnsureBloomResources(W, H, settings.iBloomMips))
 			return;
+
+		auto* lumCS    = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\LumPyramidGenCS.hlsl", lumPyramidCS, "LumPyramidGenCS") : nullptr;
+		auto* expoCS   = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\ExposureAdaptCS.hlsl",  exposureCS,   "ExposureAdaptCS") : nullptr;
+		auto* threshCS = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\BloomThresholdCS.hlsl", bloomThresholdCS, "BloomThresholdCS") : nullptr;
+		auto* downCS   = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\BloomDownCS.hlsl",      bloomDownCS,      "BloomDownCS") : nullptr;
+		auto* upCS     = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\BloomUpCS.hlsl",        bloomUpCS,        "BloomUpCS") : nullptr;
+		auto* compCS   = wantComposite ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\CompositeCS.hlsl",     compositeCS,      "CompositeCS") : nullptr;
+
+		if (wantAdaptive && (!lumCS || !expoCS)) return;
+		if (wantBloom && (!threshCS || !downCS || !upCS)) return;
+		if (wantComposite && !compCS) return;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
@@ -358,70 +552,218 @@ namespace cs::features
 		context->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
 		context->OMSetRenderTargets(0, nullptr, nullptr);
 
-		// Composite pass: regrade kFrameBuffer into compositeScratch, CopyResource back.
-		if (wantComposite) {
-			CompositeCB ccb{};
-			ccb.Operator    = static_cast<uint32_t>(settings.iOperator);
-			ccb.LUTEnable   = (settings.bLUTEnable && lutSRV) ? 1u : 0u;
-			ccb.Exposure    = settings.fExposure;
-			ccb.LUTStrength = settings.fLUTStrength;
-			ccb.OutputDimensions[0] = fbDesc.Width;
-			ccb.OutputDimensions[1] = fbDesc.Height;
-			compositeCB->Update(ccb);
+		auto clearCSBindings = [&]() {
+			ID3D11ShaderResourceView* nullSRVs[4] = { nullptr, nullptr, nullptr, nullptr };
+			context->CSSetShaderResources(0, 4, nullSRVs);
+			ID3D11SamplerState* nullSamp[1] = { nullptr };
+			context->CSSetSamplers(0, 1, nullSamp);
+			ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+			context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+			ID3D11Buffer* nullCBs[1] = { nullptr };
+			context->CSSetConstantBuffers(0, 1, nullCBs);
+			context->CSSetShader(nullptr, nullptr, 0);
+		};
 
-			ID3D11ShaderResourceView* csSRVs[2] = { fbSRV, ccb.LUTEnable ? lutSRV.get() : nullptr };
-			context->CSSetShaderResources(0, 2, csSRVs);
-			ID3D11SamplerState* csSamplers[1] = { lutSampler.get() };
-			context->CSSetSamplers(0, 1, csSamplers);
-			ID3D11UnorderedAccessView* csUAVs[1] = { compositeScratch->uav.get() };
-			context->CSSetUnorderedAccessViews(0, 1, csUAVs, nullptr);
-			ID3D11Buffer* csCBs[1] = { compositeCB->CB() };
-			context->CSSetConstantBuffers(0, 1, csCBs);
-			context->CSSetShader(compCS, nullptr, 0);
-			const uint32_t gx = (fbDesc.Width  + 7) / 8;
-			const uint32_t gy = (fbDesc.Height + 7) / 8;
+		// === 1. Luminance pyramid ===
+		// Convention: every mip is a 2x2 average. Mip 0 reads kFrameBuffer (full res input)
+		// and writes the half-res log-luma. Mip k>0 reads previous pyramid mip and halves again.
+		// pyramid texture dims = (W, H); pyramid mip 0 dims = (W/2, H/2) per D3D's auto-mip layout.
+		if (wantAdaptive) {
+			context->CSSetShader(lumCS, nullptr, 0);
+			ID3D11Buffer* pyrCBs[1] = { pyramidCB->CB() };
+			context->CSSetConstantBuffers(0, 1, pyrCBs);
+
+			for (uint32_t mip = 0; mip < pyramidMipCount; ++mip) {
+				const uint32_t dstW = std::max(1u, W >> (mip + 1));
+				const uint32_t dstH = std::max(1u, H >> (mip + 1));
+
+				PyramidCB cb{};
+				cb.SrcIsLDR  = (mip == 0) ? 1u : 0u;
+				cb.SrcMipIdx = (mip == 0) ? 0u : (mip - 1u);
+				cb.DstDimensions[0] = dstW;
+				cb.DstDimensions[1] = dstH;
+				pyramidCB->Update(cb);
+
+				ID3D11ShaderResourceView* srvs[2] = { fbSRV, lumPyramid->srv.get() };
+				context->CSSetShaderResources(0, 2, srvs);
+				ID3D11UnorderedAccessView* uavs[1] = { lumPyramidUAVs[mip].get() };
+				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+				const uint32_t gx = (dstW + 7) / 8;
+				const uint32_t gy = (dstH + 7) / 8;
+				context->Dispatch(gx, gy, 1);
+
+				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+
+				if (dstW <= 1 && dstH <= 1) {
+					pyramidMipCount = mip + 1;
+					break;
+				}
+			}
+		}
+
+		// === 2. Adaptive exposure ===
+		if (wantAdaptive) {
+			ExposureCB ecb{};
+			auto* timer = RE::BSTimer::GetSingleton();
+			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.5f) : (1.0f / 60.0f);
+			ecb.Tau       = settings.fAdaptationSpeed;
+			ecb.TailMipIdx = pyramidMipCount - 1;
+			exposureCB->Update(ecb);
+
+			const int prev = expoFrameIdx;
+			const int next = 1 - expoFrameIdx;
+			ID3D11ShaderResourceView* srvs[2] = { lumPyramid->srv.get(), expoPingPong[prev]->srv.get() };
+			context->CSSetShaderResources(0, 2, srvs);
+			ID3D11UnorderedAccessView* uavs[1] = { expoPingPong[next]->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			ID3D11Buffer* cbs[1] = { exposureCB->CB() };
+			context->CSSetConstantBuffers(0, 1, cbs);
+			context->CSSetShader(expoCS, nullptr, 0);
+			context->Dispatch(1, 1, 1);
+
+			ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+
+			expoFrameIdx = next;
+		}
+
+		// === 3. Bloom threshold (kFrameBuffer -> bloomChain[0]) ===
+		if (wantBloom) {
+			BloomThresholdCB bcb{};
+			bcb.Threshold = settings.fBloomThreshold;
+			bcb.SoftKnee  = 0.5f;
+			bcb.OutputDimensions[0] = bloomChain[0]->desc.Width;
+			bcb.OutputDimensions[1] = bloomChain[0]->desc.Height;
+			bloomThresholdCB->Update(bcb);
+
+			ID3D11ShaderResourceView* srvs[1] = { fbSRV };
+			context->CSSetShaderResources(0, 1, srvs);
+			ID3D11UnorderedAccessView* uavs[1] = { bloomChain[0]->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			ID3D11Buffer* cbs[1] = { bloomThresholdCB->CB() };
+			context->CSSetConstantBuffers(0, 1, cbs);
+			context->CSSetShader(threshCS, nullptr, 0);
+			const uint32_t gx = (bcb.OutputDimensions[0] + 7) / 8;
+			const uint32_t gy = (bcb.OutputDimensions[1] + 7) / 8;
 			context->Dispatch(gx, gy, 1);
 
-			// Unbind UAV before CopyResource so the destination isn't bound for compute write.
+			ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+		}
+
+		// === 4. Bloom downsample chain ===
+		if (wantBloom) {
+			ID3D11SamplerState* samplers[1] = { lutSampler.get() };
+			context->CSSetSamplers(0, 1, samplers);
+			context->CSSetShader(downCS, nullptr, 0);
+
+			for (int k = 0; k < settings.iBloomMips - 1; ++k) {
+				BloomCB bcb{};
+				bcb.SrcDimensions[0] = bloomChain[k]->desc.Width;
+				bcb.SrcDimensions[1] = bloomChain[k]->desc.Height;
+				bcb.DstDimensions[0] = bloomChain[k + 1]->desc.Width;
+				bcb.DstDimensions[1] = bloomChain[k + 1]->desc.Height;
+				bloomCB->Update(bcb);
+
+				ID3D11ShaderResourceView* srvs[1] = { bloomChain[k]->srv.get() };
+				context->CSSetShaderResources(0, 1, srvs);
+				ID3D11UnorderedAccessView* uavs[1] = { bloomChain[k + 1]->uav.get() };
+				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+				ID3D11Buffer* cbs[1] = { bloomCB->CB() };
+				context->CSSetConstantBuffers(0, 1, cbs);
+				const uint32_t gx = (bcb.DstDimensions[0] + 7) / 8;
+				const uint32_t gy = (bcb.DstDimensions[1] + 7) / 8;
+				context->Dispatch(gx, gy, 1);
+
+				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+			}
+		}
+
+		// === 5. Bloom upsample (additive accumulate, ping-pongs into bloomScratch) ===
+		if (wantBloom) {
+			context->CSSetShader(upCS, nullptr, 0);
+			for (int k = settings.iBloomMips - 2; k >= 0; --k) {
+				BloomCB bcb{};
+				bcb.SrcDimensions[0] = (k == settings.iBloomMips - 2) ? bloomChain[k + 1]->desc.Width  : bloomScratch[k + 1]->desc.Width;
+				bcb.SrcDimensions[1] = (k == settings.iBloomMips - 2) ? bloomChain[k + 1]->desc.Height : bloomScratch[k + 1]->desc.Height;
+				bcb.DstDimensions[0] = bloomChain[k]->desc.Width;
+				bcb.DstDimensions[1] = bloomChain[k]->desc.Height;
+				bloomCB->Update(bcb);
+
+				ID3D11ShaderResourceView* srcSRV = (k == settings.iBloomMips - 2) ? bloomChain[k + 1]->srv.get() : bloomScratch[k + 1]->srv.get();
+				ID3D11ShaderResourceView* srvs[2] = { srcSRV, bloomChain[k]->srv.get() };
+				context->CSSetShaderResources(0, 2, srvs);
+				ID3D11UnorderedAccessView* uavs[1] = { bloomScratch[k]->uav.get() };
+				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+				ID3D11Buffer* cbs[1] = { bloomCB->CB() };
+				context->CSSetConstantBuffers(0, 1, cbs);
+				const uint32_t gx = (bcb.DstDimensions[0] + 7) / 8;
+				const uint32_t gy = (bcb.DstDimensions[1] + 7) / 8;
+				context->Dispatch(gx, gy, 1);
+
+				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+			}
+		}
+
+		// === 6. Composite ===
+		if (wantComposite) {
+			CompositeCB ccb{};
+			ccb.Operator               = static_cast<uint32_t>(settings.iOperator);
+			ccb.LUTEnable              = (settings.bLUTEnable && lutSRV) ? 1u : 0u;
+			ccb.AdaptiveExposureEnable = wantAdaptive ? 1u : 0u;
+			ccb.BloomEnable            = wantBloom ? 1u : 0u;
+			ccb.ExposureManual         = settings.fExposure;
+			ccb.LUTStrength            = settings.fLUTStrength;
+			ccb.ExposureKey            = settings.fExposureKey;
+			ccb.BloomIntensity         = settings.fBloomIntensity;
+			ccb.VignetteEnable         = settings.bVignetteEnable ? 1u : 0u;
+			ccb.CAEnable               = settings.bCAEnable ? 1u : 0u;
+			ccb.SharpenEnable          = settings.bSharpenEnable ? 1u : 0u;
+			ccb.VignetteIntensity      = settings.fVignetteIntensity;
+			ccb.CAIntensity            = settings.fCAIntensity;
+			ccb.Sharpness              = settings.fSharpness;
+			ccb.ExposureMin            = settings.fExposureMin;
+			ccb.ExposureMax            = settings.fExposureMax;
+			ccb.OutputDimensions[0]    = W;
+			ccb.OutputDimensions[1]    = H;
+			compositeCB->Update(ccb);
+
+			ID3D11ShaderResourceView* srvs[4] = {
+				fbSRV,
+				ccb.LUTEnable ? lutSRV.get() : nullptr,
+				wantBloom ? bloomScratch[0]->srv.get() : nullptr,
+				wantAdaptive ? expoPingPong[expoFrameIdx]->srv.get() : nullptr
+			};
+			context->CSSetShaderResources(0, 4, srvs);
+			ID3D11SamplerState* samplers[1] = { lutSampler.get() };
+			context->CSSetSamplers(0, 1, samplers);
+			ID3D11UnorderedAccessView* uavs[1] = { compositeScratch->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			ID3D11Buffer* cbs[1] = { compositeCB->CB() };
+			context->CSSetConstantBuffers(0, 1, cbs);
+			context->CSSetShader(compCS, nullptr, 0);
+			const uint32_t gx = (W + 7) / 8;
+			const uint32_t gy = (H + 7) / 8;
+			context->Dispatch(gx, gy, 1);
+
 			ID3D11UnorderedAccessView* clearUAV[1] = { nullptr };
 			context->CSSetUnorderedAccessViews(0, 1, clearUAV, nullptr);
 			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
 		}
 
-		// Luma probe reads kFrameBuffer (now post-composite if wantComposite).
-		LumCB lcb{};
-		lcb.InputDimensions[0] = probeWidth;
-		lcb.InputDimensions[1] = probeHeight;
-		lumProbeCB->Update(lcb);
-
-		ID3D11ShaderResourceView* probeSRVs[1] = { fbSRV };
-		context->CSSetShaderResources(0, 1, probeSRVs);
-		ID3D11UnorderedAccessView* probeUAVs[1] = { lumProbeTexture->uav.get() };
-		context->CSSetUnorderedAccessViews(0, 1, probeUAVs, nullptr);
-		ID3D11Buffer* probeCBs[1] = { lumProbeCB->CB() };
-		context->CSSetConstantBuffers(0, 1, probeCBs);
-		context->CSSetShader(lumCS, nullptr, 0);
-		context->Dispatch(1, 1, 1);
-
-		// Clear bindings before restoring OM.
-		ID3D11ShaderResourceView* nullSRV[2] = { nullptr, nullptr };
-		context->CSSetShaderResources(0, 2, nullSRV);
-		ID3D11SamplerState* nullSampler[1] = { nullptr };
-		context->CSSetSamplers(0, 1, nullSampler);
-		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
-		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		ID3D11Buffer* nullCB[1] = { nullptr };
-		context->CSSetConstantBuffers(0, 1, nullCB);
-		context->CSSetShader(nullptr, nullptr, 0);
+		clearCSBindings();
 
 		context->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
 		for (auto* rtv : savedRTVs)
 			if (rtv) rtv->Release();
 		if (savedDSV) savedDSV->Release();
 
-		// One-shot CPU readback so the smoke harness can see a real luminance value in the log.
+		// One-shot CPU readback of the EMA scalar so smoke can confirm adaptive exposure path.
 		static int readbackCountdown = 60;
-		if (readbackCountdown > 0) {
+		if (wantAdaptive && readbackCountdown > 0) {
 			--readbackCountdown;
 			if (readbackCountdown == 0) {
 				auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
@@ -436,12 +778,12 @@ namespace cs::features
 				sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
 				winrt::com_ptr<ID3D11Texture2D> staging;
 				if (SUCCEEDED(device->CreateTexture2D(&sd, nullptr, staging.put()))) {
-					context->CopyResource(staging.get(), lumProbeTexture->resource.get());
+					context->CopyResource(staging.get(), expoPingPong[expoFrameIdx]->resource.get());
 					D3D11_MAPPED_SUBRESOURCE mapped{};
 					if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-						const float luma = *reinterpret_cast<const float*>(mapped.pData);
+						const float expo = *reinterpret_cast<const float*>(mapped.pData);
 						context->Unmap(staging.get(), 0);
-						L->info("Probe luma={:.4f} fb={}x{} fmt={}", luma, probeWidth, probeHeight, static_cast<int>(fbDesc.Format));
+						L->info("Probe expoPong={:.4f} fb={}x{} fmt={}", expo, W, H, static_cast<int>(fbDesc.Format));
 					}
 				}
 			}
@@ -458,20 +800,51 @@ namespace cs::features
 
 		ImGui::Separator();
 		ImGui::Text("Tonemap");
-
 		const char* opNames[] = { "Off (passthrough)", "Hable filmic", "Reinhard extended", "Lottes" };
 		if (ImGui::Combo("Operator", &settings.iOperator, opNames, IM_ARRAYSIZE(opNames)))
 			dirty = true;
 
-		ImGui::SliderFloat("Exposure", &settings.fExposure, 0.25f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
-		if (ImGui::IsItemDeactivatedAfterEdit())
-			dirty = true;
+		const char* expoLabel = settings.bAdaptiveExposure ? "Exposure bias" : "Exposure";
+		ImGui::SliderFloat(expoLabel, &settings.fExposure, 0.25f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+
+		ImGui::Separator();
+		ImGui::Text("Adaptive exposure");
+		dirty |= ImGui::Checkbox("Adaptive enable", &settings.bAdaptiveExposure);
+		ImGui::SliderFloat("Adaptation speed (s)", &settings.fAdaptationSpeed, 0.1f, 5.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SliderFloat("Key (mid-grey)", &settings.fExposureKey, 0.05f, 0.5f, "%.3f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SliderFloat("Min adapted", &settings.fExposureMin, 0.01f, 1.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SliderFloat("Max adapted", &settings.fExposureMax, 1.0f, 16.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+
+		ImGui::Separator();
+		ImGui::Text("Bloom");
+		dirty |= ImGui::Checkbox("Bloom enable", &settings.bBloomEnable);
+		ImGui::SliderFloat("Threshold", &settings.fBloomThreshold, 0.0f, 2.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SliderFloat("Intensity", &settings.fBloomIntensity, 0.0f, 0.3f, "%.3f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		ImGui::SliderInt("Mips", &settings.iBloomMips, 3, 6);
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+
+		ImGui::Separator();
+		ImGui::Text("Lens");
+		dirty |= ImGui::Checkbox("Vignette", &settings.bVignetteEnable);
+		ImGui::SliderFloat("Vignette intensity", &settings.fVignetteIntensity, 0.0f, 1.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		dirty |= ImGui::Checkbox("Chromatic aberration", &settings.bCAEnable);
+		ImGui::SliderFloat("CA intensity", &settings.fCAIntensity, 0.0f, 2.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
+		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 
 		ImGui::Separator();
 		ImGui::Text("Color grading (LUT)");
-
 		dirty |= ImGui::Checkbox("LUT enabled", &settings.bLUTEnable);
-
 		char lutBuf[256] = {};
 		const auto lutLen = std::min(settings.sLUTPath.size(), sizeof(lutBuf) - 1);
 		std::memcpy(lutBuf, settings.sLUTPath.data(), lutLen);
@@ -486,18 +859,12 @@ namespace cs::features
 			dirty = true;
 		}
 		ImGui::SameLine();
-		if (lutSRV) {
-			ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "loaded: %s", lutLoadedPath.c_str());
-		} else {
-			ImGui::TextDisabled("no LUT loaded");
-		}
-
+		if (lutSRV) ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "loaded: %s", lutLoadedPath.c_str());
+		else        ImGui::TextDisabled("no LUT loaded");
 		ImGui::SliderFloat("LUT strength", &settings.fLUTStrength, 0.0f, 1.0f, "%.2f");
-		if (ImGui::IsItemDeactivatedAfterEdit())
-			dirty = true;
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 
-		if (dirty)
-			SaveSettings();
+		if (dirty) SaveSettings();
 	}
 
 	namespace
