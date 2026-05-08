@@ -27,6 +27,7 @@ namespace cs::features
 	constexpr const char* kVignMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_vignette";
 	constexpr const char* kCAMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_ca";
 	constexpr const char* kSharpenMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_sharpen";
+	constexpr const char* kDofMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_dof";
 	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
 
 	struct CompositeCB
@@ -111,7 +112,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return !Imagespace::GetSingleton()->settings.bDOFEnable && func(This);
+			return (!Imagespace::GetSingleton()->settings.bDOFEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -119,7 +120,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return !Imagespace::GetSingleton()->settings.bDOFEnable && func(This);
+			return (!Imagespace::GetSingleton()->settings.bDOFEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -127,7 +128,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return !Imagespace::GetSingleton()->settings.bDOFEnable && func(This);
+			return (!Imagespace::GetSingleton()->settings.bDOFEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -151,10 +152,11 @@ namespace cs::features
 	void Imagespace::Load()
 	{
 		LoadSettings();
-		L->info("Loaded: enabled={} op={} exposure={:.2f} adaptive={} bloom={} vig={} ca={} sharp={}",
+		L->info("Loaded: enabled={} op={} exposure={:.2f} adaptive={} bloom={} vig={} ca={} sharp={} dof={}",
 			settings.enabled, settings.iOperator, settings.fExposure,
 			settings.bAdaptiveExposure, settings.bBloomEnable,
-			settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable);
+			settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable,
+			settings.bDOFEnable);
 	}
 
 	void Imagespace::OnPostPostLoad()
@@ -210,8 +212,16 @@ namespace cs::features
 		settings.bSharpenEnable     = ini.GetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
 		settings.fSharpness         = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", settings.fSharpness)), 0.0f, 1.0f);
 
+		settings.bDOFEnable         = ini.GetBoolValue("Settings",   "bDOFEnable",          settings.bDOFEnable);
+		settings.fAperture          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAperture",       settings.fAperture)),       0.0f, 0.5f);
+		settings.fFocusDistance     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusDistance",  settings.fFocusDistance)), 10.0f, 100000.0f);
+		settings.fFocalLength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocalLength",    settings.fFocalLength)),    1.0f, 200.0f);
+		settings.fFocusRange        = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusRange",     settings.fFocusRange)),    10.0f, 10000.0f);
+		settings.iDOFQuality        = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iDOFQuality",     settings.iDOFQuality)),     0, 2);
+		settings.fCoCLimitFactor    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCoCLimitFactor", settings.fCoCLimitFactor)), 0.005f, 0.10f);
+
 		// Smoke-harness markers.
-		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0;
+		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0;
 		const bool opP    = ReadMarker(kOpMarker,      op_c);
 		const bool lutP   = ReadMarker(kLutMarker,     lut_c);
 		const bool adaptP = ReadMarker(kAdaptMarker,   adapt_c);
@@ -219,8 +229,9 @@ namespace cs::features
 		const bool vigP   = ReadMarker(kVignMarker,    vig_c);
 		const bool caP    = ReadMarker(kCAMarker,      ca_c);
 		const bool sharpP = ReadMarker(kSharpenMarker, sharp_c);
+		const bool dofP   = ReadMarker(kDofMarker,     dof_c);
 
-		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP;
+		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP;
 
 		if (testModeActive) {
 			// Reset to deterministic baseline.
@@ -240,9 +251,22 @@ namespace cs::features
 			settings.fCAIntensity       = settings.bCAEnable ? 1.5f : 0.5f;
 			settings.bSharpenEnable     = sharpP && (sharp_c == '1');
 			settings.fSharpness         = settings.bSharpenEnable ? 0.8f : 0.4f;
-			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={}",
+			settings.bDOFEnable         = dofP && (dof_c == '1' || dof_c == '2');
+			if (dof_c == '1') {
+				settings.fAperture      = 0.05f;
+				settings.fFocusDistance = 1500.0f;
+				settings.fFocalLength   = 50.0f;
+				settings.iDOFQuality    = 1;
+			} else if (dof_c == '2') {
+				settings.fAperture      = 0.30f;
+				settings.fFocusDistance = 500.0f;
+				settings.fFocalLength   = 50.0f;
+				settings.iDOFQuality    = 2;
+			}
+			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={} dof={}",
 				settings.iOperator, settings.bLUTEnable, settings.bAdaptiveExposure,
-				settings.bBloomEnable, settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable);
+				settings.bBloomEnable, settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable,
+				settings.bDOFEnable);
 		}
 	}
 
@@ -275,6 +299,13 @@ namespace cs::features
 		ini.SetDoubleValue("Settings", "fCAIntensity",        settings.fCAIntensity);
 		ini.SetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
 		ini.SetDoubleValue("Settings", "fSharpness",          settings.fSharpness);
+		ini.SetBoolValue("Settings",   "bDOFEnable",          settings.bDOFEnable);
+		ini.SetDoubleValue("Settings", "fAperture",           settings.fAperture);
+		ini.SetDoubleValue("Settings", "fFocusDistance",      settings.fFocusDistance);
+		ini.SetDoubleValue("Settings", "fFocalLength",        settings.fFocalLength);
+		ini.SetDoubleValue("Settings", "fFocusRange",         settings.fFocusRange);
+		ini.SetLongValue("Settings",   "iDOFQuality",         settings.iDOFQuality);
+		ini.SetDoubleValue("Settings", "fCoCLimitFactor",     settings.fCoCLimitFactor);
 		ini.SaveFile(kIniPath);
 	}
 
@@ -538,6 +569,8 @@ namespace cs::features
 	void Imagespace::RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex)
 	{
 		if (!settings.bDOFEnable) return;
+		// Yield to ENB's DOF rather than double-blurring. The persisted user preference is left intact.
+		if (cs::env::IsENBLoaded()) return;
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) return;
@@ -1096,6 +1129,35 @@ namespace cs::features
 		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
 		ImGui::BeginDisabled(!settings.bSharpenEnable);
 		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
+		commitDirty();
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		ImGui::Text("Bokeh depth of field");
+		if (cs::env::IsENBLoaded())
+			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.4f, 1.0f), "ENB detected: ours yields to ENB DOF.");
+		dirty |= ImGui::Checkbox("DOF enable", &settings.bDOFEnable);
+		ImGui::BeginDisabled(!settings.bDOFEnable);
+		ImGui::SliderFloat("Aperture", &settings.fAperture, 0.0f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+		ImGui::SetItemTooltip("Larger = stronger background blur. 0 disables blur entirely.");
+		commitDirty();
+		ImGui::SliderFloat("Focus distance (game units)", &settings.fFocusDistance, 10.0f, 100000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+		ImGui::SetItemTooltip("Distance to the in-focus plane in game units.");
+		commitDirty();
+		ImGui::SliderFloat("Focal length", &settings.fFocalLength, 1.0f, 200.0f, "%.1f");
+		ImGui::SetItemTooltip("Larger focal length = narrower depth of field around the focus plane.");
+		commitDirty();
+		ImGui::SliderFloat("Focus range", &settings.fFocusRange, 10.0f, 10000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+		ImGui::SetItemTooltip("Width of the sharp zone around the focus plane.");
+		commitDirty();
+		const char* qualityNames[] = { "Performance (12 taps)", "Balanced (24 taps)", "Quality (24 taps)" };
+		int qualityIdx = std::clamp(settings.iDOFQuality, 0, 2);
+		if (ImGui::Combo("Quality", &qualityIdx, qualityNames, IM_ARRAYSIZE(qualityNames))) {
+			settings.iDOFQuality = qualityIdx;
+			dirty = true;
+		}
+		ImGui::SliderFloat("CoC limit (% of frame height)", &settings.fCoCLimitFactor, 0.005f, 0.10f, "%.3f");
+		ImGui::SetItemTooltip("Caps maximum blur radius. 0.04 = up to 4% of frame height.");
 		commitDirty();
 		ImGui::EndDisabled();
 
