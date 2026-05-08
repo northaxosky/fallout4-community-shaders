@@ -7,10 +7,13 @@
 #include <filesystem>
 #include <imgui.h>
 
+#include <DirectXMath.h>
+
 #include "ComputeScope.h"
 #include "Env.h"
 #include "Log.h"
 #include "SimpleIni.h"
+#include "Sky.h"
 #include "Util.h"
 #include "Weather.h"
 
@@ -55,6 +58,15 @@ namespace cs::features
 		float    ExposureMax;
 		uint32_t OutputDimensions[2];
 		float    Pad1;
+
+		uint32_t SunspriteEnable;
+		uint32_t LensFlareEnable;
+		float    SunUV[2];
+
+		float    SunspriteIntensity;
+		float    SunspriteSize;
+		float    LensFlareIntensity;
+		uint32_t LensFlareGhosts;
 	};
 	static_assert(sizeof(CompositeCB) % 16 == 0, "CompositeCB must be 16-byte aligned");
 
@@ -212,6 +224,13 @@ namespace cs::features
 		settings.bSharpenEnable     = ini.GetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
 		settings.fSharpness         = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", settings.fSharpness)), 0.0f, 1.0f);
 
+		settings.bSunspriteEnable    = ini.GetBoolValue("Settings",   "bSunspriteEnable",    settings.bSunspriteEnable);
+		settings.fSunspriteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteIntensity", settings.fSunspriteIntensity)), 0.0f, 2.0f);
+		settings.fSunspriteSize      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteSize",      settings.fSunspriteSize)),      0.01f, 0.2f);
+		settings.bLensFlareEnable    = ini.GetBoolValue("Settings",   "bLensFlareEnable",    settings.bLensFlareEnable);
+		settings.fLensFlareIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLensFlareIntensity", settings.fLensFlareIntensity)), 0.0f, 2.0f);
+		settings.iLensFlareGhosts    = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iLensFlareGhosts",    settings.iLensFlareGhosts)),    3, 7);
+
 		settings.bDOFEnable         = ini.GetBoolValue("Settings",   "bDOFEnable",          settings.bDOFEnable);
 		settings.fAperture          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAperture",       settings.fAperture)),       0.0f, 0.5f);
 		settings.fFocusDistance     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusDistance",  settings.fFocusDistance)), 10.0f, 100000.0f);
@@ -299,6 +318,12 @@ namespace cs::features
 		ini.SetDoubleValue("Settings", "fCAIntensity",        settings.fCAIntensity);
 		ini.SetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
 		ini.SetDoubleValue("Settings", "fSharpness",          settings.fSharpness);
+		ini.SetBoolValue("Settings",   "bSunspriteEnable",    settings.bSunspriteEnable);
+		ini.SetDoubleValue("Settings", "fSunspriteIntensity", settings.fSunspriteIntensity);
+		ini.SetDoubleValue("Settings", "fSunspriteSize",      settings.fSunspriteSize);
+		ini.SetBoolValue("Settings",   "bLensFlareEnable",    settings.bLensFlareEnable);
+		ini.SetDoubleValue("Settings", "fLensFlareIntensity", settings.fLensFlareIntensity);
+		ini.SetLongValue("Settings",   "iLensFlareGhosts",    settings.iLensFlareGhosts);
 		ini.SetBoolValue("Settings",   "bDOFEnable",          settings.bDOFEnable);
 		ini.SetDoubleValue("Settings", "fAperture",           settings.fAperture);
 		ini.SetDoubleValue("Settings", "fFocusDistance",      settings.fFocusDistance);
@@ -823,8 +848,13 @@ namespace cs::features
 
 		const bool wantAdaptive = settings.bAdaptiveExposure;
 		const bool wantBloom    = settings.bBloomEnable;
+		// Yield sun additions to ENB; the persisted user prefs are left intact (matches DOF's runtime gate).
+		const bool enbLoaded    = cs::env::IsENBLoaded();
+		const bool wantSunsprite = settings.bSunspriteEnable && !enbLoaded;
+		const bool wantLensFlare = settings.bLensFlareEnable && !enbLoaded;
 		const bool wantComposite = (settings.iOperator != 0) || wantBloom || settings.bVignetteEnable
-			|| settings.bCAEnable || settings.bSharpenEnable || (settings.bLUTEnable && lutSRV);
+			|| settings.bCAEnable || settings.bSharpenEnable || (settings.bLUTEnable && lutSRV)
+			|| wantSunsprite || wantLensFlare;
 
 		if (wantAdaptive && !EnsurePyramidResources(W, H))
 			return;
@@ -1008,6 +1038,43 @@ namespace cs::features
 			ccb.ExposureMax            = settings.fExposureMax;
 			ccb.OutputDimensions[0]    = W;
 			ccb.OutputDimensions[1]    = H;
+
+			// Sun NDC X/Y in [-1,1] when on-screen; sentinel 2.0 = sun unavailable / off-screen / behind camera.
+			float sunUVx = 2.0f, sunUVy = 2.0f;
+			float sunWSx = 0, sunWSy = 0, sunWSz = 0;
+			if (cs::engine::TryGetSunDirectionWS(sunWSx, sunWSy, sunWSz)) {
+				auto* viewport = imagespace::Util::State_GetSingleton();
+				if (viewport) {
+					const auto& vp = viewport->cameraState.camViewData.viewProjMat;
+					DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sunWSx, -sunWSy, -sunWSz, 0.0f);
+					DirectX::XMMATRIX vpMat  = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(&vp));
+					DirectX::XMVECTOR clip   = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vpMat));
+					const float wClip = DirectX::XMVectorGetW(clip);
+					// w<=0: sun behind camera. abs<5 caps the divide before it can produce inf-class garbage.
+					if (wClip > 0.0f) {
+						const float u = DirectX::XMVectorGetX(clip) / wClip;
+						const float v = DirectX::XMVectorGetY(clip) / wClip;
+						if (std::abs(u) < 5.0f && std::abs(v) < 5.0f) {
+							sunUVx = u;
+							sunUVy = v;
+						}
+					}
+				}
+			}
+			ccb.SunUV[0] = sunUVx;
+			ccb.SunUV[1] = sunUVy;
+			ccb.SunspriteEnable    = wantSunsprite ? 1u : 0u;
+			ccb.LensFlareEnable    = wantLensFlare ? 1u : 0u;
+			static bool sunFxLoggedOnce = false;
+			if (!sunFxLoggedOnce && (wantSunsprite || wantLensFlare)) {
+				sunFxLoggedOnce = true;
+				L->info("Sun probe: ws=({:.3f},{:.3f},{:.3f}) uv=({:.3f},{:.3f}) sunsprite={} flare={}",
+					sunWSx, sunWSy, sunWSz, sunUVx, sunUVy, wantSunsprite ? "on" : "off", wantLensFlare ? "on" : "off");
+			}
+			ccb.SunspriteIntensity = settings.fSunspriteIntensity;
+			ccb.SunspriteSize      = settings.fSunspriteSize;
+			ccb.LensFlareIntensity = settings.fLensFlareIntensity;
+			ccb.LensFlareGhosts    = static_cast<uint32_t>(settings.iLensFlareGhosts);
 			compositeCB->Update(ccb);
 
 			ID3D11ShaderResourceView* srvs[4] = {
@@ -1129,6 +1196,26 @@ namespace cs::features
 		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
 		ImGui::BeginDisabled(!settings.bSharpenEnable);
 		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
+		commitDirty();
+		ImGui::EndDisabled();
+
+		ImGui::Separator();
+		ImGui::Text("Sun & lens");
+		dirty |= ImGui::Checkbox("Sunsprite", &settings.bSunspriteEnable);
+		ImGui::SetItemTooltip("Bright glow at the sun's screen position. No-op when sun is behind camera or in interiors.");
+		ImGui::BeginDisabled(!settings.bSunspriteEnable);
+		ImGui::SliderFloat("Sunsprite intensity", &settings.fSunspriteIntensity, 0.0f, 2.0f, "%.2f");
+		commitDirty();
+		ImGui::SliderFloat("Sunsprite size", &settings.fSunspriteSize, 0.01f, 0.2f, "%.3f");
+		ImGui::SetItemTooltip("Disc radius as a fraction of frame height.");
+		commitDirty();
+		ImGui::EndDisabled();
+		dirty |= ImGui::Checkbox("Lens flare", &settings.bLensFlareEnable);
+		ImGui::SetItemTooltip("Ghost reflections traversing from the sun toward the screen centre.");
+		ImGui::BeginDisabled(!settings.bLensFlareEnable);
+		ImGui::SliderFloat("Flare intensity", &settings.fLensFlareIntensity, 0.0f, 2.0f, "%.2f");
+		commitDirty();
+		ImGui::SliderInt("Flare ghosts", &settings.iLensFlareGhosts, 3, 7);
 		commitDirty();
 		ImGui::EndDisabled();
 

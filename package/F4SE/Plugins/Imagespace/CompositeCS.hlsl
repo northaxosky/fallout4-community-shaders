@@ -32,14 +32,23 @@ void main(uint3 dtid : SV_DispatchThreadID)
     else
         c = InputColor.Load(int3(px, 0)).rgb;
 
-    // 3. Operator path: linear domain.
-    if (Operator != 0 || BloomEnable != 0) {
+    const bool sunInFrame = (SunspriteEnable != 0 || LensFlareEnable != 0) && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
+    const bool useLinearPath = Operator != 0 || BloomEnable != 0 || sunInFrame;
+    if (useLinearPath) {
         float3 lin = SRGBToLinear(c);
 
         // Bloom-add (linear domain so blur sums sensibly).
         if (BloomEnable != 0) {
             const float3 bloom = BloomTex.SampleLevel(LinearClampSampler, uv, 0).rgb;
             lin += bloom * BloomIntensity;
+        }
+
+        // Sun additions in linear HDR domain so tonemap compresses them like any bright source.
+        if (sunInFrame) {
+            if (SunspriteEnable != 0)
+                lin += ApplySunsprite(uv, SunUV, SunspriteIntensity, SunspriteSize);
+            if (LensFlareEnable != 0)
+                lin += ApplyLensFlare(uv, SunUV, LensFlareIntensity, LensFlareGhosts);
         }
 
         // Combined exposure.

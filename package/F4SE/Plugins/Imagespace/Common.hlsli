@@ -25,6 +25,15 @@ cbuffer CompositeCB : register(b0)
     float ExposureMax;
     uint2 OutputDimensions;
     float _Pad1;
+
+    uint  SunspriteEnable;
+    uint  LensFlareEnable;
+    float2 SunUV;
+
+    float SunspriteIntensity;
+    float SunspriteSize;
+    float LensFlareIntensity;
+    uint  LensFlareGhosts;
 };
 
 // Approximation: pure power, not the piecewise sRGB curve. Adequate for grading work.

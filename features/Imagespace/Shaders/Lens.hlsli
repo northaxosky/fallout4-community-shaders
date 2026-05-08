@@ -26,3 +26,55 @@ float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 
     const float b_ch = tex.SampleLevel(samp, uvB, 0).b;
     return float3(r_ch, g_ch, b_ch);
 }
+
+// Sun-disc Gaussian glow at sunUVNDC; sizeUV = disc radius in UV space, returns a tinted contribution to add.
+float3 ApplySunsprite(float2 uv, float2 sunUVNDC, float intensity, float sizeUV)
+{
+    // Engine NDC Y is inverted vs UV.
+    const float2 sunUV = float2(sunUVNDC.x * 0.5 + 0.5, 1.0 - (sunUVNDC.y * 0.5 + 0.5));
+    const float2 d = uv - sunUV;
+    const float  r2 = dot(d, d);
+    const float  sigma = max(sizeUV * sizeUV, 1e-6);
+    const float  glow = exp(-r2 / sigma);
+    const float3 tint = float3(1.0, 0.95, 0.78);  // slight warm yellow
+    return tint * (intensity * glow);
+}
+
+// Lens-flare ghost kernel along the line from sunUV through the screen centre.
+// Fixed pattern of up to 7 ghosts (kPositions/kScales/kTints arrays); ghostCount selects how many.
+float3 ApplyLensFlare(float2 uv, float2 sunUVNDC, float intensity, uint ghostCount)
+{
+    const float2 sunUV = float2(sunUVNDC.x * 0.5 + 0.5, 1.0 - (sunUVNDC.y * 0.5 + 0.5));
+    const float2 centre = float2(0.5, 0.5);
+    const float2 dir = centre - sunUV;
+    const float  flareLen = length(dir);
+    if (flareLen < 1e-4) return float3(0, 0, 0);  // sun exactly on centre: no flare
+
+    static const float kPositions[7] = { 0.6, 1.4, 1.9, 2.4, 0.4, 0.9, 1.6 };
+    static const float kScales[7]    = { 0.20, 0.60, 0.40, 0.30, 1.10, 0.25, 0.45 };
+    static const float3 kTints[7] = {
+        float3(1.0, 0.4, 0.2),
+        float3(0.3, 0.7, 1.0),
+        float3(1.0, 0.9, 0.5),
+        float3(0.6, 0.4, 1.0),
+        float3(1.0, 0.6, 0.6),
+        float3(0.5, 1.0, 0.7),
+        float3(1.0, 0.8, 0.3)
+    };
+
+    float3 accum = 0.0;
+    const uint count = min(ghostCount, 7u);
+    for (uint i = 0; i < count; ++i) {
+        const float2 ghost = sunUV + dir * kPositions[i];
+        const float2 d = uv - ghost;
+        const float  r2 = dot(d, d);
+        const float  radius = 0.012 * kScales[i] * (1.0 + flareLen * 0.5);
+        const float  sigma = max(radius * radius, 1e-6);
+        accum += kTints[i] * exp(-r2 / sigma);
+    }
+
+    // Edge fade as sunUV leaves [0,1]; min() keeps it isotropic (product form double-squared in corners).
+    const float2 fadeXY = saturate(1.0 - 2.0 * abs(sunUV - 0.5));
+    const float  edgeFade = min(fadeXY.x, fadeXY.y);
+    return accum * intensity * edgeFade;
+}

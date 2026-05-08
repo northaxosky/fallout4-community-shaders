@@ -16,11 +16,9 @@
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
-#include "RE/N/NiAVObject.h"
-#include "RE/S/Sky.h"
-#include "RE/S/Sun.h"
 #include "RenderHooks.h"
 #include "SimpleIni.h"
+#include "Sky.h"
 #include "Util.h"
 
 namespace cs::features
@@ -237,35 +235,6 @@ namespace cs::features
 		return std::max<uint32_t>(scaled, 8u);
 	}
 
-	bool ScreenSpaceShadows::GetSunDirectionWS(float& outX, float& outY, float& outZ) const
-	{
-		auto* sky = RE::Sky::GetSingleton();
-		if (!sky || !sky->sun || !sky->sun->light)
-			return false;
-
-		// NiDirectionalLight is only forward-declared in CommonLibF4; cast through NiAVObject for the world transform.
-		auto* lightObj = reinterpret_cast<RE::NiAVObject*>(sky->sun->light.get());
-		auto& rot = lightObj->world.rotate;
-
-		static bool loggedMatrix = false;
-		if (!loggedMatrix) {
-			L->info("Sun rotation row0=({:.3f},{:.3f},{:.3f},{:.3f})", rot.entry[0].x, rot.entry[0].y, rot.entry[0].z, rot.entry[0].w);
-			L->info("Sun rotation row1=({:.3f},{:.3f},{:.3f},{:.3f})", rot.entry[1].x, rot.entry[1].y, rot.entry[1].z, rot.entry[1].w);
-			L->info("Sun rotation row2=({:.3f},{:.3f},{:.3f},{:.3f})", rot.entry[2].x, rot.entry[2].y, rot.entry[2].z, rot.entry[2].w);
-			loggedMatrix = true;
-		}
-
-		// FO4's directional light stores the world-space sun direction in row 0 of its NiTransform::rotate;
-		// rows 1 and 2 are identity placeholders, not a real rotation. Verified via runtime matrix dump.
-		float x = rot.entry[0].x;
-		float y = rot.entry[0].y;
-		float z = rot.entry[0].z;
-		const float invLen = 1.0f / std::max(std::sqrt(x * x + y * y + z * z), 1e-6f);
-		outX = x * invLen;
-		outY = y * invLen;
-		outZ = z * invLen;
-		return true;
-	}
 
 	bool ScreenSpaceShadows::EnsureResources()
 	{
@@ -454,7 +423,7 @@ namespace cs::features
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
 		float dirX, dirY, dirZ;
-		if (!GetSunDirectionWS(dirX, dirY, dirZ))
+		if (!cs::engine::TryGetSunDirectionWS(dirX, dirY, dirZ))
 			return;
 
 		// Project against the jittered view-proj since the depth buffer SSS samples was rasterized with jitter applied.
@@ -706,7 +675,7 @@ namespace cs::features
 			return;
 
 		float dirX, dirY, dirZ;
-		if (!GetSunDirectionWS(dirX, dirY, dirZ))
+		if (!cs::engine::TryGetSunDirectionWS(dirX, dirY, dirZ))
 			return;
 
 		auto* cs = GetApplyCS();

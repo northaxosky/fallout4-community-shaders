@@ -55,6 +55,14 @@ namespace cs::features
 			bool        bSharpenEnable     = true;
 			float       fSharpness         = 0.4f;
 
+			// Sun + lens.
+			bool        bSunspriteEnable    = true;
+			float       fSunspriteIntensity = 0.6f;
+			float       fSunspriteSize      = 0.05f;
+			bool        bLensFlareEnable    = false;
+			float       fLensFlareIntensity = 0.8f;
+			int         iLensFlareGhosts    = 5;
+
 			// Bokeh DOF.
 			bool        bDOFEnable         = false;
 			float       fAperture          = 0.05f;

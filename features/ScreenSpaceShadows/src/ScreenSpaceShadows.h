@@ -68,9 +68,6 @@ namespace cs::features
 
 		uint32_t GetScaledSampleCount() const;
 
-		// Returns the world-space sun direction (normalized) on success.
-		bool GetSunDirectionWS(float& outX, float& outY, float& outZ) const;
-
 		// Mask compute resources
 		std::unique_ptr<sss::Texture2D>      shadowsTexture;
 		std::unique_ptr<sss::ConstantBuffer> raymarchCB;
