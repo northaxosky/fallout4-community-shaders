@@ -173,17 +173,23 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 			}
 		}
 
-		L->info("Frame Generation enabled, using D3D12 proxy");
-
 		auto fidelityFX = FidelityFX::GetSingleton();
 
-		bool hasBackend = fidelityFX->module;
+		// User-disabled FG: skip D3D12 proxy entirely so FO4 stays on native D3D11.
+		// Lets RenderDoc captures see the actual game rendering instead of the proxy swap chain.
+		const bool userEnabled = upscaling->settings.frameGenerationMode;
+		bool hasBackend = userEnabled && fidelityFX->module;
+		if (!userEnabled) {
+			L->info("FrameGeneration disabled in INI; skipping D3D12 swap-chain proxy");
+		} else {
+			L->info("Frame Generation enabled, using D3D12 proxy");
+		}
 
 		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
-		if (upscaling->settings.frameGenType == 1) {
+		if (userEnabled && upscaling->settings.frameGenType == 1) {
 			upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
 			hasBackend = true;
-		} else if (upscaling->settings.frameGenType == 2) {
+		} else if (userEnabled && upscaling->settings.frameGenType == 2) {
 			auto xess = XeSSFG::GetSingleton();
 			if (xess->fgModule && xess->xellModule) {
 				upscaling->activeFrameGenType = Upscaling::FrameGenType::kXeSSFG;

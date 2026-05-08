@@ -10,6 +10,7 @@ namespace cs::engine
 	// post-callbacks at the same anchor; the broker installs one detour per anchor and dispatches the list.
 	// First registration at an anchor lazy-installs the detour. Callbacks fire in registration order.
 	void RegisterPostDeferredPrePass(RenderHookCallback callback);
+	void RegisterPreDeferredLightsImpl(RenderHookCallback callback);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback);
 	void RegisterPostDeferredComposite(RenderHookCallback callback);
 }

@@ -11,6 +11,7 @@ namespace cs::engine
 	namespace
 	{
 		std::vector<RenderHookCallback> g_postDeferredPrePass;
+		std::vector<RenderHookCallback> g_preDeferredLightsImpl;
 		std::vector<RenderHookCallback> g_postDeferredLightsImpl;
 		std::vector<RenderHookCallback> g_postDeferredComposite;
 		bool g_prePassInstalled = false;
@@ -33,6 +34,9 @@ namespace cs::engine
 		{
 			static void thunk()
 			{
+				for (auto& cb : g_preDeferredLightsImpl) {
+					cb();
+				}
 				func();
 				for (auto& cb : g_postDeferredLightsImpl) {
 					cb();
@@ -61,6 +65,16 @@ namespace cs::engine
 			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
 			g_prePassInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredPrePass");
+		}
+	}
+
+	void RegisterPreDeferredLightsImpl(RenderHookCallback callback)
+	{
+		g_preDeferredLightsImpl.push_back(std::move(callback));
+		if (!g_lightsImplInstalled) {
+			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
+			g_lightsImplInstalled = true;
+			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 		}
 	}
 

@@ -44,6 +44,13 @@ namespace cs::engine
 
 		kMainDepthMips = 39,
 
+		// Full-res (matches frame dim) R8G8B8A8 SAO buffers with full SRV+RTV+UAV bind. Identified via runtime
+		// probe + RenderDoc capture: this trio holds the SAO output that the deferred ambient pass actually
+		// samples (t9). The half-res kSSAO=28 / kSSAOTemp[1-3]=48-50 are compute scratch / blur intermediates.
+		kSSAOFinal = 45,
+		kSSAOFinalSwap = 46,
+		kSSAOFinalSwap2 = 47,
+
 		kSSAOTemp = 48,
 		kSSAOTemp2 = 49,
 		kSSAOTemp3 = 50,
