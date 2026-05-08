@@ -54,6 +54,15 @@ namespace cs::features
 			float       fCAIntensity       = 0.5f;
 			bool        bSharpenEnable     = true;
 			float       fSharpness         = 0.4f;
+
+			// Bokeh DOF (IS-5; UI lands in IS-5b alongside INI defaults + ENB-aware logic).
+			bool        bDOFEnable         = false;
+			float       fAperture          = 0.05f;
+			float       fFocusDistance     = 1500.0f;
+			float       fFocalLength       = 50.0f;
+			float       fFocusRange        = 200.0f;
+			int         iDOFQuality        = 1;
+			float       fCoCLimitFactor    = 0.04f;
 		};
 
 		Settings settings;
@@ -67,6 +76,8 @@ namespace cs::features
 		bool EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format);
 		bool EnsurePyramidResources(uint32_t a_width, uint32_t a_height);
 		bool EnsureBloomResources(uint32_t a_width, uint32_t a_height, int a_mips);
+		bool EnsureDOFResources(uint32_t a_width, uint32_t a_height);
+		void RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex);
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);
 		bool LoadLUTFromDisk(const std::string& a_filename);
 
@@ -98,6 +109,20 @@ namespace cs::features
 		ID3D11ComputeShader*                        bloomDownCS      = nullptr;
 		ID3D11ComputeShader*                        bloomUpCS        = nullptr;
 		int                                         bloomMipsAlloc   = 0;
+
+		// Bokeh DOF (IS-5).
+		std::unique_ptr<imagespace::Texture2D>      dofCoCTex;             // half-res R16F: linearised CoC (signed)
+		std::unique_ptr<imagespace::Texture2D>      dofTileTex;            // /16 R16G16F: per-tile {minCoC, maxCoC} for early-out
+		std::unique_ptr<imagespace::Texture2D>      dofHalfColor;          // half-res R11G11B10F: downsampled scene (Pass 1 output)
+		std::unique_ptr<imagespace::Texture2D>      dofHalfBlurred;        // half-res R11G11B10F: blur output (Pass 3 output) - ping-pong with dofHalfColor
+		std::unique_ptr<imagespace::ConstantBuffer> dofCB;
+		ID3D11ComputeShader*                        dofDepthCoCCS    = nullptr;
+		ID3D11ComputeShader*                        dofDilateCS      = nullptr;
+		ID3D11ComputeShader*                        dofBlurCS        = nullptr;
+		ID3D11ComputeShader*                        dofCompositeCS   = nullptr;
+		winrt::com_ptr<ID3D11SamplerState>          dofLinearClampSampler;
+		uint32_t                                    dofWidth         = 0;
+		uint32_t                                    dofHeight        = 0;
 
 		// Cached for dim-change reallocation.
 		uint32_t                                    scratchWidth  = 0;

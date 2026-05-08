@@ -89,6 +89,51 @@ namespace cs::features
 	};
 	static_assert(sizeof(BloomCB) % 16 == 0);
 
+	struct DofCB
+	{
+		float    CocScale;
+		float    CocBias;
+		float    CocLimit;
+		float    FocusRange;
+
+		uint32_t HalfDimensions[2];
+		uint32_t FullDimensions[2];
+
+		uint32_t QualityLevel;
+		float    NearPlane;
+		float    FarPlane;
+		float    Pad0;
+	};
+	static_assert(sizeof(DofCB) % 16 == 0);
+
+	// Engine DOF + blur effects: vfunc 8 (IsActive) replaced to return false when our DOF is on.
+	// Three effects to disable: ImageSpaceEffectDepthOfField, ImageSpaceEffectBokehDepthOfField,
+	// ImageSpaceEffectFullScreenBlur. Missing one would cause double-DOF.
+	struct ImageSpaceEffectDepthOfField_IsActive
+	{
+		static bool thunk(RE::ImageSpaceEffect* This)
+		{
+			return !Imagespace::GetSingleton()->settings.bDOFEnable && func(This);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+	struct ImageSpaceEffectBokehDepthOfField_IsActive
+	{
+		static bool thunk(RE::ImageSpaceEffect* This)
+		{
+			return !Imagespace::GetSingleton()->settings.bDOFEnable && func(This);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+	struct ImageSpaceEffectFullScreenBlur_IsActive
+	{
+		static bool thunk(RE::ImageSpaceEffect* This)
+		{
+			return !Imagespace::GetSingleton()->settings.bDOFEnable && func(This);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
+
 	struct Imagespace_PostUpscale_Hook
 	{
 		static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
@@ -120,6 +165,13 @@ namespace cs::features
 		constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
 		stl::write_thunk_call<Imagespace_PostUpscale_Hook>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
 		L->info("Hook installed on Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport");
+
+		// Engine DOF disable: replace IsActive (vfunc 8) on three effects so they sit out when our DOF is on.
+		// Mirror's Upscaling's TAA-disable pattern.
+		stl::write_vfunc<0x8, ImageSpaceEffectDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectDepthOfField[0]);
+		stl::write_vfunc<0x8, ImageSpaceEffectBokehDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectBokehDepthOfField[0]);
+		stl::write_vfunc<0x8, ImageSpaceEffectFullScreenBlur_IsActive>(RE::VTABLE::ImageSpaceEffectFullScreenBlur[0]);
+		L->info("Engine DOF effects vfunc-disabled (DepthOfField + BokehDepthOfField + FullScreenBlur)");
 	}
 
 	static bool ReadMarker(const char* a_path, char& out_value)
@@ -413,6 +465,216 @@ namespace cs::features
 		if (!bloomCB)          bloomCB          = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(BloomCB)));
 		if (!bloomThresholdCB) bloomThresholdCB = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(BloomThresholdCB)));
 		return true;
+	}
+
+	bool Imagespace::EnsureDOFResources(uint32_t a_width, uint32_t a_height)
+	{
+		auto* device = imagespace::Util::GetD3DDevice();
+		if (!device) return false;
+
+		const uint32_t halfW = std::max(1u, (a_width  + 1) / 2);
+		const uint32_t halfH = std::max(1u, (a_height + 1) / 2);
+		const bool dimChanged = (halfW != dofWidth || halfH != dofHeight);
+
+		if (dimChanged || !dofCoCTex) {
+			D3D11_TEXTURE2D_DESC td{};
+			td.MipLevels = 1;
+			td.ArraySize = 1;
+			td.SampleDesc.Count = 1;
+			td.Usage = D3D11_USAGE_DEFAULT;
+			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+			// CoC: half-res, R16F, signed (negative=foreground, positive=background).
+			td.Width = halfW; td.Height = halfH;
+			td.Format = DXGI_FORMAT_R16_FLOAT;
+			dofCoCTex = std::make_unique<imagespace::Texture2D>(td);
+			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			sd.Texture2D.MipLevels = 1;
+			sd.Format = DXGI_FORMAT_R16_FLOAT;
+			dofCoCTex->CreateSRV(sd);
+			D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+			ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+			ud.Format = DXGI_FORMAT_R16_FLOAT;
+			dofCoCTex->CreateUAV(ud);
+
+			// Tile texture: 16x reduction in each dim, R16G16F (min/max CoC for early-out).
+			const uint32_t tileW = std::max(1u, (halfW + 15) / 16);
+			const uint32_t tileH = std::max(1u, (halfH + 15) / 16);
+			td.Width = tileW; td.Height = tileH;
+			td.Format = DXGI_FORMAT_R16G16_FLOAT;
+			dofTileTex = std::make_unique<imagespace::Texture2D>(td);
+			sd.Format = DXGI_FORMAT_R16G16_FLOAT;
+			dofTileTex->CreateSRV(sd);
+			ud.Format = DXGI_FORMAT_R16G16_FLOAT;
+			dofTileTex->CreateUAV(ud);
+
+			// Half-res color ping-pong: Pass 1 writes dofHalfColor (downsample), Pass 3 reads it + writes dofHalfBlurred.
+			td.Width = halfW; td.Height = halfH;
+			td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+			dofHalfColor   = std::make_unique<imagespace::Texture2D>(td);
+			dofHalfBlurred = std::make_unique<imagespace::Texture2D>(td);
+			sd.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+			dofHalfColor->CreateSRV(sd);
+			dofHalfBlurred->CreateSRV(sd);
+			ud.Format = DXGI_FORMAT_R11G11B10_FLOAT;
+			dofHalfColor->CreateUAV(ud);
+			dofHalfBlurred->CreateUAV(ud);
+
+			dofWidth  = halfW;
+			dofHeight = halfH;
+			L->info("DOF resources (re)allocated half={}x{} tile={}x{}", halfW, halfH, tileW, tileH);
+		}
+
+		if (!dofCB) dofCB = std::make_unique<imagespace::ConstantBuffer>(imagespace::ConstantBufferDesc(sizeof(DofCB)));
+
+		if (!dofLinearClampSampler) {
+			D3D11_SAMPLER_DESC sd{};
+			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			sd.AddressU = sd.AddressV = sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
+			DX::ThrowIfFailed(device->CreateSamplerState(&sd, dofLinearClampSampler.put()));
+		}
+		return true;
+	}
+
+	void Imagespace::RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex)
+	{
+		if (!settings.bDOFEnable) return;
+
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) return;
+
+		// Need: full-res color SRV (kFrameBuffer) + main depth SRV.
+		auto& fb = rendererData->renderTargets[kRT_FrameBuffer];
+		auto* fbSRV = reinterpret_cast<ID3D11ShaderResourceView*>(fb.srView);
+		if (!fbSRV) return;
+
+		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain)];
+		auto* depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth);
+		if (!depthSRV) return;
+
+		if (!EnsureDOFResources(a_width, a_height)) return;
+		if (!compositeScratch) return;  // we reuse this as final output
+
+		auto* depthCoCCS = GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\DepthCoCCS.hlsl",   dofDepthCoCCS,  "DepthCoCCS");
+		auto* dilateCS   = GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\DilateCoCCS.hlsl",  dofDilateCS,    "DilateCoCCS");
+		auto* blurCS     = GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\DOFBlurCoCCS.hlsl", dofBlurCS,      "DOFBlurCoCCS");
+		auto* compCS     = GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\DOFCompositeCS.hlsl", dofCompositeCS, "DOFCompositeCS");
+		if (!depthCoCCS || !dilateCS || !blurCS || !compCS) return;
+
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		cs::ComputeScope scope(context);
+
+		// Camera near/far for linearization.
+		const float nearP = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
+		const float farP  = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+
+		// CoC math: thin-lens, in pixel units relative to half-res frame height.
+		// Sign convention: positive = far (background), negative = near (foreground).
+		const float cocLimitPx = settings.fCoCLimitFactor * static_cast<float>(dofHeight);
+		const float aperture   = settings.fAperture;
+		const float focalLen   = settings.fFocalLength;
+		const float focusDist  = settings.fFocusDistance;
+		// scale = aperture * focalLength / (focusDist - focalLength), bias = -focalLength * scale (so coc=0 at focusDist)
+		// Per-pixel: coc = scale * (1 - focusDist/z). We pre-bake scale and bias into the CB.
+		const float cocScale = (aperture * focalLen) / std::max(1.0f, focusDist - focalLen);
+		const float cocBias  = -cocScale * focusDist;
+
+		DofCB cb{};
+		cb.CocScale = cocScale;
+		cb.CocBias  = cocBias;
+		cb.CocLimit = cocLimitPx;
+		cb.FocusRange = settings.fFocusRange;
+		cb.HalfDimensions[0] = dofWidth;
+		cb.HalfDimensions[1] = dofHeight;
+		cb.FullDimensions[0] = a_width;
+		cb.FullDimensions[1] = a_height;
+		cb.QualityLevel = static_cast<uint32_t>(std::clamp(settings.iDOFQuality, 0, 2));
+		cb.NearPlane    = nearP;
+		cb.FarPlane     = farP;
+		dofCB->Update(cb);
+
+		ID3D11Buffer* dofCBs[1] = { dofCB->CB() };
+		ID3D11SamplerState* samplers[1] = { dofLinearClampSampler.get() };
+		context->CSSetSamplers(0, 1, samplers);
+		context->CSSetConstantBuffers(0, 1, dofCBs);
+
+		// Pass 1: depth → CoC (half-res), color → halfColor (downsample).
+		{
+			ID3D11ShaderResourceView* srvs[2] = { depthSRV, fbSRV };
+			context->CSSetShaderResources(0, 2, srvs);
+			ID3D11UnorderedAccessView* uavs[2] = { dofCoCTex->uav.get(), dofHalfColor->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
+			context->CSSetShader(depthCoCCS, nullptr, 0);
+			const uint32_t gx = (dofWidth  + 7) / 8;
+			const uint32_t gy = (dofHeight + 7) / 8;
+			context->Dispatch(gx, gy, 1);
+			ID3D11UnorderedAccessView* clear[2] = { nullptr, nullptr };
+			context->CSSetUnorderedAccessViews(0, 2, clear, nullptr);
+			ID3D11ShaderResourceView* clearSRV[2] = { nullptr, nullptr };
+			context->CSSetShaderResources(0, 2, clearSRV);
+		}
+
+		// Pass 2: CoC → tile (16x reduction min/max).
+		{
+			ID3D11ShaderResourceView* srvs[1] = { dofCoCTex->srv.get() };
+			context->CSSetShaderResources(0, 1, srvs);
+			ID3D11UnorderedAccessView* uavs[1] = { dofTileTex->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(dilateCS, nullptr, 0);
+			const uint32_t tileW = std::max(1u, (dofWidth  + 15) / 16);
+			const uint32_t tileH = std::max(1u, (dofHeight + 15) / 16);
+			const uint32_t gx = (tileW + 7) / 8;
+			const uint32_t gy = (tileH + 7) / 8;
+			context->Dispatch(gx, gy, 1);
+			ID3D11UnorderedAccessView* clear[1] = { nullptr };
+			context->CSSetUnorderedAccessViews(0, 1, clear, nullptr);
+			ID3D11ShaderResourceView* clearSRV[1] = { nullptr };
+			context->CSSetShaderResources(0, 1, clearSRV);
+		}
+
+		// Pass 3: half-res CoC-weighted disc blur. Read dofHalfColor + dofCoCTex + dofTileTex, write dofHalfBlurred.
+		{
+			ID3D11ShaderResourceView* srvs[3] = { dofHalfColor->srv.get(), dofCoCTex->srv.get(), dofTileTex->srv.get() };
+			context->CSSetShaderResources(0, 3, srvs);
+			ID3D11UnorderedAccessView* uavs[1] = { dofHalfBlurred->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(blurCS, nullptr, 0);
+			const uint32_t gx = (dofWidth  + 7) / 8;
+			const uint32_t gy = (dofHeight + 7) / 8;
+			context->Dispatch(gx, gy, 1);
+			ID3D11UnorderedAccessView* clear[1] = { nullptr };
+			context->CSSetUnorderedAccessViews(0, 1, clear, nullptr);
+			ID3D11ShaderResourceView* clearSRV[3] = { nullptr, nullptr, nullptr };
+			context->CSSetShaderResources(0, 3, clearSRV);
+		}
+
+		// Pass 4: full-res composite. Lerp(sharpFB, blurredHalf-with-bilinear, smoothstep(|CoC|)).
+		{
+			ID3D11ShaderResourceView* srvs[3] = { fbSRV, dofHalfBlurred->srv.get(), dofCoCTex->srv.get() };
+			context->CSSetShaderResources(0, 3, srvs);
+			ID3D11UnorderedAccessView* uavs[1] = { compositeScratch->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(compCS, nullptr, 0);
+			const uint32_t gx = (a_width  + 7) / 8;
+			const uint32_t gy = (a_height + 7) / 8;
+			context->Dispatch(gx, gy, 1);
+			ID3D11UnorderedAccessView* clear[1] = { nullptr };
+			context->CSSetUnorderedAccessViews(0, 1, clear, nullptr);
+			ID3D11ShaderResourceView* clearSRV[3] = { nullptr, nullptr, nullptr };
+			context->CSSetShaderResources(0, 3, clearSRV);
+		}
+
+		context->CopyResource(a_fbTex, compositeScratch->resource.get());
+
+		static bool dofFirstFireLogged = false;
+		if (!dofFirstFireLogged) {
+			L->info("DOF first dispatch: aperture={:.3f} focus={:.0f} focal={:.1f} quality={} cocLimit={:.1f}px",
+				settings.fAperture, settings.fFocusDistance, settings.fFocalLength,
+				settings.iDOFQuality, cocLimitPx);
+			dofFirstFireLogged = true;
+		}
 	}
 
 	ID3D11ComputeShader* Imagespace::GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name)
@@ -743,6 +1005,10 @@ namespace cs::features
 			context->CSSetUnorderedAccessViews(0, 1, clearUAV, nullptr);
 			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
 		}
+
+		// IS-5: Bokeh DOF runs after composite finishes (graded color in fb), before EMA readback.
+		// Reuses compositeScratch as final DOF output, then CopyResource back to fb.
+		RunDOF(W, H, fbTex2.get());
 
 		// One-shot CPU readback of the EMA scalar to log a probe value.
 		static int readbackCountdown = 60;
