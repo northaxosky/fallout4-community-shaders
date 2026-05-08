@@ -11,4 +11,5 @@ namespace cs::engine
 	// First registration at an anchor lazy-installs the detour. Callbacks fire in registration order.
 	void RegisterPostDeferredPrePass(RenderHookCallback callback);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback);
+	void RegisterPostDeferredComposite(RenderHookCallback callback);
 }
