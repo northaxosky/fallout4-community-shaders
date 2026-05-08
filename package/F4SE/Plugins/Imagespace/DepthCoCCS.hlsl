@@ -1,4 +1,4 @@
-// IS-5 Pass 1: read main depth + scene color, output half-res CoC + half-res downsampled color.
+// DOF Pass 1: read main depth + scene color, output half-res CoC + half-res downsampled color.
 
 Texture2D<float>    DepthIn  : register(t0);  // FO4 main depth (hyperbolic z, 0..1; near=0)
 Texture2D<float4>   ColorIn  : register(t1);  // full-res framebuffer (post-graded)

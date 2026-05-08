@@ -1,4 +1,4 @@
-// IS-5 Pass 3: half-res CoC-weighted disc-sample blur with tile early-out.
+// DOF Pass 3: half-res disc-sample blur with tile early-out.
 
 Texture2D<float4>    HalfColorIn : register(t0);  // half-res downsampled scene
 Texture2D<float>     CocIn       : register(t1);  // half-res signed CoC
@@ -49,9 +49,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const float coc = CocIn.Load(int3(dtid.xy, 0));
     const float radiusPx = max(1.0, abs(coc));
 
-    // Uniform disc blur: each sample contributes equally. Energy-conserving by construction.
-    // IS-5a uses this; IS-5b can switch to scatter-as-gather (sample contributes if its CoC
-    // reaches our pixel) for better in-focus / out-of-focus boundary handling.
+    // Uniform disc blur: each sample contributes equally. Energy-conserving but doesn't produce true bokeh boundaries (scatter-as-gather upgrade is a follow-up).
     const uint sampleCount = (QualityLevel == 0u) ? 12u : (QualityLevel == 1u ? 24u : 24u);
     float3 accum = 0.0;
 

@@ -1,4 +1,4 @@
-// IS-5 Pass 2: per-tile (16x16 half-res pixels) min/max CoC for blur early-out.
+// DOF Pass 2: per-tile (16x16 half-res pixels) min/max CoC for blur early-out.
 
 Texture2D<float>     CocIn   : register(t0);  // half-res signed CoC
 RWTexture2D<float2>  TileOut : register(u0);  // /16 R16G16F: {minCoC, maxCoC}

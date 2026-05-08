@@ -106,9 +106,7 @@ namespace cs::features
 	};
 	static_assert(sizeof(DofCB) % 16 == 0);
 
-	// Engine DOF + blur effects: vfunc 8 (IsActive) replaced to return false when our DOF is on.
-	// Three effects to disable: ImageSpaceEffectDepthOfField, ImageSpaceEffectBokehDepthOfField,
-	// ImageSpaceEffectFullScreenBlur. Missing one would cause double-DOF.
+	// Engine DOF: IsActive (vfunc 8) returns false when ours is enabled. All three effects must be disabled or the engine double-DOFs.
 	struct ImageSpaceEffectDepthOfField_IsActive
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
@@ -166,8 +164,7 @@ namespace cs::features
 		stl::write_thunk_call<Imagespace_PostUpscale_Hook>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
 		L->info("Hook installed on Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport");
 
-		// Engine DOF disable: replace IsActive (vfunc 8) on three effects so they sit out when our DOF is on.
-		// Mirror's Upscaling's TAA-disable pattern.
+		// IsActive (vfunc 8) replacement; engine DOF resumes when bDOFEnable is false.
 		stl::write_vfunc<0x8, ImageSpaceEffectDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectDepthOfField[0]);
 		stl::write_vfunc<0x8, ImageSpaceEffectBokehDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectBokehDepthOfField[0]);
 		stl::write_vfunc<0x8, ImageSpaceEffectFullScreenBlur_IsActive>(RE::VTABLE::ImageSpaceEffectFullScreenBlur[0]);
@@ -570,14 +567,11 @@ namespace cs::features
 		const float nearP = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
 		const float farP  = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
-		// CoC math: thin-lens, in pixel units relative to half-res frame height.
-		// Sign convention: positive = far (background), negative = near (foreground).
+		// Thin-lens CoC in pixel units; positive = background, negative = foreground. Pre-bake scale/bias so per-pixel coc = CocScale*z + CocBias.
 		const float cocLimitPx = settings.fCoCLimitFactor * static_cast<float>(dofHeight);
 		const float aperture   = settings.fAperture;
 		const float focalLen   = settings.fFocalLength;
 		const float focusDist  = settings.fFocusDistance;
-		// scale = aperture * focalLength / (focusDist - focalLength), bias = -focalLength * scale (so coc=0 at focusDist)
-		// Per-pixel: coc = scale * (1 - focusDist/z). We pre-bake scale and bias into the CB.
 		const float cocScale = (aperture * focalLen) / std::max(1.0f, focusDist - focalLen);
 		const float cocBias  = -cocScale * focusDist;
 
@@ -1006,8 +1000,7 @@ namespace cs::features
 			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
 		}
 
-		// IS-5: Bokeh DOF runs after composite finishes (graded color in fb), before EMA readback.
-		// Reuses compositeScratch as final DOF output, then CopyResource back to fb.
+		// DOF runs on the post-graded fb; reuses compositeScratch as scratch, then CopyResource back.
 		RunDOF(W, H, fbTex2.get());
 
 		// One-shot CPU readback of the EMA scalar to log a probe value.

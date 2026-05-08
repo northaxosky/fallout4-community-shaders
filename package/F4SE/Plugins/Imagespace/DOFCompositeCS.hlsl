@@ -1,4 +1,4 @@
-// IS-5 Pass 4: full-res composite. Lerp(sharpInput, blurredHalf, smoothstep on |CoC|).
+// DOF Pass 4: full-res composite. Lerp(sharpInput, blurredHalf, smoothstep on |CoC|).
 
 Texture2D<float4>    SharpFB   : register(t0);  // full-res framebuffer (graded)
 Texture2D<float4>    BlurredHalf : register(t1); // half-res blur output

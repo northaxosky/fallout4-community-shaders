@@ -55,7 +55,7 @@ namespace cs::features
 			bool        bSharpenEnable     = true;
 			float       fSharpness         = 0.4f;
 
-			// Bokeh DOF (IS-5; UI lands in IS-5b alongside INI defaults + ENB-aware logic).
+			// Bokeh DOF.
 			bool        bDOFEnable         = false;
 			float       fAperture          = 0.05f;
 			float       fFocusDistance     = 1500.0f;
@@ -110,11 +110,11 @@ namespace cs::features
 		ID3D11ComputeShader*                        bloomUpCS        = nullptr;
 		int                                         bloomMipsAlloc   = 0;
 
-		// Bokeh DOF (IS-5).
-		std::unique_ptr<imagespace::Texture2D>      dofCoCTex;             // half-res R16F: linearised CoC (signed)
-		std::unique_ptr<imagespace::Texture2D>      dofTileTex;            // /16 R16G16F: per-tile {minCoC, maxCoC} for early-out
-		std::unique_ptr<imagespace::Texture2D>      dofHalfColor;          // half-res R11G11B10F: downsampled scene (Pass 1 output)
-		std::unique_ptr<imagespace::Texture2D>      dofHalfBlurred;        // half-res R11G11B10F: blur output (Pass 3 output) - ping-pong with dofHalfColor
+		// Bokeh DOF.
+		std::unique_ptr<imagespace::Texture2D>      dofCoCTex;             // half-res R16F signed CoC
+		std::unique_ptr<imagespace::Texture2D>      dofTileTex;            // /16 R16G16F {minCoC, maxCoC} for blur early-out
+		std::unique_ptr<imagespace::Texture2D>      dofHalfColor;          // half-res R11G11B10F downsampled scene
+		std::unique_ptr<imagespace::Texture2D>      dofHalfBlurred;        // half-res R11G11B10F blur output
 		std::unique_ptr<imagespace::ConstantBuffer> dofCB;
 		ID3D11ComputeShader*                        dofDepthCoCCS    = nullptr;
 		ID3D11ComputeShader*                        dofDilateCS      = nullptr;
