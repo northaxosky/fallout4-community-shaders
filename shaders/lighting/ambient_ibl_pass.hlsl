@@ -5,18 +5,35 @@
 // shader binary; see `shaders/lighting/README.md` and the runbook at
 // `Fallout4RE/Workspace/docs/lighting-shader-reconstruction-runbook.md`.
 //
-// Status: ANALYSIS-COMPLETE / HLSL-WIP
+// Status: RENDERDOC-CONFIRMED (HLSL still WIP)
 // See `shaders/lighting/shader-3560-analysis.md` for the structural
 // reverse-engineering of this shader (Shaders011 blob 3560) including:
-//   - Per-SRV-slot resource map (high-confidence: t1 kGbufferNormal,
-//     t7 depth, t8 IBL cubemap array, t9 kSSAO).
-//   - Per-CB-index constant map (camera matrices, fog params, light dir).
-//   - Five-block structural breakdown of the 321-instruction shader.
+//   - Per-SRV-slot resource map confirmed by RenderDoc capture
+//     FO4_frame5407.rdc eid 45345 (Phase C):
+//       t1  kGbufferNormal      (R16G16_UNORM, octahedral)
+//       t2  kGbufferMaterial    (R8G8B8A8_UNORM, gloss/spec/SSS/mat-id)
+//       t3  gbuffer aux         (R8G8B8A8_UNORM, packed roughness + mat-id)
+//       t4  kGbufferAlbedo      (R8G8B8A8_SRGB)
+//       t5  ambient diffuse A   (R11G11B10_FLOAT, paired with t11)
+//       t6  ambient diffuse aux (R11G11B10_FLOAT, paired with t12)
+//       t7  kMain depth         (D24_UNORM_S8_UINT, DSV 2)
+//       t8  IBL probe cubemap array (B8G8R8A8_SRGB, 252 slices, 8 mips)
+//       t9  kSSAO               (R8G8B8A8_UNORM, AO in .x)
+//       t10 SS ambient input    (R11G11B10_FLOAT, bilateral source)
+//       t11 ambient diffuse B   (R11G11B10_FLOAT, paired with t5)
+//       t12 SS ambient aux      (R11G11B10_FLOAT, paired with t6)
+//       t14 kMainPreAlpha       (R8G8B8A8_SRGB, lit scene for IBL overlay)
+//       t15 kMainDepthMips      (R32_FLOAT, 12-mip depth pyramid)
+//   - Output: o0 -> kDiffuseBuffer (RT 58, R11G11B10_FLOAT).
 //   - The SSGI-Phase-2-relevant AO-application boundary: line 264 of the
 //     ASM applies kSSAO with a single multiply on the combined
 //     ambient+IBL term, AFTER the cubemap and bilateral-blur math and
 //     BEFORE fog blending. Direct light is computed by separate per-light
 //     pixel shaders and is never multiplied by kSSAO via this path.
+//   - kSSAO write timeline: written by DrawWorld::ImagespaceSAO at
+//     Render_PreUI +0x036b, read by DrawWorld::DeferredLightsImpl at
+//     Render_PreUI +0x039c. SSGI Phase 2 hook: RegisterPreDeferredLightsImpl
+//     (already implemented in src/RenderHooks.cpp).
 //
 // Source binding:
 //   - Dispatched inside DrawWorld::DeferredLightsImpl

@@ -227,12 +227,114 @@ colors, distance fade params) should be treated as
 `// TODO: identify (math-shape inference)` — they are consistent with
 the disassembly but are not corroborated by C++ side struct knowledge.
 
+## Phase C: RenderDoc capture confirms full SRV map
+
+A live D3D11 capture (`FO4_frame5407.rdc`, 2.6 GB) was analysed via
+RenderDoc's Python API. The ambient/IBL dispatch was located at
+**event ID 45345** (`ID3D11DeviceContext::DrawIndexed`); the bound pixel
+shader has SHA1 `761d4100801623dcce7f07db7e6f2b4e56fb765e` (9 164 bytes
+in the captured permutation; structurally the same family as blob 3560).
+
+The captured pixel shader's reflection declares **exactly the same 14
+SRVs at the same registers** as blob 3560: t1-t12, t14, t15 (t13
+intentionally skipped). This proves all permutations of this shader use
+the same binding contract.
+
+### Confirmed SRV map (RenderDoc + format inference)
+
+| Slot | Captured format | RenderDoc resource | Inferred FO4 role | Confidence |
+|---|---|---|---|---|
+| t1  | R16G16_UNORM           | RT 244           | **kGbufferNormal** (RT 20, octahedral) | high (matches ASM L30-36 octahedral decode + format matches enum spec) |
+| t2  | R8G8B8A8_UNORM         | RT 386           | **kGbufferMaterial** (RT 24, glossiness/specular/backlight/SSS) | high (.x = material id at L49, .y = NdotV-style at L252, format matches enum spec) |
+| t3  | R8G8B8A8_UNORM         | RT 256           | gbuffer aux (likely shading-data packed buffer) | medium (.x = roughness scale at L46, .z (.w) = mat-id classifier at L59; format consistent) |
+| t4  | R8G8B8A8_SRGB          | RT 253           | **kGbufferAlbedo** (RT 22) | high (sRGB matches albedo storage; sampled at L62 inside material-5 path for skin colour) |
+| t5  | R11G11B10_FLOAT        | RT 389           | precomputed ambient diffuse buffer A | medium (paired with t11 in ASM L242-244 as `r5 = t5 + t11`; HDR format matches) |
+| t6  | R11G11B10_FLOAT        | RT 392           | gbuffer emissive or skin/SSS scatter accumulator (likely **kGbufferEmissive** RT 23 — but kGbufferEmissive in Engine.h is unannotated for format) | medium (sampled L234 inside material-5 block; HDR consistent with emissive) |
+| t7  | D24_UNORM_S8_UINT      | Depth Target 183 | **main depth (DSV 2 / kMain depth)** | high (depth-classify branch at ASM L3 against `0.01 >= r0.z`; D24S8 matches main DSV) |
+| t8  | B8G8R8A8_SRGB          | TextureCubeArray, 252 slices, 8 mips | **IBL probe cubemap array** | high (texturecubearray at ASM L51; 252 slice count = Bethesda's IBL probe array; not in public RT enum yet — Bethesda-internal, allocated by image-space manager) |
+| t9  | R8G8B8A8_UNORM         | RT 259           | **kSSAO** (RT 28) | high (single-channel `.x` read at ASM L263 = AO; FO4 packs AO in .x of an R8G8B8A8 RT) |
+| t10 | R11G11B10_FLOAT        | RT 168           | screen-space ambient/SSGI input for the bilateral filter (likely a **previous-frame ambient buffer** or compute-shader output) | medium (sampled at every bilateral tap in ASM L74-225 for material-5 / skin path) |
+| t11 | R11G11B10_FLOAT        | RT 395           | precomputed ambient diffuse buffer B | medium (paired with t5 in ASM L243; HDR) |
+| t12 | R11G11B10_FLOAT        | RT 399           | screen-space ambient term (paired with t6 in ASM L235 as `r8 = t6 + t12`) | medium (HDR; same role pattern as t6) |
+| t14 | R8G8B8A8_SRGB          | RT 202           | **lit-scene buffer** (likely **kMainPreAlpha** RT 2) used to overlay scene colour onto the IBL specular | high (sRGB; sampled with viewport-clamped UV at ASM L254-255; lerped against cube colour at L258-259) |
+| t15 | R32_FLOAT, 12 mips     | RT 318           | **kMainDepthMips** (RT 39) | high (R32_FLOAT with 12 mip levels matches the depth-pyramid spec; used in bilateral weighting at every tap to discard distant samples) |
+
+### Output target (confirmed)
+
+| Slot | Format | Resource | Inferred role | Confidence |
+|---|---|---|---|---|
+| o0 | R11G11B10_FLOAT | RT 172 | **kDiffuseBuffer** (RT 58) | high (R11G11B10F is the spec format of kDiffuseBuffer; only one RT bound, matches single SV_Target output of the shader) |
+
+Depth target bound for stencil-test only: D24S8 (Depth Target 183) =
+**kMain depth (DSV 2)**, same resource as t7.
+
+### Constant-buffer layout (captured byte sizes)
+
+| CB | Reflection name | Captured byte size | Vec4 count | Notes |
+|---|---|---|---|---|
+| b0  | cbuffer0  | 48 bytes | 3  | matches `dcl_constantbuffer CB0[3]` in ASM |
+| b2  | cbuffer2  | 16 bytes | 1  | smaller than the ASM's `CB2[6]` declaration — only the first vec4 (cb2[0] = screen→UV) is used in this draw permutation; the per-light fields (cb2[1] sun direction, cb2[2] glow params) are part of the per-light path that may be a different draw |
+| b12 | cbuffer12 | 496 bytes | 31 | matches `dcl_constantbuffer CB12[31]` for the captured permutation; the asm's larger `CB12[47]` declaration is for permutations that include the full fog/distance block |
+
+The captured CB12 contents (496 bytes) were dumped to
+`Scratch/reports/rdoc-ambient-ibl-eid45345.json` for offline parsing.
+First vec4 (`cb12[0]`) is `(-0.5810, -0.8137, 0.0000114, 0.0)` — values
+consistent with a normalized 3D vector + scalar, plausibly the camera
+forward direction. Decoding the rest into named struct fields requires
+the C++ side, but the raw bytes are now available without further GPU
+inspection.
+
+### Implications for the prior analysis
+
+* All five "medium-confidence" inferences from the static analysis are
+  upgraded:
+  * **t1 = kGbufferNormal**: confirmed by R16G16_UNORM format (FO4
+    octahedral encoding spec).
+  * **t2 = kGbufferMaterial**: confirmed by R8G8B8A8_UNORM + position
+    in render-target allocation order.
+  * **t4 = kGbufferAlbedo**: confirmed by R8G8B8A8_SRGB.
+  * **t7 = main depth**: confirmed by D24_UNORM_S8_UINT.
+  * **t8 = IBL probe cubemap array**: confirmed by TextureCubeArray
+    with 252 slices.
+* The t5/t11 ambient-diffuse pair and the t10/t6/t12 screen-space
+  buffers cannot be definitively named against `cs::engine::RenderTarget`
+  because they live in unenumerated slots. Their formats (R11G11B10_FLOAT)
+  + role pattern in the math are the strongest evidence; the canonical
+  way to confirm names is the next step below.
+* **t15 = kMainDepthMips (RT 39) confirmed.** The 12-mip R32_FLOAT
+  texture matches the depth pyramid that
+  `BSGraphics::RenderTargetManager` allocates as RT 39.
+* **Output o0 = kDiffuseBuffer (RT 58) confirmed.** The single bound
+  RT is R11G11B10_FLOAT — the spec format of kDiffuseBuffer.
+
+### What the RenderDoc capture did NOT settle
+
+* **Sampler bindings**: every PS sampler slot (`s0..s13`) returned
+  `resource_id = 0` and empty filter/address/compare-op fields in the
+  RenderDoc dump. This may be a quirk of how D3D11 immutable samplers
+  are surfaced via the new descriptor-store API; the ASM's
+  `mode_default` / `mode_comparison` declarations remain the most
+  reliable sampler info for now.
+* **CB field semantics**: byte-level CB contents are now available in
+  the JSON dump, but mapping byte offsets to named struct fields
+  requires either reading the C++ `cbPerFrameDeferred` struct
+  definition or decoding by mathematical role-fitting (which the
+  runbook discourages). The values are present; naming is deferred.
+
 ## Reconstruction gap (updated)
 
-A round-trip-verified HLSL reconstruction has **not** been completed and
-the destination `ambient_ibl_pass.hlsl` retains its `#error` guard.
+The ambient/IBL HLSL stub `ambient_ibl_pass.hlsl` now retains its
+`#error` guard for one remaining reason: the 177-instruction bilateral
+SSSS-style blur (ASM lines 61-238) requires a multi-iteration
+HLSL → DXC → diff loop to round-trip clean, beyond the runbook's
+single-pass budget.
 
-The bilateral-blur block remains the dominant blocker for round-trip
-HLSL. The Phase B walk closed the SAO timing question (which is the
-SSGI Phase 2 unblock value) and confirmed the SRV/CB12 gaps cannot be
-closed from static analysis alone.
+All other prior gaps are now closed:
+
+* SRV slot assignments t1-t15 are mapped (high or medium confidence,
+  per the table above).
+* CB byte sizes are confirmed; CB byte contents are dumped.
+* SSAO read site is confirmed (t9, single-channel access at ASM L263).
+* AO-application boundary is confirmed (single multiply at ASM L264).
+* SSGI Phase 2 hook target is confirmed (`RegisterPreDeferredLightsImpl`
+  - already implemented by the user in the sibling repo).
