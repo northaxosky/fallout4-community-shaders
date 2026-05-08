@@ -32,6 +32,12 @@ src = "package/F4SE/Plugins/ScreenSpaceShadows/"
 dst = "F4SE/Plugins/ScreenSpaceShadows/"
 pattern = "*.hlsl*"
 
+# Screen-Space GI HLSL (committed).
+[[deploy.assets]]
+src = "package/F4SE/Plugins/ScreenSpaceGI/"
+dst = "F4SE/Plugins/ScreenSpaceGI/"
+pattern = "*.hlsl*"
+
 # Imagespace HLSL (committed).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/Imagespace/"

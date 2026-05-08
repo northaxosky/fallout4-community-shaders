@@ -19,6 +19,7 @@
 #include "RE/N/NiAVObject.h"
 #include "RE/S/Sky.h"
 #include "RE/S/Sun.h"
+#include "RenderHooks.h"
 #include "SimpleIni.h"
 #include "Util.h"
 
@@ -56,28 +57,6 @@ namespace cs::features
 	};
 	static_assert(sizeof(ApplyShadowsCB) % 16 == 0, "ApplyShadowsCB must be 16-byte aligned");
 
-	// DrawWorld::DeferredPrePass(): free function, void(void); REL::IDs cross-validated in cs-render-subsystem-ids.json.
-	struct DrawWorld_DeferredPrePass_Hook
-	{
-		static void thunk()
-		{
-			func();
-			ScreenSpaceShadows::GetSingleton()->DrawShadows();
-		}
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
-
-	// DrawWorld::DeferredLightsImpl(): free function, void(void); confirmed in cs-render-subsystem-ids.json.
-	struct DrawWorld_DeferredLightsImpl_Hook
-	{
-		static void thunk()
-		{
-			func();
-			ScreenSpaceShadows::GetSingleton()->Apply();
-		}
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
-
 	ScreenSpaceShadows* ScreenSpaceShadows::GetSingleton()
 	{
 		static ScreenSpaceShadows instance;
@@ -91,11 +70,12 @@ namespace cs::features
 			settings.enabled, settings.sampleCount, settings.surfaceThickness, settings.shadowContrast,
 			settings.applyToScene, settings.sunOnly);
 
-		stl::detour_thunk<DrawWorld_DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
-		L->info("Hook installed on DrawWorld::DeferredPrePass");
-
-		stl::detour_thunk<DrawWorld_DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
-		L->info("Hook installed on DrawWorld::DeferredLightsImpl");
+		cs::engine::RegisterPostDeferredPrePass([]() {
+			ScreenSpaceShadows::GetSingleton()->DrawShadows();
+		});
+		cs::engine::RegisterPostDeferredLightsImpl([]() {
+			ScreenSpaceShadows::GetSingleton()->Apply();
+		});
 	}
 
 	void ScreenSpaceShadows::LoadSettings()
