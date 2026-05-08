@@ -129,36 +129,110 @@ globally per shader-pack, so individual shaders see gaps.
 | 309-316| Final output: blend AO-modulated ambient with fog via `o0 = fog_opacity * fog_blend + AO * combined_ambient`; write 1.0 to alpha. |
 | 317-319| Else branch: write 0 (pixel discarded by material mask). |
 
-## Reconstruction gap
+## kSSAO write timeline (Phase B finding — SSGI integration boundary)
+
+`DrawWorld::Render_PreUI` calls these in order (call-site offsets in
+the AE binary; identical relative ordering in OG and NG):
+
+| Render_PreUI offset (AE) | Function | What it does |
+|---|---|---|
+| +0x0366 | `DrawWorld::DeferredDecals` | writes decals into G-buffer |
+| **+0x036b** | **`DrawWorld::ImagespaceSAO`** | **dispatches the SAO compute that writes kSSAO=28** |
+| +0x0392 | `sub_142206900` (anonymous) | runs additional `ImageSpaceEffect::SetEffect`/`SetEffectInputs` postprocess passes (likely SAO blur / volumetric scattering); may further mutate kSSAO |
+| +0x0397 | `sub_1421EC370` (anonymous) | unknown postprocess setup |
+| **+0x039c** | **`DrawWorld::DeferredLightsImpl`** | **dispatches blob 3560 ambient PS, which reads kSSAO via t9 at ASM line 263** |
+| +0x03a1 | `DrawWorld::DeferredComposite` | combines diffuse + specular + albedo |
+
+**`ImageSpaceEffectScalableAmbientObscurance::Render` is never called
+from a static call site:** the only callers in the cache are the
+script-API `ToggleSAO`, the constructor, and the destructor. The actual
+per-frame dispatch is virtual — the SAO effect's vtable slot is
+invoked through `ImageSpaceEffect`'s base-class dispatcher inside
+`DrawWorld::ImagespaceSAO`. The static-analysis path therefore stops at
+`ImagespaceSAO`; everything below that is virtual dispatch and would
+need RenderDoc capture or per-subclass disassembly to follow further.
+
+That said, the **SSGI integration boundary is fully determined** by the
+two static anchors above: kSSAO is written by `ImagespaceSAO` and read
+by `DeferredLightsImpl`. SSGI Phase 2 should therefore inject between
+those two anchors. Two viable hook strategies:
+
+1. **`RegisterPostImagespaceSAO` (new hook)** — fires immediately after
+   the SAO dispatch returns. **Risk:** `sub_142206900` (between
+   ImagespaceSAO and DeferredLightsImpl) issues additional
+   `ImageSpaceEffect` passes that may further mutate kSSAO. If any of
+   those passes touch kSSAO, our SSGI write would be clobbered before
+   the ambient PS reads it.
+2. **`RegisterPreDeferredLightsImpl` (new hook)** — fires immediately
+   before the deferred lighting dispatch. **Lower risk:** kSSAO is in
+   its final pre-read state. This is the safer choice and matches the
+   single-multiply-on-ambient pattern we documented at ASM line 264.
+
+REL::IDs for the new hooks (confirmed via cross-runtime verification):
+
+| Function | OG AL id | NG AL id | AE AL id | OG RVA | NG RVA | AE RVA |
+|---|---|---|---|---|---|---|
+| `DrawWorld::ImagespaceSAO` | 39691 | 2318306 | 2318306 | 0x02851540 | 0x02096f90 | 0x021ec620 |
+| `DrawWorld::DeferredLightsImpl` | 1108521 | 2318312 | 2318312 | 0x028529b0 | 0x02097e30 | 0x021ed4c0 |
+
+The NG match for ImagespaceSAO was confirmed by mnemonic-hash equality
+with the AE function (`0408326c14110ba74878f9346b35141b49076c61e1a85d14414272b20a45dcaa`)
+and by identical Render_PreUI call-site offset (+0x036b) across NG and
+AE. NG and AE share AL id 2318306; OG has AL id 39691.
+
+## SRV slot mapping — unresolvable from static analysis
+
+The remaining unmapped SRV slots (t4, t6, t10, t12, t14, t15) **cannot
+be recovered from static analysis of `DeferredLightsImpl` alone.** The
+per-pass shader bindings are issued through the `BSShader` subclass's
+virtual `SetupTechnique` / `SetupGeometry` / `SetupMaterial` / 
+`SetupMaterialSecondary` methods, dispatched indirectly by
+`BSBatchRenderer::RenderPassImmediately`. The Ghidra cache does not
+resolve indirect / vtable calls, so the SRV-binding sites are not
+present in `ghidra_function_calls`.
+
+`DeferredLightsImpl` itself contains 11 `BSShaderManager::GetShader`
+calls and 19 `BSBatchRenderer::RenderPassImmediately` calls (one
+sequence per technique inside the deferred-light sweep — pre-pass,
+ambient, sun, point, spot, etc.). Each `RenderPassImmediately` invokes
+the bound shader's virtual setup methods, which is where the
+`SetTextureRenderTarget` / `SetTextureXxx` calls binding the 14 SRVs
+take place.
+
+**To close the t4/t6/t10/t12/t14/t15 gap, one of:**
+
+1. **RenderDoc capture** (the human is doing this in parallel) — the
+   captured pixel-shader pipeline state will list the bound SRV at
+   each slot directly, so this is the canonical answer source.
+2. **Per-shader manual disassembly** of the `BSShader` subclass that
+   owns this technique (likely `BSDFLightShader` or `BSImagespaceShader`
+   subclass; the BSShader hierarchy export at
+   `Workspace/exports/cs-bsshader-vtables.json` lists candidates).
+   Each candidate's slot 4 (`SetupMaterial`) would name the SRVs.
+
+Path #1 is strictly simpler and is the canonical Bethesda-RE workflow
+for this question. The static-call-graph path stops here.
+
+## CB12 unmapped indices — same constraint
+
+CB12 indices [30..46] would be filled by the dispatch site's cbuffer
+update — typically a `Buffer::Update` call inside the `BSShader`
+subclass's `SetupGeometry`. As above, the static call graph cannot
+follow virtual dispatch. The tight path uses RenderDoc capture's
+"Constants" view on the captured pixel shader stage, which dumps the
+CB12 contents at the moment of dispatch.
+
+The math-shape-only inferences in the CB12 map above (fog near/far
+colors, distance fade params) should be treated as
+`// TODO: identify (math-shape inference)` — they are consistent with
+the disassembly but are not corroborated by C++ side struct knowledge.
+
+## Reconstruction gap (updated)
 
 A round-trip-verified HLSL reconstruction has **not** been completed and
 the destination `ambient_ibl_pass.hlsl` retains its `#error` guard.
 
-Reasons:
-
-1. The 9-tap bilateral-filter block (177 instructions) is conditional
-   per-tap and per-channel, with kernel weights that must match the
-   compiled bytecode exactly. Reproducing this in HLSL such that DXC
-   compiles to the same instruction sequence is a multi-iteration loop
-   that exceeds the runbook's "if round-trip diff > 10% leave WIP"
-   guidance after a single pass.
-2. `t4`, `t6`, `t12` are sampled inside the material-5 block but their
-   purpose cannot be determined from the ASM alone; they would
-   ship as `// SRV t4: UNKNOWN — TODO` per the runbook constraints.
-3. CB12 indices 30/35/41-46 are fog/distance constants whose specific
-   semantics (which is start vs end, which is color vs density) require
-   inspection of the C++ dispatch site.
-
-What's needed to close the gap:
-
-* Decompile or hand-walk `DrawWorld::DeferredLightsImpl` at AE RVA
-  `0x021ed4c0` to find the `SetShaderResources` call that binds these
-  exact 14 SRVs, recovering t4/t6/t12 by name and confirming t10/t14/t15.
-* Recover the C++ `cbPerFrameDeferred` struct layout from the same
-  function or its CB-update helper.
-* Iterate the HLSL→DXC→disassemble→diff loop on the bilateral block
-  until the per-channel kernel weights match.
-
-The structural information above is sufficient for SSGI Phase 2 to
-proceed without the full HLSL: the AO-application boundary is
-empirically determined.
+The bilateral-blur block remains the dominant blocker for round-trip
+HLSL. The Phase B walk closed the SAO timing question (which is the
+SSGI Phase 2 unblock value) and confirmed the SRV/CB12 gaps cannot be
+closed from static analysis alone.

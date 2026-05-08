@@ -10,7 +10,7 @@ intended to inform feature implementations elsewhere in the repo.
 
 | File | Role | Source binding (RT in/out) | REL::ID OG/NG/AE | Status |
 |---|---|---|---|---|
-| `ambient_ibl_pass.hlsl`     | ambient + image-based lighting consuming kSSAO | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **analysis-complete-hlsl-wip** |
+| `ambient_ibl_pass.hlsl`     | ambient + image-based lighting consuming kSSAO | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **reconstructed-structural** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **candidates-identified** |
 | `directional_sun_light.hlsl`| sun-direction deferred light | reads `kGbuffer*`, `kShadowMap`; writes `kDiffuseBuffer=58`, `kSpecularBuffer=59` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **candidates-identified** |
 
@@ -21,15 +21,26 @@ changes.
 
 ## Phase A reconstruction status
 
-* **`ambient_ibl_pass.hlsl`** — analysis complete (see
-  `shader-3560-analysis.md`), HLSL reconstruction WIP. The
-  SSGI-Phase-2-relevant question is answered: kSSAO is multiplied
-  into the combined ambient+IBL contribution at one site (ASM line
-  264 of the disassembly) and never touches direct light. Full
-  round-trip HLSL not shipped because the 177-instruction bilateral
-  SSSS-style blur block exceeds the runbook's single-pass diff
-  budget; see analysis doc's "Reconstruction gap" section for what's
-  needed to close it.
+* **`ambient_ibl_pass.hlsl`** — **reconstructed-structural**. The
+  structural reverse-engineering and SSGI-Phase-2 question are both
+  resolved (see `shader-3560-analysis.md`):
+  * **AO-application boundary** (line-264 single multiply on the
+    combined ambient+IBL term, no direct-light contamination).
+  * **kSSAO write timeline** (Phase B walk): kSSAO is written by
+    `DrawWorld::ImagespaceSAO` at `Render_PreUI +0x036b` and read by
+    `DrawWorld::DeferredLightsImpl` at `Render_PreUI +0x039c`. SSGI
+    Phase 2 should inject between those two anchors via a new
+    `RegisterPreDeferredLightsImpl` hook (REL::ID arrays already
+    confirmed for both anchors). The intermediate `sub_142206900`
+    issues additional ImageSpaceEffect passes, so a post-SAO hook is
+    riskier than a pre-DLI hook.
+  * **Honest gaps**: literal HLSL round-trip is not shipped (the
+    177-instruction bilateral SSSS block exceeds the runbook's
+    single-pass diff budget); SRVs t4/t6/t10/t12/t14/t15 and CB12
+    indices [30..46] cannot be recovered from static analysis alone
+    because the bindings are issued via `BSShader` subclass virtual
+    dispatch, which the cache does not resolve. The companion
+    RenderDoc capture is the canonical source for those.
 * **`deferred_composite.hlsl`** — candidates identified, no
   reconstruction attempted yet.
 * **`directional_sun_light.hlsl`** — candidates identified, no

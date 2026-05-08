@@ -28,15 +28,20 @@
 //   The full HLSL has not been committed because the 177-instruction
 //   bilateral SSSS-style blur block (ASM lines 61-238) requires a
 //   round-trip iteration loop the runbook caps at one pass with > 10%
-//   diff -> WIP. Closing the gap requires:
-//     1. Walking DrawWorld::DeferredLightsImpl at AE 0x021ed4c0 to
-//        recover t4 / t6 / t10 / t12 / t14 / t15 binding semantics from
-//        the SetShaderResources call.
-//     2. Recovering the cbPerFrameDeferred struct layout (CB12 indices
-//        30 / 35 / 41-46 are fog/distance constants whose specifics need
-//        the C++ side).
-//     3. Iterating HLSL -> dxc -> disassemble -> diff on the bilateral
-//        block until per-channel kernel weights match.
+//   diff -> WIP. The Phase B walk of DrawWorld::DeferredLightsImpl
+//   confirmed that closing the SRV t4/t6/t10/t12/t14/t15 binding gap
+//   and the CB12 [30..46] semantic gap requires either:
+//     1. RenderDoc capture of the deferred-lighting pixel-shader stage
+//        (canonical source — captured pipeline state lists each SRV
+//        and CB12's contents at dispatch time), or
+//     2. Per-shader manual disassembly of the BSShader subclass
+//        owning this technique (see exports/cs-bsshader-vtables.json
+//        for candidates).
+//
+//   Both gaps are blocked on the BSShader subclass virtual dispatch
+//   issued by BSBatchRenderer::RenderPassImmediately, which the
+//   static call graph in Fallout4RE/.cache/cross-runtime.sqlite does
+//   not resolve.
 //
 //   The structural information in the analysis doc is sufficient for
 //   SSGI Phase 2 to integrate at the correct boundary without the full
