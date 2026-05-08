@@ -12,7 +12,7 @@ Press **END** in game to open the settings menu.
 | Upscaling | DLSS / FSR3 / XeSS with quality modes; replaces engine TAA, dynamic-resolution aware |
 | FrameGeneration | DLSS-G / FSR3-FG / XeSS-FG; D3D11/D3D12 interop |
 | ScreenSpaceShadows | Sony Bend SSS pipeline + sidecar attenuation pass on the diffuse light buffer. Performance / Quality / Cinematic presets, ENB auto-skip |
-| Imagespace | Tonemap (Hable / Reinhard / Lottes), 32³ LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen |
+| Imagespace | Tonemap (Hable / Reinhard / Lottes), 32³ LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, sunsprite + lens flare. Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
 | PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle |
 | RenderDoc | One-click frame capture from inside the menu |
 

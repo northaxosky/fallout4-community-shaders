@@ -47,7 +47,7 @@ file(GLOB_RECURSE CORE_SOURCES
 target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
 
 include(Common)
-configure_xse_plugin(FO4CommunityShaders 0 1 0)
+configure_xse_plugin(FO4CommunityShaders 0 2 0)
 
 target_link_libraries(FO4CommunityShaders PRIVATE
 	debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib

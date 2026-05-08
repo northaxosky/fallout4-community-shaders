@@ -31,6 +31,7 @@ namespace cs::features
 	constexpr const char* kCAMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_ca";
 	constexpr const char* kSharpenMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_sharpen";
 	constexpr const char* kDofMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_dof";
+	constexpr const char* kPresetMarker  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_preset";
 	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
 
 	struct CompositeCB
@@ -144,6 +145,15 @@ namespace cs::features
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
+	// Engine sunbeams: yield to our sunsprite when enabled, or yield to ENB if loaded.
+	struct ImageSpaceEffectSunbeams_IsActive
+	{
+		static bool thunk(RE::ImageSpaceEffect* This)
+		{
+			return (!Imagespace::GetSingleton()->settings.bSunspriteEnable || cs::env::IsENBLoaded()) && func(This);
+		}
+		static inline REL::Relocation<decltype(thunk)> func;
+	};
 
 	struct Imagespace_PostUpscale_Hook
 	{
@@ -183,6 +193,8 @@ namespace cs::features
 		stl::write_vfunc<0x8, ImageSpaceEffectBokehDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectBokehDepthOfField[0]);
 		stl::write_vfunc<0x8, ImageSpaceEffectFullScreenBlur_IsActive>(RE::VTABLE::ImageSpaceEffectFullScreenBlur[0]);
 		L->info("Engine DOF effects vfunc-disabled (DepthOfField + BokehDepthOfField + FullScreenBlur)");
+		stl::write_vfunc<0x8, ImageSpaceEffectSunbeams_IsActive>(RE::VTABLE::ImageSpaceEffectSunbeams[0]);
+		L->info("Engine sunbeams vfunc-disabled");
 	}
 
 	static bool ReadMarker(const char* a_path, char& out_value)
@@ -200,6 +212,8 @@ namespace cs::features
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);
 		settings.enabled            = ini.GetBoolValue("Settings",   "bEnabled",            settings.enabled);
+		settings.iPreset            = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iPreset", settings.iPreset)), 0, 4);
+		settings.bForceWithENB      = ini.GetBoolValue("Settings",   "bForceWithENB",       settings.bForceWithENB);
 		settings.iOperator          = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iOperator", settings.iOperator)), 0, 3);
 		settings.fExposure          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposure", settings.fExposure)), 0.25f, 4.0f);
 		settings.bLUTEnable         = ini.GetBoolValue("Settings",   "bLUTEnable",          settings.bLUTEnable);
@@ -240,17 +254,18 @@ namespace cs::features
 		settings.fCoCLimitFactor    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCoCLimitFactor", settings.fCoCLimitFactor)), 0.005f, 0.10f);
 
 		// Smoke-harness markers.
-		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0;
-		const bool opP    = ReadMarker(kOpMarker,      op_c);
-		const bool lutP   = ReadMarker(kLutMarker,     lut_c);
-		const bool adaptP = ReadMarker(kAdaptMarker,   adapt_c);
-		const bool bloomP = ReadMarker(kBloomMarker,   bloom_c);
-		const bool vigP   = ReadMarker(kVignMarker,    vig_c);
-		const bool caP    = ReadMarker(kCAMarker,      ca_c);
-		const bool sharpP = ReadMarker(kSharpenMarker, sharp_c);
-		const bool dofP   = ReadMarker(kDofMarker,     dof_c);
+		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
+		const bool opP     = ReadMarker(kOpMarker,      op_c);
+		const bool lutP    = ReadMarker(kLutMarker,     lut_c);
+		const bool adaptP  = ReadMarker(kAdaptMarker,   adapt_c);
+		const bool bloomP  = ReadMarker(kBloomMarker,   bloom_c);
+		const bool vigP    = ReadMarker(kVignMarker,    vig_c);
+		const bool caP     = ReadMarker(kCAMarker,      ca_c);
+		const bool sharpP  = ReadMarker(kSharpenMarker, sharp_c);
+		const bool dofP    = ReadMarker(kDofMarker,     dof_c);
+		const bool presetP = ReadMarker(kPresetMarker,  preset_c);
 
-		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP;
+		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || presetP;
 
 		if (testModeActive) {
 			// Reset to deterministic baseline.
@@ -282,10 +297,22 @@ namespace cs::features
 				settings.fFocalLength   = 50.0f;
 				settings.iDOFQuality    = 2;
 			}
-			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={} dof={}",
+			// preset_c '0' = passthrough baseline; '1'..'4' = preset with toggles forced so intensities are observable.
+			if (presetP && preset_c >= '1' && preset_c <= '4') {
+				ApplyPreset(static_cast<Preset>(preset_c - '0'));
+				settings.bBloomEnable     = true;
+				settings.bVignetteEnable  = true;
+				settings.bCAEnable        = true;
+				settings.bSharpenEnable   = true;
+				settings.bSunspriteEnable = true;
+				settings.bLensFlareEnable = true;
+			} else if (presetP && preset_c == '0') {
+				settings.iPreset = static_cast<int>(Preset::kCustom);
+			}
+			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={} dof={} preset={}",
 				settings.iOperator, settings.bLUTEnable, settings.bAdaptiveExposure,
 				settings.bBloomEnable, settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable,
-				settings.bDOFEnable);
+				settings.bDOFEnable, settings.iPreset);
 		}
 	}
 
@@ -298,6 +325,8 @@ namespace cs::features
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);
 		ini.SetBoolValue("Settings",   "bEnabled",            settings.enabled);
+		ini.SetLongValue("Settings",   "iPreset",             settings.iPreset);
+		ini.SetBoolValue("Settings",   "bForceWithENB",       settings.bForceWithENB);
 		ini.SetLongValue("Settings",   "iOperator",           settings.iOperator);
 		ini.SetDoubleValue("Settings", "fExposure",           settings.fExposure);
 		ini.SetBoolValue("Settings",   "bLUTEnable",          settings.bLUTEnable);
@@ -332,6 +361,61 @@ namespace cs::features
 		ini.SetLongValue("Settings",   "iDOFQuality",         settings.iDOFQuality);
 		ini.SetDoubleValue("Settings", "fCoCLimitFactor",     settings.fCoCLimitFactor);
 		ini.SaveFile(kIniPath);
+	}
+
+	struct PresetValues
+	{
+		int   iOperator;
+		float fExposureKey;
+		float fBloomIntensity;
+		float fVignetteIntensity;
+		float fCAIntensity;
+		float fSharpness;
+		float fSunspriteIntensity;
+		float fLensFlareIntensity;
+	};
+
+	// Indexed by Preset enum. Custom (idx 0) is a sentinel and never read. Preset shape mirrors SSS's:
+	// intensity-only recipe, master toggles (bBloomEnable, bSunspriteEnable, bLensFlareEnable, etc.) stay user-controlled.
+	static constexpr PresetValues kPresets[5] = {
+		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.0f },                           // Custom
+		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.40f, 0.50f },                        // Subtle: lighter touches across the board.
+		{ 1, 0.18f, 0.05f, 0.30f, 0.50f, 0.40f, 0.60f, 0.80f },                        // Standard: current ship defaults.
+		{ 3, 0.20f, 0.10f, 0.40f, 0.80f, 0.50f, 0.80f, 1.00f },                        // Vivid: Lottes operator, heavier grade.
+		{ 1, 0.16f, 0.08f, 0.50f, 0.40f, 0.30f, 0.70f, 0.80f },                        // Cinematic: low key, soft bloom, strong vignette.
+	};
+
+	void Imagespace::ApplyPreset(Preset preset)
+	{
+		const int idx = static_cast<int>(preset);
+		if (preset != Preset::kCustom && idx >= 0 && idx < static_cast<int>(std::size(kPresets))) {
+			const auto& v = kPresets[idx];
+			settings.iOperator           = v.iOperator;
+			settings.fExposureKey        = v.fExposureKey;
+			settings.fBloomIntensity     = v.fBloomIntensity;
+			settings.fVignetteIntensity  = v.fVignetteIntensity;
+			settings.fCAIntensity        = v.fCAIntensity;
+			settings.fSharpness          = v.fSharpness;
+			settings.fSunspriteIntensity = v.fSunspriteIntensity;
+			settings.fLensFlareIntensity = v.fLensFlareIntensity;
+		}
+		settings.iPreset = idx;
+	}
+
+	bool Imagespace::SettingsMatchPreset(Preset preset) const
+	{
+		const int idx = static_cast<int>(preset);
+		if (preset == Preset::kCustom || idx < 0 || idx >= static_cast<int>(std::size(kPresets)))
+			return false;
+		const auto& v = kPresets[idx];
+		return settings.iOperator == v.iOperator
+			&& std::fabs(settings.fExposureKey        - v.fExposureKey)        < 1e-3f
+			&& std::fabs(settings.fBloomIntensity     - v.fBloomIntensity)     < 1e-3f
+			&& std::fabs(settings.fVignetteIntensity  - v.fVignetteIntensity)  < 1e-3f
+			&& std::fabs(settings.fCAIntensity        - v.fCAIntensity)        < 1e-3f
+			&& std::fabs(settings.fSharpness          - v.fSharpness)          < 1e-3f
+			&& std::fabs(settings.fSunspriteIntensity - v.fSunspriteIntensity) < 1e-3f
+			&& std::fabs(settings.fLensFlareIntensity - v.fLensFlareIntensity) < 1e-3f;
 	}
 
 	bool Imagespace::EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format)
@@ -803,6 +887,15 @@ namespace cs::features
 	{
 		if (!settings.enabled)
 			return;
+		// Suite-wide ENB yield. Persisted prefs are left intact; the user opts in to stacking via bForceWithENB.
+		static bool enbSuppressLogged = false;
+		if (cs::env::IsENBLoaded() && !settings.bForceWithENB) {
+			if (!enbSuppressLogged) {
+				L->info("Suite skipped: ENB loaded and bForceWithENB=false");
+				enbSuppressLogged = true;
+			}
+			return;
+		}
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData)
@@ -848,10 +941,10 @@ namespace cs::features
 
 		const bool wantAdaptive = settings.bAdaptiveExposure;
 		const bool wantBloom    = settings.bBloomEnable;
-		// Yield sun additions to ENB; the persisted user prefs are left intact (matches DOF's runtime gate).
-		const bool enbLoaded    = cs::env::IsENBLoaded();
-		const bool wantSunsprite = settings.bSunspriteEnable && !enbLoaded;
-		const bool wantLensFlare = settings.bLensFlareEnable && !enbLoaded;
+		// Yield sun additions to ENB unless the user opted into suite-wide stacking via bForceWithENB.
+		const bool enbYield     = cs::env::IsENBLoaded() && !settings.bForceWithENB;
+		const bool wantSunsprite = settings.bSunspriteEnable && !enbYield;
+		const bool wantLensFlare = settings.bLensFlareEnable && !enbYield;
 		const bool wantComposite = (settings.iOperator != 0) || wantBloom || settings.bVignetteEnable
 			|| settings.bCAEnable || settings.bSharpenEnable || (settings.bLUTEnable && lutSRV)
 			|| wantSunsprite || wantLensFlare;
@@ -1136,17 +1229,44 @@ namespace cs::features
 	{
 		bool dirty = false;
 		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
+		auto markCustomIfEdited = [&] {
+			if (ImGui::IsItemDeactivatedAfterEdit()) {
+				if (!SettingsMatchPreset(static_cast<Preset>(settings.iPreset)))
+					settings.iPreset = static_cast<int>(Preset::kCustom);
+				dirty = true;
+			}
+		};
 
 		dirty |= ImGui::Checkbox("Enabled", &settings.enabled);
 
-		if (cs::env::IsENBLoaded())
-			ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: stacking may double-grade.");
+		if (cs::env::IsENBLoaded()) {
+			ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: suite skips by default.");
+			dirty |= ImGui::Checkbox("Force-enable with ENB", &settings.bForceWithENB);
+			ImGui::SetItemTooltip("Off (default): Imagespace yields the entire post-process chain to ENB. On: stack on top (may double-grade).");
+		}
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Preset");
+		const char* presetNames[] = { "Custom", "Subtle", "Standard", "Vivid", "Cinematic" };
+		int presetIdx = std::clamp(settings.iPreset, 0, 4);
+		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
+			if (presetIdx != static_cast<int>(Preset::kCustom)) {
+				ApplyPreset(static_cast<Preset>(presetIdx));
+			} else {
+				settings.iPreset = static_cast<int>(Preset::kCustom);
+			}
+			dirty = true;
+		}
+		ImGui::SetItemTooltip("Editing any tracked slider switches preset to Custom. DOF / LUT / adaptive exposure are not part of presets.");
 
 		ImGui::Separator();
 		ImGui::Text("Tonemap");
 		const char* opNames[] = { "Off (passthrough)", "Hable filmic", "Reinhard extended", "Lottes" };
-		if (ImGui::Combo("Operator", &settings.iOperator, opNames, IM_ARRAYSIZE(opNames)))
+		if (ImGui::Combo("Operator", &settings.iOperator, opNames, IM_ARRAYSIZE(opNames))) {
+			if (!SettingsMatchPreset(static_cast<Preset>(settings.iPreset)))
+				settings.iPreset = static_cast<int>(Preset::kCustom);
 			dirty = true;
+		}
 		ImGui::SetItemTooltip("Affects only the tonemap stage; bloom, LUT, and lens still run if their toggles are on.");
 
 		const char* expoLabel = settings.bAdaptiveExposure ? "Exposure bias" : "Exposure";
@@ -1161,7 +1281,7 @@ namespace cs::features
 		commitDirty();
 		ImGui::SliderFloat("Key (mid-grey)", &settings.fExposureKey, 0.05f, 0.5f, "%.3f");
 		ImGui::SetItemTooltip("Target average luminance the EMA aims for. Lower = darker midtones, higher = brighter midtones.");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::SliderFloat("Min adapted", &settings.fExposureMin, 0.01f, 1.0f, "%.2f");
 		commitDirty();
 		ImGui::SliderFloat("Max adapted", &settings.fExposureMax, 1.0f, 16.0f, "%.2f");
@@ -1176,7 +1296,7 @@ namespace cs::features
 		ImGui::SetItemTooltip("Pixels brighter than this contribute to bloom. LDR-domain so values >1.0 give zero bloom.");
 		commitDirty();
 		ImGui::SliderFloat("Intensity", &settings.fBloomIntensity, 0.0f, 0.3f, "%.3f");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::SliderInt("Mips", &settings.iBloomMips, 3, 6);
 		commitDirty();
 		ImGui::EndDisabled();
@@ -1186,17 +1306,17 @@ namespace cs::features
 		dirty |= ImGui::Checkbox("Vignette", &settings.bVignetteEnable);
 		ImGui::BeginDisabled(!settings.bVignetteEnable);
 		ImGui::SliderFloat("Vignette intensity", &settings.fVignetteIntensity, 0.0f, 1.0f, "%.2f");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Chromatic aberration", &settings.bCAEnable);
 		ImGui::BeginDisabled(!settings.bCAEnable);
 		ImGui::SliderFloat("CA intensity", &settings.fCAIntensity, 0.0f, 2.0f, "%.2f");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
 		ImGui::BeginDisabled(!settings.bSharpenEnable);
 		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -1205,7 +1325,7 @@ namespace cs::features
 		ImGui::SetItemTooltip("Bright glow at the sun's screen position. No-op when sun is behind camera or in interiors.");
 		ImGui::BeginDisabled(!settings.bSunspriteEnable);
 		ImGui::SliderFloat("Sunsprite intensity", &settings.fSunspriteIntensity, 0.0f, 2.0f, "%.2f");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::SliderFloat("Sunsprite size", &settings.fSunspriteSize, 0.01f, 0.2f, "%.3f");
 		ImGui::SetItemTooltip("Disc radius as a fraction of frame height.");
 		commitDirty();
@@ -1214,7 +1334,7 @@ namespace cs::features
 		ImGui::SetItemTooltip("Ghost reflections traversing from the sun toward the screen centre.");
 		ImGui::BeginDisabled(!settings.bLensFlareEnable);
 		ImGui::SliderFloat("Flare intensity", &settings.fLensFlareIntensity, 0.0f, 2.0f, "%.2f");
-		commitDirty();
+		markCustomIfEdited();
 		ImGui::SliderInt("Flare ghosts", &settings.iLensFlareGhosts, 3, 7);
 		commitDirty();
 		ImGui::EndDisabled();

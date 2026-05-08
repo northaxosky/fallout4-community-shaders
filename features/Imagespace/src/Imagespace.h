@@ -23,9 +23,20 @@ namespace cs::features
 
 		void RunFrame();
 
+		enum class Preset : int
+		{
+			kCustom    = 0,
+			kSubtle    = 1,
+			kStandard  = 2,
+			kVivid     = 3,
+			kCinematic = 4,
+		};
+
 		struct Settings
 		{
 			bool        enabled            = true;
+			int         iPreset            = static_cast<int>(Preset::kStandard);
+			bool        bForceWithENB      = false;
 
 			// Tonemap + LUT.
 			int         iOperator          = 1;
@@ -80,6 +91,9 @@ namespace cs::features
 
 		void LoadSettings();
 		void SaveSettings();
+
+		void ApplyPreset(Preset preset);
+		bool SettingsMatchPreset(Preset preset) const;
 
 		bool EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format);
 		bool EnsurePyramidResources(uint32_t a_width, uint32_t a_height);
