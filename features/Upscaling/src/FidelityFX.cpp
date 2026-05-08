@@ -198,7 +198,8 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 		dispatchParameters.cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
 		dispatchParameters.cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
-		dispatchParameters.enableSharpening = false;
+		dispatchParameters.enableSharpening = true;
+		dispatchParameters.sharpness = 0.0f;
 
 		dispatchParameters.cameraFovAngleVertical = 1.0f;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
