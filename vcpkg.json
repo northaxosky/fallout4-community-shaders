@@ -17,6 +17,7 @@
     "directx-headers",
     "magic-enum",
     "simpleini",
+    "sqlite3",
     {
       "name": "imgui",
       "features": [ "dx11-binding", "win32-binding", "docking-experimental" ]
