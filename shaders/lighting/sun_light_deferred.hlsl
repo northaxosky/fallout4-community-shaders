@@ -72,7 +72,7 @@
 // 9-tap kernel - so the shadow filtering ports with FO4-specific changes.
 //
 // Limits of this reconstruction (be honest):
-//   * CB12 field names are PARTIALLY known from shader-3560-analysis
+//   * CB12 field names are PARTIALLY known
 //     (CB12[20..27] reprojection matrix, CB12[28..29] for trig + SSS
 //     constants per insn 149 sincos pattern, CB12[30].y for desaturation).
 //     Other CB12 indices are placeholders.
@@ -580,7 +580,7 @@ PS_OUTPUT main(PS_INPUT input)
 //     + ICB size delta will likely push this above ±10% but stays within
 //     documented-WIP territory.
 //
-// What needs cross-read to finalize (see followups doc §Shaders011.3295):
+// What needs cross-read to finalize:
 //   * CB12[28..30] field semantics. The skin BRDF uses cb12[28..29] for
 //     SSS-style rotated absorption math; the field names are placeholders.
 //   * CB2[3..9] + CB2[17..19] + CB2[23] are unused-by-this-shader CB

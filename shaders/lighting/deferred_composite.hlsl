@@ -5,8 +5,7 @@
 // Status: REFERENCE - asm-level transcription, structural fidelity high.
 //   Semantic naming of CB fields and texture roles is INCOMPLETE pending
 //   IDA Hex-Rays cross-read of the dispatch site C++; unresolved items
-//   are marked `TODO: identify` and migrated to
-//   `shaders/lighting/docs/lighting-shader-followups.md` §Shaders011.3539.
+//   are marked `// TODO: identify`.
 //
 // Canonical mapping:
 //   * Corpus blob:    Shaders011.fxp blob 3539
@@ -41,8 +40,7 @@
 //      dir) + cb2[2].w (specular power) + cb2[1].w (intensity).
 //   5. Distance- and depth-based fog/tonemap-style blending using CB12
 //      indices 14, 35, 41..46 - these look like the same fog/distance-fade
-//      parameter block already partially documented in
-//      `shader-3560-analysis.md` for the ambient/IBL pass.
+//      parameter block used by the ambient/IBL pass (blob 3559).
 //
 // Limits of this reconstruction (be honest):
 //   - CB12 field NAMES are not from C++ cross-read; only the INDICES are
@@ -454,9 +452,8 @@ PS_OUTPUT main(PS_INPUT input)
 //   The reconstruction is therefore SHIPPED-WIP: structurally faithful,
 //   semantically transparent, compiles cleanly, but the round-trip is
 //   not byte-equivalent to the original. Follow-up work to tighten the
-//   compiler output (queued under `shaders/lighting/docs/lighting-shader-followups.md`
-//   §Shaders011.3539): rework the matrix-select pattern, then revisit
-//   the lighting + tonemap blocks.
+//   compiler output: rework the matrix-select pattern, then revisit the
+//   lighting + tonemap blocks.
 //
 // What is faithfully reconstructed:
 //   * Resource declarations (6 SRVs, 6 samplers, 2 CBs) at exact slot
@@ -467,7 +464,7 @@ PS_OUTPUT main(PS_INPUT input)
 //     1 Sample).
 //   * The dp4 / dp3 / rsq / pow / lerp math is asm-faithful per instruction.
 //
-// What needs cross-read to finalize (see followups doc §Shaders011.3539):
+// What needs cross-read to finalize:
 //   * Engine RT-index mapping for t0/t3/t4/t5/t7/t11 (the rdoc slot bindings
 //     reference RT 250/256/253/389/183-depth/395 which are outside the
 //     `cs::engine::RenderTarget` enum; they appear to be dynamic

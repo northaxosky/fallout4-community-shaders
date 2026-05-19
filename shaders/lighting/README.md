@@ -16,21 +16,19 @@ intended to inform feature implementations elsewhere in the repo.
 | `sun_light_deferred.hlsl`   | directional sun-light deferred PS with cascade-shadow PCF | reads gbuffer (albedo/normal/material) + main depth + cascade shadow Texture2DArray; writes RT 389+392 (kDiffuse/kSpec HDR pair) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) | **reconstructed-roundtrip-8.8pct** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
-HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings;
-regenerate it whenever the cross-runtime ID export changes.
+HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
 ## Reconstruction status
 
 * **`ambient_ibl_pass.hlsl`** - **reconstructed, round-trip +1.5%**.
   Canonical blob: `Shaders011.fxp` blob **3559** (sha1 `7460585eaf76`),
   mnemonic-stream-exact-match sibling of the previously-analysed blob
-  3560 (`shader-3560-analysis.md`). 263-instruction ambient/IBL deferred
-  PS including the 9-tap SSSS-style bilateral blur. Resource bindings
-  (14 SRVs + 14 samplers + 3 CBs) + signature exact-match. Round-trip
-  via fxc /T ps_5_0 /O3: 269 vs 265 insns (+1.5%, within the ±10%
-  threshold for this larger shader). Sample count 41 vs 44 (3 short
-  due to a missing +1.28 ring tap, tracked in followups).
-  Key findings carried over from `shader-3560-analysis.md`:
+  3560. 263-instruction ambient/IBL deferred PS including the 9-tap
+  SSSS-style bilateral blur. Resource bindings (14 SRVs + 14 samplers +
+  3 CBs) + signature exact-match. Round-trip via fxc /T ps_5_0 /O3: 269
+  vs 265 insns (+1.5%, within the ±10% threshold for this larger
+  shader). Sample count 41 vs 44 (3 short due to a missing +1.28 ring
+  tap). Key findings:
   * **AO-application boundary** at the final multiply on the
     combined ambient+IBL term (no direct-light contamination).
   * **kSSAO write timeline**: SAO writes at
@@ -55,8 +53,7 @@ regenerate it whenever the cross-runtime ID export changes.
   fidelity verified, instruction-count delta documented. CB12 field
   semantics and texture RT-index mapping are placeholder names
   (`cb12_idx<N>_*` and inferred role names); finalizing requires IDA
-  Hex-Rays cross-read of `DrawWorld::DeferredComposite`. See
-  `docs/lighting-shader-followups.md` §`Shaders011.3539` for open items.
+  Hex-Rays cross-read of `DrawWorld::DeferredComposite`.
 * **`vls_slice_scatter.hlsl`** - **reconstructed, role confirmed**
   (renamed from `directional_sun_light.hlsl` after the captured PS at
   eid 45401 (sha `46b911cb8053`) was confirmed to be a per-slice
@@ -88,8 +85,7 @@ regenerate it whenever the cross-runtime ID export changes.
   keeps the cascade PCF blocks as runtime loops (4 sample_c_lz
   instructions in asm), matching the original exactly. The material-
   non-1 BRDF block is condensed for readability; full asm-granular
-  reconstruction would add ~24 more insns. See
-  `docs/lighting-shader-followups.md` §`Shaders011.3295`.
+  reconstruction would add ~24 more insns.
 
 ## Earlier classifier picks (historical context)
 

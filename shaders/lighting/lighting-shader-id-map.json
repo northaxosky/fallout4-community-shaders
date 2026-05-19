@@ -11,8 +11,7 @@
       ],
       "notes": [
         "REL::ID array ordering matches Fallout4RE convention: { OG, NG, AE }.",
-        "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE));",
-        "HLSL for this pass is not extracted yet; see docs/lighting-shader-reconstruction-runbook.md."
+        "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE));"
       ],
       "rel_id_array_OG_NG_AE": [
         56596,
@@ -52,8 +51,7 @@
       "depth_targets_written": [],
       "notes": [
         "REL::ID array ordering matches Fallout4RE convention: { OG, NG, AE }.",
-        "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE));",
-        "HLSL for this pass is not extracted yet; see docs/lighting-shader-reconstruction-runbook.md."
+        "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE));"
       ],
       "rel_id_array_OG_NG_AE": [
         1108521,
@@ -95,8 +93,7 @@
       "depth_targets_written": [],
       "notes": [
         "REL::ID array ordering matches Fallout4RE convention: { OG, NG, AE }.",
-        "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE));",
-        "HLSL for this pass is not extracted yet; see docs/lighting-shader-reconstruction-runbook.md."
+        "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE));"
       ],
       "rel_id_array_OG_NG_AE": [
         728427,

@@ -7,9 +7,8 @@
 //   SSSS-style blur block (insns 80-251 in the original asm, 171 of the
 //   263 total instructions) is the largest single segment and is
 //   reconstructed as a [unroll]'d loop over a static kernel array.
-//   CB field semantic names are partially inferred from the existing
-//   shader-3560-analysis.md structural work;
-//   unresolved fields are marked TODO and migrated to the followups doc.
+//   CB field semantic names are partially inferred from prior asm
+//   reading; unresolved fields are marked `// TODO: identify`.
 //
 // Canonical mapping:
 //   * Corpus blob:    Shaders011.fxp blob 3559
@@ -18,9 +17,8 @@
 //     mnemonic stream within +/- 2 instructions of corpus blob
 //     (263 vs 265 insns; 44 vs 44 samples; same control flow).
 //   * Sibling blob:   3560 (sha 2b6e36c08aca, 321 insns) - structurally
-//     equivalent; the prior structural analysis at
-//     shaders/lighting/shader-3560-analysis.md applies almost verbatim.
-//     Use 3559 as canonical (matches the captured runtime PS exactly).
+//     equivalent. Use 3559 as canonical (matches the captured runtime
+//     PS exactly).
 //   * Source asm:     Shaders011.3559.7460585eaf76.dxbc.asm
 //   * Shape:          ps_5_0, 263 insns, 44 samples, 14 SRVs
 //                     (t1-t7, t8 texturecubearray, t9-t12, t14, t15),
@@ -33,7 +31,7 @@
 //   REL::ID { OG=1108521, NG=2318312, AE=2318312 }
 //   AE RVA 0x021ed4c0   OG RVA 0x028529b0   NG RVA 0x02097e30
 //
-// SSGI integration boundary (high confidence, carried from shader-3560-analysis.md):
+// SSGI integration boundary (high confidence):
 //   The engine applies kSSAO (t9) to the combined ambient+IBL term via
 //   a SINGLE MULTIPLY at the very end of this shader (insns 261-262).
 //   AO is applied AFTER the cubemap reflection, AFTER the bilateral
@@ -48,8 +46,7 @@
 // this PS dispatches). RegisterPostDeferredPrePass in src/RenderHooks.cpp
 // is positioned to support this.
 //
-// What this shader does (interpreted, structurally validated against
-// shader-3560-analysis.md):
+// What this shader does (interpreted, structurally validated):
 //   1. Sample gbuffer aux buffers (t3 shading data, t5+t11 precomputed
 //      ambient pair, t7 depth, t10 bilateral source).
 //   2. Compute glossiness factor from t3.x (roughness derivation).
@@ -78,7 +75,7 @@
 //   9. Output to o0; o0.w = 1.0.
 //
 // Limits of this reconstruction (be honest):
-//   * CB12 field names are PARTIALLY known from shader-3560-analysis
+//   * CB12 field names are PARTIALLY known
 //     (CB12[12..14] view->world matrix, CB12[20..27] reprojection
 //     matrices, CB12[30].y luminance lerp). Other CB12 indices used
 //     in the dispatch (e.g. CB12[12..14] for world-space rotate) and
@@ -91,7 +88,7 @@
 //   * No second-pass capture diff - the 9-tap blur is a separable
 //     horizontal pass; a vertical complement should exist somewhere
 //     (likely blob 3559+1 or 3559-1 in the fxp). Not investigated
-//     here; queued in followups.
+//     here.
 
 // ----------------------------------------------------------------------------
 // Constant buffer layouts.
@@ -105,7 +102,7 @@ cbuffer PerFrame_CB12 : register(b12)
     // [12..14]: 3x3 view-to-world rotation matrix (rows 12, 13, 14).
     //           Used at insns 55-57 to transform the reflection vector
     //           from view space into world space for IBL cubemap
-    //           sampling. Per shader-3560-analysis identification.
+    //           sampling.
     float4 cb12_view_to_world_row0;  // = cb12[12]
     float4 cb12_view_to_world_row1;  // = cb12[13]
     float4 cb12_view_to_world_row2;  // = cb12[14]
@@ -127,7 +124,7 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 cb12_pad_28_29[2];
 
     // [30]: .y = IBL luminance-desaturation lerp factor (scaled by 0.9
-    //       at insn 65). Per shader-3560-analysis. Other channels TODO.
+    //       at insn 65). Other channels TODO.
     float4 cb12_idx30_ibl_desaturation;
 };
 
@@ -167,8 +164,7 @@ cbuffer PerCall_CB2 : register(b2)
 };
 
 // ----------------------------------------------------------------------------
-// Resource bindings.
-// Semantic roles inferred from shader-3560-analysis.md plus asm reading.
+// Resource bindings. Semantic roles inferred from asm reading.
 // ----------------------------------------------------------------------------
 
 // t1: kGbufferNormal (RT 20). Octahedral-encoded normal sampled at insn 33;
@@ -605,7 +601,7 @@ PS_OUTPUT main(PS_INPUT input)
 //     the +1.28 tap is the lone gap).
 //   * SSGI AO-application boundary at the final multiply.
 //
-// What needs cross-read to finalize (see followups doc §Shaders011.3559):
+// What needs cross-read to finalize:
 //   * Add the missing +1.28 ring tap to close the sample-count gap.
 //     Trivial: append (1.28, 1.28) to SSSS_BLUR_OFFSETS + a matching
 //     weight to SSSS_TAP_WEIGHTS; recompile.

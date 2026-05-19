@@ -335,7 +335,7 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Both smoothstep computations (one inverse-smoothstep^0.33 for alpha
 //     fade, one direct smoothstep for color lerp).
 //
-// What needs cross-read to finalize (see followups doc §Shaders011.2147):
+// What needs cross-read to finalize:
 //   * The ROLE of this shader. The original "sun-shadow" label does
 //     not match the asm. Best-guess role from math: god-rays / volumetric
 //     scattering / atmospheric sky-color sampling. IDA Hex-Rays on the
