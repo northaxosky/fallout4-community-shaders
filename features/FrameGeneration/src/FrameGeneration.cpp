@@ -17,6 +17,8 @@ namespace cs::features
 	using namespace framegeneration;
 	namespace { auto* L = cs::log::Get("cs.feature.framegen"); }
 
+	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini";
+
 enum class RenderTarget
 {
 	kFrameBuffer = 0,
@@ -132,7 +134,7 @@ void FrameGeneration::LoadSettings()
 {
 	CSimpleIniA ini;
 	ini.SetUnicode();
-	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
+	ini.LoadFile(kIniPath);
 
 	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
 	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
@@ -163,7 +165,7 @@ void FrameGeneration::SaveSettings()
 {
 	CSimpleIniA ini;
 	ini.SetUnicode();
-	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
+	ini.LoadFile(kIniPath);
 
 	ini.SetBoolValue("Settings", "bFrameGenerationMode", settings.frameGenerationMode);
 	ini.SetBoolValue("Settings", "bFrameLimitMode", settings.frameLimitMode);
@@ -173,7 +175,7 @@ void FrameGeneration::SaveSettings()
 	// INI stores 0-indexed (0=2x, 1=3x, 2=4x); settings.frameGenFrames is 1-indexed.
 	ini.SetLongValue("Settings", "iFrameGenFrames", settings.frameGenFrames - 1);
 
-	ini.SaveFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
+	ini.SaveFile(kIniPath);
 }
 
 void FrameGeneration::DrawSettings()
