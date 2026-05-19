@@ -145,12 +145,16 @@ cbuffer PerCall_CB2 : register(b2)
     //       (insn 109). Likely (FarCascadeNearZ, NearCascadeFarZ).
     float4 cb2_idx10_cascade_range;
 
-    // [11..13]: cascade-0 view-space-to-light-space matrix (4x4 with
-    //           row 13 used as cascade-0 z, see insn 44).
-    float4x4 cb2_cascade0_matrix;
+    // [11..13]: cascade-0 view-space-to-light-space rows (3 x float4).
+    //           dp4 against (posView, 1) yields cascade-0 (x, y, z).
+    float4 cb2_cascade0_row0;
+    float4 cb2_cascade0_row1;
+    float4 cb2_cascade0_row2;
 
-    // [14..16]: cascade-1 view-space-to-light-space matrix.
-    float4x4 cb2_cascade1_matrix;
+    // [14..16]: cascade-1 view-space-to-light-space rows (3 x float4).
+    float4 cb2_cascade1_row0;
+    float4 cb2_cascade1_row1;
+    float4 cb2_cascade1_row2;
 
     // [17..19]: TODO: identify
     float4 cb2_pad_17_19[3];
@@ -267,18 +271,18 @@ float3 DecodeOctahedralNormal(float2 enc01)
 
 // Per-cascade PCF shadow factor.
 //   posView    = the view-space position to project into light space.
-//   lightMatrix = 4x4 view-to-light-space matrix (rows 11..13 or 14..16).
+//   row0/1/2   = 3 view-to-light-space rows (cb2[11..13] or cb2[14..16]).
 //   cascadeIdx = 0 or 1 (selects the Texture2DArray slice).
 //   cascadeDepthRange = cb2[21..22].zw delta + reciprocal applied externally.
 //   kernelScale = cb2[20].z * 3.0 (asm's pre-computed r5.w).
 // Returns: averaged PCF result (asm equivalent of r2.y / r1.w * 0.0625 = / 16).
-float ComputeCascadePCF(float3 posView, float4x4 lightMatrix, float cascadeIdx,
-                        float cascadeDepthRcp, float kernelScale)
+float ComputeCascadePCF(float3 posView, float4 row0, float4 row1, float4 row2,
+                        float cascadeIdx, float cascadeDepthRcp, float kernelScale)
 {
     float4 posLightH;
-    posLightH.x = dot(lightMatrix[0], float4(posView, 1.0));
-    posLightH.y = dot(lightMatrix[1], float4(posView, 1.0));
-    posLightH.z = dot(lightMatrix[2], float4(posView, 1.0));
+    posLightH.x = dot(row0, float4(posView, 1.0));
+    posLightH.y = dot(row1, float4(posView, 1.0));
+    posLightH.z = dot(row2, float4(posView, 1.0));
     // Asm uses dp4 r2.y = cb2[13].xyzw . r1.xyzw  for the depth ref;
     // the cascade 1 variant also uses the same .z accumulator pattern.
     // For cascade 0: r2.y = -r6.z * 0.275 + posLight.z  (insn 48)
@@ -337,27 +341,22 @@ PS_OUTPUT main(PS_INPUT input)
                                            ddx_.xx, ddy_.xx).x;
 
     // Insn 4-17: depth-based matrix select.
-    float linearizedDepth;
-    float4x4 reprojMatrix;
-    if (depth < 0.01)
-    {
-        linearizedDepth = depth * 100.0;
-        reprojMatrix    = cb12_near_reproj_matrix;
-    }
-    else
-    {
-        linearizedDepth = depth * 1.01 - 0.01;
-        reprojMatrix    = cb12_far_reproj_matrix;
-    }
+    // Per-row ternary matches corpus shape closer than `float4x4` ?:.
+    bool isNearPath = (depth < 0.01);
+    float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
+    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
+    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
+    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
+    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
 
     // Insn 18-25: reconstruct view-space position.
     float2 uvNDC = uv4.zw * float2(2.0, -2.0) + float2(-1.0, 1.0);
     float4 pos4  = float4(uvNDC, linearizedDepth, 1.0);
     float4 posViewH;
-    posViewH.x = dot(reprojMatrix[0], pos4);
-    posViewH.y = dot(reprojMatrix[1], pos4);
-    posViewH.z = dot(reprojMatrix[2], pos4);
-    posViewH.w = dot(reprojMatrix[3], pos4);
+    posViewH.x = dot(reprojRow0, pos4);
+    posViewH.y = dot(reprojRow1, pos4);
+    posViewH.z = dot(reprojRow2, pos4);
+    posViewH.w = dot(reprojRow3, pos4);
     float3 posView = posViewH.xyz / posViewH.www;
 
     // Insn 26-28: sample gbuffer
@@ -388,8 +387,10 @@ PS_OUTPUT main(PS_INPUT input)
     {
         float c0DepthRcp = 1.0 / (cb2_idx21_cascade0_depth_range.w
                                    - cb2_idx21_cascade0_depth_range.z);
-        cascade0Pcf = ComputeCascadePCF(posView, cb2_cascade0_matrix, 0.0,
-                                         c0DepthRcp, kernelScale);
+        cascade0Pcf = ComputeCascadePCF(posView,
+                                         cb2_cascade0_row0, cb2_cascade0_row1,
+                                         cb2_cascade0_row2,
+                                         0.0, c0DepthRcp, kernelScale);
     }
 
     // Insn 73-108: cascade-1 PCF
@@ -398,8 +399,10 @@ PS_OUTPUT main(PS_INPUT input)
     {
         float c1DepthRcp = 1.0 / (cb2_idx22_cascade1_depth_range.w
                                    - cb2_idx22_cascade1_depth_range.z);
-        cascade1Pcf = ComputeCascadePCF(posView, cb2_cascade1_matrix, 1.0,
-                                         c1DepthRcp, kernelScale);
+        cascade1Pcf = ComputeCascadePCF(posView,
+                                         cb2_cascade1_row0, cb2_cascade1_row1,
+                                         cb2_cascade1_row2,
+                                         1.0, c1DepthRcp, kernelScale);
     }
 
     // Insn 109-120: cascade blend by view-space distance.
