@@ -22,7 +22,7 @@ namespace cs::features
 	namespace { auto* L = cs::log::Get("cs.feature.imagespace"); }
 
 	constexpr const char* kIniPath  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.ini";
-	constexpr const char* kLUTDir   = "Data\\F4SE\\Plugins\\Imagespace\\LUTs\\";
+	constexpr const char* kLUTDir   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\LUTs\\";
 	constexpr const char* kOpMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
 	constexpr const char* kLutMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_lut";
 	constexpr const char* kAdaptMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_adaptive_exposure";
