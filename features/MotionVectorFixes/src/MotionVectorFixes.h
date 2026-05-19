@@ -7,7 +7,7 @@ namespace cs::features
 	class MotionVectorFixes : public Feature
 	{
 	public:
-		static MotionVectorFixes* Get();
+		static MotionVectorFixes* GetSingleton();
 
 		std::string_view GetName() const override { return "MotionVectorFixes"; }
 

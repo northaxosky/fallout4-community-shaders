@@ -161,7 +161,7 @@ namespace cs::features
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
 
-	MotionVectorFixes* MotionVectorFixes::Get()
+	MotionVectorFixes* MotionVectorFixes::GetSingleton()
 	{
 		static MotionVectorFixes instance;
 		return &instance;
@@ -201,7 +201,7 @@ namespace cs::features
 		{
 			AutoRegister()
 			{
-				FeatureManager::Get().Register(MotionVectorFixes::Get());
+				cs::FeatureManager::Get().Register(MotionVectorFixes::GetSingleton());
 			}
 		};
 		static AutoRegister _autoRegister;
