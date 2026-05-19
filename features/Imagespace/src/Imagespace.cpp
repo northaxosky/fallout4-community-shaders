@@ -421,7 +421,7 @@ namespace cs::features
 
 	bool Imagespace::EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format)
 	{
-		auto* device = imagespace::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device)
 			return false;
 
@@ -469,7 +469,7 @@ namespace cs::features
 
 	bool Imagespace::EnsurePyramidResources(uint32_t a_width, uint32_t a_height)
 	{
-		auto* device = imagespace::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device)
 			return false;
 
@@ -553,7 +553,7 @@ namespace cs::features
 
 	bool Imagespace::EnsureBloomResources(uint32_t a_width, uint32_t a_height, int a_mips)
 	{
-		if (!imagespace::Util::GetD3DDevice())
+		if (!cs::util::GetD3DDevice())
 			return false;
 
 		const uint32_t halfW = std::max(1u, a_width  / 2);
@@ -607,7 +607,7 @@ namespace cs::features
 
 	bool Imagespace::EnsureDOFResources(uint32_t a_width, uint32_t a_height)
 	{
-		auto* device = imagespace::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device) return false;
 
 		const uint32_t halfW = std::max(1u, (a_width  + 1) / 2);
@@ -838,7 +838,7 @@ namespace cs::features
 			return false;
 		}
 
-		auto* device = imagespace::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device)
 			return false;
 

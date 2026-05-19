@@ -201,7 +201,7 @@ namespace cs::features
 
 	bool ScreenSpaceGI::EnsurePyramid(uint32_t a_w, uint32_t a_h)
 	{
-		auto* device = ssgi::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device) return false;
 
 		const uint32_t baseW = std::max(1u, a_w / 2);
@@ -250,7 +250,7 @@ namespace cs::features
 
 	bool ScreenSpaceGI::EnsureAOResources(uint32_t a_w, uint32_t a_h)
 	{
-		auto* device = ssgi::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device) return false;
 
 		const uint32_t halfW = std::max(1u, a_w / 2);
@@ -308,7 +308,7 @@ namespace cs::features
 
 	bool ScreenSpaceGI::EnsureApplyResources(uint32_t a_w, uint32_t a_h, uint32_t a_format)
 	{
-		auto* device = ssgi::Util::GetD3DDevice();
+		auto* device = cs::util::GetD3DDevice();
 		if (!device) return false;
 
 		if (a_w != scratchWidth || a_h != scratchHeight || a_format != scratchFormat || !scratchDiffuse) {
