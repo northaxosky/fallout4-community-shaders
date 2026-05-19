@@ -157,15 +157,16 @@ namespace cs::features
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
-		if (ImGui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf))) {
+		if (ImGui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf)))
 			_settings.dllPath = dllPathBuf;
+		if (ImGui::IsItemDeactivatedAfterEdit())
 			SaveSettings();
-		}
 
 		char folderBuf[260];
 		strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
-		if (ImGui::InputText("Capture folder", folderBuf, sizeof(folderBuf))) {
+		if (ImGui::InputText("Capture folder", folderBuf, sizeof(folderBuf)))
 			_settings.captureFolder = folderBuf;
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			SaveSettings();
 			ApplyCapturePath();
 		}
