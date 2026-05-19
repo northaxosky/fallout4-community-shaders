@@ -44,6 +44,12 @@ src = "package/F4SE/Plugins/Imagespace/"
 dst = "F4SE/Plugins/Imagespace/"
 pattern = "*.hlsl*"
 
+# ShaderCatalog default INI (seed file; in-game settings menu rewrites it on toggle).
+[[deploy.assets]]
+src = "package/F4SE/Plugins/FO4CommunityShaders/"
+dst = "F4SE/Plugins/FO4CommunityShaders/"
+pattern = "*.ini"
+
 # NVIDIA Streamline runtime DLLs (fetched by scripts/fetch-sdks.sh).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/Streamline/"
