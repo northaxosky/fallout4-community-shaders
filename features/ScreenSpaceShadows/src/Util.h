@@ -6,9 +6,5 @@
 
 namespace cs::features::sss::Util
 {
-	// Mirrors Upscaling's enumeration so we read the same depth-stencil slot the engine populates pre-deferred.
-	enum class DepthStencilTarget
-	{
-		kMain = 2,
-	};
+	using DepthStencilTarget = cs::engine::DepthStencilTarget;
 }
