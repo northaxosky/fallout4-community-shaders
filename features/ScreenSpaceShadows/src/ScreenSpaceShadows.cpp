@@ -13,6 +13,7 @@
 #pragma warning(pop)
 
 #include "ComputeScope.h"
+#include "CSUtil.h"
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
@@ -381,7 +382,7 @@ namespace cs::features
 			auto sampleCount = std::format("{}", scaled);
 			std::vector<std::pair<const char*, const char*>> defines{ { "SAMPLE_COUNT", sampleCount.c_str() } };
 			raymarchCS = reinterpret_cast<ID3D11ComputeShader*>(
-				sss::Util::CompileShader(L"Data\\F4SE\\Plugins\\ScreenSpaceShadows\\RaymarchCS.hlsl", defines, "cs_5_0"));
+				cs::util::CompileShader(L"Data\\F4SE\\Plugins\\ScreenSpaceShadows\\RaymarchCS.hlsl", defines, "cs_5_0"));
 			if (raymarchCS) L->info("Compiled RaymarchCS with SAMPLE_COUNT={}", scaled);
 		}
 		return raymarchCS;
@@ -392,7 +393,7 @@ namespace cs::features
 		if (!applyCS) {
 			std::vector<std::pair<const char*, const char*>> defines;
 			applyCS = reinterpret_cast<ID3D11ComputeShader*>(
-				sss::Util::CompileShader(L"Data\\F4SE\\Plugins\\ScreenSpaceShadows\\ApplyShadowsCS.hlsl", defines, "cs_5_0"));
+				cs::util::CompileShader(L"Data\\F4SE\\Plugins\\ScreenSpaceShadows\\ApplyShadowsCS.hlsl", defines, "cs_5_0"));
 			if (applyCS) L->info("Compiled ApplyShadowsCS");
 		}
 		return applyCS;

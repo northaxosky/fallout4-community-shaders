@@ -15,9 +15,4 @@ namespace cs::features::sss::Util
 		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
 		return singleton.get();
 	}
-
-	ID3D11DeviceChild* CompileShader(const wchar_t* a_filePath,
-		const std::vector<std::pair<const char*, const char*>>& a_defines,
-		const char* a_programType,
-		const char* a_program = "main");
 }

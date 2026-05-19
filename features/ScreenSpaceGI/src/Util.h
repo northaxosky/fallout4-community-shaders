@@ -1,8 +1,6 @@
 #pragma once
 
 #include <d3d11.h>
-#include <utility>
-#include <vector>
 
 #include "Engine.h"
 
@@ -23,9 +21,4 @@ namespace cs::features::ssgi::Util
 		if (!data || !data->device) return nullptr;
 		return reinterpret_cast<ID3D11Device*>(data->device);
 	}
-
-	ID3D11DeviceChild* CompileShader(const wchar_t* a_filePath,
-		const std::vector<std::pair<const char*, const char*>>& a_defines,
-		const char* a_programType,
-		const char* a_program = "main");
 }

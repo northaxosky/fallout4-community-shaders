@@ -4,6 +4,7 @@
 #include <imgui.h>
 
 #include "DX12SwapChain.h"
+#include "CSUtil.h"
 #include "DirectXMath.h"
 #include "Env.h"
 #include "Feature.h"
@@ -92,43 +93,6 @@ enum class DepthStencilTarget
 
 	kCount = 13
 };
-
-ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramType, const char* Program = "main")
-{
-	auto rendererData = RE::BSGraphics::GetRendererData();
-	auto device = reinterpret_cast<ID3D11Device*>(rendererData->device);
-
-	// Compiler setup
-	uint32_t flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-
-	ID3DBlob* shaderBlob = nullptr;
-	ID3DBlob* shaderErrors = nullptr;
-
-	std::string str;
-	std::wstring path{ FilePath };
-	std::transform(path.begin(), path.end(), std::back_inserter(str), [](wchar_t c) {
-		return (char)c;
-	});
-	if (!std::filesystem::exists(FilePath)) {
-		L->error("Failed to compile shader; {} does not exist", str);
-		return nullptr;
-	}
-	if (FAILED(D3DCompileFromFile(FilePath, nullptr, D3D_COMPILE_STANDARD_FILE_INCLUDE, Program, ProgramType, flags, 0, &shaderBlob, &shaderErrors))) {
-		L->warn("Shader compilation failed:\n\n{}", shaderErrors ? static_cast<char*>(shaderErrors->GetBufferPointer()) : "Unknown error");
-		if (shaderErrors) shaderErrors->Release();
-		if (shaderBlob) shaderBlob->Release();
-		return nullptr;
-	}
-	if (shaderErrors) {
-		L->debug("Shader logs:\n{}", static_cast<char*>(shaderErrors->GetBufferPointer()));
-		shaderErrors->Release();
-	}
-
-	ID3D11ComputeShader* regShader;
-	DX::ThrowIfFailed(device->CreateComputeShader(shaderBlob->GetBufferPointer(), shaderBlob->GetBufferSize(), nullptr, &regShader));
-	shaderBlob->Release();
-	return regShader;
-}
 
 void FrameGeneration::LoadSettings()
 {
@@ -398,9 +362,9 @@ void FrameGeneration::CreateFrameGenerationResources()
 		}
 	}
 
-	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", "cs_5_0");
-	generateSharedBuffersCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", "cs_5_0");
-	uiAlphaMaskCS = (ID3D11ComputeShader*)CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\UIAlphaMaskCS.hlsl", "cs_5_0");
+	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", {}, "cs_5_0");
+	generateSharedBuffersCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", {}, "cs_5_0");
+	uiAlphaMaskCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\UIAlphaMaskCS.hlsl", {}, "cs_5_0");
 
 	L->info("Frame generation resources created (HUDLess + Depth + MVec + UIAlpha)");
 }

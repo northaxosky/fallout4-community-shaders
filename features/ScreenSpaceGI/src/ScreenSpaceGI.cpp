@@ -5,6 +5,7 @@
 #include <imgui.h>
 
 #include "ComputeScope.h"
+#include "CSUtil.h"
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
@@ -339,7 +340,7 @@ namespace cs::features
 	{
 		if (!a_slot) {
 			std::vector<std::pair<const char*, const char*>> defines;
-			a_slot = reinterpret_cast<ID3D11ComputeShader*>(ssgi::Util::CompileShader(a_path, defines, "cs_5_0"));
+			a_slot = reinterpret_cast<ID3D11ComputeShader*>(cs::util::CompileShader(a_path, defines, "cs_5_0"));
 			if (a_slot) L->info("Compiled {}", a_name);
 		}
 		return a_slot;
