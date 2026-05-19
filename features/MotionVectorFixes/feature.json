@@ -1,6 +1,0 @@
-{
-	"name": "MotionVectorFixes",
-	"version": "0.1.0",
-	"description": "Fixes for broken motion vectors: weapon ghosting, menu ghosting, animated objects, LOD",
-	"core": true
-}
