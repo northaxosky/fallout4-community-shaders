@@ -18,7 +18,7 @@ Press **END** in game to open the settings menu.
 
 ## Known issues
 
-- **DLSS-G UI ghosting.** DLSS-G interpolates the HUD as part of the scene, which produces mild UI ghosting during fast camera motion. FSR3 mode is unaffected. See `.local/findings/dlssg-flicker.md` for the investigation and current status.
+- **DLSS-G UI ghosting.** DLSS-G interpolates the HUD as part of the scene, which produces mild UI ghosting during fast camera motion. FSR3 mode is unaffected. Investigation ongoing.
 
 ## Requirements
 
@@ -26,6 +26,7 @@ Press **END** in game to open the settings menu.
 - [CMake 3.21+](https://cmake.org/)
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment variable set
 - [Git](https://git-scm.com/)
+- Optional: a sibling `../_tools/` checkout (the shared build/deploy/test harness). Without it, use the raw CMake commands below; `scripts/deploy.sh` and `scripts/test.sh` will not work.
 
 ## User Requirements
 

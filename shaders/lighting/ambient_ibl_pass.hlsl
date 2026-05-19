@@ -8,11 +8,10 @@
 //   263 total instructions) is the largest single segment and is
 //   reconstructed as a [unroll]'d loop over a static kernel array.
 //   CB field semantic names are partially inferred from the existing
-//   shader-3560-analysis.md structural work (Phase A/B/C, May 7-8);
+//   shader-3560-analysis.md structural work;
 //   unresolved fields are marked TODO and migrated to the followups doc.
 //
-// Canonical mapping (from Fallout4RE workspace commit 4ccba1b,
-// d3dcompile-static-analysis byte-diff campaign):
+// Canonical mapping:
 //   * Corpus blob:    Shaders011.fxp blob 3559
 //   * Corpus sha1:    7460585eaf76...
 //   * Runtime sha1:   761d41008016... (eid 45345 in FO4_frame5407.rdc) -
@@ -22,8 +21,7 @@
 //     equivalent; the prior structural analysis at
 //     shaders/lighting/shader-3560-analysis.md applies almost verbatim.
 //     Use 3559 as canonical (matches the captured runtime PS exactly).
-//   * Source asm:     Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/
-//                     Shaders011/asm/Shaders011.3559.7460585eaf76.dxbc.asm
+//   * Source asm:     Shaders011.3559.7460585eaf76.dxbc.asm
 //   * Shape:          ps_5_0, 263 insns, 44 samples, 14 SRVs
 //                     (t1-t7, t8 texturecubearray, t9-t12, t14, t15),
 //                     14 samplers, 3 CBs (CB12[31], CB0[3], CB2[6]),
@@ -35,7 +33,7 @@
 //   REL::ID { OG=1108521, NG=2318312, AE=2318312 }
 //   AE RVA 0x021ed4c0   OG RVA 0x028529b0   NG RVA 0x02097e30
 //
-// SSGI Phase 2 answer (high confidence, carried from shader-3560-analysis.md):
+// SSGI integration boundary (high confidence, carried from shader-3560-analysis.md):
 //   The engine applies kSSAO (t9) to the combined ambient+IBL term via
 //   a SINGLE MULTIPLY at the very end of this shader (insns 261-262).
 //   AO is applied AFTER the cubemap reflection, AFTER the bilateral
@@ -45,7 +43,7 @@
 //   PSes that also live in DeferredLightsImpl write to kDiffuseBuffer
 //   additively after this pass.
 //
-// SSGI Phase 2 integration boundary recommendation: replace the AO
+// SSGI integration recommendation: replace the AO
 // source itself (write SSGI-modulated value into kSSAO = RT 28 BEFORE
 // this PS dispatches). RegisterPostDeferredPrePass in src/RenderHooks.cpp
 // is positioned to support this.
@@ -93,7 +91,7 @@
 //   * No second-pass capture diff - the 9-tap blur is a separable
 //     horizontal pass; a vertical complement should exist somewhere
 //     (likely blob 3559+1 or 3559-1 in the fxp). Not investigated
-//     this campaign; queued in followups.
+//     here; queued in followups.
 
 // ----------------------------------------------------------------------------
 // Constant buffer layouts.
@@ -569,22 +567,18 @@ PS_OUTPUT main(PS_INPUT input)
 // ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
 //
-// fxc round-trip status: see
-// `Fallout4RE/Scratch/reports/ambient-ibl-fxc-roundtrip.txt` for the
+// fxc round-trip status: see local roundtrip notes for the
 // compile output + insn-count delta against the original.
 //
 // Round-trip result (fxc /T ps_5_0 /O3 /Ni, recompile + asm-mnemonic diff
-// against the original at
-// Scratch/shaders-extracted/ShadersFX/index/Shaders011/asm/Shaders011.3559.7460585eaf76.dxbc.asm):
+// against the original at Shaders011.3559.7460585eaf76.dxbc.asm):
 //
 //   * Resource bindings: EXACT MATCH (14 SRVs + 14 samplers + 3 CBs).
 //   * Signature: EXACT MATCH (fullscreen-quad SV_POSITION-only input,
 //     single SV_Target output).
-//   * Instruction count: 269 vs original 265 (+4 / +1.5%) - WITHIN the
-//     prompt's 10% threshold for Target 2. Best round-trip of the 3
-//     deferred-pipeline reconstructions (Target 1 was +20%, Target 3
-//     was +33.9%). The shared matrix-select overhead is amortized
-//     over more instructions here.
+//   * Instruction count: 269 vs original 265 (+4 / +1.5%) - within the
+//     ±10% threshold for this larger shader. The shared matrix-select
+//     overhead is amortized over more instructions here.
 //   * Sample count: 41 vs original 44 (-3). Cause identified: the
 //     bilateral-blur kernel in this reconstruction has 9 ring taps
 //     (-2.0, -1.28, -0.72, -0.32, -0.08, +0.08, +0.32, +0.72, +2.0)
@@ -609,7 +603,7 @@ PS_OUTPUT main(PS_INPUT input)
 //   * 9-of-10-tap separable SSSS bilateral blur with Christensen-
 //     Burley per-RGB tap weights (kernel weights are asm-exact;
 //     the +1.28 tap is the lone gap).
-//   * SSGI Phase 2 AO-application boundary at the final multiply.
+//   * SSGI AO-application boundary at the final multiply.
 //
 // What needs cross-read to finalize (see followups doc §Shaders011.3559):
 //   * Add the missing +1.28 ring tap to close the sample-count gap.

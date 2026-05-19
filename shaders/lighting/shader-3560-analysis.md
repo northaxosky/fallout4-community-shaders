@@ -1,4 +1,4 @@
-# Ambient/IBL pixel shader analysis — `Shaders011.3560`
+# Ambient/IBL pixel shader analysis - `Shaders011.3560`
 
 Status: **analysis complete, HLSL reconstruction WIP**. The full HLSL has
 not been written; see "Reconstruction gap" below.
@@ -6,17 +6,17 @@ not been written; see "Reconstruction gap" below.
 This document captures the structural reverse-engineering of the FO4
 ambient/IBL deferred pixel shader (DXBC blob 3560 in
 `Fallout4 - Shaders.ba2/ShadersFX/Shaders011.fxp`), focused on the
-question that gates SSGI Phase 2: **how does the engine apply kSSAO to
+question that gates SSGI indirect-lighting integration: **how does the engine apply kSSAO to
 the ambient term?**
 
-* Source ASM: `Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/Shaders011/asm/Shaders011.3560.2b6e36c08aca.dxbc.asm`
+* Source ASM: `Shaders011.3560.2b6e36c08aca.dxbc.asm`
 * Stage: `ps_5_0`
 * Instruction count: 321 numbered instructions
 * Output: 1 SV_Target (RGBA float)
 * Dispatch site: inside `DrawWorld::DeferredLightsImpl`
   (REL::ID `{1108521, 2318312, 2318312}`)
 
-## SSGI Phase 2 answer (high confidence)
+## How AO is applied (SSGI integration boundary)
 
 The engine applies kSSAO to the ambient term via **one multiply** on the
 combined ambient+IBL contribution, after the cubemap and bilateral-blur
@@ -45,16 +45,16 @@ So the AO multiply hits the ambient diffuse + IBL specular together but
 per-light pixel shaders that also live inside `DeferredLightsImpl` and
 write to kDiffuseBuffer / kSpecularBuffer additively.
 
-The implication for SSGI Phase 2 in the sibling repo: instead of
+The implication for SSGI indirect-lighting integration in this repo: instead of
 post-modulating kDiffuseBuffer (which currently darkens direct light
 along with ambient), the right integration boundary is to either:
 
 1. **Pre-write the ambient buffer** that this shader samples at `t5` /
    `t11` so AO modulation is naturally inherited by the multiply at line
-   264 — but those buffers are not in the public `cs::engine::RenderTarget`
+   264 - but those buffers are not in the public `cs::engine::RenderTarget`
    enum so they are likely engine-internal scratch RTs.
 2. **Replace the AO source itself** by writing an SSGI-modulated value
-   into kSSAO=28 before this pass dispatches — the shader applies AO
+   into kSSAO=28 before this pass dispatches - the shader applies AO
    only at line 264, so any SSAO value we put in kSSAO will only affect
    the ambient/IBL result, not direct light.
 
@@ -81,7 +81,7 @@ Option 2 is the cleanest and matches what `RegisterPostDeferredPrePass`
 | t15 | depth source for bilateral weight | medium | sampled at every bilateral tap; difference vs `r0.w` (a depth value) is the depth-bilateral weight |
 
 The two slots not declared (t0 and t13) are likely common samplers used
-by other techniques in the same .fxp — Bethesda assigns slot numbers
+by other techniques in the same .fxp - Bethesda assigns slot numbers
 globally per shader-pack, so individual shaders see gaps.
 
 ## Constant-buffer map
@@ -129,7 +129,7 @@ globally per shader-pack, so individual shaders see gaps.
 | 309-316| Final output: blend AO-modulated ambient with fog via `o0 = fog_opacity * fog_blend + AO * combined_ambient`; write 1.0 to alpha. |
 | 317-319| Else branch: write 0 (pixel discarded by material mask). |
 
-## kSSAO write timeline (Phase B finding — SSGI integration boundary)
+## kSSAO write timeline
 
 `DrawWorld::Render_PreUI` calls these in order (call-site offsets in
 the AE binary; identical relative ordering in OG and NG):
@@ -146,7 +146,7 @@ the AE binary; identical relative ordering in OG and NG):
 **`ImageSpaceEffectScalableAmbientObscurance::Render` is never called
 from a static call site:** the only callers in the cache are the
 script-API `ToggleSAO`, the constructor, and the destructor. The actual
-per-frame dispatch is virtual — the SAO effect's vtable slot is
+per-frame dispatch is virtual - the SAO effect's vtable slot is
 invoked through `ImageSpaceEffect`'s base-class dispatcher inside
 `DrawWorld::ImagespaceSAO`. The static-analysis path therefore stops at
 `ImagespaceSAO`; everything below that is virtual dispatch and would
@@ -154,19 +154,19 @@ need RenderDoc capture or per-subclass disassembly to follow further.
 
 That said, the **SSGI integration boundary is fully determined** by the
 two static anchors above: kSSAO is written by `ImagespaceSAO` and read
-by `DeferredLightsImpl`. SSGI Phase 2 should therefore inject between
+by `DeferredLightsImpl`. SSGI integration should therefore inject between
 those two anchors. Two viable hook strategies:
 
-1. **`RegisterPostImagespaceSAO` (new hook)** — fires immediately after
+1. **`RegisterPostImagespaceSAO` (new hook)** - fires immediately after
    the SAO dispatch returns. **Risk:** `sub_142206900` (between
    ImagespaceSAO and DeferredLightsImpl) issues additional
    `ImageSpaceEffect` passes that may further mutate kSSAO. If any of
    those passes touch kSSAO, our SSGI write would be clobbered before
    the ambient PS reads it.
-2. **`RegisterPreDeferredLightsImpl` (new hook)** — fires immediately
+2. **`RegisterPreDeferredLightsImpl` (new hook)** - fires immediately
    before the deferred lighting dispatch. **Lower risk:** kSSAO is in
    its final pre-read state. This is the safer choice and matches the
-   single-multiply-on-ambient pattern we documented at ASM line 264.
+   single-multiply-on-ambient pattern documented at ASM line 264.
 
 REL::IDs for the new hooks (confirmed via cross-runtime verification):
 
@@ -180,7 +180,7 @@ with the AE function (`0408326c14110ba74878f9346b35141b49076c61e1a85d14414272b20
 and by identical Render_PreUI call-site offset (+0x036b) across NG and
 AE. NG and AE share AL id 2318306; OG has AL id 39691.
 
-## SRV slot mapping — unresolvable from static analysis
+## SRV slot mapping - unresolvable from static analysis
 
 The remaining unmapped SRV slots (t4, t6, t10, t12, t14, t15) **cannot
 be recovered from static analysis of `DeferredLightsImpl` alone.** The
@@ -193,7 +193,7 @@ present in `ghidra_function_calls`.
 
 `DeferredLightsImpl` itself contains 11 `BSShaderManager::GetShader`
 calls and 19 `BSBatchRenderer::RenderPassImmediately` calls (one
-sequence per technique inside the deferred-light sweep — pre-pass,
+sequence per technique inside the deferred-light sweep - pre-pass,
 ambient, sun, point, spot, etc.). Each `RenderPassImmediately` invokes
 the bound shader's virtual setup methods, which is where the
 `SetTextureRenderTarget` / `SetTextureXxx` calls binding the 14 SRVs
@@ -201,7 +201,7 @@ take place.
 
 **To close the t4/t6/t10/t12/t14/t15 gap, one of:**
 
-1. **RenderDoc capture** (the human is doing this in parallel) — the
+1. **RenderDoc capture** (the human is doing this in parallel) - the
    captured pixel-shader pipeline state will list the bound SRV at
    each slot directly, so this is the canonical answer source.
 2. **Per-shader manual disassembly** of the `BSShader` subclass that
@@ -213,10 +213,10 @@ take place.
 Path #1 is strictly simpler and is the canonical Bethesda-RE workflow
 for this question. The static-call-graph path stops here.
 
-## CB12 unmapped indices — same constraint
+## CB12 unmapped indices - same constraint
 
 CB12 indices [30..46] would be filled by the dispatch site's cbuffer
-update — typically a `Buffer::Update` call inside the `BSShader`
+update - typically a `Buffer::Update` call inside the `BSShader`
 subclass's `SetupGeometry`. As above, the static call graph cannot
 follow virtual dispatch. The tight path uses RenderDoc capture's
 "Constants" view on the captured pixel shader stage, which dumps the
@@ -224,10 +224,10 @@ CB12 contents at the moment of dispatch.
 
 The math-shape-only inferences in the CB12 map above (fog near/far
 colors, distance fade params) should be treated as
-`// TODO: identify (math-shape inference)` — they are consistent with
+`// TODO: identify (math-shape inference)` - they are consistent with
 the disassembly but are not corroborated by C++ side struct knowledge.
 
-## Phase C: RenderDoc capture confirms full SRV map
+## RenderDoc capture: full SRV map
 
 A live D3D11 capture (`FO4_frame5407.rdc`, 2.6 GB) was analysed via
 RenderDoc's Python API. The ambient/IBL dispatch was located at
@@ -249,9 +249,9 @@ the same binding contract.
 | t3  | R8G8B8A8_UNORM         | RT 256           | gbuffer aux (likely shading-data packed buffer) | medium (.x = roughness scale at L46, .z (.w) = mat-id classifier at L59; format consistent) |
 | t4  | R8G8B8A8_SRGB          | RT 253           | **kGbufferAlbedo** (RT 22) | high (sRGB matches albedo storage; sampled at L62 inside material-5 path for skin colour) |
 | t5  | R11G11B10_FLOAT        | RT 389           | precomputed ambient diffuse buffer A | medium (paired with t11 in ASM L242-244 as `r5 = t5 + t11`; HDR format matches) |
-| t6  | R11G11B10_FLOAT        | RT 392           | gbuffer emissive or skin/SSS scatter accumulator (likely **kGbufferEmissive** RT 23 — but kGbufferEmissive in Engine.h is unannotated for format) | medium (sampled L234 inside material-5 block; HDR consistent with emissive) |
+| t6  | R11G11B10_FLOAT        | RT 392           | gbuffer emissive or skin/SSS scatter accumulator (likely **kGbufferEmissive** RT 23 - but kGbufferEmissive in Engine.h is unannotated for format) | medium (sampled L234 inside material-5 block; HDR consistent with emissive) |
 | t7  | D24_UNORM_S8_UINT      | Depth Target 183 | **main depth (DSV 2 / kMain depth)** | high (depth-classify branch at ASM L3 against `0.01 >= r0.z`; D24S8 matches main DSV) |
-| t8  | B8G8R8A8_SRGB          | TextureCubeArray, 252 slices, 8 mips | **IBL probe cubemap array** | high (texturecubearray at ASM L51; 252 slice count = Bethesda's IBL probe array; not in public RT enum yet — Bethesda-internal, allocated by image-space manager) |
+| t8  | B8G8R8A8_SRGB          | TextureCubeArray, 252 slices, 8 mips | **IBL probe cubemap array** | high (texturecubearray at ASM L51; 252 slice count = Bethesda's IBL probe array; not in public RT enum yet - Bethesda-internal, allocated by image-space manager) |
 | t9  | R8G8B8A8_UNORM         | RT 259           | **kSSAO** (RT 28) | high (single-channel `.x` read at ASM L263 = AO; FO4 packs AO in .x of an R8G8B8A8 RT) |
 | t10 | R11G11B10_FLOAT        | RT 168           | screen-space ambient/SSGI input for the bilateral filter (likely a **previous-frame ambient buffer** or compute-shader output) | medium (sampled at every bilateral tap in ASM L74-225 for material-5 / skin path) |
 | t11 | R11G11B10_FLOAT        | RT 395           | precomputed ambient diffuse buffer B | medium (paired with t5 in ASM L243; HDR) |
@@ -273,12 +273,12 @@ Depth target bound for stencil-test only: D24S8 (Depth Target 183) =
 | CB | Reflection name | Captured byte size | Vec4 count | Notes |
 |---|---|---|---|---|
 | b0  | cbuffer0  | 48 bytes | 3  | matches `dcl_constantbuffer CB0[3]` in ASM |
-| b2  | cbuffer2  | 16 bytes | 1  | smaller than the ASM's `CB2[6]` declaration — only the first vec4 (cb2[0] = screen→UV) is used in this draw permutation; the per-light fields (cb2[1] sun direction, cb2[2] glow params) are part of the per-light path that may be a different draw |
+| b2  | cbuffer2  | 16 bytes | 1  | smaller than the ASM's `CB2[6]` declaration - only the first vec4 (cb2[0] = screen→UV) is used in this draw permutation; the per-light fields (cb2[1] sun direction, cb2[2] glow params) are part of the per-light path that may be a different draw |
 | b12 | cbuffer12 | 496 bytes | 31 | matches `dcl_constantbuffer CB12[31]` for the captured permutation; the asm's larger `CB12[47]` declaration is for permutations that include the full fog/distance block |
 
 The captured CB12 contents (496 bytes) were dumped to
 `Scratch/reports/rdoc-ambient-ibl-eid45345.json` for offline parsing.
-First vec4 (`cb12[0]`) is `(-0.5810, -0.8137, 0.0000114, 0.0)` — values
+First vec4 (`cb12[0]`) is `(-0.5810, -0.8137, 0.0000114, 0.0)` - values
 consistent with a normalized 3D vector + scalar, plausibly the camera
 forward direction. Decoding the rest into named struct fields requires
 the C++ side, but the raw bytes are now available without further GPU
@@ -305,7 +305,7 @@ inspection.
   texture matches the depth pyramid that
   `BSGraphics::RenderTargetManager` allocates as RT 39.
 * **Output o0 = kDiffuseBuffer (RT 58) confirmed.** The single bound
-  RT is R11G11B10_FLOAT — the spec format of kDiffuseBuffer.
+  RT is R11G11B10_FLOAT - the spec format of kDiffuseBuffer.
 
 ### What the RenderDoc capture did NOT settle
 
@@ -318,16 +318,15 @@ inspection.
 * **CB field semantics**: byte-level CB contents are now available in
   the JSON dump, but mapping byte offsets to named struct fields
   requires either reading the C++ `cbPerFrameDeferred` struct
-  definition or decoding by mathematical role-fitting (which the
-  runbook discourages). The values are present; naming is deferred.
+  definition or decoding by mathematical role-fitting (no-speculation
+  rule). The values are present; naming is deferred.
 
 ## Reconstruction gap (updated)
 
 The ambient/IBL HLSL stub `ambient_ibl_pass.hlsl` now retains its
 `#error` guard for one remaining reason: the 177-instruction bilateral
 SSSS-style blur (ASM lines 61-238) requires a multi-iteration
-HLSL → DXC → diff loop to round-trip clean, beyond the runbook's
-single-pass budget.
+HLSL -> DXC -> diff loop that was out of scope for the initial pass.
 
 All other prior gaps are now closed:
 
@@ -336,19 +335,18 @@ All other prior gaps are now closed:
 * CB byte sizes are confirmed; CB byte contents are dumped.
 * SSAO read site is confirmed (t9, single-channel access at ASM L263).
 * AO-application boundary is confirmed (single multiply at ASM L264).
-* SSGI Phase 2 hook target is confirmed (`RegisterPreDeferredLightsImpl`
-  - already implemented by the user in the sibling repo).
+* SSGI integration hook is confirmed (`RegisterPreDeferredLightsImpl`
+  - already implemented in this repo).
 
 
 ## CLOSED 2026-05-19 - Reconstruction shipped via blob 3559
 
 The "Reconstruction gap" called out at the top of this document is
-closed. `ambient_ibl_pass.hlsl` was reconstructed in the 2026-05-19
-reconstruct-deferred-pipeline Target 2 campaign using blob 3559
+closed. `ambient_ibl_pass.hlsl` was reconstructed using blob 3559
 (`7460585eaf76`, the mnemonic-stream-exact-match sibling of 3560
 that matches the captured runtime PS at FO4_frame5407.rdc eid 45345).
 
-The structural analysis in this document (Phase A/B/C from May 7-8)
+The structural analysis in this document (the May 7-8 analysis)
 mapped 3560 specifically (321 insns, 14 SRVs, 1 SV_Target,
 inside DrawWorld::DeferredLightsImpl). 3559 is the slightly-smaller
 variant (263 insns, 44 samples) that captures the exact permutation
@@ -361,14 +359,14 @@ the engine ran in the canonical capture. Both share:
    the deferred composite (blob 3539) + VLS slice scatter (blob 2147).
 
 Round-trip via fxc /T ps_5_0 /O3 /Ni: 269 insns vs 265 original
-(+1.5%, well within the 10% threshold for this larger shader).
+(+1.5%, well within the ±10% threshold for this larger shader).
 Sample count 41 vs 44 (-3, due to a missing +1.28 ring tap in the
 SSSS_BLUR_OFFSETS table - documented in
 docs/lighting-shader-followups.md §Shaders011.3559 for trivial
 follow-up).
 
-This SSGI Phase 2 question is now ANSWERED with shipped HLSL: line
+The integration boundary is now confirmed with shipped HLSL: line
 261-262 in the reconstructed file does the single AO multiply on the
-combined ambient+IBL term. The sibling repo's SSGI feature can plug
-into the kSSAO source per the recommendation in this doc's
-"SSGI Phase 2 answer" section above.
+combined ambient+IBL term. The SSGI feature can plug into the kSSAO
+source per the recommendation in this doc's "How AO is applied" section
+above.

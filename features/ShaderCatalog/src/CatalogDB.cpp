@@ -22,9 +22,8 @@ namespace cs::features::catalog
 {
 	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
 
-	// Schema source: Fallout4RE/Workspace/schemas/runtime/shader-catalog.sqlite.schema.sql
-	// Embedded verbatim. If this drifts from the canonical SQL file, bump corpus_meta.schema_version
-	// and update the canonical schema; the importer enforces version match.
+	// Schema source: in-repo schema definition below. If this changes,
+	// bump corpus_meta.schema_version; the importer enforces version match.
 	static const char* kSchemaSql = R"sql(
 PRAGMA foreign_keys = ON;
 

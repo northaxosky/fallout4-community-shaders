@@ -37,7 +37,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
 {
     if (dtid.x >= HalfDimensions.x || dtid.y >= HalfDimensions.y) return;
 
-    // Tile early-out: if max |CoC| in tile is < 1px, the disc collapses to a point — passthrough.
+    // Tile early-out: if max |CoC| in tile is < 1px, the disc collapses to a point - passthrough.
     const int2 tileCoord = int2(dtid.xy) / 16;
     const float2 tileMM = TileIn.Load(int3(tileCoord, 0));
     const float tileMaxAbs = max(abs(tileMM.x), abs(tileMM.y));

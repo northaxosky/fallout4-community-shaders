@@ -3,23 +3,20 @@
 // Reconstruction of FO4 corpus blob Shaders011.fxp #2147.
 //
 // Status: REFERENCE - asm-level transcription, role CONFIRMED.
-//   ROLE CONFIRMED 2026-05-19 (see
-//   Fallout4RE/Workspace/docs/shader-2147-role-analysis.md): this is
+//   ROLE CONFIRMED 2026-05-19: this is
 //   a per-slice scatter pixel shader in FO4's Volumetric Light
 //   Scattering (VLS) subsystem - NOT a directional sun-shadow PS as
-//   the original reconstruction prompt mislabeled. Filename updated
+//   the initial classifier output suggested. Filename updated
 //   from `directional_sun_light.hlsl` to `vls_slice_scatter.hlsl`
-//   in the same campaign.
+//   at the same time.
 //
-// Canonical mapping (from Fallout4RE workspace commit 4ccba1b,
-// d3dcompile-static-analysis byte-diff campaign):
+// Canonical mapping:
 //   * Corpus blob:    Shaders011.fxp blob 2147
 //   * Corpus sha1:    8fb709c2fdf0...
 //   * Runtime sha1:   46b911cb8053bbe1fc529ff4e32c78293c902cb7  (eid 45401
 //     in FO4_frame5407.rdc; 22 dispatches at eids 45401-45623) - mnemonic
 //     stream IDENTICAL to corpus blob (62 insns / 1 sample exact match).
-//   * Source asm:     Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/
-//                     Shaders011/asm/Shaders011.2147.8fb709c2fdf0.dxbc.asm
+//   * Source asm:     Shaders011.2147.8fb709c2fdf0.dxbc.asm
 //   * Shape:          ps_5_0, 62 instructions, 1 sample, 1 SRV (t7), 4 CBs
 //                     (CB0[1], CB1[14], CB2[5], CB12[28]), 1 sampler s7
 //                     (mode_default - NOT comparison; this is NOT a PCF
@@ -27,9 +24,9 @@
 //
 // Subsystem context (confirmed via Fallout4 PDB symbol-table walk):
 //   * BSShader subclass: BSImagespaceShaderVLSSliceScatterInterp
-//     (high-confidence best guess from a 6-class VLS family; locking
+//     (high-confidence candidate from a 6-class VLS family; locking
 //     to certainty requires per-subclass SetupTechnique cross-read or
-//     runtime catalog WU3 enrichment)
+//     per-BSShader-subclass catalog enrichment)
 //     - OG  RVA 0x028050A0   AE RVA 0x021A18B0   (NG: stripped)
 //   * Effect class:      ImageSpaceEffectVLSLight (per-light variant)
 //     - OG  RVA 0x028D7DF0   AE RVA 0x022562D0   (NG: stripped)
@@ -61,7 +58,7 @@
 //      lerp for atmospheric scattering.
 //   8. Output alpha = fade * sunDot + cb1[12].z (additive bias).
 //
-// What this shader is NOT (clarified from the role-confirmation campaign):
+// What this shader is NOT:
 //   * NOT a directional sun-shadow PS (no SampleCmp, no PCF sampler,
 //     no shadow-map filtering math).
 //   * NOT a deferred-light BRDF (no normal-N.L pattern, no albedo
@@ -79,16 +76,16 @@
 //     used are known. IDA Hex-Rays on ImageSpaceEffectVLSLight::Setup
 //     (AE RVA 0x02255F90, OG RVA also in PDB) would lock semantics.
 //   * The exact BSShader subclass (one of 6 VLS-family candidates) is
-//     high-confidence-best-guess `BSImagespaceShaderVLSSliceScatterInterp`
-//     - confirming to 100% certainty requires per-subclass
-//     SetupTechnique cross-read OR runtime catalog WU3 enrichment.
+//     the leading candidate: `BSImagespaceShaderVLSSliceScatterInterp`.
+//     Confirming to 100% certainty requires per-subclass
+//     SetupTechnique cross-read OR per-BSShader-subclass catalog enrichment.
 //   * The single SRV t7 is sampled .y of texture - same channel access
 //     pattern as in the composite (blob 3539) where t7 was identified as
 //     the linear-depth gbuffer. Almost certainly the same gbuffer here.
 
 // ----------------------------------------------------------------------------
 // Constant buffer layouts. Index-only references; field-level semantics are
-// `// TODO: identify` markers per the runbook "no speculation" rule.
+// `// TODO: identify` markers (no-speculation rule).
 // ----------------------------------------------------------------------------
 
 cbuffer PerCall_CB0 : register(b0)
@@ -323,10 +320,9 @@ PS_OUTPUT main(PS_INPUT input)
 //
 // This file was authored as a one-pass asm-to-HLSL transcription of corpus
 // blob 2147 (sha1 8fb709c2fdf0...) against the disassembly at
-// `Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/Shaders011/asm/Shaders011.2147.8fb709c2fdf0.dxbc.asm`.
+// Shaders011.2147.8fb709c2fdf0.dxbc.asm.
 //
-// dxc round-trip status: see
-// `Fallout4RE/Scratch/reports/sun-shadow-roundtrip.txt` for the
+// dxc round-trip status: see local roundtrip notes for the
 // fxc compile output + insn-count delta against the original.
 //
 // What is faithfully reconstructed:
@@ -340,7 +336,7 @@ PS_OUTPUT main(PS_INPUT input)
 //     fade, one direct smoothstep for color lerp).
 //
 // What needs cross-read to finalize (see followups doc §Shaders011.2147):
-//   * The ROLE of this shader. The "sun-shadow" label from the prompt does
+//   * The ROLE of this shader. The original "sun-shadow" label does
 //     not match the asm. Best-guess role from math: god-rays / volumetric
 //     scattering / atmospheric sky-color sampling. IDA Hex-Rays on the
 //     dispatch site C++ should resolve which BSShader subclass owns it.

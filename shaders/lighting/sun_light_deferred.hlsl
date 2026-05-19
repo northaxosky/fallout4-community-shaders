@@ -4,18 +4,13 @@
 // sun-light deferred PS for FO4's deferred-lighting pipeline.
 //
 // Status: REFERENCE - asm-level transcription, structural fidelity high.
-//   This is the fourth and final reconstruction in the deferred-pipeline
-//   demonstrative-artifact arc (composite + ambient/IBL + VLS slice +
-//   sun-light = the complete deferred-lighting reference set).
 //
-// Canonical mapping (from Fallout4RE find-actual-sun-light-ps campaign,
-// workspace commit 6cfadc3 + docs/sun-light-ps-analysis.md):
+// Canonical mapping:
 //   * Corpus blob:    Shaders011.fxp blob 3295
-//   * Corpus sha1:    50e2618e8d1a... (best of a 5-peer cluster)
+//   * Corpus sha1:    50e2618e8d1a... (strongest match in a 5-peer cluster)
 //   * Runtime sha1:   8c615844e6443... (eid 44513 in FO4_frame5407.rdc;
 //                     mnemonic-near-match within +2 insns of corpus blob)
-//   * Source asm:     Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/
-//                     Shaders011/asm/Shaders011.3295.50e2618e8d1a.dxbc.asm
+//   * Source asm:     Shaders011.3295.50e2618e8d1a.dxbc.asm
 //   * Shape:          ps_5_0, 272 instructions, 8 samples (including 4
 //                     SampleCmp inside two 8-iteration loops = 32 PCF taps
 //                     across both cascades), 5 SRVs (t0/t1/t2/t3 texture2d
@@ -181,8 +176,7 @@ cbuffer PerCall_CB2 : register(b2)
 // ----------------------------------------------------------------------------
 // Resource bindings.
 // Slot indices match the corpus blob 3295 declarations exactly.
-// Semantic names from the rdoc capture eid 44513 SRV-format diagnosis
-// (see Fallout4RE/Workspace/docs/sun-light-ps-analysis.md).
+// Semantic names from the rdoc capture eid 44513 SRV-format diagnosis.
 // ----------------------------------------------------------------------------
 
 // t0: kGbufferAlbedo equivalent (RT 250 R8G8B8A8_SRGB at runtime).
@@ -557,8 +551,7 @@ PS_OUTPUT main(PS_INPUT input)
 // ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
 //
-// fxc round-trip status: see
-// `Fallout4RE/Scratch/reports/sun-light-fxc-roundtrip.txt` for the
+// fxc round-trip status: see local roundtrip notes for the
 // compile output + insn-count delta against the original.
 //
 // What is faithfully reconstructed (structurally):
@@ -584,8 +577,8 @@ PS_OUTPUT main(PS_INPUT input)
 //     readability; the runtime version uses a more granular sequence
 //     of MAD operations that may emit different bytecode after fxc.
 //   * Round-trip target: <15% insn delta. The material BRDF condensing
-//     + ICB size delta will likely push this above the prompt's 10%
-//     threshold but stays within runbook §230-232 honest-WIP territory.
+//     + ICB size delta will likely push this above ±10% but stays within
+//     documented-WIP territory.
 //
 // What needs cross-read to finalize (see followups doc §Shaders011.3295):
 //   * CB12[28..30] field semantics. The skin BRDF uses cb12[28..29] for

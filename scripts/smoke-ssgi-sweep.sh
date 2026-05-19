@@ -1,5 +1,5 @@
 #!/bin/bash
-# A/B/C smoke comparison for SSGI Phase 1: apply off, apply on (defaults), apply on (extreme).
+# A/B/C smoke comparison for SSGI: apply off, apply on (defaults), apply on (extreme).
 # Confirms (a) AO attenuates kDiffuseBuffer when apply is on, (b) extreme settings darken more than defaults.
 set -e
 

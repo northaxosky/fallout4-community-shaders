@@ -1,27 +1,48 @@
 # ShaderCatalog feature
 
-Canonical spec lives in the Fallout4RE repo and is authoritative:
+Observes shader creation on `ID3D11Device` and records each unique shader to a per-session SQLite catalog. Read-only with respect to the engine; the hot path is `CreateXxxShader -> SHA1 -> SQLite upsert -> chain to original vtable entry`.
 
-- `Fallout4RE/Workspace/docs/shader-catalog-plugin-spec.md` (lifecycle, hot-path invariant, INI, ImGui surface).
-- `Fallout4RE/Workspace/docs/d3d11-device-vtable-map.md` (hook surface; slots 12/15/16/17/18 on `ID3D11Device`).
-- `Fallout4RE/Workspace/schemas/runtime/shader-catalog.sqlite.schema.sql` (DB schema; embedded verbatim in `CatalogDB.cpp`).
+## Hook surface
 
-## Implemented here
+Vtable detours on `ID3D11Device`:
 
-- Phase 1: `Create{Vertex,Pixel,Geometry,Hull,Domain,Compute}Shader` vtable detours (slots 12/13/15/16/17/18) + SHA1 + SQLite catalog + ImGui menu surface.
+- Slot 12: `CreateVertexShader`
+- Slot 13: `CreatePixelShader`
+- Slot 15: `CreateGeometryShader`
+- Slot 16: `CreateHullShader`
+- Slot 17: `CreateDomainShader`
+- Slot 18: `CreateComputeShader`
 
-## Not implemented (deferred to later phases or out of scope entirely)
+The detour wraps the call, SHA1s the bytecode, then chains to the original entry. Hooks are installed once at device creation and never removed.
 
-- ~~Phase 2 (`D3DCompile` HLSL-source capture)~~ - **dropped 2026-05-18**. The Fallout4RE-side `docs/d3dcompile-static-analysis.md` proved `D3DCompile` is never called by FO4 (zero imports, zero strings across OG/NG/AE) AND the previously-missing deferred PSes are in the on-disk corpus under different sha1 (DXBC re-encoded by D3D loader). The compile-hook surface is removed; the `compile_events` table stays in the schema for forward-compat with a reframed Phase 2.
-- **Phase 2 (reframe)**: `corpus_match_sha1` column on `shader_catalog`, populated by writer-thread mnemonic-stream match against `Fallout4RE/.cache/shader-corpus.sqlite`. Schema v2 territory; needs a C++ DXBC mnemonic disassembler. Separate prompt.
-- Phase 3 (`BSShader` subclass `LoadShaders` enrichment for `bsshader_subclass` / `bsshader_technique_bits` columns).
-- Phase 4 (`import-runtime-catalog.py` workspace merger; lives Fallout4RE-side).
-- `cs::ShaderCache` substitution path (separate prompt; catalog is the lookup table, not the substitution layer).
+## SHA1 algorithm
+
+Standard SHA1 over the DXBC blob passed to `CreateXxxShader` (the `pShaderBytecode` / `BytecodeLength` pair, byte-for-byte). The hex digest is the catalog key.
+
+## Storage
+
+SQLite at `Data/F4SE/Plugins/FO4CommunityShaders/shader-catalog.sqlite`. Schema is embedded verbatim in `CatalogDB.cpp`. WAL journaling. Key tables:
+
+- `shader_catalog` (sha1, stage, size_bytes, source_module, creation_thread_id, engine_runtime, ...)
+- `sessions` (per-process-launch row; `ended_at` is updated on clean shutdown, left NULL on crash)
+- `corpus_meta` (`schema_version`, etc.)
+
+## Implemented
+
+`Create{Vertex,Pixel,Geometry,Hull,Domain,Compute}Shader` vtable detours + SHA1 + SQLite catalog + ImGui menu surface.
+
+## Not implemented
+
+- D3DCompile hook removed; the engine does not call D3DCompile under any path (confirmed via import-table audit across OG/NG/AE: zero `d3dcompiler*` imports, zero d3dcompile-family strings). The `compile_events` table stays in the schema for forward-compat.
+- Future: corpus-match enrichment. A `corpus_match_sha1` column on `shader_catalog`, populated by a writer-thread mnemonic-stream match against a shipped corpus DB. Schema v2 territory; needs a C++ DXBC mnemonic disassembler.
+- Future: per-`BSShader` subclass enrichment. Fill `bsshader_subclass` / `bsshader_technique_bits` columns by hooking each subclass's `LoadShaders`.
+- Future: catalog import. Workspace-side merger to fold per-session catalogs into a long-lived analysis DB.
+- `cs::ShaderCache` substitution path. The catalog is the lookup table, not the substitution layer.
 
 ## Smoke-harness gates (run before declaring the feature shippable)
 
 1. Fresh install + `bEnabled=true` + game boot: `shader-catalog.sqlite` is created and contains `corpus_meta.schema_version=1`, a `sessions` row, and `PRAGMA journal_mode -> wal`.
 2. After main-menu entry + exit: `shader_catalog` has rows with non-NULL `sha1`, `stage`, `size_bytes`, `source_module`, `creation_thread_id`, `engine_runtime`.
-3. After one in-game scene load: catalog contains at least one PS row (DXBC-parsed shape fields stay NULL in Phase 1; the workspace importer fills them at merge time).
+3. After one in-game scene load: catalog contains at least one PS row (DXBC-parsed shape fields stay NULL until the corpus-match enrichment lands).
 4. Crash test: kill `Fallout4.exe` via Task Manager mid-session; reopen game; previous session has `ended_at IS NULL` and rows survive (WAL replay).
 5. Cross-runtime: smoke gates 1-3 against each of OG/NG/AE binaries.

@@ -1,4 +1,4 @@
-// Shared helpers for SSGI Phase 1 (AO-only). CBs are defined inline per shader.
+// Shared helpers for SSGI (AO-only variant; indirect-lighting not yet implemented).
 
 cbuffer SSGI_CB : register(b0)
 {

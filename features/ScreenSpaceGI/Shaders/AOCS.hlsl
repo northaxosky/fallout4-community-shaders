@@ -1,4 +1,4 @@
-// XeGTAO-derived horizon-search AO. Half-res output. Phase 1: AO only, no IL, no temporal.
+// XeGTAO-derived horizon-search AO. Half-res output. AO-only; no indirect lighting or temporal accumulation.
 // Reference: Intel XeGTAO https://github.com/GameTechDev/XeGTAO (MIT). Algorithm core only.
 
 #include "Common.hlsli"
