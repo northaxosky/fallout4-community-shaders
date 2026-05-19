@@ -413,7 +413,11 @@ identified, CB12 byte content dumped) carries over.
 
 
 
-## find-actual-sun-light-ps (NEW, 2026-05-19)
+## find-actual-sun-light-ps (CLOSED 2026-05-19, Outcome A)
+
+Campaign: Fallout4RE 2026-05-19 find-actual-sun-light-ps. CLOSED with
+Outcome A per the prompt's framework: the actual directional sun-light
+deferred PS was located in the on-disk corpus.
 
 Campaign: 2026-05-19 confirm-2147-role campaign as a follow-up. The
 original `directional_sun_light.hlsl` reconstruction target turned
@@ -588,3 +592,67 @@ the prompt's threshold.
 
 This closes the `shader-3560-analysis.md` "Reconstruction gap"
 called out at the top of that doc: the HLSL is shipped.
+
+
+## Shaders011.3295 / `sun_light_deferred.hlsl` (RECONSTRUCTION QUEUED 2026-05-19)
+
+Campaign queued: Fallout4RE 2026-05-19 find-actual-sun-light-ps located the
+canonical directional sun-light deferred PS as **corpus blob 3295**
+(`50e2618e8d1a`), best peer in a 5-peer cluster of similar-shape
+permutations. Captured at RenderDoc eid 44513 in `FO4_frame5407.rdc`
+(captured sha `8c615844e644`, 274 / 8 vs corpus 272 / 8 - +12 bytes,
+-2 insns, exact sample count). See `Fallout4RE/Workspace/docs/sun-light-ps-analysis.md`
+for full evidence chain.
+
+### Resolved this campaign (find-actual-sun-light-ps)
+
+- Outcome A confirmed: separate PS, in the corpus, dispatched by
+  `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs
+  `{OG=259940, NG=2318296, AE=2318296}`, all confirmed cross-runtime).
+- Host C++ chain identified: `BSDFLightShader` (NOT a separate
+  `BSDFDirectionalLightShader` subclass - the sun light is a TECHNIQUE
+  PERMUTATION of the same class that handles point/spot lights).
+- 5-peer cluster identified (blob 3295 best by all metrics; alternative
+  candidates: 3234, 3250, 3268, 3182).
+- Pre-eid-45345 PS inventory complete: 7 distinct MRT PSes in the deferred-
+  lighting window before ambient/IBL. EID 44513 is the sun-light; EIDs
+  44848-45252 are the cascade-shadow-build chain (46 dispatches building
+  RT 205+215 -> RT 408 which the sun-light PS reads as Texture2DArray).
+
+### Reconstruction (NEW open item - QUEUED)
+
+- [ ] Reconstruction prompt at
+  `Fallout4RE/Scratch/prompts/reconstruct-sun-light-ps.md`. Single
+  target (274 instructions); should ship in 1 session following the
+  same workflow as Targets 1-3.
+
+### Open items (for the reconstruction campaign)
+
+- [ ] **5-peer-cluster disambiguation**: lock the exact corpus blob
+  to 100% certainty. Candidates: blob 3295 (best by size delta +12),
+  3234 (+44 size, -4 insns), 3250 (+264, -6), 3268 (+448, -10),
+  3182 (+204, +8 insns, 10 samples - outlier). Locks via runtime
+  catalog WU3 enrichment OR `BSDFLightShaderMacros::GetPixelShaderID`
+  IDA cross-read on the specific technique-bit combination dispatched
+  by `AccumulateSunShadowLightImpl`.
+- [ ] **CB layout cross-read for the 2 CBs**. `BSDFLightShaderPixelConstants`
+  + `BSDFLightShaderVertexConstants` exist as named PDB types (AE RVAs
+  `0x02269B80` + `0x02269A60`); their field offsets should be
+  fully cross-readable.
+- [ ] **Shadow cascade Texture2DArray binding**: RT 408 (R16_UNORM)
+  is the cascade source. The 46 cascade-build dispatches at eids
+  44848-45252 build this atlas; their PS shapes (eids 44878, 45107
+  with 20+26 draws) are themselves interesting investigation targets.
+- [ ] **Two additional post-sun MRT PSes** at eids 44533 (2252b) and
+  44553 (6380b) writing to the same RT 389+392 HDR pair. Inferred
+  roles: `post-sun small composite` (sky/water?) + `terrain or
+  distant geometry deferred contributor`. Possibly investigation
+  campaigns of their own. See `sun-light-ps-analysis.md` "Full pre-
+  eid-45345 PS inventory" for the full table.
+
+### Status
+
+When `sun_light_deferred.hlsl` ships, the deferred-pipeline reference
+HLSL set will be at **4 files** (composite, ambient/IBL, sun-light,
+VLS scatter), covering the major paths in FO4's deferred lighting -
+the complete demonstrative artifact the strategic goal called for.
