@@ -16,356 +16,136 @@ namespace cs::features
 
 const uint renderTargetsPatch[] = { 20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16 };
 
-/**
- * @class Upscaling
- * @brief Main upscaling manager that handles FSR3 and DLSS upscaling for Fallout 4
- *
- * This class manages all aspects of upscaling including:
- * - Dynamic render target scaling
- * - Sampler state mipmap bias adjustment
- * - Depth buffer management
- * - Integration with FSR3 and DLSS backends
- */
+// Main upscaling manager: FSR3 + DLSS dispatch, dynamic RT scaling, mip-bias, depth swap.
 class Upscaling : public cs::Feature, public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 {
 public:
-	// ========================================
-	// Singleton & Initialization
-	// ========================================
-
-	/**
-	 * @brief Get the singleton instance
-	 * @return Pointer to the global Upscaling instance
-	 */
 	static Upscaling* GetSingleton()
 	{
 		static Upscaling singleton;
 		return &singleton;
 	}
 
-		std::string_view GetName() const override { return "Upscaling"; }
-		void Load() override;
-		void OnDataLoaded() override;
-		void DrawSettings() override;
-		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
+	std::string_view GetName() const override { return "Upscaling"; }
+	void Load() override;
+	void OnDataLoaded() override;
+	void DrawSettings() override;
+	void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 
-	/**
-	 * @brief Install all game engine hooks required for upscaling
-	 *
-	 * Patches render pipeline, TAA shaders, dynamic resolution, and other
-	 * game systems to integrate upscaling functionality
-	 */
+	// Patches render pipeline, TAA shaders, dynamic resolution, and other game systems.
 	static void InstallHooks();
 
-	// ========================================
-	// Settings & Configuration
-	// ========================================
-
-	/**
-	 * @enum UpscaleMethod
-	 * @brief Available upscaling methods
-	 */
 	enum class UpscaleMethod
 	{
-		kDisabled,  ///< No upscaling, native TAA
-		kFSR,       ///< AMD FidelityFX Super Resolution 3
-		kDLSS       ///< NVIDIA Deep Learning Super Sampling
+		kDisabled,  // No upscaling, native TAA
+		kFSR,       // AMD FidelityFX Super Resolution 3
+		kDLSS       // NVIDIA Deep Learning Super Sampling
 	};
 
-	/**
-	 * @struct Settings
-	 * @brief User-configurable upscaling settings
-	 */
 	struct Settings
 	{
-		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS; ///< Preferred upscaling method
-		uint qualityMode = 1;									   ///< Quality mode: 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance
+		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS;
+		// 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
+		uint qualityMode = 1;
 	};
 
 	Settings settings;
 
-	/**
-	 * @brief Load settings from configuration file
-	 *
-	 * Reads Data/F4SE/Plugins/FO4CommunityShaders/Upscaling.ini and updates the settings struct
-	 */
+	// Reads Data/F4SE/Plugins/FO4CommunityShaders/Upscaling.ini.
 	void LoadSettings();
 	void SaveSettings();
 
-	/**
-	 * @brief Determine which upscaling method should be used
-	 * @param a_checkMenu If true, disable upscaling when certain menus are open
-	 * @return The active upscaling method
-	 *
-	 * Falls back to FSR if DLSS is not available but preferred
-	 */
+	// Returns active method; falls back to FSR if DLSS unavailable but preferred.
 	UpscaleMethod GetUpscaleMethod(bool a_checkMenu);
 
-	/**
-	 * @brief Get quality mode, clamped for ENB compatibility
-	 * @return 0 (Native AA) when ENB is loaded, otherwise user's setting
-	 *
-	 * Sub-native quality modes cause viewport compounding through ENB's
-	 * D3D11 wrapper pipeline. Native AA (DLAA/FSR) works at 1:1 resolution.
-	 */
+	// 0 (Native AA) under ENB to avoid viewport compounding through ENB's D3D11 wrapper.
 	uint GetEffectiveQualityMode();
 
-	/**
-	 * @brief Process menu open/close events
-	 * @param a_event The menu event
-	 * @param a_source Event source (unused)
-	 * @return Event control flag
-	 *
-	 * Reloads settings when pause menu is closed
-	 */
+	// Reloads settings when pause menu is closed.
 	RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent& a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*);
 
-	// ========================================
-	// Main Upscaling Operations
-	// ========================================
-
-	/**
-	 * @brief Update camera jitter for temporal anti-aliasing
-	 *
-	 * Calculates per-frame jitter offsets, updates sampler states, render targets,
-	 * and manages resource creation/destruction based on active upscaling method
-	 */
+	// Per-frame jitter, sampler/RT updates, resource lifecycle for the active method.
 	void UpdateUpscaling();
 
-	/**
-	 * @brief Perform upscaling operation
-	 *
-	 * Executes the active upscaling method (FSR3 or DLSS) to upscale the
-	 * rendered image from render resolution to display resolution
-	 */
+	// Dispatches the active upscaler (FSR3 or DLSS) render->display.
 	void Upscale();
 
-	/**
-	 * @brief Check and manage upscaling resources
-	 *
-	 * Creates or destroys upscaling resources when switching between
-	 * different upscaling methods
-	 */
+	// Creates/destroys upscaler resources when the active method changes.
 	void CheckResources();
 
-	float2 jitter = { 0, 0 };  ///< Current frame's camera jitter offset
+	float2 jitter = { 0, 0 };
 	UpscaleMethod upscaleMethodNoMenu = UpscaleMethod::kDisabled;
 	UpscaleMethod upscaleMethod = UpscaleMethod::kDisabled;
 
-	// ========================================
-	// Render Target Management
-	// ========================================
-
-	/**
-	 * @brief Update all render targets for new resolution scaling
-	 * @param a_currentWidthRatio Width scale factor (e.g., 0.67 for balanced mode)
-	 * @param a_currentHeightRatio Height scale factor
-	 *
-	 * Recreates proxy render targets when resolution changes
-	 */
+	// Render target management.
 	void UpdateRenderTargets(float a_currentWidthRatio, float a_currentHeightRatio);
-
-	/**
-	 * @brief Override game render targets with scaled proxy targets
-	 * @param a_indicesToCopy Optional array of render target indices that require expensive copy. Empty = copy all.
-	 *
-	 * Temporarily replaces game render targets with lower resolution proxies
-	 * during main rendering pass
-	 */
+	// a_indicesToCopy: RT indices that require an expensive copy. Empty = copy all.
 	void OverrideRenderTargets(const std::vector<int>& a_indicesToCopy = {});
-
-	/**
-	 * @brief Restore original render targets
-	 * @param a_indicesToCopy Optional array of render target indices that require expensive copy. Empty = copy all.
-	 *
-	 * Restores full resolution render targets after scaled rendering is complete
-	 */
 	void ResetRenderTargets(const std::vector<int>& a_indicesToCopy = {});
-
-	/**
-	 * @brief Update a single render target
-	 * @param index Render target index
-	 * @param a_currentWidthRatio Width scale factor
-	 * @param a_currentHeightRatio Height scale factor
-	 */
 	void UpdateRenderTarget(int index, float a_currentWidthRatio, float a_currentHeightRatio);
-
-	/**
-	 * @brief Override a single render target
-	 * @param index Render target index
-	 * @param a_doCopy If true, performs expensive copy of texture content. If false, only swaps pointers.
-	 */
+	// a_doCopy: true performs full texture copy; false only swaps pointers.
 	void OverrideRenderTarget(int index, bool a_doCopy = true);
-
-	/**
-	 * @brief Reset a single render target
-	 * @param index Render target index
-	 * @param a_doCopy If true, performs expensive copy of texture content. If false, only swaps pointers.
-	 */
 	void ResetRenderTarget(int index, bool a_doCopy = true);
 
-	RE::BSGraphics::RenderTarget originalRenderTargets[101];      ///< Original full-resolution render targets
-	RE::BSGraphics::RenderTarget proxyRenderTargets[101];         ///< Scaled proxy render targets
-	RE::BSGraphics::RenderTargetProperties originalRenderTargetData[101];  ///< Original RT properties
+	RE::BSGraphics::RenderTarget originalRenderTargets[101];
+	RE::BSGraphics::RenderTarget proxyRenderTargets[101];
+	RE::BSGraphics::RenderTargetProperties originalRenderTargetData[101];
 
-	// ========================================
-	// Sampler State Management
-	// ========================================
-
-	/**
-	 * @brief Update sampler states with mipmap LOD bias
-	 * @param a_currentMipBias Mipmap bias to apply (negative = sharper textures)
-	 *
-	 * Creates modified sampler states with adjusted mip bias to compensate
-	 * for lower render resolution
-	 */
+	// Sampler state management: negative LOD bias compensates for lower render resolution.
 	void UpdateSamplerStates(float a_currentMipBias);
-
-	/**
-	 * @brief Override game sampler states with biased versions
-	 *
-	 * Applies sampler states with negative LOD bias during rendering
-	 */
 	void OverrideSamplerStates();
-
-	/**
-	 * @brief Restore original sampler states
-	 */
 	void ResetSamplerStates();
 
-	std::array<ID3D11SamplerState*, 320> originalSamplerStates;  ///< Original game sampler states
-	std::array<ID3D11SamplerState*, 320> biasedSamplerStates;	 ///< Modified sampler states with LOD bias
+	std::array<ID3D11SamplerState*, 320> originalSamplerStates;
+	std::array<ID3D11SamplerState*, 320> biasedSamplerStates;
 
-	// ========================================
-	// Depth Management
-	// ========================================
-
-	/**
-	 * @brief Override depth buffer with upscaled version
-	 * @param a_doCopy If true, performs expensive copy of depth content. If false, only swaps pointers.
-	 *
-	 * Replaces depth buffer SRV with full-resolution depth for correct
-	 * depth testing in post-processing effects
-	 */
+	// Depth: swap in full-res depth SRV for post effects, then restore.
 	void OverrideDepth(bool a_doCopy = true);
-
-	/**
-	 * @brief Restore original depth buffer
-	 */
 	void ResetDepth();
-
-	/**
-	 * @brief Copy and upscale depth buffers
-	 */
 	void CopyDepth();
 
-	ID3D11ShaderResourceView* originalDepthView;	    ///< Original depth buffer SRV
-	std::unique_ptr<upscaling::Texture2D> depthOverrideTexture;    ///< Dynamic resolution depth override texture
+	ID3D11ShaderResourceView* originalDepthView;
+	std::unique_ptr<upscaling::Texture2D> depthOverrideTexture;
 
-	// ========================================
-	// Shader Management
-	// ========================================
-
-	/**
-	 * @brief Patch screen-space reflections shader
-	 *
-	 * Injects custom SSR shader that properly handles scaled render targets
-	 */
+	// Replaces game SSR pixel shader with one that handles scaled render targets.
 	void PatchSSRShader();
 
-	/**
-	 * @brief Get or compile motion vector dilation shader
-	 * @return Compiled compute shader
-	 *
-	 * Dilates motion vectors for better temporal stability in DLSS
-	 */
+	// Compute shaders: dilates motion vectors for DLSS, upscales/copies depth.
 	ID3D11ComputeShader* GetDilateMotionVectorCS();
-
-	/**
-	 * @brief Get or compile depth override shader
-	 * @return Compiled compute shader
-	 *
-	 * Upscales depth buffer from render to display resolution
-	 */
 	ID3D11ComputeShader* GetOverrideLinearDepthCS();
-
-	/**
-	 * @brief Get or compile depth override shader
-	 * @return Compiled compute shader
-	 *
-	 * Copies depth buffer
-	 */
 	ID3D11ComputeShader* GetOverrideDepthCS();
 
-	/**
-	 * @brief Get or compile custom SSR raytracing pixel shader
-	 * @return Compiled pixel shader
-	 */
+	// Custom SSR raytracing pixel shader for scaled render targets.
 	ID3D11PixelShader* GetBSImagespaceShaderSSLRRaytracing();
 
-	/**
-	 * @brief Get constant buffer for upscaling parameters
-	 * @return Pointer to constant buffer
-	 *
-	 * Contains screen size, render size, and camera data
-	 */
+	// Constant buffer holding screen size, render size, and camera data.
 	upscaling::ConstantBuffer* GetUpscalingCB();
 
-	/**
-	 * @brief Update and bind upscaling constant buffer
-	 * @param a_context D3D11 device context
-	 * @param a_screenSize Display resolution
-	 * @param a_renderSize Render resolution
-	 *
-	 * Helper function to fill and bind the upscaling CB to slot 0
-	 * Automatically reads camera parameters from the game engine
-	 */
+	// Fills + binds the upscaling CB to CS slot 0 (camera params pulled from engine).
 	void UpdateAndBindUpscalingCB(ID3D11DeviceContext* a_context, float2 a_screenSize, float2 a_renderSize);
 
-	/**
-	 * @brief Updates game settings
-	 */
 	void UpdateGameSettings();
 
-	// ========================================
-	// Resource Management
-	// ========================================
-
-	/**
-	 * @brief Create upscaling-specific resources
-	 *
-	 * Creates textures needed for DLSS (dilated motion vectors)
-	 */
+	// Upscaler resource management (DLSS dilated motion vectors etc).
 	void CreateUpscalingResources();
-
-	/**
-	 * @brief Destroy upscaling-specific resources
-	 */
 	void DestroyUpscalingResources();
 
-	std::unique_ptr<upscaling::Texture2D> upscalingTexture;           ///< Intermediate upscaling texture
-	std::unique_ptr<upscaling::Texture2D> dilatedMotionVectorTexture; ///< Dilated motion vectors for DLSS
+	std::unique_ptr<upscaling::Texture2D> upscalingTexture;
+	std::unique_ptr<upscaling::Texture2D> dilatedMotionVectorTexture;
 
-	/**
-	 * @struct UpscalingCB
-	 * @brief Constant buffer structure for upscaling shaders
-	 */
 	struct UpscalingCB
 	{
-		uint ScreenSize[2];    ///< Display resolution (width, height)
-		uint RenderSize[2];    ///< Render resolution (width, height)
-		float4 CameraData;     ///< Camera parameters (far, near, far-near, far*near)
+		uint ScreenSize[2];
+		uint RenderSize[2];
+		// Camera parameters: far, near, far-near, far*near.
+		float4 CameraData;
 	};
 
 private:
-	// ========================================
-	// Shader Resources (Private)
-	// ========================================
-
-	winrt::com_ptr<ID3D11ComputeShader> dilateMotionVectorCS;        ///< Motion vector dilation shader
-	winrt::com_ptr<ID3D11ComputeShader> overrideLinearDepthCS;       ///< Linear depth upscaling shader
-	winrt::com_ptr<ID3D11ComputeShader> overrideDepthCS;             ///< Depth copy shader
-	winrt::com_ptr<ID3D11PixelShader> BSImagespaceShaderSSLRRaytracing;  ///< Custom SSR shader
+	winrt::com_ptr<ID3D11ComputeShader> dilateMotionVectorCS;
+	winrt::com_ptr<ID3D11ComputeShader> overrideLinearDepthCS;
+	winrt::com_ptr<ID3D11ComputeShader> overrideDepthCS;
+	winrt::com_ptr<ID3D11PixelShader> BSImagespaceShaderSSLRRaytracing;
 };
 
 }
