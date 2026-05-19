@@ -22,9 +22,9 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
 * **`ambient_ibl_pass.hlsl`** - **reconstructed, round-trip +1.5%**.
   Canonical blob: `Shaders011.fxp` blob **3559** (sha1 `7460585eaf76`),
-  mnemonic-stream-exact-match sibling of the previously-analysed blob
-  3560. 263-instruction ambient/IBL deferred PS including the 9-tap
-  SSSS-style bilateral blur. Resource bindings (14 SRVs + 14 samplers +
+  mnemonic-stream-exact-match sibling of the structurally-equivalent
+  blob 3560. 263-instruction ambient/IBL deferred PS including the
+  9-tap SSSS-style bilateral blur. Resource bindings (14 SRVs + 14 samplers +
   3 CBs) + signature exact-match. Round-trip via fxc /T ps_5_0 /O3: 269
   vs 265 insns (+1.5%, within the ±10% threshold for this larger
   shader). Sample count 41 vs 44 (3 short due to a missing +1.28 ring
@@ -42,11 +42,10 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
     t6/t10/t12=screen-space ambient HDR scratch.
   * **Output**: o0 = kDiffuseBuffer (R11G11B10F).
 * **`deferred_composite.hlsl`** - **reconstructed, round-trip WIP**
-  (reconstructed 2026-05-18; canonical blob 3539). Canonical blob:
-  `Shaders011.fxp` blob 3539 (sha1 `861504f6dcbe`), identified by
-  mnemonic-stream equivalence against the captured runtime PS at eid
-  45368 (sha1 `813c9acec23b`) - same shader, different bytecode
-  encoding. The HLSL is a faithful asm-to-source transcription of all
+  (canonical blob 3539). Canonical blob: `Shaders011.fxp` blob 3539
+  (sha1 `861504f6dcbe`), identified by mnemonic-stream equivalence
+  against the captured runtime PS at eid 45368 (sha1 `813c9acec23b`) -
+  same shader, different bytecode encoding. The HLSL is a faithful asm-to-source transcription of all
   90 instructions: resource bindings exact-match, sample count
   exact-match (6/6), signature exact-match. Round-trip via fxc
   `/T ps_5_0 /O3` produces 108 insns vs 90 original (+20%): structural
@@ -86,26 +85,6 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   instructions in asm), matching the original exactly. The material-
   non-1 BRDF block is condensed for readability; full asm-granular
   reconstruction would add ~24 more insns.
-
-## Earlier classifier picks (historical context)
-
-The shape-based classifier output that bootstrapped this work landed
-on three "hottest representative" candidates per role. Two of them
-turned out to be misidentifications, surfaced once the live capture
-was cross-referenced against the on-disk corpus:
-
-* **Blob 2122** (initially picked as `deferred-composite`) is actually
-  a per-light geometry pass, not a fullscreen composite. The canonical
-  composite is blob **3539**.
-* **Blob 3147** (initially picked as `directional-sun-light`) belongs
-  to a 30+ peer cluster of permutations; no single member is canonical
-  for any captured scene. The actual sun-shadow path is the
-  cascade-PCF deferred PS at blob **3295**.
-* The on-disk corpus survey confirmed that `Shaders011.fxp` plus the
-  PE-embedded shader blobs across OG/NG/AE are complete with respect
-  to the deferred-stage PSes; earlier "missing" PSes were missing only
-  because the D3D loader re-encodes the bytecode (mnemonic-stream
-  identical to corpus blobs, byte-different).
 
 ## Workflow
 
