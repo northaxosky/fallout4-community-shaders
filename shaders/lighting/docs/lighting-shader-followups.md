@@ -309,28 +309,76 @@ runbook §230-232 WIP territory.
   side-by-side compare in this followups section would help future
   reconstructors understand which math ports and which doesn't.
 
-## Shaders011.2147 / `directional_sun_light.hlsl` (RECONSTRUCTION QUEUED)
+## Shaders011.2147 / `directional_sun_light.hlsl` (reconstructed-roundtrip-wip-role-tbd)
 
-Campaign queued: Fallout4RE 2026-05-18 reconstruct-deferred-pipeline
-Target 3. Canonical sun-shadow blob per 2026-05-18 mnemonic-diff: 2147
-(`8fb709c2fdf0`). Captured runtime PS at eid 45401 in
-`FO4_frame5407.rdc` (sha `46b911cb8053`) is exact-mnemonic match
-(62 / 62 insns, 1 / 1 samples). Asm available at
+Campaign: Fallout4RE 2026-05-18 reconstruct-deferred-pipeline Target 3.
+HLSL reconstruction shipped as honest WIP. fxc round-trip: 83 insns vs
+original 62 (+33.9%). Resource bindings + sample count (1/1) + signature
+all exact-match. Asm at
 `Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/Shaders011/asm/Shaders011.2147.8fb709c2fdf0.dxbc.asm`.
+
+### Resolved this campaign
+
+- Canonical blob 2147 (`8fb709c2fdf0`) confirmed as mnemonic-stream
+  exact match to captured runtime PS at eid 45401 (`46b911cb8053`)
+  by the 2026-05-18 byte-diff campaign (4ccba1b).
+- Faithful asm-to-HLSL transcription of all 62 instructions: depth-
+  based matrix select (SHARED with composite blob 3539 - same CB12
+  rows 20..27), view-space position reconstruction, back-projected
+  view ray, dot product against sun direction (cb2[4].xyz), two
+  smoothstep distance fades, color lerp output.
+- Identified the prompt's `out=2` claim as WRONG; the asm has
+  `out=1` SV_Target and the rdoc capture's `out_rt = 172` is a
+  single output. Reconstruction matches the asm.
+
+### Role discrepancy (NEW open item)
+
+The prompt labeled this shader `directional sun light / sun shadow PS`
+based on the captured 22-dispatch pattern at eids 45401-45623. The asm
+does NOT match a shadow-mapping shape:
+
+- 1 SV_Target output (not 2 MRT).
+- 1 SRV sampler with `mode_default` (not `mode_comparison`; no
+  hardware PCF).
+- No `SampleCmp` operation (no shadow comparison).
+- Math: view-ray-vs-sun-direction dot + distance smoothstep + sky-color
+  lerp. Textbook FO4 god-rays / atmospheric-scattering shape.
+
+Best-guess role: per-light god-rays / volumetric-scattering / sky-
+sampling PS. The 22-dispatch pattern at the captured eids likely
+corresponds to per-light-volume iteration (one dispatch per visible
+light source with god-rays enabled) rather than per-cascade shadow.
+
+- [ ] **Confirm actual role via IDA Hex-Rays** on the dispatch site
+  C++. The dispatch is inside `DrawWorld::DeferredLightsImpl` per
+  the prompt (REL::ID `{1108521, 2318312, 2318312}`, AE RVA
+  `0x021ed4c0`). Walk the function body to find which BSShader
+  subclass owns the technique at this dispatch site.
+- [ ] **Rename the file** if the god-rays interpretation is confirmed.
+  Current name `directional_sun_light.hlsl` is misleading. Proposed
+  rename: `god_rays_sky_sampling.hlsl` or similar. Defer until
+  role is locked in by cross-read.
 
 ### Open items
 
-- [ ] Faithful asm-to-HLSL reconstruction (62 insns, 1 SRV =
-  `kShadowMap` cascade, 4 CBs, 2 SV_Target outputs). The 22-dispatch
-  pattern at eids 45401-45623 suggests per-cascade or per-light
-  iteration; confirm via dispatch-site C++.
-- [ ] PCF kernel identification (3x3? 5x5? rotated Poisson?).
-- [ ] CB layout cross-read for 4 CBs (per-pass, per-light, per-frame,
-  per-material - likely).
-- [ ] fxc round-trip within 5%.
-- [ ] Sibling README status: `wip-permutation-uncertain` -> `reconstructed`.
-- [ ] Append-only `shader-3147-analysis.md` with a `Superseded by
-  2147` note (keep the negative-findings record).
+- [ ] **CB field semantic names** for CB0[0], CB1[0/1/10/12/13],
+  CB2[4]. Currently placeholders (`cb<N>_idx<M>_*`). IDA Hex-Rays
+  on the dispatch site C++ should reveal struct names.
+- [ ] **t7 binding semantics**. Likely the same main depth gbuffer
+  as the composite uses, but the rdoc walk recorded eid 45401's
+  single SRV as depth target 183 (D24S8) - consistent with the
+  composite's depth source. Confirm.
+- [ ] **Round-trip tightening** (+33.9% -> <5%). The matrix-select
+  pattern probably contributes most of the surplus (same problem as
+  the composite); rework to per-row movc or inline dp4s with
+  conditional select rather than copying a `float4x4`.
+- [ ] **Per-light parameter variation**. The 22 dispatches at eids
+  45401-45623 use different cb1/cb2 contents per dispatch (per-light
+  parameters). Verify by extracting CB byte contents at 2-3 of those
+  eids and diffing - if all 22 use identical CBs, it's not per-light.
+- [ ] **shader-3147-analysis.md** should gain a `Superseded by
+  2147 reconstruction` appendix; keep the negative-findings record
+  as the historical doc of the false-positive lesson.
 
 ## Shaders011.3559 / `ambient_ibl_pass.hlsl` (RECONSTRUCTION QUEUED)
 
