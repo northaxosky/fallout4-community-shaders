@@ -1102,7 +1102,7 @@ ConstantBuffer* Upscaling::GetUpscalingCB()
 
 	if (!upscalingCB) {
 		L->debug("Creating UpscalingCB");
-		upscalingCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<UpscalingCB>());
+		upscalingCB = std::make_unique<ConstantBuffer>(ConstantBufferDesc<UpscalingCB>(false));
 	}
 	return upscalingCB.get();
 }

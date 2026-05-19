@@ -7,61 +7,14 @@
 #include <stdio.h>
 #include <winrt/base.h>
 
+#include "CSBuffer.h"
+
 namespace cs::features::upscaling
 {
 
-// ========================================
-// Helper Functions & Utilities
-// ========================================
-
-/**
- * @brief Calculate aligned constant buffer size
- * @param buffer_size Raw buffer size in bytes
- * @return Size aligned to 64-byte boundary (required for D3D11 constant buffers)
- *
- * D3D11 requires constant buffers to be aligned to 64-byte boundaries.
- * This function rounds up the size to the nearest multiple of 64.
- */
-static constexpr std::uint32_t GetCBufferSize(std::uint32_t buffer_size)
-{
-	return (buffer_size + (64 - 1)) & ~(64 - 1);
-}
-
-// ========================================
-// Buffer Description Helpers
-// ========================================
-
-/**
- * @brief Create a D3D11 constant buffer description
- * @param size Buffer size in bytes (will be aligned to 64-byte boundary)
- * @param dynamic If true, creates a dynamic buffer for frequent CPU updates
- * @return Configured D3D11_BUFFER_DESC for a constant buffer
- *
- * Dynamic buffers use D3D11_USAGE_DYNAMIC and D3D11_CPU_ACCESS_WRITE for efficient CPU updates.
- * Non-dynamic buffers use D3D11_USAGE_DEFAULT for GPU-only access.
- */
-inline D3D11_BUFFER_DESC ConstantBufferDesc(uint32_t size, bool dynamic = false)
-{
-	D3D11_BUFFER_DESC desc{};
-	ZeroMemory(&desc, sizeof(desc));
-	desc.Usage = (!dynamic) ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
-	desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	desc.CPUAccessFlags = !dynamic ? 0 : D3D11_CPU_ACCESS_WRITE;
-	desc.ByteWidth = GetCBufferSize(size);
-	return desc;
-}
-
-/**
- * @brief Create a constant buffer description from a type
- * @tparam T Structure type to use for buffer size calculation
- * @param dynamic If true, creates a dynamic buffer for frequent CPU updates
- * @return Configured D3D11_BUFFER_DESC sized for type T
- */
-template <typename T>
-D3D11_BUFFER_DESC ConstantBufferDesc(bool dynamic = false)
-{
-	return ConstantBufferDesc(sizeof(T), dynamic);
-}
+using cs::buffer::ConstantBuffer;
+using cs::buffer::ConstantBufferDesc;
+using cs::buffer::GetCBufferSize;
 
 /**
  * @brief Create a structured buffer description
@@ -88,102 +41,6 @@ D3D11_BUFFER_DESC StructuredBufferDesc(uint64_t count, bool uav = true, bool dyn
 	desc.ByteWidth = (UINT)(sizeof(T) * count);
 	return desc;
 }
-
-/**
- * @brief Create a structured buffer description (alternative signature)
- * @tparam T Structure type for buffer elements
- * @param a_count Number of elements (default: 1)
- * @param cpu_access If true, allows CPU write access
- * @return Configured D3D11_BUFFER_DESC for a structured buffer
- *
- * CPU-accessible buffers use D3D11_USAGE_DYNAMIC for efficient updates.
- * Non-CPU-accessible buffers support UAV for compute shader writes.
- */
-template <typename T>
-D3D11_BUFFER_DESC StructuredBufferDesc(UINT a_count = 1, bool cpu_access = true)
-{
-	D3D11_BUFFER_DESC desc{};
-	ZeroMemory(&desc, sizeof(desc));
-	desc.Usage = cpu_access ? D3D11_USAGE_DYNAMIC : D3D11_USAGE_DEFAULT;
-	desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-	if (!cpu_access)
-		desc.BindFlags = desc.BindFlags | D3D11_BIND_UNORDERED_ACCESS;
-	desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
-	desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
-	desc.StructureByteStride = sizeof(T);
-	desc.ByteWidth = sizeof(T) * a_count;
-	return desc;
-}
-
-// ========================================
-// Constant Buffer Class
-// ========================================
-
-/**
- * @class ConstantBuffer
- * @brief RAII wrapper for D3D11 constant buffers
- *
- * Manages constant buffer creation and updates with automatic resource cleanup.
- * Supports both dynamic (CPU-writable) and default (GPU-only) buffers.
- */
-class ConstantBuffer
-{
-public:
-	/**
-	 * @brief Construct a constant buffer from description
-	 * @param a_desc D3D11 buffer description (use ConstantBufferDesc helper)
-	 *
-	 * Creates the D3D11 buffer resource automatically on construction
-	 */
-	explicit ConstantBuffer(D3D11_BUFFER_DESC const& a_desc) :
-		desc(a_desc)
-	{
-		auto device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
-		DX::ThrowIfFailed(device->CreateBuffer(&desc, nullptr, resource.put()));
-	}
-
-	/**
-	 * @brief Get the underlying D3D11 buffer
-	 * @return Raw pointer to ID3D11Buffer for binding to pipeline
-	 */
-	ID3D11Buffer* CB() const { return resource.get(); }
-
-	/**
-	 * @brief Update buffer contents from memory
-	 * @param src_data Pointer to source data
-	 * @param data_size Size of data in bytes
-	 *
-	 * Dynamic buffers use Map/Unmap for efficient updates.
-	 * Default buffers use UpdateSubresource.
-	 */
-	void Update(void const* src_data, size_t data_size)
-	{
-		ID3D11DeviceContext* ctx = reinterpret_cast<ID3D11DeviceContext*>(RE::BSGraphics::GetRendererData()->context);
-		if (desc.Usage & D3D11_USAGE_DYNAMIC) {
-			D3D11_MAPPED_SUBRESOURCE mapped_buffer{};
-			ZeroMemory(&mapped_buffer, sizeof(D3D11_MAPPED_SUBRESOURCE));
-			DX::ThrowIfFailed(ctx->Map(resource.get(), 0u, D3D11_MAP_WRITE_DISCARD, 0u, &mapped_buffer));
-			memcpy(mapped_buffer.pData, src_data, data_size);
-			ctx->Unmap(resource.get(), 0);
-		} else
-			ctx->UpdateSubresource(resource.get(), 0, nullptr, src_data, 0, 0);
-	}
-
-	/**
-	 * @brief Update buffer from typed data
-	 * @tparam T Type of data structure
-	 * @param src_data Reference to data structure
-	 */
-	template <typename T>
-	void Update(T const& src_data)
-	{
-		Update(&src_data, sizeof(T));
-	}
-
-private:
-	winrt::com_ptr<ID3D11Buffer> resource;  ///< D3D11 buffer resource (automatically released)
-	D3D11_BUFFER_DESC desc;                 ///< Buffer description
-};
 
 // ========================================
 // Structured Buffer Class

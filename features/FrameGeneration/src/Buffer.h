@@ -9,8 +9,14 @@
 #include <wrl\client.h>
 #include <wrl\wrappers\corewrappers.h>
 
+#include "CSBuffer.h"
+
 namespace cs::features::framegeneration
 {
+
+using cs::buffer::ConstantBuffer;
+using cs::buffer::ConstantBufferDesc;
+using cs::buffer::GetCBufferSize;
 
 template <typename T>
 D3D11_BUFFER_DESC StructuredBufferDesc(uint64_t count, bool uav = true, bool dynamic = false)
@@ -26,64 +32,6 @@ D3D11_BUFFER_DESC StructuredBufferDesc(uint64_t count, bool uav = true, bool dyn
 	desc.ByteWidth = (UINT)(sizeof(T) * count);
 	return desc;
 }
-
-static constexpr std::uint32_t GetCBufferSize(std::uint32_t buffer_size)
-{
-	return (buffer_size + (64 - 1)) & ~(64 - 1);
-}
-
-inline D3D11_BUFFER_DESC ConstantBufferDesc(uint32_t size, bool dynamic = false)
-{
-	D3D11_BUFFER_DESC desc{};
-	ZeroMemory(&desc, sizeof(desc));
-	desc.Usage = (!dynamic) ? D3D11_USAGE_DEFAULT : D3D11_USAGE_DYNAMIC;
-	desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	desc.CPUAccessFlags = !dynamic ? 0 : D3D11_CPU_ACCESS_WRITE;
-	desc.ByteWidth = GetCBufferSize(size);
-	return desc;
-}
-
-template <typename T>
-D3D11_BUFFER_DESC ConstantBufferDesc(bool dynamic = false)
-{
-	return ConstantBufferDesc(sizeof(T), dynamic);
-}
-
-class ConstantBuffer
-{
-public:
-	explicit ConstantBuffer(D3D11_BUFFER_DESC const& a_desc) :
-		desc(a_desc)
-	{
-		auto device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
-		DX::ThrowIfFailed(device->CreateBuffer(&desc, nullptr, resource.ReleaseAndGetAddressOf()));
-	}
-
-	ID3D11Buffer* CB() const { return resource.Get(); }
-
-	void Update(void const* src_data, size_t data_size)
-	{
-		ID3D11DeviceContext* ctx = reinterpret_cast<ID3D11DeviceContext*>(RE::BSGraphics::GetRendererData()->context);
-		if (desc.Usage & D3D11_USAGE_DYNAMIC) {
-			D3D11_MAPPED_SUBRESOURCE mapped_buffer{};
-			ZeroMemory(&mapped_buffer, sizeof(D3D11_MAPPED_SUBRESOURCE));
-			DX::ThrowIfFailed(ctx->Map(resource.Get(), 0u, D3D11_MAP_WRITE_DISCARD, 0u, &mapped_buffer));
-			memcpy(mapped_buffer.pData, src_data, data_size);
-			ctx->Unmap(resource.Get(), 0);
-		} else
-			ctx->UpdateSubresource(resource.Get(), 0, nullptr, src_data, 0, 0);
-	}
-
-	template <typename T>
-	void Update(T const& src_data)
-	{
-		Update(&src_data, sizeof(T));
-	}
-
-private:
-	Microsoft::WRL::ComPtr<ID3D11Buffer> resource;
-	D3D11_BUFFER_DESC desc;
-};
 
 class StructuredBuffer
 {
