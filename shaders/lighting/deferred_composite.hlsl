@@ -228,18 +228,13 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 3-16: select reprojection matrix based on depth threshold.
     //   if (depth < 0.01)   -> use NEAR matrix, scale depth by 100
     //   else                -> use FAR matrix,  linearize depth slightly
-    float linearizedDepth;
-    float4x4 reprojMatrix;
-    if (depth < 0.01)
-    {
-        linearizedDepth = depth * 100.0;
-        reprojMatrix    = cb12_near_reproj_matrix;
-    }
-    else
-    {
-        linearizedDepth = depth * 1.01 - 0.01;
-        reprojMatrix    = cb12_far_reproj_matrix;
-    }
+    // Per-row ternary matches corpus shape closer than `float4x4` ?:.
+    bool isNearPath = (depth < 0.01);
+    float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
+    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
+    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
+    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
+    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
 
     // Insn 17-20: material-ID test - is matId in {2, 3}?
     //   r0.zw = matIdRaw * 255 + {-2, -3}
@@ -276,10 +271,10 @@ PS_OUTPUT main(PS_INPUT input)
 
         float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
         float4 posViewH;
-        posViewH.x = dot(reprojMatrix[0], pos4);
-        posViewH.y = dot(reprojMatrix[1], pos4);
-        posViewH.z = dot(reprojMatrix[2], pos4);
-        posViewH.w = dot(reprojMatrix[3], pos4);
+        posViewH.x = dot(reprojRow0, pos4);
+        posViewH.y = dot(reprojRow1, pos4);
+        posViewH.z = dot(reprojRow2, pos4);
+        posViewH.w = dot(reprojRow3, pos4);
         float3 posView = posViewH.xyz / posViewH.www;
 
         // -------- Insn 36-37: fog-plane distance. -------------------------
