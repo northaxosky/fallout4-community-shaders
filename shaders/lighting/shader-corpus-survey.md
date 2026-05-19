@@ -1,5 +1,18 @@
 ## Shader corpus completeness survey — campaign findings
 
+> **REVISION (2026-05-18, same-day)**: see `d3dcompile-static-analysis.md`.
+> The "L = 3 unknown PSes" conclusion below is technically correct (sha1
+> mismatch is real) but conceptually misleading: each of the 3 "unknown"
+> PSes has a shape-and-size-near peer in `Shaders011.fxp` (composite +4
+> bytes, ambient/IBL +64 bytes, sun-shadow +32 bytes). The engine selects
+> a corpus blob and applies a small byte-level patch before passing to
+> `CreatePixelShader`; the patch changes the DXBC's embedded MD5 hash and
+> therefore the whole-blob sha1. The patch is small enough to be
+> reverse-engineered statically once the captured bytecodes are extracted
+> from the RenderDoc capture. The runtime-catalog plugin's Phase 2 needs
+> reframing from "capture HLSL" to "capture patch vectors" because
+> `D3DCompile` is definitively not used by the engine.
+
 Status: **WU1 complete, WU2 partial, WU-B Path A complete (negative)**.
 WU3 and WU4 of the `shader-corpus-completeness` prompt remain explicitly
 gated on user approval per the prompt's own phasing rule.
