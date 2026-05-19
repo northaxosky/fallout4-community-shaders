@@ -35,53 +35,53 @@ namespace cs::features
 		struct Settings
 		{
 			bool        enabled            = true;
-			int         iPreset            = static_cast<int>(Preset::kStandard);
-			bool        bForceWithENB      = false;
+			int         preset             = static_cast<int>(Preset::kStandard);
+			bool        forceWithENB       = false;
 
 			// Tonemap + LUT.
-			int         iOperator          = 1;
-			float       fExposure          = 1.0f;
-			bool        bLUTEnable         = false;
-			std::string sLUTPath           = "";
-			float       fLUTStrength       = 1.0f;
+			int         tonemapOperator    = 1;
+			float       exposure           = 1.0f;
+			bool        lutEnable          = false;
+			std::string lutPath            = "";
+			float       lutStrength        = 1.0f;
 
 			// Adaptive exposure.
-			bool        bAdaptiveExposure  = true;
-			float       fAdaptationSpeed   = 1.0f;
-			float       fExposureKey       = 0.18f;
-			float       fExposureMin       = 0.25f;
-			float       fExposureMax       = 4.0f;
+			bool        adaptiveExposure   = true;
+			float       adaptationSpeed    = 1.0f;
+			float       exposureKey        = 0.18f;
+			float       exposureMin        = 0.25f;
+			float       exposureMax        = 4.0f;
 
 			// Bloom.
-			bool        bBloomEnable       = true;
-			float       fBloomThreshold    = 0.85f;
-			float       fBloomIntensity    = 0.05f;
-			int         iBloomMips         = 5;
+			bool        bloomEnable        = true;
+			float       bloomThreshold     = 0.85f;
+			float       bloomIntensity     = 0.05f;
+			int         bloomMips          = 5;
 
 			// Lens.
-			bool        bVignetteEnable    = true;
-			float       fVignetteIntensity = 0.3f;
-			bool        bCAEnable          = true;
-			float       fCAIntensity       = 0.5f;
-			bool        bSharpenEnable     = true;
-			float       fSharpness         = 0.4f;
+			bool        vignetteEnable     = true;
+			float       vignetteIntensity  = 0.3f;
+			bool        caEnable           = true;
+			float       caIntensity        = 0.5f;
+			bool        sharpenEnable      = true;
+			float       sharpness          = 0.4f;
 
 			// Sun + lens.
-			bool        bSunspriteEnable    = true;
-			float       fSunspriteIntensity = 0.6f;
-			float       fSunspriteSize      = 0.05f;
-			bool        bLensFlareEnable    = false;
-			float       fLensFlareIntensity = 0.8f;
-			int         iLensFlareGhosts    = 5;
+			bool        sunspriteEnable    = true;
+			float       sunspriteIntensity = 0.6f;
+			float       sunspriteSize      = 0.05f;
+			bool        lensFlareEnable    = false;
+			float       lensFlareIntensity = 0.8f;
+			int         lensFlareGhosts    = 5;
 
 			// Bokeh DOF.
-			bool        bDOFEnable         = false;
-			float       fAperture          = 0.05f;
-			float       fFocusDistance     = 1500.0f;
-			float       fFocalLength       = 50.0f;
-			float       fFocusRange        = 200.0f;
-			int         iDOFQuality        = 1;
-			float       fCoCLimitFactor    = 0.04f;
+			bool        dofEnable          = false;
+			float       aperture           = 0.05f;
+			float       focusDistance      = 1500.0f;
+			float       focalLength        = 50.0f;
+			float       focusRange         = 200.0f;
+			int         dofQuality         = 1;
+			float       cocLimitFactor     = 0.04f;
 		};
 
 		Settings settings;

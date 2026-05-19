@@ -125,7 +125,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.bDOFEnable || cs::env::IsENBLoaded()) && func(This);
+			return (!Imagespace::GetSingleton()->settings.dofEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -133,7 +133,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.bDOFEnable || cs::env::IsENBLoaded()) && func(This);
+			return (!Imagespace::GetSingleton()->settings.dofEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -141,7 +141,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.bDOFEnable || cs::env::IsENBLoaded()) && func(This);
+			return (!Imagespace::GetSingleton()->settings.dofEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -150,7 +150,7 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.bSunspriteEnable || cs::env::IsENBLoaded()) && func(This);
+			return (!Imagespace::GetSingleton()->settings.sunspriteEnable || cs::env::IsENBLoaded()) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -175,10 +175,10 @@ namespace cs::features
 	{
 		LoadSettings();
 		L->info("Loaded: enabled={} op={} exposure={:.2f} adaptive={} bloom={} vig={} ca={} sharp={} dof={}",
-			settings.enabled, settings.iOperator, settings.fExposure,
-			settings.bAdaptiveExposure, settings.bBloomEnable,
-			settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable,
-			settings.bDOFEnable);
+			settings.enabled, settings.tonemapOperator, settings.exposure,
+			settings.adaptiveExposure, settings.bloomEnable,
+			settings.vignetteEnable, settings.caEnable, settings.sharpenEnable,
+			settings.dofEnable);
 	}
 
 	void Imagespace::OnPostPostLoad()
@@ -212,46 +212,46 @@ namespace cs::features
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);
 		settings.enabled            = ini.GetBoolValue("Settings",   "bEnabled",            settings.enabled);
-		settings.iPreset            = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iPreset", settings.iPreset)), 0, 4);
-		settings.bForceWithENB      = ini.GetBoolValue("Settings",   "bForceWithENB",       settings.bForceWithENB);
-		settings.iOperator          = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iOperator", settings.iOperator)), 0, 3);
-		settings.fExposure          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposure", settings.fExposure)), 0.25f, 4.0f);
-		settings.bLUTEnable         = ini.GetBoolValue("Settings",   "bLUTEnable",          settings.bLUTEnable);
-		settings.sLUTPath           = ini.GetValue("Settings",       "sLUTPath",            settings.sLUTPath.c_str());
-		settings.fLUTStrength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLUTStrength", settings.fLUTStrength)), 0.0f, 1.0f);
+		settings.preset            = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iPreset", settings.preset)), 0, 4);
+		settings.forceWithENB      = ini.GetBoolValue("Settings",   "bForceWithENB",       settings.forceWithENB);
+		settings.tonemapOperator          = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iOperator", settings.tonemapOperator)), 0, 3);
+		settings.exposure          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposure", settings.exposure)), 0.25f, 4.0f);
+		settings.lutEnable         = ini.GetBoolValue("Settings",   "bLUTEnable",          settings.lutEnable);
+		settings.lutPath           = ini.GetValue("Settings",       "sLUTPath",            settings.lutPath.c_str());
+		settings.lutStrength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLUTStrength", settings.lutStrength)), 0.0f, 1.0f);
 
-		settings.bAdaptiveExposure  = ini.GetBoolValue("Settings",   "bAdaptiveExposure",   settings.bAdaptiveExposure);
-		settings.fAdaptationSpeed   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", settings.fAdaptationSpeed)), 0.1f, 5.0f);
-		settings.fExposureKey       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureKey", settings.fExposureKey)), 0.05f, 0.5f);
-		settings.fExposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.fExposureMin)), 0.01f, 1.0f);
-		settings.fExposureMax       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMax", settings.fExposureMax)), 1.0f, 16.0f);
+		settings.adaptiveExposure  = ini.GetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
+		settings.adaptationSpeed   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", settings.adaptationSpeed)), 0.1f, 5.0f);
+		settings.exposureKey       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureKey", settings.exposureKey)), 0.05f, 0.5f);
+		settings.exposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.exposureMin)), 0.01f, 1.0f);
+		settings.exposureMax       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMax", settings.exposureMax)), 1.0f, 16.0f);
 
-		settings.bBloomEnable       = ini.GetBoolValue("Settings",   "bBloomEnable",        settings.bBloomEnable);
-		settings.fBloomThreshold    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomThreshold", settings.fBloomThreshold)), 0.0f, 2.0f);
-		settings.fBloomIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomIntensity", settings.fBloomIntensity)), 0.0f, 0.3f);
-		settings.iBloomMips         = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iBloomMips",      settings.iBloomMips)), 3, 6);
+		settings.bloomEnable       = ini.GetBoolValue("Settings",   "bBloomEnable",        settings.bloomEnable);
+		settings.bloomThreshold    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomThreshold", settings.bloomThreshold)), 0.0f, 2.0f);
+		settings.bloomIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomIntensity", settings.bloomIntensity)), 0.0f, 0.3f);
+		settings.bloomMips         = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iBloomMips",      settings.bloomMips)), 3, 6);
 
-		settings.bVignetteEnable    = ini.GetBoolValue("Settings",   "bVignetteEnable",     settings.bVignetteEnable);
-		settings.fVignetteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fVignetteIntensity", settings.fVignetteIntensity)), 0.0f, 1.0f);
-		settings.bCAEnable          = ini.GetBoolValue("Settings",   "bCAEnable",           settings.bCAEnable);
-		settings.fCAIntensity       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCAIntensity", settings.fCAIntensity)), 0.0f, 2.0f);
-		settings.bSharpenEnable     = ini.GetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
-		settings.fSharpness         = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", settings.fSharpness)), 0.0f, 1.0f);
+		settings.vignetteEnable    = ini.GetBoolValue("Settings",   "bVignetteEnable",     settings.vignetteEnable);
+		settings.vignetteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fVignetteIntensity", settings.vignetteIntensity)), 0.0f, 1.0f);
+		settings.caEnable          = ini.GetBoolValue("Settings",   "bCAEnable",           settings.caEnable);
+		settings.caIntensity       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCAIntensity", settings.caIntensity)), 0.0f, 2.0f);
+		settings.sharpenEnable     = ini.GetBoolValue("Settings",   "bSharpenEnable",      settings.sharpenEnable);
+		settings.sharpness         = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", settings.sharpness)), 0.0f, 1.0f);
 
-		settings.bSunspriteEnable    = ini.GetBoolValue("Settings",   "bSunspriteEnable",    settings.bSunspriteEnable);
-		settings.fSunspriteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteIntensity", settings.fSunspriteIntensity)), 0.0f, 2.0f);
-		settings.fSunspriteSize      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteSize",      settings.fSunspriteSize)),      0.01f, 0.2f);
-		settings.bLensFlareEnable    = ini.GetBoolValue("Settings",   "bLensFlareEnable",    settings.bLensFlareEnable);
-		settings.fLensFlareIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLensFlareIntensity", settings.fLensFlareIntensity)), 0.0f, 2.0f);
-		settings.iLensFlareGhosts    = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iLensFlareGhosts",    settings.iLensFlareGhosts)),    3, 7);
+		settings.sunspriteEnable    = ini.GetBoolValue("Settings",   "bSunspriteEnable",    settings.sunspriteEnable);
+		settings.sunspriteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteIntensity", settings.sunspriteIntensity)), 0.0f, 2.0f);
+		settings.sunspriteSize      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteSize",      settings.sunspriteSize)),      0.01f, 0.2f);
+		settings.lensFlareEnable    = ini.GetBoolValue("Settings",   "bLensFlareEnable",    settings.lensFlareEnable);
+		settings.lensFlareIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLensFlareIntensity", settings.lensFlareIntensity)), 0.0f, 2.0f);
+		settings.lensFlareGhosts    = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iLensFlareGhosts",    settings.lensFlareGhosts)),    3, 7);
 
-		settings.bDOFEnable         = ini.GetBoolValue("Settings",   "bDOFEnable",          settings.bDOFEnable);
-		settings.fAperture          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAperture",       settings.fAperture)),       0.0f, 0.5f);
-		settings.fFocusDistance     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusDistance",  settings.fFocusDistance)), 10.0f, 100000.0f);
-		settings.fFocalLength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocalLength",    settings.fFocalLength)),    1.0f, 200.0f);
-		settings.fFocusRange        = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusRange",     settings.fFocusRange)),    10.0f, 10000.0f);
-		settings.iDOFQuality        = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iDOFQuality",     settings.iDOFQuality)),     0, 2);
-		settings.fCoCLimitFactor    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCoCLimitFactor", settings.fCoCLimitFactor)), 0.005f, 0.10f);
+		settings.dofEnable         = ini.GetBoolValue("Settings",   "bDOFEnable",          settings.dofEnable);
+		settings.aperture          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAperture",       settings.aperture)),       0.0f, 0.5f);
+		settings.focusDistance     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusDistance",  settings.focusDistance)), 10.0f, 100000.0f);
+		settings.focalLength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocalLength",    settings.focalLength)),    1.0f, 200.0f);
+		settings.focusRange        = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusRange",     settings.focusRange)),    10.0f, 10000.0f);
+		settings.dofQuality        = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iDOFQuality",     settings.dofQuality)),     0, 2);
+		settings.cocLimitFactor    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCoCLimitFactor", settings.cocLimitFactor)), 0.005f, 0.10f);
 
 		// Smoke-harness markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
@@ -270,49 +270,49 @@ namespace cs::features
 		if (testModeActive) {
 			// Reset to deterministic baseline.
 			settings.enabled            = true;
-			settings.iOperator          = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
-			settings.fExposure          = 1.0f;
-			settings.bLUTEnable         = lutP && (lut_c == '1');
-			settings.fLUTStrength       = 1.0f;
-			settings.bAdaptiveExposure  = adaptP && (adapt_c == '1');
-			settings.fAdaptationSpeed   = 1.0f;
-			settings.fExposureKey       = 0.18f;
-			settings.bBloomEnable       = bloomP && (bloom_c == '1');
-			settings.fBloomIntensity    = settings.bBloomEnable ? 0.15f : 0.05f;
-			settings.bVignetteEnable    = vigP && (vig_c == '1');
-			settings.fVignetteIntensity = settings.bVignetteEnable ? 0.6f : 0.3f;
-			settings.bCAEnable          = caP && (ca_c == '1');
-			settings.fCAIntensity       = settings.bCAEnable ? 1.5f : 0.5f;
-			settings.bSharpenEnable     = sharpP && (sharp_c == '1');
-			settings.fSharpness         = settings.bSharpenEnable ? 0.8f : 0.4f;
-			settings.bDOFEnable         = dofP && (dof_c == '1' || dof_c == '2');
+			settings.tonemapOperator          = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
+			settings.exposure          = 1.0f;
+			settings.lutEnable         = lutP && (lut_c == '1');
+			settings.lutStrength       = 1.0f;
+			settings.adaptiveExposure  = adaptP && (adapt_c == '1');
+			settings.adaptationSpeed   = 1.0f;
+			settings.exposureKey       = 0.18f;
+			settings.bloomEnable       = bloomP && (bloom_c == '1');
+			settings.bloomIntensity    = settings.bloomEnable ? 0.15f : 0.05f;
+			settings.vignetteEnable    = vigP && (vig_c == '1');
+			settings.vignetteIntensity = settings.vignetteEnable ? 0.6f : 0.3f;
+			settings.caEnable          = caP && (ca_c == '1');
+			settings.caIntensity       = settings.caEnable ? 1.5f : 0.5f;
+			settings.sharpenEnable     = sharpP && (sharp_c == '1');
+			settings.sharpness         = settings.sharpenEnable ? 0.8f : 0.4f;
+			settings.dofEnable         = dofP && (dof_c == '1' || dof_c == '2');
 			if (dof_c == '1') {
-				settings.fAperture      = 0.05f;
-				settings.fFocusDistance = 1500.0f;
-				settings.fFocalLength   = 50.0f;
-				settings.iDOFQuality    = 1;
+				settings.aperture      = 0.05f;
+				settings.focusDistance = 1500.0f;
+				settings.focalLength   = 50.0f;
+				settings.dofQuality    = 1;
 			} else if (dof_c == '2') {
-				settings.fAperture      = 0.30f;
-				settings.fFocusDistance = 500.0f;
-				settings.fFocalLength   = 50.0f;
-				settings.iDOFQuality    = 2;
+				settings.aperture      = 0.30f;
+				settings.focusDistance = 500.0f;
+				settings.focalLength   = 50.0f;
+				settings.dofQuality    = 2;
 			}
 			// preset_c '0' = passthrough baseline; '1'..'4' = preset with toggles forced so intensities are observable.
 			if (presetP && preset_c >= '1' && preset_c <= '4') {
 				ApplyPreset(static_cast<Preset>(preset_c - '0'));
-				settings.bBloomEnable     = true;
-				settings.bVignetteEnable  = true;
-				settings.bCAEnable        = true;
-				settings.bSharpenEnable   = true;
-				settings.bSunspriteEnable = true;
-				settings.bLensFlareEnable = true;
+				settings.bloomEnable     = true;
+				settings.vignetteEnable  = true;
+				settings.caEnable        = true;
+				settings.sharpenEnable   = true;
+				settings.sunspriteEnable = true;
+				settings.lensFlareEnable = true;
 			} else if (presetP && preset_c == '0') {
-				settings.iPreset = static_cast<int>(Preset::kCustom);
+				settings.preset = static_cast<int>(Preset::kCustom);
 			}
 			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={} dof={} preset={}",
-				settings.iOperator, settings.bLUTEnable, settings.bAdaptiveExposure,
-				settings.bBloomEnable, settings.bVignetteEnable, settings.bCAEnable, settings.bSharpenEnable,
-				settings.bDOFEnable, settings.iPreset);
+				settings.tonemapOperator, settings.lutEnable, settings.adaptiveExposure,
+				settings.bloomEnable, settings.vignetteEnable, settings.caEnable, settings.sharpenEnable,
+				settings.dofEnable, settings.preset);
 		}
 	}
 
@@ -325,54 +325,54 @@ namespace cs::features
 		ini.SetUnicode();
 		ini.LoadFile(kIniPath);
 		ini.SetBoolValue("Settings",   "bEnabled",            settings.enabled);
-		ini.SetLongValue("Settings",   "iPreset",             settings.iPreset);
-		ini.SetBoolValue("Settings",   "bForceWithENB",       settings.bForceWithENB);
-		ini.SetLongValue("Settings",   "iOperator",           settings.iOperator);
-		ini.SetDoubleValue("Settings", "fExposure",           settings.fExposure);
-		ini.SetBoolValue("Settings",   "bLUTEnable",          settings.bLUTEnable);
-		ini.SetValue("Settings",       "sLUTPath",            settings.sLUTPath.c_str());
-		ini.SetDoubleValue("Settings", "fLUTStrength",        settings.fLUTStrength);
-		ini.SetBoolValue("Settings",   "bAdaptiveExposure",   settings.bAdaptiveExposure);
-		ini.SetDoubleValue("Settings", "fAdaptationSpeed",    settings.fAdaptationSpeed);
-		ini.SetDoubleValue("Settings", "fExposureKey",        settings.fExposureKey);
-		ini.SetDoubleValue("Settings", "fExposureMin",        settings.fExposureMin);
-		ini.SetDoubleValue("Settings", "fExposureMax",        settings.fExposureMax);
-		ini.SetBoolValue("Settings",   "bBloomEnable",        settings.bBloomEnable);
-		ini.SetDoubleValue("Settings", "fBloomThreshold",     settings.fBloomThreshold);
-		ini.SetDoubleValue("Settings", "fBloomIntensity",     settings.fBloomIntensity);
-		ini.SetLongValue("Settings",   "iBloomMips",          settings.iBloomMips);
-		ini.SetBoolValue("Settings",   "bVignetteEnable",     settings.bVignetteEnable);
-		ini.SetDoubleValue("Settings", "fVignetteIntensity",  settings.fVignetteIntensity);
-		ini.SetBoolValue("Settings",   "bCAEnable",           settings.bCAEnable);
-		ini.SetDoubleValue("Settings", "fCAIntensity",        settings.fCAIntensity);
-		ini.SetBoolValue("Settings",   "bSharpenEnable",      settings.bSharpenEnable);
-		ini.SetDoubleValue("Settings", "fSharpness",          settings.fSharpness);
-		ini.SetBoolValue("Settings",   "bSunspriteEnable",    settings.bSunspriteEnable);
-		ini.SetDoubleValue("Settings", "fSunspriteIntensity", settings.fSunspriteIntensity);
-		ini.SetDoubleValue("Settings", "fSunspriteSize",      settings.fSunspriteSize);
-		ini.SetBoolValue("Settings",   "bLensFlareEnable",    settings.bLensFlareEnable);
-		ini.SetDoubleValue("Settings", "fLensFlareIntensity", settings.fLensFlareIntensity);
-		ini.SetLongValue("Settings",   "iLensFlareGhosts",    settings.iLensFlareGhosts);
-		ini.SetBoolValue("Settings",   "bDOFEnable",          settings.bDOFEnable);
-		ini.SetDoubleValue("Settings", "fAperture",           settings.fAperture);
-		ini.SetDoubleValue("Settings", "fFocusDistance",      settings.fFocusDistance);
-		ini.SetDoubleValue("Settings", "fFocalLength",        settings.fFocalLength);
-		ini.SetDoubleValue("Settings", "fFocusRange",         settings.fFocusRange);
-		ini.SetLongValue("Settings",   "iDOFQuality",         settings.iDOFQuality);
-		ini.SetDoubleValue("Settings", "fCoCLimitFactor",     settings.fCoCLimitFactor);
+		ini.SetLongValue("Settings",   "iPreset",             settings.preset);
+		ini.SetBoolValue("Settings",   "bForceWithENB",       settings.forceWithENB);
+		ini.SetLongValue("Settings",   "iOperator",           settings.tonemapOperator);
+		ini.SetDoubleValue("Settings", "fExposure",           settings.exposure);
+		ini.SetBoolValue("Settings",   "bLUTEnable",          settings.lutEnable);
+		ini.SetValue("Settings",       "sLUTPath",            settings.lutPath.c_str());
+		ini.SetDoubleValue("Settings", "fLUTStrength",        settings.lutStrength);
+		ini.SetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
+		ini.SetDoubleValue("Settings", "fAdaptationSpeed",    settings.adaptationSpeed);
+		ini.SetDoubleValue("Settings", "fExposureKey",        settings.exposureKey);
+		ini.SetDoubleValue("Settings", "fExposureMin",        settings.exposureMin);
+		ini.SetDoubleValue("Settings", "fExposureMax",        settings.exposureMax);
+		ini.SetBoolValue("Settings",   "bBloomEnable",        settings.bloomEnable);
+		ini.SetDoubleValue("Settings", "fBloomThreshold",     settings.bloomThreshold);
+		ini.SetDoubleValue("Settings", "fBloomIntensity",     settings.bloomIntensity);
+		ini.SetLongValue("Settings",   "iBloomMips",          settings.bloomMips);
+		ini.SetBoolValue("Settings",   "bVignetteEnable",     settings.vignetteEnable);
+		ini.SetDoubleValue("Settings", "fVignetteIntensity",  settings.vignetteIntensity);
+		ini.SetBoolValue("Settings",   "bCAEnable",           settings.caEnable);
+		ini.SetDoubleValue("Settings", "fCAIntensity",        settings.caIntensity);
+		ini.SetBoolValue("Settings",   "bSharpenEnable",      settings.sharpenEnable);
+		ini.SetDoubleValue("Settings", "fSharpness",          settings.sharpness);
+		ini.SetBoolValue("Settings",   "bSunspriteEnable",    settings.sunspriteEnable);
+		ini.SetDoubleValue("Settings", "fSunspriteIntensity", settings.sunspriteIntensity);
+		ini.SetDoubleValue("Settings", "fSunspriteSize",      settings.sunspriteSize);
+		ini.SetBoolValue("Settings",   "bLensFlareEnable",    settings.lensFlareEnable);
+		ini.SetDoubleValue("Settings", "fLensFlareIntensity", settings.lensFlareIntensity);
+		ini.SetLongValue("Settings",   "iLensFlareGhosts",    settings.lensFlareGhosts);
+		ini.SetBoolValue("Settings",   "bDOFEnable",          settings.dofEnable);
+		ini.SetDoubleValue("Settings", "fAperture",           settings.aperture);
+		ini.SetDoubleValue("Settings", "fFocusDistance",      settings.focusDistance);
+		ini.SetDoubleValue("Settings", "fFocalLength",        settings.focalLength);
+		ini.SetDoubleValue("Settings", "fFocusRange",         settings.focusRange);
+		ini.SetLongValue("Settings",   "iDOFQuality",         settings.dofQuality);
+		ini.SetDoubleValue("Settings", "fCoCLimitFactor",     settings.cocLimitFactor);
 		ini.SaveFile(kIniPath);
 	}
 
 	struct PresetValues
 	{
-		int   iOperator;
-		float fExposureKey;
-		float fBloomIntensity;
-		float fVignetteIntensity;
-		float fCAIntensity;
-		float fSharpness;
-		float fSunspriteIntensity;
-		float fLensFlareIntensity;
+		int   tonemapOperator;
+		float exposureKey;
+		float bloomIntensity;
+		float vignetteIntensity;
+		float caIntensity;
+		float sharpness;
+		float sunspriteIntensity;
+		float lensFlareIntensity;
 	};
 
 	// Indexed by Preset enum. Custom (idx 0) is a sentinel and never read. Preset shape mirrors SSS's:
@@ -390,16 +390,16 @@ namespace cs::features
 		const int idx = static_cast<int>(preset);
 		if (preset != Preset::kCustom && idx >= 0 && idx < static_cast<int>(std::size(kPresets))) {
 			const auto& v = kPresets[idx];
-			settings.iOperator           = v.iOperator;
-			settings.fExposureKey        = v.fExposureKey;
-			settings.fBloomIntensity     = v.fBloomIntensity;
-			settings.fVignetteIntensity  = v.fVignetteIntensity;
-			settings.fCAIntensity        = v.fCAIntensity;
-			settings.fSharpness          = v.fSharpness;
-			settings.fSunspriteIntensity = v.fSunspriteIntensity;
-			settings.fLensFlareIntensity = v.fLensFlareIntensity;
+			settings.tonemapOperator           = v.tonemapOperator;
+			settings.exposureKey        = v.exposureKey;
+			settings.bloomIntensity     = v.bloomIntensity;
+			settings.vignetteIntensity  = v.vignetteIntensity;
+			settings.caIntensity        = v.caIntensity;
+			settings.sharpness          = v.sharpness;
+			settings.sunspriteIntensity = v.sunspriteIntensity;
+			settings.lensFlareIntensity = v.lensFlareIntensity;
 		}
-		settings.iPreset = idx;
+		settings.preset = idx;
 	}
 
 	bool Imagespace::SettingsMatchPreset(Preset preset) const
@@ -408,14 +408,14 @@ namespace cs::features
 		if (preset == Preset::kCustom || idx < 0 || idx >= static_cast<int>(std::size(kPresets)))
 			return false;
 		const auto& v = kPresets[idx];
-		return settings.iOperator == v.iOperator
-			&& std::fabs(settings.fExposureKey        - v.fExposureKey)        < 1e-3f
-			&& std::fabs(settings.fBloomIntensity     - v.fBloomIntensity)     < 1e-3f
-			&& std::fabs(settings.fVignetteIntensity  - v.fVignetteIntensity)  < 1e-3f
-			&& std::fabs(settings.fCAIntensity        - v.fCAIntensity)        < 1e-3f
-			&& std::fabs(settings.fSharpness          - v.fSharpness)          < 1e-3f
-			&& std::fabs(settings.fSunspriteIntensity - v.fSunspriteIntensity) < 1e-3f
-			&& std::fabs(settings.fLensFlareIntensity - v.fLensFlareIntensity) < 1e-3f;
+		return settings.tonemapOperator == v.tonemapOperator
+			&& std::fabs(settings.exposureKey        - v.exposureKey)        < 1e-3f
+			&& std::fabs(settings.bloomIntensity     - v.bloomIntensity)     < 1e-3f
+			&& std::fabs(settings.vignetteIntensity  - v.vignetteIntensity)  < 1e-3f
+			&& std::fabs(settings.caIntensity        - v.caIntensity)        < 1e-3f
+			&& std::fabs(settings.sharpness          - v.sharpness)          < 1e-3f
+			&& std::fabs(settings.sunspriteIntensity - v.sunspriteIntensity) < 1e-3f
+			&& std::fabs(settings.lensFlareIntensity - v.lensFlareIntensity) < 1e-3f;
 	}
 
 	bool Imagespace::EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format)
@@ -677,7 +677,7 @@ namespace cs::features
 
 	void Imagespace::RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex)
 	{
-		if (!settings.bDOFEnable) return;
+		if (!settings.dofEnable) return;
 		// Yield to ENB's DOF rather than double-blurring. The persisted user preference is left intact.
 		if (cs::env::IsENBLoaded()) return;
 
@@ -710,10 +710,10 @@ namespace cs::features
 		const float farP  = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
 
 		// Thin-lens CoC in pixel units; positive = background, negative = foreground. Pre-bake scale/bias so per-pixel coc = CocScale*z + CocBias.
-		const float cocLimitPx = settings.fCoCLimitFactor * static_cast<float>(dofHeight);
-		const float aperture   = settings.fAperture;
-		const float focalLen   = settings.fFocalLength;
-		const float focusDist  = settings.fFocusDistance;
+		const float cocLimitPx = settings.cocLimitFactor * static_cast<float>(dofHeight);
+		const float aperture   = settings.aperture;
+		const float focalLen   = settings.focalLength;
+		const float focusDist  = settings.focusDistance;
 		const float cocScale = (aperture * focalLen) / std::max(1.0f, focusDist - focalLen);
 		const float cocBias  = -cocScale * focusDist;
 
@@ -721,12 +721,12 @@ namespace cs::features
 		cb.CocScale = cocScale;
 		cb.CocBias  = cocBias;
 		cb.CocLimit = cocLimitPx;
-		cb.FocusRange = settings.fFocusRange;
+		cb.FocusRange = settings.focusRange;
 		cb.HalfDimensions[0] = dofWidth;
 		cb.HalfDimensions[1] = dofHeight;
 		cb.FullDimensions[0] = a_width;
 		cb.FullDimensions[1] = a_height;
-		cb.QualityLevel = static_cast<uint32_t>(std::clamp(settings.iDOFQuality, 0, 2));
+		cb.QualityLevel = static_cast<uint32_t>(std::clamp(settings.dofQuality, 0, 2));
 		cb.NearPlane    = nearP;
 		cb.FarPlane     = farP;
 		dofCB->Update(cb);
@@ -807,8 +807,8 @@ namespace cs::features
 		static bool dofFirstFireLogged = false;
 		if (!dofFirstFireLogged) {
 			L->info("DOF first dispatch: aperture={:.3f} focus={:.0f} focal={:.1f} quality={} cocLimit={:.1f}px",
-				settings.fAperture, settings.fFocusDistance, settings.fFocalLength,
-				settings.iDOFQuality, cocLimitPx);
+				settings.aperture, settings.focusDistance, settings.focalLength,
+				settings.dofQuality, cocLimitPx);
 			dofFirstFireLogged = true;
 		}
 	}
@@ -889,7 +889,7 @@ namespace cs::features
 			return;
 		// Suite-wide ENB yield. Persisted prefs are left intact; the user opts in to stacking via bForceWithENB.
 		static bool enbSuppressLogged = false;
-		if (cs::env::IsENBLoaded() && !settings.bForceWithENB) {
+		if (cs::env::IsENBLoaded() && !settings.forceWithENB) {
 			if (!enbSuppressLogged) {
 				L->info("Suite skipped: ENB loaded and bForceWithENB=false");
 				enbSuppressLogged = true;
@@ -939,19 +939,19 @@ namespace cs::features
 		if (!EnsureCompositeResources(W, H, fbDesc.Format))
 			return;
 
-		const bool wantAdaptive = settings.bAdaptiveExposure;
-		const bool wantBloom    = settings.bBloomEnable;
+		const bool wantAdaptive = settings.adaptiveExposure;
+		const bool wantBloom    = settings.bloomEnable;
 		// Yield sun additions to ENB unless the user opted into suite-wide stacking via bForceWithENB.
-		const bool enbYield     = cs::env::IsENBLoaded() && !settings.bForceWithENB;
-		const bool wantSunsprite = settings.bSunspriteEnable && !enbYield;
-		const bool wantLensFlare = settings.bLensFlareEnable && !enbYield;
-		const bool wantComposite = (settings.iOperator != 0) || wantBloom || settings.bVignetteEnable
-			|| settings.bCAEnable || settings.bSharpenEnable || (settings.bLUTEnable && lutSRV)
+		const bool enbYield     = cs::env::IsENBLoaded() && !settings.forceWithENB;
+		const bool wantSunsprite = settings.sunspriteEnable && !enbYield;
+		const bool wantLensFlare = settings.lensFlareEnable && !enbYield;
+		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || settings.vignetteEnable
+			|| settings.caEnable || settings.sharpenEnable || (settings.lutEnable && lutSRV)
 			|| wantSunsprite || wantLensFlare;
 
 		if (wantAdaptive && !EnsurePyramidResources(W, H))
 			return;
-		if (wantBloom && !EnsureBloomResources(W, H, settings.iBloomMips))
+		if (wantBloom && !EnsureBloomResources(W, H, settings.bloomMips))
 			return;
 
 		auto* lumCS    = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\Imagespace\\LumPyramidGenCS.hlsl", lumPyramidCS, "LumPyramidGenCS") : nullptr;
@@ -1009,7 +1009,7 @@ namespace cs::features
 			ExposureCB ecb{};
 			auto* timer = RE::BSTimer::GetSingleton();
 			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.5f) : (1.0f / 60.0f);
-			ecb.Tau       = settings.fAdaptationSpeed;
+			ecb.Tau       = settings.adaptationSpeed;
 			ecb.TailMipIdx = pyramidMipCount - 1;
 			exposureCB->Update(ecb);
 
@@ -1033,7 +1033,7 @@ namespace cs::features
 		// === 3. Bloom threshold (kFrameBuffer -> bloomChain[0]) ===
 		if (wantBloom) {
 			BloomThresholdCB bcb{};
-			bcb.Threshold = settings.fBloomThreshold;
+			bcb.Threshold = settings.bloomThreshold;
 			bcb.SoftKnee  = 0.5f;
 			bcb.OutputDimensions[0] = bloomChain[0]->desc.Width;
 			bcb.OutputDimensions[1] = bloomChain[0]->desc.Height;
@@ -1060,7 +1060,7 @@ namespace cs::features
 			context->CSSetSamplers(0, 1, samplers);
 			context->CSSetShader(downCS, nullptr, 0);
 
-			for (int k = 0; k < settings.iBloomMips - 1; ++k) {
+			for (int k = 0; k < settings.bloomMips - 1; ++k) {
 				BloomCB bcb{};
 				bcb.SrcDimensions[0] = bloomChain[k]->desc.Width;
 				bcb.SrcDimensions[1] = bloomChain[k]->desc.Height;
@@ -1086,15 +1086,15 @@ namespace cs::features
 		// === 5. Bloom upsample (additive accumulate, ping-pongs into bloomScratch) ===
 		if (wantBloom) {
 			context->CSSetShader(upCS, nullptr, 0);
-			for (int k = settings.iBloomMips - 2; k >= 0; --k) {
+			for (int k = settings.bloomMips - 2; k >= 0; --k) {
 				BloomCB bcb{};
-				bcb.SrcDimensions[0] = (k == settings.iBloomMips - 2) ? bloomChain[k + 1]->desc.Width  : bloomScratch[k + 1]->desc.Width;
-				bcb.SrcDimensions[1] = (k == settings.iBloomMips - 2) ? bloomChain[k + 1]->desc.Height : bloomScratch[k + 1]->desc.Height;
+				bcb.SrcDimensions[0] = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->desc.Width  : bloomScratch[k + 1]->desc.Width;
+				bcb.SrcDimensions[1] = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->desc.Height : bloomScratch[k + 1]->desc.Height;
 				bcb.DstDimensions[0] = bloomChain[k]->desc.Width;
 				bcb.DstDimensions[1] = bloomChain[k]->desc.Height;
 				bloomCB->Update(bcb);
 
-				ID3D11ShaderResourceView* srcSRV = (k == settings.iBloomMips - 2) ? bloomChain[k + 1]->srv.get() : bloomScratch[k + 1]->srv.get();
+				ID3D11ShaderResourceView* srcSRV = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->srv.get() : bloomScratch[k + 1]->srv.get();
 				ID3D11ShaderResourceView* srvs[2] = { srcSRV, bloomChain[k]->srv.get() };
 				context->CSSetShaderResources(0, 2, srvs);
 				ID3D11UnorderedAccessView* uavs[1] = { bloomScratch[k]->uav.get() };
@@ -1113,22 +1113,22 @@ namespace cs::features
 		// === 6. Composite ===
 		if (wantComposite) {
 			CompositeCB ccb{};
-			ccb.Operator               = static_cast<uint32_t>(settings.iOperator);
-			ccb.LUTEnable              = (settings.bLUTEnable && lutSRV) ? 1u : 0u;
+			ccb.Operator               = static_cast<uint32_t>(settings.tonemapOperator);
+			ccb.LUTEnable              = (settings.lutEnable && lutSRV) ? 1u : 0u;
 			ccb.AdaptiveExposureEnable = wantAdaptive ? 1u : 0u;
 			ccb.BloomEnable            = wantBloom ? 1u : 0u;
-			ccb.ExposureManual         = settings.fExposure;
-			ccb.LUTStrength            = settings.fLUTStrength;
-			ccb.ExposureKey            = settings.fExposureKey;
-			ccb.BloomIntensity         = settings.fBloomIntensity;
-			ccb.VignetteEnable         = settings.bVignetteEnable ? 1u : 0u;
-			ccb.CAEnable               = settings.bCAEnable ? 1u : 0u;
-			ccb.SharpenEnable          = settings.bSharpenEnable ? 1u : 0u;
-			ccb.VignetteIntensity      = settings.fVignetteIntensity;
-			ccb.CAIntensity            = settings.fCAIntensity;
-			ccb.Sharpness              = settings.fSharpness;
-			ccb.ExposureMin            = settings.fExposureMin;
-			ccb.ExposureMax            = settings.fExposureMax;
+			ccb.ExposureManual         = settings.exposure;
+			ccb.LUTStrength            = settings.lutStrength;
+			ccb.ExposureKey            = settings.exposureKey;
+			ccb.BloomIntensity         = settings.bloomIntensity;
+			ccb.VignetteEnable         = settings.vignetteEnable ? 1u : 0u;
+			ccb.CAEnable               = settings.caEnable ? 1u : 0u;
+			ccb.SharpenEnable          = settings.sharpenEnable ? 1u : 0u;
+			ccb.VignetteIntensity      = settings.vignetteIntensity;
+			ccb.CAIntensity            = settings.caIntensity;
+			ccb.Sharpness              = settings.sharpness;
+			ccb.ExposureMin            = settings.exposureMin;
+			ccb.ExposureMax            = settings.exposureMax;
 			ccb.OutputDimensions[0]    = W;
 			ccb.OutputDimensions[1]    = H;
 
@@ -1164,10 +1164,10 @@ namespace cs::features
 				L->info("Sun probe: ws=({:.3f},{:.3f},{:.3f}) uv=({:.3f},{:.3f}) sunsprite={} flare={}",
 					sunWSx, sunWSy, sunWSz, sunUVx, sunUVy, wantSunsprite ? "on" : "off", wantLensFlare ? "on" : "off");
 			}
-			ccb.SunspriteIntensity = settings.fSunspriteIntensity;
-			ccb.SunspriteSize      = settings.fSunspriteSize;
-			ccb.LensFlareIntensity = settings.fLensFlareIntensity;
-			ccb.LensFlareGhosts    = static_cast<uint32_t>(settings.iLensFlareGhosts);
+			ccb.SunspriteIntensity = settings.sunspriteIntensity;
+			ccb.SunspriteSize      = settings.sunspriteSize;
+			ccb.LensFlareIntensity = settings.lensFlareIntensity;
+			ccb.LensFlareGhosts    = static_cast<uint32_t>(settings.lensFlareGhosts);
 			compositeCB->Update(ccb);
 
 			ID3D11ShaderResourceView* srvs[4] = {
@@ -1231,8 +1231,8 @@ namespace cs::features
 		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
 		auto markCustomIfEdited = [&] {
 			if (ImGui::IsItemDeactivatedAfterEdit()) {
-				if (!SettingsMatchPreset(static_cast<Preset>(settings.iPreset)))
-					settings.iPreset = static_cast<int>(Preset::kCustom);
+				if (!SettingsMatchPreset(static_cast<Preset>(settings.preset)))
+					settings.preset = static_cast<int>(Preset::kCustom);
 				dirty = true;
 			}
 		};
@@ -1241,19 +1241,19 @@ namespace cs::features
 
 		if (cs::env::IsENBLoaded()) {
 			ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: suite skips by default.");
-			dirty |= ImGui::Checkbox("Force-enable with ENB", &settings.bForceWithENB);
+			dirty |= ImGui::Checkbox("Force-enable with ENB", &settings.forceWithENB);
 			ImGui::SetItemTooltip("Off (default): Imagespace yields the entire post-process chain to ENB. On: stack on top (may double-grade).");
 		}
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Preset");
 		const char* presetNames[] = { "Custom", "Subtle", "Standard", "Vivid", "Cinematic" };
-		int presetIdx = std::clamp(settings.iPreset, 0, 4);
+		int presetIdx = std::clamp(settings.preset, 0, 4);
 		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
 			if (presetIdx != static_cast<int>(Preset::kCustom)) {
 				ApplyPreset(static_cast<Preset>(presetIdx));
 			} else {
-				settings.iPreset = static_cast<int>(Preset::kCustom);
+				settings.preset = static_cast<int>(Preset::kCustom);
 			}
 			dirty = true;
 		}
@@ -1262,80 +1262,80 @@ namespace cs::features
 		ImGui::Separator();
 		ImGui::Text("Tonemap");
 		const char* opNames[] = { "Off (passthrough)", "Hable filmic", "Reinhard extended", "Lottes" };
-		if (ImGui::Combo("Operator", &settings.iOperator, opNames, IM_ARRAYSIZE(opNames))) {
-			if (!SettingsMatchPreset(static_cast<Preset>(settings.iPreset)))
-				settings.iPreset = static_cast<int>(Preset::kCustom);
+		if (ImGui::Combo("Operator", &settings.tonemapOperator, opNames, IM_ARRAYSIZE(opNames))) {
+			if (!SettingsMatchPreset(static_cast<Preset>(settings.preset)))
+				settings.preset = static_cast<int>(Preset::kCustom);
 			dirty = true;
 		}
 		ImGui::SetItemTooltip("Affects only the tonemap stage; bloom, LUT, and lens still run if their toggles are on.");
 
-		const char* expoLabel = settings.bAdaptiveExposure ? "Exposure bias" : "Exposure";
-		ImGui::SliderFloat(expoLabel, &settings.fExposure, 0.25f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
+		const char* expoLabel = settings.adaptiveExposure ? "Exposure bias" : "Exposure";
+		ImGui::SliderFloat(expoLabel, &settings.exposure, 0.25f, 4.0f, "%.2f", ImGuiSliderFlags_Logarithmic);
 		commitDirty();
 
 		ImGui::Separator();
 		ImGui::Text("Adaptive exposure");
-		dirty |= ImGui::Checkbox("Adaptive enable", &settings.bAdaptiveExposure);
-		ImGui::BeginDisabled(!settings.bAdaptiveExposure);
-		ImGui::SliderFloat("Adaptation speed (s)", &settings.fAdaptationSpeed, 0.1f, 5.0f, "%.2f");
+		dirty |= ImGui::Checkbox("Adaptive enable", &settings.adaptiveExposure);
+		ImGui::BeginDisabled(!settings.adaptiveExposure);
+		ImGui::SliderFloat("Adaptation speed (s)", &settings.adaptationSpeed, 0.1f, 5.0f, "%.2f");
 		commitDirty();
-		ImGui::SliderFloat("Key (mid-grey)", &settings.fExposureKey, 0.05f, 0.5f, "%.3f");
+		ImGui::SliderFloat("Key (mid-grey)", &settings.exposureKey, 0.05f, 0.5f, "%.3f");
 		ImGui::SetItemTooltip("Target average luminance the EMA aims for. Lower = darker midtones, higher = brighter midtones.");
 		markCustomIfEdited();
-		ImGui::SliderFloat("Min adapted", &settings.fExposureMin, 0.01f, 1.0f, "%.2f");
+		ImGui::SliderFloat("Min adapted", &settings.exposureMin, 0.01f, 1.0f, "%.2f");
 		commitDirty();
-		ImGui::SliderFloat("Max adapted", &settings.fExposureMax, 1.0f, 16.0f, "%.2f");
+		ImGui::SliderFloat("Max adapted", &settings.exposureMax, 1.0f, 16.0f, "%.2f");
 		commitDirty();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Bloom");
-		dirty |= ImGui::Checkbox("Bloom enable", &settings.bBloomEnable);
-		ImGui::BeginDisabled(!settings.bBloomEnable);
-		ImGui::SliderFloat("Threshold", &settings.fBloomThreshold, 0.0f, 2.0f, "%.2f");
+		dirty |= ImGui::Checkbox("Bloom enable", &settings.bloomEnable);
+		ImGui::BeginDisabled(!settings.bloomEnable);
+		ImGui::SliderFloat("Threshold", &settings.bloomThreshold, 0.0f, 2.0f, "%.2f");
 		ImGui::SetItemTooltip("Pixels brighter than this contribute to bloom. LDR-domain so values >1.0 give zero bloom.");
 		commitDirty();
-		ImGui::SliderFloat("Intensity", &settings.fBloomIntensity, 0.0f, 0.3f, "%.3f");
+		ImGui::SliderFloat("Intensity", &settings.bloomIntensity, 0.0f, 0.3f, "%.3f");
 		markCustomIfEdited();
-		ImGui::SliderInt("Mips", &settings.iBloomMips, 3, 6);
+		ImGui::SliderInt("Mips", &settings.bloomMips, 3, 6);
 		commitDirty();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Lens");
-		dirty |= ImGui::Checkbox("Vignette", &settings.bVignetteEnable);
-		ImGui::BeginDisabled(!settings.bVignetteEnable);
-		ImGui::SliderFloat("Vignette intensity", &settings.fVignetteIntensity, 0.0f, 1.0f, "%.2f");
+		dirty |= ImGui::Checkbox("Vignette", &settings.vignetteEnable);
+		ImGui::BeginDisabled(!settings.vignetteEnable);
+		ImGui::SliderFloat("Vignette intensity", &settings.vignetteIntensity, 0.0f, 1.0f, "%.2f");
 		markCustomIfEdited();
 		ImGui::EndDisabled();
-		dirty |= ImGui::Checkbox("Chromatic aberration", &settings.bCAEnable);
-		ImGui::BeginDisabled(!settings.bCAEnable);
-		ImGui::SliderFloat("CA intensity", &settings.fCAIntensity, 0.0f, 2.0f, "%.2f");
+		dirty |= ImGui::Checkbox("Chromatic aberration", &settings.caEnable);
+		ImGui::BeginDisabled(!settings.caEnable);
+		ImGui::SliderFloat("CA intensity", &settings.caIntensity, 0.0f, 2.0f, "%.2f");
 		markCustomIfEdited();
 		ImGui::EndDisabled();
-		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.bSharpenEnable);
-		ImGui::BeginDisabled(!settings.bSharpenEnable);
-		ImGui::SliderFloat("Sharpness", &settings.fSharpness, 0.0f, 1.0f, "%.2f");
+		dirty |= ImGui::Checkbox("Sharpen (CAS)", &settings.sharpenEnable);
+		ImGui::BeginDisabled(!settings.sharpenEnable);
+		ImGui::SliderFloat("Sharpness", &settings.sharpness, 0.0f, 1.0f, "%.2f");
 		markCustomIfEdited();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Sun & lens");
-		dirty |= ImGui::Checkbox("Sunsprite", &settings.bSunspriteEnable);
+		dirty |= ImGui::Checkbox("Sunsprite", &settings.sunspriteEnable);
 		ImGui::SetItemTooltip("Bright glow at the sun's screen position. No-op when sun is behind camera or in interiors.");
-		ImGui::BeginDisabled(!settings.bSunspriteEnable);
-		ImGui::SliderFloat("Sunsprite intensity", &settings.fSunspriteIntensity, 0.0f, 2.0f, "%.2f");
+		ImGui::BeginDisabled(!settings.sunspriteEnable);
+		ImGui::SliderFloat("Sunsprite intensity", &settings.sunspriteIntensity, 0.0f, 2.0f, "%.2f");
 		markCustomIfEdited();
-		ImGui::SliderFloat("Sunsprite size", &settings.fSunspriteSize, 0.01f, 0.2f, "%.3f");
+		ImGui::SliderFloat("Sunsprite size", &settings.sunspriteSize, 0.01f, 0.2f, "%.3f");
 		ImGui::SetItemTooltip("Disc radius as a fraction of frame height.");
 		commitDirty();
 		ImGui::EndDisabled();
-		dirty |= ImGui::Checkbox("Lens flare", &settings.bLensFlareEnable);
+		dirty |= ImGui::Checkbox("Lens flare", &settings.lensFlareEnable);
 		ImGui::SetItemTooltip("Ghost reflections traversing from the sun toward the screen centre.");
-		ImGui::BeginDisabled(!settings.bLensFlareEnable);
-		ImGui::SliderFloat("Flare intensity", &settings.fLensFlareIntensity, 0.0f, 2.0f, "%.2f");
+		ImGui::BeginDisabled(!settings.lensFlareEnable);
+		ImGui::SliderFloat("Flare intensity", &settings.lensFlareIntensity, 0.0f, 2.0f, "%.2f");
 		markCustomIfEdited();
-		ImGui::SliderInt("Flare ghosts", &settings.iLensFlareGhosts, 3, 7);
+		ImGui::SliderInt("Flare ghosts", &settings.lensFlareGhosts, 3, 7);
 		commitDirty();
 		ImGui::EndDisabled();
 
@@ -1343,52 +1343,52 @@ namespace cs::features
 		ImGui::Text("Bokeh depth of field");
 		if (cs::env::IsENBLoaded())
 			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.4f, 1.0f), "ENB detected: ours yields to ENB DOF.");
-		dirty |= ImGui::Checkbox("DOF enable", &settings.bDOFEnable);
-		ImGui::BeginDisabled(!settings.bDOFEnable);
-		ImGui::SliderFloat("Aperture", &settings.fAperture, 0.0f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
+		dirty |= ImGui::Checkbox("DOF enable", &settings.dofEnable);
+		ImGui::BeginDisabled(!settings.dofEnable);
+		ImGui::SliderFloat("Aperture", &settings.aperture, 0.0f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);
 		ImGui::SetItemTooltip("Larger = stronger background blur. 0 disables blur entirely.");
 		commitDirty();
-		ImGui::SliderFloat("Focus distance (game units)", &settings.fFocusDistance, 10.0f, 100000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+		ImGui::SliderFloat("Focus distance (game units)", &settings.focusDistance, 10.0f, 100000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 		ImGui::SetItemTooltip("Distance to the in-focus plane in game units.");
 		commitDirty();
-		ImGui::SliderFloat("Focal length", &settings.fFocalLength, 1.0f, 200.0f, "%.1f");
+		ImGui::SliderFloat("Focal length", &settings.focalLength, 1.0f, 200.0f, "%.1f");
 		ImGui::SetItemTooltip("Larger focal length = narrower depth of field around the focus plane.");
 		commitDirty();
-		ImGui::SliderFloat("Focus range", &settings.fFocusRange, 10.0f, 10000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
+		ImGui::SliderFloat("Focus range", &settings.focusRange, 10.0f, 10000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 		ImGui::SetItemTooltip("Width of the sharp zone around the focus plane.");
 		commitDirty();
 		const char* qualityNames[] = { "Performance (12 taps)", "Balanced (24 taps)", "Quality (24 taps)" };
-		int qualityIdx = std::clamp(settings.iDOFQuality, 0, 2);
+		int qualityIdx = std::clamp(settings.dofQuality, 0, 2);
 		if (ImGui::Combo("Quality", &qualityIdx, qualityNames, IM_ARRAYSIZE(qualityNames))) {
-			settings.iDOFQuality = qualityIdx;
+			settings.dofQuality = qualityIdx;
 			dirty = true;
 		}
-		ImGui::SliderFloat("CoC limit (% of frame height)", &settings.fCoCLimitFactor, 0.005f, 0.10f, "%.3f");
+		ImGui::SliderFloat("CoC limit (% of frame height)", &settings.cocLimitFactor, 0.005f, 0.10f, "%.3f");
 		ImGui::SetItemTooltip("Caps maximum blur radius. 0.04 = up to 4% of frame height.");
 		commitDirty();
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
 		ImGui::Text("Color grading (LUT)");
-		dirty |= ImGui::Checkbox("LUT enabled", &settings.bLUTEnable);
-		ImGui::BeginDisabled(!settings.bLUTEnable);
+		dirty |= ImGui::Checkbox("LUT enabled", &settings.lutEnable);
+		ImGui::BeginDisabled(!settings.lutEnable);
 		char lutBuf[256] = {};
-		const auto lutLen = std::min(settings.sLUTPath.size(), sizeof(lutBuf) - 1);
-		std::memcpy(lutBuf, settings.sLUTPath.data(), lutLen);
+		const auto lutLen = std::min(settings.lutPath.size(), sizeof(lutBuf) - 1);
+		std::memcpy(lutBuf, settings.lutPath.data(), lutLen);
 		if (ImGui::InputText("LUT file (no ext)", lutBuf, sizeof(lutBuf), ImGuiInputTextFlags_EnterReturnsTrue)) {
-			settings.sLUTPath = lutBuf;
-			LoadLUTFromDisk(settings.sLUTPath);
+			settings.lutPath = lutBuf;
+			LoadLUTFromDisk(settings.lutPath);
 			dirty = true;
 		}
 		if (ImGui::Button("Reload LUT")) {
-			settings.sLUTPath = lutBuf;
-			LoadLUTFromDisk(settings.sLUTPath);
+			settings.lutPath = lutBuf;
+			LoadLUTFromDisk(settings.lutPath);
 			dirty = true;
 		}
 		ImGui::SameLine();
 		if (lutSRV) ImGui::TextColored(ImVec4(0.4f, 1, 0.4f, 1), "loaded: %s", lutLoadedPath.c_str());
 		else        ImGui::TextDisabled("no LUT loaded");
-		ImGui::SliderFloat("LUT strength", &settings.fLUTStrength, 0.0f, 1.0f, "%.2f");
+		ImGui::SliderFloat("LUT strength", &settings.lutStrength, 0.0f, 1.0f, "%.2f");
 		commitDirty();
 		ImGui::EndDisabled();
 
