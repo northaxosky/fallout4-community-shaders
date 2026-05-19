@@ -5,36 +5,45 @@
 // `shaders/lighting/README.md` and the runbook at
 // `Fallout4RE/Workspace/docs/lighting-shader-reconstruction-runbook.md`.
 //
-// Status: NEEDS-EXTRACTION
+// Status: WIP - BLOB MISIDENTIFIED
+// See `shaders/lighting/shader-2122-analysis.md` for the full negative
+// findings. Three independent confirmations from the 2026-05-18 campaign:
 //
-// Source binding:
+//   1. Shaders011 blob 2122 (sha1 af996dd590c2...) is NOT a deferred composite.
+//      Per-vertex inputs (TEXCOORD/POSITION), sun BRDF math against cb0[2],
+//      no albedo SRV. Likely a per-light deferred geometry pass (sun disc,
+//      sky dome, distant terrain) that samples the already-written
+//      kDiffuseBuffer/kSpecularBuffer at clamped screen UV.
+//   2. Shaders011 blob 556 (sha1 3d7efefcfa9c...) is ALSO not a composite -
+//      it is a particle/decal shader with discard_nz distance fade.
+//   3. DrawWorld::DeferredComposite is a C++ orchestrator that dispatches
+//      3 separate RenderPassImmediately calls + 4 RenderGeometryGroup
+//      calls across 4 render-target switchovers. There is no single
+//      "composite PS"; the composite is a multi-pass operation.
+//
+// The actual composite PS is identified by live RenderDoc capture eid 45368
+// (sha1 prefix 813c9acec23b, 3172 bytes, 6 SRVs, 2 CBs, writes RT 172 =
+// kMain). That SHA does not appear in Shaders011.fxp (0/3939 blobs) or in
+// Fallout4.unpacked.exe (0/924 embedded blobs). Reconstruction is blocked
+// on locating the on-disk source of that bytecode. See
+// `shaders/lighting/docs/lighting-shader-followups.md` "Shaders011.2122"
+// for the open items and next-step procedure.
+//
+// Source binding (HOST C++ FUNCTION - still correct):
 //   - Function: DrawWorld::DeferredComposite
 //     REL::ID array { OG=728427, NG=2318313, AE=2318313 }
 //     OG  RVA 0x02855E60 (size 2633b / 587 insn)
 //     NG  RVA 0x0209B100 (size 2970b / 639 insn)
 //     AE  RVA 0x021F0790 (size 2970b / 639 insn)
-//     Confirmed via Render_PreUI anchor-walk; see
-//     Fallout4RE/knowledge/cross-runtime/render-subsystem-manual-overrides.json
-//   - Reads:
-//       t? : kGbufferAlbedo     (RT 22)
-//       t? : kDiffuseBuffer     (RT 58) -- diffuse light accumulation
-//       t? : kSpecularBuffer    (RT 59) -- specular light accumulation
-//       (potentially) emissive, fog
-//   - Writes:
-//       o0 : kMain              (RT 3) -- composited HDR scene
+//   - Confirmed via Render_PreUI anchor-walk (see
+//     Fallout4RE/knowledge/cross-runtime/render-subsystem-manual-overrides.json)
+//   - Dispatches 3 separate PS draws - the one we want is the first follow-up
+//     to the ambient/IBL pass, RenderDoc eid 45368 in FO4_frame5407.rdc.
 //
-// Why we want this shader:
-//   This is the canonical place to insert apply-passes that need diffuse and
-//   specular accumulation buffers separated from direct light - exactly the
-//   boundary SSGI Phase 2 wants to hook (instead of the current
-//   post-DeferredLightsImpl modulation that darkens both ambient and direct).
-//
-// Reconstruction has not been performed: no DXBC blob is available in this
-// repo. Populate per the runbook.
-//
-// Do not commit speculation.
+// Do not commit speculation. The #error stays in place until the actual
+// composite PS bytecode is sourced and round-trip verified.
 
 #error \
-"shaders/lighting/deferred_composite.hlsl is a reconstruction stub. " \
-"Populate it from a RenderDoc capture or .ba2 extraction following " \
-"Fallout4RE/Workspace/docs/lighting-shader-reconstruction-runbook.md."
+"shaders/lighting/deferred_composite.hlsl is WIP - blob misidentified. " \
+"See shader-2122-analysis.md and docs/lighting-shader-followups.md for " \
+"the negative findings and the path to resolution."
