@@ -4,7 +4,6 @@
   "description": "Community Shaders port for Fallout 4",
   "supports": "windows & x64",
   "dependencies": [
-    "boost-stl-interfaces",
     "fmt",
     "rsm-mmio",
     {

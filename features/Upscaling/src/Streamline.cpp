@@ -16,8 +16,6 @@ void Streamline::CacheDLSSFunctions()
 			core->featureDLSS, (void*)core->slGetFeatureFunction);
 		return;
 	}
-	core->slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSGetOptimalSettings", (void*&)slDLSSGetOptimalSettings);
-	core->slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSGetState",          (void*&)slDLSSGetState);
 	core->slGetFeatureFunction(sl::kFeatureDLSS, "slDLSSSetOptions",        (void*&)slDLSSSetOptions);
 	L->info("DLSS entry points cached");
 }

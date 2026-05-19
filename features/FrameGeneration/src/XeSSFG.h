@@ -38,8 +38,6 @@ public:
 		bool a_reset);
 	void SetEnabled(uint32_t a_enabled);
 
-	void Shutdown();
-
 	bool initialized = false;
 	HMODULE fgModule = nullptr;
 	HMODULE xellModule = nullptr;

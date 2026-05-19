@@ -59,17 +59,12 @@ namespace cs
 		PFun_slShutdown*             slShutdown{};
 		PFun_slIsFeatureSupported*   slIsFeatureSupported{};
 		PFun_slIsFeatureLoaded*      slIsFeatureLoaded{};
-		PFun_slSetFeatureLoaded*     slSetFeatureLoaded{};
 		PFun_slEvaluateFeature*      slEvaluateFeature{};
-		PFun_slAllocateResources*    slAllocateResources{};
 		PFun_slFreeResources*        slFreeResources{};
 		PFun_slSetTag2*              slSetTag{};
 		PFun_slSetTagForFrame2*      slSetTagForFrame{};
-		PFun_slGetFeatureRequirements* slGetFeatureRequirements{};
-		PFun_slGetFeatureVersion*    slGetFeatureVersion{};
 		PFun_slUpgradeInterface*     slUpgradeInterface{};
 		PFun_slSetConstants*         slSetConstants{};
-		PFun_slGetNativeInterface*   slGetNativeInterface{};
 		PFun_slGetFeatureFunction*   slGetFeatureFunction{};
 		PFun_slGetNewFrameToken*     slGetNewFrameToken{};
 		PFun_slSetD3DDevice*         slSetD3DDevice{};

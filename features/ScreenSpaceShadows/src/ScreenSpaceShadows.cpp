@@ -339,12 +339,6 @@ namespace cs::features
 
 			scratchDiffuse = std::make_unique<sss::Texture2D>(td);
 
-			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-			sd.Format = dd.Format;
-			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			sd.Texture2D.MipLevels = 1;
-			scratchDiffuse->CreateSRV(sd);
-
 			D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
 			ud.Format = dd.Format;
 			ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;

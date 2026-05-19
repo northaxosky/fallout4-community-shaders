@@ -258,17 +258,4 @@ void XeSSFG::SetEnabled(uint32_t a_enabled)
 		pfn_xefgSwapChainSetEnabled(xefgCtx, a_enabled);
 }
 
-void XeSSFG::Shutdown()
-{
-	if (xefgCtx && pfn_xefgSwapChainDestroy) {
-		pfn_xefgSwapChainDestroy(xefgCtx);
-		xefgCtx = nullptr;
-	}
-	if (xellCtx && pfn_xellDestroyContext) {
-		pfn_xellDestroyContext(xellCtx);
-		xellCtx = nullptr;
-	}
-	initialized = false;
-}
-
 }

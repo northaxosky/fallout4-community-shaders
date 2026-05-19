@@ -128,8 +128,6 @@ public:
 	UINT frameIndex = 0;
 	UINT64 fenceValue = 0;
 
-	LARGE_INTEGER qpf;
-
 	DXGISwapChainProxy* swapChainProxy = nullptr;
 
 	void CreateD3D12Device(IDXGIAdapter* a_adapter);

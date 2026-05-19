@@ -311,7 +311,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 		// Set constants and tag resources
 		static auto gameViewport = State_GetSingleton();
-		static auto renderTargetManager = RenderTargetManager_GetSingleton();
 
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 

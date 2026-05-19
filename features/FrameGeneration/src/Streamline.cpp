@@ -210,12 +210,4 @@ void StreamlineFG::Present(
 	}
 }
 
-void StreamlineFG::Shutdown()
-{
-	auto* core = cs::Streamline::GetSingleton();
-	if (core->slShutdown && core->IsInitialized()) {
-		core->slShutdown();
-	}
-}
-
 }

@@ -59,17 +59,12 @@ namespace cs
 		slShutdown               = (PFun_slShutdown*)          GetProcAddress(interposer, "slShutdown");
 		slIsFeatureSupported     = (PFun_slIsFeatureSupported*)GetProcAddress(interposer, "slIsFeatureSupported");
 		slIsFeatureLoaded        = (PFun_slIsFeatureLoaded*)   GetProcAddress(interposer, "slIsFeatureLoaded");
-		slSetFeatureLoaded       = (PFun_slSetFeatureLoaded*)  GetProcAddress(interposer, "slSetFeatureLoaded");
 		slEvaluateFeature        = (PFun_slEvaluateFeature*)   GetProcAddress(interposer, "slEvaluateFeature");
-		slAllocateResources      = (PFun_slAllocateResources*) GetProcAddress(interposer, "slAllocateResources");
 		slFreeResources          = (PFun_slFreeResources*)     GetProcAddress(interposer, "slFreeResources");
 		slSetTag                 = (PFun_slSetTag2*)           GetProcAddress(interposer, "slSetTag");
 		slSetTagForFrame         = (PFun_slSetTagForFrame2*)   GetProcAddress(interposer, "slSetTagForFrame");
-		slGetFeatureRequirements = (PFun_slGetFeatureRequirements*)GetProcAddress(interposer, "slGetFeatureRequirements");
-		slGetFeatureVersion      = (PFun_slGetFeatureVersion*) GetProcAddress(interposer, "slGetFeatureVersion");
 		slUpgradeInterface       = (PFun_slUpgradeInterface*)  GetProcAddress(interposer, "slUpgradeInterface");
 		slSetConstants           = (PFun_slSetConstants*)      GetProcAddress(interposer, "slSetConstants");
-		slGetNativeInterface     = (PFun_slGetNativeInterface*)GetProcAddress(interposer, "slGetNativeInterface");
 		slGetFeatureFunction     = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
 		slGetNewFrameToken       = (PFun_slGetNewFrameToken*)  GetProcAddress(interposer, "slGetNewFrameToken");
 		slSetD3DDevice           = (PFun_slSetD3DDevice*)      GetProcAddress(interposer, "slSetD3DDevice");

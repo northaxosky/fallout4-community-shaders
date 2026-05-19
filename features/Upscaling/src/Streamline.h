@@ -35,8 +35,6 @@ public:
 	sl::ViewportHandle viewport{ 0 };
 	sl::FrameToken*    frameToken = nullptr;
 
-	PFun_slDLSSGetOptimalSettings* slDLSSGetOptimalSettings{};
-	PFun_slDLSSGetState*           slDLSSGetState{};
 	PFun_slDLSSSetOptions*         slDLSSSetOptions{};
 };
 

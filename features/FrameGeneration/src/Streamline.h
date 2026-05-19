@@ -61,8 +61,6 @@ public:
 		float a_cameraNear, float a_cameraFar,
 		const CameraData& a_camera);
 
-	void Shutdown();
-
 	// Active for this session, distinct from cs::Streamline::featureDLSSG (loaded + supported).
 	bool sessionActive = false;
 	uint32_t configuredFrameCount = 1;

@@ -736,10 +736,7 @@ struct SetUseDynamicResolutionViewportAsDefaultViewport
 
 		if (!a_true) {
 			// Imagespace just completed - capture HUDLess (pre-UI scene)
-			upscaling->imagespaceComplete = true;
 			upscaling->PostDisplay();
-		} else {
-			upscaling->imagespaceComplete = false;
 		}
 	}
 	static inline REL::Relocation<decltype(thunk)> func;

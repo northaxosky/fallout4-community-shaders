@@ -58,8 +58,6 @@ public:
 
 	bool setupBuffers = false;
 
-	bool imagespaceComplete = false;
-
 	void LoadSettings();
 	void SaveSettings();
 	void ReloadSettingsIfNeeded();
