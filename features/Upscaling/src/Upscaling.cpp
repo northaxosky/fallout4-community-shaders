@@ -16,6 +16,8 @@ namespace cs::features
 	using namespace upscaling;
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling"); }
 
+	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini";
+
 
 /** @brief Hook for updating jitter, dynamic resolution, and resources */
 struct BSGraphics_State_UpdateDynamicResolution
@@ -383,7 +385,7 @@ void Upscaling::LoadSettings()
 {
 	CSimpleIniA ini;
 	ini.SetUnicode();
-	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini");
+	ini.LoadFile(kIniPath);
 
 	settings.upscaleMethodPreference = static_cast<uint>(ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2));
 	settings.qualityMode = static_cast<uint>(ini.GetLongValue("Settings", "iQualityMode", 1));
@@ -396,12 +398,12 @@ void Upscaling::SaveSettings()
 {
 	CSimpleIniA ini;
 	ini.SetUnicode();
-	ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini");
+	ini.LoadFile(kIniPath);
 
 	ini.SetLongValue("Settings", "iUpscaleMethodPreference", settings.upscaleMethodPreference);
 	ini.SetLongValue("Settings", "iQualityMode", settings.qualityMode);
 
-	ini.SaveFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini");
+	ini.SaveFile(kIniPath);
 }
 
 void Upscaling::DrawSettings()
