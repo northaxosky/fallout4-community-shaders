@@ -594,7 +594,14 @@ This closes the `shader-3560-analysis.md` "Reconstruction gap"
 called out at the top of that doc: the HLSL is shipped.
 
 
-## Shaders011.3295 / `sun_light_deferred.hlsl` (RECONSTRUCTION QUEUED 2026-05-19)
+## Shaders011.3295 / `sun_light_deferred.hlsl` (RECONSTRUCTED 2026-05-19, roundtrip -8.8%)
+
+Campaign: Fallout4RE 2026-05-19 reconstruct-sun-light-ps follow-on to
+find-actual-sun-light-ps. **Closes the deferred-pipeline arc** - the
+sibling repo's `shaders/lighting/` now has 4 reconstructed reference
+HLSL files covering the complete deferred-lighting pipeline:
+deferred composite + ambient/IBL + VLS slice scatter + sun-light
+deferred.
 
 Campaign queued: Fallout4RE 2026-05-19 find-actual-sun-light-ps located the
 canonical directional sun-light deferred PS as **corpus blob 3295**
@@ -656,3 +663,81 @@ When `sun_light_deferred.hlsl` ships, the deferred-pipeline reference
 HLSL set will be at **4 files** (composite, ambient/IBL, sun-light,
 VLS scatter), covering the major paths in FO4's deferred lighting -
 the complete demonstrative artifact the strategic goal called for.
+
+
+### Reconstructed this campaign (2026-05-19 reconstruct-sun-light-ps)
+
+- 272-instruction directional sun-light deferred PS fully transcribed
+  to HLSL. Major sections:
+  1. Depth sample + matrix select (SHARED CB12[20..27] infrastructure -
+     4th shader in the deferred pipeline to use this pattern).
+  2. Octahedral normal decode from t1.
+  3. View-space position reconstruction via picked matrix.
+  4. Cascade-0 PCF: 8-iteration [loop] with 2 SampleCmp taps per iter,
+     stratified Poisson from the embedded ICB, 16 total taps averaged
+     with 1/16.
+  5. Cascade-1 PCF: same pattern with cb2[14..16] matrix and cb2[22]
+     params.
+  6. Cascade blend by view-space distance with smoothstep.
+  7. Distance fade by cb2[24].x squared-then-squared.
+  8. Material-id branch:
+     - Material 1 (skin): SSS-style BRDF with rotated cos/sin pairs
+       using cb12[28..29], wavelength-dependent absorption.
+     - Material non-1: Schlick-Fresnel + GGX-like specular against sun
+       direction.
+  9. Final composition: shadowed diffuse + specular + ambient AO term.
+  10. MRT output: o0 (diffuse / 3) -> RT 389, o1 (specular) -> RT 392.
+- Stratified Poisson PCF kernel inlined (32 of the 999 ICB entries -
+  loop only consumes 16, so functional but not byte-equivalent).
+- `[loop]` attribute on PCF loops preserves the runtime-loop structure
+  exactly (4 sample_c_lz asm instructions, matching original 8/8 sample
+  count).
+- fxc round-trip: 248 vs 272 insns (**-8.8%, within 10% threshold**),
+  samples 8/8 EXACT MATCH, resource bindings + signature EXACT MATCH.
+- Sibling README status: `reconstructed-roundtrip-8.8pct`.
+
+### Open items
+
+- [ ] **Material-non-1 BRDF block is condensed** for readability. The
+  original asm at insns 178-241 (~64 instructions) has more granular
+  MAD sequences than my reconstruction; adding the granularity would
+  push the round-trip closer to 0% but inflate the HLSL significantly.
+  Optional polish.
+- [ ] **Full 999-entry Poisson ICB inline** for byte-equivalent
+  round-trip. Currently 32 entries are inlined; the loop only accesses
+  16, so functional output should match. Optional polish for asm-
+  exact equivalence.
+- [ ] **CB12[28..30] semantic names** for the SSS-style BRDF
+  parameters. Currently `cb12_idx28_sss_params` /
+  `cb12_idx29_sss_angles` / `cb12_idx30` placeholders. IDA Hex-Rays
+  cross-read of `BSDFLightShaderPixelConstants` (AE RVA
+  `0x02269B80`) would lock names.
+- [ ] **CB2[3..9] + [17..19] + [23] semantic names**. These are
+  CB2 slots that exist in the 25-vec4 layout but are not read by this
+  shader; the dispatch site C++ populates them. `BSDFLightShader-
+  PixelConstants` cross-read closes these.
+- [ ] **5-peer-cluster disambiguation**: blob 3295 vs 3234/3250/3268/3182.
+  The reconstruction is structurally the same across the cluster; the
+  exact permutation flags choosing 3295 (vs siblings) need
+  `BSDFLightShaderMacros::GetPixelShaderID` cross-read (AE RVA
+  `0x0226A030`) or runtime catalog WU3 enrichment.
+- [ ] **Cascade-PCF zRef bias** (-0.275 * range_rcp at insns 48, 83).
+  The exact bias formula is preserved structurally but the value
+  -0.275 may have a semantic name (likely `ShadowDepthBias` or
+  `CascadeNormalOffset`).
+- [ ] **Per-frame permutation diff**. A second RenderDoc capture under
+  different shadow distance / IBL settings could surface which of the
+  5-peer-cluster variants gets dispatched in non-default settings.
+
+### Deferred-pipeline arc CLOSED
+
+This is the 4th and final reconstruction in the demonstrative-artifact
+arc. After this commit:
+- `shaders/lighting/deferred_composite.hlsl`    (Target 1, +20%)
+- `shaders/lighting/ambient_ibl_pass.hlsl`       (Target 2, +1.5%)
+- `shaders/lighting/vls_slice_scatter.hlsl`      (Target 3, +33.9%, role-confirmed)
+- `shaders/lighting/sun_light_deferred.hlsl`     (this campaign, -8.8%)
+
+The complete FO4 deferred-lighting pipeline is now reverse-engineered
+and shipped as readable HLSL reference - the strategic goal the
+deferred-pipeline arc was opened to deliver.
