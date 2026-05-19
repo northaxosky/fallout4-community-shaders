@@ -242,54 +242,56 @@ SamplerState g_sBlurDepthRef       : register(s15);
 // ----------------------------------------------------------------------------
 // SSSS bilateral-blur kernel.
 //
-// 9 taps: center + 8 ring taps along one separable axis (this PS does
-// only one direction; the perpendicular pass lives elsewhere in the
-// rendering pipeline, queued for investigation).
+// 11 taps total: 1 center + 10 ring along one separable axis at offsets
+// +/- {2.0, 1.28, 0.72, 0.32, 0.08}. The perpendicular pass lives in a
+// sibling shader (not investigated here).
 //
-// Tap offsets are along (CB0[0].xy * <constant>) / depth-adjusted factor;
-// computed at insn 85-87 per tap. The 8 ring taps come in 4 paired
-// CB0[0].xy.xyxy MAD operations producing 2 taps each.
+// Tap offsets are scaled by (CB0[0].xy * base) / depth-derived factor.
+// The 10 ring taps are emitted as 5 paired CB0[0].xyxy MAD operations in
+// the corpus asm. The center weight multiplies skinAux (t4), NOT the
+// center sample of t10 (blurSourceCenter is unused once the kernel
+// begins; the earlier sample is shared with the non-skin branch).
 //
 // Per-tap RGB weights match the Christensen-Burley SSSS approximation
-// (per-wavelength absorption -- red diffuses farthest, blue least).
-// Center tap gets a high weight; outermost taps get tiny weights.
+// (per-wavelength absorption, red diffuses farthest).
 // ----------------------------------------------------------------------------
 
-// Each tap: (offset_x, offset_y) in scaled-UV space, plus an (r, g, b) weight.
-// Center weight applied separately; the 8 ring weights below match the
-// asm's per-block MAD coefficients in order.
-static const float2 SSSS_BLUR_OFFSETS[8] =
+// 10 symmetric ring offsets (5 negative + 5 positive); index i has weight
+// SSSS_RING_WEIGHTS[i].
+static const float2 SSSS_RING_OFFSETS[10] =
 {
-    float2(-2.000,  -2.000),   // tap 1
-    float2(-1.280,  -1.280),   // tap 2
-    float2(-0.720,  -0.720),   // tap 3
-    float2(-0.320,  -0.320),   // tap 4
-    float2(-0.080,  -0.080),   // tap 5
-    float2( 0.080,   0.080),   // tap 6
-    float2( 0.320,   0.320),   // tap 7
-    float2( 0.720,   0.720),   // tap 8
+    float2(-2.000,  -2.000),
+    float2(-1.280,  -1.280),
+    float2(-0.720,  -0.720),
+    float2(-0.320,  -0.320),
+    float2(-0.080,  -0.080),
+    float2( 0.080,   0.080),
+    float2( 0.320,   0.320),
+    float2( 0.720,   0.720),
+    float2( 1.280,   1.280),
+    float2( 2.000,   2.000),
 };
 
-// Per-tap weights extracted from the asm's MAD coefficients (insns
-// 103, 120, 137, 153, 170, 186, 203, 219). The 9th-tap weight at
-// (1.280, 1.280) is applied at insn 236; the final (2.000, 2.000)
-// scale tap accumulates into the center at insn 251.
-static const float3 SSSS_TAP_WEIGHTS[9] =
+// Symmetric per-RGB weights. Asm-extracted from blob 3559 corpus
+// (insns 103 outer, 119 -1.28, 137 -0.72, 152 -0.32, 169 -0.08,
+//  185 +0.08, 202 +0.32, 219 +0.72, 235 +1.28, 250 outer).
+// Sum + center weight (0.560479, 0.669086, 0.784728) = ~1.0 per channel.
+static const float3 SSSS_RING_WEIGHTS[10] =
 {
-    float3(0.560479, 0.669086, 0.784728),  // center (insn 104)
-    float3(0.019283, 0.002820, 0.000842),  // tap 1 (insn 120)
-    float3(0.036390, 0.013100, 0.006437),  // tap 2 (insn 137)
-    float3(0.077180, 0.113491, 0.079380),  // tap 3 (insn 153)
-    float3(0.077180, 0.113491, 0.079380),  // tap 4 (insn 170, same shape)
-    float3(0.082190, 0.035861, 0.020926),  // tap 5 (insn 186)
-    float3(0.082190, 0.035861, 0.020926),  // tap 6 (insn 203, same shape)
-    float3(0.036390, 0.013100, 0.006437),  // tap 7 (insn 219, same)
-    float3(0.019283, 0.002820, 0.000842),  // tap 8 (insn 236, same as tap 1)
+    float3(0.004717, 0.000185, 0.000051),  // -2.0
+    float3(0.019283, 0.002820, 0.000842),  // -1.28
+    float3(0.036390, 0.013100, 0.006437),  // -0.72
+    float3(0.077180, 0.113491, 0.079380),  // -0.32
+    float3(0.082190, 0.035861, 0.020926),  // -0.08
+    float3(0.082190, 0.035861, 0.020926),  // +0.08
+    float3(0.077180, 0.113491, 0.079380),  // +0.32
+    float3(0.036390, 0.013100, 0.006437),  // +0.72
+    float3(0.019283, 0.002820, 0.000842),  // +1.28
+    float3(0.004717, 0.000185, 0.000051),  // +2.0
 };
 
-// Final outer-ring tap at offset (2.0, 2.0) with weight matching tap 9
-// (per insn 251, applied to t8.xyz center-color result).
-static const float3 SSSS_OUTER_TAP_WEIGHT = float3(0.004717, 0.000185, 0.000051);
+// Center tap weight multiplies skinAux (t4), not blurSourceCenter (t10).
+static const float3 SSSS_CENTER_WEIGHT = float3(0.560479, 0.669086, 0.784728);
 
 // ----------------------------------------------------------------------------
 // Entry point.
@@ -319,19 +321,16 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientPairSum = (ambientA + ambientB) * 3.0;
 
     // ----- Insn 6-20: sample depth, depth-based matrix select -----------
+    // Corpus uses explicit `if/else` with per-row `mov rN.xyzw, cb12[K]`
+    // (insns 7-20). Per-row ternary gives `movc rN, ...` which is the
+    // closest fxc gets without [branch] making the issue worse.
     float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).y;
-    float linearizedDepth;
-    float4x4 reprojMatrix;
-    if (depth < 0.01)
-    {
-        linearizedDepth = depth * 100.0;
-        reprojMatrix    = cb12_near_reproj_matrix;
-    }
-    else
-    {
-        linearizedDepth = depth * 1.01 - 0.01;
-        reprojMatrix    = cb12_far_reproj_matrix;
-    }
+    bool isNearPath = (depth < 0.01);
+    float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
+    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
+    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
+    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
+    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
 
     // ----- Insn 21: bilateral-blur center sample (color) ----------------
     float3 blurSourceCenter = g_tBlurSource.SampleLevel(g_sBlurSource, uv, 0).xyz;
@@ -375,10 +374,10 @@ PS_OUTPUT main(PS_INPUT input)
         float2 uvNDC = uvRemapped.xz * 2.0 - 1.0;
         float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
         float4 posViewH;
-        posViewH.x = dot(reprojMatrix[0], pos4);
-        posViewH.y = dot(reprojMatrix[1], pos4);
-        posViewH.z = dot(reprojMatrix[2], pos4);
-        posViewH.w = dot(reprojMatrix[3], pos4);
+        posViewH.x = dot(reprojRow0, pos4);
+        posViewH.y = dot(reprojRow1, pos4);
+        posViewH.z = dot(reprojRow2, pos4);
+        posViewH.w = dot(reprojRow3, pos4);
         float3 posView = posViewH.xyz / posViewH.www;
 
         // Insn 49-54: view direction + reflection vector
@@ -462,28 +461,20 @@ PS_OUTPUT main(PS_INPUT input)
                        * float2(0.078125, 0.138890)
                        / centerRef;
 
-        // ----- Insn 80: center color (sample t10 again - same uv) ------
-        float3 blurCenter = blurSourceCenter;
-
-        // ----- Insn 88-235: 8 ring-tap bilateral samples ---------------
-        // Each tap:
-        //   tap_uv = uv + tapBase * SSSS_BLUR_OFFSETS[i]
-        //   tap_mat = t3.Sample(tap_uv).x * 255 - 5    // material id check
-        //   if (abs(tap_mat) < 0.25):
-        //     tap_color = t10.Sample(tap_uv).xyz
-        //     tap_depth = t15.Sample(tap_uv).y
-        //     dt        = abs(tap_depth * blurDepthScale - centerRef)
-        //                  * cb0[0].y * 0.1
-        //     dt        = min(dt, 1.0)            // similarity weight
-        //     tap_blend = lerp(tap_color, skinAux, dt)
-        //   else:
-        //     tap_blend = skinAux                    // outside-skin fallback
-        //   accumulator += tap_blend * SSSS_TAP_WEIGHTS[i+1]
-        float3 blurAccum = blurCenter * SSSS_TAP_WEIGHTS[0];  // center weight
+        // ----- Insn 88-249: 10 ring-tap bilateral samples ---------------
+        // Each tap follows the same pattern:
+        //   tap_uv = uv + tapBase * SSSS_RING_OFFSETS[i]
+        //   tap_mat = t3.Sample(tap_uv).x * 255 - 5  // skin id check
+        //   if (abs(tap_mat) < 0.25): blend t10 sample with skinAux by
+        //     depth-similarity dt; else use skinAux as the tap value.
+        //   accumulator += tap_value * SSSS_RING_WEIGHTS[i]
+        // The center contribution (SSSS_CENTER_WEIGHT * skinAux) is
+        // added at the end.
+        float3 blurAccum = float3(0, 0, 0);
         [unroll]
-        for (int i = 0; i < 8; ++i)
+        for (int i = 0; i < 10; ++i)
         {
-            float2 tapUV = uv + tapBase * SSSS_BLUR_OFFSETS[i];
+            float2 tapUV = uv + tapBase * SSSS_RING_OFFSETS[i];
             float  tapMatId = g_tGbufferShadingData.SampleLevel(
                                    g_sGbufferShadingData, tapUV, 0).x * 255.0 - 5.0;
             float3 tapBlended;
@@ -502,28 +493,11 @@ PS_OUTPUT main(PS_INPUT input)
             {
                 tapBlended = skinAux;
             }
-            blurAccum += tapBlended * SSSS_TAP_WEIGHTS[i + 1];
+            blurAccum += tapBlended * SSSS_RING_WEIGHTS[i];
         }
 
-        // ----- Insn 237-251: outer tap (offset 2.0, 2.0) + center mix ---
-        // This is the 9th tap in the kernel; it ALSO has a fall-through
-        // path where the outer-tap color carries forward without the
-        // material-id check, hence the slightly different control flow.
-        float2 outerUV = uv + tapBase * float2(2.0, 2.0);
-        float  outerMatId = g_tGbufferShadingData.SampleLevel(
-                                 g_sGbufferShadingData, outerUV, 0).x * 255.0 - 5.0;
-        float3 outerColor = g_tBlurSource.SampleLevel(
-                                 g_sBlurSource, outerUV, 0).xyz;
-        if (abs(outerMatId) < 0.25)
-        {
-            float outerDepth = g_tBlurDepthRef.SampleLevel(
-                                     g_sBlurDepthRef, outerUV, 0).y;
-            float dt = min(abs(-outerDepth * blurDepthScale + centerRef)
-                            * cb0_idx0_screen_scale_and_blur_tolerance.y * 0.1,
-                            1.0);
-            outerColor = lerp(outerColor, skinAux, dt);
-        }
-        blurAccum += outerColor * SSSS_OUTER_TAP_WEIGHT;
+        // ----- Center contribution: SSSS_CENTER_WEIGHT * skinAux --------
+        blurAccum += SSSS_CENTER_WEIGHT * skinAux;
 
         // ----- Insn 252-256: ambient probe additions + skin accumulator
         //   r6 = t6.SampleLevel(uv)
