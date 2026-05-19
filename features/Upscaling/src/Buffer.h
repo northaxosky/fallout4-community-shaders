@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <winrt/base.h>
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 
 // ========================================

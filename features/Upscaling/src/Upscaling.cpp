@@ -11,8 +11,9 @@
 #include "Log.h"
 #include "StreamlineCore.h"
 
-namespace cs::features::Upscaling
+namespace cs::features
 {
+	using namespace upscaling;
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling"); }
 
 

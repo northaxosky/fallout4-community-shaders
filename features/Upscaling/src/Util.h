@@ -4,7 +4,7 @@
 
 #include "Engine.h"
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 
 namespace Util

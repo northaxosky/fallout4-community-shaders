@@ -11,7 +11,7 @@
 #include <vector>
 #include <winrt/base.h>
 
-namespace cs::features::Upscaling
+namespace cs::features
 {
 
 const uint renderTargetsPatch[] = { 20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16 };
@@ -260,7 +260,7 @@ public:
 	void CopyDepth();
 
 	ID3D11ShaderResourceView* originalDepthView;	    ///< Original depth buffer SRV
-	std::unique_ptr<Texture2D> depthOverrideTexture;    ///< Dynamic resolution depth override texture
+	std::unique_ptr<upscaling::Texture2D> depthOverrideTexture;    ///< Dynamic resolution depth override texture
 
 	// ========================================
 	// Shader Management
@@ -309,7 +309,7 @@ public:
 	 *
 	 * Contains screen size, render size, and camera data
 	 */
-	ConstantBuffer* GetUpscalingCB();
+	upscaling::ConstantBuffer* GetUpscalingCB();
 
 	/**
 	 * @brief Update and bind upscaling constant buffer
@@ -343,8 +343,8 @@ public:
 	 */
 	void DestroyUpscalingResources();
 
-	std::unique_ptr<Texture2D> upscalingTexture;           ///< Intermediate upscaling texture
-	std::unique_ptr<Texture2D> dilatedMotionVectorTexture; ///< Dilated motion vectors for DLSS
+	std::unique_ptr<upscaling::Texture2D> upscalingTexture;           ///< Intermediate upscaling texture
+	std::unique_ptr<upscaling::Texture2D> dilatedMotionVectorTexture; ///< Dilated motion vectors for DLSS
 
 	/**
 	 * @struct UpscalingCB

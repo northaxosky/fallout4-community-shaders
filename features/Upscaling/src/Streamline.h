@@ -12,7 +12,7 @@
 #pragma warning(pop)
 #include "Buffer.h"
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 
 // DLSS dispatch helper. SDK plumbing lives in cs::Streamline; this owns the DLSS entry points and dispatch path.

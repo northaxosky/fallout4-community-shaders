@@ -1,6 +1,6 @@
 #pragma once
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 	namespace DX11Hooks
 	{

@@ -4,7 +4,7 @@
 #include "Upscaling.h"
 #include "Util.h"
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling.fsr"); }
 

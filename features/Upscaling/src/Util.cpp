@@ -5,7 +5,7 @@
 
 #include "Log.h"
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling.util"); }
 

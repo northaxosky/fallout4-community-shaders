@@ -8,7 +8,7 @@
 
 #include <memory>
 
-namespace cs::features::Upscaling
+namespace cs::features::upscaling
 {
 
 /**
