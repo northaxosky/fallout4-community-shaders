@@ -22,7 +22,7 @@ mkdir -p "$REPO_ROOT/docs"
 TMP="$(mktemp)"
 trap 'rm -f "$TMP"' EXIT
 
-(cd "$REPO_ROOT/features" && hlslkit-buffer-scan --show-conflicts) > "$TMP" 2>&1
+(cd "$REPO_ROOT/features" && hlslkit-buffer-scan --show-conflicts) > "$TMP"
 
 # Detect conflicts via the report's own marker. The "no conflicts" line is fixed; any other text under
 # the Register Conflicts header means a real collision.

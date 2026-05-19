@@ -8,6 +8,12 @@ out/
 *.pdb
 *.ilk
 
+# Logs
+*.log
+
+# Generated tool output, do not commit
+docs/shader-buffers.md
+
 # Vendored Detours static libs are NOT build output, track them.
 !include/detours/**/*.lib
 !include/detours/**/*.pdb
@@ -45,6 +51,9 @@ CLAUDE.md
 AGENTS.md
 GEMINI.md
 .github/copilot-instructions.md
+
+# Local-only project notes (also caught by user-global gitignore but explicit here)
+.local/
 .agents/
 
 # OS
