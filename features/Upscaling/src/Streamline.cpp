@@ -31,7 +31,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto& depthTexture = rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain];
 
-	static auto gameViewport = Util::State_GetSingleton();
+	static auto gameViewport = cs::engine::GetGraphicsState();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
 	{

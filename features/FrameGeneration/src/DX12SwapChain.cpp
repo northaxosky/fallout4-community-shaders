@@ -4,6 +4,7 @@
 #include <dxgi1_6.h>
 
 #include "Env.h"
+#include "Engine.h"
 #include "FidelityFX.h"
 #include "Log.h"
 #include "Streamline.h"
@@ -14,18 +15,6 @@ namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx12"); }
 
-
-[[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
-{
-	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
-	return singleton.get();
-}
-
-[[nodiscard]] static RE::BSGraphics::RenderTargetManager* RenderTargetManager_GetSingleton()
-{
-	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
-	return singleton.get();
-}
 
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)
 {
@@ -310,7 +299,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationEnd);
 
 		// Set constants and tag resources
-		static auto gameViewport = State_GetSingleton();
+		static auto gameViewport = cs::engine::GetGraphicsState();
 
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 
@@ -390,7 +379,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		DX::ThrowIfFailed(commandAllocators[tagListIdx]->Reset());
 		DX::ThrowIfFailed(commandLists[tagListIdx]->Reset(commandAllocators[tagListIdx].get(), nullptr));
 
-		static auto gameViewport = State_GetSingleton();
+		static auto gameViewport = cs::engine::GetGraphicsState();
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 
 		float2 jitterNorm;

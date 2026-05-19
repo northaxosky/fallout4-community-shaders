@@ -3,6 +3,7 @@
 #include "FrameGeneration.h"
 
 #include "DX12SwapChain.h"
+#include "Engine.h"
 #include <dx12/ffx_api_dx12.hpp>
 
 #include "Log.h"
@@ -39,17 +40,7 @@ void FidelityFX::SetupFrameGeneration()
 	}
 }
 
-[[nodiscard]] static RE::BSGraphics::State* State_GetSingleton()
-{
-	REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
-	return singleton.get();
-}
 
-[[nodiscard]] static RE::BSGraphics::RenderTargetManager* RenderTargetManager_GetSingleton()
-{
-	REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
-	return singleton.get();
-}
 
 void FidelityFX::Present(bool a_useFrameGeneration)
 {
@@ -127,8 +118,8 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 
 		dispatchParameters.commandList = commandList;
 
-		static auto gameViewport = State_GetSingleton();
-		static auto renderTargetManager = RenderTargetManager_GetSingleton();
+		static auto gameViewport = cs::engine::GetGraphicsState();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 		auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio, screenSize.y * renderTargetManager->dynamicHeightRatio);

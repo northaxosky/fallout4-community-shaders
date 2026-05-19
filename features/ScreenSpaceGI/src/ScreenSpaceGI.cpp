@@ -426,7 +426,7 @@ namespace cs::features
 		}
 
 		// AO pass.
-		auto* gameViewport = ssgi::Util::State_GetSingleton();
+		auto* gameViewport = cs::engine::GetGraphicsState();
 		const float vfov = gameViewport ? std::tan(0.5f * 1.05f) : std::tan(0.5f * 1.05f);  // ~60deg fallback
 		const float aspect = float(W) / float(std::max(H, 1u));
 

@@ -29,7 +29,7 @@ FfxResource ffxGetResource(ID3D11Resource* dx11Resource,
 void FidelityFX::CreateFSRResources()
 {
 	static auto rendererData = RE::BSGraphics::GetRendererData();
-	static auto gameViewport = Util::State_GetSingleton();
+	static auto gameViewport = cs::engine::GetGraphicsState();
 
 	auto device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 
@@ -130,8 +130,8 @@ void FidelityFX::GenerateReactiveMask()
 	dispatchParameters.colorPreUpscale = ffxGetResource(mainTexture, L"FSR3_Input_ColorPreUpscale", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	dispatchParameters.outReactive = ffxGetResource(reactiveMaskTexture->resource.get(), L"FSR3_Output_OutReactive", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 
-	static auto gameViewport = Util::State_GetSingleton();
-	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+	static auto gameViewport = cs::engine::GetGraphicsState();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));

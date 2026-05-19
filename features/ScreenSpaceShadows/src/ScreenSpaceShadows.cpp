@@ -220,7 +220,7 @@ namespace cs::features
 
 	uint32_t ScreenSpaceShadows::GetScaledSampleCount() const
 	{
-		auto state = sss::Util::State_GetSingleton();
+		auto state = cs::engine::GetGraphicsState();
 		const float renderW = static_cast<float>(state->screenWidth);
 		const float renderH = static_cast<float>(state->screenHeight);
 
@@ -419,7 +419,7 @@ namespace cs::features
 			return;
 
 		// Project against the jittered view-proj since the depth buffer SSS samples was rasterized with jitter applied.
-		auto* viewport = sss::Util::State_GetSingleton();
+		auto* viewport = cs::engine::GetGraphicsState();
 		auto& camView = viewport->cameraState.camViewData;
 		const auto* vpRows = reinterpret_cast<const float*>(camView.viewProjMat);
 
@@ -675,7 +675,7 @@ namespace cs::features
 			return;
 
 		// Transform world-space sun into view space so the dot product with view-space gbuffer normals is meaningful.
-		auto* viewport = sss::Util::State_GetSingleton();
+		auto* viewport = cs::engine::GetGraphicsState();
 		auto& camView = viewport->cameraState.camViewData;
 		DirectX::XMMATRIX viewMat = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(camView.viewMat));
 		viewMat = DirectX::XMMatrixTranspose(viewMat);

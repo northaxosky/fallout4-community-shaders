@@ -2,6 +2,8 @@
 
 #include <d3d11.h>
 
+#include "Engine.h"
+
 namespace cs::features::sss::Util
 {
 	// Mirrors Upscaling's enumeration so we read the same depth-stencil slot the engine populates pre-deferred.
@@ -9,10 +11,4 @@ namespace cs::features::sss::Util
 	{
 		kMain = 2,
 	};
-
-	[[nodiscard]] inline RE::BSGraphics::State* State_GetSingleton()
-	{
-		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
-		return singleton.get();
-	}
 }

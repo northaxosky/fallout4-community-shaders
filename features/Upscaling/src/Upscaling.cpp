@@ -66,8 +66,8 @@ struct DrawWorld_Imagespace_RenderEffectRange
 	{
 		auto upscaling = Upscaling::GetSingleton();
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
-		static auto gameViewport = Util::State_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
+		static auto gameViewport = cs::engine::GetGraphicsState();
 
 		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
@@ -118,7 +118,7 @@ struct DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport
 		auto upscaling = Upscaling::GetSingleton();
 		upscaling->Upscale();
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
 		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
@@ -167,7 +167,7 @@ struct DrawWorld_Render_PreUI_NVHBAO
 	{
 		auto upscaling = Upscaling::GetSingleton();
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
 		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
@@ -198,7 +198,7 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 	{
 		auto upscaling = Upscaling::GetSingleton();
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
 		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
@@ -229,7 +229,7 @@ struct BSImagespaceShaderLensFlare_RenderLensFlare
 	{
 		auto upscaling = Upscaling::GetSingleton();
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
 
 		if (requiresOverride)
@@ -276,7 +276,7 @@ struct LoadingMenu_Render_UpdateTemporalData
 	{
 		func(This);
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 		Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -289,7 +289,7 @@ struct DrawWorld_Imagespace
 	{
 		func(This);
 
-		static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 		Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 			originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
@@ -699,7 +699,7 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 		OverrideRenderTarget(targetIndex, shouldCopy);
 	}
 
-	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	// Update render target metadata to match the scaled resolution
 	// This ensures code that queries render target dimensions get the correct values
@@ -763,7 +763,7 @@ void Upscaling::ResetRenderTargets(const std::vector<int>& a_indicesToCopy)
 		ResetRenderTarget(targetIndex, shouldCopy);
 	}
 
-	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	// Restore original render target metadata (full-resolution dimensions)
 	for (int i = 0; i < 100; i++) {
@@ -815,7 +815,7 @@ void Upscaling::OverrideDepth(bool a_doCopy)
 
 	// Optionally perform expensive copy operation
 	if (a_doCopy) {
-		static auto gameViewport = Util::State_GetSingleton();
+		static auto gameViewport = cs::engine::GetGraphicsState();
 
 		// Only copy depth once per frame
 		static decltype(gameViewport->frameCount) previousFrame = UINT_MAX;
@@ -909,8 +909,8 @@ void Upscaling::CopyDepth()
 	// This ensures we don't have any resource hazards during the copy
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 
-	static auto gameViewport = Util::State_GetSingleton();
-	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+	static auto gameViewport = cs::engine::GetGraphicsState();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	// Calculate both display (screen) and render (scaled) resolutions
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
@@ -1152,8 +1152,8 @@ void Upscaling::UpdateUpscaling()
 		firstCall = false;
 	}
 
-	static auto gameViewport = Util::State_GetSingleton();
-	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+	static auto gameViewport = cs::engine::GetGraphicsState();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	upscaleMethodNoMenu = GetUpscaleMethod(false);
 	upscaleMethod = GetUpscaleMethod(true);
@@ -1234,8 +1234,8 @@ void Upscaling::Upscale()
 	winrt::com_ptr<ID3D11Resource> frameBufferResource;
 	frameBufferSRV->GetResource(frameBufferResource.put());
 
-	static auto gameViewport = Util::State_GetSingleton();
-	static auto renderTargetManager = Util::RenderTargetManager_GetSingleton();
+	static auto gameViewport = cs::engine::GetGraphicsState();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));

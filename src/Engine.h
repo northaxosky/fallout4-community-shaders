@@ -2,6 +2,19 @@
 
 namespace cs::engine
 {
+	// Engine singleton accessors - canonical home for cross-feature renderer-state lookups.
+	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
+	{
+		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
+		return singleton.get();
+	}
+
+	[[nodiscard]] inline RE::BSGraphics::RenderTargetManager* GetRenderTargetManager()
+	{
+		static REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
+		return singleton.get();
+	}
+
 	// FO4's render-target indices; canonical source for cross-feature engine-RE constants.
 	enum class RenderTarget
 	{

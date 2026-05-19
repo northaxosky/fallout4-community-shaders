@@ -1128,7 +1128,7 @@ namespace cs::features
 			float sunUVx = 2.0f, sunUVy = 2.0f;
 			float sunWSx = 0, sunWSy = 0, sunWSz = 0;
 			if (cs::engine::TryGetSunDirectionWS(sunWSx, sunWSy, sunWSz)) {
-				auto* viewport = imagespace::Util::State_GetSingleton();
+				auto* viewport = cs::engine::GetGraphicsState();
 				if (viewport) {
 					const auto& vp = viewport->cameraState.camViewData.viewProjMat;
 					DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sunWSx, -sunWSy, -sunWSz, 0.0f);
