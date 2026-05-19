@@ -411,3 +411,93 @@ identified, CB12 byte content dumped) carries over.
 - [ ] fxc round-trip within ~10% (looser because shader is larger).
 - [ ] Append closure to `shader-3560-analysis.md`.
 
+
+
+## find-actual-sun-light-ps (NEW, 2026-05-19)
+
+Campaign: 2026-05-19 confirm-2147-role campaign as a follow-up. The
+original `directional_sun_light.hlsl` reconstruction target turned
+out to be the FO4 VLS slice scatter PS (blob 2147 = VLSSliceScatterInterp),
+not a directional sun-light deferred PS. The sibling repo's
+`shaders/lighting/` directory therefore now has NO directional-
+sun-light reference HLSL; the deferred-lighting demonstrative-artifact
+arc has a gap.
+
+### Open items
+
+- [ ] **Locate FO4's actual directional-sun-light deferred PS.**
+  Candidates per the role-analysis writeup:
+  1. **Inlined into the ambient/IBL pass (blob 3559)** - 14 SRVs;
+     could include cascade depth + sun direction. The 3560 analysis
+     already noted CB12 has sun-direction parameters. The ambient
+     pass may accumulate sun-light into kDiffuseBuffer alongside
+     ambient/IBL.
+  2. **Inside DrawWorld::DeferredLightsImpl per-light branches** but
+     not exposed as a single dispatch. FO4 may iterate per-light-
+     volume PSes for spots/points, with the sun handled inline.
+  3. **A separate PS we haven't isolated yet.** Search the PDB for
+     `BSImagespaceShaderDirectional`, `BSDFShader_Directional`,
+     `Directional*Render`, `Sun*Render`. The current AE PDB
+     surface shows `BGSDirectionalAmbientLightingColors` (data
+     only) and various directional refs but no obvious render entry.
+- [ ] **Search strategy**: walk all PS draws in FO4_frame5407.rdc
+  with shape srv>=4 + writes to kDiffuseBuffer (RT 58) AND fires
+  before eid 45368 (the composite). The ambient/IBL eid 45345 is one
+  such draw; check the others in the eid 45000-45345 range. The
+  actual sun-light deferred PS should be among them if it exists as
+  a discrete pass.
+- [ ] **If approach 1 confirms** (sun-light inlined into ambient/IBL):
+  document in shader-3560-analysis.md that the ambient/IBL pass IS
+  the sun-light deferred pass for FO4. No separate file needed.
+- [ ] **If approach 2 confirms** (per-light iteration in
+  DeferredLightsImpl): identify the specific PS sha for the sun-
+  cascade light and reconstruct it as a new
+  shaders/lighting/<name>.hlsl file.
+- [ ] **If approach 3 confirms** (separate file): identify, anchor,
+  reconstruct.
+
+## Shaders011.2147 / ls_slice_scatter.hlsl (CLOSED 2026-05-19)
+
+Previously tracked under this section as directional_sun_light.hlsl
+with role-TBD status. Closed by the 2026-05-19 confirm-2147-role
+campaign:
+
+### Resolved this campaign
+
+- **Role confirmed**: per-slice scatter pixel shader in FO4's
+  Volumetric Light Scattering (VLS) subsystem. Confirmed via PDB
+  symbol walk + math-shape corroboration; see
+  Fallout4RE/Workspace/docs/shader-2147-role-analysis.md.
+- **BSShader subclass identified** (high-confidence best guess):
+  BSImagespaceShaderVLSSliceScatterInterp. Alternative candidates
+  (5 other VLSSlice* siblings) listed in the analysis doc; locking
+  to 100% certainty defers to runtime catalog WU3 enrichment.
+- **Host effect identified**: ImageSpaceEffectVLSLight::Render
+  (per-light VLS path), with NVGodrays::RenderVolume(BSShadowLight*,
+  int) as the NVIDIA helper. 22-dispatch pattern at eids 45401-45623
+  is N slices × M shadow-lights.
+- **Cross-runtime verified**: OG + AE both carry the full VLS symbol
+  set; NG PDB is stripped to 3 VLS-family publics but the
+  architectural finding generalizes (binary layout is consistent
+  across runtimes).
+- **Sibling file renamed**: directional_sun_light.hlsl ->
+  ls_slice_scatter.hlsl. Header rewritten to drop the
+  "sun-shadow" framing and document the actual VLS context.
+- **README status row updated**:
+  econstructed-roundtrip-wip-role-tbd -> econstructed-role-confirmed.
+
+### Remaining (not blockers)
+
+- [ ] Lock the exact BSShader subclass (one of 6 VLS-family
+  candidates) to 100% certainty. Defers to runtime catalog WU3
+  enrichment per the shader-catalog-plugin-spec.md Phase 3, OR
+  per-subclass SetupTechnique IDA Hex-Rays cross-read.
+- [ ] CB field semantic names (still placeholders; would close via
+  IDA Hex-Rays on ImageSpaceEffectVLSLight::Setup).
+- [ ] Round-trip tightening (+33.9% -> <5%); same matrix-select
+  pattern issue as the composite reconstruction.
+- [ ] Per-dispatch parameter variation across the 22 dispatches
+  (extract CB byte contents at 2-3 sample eids and diff).
+
+The "find actual sun-light PS" item now lives as its own section
+above (separate concern, separate investigation).
