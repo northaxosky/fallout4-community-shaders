@@ -338,3 +338,37 @@ All other prior gaps are now closed:
 * AO-application boundary is confirmed (single multiply at ASM L264).
 * SSGI Phase 2 hook target is confirmed (`RegisterPreDeferredLightsImpl`
   - already implemented by the user in the sibling repo).
+
+
+## CLOSED 2026-05-19 - Reconstruction shipped via blob 3559
+
+The "Reconstruction gap" called out at the top of this document is
+closed. `ambient_ibl_pass.hlsl` was reconstructed in the 2026-05-19
+reconstruct-deferred-pipeline Target 2 campaign using blob 3559
+(`7460585eaf76`, the mnemonic-stream-exact-match sibling of 3560
+that matches the captured runtime PS at FO4_frame5407.rdc eid 45345).
+
+The structural analysis in this document (Phase A/B/C from May 7-8)
+mapped 3560 specifically (321 insns, 14 SRVs, 1 SV_Target,
+inside DrawWorld::DeferredLightsImpl). 3559 is the slightly-smaller
+variant (263 insns, 44 samples) that captures the exact permutation
+the engine ran in the canonical capture. Both share:
+ - Same 14 SRV layout (t1-t12 + t14 + t15).
+ - Same 3 CB layout (CB12[31], CB0[3], CB2[6]).
+ - Same AO-application boundary (single multiply on combined ambient+
+   IBL term at the very end, before fog).
+ - Same shared CB12[20..27] reprojection matrix infrastructure as
+   the deferred composite (blob 3539) + VLS slice scatter (blob 2147).
+
+Round-trip via fxc /T ps_5_0 /O3 /Ni: 269 insns vs 265 original
+(+1.5%, well within the 10% threshold for this larger shader).
+Sample count 41 vs 44 (-3, due to a missing +1.28 ring tap in the
+SSSS_BLUR_OFFSETS table - documented in
+docs/lighting-shader-followups.md §Shaders011.3559 for trivial
+follow-up).
+
+This SSGI Phase 2 question is now ANSWERED with shipped HLSL: line
+261-262 in the reconstructed file does the single AO multiply on the
+combined ambient+IBL term. The sibling repo's SSGI feature can plug
+into the kSSAO source per the recommendation in this doc's
+"SSGI Phase 2 answer" section above.

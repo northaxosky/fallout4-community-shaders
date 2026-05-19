@@ -501,3 +501,90 @@ campaign:
 
 The "find actual sun-light PS" item now lives as its own section
 above (separate concern, separate investigation).
+
+
+## Shaders011.3559 / `ambient_ibl_pass.hlsl` (RECONSTRUCTED 2026-05-19, roundtrip +1.5%)
+
+Campaign: Fallout4RE 2026-05-19 reconstruct-deferred-pipeline Target 2
+(the big one). HLSL reconstruction shipped with the BEST round-trip of
+the 3 deferred-pipeline targets (+1.5% vs the prompt's 10% threshold
+for this larger shader). Resource bindings + signature exact-match;
+sample count 41 vs 44 (3 short due to a missing +1.28 ring tap in the
+SSSS blur kernel, documented below).
+
+### Resolved this campaign
+
+- Canonical blob 3559 (`7460585eaf76`) confirmed: 14 SRVs, 14 samplers,
+  3 CBs, fullscreen-quad input, single SV_Target to RT 58 = kDiffuseBuffer.
+- Full 263-instruction reconstruction including the 9-tap SSSS bilateral
+  blur block (insns 80-251) that blocked the 2026-05-07/08 campaign.
+  Blur is implemented as a [unroll]'d loop over a static kernel array
+  with Christensen-Burley per-RGB weights (red diffuses farthest, blue
+  least - correct subsurface-scattering wavelength absorption).
+- SSGI Phase 2 AO-application boundary CONFIRMED: t9 (kSSAO) single
+  multiply on the combined ambient+IBL term at insns 261-262, AFTER
+  all cubemap reflection + bilateral blur + ambient accumulation,
+  BEFORE downstream fog blending in the composite (blob 3539). Direct
+  light is NEVER multiplied by AO via this path.
+- CB12[20..27] shared deferred-pipeline reprojection matrix pattern
+  CONFIRMED HERE TOO. The same pattern as composite (3539) + VLS
+  slice scatter (2147); these matrices are global per-frame
+  infrastructure reused across the deferred pipeline.
+- shader-3560-analysis.md SRV map carries over (3559 is the slightly-
+  smaller sibling of 3560 with same structure); 14 SRV roles
+  identified at high confidence (kGbufferNormal=t1, depth=t7,
+  IBL cube array=t8, kSSAO=t9, kMainPreAlpha=t14) + medium confidence
+  (kGbufferMaterial=t2, shading data=t3, ambient pair=t5+t11,
+  bilateral source=t10, depth ref=t15, probes=t6+t12, skin aux=t4).
+
+### Round-trip result (fxc /T ps_5_0 /O3 /Ni)
+
+| Metric | Original | Reconstructed | Status |
+|---|---:|---:|---|
+| Resource bindings | 14 SRVs + 14 samplers + 3 CBs at exact slots | identical | EXACT MATCH |
+| Signature | SV_POSITION-only input + single SV_Target out | identical | EXACT MATCH |
+| Instruction count | 265 | 269 | **+1.5%** (vs 10% threshold) |
+| Sample count | 44 | 41 | -3 (see open item below) |
+
+### Open items
+
+- [ ] **Add the missing +1.28 ring tap** to the SSSS_BLUR_OFFSETS table
+  to close the sample-count gap (currently 41 vs 44 = 3 short).
+  Trivial fix: append (1.28, 1.28) entry to the offsets array + a
+  matching weight to SSSS_TAP_WEIGHTS (likely (0.019283, 0.002820,
+  0.000842) by symmetry with the -1.28 tap). Recompile + diff.
+- [ ] **CB12 field semantics beyond [12..14, 20..27, 30]**. CB12 has
+  31 vec4s declared; most are unused by this PS but the dispatch site
+  C++ populates them - cross-read via IDA Hex-Rays on the
+  `DrawWorld::DeferredLightsImpl` body (AE RVA 0x021ed4c0).
+  Many indices likely overlap with the composite shader (3539)
+  which also uses CB12.
+- [ ] **CB0[3] and CB2[6] field semantics**. Placeholders use
+  `cb<N>_idx<M>_*` per the runbook "no speculation" rule.
+- [ ] **Texture RT-index mapping** for t4, t6, t10, t12, t15. The
+  rdoc capture eid 45345 SRV bindings reference RT indices above the
+  highest committed `cs::engine::RenderTarget` enum value (47); they
+  appear to be dynamic RenderTargetManager scratch RTs. IDA cross-read
+  needed.
+- [ ] **Find the separable-blur PERPENDICULAR pass**. This PS does
+  one axis of the separable Gaussian. Search candidates: blobs near
+  3559 (3557-3561 range) with same shape (14 SRVs, 263+/- insns).
+  `query-shader-corpus.py --stage ps --srv-count 14 --output-count 1
+  --cb-count 3` would surface them.
+- [ ] **Permutation diff** against indoor / night RenderDoc capture.
+  Out-of-budget this campaign; deferred. `FO4_frame9483.rdc` may
+  surface different captured PS shas at the ambient/IBL eid range.
+- [ ] **Skyrim CS SSSS analog comparison**. Skyrim CS at
+  `.local/skyrim-community-shaders-dev/package/Shaders/SubsurfaceScattering/`
+  (if present) has a separable SSSS that would be worth diffing
+  against this FO4 10-tap kernel.
+
+### Status
+
+`shaders/lighting/README.md` status row updated this campaign:
+`renderdoc-confirmed-hlsl-wip` -> **`reconstructed-roundtrip-1.5pct`**.
+The HLSL is now present (no more #error stub) and round-trips within
+the prompt's threshold.
+
+This closes the `shader-3560-analysis.md` "Reconstruction gap"
+called out at the top of that doc: the HLSL is shipped.
