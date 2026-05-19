@@ -113,10 +113,8 @@ namespace cs::features
 		bool applyMarkerPresent = false;
 		bool applyMarkerEnable  = false;
 		{
-			FILE* f = nullptr;
-			if (fopen_s(&f, kApplyMarker, "r") == 0 && f) {
-				char c = static_cast<char>(fgetc(f));
-				fclose(f);
+			char c = 0;
+			if (cs::util::ReadMarker(kApplyMarker, c)) {
 				applyMarkerPresent = true;
 				applyMarkerEnable = (c == '1');
 			}
@@ -135,9 +133,8 @@ namespace cs::features
 			settings.sunOnly           = true;
 			settings.applyContrast     = 1.0f;
 
-			FILE* f = nullptr;
-			if (fopen_s(&f, kExtremeMarker, "r") == 0 && f) {
-				fclose(f);
+			char dummy = 0;
+			if (cs::util::ReadMarker(kExtremeMarker, dummy)) {
 				settings.shadowContrast = 4.0f;
 				settings.applyContrast  = 2.0f;
 				settings.sunOnly        = false;

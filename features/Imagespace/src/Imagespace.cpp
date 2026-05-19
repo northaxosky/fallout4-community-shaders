@@ -198,15 +198,6 @@ namespace cs::features
 		L->info("Engine sunbeams vfunc-disabled");
 	}
 
-	static bool ReadMarker(const char* a_path, char& out_value)
-	{
-		FILE* f = nullptr;
-		if (fopen_s(&f, a_path, "r") != 0 || !f) return false;
-		out_value = static_cast<char>(fgetc(f));
-		fclose(f);
-		return true;
-	}
-
 	void Imagespace::LoadSettings()
 	{
 		CSimpleIniA ini;
@@ -256,15 +247,15 @@ namespace cs::features
 
 		// Smoke-harness markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
-		const bool opP     = ReadMarker(kOpMarker,      op_c);
-		const bool lutP    = ReadMarker(kLutMarker,     lut_c);
-		const bool adaptP  = ReadMarker(kAdaptMarker,   adapt_c);
-		const bool bloomP  = ReadMarker(kBloomMarker,   bloom_c);
-		const bool vigP    = ReadMarker(kVignMarker,    vig_c);
-		const bool caP     = ReadMarker(kCAMarker,      ca_c);
-		const bool sharpP  = ReadMarker(kSharpenMarker, sharp_c);
-		const bool dofP    = ReadMarker(kDofMarker,     dof_c);
-		const bool presetP = ReadMarker(kPresetMarker,  preset_c);
+		const bool opP     = cs::util::ReadMarker(kOpMarker,      op_c);
+		const bool lutP    = cs::util::ReadMarker(kLutMarker,     lut_c);
+		const bool adaptP  = cs::util::ReadMarker(kAdaptMarker,   adapt_c);
+		const bool bloomP  = cs::util::ReadMarker(kBloomMarker,   bloom_c);
+		const bool vigP    = cs::util::ReadMarker(kVignMarker,    vig_c);
+		const bool caP     = cs::util::ReadMarker(kCAMarker,      ca_c);
+		const bool sharpP  = cs::util::ReadMarker(kSharpenMarker, sharp_c);
+		const bool dofP    = cs::util::ReadMarker(kDofMarker,     dof_c);
+		const bool presetP = cs::util::ReadMarker(kPresetMarker,  preset_c);
 
 		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || presetP;
 
