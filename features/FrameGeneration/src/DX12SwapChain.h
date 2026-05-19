@@ -11,7 +11,7 @@
 
 #include "Buffer.h"
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 
 class WrappedResource

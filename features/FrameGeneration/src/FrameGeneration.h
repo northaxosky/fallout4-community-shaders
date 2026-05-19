@@ -5,17 +5,17 @@
 #include "SimpleIni.h"
 #include "Feature.h"
 
-namespace cs::features::FrameGeneration
+namespace cs::features
 {
 
-class Upscaling : public cs::Feature
+class FrameGeneration : public cs::Feature
 {
 public:
 	enum class FrameGenType : int { kFSR3 = 0, kDLSSG = 1, kXeSSFG = 2 };
 
-	static Upscaling* GetSingleton()
+	static FrameGeneration* GetSingleton()
 	{
-		static Upscaling singleton;
+		static FrameGeneration singleton;
 		return &singleton;
 	}
 
@@ -42,10 +42,10 @@ public:
 	bool d3d12Interop = false;
 	double refreshRate = 0.0f;
 
-	Texture2D* HUDLessBufferShared[2];
-	Texture2D* depthBufferShared[2];
-	Texture2D* motionVectorBufferShared[2];
-	Texture2D* UIAlphaBufferShared[2];
+	framegeneration::Texture2D* HUDLessBufferShared[2];
+	framegeneration::Texture2D* depthBufferShared[2];
+	framegeneration::Texture2D* motionVectorBufferShared[2];
+	framegeneration::Texture2D* UIAlphaBufferShared[2];
 
 	winrt::com_ptr<ID3D12Resource> HUDLessBufferShared12[2];
 	winrt::com_ptr<ID3D12Resource> depthBufferShared12[2];

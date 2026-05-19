@@ -7,10 +7,10 @@
 #include "FidelityFX.h"
 #include "Log.h"
 #include "Streamline.h"
-#include "Upscaling.h"
+#include "FrameGeneration.h"
 #include "XeSSFG.h"
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx12"); }
 
@@ -71,14 +71,14 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 	swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
-	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+	} else if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		if (!CreateSwapChainXeSS(a_dxgiFactory, a_swapChainDesc)) {
 			L->warn("XeSS-FG swap chain failed, falling back to FSR3");
-			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+			upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 			CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 		}
 	} else {
@@ -239,8 +239,8 @@ HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 {
 	// DLSS-G recomposition needs a single-channel UI alpha tag; derive it before the cross-API fence.
-	if (Upscaling::GetSingleton()->activeFrameGenType == Upscaling::FrameGenType::kDLSSG)
-		Upscaling::GetSingleton()->GenerateUIAlphaMask();
+	if (FrameGeneration::GetSingleton()->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG)
+		FrameGeneration::GetSingleton()->GenerateUIAlphaMask();
 
 	// FSR-like strategy for all framegen modes: present the full proxy backbuffer (scene + UI) and let DLSS-G/FFX warp the entire image as one.
 	d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
@@ -274,7 +274,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		commandLists[frameIndex]->ResourceBarrier(2, postBarriers);
 	}
 
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 	upscaling->ReloadSettingsIfNeeded();
 
 	bool useFrameGenerationThisFrame = false;
@@ -289,7 +289,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		}
 	}
 
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
 		// Toggle DLSS-G on/off only on state changes (matches XeSS pattern)
@@ -348,7 +348,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			cameraNear, cameraFar, camera);
 
 		isDLSSGFrame = true;
-	} else if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+	} else if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (xess->initialized) {
 			// Toggle enable only on state changes

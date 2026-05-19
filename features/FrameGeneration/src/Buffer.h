@@ -9,7 +9,7 @@
 #include <wrl\client.h>
 #include <wrl\wrappers\corewrappers.h>
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 
 template <typename T>

@@ -3,7 +3,7 @@
 #include <d3d11.h>
 #pragma comment(lib, "d3d11.lib")
 
-#include "Upscaling.h"
+#include "FrameGeneration.h"
 #include "DX12SwapChain.h"
 #include "FidelityFX.h"
 #include "Streamline.h"
@@ -15,7 +15,7 @@
 #include "StreamlineCore.h"
 #include "XeSSFG.h"
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx11"); }
 
@@ -65,7 +65,7 @@ static HRESULT WINAPI hk_CreateDXGIFactory1(REFIID riid, void** ppFactory)
 HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain)
 {
 	// ENB path: ENB's wrapped factory calls CreateSwapChain - we intercept to insert our D3D12 proxy
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 
 	IDXGIDevice* dxgiDevice = nullptr;
 	DX::ThrowIfFailed(a_device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice));
@@ -84,7 +84,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	context->Release();
 
 	// For DLSS-G: init Streamline BEFORE D3D12 device
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		cs::Streamline::GetSingleton()->Initialize();
 	}
 
@@ -92,17 +92,17 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	adapter->Release();
 
 	// XeSS-FG: create contexts after D3D12 device
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (!xess->CreateContexts(proxy->d3d12Device.get())) {
 			L->warn("XeSS-FG context creation failed (ENB path), falling back to FSR3");
-			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+			upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 		}
 	}
 
 	// DLSS-G: upgrade device+factory via Streamline
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto* core = cs::Streamline::GetSingleton();
 
 		ID3D12Device* rawDevice = proxy->d3d12Device.get();
@@ -119,11 +119,11 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	proxy->CreateD3D12CommandQueues();
 	proxy->CreateSwapChain(factory, *pDesc);
 
-	if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 		if (!dlssg->CheckAndEnableDLSSG()) {
 			L->warn("DLSS-G enable failed, falling back to FSR3");
-			upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+			upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 		}
 	}
 
@@ -157,7 +157,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 	D3D_FEATURE_LEVEL* pFeatureLevel,
 	ID3D11DeviceContext** ppImmediateContext)
 {
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 
 	if (pSwapChainDesc->Windowed) {
 		// Log GPU info
@@ -187,19 +187,19 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
 		if (userEnabled && upscaling->settings.frameGenType == 1) {
-			upscaling->activeFrameGenType = Upscaling::FrameGenType::kDLSSG;
+			upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kDLSSG;
 			hasBackend = true;
 		} else if (userEnabled && upscaling->settings.frameGenType == 2) {
 			auto xess = XeSSFG::GetSingleton();
 			if (xess->fgModule && xess->xellModule) {
-				upscaling->activeFrameGenType = Upscaling::FrameGenType::kXeSSFG;
+				upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kXeSSFG;
 				hasBackend = true;
 			}
 		}
 
 		if (hasBackend) {
 			upscaling->d3d12Interop = true;
-			upscaling->refreshRate = Upscaling::GetRefreshRate(pSwapChainDesc->OutputWindow);
+			upscaling->refreshRate = FrameGeneration::GetRefreshRate(pSwapChainDesc->OutputWindow);
 
 			IDXGIFactory4* dxgiFactory;
 			pAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory));
@@ -240,7 +240,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				context->Release();
 
 				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
-				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+				if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 					cs::Streamline::GetSingleton()->Initialize();
 				}
 
@@ -248,17 +248,17 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				adapter->Release();
 
 				// XeSS-FG: create contexts after D3D12 device, no device/factory upgrade needed
-				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kXeSSFG) {
+				if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 					auto xess = XeSSFG::GetSingleton();
 					if (!xess->CreateContexts(proxy->d3d12Device.get())) {
 						L->warn("XeSS-FG context creation failed, falling back to FSR3");
-						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+						upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 					}
 				}
 
 				// DLSS-G: upgrade device+factory via Streamline, then set device
 				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
-				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+				if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 					auto* core = cs::Streamline::GetSingleton();
 
 					ID3D12Device* rawDevice = proxy->d3d12Device.get();
@@ -275,12 +275,12 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				proxy->CreateD3D12CommandQueues();
 				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
 
-				if (upscaling->activeFrameGenType == Upscaling::FrameGenType::kDLSSG) {
+				if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 					auto dlssg = StreamlineFG::GetSingleton();
 
 					if (!dlssg->CheckAndEnableDLSSG()) {
 						L->warn("DLSS-G enable failed, falling back to FSR3");
-						upscaling->activeFrameGenType = Upscaling::FrameGenType::kFSR3;
+						upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 					}
 				}
 
@@ -324,7 +324,7 @@ void DX11Hooks::Install()
 {
 	L->info("ENB state: {} swap chain hook", cs::env::IsENBLoaded() ? "loaded, using alternative" : "not loaded, using standard");
 
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 	auto fidelityFX = FidelityFX::GetSingleton();
 
 	// Always load FidelityFX as fallback

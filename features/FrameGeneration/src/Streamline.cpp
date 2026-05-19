@@ -1,10 +1,10 @@
 #include "Streamline.h"
-#include "Upscaling.h"
+#include "FrameGeneration.h"
 
 #include "Log.h"
 #include "StreamlineCore.h"
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.dlssg"); }
 
@@ -46,7 +46,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		maxFrames = state.numFramesToGenerateMax;
 	}
 
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 	uint32_t requestedFrames = std::clamp((uint32_t)upscaling->settings.frameGenFrames, 1u, maxFrames);
 
 	configuredFrameCount = requestedFrames;

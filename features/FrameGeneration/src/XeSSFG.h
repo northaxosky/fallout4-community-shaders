@@ -8,7 +8,7 @@
 #include <xell.h>
 #include <xell_d3d12.h>
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 
 class XeSSFG

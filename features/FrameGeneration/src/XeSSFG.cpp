@@ -1,11 +1,11 @@
 #include "XeSSFG.h"
-#include "Upscaling.h"
+#include "FrameGeneration.h"
 
 #include "Log.h"
 
 #define LOAD_FN(module, name) pfn_##name = reinterpret_cast<decltype(&name)>(GetProcAddress(module, #name))
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.xess"); }
 
@@ -86,7 +86,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	}
 
 	// Configure logging
-	auto debugLogging = Upscaling::GetSingleton()->settings.debugLogging;
+	auto debugLogging = FrameGeneration::GetSingleton()->settings.debugLogging;
 	if (debugLogging) {
 		if (pfn_xefgSwapChainSetLoggingCallback) {
 			pfn_xefgSwapChainSetLoggingCallback(xefgCtx,

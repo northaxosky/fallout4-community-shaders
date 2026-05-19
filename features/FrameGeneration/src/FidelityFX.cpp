@@ -1,6 +1,6 @@
 #include "FidelityFX.h"
 
-#include "Upscaling.h"
+#include "FrameGeneration.h"
 
 #include "DX12SwapChain.h"
 #include <dx12/ffx_api_dx12.hpp>
@@ -9,7 +9,7 @@
 
 ffxFunctions ffxModule;
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.fsr"); }
 
@@ -53,7 +53,7 @@ void FidelityFX::SetupFrameGeneration()
 
 void FidelityFX::Present(bool a_useFrameGeneration)
 {
-	auto upscaling = Upscaling::GetSingleton();
+	auto upscaling = FrameGeneration::GetSingleton();
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 	auto commandList = dx12SwapChain->commandLists[dx12SwapChain->frameIndex].get();
 	

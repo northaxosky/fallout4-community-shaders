@@ -1,4 +1,4 @@
-#include "Upscaling.h"
+#include "FrameGeneration.h"
 
 #include <d3dcompiler.h>
 #include <imgui.h>
@@ -12,8 +12,9 @@
 #include "Streamline.h"
 #include "StreamlineCore.h"
 
-namespace cs::features::FrameGeneration
+namespace cs::features
 {
+	using namespace framegeneration;
 	namespace { auto* L = cs::log::Get("cs.feature.framegen"); }
 
 enum class RenderTarget
@@ -127,7 +128,7 @@ ID3D11DeviceChild* CompileShader(const wchar_t* FilePath, const char* ProgramTyp
 	return regShader;
 }
 
-void Upscaling::LoadSettings()
+void FrameGeneration::LoadSettings()
 {
 	CSimpleIniA ini;
 	ini.SetUnicode();
@@ -151,14 +152,14 @@ void Upscaling::LoadSettings()
 	}
 }
 
-void Upscaling::ReloadSettingsIfNeeded()
+void FrameGeneration::ReloadSettingsIfNeeded()
 {
 	static int frameCounter = 0;
 	if (++frameCounter % 60 != 0) return;
 	LoadSettings();
 }
 
-void Upscaling::SaveSettings()
+void FrameGeneration::SaveSettings()
 {
 	CSimpleIniA ini;
 	ini.SetUnicode();
@@ -175,7 +176,7 @@ void Upscaling::SaveSettings()
 	ini.SaveFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
 }
 
-void Upscaling::DrawSettings()
+void FrameGeneration::DrawSettings()
 {
 	const char* activeStr = "Inactive";
 	if (settings.frameGenerationMode) {
@@ -227,7 +228,7 @@ void Upscaling::DrawSettings()
 	ImGui::TextDisabled("Mode and MFG changes take effect on next launch.");
 }
 
-void Upscaling::OnPostPostLoad()
+void FrameGeneration::OnPostPostLoad()
 {
 	highFPSPhysicsFixLoaded = GetModuleHandleA("Data\\F4SE\\Plugins\\HighFPSPhysicsFix.dll") != nullptr;
 
@@ -239,7 +240,7 @@ void Upscaling::OnPostPostLoad()
 	InstallHooks();
 }
 
-void Upscaling::CreateFrameGenerationResources()
+void FrameGeneration::CreateFrameGenerationResources()
 {
 	L->info("Creating resources");
 	
@@ -402,7 +403,7 @@ void Upscaling::CreateFrameGenerationResources()
 	L->info("Frame generation resources created (HUDLess + Depth + MVec + UIAlpha)");
 }
 
-void Upscaling::PreAlpha()
+void FrameGeneration::PreAlpha()
 {
 	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
@@ -413,7 +414,7 @@ void Upscaling::PreAlpha()
 	context->CopyResource(reinterpret_cast<ID3D11Texture2D*>(colorMain.texture), reinterpret_cast<ID3D11Texture2D*>(colorPostAlpha.texture));
 }
 
-void Upscaling::PostAlpha()
+void FrameGeneration::PostAlpha()
 {
 	if (!d3d12Interop)
 		return;
@@ -471,7 +472,7 @@ void Upscaling::PostAlpha()
 	}
 }
 
-void Upscaling::CopyBuffersToSharedResources()
+void FrameGeneration::CopyBuffersToSharedResources()
 {
 	if (!d3d12Interop)
 		return;
@@ -519,7 +520,7 @@ void Upscaling::CopyBuffersToSharedResources()
 	}	
 }
 
-void Upscaling::TimerSleepQPC(int64_t targetQPC)
+void FrameGeneration::TimerSleepQPC(int64_t targetQPC)
 {
 	LARGE_INTEGER currentQPC;
 	do {
@@ -527,7 +528,7 @@ void Upscaling::TimerSleepQPC(int64_t targetQPC)
 	} while (currentQPC.QuadPart < targetQPC);
 }
 
-void Upscaling::FrameLimiter(bool a_useFrameGeneration)
+void FrameGeneration::FrameLimiter(bool a_useFrameGeneration)
 {
 	static LARGE_INTEGER lastFrame = {};
 
@@ -552,7 +553,7 @@ void Upscaling::FrameLimiter(bool a_useFrameGeneration)
 	QueryPerformanceCounter(&lastFrame);
 }
 
-void Upscaling::GameFrameLimiter()
+void FrameGeneration::GameFrameLimiter()
 {
 	double bestRefreshRate = 60.0f;
 
@@ -593,7 +594,7 @@ void Upscaling::GameFrameLimiter()
 * SOFTWARE.
 */
 
-double Upscaling::GetRefreshRate(HWND a_window)
+double FrameGeneration::GetRefreshRate(HWND a_window)
 {
 	HMONITOR monitor = MonitorFromWindow(a_window, MONITOR_DEFAULTTONEAREST);
 	MONITORINFOEXW info;
@@ -632,7 +633,7 @@ double Upscaling::GetRefreshRate(HWND a_window)
 	return 60;
 }
 
-void Upscaling::PostDisplay()
+void FrameGeneration::PostDisplay()
 {
 	if (!d3d12Interop)
 		return;
@@ -658,7 +659,7 @@ void Upscaling::PostDisplay()
 	}
 }
 
-void Upscaling::GenerateUIAlphaMask()
+void FrameGeneration::GenerateUIAlphaMask()
 {
 	if (!d3d12Interop || !setupBuffers || !uiAlphaMaskCS)
 		return;
@@ -698,7 +699,7 @@ void Upscaling::GenerateUIAlphaMask()
 	context->CSSetShader(nullptr, nullptr, 0);
 }
 
-void Upscaling::Reset()
+void FrameGeneration::Reset()
 {
 	if (!d3d12Interop)
 		return;
@@ -730,7 +731,7 @@ struct SetUseDynamicResolutionViewportAsDefaultViewport
 {
 	static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
 	{
-		auto upscaling = Upscaling::GetSingleton();
+		auto upscaling = FrameGeneration::GetSingleton();
 
 		func(This, a_true);
 
@@ -751,7 +752,7 @@ struct DrawWorld_Forward
 		func(a1);
 
 		if (!reticleFix)
-			Upscaling::GetSingleton()->CopyBuffersToSharedResources();
+			FrameGeneration::GetSingleton()->CopyBuffersToSharedResources();
 
 		reticleFix = false;
 	}
@@ -762,7 +763,7 @@ struct DrawWorld_Reticle
 {
 	static void thunk(void* a1)
 	{
-		auto upscaling = Upscaling::GetSingleton();
+		auto upscaling = FrameGeneration::GetSingleton();
 		upscaling->PreAlpha();
 		func(a1);
 		reticleFix = true;
@@ -771,7 +772,7 @@ struct DrawWorld_Reticle
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-void Upscaling::InstallHooks()
+void FrameGeneration::InstallHooks()
 {
 	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 
@@ -793,7 +794,7 @@ void Upscaling::InstallHooks()
 	L->info("Installed hooks");
 }
 
-	void Upscaling::Load()
+	void FrameGeneration::Load()
 	{
 		LoadSettings();
 
@@ -814,7 +815,7 @@ void Upscaling::InstallHooks()
 		{
 			AutoRegister()
 			{
-				cs::FeatureManager::Get().Register(Upscaling::GetSingleton());
+				cs::FeatureManager::Get().Register(FrameGeneration::GetSingleton());
 			}
 		};
 		static AutoRegister _autoRegister;

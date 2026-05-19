@@ -15,7 +15,7 @@
 #include <sl_version.h>
 #pragma warning(pop)
 
-namespace cs::features::FrameGeneration
+namespace cs::features::framegeneration
 {
 
 // DLSS-G / Reflex / PCL dispatch helper. SDK plumbing lives in cs::Streamline.
