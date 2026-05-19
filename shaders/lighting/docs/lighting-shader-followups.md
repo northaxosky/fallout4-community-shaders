@@ -6,6 +6,17 @@ under their shader-blob header. Migrate, do not delete.
 
 ## Shaders011.2122 / `deferred_composite.hlsl`
 
+> **SUPERSEDED 2026-05-18** by the d3dcompile-static-analysis byte-diff
+> follow-up and the reconstruct-deferred-pipeline Target 1 campaign.
+> The canonical composite blob is **3539** (`861504f6dcbe`), not 2122.
+> Blob 2122 was a Phase A classifier false-positive (it's a per-light
+> geometry pass, not a composite). See `shader-2122-analysis.md` for
+> the original negative findings; the section below is preserved as
+> a record of the false-positive sequence.
+>
+> The actively-tracked open items for the deferred composite are
+> below under §`Shaders011.3539`.
+
 Campaign: Fallout4RE 2026-05-18 (see `shader-2122-analysis.md` for full
 context).
 
@@ -80,6 +91,18 @@ context).
 real PS source is located.
 
 ## Shaders011.3147 / `directional_sun_light.hlsl`
+
+> **SUPERSEDED 2026-05-18 (partial)** by the d3dcompile-static-analysis
+> byte-diff follow-up. The captured sun-shadow PS (eid 45401, sha
+> `46b911cb8053`) was found to mnemonic-match corpus blob **2147**
+> (`8fb709c2fdf0`), not 3147. Blob 3147 belongs to a 30+ peer cluster
+> for the directional-sun-light role but does not match any captured
+> PS in the reference scene. The sun-shadow reconstruction target is
+> blob 2147, queued under §`Shaders011.2147` below.
+>
+> The 30-peer-cluster ambiguity for 3147 itself remains open: any
+> future "which permutation does the engine actually load?" question
+> still needs the runtime catalog plugin (WU3+WU4) to resolve.
 
 Campaign: Fallout4RE 2026-05-18 (see `shader-3147-analysis.md` and
 `shader-corpus-survey.md` for full context).
@@ -219,3 +242,124 @@ is gated on the items below.
   the data; the per-slot mapping to canonical RT indices is the gap.
   To resolve: a second RenderDoc capture in a contrasting permutation
   (indoor night vs outdoor day) to lock the bindings.
+
+
+## Shaders011.3539 / `deferred_composite.hlsl` (reconstructed-roundtrip-wip)
+
+Campaign: Fallout4RE 2026-05-18 reconstruct-deferred-pipeline Target 1.
+HLSL reconstruction shipped as honest WIP after one-pass asm-to-source
+transcription. See `../deferred_composite.hlsl` header for the full
+round-trip notes; in short: resource bindings exact-match, sample count
+exact-match (6/6), signature exact-match, but instruction count is 108
+vs original 90 (+20%) - outside the 5% threshold the prompt set, within
+runbook §230-232 WIP territory.
+
+### Resolved this campaign
+
+- Canonical blob identified as 3539 (`861504f6dcbe`) by mnemonic-stream
+  equivalence with captured runtime PS at eid 45368 (`813c9acec23b`).
+- Faithful asm-to-HLSL transcription of all 90 instructions. Structural
+  fidelity high: depth-based matrix select, material-id gate on
+  `{skin, hair}`, view-space position reconstruction, fog-color
+  4-corner lerp with intensity ramp, sun-direction lighting, grayscale-
+  saturation tonemap, all preserved.
+- Identified the FO4 composite as fundamentally different from the
+  Skyrim CS `ISLightingComposite` / `ISSAOComposite` analogs (FO4
+  does its own view-space position reconstruction + sun lighting in
+  this PS rather than reading pre-accumulated DirDiffuse / DirSpecular
+  buffers).
+
+### Open items
+
+- [ ] **CB12 field semantic names**. The reconstruction uses
+  `cb12_idx<N>_<inferred-role>` placeholders for indices 14, 35, 41,
+  42, 43, 44, 45, 46 plus the two 4x4 reprojection matrices at 20..23
+  and 24..27. The remaining indices [0..13, 15..19, 28..34, 36..40] are
+  unused by this PS but the dispatch-site C++ should populate them.
+  To resolve: IDA Hex-Rays on `DrawWorld::DeferredComposite` AE RVA
+  `0x021F0790` body, walk the `ID3D11DeviceContext::PSSetConstantBuffers`
+  + the per-frame CB12 update site.
+- [ ] **CB2 field semantic names**. Three vec4s; placeholders use
+  `cb2_idx0_screen_uv_scale`, `cb2_idx1_sun_dir_and_intensity`,
+  `cb2_idx2_sun_color_and_spec_power`. The `.w` channels of each
+  carry distinct meanings (UV scale, intensity, spec power respectively)
+  but the actual struct layout needs cross-read.
+- [ ] **Texture RT-index mapping**. The rdoc capture eid 45368 binds
+  RT 250 / 256 / 253 / 389 / depth-183 / 395 - all of which are above
+  the highest committed `cs::engine::RenderTarget` enum value
+  (kSSAOFinalSwap2 = 47). They appear to be dynamic per-frame scratch
+  RTs allocated by RenderTargetManager. To resolve: walk RenderTarget-
+  Manager's allocation log via IDA, or extend the sibling-repo enum
+  with the dynamic scratch indices.
+- [ ] **Round-trip tightening** (+20% -> <5%). Try alternative HLSL
+  patterns for: the matrix select (per-row movc instead of float4x4
+  assign), the secondary-color-vs-grayscale tonemap blend (compress
+  to fewer mads), and the fog intensity threshold branch (movc
+  instead of if/else). Each iteration: edit -> fxc /T ps_5_0 /O3 ->
+  diff against original.asm via existing
+  `tools/commands/diff-runtime-vs-corpus.py`-style mnemonic check.
+- [ ] **Permutation diff** vs a second RenderDoc capture (indoor cell
+  + interior night). Out-of-budget this campaign; deferred. The 4
+  existing captures may suffice; re-run
+  `tools/renderdoc-scripts/dump-deferred-ps-bytecode.py` against
+  `FO4_frame9483.rdc` to see if the same eid pattern yields a
+  different captured-PS sha (which would surface the permutation).
+- [ ] **Skyrim CS analog cite + comparison appendix**. The HLSL header
+  mentions `ISLightingComposite.hlsl` as the closest analog; a
+  side-by-side compare in this followups section would help future
+  reconstructors understand which math ports and which doesn't.
+
+## Shaders011.2147 / `directional_sun_light.hlsl` (RECONSTRUCTION QUEUED)
+
+Campaign queued: Fallout4RE 2026-05-18 reconstruct-deferred-pipeline
+Target 3. Canonical sun-shadow blob per 2026-05-18 mnemonic-diff: 2147
+(`8fb709c2fdf0`). Captured runtime PS at eid 45401 in
+`FO4_frame5407.rdc` (sha `46b911cb8053`) is exact-mnemonic match
+(62 / 62 insns, 1 / 1 samples). Asm available at
+`Fallout4RE/Scratch/shaders-extracted/ShadersFX/index/Shaders011/asm/Shaders011.2147.8fb709c2fdf0.dxbc.asm`.
+
+### Open items
+
+- [ ] Faithful asm-to-HLSL reconstruction (62 insns, 1 SRV =
+  `kShadowMap` cascade, 4 CBs, 2 SV_Target outputs). The 22-dispatch
+  pattern at eids 45401-45623 suggests per-cascade or per-light
+  iteration; confirm via dispatch-site C++.
+- [ ] PCF kernel identification (3x3? 5x5? rotated Poisson?).
+- [ ] CB layout cross-read for 4 CBs (per-pass, per-light, per-frame,
+  per-material - likely).
+- [ ] fxc round-trip within 5%.
+- [ ] Sibling README status: `wip-permutation-uncertain` -> `reconstructed`.
+- [ ] Append-only `shader-3147-analysis.md` with a `Superseded by
+  2147` note (keep the negative-findings record).
+
+## Shaders011.3559 / `ambient_ibl_pass.hlsl` (RECONSTRUCTION QUEUED)
+
+Campaign queued: Fallout4RE 2026-05-18 reconstruct-deferred-pipeline
+Target 2 (the big one - 263 insns, 14 SRVs, 3 CBs). Canonical
+ambient/IBL blob per mnemonic-diff: 3559 (`7460585eaf76`); the
+already-analyzed 3560 (`2b6e36c08aca`) is the slightly-larger sibling
+(265 insns, 321 if counting the bilateral-blur expansion). Pre-existing
+structural work in `shader-3560-analysis.md` (Phase A/B/C, 14 SRVs
+mapped, AO-application boundary at line 264, kSSAO write timeline
+identified, CB12 byte content dumped) carries over.
+
+### Open items
+
+- [ ] HLSL reconstruction including the 177-insn bilateral SSSS-style
+  blur block that blocked the May 7-8 campaign. With Target 1's
+  workflow proven (this campaign's outcome) the iteration loop is
+  better-understood; tackle the blur block by referencing Skyrim CS's
+  SSSS reconstruction at
+  `.local/skyrim-community-shaders-dev/package/Shaders/SubsurfaceScattering/`
+  (search for the SSSS files first - they may not be at that exact
+  path).
+- [ ] Close the CB12 [30..46] semantic gap via IDA Hex-Rays on
+  `DrawWorld::DeferredLightsImpl` AE RVA `0x021ed4c0` body. Many
+  of the CB12 indices used here OVERLAP with the indices used by
+  the composite PS (3539 uses indices 14, 35, 41..46 from CB12);
+  cross-resolution may share results.
+- [ ] Medium-confidence SRV bindings (t2/t3/t5/t11/t6/t10/t12) - close
+  via dispatch-site C++ now that IDA is registered.
+- [ ] fxc round-trip within ~10% (looser because shader is larger).
+- [ ] Append closure to `shader-3560-analysis.md`.
+
