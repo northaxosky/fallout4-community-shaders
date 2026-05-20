@@ -150,17 +150,33 @@ cbuffer PerCall_CB2 : register(b2)
 cbuffer PerFrame_CB12 : register(b12)
 {
     // [0..19]: unused by this PS.
+    // Per runtime evidence (cb12-runtime-evidence.json, FO4_frame5407.rdc):
+    //   [0..2]  ViewRotation rows
+    //   [3]     ViewMatrix_row3
+    //   [4..7]  Projection rows; [5].z TAA-patched
+    //   [8..10] PrevFrame_ViewProj; [9] TAA-patched
+    //   [11]    duplicate of [2]
+    //   [12..15] ViewToWorld rows (transpose of [0..2]) + identity continuation
+    //   [16..18] WorldToView block; [18] TAA-patched
+    //   [19]    Depth reciprocal params
     float4 cb12_pad_0_19[20];
 
-    // [20..23]: 4x4 "far" reprojection matrix (selected when sampled
-    //           depth >= 0.01). IDENTICAL slot pattern to the deferred
-    //           composite shader, strongly suggesting these are shared
-    //           per-frame matrices. TODO: confirm naming via IDA.
-    float4x4 cb12_far_reproj_matrix;  // rows 20..23
+    // [20..23]: "Far" reprojection matrix (depth >= 0.01). IDENTICAL slot
+    //           pattern to composite + ambient/IBL + sun-light, confirmed
+    //           via runtime cross-eid stability check on FO4_frame5407.rdc.
+    //           [21].w is TAA-patched mid-frame.
+    float4 FarReproj_row0;
+    float4 FarReproj_row1;
+    float4 FarReproj_row2;
+    float4 FarReproj_row3;
 
-    // [24..27]: 4x4 "near" reprojection matrix (selected when sampled
-    //           depth < 0.01). Same pattern as composite.
-    float4x4 cb12_near_reproj_matrix; // rows 24..27
+    // [24..27]: "Near" reprojection matrix (depth < 0.01). Same diagonal
+    //           as Far, with TAA sub-pixel camera offsets in [24].w and
+    //           [25].w.
+    float4 NearReproj_row0;
+    float4 NearReproj_row1;
+    float4 NearReproj_row2;
+    float4 NearReproj_row3;
 };
 
 // ----------------------------------------------------------------------------
@@ -217,10 +233,10 @@ PS_OUTPUT main(PS_INPUT input)
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
     bool isNearPath = (depth < 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
-    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
-    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
-    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
-    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
+    float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
+    float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
+    float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
+    float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
     // Insn 19-27: reconstruct view-space position
     //   uvNDC.x = uv.x * cb0[0].z  remapped to [-1, +1]

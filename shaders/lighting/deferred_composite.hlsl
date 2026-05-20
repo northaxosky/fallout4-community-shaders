@@ -69,28 +69,56 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..13]: TODO: identify - referenced indirectly through cb12[14] dp4
+    // [0..13]: not read directly by this PS (except [14] below).
+    // Per runtime evidence (cb12-runtime-evidence.json, FO4_frame5407.rdc):
+    //   [0..2]  ViewRotation rows (orthonormal 3x3, world -> view)
+    //   [3]     ViewMatrix_row3 (homogeneous identity)
+    //   [4..7]  Projection rows (focal_x=1.19, focal_y=2.12, near=15);
+    //           [5].z is TAA-patched mid-frame
+    //   [8..10] PrevFrame_ViewProj; [9] TAA-patched
+    //   [11]    duplicate of [2]
+    //   [12..14] ViewToWorld rows (transpose of [0..2]); this PS reuses
+    //           [14] as a fog-distance plane equation via dp4.
     float4 cb12_pad_0_13[14];
 
     // [14]: dp4 with reconstructed view-space position (with .w=1) yields
-    //       a scalar used as fog-distance input. Likely a fog plane equation
-    //       (FogDistancePlane: float4 = (normal.xyz, d)). TODO: identify.
+    //       a scalar used as fog-distance input. The underlying value is
+    //       ViewToWorld_row2 (per runtime evidence transpose-pair with
+    //       cb12[2]); composite reuses it as a plane equation
+    //       (normal.xyz=row2.xyz, d=row2.w=0). The dp4 effectively
+    //       projects view-space pos onto the ground-plane axis.
     float4 cb12_idx14_fog_distance_plane;
 
-    // [15..19]: TODO: identify
+    // [15..19]: not read directly by this PS. Per runtime evidence:
+    //   [15]    ViewToWorld_row3 (homogeneous identity continuation)
+    //   [16..18] WorldToView block (camera_pos partial in .w); [18] TAA-patched
+    //   [19]    Depth reciprocal params (near recip + depth-range recip)
     float4 cb12_pad_15_19[5];
 
-    // [20..23]: 4x4 matrix - "far" reprojection (screen-space + linear-depth
-    //           to view-space position; selected when sampled-depth >= 0.01).
-    //           Row-major: cb12[20]=row0, cb12[21]=row1, cb12[22]=row2,
-    //           cb12[23]=row3. TODO: confirm naming via IDA.
-    float4x4 cb12_far_reproj_matrix;  // rows 20..23
+    // [20..23]: "Far" reprojection matrix (selected when sampled depth
+    //           >= 0.01; reconstructs view-space position from screen-
+    //           space UV + linearized depth). 0.84 / 0.47 diagonal.
+    //           Shared with ambient/IBL (3559), sun-light (3295), VLS
+    //           slice (2147) - same per-frame infrastructure.
+    //           [21].w is TAA-patched mid-frame.
+    float4 FarReproj_row0;
+    float4 FarReproj_row1;
+    float4 FarReproj_row2;
+    float4 FarReproj_row3;
 
-    // [24..27]: 4x4 matrix - "near" reprojection (selected when sampled-depth
-    //           < 0.01). Same row order as far matrix.
-    float4x4 cb12_near_reproj_matrix; // rows 24..27
+    // [24..27]: "Near" reprojection matrix (selected when depth < 0.01).
+    //           Same diagonal as Far, with TAA sub-pixel camera offsets
+    //           in [24].w and [25].w.
+    float4 NearReproj_row0;
+    float4 NearReproj_row1;
+    float4 NearReproj_row2;
+    float4 NearReproj_row3;
 
-    // [28..34]: TODO: identify
+    // [28..34]: not read directly by this PS (except [35] below).
+    // Per runtime evidence at [28..29]:
+    //   [28]    Clip_planes_and_fog (near=0.02, far=125, density=1.2, far=160)
+    //   [29]    Exposure_or_tonemap (0.36, -0.4, 0, 0)
+    // [30..34] outside the 31-vec4 runtime dump range; TODO: identify.
     float4 cb12_pad_28_34[7];
 
     // [35]: .z used as additive scalar after the fog-plane dp4.
@@ -231,10 +259,10 @@ PS_OUTPUT main(PS_INPUT input)
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
     bool isNearPath = (depth < 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
-    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
-    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
-    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
-    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
+    float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
+    float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
+    float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
+    float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
     // Insn 17-20: material-ID test - is matId in {2, 3}?
     //   r0.zw = matIdRaw * 255 + {-2, -3}

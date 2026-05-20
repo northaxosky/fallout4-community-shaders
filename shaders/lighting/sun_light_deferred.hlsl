@@ -97,28 +97,53 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..19]: TODO: identify
+    // [0..19]: not read directly by this PS.
+    // Per runtime evidence (cb12-runtime-evidence.json, FO4_frame5407.rdc):
+    //   [0..2]  ViewRotation rows (orthonormal 3x3, world -> view)
+    //   [3]     ViewMatrix_row3 (homogeneous identity)
+    //   [4..7]  Projection rows; [5].z TAA-patched mid-frame
+    //   [8..10] PrevFrame_ViewProj; [9] TAA-patched
+    //   [11]    duplicate of [2]
+    //   [12..14] ViewToWorld rows (transpose of [0..2])
+    //   [15]    ViewToWorld_row3 (homogeneous identity continuation)
+    //   [16..18] WorldToView block (camera_pos partial in .w); [18] TAA-patched
+    //   [19]    Depth reciprocal params
     float4 cb12_pad_0_19[20];
 
-    // [20..23]: 4x4 "far" reprojection matrix (depth >= 0.01). SHARED
-    //           with composite + ambient/IBL + VLS slice.
-    float4x4 cb12_far_reproj_matrix;
+    // [20..23]: "Far" reprojection matrix (depth >= 0.01). Reconstructs
+    //           view-space position from screen-space UV + linear depth.
+    //           0.84 / 0.47 diagonal. Shared with composite, ambient/IBL,
+    //           VLS slice. [21].w is TAA-patched mid-frame.
+    float4 FarReproj_row0;
+    float4 FarReproj_row1;
+    float4 FarReproj_row2;
+    float4 FarReproj_row3;
 
-    // [24..27]: 4x4 "near" reprojection matrix (depth < 0.01). SHARED.
-    float4x4 cb12_near_reproj_matrix;
+    // [24..27]: "Near" reprojection matrix (depth < 0.01). Same diagonal
+    //           as Far, with TAA sub-pixel camera offsets in [24].w and
+    //           [25].w.
+    float4 NearReproj_row0;
+    float4 NearReproj_row1;
+    float4 NearReproj_row2;
+    float4 NearReproj_row3;
 
     // [28]: .x, .y, .z, .w used in the material-1 (skin) BRDF block at
     //       insns 158-173 as: SSS log-multiplier (28.y, 28.w), SSS
     //       intensity (28.x), SSS clamp (28.z). Likely SubsurfaceParams.
-    //       TODO: identify exact field names.
+    //       Runtime evidence at [28] reads (0.02, 125, 1.2, 160) which
+    //       in the ambient/IBL context looks like (near, far, fog_density,
+    //       fog_far). Cross-shader reuse - this slot carries different
+    //       per-scene semantics depending on which technique reads it.
     float4 cb12_idx28_sss_params;
 
     // [29]: .x, .y used as sincos arguments (insns 149, 162) - two
     //       angle parameters for the SSS / fresnel rotation pattern.
-    //       TODO: identify.
+    //       Runtime evidence at [29] reads (0.36, -0.4, 0, 0) - small
+    //       constants consistent with rotation angles.
     float4 cb12_idx29_sss_angles;
 
     // [30]: .y used as 1.0 - x raise-to-4th roughness term at insn 132.
+    //       Runtime evidence reads zeros in captured frame (inconclusive).
     //       TODO: identify (likely roughness/sss desaturation factor).
     float4 cb12_idx30;
 };
@@ -344,10 +369,10 @@ PS_OUTPUT main(PS_INPUT input)
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
     bool isNearPath = (depth < 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
-    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
-    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
-    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
-    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
+    float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
+    float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
+    float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
+    float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
     // Insn 18-25: reconstruct view-space position.
     float2 uvNDC = uv4.zw * float2(2.0, -2.0) + float2(-1.0, 1.0);

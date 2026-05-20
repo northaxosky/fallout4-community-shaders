@@ -96,35 +96,60 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..11]: TODO: identify
+    // [0..11]: not read directly by this PS. Per runtime evidence
+    // (cb12-runtime-evidence.json, captured FO4_frame5407.rdc):
+    //   [0..2]  ViewRotation rows (orthonormal 3x3, world -> view)
+    //   [3]     ViewMatrix_row3 (homogeneous identity (0,0,0,1))
+    //   [4..7]  Projection rows (focal_x=1.19, focal_y=2.12, near=15);
+    //           [5].z is TAA-patched mid-frame
+    //   [8..10] PrevFrame_ViewProj (for motion vectors); [9] TAA-patched
+    //   [11]    duplicate of [2]
     float4 cb12_pad_0_11[12];
 
-    // [12..14]: 3x3 view-to-world rotation matrix (rows 12, 13, 14).
-    //           Used at insns 55-57 to transform the reflection vector
-    //           from view space into world space for IBL cubemap
-    //           sampling.
-    float4 cb12_view_to_world_row0;  // = cb12[12]
-    float4 cb12_view_to_world_row1;  // = cb12[13]
-    float4 cb12_view_to_world_row2;  // = cb12[14]
+    // [12..14]: 3x3 view-to-world rotation matrix rows (transpose of
+    //           the view-rotation block at [0..2]; transpose-pair
+    //           confirmed via runtime evidence). Used at insns 55-57 to
+    //           transform the reflection vector from view space into
+    //           world space for IBL cubemap sampling.
+    float4 ViewToWorld_row0;  // = cb12[12]
+    float4 ViewToWorld_row1;  // = cb12[13]
+    float4 ViewToWorld_row2;  // = cb12[14]
 
-    // [15..19]: TODO: identify
+    // [15..19]: not read directly by this PS. Per runtime evidence:
+    //   [15]    ViewToWorld_row3 (homogeneous identity continuation)
+    //   [16..18] WorldToView extended block (camera_pos partial in .w);
+    //            [18].w is TAA-patched
+    //   [19]    Depth reciprocal params (near recip + depth-range recip)
     float4 cb12_pad_15_19[5];
 
-    // [20..23]: 4x4 "far" reprojection matrix (selected when sampled
-    //           depth >= 0.01). SHARED with deferred composite (blob 3539)
-    //           and VLS slice scatter (blob 2147) - same shared per-frame
-    //           reprojection infrastructure.
-    float4x4 cb12_far_reproj_matrix;
+    // [20..23]: "Far" reprojection matrix (selected when sampled depth
+    //           >= 0.01; reconstructs view-space position from screen-
+    //           space UV + linearized depth). 0.84 / 0.47 diagonal.
+    //           Shared with composite (3539), sun-light (3295), VLS
+    //           slice (2147) - same per-frame infrastructure.
+    //           [21].w is TAA-patched mid-frame (sub-pixel jitter).
+    float4 FarReproj_row0;
+    float4 FarReproj_row1;
+    float4 FarReproj_row2;
+    float4 FarReproj_row3;
 
-    // [24..27]: 4x4 "near" reprojection matrix (selected when sampled
-    //           depth < 0.01). Same shared infrastructure.
-    float4x4 cb12_near_reproj_matrix;
+    // [24..27]: "Near" reprojection matrix (selected when depth < 0.01).
+    //           Same diagonal as Far, with TAA sub-pixel camera offsets
+    //           embedded in [24].w and [25].w.
+    float4 NearReproj_row0;
+    float4 NearReproj_row1;
+    float4 NearReproj_row2;
+    float4 NearReproj_row3;
 
-    // [28..29]: TODO: identify
+    // [28..29]: not read directly by this PS. Per runtime evidence:
+    //   [28]    Clip_planes_and_fog (near=0.02, far=125, density=1.2, far=160)
+    //   [29]    Exposure_or_tonemap (0.36, -0.4, 0, 0)
     float4 cb12_pad_28_29[2];
 
     // [30]: .y = IBL luminance-desaturation lerp factor (scaled by 0.9
-    //       at insn 65). Other channels TODO.
+    //       at insn 65). Runtime evidence at [30] reads zeros in the
+    //       captured frame (inconclusive - value may be scene-dependent).
+    //       Other channels TODO.
     float4 cb12_idx30_ibl_desaturation;
 };
 
@@ -327,10 +352,10 @@ PS_OUTPUT main(PS_INPUT input)
     float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).y;
     bool isNearPath = (depth < 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
-    float4 reprojRow0 = isNearPath ? cb12_near_reproj_matrix[0] : cb12_far_reproj_matrix[0];
-    float4 reprojRow1 = isNearPath ? cb12_near_reproj_matrix[1] : cb12_far_reproj_matrix[1];
-    float4 reprojRow2 = isNearPath ? cb12_near_reproj_matrix[2] : cb12_far_reproj_matrix[2];
-    float4 reprojRow3 = isNearPath ? cb12_near_reproj_matrix[3] : cb12_far_reproj_matrix[3];
+    float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
+    float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
+    float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
+    float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
     // ----- Insn 21: bilateral-blur center sample (color) ----------------
     float3 blurSourceCenter = g_tBlurSource.SampleLevel(g_sBlurSource, uv, 0).xyz;
@@ -390,9 +415,9 @@ PS_OUTPUT main(PS_INPUT input)
 
         // Insn 55-57: rotate reflView -> world space via cb12[12..14]
         float3 reflWorld;
-        reflWorld.x = dot(cb12_view_to_world_row0.xyz, reflView);
-        reflWorld.y = dot(cb12_view_to_world_row1.xyz, reflView);
-        reflWorld.z = dot(cb12_view_to_world_row2.xyz, reflView);
+        reflWorld.x = dot(ViewToWorld_row0.xyz, reflView);
+        reflWorld.y = dot(ViewToWorld_row1.xyz, reflView);
+        reflWorld.z = dot(ViewToWorld_row2.xyz, reflView);
 
         // Insn 58-62: roughness-derived mip + array slice
         //   r1.x = (1 - shadingData.x) * 6   // roughness-to-mip
