@@ -15,6 +15,7 @@
 #include "Plugin.h"
 #include "Sha1.h"
 #include "SimpleIni.h"
+#include "SubclassHooks.h"
 
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "shell32.lib")
@@ -120,6 +121,11 @@ namespace cs::features
 
 		catalog::Sha1InitOnce();
 
+		// Patch BSShader-subclass vtable slot 0x0B (ReloadShaders) BEFORE the engine
+		// starts loading shader fxp blobs. Each thunk pushes a TLS subclass scope so the
+		// device-vtable CreatePixelShader hook can attribute the resulting row.
+		catalog::subclass_hooks::InstallAll();
+
 		catalog::DbConfig dbc;
 		dbc.catalog_path      = _settings.catalogPath;
 		dbc.flush_interval_ms = static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
@@ -161,6 +167,17 @@ namespace cs::features
 		ImGui::Text("Shader hooks enqueued: %llu", static_cast<unsigned long long>(s.enqueued));
 		ImGui::Text("Shader rows written:   %llu", static_cast<unsigned long long>(s.written));
 		ImGui::Text("Dropped (ring full):   %llu", static_cast<unsigned long long>(s.dropped));
+		if (s.total_ps > 0) {
+			const auto pct = (100.0 * static_cast<double>(s.attributed_ps)) / static_cast<double>(s.total_ps);
+			ImGui::Text("Attributed PS rows:    %llu / %llu (%.1f%%)",
+				static_cast<unsigned long long>(s.attributed_ps),
+				static_cast<unsigned long long>(s.total_ps), pct);
+		} else {
+			ImGui::Text("Attributed PS rows:    0 / 0");
+		}
+		const auto hi = catalog::subclass_hooks::GetInstallStats();
+		ImGui::Text("Subclass hooks:        %u/%u patched (%u failed)",
+			hi.succeeded, hi.attempted, hi.failed);
 
 		if (ImGui::Button("Open catalog folder")) {
 			std::error_code ec;
