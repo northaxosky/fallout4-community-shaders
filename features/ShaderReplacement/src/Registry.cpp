@@ -234,6 +234,9 @@ namespace cs::features::replacement
 
 	ReplacementEntry* Registry::FindByRuntimeSha1(const Sha1Result& s) noexcept
 	{
+		if (Sha1IsZero(s))
+			return nullptr;
+
 		for (auto& e : _entries) {
 			if (!e->runtime_sha1_known) continue;
 			if (e->runtime_sha1.bytes == s.bytes) return e.get();

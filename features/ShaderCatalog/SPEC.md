@@ -7,8 +7,8 @@ Observes shader creation on `ID3D11Device` and records each unique shader to a p
 Vtable detours on `ID3D11Device`:
 
 - Slot 12: `CreateVertexShader`
-- Slot 13: `CreatePixelShader`
-- Slot 15: `CreateGeometryShader`
+- Slot 13: `CreateGeometryShader`
+- Slot 15: `CreatePixelShader`
 - Slot 16: `CreateHullShader`
 - Slot 17: `CreateDomainShader`
 - Slot 18: `CreateComputeShader`

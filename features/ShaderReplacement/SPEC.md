@@ -1,6 +1,6 @@
 # ShaderReplacement feature
 
-Phase 1 validation harness for the reconstructed `shaders/lighting/` HLSLs. At `OnD3D11Ready` we install a second `ID3D11Device::CreatePixelShader` vtable detour (slot 15) chained behind ShaderCatalog's, sha1 each blob the engine submits, and swap the engine's output `ID3D11PixelShader*` for our pre-compiled replacement when the sha1 matches the manifest and the per-shader INI toggle is on.
+Phase 1 validation harness for the reconstructed `shaders/lighting/` HLSLs. At `OnD3D11Ready` we install a second `ID3D11Device::CreatePixelShader` vtable detour (slot 15), sha1 each blob the engine submits, and swap the engine's output `ID3D11PixelShader*` for our pre-compiled replacement when the sha1 matches the manifest and the per-shader INI toggle is on.
 
 The product is a substrate for visual equivalence: prove our HLSL produces the same frame as the engine's bytecode for one PS at a time, then build features on top.
 
@@ -10,7 +10,7 @@ One detour on `ID3D11Device`:
 
 - Slot 15: `CreatePixelShader`
 
-Chain order: engine -> ShaderReplacement thunk -> ShaderCatalog thunk -> original. ShaderReplacement registers AFTER ShaderCatalog in the top-level `CMakeLists.txt` so its `OnD3D11Ready` runs after the catalog has installed its detour.
+Preferred chain order when ShaderCatalog is enabled: engine -> ShaderReplacement thunk -> ShaderCatalog thunk -> original. ShaderReplacement registers AFTER ShaderCatalog in the top-level `CMakeLists.txt` so its `OnD3D11Ready` runs after the catalog has installed its detour.
 
 The hook is no-op (immediate return after the chained call) when:
 - Master `bEnabled = false` (in which case the hook is never installed).
@@ -46,6 +46,8 @@ The `hlsl` path is resolved against the configured `sShadersRoot` after strippin
 ## Compile
 
 `OnD3D11Ready` iterates enabled entries and calls `D3DCompileFromFile` with `D3D_COMPILE_STANDARD_FILE_INCLUDE`, profile `ps_5_0`, entry `main`, flags `D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3` (matches the `verify-shader-roundtrip.ps1` fxc `/O3` baseline). Compile failures are loud (error log, `compile_error` populated, ImGui surfaces the message); the runtime hook falls back to engine bytecode on compile failure.
+
+Replacement-created pixel shaders are wrapped in `ShaderCatalog`'s thread-local record-suppression scope so the catalog remains an engine-originated shader inventory when both features are enabled.
 
 ## INI
 
@@ -86,4 +88,4 @@ Phase 1 ships 5-of-6 runtime sha1 mappings. `vls_slice_scatter` is wired but `ru
 
 - **PS pointer caching.** If the engine caches the `ID3D11PixelShader*` it received during a previous `CreatePixelShader` call and rebuilds it later via a path that does not re-call the device entry (resolution change, shader reload console command), our substitution is bypassed for that copy. Mitigation: stack-walk first hit if substitution counter drops to 0 between scene loads.
 - **Compile drift vs runtime equivalence.** `verify-shader-roundtrip.ps1` confirms our HLSL produces a fxc-equivalent DXBC blob offline; `D3DCompileFromFile` (d3dcompiler_47) is the same compiler family but is not guaranteed byte-identical to fxc-on-Win10-SDK-26100. Static gate stays in CI; runtime gate is the screenshot diff.
-- **Static-init order across TUs.** Both `ShaderCatalog` and `ShaderReplacement` self-register via TU-local `AutoRegister`. MSVC link order follows `register_feature(...)` order in the top-level `CMakeLists.txt`; this is the relied-on ordering. Refactoring the registration system or reordering features in `CMakeLists.txt` may silently break the hook chain.
+- **Static-init order across TUs.** Both `ShaderCatalog` and `ShaderReplacement` self-register via TU-local `AutoRegister`. MSVC link order follows `register_feature(...)` order in the top-level `CMakeLists.txt`; this is the preferred ordering for the hook chain. Refactoring the registration system or reordering features in `CMakeLists.txt` should re-check catalog + replacement interop.

@@ -2,6 +2,7 @@
 
 #include "CatalogDB.h"
 #include "Sha1.h"
+#include "ShaderCatalogSuppression.h"
 #include "SubclassContext.h"
 
 namespace cs::features::catalog::hooks
@@ -15,6 +16,9 @@ namespace cs::features::catalog::hooks
 		// what the adversarial reviewer is checking.
 		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len) noexcept
 		{
+			if (RecordingSuppressed())
+				return;
+
 			CatalogEntry e{};
 			e.stage = stage;
 			e.bytecode_size = len;

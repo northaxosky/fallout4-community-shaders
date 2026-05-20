@@ -12,6 +12,7 @@
 #include "Hooks.h"
 #include "Log.h"
 #include "Registry.h"
+#include "ShaderCatalog.h"
 #include "Sha1.h"
 #include "SimpleIni.h"
 
@@ -179,8 +180,9 @@ namespace cs::features
 		}
 		L->info("Compiled {}/{} replacements", got, want);
 
+		const bool catalogHooked = ShaderCatalog::GetSingleton()->HooksInstalled();
 		replacement::hooks::Install(device);
-		L->info("Device-vtable hook installed (slot 15) behind ShaderCatalog's.");
+		L->info("Device-vtable hook installed (slot 15, catalog chain={}).", catalogHooked ? "present" : "absent");
 	}
 
 	void ShaderReplacement::DrawSettings()

@@ -1,5 +1,6 @@
 #include "Sha1.h"
 
+#include <algorithm>
 #include <atomic>
 #include <mutex>
 
@@ -72,6 +73,11 @@ namespace cs::features::replacement
 		return s;
 	}
 
+	bool Sha1IsZero(const Sha1Result& r) noexcept
+	{
+		return std::all_of(r.bytes.begin(), r.bytes.end(), [](uint8_t b) { return b == 0; });
+	}
+
 	bool Sha1FromHex(const std::string& hex, Sha1Result& out)
 	{
 		if (hex.size() != 40) return false;
@@ -86,6 +92,6 @@ namespace cs::features::replacement
 			if (!hv(hex[i * 2], hi) || !hv(hex[i * 2 + 1], lo)) return false;
 			out.bytes[i] = static_cast<uint8_t>((hi << 4) | lo);
 		}
-		return true;
+		return !Sha1IsZero(out);
 	}
 }

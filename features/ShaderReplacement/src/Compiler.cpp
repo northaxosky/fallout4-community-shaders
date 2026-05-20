@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "Sha1.h"
+#include "ShaderCatalogSuppression.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -69,7 +70,10 @@ namespace cs::features::replacement
 		}
 
 		winrt::com_ptr<ID3D11PixelShader> ps;
-		hr = device->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps.put());
+		{
+			cs::features::catalog::hooks::ScopedRecordSuppression suppressCatalog;
+			hr = device->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps.put());
+		}
 		if (FAILED(hr) || !ps) {
 			char buf[64];
 			std::snprintf(buf, sizeof(buf), "CreatePixelShader hr=0x%08x", static_cast<unsigned>(hr));

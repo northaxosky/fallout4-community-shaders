@@ -20,6 +20,7 @@ namespace cs::features
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;
 		void DrawSettings() override;
+		bool HooksInstalled() const noexcept { return _hooksInstalled.load(std::memory_order_acquire); }
 
 		struct Settings
 		{
