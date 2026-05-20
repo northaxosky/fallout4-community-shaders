@@ -1,6 +1,7 @@
 #include "Hooks.h"
 
 #include "Log.h"
+#include "PixelShaderTracker.h"
 #include "Registry.h"
 #include "Sha1.h"
 
@@ -40,6 +41,9 @@ namespace cs::features::replacement::hooks
 		// Swap *a_out with the pre-compiled replacement. Net refcount of the engine-bound
 		// shader must end at exactly 1: AddRef our replacement, Release the engine's.
 		ID3D11PixelShader* mine = entry->compiled_ps.get();
+		cs::features::catalog::Sha1Result catalogSha{};
+		catalogSha.bytes = sha.bytes;
+		cs::features::catalog::shader_tracker::TrackPixelShader(mine, catalogSha, true);
 		mine->AddRef();
 		(*a_out)->Release();
 		*a_out = mine;

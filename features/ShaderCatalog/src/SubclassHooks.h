@@ -1,12 +1,12 @@
 #pragma once
 
+#include <cstdint>
+
 namespace cs::features::catalog::subclass_hooks
 {
-	// Patches vtable slot 0x0B (BSShader::ReloadShaders) on each known concrete BSShader
-	// subclass. Each thunk pushes a TLS Scope naming the subclass, then chains to the
-	// original (shared base) implementation, which loads the per-fxp technique permutations
-	// and ultimately calls ID3D11Device::CreatePixelShader. Our device-vtable hook reads the
-	// TLS context to attribute the resulting catalog row.
+	// Patches ReloadShaders (slot 0x0B) and SetupTechnique (slot 0x02) on each known concrete
+	// BSShader subclass. ReloadShaders attributes explicit reloads; SetupTechnique retroactively
+	// attributes runtime rows from the subclass's pixelShaders map.
 	//
 	// Idempotent: guarded by a process-wide once-flag.
 	void InstallAll();
@@ -19,4 +19,13 @@ namespace cs::features::catalog::subclass_hooks
 		unsigned failed    = 0;
 	};
 	InstallStats GetInstallStats();
+	InstallStats GetReloadInstallStats();
+	InstallStats GetSetupTechniqueInstallStats();
+
+	struct RuntimeStats
+	{
+		std::uint64_t setupTechniqueCalls = 0;
+		std::uint64_t mapAttributions     = 0;
+	};
+	RuntimeStats GetRuntimeStats();
 }

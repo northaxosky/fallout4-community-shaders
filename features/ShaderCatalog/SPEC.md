@@ -33,35 +33,34 @@ SQLite at `Data/F4SE/Plugins/FO4CommunityShaders/shader-catalog.sqlite`. Schema 
 
 ### Subclass attribution (Path B)
 
-Each concrete `BSShader` subclass has its vtable slot `0x0B` (`ReloadShaders`) patched at feature `Load()`. The patched thunk pushes a thread-local `subclass_name` scope and chains to the original (shared) base implementation, which iterates the subclass's `*.fxp` technique permutations and calls `ID3D11Device::CreatePixelShader` per blob. The device-vtable hook reads the TLS context and stamps the `bsshader_subclass` column.
+Each known concrete `BSShader` subclass has these vtable slots patched at feature `Load()`:
+
+- Slot `0x0B`: `ReloadShaders(bool)` for explicit shader reload attribution.
+- Slot `0x02`: `SetupTechnique(uint32_t)` for runtime attribution during normal rendering.
+
+`CreatePixelShader` stores a retained `ID3D11PixelShader* -> sha1` side table for engine-created shaders. After the original `SetupTechnique` returns true, the thunk probes `self->pixelShaders` by technique id, resolves the bound D3D pixel-shader pointer through that side table, and enqueues an attribution-only SQLite upsert. This fills `bsshader_subclass` and `bsshader_technique_bits` without changing engine D3D calls.
 
 Subclasses hooked (12): `BSBloodSplatterShader`, `BSDFCompositeShader`, `BSDFLightShader`, `BSDFPrePassShader`, `BSDistantTreeShader`, `BSEffectShader`, `BSFaceCustomizationShader`, `BSLightingShader`, `BSParticleShader`, `BSSkyShader`, `BSUtilityShader`, `BSWaterShader`.
 
-On UPSERT, `bsshader_subclass` is preserved via `COALESCE`: the first non-null attribution wins. PS rows created outside any hooked `ReloadShaders` (e.g. from `BSImagespaceShader`, which is not in the BSShader hierarchy in FO4, or from non-engine creators) remain NULL and surface as unattributed in the ImGui stats counter.
+Attribution events are UPSERTs, not UPDATE-only records. If an attribution reaches the writer before the original create row, SQLite inserts a placeholder PS row with `size_bytes=0`; a later create-row UPSERT fills the bytecode metadata. `seen_count` is not incremented by attribution-only events. Normal create-row UPSERTs preserve the first non-null `bsshader_subclass` and `bsshader_technique_bits` values via `COALESCE`.
 
-#### Runtime gap discovered
+`ID3D11DeviceContext::PSSetShader` is also hooked as a fallback for cases where the engine binds inside or shortly after a `SetupTechnique` scope, but runtime validation showed FO4 often uses its own state cache and does not call `PSSetShader` for every setup. The `pixelShaders` map probe is the primary path.
 
-On a first smoke-harness run (clean catalog, fresh boot, main-menu entry + exit) all 12 hooks install successfully but no rows are attributed. The engine's initial shader-load path does NOT route through `BSShader::ReloadShaders(bool)`; that virtual is only invoked by the explicit reload path (e.g. shader-reload console command, resolution-change reload). Initial creation goes through a separate per-subclass entry not exposed in commonlibf4 and not yet symbolicated in `cs-render-subsystem-ids.json`.
+Runtime validation on OG-Testing with ShaderReplacement forced off attributed 50 of 1467 PS rows across 8 subclasses. Partial attribution is expected: only permutations exercised by the current scene and routed through known `BSShader::SetupTechnique` surfaces are attributed. Zero attributed PS rows is a failure.
 
-Two viable next steps to close the gap (follow-up work):
+PS rows created outside known `BSShader` subclasses, such as `BSImagespaceShader` in FO4's separate imagespace hierarchy or non-engine creators, remain NULL and surface as unattributed in the ImGui stats counter.
 
-1. Hook `BSShaderManager::ReloadShaders` (renderer-subsystem ID exists) and any `BSShaderManager::Initialize` / `Reinitialize` / `RegisterShaderLoader` that orchestrates the initial sweep, then push subclass context based on the loader being iterated.
-2. Add `SetupTechnique` hooks per subclass for a retroactive attribution pass: on first bind, look up the bound `ID3D11PixelShader*` in a side-table populated by the device-vtable hook (D3D11 pointer to sha1) and enqueue an `UPDATE shader_catalog SET bsshader_subclass = ?, bsshader_technique_bits = ? WHERE sha1 = ?` record. This also closes the technique-bits gap below in one stroke.
+ShaderReplacement interop: when a runtime PS is substituted, the replacement `ID3D11PixelShader*` is registered as an alias for the original runtime sha1 so later attribution still lands on the engine-originated catalog row. The alias tracker is enabled only while ShaderCatalog is active.
 
-### Technique bits (gap)
+### Technique ids
 
-`bsshader_technique_bits` is plumbed end-to-end (TLS context field, `CatalogEntry` field, SQL binding, `COALESCE` upsert) but currently always written as NULL because `ReloadShaders(bool)` does not carry the per-permutation technique-bit value as a parameter. Recovering tech-bits requires either:
-
-- Hooking a deeper helper (`BS{Subclass}::GetPixelShaderID` / equivalent) that takes the technique-bit integer as input and resolves to a `BSGraphics::PixelShader*`, then correlating to sha1 via a side-table populated by the device-vtable hook, or
-- Hooking `SetupTechnique(uint32_t)` on each subclass for retroactive update of rows whose sha1 the engine has bound under that technique bit.
-
-Both are follow-up work; the column stays nullable and `COALESCE` semantics let a later writer fill it in without schema migration.
+`bsshader_technique_bits` stores the `SetupTechnique(uint32_t)` argument. For some subclasses this is a bitfield-like technique selector; for others it is an opaque technique id that keys the subclass's `pixelShaders` map. Keep the column nullable because not every PS row can be attributed.
 
 ## Not implemented
 
 - D3DCompile hook removed; the engine does not call D3DCompile under any path (confirmed via import-table audit across OG/NG/AE: zero `d3dcompiler*` imports, zero d3dcompile-family strings). The `compile_events` table stays in the schema for forward-compat.
 - Future: corpus-match enrichment. A `corpus_match_sha1` column on `shader_catalog`, populated by a writer-thread mnemonic-stream match against a shipped corpus DB. Schema v2 territory; needs a C++ DXBC mnemonic disassembler.
-- Future: per-permutation technique-bit attribution. See "Technique bits (gap)" above.
+- Future: exact decoder labels for `bsshader_technique_bits` by subclass. Fallout4RE exports include `BSDFLightShaderMacros::GetPixelShaderID` and peers; use those when a feature needs semantic names rather than raw ids.
 - Future: `BSImagespaceShader` attribution. The class is not in the BSShader virtual hierarchy in FO4, so vtable slot 0x0B patching does not apply. A separate hook on the imagespace shader loader is needed.
 - Future: catalog import. Workspace-side merger to fold per-session catalogs into a long-lived analysis DB.
 - `cs::ShaderCache` substitution path. The catalog is the lookup table, not the substitution layer.
@@ -70,6 +69,6 @@ Both are follow-up work; the column stays nullable and `COALESCE` semantics let 
 
 1. Fresh install + `bEnabled=true` + game boot: `shader-catalog.sqlite` is created and contains `corpus_meta.schema_version=1`, a `sessions` row, and `PRAGMA journal_mode -> wal`.
 2. After main-menu entry + exit: `shader_catalog` has rows with non-NULL `sha1`, `stage`, `size_bytes`, `source_module`, `creation_thread_id`, `engine_runtime`.
-3. After one in-game scene load: catalog contains at least one PS row (DXBC-parsed shape fields stay NULL until the corpus-match enrichment lands).
+3. After one in-game scene load: catalog contains at least one PS row and `attributed_ps > 0` for known `BSShader` subclasses exercised by the scene.
 4. Crash test: kill `Fallout4.exe` via Task Manager mid-session; reopen game; previous session has `ended_at IS NULL` and rows survive (WAL replay).
 5. Cross-runtime: smoke gates 1-3 against each of OG/NG/AE binaries.

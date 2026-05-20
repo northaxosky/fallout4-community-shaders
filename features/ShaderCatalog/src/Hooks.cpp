@@ -1,19 +1,28 @@
 #include "Hooks.h"
 
 #include "CatalogDB.h"
+#include "Log.h"
+#include "PixelShaderTracker.h"
 #include "Sha1.h"
 #include "ShaderCatalogSuppression.h"
 #include "SubclassContext.h"
+
+#include <atomic>
 
 namespace cs::features::catalog::hooks
 {
 	namespace
 	{
+		auto* L = cs::log::Get("cs.feature.catalog");
+
+		std::atomic<bool> g_psSetShaderHookInstalled{ false };
+		std::atomic<std::uint64_t> g_scopedBinds{ 0 };
+		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
+		std::atomic<std::uint64_t> g_missedBinds{ 0 };
+
 		// Hot-path body, identical shape for every stage. Inlined into each thunk by the
 		// compiler. Order is: sha1 -> stack capture -> enqueue. Cost dominated by SHA1 over the
-		// bytecode; everything else is ALU + a single atomic CAS in the ring. The original
-		// function pointer must NEVER be skipped or its arguments mutated; that invariant is
-		// what the adversarial reviewer is checking.
+		// bytecode; everything else is ALU + a single atomic CAS in the ring.
 		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len) noexcept
 		{
 			if (RecordingSuppressed())
@@ -61,8 +70,42 @@ namespace cs::features::catalog::hooks
 		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
 		ID3D11ClassLinkage* a_linkage, ID3D11PixelShader** a_out)
 	{
-		RecordEntry('p', a_bytecode, a_bytecode_len);
-		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (!RecordingSuppressed())
+			RecordEntry('p', a_bytecode, a_bytecode_len);
+
+		const HRESULT hr = func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (!RecordingSuppressed() && SUCCEEDED(hr) && a_out && *a_out && a_bytecode && a_bytecode_len != 0) {
+			const auto hash = Sha1Compute(a_bytecode, a_bytecode_len);
+			shader_tracker::TrackPixelShader(*a_out, hash);
+		}
+		return hr;
+	}
+
+	void STDMETHODCALLTYPE PSSetShaderHook::thunk(
+		ID3D11DeviceContext*       a_this,
+		ID3D11PixelShader*         a_shader,
+		ID3D11ClassInstance* const* a_classInstances,
+		UINT                       a_numClassInstances)
+	{
+		func(a_this, a_shader, a_classInstances, a_numClassInstances);
+
+		const auto ctx = context::CurrentOrSticky();
+		if (!ctx.active || !ctx.subclass_name)
+			return;
+		if (!a_shader)
+			return;
+
+		g_scopedBinds.fetch_add(1, std::memory_order_relaxed);
+		Sha1Result sha{};
+		if (shader_tracker::TryGetPixelShaderSha1(a_shader, sha)) {
+			g_matchedBinds.fetch_add(1, std::memory_order_relaxed);
+			CatalogDB::Get().EnqueueAttribution(sha, ctx.subclass_name, ctx.technique_bits);
+		} else {
+			const auto miss = g_missedBinds.fetch_add(1, std::memory_order_relaxed);
+			if (miss < 8)
+				L->debug("PSSetShader in {} scope missed pixel-shader tracker", ctx.subclass_name);
+		}
+		context::ClearSticky();
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateGeometryShaderHook::thunk(
@@ -106,5 +149,23 @@ namespace cs::features::catalog::hooks
 		stl::detour_vfunc<16, CreateHullShaderHook    >(a_device);
 		stl::detour_vfunc<17, CreateDomainShaderHook  >(a_device);
 		stl::detour_vfunc<18, CreateComputeShaderHook >(a_device);
+
+		ID3D11DeviceContext* context = nullptr;
+		a_device->GetImmediateContext(&context);
+		if (context) {
+			stl::detour_vfunc<9, PSSetShaderHook>(context);
+			context->Release();
+			g_psSetShaderHookInstalled.store(true, std::memory_order_release);
+		}
+	}
+
+	RuntimeAttributionStats GetRuntimeAttributionStats()
+	{
+		return RuntimeAttributionStats{
+			g_psSetShaderHookInstalled.load(std::memory_order_acquire),
+			g_scopedBinds.load(std::memory_order_relaxed),
+			g_matchedBinds.load(std::memory_order_relaxed),
+			g_missedBinds.load(std::memory_order_relaxed)
+		};
 	}
 }

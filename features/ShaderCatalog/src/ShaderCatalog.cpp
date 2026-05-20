@@ -12,6 +12,7 @@
 #include "CatalogDB.h"
 #include "Hooks.h"
 #include "Log.h"
+#include "PixelShaderTracker.h"
 #include "Plugin.h"
 #include "Sha1.h"
 #include "SimpleIni.h"
@@ -76,6 +77,7 @@ namespace cs::features
 	{
 		// Best-effort teardown; DLL unload order may already have torn things down.
 		catalog::CatalogDB::Get().Stop();
+		catalog::shader_tracker::SetEnabled(false);
 	}
 
 	void ShaderCatalog::LoadSettings()
@@ -121,9 +123,7 @@ namespace cs::features
 
 		catalog::Sha1InitOnce();
 
-		// Patch BSShader-subclass vtable slot 0x0B (ReloadShaders) BEFORE the engine
-		// starts loading shader fxp blobs. Each thunk pushes a TLS subclass scope so the
-		// device-vtable CreatePixelShader hook can attribute the resulting row.
+		// Patch subclass reload/setup slots before D3D hooks see engine shader creation.
 		catalog::subclass_hooks::InstallAll();
 
 		catalog::DbConfig dbc;
@@ -133,9 +133,11 @@ namespace cs::features
 		const auto runtime = DetectRuntime();
 		const auto version = PluginVersionString();
 		if (catalog::CatalogDB::Get().Start(dbc, runtime, version.c_str())) {
+			catalog::shader_tracker::SetEnabled(true);
 			_started.store(true, std::memory_order_release);
 			L->info("Catalog initialized (runtime={})", runtime);
 		} else {
+			catalog::shader_tracker::SetEnabled(false);
 			L->error("Catalog start failed; feature inert.");
 			_started.store(false, std::memory_order_release);
 		}
@@ -148,7 +150,9 @@ namespace cs::features
 		if (_hooksInstalled.exchange(true, std::memory_order_acq_rel))
 			return;
 		catalog::hooks::InstallAll(device);
-		L->info("Device-vtable hooks installed (slots 12/15/16/17/18).");
+		const auto hs = catalog::hooks::GetRuntimeAttributionStats();
+		L->info("Device-vtable hooks installed (slots 12/13/15/16/17/18; PSSetShader={}).",
+			hs.psSetShaderHookInstalled ? "yes" : "no");
 	}
 
 	void ShaderCatalog::DrawSettings()
@@ -166,6 +170,7 @@ namespace cs::features
 		const auto s = catalog::CatalogDB::Get().GetStats();
 		ImGui::Text("Shader hooks enqueued: %llu", static_cast<unsigned long long>(s.enqueued));
 		ImGui::Text("Shader rows written:   %llu", static_cast<unsigned long long>(s.written));
+		ImGui::Text("Attribution events:    %llu", static_cast<unsigned long long>(s.attribution_events));
 		ImGui::Text("Dropped (ring full):   %llu", static_cast<unsigned long long>(s.dropped));
 		if (s.total_ps > 0) {
 			const auto pct = (100.0 * static_cast<double>(s.attributed_ps)) / static_cast<double>(s.total_ps);
@@ -175,9 +180,25 @@ namespace cs::features
 		} else {
 			ImGui::Text("Attributed PS rows:    0 / 0");
 		}
-		const auto hi = catalog::subclass_hooks::GetInstallStats();
-		ImGui::Text("Subclass hooks:        %u/%u patched (%u failed)",
-			hi.succeeded, hi.attempted, hi.failed);
+		const auto reloadHooks = catalog::subclass_hooks::GetReloadInstallStats();
+		ImGui::Text("ReloadShaders hooks:   %u/%u patched (%u failed)",
+			reloadHooks.succeeded, reloadHooks.attempted, reloadHooks.failed);
+		const auto setupHooks = catalog::subclass_hooks::GetSetupTechniqueInstallStats();
+		ImGui::Text("SetupTechnique hooks:  %u/%u patched (%u failed)",
+			setupHooks.succeeded, setupHooks.attempted, setupHooks.failed);
+		const auto subclassRt = catalog::subclass_hooks::GetRuntimeStats();
+		ImGui::Text("SetupTechnique maps:   %llu / %llu attributed",
+			static_cast<unsigned long long>(subclassRt.mapAttributions),
+			static_cast<unsigned long long>(subclassRt.setupTechniqueCalls));
+		const auto rt = catalog::hooks::GetRuntimeAttributionStats();
+		ImGui::Text("PSSetShader hook:      %s", rt.psSetShaderHookInstalled ? "installed" : "not installed");
+		ImGui::Text("Scoped PS binds:       %llu matched / %llu missed",
+			static_cast<unsigned long long>(rt.matchedBinds),
+			static_cast<unsigned long long>(rt.missedBinds));
+		const auto tracker = catalog::shader_tracker::GetStats();
+		ImGui::Text("Tracked PS pointers:   %llu (%llu aliases)",
+			static_cast<unsigned long long>(tracker.tracked),
+			static_cast<unsigned long long>(tracker.aliases));
 
 		if (ImGui::Button("Open catalog folder")) {
 			std::error_code ec;

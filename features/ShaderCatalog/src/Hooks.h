@@ -30,6 +30,17 @@ namespace cs::features::catalog::hooks
 			ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11PixelShader**) = nullptr;
 	};
 
+	struct PSSetShaderHook
+	{
+		static void STDMETHODCALLTYPE thunk(
+			ID3D11DeviceContext*       a_this,
+			ID3D11PixelShader*         a_shader,
+			ID3D11ClassInstance* const* a_classInstances,
+			UINT                       a_numClassInstances);
+		static inline void (STDMETHODCALLTYPE *func)(
+			ID3D11DeviceContext*, ID3D11PixelShader*, ID3D11ClassInstance* const*, UINT) = nullptr;
+	};
+
 	struct CreateGeometryShaderHook
 	{
 		static HRESULT STDMETHODCALLTYPE thunk(
@@ -78,8 +89,17 @@ namespace cs::features::catalog::hooks
 			ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11DomainShader**) = nullptr;
 	};
 
-	// Installs all five vtable detours on the supplied device. Idempotent in practice (each
+	// Installs the D3D11 vtable detours on the supplied device. Idempotent in practice (each
 	// detour_vfunc replaces the slot and stashes the prior pointer, so calling it twice would
 	// re-chain; caller guards against double-install via _hooksInstalled).
 	void InstallAll(ID3D11Device* a_device);
+
+	struct RuntimeAttributionStats
+	{
+		bool psSetShaderHookInstalled = false;
+		std::uint64_t scopedBinds = 0;
+		std::uint64_t matchedBinds = 0;
+		std::uint64_t missedBinds = 0;
+	};
+	RuntimeAttributionStats GetRuntimeAttributionStats();
 }

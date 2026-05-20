@@ -17,6 +17,7 @@ namespace cs::features::catalog
 	// Hot-path callable. Uses the cached BCrypt provider handle.
 	// Returns zero-initialized bytes on failure (caller treats that as a non-fatal hash miss).
 	Sha1Result Sha1Compute(const void* data, std::size_t len) noexcept;
+	bool Sha1IsZero(const Sha1Result& r) noexcept;
 
 	// 40-char lowercase hex. Allocates; call from writer thread only.
 	std::string Sha1ToHex(const Sha1Result& r);

@@ -221,9 +221,10 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		if (cleanShutdown) {
 			FinalizeSession();
 
-			if (_insertShader)  { sqlite3_finalize(_insertShader);  _insertShader = nullptr; }
-			if (_updateSession) { sqlite3_finalize(_updateSession); _updateSession = nullptr; }
-			if (_db)            { sqlite3_close(_db); _db = nullptr; }
+			if (_insertShader)      { sqlite3_finalize(_insertShader);      _insertShader = nullptr; }
+			if (_upsertAttribution) { sqlite3_finalize(_upsertAttribution); _upsertAttribution = nullptr; }
+			if (_updateSession)     { sqlite3_finalize(_updateSession);     _updateSession = nullptr; }
+			if (_db)                { sqlite3_close(_db); _db = nullptr; }
 		} else {
 			// Detached writer still owns the DB + prepared statements; touching them races. Leak
 			// is intentional - process is about to exit anyway. WAL preserves committed rows.
@@ -307,10 +308,29 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			"ON CONFLICT(sha1) DO UPDATE SET "
 			"  last_seen_timestamp = excluded.last_seen_timestamp, "
 			"  seen_count = seen_count + 1, "
+			"  size_bytes = CASE WHEN shader_catalog.size_bytes = 0 THEN excluded.size_bytes ELSE shader_catalog.size_bytes END, "
+			"  source_pointer_va = COALESCE(shader_catalog.source_pointer_va, excluded.source_pointer_va), "
+			"  source_module = COALESCE(shader_catalog.source_module, excluded.source_module), "
+			"  creation_stack_top4 = COALESCE(shader_catalog.creation_stack_top4, excluded.creation_stack_top4), "
+			"  creation_thread_id = COALESCE(shader_catalog.creation_thread_id, excluded.creation_thread_id), "
 			"  bsshader_subclass = COALESCE(shader_catalog.bsshader_subclass, excluded.bsshader_subclass), "
 			"  bsshader_technique_bits = COALESCE(shader_catalog.bsshader_technique_bits, excluded.bsshader_technique_bits)";
 		if (sqlite3_prepare_v2(_db, kInsertShader, -1, &_insertShader, nullptr) != SQLITE_OK) {
 			L->error("prepare insert shader failed: {}", sqlite3_errmsg(_db));
+			return false;
+		}
+
+		const char* kUpsertAttribution =
+			"INSERT INTO shader_catalog("
+			"  sha1, size_bytes, stage,"
+			"  first_seen_timestamp, first_seen_session_id, last_seen_timestamp, seen_count,"
+			"  creation_thread_id, engine_runtime, bsshader_subclass, bsshader_technique_bits"
+			") VALUES(?,0,'ps',?,?,?,0,?,?,?,?) "
+			"ON CONFLICT(sha1) DO UPDATE SET "
+			"  bsshader_subclass = COALESCE(shader_catalog.bsshader_subclass, excluded.bsshader_subclass), "
+			"  bsshader_technique_bits = COALESCE(shader_catalog.bsshader_technique_bits, excluded.bsshader_technique_bits)";
+		if (sqlite3_prepare_v2(_db, kUpsertAttribution, -1, &_upsertAttribution, nullptr) != SQLITE_OK) {
+			L->error("prepare upsert attribution failed: {}", sqlite3_errmsg(_db));
 			return false;
 		}
 
@@ -360,7 +380,28 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		s.written  = _statWritten.load(std::memory_order_relaxed);
 		s.attributed_ps = _statAttributedPs.load(std::memory_order_relaxed);
 		s.total_ps      = _statTotalPs.load(std::memory_order_relaxed);
+		s.attribution_events = _statAttributionEvents.load(std::memory_order_relaxed);
 		return s;
+	}
+
+	void CatalogDB::EnqueueAttribution(const Sha1Result& sha, const char* subclassName, std::uint32_t techniqueBits) noexcept
+	{
+		if (!subclassName || Sha1IsZero(sha))
+			return;
+
+		CatalogEntry e{};
+		e.sha1_bytes = sha.bytes;
+		e.stage = 'p';
+		e.thread_id = ::GetCurrentThreadId();
+		LARGE_INTEGER c;
+		QueryPerformanceCounter(&c);
+		e.timestamp_qpc = c.QuadPart;
+		e.subclass_name = subclassName;
+		e.technique_bits = techniqueBits;
+		e.has_subclass = true;
+		e.has_technique_bits = true;
+		e.attribution_only = true;
+		EnqueueShader(e);
 	}
 
 	std::string CatalogDB::ResolveModule(std::uintptr_t va)
@@ -400,6 +441,11 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 
 	void CatalogDB::PersistShader(const CatalogEntry& e)
 	{
+		if (e.attribution_only) {
+			PersistAttribution(e);
+			return;
+		}
+
 		if (!_insertShader) return;
 		const auto sha1 = Sha1ToHex(Sha1Result{ e.sha1_bytes });
 		const auto now = IsoNowUtc();
@@ -429,17 +475,59 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		if (e.has_technique_bits) sqlite3_bind_int64(_insertShader, 13, static_cast<sqlite3_int64>(e.technique_bits));
 		else                      sqlite3_bind_null (_insertShader, 13);
 
-		if (e.stage == 'p') {
-			_statTotalPs.fetch_add(1, std::memory_order_relaxed);
-			if (e.has_subclass)
-				_statAttributedPs.fetch_add(1, std::memory_order_relaxed);
-		}
-
 		if (sqlite3_step(_insertShader) == SQLITE_DONE) {
 			_statWritten.fetch_add(1, std::memory_order_relaxed);
 		} else {
 			L->warn("insert shader failed: {}", sqlite3_errmsg(_db));
 		}
+	}
+
+	void CatalogDB::PersistAttribution(const CatalogEntry& e)
+	{
+		if (!_upsertAttribution || !e.has_subclass || !e.subclass_name)
+			return;
+
+		const auto sha1 = Sha1ToHex(Sha1Result{ e.sha1_bytes });
+		const auto now = IsoNowUtc();
+
+		sqlite3_reset(_upsertAttribution);
+		sqlite3_clear_bindings(_upsertAttribution);
+		sqlite3_bind_text (_upsertAttribution, 1, sha1.c_str(),        -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text (_upsertAttribution, 2, now.c_str(),         -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text (_upsertAttribution, 3, _session_id.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text (_upsertAttribution, 4, now.c_str(),         -1, SQLITE_TRANSIENT);
+		sqlite3_bind_int  (_upsertAttribution, 5, static_cast<int>(e.thread_id));
+		sqlite3_bind_text (_upsertAttribution, 6, _engine_runtime.c_str(), -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text (_upsertAttribution, 7, e.subclass_name, -1, SQLITE_STATIC);
+		if (e.has_technique_bits) sqlite3_bind_int64(_upsertAttribution, 8, static_cast<sqlite3_int64>(e.technique_bits));
+		else                      sqlite3_bind_null (_upsertAttribution, 8);
+
+		if (sqlite3_step(_upsertAttribution) == SQLITE_DONE) {
+			_statAttributionEvents.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			L->warn("upsert attribution failed: {}", sqlite3_errmsg(_db));
+		}
+	}
+
+	void CatalogDB::RefreshCatalogCounts()
+	{
+		if (!_db)
+			return;
+
+		auto count = [&](const char* sql) -> std::uint64_t {
+			sqlite3_stmt* stmt = nullptr;
+			std::uint64_t value = 0;
+			if (sqlite3_prepare_v2(_db, sql, -1, &stmt, nullptr) == SQLITE_OK) {
+				if (sqlite3_step(stmt) == SQLITE_ROW)
+					value = static_cast<std::uint64_t>(sqlite3_column_int64(stmt, 0));
+			}
+			if (stmt)
+				sqlite3_finalize(stmt);
+			return value;
+		};
+
+		_statTotalPs.store(count("SELECT COUNT(*) FROM shader_catalog WHERE stage='ps'"), std::memory_order_relaxed);
+		_statAttributedPs.store(count("SELECT COUNT(*) FROM shader_catalog WHERE stage='ps' AND bsshader_subclass IS NOT NULL"), std::memory_order_relaxed);
 	}
 
 	void CatalogDB::WriterLoop()
@@ -477,6 +565,8 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 
 			sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &err);
 			if (err) { sqlite3_free(err); err = nullptr; }
+			if (drained > 0)
+				RefreshCatalogCounts();
 
 			// Periodic WAL truncate so the sidecar doesn't grow unbounded.
 			if ((++checkpointN % 12) == 0) {
@@ -506,6 +596,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			}
 			sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &err);
 			if (err) { sqlite3_free(err); err = nullptr; }
+			RefreshCatalogCounts();
 		}
 	}
 

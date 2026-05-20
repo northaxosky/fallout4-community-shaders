@@ -25,12 +25,12 @@ namespace cs::features::catalog
 		std::int64_t            timestamp_qpc = 0;
 		std::array<void*, 4>    stack_frames{};
 
-		// Subclass attribution captured from TLS context at CreateXxxShader time.
-		// subclass_name is a string literal owned by SubclassContext (process-lifetime), safe to copy as a pointer.
+		// subclass_name is a string literal owned by SubclassContext, safe to copy as a pointer.
 		const char*             subclass_name           = nullptr;
 		std::uint32_t           technique_bits          = 0;
 		bool                    has_subclass            = false;
 		bool                    has_technique_bits      = false;
+		bool                    attribution_only        = false;
 	};
 
 	struct DbConfig
@@ -62,8 +62,10 @@ namespace cs::features::catalog
 			std::uint64_t written  = 0;
 			std::uint64_t attributed_ps = 0;
 			std::uint64_t total_ps      = 0;
+			std::uint64_t attribution_events = 0;
 		};
 		Stats GetStats() const noexcept;
+		void EnqueueAttribution(const Sha1Result& sha, const char* subclassName, std::uint32_t techniqueBits) noexcept;
 
 	private:
 		CatalogDB() = default;
@@ -75,6 +77,8 @@ namespace cs::features::catalog
 		bool OpenAndBootstrap();
 		void FinalizeSession();
 		void PersistShader(const CatalogEntry& e);
+		void PersistAttribution(const CatalogEntry& e);
+		void RefreshCatalogCounts();
 
 		// Module/VA resolution; cached by base address. Writer-thread only.
 		std::string ResolveModule(std::uintptr_t va);
@@ -87,6 +91,7 @@ namespace cs::features::catalog
 
 		sqlite3*       _db = nullptr;
 		sqlite3_stmt*  _insertShader = nullptr;
+		sqlite3_stmt*  _upsertAttribution = nullptr;
 		sqlite3_stmt*  _updateSession = nullptr;
 
 		std::thread _writer;
@@ -109,6 +114,7 @@ namespace cs::features::catalog
 		mutable std::atomic<std::uint64_t> _statWritten{ 0 };
 		mutable std::atomic<std::uint64_t> _statAttributedPs{ 0 };
 		mutable std::atomic<std::uint64_t> _statTotalPs{ 0 };
+		mutable std::atomic<std::uint64_t> _statAttributionEvents{ 0 };
 
 		// Cached module resolution: base addr -> formatted "Name.exe + 0x<rva>" prefix.
 		std::unordered_map<std::uintptr_t, std::string> _moduleCache;
