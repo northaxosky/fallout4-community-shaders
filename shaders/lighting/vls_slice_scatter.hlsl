@@ -88,6 +88,9 @@
 // `// TODO: identify` markers (no-speculation rule).
 // ----------------------------------------------------------------------------
 
+// Shared CB12[0..27] schema (consumed below).
+#include "deferred_contracts.hlsli"
+
 cbuffer PerCall_CB0 : register(b0)
 {
     // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
@@ -153,34 +156,11 @@ cbuffer PerCall_CB2 : register(b2)
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..19]: unused by this PS.
-    // Per runtime evidence (cb12-runtime-evidence.json, FO4_frame5407.rdc):
-    //   [0..2]  ViewRotation rows
-    //   [3]     ViewMatrix_row3
-    //   [4..7]  Projection rows; [5].z TAA-patched
-    //   [8..10] PrevFrame_ViewProj; [9] TAA-patched
-    //   [11]    duplicate of [2]
-    //   [12..15] ViewToWorld rows (transpose of [0..2]) + identity continuation
-    //   [16..18] WorldToView block; [18] TAA-patched
-    //   [19]    Depth reciprocal params
-    float4 cb12_pad_0_19[20];
-
-    // [20..23]: "Far" reprojection matrix (depth >= 0.01). IDENTICAL slot
-    //           pattern to composite + ambient/IBL + sun-light, confirmed
-    //           via runtime cross-eid stability check on FO4_frame5407.rdc.
-    //           [21].w is TAA-patched mid-frame.
-    float4 FarReproj_row0;
-    float4 FarReproj_row1;
-    float4 FarReproj_row2;
-    float4 FarReproj_row3;
-
-    // [24..27]: "Near" reprojection matrix (depth < 0.01). Same diagonal
-    //           as Far, with TAA sub-pixel camera offsets in [24].w and
-    //           [25].w.
-    float4 NearReproj_row0;
-    float4 NearReproj_row1;
-    float4 NearReproj_row2;
-    float4 NearReproj_row3;
+    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    //          This PS reads only the Far/Near reproject matrix pair at
+    //          [20..27]; the upper-CB12 slots used by composite (fog +
+    //          color stack) and ambient (IBL desaturation) are not bound.
+    DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 };
 
 // ----------------------------------------------------------------------------

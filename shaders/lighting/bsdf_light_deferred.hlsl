@@ -141,6 +141,10 @@
 #  error "LIGHT_TYPE_SPOT is a stub; reconstruct from FO4_frame9483 first"
 #endif
 
+// Shared CB12[0..27] per-frame schema (single source of truth across the 5
+// deferred-pipeline PS reconstructions). See header for documentation.
+#include "deferred_contracts.hlsli"
+
 // ============================================================================
 // LIGHT_TYPE_DIRECTIONAL branch (the sun-light path).
 // ============================================================================
@@ -152,35 +156,11 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..19]: not read directly by this PS.
-    // Per runtime evidence (cb12-runtime-evidence.json, FO4_frame5407.rdc):
-    //   [0..2]  ViewRotation rows (orthonormal 3x3, world -> view)
-    //   [3]     ViewMatrix_row3 (homogeneous identity)
-    //   [4..7]  Projection rows; [5].z TAA-patched mid-frame
-    //   [8..10] PrevFrame_ViewProj; [9] TAA-patched
-    //   [11]    duplicate of [2]
-    //   [12..14] ViewToWorld rows (transpose of [0..2])
-    //   [15]    ViewToWorld_row3 (homogeneous identity continuation)
-    //   [16..18] WorldToView block (camera_pos partial in .w); [18] TAA-patched
-    //   [19]    Depth reciprocal params
-    float4 cb12_pad_0_19[20];
-
-    // [20..23]: "Far" reprojection matrix (depth >= 0.01). Reconstructs
-    //           view-space position from screen-space UV + linear depth.
-    //           0.84 / 0.47 diagonal. Shared with composite, ambient/IBL,
-    //           VLS slice. [21].w is TAA-patched mid-frame.
-    float4 FarReproj_row0;
-    float4 FarReproj_row1;
-    float4 FarReproj_row2;
-    float4 FarReproj_row3;
-
-    // [24..27]: "Near" reprojection matrix (depth < 0.01). Same diagonal
-    //           as Far, with TAA sub-pixel camera offsets in [24].w and
-    //           [25].w.
-    float4 NearReproj_row0;
-    float4 NearReproj_row1;
-    float4 NearReproj_row2;
-    float4 NearReproj_row3;
+    // [0..27]: shared per-frame block (ViewRotation / Projection /
+    //          PrevFrame_ViewProj / ViewToWorld / WorldToView / depth recip /
+    //          Far+Near reproject matrices). See `deferred_contracts.hlsli`
+    //          for the full per-slot schema.
+    DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: .x, .y, .z, .w used in the material-1 (skin) BRDF block at
     //       insns 158-173 as: SSS log-multiplier (28.y, 28.w), SSS
@@ -751,21 +731,8 @@ PS_OUTPUT main(PS_INPUT input)
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..19]: same shared per-frame schema as directional. Unused here.
-    float4 cb12_pad_0_19[20];
-
-    // [20..23]: Far reprojection matrix (depth >= 0.01). Same shared
-    //           infrastructure as directional / composite / ambient.
-    float4 FarReproj_row0;
-    float4 FarReproj_row1;
-    float4 FarReproj_row2;
-    float4 FarReproj_row3;
-
-    // [24..27]: Near reprojection matrix (depth < 0.01).
-    float4 NearReproj_row0;
-    float4 NearReproj_row1;
-    float4 NearReproj_row2;
-    float4 NearReproj_row3;
+    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: SSS / fresnel parameters (skin-material BRDF). Same role as
     //       in the directional path.
