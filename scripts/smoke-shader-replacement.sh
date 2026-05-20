@@ -61,15 +61,33 @@ capture() {
 
 # Per-shader threshold band. 0.5% = imperceptible delta.
 GATE_MAX_PCT="${GATE_MAX_PCT:-0.5}"
+# Set to 1 for the old single-baseline runtime when iterating locally.
+SHADER_REPLACEMENT_OFF_SAMPLES="${SHADER_REPLACEMENT_OFF_SAMPLES:-3}"
+if ! [[ "$SHADER_REPLACEMENT_OFF_SAMPLES" =~ ^[0-9]+$ ]] || (( SHADER_REPLACEMENT_OFF_SAMPLES < 1 || SHADER_REPLACEMENT_OFF_SAMPLES > 9 )); then
+    echo "ERROR: SHADER_REPLACEMENT_OFF_SAMPLES must be an integer from 1 to 9" >&2
+    exit 2
+fi
+
+SMOKE_RUN_DIR="${SHADER_REPLACEMENT_SMOKE_DIR:-test-results/shader-replacement-smoke-$(date +%Y%m%d_%H%M%S)}"
+mkdir -p "$SMOKE_RUN_DIR" test-results
+make_log_path() { printf '%s/%s.log' "$SMOKE_RUN_DIR" "$1"; }
+echo "ShaderReplacement smoke artifacts: $SMOKE_RUN_DIR"
 
 OFF="test-results/_repl_off.png"
-LOG_OFF="$(mktemp)"
-trap 'rm -f "$LOG_OFF"; clear_marker; restore_ini' EXIT
+declare -a OFF_SAMPLES=()
+trap 'clear_marker; restore_ini' EXIT
 backup_ini
 
-write_marker "none"
-run_smoke "baseline (none)" "$LOG_OFF"
-capture off "$(extract_results_dir "$LOG_OFF")" "$OFF"
+echo "Capturing ${SHADER_REPLACEMENT_OFF_SAMPLES} OFF baseline sample(s) for median comparison."
+for ((sample_idx = 1; sample_idx <= SHADER_REPLACEMENT_OFF_SAMPLES; sample_idx++)); do
+    sample_out="$SMOKE_RUN_DIR/off_${sample_idx}.png"
+    sample_log="$(make_log_path "off_${sample_idx}")"
+    write_marker "none"
+    run_smoke "baseline (none) ${sample_idx}/${SHADER_REPLACEMENT_OFF_SAMPLES}" "$sample_log"
+    capture "off ${sample_idx}" "$(extract_results_dir "$sample_log")" "$sample_out"
+    OFF_SAMPLES+=("$sample_out")
+done
+python scripts/diff-screenshots.py --select-median "$OFF" "${OFF_SAMPLES[@]}"
 
 SHADERS=("composite" "ambient" "prepass" "bsdf-dir" "bsdf-pt" "vls")
 declare -A VERDICT
@@ -77,21 +95,18 @@ declare -A DELTA
 
 for shader in "${SHADERS[@]}"; do
     OUT="test-results/_repl_${shader}.png"
-    LOG="$(mktemp)"
+    LOG="$(make_log_path "$shader")"
     write_marker "$shader"
     if ! run_smoke "$shader on" "$LOG"; then
         VERDICT[$shader]="FAIL(run)"
-        rm -f "$LOG"
         continue
     fi
     if ! capture "$shader" "$(extract_results_dir "$LOG")" "$OUT"; then
         VERDICT[$shader]="FAIL(capture)"
-        rm -f "$LOG"
         continue
     fi
-    rm -f "$LOG"
 
-    diff_out="$(python scripts/diff-screenshots.py "$OFF" "$OUT" 2>&1 || true)"
+    diff_out="$(python scripts/diff-screenshots.py "${OFF_SAMPLES[@]}" "$OUT" 2>&1 || true)"
     echo "--- diff $shader vs OFF ---"
     echo "$diff_out"
 
