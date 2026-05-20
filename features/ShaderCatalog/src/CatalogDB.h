@@ -24,6 +24,13 @@ namespace cs::features::catalog
 		std::uint32_t           thread_id     = 0;
 		std::int64_t            timestamp_qpc = 0;
 		std::array<void*, 4>    stack_frames{};
+
+		// Subclass attribution captured from TLS context at CreateXxxShader time.
+		// subclass_name is a string literal owned by SubclassContext (process-lifetime), safe to copy as a pointer.
+		const char*             subclass_name           = nullptr;
+		std::uint32_t           technique_bits          = 0;
+		bool                    has_subclass            = false;
+		bool                    has_technique_bits      = false;
 	};
 
 	struct DbConfig
@@ -53,6 +60,8 @@ namespace cs::features::catalog
 			std::uint64_t enqueued = 0;
 			std::uint64_t dropped  = 0;
 			std::uint64_t written  = 0;
+			std::uint64_t attributed_ps = 0;
+			std::uint64_t total_ps      = 0;
 		};
 		Stats GetStats() const noexcept;
 
@@ -98,6 +107,8 @@ namespace cs::features::catalog
 		mutable std::atomic<std::uint64_t> _statEnqueued{ 0 };
 		mutable std::atomic<std::uint64_t> _statDropped{ 0 };
 		mutable std::atomic<std::uint64_t> _statWritten{ 0 };
+		mutable std::atomic<std::uint64_t> _statAttributedPs{ 0 };
+		mutable std::atomic<std::uint64_t> _statTotalPs{ 0 };
 
 		// Cached module resolution: base addr -> formatted "Name.exe + 0x<rva>" prefix.
 		std::unordered_map<std::uintptr_t, std::string> _moduleCache;

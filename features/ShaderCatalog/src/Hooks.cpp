@@ -2,6 +2,7 @@
 
 #include "CatalogDB.h"
 #include "Sha1.h"
+#include "SubclassContext.h"
 
 namespace cs::features::catalog::hooks
 {
@@ -31,6 +32,14 @@ namespace cs::features::catalog::hooks
 			void* frames[4] = {};
 			CaptureStackBackTrace(2, 4, frames, nullptr);
 			for (int i = 0; i < 4; ++i) e.stack_frames[i] = frames[i];
+
+			const auto& ctx = context::g_ctx;
+			if (ctx.active && ctx.subclass_name) {
+				e.subclass_name      = ctx.subclass_name;
+				e.has_subclass       = true;
+				e.technique_bits     = ctx.technique_bits;
+				e.has_technique_bits = (ctx.technique_bits != 0);
+			}
 
 			CatalogDB::Get().EnqueueShader(e);
 		}

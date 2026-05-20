@@ -301,11 +301,14 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			"INSERT INTO shader_catalog("
 			"  sha1, size_bytes, stage,"
 			"  first_seen_timestamp, first_seen_session_id, last_seen_timestamp, seen_count,"
-			"  source_pointer_va, source_module, creation_stack_top4, creation_thread_id, engine_runtime"
-			") VALUES(?,?,?,?,?,?,1,?,?,?,?,?) "
+			"  source_pointer_va, source_module, creation_stack_top4, creation_thread_id, engine_runtime,"
+			"  bsshader_subclass, bsshader_technique_bits"
+			") VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?) "
 			"ON CONFLICT(sha1) DO UPDATE SET "
 			"  last_seen_timestamp = excluded.last_seen_timestamp, "
-			"  seen_count = seen_count + 1";
+			"  seen_count = seen_count + 1, "
+			"  bsshader_subclass = COALESCE(shader_catalog.bsshader_subclass, excluded.bsshader_subclass), "
+			"  bsshader_technique_bits = COALESCE(shader_catalog.bsshader_technique_bits, excluded.bsshader_technique_bits)";
 		if (sqlite3_prepare_v2(_db, kInsertShader, -1, &_insertShader, nullptr) != SQLITE_OK) {
 			L->error("prepare insert shader failed: {}", sqlite3_errmsg(_db));
 			return false;
@@ -355,6 +358,8 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		s.enqueued = _statEnqueued.load(std::memory_order_relaxed);
 		s.dropped  = _statDropped.load(std::memory_order_relaxed);
 		s.written  = _statWritten.load(std::memory_order_relaxed);
+		s.attributed_ps = _statAttributedPs.load(std::memory_order_relaxed);
+		s.total_ps      = _statTotalPs.load(std::memory_order_relaxed);
 		return s;
 	}
 
@@ -419,6 +424,16 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		else               sqlite3_bind_text(_insertShader, 9, stack.c_str(),   -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int   (_insertShader, 10, static_cast<int>(e.thread_id));
 		sqlite3_bind_text  (_insertShader, 11, _engine_runtime.c_str(), -1, SQLITE_TRANSIENT);
+		if (e.has_subclass && e.subclass_name) sqlite3_bind_text(_insertShader, 12, e.subclass_name, -1, SQLITE_STATIC);
+		else                                   sqlite3_bind_null(_insertShader, 12);
+		if (e.has_technique_bits) sqlite3_bind_int64(_insertShader, 13, static_cast<sqlite3_int64>(e.technique_bits));
+		else                      sqlite3_bind_null (_insertShader, 13);
+
+		if (e.stage == 'p') {
+			_statTotalPs.fetch_add(1, std::memory_order_relaxed);
+			if (e.has_subclass)
+				_statAttributedPs.fetch_add(1, std::memory_order_relaxed);
+		}
 
 		if (sqlite3_step(_insertShader) == SQLITE_DONE) {
 			_statWritten.fetch_add(1, std::memory_order_relaxed);
