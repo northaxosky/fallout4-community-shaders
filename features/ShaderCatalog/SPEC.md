@@ -31,11 +31,29 @@ SQLite at `Data/F4SE/Plugins/FO4CommunityShaders/shader-catalog.sqlite`. Schema 
 
 `Create{Vertex,Pixel,Geometry,Hull,Domain,Compute}Shader` vtable detours + SHA1 + SQLite catalog + ImGui menu surface.
 
+### Subclass attribution (Path B)
+
+Each concrete `BSShader` subclass has its vtable slot `0x0B` (`ReloadShaders`) patched at feature `Load()`. The patched thunk pushes a thread-local `subclass_name` scope and chains to the original (shared) base implementation, which iterates the subclass's `*.fxp` technique permutations and calls `ID3D11Device::CreatePixelShader` per blob. The device-vtable hook reads the TLS context and stamps the `bsshader_subclass` column.
+
+Subclasses hooked (12): `BSBloodSplatterShader`, `BSDFCompositeShader`, `BSDFLightShader`, `BSDFPrePassShader`, `BSDistantTreeShader`, `BSEffectShader`, `BSFaceCustomizationShader`, `BSLightingShader`, `BSParticleShader`, `BSSkyShader`, `BSUtilityShader`, `BSWaterShader`.
+
+On UPSERT, `bsshader_subclass` is preserved via `COALESCE`: the first non-null attribution wins. PS rows created outside any hooked `ReloadShaders` (e.g. from `BSImagespaceShader`, which is not in the BSShader hierarchy in FO4, or from non-engine creators) remain NULL and surface as unattributed in the ImGui stats counter.
+
+### Technique bits (gap)
+
+`bsshader_technique_bits` is plumbed end-to-end (TLS context field, `CatalogEntry` field, SQL binding, `COALESCE` upsert) but currently always written as NULL because `ReloadShaders(bool)` does not carry the per-permutation technique-bit value as a parameter. Recovering tech-bits requires either:
+
+- Hooking a deeper helper (`BS{Subclass}::GetPixelShaderID` / equivalent) that takes the technique-bit integer as input and resolves to a `BSGraphics::PixelShader*`, then correlating to sha1 via a side-table populated by the device-vtable hook, or
+- Hooking `SetupTechnique(uint32_t)` on each subclass for retroactive update of rows whose sha1 the engine has bound under that technique bit.
+
+Both are follow-up work; the column stays nullable and `COALESCE` semantics let a later writer fill it in without schema migration.
+
 ## Not implemented
 
 - D3DCompile hook removed; the engine does not call D3DCompile under any path (confirmed via import-table audit across OG/NG/AE: zero `d3dcompiler*` imports, zero d3dcompile-family strings). The `compile_events` table stays in the schema for forward-compat.
 - Future: corpus-match enrichment. A `corpus_match_sha1` column on `shader_catalog`, populated by a writer-thread mnemonic-stream match against a shipped corpus DB. Schema v2 territory; needs a C++ DXBC mnemonic disassembler.
-- Future: per-`BSShader` subclass enrichment. Fill `bsshader_subclass` / `bsshader_technique_bits` columns by hooking each subclass's `LoadShaders`.
+- Future: per-permutation technique-bit attribution. See "Technique bits (gap)" above.
+- Future: `BSImagespaceShader` attribution. The class is not in the BSShader virtual hierarchy in FO4, so vtable slot 0x0B patching does not apply. A separate hook on the imagespace shader loader is needed.
 - Future: catalog import. Workspace-side merger to fold per-session catalogs into a long-lived analysis DB.
 - `cs::ShaderCache` substitution path. The catalog is the lookup table, not the substitution layer.
 
