@@ -46,8 +46,8 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 		maxFrames = state.numFramesToGenerateMax;
 	}
 
-	auto upscaling = FrameGeneration::GetSingleton();
-	uint32_t requestedFrames = std::clamp((uint32_t)upscaling->settings.frameGenFrames, 1u, maxFrames);
+	auto frameGen = FrameGeneration::GetSingleton();
+	uint32_t requestedFrames = std::clamp((uint32_t)frameGen->settings.frameGenFrames, 1u, maxFrames);
 
 	configuredFrameCount = requestedFrames;
 
@@ -64,7 +64,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 
 	sessionActive = true;
 	L->info("DLSS-G enabled: {}x frame gen (requested {}, hardware max {})",
-		requestedFrames + 1, upscaling->settings.frameGenFrames, maxFrames);
+		requestedFrames + 1, frameGen->settings.frameGenFrames, maxFrames);
 
 	if (slReflexSetOptions) {
 		sl::ReflexOptions reflexOptions{};

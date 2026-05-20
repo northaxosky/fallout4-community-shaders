@@ -60,14 +60,14 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 
 	swapChainDesc.Flags = allowTearing ? DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING : 0;
 
-	auto upscaling = FrameGeneration::GetSingleton();
+	auto frameGen = FrameGeneration::GetSingleton();
 
-	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
+	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		CreateSwapChainDLSSG(a_dxgiFactory, a_swapChainDesc);
-	} else if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
+	} else if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		if (!CreateSwapChainXeSS(a_dxgiFactory, a_swapChainDesc)) {
 			L->warn("XeSS-FG swap chain failed, falling back to FSR3");
-			upscaling->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
+			frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 			CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 		}
 	} else {
@@ -263,8 +263,8 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		commandLists[frameIndex]->ResourceBarrier(2, postBarriers);
 	}
 
-	auto upscaling = FrameGeneration::GetSingleton();
-	upscaling->ReloadSettingsIfNeeded();
+	auto frameGen = FrameGeneration::GetSingleton();
+	frameGen->ReloadSettingsIfNeeded();
 
 	bool useFrameGenerationThisFrame = false;
 	bool isDLSSGFrame = false;
@@ -273,12 +273,12 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	if (auto main = RE::Main::GetSingleton()) {
 		if (auto ui = RE::UI::GetSingleton()) {
-			bool menuBlock = upscaling->settings.disableInMenus && main->inMenuMode;
-			useFrameGenerationThisFrame = upscaling->settings.frameGenerationMode && main->gameActive && !menuBlock && !ui->movementToDirectionalCount;
+			bool menuBlock = frameGen->settings.disableInMenus && main->inMenuMode;
+			useFrameGenerationThisFrame = frameGen->settings.frameGenerationMode && main->gameActive && !menuBlock && !ui->movementToDirectionalCount;
 		}
 	}
 
-	if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
+	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
 		// Toggle DLSS-G on/off only on state changes (matches XeSS pattern)
@@ -328,16 +328,16 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		// Full composite on swap chain; UI alpha mask drives DLSS-G recomposition for sharp UI on interpolated frames.
 		dlssg->Present(
 			commandLists[frameIndex].get(),
-			upscaling->depthBufferShared12[frameIndex].get(),
-			upscaling->motionVectorBufferShared12[frameIndex].get(),
-			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			frameGen->depthBufferShared12[frameIndex].get(),
+			frameGen->motionVectorBufferShared12[frameIndex].get(),
+			frameGen->HUDLessBufferShared12[frameIndex].get(),
 			nullptr,
-			upscaling->UIAlphaBufferShared12[frameIndex].get(),
+			frameGen->UIAlphaBufferShared12[frameIndex].get(),
 			screenSize, jitter,
 			cameraNear, cameraFar, camera);
 
 		isDLSSGFrame = true;
-	} else if (upscaling->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
+	} else if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (xess->initialized) {
 			// Toggle enable only on state changes
@@ -414,9 +414,9 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 		xess->TagResources(xessFrameId - 1,
 			commandLists[tagListIdx].get(),
-			upscaling->depthBufferShared12[frameIndex].get(),
-			upscaling->motionVectorBufferShared12[frameIndex].get(),
-			upscaling->HUDLessBufferShared12[frameIndex].get(),
+			frameGen->depthBufferShared12[frameIndex].get(),
+			frameGen->motionVectorBufferShared12[frameIndex].get(),
+			frameGen->HUDLessBufferShared12[frameIndex].get(),
 			screenSize, jitterNorm,
 			deltaMs, viewMat, projMat, false);
 
@@ -430,7 +430,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_END, xessFrameId - 1);
 
 	// Fix FPS cap being e.g. 55 instead of 60
-	if (!upscaling->highFPSPhysicsFixLoaded && SyncInterval > 0)
+	if (!frameGen->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
 	// Bracket Present with markers
@@ -453,16 +453,16 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
 	// Clear resources
-	upscaling->Reset();
+	frameGen->Reset();
 
 	// Fix game running too fast
-	if (!upscaling->highFPSPhysicsFixLoaded)
-		upscaling->GameFrameLimiter();
+	if (!frameGen->highFPSPhysicsFixLoaded)
+		frameGen->GameFrameLimiter();
 
 	// If VSync is disabled and HighFPSPhysicsFix isn't handling pacing, use our limiter.
 	// Skip when HFPF is loaded - it handles pacing correctly including loading screens.
-	if (SyncInterval == 0 && !upscaling->highFPSPhysicsFixLoaded)
-		upscaling->FrameLimiter(useFrameGenerationThisFrame);
+	if (SyncInterval == 0 && !frameGen->highFPSPhysicsFixLoaded)
+		frameGen->FrameLimiter(useFrameGenerationThisFrame);
 
 	return S_OK;
 }

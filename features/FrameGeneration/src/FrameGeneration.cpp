@@ -626,13 +626,13 @@ struct SetUseDynamicResolutionViewportAsDefaultViewport
 {
 	static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
 	{
-		auto upscaling = FrameGeneration::GetSingleton();
+		auto frameGen = FrameGeneration::GetSingleton();
 
 		func(This, a_true);
 
 		if (!a_true) {
 			// Imagespace just completed - capture HUDLess (pre-UI scene)
-			upscaling->PostDisplay();
+			frameGen->PostDisplay();
 		}
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -658,11 +658,11 @@ struct DrawWorld_Reticle
 {
 	static void thunk(void* a1)
 	{
-		auto upscaling = FrameGeneration::GetSingleton();
-		upscaling->PreAlpha();
+		auto frameGen = FrameGeneration::GetSingleton();
+		frameGen->PreAlpha();
 		func(a1);
 		reticleFix = true;
-		upscaling->PostAlpha();
+		frameGen->PostAlpha();
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
