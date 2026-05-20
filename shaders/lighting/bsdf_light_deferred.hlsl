@@ -1,11 +1,31 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 //
-// Reconstruction of FO4 corpus blob Shaders011.fxp #3295 - the directional
-// sun-light deferred PS for FO4's deferred-lighting pipeline.
+// Consolidated BSDFLightShader deferred-lighting PS for FO4.
 //
-// Status: REFERENCE - asm-level transcription, structural fidelity high.
+// FO4's BSDFLightShader class handles directional, point, and spot light
+// permutations as technique-bit variants of one shader class
+// (BSDFLightShaderMacros::GetPixelShaderID resolves the bits to a corpus
+// blob). This file mirrors that consolidation: one HLSL parameterized by
+// LIGHT_TYPE.
 //
-// Canonical mapping:
+// LIGHT_TYPE permutation system:
+//   LIGHT_TYPE_DIRECTIONAL (1) - sun-light path (cascade-shadow PCF,
+//                                distance fade). FULLY RECONSTRUCTED.
+//   LIGHT_TYPE_POINT       (2) - point-light path (cubemap-array PCF,
+//                                1/d^2 attenuation). STUB - see TODO at
+//                                end of file. Awaits FO4_frame9483
+//                                interior capture.
+//   LIGHT_TYPE_SPOT        (3) - spot-light path (single-frustum PCF,
+//                                cone attenuation). STUB - see TODO at
+//                                end of file. Awaits FO4_frame9483.
+//
+// Default LIGHT_TYPE is DIRECTIONAL to preserve backwards-compatible
+// behaviour (this file replaces the prior sun_light_deferred.hlsl).
+//
+// Status: REFERENCE - directional branch is asm-level transcription with
+// structural fidelity high; point and spot branches are stubs.
+//
+// Canonical mapping (directional):
 //   * Corpus blob:    Shaders011.fxp blob 3295
 //   * Corpus sha1:    50e2618e8d1a... (strongest match in a 5-peer cluster)
 //   * Runtime sha1:   8c615844e6443... (eid 44513 in FO4_frame5407.rdc;
@@ -19,7 +39,7 @@
 //                     mode_comparison (hardware PCF), 999-entry immediate
 //                     constant buffer of jittered 2D Poisson points.
 //
-// Host dispatch (cross-runtime confirmed):
+// Host dispatch (cross-runtime confirmed, directional variant):
 //   DrawWorld::AccumulateSunShadowLightImpl  (REL::IDs {OG=259940,
 //                                              NG=2318296, AE=2318296})
 //     OG RVA 0x02850340   NG RVA 0x02095e60   AE RVA 0x021eb4f0
@@ -31,7 +51,15 @@
 //   (FO4 has no separate BSDFDirectionalLightShader - the sun-light is
 //   a technique permutation of the same class that handles point/spot.)
 //
-// What this shader does (interpreted from asm):
+// Refactor history:
+//   * This file is the consolidation of prior sun_light_deferred.hlsl
+//     (deleted in same commit). The directional branch is byte-for-byte
+//     the same math as the deleted file; compiling this with LIGHT_TYPE
+//     undefined / LIGHT_TYPE_DIRECTIONAL must produce identical bytecode.
+//   * Point + spot branches arrive in follow-up commits when the
+//     FO4_frame9483 interior capture has been processed.
+//
+// What the directional branch does (interpreted from asm):
 //   1. Sample depth from t3 using derivative-based gradient filter.
 //   2. Depth-based matrix select via CB12[20..27] - SHARED with composite
 //      (blob 3539), ambient/IBL (3559), VLS slice (2147). The shared
@@ -90,6 +118,32 @@
 //     marked TODO for the next iteration (the runtime stratified loop
 //     indexes icb[r6.w * 2 + 0] and [r6.w * 2 + 1] so a partial array
 //     limits the loop iteration count).
+
+// ----------------------------------------------------------------------------
+// LIGHT_TYPE permutation config.
+// ----------------------------------------------------------------------------
+
+#define LIGHT_TYPE_DIRECTIONAL 1
+#define LIGHT_TYPE_POINT       2
+#define LIGHT_TYPE_SPOT        3
+
+#ifndef LIGHT_TYPE
+#  define LIGHT_TYPE LIGHT_TYPE_DIRECTIONAL
+#endif
+
+#if LIGHT_TYPE != LIGHT_TYPE_DIRECTIONAL \
+    && LIGHT_TYPE != LIGHT_TYPE_POINT \
+    && LIGHT_TYPE != LIGHT_TYPE_SPOT
+#  error "LIGHT_TYPE must be DIRECTIONAL (1), POINT (2), or SPOT (3)"
+#endif
+
+#if LIGHT_TYPE == LIGHT_TYPE_POINT
+#  error "LIGHT_TYPE_POINT is a stub; reconstruct from FO4_frame9483 first"
+#endif
+
+#if LIGHT_TYPE == LIGHT_TYPE_SPOT
+#  error "LIGHT_TYPE_SPOT is a stub; reconstruct from FO4_frame9483 first"
+#endif
 
 // ----------------------------------------------------------------------------
 // Constant buffer layouts.
@@ -629,4 +683,71 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Cascade-PCF zRef bias terms (insns 48, 83) - the exact -0.275 *
 //     range_rcp scaling is preserved structurally but field semantics
 //     would benefit from IDA Hex-Rays cross-read.
+// ============================================================================
+
+// ============================================================================
+// LIGHT_TYPE_POINT stub - reconstruction TODO
+//
+// Awaits canonical capture from FO4_frame9483.rdc (interior cell, 2.6 GB)
+// where point lights are dispatched. The FO4_frame5407.rdc capture used
+// for the directional reconstruction is exterior-daytime with no point
+// lights active.
+//
+// Expected math sketch (from BSDFLightShader source-side comments,
+// pending IDA cross-read of host BSDFLightShaderMacros::GetPixelShaderID
+// at AE RVA 0x0226A030):
+//
+//   1. Same gbuffer decode + view-space position reconstruction as
+//      directional. Reuse the cb12 reprojection matrix block + the
+//      octahedral normal decode helper.
+//   2. toLight = lightPos - posView (lightPos from CB1[0].xyz).
+//   3. d = length(toLight); lightDir = toLight / d.
+//   4. attenuation = saturate(1 - d / range)^2 / max(d*d, epsilon)
+//      (range from CB1[0].w; the exact attenuation curve matches the
+//      smoothstep-toward-radius pattern used by Skyrim CS for point
+//      lights and is presumed-stable across the engine fork).
+//   5. Cubemap-array shadow PCF: sample t5.SampleCmpLevelZero with
+//      direction = -lightDir mapped to cubemap face + (light index)
+//      slice. 6 jittered taps over a small radius. Use the same Poisson
+//      kernel offsets as directional but reshaped for cube space.
+//   6. NdotL = max(0, dot(normalView, lightDir)).
+//   7. BRDF math identical to directional (Schlick + GGX). Use light
+//      color from CB1[1].xyz, intensity from CB1[1].w.
+//   8. Final composition writes the same MRT pair (o0 diffuse, o1 spec).
+//
+// Per-light CB1 schema (TODO confirm):
+//   CB1[0]: .xyz = view-space light position, .w = range
+//   CB1[1]: .xyz = light color (linear HDR), .w = intensity multiplier
+//   CB1[2..]: shadow params (cubemap-array slice, bias, depth-range)
+// ============================================================================
+
+// ============================================================================
+// LIGHT_TYPE_SPOT stub - reconstruction TODO
+//
+// Awaits canonical capture from FO4_frame9483.rdc (interior cell with
+// spot lights active).
+//
+// Expected math sketch:
+//
+//   1. Same gbuffer decode + view-space position reconstruction as
+//      directional.
+//   2. toLight = lightPos - posView (CB1[0].xyz).
+//   3. d = length(toLight); lightDir = toLight / d.
+//   4. coneFactor = saturate((dot(lightConeAxis, -lightDir) - cosOuter)
+//                            / (cosInner - cosOuter))
+//      where lightConeAxis (CB1[2].xyz), cosOuter (CB1[2].w), cosInner
+//      (CB1[3].x). Pre-multiplied with the same range attenuation as
+//      point lights.
+//   5. Single-frustum shadow PCF: sample t5 (Texture2D, not array, not
+//      cubemap) with the spot light's projection matrix from CB1[4..7].
+//      Use the same stratified Poisson kernel as directional cascade-0.
+//   6. NdotL + BRDF identical to directional.
+//   7. Final composition writes the MRT pair.
+//
+// Per-light CB1 schema (TODO confirm):
+//   CB1[0]: .xyz = view-space light position, .w = range
+//   CB1[1]: .xyz = light color, .w = intensity
+//   CB1[2]: .xyz = view-space cone axis, .w = cos(outer cone half-angle)
+//   CB1[3]: .x   = cos(inner cone half-angle), .yzw = shadow params
+//   CB1[4..7]: spot-light projection matrix
 // ============================================================================

@@ -13,7 +13,7 @@ intended to inform feature implementations elsewhere in the repo.
 | `ambient_ibl_pass.hlsl`     | ambient + image-based lighting consuming kSSAO | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **reconstructed-roundtrip-1.5pct** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
-| `sun_light_deferred.hlsl`   | directional sun-light deferred PS with cascade-shadow PCF | reads gbuffer (albedo/normal/material) + main depth + cascade shadow Texture2DArray; writes RT 389+392 (kDiffuse/kSpec HDR pair) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) | **reconstructed-roundtrip-8.8pct** |
+| `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads gbuffer (albedo/normal/material) + main depth + cascade shadow Texture2DArray; writes RT 389+392 (kDiffuse/kSpec HDR pair) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point/spot stubs await `FO4_frame9483` interior capture | **directional-reconstructed-roundtrip-8.8pct; point+spot STUB** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -66,8 +66,13 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   pattern at eids 45401-45623 is N slices × M shadow-lights for VLS
   accumulation into `kMain`. Round-trip from the prior reconstruction
   is unchanged (+33.9% insns vs original; structural fidelity verified).
-* **`sun_light_deferred.hlsl`** - **reconstructed, round-trip -8.8%**.
-  Canonical blob: `Shaders011.fxp` blob **3295** (sha1 `50e2618e8d1a`),
+* **`bsdf_light_deferred.hlsl`** - **directional branch reconstructed, round-trip -8.8%; point + spot are stubs**.
+  Consolidated BSDFLightShader deferred PS, parameterized by
+  `LIGHT_TYPE` (DIRECTIONAL=1 default; POINT=2 and SPOT=3 are stubs).
+  This file replaces the prior `sun_light_deferred.hlsl`; the directional
+  branch's bytecode is byte-identical to the deleted file (verified via
+  sha256 comparison of fxc /O3 output). Canonical blob (directional):
+  `Shaders011.fxp` blob **3295** (sha1 `50e2618e8d1a`),
   the strongest candidate in a 5-peer cluster of similar permutations.
   272-instruction directional sun-light deferred PS with cascade-shadow
   hardware PCF (16-tap stratified Poisson per cascade, 2 cascades +
@@ -84,7 +89,10 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   keeps the cascade PCF blocks as runtime loops (4 sample_c_lz
   instructions in asm), matching the original exactly. The material-
   non-1 BRDF block is condensed for readability; full asm-granular
-  reconstruction would add ~24 more insns.
+  reconstruction would add ~24 more insns. Point + spot stubs at the
+  end of the file document the math sketches; reconstruction awaits
+  `FO4_frame9483.rdc` interior capture (the existing exterior frame
+  has no point/spot dispatches).
 
 ## Workflow
 
