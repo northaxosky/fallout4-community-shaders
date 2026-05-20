@@ -12,8 +12,9 @@ intended to inform feature implementations elsewhere in the repo.
 |---|---|---|---|---|
 | `ambient_ibl_pass.hlsl`     | ambient + image-based lighting consuming kSSAO | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **reconstructed-roundtrip-1.5pct** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
+| `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **reconstructed-roundtrip-1.25pct** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
-| `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads gbuffer (albedo/normal/material) + main depth + cascade shadow Texture2DArray; writes RT 389+392 (kDiffuse/kSpec HDR pair) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point/spot stubs await `FO4_frame9483` interior capture | **directional-reconstructed-roundtrip-8.8pct; point+spot STUB** |
+| `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads gbuffer (albedo/normal/material) + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes RT 389+392 (kDiffuse/kSpec HDR pair) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-reconstructed-roundtrip-26.5pct; spot STUB** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -66,33 +67,49 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   pattern at eids 45401-45623 is N slices × M shadow-lights for VLS
   accumulation into `kMain`. Round-trip from the prior reconstruction
   is unchanged (+33.9% insns vs original; structural fidelity verified).
-* **`bsdf_light_deferred.hlsl`** - **directional branch reconstructed, round-trip -8.8%; point + spot are stubs**.
+* **`deferred_prepass.hlsl`** - **reconstructed, round-trip -1.25%**.
+  Standard-opaque G-buffer prepass PS for FO4's deferred pipeline.
+  Canonical runtime sha1: `c493970c042c...` (eid 13220 in
+  `FO4_frame9483.rdc`). 80-instruction PS that fills 6 MRT outputs:
+  albedo (`kGbufferAlbedo`), 2-channel octahedral normal
+  (`kGbufferNormal`), packed material data (`kGbufferMaterial`), two
+  auxiliary G-buffer slots (scroll UVs + specular tint), and the
+  screen-space motion vector via current-frame vs previous-frame
+  world-to-clip dp4 + perspective-divide. Resource bindings (3 SRVs
+  `t0/t1/t2` + 3 default samplers + CB12[41] / CB2[6]) and signature
+  exact-match. Round-trip via fxc /T ps_5_0 /O3: 79 vs 80 insns
+  (-1.25%), 3/3 samples. Hosted by `DrawWorld::DeferredPrePass`
+  (REL::IDs `{OG=56596, NG=2318301, AE=2318301}`). 7 other prepass
+  permutations (skin / hair / decal / projected / two-sided /
+  alpha-test) captured at eids 13241 / 13259 / 13507 / 13546 / 31244 /
+  38343 / 39205 are documented but NOT reconstructed; they share
+  resource shape with the standard-opaque variant but differ in body
+  math.
+* **`bsdf_light_deferred.hlsl`** - **directional + point branches reconstructed; spot is a stub**.
   Consolidated BSDFLightShader deferred PS, parameterized by
-  `LIGHT_TYPE` (DIRECTIONAL=1 default; POINT=2 and SPOT=3 are stubs).
+  `LIGHT_TYPE` (DIRECTIONAL=1 default; POINT=2 reconstructed; SPOT=3 is a stub).
   This file replaces the prior `sun_light_deferred.hlsl`; the directional
   branch's bytecode is byte-identical to the deleted file (verified via
-  sha256 comparison of fxc /O3 output). Canonical blob (directional):
-  `Shaders011.fxp` blob **3295** (sha1 `50e2618e8d1a`),
-  the strongest candidate in a 5-peer cluster of similar permutations.
-  272-instruction directional sun-light deferred PS with cascade-shadow
-  hardware PCF (16-tap stratified Poisson per cascade, 2 cascades +
-  smooth blend), octahedral-encoded normal decode, view-space position
-  reconstruction via the shared CB12[20..27] matrix pair (same
-  infrastructure as composite + ambient/IBL + VLS slice), material-id-
-  branched BRDF (material 1 = skin subsurface-style, non-1 = standard
-  Schlick + GGX), MRT output to RT 389 (kDiffuseBuffer equivalent) +
-  RT 392 (kSpecularBuffer equivalent). Hosted by
-  `DrawWorld::AccumulateSunShadowLightImpl` (cross-runtime confirmed
-  REL::IDs `{OG=259940, NG=2318296, AE=2318296}`). Round-trip via
-  fxc /T ps_5_0 /O3: 248 vs 272 insns (-8.8%, within the ±10%
-  threshold), sample count EXACT match (8/8). The `[loop]` attribute
-  keeps the cascade PCF blocks as runtime loops (4 sample_c_lz
-  instructions in asm), matching the original exactly. The material-
-  non-1 BRDF block is condensed for readability; full asm-granular
-  reconstruction would add ~24 more insns. Point + spot stubs at the
-  end of the file document the math sketches; reconstruction awaits
-  `FO4_frame9483.rdc` interior capture (the existing exterior frame
-  has no point/spot dispatches).
+  sha1 comparison of fxc /O3 output: `085625AF00823BEA6806625AEF9328C055C9E4F2`).
+  Canonical blob (directional): `Shaders011.fxp` blob **3295** (sha1
+  `50e2618e8d1a`). 272-instruction directional sun-light deferred PS
+  with cascade-shadow hardware PCF (16-tap stratified Poisson per
+  cascade, 2 cascades + smooth blend). Round-trip via fxc /T ps_5_0 /O3:
+  248 vs 272 insns (-8.8%), sample count EXACT match (8/8).
+
+  **Point-light branch** (`-D LIGHT_TYPE=2`) reconstructed from
+  FO4_frame9483.rdc eid 46771 (sha1 `3f1f708c0175`, 204 insns,
+  `bsdf-light-unshadowed` permutation): unshadowed point light with
+  radial attenuation curve (`cb2[1].w` radius + `cb2[3].xyz` curve
+  params) and an octahedral 2D light-cookie sample at `t7` driven by a
+  `cb2[11..14]` light-space transform. Resource bindings exact-match
+  (5 SRVs `t0/t1/t2/t3/t7`, 5 default samplers `s0/s1/s2/s3/s7` - no
+  comparison sampler), 5/5 samples, signature exact-match (o0 + o1).
+  Round-trip 150 vs 204 insns (-26.5%, BRDF condensation comparable to
+  the sun_light precedent's -28.7%).
+
+  Spot stub at the end of the file documents the expected math sketch;
+  reconstruction awaits a canonical spot-light capture.
 
 ## Workflow
 
@@ -117,17 +134,20 @@ explicit `// TODO` blocks and a documented instruction-count delta.
 
 ## Why these shaders
 
-These four shaders together cover the major paths in FO4's deferred
-lighting pipeline: ambient + image-based lighting (with kSSAO
-modulation), directional sun light + cascade shadows, volumetric light
-scattering accumulation, and final composite. Delivering them
-unblocks SSGI integration: the ambient/IBL pass tells us how the
-engine applies AO to the ambient term, so the SSGI feature can
-integrate at the right boundary instead of post-modulating
-`kDiffuseBuffer` (which darkens direct light along with ambient).
+These shaders together cover the major paths in FO4's deferred lighting
+pipeline: the G-buffer prepass (geometry pass that fills albedo / normal
+/ material / motion vector), ambient + image-based lighting (with kSSAO
+modulation), directional sun light + cascade shadows, unshadowed
+point lights, volumetric light scattering accumulation, and final
+composite. Delivering them unblocks SSGI integration: the ambient/IBL
+pass tells us how the engine applies AO to the ambient term, so the
+SSGI feature can integrate at the right boundary instead of post-
+modulating `kDiffuseBuffer` (which darkens direct light along with
+ambient).
 
-Point/spot light passes, fog, and the per-material permutation axes
-remain unmapped; they are queued as follow-up work.
+Spot lights, fog, shadowed-point-light permutations, and per-material
+prepass permutation axes remain unmapped; they are queued as follow-up
+work.
 
 ## License
 
