@@ -1,0 +1,43 @@
+{
+  "_comment": "Canonical fxc /T ps_5_0 /O3 sha1 baselines for reconstructed deferred-pipeline PSes. Captured post-Tier-1-spec-hardening. Update with verify-shader-roundtrip.ps1 --update-baselines after a deliberate refactor.",
+  "fxc_invocation": "fxc.exe /T ps_5_0 /O3 /E main [defines...] /Fo <out.dxbc> <src.hlsl>",
+  "shaders": [
+    {
+      "name": "ambient_ibl_pass",
+      "src": "shaders/lighting/ambient_ibl_pass.hlsl",
+      "defines": [],
+      "sha1": "BE5D9EEED4E0883DF4250B089A7A49C4D19288EB"
+    },
+    {
+      "name": "bsdf_light_deferred_directional",
+      "src": "shaders/lighting/bsdf_light_deferred.hlsl",
+      "defines": ["LIGHT_TYPE=1"],
+      "sha1": "085625AF00823BEA6806625AEF9328C055C9E4F2",
+      "invariant": "Locked by commit 5845b9e. The directional BSDF reconstruction must round-trip to this exact sha1. Any refactor that drifts this is wrong."
+    },
+    {
+      "name": "bsdf_light_deferred_point",
+      "src": "shaders/lighting/bsdf_light_deferred.hlsl",
+      "defines": ["LIGHT_TYPE=2"],
+      "sha1": "301B2CFD363DB202F74163C0F59C14ABBA5EEEED"
+    },
+    {
+      "name": "deferred_composite",
+      "src": "shaders/lighting/deferred_composite.hlsl",
+      "defines": [],
+      "sha1": "95D10F9ECDBE70207A9794C40694EF15CB935482"
+    },
+    {
+      "name": "deferred_prepass",
+      "src": "shaders/lighting/deferred_prepass.hlsl",
+      "defines": [],
+      "sha1": "15EAEAD567E78EA0469180BC44A0646154375E65"
+    },
+    {
+      "name": "vls_slice_scatter",
+      "src": "shaders/lighting/vls_slice_scatter.hlsl",
+      "defines": [],
+      "sha1": "65C54A65B061558F9B4D91CAEA1BE0D10F315AAC"
+    }
+  ]
+}
