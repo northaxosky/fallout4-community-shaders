@@ -39,6 +39,15 @@ Subclasses hooked (12): `BSBloodSplatterShader`, `BSDFCompositeShader`, `BSDFLig
 
 On UPSERT, `bsshader_subclass` is preserved via `COALESCE`: the first non-null attribution wins. PS rows created outside any hooked `ReloadShaders` (e.g. from `BSImagespaceShader`, which is not in the BSShader hierarchy in FO4, or from non-engine creators) remain NULL and surface as unattributed in the ImGui stats counter.
 
+#### Runtime gap discovered
+
+On a first smoke-harness run (clean catalog, fresh boot, main-menu entry + exit) all 12 hooks install successfully but no rows are attributed. The engine's initial shader-load path does NOT route through `BSShader::ReloadShaders(bool)`; that virtual is only invoked by the explicit reload path (e.g. shader-reload console command, resolution-change reload). Initial creation goes through a separate per-subclass entry not exposed in commonlibf4 and not yet symbolicated in `cs-render-subsystem-ids.json`.
+
+Two viable next steps to close the gap (follow-up work):
+
+1. Hook `BSShaderManager::ReloadShaders` (renderer-subsystem ID exists) and any `BSShaderManager::Initialize` / `Reinitialize` / `RegisterShaderLoader` that orchestrates the initial sweep, then push subclass context based on the loader being iterated.
+2. Add `SetupTechnique` hooks per subclass for a retroactive attribution pass: on first bind, look up the bound `ID3D11PixelShader*` in a side-table populated by the device-vtable hook (D3D11 pointer to sha1) and enqueue an `UPDATE shader_catalog SET bsshader_subclass = ?, bsshader_technique_bits = ? WHERE sha1 = ?` record. This also closes the technique-bits gap below in one stroke.
+
 ### Technique bits (gap)
 
 `bsshader_technique_bits` is plumbed end-to-end (TLS context field, `CatalogEntry` field, SQL binding, `COALESCE` upsert) but currently always written as NULL because `ReloadShaders(bool)` does not carry the per-permutation technique-bit value as a parameter. Recovering tech-bits requires either:
