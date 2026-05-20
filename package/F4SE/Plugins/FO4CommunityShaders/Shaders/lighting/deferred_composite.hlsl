@@ -249,9 +249,15 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 0: screen-space UV from SV_POSITION.xy * CB2[0].xy
     float2 uv = input.position.xy * ScreenSize.xy;
 
-    // Insn 1-2: sample material-id (.y of t3) and linear depth (.y of t7)
-    float matIdRaw = g_tMaterialIdBuffer.SampleLevel(g_sMaterialId, uv, 0).y;
-    float depth    = g_tLinearDepth.SampleLevel(g_sDepth, uv, 0).y;
+    // Insn 1-2: sample material-id (.w of t3) and linear depth (.x of t7).
+    //   Corpus asm encodes the channels via the sample-instruction swizzle:
+    //     insn 1: sample r0.z, t3.xywz   -> r0.z = texel.w (position z = 'w')
+    //     insn 2: sample r0.w, t7.yzwx   -> r0.w = texel.x (position w = 'x')
+    //   Reading .y here was a 2026-05-19 reconstruction error: it routed
+    //   every pixel into the skin/hair branch (output = 0, black screen)
+    //   because t3.y is not in {2/255, 3/255} but t3.w is the material code.
+    float matIdRaw = g_tMaterialIdBuffer.SampleLevel(g_sMaterialId, uv, 0).w;
+    float depth    = g_tLinearDepth.SampleLevel(g_sDepth, uv, 0).x;
 
     // Insn 3-16: select reprojection matrix based on depth threshold.
     //   if (depth < 0.01)   -> use NEAR matrix, scale depth by 100
@@ -401,10 +407,15 @@ PS_OUTPUT main(PS_INPUT input)
         float specular = pow(NdotL, SunColor_and_SpecPower.w)
                          * SunDirection_and_intensity.w;
 
-        // -------- Insn 77-78: blend secondary color with sun color. -------
-        //   r0.xyz = lerp(secondaryColor, cb2[2].xyz, specular)
-        float3 secondaryLit = lerp(secondaryColor, SunColor_and_SpecPower.xyz,
-                                   specular);
+        // -------- Insn 77-78: sun-direction "specular" mixes the FOG color
+        //   (r2.xyz at this point) toward the directional sun color, NOT
+        //   the secondary color (r7.xyz). Corpus asm:
+        //     77:   add r1.xyz, -r2.xyzx, cb2[2].xyzx     ; SunColor - fogColor
+        //     78:   mad r0.xyz, r0.xxxx, r1.xyzx, r2.xyzx ; fogColor + spec*(...)
+        //   The earlier reconstruction used secondaryColor (r7) here, which
+        //   compounded with the matId channel bug to wash output to black.
+        float3 sunlitFogColor = lerp(fogColor, SunColor_and_SpecPower.xyz,
+                                     specular);
 
         // -------- Insn 79-83: grayscale-saturation tonemap path. ----------
         //   r1.xyz   = litColor * 3 + secondaryColor     // r6 * 3 + r7
@@ -417,14 +428,14 @@ PS_OUTPUT main(PS_INPUT input)
         //     lerp(secondaryLit, gray.xxx, gray).
         float3 ambientWeighted = litColor * 3.0 + secondaryColor;
         float  gray            = dot(ambientWeighted, float3(1.0/3.0, 1.0/3.0, 1.0/3.0));
-        float3 graySaturated   = secondaryLit + gray * (gray.xxx - secondaryLit);
+        float3 graySaturated   = sunlitFogColor + gray * (gray.xxx - sunlitFogColor);
 
         // -------- Insn 80, 84: branch on combinedFog vs threshold. --------
         //   r1.w = (fogMixFactor < cb12[43].w)
-        //   output.xyz = r1.w ? graySaturated : secondaryLit
+        //   output.xyz = r1.w ? graySaturated : sunlitFogColor
         bool useGraySaturated = (fogMixFactor
                                   < cb12_idx43_fog_color_b_and_threshold.w);
-        output.color.xyz = useGraySaturated ? graySaturated : secondaryLit;
+        output.color.xyz = useGraySaturated ? graySaturated : sunlitFogColor;
 
         // -------- Insn 85: output alpha = fogMixFactor. -------------------
         output.color.w = fogMixFactor;

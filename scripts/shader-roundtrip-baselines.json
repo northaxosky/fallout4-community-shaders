@@ -25,7 +25,8 @@
       "name": "deferred_composite",
       "src": "shaders/lighting/deferred_composite.hlsl",
       "defines": [],
-      "sha1": "95D10F9ECDBE70207A9794C40694EF15CB935482"
+      "sha1": "06C040D09B107A0638AFA55F29058374C80D8748",
+      "_baseline_history": "Re-baselined 2026-05-20: fixed matId channel (.y->.w), depth channel (.y->.x), and sunlit-color base (secondaryColor->fogColor). Tail asm now matches corpus blob 3539 insns 60-85 instruction-for-instruction; prior baseline 95D10F9E was the buggy reconstruction that black-screened in smoke."
     },
     {
       "name": "deferred_prepass",
