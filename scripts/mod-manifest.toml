@@ -40,8 +40,8 @@ pattern = "*.hlsl*"
 
 # Imagespace HLSL (committed).
 [[deploy.assets]]
-src = "package/F4SE/Plugins/Imagespace/"
-dst = "F4SE/Plugins/Imagespace/"
+src = "package/F4SE/Plugins/FO4CommunityShaders/Imagespace/Shaders/"
+dst = "F4SE/Plugins/FO4CommunityShaders/Imagespace/Shaders/"
 pattern = "*.hlsl*"
 
 # Default INI seeds for features that read F4SE/Plugins/FO4CommunityShaders/*.ini.
