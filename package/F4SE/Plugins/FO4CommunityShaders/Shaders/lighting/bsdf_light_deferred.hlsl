@@ -604,7 +604,11 @@ PS_OUTPUT main(PS_INPUT input)
     ambientFres = exp2(log2(max(ambientFres, 1e-6)) * 0.01);
 
     float fresEdge = saturate(dot(viewDirNeg, -SunDirection_and_padding.xyz));
-    float ambientTerm = fresEdge * ambientFres * NdotL_clamped * posViewLen;
+    // Corpus insn 251 multiplies by r0.w which is `1 - matSample.x` (set at
+    // insn 35 and not overwritten before 251). Prior reconstruction used
+    // `posViewLen` (= 1/|posView|), which crushed the ambient contribution
+    // to ~1/distance and produced ~-86% scene darkening.
+    float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 
     float3 finalDiffuse  = SunColor_HDR.xyz * ambientTerm;
     finalDiffuse += SunColor_HDR.xyz * brdfShadowMix;

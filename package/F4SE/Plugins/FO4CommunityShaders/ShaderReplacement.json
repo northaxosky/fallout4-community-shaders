@@ -44,8 +44,8 @@
     },
     {
       "name": "bsdf_light_deferred_directional",
-      "runtime_sha1_hex": "46b911cb8053bbe1fc529ff4e32c78293c902cb7",
-      "comment": "sun-shadow DIRECTIONAL permutation (bombshell capture)",
+      "runtime_sha1_hex": "8c615844e644bf98ac3747119b8c44ec11491cd5",
+      "comment": "BSDFLightShader sun-shadow DIRECTIONAL permutation at eid 44513 in FO4_frame5407.rdc. Prior 46b911cb mapping was misattributed (that sha is a 61-insn fog/imagespace pass with t7-only and CB0/CB1/CB2[5]); substituting it with this 270-insn HLSL produced -86% scene darkening.",
       "hlsl": "Shaders/lighting/bsdf_light_deferred.hlsl",
       "entry": "main",
       "profile": "ps_5_0",

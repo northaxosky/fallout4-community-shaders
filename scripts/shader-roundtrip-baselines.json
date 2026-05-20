@@ -12,8 +12,8 @@
       "name": "bsdf_light_deferred_directional",
       "src": "shaders/lighting/bsdf_light_deferred.hlsl",
       "defines": ["LIGHT_TYPE=1"],
-      "sha1": "085625AF00823BEA6806625AEF9328C055C9E4F2",
-      "invariant": "Locked by commit 5845b9e. The directional BSDF reconstruction must round-trip to this exact sha1. Any refactor that drifts this is wrong."
+      "sha1": "F614C18D125C71F4FDC95172A749A3F7BEE5C842",
+      "invariant": "Re-baselined 2026-05-20: corrected ambient-term multiplier from posViewLen (= 1/|posView|) to roughness01 (= 1 - matSample.x). Corpus blob 3295 / runtime sha 8c615844e644 insn 251 multiplies by r0.w which is roughness01 set at insn 35. Prior baseline 085625AF (locked at 5845b9e) had the posViewLen bug; replacing the (separately-misattributed) runtime sha caused -86% scene darkening. The DIRECTIONAL bsdf must continue to round-trip to this exact sha1; any refactor that drifts it is wrong."
     },
     {
       "name": "bsdf_light_deferred_point",
