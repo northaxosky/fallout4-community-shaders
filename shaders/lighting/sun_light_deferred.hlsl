@@ -150,17 +150,27 @@ cbuffer PerFrame_CB12 : register(b12)
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0]: .xy = screen-space UV scale (insn 0 mul); .zw = related
-    //      view-space UV remap. Same shape as composite cb2[0].
-    float4 cb2_idx0_screen_uv_scale;
+    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
+    //      eid 44513 CB2 slot): .xy = RcpFrameDim (1/3840, 1/2160 in
+    //      captured frame), .zw appear as denormal noise here (CB2 is
+    //      patched per-call; sun-light reads only .xy of [0]).
+    //      Shared screen-size convention with composite + ambient/IBL + VLS.
+    float4 ScreenSize;
 
-    // [1]: .xyz = sun direction in view space (insn 129).
-    //      TODO: confirm .w.
-    float4 cb2_idx1_sun_dir;
+    // [1]: per runtime evidence (eid 44513 (0.833, 0.545, -0.091, 0)):
+    //      .xyz = sun direction in view space. SAME xyz value as
+    //      composite (3539) CB2[1] in the same captured frame,
+    //      confirming this is the per-frame sun direction.
+    //      .w = 0 here (composite sees .w=1 = intensity); sun-light
+    //      doesn't read .w.
+    float4 SunDirection_and_padding;
 
-    // [2]: .xyz = sun light color (insns 174, 240, 252, 253, 256, 262).
-    //      TODO: confirm .w.
-    float4 cb2_idx2_sun_color;
+    // [2]: per runtime evidence (eid 44513 (3.4169, 3.4170, 3.4169, 0)):
+    //      .xyz = sun color in BSDFLightShader's HDR-scale convention
+    //      (much brighter than composite's CB2[2] = (0.759x3, 8); the
+    //      BSDFLightShader pre-multiplies color by an intensity factor
+    //      before dispatch). .w = 0 here.
+    float4 SunColor_HDR;
 
     // [3..9]: TODO: identify
     float4 cb2_pad_3_9[7];
@@ -355,7 +365,7 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 
     // Insn 0: r0.xyzw = position.xy * cb2[0].xyzw -> uv + scaled coords
-    float4 uv4 = input.position.xyxy * cb2_idx0_screen_uv_scale.xyzw;
+    float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
     float2 uv = uv4.xy;
 
     // Insn 1-3: depth sample with explicit gradients (sample_d) - lets the
@@ -461,7 +471,7 @@ PS_OUTPUT main(PS_INPUT input)
     //   r6.w = r6.z * r6.z * (r6.z * r6.z) = pow(r6.z, 4)
     //   r6.z = 1.0 - r6.z * r6.w  // = 1 - (1-cb12[30].y)^5  approx Schlick
     float3 albedoPremult = albedoSample.w * albedoSample.xyz;
-    float  NdotL_raw     = dot(normalView, cb2_idx1_sun_dir.xyz);
+    float  NdotL_raw     = dot(normalView, SunDirection_and_padding.xyz);
     float  NdotL_clamped = saturate(NdotL_raw);
     float  oneMinusGloss = saturate(1.0 - cb12_idx30.y);
     float  schlickFres   = 1.0 - oneMinusGloss * (oneMinusGloss * oneMinusGloss * oneMinusGloss);
@@ -509,7 +519,7 @@ PS_OUTPUT main(PS_INPUT input)
         float pow2 = pow(vis2, cb12_idx28_sss_params.y) * cb12_idx28_sss_params.x;
 
         brdfShadowMix = min(albedoSample.w, SSSinten1);
-        brdfSpecular  = pow2 * cb2_idx2_sun_color.xyz * NdotL_clamped;
+        brdfSpecular  = pow2 * SunColor_HDR.xyz * NdotL_clamped;
         brdfModulator = 0.0;  // r3.w = 0 (insn 176)
     }
     else
@@ -526,7 +536,7 @@ PS_OUTPUT main(PS_INPUT input)
         float schlickComb = (1.0 - schlickFres * 0.98) * schlickBase;
 
         float3 reflVec = normalize(-2.0 * dot(viewDirNeg, normalView) * normalView + viewDirNeg);
-        float3 halfish = normalize(-posView * posViewLen + cb2_idx1_sun_dir.xyz);
+        float3 halfish = normalize(-posView * posViewLen + SunDirection_and_padding.xyz);
         float  NdotH   = saturate(dot(normalView, halfish));
         float  RdotV   = saturate(dot(reflVec, normalView));
 
@@ -541,7 +551,7 @@ PS_OUTPUT main(PS_INPUT input)
         specMag = min(specMag * 0.25, 15.0);
         specMag = specMag * 3.141593;
 
-        brdfSpecular = specMag * cb2_idx2_sun_color.xyz;
+        brdfSpecular = specMag * SunColor_HDR.xyz;
         brdfShadowMix = albedoSample.w * specMag;
         brdfModulator = schlickFres;
     }
@@ -558,11 +568,11 @@ PS_OUTPUT main(PS_INPUT input)
     float ambientFres = 1.0 - NdotV_view;
     ambientFres = exp2(log2(max(ambientFres, 1e-6)) * 0.01);
 
-    float fresEdge = saturate(dot(viewDirNeg, -cb2_idx1_sun_dir.xyz));
+    float fresEdge = saturate(dot(viewDirNeg, -SunDirection_and_padding.xyz));
     float ambientTerm = fresEdge * ambientFres * NdotL_clamped * posViewLen;
 
-    float3 finalDiffuse  = cb2_idx2_sun_color.xyz * ambientTerm;
-    finalDiffuse += cb2_idx2_sun_color.xyz * brdfShadowMix;
+    float3 finalDiffuse  = SunColor_HDR.xyz * ambientTerm;
+    finalDiffuse += SunColor_HDR.xyz * brdfShadowMix;
 
     // Specular accumulation in o1
     float specMix = (1.0 - schlickFres * 0.5);

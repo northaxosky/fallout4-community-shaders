@@ -90,11 +90,14 @@
 
 cbuffer PerCall_CB0 : register(b0)
 {
-    // [0]: .xy = screen-space UV scale (multiplied with SV_POSITION.xy at
-    //      insn 3); .zw = related scale used in view-space reconstruction
-    //      (same pattern as cb2[0] in the deferred composite).
-    //      TODO: identify (likely (RcpFrameDim.xy, FrameDim.xy)).
-    float4 cb0_idx0_screen_uv_scale;
+    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
+    //      eid 45401 CB0 slot): .xy = RcpFrameDim (1/3840, 1/2160 in
+    //      captured frame), .zw appear as (1, 1) here. The VLS slice
+    //      PS reads .xy for screen-UV scale and .zw for view-space UV
+    //      remap (the .zw=(1,1) here suggests an alternate per-call
+    //      convention; same shape as composite + ambient/IBL + sun-light
+    //      CB2[0] but bound at CB0 here).
+    float4 ScreenSize;
 };
 
 cbuffer PerLight_CB1 : register(b1)
@@ -138,13 +141,14 @@ cbuffer PerCall_CB2 : register(b2)
     // [0..3]: unused by this PS (declared CB2[5] but only [4] read).
     float4 cb2_pad_0_3[4];
 
-    // [4]: .xyz = unit direction in view space (dotted with the back-
-    //      projected view ray; the ratio cb2[4].w / dot drives a fade
-    //      factor). Almost certainly the SUN DIRECTION in view space.
-    //      .w  = denominator scalar (probably sun-direction "spread"
-    //      or "cosine cutoff").
-    //      TODO: confirm via IDA on dispatch site.
-    float4 cb2_idx4_sun_dir_and_w;
+    // [4]: per runtime evidence (eid 45401 CB2 slot (0, 0, 1, 8639.2)):
+    //      .xyz = (0, 0, 1) - this is the world-up axis (Z-axis up
+    //      convention), NOT a sun direction as the prior HLSL inference
+    //      suggested. .w = 8639.2 - a large scalar, likely a scatter-
+    //      distance or volume-thickness parameter for GodRays atmospheric
+    //      math. The dot(backRay, [4].xyz) measures the vertical
+    //      component of the back-projected view ray.
+    float4 cb2_idx4_scatter_axis_and_scale;
 };
 
 cbuffer PerFrame_CB12 : register(b12)
@@ -222,7 +226,7 @@ PS_OUTPUT main(PS_INPUT input)
     float3 rayUnit = normalize(input.rayDir);
 
     // Insn 3: r1.xy = uv = SV_POSITION.xy * cb0[0].xy
-    float2 uv = input.position.xy * cb0_idx0_screen_uv_scale.xy;
+    float2 uv = input.position.xy * ScreenSize.xy;
 
     // Insn 4: r0.w = linear depth = t7.Sample(s7, uv).y
     float depth = g_tLinearDepth.Sample(g_sDepth, uv).y;
@@ -244,8 +248,8 @@ PS_OUTPUT main(PS_INPUT input)
     //   pos4    = (uvNDC, linearizedDepth, 1)
     //   posView = (matrix * pos4).xyz / (matrix * pos4).w
     float3 uvRemapped;
-    uvRemapped.x = uv.x * cb0_idx0_screen_uv_scale.z;
-    uvRemapped.z = -uv.y * cb0_idx0_screen_uv_scale.w + 1.0;
+    uvRemapped.x = uv.x * ScreenSize.z;
+    uvRemapped.z = -uv.y * ScreenSize.w + 1.0;
     float2 uvNDC = uvRemapped.xz * 2.0 - 1.0;
 
     float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
@@ -265,14 +269,14 @@ PS_OUTPUT main(PS_INPUT input)
 
     // Insn 31: r0.w = dot(backRay, cb2[4].xyz)
     //   The "sun direction dot product" if cb2[4].xyz is the sun direction.
-    float sunDot = dot(backRay, cb2_idx4_sun_dir_and_w.xyz);
+    float sunDot = dot(backRay, cb2_idx4_scatter_axis_and_scale.xyz);
 
     // Insn 32-33: r0.x = length(backRay) (same magnitude as posViewLen)
     float backRayLen = length(backRay);
 
     // Insn 34-36: ratio = cb2[4].w / sunDot; inv = 1 - ratio;
     //             r0.x = backRayLen * inv
-    float ratio = cb2_idx4_sun_dir_and_w.w / sunDot;
+    float ratio = cb2_idx4_scatter_axis_and_scale.w / sunDot;
     float inv   = 1.0 - ratio;
     float distScaled = backRayLen * inv;
 

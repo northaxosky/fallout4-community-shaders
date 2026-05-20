@@ -174,11 +174,12 @@ cbuffer PerCall_CB0 : register(b0)
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0]: .xy = screen-space UV scale (multiplied with SV_POSITION.xy
-    //      at insn 0). .zw = used in view-space reconstruction at
-    //      insns 40-42 (same pattern as composite + VLS).
-    //      TODO: confirm (likely (RcpFrameDim.xy, FrameDim.xy)).
-    float4 cb2_idx0_screen_uv_scale;
+    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
+    //      eid 45345 CB2 slot): .xy = RcpFrameDim (1/3840, 1/2160 in the
+    //      captured frame), .zw = FrameDim (3840, 2160). Same shape
+    //      across composite, sun-light, VLS slice - shared screen-size
+    //      conventions for the per-call CB.
+    float4 ScreenSize;
 
     // [1..4]: TODO: identify
     float4 cb2_pad_1_4[4];
@@ -337,7 +338,7 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 
     // ----- Insn 0: screen-space UV --------------------------------------
-    float2 uv = input.position.xy * cb2_idx0_screen_uv_scale.xy;
+    float2 uv = input.position.xy * ScreenSize.xy;
 
     // ----- Insn 1-5: sample ambient pair + scale ------------------------
     float3 shadingData    = g_tGbufferShadingData.SampleLevel(g_sGbufferShadingData, uv, 0).xyw;
@@ -394,8 +395,8 @@ PS_OUTPUT main(PS_INPUT input)
 
         // Insn 40-48: reconstruct view-space position via reproj matrix
         float3 uvRemapped;
-        uvRemapped.x = uv.x * cb2_idx0_screen_uv_scale.z;
-        uvRemapped.z = -uv.y * cb2_idx0_screen_uv_scale.w + 1.0;
+        uvRemapped.x = uv.x * ScreenSize.z;
+        uvRemapped.z = -uv.y * ScreenSize.w + 1.0;
         float2 uvNDC = uvRemapped.xz * 2.0 - 1.0;
         float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
         float4 posViewH;

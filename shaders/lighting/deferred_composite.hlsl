@@ -157,24 +157,24 @@ cbuffer PerFrame_CB12 : register(b12)
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0]: .xy = screen-space UV scale (multiplied with SV_POSITION.xy at
-    //      the very first instruction); .zw = related scale used in
-    //      view-space reconstruction. Likely (1/width, 1/height, width,
-    //      height) or (RcpFrameDim.xy, FrameDim.xy). TODO: confirm.
-    float4 cb2_idx0_screen_uv_scale;
+    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
+    //      eid 45368 CB2 slot): .xy = RcpFrameDim (1/3840, 1/2160 in the
+    //      captured frame), .zw = FrameDim (3840, 2160). Shared screen-
+    //      size conventions across composite + ambient/IBL + sun-light + VLS.
+    float4 ScreenSize;
 
-    // [1]: .xyz = sun direction (or directional light direction) in
-    //      view-space (dot with reconstructed view-space-normalized
-    //      position gives N.L term).
-    //      .w = directional light intensity scalar.
-    //      TODO: confirm via IDA on dispatch-site C++.
-    float4 cb2_idx1_sun_dir_and_intensity;
+    // [1]: per runtime evidence (eid 45368 captured value
+    //      (0.833, 0.545, -0.091, 1.0)): .xyz = sun direction in view
+    //      space (normalized; magnitude ~1.0). .w = intensity scalar = 1.0.
+    //      Cross-shader consistency: sun-light (3295) sees the same
+    //      .xyz at the same slot, confirming this is a per-frame sun
+    //      direction used by both passes.
+    float4 SunDirection_and_intensity;
 
-    // [2]: .xyz = directional light color (lerp endpoint with sampled t4
-    //      color).
-    //      .w = specular power exponent (`pow(NdotL, exp)` style).
-    //      TODO: confirm.
-    float4 cb2_idx2_sun_color_and_spec_power;
+    // [2]: per runtime evidence (eid 45368 captured value
+    //      (0.759, 0.759, 0.759, 8.0)): .xyz = directional light color
+    //      (lerp endpoint), .w = specular power exponent.
+    float4 SunColor_and_SpecPower;
 };
 
 // ----------------------------------------------------------------------------
@@ -247,7 +247,7 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 
     // Insn 0: screen-space UV from SV_POSITION.xy * CB2[0].xy
-    float2 uv = input.position.xy * cb2_idx0_screen_uv_scale.xy;
+    float2 uv = input.position.xy * ScreenSize.xy;
 
     // Insn 1-2: sample material-id (.y of t3) and linear depth (.y of t7)
     float matIdRaw = g_tMaterialIdBuffer.SampleLevel(g_sMaterialId, uv, 0).y;
@@ -293,8 +293,8 @@ PS_OUTPUT main(PS_INPUT input)
         //   (TODO: confirm matrix order vs row-major/column-major; the asm
         //   uses dp4 on rows 0..3 of the matrix which is row-major mul.)
         float3 uvRemapped;
-        uvRemapped.x = uv.x * cb2_idx0_screen_uv_scale.z;
-        uvRemapped.z = -uv.y * cb2_idx0_screen_uv_scale.w + 1.0;
+        uvRemapped.x = uv.x * ScreenSize.z;
+        uvRemapped.z = -uv.y * ScreenSize.w + 1.0;
         float2 uvNDC = uvRemapped.xz * 2.0 - 1.0;
 
         float4 pos4 = float4(uvNDC, linearizedDepth, 1.0);
@@ -397,13 +397,13 @@ PS_OUTPUT main(PS_INPUT input)
         // -------- Insn 71-76: sun-direction lighting. ---------------------
         //   NdotL    = max(dot(viewDirUnit, cb2[1].xyz), 0)
         //   specular = pow(NdotL, cb2[2].w) * cb2[1].w
-        float NdotL    = max(dot(viewDirUnit, cb2_idx1_sun_dir_and_intensity.xyz), 0.0);
-        float specular = pow(NdotL, cb2_idx2_sun_color_and_spec_power.w)
-                         * cb2_idx1_sun_dir_and_intensity.w;
+        float NdotL    = max(dot(viewDirUnit, SunDirection_and_intensity.xyz), 0.0);
+        float specular = pow(NdotL, SunColor_and_SpecPower.w)
+                         * SunDirection_and_intensity.w;
 
         // -------- Insn 77-78: blend secondary color with sun color. -------
         //   r0.xyz = lerp(secondaryColor, cb2[2].xyz, specular)
-        float3 secondaryLit = lerp(secondaryColor, cb2_idx2_sun_color_and_spec_power.xyz,
+        float3 secondaryLit = lerp(secondaryColor, SunColor_and_SpecPower.xyz,
                                    specular);
 
         // -------- Insn 79-83: grayscale-saturation tonemap path. ----------
