@@ -44,11 +44,22 @@ src = "package/F4SE/Plugins/Imagespace/"
 dst = "F4SE/Plugins/Imagespace/"
 pattern = "*.hlsl*"
 
-# ShaderCatalog default INI (seed file; in-game settings menu rewrites it on toggle).
+# Default INI seeds for features that read F4SE/Plugins/FO4CommunityShaders/*.ini.
 [[deploy.assets]]
 src = "package/F4SE/Plugins/FO4CommunityShaders/"
 dst = "F4SE/Plugins/FO4CommunityShaders/"
 pattern = "*.ini"
+
+# ShaderReplacement manifest (maps runtime PS sha1 to reconstructed HLSL).
+[[deploy.assets]]
+src = "package/F4SE/Plugins/FO4CommunityShaders/"
+dst = "F4SE/Plugins/FO4CommunityShaders/"
+pattern = "*.json"
+
+# ShaderReplacement HLSL sources, compiled in-process at OnD3D11Ready via D3DCompileFromFile.
+[[deploy.assets]]
+src = "package/F4SE/Plugins/FO4CommunityShaders/Shaders/"
+dst = "F4SE/Plugins/FO4CommunityShaders/Shaders/"
 
 # NVIDIA Streamline runtime DLLs (fetched by scripts/fetch-sdks.sh).
 [[deploy.assets]]

@@ -72,3 +72,6 @@ register_feature(ScreenSpaceShadows)
 register_feature(ScreenSpaceGI)
 register_feature(Imagespace)
 register_feature(ShaderCatalog)
+# ShaderReplacement MUST register AFTER ShaderCatalog so its OnD3D11Ready runs after the catalog
+# installs its slot-15 detour; the chain is engine -> ShaderReplacement -> ShaderCatalog -> original.
+register_feature(ShaderReplacement)
