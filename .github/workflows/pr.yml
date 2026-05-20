@@ -1,0 +1,51 @@
+name: Pull Request
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Windows Release
+    runs-on: windows-2022
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Resolve vcpkg root
+        shell: pwsh
+        run: |
+          $candidates = @($env:VCPKG_ROOT, $env:VCPKG_INSTALLATION_ROOT, 'C:\vcpkg') |
+            Where-Object { $_ } |
+            Select-Object -Unique
+
+          $root = $null
+          foreach ($candidate in $candidates) {
+            $toolchain = Join-Path $candidate 'scripts\buildsystems\vcpkg.cmake'
+            if (Test-Path $toolchain) {
+              $root = $candidate
+              break
+            }
+          }
+
+          if (-not $root) {
+            throw "Could not find a vcpkg toolchain. Tried: $($candidates -join ', ')"
+          }
+
+          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure
+        shell: pwsh
+        run: |
+          if (-not $env:VCPKG_ROOT) {
+            throw 'VCPKG_ROOT was not set'
+          }
+          cmake -S . --preset=default
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
