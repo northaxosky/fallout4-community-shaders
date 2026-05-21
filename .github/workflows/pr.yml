@@ -18,7 +18,15 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
+          lfs: true
           submodules: recursive
+
+      - name: Fetch submodule LFS assets
+        shell: pwsh
+        run: |
+          git lfs install --local
+          git lfs pull
+          git submodule foreach --recursive "git lfs install --local && git lfs pull"
 
       - name: Resolve vcpkg root
         shell: pwsh
