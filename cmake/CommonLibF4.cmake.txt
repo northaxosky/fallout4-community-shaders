@@ -5,18 +5,20 @@ project(
 	LANGUAGES CXX
 )
 
+set(COMMONLIBF4_SOURCE_DIR "@COMMONLIBF4_SOURCE_DIR@")
+
 # ---- commonlib-shared (internal static lib) ----
 
 file(GLOB_RECURSE SHARED_SOURCES
 	LIST_DIRECTORIES false
 	CONFIGURE_DEPENDS
-	"lib/commonlib-shared/src/*.cpp"
+	"${COMMONLIBF4_SOURCE_DIR}/lib/commonlib-shared/src/*.cpp"
 )
 
 file(GLOB_RECURSE SHARED_HEADERS
 	LIST_DIRECTORIES false
 	CONFIGURE_DEPENDS
-	"lib/commonlib-shared/include/*.h"
+	"${COMMONLIBF4_SOURCE_DIR}/lib/commonlib-shared/include/*.h"
 )
 
 add_library(commonlib-shared STATIC
@@ -26,7 +28,7 @@ add_library(commonlib-shared STATIC
 
 target_include_directories(commonlib-shared
 	PUBLIC
-		"${CMAKE_CURRENT_SOURCE_DIR}/lib/commonlib-shared/include"
+		"${COMMONLIBF4_SOURCE_DIR}/lib/commonlib-shared/include"
 )
 
 target_compile_features(commonlib-shared
@@ -36,7 +38,7 @@ target_compile_features(commonlib-shared
 
 target_precompile_headers(commonlib-shared
 	PRIVATE
-		"lib/commonlib-shared/src/REX/PCH.h"
+		"${COMMONLIBF4_SOURCE_DIR}/lib/commonlib-shared/src/REX/PCH.h"
 )
 
 # ---- commonlib-shared: find packages ----
@@ -90,13 +92,13 @@ endif()
 file(GLOB_RECURSE COMMONLIBF4_SOURCES
 	LIST_DIRECTORIES false
 	CONFIGURE_DEPENDS
-	"src/*.cpp"
+	"${COMMONLIBF4_SOURCE_DIR}/src/*.cpp"
 )
 
 file(GLOB_RECURSE COMMONLIBF4_HEADERS
 	LIST_DIRECTORIES false
 	CONFIGURE_DEPENDS
-	"include/*.h"
+	"${COMMONLIBF4_SOURCE_DIR}/include/*.h"
 )
 
 add_library(CommonLibF4 STATIC
@@ -108,7 +110,7 @@ add_library(CommonLibF4::CommonLibF4 ALIAS CommonLibF4)
 
 target_include_directories(CommonLibF4
 	PUBLIC
-		"${CMAKE_CURRENT_SOURCE_DIR}/include"
+		"${COMMONLIBF4_SOURCE_DIR}/include"
 )
 
 target_compile_features(CommonLibF4
@@ -131,7 +133,7 @@ target_compile_definitions(CommonLibF4
 
 target_precompile_headers(CommonLibF4
 	PRIVATE
-		"include/F4SE/Impl/PCH.h"
+		"${COMMONLIBF4_SOURCE_DIR}/include/F4SE/Impl/PCH.h"
 )
 
 if(MSVC)

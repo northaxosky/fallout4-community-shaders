@@ -15,13 +15,24 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
-# Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so inject our CMakeLists template before add_subdirectory.
+file(STRINGS "${CMAKE_SOURCE_DIR}/version.txt" FO4CS_VERSION LIMIT_COUNT 1)
+string(STRIP "${FO4CS_VERSION}" FO4CS_VERSION)
+if(NOT FO4CS_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+	message(FATAL_ERROR "version.txt must contain MAJOR.MINOR.PATCH")
+endif()
+set(FO4CS_VERSION_MAJOR "${CMAKE_MATCH_1}")
+set(FO4CS_VERSION_MINOR "${CMAKE_MATCH_2}")
+set(FO4CS_VERSION_PATCH "${CMAKE_MATCH_3}")
+
+# Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so generate a CMake shim in the build tree.
+set(COMMONLIBF4_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/CommonLibF4")
+set(COMMONLIBF4_SHIM_DIR "${CMAKE_BINARY_DIR}/CommonLibF4-shim")
 configure_file(
 	${CMAKE_SOURCE_DIR}/cmake/CommonLibF4.cmake.txt
-	${CMAKE_SOURCE_DIR}/extern/CommonLibF4/CMakeLists.txt
-	COPYONLY
+	${COMMONLIBF4_SHIM_DIR}/CMakeLists.txt
+	@ONLY
 )
-add_subdirectory(extern/CommonLibF4 CommonLibF4 EXCLUDE_FROM_ALL)
+add_subdirectory(${COMMONLIBF4_SHIM_DIR} CommonLibF4 EXCLUDE_FROM_ALL)
 
 # vcpkg packages
 find_package(directxtk CONFIG REQUIRED)
@@ -48,7 +59,8 @@ file(GLOB_RECURSE CORE_SOURCES
 target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
 
 include(Common)
-configure_xse_plugin(FO4CommunityShaders 0 2 0)
+include(FidelityFX)
+configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
 
 target_link_libraries(FO4CommunityShaders PRIVATE
 	debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib

@@ -1,6 +1,6 @@
 {
   "name": "fo4-community-shaders",
-  "version-string": "0.1.0",
+  "version-string": "0.2.0",
   "description": "Community Shaders port for Fallout 4",
   "supports": "windows & x64",
   "dependencies": [
