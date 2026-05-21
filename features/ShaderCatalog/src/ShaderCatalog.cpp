@@ -76,8 +76,8 @@ namespace cs::features
 	ShaderCatalog::~ShaderCatalog()
 	{
 		// Best-effort teardown; DLL unload order may already have torn things down.
-		catalog::CatalogDB::Get().Stop();
 		catalog::shader_tracker::SetEnabled(false);
+		catalog::CatalogDB::Get().Stop();
 	}
 
 	void ShaderCatalog::LoadSettings()

@@ -200,6 +200,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 	{
 		if (!_running.exchange(false, std::memory_order_acq_rel))
 			return;
+		_wakeWriter.notify_one();
 
 		bool cleanShutdown = false;
 		if (_writer.joinable()) {
@@ -336,7 +337,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 
 		const char* kUpdateSession =
 			"UPDATE sessions SET ended_at=?, "
-			"  shaders_added_this_session=(SELECT COUNT(*) FROM shader_catalog WHERE first_seen_session_id=?) "
+			"  shaders_added_this_session=(SELECT COUNT(*) FROM shader_catalog WHERE first_seen_session_id=? AND seen_count > 0) "
 			"WHERE session_id=?";
 		if (sqlite3_prepare_v2(_db, kUpdateSession, -1, &_updateSession, nullptr) != SQLITE_OK) {
 			L->error("prepare update session failed: {}", sqlite3_errmsg(_db));
@@ -348,6 +349,9 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 
 	void CatalogDB::EnqueueShader(const CatalogEntry& e) noexcept
 	{
+		if (!_running.load(std::memory_order_acquire))
+			return;
+
 		// MPSC bounded ring; producers claim a slot via CAS on _enqPos. On full ring,
 		// drop newest and bump the counter rather than blocking the render thread.
 		std::uint64_t pos = _enqPos.load(std::memory_order_relaxed);
@@ -537,9 +541,13 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		const auto flushIv = milliseconds(_cfg.flush_interval_ms == 0 ? 5000 : _cfg.flush_interval_ms);
 
 		while (_running.load(std::memory_order_acquire)) {
-			// Sleep up to the flush interval. Shutdown signals via _running flip; the writer
-			// will see it on the next wake. Worst case 1 flush-interval shutdown delay.
-			std::this_thread::sleep_for(flushIv);
+			// Periodic flush, with Stop() waking the writer so teardown is not flush-interval bound.
+			{
+				std::unique_lock lock(_wakeMutex);
+				_wakeWriter.wait_for(lock, flushIv, [this] {
+					return !_running.load(std::memory_order_acquire);
+				});
+			}
 
 			char* err = nullptr;
 			sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err);

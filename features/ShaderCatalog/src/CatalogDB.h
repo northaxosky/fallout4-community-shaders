@@ -2,7 +2,9 @@
 
 #include <array>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -96,6 +98,8 @@ namespace cs::features::catalog
 
 		std::thread _writer;
 		std::atomic<bool> _running{ false };
+		std::condition_variable _wakeWriter;
+		std::mutex _wakeMutex;
 
 		// Bounded MPSC ring for shader entries. Power-of-two capacity for fast index masking.
 		static constexpr std::size_t kCapacity = 4096;

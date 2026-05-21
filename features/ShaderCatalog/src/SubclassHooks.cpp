@@ -150,6 +150,14 @@ namespace cs::features::catalog::subclass_hooks
 				g_reloadStats.succeeded, g_reloadStats.attempted, g_reloadStats.failed);
 			L->info("Subclass SetupTechnique hooks: {}/{} patched ({} failed)",
 				g_setupStats.succeeded, g_setupStats.attempted, g_setupStats.failed);
+			if (g_reloadStats.attempted > 0 && g_reloadStats.succeeded == 0) {
+				L->error("No ReloadShaders subclass hooks were patched (0/{}); shader attribution may be unavailable.",
+					g_reloadStats.attempted);
+			}
+			if (g_setupStats.attempted > 0 && g_setupStats.succeeded == 0) {
+				L->error("No SetupTechnique subclass hooks were patched (0/{}); runtime technique attribution unavailable.",
+					g_setupStats.attempted);
+			}
 		});
 	}
 
