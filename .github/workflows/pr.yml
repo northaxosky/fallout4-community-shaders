@@ -47,5 +47,20 @@ jobs:
           }
           cmake -S . --preset=default
 
+      - name: Verify shader roundtrip baselines
+        shell: pwsh
+        run: |
+          $kitsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
+          $fxc = Get-ChildItem -Path $kitsRoot -Filter fxc.exe -Recurse |
+            Where-Object { $_.FullName -like '*\x64\fxc.exe' } |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+
+          if (-not $fxc) {
+            throw "Could not find x64 fxc.exe under $kitsRoot"
+          }
+
+          pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-shader-roundtrip.ps1 -FxcPath $fxc.FullName
+
       - name: Build
         run: cmake --build build --config Release --parallel
