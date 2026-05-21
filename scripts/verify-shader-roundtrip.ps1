@@ -73,7 +73,13 @@ foreach ($shader in $config.shaders) {
     foreach ($d in $shader.defines) { $defineArgs += "/D$d" }
     $fxcArgs = @("/nologo", "/T", "ps_5_0", "/O3", "/E", "main") + $defineArgs + @("/Fo", $out, $src)
 
-    $fxcOutput = & $FxcPath @fxcArgs 2>&1
+    $previousErrorActionPreference = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $fxcOutput = & $FxcPath @fxcArgs 2>&1
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
     if ($LASTEXITCODE -ne 0) {
         $results += [pscustomobject]@{
             Name     = $shader.name

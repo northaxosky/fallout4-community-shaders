@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run hlslkit-buffer-scan against features/ and refresh docs/shader-buffers.md.
+# Run hlslkit-buffer-scan against canonical shader roots and refresh docs/shader-buffers.md.
 # Exits nonzero if any cross-feature register conflict is detected.
 #
 # Usage: scripts/scan-shader-buffers.sh [--check]
@@ -20,9 +20,33 @@ fi
 
 mkdir -p "$REPO_ROOT/docs"
 TMP="$(mktemp)"
-trap 'rm -f "$TMP"' EXIT
+SCAN_ROOT="$(mktemp -d)"
+trap 'rm -f "$TMP"; rm -rf "$SCAN_ROOT"' EXIT
 
-(cd "$REPO_ROOT/features" && hlslkit-buffer-scan --show-conflicts) > "$TMP"
+mkdir -p \
+    "$SCAN_ROOT/features" \
+    "$SCAN_ROOT/package/F4SE/Plugins" \
+    "$SCAN_ROOT/shaders"
+
+SCAN_DIRS=(
+    "$REPO_ROOT/features"
+    "$REPO_ROOT/package/F4SE/Plugins/Upscaling"
+    "$REPO_ROOT/package/F4SE/Plugins/FrameGeneration"
+    "$REPO_ROOT/shaders"
+)
+for dir in "${SCAN_DIRS[@]}"; do
+    if [[ ! -d "$dir" ]]; then
+        echo "ERROR: required shader scan directory not found: $dir" >&2
+        exit 2
+    fi
+done
+
+cp -R "$REPO_ROOT/features/." "$SCAN_ROOT/features/"
+cp -R "$REPO_ROOT/package/F4SE/Plugins/Upscaling" "$SCAN_ROOT/package/F4SE/Plugins/"
+cp -R "$REPO_ROOT/package/F4SE/Plugins/FrameGeneration" "$SCAN_ROOT/package/F4SE/Plugins/"
+cp -R "$REPO_ROOT/shaders/." "$SCAN_ROOT/shaders/"
+
+(cd "$SCAN_ROOT" && hlslkit-buffer-scan --show-conflicts) > "$TMP"
 
 # Detect conflicts via the report's own marker. The "no conflicts" line is fixed; any other text under
 # the Register Conflicts header means a real collision.

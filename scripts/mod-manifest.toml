@@ -19,6 +19,7 @@ pdb = true
 [[deploy.assets]]
 src = "package/F4SE/Plugins/Upscaling/"
 dst = "F4SE/Plugins/Upscaling/"
+pattern = "*.hlsl"
 
 # FrameGeneration HLSL shaders (committed).
 [[deploy.assets]]
@@ -26,21 +27,21 @@ src = "package/F4SE/Plugins/FrameGeneration/"
 dst = "F4SE/Plugins/FrameGeneration/"
 pattern = "*.hlsl"
 
-# Screen-Space Shadows HLSL + Bend SSS hlsli (committed).
+# Screen-Space Shadows HLSL + Bend SSS hlsli.
 [[deploy.assets]]
-src = "package/F4SE/Plugins/ScreenSpaceShadows/"
+src = "features/ScreenSpaceShadows/Shaders/"
 dst = "F4SE/Plugins/ScreenSpaceShadows/"
 pattern = "*.hlsl*"
 
-# Screen-Space GI HLSL (committed).
+# Screen-Space GI HLSL.
 [[deploy.assets]]
-src = "package/F4SE/Plugins/ScreenSpaceGI/"
+src = "features/ScreenSpaceGI/Shaders/"
 dst = "F4SE/Plugins/ScreenSpaceGI/"
 pattern = "*.hlsl*"
 
-# Imagespace HLSL (committed).
+# Imagespace HLSL.
 [[deploy.assets]]
-src = "package/F4SE/Plugins/FO4CommunityShaders/Imagespace/Shaders/"
+src = "features/Imagespace/Shaders/"
 dst = "F4SE/Plugins/FO4CommunityShaders/Imagespace/Shaders/"
 pattern = "*.hlsl*"
 
@@ -58,7 +59,7 @@ pattern = "*.json"
 
 # ShaderReplacement HLSL sources, compiled in-process at OnD3D11Ready via D3DCompileFromFile.
 [[deploy.assets]]
-src = "package/F4SE/Plugins/FO4CommunityShaders/Shaders/"
+src = "shaders/"
 dst = "F4SE/Plugins/FO4CommunityShaders/Shaders/"
 
 # NVIDIA Streamline runtime DLLs (fetched by scripts/fetch-sdks.sh).

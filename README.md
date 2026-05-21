@@ -35,7 +35,7 @@ Press **END** in game to open the settings menu.
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment variable set
 - [Git](https://git-scm.com/)
 - Python 3 with Pillow for screenshot-diff smoke scripts
-- Optional: a sibling `../_tools/` checkout, or `FALLOUT_TOOLS_DIR` pointing to the shared build/deploy/test harness. Without it, use the raw CMake commands below and deploy `package/` manually.
+- Optional: a sibling `../_tools/` checkout, or `FALLOUT_TOOLS_DIR` pointing to the shared build/deploy/test harness. Without it, use the raw CMake commands below and mirror `scripts/mod-manifest.toml` manually.
 
 ## User Requirements
 
@@ -68,7 +68,7 @@ cp scripts/.env.example scripts/.env
 ./scripts/test.sh            # launch through MO2/F4SE, capture logs + screenshot
 ```
 
-The deploy and test wrappers delegate to the sibling `../_tools/` harness. If that checkout is missing, use the raw CMake build commands and deploy `package/` manually.
+The deploy and test wrappers delegate to the sibling `../_tools/` harness. If that checkout is missing, use the raw CMake build commands and copy the assets listed in `scripts/mod-manifest.toml`.
 
 Feature smoke scripts live under `scripts/`. They are designed for repeatable agent-driven validation:
 
@@ -89,7 +89,7 @@ features/<Name>/              One subdirectory per feature
 extern/                       Submodules: CommonLibF4, FidelityFX-SDK, Streamline, XeSS
 include/                      Shared headers (PCH, Detours static lib)
 cmake/                        Build config (Common.cmake, Plugin.h.in, Version.rc.in)
-package/F4SE/Plugins/         Runtime files staged here for MO2 deployment
+package/F4SE/Plugins/         Static runtime assets and proprietary SDK DLL staging
 scripts/                      Build, deploy, smoke, and shader-validation helpers
 shaders/                      Reconstructed reference HLSL and shader notes
 test-results/                 Ignored runtime validation output
