@@ -1,5 +1,5 @@
 // Depth pyramid build: linearised view-Z, R16F, one dispatch per mip pair.
-// Mip 0 reads scene NDC depth (FO4 standard: near=0, far=1); mips 1..N average previous mip.
+// Mip 0 reads scene NDC depth; mips 1..N read the previous mip through a one-mip SRV.
 
 Texture2D<float> SrcNDCDepth : register(t0);
 Texture2D<float> SrcPyramid  : register(t1);
@@ -10,7 +10,7 @@ cbuffer PyramidCB : register(b0)
     uint2  SrcDim;
     uint2  DstDim;
     uint   IsLDR;
-    uint   SrcMipIdx;
+    uint   _Pad0;
     float  NearC;
     float  FarC;
 };
@@ -31,11 +31,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
         const float d3 = SrcNDCDepth.Load(int3(src + int2(1, 1), 0));
         DstMip[dtid.xy] = min(min(Linearize(d0), Linearize(d1)), min(Linearize(d2), Linearize(d3)));
     } else {
-        const int mip = int(SrcMipIdx);
-        const float l0 = SrcPyramid.Load(int3(src + int2(0, 0), mip));
-        const float l1 = SrcPyramid.Load(int3(src + int2(1, 0), mip));
-        const float l2 = SrcPyramid.Load(int3(src + int2(0, 1), mip));
-        const float l3 = SrcPyramid.Load(int3(src + int2(1, 1), mip));
+        const float l0 = SrcPyramid.Load(int3(src + int2(0, 0), 0));
+        const float l1 = SrcPyramid.Load(int3(src + int2(1, 0), 0));
+        const float l2 = SrcPyramid.Load(int3(src + int2(0, 1), 0));
+        const float l3 = SrcPyramid.Load(int3(src + int2(1, 1), 0));
         DstMip[dtid.xy] = min(min(l0, l1), min(l2, l3));
     }
 }

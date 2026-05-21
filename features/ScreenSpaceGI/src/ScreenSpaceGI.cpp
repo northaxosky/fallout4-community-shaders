@@ -45,7 +45,7 @@ namespace cs::features
 		uint32_t SrcDim[2];
 		uint32_t DstDim[2];
 		uint32_t IsLDR;
-		uint32_t SrcMipIdx;
+		uint32_t Pad0;
 		float    NearC;
 		float    FarC;
 	};
@@ -388,8 +388,7 @@ namespace cs::features
 			firstFireLogged = true;
 		}
 
-		// Pyramid build: 5 mips. Mip 0 reads NDC depth, mips 1..4 read previous mip via per-mip SRVs
-		// (the full-pyramid SRV would conflict with the UAV bind D3D11 unbinds it).
+		// Pyramid build uses one-mip SRVs while writing disjoint mip UAVs; AO samples the full chain later.
 		context->CSSetShader(prefCS, nullptr, 0);
 		ID3D11Buffer* pyrCBs[1] = { pyramidCB->CB() };
 		context->CSSetConstantBuffers(0, 1, pyrCBs);
@@ -402,7 +401,6 @@ namespace cs::features
 			cb.DstDim[0] = std::max(1u, mipW);
 			cb.DstDim[1] = std::max(1u, mipH);
 			cb.IsLDR     = (mip == 0) ? 1u : 0u;
-			cb.SrcMipIdx = 0u;
 			cb.NearC     = 0.1f;
 			cb.FarC      = 100000.0f;
 			pyramidCB->Update(cb);
@@ -425,9 +423,8 @@ namespace cs::features
 			mipH = std::max(1u, mipH / 2);
 		}
 
-		// AO pass.
-		auto* gameViewport = cs::engine::GetGraphicsState();
-		const float vfov = gameViewport ? std::tan(0.5f * 1.05f) : std::tan(0.5f * 1.05f);  // ~60deg fallback
+		// Projection source is not exposed yet; use the historical ~60-degree fallback.
+		const float vfov = std::tan(0.5f * 1.05f);
 		const float aspect = float(W) / float(std::max(H, 1u));
 
 		SSGI_CB sb{};

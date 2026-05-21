@@ -43,7 +43,7 @@ namespace cs::features
 			return;
 		if (DLSSGRequested()) {
 			L->warn("RenderDoc disabled at load: incompatible with DLSS-G frame generation. "
-			        "Set iFrameGenType=0 (FSR3) in FrameGeneration.ini to use RenderDoc.");
+			        "Set bFrameGenerationMode=false or choose a non-DLSS-G backend before enabling RenderDoc.");
 			_settings.enabled = false;
 			return;
 		}
@@ -153,7 +153,7 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		ImGui::TextDisabled("Restart the game after enabling. Incompatible with DLSS-G; switch FrameGeneration to FSR3 first.");
+		ImGui::TextDisabled("Restart after enabling. DLSS-G is blocked; disable all FrameGeneration for clean D3D11 captures.");
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
