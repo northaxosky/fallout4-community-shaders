@@ -20,6 +20,15 @@ namespace cs::features
 
 	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini";
 
+	namespace
+	{
+		bool IsAnisotropicFilter(D3D11_FILTER a_filter)
+		{
+			return a_filter == D3D11_FILTER_ANISOTROPIC
+				|| a_filter == D3D11_FILTER_COMPARISON_ANISOTROPIC;
+		}
+	}
+
 
 /** @brief Hook for updating jitter, dynamic resolution, and resources */
 struct BSGraphics_State_UpdateDynamicResolution
@@ -389,8 +398,18 @@ void Upscaling::LoadSettings()
 	ini.SetUnicode();
 	ini.LoadFile(kIniPath);
 
-	settings.upscaleMethodPreference = static_cast<uint>(ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2));
-	settings.qualityMode = static_cast<uint>(ini.GetLongValue("Settings", "iQualityMode", 1));
+	const auto rawMethod = ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2);
+	const auto rawQuality = ini.GetLongValue("Settings", "iQualityMode", 1);
+	const auto method = std::clamp(rawMethod, 0L, 2L);
+	const auto quality = std::clamp(rawQuality, 0L, 4L);
+	if (method != rawMethod) {
+		L->warn("Clamped invalid iUpscaleMethodPreference {} -> {}", rawMethod, method);
+	}
+	if (quality != rawQuality) {
+		L->warn("Clamped invalid iQualityMode {} -> {}", rawQuality, quality);
+	}
+	settings.upscaleMethodPreference = static_cast<uint>(method);
+	settings.qualityMode = static_cast<uint>(quality);
 
 	L->info("Loaded: upscaleMethod={}, qualityMode={}",
 		settings.upscaleMethodPreference, settings.qualityMode);
@@ -856,7 +875,9 @@ void Upscaling::UpdateSamplerStates(float a_currentMipBias)
 	L->info("Mip bias changed: {:.4f} -> {:.4f}", previousMipBias, a_currentMipBias);
 	previousMipBias = a_currentMipBias;
 
-	// Create new sampler states with negative LOD bias
+	const float clampedMipBias = std::clamp(a_currentMipBias, -15.99f, 15.99f);
+
+	// Create new sampler states with negative LOD bias when rendering sub-native.
 	for (int a = 0; a < 320; a++) {
 		// Release existing biased sampler state
 		if (biasedSamplerStates[a]){
@@ -869,10 +890,8 @@ void Upscaling::UpdateSamplerStates(float a_currentMipBias)
 			D3D11_SAMPLER_DESC samplerDesc;
 			samplerState->GetDesc(&samplerDesc);
 
-			// Only modify 16x anisotropic samplers (the high-quality ones)
-			if (samplerDesc.Filter == D3D11_FILTER_ANISOTROPIC) {
-				samplerDesc.MaxAnisotropy = 8; // Reduced from 16x to 8x for performance
-				samplerDesc.MipLODBias = a_currentMipBias;
+			if (clampedMipBias != 0.0f && IsAnisotropicFilter(samplerDesc.Filter)) {
+				samplerDesc.MipLODBias = clampedMipBias;
 			}
 
 			DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, &biasedSamplerStates[a]));
@@ -1174,10 +1193,9 @@ void Upscaling::UpdateUpscaling()
 
 	// Calculate mipmap LOD bias
 	// Example: 0.67 scale -> log2(0.67) = -0.58
-	float currentMipBias = std::log2f(resolutionScale);
-
-	if (upscaleMethodNoMenu == UpscaleMethod::kDLSS || upscaleMethodNoMenu == UpscaleMethod::kFSR)
-		currentMipBias -= 1.0f;
+	float currentMipBias = 0.0f;
+	if ((upscaleMethodNoMenu == UpscaleMethod::kDLSS || upscaleMethodNoMenu == UpscaleMethod::kFSR) && resolutionScale < 1.0f)
+		currentMipBias = std::log2f(resolutionScale) - 1.0f;
 
 	UpdateSamplerStates(currentMipBias);
 	UpdateRenderTargets(resolutionScale, resolutionScale);
