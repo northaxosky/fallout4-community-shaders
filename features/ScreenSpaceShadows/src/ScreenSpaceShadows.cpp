@@ -333,7 +333,7 @@ namespace cs::features
 			td.Format = dd.Format;
 			td.SampleDesc.Count = 1;
 			td.Usage = D3D11_USAGE_DEFAULT;
-			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			td.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
 
 			scratchDiffuse = std::make_unique<sss::Texture2D>(td);
 
