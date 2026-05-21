@@ -1,6 +1,9 @@
-name: Pull Request
+name: CI
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
 
 permissions:
