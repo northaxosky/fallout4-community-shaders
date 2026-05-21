@@ -75,7 +75,7 @@ namespace cs::features
 	struct PyramidCB
 	{
 		uint32_t SrcIsLDR;
-		uint32_t SrcMipIdx;
+		uint32_t Pad0;
 		uint32_t DstDimensions[2];
 	};
 	static_assert(sizeof(PyramidCB) % 16 == 0);
@@ -492,10 +492,20 @@ namespace cs::features
 			srvd.Texture2D.MipLevels = pyramidMipCount;
 			lumPyramid->CreateSRV(srvd);
 
-			// Per-mip UAVs.
+			// Per-mip views keep pyramid generation SRV/UAV binds to disjoint subresources.
+			lumPyramidMipSRVs.clear();
+			lumPyramidMipSRVs.resize(pyramidMipCount);
 			lumPyramidUAVs.clear();
 			lumPyramidUAVs.resize(pyramidMipCount);
 			for (uint32_t i = 0; i < pyramidMipCount; ++i) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC mipSrvd{};
+				mipSrvd.Format = DXGI_FORMAT_R16_FLOAT;
+				mipSrvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				mipSrvd.Texture2D.MostDetailedMip = i;
+				mipSrvd.Texture2D.MipLevels = 1;
+				DX::ThrowIfFailed(device->CreateShaderResourceView(
+					lumPyramid->resource.get(), &mipSrvd, lumPyramidMipSRVs[i].put()));
+
 				D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
 				ud.Format = DXGI_FORMAT_R16_FLOAT;
 				ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
@@ -966,8 +976,6 @@ namespace cs::features
 			context->CSSetShader(lumCS, nullptr, 0);
 			ID3D11Buffer* pyrCBs[1] = { pyramidCB->CB() };
 			context->CSSetConstantBuffers(0, 1, pyrCBs);
-			ID3D11ShaderResourceView* srvs[2] = { fbSRV, lumPyramid->srv.get() };
-			context->CSSetShaderResources(0, 2, srvs);
 
 			for (uint32_t mip = 0; mip < pyramidMipCount; ++mip) {
 				const uint32_t dstW = std::max(1u, W >> (mip + 1));
@@ -975,11 +983,15 @@ namespace cs::features
 
 				PyramidCB cb{};
 				cb.SrcIsLDR  = (mip == 0) ? 1u : 0u;
-				cb.SrcMipIdx = (mip == 0) ? 0u : (mip - 1u);
 				cb.DstDimensions[0] = dstW;
 				cb.DstDimensions[1] = dstH;
 				pyramidCB->Update(cb);
 
+				ID3D11ShaderResourceView* srvs[2] = {
+					fbSRV,
+					(mip == 0) ? nullptr : lumPyramidMipSRVs[mip - 1].get()
+				};
+				context->CSSetShaderResources(0, 2, srvs);
 				ID3D11UnorderedAccessView* uavs[1] = { lumPyramidUAVs[mip].get() };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 				const uint32_t gx = (dstW + 7) / 8;
@@ -988,6 +1000,8 @@ namespace cs::features
 
 				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+				ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
+				context->CSSetShaderResources(0, 2, nullSRVs);
 
 				if (dstW <= 1 && dstH <= 1) {
 					pyramidMipCount = mip + 1;

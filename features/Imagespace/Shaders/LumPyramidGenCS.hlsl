@@ -1,13 +1,13 @@
-// Log-luma pyramid: SrcIsLDR=1 reads kFrameBuffer, =0 reads previous pyramid mip (2x2 avg). log2 so EMA computes a geometric mean.
+// Log-luma pyramid: SrcIsLDR=1 reads kFrameBuffer, =0 reads previous one-mip pyramid SRV. log2 so EMA computes a geometric mean.
 
 Texture2D<float4>   SrcSRGB     : register(t0);   // kFrameBuffer
-Texture2D<float>    SrcPyramid  : register(t1);   // lumPyramid (full-mip SRV)
+Texture2D<float>    SrcPyramid  : register(t1);   // previous lumPyramid mip as a one-mip SRV
 RWTexture2D<float>  DstMip      : register(u0);
 
 cbuffer PyramidCB : register(b0)
 {
     uint  SrcIsLDR;
-    uint  SrcMipIdx;
+    uint  _Pad0;
     uint2 DstDimensions;
 };
 
@@ -33,11 +33,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
         const float3 c3 = SrcSRGB.Load(int3(src + int2(1, 1), 0)).rgb;
         DstMip[px] = 0.25 * (LogLumaSRGB(c0) + LogLumaSRGB(c1) + LogLumaSRGB(c2) + LogLumaSRGB(c3));
     } else {
-        const int mip = int(SrcMipIdx);
-        const float l0 = SrcPyramid.Load(int3(src + int2(0, 0), mip));
-        const float l1 = SrcPyramid.Load(int3(src + int2(1, 0), mip));
-        const float l2 = SrcPyramid.Load(int3(src + int2(0, 1), mip));
-        const float l3 = SrcPyramid.Load(int3(src + int2(1, 1), mip));
+        const float l0 = SrcPyramid.Load(int3(src + int2(0, 0), 0));
+        const float l1 = SrcPyramid.Load(int3(src + int2(1, 0), 0));
+        const float l2 = SrcPyramid.Load(int3(src + int2(0, 1), 0));
+        const float l3 = SrcPyramid.Load(int3(src + int2(1, 1), 0));
         DstMip[px] = 0.25 * (l0 + l1 + l2 + l3);
     }
 }

@@ -113,6 +113,7 @@ namespace cs::features
 
 		// Adaptive exposure: log-luma pyramid + ping-pong scalar.
 		std::unique_ptr<imagespace::Texture2D>      lumPyramid;                 // single Texture2D, multi-mip
+		std::vector<winrt::com_ptr<ID3D11ShaderResourceView>> lumPyramidMipSRVs;
 		std::vector<winrt::com_ptr<ID3D11UnorderedAccessView>> lumPyramidUAVs;
 		std::unique_ptr<imagespace::ConstantBuffer> pyramidCB;
 		ID3D11ComputeShader*                        lumPyramidCS = nullptr;
