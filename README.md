@@ -12,9 +12,17 @@ Press **END** in game to open the settings menu.
 | Upscaling | DLSS / FSR3 / XeSS with quality modes; replaces engine TAA, dynamic-resolution aware |
 | FrameGeneration | DLSS-G / FSR3-FG / XeSS-FG; D3D11/D3D12 interop |
 | ScreenSpaceShadows | Sony Bend SSS pipeline + sidecar attenuation pass on the diffuse light buffer. Performance / Quality / Cinematic presets, ENB auto-skip |
+| ScreenSpaceGI | Phase 1 screen-space GI sidecar for ambient occlusion / indirect-lighting experiments |
 | Imagespace | Tonemap (Hable / Reinhard / Lottes), 32³ LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, sunsprite + lens flare. Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
 | PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle |
 | RenderDoc | One-click frame capture from inside the menu |
+
+## Developer tools
+
+| Tool feature | Description |
+|---|---|
+| ShaderCatalog | Runtime D3D shader inventory with SQLite output and `BSShader::SetupTechnique` attribution |
+| ShaderReplacement | Development-only pixel-shader substitution harness for validating reconstructed FO4 shaders |
 
 ## Known issues
 
@@ -26,7 +34,8 @@ Press **END** in game to open the settings menu.
 - [CMake 3.21+](https://cmake.org/)
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment variable set
 - [Git](https://git-scm.com/)
-- Optional: a sibling `../_tools/` checkout (the shared build/deploy/test harness). Without it, use the raw CMake commands below; `scripts/deploy.sh` and `scripts/test.sh` will not work.
+- Python 3 with Pillow for screenshot-diff smoke scripts
+- Optional: a sibling `../_tools/` checkout, or `FALLOUT_TOOLS_DIR` pointing to the shared build/deploy/test harness. Without it, use the raw CMake commands below and deploy `package/` manually.
 
 ## User Requirements
 
@@ -36,7 +45,7 @@ Press **END** in game to open the settings menu.
 ## Build
 
 ```bash
-git clone --recursive https://github.com/<owner>/fallout4-community-shaders.git
+git clone --recursive https://github.com/northaxosky/fallout4-community-shaders.git
 cd fallout4-community-shaders
 
 # Fetch proprietary SDK runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS)
@@ -48,7 +57,7 @@ cmake --build build --config Release
 
 Output: `build/Release/FO4CommunityShaders.dll` plus runtime SDK DLLs staged under `package/F4SE/Plugins/`.
 
-## Deploy
+## Deploy and test
 
 ```bash
 cp scripts/.env.example scripts/.env
@@ -56,7 +65,21 @@ cp scripts/.env.example scripts/.env
 
 ./scripts/deploy.sh build    # build + deploy
 ./scripts/deploy.sh deploy   # deploy only (skip build)
+./scripts/test.sh            # launch through MO2/F4SE, capture logs + screenshot
 ```
+
+The deploy and test wrappers delegate to the sibling `../_tools/` harness. If that checkout is missing, use the raw CMake build commands and deploy `package/` manually.
+
+Feature smoke scripts live under `scripts/`. They are designed for repeatable agent-driven validation:
+
+| Script | Purpose |
+|---|---|
+| `smoke-shader-replacement.sh` | Generic OFF/ON ShaderReplacement screenshot diff sweep |
+| `smoke-shader-replacement-active-scenes.sh` | Role-focused BSDF/VLS scene validation with ShaderCatalog evidence capture |
+| `smoke-imagespace-*.sh` | Imagespace preset / DOF validation |
+| `smoke-*.sh` | Feature-specific runtime smoke wrappers |
+
+`smoke-shader-replacement-active-scenes.sh` expects an MO2 profile/save already positioned in the scene being tested. Use `FO4CS_SCENE_COMPOUND_PROFILE`, the per-role profile variables documented by `--help`, or `FO4CS_ACTIVE_SCENE_USE_CURRENT_PROFILE=1`.
 
 ## Project structure
 
@@ -67,7 +90,9 @@ extern/                       Submodules: CommonLibF4, FidelityFX-SDK, Streamlin
 include/                      Shared headers (PCH, Detours static lib)
 cmake/                        Build config (Common.cmake, Plugin.h.in, Version.rc.in)
 package/F4SE/Plugins/         Runtime files staged here for MO2 deployment
-scripts/                      deploy.sh, fetch-sdks.sh (added when SDK-using features absorbed)
+scripts/                      Build, deploy, smoke, and shader-validation helpers
+shaders/                      Reconstructed reference HLSL and shader notes
+test-results/                 Ignored runtime validation output
 ```
 
 ## License

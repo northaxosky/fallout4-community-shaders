@@ -2,17 +2,21 @@
 build/
 build-*/
 out/
+bin/
 *.exp
 *.lib
 *.obj
 *.pdb
 *.ilk
+*.idb
 
 # Logs
 *.log
 
 # Generated tool output, do not commit
 docs/shader-buffers.md
+.tmp-roundtrip/
+__pycache__/
 
 # Vendored Detours static libs are NOT build output, track them.
 !include/detours/**/*.lib
@@ -42,6 +46,9 @@ scripts/.env
 
 # SDK runtime DLL cache (per FO4Upscaling pattern)
 .sdk-cache/
+package/F4SE/Plugins/Streamline/
+package/F4SE/Plugins/FrameGeneration/FidelityFX/
+package/F4SE/Plugins/FrameGeneration/XeSS/
 
 # Test output
 test-results/

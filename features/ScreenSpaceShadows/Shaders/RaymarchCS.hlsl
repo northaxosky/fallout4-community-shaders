@@ -4,7 +4,7 @@
 
 #include "bend_sss_gpu.hlsli"
 
-Texture2D<float>         DepthTexture       : register(t0);  // FO4's main depth SRV; permissive type covers both R24_UNORM and R32_FLOAT.
+Texture2D<unorm float>   DepthTexture       : register(t0);  // R24_UNORM_X8_TYPELESS view of the main depth-stencil
 RWTexture2D<unorm float> OutputTexture      : register(u0);  // R8_UNORM screen-space shadow mask
 SamplerState             PointBorderSampler : register(s0);  // Border-clamp, BorderColor = FarDepthValue
 
