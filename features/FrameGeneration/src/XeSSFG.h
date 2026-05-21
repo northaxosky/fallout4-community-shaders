@@ -45,11 +45,13 @@ public:
 	xell_context_handle_t xellCtx = nullptr;
 
 private:
+	~XeSSFG();
+	void Shutdown();
+
 	// XeLL function pointers (resolved via GetProcAddress)
 	decltype(&xellD3D12CreateContext) pfn_xellD3D12CreateContext = nullptr;
 	decltype(&xellDestroyContext) pfn_xellDestroyContext = nullptr;
 	decltype(&xellSetSleepMode) pfn_xellSetSleepMode = nullptr;
-	decltype(&xellSleep) pfn_xellSleep = nullptr;
 	decltype(&xellAddMarkerData) pfn_xellAddMarkerData = nullptr;
 	decltype(&xellSetLoggingCallback) pfn_xellSetLoggingCallback = nullptr;
 

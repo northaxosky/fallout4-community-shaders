@@ -9,6 +9,49 @@ namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegen.xess"); }
 
+XeSSFG::~XeSSFG()
+{
+	Shutdown();
+}
+
+void XeSSFG::Shutdown()
+{
+	initialized = false;
+	if (xefgCtx && pfn_xefgSwapChainDestroy) {
+		pfn_xefgSwapChainDestroy(xefgCtx);
+		xefgCtx = nullptr;
+	}
+	if (xellCtx && pfn_xellDestroyContext) {
+		pfn_xellDestroyContext(xellCtx);
+		xellCtx = nullptr;
+	}
+	if (xellModule) {
+		FreeLibrary(xellModule);
+		xellModule = nullptr;
+	}
+	if (fgModule) {
+		FreeLibrary(fgModule);
+		fgModule = nullptr;
+	}
+
+	pfn_xellD3D12CreateContext = nullptr;
+	pfn_xellDestroyContext = nullptr;
+	pfn_xellSetSleepMode = nullptr;
+	pfn_xellAddMarkerData = nullptr;
+	pfn_xellSetLoggingCallback = nullptr;
+	pfn_xefgSwapChainD3D12CreateContext = nullptr;
+	pfn_xefgSwapChainSetLatencyReduction = nullptr;
+	pfn_xefgSwapChainSetLoggingCallback = nullptr;
+	pfn_xefgSwapChainD3D12InitFromSwapChainDesc = nullptr;
+	pfn_xefgSwapChainD3D12GetSwapChainPtr = nullptr;
+	pfn_xefgSwapChainSetEnabled = nullptr;
+	pfn_xefgSwapChainGetProperties = nullptr;
+	pfn_xefgSwapChainD3D12TagFrameResource = nullptr;
+	pfn_xefgSwapChainTagFrameConstants = nullptr;
+	pfn_xefgSwapChainSetPresentId = nullptr;
+	pfn_xefgSwapChainDestroy = nullptr;
+}
+
 bool XeSSFG::LoadLibraries()
 {
 	fgModule = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\XeSS\\libxess_fg.dll");
@@ -29,7 +72,6 @@ bool XeSSFG::LoadLibraries()
 	LOAD_FN(xellModule, xellD3D12CreateContext);
 	LOAD_FN(xellModule, xellDestroyContext);
 	LOAD_FN(xellModule, xellSetSleepMode);
-	LOAD_FN(xellModule, xellSleep);
 	LOAD_FN(xellModule, xellAddMarkerData);
 	LOAD_FN(xellModule, xellSetLoggingCallback);
 
@@ -46,8 +88,15 @@ bool XeSSFG::LoadLibraries()
 	LOAD_FN(fgModule, xefgSwapChainSetPresentId);
 	LOAD_FN(fgModule, xefgSwapChainDestroy);
 
-	if (!pfn_xellD3D12CreateContext || !pfn_xefgSwapChainD3D12CreateContext) {
+	if (!pfn_xellD3D12CreateContext ||
+		!pfn_xellDestroyContext ||
+		!pfn_xefgSwapChainD3D12CreateContext ||
+		!pfn_xefgSwapChainD3D12InitFromSwapChainDesc ||
+		!pfn_xefgSwapChainD3D12GetSwapChainPtr ||
+		!pfn_xefgSwapChainSetEnabled ||
+		!pfn_xefgSwapChainDestroy) {
 		L->warn("Failed to resolve required function pointers");
+		Shutdown();
 		return false;
 	}
 
@@ -64,6 +113,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	auto xellResult = pfn_xellD3D12CreateContext(a_device, &xellCtx);
 	if (xellResult != XELL_RESULT_SUCCESS) {
 		L->warn("XeLL context creation failed: {}", (int)xellResult);
+		Shutdown();
 		return false;
 	}
 	L->info("XeLL context created");
@@ -71,8 +121,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	auto xefgResult = pfn_xefgSwapChainD3D12CreateContext(a_device, &xefgCtx);
 	if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 		L->warn("Context creation failed: {}", (int)xefgResult);
-		pfn_xellDestroyContext(xellCtx);
-		xellCtx = nullptr;
+		Shutdown();
 		return false;
 	}
 	L->info("Context created");
@@ -147,12 +196,14 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 
 	if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 		L->warn("Swap chain init failed: {}", (int)result);
+		Shutdown();
 		return false;
 	}
 
 	result = pfn_xefgSwapChainD3D12GetSwapChainPtr(xefgCtx, IID_PPV_ARGS(a_outSwapChain));
 	if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 		L->warn("Failed to get proxy swap chain: {}", (int)result);
+		Shutdown();
 		return false;
 	}
 
@@ -168,7 +219,7 @@ void XeSSFG::BeginFrame(uint32_t a_frameId)
 {
 	if (!xellCtx) return;
 
-	// Skip xellSleep - cross-vendor mode caps at 60fps on NVIDIA.
+	// Skip XeLL sleep - cross-vendor mode caps at 60fps on NVIDIA.
 	// DXGI frame latency waitable handles pacing instead.
 	if (pfn_xellAddMarkerData)
 		pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
