@@ -56,6 +56,7 @@ namespace cs::engine
 		kUIDownscaledComposite = 37,
 
 		kMainDepthMips = 39,
+		kSSLRRaytracing = 40,  // Fallout4RE cs-engine-h-rt-enum-extension.json @ 2d73ccf.
 
 		// Full-res (matches frame dim) R8G8B8A8 SAO buffers with full SRV+RTV+UAV bind. Identified via runtime
 		// probe + RenderDoc capture: this trio holds the SAO output that the deferred ambient pass actually
@@ -93,6 +94,7 @@ namespace cs::engine
 		kMainCopyCopy = 4,
 
 		kShadowMap = 8,
+		kGodraysDepth = 10,  // Fallout4RE cs-engine-h-rt-enum-extension.json @ 2d73ccf.
 
 		kCount = 13
 	};
