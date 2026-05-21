@@ -1,20 +1,13 @@
 #pragma once
 
-#include <array>
-#include <cstddef>
-#include <cstdint>
-#include <string>
+#include "CSSha1.h"
 
 namespace cs::features::replacement
 {
-	struct Sha1Result
-	{
-		std::array<uint8_t, 20> bytes{};
-	};
-
-	void Sha1InitOnce();
-	Sha1Result Sha1Compute(const void* data, std::size_t len) noexcept;
-	bool Sha1IsZero(const Sha1Result& r) noexcept;
-	std::string Sha1ToHex(const Sha1Result& r);
-	bool Sha1FromHex(const std::string& hex, Sha1Result& out);
+	using Sha1Result = cs::sha1::Sha1Result;
+	using cs::sha1::Sha1Compute;
+	using cs::sha1::Sha1FromHex;
+	using cs::sha1::Sha1InitOnce;
+	using cs::sha1::Sha1IsZero;
+	using cs::sha1::Sha1ToHex;
 }
