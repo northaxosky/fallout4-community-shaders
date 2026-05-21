@@ -3,6 +3,8 @@
 #include <DirectXMath.h>
 #include <d3d11.h>
 
+#include <cstdint>
+#include <cstring>
 #include <winrt/base.h>
 
 namespace cs::buffer
@@ -59,5 +61,54 @@ namespace cs::buffer
 	private:
 		winrt::com_ptr<ID3D11Buffer> resource;
 		D3D11_BUFFER_DESC desc;
+	};
+
+	class Texture2D
+	{
+	public:
+		explicit Texture2D(D3D11_TEXTURE2D_DESC const& a_desc) :
+			desc(a_desc)
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateTexture2D(&desc, nullptr, resource.put()));
+		}
+
+		explicit Texture2D(ID3D11Texture2D* a_resource)
+		{
+			a_resource->GetDesc(&desc);
+			resource.attach(a_resource);
+		}
+
+		void CreateSRV(D3D11_SHADER_RESOURCE_VIEW_DESC const& a_desc)
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateShaderResourceView(resource.get(), &a_desc, srv.put()));
+		}
+
+		void CreateUAV(D3D11_UNORDERED_ACCESS_VIEW_DESC const& a_desc)
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateUnorderedAccessView(resource.get(), &a_desc, uav.put()));
+		}
+
+		void CreateRTV(D3D11_RENDER_TARGET_VIEW_DESC const& a_desc)
+		{
+			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
+			DX::ThrowIfFailed(device->CreateRenderTargetView(resource.get(), &a_desc, rtv.put()));
+		}
+
+		void Reset()
+		{
+			rtv = nullptr;
+			uav = nullptr;
+			srv = nullptr;
+			resource = nullptr;
+		}
+
+		D3D11_TEXTURE2D_DESC desc;
+		winrt::com_ptr<ID3D11Texture2D> resource;
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		winrt::com_ptr<ID3D11UnorderedAccessView> uav;
+		winrt::com_ptr<ID3D11RenderTargetView> rtv;
 	};
 }
