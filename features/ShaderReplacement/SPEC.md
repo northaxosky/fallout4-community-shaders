@@ -63,6 +63,25 @@ Replacement-created pixel shaders are wrapped in `ShaderCatalog`'s thread-local 
 
 Used by `scripts/smoke-shader-replacement.sh` so the seed INI in `package/` stays `false` and dev opt-in stays explicit.
 
+### Active-scene smoke harness
+
+`scripts/smoke-shader-replacement-active-scenes.sh` validates one targeted scene role at a time:
+
+- `bsdf-dir-outdoor-sun-shadow` / `bsdf-dir`
+- `bsdf-pt-interior-point-light` / `bsdf-pt`
+- `vls-outdoor-sunshafts` / `vls`
+
+Each scene must auto-load from an MO2 profile/save already positioned at the target. Set
+`FO4CS_SCENE_COMPOUND_PROFILE` to reuse one outdoor validation scene for all three
+roles, set `FO4CS_SCENE_BSDF_DIR_PROFILE`, `FO4CS_SCENE_BSDF_PT_PROFILE`, or
+`FO4CS_SCENE_VLS_PROFILE` to override `MO2_PROFILE` per role, or set
+`FO4CS_ACTIVE_SCENE_USE_CURRENT_PROFILE=1` when manually validating the current profile.
+
+The active harness copies screenshots, logs, and the ShaderCatalog SQLite WAL triple for
+each run. BSDF scenes require both a replacement-bind log and ShaderCatalog subclass /
+technique attribution before they can receive a pass-like verdict. VLS remains
+`catalog-capture-only` until `vls_slice_scatter` gets a runtime SHA.
+
 ## Dev workflow
 
 For a one-off manual test (without the smoke harness):
