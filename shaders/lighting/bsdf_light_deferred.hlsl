@@ -89,8 +89,10 @@
 //  11. Final composition: diffuse * cb2[2] (sun color) + specular +
 //      ambient AO term; modulated by shadow factor.
 //  12. MRT output: o0 = diffuse accumulator (/3 for HDR normalization)
-//      to RT 389 (kDiffuseBuffer-equivalent); o1 = specular accumulator
-//      to RT 392 (kSpecularBuffer-equivalent). Both R11G11B10F.
+//      to kDiffuseBuffer (RT 58); o1 = specular accumulator
+//      to kSpecularBuffer (RT 59). Both R11G11B10F. RT 389/392 in
+//      RenderDoc captures are capture-local resource IDs for these
+//      slots, not stable engine enum values.
 //
 // Skyrim CS analog: `package/Shaders/Lighting.hlsl` has the closest
 // math for the directional + cascade-shadow + Lambert + GGX pattern.
@@ -391,8 +393,8 @@ struct PS_INPUT
 
 struct PS_OUTPUT
 {
-    float4 diffuse  : SV_Target0;  // -> RT 389 (kDiffuseBuffer equivalent)
-    float4 specular : SV_Target1;  // -> RT 392 (kSpecularBuffer equivalent)
+    float4 diffuse  : SV_Target0;  // -> kDiffuseBuffer (RT 58)
+    float4 specular : SV_Target1;  // -> kSpecularBuffer (RT 59)
 };
 
 PS_OUTPUT main(PS_INPUT input)
