@@ -75,6 +75,8 @@ namespace cs::features
 			bool        lensFlareEnable    = false;
 			float       lensFlareIntensity = 0.8f;
 			int         lensFlareGhosts    = 5;
+			bool        dirtEnable         = false;
+			float       dirtIntensity      = 0.5f;
 
 			// Bokeh DOF.
 			bool        dofEnable          = false;
@@ -98,6 +100,7 @@ namespace cs::features
 		bool SettingsMatchPreset(Preset preset) const;
 
 		bool EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format);
+		bool GenerateDirtTexture();
 		bool EnsurePyramidResources(uint32_t a_width, uint32_t a_height);
 		bool EnsureBloomResources(uint32_t a_width, uint32_t a_height, int a_mips);
 		bool EnsureDOFResources(uint32_t a_width, uint32_t a_height);
@@ -109,6 +112,7 @@ namespace cs::features
 		std::unique_ptr<imagespace::Texture2D>      compositeScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> compositeCB;
 		ID3D11ComputeShader*                        compositeCS = nullptr;
+		std::unique_ptr<imagespace::Texture2D>      dirtTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView>    lutSRV;
 		winrt::com_ptr<ID3D11SamplerState>          lutSampler;
 		std::string                                 lutLoadedPath;
@@ -159,6 +163,7 @@ namespace cs::features
 		uint32_t                                    bloomWidth    = 0;
 		uint32_t                                    bloomHeight   = 0;
 
+		bool                                        dirtTextureAttempted = false;
 		bool                                        firstFireLogged = false;
 		bool                                        testModeActive  = false;
 	};

@@ -3,9 +3,11 @@
 #include <DirectXTex.h>
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <imgui.h>
+#include <vector>
 
 #include <DirectXMath.h>
 
@@ -34,6 +36,45 @@ namespace cs::features
 	constexpr const char* kDofMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_dof";
 	constexpr const char* kPresetMarker  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_preset";
 	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
+
+	namespace
+	{
+		[[nodiscard]] float DirtFade(float a_t)
+		{
+			return a_t * a_t * (3.0f - 2.0f * a_t);
+		}
+
+		[[nodiscard]] float DirtMix(float a_lhs, float a_rhs, float a_t)
+		{
+			return a_lhs + (a_rhs - a_lhs) * a_t;
+		}
+
+		[[nodiscard]] float DirtHash(int a_x, int a_y)
+		{
+			uint32_t h = static_cast<uint32_t>(a_x) * 0x8da6b343u;
+			h ^= static_cast<uint32_t>(a_y) * 0xd8163841u;
+			h ^= 0x9e3779b9u;
+			h ^= h >> 15;
+			h *= 0x2c1b3c6du;
+			h ^= h >> 12;
+			h *= 0x297a2d39u;
+			h ^= h >> 15;
+			return static_cast<float>(h & 0x00ffffffu) / 16777215.0f;
+		}
+
+		[[nodiscard]] float DirtValueNoise(float a_x, float a_y)
+		{
+			const int xi = static_cast<int>(std::floor(a_x));
+			const int yi = static_cast<int>(std::floor(a_y));
+			const float tx = a_x - static_cast<float>(xi);
+			const float ty = a_y - static_cast<float>(yi);
+			const float sx = DirtFade(tx);
+			const float sy = DirtFade(ty);
+			const float a = DirtMix(DirtHash(xi, yi), DirtHash(xi + 1, yi), sx);
+			const float b = DirtMix(DirtHash(xi, yi + 1), DirtHash(xi + 1, yi + 1), sx);
+			return DirtMix(a, b, sy);
+		}
+	}
 
 	struct CompositeCB
 	{
@@ -69,6 +110,11 @@ namespace cs::features
 		float    SunspriteSize;
 		float    LensFlareIntensity;
 		uint32_t LensFlareGhosts;
+
+		uint32_t DirtEnable;
+		float    DirtIntensity;
+		float    DirtPad0;
+		float    DirtPad1;
 	};
 	static_assert(sizeof(CompositeCB) % 16 == 0, "CompositeCB must be 16-byte aligned");
 
@@ -247,6 +293,8 @@ namespace cs::features
 		settings.lensFlareEnable    = ini.GetBoolValue("Settings",   "bLensFlareEnable",    settings.lensFlareEnable);
 		settings.lensFlareIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLensFlareIntensity", settings.lensFlareIntensity)), 0.0f, 2.0f);
 		settings.lensFlareGhosts    = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iLensFlareGhosts",    settings.lensFlareGhosts)),    3, 7);
+		settings.dirtEnable         = ini.GetBoolValue("Settings",   "bDirtEnable",         settings.dirtEnable);
+		settings.dirtIntensity      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fDirtIntensity", settings.dirtIntensity)), 0.0f, 2.0f);
 
 		settings.dofEnable         = ini.GetBoolValue("Settings",   "bDOFEnable",          settings.dofEnable);
 		settings.aperture          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAperture",       settings.aperture)),       0.0f, 0.5f);
@@ -358,6 +406,8 @@ namespace cs::features
 		ini.SetBoolValue("Settings",   "bLensFlareEnable",    settings.lensFlareEnable);
 		ini.SetDoubleValue("Settings", "fLensFlareIntensity", settings.lensFlareIntensity);
 		ini.SetLongValue("Settings",   "iLensFlareGhosts",    settings.lensFlareGhosts);
+		ini.SetBoolValue("Settings",   "bDirtEnable",         settings.dirtEnable);
+		ini.SetDoubleValue("Settings", "fDirtIntensity",      settings.dirtIntensity);
 		ini.SetBoolValue("Settings",   "bDOFEnable",          settings.dofEnable);
 		ini.SetDoubleValue("Settings", "fAperture",           settings.aperture);
 		ini.SetDoubleValue("Settings", "fFocusDistance",      settings.focusDistance);
@@ -468,6 +518,71 @@ namespace cs::features
 			DX::ThrowIfFailed(device->CreateSamplerState(&sd, lutSampler.put()));
 		}
 
+		if (settings.dirtEnable && !dirtTexture) {
+			(void)GenerateDirtTexture();
+		}
+
+		return true;
+	}
+
+	bool Imagespace::GenerateDirtTexture()
+	{
+		if (dirtTexture)
+			return true;
+		if (dirtTextureAttempted)
+			return false;
+
+		dirtTextureAttempted = true;
+		auto* device = cs::util::GetD3DDevice();
+		if (!device)
+			return false;
+
+		constexpr uint32_t W = 256;
+		constexpr uint32_t H = 256;
+		std::vector<uint8_t> buf(W * H);
+		for (uint32_t y = 0; y < H; ++y) {
+			for (uint32_t x = 0; x < W; ++x) {
+				const float fx = static_cast<float>(x) / static_cast<float>(W - 1);
+				const float fy = static_cast<float>(y) / static_cast<float>(H - 1);
+				float n = DirtValueNoise(fx * 4.0f, fy * 4.0f) * 0.50f;
+				n += DirtValueNoise(fx * 12.0f, fy * 12.0f) * 0.30f;
+				n += DirtValueNoise(fx * 30.0f, fy * 30.0f) * 0.20f;
+				buf[y * W + x] = static_cast<uint8_t>(std::clamp(n * 255.0f, 0.0f, 255.0f));
+			}
+		}
+
+		D3D11_TEXTURE2D_DESC td{};
+		td.Width = W;
+		td.Height = H;
+		td.MipLevels = 1;
+		td.ArraySize = 1;
+		td.Format = DXGI_FORMAT_R8_UNORM;
+		td.SampleDesc.Count = 1;
+		td.Usage = D3D11_USAGE_IMMUTABLE;
+		td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+		D3D11_SUBRESOURCE_DATA init{};
+		init.pSysMem = buf.data();
+		init.SysMemPitch = static_cast<UINT>(W * sizeof(uint8_t));
+
+		winrt::com_ptr<ID3D11Texture2D> tex;
+		if (FAILED(device->CreateTexture2D(&td, &init, tex.put()))) {
+			L->warn("Lens dirt texture creation failed");
+			return false;
+		}
+
+		auto texture = std::make_unique<imagespace::Texture2D>(tex.detach());
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+		sd.Format = DXGI_FORMAT_R8_UNORM;
+		sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		sd.Texture2D.MipLevels = 1;
+		if (FAILED(device->CreateShaderResourceView(texture->resource.get(), &sd, texture->srv.put()))) {
+			L->warn("Lens dirt SRV creation failed");
+			return false;
+		}
+
+		dirtTexture = std::move(texture);
+		L->info("Lens dirt texture generated {}x{}", W, H);
 		return true;
 	}
 
@@ -965,7 +1080,7 @@ namespace cs::features
 		const bool wantLensFlare = settings.lensFlareEnable && !enbYield;
 		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || settings.vignetteEnable
 			|| settings.caEnable || settings.sharpenEnable || (settings.lutEnable && lutSRV)
-			|| wantSunsprite || wantLensFlare;
+			|| wantSunsprite || wantLensFlare || settings.dirtEnable;
 
 		if (wantAdaptive && !EnsurePyramidResources(W, H))
 			return;
@@ -1140,6 +1255,7 @@ namespace cs::features
 		// === 6. Composite ===
 		if (wantComposite) {
 			CompositeCB ccb{};
+			const bool wantDirt = settings.dirtEnable && dirtTexture && dirtTexture->srv;
 			ccb.Operator               = static_cast<uint32_t>(settings.tonemapOperator);
 			ccb.LUTEnable              = (settings.lutEnable && lutSRV) ? 1u : 0u;
 			ccb.AdaptiveExposureEnable = wantAdaptive ? 1u : 0u;
@@ -1195,15 +1311,18 @@ namespace cs::features
 			ccb.SunspriteSize      = settings.sunspriteSize;
 			ccb.LensFlareIntensity = settings.lensFlareIntensity;
 			ccb.LensFlareGhosts    = static_cast<uint32_t>(settings.lensFlareGhosts);
+			ccb.DirtEnable         = wantDirt ? 1u : 0u;
+			ccb.DirtIntensity      = settings.dirtIntensity;
 			compositeCB->Update(ccb);
 
-			ID3D11ShaderResourceView* srvs[4] = {
+			ID3D11ShaderResourceView* srvs[5] = {
 				fbSRV,
 				ccb.LUTEnable ? lutSRV.get() : nullptr,
 				wantBloom ? bloomScratch[0]->srv.get() : nullptr,
-				wantAdaptive ? expoPingPong[expoFrameIdx]->srv.get() : nullptr
+				wantAdaptive ? expoPingPong[expoFrameIdx]->srv.get() : nullptr,
+				wantDirt ? dirtTexture->srv.get() : nullptr
 			};
-			context->CSSetShaderResources(0, 4, srvs);
+			context->CSSetShaderResources(0, 5, srvs);
 			ID3D11SamplerState* samplers[1] = { lutSampler.get() };
 			context->CSSetSamplers(0, 1, samplers);
 			ID3D11UnorderedAccessView* uavs[1] = { compositeScratch->uav.get() };
@@ -1217,6 +1336,8 @@ namespace cs::features
 
 			ID3D11UnorderedAccessView* clearUAV[1] = { nullptr };
 			context->CSSetUnorderedAccessViews(0, 1, clearUAV, nullptr);
+			ID3D11ShaderResourceView* clearSRVs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+			context->CSSetShaderResources(0, 5, clearSRVs);
 			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
 		}
 
@@ -1367,6 +1488,12 @@ namespace cs::features
 		ImGui::SliderFloat("Flare intensity", &settings.lensFlareIntensity, 0.0f, 2.0f, "%.2f");
 		markCustomIfEdited();
 		ImGui::SliderInt("Flare ghosts", &settings.lensFlareGhosts, 3, 7);
+		commitDirty();
+		ImGui::EndDisabled();
+		dirty |= ImGui::Checkbox("Lens dirt", &settings.dirtEnable);
+		ImGui::SetItemTooltip("Procedural dirt overlay modulated by sun-glow magnitude. Only visible when sun is on-screen.");
+		ImGui::BeginDisabled(!settings.dirtEnable);
+		ImGui::SliderFloat("Dirt intensity", &settings.dirtIntensity, 0.0f, 2.0f, "%.2f");
 		commitDirty();
 		ImGui::EndDisabled();
 

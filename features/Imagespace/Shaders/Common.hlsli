@@ -34,6 +34,11 @@ cbuffer CompositeCB : register(b0)
     float SunspriteSize;
     float LensFlareIntensity;
     uint  LensFlareGhosts;
+
+    uint  DirtEnable;
+    float DirtIntensity;
+    float _DirtPad0;
+    float _DirtPad1;
 };
 
 // Approximation: pure power, not the piecewise sRGB curve. Adequate for grading work.

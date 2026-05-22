@@ -10,6 +10,7 @@ Texture2D<float4>     InputColor         : register(t0);
 Texture3D<float4>     LUT3D              : register(t1);
 Texture2D<float4>     BloomTex           : register(t2);
 Texture2D<float>      ExpoTex            : register(t3);
+Texture2D<float>      DirtTex            : register(t4);
 SamplerState          LinearClampSampler : register(s0);
 RWTexture2D<float4>   OutputColor        : register(u0);
 
@@ -32,8 +33,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
     else
         c = InputColor.Load(int3(px, 0)).rgb;
 
+    const bool dirtInFrame = DirtEnable != 0 && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
     const bool sunInFrame = (SunspriteEnable != 0 || LensFlareEnable != 0) && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
-    const bool useLinearPath = Operator != 0 || BloomEnable != 0 || sunInFrame;
+    const bool useLinearPath = Operator != 0 || BloomEnable != 0 || sunInFrame || dirtInFrame;
     if (useLinearPath) {
         float3 lin = SRGBToLinear(c);
 
@@ -49,6 +51,16 @@ void main(uint3 dtid : SV_DispatchThreadID)
                 lin += ApplySunsprite(uv, SunUV, SunspriteIntensity, SunspriteSize);
             if (LensFlareEnable != 0)
                 lin += ApplyLensFlare(uv, SunUV, LensFlareIntensity, LensFlareGhosts);
+        }
+
+        if (DirtEnable != 0) {
+            const float2 sunSentinel = float2(SunUV.x, SunUV.y);
+            const bool   sunVisible  = abs(sunSentinel.x) < 1.5 && abs(sunSentinel.y) < 1.5;
+            const float  sunGlow     = sunVisible
+                                     ? saturate(1.0 - dot(sunSentinel, sunSentinel) * 0.25)
+                                     : 0.0;
+            const float  mask        = DirtTex.SampleLevel(LinearClampSampler, uv, 0).r;
+            lin += mask * sunGlow * DirtIntensity;
         }
 
         // Combined exposure.
