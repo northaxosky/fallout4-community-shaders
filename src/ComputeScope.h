@@ -5,6 +5,9 @@
 namespace cs
 {
 	// RAII: saves+unbinds OM on entry; clears CS-stage bindings and restores OM on exit. Not re-entrant.
+	// Skips BSGraphics::Renderer::SetDirtyStates intentionally: raw ID3D11 dispatches under this scope
+	// restore the D3D11 state they change, so the engine's TLS dirty-state cache stays consistent without
+	// the per-dispatch flush. See Fallout4RE exports/cs-bsgraphics-flush-trigger.json @ b929b61.
 	class ComputeScope
 	{
 	public:
