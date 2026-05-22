@@ -11,10 +11,10 @@ cbuffer PyramidCB : register(b0)
     uint2 DstDimensions;
 };
 
-float LogLumaSRGB(float3 srgb)
+float LogLumaLinear(float3 lin)
 {
-    const float3 lin = pow(saturate(srgb), 2.2);
-    const float  luma = dot(lin, float3(0.2126, 0.7152, 0.0722));
+    // kFrameBuffer is linear HDR (R11G11B10F); no gamma expansion needed.
+    const float luma = dot(max(lin, 0.0), float3(0.2126, 0.7152, 0.0722));
     return log2(max(luma, 1e-5));
 }
 
@@ -31,7 +31,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
         const float3 c1 = SrcSRGB.Load(int3(src + int2(1, 0), 0)).rgb;
         const float3 c2 = SrcSRGB.Load(int3(src + int2(0, 1), 0)).rgb;
         const float3 c3 = SrcSRGB.Load(int3(src + int2(1, 1), 0)).rgb;
-        DstMip[px] = 0.25 * (LogLumaSRGB(c0) + LogLumaSRGB(c1) + LogLumaSRGB(c2) + LogLumaSRGB(c3));
+        DstMip[px] = 0.25 * (LogLumaLinear(c0) + LogLumaLinear(c1) + LogLumaLinear(c2) + LogLumaLinear(c3));
     } else {
         const float l0 = SrcPyramid.Load(int3(src + int2(0, 0), 0));
         const float l1 = SrcPyramid.Load(int3(src + int2(1, 0), 0));
