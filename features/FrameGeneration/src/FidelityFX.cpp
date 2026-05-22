@@ -122,7 +122,9 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-		auto renderSize = float2(screenSize.x * renderTargetManager->dynamicWidthRatio, screenSize.y * renderTargetManager->dynamicHeightRatio);
+		auto renderSize = float2(
+			screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager),
+			screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
 
 		dispatchParameters.motionVectorScale.x = renderSize.x;
 		dispatchParameters.motionVectorScale.y = renderSize.y;
@@ -133,8 +135,8 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 		jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
 		jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
 
-		dispatchParameters.jitterOffset.x = -jitter.x / renderTargetManager->dynamicWidthRatio;
-		dispatchParameters.jitterOffset.y = -jitter.y / renderTargetManager->dynamicHeightRatio;
+		dispatchParameters.jitterOffset.x = -jitter.x / cs::engine::dynres::GetWidthRatio(renderTargetManager);
+		dispatchParameters.jitterOffset.y = -jitter.y / cs::engine::dynres::GetHeightRatio(renderTargetManager);
 
 		dispatchParameters.frameTimeDelta = deltaTime * 1000.f;
 
