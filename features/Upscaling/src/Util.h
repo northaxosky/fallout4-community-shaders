@@ -13,41 +13,52 @@ namespace Util
 	using RenderTarget = cs::engine::RenderTarget;
 	using DepthStencilTarget = cs::engine::DepthStencilTarget;
 
-	// CommonLibF4 has a 0x30 pad shifting dynamic-res offsets; OG binary reads the no-pad layout.
-	static constexpr std::ptrdiff_t GAME_DYNAMIC_WIDTH_RATIO_OFFSET = 0xF88;
-	static constexpr std::ptrdiff_t GAME_DYNAMIC_HEIGHT_RATIO_OFFSET = 0xF8C;
-	static constexpr std::ptrdiff_t GAME_IS_DYNAMIC_RES_ACTIVATED_OFFSET = 0xFA8;
+	// RTM dynamic-resolution field offsets per Fallout4RE exports/cs-rtm-dynamic-res-offsets.json @ a124812.
+	// OG has no 0x30 pad at 0xDC4; NG and AE do. CommonLibF4 compiles a unified padded layout that lands at
+	// 0xFB8/0xFBC/0xFD8 for the three fields, which is OG-broken and NG/AE-broken-for-isActivated only.
+	struct DynamicResOffsets
+	{
+		std::ptrdiff_t widthRatio;
+		std::ptrdiff_t heightRatio;
+		std::ptrdiff_t isActivated;
+	};
+
+	static constexpr DynamicResOffsets kOffsetsOG{ 0xF88, 0xF8C, 0xFA8 };
+	static constexpr DynamicResOffsets kOffsetsNGAE{ 0xFB8, 0xFBC, 0xFE5 };
+
+	[[nodiscard]] inline DynamicResOffsets GetDynamicResOffsets()
+	{
+		return REX::FModule::IsRuntimeOG() ? kOffsetsOG : kOffsetsNGAE;
+	}
 
 	static void SetDynamicResolution(RE::BSGraphics::RenderTargetManager* rtm, float width, float height, bool activated)
 	{
-		// Write to struct members (used by our code)
+		// Write to binary offsets (cross-runtime correct per cs-rtm-dynamic-res-offsets.json).
+		const auto off = GetDynamicResOffsets();
+		auto base = reinterpret_cast<uintptr_t>(rtm);
+		*reinterpret_cast<float*>(base + off.widthRatio)  = width;
+		*reinterpret_cast<float*>(base + off.heightRatio) = height;
+		*reinterpret_cast<bool*>(base + off.isActivated)  = activated;
+
+		// Also write to CommonLibF4 struct members so existing struct-reader code stays in sync.
+		// On NG/AE this is the same memory as off.widthRatio/heightRatio; on OG the struct compiles
+		// to padded offsets that don't match the binary, so this write only keeps struct readers fed
+		// (do not rely on it for engine-visible state).
 		rtm->dynamicWidthRatio = width;
 		rtm->dynamicHeightRatio = height;
 		rtm->isDynamicResolutionCurrentlyActivated = activated;
-
-		// Also write to the game's actual offsets (no-pad layout)
-		if (REX::FModule::IsRuntimeOG()) {
-			auto base = reinterpret_cast<uintptr_t>(rtm);
-			*reinterpret_cast<float*>(base + GAME_DYNAMIC_WIDTH_RATIO_OFFSET) = width;
-			*reinterpret_cast<float*>(base + GAME_DYNAMIC_HEIGHT_RATIO_OFFSET) = height;
-			*reinterpret_cast<bool*>(base + GAME_IS_DYNAMIC_RES_ACTIVATED_OFFSET) = activated;
-		}
 	}
 
 	static float GetGameDynamicWidthRatio(RE::BSGraphics::RenderTargetManager* rtm)
 	{
-		if (REX::FModule::IsRuntimeOG()) {
-			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + GAME_DYNAMIC_WIDTH_RATIO_OFFSET);
-		}
-		return rtm->dynamicWidthRatio;
+		const auto off = GetDynamicResOffsets();
+		return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + off.widthRatio);
 	}
 
 	static float GetGameDynamicHeightRatio(RE::BSGraphics::RenderTargetManager* rtm)
 	{
-		if (REX::FModule::IsRuntimeOG()) {
-			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + GAME_DYNAMIC_HEIGHT_RATIO_OFFSET);
-		}
-		return rtm->dynamicHeightRatio;
+		const auto off = GetDynamicResOffsets();
+		return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(rtm) + off.heightRatio);
 	}
 
 }
