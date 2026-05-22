@@ -18,6 +18,7 @@ Post-upscale compute stack for tone mapping, LUT grading, adaptive exposure, blo
 - ENB is treated as owner of its overlapping effects unless `bForceWithENB=true`.
 - Adaptive exposure generates the log-luma pyramid with per-mip SRVs and per-mip UAVs, then reads the full chain only during the exposure pass.
 - Composite output alpha stays `1.0`: FO4's `kMain` runtime format is `R11G11B10_FLOAT`, so there is no stored framebuffer alpha to preserve.
+- Bokeh DOF keeps near and far half-res blur buffers separate; composite applies far blur over sharp, then near blur on top.
 - Constant buffers must stay 16-byte aligned.
 
 ## Smoke gates

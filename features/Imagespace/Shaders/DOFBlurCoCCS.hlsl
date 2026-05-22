@@ -4,7 +4,8 @@ Texture2D<float4>    HalfColorIn : register(t0);  // half-res downsampled scene
 Texture2D<float>     CocIn       : register(t1);  // half-res signed CoC
 Texture2D<float2>    TileIn      : register(t2);  // /16 {minCoC, maxCoC}
 
-RWTexture2D<float4>  HalfColorOut : register(u0); // half-res blur output
+RWTexture2D<float4>  NearColorOut : register(u0); // half-res foreground blur output
+RWTexture2D<float4>  FarColorOut  : register(u1); // half-res background blur output
 
 cbuffer DofCB : register(b0)
 {
@@ -41,25 +42,43 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const int2 tileCoord = int2(dtid.xy) / 16;
     const float2 tileMM = TileIn.Load(int3(tileCoord, 0));
     const float tileMaxAbs = max(abs(tileMM.x), abs(tileMM.y));
+    const float3 centerColor = HalfColorIn.Load(int3(dtid.xy, 0)).rgb;
     if (tileMaxAbs < 1.0) {
-        HalfColorOut[dtid.xy] = HalfColorIn.Load(int3(dtid.xy, 0));
+        NearColorOut[dtid.xy] = float4(centerColor, 1.0);
+        FarColorOut[dtid.xy] = float4(centerColor, 1.0);
         return;
     }
 
     const float coc = CocIn.Load(int3(dtid.xy, 0));
+    const float centerCocAbs = max(abs(coc), 1e-3);
     const float radiusPx = max(1.0, abs(coc));
 
-    // Uniform disc blur: each sample contributes equally. Energy-conserving but doesn't produce true bokeh boundaries (scatter-as-gather upgrade is a follow-up).
+    // Split gather by CoC sign so foreground blur can composite over background blur.
     const uint sampleCount = (QualityLevel == 0u) ? 12u : (QualityLevel == 1u ? 24u : 24u);
-    float3 accum = 0.0;
+    float3 nearAccum = 0.0;
+    float3 farAccum = 0.0;
+    float nearWeightSum = 0.0;
+    float farWeightSum = 0.0;
 
     [unroll(24)]
     for (uint i = 0; i < sampleCount; ++i) {
         const float2 offset = kDiscSamples24[i] * radiusPx;
         int2 px = int2(round(float2(dtid.xy) + offset));
         px = clamp(px, int2(0, 0), int2(HalfDimensions) - 1);
-        accum += HalfColorIn.Load(int3(px, 0)).rgb;
+
+        const float sampleCoc = CocIn.Load(int3(px, 0));
+        const float3 sampleColor = HalfColorIn.Load(int3(px, 0)).rgb;
+        const float nearWeight = saturate(-sampleCoc / centerCocAbs);
+        const float farWeight = saturate(sampleCoc / centerCocAbs);
+
+        nearAccum += sampleColor * nearWeight;
+        farAccum += sampleColor * farWeight;
+        nearWeightSum += nearWeight;
+        farWeightSum += farWeight;
     }
 
-    HalfColorOut[dtid.xy] = float4(accum / float(sampleCount), 1.0);
+    const float3 nearColor = (nearWeightSum > 1e-4) ? (nearAccum / nearWeightSum) : centerColor;
+    const float3 farColor = (farWeightSum > 1e-4) ? (farAccum / farWeightSum) : centerColor;
+    NearColorOut[dtid.xy] = float4(nearColor, 1.0);
+    FarColorOut[dtid.xy] = float4(farColor, 1.0);
 }

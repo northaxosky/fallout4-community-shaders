@@ -628,7 +628,7 @@ namespace cs::features
 		const uint32_t halfH = std::max(1u, (a_height + 1) / 2);
 		const bool dimChanged = (halfW != dofWidth || halfH != dofHeight);
 
-		if (dimChanged || !dofCoCTex) {
+		if (dimChanged || !dofCoCTex || !dofTileTex || !dofHalfColor || !dofNearBlurred || !dofFarBlurred) {
 			D3D11_TEXTURE2D_DESC td{};
 			td.MipLevels = 1;
 			td.ArraySize = 1;
@@ -661,17 +661,20 @@ namespace cs::features
 			ud.Format = DXGI_FORMAT_R16G16_FLOAT;
 			dofTileTex->CreateUAV(ud);
 
-			// Half-res color ping-pong: Pass 1 writes dofHalfColor (downsample), Pass 3 reads it + writes dofHalfBlurred.
+			// Half-res DOF color: Pass 1 writes source color; Pass 3 writes separated near/far blur outputs.
 			td.Width = halfW; td.Height = halfH;
 			td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
 			dofHalfColor   = std::make_unique<imagespace::Texture2D>(td);
-			dofHalfBlurred = std::make_unique<imagespace::Texture2D>(td);
+			dofNearBlurred = std::make_unique<imagespace::Texture2D>(td);
+			dofFarBlurred  = std::make_unique<imagespace::Texture2D>(td);
 			sd.Format = DXGI_FORMAT_R11G11B10_FLOAT;
 			dofHalfColor->CreateSRV(sd);
-			dofHalfBlurred->CreateSRV(sd);
+			dofNearBlurred->CreateSRV(sd);
+			dofFarBlurred->CreateSRV(sd);
 			ud.Format = DXGI_FORMAT_R11G11B10_FLOAT;
 			dofHalfColor->CreateUAV(ud);
-			dofHalfBlurred->CreateUAV(ud);
+			dofNearBlurred->CreateUAV(ud);
+			dofFarBlurred->CreateUAV(ud);
 
 			dofWidth  = halfW;
 			dofHeight = halfH;
@@ -785,26 +788,26 @@ namespace cs::features
 			context->CSSetShaderResources(0, 1, clearSRV);
 		}
 
-		// Pass 3: half-res CoC-weighted disc blur. Read dofHalfColor + dofCoCTex + dofTileTex, write dofHalfBlurred.
+		// Pass 3: half-res CoC-weighted disc blur. Read dofHalfColor + CoC + tiles, write near/far blur outputs.
 		{
 			ID3D11ShaderResourceView* srvs[3] = { dofHalfColor->srv.get(), dofCoCTex->srv.get(), dofTileTex->srv.get() };
 			context->CSSetShaderResources(0, 3, srvs);
-			ID3D11UnorderedAccessView* uavs[1] = { dofHalfBlurred->uav.get() };
-			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			ID3D11UnorderedAccessView* uavs[2] = { dofNearBlurred->uav.get(), dofFarBlurred->uav.get() };
+			context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
 			context->CSSetShader(blurCS, nullptr, 0);
 			const uint32_t gx = (dofWidth  + 7) / 8;
 			const uint32_t gy = (dofHeight + 7) / 8;
 			context->Dispatch(gx, gy, 1);
-			ID3D11UnorderedAccessView* clear[1] = { nullptr };
-			context->CSSetUnorderedAccessViews(0, 1, clear, nullptr);
+			ID3D11UnorderedAccessView* clear[2] = { nullptr, nullptr };
+			context->CSSetUnorderedAccessViews(0, 2, clear, nullptr);
 			ID3D11ShaderResourceView* clearSRV[3] = { nullptr, nullptr, nullptr };
 			context->CSSetShaderResources(0, 3, clearSRV);
 		}
 
-		// Pass 4: full-res composite. Lerp(sharpFB, blurredHalf-with-bilinear, smoothstep(|CoC|)).
+		// Pass 4: full-res composite. Far blur blends over sharp, then near blur blends on top.
 		{
-			ID3D11ShaderResourceView* srvs[3] = { fbSRV, dofHalfBlurred->srv.get(), dofCoCTex->srv.get() };
-			context->CSSetShaderResources(0, 3, srvs);
+			ID3D11ShaderResourceView* srvs[4] = { fbSRV, dofNearBlurred->srv.get(), dofFarBlurred->srv.get(), dofCoCTex->srv.get() };
+			context->CSSetShaderResources(0, 4, srvs);
 			ID3D11UnorderedAccessView* uavs[1] = { compositeScratch->uav.get() };
 			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 			context->CSSetShader(compCS, nullptr, 0);
@@ -813,8 +816,8 @@ namespace cs::features
 			context->Dispatch(gx, gy, 1);
 			ID3D11UnorderedAccessView* clear[1] = { nullptr };
 			context->CSSetUnorderedAccessViews(0, 1, clear, nullptr);
-			ID3D11ShaderResourceView* clearSRV[3] = { nullptr, nullptr, nullptr };
-			context->CSSetShaderResources(0, 3, clearSRV);
+			ID3D11ShaderResourceView* clearSRV[4] = { nullptr, nullptr, nullptr, nullptr };
+			context->CSSetShaderResources(0, 4, clearSRV);
 		}
 
 		context->CopyResource(a_fbTex, compositeScratch->resource.get());

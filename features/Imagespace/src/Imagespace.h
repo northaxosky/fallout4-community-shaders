@@ -16,6 +16,7 @@ namespace cs::features
 		static Imagespace* GetSingleton();
 
 		std::string_view GetName() const override { return "Imagespace"; }
+		std::vector<std::string_view> GetDependencies() const override { return { "Upscaling" }; }
 
 		void Load() override;
 		void OnPostPostLoad() override;
@@ -138,7 +139,8 @@ namespace cs::features
 		std::unique_ptr<imagespace::Texture2D>      dofCoCTex;             // half-res R16F signed CoC
 		std::unique_ptr<imagespace::Texture2D>      dofTileTex;            // /16 R16G16F {minCoC, maxCoC} for blur early-out
 		std::unique_ptr<imagespace::Texture2D>      dofHalfColor;          // half-res R11G11B10F downsampled scene
-		std::unique_ptr<imagespace::Texture2D>      dofHalfBlurred;        // half-res R11G11B10F blur output
+		std::unique_ptr<imagespace::Texture2D>      dofNearBlurred;        // half-res R11G11B10F foreground blur output
+		std::unique_ptr<imagespace::Texture2D>      dofFarBlurred;         // half-res R11G11B10F background blur output
 		std::unique_ptr<imagespace::ConstantBuffer> dofCB;
 		ID3D11ComputeShader*                        dofDepthCoCCS    = nullptr;
 		ID3D11ComputeShader*                        dofDilateCS      = nullptr;
