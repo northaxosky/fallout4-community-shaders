@@ -13,6 +13,13 @@
 #include "SimpleIni.h"
 #include "Util.h"
 
+#ifdef near
+#	undef near
+#endif
+#ifdef far
+#	undef far
+#endif
+
 namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.ssgi"); }
@@ -75,6 +82,102 @@ namespace cs::features
 		{ "Quality",     3, 5, 200.0f, 0.20f, 1.2f, 32.0f },
 		{ "Cinematic",   4, 8, 280.0f, 0.30f, 1.5f, 40.0f },
 	};
+
+	struct ProjectionData
+	{
+		float nearClip;
+		float farClip;
+		float ndcToViewMul[2];
+		float ndcToViewAdd[2];
+		bool  fromCamera;
+	};
+
+	struct FrustumData
+	{
+		float left;
+		float right;
+		float top;
+		float bottom;
+		float nearClip;
+		float farClip;
+		bool  ortho;
+	};
+
+	ProjectionData GetFallbackProjection(uint32_t a_width, uint32_t a_height)
+	{
+		const float vfov = std::tan(0.5f * 1.05f);
+		const float aspect = float(a_width) / float(std::max(a_height, 1u));
+		return {
+			0.1f,
+			100000.0f,
+			{ vfov * aspect, vfov },
+			{ 0.0f, 0.0f },
+			false
+		};
+	}
+
+	FrustumData ReadFrustum(const RE::NiFrustum& a_frustum)
+	{
+		return {
+			a_frustum.left,
+			a_frustum.right,
+			a_frustum.top,
+			a_frustum.bottom,
+			a_frustum.near,
+			a_frustum.far,
+			a_frustum.ortho
+		};
+	}
+
+	bool IsValidFrustum(const FrustumData& a_frustum)
+	{
+		return !a_frustum.ortho &&
+			std::isfinite(a_frustum.left) &&
+			std::isfinite(a_frustum.right) &&
+			std::isfinite(a_frustum.top) &&
+			std::isfinite(a_frustum.bottom) &&
+			std::isfinite(a_frustum.nearClip) &&
+			std::isfinite(a_frustum.farClip) &&
+			a_frustum.right > a_frustum.left &&
+			a_frustum.top > a_frustum.bottom &&
+			a_frustum.nearClip > 0.0f &&
+			a_frustum.farClip > a_frustum.nearClip;
+	}
+
+	ProjectionData GetProjectionData(uint32_t a_width, uint32_t a_height)
+	{
+		auto data = GetFallbackProjection(a_width, a_height);
+		auto* state = cs::engine::GetGraphicsState();
+		if (!state)
+			return data;
+
+		// Fallout4RE exports/cs-camera-projection-data-path.json @ cc44b0e.
+		auto* camera = state->cameraState.referenceCamera;
+		if (!camera) {
+			for (const auto& entry : state->cameraDataCache) {
+				if (entry.referenceCamera && entry.useJitter) {
+					camera = entry.referenceCamera;
+					break;
+				}
+			}
+		}
+
+		if (!camera)
+			return data;
+
+		const auto f = ReadFrustum(camera->viewFrustum);
+		if (!IsValidFrustum(f))
+			return data;
+
+		data.nearClip = f.nearClip;
+		data.farClip = f.farClip;
+		data.ndcToViewMul[0] = (f.right - f.left) * 0.5f;
+		data.ndcToViewMul[1] = (f.top - f.bottom) * 0.5f;
+		data.ndcToViewAdd[0] = (f.right + f.left) * 0.5f;
+		data.ndcToViewAdd[1] = (f.top + f.bottom) * 0.5f;
+		data.fromCamera = true;
+		return data;
+	}
 
 	ScreenSpaceGI* ScreenSpaceGI::GetSingleton()
 	{
@@ -394,6 +497,18 @@ namespace cs::features
 		context->CSSetConstantBuffers(0, 1, pyrCBs);
 
 		uint32_t mipW = pyrWidth, mipH = pyrHeight;
+		const ProjectionData projection = GetProjectionData(W, H);
+		static bool projectionSourceLogged = false;
+		if (!projectionSourceLogged) {
+			if (projection.fromCamera) {
+				L->info("Projection source: CameraStateData reference camera, near={:.3f} far={:.1f}",
+					projection.nearClip, projection.farClip);
+			} else {
+				L->warn("Projection source unavailable; using historical SSGI fallback");
+			}
+			projectionSourceLogged = true;
+		}
+
 		for (uint32_t mip = 0; mip < 5; ++mip) {
 			PyramidCB cb{};
 			cb.SrcDim[0] = (mip == 0) ? W : (pyrWidth >> (mip - 1));
@@ -401,8 +516,8 @@ namespace cs::features
 			cb.DstDim[0] = std::max(1u, mipW);
 			cb.DstDim[1] = std::max(1u, mipH);
 			cb.IsLDR     = (mip == 0) ? 1u : 0u;
-			cb.NearC     = 0.1f;
-			cb.FarC      = 100000.0f;
+			cb.NearC     = projection.nearClip;
+			cb.FarC      = projection.farClip;
 			pyramidCB->Update(cb);
 
 			ID3D11ShaderResourceView* pyrSRVs[2] = { depthSRV, (mip == 0) ? nullptr : depthMipSRVs[mip - 1].get() };
@@ -423,24 +538,20 @@ namespace cs::features
 			mipH = std::max(1u, mipH / 2);
 		}
 
-		// Projection source is not exposed yet; use the historical ~60-degree fallback.
-		const float vfov = std::tan(0.5f * 1.05f);
-		const float aspect = float(W) / float(std::max(H, 1u));
-
 		SSGI_CB sb{};
 		sb.FrameDim[0] = W; sb.FrameDim[1] = H;
 		sb.AODim[0] = aoWidth; sb.AODim[1] = aoHeight;
-		sb.NearClip = 0.1f;
-		sb.FarClip  = 100000.0f;
+		sb.NearClip = projection.nearClip;
+		sb.FarClip  = projection.farClip;
 		sb.SliceCount = static_cast<uint32_t>(settings.sliceCount);
 		sb.StepCount  = static_cast<uint32_t>(settings.stepCount);
 		sb.AORadius   = settings.aoRadius;
 		sb.AOPower    = settings.aoPower;
 		sb.Thickness  = settings.thickness;
-		sb.NDCToViewMul[0] = vfov * aspect;
-		sb.NDCToViewMul[1] = vfov;
-		sb.NDCToViewAdd[0] = 0.0f;
-		sb.NDCToViewAdd[1] = 0.0f;
+		sb.NDCToViewMul[0] = projection.ndcToViewMul[0];
+		sb.NDCToViewMul[1] = projection.ndcToViewMul[1];
+		sb.NDCToViewAdd[0] = projection.ndcToViewAdd[0];
+		sb.NDCToViewAdd[1] = projection.ndcToViewAdd[1];
 		aoCB->Update(sb);
 
 		context->CSSetShader(aocs, nullptr, 0);
