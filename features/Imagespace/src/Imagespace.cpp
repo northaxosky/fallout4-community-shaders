@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <imgui.h>
@@ -123,6 +124,9 @@ namespace cs::features
 		uint32_t SrcIsLDR;
 		uint32_t Pad0;
 		uint32_t DstDimensions[2];
+		uint32_t TailW;
+		uint32_t TailH;
+		uint32_t Pad1[2];
 	};
 	static_assert(sizeof(PyramidCB) % 16 == 0);
 
@@ -148,7 +152,8 @@ namespace cs::features
 		uint32_t SrcDimensions[2];
 		uint32_t DstDimensions[2];
 		uint32_t IsFirstDownsample;
-		uint32_t _Pad[3];
+		float    MipWeight;
+		uint32_t _Pad[2];
 	};
 	static_assert(sizeof(BloomCB) % 16 == 0);
 
@@ -165,7 +170,10 @@ namespace cs::features
 		uint32_t QualityLevel;
 		float    NearPlane;
 		float    FarPlane;
-		float    Pad0;
+		float    BokehIntensity;
+
+		float    AnamorphRatio;
+		float    Pad0[3];
 	};
 	static_assert(sizeof(DofCB) % 16 == 0);
 
@@ -279,6 +287,11 @@ namespace cs::features
 		settings.bloomThreshold    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomThreshold", settings.bloomThreshold)), 0.0f, 2.0f);
 		settings.bloomIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomIntensity", settings.bloomIntensity)), 0.0f, 0.3f);
 		settings.bloomMips         = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iBloomMips",      settings.bloomMips)), 3, 6);
+		for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
+			char key[32];
+			std::snprintf(key, sizeof(key), "fBloomMipWeight%u", static_cast<unsigned>(i));
+			settings.bloomMipWeights[i] = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", key, settings.bloomMipWeights[i])), 0.0f, 4.0f);
+		}
 
 		settings.vignetteEnable    = ini.GetBoolValue("Settings",   "bVignetteEnable",     settings.vignetteEnable);
 		settings.vignetteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fVignetteIntensity", settings.vignetteIntensity)), 0.0f, 1.0f);
@@ -303,6 +316,8 @@ namespace cs::features
 		settings.focusRange        = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusRange",     settings.focusRange)),    10.0f, 10000.0f);
 		settings.dofQuality        = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iDOFQuality",     settings.dofQuality)),     0, 2);
 		settings.cocLimitFactor    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCoCLimitFactor", settings.cocLimitFactor)), 0.005f, 0.10f);
+		settings.bokehIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBokehIntensity", settings.bokehIntensity)), 0.0f, 1.0f);
+		settings.anamorphRatio     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAnamorphRatio",  settings.anamorphRatio)),  0.25f, 4.0f);
 
 		// Smoke-harness markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
@@ -394,6 +409,11 @@ namespace cs::features
 		ini.SetDoubleValue("Settings", "fBloomThreshold",     settings.bloomThreshold);
 		ini.SetDoubleValue("Settings", "fBloomIntensity",     settings.bloomIntensity);
 		ini.SetLongValue("Settings",   "iBloomMips",          settings.bloomMips);
+		for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
+			char key[32];
+			std::snprintf(key, sizeof(key), "fBloomMipWeight%u", static_cast<unsigned>(i));
+			ini.SetDoubleValue("Settings", key, settings.bloomMipWeights[i]);
+		}
 		ini.SetBoolValue("Settings",   "bVignetteEnable",     settings.vignetteEnable);
 		ini.SetDoubleValue("Settings", "fVignetteIntensity",  settings.vignetteIntensity);
 		ini.SetBoolValue("Settings",   "bCAEnable",           settings.caEnable);
@@ -415,6 +435,8 @@ namespace cs::features
 		ini.SetDoubleValue("Settings", "fFocusRange",         settings.focusRange);
 		ini.SetLongValue("Settings",   "iDOFQuality",         settings.dofQuality);
 		ini.SetDoubleValue("Settings", "fCoCLimitFactor",     settings.cocLimitFactor);
+		ini.SetDoubleValue("Settings", "fBokehIntensity",     settings.bokehIntensity);
+		ini.SetDoubleValue("Settings", "fAnamorphRatio",      settings.anamorphRatio);
 		ini.SaveFile(kIniPath);
 	}
 
@@ -859,9 +881,11 @@ namespace cs::features
 		cb.HalfDimensions[1] = dofHeight;
 		cb.FullDimensions[0] = a_width;
 		cb.FullDimensions[1] = a_height;
-		cb.QualityLevel = static_cast<uint32_t>(std::clamp(settings.dofQuality, 0, 2));
-		cb.NearPlane    = nearP;
-		cb.FarPlane     = farP;
+		cb.QualityLevel   = static_cast<uint32_t>(std::clamp(settings.dofQuality, 0, 2));
+		cb.NearPlane      = nearP;
+		cb.FarPlane       = farP;
+		cb.BokehIntensity = settings.bokehIntensity;
+		cb.AnamorphRatio  = settings.anamorphRatio;
 		dofCB->Update(cb);
 
 		ID3D11Buffer* dofCBs[1] = { dofCB->CB() };
@@ -1087,14 +1111,15 @@ namespace cs::features
 		if (wantBloom && !EnsureBloomResources(W, H, settings.bloomMips))
 			return;
 
-		auto* lumCS    = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\LumPyramidGenCS.hlsl", lumPyramidCS, "LumPyramidGenCS") : nullptr;
-		auto* expoCS   = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\ExposureAdaptCS.hlsl",  exposureCS,   "ExposureAdaptCS") : nullptr;
-		auto* threshCS = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomThresholdCS.hlsl", bloomThresholdCS, "BloomThresholdCS") : nullptr;
+		auto* lumCS     = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\LumPyramidGenCS.hlsl",  lumPyramidCS,     "LumPyramidGenCS") : nullptr;
+		auto* lumTailCS = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\LumPyramidTailCS.hlsl", lumPyramidTailCS, "LumPyramidTailCS") : nullptr;
+		auto* expoCS    = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\ExposureAdaptCS.hlsl",   exposureCS,       "ExposureAdaptCS") : nullptr;
+		auto* threshCS  = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomThresholdCS.hlsl", bloomThresholdCS, "BloomThresholdCS") : nullptr;
 		auto* downCS   = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomDownCS.hlsl",      bloomDownCS,      "BloomDownCS") : nullptr;
 		auto* upCS     = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomUpCS.hlsl",        bloomUpCS,        "BloomUpCS") : nullptr;
 		auto* compCS   = wantComposite ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\CompositeCS.hlsl",     compositeCS,      "CompositeCS") : nullptr;
 
-		if (wantAdaptive && (!lumCS || !expoCS)) return;
+		if (wantAdaptive && (!lumCS || !lumTailCS || !expoCS)) return;
 		if (wantBloom && (!threshCS || !downCS || !upCS)) return;
 		if (wantComposite && !compCS) return;
 
@@ -1104,13 +1129,17 @@ namespace cs::features
 		// === 1. Luminance pyramid ===
 		// Mip 0: kFrameBuffer -> half-res log-luma; mip k>0: 2x2 average of previous pyramid mip.
 		if (wantAdaptive) {
+			auto mipWidth = [W](uint32_t a_mip) { return std::max(1u, W >> (a_mip + 1)); };
+			auto mipHeight = [H](uint32_t a_mip) { return std::max(1u, H >> (a_mip + 1)); };
+			uint32_t tailSrcMip = pyramidMipCount - 1;
+
 			context->CSSetShader(lumCS, nullptr, 0);
 			ID3D11Buffer* pyrCBs[1] = { pyramidCB->CB() };
 			context->CSSetConstantBuffers(0, 1, pyrCBs);
 
 			for (uint32_t mip = 0; mip < pyramidMipCount; ++mip) {
-				const uint32_t dstW = std::max(1u, W >> (mip + 1));
-				const uint32_t dstH = std::max(1u, H >> (mip + 1));
+				const uint32_t dstW = mipWidth(mip);
+				const uint32_t dstH = mipHeight(mip);
 
 				PyramidCB cb{};
 				cb.SrcIsLDR  = (mip == 0) ? 1u : 0u;
@@ -1134,10 +1163,31 @@ namespace cs::features
 				ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
 				context->CSSetShaderResources(0, 2, nullSRVs);
 
-				if (dstW <= 1 && dstH <= 1) {
-					pyramidMipCount = mip + 1;
+				if (dstW <= 8 && dstH <= 8) {
+					tailSrcMip = mip;
 					break;
 				}
+			}
+
+			if (tailSrcMip + 1 < pyramidMipCount) {
+				PyramidCB cb{};
+				cb.DstDimensions[0] = 1;
+				cb.DstDimensions[1] = 1;
+				cb.TailW = mipWidth(tailSrcMip);
+				cb.TailH = mipHeight(tailSrcMip);
+				pyramidCB->Update(cb);
+
+				ID3D11ShaderResourceView* srvs[1] = { lumPyramidMipSRVs[tailSrcMip].get() };
+				context->CSSetShaderResources(0, 1, srvs);
+				ID3D11UnorderedAccessView* uavs[1] = { lumPyramidUAVs[pyramidMipCount - 1].get() };
+				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+				context->CSSetShader(lumTailCS, nullptr, 0);
+				context->Dispatch(1, 1, 1);
+
+				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+				ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
+				context->CSSetShaderResources(0, 1, nullSRVs);
 			}
 		}
 
@@ -1208,6 +1258,7 @@ namespace cs::features
 				bcb.DstDimensions[0] = bloomChain[k + 1]->desc.Width;
 				bcb.DstDimensions[1] = bloomChain[k + 1]->desc.Height;
 				bcb.IsFirstDownsample = (k == 0) ? 1u : 0u;
+				bcb.MipWeight = 1.0f;
 				bloomCB->Update(bcb);
 
 				ID3D11ShaderResourceView* srvs[1] = { bloomChain[k]->srv.get() };
@@ -1227,6 +1278,11 @@ namespace cs::features
 
 		// === 5. Bloom upsample (additive accumulate, ping-pongs into bloomScratch) ===
 		if (wantBloom) {
+			float mipWeightSum = 0.0f;
+			for (int k = 0; k < settings.bloomMips - 1; ++k)
+				mipWeightSum += settings.bloomMipWeights[k];
+			const float mipWeightScale = (mipWeightSum > 1e-5f) ? (1.0f / mipWeightSum) : 0.0f;
+
 			context->CSSetShader(upCS, nullptr, 0);
 			for (int k = settings.bloomMips - 2; k >= 0; --k) {
 				BloomCB bcb{};
@@ -1234,6 +1290,7 @@ namespace cs::features
 				bcb.SrcDimensions[1] = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->desc.Height : bloomScratch[k + 1]->desc.Height;
 				bcb.DstDimensions[0] = bloomChain[k]->desc.Width;
 				bcb.DstDimensions[1] = bloomChain[k]->desc.Height;
+				bcb.MipWeight = settings.bloomMipWeights[k] * mipWeightScale;
 				bloomCB->Update(bcb);
 
 				ID3D11ShaderResourceView* srcSRV = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->srv.get() : bloomScratch[k + 1]->srv.get();
@@ -1451,6 +1508,19 @@ namespace cs::features
 		markCustomIfEdited();
 		ImGui::SliderInt("Mips", &settings.bloomMips, 3, 6);
 		commitDirty();
+		if (settings.bloomEnable) {
+			const bool mipWeightsOpen = ImGui::TreeNode("Bloom mip weights");
+			ImGui::SetItemTooltip("Per-mip multiplier before accumulation. Boost mip 0-1 for sharper bloom, mip 4-5 for wider glow.");
+			if (mipWeightsOpen) {
+				for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
+					char label[16];
+					std::snprintf(label, sizeof(label), "Mip %u", static_cast<unsigned>(i));
+					ImGui::SliderFloat(label, &settings.bloomMipWeights[i], 0.0f, 4.0f, "%.2f");
+					commitDirty();
+				}
+				ImGui::TreePop();
+			}
+		}
 		ImGui::EndDisabled();
 
 		ImGui::Separator();
@@ -1523,6 +1593,12 @@ namespace cs::features
 		}
 		ImGui::SliderFloat("CoC limit (% of frame height)", &settings.cocLimitFactor, 0.005f, 0.10f, "%.3f");
 		ImGui::SetItemTooltip("Caps maximum blur radius. 0.04 = up to 4% of frame height.");
+		commitDirty();
+		ImGui::SliderFloat("Bokeh highlight boost", &settings.bokehIntensity, 0.0f, 1.0f, "%.2f");
+		ImGui::SetItemTooltip("Quadratic pop on bright samples within the bokeh disc; citylights / fires / explosions pop.");
+		commitDirty();
+		ImGui::SliderFloat("Anamorphic ratio", &settings.anamorphRatio, 0.25f, 4.0f, "%.2f");
+		ImGui::SetItemTooltip("Horizontal stretch on the bokeh disc. 1.0 = circular; <1 squashes; >1 stretches horizontally.");
 		commitDirty();
 		ImGui::EndDisabled();
 

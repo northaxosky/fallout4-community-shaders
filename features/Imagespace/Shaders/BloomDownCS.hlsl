@@ -1,6 +1,5 @@
-// Kawase 4-tap downsample (Masaki Kawase, GDC 2003 "Frame Buffer Postprocessing Effects").
-// First downsample (mip 0 -> 1) uses Karis-average luminance weighting to suppress fireflies
-// from HDR specular hotspots (Karis, SIGGRAPH 2013 "Real Shading in Unreal Engine 4").
+// COD-style bloom downsample (Brian Karis, SIGGRAPH 2014 Call of Duty: Advanced Warfare).
+// First downsample (mip 0 -> 1) applies Karis weighting per bilinear quad to suppress fireflies.
 
 Texture2D<float4>     SrcMip : register(t0);
 SamplerState          LinearClampSampler : register(s0);
@@ -11,7 +10,22 @@ cbuffer BloomCB : register(b0)
     uint2 SrcDimensions;
     uint2 DstDimensions;
     uint  IsFirstDownsample;
+    float MipWeight;
+    uint2 _Pad;
 };
+
+float KarisWeight(float3 color)
+{
+    return rcp(1.0 + max(color.r, max(color.g, color.b)));
+}
+
+void AccumulateQuad(inout float3 sum, inout float weightSum, float2 uv, float kernelWeight)
+{
+    const float3 c = SrcMip.SampleLevel(LinearClampSampler, uv, 0).rgb;
+    const float w = (IsFirstDownsample != 0) ? kernelWeight * KarisWeight(c) : kernelWeight;
+    sum += c * w;
+    weightSum += w;
+}
 
 [numthreads(8, 8, 1)]
 void main(uint3 dtid : SV_DispatchThreadID)
@@ -20,28 +34,25 @@ void main(uint3 dtid : SV_DispatchThreadID)
     if (px.x >= DstDimensions.x || px.y >= DstDimensions.y)
         return;
 
-    // Sample at four offset half-pixels in source space (Kawase distance = 0.5 mip step).
-    const float2 srcSize  = float2(SrcDimensions);
-    const float2 dstStep  = 1.0 / float2(DstDimensions);
-    const float2 uv       = (float2(px) + 0.5) * dstStep;
-    const float2 step     = 0.5 / srcSize;
+    const float2 uv    = (float2(px) + 0.5) / float2(DstDimensions);
+    const float2 texel = 1.0 / float2(SrcDimensions);
 
-    float3 c0 = SrcMip.SampleLevel(LinearClampSampler, uv + float2(-step.x, -step.y), 0).rgb;
-    float3 c1 = SrcMip.SampleLevel(LinearClampSampler, uv + float2( step.x, -step.y), 0).rgb;
-    float3 c2 = SrcMip.SampleLevel(LinearClampSampler, uv + float2(-step.x,  step.y), 0).rgb;
-    float3 c3 = SrcMip.SampleLevel(LinearClampSampler, uv + float2( step.x,  step.y), 0).rgb;
+    float3 sum = 0.0;
+    float weightSum = 0.0;
 
-    float3 result;
-    if (IsFirstDownsample != 0) {
-        // Karis-average: weight each tap by 1 / (1 + max(rgb)) so bright outliers contribute less.
-        const float w0 = rcp(1.0 + max(c0.r, max(c0.g, c0.b)));
-        const float w1 = rcp(1.0 + max(c1.r, max(c1.g, c1.b)));
-        const float w2 = rcp(1.0 + max(c2.r, max(c2.g, c2.b)));
-        const float w3 = rcp(1.0 + max(c3.r, max(c3.g, c3.b)));
-        result = (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / max(w0 + w1 + w2 + w3, 1e-5);
-    } else {
-        result = 0.25 * (c0 + c1 + c2 + c3);
-    }
+    AccumulateQuad(sum, weightSum, uv, 4.0 / 16.0);
 
-    DstMip[px] = float4(result, 1.0);
+    const float2 inner = 2.0 * texel;
+    AccumulateQuad(sum, weightSum, uv + float2(-inner.x, -inner.y), 2.0 / 16.0);
+    AccumulateQuad(sum, weightSum, uv + float2( inner.x, -inner.y), 2.0 / 16.0);
+    AccumulateQuad(sum, weightSum, uv + float2(-inner.x,  inner.y), 2.0 / 16.0);
+    AccumulateQuad(sum, weightSum, uv + float2( inner.x,  inner.y), 2.0 / 16.0);
+
+    const float2 outer = 4.0 * texel;
+    AccumulateQuad(sum, weightSum, uv + float2(-outer.x, 0.0), 1.0 / 16.0);
+    AccumulateQuad(sum, weightSum, uv + float2( outer.x, 0.0), 1.0 / 16.0);
+    AccumulateQuad(sum, weightSum, uv + float2(0.0, -outer.y), 1.0 / 16.0);
+    AccumulateQuad(sum, weightSum, uv + float2(0.0,  outer.y), 1.0 / 16.0);
+
+    DstMip[px] = float4(sum * rcp(max(weightSum, 1e-5)), 1.0);
 }

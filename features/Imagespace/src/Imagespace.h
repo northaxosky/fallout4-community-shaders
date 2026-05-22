@@ -59,6 +59,7 @@ namespace cs::features
 			float       bloomThreshold     = 0.85f;
 			float       bloomIntensity     = 0.05f;
 			int         bloomMips          = 5;
+			float       bloomMipWeights[6] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
 			// Lens.
 			bool        vignetteEnable     = true;
@@ -86,6 +87,8 @@ namespace cs::features
 			float       focusRange         = 200.0f;
 			int         dofQuality         = 1;
 			float       cocLimitFactor     = 0.04f;
+			float       bokehIntensity     = 0.0f;
+			float       anamorphRatio      = 1.0f;
 		};
 
 		Settings settings;
@@ -122,7 +125,8 @@ namespace cs::features
 		std::vector<winrt::com_ptr<ID3D11ShaderResourceView>> lumPyramidMipSRVs;
 		std::vector<winrt::com_ptr<ID3D11UnorderedAccessView>> lumPyramidUAVs;
 		std::unique_ptr<imagespace::ConstantBuffer> pyramidCB;
-		ID3D11ComputeShader*                        lumPyramidCS = nullptr;
+		ID3D11ComputeShader*                        lumPyramidCS     = nullptr;
+		ID3D11ComputeShader*                        lumPyramidTailCS = nullptr;
 		std::array<std::unique_ptr<imagespace::Texture2D>, 2> expoPingPong;
 		std::unique_ptr<imagespace::ConstantBuffer> exposureCB;
 		ID3D11ComputeShader*                        exposureCS = nullptr;

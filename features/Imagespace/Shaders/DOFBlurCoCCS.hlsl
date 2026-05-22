@@ -18,7 +18,9 @@ cbuffer DofCB : register(b0)
     uint   QualityLevel;
     float  NearPlane;
     float  FarPlane;
-    float  Pad0;
+    float  BokehIntensity;
+    float  AnamorphRatio;
+    float3 Pad0;
 };
 
 // 24-point Halton-disc sample pattern in unit-radius polar coords.
@@ -57,12 +59,15 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const uint sampleCount = (QualityLevel == 0u) ? 12u : (QualityLevel == 1u ? 24u : 24u);
     float3 nearAccum = 0.0;
     float3 farAccum = 0.0;
+    float3 nearMax = 0.0;
+    float3 farMax = 0.0;
     float nearWeightSum = 0.0;
     float farWeightSum = 0.0;
+    const float2 scale = float2(AnamorphRatio, 1.0) * radiusPx;
 
     [unroll(24)]
     for (uint i = 0; i < sampleCount; ++i) {
-        const float2 offset = kDiscSamples24[i] * radiusPx;
+        const float2 offset = kDiscSamples24[i] * scale;
         int2 px = int2(round(float2(dtid.xy) + offset));
         px = clamp(px, int2(0, 0), int2(HalfDimensions) - 1);
 
@@ -73,12 +78,27 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
         nearAccum += sampleColor * nearWeight;
         farAccum += sampleColor * farWeight;
+        nearMax = max(nearMax, sampleColor * nearWeight);
+        farMax = max(farMax, sampleColor * farWeight);
         nearWeightSum += nearWeight;
         farWeightSum += farWeight;
     }
 
     const float3 nearColor = (nearWeightSum > 1e-4) ? (nearAccum / nearWeightSum) : centerColor;
     const float3 farColor = (farWeightSum > 1e-4) ? (farAccum / farWeightSum) : centerColor;
-    NearColorOut[dtid.xy] = float4(nearColor, 1.0);
-    FarColorOut[dtid.xy] = float4(farColor, 1.0);
+
+    if (BokehIntensity > 0.0) {
+        const float3 lumaWeights = float3(0.299, 0.587, 0.114);
+        const float nearMaxLuma = dot(nearMax, lumaWeights);
+        const float nearAvgLuma = dot(nearColor, lumaWeights);
+        const float nearW = max(0.0, nearMaxLuma - nearAvgLuma) * BokehIntensity * 2.0;
+        const float farMaxLuma = dot(farMax, lumaWeights);
+        const float farAvgLuma = dot(farColor, lumaWeights);
+        const float farW = max(0.0, farMaxLuma - farAvgLuma) * BokehIntensity * 2.0;
+        NearColorOut[dtid.xy] = float4(nearColor + nearMax * saturate(nearW * nearW * radiusPx), 1.0);
+        FarColorOut[dtid.xy] = float4(farColor + farMax * saturate(farW * farW * radiusPx), 1.0);
+    } else {
+        NearColorOut[dtid.xy] = float4(nearColor, 1.0);
+        FarColorOut[dtid.xy] = float4(farColor, 1.0);
+    }
 }
