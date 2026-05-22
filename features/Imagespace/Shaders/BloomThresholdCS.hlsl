@@ -26,9 +26,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
         InputColor.Load(int3(src + int2(1, 1), 0)).rgb
     );
 
-    c = pow(saturate(c), 2.2);
-
-    // Soft-knee threshold (Karis). brightness = max(rgb).
+    // Source is linear HDR (kMain = R11G11B10F); no gamma expansion.
     const float brightness = max(c.r, max(c.g, c.b));
     const float knee = max(SoftKnee, 1e-5);
     const float soft = clamp(brightness - Threshold + knee, 0.0, 2.0 * knee);
