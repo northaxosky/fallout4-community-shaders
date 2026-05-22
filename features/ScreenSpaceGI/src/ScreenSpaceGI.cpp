@@ -151,8 +151,30 @@ namespace cs::features
 		if (!state)
 			return data;
 
-		// Fallout4RE exports/cs-camera-projection-data-path.json @ cc44b0e.
-		auto* camera = state->cameraState.referenceCamera;
+		// Fallout4RE exports/cs-camera-projection-data-path.json @ c8246c4 (schema v2).
+		// Preferred lookup: cameraDataCache entry where referenceCamera matches the DrawWorld current-camera
+		// global and useJitter is true. Fallback chain: the global itself; then state->cameraState; then any
+		// jittered cache entry (legacy safety net when the current-camera global is not yet populated).
+		const RE::NiCamera* current = nullptr;
+		{
+			static const REL::Relocation<RE::NiCamera**> kCurrentCameraGlobal{ REL::ID({ 1444212, 2712877, 2712877 }) };
+			if (auto** slot = kCurrentCameraGlobal.get(); slot)
+				current = *slot;
+		}
+
+		const RE::NiCamera* camera = nullptr;
+		if (current) {
+			for (const auto& entry : state->cameraDataCache) {
+				if (entry.referenceCamera == current && entry.useJitter) {
+					camera = entry.referenceCamera;
+					break;
+				}
+			}
+			if (!camera)
+				camera = current;
+		}
+		if (!camera)
+			camera = state->cameraState.referenceCamera;
 		if (!camera) {
 			for (const auto& entry : state->cameraDataCache) {
 				if (entry.referenceCamera && entry.useJitter) {
