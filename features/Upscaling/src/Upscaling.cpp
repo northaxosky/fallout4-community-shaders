@@ -1128,12 +1128,9 @@ ConstantBuffer* Upscaling::GetUpscalingCB()
 
 void Upscaling::UpdateAndBindUpscalingCB(ID3D11DeviceContext* a_context, float2 a_screenSize, float2 a_renderSize)
 {
-	static auto cameraNear = (float*)REL::ID({ 57985, 2712882, 2712882 }).address();
-	static auto cameraFar = (float*)REL::ID({ 958877, 2712883, 2712883 }).address();
-
 	float4 cameraData{};
-	cameraData.x = *cameraFar;
-	cameraData.y = *cameraNear;
+	cameraData.x = cs::engine::GetCameraFar();
+	cameraData.y = cs::engine::GetCameraNear();
 	cameraData.z = cameraData.x - cameraData.y;
 	cameraData.w = cameraData.x * cameraData.y;
 

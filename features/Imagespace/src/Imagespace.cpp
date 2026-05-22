@@ -708,8 +708,8 @@ namespace cs::features
 		cs::ComputeScope scope(context);
 
 		// Camera near/far for linearization.
-		const float nearP = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
-		const float farP  = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+		const float nearP = cs::engine::GetCameraNear();
+		const float farP  = cs::engine::GetCameraFar();
 
 		// Thin-lens CoC in pixel units; positive = background, negative = foreground. Pre-bake scale/bias so per-pixel coc = CocScale*z + CocBias.
 		const float cocLimitPx = settings.cocLimitFactor * static_cast<float>(dofHeight);

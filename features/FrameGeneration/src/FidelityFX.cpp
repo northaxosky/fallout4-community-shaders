@@ -140,8 +140,8 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 
 		dispatchParameters.frameTimeDelta = deltaTime * 1000.f;
 
-		dispatchParameters.cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
-		dispatchParameters.cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+		dispatchParameters.cameraNear = cs::engine::GetCameraNear();
+		dispatchParameters.cameraFar = cs::engine::GetCameraFar();
 
 		dispatchParameters.cameraFovAngleVertical = 1.0f;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;

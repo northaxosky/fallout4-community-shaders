@@ -307,8 +307,8 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		jitter.x = -gameViewport->offsetX * screenSize.x / 2.0f;
 		jitter.y = gameViewport->offsetY * screenSize.y / 2.0f;
 
-		float cameraNear = *(float*)REL::ID({ 57985, 2712882, 2712882 }).address();
-		float cameraFar = *(float*)REL::ID({ 958877, 2712883, 2712883 }).address();
+		float cameraNear = cs::engine::GetCameraNear();
+		float cameraFar = cs::engine::GetCameraFar();
 
 		auto& camView = gameViewport->cameraState.camViewData;
 		auto& camState = gameViewport->cameraState;

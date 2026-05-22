@@ -15,6 +15,23 @@ namespace cs::engine
 		return singleton.get();
 	}
 
+	// DrawWorld camera near/far globals, per Fallout4RE exports/cs-camera-near-far-globals.json @ 2b79e7c.
+	// Written by DrawWorld::SetNearDistance / SetFarDistance; read at frustum-refresh sites within the same
+	// DrawWorld frame. For per-camera live frustum values prefer NiCamera::viewFrustum.near/far (see
+	// cs-camera-projection-data-path.json); use the globals only for code that mirrors the engine's own
+	// per-frame setup (DLSS/FSR3/Imagespace DOF linearization).
+	[[nodiscard]] inline float GetCameraNear()
+	{
+		static REL::Relocation<float*> near_{ REL::ID({ 57985, 2712882, 2712882 }) };
+		return *near_.get();
+	}
+
+	[[nodiscard]] inline float GetCameraFar()
+	{
+		static REL::Relocation<float*> far_{ REL::ID({ 958877, 2712883, 2712883 }) };
+		return *far_.get();
+	}
+
 	// RenderTargetManager dynamic-resolution field offsets, per Fallout4RE
 	// exports/cs-rtm-dynamic-res-offsets.json @ a124812. OG has no 0x30 pad at 0xDC4; NG/AE do.
 	// CommonLibF4 compiles a unified padded layout (widthRatio=0xFB8, heightRatio=0xFBC,
