@@ -17,6 +17,7 @@ namespace cs::features
 		static ShaderReplacement* GetSingleton();
 
 		std::string_view GetName() const override { return "ShaderReplacement"; }
+		std::vector<std::string_view> GetDependencies() const override { return { "ShaderCatalog" }; }
 
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;

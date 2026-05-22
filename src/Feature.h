@@ -14,6 +14,7 @@ namespace cs
 		virtual ~Feature() = default;
 
 		virtual std::string_view GetName() const = 0;
+		virtual std::vector<std::string_view> GetDependencies() const { return {}; }
 
 		virtual void Load() {}
 		virtual void OnDataLoaded() {}

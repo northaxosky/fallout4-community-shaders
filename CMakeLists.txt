@@ -75,6 +75,7 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 )
 
 # Features attach their own sources to FO4CommunityShaders via target_sources.
+# Lifecycle dependencies are declared through cs::Feature::GetDependencies().
 register_feature(MotionVectorFixes)
 register_feature(Upscaling)
 register_feature(FrameGeneration)
@@ -84,6 +85,4 @@ register_feature(ScreenSpaceShadows)
 register_feature(ScreenSpaceGI)
 register_feature(Imagespace)
 register_feature(ShaderCatalog)
-# ShaderReplacement MUST register AFTER ShaderCatalog so its OnD3D11Ready runs after the catalog
-# installs its slot-15 detour; the chain is engine -> ShaderReplacement -> ShaderCatalog -> original.
 register_feature(ShaderReplacement)
