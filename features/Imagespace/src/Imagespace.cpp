@@ -1027,7 +1027,10 @@ namespace cs::features
 		if (wantAdaptive) {
 			ExposureCB ecb{};
 			auto* timer = RE::BSTimer::GetSingleton();
-			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.5f) : (1.0f / 60.0f);
+			// Clamp dt to [1/240, 0.1]s. Upper bound prevents a single-frame "blinding flash" on
+			// alt-tab / load-screen returns: with TauUp=0.5s, alpha goes from 0.63 (at dt=0.5s) to
+			// 0.18 (at dt=0.1s). Lower bound prevents division-by-zero at extreme high FPS.
+			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.1f) : (1.0f / 60.0f);
 			ecb.TauUp     = settings.adaptationSpeedUp;
 			ecb.TauDown   = settings.adaptationSpeedDown;
 			ecb.TailMipIdx = pyramidMipCount - 1;
