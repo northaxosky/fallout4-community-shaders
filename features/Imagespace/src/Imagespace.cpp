@@ -83,9 +83,9 @@ namespace cs::features
 	struct ExposureCB
 	{
 		float    DeltaTime;
-		float    Tau;
+		float    TauUp;
+		float    TauDown;
 		uint32_t TailMipIdx;
-		uint32_t Pad0;
 	};
 	static_assert(sizeof(ExposureCB) % 16 == 0);
 
@@ -213,7 +213,16 @@ namespace cs::features
 		settings.lutStrength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLUTStrength", settings.lutStrength)), 0.0f, 1.0f);
 
 		settings.adaptiveExposure  = ini.GetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
-		settings.adaptationSpeed   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", settings.adaptationSpeed)), 0.1f, 5.0f);
+		{
+			// Back-compat: if neither new asymmetric key is present, fall back to the old
+			// symmetric `fAdaptationSpeed` (sets both up and down to that value). Otherwise read
+			// the new keys independently, with the old key as the per-key default.
+			const float legacy = static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", -1.0));
+			const float defUp   = (legacy > 0.0f) ? legacy : settings.adaptationSpeedUp;
+			const float defDown = (legacy > 0.0f) ? legacy : settings.adaptationSpeedDown;
+			settings.adaptationSpeedUp   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeedUp",   defUp)),   0.05f, 10.0f);
+			settings.adaptationSpeedDown = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeedDown", defDown)), 0.05f, 30.0f);
+		}
 		settings.exposureKey       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureKey", settings.exposureKey)), 0.05f, 0.5f);
 		settings.exposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.exposureMin)), 0.005f, 0.5f);
 		settings.exposureMax       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMax", settings.exposureMax)), 1.0f, 16.0f);
@@ -267,7 +276,8 @@ namespace cs::features
 			settings.lutEnable         = lutP && (lut_c == '1');
 			settings.lutStrength       = 1.0f;
 			settings.adaptiveExposure  = adaptP && (adapt_c == '1');
-			settings.adaptationSpeed   = 1.0f;
+			settings.adaptationSpeedUp   = 0.5f;
+			settings.adaptationSpeedDown = 2.0f;
 			settings.exposureKey       = 0.18f;
 			settings.bloomEnable       = bloomP && (bloom_c == '1');
 			settings.bloomIntensity    = settings.bloomEnable ? 0.15f : 0.05f;
@@ -325,7 +335,8 @@ namespace cs::features
 		ini.SetValue("Settings",       "sLUTPath",            settings.lutPath.c_str());
 		ini.SetDoubleValue("Settings", "fLUTStrength",        settings.lutStrength);
 		ini.SetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
-		ini.SetDoubleValue("Settings", "fAdaptationSpeed",    settings.adaptationSpeed);
+		ini.SetDoubleValue("Settings", "fAdaptationSpeedUp",   settings.adaptationSpeedUp);
+		ini.SetDoubleValue("Settings", "fAdaptationSpeedDown", settings.adaptationSpeedDown);
 		ini.SetDoubleValue("Settings", "fExposureKey",        settings.exposureKey);
 		ini.SetDoubleValue("Settings", "fExposureMin",        settings.exposureMin);
 		ini.SetDoubleValue("Settings", "fExposureMax",        settings.exposureMax);
@@ -1015,7 +1026,8 @@ namespace cs::features
 			ExposureCB ecb{};
 			auto* timer = RE::BSTimer::GetSingleton();
 			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.5f) : (1.0f / 60.0f);
-			ecb.Tau       = settings.adaptationSpeed;
+			ecb.TauUp     = settings.adaptationSpeedUp;
+			ecb.TauDown   = settings.adaptationSpeedDown;
 			ecb.TailMipIdx = pyramidMipCount - 1;
 			exposureCB->Update(ecb);
 
@@ -1283,7 +1295,11 @@ namespace cs::features
 		ImGui::Text("Adaptive exposure");
 		dirty |= ImGui::Checkbox("Adaptive enable", &settings.adaptiveExposure);
 		ImGui::BeginDisabled(!settings.adaptiveExposure);
-		ImGui::SliderFloat("Adaptation speed (s)", &settings.adaptationSpeed, 0.1f, 5.0f, "%.2f");
+		ImGui::SliderFloat("Brighten time (s)", &settings.adaptationSpeedUp, 0.05f, 5.0f, "%.2f");
+		ImGui::SetItemTooltip("EMA time constant when scene gets brighter. Shorter = faster snap (prevents blinding flash on cell exit).");
+		commitDirty();
+		ImGui::SliderFloat("Darken time (s)", &settings.adaptationSpeedDown, 0.1f, 10.0f, "%.2f");
+		ImGui::SetItemTooltip("EMA time constant when scene gets darker. Longer = slower ease (more natural in dim interiors).");
 		commitDirty();
 		ImGui::SliderFloat("Key (mid-grey)", &settings.exposureKey, 0.05f, 0.5f, "%.3f");
 		ImGui::SetItemTooltip("Target average luminance the EMA aims for. Lower = darker midtones, higher = brighter midtones.");

@@ -8,9 +8,9 @@ RWTexture2D<float>  ExpoNext        : register(u0);
 cbuffer ExposureCB : register(b0)
 {
     float DeltaTime;       // seconds since last frame
-    float Tau;             // EMA time constant in seconds (fAdaptationSpeed)
+    float TauUp;           // EMA time constant when adapting to a brighter scene (fAdaptationSpeedUp)
+    float TauDown;         // EMA time constant when adapting to a darker scene  (fAdaptationSpeedDown)
     uint  TailMipIdx;
-    uint  _Pad0;
 };
 
 [numthreads(1, 1, 1)]
@@ -20,9 +20,11 @@ void main()
     const float curLuma = exp2(logLuma);
     const float prev    = ExpoPrev.Load(int3(0, 0, 0));
 
-    // EMA: alpha = 1 - exp(-dt/tau). When tau is small relative to dt, alpha approaches 1
-    // (instant snap); when tau >> dt, alpha approaches 0 (slow blend).
-    const float alpha = 1.0 - exp(-DeltaTime / max(Tau, 1e-3));
+    // Asymmetric EMA. Human vision adapts faster to bright than to dark, so TauUp is short
+    // (fast snap when scene gets brighter; prevents blinding flash on cell exit) and TauDown
+    // is long (slow easing when scene gets darker).
+    const float tau   = (curLuma > prev) ? TauUp : TauDown;
+    const float alpha = 1.0 - exp(-DeltaTime / max(tau, 1e-3));
     const float next  = lerp(prev, curLuma, alpha);
 
     ExpoNext[uint2(0, 0)] = next;

@@ -47,7 +47,8 @@ namespace cs::features
 
 			// Adaptive exposure.
 			bool        adaptiveExposure   = true;
-			float       adaptationSpeed    = 1.0f;
+			float       adaptationSpeedUp  = 0.5f;
+			float       adaptationSpeedDown = 2.0f;
 			float       exposureKey        = 0.18f;
 			float       exposureMin        = 0.05f;
 			float       exposureMax        = 4.0f;
