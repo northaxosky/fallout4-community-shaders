@@ -1393,6 +1393,7 @@ void Upscaling::PatchSSRShader()
 	void Upscaling::Load()
 	{
 		L->info("ENB state: {}", cs::env::IsENBLoaded() ? "loaded (native AA only)" : "not loaded (full pipeline active)");
+		cs::Streamline::GetSingleton()->RequestFeature(sl::kFeatureDLSS);
 
 		L->info("Installing DX11 hooks...");
 		DX11Hooks::Install();
@@ -1410,7 +1411,6 @@ void Upscaling::PatchSSRShader()
 			AutoRegister()
 			{
 				cs::FeatureManager::Get().Register(Upscaling::GetSingleton());
-				cs::Streamline::GetSingleton()->RequestFeature(sl::kFeatureDLSS);
 			}
 		};
 		static AutoRegister _autoRegister;

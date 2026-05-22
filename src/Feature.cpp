@@ -1,22 +1,110 @@
 #include "Feature.h"
 
 #include "Log.h"
+#include "Plugin.h"
+#include "SimpleIni.h"
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
+#include <filesystem>
 #include <functional>
 #include <limits>
 #include <queue>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace
 {
+	namespace fs = std::filesystem;
+
 	auto* L = cs::log::Get("cs");
 	constexpr auto kUnvisited = std::numeric_limits<std::size_t>::max();
+	constexpr const char* kConfigDir = "Data\\F4SE\\Plugins\\FO4CommunityShaders";
+	constexpr const char* kGlobalIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.ini";
+	constexpr bool kDefaultAutoInstallAllFeatures = true;
+
+	std::string ToString(std::string_view a_value)
+	{
+		return { a_value.data(), a_value.size() };
+	}
+
+	std::string PluginVersionString()
+	{
+		char buf[32];
+		std::snprintf(buf, sizeof(buf), "%u.%u.%u", Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
+		return buf;
+	}
+
+	fs::path FeatureIniPath(const cs::Feature& a_feature)
+	{
+		return fs::path(kConfigDir) / (ToString(a_feature.GetName()) + ".ini");
+	}
+
+	bool PathExists(const fs::path& a_path)
+	{
+		std::error_code ec;
+		const bool exists = fs::exists(a_path, ec);
+		return exists && !ec;
+	}
+
+	void EnsureConfigDirectory()
+	{
+		std::error_code ec;
+		fs::create_directories(kConfigDir, ec);
+		if (ec) {
+			L->warn("Failed to create feature config directory {}: {}", kConfigDir, ec.message());
+		}
+	}
+
+	bool LoadAutoInstallAllFeatures()
+	{
+		CSimpleIniA ini;
+		ini.SetUnicode();
+
+		const bool configExists = PathExists(kGlobalIniPath);
+		ini.LoadFile(kGlobalIniPath);
+		const bool hasKey = ini.KeyExists("Features", "bAutoInstallAllFeatures");
+		const bool autoInstall = ini.GetBoolValue("Features", "bAutoInstallAllFeatures", kDefaultAutoInstallAllFeatures);
+
+		if (!configExists || !hasKey) {
+			EnsureConfigDirectory();
+			const auto version = PluginVersionString();
+			ini.SetValue("Info", "Version", version.c_str());
+			ini.SetBoolValue("Features", "bAutoInstallAllFeatures", autoInstall);
+			if (ini.SaveFile(kGlobalIniPath) < 0) {
+				L->warn("Failed to save global feature config {}", kGlobalIniPath);
+			}
+		}
+
+		return autoInstall;
+	}
+
+	bool EnsureFeatureIni(const cs::Feature& a_feature)
+	{
+		const auto path = FeatureIniPath(a_feature);
+		if (PathExists(path)) {
+			return true;
+		}
+
+		EnsureConfigDirectory();
+		CSimpleIniA ini;
+		ini.SetUnicode();
+		const auto version = PluginVersionString();
+		ini.SetValue("Info", "Version", version.c_str());
+
+		const auto pathString = path.string();
+		if (ini.SaveFile(pathString.c_str()) < 0) {
+			L->warn("Failed to create feature INI {}", pathString);
+			return false;
+		}
+		L->info("Created feature INI {}", pathString);
+		return true;
+	}
 
 	void LogCycle(const std::vector<std::size_t>& a_component, const std::vector<cs::Feature*>& a_features)
 	{
@@ -160,6 +248,11 @@ namespace
 
 namespace cs
 {
+	bool Feature::IsInstalled() const
+	{
+		return PathExists(FeatureIniPath(*this));
+	}
+
 	FeatureManager& FeatureManager::Get()
 	{
 		static FeatureManager instance;
@@ -174,22 +267,60 @@ namespace cs
 	void FeatureManager::LoadAll()
 	{
 		_features = SortFeaturesByDependencies(_features);
+		_loadedFeatures.clear();
 		for (auto* feature : _features) {
+			feature->SetLoaded(false);
+		}
+
+		const bool autoInstallAll = LoadAutoInstallAllFeatures();
+		L->info("Feature INI auto-install: {}", autoInstallAll ? "enabled" : "disabled");
+
+		std::unordered_map<std::string_view, bool> installedByName;
+		installedByName.reserve(_features.size());
+		for (auto* feature : _features) {
+			bool installed = true;
+			if (autoInstallAll) {
+				if (!EnsureFeatureIni(*feature)) {
+					L->warn("Feature {} INI missing but auto-install is enabled; loading without a companion INI",
+						feature->GetName());
+				}
+			} else {
+				installed = feature->IsInstalled();
+			}
+			installedByName.insert_or_assign(feature->GetName(), installed);
+		}
+
+		for (auto* feature : _features) {
+			if (const auto installedIt = installedByName.find(feature->GetName()); installedIt == installedByName.end() || !installedIt->second) {
+				L->info("Feature {} not installed (no INI); skipping", feature->GetName());
+				continue;
+			}
+
+			for (const auto dependency : feature->GetDependencies()) {
+				const auto dependencyIt = installedByName.find(dependency);
+				if (dependencyIt != installedByName.end() && !dependencyIt->second) {
+					L->warn("Feature {} depends on {} which is not installed; loading may be unstable",
+						feature->GetName(), dependency);
+				}
+			}
+
 			L->info("Loading feature: {}", feature->GetName());
 			feature->Load();
+			feature->SetLoaded(true);
+			_loadedFeatures.push_back(feature);
 		}
 	}
 
 	void FeatureManager::OnDataLoadedAll()
 	{
-		for (auto* feature : _features) {
+		for (auto* feature : _loadedFeatures) {
 			feature->OnDataLoaded();
 		}
 	}
 
 	void FeatureManager::OnPostPostLoadAll()
 	{
-		for (auto* feature : _features) {
+		for (auto* feature : _loadedFeatures) {
 			feature->OnPostPostLoad();
 		}
 	}
