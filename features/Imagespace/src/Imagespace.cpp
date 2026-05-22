@@ -101,6 +101,8 @@ namespace cs::features
 	{
 		uint32_t SrcDimensions[2];
 		uint32_t DstDimensions[2];
+		uint32_t IsFirstDownsample;
+		uint32_t _Pad[3];
 	};
 	static_assert(sizeof(BloomCB) % 16 == 0);
 
@@ -1084,6 +1086,7 @@ namespace cs::features
 				bcb.SrcDimensions[1] = bloomChain[k]->desc.Height;
 				bcb.DstDimensions[0] = bloomChain[k + 1]->desc.Width;
 				bcb.DstDimensions[1] = bloomChain[k + 1]->desc.Height;
+				bcb.IsFirstDownsample = (k == 0) ? 1u : 0u;
 				bloomCB->Update(bcb);
 
 				ID3D11ShaderResourceView* srvs[1] = { bloomChain[k]->srv.get() };
