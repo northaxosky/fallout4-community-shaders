@@ -80,13 +80,17 @@ namespace cs::engine
 			*reinterpret_cast<float*>(base + off.heightRatio) = a_height;
 			*reinterpret_cast<bool*>(base + off.isActivated)  = a_activated;
 
-			// Sync CommonLibF4 struct members so existing struct-reader code stays in sync.
-			// On NG/AE this is the same memory as widthRatio/heightRatio above; on OG the compiled
-			// offsets target unrelated fields (write-only side-effect to preserve old callers that
-			// haven't been migrated; new code should use the accessors above).
-			a_rtm->dynamicWidthRatio = a_width;
-			a_rtm->dynamicHeightRatio = a_height;
-			a_rtm->isDynamicResolutionCurrentlyActivated = a_activated;
+			// Sync CommonLibF4 struct members so existing struct-reader code (e.g. older callers that
+			// haven't migrated to these accessors) stays in sync. On NG/AE this writes the same memory
+			// as widthRatio/heightRatio above; on OG the compiled struct offsets overlap the `create`
+			// function pointer at 0xFB8 (called on window resize per Fallout4RE
+			// exports/cs-rtm-create-field-og.json @ 8256239), so the sync would AV the game on the next
+			// resize. Skip the sync on OG. All consumers must go through cs::engine::dynres::* on OG.
+			if (!REX::FModule::IsRuntimeOG()) {
+				a_rtm->dynamicWidthRatio = a_width;
+				a_rtm->dynamicHeightRatio = a_height;
+				a_rtm->isDynamicResolutionCurrentlyActivated = a_activated;
+			}
 		}
 	}
 
