@@ -215,7 +215,7 @@ namespace cs::features
 		settings.adaptiveExposure  = ini.GetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
 		settings.adaptationSpeed   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", settings.adaptationSpeed)), 0.1f, 5.0f);
 		settings.exposureKey       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureKey", settings.exposureKey)), 0.05f, 0.5f);
-		settings.exposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.exposureMin)), 0.01f, 1.0f);
+		settings.exposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.exposureMin)), 0.005f, 0.5f);
 		settings.exposureMax       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMax", settings.exposureMax)), 1.0f, 16.0f);
 
 		settings.bloomEnable       = ini.GetBoolValue("Settings",   "bBloomEnable",        settings.bloomEnable);
@@ -1288,7 +1288,7 @@ namespace cs::features
 		ImGui::SliderFloat("Key (mid-grey)", &settings.exposureKey, 0.05f, 0.5f, "%.3f");
 		ImGui::SetItemTooltip("Target average luminance the EMA aims for. Lower = darker midtones, higher = brighter midtones.");
 		markCustomIfEdited();
-		ImGui::SliderFloat("Min adapted", &settings.exposureMin, 0.01f, 1.0f, "%.2f");
+		ImGui::SliderFloat("Min adapted", &settings.exposureMin, 0.005f, 0.5f, "%.3f");
 		commitDirty();
 		ImGui::SliderFloat("Max adapted", &settings.exposureMax, 1.0f, 16.0f, "%.2f");
 		commitDirty();

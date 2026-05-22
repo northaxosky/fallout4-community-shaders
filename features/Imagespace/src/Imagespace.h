@@ -49,7 +49,7 @@ namespace cs::features
 			bool        adaptiveExposure   = true;
 			float       adaptationSpeed    = 1.0f;
 			float       exposureKey        = 0.18f;
-			float       exposureMin        = 0.25f;
+			float       exposureMin        = 0.05f;
 			float       exposureMax        = 4.0f;
 
 			// Bloom.
