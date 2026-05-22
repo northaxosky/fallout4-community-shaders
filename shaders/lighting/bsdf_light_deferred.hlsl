@@ -65,8 +65,8 @@
 //      (blob 3539), ambient/IBL (3559), VLS slice (2147). The shared
 //      per-frame reprojection matrix pair for view-space position
 //      reconstruction.
-//   3. Sample gbuffer: t2 = material, t0 = albedo, t1 = octahedral
-//      normal. Decode normal from 2-channel octahedral encoding.
+//   3. Sample BSDFLight G-buffer aliases: t0 = RT26, t1 = RT27, t2 =
+//      unnamed RT30. Decode normal from the t1 octahedral encoding.
 //   4. Reconstruct view-space position from screen UV + linearized depth.
 //   5. Cascade 0 PCF (if cb2[10].y check passes): project view-space pos
 //      into cascade-0 light space via cb2[11..13] matrix; sample 16 jittered
@@ -250,19 +250,19 @@ cbuffer PerCall_CB2 : register(b2)
 // ----------------------------------------------------------------------------
 // Resource bindings.
 // Slot indices match the corpus blob 3295 declarations exactly.
-// Semantic names from the rdoc capture eid 44513 SRV-format diagnosis.
+// Semantic names from Fallout4RE exports/cs-bsdflight-setup-decoder.json @ 43502f2.
 // ----------------------------------------------------------------------------
 
-// t0: kGbufferAlbedo equivalent (RT 250 R8G8B8A8_SRGB at runtime).
+// t0: RT26 kTAAAccumulation, used by BSDFLight as albedo/base color.
 //     Sampled at insn 27. .xyz = color, .w = some scalar (used at insn
 //     128, 263 as r4.w / r4.xyz multipliers).
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
 
-// t1: kGbufferNormal (RT 244 R16G16_UNORM at runtime). 2-channel
-//     octahedral-encoded normal sampled at insn 28; decoded at 29-34.
+// t1: RT27 kTAAAccumulationSwap, used by BSDFLight as octahedral normal.
+//     Sampled at insn 28; decoded at 29-34.
 Texture2D<float4> g_tGbufferNormal : register(t1);
 
-// t2: kGbufferMaterial / shading-data (RT 256 R8G8B8A8_UNORM at runtime).
+// t2: RT30 unnamed G-buffer auxiliary.
 //     Sampled at insn 26. .w channel * 255 - 1 < 0.25 = material-1 (skin)
 //     branch test at insn 137-138.
 Texture2D<float4> g_tGbufferMaterial : register(t2);
@@ -790,13 +790,13 @@ cbuffer PerCall_CB2 : register(b2)
 // Resource bindings (point-light variant).
 // ----------------------------------------------------------------------------
 
-// t0: kGbufferAlbedo. Sampled at insn 42 (.w channel used for alpha mix).
+// t0: RT26 kTAAAccumulation. Sampled at insn 42 (.w channel used for alpha mix).
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
 
-// t1: kGbufferNormal (octahedral 2-channel). Sampled at insn 43.
+// t1: RT27 kTAAAccumulationSwap (octahedral 2-channel). Sampled at insn 43.
 Texture2D<float4> g_tGbufferNormal : register(t1);
 
-// t2: kGbufferMaterial. Sampled at insn 41.
+// t2: RT30 unnamed G-buffer auxiliary. Sampled at insn 41.
 Texture2D<float4> g_tGbufferMaterial : register(t2);
 
 // t3: main depth. Sampled at insn 5 with explicit gradients.
