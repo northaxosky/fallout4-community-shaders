@@ -106,7 +106,7 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 FarReproj_row2;
     float4 FarReproj_row3;
 
-    // [24..27]: "Near" reprojection matrix (selected when depth < 0.01).
+    // [24..27]: "Near" reprojection matrix (selected when depth <= 0.01).
     //           Same diagonal as Far, with TAA sub-pixel camera offsets
     //           in [24].w and [25].w.
     float4 NearReproj_row0;
@@ -260,10 +260,11 @@ PS_OUTPUT main(PS_INPUT input)
     float depth    = g_tLinearDepth.SampleLevel(g_sDepth, uv, 0).x;
 
     // Insn 3-16: select reprojection matrix based on depth threshold.
-    //   if (depth < 0.01)   -> use NEAR matrix, scale depth by 100
+    //   if (depth <= 0.01)  -> use NEAR matrix, scale depth by 100
     //   else                -> use FAR matrix,  linearize depth slightly
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
-    bool isNearPath = (depth < 0.01);
+    // Corpus blob Shaders011.3539.861504f6dcbe uses `ge l(0.010000)` at i=3.
+    bool isNearPath = (depth <= 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
     float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
     float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
@@ -475,7 +476,7 @@ PS_OUTPUT main(PS_INPUT input)
 //   The +20% delta is interpreted as register-allocator / common-
 //   subexpression-elimination differences between my literal asm
 //   transcription and the original Bethesda HLSL. Specifically:
-//   - the `if (depth < 0.01) { matrix = near } else { matrix = far }`
+//   - the `if (depth <= 0.01) { matrix = near } else { matrix = far }`
 //     pattern is harder for fxc to fold into a single movc-style select
 //     than a direct ternary or per-row movc;
 //   - my explicit `float4x4` copies (16 dp4 ops worth of locals) may
