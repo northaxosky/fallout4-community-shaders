@@ -12,6 +12,7 @@
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 
+#include "Env.h"
 #include "Log.h"
 
 namespace cs::features
@@ -186,6 +187,7 @@ namespace cs::features
 		if (nowSec - _lastDisplayUpdate >= settings.updateInterval) {
 			_displayedFrameMs = _curFrameMs;
 			_displayedFps = _curFrameMs > 0.0f ? 1000.0f / _curFrameMs : 0.0f;
+			_displayedFrameMultiplier = std::max(1, cs::env::GetDisplayedFrameMultiplier());
 			RecomputeStats();
 			_lastDisplayUpdate = nowSec;
 		}
@@ -286,12 +288,23 @@ namespace cs::features
 			};
 
 			if (settings.showFps) {
-				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(_displayedFps));
-				ImGui::Text("%.0f FPS", _displayedFps);
+				const bool fgActive = _displayedFrameMultiplier > 1;
+				const float outputFps = _displayedFps * static_cast<float>(_displayedFrameMultiplier);
+				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(outputFps));
+				if (fgActive)
+					ImGui::Text("%.0f FPS  (engine %.0f x%d)", outputFps, _displayedFps, _displayedFrameMultiplier);
+				else
+					ImGui::Text("%.0f FPS", _displayedFps);
 				ImGui::PopStyleColor();
 			}
-			if (settings.showFrameTime)
-				ImGui::Text("%.2f ms", _displayedFrameMs);
+			if (settings.showFrameTime) {
+				if (_displayedFrameMultiplier > 1)
+					ImGui::Text("%.2f ms / displayed %.2f ms",
+						_displayedFrameMs,
+						_displayedFrameMs / static_cast<float>(_displayedFrameMultiplier));
+				else
+					ImGui::Text("%.2f ms", _displayedFrameMs);
+			}
 
 			if (settings.showGraph && _frameTimesCount > 1) {
 				// Re-sort window for ImGui::PlotLines requires linear array; reorder ringbuf into a temp.

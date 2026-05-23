@@ -93,6 +93,7 @@ namespace cs::features
 		float  _curFrameMs        = 0.0f;
 		float  _displayedFps      = 0.0f;
 		float  _displayedFrameMs  = 0.0f;
+		int    _displayedFrameMultiplier = 1;
 		float  _avgMs             = 0.0f;
 		float  _onePctLowMs       = 0.0f;
 		float  _pointOnePctLowMs  = 0.0f;

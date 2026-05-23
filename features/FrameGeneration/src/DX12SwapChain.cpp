@@ -278,6 +278,23 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		}
 	}
 
+	// Publish the per-engine-tick multiplier so PerformanceOverlay can show the displayed
+	// FPS. FSR3 and XeSS-FG are 2x only; DLSS-G honours frameGenFrames for MFG (3x/4x on
+	// RTX 50+). Active backend is what's running this frame, not settings.frameGenType
+	// (e.g. DLSS-G fell back to FSR3 at init).
+	int multiplier = 1;
+	if (useFrameGenerationThisFrame) {
+		switch (frameGen->activeFrameGenType) {
+			case FrameGeneration::FrameGenType::kDLSSG:
+				multiplier = 1 + std::max(1, frameGen->settings.frameGenFrames);
+				break;
+			default:
+				multiplier = 2;
+				break;
+		}
+	}
+	cs::env::SetDisplayedFrameMultiplier(multiplier);
+
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 

@@ -1,5 +1,7 @@
 #include "Env.h"
 
+#include <atomic>
+
 #include <Windows.h>
 
 #include "ENB/ENBSeriesAPI.h"
@@ -12,6 +14,7 @@ namespace cs::env
 		auto* L = cs::log::Get("cs.env");
 		bool g_detected = false;
 		bool g_enbLoaded = false;
+		std::atomic<int> g_displayedFrameMultiplier{ 1 };
 	}
 
 	void DetectENB()
@@ -31,5 +34,17 @@ namespace cs::env
 	bool IsRenderDocActive() noexcept
 	{
 		return GetModuleHandleW(L"renderdoc.dll") != nullptr;
+	}
+
+	void SetDisplayedFrameMultiplier(int a_multiplier) noexcept
+	{
+		if (a_multiplier < 1) a_multiplier = 1;
+		if (a_multiplier > 8) a_multiplier = 8;
+		g_displayedFrameMultiplier.store(a_multiplier, std::memory_order_relaxed);
+	}
+
+	int GetDisplayedFrameMultiplier() noexcept
+	{
+		return g_displayedFrameMultiplier.load(std::memory_order_relaxed);
 	}
 }
