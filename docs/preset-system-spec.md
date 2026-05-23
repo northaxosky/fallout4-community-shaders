@@ -45,7 +45,7 @@ the scratch. `ExportToPreset` emits a fresh `[features.<key>]` from current live
 state, used by `Save` / `Save As`.
 
 `IsInTestMode()` returns true if a feature has its own force marker active
-(e.g. `.imagespace_force_preset`); the manager skips such features so smoke
+(e.g. `.cs_force_preset`); the manager skips such features so smoke
 runs are not stomped by global preset apply.
 
 ## Two-phase apply

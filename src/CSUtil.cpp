@@ -23,11 +23,25 @@ namespace cs::util
 	bool ReadMarker(const char* a_path, char& a_out)
 	{
 		FILE* f = nullptr;
-		if (fopen_s(&f, a_path, "r") != 0 || !f)
+		if (fopen_s(&f, a_path, "rb") != 0 || !f)
 			return false;
-		a_out = static_cast<char>(fgetc(f));
+		// Skip UTF-8 BOM if present (PowerShell `Out-File -Encoding utf8` and Notepad both write it).
+		unsigned char buf[4] = {};
+		size_t        read   = fread(buf, 1, 4, f);
+		size_t        cursor = 0;
+		if (read >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF)
+			cursor = 3;
+		bool ok = false;
+		if (read > cursor) {
+			a_out = static_cast<char>(buf[cursor]);
+			ok    = true;
+		}
 		fclose(f);
-		return true;
+		// Self-delete on successful read: markers are smoke-harness one-shots; lingering files
+		// silently override the next run (and survive crashes between sessions).
+		if (ok)
+			std::remove(a_path);
+		return ok;
 	}
 
 	ID3D11DeviceChild* CompileShader(

@@ -20,7 +20,9 @@ cbuffer DofCB : register(b0)
     uint   QualityLevel;
     float  NearPlane;
     float  FarPlane;
-    float  Pad0;
+    float  BokehIntensity;
+    float  AnamorphRatio;
+    float3 Pad0;
 };
 
 [numthreads(8, 8, 1)]

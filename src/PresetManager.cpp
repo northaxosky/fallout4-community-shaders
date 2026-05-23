@@ -552,6 +552,9 @@ namespace cs
 
 		if (view.empty()) return false;
 		a_outPayload.assign(view);
+		in.close();
+		std::error_code rmEc;
+		std::filesystem::remove(a_path, rmEc);
 		return true;
 	}
 }

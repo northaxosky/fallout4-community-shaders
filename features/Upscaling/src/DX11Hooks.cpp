@@ -9,7 +9,10 @@
 
 namespace cs::features::upscaling
 {
-	namespace { auto* L = cs::log::Get("cs.feature.upscaling.dx11"); }
+	namespace {
+		auto* L   = cs::log::Get("cs.feature.upscaling.dx11");
+		auto* kSL = cs::log::Get("cs.feature.upscaling.streamline");
+	}
 
 
 struct hkD3D11CreateDeviceAndSwapChain
@@ -56,14 +59,14 @@ struct hkD3D11CreateDeviceAndSwapChain
 		if (core->IsInitialized()) {
 			// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
 			if (!cs::env::IsENBLoaded() && core->slUpgradeInterface) {
-				cs::log::Get("cs.feature.upscaling.streamline")->info("Upgrading swap chain interface (no ENB)");
+				kSL->info("Upgrading swap chain interface (no ENB)");
 				core->slUpgradeInterface((void**)&(*ppSwapChain));
 			} else if (cs::env::IsENBLoaded()) {
-				cs::log::Get("cs.feature.upscaling.streamline")->info("Skipping swap chain upgrade (ENB loaded)");
+				kSL->info("Skipping swap chain upgrade (ENB loaded)");
 			}
 			core->OnD3D11Ready(pAdapter, *ppDevice);
 		} else {
-			cs::log::Get("cs.feature.upscaling.streamline")->info("Streamline not initialized, skipping device registration");
+			kSL->info("Streamline not initialized, skipping device registration");
 		}
 
 		cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
@@ -76,15 +79,17 @@ struct hkD3D11CreateDeviceAndSwapChain
 
 namespace DX11Hooks
 {
+	namespace { auto* kHook = cs::log::Get("cs.feature.upscaling.hook"); }
+
 	void Install()
 	{
 		uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
-		cs::log::Get("cs.feature.upscaling.hook")->info("Module base: {:#x}", moduleBase);
+		kHook->info("Module base: {:#x}", moduleBase);
 
 		// Hook BSGraphics::CreateD3DAndSwapChain::D3D11CreateDeviceAndSwapChain to use D3D_FEATURE_LEVEL_11_1
-		cs::log::Get("cs.feature.upscaling.hook")->info("Installing IAT hook for D3D11CreateDeviceAndSwapChain");
+		kHook->info("Installing IAT hook for D3D11CreateDeviceAndSwapChain");
 		(uintptr_t&)hkD3D11CreateDeviceAndSwapChain::func = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::thunk);
-		cs::log::Get("cs.feature.upscaling.hook")->info("IAT hook installed, original func: {:#x}", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::func.get());
+		kHook->info("IAT hook installed, original func: {:#x}", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::func.get());
 	}
 }
 

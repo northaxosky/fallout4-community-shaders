@@ -3,6 +3,7 @@
 #include <DirectXTex.h>
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <charconv>
 #include <cmath>
 #include <cstdint>
@@ -215,11 +216,14 @@ namespace cs::features
 	static_assert(sizeof(DofCB) % 16 == 0);
 
 	// Engine DOF: IsActive (vfunc 8) returns false when ours is enabled. All three effects must be disabled or the engine double-DOFs.
+	// `forceWithENB` keeps our pass live alongside ENB for users who want to stack; default behavior still yields to ENB.
 	struct ImageSpaceEffectDepthOfField_IsActive
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.dofEnable || cs::env::IsENBLoaded()) && func(This);
+			const auto& s = Imagespace::GetSingleton()->settings;
+			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
+			return (!s.dofEnable || enbYield) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -227,7 +231,9 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.dofEnable || cs::env::IsENBLoaded()) && func(This);
+			const auto& s = Imagespace::GetSingleton()->settings;
+			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
+			return (!s.dofEnable || enbYield) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -235,16 +241,20 @@ namespace cs::features
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.dofEnable || cs::env::IsENBLoaded()) && func(This);
+			const auto& s = Imagespace::GetSingleton()->settings;
+			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
+			return (!s.dofEnable || enbYield) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
-	// Engine sunbeams: yield to our sunsprite when enabled, or yield to ENB if loaded.
+	// Engine sunbeams: yield to our sunsprite when enabled, or yield to ENB if loaded (unless force-stacked).
 	struct ImageSpaceEffectSunbeams_IsActive
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
-			return (!Imagespace::GetSingleton()->settings.sunspriteEnable || cs::env::IsENBLoaded()) && func(This);
+			const auto& s = Imagespace::GetSingleton()->settings;
+			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
+			return (!s.sunspriteEnable || enbYield) && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -278,6 +288,8 @@ namespace cs::features
 	void Imagespace::OnPostPostLoad()
 	{
 		const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
+		// All offsets[] arrays in this function are 3-wide (OG/NG/AE).
+		assert(runtimeIdx < 3);
 		constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
 		stl::write_thunk_call<Imagespace_PostUpscale_Hook>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
 		L->info("Hook installed on Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport");
@@ -353,21 +365,33 @@ namespace cs::features
 			L->info("Forced weather category: {}", imagespace::CategoryName(*forcedWeatherCategory));
 		}
 		// FormID marker is a hex string read separately (engine-integrated mode honored at OnDataLoaded).
+		// Markers are smoke-harness one-shots: delete on successful parse so they don't leak across runs.
 		try {
-			std::ifstream f(kWeatherFormIDMarker);
+			std::ifstream f(kWeatherFormIDMarker, std::ios::binary);
 			if (f.is_open()) {
 				std::string line; std::getline(f, line);
-				const auto* begin = line.c_str();
-				const auto* end   = begin + line.size();
+				std::string_view view(line);
+				if (view.size() >= 3 &&
+					static_cast<unsigned char>(view[0]) == 0xEF &&
+					static_cast<unsigned char>(view[1]) == 0xBB &&
+					static_cast<unsigned char>(view[2]) == 0xBF)
+				{
+					view.remove_prefix(3);
+				}
+				const auto* begin = view.data();
+				const auto* end   = begin + view.size();
 				std::uint32_t formID = 0;
 				int parseBase = 10;
-				if (line.size() > 2 && line[0] == '0' && (line[1] == 'x' || line[1] == 'X')) {
+				if (view.size() > 2 && view[0] == '0' && (view[1] == 'x' || view[1] == 'X')) {
 					begin += 2; parseBase = 16;
 				}
 				auto [ptr, ec] = std::from_chars(begin, end, formID, parseBase);
 				if (ec == std::errc{} && ptr == end) {
 					forcedWeatherFormID = formID;
 					L->info("Forced weather formID: 0x{:08X}", formID);
+					f.close();
+					std::error_code rmEc;
+					std::filesystem::remove(kWeatherFormIDMarker, rmEc);
 				}
 			}
 		} catch (...) {}

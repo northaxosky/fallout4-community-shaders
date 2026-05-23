@@ -47,6 +47,7 @@ function(configure_xse_plugin TARGET_NAME MAJOR MINOR PATCH)
 			/W4
 			/WX
 			/permissive-
+			/utf-8
 			/Zc:alignedNew
 			/Zc:auto
 			/Zc:__cplusplus

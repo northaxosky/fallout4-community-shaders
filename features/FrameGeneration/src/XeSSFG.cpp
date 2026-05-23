@@ -7,7 +7,10 @@
 
 namespace cs::features::framegeneration
 {
-	namespace { auto* L = cs::log::Get("cs.feature.framegen.xess"); }
+	namespace {
+		auto* L         = cs::log::Get("cs.feature.framegen.xess");
+		auto* kInternal = cs::log::Get("cs.feature.framegen.xess.internal");
+	}
 
 XeSSFG::~XeSSFG()
 {
@@ -141,14 +144,14 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 			pfn_xefgSwapChainSetLoggingCallback(xefgCtx,
 				XEFG_SWAPCHAIN_LOGGING_LEVEL_DEBUG,
 				[](const char* msg, xefg_swapchain_logging_level_t, void*) {
-					cs::log::Get("cs.feature.framegen.xess.internal")->info("{}", msg);
+					kInternal->info("{}", msg);
 				}, nullptr);
 		}
 		if (pfn_xellSetLoggingCallback) {
 			pfn_xellSetLoggingCallback(xellCtx,
 				XELL_LOGGING_LEVEL_DEBUG,
 				[](const char* msg, xell_logging_level_t) {
-					cs::log::Get("cs.feature.framegen.xess.internal")->info("{}", msg);
+					kInternal->info("{}", msg);
 				});
 		}
 	}

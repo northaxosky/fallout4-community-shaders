@@ -9,6 +9,9 @@ cbuffer PyramidCB : register(b0)
     uint  SrcIsLDR;
     uint  _Pad0;
     uint2 DstDimensions;
+    uint  TailW;
+    uint  TailH;
+    uint2 _Pad1;
 };
 
 float LogLumaLinear(float3 lin)

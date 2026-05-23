@@ -86,11 +86,11 @@ User overrides (`[weather.overrides]`) take precedence, then a binary search ove
 - `scripts/smoke-imagespace-weather.sh` (resolver-only by default; set `SMOKE_WEATHER_ENGINE_MODE=1` with an exterior save to also exercise `Sky::ForceWeather`)
 - `scripts/smoke-imagespace-preset-load.sh`
 
-Smoke markers use `.imagespace_force_*` files next to the INI and are read during `LoadSettings()`.
+Smoke markers use `.cs_force_*` and `.imagespace_force_*` files next to the INI and are read during `LoadSettings()`. Files are deleted on read so a one-shot marker does not leak into the next run.
 The weather harness uses `.imagespace_force_weather_category` (single digit '0'-'7' matching the
 `WeatherCategory` enum order) for resolver-only mode and `.imagespace_force_weather_formid` (hex
 string) for engine-integrated mode.
-The preset harness uses `.imagespace_force_preset` (single-line text payload; either a `<scope>:<name>`
+The preset harness uses the cross-feature `.cs_force_preset` marker (single-line text payload; either a `<scope>:<name>`
 identity like `B:Default` / `U:MyLook`, or a bare display name resolved via `FindByName(preferUser=true)`).
 The marker always wins over `[preset]` auto-load.
 
@@ -170,7 +170,7 @@ On `LoadSettings()`:
 1. Parse `[settings]` + `[weather]` into defaults.
 2. Read `[preset]` block.
 3. `PresetManager::Refresh()`.
-4. If `.imagespace_force_preset` marker is present and resolves: apply that preset (marker wins over auto-load).
+4. If `.cs_force_preset` marker is present and resolves: apply that preset (marker wins over auto-load).
 5. Else if `auto_load_on_boot && active != ""`: apply by identity (fallback to FindByName), warn if missing.
 
 LUT preload is deferred to `OnD3D11Ready` for the boot path (D3D isn't live during plugin Load); mid-game preset loads call `ApplyLUTState` synchronously.

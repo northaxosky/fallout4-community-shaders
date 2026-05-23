@@ -98,7 +98,8 @@ namespace cs
 							std::string&                   a_err);
 
 	// Reads a marker file as a single-line text payload. Caps at 512 bytes; strips UTF-8 BOM,
-	// ASCII whitespace, CRLF; takes first line only; rejects empty.
+	// ASCII whitespace, CRLF; takes first line only; rejects empty. Removes the marker on
+	// successful read (smoke-harness one-shot semantics, matches cs::util::ReadMarker).
 	bool ReadTextMarker(const std::filesystem::path& a_path, std::string& a_outPayload);
 
 	// Builds an identity string from a scope ('B' or 'U') and a display name.

@@ -22,6 +22,8 @@ namespace cs::util
 	[[nodiscard]] ID3D11Device* GetD3DDevice();
 
 	// Read a single byte from a marker file. Returns true iff the file existed and the byte was read.
-	// Used by smoke-test marker plumbing (e.g. .feature_force_X files that override INI at startup).
+	// Skips a leading UTF-8 BOM (PowerShell `Out-File -Encoding utf8` writes one).
+	// On success the marker is deleted: markers are smoke-harness one-shots and lingering files
+	// silently override the next run (and survive crashes between sessions).
 	bool ReadMarker(const char* a_path, char& a_out);
 }

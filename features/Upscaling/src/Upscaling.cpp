@@ -4,6 +4,7 @@
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <fstream>
 
@@ -316,6 +317,8 @@ void Upscaling::InstallHooks()
 
 	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 	L->info("Runtime index: {}", runtimeIdx);
+	// All offsets[] arrays below are 3-wide (OG/NG/AE). A 4th runtime would index past the end and silently overwrite a random byte.
+	assert(runtimeIdx < 3);
 
 	// Control jitters, dynamic resolution, sampler states, and render targets
 	L->info("Installing BSGraphics_State_UpdateDynamicResolution hook");
