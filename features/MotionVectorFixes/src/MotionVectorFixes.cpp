@@ -1,5 +1,8 @@
 #include "MotionVectorFixes.h"
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <unordered_map>
 
 #include <imgui.h>
@@ -173,8 +176,20 @@ namespace cs::features
 		stl::detour_thunk<OnIdle_UpdatePlayer>(REL::ID({ 1318162, 2228929, 2228929 }));
 
 		// Fix incorrect previousWorld on animated objects (e.g., doors)
-		auto setSeqAddr = REL::ID({ 854236, 2200766, 2200766 }).address() + 0x1D7;
-		stl::write_thunk_call<TESObjectREFR_SetSequencePosition>(setSeqAddr);
+		// Source: Fallout4RE/Workspace/exports/cs-mvf-setsequenceposition-call.json
+		//   commit @ Fallout4RE 2026-05-23. OG/NG/AE all share offset 0x1D7 at the
+		//   direct E8 call to NiAVObject::Update inside TESObjectREFR::SetSequencePosition.
+		{
+			constexpr std::ptrdiff_t offsets[] = { 0x1D7, 0x1D7, 0x1D7 };
+			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
+			assert(runtimeIdx < 3);
+			const auto setSeqAddr = REL::ID({ 854236, 2200766, 2200766 }).address() + offsets[runtimeIdx];
+			if (*reinterpret_cast<const std::uint8_t*>(setSeqAddr) != 0xE8) {
+				L->warn("SetSequencePosition call-site opcode mismatch at {:#x}; skipping hook", setSeqAddr);
+			} else {
+				stl::write_thunk_call<TESObjectREFR_SetSequencePosition>(setSeqAddr);
+			}
+		}
 
 		// Fix vanilla motion vectors not updating in menus or when time is frozen
 		stl::write_vfunc<43, BSLightingShaderProperty_GetRenderPasses>(RE::VTABLE::BSLightingShaderProperty[0]);
