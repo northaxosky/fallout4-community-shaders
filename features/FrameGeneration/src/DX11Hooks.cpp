@@ -177,7 +177,16 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 		// User-disabled FG: skip D3D12 proxy entirely so FO4 stays on native D3D11.
 		// Lets RenderDoc captures see the actual game rendering instead of the proxy swap chain.
-		const bool userEnabled = frameGen->settings.frameGenerationMode;
+		bool userEnabled = frameGen->settings.frameGenerationMode;
+
+		// RenderDoc.dll injected into the process: force-skip every FG backend so captures see the
+		// real D3D11 swap chain. Otherwise FSR3/XeSS-FG quietly run through the D3D12 proxy and the
+		// user gets empty captures. (DLSS-G already refuses in RenderDoc::Load + Streamline init.)
+		if (userEnabled && cs::env::IsRenderDocActive()) {
+			L->warn("RenderDoc detected; disabling FrameGeneration for this session to preserve native D3D11 capture path");
+			userEnabled = false;
+		}
+
 		bool hasBackend = userEnabled && fidelityFX->module;
 		if (!userEnabled) {
 			L->info("FrameGeneration disabled in INI; skipping D3D12 swap-chain proxy");

@@ -7,4 +7,9 @@ namespace cs::env
 
 	// Cached result of DetectENB. False before DetectENB has run.
 	bool IsENBLoaded() noexcept;
+
+	// True when renderdoc.dll is loaded in this process (typically because the RenderDoc
+	// feature loaded the runtime or the user launched the game from RenderDoc itself).
+	// Cheap LIVE check: callers may invoke per-frame; result is not cached.
+	bool IsRenderDocActive() noexcept;
 }

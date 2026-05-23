@@ -314,6 +314,9 @@ void FrameGeneration::CreateFrameGenerationResources()
 
 void FrameGeneration::PreAlpha()
 {
+	if (!d3d12Interop)
+		return;
+
 	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	
@@ -572,6 +575,13 @@ void FrameGeneration::GenerateUIAlphaMask()
 {
 	if (!d3d12Interop || !setupBuffers || !uiAlphaMaskCS)
 		return;
+
+	// Match the menu-block check applied by DX12SwapChain::Present so we don't waste a dispatch
+	// when frame generation will be skipped this frame anyway.
+	if (settings.disableInMenus) {
+		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode)
+			return;
+	}
 
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 	ID3D11ShaderResourceView* backbufferSRV = dx12SwapChain->swapChainBufferProxy ? dx12SwapChain->swapChainBufferProxy->srv : nullptr;

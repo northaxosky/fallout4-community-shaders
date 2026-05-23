@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <vector>
 
 #include <Windows.h>
@@ -75,11 +76,11 @@ namespace cs
 		Streamline(const Streamline&) = delete;
 		Streamline& operator=(const Streamline&) = delete;
 
-		bool   _interposerAttempted = false;
-		bool   _initAttempted = false;
-		bool   _d3dDeviceRegistered = false;
-		bool   _featureSweepDone = false;
-		bool   _initialized = false;
+		bool              _interposerAttempted = false;
+		bool              _initAttempted = false;
+		std::atomic<bool> _d3dDeviceRegistered{ false };
+		bool              _featureSweepDone = false;
+		bool              _initialized = false;
 		std::vector<sl::Feature> _requestedFeatures;
 	};
 }

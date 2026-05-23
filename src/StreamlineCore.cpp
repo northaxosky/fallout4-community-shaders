@@ -126,7 +126,7 @@ namespace cs
 
 	void Streamline::MarkD3DDeviceRegistered()
 	{
-		_d3dDeviceRegistered = true;
+		_d3dDeviceRegistered.store(true, std::memory_order_release);
 	}
 
 	void Streamline::OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device)
@@ -134,10 +134,10 @@ namespace cs
 		if (!Initialize())
 			return;
 
-		if (!_d3dDeviceRegistered && slSetD3DDevice && device) {
+		if (!_d3dDeviceRegistered.load(std::memory_order_acquire) && slSetD3DDevice && device) {
 			const auto r = slSetD3DDevice(device);
 			L->info("slSetD3DDevice result: {}", (int)r);
-			_d3dDeviceRegistered = true;
+			_d3dDeviceRegistered.store(true, std::memory_order_release);
 		}
 
 		if (!_featureSweepDone && adapter) {
