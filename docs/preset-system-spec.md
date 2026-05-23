@@ -22,7 +22,7 @@ Internal spec for the cross-feature preset system. User-facing docs live in
 
 ## Feature contract
 
-Six new virtuals on `cs::Feature` (default impls in `Feature.cpp` keep
+Seven new virtuals on `cs::Feature` (default impls in `Feature.h` keep
 non-participating features inert):
 
 ```cpp
@@ -33,22 +33,27 @@ virtual std::string GetPresetKey() const          { return {}; }
 virtual bool StageFromPreset(const toml::table&        featureRoot,
                              const PresetApplyContext& ctx,
                              std::string&              err);
-virtual void CommitStaged();
+virtual void CommitStagedSwap();      // phase 2a: live-state swap, no-throw, no-I/O
+virtual void CommitStagedFinalize();  // phase 2b: SaveSettings + derived refresh
+        void CommitStaged();          // = Swap then Finalize (in-place edit helper)
 virtual void ExportToPreset(toml::table& featureRoot) const;
 ```
 
 `StageFromPreset` parses `featureRoot` (the `[features.<key>]` subtable) into a
 scratch member on the feature; never mutates live state and never touches disk.
-`CommitStaged` swaps scratch into live state, runs the feature's own dirty path
-(SaveSettings, re-upload constant buffers, refresh LUT cache, ...), and clears
-the scratch. `ExportToPreset` emits a fresh `[features.<key>]` from current live
-state, used by `Save` / `Save As`.
+`CommitStagedSwap` swaps scratch into live state only (no throwing, no disk I/O).
+`CommitStagedFinalize` runs the feature's own dirty path (SaveSettings, re-upload
+constant buffers, refresh LUT cache, ...) and is allowed to throw or log
+errors. `CommitStaged` is the in-place-edit helper that runs both back-to-back;
+PresetManager uses the two-phase form so cross-feature state stays consistent.
+`ExportToPreset` emits a fresh `[features.<key>]` from current live state, used
+by `Save` / `Save As`.
 
 `IsInTestMode()` returns true if a feature has its own force marker active
 (e.g. `.cs_force_preset`); the manager skips such features so smoke
 runs are not stomped by global preset apply.
 
-## Two-phase apply
+## Three-phase apply
 
 `PresetManager::Apply(meta, err)`:
 
@@ -57,14 +62,20 @@ runs are not stomped by global preset apply.
    - Resolve `<key>` to a participating, non-test-mode feature.
    - Build `PresetApplyContext { isBuiltin = meta.builtin }`.
    - Call `feature->StageFromPreset(subtable, ctx, err)`.
-   - On any error, abort. No feature has called `CommitStaged` yet; live state
+   - On any error, abort. No feature has called CommitStaged* yet; live state
      is untouched.
-3. For every successfully staged feature, call `CommitStaged()`.
-4. Update `activeIdentity` + `activeName`, call `SaveCoreConfig()`.
+3. For every successfully staged feature, call `CommitStagedSwap()`. This pass
+   is no-throw and no-I/O; on completion live state is uniformly updated.
+4. For every successfully staged feature, call `CommitStagedFinalize()` wrapped
+   in try/catch. Per-feature failures are logged and the loop continues; the
+   apply returns false with a non-fatal error so the user sees a toast but the
+   live world stays in the new preset's state.
+5. Update `activeIdentity` + `activeName`, call `SaveCoreConfig()` (runs even
+   when finalize errors occurred, since live state has already changed).
 
-Step 2 is the only step that can fail. Step 3 is infallible by contract; if
-`CommitStaged` discovers a runtime issue it logs and best-efforts continues so
-half-staged state doesn't survive.
+The atomicity contract: a feature that throws in `CommitStagedFinalize` leaves
+its on-disk TOML stale, but live state across all features is consistent. The
+user can reapply the preset to retry the failing feature's persist step.
 
 ## CoreConfig ownership
 

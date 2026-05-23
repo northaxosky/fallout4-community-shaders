@@ -8,6 +8,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <stdexcept>
 
 #include <DirectXMath.h>
 #include <DirectXTex.h>
@@ -20,6 +21,7 @@
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
+#include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Util.h"
@@ -451,9 +453,12 @@ namespace cs::features
 		ssgi::EmitSettings(table, settings);
 
 		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
-		}
+		if (!out)
+			throw std::runtime_error(std::string("failed to open ScreenSpaceGI config for write: ") + std::string(kConfigPath));
+		out << table;
+		out.flush();
+		if (!out.good())
+			throw std::runtime_error(std::string("failed to write ScreenSpaceGI config: ") + std::string(kConfigPath));
 	}
 
 	bool ScreenSpaceGI::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext&, std::string& a_err)
@@ -465,7 +470,7 @@ namespace cs::features
 		return true;
 	}
 
-	void ScreenSpaceGI::CommitStaged()
+	void ScreenSpaceGI::CommitStagedSwap()
 	{
 		if (!stagedValid) return;
 		const bool resModeChanged = (stagedSettings.resolutionMode != settings.resolutionMode);
@@ -473,6 +478,10 @@ namespace cs::features
 		stagedValid = false;
 		if (resModeChanged)
 			resourcesAllocated = false;
+	}
+
+	void ScreenSpaceGI::CommitStagedFinalize()
+	{
 		SaveSettings();
 	}
 
@@ -1310,6 +1319,15 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSettings()
 	{
+		if (ImGui::Button("Reset to defaults")) {
+			settings           = Settings{};
+			resourcesAllocated = false;
+			SaveSettings();
+			cs::Menu::ShowToast("Screen Space GI reset to defaults", 2.5);
+		}
+		ImGui::SetItemTooltip("Reverts SSGI to plugin defaults (enabled, resolution mode, preset, IL bounce, denoise, debug) and saves.");
+		ImGui::Separator();
+
 		bool dirty = false;
 		const bool enbActive = cs::env::IsENBLoaded();
 		if (enbActive) {

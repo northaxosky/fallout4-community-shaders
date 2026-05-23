@@ -24,6 +24,65 @@ namespace cs
 		return instance;
 	}
 
+	void Menu::ShowToast(std::string a_text, double a_durationSec)
+	{
+		auto& m = Get();
+		std::lock_guard lock(m._toastMutex);
+		m._toastText     = std::move(a_text);
+		m._toastShown    = std::chrono::steady_clock::now();
+		m._toastDuration = std::chrono::duration<double>(a_durationSec > 0.0 ? a_durationSec : 3.0);
+		++m._toastSeq;
+	}
+
+	void Menu::DrawToast()
+	{
+		std::string                           text;
+		std::chrono::steady_clock::time_point shown{};
+		std::chrono::duration<double>         duration{0};
+		uint64_t                              seq = 0;
+		{
+			std::lock_guard lock(_toastMutex);
+			if (_toastText.empty()) return;
+			text     = _toastText;
+			shown    = _toastShown;
+			duration = _toastDuration;
+			seq      = _toastSeq;
+		}
+
+		const auto now     = std::chrono::steady_clock::now();
+		const auto elapsed = std::chrono::duration<double>(now - shown);
+		if (elapsed >= duration) {
+			std::lock_guard lock(_toastMutex);
+			if (_toastSeq == seq) {
+				// Same toast we just inspected; safe to clear. If a writer raced in between
+				// release and re-acquire, _toastSeq has advanced and we leave the new toast alone.
+				_toastText.clear();
+			}
+			return;
+		}
+
+		const double remainingSec  = (duration - elapsed).count();
+		const double durationSec   = duration.count();
+		const double fadeWindowSec = durationSec < 2.0 ? durationSec * 0.25 : 0.5;
+		const float  alpha         = remainingSec >= fadeWindowSec ? 1.0f
+		                                                          : static_cast<float>(remainingSec / fadeWindowSec);
+
+		ImGuiIO& io = ImGui::GetIO();
+		const float pad = 24.0f;
+		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, pad), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+		ImGui::SetNextWindowBgAlpha(0.85f * alpha);
+		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
+		const ImGuiWindowFlags flags =
+			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
+		if (ImGui::Begin("##cs_toast", nullptr, flags)) {
+			ImGui::TextUnformatted(text.c_str());
+		}
+		ImGui::End();
+		ImGui::PopStyleVar();
+	}
+
 	void Menu::OnD3D11Ready(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd)
 	{
 		if (_imguiInited)
@@ -139,6 +198,8 @@ namespace cs
 
 		if (_open)
 			DrawDefaultUI();
+
+		DrawToast();
 
 		ImGui::Render();
 

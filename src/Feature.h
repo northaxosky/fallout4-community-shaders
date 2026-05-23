@@ -59,10 +59,22 @@ namespace cs
 									 const PresetApplyContext& /*a_ctx*/,
 									 std::string& /*a_err*/) { return true; }
 
-		// Phase 2 of preset apply. Atomically swap scratch into live state, re-run any derived
-		// resource updates (LUT loads, shader rebuilds), and persist to this feature's per-feature
-		// TOML. Only called if every staged feature succeeded in StageFromPreset.
-		virtual void CommitStaged() {}
+		// Phase 2 of preset apply. Two sub-phases so PresetManager can keep live state and disk
+		// consistent across a multi-feature apply:
+		//   2a) CommitStagedSwap   - swap scratch into live state ONLY. Must not throw and must
+		//       not touch disk. Caller invokes this on every staged feature first.
+		//   2b) CommitStagedFinalize - persist to this feature's per-feature TOML and run derived
+		//       resource updates (LUT loads, shader rebuilds, dirty flags). May throw; caller logs
+		//       and continues so a single feature's I/O failure doesn't leave the rest unsaved.
+		// Default CommitStaged() runs both back-to-back for the in-place edit case (slider commit,
+		// per-feature DrawSettings) where the cross-feature ordering isn't relevant.
+		virtual void CommitStagedSwap() {}
+		virtual void CommitStagedFinalize() {}
+		void CommitStaged()
+		{
+			CommitStagedSwap();
+			CommitStagedFinalize();
+		}
 
 		// Emit current live state into a_subtable for inclusion as [features.<key>] in a saved
 		// preset. Implementations may leave a_subtable empty to opt out of the current save.

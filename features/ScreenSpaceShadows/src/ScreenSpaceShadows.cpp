@@ -6,6 +6,7 @@
 #include <cmath>
 #include <format>
 #include <fstream>
+#include <stdexcept>
 
 #include <DirectXMath.h>
 #include <imgui.h>
@@ -21,6 +22,7 @@
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
+#include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Sky.h"
@@ -162,9 +164,12 @@ namespace cs::features
 		settingsTable.insert_or_assign("show_preview", settings.showPreview);
 
 		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
-		}
+		if (!out)
+			throw std::runtime_error(std::string("failed to open ScreenSpaceShadows config for write: ") + std::string(kConfigPath));
+		out << table;
+		out.flush();
+		if (!out.good())
+			throw std::runtime_error(std::string("failed to write ScreenSpaceShadows config: ") + std::string(kConfigPath));
 	}
 
 	bool ScreenSpaceShadows::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext&, std::string& a_err)
@@ -179,11 +184,15 @@ namespace cs::features
 		return true;
 	}
 
-	void ScreenSpaceShadows::CommitStaged()
+	void ScreenSpaceShadows::CommitStagedSwap()
 	{
 		if (!stagedValid) return;
 		settings    = stagedSettings;
 		stagedValid = false;
+	}
+
+	void ScreenSpaceShadows::CommitStagedFinalize()
+	{
 		SaveSettings();
 	}
 
@@ -745,6 +754,14 @@ namespace cs::features
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
+		if (ImGui::Button("Reset to defaults")) {
+			settings = Settings{};
+			SaveSettings();
+			cs::Menu::ShowToast("Screen Space Shadows reset to defaults", 2.5);
+		}
+		ImGui::SetItemTooltip("Reverts SSS to plugin defaults (enabled, quality preset, sample counts, depth bias) and saves.");
+		ImGui::Separator();
+
 		bool dirty = false;
 
 		// Status panel: ENB takes precedence over our SSS, so flag it and grey out interactive controls.

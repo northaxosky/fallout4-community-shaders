@@ -16,6 +16,7 @@
 #include "Feature.h"
 #include "DX11Hooks.h"
 #include "Log.h"
+#include "Menu.h"
 #include "RenderHooks.h"
 #include "Streamline.h"
 #include "StreamlineCore.h"
@@ -87,6 +88,14 @@ void FrameGeneration::SaveSettings()
 
 void FrameGeneration::DrawSettings()
 {
+	if (ImGui::Button("Reset to defaults")) {
+		settings = Settings{};
+		SaveSettings();
+		cs::Menu::ShowToast("Frame Generation reset to defaults", 2.5);
+	}
+	ImGui::SetItemTooltip("Reverts Frame Generation to plugin defaults (mode, backend, MFG count, in-menu disable) and saves. Backend switch applies on next swap-chain rebuild.");
+	ImGui::Separator();
+
 	const char* activeStr = "Inactive";
 	if (settings.frameGenerationMode) {
 		switch (activeFrameGenType) {

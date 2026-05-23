@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "Log.h"
+#include "Menu.h"
 
 #include <algorithm>
 #include <array>
@@ -261,17 +262,59 @@ namespace cs
 			}
 		}
 
-		// Phase 2: commit. Every staged feature swaps scratch into live state.
+		// Phase 2a: swap. Walk the staged set and atomically swap scratch into live state across
+		// every feature. Each CommitStagedSwap implementation is no-throw and no-I/O so the live
+		// world ends up uniformly updated. Doing this in a separate pass avoids the case where a
+		// finalize-time exception on feature N would leave features 0..N-1 swapped while N+1.. stay
+		// on their old state.
 		for (const auto& s : staged) {
-			s.feature->CommitStaged();
+			s.feature->CommitStagedSwap();
 		}
 
-		activeIdentity = a_meta.identity;
-		activeName     = a_meta.name;
+		// Phase 2b: finalize. Persist each feature to disk and run derived resource refreshes.
+		// Per-feature failures are logged but do NOT abort the rest of the loop. If any feature
+		// fails to persist we still report a non-fatal error to the UI; the live state is
+		// internally consistent, only the on-disk snapshot for the failing feature(s) is stale.
+		std::vector<std::string> finalizeErrors;
+		for (const auto& s : staged) {
+			try {
+				s.feature->CommitStagedFinalize();
+			} catch (const std::exception& ex) {
+				std::ostringstream oss;
+				oss << "feature '" << s.feature->GetPresetKey() << "' finalize failed: " << ex.what();
+				finalizeErrors.emplace_back(oss.str());
+				L->error("{}", finalizeErrors.back());
+			} catch (...) {
+				std::ostringstream oss;
+				oss << "feature '" << s.feature->GetPresetKey() << "' finalize failed: unknown exception";
+				finalizeErrors.emplace_back(oss.str());
+				L->error("{}", finalizeErrors.back());
+			}
+		}
+
+		if (!finalizeErrors.empty()) {
+			std::ostringstream oss;
+			oss << "applied with " << finalizeErrors.size() << " finalize error(s); see log";
+			a_err = oss.str();
+			L->warn("Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
+			        "active preset on disk left unchanged so next boot reapplies the previous state",
+				a_meta.name, a_meta.builtin ? "builtin" : "user", staged.size(), finalizeErrors.size());
+			// Surface as much detail as fits onto the screen so the user knows the disk state is
+			// stale for at least one feature. The live world IS the new preset, but we deliberately
+			// skip SaveCoreConfig so a relaunch goes back to the previous known-good preset.
+			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
+				std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted", 5.0);
+			return false;
+		}
+
+		activeIdentity       = a_meta.identity;
+		activeName           = a_meta.name;
 		pendingComboIdentity = a_meta.identity;
 		SaveCoreConfig();
+
 		L->info("Applied preset: {} ({}, {} feature(s))", a_meta.name,
 			a_meta.builtin ? "builtin" : "user", staged.size());
+		Menu::ShowToast("Applied preset '" + a_meta.name + "'", 2.5);
 		return true;
 	}
 

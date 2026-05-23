@@ -13,6 +13,7 @@
 #include "Env.h"
 #include "Feature.h"
 #include "Log.h"
+#include "Menu.h"
 #include "StreamlineCore.h"
 #include "Util.h"
 
@@ -444,6 +445,14 @@ void Upscaling::SaveSettings()
 
 void Upscaling::DrawSettings()
 {
+	if (ImGui::Button("Reset to defaults")) {
+		settings = Settings{};
+		SaveSettings();
+		cs::Menu::ShowToast("Upscaling reset to defaults", 2.5);
+	}
+	ImGui::SetItemTooltip("Reverts Upscaling to plugin defaults (method preference, quality mode) and saves.");
+	ImGui::Separator();
+
 	const auto activeMethod = GetUpscaleMethod(false);
 	const char* activeStr = activeMethod == UpscaleMethod::kDLSS ? "DLSS"
 		: activeMethod == UpscaleMethod::kFSR ? "FSR3"

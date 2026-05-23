@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <imgui.h>
+#include <stdexcept>
 #include <toml++/toml.hpp>
 #include <vector>
 
@@ -22,6 +23,7 @@
 #include "Env.h"
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
+#include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Sky.h"
@@ -453,9 +455,12 @@ namespace cs::features
 		imagespace::EmitWeather(table, weatherProfiles, /*a_includeOverrides=*/true);
 
 		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
-		}
+		if (!out)
+			throw std::runtime_error(std::string("failed to open Imagespace config for write: ") + std::string(kConfigPath));
+		out << table;
+		out.flush();
+		if (!out.good())
+			throw std::runtime_error(std::string("failed to write Imagespace config: ") + std::string(kConfigPath));
 	}
 
 	bool Imagespace::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err)
@@ -476,12 +481,16 @@ namespace cs::features
 		return true;
 	}
 
-	void Imagespace::CommitStaged()
+	void Imagespace::CommitStagedSwap()
 	{
 		if (!stagedValid) return;
 		settings        = std::move(stagedSettings);
 		weatherProfiles = std::move(stagedWeatherProfiles);
 		stagedValid     = false;
+	}
+
+	void Imagespace::CommitStagedFinalize()
+	{
 		SaveSettings();
 		ApplyLUTState();
 	}
@@ -1059,6 +1068,11 @@ namespace cs::features
 		}
 		if (settings.lutEnable && !settings.lutPath.empty()) {
 			LoadLUTFromDisk(settings.lutPath);
+		} else {
+			// LUT disabled or no base path - drop any previously cached LUT so a reset / disable
+			// actually removes the LUT pass from the chain instead of leaving a stale SRV bound.
+			lutSRV = nullptr;
+			lutLoadedPath.clear();
 		}
 		lutCache.Preload(imagespace::CollectReferencedLUTs(settings.lutPath, weatherProfiles));
 	}
@@ -1487,6 +1501,16 @@ namespace cs::features
 
 	void Imagespace::DrawSettings()
 	{
+		if (ImGui::Button("Reset to defaults")) {
+			settings        = Settings{};
+			weatherProfiles = {};
+			SaveSettings();
+			ApplyLUTState();
+			cs::Menu::ShowToast("Imagespace reset to defaults", 2.5);
+		}
+		ImGui::SetItemTooltip("Reverts every Imagespace setting (style, tonemap, bloom, DOF, LUT, lens, weather profiles, exposure) to plugin defaults and saves.");
+		ImGui::Separator();
+
 		bool dirty = false;
 		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
 		auto markCustomIfEdited = [&] {

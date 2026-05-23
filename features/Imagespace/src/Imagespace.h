@@ -31,7 +31,8 @@ namespace cs::features
 		bool IsInTestMode() const override { return testModeActive; }
 		std::string GetPresetKey() const override { return "imagespace"; }
 		bool StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err) override;
-		void CommitStaged() override;
+		void CommitStagedSwap() override;
+		void CommitStagedFinalize() override;
 		void ExportToPreset(toml::table& a_subtable) override;
 
 		void RunFrame();
