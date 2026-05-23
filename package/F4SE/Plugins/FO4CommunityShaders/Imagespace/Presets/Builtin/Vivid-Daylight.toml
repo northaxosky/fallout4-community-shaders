@@ -1,0 +1,62 @@
+[meta]
+name = "Vivid-Daylight"
+created_by = "FO4CommunityShaders Imagespace"
+description = "Higher contrast, punchier daylight look: Hable tonemap, lighter vignette, slight CA, strong sharpen. Clear weather swaps in the Reactor-Warm LUT at low strength to demonstrate the per-weather LUT override path."
+
+[settings]
+enabled = true
+style = 0
+force_with_enb = false
+
+tonemap_operator = 1
+exposure = 1.0
+lut_enable = false
+lut_path = ""
+lut_strength = 1.0
+
+adaptive_exposure = true
+adaptation_speed_up = 0.6
+adaptation_speed_down = 2.5
+exposure_key = 0.20
+exposure_min = 0.05
+exposure_max = 4.0
+
+bloom_enable = true
+bloom_threshold = 0.85
+bloom_intensity = 0.06
+bloom_mips = 5
+bloom_mip_weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+vignette_enable = true
+vignette_intensity = 0.15
+ca_enable = true
+ca_intensity = 0.4
+sharpen_enable = true
+sharpness = 0.6
+
+sunsprite_enable = true
+sunsprite_intensity = 0.7
+sunsprite_size = 0.05
+lens_flare_enable = false
+lens_flare_intensity = 0.8
+lens_flare_ghosts = 5
+dirt_enable = false
+dirt_intensity = 0.0
+
+dof_enable = false
+aperture = 0.05
+focus_distance = 1500.0
+focal_length = 50.0
+focus_range = 200.0
+dof_quality = 1
+coc_limit_factor = 0.04
+bokeh_intensity = 0.0
+anamorph_ratio = 1.0
+
+[weather]
+enable_per_weather_profiles = true
+
+[weather.clear]
+lut_enable = true
+lut_path = "Reactor-Warm"
+lut_strength = 0.4

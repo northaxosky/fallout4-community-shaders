@@ -14,61 +14,74 @@ namespace cs::features::imagespace
 	namespace
 	{
 		constexpr const char* kLUTDir = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\LUTs\\";
+	}
 
-		// Inner loader that does the DirectXTex pipeline. Mirrors Imagespace::LoadLUTFromDisk but is
-		// LUTCache-local so its lifetime model is "cache owns the SRV".
-		winrt::com_ptr<ID3D11ShaderResourceView> LoadLUT(const std::string& a_filename)
-		{
-			winrt::com_ptr<ID3D11ShaderResourceView> empty;
-			if (a_filename.empty()) return empty;
-
-			const std::string path = std::string(kLUTDir) + a_filename + ".dds";
-			if (!std::filesystem::exists(path)) {
-				L->warn("LUT file missing: {}", path);
-				return empty;
-			}
-
-			auto* device = cs::util::GetD3DDevice();
-			if (!device) return empty;
-
-			DirectX::ScratchImage img;
-			DirectX::TexMetadata  meta{};
-			const std::wstring wpath(path.begin(), path.end());
-			if (FAILED(DirectX::LoadFromDDSFile(wpath.c_str(), DirectX::DDS_FLAGS_NONE, &meta, img))) {
-				L->warn("LUT load failed: {}", path);
-				return empty;
-			}
-			if (meta.dimension != DirectX::TEX_DIMENSION_TEXTURE3D ||
-				meta.width != 32 || meta.height != 32 || meta.depth != 32) {
-				L->warn("LUT dims mismatch ({}x{}x{} dim={}); expected 32x32x32 Texture3D",
-					static_cast<std::uint32_t>(meta.width), static_cast<std::uint32_t>(meta.height),
-					static_cast<std::uint32_t>(meta.depth), static_cast<int>(meta.dimension));
-				return empty;
-			}
-
-			winrt::com_ptr<ID3D11Resource> resource;
-			if (FAILED(DirectX::CreateTexture(device, img.GetImages(), img.GetImageCount(), meta, resource.put()))) {
-				L->warn("LUT CreateTexture failed: {}", path);
-				return empty;
-			}
-			winrt::com_ptr<ID3D11Texture3D> tex;
-			if (FAILED(resource->QueryInterface(IID_PPV_ARGS(tex.put())))) {
-				L->warn("LUT resource is not Texture3D: {}", path);
-				return empty;
-			}
-
-			winrt::com_ptr<ID3D11ShaderResourceView> srv;
-			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-			sd.Format = static_cast<DXGI_FORMAT>(meta.format);
-			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
-			sd.Texture3D.MipLevels = 1;
-			if (FAILED(device->CreateShaderResourceView(tex.get(), &sd, srv.put()))) {
-				L->warn("LUT SRV creation failed: {}", path);
-				return empty;
-			}
-			L->info("LUT cached: {}", path);
-			return srv;
+	LUTLoadResult LoadLUTFromFile(std::string_view a_filename)
+	{
+		LUTLoadResult result;
+		if (a_filename.empty()) {
+			result.status = LUTLoadStatus::FileMissing;
+			return result;
 		}
+
+		const std::string path = std::string(kLUTDir) + std::string(a_filename) + ".dds";
+		if (!std::filesystem::exists(path)) {
+			L->warn("LUT file missing: {}", path);
+			result.status = LUTLoadStatus::FileMissing;
+			return result;
+		}
+
+		auto* device = cs::util::GetD3DDevice();
+		if (!device) {
+			result.status = LUTLoadStatus::DeviceNotReady;
+			return result;
+		}
+
+		DirectX::ScratchImage img;
+		DirectX::TexMetadata  meta{};
+		const std::wstring wpath(path.begin(), path.end());
+		if (FAILED(DirectX::LoadFromDDSFile(wpath.c_str(), DirectX::DDS_FLAGS_NONE, &meta, img))) {
+			L->warn("LUT load failed: {}", path);
+			result.status = LUTLoadStatus::DDSLoadFailed;
+			return result;
+		}
+		if (meta.dimension != DirectX::TEX_DIMENSION_TEXTURE3D ||
+			meta.width != 32 || meta.height != 32 || meta.depth != 32) {
+			L->warn("LUT dims mismatch ({}x{}x{} dim={}); expected 32x32x32 Texture3D",
+				static_cast<std::uint32_t>(meta.width), static_cast<std::uint32_t>(meta.height),
+				static_cast<std::uint32_t>(meta.depth), static_cast<int>(meta.dimension));
+			result.status = LUTLoadStatus::DimensionsMismatch;
+			return result;
+		}
+
+		winrt::com_ptr<ID3D11Resource> resource;
+		if (FAILED(DirectX::CreateTexture(device, img.GetImages(), img.GetImageCount(), meta, resource.put()))) {
+			L->warn("LUT CreateTexture failed: {}", path);
+			result.status = LUTLoadStatus::CreateTextureFailed;
+			return result;
+		}
+		winrt::com_ptr<ID3D11Texture3D> tex;
+		if (FAILED(resource->QueryInterface(IID_PPV_ARGS(tex.put())))) {
+			L->warn("LUT resource is not Texture3D: {}", path);
+			result.status = LUTLoadStatus::CreateTextureFailed;
+			return result;
+		}
+
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+		sd.Format = static_cast<DXGI_FORMAT>(meta.format);
+		sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
+		sd.Texture3D.MipLevels = 1;
+		if (FAILED(device->CreateShaderResourceView(tex.get(), &sd, srv.put()))) {
+			L->warn("LUT SRV creation failed: {}", path);
+			result.status = LUTLoadStatus::SRVCreationFailed;
+			return result;
+		}
+
+		L->info("LUT cached: {}", path);
+		result.srv = std::move(srv);
+		result.status = LUTLoadStatus::Ok;
+		return result;
 	}
 
 	ID3D11ShaderResourceView* LUTCache::GetOrLoad(const std::string& a_filename)
@@ -77,11 +90,15 @@ namespace cs::features::imagespace
 		if (auto it = entries.find(a_filename); it != entries.end()) {
 			return it->second.get();
 		}
-		auto srv = LoadLUT(a_filename);
-		auto* raw = srv.get();
-		// Insert regardless: a null SRV acts as a negative cache so we don't retry the load
-		// synchronously every config-apply pass. Cleared by Clear() (called from the Reload button).
-		entries.emplace(a_filename, std::move(srv));
+		auto loaded = LoadLUTFromFile(a_filename);
+		if (loaded.status == LUTLoadStatus::DeviceNotReady) {
+			// Don't poison the cache: D3D wasn't ready yet, the next pass (post-OnD3D11Ready) will retry.
+			return nullptr;
+		}
+		auto* raw = loaded.srv.get();
+		// Other failure modes (missing file, bad dims, etc.) still negative-cache so we don't retry
+		// the disk read every config-apply. Cleared by Clear() (called from the Reload button).
+		entries.emplace(a_filename, std::move(loaded.srv));
 		return raw;
 	}
 

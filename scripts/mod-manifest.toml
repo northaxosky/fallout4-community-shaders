@@ -51,6 +51,19 @@ src = "package/F4SE/Plugins/FO4CommunityShaders/"
 dst = "F4SE/Plugins/FO4CommunityShaders/"
 pattern = "*.toml"
 
+# Imagespace builtin preset TOMLs (5 shipped presets; users add their own under
+# F4SE/Plugins/FO4CommunityShaders/Imagespace/Presets/ at runtime).
+[[deploy.assets]]
+src = "package/F4SE/Plugins/FO4CommunityShaders/Imagespace/Presets/Builtin/"
+dst = "F4SE/Plugins/FO4CommunityShaders/Imagespace/Presets/Builtin/"
+pattern = "*.toml"
+
+# Imagespace shipped LUT textures (Reactor-Warm.dds; users drop their own *.dds beside these).
+[[deploy.assets]]
+src = "package/F4SE/Plugins/FO4CommunityShaders/Imagespace/LUTs/"
+dst = "F4SE/Plugins/FO4CommunityShaders/Imagespace/LUTs/"
+pattern = "*.dds"
+
 # ShaderReplacement manifest (maps runtime PS sha1 to reconstructed HLSL).
 [[deploy.assets]]
 src = "package/F4SE/Plugins/FO4CommunityShaders/"

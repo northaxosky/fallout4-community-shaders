@@ -1,5 +1,7 @@
 #include "Imagespace.h"
 
+#include "PresetManager.h"
+
 #include <DirectXTex.h>
 #include <algorithm>
 #include <array>
@@ -19,6 +21,7 @@
 #include "ComputeScope.h"
 #include "CSUtil.h"
 #include "Env.h"
+#include "ImagespaceConfigIO.h"
 #include "Log.h"
 #include "Sky.h"
 #include "Util.h"
@@ -30,7 +33,6 @@ namespace cs::features
 	namespace { auto* L = cs::log::Get("cs.feature.imagespace"); }
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.toml";
-	constexpr const char* kLUTDir     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\LUTs\\";
 	constexpr const char* kOpMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
 	constexpr const char* kLutMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_lut";
 	constexpr const char* kAdaptMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_adaptive_exposure";
@@ -39,6 +41,7 @@ namespace cs::features
 	constexpr const char* kCAMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_ca";
 	constexpr const char* kSharpenMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_sharpen";
 	constexpr const char* kDofMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_dof";
+	constexpr const char* kStyleMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_style";
 	constexpr const char* kPresetMarker  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_preset";
 	constexpr const char* kWeatherCatMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_category";
 	constexpr const char* kWeatherFormIDMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_formid";
@@ -264,6 +267,12 @@ namespace cs::features
 		return &instance;
 	}
 
+	Imagespace::Imagespace() :
+		presetManager(std::make_unique<imagespace::PresetManager>())
+	{}
+
+	Imagespace::~Imagespace() = default;
+
 	void Imagespace::Load()
 	{
 		LoadSettings();
@@ -315,174 +324,82 @@ namespace cs::features
 			table = toml::table{};
 		}
 
-		auto readInt = [&table](const char* a_key, int a_current, int a_min, int a_max) {
-			const auto value = table["settings"][a_key].value_or(static_cast<std::int64_t>(a_current));
-			const auto clamped = std::clamp(value, static_cast<std::int64_t>(a_min), static_cast<std::int64_t>(a_max));
-			return static_cast<int>(clamped);
-		};
-		auto readFloat = [&table](const char* a_key, float a_current, float a_min, float a_max) {
-			const auto value = table["settings"][a_key].value_or(static_cast<double>(a_current));
-			return std::clamp(static_cast<float>(value), a_min, a_max);
-		};
-
-		settings.enabled           = table["settings"]["enabled"].value_or(settings.enabled);
-		settings.preset            = readInt("preset", settings.preset, 0, 4);
-		settings.forceWithENB      = table["settings"]["force_with_enb"].value_or(settings.forceWithENB);
-		settings.tonemapOperator   = readInt("tonemap_operator", settings.tonemapOperator, 0, 3);
-		settings.exposure          = readFloat("exposure", settings.exposure, 0.25f, 4.0f);
-		settings.lutEnable         = table["settings"]["lut_enable"].value_or(settings.lutEnable);
-		settings.lutPath           = table["settings"]["lut_path"].value_or(settings.lutPath);
-		settings.lutStrength       = readFloat("lut_strength", settings.lutStrength, 0.0f, 1.0f);
-
-		settings.adaptiveExposure   = table["settings"]["adaptive_exposure"].value_or(settings.adaptiveExposure);
-		settings.adaptationSpeedUp  = readFloat("adaptation_speed_up", settings.adaptationSpeedUp, 0.05f, 10.0f);
-		settings.adaptationSpeedDown = readFloat("adaptation_speed_down", settings.adaptationSpeedDown, 0.05f, 30.0f);
-		settings.exposureKey        = readFloat("exposure_key", settings.exposureKey, 0.05f, 0.5f);
-		settings.exposureMin        = readFloat("exposure_min", settings.exposureMin, 0.005f, 0.5f);
-		settings.exposureMax        = readFloat("exposure_max", settings.exposureMax, 1.0f, 16.0f);
-
-		settings.bloomEnable    = table["settings"]["bloom_enable"].value_or(settings.bloomEnable);
-		settings.bloomThreshold = readFloat("bloom_threshold", settings.bloomThreshold, 0.0f, 2.0f);
-		settings.bloomIntensity = readFloat("bloom_intensity", settings.bloomIntensity, 0.0f, 0.3f);
-		settings.bloomMips      = readInt("bloom_mips", settings.bloomMips, 3, 6);
-		if (const auto* weights = table["settings"]["bloom_mip_weights"].as_array();
-			weights && weights->size() == std::size(settings.bloomMipWeights)) {
-			bool valid = true;
-			for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
-				if (!(*weights)[i].value<double>()) {
-					valid = false;
-					break;
-				}
-			}
-			if (valid) {
-				for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
-					const auto weight = (*weights)[i].value<double>();
-					settings.bloomMipWeights[i] = std::clamp(static_cast<float>(*weight), 0.0f, 4.0f);
-				}
-			}
-		}
-
-		settings.vignetteEnable    = table["settings"]["vignette_enable"].value_or(settings.vignetteEnable);
-		settings.vignetteIntensity = readFloat("vignette_intensity", settings.vignetteIntensity, 0.0f, 1.0f);
-		settings.caEnable          = table["settings"]["ca_enable"].value_or(settings.caEnable);
-		settings.caIntensity       = readFloat("ca_intensity", settings.caIntensity, 0.0f, 2.0f);
-		settings.sharpenEnable     = table["settings"]["sharpen_enable"].value_or(settings.sharpenEnable);
-		settings.sharpness         = readFloat("sharpness", settings.sharpness, 0.0f, 1.0f);
-
-		settings.sunspriteEnable    = table["settings"]["sunsprite_enable"].value_or(settings.sunspriteEnable);
-		settings.sunspriteIntensity = readFloat("sunsprite_intensity", settings.sunspriteIntensity, 0.0f, 2.0f);
-		settings.sunspriteSize      = readFloat("sunsprite_size", settings.sunspriteSize, 0.01f, 0.2f);
-		settings.lensFlareEnable    = table["settings"]["lens_flare_enable"].value_or(settings.lensFlareEnable);
-		settings.lensFlareIntensity = readFloat("lens_flare_intensity", settings.lensFlareIntensity, 0.0f, 2.0f);
-		settings.lensFlareGhosts    = readInt("lens_flare_ghosts", settings.lensFlareGhosts, 3, 7);
-		settings.dirtEnable         = table["settings"]["dirt_enable"].value_or(settings.dirtEnable);
-		settings.dirtIntensity      = readFloat("dirt_intensity", settings.dirtIntensity, 0.0f, 2.0f);
-
-		settings.dofEnable      = table["settings"]["dof_enable"].value_or(settings.dofEnable);
-		settings.aperture       = readFloat("aperture", settings.aperture, 0.0f, 0.5f);
-		settings.focusDistance  = readFloat("focus_distance", settings.focusDistance, 10.0f, 100000.0f);
-		settings.focalLength    = readFloat("focal_length", settings.focalLength, 1.0f, 200.0f);
-		settings.focusRange     = readFloat("focus_range", settings.focusRange, 10.0f, 10000.0f);
-		settings.dofQuality     = readInt("dof_quality", settings.dofQuality, 0, 2);
-		settings.cocLimitFactor = readFloat("coc_limit_factor", settings.cocLimitFactor, 0.005f, 0.10f);
-		settings.bokehIntensity = readFloat("bokeh_intensity", settings.bokehIntensity, 0.0f, 1.0f);
-		settings.anamorphRatio  = readFloat("anamorph_ratio", settings.anamorphRatio, 0.25f, 4.0f);
-
-		// Per-weather profiles (Phase 2).
+		// Reset to defaults so missing keys land on struct-defined defaults rather than carrying
+		// stale state from a prior load.
+		settings        = Settings{};
 		weatherProfiles = imagespace::WeatherProfiles{};
-		if (const auto* weatherNode = table["weather"].as_table()) {
-			weatherProfiles.enablePerWeatherProfiles =
-				(*weatherNode)["enable_per_weather_profiles"].value_or(false);
 
-			static constexpr std::array<std::pair<std::string_view, imagespace::WeatherCategory>,
-				static_cast<std::size_t>(imagespace::WeatherCategory::kCount)> kCatTables = { {
-					{ "clear",    imagespace::WeatherCategory::kClear    },
-					{ "overcast", imagespace::WeatherCategory::kOvercast },
-					{ "fog",      imagespace::WeatherCategory::kFog      },
-					{ "rain",     imagespace::WeatherCategory::kRain     },
-					{ "radstorm", imagespace::WeatherCategory::kRadstorm },
-					{ "snow",     imagespace::WeatherCategory::kSnow     },
-					{ "interior", imagespace::WeatherCategory::kInterior },
-					{ "unknown",  imagespace::WeatherCategory::kUnknown  },
-				} };
+		imagespace::ParseSettings(table, settings);
+		imagespace::ParseWeather(table, weatherProfiles, /*a_dropOverrides=*/false);
 
-			for (const auto& [name, cat] : kCatTables) {
-				const auto* sub = (*weatherNode)[name].as_table();
-				if (!sub) continue;
-				auto& ov = weatherProfiles.overlays[static_cast<std::size_t>(cat)];
-				auto readOptF = [&sub](const char* k, float lo, float hi) -> std::optional<float> {
-					if (auto v = (*sub)[k].value<double>()) return std::clamp(static_cast<float>(*v), lo, hi);
-					return std::nullopt;
-				};
-				auto readOptI = [&sub](const char* k, int lo, int hi) -> std::optional<int> {
-					if (auto v = (*sub)[k].value<std::int64_t>()) return static_cast<int>(std::clamp(*v, static_cast<std::int64_t>(lo), static_cast<std::int64_t>(hi)));
-					return std::nullopt;
-				};
-				auto readOptB = [&sub](const char* k) -> std::optional<bool> {
-					if (auto v = (*sub)[k].value<bool>()) return *v;
-					return std::nullopt;
-				};
-				auto readOptS = [&sub](const char* k) -> std::optional<std::string> {
-					if (auto v = (*sub)[k].value<std::string>()) return *v;
-					return std::nullopt;
-				};
-				ov.exposure           = readOptF("exposure",           0.25f, 4.0f);
-				ov.lutEnable          = readOptB("lut_enable");
-				ov.lutPath            = readOptS("lut_path");
-				ov.lutStrength        = readOptF("lut_strength",       0.0f, 1.0f);
-				ov.bloomEnable        = readOptB("bloom_enable");
-				ov.bloomThreshold     = readOptF("bloom_threshold",    0.0f, 2.0f);
-				ov.bloomIntensity     = readOptF("bloom_intensity",    0.0f, 0.3f);
-				if (const auto* w = (*sub)["bloom_mip_weights"].as_array(); w && w->size() == 6) {
-					std::array<float, 6> arr{};
-					bool valid = true;
-					for (std::size_t i = 0; i < 6 && valid; ++i) {
-						if (auto v = (*w)[i].value<double>()) arr[i] = std::clamp(static_cast<float>(*v), 0.0f, 4.0f);
-						else valid = false;
-					}
-					if (valid) ov.bloomMipWeights = arr;
-				}
-				ov.vignetteEnable     = readOptB("vignette_enable");
-				ov.vignetteIntensity  = readOptF("vignette_intensity", 0.0f, 1.0f);
-				ov.caEnable           = readOptB("ca_enable");
-				ov.caIntensity        = readOptF("ca_intensity",       0.0f, 2.0f);
-				ov.sunspriteIntensity = readOptF("sunsprite_intensity", 0.0f, 2.0f);
-				ov.sunspriteSize      = readOptF("sunsprite_size",     0.01f, 0.2f);
-				ov.lensFlareEnable    = readOptB("lens_flare_enable");
-				ov.lensFlareIntensity = readOptF("lens_flare_intensity", 0.0f, 2.0f);
-				ov.lensFlareGhosts    = readOptI("lens_flare_ghosts",  3, 7);
-				ov.dirtEnable         = readOptB("dirt_enable");
-				ov.dirtIntensity      = readOptF("dirt_intensity",     0.0f, 2.0f);
+		// [preset] block: persisted active identity + auto-load toggle. Owned by Imagespace.cpp
+		// (not by ConfigIO) so the snapshot semantics of preset files stay free of preset-machinery
+		// metadata.
+		activePresetIdentity.clear();
+		activePresetName.clear();
+		autoLoadPresetOnBoot = false;
+		if (const auto* presetTbl = table["preset"].as_table()) {
+			if (const auto v = (*presetTbl)["active"].value<std::string>()) {
+				// Lowercase here so identities stay comparable regardless of how the file was edited.
+				activePresetIdentity = *v;
+				std::transform(activePresetIdentity.begin(), activePresetIdentity.end(), activePresetIdentity.begin(),
+					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 			}
+			autoLoadPresetOnBoot = (*presetTbl)["auto_load_on_boot"].value_or(false);
+		}
 
-			if (const auto* ovTbl = (*weatherNode)["overrides"].as_table()) {
-				for (const auto& [key, val] : *ovTbl) {
-					const std::string keyStr(key.str());
-					std::uint32_t formID = 0;
-					const auto* begin = keyStr.c_str();
-					const auto* end   = begin + keyStr.size();
-					int base = 10;
-					if (keyStr.size() > 2 && keyStr[0] == '0' && (keyStr[1] == 'x' || keyStr[1] == 'X')) {
-						begin += 2;
-						base = 16;
-					}
-					auto [ptr, ec] = std::from_chars(begin, end, formID, base);
-					if (ec != std::errc{} || ptr != end) continue;
-					if (auto v = val.value<std::string>()) {
-						if (auto cat = imagespace::ParseCategory(*v)) {
-							weatherProfiles.userOverrides.emplace(formID, *cat);
-						}
-					}
-				}
+		presetManager->Refresh();
+
+		// Reconstruct display name from refreshed metadata so the UI status line is correct even
+		// when neither the marker nor auto-load fires (otherwise activePresetName stays empty
+		// while activePresetIdentity has a value).
+		if (!activePresetIdentity.empty()) {
+			if (const auto* meta = presetManager->FindByIdentity(activePresetIdentity)) {
+				activePresetName = meta->name;
 			}
 		}
 
-		// Preload all referenced LUTs synchronously (config-apply thread). Render thread only consults
-		// TryGet after this point.
-		lutCache.Preload(imagespace::CollectReferencedLUTs(settings.lutPath, weatherProfiles));
+		// Preset marker (smoke harness) wins over auto_load_on_boot.
+		std::string markerPayload;
+		const bool  markerHit = imagespace::ReadTextMarker(std::filesystem::path(kPresetMarker), markerPayload);
+
+		auto resolvePayload = [this](std::string_view payload) -> const imagespace::PresetMeta* {
+			if (payload.size() >= 2 && (payload[1] == ':') && (payload[0] == 'B' || payload[0] == 'U' || payload[0] == 'b' || payload[0] == 'u')) {
+				return presetManager->FindByIdentity(payload);
+			}
+			return presetManager->FindByName(payload, /*a_preferUser=*/true);
+		};
+
+		if (markerHit) {
+			if (const auto* meta = resolvePayload(markerPayload)) {
+				ApplyPresetByIdentity(meta->identity);
+				L->info("Preset marker honored: '{}' -> {}", markerPayload, meta->identity);
+			} else {
+				L->warn("Preset marker payload '{}' did not resolve to a known preset", markerPayload);
+			}
+		} else if (autoLoadPresetOnBoot && !activePresetIdentity.empty()) {
+			const imagespace::PresetMeta* meta = presetManager->FindByIdentity(activePresetIdentity);
+			if (!meta) {
+				meta = presetManager->FindByName(activePresetName, /*a_preferUser=*/true);
+			}
+			if (meta) {
+				ApplyPresetByIdentity(meta->identity);
+			} else {
+				L->warn("Auto-load preset '{}' not found; keeping Imagespace.toml-derived settings",
+					activePresetName.empty() ? activePresetIdentity : activePresetName);
+			}
+		}
+
+		pendingComboIdentity = activePresetIdentity;
+
+		// LUT preload deferred: if D3D is ready (mid-game reload), do it now; otherwise OnD3D11Ready
+		// will pick it up. Avoids poisoning LUTCache's negative cache during pre-D3D Imagespace::Load().
+		if (cs::util::GetD3DDevice() != nullptr) {
+			ApplyLUTState();
+		}
 
 		// Smoke-harness markers.
-		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
+		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, style_c = 0;
 		const bool opP     = cs::util::ReadMarker(kOpMarker,      op_c);
 		const bool lutP    = cs::util::ReadMarker(kLutMarker,     lut_c);
 		const bool adaptP  = cs::util::ReadMarker(kAdaptMarker,   adapt_c);
@@ -491,7 +408,7 @@ namespace cs::features
 		const bool caP     = cs::util::ReadMarker(kCAMarker,      ca_c);
 		const bool sharpP  = cs::util::ReadMarker(kSharpenMarker, sharp_c);
 		const bool dofP    = cs::util::ReadMarker(kDofMarker,     dof_c);
-		const bool presetP = cs::util::ReadMarker(kPresetMarker,  preset_c);
+		const bool styleP  = cs::util::ReadMarker(kStyleMarker,   style_c);
 
 		// Weather-category marker: single ASCII digit '0'..'7' matching WeatherCategory enum order.
 		// Resolver-only mode: bypasses Sky and forces the chosen category at pct=1.0.
@@ -523,7 +440,7 @@ namespace cs::features
 			}
 		} catch (...) {}
 
-		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || presetP;
+		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || styleP;
 
 		if (testModeActive) {
 			// Reset to deterministic baseline.
@@ -556,22 +473,22 @@ namespace cs::features
 				settings.focalLength   = 50.0f;
 				settings.dofQuality    = 2;
 			}
-			// preset_c '0' = passthrough baseline; '1'..'4' = preset with toggles forced so intensities are observable.
-			if (presetP && preset_c >= '1' && preset_c <= '4') {
-				ApplyPreset(static_cast<Preset>(preset_c - '0'));
+			// style_c '0' = passthrough baseline; '1'..'4' = style with toggles forced so intensities are observable.
+			if (styleP && style_c >= '1' && style_c <= '4') {
+				ApplyStyle(static_cast<Style>(style_c - '0'));
 				settings.bloomEnable     = true;
 				settings.vignetteEnable  = true;
 				settings.caEnable        = true;
 				settings.sharpenEnable   = true;
 				settings.sunspriteEnable = true;
 				settings.lensFlareEnable = true;
-			} else if (presetP && preset_c == '0') {
-				settings.preset = static_cast<int>(Preset::kCustom);
+			} else if (styleP && style_c == '0') {
+				settings.style = static_cast<int>(Style::kCustom);
 			}
-			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={} dof={} preset={}",
+			L->info("Test mode: op={} lut={} adapt={} bloom={} vig={} ca={} sharp={} dof={} style={}",
 				settings.tonemapOperator, settings.lutEnable, settings.adaptiveExposure,
 				settings.bloomEnable, settings.vignetteEnable, settings.caEnable, settings.sharpenEnable,
-				settings.dofEnable, settings.preset);
+				settings.dofEnable, settings.style);
 		}
 	}
 
@@ -587,111 +504,14 @@ namespace cs::features
 			table = toml::table{};
 		}
 
-		auto& s = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-		s.insert_or_assign("enabled", settings.enabled);
-		s.insert_or_assign("preset", static_cast<std::int64_t>(settings.preset));
-		s.insert_or_assign("force_with_enb", settings.forceWithENB);
-		s.insert_or_assign("tonemap_operator", static_cast<std::int64_t>(settings.tonemapOperator));
-		s.insert_or_assign("exposure", static_cast<double>(settings.exposure));
-		s.insert_or_assign("lut_enable", settings.lutEnable);
-		s.insert_or_assign("lut_path", settings.lutPath);
-		s.insert_or_assign("lut_strength", static_cast<double>(settings.lutStrength));
-		s.insert_or_assign("adaptive_exposure", settings.adaptiveExposure);
-		s.insert_or_assign("adaptation_speed_up", static_cast<double>(settings.adaptationSpeedUp));
-		s.insert_or_assign("adaptation_speed_down", static_cast<double>(settings.adaptationSpeedDown));
-		s.insert_or_assign("exposure_key", static_cast<double>(settings.exposureKey));
-		s.insert_or_assign("exposure_min", static_cast<double>(settings.exposureMin));
-		s.insert_or_assign("exposure_max", static_cast<double>(settings.exposureMax));
-		s.insert_or_assign("bloom_enable", settings.bloomEnable);
-		s.insert_or_assign("bloom_threshold", static_cast<double>(settings.bloomThreshold));
-		s.insert_or_assign("bloom_intensity", static_cast<double>(settings.bloomIntensity));
-		s.insert_or_assign("bloom_mips", static_cast<std::int64_t>(settings.bloomMips));
-		toml::array bloomMipWeights;
-		for (const auto weight : settings.bloomMipWeights) {
-			bloomMipWeights.push_back(static_cast<double>(weight));
-		}
-		s.insert_or_assign("bloom_mip_weights", std::move(bloomMipWeights));
-		s.insert_or_assign("vignette_enable", settings.vignetteEnable);
-		s.insert_or_assign("vignette_intensity", static_cast<double>(settings.vignetteIntensity));
-		s.insert_or_assign("ca_enable", settings.caEnable);
-		s.insert_or_assign("ca_intensity", static_cast<double>(settings.caIntensity));
-		s.insert_or_assign("sharpen_enable", settings.sharpenEnable);
-		s.insert_or_assign("sharpness", static_cast<double>(settings.sharpness));
-		s.insert_or_assign("sunsprite_enable", settings.sunspriteEnable);
-		s.insert_or_assign("sunsprite_intensity", static_cast<double>(settings.sunspriteIntensity));
-		s.insert_or_assign("sunsprite_size", static_cast<double>(settings.sunspriteSize));
-		s.insert_or_assign("lens_flare_enable", settings.lensFlareEnable);
-		s.insert_or_assign("lens_flare_intensity", static_cast<double>(settings.lensFlareIntensity));
-		s.insert_or_assign("lens_flare_ghosts", static_cast<std::int64_t>(settings.lensFlareGhosts));
-		s.insert_or_assign("dirt_enable", settings.dirtEnable);
-		s.insert_or_assign("dirt_intensity", static_cast<double>(settings.dirtIntensity));
-		s.insert_or_assign("dof_enable", settings.dofEnable);
-		s.insert_or_assign("aperture", static_cast<double>(settings.aperture));
-		s.insert_or_assign("focus_distance", static_cast<double>(settings.focusDistance));
-		s.insert_or_assign("focal_length", static_cast<double>(settings.focalLength));
-		s.insert_or_assign("focus_range", static_cast<double>(settings.focusRange));
-		s.insert_or_assign("dof_quality", static_cast<std::int64_t>(settings.dofQuality));
-		s.insert_or_assign("coc_limit_factor", static_cast<double>(settings.cocLimitFactor));
-		s.insert_or_assign("bokeh_intensity", static_cast<double>(settings.bokehIntensity));
-		s.insert_or_assign("anamorph_ratio", static_cast<double>(settings.anamorphRatio));
+		imagespace::EmitSettings(table, settings);
+		imagespace::EmitWeather(table, weatherProfiles, /*a_includeOverrides=*/true);
 
-		// Per-weather profiles. Only emit overlay keys that are set (std::optional has a value) so
-		// "fall through to base" semantics are preserved across round-trip.
+		// [preset] block: persist active identity + auto-load.
 		{
-			auto& w = table.insert_or_assign("weather", toml::table{}).first->second.as_table()->ref<toml::table>();
-			w.insert_or_assign("enable_per_weather_profiles", weatherProfiles.enablePerWeatherProfiles);
-
-			static constexpr std::array<std::pair<std::string_view, imagespace::WeatherCategory>,
-				static_cast<std::size_t>(imagespace::WeatherCategory::kCount)> kCatTables = { {
-					{ "clear",    imagespace::WeatherCategory::kClear    },
-					{ "overcast", imagespace::WeatherCategory::kOvercast },
-					{ "fog",      imagespace::WeatherCategory::kFog      },
-					{ "rain",     imagespace::WeatherCategory::kRain     },
-					{ "radstorm", imagespace::WeatherCategory::kRadstorm },
-					{ "snow",     imagespace::WeatherCategory::kSnow     },
-					{ "interior", imagespace::WeatherCategory::kInterior },
-					{ "unknown",  imagespace::WeatherCategory::kUnknown  },
-				} };
-
-			for (const auto& [name, cat] : kCatTables) {
-				const auto& ov = weatherProfiles.overlays[static_cast<std::size_t>(cat)];
-				if (ov.SetKeyCount() == 0) continue;
-				toml::table cat_tbl;
-				if (ov.exposure)           cat_tbl.insert_or_assign("exposure",           static_cast<double>(*ov.exposure));
-				if (ov.lutEnable)          cat_tbl.insert_or_assign("lut_enable",         *ov.lutEnable);
-				if (ov.lutPath)            cat_tbl.insert_or_assign("lut_path",           *ov.lutPath);
-				if (ov.lutStrength)        cat_tbl.insert_or_assign("lut_strength",       static_cast<double>(*ov.lutStrength));
-				if (ov.bloomEnable)        cat_tbl.insert_or_assign("bloom_enable",       *ov.bloomEnable);
-				if (ov.bloomThreshold)     cat_tbl.insert_or_assign("bloom_threshold",    static_cast<double>(*ov.bloomThreshold));
-				if (ov.bloomIntensity)     cat_tbl.insert_or_assign("bloom_intensity",    static_cast<double>(*ov.bloomIntensity));
-				if (ov.bloomMipWeights) {
-					toml::array arr;
-					for (const auto v : *ov.bloomMipWeights) arr.push_back(static_cast<double>(v));
-					cat_tbl.insert_or_assign("bloom_mip_weights", std::move(arr));
-				}
-				if (ov.vignetteEnable)     cat_tbl.insert_or_assign("vignette_enable",    *ov.vignetteEnable);
-				if (ov.vignetteIntensity)  cat_tbl.insert_or_assign("vignette_intensity", static_cast<double>(*ov.vignetteIntensity));
-				if (ov.caEnable)           cat_tbl.insert_or_assign("ca_enable",          *ov.caEnable);
-				if (ov.caIntensity)        cat_tbl.insert_or_assign("ca_intensity",       static_cast<double>(*ov.caIntensity));
-				if (ov.sunspriteIntensity) cat_tbl.insert_or_assign("sunsprite_intensity", static_cast<double>(*ov.sunspriteIntensity));
-				if (ov.sunspriteSize)      cat_tbl.insert_or_assign("sunsprite_size",     static_cast<double>(*ov.sunspriteSize));
-				if (ov.lensFlareEnable)    cat_tbl.insert_or_assign("lens_flare_enable",  *ov.lensFlareEnable);
-				if (ov.lensFlareIntensity) cat_tbl.insert_or_assign("lens_flare_intensity", static_cast<double>(*ov.lensFlareIntensity));
-				if (ov.lensFlareGhosts)    cat_tbl.insert_or_assign("lens_flare_ghosts",  static_cast<std::int64_t>(*ov.lensFlareGhosts));
-				if (ov.dirtEnable)         cat_tbl.insert_or_assign("dirt_enable",        *ov.dirtEnable);
-				if (ov.dirtIntensity)      cat_tbl.insert_or_assign("dirt_intensity",     static_cast<double>(*ov.dirtIntensity));
-				w.insert_or_assign(name, std::move(cat_tbl));
-			}
-
-			if (!weatherProfiles.userOverrides.empty()) {
-				toml::table ov_tbl;
-				for (const auto& [formID, cat] : weatherProfiles.userOverrides) {
-					char hex[12];
-					std::snprintf(hex, sizeof(hex), "0x%08X", formID);
-					ov_tbl.insert_or_assign(hex, std::string(imagespace::CategoryName(cat)));
-				}
-				w.insert_or_assign("overrides", std::move(ov_tbl));
-			}
+			auto& p = table.insert_or_assign("preset", toml::table{}).first->second.as_table()->ref<toml::table>();
+			p.insert_or_assign("active",            activePresetIdentity);
+			p.insert_or_assign("auto_load_on_boot", autoLoadPresetOnBoot);
 		}
 
 		std::ofstream out(kConfigPath);
@@ -700,7 +520,44 @@ namespace cs::features
 		}
 	}
 
-	struct PresetValues
+	void Imagespace::ApplyPresetByIdentity(std::string_view a_identity)
+	{
+		lastPresetError.clear();
+		const auto* meta = presetManager->FindByIdentity(a_identity);
+		if (!meta) {
+			lastPresetError = "Preset not found: " + std::string(a_identity);
+			L->warn("{}", lastPresetError);
+			return;
+		}
+
+		Settings                    nextSettings{};
+		imagespace::WeatherProfiles nextProfiles{};
+		std::string                 err;
+		if (!presetManager->Load(*meta, nextSettings, nextProfiles, err)) {
+			lastPresetError = "Load failed: " + err;
+			L->warn("{}", lastPresetError);
+			return;
+		}
+
+		// Builtin presets must not stamp formID mappings into user state; carry the live overrides
+		// across the commit so loading a shipped preset leaves the user's saved formID -> category
+		// map untouched.
+		if (meta->builtin) {
+			nextProfiles.userOverrides = weatherProfiles.userOverrides;
+		}
+
+		settings        = std::move(nextSettings);
+		weatherProfiles = std::move(nextProfiles);
+
+		activePresetIdentity = meta->identity;
+		activePresetName     = meta->name;
+		pendingComboIdentity = meta->identity;
+
+		ApplyLUTState();
+		L->info("Applied preset: {} ({})", meta->name, meta->builtin ? "builtin" : "user");
+	}
+
+	struct StyleValues
 	{
 		int   tonemapOperator;
 		float exposureKey;
@@ -712,9 +569,9 @@ namespace cs::features
 		float lensFlareIntensity;
 	};
 
-	// Indexed by Preset enum. Custom (idx 0) is a sentinel and never read. Preset shape mirrors SSS's:
+	// Indexed by Style enum. Custom (idx 0) is a sentinel and never read. Style shape mirrors SSS's:
 	// intensity-only recipe, master toggles (bBloomEnable, bSunspriteEnable, bLensFlareEnable, etc.) stay user-controlled.
-	static constexpr PresetValues kPresets[5] = {
+	static constexpr StyleValues kStyles[5] = {
 		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.0f },                           // Custom
 		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.40f, 0.50f },                        // Subtle: lighter touches across the board.
 		{ 1, 0.18f, 0.05f, 0.30f, 0.50f, 0.40f, 0.60f, 0.80f },                        // Standard: current ship defaults.
@@ -722,11 +579,11 @@ namespace cs::features
 		{ 1, 0.16f, 0.08f, 0.50f, 0.40f, 0.30f, 0.70f, 0.80f },                        // Cinematic: low key, soft bloom, strong vignette.
 	};
 
-	void Imagespace::ApplyPreset(Preset preset)
+	void Imagespace::ApplyStyle(Style style)
 	{
-		const int idx = static_cast<int>(preset);
-		if (preset != Preset::kCustom && idx >= 0 && idx < static_cast<int>(std::size(kPresets))) {
-			const auto& v = kPresets[idx];
+		const int idx = static_cast<int>(style);
+		if (style != Style::kCustom && idx >= 0 && idx < static_cast<int>(std::size(kStyles))) {
+			const auto& v = kStyles[idx];
 			settings.tonemapOperator           = v.tonemapOperator;
 			settings.exposureKey        = v.exposureKey;
 			settings.bloomIntensity     = v.bloomIntensity;
@@ -736,15 +593,15 @@ namespace cs::features
 			settings.sunspriteIntensity = v.sunspriteIntensity;
 			settings.lensFlareIntensity = v.lensFlareIntensity;
 		}
-		settings.preset = idx;
+		settings.style = idx;
 	}
 
-	bool Imagespace::SettingsMatchPreset(Preset preset) const
+	bool Imagespace::SettingsMatchStyle(Style style) const
 	{
-		const int idx = static_cast<int>(preset);
-		if (preset == Preset::kCustom || idx < 0 || idx >= static_cast<int>(std::size(kPresets)))
+		const int idx = static_cast<int>(style);
+		if (style == Style::kCustom || idx < 0 || idx >= static_cast<int>(std::size(kStyles)))
 			return false;
-		const auto& v = kPresets[idx];
+		const auto& v = kStyles[idx];
 		return settings.tonemapOperator == v.tonemapOperator
 			&& std::fabs(settings.exposureKey        - v.exposureKey)        < 1e-3f
 			&& std::fabs(settings.bloomIntensity     - v.bloomIntensity)     < 1e-3f
@@ -1248,56 +1105,32 @@ namespace cs::features
 			lutLoadedPath.clear();
 			return false;
 		}
-		const std::string path = std::string(kLUTDir) + a_filename + ".dds";
-		if (!std::filesystem::exists(path)) {
-			L->warn("LUT file missing: {}", path);
+		auto loaded = imagespace::LoadLUTFromFile(a_filename);
+		if (loaded.status != imagespace::LUTLoadStatus::Ok) {
+			// Loader already logged the specific reason. DeviceNotReady is the only non-warning case
+			// (OnD3D11Ready will retry); leave lutSRV/lutLoadedPath unchanged so the previous LUT
+			// (if any) stays in effect.
 			return false;
 		}
-
-		auto* device = cs::util::GetD3DDevice();
-		if (!device)
-			return false;
-
-		DirectX::ScratchImage img;
-		DirectX::TexMetadata  meta{};
-		const std::wstring wpath(path.begin(), path.end());
-		if (FAILED(DirectX::LoadFromDDSFile(wpath.c_str(), DirectX::DDS_FLAGS_NONE, &meta, img))) {
-			L->warn("LUT load failed: {}", path);
-			return false;
-		}
-		if (meta.dimension != DirectX::TEX_DIMENSION_TEXTURE3D ||
-			meta.width != 32 || meta.height != 32 || meta.depth != 32) {
-			L->warn("LUT dims mismatch ({}x{}x{} dim={}); expected 32x32x32 Texture3D",
-				static_cast<uint32_t>(meta.width), static_cast<uint32_t>(meta.height),
-				static_cast<uint32_t>(meta.depth), static_cast<int>(meta.dimension));
-			return false;
-		}
-
-		winrt::com_ptr<ID3D11Resource> resource;
-		if (FAILED(DirectX::CreateTexture(device, img.GetImages(), img.GetImageCount(), meta, resource.put()))) {
-			L->warn("LUT CreateTexture failed: {}", path);
-			return false;
-		}
-		winrt::com_ptr<ID3D11Texture3D> tex;
-		if (FAILED(resource->QueryInterface(IID_PPV_ARGS(tex.put())))) {
-			L->warn("LUT resource is not Texture3D: {}", path);
-			return false;
-		}
-		winrt::com_ptr<ID3D11ShaderResourceView> srv;
-		D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-		sd.Format = static_cast<DXGI_FORMAT>(meta.format);
-		sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE3D;
-		sd.Texture3D.MipLevels = 1;
-		if (FAILED(device->CreateShaderResourceView(tex.get(), &sd, srv.put()))) {
-			L->warn("LUT SRV creation failed: {}", path);
-			return false;
-		}
-
-		// SRV holds a refcount on the underlying Texture3D for the lifetime of the SRV.
-		lutSRV     = srv;
+		lutSRV        = std::move(loaded.srv);
 		lutLoadedPath = a_filename;
-		L->info("LUT loaded: {}", path);
 		return true;
+	}
+
+	void Imagespace::ApplyLUTState()
+	{
+		if (cs::util::GetD3DDevice() == nullptr) {
+			return;
+		}
+		if (settings.lutEnable && !settings.lutPath.empty()) {
+			LoadLUTFromDisk(settings.lutPath);
+		}
+		lutCache.Preload(imagespace::CollectReferencedLUTs(settings.lutPath, weatherProfiles));
+	}
+
+	void Imagespace::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
+	{
+		ApplyLUTState();
 	}
 
 	void Imagespace::RunFrame()
@@ -1719,8 +1552,8 @@ namespace cs::features
 		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
 		auto markCustomIfEdited = [&] {
 			if (ImGui::IsItemDeactivatedAfterEdit()) {
-				if (!SettingsMatchPreset(static_cast<Preset>(settings.preset)))
-					settings.preset = static_cast<int>(Preset::kCustom);
+				if (!SettingsMatchStyle(static_cast<Style>(settings.style)))
+					settings.style = static_cast<int>(Style::kCustom);
 				dirty = true;
 			}
 		};
@@ -1734,25 +1567,198 @@ namespace cs::features
 		}
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Preset");
-		const char* presetNames[] = { "Custom", "Subtle", "Standard", "Vivid", "Cinematic" };
-		int presetIdx = std::clamp(settings.preset, 0, 4);
-		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
-			if (presetIdx != static_cast<int>(Preset::kCustom)) {
-				ApplyPreset(static_cast<Preset>(presetIdx));
+		if (ImGui::CollapsingHeader("Presets")) {
+			const auto& presets = presetManager->List();
+
+			// Status line.
+			if (activePresetIdentity.empty()) {
+				ImGui::TextDisabled("Active: (none)");
 			} else {
-				settings.preset = static_cast<int>(Preset::kCustom);
+				const bool builtin = !activePresetIdentity.empty() && activePresetIdentity[0] == 'b';
+				const auto* active = presetManager->FindByIdentity(activePresetIdentity);
+				if (active) {
+					ImGui::Text("Active: %s (%s)", activePresetName.c_str(), builtin ? "builtin" : "user");
+				} else {
+					ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "Active: %s (missing)", activePresetName.c_str());
+				}
+			}
+			if (!lastPresetError.empty()) {
+				ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", lastPresetError.c_str());
+			}
+
+			// Combo.
+			std::string pendingLabel;
+			if (pendingComboIdentity.empty() && !presets.empty()) {
+				pendingComboIdentity = presets.front().identity;
+			}
+			if (const auto* sel = presetManager->FindByIdentity(pendingComboIdentity)) {
+				pendingLabel.assign(sel->builtin ? "B: " : "U: ");
+				pendingLabel.append(sel->name);
+			} else if (!presets.empty()) {
+				pendingComboIdentity = presets.front().identity;
+				pendingLabel.assign(presets.front().builtin ? "B: " : "U: ");
+				pendingLabel.append(presets.front().name);
+			} else {
+				pendingLabel = "(no presets found)";
+			}
+
+			ImGui::BeginDisabled(presets.empty());
+			if (ImGui::BeginCombo("Preset", pendingLabel.c_str())) {
+				for (const auto& meta : presets) {
+					std::string label = meta.builtin ? "B: " : "U: ";
+					label.append(meta.name);
+					const bool selected = (meta.identity == pendingComboIdentity);
+					if (ImGui::Selectable(label.c_str(), selected)) {
+						pendingComboIdentity = meta.identity;
+					}
+					if (selected) ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			ImGui::EndDisabled();
+
+			// Action buttons.
+			const auto* pending  = presetManager->FindByIdentity(pendingComboIdentity);
+			const auto* active   = presetManager->FindByIdentity(activePresetIdentity);
+			const bool  canSave  = active && !active->builtin;
+			const bool  canDel   = active && !active->builtin;
+
+			ImGui::BeginDisabled(!pending);
+			if (ImGui::Button("Load")) {
+				if (dirty) {
+					SaveSettings();
+					dirty = false;
+				}
+				ApplyPresetByIdentity(pendingComboIdentity);
+				dirty = true;  // persist [preset] block update on next flush.
+			}
+			ImGui::EndDisabled();
+
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!canSave);
+			if (ImGui::Button("Save")) {
+				std::string err;
+				if (presetManager->Save(active->path, settings, weatherProfiles, active->name, err, /*a_allowOverwrite=*/true)) {
+					std::string savedName = active->name;
+					presetManager->Refresh();
+					if (const auto* re = presetManager->FindByName(savedName, /*a_preferUser=*/true)) {
+						activePresetIdentity = re->identity;
+						activePresetName     = re->name;
+						pendingComboIdentity = re->identity;
+					}
+					lastPresetError.clear();
+				} else {
+					lastPresetError = "Save failed: " + err;
+				}
+			}
+			ImGui::EndDisabled();
+
+			ImGui::SameLine();
+			if (ImGui::Button("Save As...")) {
+				presetSaveAsBuf[0] = '\0';
+				ImGui::OpenPopup("Save As Preset");
+			}
+
+			ImGui::SameLine();
+			ImGui::BeginDisabled(!canDel);
+			if (ImGui::Button("Delete")) {
+				ImGui::OpenPopup("Delete Preset?");
+			}
+			ImGui::EndDisabled();
+
+			ImGui::SameLine();
+			if (ImGui::Button("Refresh")) {
+				presetManager->Refresh();
+				if (!presetManager->FindByIdentity(pendingComboIdentity)) {
+					pendingComboIdentity.clear();
+				}
+				lastPresetError.clear();
+			}
+
+			dirty |= ImGui::Checkbox("Auto-load this preset on boot", &autoLoadPresetOnBoot);
+			ImGui::SetItemTooltip("On next plugin load, the active preset is reapplied over Imagespace.toml. Overridden by the .imagespace_force_preset marker.");
+
+			// Save As modal.
+			if (ImGui::BeginPopupModal("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+				ImGui::InputText("Name", presetSaveAsBuf, sizeof(presetSaveAsBuf));
+				ImGui::TextDisabled("Letters, digits, underscore, hyphen. 1-64 chars.");
+				if (ImGui::Button("Save", ImVec2(120, 0))) {
+					std::string err;
+					std::string name(presetSaveAsBuf);
+					if (!imagespace::ValidatePresetName(name, presetManager->List(), err)) {
+						lastPresetError = "Invalid name: " + err;
+					} else {
+						std::filesystem::path dst = std::filesystem::path(kConfigPath).parent_path() / "Imagespace" / "Presets" / (name + ".toml");
+						if (presetManager->Save(dst, settings, weatherProfiles, name, err)) {
+							presetManager->Refresh();
+							if (const auto* re = presetManager->FindByName(name, /*a_preferUser=*/true)) {
+								activePresetIdentity = re->identity;
+								activePresetName     = re->name;
+								pendingComboIdentity = re->identity;
+								dirty = true;
+							}
+							lastPresetError.clear();
+							ImGui::CloseCurrentPopup();
+						} else {
+							lastPresetError = "Save failed: " + err;
+						}
+					}
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndPopup();
+			}
+
+			// Delete confirm modal.
+			if (ImGui::BeginPopupModal("Delete Preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+				ImGui::Text("Delete preset '%s'?", active ? active->name.c_str() : "");
+				ImGui::TextDisabled("File is removed from disk. This cannot be undone.");
+				if (ImGui::Button("Delete", ImVec2(120, 0))) {
+					std::string err;
+					if (active && presetManager->Delete(*active, err)) {
+						presetManager->Refresh();
+						activePresetIdentity.clear();
+						activePresetName.clear();
+						pendingComboIdentity.clear();
+						autoLoadPresetOnBoot = false;
+						SaveSettings();  // persist cleared [preset] block immediately.
+						dirty = false;
+						lastPresetError.clear();
+					} else {
+						lastPresetError = "Delete failed: " + err;
+					}
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::SameLine();
+				if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndPopup();
+			}
+		}
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Style");
+		const char* styleNames[] = { "Custom", "Subtle", "Standard", "Vivid", "Cinematic" };
+		int styleIdx = std::clamp(settings.style, 0, 4);
+		if (ImGui::Combo("Style", &styleIdx, styleNames, IM_ARRAYSIZE(styleNames))) {
+			if (styleIdx != static_cast<int>(Style::kCustom)) {
+				ApplyStyle(static_cast<Style>(styleIdx));
+			} else {
+				settings.style = static_cast<int>(Style::kCustom);
 			}
 			dirty = true;
 		}
-		ImGui::SetItemTooltip("Editing any tracked slider switches preset to Custom. DOF / LUT / adaptive exposure are not part of presets.");
+		ImGui::SetItemTooltip("Quick-pick recipe for tonemap + bloom + lens. Editing any tracked slider switches style to Custom. DOF / LUT / adaptive exposure are not part of styles.");
 
 		ImGui::Separator();
 		ImGui::Text("Tonemap");
 		const char* opNames[] = { "Off (passthrough)", "Hable filmic", "Reinhard extended", "Lottes" };
 		if (ImGui::Combo("Operator", &settings.tonemapOperator, opNames, IM_ARRAYSIZE(opNames))) {
-			if (!SettingsMatchPreset(static_cast<Preset>(settings.preset)))
-				settings.preset = static_cast<int>(Preset::kCustom);
+			if (!SettingsMatchStyle(static_cast<Style>(settings.style)))
+				settings.style = static_cast<int>(Style::kCustom);
 			dirty = true;
 		}
 		ImGui::SetItemTooltip("Affects only the tonemap stage; bloom, LUT, and lens still run if their toggles are on.");

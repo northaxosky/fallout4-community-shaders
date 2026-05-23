@@ -11,6 +11,11 @@
 #include <string>
 #include <vector>
 
+namespace cs::features::imagespace
+{
+	class PresetManager;
+}
+
 namespace cs::features
 {
 	class Imagespace : public Feature
@@ -24,11 +29,12 @@ namespace cs::features
 		void Load() override;
 		void OnPostPostLoad() override;
 		void OnDataLoaded() override;
+		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
 
 		void RunFrame();
 
-		enum class Preset : int
+		enum class Style : int
 		{
 			kCustom    = 0,
 			kSubtle    = 1,
@@ -40,7 +46,7 @@ namespace cs::features
 		struct Settings
 		{
 			bool        enabled            = true;
-			int         preset             = static_cast<int>(Preset::kStandard);
+			int         style              = static_cast<int>(Style::kStandard);
 			bool        forceWithENB       = false;
 
 			// Tonemap + LUT.
@@ -98,18 +104,35 @@ namespace cs::features
 		Settings settings;
 		imagespace::WeatherProfiles weatherProfiles;
 		imagespace::LUTCache        lutCache;
+		std::unique_ptr<imagespace::PresetManager> presetManager;
 		// Smoke-harness override: when set, RunFrame uses ResolveForced(category) instead of Sky.
 		std::optional<imagespace::WeatherCategory> forcedWeatherCategory;
 		std::optional<std::uint32_t>               forcedWeatherFormID;
 
+		// Preset library state (persisted in Imagespace.toml [preset] block; UI scratch otherwise).
+		std::string activePresetIdentity;   // lowercase "B:name" / "U:name"; persists across Refresh.
+		std::string activePresetName;       // display name (preserves case); informational.
+		bool        autoLoadPresetOnBoot = false;
+		std::string pendingComboIdentity;   // ImGui combo binding; may differ from active until Load.
+		std::string lastPresetError;        // rendered below the controls in red when non-empty.
+		char        presetSaveAsBuf[64]  = {};
+
 	private:
-		Imagespace() = default;
+		Imagespace();
+		~Imagespace();
 
 		void LoadSettings();
 		void SaveSettings();
 
-		void ApplyPreset(Preset preset);
-		bool SettingsMatchPreset(Preset preset) const;
+		void ApplyStyle(Style style);
+		bool SettingsMatchStyle(Style style) const;
+
+		// Applies a preset by identity ("B:..." or "U:..."). Parses into local Settings/WeatherProfiles
+		// temporaries first; commits via std::move only on parse success so a malformed preset never
+		// trashes the user's in-memory state. User-formID overrides are preserved when a BUILTIN preset
+		// is loaded (the builtin file's [weather.overrides] is dropped); user presets fully replace
+		// overrides from the file. Reports failure via lastPresetError.
+		void ApplyPresetByIdentity(std::string_view a_identity);
 
 		bool EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format);
 		bool GenerateDirtTexture();
@@ -119,6 +142,9 @@ namespace cs::features
 		void RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex);
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);
 		bool LoadLUTFromDisk(const std::string& a_filename);
+		// Loads the base LUT (if configured) and preloads referenced overlay LUTs. Safe to call after
+		// each settings/preset change and from OnD3D11Ready; no-op if device isn't ready yet.
+		void ApplyLUTState();
 
 		// Composite (tonemap + LUT + bloom-add + lens).
 		std::unique_ptr<imagespace::Texture2D>      compositeScratch;

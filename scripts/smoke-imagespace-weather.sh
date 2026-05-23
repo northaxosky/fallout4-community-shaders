@@ -31,7 +31,7 @@ write_weather_cfg() {
     cat > "$CFG_FILE" <<'TOML'
 [settings]
 enabled = true
-preset = 0
+style = 0
 force_with_enb = false
 tonemap_operator = 1
 exposure = 1.0
