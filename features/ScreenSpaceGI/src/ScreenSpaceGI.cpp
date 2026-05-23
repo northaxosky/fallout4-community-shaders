@@ -4,8 +4,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
+#include <filesystem>
 #include <fstream>
 
+#include <DirectXTex.h>
+#include <dxgi.h>
 #include <imgui.h>
 #include <toml++/toml.hpp>
 
@@ -70,6 +74,46 @@ namespace cs::features
 		float    ApplyContrast;
 	};
 	static_assert(sizeof(ApplyCB) % 16 == 0);
+
+	// v2 SSGI constant buffer. Layout matches upstream Skyrim CS @ bb6460db
+	// `features/Screen Space GI/Shaders/ScreenSpaceGI/common.hlsli` (`SSGICB`), with the [2]
+	// stereo arrays collapsed to mono. Field order/sizes mirror HLSL register packing so the
+	// C++ struct and the `cbuffer SSGICB : register(b1)` declaration in v2 Common.hlsli stay
+	// byte-equivalent. 13 registers * 16 bytes = 208 bytes.
+	struct SSGIv2CB
+	{
+		float    PrevInvViewMat[16];        // c0-c3: row-major float4x4
+		float    NDCToViewMul[2];           // c4.xy
+		float    NDCToViewAdd[2];           // c4.zw
+		float    TexDim[2];                 // c5.xy
+		float    RcpTexDim[2];              // c5.zw
+		float    FrameDim[2];               // c6.xy
+		float    RcpFrameDim[2];            // c6.zw
+		uint32_t FrameIndex;                // c7.x
+		uint32_t NumSlices;                 // c7.y
+		uint32_t NumSteps;                  // c7.z
+		float    MinScreenRadius;           // c7.w
+		float    AORadius;                  // c8.x
+		float    GIRadius;                  // c8.y
+		float    EffectRadius;              // c8.z
+		float    Thickness;                 // c8.w
+		float    DepthFadeRange[2];         // c9.xy
+		float    DepthFadeScaleConst;       // c9.z
+		float    GISaturation;              // c9.w
+		float    GIDistanceCompensation;    // c10.x
+		float    GICompensationMaxDist;     // c10.y
+		float    _Pad1;                     // c10.z
+		float    AOPower;                   // c10.w
+		float    GIStrength;                // c11.x
+		float    DepthDisocclusion;         // c11.y
+		float    NormalDisocclusion;        // c11.z
+		uint32_t MaxAccumFrames;            // c11.w
+		float    BlurRadius;                // c12.x
+		float    DistanceNormalisation;     // c12.y
+		float    _Pad2[2];                  // c12.zw
+	};
+	static_assert(sizeof(SSGIv2CB) == 208, "SSGIv2CB layout must match HLSL cbuffer");
+	static_assert(sizeof(SSGIv2CB) % 16 == 0);
 
 	struct PresetEntry
 	{
@@ -479,6 +523,222 @@ namespace cs::features
 		return true;
 	}
 
+	// ---- v2 (XeGTAO + Visibility Bitmask + SH2-YCoCg) substrate ---------------------------
+	// The bodies below are wired but the v2 dispatch path is still gated entirely behind
+	// `settings.useV2`. With useV2=false (default) none of this code paths execute at runtime.
+
+	void ScreenSpaceGI::EnsureV2Noise()
+	{
+		if (v2_noiseLoaded || v2_texNoise) return;
+		auto* device = cs::util::GetD3DDevice();
+		if (!device) return;
+
+		constexpr const wchar_t* kNoisePath = L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\fast_2uges.dds";
+
+		DirectX::ScratchImage img;
+		DirectX::TexMetadata  meta{};
+		if (FAILED(DirectX::LoadFromDDSFile(kNoisePath, DirectX::DDS_FLAGS_NONE, &meta, img))) {
+			L->warn("SSGI v2 noise load failed: {}", "fast_2uges.dds");
+			return;
+		}
+
+		winrt::com_ptr<ID3D11Resource> resource;
+		if (FAILED(DirectX::CreateTexture(device, img.GetImages(), img.GetImageCount(), meta, resource.put()))) {
+			L->warn("SSGI v2 noise CreateTexture failed");
+			return;
+		}
+		winrt::com_ptr<ID3D11Texture2D> tex;
+		if (FAILED(resource->QueryInterface(IID_PPV_ARGS(tex.put())))) {
+			L->warn("SSGI v2 noise resource is not Texture2D");
+			return;
+		}
+
+		v2_texNoise = std::make_unique<ssgi::Texture2D>(tex.detach());
+		D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+		sd.Format = v2_texNoise->desc.Format;
+		sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		sd.Texture2D.MostDetailedMip = 0;
+		sd.Texture2D.MipLevels = 1;
+		v2_texNoise->CreateSRV(sd);
+
+		v2_noiseLoaded = true;
+		L->info("SSGI v2 noise loaded ({}x{} fmt={})",
+			v2_texNoise->desc.Width, v2_texNoise->desc.Height, static_cast<int>(v2_texNoise->desc.Format));
+	}
+
+	void ScreenSpaceGI::CompileV2Shaders()
+	{
+		if (v2_shadersWarmedUp) return;
+		if (!settings.useV2) return;
+		if (!cs::util::GetD3DDevice()) return;
+
+		// Each GetCS call tolerates a missing file: the underlying CompileShader logs a warning
+		// and returns nullptr. v2 dispatch later checks every slot before fan-out.
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterDepths.cs.hlsl",  v2_prefilterDepthsCS,   "v2_prefilterDepths");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterRadiance.cs.hlsl", v2_prefilterRadianceCS, "v2_prefilterRadiance");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterNormal.cs.hlsl",  v2_prefilterNormalCS,   "v2_prefilterNormal");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\radianceDisocc.cs.hlsl",   v2_radianceDisoccCS,    "v2_radianceDisocc");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\gi.cs.hlsl",               v2_giCS,                "v2_gi");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\blur.cs.hlsl",             v2_blurCS,              "v2_blur");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\upsample.cs.hlsl",         v2_upsampleCS,          "v2_upsample");
+
+		v2_shadersWarmedUp = true;
+	}
+
+	bool ScreenSpaceGI::EnsureV2Resources(uint32_t a_w, uint32_t a_h, int a_resolutionMode)
+	{
+		auto* device = cs::util::GetD3DDevice();
+		if (!device) return false;
+
+		const int  resMode = std::clamp(a_resolutionMode, 0, 2);
+		const auto divisor = (resMode == 0) ? 1u : (resMode == 1) ? 2u : 4u;
+		const uint32_t workW = std::max(1u, a_w / divisor);
+		const uint32_t workH = std::max(1u, a_h / divisor);
+
+		const bool dirty = !v2_resourcesAllocated ||
+			a_w != v2_lastWidth || a_h != v2_lastHeight || resMode != v2_lastResolutionMode;
+		if (!dirty) {
+			if (!v2_ssgiCB) v2_ssgiCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGIv2CB)));
+			return true;
+		}
+
+		// Allocator helper for the 5-mip pyramid pattern (working depth / encoded normal / radiance).
+		auto allocPyramid = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out,
+		                        std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, 5>& uavs,
+		                        std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 5>& srvMips,
+		                        bool withFullChainSRV)
+		{
+			D3D11_TEXTURE2D_DESC td{};
+			td.Width = workW;
+			td.Height = workH;
+			td.MipLevels = 5;
+			td.ArraySize = 1;
+			td.Format = fmt;
+			td.SampleDesc.Count = 1;
+			td.Usage = D3D11_USAGE_DEFAULT;
+			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			out = std::make_unique<ssgi::Texture2D>(td);
+
+			if (withFullChainSRV) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+				sd.Format = fmt;
+				sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				sd.Texture2D.MostDetailedMip = 0;
+				sd.Texture2D.MipLevels = 5;
+				out->CreateSRV(sd);
+			}
+
+			for (uint32_t i = 0; i < 5; ++i) {
+				D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+				ud.Format = fmt;
+				ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+				ud.Texture2D.MipSlice = i;
+				uavs[i] = nullptr;
+				DX::ThrowIfFailed(device->CreateUnorderedAccessView(out->resource.get(), &ud, uavs[i].put()));
+
+				D3D11_SHADER_RESOURCE_VIEW_DESC sd2{};
+				sd2.Format = fmt;
+				sd2.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+				sd2.Texture2D.MostDetailedMip = i;
+				sd2.Texture2D.MipLevels = 1;
+				srvMips[i] = nullptr;
+				DX::ThrowIfFailed(device->CreateShaderResourceView(out->resource.get(), &sd2, srvMips[i].put()));
+			}
+		};
+
+		// Allocator for a flat single-mip texture with SRV + UAV.
+		auto allocFlat = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out)
+		{
+			D3D11_TEXTURE2D_DESC td{};
+			td.Width = workW;
+			td.Height = workH;
+			td.MipLevels = 1;
+			td.ArraySize = 1;
+			td.Format = fmt;
+			td.SampleDesc.Count = 1;
+			td.Usage = D3D11_USAGE_DEFAULT;
+			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			out = std::make_unique<ssgi::Texture2D>(td);
+
+			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+			sd.Format = fmt;
+			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			sd.Texture2D.MipLevels = 1;
+			out->CreateSRV(sd);
+
+			D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
+			ud.Format = fmt;
+			ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+			out->CreateUAV(ud);
+		};
+
+		try {
+			allocPyramid(DXGI_FORMAT_R16_FLOAT,          v2_texWorkingDepth, v2_uavWorkingDepth, v2_srvWorkingDepthMips, true);
+			allocPyramid(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texRadiance,     v2_uavRadiance,     v2_srvRadianceMips,     true);
+			allocPyramid(DXGI_FORMAT_R32_UINT,           v2_texNormal,       v2_uavNormal,       v2_srvNormalMips,       true);
+
+			// Flat helpers.
+			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texRadianceTemp);
+			allocFlat(DXGI_FORMAT_R16G16_FLOAT,       v2_texPrevGeo);  // viewZ + encoded normal.xy
+
+			for (int i = 0; i < 2; ++i) {
+				allocFlat(DXGI_FORMAT_R8_UNORM,           v2_texAccumFrames[i]);
+				allocFlat(DXGI_FORMAT_R8_UNORM,           v2_texAo[i]);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texIlY[i]);
+				allocFlat(DXGI_FORMAT_R16G16_FLOAT,       v2_texIlCoCg[i]);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texGiSpecular[i]);
+			}
+		} catch (const std::exception& e) {
+			L->error("SSGI v2 resource allocation failed: {}", e.what());
+			v2_resourcesAllocated = false;
+			return false;
+		}
+
+		if (!v2_ssgiCB) v2_ssgiCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGIv2CB)));
+
+		// Reuse v1 samplers; they are point-clamp + linear-clamp which match upstream's needs.
+		// EnsureAOResources is responsible for sampler creation; call it once if not done.
+		if (!pointClampSampler || !linearClampSampler) {
+			EnsureAOResources(a_w, a_h);
+		}
+
+		v2_lastWidth          = a_w;
+		v2_lastHeight         = a_h;
+		v2_lastResolutionMode = resMode;
+		v2_resourcesAllocated = true;
+		v2_outputAoIdx        = 0;
+		v2_outputIlIdx        = 0;
+		v2_inputAoIdx         = 1;
+		v2_inputIlIdx         = 1;
+		v2_outputAccumFramesIdx = 0;
+		v2_inputAccumFramesIdx  = 1;
+
+		L->info("SSGI v2 resources allocated: working={}x{} (resMode={}, divisor={}) from frame={}x{}",
+			workW, workH, resMode, divisor, a_w, a_h);
+		return true;
+	}
+
+	void ScreenSpaceGI::DrawSSGIv2()
+	{
+		// Stub. The v2 dispatch chain (prefilter depths -> normal -> radiance disocc ->
+		// prefilter radiance -> gi -> blur -> upsample) is implemented incrementally as each
+		// compute shader port lands. Until then the v2 hook does nothing observable.
+		static bool entryLogged = false;
+		if (!entryLogged) {
+			L->info("DrawSSGIv2 entry stub (no v2 shaders wired yet)");
+			entryLogged = true;
+		}
+		if (!settings.useV2 || !settings.enabled) return;
+		if (cs::env::IsENBLoaded()) return;
+	}
+
+	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
+	{
+		if (!settings.useV2) return;
+		EnsureV2Noise();
+		CompileV2Shaders();
+	}
+
 	ID3D11ComputeShader* ScreenSpaceGI::GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name)
 	{
 		if (!a_slot) {
@@ -769,6 +1029,30 @@ namespace cs::features
 			const float w = static_cast<float>(aoWidth)  * settings.previewScale;
 			const float h = static_cast<float>(aoHeight) * settings.previewScale;
 			ImGui::Image(reinterpret_cast<ImTextureID>(aoTexture->srv.get()), ImVec2(w, h));
+		}
+
+		ImGui::Separator();
+		ImGui::TextDisabled("v2 substrate (XeGTAO + SH2-YCoCg, experimental)");
+		ImGui::TextDisabled("Resources allocate when toggled. Dispatch path lands in Phase 2c.1+");
+		if (ImGui::Checkbox("Use v2 (substrate only, no shaders wired)", &settings.useV2)) {
+			dirty = true;
+		}
+		if (settings.useV2) {
+			const char* resModeNames[] = { "Full", "Half", "Quarter" };
+			int rm = std::clamp(settings.resolutionMode, 0, 2);
+			if (ImGui::Combo("v2 resolution", &rm, resModeNames, IM_ARRAYSIZE(resModeNames))) {
+				settings.resolutionMode = rm;
+				v2_resourcesAllocated = false;
+				dirty = true;
+			}
+			ImGui::Checkbox("v2 enable GI (SH irradiance)", &settings.enableGI);
+			ImGui::SliderFloat("v2 GI radius", &settings.giRadius, 10.0f, 4096.0f, "%.0f");
+			markCustomIfEdited();
+			ImGui::SliderFloat("v2 GI strength", &settings.giStrength, 0.0f, 4.0f, "%.2f");
+			markCustomIfEdited();
+			ImGui::Checkbox("v2 debug: show IL only", &settings.v2DebugShowIL);
+			ImGui::TextDisabled("v2 status: %s", v2_resourcesAllocated ? "resources OK" : "not allocated");
+			ImGui::TextDisabled("v2 shaders: %s", v2_shadersWarmedUp ? "compiled" : "pending");
 		}
 
 		ImGui::EndDisabled();
