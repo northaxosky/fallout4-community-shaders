@@ -111,8 +111,9 @@ namespace cs::features
 		float    BlurRadius;                // c12.x
 		float    DistanceNormalisation;     // c12.y
 		float    _Pad2[2];                  // c12.zw
+		float    CameraData[4];             // c13: matches upstream SharedData::CameraData (1/W, 1/H, -near/(far-near), -far*near/(far-near))
 	};
-	static_assert(sizeof(SSGIv2CB) == 208, "SSGIv2CB layout must match HLSL cbuffer");
+	static_assert(sizeof(SSGIv2CB) == 224, "SSGIv2CB layout must match HLSL cbuffer");
 	static_assert(sizeof(SSGIv2CB) % 16 == 0);
 
 	struct PresetEntry
@@ -264,7 +265,9 @@ namespace cs::features
 			settings.aoRadius, settings.applyToScene);
 
 		cs::engine::RegisterPostDeferredPrePass([]() {
-			ScreenSpaceGI::GetSingleton()->DrawAO();
+			auto* self = ScreenSpaceGI::GetSingleton();
+			self->DrawAO();
+			self->DrawSSGIv2();
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->Apply();
@@ -720,16 +723,117 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSSGIv2()
 	{
-		// Stub. The v2 dispatch chain (prefilter depths -> normal -> radiance disocc ->
-		// prefilter radiance -> gi -> blur -> upsample) is implemented incrementally as each
-		// compute shader port lands. Until then the v2 hook does nothing observable.
-		static bool entryLogged = false;
-		if (!entryLogged) {
-			L->info("DrawSSGIv2 entry stub (no v2 shaders wired yet)");
-			entryLogged = true;
-		}
 		if (!settings.useV2 || !settings.enabled) return;
 		if (cs::env::IsENBLoaded()) return;
+
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) return;
+
+		auto& depth = rendererData->depthStencilTargets[kDST_Main];
+		auto* depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth);
+		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
+		if (!depthSRV || !depthTex) return;
+
+		D3D11_TEXTURE2D_DESC dd{};
+		depthTex->GetDesc(&dd);
+		const uint32_t W = dd.Width;
+		const uint32_t H = dd.Height;
+
+		if (!EnsureV2Resources(W, H, settings.resolutionMode)) return;
+		CompileV2Shaders();
+		EnsureV2Noise();
+
+		// Phase 2c.1 milestone 1: prefilterDepths-only. Other shaders chain in once they land.
+		if (!v2_prefilterDepthsCS) return;
+
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		cs::ComputeScope scope(context);
+
+		static bool firstFire = false;
+		if (!firstFire) {
+			L->info("DrawSSGIv2 first fire (prefilterDepths only)");
+			firstFire = true;
+		}
+
+		const ProjectionData projection = GetProjectionData(W, H);
+
+		const auto divisor = (settings.resolutionMode == 0) ? 1u : (settings.resolutionMode == 1) ? 2u : 4u;
+		const uint32_t workW = std::max(1u, W / divisor);
+		const uint32_t workH = std::max(1u, H / divisor);
+
+		SSGIv2CB cb{};
+		// Identity for now; PrevInvViewMat is used only by radianceDisocc/gi (not by prefilterDepths).
+		for (int i = 0; i < 16; ++i) cb.PrevInvViewMat[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+		cb.NDCToViewMul[0] = projection.ndcToViewMul[0];
+		cb.NDCToViewMul[1] = projection.ndcToViewMul[1];
+		cb.NDCToViewAdd[0] = projection.ndcToViewAdd[0];
+		cb.NDCToViewAdd[1] = projection.ndcToViewAdd[1];
+		cb.TexDim[0]       = static_cast<float>(W);
+		cb.TexDim[1]       = static_cast<float>(H);
+		cb.RcpTexDim[0]    = 1.0f / static_cast<float>(W);
+		cb.RcpTexDim[1]    = 1.0f / static_cast<float>(H);
+		cb.FrameDim[0]     = static_cast<float>(workW);
+		cb.FrameDim[1]     = static_cast<float>(workH);
+		cb.RcpFrameDim[0]  = 1.0f / static_cast<float>(workW);
+		cb.RcpFrameDim[1]  = 1.0f / static_cast<float>(workH);
+		cb.FrameIndex      = v2_frameIndex++;
+		cb.NumSlices       = static_cast<uint32_t>(settings.sliceCount);
+		cb.NumSteps        = static_cast<uint32_t>(settings.stepCount);
+		cb.MinScreenRadius = settings.minScreenRadius;
+		cb.AORadius        = settings.aoRadius;
+		cb.GIRadius        = settings.giRadius;
+		cb.EffectRadius    = std::max(settings.aoRadius, settings.giRadius);
+		cb.Thickness       = settings.thickness;
+		cb.DepthFadeRange[0] = settings.depthFadeNear;
+		cb.DepthFadeRange[1] = settings.depthFadeFar;
+		cb.DepthFadeScaleConst = (settings.depthFadeFar > settings.depthFadeNear)
+			? (1.0f / (settings.depthFadeFar - settings.depthFadeNear)) : 0.0f;
+		cb.GISaturation         = settings.giSaturation;
+		cb.GIDistanceCompensation = settings.giDistanceCompensation;
+		cb.GICompensationMaxDist  = settings.giRadius;
+		cb._Pad1                = 0.0f;
+		cb.AOPower              = settings.aoPower;
+		cb.GIStrength           = settings.giStrength;
+		cb.DepthDisocclusion    = settings.depthDisocclusion;
+		cb.NormalDisocclusion   = settings.normalDisocclusion;
+		cb.MaxAccumFrames       = settings.maxAccumFrames;
+		cb.BlurRadius           = settings.blurRadius;
+		cb.DistanceNormalisation = settings.distanceNormalisation;
+		cb._Pad2[0] = cb._Pad2[1] = 0.0f;
+
+		// CameraData matches upstream SharedData::CameraData encoding:
+		// (1/W_render, 1/H_render, -near/(far-near), -(far*near)/(far-near)). FO4 reversed-Z.
+		const float nC = projection.nearClip;
+		const float fC = projection.farClip;
+		const float diff = (fC - nC);
+		cb.CameraData[0] = 1.0f / static_cast<float>(W);
+		cb.CameraData[1] = 1.0f / static_cast<float>(H);
+		cb.CameraData[2] = (diff > 0.0f) ? (-nC / diff) : 0.0f;
+		cb.CameraData[3] = (diff > 0.0f) ? (-fC * nC / diff) : 0.0f;
+
+		v2_ssgiCB->Update(cb);
+
+		// prefilterDepths: single dispatch writing all 5 mips via groupshared scratch.
+		context->CSSetShader(v2_prefilterDepthsCS, nullptr, 0);
+		ID3D11Buffer* cbs[1] = { v2_ssgiCB->CB() };
+		context->CSSetConstantBuffers(0, 1, cbs);
+		ID3D11ShaderResourceView* srvs[1] = { depthSRV };
+		context->CSSetShaderResources(0, 1, srvs);
+		ID3D11SamplerState* samps[2] = { pointClampSampler.get(), linearClampSampler.get() };
+		context->CSSetSamplers(0, 2, samps);
+		ID3D11UnorderedAccessView* uavs[5] = {
+			v2_uavWorkingDepth[0].get(),
+			v2_uavWorkingDepth[1].get(),
+			v2_uavWorkingDepth[2].get(),
+			v2_uavWorkingDepth[3].get(),
+			v2_uavWorkingDepth[4].get(),
+		};
+		context->CSSetUnorderedAccessViews(0, 5, uavs, nullptr);
+
+		// Each thread emits 2x2 pixels into mip 0, so dispatch covers workDim / 2 rounded up to 8x8 groups.
+		const uint32_t gx = (((workW + 1u) / 2u) + 7u) / 8u;
+		const uint32_t gy = (((workH + 1u) / 2u) + 7u) / 8u;
+		context->Dispatch(gx, gy, 1);
 	}
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
