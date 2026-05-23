@@ -48,6 +48,14 @@ namespace cs::features
 	};
 	static_assert(sizeof(ApplyCB) % 16 == 0);
 
+	struct ApplyILCB
+	{
+		uint32_t ApplyDim[2];
+		float    ILStrength;
+		float    _Pad0;
+	};
+	static_assert(sizeof(ApplyILCB) % 16 == 0);
+
 	// SSGI constant buffer. Layout matches upstream Skyrim CS @ bb6460db
 	// `features/Screen Space GI/Shaders/ScreenSpaceGI/common.hlsli` (`SSGICB`), with the [2]
 	// stereo arrays collapsed to mono. Field order/sizes mirror HLSL register packing so the
@@ -246,8 +254,13 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([]() {
 			ScreenSpaceGI::GetSingleton()->DrawSSGI();
 		});
+		// Registration order = fire order. Apply (AO darken) runs first; ApplyIL adds the
+		// SH-reconstructed bounce on top so the bounce term is not modulated by AO.
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->Apply();
+		});
+		cs::engine::RegisterPostDeferredLightsImpl([]() {
+			ScreenSpaceGI::GetSingleton()->ApplyIL();
 		});
 	}
 
@@ -394,6 +407,7 @@ namespace cs::features
 		}
 
 		if (!applyCB) applyCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(ApplyCB)));
+		if (!applyILCB) applyILCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(ApplyILCB)));
 		return true;
 	}
 
@@ -963,6 +977,68 @@ namespace cs::features
 		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
 	}
 
+	void ScreenSpaceGI::ApplyIL()
+	{
+		static bool entryLogged = false;
+		if (!entryLogged) { L->info("ApplyIL entry"); entryLogged = true; }
+		if (!settings.enabled || !settings.applyILToScene) return;
+		if (cs::env::IsENBLoaded()) return;
+		// IL outputs (texIlY / texIlCoCg) are populated by the same gi.cs + blur + upsample
+		// chain that produces texAo, so hasValidAoOutput is the appropriate readiness gate.
+		if (!resourcesAllocated || !hasValidAoOutput) return;
+
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) return;
+
+		auto& normal     = rendererData->renderTargets[kRT_GbufferNormal];
+		auto* normalSRV  = reinterpret_cast<ID3D11ShaderResourceView*>(normal.srView);
+		if (!normalSRV) return;
+
+		auto& diffuse    = rendererData->renderTargets[kRT_DiffuseBuffer];
+		auto* diffuseSRV = reinterpret_cast<ID3D11ShaderResourceView*>(diffuse.srView);
+		auto* diffuseTex = reinterpret_cast<ID3D11Texture2D*>(diffuse.texture);
+		if (!diffuseSRV || !diffuseTex) return;
+
+		D3D11_TEXTURE2D_DESC dd{};
+		diffuseTex->GetDesc(&dd);
+		if (!EnsureApplyResources(dd.Width, dd.Height, dd.Format)) return;
+
+		auto* applyShader = GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\ApplyILCS.hlsl", applyILCS, "ApplyILCS");
+		if (!applyShader) return;
+
+		// inputIlIdx points at the buffers most recently written by the SSGI chain (post-swap
+		// in DrawSSGI). Mirrors the Apply() convention for texAo.
+		const auto& ilY    = texIlY[inputIlIdx];
+		const auto& ilCoCg = texIlCoCg[inputIlIdx];
+		if (!ilY || !ilY->srv || !ilCoCg || !ilCoCg->srv) return;
+
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		cs::ComputeScope scope(context);
+
+		ApplyILCB cb{};
+		cb.ApplyDim[0] = dd.Width;
+		cb.ApplyDim[1] = dd.Height;
+		cb.ILStrength  = settings.ilStrength;
+		applyILCB->Update(cb);
+
+		context->CSSetShader(applyShader, nullptr, 0);
+		ID3D11ShaderResourceView* srvs[4] = { normalSRV, ilY->srv.get(), ilCoCg->srv.get(), diffuseSRV };
+		context->CSSetShaderResources(0, 4, srvs);
+		ID3D11SamplerState* samp[1] = { linearClampSampler.get() };
+		context->CSSetSamplers(0, 1, samp);
+		ID3D11Buffer* cbs[1] = { applyILCB->CB() };
+		context->CSSetConstantBuffers(0, 1, cbs);
+		ID3D11UnorderedAccessView* uavs[1] = { scratchDiffuse->uav.get() };
+		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		const uint32_t gx = (dd.Width  + 7) / 8;
+		const uint32_t gy = (dd.Height + 7) / 8;
+		context->Dispatch(gx, gy, 1);
+
+		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
+		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
+	}
+
 	void ScreenSpaceGI::DrawSettings()
 	{
 		bool dirty = false;
@@ -1061,12 +1137,15 @@ namespace cs::features
 		markCustomIfEdited();
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Apply pass (transitional: blends SSGI AO into kDiffuseBuffer).");
-		ImGui::TextDisabled("Replaced by ambient-pass injection in Phase 2c.2.");
+		ImGui::TextDisabled("Apply pass (AO darkens kDiffuseBuffer, IL bounce added on top).");
 		dirty |= ImGui::Checkbox("Apply AO to scene", &settings.applyAOToScene);
 		ImGui::SliderFloat("Apply intensity", &settings.applyIntensity, 0.0f, 4.0f, "%.2f");
 		markCustomIfEdited();
 		ImGui::SliderFloat("Apply contrast", &settings.applyContrast, 0.0f, 2.0f, "%.2f");
+		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
+
+		dirty |= ImGui::Checkbox("Apply IL bounce to scene", &settings.applyILToScene);
+		ImGui::SliderFloat("IL strength", &settings.ilStrength, 0.0f, 4.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 
 		ImGui::Separator();

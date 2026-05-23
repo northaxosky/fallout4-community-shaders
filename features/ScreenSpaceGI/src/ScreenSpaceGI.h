@@ -30,10 +30,17 @@ namespace cs::features
 		// DrawWorld::DeferredPrePass.
 		void DrawSSGI();
 
-		// Transitional consumer: blends the SSGI AO output into kDiffuseBuffer.
-		// Post-call thunk on DrawWorld::DeferredLightsImpl. Will be replaced by
-		// ambient-pass injection in Phase 2c.2.
+		// Transitional AO consumer: darkens kDiffuseBuffer by the SSGI AO output.
+		// Post-call thunk on DrawWorld::DeferredLightsImpl. The kSSAO replacement
+		// path lands in Phase 2c.3 (paired with the vanilla SSAO disable lever).
 		void Apply();
+
+		// IL bounce consumer: reads the SSGI SH2-YCoCg buffers (texIlY + texIlCoCg),
+		// reconstructs RGB irradiance at the receiving pixel's view-space normal, and
+		// adds it to kDiffuseBuffer. Runs after Apply() so AO darkening does not
+		// modulate the bounce term. deferred_composite multiplies kDiffuseBuffer by
+		// albedo, so the inject is `ssgiIl` only (no per-pixel albedo here).
+		void ApplyIL();
 
 		enum class QualityPreset : int
 		{
@@ -55,10 +62,15 @@ namespace cs::features
 			float aoPower       = 2.0f;
 			float thickness     = 32.0f;
 
-			// Transitional apply pass into kDiffuseBuffer (replaced by ambient injection in 2c.2).
+			// Transitional apply pass into kDiffuseBuffer (kSSAO replacement lands in 2c.3).
 			bool  applyAOToScene = true;
 			float applyIntensity = 0.5f;
 			float applyContrast  = 1.0f;
+
+			// IL bounce injection (Phase 2c.2). Adds ssgiIl to kDiffuseBuffer post-direct-lights.
+			// composite then multiplies by albedo, mirroring upstream `linDiffuseColor += ssgiIl * linAlbedo`.
+			bool  applyILToScene = true;
+			float ilStrength     = 1.0f;
 
 			// XeGTAO + SH2-YCoCg (canonical SSGI knobs).
 			bool     enableGI               = true;
@@ -115,7 +127,11 @@ namespace cs::features
 		// Apply pass.
 		std::unique_ptr<ssgi::Texture2D>      scratchDiffuse;
 		std::unique_ptr<ssgi::ConstantBuffer> applyCB;
-		ID3D11ComputeShader*                  applyCS = nullptr;
+		ID3D11ComputeShader*                  applyCS   = nullptr;
+
+		// ApplyIL pass (shares scratchDiffuse with Apply).
+		std::unique_ptr<ssgi::ConstantBuffer> applyILCB;
+		ID3D11ComputeShader*                  applyILCS = nullptr;
 
 		// Apply pass watchdog state.
 		uint32_t scratchWidth  = 0;

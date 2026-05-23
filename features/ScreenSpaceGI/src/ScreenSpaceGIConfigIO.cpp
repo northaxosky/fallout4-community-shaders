@@ -59,6 +59,10 @@ namespace cs::features::ssgi
 		a_out.applyIntensity = std::clamp(static_cast<float>((*s)["apply_intensity"].value_or(static_cast<double>(a_out.applyIntensity))), 0.0f, 4.0f);
 		a_out.applyContrast  = std::clamp(static_cast<float>((*s)["apply_contrast"].value_or(static_cast<double>(a_out.applyContrast))), 0.0f, 2.0f);
 
+		// IL bounce injection (Phase 2c.2).
+		a_out.applyILToScene = (*s)["apply_il_to_scene"].value_or(a_out.applyILToScene);
+		a_out.ilStrength     = std::clamp(static_cast<float>((*s)["il_strength"].value_or(static_cast<double>(a_out.ilStrength))), 0.0f, 4.0f);
+
 		// Canonical SSGI knobs (promoted from the legacy [v2] block).
 		a_out.enableGI               = (*s)["enable_gi"].value_or(a_out.enableGI);
 		a_out.enableVanillaSSAO      = (*s)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
@@ -95,6 +99,9 @@ namespace cs::features::ssgi
 		out.insert_or_assign("apply_ao_to_scene", a_settings.applyAOToScene);
 		out.insert_or_assign("apply_intensity",   static_cast<double>(a_settings.applyIntensity));
 		out.insert_or_assign("apply_contrast",    static_cast<double>(a_settings.applyContrast));
+
+		out.insert_or_assign("apply_il_to_scene", a_settings.applyILToScene);
+		out.insert_or_assign("il_strength",       static_cast<double>(a_settings.ilStrength));
 
 		out.insert_or_assign("enable_gi",                a_settings.enableGI);
 		out.insert_or_assign("enable_vanilla_ssao",      a_settings.enableVanillaSSAO);
