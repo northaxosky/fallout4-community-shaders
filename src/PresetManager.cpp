@@ -108,7 +108,7 @@ namespace cs
 	{
 		std::string id;
 		id.reserve(2 + a_name.size());
-		id.push_back(a_scope);
+		id.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(a_scope))));
 		id.push_back(':');
 		id.append(ToLower(a_name));
 		return id;
