@@ -1083,6 +1083,10 @@ namespace cs::features
 	{
 		if (!settings.enabled)
 			return;
+		// Skip the suite when a menu is open (Pip-Boy, Workshop, Pause, etc.). The post-FX state
+		// persists from the previous frame; the chain re-engages the moment the menu closes.
+		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode)
+			return;
 		// Suite-wide ENB yield. Persisted prefs are left intact; the user opts in to stacking via bForceWithENB.
 		static bool enbSuppressLogged = false;
 		if (cs::env::IsENBLoaded() && !settings.forceWithENB) {

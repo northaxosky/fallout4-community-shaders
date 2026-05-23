@@ -59,6 +59,7 @@ namespace cs::features
 		uint32_t ApplyDim[2];
 		float    ILStrength;
 		float    _Pad0;
+		float    CameraViewInverse[16];     // c1-c4: row-major float4x4
 	};
 	static_assert(sizeof(ApplyILCB) % 16 == 0);
 
@@ -736,6 +737,9 @@ namespace cs::features
 	void ScreenSpaceGI::DrawSSGI()
 	{
 		if (!settings.enabled) return;
+		// Skip the 7-shader compute chain when a menu is open (Pip-Boy, Workshop, Pause, etc.).
+		// hasValidAoOutput stays true so Apply/ApplyIL keep modulating with the last good IL/AO.
+		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode) return;
 		if (cs::env::IsENBLoaded()) {
 			if (!enbWarningLogged) {
 				L->info("ENB detected; SSGI skipped");
@@ -1124,6 +1128,7 @@ namespace cs::features
 		static bool entryLogged = false;
 		if (!entryLogged) { L->info("Apply entry"); entryLogged = true; }
 		if (!settings.enabled || !settings.applyAOToScene) return;
+		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode) return;
 		if (cs::env::IsENBLoaded()) return;
 		// AO output is only valid once resources are allocated and the chain has produced at
 		// least one full frame. Otherwise Apply reads zero-cleared R8 buffers and darkens the
@@ -1191,7 +1196,8 @@ namespace cs::features
 	{
 		static bool entryLogged = false;
 		if (!entryLogged) { L->info("ApplyIL entry"); entryLogged = true; }
-		if (!settings.enabled || !settings.applyILToScene) return;
+		if (!settings.enabled || !settings.applyILToScene || !settings.enableGI) return;
+		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode) return;
 		if (cs::env::IsENBLoaded()) return;
 		// IL outputs (texIlY / texIlCoCg) are populated by the same gi.cs + blur + upsample
 		// chain that produces texAo, so hasValidAoOutput is the appropriate readiness gate.
@@ -1242,6 +1248,18 @@ namespace cs::features
 		cb.ApplyDim[0] = dd.Width;
 		cb.ApplyDim[1] = dd.Height;
 		cb.ILStrength  = settings.ilStrength;
+		// Reuse the raw view-matrix captured by DrawSSGI so the view->world rotation here matches
+		// the SH world-space frame written by gi.cs. Fall back to identity if DrawSSGI hasn't yet
+		// produced a frame (sky-only / first-frame); without the rotation the SH evaluation runs in
+		// view space, which is also what the producer collapses to under an identity inverse.
+		if (hasRawCurrentViewMat) {
+			const auto rawCur = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(rawCurrentViewMat));
+			const auto invCur = DirectX::XMMatrixInverse(nullptr, rawCur);
+			DirectX::XMStoreFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(cb.CameraViewInverse), invCur);
+		} else {
+			for (int i = 0; i < 16; ++i)
+				cb.CameraViewInverse[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+		}
 		applyILCB->Update(cb);
 
 		context->CSSetShader(applyShader, nullptr, 0);
