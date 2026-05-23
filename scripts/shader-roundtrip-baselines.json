@@ -25,8 +25,8 @@
       "name": "deferred_composite",
       "src": "shaders/lighting/deferred_composite.hlsl",
       "defines": [],
-      "sha1": "06C040D09B107A0638AFA55F29058374C80D8748",
-      "_baseline_history": "Re-baselined 2026-05-20: fixed matId channel (.y->.w), depth channel (.y->.x), and sunlit-color base (secondaryColor->fogColor). Tail asm now matches corpus blob 3539 insns 60-85 instruction-for-instruction; prior baseline 95D10F9E was the buggy reconstruction that black-screened in smoke."
+      "sha1": "CB972062337B41200C8C4E3A45BDBB78B26E6758",
+      "_baseline_history": "Re-baselined 2026-05-23: applied near/far depth threshold equality fix (< -> <=) and promoted CB12 + CB2 field names + SRV role names to the RE-handoff HIGH-confidence semantics (FogState struct decode, SunDirection/SunColor, kGbufferMaterial.w material-id channel, direct-light diffuse/specular splits). Prior baselines: 06C040D0 (2026-05-20, fixed matId .y->.w, depth .y->.x, sunlit-color base secondaryColor->fogColor); 95D10F9E (original, black-screened in smoke). After this re-baseline, the post-fix corpus diff (Fallout4RE Scratch/composite-postfix-2026-05-23.md) reports -6/-6.7% instruction-count delta with EXACT match on resources, signature, declarations, and sample count. The tool also reports MISMATCH due to instruction-stream divergence after fxc reorders the emitted asm; manual review shows the flagged literals (4.0, 66.666672, 1.0) and cb references (cb12[14], [35], [44], cb2[1].w, [2].w) are all present in the HLSL at logically-matching sites and the tool's by-index alignment slipped. A future stream-alignment-aware diff (CFG reconstruction, per-node compare) is the right way to fully close the verdict; treat the current MISMATCH as structural noise, not a known semantic miss."
     },
     {
       "name": "deferred_prepass",
