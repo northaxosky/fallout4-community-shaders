@@ -1,0 +1,78 @@
+[meta]
+name = "Cinematic-Night"
+schema_version = 1
+created_by = "FO4CommunityShaders"
+description = "Low-key cinematic look. Soft diffused bloom (higher-mip bias), heavy vignette, gentle CA, Bokeh DOF on. SSS Cinematic with full apply-to-scene, SSGI Cinematic with apply-to-scene for grounded contact shadows in darker scenes."
+
+[features.imagespace.settings]
+enabled = true
+style = 0
+force_with_enb = false
+tonemap_operator = 1
+exposure = 0.95
+lut_enable = false
+lut_path = ""
+lut_strength = 1.0
+adaptive_exposure = true
+adaptation_speed_up = 0.4
+adaptation_speed_down = 1.5
+exposure_key = 0.16
+exposure_min = 0.05
+exposure_max = 4.0
+bloom_enable = true
+bloom_threshold = 0.7
+bloom_intensity = 0.07
+bloom_mips = 6
+bloom_mip_weights = [0.4, 0.6, 0.9, 1.2, 1.5, 1.7]
+vignette_enable = true
+vignette_intensity = 0.5
+ca_enable = true
+ca_intensity = 0.6
+sharpen_enable = false
+sharpness = 0.0
+sunsprite_enable = true
+sunsprite_intensity = 0.5
+sunsprite_size = 0.04
+lens_flare_enable = true
+lens_flare_intensity = 0.6
+lens_flare_ghosts = 5
+dirt_enable = false
+dirt_intensity = 0.0
+dof_enable = true
+aperture = 0.05
+focus_distance = 1500.0
+focal_length = 50.0
+focus_range = 200.0
+dof_quality = 1
+coc_limit_factor = 0.04
+bokeh_intensity = 0.0
+anamorph_ratio = 1.0
+
+[features.imagespace.weather]
+enable_per_weather_profiles = true
+
+[features.imagespace.weather.clear]
+bloom_intensity = 0.08
+
+[features.screen_space_shadows.settings]
+enabled = true
+preset = 3
+sample_count = 3
+surface_thickness = 0.025
+bilinear_threshold = 0.025
+shadow_contrast = 1.3
+apply_to_scene = true
+sun_only = true
+apply_contrast = 1.2
+
+[features.screen_space_gi.settings]
+enabled = true
+preset = 3
+slice_count = 4
+step_count = 6
+ao_radius = 240.0
+ao_intensity = 1.2
+ao_power = 2.4
+thickness = 36.0
+apply_to_scene = true
+apply_contrast = 1.2

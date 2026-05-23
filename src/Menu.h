@@ -29,6 +29,7 @@ namespace cs
 		void HookWndProc();
 		void Render();
 		void DrawDefaultUI();
+		void DrawPresetsUI();
 		void Toggle();
 		void EnsureBackbufferRTV();
 		void ReleaseBackbufferRTV();

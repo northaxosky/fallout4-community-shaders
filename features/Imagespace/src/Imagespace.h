@@ -11,11 +11,6 @@
 #include <string>
 #include <vector>
 
-namespace cs::features::imagespace
-{
-	class PresetManager;
-}
-
 namespace cs::features
 {
 	class Imagespace : public Feature
@@ -31,6 +26,13 @@ namespace cs::features
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
+
+		bool ParticipatesInPresets() const override { return true; }
+		bool IsInTestMode() const override { return testModeActive; }
+		std::string GetPresetKey() const override { return "imagespace"; }
+		bool StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err) override;
+		void CommitStaged() override;
+		void ExportToPreset(toml::table& a_subtable) override;
 
 		void RunFrame();
 
@@ -104,35 +106,18 @@ namespace cs::features
 		Settings settings;
 		imagespace::WeatherProfiles weatherProfiles;
 		imagespace::LUTCache        lutCache;
-		std::unique_ptr<imagespace::PresetManager> presetManager;
 		// Smoke-harness override: when set, RunFrame uses ResolveForced(category) instead of Sky.
 		std::optional<imagespace::WeatherCategory> forcedWeatherCategory;
 		std::optional<std::uint32_t>               forcedWeatherFormID;
 
-		// Preset library state (persisted in Imagespace.toml [preset] block; UI scratch otherwise).
-		std::string activePresetIdentity;   // lowercase "B:name" / "U:name"; persists across Refresh.
-		std::string activePresetName;       // display name (preserves case); informational.
-		bool        autoLoadPresetOnBoot = false;
-		std::string pendingComboIdentity;   // ImGui combo binding; may differ from active until Load.
-		std::string lastPresetError;        // rendered below the controls in red when non-empty.
-		char        presetSaveAsBuf[64]  = {};
-
 	private:
-		Imagespace();
-		~Imagespace();
+		Imagespace() = default;
 
 		void LoadSettings();
 		void SaveSettings();
 
 		void ApplyStyle(Style style);
 		bool SettingsMatchStyle(Style style) const;
-
-		// Applies a preset by identity ("B:..." or "U:..."). Parses into local Settings/WeatherProfiles
-		// temporaries first; commits via std::move only on parse success so a malformed preset never
-		// trashes the user's in-memory state. User-formID overrides are preserved when a BUILTIN preset
-		// is loaded (the builtin file's [weather.overrides] is dropped); user presets fully replace
-		// overrides from the file. Reports failure via lastPresetError.
-		void ApplyPresetByIdentity(std::string_view a_identity);
 
 		bool EnsureCompositeResources(uint32_t a_width, uint32_t a_height, uint32_t a_format);
 		bool GenerateDirtTexture();
@@ -205,5 +190,10 @@ namespace cs::features
 		bool                                        dirtTextureAttempted = false;
 		bool                                        firstFireLogged = false;
 		bool                                        testModeActive  = false;
+
+		// Preset staging scratch. Filled by StageFromPreset, swapped into live state by CommitStaged.
+		Settings                    stagedSettings;
+		imagespace::WeatherProfiles stagedWeatherProfiles;
+		bool                        stagedValid = false;
 	};
 }

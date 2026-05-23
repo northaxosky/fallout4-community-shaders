@@ -18,6 +18,13 @@ namespace cs::features
 		void Load() override;
 		void DrawSettings() override;
 
+		bool ParticipatesInPresets() const override { return true; }
+		bool IsInTestMode() const override { return testModeActive; }
+		std::string GetPresetKey() const override { return "screen_space_gi"; }
+		bool StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err) override;
+		void CommitStaged() override;
+		void ExportToPreset(toml::table& a_subtable) override;
+
 		// Builds depth pyramid + AO mask. Post-call thunk on DrawWorld::DeferredPrePass.
 		void DrawAO();
 
@@ -99,5 +106,8 @@ namespace cs::features
 		bool testModeActive    = false;
 		bool firstFireLogged   = false;
 		bool enbWarningLogged  = false;
+
+		Settings stagedSettings;
+		bool     stagedValid = false;
 	};
 }

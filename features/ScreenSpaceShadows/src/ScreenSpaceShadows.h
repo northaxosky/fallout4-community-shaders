@@ -17,6 +17,13 @@ namespace cs::features
 		void Load() override;
 		void DrawSettings() override;
 
+		bool ParticipatesInPresets() const override { return true; }
+		bool IsInTestMode() const override { return testModeActive; }
+		std::string GetPresetKey() const override { return "screen_space_shadows"; }
+		bool StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err) override;
+		void CommitStaged() override;
+		void ExportToPreset(toml::table& a_subtable) override;
+
 		// Writes the screen-space shadow mask. Runs in the post-call thunk on DrawWorld::DeferredPrePass.
 		void DrawShadows();
 
@@ -78,6 +85,8 @@ namespace cs::features
 		uint32_t                             shadowsHeight = 0;
 
 		bool testModeActive = false;
+		Settings stagedSettings;
+		bool     stagedValid = false;
 
 		// Apply-pass resources
 		std::unique_ptr<sss::Texture2D>      scratchDiffuse;

@@ -1,48 +1,43 @@
 [meta]
 name = "Neutral-Realistic"
-created_by = "FO4CommunityShaders Imagespace"
-description = "Subtle grade aimed at neutral, photographic balance: Hable tonemap, light bloom, mild vignette, CA off, light sharpen, no LUT. Per-weather overlays add a touch more bloom and vignette in rain and snow."
+schema_version = 1
+created_by = "FO4CommunityShaders"
+description = "Light touch across the suite. Hable tonemap, modest bloom and vignette, no LUT, ChromaticAberration off, gentle sharpen. SSS and SSGI both run at Quality with apply-to-scene off so the user still opts in."
 
-[settings]
+[features.imagespace.settings]
 enabled = true
 style = 0
 force_with_enb = false
-
 tonemap_operator = 1
 exposure = 1.0
 lut_enable = false
 lut_path = ""
 lut_strength = 1.0
-
 adaptive_exposure = true
 adaptation_speed_up = 0.5
 adaptation_speed_down = 2.0
 exposure_key = 0.18
 exposure_min = 0.05
 exposure_max = 4.0
-
 bloom_enable = true
-bloom_threshold = 0.95
+bloom_threshold = 0.9
 bloom_intensity = 0.04
 bloom_mips = 5
 bloom_mip_weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-
 vignette_enable = true
 vignette_intensity = 0.2
 ca_enable = false
-ca_intensity = 0.0
+ca_intensity = 0.3
 sharpen_enable = true
 sharpness = 0.3
-
 sunsprite_enable = true
 sunsprite_intensity = 0.5
 sunsprite_size = 0.05
 lens_flare_enable = false
-lens_flare_intensity = 0.0
+lens_flare_intensity = 0.5
 lens_flare_ghosts = 5
 dirt_enable = false
 dirt_intensity = 0.0
-
 dof_enable = false
 aperture = 0.05
 focus_distance = 1500.0
@@ -53,13 +48,36 @@ coc_limit_factor = 0.04
 bokeh_intensity = 0.0
 anamorph_ratio = 1.0
 
-[weather]
+[features.imagespace.weather]
 enable_per_weather_profiles = true
 
-[weather.rain]
+[features.imagespace.weather.rain]
 bloom_intensity = 0.05
 vignette_intensity = 0.25
 
-[weather.snow]
+[features.imagespace.weather.snow]
 bloom_intensity = 0.05
 vignette_intensity = 0.25
+
+[features.screen_space_shadows.settings]
+enabled = true
+preset = 2
+sample_count = 2
+surface_thickness = 0.02
+bilinear_threshold = 0.02
+shadow_contrast = 1.0
+apply_to_scene = false
+sun_only = true
+apply_contrast = 1.0
+
+[features.screen_space_gi.settings]
+enabled = true
+preset = 2
+slice_count = 3
+step_count = 5
+ao_radius = 180.0
+ao_intensity = 0.9
+ao_power = 1.9
+thickness = 32.0
+apply_to_scene = false
+apply_contrast = 1.0

@@ -1,5 +1,7 @@
 #include "ScreenSpaceGI.h"
 
+#include "ScreenSpaceGIConfigIO.h"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -12,6 +14,7 @@
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
+#include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Util.h"
 
@@ -260,25 +263,13 @@ namespace cs::features
 			return;
 		}
 
-		const auto settingsTable = table["settings"];
-		settings.enabled = settingsTable["enabled"].value_or(settings.enabled);
-		const auto tomlPreset = settingsTable["preset"].value<int64_t>();
+		const auto tomlPreset = table["settings"]["preset"].value<int64_t>();
 		const bool firstLaunch = !tomlPreset.has_value();
 
-		settings.sliceCount = std::clamp(static_cast<int>(settingsTable["slice_count"].value_or<int64_t>(settings.sliceCount)), 1, 8);
-		settings.stepCount = std::clamp(static_cast<int>(settingsTable["step_count"].value_or<int64_t>(settings.stepCount)), 1, 16);
-		settings.aoRadius = std::clamp(static_cast<float>(settingsTable["ao_radius"].value_or(static_cast<double>(settings.aoRadius))), 10.0f, 1024.0f);
-		settings.aoIntensity = std::clamp(static_cast<float>(settingsTable["ao_intensity"].value_or(static_cast<double>(settings.aoIntensity))), 0.0f, 4.0f);
-		settings.aoPower = std::clamp(static_cast<float>(settingsTable["ao_power"].value_or(static_cast<double>(settings.aoPower))), 0.1f, 6.0f);
-		settings.thickness = std::clamp(static_cast<float>(settingsTable["thickness"].value_or(static_cast<double>(settings.thickness))), 1.0f, 256.0f);
-
-		settings.applyToScene = settingsTable["apply_to_scene"].value_or(settings.applyToScene);
-		settings.applyContrast = std::clamp(static_cast<float>(settingsTable["apply_contrast"].value_or(static_cast<double>(settings.applyContrast))), 0.0f, 2.0f);
+		ssgi::ParseSettings(table, settings);
 
 		if (firstLaunch) {
 			ApplyPreset(Preset::kQuality);
-		} else {
-			settings.preset = std::clamp(static_cast<int>(*tomlPreset), 0, 3);
 		}
 
 		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_force_apply";
@@ -319,22 +310,36 @@ namespace cs::features
 			table = toml::table{};
 		}
 
-		auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-		settingsTable.insert_or_assign("enabled", settings.enabled);
-		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
-		settingsTable.insert_or_assign("slice_count", static_cast<int64_t>(settings.sliceCount));
-		settingsTable.insert_or_assign("step_count", static_cast<int64_t>(settings.stepCount));
-		settingsTable.insert_or_assign("ao_radius", static_cast<double>(settings.aoRadius));
-		settingsTable.insert_or_assign("ao_intensity", static_cast<double>(settings.aoIntensity));
-		settingsTable.insert_or_assign("ao_power", static_cast<double>(settings.aoPower));
-		settingsTable.insert_or_assign("thickness", static_cast<double>(settings.thickness));
-		settingsTable.insert_or_assign("apply_to_scene", settings.applyToScene);
-		settingsTable.insert_or_assign("apply_contrast", static_cast<double>(settings.applyContrast));
+		ssgi::EmitSettings(table, settings);
 
 		std::ofstream out(kConfigPath);
 		if (out) {
 			out << table;
 		}
+	}
+
+	bool ScreenSpaceGI::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext&, std::string& a_err)
+	{
+		stagedSettings = Settings{};
+		ssgi::ParseSettings(a_subtable, stagedSettings);
+		stagedSettings.previewScale = settings.previewScale;
+		stagedSettings.showPreview  = settings.showPreview;
+		stagedValid = true;
+		a_err.clear();
+		return true;
+	}
+
+	void ScreenSpaceGI::CommitStaged()
+	{
+		if (!stagedValid) return;
+		settings    = stagedSettings;
+		stagedValid = false;
+		SaveSettings();
+	}
+
+	void ScreenSpaceGI::ExportToPreset(toml::table& a_subtable)
+	{
+		ssgi::EmitSettings(a_subtable, settings);
 	}
 
 	bool ScreenSpaceGI::EnsurePyramid(uint32_t a_w, uint32_t a_h)

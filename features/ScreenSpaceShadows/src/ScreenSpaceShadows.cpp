@@ -1,5 +1,7 @@
 #include "ScreenSpaceShadows.h"
 
+#include "ScreenSpaceShadowsConfigIO.h"
+
 #include <algorithm>
 #include <cmath>
 #include <format>
@@ -19,6 +21,7 @@
 #include "Engine.h"
 #include "Env.h"
 #include "Log.h"
+#include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Sky.h"
 #include "Util.h"
@@ -87,27 +90,14 @@ namespace cs::features
 			return;
 		}
 
-		const auto settingsTable = table["settings"];
-		settings.enabled = settingsTable["enabled"].value_or(settings.enabled);
-
 		// First-launch detection: missing preset means the TOML was newly bootstrapped.
-		const auto tomlPreset = settingsTable["preset"].value<int64_t>();
+		const auto tomlPreset = table["settings"]["preset"].value<int64_t>();
 		const bool firstLaunch = !tomlPreset.has_value();
 
-		settings.sampleCount = std::clamp(static_cast<int>(settingsTable["sample_count"].value_or<int64_t>(settings.sampleCount)), 1, 4);
-		settings.surfaceThickness = std::clamp(static_cast<float>(settingsTable["surface_thickness"].value_or(static_cast<double>(settings.surfaceThickness))), 0.001f, 0.1f);
-		settings.bilinearThreshold = std::clamp(static_cast<float>(settingsTable["bilinear_threshold"].value_or(static_cast<double>(settings.bilinearThreshold))), 0.001f, 1.0f);
-		settings.shadowContrast = std::clamp(static_cast<float>(settingsTable["shadow_contrast"].value_or(static_cast<double>(settings.shadowContrast))), 0.0f, 4.0f);
-
-		settings.applyToScene = settingsTable["apply_to_scene"].value_or(settings.applyToScene);
-		settings.sunOnly = settingsTable["sun_only"].value_or(settings.sunOnly);
-		settings.applyContrast = std::clamp(static_cast<float>(settingsTable["apply_contrast"].value_or(static_cast<double>(settings.applyContrast))), 0.0f, 2.0f);
+		sss::ParseSettings(table, settings);
 
 		if (firstLaunch) {
 			ApplyPreset(Preset::kQuality);
-		} else {
-			settings.preset = std::clamp(static_cast<int>(*tomlPreset),
-				static_cast<int>(Preset::kCustom), static_cast<int>(Preset::kCinematic));
 		}
 
 		// Smoke-harness override: marker presence forces all knobs to known values; cleared on harness exit.
@@ -145,6 +135,7 @@ namespace cs::features
 			}
 		}
 
+		const auto settingsTable = table["settings"];
 		settings.previewScale = std::clamp(static_cast<float>(settingsTable["preview_scale"].value_or(static_cast<double>(settings.previewScale))), 0.05f, 1.0f);
 		settings.showPreview = settingsTable["show_preview"].value_or(settings.showPreview);
 	}
@@ -162,16 +153,11 @@ namespace cs::features
 			table = toml::table{};
 		}
 
-		auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-		settingsTable.insert_or_assign("enabled", settings.enabled);
-		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
-		settingsTable.insert_or_assign("sample_count", static_cast<int64_t>(settings.sampleCount));
-		settingsTable.insert_or_assign("surface_thickness", static_cast<double>(settings.surfaceThickness));
-		settingsTable.insert_or_assign("bilinear_threshold", static_cast<double>(settings.bilinearThreshold));
-		settingsTable.insert_or_assign("shadow_contrast", static_cast<double>(settings.shadowContrast));
-		settingsTable.insert_or_assign("apply_to_scene", settings.applyToScene);
-		settingsTable.insert_or_assign("sun_only", settings.sunOnly);
-		settingsTable.insert_or_assign("apply_contrast", static_cast<double>(settings.applyContrast));
+		sss::EmitSettings(table, settings);
+
+		// preview_scale / show_preview are debug UI scratch and are not part of the preset surface,
+		// so the ConfigIO module excludes them; SaveSettings still persists them for menu UX.
+		auto& settingsTable = *table["settings"].as_table();
 		settingsTable.insert_or_assign("preview_scale", static_cast<double>(settings.previewScale));
 		settingsTable.insert_or_assign("show_preview", settings.showPreview);
 
@@ -179,6 +165,31 @@ namespace cs::features
 		if (out) {
 			out << table;
 		}
+	}
+
+	bool ScreenSpaceShadows::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext&, std::string& a_err)
+	{
+		stagedSettings = Settings{};
+		sss::ParseSettings(a_subtable, stagedSettings);
+		// Preserve current preview UI scratch state across preset apply.
+		stagedSettings.previewScale = settings.previewScale;
+		stagedSettings.showPreview  = settings.showPreview;
+		stagedValid = true;
+		a_err.clear();
+		return true;
+	}
+
+	void ScreenSpaceShadows::CommitStaged()
+	{
+		if (!stagedValid) return;
+		settings    = stagedSettings;
+		stagedValid = false;
+		SaveSettings();
+	}
+
+	void ScreenSpaceShadows::ExportToPreset(toml::table& a_subtable)
+	{
+		sss::EmitSettings(a_subtable, settings);
 	}
 
 	struct PresetValues

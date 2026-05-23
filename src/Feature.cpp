@@ -2,10 +2,12 @@
 
 #include "Log.h"
 #include "Plugin.h"
+#include "PresetManager.h"
 
 #include <toml++/toml.hpp>
 
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
@@ -76,14 +78,16 @@ namespace
 	bool LoadAutoInstallAllFeatures()
 	{
 		toml::table table;
-		bool configExists = PathExists(kGlobalConfigPath);
+		const bool configExists = PathExists(kGlobalConfigPath);
+		bool parsedOk = false;
 		if (configExists) {
 			try {
 				table = toml::parse_file(kGlobalConfigPath);
+				parsedOk = true;
 			} catch (const toml::parse_error& e) {
-				L->warn("Failed to parse global feature config {}: {}", kGlobalConfigPath, e.description());
-				configExists = false;
-				table = toml::table{};
+				L->warn("Failed to parse global feature config {}: {}. Leaving file untouched; preset state will be preserved on a successful reparse.",
+					kGlobalConfigPath, e.description());
+				return kDefaultAutoInstallAllFeatures;
 			}
 		}
 
@@ -93,13 +97,23 @@ namespace
 
 		if (!configExists || !hasKey) {
 			EnsureConfigDirectory();
-			table.insert_or_assign("info", toml::table{ { "version", PluginVersionString() } });
-			table.insert_or_assign("features", toml::table{ { "auto_install_all_features", autoInstall } });
+			// Scoped key-level mutation so sibling blocks ([preset], owned by PresetManager) survive.
+			if (!table["info"].as_table()) {
+				table.insert_or_assign("info", toml::table{});
+			}
+			(*table["info"].as_table()).insert_or_assign("version", PluginVersionString());
+
+			if (!table["features"].as_table()) {
+				table.insert_or_assign("features", toml::table{});
+			}
+			(*table["features"].as_table()).insert_or_assign("auto_install_all_features", autoInstall);
+
 			if (!WriteToml(kGlobalConfigPath, table)) {
 				L->warn("Failed to save global feature config {}", kGlobalConfigPath);
 			}
 		}
 
+		(void)parsedOk;
 		return autoInstall;
 	}
 
@@ -267,6 +281,19 @@ namespace cs
 		return PathExists(FeatureConfigPath(*this));
 	}
 
+	std::string Feature::GetPresetKey() const
+	{
+		const auto name = GetName();
+		std::string out;
+		out.reserve(name.size());
+		for (char c : name) {
+			const auto lc = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			const bool ok = (lc >= 'a' && lc <= 'z') || (lc >= '0' && lc <= '9') || lc == '_';
+			out.push_back(ok ? lc : '_');
+		}
+		return out;
+	}
+
 	FeatureManager& FeatureManager::Get()
 	{
 		static FeatureManager instance;
@@ -337,5 +364,6 @@ namespace cs
 		for (auto* feature : _loadedFeatures) {
 			feature->OnPostPostLoad();
 		}
+		PresetManager::Get().ResolveAndApplyBootPreset();
 	}
 }

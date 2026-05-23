@@ -1,7 +1,5 @@
 #include "Imagespace.h"
 
-#include "PresetManager.h"
-
 #include <DirectXTex.h>
 #include <algorithm>
 #include <array>
@@ -23,6 +21,7 @@
 #include "Env.h"
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
+#include "PresetManager.h"
 #include "Sky.h"
 #include "Util.h"
 #include "Weather.h"
@@ -42,7 +41,6 @@ namespace cs::features
 	constexpr const char* kSharpenMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_sharpen";
 	constexpr const char* kDofMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_dof";
 	constexpr const char* kStyleMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_style";
-	constexpr const char* kPresetMarker  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_preset";
 	constexpr const char* kWeatherCatMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_category";
 	constexpr const char* kWeatherFormIDMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_formid";
 	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
@@ -267,12 +265,6 @@ namespace cs::features
 		return &instance;
 	}
 
-	Imagespace::Imagespace() :
-		presetManager(std::make_unique<imagespace::PresetManager>())
-	{}
-
-	Imagespace::~Imagespace() = default;
-
 	void Imagespace::Load()
 	{
 		LoadSettings();
@@ -331,66 +323,6 @@ namespace cs::features
 
 		imagespace::ParseSettings(table, settings);
 		imagespace::ParseWeather(table, weatherProfiles, /*a_dropOverrides=*/false);
-
-		// [preset] block: persisted active identity + auto-load toggle. Owned by Imagespace.cpp
-		// (not by ConfigIO) so the snapshot semantics of preset files stay free of preset-machinery
-		// metadata.
-		activePresetIdentity.clear();
-		activePresetName.clear();
-		autoLoadPresetOnBoot = false;
-		if (const auto* presetTbl = table["preset"].as_table()) {
-			if (const auto v = (*presetTbl)["active"].value<std::string>()) {
-				// Lowercase here so identities stay comparable regardless of how the file was edited.
-				activePresetIdentity = *v;
-				std::transform(activePresetIdentity.begin(), activePresetIdentity.end(), activePresetIdentity.begin(),
-					[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
-			}
-			autoLoadPresetOnBoot = (*presetTbl)["auto_load_on_boot"].value_or(false);
-		}
-
-		presetManager->Refresh();
-
-		// Reconstruct display name from refreshed metadata so the UI status line is correct even
-		// when neither the marker nor auto-load fires (otherwise activePresetName stays empty
-		// while activePresetIdentity has a value).
-		if (!activePresetIdentity.empty()) {
-			if (const auto* meta = presetManager->FindByIdentity(activePresetIdentity)) {
-				activePresetName = meta->name;
-			}
-		}
-
-		// Preset marker (smoke harness) wins over auto_load_on_boot.
-		std::string markerPayload;
-		const bool  markerHit = imagespace::ReadTextMarker(std::filesystem::path(kPresetMarker), markerPayload);
-
-		auto resolvePayload = [this](std::string_view payload) -> const imagespace::PresetMeta* {
-			if (payload.size() >= 2 && (payload[1] == ':') && (payload[0] == 'B' || payload[0] == 'U' || payload[0] == 'b' || payload[0] == 'u')) {
-				return presetManager->FindByIdentity(payload);
-			}
-			return presetManager->FindByName(payload, /*a_preferUser=*/true);
-		};
-
-		if (markerHit) {
-			if (const auto* meta = resolvePayload(markerPayload)) {
-				ApplyPresetByIdentity(meta->identity);
-				L->info("Preset marker honored: '{}' -> {}", markerPayload, meta->identity);
-			} else {
-				L->warn("Preset marker payload '{}' did not resolve to a known preset", markerPayload);
-			}
-		} else if (autoLoadPresetOnBoot && !activePresetIdentity.empty()) {
-			const imagespace::PresetMeta* meta = presetManager->FindByIdentity(activePresetIdentity);
-			if (!meta) {
-				meta = presetManager->FindByName(activePresetName, /*a_preferUser=*/true);
-			}
-			if (meta) {
-				ApplyPresetByIdentity(meta->identity);
-			} else {
-				L->warn("Auto-load preset '{}' not found; keeping Imagespace.toml-derived settings",
-					activePresetName.empty() ? activePresetIdentity : activePresetName);
-			}
-		}
-
-		pendingComboIdentity = activePresetIdentity;
 
 		// LUT preload deferred: if D3D is ready (mid-game reload), do it now; otherwise OnD3D11Ready
 		// will pick it up. Avoids poisoning LUTCache's negative cache during pre-D3D Imagespace::Load().
@@ -507,54 +439,44 @@ namespace cs::features
 		imagespace::EmitSettings(table, settings);
 		imagespace::EmitWeather(table, weatherProfiles, /*a_includeOverrides=*/true);
 
-		// [preset] block: persist active identity + auto-load.
-		{
-			auto& p = table.insert_or_assign("preset", toml::table{}).first->second.as_table()->ref<toml::table>();
-			p.insert_or_assign("active",            activePresetIdentity);
-			p.insert_or_assign("auto_load_on_boot", autoLoadPresetOnBoot);
-		}
-
 		std::ofstream out(kConfigPath);
 		if (out) {
 			out << table;
 		}
 	}
 
-	void Imagespace::ApplyPresetByIdentity(std::string_view a_identity)
+	bool Imagespace::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err)
 	{
-		lastPresetError.clear();
-		const auto* meta = presetManager->FindByIdentity(a_identity);
-		if (!meta) {
-			lastPresetError = "Preset not found: " + std::string(a_identity);
-			L->warn("{}", lastPresetError);
-			return;
-		}
-
-		Settings                    nextSettings{};
-		imagespace::WeatherProfiles nextProfiles{};
-		std::string                 err;
-		if (!presetManager->Load(*meta, nextSettings, nextProfiles, err)) {
-			lastPresetError = "Load failed: " + err;
-			L->warn("{}", lastPresetError);
-			return;
-		}
+		stagedSettings        = Settings{};
+		stagedWeatherProfiles = imagespace::WeatherProfiles{};
+		imagespace::ParseSettings(a_subtable, stagedSettings);
+		imagespace::ParseWeather(a_subtable, stagedWeatherProfiles, /*a_dropOverrides=*/a_ctx.isBuiltin);
 
 		// Builtin presets must not stamp formID mappings into user state; carry the live overrides
 		// across the commit so loading a shipped preset leaves the user's saved formID -> category
 		// map untouched.
-		if (meta->builtin) {
-			nextProfiles.userOverrides = weatherProfiles.userOverrides;
+		if (a_ctx.isBuiltin) {
+			stagedWeatherProfiles.userOverrides = weatherProfiles.userOverrides;
 		}
+		stagedValid = true;
+		a_err.clear();
+		return true;
+	}
 
-		settings        = std::move(nextSettings);
-		weatherProfiles = std::move(nextProfiles);
-
-		activePresetIdentity = meta->identity;
-		activePresetName     = meta->name;
-		pendingComboIdentity = meta->identity;
-
+	void Imagespace::CommitStaged()
+	{
+		if (!stagedValid) return;
+		settings        = std::move(stagedSettings);
+		weatherProfiles = std::move(stagedWeatherProfiles);
+		stagedValid     = false;
+		SaveSettings();
 		ApplyLUTState();
-		L->info("Applied preset: {} ({})", meta->name, meta->builtin ? "builtin" : "user");
+	}
+
+	void Imagespace::ExportToPreset(toml::table& a_subtable)
+	{
+		imagespace::EmitSettings(a_subtable, settings);
+		imagespace::EmitWeather(a_subtable, weatherProfiles, /*a_includeOverrides=*/false);
 	}
 
 	struct StyleValues
@@ -1564,179 +1486,6 @@ namespace cs::features
 			ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: suite skips by default.");
 			dirty |= ImGui::Checkbox("Force-enable with ENB", &settings.forceWithENB);
 			ImGui::SetItemTooltip("Off (default): Imagespace yields the entire post-process chain to ENB. On: stack on top (may double-grade).");
-		}
-
-		ImGui::Separator();
-		if (ImGui::CollapsingHeader("Presets")) {
-			const auto& presets = presetManager->List();
-
-			// Status line.
-			if (activePresetIdentity.empty()) {
-				ImGui::TextDisabled("Active: (none)");
-			} else {
-				const bool builtin = !activePresetIdentity.empty() && activePresetIdentity[0] == 'b';
-				const auto* active = presetManager->FindByIdentity(activePresetIdentity);
-				if (active) {
-					ImGui::Text("Active: %s (%s)", activePresetName.c_str(), builtin ? "builtin" : "user");
-				} else {
-					ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "Active: %s (missing)", activePresetName.c_str());
-				}
-			}
-			if (!lastPresetError.empty()) {
-				ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", lastPresetError.c_str());
-			}
-
-			// Combo.
-			std::string pendingLabel;
-			if (pendingComboIdentity.empty() && !presets.empty()) {
-				pendingComboIdentity = presets.front().identity;
-			}
-			if (const auto* sel = presetManager->FindByIdentity(pendingComboIdentity)) {
-				pendingLabel.assign(sel->builtin ? "B: " : "U: ");
-				pendingLabel.append(sel->name);
-			} else if (!presets.empty()) {
-				pendingComboIdentity = presets.front().identity;
-				pendingLabel.assign(presets.front().builtin ? "B: " : "U: ");
-				pendingLabel.append(presets.front().name);
-			} else {
-				pendingLabel = "(no presets found)";
-			}
-
-			ImGui::BeginDisabled(presets.empty());
-			if (ImGui::BeginCombo("Preset", pendingLabel.c_str())) {
-				for (const auto& meta : presets) {
-					std::string label = meta.builtin ? "B: " : "U: ";
-					label.append(meta.name);
-					const bool selected = (meta.identity == pendingComboIdentity);
-					if (ImGui::Selectable(label.c_str(), selected)) {
-						pendingComboIdentity = meta.identity;
-					}
-					if (selected) ImGui::SetItemDefaultFocus();
-				}
-				ImGui::EndCombo();
-			}
-			ImGui::EndDisabled();
-
-			// Action buttons.
-			const auto* pending  = presetManager->FindByIdentity(pendingComboIdentity);
-			const auto* active   = presetManager->FindByIdentity(activePresetIdentity);
-			const bool  canSave  = active && !active->builtin;
-			const bool  canDel   = active && !active->builtin;
-
-			ImGui::BeginDisabled(!pending);
-			if (ImGui::Button("Load")) {
-				if (dirty) {
-					SaveSettings();
-					dirty = false;
-				}
-				ApplyPresetByIdentity(pendingComboIdentity);
-				dirty = true;  // persist [preset] block update on next flush.
-			}
-			ImGui::EndDisabled();
-
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!canSave);
-			if (ImGui::Button("Save")) {
-				std::string err;
-				if (presetManager->Save(active->path, settings, weatherProfiles, active->name, err, /*a_allowOverwrite=*/true)) {
-					std::string savedName = active->name;
-					presetManager->Refresh();
-					if (const auto* re = presetManager->FindByName(savedName, /*a_preferUser=*/true)) {
-						activePresetIdentity = re->identity;
-						activePresetName     = re->name;
-						pendingComboIdentity = re->identity;
-					}
-					lastPresetError.clear();
-				} else {
-					lastPresetError = "Save failed: " + err;
-				}
-			}
-			ImGui::EndDisabled();
-
-			ImGui::SameLine();
-			if (ImGui::Button("Save As...")) {
-				presetSaveAsBuf[0] = '\0';
-				ImGui::OpenPopup("Save As Preset");
-			}
-
-			ImGui::SameLine();
-			ImGui::BeginDisabled(!canDel);
-			if (ImGui::Button("Delete")) {
-				ImGui::OpenPopup("Delete Preset?");
-			}
-			ImGui::EndDisabled();
-
-			ImGui::SameLine();
-			if (ImGui::Button("Refresh")) {
-				presetManager->Refresh();
-				if (!presetManager->FindByIdentity(pendingComboIdentity)) {
-					pendingComboIdentity.clear();
-				}
-				lastPresetError.clear();
-			}
-
-			dirty |= ImGui::Checkbox("Auto-load this preset on boot", &autoLoadPresetOnBoot);
-			ImGui::SetItemTooltip("On next plugin load, the active preset is reapplied over Imagespace.toml. Overridden by the .imagespace_force_preset marker.");
-
-			// Save As modal.
-			if (ImGui::BeginPopupModal("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-				ImGui::InputText("Name", presetSaveAsBuf, sizeof(presetSaveAsBuf));
-				ImGui::TextDisabled("Letters, digits, underscore, hyphen. 1-64 chars.");
-				if (ImGui::Button("Save", ImVec2(120, 0))) {
-					std::string err;
-					std::string name(presetSaveAsBuf);
-					if (!imagespace::ValidatePresetName(name, presetManager->List(), err)) {
-						lastPresetError = "Invalid name: " + err;
-					} else {
-						std::filesystem::path dst = std::filesystem::path(kConfigPath).parent_path() / "Imagespace" / "Presets" / (name + ".toml");
-						if (presetManager->Save(dst, settings, weatherProfiles, name, err)) {
-							presetManager->Refresh();
-							if (const auto* re = presetManager->FindByName(name, /*a_preferUser=*/true)) {
-								activePresetIdentity = re->identity;
-								activePresetName     = re->name;
-								pendingComboIdentity = re->identity;
-								dirty = true;
-							}
-							lastPresetError.clear();
-							ImGui::CloseCurrentPopup();
-						} else {
-							lastPresetError = "Save failed: " + err;
-						}
-					}
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-					ImGui::CloseCurrentPopup();
-				}
-				ImGui::EndPopup();
-			}
-
-			// Delete confirm modal.
-			if (ImGui::BeginPopupModal("Delete Preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-				ImGui::Text("Delete preset '%s'?", active ? active->name.c_str() : "");
-				ImGui::TextDisabled("File is removed from disk. This cannot be undone.");
-				if (ImGui::Button("Delete", ImVec2(120, 0))) {
-					std::string err;
-					if (active && presetManager->Delete(*active, err)) {
-						presetManager->Refresh();
-						activePresetIdentity.clear();
-						activePresetName.clear();
-						pendingComboIdentity.clear();
-						autoLoadPresetOnBoot = false;
-						SaveSettings();  // persist cleared [preset] block immediately.
-						dirty = false;
-						lastPresetError.clear();
-					} else {
-						lastPresetError = "Delete failed: " + err;
-					}
-					ImGui::CloseCurrentPopup();
-				}
-				ImGui::SameLine();
-				if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-					ImGui::CloseCurrentPopup();
-				}
-				ImGui::EndPopup();
-			}
 		}
 
 		ImGui::Separator();

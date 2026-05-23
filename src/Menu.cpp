@@ -4,9 +4,13 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include <filesystem>
+#include <string>
+
 #include "Feature.h"
 #include "Log.h"
 #include "Plugin.h"
+#include "PresetManager.h"
 
 namespace { auto* L = cs::log::Get("cs.menu"); }
 
@@ -206,6 +210,10 @@ namespace cs
 				}
 			}
 
+			if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen)) {
+				DrawPresetsUI();
+			}
+
 			// PushID per feature so widgets in DrawSettings can't collide across features.
 			for (auto* feat : FeatureManager::Get().GetAll()) {
 				ImGui::PushID(feat->GetName().data());
@@ -215,6 +223,184 @@ namespace cs
 			}
 		}
 		ImGui::End();
+	}
+
+	void Menu::DrawPresetsUI()
+	{
+		auto& pm = PresetManager::Get();
+		const auto& presets = pm.List();
+
+		// Status line.
+		if (pm.activeIdentity.empty()) {
+			ImGui::TextDisabled("Active: (none)");
+		} else {
+			const bool  builtin = pm.activeIdentity[0] == 'b';
+			const auto* active  = pm.FindByIdentity(pm.activeIdentity);
+			if (active) {
+				ImGui::Text("Active: %s (%s)", pm.activeName.c_str(), builtin ? "builtin" : "user");
+			} else {
+				ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "Active: %s (missing)",
+					pm.activeName.empty() ? pm.activeIdentity.c_str() : pm.activeName.c_str());
+			}
+		}
+		if (!pm.lastError.empty()) {
+			ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", pm.lastError.c_str());
+		}
+
+		// Combo.
+		std::string pendingLabel;
+		if (pm.pendingComboIdentity.empty() && !presets.empty()) {
+			pm.pendingComboIdentity = presets.front().identity;
+		}
+		if (const auto* sel = pm.FindByIdentity(pm.pendingComboIdentity)) {
+			pendingLabel.assign(sel->builtin ? "B: " : "U: ");
+			pendingLabel.append(sel->name);
+		} else if (!presets.empty()) {
+			pm.pendingComboIdentity = presets.front().identity;
+			pendingLabel.assign(presets.front().builtin ? "B: " : "U: ");
+			pendingLabel.append(presets.front().name);
+		} else {
+			pendingLabel = "(no presets found)";
+		}
+
+		ImGui::BeginDisabled(presets.empty());
+		if (ImGui::BeginCombo("Preset", pendingLabel.c_str())) {
+			for (const auto& meta : presets) {
+				std::string label = meta.builtin ? "B: " : "U: ";
+				label.append(meta.name);
+				const bool selected = (meta.identity == pm.pendingComboIdentity);
+				if (ImGui::Selectable(label.c_str(), selected)) {
+					pm.pendingComboIdentity = meta.identity;
+				}
+				if (selected) ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::EndDisabled();
+
+		// Action buttons.
+		const auto* pending = pm.FindByIdentity(pm.pendingComboIdentity);
+		const auto* active  = pm.FindByIdentity(pm.activeIdentity);
+		const bool  canSave = active && !active->builtin;
+		const bool  canDel  = active && !active->builtin;
+
+		ImGui::BeginDisabled(!pending);
+		if (ImGui::Button("Load")) {
+			std::string err;
+			if (!pm.Apply(*pending, err)) {
+				pm.lastError = "Load failed: " + err;
+			} else {
+				pm.lastError.clear();
+			}
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!canSave);
+		if (ImGui::Button("Save")) {
+			std::string err;
+			if (pm.Save(active->path, active->name, err, /*a_allowOverwrite=*/true)) {
+				const std::string savedName = active->name;
+				pm.Refresh();
+				if (const auto* re = pm.FindByName(savedName, /*a_preferUser=*/true)) {
+					pm.activeIdentity       = re->identity;
+					pm.activeName           = re->name;
+					pm.pendingComboIdentity = re->identity;
+				}
+				pm.lastError.clear();
+			} else {
+				pm.lastError = "Save failed: " + err;
+			}
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::Button("Save As...")) {
+			pm.saveAsBuf[0] = '\0';
+			ImGui::OpenPopup("Save As Preset");
+		}
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!canDel);
+		if (ImGui::Button("Delete")) {
+			ImGui::OpenPopup("Delete Preset?");
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::Button("Refresh")) {
+			pm.Refresh();
+			if (!pm.FindByIdentity(pm.pendingComboIdentity)) {
+				pm.pendingComboIdentity.clear();
+			}
+			pm.lastError.clear();
+		}
+
+		if (ImGui::Checkbox("Auto-load this preset on boot", &pm.autoLoadOnBoot)) {
+			pm.SaveCoreConfig();
+		}
+		ImGui::SetItemTooltip("On next plugin load, the active preset is reapplied across every participating feature. Overridden by the .cs_force_preset marker.");
+
+		// Save As modal.
+		if (ImGui::BeginPopupModal("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::InputText("Name", pm.saveAsBuf, sizeof(pm.saveAsBuf));
+			ImGui::TextDisabled("Letters, digits, underscore, hyphen. 1-64 chars.");
+			if (ImGui::Button("Save", ImVec2(120, 0))) {
+				std::string err;
+				std::string name(pm.saveAsBuf);
+				if (!ValidatePresetName(name, pm.List(), err)) {
+					pm.lastError = "Invalid name: " + err;
+				} else {
+					const std::filesystem::path dst =
+						std::filesystem::path("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets") /
+						(name + ".toml");
+					if (pm.Save(dst, name, err)) {
+						pm.Refresh();
+						if (const auto* re = pm.FindByName(name, /*a_preferUser=*/true)) {
+							pm.activeIdentity       = re->identity;
+							pm.activeName           = re->name;
+							pm.pendingComboIdentity = re->identity;
+							pm.SaveCoreConfig();
+						}
+						pm.lastError.clear();
+						ImGui::CloseCurrentPopup();
+					} else {
+						pm.lastError = "Save failed: " + err;
+					}
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		// Delete confirm modal.
+		if (ImGui::BeginPopupModal("Delete Preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("Delete preset '%s'?", active ? active->name.c_str() : "");
+			ImGui::TextDisabled("File is removed from disk. This cannot be undone.");
+			if (ImGui::Button("Delete", ImVec2(120, 0))) {
+				std::string err;
+				if (active && pm.Delete(*active, err)) {
+					pm.Refresh();
+					pm.activeIdentity.clear();
+					pm.activeName.clear();
+					pm.pendingComboIdentity.clear();
+					pm.autoLoadOnBoot = false;
+					pm.SaveCoreConfig();
+					pm.lastError.clear();
+				} else {
+					pm.lastError = "Delete failed: " + err;
+				}
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
 	}
 
 	void Menu::Toggle()

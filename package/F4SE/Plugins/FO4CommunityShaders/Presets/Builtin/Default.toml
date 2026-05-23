@@ -1,39 +1,35 @@
 [meta]
 name = "Default"
-created_by = "FO4CommunityShaders Imagespace"
-description = "Stock defaults. Loading this preset resets every Imagespace knob to its struct-defined value. Per-weather profiles are reset to disabled with empty overlays. Use this as a reference baseline or a one-click reset."
+schema_version = 1
+created_by = "FO4CommunityShaders"
+description = "Stock defaults for every participating feature. Loading this preset resets Imagespace, ScreenSpaceShadows, and ScreenSpaceGI to their struct-defined values. Use as a baseline or one-click reset."
 
-[settings]
+[features.imagespace.settings]
 enabled = true
 style = 2
 force_with_enb = false
-
 tonemap_operator = 1
 exposure = 1.0
 lut_enable = false
 lut_path = ""
 lut_strength = 1.0
-
 adaptive_exposure = true
 adaptation_speed_up = 0.5
 adaptation_speed_down = 2.0
 exposure_key = 0.18
 exposure_min = 0.05
 exposure_max = 4.0
-
 bloom_enable = true
 bloom_threshold = 0.85
 bloom_intensity = 0.05
 bloom_mips = 5
 bloom_mip_weights = [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-
 vignette_enable = true
 vignette_intensity = 0.3
 ca_enable = true
 ca_intensity = 0.5
 sharpen_enable = true
 sharpness = 0.4
-
 sunsprite_enable = true
 sunsprite_intensity = 0.6
 sunsprite_size = 0.05
@@ -42,7 +38,6 @@ lens_flare_intensity = 0.8
 lens_flare_ghosts = 5
 dirt_enable = false
 dirt_intensity = 0.5
-
 dof_enable = false
 aperture = 0.05
 focus_distance = 1500.0
@@ -53,5 +48,28 @@ coc_limit_factor = 0.04
 bokeh_intensity = 0.0
 anamorph_ratio = 1.0
 
-[weather]
+[features.imagespace.weather]
 enable_per_weather_profiles = false
+
+[features.screen_space_shadows.settings]
+enabled = true
+preset = 2
+sample_count = 1
+surface_thickness = 0.02
+bilinear_threshold = 0.02
+shadow_contrast = 1.0
+apply_to_scene = false
+sun_only = true
+apply_contrast = 1.0
+
+[features.screen_space_gi.settings]
+enabled = true
+preset = 2
+slice_count = 3
+step_count = 5
+ao_radius = 200.0
+ao_intensity = 1.0
+ao_power = 2.0
+thickness = 32.0
+apply_to_scene = false
+apply_contrast = 1.0
