@@ -10,8 +10,8 @@ Post-upscale compute stack for tone mapping, LUT grading, adaptive exposure, blo
 ## Runtime assets
 
 - Shaders live in `features/Imagespace/Shaders/` and deploy to `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`.
-- Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace.ini`.
-- LUT files are loaded from the configured INI path.
+- Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace.toml`.
+- LUT files are loaded from the configured `lut_path` setting.
 
 ## Invariants
 

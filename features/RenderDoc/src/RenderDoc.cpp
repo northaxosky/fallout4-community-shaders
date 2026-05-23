@@ -3,17 +3,18 @@
 #include <renderdoc_app.h>
 
 #include <imgui.h>
+#include <toml++/toml.hpp>
 
 #include <filesystem>
+#include <fstream>
 
 #include "Log.h"
-#include "SimpleIni.h"
 
 namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.renderdoc"); }
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\RenderDoc.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\RenderDoc.toml";
 
 	RenderDoc* RenderDoc::GetSingleton()
 	{
@@ -27,11 +28,14 @@ namespace cs::features
 		// and the game CTDs when Upscaling tries to fall back mid-flight. Refuse to load if DLSS-G is on.
 		bool DLSSGRequested()
 		{
-			CSimpleIniA ini;
-			ini.SetUnicode();
-			ini.LoadFile("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini");
-			const auto type = ini.GetLongValue("Settings", "iFrameGenType", 0);
-			const auto fgEnabled = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
+			toml::table table;
+			try {
+				table = toml::parse_file("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.toml");
+			} catch (const toml::parse_error&) {
+				return false;
+			}
+			const auto type = table["settings"]["frame_gen_type"].value_or<int64_t>(0);
+			const auto fgEnabled = table["settings"]["frame_generation_mode"].value_or(true);
 			return fgEnabled && type == 1;
 		}
 	}
@@ -43,7 +47,7 @@ namespace cs::features
 			return;
 		if (DLSSGRequested()) {
 			L->warn("RenderDoc disabled at load: incompatible with DLSS-G frame generation. "
-			        "Set bFrameGenerationMode=false or choose a non-DLSS-G backend before enabling RenderDoc.");
+			        "Set frame_generation_mode=false or choose a non-DLSS-G backend before enabling RenderDoc.");
 			_settings.enabled = false;
 			return;
 		}
@@ -53,13 +57,16 @@ namespace cs::features
 
 	void RenderDoc::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			return;
+		}
 
-		_settings.enabled       = ini.GetBoolValue("Settings", "bEnabled", _settings.enabled);
-		_settings.dllPath       = ini.GetValue("Settings", "sDllPath", _settings.dllPath.c_str());
-		_settings.captureFolder = ini.GetValue("Settings", "sCaptureFolder", _settings.captureFolder.c_str());
+		_settings.enabled       = table["settings"]["enabled"].value_or(_settings.enabled);
+		_settings.dllPath       = table["settings"]["dll_path"].value_or(_settings.dllPath);
+		_settings.captureFolder = table["settings"]["capture_folder"].value_or(_settings.captureFolder);
 
 		L->info("Settings: enabled={} dll={} folder={}",
 			_settings.enabled, _settings.dllPath, _settings.captureFolder);
@@ -67,15 +74,22 @@ namespace cs::features
 
 	void RenderDoc::SaveSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
+		}
 
-		ini.SetBoolValue("Settings", "bEnabled", _settings.enabled);
-		ini.SetValue("Settings", "sDllPath", _settings.dllPath.c_str());
-		ini.SetValue("Settings", "sCaptureFolder", _settings.captureFolder.c_str());
+		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign("dll_path", _settings.dllPath);
+		settings.insert_or_assign("capture_folder", _settings.captureFolder);
 
-		ini.SaveFile(kIniPath);
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	bool RenderDoc::TryLoadRuntime()

@@ -2,15 +2,17 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <fstream>
 #include <vector>
 
 #include <imgui.h>
+#include <toml++/toml.hpp>
 #include <Windows.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 
 #include "Log.h"
-#include "SimpleIni.h"
 
 namespace cs::features
 {
@@ -21,7 +23,7 @@ namespace cs::features
 		Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter;
 	};
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\PerformanceOverlay.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\PerformanceOverlay.toml";
 
 	PerformanceOverlay* PerformanceOverlay::GetSingleton()
 	{
@@ -43,70 +45,80 @@ namespace cs::features
 
 	void PerformanceOverlay::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			return;
+		}
 
-		settings.enabled        = ini.GetBoolValue("Settings", "bEnabled", settings.enabled);
-		settings.preset         = static_cast<int>(ini.GetLongValue("Settings", "iPreset", settings.preset));
+		settings.enabled        = table["settings"]["enabled"].value_or(settings.enabled);
+		settings.preset         = std::clamp(static_cast<int>(table["settings"]["preset"].value_or<int64_t>(settings.preset)), 0, 3);
 
-		settings.showFps        = ini.GetBoolValue("Settings", "bShowFps", settings.showFps);
-		settings.showFrameTime  = ini.GetBoolValue("Settings", "bShowFrameTime", settings.showFrameTime);
-		settings.showGraph      = ini.GetBoolValue("Settings", "bShowGraph", settings.showGraph);
-		settings.showVram       = ini.GetBoolValue("Settings", "bShowVram", settings.showVram);
-		settings.showStats      = ini.GetBoolValue("Settings", "bShowStats", settings.showStats);
+		settings.showFps        = table["settings"]["show_fps"].value_or(settings.showFps);
+		settings.showFrameTime  = table["settings"]["show_frame_time"].value_or(settings.showFrameTime);
+		settings.showGraph      = table["settings"]["show_graph"].value_or(settings.showGraph);
+		settings.showVram       = table["settings"]["show_vram"].value_or(settings.showVram);
+		settings.showStats      = table["settings"]["show_stats"].value_or(settings.showStats);
 
-		settings.corner         = static_cast<int>(ini.GetLongValue("Settings", "iCorner", settings.corner));
-		settings.freeDrag       = ini.GetBoolValue("Settings", "bFreeDrag", settings.freeDrag);
-		settings.dragPosX       = static_cast<float>(ini.GetDoubleValue("Settings", "fDragPosX", settings.dragPosX));
-		settings.dragPosY       = static_cast<float>(ini.GetDoubleValue("Settings", "fDragPosY", settings.dragPosY));
+		settings.corner         = std::clamp(static_cast<int>(table["settings"]["corner"].value_or<int64_t>(settings.corner)), 0, 3);
+		settings.freeDrag       = table["settings"]["free_drag"].value_or(settings.freeDrag);
+		settings.dragPosX       = static_cast<float>(table["settings"]["drag_pos_x"].value_or(static_cast<double>(settings.dragPosX)));
+		settings.dragPosY       = static_cast<float>(table["settings"]["drag_pos_y"].value_or(static_cast<double>(settings.dragPosY)));
 
-		settings.opacity        = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fOpacity", settings.opacity)), 0.0f, 1.0f);
-		settings.showBorder     = ini.GetBoolValue("Settings", "bShowBorder", settings.showBorder);
-		settings.fontScale      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFontScale", settings.fontScale)), 0.5f, 3.0f);
-		settings.highContrast   = ini.GetBoolValue("Settings", "bHighContrast", settings.highContrast);
+		settings.opacity        = std::clamp(static_cast<float>(table["settings"]["opacity"].value_or(static_cast<double>(settings.opacity))), 0.0f, 1.0f);
+		settings.showBorder     = table["settings"]["show_border"].value_or(settings.showBorder);
+		settings.fontScale      = std::clamp(static_cast<float>(table["settings"]["font_scale"].value_or(static_cast<double>(settings.fontScale))), 0.5f, 3.0f);
+		settings.highContrast   = table["settings"]["high_contrast"].value_or(settings.highContrast);
 
-		settings.autoThresholds = ini.GetBoolValue("Settings", "bAutoThresholds", settings.autoThresholds);
-		settings.fpsGood        = static_cast<float>(ini.GetDoubleValue("Settings", "fFpsGood", settings.fpsGood));
-		settings.fpsWarn        = static_cast<float>(ini.GetDoubleValue("Settings", "fFpsWarn", settings.fpsWarn));
+		settings.autoThresholds = table["settings"]["auto_thresholds"].value_or(settings.autoThresholds);
+		settings.fpsGood        = static_cast<float>(table["settings"]["fps_good"].value_or(static_cast<double>(settings.fpsGood)));
+		settings.fpsWarn        = static_cast<float>(table["settings"]["fps_warn"].value_or(static_cast<double>(settings.fpsWarn)));
 
-		settings.updateInterval = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fUpdateInterval", settings.updateInterval)), 0.05f, 5.0f);
-		settings.historySize    = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iHistorySize", settings.historySize)), 30, kHistoryCapacity);
+		settings.updateInterval = std::clamp(static_cast<float>(table["settings"]["update_interval"].value_or(static_cast<double>(settings.updateInterval))), 0.05f, 5.0f);
+		settings.historySize    = std::clamp(static_cast<int>(table["settings"]["history_size"].value_or<int64_t>(settings.historySize)), 30, kHistoryCapacity);
 	}
 
 	void PerformanceOverlay::SaveSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
+		}
 
-		ini.SetBoolValue("Settings", "bEnabled", settings.enabled);
-		ini.SetLongValue("Settings", "iPreset", settings.preset);
+		auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settingsTable.insert_or_assign("enabled", settings.enabled);
+		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
 
-		ini.SetBoolValue("Settings", "bShowFps", settings.showFps);
-		ini.SetBoolValue("Settings", "bShowFrameTime", settings.showFrameTime);
-		ini.SetBoolValue("Settings", "bShowGraph", settings.showGraph);
-		ini.SetBoolValue("Settings", "bShowVram", settings.showVram);
-		ini.SetBoolValue("Settings", "bShowStats", settings.showStats);
+		settingsTable.insert_or_assign("show_fps", settings.showFps);
+		settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
+		settingsTable.insert_or_assign("show_graph", settings.showGraph);
+		settingsTable.insert_or_assign("show_vram", settings.showVram);
+		settingsTable.insert_or_assign("show_stats", settings.showStats);
 
-		ini.SetLongValue("Settings", "iCorner", settings.corner);
-		ini.SetBoolValue("Settings", "bFreeDrag", settings.freeDrag);
-		ini.SetDoubleValue("Settings", "fDragPosX", settings.dragPosX);
-		ini.SetDoubleValue("Settings", "fDragPosY", settings.dragPosY);
+		settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
+		settingsTable.insert_or_assign("free_drag", settings.freeDrag);
+		settingsTable.insert_or_assign("drag_pos_x", static_cast<double>(settings.dragPosX));
+		settingsTable.insert_or_assign("drag_pos_y", static_cast<double>(settings.dragPosY));
 
-		ini.SetDoubleValue("Settings", "fOpacity", settings.opacity);
-		ini.SetBoolValue("Settings", "bShowBorder", settings.showBorder);
-		ini.SetDoubleValue("Settings", "fFontScale", settings.fontScale);
-		ini.SetBoolValue("Settings", "bHighContrast", settings.highContrast);
+		settingsTable.insert_or_assign("opacity", static_cast<double>(settings.opacity));
+		settingsTable.insert_or_assign("show_border", settings.showBorder);
+		settingsTable.insert_or_assign("font_scale", static_cast<double>(settings.fontScale));
+		settingsTable.insert_or_assign("high_contrast", settings.highContrast);
 
-		ini.SetBoolValue("Settings", "bAutoThresholds", settings.autoThresholds);
-		ini.SetDoubleValue("Settings", "fFpsGood", settings.fpsGood);
-		ini.SetDoubleValue("Settings", "fFpsWarn", settings.fpsWarn);
+		settingsTable.insert_or_assign("auto_thresholds", settings.autoThresholds);
+		settingsTable.insert_or_assign("fps_good", static_cast<double>(settings.fpsGood));
+		settingsTable.insert_or_assign("fps_warn", static_cast<double>(settings.fpsWarn));
 
-		ini.SetDoubleValue("Settings", "fUpdateInterval", settings.updateInterval);
-		ini.SetLongValue("Settings", "iHistorySize", settings.historySize);
+		settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
+		settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
 
-		ini.SaveFile(kIniPath);
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	void PerformanceOverlay::ApplyPreset(Preset preset)
@@ -345,7 +357,7 @@ namespace cs::features
 		ImGui::Separator();
 
 		// Sliders save on commit (mouse-release / keyboard-deactivate) rather than per-tick;
-		// otherwise a slider drag triggers a full INI rewrite on the render thread every frame.
+		// otherwise a slider drag triggers a full TOML rewrite on the render thread every frame.
 		auto sliderCommit = [] { return ImGui::IsItemDeactivatedAfterEdit(); };
 
 		static const char* presetLabels[] = { "Off", "Minimal", "Standard", "Verbose" };

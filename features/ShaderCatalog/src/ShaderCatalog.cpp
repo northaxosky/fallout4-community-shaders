@@ -4,9 +4,11 @@
 #include <shellapi.h>
 #include <d3d11.h>
 #include <imgui.h>
+#include <toml++/toml.hpp>
 
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "CatalogDB.h"
@@ -15,7 +17,6 @@
 #include "PixelShaderTracker.h"
 #include "Plugin.h"
 #include "Sha1.h"
-#include "SimpleIni.h"
 #include "SubclassHooks.h"
 
 #pragma comment(lib, "version.lib")
@@ -25,7 +26,7 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderCatalog.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderCatalog.toml";
 
 	namespace
 	{
@@ -82,14 +83,18 @@ namespace cs::features
 
 	void ShaderCatalog::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			return;
+		}
 
-		_settings.enabled               = ini.GetBoolValue("Settings", "bEnabled", _settings.enabled);
-		_settings.writerFlushIntervalMs = static_cast<int>(ini.GetLongValue("Settings", "iWriterFlushIntervalMs", _settings.writerFlushIntervalMs));
-		_settings.catalogPath           = ini.GetValue("Settings", "sCatalogPath", _settings.catalogPath.c_str());
-		_settings.symbolicationBudgetUs = static_cast<int>(ini.GetLongValue("Settings", "iSymbolicationBudgetUs", _settings.symbolicationBudgetUs));
+		const auto settings = table["settings"];
+		_settings.enabled = settings["enabled"].value_or(_settings.enabled);
+		_settings.writerFlushIntervalMs = static_cast<int>(settings["writer_flush_interval_ms"].value_or<int64_t>(_settings.writerFlushIntervalMs));
+		_settings.catalogPath = settings["catalog_path"].value_or(_settings.catalogPath);
+		_settings.symbolicationBudgetUs = static_cast<int>(settings["symbolication_budget_us"].value_or<int64_t>(_settings.symbolicationBudgetUs));
 
 		// Clamp pathological values.
 		if (_settings.writerFlushIntervalMs < 100)    _settings.writerFlushIntervalMs = 100;
@@ -98,26 +103,33 @@ namespace cs::features
 
 	void ShaderCatalog::SaveSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
+		}
 
-		ini.SetBoolValue("Settings", "bEnabled",               _settings.enabled);
-		ini.SetLongValue("Settings", "iWriterFlushIntervalMs", _settings.writerFlushIntervalMs);
-		ini.SetValue    ("Settings", "sCatalogPath",           _settings.catalogPath.c_str());
-		ini.SetLongValue("Settings", "iSymbolicationBudgetUs", _settings.symbolicationBudgetUs);
+		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign("writer_flush_interval_ms", static_cast<int64_t>(_settings.writerFlushIntervalMs));
+		settings.insert_or_assign("catalog_path", _settings.catalogPath);
+		settings.insert_or_assign("symbolication_budget_us", static_cast<int64_t>(_settings.symbolicationBudgetUs));
 
 		std::error_code ec;
 		std::filesystem::create_directories(
-			std::filesystem::path(kIniPath).parent_path(), ec);
-		ini.SaveFile(kIniPath);
+			std::filesystem::path(kConfigPath).parent_path(), ec);
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	void ShaderCatalog::Load()
 	{
 		LoadSettings();
 		if (!_settings.enabled) {
-			L->info("Disabled by INI; feature inert.");
+			L->info("Disabled by config; feature inert.");
 			return;
 		}
 

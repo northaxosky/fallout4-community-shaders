@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <fstream>
 
 #include <DirectXMath.h>
 #include <imgui.h>
+#include <toml++/toml.hpp>
 
 #pragma warning(push)
 #pragma warning(disable: 4244)
@@ -18,7 +20,6 @@
 #include "Env.h"
 #include "Log.h"
 #include "RenderHooks.h"
-#include "SimpleIni.h"
 #include "Sky.h"
 #include "Util.h"
 
@@ -26,7 +27,7 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.sss"); }
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.toml";
 
 	constexpr uint32_t kRT_GbufferNormal = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
 	constexpr uint32_t kRT_DiffuseBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
@@ -79,30 +80,33 @@ namespace cs::features
 
 	void ScreenSpaceShadows::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			return;
+		}
 
-		settings.enabled           = ini.GetBoolValue("Settings",   "bEnabled",          settings.enabled);
+		const auto settingsTable = table["settings"];
+		settings.enabled = settingsTable["enabled"].value_or(settings.enabled);
 
-		// First-launch detection: -1 sentinel means the key was absent. Existing INIs are trusted as-is
-		// to preserve any manual slider customisations the user has accumulated.
-		const long iniPreset = ini.GetLongValue("Settings", "iPreset", -1);
-		const bool firstLaunch = (iniPreset == -1);
+		// First-launch detection: missing preset means the TOML was newly bootstrapped.
+		const auto tomlPreset = settingsTable["preset"].value<int64_t>();
+		const bool firstLaunch = !tomlPreset.has_value();
 
-		settings.sampleCount       = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iSampleCount", settings.sampleCount)), 1, 4);
-		settings.surfaceThickness  = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSurfaceThickness", settings.surfaceThickness)), 0.001f, 0.1f);
-		settings.bilinearThreshold = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBilinearThreshold", settings.bilinearThreshold)), 0.001f, 1.0f);
-		settings.shadowContrast    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fShadowContrast", settings.shadowContrast)), 0.0f, 4.0f);
+		settings.sampleCount = std::clamp(static_cast<int>(settingsTable["sample_count"].value_or<int64_t>(settings.sampleCount)), 1, 4);
+		settings.surfaceThickness = std::clamp(static_cast<float>(settingsTable["surface_thickness"].value_or(static_cast<double>(settings.surfaceThickness))), 0.001f, 0.1f);
+		settings.bilinearThreshold = std::clamp(static_cast<float>(settingsTable["bilinear_threshold"].value_or(static_cast<double>(settings.bilinearThreshold))), 0.001f, 1.0f);
+		settings.shadowContrast = std::clamp(static_cast<float>(settingsTable["shadow_contrast"].value_or(static_cast<double>(settings.shadowContrast))), 0.0f, 4.0f);
 
-		settings.applyToScene      = ini.GetBoolValue("Apply",      "bApplyToScene",     settings.applyToScene);
-		settings.sunOnly           = ini.GetBoolValue("Apply",      "bSunOnly",          settings.sunOnly);
-		settings.applyContrast     = std::clamp(static_cast<float>(ini.GetDoubleValue("Apply", "fApplyContrast", settings.applyContrast)), 0.0f, 2.0f);
+		settings.applyToScene = settingsTable["apply_to_scene"].value_or(settings.applyToScene);
+		settings.sunOnly = settingsTable["sun_only"].value_or(settings.sunOnly);
+		settings.applyContrast = std::clamp(static_cast<float>(settingsTable["apply_contrast"].value_or(static_cast<double>(settings.applyContrast))), 0.0f, 2.0f);
 
 		if (firstLaunch) {
 			ApplyPreset(Preset::kQuality);
 		} else {
-			settings.preset = std::clamp(static_cast<int>(iniPreset),
+			settings.preset = std::clamp(static_cast<int>(*tomlPreset),
 				static_cast<int>(Preset::kCustom), static_cast<int>(Preset::kCinematic));
 		}
 
@@ -123,7 +127,7 @@ namespace cs::features
 		testModeActive = applyMarkerPresent;
 
 		if (applyMarkerPresent) {
-			// Reset every knob to canonical defaults so smoke A/B isn't polluted by INI drift.
+			// Reset every knob to canonical defaults so smoke A/B isn't polluted by config drift.
 			settings.enabled           = true;
 			settings.sampleCount       = 1;
 			settings.surfaceThickness  = 0.020f;
@@ -141,36 +145,40 @@ namespace cs::features
 			}
 		}
 
-		settings.previewScale      = std::clamp(static_cast<float>(ini.GetDoubleValue("Debug", "fPreviewScale", settings.previewScale)), 0.05f, 1.0f);
-		settings.showPreview       = ini.GetBoolValue("Debug",      "bShowPreview",      settings.showPreview);
+		settings.previewScale = std::clamp(static_cast<float>(settingsTable["preview_scale"].value_or(static_cast<double>(settings.previewScale))), 0.05f, 1.0f);
+		settings.showPreview = settingsTable["show_preview"].value_or(settings.showPreview);
 	}
 
 	void ScreenSpaceShadows::SaveSettings()
 	{
-		// Don't write back marker-overridden values to the user's INI. Markers are smoke-only;
-		// any persistence here would pollute the user's saved configuration.
+		// Don't write back marker-overridden values. Markers are smoke-only.
 		if (testModeActive)
 			return;
 
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
+		}
 
-		ini.SetBoolValue("Settings",   "bEnabled",           settings.enabled);
-		ini.SetLongValue("Settings",   "iPreset",            settings.preset);
-		ini.SetLongValue("Settings",   "iSampleCount",       settings.sampleCount);
-		ini.SetDoubleValue("Settings", "fSurfaceThickness",  settings.surfaceThickness);
-		ini.SetDoubleValue("Settings", "fBilinearThreshold", settings.bilinearThreshold);
-		ini.SetDoubleValue("Settings", "fShadowContrast",    settings.shadowContrast);
+		auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settingsTable.insert_or_assign("enabled", settings.enabled);
+		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
+		settingsTable.insert_or_assign("sample_count", static_cast<int64_t>(settings.sampleCount));
+		settingsTable.insert_or_assign("surface_thickness", static_cast<double>(settings.surfaceThickness));
+		settingsTable.insert_or_assign("bilinear_threshold", static_cast<double>(settings.bilinearThreshold));
+		settingsTable.insert_or_assign("shadow_contrast", static_cast<double>(settings.shadowContrast));
+		settingsTable.insert_or_assign("apply_to_scene", settings.applyToScene);
+		settingsTable.insert_or_assign("sun_only", settings.sunOnly);
+		settingsTable.insert_or_assign("apply_contrast", static_cast<double>(settings.applyContrast));
+		settingsTable.insert_or_assign("preview_scale", static_cast<double>(settings.previewScale));
+		settingsTable.insert_or_assign("show_preview", settings.showPreview);
 
-		ini.SetBoolValue("Apply",      "bApplyToScene",      settings.applyToScene);
-		ini.SetBoolValue("Apply",      "bSunOnly",           settings.sunOnly);
-		ini.SetDoubleValue("Apply",    "fApplyContrast",     settings.applyContrast);
-
-		ini.SetDoubleValue("Debug",    "fPreviewScale",      settings.previewScale);
-		ini.SetBoolValue("Debug",      "bShowPreview",       settings.showPreview);
-
-		ini.SaveFile(kIniPath);
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	struct PresetValues

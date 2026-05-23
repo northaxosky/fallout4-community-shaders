@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+
 #include <imgui.h>
+#include <toml++/toml.hpp>
 
 #include "ComputeScope.h"
 #include "CSUtil.h"
@@ -10,7 +13,6 @@
 #include "Env.h"
 #include "Log.h"
 #include "RenderHooks.h"
-#include "SimpleIni.h"
 #include "Util.h"
 
 #ifdef near
@@ -24,7 +26,7 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.ssgi"); }
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI.toml";
 
 	constexpr uint32_t kRT_GbufferNormal = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
 	constexpr uint32_t kRT_DiffuseBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
@@ -251,28 +253,32 @@ namespace cs::features
 
 	void ScreenSpaceGI::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			return;
+		}
 
-		settings.enabled      = ini.GetBoolValue("Settings",   "bEnabled",     settings.enabled);
-		const long iniPreset  = ini.GetLongValue("Settings",   "iPreset",      -1);
-		const bool firstLaunch = (iniPreset == -1);
+		const auto settingsTable = table["settings"];
+		settings.enabled = settingsTable["enabled"].value_or(settings.enabled);
+		const auto tomlPreset = settingsTable["preset"].value<int64_t>();
+		const bool firstLaunch = !tomlPreset.has_value();
 
-		settings.sliceCount   = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iSliceCount", settings.sliceCount)), 1, 8);
-		settings.stepCount    = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iStepCount", settings.stepCount)), 1, 16);
-		settings.aoRadius     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAORadius", settings.aoRadius)), 10.0f, 1024.0f);
-		settings.aoIntensity  = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAOIntensity", settings.aoIntensity)), 0.0f, 4.0f);
-		settings.aoPower      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAOPower", settings.aoPower)), 0.1f, 6.0f);
-		settings.thickness    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fThickness", settings.thickness)), 1.0f, 256.0f);
+		settings.sliceCount = std::clamp(static_cast<int>(settingsTable["slice_count"].value_or<int64_t>(settings.sliceCount)), 1, 8);
+		settings.stepCount = std::clamp(static_cast<int>(settingsTable["step_count"].value_or<int64_t>(settings.stepCount)), 1, 16);
+		settings.aoRadius = std::clamp(static_cast<float>(settingsTable["ao_radius"].value_or(static_cast<double>(settings.aoRadius))), 10.0f, 1024.0f);
+		settings.aoIntensity = std::clamp(static_cast<float>(settingsTable["ao_intensity"].value_or(static_cast<double>(settings.aoIntensity))), 0.0f, 4.0f);
+		settings.aoPower = std::clamp(static_cast<float>(settingsTable["ao_power"].value_or(static_cast<double>(settings.aoPower))), 0.1f, 6.0f);
+		settings.thickness = std::clamp(static_cast<float>(settingsTable["thickness"].value_or(static_cast<double>(settings.thickness))), 1.0f, 256.0f);
 
-		settings.applyToScene = ini.GetBoolValue("Apply", "bApplyToScene", settings.applyToScene);
-		settings.applyContrast = std::clamp(static_cast<float>(ini.GetDoubleValue("Apply", "fApplyContrast", settings.applyContrast)), 0.0f, 2.0f);
+		settings.applyToScene = settingsTable["apply_to_scene"].value_or(settings.applyToScene);
+		settings.applyContrast = std::clamp(static_cast<float>(settingsTable["apply_contrast"].value_or(static_cast<double>(settings.applyContrast))), 0.0f, 2.0f);
 
 		if (firstLaunch) {
 			ApplyPreset(Preset::kQuality);
 		} else {
-			settings.preset = std::clamp(static_cast<int>(iniPreset), 0, 3);
+			settings.preset = std::clamp(static_cast<int>(*tomlPreset), 0, 3);
 		}
 
 		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_force_apply";
@@ -305,20 +311,30 @@ namespace cs::features
 	void ScreenSpaceGI::SaveSettings()
 	{
 		if (testModeActive) return;
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
-		ini.SetBoolValue("Settings",   "bEnabled",      settings.enabled);
-		ini.SetLongValue("Settings",   "iPreset",       settings.preset);
-		ini.SetLongValue("Settings",   "iSliceCount",   settings.sliceCount);
-		ini.SetLongValue("Settings",   "iStepCount",    settings.stepCount);
-		ini.SetDoubleValue("Settings", "fAORadius",     settings.aoRadius);
-		ini.SetDoubleValue("Settings", "fAOIntensity",  settings.aoIntensity);
-		ini.SetDoubleValue("Settings", "fAOPower",      settings.aoPower);
-		ini.SetDoubleValue("Settings", "fThickness",    settings.thickness);
-		ini.SetBoolValue("Apply",      "bApplyToScene", settings.applyToScene);
-		ini.SetDoubleValue("Apply",    "fApplyContrast", settings.applyContrast);
-		ini.SaveFile(kIniPath);
+
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
+		}
+
+		auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settingsTable.insert_or_assign("enabled", settings.enabled);
+		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
+		settingsTable.insert_or_assign("slice_count", static_cast<int64_t>(settings.sliceCount));
+		settingsTable.insert_or_assign("step_count", static_cast<int64_t>(settings.stepCount));
+		settingsTable.insert_or_assign("ao_radius", static_cast<double>(settings.aoRadius));
+		settingsTable.insert_or_assign("ao_intensity", static_cast<double>(settings.aoIntensity));
+		settingsTable.insert_or_assign("ao_power", static_cast<double>(settings.aoPower));
+		settingsTable.insert_or_assign("thickness", static_cast<double>(settings.thickness));
+		settingsTable.insert_or_assign("apply_to_scene", settings.applyToScene);
+		settingsTable.insert_or_assign("apply_contrast", static_cast<double>(settings.applyContrast));
+
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	bool ScreenSpaceGI::EnsurePyramid(uint32_t a_w, uint32_t a_h)

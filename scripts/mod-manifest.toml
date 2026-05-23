@@ -45,11 +45,11 @@ src = "features/Imagespace/Shaders/"
 dst = "F4SE/Plugins/FO4CommunityShaders/Imagespace/Shaders/"
 pattern = "*.hlsl*"
 
-# Default INI seeds for features that read F4SE/Plugins/FO4CommunityShaders/*.ini.
+# Default TOML seeds for features that read F4SE/Plugins/FO4CommunityShaders/*.toml.
 [[deploy.assets]]
 src = "package/F4SE/Plugins/FO4CommunityShaders/"
 dst = "F4SE/Plugins/FO4CommunityShaders/"
-pattern = "*.ini"
+pattern = "*.toml"
 
 # ShaderReplacement manifest (maps runtime PS sha1 to reconstructed HLSL).
 [[deploy.assets]]

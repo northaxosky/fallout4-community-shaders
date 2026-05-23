@@ -10,7 +10,7 @@ Screen-space shadow sidecar using Sony Bend SSS-style raymarching plus an option
 ## Runtime assets
 
 - Shaders live in `features/ScreenSpaceShadows/Shaders/` and deploy to `Data\F4SE\Plugins\ScreenSpaceShadows\`.
-- Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\ScreenSpaceShadows.ini`.
+- Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\ScreenSpaceShadows.toml`.
 
 ## Invariants
 

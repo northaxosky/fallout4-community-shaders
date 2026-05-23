@@ -1,9 +1,11 @@
 #include "Upscaling.h"
 
 #include <imgui.h>
+#include <toml++/toml.hpp>
 
 #include <algorithm>
-#include <SimpleIni.h>
+#include <cstdint>
+#include <fstream>
 
 #include "CSUtil.h"
 #include "DX11Hooks.h"
@@ -18,7 +20,7 @@ namespace cs::features
 	using namespace upscaling;
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling"); }
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.toml";
 
 	namespace
 	{
@@ -394,19 +396,22 @@ struct SamplerStates
 
 void Upscaling::LoadSettings()
 {
-	CSimpleIniA ini;
-	ini.SetUnicode();
-	ini.LoadFile(kIniPath);
+	toml::table table;
+	try {
+		table = toml::parse_file(kConfigPath);
+	} catch (const toml::parse_error&) {
+		return;
+	}
 
-	const auto rawMethod = ini.GetLongValue("Settings", "iUpscaleMethodPreference", 2);
-	const auto rawQuality = ini.GetLongValue("Settings", "iQualityMode", 1);
-	const auto method = std::clamp(rawMethod, 0L, 2L);
-	const auto quality = std::clamp(rawQuality, 0L, 4L);
+	const auto rawMethod = table["settings"]["upscale_method_preference"].value_or<int64_t>(static_cast<int64_t>(settings.upscaleMethodPreference));
+	const auto rawQuality = table["settings"]["quality_mode"].value_or<int64_t>(static_cast<int64_t>(settings.qualityMode));
+	const auto method = std::clamp(rawMethod, int64_t{ 0 }, int64_t{ 2 });
+	const auto quality = std::clamp(rawQuality, int64_t{ 0 }, int64_t{ 4 });
 	if (method != rawMethod) {
-		L->warn("Clamped invalid iUpscaleMethodPreference {} -> {}", rawMethod, method);
+		L->warn("Clamped invalid upscale_method_preference {} -> {}", rawMethod, method);
 	}
 	if (quality != rawQuality) {
-		L->warn("Clamped invalid iQualityMode {} -> {}", rawQuality, quality);
+		L->warn("Clamped invalid quality_mode {} -> {}", rawQuality, quality);
 	}
 	settings.upscaleMethodPreference = static_cast<uint>(method);
 	settings.qualityMode = static_cast<uint>(quality);
@@ -417,14 +422,21 @@ void Upscaling::LoadSettings()
 
 void Upscaling::SaveSettings()
 {
-	CSimpleIniA ini;
-	ini.SetUnicode();
-	ini.LoadFile(kIniPath);
+	toml::table table;
+	try {
+		table = toml::parse_file(kConfigPath);
+	} catch (const toml::parse_error&) {
+		table = toml::table{};
+	}
 
-	ini.SetLongValue("Settings", "iUpscaleMethodPreference", settings.upscaleMethodPreference);
-	ini.SetLongValue("Settings", "iQualityMode", settings.qualityMode);
+	auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+	settingsTable.insert_or_assign("upscale_method_preference", static_cast<int64_t>(settings.upscaleMethodPreference));
+	settingsTable.insert_or_assign("quality_mode", static_cast<int64_t>(settings.qualityMode));
 
-	ini.SaveFile(kIniPath);
+	std::ofstream out(kConfigPath);
+	if (out) {
+		out << table;
+	}
 }
 
 void Upscaling::DrawSettings()

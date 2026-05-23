@@ -12,11 +12,11 @@ if [ -f scripts/.env ]; then . scripts/.env; fi
 PLUGIN_DIR="$(dirname "${MOD_DIR:-}")/../overwrite/F4SE/Plugins/FO4CommunityShaders"
 PLUGIN_DIR="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd || echo "$PLUGIN_DIR")"
 PRESET_MARKER="$PLUGIN_DIR/.imagespace_force_preset"
-INI_FILE="$PLUGIN_DIR/Imagespace.ini"
-INI_BACKUP="$PLUGIN_DIR/Imagespace.ini.smoke-bak"
+CFG_FILE="$PLUGIN_DIR/Imagespace.toml"
+CFG_BACKUP="$PLUGIN_DIR/Imagespace.toml.smoke-bak"
 
-backup_ini()  { [ -f "$INI_FILE" ] && cp -f "$INI_FILE" "$INI_BACKUP" || true; }
-restore_ini() { [ -f "$INI_BACKUP" ] && mv -f "$INI_BACKUP" "$INI_FILE" || true; }
+backup_cfg()  { [ -f "$CFG_FILE" ] && cp -f "$CFG_FILE" "$CFG_BACKUP" || true; }
+restore_cfg() { [ -f "$CFG_BACKUP" ] && mv -f "$CFG_BACKUP" "$CFG_FILE" || true; }
 
 write_preset()   { mkdir -p "$PLUGIN_DIR"; printf '%s' "$1" > "$PRESET_MARKER"; }
 clear_markers()  { rm -f "$PRESET_MARKER" 2>/dev/null || true; }
@@ -55,8 +55,8 @@ VIV="test-results/_sweep_preset_vivid.png"
 CIN="test-results/_sweep_preset_cinematic.png"
 
 LOG_BASE="$(mktemp)"; LOG_SUB="$(mktemp)"; LOG_STD="$(mktemp)"; LOG_VIV="$(mktemp)"; LOG_CIN="$(mktemp)"
-trap 'rm -f "$LOG_BASE" "$LOG_SUB" "$LOG_STD" "$LOG_VIV" "$LOG_CIN"; clear_markers; restore_ini' EXIT
-backup_ini
+trap 'rm -f "$LOG_BASE" "$LOG_SUB" "$LOG_STD" "$LOG_VIV" "$LOG_CIN"; clear_markers; restore_cfg' EXIT
+backup_cfg
 
 write_preset 0 ; run_smoke "preset=passthrough" "$LOG_BASE" ; capture passthrough "$(extract_results_dir "$LOG_BASE")" "$BASE"
 write_preset 1 ; run_smoke "preset=subtle"      "$LOG_SUB"  ; capture subtle      "$(extract_results_dir "$LOG_SUB")"  "$SUB"

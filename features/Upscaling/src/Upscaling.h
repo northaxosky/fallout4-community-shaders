@@ -51,7 +51,7 @@ public:
 
 	Settings settings;
 
-	// Reads Data/F4SE/Plugins/FO4CommunityShaders/Upscaling.ini.
+	// Reads Data/F4SE/Plugins/FO4CommunityShaders/Upscaling.toml.
 	void LoadSettings();
 	void SaveSettings();
 

@@ -41,6 +41,7 @@ find_package(directx-headers CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(tomlplusplus CONFIG REQUIRED)
 
 # Header-only INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
 add_subdirectory(cmake/Streamline)
@@ -72,6 +73,7 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 	magic_enum::magic_enum
 	d3dcompiler.lib
 	imgui::imgui
+	tomlplusplus::tomlplusplus
 )
 
 # Features attach their own sources to FO4CommunityShaders via target_sources.

@@ -18,11 +18,11 @@ BLOOM_MARKER="$PLUGIN_DIR/.imagespace_force_bloom"
 VIG_MARKER="$PLUGIN_DIR/.imagespace_force_vignette"
 CA_MARKER="$PLUGIN_DIR/.imagespace_force_ca"
 SHARP_MARKER="$PLUGIN_DIR/.imagespace_force_sharpen"
-INI_FILE="$PLUGIN_DIR/Imagespace.ini"
-INI_BACKUP="$PLUGIN_DIR/Imagespace.ini.smoke-bak"
+CFG_FILE="$PLUGIN_DIR/Imagespace.toml"
+CFG_BACKUP="$PLUGIN_DIR/Imagespace.toml.smoke-bak"
 
-backup_ini()  { [ -f "$INI_FILE" ] && cp -f "$INI_FILE" "$INI_BACKUP" || true; }
-restore_ini() { [ -f "$INI_BACKUP" ] && mv -f "$INI_BACKUP" "$INI_FILE" || true; }
+backup_cfg()  { [ -f "$CFG_FILE" ] && cp -f "$CFG_FILE" "$CFG_BACKUP" || true; }
+restore_cfg() { [ -f "$CFG_BACKUP" ] && mv -f "$CFG_BACKUP" "$CFG_FILE" || true; }
 
 write_marker() { mkdir -p "$PLUGIN_DIR"; printf '%s' "$2" > "$PLUGIN_DIR/.imagespace_force_$1"; }
 write_op()     { mkdir -p "$PLUGIN_DIR"; printf '%s' "$1" > "$OP_MARKER"; }
@@ -73,8 +73,8 @@ LOG_BL_OFF="$(mktemp)"; LOG_BL_ON="$(mktemp)"
 LOG_V_OFF="$(mktemp)"; LOG_V_ON="$(mktemp)"
 LOG_C_OFF="$(mktemp)"; LOG_C_ON="$(mktemp)"
 LOG_S_OFF="$(mktemp)"; LOG_S_ON="$(mktemp)"
-trap 'rm -f "$LOG_OFF" "$LOG_HAB" "$LOG_REI" "$LOG_LOT" "$LOG_BL_OFF" "$LOG_BL_ON" "$LOG_V_OFF" "$LOG_V_ON" "$LOG_C_OFF" "$LOG_C_ON" "$LOG_S_OFF" "$LOG_S_ON"; clear_markers; restore_ini' EXIT
-backup_ini
+trap 'rm -f "$LOG_OFF" "$LOG_HAB" "$LOG_REI" "$LOG_LOT" "$LOG_BL_OFF" "$LOG_BL_ON" "$LOG_V_OFF" "$LOG_V_ON" "$LOG_C_OFF" "$LOG_C_ON" "$LOG_S_OFF" "$LOG_S_ON"; clear_markers; restore_cfg' EXIT
+backup_cfg
 
 # Operator sweep.
 write_op 0 ; run_smoke "operator=off"      "$LOG_OFF" ; capture off      "$(extract_results_dir "$LOG_OFF")" "$OFF"

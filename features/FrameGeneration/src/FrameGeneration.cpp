@@ -2,6 +2,11 @@
 
 #include <d3dcompiler.h>
 #include <imgui.h>
+#include <toml++/toml.hpp>
+
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
 
 #include "DX12SwapChain.h"
 #include "CSUtil.h"
@@ -21,28 +26,30 @@ namespace cs::features
 	using cs::engine::DepthStencilTarget;
 	namespace { auto* L = cs::log::Get("cs.feature.framegen"); }
 
-	constexpr const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.toml";
 
 void FrameGeneration::LoadSettings()
 {
-	CSimpleIniA ini;
-	ini.SetUnicode();
-	ini.LoadFile(kIniPath);
+	toml::table table;
+	try {
+		table = toml::parse_file(kConfigPath);
+	} catch (const toml::parse_error&) {
+		return;
+	}
 
-	settings.frameGenerationMode = ini.GetBoolValue("Settings", "bFrameGenerationMode", true);
-	settings.frameLimitMode = ini.GetBoolValue("Settings", "bFrameLimitMode", true);
-	settings.disableInMenus = ini.GetBoolValue("Settings", "bDisableInMenus", true);
-	settings.debugLogging = ini.GetBoolValue("Settings", "bEnableDebugLogging", false);
-	settings.frameGenType = (int)ini.GetLongValue("Settings", "iFrameGenType", 0);
-	// configuration file stepper is 0-indexed (0=2x, 1=3x, 2=4x) but we store as numFramesToGenerate (1, 2, 3)
-	settings.frameGenFrames = std::clamp((int)ini.GetLongValue("Settings", "iFrameGenFrames", 0) + 1, 1, 3);
+	settings.frameGenerationMode = table["settings"]["frame_generation_mode"].value_or(settings.frameGenerationMode);
+	settings.frameLimitMode = table["settings"]["frame_limit_mode"].value_or(settings.frameLimitMode);
+	settings.disableInMenus = table["settings"]["disable_in_menus"].value_or(settings.disableInMenus);
+	settings.debugLogging = table["settings"]["enable_debug_logging"].value_or(settings.debugLogging);
+	settings.frameGenType = std::clamp(static_cast<int>(table["settings"]["frame_gen_type"].value_or<int64_t>(settings.frameGenType)), 0, 2);
+	settings.frameGenFrames = std::clamp(static_cast<int>(table["settings"]["frame_gen_frames"].value_or<int64_t>(settings.frameGenFrames)), 1, 3);
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
-		L->info("bFrameGenerationMode: {}", settings.frameGenerationMode);
-		L->info("bFrameLimitMode: {}", settings.frameLimitMode);
-		L->info("iFrameGenType: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
-		L->info("iFrameGenFrames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
+		L->info("frame_generation_mode: {}", settings.frameGenerationMode);
+		L->info("frame_limit_mode: {}", settings.frameLimitMode);
+		L->info("frame_gen_type: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
+		L->info("frame_gen_frames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
 		loggedOnce = true;
 	}
 }
@@ -56,19 +63,25 @@ void FrameGeneration::ReloadSettingsIfNeeded()
 
 void FrameGeneration::SaveSettings()
 {
-	CSimpleIniA ini;
-	ini.SetUnicode();
-	ini.LoadFile(kIniPath);
+	toml::table table;
+	try {
+		table = toml::parse_file(kConfigPath);
+	} catch (const toml::parse_error&) {
+		table = toml::table{};
+	}
 
-	ini.SetBoolValue("Settings", "bFrameGenerationMode", settings.frameGenerationMode);
-	ini.SetBoolValue("Settings", "bFrameLimitMode", settings.frameLimitMode);
-	ini.SetBoolValue("Settings", "bDisableInMenus", settings.disableInMenus);
-	ini.SetBoolValue("Settings", "bEnableDebugLogging", settings.debugLogging);
-	ini.SetLongValue("Settings", "iFrameGenType", settings.frameGenType);
-	// INI stores 0-indexed (0=2x, 1=3x, 2=4x); settings.frameGenFrames is 1-indexed.
-	ini.SetLongValue("Settings", "iFrameGenFrames", settings.frameGenFrames - 1);
+	auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+	settingsTable.insert_or_assign("frame_generation_mode", settings.frameGenerationMode);
+	settingsTable.insert_or_assign("frame_limit_mode", settings.frameLimitMode);
+	settingsTable.insert_or_assign("disable_in_menus", settings.disableInMenus);
+	settingsTable.insert_or_assign("enable_debug_logging", settings.debugLogging);
+	settingsTable.insert_or_assign("frame_gen_type", static_cast<int64_t>(settings.frameGenType));
+	settingsTable.insert_or_assign("frame_gen_frames", static_cast<int64_t>(settings.frameGenFrames));
 
-	ini.SaveFile(kIniPath);
+	std::ofstream out(kConfigPath);
+	if (out) {
+		out << table;
+	}
 }
 
 void FrameGeneration::DrawSettings()

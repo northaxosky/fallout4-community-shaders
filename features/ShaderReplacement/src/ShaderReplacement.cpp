@@ -6,7 +6,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <string>
+
+#include <toml++/toml.hpp>
 
 #include "Compiler.h"
 #include "Hooks.h"
@@ -14,13 +17,12 @@
 #include "Registry.h"
 #include "ShaderCatalog.h"
 #include "Sha1.h"
-#include "SimpleIni.h"
 
 namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.shaderreplacement"); }
 
-	constexpr const char* kIniPath    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderReplacement.ini";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderReplacement.toml";
 	constexpr const char* kMarkerPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.shaderreplace_force";
 
 	namespace
@@ -60,52 +62,62 @@ namespace cs::features
 
 	void ShaderReplacement::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			return;
+		}
 
-		_settings.enabled       = ini.GetBoolValue("Settings", "bEnabled",      _settings.enabled);
-		_settings.manifestPath  = ini.GetValue("Settings",     "sManifestPath", _settings.manifestPath.c_str());
-		_settings.shadersRoot   = ini.GetValue("Settings",     "sShadersRoot",  _settings.shadersRoot.c_str());
+		const auto settings = table["settings"];
+		_settings.enabled = settings["enabled"].value_or(_settings.enabled);
+		_settings.manifestPath = settings["manifest_path"].value_or(_settings.manifestPath);
+		_settings.shadersRoot = settings["shaders_root"].value_or(_settings.shadersRoot);
 
 		auto& s = _settings.shaders;
-		s.ambient_ibl_pass                = ini.GetBoolValue("Shaders", "bAmbientIblPass",                s.ambient_ibl_pass);
-		s.bsdf_light_deferred_directional = ini.GetBoolValue("Shaders", "bBsdfLightDeferredDirectional", s.bsdf_light_deferred_directional);
-		s.bsdf_light_deferred_point       = ini.GetBoolValue("Shaders", "bBsdfLightDeferredPoint",       s.bsdf_light_deferred_point);
-		s.deferred_composite              = ini.GetBoolValue("Shaders", "bDeferredComposite",            s.deferred_composite);
-		s.deferred_prepass                = ini.GetBoolValue("Shaders", "bDeferredPrepass",              s.deferred_prepass);
-		s.vls_slice_scatter               = ini.GetBoolValue("Shaders", "bVlsSliceScatter",              s.vls_slice_scatter);
+		s.ambient_ibl_pass = settings["replace_ambient_ibl_pass"].value_or(s.ambient_ibl_pass);
+		s.bsdf_light_deferred_directional = settings["replace_bsdf_light_deferred_directional"].value_or(s.bsdf_light_deferred_directional);
+		s.bsdf_light_deferred_point = settings["replace_bsdf_light_deferred_point"].value_or(s.bsdf_light_deferred_point);
+		s.deferred_composite = settings["replace_deferred_composite"].value_or(s.deferred_composite);
+		s.deferred_prepass = settings["replace_deferred_prepass"].value_or(s.deferred_prepass);
+		s.vls_slice_scatter = settings["replace_vls_slice_scatter"].value_or(s.vls_slice_scatter);
 
 		ApplyMarkerOverrides();
 	}
 
 	void ShaderReplacement::SaveSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
+		}
 
-		ini.SetBoolValue("Settings", "bEnabled",      _settings.enabled);
-		ini.SetValue("Settings",     "sManifestPath", _settings.manifestPath.c_str());
-		ini.SetValue("Settings",     "sShadersRoot",  _settings.shadersRoot.c_str());
+		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign("manifest_path", _settings.manifestPath);
+		settings.insert_or_assign("shaders_root", _settings.shadersRoot);
 
 		auto& s = _settings.shaders;
-		ini.SetBoolValue("Shaders", "bAmbientIblPass",                s.ambient_ibl_pass);
-		ini.SetBoolValue("Shaders", "bBsdfLightDeferredDirectional", s.bsdf_light_deferred_directional);
-		ini.SetBoolValue("Shaders", "bBsdfLightDeferredPoint",       s.bsdf_light_deferred_point);
-		ini.SetBoolValue("Shaders", "bDeferredComposite",            s.deferred_composite);
-		ini.SetBoolValue("Shaders", "bDeferredPrepass",              s.deferred_prepass);
-		ini.SetBoolValue("Shaders", "bVlsSliceScatter",               s.vls_slice_scatter);
+		settings.insert_or_assign("replace_ambient_ibl_pass", s.ambient_ibl_pass);
+		settings.insert_or_assign("replace_bsdf_light_deferred_directional", s.bsdf_light_deferred_directional);
+		settings.insert_or_assign("replace_bsdf_light_deferred_point", s.bsdf_light_deferred_point);
+		settings.insert_or_assign("replace_deferred_composite", s.deferred_composite);
+		settings.insert_or_assign("replace_deferred_prepass", s.deferred_prepass);
+		settings.insert_or_assign("replace_vls_slice_scatter", s.vls_slice_scatter);
 
 		std::error_code ec;
-		std::filesystem::create_directories(std::filesystem::path(kIniPath).parent_path(), ec);
-		ini.SaveFile(kIniPath);
+		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	void ShaderReplacement::ApplyMarkerOverrides()
 	{
-		// One-shot marker: smoke harness writes a tag string (composite/ambient/prepass/
-		// bsdf-dir/bsdf-pt/vls/all/none) and we override the in-memory INI accordingly.
+		// One-shot marker: smoke harness writes a tag string and overrides in-memory config.
 		FILE* f = nullptr;
 		if (fopen_s(&f, kMarkerPath, "r") != 0 || !f) return;
 		char buf[64] = {};
@@ -138,7 +150,7 @@ namespace cs::features
 	{
 		LoadSettings();
 		if (!_settings.enabled) {
-			L->info("Disabled by INI; feature inert.");
+			L->info("Disabled by config; feature inert.");
 			return;
 		}
 
@@ -151,7 +163,7 @@ namespace cs::features
 			return;
 		}
 
-		// Reconcile registry entries against per-shader INI toggles.
+		// Reconcile registry entries against per-shader config toggles.
 		auto& s = _settings.shaders;
 		for (auto& up : replacement::Registry::Get().All()) {
 			auto& e = *up;

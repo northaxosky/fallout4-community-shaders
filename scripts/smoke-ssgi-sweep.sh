@@ -12,11 +12,11 @@ PLUGIN_DIR="$(dirname "${MOD_DIR:-}")/../overwrite/F4SE/Plugins/FO4CommunityShad
 PLUGIN_DIR="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd || echo "$PLUGIN_DIR")"
 APPLY_MARKER="$PLUGIN_DIR/.ssgi_force_apply"
 EXTREME_MARKER="$PLUGIN_DIR/.ssgi_extreme"
-INI_FILE="$PLUGIN_DIR/ScreenSpaceGI.ini"
-INI_BACKUP="$PLUGIN_DIR/ScreenSpaceGI.ini.smoke-bak"
+CFG_FILE="$PLUGIN_DIR/ScreenSpaceGI.toml"
+CFG_BACKUP="$PLUGIN_DIR/ScreenSpaceGI.toml.smoke-bak"
 
-backup_ini()  { [ -f "$INI_FILE" ] && cp -f "$INI_FILE" "$INI_BACKUP" || true; }
-restore_ini() { [ -f "$INI_BACKUP" ] && mv -f "$INI_BACKUP" "$INI_FILE" || true; }
+backup_cfg()  { [ -f "$CFG_FILE" ] && cp -f "$CFG_FILE" "$CFG_BACKUP" || true; }
+restore_cfg() { [ -f "$CFG_BACKUP" ] && mv -f "$CFG_BACKUP" "$CFG_FILE" || true; }
 
 write_apply()   { mkdir -p "$PLUGIN_DIR"; printf '%s' "$1" > "$APPLY_MARKER"; }
 clear_markers() { rm -f "$APPLY_MARKER" "$EXTREME_MARKER" 2>/dev/null || true; }
@@ -54,8 +54,8 @@ OFF="test-results/_ssgi_sweep_off.png"
 DEF="test-results/_ssgi_sweep_default.png"
 EXT="test-results/_ssgi_sweep_extreme.png"
 LOG_OFF="$(mktemp)"; LOG_DEF="$(mktemp)"; LOG_EXT="$(mktemp)"
-trap 'rm -f "$LOG_OFF" "$LOG_DEF" "$LOG_EXT"; clear_markers; restore_ini' EXIT
-backup_ini
+trap 'rm -f "$LOG_OFF" "$LOG_DEF" "$LOG_EXT"; clear_markers; restore_cfg' EXIT
+backup_cfg
 
 write_apply 0 ; clear_extreme ; run_smoke "apply off"           "$LOG_OFF" ; capture off     "$(extract_results_dir "$LOG_OFF")" "$OFF"
 write_apply 1 ; clear_extreme ; run_smoke "apply on (defaults)" "$LOG_DEF" ; capture default "$(extract_results_dir "$LOG_DEF")" "$DEF"

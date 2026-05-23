@@ -13,7 +13,7 @@ One detour on `ID3D11Device`:
 Preferred chain order when ShaderCatalog is enabled: engine -> ShaderReplacement thunk -> ShaderCatalog thunk -> original. ShaderReplacement registers AFTER ShaderCatalog in the top-level `CMakeLists.txt` so its `OnD3D11Ready` runs after the catalog has installed its detour.
 
 The hook is no-op (immediate return after the chained call) when:
-- Master `bEnabled = false` (in which case the hook is never installed).
+- Master `enabled = false` (in which case the hook is never installed).
 - The sha1 of the engine's bytecode does not match any registry entry.
 - The matched entry's per-shader toggle is off (passthrough counter increments).
 - The matched entry's compile failed at boot (passthrough-due-to-compile-fail counter increments; engine bytecode is used).
@@ -49,19 +49,19 @@ The `hlsl` path is resolved against the configured `sShadersRoot` after strippin
 
 Replacement-created pixel shaders are wrapped in `ShaderCatalog`'s thread-local record-suppression scope so the catalog remains an engine-originated shader inventory when both features are enabled.
 
-## INI
+## Settings
 
-`Data\F4SE\Plugins\FO4CommunityShaders\ShaderReplacement.ini`. `[Settings] bEnabled` is the master kill-switch (default off; ship inert). `[Shaders]` holds per-shader toggles (also default off).
+`Data\F4SE\Plugins\FO4CommunityShaders\ShaderReplacement.toml`. `[settings] enabled` is the master kill-switch (default off; ship inert). Per-shader toggles (`replace_<name>`) also default off.
 
 ### Smoke-harness marker plumbing
 
-`Data\F4SE\Plugins\FO4CommunityShaders\.shaderreplace_force` content overrides the INI for one run:
+`Data\F4SE\Plugins\FO4CommunityShaders\.shaderreplace_force` content overrides the TOML for one run:
 
 - `none`  -> master off
 - `all`   -> master on, all per-shader on
 - `composite` / `ambient` / `prepass` / `bsdf-dir` / `bsdf-pt` / `vls` -> master on, just that one on
 
-Used by `scripts/smoke-shader-replacement.sh` so the seed INI in `package/` stays `false` and dev opt-in stays explicit.
+Used by `scripts/smoke-shader-replacement.sh` so the seed TOML in `package/` stays `false` and dev opt-in stays explicit.
 
 ### Active-scene smoke harness
 
@@ -87,7 +87,7 @@ technique attribution before they can receive a pass-like verdict. VLS remains
 For a one-off manual test (without the smoke harness):
 
 1. `./scripts/deploy.sh build`
-2. Edit the deployed `Data\F4SE\Plugins\FO4CommunityShaders\ShaderReplacement.ini` (NOT the `package/` seed): set `bEnabled = true` and the per-shader flag to `true`.
+2. Edit the deployed `Data\F4SE\Plugins\FO4CommunityShaders\ShaderReplacement.toml` (NOT the `package/` seed): set `enabled = true` under `[settings]` and the per-shader flag (e.g. `replace_deferred_composite = true`) to `true`.
 3. Boot via `./scripts/test.sh` or MO2 directly.
 4. Confirm log line `Replaced PS sha=... -> <name>` in `My Games\Fallout4\F4SE\FO4CommunityShaders.log` on first match.
 

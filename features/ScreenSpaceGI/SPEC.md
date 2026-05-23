@@ -10,7 +10,7 @@ Phase 1 screen-space AO sidecar for deferred-rendering experiments. It currently
 ## Runtime assets
 
 - Shaders live in `features/ScreenSpaceGI/Shaders/` and deploy to `Data\F4SE\Plugins\ScreenSpaceGI\`.
-- Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\ScreenSpaceGI.ini`.
+- Settings live in `Data\F4SE\Plugins\FO4CommunityShaders\ScreenSpaceGI.toml`.
 
 ## Invariants
 

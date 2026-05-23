@@ -1,0 +1,15 @@
+[settings]
+# Master kill-switch. Ships off; dev opt-in only.
+enabled = false
+
+# Manifest + HLSL root paths (relative to FO4 install dir).
+manifest_path = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderReplacement.json"
+shaders_root  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders"
+
+# Per-shader toggles (all default off).
+replace_ambient_ibl_pass               = false
+replace_bsdf_light_deferred_directional = false
+replace_bsdf_light_deferred_point       = false
+replace_deferred_composite              = false
+replace_deferred_prepass                = false
+replace_vls_slice_scatter               = false

@@ -67,7 +67,7 @@ ShaderReplacement interop: when a runtime PS is substituted, the replacement `ID
 
 ## Smoke-harness gates (run before declaring the feature shippable)
 
-1. Fresh install + `bEnabled=true` + game boot: `shader-catalog.sqlite` is created and contains `corpus_meta.schema_version=1`, a `sessions` row, and `PRAGMA journal_mode -> wal`.
+1. Fresh install + `enabled = true` + game boot: `shader-catalog.sqlite` is created and contains `corpus_meta.schema_version=1`, a `sessions` row, and `PRAGMA journal_mode -> wal`.
 2. After main-menu entry + exit: `shader_catalog` has rows with non-NULL `sha1`, `stage`, `size_bytes`, `source_module`, `creation_thread_id`, `engine_runtime`.
 3. After one in-game scene load: catalog contains at least one PS row and `attributed_ps > 0` for known `BSShader` subclasses exercised by the scene.
 4. Crash test: kill `Fallout4.exe` via Task Manager mid-session; reopen game; previous session has `ended_at IS NULL` and rows survive (WAL replay).

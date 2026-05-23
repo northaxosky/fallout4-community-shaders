@@ -7,7 +7,9 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <imgui.h>
+#include <toml++/toml.hpp>
 #include <vector>
 
 #include <DirectXMath.h>
@@ -16,7 +18,6 @@
 #include "CSUtil.h"
 #include "Env.h"
 #include "Log.h"
-#include "SimpleIni.h"
 #include "Sky.h"
 #include "Util.h"
 #include "Weather.h"
@@ -25,8 +26,8 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.imagespace"); }
 
-	constexpr const char* kIniPath  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.ini";
-	constexpr const char* kLUTDir   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\LUTs\\";
+	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.toml";
+	constexpr const char* kLUTDir     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\LUTs\\";
 	constexpr const char* kOpMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
 	constexpr const char* kLutMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_lut";
 	constexpr const char* kAdaptMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_adaptive_exposure";
@@ -256,68 +257,85 @@ namespace cs::features
 
 	void Imagespace::LoadSettings()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
-		settings.enabled            = ini.GetBoolValue("Settings",   "bEnabled",            settings.enabled);
-		settings.preset            = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iPreset", settings.preset)), 0, 4);
-		settings.forceWithENB      = ini.GetBoolValue("Settings",   "bForceWithENB",       settings.forceWithENB);
-		settings.tonemapOperator          = std::clamp(static_cast<int>(ini.GetLongValue("Settings", "iOperator", settings.tonemapOperator)), 0, 3);
-		settings.exposure          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposure", settings.exposure)), 0.25f, 4.0f);
-		settings.lutEnable         = ini.GetBoolValue("Settings",   "bLUTEnable",          settings.lutEnable);
-		settings.lutPath           = ini.GetValue("Settings",       "sLUTPath",            settings.lutPath.c_str());
-		settings.lutStrength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLUTStrength", settings.lutStrength)), 0.0f, 1.0f);
-
-		settings.adaptiveExposure  = ini.GetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
-		{
-			// Back-compat: if neither new asymmetric key is present, fall back to the old
-			// symmetric `fAdaptationSpeed` (sets both up and down to that value). Otherwise read
-			// the new keys independently, with the old key as the per-key default.
-			const float legacy = static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeed", -1.0));
-			const float defUp   = (legacy > 0.0f) ? legacy : settings.adaptationSpeedUp;
-			const float defDown = (legacy > 0.0f) ? legacy : settings.adaptationSpeedDown;
-			settings.adaptationSpeedUp   = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeedUp",   defUp)),   0.05f, 10.0f);
-			settings.adaptationSpeedDown = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAdaptationSpeedDown", defDown)), 0.05f, 30.0f);
-		}
-		settings.exposureKey       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureKey", settings.exposureKey)), 0.05f, 0.5f);
-		settings.exposureMin       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMin", settings.exposureMin)), 0.005f, 0.5f);
-		settings.exposureMax       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fExposureMax", settings.exposureMax)), 1.0f, 16.0f);
-
-		settings.bloomEnable       = ini.GetBoolValue("Settings",   "bBloomEnable",        settings.bloomEnable);
-		settings.bloomThreshold    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomThreshold", settings.bloomThreshold)), 0.0f, 2.0f);
-		settings.bloomIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBloomIntensity", settings.bloomIntensity)), 0.0f, 0.3f);
-		settings.bloomMips         = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iBloomMips",      settings.bloomMips)), 3, 6);
-		for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
-			char key[32];
-			std::snprintf(key, sizeof(key), "fBloomMipWeight%u", static_cast<unsigned>(i));
-			settings.bloomMipWeights[i] = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", key, settings.bloomMipWeights[i])), 0.0f, 4.0f);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
 		}
 
-		settings.vignetteEnable    = ini.GetBoolValue("Settings",   "bVignetteEnable",     settings.vignetteEnable);
-		settings.vignetteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fVignetteIntensity", settings.vignetteIntensity)), 0.0f, 1.0f);
-		settings.caEnable          = ini.GetBoolValue("Settings",   "bCAEnable",           settings.caEnable);
-		settings.caIntensity       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCAIntensity", settings.caIntensity)), 0.0f, 2.0f);
-		settings.sharpenEnable     = ini.GetBoolValue("Settings",   "bSharpenEnable",      settings.sharpenEnable);
-		settings.sharpness         = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSharpness", settings.sharpness)), 0.0f, 1.0f);
+		auto readInt = [&table](const char* a_key, int a_current, int a_min, int a_max) {
+			const auto value = table["settings"][a_key].value_or(static_cast<std::int64_t>(a_current));
+			const auto clamped = std::clamp(value, static_cast<std::int64_t>(a_min), static_cast<std::int64_t>(a_max));
+			return static_cast<int>(clamped);
+		};
+		auto readFloat = [&table](const char* a_key, float a_current, float a_min, float a_max) {
+			const auto value = table["settings"][a_key].value_or(static_cast<double>(a_current));
+			return std::clamp(static_cast<float>(value), a_min, a_max);
+		};
 
-		settings.sunspriteEnable    = ini.GetBoolValue("Settings",   "bSunspriteEnable",    settings.sunspriteEnable);
-		settings.sunspriteIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteIntensity", settings.sunspriteIntensity)), 0.0f, 2.0f);
-		settings.sunspriteSize      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fSunspriteSize",      settings.sunspriteSize)),      0.01f, 0.2f);
-		settings.lensFlareEnable    = ini.GetBoolValue("Settings",   "bLensFlareEnable",    settings.lensFlareEnable);
-		settings.lensFlareIntensity = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fLensFlareIntensity", settings.lensFlareIntensity)), 0.0f, 2.0f);
-		settings.lensFlareGhosts    = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iLensFlareGhosts",    settings.lensFlareGhosts)),    3, 7);
-		settings.dirtEnable         = ini.GetBoolValue("Settings",   "bDirtEnable",         settings.dirtEnable);
-		settings.dirtIntensity      = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fDirtIntensity", settings.dirtIntensity)), 0.0f, 2.0f);
+		settings.enabled           = table["settings"]["enabled"].value_or(settings.enabled);
+		settings.preset            = readInt("preset", settings.preset, 0, 4);
+		settings.forceWithENB      = table["settings"]["force_with_enb"].value_or(settings.forceWithENB);
+		settings.tonemapOperator   = readInt("tonemap_operator", settings.tonemapOperator, 0, 3);
+		settings.exposure          = readFloat("exposure", settings.exposure, 0.25f, 4.0f);
+		settings.lutEnable         = table["settings"]["lut_enable"].value_or(settings.lutEnable);
+		settings.lutPath           = table["settings"]["lut_path"].value_or(settings.lutPath);
+		settings.lutStrength       = readFloat("lut_strength", settings.lutStrength, 0.0f, 1.0f);
 
-		settings.dofEnable         = ini.GetBoolValue("Settings",   "bDOFEnable",          settings.dofEnable);
-		settings.aperture          = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAperture",       settings.aperture)),       0.0f, 0.5f);
-		settings.focusDistance     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusDistance",  settings.focusDistance)), 10.0f, 100000.0f);
-		settings.focalLength       = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocalLength",    settings.focalLength)),    1.0f, 200.0f);
-		settings.focusRange        = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fFocusRange",     settings.focusRange)),    10.0f, 10000.0f);
-		settings.dofQuality        = std::clamp(static_cast<int>(ini.GetLongValue("Settings",    "iDOFQuality",     settings.dofQuality)),     0, 2);
-		settings.cocLimitFactor    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fCoCLimitFactor", settings.cocLimitFactor)), 0.005f, 0.10f);
-		settings.bokehIntensity    = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fBokehIntensity", settings.bokehIntensity)), 0.0f, 1.0f);
-		settings.anamorphRatio     = std::clamp(static_cast<float>(ini.GetDoubleValue("Settings", "fAnamorphRatio",  settings.anamorphRatio)),  0.25f, 4.0f);
+		settings.adaptiveExposure   = table["settings"]["adaptive_exposure"].value_or(settings.adaptiveExposure);
+		settings.adaptationSpeedUp  = readFloat("adaptation_speed_up", settings.adaptationSpeedUp, 0.05f, 10.0f);
+		settings.adaptationSpeedDown = readFloat("adaptation_speed_down", settings.adaptationSpeedDown, 0.05f, 30.0f);
+		settings.exposureKey        = readFloat("exposure_key", settings.exposureKey, 0.05f, 0.5f);
+		settings.exposureMin        = readFloat("exposure_min", settings.exposureMin, 0.005f, 0.5f);
+		settings.exposureMax        = readFloat("exposure_max", settings.exposureMax, 1.0f, 16.0f);
+
+		settings.bloomEnable    = table["settings"]["bloom_enable"].value_or(settings.bloomEnable);
+		settings.bloomThreshold = readFloat("bloom_threshold", settings.bloomThreshold, 0.0f, 2.0f);
+		settings.bloomIntensity = readFloat("bloom_intensity", settings.bloomIntensity, 0.0f, 0.3f);
+		settings.bloomMips      = readInt("bloom_mips", settings.bloomMips, 3, 6);
+		if (const auto* weights = table["settings"]["bloom_mip_weights"].as_array();
+			weights && weights->size() == std::size(settings.bloomMipWeights)) {
+			bool valid = true;
+			for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
+				if (!(*weights)[i].value<double>()) {
+					valid = false;
+					break;
+				}
+			}
+			if (valid) {
+				for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
+					const auto weight = (*weights)[i].value<double>();
+					settings.bloomMipWeights[i] = std::clamp(static_cast<float>(*weight), 0.0f, 4.0f);
+				}
+			}
+		}
+
+		settings.vignetteEnable    = table["settings"]["vignette_enable"].value_or(settings.vignetteEnable);
+		settings.vignetteIntensity = readFloat("vignette_intensity", settings.vignetteIntensity, 0.0f, 1.0f);
+		settings.caEnable          = table["settings"]["ca_enable"].value_or(settings.caEnable);
+		settings.caIntensity       = readFloat("ca_intensity", settings.caIntensity, 0.0f, 2.0f);
+		settings.sharpenEnable     = table["settings"]["sharpen_enable"].value_or(settings.sharpenEnable);
+		settings.sharpness         = readFloat("sharpness", settings.sharpness, 0.0f, 1.0f);
+
+		settings.sunspriteEnable    = table["settings"]["sunsprite_enable"].value_or(settings.sunspriteEnable);
+		settings.sunspriteIntensity = readFloat("sunsprite_intensity", settings.sunspriteIntensity, 0.0f, 2.0f);
+		settings.sunspriteSize      = readFloat("sunsprite_size", settings.sunspriteSize, 0.01f, 0.2f);
+		settings.lensFlareEnable    = table["settings"]["lens_flare_enable"].value_or(settings.lensFlareEnable);
+		settings.lensFlareIntensity = readFloat("lens_flare_intensity", settings.lensFlareIntensity, 0.0f, 2.0f);
+		settings.lensFlareGhosts    = readInt("lens_flare_ghosts", settings.lensFlareGhosts, 3, 7);
+		settings.dirtEnable         = table["settings"]["dirt_enable"].value_or(settings.dirtEnable);
+		settings.dirtIntensity      = readFloat("dirt_intensity", settings.dirtIntensity, 0.0f, 2.0f);
+
+		settings.dofEnable      = table["settings"]["dof_enable"].value_or(settings.dofEnable);
+		settings.aperture       = readFloat("aperture", settings.aperture, 0.0f, 0.5f);
+		settings.focusDistance  = readFloat("focus_distance", settings.focusDistance, 10.0f, 100000.0f);
+		settings.focalLength    = readFloat("focal_length", settings.focalLength, 1.0f, 200.0f);
+		settings.focusRange     = readFloat("focus_range", settings.focusRange, 10.0f, 10000.0f);
+		settings.dofQuality     = readInt("dof_quality", settings.dofQuality, 0, 2);
+		settings.cocLimitFactor = readFloat("coc_limit_factor", settings.cocLimitFactor, 0.005f, 0.10f);
+		settings.bokehIntensity = readFloat("bokeh_intensity", settings.bokehIntensity, 0.0f, 1.0f);
+		settings.anamorphRatio  = readFloat("anamorph_ratio", settings.anamorphRatio, 0.25f, 4.0f);
 
 		// Smoke-harness markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
@@ -336,23 +354,23 @@ namespace cs::features
 		if (testModeActive) {
 			// Reset to deterministic baseline.
 			settings.enabled            = true;
-			settings.tonemapOperator          = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
-			settings.exposure          = 1.0f;
-			settings.lutEnable         = lutP && (lut_c == '1');
-			settings.lutStrength       = 1.0f;
-			settings.adaptiveExposure  = adaptP && (adapt_c == '1');
-			settings.adaptationSpeedUp   = 0.5f;
+			settings.tonemapOperator    = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
+			settings.exposure           = 1.0f;
+			settings.lutEnable          = lutP && (lut_c == '1');
+			settings.lutStrength        = 1.0f;
+			settings.adaptiveExposure   = adaptP && (adapt_c == '1');
+			settings.adaptationSpeedUp  = 0.5f;
 			settings.adaptationSpeedDown = 2.0f;
-			settings.exposureKey       = 0.18f;
-			settings.bloomEnable       = bloomP && (bloom_c == '1');
-			settings.bloomIntensity    = settings.bloomEnable ? 0.15f : 0.05f;
-			settings.vignetteEnable    = vigP && (vig_c == '1');
-			settings.vignetteIntensity = settings.vignetteEnable ? 0.6f : 0.3f;
-			settings.caEnable          = caP && (ca_c == '1');
-			settings.caIntensity       = settings.caEnable ? 1.5f : 0.5f;
-			settings.sharpenEnable     = sharpP && (sharp_c == '1');
-			settings.sharpness         = settings.sharpenEnable ? 0.8f : 0.4f;
-			settings.dofEnable         = dofP && (dof_c == '1' || dof_c == '2');
+			settings.exposureKey        = 0.18f;
+			settings.bloomEnable        = bloomP && (bloom_c == '1');
+			settings.bloomIntensity     = settings.bloomEnable ? 0.15f : 0.05f;
+			settings.vignetteEnable     = vigP && (vig_c == '1');
+			settings.vignetteIntensity  = settings.vignetteEnable ? 0.6f : 0.3f;
+			settings.caEnable           = caP && (ca_c == '1');
+			settings.caIntensity        = settings.caEnable ? 1.5f : 0.5f;
+			settings.sharpenEnable      = sharpP && (sharp_c == '1');
+			settings.sharpness          = settings.sharpenEnable ? 0.8f : 0.4f;
+			settings.dofEnable          = dofP && (dof_c == '1' || dof_c == '2');
 			if (dof_c == '1') {
 				settings.aperture      = 0.05f;
 				settings.focusDistance = 1500.0f;
@@ -388,56 +406,65 @@ namespace cs::features
 		if (testModeActive)
 			return;
 
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		ini.LoadFile(kIniPath);
-		ini.SetBoolValue("Settings",   "bEnabled",            settings.enabled);
-		ini.SetLongValue("Settings",   "iPreset",             settings.preset);
-		ini.SetBoolValue("Settings",   "bForceWithENB",       settings.forceWithENB);
-		ini.SetLongValue("Settings",   "iOperator",           settings.tonemapOperator);
-		ini.SetDoubleValue("Settings", "fExposure",           settings.exposure);
-		ini.SetBoolValue("Settings",   "bLUTEnable",          settings.lutEnable);
-		ini.SetValue("Settings",       "sLUTPath",            settings.lutPath.c_str());
-		ini.SetDoubleValue("Settings", "fLUTStrength",        settings.lutStrength);
-		ini.SetBoolValue("Settings",   "bAdaptiveExposure",   settings.adaptiveExposure);
-		ini.SetDoubleValue("Settings", "fAdaptationSpeedUp",   settings.adaptationSpeedUp);
-		ini.SetDoubleValue("Settings", "fAdaptationSpeedDown", settings.adaptationSpeedDown);
-		ini.SetDoubleValue("Settings", "fExposureKey",        settings.exposureKey);
-		ini.SetDoubleValue("Settings", "fExposureMin",        settings.exposureMin);
-		ini.SetDoubleValue("Settings", "fExposureMax",        settings.exposureMax);
-		ini.SetBoolValue("Settings",   "bBloomEnable",        settings.bloomEnable);
-		ini.SetDoubleValue("Settings", "fBloomThreshold",     settings.bloomThreshold);
-		ini.SetDoubleValue("Settings", "fBloomIntensity",     settings.bloomIntensity);
-		ini.SetLongValue("Settings",   "iBloomMips",          settings.bloomMips);
-		for (std::size_t i = 0; i < std::size(settings.bloomMipWeights); ++i) {
-			char key[32];
-			std::snprintf(key, sizeof(key), "fBloomMipWeight%u", static_cast<unsigned>(i));
-			ini.SetDoubleValue("Settings", key, settings.bloomMipWeights[i]);
+		toml::table table;
+		try {
+			table = toml::parse_file(kConfigPath);
+		} catch (const toml::parse_error&) {
+			table = toml::table{};
 		}
-		ini.SetBoolValue("Settings",   "bVignetteEnable",     settings.vignetteEnable);
-		ini.SetDoubleValue("Settings", "fVignetteIntensity",  settings.vignetteIntensity);
-		ini.SetBoolValue("Settings",   "bCAEnable",           settings.caEnable);
-		ini.SetDoubleValue("Settings", "fCAIntensity",        settings.caIntensity);
-		ini.SetBoolValue("Settings",   "bSharpenEnable",      settings.sharpenEnable);
-		ini.SetDoubleValue("Settings", "fSharpness",          settings.sharpness);
-		ini.SetBoolValue("Settings",   "bSunspriteEnable",    settings.sunspriteEnable);
-		ini.SetDoubleValue("Settings", "fSunspriteIntensity", settings.sunspriteIntensity);
-		ini.SetDoubleValue("Settings", "fSunspriteSize",      settings.sunspriteSize);
-		ini.SetBoolValue("Settings",   "bLensFlareEnable",    settings.lensFlareEnable);
-		ini.SetDoubleValue("Settings", "fLensFlareIntensity", settings.lensFlareIntensity);
-		ini.SetLongValue("Settings",   "iLensFlareGhosts",    settings.lensFlareGhosts);
-		ini.SetBoolValue("Settings",   "bDirtEnable",         settings.dirtEnable);
-		ini.SetDoubleValue("Settings", "fDirtIntensity",      settings.dirtIntensity);
-		ini.SetBoolValue("Settings",   "bDOFEnable",          settings.dofEnable);
-		ini.SetDoubleValue("Settings", "fAperture",           settings.aperture);
-		ini.SetDoubleValue("Settings", "fFocusDistance",      settings.focusDistance);
-		ini.SetDoubleValue("Settings", "fFocalLength",        settings.focalLength);
-		ini.SetDoubleValue("Settings", "fFocusRange",         settings.focusRange);
-		ini.SetLongValue("Settings",   "iDOFQuality",         settings.dofQuality);
-		ini.SetDoubleValue("Settings", "fCoCLimitFactor",     settings.cocLimitFactor);
-		ini.SetDoubleValue("Settings", "fBokehIntensity",     settings.bokehIntensity);
-		ini.SetDoubleValue("Settings", "fAnamorphRatio",      settings.anamorphRatio);
-		ini.SaveFile(kIniPath);
+
+		auto& s = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		s.insert_or_assign("enabled", settings.enabled);
+		s.insert_or_assign("preset", static_cast<std::int64_t>(settings.preset));
+		s.insert_or_assign("force_with_enb", settings.forceWithENB);
+		s.insert_or_assign("tonemap_operator", static_cast<std::int64_t>(settings.tonemapOperator));
+		s.insert_or_assign("exposure", static_cast<double>(settings.exposure));
+		s.insert_or_assign("lut_enable", settings.lutEnable);
+		s.insert_or_assign("lut_path", settings.lutPath);
+		s.insert_or_assign("lut_strength", static_cast<double>(settings.lutStrength));
+		s.insert_or_assign("adaptive_exposure", settings.adaptiveExposure);
+		s.insert_or_assign("adaptation_speed_up", static_cast<double>(settings.adaptationSpeedUp));
+		s.insert_or_assign("adaptation_speed_down", static_cast<double>(settings.adaptationSpeedDown));
+		s.insert_or_assign("exposure_key", static_cast<double>(settings.exposureKey));
+		s.insert_or_assign("exposure_min", static_cast<double>(settings.exposureMin));
+		s.insert_or_assign("exposure_max", static_cast<double>(settings.exposureMax));
+		s.insert_or_assign("bloom_enable", settings.bloomEnable);
+		s.insert_or_assign("bloom_threshold", static_cast<double>(settings.bloomThreshold));
+		s.insert_or_assign("bloom_intensity", static_cast<double>(settings.bloomIntensity));
+		s.insert_or_assign("bloom_mips", static_cast<std::int64_t>(settings.bloomMips));
+		toml::array bloomMipWeights;
+		for (const auto weight : settings.bloomMipWeights) {
+			bloomMipWeights.push_back(static_cast<double>(weight));
+		}
+		s.insert_or_assign("bloom_mip_weights", std::move(bloomMipWeights));
+		s.insert_or_assign("vignette_enable", settings.vignetteEnable);
+		s.insert_or_assign("vignette_intensity", static_cast<double>(settings.vignetteIntensity));
+		s.insert_or_assign("ca_enable", settings.caEnable);
+		s.insert_or_assign("ca_intensity", static_cast<double>(settings.caIntensity));
+		s.insert_or_assign("sharpen_enable", settings.sharpenEnable);
+		s.insert_or_assign("sharpness", static_cast<double>(settings.sharpness));
+		s.insert_or_assign("sunsprite_enable", settings.sunspriteEnable);
+		s.insert_or_assign("sunsprite_intensity", static_cast<double>(settings.sunspriteIntensity));
+		s.insert_or_assign("sunsprite_size", static_cast<double>(settings.sunspriteSize));
+		s.insert_or_assign("lens_flare_enable", settings.lensFlareEnable);
+		s.insert_or_assign("lens_flare_intensity", static_cast<double>(settings.lensFlareIntensity));
+		s.insert_or_assign("lens_flare_ghosts", static_cast<std::int64_t>(settings.lensFlareGhosts));
+		s.insert_or_assign("dirt_enable", settings.dirtEnable);
+		s.insert_or_assign("dirt_intensity", static_cast<double>(settings.dirtIntensity));
+		s.insert_or_assign("dof_enable", settings.dofEnable);
+		s.insert_or_assign("aperture", static_cast<double>(settings.aperture));
+		s.insert_or_assign("focus_distance", static_cast<double>(settings.focusDistance));
+		s.insert_or_assign("focal_length", static_cast<double>(settings.focalLength));
+		s.insert_or_assign("focus_range", static_cast<double>(settings.focusRange));
+		s.insert_or_assign("dof_quality", static_cast<std::int64_t>(settings.dofQuality));
+		s.insert_or_assign("coc_limit_factor", static_cast<double>(settings.cocLimitFactor));
+		s.insert_or_assign("bokeh_intensity", static_cast<double>(settings.bokehIntensity));
+		s.insert_or_assign("anamorph_ratio", static_cast<double>(settings.anamorphRatio));
+
+		std::ofstream out(kConfigPath);
+		if (out) {
+			out << table;
+		}
 	}
 
 	struct PresetValues

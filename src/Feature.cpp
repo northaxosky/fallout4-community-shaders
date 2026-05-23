@@ -2,12 +2,14 @@
 
 #include "Log.h"
 #include "Plugin.h"
-#include "SimpleIni.h"
+
+#include <toml++/toml.hpp>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <limits>
 #include <queue>
@@ -25,7 +27,7 @@ namespace
 	auto* L = cs::log::Get("cs");
 	constexpr auto kUnvisited = std::numeric_limits<std::size_t>::max();
 	constexpr const char* kConfigDir = "Data\\F4SE\\Plugins\\FO4CommunityShaders";
-	constexpr const char* kGlobalIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.ini";
+	constexpr const char* kGlobalConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
 	constexpr bool kDefaultAutoInstallAllFeatures = true;
 
 	std::string ToString(std::string_view a_value)
@@ -40,9 +42,9 @@ namespace
 		return buf;
 	}
 
-	fs::path FeatureIniPath(const cs::Feature& a_feature)
+	fs::path FeatureConfigPath(const cs::Feature& a_feature)
 	{
-		return fs::path(kConfigDir) / (ToString(a_feature.GetName()) + ".ini");
+		return fs::path(kConfigDir) / (ToString(a_feature.GetName()) + ".toml");
 	}
 
 	bool PathExists(const fs::path& a_path)
@@ -61,48 +63,60 @@ namespace
 		}
 	}
 
+	bool WriteToml(const fs::path& a_path, const toml::table& a_table)
+	{
+		std::ofstream out(a_path);
+		if (!out) {
+			return false;
+		}
+		out << a_table;
+		return out.good();
+	}
+
 	bool LoadAutoInstallAllFeatures()
 	{
-		CSimpleIniA ini;
-		ini.SetUnicode();
+		toml::table table;
+		bool configExists = PathExists(kGlobalConfigPath);
+		if (configExists) {
+			try {
+				table = toml::parse_file(kGlobalConfigPath);
+			} catch (const toml::parse_error& e) {
+				L->warn("Failed to parse global feature config {}: {}", kGlobalConfigPath, e.description());
+				configExists = false;
+				table = toml::table{};
+			}
+		}
 
-		const bool configExists = PathExists(kGlobalIniPath);
-		ini.LoadFile(kGlobalIniPath);
-		const bool hasKey = ini.KeyExists("Features", "bAutoInstallAllFeatures");
-		const bool autoInstall = ini.GetBoolValue("Features", "bAutoInstallAllFeatures", kDefaultAutoInstallAllFeatures);
+		const auto* features = table["features"].as_table();
+		const bool hasKey = features && features->contains("auto_install_all_features");
+		const bool autoInstall = table["features"]["auto_install_all_features"].value_or(kDefaultAutoInstallAllFeatures);
 
 		if (!configExists || !hasKey) {
 			EnsureConfigDirectory();
-			const auto version = PluginVersionString();
-			ini.SetValue("Info", "Version", version.c_str());
-			ini.SetBoolValue("Features", "bAutoInstallAllFeatures", autoInstall);
-			if (ini.SaveFile(kGlobalIniPath) < 0) {
-				L->warn("Failed to save global feature config {}", kGlobalIniPath);
+			table.insert_or_assign("info", toml::table{ { "version", PluginVersionString() } });
+			table.insert_or_assign("features", toml::table{ { "auto_install_all_features", autoInstall } });
+			if (!WriteToml(kGlobalConfigPath, table)) {
+				L->warn("Failed to save global feature config {}", kGlobalConfigPath);
 			}
 		}
 
 		return autoInstall;
 	}
 
-	bool EnsureFeatureIni(const cs::Feature& a_feature)
+	bool EnsureFeatureConfig(const cs::Feature& a_feature)
 	{
-		const auto path = FeatureIniPath(a_feature);
+		const auto path = FeatureConfigPath(a_feature);
 		if (PathExists(path)) {
 			return true;
 		}
 
 		EnsureConfigDirectory();
-		CSimpleIniA ini;
-		ini.SetUnicode();
-		const auto version = PluginVersionString();
-		ini.SetValue("Info", "Version", version.c_str());
-
-		const auto pathString = path.string();
-		if (ini.SaveFile(pathString.c_str()) < 0) {
-			L->warn("Failed to create feature INI {}", pathString);
+		toml::table table{ { "info", toml::table{ { "version", PluginVersionString() } } } };
+		if (!WriteToml(path, table)) {
+			L->warn("Failed to create feature config {}", path.string());
 			return false;
 		}
-		L->info("Created feature INI {}", pathString);
+		L->info("Created feature config {}", path.string());
 		return true;
 	}
 
@@ -250,7 +264,7 @@ namespace cs
 {
 	bool Feature::IsInstalled() const
 	{
-		return PathExists(FeatureIniPath(*this));
+		return PathExists(FeatureConfigPath(*this));
 	}
 
 	FeatureManager& FeatureManager::Get()
@@ -280,7 +294,7 @@ namespace cs
 		for (auto* feature : _features) {
 			bool installed = true;
 			if (autoInstallAll) {
-				if (!EnsureFeatureIni(*feature)) {
+				if (!EnsureFeatureConfig(*feature)) {
 					L->warn("Feature {} INI missing but auto-install is enabled; loading without a companion INI",
 						feature->GetName());
 				}

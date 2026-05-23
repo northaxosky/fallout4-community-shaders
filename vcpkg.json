@@ -15,7 +15,7 @@
     "directxtex",
     "directx-headers",
     "magic-enum",
-    "simpleini",
+    "tomlplusplus",
     "sqlite3",
     {
       "name": "imgui",

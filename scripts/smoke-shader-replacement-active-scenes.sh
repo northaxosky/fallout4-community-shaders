@@ -167,35 +167,35 @@ MOD_DIR_BASH="$(to_bash_path "${MOD_DIR:-}")"
 PLUGIN_DIR="$(dirname "$MOD_DIR_BASH")/../overwrite/F4SE/Plugins/FO4CommunityShaders"
 PLUGIN_DIR="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd || echo "$PLUGIN_DIR")"
 MARKER="$PLUGIN_DIR/.shaderreplace_force"
-CATALOG_INI="$PLUGIN_DIR/ShaderCatalog.ini"
-CATALOG_INI_BACKUP="$PLUGIN_DIR/ShaderCatalog.ini.active-smoke-bak"
-CATALOG_INI_HAD_FILE=0
+CATALOG_CFG="$PLUGIN_DIR/ShaderCatalog.toml"
+CATALOG_CFG_BACKUP="$PLUGIN_DIR/ShaderCatalog.toml.active-smoke-bak"
+CATALOG_CFG_HAD_FILE=0
 
 write_marker() { mkdir -p "$PLUGIN_DIR"; printf '%s' "$1" > "$MARKER"; }
 clear_marker() { rm -f "$MARKER" 2>/dev/null || true; }
 
-backup_catalog_ini() {
+backup_catalog_cfg() {
     mkdir -p "$PLUGIN_DIR"
-    if [ -f "$CATALOG_INI" ]; then
-        CATALOG_INI_HAD_FILE=1
-        cp -f "$CATALOG_INI" "$CATALOG_INI_BACKUP"
+    if [ -f "$CATALOG_CFG" ]; then
+        CATALOG_CFG_HAD_FILE=1
+        cp -f "$CATALOG_CFG" "$CATALOG_CFG_BACKUP"
     else
-        CATALOG_INI_HAD_FILE=0
-        rm -f "$CATALOG_INI_BACKUP" 2>/dev/null || true
+        CATALOG_CFG_HAD_FILE=0
+        rm -f "$CATALOG_CFG_BACKUP" 2>/dev/null || true
     fi
 }
 
-restore_catalog_ini() {
-    if [ "$CATALOG_INI_HAD_FILE" = "1" ] && [ -f "$CATALOG_INI_BACKUP" ]; then
-        mv -f "$CATALOG_INI_BACKUP" "$CATALOG_INI"
+restore_catalog_cfg() {
+    if [ "$CATALOG_CFG_HAD_FILE" = "1" ] && [ -f "$CATALOG_CFG_BACKUP" ]; then
+        mv -f "$CATALOG_CFG_BACKUP" "$CATALOG_CFG"
     else
-        rm -f "$CATALOG_INI" "$CATALOG_INI_BACKUP" 2>/dev/null || true
+        rm -f "$CATALOG_CFG" "$CATALOG_CFG_BACKUP" 2>/dev/null || true
     fi
 }
 
 cleanup() {
     clear_marker
-    restore_catalog_ini
+    restore_catalog_cfg
 }
 
 run_static_gate() {
@@ -249,25 +249,25 @@ make_scene_env() {
     fi
 }
 
-write_catalog_ini() {
+write_catalog_cfg() {
     local catalog_name="$1"
     if [ "${FO4CS_ACTIVE_ENABLE_CATALOG:-1}" != "1" ]; then
         return 0
     fi
     mkdir -p "$PLUGIN_DIR"
-    cat > "$CATALOG_INI" <<EOF
-[Settings]
-bEnabled = true
-iWriterFlushIntervalMs = 1000
-sCatalogPath = Data\\F4SE\\Plugins\\FO4CommunityShaders\\${catalog_name}
-iSymbolicationBudgetUs = 200
+    cat > "$CATALOG_CFG" <<EOF
+[settings]
+enabled = true
+writer_flush_interval_ms = 1000
+catalog_path = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\${catalog_name}"
+symbolication_budget_us = 200
 EOF
 }
 
 prepare_catalog_db() {
     local catalog_name="$1"
     rm -f "$PLUGIN_DIR/$catalog_name" "$PLUGIN_DIR/$catalog_name-wal" "$PLUGIN_DIR/$catalog_name-shm" 2>/dev/null || true
-    write_catalog_ini "$catalog_name"
+    write_catalog_cfg "$catalog_name"
 }
 
 run_smoke() {
@@ -565,7 +565,7 @@ printf 'scene\treplacement\tverdict\tmarker\tnote\n' > "$SUMMARY_TSV"
 echo "ShaderReplacement active-scene artifacts: $RUN_DIR"
 
 trap cleanup EXIT
-backup_catalog_ini
+backup_catalog_cfg
 run_static_gate
 
 for scene in "${SCENES[@]}"; do

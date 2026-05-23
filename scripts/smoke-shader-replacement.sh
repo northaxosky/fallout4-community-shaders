@@ -24,11 +24,11 @@ fi
 PLUGIN_DIR="$(dirname "${MOD_DIR:-}")/../overwrite/F4SE/Plugins/FO4CommunityShaders"
 PLUGIN_DIR="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd || echo "$PLUGIN_DIR")"
 MARKER="$PLUGIN_DIR/.shaderreplace_force"
-INI_FILE="$PLUGIN_DIR/ShaderReplacement.ini"
-INI_BACKUP="$PLUGIN_DIR/ShaderReplacement.ini.smoke-bak"
+CFG_FILE="$PLUGIN_DIR/ShaderReplacement.toml"
+CFG_BACKUP="$PLUGIN_DIR/ShaderReplacement.toml.smoke-bak"
 
-backup_ini()  { [ -f "$INI_FILE" ] && cp -f "$INI_FILE" "$INI_BACKUP" || true; }
-restore_ini() { [ -f "$INI_BACKUP" ] && mv -f "$INI_BACKUP" "$INI_FILE" || true; }
+backup_cfg()  { [ -f "$CFG_FILE" ] && cp -f "$CFG_FILE" "$CFG_BACKUP" || true; }
+restore_cfg() { [ -f "$CFG_BACKUP" ] && mv -f "$CFG_BACKUP" "$CFG_FILE" || true; }
 write_marker() { mkdir -p "$PLUGIN_DIR"; printf '%s' "$1" > "$MARKER"; }
 clear_marker() { rm -f "$MARKER" 2>/dev/null || true; }
 
@@ -75,8 +75,8 @@ echo "ShaderReplacement smoke artifacts: $SMOKE_RUN_DIR"
 
 OFF="test-results/_repl_off.png"
 declare -a OFF_SAMPLES=()
-trap 'clear_marker; restore_ini' EXIT
-backup_ini
+trap 'clear_marker; restore_cfg' EXIT
+backup_cfg
 
 echo "Capturing ${SHADER_REPLACEMENT_OFF_SAMPLES} OFF baseline sample(s) for median comparison."
 for ((sample_idx = 1; sample_idx <= SHADER_REPLACEMENT_OFF_SAMPLES; sample_idx++)); do

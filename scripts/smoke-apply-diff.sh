@@ -10,15 +10,15 @@ BASELINE_OUT="test-results/_apply_baseline.png"
 TEST_OUT="test-results/_apply_test.png"
 
 # Marker file the C++ side reads at LoadSettings to override bApplyToScene. Lives next to
-# the deployed INI. Path resolves via $MOD_DIR from .env.
+# the deployed TOML config. Path resolves via $MOD_DIR from .env.
 if [ -f scripts/.env ]; then . scripts/.env; fi
 PLUGIN_DIR="$(dirname "${MOD_DIR:-}")/../overwrite/F4SE/Plugins/FO4CommunityShaders"
 PLUGIN_DIR="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd || echo "$PLUGIN_DIR")"
 MARKER="$PLUGIN_DIR/.sss_force_apply"
-INI_FILE="$PLUGIN_DIR/ScreenSpaceShadows.ini"
-INI_BACKUP="$PLUGIN_DIR/ScreenSpaceShadows.ini.smoke-bak"
-backup_ini()  { [ -f "$INI_FILE" ] && cp -f "$INI_FILE" "$INI_BACKUP" || true; }
-restore_ini() { [ -f "$INI_BACKUP" ] && mv -f "$INI_BACKUP" "$INI_FILE" || true; }
+CFG_FILE="$PLUGIN_DIR/ScreenSpaceShadows.toml"
+CFG_BACKUP="$PLUGIN_DIR/ScreenSpaceShadows.toml.smoke-bak"
+backup_cfg()  { [ -f "$CFG_FILE" ] && cp -f "$CFG_FILE" "$CFG_BACKUP" || true; }
+restore_cfg() { [ -f "$CFG_BACKUP" ] && mv -f "$CFG_BACKUP" "$CFG_FILE" || true; }
 
 write_marker() {
     local val="$1"
@@ -66,8 +66,8 @@ capture_screenshot() {
 
 BASELINE_LOG="$(mktemp)"
 TEST_LOG="$(mktemp)"
-trap 'rm -f "$BASELINE_LOG" "$TEST_LOG"; clear_marker; restore_ini' EXIT
-backup_ini
+trap 'rm -f "$BASELINE_LOG" "$TEST_LOG"; clear_marker; restore_cfg' EXIT
+backup_cfg
 
 run_smoke baseline 0 "$BASELINE_LOG"
 capture_screenshot baseline "$(extract_results_dir "$BASELINE_LOG")" "$BASELINE_OUT"

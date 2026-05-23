@@ -11,11 +11,11 @@ if [ -f scripts/.env ]; then . scripts/.env; fi
 PLUGIN_DIR="$(dirname "${MOD_DIR:-}")/../overwrite/F4SE/Plugins/FO4CommunityShaders"
 PLUGIN_DIR="$(cd "$PLUGIN_DIR" 2>/dev/null && pwd || echo "$PLUGIN_DIR")"
 DOF_MARKER="$PLUGIN_DIR/.imagespace_force_dof"
-INI_FILE="$PLUGIN_DIR/Imagespace.ini"
-INI_BACKUP="$PLUGIN_DIR/Imagespace.ini.smoke-bak"
+CFG_FILE="$PLUGIN_DIR/Imagespace.toml"
+CFG_BACKUP="$PLUGIN_DIR/Imagespace.toml.smoke-bak"
 
-backup_ini()  { [ -f "$INI_FILE" ] && cp -f "$INI_FILE" "$INI_BACKUP" || true; }
-restore_ini() { [ -f "$INI_BACKUP" ] && mv -f "$INI_BACKUP" "$INI_FILE" || true; }
+backup_cfg()  { [ -f "$CFG_FILE" ] && cp -f "$CFG_FILE" "$CFG_BACKUP" || true; }
+restore_cfg() { [ -f "$CFG_BACKUP" ] && mv -f "$CFG_BACKUP" "$CFG_FILE" || true; }
 
 write_dof()      { mkdir -p "$PLUGIN_DIR"; printf '%s' "$1" > "$DOF_MARKER"; }
 clear_markers()  { rm -f "$DOF_MARKER" 2>/dev/null || true; }
@@ -52,8 +52,8 @@ DEF="test-results/_sweep_dof_default.png"
 EXT="test-results/_sweep_dof_extreme.png"
 
 LOG_OFF="$(mktemp)"; LOG_DEF="$(mktemp)"; LOG_EXT="$(mktemp)"
-trap 'rm -f "$LOG_OFF" "$LOG_DEF" "$LOG_EXT"; clear_markers; restore_ini' EXIT
-backup_ini
+trap 'rm -f "$LOG_OFF" "$LOG_DEF" "$LOG_EXT"; clear_markers; restore_cfg' EXIT
+backup_cfg
 
 write_dof 0 ; run_smoke "dof=off"     "$LOG_OFF" ; capture off     "$(extract_results_dir "$LOG_OFF")" "$OFF"
 write_dof 1 ; run_smoke "dof=default" "$LOG_DEF" ; capture default "$(extract_results_dir "$LOG_DEF")" "$DEF"
