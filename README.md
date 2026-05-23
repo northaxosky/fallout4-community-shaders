@@ -1,8 +1,18 @@
 # FO4 Community Shaders
 
-Port of [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders) to Fallout 4. Permission obtained from doodlum.
+Port of [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders) to Fallout 4. See [PERMISSIONS.md](PERMISSIONS.md) for the upstream-author permission record.
 
 Press **END** in game to open the settings menu.
+
+## Game compatibility
+
+| Runtime | Status |
+|---|---|
+| OG (1.10.163) | Supported |
+| NG (1.10.984) | Supported |
+| AE (1.10.980) | Supported |
+
+A single DLL handles all three runtimes via [Address Library](https://www.nexusmods.com/fallout4/mods/47327) IDs. OG/NG/AE share a single binary; nothing per-runtime needs to be selected at install time.
 
 ## Features
 
@@ -12,8 +22,8 @@ Press **END** in game to open the settings menu.
 | Upscaling | DLSS / FSR3 / XeSS with quality modes; replaces engine TAA, dynamic-resolution aware |
 | FrameGeneration | DLSS-G / FSR3-FG / XeSS-FG; D3D11/D3D12 interop |
 | ScreenSpaceShadows | Sony Bend SSS pipeline + sidecar attenuation pass on the diffuse light buffer. Performance / Quality / Cinematic presets, ENB auto-skip |
-| ScreenSpaceGI | Phase 1 screen-space GI sidecar for ambient occlusion / indirect-lighting experiments |
-| Imagespace | Tonemap (Hable / Reinhard / Lottes), 32³ LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, sunsprite + lens flare. Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
+| ScreenSpaceGI | GTAO + Spherical-Harmonic indirect-lighting bounce, half/quarter resolution permutations, Performance / Quality / Cinematic presets |
+| Imagespace | Tonemap (Hable / Reinhard / Lottes), 32^3 LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, sunsprite + lens flare. Per-weather profile blending, Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
 | PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle |
 | RenderDoc | One-click frame capture from inside the menu |
 
@@ -23,6 +33,23 @@ Press **END** in game to open the settings menu.
 |---|---|
 | ShaderCatalog | Runtime D3D shader inventory with SQLite output and `BSShader::SetupTechnique` attribution |
 | ShaderReplacement | Development-only pixel-shader substitution harness for validating reconstructed FO4 shaders |
+
+## Installation
+
+1. Install [Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327) and [Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/) first.
+2. Drop the release archive into Mod Organizer 2 (or any mod manager). The shipped layout is the canonical `Data/F4SE/Plugins/...` tree.
+3. Launch the game via F4SE. On first launch the plugin writes default `.toml` configs under `Data\F4SE\Plugins\FO4CommunityShaders\<Feature>\`.
+4. In game, press **END** to open the settings menu and toggle features.
+
+### ENB coexistence
+
+When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't double-up. Per-feature `force_with_enb` (Imagespace) or feature toggles let you stack specific passes if desired. Streamline-based features (DLSS / DLSS-G / Reflex) skip swap-chain upgrades when ENB is detected, because ENB already owns the swap chain.
+
+### Performance notes
+
+- ScreenSpaceGI: ~168 MB VRAM at 4K in HALF/QUARTER resolution modes (full-res upsample destinations); 0 MB at FULL.
+- FrameGeneration: requires hardware support (NVIDIA RTX 40+ for DLSS-G, AMD RDNA3+ for FSR3-FG with hardware path, Intel Arc for XeSS-FG). Effective on a GPU that already runs the game at 60+ fps; below that, latency dominates the perceived smoothness benefit.
+- Use the PerformanceOverlay (Shift+F11) to bisect impact when toggling features.
 
 ## Known issues
 
