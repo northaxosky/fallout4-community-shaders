@@ -4,10 +4,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <fstream>
 
+#include <DirectXMath.h>
 #include <DirectXTex.h>
 #include <dxgi.h>
 #include <imgui.h>
@@ -38,6 +40,10 @@ namespace cs::features
 	constexpr uint32_t kRT_GbufferNormal = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
 	constexpr uint32_t kRT_DiffuseBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
 	constexpr uint32_t kRT_MotionVectors = static_cast<uint32_t>(cs::engine::RenderTarget::kMotionVectors);
+	constexpr uint32_t kRT_SSAO          = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAO);
+	constexpr uint32_t kRT_SSAOFinal     = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinal);
+	constexpr uint32_t kRT_SSAOFinalSwap = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinalSwap);
+	constexpr uint32_t kRT_SSAOFinalSwap2= static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinalSwap2);
 	constexpr uint32_t kDST_Main         = static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain);
 
 	struct ApplyCB
@@ -127,6 +133,10 @@ namespace cs::features
 		float ndcToViewMul[2];
 		float ndcToViewAdd[2];
 		bool  fromCamera;
+		// Raw (column-major-in-memory) view matrix from cameraDataCache when available.
+		// `hasViewMat == false` means we should not advance prev-frame matrix history.
+		float rawViewMat[16];
+		bool  hasViewMat;
 	};
 
 	struct FrustumData
@@ -144,13 +154,16 @@ namespace cs::features
 	{
 		const float vfov = std::tan(0.5f * 1.05f);
 		const float aspect = float(a_width) / float(std::max(a_height, 1u));
-		return {
-			0.1f,
-			100000.0f,
-			{ vfov * aspect, vfov },
-			{ 0.0f, 0.0f },
-			false
-		};
+		ProjectionData data{};
+		data.nearClip = 0.1f;
+		data.farClip = 100000.0f;
+		data.ndcToViewMul[0] = vfov * aspect;
+		data.ndcToViewMul[1] = vfov;
+		data.ndcToViewAdd[0] = 0.0f;
+		data.ndcToViewAdd[1] = 0.0f;
+		data.fromCamera = false;
+		data.hasViewMat = false;
+		return data;
 	}
 
 	FrustumData ReadFrustum(const RE::NiFrustum& a_frustum)
@@ -199,23 +212,28 @@ namespace cs::features
 				current = *slot;
 		}
 
-		const RE::NiCamera* camera = nullptr;
+		const RE::NiCamera*                       camera   = nullptr;
+		const RE::BSGraphics::CameraStateData*    stateBlk = nullptr;
 		if (current) {
 			for (const auto& entry : state->cameraDataCache) {
 				if (entry.referenceCamera == current && entry.useJitter) {
-					camera = entry.referenceCamera;
+					camera   = entry.referenceCamera;
+					stateBlk = &entry;
 					break;
 				}
 			}
 			if (!camera)
 				camera = current;
 		}
-		if (!camera)
-			camera = state->cameraState.referenceCamera;
+		if (!camera) {
+			camera   = state->cameraState.referenceCamera;
+			stateBlk = (camera) ? &state->cameraState : nullptr;
+		}
 		if (!camera) {
 			for (const auto& entry : state->cameraDataCache) {
 				if (entry.referenceCamera && entry.useJitter) {
-					camera = entry.referenceCamera;
+					camera   = entry.referenceCamera;
+					stateBlk = &entry;
 					break;
 				}
 			}
@@ -235,6 +253,16 @@ namespace cs::features
 		data.ndcToViewAdd[0] = (f.right + f.left) * 0.5f;
 		data.ndcToViewAdd[1] = (f.top + f.bottom) * 0.5f;
 		data.fromCamera = true;
+
+		// viewMat is `__m128 viewMat[4]` at +0x050 inside camViewData (BSGraphics.h:563); 64 bytes
+		// total. Memcpy preserves byte layout; the matrix is stored as the transpose of the logical
+		// row-major view matrix (the convention DXMath uses), so DirectX consumers either transpose
+		// after load (`ScreenSpaceShadows.cpp:696-702`) or, as we do for `CameraViewInverse`,
+		// short-circuit by `XMMatrixInverse`ing the raw load directly (the algebra cancels).
+		if (stateBlk) {
+			std::memcpy(data.rawViewMat, &stateBlk->camViewData.viewMat[0], sizeof(data.rawViewMat));
+			data.hasViewMat = true;
+		}
 		return data;
 	}
 
@@ -242,6 +270,49 @@ namespace cs::features
 	{
 		static ScreenSpaceGI instance;
 		return &instance;
+	}
+
+	namespace
+	{
+		// Vanilla SAO disable lever state.
+		// REL::ID resolves DrawWorld::ImagespaceSAO on each runtime; first byte is `0x48`
+		// (sub rsp, 38h) which we replace with `0xC3` (ret) so the function returns before any stack
+		// adjust. See ../Fallout4RE/Workspace/knowledge/cross-runtime/vanilla-ssao-disable-lever.md.
+		std::uint8_t s_ssaoOriginalByte    = 0x48;
+		bool         s_ssaoLeverApplied   = false;
+		std::uintptr_t s_ssaoPatchAddress = 0;
+
+		bool ApplyVanillaSAODisableLever()
+		{
+			if (s_ssaoLeverApplied)
+				return true;
+
+			const auto rel = REL::Relocation<std::uintptr_t>{ REL::ID({ 39691, 2318306, 2318306 }) };
+			const auto addr = rel.address();
+			if (!addr) {
+				L->warn("VanillaSAOLever: REL::ID resolved to nullptr; vanilla SAO stays active.");
+				return false;
+			}
+
+			const auto* p = reinterpret_cast<const std::uint8_t*>(addr);
+			if (*p != 0x48) {
+				L->warn("VanillaSAOLever: first byte at 0x{:X} = 0x{:02X} (expected 0x48); aborting patch.",
+					addr, static_cast<unsigned>(*p));
+				return false;
+			}
+
+			s_ssaoOriginalByte   = *p;
+			const std::uint8_t kRet = 0xC3;
+			if (!REL::WriteSafeData(addr, kRet)) {
+				L->warn("VanillaSAOLever: WriteSafe failed at 0x{:X}; vanilla SAO stays active.", addr);
+				return false;
+			}
+
+			s_ssaoPatchAddress = addr;
+			s_ssaoLeverApplied = true;
+			L->info("VanillaSAOLever: patched ImagespaceSAO entry @ 0x{:X} (0x48 -> 0xC3).", addr);
+			return true;
+		}
 	}
 
 	void ScreenSpaceGI::Load()
@@ -254,6 +325,12 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([]() {
 			ScreenSpaceGI::GetSingleton()->DrawSSGI();
 		});
+		// Pre-DeferredLights companion to the SAO disable lever: clears the four vanilla SAO RTs to
+		// white so the deferred ambient/IBL pass doesn't sample stale GPU contents when the engine
+		// SAO chain has been short-circuited.
+		cs::engine::RegisterPreDeferredLightsImpl([]() {
+			ScreenSpaceGI::GetSingleton()->ClearVanillaSAOTargets();
+		});
 		// Registration order = fire order. Apply (AO darken) runs first; ApplyIL adds the
 		// SH-reconstructed bounce on top so the bounce term is not modulated by AO.
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
@@ -262,6 +339,19 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->ApplyIL();
 		});
+	}
+
+	void ScreenSpaceGI::OnDataLoaded()
+	{
+		// SSGI owns AO when enableVanillaSSAO is false (default). Patching at kGameDataReady is
+		// before any renderer dispatch, so there's no risk of mid-frame code mutation.
+		// Settings.enableVanillaSSAO is restart-required by design; flipping the toggle in the menu
+		// will only take effect after the next launch.
+		if (!settings.enableVanillaSSAO) {
+			ApplyVanillaSAODisableLever();
+		} else {
+			L->info("VanillaSAOLever: enableVanillaSSAO=true; vanilla SAO left in place.");
+		}
 	}
 
 	void ScreenSpaceGI::ApplyPreset(QualityPreset preset)
@@ -678,14 +768,35 @@ namespace cs::features
 		const uint32_t workH = std::max(1u, H / divisor);
 
 		SSGICB cb{};
-		// Identity for now; PrevInvViewMat + CameraViewInverse are read by gi.cs (CameraViewInverse
-		// for world-space SH evaluation) and by radianceDisocc.cs (PrevInvViewMat for temporal
-		// reproject - disabled in this build). Phase 2c.3 wires per-frame view-matrix capture
-		// from BSGraphics::State::cameraState.viewMat (offset 0x050 per
-		// Fallout4RE/Workspace/knowledge/cross-runtime/camera-projection-data-path.md).
-		for (int i = 0; i < 16; ++i) {
-			cb.PrevInvViewMat[i]    = (i % 5 == 0) ? 1.0f : 0.0f;
-			cb.CameraViewInverse[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+		// View-matrix capture. Raw `viewMat` (BSGraphics.h:563) is stored as the transpose of the
+		// DXMath row-major view matrix; we exploit that algebra: HLSL upload should be
+		// `transpose(inverse(L_logical))` = `transpose(inverse(transpose(raw)))` = `inverse(raw)`,
+		// i.e. take XMMatrixInverse of the raw load directly with no follow-up transpose.
+		// gi.cs uses `CameraViewInverse` for world-space SH evaluation; radianceDisocc.cs uses
+		// `PrevInvViewMat` for temporal reprojection.
+		const bool haveCurrent = projection.hasViewMat;
+		if (haveCurrent) {
+			std::memcpy(rawCurrentViewMat, projection.rawViewMat, sizeof(rawCurrentViewMat));
+			hasRawCurrentViewMat = true;
+
+			const auto rawCur = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(rawCurrentViewMat));
+			const auto invCur = DirectX::XMMatrixInverse(nullptr, rawCur);
+			DirectX::XMStoreFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(cb.CameraViewInverse), invCur);
+
+			const float* prevSrc = hasRawPreviousViewMat ? rawPreviousViewMat : rawCurrentViewMat;
+			const auto   rawPrev = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(prevSrc));
+			const auto   invPrev = DirectX::XMMatrixInverse(nullptr, rawPrev);
+			DirectX::XMStoreFloat4x4(reinterpret_cast<DirectX::XMFLOAT4X4*>(cb.PrevInvViewMat), invPrev);
+
+			std::memcpy(rawPreviousViewMat, rawCurrentViewMat, sizeof(rawPreviousViewMat));
+			hasRawPreviousViewMat = true;
+		} else {
+			// Fallback: identity matrices, don't advance history (so prev/current re-converge
+			// the moment the camera lookup recovers).
+			for (int i = 0; i < 16; ++i) {
+				cb.PrevInvViewMat[i]    = (i % 5 == 0) ? 1.0f : 0.0f;
+				cb.CameraViewInverse[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+			}
 		}
 		cb.NDCToViewMul[0] = projection.ndcToViewMul[0];
 		cb.NDCToViewMul[1] = projection.ndcToViewMul[1];
@@ -1039,6 +1150,34 @@ namespace cs::features
 		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
 	}
 
+	void ScreenSpaceGI::ClearVanillaSAOTargets()
+	{
+		// Only act when the lever actually patched the engine; otherwise the engine SAO chain is
+		// still writing those RTs and we'd be stomping its output.
+		if (!s_ssaoLeverApplied)
+			return;
+
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) return;
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) return;
+
+		// White (1.0) so the deferred ambient pass treats every pixel as fully unoccluded -
+		// our SSGI Apply() supplies the real occlusion term later in the same frame. Cleared
+		// values get overwritten the next time the engine binds these as RTVs, so only the
+		// SRV reads against this state matter (which is exactly what we want).
+		// Engine.h notes kSSAOFinal=45 is the RT empirically sampled at t9 by BSDFLightShader;
+		// we clear the other three SAO targets as well since RE doc reports kSSAO=28 and we
+		// can't yet conclusively rule out engine paths that ping-pong through 46 / 47.
+		const uint32_t saoRTs[] = { kRT_SSAO, kRT_SSAOFinal, kRT_SSAOFinalSwap, kRT_SSAOFinalSwap2 };
+		const float    white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+		for (uint32_t rt : saoRTs) {
+			auto& target = rendererData->renderTargets[rt];
+			auto* rtv    = reinterpret_cast<ID3D11RenderTargetView*>(target.rtView);
+			if (rtv) context->ClearRenderTargetView(rtv, white);
+		}
+	}
+
 	void ScreenSpaceGI::DrawSettings()
 	{
 		bool dirty = false;
@@ -1154,6 +1293,20 @@ namespace cs::features
 		ImGui::TextDisabled("Status: resources=%s, shaders=%s",
 			resourcesAllocated ? "OK" : "not allocated",
 			shadersWarmedUp    ? "compiled" : "pending");
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Advanced (restart required)");
+		if (ImGui::Checkbox("Keep vanilla SSAO active", &settings.enableVanillaSSAO)) {
+			dirty = true;
+		}
+		ImGui::SetItemTooltip(
+			"Default off: SSGI patches DrawWorld::ImagespaceSAO to early-return so vanilla SAO\n"
+			"does not double up with our AO. Toggle takes effect on next game launch.");
+		if (s_ssaoLeverApplied) {
+			ImGui::TextDisabled("Vanilla SAO disabled this session.");
+		} else {
+			ImGui::TextDisabled("Vanilla SAO active this session.");
+		}
 
 		ImGui::EndDisabled();
 		if (dirty) SaveSettings();

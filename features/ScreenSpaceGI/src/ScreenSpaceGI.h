@@ -16,6 +16,7 @@ namespace cs::features
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
 
 		void Load() override;
+		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
 
@@ -41,6 +42,12 @@ namespace cs::features
 		// modulate the bounce term. deferred_composite multiplies kDiffuseBuffer by
 		// albedo, so the inject is `ssgiIl` only (no per-pixel albedo here).
 		void ApplyIL();
+
+		// Clears the four vanilla SAO render targets to white(1) before DeferredLightsImpl.
+		// Only active when the vanilla SAO disable lever is patched in (settings.enableVanillaSSAO
+		// == false at startup). Stops the deferred ambient/IBL pass from reading stale GPU
+		// contents of the (now-unwritten) SAO chain after the engine SAO pass is short-circuited.
+		void ClearVanillaSAOTargets();
 
 		enum class QualityPreset : int
 		{
@@ -74,7 +81,11 @@ namespace cs::features
 
 			// XeGTAO + SH2-YCoCg (canonical SSGI knobs).
 			bool     enableGI               = true;
-			bool     enableVanillaSSAO      = false;  // RE-confirmed lever pending wire-up in 2c.3
+			// Vanilla SAO disable lever: when false (default), Load() patches
+			// DrawWorld::ImagespaceSAO entry to `ret` so the engine SAO chain is short-circuited;
+			// the SSGI compute chain owns AO via Apply(). When true, vanilla SAO remains active
+			// (smoke-comparison mode). Toggle is restart-required.
+			bool     enableVanillaSSAO      = false;
 			int      resolutionMode         = 0;       // 0=full (forced until 2c.3 wires HALF_RES/QUARTER_RES permutations)
 			float    minScreenRadius        = 0.01f;
 			float    giRadius               = 256.0f;
@@ -197,7 +208,15 @@ namespace cs::features
 		uint32_t inputIlIdx         = 0;
 		uint32_t outputAccumFramesIdx = 0;
 		uint32_t inputAccumFramesIdx  = 0;
-		float    prevInvViewMat[16] = {};
+		// Per-frame view-matrix capture for SH frame stabilization and temporal reprojection.
+		// `rawCurrentViewMat` / `rawPreviousViewMat` hold the raw 64-byte `BSGraphics::CameraStateData::
+		// camViewData::viewMat` blocks (stored as transposes of the logical row-major view matrix; see
+		// `ScreenSpaceShadows.cpp:696-702` for the same convention). The `XMMatrixInverse` of the raw
+		// load lands directly in HLSL column-major form, so no transpose is needed on upload.
+		float    rawCurrentViewMat[16]  = {};
+		float    rawPreviousViewMat[16] = {};
+		bool     hasRawCurrentViewMat   = false;
+		bool     hasRawPreviousViewMat  = false;
 		bool     shadersWarmedUp    = false;
 		bool     resourcesAllocated = false;
 		bool     hasValidAoOutput   = false;  // gates Apply() until DrawSSGI has produced at least one full chain
