@@ -23,6 +23,7 @@
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
 #include "PresetManager.h"
+#include "RenderHooks.h"
 #include "Sky.h"
 #include "Util.h"
 #include "Weather.h"
@@ -259,16 +260,6 @@ namespace cs::features
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
 
-	struct Imagespace_PostUpscale_Hook
-	{
-		static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
-		{
-			func(This, a_true);
-			Imagespace::GetSingleton()->RunFrame();
-		}
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
-
 	Imagespace* Imagespace::GetSingleton()
 	{
 		static Imagespace instance;
@@ -287,12 +278,10 @@ namespace cs::features
 
 	void Imagespace::OnPostPostLoad()
 	{
-		const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
-		// All offsets[] arrays in this function are 3-wide (OG/NG/AE).
-		assert(runtimeIdx < 3);
-		constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
-		stl::write_thunk_call<Imagespace_PostUpscale_Hook>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
-		L->info("Hook installed on Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport");
+		cs::engine::RegisterPostDynResViewport_Imagespace([] {
+			Imagespace::GetSingleton()->RunFrame();
+		});
+		L->info("Registered Imagespace post-upscale callback on cs::engine broker");
 
 		// IsActive (vfunc 8) replacement; engine DOF resumes when bDOFEnable is false.
 		stl::write_vfunc<0x8, ImageSpaceEffectDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectDepthOfField[0]);

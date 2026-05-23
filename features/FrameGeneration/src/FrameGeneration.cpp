@@ -16,6 +16,7 @@
 #include "Feature.h"
 #include "DX11Hooks.h"
 #include "Log.h"
+#include "RenderHooks.h"
 #include "Streamline.h"
 #include "StreamlineCore.h"
 
@@ -635,22 +636,6 @@ struct WindowSizeChanged
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-struct SetUseDynamicResolutionViewportAsDefaultViewport
-{
-	static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
-	{
-		auto frameGen = FrameGeneration::GetSingleton();
-
-		func(This, a_true);
-
-		if (!a_true) {
-			// Imagespace just completed - capture HUDLess (pre-UI scene)
-			frameGen->PostDisplay();
-		}
-	}
-	static inline REL::Relocation<decltype(thunk)> func;
-};
-
 bool reticleFix = false;
 
 struct DrawWorld_Forward
@@ -687,10 +672,13 @@ void FrameGeneration::InstallHooks()
 	// Fix game initialising twice
 	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));
 
-	// Watch frame presentation
-	constexpr std::ptrdiff_t dynResOffsets[] = { 0xE1, 0xC5, 0xC5 };
-	stl::write_thunk_call<SetUseDynamicResolutionViewportAsDefaultViewport>(
-		REL::ID({ 587723, 2318322, 2318322 }).address() + dynResOffsets[runtimeIdx]);
+	// Watch frame presentation via the shared post-upscale broker so Imagespace post-FX lands
+	// before HUDLess capture (avoids the 60Hz judder when Imagespace was second-to-install).
+	cs::engine::RegisterPostDynResViewport_FGCapture([](bool a_setting) {
+		if (!a_setting) {
+			FrameGeneration::GetSingleton()->PostDisplay();
+		}
+	});
 
 	// Fix reticles on motion vectors and depth
 	stl::detour_thunk<DrawWorld_Forward>(REL::ID({ 656535, 2318315, 2318315 }));

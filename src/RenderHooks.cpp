@@ -2,6 +2,8 @@
 
 #include "Log.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <vector>
 
 namespace { auto* L = cs::log::Get("cs.hooks"); }
@@ -10,13 +12,16 @@ namespace cs::engine
 {
 	namespace
 	{
-		std::vector<RenderHookCallback> g_postDeferredPrePass;
-		std::vector<RenderHookCallback> g_preDeferredLightsImpl;
-		std::vector<RenderHookCallback> g_postDeferredLightsImpl;
-		std::vector<RenderHookCallback> g_postDeferredComposite;
-		bool g_prePassInstalled = false;
-		bool g_lightsImplInstalled = false;
-		bool g_compositeInstalled = false;
+		std::vector<RenderHookCallback>     g_postDeferredPrePass;
+		std::vector<RenderHookCallback>     g_preDeferredLightsImpl;
+		std::vector<RenderHookCallback>     g_postDeferredLightsImpl;
+		std::vector<RenderHookCallback>     g_postDeferredComposite;
+		std::vector<RenderHookCallback>     g_postDynResViewport_Imagespace;
+		std::vector<PostDynResViewportFGCb> g_postDynResViewport_FGCapture;
+		bool g_prePassInstalled            = false;
+		bool g_lightsImplInstalled         = false;
+		bool g_compositeInstalled          = false;
+		bool g_postDynResViewportInstalled = false;
 
 		struct DeferredPrePass_Hook
 		{
@@ -56,6 +61,41 @@ namespace cs::engine
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
+
+		// SetUseDynamicResolutionViewportAsDefaultViewport(This, a_setting) call site after the post-
+		// upscale buffer has been written. Order: engine func first, then Imagespace post-FX, then
+		// FG HUDLess capture (so FG captures post-imagespace pixels for DLSS-G judder-free output).
+		struct PostDynResViewport_Hook
+		{
+			static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_setting)
+			{
+				func(This, a_setting);
+				for (auto& cb : g_postDynResViewport_Imagespace) {
+					cb();
+				}
+				for (auto& cb : g_postDynResViewport_FGCapture) {
+					cb(a_setting);
+				}
+			}
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// REL::ID 587723 / 2318322 / 2318322 + offsets { 0xE1, 0xC5, 0xC5 } is the single E8 call site
+		// inside the deferred composite epilogue that re-arms the engine viewport after Upscaling has
+		// written the post-upscale buffer. Confirmed shared by Imagespace + FrameGeneration; cited in
+		// Fallout4RE/Workspace/exports/cs-render-subsystem-ids.json (commit 20e5fa7).
+		void EnsurePostDynResViewportInstalled()
+		{
+			if (g_postDynResViewportInstalled) {
+				return;
+			}
+			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
+			constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
+			stl::write_thunk_call<PostDynResViewport_Hook>(
+				REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
+			g_postDynResViewportInstalled = true;
+			L->info("Hook installed on SetUseDynamicResolutionViewportAsDefaultViewport (broker)");
+		}
 	}
 
 	void RegisterPostDeferredPrePass(RenderHookCallback callback)
@@ -103,5 +143,17 @@ namespace cs::engine
 			g_compositeInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredComposite");
 		}
+	}
+
+	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback)
+	{
+		g_postDynResViewport_Imagespace.push_back(std::move(callback));
+		EnsurePostDynResViewportInstalled();
+	}
+
+	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback)
+	{
+		g_postDynResViewport_FGCapture.push_back(std::move(callback));
+		EnsurePostDynResViewportInstalled();
 	}
 }
