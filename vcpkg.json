@@ -4,8 +4,6 @@
   "description": "Community Shaders port for Fallout 4",
   "supports": "windows & x64",
   "dependencies": [
-    "fmt",
-    "rsm-mmio",
     {
       "name": "spdlog",
       "features": [ "wchar" ]

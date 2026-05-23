@@ -10,6 +10,59 @@ permissions:
   contents: read
 
 jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Em-dash sweep (no U+2014 in tracked text)
+        shell: bash
+        run: |
+          set -e
+          hits=$(git grep -nP $'\xe2\x80\x94' -- \
+            ':(exclude)extern' ':(exclude).local' ':(exclude)*.bin' ':(exclude)*.dds' \
+            ':(exclude)*.png' ':(exclude)*.zip' ':(exclude)*.dll' ':(exclude)*.pdb' || true)
+          if [ -n "$hits" ]; then
+            echo "Em-dash characters (U+2014) found in tracked files:" >&2
+            echo "$hits" >&2
+            exit 1
+          fi
+          echo "No em-dashes."
+
+      - name: Bash syntax check (*.sh)
+        shell: bash
+        run: |
+          set -e
+          fail=0
+          while IFS= read -r f; do
+            if ! bash -n "$f"; then
+              echo "  bash syntax error in $f" >&2
+              fail=1
+            fi
+          done < <(git ls-files '*.sh')
+          exit "$fail"
+
+      - name: PowerShell parse check (*.ps1)
+        shell: pwsh
+        run: |
+          $files = git ls-files '*.ps1'
+          $failed = 0
+          foreach ($f in $files) {
+            $tokens = $null
+            $err = $null
+            [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path $f), [ref]$tokens, [ref]$err) | Out-Null
+            if ($err.Count -gt 0) {
+              Write-Error "Parse errors in $f"
+              foreach ($e in $err) { Write-Error "  $($e.Message) at line $($e.Extent.StartLineNumber)" }
+              $failed = 1
+            }
+          }
+          exit $failed
+
   build:
     name: Windows Release
     runs-on: windows-2022
