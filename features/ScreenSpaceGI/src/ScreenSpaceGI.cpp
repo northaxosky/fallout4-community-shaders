@@ -40,34 +40,6 @@ namespace cs::features
 	constexpr uint32_t kRT_MotionVectors = static_cast<uint32_t>(cs::engine::RenderTarget::kMotionVectors);
 	constexpr uint32_t kDST_Main         = static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain);
 
-	struct SSGI_CB
-	{
-		uint32_t FrameDim[2];
-		uint32_t AODim[2];
-		float    NearClip;
-		float    FarClip;
-		uint32_t SliceCount;
-		uint32_t StepCount;
-		float    AORadius;
-		float    AOPower;
-		float    Thickness;
-		float    _Pad0;
-		float    NDCToViewMul[4];
-		float    NDCToViewAdd[4];
-	};
-	static_assert(sizeof(SSGI_CB) % 16 == 0);
-
-	struct PyramidCB
-	{
-		uint32_t SrcDim[2];
-		uint32_t DstDim[2];
-		uint32_t IsLDR;
-		uint32_t Pad0;
-		float    NearC;
-		float    FarC;
-	};
-	static_assert(sizeof(PyramidCB) % 16 == 0);
-
 	struct ApplyCB
 	{
 		uint32_t ApplyDim[2];
@@ -76,12 +48,12 @@ namespace cs::features
 	};
 	static_assert(sizeof(ApplyCB) % 16 == 0);
 
-	// v2 SSGI constant buffer. Layout matches upstream Skyrim CS @ bb6460db
+	// SSGI constant buffer. Layout matches upstream Skyrim CS @ bb6460db
 	// `features/Screen Space GI/Shaders/ScreenSpaceGI/common.hlsli` (`SSGICB`), with the [2]
 	// stereo arrays collapsed to mono. Field order/sizes mirror HLSL register packing so the
-	// C++ struct and the `cbuffer SSGICB : register(b1)` declaration in v2 Common.hlsli stay
-	// byte-equivalent. 13 registers * 16 bytes = 208 bytes.
-	struct SSGIv2CB
+	// C++ struct and the `cbuffer SSGICB : register(b1)` declaration in Common.hlsli stay
+	// byte-equivalent. 18 registers * 16 bytes = 288 bytes.
+	struct SSGICB
 	{
 		float    PrevInvViewMat[16];        // c0-c3: row-major float4x4
 		float    NDCToViewMul[2];           // c4.xy
@@ -112,27 +84,32 @@ namespace cs::features
 		float    BlurRadius;                // c12.x
 		float    DistanceNormalisation;     // c12.y
 		float    _Pad2[2];                  // c12.zw
-		float    CameraData[4];             // c13: matches upstream SharedData::CameraData (1/W, 1/H, -near/(far-near), -far*near/(far-near))
-		float    CameraViewInverse[16];     // c14-c17: row-major float4x4, current frame view inverse
+		float    CameraData[4];             // c13: (1/W, 1/H, -near/(far-near), -far*near/(far-near))
+		float    CameraViewInverse[16];     // c14-c17: row-major float4x4
 	};
-	static_assert(sizeof(SSGIv2CB) == 288, "SSGIv2CB layout must match HLSL cbuffer");
-	static_assert(sizeof(SSGIv2CB) % 16 == 0);
+	static_assert(sizeof(SSGICB) == 288, "SSGICB layout must match HLSL cbuffer");
+	static_assert(sizeof(SSGICB) % 16 == 0);
 
+	// Quality preset table. Each entry covers the v2 fan-out tuning that's actually
+	// relevant: working resolution + ray budget + GI strength + ambient injection
+	// strength. Fine-grained knobs (radius, thickness, etc.) stay at defaults.
 	struct PresetEntry
 	{
 		const char* name;
+		int         resolutionMode;  // 0=full, 1=half, 2=quarter
 		int         sliceCount;
 		int         stepCount;
-		float       aoRadius;
-		float       aoIntensity;
-		float       aoPower;
-		float       thickness;
+		float       giStrength;
+		float       applyIntensity;
 	};
 
-	static constexpr PresetEntry kPresets[] = {
-		{ "Performance", 2, 3, 150.0f, 0.15f, 1.0f, 32.0f },
-		{ "Quality",     3, 5, 200.0f, 0.20f, 1.2f, 32.0f },
-		{ "Cinematic",   4, 8, 280.0f, 0.30f, 1.5f, 40.0f },
+	static constexpr PresetEntry kQualityPresets[] = {
+		// resolutionMode is forced to 0 until Phase 2c.3 wires HALF_RES/QUARTER_RES permutations
+		// (Common.hlsli's FULLRES_LOAD/READ_DEPTH macros require permutation defines to sample the
+		// full-res scene RTs correctly when the chain runs at sub-resolution).
+		{ "Performance", 0, 2, 4, 0.8f, 0.4f },
+		{ "Quality",     0, 3, 5, 1.0f, 0.5f },
+		{ "Cinematic",   0, 4, 8, 1.2f, 0.6f },
 	};
 
 	struct ProjectionData
@@ -264,43 +241,41 @@ namespace cs::features
 		LoadSettings();
 		L->info("Loaded: enabled={} preset={} slices={} steps={} radius={:.1f} apply={}",
 			settings.enabled, settings.preset, settings.sliceCount, settings.stepCount,
-			settings.aoRadius, settings.applyToScene);
+			settings.aoRadius, settings.applyAOToScene);
 
 		cs::engine::RegisterPostDeferredPrePass([]() {
-			auto* self = ScreenSpaceGI::GetSingleton();
-			self->DrawAO();
-			self->DrawSSGIv2();
+			ScreenSpaceGI::GetSingleton()->DrawSSGI();
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->Apply();
 		});
 	}
 
-	void ScreenSpaceGI::ApplyPreset(Preset preset)
+	void ScreenSpaceGI::ApplyPreset(QualityPreset preset)
 	{
 		const int idx = static_cast<int>(preset) - 1;
 		if (idx < 0 || idx >= 3) return;
-		const auto& p = kPresets[idx];
-		settings.preset       = static_cast<int>(preset);
-		settings.sliceCount   = p.sliceCount;
-		settings.stepCount    = p.stepCount;
-		settings.aoRadius     = p.aoRadius;
-		settings.aoIntensity  = p.aoIntensity;
-		settings.aoPower      = p.aoPower;
-		settings.thickness    = p.thickness;
+		const auto& p = kQualityPresets[idx];
+		settings.preset         = static_cast<int>(preset);
+		settings.resolutionMode = p.resolutionMode;
+		settings.sliceCount     = p.sliceCount;
+		settings.stepCount      = p.stepCount;
+		settings.giStrength     = p.giStrength;
+		settings.applyIntensity = p.applyIntensity;
+		// Force re-allocation if the resolution mode changed.
+		resourcesAllocated = false;
 	}
 
-	bool ScreenSpaceGI::SettingsMatchPreset(Preset preset) const
+	bool ScreenSpaceGI::SettingsMatchPreset(QualityPreset preset) const
 	{
 		const int idx = static_cast<int>(preset) - 1;
 		if (idx < 0 || idx >= 3) return false;
-		const auto& p = kPresets[idx];
-		return settings.sliceCount == p.sliceCount &&
-		       settings.stepCount  == p.stepCount &&
-		       std::abs(settings.aoRadius    - p.aoRadius)    < 0.5f &&
-		       std::abs(settings.aoIntensity - p.aoIntensity) < 0.01f &&
-		       std::abs(settings.aoPower     - p.aoPower)     < 0.01f &&
-		       std::abs(settings.thickness   - p.thickness)   < 0.5f;
+		const auto& p = kQualityPresets[idx];
+		return settings.resolutionMode == p.resolutionMode &&
+		       settings.sliceCount     == p.sliceCount &&
+		       settings.stepCount      == p.stepCount &&
+		       std::abs(settings.giStrength     - p.giStrength)     < 0.01f &&
+		       std::abs(settings.applyIntensity - p.applyIntensity) < 0.01f;
 	}
 
 	void ScreenSpaceGI::LoadSettings()
@@ -318,7 +293,7 @@ namespace cs::features
 		ssgi::ParseSettings(table, settings);
 
 		if (firstLaunch) {
-			ApplyPreset(Preset::kQuality);
+			ApplyPreset(QualityPreset::kQuality);
 		}
 
 		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_force_apply";
@@ -334,17 +309,17 @@ namespace cs::features
 		}
 		testModeActive = applyMarkerPresent;
 		if (applyMarkerPresent) {
-			settings.enabled       = true;
-			ApplyPreset(Preset::kQuality);
-			settings.applyToScene  = applyMarkerEnable;
-			settings.applyContrast = 1.0f;
+			settings.enabled        = true;
+			ApplyPreset(QualityPreset::kQuality);
+			settings.applyAOToScene = applyMarkerEnable;
+			settings.applyContrast  = 1.0f;
 			char dummy = 0;
 			if (cs::util::ReadMarker(kExtremeMarker, dummy)) {
-				settings.aoIntensity = 2.0f;
-				settings.applyContrast = 2.0f;
-				settings.aoPower = 3.0f;
+				settings.applyIntensity = 1.0f;
+				settings.applyContrast  = 2.0f;
+				settings.aoPower        = 3.0f;
 			}
-			L->info("Test mode: apply={} extreme override applied", settings.applyToScene);
+			L->info("Test mode: apply={} extreme override applied", settings.applyAOToScene);
 		}
 	}
 
@@ -371,8 +346,6 @@ namespace cs::features
 	{
 		stagedSettings = Settings{};
 		ssgi::ParseSettings(a_subtable, stagedSettings);
-		stagedSettings.previewScale = settings.previewScale;
-		stagedSettings.showPreview  = settings.showPreview;
 		stagedValid = true;
 		a_err.clear();
 		return true;
@@ -381,121 +354,17 @@ namespace cs::features
 	void ScreenSpaceGI::CommitStaged()
 	{
 		if (!stagedValid) return;
+		const bool resModeChanged = (stagedSettings.resolutionMode != settings.resolutionMode);
 		settings    = stagedSettings;
 		stagedValid = false;
+		if (resModeChanged)
+			resourcesAllocated = false;
 		SaveSettings();
 	}
 
 	void ScreenSpaceGI::ExportToPreset(toml::table& a_subtable)
 	{
 		ssgi::EmitSettings(a_subtable, settings);
-	}
-
-	bool ScreenSpaceGI::EnsurePyramid(uint32_t a_w, uint32_t a_h)
-	{
-		auto* device = cs::util::GetD3DDevice();
-		if (!device) return false;
-
-		const uint32_t baseW = std::max(1u, a_w / 2);
-		const uint32_t baseH = std::max(1u, a_h / 2);
-		if (baseW != pyrWidth || baseH != pyrHeight || !depthPyramid) {
-			D3D11_TEXTURE2D_DESC td{};
-			td.Width = baseW;
-			td.Height = baseH;
-			td.MipLevels = 5;
-			td.ArraySize = 1;
-			td.Format = DXGI_FORMAT_R16_FLOAT;
-			td.SampleDesc.Count = 1;
-			td.Usage = D3D11_USAGE_DEFAULT;
-			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-			depthPyramid = std::make_unique<ssgi::Texture2D>(td);
-
-			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-			sd.Format = DXGI_FORMAT_R16_FLOAT;
-			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			sd.Texture2D.MipLevels = 5;
-			depthPyramid->CreateSRV(sd);
-
-			for (uint32_t i = 0; i < 5; ++i) {
-				D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
-				ud.Format = DXGI_FORMAT_R16_FLOAT;
-				ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-				ud.Texture2D.MipSlice = i;
-				DX::ThrowIfFailed(device->CreateUnorderedAccessView(depthPyramid->resource.get(), &ud, depthMipUAVs[i].put()));
-
-				D3D11_SHADER_RESOURCE_VIEW_DESC sd2{};
-				sd2.Format = DXGI_FORMAT_R16_FLOAT;
-				sd2.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-				sd2.Texture2D.MostDetailedMip = i;
-				sd2.Texture2D.MipLevels = 1;
-				DX::ThrowIfFailed(device->CreateShaderResourceView(depthPyramid->resource.get(), &sd2, depthMipSRVs[i].put()));
-			}
-
-			pyrWidth = baseW;
-			pyrHeight = baseH;
-			L->info("Depth pyramid (re)allocated {}x{}", baseW, baseH);
-		}
-
-		if (!pyramidCB) pyramidCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(PyramidCB)));
-		return true;
-	}
-
-	bool ScreenSpaceGI::EnsureAOResources(uint32_t a_w, uint32_t a_h)
-	{
-		auto* device = cs::util::GetD3DDevice();
-		if (!device) return false;
-
-		const uint32_t halfW = std::max(1u, a_w / 2);
-		const uint32_t halfH = std::max(1u, a_h / 2);
-		if (halfW != aoWidth || halfH != aoHeight || !aoTexture) {
-			D3D11_TEXTURE2D_DESC td{};
-			td.Width = halfW;
-			td.Height = halfH;
-			td.MipLevels = 1;
-			td.ArraySize = 1;
-			td.Format = DXGI_FORMAT_R8_UNORM;
-			td.SampleDesc.Count = 1;
-			td.Usage = D3D11_USAGE_DEFAULT;
-			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-			aoTexture = std::make_unique<ssgi::Texture2D>(td);
-
-			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-			sd.Format = DXGI_FORMAT_R8_UNORM;
-			sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-			sd.Texture2D.MipLevels = 1;
-			aoTexture->CreateSRV(sd);
-
-			D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};
-			ud.Format = DXGI_FORMAT_R8_UNORM;
-			ud.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-			aoTexture->CreateUAV(ud);
-
-			aoWidth = halfW;
-			aoHeight = halfH;
-			L->info("AO texture (re)allocated {}x{}", halfW, halfH);
-		}
-
-		if (!aoCB) aoCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGI_CB)));
-
-		if (!pointClampSampler) {
-			D3D11_SAMPLER_DESC sd{};
-			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
-			sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-			sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-			sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-			sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
-			DX::ThrowIfFailed(device->CreateSamplerState(&sd, pointClampSampler.put()));
-		}
-		if (!linearClampSampler) {
-			D3D11_SAMPLER_DESC sd{};
-			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-			sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-			sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-			sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-			sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
-			DX::ThrowIfFailed(device->CreateSamplerState(&sd, linearClampSampler.put()));
-		}
-		return true;
 	}
 
 	bool ScreenSpaceGI::EnsureApplyResources(uint32_t a_w, uint32_t a_h, uint32_t a_format)
@@ -528,13 +397,9 @@ namespace cs::features
 		return true;
 	}
 
-	// ---- v2 (XeGTAO + Visibility Bitmask + SH2-YCoCg) substrate ---------------------------
-	// The bodies below are wired but the v2 dispatch path is still gated entirely behind
-	// `settings.useV2`. With useV2=false (default) none of this code paths execute at runtime.
-
-	void ScreenSpaceGI::EnsureV2Noise()
+	void ScreenSpaceGI::EnsureNoise()
 	{
-		if (v2_noiseLoaded || v2_texNoise) return;
+		if (noiseLoaded || texNoise) return;
 		auto* device = cs::util::GetD3DDevice();
 		if (!device) return;
 
@@ -543,54 +408,53 @@ namespace cs::features
 		DirectX::ScratchImage img;
 		DirectX::TexMetadata  meta{};
 		if (FAILED(DirectX::LoadFromDDSFile(kNoisePath, DirectX::DDS_FLAGS_NONE, &meta, img))) {
-			L->warn("SSGI v2 noise load failed: {}", "fast_2uges.dds");
+			L->warn("SSGI noise load failed: {}", "fast_2uges.dds");
 			return;
 		}
 
 		winrt::com_ptr<ID3D11Resource> resource;
 		if (FAILED(DirectX::CreateTexture(device, img.GetImages(), img.GetImageCount(), meta, resource.put()))) {
-			L->warn("SSGI v2 noise CreateTexture failed");
+			L->warn("SSGI noise CreateTexture failed");
 			return;
 		}
 		winrt::com_ptr<ID3D11Texture2D> tex;
 		if (FAILED(resource->QueryInterface(IID_PPV_ARGS(tex.put())))) {
-			L->warn("SSGI v2 noise resource is not Texture2D");
+			L->warn("SSGI noise resource is not Texture2D");
 			return;
 		}
 
-		v2_texNoise = std::make_unique<ssgi::Texture2D>(tex.detach());
+		texNoise = std::make_unique<ssgi::Texture2D>(tex.detach());
 		D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-		sd.Format = v2_texNoise->desc.Format;
+		sd.Format = texNoise->desc.Format;
 		sd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
 		sd.Texture2D.MostDetailedMip = 0;
 		sd.Texture2D.MipLevels = 1;
-		v2_texNoise->CreateSRV(sd);
+		texNoise->CreateSRV(sd);
 
-		v2_noiseLoaded = true;
-		L->info("SSGI v2 noise loaded ({}x{} fmt={})",
-			v2_texNoise->desc.Width, v2_texNoise->desc.Height, static_cast<int>(v2_texNoise->desc.Format));
+		noiseLoaded = true;
+		L->info("SSGI noise loaded ({}x{} fmt={})",
+			texNoise->desc.Width, texNoise->desc.Height, static_cast<int>(texNoise->desc.Format));
 	}
 
-	void ScreenSpaceGI::CompileV2Shaders()
+	void ScreenSpaceGI::CompileShaders()
 	{
-		if (v2_shadersWarmedUp) return;
-		if (!settings.useV2) return;
+		if (shadersWarmedUp) return;
 		if (!cs::util::GetD3DDevice()) return;
 
 		// Each GetCS call tolerates a missing file: the underlying CompileShader logs a warning
-		// and returns nullptr. v2 dispatch later checks every slot before fan-out.
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterDepths.cs.hlsl",  v2_prefilterDepthsCS,   "v2_prefilterDepths");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterRadiance.cs.hlsl", v2_prefilterRadianceCS, "v2_prefilterRadiance");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterNormal.cs.hlsl",  v2_prefilterNormalCS,   "v2_prefilterNormal");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\radianceDisocc.cs.hlsl",   v2_radianceDisoccCS,    "v2_radianceDisocc");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\gi.cs.hlsl",               v2_giCS,                "v2_gi");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\blur.cs.hlsl",             v2_blurCS,              "v2_blur");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\upsample.cs.hlsl",         v2_upsampleCS,          "v2_upsample");
+		// and returns nullptr. Dispatch later checks every slot before fan-out.
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterDepths.cs.hlsl",  prefilterDepthsCS,   "prefilterDepths");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterRadiance.cs.hlsl", prefilterRadianceCS, "prefilterRadiance");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterNormal.cs.hlsl",  prefilterNormalCS,   "prefilterNormal");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\radianceDisocc.cs.hlsl",   radianceDisoccCS,    "radianceDisocc");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\gi.cs.hlsl",               giCS,                "gi");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\blur.cs.hlsl",             blurCS,              "blur");
+		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\upsample.cs.hlsl",         upsampleCS,          "upsample");
 
-		v2_shadersWarmedUp = true;
+		shadersWarmedUp = true;
 	}
 
-	bool ScreenSpaceGI::EnsureV2Resources(uint32_t a_w, uint32_t a_h, int a_resolutionMode)
+	bool ScreenSpaceGI::EnsureResources(uint32_t a_w, uint32_t a_h, int a_resolutionMode)
 	{
 		auto* device = cs::util::GetD3DDevice();
 		if (!device) return false;
@@ -600,14 +464,13 @@ namespace cs::features
 		const uint32_t workW = std::max(1u, a_w / divisor);
 		const uint32_t workH = std::max(1u, a_h / divisor);
 
-		const bool dirty = !v2_resourcesAllocated ||
-			a_w != v2_lastWidth || a_h != v2_lastHeight || resMode != v2_lastResolutionMode;
+		const bool dirty = !resourcesAllocated ||
+			a_w != lastWidth || a_h != lastHeight || resMode != lastResolutionMode;
 		if (!dirty) {
-			if (!v2_ssgiCB) v2_ssgiCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGIv2CB)));
+			if (!ssgiCB) ssgiCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGICB)));
 			return true;
 		}
 
-		// Allocator helper for the 5-mip pyramid pattern (working depth / encoded normal / radiance).
 		auto allocPyramid = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out,
 		                        std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, 5>& uavs,
 		                        std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 5>& srvMips,
@@ -651,7 +514,6 @@ namespace cs::features
 			}
 		};
 
-		// Allocator for a flat single-mip texture with SRV + UAV.
 		auto allocFlat = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out)
 		{
 			D3D11_TEXTURE2D_DESC td{};
@@ -678,55 +540,74 @@ namespace cs::features
 		};
 
 		try {
-			allocPyramid(DXGI_FORMAT_R16_FLOAT,          v2_texWorkingDepth, v2_uavWorkingDepth, v2_srvWorkingDepthMips, true);
-			allocPyramid(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texRadiance,     v2_uavRadiance,     v2_srvRadianceMips,     true);
-			allocPyramid(DXGI_FORMAT_R16G16_UNORM,       v2_texNormal,       v2_uavNormal,       v2_srvNormalMips,       true);
+			allocPyramid(DXGI_FORMAT_R16_FLOAT,          texWorkingDepth, uavWorkingDepth, srvWorkingDepthMips, true);
+			allocPyramid(DXGI_FORMAT_R16G16B16A16_FLOAT, texRadiance,     uavRadiance,     srvRadianceMips,     true);
+			allocPyramid(DXGI_FORMAT_R16G16_UNORM,       texNormal,       uavNormal,       srvNormalMips,       true);
 
-			// Flat helpers.
-			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texRadianceTemp);
-			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texPrevGeo);  // viewZ (r) + encoded normal.xy (gb); a unused
+			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texRadianceTemp);
+			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texPrevGeo);  // viewZ (r) + encoded normal.xy (gb); a unused
 
 			for (int i = 0; i < 2; ++i) {
-				allocFlat(DXGI_FORMAT_R8_UNORM,           v2_texAccumFrames[i]);
-				allocFlat(DXGI_FORMAT_R8_UNORM,           v2_texAo[i]);
-				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texIlY[i]);
-				allocFlat(DXGI_FORMAT_R16G16_FLOAT,       v2_texIlCoCg[i]);
-				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texGiSpecular[i]);
+				allocFlat(DXGI_FORMAT_R8_UNORM,           texAccumFrames[i]);
+				allocFlat(DXGI_FORMAT_R8_UNORM,           texAo[i]);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texIlY[i]);
+				allocFlat(DXGI_FORMAT_R16G16_FLOAT,       texIlCoCg[i]);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texGiSpecular[i]);
 			}
 		} catch (const std::exception& e) {
-			L->error("SSGI v2 resource allocation failed: {}", e.what());
-			v2_resourcesAllocated = false;
+			L->error("SSGI resource allocation failed: {}", e.what());
+			resourcesAllocated = false;
 			return false;
 		}
 
-		if (!v2_ssgiCB) v2_ssgiCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGIv2CB)));
+		if (!ssgiCB) ssgiCB = std::make_unique<ssgi::ConstantBuffer>(ssgi::ConstantBufferDesc(sizeof(SSGICB)));
 
-		// Reuse v1 samplers; they are point-clamp + linear-clamp which match upstream's needs.
-		// EnsureAOResources is responsible for sampler creation; call it once if not done.
-		if (!pointClampSampler || !linearClampSampler) {
-			EnsureAOResources(a_w, a_h);
+		if (!pointClampSampler) {
+			D3D11_SAMPLER_DESC sd{};
+			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+			sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
+			DX::ThrowIfFailed(device->CreateSamplerState(&sd, pointClampSampler.put()));
+		}
+		if (!linearClampSampler) {
+			D3D11_SAMPLER_DESC sd{};
+			sd.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+			sd.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+			sd.MinLOD = 0; sd.MaxLOD = D3D11_FLOAT32_MAX;
+			DX::ThrowIfFailed(device->CreateSamplerState(&sd, linearClampSampler.put()));
 		}
 
-		v2_lastWidth          = a_w;
-		v2_lastHeight         = a_h;
-		v2_lastResolutionMode = resMode;
-		v2_resourcesAllocated = true;
-		v2_outputAoIdx        = 0;
-		v2_outputIlIdx        = 0;
-		v2_inputAoIdx         = 1;
-		v2_inputIlIdx         = 1;
-		v2_outputAccumFramesIdx = 0;
-		v2_inputAccumFramesIdx  = 1;
+		lastWidth          = a_w;
+		lastHeight         = a_h;
+		lastResolutionMode = resMode;
+		resourcesAllocated = true;
+		hasValidAoOutput   = false;
+		outputAoIdx        = 0;
+		outputIlIdx        = 0;
+		inputAoIdx         = 1;
+		inputIlIdx         = 1;
+		outputAccumFramesIdx = 0;
+		inputAccumFramesIdx  = 1;
 
-		L->info("SSGI v2 resources allocated: working={}x{} (resMode={}, divisor={}) from frame={}x{}",
+		L->info("SSGI resources allocated: working={}x{} (resMode={}, divisor={}) from frame={}x{}",
 			workW, workH, resMode, divisor, a_w, a_h);
 		return true;
 	}
 
-	void ScreenSpaceGI::DrawSSGIv2()
+	void ScreenSpaceGI::DrawSSGI()
 	{
-		if (!settings.useV2 || !settings.enabled) return;
-		if (cs::env::IsENBLoaded()) return;
+		if (!settings.enabled) return;
+		if (cs::env::IsENBLoaded()) {
+			if (!enbWarningLogged) {
+				L->info("ENB detected; SSGI skipped");
+				enbWarningLogged = true;
+			}
+			return;
+		}
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) return;
@@ -752,37 +633,42 @@ namespace cs::features
 		const uint32_t W = dd.Width;
 		const uint32_t H = dd.Height;
 
-		if (!EnsureV2Resources(W, H, settings.resolutionMode)) return;
-		CompileV2Shaders();
-		EnsureV2Noise();
+		if (!EnsureResources(W, H, 0)) return;
+		CompileShaders();
+		EnsureNoise();
 
-		// Phase 2c.1 baseline: all 7 v2 compute shaders are required to fan out cleanly.
+		// All 7 compute shaders are required to fan out cleanly.
 		// If any failed to compile, bail rather than running a partial chain.
-		if (!v2_prefilterDepthsCS  || !v2_prefilterNormalCS || !v2_radianceDisoccCS ||
-		    !v2_prefilterRadianceCS|| !v2_giCS              || !v2_blurCS           ||
-		    !v2_upsampleCS)
+		if (!prefilterDepthsCS  || !prefilterNormalCS || !radianceDisoccCS ||
+		    !prefilterRadianceCS|| !giCS              || !blurCS           ||
+		    !upsampleCS)
 			return;
+
+		// Phase 2c.1: HALF_RES/QUARTER_RES permutations not yet wired (Common.hlsli FULLRES_LOAD
+		// / READ_DEPTH macros require permutation defines to sample full-res scene RTs correctly
+		// when the chain runs at sub-resolution). Force full-res at runtime regardless of UI.
+		const int effectiveResMode = 0;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
 
-		static bool firstFire = false;
-		if (!firstFire) {
-			L->info("DrawSSGIv2 first fire (full v2 chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample)");
-			firstFire = true;
+		if (!firstFireLogged) {
+			L->info("DrawSSGI first fire (full chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample)");
+			firstFireLogged = true;
 		}
 
 		const ProjectionData projection = GetProjectionData(W, H);
 
-		const auto divisor = (settings.resolutionMode == 0) ? 1u : (settings.resolutionMode == 1) ? 2u : 4u;
+		const auto divisor = (effectiveResMode == 0) ? 1u : (effectiveResMode == 1) ? 2u : 4u;
 		const uint32_t workW = std::max(1u, W / divisor);
 		const uint32_t workH = std::max(1u, H / divisor);
 
-		SSGIv2CB cb{};
-		// Identity for now; PrevInvViewMat + CameraViewInverse are read by gi.cs (CameraViewInverse for
-		// world-space SH evaluation) and by radianceDisocc.cs (PrevInvViewMat for temporal reproject -
-		// reproject path disabled in our reduced FO4 build). Identity here means SHs rotate with the
-		// camera; future iteration captures BSGraphics::State::cameraState view matrix per frame.
+		SSGICB cb{};
+		// Identity for now; PrevInvViewMat + CameraViewInverse are read by gi.cs (CameraViewInverse
+		// for world-space SH evaluation) and by radianceDisocc.cs (PrevInvViewMat for temporal
+		// reproject - disabled in this build). Phase 2c.3 wires per-frame view-matrix capture
+		// from BSGraphics::State::cameraState.viewMat (offset 0x050 per
+		// Fallout4RE/Workspace/knowledge/cross-runtime/camera-projection-data-path.md).
 		for (int i = 0; i < 16; ++i) {
 			cb.PrevInvViewMat[i]    = (i % 5 == 0) ? 1.0f : 0.0f;
 			cb.CameraViewInverse[i] = (i % 5 == 0) ? 1.0f : 0.0f;
@@ -799,7 +685,7 @@ namespace cs::features
 		cb.FrameDim[1]     = static_cast<float>(workH);
 		cb.RcpFrameDim[0]  = 1.0f / static_cast<float>(workW);
 		cb.RcpFrameDim[1]  = 1.0f / static_cast<float>(workH);
-		cb.FrameIndex      = v2_frameIndex++;
+		cb.FrameIndex      = frameIndex++;
 		cb.NumSlices       = static_cast<uint32_t>(settings.sliceCount);
 		cb.NumSteps        = static_cast<uint32_t>(settings.stepCount);
 		cb.MinScreenRadius = settings.minScreenRadius;
@@ -834,14 +720,13 @@ namespace cs::features
 		cb.CameraData[2] = (diff > 0.0f) ? (-nC / diff) : 0.0f;
 		cb.CameraData[3] = (diff > 0.0f) ? (-fC * nC / diff) : 0.0f;
 
-		v2_ssgiCB->Update(cb);
+		ssgiCB->Update(cb);
 
-		ID3D11Buffer* cbs[1] = { v2_ssgiCB->CB() };
+		ID3D11Buffer* cbs[1] = { ssgiCB->CB() };
 		ID3D11SamplerState* samps[2] = { pointClampSampler.get(), linearClampSampler.get() };
 		context->CSSetConstantBuffers(0, 1, cbs);
 		context->CSSetSamplers(0, 2, samps);
 
-		// Helper macros for binding fan-out cleanup between dispatches.
 		ID3D11ShaderResourceView*  nullSRV[10] = {};
 		ID3D11UnorderedAccessView* nullUAV[6]  = {};
 
@@ -853,62 +738,62 @@ namespace cs::features
 		const uint32_t gy_full = (workH + 7u) / 8u;
 
 		//----------------------------------------------------------------
-		// 1) prefilterDepths: depth -> v2_texWorkingDepth mips 0-4
+		// 1) prefilterDepths: depth -> texWorkingDepth mips 0-4
 		//----------------------------------------------------------------
-		context->CSSetShader(v2_prefilterDepthsCS, nullptr, 0);
+		context->CSSetShader(prefilterDepthsCS, nullptr, 0);
 		ID3D11ShaderResourceView* pdSRV[1] = { depthSRV };
 		context->CSSetShaderResources(0, 1, pdSRV);
 		ID3D11UnorderedAccessView* pdUAV[5] = {
-			v2_uavWorkingDepth[0].get(), v2_uavWorkingDepth[1].get(),
-			v2_uavWorkingDepth[2].get(), v2_uavWorkingDepth[3].get(),
-			v2_uavWorkingDepth[4].get(),
+			uavWorkingDepth[0].get(), uavWorkingDepth[1].get(),
+			uavWorkingDepth[2].get(), uavWorkingDepth[3].get(),
+			uavWorkingDepth[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, pdUAV, nullptr);
 		context->Dispatch(gx_half, gy_half, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
 		//----------------------------------------------------------------
-		// 2) prefilterNormal: kGbufferNormal -> v2_texNormal mips 0-4
+		// 2) prefilterNormal: kGbufferNormal -> texNormal mips 0-4
 		//----------------------------------------------------------------
-		context->CSSetShader(v2_prefilterNormalCS, nullptr, 0);
+		context->CSSetShader(prefilterNormalCS, nullptr, 0);
 		ID3D11ShaderResourceView* pnSRV[1] = { normalSRV };
 		context->CSSetShaderResources(0, 1, pnSRV);
 		ID3D11UnorderedAccessView* pnUAV[5] = {
-			v2_uavNormal[0].get(), v2_uavNormal[1].get(),
-			v2_uavNormal[2].get(), v2_uavNormal[3].get(),
-			v2_uavNormal[4].get(),
+			uavNormal[0].get(), uavNormal[1].get(),
+			uavNormal[2].get(), uavNormal[3].get(),
+			uavNormal[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, pnUAV, nullptr);
 		context->Dispatch(gx_half, gy_half, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
 		//----------------------------------------------------------------
-		// 3) radianceDisocc: kDiffuseBuffer + working depth -> v2_texRadiance mip0 (+ resets)
+		// 3) radianceDisocc: kDiffuseBuffer + working depth -> texRadianceTemp (+ resets)
 		//----------------------------------------------------------------
-		const int outIdx = v2_outputAoIdx;
-		const int inIdx  = v2_inputAoIdx;
+		const int outIdx = outputAoIdx;
+		const int inIdx  = inputAoIdx;
 
-		context->CSSetShader(v2_radianceDisoccCS, nullptr, 0);
+		context->CSSetShader(radianceDisoccCS, nullptr, 0);
 		ID3D11ShaderResourceView* rdSRV[10] = {
 			diffuseSRV,
-			v2_srvWorkingDepthMips[0].get(),
+			srvWorkingDepthMips[0].get(),
 			normalSRV,
-			v2_texPrevGeo->srv.get(),
+			texPrevGeo->srv.get(),
 			motionSRV,
-			v2_texAccumFrames[inIdx]->srv.get(),
-			v2_texAo[inIdx]->srv.get(),
-			v2_texIlY[inIdx]->srv.get(),
-			v2_texIlCoCg[inIdx]->srv.get(),
-			v2_texGiSpecular[inIdx]->srv.get(),
+			texAccumFrames[inIdx]->srv.get(),
+			texAo[inIdx]->srv.get(),
+			texIlY[inIdx]->srv.get(),
+			texIlCoCg[inIdx]->srv.get(),
+			texGiSpecular[inIdx]->srv.get(),
 		};
 		context->CSSetShaderResources(0, 10, rdSRV);
 		ID3D11UnorderedAccessView* rdUAV[6] = {
-			v2_uavRadiance[0].get(),
-			v2_texAccumFrames[outIdx]->uav.get(),
-			v2_texAo[outIdx]->uav.get(),
-			v2_texIlY[outIdx]->uav.get(),
-			v2_texIlCoCg[outIdx]->uav.get(),
-			v2_texGiSpecular[outIdx]->uav.get(),
+			texRadianceTemp->uav.get(),
+			texAccumFrames[outIdx]->uav.get(),
+			texAo[outIdx]->uav.get(),
+			texIlY[outIdx]->uav.get(),
+			texIlCoCg[outIdx]->uav.get(),
+			texGiSpecular[outIdx]->uav.get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 6, rdUAV, nullptr);
 		context->Dispatch(gx_full, gy_full, 1);
@@ -916,15 +801,17 @@ namespace cs::features
 		context->CSSetShaderResources(0, 10, nullSRV);
 
 		//----------------------------------------------------------------
-		// 4) prefilterRadiance: v2_texRadiance mip0 -> v2_texRadiance mips 1-4 (rewrites mip0 too)
+		// 4) prefilterRadiance: texRadianceTemp -> texRadiance mips 0-4
+		// Reading from a disjoint scratch avoids the SRV+UAV-on-same-subresource
+		// hazard that would happen if we read texRadiance mip0 while writing it.
 		//----------------------------------------------------------------
-		context->CSSetShader(v2_prefilterRadianceCS, nullptr, 0);
-		ID3D11ShaderResourceView* prSRV[1] = { v2_srvRadianceMips[0].get() };
+		context->CSSetShader(prefilterRadianceCS, nullptr, 0);
+		ID3D11ShaderResourceView* prSRV[1] = { texRadianceTemp->srv.get() };
 		context->CSSetShaderResources(0, 1, prSRV);
 		ID3D11UnorderedAccessView* prUAV[5] = {
-			v2_uavRadiance[0].get(), v2_uavRadiance[1].get(),
-			v2_uavRadiance[2].get(), v2_uavRadiance[3].get(),
-			v2_uavRadiance[4].get(),
+			uavRadiance[0].get(), uavRadiance[1].get(),
+			uavRadiance[2].get(), uavRadiance[3].get(),
+			uavRadiance[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, prUAV, nullptr);
 		context->Dispatch(gx_half, gy_half, 1);
@@ -934,25 +821,25 @@ namespace cs::features
 		//----------------------------------------------------------------
 		// 5) gi: working depth + normal + radiance + noise + history -> AO/Y/CoCg + prevGeo
 		//----------------------------------------------------------------
-		context->CSSetShader(v2_giCS, nullptr, 0);
+		context->CSSetShader(giCS, nullptr, 0);
 		ID3D11ShaderResourceView* giSRV[9] = {
-			v2_texWorkingDepth->srv.get(),
+			texWorkingDepth->srv.get(),
 			normalSRV,
-			v2_texRadiance->srv.get(),
-			v2_texNoise ? v2_texNoise->srv.get() : nullptr,
-			v2_texAccumFrames[outIdx]->srv.get(),
-			v2_texIlY[inIdx]->srv.get(),
-			v2_texIlCoCg[inIdx]->srv.get(),
-			v2_texGiSpecular[inIdx]->srv.get(),
-			v2_srvNormalMips[0].get(),
+			texRadiance->srv.get(),
+			texNoise ? texNoise->srv.get() : nullptr,
+			texAccumFrames[outIdx]->srv.get(),
+			texIlY[inIdx]->srv.get(),
+			texIlCoCg[inIdx]->srv.get(),
+			texGiSpecular[inIdx]->srv.get(),
+			srvNormalMips[0].get(),
 		};
 		context->CSSetShaderResources(0, 9, giSRV);
 		ID3D11UnorderedAccessView* giUAV[5] = {
-			v2_texAo[outIdx]->uav.get(),
-			v2_texIlY[outIdx]->uav.get(),
-			v2_texIlCoCg[outIdx]->uav.get(),
-			v2_texGiSpecular[outIdx]->uav.get(),
-			v2_texPrevGeo->uav.get(),
+			texAo[outIdx]->uav.get(),
+			texIlY[outIdx]->uav.get(),
+			texIlCoCg[outIdx]->uav.get(),
+			texGiSpecular[outIdx]->uav.get(),
+			texPrevGeo->uav.get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, giUAV, nullptr);
 		context->Dispatch(gx_full, gy_full, 1);
@@ -963,19 +850,19 @@ namespace cs::features
 		// 6) blur: bilateral over IL Y/CoCg using working depth + normal pyramid
 		//----------------------------------------------------------------
 		if (settings.enableBlur) {
-			context->CSSetShader(v2_blurCS, nullptr, 0);
+			context->CSSetShader(blurCS, nullptr, 0);
 			ID3D11ShaderResourceView* blurSRV[5] = {
-				v2_texWorkingDepth->srv.get(),
-				v2_texNormal->srv.get(),
-				v2_texAccumFrames[outIdx]->srv.get(),
-				v2_texIlY[outIdx]->srv.get(),
-				v2_texIlCoCg[outIdx]->srv.get(),
+				texWorkingDepth->srv.get(),
+				texNormal->srv.get(),
+				texAccumFrames[outIdx]->srv.get(),
+				texIlY[outIdx]->srv.get(),
+				texIlCoCg[outIdx]->srv.get(),
 			};
 			context->CSSetShaderResources(0, 5, blurSRV);
 			ID3D11UnorderedAccessView* blurUAV[3] = {
-				v2_texAccumFrames[inIdx]->uav.get(),
-				v2_texIlY[inIdx]->uav.get(),
-				v2_texIlCoCg[inIdx]->uav.get(),
+				texAccumFrames[inIdx]->uav.get(),
+				texIlY[inIdx]->uav.get(),
+				texIlCoCg[inIdx]->uav.get(),
 			};
 			context->CSSetUnorderedAccessViews(0, 3, blurUAV, nullptr);
 			context->Dispatch(gx_full, gy_full, 1);
@@ -984,32 +871,27 @@ namespace cs::features
 		}
 
 		//----------------------------------------------------------------
-		// 7) upsample: full-res depth + (blurred) AO/IL -> v2_texAo[inIdx]/IlY/IlCoCg at full res
-		// NOTE: Phase 2c.1 ships full-res only (resolutionMode==0). Half/quarter-res upsample
-		// requires permutation defines + dedicated full-res output textures; deferred to 2c.3.
+		// 7) upsample: full-res depth + (blurred) AO/IL -> texAo[inIdx]/IlY/IlCoCg at full res
+		// NOTE: Phase 2c.1 ships full-res only (effectiveResMode forced to 0). Half/quarter-res
+		// upsample requires HALF_RES/QUARTER_RES permutation defines and full-res destination
+		// textures; deferred to 2c.3.
 		//----------------------------------------------------------------
-		if (settings.resolutionMode == 0) {
-			// Full-res path: upsample is a pass-through. Skip dispatch to save bandwidth;
-			// the half-res textures already hold final values at the target resolution.
-		} else {
-			// Half/quarter-res: upsample.cs requires HALF_RES/QUARTER_RES permutation defines and
-			// full-res destination textures. Not wired yet; this becomes part of Phase 2c.3.
-			// The blur output stays at work resolution; the ambient pass injection in 2c.2 will
-			// have to sample with point/linear filtering and accept the resolution mismatch.
-		}
+		// Effective resolution is full-res, so upsample is a pass-through. Skip dispatch.
 
 		// Ping-pong indices for next frame's TEMPORAL_DENOISER path (currently unused but the
 		// state machine is in place so the future flip is a one-line change).
-		std::swap(v2_outputAoIdx, v2_inputAoIdx);
-		std::swap(v2_outputIlIdx, v2_inputIlIdx);
-		std::swap(v2_outputAccumFramesIdx, v2_inputAccumFramesIdx);
+		std::swap(outputAoIdx, inputAoIdx);
+		std::swap(outputIlIdx, inputIlIdx);
+		std::swap(outputAccumFramesIdx, inputAccumFramesIdx);
+
+		// First successful end-to-end fan-out: gates Apply() against reading stale/zero AO.
+		hasValidAoOutput = true;
 	}
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
 	{
-		if (!settings.useV2) return;
-		EnsureV2Noise();
-		CompileV2Shaders();
+		EnsureNoise();
+		CompileShaders();
 	}
 
 	ID3D11ComputeShader* ScreenSpaceGI::GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name)
@@ -1022,177 +904,16 @@ namespace cs::features
 		return a_slot;
 	}
 
-	void ScreenSpaceGI::DrawAO()
-	{
-		static bool entryLogged = false;
-		if (!entryLogged) { L->info("DrawAO entry"); entryLogged = true; }
-		if (!settings.enabled) return;
-		if (cs::env::IsENBLoaded()) {
-			if (!enbWarningLogged) {
-				L->info("ENB detected; SSGI skipped");
-				enbWarningLogged = true;
-			}
-			return;
-		}
-
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) return;
-
-		auto& depth = rendererData->depthStencilTargets[kDST_Main];
-		auto* depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth);
-		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
-		if (!depthSRV || !depthTex) return;
-
-		auto& normalRT = rendererData->renderTargets[kRT_GbufferNormal];
-		auto* normalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(normalRT.srView);
-		if (!normalSRV) return;
-
-		D3D11_TEXTURE2D_DESC dd{};
-		depthTex->GetDesc(&dd);
-		const uint32_t W = dd.Width;
-		const uint32_t H = dd.Height;
-
-		if (!EnsurePyramid(W, H)) return;
-		if (!EnsureAOResources(W, H)) return;
-
-		auto* prefCS = GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\PrefilterDepthsCS.hlsl", prefilterDepthsCS, "PrefilterDepthsCS");
-		auto* aocs   = GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\AOCS.hlsl",              aoCS,            "AOCS");
-		if (!prefCS || !aocs) return;
-
-		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		cs::ComputeScope scope(context);
-
-		if (!firstFireLogged) {
-			L->info("DrawAO first fire");
-			firstFireLogged = true;
-		}
-
-		// Pyramid build uses one-mip SRVs while writing disjoint mip UAVs; AO samples the full chain later.
-		context->CSSetShader(prefCS, nullptr, 0);
-		ID3D11Buffer* pyrCBs[1] = { pyramidCB->CB() };
-		context->CSSetConstantBuffers(0, 1, pyrCBs);
-
-		uint32_t mipW = pyrWidth, mipH = pyrHeight;
-		const ProjectionData projection = GetProjectionData(W, H);
-		static bool projectionSourceLogged = false;
-		if (!projectionSourceLogged) {
-			if (projection.fromCamera) {
-				L->info("Projection source: CameraStateData reference camera, near={:.3f} far={:.1f}",
-					projection.nearClip, projection.farClip);
-			} else {
-				L->warn("Projection source unavailable; using historical SSGI fallback");
-			}
-			projectionSourceLogged = true;
-		}
-
-		for (uint32_t mip = 0; mip < 5; ++mip) {
-			PyramidCB cb{};
-			cb.SrcDim[0] = (mip == 0) ? W : (pyrWidth >> (mip - 1));
-			cb.SrcDim[1] = (mip == 0) ? H : (pyrHeight >> (mip - 1));
-			cb.DstDim[0] = std::max(1u, mipW);
-			cb.DstDim[1] = std::max(1u, mipH);
-			cb.IsLDR     = (mip == 0) ? 1u : 0u;
-			cb.NearC     = projection.nearClip;
-			cb.FarC      = projection.farClip;
-			pyramidCB->Update(cb);
-
-			ID3D11ShaderResourceView* pyrSRVs[2] = { depthSRV, (mip == 0) ? nullptr : depthMipSRVs[mip - 1].get() };
-			context->CSSetShaderResources(0, 2, pyrSRVs);
-
-			ID3D11UnorderedAccessView* uavs[1] = { depthMipUAVs[mip].get() };
-			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-			const uint32_t gx = (cb.DstDim[0] + 7) / 8;
-			const uint32_t gy = (cb.DstDim[1] + 7) / 8;
-			context->Dispatch(gx, gy, 1);
-
-			ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
-			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-			ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
-			context->CSSetShaderResources(0, 2, nullSRVs);
-
-			mipW = std::max(1u, mipW / 2);
-			mipH = std::max(1u, mipH / 2);
-		}
-
-		SSGI_CB sb{};
-		sb.FrameDim[0] = W; sb.FrameDim[1] = H;
-		sb.AODim[0] = aoWidth; sb.AODim[1] = aoHeight;
-		sb.NearClip = projection.nearClip;
-		sb.FarClip  = projection.farClip;
-		sb.SliceCount = static_cast<uint32_t>(settings.sliceCount);
-		sb.StepCount  = static_cast<uint32_t>(settings.stepCount);
-		sb.AORadius   = settings.aoRadius;
-		sb.AOPower    = settings.aoPower;
-		sb.Thickness  = settings.thickness;
-		sb.NDCToViewMul[0] = projection.ndcToViewMul[0];
-		sb.NDCToViewMul[1] = projection.ndcToViewMul[1];
-		sb.NDCToViewAdd[0] = projection.ndcToViewAdd[0];
-		sb.NDCToViewAdd[1] = projection.ndcToViewAdd[1];
-		aoCB->Update(sb);
-
-		context->CSSetShader(aocs, nullptr, 0);
-		ID3D11Buffer* aocs_cb[1] = { aoCB->CB() };
-		context->CSSetConstantBuffers(0, 1, aocs_cb);
-		ID3D11ShaderResourceView* aocs_srvs[2] = { depthPyramid->srv.get(), normalSRV };
-		context->CSSetShaderResources(0, 2, aocs_srvs);
-		ID3D11SamplerState* aocs_samp[1] = { pointClampSampler.get() };
-		context->CSSetSamplers(0, 1, aocs_samp);
-		ID3D11UnorderedAccessView* aocs_uavs[1] = { aoTexture->uav.get() };
-		context->CSSetUnorderedAccessViews(0, 1, aocs_uavs, nullptr);
-		const uint32_t agx = (aoWidth  + 7) / 8;
-		const uint32_t agy = (aoHeight + 7) / 8;
-		context->Dispatch(agx, agy, 1);
-
-		static int aoReadbackCountdown = 200;
-		if (aoReadbackCountdown > 0) {
-			--aoReadbackCountdown;
-			if (aoReadbackCountdown == 0) {
-				auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
-				D3D11_TEXTURE2D_DESC sd{};
-				sd.Width = aoWidth;
-				sd.Height = aoHeight;
-				sd.MipLevels = 1;
-				sd.ArraySize = 1;
-				sd.Format = DXGI_FORMAT_R8_UNORM;
-				sd.SampleDesc.Count = 1;
-				sd.Usage = D3D11_USAGE_STAGING;
-				sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-				winrt::com_ptr<ID3D11Texture2D> staging;
-				if (SUCCEEDED(device->CreateTexture2D(&sd, nullptr, staging.put()))) {
-					context->CopyResource(staging.get(), aoTexture->resource.get());
-					D3D11_MAPPED_SUBRESOURCE mapped{};
-					if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-						const uint8_t* rows = static_cast<const uint8_t*>(mapped.pData);
-						uint32_t minV = 255, maxV = 0;
-						uint64_t sum = 0;
-						uint64_t count = 0;
-						const uint32_t stride = mapped.RowPitch;
-						for (uint32_t y = 0; y < aoHeight; y += 4) {
-							for (uint32_t x = 0; x < aoWidth; x += 4) {
-								uint8_t v = rows[y * stride + x];
-								if (v < minV) minV = v;
-								if (v > maxV) maxV = v;
-								sum += v;
-								++count;
-							}
-						}
-						context->Unmap(staging.get(), 0);
-						const double mean = count ? (double)sum / (double)count : 0.0;
-						L->info("AO probe (sampled 1/16 px): min={} max={} mean={:.1f} (mean/255={:.3f})",
-							minV, maxV, mean, mean / 255.0);
-					}
-				}
-			}
-		}
-	}
-
 	void ScreenSpaceGI::Apply()
 	{
 		static bool entryLogged = false;
 		if (!entryLogged) { L->info("Apply entry"); entryLogged = true; }
-		if (!settings.enabled || !settings.applyToScene) return;
+		if (!settings.enabled || !settings.applyAOToScene) return;
 		if (cs::env::IsENBLoaded()) return;
-		if (!aoTexture) return;
+		// AO output is only valid once resources are allocated and the chain has produced at
+		// least one full frame. Otherwise Apply reads zero-cleared R8 buffers and darkens the
+		// scene to black on the very first frame.
+		if (!resourcesAllocated || !hasValidAoOutput) return;
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) return;
@@ -1209,18 +930,23 @@ namespace cs::features
 		auto* applyShader = GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\ApplyAOCS.hlsl", applyCS, "ApplyAOCS");
 		if (!applyShader) return;
 
+		// DrawSSGI swaps output<->input at end of frame, so the "output" buffer this frame's
+		// Apply reads from is what was written into `inputAoIdx` after the swap.
+		const auto& aoSrc = texAo[inputAoIdx];
+		if (!aoSrc || !aoSrc->srv) return;
+
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
 
 		ApplyCB cb{};
 		cb.ApplyDim[0] = dd.Width;
 		cb.ApplyDim[1] = dd.Height;
-		cb.ApplyIntensity = settings.aoIntensity;
+		cb.ApplyIntensity = settings.applyIntensity;
 		cb.ApplyContrast  = settings.applyContrast;
 		applyCB->Update(cb);
 
 		context->CSSetShader(applyShader, nullptr, 0);
-		ID3D11ShaderResourceView* srvs[2] = { aoTexture->srv.get(), diffuseSRV };
+		ID3D11ShaderResourceView* srvs[2] = { aoSrc->srv.get(), diffuseSRV };
 		context->CSSetShaderResources(0, 2, srvs);
 		ID3D11SamplerState* samp[1] = { linearClampSampler.get() };
 		context->CSSetSamplers(0, 1, samp);
@@ -1255,78 +981,100 @@ namespace cs::features
 		const char* presetNames[] = { "Custom", "Performance", "Quality", "Cinematic" };
 		int presetIdx = std::clamp(settings.preset, 0, 3);
 		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
-			if (presetIdx != static_cast<int>(Preset::kCustom)) {
-				ApplyPreset(static_cast<Preset>(presetIdx));
+			if (presetIdx != static_cast<int>(QualityPreset::kCustom)) {
+				ApplyPreset(static_cast<QualityPreset>(presetIdx));
 			} else {
-				settings.preset = static_cast<int>(Preset::kCustom);
+				settings.preset = static_cast<int>(QualityPreset::kCustom);
 			}
 			dirty = true;
 		}
 
 		auto markCustomIfEdited = [&]() {
 			if (ImGui::IsItemDeactivatedAfterEdit()) {
-				if (!SettingsMatchPreset(static_cast<Preset>(settings.preset)))
-					settings.preset = static_cast<int>(Preset::kCustom);
+				if (!SettingsMatchPreset(static_cast<QualityPreset>(settings.preset)))
+					settings.preset = static_cast<int>(QualityPreset::kCustom);
 				dirty = true;
 			}
 		};
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Quality (manual)");
+		ImGui::TextDisabled("Resolution");
+		{
+			const char* resModeNames[] = { "Full", "Half (2c.3)", "Quarter (2c.3)" };
+			int rm = std::clamp(settings.resolutionMode, 0, 2);
+			if (ImGui::Combo("Working resolution", &rm, resModeNames, IM_ARRAYSIZE(resModeNames))) {
+				settings.resolutionMode = rm;
+				resourcesAllocated = false;
+				dirty = true;
+			}
+			if (settings.resolutionMode != 0) {
+				ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
+					"Half/Quarter need HALF_RES/QUARTER_RES permutations; forced to Full until Phase 2c.3.");
+			}
+			markCustomIfEdited();
+		}
+
+		ImGui::Separator();
+		ImGui::TextDisabled("XeGTAO core (slice/step/AO)");
 		ImGui::SliderInt("Slice count", &settings.sliceCount, 1, 8);
 		ImGui::SetItemTooltip("XeGTAO direction count; more = smoother AO at higher cost.");
 		markCustomIfEdited();
 		ImGui::SliderInt("Step count", &settings.stepCount, 1, 16);
 		markCustomIfEdited();
-		ImGui::SliderFloat("Radius", &settings.aoRadius, 10.0f, 1024.0f, "%.0f");
+		ImGui::SliderFloat("AO radius (world units)", &settings.aoRadius, 10.0f, 1024.0f, "%.0f");
 		markCustomIfEdited();
-		ImGui::SliderFloat("Power", &settings.aoPower, 0.1f, 6.0f, "%.2f");
+		ImGui::SliderFloat("AO power", &settings.aoPower, 0.1f, 6.0f, "%.2f");
 		markCustomIfEdited();
-		ImGui::SliderFloat("Thickness", &settings.thickness, 1.0f, 256.0f, "%.0f");
+		ImGui::SliderFloat("Thickness (world units)", &settings.thickness, 1.0f, 256.0f, "%.0f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("Min screen radius", &settings.minScreenRadius, 0.0f, 0.1f, "%.3f");
 		markCustomIfEdited();
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Apply pass (writes attenuation into the diffuse light buffer)");
-		dirty |= ImGui::Checkbox("Apply AO to scene", &settings.applyToScene);
-		ImGui::SliderFloat("Intensity", &settings.aoIntensity, 0.0f, 4.0f, "%.2f");
+		ImGui::TextDisabled("Global illumination (SH2-YCoCg)");
+		dirty |= ImGui::Checkbox("Enable GI", &settings.enableGI);
+		ImGui::SliderFloat("GI radius (world units)", &settings.giRadius, 10.0f, 4096.0f, "%.0f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("GI strength", &settings.giStrength, 0.0f, 4.0f, "%.2f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("GI saturation", &settings.giSaturation, 0.0f, 2.0f, "%.2f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("GI distance compensation", &settings.giDistanceCompensation, 0.0f, 4.0f, "%.2f");
+		markCustomIfEdited();
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Temporal denoiser + blur");
+		dirty |= ImGui::Checkbox("Temporal denoiser", &settings.enableTemporalDenoiser);
+		dirty |= ImGui::Checkbox("Bilateral blur", &settings.enableBlur);
+		ImGui::SliderFloat("Blur radius (px)", &settings.blurRadius, 0.0f, 8.0f, "%.2f");
+		markCustomIfEdited();
+		{
+			int maxAccum = static_cast<int>(settings.maxAccumFrames);
+			if (ImGui::SliderInt("Max accumulation frames", &maxAccum, 1, 64)) {
+				settings.maxAccumFrames = static_cast<uint32_t>(std::clamp(maxAccum, 1, 64));
+				dirty = true;
+			}
+		}
+		ImGui::SliderFloat("Depth disocclusion", &settings.depthDisocclusion, 0.0f, 1.0f, "%.2f");
+		markCustomIfEdited();
+		ImGui::SliderFloat("Normal disocclusion", &settings.normalDisocclusion, 0.0f, 1.0f, "%.2f");
+		markCustomIfEdited();
+
+		ImGui::Separator();
+		ImGui::TextDisabled("Apply pass (transitional: blends SSGI AO into kDiffuseBuffer).");
+		ImGui::TextDisabled("Replaced by ambient-pass injection in Phase 2c.2.");
+		dirty |= ImGui::Checkbox("Apply AO to scene", &settings.applyAOToScene);
+		ImGui::SliderFloat("Apply intensity", &settings.applyIntensity, 0.0f, 4.0f, "%.2f");
 		markCustomIfEdited();
 		ImGui::SliderFloat("Apply contrast", &settings.applyContrast, 0.0f, 2.0f, "%.2f");
 		if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Debug");
-		dirty |= ImGui::Checkbox("Show AO mask preview", &settings.showPreview);
-		if (settings.showPreview && aoTexture && aoTexture->srv) {
-			ImGui::SliderFloat("Preview scale", &settings.previewScale, 0.05f, 1.0f, "%.2f");
-			if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true;
-			const float w = static_cast<float>(aoWidth)  * settings.previewScale;
-			const float h = static_cast<float>(aoHeight) * settings.previewScale;
-			ImGui::Image(reinterpret_cast<ImTextureID>(aoTexture->srv.get()), ImVec2(w, h));
-		}
-
-		ImGui::Separator();
-		ImGui::TextDisabled("v2 substrate (XeGTAO + SH2-YCoCg, experimental)");
-		ImGui::TextDisabled("Resources allocate when toggled. Dispatch path lands in Phase 2c.1+");
-		if (ImGui::Checkbox("Use v2 (substrate only, no shaders wired)", &settings.useV2)) {
-			dirty = true;
-		}
-		if (settings.useV2) {
-			const char* resModeNames[] = { "Full", "Half", "Quarter" };
-			int rm = std::clamp(settings.resolutionMode, 0, 2);
-			if (ImGui::Combo("v2 resolution", &rm, resModeNames, IM_ARRAYSIZE(resModeNames))) {
-				settings.resolutionMode = rm;
-				v2_resourcesAllocated = false;
-				dirty = true;
-			}
-			ImGui::Checkbox("v2 enable GI (SH irradiance)", &settings.enableGI);
-			ImGui::SliderFloat("v2 GI radius", &settings.giRadius, 10.0f, 4096.0f, "%.0f");
-			markCustomIfEdited();
-			ImGui::SliderFloat("v2 GI strength", &settings.giStrength, 0.0f, 4.0f, "%.2f");
-			markCustomIfEdited();
-			ImGui::Checkbox("v2 debug: show IL only", &settings.v2DebugShowIL);
-			ImGui::TextDisabled("v2 status: %s", v2_resourcesAllocated ? "resources OK" : "not allocated");
-			ImGui::TextDisabled("v2 shaders: %s", v2_shadersWarmedUp ? "compiled" : "pending");
-		}
+		dirty |= ImGui::Checkbox("Show IL only (visualise SH irradiance)", &settings.debugShowIL);
+		ImGui::TextDisabled("Status: resources=%s, shaders=%s",
+			resourcesAllocated ? "OK" : "not allocated",
+			shadersWarmedUp    ? "compiled" : "pending");
 
 		ImGui::EndDisabled();
 		if (dirty) SaveSettings();

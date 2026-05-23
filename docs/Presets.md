@@ -79,8 +79,14 @@ max_distance = 2000.0
 samples      = 16
 
 [features.screen_space_gi.settings]
-quality_tier = 2
-ray_budget   = 12
+preset       = 2       # 0=Custom, 1=Performance, 2=Quality, 3=Cinematic
+slice_count  = 3       # XeGTAO direction count
+step_count   = 5       # XeGTAO ray-march steps per direction
+gi_strength  = 1.0
+gi_radius    = 256.0
+enable_gi    = true
+apply_ao_to_scene = true
+apply_intensity   = 0.5
 ```
 
 ### Schema rules
