@@ -2,9 +2,12 @@
 
 #include "Buffer.h"
 #include "Feature.h"
+#include "LUTCache.h"
+#include "WeatherProfiles.h"
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -20,6 +23,7 @@ namespace cs::features
 
 		void Load() override;
 		void OnPostPostLoad() override;
+		void OnDataLoaded() override;
 		void DrawSettings() override;
 
 		void RunFrame();
@@ -92,6 +96,11 @@ namespace cs::features
 		};
 
 		Settings settings;
+		imagespace::WeatherProfiles weatherProfiles;
+		imagespace::LUTCache        lutCache;
+		// Smoke-harness override: when set, RunFrame uses ResolveForced(category) instead of Sky.
+		std::optional<imagespace::WeatherCategory> forcedWeatherCategory;
+		std::optional<std::uint32_t>               forcedWeatherFormID;
 
 	private:
 		Imagespace() = default;

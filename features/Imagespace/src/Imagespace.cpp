@@ -2,6 +2,8 @@
 
 #include <DirectXTex.h>
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +23,7 @@
 #include "Sky.h"
 #include "Util.h"
 #include "Weather.h"
+#include "WeatherProfiles.h"
 
 namespace cs::features
 {
@@ -37,7 +40,39 @@ namespace cs::features
 	constexpr const char* kSharpenMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_sharpen";
 	constexpr const char* kDofMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_dof";
 	constexpr const char* kPresetMarker  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_preset";
+	constexpr const char* kWeatherCatMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_category";
+	constexpr const char* kWeatherFormIDMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_formid";
 	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
+
+	namespace
+	{
+		// Copies Imagespace::Settings -> imagespace::ResolveBase (overlayable subset).
+		imagespace::ResolveBase MakeResolveBase(const Imagespace::Settings& a_s)
+		{
+			imagespace::ResolveBase b;
+			b.exposure           = a_s.exposure;
+			b.lutEnable          = a_s.lutEnable;
+			b.lutPath            = a_s.lutPath;
+			b.lutStrength        = a_s.lutStrength;
+			b.bloomEnable        = a_s.bloomEnable;
+			b.bloomThreshold     = a_s.bloomThreshold;
+			b.bloomIntensity     = a_s.bloomIntensity;
+			for (std::size_t i = 0; i < b.bloomMipWeights.size(); ++i)
+				b.bloomMipWeights[i] = a_s.bloomMipWeights[i];
+			b.vignetteEnable     = a_s.vignetteEnable;
+			b.vignetteIntensity  = a_s.vignetteIntensity;
+			b.caEnable           = a_s.caEnable;
+			b.caIntensity        = a_s.caIntensity;
+			b.sunspriteIntensity = a_s.sunspriteIntensity;
+			b.sunspriteSize      = a_s.sunspriteSize;
+			b.lensFlareEnable    = a_s.lensFlareEnable;
+			b.lensFlareIntensity = a_s.lensFlareIntensity;
+			b.lensFlareGhosts    = a_s.lensFlareGhosts;
+			b.dirtEnable         = a_s.dirtEnable;
+			b.dirtIntensity      = a_s.dirtIntensity;
+			return b;
+		}
+	}
 
 	namespace
 	{
@@ -255,6 +290,22 @@ namespace cs::features
 		L->info("Engine sunbeams vfunc-disabled");
 	}
 
+	void Imagespace::OnDataLoaded()
+	{
+		// Engine-integrated smoke mode: honor forcedWeatherFormID by calling Sky::ForceWeather once.
+		if (!forcedWeatherFormID.has_value()) return;
+		auto* sky = RE::Sky::GetSingleton();
+		if (!sky) return;
+		auto* tw = RE::TESForm::GetFormByID<RE::TESWeather>(*forcedWeatherFormID);
+		if (!tw) {
+			L->warn("Forced weather formID 0x{:08X} not found or not a TESWeather at OnDataLoaded", *forcedWeatherFormID);
+			return;
+		}
+		sky->ReleaseWeatherOverride();
+		sky->ForceWeather(tw, true);
+		L->info("Sky::ForceWeather invoked for 0x{:08X}", *forcedWeatherFormID);
+	}
+
 	void Imagespace::LoadSettings()
 	{
 		toml::table table;
@@ -337,6 +388,99 @@ namespace cs::features
 		settings.bokehIntensity = readFloat("bokeh_intensity", settings.bokehIntensity, 0.0f, 1.0f);
 		settings.anamorphRatio  = readFloat("anamorph_ratio", settings.anamorphRatio, 0.25f, 4.0f);
 
+		// Per-weather profiles (Phase 2).
+		weatherProfiles = imagespace::WeatherProfiles{};
+		if (const auto* weatherNode = table["weather"].as_table()) {
+			weatherProfiles.enablePerWeatherProfiles =
+				(*weatherNode)["enable_per_weather_profiles"].value_or(false);
+
+			static constexpr std::array<std::pair<std::string_view, imagespace::WeatherCategory>,
+				static_cast<std::size_t>(imagespace::WeatherCategory::kCount)> kCatTables = { {
+					{ "clear",    imagespace::WeatherCategory::kClear    },
+					{ "overcast", imagespace::WeatherCategory::kOvercast },
+					{ "fog",      imagespace::WeatherCategory::kFog      },
+					{ "rain",     imagespace::WeatherCategory::kRain     },
+					{ "radstorm", imagespace::WeatherCategory::kRadstorm },
+					{ "snow",     imagespace::WeatherCategory::kSnow     },
+					{ "interior", imagespace::WeatherCategory::kInterior },
+					{ "unknown",  imagespace::WeatherCategory::kUnknown  },
+				} };
+
+			for (const auto& [name, cat] : kCatTables) {
+				const auto* sub = (*weatherNode)[name].as_table();
+				if (!sub) continue;
+				auto& ov = weatherProfiles.overlays[static_cast<std::size_t>(cat)];
+				auto readOptF = [&sub](const char* k, float lo, float hi) -> std::optional<float> {
+					if (auto v = (*sub)[k].value<double>()) return std::clamp(static_cast<float>(*v), lo, hi);
+					return std::nullopt;
+				};
+				auto readOptI = [&sub](const char* k, int lo, int hi) -> std::optional<int> {
+					if (auto v = (*sub)[k].value<std::int64_t>()) return static_cast<int>(std::clamp(*v, static_cast<std::int64_t>(lo), static_cast<std::int64_t>(hi)));
+					return std::nullopt;
+				};
+				auto readOptB = [&sub](const char* k) -> std::optional<bool> {
+					if (auto v = (*sub)[k].value<bool>()) return *v;
+					return std::nullopt;
+				};
+				auto readOptS = [&sub](const char* k) -> std::optional<std::string> {
+					if (auto v = (*sub)[k].value<std::string>()) return *v;
+					return std::nullopt;
+				};
+				ov.exposure           = readOptF("exposure",           0.25f, 4.0f);
+				ov.lutEnable          = readOptB("lut_enable");
+				ov.lutPath            = readOptS("lut_path");
+				ov.lutStrength        = readOptF("lut_strength",       0.0f, 1.0f);
+				ov.bloomEnable        = readOptB("bloom_enable");
+				ov.bloomThreshold     = readOptF("bloom_threshold",    0.0f, 2.0f);
+				ov.bloomIntensity     = readOptF("bloom_intensity",    0.0f, 0.3f);
+				if (const auto* w = (*sub)["bloom_mip_weights"].as_array(); w && w->size() == 6) {
+					std::array<float, 6> arr{};
+					bool valid = true;
+					for (std::size_t i = 0; i < 6 && valid; ++i) {
+						if (auto v = (*w)[i].value<double>()) arr[i] = std::clamp(static_cast<float>(*v), 0.0f, 4.0f);
+						else valid = false;
+					}
+					if (valid) ov.bloomMipWeights = arr;
+				}
+				ov.vignetteEnable     = readOptB("vignette_enable");
+				ov.vignetteIntensity  = readOptF("vignette_intensity", 0.0f, 1.0f);
+				ov.caEnable           = readOptB("ca_enable");
+				ov.caIntensity        = readOptF("ca_intensity",       0.0f, 2.0f);
+				ov.sunspriteIntensity = readOptF("sunsprite_intensity", 0.0f, 2.0f);
+				ov.sunspriteSize      = readOptF("sunsprite_size",     0.01f, 0.2f);
+				ov.lensFlareEnable    = readOptB("lens_flare_enable");
+				ov.lensFlareIntensity = readOptF("lens_flare_intensity", 0.0f, 2.0f);
+				ov.lensFlareGhosts    = readOptI("lens_flare_ghosts",  3, 7);
+				ov.dirtEnable         = readOptB("dirt_enable");
+				ov.dirtIntensity      = readOptF("dirt_intensity",     0.0f, 2.0f);
+			}
+
+			if (const auto* ovTbl = (*weatherNode)["overrides"].as_table()) {
+				for (const auto& [key, val] : *ovTbl) {
+					const std::string keyStr(key.str());
+					std::uint32_t formID = 0;
+					const auto* begin = keyStr.c_str();
+					const auto* end   = begin + keyStr.size();
+					int base = 10;
+					if (keyStr.size() > 2 && keyStr[0] == '0' && (keyStr[1] == 'x' || keyStr[1] == 'X')) {
+						begin += 2;
+						base = 16;
+					}
+					auto [ptr, ec] = std::from_chars(begin, end, formID, base);
+					if (ec != std::errc{} || ptr != end) continue;
+					if (auto v = val.value<std::string>()) {
+						if (auto cat = imagespace::ParseCategory(*v)) {
+							weatherProfiles.userOverrides.emplace(formID, *cat);
+						}
+					}
+				}
+			}
+		}
+
+		// Preload all referenced LUTs synchronously (config-apply thread). Render thread only consults
+		// TryGet after this point.
+		lutCache.Preload(imagespace::CollectReferencedLUTs(settings.lutPath, weatherProfiles));
+
 		// Smoke-harness markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, preset_c = 0;
 		const bool opP     = cs::util::ReadMarker(kOpMarker,      op_c);
@@ -348,6 +492,36 @@ namespace cs::features
 		const bool sharpP  = cs::util::ReadMarker(kSharpenMarker, sharp_c);
 		const bool dofP    = cs::util::ReadMarker(kDofMarker,     dof_c);
 		const bool presetP = cs::util::ReadMarker(kPresetMarker,  preset_c);
+
+		// Weather-category marker: single ASCII digit '0'..'7' matching WeatherCategory enum order.
+		// Resolver-only mode: bypasses Sky and forces the chosen category at pct=1.0.
+		forcedWeatherCategory.reset();
+		forcedWeatherFormID.reset();
+		char wcat_c = 0;
+		if (cs::util::ReadMarker(kWeatherCatMarker, wcat_c) && wcat_c >= '0' && wcat_c <= '7') {
+			forcedWeatherCategory = static_cast<imagespace::WeatherCategory>(wcat_c - '0');
+			weatherProfiles.enablePerWeatherProfiles = true;
+			L->info("Forced weather category: {}", imagespace::CategoryName(*forcedWeatherCategory));
+		}
+		// FormID marker is a hex string read separately (engine-integrated mode honored at OnDataLoaded).
+		try {
+			std::ifstream f(kWeatherFormIDMarker);
+			if (f.is_open()) {
+				std::string line; std::getline(f, line);
+				const auto* begin = line.c_str();
+				const auto* end   = begin + line.size();
+				std::uint32_t formID = 0;
+				int parseBase = 10;
+				if (line.size() > 2 && line[0] == '0' && (line[1] == 'x' || line[1] == 'X')) {
+					begin += 2; parseBase = 16;
+				}
+				auto [ptr, ec] = std::from_chars(begin, end, formID, parseBase);
+				if (ec == std::errc{} && ptr == end) {
+					forcedWeatherFormID = formID;
+					L->info("Forced weather formID: 0x{:08X}", formID);
+				}
+			}
+		} catch (...) {}
 
 		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || presetP;
 
@@ -460,6 +634,65 @@ namespace cs::features
 		s.insert_or_assign("coc_limit_factor", static_cast<double>(settings.cocLimitFactor));
 		s.insert_or_assign("bokeh_intensity", static_cast<double>(settings.bokehIntensity));
 		s.insert_or_assign("anamorph_ratio", static_cast<double>(settings.anamorphRatio));
+
+		// Per-weather profiles. Only emit overlay keys that are set (std::optional has a value) so
+		// "fall through to base" semantics are preserved across round-trip.
+		{
+			auto& w = table.insert_or_assign("weather", toml::table{}).first->second.as_table()->ref<toml::table>();
+			w.insert_or_assign("enable_per_weather_profiles", weatherProfiles.enablePerWeatherProfiles);
+
+			static constexpr std::array<std::pair<std::string_view, imagespace::WeatherCategory>,
+				static_cast<std::size_t>(imagespace::WeatherCategory::kCount)> kCatTables = { {
+					{ "clear",    imagespace::WeatherCategory::kClear    },
+					{ "overcast", imagespace::WeatherCategory::kOvercast },
+					{ "fog",      imagespace::WeatherCategory::kFog      },
+					{ "rain",     imagespace::WeatherCategory::kRain     },
+					{ "radstorm", imagespace::WeatherCategory::kRadstorm },
+					{ "snow",     imagespace::WeatherCategory::kSnow     },
+					{ "interior", imagespace::WeatherCategory::kInterior },
+					{ "unknown",  imagespace::WeatherCategory::kUnknown  },
+				} };
+
+			for (const auto& [name, cat] : kCatTables) {
+				const auto& ov = weatherProfiles.overlays[static_cast<std::size_t>(cat)];
+				if (ov.SetKeyCount() == 0) continue;
+				toml::table cat_tbl;
+				if (ov.exposure)           cat_tbl.insert_or_assign("exposure",           static_cast<double>(*ov.exposure));
+				if (ov.lutEnable)          cat_tbl.insert_or_assign("lut_enable",         *ov.lutEnable);
+				if (ov.lutPath)            cat_tbl.insert_or_assign("lut_path",           *ov.lutPath);
+				if (ov.lutStrength)        cat_tbl.insert_or_assign("lut_strength",       static_cast<double>(*ov.lutStrength));
+				if (ov.bloomEnable)        cat_tbl.insert_or_assign("bloom_enable",       *ov.bloomEnable);
+				if (ov.bloomThreshold)     cat_tbl.insert_or_assign("bloom_threshold",    static_cast<double>(*ov.bloomThreshold));
+				if (ov.bloomIntensity)     cat_tbl.insert_or_assign("bloom_intensity",    static_cast<double>(*ov.bloomIntensity));
+				if (ov.bloomMipWeights) {
+					toml::array arr;
+					for (const auto v : *ov.bloomMipWeights) arr.push_back(static_cast<double>(v));
+					cat_tbl.insert_or_assign("bloom_mip_weights", std::move(arr));
+				}
+				if (ov.vignetteEnable)     cat_tbl.insert_or_assign("vignette_enable",    *ov.vignetteEnable);
+				if (ov.vignetteIntensity)  cat_tbl.insert_or_assign("vignette_intensity", static_cast<double>(*ov.vignetteIntensity));
+				if (ov.caEnable)           cat_tbl.insert_or_assign("ca_enable",          *ov.caEnable);
+				if (ov.caIntensity)        cat_tbl.insert_or_assign("ca_intensity",       static_cast<double>(*ov.caIntensity));
+				if (ov.sunspriteIntensity) cat_tbl.insert_or_assign("sunsprite_intensity", static_cast<double>(*ov.sunspriteIntensity));
+				if (ov.sunspriteSize)      cat_tbl.insert_or_assign("sunsprite_size",     static_cast<double>(*ov.sunspriteSize));
+				if (ov.lensFlareEnable)    cat_tbl.insert_or_assign("lens_flare_enable",  *ov.lensFlareEnable);
+				if (ov.lensFlareIntensity) cat_tbl.insert_or_assign("lens_flare_intensity", static_cast<double>(*ov.lensFlareIntensity));
+				if (ov.lensFlareGhosts)    cat_tbl.insert_or_assign("lens_flare_ghosts",  static_cast<std::int64_t>(*ov.lensFlareGhosts));
+				if (ov.dirtEnable)         cat_tbl.insert_or_assign("dirt_enable",        *ov.dirtEnable);
+				if (ov.dirtIntensity)      cat_tbl.insert_or_assign("dirt_intensity",     static_cast<double>(*ov.dirtIntensity));
+				w.insert_or_assign(name, std::move(cat_tbl));
+			}
+
+			if (!weatherProfiles.userOverrides.empty()) {
+				toml::table ov_tbl;
+				for (const auto& [formID, cat] : weatherProfiles.userOverrides) {
+					char hex[12];
+					std::snprintf(hex, sizeof(hex), "0x%08X", formID);
+					ov_tbl.insert_or_assign(hex, std::string(imagespace::CategoryName(cat)));
+				}
+				w.insert_or_assign("overrides", std::move(ov_tbl));
+			}
+		}
 
 		std::ofstream out(kConfigPath);
 		if (out) {
@@ -1123,15 +1356,38 @@ namespace cs::features
 		if (!EnsureCompositeResources(W, H, fbDesc.Format))
 			return;
 
+		// Resolve per-frame settings under the active weather. Render-thread safe (TryGet only).
+		// Smoke-harness path: forcedWeatherCategory bypasses Sky entirely.
+		const auto resolveBase   = MakeResolveBase(settings);
+		const auto resolved      = forcedWeatherCategory.has_value()
+			? imagespace::ResolveForced(resolveBase, lutSRV.get(), weatherProfiles,
+				*forcedWeatherCategory, lutCache)
+			: imagespace::Resolve(resolveBase, lutSRV.get(), weatherProfiles,
+				imagespace::SampleSky(), lutCache);
+
+		static bool weatherActiveLogged = false;
+		if (resolved.weatherProfilesActive && !weatherActiveLogged) {
+			L->info("Per-weather Imagespace active: current={} previous={} pct={:.3f}",
+				imagespace::CategoryName(resolved.currentCategory),
+				imagespace::CategoryName(resolved.previousCategory),
+				resolved.transitionPct);
+			weatherActiveLogged = true;
+		}
+		static bool lutMissLogged = false;
+		if (resolved.lutCacheMiss && !lutMissLogged) {
+			L->warn("Per-weather LUT cache miss; falling back to base LUT for the offending overlay. Hit 'Reload weather profiles' after fixing.");
+			lutMissLogged = true;
+		}
+
 		const bool wantAdaptive = settings.adaptiveExposure;
-		const bool wantBloom    = settings.bloomEnable;
+		const bool wantBloom    = resolved.bloomEnable;
 		// Yield sun additions to ENB unless the user opted into suite-wide stacking via bForceWithENB.
 		const bool enbYield     = cs::env::IsENBLoaded() && !settings.forceWithENB;
 		const bool wantSunsprite = settings.sunspriteEnable && !enbYield;
-		const bool wantLensFlare = settings.lensFlareEnable && !enbYield;
-		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || settings.vignetteEnable
-			|| settings.caEnable || settings.sharpenEnable || (settings.lutEnable && lutSRV)
-			|| wantSunsprite || wantLensFlare || settings.dirtEnable;
+		const bool wantLensFlare = resolved.lensFlareEnable && !enbYield;
+		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || resolved.vignetteEnable
+			|| resolved.caEnable || settings.sharpenEnable || (resolved.lutEnable && resolved.lutSRV)
+			|| wantSunsprite || wantLensFlare || resolved.dirtEnable;
 
 		if (wantAdaptive && !EnsurePyramidResources(W, H))
 			return;
@@ -1251,7 +1507,7 @@ namespace cs::features
 		// === 3. Bloom threshold (kFrameBuffer -> bloomChain[0]) ===
 		if (wantBloom) {
 			BloomThresholdCB bcb{};
-			bcb.Threshold = settings.bloomThreshold;
+			bcb.Threshold = resolved.bloomThreshold;
 			bcb.SoftKnee  = 0.5f;
 			bcb.OutputDimensions[0] = bloomChain[0]->desc.Width;
 			bcb.OutputDimensions[1] = bloomChain[0]->desc.Height;
@@ -1307,7 +1563,7 @@ namespace cs::features
 		if (wantBloom) {
 			float mipWeightSum = 0.0f;
 			for (int k = 0; k < settings.bloomMips - 1; ++k)
-				mipWeightSum += settings.bloomMipWeights[k];
+				mipWeightSum += resolved.bloomMipWeights[k];
 			const float mipWeightScale = (mipWeightSum > 1e-5f) ? (1.0f / mipWeightSum) : 0.0f;
 
 			context->CSSetShader(upCS, nullptr, 0);
@@ -1317,7 +1573,7 @@ namespace cs::features
 				bcb.SrcDimensions[1] = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->desc.Height : bloomScratch[k + 1]->desc.Height;
 				bcb.DstDimensions[0] = bloomChain[k]->desc.Width;
 				bcb.DstDimensions[1] = bloomChain[k]->desc.Height;
-				bcb.MipWeight = settings.bloomMipWeights[k] * mipWeightScale;
+				bcb.MipWeight = resolved.bloomMipWeights[k] * mipWeightScale;
 				bloomCB->Update(bcb);
 
 				ID3D11ShaderResourceView* srcSRV = (k == settings.bloomMips - 2) ? bloomChain[k + 1]->srv.get() : bloomScratch[k + 1]->srv.get();
@@ -1339,20 +1595,20 @@ namespace cs::features
 		// === 6. Composite ===
 		if (wantComposite) {
 			CompositeCB ccb{};
-			const bool wantDirt = settings.dirtEnable && dirtTexture && dirtTexture->srv;
+			const bool wantDirt = resolved.dirtEnable && dirtTexture && dirtTexture->srv;
 			ccb.Operator               = static_cast<uint32_t>(settings.tonemapOperator);
-			ccb.LUTEnable              = (settings.lutEnable && lutSRV) ? 1u : 0u;
+			ccb.LUTEnable              = (resolved.lutEnable && resolved.lutSRV) ? 1u : 0u;
 			ccb.AdaptiveExposureEnable = wantAdaptive ? 1u : 0u;
 			ccb.BloomEnable            = wantBloom ? 1u : 0u;
-			ccb.ExposureManual         = settings.exposure;
-			ccb.LUTStrength            = settings.lutStrength;
+			ccb.ExposureManual         = resolved.exposure;
+			ccb.LUTStrength            = resolved.lutStrength;
 			ccb.ExposureKey            = settings.exposureKey;
-			ccb.BloomIntensity         = settings.bloomIntensity;
-			ccb.VignetteEnable         = settings.vignetteEnable ? 1u : 0u;
-			ccb.CAEnable               = settings.caEnable ? 1u : 0u;
+			ccb.BloomIntensity         = resolved.bloomIntensity;
+			ccb.VignetteEnable         = resolved.vignetteEnable ? 1u : 0u;
+			ccb.CAEnable               = resolved.caEnable ? 1u : 0u;
 			ccb.SharpenEnable          = settings.sharpenEnable ? 1u : 0u;
-			ccb.VignetteIntensity      = settings.vignetteIntensity;
-			ccb.CAIntensity            = settings.caIntensity;
+			ccb.VignetteIntensity      = resolved.vignetteIntensity;
+			ccb.CAIntensity            = resolved.caIntensity;
 			ccb.Sharpness              = settings.sharpness;
 			ccb.ExposureMin            = settings.exposureMin;
 			ccb.ExposureMax            = settings.exposureMax;
@@ -1391,17 +1647,17 @@ namespace cs::features
 				L->info("Sun probe: ws=({:.3f},{:.3f},{:.3f}) uv=({:.3f},{:.3f}) sunsprite={} flare={}",
 					sunWSx, sunWSy, sunWSz, sunUVx, sunUVy, wantSunsprite ? "on" : "off", wantLensFlare ? "on" : "off");
 			}
-			ccb.SunspriteIntensity = settings.sunspriteIntensity;
-			ccb.SunspriteSize      = settings.sunspriteSize;
-			ccb.LensFlareIntensity = settings.lensFlareIntensity;
-			ccb.LensFlareGhosts    = static_cast<uint32_t>(settings.lensFlareGhosts);
+			ccb.SunspriteIntensity = resolved.sunspriteIntensity;
+			ccb.SunspriteSize      = resolved.sunspriteSize;
+			ccb.LensFlareIntensity = resolved.lensFlareIntensity;
+			ccb.LensFlareGhosts    = static_cast<uint32_t>(resolved.lensFlareGhosts);
 			ccb.DirtEnable         = wantDirt ? 1u : 0u;
-			ccb.DirtIntensity      = settings.dirtIntensity;
+			ccb.DirtIntensity      = resolved.dirtIntensity;
 			compositeCB->Update(ccb);
 
 			ID3D11ShaderResourceView* srvs[5] = {
 				fbSRV,
-				ccb.LUTEnable ? lutSRV.get() : nullptr,
+				ccb.LUTEnable ? resolved.lutSRV : nullptr,
 				wantBloom ? bloomScratch[0]->srv.get() : nullptr,
 				wantAdaptive ? expoPingPong[expoFrameIdx]->srv.get() : nullptr,
 				wantDirt ? dirtTexture->srv.get() : nullptr
@@ -1652,6 +1908,94 @@ namespace cs::features
 		ImGui::SliderFloat("LUT strength", &settings.lutStrength, 0.0f, 1.0f, "%.2f");
 		commitDirty();
 		ImGui::EndDisabled();
+
+		// === Per-weather profiles ===
+		ImGui::Separator();
+		if (ImGui::CollapsingHeader("Per-weather profiles")) {
+			dirty |= ImGui::Checkbox("Enable per-weather profiles", &weatherProfiles.enablePerWeatherProfiles);
+			ImGui::SetItemTooltip("Layers per-category overlays over base settings, blended across the engine's currentWeather/lastWeather transition.");
+
+			// Live status block.
+			const auto sample = imagespace::SampleSky();
+			const auto curCat  = sample.current  ? imagespace::Classify(sample.current,  weatherProfiles.userOverrides) : imagespace::WeatherCategory::kUnknown;
+			const auto prevCat = sample.previous ? imagespace::Classify(sample.previous, weatherProfiles.userOverrides) : imagespace::WeatherCategory::kUnknown;
+			const std::uint32_t curID  = sample.current  ? sample.current->GetFormID()  : 0u;
+			const std::uint32_t prevID = sample.previous ? sample.previous->GetFormID() : 0u;
+			ImGui::Text("Current:  %s (0x%08X)", std::string(imagespace::CategoryName(curCat)).c_str(),  curID);
+			ImGui::Text("Previous: %s (0x%08X)", std::string(imagespace::CategoryName(prevCat)).c_str(), prevID);
+			ImGui::Text("Pct: %.3f  Mode: %s", sample.transitionPct, sample.modeIsFull ? "Full" : "Partial/Interior");
+
+			ImGui::Separator();
+			static constexpr std::array<std::pair<const char*, imagespace::WeatherCategory>,
+				static_cast<std::size_t>(imagespace::WeatherCategory::kCount)> kCats = { {
+					{ "clear",    imagespace::WeatherCategory::kClear    },
+					{ "overcast", imagespace::WeatherCategory::kOvercast },
+					{ "fog",      imagespace::WeatherCategory::kFog      },
+					{ "rain",     imagespace::WeatherCategory::kRain     },
+					{ "radstorm", imagespace::WeatherCategory::kRadstorm },
+					{ "snow",     imagespace::WeatherCategory::kSnow     },
+					{ "interior", imagespace::WeatherCategory::kInterior },
+					{ "unknown",  imagespace::WeatherCategory::kUnknown  },
+				} };
+			for (const auto& [name, cat] : kCats) {
+				auto& ov = weatherProfiles.overlays[static_cast<std::size_t>(cat)];
+				const auto setCount = ov.SetKeyCount();
+				ImGui::PushID(name);
+				const bool isCurrent = (cat == curCat);
+				if (isCurrent) ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1.0f), "%s [active]", name);
+				else if (setCount > 0) ImGui::TextColored(ImVec4(0.7f, 0.9f, 1.0f, 1.0f), "%s", name);
+				else                   ImGui::TextDisabled("%s", name);
+				ImGui::SameLine();
+				ImGui::Text("(%zu keys set)", setCount);
+				ImGui::SameLine();
+				char copyLabel[64];
+				std::snprintf(copyLabel, sizeof(copyLabel), "Copy current sliders##%s", name);
+				if (ImGui::Button(copyLabel)) {
+					ov.exposure           = settings.exposure;
+					ov.lutEnable          = settings.lutEnable;
+					ov.lutPath            = settings.lutPath;
+					ov.lutStrength        = settings.lutStrength;
+					ov.bloomEnable        = settings.bloomEnable;
+					ov.bloomThreshold     = settings.bloomThreshold;
+					ov.bloomIntensity     = settings.bloomIntensity;
+					std::array<float, 6> w{};
+					for (std::size_t i = 0; i < 6; ++i) w[i] = settings.bloomMipWeights[i];
+					ov.bloomMipWeights    = w;
+					ov.vignetteEnable     = settings.vignetteEnable;
+					ov.vignetteIntensity  = settings.vignetteIntensity;
+					ov.caEnable           = settings.caEnable;
+					ov.caIntensity        = settings.caIntensity;
+					ov.sunspriteIntensity = settings.sunspriteIntensity;
+					ov.sunspriteSize      = settings.sunspriteSize;
+					ov.lensFlareEnable    = settings.lensFlareEnable;
+					ov.lensFlareIntensity = settings.lensFlareIntensity;
+					ov.lensFlareGhosts    = settings.lensFlareGhosts;
+					ov.dirtEnable         = settings.dirtEnable;
+					ov.dirtIntensity      = settings.dirtIntensity;
+					lutCache.Preload({ settings.lutPath });
+					dirty = true;
+				}
+				ImGui::SameLine();
+				char resetLabel[64];
+				std::snprintf(resetLabel, sizeof(resetLabel), "Reset##%s", name);
+				if (ImGui::Button(resetLabel)) {
+					ov.Clear();
+					dirty = true;
+				}
+				ImGui::PopID();
+			}
+
+			ImGui::Separator();
+			if (ImGui::Button("Reload weather profiles")) {
+				if (dirty) {
+					SaveSettings();
+					dirty = false;
+				}
+				lutCache.Clear();
+				LoadSettings();
+			}
+			ImGui::SetItemTooltip("Flushes pending edits to disk, then reparses [weather] and refreshes the LUT cache.");
+		}
 
 		if (dirty) SaveSettings();
 	}

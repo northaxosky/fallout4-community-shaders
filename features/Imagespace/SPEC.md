@@ -22,10 +22,64 @@ Post-upscale compute stack for tone mapping, LUT grading, adaptive exposure, blo
 - Bokeh DOF keeps near and far half-res blur buffers separate; composite applies far blur over sharp, then near blur on top.
 - Constant buffers must stay 16-byte aligned.
 
+## Per-weather profiles
+
+Layers per-category overlays over base settings, blended across the engine's `currentWeather`/`lastWeather` transition.
+
+### Schema (TOML)
+
+```toml
+[weather]
+enable_per_weather_profiles = true
+
+[weather.clear]
+exposure = 1.0
+bloom_intensity = 0.55
+
+[weather.rain]
+exposure = 0.85
+bloom_intensity = 0.75
+lut_path = "rain_cool"
+lut_enable = true
+ca_intensity = 0.6
+
+[weather.overrides]
+"0x001E5E60" = "overcast"   # form ID -> category, applied before vanilla lookup
+```
+
+Categories: `clear`, `overcast`, `fog`, `rain`, `radstorm`, `snow`, `interior`, `unknown`.
+
+### Overlayable keys
+
+Each `[weather.<category>]` table may set any subset of: `exposure`, `lut_enable`, `lut_path`, `lut_strength`, `bloom_enable`, `bloom_threshold`, `bloom_intensity`, `bloom_mip_weights`, `vignette_enable`, `vignette_intensity`, `ca_enable`, `ca_intensity`, `sunsprite_intensity`, `sunsprite_size`, `lens_flare_enable`, `lens_flare_intensity`, `lens_flare_ghosts`, `dirt_enable`, `dirt_intensity`. Unset keys fall through to `[settings]`.
+
+NOT overlayable: `sunsprite_enable` (engine sunbeams vfunc hook reads the persisted `settings.sunspriteEnable` directly; a frame-overlaid value would desync the hook), all `dof_*`/`aperture`/`focus_*` keys (also hook-gated), and all global keys (`enabled`, `preset`, `force_with_enb`, `tonemap_operator`, `adaptive_exposure*`, `exposure_key/min/max`, `bloom_mips`, `sharpen_*`).
+
+### Blend math
+
+Resolver builds two endpoints (`prev = base + overlay[prevCat]`, `cur = base + overlay[curCat]`), then linearly lerps numeric keys across `currentWeatherPct`. Booleans and integers snap at `pct >= 0.5`. LUT paths swap at `pct >= 0.5` via the LUT cache (no per-frame DDS load).
+
+### LUT cache
+
+`LoadSettings` and "Reload weather profiles" call `LUTCache::Preload` for every referenced `lut_path`. The render-thread `Resolve` only consults `LUTCache::TryGet` (no synchronous I/O). On a cache miss, the resolver falls back to the base LUT SRV and surfaces a one-shot warning.
+
+### Sampling and threading
+
+`SampleSky` reads `Sky::currentWeather/lastWeather/currentWeatherPct/mode` on the render thread. Pointer reads are atomic on x64; a one-frame torn read of `currentWeatherPct` is clamped to `[0, 1]`. `mode != kFull` (interior, sky-dome-only) falls back to base.
+
+### Classifier
+
+User overrides (`[weather.overrides]`) take precedence, then a binary search over the 52-entry vanilla weather table seeded from `Fallout4RE/exports/cs-weather-state-machine.json`, then a fallback that reads `TESWeather::weatherData[kFlags]` (kSnow -> snow, kRainy -> rain, kCloudy -> overcast, else clear). FormID overrides are load-order-fragile and should be authored against the leveled set in use.
+
 ## Smoke gates
 
 - `scripts/smoke-imagespace-presets-sweep.sh`
 - `scripts/smoke-imagespace-sweep.sh`
 - `scripts/smoke-imagespace-dof-sweep.sh`
+- `scripts/smoke-imagespace-weather.sh` (resolver-only by default; set `SMOKE_WEATHER_ENGINE_MODE=1` with an exterior save to also exercise `Sky::ForceWeather`)
 
 Smoke markers use `.imagespace_force_*` files next to the INI and are read during `LoadSettings()`.
+The weather harness uses `.imagespace_force_weather_category` (single digit '0'-'7' matching the
+`WeatherCategory` enum order) for resolver-only mode and `.imagespace_force_weather_formid` (hex
+string) for engine-integrated mode.
+
