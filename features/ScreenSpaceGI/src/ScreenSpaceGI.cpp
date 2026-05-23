@@ -37,6 +37,7 @@ namespace cs::features
 
 	constexpr uint32_t kRT_GbufferNormal = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
 	constexpr uint32_t kRT_DiffuseBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
+	constexpr uint32_t kRT_MotionVectors = static_cast<uint32_t>(cs::engine::RenderTarget::kMotionVectors);
 	constexpr uint32_t kDST_Main         = static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain);
 
 	struct SSGI_CB
@@ -112,8 +113,9 @@ namespace cs::features
 		float    DistanceNormalisation;     // c12.y
 		float    _Pad2[2];                  // c12.zw
 		float    CameraData[4];             // c13: matches upstream SharedData::CameraData (1/W, 1/H, -near/(far-near), -far*near/(far-near))
+		float    CameraViewInverse[16];     // c14-c17: row-major float4x4, current frame view inverse
 	};
-	static_assert(sizeof(SSGIv2CB) == 224, "SSGIv2CB layout must match HLSL cbuffer");
+	static_assert(sizeof(SSGIv2CB) == 288, "SSGIv2CB layout must match HLSL cbuffer");
 	static_assert(sizeof(SSGIv2CB) % 16 == 0);
 
 	struct PresetEntry
@@ -734,6 +736,17 @@ namespace cs::features
 		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
 		if (!depthSRV || !depthTex) return;
 
+		auto& normalRT = rendererData->renderTargets[kRT_GbufferNormal];
+		auto* normalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(normalRT.srView);
+
+		auto& diffuseRT = rendererData->renderTargets[kRT_DiffuseBuffer];
+		auto* diffuseSRV = reinterpret_cast<ID3D11ShaderResourceView*>(diffuseRT.srView);
+
+		auto& motionRT = rendererData->renderTargets[kRT_MotionVectors];
+		auto* motionSRV = reinterpret_cast<ID3D11ShaderResourceView*>(motionRT.srView);
+
+		if (!normalSRV || !diffuseSRV) return;
+
 		D3D11_TEXTURE2D_DESC dd{};
 		depthTex->GetDesc(&dd);
 		const uint32_t W = dd.Width;
@@ -743,15 +756,19 @@ namespace cs::features
 		CompileV2Shaders();
 		EnsureV2Noise();
 
-		// Phase 2c.1 milestone 1: prefilterDepths-only. Other shaders chain in once they land.
-		if (!v2_prefilterDepthsCS) return;
+		// Phase 2c.1 baseline: all 7 v2 compute shaders are required to fan out cleanly.
+		// If any failed to compile, bail rather than running a partial chain.
+		if (!v2_prefilterDepthsCS  || !v2_prefilterNormalCS || !v2_radianceDisoccCS ||
+		    !v2_prefilterRadianceCS|| !v2_giCS              || !v2_blurCS           ||
+		    !v2_upsampleCS)
+			return;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
 
 		static bool firstFire = false;
 		if (!firstFire) {
-			L->info("DrawSSGIv2 first fire (prefilterDepths + prefilterNormal)");
+			L->info("DrawSSGIv2 first fire (full v2 chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample)");
 			firstFire = true;
 		}
 
@@ -762,8 +779,14 @@ namespace cs::features
 		const uint32_t workH = std::max(1u, H / divisor);
 
 		SSGIv2CB cb{};
-		// Identity for now; PrevInvViewMat is used only by radianceDisocc/gi (not by prefilterDepths).
-		for (int i = 0; i < 16; ++i) cb.PrevInvViewMat[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+		// Identity for now; PrevInvViewMat + CameraViewInverse are read by gi.cs (CameraViewInverse for
+		// world-space SH evaluation) and by radianceDisocc.cs (PrevInvViewMat for temporal reproject -
+		// reproject path disabled in our reduced FO4 build). Identity here means SHs rotate with the
+		// camera; future iteration captures BSGraphics::State::cameraState view matrix per frame.
+		for (int i = 0; i < 16; ++i) {
+			cb.PrevInvViewMat[i]    = (i % 5 == 0) ? 1.0f : 0.0f;
+			cb.CameraViewInverse[i] = (i % 5 == 0) ? 1.0f : 0.0f;
+		}
 		cb.NDCToViewMul[0] = projection.ndcToViewMul[0];
 		cb.NDCToViewMul[1] = projection.ndcToViewMul[1];
 		cb.NDCToViewAdd[0] = projection.ndcToViewAdd[0];
@@ -813,50 +836,173 @@ namespace cs::features
 
 		v2_ssgiCB->Update(cb);
 
-		// prefilterDepths: single dispatch writing all 5 mips via groupshared scratch.
-		context->CSSetShader(v2_prefilterDepthsCS, nullptr, 0);
 		ID3D11Buffer* cbs[1] = { v2_ssgiCB->CB() };
-		context->CSSetConstantBuffers(0, 1, cbs);
-		ID3D11ShaderResourceView* srvs[1] = { depthSRV };
-		context->CSSetShaderResources(0, 1, srvs);
 		ID3D11SamplerState* samps[2] = { pointClampSampler.get(), linearClampSampler.get() };
+		context->CSSetConstantBuffers(0, 1, cbs);
 		context->CSSetSamplers(0, 2, samps);
-		ID3D11UnorderedAccessView* uavs[5] = {
-			v2_uavWorkingDepth[0].get(),
-			v2_uavWorkingDepth[1].get(),
-			v2_uavWorkingDepth[2].get(),
-			v2_uavWorkingDepth[3].get(),
+
+		// Helper macros for binding fan-out cleanup between dispatches.
+		ID3D11ShaderResourceView*  nullSRV[10] = {};
+		ID3D11UnorderedAccessView* nullUAV[6]  = {};
+
+		// Each thread emits a 2x2 quad to mip 0, so work covers workW/2 x workH/2 in 8x8 groups.
+		const uint32_t gx_half = (((workW + 1u) / 2u) + 7u) / 8u;
+		const uint32_t gy_half = (((workH + 1u) / 2u) + 7u) / 8u;
+		// Full per-pixel dispatch (gi/blur/upsample) covers workDim in 8x8 groups.
+		const uint32_t gx_full = (workW + 7u) / 8u;
+		const uint32_t gy_full = (workH + 7u) / 8u;
+
+		//----------------------------------------------------------------
+		// 1) prefilterDepths: depth -> v2_texWorkingDepth mips 0-4
+		//----------------------------------------------------------------
+		context->CSSetShader(v2_prefilterDepthsCS, nullptr, 0);
+		ID3D11ShaderResourceView* pdSRV[1] = { depthSRV };
+		context->CSSetShaderResources(0, 1, pdSRV);
+		ID3D11UnorderedAccessView* pdUAV[5] = {
+			v2_uavWorkingDepth[0].get(), v2_uavWorkingDepth[1].get(),
+			v2_uavWorkingDepth[2].get(), v2_uavWorkingDepth[3].get(),
 			v2_uavWorkingDepth[4].get(),
 		};
-		context->CSSetUnorderedAccessViews(0, 5, uavs, nullptr);
+		context->CSSetUnorderedAccessViews(0, 5, pdUAV, nullptr);
+		context->Dispatch(gx_half, gy_half, 1);
+		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
-		// Each thread emits 2x2 pixels into mip 0, so dispatch covers workDim / 2 rounded up to 8x8 groups.
-		const uint32_t gx = (((workW + 1u) / 2u) + 7u) / 8u;
-		const uint32_t gy = (((workH + 1u) / 2u) + 7u) / 8u;
-		context->Dispatch(gx, gy, 1);
+		//----------------------------------------------------------------
+		// 2) prefilterNormal: kGbufferNormal -> v2_texNormal mips 0-4
+		//----------------------------------------------------------------
+		context->CSSetShader(v2_prefilterNormalCS, nullptr, 0);
+		ID3D11ShaderResourceView* pnSRV[1] = { normalSRV };
+		context->CSSetShaderResources(0, 1, pnSRV);
+		ID3D11UnorderedAccessView* pnUAV[5] = {
+			v2_uavNormal[0].get(), v2_uavNormal[1].get(),
+			v2_uavNormal[2].get(), v2_uavNormal[3].get(),
+			v2_uavNormal[4].get(),
+		};
+		context->CSSetUnorderedAccessViews(0, 5, pnUAV, nullptr);
+		context->Dispatch(gx_half, gy_half, 1);
+		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
-		// prefilterNormal: reuse the SSGICB binding, swap SRV to kGbufferNormal, swap UAVs to the normal pyramid.
-		if (v2_prefilterNormalCS) {
-			auto& normalRT = rendererData->renderTargets[kRT_GbufferNormal];
-			auto* normalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(normalRT.srView);
-			if (normalSRV) {
-				ID3D11UnorderedAccessView* nullUAVs5[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
-				context->CSSetUnorderedAccessViews(0, 5, nullUAVs5, nullptr);
+		//----------------------------------------------------------------
+		// 3) radianceDisocc: kDiffuseBuffer + working depth -> v2_texRadiance mip0 (+ resets)
+		//----------------------------------------------------------------
+		const int outIdx = v2_outputAoIdx;
+		const int inIdx  = v2_inputAoIdx;
 
-				context->CSSetShader(v2_prefilterNormalCS, nullptr, 0);
-				ID3D11ShaderResourceView* nrSRVs[1] = { normalSRV };
-				context->CSSetShaderResources(0, 1, nrSRVs);
-				ID3D11UnorderedAccessView* nrUAVs[5] = {
-					v2_uavNormal[0].get(),
-					v2_uavNormal[1].get(),
-					v2_uavNormal[2].get(),
-					v2_uavNormal[3].get(),
-					v2_uavNormal[4].get(),
-				};
-				context->CSSetUnorderedAccessViews(0, 5, nrUAVs, nullptr);
-				context->Dispatch(gx, gy, 1);
-			}
+		context->CSSetShader(v2_radianceDisoccCS, nullptr, 0);
+		ID3D11ShaderResourceView* rdSRV[10] = {
+			diffuseSRV,
+			v2_srvWorkingDepthMips[0].get(),
+			normalSRV,
+			v2_texPrevGeo->srv.get(),
+			motionSRV,
+			v2_texAccumFrames[inIdx]->srv.get(),
+			v2_texAo[inIdx]->srv.get(),
+			v2_texIlY[inIdx]->srv.get(),
+			v2_texIlCoCg[inIdx]->srv.get(),
+			v2_texGiSpecular[inIdx]->srv.get(),
+		};
+		context->CSSetShaderResources(0, 10, rdSRV);
+		ID3D11UnorderedAccessView* rdUAV[6] = {
+			v2_uavRadiance[0].get(),
+			v2_texAccumFrames[outIdx]->uav.get(),
+			v2_texAo[outIdx]->uav.get(),
+			v2_texIlY[outIdx]->uav.get(),
+			v2_texIlCoCg[outIdx]->uav.get(),
+			v2_texGiSpecular[outIdx]->uav.get(),
+		};
+		context->CSSetUnorderedAccessViews(0, 6, rdUAV, nullptr);
+		context->Dispatch(gx_full, gy_full, 1);
+		context->CSSetUnorderedAccessViews(0, 6, nullUAV, nullptr);
+		context->CSSetShaderResources(0, 10, nullSRV);
+
+		//----------------------------------------------------------------
+		// 4) prefilterRadiance: v2_texRadiance mip0 -> v2_texRadiance mips 1-4 (rewrites mip0 too)
+		//----------------------------------------------------------------
+		context->CSSetShader(v2_prefilterRadianceCS, nullptr, 0);
+		ID3D11ShaderResourceView* prSRV[1] = { v2_srvRadianceMips[0].get() };
+		context->CSSetShaderResources(0, 1, prSRV);
+		ID3D11UnorderedAccessView* prUAV[5] = {
+			v2_uavRadiance[0].get(), v2_uavRadiance[1].get(),
+			v2_uavRadiance[2].get(), v2_uavRadiance[3].get(),
+			v2_uavRadiance[4].get(),
+		};
+		context->CSSetUnorderedAccessViews(0, 5, prUAV, nullptr);
+		context->Dispatch(gx_half, gy_half, 1);
+		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
+		context->CSSetShaderResources(0, 1, nullSRV);
+
+		//----------------------------------------------------------------
+		// 5) gi: working depth + normal + radiance + noise + history -> AO/Y/CoCg + prevGeo
+		//----------------------------------------------------------------
+		context->CSSetShader(v2_giCS, nullptr, 0);
+		ID3D11ShaderResourceView* giSRV[9] = {
+			v2_texWorkingDepth->srv.get(),
+			normalSRV,
+			v2_texRadiance->srv.get(),
+			v2_texNoise ? v2_texNoise->srv.get() : nullptr,
+			v2_texAccumFrames[outIdx]->srv.get(),
+			v2_texIlY[inIdx]->srv.get(),
+			v2_texIlCoCg[inIdx]->srv.get(),
+			v2_texGiSpecular[inIdx]->srv.get(),
+			v2_srvNormalMips[0].get(),
+		};
+		context->CSSetShaderResources(0, 9, giSRV);
+		ID3D11UnorderedAccessView* giUAV[5] = {
+			v2_texAo[outIdx]->uav.get(),
+			v2_texIlY[outIdx]->uav.get(),
+			v2_texIlCoCg[outIdx]->uav.get(),
+			v2_texGiSpecular[outIdx]->uav.get(),
+			v2_texPrevGeo->uav.get(),
+		};
+		context->CSSetUnorderedAccessViews(0, 5, giUAV, nullptr);
+		context->Dispatch(gx_full, gy_full, 1);
+		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
+		context->CSSetShaderResources(0, 9, nullSRV);
+
+		//----------------------------------------------------------------
+		// 6) blur: bilateral over IL Y/CoCg using working depth + normal pyramid
+		//----------------------------------------------------------------
+		if (settings.enableBlur) {
+			context->CSSetShader(v2_blurCS, nullptr, 0);
+			ID3D11ShaderResourceView* blurSRV[5] = {
+				v2_texWorkingDepth->srv.get(),
+				v2_texNormal->srv.get(),
+				v2_texAccumFrames[outIdx]->srv.get(),
+				v2_texIlY[outIdx]->srv.get(),
+				v2_texIlCoCg[outIdx]->srv.get(),
+			};
+			context->CSSetShaderResources(0, 5, blurSRV);
+			ID3D11UnorderedAccessView* blurUAV[3] = {
+				v2_texAccumFrames[inIdx]->uav.get(),
+				v2_texIlY[inIdx]->uav.get(),
+				v2_texIlCoCg[inIdx]->uav.get(),
+			};
+			context->CSSetUnorderedAccessViews(0, 3, blurUAV, nullptr);
+			context->Dispatch(gx_full, gy_full, 1);
+			context->CSSetUnorderedAccessViews(0, 3, nullUAV, nullptr);
+			context->CSSetShaderResources(0, 5, nullSRV);
 		}
+
+		//----------------------------------------------------------------
+		// 7) upsample: full-res depth + (blurred) AO/IL -> v2_texAo[inIdx]/IlY/IlCoCg at full res
+		// NOTE: Phase 2c.1 ships full-res only (resolutionMode==0). Half/quarter-res upsample
+		// requires permutation defines + dedicated full-res output textures; deferred to 2c.3.
+		//----------------------------------------------------------------
+		if (settings.resolutionMode == 0) {
+			// Full-res path: upsample is a pass-through. Skip dispatch to save bandwidth;
+			// the half-res textures already hold final values at the target resolution.
+		} else {
+			// Half/quarter-res: upsample.cs requires HALF_RES/QUARTER_RES permutation defines and
+			// full-res destination textures. Not wired yet; this becomes part of Phase 2c.3.
+			// The blur output stays at work resolution; the ambient pass injection in 2c.2 will
+			// have to sample with point/linear filtering and accept the resolution mismatch.
+		}
+
+		// Ping-pong indices for next frame's TEMPORAL_DENOISER path (currently unused but the
+		// state machine is in place so the future flip is a one-line change).
+		std::swap(v2_outputAoIdx, v2_inputAoIdx);
+		std::swap(v2_outputIlIdx, v2_inputIlIdx);
+		std::swap(v2_outputAccumFramesIdx, v2_inputAccumFramesIdx);
 	}
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)

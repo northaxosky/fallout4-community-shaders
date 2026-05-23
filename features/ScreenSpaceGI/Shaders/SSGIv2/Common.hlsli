@@ -58,6 +58,12 @@ cbuffer SSGICB : register(b0)
 	// (1/W_render, 1/H_render, -near/(far-near), -(far*near)/(far-near)).
 	// Used by ScreenToViewDepth to recover viewspace Z from reversed-Z depth.
 	float4 CameraData;
+
+	// Current frame camera view-inverse. Used by gi.cs to project sample horizon
+	// vectors from view-space into world-space before SH evaluation, so SHs don't
+	// rotate with the camera. Pushed from BSGraphics::State::cameraState every
+	// frame; identity if cameraState unavailable.
+	float4x4 CameraViewInverse;
 };
 
 SamplerState samplerPointClamp  : register(s0);
@@ -73,6 +79,11 @@ namespace Math
 	static const float TAU     = PI * 2.0f;
 	static const float INV_PI  = 1.0f / PI;
 }
+
+// Shared epsilon constants used across gi.cs / radianceDisocc.cs / blur.cs.
+static const float EPSILON_LENGTH_SQ   = 1e-8;
+static const float EPSILON_WEIGHT_SUM  = 1e-5;
+static const float FP_Z = 18.0;
 
 ///////////////////////////////////////////////////////////////////////////////
 // NaN/Inf scrubbers (XeGTAO original)
@@ -125,6 +136,13 @@ float3 ScreenToViewPosition(const float2 screenPos, const float viewspaceDepth)
 	return ret;
 }
 
+// eyeIndex overload kept for ports from upstream stereo-aware shaders; FO4 is
+// mono so eyeIndex is always 0 and we always pick the .xy half of NDCToView*.
+float3 ScreenToViewPosition(const float2 screenPos, const float viewspaceDepth, const uint eyeIndex)
+{
+	return ScreenToViewPosition(screenPos, viewspaceDepth);
+}
+
 // Recover viewspace depth from reversed-Z screen depth. CameraData layout matches
 // upstream SharedData::CameraData; in FO4 we pack it into SSGICB.
 float ScreenToViewDepth(const float screenDepth)
@@ -141,6 +159,51 @@ float3 ViewToWorldPosition(const float3 pos, const float4x4 invView)
 float3 ViewToWorldVector(const float3 vec, const float4x4 invView)
 {
 	return mul((float3x3)invView, vec);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// Stereo / FrameBuffer stubs (FO4 is single-eye / mono)
+//
+// Upstream Skyrim CS expects Stereo:: and FrameBuffer:: helpers from its
+// SharedData/VR system. FO4 has no equivalent (mono only), so we provide
+// trivial pass-through versions that satisfy the upstream call shape.
+
+namespace Stereo
+{
+	uint  GetEyeIndexFromTexCoord(float2 uv) { return 0u; }
+	float2 ConvertFromStereoUV(float2 uv, uint eyeIndex) { return uv; }
+	float2 ConvertToStereoUV  (float2 uv, uint eyeIndex) { return uv; }
+}
+
+namespace FrameBuffer
+{
+	// FO4 is mono; ports from upstream Skyrim CS that index FrameBuffer::CameraViewInverse[eyeIndex]
+	// must be rewritten to use the plain CameraViewInverse SSGICB field on FO4.
+
+	// Project view-space position to screen-space UV. eyeIndex unused on mono.
+	float2 ViewToUV(float3 pos, bool isPosition, uint eyeIndex)
+	{
+		// Invert ScreenToViewPosition: screen = (view.xy / view.z - add) / mul, in [0,1].
+		float2 ndc = (pos.xy / pos.z - NDCToViewAdd) / NDCToViewMul;
+		return ndc;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////////
+// FastMath wrappers - upstream Skyrim CS calls these via FastMath::ACos /
+// FastMath::acosFast4. Provide the namespaced spellings here on top of the
+// free-function FastACos defined further down.
+
+float _FastSqrtImpl(float x);
+float _FastACosImpl(float inX);
+
+namespace FastMath
+{
+	// XeGTAO low-precision ACos (~0.156583x + pi/2) * sqrt(1-x), wrapped to
+	// match the upstream Skyrim CS namespace spelling.
+	float ACos(float x) { return _FastACosImpl(x); }
+	// blur.cs.hlsl calls acosFast4 which is the same approximation in upstream.
+	float acosFast4(float x) { return _FastACosImpl(x); }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -297,27 +360,34 @@ namespace Color
 		float cg = ycocg.z;
 		return float3(y + co - cg, y + cg, y - co - cg);
 	}
+
+	// FO4's deferred lit-colour buffer is already linear HDR (FP16), so no
+	// gamma conversion is needed here. Identity wrapper preserves the upstream
+	// call shape from radianceDisocc.cs.hlsl line 146.
+	float3 RadianceToLinear(float3 c) { return c; }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 // FastMath helpers (XeGTAO subset)
 // Approximate, branchless, hardware-friendly variants used by gi.cs.hlsl.
 
-float FastSqrt(float x)
+float _FastSqrtImpl(float x)
 {
 	return asfloat(0x1fbd1df5 + (asint(x) >> 1));
 }
 
-float FastACos(float inX)
+float _FastACosImpl(float inX)
 {
 	const float PI_F = 3.141593f;
 	const float HALF_PI_F = 1.570796f;
 	float x = abs(inX);
 	float res = -0.156583f * x + HALF_PI_F;
-	res *= FastSqrt(1.0f - x);
+	res *= _FastSqrtImpl(1.0f - x);
 	return (inX >= 0) ? res : PI_F - res;
 }
 
-float FP_Z() { return 18.0; }
+// Free-function aliases retained for shaders that call FastSqrt/FastACos directly.
+float FastSqrt(float x) { return _FastSqrtImpl(x); }
+float FastACos(float inX) { return _FastACosImpl(inX); }
 
 #endif  // SSGI_V2_COMMON
