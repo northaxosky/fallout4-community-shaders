@@ -118,12 +118,13 @@ namespace cs::features
 	};
 
 	static constexpr PresetEntry kQualityPresets[] = {
-		// resolutionMode is forced to 0 until Phase 2c.3 wires HALF_RES/QUARTER_RES permutations
-		// (Common.hlsli's FULLRES_LOAD/READ_DEPTH macros require permutation defines to sample the
-		// full-res scene RTs correctly when the chain runs at sub-resolution).
-		{ "Performance", 0, 2, 4, 0.8f, 0.4f },
-		{ "Quality",     0, 3, 5, 1.0f, 0.5f },
-		{ "Cinematic",   0, 4, 8, 1.2f, 0.6f },
+		// Map upstream Skyrim CS @ bb6460db Low/Standard/Extreme -> Performance/Quality/Cinematic.
+		// Quality and Cinematic share slice/step counts (upstream "Standard" and "Extreme"); only
+		// resolution differs. Performance is upstream "Low" (more slices/steps compensate for the
+		// missing fidelity at quarter-res).
+		{ "Performance", 2, 10, 12, 0.8f, 0.4f },
+		{ "Quality",     1,  4,  8, 1.0f, 0.5f },
+		{ "Cinematic",   0,  4,  8, 1.2f, 0.6f },
 	};
 
 	struct ProjectionData
@@ -422,6 +423,15 @@ namespace cs::features
 				settings.applyContrast  = 2.0f;
 				settings.aoPower        = 3.0f;
 			}
+			// Optional resolutionMode override marker: '0'=Full, '1'=Half, '2'=Quarter.
+			// Smoke harness uses this to validate per-mode dispatch without flipping preset tiers.
+			constexpr const char* kResModeMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_resmode";
+			char resModeChar = 0;
+			if (cs::util::ReadMarker(kResModeMarker, resModeChar)) {
+				if (resModeChar >= '0' && resModeChar <= '2') {
+					settings.resolutionMode = resModeChar - '0';
+				}
+			}
 			L->info("Test mode: apply={} extreme override applied", settings.applyAOToScene);
 		}
 	}
@@ -542,20 +552,23 @@ namespace cs::features
 
 	void ScreenSpaceGI::CompileShaders()
 	{
-		if (shadersWarmedUp) return;
+		// Per-mode compile is lazy in DrawSSGI via GetCSVariant. CompileShaders is now a
+		// device-readiness sentinel: it eagerly warms only the resolutionMode the user has
+		// currently selected so first-DrawSSGI doesn't pay the full 7-shader compile cost.
 		if (!cs::util::GetD3DDevice()) return;
 
-		// Each GetCS call tolerates a missing file: the underlying CompileShader logs a warning
-		// and returns nullptr. Dispatch later checks every slot before fan-out.
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterDepths.cs.hlsl",  prefilterDepthsCS,   "prefilterDepths");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterRadiance.cs.hlsl", prefilterRadianceCS, "prefilterRadiance");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterNormal.cs.hlsl",  prefilterNormalCS,   "prefilterNormal");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\radianceDisocc.cs.hlsl",   radianceDisoccCS,    "radianceDisocc");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\gi.cs.hlsl",               giCS,                "gi");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\blur.cs.hlsl",             blurCS,              "blur");
-		GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\upsample.cs.hlsl",         upsampleCS,          "upsample");
+		const int modeIdx = std::clamp(settings.resolutionMode, 0, 2);
+		if (shadersWarmedForMode[modeIdx]) return;
 
-		shadersWarmedUp = true;
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterDepths.cs.hlsl",  prefilterDepthsCSv,   modeIdx, "prefilterDepths");
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterRadiance.cs.hlsl", prefilterRadianceCSv, modeIdx, "prefilterRadiance");
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\prefilterNormal.cs.hlsl",  prefilterNormalCSv,   modeIdx, "prefilterNormal");
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\radianceDisocc.cs.hlsl",   radianceDisoccCSv,    modeIdx, "radianceDisocc");
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\gi.cs.hlsl",               giCSv,                modeIdx, "gi");
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\blur.cs.hlsl",             blurCSv,              modeIdx, "blur");
+		GetCSVariant(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\SSGIv2\\upsample.cs.hlsl",         upsampleCSv,          modeIdx, "upsample");
+
+		shadersWarmedForMode[modeIdx] = true;
 	}
 
 	bool ScreenSpaceGI::EnsureResources(uint32_t a_w, uint32_t a_h, int a_resolutionMode)
@@ -575,14 +588,17 @@ namespace cs::features
 			return true;
 		}
 
+		// All pyramids + flat textures are allocated at full-res W*H. In HALF/QUARTER modes only
+		// the top-left work-res tile is populated; consumers remap UVs via OUT_FRAME_SCALE /
+		// OUT_FRAME_DIM. Matches upstream `Features/ScreenSpaceGI.cpp @ bb6460db` allocation pattern.
 		auto allocPyramid = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out,
 		                        std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, 5>& uavs,
 		                        std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 5>& srvMips,
 		                        bool withFullChainSRV)
 		{
 			D3D11_TEXTURE2D_DESC td{};
-			td.Width = workW;
-			td.Height = workH;
+			td.Width = a_w;
+			td.Height = a_h;
 			td.MipLevels = 5;
 			td.ArraySize = 1;
 			td.Format = fmt;
@@ -618,11 +634,11 @@ namespace cs::features
 			}
 		};
 
-		auto allocFlat = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out)
+		auto allocFlat = [&](DXGI_FORMAT fmt, std::unique_ptr<ssgi::Texture2D>& out, uint32_t w, uint32_t h)
 		{
 			D3D11_TEXTURE2D_DESC td{};
-			td.Width = workW;
-			td.Height = workH;
+			td.Width = w;
+			td.Height = h;
 			td.MipLevels = 1;
 			td.ArraySize = 1;
 			td.Format = fmt;
@@ -648,15 +664,30 @@ namespace cs::features
 			allocPyramid(DXGI_FORMAT_R16G16B16A16_FLOAT, texRadiance,     uavRadiance,     srvRadianceMips,     true);
 			allocPyramid(DXGI_FORMAT_R16G16_UNORM,       texNormal,       uavNormal,       srvNormalMips,       true);
 
-			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texRadianceTemp);
-			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texPrevGeo);  // viewZ (r) + encoded normal.xy (gb); a unused
+			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texRadianceTemp, a_w, a_h);
+			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texPrevGeo,      a_w, a_h);  // viewZ (r) + encoded normal.xy (gb); a unused
 
 			for (int i = 0; i < 2; ++i) {
-				allocFlat(DXGI_FORMAT_R8_UNORM,           texAccumFrames[i]);
-				allocFlat(DXGI_FORMAT_R8_UNORM,           texAo[i]);
-				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texIlY[i]);
-				allocFlat(DXGI_FORMAT_R16G16_FLOAT,       texIlCoCg[i]);
-				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texGiSpecular[i]);
+				allocFlat(DXGI_FORMAT_R8_UNORM,           texAccumFrames[i], a_w, a_h);
+				allocFlat(DXGI_FORMAT_R8_UNORM,           texAo[i],          a_w, a_h);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texIlY[i],         a_w, a_h);
+				allocFlat(DXGI_FORMAT_R16G16_FLOAT,       texIlCoCg[i],      a_w, a_h);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texGiSpecular[i],  a_w, a_h);
+			}
+
+			// Upsample destinations: only allocate when sub-res. Apply/ApplyIL bind these
+			// instead of texAo/texIlY/texIlCoCg in HALF/QUARTER modes. ~168 MB at 4K full-res,
+			// 0 MB at FULL.
+			if (resMode > 0) {
+				allocFlat(DXGI_FORMAT_R8_UNORM,           texAoUpsampled,         a_w, a_h);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texIlYUpsampled,        a_w, a_h);
+				allocFlat(DXGI_FORMAT_R16G16_FLOAT,       texIlCoCgUpsampled,     a_w, a_h);
+				allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, texGiSpecularUpsampled, a_w, a_h);
+			} else {
+				texAoUpsampled.reset();
+				texIlYUpsampled.reset();
+				texIlCoCgUpsampled.reset();
+				texGiSpecularUpsampled.reset();
 			}
 		} catch (const std::exception& e) {
 			L->error("SSGI resource allocation failed: {}", e.what());
@@ -737,9 +768,18 @@ namespace cs::features
 		const uint32_t W = dd.Width;
 		const uint32_t H = dd.Height;
 
-		if (!EnsureResources(W, H, 0)) return;
+		if (!EnsureResources(W, H, settings.resolutionMode)) return;
 		CompileShaders();
 		EnsureNoise();
+
+		const int modeIdx = std::clamp(settings.resolutionMode, 0, 2);
+		auto* prefilterDepthsCS   = prefilterDepthsCSv[modeIdx];
+		auto* prefilterRadianceCS = prefilterRadianceCSv[modeIdx];
+		auto* prefilterNormalCS   = prefilterNormalCSv[modeIdx];
+		auto* radianceDisoccCS    = radianceDisoccCSv[modeIdx];
+		auto* giCS                = giCSv[modeIdx];
+		auto* blurCS              = blurCSv[modeIdx];
+		auto* upsampleCS          = upsampleCSv[modeIdx];
 
 		// All 7 compute shaders are required to fan out cleanly.
 		// If any failed to compile, bail rather than running a partial chain.
@@ -748,22 +788,17 @@ namespace cs::features
 		    !upsampleCS)
 			return;
 
-		// Phase 2c.1: HALF_RES/QUARTER_RES permutations not yet wired (Common.hlsli FULLRES_LOAD
-		// / READ_DEPTH macros require permutation defines to sample full-res scene RTs correctly
-		// when the chain runs at sub-resolution). Force full-res at runtime regardless of UI.
-		const int effectiveResMode = 0;
-
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
 
 		if (!firstFireLogged) {
-			L->info("DrawSSGI first fire (full chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample)");
+			L->info("DrawSSGI first fire (full chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample), resMode={}", modeIdx);
 			firstFireLogged = true;
 		}
 
 		const ProjectionData projection = GetProjectionData(W, H);
 
-		const auto divisor = (effectiveResMode == 0) ? 1u : (effectiveResMode == 1) ? 2u : 4u;
+		const auto divisor = (modeIdx == 0) ? 1u : (modeIdx == 1) ? 2u : 4u;
 		const uint32_t workW = std::max(1u, W / divisor);
 		const uint32_t workH = std::max(1u, H / divisor);
 
@@ -806,10 +841,12 @@ namespace cs::features
 		cb.TexDim[1]       = static_cast<float>(H);
 		cb.RcpTexDim[0]    = 1.0f / static_cast<float>(W);
 		cb.RcpTexDim[1]    = 1.0f / static_cast<float>(H);
-		cb.FrameDim[0]     = static_cast<float>(workW);
-		cb.FrameDim[1]     = static_cast<float>(workH);
-		cb.RcpFrameDim[0]  = 1.0f / static_cast<float>(workW);
-		cb.RcpFrameDim[1]  = 1.0f / static_cast<float>(workH);
+		// FrameDim is full-res in CB: Common.hlsli derives OUT_FRAME_DIM = FrameDim * (1/divisor)
+		// for HALF_RES/QUARTER_RES, then dispatches use OUT_FRAME_DIM (work-res) bounds.
+		cb.FrameDim[0]     = static_cast<float>(W);
+		cb.FrameDim[1]     = static_cast<float>(H);
+		cb.RcpFrameDim[0]  = 1.0f / static_cast<float>(W);
+		cb.RcpFrameDim[1]  = 1.0f / static_cast<float>(H);
 		cb.FrameIndex      = frameIndex++;
 		cb.NumSlices       = static_cast<uint32_t>(settings.sliceCount);
 		cb.NumSteps        = static_cast<uint32_t>(settings.stepCount);
@@ -855,12 +892,20 @@ namespace cs::features
 		ID3D11ShaderResourceView*  nullSRV[10] = {};
 		ID3D11UnorderedAccessView* nullUAV[6]  = {};
 
-		// Each thread emits a 2x2 quad to mip 0, so work covers workW/2 x workH/2 in 8x8 groups.
-		const uint32_t gx_half = (((workW + 1u) / 2u) + 7u) / 8u;
-		const uint32_t gy_half = (((workH + 1u) / 2u) + 7u) / 8u;
-		// Full per-pixel dispatch (gi/blur/upsample) covers workDim in 8x8 groups.
-		const uint32_t gx_full = (workW + 7u) / 8u;
-		const uint32_t gy_full = (workH + 7u) / 8u;
+		// Dispatch sizing:
+		//  - prefilterDepths always runs at full-res (no permutation): emits 2x2 per thread, so
+		//    its grid covers W/2 x H/2 in 8x8 groups.
+		//  - prefilterNormal/Radiance run at work-res (same 2x2 emit pattern).
+		//  - radianceDisocc/gi/blur run at work-res per-pixel in 8x8 groups.
+		//  - upsample runs at full-res per-pixel in 8x8 groups; only dispatched when modeIdx > 0.
+		const uint32_t gx_pd   = (((W     + 1u) / 2u) + 7u) / 8u;
+		const uint32_t gy_pd   = (((H     + 1u) / 2u) + 7u) / 8u;
+		const uint32_t gx_pn   = (((workW + 1u) / 2u) + 7u) / 8u;
+		const uint32_t gy_pn   = (((workH + 1u) / 2u) + 7u) / 8u;
+		const uint32_t gx_work = (workW + 7u) / 8u;
+		const uint32_t gy_work = (workH + 7u) / 8u;
+		const uint32_t gx_up   = (W     + 7u) / 8u;
+		const uint32_t gy_up   = (H     + 7u) / 8u;
 
 		//----------------------------------------------------------------
 		// 1) prefilterDepths: depth -> texWorkingDepth mips 0-4
@@ -874,11 +919,11 @@ namespace cs::features
 			uavWorkingDepth[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, pdUAV, nullptr);
-		context->Dispatch(gx_half, gy_half, 1);
+		context->Dispatch(gx_pd, gy_pd, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
 		//----------------------------------------------------------------
-		// 2) prefilterNormal: kGbufferNormal -> texNormal mips 0-4
+		// 2) prefilterNormal: kGbufferNormal -> texNormal mips 0-4 (work-res top-left tile)
 		//----------------------------------------------------------------
 		context->CSSetShader(prefilterNormalCS, nullptr, 0);
 		ID3D11ShaderResourceView* pnSRV[1] = { normalSRV };
@@ -889,7 +934,7 @@ namespace cs::features
 			uavNormal[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, pnUAV, nullptr);
-		context->Dispatch(gx_half, gy_half, 1);
+		context->Dispatch(gx_pn, gy_pn, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
 		//----------------------------------------------------------------
@@ -921,7 +966,7 @@ namespace cs::features
 			texGiSpecular[outIdx]->uav.get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 6, rdUAV, nullptr);
-		context->Dispatch(gx_full, gy_full, 1);
+		context->Dispatch(gx_work, gy_work, 1);
 		context->CSSetUnorderedAccessViews(0, 6, nullUAV, nullptr);
 		context->CSSetShaderResources(0, 10, nullSRV);
 
@@ -939,7 +984,7 @@ namespace cs::features
 			uavRadiance[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, prUAV, nullptr);
-		context->Dispatch(gx_half, gy_half, 1);
+		context->Dispatch(gx_pn, gy_pn, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 		context->CSSetShaderResources(0, 1, nullSRV);
 
@@ -967,7 +1012,7 @@ namespace cs::features
 			texPrevGeo->uav.get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, giUAV, nullptr);
-		context->Dispatch(gx_full, gy_full, 1);
+		context->Dispatch(gx_work, gy_work, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 		context->CSSetShaderResources(0, 9, nullSRV);
 
@@ -990,18 +1035,47 @@ namespace cs::features
 				texIlCoCg[inIdx]->uav.get(),
 			};
 			context->CSSetUnorderedAccessViews(0, 3, blurUAV, nullptr);
-			context->Dispatch(gx_full, gy_full, 1);
+			context->Dispatch(gx_work, gy_work, 1);
 			context->CSSetUnorderedAccessViews(0, 3, nullUAV, nullptr);
 			context->CSSetShaderResources(0, 5, nullSRV);
 		}
 
+		// "Fresh" IL/AO indices: where the most recent write lives. Blur writes IL to inIdx only;
+		// when blur is enabled, fresh IL is inIdx; otherwise fresh IL is gi's outIdx. Without this
+		// tracking, the post-swap ApplyIL reads gi's un-blurred IL via inputIlIdx (latent bug).
+		// AccumFrames is similarly written by blur to inIdx when TEMPORAL_DENOISER is defined
+		// (currently never), so fresh AccumFrames stays at outIdx today.
+		freshAoIdx          = static_cast<uint32_t>(outIdx);
+		freshIlIdx          = settings.enableBlur ? static_cast<uint32_t>(inIdx) : static_cast<uint32_t>(outIdx);
+		freshAccumFramesIdx = static_cast<uint32_t>(outIdx);
+		freshGiSpecularIdx  = static_cast<uint32_t>(outIdx);
+
 		//----------------------------------------------------------------
-		// 7) upsample: full-res depth + (blurred) AO/IL -> texAo[inIdx]/IlY/IlCoCg at full res
-		// NOTE: Phase 2c.1 ships full-res only (effectiveResMode forced to 0). Half/quarter-res
-		// upsample requires HALF_RES/QUARTER_RES permutation defines and full-res destination
-		// textures; deferred to 2c.3.
+		// 7) upsample: depth + (blurred) AO/IL/GiSpec work-res tile -> upsampled full-res RTs.
+		// Only dispatched when sub-res; in FULL mode the destination textures aren't allocated
+		// and Apply/ApplyIL sample texAo[freshAoIdx] / texIl*[freshIlIdx] directly.
 		//----------------------------------------------------------------
-		// Effective resolution is full-res, so upsample is a pass-through. Skip dispatch.
+		if (modeIdx > 0 && texAoUpsampled && texIlYUpsampled && texIlCoCgUpsampled && texGiSpecularUpsampled) {
+			context->CSSetShader(upsampleCS, nullptr, 0);
+			ID3D11ShaderResourceView* upSRV[5] = {
+				texWorkingDepth->srv.get(),         // full-mip-chain SRV; shader Loads at RES_MIP
+				texAo[freshAoIdx]->srv.get(),
+				texIlY[freshIlIdx]->srv.get(),
+				texIlCoCg[freshIlIdx]->srv.get(),
+				texGiSpecular[freshGiSpecularIdx]->srv.get(),
+			};
+			context->CSSetShaderResources(0, 5, upSRV);
+			ID3D11UnorderedAccessView* upUAV[4] = {
+				texAoUpsampled->uav.get(),
+				texIlYUpsampled->uav.get(),
+				texIlCoCgUpsampled->uav.get(),
+				texGiSpecularUpsampled->uav.get(),
+			};
+			context->CSSetUnorderedAccessViews(0, 4, upUAV, nullptr);
+			context->Dispatch(gx_up, gy_up, 1);
+			context->CSSetUnorderedAccessViews(0, 4, nullUAV, nullptr);
+			context->CSSetShaderResources(0, 5, nullSRV);
+		}
 
 		// Ping-pong indices for next frame's TEMPORAL_DENOISER path (currently unused but the
 		// state machine is in place so the future flip is a one-line change).
@@ -1017,6 +1091,22 @@ namespace cs::features
 	{
 		EnsureNoise();
 		CompileShaders();
+	}
+
+	ID3D11ComputeShader* ScreenSpaceGI::GetCSVariant(const wchar_t* a_path, ID3D11ComputeShader* (&a_slots)[3], int a_modeIdx, const char* a_name)
+	{
+		const int idx = std::clamp(a_modeIdx, 0, 2);
+		if (a_slots[idx]) return a_slots[idx];
+
+		std::vector<std::pair<const char*, const char*>> defines;
+		switch (idx) {
+		case 1: defines.emplace_back("HALF_RES",    "1"); break;
+		case 2: defines.emplace_back("QUARTER_RES", "1"); break;
+		default: break;
+		}
+		a_slots[idx] = reinterpret_cast<ID3D11ComputeShader*>(cs::util::CompileShader(a_path, defines, "cs_5_0"));
+		if (a_slots[idx]) L->info("Compiled {} (mode={})", a_name, idx);
+		return a_slots[idx];
 	}
 
 	ID3D11ComputeShader* ScreenSpaceGI::GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name)
@@ -1055,10 +1145,19 @@ namespace cs::features
 		auto* applyShader = GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\ApplyAOCS.hlsl", applyCS, "ApplyAOCS");
 		if (!applyShader) return;
 
-		// DrawSSGI swaps output<->input at end of frame, so the "output" buffer this frame's
-		// Apply reads from is what was written into `inputAoIdx` after the swap.
-		const auto& aoSrc = texAo[inputAoIdx];
-		if (!aoSrc || !aoSrc->srv) return;
+		// Pick the AO source for this resolutionMode. In FULL mode we read texAo at the freshly-
+		// written index (gi's output). In HALF/QUARTER we read the upsample destination, which
+		// upsample.cs wrote at full-res from the work-res top-left tile of texAo[freshAoIdx].
+		const int currentModeIdx = std::clamp(settings.resolutionMode, 0, 2);
+		ID3D11ShaderResourceView* aoSrcSRV = nullptr;
+		if (currentModeIdx == 0) {
+			const auto& aoSrc = texAo[freshAoIdx];
+			if (!aoSrc || !aoSrc->srv) return;
+			aoSrcSRV = aoSrc->srv.get();
+		} else {
+			if (!texAoUpsampled || !texAoUpsampled->srv) return;
+			aoSrcSRV = texAoUpsampled->srv.get();
+		}
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
@@ -1071,7 +1170,7 @@ namespace cs::features
 		applyCB->Update(cb);
 
 		context->CSSetShader(applyShader, nullptr, 0);
-		ID3D11ShaderResourceView* srvs[2] = { aoSrc->srv.get(), diffuseSRV };
+		ID3D11ShaderResourceView* srvs[2] = { aoSrcSRV, diffuseSRV };
 		context->CSSetShaderResources(0, 2, srvs);
 		ID3D11SamplerState* samp[1] = { linearClampSampler.get() };
 		context->CSSetSamplers(0, 1, samp);
@@ -1117,11 +1216,24 @@ namespace cs::features
 		auto* applyShader = GetCS(L"Data\\F4SE\\Plugins\\ScreenSpaceGI\\ApplyILCS.hlsl", applyILCS, "ApplyILCS");
 		if (!applyShader) return;
 
-		// inputIlIdx points at the buffers most recently written by the SSGI chain (post-swap
-		// in DrawSSGI). Mirrors the Apply() convention for texAo.
-		const auto& ilY    = texIlY[inputIlIdx];
-		const auto& ilCoCg = texIlCoCg[inputIlIdx];
-		if (!ilY || !ilY->srv || !ilCoCg || !ilCoCg->srv) return;
+		// Pick the IL source for this resolutionMode. In FULL mode we read texIlY/CoCg at
+		// freshIlIdx (blur's output when enableBlur, gi's otherwise). In HALF/QUARTER we read
+		// the upsample destinations, which upsample.cs wrote at full-res.
+		const int currentModeIdx = std::clamp(settings.resolutionMode, 0, 2);
+		ID3D11ShaderResourceView* ilYSRV    = nullptr;
+		ID3D11ShaderResourceView* ilCoCgSRV = nullptr;
+		if (currentModeIdx == 0) {
+			const auto& ilY    = texIlY[freshIlIdx];
+			const auto& ilCoCg = texIlCoCg[freshIlIdx];
+			if (!ilY || !ilY->srv || !ilCoCg || !ilCoCg->srv) return;
+			ilYSRV    = ilY->srv.get();
+			ilCoCgSRV = ilCoCg->srv.get();
+		} else {
+			if (!texIlYUpsampled || !texIlYUpsampled->srv) return;
+			if (!texIlCoCgUpsampled || !texIlCoCgUpsampled->srv) return;
+			ilYSRV    = texIlYUpsampled->srv.get();
+			ilCoCgSRV = texIlCoCgUpsampled->srv.get();
+		}
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
@@ -1133,7 +1245,7 @@ namespace cs::features
 		applyILCB->Update(cb);
 
 		context->CSSetShader(applyShader, nullptr, 0);
-		ID3D11ShaderResourceView* srvs[4] = { normalSRV, ilY->srv.get(), ilCoCg->srv.get(), diffuseSRV };
+		ID3D11ShaderResourceView* srvs[4] = { normalSRV, ilYSRV, ilCoCgSRV, diffuseSRV };
 		context->CSSetShaderResources(0, 4, srvs);
 		ID3D11SamplerState* samp[1] = { linearClampSampler.get() };
 		context->CSSetSamplers(0, 1, samp);
@@ -1215,17 +1327,14 @@ namespace cs::features
 		ImGui::Separator();
 		ImGui::TextDisabled("Resolution");
 		{
-			const char* resModeNames[] = { "Full", "Half (2c.3)", "Quarter (2c.3)" };
+			const char* resModeNames[] = { "Full", "Half", "Quarter" };
 			int rm = std::clamp(settings.resolutionMode, 0, 2);
 			if (ImGui::Combo("Working resolution", &rm, resModeNames, IM_ARRAYSIZE(resModeNames))) {
 				settings.resolutionMode = rm;
 				resourcesAllocated = false;
 				dirty = true;
 			}
-			if (settings.resolutionMode != 0) {
-				ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
-					"Half/Quarter need HALF_RES/QUARTER_RES permutations; forced to Full until Phase 2c.3.");
-			}
+			ImGui::TextDisabled("Half = 2x bilateral upsample, Quarter = 4x. Sub-res allocates extra full-res scratch.");
 			markCustomIfEdited();
 		}
 
@@ -1292,7 +1401,7 @@ namespace cs::features
 		dirty |= ImGui::Checkbox("Show IL only (visualise SH irradiance)", &settings.debugShowIL);
 		ImGui::TextDisabled("Status: resources=%s, shaders=%s",
 			resourcesAllocated ? "OK" : "not allocated",
-			shadersWarmedUp    ? "compiled" : "pending");
+			shadersWarmedForMode[std::clamp(settings.resolutionMode, 0, 2)] ? "compiled" : "pending");
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Advanced (restart required)");

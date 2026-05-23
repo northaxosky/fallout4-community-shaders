@@ -86,7 +86,9 @@ namespace cs::features
 			// the SSGI compute chain owns AO via Apply(). When true, vanilla SAO remains active
 			// (smoke-comparison mode). Toggle is restart-required.
 			bool     enableVanillaSSAO      = false;
-			int      resolutionMode         = 0;       // 0=full (forced until 2c.3 wires HALF_RES/QUARTER_RES permutations)
+			// 0=full, 1=half, 2=quarter. Pyramids+flat textures stay full-res allocations; sub-res modes
+			// fill the top-left work-res tile and rely on OUT_FRAME_SCALE/OUT_FRAME_DIM macros to remap UVs.
+			int      resolutionMode         = 0;
 			float    minScreenRadius        = 0.01f;
 			float    giRadius               = 256.0f;
 			float    depthFadeNear          = 4.0e4f;
@@ -129,6 +131,7 @@ namespace cs::features
 		// Compiles the 7 compute shaders. Idempotent.
 		void CompileShaders();
 
+		ID3D11ComputeShader* GetCSVariant(const wchar_t* a_path, ID3D11ComputeShader* (&a_slots)[3], int a_modeIdx, const char* a_name);
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);
 
 		// Shared samplers (created during EnsureResources).
@@ -187,15 +190,29 @@ namespace cs::features
 		std::unique_ptr<ssgi::Texture2D> texIlCoCg[2];
 		std::unique_ptr<ssgi::Texture2D> texGiSpecular[2];
 
+		// Upsample destinations, only allocated when resolutionMode > 0. Full-res W*H scratch that
+		// upsample.cs.hlsl writes; Apply/ApplyIL bind these instead of the work-res top-left of
+		// texAo / texIlY / texIlCoCg / texGiSpecular when sub-res is active.
+		std::unique_ptr<ssgi::Texture2D> texAoUpsampled;
+		std::unique_ptr<ssgi::Texture2D> texIlYUpsampled;
+		std::unique_ptr<ssgi::Texture2D> texIlCoCgUpsampled;
+		std::unique_ptr<ssgi::Texture2D> texGiSpecularUpsampled;
+
 		std::unique_ptr<ssgi::ConstantBuffer> ssgiCB;
 
-		ID3D11ComputeShader* prefilterDepthsCS   = nullptr;
-		ID3D11ComputeShader* prefilterRadianceCS = nullptr;
-		ID3D11ComputeShader* prefilterNormalCS   = nullptr;
-		ID3D11ComputeShader* radianceDisoccCS    = nullptr;
-		ID3D11ComputeShader* giCS                = nullptr;
-		ID3D11ComputeShader* blurCS              = nullptr;
-		ID3D11ComputeShader* upsampleCS          = nullptr;
+		// Per-mode compute-shader cache. Indexed by resolutionMode (0=FULL, 1=HALF, 2=QUARTER).
+		// prefilterDepths/prefilterRadiance have no per-mode permutation (their HLSL doesn't reference
+		// HALF_RES/QUARTER_RES), but we keep a 3-slot array for uniform handling - the same blob is
+		// returned for all 3 modes via GetCSVariant.
+		ID3D11ComputeShader* prefilterDepthsCSv[3]   = { nullptr, nullptr, nullptr };
+		ID3D11ComputeShader* prefilterRadianceCSv[3] = { nullptr, nullptr, nullptr };
+		ID3D11ComputeShader* prefilterNormalCSv[3]   = { nullptr, nullptr, nullptr };
+		ID3D11ComputeShader* radianceDisoccCSv[3]    = { nullptr, nullptr, nullptr };
+		ID3D11ComputeShader* giCSv[3]                = { nullptr, nullptr, nullptr };
+		ID3D11ComputeShader* blurCSv[3]              = { nullptr, nullptr, nullptr };
+		// upsample.cs.hlsl handles all 3 modes inside the shader; we only dispatch it when
+		// resolutionMode > 0, but compile uniformly.
+		ID3D11ComputeShader* upsampleCSv[3]          = { nullptr, nullptr, nullptr };
 
 		// Cached watchdog state.
 		uint32_t lastWidth          = 0;
@@ -208,6 +225,13 @@ namespace cs::features
 		uint32_t inputIlIdx         = 0;
 		uint32_t outputAccumFramesIdx = 0;
 		uint32_t inputAccumFramesIdx  = 0;
+		// "Fresh" indices captured after the last write in DrawSSGI (pre-swap). Apply / ApplyIL read
+		// from these so they always see blur's output when blur is enabled, gi's output otherwise.
+		// Fixes a latent ping-pong bug where ApplyIL was reading gi's un-blurred IL via inputIlIdx.
+		uint32_t freshAoIdx           = 0;
+		uint32_t freshIlIdx           = 0;
+		uint32_t freshAccumFramesIdx  = 0;
+		uint32_t freshGiSpecularIdx   = 0;
 		// Per-frame view-matrix capture for SH frame stabilization and temporal reprojection.
 		// `rawCurrentViewMat` / `rawPreviousViewMat` hold the raw 64-byte `BSGraphics::CameraStateData::
 		// camViewData::viewMat` blocks (stored as transposes of the logical row-major view matrix; see
@@ -217,7 +241,7 @@ namespace cs::features
 		float    rawPreviousViewMat[16] = {};
 		bool     hasRawCurrentViewMat   = false;
 		bool     hasRawPreviousViewMat  = false;
-		bool     shadersWarmedUp    = false;
+		bool     shadersWarmedForMode[3] = { false, false, false };
 		bool     resourcesAllocated = false;
 		bool     hasValidAoOutput   = false;  // gates Apply() until DrawSSGI has produced at least one full chain
 		bool     noiseLoaded        = false;

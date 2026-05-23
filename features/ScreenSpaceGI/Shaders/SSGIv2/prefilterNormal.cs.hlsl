@@ -42,9 +42,10 @@ void main(uint2 dispatchThreadID : SV_DispatchThreadID, uint2 groupThreadID : SV
 	const float2 frameScale = FrameDim * RcpTexDim;
 
 	// MIP 0: gather a 2x2 source quad per thread, write 4 encoded normals.
+	// RCP_OUT_FRAME_DIM (not RcpFrameDim): dispatch covers work-res in HALF/QUARTER, so the rcp must scale to OUT_FRAME_DIM.
 	const uint2 baseCoord = dispatchThreadID;
 	const uint2 pixCoord  = baseCoord * 2;
-	const float2 uv       = (pixCoord + .5) * RcpFrameDim;
+	const float2 uv       = (pixCoord + .5) * RCP_OUT_FRAME_DIM;
 
 	float4 nr0 = srcNormalRoughness.GatherRed(samplerPointClamp,   uv * frameScale);
 	float4 nr1 = srcNormalRoughness.GatherGreen(samplerPointClamp, uv * frameScale);
