@@ -678,11 +678,11 @@ namespace cs::features
 		try {
 			allocPyramid(DXGI_FORMAT_R16_FLOAT,          v2_texWorkingDepth, v2_uavWorkingDepth, v2_srvWorkingDepthMips, true);
 			allocPyramid(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texRadiance,     v2_uavRadiance,     v2_srvRadianceMips,     true);
-			allocPyramid(DXGI_FORMAT_R32_UINT,           v2_texNormal,       v2_uavNormal,       v2_srvNormalMips,       true);
+			allocPyramid(DXGI_FORMAT_R16G16_UNORM,       v2_texNormal,       v2_uavNormal,       v2_srvNormalMips,       true);
 
 			// Flat helpers.
 			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texRadianceTemp);
-			allocFlat(DXGI_FORMAT_R16G16_FLOAT,       v2_texPrevGeo);  // viewZ + encoded normal.xy
+			allocFlat(DXGI_FORMAT_R16G16B16A16_FLOAT, v2_texPrevGeo);  // viewZ (r) + encoded normal.xy (gb); a unused
 
 			for (int i = 0; i < 2; ++i) {
 				allocFlat(DXGI_FORMAT_R8_UNORM,           v2_texAccumFrames[i]);
@@ -751,7 +751,7 @@ namespace cs::features
 
 		static bool firstFire = false;
 		if (!firstFire) {
-			L->info("DrawSSGIv2 first fire (prefilterDepths only)");
+			L->info("DrawSSGIv2 first fire (prefilterDepths + prefilterNormal)");
 			firstFire = true;
 		}
 
@@ -834,6 +834,29 @@ namespace cs::features
 		const uint32_t gx = (((workW + 1u) / 2u) + 7u) / 8u;
 		const uint32_t gy = (((workH + 1u) / 2u) + 7u) / 8u;
 		context->Dispatch(gx, gy, 1);
+
+		// prefilterNormal: reuse the SSGICB binding, swap SRV to kGbufferNormal, swap UAVs to the normal pyramid.
+		if (v2_prefilterNormalCS) {
+			auto& normalRT = rendererData->renderTargets[kRT_GbufferNormal];
+			auto* normalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(normalRT.srView);
+			if (normalSRV) {
+				ID3D11UnorderedAccessView* nullUAVs5[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
+				context->CSSetUnorderedAccessViews(0, 5, nullUAVs5, nullptr);
+
+				context->CSSetShader(v2_prefilterNormalCS, nullptr, 0);
+				ID3D11ShaderResourceView* nrSRVs[1] = { normalSRV };
+				context->CSSetShaderResources(0, 1, nrSRVs);
+				ID3D11UnorderedAccessView* nrUAVs[5] = {
+					v2_uavNormal[0].get(),
+					v2_uavNormal[1].get(),
+					v2_uavNormal[2].get(),
+					v2_uavNormal[3].get(),
+					v2_uavNormal[4].get(),
+				};
+				context->CSSetUnorderedAccessViews(0, 5, nrUAVs, nullptr);
+				context->Dispatch(gx, gy, 1);
+			}
+		}
 	}
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
