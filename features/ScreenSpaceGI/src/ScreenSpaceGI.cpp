@@ -335,14 +335,16 @@ namespace cs::features
 		cs::engine::RegisterPreDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->ClearVanillaSAOTargets();
 		});
-		// Registration order = fire order. Apply (AO darken) runs first; ApplyIL adds the
-		// SH-reconstructed bounce on top so the bounce term is not modulated by AO.
+		// Cross-feature ordering on PostDeferredLightsImpl: Apply (AO darken) at Default with SSS
+		// (both multiplicative); ApplyIL at Late so the additive SH bounce is not modulated by AO
+		// from its own surface. Without explicit priority the relative order across features is
+		// undefined static-initializer order.
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->Apply();
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([]() {
 			ScreenSpaceGI::GetSingleton()->ApplyIL();
-		});
+		}, cs::engine::HookPriority::Late);
 	}
 
 	void ScreenSpaceGI::OnDataLoaded()

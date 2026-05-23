@@ -8,7 +8,7 @@ The Phase 1 AO-only path was removed in this revision; v2 is now the only SSGI i
 
 - `RegisterPostDeferredPrePass()` runs `DrawSSGI()` (7-shader compute fan-out).
 - `RegisterPreDeferredLightsImpl()` runs `ClearVanillaSAOTargets()` when the vanilla SAO disable lever is active: clears `kSSAO`/`kSSAOFinal`/`kSSAOFinalSwap`/`kSSAOFinalSwap2` to white so the deferred ambient/IBL pass sees full-unoccluded SAO state before we contribute the real AO from `Apply()`.
-- `RegisterPostDeferredLightsImpl()` runs `Apply()` (AO darken) and then `ApplyIL()` (IL bounce). Registration order = fire order; bounce must not be modulated by AO from its own surface.
+- `RegisterPostDeferredLightsImpl()` runs `Apply()` (AO darken, `HookPriority::Default`) and `ApplyIL()` (IL bounce, `HookPriority::Late`). Priority slot keeps the additive bounce after every darken-pass consumer (own AO + ScreenSpaceShadows) regardless of registration order.
 
 ## Runtime assets
 

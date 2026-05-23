@@ -2,6 +2,7 @@
 
 #include "Log.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -12,10 +13,18 @@ namespace cs::engine
 {
 	namespace
 	{
-		std::vector<RenderHookCallback>     g_postDeferredPrePass;
-		std::vector<RenderHookCallback>     g_preDeferredLightsImpl;
-		std::vector<RenderHookCallback>     g_postDeferredLightsImpl;
-		std::vector<RenderHookCallback>     g_postDeferredComposite;
+		struct PrioritizedCallback
+		{
+			HookPriority        priority;
+			std::uint64_t       seq;
+			RenderHookCallback  cb;
+		};
+
+		std::uint64_t                       g_nextSeq = 0;
+		std::vector<PrioritizedCallback>    g_postDeferredPrePass;
+		std::vector<PrioritizedCallback>    g_preDeferredLightsImpl;
+		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
+		std::vector<PrioritizedCallback>    g_postDeferredComposite;
 		std::vector<RenderHookCallback>     g_postDynResViewport_Imagespace;
 		std::vector<PostDynResViewportFGCb> g_postDynResViewport_FGCapture;
 		bool g_prePassInstalled            = false;
@@ -23,14 +32,28 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 
+		void InsertPrioritized(std::vector<PrioritizedCallback>& v, RenderHookCallback&& cb, HookPriority p)
+		{
+			v.push_back({ p, g_nextSeq++, std::move(cb) });
+			std::stable_sort(v.begin(), v.end(),
+				[](const PrioritizedCallback& a, const PrioritizedCallback& b) {
+					return static_cast<int>(a.priority) < static_cast<int>(b.priority);
+				});
+		}
+
+		void Dispatch(const std::vector<PrioritizedCallback>& v)
+		{
+			for (auto& entry : v) {
+				entry.cb();
+			}
+		}
+
 		struct DeferredPrePass_Hook
 		{
 			static void thunk()
 			{
 				func();
-				for (auto& cb : g_postDeferredPrePass) {
-					cb();
-				}
+				Dispatch(g_postDeferredPrePass);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -39,13 +62,9 @@ namespace cs::engine
 		{
 			static void thunk()
 			{
-				for (auto& cb : g_preDeferredLightsImpl) {
-					cb();
-				}
+				Dispatch(g_preDeferredLightsImpl);
 				func();
-				for (auto& cb : g_postDeferredLightsImpl) {
-					cb();
-				}
+				Dispatch(g_postDeferredLightsImpl);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -55,9 +74,7 @@ namespace cs::engine
 			static void thunk()
 			{
 				func();
-				for (auto& cb : g_postDeferredComposite) {
-					cb();
-				}
+				Dispatch(g_postDeferredComposite);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
@@ -98,9 +115,9 @@ namespace cs::engine
 		}
 	}
 
-	void RegisterPostDeferredPrePass(RenderHookCallback callback)
+	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
-		g_postDeferredPrePass.push_back(std::move(callback));
+		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
 		if (!g_prePassInstalled) {
 			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
 			g_prePassInstalled = true;
@@ -108,9 +125,9 @@ namespace cs::engine
 		}
 	}
 
-	void RegisterPreDeferredLightsImpl(RenderHookCallback callback)
+	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
-		g_preDeferredLightsImpl.push_back(std::move(callback));
+		InsertPrioritized(g_preDeferredLightsImpl, std::move(callback), priority);
 		if (!g_lightsImplInstalled) {
 			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
 			g_lightsImplInstalled = true;
@@ -118,9 +135,9 @@ namespace cs::engine
 		}
 	}
 
-	void RegisterPostDeferredLightsImpl(RenderHookCallback callback)
+	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
-		g_postDeferredLightsImpl.push_back(std::move(callback));
+		InsertPrioritized(g_postDeferredLightsImpl, std::move(callback), priority);
 		if (!g_lightsImplInstalled) {
 			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
 			g_lightsImplInstalled = true;
@@ -135,9 +152,9 @@ namespace cs::engine
 	//   AE  RVA 0x021F0790  AL id 2318313
 	// NG and AE compile to identical body sizes / instruction counts /
 	// mnemonic hashes, and Address Library v2 issues the same id in both.
-	void RegisterPostDeferredComposite(RenderHookCallback callback)
+	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
-		g_postDeferredComposite.push_back(std::move(callback));
+		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		if (!g_compositeInstalled) {
 			stl::detour_thunk<DeferredComposite_Hook>(REL::ID({ 728427, 2318313, 2318313 }));
 			g_compositeInstalled = true;
