@@ -2,7 +2,7 @@
 
 Port of [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders) to Fallout 4. See [PERMISSIONS.md](PERMISSIONS.md) for the upstream-author permission record.
 
-Press **END** in game to open the settings menu.
+Press **END** in game to open the settings menu. Press **Shift+F11** to toggle the performance overlay.
 
 ## Game compatibility
 
@@ -22,9 +22,9 @@ A single DLL handles all three runtimes via [Address Library](https://www.nexusm
 | Upscaling | DLSS / FSR3 / XeSS with quality modes; replaces engine TAA, dynamic-resolution aware |
 | FrameGeneration | DLSS-G / FSR3-FG / XeSS-FG; D3D11/D3D12 interop |
 | ScreenSpaceShadows | Sony Bend SSS pipeline + sidecar attenuation pass on the diffuse light buffer. Performance / Quality / Cinematic presets, ENB auto-skip |
-| ScreenSpaceGI | GTAO + Spherical-Harmonic indirect-lighting bounce, half/quarter resolution permutations, Performance / Quality / Cinematic presets |
+| ScreenSpaceGI | GTAO + Spherical-Harmonic indirect-lighting bounce, half/quarter resolution permutations, Performance / Quality / Cinematic presets, experimental specular GI |
 | Imagespace | Tonemap (Hable / Reinhard / Lottes), 32^3 LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, sunsprite + lens flare. Per-weather profile blending, Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
-| PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle |
+| PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle. Backend-reported displayed FPS for DLSS-G and XeSS-FG (engine FPS shown alongside) |
 | RenderDoc | One-click frame capture from inside the menu |
 
 ## Developer tools
@@ -33,6 +33,12 @@ A single DLL handles all three runtimes via [Address Library](https://www.nexusm
 |---|---|
 | ShaderCatalog | Runtime D3D shader inventory with SQLite output and `BSShader::SetupTechnique` attribution |
 | ShaderReplacement | Development-only pixel-shader substitution harness for validating reconstructed FO4 shaders |
+
+## Presets
+
+Cross-feature `.toml` preset library at `Data\F4SE\Plugins\FO4CommunityShaders\Presets\<name>.toml`. Five builtins ship with the package (`Default`, `Cinematic-Night`, `Neutral-Realistic`, `Reactor-Inspired`, `Vivid-Daylight`) covering Imagespace, ScreenSpaceShadows, and ScreenSpaceGI in lockstep. Apply from the **Presets** header at the top of the menu; the active preset is restored on next launch. Authoring + scope rules in [docs/Presets.md](docs/Presets.md).
+
+Each feature also exposes a **Reset to defaults** button in its settings page (uniform across the menu via the `RestoreDefaultSettings` virtual).
 
 ## Installation
 
@@ -43,7 +49,7 @@ A single DLL handles all three runtimes via [Address Library](https://www.nexusm
 
 ### ENB coexistence
 
-When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't double-up. Per-feature `force_with_enb` (Imagespace) or feature toggles let you stack specific passes if desired. Streamline-based features (DLSS / DLSS-G / Reflex) skip swap-chain upgrades when ENB is detected, because ENB already owns the swap chain.
+When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't double-up. Each feature exposes a `force_with_enb` setting (or feature-level toggle) so you can stack specific passes on top of ENB. Streamline-based features (DLSS / DLSS-G / Reflex) skip swap-chain upgrades when ENB is detected, because ENB already owns the swap chain.
 
 ### Performance notes
 
@@ -53,7 +59,7 @@ When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't 
 
 ## Known issues
 
-- **DLSS-G UI ghosting.** DLSS-G interpolates the HUD as part of the scene, which produces mild UI ghosting during fast camera motion. FSR3 mode is unaffected. Investigation ongoing.
+- **DLSS-G crosshair / weapon-reticle ghosting.** Bulk HUD ghosting was fixed by hooking `kBufferTypeUIAlpha`, but the dot crosshair and weapon "+" reticle still motion-warp under DLSS-G because they're drawn into `kFrameBuffer` before the HUDless capture. FSR3 and XeSS-FG are unaffected. Investigation ongoing.
 
 ## Requirements
 
