@@ -649,6 +649,7 @@ void FrameGeneration::Reset()
 
 struct WindowSizeChanged
 {
+	// Deliberately empty: swallows the engine's spurious second WindowSizeChanged during init (inherited from FO4Upscaling).
 	static void thunk(RE::BSGraphics::Renderer*, unsigned int)
 	{
 	}
