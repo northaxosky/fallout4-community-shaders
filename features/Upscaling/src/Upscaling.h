@@ -32,6 +32,8 @@ public:
 	void Load() override;
 	void OnDataLoaded() override;
 	void DrawSettings() override;
+	void RestoreDefaultSettings() override;
+	bool HasResettableSettings() const override { return true; }
 	void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 
 	// Patches render pipeline, TAA shaders, dynamic resolution, and other game systems.

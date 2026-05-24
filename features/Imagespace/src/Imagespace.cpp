@@ -1499,18 +1499,17 @@ namespace cs::features
 		}
 	}
 
+	void Imagespace::RestoreDefaultSettings()
+	{
+		settings        = Settings{};
+		weatherProfiles = {};
+		SaveSettings();
+		ApplyLUTState();
+		cs::Menu::ShowToast("Imagespace reset to defaults", 2.5);
+	}
+
 	void Imagespace::DrawSettings()
 	{
-		if (ImGui::Button("Reset to defaults")) {
-			settings        = Settings{};
-			weatherProfiles = {};
-			SaveSettings();
-			ApplyLUTState();
-			cs::Menu::ShowToast("Imagespace reset to defaults", 2.5);
-		}
-		ImGui::SetItemTooltip("Reverts every Imagespace setting (style, tonemap, bloom, DOF, LUT, lens, weather profiles, exposure) to plugin defaults and saves.");
-		ImGui::Separator();
-
 		bool dirty = false;
 		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
 		auto markCustomIfEdited = [&] {

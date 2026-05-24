@@ -1345,18 +1345,17 @@ namespace cs::features
 		}
 	}
 
+	void ScreenSpaceGI::RestoreDefaultSettings()
+	{
+		settings           = Settings{};
+		resourcesAllocated = false;
+		InvalidateGIShaderCache();
+		SaveSettings();
+		cs::Menu::ShowToast("Screen Space GI reset to defaults", 2.5);
+	}
+
 	void ScreenSpaceGI::DrawSettings()
 	{
-		if (ImGui::Button("Reset to defaults")) {
-			settings           = Settings{};
-			resourcesAllocated = false;
-			InvalidateGIShaderCache();
-			SaveSettings();
-			cs::Menu::ShowToast("Screen Space GI reset to defaults", 2.5);
-		}
-		ImGui::SetItemTooltip("Reverts SSGI to plugin defaults (enabled, resolution mode, preset, IL bounce, denoise, debug) and saves.");
-		ImGui::Separator();
-
 		bool dirty = false;
 		const bool enbActive = cs::env::IsENBLoaded();
 		if (enbActive) {

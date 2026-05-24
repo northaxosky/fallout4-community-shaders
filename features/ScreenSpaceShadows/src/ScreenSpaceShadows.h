@@ -18,6 +18,8 @@ namespace cs::features
 
 		void Load() override;
 		void DrawSettings() override;
+		void RestoreDefaultSettings() override;
+		bool HasResettableSettings() const override { return true; }
 
 		bool ParticipatesInPresets() const override { return true; }
 		bool IsInTestMode() const override { return testModeActive; }

@@ -20,6 +20,8 @@ namespace cs::features
 		void Load() override;
 		void DrawSettings() override;
 		void DrawOverlay() override;
+		void RestoreDefaultSettings() override;
+		bool HasResettableSettings() const override { return true; }
 
 		// Axis: overlay verbosity.
 		enum class Preset : int

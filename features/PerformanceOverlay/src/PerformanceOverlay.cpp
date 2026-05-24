@@ -427,16 +427,15 @@ namespace cs::features
 		ImGui::End();
 	}
 
+	void PerformanceOverlay::RestoreDefaultSettings()
+	{
+		settings = Settings{};
+		SaveSettings();
+		cs::Menu::ShowToast("Performance Overlay reset to defaults", 2.5);
+	}
+
 	void PerformanceOverlay::DrawSettings()
 	{
-		if (ImGui::Button("Reset to defaults")) {
-			settings = Settings{};
-			SaveSettings();
-			cs::Menu::ShowToast("Performance Overlay reset to defaults", 2.5);
-		}
-		ImGui::SetItemTooltip("Reverts the overlay to plugin defaults (preset, sections, position, colors) and saves.");
-		ImGui::Separator();
-
 		ImGui::TextDisabled("Shift+F11 toggles the overlay in-game.");
 
 		if (ImGui::Checkbox("Enabled", &settings.enabled))

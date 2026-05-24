@@ -86,16 +86,15 @@ void FrameGeneration::SaveSettings()
 	}
 }
 
+void FrameGeneration::RestoreDefaultSettings()
+{
+	settings = Settings{};
+	SaveSettings();
+	cs::Menu::ShowToast("Frame Generation reset to defaults", 2.5);
+}
+
 void FrameGeneration::DrawSettings()
 {
-	if (ImGui::Button("Reset to defaults")) {
-		settings = Settings{};
-		SaveSettings();
-		cs::Menu::ShowToast("Frame Generation reset to defaults", 2.5);
-	}
-	ImGui::SetItemTooltip("Reverts Frame Generation to plugin defaults (mode, backend, MFG count, in-menu disable) and saves. Backend switch applies on next swap-chain rebuild.");
-	ImGui::Separator();
-
 	const char* activeStr = "Inactive";
 	if (settings.frameGenerationMode) {
 		switch (activeFrameGenType) {

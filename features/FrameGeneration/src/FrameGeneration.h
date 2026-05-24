@@ -23,6 +23,8 @@ public:
 	void Load() override;
 	void OnPostPostLoad() override;
 	void DrawSettings() override;
+	void RestoreDefaultSettings() override;
+	bool HasResettableSettings() const override { return true; }
 
 	struct Settings
 	{

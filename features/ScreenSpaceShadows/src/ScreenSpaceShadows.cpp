@@ -752,16 +752,15 @@ namespace cs::features
 		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
 	}
 
+	void ScreenSpaceShadows::RestoreDefaultSettings()
+	{
+		settings = Settings{};
+		SaveSettings();
+		cs::Menu::ShowToast("Screen Space Shadows reset to defaults", 2.5);
+	}
+
 	void ScreenSpaceShadows::DrawSettings()
 	{
-		if (ImGui::Button("Reset to defaults")) {
-			settings = Settings{};
-			SaveSettings();
-			cs::Menu::ShowToast("Screen Space Shadows reset to defaults", 2.5);
-		}
-		ImGui::SetItemTooltip("Reverts SSS to plugin defaults (enabled, quality preset, sample counts, depth bias) and saves.");
-		ImGui::Separator();
-
 		bool dirty = false;
 
 		// Status panel: ENB takes precedence over our SSS, so flag it and grey out interactive controls.

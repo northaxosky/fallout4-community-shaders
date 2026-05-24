@@ -443,16 +443,15 @@ void Upscaling::SaveSettings()
 	}
 }
 
+void Upscaling::RestoreDefaultSettings()
+{
+	settings = Settings{};
+	SaveSettings();
+	cs::Menu::ShowToast("Upscaling reset to defaults", 2.5);
+}
+
 void Upscaling::DrawSettings()
 {
-	if (ImGui::Button("Reset to defaults")) {
-		settings = Settings{};
-		SaveSettings();
-		cs::Menu::ShowToast("Upscaling reset to defaults", 2.5);
-	}
-	ImGui::SetItemTooltip("Reverts Upscaling to plugin defaults (method preference, quality mode) and saves.");
-	ImGui::Separator();
-
 	const auto activeMethod = GetUpscaleMethod(false);
 	const char* activeStr = activeMethod == UpscaleMethod::kDLSS ? "DLSS"
 		: activeMethod == UpscaleMethod::kFSR ? "FSR3"

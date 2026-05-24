@@ -21,6 +21,8 @@ namespace cs::features
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
+		void RestoreDefaultSettings() override;
+		bool HasResettableSettings() const override { return true; }
 
 		bool ParticipatesInPresets() const override { return true; }
 		bool IsInTestMode() const override { return testModeActive; }
