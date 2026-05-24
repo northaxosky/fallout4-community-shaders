@@ -1,15 +1,17 @@
 // SSGI v2 gi.cs - port of upstream Skyrim CS @ bb6460db.
 //
 // XeGTAO + Visibility Bitmask + SH2-YCoCg main compute. FO4 reduction:
-//   - GI define always on, GI_SPECULAR optional (no TEMPORAL_DENOISER, no VR).
+//   - GI / GI_SPECULAR optional permutations (no TEMPORAL_DENOISER, no VR).
 //   - Stereo:: / FrameBuffer:: replaced with mono no-ops.
 //   - FrameBuffer::CameraViewInverse[eye] -> plain SSGICB CameraViewInverse.
+//
+// GI_SPECULAR implies GI (gated together from C++ in GetCSVariant). When GI is
+// undefined, the expensive radiance gather is skipped but outY/outCoCg still
+// write the zero-initialized accumulators so downstream blur/upsample stays valid.
 //
 // MIT licensed (Intel XeGTAO + ProfJack additions); SH helpers MIT (SebH).
 
 #include "Common.hlsli"
-
-#define GI 1
 
 Texture2D<float>        srcWorkingDepth   : register(t0);
 Texture2D<float4>       srcNormalRoughness: register(t1);
@@ -140,7 +142,9 @@ void CalculateGI(
 		float n = signNorm * FastMath::ACos(cosNorm);
 
 		uint bitmask   = 0;
+#ifdef GI
 		uint bitmaskGI = 0;
+#endif
 #ifdef GI_SPECULAR
 		uint bitmaskGISpecular = 0;
 		float3 domVec = getSpecularDominantDirection(viewspaceNormal, viewVec, roughness);
@@ -186,7 +190,8 @@ void CalculateGI(
 				uint2 bitsRange  = uint2(round(angleRange.x * 32u), round((angleRange.y - angleRange.x) * 32u));
 				uint  maskedBits = s < AORadius ? ((1 << bitsRange.y) - 1) << bitsRange.x : 0;
 
-				// GI: GI-radius horizon vector for thickness-tolerant sampling
+#ifdef GI
+				// GI-radius horizon vector for thickness-tolerant radiance sampling.
 				float3 sampleBackHorizonVecGI = normalize(sampleDelta - viewVec * 300);
 				float  angleBackGI = FastMath::ACos(dot(sampleBackHorizonVecGI, viewVec));
 				float2 angleRangeGI = -sideSign * (sideSign == -1 ? float2(angleFront, angleBackGI) : float2(angleBackGI, angleFront));
@@ -240,9 +245,12 @@ void CalculateGI(
 #endif
 					}
 				}
+#endif // GI
 
 				bitmask   |= maskedBits;
+#ifdef GI
 				bitmaskGI |= maskedBitsGI;
+#endif
 #ifdef GI_SPECULAR
 				bitmaskGISpecular |= maskedBitsGISpecular;
 #endif
@@ -261,10 +269,12 @@ void CalculateGI(
 	visibility  = lerp(saturate(visibility), 0, depthFade);
 	visibility  = 1 - pow(abs(1 - visibility), AOPower);
 
+#ifdef GI
 	radianceY    *= rcpNumSlices;
 	radianceY    = lerp(radianceY, 0, depthFade);
 
 	radianceCoCg *= rcpNumSlices * GISaturation;
+#endif
 
 #ifdef GI_SPECULAR
 	radianceSpecular *= rcpNumSlices;

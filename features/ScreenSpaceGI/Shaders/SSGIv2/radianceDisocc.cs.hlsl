@@ -12,8 +12,6 @@
 
 #include "Common.hlsli"
 
-#define GI 1
-
 Texture2D<half4> srcDiffuse     : register(t0);
 Texture2D<half>  srcCurrDepth   : register(t1);
 Texture2D<half4> srcCurrNormal  : register(t2);

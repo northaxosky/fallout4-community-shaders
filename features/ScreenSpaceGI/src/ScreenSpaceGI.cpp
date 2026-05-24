@@ -477,12 +477,13 @@ namespace cs::features
 	{
 		if (!stagedValid) return;
 		const bool resModeChanged = (stagedSettings.resolutionMode != settings.resolutionMode);
+		const bool giChanged = (stagedSettings.enableGI != settings.enableGI);
 		const bool specularChanged = (stagedSettings.enableExperimentalSpecularGI != settings.enableExperimentalSpecularGI);
 		settings    = stagedSettings;
 		stagedValid = false;
 		if (resModeChanged)
 			resourcesAllocated = false;
-		if (specularChanged)
+		if (giChanged || specularChanged)
 			InvalidateGIShaderCache();
 	}
 
@@ -1141,8 +1142,14 @@ namespace cs::features
 		case 2: defines.emplace_back("QUARTER_RES", "1"); break;
 		default: break;
 		}
-		if (std::strcmp(a_name, "gi") == 0 && settings.enableExperimentalSpecularGI)
-			defines.emplace_back("GI_SPECULAR", "1");
+		if (std::strcmp(a_name, "gi") == 0) {
+			// GI_SPECULAR implies GI; gate the define together so we never compile a
+			// specular-only permutation that references unbound GI-only state.
+			if (settings.enableGI)
+				defines.emplace_back("GI", "1");
+			if (settings.enableGI && settings.enableExperimentalSpecularGI)
+				defines.emplace_back("GI_SPECULAR", "1");
+		}
 		a_slots[idx] = reinterpret_cast<ID3D11ComputeShader*>(cs::util::CompileShader(a_path, defines, "cs_5_0"));
 		if (a_slots[idx]) L->info("Compiled {} (mode={})", a_name, idx);
 		return a_slots[idx];
@@ -1418,7 +1425,10 @@ namespace cs::features
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Global illumination (SH2-YCoCg)");
-		dirty |= ImGui::Checkbox("Enable GI", &settings.enableGI);
+		if (ImGui::Checkbox("Enable GI", &settings.enableGI)) {
+			dirty = true;
+			InvalidateGIShaderCache();
+		}
 		if (ImGui::Checkbox("Experimental Specular GI", &settings.enableExperimentalSpecularGI)) {
 			dirty = true;
 			InvalidateGIShaderCache();
