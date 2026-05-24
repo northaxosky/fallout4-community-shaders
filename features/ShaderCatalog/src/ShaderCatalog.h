@@ -16,6 +16,8 @@ namespace cs::features
 		static ShaderCatalog* GetSingleton();
 
 		std::string_view GetName() const override { return "ShaderCatalog"; }
+		std::string GetFeatureSummary() const override { return "Captures every shader the engine compiles into a SQLite catalog for inspection."; }
+		std::string GetCategory() const override { return "Diagnostics"; }
 
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;

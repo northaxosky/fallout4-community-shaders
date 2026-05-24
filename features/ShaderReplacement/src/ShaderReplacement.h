@@ -17,6 +17,8 @@ namespace cs::features
 		static ShaderReplacement* GetSingleton();
 
 		std::string_view GetName() const override { return "ShaderReplacement"; }
+		std::string GetFeatureSummary() const override { return "Lets developers swap in modified compiled shaders without restarting."; }
+		std::string GetCategory() const override { return "Developer"; }
 		std::vector<std::string_view> GetDependencies() const override { return { "ShaderCatalog" }; }
 
 		void Load() override;

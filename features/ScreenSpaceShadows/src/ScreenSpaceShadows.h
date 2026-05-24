@@ -13,6 +13,8 @@ namespace cs::features
 		static ScreenSpaceShadows* GetSingleton();
 
 		std::string_view GetName() const override { return "ScreenSpaceShadows"; }
+		std::string GetFeatureSummary() const override { return "Adds finer-grained contact shadows derived from screen-space depth."; }
+		std::string GetCategory() const override { return "Lighting"; }
 
 		void Load() override;
 		void DrawSettings() override;

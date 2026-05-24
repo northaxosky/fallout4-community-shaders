@@ -27,6 +27,8 @@ public:
 	}
 
 	std::string_view GetName() const override { return "Upscaling"; }
+	std::string GetFeatureSummary() const override { return "DLSS, FSR2, FSR3, XeSS, and TAAU spatial upscaling integrated with the engine's render pipeline."; }
+	std::string GetCategory() const override { return "Upscaling"; }
 	void Load() override;
 	void OnDataLoaded() override;
 	void DrawSettings() override;

@@ -17,6 +17,8 @@ namespace cs::features
 		static RenderDoc* GetSingleton();
 
 		std::string_view GetName() const override { return "RenderDoc"; }
+		std::string GetFeatureSummary() const override { return "Loads the RenderDoc capture library and bridges F4SE input to its capture hotkey."; }
+		std::string GetCategory() const override { return "Diagnostics"; }
 
 		void Load() override;
 		void DrawSettings() override;

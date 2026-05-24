@@ -14,6 +14,8 @@ namespace cs::features
 		static ScreenSpaceGI* GetSingleton();
 
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
+		std::string GetFeatureSummary() const override { return "Screen-space global illumination and ambient occlusion."; }
+		std::string GetCategory() const override { return "Lighting"; }
 
 		void Load() override;
 		void OnDataLoaded() override;

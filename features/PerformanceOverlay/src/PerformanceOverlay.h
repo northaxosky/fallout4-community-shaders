@@ -14,6 +14,8 @@ namespace cs::features
 		static PerformanceOverlay* GetSingleton();
 
 		std::string_view GetName() const override { return "PerformanceOverlay"; }
+		std::string GetFeatureSummary() const override { return "On-screen FPS counter and frame-time graph with estimated post-FG values."; }
+		std::string GetCategory() const override { return "Diagnostics"; }
 
 		void Load() override;
 		void DrawSettings() override;

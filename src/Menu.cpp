@@ -4,15 +4,67 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <filesystem>
+#include <map>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "Feature.h"
 #include "Log.h"
 #include "Plugin.h"
 #include "PresetManager.h"
 
-namespace { auto* L = cs::log::Get("cs.menu"); }
+namespace
+{
+	auto* L = cs::log::Get("cs.menu");
+
+	constexpr std::array<std::string_view, 5> kFeatureCategoryOrder{
+		"Lighting",
+		"Post-process",
+		"Upscaling",
+		"Frame Generation",
+		"Diagnostics"
+	};
+	constexpr std::string_view kMiscFeatureCategory = "Misc";
+
+	int FeatureCategoryRank(std::string_view a_category)
+	{
+		for (std::size_t i = 0; i < kFeatureCategoryOrder.size(); ++i) {
+			if (a_category == kFeatureCategoryOrder[i])
+				return static_cast<int>(i);
+		}
+
+		const int fallbackRank = static_cast<int>(kFeatureCategoryOrder.size());
+		return a_category == kMiscFeatureCategory ? fallbackRank + 1 : fallbackRank;
+	}
+
+	bool FeatureCategoryLess(const std::string& a_lhs, const std::string& a_rhs)
+	{
+		const int lhsRank = FeatureCategoryRank(a_lhs);
+		const int rhsRank = FeatureCategoryRank(a_rhs);
+		if (lhsRank != rhsRank)
+			return lhsRank < rhsRank;
+		return a_lhs < a_rhs;
+	}
+
+	void DrawFeatureSettings(cs::Feature* a_feature)
+	{
+		ImGui::PushID(a_feature->GetName().data());
+		if (ImGui::CollapsingHeader(a_feature->GetName().data())) {
+			const std::string summary = a_feature->GetFeatureSummary();
+			if (!summary.empty()) {
+				ImGui::TextDisabled("%s", summary.c_str());
+				ImGui::Separator();
+			}
+			a_feature->DrawSettings();
+		}
+		ImGui::PopID();
+	}
+}
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
@@ -275,12 +327,28 @@ namespace cs
 				DrawPresetsUI();
 			}
 
-			// PushID per feature so widgets in DrawSettings can't collide across features.
+			std::map<std::string, std::vector<Feature*>> featuresByCategory;
 			for (auto* feat : FeatureManager::Get().GetAll()) {
-				ImGui::PushID(feat->GetName().data());
-				if (ImGui::CollapsingHeader(feat->GetName().data()))
-					feat->DrawSettings();
-				ImGui::PopID();
+				std::string category = feat->GetCategory();
+				if (category.empty())
+					category = "Misc";
+				featuresByCategory[std::move(category)].push_back(feat);
+			}
+
+			std::vector<std::string> categories;
+			categories.reserve(featuresByCategory.size());
+			for (const auto& entry : featuresByCategory) {
+				categories.push_back(entry.first);
+			}
+			std::sort(categories.begin(), categories.end(), FeatureCategoryLess);
+
+			for (const auto& category : categories) {
+				if (ImGui::CollapsingHeader(category.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+					ImGui::Indent();
+					for (auto* feat : featuresByCategory.at(category))
+						DrawFeatureSettings(feat);
+					ImGui::Unindent();
+				}
 			}
 		}
 		ImGui::End();

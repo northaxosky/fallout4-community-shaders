@@ -10,6 +10,8 @@ namespace cs::features
 		static MotionVectorFixes* GetSingleton();
 
 		std::string_view GetName() const override { return "MotionVectorFixes"; }
+		std::string GetFeatureSummary() const override { return "Restores correct motion vectors for upscalers and frame generation."; }
+		std::string GetCategory() const override { return "Compatibility"; }
 
 		void Load() override;
 		void OnDataLoaded() override;
