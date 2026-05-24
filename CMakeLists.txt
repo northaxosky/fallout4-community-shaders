@@ -15,6 +15,8 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DEBUG OFF)
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
+option(TRACY_SUPPORT "Enable Tracy profiler instrumentation" OFF)
+
 file(STRINGS "${CMAKE_SOURCE_DIR}/version.txt" FO4CS_VERSION LIMIT_COUNT 1)
 string(STRIP "${FO4CS_VERSION}" FO4CS_VERSION)
 if(NOT FO4CS_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
@@ -42,6 +44,9 @@ find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
+if(TRACY_SUPPORT)
+	find_package(Tracy CONFIG REQUIRED)
+endif()
 
 # Header-only INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
 add_subdirectory(cmake/Streamline)
@@ -74,7 +79,12 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 	d3dcompiler.lib
 	imgui::imgui
 	tomlplusplus::tomlplusplus
+	$<$<BOOL:${TRACY_SUPPORT}>:Tracy::TracyClient>
 )
+
+if(TRACY_SUPPORT)
+	target_compile_definitions(FO4CommunityShaders PRIVATE TRACY_SUPPORT TRACY_ENABLE)
+endif()
 
 # Features attach their own sources to FO4CommunityShaders via target_sources.
 # Lifecycle dependencies are declared through cs::Feature::GetDependencies().

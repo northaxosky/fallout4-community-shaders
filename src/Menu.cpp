@@ -102,6 +102,7 @@ namespace
 				ImGui::TextDisabled("%s", summary.c_str());
 				ImGui::Separator();
 			}
+			CS_FEATURE_ZONE(a_feature, "DrawSettings");
 			a_feature->DrawSettings();
 			if (a_feature->HasResettableSettings()) {
 				ImGui::Spacing();
@@ -294,8 +295,10 @@ namespace cs
 		// Always-on overlays render every frame regardless of _open; features that don't
 		// want one have an empty default override and pay nothing.
 		if (_overlayVisible) {
-			for (auto* feat : FeatureManager::Get().GetAll())
+			for (auto* feat : FeatureManager::Get().GetAll()) {
+				CS_FEATURE_ZONE(feat, "DrawOverlay");
 				feat->DrawOverlay();
+			}
 		}
 
 		if (_open)
@@ -591,6 +594,7 @@ namespace cs
 	HRESULT WINAPI Menu::hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags)
 	{
 		Menu::Get().Render();
+		FrameMark;
 		return Menu::Get()._origPresent(a_chain, a_sync, a_flags);
 	}
 

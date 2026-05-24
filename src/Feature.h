@@ -121,6 +121,22 @@ namespace cs
 		bool _loaded = false;
 	};
 
+#ifdef TRACY_SUPPORT
+	namespace detail
+	{
+		inline std::string FeatureZoneName(const Feature* a_feature, std::string_view a_method)
+		{
+			const auto featureName = a_feature->GetName();
+			std::string name;
+			name.reserve(featureName.size() + a_method.size() + 1);
+			name.append(featureName.data(), featureName.size());
+			name.push_back(':');
+			name.append(a_method.data(), a_method.size());
+			return name;
+		}
+	}
+#endif
+
 	class FeatureManager
 	{
 	public:
@@ -140,3 +156,14 @@ namespace cs
 		std::vector<Feature*> _loadedFeatures;
 	};
 }
+
+#ifdef TRACY_SUPPORT
+#define CS_DETAIL_CONCAT_INNER(a, b) a##b
+#define CS_DETAIL_CONCAT(a, b) CS_DETAIL_CONCAT_INNER(a, b)
+#define CS_FEATURE_ZONE_IMPL(featurePtr, methodLiteral, id) \
+	const auto CS_DETAIL_CONCAT(csFeatureZoneName_, id) = ::cs::detail::FeatureZoneName((featurePtr), (methodLiteral)); \
+	ZoneTransientN(CS_DETAIL_CONCAT(csFeatureZone_, id), CS_DETAIL_CONCAT(csFeatureZoneName_, id).c_str(), true)
+#define CS_FEATURE_ZONE(featurePtr, methodLiteral) CS_FEATURE_ZONE_IMPL(featurePtr, methodLiteral, __COUNTER__)
+#else
+#define CS_FEATURE_ZONE(featurePtr, methodLiteral) ((void)0)
+#endif

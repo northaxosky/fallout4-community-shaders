@@ -11,6 +11,17 @@
 
 #include "Windows.h"
 
+#ifdef TRACY_SUPPORT
+#include <tracy/Tracy.hpp>
+#else
+#define ZoneScoped ((void)0)
+#define ZoneScopedN(x) ((void)0)
+#define ZoneTransientN(name, str, active) ((void)0)
+#define FrameMark ((void)0)
+#define TracyPlot(name, val) ((void)0)
+#define TracyMessage(txt, sz) ((void)0)
+#endif
+
 #undef DEBUG
 #undef ERROR
 

@@ -4,20 +4,24 @@
   "description": "Community Shaders port for Fallout 4",
   "supports": "windows & x64",
   "dependencies": [
+    "directx-headers",
+    "directxtex",
+    "directxtk",
+    {
+      "name": "imgui",
+      "features": [ "dx11-binding", "win32-binding", "docking-experimental" ]
+    },
+    "magic-enum",
     {
       "name": "spdlog",
       "features": [ "wchar" ]
     },
-    "xbyak",
-    "directxtk",
-    "directxtex",
-    "directx-headers",
-    "magic-enum",
-    "tomlplusplus",
     "sqlite3",
+    "tomlplusplus",
     {
-      "name": "imgui",
-      "features": [ "dx11-binding", "win32-binding", "docking-experimental" ]
-    }
+      "name": "tracy",
+      "features": [ "on-demand" ]
+    },
+    "xbyak"
   ]
 }
