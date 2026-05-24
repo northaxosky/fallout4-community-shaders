@@ -16,11 +16,9 @@ namespace cs::engine
 		struct PrioritizedCallback
 		{
 			HookPriority        priority;
-			std::uint64_t       seq;
 			RenderHookCallback  cb;
 		};
 
-		std::uint64_t                       g_nextSeq = 0;
 		std::vector<PrioritizedCallback>    g_postDeferredPrePass;
 		std::vector<PrioritizedCallback>    g_preDeferredLightsImpl;
 		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
@@ -34,7 +32,7 @@ namespace cs::engine
 
 		void InsertPrioritized(std::vector<PrioritizedCallback>& v, RenderHookCallback&& cb, HookPriority p)
 		{
-			v.push_back({ p, g_nextSeq++, std::move(cb) });
+			v.push_back({ p, std::move(cb) });
 			std::stable_sort(v.begin(), v.end(),
 				[](const PrioritizedCallback& a, const PrioritizedCallback& b) {
 					return static_cast<int>(a.priority) < static_cast<int>(b.priority);

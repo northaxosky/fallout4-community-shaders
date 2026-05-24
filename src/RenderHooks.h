@@ -15,12 +15,10 @@ namespace cs::engine
 	//   Default - multiplicative darken (vanilla AO darken, ScreenSpaceShadows apply, SSGI Apply)
 	//   Late    - additive contributions that must not be modulated by their own darken pass
 	//             (SSGI ApplyIL - indirect bounce on top of shaded base)
-	//   Final   - reserved for end-of-anchor work (e.g. resolve / blit) added later
 	enum class HookPriority : int {
 		Early   = -100,
 		Default =    0,
 		Late    =  100,
-		Final   =  200,
 	};
 
 	// Single-owner detour broker for FO4 deferred-renderer anchors. Multiple features can register
