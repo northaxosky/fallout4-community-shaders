@@ -57,6 +57,10 @@ namespace cs
 		HMODULE interposer = nullptr;
 
 		PFun_slInit*                 slInit{};
+		// slShutdown is deliberately resolved but never called. Process teardown ordering
+		// across F4SE / interposer / NVAPI threads isn't guaranteed, and any in-flight
+		// Present touching a stale function pointer crashes. The DLL unload path lets the
+		// loader unwind the SDK safely. Keep the pointer for completeness only.
 		PFun_slShutdown*             slShutdown{};
 		PFun_slIsFeatureSupported*   slIsFeatureSupported{};
 		PFun_slIsFeatureLoaded*      slIsFeatureLoaded{};

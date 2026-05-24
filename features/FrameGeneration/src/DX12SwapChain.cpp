@@ -706,8 +706,12 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(UINT BufferCount, UI
 	auto& dx12 = *DX12SwapChain::GetSingleton();
 	dx12.OnPreResize();
 	HRESULT hr = swapChain->ResizeBuffers(BufferCount, Width, Height, NewFormat, SwapChainFlags);
-	if (SUCCEEDED(hr))
+	if (SUCCEEDED(hr)) {
 		dx12.RecreateWrappedBuffers();
+		// Reflex state is bound to the swap chain; underlying rebuild can drop it. Cheap
+		// to re-push; no-op when DLSS-G isn't active.
+		StreamlineFG::GetSingleton()->ReapplyReflexOptions();
+	}
 	return hr;
 }
 
@@ -762,8 +766,11 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers1(UINT BufferCount, U
 	auto& dx12 = *DX12SwapChain::GetSingleton();
 	dx12.OnPreResize();
 	HRESULT hr = swapChain->ResizeBuffers1(BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask, ppPresentQueue);
-	if (SUCCEEDED(hr))
+	if (SUCCEEDED(hr)) {
 		dx12.RecreateWrappedBuffers();
+		// See ResizeBuffers: Reflex options need re-pushing after swap rebuild.
+		StreamlineFG::GetSingleton()->ReapplyReflexOptions();
+	}
 	return hr;
 }
 

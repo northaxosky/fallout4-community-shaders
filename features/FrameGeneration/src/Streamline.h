@@ -34,6 +34,12 @@ public:
 	bool CheckAndEnableDLSSG();
 	void SetEnabled(bool a_enabled);
 
+	// Re-applies the default ReflexOptions (eLowLatency). Called from CheckAndEnableDLSSG
+	// at init, and again from DXGISwapChainProxy::ResizeBuffers/ResizeBuffers1 after the
+	// D3D12 swap chain is rebuilt - Reflex state can be invalidated by the underlying
+	// swap rebuild on resolution / HDR / windowed-fullscreen changes.
+	void ReapplyReflexOptions();
+
 	// Approach B post-FG FPS source. Returns DLSSGState::numFramesActuallyPresented (which
 	// is "since the last slDLSSGGetState call" per sl_dlss_g.h). Returns 0 when DLSS-G is
 	// not enabled for this session or telemetry is unavailable. Call exactly once per

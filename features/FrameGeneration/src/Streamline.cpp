@@ -66,11 +66,7 @@ bool StreamlineFG::CheckAndEnableDLSSG()
 	L->info("DLSS-G enabled: {}x frame gen (requested {}, hardware max {})",
 		requestedFrames + 1, frameGen->settings.frameGenFrames, maxFrames);
 
-	if (slReflexSetOptions) {
-		sl::ReflexOptions reflexOptions{};
-		reflexOptions.mode = sl::ReflexMode::eLowLatency;
-		slReflexSetOptions(reflexOptions);
-	}
+	ReapplyReflexOptions();
 
 	if (slDLSSGGetState) {
 		sl::DLSSGState state{};
@@ -101,6 +97,16 @@ uint32_t StreamlineFG::ConsumeFramesPresented()
 	if (slDLSSGGetState(viewport, state, nullptr) != sl::Result::eOk)
 		return 0;
 	return state.numFramesActuallyPresented;
+}
+
+void StreamlineFG::ReapplyReflexOptions()
+{
+	if (!slReflexSetOptions || !sessionActive)
+		return;
+	sl::ReflexOptions reflexOptions{};
+	reflexOptions.mode = sl::ReflexMode::eLowLatency;
+	if (slReflexSetOptions(reflexOptions) != sl::Result::eOk)
+		L->warn("slReflexSetOptions failed during reapply");
 }
 
 static sl::float4x4 toSLMatrix(const __m128* mat)
