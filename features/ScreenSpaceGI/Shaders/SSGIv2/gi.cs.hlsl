@@ -270,8 +270,7 @@ void CalculateGI(
 	radianceSpecular *= rcpNumSlices;
 	radianceSpecular = lerp(radianceSpecular, 0, depthFade);
 	visibilitySpecular *= rcpNumSlices;
-	// FIXME: mirrors upstream Screen Space GI gi.cs.hlsl:334 verbatim; suspected upstream copy-paste (should be saturate(visibilitySpecular)). Dormant today (texGiSpecular unconsumed). Fix when upstream does or when wiring the consumer.
-	visibilitySpecular = lerp(saturate(visibility), 0, depthFade);
+	visibilitySpecular = lerp(saturate(visibilitySpecular), 0, depthFade);
 #endif
 
 	o_ao = visibility;
