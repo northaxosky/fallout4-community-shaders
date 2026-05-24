@@ -1,5 +1,6 @@
 #pragma once
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -37,6 +38,36 @@ namespace cs
 
 		// Fired by cs::Streamline once the D3D11 device exists and the SDK is initialized.
 		virtual void OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* /*device*/) {}
+
+		// ---- Discovery / menu surface (upstream parity) ------------------------------------
+		// Mirrors Skyrim CS Feature.h. No-op defaults; features opt in by overriding. The
+		// settings menu and a future unloaded-feature panel read these to render summaries
+		// and group features by category. Adding new ones here keeps feature parity with
+		// upstream while letting per-feature population happen incrementally.
+
+		// One-line description shown in the menu under the feature name.
+		virtual std::string GetFeatureSummary() const { return {}; }
+
+		// External docs / mod-page link surfaced in the menu when present.
+		virtual std::optional<std::string> GetFeatureModLink() const { return {}; }
+
+		// Core features cannot be disabled by the user; the menu hides their enabled toggle.
+		virtual bool IsCore() const { return false; }
+
+		// Category label used for menu grouping (e.g. "Lighting", "Post-process", "Diagnostics").
+		virtual std::string GetCategory() const { return "Misc"; }
+
+		// Hide a feature from the menu entirely (e.g. developer-only tooling).
+		virtual bool IsInMenu() const { return true; }
+
+		// Drawn for features that registered but did not load (missing config, failed init).
+		// Unwired today; the FeatureManager doesn't yet distinguish registered-but-failed
+		// from skipped. Provided for upstream parity so per-feature overrides can land
+		// independently.
+		virtual void DrawUnloadedUI() {}
+
+		// Drawn when a feature failed to load, so the user sees why instead of a silent skip.
+		virtual void DrawFailLoadMessage() {}
 
 		// ---- Cross-feature preset system (Phase 4) -----------------------------------------
 		// Default = opt-out. Features set this true to participate in the global preset library.
