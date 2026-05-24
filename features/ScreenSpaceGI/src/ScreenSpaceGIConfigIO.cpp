@@ -14,9 +14,10 @@ namespace cs::features::ssgi
 			const auto* v2 = a_root["v2"].as_table();
 			if (!v2) return;
 
-			a_out.enableGI               = (*v2)["enable_gi"].value_or(a_out.enableGI);
-			a_out.enableVanillaSSAO      = (*v2)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
-			a_out.resolutionMode         = std::clamp(static_cast<int>((*v2)["resolution_mode"].value_or<std::int64_t>(a_out.resolutionMode)), 0, 2);
+			a_out.enableGI                     = (*v2)["enable_gi"].value_or(a_out.enableGI);
+			a_out.enableExperimentalSpecularGI = (*v2)["enable_experimental_specular_gi"].value_or(a_out.enableExperimentalSpecularGI);
+			a_out.enableVanillaSSAO            = (*v2)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
+			a_out.resolutionMode               = std::clamp(static_cast<int>((*v2)["resolution_mode"].value_or<std::int64_t>(a_out.resolutionMode)), 0, 2);
 			a_out.minScreenRadius        = std::clamp(static_cast<float>((*v2)["min_screen_radius"].value_or(static_cast<double>(a_out.minScreenRadius))), 0.0f, 1.0f);
 			a_out.giRadius               = std::clamp(static_cast<float>((*v2)["gi_radius"].value_or(static_cast<double>(a_out.giRadius))), 10.0f, 4096.0f);
 			a_out.depthFadeNear          = static_cast<float>((*v2)["depth_fade_near"].value_or(static_cast<double>(a_out.depthFadeNear)));
@@ -64,9 +65,10 @@ namespace cs::features::ssgi
 		a_out.ilStrength     = std::clamp(static_cast<float>((*s)["il_strength"].value_or(static_cast<double>(a_out.ilStrength))), 0.0f, 4.0f);
 
 		// Canonical SSGI knobs (promoted from the legacy [v2] block).
-		a_out.enableGI               = (*s)["enable_gi"].value_or(a_out.enableGI);
-		a_out.enableVanillaSSAO      = (*s)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
-		a_out.resolutionMode         = std::clamp(static_cast<int>((*s)["resolution_mode"].value_or<std::int64_t>(a_out.resolutionMode)), 0, 2);
+		a_out.enableGI                     = (*s)["enable_gi"].value_or(a_out.enableGI);
+		a_out.enableExperimentalSpecularGI = (*s)["enable_experimental_specular_gi"].value_or(a_out.enableExperimentalSpecularGI);
+		a_out.enableVanillaSSAO            = (*s)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
+		a_out.resolutionMode               = std::clamp(static_cast<int>((*s)["resolution_mode"].value_or<std::int64_t>(a_out.resolutionMode)), 0, 2);
 		a_out.minScreenRadius        = std::clamp(static_cast<float>((*s)["min_screen_radius"].value_or(static_cast<double>(a_out.minScreenRadius))), 0.0f, 1.0f);
 		a_out.giRadius               = std::clamp(static_cast<float>((*s)["gi_radius"].value_or(static_cast<double>(a_out.giRadius))), 10.0f, 4096.0f);
 		a_out.depthFadeNear          = static_cast<float>((*s)["depth_fade_near"].value_or(static_cast<double>(a_out.depthFadeNear)));
@@ -103,9 +105,10 @@ namespace cs::features::ssgi
 		out.insert_or_assign("apply_il_to_scene", a_settings.applyILToScene);
 		out.insert_or_assign("il_strength",       static_cast<double>(a_settings.ilStrength));
 
-		out.insert_or_assign("enable_gi",                a_settings.enableGI);
-		out.insert_or_assign("enable_vanilla_ssao",      a_settings.enableVanillaSSAO);
-		out.insert_or_assign("resolution_mode",          static_cast<std::int64_t>(a_settings.resolutionMode));
+		out.insert_or_assign("enable_gi",                       a_settings.enableGI);
+		out.insert_or_assign("enable_experimental_specular_gi", a_settings.enableExperimentalSpecularGI);
+		out.insert_or_assign("enable_vanilla_ssao",             a_settings.enableVanillaSSAO);
+		out.insert_or_assign("resolution_mode",                 static_cast<std::int64_t>(a_settings.resolutionMode));
 		out.insert_or_assign("min_screen_radius",        static_cast<double>(a_settings.minScreenRadius));
 		out.insert_or_assign("gi_radius",                static_cast<double>(a_settings.giRadius));
 		out.insert_or_assign("depth_fade_near",          static_cast<double>(a_settings.depthFadeNear));

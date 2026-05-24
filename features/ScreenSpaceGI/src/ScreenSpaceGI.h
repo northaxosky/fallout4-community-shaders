@@ -81,7 +81,8 @@ namespace cs::features
 			float ilStrength     = 1.0f;
 
 			// XeGTAO + SH2-YCoCg (canonical SSGI knobs).
-			bool     enableGI               = true;
+			bool     enableGI                     = true;
+			bool     enableExperimentalSpecularGI = false;
 			// Vanilla SAO disable lever: when false (default), Load() patches
 			// DrawWorld::ImagespaceSAO entry to `ret` so the engine SAO chain is short-circuited;
 			// the SSGI compute chain owns AO via Apply(). When true, vanilla SAO remains active
@@ -131,6 +132,8 @@ namespace cs::features
 
 		// Compiles the 7 compute shaders. Idempotent.
 		void CompileShaders();
+		// GI_SPECULAR changes only affect gi.cs, so other shader variants stay cached.
+		void InvalidateGIShaderCache();
 
 		ID3D11ComputeShader* GetCSVariant(const wchar_t* a_path, ID3D11ComputeShader* (&a_slots)[3], int a_modeIdx, const char* a_name);
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);

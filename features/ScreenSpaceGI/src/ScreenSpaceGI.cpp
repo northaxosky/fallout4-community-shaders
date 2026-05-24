@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -39,14 +40,15 @@ namespace cs::features
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI.toml";
 
-	constexpr uint32_t kRT_GbufferNormal = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
-	constexpr uint32_t kRT_DiffuseBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
-	constexpr uint32_t kRT_MotionVectors = static_cast<uint32_t>(cs::engine::RenderTarget::kMotionVectors);
-	constexpr uint32_t kRT_SSAO          = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAO);
-	constexpr uint32_t kRT_SSAOFinal     = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinal);
-	constexpr uint32_t kRT_SSAOFinalSwap = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinalSwap);
-	constexpr uint32_t kRT_SSAOFinalSwap2= static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinalSwap2);
-	constexpr uint32_t kDST_Main         = static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain);
+	constexpr uint32_t kRT_GbufferNormal   = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferNormal);
+	constexpr uint32_t kRT_GbufferMaterial = static_cast<uint32_t>(cs::engine::RenderTarget::kGbufferMaterial);
+	constexpr uint32_t kRT_DiffuseBuffer   = static_cast<uint32_t>(cs::engine::RenderTarget::kDiffuseBuffer);
+	constexpr uint32_t kRT_MotionVectors   = static_cast<uint32_t>(cs::engine::RenderTarget::kMotionVectors);
+	constexpr uint32_t kRT_SSAO            = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAO);
+	constexpr uint32_t kRT_SSAOFinal       = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinal);
+	constexpr uint32_t kRT_SSAOFinalSwap   = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinalSwap);
+	constexpr uint32_t kRT_SSAOFinalSwap2  = static_cast<uint32_t>(cs::engine::RenderTarget::kSSAOFinalSwap2);
+	constexpr uint32_t kDST_Main           = static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain);
 
 	struct ApplyCB
 	{
@@ -476,10 +478,13 @@ namespace cs::features
 	{
 		if (!stagedValid) return;
 		const bool resModeChanged = (stagedSettings.resolutionMode != settings.resolutionMode);
+		const bool specularChanged = (stagedSettings.enableExperimentalSpecularGI != settings.enableExperimentalSpecularGI);
 		settings    = stagedSettings;
 		stagedValid = false;
 		if (resModeChanged)
 			resourcesAllocated = false;
+		if (specularChanged)
+			InvalidateGIShaderCache();
 	}
 
 	void ScreenSpaceGI::CommitStagedFinalize()
@@ -560,6 +565,18 @@ namespace cs::features
 		noiseLoaded = true;
 		L->info("SSGI noise loaded ({}x{} fmt={})",
 			texNoise->desc.Width, texNoise->desc.Height, static_cast<int>(texNoise->desc.Format));
+	}
+
+	void ScreenSpaceGI::InvalidateGIShaderCache()
+	{
+		for (auto*& shader : giCSv) {
+			if (shader) {
+				shader->Release();
+				shader = nullptr;
+			}
+		}
+		for (auto& warmed : shadersWarmedForMode)
+			warmed = false;
 	}
 
 	void ScreenSpaceGI::CompileShaders()
@@ -770,6 +787,9 @@ namespace cs::features
 		auto& normalRT = rendererData->renderTargets[kRT_GbufferNormal];
 		auto* normalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(normalRT.srView);
 
+		auto& materialRT = rendererData->renderTargets[kRT_GbufferMaterial];
+		auto* materialSRV = reinterpret_cast<ID3D11ShaderResourceView*>(materialRT.srView);
+
 		auto& diffuseRT = rendererData->renderTargets[kRT_DiffuseBuffer];
 		auto* diffuseSRV = reinterpret_cast<ID3D11ShaderResourceView*>(diffuseRT.srView);
 
@@ -777,6 +797,7 @@ namespace cs::features
 		auto* motionSRV = reinterpret_cast<ID3D11ShaderResourceView*>(motionRT.srView);
 
 		if (!normalSRV || !diffuseSRV) return;
+		if (settings.enableExperimentalSpecularGI && !materialSRV) return;
 
 		D3D11_TEXTURE2D_DESC dd{};
 		depthTex->GetDesc(&dd);
@@ -1007,7 +1028,7 @@ namespace cs::features
 		// 5) gi: working depth + normal + radiance + noise + history -> AO/Y/CoCg + prevGeo
 		//----------------------------------------------------------------
 		context->CSSetShader(giCS, nullptr, 0);
-		ID3D11ShaderResourceView* giSRV[9] = {
+		ID3D11ShaderResourceView* giSRV[10] = {
 			texWorkingDepth->srv.get(),
 			normalSRV,
 			texRadiance->srv.get(),
@@ -1017,8 +1038,10 @@ namespace cs::features
 			texIlCoCg[inIdx]->srv.get(),
 			texGiSpecular[inIdx]->srv.get(),
 			srvNormalMips[0].get(),
+			materialSRV,
 		};
-		context->CSSetShaderResources(0, 9, giSRV);
+		const UINT giSrvCount = settings.enableExperimentalSpecularGI ? 10u : 9u;
+		context->CSSetShaderResources(0, giSrvCount, giSRV);
 		ID3D11UnorderedAccessView* giUAV[5] = {
 			texAo[outIdx]->uav.get(),
 			texIlY[outIdx]->uav.get(),
@@ -1029,7 +1052,7 @@ namespace cs::features
 		context->CSSetUnorderedAccessViews(0, 5, giUAV, nullptr);
 		context->Dispatch(gx_work, gy_work, 1);
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
-		context->CSSetShaderResources(0, 9, nullSRV);
+		context->CSSetShaderResources(0, giSrvCount, nullSRV);
 
 		//----------------------------------------------------------------
 		// 6) blur: bilateral over IL Y/CoCg using working depth + normal pyramid
@@ -1119,6 +1142,8 @@ namespace cs::features
 		case 2: defines.emplace_back("QUARTER_RES", "1"); break;
 		default: break;
 		}
+		if (std::strcmp(a_name, "gi") == 0 && settings.enableExperimentalSpecularGI)
+			defines.emplace_back("GI_SPECULAR", "1");
 		a_slots[idx] = reinterpret_cast<ID3D11ComputeShader*>(cs::util::CompileShader(a_path, defines, "cs_5_0"));
 		if (a_slots[idx]) L->info("Compiled {} (mode={})", a_name, idx);
 		return a_slots[idx];
@@ -1324,6 +1349,7 @@ namespace cs::features
 		if (ImGui::Button("Reset to defaults")) {
 			settings           = Settings{};
 			resourcesAllocated = false;
+			InvalidateGIShaderCache();
 			SaveSettings();
 			cs::Menu::ShowToast("Screen Space GI reset to defaults", 2.5);
 		}
@@ -1395,6 +1421,13 @@ namespace cs::features
 		ImGui::Separator();
 		ImGui::TextDisabled("Global illumination (SH2-YCoCg)");
 		dirty |= ImGui::Checkbox("Enable GI", &settings.enableGI);
+		if (ImGui::Checkbox("Experimental Specular GI", &settings.enableExperimentalSpecularGI)) {
+			dirty = true;
+			InvalidateGIShaderCache();
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("(?)");
+		ImGui::SetItemTooltip("Experimental specular GI may have artifacts and is not blurred.");
 		ImGui::SliderFloat("GI radius (world units)", &settings.giRadius, 10.0f, 4096.0f, "%.0f");
 		markCustomIfEdited();
 		ImGui::SliderFloat("GI strength", &settings.giStrength, 0.0f, 4.0f, "%.2f");
