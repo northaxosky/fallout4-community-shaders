@@ -826,6 +826,7 @@ namespace cs::features
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
+		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "DrawSSGI");
 
 		if (!firstFireLogged) {
 			L->info("DrawSSGI first fire (full chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample), resMode={}", modeIdx);
@@ -955,7 +956,10 @@ namespace cs::features
 			uavWorkingDepth[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, pdUAV, nullptr);
-		context->Dispatch(gx_pd, gy_pd, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Prefilter");
+			context->Dispatch(gx_pd, gy_pd, 1);
+		}
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
 		//----------------------------------------------------------------
@@ -970,7 +974,10 @@ namespace cs::features
 			uavNormal[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, pnUAV, nullptr);
-		context->Dispatch(gx_pn, gy_pn, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Prefilter");
+			context->Dispatch(gx_pn, gy_pn, 1);
+		}
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 
 		//----------------------------------------------------------------
@@ -1002,7 +1009,10 @@ namespace cs::features
 			texGiSpecular[outIdx]->uav.get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 6, rdUAV, nullptr);
-		context->Dispatch(gx_work, gy_work, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "RadianceDisocc");
+			context->Dispatch(gx_work, gy_work, 1);
+		}
 		context->CSSetUnorderedAccessViews(0, 6, nullUAV, nullptr);
 		context->CSSetShaderResources(0, 10, nullSRV);
 
@@ -1020,7 +1030,10 @@ namespace cs::features
 			uavRadiance[4].get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, prUAV, nullptr);
-		context->Dispatch(gx_pn, gy_pn, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Radiance");
+			context->Dispatch(gx_pn, gy_pn, 1);
+		}
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 		context->CSSetShaderResources(0, 1, nullSRV);
 
@@ -1050,7 +1063,10 @@ namespace cs::features
 			texPrevGeo->uav.get(),
 		};
 		context->CSSetUnorderedAccessViews(0, 5, giUAV, nullptr);
-		context->Dispatch(gx_work, gy_work, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "GI");
+			context->Dispatch(gx_work, gy_work, 1);
+		}
 		context->CSSetUnorderedAccessViews(0, 5, nullUAV, nullptr);
 		context->CSSetShaderResources(0, giSrvCount, nullSRV);
 
@@ -1073,7 +1089,10 @@ namespace cs::features
 				texIlCoCg[inIdx]->uav.get(),
 			};
 			context->CSSetUnorderedAccessViews(0, 3, blurUAV, nullptr);
-			context->Dispatch(gx_work, gy_work, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Blur");
+				context->Dispatch(gx_work, gy_work, 1);
+			}
 			context->CSSetUnorderedAccessViews(0, 3, nullUAV, nullptr);
 			context->CSSetShaderResources(0, 5, nullSRV);
 		}
@@ -1110,7 +1129,10 @@ namespace cs::features
 				texGiSpecularUpsampled->uav.get(),
 			};
 			context->CSSetUnorderedAccessViews(0, 4, upUAV, nullptr);
-			context->Dispatch(gx_up, gy_up, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Upsample");
+				context->Dispatch(gx_up, gy_up, 1);
+			}
 			context->CSSetUnorderedAccessViews(0, 4, nullUAV, nullptr);
 			context->CSSetShaderResources(0, 5, nullSRV);
 		}
@@ -1227,7 +1249,10 @@ namespace cs::features
 		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 		const uint32_t gx = (dd.Width  + 7) / 8;
 		const uint32_t gy = (dd.Height + 7) / 8;
-		context->Dispatch(gx, gy, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Apply");
+			context->Dispatch(gx, gy, 1);
+		}
 
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1315,7 +1340,10 @@ namespace cs::features
 		context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 		const uint32_t gx = (dd.Width  + 7) / 8;
 		const uint32_t gy = (dd.Height + 7) / 8;
-		context->Dispatch(gx, gy, 1);
+		{
+			TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "ApplyIL");
+			context->Dispatch(gx, gy, 1);
+		}
 
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);

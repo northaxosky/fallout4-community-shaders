@@ -11,6 +11,24 @@
 
 #include "Windows.h"
 
+#ifdef TRACY_SUPPORT
+#include <tracy/Tracy.hpp>
+#include <tracy/TracyD3D11.hpp>
+#else
+using TracyD3D11Ctx = void*;
+#define ZoneScoped ((void)0)
+#define ZoneScopedN(x) ((void)0)
+#define ZoneTransientN(name, str, active) ((void)0)
+#define FrameMark ((void)0)
+#define TracyPlot(name, val) ((void)0)
+#define TracyMessage(txt, sz) ((void)0)
+#define TracyD3D11Context(d, c) nullptr
+#define TracyD3D11Destroy(ctx) ((void)0)
+#define TracyD3D11Zone(ctx, name) ((void)0)
+#define TracyD3D11ZoneTransientS(ctx, var, name, depth, active) ((void)0)
+#define TracyD3D11Collect(ctx) ((void)0)
+#endif
+
 #undef DEBUG
 #undef ERROR
 

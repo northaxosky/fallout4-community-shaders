@@ -14,12 +14,14 @@ namespace cs
 	{
 	public:
 		static Menu& Get();
+		~Menu();
 
 		void OnD3D11Ready(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd);
 		void HookPresentOn(IDXGISwapChain* a_chain);
 
 		bool IsOpen() const noexcept { return _open; }
 		bool IsOverlayVisible() const noexcept { return _overlayVisible; }
+		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
 
 		// Drop a transient top-center notification onto the screen for `a_durationSec`. Replaces
 		// any toast still visible; the most recent message wins. Thread-safe so features can call
@@ -47,6 +49,7 @@ namespace cs
 		ID3D11DeviceContext*    _context        = nullptr;
 		HWND                    _hwnd           = nullptr;
 		IDXGISwapChain*         _chain          = nullptr;
+		TracyD3D11Ctx           _tracyD3D11Ctx  = nullptr;
 		ID3D11RenderTargetView* _backbufferRTV  = nullptr;
 		UINT                    _backbufferW    = 0;
 		UINT                    _backbufferH    = 0;
