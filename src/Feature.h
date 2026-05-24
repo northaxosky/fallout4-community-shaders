@@ -33,6 +33,15 @@ namespace cs
 
 		virtual void DrawSettings() {}
 
+		// Reset this feature's persisted settings to in-code defaults. Override + opt-in via
+		// HasResettableSettings() == true to have the menu render the shared Reset button.
+		// Implementations should also clear derived caches and run SaveSettings().
+		virtual void RestoreDefaultSettings() {}
+
+		// Opt-in to the shared menu Reset button. Default false so features that don't carry
+		// user-tunable settings (e.g. ShaderCatalog, ShaderReplacement diagnostics) stay clean.
+		virtual bool HasResettableSettings() const { return false; }
+
 		// Always-on overlay rendered on top of the game even when the settings menu is closed.
 		virtual void DrawOverlay() {}
 

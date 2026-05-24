@@ -52,6 +52,47 @@ namespace
 		return a_lhs < a_rhs;
 	}
 
+	void DrawFeatureResetButton(cs::Feature* a_feature)
+	{
+		if (!a_feature->HasResettableSettings())
+			return;
+
+		ImGui::PushID("__reset");
+
+		ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kMuted);
+		const bool clicked = ImGui::SmallButton("Reset to defaults");
+		ImGui::PopStyleColor();
+
+		if (clicked)
+			ImGui::OpenPopup("Confirm reset");
+
+		const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+		if (ImGui::BeginPopupModal("Confirm reset", nullptr,
+				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+			ImGui::Text("Reset %.*s to defaults?",
+				static_cast<int>(a_feature->GetName().size()),
+				a_feature->GetName().data());
+			ImGui::Spacing();
+			ImGui::TextDisabled("This restores in-code defaults and saves immediately.");
+			ImGui::Spacing();
+			ImGui::Separator();
+			ImGui::Spacing();
+
+			if (ImGui::Button("Reset", ImVec2(120, 0))) {
+				a_feature->RestoreDefaultSettings();
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::EndPopup();
+		}
+
+		ImGui::PopID();
+	}
+
 	void DrawFeatureSettings(cs::Feature* a_feature)
 	{
 		ImGui::PushID(a_feature->GetName().data());
@@ -62,6 +103,11 @@ namespace
 				ImGui::Separator();
 			}
 			a_feature->DrawSettings();
+			if (a_feature->HasResettableSettings()) {
+				ImGui::Spacing();
+				ImGui::Separator();
+				DrawFeatureResetButton(a_feature);
+			}
 		}
 		ImGui::PopID();
 	}

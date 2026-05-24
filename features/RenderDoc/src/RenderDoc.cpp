@@ -198,6 +198,14 @@ namespace cs::features
 			ImGui::TextDisabled("Runtime load failed - fix the DLL path then restart the game.");
 	}
 
+	void RenderDoc::RestoreDefaultSettings()
+	{
+		_settings = Settings{};
+		SaveSettings();
+		ApplyCapturePath();
+		L->info("Settings reset to defaults");
+	}
+
 	namespace
 	{
 		struct AutoRegister

@@ -19,9 +19,11 @@ namespace cs::features
 		std::string_view GetName() const override { return "RenderDoc"; }
 		std::string GetFeatureSummary() const override { return "Loads the RenderDoc capture library and bridges F4SE input to its capture hotkey."; }
 		std::string GetCategory() const override { return "Diagnostics"; }
+		bool HasResettableSettings() const override { return true; }
 
 		void Load() override;
 		void DrawSettings() override;
+		void RestoreDefaultSettings() override;
 
 		void TriggerCapture();
 
