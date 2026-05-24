@@ -44,6 +44,7 @@ namespace cs::features
 			bool   showFps        = true;
 			bool   showFrameTime  = true;
 			bool   showGraph      = true;
+			bool   showEstimatedPostFGFrameTime = true;
 			bool   showVram       = false;
 			bool   showStats      = false;
 
@@ -83,6 +84,7 @@ namespace cs::features
 
 		static constexpr int kHistoryCapacity = 600;
 		std::array<float, kHistoryCapacity> _frameTimesMs{};
+		std::array<float, kHistoryCapacity> _postFgFrameTimesMs{};
 		int    _frameTimesHead    = 0;
 		int    _frameTimesCount   = 0;
 
