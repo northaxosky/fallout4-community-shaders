@@ -12,11 +12,10 @@
 #include "DX11Hooks.h"
 #include "Env.h"
 #include "Feature.h"
+#include "Engine.h"
 #include "Log.h"
 #include "Menu.h"
 #include "StreamlineCore.h"
-#include "Util.h"
-
 namespace cs::features
 {
 	using namespace upscaling;
@@ -82,7 +81,7 @@ struct DrawWorld_Imagespace_RenderEffectRange
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 		static auto gameViewport = cs::engine::GetGraphicsState();
 
-		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
 
 		auto originalOffsetX = gameViewport->offsetX;
 		auto originalOffsetY = gameViewport->offsetY;
@@ -93,8 +92,8 @@ struct DrawWorld_Imagespace_RenderEffectRange
 			gameViewport->offsetY = originalOffsetY;
 		}
 
-		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
 
 		if (requiresOverride) {
 
@@ -102,14 +101,14 @@ struct DrawWorld_Imagespace_RenderEffectRange
 			func(This, 0, 3, 1, 1);
 			upscaling->OverrideRenderTargets({1, 4, 29, 16});
 			upscaling->OverrideDepth(true);
-			Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
+			cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
 
 			// LDR shaders
 			func(This, 4, 13, 1, 1);
 			upscaling->ResetDepth();
 			upscaling->ResetRenderTargets({4});
 
-			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		} else {
 			func(This, a2, a3, a4, a5);
@@ -133,10 +132,10 @@ struct DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
-		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
 
-		Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
+		cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -181,15 +180,15 @@ struct DrawWorld_Render_PreUI_NVHBAO
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
 
-		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
 
 		if (requiresOverride) {
 			upscaling->OverrideDepth(true);
 			upscaling->OverrideRenderTargets({20});
-			Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
+			cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
 		}
 
 		func(This);
@@ -197,7 +196,7 @@ struct DrawWorld_Render_PreUI_NVHBAO
 		if (requiresOverride) {
 			upscaling->ResetDepth();
 			upscaling->ResetRenderTargets({20});
-			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
 	}
@@ -212,15 +211,15 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
 
-		originalDynamicHeightRatio = Util::GetGameDynamicHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = Util::GetGameDynamicWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
+		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
 
 		if (requiresOverride) {
 			upscaling->OverrideRenderTargets({20, 25, 57, 24, 23, 58, 59, 3, 9, 60, 61, 28});
 			upscaling->OverrideDepth(true);
-			Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
+			cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
 		}
 
 		func(This, a2, a3);
@@ -228,7 +227,7 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 		if (requiresOverride) {
 			upscaling->ResetRenderTargets({4});
 			upscaling->ResetDepth();
-			Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
 	}
@@ -243,7 +242,7 @@ struct BSImagespaceShaderLensFlare_RenderLensFlare
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		bool requiresOverride = Util::GetGameDynamicHeightRatio(renderTargetManager) != 1.0 || Util::GetGameDynamicWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
 
 		if (requiresOverride)
 			upscaling->OverrideDepth(true);
@@ -290,7 +289,7 @@ struct LoadingMenu_Render_UpdateTemporalData
 		func(This);
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		Util::SetDynamicResolution(renderTargetManager, 1.0f, 1.0f, false);
+		cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -304,7 +303,7 @@ struct DrawWorld_Imagespace
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
-		Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+		cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 			originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -677,7 +676,7 @@ void Upscaling::UpdateRenderTargets(float a_currentWidthRatio, float a_currentHe
 
 	// Get the frame buffer texture description to match its properties
 	static auto rendererData = RE::BSGraphics::GetRendererData();
-	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)Util::RenderTarget::kFrameBuffer].srView);
+	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kFrameBuffer].srView);
 
 	ID3D11Resource* frameBufferResource;
 	frameBufferSRV->GetResource(&frameBufferResource);
@@ -747,8 +746,8 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 	// This ensures code that queries render target dimensions get the correct values
 	for (int i = 0; i < 100; i++) {
 		originalRenderTargetData[i] = renderTargetManager->renderTargetData[i];
-		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * Util::GetGameDynamicWidthRatio(renderTargetManager));
-		renderTargetManager->renderTargetData[i].height = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].height) * Util::GetGameDynamicHeightRatio(renderTargetManager));
+		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * cs::engine::dynres::GetWidthRatio(renderTargetManager));
+		renderTargetManager->renderTargetData[i].height = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].height) * cs::engine::dynres::GetHeightRatio(renderTargetManager));
 	}
 
 	// Check and override pixel shader SRVs that reference original render targets
@@ -853,7 +852,7 @@ void Upscaling::OverrideDepth(bool a_doCopy)
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 
 	// Save the original depth SRV (with dynamic resolution)
-	originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain].srViewDepth);
+	originalDepthView = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain].srViewDepth);
 
 	// Optionally perform expensive copy operation
 	if (a_doCopy) {
@@ -867,7 +866,7 @@ void Upscaling::OverrideDepth(bool a_doCopy)
 	}
 
 	// Replace with our dynamic resolution depth texture for post-processing effects
-	rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain].srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(depthOverrideTexture->srv.get());
+	rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain].srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(depthOverrideTexture->srv.get());
 }
 
 void Upscaling::ResetDepth()
@@ -875,7 +874,7 @@ void Upscaling::ResetDepth()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 
 	// Restore the original depth SRV with dynamic resolution
-	rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain].srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(originalDepthView);
+	rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain].srViewDepth = reinterpret_cast<REX::W32::ID3D11ShaderResourceView*>(originalDepthView);
 }
 
 void Upscaling::UpdateSamplerStates(float a_currentMipBias)
@@ -956,24 +955,24 @@ void Upscaling::CopyDepth()
 
 	// Calculate both display (screen) and render (scaled) resolutions
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
 		L->info("First CopyDepth: screen={}x{}, render={}x{}, widthRatio={:.4f}, heightRatio={:.4f}",
 			(uint)screenSize.x, (uint)screenSize.y, (uint)renderSize.x, (uint)renderSize.y,
-			Util::GetGameDynamicWidthRatio(renderTargetManager), Util::GetGameDynamicHeightRatio(renderTargetManager));
+			cs::engine::dynres::GetWidthRatio(renderTargetManager), cs::engine::dynres::GetHeightRatio(renderTargetManager));
 		loggedOnce = true;
 	}
 
 	// Get the scaled depth buffer as input
-	auto depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain].srViewDepth);
+	auto depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain].srViewDepth);
 
 	// Get the dynamic resolution depth output UAV
 	auto depthUAV = depthOverrideTexture->uav.get();
 
 	// Also update the linearized depth used by other effects
-	auto linearDepthUAV = reinterpret_cast<ID3D11UnorderedAccessView*>(rendererData->renderTargets[(uint)Util::RenderTarget::kMainDepthMips].uaView);
+	auto linearDepthUAV = reinterpret_cast<ID3D11UnorderedAccessView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainDepthMips].uaView);
 
 	{
 		UpdateAndBindUpscalingCB(context, screenSize, renderSize);
@@ -1250,7 +1249,7 @@ void Upscaling::UpdateUpscaling()
 	originalDynamicHeightRatio = resolutionScale;
 	originalDynamicWidthRatio = resolutionScale;
 
-	Util::SetDynamicResolution(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+	cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
 		originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 
 	CheckResources();
@@ -1267,7 +1266,7 @@ void Upscaling::Upscale()
 	// Unbind render targets to avoid resource hazards
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 
-	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)Util::RenderTarget::kFrameBuffer].srView);
+	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kFrameBuffer].srView);
 
 	winrt::com_ptr<ID3D11Resource> frameBufferResource;
 	frameBufferSRV->GetResource(frameBufferResource.put());
@@ -1276,7 +1275,7 @@ void Upscaling::Upscale()
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
 
 	// Copy frame buffer to upscaling texture (input for DLSS/FSR)
 	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource.get());
@@ -1292,7 +1291,7 @@ void Upscaling::Upscale()
 			jitter.x, jitter.y, settings.qualityMode);
 		L->info("FrameBuffer texture: {}x{} format={}", fbDesc.Width, fbDesc.Height, (uint)fbDesc.Format);
 		L->info("Upscaling texture: {}x{} format={}", utDesc.Width, utDesc.Height, (uint)utDesc.Format);
-		L->info("dynamicWidthRatio={}, dynamicHeightRatio={}", Util::GetGameDynamicWidthRatio(renderTargetManager), Util::GetGameDynamicHeightRatio(renderTargetManager));
+		L->info("dynamicWidthRatio={}, dynamicHeightRatio={}", cs::engine::dynres::GetWidthRatio(renderTargetManager), cs::engine::dynres::GetHeightRatio(renderTargetManager));
 		loggedOnce = true;
 	}
 
@@ -1301,8 +1300,8 @@ void Upscaling::Upscale()
 		{
 			UpdateAndBindUpscalingCB(context, screenSize, renderSize);
 
-			auto motionVectorSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)Util::RenderTarget::kMotionVectors].srView);
-			auto depthTextureSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain].srViewDepth);
+			auto motionVectorSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMotionVectors].srView);
+			auto depthTextureSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain].srViewDepth);
 
 			ID3D11ShaderResourceView* views[2] = { motionVectorSRV, depthTextureSRV };
 			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
@@ -1359,7 +1358,7 @@ void Upscaling::CreateUpscalingResources()
 	// Only create DLSS-specific resources if DLSS is available
 	if (cs::Streamline::GetSingleton()->featureDLSS) {
 		auto renderer = RE::BSGraphics::GetRendererData();
-		auto& main = renderer->renderTargets[(uint)Util::RenderTarget::kMain];
+		auto& main = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMain];
 
 		// Get main render target dimensions
 		D3D11_TEXTURE2D_DESC texDesc{};

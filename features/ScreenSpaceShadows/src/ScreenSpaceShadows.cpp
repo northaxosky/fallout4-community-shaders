@@ -26,8 +26,6 @@
 #include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Sky.h"
-#include "Util.h"
-
 namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.sss"); }
@@ -269,7 +267,7 @@ namespace cs::features
 			return false;
 
 		// Size off the depth target so the mask matches the proxied DRS dims, not the back buffer.
-		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(sss::Util::DepthStencilTarget::kMain)];
+		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain)];
 		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
 		if (!depthTex)
 			return false;
@@ -507,7 +505,7 @@ namespace cs::features
 			return;
 
 		// Bind depth SRV (slot 0). The engine populates this before DeferredPrePass begins; we read it here post-call.
-		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(sss::Util::DepthStencilTarget::kMain)];
+		auto& depth = rendererData->depthStencilTargets[static_cast<uint32_t>(cs::engine::DepthStencilTarget::kMain)];
 		auto* depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth);
 		if (!depthSRV)
 			return;

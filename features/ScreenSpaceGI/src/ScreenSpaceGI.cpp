@@ -25,8 +25,6 @@
 #include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
-#include "Util.h"
-
 #ifdef near
 #	undef near
 #endif

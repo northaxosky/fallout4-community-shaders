@@ -1,6 +1,4 @@
 #pragma once
-
-#include "Util.h"
 #include "Buffer.h"
 #include "FidelityFX.h"
 #include "Streamline.h"

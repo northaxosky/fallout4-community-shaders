@@ -1,9 +1,8 @@
 #include "FidelityFX.h"
 
+#include "Engine.h"
 #include "Log.h"
 #include "Upscaling.h"
-#include "Util.h"
-
 namespace cs::features::upscaling
 {
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling.fsr"); }
@@ -62,7 +61,7 @@ void FidelityFX::CreateFSRResources()
 	contextDescription.backendInterfaceUpscaling = fsrInterface;
 
 	auto renderer = RE::BSGraphics::GetRendererData();
-	auto& main = renderer->renderTargets[(uint)Util::RenderTarget::kMainTemp];
+	auto& main = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp];
 
 	D3D11_TEXTURE2D_DESC texDesc{};
 	reinterpret_cast<ID3D11Texture2D*>(main.texture)->GetDesc(&texDesc);
@@ -103,7 +102,7 @@ void FidelityFX::CopyOpaqueTexture()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)Util::RenderTarget::kMainTemp].texture);
+	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
 
 	context->CopyResource(colorOpaqueOnlyTexture->resource.get(), mainTexture);
 }
@@ -120,7 +119,7 @@ void FidelityFX::GenerateReactiveMask()
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 
-	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)Util::RenderTarget::kMainTemp].texture);
+	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
 
 	FfxFsr3GenerateReactiveDescription dispatchParameters{};
 
@@ -134,7 +133,7 @@ void FidelityFX::GenerateReactiveMask()
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * Util::GetGameDynamicWidthRatio(renderTargetManager), screenSize.y * Util::GetGameDynamicHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
 
 	dispatchParameters.renderSize.width = static_cast<uint>(renderSize.x);
 	dispatchParameters.renderSize.height = static_cast<uint>(renderSize.y);
@@ -152,8 +151,8 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
 
-	auto& depthTexture = rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain];
-	auto& motionVectorTexture = rendererData->renderTargets[(uint)Util::RenderTarget::kMotionVectors];
+	auto& depthTexture = rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain];
+	auto& motionVectorTexture = rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMotionVectors];
 
 	static LARGE_INTEGER frequency = []() {
 		LARGE_INTEGER freq;

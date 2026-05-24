@@ -1,9 +1,8 @@
 #include "Streamline.h"
 
 #include "StreamlineCore.h"
+#include "Engine.h"
 #include "Log.h"
-#include "Util.h"
-
 namespace cs::features::upscaling
 {
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling.streamline"); }
@@ -29,7 +28,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 	UpdateConstants(a_jitter);
 
 	static auto rendererData = RE::BSGraphics::GetRendererData();
-	auto& depthTexture = rendererData->depthStencilTargets[(uint)Util::DepthStencilTarget::kMain];
+	auto& depthTexture = rendererData->depthStencilTargets[(uint)cs::engine::DepthStencilTarget::kMain];
 
 	static auto gameViewport = cs::engine::GetGraphicsState();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);

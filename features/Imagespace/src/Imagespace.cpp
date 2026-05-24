@@ -19,6 +19,7 @@
 #include <DirectXMath.h>
 
 #include "ComputeScope.h"
+#include "Engine.h"
 #include "CSUtil.h"
 #include "Env.h"
 #include "ImagespaceConfigIO.h"
@@ -27,7 +28,6 @@
 #include "PresetManager.h"
 #include "RenderHooks.h"
 #include "Sky.h"
-#include "Util.h"
 #include "Weather.h"
 #include "WeatherProfiles.h"
 
@@ -47,7 +47,7 @@ namespace cs::features
 	constexpr const char* kStyleMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_style";
 	constexpr const char* kWeatherCatMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_category";
 	constexpr const char* kWeatherFormIDMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_formid";
-	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(imagespace::Util::RenderTarget::kFrameBuffer);
+	constexpr uint32_t    kRT_FrameBuffer = static_cast<uint32_t>(cs::engine::RenderTarget::kFrameBuffer);
 
 	namespace
 	{
