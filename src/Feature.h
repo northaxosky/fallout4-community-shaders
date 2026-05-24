@@ -40,10 +40,7 @@ namespace cs
 		virtual void OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* /*device*/) {}
 
 		// ---- Discovery / menu surface (upstream parity) ------------------------------------
-		// Mirrors Skyrim CS Feature.h. No-op defaults; features opt in by overriding. The
-		// settings menu and a future unloaded-feature panel read these to render summaries
-		// and group features by category. Adding new ones here keeps feature parity with
-		// upstream while letting per-feature population happen incrementally.
+		// Mirrors Skyrim CS Feature.h; no-op defaults so features opt in by overriding.
 
 		// One-line description shown in the menu under the feature name.
 		virtual std::string GetFeatureSummary() const { return {}; }
@@ -60,10 +57,7 @@ namespace cs
 		// Hide a feature from the menu entirely (e.g. developer-only tooling).
 		virtual bool IsInMenu() const { return true; }
 
-		// Drawn for features that registered but did not load (missing config, failed init).
-		// Unwired today; the FeatureManager doesn't yet distinguish registered-but-failed
-		// from skipped. Provided for upstream parity so per-feature overrides can land
-		// independently.
+		// Drawn for features that registered but did not load; unwired today (no load-state tracking).
 		virtual void DrawUnloadedUI() {}
 
 		// Drawn when a feature failed to load, so the user sees why instead of a silent skip.

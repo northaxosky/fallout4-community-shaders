@@ -210,12 +210,8 @@ namespace cs::features
 		float applyContrast;
 	};
 
-	// FO4-original: upstream Skyrim CS SSShadows has no tier preset enum. The
-	// Performance/Quality/Cinematic tiers here are an FO4-port addition for parity with our
-	// other features' preset surfaces.
-	//
-	// Indexed by Preset enum. Keep BilinearThreshold near Bend's recommended 0.02 across the board;
-	// the cost knob is sample count + thickness, not bilinear sensitivity.
+	// FO4-original tier enum; upstream Skyrim CS SSShadows has no Performance/Quality/Cinematic presets.
+	// BilinearThreshold stays near Bend's recommended 0.02 across the board; cost knob is sample count + thickness.
 	static constexpr PresetValues kPresets[4] = {
 		{ 0, 0.0f,    0.0f,    0.0f,    0.0f  },  // Custom: sentinel, never read.
 		{ 1, 0.030f,  0.040f,  0.75f,   0.7f  },  // Performance: looser thickness, slightly relaxed bilinear.
