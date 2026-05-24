@@ -33,6 +33,7 @@ namespace cs::features
 		// Multiplies the mask into kDiffuseBuffer with N.L gating against the sun. Runs in the post-call thunk on DrawWorld::DeferredLightsImpl.
 		void Apply();
 
+		// Axis: quality vs perf cost.
 		enum class Preset : int
 		{
 			kCustom      = 0,

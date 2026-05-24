@@ -47,6 +47,7 @@ public:
 	struct Settings
 	{
 		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS;
+		// Axis: industry-standard upscaler quality (DLSS/FSR/XeSS naming).
 		// 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
 		uint qualityMode = 1;
 	};

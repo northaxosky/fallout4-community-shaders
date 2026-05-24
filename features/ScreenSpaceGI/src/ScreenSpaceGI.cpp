@@ -122,6 +122,7 @@ namespace cs::features
 		float       applyIntensity;
 	};
 
+	// Axis: quality vs perf cost.
 	static constexpr PresetEntry kQualityPresets[] = {
 		// Map upstream Skyrim CS @ bb6460db Low/Standard/Extreme -> Performance/Quality/Cinematic.
 		// Quality and Cinematic share slice/step counts (upstream "Standard" and "Extreme"); only

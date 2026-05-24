@@ -39,6 +39,7 @@ namespace cs::features
 
 		void RunFrame();
 
+		// Axis: stylistic look (not quality).
 		enum class Style : int
 		{
 			kCustom    = 0,

@@ -21,6 +21,7 @@ namespace cs::features
 		void DrawSettings() override;
 		void DrawOverlay() override;
 
+		// Axis: overlay verbosity.
 		enum class Preset : int
 		{
 			Off      = 0,
