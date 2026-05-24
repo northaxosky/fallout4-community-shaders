@@ -295,6 +295,30 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	}
 	cs::env::SetDisplayedFrameMultiplier(multiplier);
 
+	// Approach B post-FG FPS source. Query the active backend for the actual frames-
+	// presented delta and accumulate into a monotonic counter; PerformanceOverlay deltas
+	// this against wall time to derive the displayed-FPS readout. Falls back to multiplier
+	// when the backend doesn't report (FSR3 has no safe per-frame counter without
+	// hijacking presentCallback, which would break UI composition).
+	uint32_t actualFrames = 0;
+	if (useFrameGenerationThisFrame) {
+		switch (frameGen->activeFrameGenType) {
+			case FrameGeneration::FrameGenType::kDLSSG:
+				actualFrames = StreamlineFG::GetSingleton()->ConsumeFramesPresented();
+				break;
+			case FrameGeneration::FrameGenType::kXeSSFG:
+				actualFrames = XeSSFG::GetSingleton()->ConsumeFramesPresented();
+				break;
+			default:
+				break;
+		}
+		if (actualFrames == 0)
+			actualFrames = static_cast<uint32_t>(multiplier);
+	} else {
+		actualFrames = 1;
+	}
+	cs::env::AddDisplayedFrames(actualFrames);
+
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 

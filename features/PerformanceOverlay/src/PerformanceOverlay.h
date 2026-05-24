@@ -101,6 +101,12 @@ namespace cs::features
 		float  _displayedFps      = 0.0f;
 		float  _displayedFrameMs  = 0.0f;
 		int    _displayedFrameMultiplier = 1;
+		// Approach B: backend-reported displayed FPS sampled by delta-ing the env counter
+		// against a wall-clock window. 0 until the first window completes. Always equals
+		// _displayedFps when FG is off.
+		float    _measuredDisplayedFps = 0.0f;
+		uint64_t _lastDisplayedFrameTotal = 0;
+		double   _lastDisplayedSampleSec  = 0.0;
 		float  _avgMs             = 0.0f;
 		float  _onePctLowMs       = 0.0f;
 		float  _pointOnePctLowMs  = 0.0f;

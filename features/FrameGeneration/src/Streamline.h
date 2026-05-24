@@ -34,6 +34,12 @@ public:
 	bool CheckAndEnableDLSSG();
 	void SetEnabled(bool a_enabled);
 
+	// Approach B post-FG FPS source. Returns DLSSGState::numFramesActuallyPresented (which
+	// is "since the last slDLSSGGetState call" per sl_dlss_g.h). Returns 0 when DLSS-G is
+	// not enabled for this session or telemetry is unavailable. Call exactly once per
+	// engine tick to avoid losing counts.
+	uint32_t ConsumeFramesPresented();
+
 	void AcquireFrameToken();
 	void SetPCLMarker(sl::PCLMarker marker);
 

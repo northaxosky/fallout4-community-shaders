@@ -27,7 +27,7 @@ namespace cs::features
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\PerformanceOverlay.toml";
 	constexpr const char* kPostFgFrameTimeTooltip =
-		"Estimated by dividing pre-FG frame time by the active frame-generation multiplier (DLSS-G/FSR3-FG/XeSS-FG). Not a measured post-present timestamp.";
+		"Backend-reported when available (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus accumulate into a per-tick counter). FSR3 falls back to engine frame time divided by the configured multiplier.";
 
 	PerformanceOverlay* PerformanceOverlay::GetSingleton()
 	{
@@ -212,6 +212,24 @@ namespace cs::features
 			_displayedFrameMs = _curFrameMs;
 			_displayedFps = _curFrameMs > 0.0f ? 1000.0f / _curFrameMs : 0.0f;
 			_displayedFrameMultiplier = displayedFrameMultiplier;
+
+			// Approach B: derive measured displayed FPS from the env counter delta over the
+			// elapsed wall-clock window. Falls back to estimate (engine FPS * multiplier)
+			// when the window is too short, the counter hasn't advanced, or FG is off.
+			const uint64_t totalNow = cs::env::GetDisplayedFrameTotal();
+			const double windowSec = nowSec - _lastDisplayedSampleSec;
+			if (_lastDisplayedSampleSec > 0.0 && windowSec > 0.0 && totalNow >= _lastDisplayedFrameTotal) {
+				const uint64_t delta = totalNow - _lastDisplayedFrameTotal;
+				if (delta > 0)
+					_measuredDisplayedFps = static_cast<float>(static_cast<double>(delta) / windowSec);
+				else
+					_measuredDisplayedFps = _displayedFps * static_cast<float>(displayedFrameMultiplier);
+			} else {
+				_measuredDisplayedFps = _displayedFps * static_cast<float>(displayedFrameMultiplier);
+			}
+			_lastDisplayedFrameTotal = totalNow;
+			_lastDisplayedSampleSec  = nowSec;
+
 			RecomputeStats();
 			_lastDisplayUpdate = nowSec;
 		}
@@ -346,13 +364,18 @@ namespace cs::features
 
 			if (settings.showFps) {
 				const bool fgActive = _displayedFrameMultiplier > 1;
-				const float outputFps = _displayedFps * static_cast<float>(_displayedFrameMultiplier);
+				// Approach B: prefer measured displayed FPS from backend telemetry; fall
+				// back to engine FPS * multiplier when the measurement hasn't warmed up.
+				const float estimateFps = _displayedFps * static_cast<float>(_displayedFrameMultiplier);
+				const float outputFps = (fgActive && _measuredDisplayedFps > 0.0f) ? _measuredDisplayedFps : estimateFps;
 				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(outputFps));
 				if (fgActive)
 					ImGui::Text("%.0f FPS  (engine %.0f x%d)", outputFps, _displayedFps, _displayedFrameMultiplier);
 				else
 					ImGui::Text("%.0f FPS", _displayedFps);
 				ImGui::PopStyleColor();
+				if (fgActive)
+					ImGui::SetItemTooltip("Displayed FPS comes from backend-reported frame counts (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus). FSR3 falls back to engine FPS times multiplier since safe per-frame counting would require hijacking presentCallback.");
 			}
 			if (settings.showFrameTime) {
 				if (_displayedFrameMultiplier > 1)

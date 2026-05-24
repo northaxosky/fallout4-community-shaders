@@ -49,6 +49,7 @@ void XeSSFG::Shutdown()
 	pfn_xefgSwapChainD3D12GetSwapChainPtr = nullptr;
 	pfn_xefgSwapChainSetEnabled = nullptr;
 	pfn_xefgSwapChainGetProperties = nullptr;
+	pfn_xefgSwapChainGetLastPresentStatus = nullptr;
 	pfn_xefgSwapChainD3D12TagFrameResource = nullptr;
 	pfn_xefgSwapChainTagFrameConstants = nullptr;
 	pfn_xefgSwapChainSetPresentId = nullptr;
@@ -86,6 +87,7 @@ bool XeSSFG::LoadLibraries()
 	LOAD_FN(fgModule, xefgSwapChainD3D12GetSwapChainPtr);
 	LOAD_FN(fgModule, xefgSwapChainSetEnabled);
 	LOAD_FN(fgModule, xefgSwapChainGetProperties);
+	LOAD_FN(fgModule, xefgSwapChainGetLastPresentStatus);
 	LOAD_FN(fgModule, xefgSwapChainD3D12TagFrameResource);
 	LOAD_FN(fgModule, xefgSwapChainTagFrameConstants);
 	LOAD_FN(fgModule, xefgSwapChainSetPresentId);
@@ -310,6 +312,16 @@ void XeSSFG::SetEnabled(uint32_t a_enabled)
 {
 	if (xefgCtx && pfn_xefgSwapChainSetEnabled)
 		pfn_xefgSwapChainSetEnabled(xefgCtx, a_enabled);
+}
+
+uint32_t XeSSFG::ConsumeFramesPresented()
+{
+	if (!xefgCtx || !pfn_xefgSwapChainGetLastPresentStatus)
+		return 0;
+	xefg_swapchain_present_status_t status{};
+	if (pfn_xefgSwapChainGetLastPresentStatus(xefgCtx, &status) != XEFG_SWAPCHAIN_RESULT_SUCCESS)
+		return 0;
+	return status.framesPresented;
 }
 
 }

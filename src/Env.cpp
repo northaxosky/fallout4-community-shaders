@@ -1,6 +1,7 @@
 #include "Env.h"
 
 #include <atomic>
+#include <cstdint>
 
 #include <Windows.h>
 
@@ -15,6 +16,7 @@ namespace cs::env
 		bool g_detected = false;
 		bool g_enbLoaded = false;
 		std::atomic<int> g_displayedFrameMultiplier{ 1 };
+		std::atomic<uint64_t> g_displayedFrameTotal{ 0 };
 	}
 
 	void DetectENB()
@@ -46,5 +48,16 @@ namespace cs::env
 	int GetDisplayedFrameMultiplier() noexcept
 	{
 		return g_displayedFrameMultiplier.load(std::memory_order_relaxed);
+	}
+
+	void AddDisplayedFrames(uint32_t a_count) noexcept
+	{
+		if (a_count == 0) return;
+		g_displayedFrameTotal.fetch_add(a_count, std::memory_order_relaxed);
+	}
+
+	uint64_t GetDisplayedFrameTotal() noexcept
+	{
+		return g_displayedFrameTotal.load(std::memory_order_relaxed);
 	}
 }

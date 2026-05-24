@@ -38,6 +38,11 @@ public:
 		bool a_reset);
 	void SetEnabled(uint32_t a_enabled);
 
+	// Approach B post-FG FPS source. Returns the frames-presented delta since the previous
+	// call (XeSS-FG's xefg_swapchain_present_status_t::framesPresented is per-last-call,
+	// not cumulative). Returns 0 when telemetry is unavailable or the runtime didn't run.
+	uint32_t ConsumeFramesPresented();
+
 	bool initialized = false;
 	HMODULE fgModule = nullptr;
 	HMODULE xellModule = nullptr;
@@ -63,6 +68,7 @@ private:
 	decltype(&xefgSwapChainD3D12GetSwapChainPtr) pfn_xefgSwapChainD3D12GetSwapChainPtr = nullptr;
 	decltype(&xefgSwapChainSetEnabled) pfn_xefgSwapChainSetEnabled = nullptr;
 	decltype(&xefgSwapChainGetProperties) pfn_xefgSwapChainGetProperties = nullptr;
+	decltype(&xefgSwapChainGetLastPresentStatus) pfn_xefgSwapChainGetLastPresentStatus = nullptr;
 	decltype(&xefgSwapChainD3D12TagFrameResource) pfn_xefgSwapChainD3D12TagFrameResource = nullptr;
 	decltype(&xefgSwapChainTagFrameConstants) pfn_xefgSwapChainTagFrameConstants = nullptr;
 	decltype(&xefgSwapChainSetPresentId) pfn_xefgSwapChainSetPresentId = nullptr;

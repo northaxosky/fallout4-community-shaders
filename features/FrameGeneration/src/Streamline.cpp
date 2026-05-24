@@ -93,6 +93,16 @@ void StreamlineFG::SetEnabled(bool a_enabled)
 	slDLSSGSetOptions(viewport, options);
 }
 
+uint32_t StreamlineFG::ConsumeFramesPresented()
+{
+	if (!sessionActive || !slDLSSGGetState)
+		return 0;
+	sl::DLSSGState state{};
+	if (slDLSSGGetState(viewport, state, nullptr) != sl::Result::eOk)
+		return 0;
+	return state.numFramesActuallyPresented;
+}
+
 static sl::float4x4 toSLMatrix(const __m128* mat)
 {
 	sl::float4x4 result;
