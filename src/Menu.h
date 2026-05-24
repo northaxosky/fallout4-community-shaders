@@ -56,7 +56,7 @@ namespace cs
 		bool    _open              = false;
 		bool    _overlayVisible    = true;
 
-		float   _fontScale = 2.0f;
+		float   _fontScale = 1.25f;
 		int     _loggingLevelIdx = -1;
 		std::vector<std::string> _cachedLoggers;
 

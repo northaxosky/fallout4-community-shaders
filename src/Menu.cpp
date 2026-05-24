@@ -17,6 +17,7 @@
 #include "Log.h"
 #include "Plugin.h"
 #include "PresetManager.h"
+#include "Theme.h"
 
 namespace
 {
@@ -175,6 +176,9 @@ namespace cs
 		static const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\imgui.ini";
 		io.IniFilename = kIniPath;
 
+		cs::theme::LoadFonts(io);
+		cs::theme::ApplyDarkTheme(ImGui::GetStyle());
+
 		ImGui_ImplWin32_Init(_hwnd);
 		ImGui_ImplDX11_Init(_device, _context);
 
@@ -291,12 +295,12 @@ namespace cs
 			ImGui::Separator();
 
 			if (ImGui::CollapsingHeader("Menu Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::SliderFloat("Font scale", &_fontScale, 0.5f, 4.0f, "%.2fx");
-				if (ImGui::Button("Reset to 2x"))
-					_fontScale = 2.0f;
-				ImGui::SameLine();
-				if (ImGui::Button("Reset to 1x"))
+				ImGui::SliderFloat("Font scale", &_fontScale, 0.5f, 3.0f, "%.2fx");
+				if (ImGui::Button("Reset to 1.0x"))
 					_fontScale = 1.0f;
+				ImGui::SameLine();
+				if (ImGui::Button("Reset to 1.25x"))
+					_fontScale = 1.25f;
 
 				ImGui::SeparatorText("Logging");
 				static const char* kLevelNames[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };
