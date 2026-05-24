@@ -124,7 +124,8 @@ jobs:
             throw "Could not find x64 fxc.exe under $kitsRoot"
           }
 
-          pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify-shader-roundtrip.ps1 -FxcPath $fxc.FullName
+          $env:FXC_PATH = $fxc.FullName
+          ctest --test-dir build -C Release -R ShaderRoundtrip --output-on-failure --no-tests=error
 
       - name: Build
         run: cmake --build build --config Release --parallel

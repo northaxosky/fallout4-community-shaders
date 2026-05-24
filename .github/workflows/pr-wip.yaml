@@ -1,0 +1,25 @@
+name: "PR: WIP"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  pull-requests: read
+
+jobs:
+  wip:
+    name: Reject WIP titles
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          shopt -s nocasematch
+          if [[ "$PR_TITLE" =~ ^(WIP:|\[WIP\]|Draft:) ]]; then
+            echo "PR title is marked as work in progress: $PR_TITLE" >&2
+            exit 1
+          fi
