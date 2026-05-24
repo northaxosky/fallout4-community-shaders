@@ -88,3 +88,16 @@ register_feature(ScreenSpaceGI)
 register_feature(Imagespace)
 register_feature(ShaderCatalog)
 register_feature(ShaderReplacement)
+
+enable_testing()
+set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/verify-shader-roundtrip.ps1")
+add_test(
+	NAME ShaderRoundtrip
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_shader_roundtrip_script}' -FxcPath $env:FXC_PATH } else { & '${_shader_roundtrip_script}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(ShaderRoundtrip PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 300
+)
