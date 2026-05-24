@@ -1337,10 +1337,13 @@ void Upscaling::Upscale()
 
 	// Execute upscaling
 	auto effectiveQuality = GetEffectiveQualityMode();
-	if (upscaleMethod == UpscaleMethod::kDLSS) {
-		Streamline::GetSingleton()->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
-	} else if (upscaleMethod == UpscaleMethod::kFSR) {
-		FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize);
+	{
+		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Eval");
+		if (upscaleMethod == UpscaleMethod::kDLSS) {
+			Streamline::GetSingleton()->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
+		} else if (upscaleMethod == UpscaleMethod::kFSR) {
+			FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize);
+		}
 	}
 
 	// Copy upscaled result back to the frame buffer

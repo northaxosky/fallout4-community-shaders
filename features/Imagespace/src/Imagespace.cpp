@@ -920,6 +920,7 @@ namespace cs::features
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
+		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Lens");
 
 		// Camera near/far for linearization.
 		const float nearP = cs::engine::GetCameraNear();
@@ -1225,7 +1226,10 @@ namespace cs::features
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 				const uint32_t gx = (dstW + 7) / 8;
 				const uint32_t gy = (dstH + 7) / 8;
-				context->Dispatch(gx, gy, 1);
+				{
+					TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "LumPyramid");
+					context->Dispatch(gx, gy, 1);
+				}
 
 				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1251,7 +1255,10 @@ namespace cs::features
 				ID3D11UnorderedAccessView* uavs[1] = { lumPyramidUAVs[pyramidMipCount - 1].get() };
 				context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 				context->CSSetShader(lumTailCS, nullptr, 0);
-				context->Dispatch(1, 1, 1);
+				{
+					TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "LumPyramid");
+					context->Dispatch(1, 1, 1);
+				}
 
 				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1282,7 +1289,10 @@ namespace cs::features
 			ID3D11Buffer* cbs[1] = { exposureCB->CB() };
 			context->CSSetConstantBuffers(0, 1, cbs);
 			context->CSSetShader(expoCS, nullptr, 0);
-			context->Dispatch(1, 1, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Exposure");
+				context->Dispatch(1, 1, 1);
+			}
 
 			ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1308,7 +1318,10 @@ namespace cs::features
 			context->CSSetShader(threshCS, nullptr, 0);
 			const uint32_t gx = (bcb.OutputDimensions[0] + 7) / 8;
 			const uint32_t gy = (bcb.OutputDimensions[1] + 7) / 8;
-			context->Dispatch(gx, gy, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "BloomThreshold");
+				context->Dispatch(gx, gy, 1);
+			}
 
 			ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1338,7 +1351,10 @@ namespace cs::features
 				context->CSSetConstantBuffers(0, 1, cbs);
 				const uint32_t gx = (bcb.DstDimensions[0] + 7) / 8;
 				const uint32_t gy = (bcb.DstDimensions[1] + 7) / 8;
-				context->Dispatch(gx, gy, 1);
+				{
+					TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "BloomBlur");
+					context->Dispatch(gx, gy, 1);
+				}
 
 				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1371,7 +1387,10 @@ namespace cs::features
 				context->CSSetConstantBuffers(0, 1, cbs);
 				const uint32_t gx = (bcb.DstDimensions[0] + 7) / 8;
 				const uint32_t gy = (bcb.DstDimensions[1] + 7) / 8;
-				context->Dispatch(gx, gy, 1);
+				{
+					TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "BloomComposite");
+					context->Dispatch(gx, gy, 1);
+				}
 
 				ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 				context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
@@ -1458,7 +1477,10 @@ namespace cs::features
 			context->CSSetShader(compCS, nullptr, 0);
 			const uint32_t gx = (W + 7) / 8;
 			const uint32_t gy = (H + 7) / 8;
-			context->Dispatch(gx, gy, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Composite");
+				context->Dispatch(gx, gy, 1);
+			}
 
 			ID3D11UnorderedAccessView* clearUAV[1] = { nullptr };
 			context->CSSetUnorderedAccessViews(0, 1, clearUAV, nullptr);

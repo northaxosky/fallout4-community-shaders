@@ -615,7 +615,10 @@ namespace cs::features
 			cb.ShadowContrast = settings.shadowContrast;
 			raymarchCB->Update(cb);
 
-			context->Dispatch(d.WaveCount[0], d.WaveCount[1], d.WaveCount[2]);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Raymarch");
+				context->Dispatch(d.WaveCount[0], d.WaveCount[1], d.WaveCount[2]);
+			}
 		}
 
 		// One-shot CPU readback to log mask stats; lets the smoke harness verify shadows are written

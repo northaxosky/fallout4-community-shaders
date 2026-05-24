@@ -124,6 +124,14 @@ namespace cs
 		return instance;
 	}
 
+	Menu::~Menu()
+	{
+		if (_tracyD3D11Ctx) {
+			TracyD3D11Destroy(_tracyD3D11Ctx);
+			_tracyD3D11Ctx = nullptr;
+		}
+	}
+
 	void Menu::ShowToast(std::string a_text, double a_durationSec)
 	{
 		auto& m = Get();
@@ -194,6 +202,7 @@ namespace cs
 
 		InitImGui();
 		HookWndProc();
+		_tracyD3D11Ctx = TracyD3D11Context(a_device, a_context);
 
 		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<uintptr_t>(a_hwnd));
 	}
@@ -593,9 +602,12 @@ namespace cs
 
 	HRESULT WINAPI Menu::hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags)
 	{
-		Menu::Get().Render();
+		auto& menu = Menu::Get();
+		menu.Render();
 		FrameMark;
-		return Menu::Get()._origPresent(a_chain, a_sync, a_flags);
+		if (menu._tracyD3D11Ctx)
+			TracyD3D11Collect(menu._tracyD3D11Ctx);
+		return menu._origPresent(a_chain, a_sync, a_flags);
 	}
 
 	LRESULT CALLBACK Menu::hkWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)

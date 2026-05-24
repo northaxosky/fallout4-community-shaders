@@ -331,7 +331,10 @@ void FrameGeneration::PreAlpha()
 	auto& colorMain = rendererData->renderTargets[(uint)RenderTarget::kMain];
 	auto& colorPostAlpha = rendererData->renderTargets[(uint)RenderTarget::kMainTemp];
 
-	context->CopyResource(reinterpret_cast<ID3D11Texture2D*>(colorMain.texture), reinterpret_cast<ID3D11Texture2D*>(colorPostAlpha.texture));
+	{
+		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "PreAlpha");
+		context->CopyResource(reinterpret_cast<ID3D11Texture2D*>(colorMain.texture), reinterpret_cast<ID3D11Texture2D*>(colorPostAlpha.texture));
+	}
 }
 
 void FrameGeneration::PostAlpha()
@@ -378,7 +381,10 @@ void FrameGeneration::PostAlpha()
 
 			context->CSSetShader(generateSharedBuffersCS, nullptr, 0);
 
-			context->Dispatch(dispatchX, dispatchY, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Capture");
+				context->Dispatch(dispatchX, dispatchY, 1);
+			}
 		}
 
 		ID3D11ShaderResourceView* views[3] = { nullptr, nullptr, nullptr };
@@ -426,7 +432,10 @@ void FrameGeneration::CopyBuffersToSharedResources()
 
 			context->CSSetShader(copyDepthToSharedBufferCS, nullptr, 0);
 
-			context->Dispatch(dispatchX, dispatchY, 1);
+			{
+				TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Capture");
+				context->Dispatch(dispatchX, dispatchY, 1);
+			}
 		}
 
 		ID3D11ShaderResourceView* views[1] = { nullptr };
@@ -570,7 +579,10 @@ void FrameGeneration::PostDisplay()
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-	context->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
+	{
+		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Capture");
+		context->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
+	}
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
@@ -617,7 +629,10 @@ void FrameGeneration::GenerateUIAlphaMask()
 	context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 
 	context->CSSetShader(uiAlphaMaskCS, nullptr, 0);
-	context->Dispatch(dispatchX, dispatchY, 1);
+	{
+		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "CaptureUI");
+		context->Dispatch(dispatchX, dispatchY, 1);
+	}
 
 	ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
 	context->CSSetShaderResources(0, 2, nullSRVs);
