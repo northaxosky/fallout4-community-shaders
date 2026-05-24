@@ -345,8 +345,8 @@ namespace cs
 				if (ImGui::Button("Reset to 1.0x"))
 					_fontScale = 1.0f;
 				ImGui::SameLine();
-				if (ImGui::Button("Reset to 1.25x"))
-					_fontScale = 1.25f;
+				if (ImGui::Button("Reset to 1.5x"))
+					_fontScale = 1.5f;
 
 				ImGui::SeparatorText("Logging");
 				static const char* kLevelNames[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };

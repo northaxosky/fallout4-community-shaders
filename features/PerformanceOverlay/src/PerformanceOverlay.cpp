@@ -301,7 +301,7 @@ namespace cs::features
 			flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize;
 
 		// Pinned width keeps rows uniform regardless of which sections are enabled.
-		const float kContentWidth = 280.0f * settings.fontScale;
+		const float kContentWidth = 360.0f * settings.fontScale;
 		ImGui::SetNextWindowPos(pos, posCond, pivot);
 		ImGui::SetNextWindowBgAlpha(settings.opacity);
 		ImGui::SetNextWindowSizeConstraints(ImVec2(kContentWidth, 0.0f), ImVec2(kContentWidth, FLT_MAX));
