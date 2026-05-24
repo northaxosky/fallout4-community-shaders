@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Installed via `scripts/install-hooks.sh`. Delegates to the shared linter so
+# local commits and CI agree on the same rules.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+exec "$REPO_ROOT/scripts/lint-no-codenames.sh" "$1"

@@ -128,6 +128,19 @@ shaders/                      Reconstructed reference HLSL and shader notes
 test-results/                 Ignored runtime validation output
 ```
 
+## Contributing
+
+After cloning, install the local git hooks:
+
+```bash
+./scripts/install-hooks.sh
+```
+
+This points `core.hooksPath` at `scripts/hooks/`, which currently runs a `commit-msg` linter (`scripts/lint-no-codenames.sh`) that rejects internal planning labels (Arc/Tier/Phase/Cn codenames), agentic process vocab (autopilot/fleet/campaign/codename/rubber-duck), AI attribution trailers, and em-dash characters. The same linter runs in CI against the PR title, PR body, and every commit in the PR range; bypass on a local commit with `git commit --no-verify` only for genuine false positives.
+
+Conventional commits (`feat(scope): ...`, `fix(scope): ...`). Describe code changes only; no AI attribution, no narrative campaign framing.
+
+
 ## License
 
 GPL-3.0-or-later with Modding Exception and GPL-3.0 Linking Exception (matching upstream Skyrim Community Shaders). See `LICENSE` and `EXCEPTIONS.md`.

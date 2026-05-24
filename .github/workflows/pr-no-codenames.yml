@@ -1,0 +1,56 @@
+name: 'PR: reject planning codenames'
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  lint-meta-and-commits:
+    name: Lint PR title, body, and commit messages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Lint PR title
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -e
+          printf '%s\n' "$PR_TITLE" | bash scripts/lint-no-codenames.sh -
+
+      - name: Lint PR body
+        shell: bash
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -e
+          printf '%s\n' "${PR_BODY:-}" | bash scripts/lint-no-codenames.sh -
+
+      - name: Lint every commit message in the PR
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -e
+          if ! git cat-file -e "$BASE_SHA" 2>/dev/null; then
+            git fetch --no-tags --depth=50 origin "$BASE_SHA" || true
+          fi
+          fail=0
+          for sha in $(git rev-list "$BASE_SHA..$HEAD_SHA"); do
+            msg="$(git log -1 --format=%B "$sha")"
+            if ! printf '%s\n' "$msg" | bash scripts/lint-no-codenames.sh -; then
+              echo "::error::Commit $sha has forbidden vocabulary in its message"
+              fail=1
+            fi
+          done
+          exit "$fail"
