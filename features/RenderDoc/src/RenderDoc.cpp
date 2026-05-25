@@ -74,21 +74,36 @@ namespace cs::features
 
 	void RenderDoc::SaveSettings()
 	{
-		toml::table table;
 		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
+			const std::filesystem::path configPath(kConfigPath);
+			toml::table table;
+			if (std::filesystem::exists(configPath)) {
+				table = toml::parse_file(kConfigPath);
+			}
 
-		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign("dll_path", _settings.dllPath);
-		settings.insert_or_assign("capture_folder", _settings.captureFolder);
+			auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+			settings.insert_or_assign("enabled", _settings.enabled);
+			settings.insert_or_assign("dll_path", _settings.dllPath);
+			settings.insert_or_assign("capture_folder", _settings.captureFolder);
 
-		std::ofstream out(kConfigPath);
-		if (out) {
+			if (const auto parent = configPath.parent_path(); !parent.empty()) {
+				std::filesystem::create_directories(parent);
+			}
+
+			std::ofstream out(configPath);
+			if (!out) {
+				L->error("Failed to open RenderDoc config for write: {}", kConfigPath);
+				return;
+			}
 			out << table;
+			out.flush();
+			if (!out.good()) {
+				L->error("Failed to write RenderDoc config: {}", kConfigPath);
+			}
+		} catch (const toml::parse_error& e) {
+			L->error("Failed to parse RenderDoc config while saving {}: {}", kConfigPath, e.what());
+		} catch (const std::filesystem::filesystem_error& e) {
+			L->error("Failed to prepare RenderDoc config path {}: {}", kConfigPath, e.what());
 		}
 	}
 
@@ -119,6 +134,9 @@ namespace cs::features
 			_api = nullptr;
 			return false;
 		}
+
+		_api->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
+		_api->SetCaptureKeys(nullptr, 0);
 
 		ApplyCapturePath();
 		L->info("RenderDoc runtime loaded");
