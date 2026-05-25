@@ -86,6 +86,7 @@ namespace cs::features
 
 		settings.updateInterval = std::clamp(static_cast<float>(table["settings"]["update_interval"].value_or(static_cast<double>(settings.updateInterval))), 0.05f, 5.0f);
 		settings.historySize    = std::clamp(static_cast<int>(table["settings"]["history_size"].value_or<int64_t>(settings.historySize)), 30, kHistoryCapacity);
+		settings.graphHeightPx  = std::clamp(static_cast<float>(table["settings"]["graph_height_px"].value_or(static_cast<double>(settings.graphHeightPx))), 40.0f, 160.0f);
 	}
 
 	void PerformanceOverlay::SaveSettings()
@@ -126,6 +127,7 @@ namespace cs::features
 
 			settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
 			settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
+			settingsTable.insert_or_assign("graph_height_px", static_cast<double>(settings.graphHeightPx));
 
 			const std::filesystem::path configPath(kConfigPath);
 			if (const auto parent = configPath.parent_path(); !parent.empty())
@@ -332,7 +334,7 @@ namespace cs::features
 			flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize;
 
 		// Pinned width keeps rows uniform regardless of which sections are enabled.
-		const float kContentWidth = 360.0f * settings.fontScale;
+		const float kContentWidth = 440.0f * settings.fontScale;
 		ImGui::SetNextWindowPos(pos, posCond, pivot);
 		ImGui::SetNextWindowBgAlpha(settings.opacity);
 		ImGui::SetNextWindowSizeConstraints(ImVec2(kContentWidth, 0.0f), ImVec2(kContentWidth, FLT_MAX));
@@ -473,14 +475,25 @@ namespace cs::features
 					_graphYMaxSmoothed += (ymaxTarget - _graphYMaxSmoothed) * 0.25f;
 				}
 				const float ymax = _graphYMaxSmoothed;
-				ImGui::TextUnformatted("Frame Time (pre-FG)");
+				ImGui::TextUnformatted("Frame Time");
 				if (settings.showEstimatedPostFGFrameTime) {
+					// Compact legend: small colored chip + short label, tooltip carries the detail.
 					ImGui::SameLine();
-					ImGui::TextColored(colPostFg, "(estimated post-FG)");
+					const float lineH = ImGui::GetTextLineHeight();
+					const float chipW = lineH * 0.6f;
+					const ImVec2 chipPos = ImGui::GetCursorScreenPos();
+					ImGui::GetWindowDrawList()->AddRectFilled(
+						ImVec2(chipPos.x, chipPos.y + lineH * 0.25f),
+						ImVec2(chipPos.x + chipW, chipPos.y + lineH * 0.75f),
+						ImGui::GetColorU32(colPostFg));
+					ImGui::Dummy(ImVec2(chipW + 4.0f, lineH));
+					ImGui::SameLine();
+					ImGui::TextColored(colPostFg, "post-FG");
 					ImGui::SetItemTooltip(kPostFgFrameTimeTooltip);
 				}
+				const float graphHeight = std::clamp(settings.graphHeightPx, 40.0f, 160.0f) * settings.fontScale;
 				ImGui::PlotLines("##frametimegraph", linear.data(), _frameTimesCount, 0,
-					nullptr, 0.0f, ymax, ImVec2(-FLT_MIN, 40.0f * settings.fontScale));
+					nullptr, 0.0f, ymax, ImVec2(-FLT_MIN, graphHeight));
 				drawReferenceLinesOverLastPlot(0.0f, ymax, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, settings.highContrast ? 0.35f : 0.18f)));
 				if (settings.showEstimatedPostFGFrameTime)
 					drawLineOverLastPlot(linearPostFg.data(), _frameTimesCount, 0.0f, ymax, ImGui::GetColorU32(colPostFg));
@@ -611,9 +624,12 @@ namespace cs::features
 			const bool intervalCommitted = sliderCommit();
 			ImGui::SliderInt("History size (frames)", &settings.historySize, 30, kHistoryCapacity);
 			const bool historyCommitted = sliderCommit();
-			if (intervalCommitted || historyCommitted) {
+			ImGui::SliderFloat("Graph height (px)", &settings.graphHeightPx, 40.0f, 160.0f, "%.0f");
+			const bool graphHeightCommitted = sliderCommit();
+			if (intervalCommitted || historyCommitted || graphHeightCommitted) {
 				settings.updateInterval = std::clamp(settings.updateInterval, 0.05f, 5.0f);
 				settings.historySize    = std::clamp(settings.historySize, 30, kHistoryCapacity);
+				settings.graphHeightPx  = std::clamp(settings.graphHeightPx, 40.0f, 160.0f);
 				if (historyCommitted) {
 					// History buffer changes shape; reset rather than reinterpret stale data.
 					_frameTimesHead = 0;

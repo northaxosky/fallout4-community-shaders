@@ -74,6 +74,9 @@ namespace cs::features
 			// Tracking.
 			float  updateInterval = 0.5f;
 			int    historySize    = 120;
+
+			// Graph height in pixels at fontScale=1.0; scales with fontScale.
+			float  graphHeightPx  = 80.0f;
 		};
 
 		Settings settings;
