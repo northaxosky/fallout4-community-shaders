@@ -888,9 +888,10 @@ namespace cs::features
 		cb.NumSlices       = static_cast<uint32_t>(settings.sliceCount);
 		cb.NumSteps        = static_cast<uint32_t>(settings.stepCount);
 		cb.MinScreenRadius = settings.minScreenRadius;
-		cb.AORadius        = settings.aoRadius;
-		cb.GIRadius        = settings.giRadius;
-		cb.EffectRadius    = std::max(settings.aoRadius, settings.giRadius);
+		const float effectRadius = std::max(std::max(settings.aoRadius, settings.giRadius), 1.0e-6f);
+		cb.AORadius        = settings.aoRadius / effectRadius;
+		cb.GIRadius        = settings.giRadius / effectRadius;
+		cb.EffectRadius    = effectRadius;
 		cb.Thickness       = settings.thickness;
 		cb.DepthFadeRange[0] = settings.depthFadeNear;
 		cb.DepthFadeRange[1] = settings.depthFadeFar;
@@ -1474,21 +1475,8 @@ namespace cs::features
 		markCustomIfEdited();
 
 		ImGui::Separator();
-		ImGui::TextDisabled("Temporal denoiser + blur");
-		dirty |= ImGui::Checkbox("Temporal denoiser", &settings.enableTemporalDenoiser);
-		dirty |= ImGui::Checkbox("Bilateral blur", &settings.enableBlur);
+		ImGui::TextDisabled("Bilateral blur tuning");
 		ImGui::SliderFloat("Blur radius (px)", &settings.blurRadius, 0.0f, 8.0f, "%.2f");
-		markCustomIfEdited();
-		{
-			int maxAccum = static_cast<int>(settings.maxAccumFrames);
-			if (ImGui::SliderInt("Max accumulation frames", &maxAccum, 1, 64)) {
-				settings.maxAccumFrames = static_cast<uint32_t>(std::clamp(maxAccum, 1, 64));
-				dirty = true;
-			}
-		}
-		ImGui::SliderFloat("Depth disocclusion", &settings.depthDisocclusion, 0.0f, 1.0f, "%.2f");
-		markCustomIfEdited();
-		ImGui::SliderFloat("Normal disocclusion", &settings.normalDisocclusion, 0.0f, 1.0f, "%.2f");
 		markCustomIfEdited();
 
 		ImGui::Separator();
