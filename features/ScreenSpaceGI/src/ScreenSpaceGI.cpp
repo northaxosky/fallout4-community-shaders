@@ -769,9 +769,6 @@ namespace cs::features
 	void ScreenSpaceGI::DrawSSGI()
 	{
 		if (!settings.enabled) return;
-		// Skip the 7-shader compute chain when a menu is open (Pip-Boy, Workshop, Pause, etc.).
-		// hasValidAoOutput stays true so Apply/ApplyIL keep modulating with the last good IL/AO.
-		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode) return;
 		if (cs::env::IsENBLoaded()) {
 			if (!enbWarningLogged) {
 				L->info("ENB detected; SSGI skipped");
@@ -1197,7 +1194,6 @@ namespace cs::features
 		static bool entryLogged = false;
 		if (!entryLogged) { L->info("Apply entry"); entryLogged = true; }
 		if (!settings.enabled || !settings.applyAOToScene) return;
-		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode) return;
 		if (cs::env::IsENBLoaded()) return;
 		// AO output is only valid once resources are allocated and the chain has produced at
 		// least one full frame. Otherwise Apply reads zero-cleared R8 buffers and darkens the
@@ -1269,7 +1265,6 @@ namespace cs::features
 		static bool entryLogged = false;
 		if (!entryLogged) { L->info("ApplyIL entry"); entryLogged = true; }
 		if (!settings.enabled || !settings.applyILToScene || !settings.enableGI) return;
-		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode) return;
 		if (cs::env::IsENBLoaded()) return;
 		// IL outputs (texIlY / texIlCoCg) are populated by the same gi.cs + blur + upsample
 		// chain that produces texAo, so hasValidAoOutput is the appropriate readiness gate.
