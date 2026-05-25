@@ -4,7 +4,8 @@
 
 #include <array>
 #include <cstdint>
-#include <memory>
+
+struct IDXGIAdapter3;
 
 namespace cs::features
 {
@@ -114,8 +115,7 @@ namespace cs::features
 		float  _refreshHz         = 60.0f;
 		bool   _refreshKnown      = false;
 
-		struct AdapterCache;
-		std::unique_ptr<AdapterCache> _adapter;
+		IDXGIAdapter3* _adapter      = nullptr;
 		uint64_t _vramUsedBytes   = 0;
 		uint64_t _vramBudgetBytes = 0;
 	};

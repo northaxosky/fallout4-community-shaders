@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <fstream>
 #include <vector>
 
@@ -10,9 +11,9 @@
 #include <toml++/toml.hpp>
 #include <Windows.h>
 #include <dxgi1_4.h>
-#include <wrl/client.h>
 
 #include "Env.h"
+#include "FrameGeneration.h"
 #include "Log.h"
 #include "Menu.h"
 
@@ -20,12 +21,8 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.perfoverlay"); }
 
-	struct PerformanceOverlay::AdapterCache
-	{
-		Microsoft::WRL::ComPtr<IDXGIAdapter3> adapter;
-	};
-
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\PerformanceOverlay.toml";
+	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };
 	constexpr const char* kPostFgFrameTimeTooltip =
 		"Backend-reported when available (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus accumulate into a per-tick counter). FSR3 falls back to engine frame time divided by the configured multiplier.";
 
@@ -77,8 +74,15 @@ namespace cs::features
 		settings.highContrast   = table["settings"]["high_contrast"].value_or(settings.highContrast);
 
 		settings.autoThresholds = table["settings"]["auto_thresholds"].value_or(settings.autoThresholds);
-		settings.fpsGood        = static_cast<float>(table["settings"]["fps_good"].value_or(static_cast<double>(settings.fpsGood)));
-		settings.fpsWarn        = static_cast<float>(table["settings"]["fps_warn"].value_or(static_cast<double>(settings.fpsWarn)));
+		auto readFpsThreshold = [&](const char* key, float fallback) {
+			const float value = static_cast<float>(table["settings"][key].value_or(static_cast<double>(fallback)));
+			const float clamped = std::isnan(value) ? fallback : std::clamp(value, 1.0f, 1000.0f);
+			if (clamped != value || std::isnan(value))
+				L->warn("Clamped PerformanceOverlay {} from {} to {}", key, value, clamped);
+			return clamped;
+		};
+		settings.fpsGood        = readFpsThreshold("fps_good", settings.fpsGood);
+		settings.fpsWarn        = readFpsThreshold("fps_warn", settings.fpsWarn);
 
 		settings.updateInterval = std::clamp(static_cast<float>(table["settings"]["update_interval"].value_or(static_cast<double>(settings.updateInterval))), 0.05f, 5.0f);
 		settings.historySize    = std::clamp(static_cast<int>(table["settings"]["history_size"].value_or<int64_t>(settings.historySize)), 30, kHistoryCapacity);
@@ -88,42 +92,62 @@ namespace cs::features
 	{
 		toml::table table;
 		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
+			try {
+				table = toml::parse_file(kConfigPath);
+			} catch (const toml::parse_error& e) {
+				L->warn("Ignoring malformed PerformanceOverlay config while saving: {}", e.what());
+				table = toml::table{};
+			}
 
-		auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-		settingsTable.insert_or_assign("enabled", settings.enabled);
-		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
+			auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+			settingsTable.insert_or_assign("enabled", settings.enabled);
+			settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
 
-		settingsTable.insert_or_assign("show_fps", settings.showFps);
-		settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
-		settingsTable.insert_or_assign("show_graph", settings.showGraph);
-		settingsTable.insert_or_assign("show_estimated_post_fg_frame_time", settings.showEstimatedPostFGFrameTime);
-		settingsTable.insert_or_assign("show_vram", settings.showVram);
-		settingsTable.insert_or_assign("show_stats", settings.showStats);
+			settingsTable.insert_or_assign("show_fps", settings.showFps);
+			settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
+			settingsTable.insert_or_assign("show_graph", settings.showGraph);
+			settingsTable.insert_or_assign("show_estimated_post_fg_frame_time", settings.showEstimatedPostFGFrameTime);
+			settingsTable.insert_or_assign("show_vram", settings.showVram);
+			settingsTable.insert_or_assign("show_stats", settings.showStats);
 
-		settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
-		settingsTable.insert_or_assign("free_drag", settings.freeDrag);
-		settingsTable.insert_or_assign("drag_pos_x", static_cast<double>(settings.dragPosX));
-		settingsTable.insert_or_assign("drag_pos_y", static_cast<double>(settings.dragPosY));
+			settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
+			settingsTable.insert_or_assign("free_drag", settings.freeDrag);
+			settingsTable.insert_or_assign("drag_pos_x", static_cast<double>(settings.dragPosX));
+			settingsTable.insert_or_assign("drag_pos_y", static_cast<double>(settings.dragPosY));
 
-		settingsTable.insert_or_assign("opacity", static_cast<double>(settings.opacity));
-		settingsTable.insert_or_assign("show_border", settings.showBorder);
-		settingsTable.insert_or_assign("font_scale", static_cast<double>(settings.fontScale));
-		settingsTable.insert_or_assign("high_contrast", settings.highContrast);
+			settingsTable.insert_or_assign("opacity", static_cast<double>(settings.opacity));
+			settingsTable.insert_or_assign("show_border", settings.showBorder);
+			settingsTable.insert_or_assign("font_scale", static_cast<double>(settings.fontScale));
+			settingsTable.insert_or_assign("high_contrast", settings.highContrast);
 
-		settingsTable.insert_or_assign("auto_thresholds", settings.autoThresholds);
-		settingsTable.insert_or_assign("fps_good", static_cast<double>(settings.fpsGood));
-		settingsTable.insert_or_assign("fps_warn", static_cast<double>(settings.fpsWarn));
+			settingsTable.insert_or_assign("auto_thresholds", settings.autoThresholds);
+			settingsTable.insert_or_assign("fps_good", static_cast<double>(settings.fpsGood));
+			settingsTable.insert_or_assign("fps_warn", static_cast<double>(settings.fpsWarn));
 
-		settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
-		settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
+			settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
+			settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
 
-		std::ofstream out(kConfigPath);
-		if (out) {
+			const std::filesystem::path configPath(kConfigPath);
+			if (const auto parent = configPath.parent_path(); !parent.empty())
+				std::filesystem::create_directories(parent);
+
+			std::ofstream out(configPath, std::ios::out | std::ios::trunc);
+			if (!out) {
+				L->error("Failed to open PerformanceOverlay config for write: {}", kConfigPath);
+				return;
+			}
 			out << table;
+			out.flush();
+			if (!out.good()) {
+				L->error("Failed to write PerformanceOverlay config: {}", kConfigPath);
+				return;
+			}
+		} catch (const toml::parse_error& e) {
+			L->error("Failed to save PerformanceOverlay config after TOML error: {}", e.what());
+			return;
+		} catch (const std::filesystem::filesystem_error& e) {
+			L->error("Failed to save PerformanceOverlay config after filesystem error: {}", e.what());
+			return;
 		}
 	}
 
@@ -330,6 +354,29 @@ namespace cs::features
 				return colBad;
 			};
 
+			auto drawReferenceLinesOverLastPlot = [](float ymin, float ymax, ImU32 color) {
+				const ImVec2 itemMin = ImGui::GetItemRectMin();
+				const ImVec2 itemMax = ImGui::GetItemRectMax();
+				const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
+				const ImVec2 plotMin(itemMin.x + framePadding.x, itemMin.y + framePadding.y);
+				const ImVec2 plotMax(itemMax.x - framePadding.x, itemMax.y - framePadding.y);
+				if (plotMax.x <= plotMin.x || plotMax.y <= plotMin.y)
+					return;
+
+				const float range = std::max(ymax - ymin, 0.001f);
+				ImDrawList* drawList = ImGui::GetWindowDrawList();
+				drawList->PushClipRect(plotMin, plotMax, true);
+				for (float fps : kFrameTimeReferenceFps) {
+					const float ms = 1000.0f / fps;
+					if (ms < ymin || ms > ymax)
+						continue;
+					const float t = std::clamp((ms - ymin) / range, 0.0f, 1.0f);
+					const float y = plotMax.y - t * (plotMax.y - plotMin.y);
+					drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(plotMax.x, y), color, 1.0f);
+				}
+				drawList->PopClipRect();
+			};
+
 			auto drawLineOverLastPlot = [](const float* values, int count, float ymin, float ymax, ImU32 color) {
 				if (count < 2)
 					return;
@@ -364,18 +411,21 @@ namespace cs::features
 
 			if (settings.showFps) {
 				const bool fgActive = _displayedFrameMultiplier > 1;
+				const bool fsr3Fallback = fgActive && FrameGeneration::GetSingleton()->activeFrameGenType == FrameGeneration::FrameGenType::kFSR3;
 				// Approach B: prefer measured displayed FPS from backend telemetry; fall
 				// back to engine FPS * multiplier when the measurement hasn't warmed up.
 				const float estimateFps = _displayedFps * static_cast<float>(_displayedFrameMultiplier);
 				const float outputFps = (fgActive && _measuredDisplayedFps > 0.0f) ? _measuredDisplayedFps : estimateFps;
 				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(outputFps));
-				if (fgActive)
+				if (fsr3Fallback)
+					ImGui::Text("[FSR3-B] %.0f FPS  (engine %.0f x%d)", outputFps, _displayedFps, _displayedFrameMultiplier);
+				else if (fgActive)
 					ImGui::Text("%.0f FPS  (engine %.0f x%d)", outputFps, _displayedFps, _displayedFrameMultiplier);
 				else
 					ImGui::Text("%.0f FPS", _displayedFps);
 				ImGui::PopStyleColor();
 				if (fgActive)
-					ImGui::SetItemTooltip("Displayed FPS comes from backend-reported frame counts (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus). FSR3 falls back to engine FPS times multiplier since safe per-frame counting would require hijacking presentCallback.");
+					ImGui::SetItemTooltip("Displayed FPS comes from backend-reported frame counts (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus). FSR3-B falls back to engine FPS times multiplier since safe per-frame counting would require hijacking presentCallback.");
 			}
 			if (settings.showFrameTime) {
 				if (_displayedFrameMultiplier > 1)
@@ -397,7 +447,8 @@ namespace cs::features
 					linearPostFg[i] = _postFgFrameTimesMs[src];
 				}
 				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
-				const float ymax = std::max(refreshMs * 2.0f, _displayedFrameMs * 1.25f);
+				const float maxReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
+				const float ymax = std::max({ refreshMs * 2.0f, _displayedFrameMs * 1.25f, maxReferenceMs * 1.05f });
 				ImGui::TextUnformatted("Frame Time (pre-FG)");
 				if (settings.showEstimatedPostFGFrameTime) {
 					ImGui::SameLine();
@@ -406,6 +457,7 @@ namespace cs::features
 				}
 				ImGui::PlotLines("##frametimegraph", linear.data(), _frameTimesCount, 0,
 					nullptr, 0.0f, ymax, ImVec2(-FLT_MIN, 40.0f * settings.fontScale));
+				drawReferenceLinesOverLastPlot(0.0f, ymax, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, settings.highContrast ? 0.35f : 0.18f)));
 				if (settings.showEstimatedPostFGFrameTime)
 					drawLineOverLastPlot(linearPostFg.data(), _frameTimesCount, 0.0f, ymax, ImGui::GetColorU32(colPostFg));
 			}
@@ -418,18 +470,11 @@ namespace cs::features
 			}
 
 			if (settings.showVram) {
-				if (!_adapter) {
-					_adapter = std::make_unique<AdapterCache>();
-					Microsoft::WRL::ComPtr<IDXGIFactory4> factory;
-					if (SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
-						Microsoft::WRL::ComPtr<IDXGIAdapter1> adapter1;
-						if (SUCCEEDED(factory->EnumAdapters1(0, &adapter1)))
-							adapter1.As(&_adapter->adapter);
-					}
-				}
-				if (_adapter && _adapter->adapter) {
+				if (!_adapter)
+					_adapter = cs::Menu::Get().GetDXGIAdapter3();
+				if (_adapter) {
 					DXGI_QUERY_VIDEO_MEMORY_INFO info{};
-					if (SUCCEEDED(_adapter->adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) {
+					if (SUCCEEDED(_adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) {
 						_vramUsedBytes   = info.CurrentUsage;
 						_vramBudgetBytes = info.Budget;
 					}

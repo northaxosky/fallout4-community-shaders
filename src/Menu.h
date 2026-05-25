@@ -8,6 +8,8 @@
 #include <string>
 #include <vector>
 
+struct IDXGIAdapter3;
+
 namespace cs
 {
 	class Menu
@@ -22,6 +24,7 @@ namespace cs
 		bool IsOpen() const noexcept { return _open; }
 		bool IsOverlayVisible() const noexcept { return _overlayVisible; }
 		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
+		IDXGIAdapter3* GetDXGIAdapter3();
 
 		// Drop a transient top-center notification onto the screen for `a_durationSec`. Replaces
 		// any toast still visible; the most recent message wins. Thread-safe so features can call
@@ -49,15 +52,17 @@ namespace cs
 		ID3D11DeviceContext*    _context        = nullptr;
 		HWND                    _hwnd           = nullptr;
 		IDXGISwapChain*         _chain          = nullptr;
+		IDXGIAdapter3*          _dxgiAdapter3   = nullptr;
 		TracyD3D11Ctx           _tracyD3D11Ctx  = nullptr;
 		ID3D11RenderTargetView* _backbufferRTV  = nullptr;
 		UINT                    _backbufferW    = 0;
 		UINT                    _backbufferH    = 0;
 
-		bool    _imguiInited       = false;
-		bool    _wndProcHooked     = false;
-		bool    _open              = false;
-		bool    _overlayVisible    = true;
+		bool    _imguiInited           = false;
+		bool    _wndProcHooked         = false;
+		bool    _open                  = false;
+		bool    _overlayVisible        = true;
+		bool    _dxgiAdapter3InitTried = false;
 
 		float   _fontScale = 1.5f;
 		int     _loggingLevelIdx = -1;

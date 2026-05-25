@@ -4,6 +4,8 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include <dxgi1_4.h>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -130,6 +132,48 @@ namespace cs
 			TracyD3D11Destroy(_tracyD3D11Ctx);
 			_tracyD3D11Ctx = nullptr;
 		}
+		if (_dxgiAdapter3) {
+			_dxgiAdapter3->Release();
+			_dxgiAdapter3 = nullptr;
+		}
+	}
+
+	IDXGIAdapter3* Menu::GetDXGIAdapter3()
+	{
+		if (_dxgiAdapter3 || _dxgiAdapter3InitTried)
+			return _dxgiAdapter3;
+		if (!_device)
+			return nullptr;
+
+		_dxgiAdapter3InitTried = true;
+
+		IDXGIDevice* dxgiDevice = nullptr;
+		HRESULT hr = _device->QueryInterface(__uuidof(IDXGIDevice), reinterpret_cast<void**>(&dxgiDevice));
+		if (FAILED(hr) || !dxgiDevice) {
+			L->warn("D3D11 device did not expose IDXGIDevice for VRAM stats (hr={:#x})", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+
+		IDXGIAdapter* adapter = nullptr;
+		hr = dxgiDevice->GetAdapter(&adapter);
+		dxgiDevice->Release();
+		if (FAILED(hr) || !adapter) {
+			L->warn("D3D11 device did not expose a DXGI adapter for VRAM stats (hr={:#x})", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+
+		IDXGIAdapter3* adapter3 = nullptr;
+		hr = adapter->QueryInterface(__uuidof(IDXGIAdapter3), reinterpret_cast<void**>(&adapter3));
+		adapter->Release();
+		if (FAILED(hr) || !adapter3) {
+			if (adapter3)
+				adapter3->Release();
+			L->warn("DXGI adapter does not expose IDXGIAdapter3 for VRAM stats (hr={:#x})", static_cast<unsigned>(hr));
+			return nullptr;
+		}
+
+		_dxgiAdapter3 = adapter3;
+		return _dxgiAdapter3;
 	}
 
 	void Menu::ShowToast(std::string a_text, double a_durationSec)
