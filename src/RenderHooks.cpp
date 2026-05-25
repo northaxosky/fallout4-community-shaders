@@ -3,6 +3,8 @@
 #include "Log.h"
 
 #include <algorithm>
+#include <atomic>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <vector>
@@ -30,6 +32,27 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 
+#if !defined(NDEBUG)
+		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
+		std::atomic_bool g_registrationClosed{ false };
+
+		void MarkRegistrationClosed() noexcept
+		{
+			g_registrationClosed.store(true, std::memory_order_relaxed);
+		}
+
+		void AssertRegistrationAllowed()
+		{
+			assert(::GetCurrentThreadId() == g_registrationThreadId &&
+				"RenderHooks registration must run on the startup thread");
+			assert(!g_registrationClosed.load(std::memory_order_relaxed) &&
+				"RenderHooks registration must finish before render hooks fire");
+		}
+#else
+		void MarkRegistrationClosed() noexcept {}
+		void AssertRegistrationAllowed() noexcept {}
+#endif
+
 		void InsertPrioritized(std::vector<PrioritizedCallback>& v, RenderHookCallback&& cb, HookPriority p)
 		{
 			v.push_back({ p, std::move(cb) });
@@ -50,6 +73,7 @@ namespace cs::engine
 		{
 			static void thunk()
 			{
+				MarkRegistrationClosed();
 				func();
 				Dispatch(g_postDeferredPrePass);
 			}
@@ -60,6 +84,7 @@ namespace cs::engine
 		{
 			static void thunk()
 			{
+				MarkRegistrationClosed();
 				Dispatch(g_preDeferredLightsImpl);
 				func();
 				Dispatch(g_postDeferredLightsImpl);
@@ -71,6 +96,7 @@ namespace cs::engine
 		{
 			static void thunk()
 			{
+				MarkRegistrationClosed();
 				func();
 				Dispatch(g_postDeferredComposite);
 			}
@@ -84,6 +110,7 @@ namespace cs::engine
 		{
 			static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_setting)
 			{
+				MarkRegistrationClosed();
 				func(This, a_setting);
 				for (auto& cb : g_postDynResViewport_Imagespace) {
 					cb();
@@ -115,6 +142,7 @@ namespace cs::engine
 
 	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
+		AssertRegistrationAllowed();
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
 		if (!g_prePassInstalled) {
 			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
@@ -125,6 +153,7 @@ namespace cs::engine
 
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
+		AssertRegistrationAllowed();
 		InsertPrioritized(g_preDeferredLightsImpl, std::move(callback), priority);
 		if (!g_lightsImplInstalled) {
 			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
@@ -135,6 +164,7 @@ namespace cs::engine
 
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
+		AssertRegistrationAllowed();
 		InsertPrioritized(g_postDeferredLightsImpl, std::move(callback), priority);
 		if (!g_lightsImplInstalled) {
 			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
@@ -152,6 +182,7 @@ namespace cs::engine
 	// mnemonic hashes, and Address Library v2 issues the same id in both.
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
+		AssertRegistrationAllowed();
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		if (!g_compositeInstalled) {
 			stl::detour_thunk<DeferredComposite_Hook>(REL::ID({ 728427, 2318313, 2318313 }));
@@ -162,12 +193,14 @@ namespace cs::engine
 
 	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback)
 	{
+		AssertRegistrationAllowed();
 		g_postDynResViewport_Imagespace.push_back(std::move(callback));
 		EnsurePostDynResViewportInstalled();
 	}
 
 	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback)
 	{
+		AssertRegistrationAllowed();
 		g_postDynResViewport_FGCapture.push_back(std::move(callback));
 		EnsurePostDynResViewportInstalled();
 	}

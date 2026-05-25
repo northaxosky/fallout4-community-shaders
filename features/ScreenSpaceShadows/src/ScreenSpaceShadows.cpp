@@ -48,7 +48,7 @@ namespace cs::features
 		float    ShadowContrast;
 		float    pad0;
 	};
-	static_assert(sizeof(RaymarchCB) % 16 == 0, "RaymarchCB must be 16-byte aligned");
+	STATIC_ASSERT_ALIGNAS_16(RaymarchCB);
 
 	struct ApplyShadowsCB
 	{
@@ -58,7 +58,7 @@ namespace cs::features
 		uint32_t SunOnly;
 		uint32_t pad0;
 	};
-	static_assert(sizeof(ApplyShadowsCB) % 16 == 0, "ApplyShadowsCB must be 16-byte aligned");
+	STATIC_ASSERT_ALIGNAS_16(ApplyShadowsCB);
 
 	ScreenSpaceShadows* ScreenSpaceShadows::GetSingleton()
 	{

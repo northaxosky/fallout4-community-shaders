@@ -50,6 +50,7 @@ using uint = uint32_t;
 #include <magic_enum/magic_enum.hpp>
 
 #define DLLEXPORT __declspec(dllexport)
+#define STATIC_ASSERT_ALIGNAS_16(T) static_assert(sizeof(T) % 16 == 0, #T " must be 16-byte aligned for D3D11 CB")
 
 namespace stl
 {

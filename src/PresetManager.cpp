@@ -202,16 +202,12 @@ namespace cs
 			return false;
 		}
 
-		// schema_version gate. Version 1 is the only schema we currently understand; reject
-		// anything else loudly so a future v2 file can't half-apply through v1 code.
+		// Unknown schema versions can still carry settings this build understands.
 		if (const auto* metaTbl = table["meta"].as_table()) {
 			if (const auto schemaNode = (*metaTbl)["schema_version"].value<std::int64_t>()) {
 				if (*schemaNode != 1) {
-					std::ostringstream oss;
-					oss << "preset '" << a_meta.name << "' has unsupported [meta].schema_version="
-						<< *schemaNode << " (this build understands version 1)";
-					a_err = oss.str();
-					return false;
+					L->warn("Preset '{}' has [meta].schema_version={} but this build expects {}; loading known fields",
+						a_meta.name, *schemaNode, 1);
 				}
 			}
 		}

@@ -158,7 +158,7 @@ namespace cs::features
 		float    DirtPad0;
 		float    DirtPad1;
 	};
-	static_assert(sizeof(CompositeCB) % 16 == 0, "CompositeCB must be 16-byte aligned");
+	STATIC_ASSERT_ALIGNAS_16(CompositeCB);
 
 	struct PyramidCB
 	{
@@ -169,7 +169,7 @@ namespace cs::features
 		uint32_t TailH;
 		uint32_t Pad1[2];
 	};
-	static_assert(sizeof(PyramidCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(PyramidCB);
 
 	struct ExposureCB
 	{
@@ -178,7 +178,7 @@ namespace cs::features
 		float    TauDown;
 		uint32_t TailMipIdx;
 	};
-	static_assert(sizeof(ExposureCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(ExposureCB);
 
 	struct BloomThresholdCB
 	{
@@ -186,7 +186,7 @@ namespace cs::features
 		float    SoftKnee;
 		uint32_t OutputDimensions[2];
 	};
-	static_assert(sizeof(BloomThresholdCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(BloomThresholdCB);
 
 	struct BloomCB
 	{
@@ -196,7 +196,7 @@ namespace cs::features
 		float    MipWeight;
 		uint32_t _Pad[2];
 	};
-	static_assert(sizeof(BloomCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(BloomCB);
 
 	struct DofCB
 	{
@@ -216,7 +216,7 @@ namespace cs::features
 		float    AnamorphRatio;
 		float    Pad0[3];
 	};
-	static_assert(sizeof(DofCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(DofCB);
 
 	// Engine DOF: IsActive (vfunc 8) returns false when ours is enabled. All three effects must be disabled or the engine double-DOFs.
 	// `forceWithENB` keeps our pass live alongside ENB for users who want to stack; default behavior still yields to ENB.

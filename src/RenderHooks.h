@@ -25,6 +25,9 @@ namespace cs::engine
 	// post-callbacks at the same anchor; the broker installs one detour per anchor and dispatches the
 	// list. First registration at an anchor lazy-installs the detour. Callbacks are ordered by
 	// priority then by registration order.
+	// SAFETY: Register* is startup-only and single-threaded from Feature::Load or OnPostPostLoad.
+	// The vectors and install flags are deliberately unsynchronized; callbacks must register before
+	// any render hook can fire.
 	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);

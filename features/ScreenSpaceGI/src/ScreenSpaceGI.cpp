@@ -54,7 +54,7 @@ namespace cs::features
 		float    ApplyIntensity;
 		float    ApplyContrast;
 	};
-	static_assert(sizeof(ApplyCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(ApplyCB);
 
 	struct ApplyILCB
 	{
@@ -63,7 +63,7 @@ namespace cs::features
 		float    _Pad0;
 		float    CameraViewInverse[16];     // c1-c4: row-major float4x4
 	};
-	static_assert(sizeof(ApplyILCB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(ApplyILCB);
 
 	// SSGI constant buffer. Layout matches upstream Skyrim CS @ bb6460db
 	// `features/Screen Space GI/Shaders/ScreenSpaceGI/common.hlsli` (`SSGICB`), with the [2]
@@ -105,7 +105,7 @@ namespace cs::features
 		float    CameraViewInverse[16];     // c14-c17: row-major float4x4
 	};
 	static_assert(sizeof(SSGICB) == 288, "SSGICB layout must match HLSL cbuffer");
-	static_assert(sizeof(SSGICB) % 16 == 0);
+	STATIC_ASSERT_ALIGNAS_16(SSGICB);
 
 	// Quality preset table. Each entry covers the v2 fan-out tuning that's actually
 	// relevant: working resolution + ray budget + GI strength + ambient injection
