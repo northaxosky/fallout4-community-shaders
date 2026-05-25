@@ -1,11 +1,40 @@
 #include "ScreenSpaceGIConfigIO.h"
 
 #include <algorithm>
+#include <cctype>
+#include <string>
+#include <string_view>
 
 namespace cs::features::ssgi
 {
 	namespace
 	{
+		using QualityPreset = ScreenSpaceGI::QualityPreset;
+
+		int ParsePresetName(std::string_view a_name)
+		{
+			std::string lower(a_name);
+			for (auto& c : lower) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+			if (lower == "custom") return static_cast<int>(QualityPreset::kCustom);
+			if (lower == "low")    return static_cast<int>(QualityPreset::kLow);
+			if (lower == "medium") return static_cast<int>(QualityPreset::kMedium);
+			if (lower == "high")   return static_cast<int>(QualityPreset::kHigh);
+			if (lower == "ultra")  return static_cast<int>(QualityPreset::kUltra);
+			return -1;
+		}
+
+		const char* PresetName(int a_preset)
+		{
+			switch (static_cast<QualityPreset>(a_preset)) {
+			case QualityPreset::kLow:    return "Low";
+			case QualityPreset::kMedium: return "Medium";
+			case QualityPreset::kHigh:   return "High";
+			case QualityPreset::kUltra:  return "Ultra";
+			case QualityPreset::kCustom:
+			default:                     return "Custom";
+			}
+		}
+
 		void FoldLegacyV2Block(const toml::table& a_root, ScreenSpaceGI::Settings& a_out)
 		{
 			// One-shot upgrade for users whose ScreenSpaceGI.toml still has the legacy [v2]
@@ -44,8 +73,13 @@ namespace cs::features::ssgi
 		if (!s) return;
 
 		a_out.enabled = (*s)["enabled"].value_or(a_out.enabled);
-		if (const auto p = (*s)["preset"].value<std::int64_t>()) {
-			a_out.preset = std::clamp(static_cast<int>(*p), 0, 3);
+		if (const auto pname = (*s)["preset"].value<std::string>()) {
+			const int parsed = ParsePresetName(*pname);
+			if (parsed >= 0) {
+				a_out.preset = parsed;
+			}
+		} else if (const auto p = (*s)["preset"].value<std::int64_t>()) {
+			a_out.preset = std::clamp(static_cast<int>(*p), 0, 4);
 		}
 
 		// XeGTAO core knobs.
@@ -90,7 +124,7 @@ namespace cs::features::ssgi
 	{
 		toml::table out;
 		out.insert_or_assign("enabled",        a_settings.enabled);
-		out.insert_or_assign("preset",         static_cast<std::int64_t>(a_settings.preset));
+		out.insert_or_assign("preset",         PresetName(a_settings.preset));
 
 		out.insert_or_assign("slice_count",    static_cast<std::int64_t>(a_settings.sliceCount));
 		out.insert_or_assign("step_count",     static_cast<std::int64_t>(a_settings.stepCount));

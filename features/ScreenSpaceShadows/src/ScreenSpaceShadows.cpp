@@ -7,6 +7,7 @@
 #include <format>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 
 #include <DirectXMath.h>
 #include <imgui.h>
@@ -91,13 +92,13 @@ namespace cs::features
 		}
 
 		// First-launch detection: missing preset means the TOML was newly bootstrapped.
-		const auto tomlPreset = table["settings"]["preset"].value<int64_t>();
-		const bool firstLaunch = !tomlPreset.has_value();
+		const auto presetNode = table["settings"]["preset"];
+		const bool firstLaunch = !presetNode.value<int64_t>().has_value() && !presetNode.value<std::string>().has_value();
 
 		sss::ParseSettings(table, settings);
 
 		if (firstLaunch) {
-			ApplyPreset(Preset::kQuality);
+			ApplyPreset(Preset::kMedium);
 		}
 
 		// Smoke-harness override: marker presence forces all knobs to known values; cleared on harness exit.
@@ -202,13 +203,14 @@ namespace cs::features
 		float applyContrast;
 	};
 
-	// FO4-original tier enum; upstream Skyrim CS SSShadows has no Performance/Quality/Cinematic presets.
+	// FO4-original quality ladder. Custom records manual edits and is not a quality tier.
 	// BilinearThreshold stays near Bend's recommended 0.02 across the board; cost knob is sample count + thickness.
-	static constexpr PresetValues kPresets[4] = {
+	static constexpr PresetValues kPresets[5] = {
 		{ 0, 0.0f,    0.0f,    0.0f,    0.0f  },  // Custom: sentinel, never read.
-		{ 1, 0.030f,  0.020f,  0.75f,   0.7f  },  // Performance: looser thickness, lower sample count.
-		{ 1, 0.020f,  0.020f,  1.0f,    1.0f  },  // Quality (default).
-		{ 3, 0.010f,  0.020f,  1.5f,    1.2f  },  // Cinematic: more samples, tighter thickness, stronger contrast.
+		{ 1, 0.030f,  0.020f,  0.75f,   0.7f  },  // Low: looser thickness, lower sample count.
+		{ 1, 0.020f,  0.020f,  1.0f,    1.0f  },  // Medium (default).
+		{ 2, 0.015f,  0.020f,  1.25f,   1.1f  },  // High.
+		{ 3, 0.010f,  0.020f,  1.5f,    1.2f  },  // Ultra: more samples, tighter thickness, stronger contrast.
 	};
 
 	void ScreenSpaceShadows::ApplyPreset(Preset preset)
@@ -772,8 +774,8 @@ namespace cs::features
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Quality preset");
-		const char* presetNames[] = { "Custom", "Performance", "Quality", "Cinematic" };
-		int presetIdx = std::clamp(settings.preset, 0, 3);
+		const char* presetNames[] = { "Custom", "Low", "Medium", "High", "Ultra" };
+		int presetIdx = std::clamp(settings.preset, 0, 4);
 		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
 			if (presetIdx != static_cast<int>(Preset::kCustom)) {
 				ApplyPreset(static_cast<Preset>(presetIdx));

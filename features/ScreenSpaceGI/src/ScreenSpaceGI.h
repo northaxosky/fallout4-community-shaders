@@ -56,16 +56,17 @@ namespace cs::features
 
 		enum class QualityPreset : int
 		{
-			kCustom      = 0,
-			kPerformance = 1,
-			kQuality     = 2,
-			kCinematic   = 3,
+			kCustom = 0,
+			kLow    = 1,
+			kMedium = 2,
+			kHigh   = 3,
+			kUltra  = 4,
 		};
 
 		struct Settings
 		{
 			bool  enabled       = true;
-			int   preset        = static_cast<int>(QualityPreset::kQuality);
+			int   preset        = static_cast<int>(QualityPreset::kMedium);
 
 			// XeGTAO core knobs (consumed by gi.cs.hlsl).
 			int   sliceCount    = 3;

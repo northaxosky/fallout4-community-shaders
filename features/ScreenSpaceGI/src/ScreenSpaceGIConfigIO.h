@@ -7,7 +7,7 @@
 namespace cs::features::ssgi
 {
 	// Parses [settings] subtable into a_out. Missing keys leave a_out unchanged. Unknown keys
-	// silently ignored. The `preset` field is treated as an ordinary int (no first-launch
+	// silently ignored. The `preset` field accepts canonical names plus legacy ints (no first-launch
 	// bootstrap; that is owned by ScreenSpaceGI::LoadSettings).
 	void ParseSettings(const toml::table& a_root, ScreenSpaceGI::Settings& a_out);
 

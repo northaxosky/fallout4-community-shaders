@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <string>
 
 #include <DirectXMath.h>
 #include <DirectXTex.h>
@@ -122,13 +123,11 @@ namespace cs::features
 
 	// Axis: quality vs perf cost.
 	static constexpr PresetEntry kQualityPresets[] = {
-		// Map upstream Skyrim CS @ bb6460db Low/Standard/Extreme -> Performance/Quality/Cinematic.
-		// Quality and Cinematic share slice/step counts (upstream "Standard" and "Extreme"); only
-		// resolution differs. Performance is upstream "Low" (more slices/steps compensate for the
-		// missing fidelity at quarter-res).
-		{ "Performance", 2, 10, 12, 0.8f, 0.4f },
-		{ "Quality",     1,  4,  8, 1.0f, 0.5f },
-		{ "Cinematic",   0,  4,  8, 1.2f, 0.6f },
+		// Low maps upstream Low; Medium/High/Ultra step through Standard and Extreme at higher cost.
+		{ "Low",    2, 10, 12, 0.8f,  0.4f  },
+		{ "Medium", 1,  4,  8, 1.0f,  0.5f  },
+		{ "High",   0,  4,  8, 1.1f,  0.55f },
+		{ "Ultra",  0,  4,  8, 1.2f,  0.6f  },
 	};
 
 	struct ProjectionData
@@ -364,7 +363,7 @@ namespace cs::features
 	void ScreenSpaceGI::ApplyPreset(QualityPreset preset)
 	{
 		const int idx = static_cast<int>(preset) - 1;
-		if (idx < 0 || idx >= 3) return;
+		if (idx < 0 || idx >= 4) return;
 		const auto& p = kQualityPresets[idx];
 		settings.preset         = static_cast<int>(preset);
 		settings.resolutionMode = p.resolutionMode;
@@ -379,7 +378,7 @@ namespace cs::features
 	bool ScreenSpaceGI::SettingsMatchPreset(QualityPreset preset) const
 	{
 		const int idx = static_cast<int>(preset) - 1;
-		if (idx < 0 || idx >= 3) return false;
+		if (idx < 0 || idx >= 4) return false;
 		const auto& p = kQualityPresets[idx];
 		return settings.resolutionMode == p.resolutionMode &&
 		       settings.sliceCount     == p.sliceCount &&
@@ -397,13 +396,13 @@ namespace cs::features
 			return;
 		}
 
-		const auto tomlPreset = table["settings"]["preset"].value<int64_t>();
-		const bool firstLaunch = !tomlPreset.has_value();
+		const auto presetNode = table["settings"]["preset"];
+		const bool firstLaunch = !presetNode.value<int64_t>().has_value() && !presetNode.value<std::string>().has_value();
 
 		ssgi::ParseSettings(table, settings);
 
 		if (firstLaunch) {
-			ApplyPreset(QualityPreset::kQuality);
+			ApplyPreset(QualityPreset::kMedium);
 		}
 
 		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_force_apply";
@@ -420,7 +419,7 @@ namespace cs::features
 		testModeActive = applyMarkerPresent;
 		if (applyMarkerPresent) {
 			settings.enabled        = true;
-			ApplyPreset(QualityPreset::kQuality);
+			ApplyPreset(QualityPreset::kMedium);
 			settings.applyAOToScene = applyMarkerEnable;
 			settings.applyContrast  = 1.0f;
 			char dummy = 0;
@@ -1403,8 +1402,8 @@ namespace cs::features
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Quality preset");
-		const char* presetNames[] = { "Custom", "Performance", "Quality", "Cinematic" };
-		int presetIdx = std::clamp(settings.preset, 0, 3);
+		const char* presetNames[] = { "Custom", "Low", "Medium", "High", "Ultra" };
+		int presetIdx = std::clamp(settings.preset, 0, 4);
 		if (ImGui::Combo("Preset", &presetIdx, presetNames, IM_ARRAYSIZE(presetNames))) {
 			if (presetIdx != static_cast<int>(QualityPreset::kCustom)) {
 				ApplyPreset(static_cast<QualityPreset>(presetIdx));
