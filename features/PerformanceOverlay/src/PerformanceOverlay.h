@@ -109,6 +109,8 @@ namespace cs::features
 		uint64_t _lastDisplayedFrameTotal = 0;
 		double   _lastDisplayedSampleSec  = 0.0;
 		float  _avgMs             = 0.0f;
+		float  _stddevMs          = 0.0f;
+		float  _graphYMaxSmoothed = 0.0f;
 		float  _onePctLowMs       = 0.0f;
 		float  _pointOnePctLowMs  = 0.0f;
 

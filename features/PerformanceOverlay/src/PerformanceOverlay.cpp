@@ -273,6 +273,13 @@ namespace cs::features
 		for (float v : sorted) sum += v;
 		_avgMs = static_cast<float>(sum / sorted.size());
 
+		double sqDiff = 0.0;
+		for (float v : sorted) {
+			const double d = v - _avgMs;
+			sqDiff += d * d;
+		}
+		_stddevMs = static_cast<float>(std::sqrt(sqDiff / sorted.size()));
+
 		// Lows = high frame-time tail (slow frames).
 		const auto idx99   = static_cast<size_t>(sorted.size() * 99 / 100);
 		const auto idx999  = static_cast<size_t>(sorted.size() * 999 / 1000);
@@ -448,7 +455,24 @@ namespace cs::features
 				}
 				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
 				const float maxReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
-				const float ymax = std::max({ refreshMs * 2.0f, _displayedFrameMs * 1.25f, maxReferenceMs * 1.05f });
+				// Stable Y-max via stddev: avg + 3 sigma covers the spike envelope of the last
+				// recompute window without snapping to a single outlier. Floor with refresh*2 and
+				// the slowest reference line so the chart stays readable on a quiet frame stream.
+				const float ymaxTarget = std::max({
+					refreshMs * 2.0f,
+					_avgMs + 3.0f * _stddevMs,
+					maxReferenceMs * 1.05f,
+				});
+				// EMA toward the target so a single spike doesn't bounce the axis. RecomputeStats
+				// runs at settings.updateInterval (0.5s default), so 0.25 reaches ~95% within ~6
+				// recomputes (~3s) - tight enough to follow real shifts, loose enough to ignore
+				// transient hitches.
+				if (_graphYMaxSmoothed <= 0.0f) {
+					_graphYMaxSmoothed = ymaxTarget;
+				} else {
+					_graphYMaxSmoothed += (ymaxTarget - _graphYMaxSmoothed) * 0.25f;
+				}
+				const float ymax = _graphYMaxSmoothed;
 				ImGui::TextUnformatted("Frame Time (pre-FG)");
 				if (settings.showEstimatedPostFGFrameTime) {
 					ImGui::SameLine();
