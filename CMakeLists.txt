@@ -26,6 +26,17 @@ set(FO4CS_VERSION_MAJOR "${CMAKE_MATCH_1}")
 set(FO4CS_VERSION_MINOR "${CMAKE_MATCH_2}")
 set(FO4CS_VERSION_PATCH "${CMAKE_MATCH_3}")
 
+execute_process(
+	COMMAND git describe --tags --dirty --always
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+	OUTPUT_VARIABLE BUILD_DESCRIBE
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET
+)
+if(NOT BUILD_DESCRIBE)
+	set(BUILD_DESCRIBE "unknown")
+endif()
+
 # Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so generate a CMake shim in the build tree.
 set(COMMONLIBF4_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/CommonLibF4")
 set(COMMONLIBF4_SHIM_DIR "${CMAKE_BINARY_DIR}/CommonLibF4-shim")
@@ -48,9 +59,10 @@ if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
 endif()
 
-# Header-only INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
+# Lightweight INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
 add_subdirectory(cmake/Streamline)
 add_subdirectory(cmake/XeSS)
+include(Ngx)
 
 # Single unified DLL target.
 add_library(FO4CommunityShaders SHARED)

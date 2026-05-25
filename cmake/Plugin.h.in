@@ -2,6 +2,8 @@
 
 #include <string_view>
 
+#define CS_BUILD_DESCRIBE "@BUILD_DESCRIBE@"
+
 namespace Plugin
 {
 	using namespace std::literals;

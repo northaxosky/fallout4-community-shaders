@@ -53,6 +53,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded",
 		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
+	L->info("BUILD_DESCRIBE {}", CS_BUILD_DESCRIBE);
 
 	cs::FeatureManager::Get().LoadAll();
 

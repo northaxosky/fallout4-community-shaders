@@ -3,6 +3,7 @@
   "version-string": "0.2.0",
   "description": "Community Shaders port for Fallout 4",
   "supports": "windows & x64",
+  "builtin-baseline": "b472291f295551b7127359ea38fdd2ca092f6f1b",
   "dependencies": [
     "directx-headers",
     "directxtex",
@@ -23,5 +24,49 @@
       "features": [ "on-demand" ]
     },
     "xbyak"
+  ],
+  "overrides": [
+    {
+      "name": "directx-headers",
+      "version": "1.619.1"
+    },
+    {
+      "name": "directxtex",
+      "version-date": "2025-10-27"
+    },
+    {
+      "name": "directxtk",
+      "version-date": "2025-10-27"
+    },
+    {
+      "name": "imgui",
+      "version": "1.92.6"
+    },
+    {
+      "name": "magic-enum",
+      "version": "0.9.7",
+      "port-version": 1
+    },
+    {
+      "name": "spdlog",
+      "version-semver": "1.17.0"
+    },
+    {
+      "name": "sqlite3",
+      "version": "3.52.0"
+    },
+    {
+      "name": "tomlplusplus",
+      "version": "3.4.0",
+      "port-version": 1
+    },
+    {
+      "name": "tracy",
+      "version": "0.13.1"
+    },
+    {
+      "name": "xbyak",
+      "version": "7.28"
+    }
   ]
 }

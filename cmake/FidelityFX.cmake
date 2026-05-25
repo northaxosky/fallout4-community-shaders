@@ -10,6 +10,7 @@ function(ensure_fidelityfx_sdk)
 	set(FFX_FSR ON CACHE BOOL "" FORCE)
 	set(FFX_AUTO_COMPILE_SHADERS 1 CACHE BOOL "" FORCE)
 
+	file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/bin/ffx_sdk")
 	add_subdirectory(${CMAKE_SOURCE_DIR}/extern/FidelityFX-SDK/sdk ${CMAKE_BINARY_DIR}/FidelityFX-SDK)
 
 	foreach(FFX_TARGET
