@@ -88,9 +88,6 @@ namespace cs::features
 			float       sharpness          = 0.4f;
 
 			// Sun + lens.
-			bool        sunspriteEnable    = true;
-			float       sunspriteIntensity = 0.6f;
-			float       sunspriteSize      = 0.05f;
 			bool        lensFlareEnable    = false;
 			float       lensFlareIntensity = 0.8f;
 			int         lensFlareGhosts    = 5;

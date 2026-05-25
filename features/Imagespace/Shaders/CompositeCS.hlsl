@@ -33,9 +33,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
     else
         c = InputColor.Load(int3(px, 0)).rgb;
 
-    const bool dirtInFrame = DirtEnable != 0 && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
-    const bool sunInFrame = (SunspriteEnable != 0 || LensFlareEnable != 0) && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
-    const bool useLinearPath = Operator != 0 || BloomEnable != 0 || sunInFrame || dirtInFrame;
+    const bool dirtInFrame  = DirtEnable != 0      && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
+    const bool flareInFrame = LensFlareEnable != 0 && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
+    const bool useLinearPath = Operator != 0 || BloomEnable != 0 || flareInFrame || dirtInFrame;
     if (useLinearPath) {
         float3 lin = SRGBToLinear(c);
 
@@ -45,12 +45,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
             lin += bloom * BloomIntensity;
         }
 
-        // Sun additions in linear HDR domain so tonemap compresses them like any bright source.
-        if (sunInFrame) {
-            if (SunspriteEnable != 0)
-                lin += ApplySunsprite(uv, SunUV, SunspriteIntensity, SunspriteSize);
-            if (LensFlareEnable != 0)
-                lin += ApplyLensFlare(uv, SunUV, LensFlareIntensity, LensFlareGhosts);
+        // Lens flare in linear HDR domain so tonemap compresses ghost peaks like any bright source.
+        if (flareInFrame) {
+            lin += ApplyLensFlare(uv, SunUV, LensFlareIntensity, LensFlareGhosts);
         }
 
         if (DirtEnable != 0) {

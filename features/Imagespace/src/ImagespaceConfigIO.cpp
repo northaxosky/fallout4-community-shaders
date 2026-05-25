@@ -92,9 +92,6 @@ namespace cs::features::imagespace
 		s.sharpenEnable     = readBool("sharpen_enable", s.sharpenEnable);
 		s.sharpness         = readFloat("sharpness", s.sharpness, 0.0f, 1.0f);
 
-		s.sunspriteEnable    = readBool("sunsprite_enable", s.sunspriteEnable);
-		s.sunspriteIntensity = readFloat("sunsprite_intensity", s.sunspriteIntensity, 0.0f, 2.0f);
-		s.sunspriteSize      = readFloat("sunsprite_size", s.sunspriteSize, 0.01f, 0.2f);
 		s.lensFlareEnable    = readBool("lens_flare_enable", s.lensFlareEnable);
 		s.lensFlareIntensity = readFloat("lens_flare_intensity", s.lensFlareIntensity, 0.0f, 2.0f);
 		s.lensFlareGhosts    = readInt("lens_flare_ghosts", s.lensFlareGhosts, 3, 7);
@@ -159,8 +156,6 @@ namespace cs::features::imagespace
 			ov.vignetteIntensity  = readOptF("vignette_intensity", 0.0f, 1.0f);
 			ov.caEnable           = readOptB("ca_enable");
 			ov.caIntensity        = readOptF("ca_intensity",       0.0f, 2.0f);
-			ov.sunspriteIntensity = readOptF("sunsprite_intensity", 0.0f, 2.0f);
-			ov.sunspriteSize      = readOptF("sunsprite_size",     0.01f, 0.2f);
 			ov.lensFlareEnable    = readOptB("lens_flare_enable");
 			ov.lensFlareIntensity = readOptF("lens_flare_intensity", 0.0f, 2.0f);
 			ov.lensFlareGhosts    = readOptI("lens_flare_ghosts",  3, 7);
@@ -224,9 +219,6 @@ namespace cs::features::imagespace
 		s.insert_or_assign("ca_intensity", static_cast<double>(settings.caIntensity));
 		s.insert_or_assign("sharpen_enable", settings.sharpenEnable);
 		s.insert_or_assign("sharpness", static_cast<double>(settings.sharpness));
-		s.insert_or_assign("sunsprite_enable", settings.sunspriteEnable);
-		s.insert_or_assign("sunsprite_intensity", static_cast<double>(settings.sunspriteIntensity));
-		s.insert_or_assign("sunsprite_size", static_cast<double>(settings.sunspriteSize));
 		s.insert_or_assign("lens_flare_enable", settings.lensFlareEnable);
 		s.insert_or_assign("lens_flare_intensity", static_cast<double>(settings.lensFlareIntensity));
 		s.insert_or_assign("lens_flare_ghosts", static_cast<std::int64_t>(settings.lensFlareGhosts));
@@ -268,8 +260,6 @@ namespace cs::features::imagespace
 			if (ov.vignetteIntensity)  cat_tbl.insert_or_assign("vignette_intensity", static_cast<double>(*ov.vignetteIntensity));
 			if (ov.caEnable)           cat_tbl.insert_or_assign("ca_enable",          *ov.caEnable);
 			if (ov.caIntensity)        cat_tbl.insert_or_assign("ca_intensity",       static_cast<double>(*ov.caIntensity));
-			if (ov.sunspriteIntensity) cat_tbl.insert_or_assign("sunsprite_intensity", static_cast<double>(*ov.sunspriteIntensity));
-			if (ov.sunspriteSize)      cat_tbl.insert_or_assign("sunsprite_size",     static_cast<double>(*ov.sunspriteSize));
 			if (ov.lensFlareEnable)    cat_tbl.insert_or_assign("lens_flare_enable",  *ov.lensFlareEnable);
 			if (ov.lensFlareIntensity) cat_tbl.insert_or_assign("lens_flare_intensity", static_cast<double>(*ov.lensFlareIntensity));
 			if (ov.lensFlareGhosts)    cat_tbl.insert_or_assign("lens_flare_ghosts",  static_cast<std::int64_t>(*ov.lensFlareGhosts));

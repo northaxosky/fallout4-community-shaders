@@ -143,8 +143,6 @@ namespace cs::features::imagespace
 		n += vignetteIntensity.has_value();
 		n += caEnable.has_value();
 		n += caIntensity.has_value();
-		n += sunspriteIntensity.has_value();
-		n += sunspriteSize.has_value();
 		n += lensFlareEnable.has_value();
 		n += lensFlareIntensity.has_value();
 		n += lensFlareGhosts.has_value();
@@ -235,8 +233,6 @@ namespace cs::features::imagespace
 			float                vignetteIntensity;
 			bool                 caEnable;
 			float                caIntensity;
-			float                sunspriteIntensity;
-			float                sunspriteSize;
 			bool                 lensFlareEnable;
 			float                lensFlareIntensity;
 			int                  lensFlareGhosts;
@@ -259,8 +255,6 @@ namespace cs::features::imagespace
 				a_base.vignetteIntensity,
 				a_base.caEnable,
 				a_base.caIntensity,
-				a_base.sunspriteIntensity,
-				a_base.sunspriteSize,
 				a_base.lensFlareEnable,
 				a_base.lensFlareIntensity,
 				a_base.lensFlareGhosts,
@@ -279,8 +273,6 @@ namespace cs::features::imagespace
 			if (a_overlay.vignetteIntensity)  ep.vignetteIntensity  = *a_overlay.vignetteIntensity;
 			if (a_overlay.caEnable)           ep.caEnable           = *a_overlay.caEnable;
 			if (a_overlay.caIntensity)        ep.caIntensity        = *a_overlay.caIntensity;
-			if (a_overlay.sunspriteIntensity) ep.sunspriteIntensity = *a_overlay.sunspriteIntensity;
-			if (a_overlay.sunspriteSize)      ep.sunspriteSize      = *a_overlay.sunspriteSize;
 			if (a_overlay.lensFlareEnable)    ep.lensFlareEnable    = *a_overlay.lensFlareEnable;
 			if (a_overlay.lensFlareIntensity) ep.lensFlareIntensity = *a_overlay.lensFlareIntensity;
 			if (a_overlay.lensFlareGhosts)    ep.lensFlareGhosts    = *a_overlay.lensFlareGhosts;
@@ -311,8 +303,6 @@ namespace cs::features::imagespace
 			r.vignetteIntensity  = Lerp(a.vignetteIntensity, b.vignetteIntensity, t);
 			r.caEnable           = Snap(a.caEnable, b.caEnable, t);
 			r.caIntensity        = Lerp(a.caIntensity, b.caIntensity, t);
-			r.sunspriteIntensity = Lerp(a.sunspriteIntensity, b.sunspriteIntensity, t);
-			r.sunspriteSize      = Lerp(a.sunspriteSize, b.sunspriteSize, t);
 			r.lensFlareEnable    = Snap(a.lensFlareEnable, b.lensFlareEnable, t);
 			r.lensFlareIntensity = Lerp(a.lensFlareIntensity, b.lensFlareIntensity, t);
 			r.lensFlareGhosts    = Snap(a.lensFlareGhosts, b.lensFlareGhosts, t);
@@ -352,8 +342,6 @@ namespace cs::features::imagespace
 			r.vignetteIntensity  = a_base.vignetteIntensity;
 			r.caEnable           = a_base.caEnable;
 			r.caIntensity        = a_base.caIntensity;
-			r.sunspriteIntensity = a_base.sunspriteIntensity;
-			r.sunspriteSize      = a_base.sunspriteSize;
 			r.lensFlareEnable    = a_base.lensFlareEnable;
 			r.lensFlareIntensity = a_base.lensFlareIntensity;
 			r.lensFlareGhosts    = a_base.lensFlareGhosts;

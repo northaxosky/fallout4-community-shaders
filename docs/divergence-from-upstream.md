@@ -118,7 +118,7 @@ Skyrim CS has no Imagespace feature in its static feature list (`community-shade
 
 ### What this port does
 
-Imagespace owns tonemapping, LUT application, adaptive exposure, bloom, vignette, chromatic aberration, sharpening, sunsprite, lens flare, lens dirt, and depth of field inside the plugin. It runs after upscaling and before frame-generation capture so the captured HUDless frame contains the final post-process result.
+Imagespace owns tonemapping, LUT application, adaptive exposure, bloom, vignette, chromatic aberration, sharpening, lens flare, lens dirt, and depth of field inside the plugin. It runs after upscaling and before frame-generation capture so the captured HUDless frame contains the final post-process result.
 
 ### Why FO4 or the architecture diverges
 

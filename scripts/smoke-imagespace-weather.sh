@@ -47,7 +47,6 @@ vignette_intensity = 0.3
 ca_enable = false
 ca_intensity = 0.5
 sharpen_enable = false
-sunsprite_enable = false
 lens_flare_enable = false
 dirt_enable = false
 

@@ -27,19 +27,6 @@ float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 
     return float3(r_ch, g_ch, b_ch);
 }
 
-// Sun-disc Gaussian glow at sunUVNDC; sizeUV = disc radius in UV space, returns a tinted contribution to add.
-float3 ApplySunsprite(float2 uv, float2 sunUVNDC, float intensity, float sizeUV)
-{
-    // Engine NDC Y is inverted vs UV.
-    const float2 sunUV = float2(sunUVNDC.x * 0.5 + 0.5, 1.0 - (sunUVNDC.y * 0.5 + 0.5));
-    const float2 d = uv - sunUV;
-    const float  r2 = dot(d, d);
-    const float  sigma = max(sizeUV * sizeUV, 1e-6);
-    const float  glow = exp(-r2 / sigma);
-    const float3 tint = float3(1.0, 0.95, 0.78);  // slight warm yellow
-    return tint * (intensity * glow);
-}
-
 // Lens-flare ghost kernel along the line from sunUV through the screen centre.
 // Fixed pattern of up to 7 ghosts (kPositions/kScales/kTints arrays); ghostCount selects how many.
 float3 ApplyLensFlare(float2 uv, float2 sunUVNDC, float intensity, uint ghostCount)

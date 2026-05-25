@@ -58,9 +58,9 @@ Categories: `clear`, `overcast`, `fog`, `rain`, `radstorm`, `snow`, `interior`, 
 
 ### Overlayable keys
 
-Each `[weather.<category>]` table may set any subset of: `exposure`, `lut_enable`, `lut_path`, `lut_strength`, `bloom_enable`, `bloom_threshold`, `bloom_intensity`, `bloom_mip_weights`, `vignette_enable`, `vignette_intensity`, `ca_enable`, `ca_intensity`, `sunsprite_intensity`, `sunsprite_size`, `lens_flare_enable`, `lens_flare_intensity`, `lens_flare_ghosts`, `dirt_enable`, `dirt_intensity`. Unset keys fall through to `[settings]`.
+Each `[weather.<category>]` table may set any subset of: `exposure`, `lut_enable`, `lut_path`, `lut_strength`, `bloom_enable`, `bloom_threshold`, `bloom_intensity`, `bloom_mip_weights`, `vignette_enable`, `vignette_intensity`, `ca_enable`, `ca_intensity`, `lens_flare_enable`, `lens_flare_intensity`, `lens_flare_ghosts`, `dirt_enable`, `dirt_intensity`. Unset keys fall through to `[settings]`.
 
-NOT overlayable: `sunsprite_enable` (engine sunbeams vfunc hook reads the persisted `settings.sunspriteEnable` directly; a frame-overlaid value would desync the hook), all `dof_*`/`aperture`/`focus_*` keys (also hook-gated), and all global keys (`enabled`, `style`, `force_with_enb`, `tonemap_operator`, `adaptive_exposure*`, `exposure_key/min/max`, `bloom_mips`, `sharpen_*`).
+NOT overlayable: all `dof_*`/`aperture`/`focus_*` keys (hook-gated), and all global keys (`enabled`, `style`, `force_with_enb`, `tonemap_operator`, `adaptive_exposure*`, `exposure_key/min/max`, `bloom_mips`, `sharpen_*`).
 
 ### Blend math
 

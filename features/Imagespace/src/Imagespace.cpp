@@ -69,8 +69,6 @@ namespace cs::features
 			b.vignetteIntensity  = a_s.vignetteIntensity;
 			b.caEnable           = a_s.caEnable;
 			b.caIntensity        = a_s.caIntensity;
-			b.sunspriteIntensity = a_s.sunspriteIntensity;
-			b.sunspriteSize      = a_s.sunspriteSize;
 			b.lensFlareEnable    = a_s.lensFlareEnable;
 			b.lensFlareIntensity = a_s.lensFlareIntensity;
 			b.lensFlareGhosts    = a_s.lensFlareGhosts;
@@ -145,19 +143,14 @@ namespace cs::features
 		uint32_t OutputDimensions[2];
 		float    Pad1;
 
-		uint32_t SunspriteEnable;
 		uint32_t LensFlareEnable;
-		float    SunUV[2];
-
-		float    SunspriteIntensity;
-		float    SunspriteSize;
-		float    LensFlareIntensity;
 		uint32_t LensFlareGhosts;
+		float    LensFlareIntensity;
+		float    LensPad0;
 
+		float    SunUV[2];
 		uint32_t DirtEnable;
 		float    DirtIntensity;
-		float    DirtPad0;
-		float    DirtPad1;
 	};
 	STATIC_ASSERT_ALIGNAS_16(CompositeCB);
 
@@ -251,17 +244,6 @@ namespace cs::features
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
-	// Engine sunbeams: yield to our sunsprite when enabled, or yield to ENB if loaded (unless force-stacked).
-	struct ImageSpaceEffectSunbeams_IsActive
-	{
-		static bool thunk(RE::ImageSpaceEffect* This)
-		{
-			const auto& s = Imagespace::GetSingleton()->settings;
-			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
-			return (!s.sunspriteEnable || enbYield) && func(This);
-		}
-		static inline REL::Relocation<decltype(thunk)> func;
-	};
 
 	Imagespace* Imagespace::GetSingleton()
 	{
@@ -291,8 +273,6 @@ namespace cs::features
 		stl::write_vfunc<0x8, ImageSpaceEffectBokehDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectBokehDepthOfField[0]);
 		stl::write_vfunc<0x8, ImageSpaceEffectFullScreenBlur_IsActive>(RE::VTABLE::ImageSpaceEffectFullScreenBlur[0]);
 		L->info("Engine DOF effects vfunc-disabled (DepthOfField + BokehDepthOfField + FullScreenBlur)");
-		stl::write_vfunc<0x8, ImageSpaceEffectSunbeams_IsActive>(RE::VTABLE::ImageSpaceEffectSunbeams[0]);
-		L->info("Engine sunbeams vfunc-disabled");
 	}
 
 	void Imagespace::OnDataLoaded()
@@ -432,7 +412,6 @@ namespace cs::features
 				settings.vignetteEnable  = true;
 				settings.caEnable        = true;
 				settings.sharpenEnable   = true;
-				settings.sunspriteEnable = true;
 				settings.lensFlareEnable = true;
 			} else if (styleP && style_c == '0') {
 				settings.style = static_cast<int>(Style::kCustom);
@@ -514,18 +493,17 @@ namespace cs::features
 		float vignetteIntensity;
 		float caIntensity;
 		float sharpness;
-		float sunspriteIntensity;
 		float lensFlareIntensity;
 	};
 
 	// Indexed by Style enum. Custom (idx 0) is a sentinel and never read. Style shape mirrors SSS's:
-	// intensity-only recipe, master toggles (bBloomEnable, bSunspriteEnable, bLensFlareEnable, etc.) stay user-controlled.
+	// intensity-only recipe, master toggles (bBloomEnable, bLensFlareEnable, etc.) stay user-controlled.
 	static constexpr StyleValues kStyles[5] = {
-		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f, 0.0f },                           // Custom
-		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.40f, 0.50f },                        // Subtle: lighter touches across the board.
-		{ 1, 0.18f, 0.05f, 0.30f, 0.50f, 0.40f, 0.60f, 0.80f },                        // Standard: current ship defaults.
-		{ 3, 0.20f, 0.10f, 0.40f, 0.80f, 0.50f, 0.80f, 1.00f },                        // Vivid: Lottes operator, heavier grade.
-		{ 1, 0.16f, 0.08f, 0.50f, 0.40f, 0.30f, 0.70f, 0.80f },                        // Cinematic: low key, soft bloom, strong vignette.
+		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f },                                 // Custom
+		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.50f },                               // Subtle: lighter touches across the board.
+		{ 1, 0.18f, 0.05f, 0.30f, 0.50f, 0.40f, 0.80f },                               // Standard: current ship defaults.
+		{ 3, 0.20f, 0.10f, 0.40f, 0.80f, 0.50f, 1.00f },                               // Vivid: Lottes operator, heavier grade.
+		{ 1, 0.16f, 0.08f, 0.50f, 0.40f, 0.30f, 0.80f },                               // Cinematic: low key, soft bloom, strong vignette.
 	};
 
 	void Imagespace::ApplyStyle(Style style)
@@ -539,7 +517,6 @@ namespace cs::features
 			settings.vignetteIntensity  = v.vignetteIntensity;
 			settings.caIntensity        = v.caIntensity;
 			settings.sharpness          = v.sharpness;
-			settings.sunspriteIntensity = v.sunspriteIntensity;
 			settings.lensFlareIntensity = v.lensFlareIntensity;
 		}
 		settings.style = idx;
@@ -557,7 +534,6 @@ namespace cs::features
 			&& std::fabs(settings.vignetteIntensity  - v.vignetteIntensity)  < 1e-3f
 			&& std::fabs(settings.caIntensity        - v.caIntensity)        < 1e-3f
 			&& std::fabs(settings.sharpness          - v.sharpness)          < 1e-3f
-			&& std::fabs(settings.sunspriteIntensity - v.sunspriteIntensity) < 1e-3f
 			&& std::fabs(settings.lensFlareIntensity - v.lensFlareIntensity) < 1e-3f;
 	}
 
@@ -1171,11 +1147,10 @@ namespace cs::features
 		const bool wantBloom    = resolved.bloomEnable;
 		// Yield sun additions to ENB unless the user opted into suite-wide stacking via bForceWithENB.
 		const bool enbYield     = cs::env::IsENBLoaded() && !settings.forceWithENB;
-		const bool wantSunsprite = settings.sunspriteEnable && !enbYield;
 		const bool wantLensFlare = resolved.lensFlareEnable && !enbYield;
 		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || resolved.vignetteEnable
 			|| resolved.caEnable || settings.sharpenEnable || (resolved.lutEnable && resolved.lutSRV)
-			|| wantSunsprite || wantLensFlare || resolved.dirtEnable;
+			|| wantLensFlare || resolved.dirtEnable;
 
 		if (wantAdaptive && !EnsurePyramidResources(W, H))
 			return;
@@ -1445,16 +1420,13 @@ namespace cs::features
 			}
 			ccb.SunUV[0] = sunUVx;
 			ccb.SunUV[1] = sunUVy;
-			ccb.SunspriteEnable    = wantSunsprite ? 1u : 0u;
 			ccb.LensFlareEnable    = wantLensFlare ? 1u : 0u;
 			static bool sunFxLoggedOnce = false;
-			if (!sunFxLoggedOnce && (wantSunsprite || wantLensFlare)) {
+			if (!sunFxLoggedOnce && wantLensFlare) {
 				sunFxLoggedOnce = true;
-				L->info("Sun probe: ws=({:.3f},{:.3f},{:.3f}) uv=({:.3f},{:.3f}) sunsprite={} flare={}",
-					sunWSx, sunWSy, sunWSz, sunUVx, sunUVy, wantSunsprite ? "on" : "off", wantLensFlare ? "on" : "off");
+				L->info("Sun probe: ws=({:.3f},{:.3f},{:.3f}) uv=({:.3f},{:.3f}) flare=on",
+					sunWSx, sunWSy, sunWSz, sunUVx, sunUVy);
 			}
-			ccb.SunspriteIntensity = resolved.sunspriteIntensity;
-			ccb.SunspriteSize      = resolved.sunspriteSize;
 			ccb.LensFlareIntensity = resolved.lensFlareIntensity;
 			ccb.LensFlareGhosts    = static_cast<uint32_t>(resolved.lensFlareGhosts);
 			ccb.DirtEnable         = wantDirt ? 1u : 0u;
@@ -1644,15 +1616,6 @@ namespace cs::features
 
 		ImGui::Separator();
 		ImGui::Text("Sun & lens");
-		dirty |= ImGui::Checkbox("Sunsprite", &settings.sunspriteEnable);
-		ImGui::SetItemTooltip("Bright glow at the sun's screen position. No-op when sun is behind camera or in interiors.");
-		ImGui::BeginDisabled(!settings.sunspriteEnable);
-		ImGui::SliderFloat("Sunsprite intensity", &settings.sunspriteIntensity, 0.0f, 2.0f, "%.2f");
-		markCustomIfEdited();
-		ImGui::SliderFloat("Sunsprite size", &settings.sunspriteSize, 0.01f, 0.2f, "%.3f");
-		ImGui::SetItemTooltip("Disc radius as a fraction of frame height.");
-		commitDirty();
-		ImGui::EndDisabled();
 		dirty |= ImGui::Checkbox("Lens flare", &settings.lensFlareEnable);
 		ImGui::SetItemTooltip("Ghost reflections traversing from the sun toward the screen centre.");
 		ImGui::BeginDisabled(!settings.lensFlareEnable);
@@ -1783,8 +1746,6 @@ namespace cs::features
 					ov.vignetteIntensity  = settings.vignetteIntensity;
 					ov.caEnable           = settings.caEnable;
 					ov.caIntensity        = settings.caIntensity;
-					ov.sunspriteIntensity = settings.sunspriteIntensity;
-					ov.sunspriteSize      = settings.sunspriteSize;
 					ov.lensFlareEnable    = settings.lensFlareEnable;
 					ov.lensFlareIntensity = settings.lensFlareIntensity;
 					ov.lensFlareGhosts    = settings.lensFlareGhosts;

@@ -31,8 +31,7 @@ namespace cs::features::imagespace
 	[[nodiscard]] std::optional<WeatherCategory> ParseCategory(std::string_view a_name) noexcept;
 
 	// Overlayable subset of Imagespace::Settings. Each std::optional present == "override this key for
-	// this category"; absent == "fall through to base settings". Sunsprite enable is NOT overlayable
-	// because the engine sunbeams vfunc hook reads settings.sunspriteEnable directly.
+	// this category"; absent == "fall through to base settings".
 	struct WeatherOverlay
 	{
 		std::optional<float>                exposure;
@@ -47,8 +46,6 @@ namespace cs::features::imagespace
 		std::optional<float>                vignetteIntensity;
 		std::optional<bool>                 caEnable;
 		std::optional<float>                caIntensity;
-		std::optional<float>                sunspriteIntensity;
-		std::optional<float>                sunspriteSize;
 		std::optional<bool>                 lensFlareEnable;
 		std::optional<float>                lensFlareIntensity;
 		std::optional<int>                  lensFlareGhosts;
@@ -82,8 +79,6 @@ namespace cs::features::imagespace
 		float                       vignetteIntensity;
 		bool                        caEnable;
 		float                       caIntensity;
-		float                       sunspriteIntensity;
-		float                       sunspriteSize;
 		bool                        lensFlareEnable;
 		float                       lensFlareIntensity;
 		int                         lensFlareGhosts;
@@ -114,8 +109,6 @@ namespace cs::features::imagespace
 		float                vignetteIntensity;
 		bool                 caEnable;
 		float                caIntensity;
-		float                sunspriteIntensity;
-		float                sunspriteSize;
 		bool                 lensFlareEnable;
 		float                lensFlareIntensity;
 		int                  lensFlareGhosts;

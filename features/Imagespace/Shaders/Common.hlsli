@@ -26,19 +26,14 @@ cbuffer CompositeCB : register(b0)
     uint2 OutputDimensions;
     float _Pad1;
 
-    uint  SunspriteEnable;
-    uint  LensFlareEnable;
+    uint   LensFlareEnable;
+    uint   LensFlareGhosts;
+    float  LensFlareIntensity;
+    float  _LensPad0;
+
     float2 SunUV;
-
-    float SunspriteIntensity;
-    float SunspriteSize;
-    float LensFlareIntensity;
-    uint  LensFlareGhosts;
-
-    uint  DirtEnable;
-    float DirtIntensity;
-    float _DirtPad0;
-    float _DirtPad1;
+    uint   DirtEnable;
+    float  DirtIntensity;
 };
 
 // Approximation: pure power, not the piecewise sRGB curve. Polynomial form is ~3-5x cheaper
