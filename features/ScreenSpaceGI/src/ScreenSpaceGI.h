@@ -254,6 +254,6 @@ namespace cs::features
 		bool     resourcesAllocated = false;
 		bool     hasValidAoOutput   = false;  // gates Apply() until DrawSSGI has produced at least one full chain
 		bool     noiseLoaded        = false;
-		bool     debugForceFullClear = false;  // .ssgi_debug_force_full_clear marker: force-clear every ring slot to a sentinel gray each frame to validate the clear path
+		bool     debugForceFullClear = false;  // .ssgi_debug_force_full_clear marker active
 	};
 }

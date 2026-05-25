@@ -445,11 +445,7 @@ namespace cs::features
 			L->info("Test mode: apply={} extreme override applied", settings.applyAOToScene);
 		}
 
-		// Validation marker: force every ring slot to a sentinel gray (AO=0.5, IL channels=0)
-		// before each radianceDisocc dispatch. If the tile-aligned dark boxes vanish into a uniform
-		// gray screen with the marker present, the clear path is wired correctly and the box
-		// artifact is unwritten-region noise. If the boxes persist in original positions, the root
-		// cause is downstream of the AO/IL ring (e.g. upsample.cs sampling pattern or Apply blend).
+		// Diagnostic: force ring-slot AO to sentinel gray to isolate whether boxes are unwritten-region noise.
 		constexpr const char* kDebugFullClearMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_debug_force_full_clear";
 		debugForceFullClear = std::filesystem::exists(kDebugFullClearMarker);
 		if (debugForceFullClear) {
@@ -772,11 +768,7 @@ namespace cs::features
 		outputAccumFramesIdx = 0;
 		inputAccumFramesIdx  = 1;
 
-		// One-shot clear of every ring slot + upsample destinations to safe defaults. Sub-res modes
-		// only write the work-res top-left tile inside the full-res allocation, and upsample.cs
-		// reads texAo[]/texIl*[] outside that tile when it samples for full-res output. Without
-		// this clear, the outside-tile region holds undefined VRAM and produces tile-aligned dark
-		// boxes after upsample. Mirrors upstream's safe-default policy.
+		// Init clear: covers fresh alloc + resmode-change reallocs so upsample never samples uninit VRAM.
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (rendererData && rendererData->context) {
 			auto* ctx = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
@@ -806,9 +798,7 @@ namespace cs::features
 		if (!rendererData) return;
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-		// Upstream pattern: on any early-exit, clear the output ring slot so Apply / ApplyIL read
-		// safe defaults instead of last-frame data (matters when SSGI is enabled but the chain
-		// can't run this frame for any reason). Only clears when resources have been allocated.
+		// Early-exit clear: keep Apply/ApplyIL reading no-op defaults instead of stale ring data.
 		auto clearOutputsSafe = [&]() {
 			if (!resourcesAllocated || !context) return;
 			const uint32_t aoIdx    = outputAoIdx;
@@ -1039,17 +1029,14 @@ namespace cs::features
 		const int outIdx = outputAoIdx;
 		const int inIdx  = inputAoIdx;
 
-		// Clear the output ring slot before radianceDisocc + gi.cs write it. Under HALF/QUARTER res
-		// only the work-res top-left tile gets written; upsample.cs samples the full-res allocation
-		// and pulls garbage from outside the tile without this clear, producing tile-aligned dark
-		// boxes. Cheap fast-clear (single R8 / RG16F / RGBA16F UAV at full-res).
+		// Sub-res dispatches only write the work-res tile; without this clear upsample reads
+		// undefined VRAM outside the tile and paints tile-aligned dark boxes at full-res.
 		{
 			const float lit[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
 			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			// Validation marker swaps AO to a sentinel gray on BOTH ring slots so Apply reads
-			// gray regardless of ping-pong state. See LoadSettings comment for diagnosis use.
 			const float sentinelAo[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
 			if (debugForceFullClear) {
+				// Marker active: clear both ring slots so Apply reads gray regardless of ping-pong.
 				for (int s = 0; s < 2; ++s) {
 					if (texAo[s]          && texAo[s]->uav)          context->ClearUnorderedAccessViewFloat(texAo[s]->uav.get(),          sentinelAo);
 					if (texIlY[s]         && texIlY[s]->uav)         context->ClearUnorderedAccessViewFloat(texIlY[s]->uav.get(),         zero);
@@ -1217,13 +1204,10 @@ namespace cs::features
 			context->CSSetShaderResources(0, 5, nullSRV);
 		}
 
-		// First successful end-to-end fan-out: gates Apply() against reading stale/zero AO.
+		// Gate Apply() against reading stale/zero AO.
 		hasValidAoOutput = true;
 
-		// Ping-pong indices for next frame's TEMPORAL_DENOISER path. Kept as the absolute last
-		// action so any future early-return between the dispatches and here can't leave the ring
-		// half-rotated (freshAoIdx would still point at the just-written slot, and Apply would
-		// read consistent data on retry).
+		// Ping-pong for next-frame TEMPORAL_DENOISER; must stay the last action so any future early-return can't leave the ring half-rotated.
 		std::swap(outputAoIdx, inputAoIdx);
 		std::swap(outputIlIdx, inputIlIdx);
 		std::swap(outputAccumFramesIdx, inputAccumFramesIdx);
