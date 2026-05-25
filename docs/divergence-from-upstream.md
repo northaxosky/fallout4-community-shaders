@@ -146,23 +146,23 @@ Fallout 4 has three supported runtime lines for this project: original, Next-Gen
 
 Keep the three-value form until CommonLibF4 offers a clearer abstraction with the same information. For new hook anchors, cite the reverse-engineering export or other source next to the ID so the tuple can be re-derived when a runtime changes.
 
-## kDiffuseBuffer modulation in deferred lighting
+## ScreenSpaceShadows composite blend
 
 ### What upstream Skyrim CS does
 
-Skyrim CS can integrate Screen Space Shadows into its shader sources. The lighting shader samples the screen-space shadow texture and multiplies `dirDetailedShadow` when `SCREEN_SPACE_SHADOWS` and `DEFERRED` are enabled (`community-shaders/skyrim-community-shaders:package/Shaders/Lighting.hlsl:2521-2524`).
+Skyrim CS binds the R8 screen-space shadow texture as a pixel-shader SRV and reads it with `ScreenSpaceShadowsTexture.Load(...)` (`community-shaders/skyrim-community-shaders:features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:4-8`). In deferred lighting, it multiplies that mask into `dirDetailedShadow` after the engine shadow term when `SCREEN_SPACE_SHADOWS`, `DEFERRED`, `!SharedData::InInterior`, and `dirLightAngle >= 0.0` are true (`community-shaders/skyrim-community-shaders:package/Shaders/Lighting.hlsl:2509-2524`). That keeps the blend in linear direct-lighting math before tonemapping, and the resulting directional light context applies it to diffuse and specular lighting.
 
 ### What this port does
 
-The FO4 port runs a separate compute apply pass after `DeferredLightsImpl`. That pass reads the shadow mask, normal buffer, and `kDiffuseBuffer`, writes attenuated diffuse lighting to a scratch UAV, then copies the result back to `kDiffuseBuffer`.
+The FO4 port runs a separate compute apply pass after `DeferredLightsImpl`. That pass point-loads the same R8 mask, reconstructs `N.L` from `kGbufferNormal`, samples `kDiffuseBuffer`, writes attenuated diffuse lighting to a scratch UAV, then copies the result back to `kDiffuseBuffer`. With `sun_only=true`, the attenuation is `lerp(1.0, mask, saturate(smoothstep(0.05, 0.30, N.L) * ApplyContrast))`; with `sun_only=false`, the smooth gate is bypassed and `ApplyContrast` controls a global mask multiply.
 
 ### Why FO4 or the architecture diverges
 
-FO4's deferred lighting and composite shaders are engine-owned code, not source files this project compiles at startup. `kDiffuseBuffer` is the accumulator available at the right point in the renderer, so a sidecar compute pass is the clean extension point. It preserves the intended effect, multiplying the diffuse lighting contribution, without requiring a full replacement of FO4's deferred composite.
+FO4's deferred lighting and composite shaders are engine-owned code, not source files this project compiles at startup. The post-lighting buffer does not expose Skyrim's `dirDetailedShadow` scalar or a separated sun contribution, so `kDiffuseBuffer` is the clean extension point available today. The `sun_only` gate is intentionally conservative because that buffer can also contain non-sun diffuse light; the current pass does not attenuate `kSpecularBuffer`.
 
 ### Forward path
 
-If this port later owns a complete deferred-lighting replacement, move the modulation into that shader and compare against upstream's in-shader math. Until then, keep the `kDiffuseBuffer` path and the sun-light gating explicit.
+If this port later owns a complete deferred-lighting replacement, move the modulation into that shader and compare against upstream's in-shader math. That path should use an upstream-style `dirDetailedShadow *= mask` blend and add matching specular attenuation while keeping the mask read point-filtered.
 
 ## Choosing write_thunk_call or detour_thunk
 

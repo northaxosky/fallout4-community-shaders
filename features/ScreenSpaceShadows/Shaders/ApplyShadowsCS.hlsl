@@ -1,6 +1,7 @@
 // SSS apply pass: multiplies the mask into kDiffuseBuffer (RT 58) with N.L gating against the sun direction.
-// Runs in the post-call thunk on DrawWorld::DeferredLightsImpl. Output goes to a scratch UAV; the CPU
-// follows up with a CopyResource back into kDiffuseBuffer.
+// Skyrim CS bb6460d multiplies ScreenSpaceShadowsTexture into dirDetailedShadow inside Lighting.hlsl.
+// FO4 applies after DeferredLightsImpl, so N.L gates kDiffuseBuffer to avoid shadowing point lights.
+// Output goes to a scratch UAV; the CPU follows up with a CopyResource back into kDiffuseBuffer.
 
 Texture2D<unorm float> ShadowsTexture : register(t0);
 Texture2D<float4>      NormalTexture  : register(t1);
