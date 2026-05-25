@@ -1193,14 +1193,16 @@ namespace cs::features
 			context->CSSetShaderResources(0, 5, nullSRV);
 		}
 
-		// Ping-pong indices for next frame's TEMPORAL_DENOISER path (currently unused but the
-		// state machine is in place so the future flip is a one-line change).
+		// First successful end-to-end fan-out: gates Apply() against reading stale/zero AO.
+		hasValidAoOutput = true;
+
+		// Ping-pong indices for next frame's TEMPORAL_DENOISER path. Kept as the absolute last
+		// action so any future early-return between the dispatches and here can't leave the ring
+		// half-rotated (freshAoIdx would still point at the just-written slot, and Apply would
+		// read consistent data on retry).
 		std::swap(outputAoIdx, inputAoIdx);
 		std::swap(outputIlIdx, inputIlIdx);
 		std::swap(outputAccumFramesIdx, inputAccumFramesIdx);
-
-		// First successful end-to-end fan-out: gates Apply() against reading stale/zero AO.
-		hasValidAoOutput = true;
 	}
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
