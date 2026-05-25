@@ -11,6 +11,8 @@
 #include <system_error>
 #include <utility>
 
+#include "TomlUtil.h"
+
 namespace cs::features::imagespace
 {
 	namespace
@@ -26,6 +28,8 @@ namespace cs::features::imagespace
 				{ "interior", WeatherCategory::kInterior },
 				{ "unknown",  WeatherCategory::kUnknown  },
 			} };
+
+		constexpr std::string_view kSettingsCtx = "imagespace.settings";
 	}
 
 	void ParseSettings(const toml::table& a_root, Imagespace::Settings& s)
@@ -35,32 +39,35 @@ namespace cs::features::imagespace
 		const toml::table& settings = *sub;
 
 		auto readInt = [&settings](const char* a_key, int a_current, int a_min, int a_max) {
-			const auto value = settings[a_key].value_or(static_cast<std::int64_t>(a_current));
-			const auto clamped = std::clamp(value, static_cast<std::int64_t>(a_min), static_cast<std::int64_t>(a_max));
-			return static_cast<int>(clamped);
+			return cs::toml_util::ReadInt(settings, a_key, a_current, a_min, a_max, kSettingsCtx);
 		};
 		auto readFloat = [&settings](const char* a_key, float a_current, float a_min, float a_max) {
-			const auto value = settings[a_key].value_or(static_cast<double>(a_current));
-			return std::clamp(static_cast<float>(value), a_min, a_max);
+			return cs::toml_util::ReadFloat(settings, a_key, a_current, a_min, a_max, kSettingsCtx);
+		};
+		auto readBool = [&settings](const char* a_key, bool a_current) {
+			return cs::toml_util::ReadBool(settings, a_key, a_current, kSettingsCtx);
+		};
+		auto readString = [&settings](const char* a_key, const std::string& a_current) {
+			return cs::toml_util::ReadString(settings, a_key, a_current, kSettingsCtx);
 		};
 
-		s.enabled           = settings["enabled"].value_or(s.enabled);
+		s.enabled           = readBool("enabled", s.enabled);
 		s.style             = readInt("style", s.style, 0, 4);
-		s.forceWithENB      = settings["force_with_enb"].value_or(s.forceWithENB);
+		s.forceWithENB      = readBool("force_with_enb", s.forceWithENB);
 		s.tonemapOperator   = readInt("tonemap_operator", s.tonemapOperator, 0, 3);
 		s.exposure          = readFloat("exposure", s.exposure, 0.25f, 4.0f);
-		s.lutEnable         = settings["lut_enable"].value_or(s.lutEnable);
-		s.lutPath           = settings["lut_path"].value_or(s.lutPath);
+		s.lutEnable         = readBool("lut_enable", s.lutEnable);
+		s.lutPath           = readString("lut_path", s.lutPath);
 		s.lutStrength       = readFloat("lut_strength", s.lutStrength, 0.0f, 1.0f);
 
-		s.adaptiveExposure    = settings["adaptive_exposure"].value_or(s.adaptiveExposure);
+		s.adaptiveExposure    = readBool("adaptive_exposure", s.adaptiveExposure);
 		s.adaptationSpeedUp   = readFloat("adaptation_speed_up", s.adaptationSpeedUp, 0.05f, 10.0f);
 		s.adaptationSpeedDown = readFloat("adaptation_speed_down", s.adaptationSpeedDown, 0.05f, 30.0f);
 		s.exposureKey         = readFloat("exposure_key", s.exposureKey, 0.05f, 0.5f);
 		s.exposureMin         = readFloat("exposure_min", s.exposureMin, 0.005f, 0.5f);
 		s.exposureMax         = readFloat("exposure_max", s.exposureMax, 1.0f, 16.0f);
 
-		s.bloomEnable    = settings["bloom_enable"].value_or(s.bloomEnable);
+		s.bloomEnable    = readBool("bloom_enable", s.bloomEnable);
 		s.bloomThreshold = readFloat("bloom_threshold", s.bloomThreshold, 0.0f, 2.0f);
 		s.bloomIntensity = readFloat("bloom_intensity", s.bloomIntensity, 0.0f, 0.3f);
 		s.bloomMips      = readInt("bloom_mips", s.bloomMips, 3, 6);
@@ -78,23 +85,23 @@ namespace cs::features::imagespace
 			}
 		}
 
-		s.vignetteEnable    = settings["vignette_enable"].value_or(s.vignetteEnable);
+		s.vignetteEnable    = readBool("vignette_enable", s.vignetteEnable);
 		s.vignetteIntensity = readFloat("vignette_intensity", s.vignetteIntensity, 0.0f, 1.0f);
-		s.caEnable          = settings["ca_enable"].value_or(s.caEnable);
+		s.caEnable          = readBool("ca_enable", s.caEnable);
 		s.caIntensity       = readFloat("ca_intensity", s.caIntensity, 0.0f, 2.0f);
-		s.sharpenEnable     = settings["sharpen_enable"].value_or(s.sharpenEnable);
+		s.sharpenEnable     = readBool("sharpen_enable", s.sharpenEnable);
 		s.sharpness         = readFloat("sharpness", s.sharpness, 0.0f, 1.0f);
 
-		s.sunspriteEnable    = settings["sunsprite_enable"].value_or(s.sunspriteEnable);
+		s.sunspriteEnable    = readBool("sunsprite_enable", s.sunspriteEnable);
 		s.sunspriteIntensity = readFloat("sunsprite_intensity", s.sunspriteIntensity, 0.0f, 2.0f);
 		s.sunspriteSize      = readFloat("sunsprite_size", s.sunspriteSize, 0.01f, 0.2f);
-		s.lensFlareEnable    = settings["lens_flare_enable"].value_or(s.lensFlareEnable);
+		s.lensFlareEnable    = readBool("lens_flare_enable", s.lensFlareEnable);
 		s.lensFlareIntensity = readFloat("lens_flare_intensity", s.lensFlareIntensity, 0.0f, 2.0f);
 		s.lensFlareGhosts    = readInt("lens_flare_ghosts", s.lensFlareGhosts, 3, 7);
-		s.dirtEnable         = settings["dirt_enable"].value_or(s.dirtEnable);
+		s.dirtEnable         = readBool("dirt_enable", s.dirtEnable);
 		s.dirtIntensity      = readFloat("dirt_intensity", s.dirtIntensity, 0.0f, 2.0f);
 
-		s.dofEnable      = settings["dof_enable"].value_or(s.dofEnable);
+		s.dofEnable      = readBool("dof_enable", s.dofEnable);
 		s.aperture       = readFloat("aperture", s.aperture, 0.0f, 0.5f);
 		s.focusDistance  = readFloat("focus_distance", s.focusDistance, 10.0f, 100000.0f);
 		s.focalLength    = readFloat("focal_length", s.focalLength, 1.0f, 200.0f);

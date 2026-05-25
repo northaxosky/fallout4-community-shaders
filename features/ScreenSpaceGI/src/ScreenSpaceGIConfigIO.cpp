@@ -5,11 +5,15 @@
 #include <string>
 #include <string_view>
 
+#include "TomlUtil.h"
+
 namespace cs::features::ssgi
 {
 	namespace
 	{
 		using QualityPreset = ScreenSpaceGI::QualityPreset;
+		constexpr std::string_view kSettingsCtx = "ssgi.settings";
+		constexpr std::string_view kV2Ctx       = "ssgi.v2";
 
 		int ParsePresetName(std::string_view a_name)
 		{
@@ -43,25 +47,25 @@ namespace cs::features::ssgi
 			const auto* v2 = a_root["v2"].as_table();
 			if (!v2) return;
 
-			a_out.enableGI                     = (*v2)["enable_gi"].value_or(a_out.enableGI);
-			a_out.enableExperimentalSpecularGI = (*v2)["enable_experimental_specular_gi"].value_or(a_out.enableExperimentalSpecularGI);
-			a_out.enableVanillaSSAO            = (*v2)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
-			a_out.resolutionMode               = std::clamp(static_cast<int>((*v2)["resolution_mode"].value_or<std::int64_t>(a_out.resolutionMode)), 0, 2);
-			a_out.minScreenRadius        = std::clamp(static_cast<float>((*v2)["min_screen_radius"].value_or(static_cast<double>(a_out.minScreenRadius))), 0.0f, 1.0f);
-			a_out.giRadius               = std::clamp(static_cast<float>((*v2)["gi_radius"].value_or(static_cast<double>(a_out.giRadius))), 10.0f, 4096.0f);
-			a_out.depthFadeNear          = static_cast<float>((*v2)["depth_fade_near"].value_or(static_cast<double>(a_out.depthFadeNear)));
-			a_out.depthFadeFar           = static_cast<float>((*v2)["depth_fade_far"].value_or(static_cast<double>(a_out.depthFadeFar)));
-			a_out.giSaturation           = std::clamp(static_cast<float>((*v2)["gi_saturation"].value_or(static_cast<double>(a_out.giSaturation))), 0.0f, 2.0f);
-			a_out.giDistanceCompensation = std::clamp(static_cast<float>((*v2)["gi_distance_compensation"].value_or(static_cast<double>(a_out.giDistanceCompensation))), 0.0f, 4.0f);
-			a_out.giStrength             = std::clamp(static_cast<float>((*v2)["gi_strength"].value_or(static_cast<double>(a_out.giStrength))), 0.0f, 4.0f);
-			a_out.enableTemporalDenoiser = (*v2)["enable_temporal_denoiser"].value_or(a_out.enableTemporalDenoiser);
-			a_out.enableBlur             = (*v2)["enable_blur"].value_or(a_out.enableBlur);
-			a_out.depthDisocclusion      = std::clamp(static_cast<float>((*v2)["depth_disocclusion"].value_or(static_cast<double>(a_out.depthDisocclusion))), 0.0f, 1.0f);
-			a_out.normalDisocclusion     = std::clamp(static_cast<float>((*v2)["normal_disocclusion"].value_or(static_cast<double>(a_out.normalDisocclusion))), 0.0f, 1.0f);
-			a_out.maxAccumFrames         = static_cast<std::uint32_t>(std::clamp(static_cast<std::int64_t>((*v2)["max_accum_frames"].value_or<std::int64_t>(a_out.maxAccumFrames)), std::int64_t{1}, std::int64_t{64}));
-			a_out.blurRadius             = std::clamp(static_cast<float>((*v2)["blur_radius"].value_or(static_cast<double>(a_out.blurRadius))), 0.0f, 8.0f);
-			a_out.distanceNormalisation  = std::clamp(static_cast<float>((*v2)["distance_normalisation"].value_or(static_cast<double>(a_out.distanceNormalisation))), 0.0f, 16.0f);
-			a_out.debugShowIL            = (*v2)["debug_show_il"].value_or(a_out.debugShowIL);
+			a_out.enableGI                     = cs::toml_util::ReadBool(*v2,  "enable_gi",                       a_out.enableGI,                     kV2Ctx);
+			a_out.enableExperimentalSpecularGI = cs::toml_util::ReadBool(*v2,  "enable_experimental_specular_gi", a_out.enableExperimentalSpecularGI, kV2Ctx);
+			a_out.enableVanillaSSAO            = cs::toml_util::ReadBool(*v2,  "enable_vanilla_ssao",             a_out.enableVanillaSSAO,            kV2Ctx);
+			a_out.resolutionMode               = cs::toml_util::ReadInt(*v2,   "resolution_mode",                 a_out.resolutionMode,    0,     2,      kV2Ctx);
+			a_out.minScreenRadius              = cs::toml_util::ReadFloat(*v2, "min_screen_radius",               a_out.minScreenRadius,   0.0f,  1.0f,   kV2Ctx);
+			a_out.giRadius                     = cs::toml_util::ReadFloat(*v2, "gi_radius",                       a_out.giRadius,          10.0f, 4096.0f, kV2Ctx);
+			a_out.depthFadeNear                = cs::toml_util::ReadFloat(*v2, "depth_fade_near",                 a_out.depthFadeNear,    -1e9f,  1e9f,   kV2Ctx);
+			a_out.depthFadeFar                 = cs::toml_util::ReadFloat(*v2, "depth_fade_far",                  a_out.depthFadeFar,     -1e9f,  1e9f,   kV2Ctx);
+			a_out.giSaturation                 = cs::toml_util::ReadFloat(*v2, "gi_saturation",                   a_out.giSaturation,      0.0f,  2.0f,   kV2Ctx);
+			a_out.giDistanceCompensation       = cs::toml_util::ReadFloat(*v2, "gi_distance_compensation",        a_out.giDistanceCompensation, 0.0f, 4.0f, kV2Ctx);
+			a_out.giStrength                   = cs::toml_util::ReadFloat(*v2, "gi_strength",                     a_out.giStrength,        0.0f,  4.0f,   kV2Ctx);
+			a_out.enableTemporalDenoiser       = cs::toml_util::ReadBool(*v2,  "enable_temporal_denoiser",        a_out.enableTemporalDenoiser,        kV2Ctx);
+			a_out.enableBlur                   = cs::toml_util::ReadBool(*v2,  "enable_blur",                     a_out.enableBlur,                    kV2Ctx);
+			a_out.depthDisocclusion            = cs::toml_util::ReadFloat(*v2, "depth_disocclusion",              a_out.depthDisocclusion, 0.0f, 1.0f,   kV2Ctx);
+			a_out.normalDisocclusion           = cs::toml_util::ReadFloat(*v2, "normal_disocclusion",             a_out.normalDisocclusion, 0.0f, 1.0f,  kV2Ctx);
+			a_out.maxAccumFrames               = cs::toml_util::ReadUInt(*v2,  "max_accum_frames",                a_out.maxAccumFrames,    1u,    64u,    kV2Ctx);
+			a_out.blurRadius                   = cs::toml_util::ReadFloat(*v2, "blur_radius",                     a_out.blurRadius,        0.0f,  8.0f,   kV2Ctx);
+			a_out.distanceNormalisation        = cs::toml_util::ReadFloat(*v2, "distance_normalisation",          a_out.distanceNormalisation, 0.0f, 16.0f, kV2Ctx);
+			a_out.debugShowIL                  = cs::toml_util::ReadBool(*v2,  "debug_show_il",                   a_out.debugShowIL,                  kV2Ctx);
 		}
 	}
 
@@ -72,7 +76,7 @@ namespace cs::features::ssgi
 		const auto* s = a_root["settings"].as_table();
 		if (!s) return;
 
-		a_out.enabled = (*s)["enabled"].value_or(a_out.enabled);
+		a_out.enabled = cs::toml_util::ReadBool(*s, "enabled", a_out.enabled, kSettingsCtx);
 		if (const auto pname = (*s)["preset"].value<std::string>()) {
 			const int parsed = ParsePresetName(*pname);
 			if (parsed >= 0) {
@@ -83,41 +87,41 @@ namespace cs::features::ssgi
 		}
 
 		// XeGTAO core knobs.
-		a_out.sliceCount    = std::clamp(static_cast<int>((*s)["slice_count"].value_or<std::int64_t>(a_out.sliceCount)), 1, 8);
-		a_out.stepCount     = std::clamp(static_cast<int>((*s)["step_count"].value_or<std::int64_t>(a_out.stepCount)), 1, 16);
-		a_out.aoRadius      = std::clamp(static_cast<float>((*s)["ao_radius"].value_or(static_cast<double>(a_out.aoRadius))), 10.0f, 1024.0f);
-		a_out.aoPower       = std::clamp(static_cast<float>((*s)["ao_power"].value_or(static_cast<double>(a_out.aoPower))), 0.1f, 6.0f);
-		a_out.thickness     = std::clamp(static_cast<float>((*s)["thickness"].value_or(static_cast<double>(a_out.thickness))), 1.0f, 256.0f);
+		a_out.sliceCount    = cs::toml_util::ReadInt(*s,   "slice_count", a_out.sliceCount, 1, 8,        kSettingsCtx);
+		a_out.stepCount     = cs::toml_util::ReadInt(*s,   "step_count",  a_out.stepCount,  1, 16,       kSettingsCtx);
+		a_out.aoRadius      = cs::toml_util::ReadFloat(*s, "ao_radius",   a_out.aoRadius,   10.0f, 1024.0f, kSettingsCtx);
+		a_out.aoPower       = cs::toml_util::ReadFloat(*s, "ao_power",    a_out.aoPower,    0.1f,  6.0f,    kSettingsCtx);
+		a_out.thickness     = cs::toml_util::ReadFloat(*s, "thickness",   a_out.thickness,  1.0f,  256.0f,  kSettingsCtx);
 
 		// Transitional apply pass.
-		a_out.applyAOToScene = (*s)["apply_ao_to_scene"].value_or(a_out.applyAOToScene);
-		a_out.applyIntensity = std::clamp(static_cast<float>((*s)["apply_intensity"].value_or(static_cast<double>(a_out.applyIntensity))), 0.0f, 4.0f);
-		a_out.applyContrast  = std::clamp(static_cast<float>((*s)["apply_contrast"].value_or(static_cast<double>(a_out.applyContrast))), 0.0f, 2.0f);
+		a_out.applyAOToScene = cs::toml_util::ReadBool(*s,  "apply_ao_to_scene", a_out.applyAOToScene, kSettingsCtx);
+		a_out.applyIntensity = cs::toml_util::ReadFloat(*s, "apply_intensity",   a_out.applyIntensity, 0.0f, 4.0f, kSettingsCtx);
+		a_out.applyContrast  = cs::toml_util::ReadFloat(*s, "apply_contrast",    a_out.applyContrast,  0.0f, 2.0f, kSettingsCtx);
 
-		// IL bounce injection (Phase 2c.2).
-		a_out.applyILToScene = (*s)["apply_il_to_scene"].value_or(a_out.applyILToScene);
-		a_out.ilStrength     = std::clamp(static_cast<float>((*s)["il_strength"].value_or(static_cast<double>(a_out.ilStrength))), 0.0f, 4.0f);
+		// IL bounce injection.
+		a_out.applyILToScene = cs::toml_util::ReadBool(*s,  "apply_il_to_scene", a_out.applyILToScene, kSettingsCtx);
+		a_out.ilStrength     = cs::toml_util::ReadFloat(*s, "il_strength",       a_out.ilStrength,     0.0f, 4.0f, kSettingsCtx);
 
 		// Canonical SSGI knobs (promoted from the legacy [v2] block).
-		a_out.enableGI                     = (*s)["enable_gi"].value_or(a_out.enableGI);
-		a_out.enableExperimentalSpecularGI = (*s)["enable_experimental_specular_gi"].value_or(a_out.enableExperimentalSpecularGI);
-		a_out.enableVanillaSSAO            = (*s)["enable_vanilla_ssao"].value_or(a_out.enableVanillaSSAO);
-		a_out.resolutionMode               = std::clamp(static_cast<int>((*s)["resolution_mode"].value_or<std::int64_t>(a_out.resolutionMode)), 0, 2);
-		a_out.minScreenRadius        = std::clamp(static_cast<float>((*s)["min_screen_radius"].value_or(static_cast<double>(a_out.minScreenRadius))), 0.0f, 1.0f);
-		a_out.giRadius               = std::clamp(static_cast<float>((*s)["gi_radius"].value_or(static_cast<double>(a_out.giRadius))), 10.0f, 4096.0f);
-		a_out.depthFadeNear          = static_cast<float>((*s)["depth_fade_near"].value_or(static_cast<double>(a_out.depthFadeNear)));
-		a_out.depthFadeFar           = static_cast<float>((*s)["depth_fade_far"].value_or(static_cast<double>(a_out.depthFadeFar)));
-		a_out.giSaturation           = std::clamp(static_cast<float>((*s)["gi_saturation"].value_or(static_cast<double>(a_out.giSaturation))), 0.0f, 2.0f);
-		a_out.giDistanceCompensation = std::clamp(static_cast<float>((*s)["gi_distance_compensation"].value_or(static_cast<double>(a_out.giDistanceCompensation))), 0.0f, 4.0f);
-		a_out.giStrength             = std::clamp(static_cast<float>((*s)["gi_strength"].value_or(static_cast<double>(a_out.giStrength))), 0.0f, 4.0f);
-		a_out.enableTemporalDenoiser = (*s)["enable_temporal_denoiser"].value_or(a_out.enableTemporalDenoiser);
-		a_out.enableBlur             = (*s)["enable_blur"].value_or(a_out.enableBlur);
-		a_out.depthDisocclusion      = std::clamp(static_cast<float>((*s)["depth_disocclusion"].value_or(static_cast<double>(a_out.depthDisocclusion))), 0.0f, 1.0f);
-		a_out.normalDisocclusion     = std::clamp(static_cast<float>((*s)["normal_disocclusion"].value_or(static_cast<double>(a_out.normalDisocclusion))), 0.0f, 1.0f);
-		a_out.maxAccumFrames         = static_cast<std::uint32_t>(std::clamp(static_cast<std::int64_t>((*s)["max_accum_frames"].value_or<std::int64_t>(a_out.maxAccumFrames)), std::int64_t{1}, std::int64_t{64}));
-		a_out.blurRadius             = std::clamp(static_cast<float>((*s)["blur_radius"].value_or(static_cast<double>(a_out.blurRadius))), 0.0f, 8.0f);
-		a_out.distanceNormalisation  = std::clamp(static_cast<float>((*s)["distance_normalisation"].value_or(static_cast<double>(a_out.distanceNormalisation))), 0.0f, 16.0f);
-		a_out.debugShowIL            = (*s)["debug_show_il"].value_or(a_out.debugShowIL);
+		a_out.enableGI                     = cs::toml_util::ReadBool(*s,  "enable_gi",                       a_out.enableGI,                     kSettingsCtx);
+		a_out.enableExperimentalSpecularGI = cs::toml_util::ReadBool(*s,  "enable_experimental_specular_gi", a_out.enableExperimentalSpecularGI, kSettingsCtx);
+		a_out.enableVanillaSSAO            = cs::toml_util::ReadBool(*s,  "enable_vanilla_ssao",             a_out.enableVanillaSSAO,            kSettingsCtx);
+		a_out.resolutionMode               = cs::toml_util::ReadInt(*s,   "resolution_mode",                 a_out.resolutionMode,    0,     2,      kSettingsCtx);
+		a_out.minScreenRadius              = cs::toml_util::ReadFloat(*s, "min_screen_radius",               a_out.minScreenRadius,   0.0f,  1.0f,   kSettingsCtx);
+		a_out.giRadius                     = cs::toml_util::ReadFloat(*s, "gi_radius",                       a_out.giRadius,          10.0f, 4096.0f, kSettingsCtx);
+		a_out.depthFadeNear                = cs::toml_util::ReadFloat(*s, "depth_fade_near",                 a_out.depthFadeNear,    -1e9f,  1e9f,   kSettingsCtx);
+		a_out.depthFadeFar                 = cs::toml_util::ReadFloat(*s, "depth_fade_far",                  a_out.depthFadeFar,     -1e9f,  1e9f,   kSettingsCtx);
+		a_out.giSaturation                 = cs::toml_util::ReadFloat(*s, "gi_saturation",                   a_out.giSaturation,      0.0f,  2.0f,   kSettingsCtx);
+		a_out.giDistanceCompensation       = cs::toml_util::ReadFloat(*s, "gi_distance_compensation",        a_out.giDistanceCompensation, 0.0f, 4.0f, kSettingsCtx);
+		a_out.giStrength                   = cs::toml_util::ReadFloat(*s, "gi_strength",                     a_out.giStrength,        0.0f,  4.0f,   kSettingsCtx);
+		a_out.enableTemporalDenoiser       = cs::toml_util::ReadBool(*s,  "enable_temporal_denoiser",        a_out.enableTemporalDenoiser,        kSettingsCtx);
+		a_out.enableBlur                   = cs::toml_util::ReadBool(*s,  "enable_blur",                     a_out.enableBlur,                    kSettingsCtx);
+		a_out.depthDisocclusion            = cs::toml_util::ReadFloat(*s, "depth_disocclusion",              a_out.depthDisocclusion, 0.0f, 1.0f,   kSettingsCtx);
+		a_out.normalDisocclusion           = cs::toml_util::ReadFloat(*s, "normal_disocclusion",             a_out.normalDisocclusion, 0.0f, 1.0f,  kSettingsCtx);
+		a_out.maxAccumFrames               = cs::toml_util::ReadUInt(*s,  "max_accum_frames",                a_out.maxAccumFrames,    1u,    64u,    kSettingsCtx);
+		a_out.blurRadius                   = cs::toml_util::ReadFloat(*s, "blur_radius",                     a_out.blurRadius,        0.0f,  8.0f,   kSettingsCtx);
+		a_out.distanceNormalisation        = cs::toml_util::ReadFloat(*s, "distance_normalisation",          a_out.distanceNormalisation, 0.0f, 16.0f, kSettingsCtx);
+		a_out.debugShowIL                  = cs::toml_util::ReadBool(*s,  "debug_show_il",                   a_out.debugShowIL,                  kSettingsCtx);
 	}
 
 	void EmitSettings(toml::table& a_root, const ScreenSpaceGI::Settings& a_settings)
