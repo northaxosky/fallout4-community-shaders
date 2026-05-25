@@ -17,7 +17,7 @@ namespace cs::features::sss
 				static_cast<int>(ScreenSpaceShadows::Preset::kCinematic));
 		}
 
-		a_out.sampleCount       = std::clamp(static_cast<int>((*s)["sample_count"].value_or<std::int64_t>(a_out.sampleCount)), 1, 4);
+		a_out.sampleCount       = std::clamp(static_cast<int>((*s)["sample_count"].value_or<std::int64_t>(a_out.sampleCount)), 1, 128);
 		a_out.surfaceThickness  = std::clamp(static_cast<float>((*s)["surface_thickness"].value_or(static_cast<double>(a_out.surfaceThickness))), 0.001f, 0.1f);
 		a_out.bilinearThreshold = std::clamp(static_cast<float>((*s)["bilinear_threshold"].value_or(static_cast<double>(a_out.bilinearThreshold))), 0.001f, 1.0f);
 		a_out.shadowContrast    = std::clamp(static_cast<float>((*s)["shadow_contrast"].value_or(static_cast<double>(a_out.shadowContrast))), 0.0f, 4.0f);

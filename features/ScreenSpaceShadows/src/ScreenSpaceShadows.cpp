@@ -155,12 +155,6 @@ namespace cs::features
 
 		sss::EmitSettings(table, settings);
 
-		// preview_scale / show_preview are debug UI scratch and are not part of the preset surface,
-		// so the ConfigIO module excludes them; SaveSettings still persists them for menu UX.
-		auto& settingsTable = *table["settings"].as_table();
-		settingsTable.insert_or_assign("preview_scale", static_cast<double>(settings.previewScale));
-		settingsTable.insert_or_assign("show_preview", settings.showPreview);
-
 		std::ofstream out(kConfigPath);
 		if (!out)
 			throw std::runtime_error(std::string("failed to open ScreenSpaceShadows config for write: ") + std::string(kConfigPath));
@@ -212,7 +206,7 @@ namespace cs::features
 	// BilinearThreshold stays near Bend's recommended 0.02 across the board; cost knob is sample count + thickness.
 	static constexpr PresetValues kPresets[4] = {
 		{ 0, 0.0f,    0.0f,    0.0f,    0.0f  },  // Custom: sentinel, never read.
-		{ 1, 0.030f,  0.040f,  0.75f,   0.7f  },  // Performance: looser thickness, slightly relaxed bilinear.
+		{ 1, 0.030f,  0.020f,  0.75f,   0.7f  },  // Performance: looser thickness, lower sample count.
 		{ 1, 0.020f,  0.020f,  1.0f,    1.0f  },  // Quality (default).
 		{ 3, 0.010f,  0.020f,  1.5f,    1.2f  },  // Cinematic: more samples, tighter thickness, stronger contrast.
 	};
@@ -256,7 +250,7 @@ namespace cs::features
 		// Quantize to multiples of 8 so DRS oscillations don't trigger constant shader recompiles.
 		uint32_t scaled = static_cast<uint32_t>(std::round(settings.sampleCount * 60 * areaScale));
 		scaled = ((scaled + 7u) / 8u) * 8u;
-		return std::max<uint32_t>(scaled, 8u);
+		return std::clamp<uint32_t>(scaled, 8u, 128u);
 	}
 
 
@@ -802,7 +796,7 @@ namespace cs::features
 		};
 
 		ImGui::SliderInt("Sample count multiplier", &settings.sampleCount, 1, 4);
-		ImGui::SetItemTooltip("Multiplied by 60 and scaled by viewport area; rounded to multiples of 8.");
+		ImGui::SetItemTooltip("Multiplied by 60 and scaled by viewport area; rounded to multiples of 8 and capped at 128.");
 		markCustomIfEdited();
 		ImGui::SliderFloat("Surface thickness", &settings.surfaceThickness, 0.001f, 0.1f, "%.4f");
 		ImGui::SetItemTooltip("How far behind a surface a sample is treated as occluder. Lower = harsher contact shadow, higher = softer falloff.");

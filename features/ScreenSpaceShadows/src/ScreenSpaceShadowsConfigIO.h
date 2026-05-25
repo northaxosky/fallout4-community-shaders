@@ -13,7 +13,6 @@ namespace cs::features::sss
 	void ParseSettings(const toml::table& a_root, ScreenSpaceShadows::Settings& a_out);
 
 	// Emits canonical visual-look fields into [settings] (insert-or-assign on a_root). Excludes
-	// preview_scale / show_preview; those are debug UI scratch and are persisted by SaveSettings
-	// directly, not by presets.
+	// preview_scale / show_preview; those are runtime-only debug UI scratch.
 	void EmitSettings(toml::table& a_root, const ScreenSpaceShadows::Settings& a_settings);
 }
