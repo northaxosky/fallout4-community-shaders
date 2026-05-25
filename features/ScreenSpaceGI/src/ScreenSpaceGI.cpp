@@ -26,6 +26,7 @@
 #include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
+#include "SettingsOverrideManager.h"
 #ifdef near
 #	undef near
 #endif
@@ -403,6 +404,10 @@ namespace cs::features
 
 		if (firstLaunch) {
 			ApplyPreset(QualityPreset::kMedium);
+		}
+
+		if (auto overrideTbl = cs::settings_overrides::TryLoad("ScreenSpaceGI")) {
+			ssgi::ParseSettings(*overrideTbl, settings);
 		}
 
 		constexpr const char* kApplyMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_force_apply";

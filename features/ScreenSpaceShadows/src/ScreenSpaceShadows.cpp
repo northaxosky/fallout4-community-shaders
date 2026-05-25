@@ -26,6 +26,7 @@
 #include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
+#include "SettingsOverrideManager.h"
 #include "Sky.h"
 namespace cs::features
 {
@@ -99,6 +100,10 @@ namespace cs::features
 
 		if (firstLaunch) {
 			ApplyPreset(Preset::kMedium);
+		}
+
+		if (auto overrideTbl = cs::settings_overrides::TryLoad("ScreenSpaceShadows")) {
+			sss::ParseSettings(*overrideTbl, settings);
 		}
 
 		// Smoke-harness override: marker presence forces all knobs to known values; cleared on harness exit.

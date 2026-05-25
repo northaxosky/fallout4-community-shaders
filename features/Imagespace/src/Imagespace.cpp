@@ -27,6 +27,7 @@
 #include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
+#include "SettingsOverrideManager.h"
 #include "Sky.h"
 #include "Weather.h"
 #include "WeatherProfiles.h"
@@ -326,6 +327,10 @@ namespace cs::features
 
 		imagespace::ParseSettings(table, settings);
 		imagespace::ParseWeather(table, weatherProfiles, /*a_dropOverrides=*/false);
+
+		if (auto overrideTbl = cs::settings_overrides::TryLoad("Imagespace")) {
+			imagespace::ParseSettings(*overrideTbl, settings);
+		}
 
 		// LUT preload deferred: if D3D is ready (mid-game reload), do it now; otherwise OnD3D11Ready
 		// will pick it up. Avoids poisoning LUTCache's negative cache during pre-D3D Imagespace::Load().
