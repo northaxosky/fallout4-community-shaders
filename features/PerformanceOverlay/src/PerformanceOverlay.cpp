@@ -420,21 +420,25 @@ namespace cs::features
 
 			if (settings.showFps) {
 				const bool fgActive = _displayedFrameMultiplier > 1;
-				const bool fsr3Fallback = fgActive && FrameGeneration::GetSingleton()->activeFrameGenType == FrameGeneration::FrameGenType::kFSR3;
-				// Approach B: prefer measured displayed FPS from backend telemetry; fall
-				// back to engine FPS * multiplier when the measurement hasn't warmed up.
+				const auto fgType = FrameGeneration::GetSingleton()->activeFrameGenType;
+				const bool fsr3Fallback = fgActive && fgType == FrameGeneration::FrameGenType::kFSR3;
 				const float estimateFps = _displayedFps * static_cast<float>(_displayedFrameMultiplier);
 				const float outputFps = (fgActive && _measuredDisplayedFps > 0.0f) ? _measuredDisplayedFps : estimateFps;
 				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(outputFps));
-				if (fsr3Fallback)
-					ImGui::Text("[FSR3-B] %.0f FPS  (engine %.0f x%d)", outputFps, _displayedFps, _displayedFrameMultiplier);
-				else if (fgActive)
-					ImGui::Text("%.0f FPS  (engine %.0f x%d)", outputFps, _displayedFps, _displayedFrameMultiplier);
-				else
-					ImGui::Text("%.0f FPS", _displayedFps);
+				if (fgActive) {
+					const char* fgLabel = "FG";
+					switch (fgType) {
+						case FrameGeneration::FrameGenType::kFSR3:   fgLabel = fsr3Fallback ? "FSR3 est" : "FSR3"; break;
+						case FrameGeneration::FrameGenType::kDLSSG:  fgLabel = "DLSS-G"; break;
+						case FrameGeneration::FrameGenType::kXeSSFG: fgLabel = "XeSS-FG"; break;
+					}
+					ImGui::Text("[%s] %.0f FPS  |  [Engine] %.0f FPS", fgLabel, outputFps, _displayedFps);
+				} else {
+					ImGui::Text("[Engine] %.0f FPS", _displayedFps);
+				}
 				ImGui::PopStyleColor();
 				if (fgActive)
-					ImGui::SetItemTooltip("Displayed FPS comes from backend-reported frame counts (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus). FSR3-B falls back to engine FPS times multiplier since safe per-frame counting would require hijacking presentCallback.");
+					ImGui::SetItemTooltip("Displayed FPS comes from backend-reported frame counts (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus). FSR3 falls back to engine FPS times multiplier (labeled \"FSR3 est\") since safe per-frame counting would require hijacking presentCallback.");
 			}
 			if (settings.showFrameTime) {
 				if (_displayedFrameMultiplier > 1)
