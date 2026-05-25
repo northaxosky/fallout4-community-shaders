@@ -5,16 +5,22 @@
 #include <imgui.h>
 #include <toml++/toml.hpp>
 
+#include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 
 #include "Log.h"
+#include "Menu.h"
 
 namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.renderdoc"); }
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\RenderDoc.toml";
+	constexpr double      kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
+	constexpr int         kMinMultiFrameCount = 2;
+	constexpr int         kMaxMultiFrameCount = 60;
 
 	RenderDoc* RenderDoc::GetSingleton()
 	{
@@ -38,11 +44,25 @@ namespace cs::features
 			const auto fgEnabled = table["settings"]["frame_generation_mode"].value_or(true);
 			return fgEnabled && type == 1;
 		}
+
+		int ClampMultiFrameCount(int64_t a_value)
+		{
+			return static_cast<int>(std::clamp(a_value,
+				static_cast<int64_t>(kMinMultiFrameCount),
+				static_cast<int64_t>(kMaxMultiFrameCount)));
+		}
+
+		double ClampMinFreeDiskGiB(double a_value)
+		{
+			return a_value >= 0.0 ? a_value : RenderDoc::Settings{}.minFreeDiskGiB;
+		}
 	}
 
 	void RenderDoc::Load()
 	{
 		LoadSettings();
+		cs::Menu::Get().RegisterWndProcCallback(&RenderDoc::HandleWndProc);
+
 		if (!_settings.enabled)
 			return;
 		if (DLSSGRequested()) {
@@ -64,12 +84,16 @@ namespace cs::features
 			return;
 		}
 
-		_settings.enabled       = table["settings"]["enabled"].value_or(_settings.enabled);
-		_settings.dllPath       = table["settings"]["dll_path"].value_or(_settings.dllPath);
-		_settings.captureFolder = table["settings"]["capture_folder"].value_or(_settings.captureFolder);
+		_settings.enabled        = table["settings"]["enabled"].value_or(_settings.enabled);
+		_settings.dllPath        = table["settings"]["dll_path"].value_or(_settings.dllPath);
+		_settings.captureFolder  = table["settings"]["capture_folder"].value_or(_settings.captureFolder);
+		_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(table["settings"]["min_free_disk_gib"].value_or(_settings.minFreeDiskGiB));
+		_settings.multiFrameCount = ClampMultiFrameCount(
+			table["settings"]["multi_frame_count"].value_or<int64_t>(_settings.multiFrameCount));
 
-		L->info("Settings: enabled={} dll={} folder={}",
-			_settings.enabled, _settings.dllPath, _settings.captureFolder);
+		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={}",
+			_settings.enabled, _settings.dllPath, _settings.captureFolder,
+			_settings.minFreeDiskGiB, _settings.multiFrameCount);
 	}
 
 	void RenderDoc::SaveSettings()
@@ -85,6 +109,8 @@ namespace cs::features
 			settings.insert_or_assign("enabled", _settings.enabled);
 			settings.insert_or_assign("dll_path", _settings.dllPath);
 			settings.insert_or_assign("capture_folder", _settings.captureFolder);
+			settings.insert_or_assign("min_free_disk_gib", _settings.minFreeDiskGiB);
+			settings.insert_or_assign("multi_frame_count", static_cast<int64_t>(_settings.multiFrameCount));
 
 			if (const auto parent = configPath.parent_path(); !parent.empty()) {
 				std::filesystem::create_directories(parent);
@@ -153,25 +179,100 @@ namespace cs::features
 		_api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 	}
 
+	bool RenderDoc::CheckCaptureDiskSpace() const
+	{
+		std::filesystem::path captureDir(_settings.captureFolder);
+		if (captureDir.empty())
+			captureDir = ".";
+
+		std::error_code ec;
+		std::filesystem::create_directories(captureDir, ec);
+		if (ec) {
+			L->warn("RenderDoc capture aborted: failed to prepare capture folder {}: {}",
+				captureDir.string(), ec.message());
+			cs::Menu::ShowToast("RenderDoc capture aborted: capture folder unavailable", 4.0);
+			return false;
+		}
+
+		try {
+			const auto availableBytes = std::filesystem::space(captureDir).available;
+			const double availableGiB = static_cast<double>(availableBytes) / kBytesPerGiB;
+			const double requiredGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
+			if (availableGiB < requiredGiB) {
+				L->warn("RenderDoc capture aborted: {:.2f} GiB free in {} below configured {:.2f} GiB",
+					availableGiB, captureDir.string(), requiredGiB);
+				cs::Menu::ShowToast("RenderDoc capture aborted: low disk space", 4.0);
+				return false;
+			}
+		} catch (const std::filesystem::filesystem_error& e) {
+			L->warn("RenderDoc capture aborted: failed to query free disk space for {}: {}",
+				captureDir.string(), e.what());
+			cs::Menu::ShowToast("RenderDoc capture aborted: disk check failed", 4.0);
+			return false;
+		}
+
+		return true;
+	}
+
+	void RenderDoc::ApplyPendingComments()
+	{
+		if (!_api || !_commentsBuf[0])
+			return;
+
+		_api->SetCaptureFileComments("", _commentsBuf.data());
+		_commentsBuf[0] = 0;
+	}
+
 	void RenderDoc::TriggerCapture()
 	{
 		if (!_settings.enabled) {
 			L->warn("TriggerCapture called while feature disabled");
 			return;
 		}
-		if (!TryLoadRuntime())
+		if (!TryLoadRuntime() || !CheckCaptureDiskSpace())
 			return;
 
 		_api->TriggerCapture();
+		ApplyPendingComments();
 
-		// Empty path binds comments to the most-recent capture (the one we just triggered).
-		// Buffer cleared so notes don't bleed across captures.
-		if (_commentsBuf[0]) {
-			_api->SetCaptureFileComments("", _commentsBuf.data());
-			_commentsBuf[0] = 0;
+		L->info("Single-frame capture triggered");
+	}
+
+	void RenderDoc::TriggerMultiFrameCapture()
+	{
+		if (!_settings.enabled) {
+			L->warn("TriggerMultiFrameCapture called while feature disabled");
+			return;
+		}
+		if (!TryLoadRuntime() || !CheckCaptureDiskSpace())
+			return;
+		if (!_api->TriggerMultiFrameCapture) {
+			L->warn("RenderDoc runtime does not expose TriggerMultiFrameCapture");
+			return;
 		}
 
-		L->info("Capture triggered");
+		const auto frameCount = static_cast<uint32_t>(ClampMultiFrameCount(_settings.multiFrameCount));
+		_api->TriggerMultiFrameCapture(frameCount);
+		ApplyPendingComments();
+
+		L->info("Multi-frame capture triggered: {} frames", frameCount);
+	}
+
+	bool RenderDoc::HandleWndProc(HWND, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
+	{
+		if (a_msg != WM_KEYDOWN || a_wparam != VK_F11 || (HIWORD(a_lparam) & KF_REPEAT) != 0)
+			return false;
+
+		auto* renderDoc = GetSingleton();
+		if (!renderDoc->_settings.enabled)
+			return false;
+
+		if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+			renderDoc->TriggerMultiFrameCapture();
+		else
+			renderDoc->TriggerCapture();
+
+		return true;
 	}
 
 	void RenderDoc::DrawSettings()
@@ -186,6 +287,7 @@ namespace cs::features
 		}
 
 		ImGui::TextDisabled("Restart after enabling. DLSS-G is blocked; disable all FrameGeneration for clean D3D11 captures.");
+		ImGui::TextDisabled("F11 captures one frame. Shift+F11 captures the configured multi-frame count.");
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
@@ -203,6 +305,17 @@ namespace cs::features
 			ApplyCapturePath();
 		}
 
+		if (ImGui::InputDouble("Minimum free disk (GiB)", &_settings.minFreeDiskGiB, 0.25, 1.0, "%.2f"))
+			_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			SaveSettings();
+
+		ImGui::SliderInt("Multi-frame count", &_settings.multiFrameCount, kMinMultiFrameCount, kMaxMultiFrameCount);
+		if (ImGui::IsItemDeactivatedAfterEdit()) {
+			_settings.multiFrameCount = ClampMultiFrameCount(_settings.multiFrameCount);
+			SaveSettings();
+		}
+
 		ImGui::InputTextMultiline("Comments (embedded in next .rdc)",
 			_commentsBuf.data(), _commentsBuf.size(),
 			ImVec2(0, ImGui::GetTextLineHeight() * 3));
@@ -210,6 +323,9 @@ namespace cs::features
 		ImGui::BeginDisabled(!_api);
 		if (ImGui::Button("Trigger Capture"))
 			TriggerCapture();
+		ImGui::SameLine();
+		if (ImGui::Button("Trigger Multi-Frame"))
+			TriggerMultiFrameCapture();
 		ImGui::EndDisabled();
 
 		if (!_api && _settings.enabled)

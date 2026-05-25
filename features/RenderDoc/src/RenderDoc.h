@@ -26,12 +26,15 @@ namespace cs::features
 		void RestoreDefaultSettings() override;
 
 		void TriggerCapture();
+		void TriggerMultiFrameCapture();
 
 		struct Settings
 		{
 			bool        enabled = false;
 			std::string dllPath = "Data\\F4SE\\Plugins\\RenderDoc\\renderdoc.dll";
 			std::string captureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
+			double      minFreeDiskGiB = 1.0;
+			int         multiFrameCount = 5;
 		};
 
 	private:
@@ -41,6 +44,9 @@ namespace cs::features
 		void SaveSettings();
 		bool TryLoadRuntime();
 		void ApplyCapturePath();
+		bool CheckCaptureDiskSpace() const;
+		void ApplyPendingComments();
+		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 
 		Settings _settings;
 		HMODULE              _module = nullptr;

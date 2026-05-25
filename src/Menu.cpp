@@ -176,6 +176,14 @@ namespace cs
 		return _dxgiAdapter3;
 	}
 
+	void Menu::RegisterWndProcCallback(WndProcCallback a_callback)
+	{
+		if (!a_callback)
+			return;
+		if (std::find(_wndProcCallbacks.begin(), _wndProcCallbacks.end(), a_callback) == _wndProcCallbacks.end())
+			_wndProcCallbacks.push_back(a_callback);
+	}
+
 	void Menu::ShowToast(std::string a_text, double a_durationSec)
 	{
 		auto& m = Get();
@@ -664,8 +672,12 @@ namespace cs
 			return 0;
 		}
 
-		// Shift+F11 toggles the always-on overlay. Modifier-gated to avoid colliding with
-		// mods that bind F11 (Place Everywhere, MCM) or with Windows fullscreen toggle.
+		for (auto callback : m._wndProcCallbacks) {
+			if (callback && callback(a_hwnd, a_msg, a_wparam, a_lparam))
+				return 0;
+		}
+
+		// Shift+F11 toggles the always-on overlay when no feature consumes it.
 		if (a_msg == WM_KEYDOWN && a_wparam == VK_F11 && (HIWORD(a_lparam) & KF_REPEAT) == 0
 			&& (GetKeyState(VK_SHIFT) & 0x8000) != 0) {
 			m._overlayVisible = !m._overlayVisible;

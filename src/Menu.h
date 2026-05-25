@@ -21,6 +21,9 @@ namespace cs
 		void OnD3D11Ready(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd);
 		void HookPresentOn(IDXGISwapChain* a_chain);
 
+		using WndProcCallback = bool (*)(HWND, UINT, WPARAM, LPARAM);
+		void RegisterWndProcCallback(WndProcCallback a_callback);
+
 		bool IsOpen() const noexcept { return _open; }
 		bool IsOverlayVisible() const noexcept { return _overlayVisible; }
 		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
@@ -67,6 +70,7 @@ namespace cs
 		float   _fontScale = 1.5f;
 		int     _loggingLevelIdx = -1;
 		std::vector<std::string> _cachedLoggers;
+		std::vector<WndProcCallback> _wndProcCallbacks;
 
 		WNDPROC _origWndProc = nullptr;
 
