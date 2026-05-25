@@ -761,6 +761,29 @@ namespace cs::features
 		outputAccumFramesIdx = 0;
 		inputAccumFramesIdx  = 1;
 
+		// One-shot clear of every ring slot + upsample destinations to safe defaults. Sub-res modes
+		// only write the work-res top-left tile inside the full-res allocation, and upsample.cs
+		// reads texAo[]/texIl*[] outside that tile when it samples for full-res output. Without
+		// this clear, the outside-tile region holds undefined VRAM and produces tile-aligned dark
+		// boxes after upsample. Mirrors upstream's safe-default policy.
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (rendererData && rendererData->context) {
+			auto* ctx = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+			const float lit[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
+			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			for (int i = 0; i < 2; ++i) {
+				if (texAo[i]          && texAo[i]->uav)          ctx->ClearUnorderedAccessViewFloat(texAo[i]->uav.get(),          lit);
+				if (texIlY[i]         && texIlY[i]->uav)         ctx->ClearUnorderedAccessViewFloat(texIlY[i]->uav.get(),         zero);
+				if (texIlCoCg[i]      && texIlCoCg[i]->uav)      ctx->ClearUnorderedAccessViewFloat(texIlCoCg[i]->uav.get(),      zero);
+				if (texAccumFrames[i] && texAccumFrames[i]->uav) ctx->ClearUnorderedAccessViewFloat(texAccumFrames[i]->uav.get(), zero);
+				if (texGiSpecular[i]  && texGiSpecular[i]->uav)  ctx->ClearUnorderedAccessViewFloat(texGiSpecular[i]->uav.get(),  zero);
+			}
+			if (texAoUpsampled         && texAoUpsampled->uav)         ctx->ClearUnorderedAccessViewFloat(texAoUpsampled->uav.get(),         lit);
+			if (texIlYUpsampled        && texIlYUpsampled->uav)        ctx->ClearUnorderedAccessViewFloat(texIlYUpsampled->uav.get(),        zero);
+			if (texIlCoCgUpsampled     && texIlCoCgUpsampled->uav)     ctx->ClearUnorderedAccessViewFloat(texIlCoCgUpsampled->uav.get(),     zero);
+			if (texGiSpecularUpsampled && texGiSpecularUpsampled->uav) ctx->ClearUnorderedAccessViewFloat(texGiSpecularUpsampled->uav.get(), zero);
+		}
+
 		L->info("SSGI resources allocated: working={}x{} (resMode={}, divisor={}) from frame={}x{}",
 			workW, workH, resMode, divisor, a_w, a_h);
 		return true;
@@ -768,22 +791,41 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSSGI()
 	{
-		if (!settings.enabled) return;
+		auto rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) return;
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+		// Upstream pattern: on any early-exit, clear the output ring slot so Apply / ApplyIL read
+		// safe defaults instead of last-frame data (matters when SSGI is enabled but the chain
+		// can't run this frame for any reason). Only clears when resources have been allocated.
+		auto clearOutputsSafe = [&]() {
+			if (!resourcesAllocated || !context) return;
+			const uint32_t aoIdx    = outputAoIdx;
+			const uint32_t ilIdx    = outputIlIdx;
+			const uint32_t accumIdx = outputAccumFramesIdx;
+			const float lit[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
+			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			if (texAo[aoIdx]             && texAo[aoIdx]->uav)             context->ClearUnorderedAccessViewFloat(texAo[aoIdx]->uav.get(),             lit);
+			if (texIlY[ilIdx]            && texIlY[ilIdx]->uav)            context->ClearUnorderedAccessViewFloat(texIlY[ilIdx]->uav.get(),            zero);
+			if (texIlCoCg[ilIdx]         && texIlCoCg[ilIdx]->uav)         context->ClearUnorderedAccessViewFloat(texIlCoCg[ilIdx]->uav.get(),         zero);
+			if (texAccumFrames[accumIdx] && texAccumFrames[accumIdx]->uav) context->ClearUnorderedAccessViewFloat(texAccumFrames[accumIdx]->uav.get(), zero);
+			if (texGiSpecular[aoIdx]     && texGiSpecular[aoIdx]->uav)     context->ClearUnorderedAccessViewFloat(texGiSpecular[aoIdx]->uav.get(),     zero);
+		};
+
+		if (!settings.enabled) { clearOutputsSafe(); return; }
 		if (cs::env::IsENBLoaded()) {
 			if (!enbWarningLogged) {
 				L->info("ENB detected; SSGI skipped");
 				enbWarningLogged = true;
 			}
+			clearOutputsSafe();
 			return;
 		}
-
-		auto rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) return;
 
 		auto& depth = rendererData->depthStencilTargets[kDST_Main];
 		auto* depthSRV = reinterpret_cast<ID3D11ShaderResourceView*>(depth.srViewDepth);
 		auto* depthTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
-		if (!depthSRV || !depthTex) return;
+		if (!depthSRV || !depthTex) { clearOutputsSafe(); return; }
 
 		auto& normalRT = rendererData->renderTargets[kRT_GbufferNormal];
 		auto* normalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(normalRT.srView);
@@ -797,15 +839,15 @@ namespace cs::features
 		auto& motionRT = rendererData->renderTargets[kRT_MotionVectors];
 		auto* motionSRV = reinterpret_cast<ID3D11ShaderResourceView*>(motionRT.srView);
 
-		if (!normalSRV || !diffuseSRV) return;
-		if (settings.enableExperimentalSpecularGI && !materialSRV) return;
+		if (!normalSRV || !diffuseSRV) { clearOutputsSafe(); return; }
+		if (settings.enableExperimentalSpecularGI && !materialSRV) { clearOutputsSafe(); return; }
 
 		D3D11_TEXTURE2D_DESC dd{};
 		depthTex->GetDesc(&dd);
 		const uint32_t W = dd.Width;
 		const uint32_t H = dd.Height;
 
-		if (!EnsureResources(W, H, settings.resolutionMode)) return;
+		if (!EnsureResources(W, H, settings.resolutionMode)) { clearOutputsSafe(); return; }
 		CompileShaders();
 		EnsureNoise();
 
@@ -822,10 +864,8 @@ namespace cs::features
 		// If any failed to compile, bail rather than running a partial chain.
 		if (!prefilterDepthsCS  || !prefilterNormalCS || !radianceDisoccCS ||
 		    !prefilterRadianceCS|| !giCS              || !blurCS           ||
-		    !upsampleCS)
-			return;
+		    !upsampleCS) { clearOutputsSafe(); return; }
 
-		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "DrawSSGI");
 
@@ -987,6 +1027,20 @@ namespace cs::features
 		//----------------------------------------------------------------
 		const int outIdx = outputAoIdx;
 		const int inIdx  = inputAoIdx;
+
+		// Clear the output ring slot before radianceDisocc + gi.cs write it. Under HALF/QUARTER res
+		// only the work-res top-left tile gets written; upsample.cs samples the full-res allocation
+		// and pulls garbage from outside the tile without this clear, producing tile-aligned dark
+		// boxes. Cheap fast-clear (single R8 / RG16F / RGBA16F UAV at full-res).
+		{
+			const float lit[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
+			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			if (texAo[outIdx]          && texAo[outIdx]->uav)          context->ClearUnorderedAccessViewFloat(texAo[outIdx]->uav.get(),          lit);
+			if (texIlY[outIdx]         && texIlY[outIdx]->uav)         context->ClearUnorderedAccessViewFloat(texIlY[outIdx]->uav.get(),         zero);
+			if (texIlCoCg[outIdx]      && texIlCoCg[outIdx]->uav)      context->ClearUnorderedAccessViewFloat(texIlCoCg[outIdx]->uav.get(),      zero);
+			if (texAccumFrames[outIdx] && texAccumFrames[outIdx]->uav) context->ClearUnorderedAccessViewFloat(texAccumFrames[outIdx]->uav.get(), zero);
+			if (texGiSpecular[outIdx]  && texGiSpecular[outIdx]->uav)  context->ClearUnorderedAccessViewFloat(texGiSpecular[outIdx]->uav.get(),  zero);
+		}
 
 		context->CSSetShader(radianceDisoccCS, nullptr, 0);
 		ID3D11ShaderResourceView* rdSRV[10] = {
