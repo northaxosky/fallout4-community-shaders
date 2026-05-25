@@ -444,6 +444,17 @@ namespace cs::features
 			}
 			L->info("Test mode: apply={} extreme override applied", settings.applyAOToScene);
 		}
+
+		// Validation marker: force every ring slot to a sentinel gray (AO=0.5, IL channels=0)
+		// before each radianceDisocc dispatch. If the tile-aligned dark boxes vanish into a uniform
+		// gray screen with the marker present, the clear path is wired correctly and the box
+		// artifact is unwritten-region noise. If the boxes persist in original positions, the root
+		// cause is downstream of the AO/IL ring (e.g. upsample.cs sampling pattern or Apply blend).
+		constexpr const char* kDebugFullClearMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_debug_force_full_clear";
+		debugForceFullClear = std::filesystem::exists(kDebugFullClearMarker);
+		if (debugForceFullClear) {
+			L->info("Debug: full-clear validation marker active");
+		}
 	}
 
 	void ScreenSpaceGI::SaveSettings()
@@ -1035,11 +1046,24 @@ namespace cs::features
 		{
 			const float lit[4]  = { 1.0f, 1.0f, 1.0f, 1.0f };
 			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
-			if (texAo[outIdx]          && texAo[outIdx]->uav)          context->ClearUnorderedAccessViewFloat(texAo[outIdx]->uav.get(),          lit);
-			if (texIlY[outIdx]         && texIlY[outIdx]->uav)         context->ClearUnorderedAccessViewFloat(texIlY[outIdx]->uav.get(),         zero);
-			if (texIlCoCg[outIdx]      && texIlCoCg[outIdx]->uav)      context->ClearUnorderedAccessViewFloat(texIlCoCg[outIdx]->uav.get(),      zero);
-			if (texAccumFrames[outIdx] && texAccumFrames[outIdx]->uav) context->ClearUnorderedAccessViewFloat(texAccumFrames[outIdx]->uav.get(), zero);
-			if (texGiSpecular[outIdx]  && texGiSpecular[outIdx]->uav)  context->ClearUnorderedAccessViewFloat(texGiSpecular[outIdx]->uav.get(),  zero);
+			// Validation marker swaps AO to a sentinel gray on BOTH ring slots so Apply reads
+			// gray regardless of ping-pong state. See LoadSettings comment for diagnosis use.
+			const float sentinelAo[4] = { 0.5f, 0.5f, 0.5f, 0.5f };
+			if (debugForceFullClear) {
+				for (int s = 0; s < 2; ++s) {
+					if (texAo[s]          && texAo[s]->uav)          context->ClearUnorderedAccessViewFloat(texAo[s]->uav.get(),          sentinelAo);
+					if (texIlY[s]         && texIlY[s]->uav)         context->ClearUnorderedAccessViewFloat(texIlY[s]->uav.get(),         zero);
+					if (texIlCoCg[s]      && texIlCoCg[s]->uav)      context->ClearUnorderedAccessViewFloat(texIlCoCg[s]->uav.get(),      zero);
+					if (texAccumFrames[s] && texAccumFrames[s]->uav) context->ClearUnorderedAccessViewFloat(texAccumFrames[s]->uav.get(), zero);
+					if (texGiSpecular[s]  && texGiSpecular[s]->uav)  context->ClearUnorderedAccessViewFloat(texGiSpecular[s]->uav.get(),  zero);
+				}
+			} else {
+				if (texAo[outIdx]          && texAo[outIdx]->uav)          context->ClearUnorderedAccessViewFloat(texAo[outIdx]->uav.get(),          lit);
+				if (texIlY[outIdx]         && texIlY[outIdx]->uav)         context->ClearUnorderedAccessViewFloat(texIlY[outIdx]->uav.get(),         zero);
+				if (texIlCoCg[outIdx]      && texIlCoCg[outIdx]->uav)      context->ClearUnorderedAccessViewFloat(texIlCoCg[outIdx]->uav.get(),      zero);
+				if (texAccumFrames[outIdx] && texAccumFrames[outIdx]->uav) context->ClearUnorderedAccessViewFloat(texAccumFrames[outIdx]->uav.get(), zero);
+				if (texGiSpecular[outIdx]  && texGiSpecular[outIdx]->uav)  context->ClearUnorderedAccessViewFloat(texGiSpecular[outIdx]->uav.get(),  zero);
+			}
 		}
 
 		context->CSSetShader(radianceDisoccCS, nullptr, 0);
