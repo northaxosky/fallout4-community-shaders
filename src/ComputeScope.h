@@ -4,10 +4,11 @@
 
 namespace cs
 {
-	// RAII: saves+unbinds OM on entry; clears CS-stage bindings and restores OM on exit. Not re-entrant.
-	// Skips BSGraphics::Renderer::SetDirtyStates intentionally: raw ID3D11 dispatches under this scope
-	// restore the D3D11 state they change, so the engine's TLS dirty-state cache stays consistent without
-	// the per-dispatch flush. See Fallout4RE exports/cs-bsgraphics-flush-trigger.json @ b929b61.
+	// RAII guard around CS dispatches. Entry is a no-op; exit clears CS-stage bindings the
+	// dispatches touched (SRV/UAV/CB/sampler/shader) so the next CS dispatch starts clean.
+	// Width is capped at 8 slots per stage - a full-width null sweep (128 SRVs etc.) stomps
+	// engine CS-stage bindings at high slots during deferred passes and produces dark boxes
+	// at building positions. Not re-entrant.
 	class ComputeScope
 	{
 	public:
@@ -20,8 +21,6 @@ namespace cs
 		ComputeScope& operator=(ComputeScope&&)      = delete;
 
 	private:
-		ID3D11DeviceContext*    _ctx;
-		ID3D11RenderTargetView* _savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
-		ID3D11DepthStencilView* _savedDSV = nullptr;
+		ID3D11DeviceContext* _ctx;
 	};
 }

@@ -5,32 +5,27 @@ namespace cs
 	ComputeScope::ComputeScope(ID3D11DeviceContext* a_ctx) noexcept :
 		_ctx(a_ctx)
 	{
-		_ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _savedRTVs, &_savedDSV);
-		_ctx->OMSetRenderTargets(0, nullptr, nullptr);
+		(void)_ctx;
 	}
 
 	ComputeScope::~ComputeScope() noexcept
 	{
-		// Widened past 8 because SSGI's gi.cs binds 10 SRVs and other features grow over time;
-		// leaking high slots silently corrupts the engine's next draw. D3D11 max-per-stage is 128 SRVs / 14 CBs / 16 samplers / 8 UAVs.
-		constexpr UINT kSRVSlots = D3D11_COMMONSHADER_INPUT_RESOURCE_SLOT_COUNT;  // 128
-		constexpr UINT kUAVSlots = D3D11_PS_CS_UAV_REGISTER_COUNT;                // 8
-		constexpr UINT kCBSlots  = D3D11_COMMONSHADER_CONSTANT_BUFFER_API_SLOT_COUNT;  // 14
-		constexpr UINT kSampSlots = D3D11_COMMONSHADER_SAMPLER_SLOT_COUNT;        // 16
+		// CS-stage hygiene: clear the slots our dispatches likely touched so the next CS
+		// dispatch starts clean. Width is capped at 8 - widening to the D3D11 maximums
+		// (128 SRVs / 14 CBs / 16 samplers) caused dark boxes at building positions whenever
+		// SSGI or SSS was enabled, because the engine has CS-stage resources bound at high
+		// slots during deferred passes and a full-width null sweep stomps them.
+		constexpr UINT kClearWidth = 8;
 
-		ID3D11ShaderResourceView*  nullSRVs[kSRVSlots] = {};
-		_ctx->CSSetShaderResources(0, kSRVSlots, nullSRVs);
-		ID3D11SamplerState*        nullSamplers[kSampSlots] = {};
-		_ctx->CSSetSamplers(0, kSampSlots, nullSamplers);
-		ID3D11UnorderedAccessView* nullUAVs[kUAVSlots] = {};
-		_ctx->CSSetUnorderedAccessViews(0, kUAVSlots, nullUAVs, nullptr);
-		ID3D11Buffer*              nullCBs[kCBSlots] = {};
-		_ctx->CSSetConstantBuffers(0, kCBSlots, nullCBs);
+		ID3D11ShaderResourceView*  nullSRVs[kClearWidth]     = {};
+		ID3D11SamplerState*        nullSamplers[kClearWidth] = {};
+		ID3D11UnorderedAccessView* nullUAVs[kClearWidth]     = {};
+		ID3D11Buffer*              nullCBs[kClearWidth]      = {};
+
+		_ctx->CSSetShaderResources(0, kClearWidth, nullSRVs);
+		_ctx->CSSetSamplers(0, kClearWidth, nullSamplers);
+		_ctx->CSSetUnorderedAccessViews(0, kClearWidth, nullUAVs, nullptr);
+		_ctx->CSSetConstantBuffers(0, kClearWidth, nullCBs);
 		_ctx->CSSetShader(nullptr, nullptr, 0);
-
-		_ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _savedRTVs, _savedDSV);
-		for (auto* rtv : _savedRTVs)
-			if (rtv) rtv->Release();
-		if (_savedDSV) _savedDSV->Release();
 	}
 }
