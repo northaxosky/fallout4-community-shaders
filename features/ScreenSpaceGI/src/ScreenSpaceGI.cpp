@@ -848,6 +848,14 @@ namespace cs::features
 		const uint32_t W = dd.Width;
 		const uint32_t H = dd.Height;
 
+		uint32_t diffuseW = 0, diffuseH = 0;
+		if (auto* diffuseTex = reinterpret_cast<ID3D11Texture2D*>(diffuseRT.texture)) {
+			D3D11_TEXTURE2D_DESC ddd{};
+			diffuseTex->GetDesc(&ddd);
+			diffuseW = ddd.Width;
+			diffuseH = ddd.Height;
+		}
+
 		if (!EnsureResources(W, H, settings.resolutionMode)) { clearOutputsSafe(); return; }
 		CompileShaders();
 		EnsureNoise();
@@ -880,6 +888,16 @@ namespace cs::features
 		const auto divisor = (modeIdx == 0) ? 1u : (modeIdx == 1) ? 2u : 4u;
 		const uint32_t workW = std::max(1u, W / divisor);
 		const uint32_t workH = std::max(1u, H / divisor);
+
+		// Bound probe: compares the dim that drives our whole compute chain (depth tex) against
+		// kDiffuseBuffer (what SSS uses as viewport). If depth > diffuse, DRS is engaged and we're
+		// sampling outside the valid depth proxy region; if equal, DRS is off (no asymmetry).
+		static bool loggedDims = false;
+		if (!loggedDims) {
+			L->info("Bound probe: depthTex={}x{} kDiffuseBuffer={}x{} workRes={}x{} (divisor={}) resMode={}",
+				W, H, diffuseW, diffuseH, workW, workH, divisor, modeIdx);
+			loggedDims = true;
+		}
 
 		SSGICB cb{};
 		// View-matrix capture. Raw `viewMat` (BSGraphics.h:563) is stored as the transpose of the

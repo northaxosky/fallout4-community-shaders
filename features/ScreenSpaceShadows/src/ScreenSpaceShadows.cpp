@@ -485,8 +485,9 @@ namespace cs::features
 
 		static bool loggedDispatch = false;
 		if (!loggedDispatch) {
-			L->info("DispatchCount={} viewport={}x{} lightCoord=({:.1f},{:.1f},{:.4f},{:.0f})",
+			L->info("DispatchCount={} viewport={}x{} shadowsTex={}x{} lightCoord=({:.1f},{:.1f},{:.4f},{:.0f})",
 				dispatchList.DispatchCount, viewportSize[0], viewportSize[1],
+				shadowsWidth, shadowsHeight,
 				dispatchList.LightCoordinate_Shader[0], dispatchList.LightCoordinate_Shader[1],
 				dispatchList.LightCoordinate_Shader[2], dispatchList.LightCoordinate_Shader[3]);
 			for (int i = 0; i < dispatchList.DispatchCount; ++i) {
