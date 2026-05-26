@@ -1117,6 +1117,14 @@ namespace cs::features
 		const uint32_t W = fbDesc.Width;
 		const uint32_t H = fbDesc.Height;
 
+		static bool fbBindFlagsLogged = false;
+		if (!fbBindFlagsLogged) {
+			L->info("kFrameBuffer probe: BindFlags=0x{:x} Format={} Size={}x{} Usage={} MiscFlags=0x{:x} (UAV bit 0x80 = direct-write feasibility)",
+				fbDesc.BindFlags, static_cast<int>(fbDesc.Format), fbDesc.Width, fbDesc.Height,
+				static_cast<int>(fbDesc.Usage), fbDesc.MiscFlags);
+			fbBindFlagsLogged = true;
+		}
+
 		if (!EnsureCompositeResources(W, H, fbDesc.Format))
 			return;
 
