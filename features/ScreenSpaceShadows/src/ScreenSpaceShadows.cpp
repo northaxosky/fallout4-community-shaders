@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <stdexcept>
@@ -515,6 +516,17 @@ namespace cs::features
 		// Post-DeferredPrePass the depth target is still bound as a write-DSV; ComputeScope unbinds
 		// so the SRV bind takes effect, then restores the engine's OM state on exit.
 		cs::ComputeScope scope(context);
+
+		// Bisection marker: take ComputeScope but skip every bind/clear/dispatch below it.
+		// Isolates OM save/unbind/restore as the only side effect on engine state.
+		static bool loggedSkipDispatch = false;
+		if (std::filesystem::exists("Data\\F4SE\\Plugins\\FO4CommunityShaders\\.sss_skip_dispatch")) {
+			if (!loggedSkipDispatch) {
+				L->info("Skip-dispatch marker active: ComputeScope-only mode");
+				loggedSkipDispatch = true;
+			}
+			return;
+		}
 
 		static bool loggedDepth = false;
 		if (!loggedDepth) {

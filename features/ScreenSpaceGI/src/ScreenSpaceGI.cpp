@@ -878,6 +878,17 @@ namespace cs::features
 		cs::ComputeScope scope(context);
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "DrawSSGI");
 
+		// Bisection marker: take ComputeScope but skip every bind/clear/dispatch below it.
+		// Isolates OM save/unbind/restore as the only side effect on engine state.
+		static bool loggedSkipDispatch = false;
+		if (std::filesystem::exists("Data\\F4SE\\Plugins\\FO4CommunityShaders\\.ssgi_skip_dispatch")) {
+			if (!loggedSkipDispatch) {
+				L->info("Skip-dispatch marker active: ComputeScope-only mode");
+				loggedSkipDispatch = true;
+			}
+			return;
+		}
+
 		if (!firstFireLogged) {
 			L->info("DrawSSGI first fire (full chain: prefilterDepths -> prefilterNormal -> radianceDisocc -> prefilterRadiance -> gi -> blur -> upsample), resMode={}", modeIdx);
 			firstFireLogged = true;
