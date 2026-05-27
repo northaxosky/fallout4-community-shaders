@@ -25,4 +25,29 @@ namespace cs::engine
 	// next draw writing into a NULL slot. Saving and restoring around the copy keeps the
 	// engine's RT chain coherent. OM round-trip with identical pointers is inert.
 	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept;
+
+	// RAII: save OM (all RTVs + DSV), unbind for the lifetime of the scope, restore on dtor.
+	// Use whenever a compute dispatch needs to bind a resource as SRV that the engine has currently
+	// bound at OM as RTV/DSV. D3D11 resolves that hazard by silently nulling the SRV slot, so the
+	// dispatch ends up reading zeros (Bend's start_depth==0 path, or Apply pulling black diffuse).
+	// Saving+restoring around the dispatch unbinds the conflicting OM target so the SRV bind sticks,
+	// then puts the same pointers back so the engine's next pass continues with its expected OM.
+	// Construct OMScope BEFORE any ComputeScope so the CS-stage clear runs first on exit and OM
+	// restore doesn't fight a still-bound CS SRV.
+	class OMScope
+	{
+	public:
+		explicit OMScope(ID3D11DeviceContext* a_ctx) noexcept;
+		~OMScope() noexcept;
+
+		OMScope(const OMScope&) = delete;
+		OMScope(OMScope&&) = delete;
+		OMScope& operator=(const OMScope&) = delete;
+		OMScope& operator=(OMScope&&) = delete;
+
+	private:
+		ID3D11DeviceContext*    _ctx;
+		ID3D11RenderTargetView* _savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
+		ID3D11DepthStencilView* _savedDSV;
+	};
 }

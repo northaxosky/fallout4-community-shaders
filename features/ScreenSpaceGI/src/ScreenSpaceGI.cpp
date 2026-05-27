@@ -868,6 +868,9 @@ namespace cs::features
 		    !prefilterRadianceCS|| !giCS              || !blurCS           ||
 		    !upsampleCS) { clearOutputsSafe(); return; }
 
+		// Depth target is still bound as a write-DSV from DeferredPrePass; SRV bind would otherwise
+		// resolve the hazard by nulling the SRV slot. Save+unbind OM for the dispatch chain.
+		cs::engine::OMScope omScope(context);
 		cs::ComputeScope scope(context);
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "DrawSSGI");
 
@@ -1295,6 +1298,9 @@ namespace cs::features
 		}
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		// kDiffuseBuffer is bound as OM RTV by DeferredLightsImpl; saving+unbinding stops D3D11
+		// from nulling our diffuse CS SRV (slot 1) on bind. OMScope outer, ComputeScope inner.
+		cs::engine::OMScope omScope(context);
 		cs::ComputeScope scope(context);
 
 		ApplyCB cb{};
@@ -1320,9 +1326,13 @@ namespace cs::features
 			context->Dispatch(gx, gy, 1);
 		}
 
-		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
-		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		cs::engine::CopyResourcePreservingOM(context, diffuseTex, scratchDiffuse->resource.get());
+		// Drop CS bindings before the copy so dest isn't simultaneously bound as SRV/UAV.
+		ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+		context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+		ID3D11ShaderResourceView* nullSRVs[2] = {};
+		context->CSSetShaderResources(0, 2, nullSRVs);
+
+		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
 	}
 
 	void ScreenSpaceGI::ApplyIL()
@@ -1374,6 +1384,8 @@ namespace cs::features
 		}
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		// Same diffuse-RTV hazard as Apply(): save+unbind OM so CS SRV slot 3 (diffuse) sticks.
+		cs::engine::OMScope omScope(context);
 		cs::ComputeScope scope(context);
 
 		ApplyILCB cb{};
@@ -1412,7 +1424,9 @@ namespace cs::features
 
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		cs::engine::CopyResourcePreservingOM(context, diffuseTex, scratchDiffuse->resource.get());
+		ID3D11ShaderResourceView* nullSRVs[4] = {};
+		context->CSSetShaderResources(0, 4, nullSRVs);
+		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
 	}
 
 	void ScreenSpaceGI::ClearVanillaSAOTargets()

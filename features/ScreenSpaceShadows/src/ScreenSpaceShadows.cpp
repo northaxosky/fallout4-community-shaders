@@ -512,66 +512,12 @@ namespace cs::features
 		if (!depthSRV)
 			return;
 
-		// Post-DeferredPrePass the depth target is still bound as a write-DSV. D3D11 silently
-		// drops the conflict on dispatch; we don't unbind explicitly.
+		// Depth target is still bound as a write-DSV from DeferredPrePass. Without unbinding it,
+		// CSSetShaderResources nulls the SRV slot to resolve the hazard; Bend then reads zero
+		// depth and start_depth==0 short-circuits, leaving the mask cleared to 1.0 (full lit).
+		cs::engine::OMScope omScope(context);
 		cs::ComputeScope scope(context);
 
-		static bool loggedDepth = false;
-		if (!loggedDepth) {
-			D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
-			depthSRV->GetDesc(&sd);
-			L->info("Depth SRV format={} dimension={}", static_cast<int>(sd.Format), static_cast<int>(sd.ViewDimension));
-
-			// Probe the actual depth-texture contents via a CPU readback. If Bend's early-out is
-			// firing for every pixel, the depth reads must be uniformly 0 or 1.
-			auto* depthSrcTex = reinterpret_cast<ID3D11Texture2D*>(depth.texture);
-			if (depthSrcTex) {
-				D3D11_TEXTURE2D_DESC depthDesc{};
-				depthSrcTex->GetDesc(&depthDesc);
-				L->info("Depth texture format={} usage={} dims={}x{}",
-					static_cast<int>(depthDesc.Format), static_cast<int>(depthDesc.Usage), depthDesc.Width, depthDesc.Height);
-
-				// Allocate a staging texture in a typeless format compatible with R24_UNORM_X8_TYPELESS.
-				D3D11_TEXTURE2D_DESC stagingDesc = depthDesc;
-				stagingDesc.Usage = D3D11_USAGE_STAGING;
-				stagingDesc.BindFlags = 0;
-				stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-				stagingDesc.MiscFlags = 0;
-				auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
-				winrt::com_ptr<ID3D11Texture2D> staging;
-				if (SUCCEEDED(device->CreateTexture2D(&stagingDesc, nullptr, staging.put()))) {
-					context->CopyResource(staging.get(), depthSrcTex);
-					D3D11_MAPPED_SUBRESOURCE mapped{};
-					if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-						uint32_t minR = UINT32_MAX, maxR = 0;
-						uint64_t sum = 0, count = 0;
-						const uint8_t* rows = static_cast<const uint8_t*>(mapped.pData);
-						for (uint32_t y = 0; y < depthDesc.Height; y += 16) {
-							for (uint32_t x = 0; x < depthDesc.Width; x += 16) {
-								// R24_UNORM_X8: low 24 bits hold depth, high 8 hold stencil. Read 32-bit word.
-								uint32_t word = *reinterpret_cast<const uint32_t*>(rows + y * mapped.RowPitch + x * 4);
-								uint32_t d24 = word & 0x00FFFFFFu;
-								if (d24 < minR) minR = d24;
-								if (d24 > maxR) maxR = d24;
-								sum += d24;
-								++count;
-							}
-						}
-						context->Unmap(staging.get(), 0);
-						const double mean24 = count ? (double)sum / (double)count : 0.0;
-						const double max24 = double((1u << 24) - 1u);
-						L->info("Depth probe (sampled 1/256 px): min={:.4f} max={:.4f} mean={:.4f}",
-							minR / max24, maxR / max24, mean24 / max24);
-					} else {
-						L->info("Depth probe: Map failed");
-					}
-				} else {
-					L->info("Depth probe: CreateTexture2D(staging) failed");
-				}
-			}
-
-			loggedDepth = true;
-		}
 		ID3D11ShaderResourceView* srvs[1] = { depthSRV };
 		context->CSSetShaderResources(0, 1, srvs);
 
@@ -725,10 +671,11 @@ namespace cs::features
 		cb.SunOnly = settings.sunOnly ? 1u : 0u;
 		applyCB->Update(cb);
 
-		// kDiffuseBuffer is still bound as an OM RTV by the engine when this runs. CopyResource
-		// into a still-bound RTV implicit-unbinds the engine's slot, leaving subsequent draws
-		// writing to NULL. The helper saves OM, nulls it for the copy, then restores the same
-		// pointers so the engine's RT chain stays coherent.
+		// kDiffuseBuffer is bound as an OM RTV by the engine while DeferredLightsImpl runs.
+		// Without unbinding, CSSetShaderResources nulls our diffuse SRV slot (hazard resolution),
+		// the shader reads zero, and CopyResource blacks out the live diffuse target.
+		// OMScope saves OM, unbinds, restores at dtor; ComputeScope clears CS slots first on exit.
+		cs::engine::OMScope omScope(context);
 		cs::ComputeScope scope(context);
 
 		ID3D11ShaderResourceView* srvs[3] = {
@@ -750,11 +697,13 @@ namespace cs::features
 		const uint32_t groupsY = (scratchHeight + 7u) / 8u;
 		context->Dispatch(groupsX, groupsY, 1);
 
-		// Unbind UAV before the CopyResource since the destination is the SRV input we just sampled from.
-		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
-		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
+		// Drop CS bindings before the copy so the dest texture isn't simultaneously bound as SRV.
+		ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+		context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+		ID3D11ShaderResourceView* nullSRVs[3] = {};
+		context->CSSetShaderResources(0, 3, nullSRVs);
 
-		cs::engine::CopyResourcePreservingOM(context, diffuseTex, scratchDiffuse->resource.get());
+		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
 	}
 
 	void ScreenSpaceShadows::RestoreDefaultSettings()

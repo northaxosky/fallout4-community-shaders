@@ -36,4 +36,25 @@ namespace cs::engine
 		}
 		if (savedDSV) savedDSV->Release();
 	}
+
+	OMScope::OMScope(ID3D11DeviceContext* a_ctx) noexcept :
+		_ctx(a_ctx),
+		_savedRTVs{},
+		_savedDSV(nullptr)
+	{
+		if (!_ctx) return;
+		_ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _savedRTVs, &_savedDSV);
+		_ctx->OMSetRenderTargets(0, nullptr, nullptr);
+	}
+
+	OMScope::~OMScope() noexcept
+	{
+		if (_ctx) {
+			_ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, _savedRTVs, _savedDSV);
+		}
+		for (auto* rtv : _savedRTVs) {
+			if (rtv) rtv->Release();
+		}
+		if (_savedDSV) _savedDSV->Release();
+	}
 }
