@@ -15,4 +15,25 @@ namespace cs::engine
 		static REL::Relocation<Context**> ptr{ REL::ID({ 33539, 2704428, 2704428 }) };
 		return ptr ? *ptr : nullptr;
 	}
+
+	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept
+	{
+		if (!a_ctx || !a_dst || !a_src) return;
+
+		ID3D11RenderTargetView* savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+		ID3D11DepthStencilView* savedDSV = nullptr;
+		a_ctx->OMGetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, &savedDSV);
+
+		ID3D11RenderTargetView* nullRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT] = {};
+		a_ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, nullRTVs, nullptr);
+
+		a_ctx->CopyResource(a_dst, a_src);
+
+		a_ctx->OMSetRenderTargets(D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT, savedRTVs, savedDSV);
+
+		for (auto* rtv : savedRTVs) {
+			if (rtv) rtv->Release();
+		}
+		if (savedDSV) savedDSV->Release();
+	}
 }
