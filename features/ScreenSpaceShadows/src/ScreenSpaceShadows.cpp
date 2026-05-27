@@ -26,6 +26,7 @@
 #include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
+#include "RendererContext.h"
 #include "SettingsOverrideManager.h"
 #include "Sky.h"
 namespace cs::features
@@ -724,8 +725,10 @@ namespace cs::features
 		cb.SunOnly = settings.sunOnly ? 1u : 0u;
 		applyCB->Update(cb);
 
-		// Same OM/RTV conflict as DrawShadows: kDiffuseBuffer is still bound as a write-RTV after
-		// DeferredLightsImpl. ComputeScope unbinds for our compute and restores on exit.
+		// kDiffuseBuffer is still bound as an OM RTV by the engine when this runs. CopyResource
+		// into a still-bound RTV implicit-unbinds the engine's slot, leaving subsequent draws
+		// writing to NULL. The helper saves OM, nulls it for the copy, then restores the same
+		// pointers so the engine's RT chain stays coherent.
 		cs::ComputeScope scope(context);
 
 		ID3D11ShaderResourceView* srvs[3] = {
@@ -751,7 +754,7 @@ namespace cs::features
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
 
-		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
+		cs::engine::CopyResourcePreservingOM(context, diffuseTex, scratchDiffuse->resource.get());
 	}
 
 	void ScreenSpaceShadows::RestoreDefaultSettings()

@@ -26,6 +26,7 @@
 #include "Menu.h"
 #include "PresetManager.h"
 #include "RenderHooks.h"
+#include "RendererContext.h"
 #include "SettingsOverrideManager.h"
 #ifdef near
 #	undef near
@@ -1321,7 +1322,7 @@ namespace cs::features
 
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
+		cs::engine::CopyResourcePreservingOM(context, diffuseTex, scratchDiffuse->resource.get());
 	}
 
 	void ScreenSpaceGI::ApplyIL()
@@ -1411,7 +1412,7 @@ namespace cs::features
 
 		ID3D11UnorderedAccessView* nullUAV[1] = { nullptr };
 		context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
-		context->CopyResource(diffuseTex, scratchDiffuse->resource.get());
+		cs::engine::CopyResourcePreservingOM(context, diffuseTex, scratchDiffuse->resource.get());
 	}
 
 	void ScreenSpaceGI::ClearVanillaSAOTargets()
