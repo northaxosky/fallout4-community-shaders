@@ -12,8 +12,6 @@ As of schema version 1, presets cover:
 | Feature key | Feature |
 |---|---|
 | `imagespace` | tonemap, bloom, vignette, sharpen, LUT, weather profiles |
-| `screen_space_shadows` | step count, max distance, denoise |
-| `screen_space_gi` | quality, ray budget, denoise |
 
 Each feature contributes its own `[features.<key>.settings]` subtable. Imagespace
 additionally contributes `[features.imagespace.weather]` for per-weather overlays.
@@ -61,7 +59,7 @@ A preset that vanished between sessions stays visible as
 schema_version = 1
 name           = "MyLook"
 created_by     = "you"
-description    = "warm midtones, light bloom, denoised SSGI"
+description    = "warm midtones, light bloom"
 
 [features.imagespace.settings]
 tonemap_operator = 1        # 1 = Hable, 2 = Reinhard, 3 = Lottes
@@ -73,20 +71,6 @@ lut_path         = "Reactor-Warm"
 [features.imagespace.weather.rain]
 bloom_intensity = 0.06
 vignette        = 0.35
-
-[features.screen_space_shadows.settings]
-max_distance = 2000.0
-samples      = 16
-
-[features.screen_space_gi.settings]
-preset       = 2       # 0=Custom, 1=Performance, 2=Quality, 3=Cinematic
-slice_count  = 3       # XeGTAO direction count
-step_count   = 5       # XeGTAO ray-march steps per direction
-gi_strength  = 1.0
-gi_radius    = 256.0
-enable_gi    = true
-apply_ao_to_scene = true
-apply_intensity   = 0.5
 ```
 
 ### Schema rules

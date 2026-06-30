@@ -101,7 +101,7 @@ Phase 1 ships 5-of-6 runtime sha1 mappings. `vls_slice_scatter` is wired but `ru
 - VS/CS/GS/HS/DS replacement. Pixel-shader only.
 - Spot-light `bsdf_light_deferred.hlsl` permutation (still a stub in source).
 - Mnemonic-stream matching (ShaderCatalog Phase 2 territory; here we key on raw runtime sha1).
-- Any consumer of substituted shaders (TruePBR / SSGI feature consumption). Phase 1 is validation only.
+- Any consumer of substituted shaders (TruePBR feature consumption). Phase 1 is validation only.
 
 ## Risks + known gaps
 

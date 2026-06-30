@@ -2,7 +2,7 @@
 name = "Vivid-Daylight"
 schema_version = 1
 created_by = "FO4CommunityShaders"
-description = "Punchy daylight grade. Hable tonemap (operator 1), brighter bloom, lighter vignette, moderate CA, stronger sharpen. SSS Quality on, SSGI Quality on; both apply-to-scene off so the suite stays additive."
+description = "Punchy daylight grade. Hable tonemap (operator 1), brighter bloom, lighter vignette, moderate CA, stronger sharpen."
 
 [features.imagespace.settings]
 enabled = true
@@ -54,36 +54,3 @@ bloom_intensity = 0.065
 
 [features.imagespace.weather.rain]
 lut_strength = 0.15
-
-[features.screen_space_shadows.settings]
-enabled = true
-preset = 2
-sample_count = 2
-surface_thickness = 0.02
-bilinear_threshold = 0.02
-shadow_contrast = 1.1
-apply_to_scene = false
-sun_only = true
-apply_contrast = 1.0
-
-[features.screen_space_gi.settings]
-enabled = true
-preset = 2
-slice_count = 4
-step_count = 8
-ao_radius = 220.0
-ao_power = 1.3
-thickness = 32.0
-apply_ao_to_scene = false
-apply_intensity = 0.55
-apply_contrast = 1.0
-resolution_mode = 1
-enable_gi = true
-apply_il_to_scene = true
-il_strength = 1.0
-gi_radius = 256.0
-gi_strength = 1.0
-gi_saturation = 0.85
-gi_distance_compensation = 0.0
-enable_temporal_denoiser = true
-enable_blur = true

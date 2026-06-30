@@ -17,8 +17,6 @@ Internal spec for the cross-feature preset system. User-facing docs live in
 | `GetPresetKey()` | Class |
 |---|---|
 | `imagespace` | `cs::features::imagespace::Imagespace` |
-| `screen_space_shadows` | `cs::features::sss::ScreenSpaceShadows` |
-| `screen_space_gi` | `cs::features::ssgi::ScreenSpaceGI` |
 
 ## Feature contract
 

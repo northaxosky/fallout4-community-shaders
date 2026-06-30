@@ -21,8 +21,6 @@ A single DLL handles all three runtimes via [Address Library](https://www.nexusm
 | MotionVectorFixes | Fixes weapon ghosting, menu ghosting, animated objects, LOD motion vectors |
 | Upscaling | DLSS / FSR3 / XeSS with quality modes; replaces engine TAA, dynamic-resolution aware |
 | FrameGeneration | DLSS-G / FSR3-FG / XeSS-FG; D3D11/D3D12 interop |
-| ScreenSpaceShadows | Sony Bend SSS pipeline + sidecar attenuation pass on the diffuse light buffer. Performance / Quality / Cinematic presets, ENB auto-skip |
-| ScreenSpaceGI | GTAO + Spherical-Harmonic indirect-lighting bounce, half/quarter resolution permutations, Performance / Quality / Cinematic presets, experimental specular GI |
 | Imagespace | Tonemap (Hable / Reinhard / Lottes), 32^3 LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, lens flare. Per-weather profile blending, Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
 | PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle. Backend-reported displayed FPS for DLSS-G and XeSS-FG (engine FPS shown alongside) |
 | RenderDoc | One-click frame capture from inside the menu |
@@ -36,7 +34,7 @@ A single DLL handles all three runtimes via [Address Library](https://www.nexusm
 
 ## Presets
 
-Cross-feature `.toml` preset library at `Data\F4SE\Plugins\FO4CommunityShaders\Presets\<name>.toml`. Five builtins ship with the package (`Default`, `Cinematic-Night`, `Neutral-Realistic`, `Reactor-Inspired`, `Vivid-Daylight`) covering Imagespace, ScreenSpaceShadows, and ScreenSpaceGI in lockstep. Apply from the **Presets** header at the top of the menu; the active preset is restored on next launch. Authoring + scope rules in [docs/Presets.md](docs/Presets.md).
+Cross-feature `.toml` preset library at `Data\F4SE\Plugins\FO4CommunityShaders\Presets\<name>.toml`. Five builtins ship with the package (`Default`, `Cinematic-Night`, `Neutral-Realistic`, `Reactor-Inspired`, `Vivid-Daylight`) covering Imagespace settings and per-weather profiles. Apply from the **Presets** header at the top of the menu; the active preset is restored on next launch. Authoring + scope rules in [docs/Presets.md](docs/Presets.md).
 
 Each feature also exposes a **Reset to defaults** button in its settings page (uniform across the menu via the `RestoreDefaultSettings` virtual).
 
@@ -53,7 +51,6 @@ When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't 
 
 ### Performance notes
 
-- ScreenSpaceGI: ~168 MB VRAM at 4K in HALF/QUARTER resolution modes (full-res upsample destinations); 0 MB at FULL.
 - FrameGeneration: requires hardware support (NVIDIA RTX 40+ for DLSS-G, AMD RDNA3+ for FSR3-FG with hardware path, Intel Arc for XeSS-FG). Effective on a GPU that already runs the game at 60+ fps; below that, latency dominates the perceived smoothness benefit.
 - Use the PerformanceOverlay (Shift+F11) to bisect impact when toggling features.
 

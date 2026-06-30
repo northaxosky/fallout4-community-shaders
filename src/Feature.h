@@ -83,7 +83,7 @@ namespace cs
 
 		// Snake_case key used inside [features.<key>] in preset TOMLs. Default = lowercased GetName()
 		// with any character outside [a-z0-9_] replaced by '_'. Multi-word features should override
-		// to add explicit underscores (e.g. "screen_space_shadows").
+		// to add explicit underscores (e.g. "motion_vector_fixes").
 		virtual std::string GetPresetKey() const;
 
 		// Phase 1 of preset apply. Parse a_subtable into feature-owned scratch state. Do NOT mutate

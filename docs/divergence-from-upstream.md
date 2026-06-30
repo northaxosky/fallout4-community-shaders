@@ -10,7 +10,7 @@ Skyrim CS stores settings in aggregate JSON files and layers default settings, u
 
 ### What this port does
 
-We have `cs::PresetManager`, a cross-feature TOML preset library under `Data\F4SE\Plugins\FO4CommunityShaders\Presets\`. A preset can capture Imagespace, Screen Space Shadows, and Screen Space GI in one file. Applying a preset stages every participating feature, swaps live state only after parsing succeeds, then lets each feature persist and refresh derived resources.
+We have `cs::PresetManager`, a cross-feature TOML preset library under `Data\F4SE\Plugins\FO4CommunityShaders\Presets\`. A preset can capture every participating feature's settings in one file. Applying a preset stages every participating feature, swaps live state only after parsing succeeds, then lets each feature persist and refresh derived resources.
 
 ### Why FO4 or the architecture diverges
 
@@ -64,7 +64,7 @@ Skyrim CS uses `Data\SKSE\Plugins\CommunityShaders\SettingsDefault.json`, `Setti
 
 ### What this port does
 
-Each feature owns its own TOML file under `Data\F4SE\Plugins\FO4CommunityShaders\`, for example `Imagespace.toml`, `ScreenSpaceGI.toml`, `ScreenSpaceShadows.toml`, `FrameGeneration.toml`, and `RenderDoc.toml`. The base feature lifecycle has no JSON argument; features read, validate, and write their own TOML.
+Each feature owns its own TOML file under `Data\F4SE\Plugins\FO4CommunityShaders\`, for example `Imagespace.toml`, `FrameGeneration.toml`, and `RenderDoc.toml`. The base feature lifecycle has no JSON argument; features read, validate, and write their own TOML.
 
 ### Why FO4 or the architecture diverges
 
@@ -145,24 +145,6 @@ Fallout 4 has three supported runtime lines for this project: original, Next-Gen
 ### Forward path
 
 Keep the three-value form until CommonLibF4 offers a clearer abstraction with the same information. For new hook anchors, cite the reverse-engineering export or other source next to the ID so the tuple can be re-derived when a runtime changes.
-
-## ScreenSpaceShadows composite blend
-
-### What upstream Skyrim CS does
-
-Skyrim CS binds the R8 screen-space shadow texture as a pixel-shader SRV and reads it with `ScreenSpaceShadowsTexture.Load(...)` (`community-shaders/skyrim-community-shaders:features/Screen-Space Shadows/Shaders/ScreenSpaceShadows/ScreenSpaceShadows.hlsli:4-8`). In deferred lighting, it multiplies that mask into `dirDetailedShadow` after the engine shadow term when `SCREEN_SPACE_SHADOWS`, `DEFERRED`, `!SharedData::InInterior`, and `dirLightAngle >= 0.0` are true (`community-shaders/skyrim-community-shaders:package/Shaders/Lighting.hlsl:2509-2524`). That keeps the blend in linear direct-lighting math before tonemapping, and the resulting directional light context applies it to diffuse and specular lighting.
-
-### What this port does
-
-The FO4 port runs a separate compute apply pass after `DeferredLightsImpl`. That pass point-loads the same R8 mask, reconstructs `N.L` from `kGbufferNormal`, samples `kDiffuseBuffer`, writes attenuated diffuse lighting to a scratch UAV, then copies the result back to `kDiffuseBuffer`. With `sun_only=true`, the attenuation is `lerp(1.0, mask, saturate(smoothstep(0.05, 0.30, N.L) * ApplyContrast))`; with `sun_only=false`, the smooth gate is bypassed and `ApplyContrast` controls a global mask multiply.
-
-### Why FO4 or the architecture diverges
-
-FO4's deferred lighting and composite shaders are engine-owned code, not source files this project compiles at startup. The post-lighting buffer does not expose Skyrim's `dirDetailedShadow` scalar or a separated sun contribution, so `kDiffuseBuffer` is the clean extension point available today. The `sun_only` gate is intentionally conservative because that buffer can also contain non-sun diffuse light; the current pass does not attenuate `kSpecularBuffer`.
-
-### Forward path
-
-If this port later owns a complete deferred-lighting replacement, move the modulation into that shader and compare against upstream's in-shader math. That path should use an upstream-style `dirDetailedShadow *= mask` blend and add matching specular attenuation while keeping the mask read point-filtered.
 
 ## Choosing write_thunk_call or detour_thunk
 

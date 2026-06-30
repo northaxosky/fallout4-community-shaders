@@ -2,7 +2,7 @@
 name = "Reactor-Inspired"
 schema_version = 1
 created_by = "FO4CommunityShaders"
-description = "Evokes the warm-midtone, gentle-S-curve character of Reactor ENB. Ships the Reactor-Warm 32x32x32 LUT at full strength on clear weather and scales back in storms. Hable tonemap, soft-leaning bloom, lens flare on, dirt off. SSS Cinematic apply-to-scene for grounded contact shadow grade. SSGI Cinematic apply-to-scene for occlusion that complements the LUT."
+description = "Evokes the warm-midtone, gentle-S-curve character of Reactor ENB. Ships the Reactor-Warm 32x32x32 LUT at full strength on clear weather and scales back in storms. Hable tonemap, soft-leaning bloom, lens flare on, dirt off."
 
 [features.imagespace.settings]
 enabled = true
@@ -66,36 +66,3 @@ vignette_intensity = 0.45
 [features.imagespace.weather.fog]
 lut_strength = 0.5
 bloom_intensity = 0.045
-
-[features.screen_space_shadows.settings]
-enabled = true
-preset = 3
-sample_count = 3
-surface_thickness = 0.022
-bilinear_threshold = 0.022
-shadow_contrast = 1.25
-apply_to_scene = true
-sun_only = true
-apply_contrast = 1.15
-
-[features.screen_space_gi.settings]
-enabled = true
-preset = 3
-slice_count = 4
-step_count = 8
-ao_radius = 220.0
-ao_power = 1.4
-thickness = 32.0
-apply_ao_to_scene = true
-apply_intensity = 0.7
-apply_contrast = 1.1
-resolution_mode = 0
-enable_gi = true
-apply_il_to_scene = true
-il_strength = 1.4
-gi_radius = 384.0
-gi_strength = 1.4
-gi_saturation = 1.0
-gi_distance_compensation = 0.0
-enable_temporal_denoiser = true
-enable_blur = true

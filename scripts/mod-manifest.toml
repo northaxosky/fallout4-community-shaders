@@ -27,30 +27,6 @@ src = "package/F4SE/Plugins/FrameGeneration/"
 dst = "F4SE/Plugins/FrameGeneration/"
 pattern = "*.hlsl"
 
-# Screen-Space Shadows HLSL + Bend SSS hlsli.
-[[deploy.assets]]
-src = "features/ScreenSpaceShadows/Shaders/"
-dst = "F4SE/Plugins/ScreenSpaceShadows/"
-pattern = "*.hlsl*"
-
-# Screen-Space GI HLSL.
-[[deploy.assets]]
-src = "features/ScreenSpaceGI/Shaders/"
-dst = "F4SE/Plugins/ScreenSpaceGI/"
-pattern = "*.hlsl*"
-
-# Screen-Space GI v2 HLSL (XeGTAO + Visibility Bitmask + SH2-YCoCg port from upstream Skyrim CS).
-[[deploy.assets]]
-src = "features/ScreenSpaceGI/Shaders/SSGIv2/"
-dst = "F4SE/Plugins/ScreenSpaceGI/SSGIv2/"
-pattern = "*.hlsl*"
-
-# Screen-Space GI v2 EA FastNoise asset (MIT, redistributed).
-[[deploy.assets]]
-src = "features/ScreenSpaceGI/Shaders/SSGIv2/"
-dst = "F4SE/Plugins/ScreenSpaceGI/SSGIv2/"
-pattern = "*.dds"
-
 # Imagespace HLSL.
 [[deploy.assets]]
 src = "features/Imagespace/Shaders/"
