@@ -46,16 +46,19 @@ namespace cs
 
 		// Two-phase apply across every [features.<key>] subtable in the preset file:
 		//   1) Stage: each matching participating, non-test-mode feature parses into a scratch.
-		//      Any hard parse error aborts before any feature commits.
-		//   2) Commit: every staged feature swaps scratch into live state and re-saves its own TOML.
-		// On success, the [preset] block is updated and persisted. On any error, live state is
-		// untouched and the [preset] block is not modified.
+		//      Any hard parse error aborts here, before any feature commits, so live state and the
+		//      [preset] block are left untouched.
+		//   2) Commit: a no-throw swap pass moves every staged feature's scratch into live state,
+		//      then a finalize pass re-saves each feature's TOML and rebuilds derived resources.
+		// A finalize-pass failure therefore leaves live state already on the new preset (consistent
+		// across features) even though that feature's on-disk TOML may be stale; the [preset] block
+		// is still persisted to match live state, and re-applying retries the failed persist.
 		bool Apply(const PresetMeta& a_meta, std::string& a_err);
 
 		// Captures current live state from every participating, non-test-mode feature into
 		// [features.<key>] subtables, plus a [meta] block. a_allowOverwrite=false refuses to write
 		// if the path already exists (Save As semantics, with a re-check immediately before write
-		// to close the validate-then-write TOCTOU window).
+		// to narrow the validate-then-write TOCTOU window).
 		bool Save(const std::filesystem::path& a_path,
 				  std::string_view             a_presetName,
 				  std::string&                 a_err,

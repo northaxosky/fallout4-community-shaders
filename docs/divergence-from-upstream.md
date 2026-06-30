@@ -38,7 +38,7 @@ FO4 exposes useful insertion points as separate engine functions, and multiple f
 
 Keep the broker as the port's render extension surface. If upstream ever grows a comparable multi-subscriber hook layer, align names and ordering semantics. The post-dynamic-resolution viewport path can also be generalized onto the same priority list if a third feature needs that slot.
 
-## ComputeScope around compute dispatches
+## OMScope + ComputeScope around compute dispatches
 
 ### What upstream Skyrim CS does
 
@@ -46,15 +46,15 @@ Skyrim CS cleans up compute state inline in each feature. Screen Space Shadows c
 
 ### What this port does
 
-`cs::ComputeScope` saves the current OM render targets and depth-stencil view, unbinds OM while compute runs, clears the full D3D11 CS slot ranges on exit, restores OM, and releases the references acquired by `OMGetRenderTargets`.
+The port splits OM/CS hygiene into two RAII guards. `cs::engine::OMScope` saves the current OM render targets and depth-stencil view, unbinds them while compute runs, restores them on exit, and releases the references acquired by `OMGetRenderTargets`. `cs::ComputeScope` clears the CS-stage slots its dispatch touched on exit, capped at 8 slots because a full-width null sweep stomps the engine's high-slot CS bindings. The required construction order is `OMScope` before `ComputeScope`, so on scope exit the CS clear runs first and the OM restore does not fight a still-bound CS SRV.
 
 ### Why FO4 or the architecture diverges
 
-FO4's deferred renderer leaves render targets such as `kDiffuseBuffer` and the depth target bound around places where this port injects compute work. A feature that binds the same texture as an SRV or UAV without first unbinding OM risks D3D11 hazards and dirty state leaking into the next engine draw. A shared guard is safer than relying on each feature to remember the exact cleanup shape.
+FO4's deferred renderer leaves render targets such as `kDiffuseBuffer` and the depth target bound around places where this port injects compute work. A feature that binds the same texture as an SRV or UAV without first unbinding OM risks D3D11 hazards and dirty state leaking into the next engine draw. A shared pair of guards is safer than relying on each feature to remember the exact cleanup shape.
 
 ### Forward path
 
-Keep using `ComputeScope` for injected compute passes. If a narrower state guard becomes useful, build it on top of the same save, unbind, clear, and restore contract rather than returning to feature-local cleanup.
+Keep using `OMScope` then `ComputeScope` for injected compute passes, constructed in that order. If a narrower state guard becomes useful, build it on top of the same save, unbind, clear, and restore contract rather than returning to feature-local cleanup.
 
 ## Per-feature TOML files
 
