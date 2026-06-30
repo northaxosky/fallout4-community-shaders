@@ -34,8 +34,8 @@ namespace cs::theme
 {
 	void ApplyDarkTheme(ImGuiStyle& s)
 	{
-		// Start from dark, then override.
-		ImGui::StyleColorsDark();
+		// Start from dark, then override. Write into the passed style, not the global one.
+		ImGui::StyleColorsDark(&s);
 
 		s.WindowRounding    = 6.0f;
 		s.ChildRounding     = 4.0f;

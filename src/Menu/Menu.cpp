@@ -279,7 +279,6 @@ namespace cs
 		ImGui::CreateContext();
 		ImGuiIO& io = ImGui::GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 		// Persist window sizes/positions across sessions; sits beside our other plugin INIs.
 		static const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\imgui.ini";
 		io.IniFilename = kIniPath;
@@ -443,6 +442,8 @@ namespace cs
 
 			std::map<std::string, std::vector<Feature*>> featuresByCategory;
 			for (auto* feat : FeatureManager::Get().GetAll()) {
+				if (!feat->IsInMenu())
+					continue;
 				std::string category = feat->GetCategory();
 				if (category.empty())
 					category = "Misc";
