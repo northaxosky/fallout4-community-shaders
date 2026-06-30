@@ -1,7 +1,7 @@
 # FO4 Community Shaders
 
-Port of [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders) to Fallout 4. See [PERMISSIONS.md](PERMISSIONS.md) for the upstream-author permission record.
-
+Port of [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders) to Fallout 4.
+ 
 Press **END** in game to open the settings menu. Press **Shift+F11** to toggle the performance overlay.
 
 ## Game compatibility
