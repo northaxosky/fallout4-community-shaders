@@ -102,7 +102,7 @@ pwsh ../devkit/devkit.ps1 doctor -Project community-shaders   # verify paths + t
 pwsh ../devkit/devkit.ps1 cycle  -Project community-shaders -Launch -Tail
 ```
 
-`scripts/mod-manifest.toml` is the devkit-independent record of the deployed `Data/F4SE/Plugins/...` asset layout; devkit's `community-shaders` profile mirrors it. Confirming in-game visual behavior is a human step — a successful build/deploy/launch is not proof a pass renders correctly.
+`scripts/mod-manifest.toml` is the devkit-independent record of the deployed `Data/F4SE/Plugins/...` asset layout; devkit's `community-shaders` profile mirrors it. Confirming in-game visual behavior is a human step - a successful build/deploy/launch is not proof a pass renders correctly.
 
 ## Project structure
 

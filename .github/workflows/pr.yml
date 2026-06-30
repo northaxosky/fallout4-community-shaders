@@ -109,7 +109,7 @@ jobs:
           if (-not $env:VCPKG_ROOT) {
             throw 'VCPKG_ROOT was not set'
           }
-          cmake -S . --preset=default
+          cmake -S . --preset=ci
 
       - name: Verify shader roundtrip baselines
         shell: pwsh

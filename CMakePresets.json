@@ -33,7 +33,6 @@
 			"cacheVariables": {
 				"CMAKE_CXX_FLAGS": "/EHsc /MP /W4 /WX $penv{CXXFLAGS}"
 			},
-			"generator": "Visual Studio 18 2026",
 			"vendor": {
 				"microsoft.com/VisualStudioSettings/CMake/1.0": {
 					"intelliSenseMode": "windows-msvc-x64",
@@ -49,7 +48,19 @@
 				"vcpkg",
 				"win64",
 				"msvc"
-			]
+			],
+			"generator": "Visual Studio 18 2026"
+		},
+		{
+			"name": "ci",
+			"inherits": [
+				"common",
+				"vcpkg",
+				"win64",
+				"msvc"
+			],
+			"description": "Hosted-CI configure: same as default but targets the Visual Studio 2022 toolset on the GitHub windows-2022 runner (which has no VS 2026).",
+			"generator": "Visual Studio 17 2022"
 		}
 	]
 }
