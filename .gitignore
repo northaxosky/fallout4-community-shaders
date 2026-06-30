@@ -41,9 +41,6 @@ compile_commands.json
 .vscode/
 .cache/
 
-# Local config / secrets
-scripts/.env
-
 # SDK runtime DLL cache (per FO4Upscaling pattern)
 .sdk-cache/
 package/F4SE/Plugins/Streamline/

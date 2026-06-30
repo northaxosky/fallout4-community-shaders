@@ -64,8 +64,8 @@ When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't 
 - [CMake 3.21+](https://cmake.org/)
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment variable set
 - [Git](https://git-scm.com/)
-- Python 3 with Pillow for screenshot-diff smoke scripts
-- Optional: a sibling `../_tools/` checkout, or `FALLOUT_TOOLS_DIR` pointing to the shared build/deploy/test harness. Without it, use the raw CMake commands below and mirror `scripts/mod-manifest.toml` manually.
+- Python 3 with NumPy for the `generate-reactor-lut.py` LUT helper (optional)
+- The shared **devkit** workbench checked out as a sibling `../devkit/` (or `DEVKIT_DIR`) for the build/deploy/launch loop. Without it, use the raw CMake commands below and mirror `scripts/mod-manifest.toml` manually.
 
 ## User Requirements
 
@@ -89,27 +89,20 @@ Output: `build/Release/FO4CommunityShaders.dll` plus runtime SDK DLLs staged und
 
 ## Deploy and test
 
-```bash
-cp scripts/.env.example scripts/.env
-# Edit scripts/.env with your MO2 mod folder + vcpkg path
+Deploy runs through the shared **devkit** workbench in the sibling `../devkit/`. Community Shaders is registered as the `community-shaders` devkit project, which builds via the `default` CMake preset and deploys into the `Community Shaders - Dev` MO2 mod. `scripts/deploy.sh` and `scripts/test.sh` are thin shims over it (set `DEVKIT_DIR` if devkit lives elsewhere).
 
-./scripts/deploy.sh build    # build + deploy
-./scripts/deploy.sh deploy   # deploy only (skip build)
-./scripts/test.sh            # launch through MO2/F4SE, capture logs + screenshot
+```bash
+./scripts/deploy.sh                 # build + deploy   (devkit cycle)
+./scripts/deploy.sh deploy          # deploy only      (devkit deploy)
+./scripts/deploy.sh deploy -IncludeConfig   # also push shaders / tomls / presets / SDK DLLs
+./scripts/test.sh                   # build + deploy + launch via MO2/F4SE + tail the log
+
+# Or drive devkit directly (PowerShell):
+pwsh ../devkit/devkit.ps1 doctor -Project community-shaders   # verify paths + toolchain
+pwsh ../devkit/devkit.ps1 cycle  -Project community-shaders -Launch -Tail
 ```
 
-The deploy and test wrappers delegate to the sibling `../_tools/` harness. If that checkout is missing, use the raw CMake build commands and copy the assets listed in `scripts/mod-manifest.toml`.
-
-Feature smoke scripts live under `scripts/`. They are designed for repeatable agent-driven validation:
-
-| Script | Purpose |
-|---|---|
-| `smoke-shader-replacement.sh` | Generic OFF/ON ShaderReplacement screenshot diff sweep |
-| `smoke-shader-replacement-active-scenes.sh` | Role-focused BSDF/VLS scene validation with ShaderCatalog evidence capture |
-| `smoke-imagespace-*.sh` | Imagespace preset / DOF validation |
-| `smoke-*.sh` | Feature-specific runtime smoke wrappers |
-
-`smoke-shader-replacement-active-scenes.sh` expects an MO2 profile/save already positioned in the scene being tested. Use `FO4CS_SCENE_COMPOUND_PROFILE`, the per-role profile variables documented by `--help`, or `FO4CS_ACTIVE_SCENE_USE_CURRENT_PROFILE=1`.
+`scripts/mod-manifest.toml` is the devkit-independent record of the deployed `Data/F4SE/Plugins/...` asset layout; devkit's `community-shaders` profile mirrors it. Confirming in-game visual behavior is a human step — a successful build/deploy/launch is not proof a pass renders correctly.
 
 ## Project structure
 
