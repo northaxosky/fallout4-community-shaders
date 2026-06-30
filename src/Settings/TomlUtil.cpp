@@ -30,7 +30,9 @@ namespace cs::toml_util
 		const auto* node = FindNode(a_table, a_key);
 		if (!node) return std::clamp(a_default, a_min, a_max);
 		if (const auto v = node->value<std::int64_t>()) {
-			return std::clamp(static_cast<int>(*v), a_min, a_max);
+			const std::int64_t lo = static_cast<std::int64_t>(a_min);
+			const std::int64_t hi = static_cast<std::int64_t>(a_max);
+			return static_cast<int>(std::clamp(*v, lo, hi));
 		}
 		L->warn("{}.{} expected int, falling back to {}", a_logCtx, a_key, a_default);
 		return std::clamp(a_default, a_min, a_max);

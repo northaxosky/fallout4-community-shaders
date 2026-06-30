@@ -30,11 +30,11 @@ namespace cs::features
 
 	namespace
 	{
-		// Detect FO4 runtime variant from the loaded Fallout4.exe file-version. Mapping:
+		// Detect FO4 runtime variant from the loaded Fallout4.exe file-version. Exact builds:
 		//   1.10.163  -> OG    (pre-Next-Gen)
-		//   1.10.980+ -> NG    (Bethesda Next-Gen Update)
-		//   1.11.*    -> AE    (newer patches; address-library uses AE bucket)
-		// Anything outside these buckets defaults to OG; the catalog stores the runtime tag
+		//   1.10.980  -> AE
+		//   1.10.984  -> NG    (Bethesda Next-Gen Update)
+		// Unknown builds default to OG (conservative); the catalog stores the runtime tag
 		// verbatim and the importer can re-categorize if needed.
 		const char* DetectRuntime()
 		{
@@ -54,8 +54,11 @@ namespace cs::features
 			const auto major = HIWORD(fi->dwFileVersionMS);
 			const auto minor = LOWORD(fi->dwFileVersionMS);
 			const auto build = HIWORD(fi->dwFileVersionLS);
-			if (major == 1 && minor == 11) return "AE";
-			if (major == 1 && minor == 10 && build >= 980) return "NG";
+			if (major == 1 && minor == 10) {
+				if (build == 163) return "OG";
+				if (build == 980) return "AE";
+				if (build == 984) return "NG";
+			}
 			return "OG";
 		}
 

@@ -1,5 +1,6 @@
 #include "MotionVectorFixes.h"
 
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -60,7 +61,7 @@ namespace cs::features
 		static_cast<std::uint64_t>(BSShaderProperty::EShaderPropertyFlag::kLODLandBlend) |
 		static_cast<std::uint64_t>(BSShaderProperty::EShaderPropertyFlag::kMultiTextureLandscape);
 
-	static bool g_isLoadingMenuOpen = false;
+	static std::atomic_bool g_isLoadingMenuOpen{ false };
 
 	class MenuOpenCloseHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
@@ -76,7 +77,7 @@ namespace cs::features
 			RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override
 		{
 			if (a_event.menuName == "LoadingMenu")
-				g_isLoadingMenuOpen = a_event.opening;
+				g_isLoadingMenuOpen.store(a_event.opening, std::memory_order_relaxed);
 			return RE::BSEventNotifyControl::kContinue;
 		}
 	};
@@ -156,7 +157,7 @@ namespace cs::features
 			bool frozenTime = main->gameActive && (main->inMenuMode || main->freezeTime);
 			bool lodObject = (a_this->flags & kLODMask) != 0;
 
-			if (!g_isLoadingMenuOpen && (frozenTime || lodObject))
+			if (!g_isLoadingMenuOpen.load(std::memory_order_relaxed) && (frozenTime || lodObject))
 				a_geometry->previousWorld = a_geometry->world;
 
 			return func(a_this, a_geometry, a3, a4);

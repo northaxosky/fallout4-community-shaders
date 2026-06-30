@@ -37,7 +37,9 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const bool flareInFrame = LensFlareEnable != 0 && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
     const bool useLinearPath = Operator != 0 || BloomEnable != 0 || flareInFrame || dirtInFrame;
     if (useLinearPath) {
-        float3 lin = SRGBToLinear(c);
+        // kFrameBuffer is already linear HDR (R11G11B10 float), matching the bloom/luminance
+        // passes - do NOT sRGB-decode it. Just guard against negatives before the linear math.
+        float3 lin = max(c, 0.0);
 
         // Bloom-add (linear domain so blur sums sensibly).
         if (BloomEnable != 0) {
@@ -74,7 +76,8 @@ void main(uint3 dtid : SV_DispatchThreadID)
         else if (Operator == 2) lin = Tonemap_Reinhard(lin);
         else if (Operator == 3) lin = Tonemap_Lottes(lin);
 
-        c = LinearToSRGB(lin);
+        // Write back in the same linear domain we read; the engine owns final display encoding.
+        c = lin;
     }
 
     // 4. LUT colour grading.
