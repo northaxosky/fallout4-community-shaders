@@ -1,5 +1,4 @@
-// Vignette + Chromatic Aberration. Math closely follows FidelityFX Lens
-// (extern/FidelityFX-SDK/sdk/include/FidelityFX/gpu/lens/ffx_lens.h, MIT).
+// Vignette + chromatic aberration, based on FidelityFX Lens (MIT).
 
 // Radial darkening. centerPx = OutputDimensions / 2; intensity in [0,1].
 float ApplyVignette(float2 px, float2 dims, float intensity)
@@ -9,8 +8,7 @@ float ApplyVignette(float2 px, float2 dims, float intensity)
     return 1.0 - intensity * smoothstep(0.4, 1.6, r2);
 }
 
-// Channel-shifted sampling: R toward center, B away. Uses linear sampling so falloff
-// is smooth across pixel boundaries.
+// Channel-shifted sampling: R toward center, B away; linear sampling smooths falloff.
 float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 dims, float intensity)
 {
     const float2 centred = uv * 2.0 - 1.0;
@@ -27,8 +25,7 @@ float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 
     return float3(r_ch, g_ch, b_ch);
 }
 
-// Lens-flare ghost kernel along the line from sunUV through the screen centre.
-// Fixed pattern of up to 7 ghosts (kPositions/kScales/kTints arrays); ghostCount selects how many.
+// Up to 7 lens-flare ghosts along the sun-to-screen-centre line.
 float3 ApplyLensFlare(float2 uv, float2 sunUVNDC, float intensity, uint ghostCount)
 {
     const float2 sunUV = float2(sunUVNDC.x * 0.5 + 0.5, 1.0 - (sunUVNDC.y * 0.5 + 0.5));
@@ -60,7 +57,7 @@ float3 ApplyLensFlare(float2 uv, float2 sunUVNDC, float intensity, uint ghostCou
         accum += kTints[i] * exp(-r2 / sigma);
     }
 
-    // Edge fade as sunUV leaves [0,1]; min() keeps it isotropic (product form double-squared in corners).
+    // Isotropic edge fade as sunUV leaves [0,1].
     const float2 fadeXY = saturate(1.0 - 2.0 * abs(sunUV - 0.5));
     const float  edgeFade = min(fadeXY.x, fadeXY.y);
     return accum * intensity * edgeFade;

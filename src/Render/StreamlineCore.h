@@ -41,7 +41,7 @@ namespace cs
 		// Idempotent. Invokes slInit with the aggregated featuresToLoad on first call.
 		bool Initialize();
 
-		// Idempotent device + feature-sweep registration; broadcasts to features each call so FG can re-trigger after D3D12 binding.
+		// Broadcasts each call so FG can re-trigger after D3D12 binding.
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device);
 
 		// FG sets this after binding D3D12 so a later D3D11 OnD3D11Ready doesn't overwrite the D3D12 binding.
@@ -57,10 +57,7 @@ namespace cs
 		HMODULE interposer = nullptr;
 
 		PFun_slInit*                 slInit{};
-		// slShutdown is deliberately resolved but never called. Process teardown ordering
-		// across F4SE / interposer / NVAPI threads isn't guaranteed, and any in-flight
-		// Present touching a stale function pointer crashes. The DLL unload path lets the
-		// loader unwind the SDK safely. Keep the pointer for completeness only.
+		// Resolve but never call slShutdown; teardown order with NVAPI/Present is unsafe, loader unload is safer.
 		PFun_slShutdown*             slShutdown{};
 		PFun_slIsFeatureSupported*   slIsFeatureSupported{};
 		PFun_slIsFeatureLoaded*      slIsFeatureLoaded{};

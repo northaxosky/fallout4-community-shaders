@@ -8,10 +8,8 @@
 
 namespace cs::util
 {
-	// Compile a single HLSL shader from disk. Returns nullptr on failure (errors logged).
-	// a_defines: list of (name, value) macro definitions; can be empty.
-	// a_programType: "ps_5_0" / "vs_5_0" / "cs_5_0" etc.
-	// a_program: entry-point name.
+	// Compile one HLSL shader from disk; returns nullptr on logged failure.
+	// a_defines are macros, a_programType is "ps_5_0"/"vs_5_0"/"cs_5_0", a_program is the entry point.
 	ID3D11DeviceChild* CompileShader(
 		const wchar_t* a_filePath,
 		const std::vector<std::pair<const char*, const char*>>& a_defines,
@@ -21,9 +19,6 @@ namespace cs::util
 	// Engine D3D11 device accessor. Returns nullptr if rendererData/device are not yet initialized.
 	[[nodiscard]] ID3D11Device* GetD3DDevice();
 
-	// Read a single byte from a marker file. Returns true iff the file existed and the byte was read.
-	// Skips a leading UTF-8 BOM (PowerShell `Out-File -Encoding utf8` writes one).
-	// On success the marker is deleted: markers are smoke-harness one-shots and lingering files
-	// silently override the next run (and survive crashes between sessions).
+	// Reads one marker byte, skipping UTF-8 BOM; successful reads delete smoke one-shots to avoid stale overrides.
 	bool ReadMarker(const char* a_path, char& a_out);
 }

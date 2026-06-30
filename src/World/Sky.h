@@ -2,7 +2,6 @@
 
 namespace cs::engine
 {
-	// Sun world-space direction sourced from RE::Sky->sun->light->world.rotate row 0.
-	// Returns false at night, in interiors, or any state where the sun light is not bound.
+	// Sun direction from RE::Sky light row 0; false at night, in interiors, or when unbound.
 	bool TryGetSunDirectionWS(float& outX, float& outY, float& outZ) noexcept;
 }

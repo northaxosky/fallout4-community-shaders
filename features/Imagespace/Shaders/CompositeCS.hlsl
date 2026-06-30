@@ -1,5 +1,4 @@
-// Tonemap + colour grading + bloom-add + adaptive exposure + lens stack.
-// CAS-first on input scene (CAS-last would require resampling the math chain at 9 positions).
+// Tonemap, grading, bloom, exposure, lens, and CAS-first sharpening.
 
 #include "Common.hlsli"
 #include "Tonemap.hlsli"
@@ -23,8 +22,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
 
     const float2 uv = (float2(px) + 0.5) / float2(OutputDimensions);
 
-    // CA resamples InputColor at radial offsets, so it would discard any CAS result. When CA is on,
-    // skip CAS entirely; when CA is off, CAS sharpens the input scene.
+    // CA resamples InputColor, so skip CAS when CA is active.
     float3 c;
     if (CAEnable != 0)
         c = SampleWithCA(InputColor, LinearClampSampler, uv, float2(OutputDimensions), CAIntensity);
@@ -37,11 +35,10 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const bool flareInFrame = LensFlareEnable != 0 && abs(SunUV.x) < 1.5 && abs(SunUV.y) < 1.5;
     const bool useLinearPath = Operator != 0 || BloomEnable != 0 || flareInFrame || dirtInFrame;
     if (useLinearPath) {
-        // kFrameBuffer is already linear HDR (R11G11B10 float), matching the bloom/luminance
-        // passes - do NOT sRGB-decode it. Just guard against negatives before the linear math.
+        // kFrameBuffer is linear HDR; do NOT sRGB-decode before linear math.
         float3 lin = max(c, 0.0);
 
-        // Bloom-add (linear domain so blur sums sensibly).
+        // Add bloom in linear HDR.
         if (BloomEnable != 0) {
             const float3 bloom = BloomTex.SampleLevel(LinearClampSampler, uv, 0).rgb;
             lin += bloom * BloomIntensity;
@@ -62,7 +59,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
             lin += mask * sunGlow * DirtIntensity;
         }
 
-        // Combined exposure.
         float exposure = ExposureManual;
         if (AdaptiveExposureEnable != 0) {
             const float adapted = ExpoTex.Load(int3(0, 0, 0));
@@ -71,7 +67,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
         }
         lin *= exposure;
 
-        // Operator.
         if      (Operator == 1) lin = Tonemap_Hable(lin);
         else if (Operator == 2) lin = Tonemap_Reinhard(lin);
         else if (Operator == 3) lin = Tonemap_Lottes(lin);
@@ -80,7 +75,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
         c = lin;
     }
 
-    // 4. LUT colour grading.
+    // LUT colour grading.
     if (LUTEnable != 0) {
         const float scale  = 31.0 / 32.0;
         const float offset = 0.5  / 32.0;
@@ -89,7 +84,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
         c = lerp(c, graded, LUTStrength);
     }
 
-    // 5. Vignette.
+    // Vignette.
     if (VignetteEnable != 0)
         c *= ApplyVignette(float2(px), float2(OutputDimensions), VignetteIntensity);
 

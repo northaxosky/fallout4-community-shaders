@@ -1,129 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
-// Consolidated BSDFLightShader deferred-lighting PS for FO4.
-//
-// FO4's BSDFLightShader class handles directional, point, and spot light
-// permutations as technique-bit variants of one shader class
-// (BSDFLightShaderMacros::GetPixelShaderID resolves the bits to a corpus
-// blob). This file mirrors that consolidation: one HLSL parameterized by
-// LIGHT_TYPE.
-//
-// LIGHT_TYPE permutation system:
-//   LIGHT_TYPE_DIRECTIONAL (1) - sun-light path (cascade-shadow PCF,
-//                                distance fade). FULLY RECONSTRUCTED.
-//   LIGHT_TYPE_POINT       (2) - unshadowed point-light path (radial
-//                                falloff, octahedral light cookie at
-//                                t7). RECONSTRUCTED from FO4_frame9483
-//                                eid 46771 (sha 3f1f708c0175).
-//   LIGHT_TYPE_SPOT        (3) - spot-light path (single-frustum PCF,
-//                                cone attenuation). STUB - awaits a
-//                                canonical spot capture.
-//
-// Default LIGHT_TYPE is DIRECTIONAL to preserve backwards-compatible
-// behaviour (this file replaces the prior sun_light_deferred.hlsl).
-//
-// Status: REFERENCE - directional branch is asm-level transcription with
-// structural fidelity high; point and spot branches are stubs.
-//
-// Canonical mapping (directional):
-//   * Corpus blob:    Shaders011.fxp blob 3295
-//   * Corpus sha1:    50e2618e8d1a... (strongest match in a 5-peer cluster)
-//   * Runtime sha1:   8c615844e6443... (eid 44513 in FO4_frame5407.rdc;
-//                     mnemonic-near-match within +2 insns of corpus blob)
-//   * Source asm:     Shaders011.3295.50e2618e8d1a.dxbc.asm
-//   * Shape:          ps_5_0, 272 instructions, 8 samples (including 4
-//                     SampleCmp inside two 8-iteration loops = 32 PCF taps
-//                     across both cascades), 5 SRVs (t0/t1/t2/t3 texture2d
-//                     + t5 texturecubearray cascade-shadow atlas), 2 CBs
-//                     (CB12[31], CB2[25]), 4 default samplers + s5
-//                     mode_comparison (hardware PCF), 999-entry immediate
-//                     constant buffer of jittered 2D Poisson points.
-//
-// Host dispatch (cross-runtime confirmed, directional variant):
-//   DrawWorld::AccumulateSunShadowLightImpl  (REL::IDs {OG=259940,
-//                                              NG=2318296, AE=2318296})
-//     OG RVA 0x02850340   NG RVA 0x02095e60   AE RVA 0x021eb4f0
-//   gated by:
-//   DrawWorld::DoSunShadowLightAccumulate    (REL::IDs {OG=526008,
-//                                              NG=2318295, AE=2318295})
-//   PS selected by BSDFLightShaderMacros::GetPixelShaderID(directional +
-//   cascade-shadow technique bits) from the BSDFLightShader class.
-//   (FO4 has no separate BSDFDirectionalLightShader - the sun-light is
-//   a technique permutation of the same class that handles point/spot.)
-//
-// Refactor history:
-//   * This file is the consolidation of prior sun_light_deferred.hlsl
-//     (deleted in same commit). The directional branch is byte-for-byte
-//     the same math as the deleted file; compiling this with LIGHT_TYPE
-//     undefined / LIGHT_TYPE_DIRECTIONAL must produce identical bytecode.
-//   * Point + spot branches arrive in follow-up commits when the
-//     FO4_frame9483 interior capture has been processed.
-//
-// What the directional branch does (interpreted from asm):
-//   1. Sample depth from t3 using derivative-based gradient filter.
-//   2. Depth-based matrix select via CB12[20..27] - SHARED with composite
-//      (blob 3539), ambient/IBL (3559), VLS slice (2147). The shared
-//      per-frame reprojection matrix pair for view-space position
-//      reconstruction.
-//   3. Sample BSDFLight G-buffer aliases: t0 = RT26, t1 = RT27, t2 =
-//      unnamed RT30. Decode normal from the t1 octahedral encoding.
-//   4. Reconstruct view-space position from screen UV + linearized depth.
-//   5. Cascade 0 PCF (if cb2[10].y check passes): project view-space pos
-//      into cascade-0 light space via cb2[11..13] matrix; sample 16 jittered
-//      depths from t5.SampleCmp (mode_comparison, hardware PCF) over an
-//      8-iteration loop (2 samples per iter) using offsets from the
-//      999-point Poisson icb[]; average with 1/16.
-//   6. Cascade 1 PCF (if cb2[10].x check passes): same pattern with
-//      cb2[14..16] matrix and cb2[22] params.
-//   7. Cascade blend: smoothstep between the two PCF results based on
-//      view-space distance to the camera (cb2[10].xy range).
-//   8. Distance fade by cb2[24].x.
-//   9. Sun NdotL: dot(normal_view, cb2[1].xyz).
-//  10. Material-id branch:
-//      - Material 1 (skin, gbuffer aux .w * 255 == 1): subsurface-style
-//        BRDF using cb12[28..29] for trig + colored absorption (the
-//        Christensen-Burley SSS approximation seen also in the ambient
-//        bilateral blur).
-//      - Material non-1: standard Schlick-Fresnel + GGX specular against
-//        sun direction; reflection vector dot product for specular lobe.
-//  11. Final composition: diffuse * cb2[2] (sun color) + specular +
-//      ambient AO term; modulated by shadow factor.
-//  12. MRT output: o0 = diffuse accumulator (/3 for HDR normalization)
-//      to kDiffuseBuffer (RT 58); o1 = specular accumulator
-//      to kSpecularBuffer (RT 59). Both R11G11B10F. RT 389/392 in
-//      RenderDoc captures are capture-local resource IDs for these
-//      slots, not stable engine enum values.
-//
-// Skyrim CS analog: `package/Shaders/Lighting.hlsl` has the closest
-// math for the directional + cascade-shadow + Lambert + GGX pattern.
-// Per the explore survey: `package/Shaders/Common/BRDF.hlsli` has the
-// shared Lambertian + Schlick + GGX helpers. FO4's cascade PCF uses a
-// stratified Poisson kernel from an immediate CB; Skyrim CS uses a fixed
-// 9-tap kernel - so the shadow filtering ports with FO4-specific changes.
-//
-// Limits of this reconstruction (be honest):
-//   * CB12 field names are PARTIALLY known
-//     (CB12[20..27] reprojection matrix, CB12[28..29] for trig + SSS
-//     constants per insn 149 sincos pattern, CB12[30].y for desaturation).
-//     Other CB12 indices are placeholders.
-//   * CB2 has 25 vec4s. Identified: cb2[0] screen-uv scale, cb2[1] sun
-//     direction, cb2[2] sun color, cb2[10] cascade-active flags + range,
-//     cb2[11..13] cascade-0 matrix, cb2[14..16] cascade-1 matrix,
-//     cb2[20].z PCF kernel-size scale, cb2[21].zw cascade-0 depth range,
-//     cb2[22].zw cascade-1 depth range, cb2[24].x distance-fade. Others
-//     are placeholders.
-//   * The 999-entry immediate constant buffer is the rotated Poisson
-//     stratified sampling pattern. Reconstructing it as a `static const`
-//     array in HLSL is necessary; the values are asm-extracted exactly.
-//     For readability + roundtrip practicality, only the first ~16
-//     entries are inlined verbatim in this reconstruction; the rest are
-//     marked TODO for the next iteration (the runtime stratified loop
-//     indexes icb[r6.w * 2 + 0] and [r6.w * 2 + 1] so a partial array
-//     limits the loop iteration count).
-
-// ----------------------------------------------------------------------------
-// LIGHT_TYPE permutation config.
-// ----------------------------------------------------------------------------
+// Consolidated FO4 BSDFLightShader deferred PS: directional, point, and spot light permutations selected by LIGHT_TYPE.
+// Directional mapping: Shaders011.fxp #3295 (corpus 50e2618e8d1a..., runtime 8c615844e6443..., eid 44513); host DrawWorld::AccumulateSunShadowLightImpl REL::ID {OG=259940, NG=2318296, AE=2318296}.
+// Directional status: reference asm transcription; point is reconstructed from FO4_frame9483 eid 46771; spot is a guarded stub.
+// Directional flow: sample depth/gbuffer, select Far/Near reproj, run two cascade PCF blocks, blend/fade shadows, branch skin-vs-default BRDF, write diffuse/specular MRTs.
+// Point flow: reconstruct position, compute radial attenuation, sample octahedral light cookie, reuse BSDF BRDF, write diffuse/specular MRTs.
+// Limits: CB semantics remain partial; 999-entry Poisson ICB is represented by the consumed subset; non-skin BRDF is structurally condensed.
 
 #define LIGHT_TYPE_DIRECTIONAL 1
 #define LIGHT_TYPE_POINT       2
@@ -147,14 +28,10 @@
 // deferred-pipeline PS reconstructions). See header for documentation.
 #include "deferred_contracts.hlsli"
 
-// ============================================================================
 // LIGHT_TYPE_DIRECTIONAL branch (the sun-light path).
-// ============================================================================
 #if LIGHT_TYPE == LIGHT_TYPE_DIRECTIONAL
 
-// ----------------------------------------------------------------------------
 // Constant buffer layouts.
-// ----------------------------------------------------------------------------
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -249,11 +126,9 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_idx24_distance_fade;
 };
 
-// ----------------------------------------------------------------------------
 // Resource bindings.
 // Slot indices match the corpus blob 3295 declarations exactly.
 // Semantic names from Fallout4RE exports/cs-bsdflight-setup-decoder.json @ 43502f2.
-// ----------------------------------------------------------------------------
 
 // t0: RT26 kTAAAccumulation, used by BSDFLight as albedo/base color.
 //     Sampled at insn 27. .xyz = color, .w = some scalar (used at insn
@@ -284,24 +159,19 @@ SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth      : register(s3);
 SamplerComparisonState g_sCascadeShadowCmp : register(s5);  // mode_comparison
 
-// ----------------------------------------------------------------------------
 // Stratified Poisson PCF kernel.
-//
 // Asm's dcl_immediateConstantBuffer has 999 vec2 entries (from line 22
 // to line 1020 of the original asm). The cascade-PCF loops below index
 // icb[r * 2] + icb[r * 2 + 1] for r in [0, 8), so 16 of the 999 entries
 // are actually consumed per dispatch.
-//
 // For reconstruction practicality, the first 32 vec2s are inlined here
 // (covers worst-case loop indexing). Adding all 999 inflates the HLSL
 // dramatically without affecting the rendered output - any reviewer can
 // extend by copy-pasting from the asm.
-//
 // The two cascade PCF blocks dual-tap each loop iteration:
 //   tap0 = icb[r * 2 + 0].xy - 0.5
 //   tap1 = icb[r * 2 + 1].xy - 0.5
 // (centered around 0; multiplied by cb2[20].z * 3.0 kernel scale).
-// ----------------------------------------------------------------------------
 static const float2 SUN_SHADOW_POISSON[32] =
 {
     float2(0.493393, 0.394269), float2(0.798547, 0.885922),
@@ -326,9 +196,7 @@ static const float2 SUN_SHADOW_POISSON[32] =
     // round-trip; not blocking since the loop only consumes 16.
 };
 
-// ----------------------------------------------------------------------------
 // Helpers
-// ----------------------------------------------------------------------------
 
 // Decode octahedral normal (matches insns 29-34).
 float3 DecodeOctahedralNormal(float2 enc01)
@@ -381,9 +249,7 @@ float ComputeCascadePCF(float3 posView, float4 row0, float4 row1, float4 row2,
     return accum * 0.0625;  // = 1 / 16
 }
 
-// ----------------------------------------------------------------------------
 // Entry point.
-// ----------------------------------------------------------------------------
 
 struct PS_INPUT
 {
@@ -516,10 +382,8 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 137-138: material-1 (skin) test
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 
-    // ------------------------------------------------------------------
     // Material-id-branched BRDF block (insns 139-242).
     // Both branches compute a "specular contribution" r7.xyz and accumulate.
-    // ------------------------------------------------------------------
     float3 brdfSpecular = float3(0, 0, 0);
     float  brdfModulator = 0.0;
     float  brdfShadowMix = 0.0;
@@ -593,14 +457,12 @@ PS_OUTPUT main(PS_INPUT input)
         brdfModulator = schlickFres;
     }
 
-    // ------------------------------------------------------------------
     // Insn 243-265: final composition.
     //   - Compute "fresnel-modulated ambient" term using normalView dot
     //     -cb2[1].xyz against view direction (insns 243-251).
     //   - Add diffuse contribution = cb2[2].xyz * NdotL_clamped * shadow
     //   - Add specular contribution = brdfSpecular
     //   - Modulate by ambient occlusion via 1 - schlickFres*0.5 factor
-    // ------------------------------------------------------------------
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
     float ambientFres = 1.0 - NdotV_view;
     ambientFres = exp2(log2(max(ambientFres, 1e-6)) * 0.01);
@@ -629,12 +491,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 #endif // LIGHT_TYPE == LIGHT_TYPE_DIRECTIONAL
 
-// ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
-//
 // fxc round-trip status: see local roundtrip notes for the
 // compile output + insn-count delta against the original.
-//
 // What is faithfully reconstructed (structurally):
 //   * Resource declarations (5 SRVs + 5 samplers + 2 CBs) at exact slot
 //     indices.
@@ -648,7 +507,6 @@ PS_OUTPUT main(PS_INPUT input)
 //   * SampleCmpLevelZero hardware PCF via the mode_comparison sampler.
 //   * Stratified Poisson PCF kernel structure (8-iter loop, 2 taps per
 //     iter, 16 total taps per cascade, 0.0625 = 1/16 average weight).
-//
 // What is approximated rather than asm-exact:
 //   * The Poisson kernel only has 32 entries inlined here vs 999 in
 //     the original asm. The loop only accesses 16 entries so the
@@ -660,7 +518,6 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Round-trip target: <15% insn delta. The material BRDF condensing
 //     + ICB size delta will likely push this above ±10% but stays within
 //     documented-WIP territory.
-//
 // What needs cross-read to finalize:
 //   * CB12[28..30] field semantics. The skin BRDF uses cb12[28..29] for
 //     SSS-style rotated absorption math; the field names are placeholders.
@@ -672,11 +529,8 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Cascade-PCF zRef bias terms (insns 48, 83) - the exact -0.275 *
 //     range_rcp scaling is preserved structurally but field semantics
 //     would benefit from IDA Hex-Rays cross-read.
-// ============================================================================
 
-// ============================================================================
 // LIGHT_TYPE_POINT branch (the unshadowed point-light path).
-//
 // Canonical mapping:
 //   * Runtime sha1:  3f1f708c0175... (eid 46771 in FO4_frame9483.rdc)
 //   * Source asm:    runtime/bsdf-light-unshadowed/asm/
@@ -688,7 +542,6 @@ PS_OUTPUT main(PS_INPUT input)
 //                    (s0/s1/s2/s3/s7 - NO comparison sampler), 2 CBs
 //                    (CB12[30], CB2[23]), 1 input register (SV_POSITION),
 //                    2 MRT outputs (o0.xyzw + o1.xyzw).
-//
 // "unshadowed" classification: this PS has no SampleCmp instructions and
 // no cascade/cube-shadow texture array. It is dispatched for point
 // lights that either (a) have shadow casting disabled, or (b) bake their
@@ -698,7 +551,6 @@ PS_OUTPUT main(PS_INPUT input)
 // divide, normalize, and octahedral-encode the resulting direction
 // vector to sample t7. This is the canonical FO4 "omnidirectional
 // projected cookie" pattern for unshadowed point lights.
-//
 // What the point branch does (interpreted from asm):
 //   1. Reconstruct view-space position from screen UV + depth via the
 //      same Far/Near reproject matrix pair as directional (cb12[20..27]).
@@ -715,7 +567,6 @@ PS_OUTPUT main(PS_INPUT input)
 //      directional, but using toLight_normalized instead of sun direction.
 //   8. MRT: o0 = diffuse * cookie * attenuation / 3, o1 = spec * cookie *
 //      attenuation; o1.w = 1.
-//
 // Limits of this reconstruction (be honest):
 //   * cb2 field semantics are inferred. The exact role of cb2[22].xy
 //     (the extra screen-scale at insn 0) is unclear; it may be a render-
@@ -727,13 +578,10 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Other point-light permutations (shadowed-by-cube-map, with
 //     shadow bias / depth-range) live in eids 51116 / 51562 in the same
 //     capture and are documented but NOT reconstructed here.
-// ============================================================================
 
 #if LIGHT_TYPE == LIGHT_TYPE_POINT
 
-// ----------------------------------------------------------------------------
 // Constant buffer layouts (point-light variant).
-// ----------------------------------------------------------------------------
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -788,9 +636,7 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_idx22_subrect_scale;
 };
 
-// ----------------------------------------------------------------------------
 // Resource bindings (point-light variant).
-// ----------------------------------------------------------------------------
 
 // t0: RT26 kTAAAccumulation. Sampled at insn 42 (.w channel used for alpha mix).
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
@@ -814,9 +660,7 @@ SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth       : register(s3);
 SamplerState g_sLightCookie     : register(s7);
 
-// ----------------------------------------------------------------------------
 // Helpers (point-light variant).
-// ----------------------------------------------------------------------------
 
 // Octahedral normal decode (same as directional helper).
 float3 DecodeOctahedralNormal(float2 enc01)
@@ -846,9 +690,7 @@ float2 EncodeOctahedralUV(float3 dirLightSpace)
     return uv * 0.5 + 0.5;
 }
 
-// ----------------------------------------------------------------------------
 // Entry point (point-light variant).
-// ----------------------------------------------------------------------------
 
 struct PS_INPUT
 {
@@ -951,11 +793,9 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 86-87: material-1 (skin) test.
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 
-    // ------------------------------------------------------------------
     // Insns 88-184: same material-branched BRDF block as the directional
     // path. The math reads from cb12[28..29] for SSS, cb2[2] for light
     // color, and uses lightDir (not sun direction) as the lighting axis.
-    // ------------------------------------------------------------------
     float3 brdfSpecular = float3(0, 0, 0);
     float  brdfShadowMix = 0.0;
     if (isMaterial1)
@@ -1022,17 +862,14 @@ PS_OUTPUT main(PS_INPUT input)
 
 #endif // LIGHT_TYPE == LIGHT_TYPE_POINT
 
-// ============================================================================
 // Round-trip notes for the point branch (for the reviewer + future
 // maintainer)
-//
 // fxc /T ps_5_0 /O3 against eid 46771's 204 insns target: 150 vs 204
 // (-26.5%, comparable to the -28.7% BRDF condensation precedent set by
 // the prior sun_light reconstruction). Resource bindings, sample count
 // (5/5), and signature are EXACT match. The delta is entirely in the
 // material-non-1 GGX block (condensed for readability) plus the
 // octahedral cookie encode being collapsed to a normalize+sign helper.
-//
 // What is faithfully reconstructed (structurally):
 //   * Resource declarations (5 SRVs + 5 default samplers + 2 CBs) at
 //     exact slot indices (t0/t1/t2/t3/t7, s0/s1/s2/s3/s7).
@@ -1044,7 +881,6 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Shared CB12[20..27] reprojection matrix infrastructure (now the
 //     5th shader to use this pattern).
 //   * Diffuse / 3 normalization to match directional.
-//
 // What is approximated rather than asm-exact:
 //   * The octahedral cookie encoding (EncodeOctahedralUV helper) is
 //     written in canonical form; the asm's exact insn-by-insn sign
@@ -1052,16 +888,11 @@ PS_OUTPUT main(PS_INPUT input)
 //     equivalent UV values.
 //   * Material-non-1 BRDF block is condensed identically to directional
 //     (the asm's GGX vis chain is preserved in structure, not by insn).
-// ============================================================================
 
-// ============================================================================
 // LIGHT_TYPE_SPOT stub - reconstruction TODO
-//
 // Awaits canonical capture from FO4_frame9483.rdc (interior cell with
 // spot lights active).
-//
 // Expected math sketch:
-//
 //   1. Same gbuffer decode + view-space position reconstruction as
 //      directional.
 //   2. toLight = lightPos - posView (CB1[0].xyz).
@@ -1076,11 +907,9 @@ PS_OUTPUT main(PS_INPUT input)
 //      Use the same stratified Poisson kernel as directional cascade-0.
 //   6. NdotL + BRDF identical to directional.
 //   7. Final composition writes the MRT pair.
-//
 // Per-light CB1 schema (TODO confirm):
 //   CB1[0]: .xyz = view-space light position, .w = range
 //   CB1[1]: .xyz = light color, .w = intensity
 //   CB1[2]: .xyz = view-space cone axis, .w = cos(outer cone half-angle)
 //   CB1[3]: .x   = cos(inner cone half-angle), .yzw = shadow params
 //   CB1[4..7]: spot-light projection matrix
-// ============================================================================

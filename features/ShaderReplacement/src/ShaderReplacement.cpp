@@ -163,7 +163,6 @@ namespace cs::features
 			return;
 		}
 
-		// Reconcile registry entries against per-shader config toggles.
 		auto& s = _settings.shaders;
 		for (auto& up : replacement::Registry::Get().All()) {
 			auto& e = *up;
@@ -181,8 +180,7 @@ namespace cs::features
 		if (!_started.load(std::memory_order_acquire) || !device) return;
 		if (_hookInstalled.exchange(true, std::memory_order_acq_rel)) return;
 
-		// Pre-compile enabled entries; entries without a known runtime sha1 are compiled too
-		// so the ImGui surface can show compile status, but they cannot ever match at runtime.
+		// Also compile entries without runtime SHA1 so ImGui can show status, though they never match.
 		std::size_t want = 0, got = 0;
 		for (auto& up : replacement::Registry::Get().All()) {
 			auto& e = *up;

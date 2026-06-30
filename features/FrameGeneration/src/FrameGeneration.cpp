@@ -387,8 +387,7 @@ void FrameGeneration::PostAlpha()
 			}
 		}
 
-		// Clear all four SRV slots we bound above; leaving slot 3 (depth) bound is the OM/CS
-		// hazard the audit flagged - a later DSV/RTV use can silently null it or poison a dispatch.
+		// Clear all SRVs we bound; leaving depth in slot 3 risks OM/CS nulling or poisoned dispatches.
 		ID3D11ShaderResourceView* views[4] = { nullptr, nullptr, nullptr, nullptr };
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
@@ -465,7 +464,7 @@ void FrameGeneration::FrameLimiter(bool a_useFrameGeneration)
 
 	if (d3d12Interop && settings.frameLimitMode) {
 
-		// Stick within VRR bounds
+		// Stay inside VRR bounds.
 		double bestRefreshRate = refreshRate - (refreshRate * refreshRate) / 3600.0;
 
 		LARGE_INTEGER qpf;
@@ -531,13 +530,12 @@ double FrameGeneration::GetRefreshRate(HWND a_window)
 	MONITORINFOEXW info;
 	info.cbSize = sizeof(info);
 	if (GetMonitorInfoW(monitor, &info) != 0) {
-		// using the CCD get the associated path and display configuration
+		// Use CCD to find the active display path for this window.
 		UINT32 requiredPaths, requiredModes;
 		if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &requiredPaths, &requiredModes) == ERROR_SUCCESS) {
 			std::vector<DISPLAYCONFIG_PATH_INFO> paths(requiredPaths);
 			std::vector<DISPLAYCONFIG_MODE_INFO> modes2(requiredModes);
 			if (QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS, &requiredPaths, paths.data(), &requiredModes, modes2.data(), nullptr) == ERROR_SUCCESS) {
-				// iterate through all the paths until find the exact source to match
 				for (auto& p : paths) {
 					DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName;
 					sourceName.header.type = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
@@ -545,12 +543,8 @@ double FrameGeneration::GetRefreshRate(HWND a_window)
 					sourceName.header.adapterId = p.sourceInfo.adapterId;
 					sourceName.header.id = p.sourceInfo.id;
 					if (DisplayConfigGetDeviceInfo(&sourceName.header) == ERROR_SUCCESS) {
-						// find the matched device which is associated with current device
-						// there may be the possibility that display may be duplicated and windows may be one of them in such scenario
-						// there may be two callback because source is same target will be different
-						// as window is on both the display so either selecting either one is ok
+						// Duplicated displays can share a source with multiple targets; either match is valid.
 						if (wcscmp(info.szDevice, sourceName.viewGdiDeviceName) == 0) {
-							// get the refresh rate
 							UINT numerator = p.targetInfo.refreshRate.Numerator;
 							UINT denominator = p.targetInfo.refreshRate.Denominator;
 							return (double)numerator / (double)denominator;
@@ -598,8 +592,7 @@ void FrameGeneration::GenerateUIAlphaMask()
 	if (!d3d12Interop || !setupBuffers || !uiAlphaMaskCS)
 		return;
 
-	// Match the menu-block check applied by DX12SwapChain::Present so we don't waste a dispatch
-	// when frame generation will be skipped this frame anyway.
+	// Match DX12SwapChain::Present menu gating to skip unused UI-alpha dispatches.
 	if (settings.disableInMenus) {
 		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode)
 			return;
@@ -705,18 +698,17 @@ void FrameGeneration::InstallHooks()
 {
 	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 
-	// Fix game initialising twice
+	// Swallow FO4's duplicate init resize event.
 	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));
 
-	// Watch frame presentation via the shared post-upscale broker so Imagespace post-FX lands
-	// before HUDLess capture (avoids the 60Hz judder when Imagespace was second-to-install).
+	// Shared post-upscale broker keeps Imagespace post-FX before HUDLess capture, avoiding 60Hz judder.
 	cs::engine::RegisterPostDynResViewport_FGCapture([](bool a_setting) {
 		if (!a_setting) {
 			FrameGeneration::GetSingleton()->PostDisplay();
 		}
 	});
 
-	// Fix reticles on motion vectors and depth
+	// Capture motion vectors/depth after reticle handling.
 	stl::detour_thunk<DrawWorld_Forward>(REL::ID({ 656535, 2318315, 2318315 }));
 
 	constexpr std::ptrdiff_t reticleOffsets[] = { 0x253, 0x53D, 0x53D };

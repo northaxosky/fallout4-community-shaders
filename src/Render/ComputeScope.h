@@ -4,11 +4,8 @@
 
 namespace cs
 {
-	// RAII guard around CS dispatches. Entry is a no-op; exit clears CS-stage bindings the
-	// dispatches touched (SRV/UAV/CB/sampler/shader) so the next CS dispatch starts clean.
-	// Width is capped at 8 slots per stage - a full-width null sweep (128 SRVs etc.) stomps
-	// engine CS-stage bindings at high slots during deferred passes and produces dark boxes
-	// at building positions. Not re-entrant.
+	// Clears only 8 CS slots; wider sweeps stomp engine high-slot bindings and cause dark boxes.
+	// Not re-entrant.
 	class ComputeScope
 	{
 	public:

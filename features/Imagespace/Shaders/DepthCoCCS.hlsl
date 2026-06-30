@@ -32,7 +32,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
 {
     if (dtid.x >= HalfDimensions.x || dtid.y >= HalfDimensions.y) return;
 
-    // Sample depth at the corresponding full-res 2x2 footprint, take the closest (min) for AO-style sharpness.
+    // Use closest depth in the matching 2x2 full-res footprint for sharper CoC edges.
     const int2 src = int2(dtid.xy) * 2;
     const float d0 = DepthIn.Load(int3(src + int2(0, 0), 0));
     const float d1 = DepthIn.Load(int3(src + int2(1, 0), 0));
@@ -41,13 +41,11 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const float dMin = min(min(d0, d1), min(d2, d3));
     const float vz = Linearize(dMin);
 
-    // CoC = scale * (1 - focusDist/z). Pre-baked: scale*z + bias gives signed CoC in pixel units.
-    // Negative = foreground / closer than focus; positive = background / behind focus.
+    // Pre-baked scale*z+bias gives signed CoC pixels: negative foreground, positive background.
     float coc = CocScale * vz + CocBias;
     coc = clamp(coc, -CocLimit, CocLimit);
     CocOut[dtid.xy] = coc;
 
-    // 2x2 box average of the color.
     const float3 c0 = ColorIn.Load(int3(src + int2(0, 0), 0)).rgb;
     const float3 c1 = ColorIn.Load(int3(src + int2(1, 0), 0)).rgb;
     const float3 c2 = ColorIn.Load(int3(src + int2(0, 1), 0)).rgb;

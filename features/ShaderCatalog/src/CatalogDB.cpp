@@ -22,8 +22,7 @@ namespace cs::features::catalog
 {
 	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
 
-	// Schema source: in-repo schema definition below. If this changes,
-	// bump corpus_meta.schema_version; the importer enforces version match.
+	// If this schema changes, bump corpus_meta.schema_version; the importer enforces it.
 	static const char* kSchemaSql = R"sql(
 PRAGMA foreign_keys = ON;
 
@@ -227,8 +226,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			if (_updateSession)     { sqlite3_finalize(_updateSession);     _updateSession = nullptr; }
 			if (_db)                { sqlite3_close(_db); _db = nullptr; }
 		} else {
-			// Detached writer still owns the DB + prepared statements; touching them races. Leak
-			// is intentional - process is about to exit anyway. WAL preserves committed rows.
+			// Detached writer still owns DB state; leak it to avoid races while WAL preserves commits.
 			L->warn("Database left open; detached writer still holds resources until process exit.");
 		}
 	}
@@ -242,9 +240,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			return false;
 
 		char* err = nullptr;
-		// Enable foreign-key enforcement; off by default in SQLite. Without this, the schema's
-		// FK constraints (shader_catalog.first_seen_session_id REFERENCES sessions, etc.) are
-		// silently dead-code and inconsistent rows can slip in.
+		// SQLite leaves foreign keys off by default; enable them or schema constraints are inert.
 		sqlite3_exec(_db, "PRAGMA foreign_keys=ON;", nullptr, nullptr, &err);
 		if (err) { sqlite3_free(err); err = nullptr; }
 		// WAL for crash resilience; busy_timeout so concurrent readers (importer) don't trip us.
@@ -261,7 +257,6 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			return false;
 		}
 
-		// Validate schema version.
 		sqlite3_stmt* st = nullptr;
 		if (sqlite3_prepare_v2(_db, "SELECT value FROM corpus_meta WHERE key='schema_version'",
 			-1, &st, nullptr) == SQLITE_OK)
@@ -277,7 +272,6 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			sqlite3_finalize(st);
 		}
 
-		// Insert sessions row.
 		{
 			const char* sql = "INSERT INTO sessions(session_id, started_at, engine_runtime, plugin_version, config_snapshot_json) "
 			                  "VALUES(?, ?, ?, ?, ?)";
@@ -298,7 +292,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			}
 		}
 
-		// Prepare hot statements once; bound per write in the writer.
+		// Prepare hot statements once; the writer only re-binds values.
 		const char* kInsertShader =
 			"INSERT INTO shader_catalog("
 			"  sha1, size_bytes, stage,"
@@ -352,8 +346,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		if (!_running.load(std::memory_order_acquire))
 			return;
 
-		// MPSC bounded ring; producers claim a slot via CAS on _enqPos. On full ring,
-		// drop newest and bump the counter rather than blocking the render thread.
+		// Bounded MPSC ring drops newest on overflow instead of blocking the render thread.
 		std::uint64_t pos = _enqPos.load(std::memory_order_relaxed);
 		for (;;) {
 			Cell& cell = _ring[pos & (kCapacity - 1)];
@@ -367,7 +360,6 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 					return;
 				}
 			} else if (diff < 0) {
-				// Ring full from this producer's view; drop.
 				_statDropped.fetch_add(1, std::memory_order_relaxed);
 				return;
 			} else {
@@ -553,7 +545,6 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err);
 			if (err) { sqlite3_free(err); err = nullptr; }
 
-			// Drain shader ring.
 			std::size_t drained = 0;
 			for (;;) {
 				const auto pos = _deqPos.load(std::memory_order_relaxed);
@@ -576,14 +567,14 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			if (drained > 0)
 				RefreshCatalogCounts();
 
-			// Periodic WAL truncate so the sidecar doesn't grow unbounded.
+			// Periodically truncate WAL so the sidecar stays bounded.
 			if ((++checkpointN % 12) == 0) {
 				sqlite3_exec(_db, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, &err);
 				if (err) { sqlite3_free(err); err = nullptr; }
 			}
 		}
 
-		// Final flush on the way out.
+		// Flush remaining entries on exit.
 		{
 			char* err = nullptr;
 			sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err);

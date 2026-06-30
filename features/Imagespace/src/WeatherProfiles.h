@@ -30,8 +30,7 @@ namespace cs::features::imagespace
 	[[nodiscard]] std::string_view CategoryName(WeatherCategory a_cat) noexcept;
 	[[nodiscard]] std::optional<WeatherCategory> ParseCategory(std::string_view a_name) noexcept;
 
-	// Overlayable subset of Imagespace::Settings. Each std::optional present == "override this key for
-	// this category"; absent == "fall through to base settings".
+	// Optional values override the base setting for this weather category.
 	struct WeatherOverlay
 	{
 		std::optional<float>                exposure;
@@ -63,8 +62,7 @@ namespace cs::features::imagespace
 		std::unordered_map<std::uint32_t, WeatherCategory>                          userOverrides{};
 	};
 
-	// Frame-resolved view consumed by Imagespace::RunFrame. POD-only; no std::string. lutSRV is a raw
-	// pointer owned by Imagespace::lutCache (or by Imagespace::lutSRV for the base-LUT fallback).
+	// Frame-resolved POD; lutSRV is owned by LUTCache or the base LUT fallback.
 	struct ResolvedRuntime
 	{
 		float                       exposure;
@@ -93,8 +91,7 @@ namespace cs::features::imagespace
 		bool                        lutCacheMiss{ false };
 	};
 
-	// Subset of Imagespace::Settings forwarded into Resolve. Keeps WeatherProfiles independent of
-	// Imagespace.h so the resolver is unit-testable.
+	// Overlayable Imagespace settings; keeps the resolver independent of Imagespace.h.
 	struct ResolveBase
 	{
 		float                exposure;
@@ -116,9 +113,7 @@ namespace cs::features::imagespace
 		float                dirtIntensity;
 	};
 
-	// Frame snapshot of Sky state, read on the render thread. Pointer reads are atomic on x64; floats
-	// may be torn but the consumer clamps the pct to [0,1] anyway. mode==kFull is required for the
-	// per-weather pipeline; kInterior/kSkyDomeOnly fall back to base.
+	// Render-thread Sky snapshot; torn pct reads are clamped, and only kFull enables per-weather.
 	struct SkySample
 	{
 		const RE::TESWeather* current  = nullptr;
@@ -129,30 +124,24 @@ namespace cs::features::imagespace
 
 	[[nodiscard]] SkySample SampleSky() noexcept;
 
-	// Returns the canonical category for a TESWeather pointer. Applies user overrides first
-	// (formID -> category), then the static vanilla-formID table, then the kFlags fallback.
+	// Classifies weather via user overrides, then vanilla formIDs, then kFlags fallback.
 	[[nodiscard]] WeatherCategory Classify(const RE::TESWeather* a_weather,
 		const std::unordered_map<std::uint32_t, WeatherCategory>& a_userOverrides) noexcept;
 
-	// Returns the list of distinct LUT paths referenced by base + any overlay. Used by LUTCache::Preload.
+	// Distinct LUT paths referenced by base settings and overlays.
 	[[nodiscard]] std::vector<std::string> CollectReferencedLUTs(const std::string& a_baseLutPath,
 		const WeatherProfiles& a_profiles);
 
 	class LUTCache;
 
-	// Resolves per-frame Imagespace settings under the active weather. On the render thread; uses only
-	// LUTCache::TryGet (no synchronous loads). Falls back to base settings when:
-	//   profiles.enablePerWeatherProfiles == false, OR sample.modeIsFull == false,
-	//   OR sample.current == nullptr.
+	// Render-thread resolve; TryGet only, falling back to base when profiles/Sky are inactive.
 	[[nodiscard]] ResolvedRuntime Resolve(const ResolveBase& a_base,
 		ID3D11ShaderResourceView*  a_baseLutSRV,
 		const WeatherProfiles&     a_profiles,
 		const SkySample&           a_sample,
 		const LUTCache&            a_lutCache) noexcept;
 
-	// Smoke-harness path: bypass Sky entirely, apply overlay[a_category] at pct=1.0. Useful for
-	// CI screenshots where we want to validate the overlay/blend/apply pipeline without a live
-	// weather change. Render-thread safe (TryGet only).
+	// Smoke-harness resolve: bypass Sky and apply one category at pct=1.0; TryGet only.
 	[[nodiscard]] ResolvedRuntime ResolveForced(const ResolveBase& a_base,
 		ID3D11ShaderResourceView*  a_baseLutSRV,
 		const WeatherProfiles&     a_profiles,

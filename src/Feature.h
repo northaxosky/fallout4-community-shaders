@@ -33,13 +33,10 @@ namespace cs
 
 		virtual void DrawSettings() {}
 
-		// Reset this feature's persisted settings to in-code defaults. Override + opt-in via
-		// HasResettableSettings() == true to have the menu render the shared Reset button.
-		// Implementations should also clear derived caches and run SaveSettings().
+		// Reset persisted settings and derived caches; opt in via HasResettableSettings().
 		virtual void RestoreDefaultSettings() {}
 
-		// Opt-in to the shared menu Reset button. Default false so features that don't carry
-		// user-tunable settings (e.g. ShaderCatalog, ShaderReplacement diagnostics) stay clean.
+		// Opt-in to the shared Reset button; non-user-tunable features stay clean by default.
 		virtual bool HasResettableSettings() const { return false; }
 
 		// Always-on overlay rendered on top of the game even when the settings menu is closed.
@@ -48,8 +45,7 @@ namespace cs
 		// Fired by cs::Streamline once the D3D11 device exists and the SDK is initialized.
 		virtual void OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* /*device*/) {}
 
-		// ---- Discovery / menu surface (upstream parity) ------------------------------------
-		// Mirrors Skyrim CS Feature.h; no-op defaults so features opt in by overriding.
+		// Discovery/menu defaults mirror Skyrim CS; features opt in by overriding.
 
 		// One-line description shown in the menu under the feature name.
 		virtual std::string GetFeatureSummary() const { return {}; }
@@ -72,36 +68,22 @@ namespace cs
 		// Drawn when a feature failed to load, so the user sees why instead of a silent skip.
 		virtual void DrawFailLoadMessage() {}
 
-		// ---- Cross-feature preset system (Phase 4) -----------------------------------------
-		// Default = opt-out. Features set this true to participate in the global preset library.
+		// Preset defaults are opt-out; features set this true to join the global library.
 		virtual bool ParticipatesInPresets() const { return false; }
 
-		// When true, PresetManager skips this feature during both Stage and Commit. Features should
-		// return true while a smoke marker is forcing values, so a preset apply mid-test doesn't
-		// silently un-override them.
+		// Presets skip test-mode features so smoke marker overrides are not silently clobbered.
 		virtual bool IsInTestMode() const { return false; }
 
-		// Snake_case key used inside [features.<key>] in preset TOMLs. Default = lowercased GetName()
-		// with any character outside [a-z0-9_] replaced by '_'. Multi-word features should override
-		// to add explicit underscores (e.g. "motion_vector_fixes").
+		// Snake_case key for [features.<key>]; multi-word features should override for clarity.
 		virtual std::string GetPresetKey() const;
 
-		// Phase 1 of preset apply. Parse a_subtable into feature-owned scratch state. Do NOT mutate
-		// live settings here. Return true on success; on failure populate a_err and leave scratch
-		// in any state (caller will abort the whole apply).
+		// Phase 1: parse into scratch only; do NOT mutate live state before the caller commits.
 		virtual bool StageFromPreset(const toml::table& /*a_subtable*/,
 									 const PresetApplyContext& /*a_ctx*/,
 									 std::string& /*a_err*/) { return true; }
 
-		// Phase 2 of preset apply. Two sub-phases so PresetManager can keep live state and disk
-		// consistent across a multi-feature apply:
-		//   2a) CommitStagedSwap   - swap scratch into live state ONLY. Must not throw and must
-		//       not touch disk. Caller invokes this on every staged feature first.
-		//   2b) CommitStagedFinalize - persist to this feature's per-feature TOML and run derived
-		//       resource updates (LUT loads, shader rebuilds, dirty flags). May throw; caller logs
-		//       and continues so a single feature's I/O failure doesn't leave the rest unsaved.
-		// Default CommitStaged() runs both back-to-back for the in-place edit case (slider commit,
-		// per-feature DrawSettings) where the cross-feature ordering isn't relevant.
+		// Phase 2a swaps scratch into live state only; no throw, no I/O, all staged features first.
+		// Phase 2b persists TOML and rebuilds derived resources; failures are logged per feature.
 		virtual void CommitStagedSwap() {}
 		virtual void CommitStagedFinalize() {}
 		void CommitStaged()
@@ -110,8 +92,7 @@ namespace cs
 			CommitStagedFinalize();
 		}
 
-		// Emit current live state into a_subtable for inclusion as [features.<key>] in a saved
-		// preset. Implementations may leave a_subtable empty to opt out of the current save.
+		// Emit live state into [features.<key>]; leave empty to opt out of the current save.
 		virtual void ExportToPreset(toml::table& /*a_subtable*/) {}
 
 	private:

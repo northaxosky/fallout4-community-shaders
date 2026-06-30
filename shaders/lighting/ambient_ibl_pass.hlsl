@@ -1,98 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
-// Reconstruction of FO4 corpus blob Shaders011.fxp #3559.
-//
-// Status: REFERENCE - asm-level transcription, structural fidelity high.
-//   This is the FO4 ambient/IBL deferred pixel shader. The 9-tap bilateral
-//   SSSS-style blur block (insns 80-251 in the original asm, 171 of the
-//   263 total instructions) is the largest single segment and is
-//   reconstructed as a [unroll]'d loop over a static kernel array.
-//   CB field semantic names are partially inferred from prior asm
-//   reading; unresolved fields are marked `// TODO: identify`.
-//
-// Canonical mapping:
-//   * Corpus blob:    Shaders011.fxp blob 3559
-//   * Corpus sha1:    7460585eaf76...
-//   * Runtime sha1:   761d41008016... (eid 45345 in FO4_frame5407.rdc) -
-//     mnemonic stream within +/- 2 instructions of corpus blob
-//     (263 vs 265 insns; 44 vs 44 samples; same control flow).
-//   * Sibling blob:   3560 (sha 2b6e36c08aca, 321 insns) - structurally
-//     equivalent. Use 3559 as canonical (matches the captured runtime
-//     PS exactly).
-//   * Source asm:     Shaders011.3559.7460585eaf76.dxbc.asm
-//   * Shape:          ps_5_0, 263 insns, 44 samples, 14 SRVs
-//                     (t1-t7, t8 texturecubearray, t9-t12, t14, t15),
-//                     14 samplers, 3 CBs (CB12[31], CB0[3], CB2[6]),
-//                     fullscreen-quad input, single SV_Target to
-//                     RT 58 = kDiffuseBuffer (R11G11B10_FLOAT).
-//
-// Host dispatch:
-//   inside DrawWorld::DeferredLightsImpl
-//   REL::ID { OG=1108521, NG=2318312, AE=2318312 }
-//   AE RVA 0x021ed4c0   OG RVA 0x028529b0   NG RVA 0x02097e30
-//
-// SSGI integration boundary (high confidence):
-//   The engine applies kSSAO (t9) to the combined ambient+IBL term via
-//   a SINGLE MULTIPLY at the very end of this shader (insns 261-262).
-//   AO is applied AFTER the cubemap reflection, AFTER the bilateral
-//   SSSS blur, AFTER all ambient accumulation - and BEFORE any fog
-//   blending (fog happens in the downstream composite, blob 3539).
-//   Direct light is NEVER multiplied by AO via this path; per-light
-//   PSes that also live in DeferredLightsImpl write to kDiffuseBuffer
-//   additively after this pass.
-//
-// SSGI integration recommendation: replace the AO
-// source itself (write SSGI-modulated value into kSSAO = RT 28 BEFORE
-// this PS dispatches). RegisterPostDeferredPrePass in src/RenderHooks.cpp
-// is positioned to support this.
-//
-// What this shader does (interpreted, structurally validated):
-//   1. Sample gbuffer aux buffers (t3 shading data, t5+t11 precomputed
-//      ambient pair, t7 depth, t10 bilateral source).
-//   2. Compute glossiness factor from t3.x (roughness derivation).
-//   3. Depth-based matrix select via CB12[20..27] - SHARED with the
-//      deferred composite (blob 3539); rows 20..23 far, 24..27 near.
-//   4. IF the material has IBL contribution (t2.y > 0.001961):
-//      - Sample t1 = kGbufferNormal as octahedral-encoded normal.
-//      - Reconstruct view-space position via the selected matrix.
-//      - Build reflection vector; transform to world space via
-//        CB12[12..14] (3x3 rotation matrix).
-//      - Sample t8 IBL cubemap array using reflection dir + array
-//        slice from t2.x + roughness mip.
-//      - Apply luminance desaturation via CB12[30].y * 0.9 weight.
-//   5. Sample t14 (kMainPreAlpha lit-scene reference), blend with the
-//      IBL color using CB0[2].z alpha modulator and CB0[1].x weight.
-//   6. IF the material is skin (t3.z * 255 == 5, within 0.25):
-//      - 9-tap bilateral SSSS blur over t10 (color) weighted by t15
-//        (depth) similarity. Per-tap RGB weights match the
-//        Christensen-Burley SSSS approximation kernel (high red /
-//        medium green / low blue absorption).
-//      - Sample t6 + t12 + add the t4 contribution from the IBL block,
-//        sum into the accumulated ambient/IBL output.
-//   7. Modulate accumulated value by glossiness factor (r0.z) and
-//      t2.y-squared-and-scaled (r1.w).
-//   8. Multiply by t9 (kSSAO) - THE single AO application boundary.
-//   9. Output to o0; o0.w = 1.0.
-//
-// Limits of this reconstruction (be honest):
-//   * CB12 field names are PARTIALLY known
-//     (CB12[12..14] view->world matrix, CB12[20..27] reprojection
-//     matrices, CB12[30].y luminance lerp). Other CB12 indices used
-//     in the dispatch (e.g. CB12[12..14] for world-space rotate) and
-//     CB0/CB2 details are TODO.
-//   * The 9-tap blur kernel weights are the actual asm-extracted RGB
-//     weights; they match Christensen-Burley SSSS but the per-tap
-//     offsets (in CB0[0].xy * scale units) require dispatch-site
-//     cross-read for full semantic naming (the offsets divide by
-//     a depth-derived factor at insn 86).
-//   * No second-pass capture diff - the 9-tap blur is a separable
-//     horizontal pass; a vertical complement should exist somewhere
-//     (likely blob 3559+1 or 3559-1 in the fxp). Not investigated
-//     here.
-
-// ----------------------------------------------------------------------------
-// Constant buffer layouts.
-// ----------------------------------------------------------------------------
+// Reconstruction of FO4 ambient/IBL deferred PS, Shaders011.fxp #3559 (corpus 7460585eaf76..., runtime 761d41008016..., eid 45345).
+// Status: reference asm transcription; 263-insn fullscreen pass writes kDiffuseBuffer (RT 58) with 14 SRVs, 14 samplers, CB12/CB0/CB2.
+// Host: DrawWorld::DeferredLightsImpl, REL::ID { OG=1108521, NG=2318312, AE=2318312 }.
+// SSGI boundary: this shader applies kSSAO once at the final multiply, after IBL and SSSS, before downstream fog.
+// Integration: write SSGI-modulated AO into kSSAO before this dispatch (RegisterPostDeferredPrePass).
+// Flow: sample ambient pair/depth; select Far/Near reproj; reflect into IBL cube array; blend lit scene; apply skin SSSS blur; modulate by gloss and AO.
+// Limits: CB12/CB0/CB2 names are partial; SSSS offsets need dispatch-site confirmation; perpendicular blur pass remains unidentified.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -189,9 +102,7 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_idx5_lit_scene_uv_clamp;
 };
 
-// ----------------------------------------------------------------------------
 // Resource bindings. Semantic roles inferred from asm reading.
-// ----------------------------------------------------------------------------
 
 // t1: kGbufferNormal (RT 20). Octahedral-encoded normal sampled at insn 33;
 //     decoded at insns 34-39.
@@ -265,22 +176,17 @@ SamplerState g_sAmbientProbeB      : register(s12);
 SamplerState g_sLitScene           : register(s14);
 SamplerState g_sBlurDepthRef       : register(s15);
 
-// ----------------------------------------------------------------------------
 // SSSS bilateral-blur kernel.
-//
 // 11 taps total: 1 center + 10 ring along one separable axis at offsets
 // +/- {2.0, 1.28, 0.72, 0.32, 0.08}. The perpendicular pass lives in a
 // sibling shader (not investigated here).
-//
 // Tap offsets are scaled by (CB0[0].xy * base) / depth-derived factor.
 // The 10 ring taps are emitted as 5 paired CB0[0].xyxy MAD operations in
 // the corpus asm. The center weight multiplies skinAux (t4), NOT the
 // center sample of t10 (blurSourceCenter is unused once the kernel
 // begins; the earlier sample is shared with the non-skin branch).
-//
 // Per-tap RGB weights match the Christensen-Burley SSSS approximation
 // (per-wavelength absorption, red diffuses farthest).
-// ----------------------------------------------------------------------------
 
 // 10 symmetric ring offsets (5 negative + 5 positive); index i has weight
 // SSSS_RING_WEIGHTS[i].
@@ -319,9 +225,7 @@ static const float3 SSSS_RING_WEIGHTS[10] =
 // Center tap weight multiplies skinAux (t4), not blurSourceCenter (t10).
 static const float3 SSSS_CENTER_WEIGHT = float3(0.560479, 0.669086, 0.784728);
 
-// ----------------------------------------------------------------------------
 // Entry point.
-// ----------------------------------------------------------------------------
 
 struct PS_INPUT
 {
@@ -337,16 +241,16 @@ PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
 
-    // ----- Insn 0: screen-space UV --------------------------------------
+    // Insn 0: screen-space UV.
     float2 uv = input.position.xy * ScreenSize.xy;
 
-    // ----- Insn 1-5: sample ambient pair + scale ------------------------
+    // Insn 1-5: sample ambient pair + scale.
     float3 shadingData    = g_tGbufferShadingData.SampleLevel(g_sGbufferShadingData, uv, 0).xyw;
     float3 ambientA       = g_tAmbientDiffuseA.SampleLevel(g_sAmbientDiffuseA, uv, 0).xyz;
     float3 ambientB       = g_tAmbientDiffuseB.SampleLevel(g_sAmbientDiffuseB, uv, 0).xyz;
     float3 ambientPairSum = (ambientA + ambientB) * 3.0;
 
-    // ----- Insn 6-20: sample depth, depth-based matrix select -----------
+    // Insn 6-20: sample depth, depth-based matrix select.
     // Corpus uses explicit `if/else` with per-row `mov rN.xyzw, cb12[K]`
     // (insns 7-20). Per-row ternary gives `movc rN, ...` which is the
     // closest fxc gets without [branch] making the issue worse.
@@ -358,10 +262,10 @@ PS_OUTPUT main(PS_INPUT input)
     float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
     float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
-    // ----- Insn 21: bilateral-blur center sample (color) ----------------
+    // Insn 21: bilateral-blur center sample (color).
     float3 blurSourceCenter = g_tBlurSource.SampleLevel(g_sBlurSource, uv, 0).xyz;
 
-    // ----- Insn 22-27: glossiness factor derivation ---------------------
+    // Insn 22-27: glossiness factor derivation.
     //   r0.z = shadingData.y * 3
     //   r1.y = saturate(shadingData.x - 0.3) -> rsq -> rcp -> min(1)
     //   r0.z = r0.z * r1.y
@@ -370,7 +274,7 @@ PS_OUTPUT main(PS_INPUT input)
     float roughInv    = (rough01 > 0.0) ? min(1.0 / sqrt(rough01), 1.0) : 1.0;
     float glossFactor = yTripled * roughInv;
 
-    // ----- Insn 28-31: gbufferMaterial sample + IBL contribution gate ---
+    // Insn 28-31: gbufferMaterial sample + IBL contribution gate.
     //   r1.yw = t2.SampleLevel(...).xy
     //   r1.w = r1.w * r1.w * 50.0
     //   r2.w = (0.001961 < r1.y)
@@ -380,7 +284,7 @@ PS_OUTPUT main(PS_INPUT input)
     float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
     bool  hasIBL = (matGlossOrSpec > 0.001961);
 
-    // ----- Insn 32-67: IBL cubemap reflection block ---------------------
+    // Insn 32-67: IBL cubemap reflection block.
     float3 iblColor = float3(0, 0, 0);
     if (hasIBL)
     {
@@ -447,7 +351,7 @@ PS_OUTPUT main(PS_INPUT input)
         iblColor = float3(0, 0, 0);
     }
 
-    // ----- Insn 71-76: sample t14 lit-scene reference + blend with IBL --
+    // Insn 71-76: sample t14 lit-scene reference + blend with IBL.
     //   uv_clamped = min(uv, cb2[5].xy)
     //   r4 = t14.Sample(uv_clamped)
     //   r2.w = min(r4.w * cb0[2].z, 1.0)
@@ -461,14 +365,14 @@ PS_OUTPUT main(PS_INPUT input)
                                  litAlpha);
     // (Use iblLitBlend in place of "iblColor" from here on; r3.xyz in asm.)
 
-    // ----- Insn 77-256: skin material (id == 5) bilateral blur block ----
+    // Insn 77-256: skin material (id == 5) bilateral blur block.
     //   if (abs(shadingData.z * 255 - 5) < 0.25) { ... 9-tap separable
     //   SSSS blur over t10, weighted by t15 depth similarity ... }
     bool isSkin = (abs(shadingData.z * 255.0 - 5.0) < 0.25);
     float3 ambientAccum;
     if (isSkin)
     {
-        // ----- Insn 80-84: skin block setup ------------------------------
+        // Insn 80-84: skin block setup.
         //   r4 = t4.Sample(uv).xyz
         //   r0.w = (r0.w & 0x3f800000) which masks to 1.0 if r0.w was 1.0;
         //          effectively r0.w = depth>=0.01 ? 1.0 : 0.0, then
@@ -480,14 +384,14 @@ PS_OUTPUT main(PS_INPUT input)
         float  refDepth = g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, uv, 0).y;
         float  centerRef = blurDepthScale * refDepth;
 
-        // ----- Insn 85-87: per-tap offset basis -----------------------
+        // Insn 85-87: per-tap offset basis.
         //   r5.xy = cb0[0].xx * (0.078125, 0.138890) / centerRef
         //   (these are kernel-spread base offsets in UV)
         float2 tapBase = cb0_idx0_screen_scale_and_blur_tolerance.xx
                        * float2(0.078125, 0.138890)
                        / centerRef;
 
-        // ----- Insn 88-249: 10 ring-tap bilateral samples ---------------
+        // Insn 88-249: 10 ring-tap bilateral samples.
         // Each tap follows the same pattern:
         //   tap_uv = uv + tapBase * SSSS_RING_OFFSETS[i]
         //   tap_mat = t3.Sample(tap_uv).x * 255 - 5  // skin id check
@@ -522,11 +426,10 @@ PS_OUTPUT main(PS_INPUT input)
             blurAccum += tapBlended * SSSS_RING_WEIGHTS[i];
         }
 
-        // ----- Center contribution: SSSS_CENTER_WEIGHT * skinAux --------
+        // Center contribution: SSSS_CENTER_WEIGHT * skinAux.
         blurAccum += SSSS_CENTER_WEIGHT * skinAux;
 
-        // ----- Insn 252-256: ambient probe additions + skin accumulator
-        //   r6 = t6.SampleLevel(uv)
+        // Insn 252-256: ambient probe additions + skin accumulator.        //   r6 = t6.SampleLevel(uv)
         //   r0 = t12.SampleLevel(uv) (rgb in .xyw, .z unused)
         //   r0.xyw += r6.xyz + r4.xyz (= iblLitBlend) + blurAccum
         float3 probeA = g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
@@ -541,34 +444,30 @@ PS_OUTPUT main(PS_INPUT input)
         ambientAccum = iblLitBlend;
     }
 
-    // ----- Insn 258-260: modulate by gloss + spec scaling ---------------
+    // Insn 258-260: modulate by gloss + spec scaling.
     //   r0.xyz = depth.zzz * iblLitBlend          (r0.z carries depth from earlier)
     //   r0.xyz = glossSquaredScaled * r0.xyz
     //   r0.xyz = r0.xyz * ambientPairSum + ambientAccum
     float3 modulated = ambientAccum
                      + (glossSquaredScaled * (linearizedDepth * iblLitBlend) * ambientPairSum);
 
-    // ----- Insn 261-262: AO modulation - THE single AO application ------
+    // Insn 261-262: AO modulation - THE single AO application.
     //   r0.w = t9.Sample(uv).y    (kSSAO)
     //   o0.xyz = r0.w * r0.xyz
     float aoFactor = g_tSSAO.Sample(g_sSSAO, uv).y;
     output.color.xyz = aoFactor * modulated;
 
-    // ----- Insn 263: output alpha -------------------------------------
+    // Insn 263: output alpha.
     output.color.w = 1.0;
 
     return output;
 }
 
-// ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
-//
 // fxc round-trip status: see local roundtrip notes for the
 // compile output + insn-count delta against the original.
-//
 // Round-trip result (fxc /T ps_5_0 /O3 /Ni, recompile + asm-mnemonic diff
 // against the original at Shaders011.3559.7460585eaf76.dxbc.asm):
-//
 //   * Resource bindings: EXACT MATCH (14 SRVs + 14 samplers + 3 CBs).
 //   * Signature: EXACT MATCH (fullscreen-quad SV_POSITION-only input,
 //     single SV_Target output).
@@ -583,7 +482,6 @@ PS_OUTPUT main(PS_INPUT input)
 //     missing from the SSSS_BLUR_OFFSETS table; adding it (and a
 //     matching weight entry in SSSS_TAP_WEIGHTS) closes the sample-
 //     count gap. Tracked under §`Shaders011.3559` open items.
-//
 // What is faithfully reconstructed:
 //   * Resource declarations (14 SRVs + 14 samplers + 3 CBs) at exact
 //     slot indices (t1..t12, t14, t15 - matching the corpus blob's
@@ -600,7 +498,6 @@ PS_OUTPUT main(PS_INPUT input)
 //     Burley per-RGB tap weights (kernel weights are asm-exact;
 //     the +1.28 tap is the lone gap).
 //   * SSGI AO-application boundary at the final multiply.
-//
 // What needs cross-read to finalize:
 //   * Add the missing +1.28 ring tap to close the sample-count gap.
 //     Trivial: append (1.28, 1.28) to SSSS_BLUR_OFFSETS + a matching
@@ -616,7 +513,6 @@ PS_OUTPUT main(PS_INPUT input)
 //     the other axis must be a sibling blob in Shaders011.fxp.
 //     Search candidates: blobs near 3559 (3557-3561 range) with same
 //     shape (14 SRVs, 263+/- insns).
-//
 // What is intentionally NOT done in this revision (separate work):
 //   * Permutation diff against indoor / night capture.
 //   * Skyrim CS SSSS analog comparison. Skyrim CS at
@@ -626,4 +522,3 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Confirming the AO-application boundary survives across all
 //     permutations (this PS may have IBL-off / SSSS-off variants
 //     that move the AO application around).
-// ============================================================================

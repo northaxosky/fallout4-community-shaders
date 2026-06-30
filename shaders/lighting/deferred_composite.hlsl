@@ -1,90 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
-// Reconstruction of FO4's deferred-composite pixel shader.
-//
-// Status: REFERENCE - CB12/CB2 field semantics, SRV format/role
-//   mapping, output RT/blend/DSS/RS state, and material-ID encoding
-//   are HIGH-confidence (Fallout4RE sister-repo handoff 2026-05-22,
-//   knowledge/cross-runtime/deferred-composite-*.md). The following
-//   items remain partially inferred or open and are NOT gating
-//   shipping:
-//     - rt_arg 26 (logical t0): numeric RTM cache key is authoritative;
-//       the public engine-name string is unresolved (stale public enum
-//       tagged it `kTAAAccumulation` but shader math + format suggest
-//       albedo).
-//     - t11 producer (logical g_tDirectSpecular): the per-frame writer
-//       RVA is unresolved; the symbol name is the strongest inference
-//       from format + symmetric pairing with t5 and composite math
-//       `albedo * (t5 + t11)`. The handoff catalogs it as "HDR scratch
-//       B; producer writer unresolved" (`cs-deferred-composite-srv-rt-
-//       state.json` confidence=low for the producer field). The role
-//       is plausible but not RE-confirmed.
-//     - Friendly C++ symbol names for the FogState writer functions.
-//       The source struct (BSGraphics::State::fogState) + offsets ARE
-//       resolved; only PDB-level function names are missing.
-//
-// Canonical mapping:
-//   * Corpus blob:    Shaders011.fxp blob 3539
-//   * Corpus sha1:    861504f6dcbe2c1c7c3e5...
-//   * Runtime sha1:   813c9acec23b701bffefb2fc795a633d46a05e18  (eid 45368
-//     in FO4_frame5407.rdc) - mnemonic stream IDENTICAL to corpus blob;
-//     byte-level difference is solely register-allocator choice.
-//   * Source asm:     Shaders011.3539.861504f6dcbe.dxbc.asm
-//   * Shape:          ps_5_0, 90 instructions, 6 samples, 6 SRVs
-//                     (t0, t3, t4, t5, t7, t11), 2 CBs (CB12[47], CB2[3]),
-//                     6 samplers, fullscreen-quad input, single SV_Target
-//                     to RT 172 = kMain (R11G11B10_FLOAT).
-//
-// Host dispatch:
-//   DrawWorld::DeferredComposite
-//   REL::ID { OG=728427, NG=2318313, AE=2318313 }
-//   OG  RVA 0x02855E60   NG RVA 0x0209B100   AE RVA 0x021F0790
-//   Setup site: BSDFCompositeShader::SetupGeometry
-//   OG  RVA 0x028770A0   NG RVA 0x020BA350   AE RVA 0x0220F9E0
-//   This PS is the FIRST follow-up draw to the ambient/IBL pass (eid 45345);
-//   it fires at eid 45368 in the canonical capture.
-//
-// What this shader does (high level, validated against asm + RE handoff):
-//   1. Samples kGbufferMaterial.w from t3 (8-bit UNORM material code) and
-//      linear depth from t7 (.x channel - depth SRV, not stencil).
-//   2. Selects one of two 4x4 reprojection matrices from CB12 based on a
-//      depth threshold (depth <= 0.01 -> Near, else Far). Same per-frame
-//      reproj infrastructure as ambient/IBL (blob 3559), sun-light (3295),
-//      VLS slice (2147).
-//   3. Checks if the material code is in {2, 3} (kMaterialSkin /
-//      kMaterialHair); if it IS, outputs 0 - those pixels are composited
-//      by a different DrawWorld::DeferredComposite sub-pass.
-//   4. Otherwise: combines albedo-base (t0) * (direct-diffuse t5 +
-//      direct-specular t11), then mixes in a secondary color buffer (t4)
-//      via grayscale-saturation lerp, then applies sun-direction lighting
-//      via CB2 sun dir/color/spec-power.
-//   5. Distance- and height-based fog blend using FogState.rangeData /
-//      highLowRangeData / near/far/low/high colors (CB12 [14], [35], and
-//      [41..46]).
-//
-// Output target: RT 172 = kMain (R11G11B10_FLOAT, RGB-only, no stored
-// alpha). Blend: SrcAlpha/InvSrcAlpha Add, write mask RGB (alpha plane
-// does not exist). DSS: depth Greater, read-only, stencil disabled.
-// RS: solid, back-cull, front CCW, viewport 3840x2160, min depth 0.01.
-// Samplers: point min/mag/mip, clamp UVW, compare Never (six aliases of
-// the same sampler object at s0/s3/s4/s5/s7/s11 in the runtime descriptor).
-//
-// Reference: derivative reverse-engineering of Bethesda's compiled shader.
-// Licensed under this repo's terms; the asm-level math derives from
-// D3DDisassemble output of corpus blob 3539. Field semantics and
-// resource bindings sourced from Fallout4RE knowledge/cross-runtime/
-// deferred-composite-{cb-layouts,srv-rt-state,permutations-and-matid,
-// coupling-pbr-roundtrip}.md (commit d178928 .. cb9c400, 2026-05-22).
-
-// ----------------------------------------------------------------------------
-// Constant buffer layouts.
-// CB indices match the corpus blob (CB12[47] = 47 vec4s, CB2[3] = 3 vec4s).
-// CB12 field semantics are HIGH-confidence per
-// `cs-deferred-composite-cb-layouts.json` (writer: BSGraphics::Renderer::
-// SetPerFrameConstants at OG 0x01D11160 / NG 0x01702EF0 / AE 0x0181DBE0).
-// CB2 fields are HIGH-confidence per the BSDFCompositeShader::SetupGeometry
-// upload at OG 0x028770A0 / NG 0x020BA350 / AE 0x0220F9E0.
-// ----------------------------------------------------------------------------
+// Reconstruction of FO4 deferred-composite PS, Shaders011.fxp #3539 (corpus 861504f6dcbe..., runtime 813c9ace..., eid 45368).
+// Status: high-confidence CB/SRV/RT/blend/DSS/RS/material-ID mapping from Fallout4RE deferred-composite handoff; rt_arg 26, t11 producer, and FogState writer names remain open.
+// Host: DrawWorld::DeferredComposite REL::ID { OG=728427, NG=2318313, AE=2318313 }; setup BSDFCompositeShader::SetupGeometry.
+// Flow: sample material/depth; select Far/Near reproj; skip skin/hair; combine albedo*(diffuse+specular), secondary color, sun lighting, and distance/height fog into kMain.
+// Output: RT 172 kMain (R11G11B10_FLOAT), RGB mask, SrcAlpha/InvSrcAlpha blend, depth Greater read-only.
+// Sources: D3DDisassemble corpus math plus Fallout4RE knowledge/cross-runtime/deferred-composite handoff (2026-05-22).
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -221,7 +141,6 @@ cbuffer PerCall_CB2 : register(b2)
     float4 SunColor_and_SpecPower;
 };
 
-// ----------------------------------------------------------------------------
 // Resource bindings.
 // Slot indices match the corpus blob 3539 declarations exactly. The runtime
 // re-encoded variant (rdoc eid 45368) uses sequential slots t0..t5 instead,
@@ -235,7 +154,6 @@ cbuffer PerCall_CB2 : register(b2)
 // the runtime format (R8G8B8A8_SRGB at RT 250) are albedo-like, so the
 // shader-visible name reflects that role; the public engine string for
 // rt_arg 26 is the only remaining open question on this surface.
-// ----------------------------------------------------------------------------
 
 // t0: G-buffer albedo / base-color source. Per rdoc eid 45368 slot 0 =
 //     runtime RT 250, R8G8B8A8_SRGB. Setup wrapper binds rt_arg 26
@@ -292,9 +210,7 @@ SamplerState g_sDirectDiffuse   : register(s5);
 SamplerState g_sDepth           : register(s7);
 SamplerState g_sDirectSpecular  : register(s11);
 
-// ----------------------------------------------------------------------------
 // Entry point.
-// ----------------------------------------------------------------------------
 
 struct PS_INPUT
 {
@@ -346,8 +262,7 @@ PS_OUTPUT main(PS_INPUT input)
 
     if (!isSkinOrHair)
     {
-        // -------- Insn 21-25: sample albedo + direct-light pair, combine. -
-        // Sums the two direct-light accumulation buffers and modulates by
+        // Insn 21-25: sample albedo + direct-light pair, combine.        // Sums the two direct-light accumulation buffers and modulates by
         // base color. This is the "vanilla deferred lit" term for material
         // codes other than skin/hair.
         float3 baseColor    = g_tHdrBaseColor.SampleLevel(g_sBaseColor, uv, 0).xyz;
@@ -356,10 +271,10 @@ PS_OUTPUT main(PS_INPUT input)
         float3 directTotal  = directDiff + directSpec;
         float3 litColor     = baseColor * directTotal;
 
-        // -------- Insn 26: sample secondary color (with mip filtering). --
+        // Insn 26: sample secondary color (with mip filtering).
         float3 secondaryColor = g_tSecondaryColor.Sample(g_sSecondaryColor, uv).xyz;
 
-        // -------- Insn 27-35: reconstruct view-space position. -----------
+        // Insn 27-35: reconstruct view-space position.
         //   uvNDC.x = (uv.x * CB2[0].z)  remapped to [-1, +1]
         //   uvNDC.y = (-uv.y * CB2[0].w + 1) remapped to [-1, +1]
         //   pos4    = (uvNDC.xy, linearizedDepth, 1)
@@ -380,7 +295,7 @@ PS_OUTPUT main(PS_INPUT input)
         posViewH.w = dot(reprojRow3, pos4);
         float3 posView = posViewH.xyz / posViewH.www;
 
-        // -------- Insn 36-37: fog-plane distance. -------------------------
+        // Insn 36-37: fog-plane distance.
         //   r0.w = 1
         //   r0.w = dp4(cb12[14], r0.xyzw)
         //   r0.w = r0.w + cb12[35].z
@@ -390,7 +305,7 @@ PS_OUTPUT main(PS_INPUT input)
         float fogPlaneDistance = dot(ViewToWorld_row2_fog_plane, float4(posView, 1.0));
         fogPlaneDistance += CameraPosAdjust_for_fog_height.z;
 
-        // -------- Insn 38-42: distance-based fog factor. ------------------
+        // Insn 38-42: distance-based fog factor.
         //   r1.x = dot(posView, posView)     // length squared
         //   r1.y = sqrt(r1.x)                 // length
         //   r1.y = r1.y * cb12[41].x - cb12[41].z   // distance ramp
@@ -401,15 +316,14 @@ PS_OUTPUT main(PS_INPUT input)
                              - FogDistanceRamp_and_lowHeightRamp.z;
         float distanceFactor = saturate(distanceRamp);
 
-        // -------- Insn 43-45: dual saturated remap of fog-plane distance. -
-        //   r2.xy = saturate(fogPlaneDistance.xx * cb12[46].xy - cb12[46].zw)
+        // Insn 43-45: dual saturated remap of fog-plane distance.        //   r2.xy = saturate(fogPlaneDistance.xx * cb12[46].xy - cb12[46].zw)
         //   r0.w  = r2.x + distanceFactor * (r2.y - r2.x)   // lerp
         float2 fogRemapPair = saturate(fogPlaneDistance.xx
                                        * FogHeightRampScaleBiasPair.xy
                                        - FogHeightRampScaleBiasPair.zw);
         float  fogBlend     = lerp(fogRemapPair.x, fogRemapPair.y, distanceFactor);
 
-        // -------- Insn 46-52: fog intensity (with threshold + scale). -----
+        // Insn 46-52: fog intensity (with threshold + scale).
         //   if (distanceRamp > 0.75) {
         //     r2.x = (distanceFactor - 0.75) * 4.0
         //     r2.x = r2.x * (1.0 - cb12[43].w) + cb12[43].w
@@ -430,27 +344,27 @@ PS_OUTPUT main(PS_INPUT input)
             fogIntensityClamp = FogNearHighColor_and_clamp.w;
         }
 
-        // -------- Insn 53-55: small-distance escape. ----------------------
+        // Insn 53-55: small-distance escape.
         //   r1.y = (distanceRamp < 0.015) ? distanceFactor*66.666672 : 1.0
         float nearEscape = (distanceRamp < 0.015)
                            ? (distanceFactor * 66.666672)
                            : 1.0;
 
-        // -------- Insn 56-59: log-exp distance shaping. -------------------
+        // Insn 56-59: log-exp distance shaping.
         //   r1.z = log(distanceFactor) * cb12[42].w
         //   r1.z = exp(r1.z)              // = distanceFactor ^ cb12[42].w
         //   r1.z = min(fogIntensityClamp, r1.z)
         float distancePow   = pow(distanceFactor, FogNearLowColor_and_power.w);
         float fogIntensity  = min(fogIntensityClamp, distancePow);
 
-        // -------- Insn 60-61: fog blend weight. ---------------------------
+        // Insn 60-61: fog blend weight.
         //   r1.w = 1.0 - fogBlend          // unfogged weight
         //   r1.w = fogBlend * cb12[44].w + r1.w
         //   (equivalent to: fogBlend * (cb12[44].w - 1) + 1)
         float fogBlendWeight = fogBlend * FogFarLowColor_and_highDensityScale.w
                                + (1.0 - fogBlend);
 
-        // -------- Insn 62-67: fog color (4-corner lerp). ------------------
+        // Insn 62-67: fog color (4-corner lerp).
         //   colorAC  = cb12[42].xyz + fogIntensity * (cb12[44].xyz - cb12[42].xyz)
         //   colorBD  = cb12[43].xyz + fogIntensity * (cb12[45].xyz - cb12[43].xyz)
         //   fogColor = colorAC + fogBlend * (colorBD - colorAC)
@@ -464,10 +378,10 @@ PS_OUTPUT main(PS_INPUT input)
                                  fogIntensity);
         float3 fogColor   = lerp(fogColorAC, fogColorBD, fogBlend);
 
-        // -------- Insn 68: combined fog scalar. ---------------------------
+        // Insn 68: combined fog scalar.
         float combinedFog = fogBlendWeight * fogIntensity;
 
-        // -------- Insn 69-70: normalize view-space dir + scale. -----------
+        // Insn 69-70: normalize view-space dir + scale.
         //   r1.x = rsq(posViewLenSq)
         //   r0.xyz = posView * r1.x          // unit dir
         //   r0.w   = combinedFog * r1.y      // (per asm's r1.xxxy mul,
@@ -475,22 +389,21 @@ PS_OUTPUT main(PS_INPUT input)
         float3 viewDirUnit = posView * rsqrt(posViewLenSq);
         float  fogMixFactor = combinedFog * nearEscape;
 
-        // -------- Insn 71-76: sun-direction lighting. ---------------------
+        // Insn 71-76: sun-direction lighting.
         //   NdotL    = max(dot(viewDirUnit, cb2[1].xyz), 0)
         //   specular = pow(NdotL, cb2[2].w) * cb2[1].w
         float NdotL    = max(dot(viewDirUnit, SunDirection_and_intensity.xyz), 0.0);
         float specular = pow(NdotL, SunColor_and_SpecPower.w)
                          * SunDirection_and_intensity.w;
 
-        // -------- Insn 77-78: sun mixes the FOG color toward the sun color.
-        // Corpus asm:
+        // Insn 77-78: sun mixes the FOG color toward the sun color.        // Corpus asm:
         //   77:   add r1.xyz, -r2.xyzx, cb2[2].xyzx     ; SunColor - fogColor
         //   78:   mad r0.xyz, r0.xxxx, r1.xyzx, r2.xyzx ; fogColor + spec*(...)
         // (Earlier reconstruction used secondaryColor here; that was wrong.)
         float3 sunlitFogColor = lerp(fogColor, SunColor_and_SpecPower.xyz,
                                      specular);
 
-        // -------- Insn 79-83: grayscale-saturation tonemap path. ----------
+        // Insn 79-83: grayscale-saturation tonemap path.
         //   r1.xyz   = litColor * 3 + secondaryColor    // r6 * 3 + r7
         //   gray     = dot(r1.xyz, (1/3, 1/3, 1/3))
         //   r2.xyz   = gray - r0.xyz                    // gray - sunlitFog
@@ -501,13 +414,13 @@ PS_OUTPUT main(PS_INPUT input)
         float  gray            = dot(ambientWeighted, float3(1.0/3.0, 1.0/3.0, 1.0/3.0));
         float3 graySaturated   = sunlitFogColor + gray * (gray.xxx - sunlitFogColor);
 
-        // -------- Insn 80, 84: branch on combinedFog vs clamp threshold. --
+        // Insn 80, 84: branch on combinedFog vs clamp threshold.
         //   r1.w = (fogMixFactor < cb12[43].w)
         //   output.xyz = r1.w ? graySaturated : sunlitFogColor
         bool useGraySaturated = (fogMixFactor < FogNearHighColor_and_clamp.w);
         output.color.xyz = useGraySaturated ? graySaturated : sunlitFogColor;
 
-        // -------- Insn 85: output alpha = fogMixFactor. -------------------
+        // Insn 85: output alpha = fogMixFactor.
         // Output RT is R11G11B10_FLOAT (no stored alpha plane); the
         // SrcAlpha/InvSrcAlpha blend equation uses this as the RGB blend
         // factor at write time. Any post-composite shader sampling .w of
@@ -526,19 +439,15 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
-//
 // This file was authored as a one-pass asm-to-HLSL transcription of corpus
 // blob 3539 (sha1 861504f6dcbe...) and progressively hardened through
 // the Fallout4RE 7-lane render-reconstruction campaign. The current
 // status reflects the 2026-05-22 sister-repo handoff
 // (Workspace/knowledge/cross-runtime/sister-repo-handoff-2026-05-22.md).
-//
 // Corpus diff status (per Fallout4RE artifact
 // Scratch/composite-postfix-2026-05-23.md, re-run AFTER the 2026-05-23
 // `<` -> `<=` near/far threshold fix from commit `e1e6e72`):
-//
 //   * Resource bindings:  EXACT MATCH (6/6, t0..t11; cb12 + cb2).
 //   * Sample call count:  EXACT MATCH (6/6).
 //   * Signature:          EXACT MATCH (SV_POSITION input -> SV_Target0).
@@ -552,7 +461,6 @@ PS_OUTPUT main(PS_INPUT input)
 //                         stream-divergence, 1 constant-value-
 //                         divergence with 2 must-fix examples, 1 cb-
 //                         reference-divergence with 5 examples).
-//
 // What the tool's "must-fix" findings actually are:
 //   The diff tool compares insn-by-insn at positional index. After fxc
 //   reorders the emitted stream (sample call from corpus i=2 hoists to
@@ -569,7 +477,6 @@ PS_OUTPUT main(PS_INPUT input)
 //   (control-flow-graph reconstruction first, then per-node mnemonic
 //   compare) would likely report clean; building that tooling is a
 //   non-trivial Fallout4RE follow-up.
-//
 //   The `<=` fix from commit `e1e6e72` resolved the original
 //   `semantic_miss_detected` verdict (corpus `ge l(0.010000)` at i=3
 //   maps to depth `<= 0.01`; pre-fix reconstruction used `<`). The
@@ -577,13 +484,11 @@ PS_OUTPUT main(PS_INPUT input)
 //   noise, not a known semantic miss. Treat with appropriate
 //   skepticism: a future capture-diff would be the right way to fully
 //   close this out.
-//
 // Local sha-stability baseline:
 //   `scripts/verify-shader-roundtrip.ps1` locks the fxc output SHA1 for
 //   this file in `scripts/shader-roundtrip-baselines.json`. After any
 //   intentional edit, re-baseline with
 //   `verify-shader-roundtrip.ps1 -UpdateBaselines`.
-//
 // What is faithfully reconstructed:
 //   * Resource declarations (6 SRVs, 6 samplers, 2 CBs) at exact slot
 //     indices.
@@ -593,7 +498,6 @@ PS_OUTPUT main(PS_INPUT input)
 //   * All 6 texture sample calls with their LOD modes (5 SampleLevel(0),
 //     1 Sample).
 //   * The dp4 / dp3 / rsq / pow / lerp math is asm-faithful per insn.
-//
 // Open items (do not gate shipping):
 //   * Public engine-name string for `rt_arg 26` (logical t0). The numeric
 //     RTM cache key is authoritative; the BSDFLight surface also binds
@@ -608,4 +512,3 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Permutation diff against a second RenderDoc capture (indoor vs
 //     outdoor) would tighten confidence in the `unk_143E475F6` gating
 //     of t4 and the `0x10000` bit gating of t11.
-// ============================================================================

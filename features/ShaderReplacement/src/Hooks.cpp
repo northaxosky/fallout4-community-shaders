@@ -38,8 +38,7 @@ namespace cs::features::replacement::hooks
 			return hr;
 		}
 
-		// Swap *a_out with the pre-compiled replacement. Net refcount of the engine-bound
-		// shader must end at exactly 1: AddRef our replacement, Release the engine's.
+		// Swap *a_out while preserving a net refcount of 1: AddRef ours, Release engine's.
 		ID3D11PixelShader* mine = entry->compiled_ps.get();
 		cs::features::catalog::Sha1Result catalogSha{};
 		catalogSha.bytes = sha.bytes;

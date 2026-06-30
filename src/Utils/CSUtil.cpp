@@ -37,8 +37,7 @@ namespace cs::util
 			ok    = true;
 		}
 		fclose(f);
-		// Self-delete on successful read: markers are smoke-harness one-shots; lingering files
-		// silently override the next run (and survive crashes between sessions).
+		// Delete successful smoke markers so stale files cannot override later runs.
 		if (ok)
 			std::remove(a_path);
 		return ok;

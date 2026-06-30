@@ -89,9 +89,7 @@ namespace cs::features::catalog::hooks
 			ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11DomainShader**) = nullptr;
 	};
 
-	// Installs the D3D11 vtable detours on the supplied device. Idempotent in practice (each
-	// detour_vfunc replaces the slot and stashes the prior pointer, so calling it twice would
-	// re-chain; caller guards against double-install via _hooksInstalled).
+	// Install D3D11 vtable detours once; repeat calls would re-chain prior thunks.
 	void InstallAll(ID3D11Device* a_device);
 
 	struct RuntimeAttributionStats

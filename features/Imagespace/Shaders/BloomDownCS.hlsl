@@ -1,5 +1,4 @@
-// COD-style bloom downsample (Brian Karis, SIGGRAPH 2014 Call of Duty: Advanced Warfare).
-// First downsample (mip 0 -> 1) applies Karis weighting per bilinear quad to suppress fireflies.
+// COD-style bloom downsample; mip 0 -> 1 uses Karis weights to suppress fireflies.
 
 Texture2D<float4>     SrcMip : register(t0);
 SamplerState          LinearClampSampler : register(s0);

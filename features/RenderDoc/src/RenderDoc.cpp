@@ -30,8 +30,7 @@ namespace cs::features
 
 	namespace
 	{
-		// RenderDoc detours D3D11/DXGI early; Streamline's DLSS-G feature functions then fail to resolve
-		// and the game CTDs when Upscaling tries to fall back mid-flight. Refuse to load if DLSS-G is on.
+		// RenderDoc's early D3D/DXGI detours break DLSS-G fallback; refuse to load when DLSS-G is on.
 		bool DLSSGRequested()
 		{
 			toml::table table;
@@ -141,8 +140,7 @@ namespace cs::features
 			return false;
 		_attemptedLoad = true;
 
-		// Loading renderdoc.dll into a process that already has D3D devices created can crash;
-		// callers should ensure this happens before D3D init (Load / OnPostPostLoad timing).
+		// Loading renderdoc.dll after D3D devices exist can crash; call before D3D init only.
 		_module = LoadLibraryA(_settings.dllPath.c_str());
 		if (!_module) {
 			L->warn("LoadLibrary({}) failed: {:#x}", _settings.dllPath, GetLastError());
@@ -233,8 +231,7 @@ namespace cs::features
 			L->warn("TriggerCapture called while feature disabled");
 			return;
 		}
-		// Never LoadLibrary after D3D init (TryLoadRuntime warns this can crash). The runtime is
-		// only loaded at startup Load(); if it isn't present now, a restart is required.
+		// Never LoadLibrary after D3D init; if startup load failed, a restart is required.
 		if (!_api) {
 			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
 			return;

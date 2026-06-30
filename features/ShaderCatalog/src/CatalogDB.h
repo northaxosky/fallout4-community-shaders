@@ -46,17 +46,16 @@ namespace cs::features::catalog
 	public:
 		static CatalogDB& Get();
 
-		// Initialize: open DB, bootstrap schema, INSERT a session row, start writer thread.
-		// Returns false on any setup failure; feature should treat that as inert.
+		// Open DB, bootstrap schema, insert a session, and start the writer; false leaves feature inert.
 		bool Start(const DbConfig& cfg, const char* engine_runtime, const char* plugin_version);
 
-		// Stop writer, finalize session row, close DB. Idempotent.
+		// Stop writer, finalize session row, and close DB; idempotent.
 		void Stop();
 
 		// Hot-path producer. Lock-free MPSC ring; drops newest on overflow with a counter.
 		void EnqueueShader(const CatalogEntry& e) noexcept;
 
-		// Lightweight stats for the ImGui panel; updated by the writer.
+		// Lightweight ImGui stats updated by the writer.
 		struct Stats
 		{
 			std::uint64_t enqueued = 0;
@@ -82,7 +81,7 @@ namespace cs::features::catalog
 		void PersistAttribution(const CatalogEntry& e);
 		void RefreshCatalogCounts();
 
-		// Module/VA resolution; cached by base address. Writer-thread only.
+		// Module/VA resolution cache; writer-thread only.
 		std::string ResolveModule(std::uintptr_t va);
 		std::string FormatStack(const std::array<void*, 4>& frames);
 
@@ -101,7 +100,7 @@ namespace cs::features::catalog
 		std::condition_variable _wakeWriter;
 		std::mutex _wakeMutex;
 
-		// Bounded MPSC ring for shader entries. Power-of-two capacity for fast index masking.
+		// Bounded MPSC ring; power-of-two capacity enables fast masking.
 		static constexpr std::size_t kCapacity = 4096;
 		struct Cell
 		{
@@ -112,7 +111,7 @@ namespace cs::features::catalog
 		alignas(64) std::atomic<std::uint64_t> _enqPos{ 0 };  // writer-claimed; producer reserves with fetch_add
 		alignas(64) std::atomic<std::uint64_t> _deqPos{ 0 };  // consumer-only
 
-		// Stats. Producer-side counters use relaxed atomics; writer-side counters too.
+		// Stats use relaxed atomics on both producer and writer sides.
 		mutable std::atomic<std::uint64_t> _statEnqueued{ 0 };
 		mutable std::atomic<std::uint64_t> _statDropped{ 0 };
 		mutable std::atomic<std::uint64_t> _statWritten{ 0 };
@@ -120,7 +119,7 @@ namespace cs::features::catalog
 		mutable std::atomic<std::uint64_t> _statTotalPs{ 0 };
 		mutable std::atomic<std::uint64_t> _statAttributionEvents{ 0 };
 
-		// Cached module resolution: base addr -> formatted "Name.exe + 0x<rva>" prefix.
+		// Cached module base -> formatted Name+RVA prefix.
 		std::unordered_map<std::uintptr_t, std::string> _moduleCache;
 	};
 }

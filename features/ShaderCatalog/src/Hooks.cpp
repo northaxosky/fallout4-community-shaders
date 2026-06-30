@@ -20,9 +20,7 @@ namespace cs::features::catalog::hooks
 		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
 		std::atomic<std::uint64_t> g_missedBinds{ 0 };
 
-		// Hot-path body, identical shape for every stage. Inlined into each thunk by the
-		// compiler. Order is: sha1 -> stack capture -> enqueue. Cost dominated by SHA1 over the
-		// bytecode; everything else is ALU + a single atomic CAS in the ring.
+		// Hot path for every stage: SHA1, stack capture, enqueue; cost is mostly bytecode hashing.
 		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len) noexcept
 		{
 			if (RecordingSuppressed())
@@ -142,7 +140,7 @@ namespace cs::features::catalog::hooks
 
 	void InstallAll(ID3D11Device* a_device)
 	{
-		// Slot numbers from d3d11-device-vtable-map.md (Workspace docs); identical across OG/NG/AE.
+		// D3D11 device vtable slots from d3d11-device-vtable-map.md; identical across OG/NG/AE.
 		stl::detour_vfunc<12, CreateVertexShaderHook  >(a_device);
 		stl::detour_vfunc<13, CreateGeometryShaderHook>(a_device);
 		stl::detour_vfunc<15, CreatePixelShaderHook   >(a_device);

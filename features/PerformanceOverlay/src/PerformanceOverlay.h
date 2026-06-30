@@ -24,7 +24,6 @@ namespace cs::features
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
 
-		// Axis: overlay verbosity.
 		enum class Preset : int
 		{
 			Off      = 0,
@@ -46,7 +45,6 @@ namespace cs::features
 			bool   enabled        = false;
 			int    preset         = static_cast<int>(Preset::Standard);
 
-			// Per-section toggles (override the preset bundle).
 			bool   showFps        = true;
 			bool   showFrameTime  = true;
 			bool   showGraph      = true;
@@ -54,28 +52,26 @@ namespace cs::features
 			bool   showVram       = false;
 			bool   showStats      = false;
 
-			// Position. Corner snap by default; free-drag opt-in for power users.
+			// Corner snap by default; free-drag opt-in.
 			int    corner         = static_cast<int>(Corner::TopLeft);
 			bool   freeDrag       = false;
 			float  dragPosX       = 10.0f;
 			float  dragPosY       = 10.0f;
 
-			// Style.
 			float  opacity        = 0.5f;
 			bool   showBorder     = true;
 			float  fontScale      = 1.0f;
 			bool   highContrast   = false;
 
-			// Color thresholds (FPS). Auto-seeded from monitor refresh when autoThresholds=true.
+			// FPS thresholds auto-seed from monitor refresh when enabled.
 			bool   autoThresholds = true;
 			float  fpsGood        = 60.0f;
 			float  fpsWarn        = 30.0f;
 
-			// Tracking.
 			float  updateInterval = 0.5f;
 			int    historySize    = 120;
 
-			// Graph height in pixels at fontScale=1.0; scales with fontScale.
+			// Graph height at fontScale=1.0; scales with fontScale.
 			float  graphHeightPx  = 80.0f;
 		};
 
@@ -105,9 +101,7 @@ namespace cs::features
 		float  _displayedFps      = 0.0f;
 		float  _displayedFrameMs  = 0.0f;
 		int    _displayedFrameMultiplier = 1;
-		// Approach B: backend-reported displayed FPS sampled by delta-ing the env counter
-		// against a wall-clock window. 0 until the first window completes. Always equals
-		// _displayedFps when FG is off.
+		// Backend-reported displayed FPS from env-counter deltas; equals _displayedFps when FG is off.
 		float    _measuredDisplayedFps = 0.0f;
 		uint64_t _lastDisplayedFrameTotal = 0;
 		double   _lastDisplayedSampleSec  = 0.0;

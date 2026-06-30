@@ -38,9 +38,7 @@ public:
 		bool a_reset);
 	void SetEnabled(uint32_t a_enabled);
 
-	// Approach B post-FG FPS source. Returns the frames-presented delta since the previous
-	// call (XeSS-FG's xefg_swapchain_present_status_t::framesPresented is per-last-call,
-	// not cumulative). Returns 0 when telemetry is unavailable or the runtime didn't run.
+	// Returns the per-call XeSS-FG frames-presented delta, or 0 when telemetry is unavailable.
 	uint32_t ConsumeFramesPresented();
 
 	bool initialized = false;

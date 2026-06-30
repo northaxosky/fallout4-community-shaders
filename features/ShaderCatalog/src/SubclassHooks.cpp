@@ -49,9 +49,7 @@ namespace cs::features::catalog::subclass_hooks
 			CatalogDB::Get().EnqueueAttribution(sha, subclassName, techniqueBits);
 		}
 
-		// One hook type per subclass. Tag carries the human-readable subclass label;
-		// `size` is the BSShader vtable slot for ReloadShaders (0x0B). `func` is
-		// initialized when stl::write_vfunc patches the slot and returns the original.
+		// One hook type per subclass; size is ReloadShaders slot 0x0B and func receives the original.
 		template <class Tag>
 		struct ReloadHook
 		{

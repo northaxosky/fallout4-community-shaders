@@ -92,12 +92,11 @@ namespace cs::features::imagespace
 		}
 		auto loaded = LoadLUTFromFile(a_filename);
 		if (loaded.status == LUTLoadStatus::DeviceNotReady) {
-			// Don't poison the cache: D3D wasn't ready yet, the next pass (post-OnD3D11Ready) will retry.
+			// D3D was not ready; keep this miss retryable.
 			return nullptr;
 		}
 		auto* raw = loaded.srv.get();
-		// Other failure modes (missing file, bad dims, etc.) still negative-cache so we don't retry
-		// the disk read every config-apply. Cleared by Clear() (called from the Reload button).
+		// Negative-cache hard failures; Clear() lets Reload retry.
 		entries.emplace(a_filename, std::move(loaded.srv));
 		return raw;
 	}

@@ -98,7 +98,7 @@ namespace cs
 		pref.engineVersion = "1.0.0";
 		pref.projectId = "abcdef0123456789abcdef0123456789";
 
-		// Frame-based tagging is required by FG's slSetTagForFrame but breaks Upscaling's regular slSetTag, so it's gated on DLSS-G.
+		// Frame-based tagging is required for FG but breaks Upscaling tags, so gate it on DLSS-G.
 		pref.flags = sl::PreferenceFlags::eUseManualHooking;
 		const bool wantsFrameTagging = std::any_of(_requestedFeatures.begin(), _requestedFeatures.end(),
 			[](sl::Feature f) { return f == sl::kFeatureDLSS_G; });

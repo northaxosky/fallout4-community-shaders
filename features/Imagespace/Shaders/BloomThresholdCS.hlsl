@@ -17,7 +17,6 @@ void main(uint3 dtid : SV_DispatchThreadID)
     if (px.x >= OutputDimensions.x || px.y >= OutputDimensions.y)
         return;
 
-    // 2x box average of source.
     const int2 src = int2(px) * 2;
     float3 c = 0.25 * (
         InputColor.Load(int3(src + int2(0, 0), 0)).rgb +

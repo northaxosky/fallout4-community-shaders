@@ -72,14 +72,12 @@ bool XeSSFG::LoadLibraries()
 		return false;
 	}
 
-	// Resolve XeLL functions
 	LOAD_FN(xellModule, xellD3D12CreateContext);
 	LOAD_FN(xellModule, xellDestroyContext);
 	LOAD_FN(xellModule, xellSetSleepMode);
 	LOAD_FN(xellModule, xellAddMarkerData);
 	LOAD_FN(xellModule, xellSetLoggingCallback);
 
-	// Resolve XeSS-FG functions
 	LOAD_FN(fgModule, xefgSwapChainD3D12CreateContext);
 	LOAD_FN(fgModule, xefgSwapChainSetLatencyReduction);
 	LOAD_FN(fgModule, xefgSwapChainSetLoggingCallback);
@@ -131,7 +129,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	}
 	L->info("Context created");
 
-	// Wire XeLL to XeSS-FG for latency reduction
+	// Wire XeLL into XeSS-FG for latency reduction.
 	if (pfn_xefgSwapChainSetLatencyReduction) {
 		xefgResult = pfn_xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
 		if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
@@ -139,7 +137,6 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 		}
 	}
 
-	// Configure logging
 	auto debugLogging = FrameGeneration::GetSingleton()->settings.debugLogging;
 	if (debugLogging) {
 		if (pfn_xefgSwapChainSetLoggingCallback) {
@@ -158,7 +155,7 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 		}
 	}
 
-	// Enable XeLL low latency mode
+	// Enable XeLL low-latency mode.
 	if (pfn_xellSetSleepMode) {
 		xell_sleep_params_t sleepParams{};
 		sleepParams.bLowLatencyMode = 1;
@@ -166,7 +163,6 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 		pfn_xellSetSleepMode(xellCtx, &sleepParams);
 	}
 
-	// Query max supported interpolations
 	if (pfn_xefgSwapChainGetProperties) {
 		xefg_swapchain_properties_t props{};
 		if (pfn_xefgSwapChainGetProperties(xefgCtx, &props) == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
@@ -212,7 +208,6 @@ bool XeSSFG::InitSwapChain(ID3D12CommandQueue* a_cmdQueue, IDXGIFactory5* a_fact
 		return false;
 	}
 
-	// Enable frame generation
 	pfn_xefgSwapChainSetEnabled(xefgCtx, 1);
 
 	initialized = true;
@@ -224,8 +219,7 @@ void XeSSFG::BeginFrame(uint32_t a_frameId)
 {
 	if (!xellCtx) return;
 
-	// Skip XeLL sleep - cross-vendor mode caps at 60fps on NVIDIA.
-	// DXGI frame latency waitable handles pacing instead.
+	// Skip XeLL sleep: cross-vendor mode caps NVIDIA at 60fps; DXGI latency handles pacing.
 	if (pfn_xellAddMarkerData)
 		pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
 }
@@ -248,7 +242,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 {
 	if (!xefgCtx || !pfn_xefgSwapChainD3D12TagFrameResource) return;
 
-	// Tag HUDLess color (required for good interpolation quality)
+	// HUDLess color improves interpolation quality.
 	if (a_hudlessColor) {
 		xefg_swapchain_d3d12_resource_data_t colorData{};
 		colorData.type = XEFG_SWAPCHAIN_RES_HUDLESS_COLOR;
@@ -260,7 +254,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, nullptr, a_frameId, &colorData);
 	}
 
-	// Tag motion vectors (valid only now - need copy via command list)
+	// Motion vectors are only valid now, so tag through the command list.
 	if (a_motionVectors) {
 		xefg_swapchain_d3d12_resource_data_t mvData{};
 		mvData.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
@@ -272,7 +266,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &mvData);
 	}
 
-	// Tag depth (valid only now - need copy via command list)
+	// Depth is only valid now, so tag through the command list.
 	if (a_depth) {
 		xefg_swapchain_d3d12_resource_data_t depthData{};
 		depthData.type = XEFG_SWAPCHAIN_RES_DEPTH;
@@ -284,7 +278,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
 	}
 
-	// Tag frame constants - MV scale 1.0 per sample (MVs are in pixel space, normalized)
+	// MV scale stays 1.0 per XeSS-FG sample; MVs are normalized pixel-space.
 	if (pfn_xefgSwapChainTagFrameConstants) {
 		xefg_swapchain_frame_constant_data_t constants{};
 
@@ -303,7 +297,6 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainTagFrameConstants(xefgCtx, a_frameId, &constants);
 	}
 
-	// Set present ID
 	if (pfn_xefgSwapChainSetPresentId)
 		pfn_xefgSwapChainSetPresentId(xefgCtx, a_frameId);
 }

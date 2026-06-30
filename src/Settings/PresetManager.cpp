@@ -142,8 +142,7 @@ namespace cs
 		}
 		_entries = std::move(deduped);
 
-		// Cross-scope shadowing warning: a user `Default.toml` and a builtin `Default.toml` land on
-		// different identities and both survive; bare-name lookups prefer the user copy.
+		// Cross-scope same-name presets both survive; bare-name lookups prefer the user copy.
 		for (std::size_t i = 0; i < _entries.size(); ++i) {
 			for (std::size_t j = i + 1; j < _entries.size(); ++j) {
 				if (_entries[i].builtin != _entries[j].builtin &&
@@ -214,8 +213,7 @@ namespace cs
 
 		PresetApplyContext ctx{ a_meta.builtin };
 
-		// Phase 1: stage. Build (feature, subtable) pairs that match a participating feature.
-		// Skip features in test mode so smoke overrides aren't clobbered.
+		// Phase 1: stage matching participants; skip test mode so smoke overrides survive.
 		struct StageEntry
 		{
 			Feature*           feature;
@@ -258,19 +256,13 @@ namespace cs
 			}
 		}
 
-		// Phase 2a: swap. Walk the staged set and atomically swap scratch into live state across
-		// every feature. Each CommitStagedSwap implementation is no-throw and no-I/O so the live
-		// world ends up uniformly updated. Doing this in a separate pass avoids the case where a
-		// finalize-time exception on feature N would leave features 0..N-1 swapped while N+1.. stay
-		// on their old state.
+		// Phase 2a: no-throw/no-I/O swap all staged scratch into live state before any finalize can fail.
 		for (const auto& s : staged) {
 			s.feature->CommitStagedSwap();
 		}
 
-		// Phase 2b: finalize. Persist each feature to disk and run derived resource refreshes.
-		// Per-feature failures are logged but do NOT abort the rest of the loop. If any feature
-		// fails to persist we still report a non-fatal error to the UI; the live state is
-		// internally consistent, only the on-disk snapshot for the failing feature(s) is stale.
+		// Phase 2b: persist and rebuild derived resources; failures log but do NOT abort other features.
+		// Live state stays consistent even when a failing feature's on-disk snapshot is stale.
 		std::vector<std::string> finalizeErrors;
 		for (const auto& s : staged) {
 			try {
@@ -295,9 +287,7 @@ namespace cs
 			L->warn("Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
 			        "active preset on disk left unchanged so next boot reapplies the previous state",
 				a_meta.name, a_meta.builtin ? "builtin" : "user", staged.size(), finalizeErrors.size());
-			// Surface as much detail as fits onto the screen so the user knows the disk state is
-			// stale for at least one feature. The live world IS the new preset, but we deliberately
-			// skip SaveCoreConfig so a relaunch goes back to the previous known-good preset.
+			// Disk is stale for at least one feature; skip SaveCoreConfig so relaunch restores known-good.
 			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
 				std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted", 5.0);
 			return false;
@@ -362,8 +352,7 @@ namespace cs
 		std::error_code ec;
 		std::filesystem::create_directories(a_path.parent_path(), ec);
 
-		// TOCTOU re-check: if the file appeared between caller-side validation and our write,
-		// the !a_allowOverwrite branch must still refuse rather than silently clobber.
+		// TOCTOU re-check: refuse if the file appeared after caller validation.
 		if (!a_allowOverwrite && std::filesystem::exists(a_path)) {
 			std::ostringstream oss;
 			oss << "preset file appeared between validation and write at " << a_path.string();
@@ -429,9 +418,7 @@ namespace cs
 
 	bool PresetManager::SaveCoreConfig()
 	{
-		// Parse-merge-write so sibling blocks ([info], [features]) owned by Feature.cpp survive.
-		// On parse failure we keep the file untouched rather than regenerating: regeneration would
-		// erase those sibling blocks.
+		// Parse-merge-write preserves Feature.cpp-owned siblings; parse failure leaves the file untouched.
 		toml::table table;
 		const bool fileExists = std::filesystem::exists(kGlobalConfigPath);
 		if (fileExists) {
@@ -472,8 +459,7 @@ namespace cs
 			}
 		}
 
-		// Marker wins over auto-load. Invalid marker = hard reset of activeIdentity, no fallback to
-		// auto-load (deterministic for smoke harnesses).
+		// Marker wins over auto-load; invalid marker clears activeIdentity for deterministic smoke runs.
 		std::string markerPayload;
 		if (ReadTextMarker(std::filesystem::path(kBootMarker), markerPayload)) {
 			const PresetMeta* meta = nullptr;

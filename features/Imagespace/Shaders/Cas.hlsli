@@ -1,14 +1,8 @@
-// Contrast Adaptive Sharpening, math from FidelityFX CAS
-// (extern/FidelityFX-SDK/sdk/include/FidelityFX/gpu/cas/ffx_cas.h, MIT).
-// 3x3 neighborhood, no scaling. Sharpness in [0, 1].
+// Contrast Adaptive Sharpening from FidelityFX CAS (MIT); 3x3 no-scale path, sharpness [0,1].
 
 float3 ApplyCAS(Texture2D<float4> tex, int2 px, float sharpness)
 {
-    // Sample 3x3.
-    //   a b c
-    //   d e f
-    //   g h i
-    // 3x3 cross only; corners (a,c,g,i) are not used in the simple no-better-diagonals path.
+    // Cross-shaped 3x3 CAS neighborhood; corners are unused in this path.
     const float3 b = tex.Load(int3(px + int2( 0, -1), 0)).rgb;
     const float3 d = tex.Load(int3(px + int2(-1,  0), 0)).rgb;
     const float3 e = tex.Load(int3(px,                0)).rgb;
@@ -26,11 +20,7 @@ float3 ApplyCAS(Texture2D<float4> tex, int2 px, float sharpness)
     // peak = -1 / lerp(8, 5, sharpness)  (FFX const1.x)
     const float peak = -1.0 / lerp(8.0, 5.0, saturate(sharpness));
 
-    // Filter shape:
-    //   0 w 0
-    //   w 1 w
-    //   0 w 0
-    // Use green-channel weight (FFX dead-code-removes per-channel).
+    // Cross filter uses green-channel weight; FFX dead-code-removes per-channel weights.
     const float  w = amplify.g * peak;
     const float  invW = 1.0 / (1.0 + 4.0 * w);
 

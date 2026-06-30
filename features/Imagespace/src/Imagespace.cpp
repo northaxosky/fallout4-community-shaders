@@ -52,7 +52,7 @@ namespace cs::features
 
 	namespace
 	{
-		// Copies Imagespace::Settings -> imagespace::ResolveBase (overlayable subset).
+		// Extracts the overlayable settings subset.
 		imagespace::ResolveBase MakeResolveBase(const Imagespace::Settings& a_s)
 		{
 			imagespace::ResolveBase b;
@@ -212,8 +212,7 @@ namespace cs::features
 	};
 	STATIC_ASSERT_ALIGNAS_16(DofCB);
 
-	// Engine DOF: IsActive (vfunc 8) returns false when ours is enabled. All three effects must be disabled or the engine double-DOFs.
-	// `forceWithENB` keeps our pass live alongside ENB for users who want to stack; default behavior still yields to ENB.
+	// Engine DOF vfuncs return false while ours runs; forceWithENB lets users stack with ENB.
 	struct ImageSpaceEffectDepthOfField_IsActive
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
@@ -277,7 +276,7 @@ namespace cs::features
 
 	void Imagespace::OnDataLoaded()
 	{
-		// Engine-integrated smoke mode: honor forcedWeatherFormID by calling Sky::ForceWeather once.
+		// Smoke mode: force the requested engine weather once after data load.
 		if (!forcedWeatherFormID.has_value()) return;
 		auto* sky = RE::Sky::GetSingleton();
 		if (!sky) return;
@@ -300,8 +299,7 @@ namespace cs::features
 			table = toml::table{};
 		}
 
-		// Reset to defaults so missing keys land on struct-defined defaults rather than carrying
-		// stale state from a prior load.
+		// Reset first so missing keys use struct defaults, not stale prior-load state.
 		settings        = Settings{};
 		weatherProfiles = imagespace::WeatherProfiles{};
 
@@ -312,13 +310,12 @@ namespace cs::features
 			imagespace::ParseSettings(*overrideTbl, settings);
 		}
 
-		// LUT preload deferred: if D3D is ready (mid-game reload), do it now; otherwise OnD3D11Ready
-		// will pick it up. Avoids poisoning LUTCache's negative cache during pre-D3D Imagespace::Load().
+		// Defer LUT preload until D3D exists so pre-device loads do not poison the cache.
 		if (cs::util::GetD3DDevice() != nullptr) {
 			ApplyLUTState();
 		}
 
-		// Smoke-harness markers.
+		// Smoke-harness one-shot markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, style_c = 0;
 		const bool opP     = cs::util::ReadMarker(kOpMarker,      op_c);
 		const bool lutP    = cs::util::ReadMarker(kLutMarker,     lut_c);
@@ -330,8 +327,7 @@ namespace cs::features
 		const bool dofP    = cs::util::ReadMarker(kDofMarker,     dof_c);
 		const bool styleP  = cs::util::ReadMarker(kStyleMarker,   style_c);
 
-		// Weather-category marker: single ASCII digit '0'..'7' matching WeatherCategory enum order.
-		// Resolver-only mode: bypasses Sky and forces the chosen category at pct=1.0.
+		// Weather-category marker bypasses Sky and forces enum digit 0..7 at pct=1.0.
 		forcedWeatherCategory.reset();
 		forcedWeatherFormID.reset();
 		char wcat_c = 0;
@@ -340,8 +336,7 @@ namespace cs::features
 			weatherProfiles.enablePerWeatherProfiles = true;
 			L->info("Forced weather category: {}", imagespace::CategoryName(*forcedWeatherCategory));
 		}
-		// FormID marker is a hex string read separately (engine-integrated mode honored at OnDataLoaded).
-		// Markers are smoke-harness one-shots: delete on successful parse so they don't leak across runs.
+		// FormID marker is parsed separately for OnDataLoaded; delete after parse to avoid leakage.
 		try {
 			std::ifstream f(kWeatherFormIDMarker, std::ios::binary);
 			if (f.is_open()) {
@@ -375,7 +370,7 @@ namespace cs::features
 		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || styleP;
 
 		if (testModeActive) {
-			// Reset to deterministic baseline.
+			// Deterministic smoke baseline.
 			settings.enabled            = true;
 			settings.tonemapOperator    = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
 			settings.exposure           = 1.0f;
@@ -405,7 +400,7 @@ namespace cs::features
 				settings.focalLength   = 50.0f;
 				settings.dofQuality    = 2;
 			}
-			// style_c '0' = passthrough baseline; '1'..'4' = style with toggles forced so intensities are observable.
+			// Style smoke: 0 = passthrough; 1..4 force toggles so intensities are visible.
 			if (styleP && style_c >= '1' && style_c <= '4') {
 				ApplyStyle(static_cast<Style>(style_c - '0'));
 				settings.bloomEnable     = true;
@@ -454,9 +449,7 @@ namespace cs::features
 		imagespace::ParseSettings(a_subtable, stagedSettings);
 		imagespace::ParseWeather(a_subtable, stagedWeatherProfiles, /*a_dropOverrides=*/a_ctx.isBuiltin);
 
-		// Builtin presets must not stamp formID mappings into user state; carry the live overrides
-		// across the commit so loading a shipped preset leaves the user's saved formID -> category
-		// map untouched.
+		// Builtin presets must not overwrite the user's formID -> category overrides.
 		if (a_ctx.isBuiltin) {
 			stagedWeatherProfiles.userOverrides = weatherProfiles.userOverrides;
 		}
@@ -496,8 +489,7 @@ namespace cs::features
 		float lensFlareIntensity;
 	};
 
-	// Indexed by Style enum. Custom (idx 0) is a sentinel and never read. Style shape mirrors SSS's:
-	// intensity-only recipe, master toggles (bBloomEnable, bLensFlareEnable, etc.) stay user-controlled.
+	// Style recipes are intensity-only; master toggles remain user-controlled.
 	static constexpr StyleValues kStyles[5] = {
 		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f },                                 // Custom
 		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.50f },                               // Subtle: lighter touches across the board.
@@ -658,7 +650,7 @@ namespace cs::features
 
 		const bool dimChanged = (a_width != pyramidWidth || a_height != pyramidHeight);
 		if (dimChanged || !lumPyramid) {
-			// Pyramid mip 0 = W/2 x H/2 so D3D's auto-mip layout matches our 2x downsample dispatch.
+			// Mip 0 is half-res so D3D's mip layout matches our 2x dispatch chain.
 			const uint32_t baseW  = std::max(1u, a_width  / 2);
 			const uint32_t baseH  = std::max(1u, a_height / 2);
 			const uint32_t maxDim = std::max(baseW, baseH);
@@ -676,7 +668,6 @@ namespace cs::features
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 			lumPyramid = std::make_unique<imagespace::Texture2D>(td);
 
-			// SRV covers the full mip chain.
 			D3D11_SHADER_RESOURCE_VIEW_DESC srvd{};
 			srvd.Format = DXGI_FORMAT_R16_FLOAT;
 			srvd.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
@@ -684,7 +675,7 @@ namespace cs::features
 			srvd.Texture2D.MipLevels = pyramidMipCount;
 			lumPyramid->CreateSRV(srvd);
 
-			// Per-mip views keep pyramid generation SRV/UAV binds to disjoint subresources.
+			// Per-mip views keep pyramid SRV/UAV binds on disjoint subresources.
 			lumPyramidMipSRVs.clear();
 			lumPyramidMipSRVs.resize(pyramidMipCount);
 			lumPyramidUAVs.clear();
@@ -706,7 +697,7 @@ namespace cs::features
 					lumPyramid->resource.get(), &ud, lumPyramidUAVs[i].put()));
 			}
 
-			// Ping-pong exposure scalars (1x1 R32F SRV+UAV).
+			// Ping-pong exposure scalars: 1x1 R32F SRV+UAV.
 			for (auto& ep : expoPingPong) {
 				D3D11_TEXTURE2D_DESC etd{};
 				etd.Width = 1;
@@ -815,7 +806,7 @@ namespace cs::features
 			td.Usage = D3D11_USAGE_DEFAULT;
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 
-			// CoC: half-res, R16F, signed (negative=foreground, positive=background).
+			// Half-res signed CoC: negative foreground, positive background.
 			td.Width = halfW; td.Height = halfH;
 			td.Format = DXGI_FORMAT_R16_FLOAT;
 			dofCoCTex = std::make_unique<imagespace::Texture2D>(td);
@@ -829,7 +820,7 @@ namespace cs::features
 			ud.Format = DXGI_FORMAT_R16_FLOAT;
 			dofCoCTex->CreateUAV(ud);
 
-			// Tile texture: 16x reduction in each dim, R16G16F (min/max CoC for early-out).
+			// 16x tile min/max CoC for blur early-out.
 			const uint32_t tileW = std::max(1u, (halfW + 15) / 16);
 			const uint32_t tileH = std::max(1u, (halfH + 15) / 16);
 			td.Width = tileW; td.Height = tileH;
@@ -840,7 +831,7 @@ namespace cs::features
 			ud.Format = DXGI_FORMAT_R16G16_FLOAT;
 			dofTileTex->CreateUAV(ud);
 
-			// Half-res DOF color: Pass 1 writes source color; Pass 3 writes separated near/far blur outputs.
+			// Half-res color plus separated near/far blur outputs.
 			td.Width = halfW; td.Height = halfH;
 			td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
 			dofHalfColor   = std::make_unique<imagespace::Texture2D>(td);
@@ -875,13 +866,13 @@ namespace cs::features
 	void Imagespace::RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex)
 	{
 		if (!settings.dofEnable) return;
-		// Yield to ENB's DOF rather than double-blurring. The persisted user preference is left intact.
+		// Yield to ENB DOF without changing the saved preference.
 		if (cs::env::IsENBLoaded()) return;
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) return;
 
-		// Need: full-res color SRV (kFrameBuffer) + main depth SRV.
+		// Full-res color SRV plus main depth SRV.
 		auto& fb = rendererData->renderTargets[kRT_FrameBuffer];
 		auto* fbSRV = reinterpret_cast<ID3D11ShaderResourceView*>(fb.srView);
 		if (!fbSRV) return;
@@ -903,11 +894,10 @@ namespace cs::features
 		cs::ComputeScope scope(context);
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Lens");
 
-		// Camera near/far for linearization.
 		const float nearP = cs::engine::GetCameraNear();
 		const float farP  = cs::engine::GetCameraFar();
 
-		// Thin-lens CoC in pixel units; positive = background, negative = foreground. Pre-bake scale/bias so per-pixel coc = CocScale*z + CocBias.
+		// Thin-lens CoC in pixels; pre-bake per-pixel coc = CocScale*z + CocBias.
 		const float cocLimitPx = settings.cocLimitFactor * static_cast<float>(dofHeight);
 		const float aperture   = settings.aperture;
 		const float focalLen   = settings.focalLength;
@@ -936,7 +926,7 @@ namespace cs::features
 		context->CSSetSamplers(0, 1, samplers);
 		context->CSSetConstantBuffers(0, 1, dofCBs);
 
-		// Pass 1: depth → CoC (half-res), color → halfColor (downsample).
+		// Pass 1: depth to half-res CoC, color to halfColor.
 		{
 			ID3D11ShaderResourceView* srvs[2] = { depthSRV, fbSRV };
 			context->CSSetShaderResources(0, 2, srvs);
@@ -952,7 +942,7 @@ namespace cs::features
 			context->CSSetShaderResources(0, 2, clearSRV);
 		}
 
-		// Pass 2: CoC → tile (16x reduction min/max).
+		// Pass 2: CoC to 16x min/max tiles.
 		{
 			ID3D11ShaderResourceView* srvs[1] = { dofCoCTex->srv.get() };
 			context->CSSetShaderResources(0, 1, srvs);
@@ -970,7 +960,7 @@ namespace cs::features
 			context->CSSetShaderResources(0, 1, clearSRV);
 		}
 
-		// Pass 3: half-res CoC-weighted disc blur. Read dofHalfColor + CoC + tiles, write near/far blur outputs.
+		// Pass 3: CoC-weighted half-res blur into near/far outputs.
 		{
 			ID3D11ShaderResourceView* srvs[3] = { dofHalfColor->srv.get(), dofCoCTex->srv.get(), dofTileTex->srv.get() };
 			context->CSSetShaderResources(0, 3, srvs);
@@ -986,7 +976,7 @@ namespace cs::features
 			context->CSSetShaderResources(0, 3, clearSRV);
 		}
 
-		// Pass 4: full-res composite. Far blur blends over sharp, then near blur blends on top.
+		// Pass 4: far blur over sharp, then near blur on top.
 		{
 			ID3D11ShaderResourceView* srvs[4] = { fbSRV, dofNearBlurred->srv.get(), dofFarBlurred->srv.get(), dofCoCTex->srv.get() };
 			context->CSSetShaderResources(0, 4, srvs);
@@ -1033,9 +1023,7 @@ namespace cs::features
 		}
 		auto loaded = imagespace::LoadLUTFromFile(a_filename);
 		if (loaded.status != imagespace::LUTLoadStatus::Ok) {
-			// Loader already logged the specific reason. DeviceNotReady is the only non-warning case
-			// (OnD3D11Ready will retry); leave lutSRV/lutLoadedPath unchanged so the previous LUT
-			// (if any) stays in effect.
+			// Keep the previous LUT live; DeviceNotReady retries in OnD3D11Ready.
 			return false;
 		}
 		lutSRV        = std::move(loaded.srv);
@@ -1051,8 +1039,7 @@ namespace cs::features
 		if (settings.lutEnable && !settings.lutPath.empty()) {
 			LoadLUTFromDisk(settings.lutPath);
 		} else {
-			// LUT disabled or no base path - drop any previously cached LUT so a reset / disable
-			// actually removes the LUT pass from the chain instead of leaving a stale SRV bound.
+			// Drop stale base LUT SRVs when disabled or empty.
 			lutSRV = nullptr;
 			lutLoadedPath.clear();
 		}
@@ -1068,7 +1055,7 @@ namespace cs::features
 	{
 		if (!settings.enabled)
 			return;
-		// Suite-wide ENB yield. Persisted prefs are left intact; the user opts in to stacking via bForceWithENB.
+		// Suite-wide ENB yield; bForceWithENB opts into stacking.
 		static bool enbSuppressLogged = false;
 		if (cs::env::IsENBLoaded() && !settings.forceWithENB) {
 			if (!enbSuppressLogged) {
@@ -1120,8 +1107,7 @@ namespace cs::features
 		if (!EnsureCompositeResources(W, H, fbDesc.Format))
 			return;
 
-		// Resolve per-frame settings under the active weather. Render-thread safe (TryGet only).
-		// Smoke-harness path: forcedWeatherCategory bypasses Sky entirely.
+		// Render-thread resolve; forcedWeatherCategory bypasses Sky.
 		const auto resolveBase   = MakeResolveBase(settings);
 		const auto resolved      = forcedWeatherCategory.has_value()
 			? imagespace::ResolveForced(resolveBase, lutSRV.get(), weatherProfiles,
@@ -1145,7 +1131,7 @@ namespace cs::features
 
 		const bool wantAdaptive = settings.adaptiveExposure;
 		const bool wantBloom    = resolved.bloomEnable;
-		// Yield sun additions to ENB unless the user opted into suite-wide stacking via bForceWithENB.
+		// Yield sun additions to ENB unless suite-wide stacking is enabled.
 		const bool enbYield     = cs::env::IsENBLoaded() && !settings.forceWithENB;
 		const bool wantLensFlare = resolved.lensFlareEnable && !enbYield;
 		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || resolved.vignetteEnable
@@ -1172,8 +1158,7 @@ namespace cs::features
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::ComputeScope scope(context);
 
-		// === 1. Luminance pyramid ===
-		// Mip 0: kFrameBuffer -> half-res log-luma; mip k>0: 2x2 average of previous pyramid mip.
+		// 1. Luminance pyramid: half-res log-luma, then 2x2 reductions.
 		if (wantAdaptive) {
 			auto mipWidth = [W](uint32_t a_mip) { return std::max(1u, W >> (a_mip + 1)); };
 			auto mipHeight = [H](uint32_t a_mip) { return std::max(1u, H >> (a_mip + 1)); };
@@ -1243,13 +1228,11 @@ namespace cs::features
 			}
 		}
 
-		// === 2. Adaptive exposure ===
+		// 2. Adaptive exposure.
 		if (wantAdaptive) {
 			ExposureCB ecb{};
 			auto* timer = RE::BSTimer::GetSingleton();
-			// Clamp dt to [1/240, 0.1]s. Upper bound prevents a single-frame "blinding flash" on
-			// alt-tab / load-screen returns: with TauUp=0.5s, alpha goes from 0.63 (at dt=0.5s) to
-			// 0.18 (at dt=0.1s). Lower bound prevents division-by-zero at extreme high FPS.
+			// Clamp dt to avoid alt-tab flashes and high-FPS divide-by-zero edge cases.
 			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.1f) : (1.0f / 60.0f);
 			ecb.TauUp     = settings.adaptationSpeedUp;
 			ecb.TauDown   = settings.adaptationSpeedDown;
@@ -1276,7 +1259,7 @@ namespace cs::features
 			expoFrameIdx = next;
 		}
 
-		// === 3. Bloom threshold (kFrameBuffer -> bloomChain[0]) ===
+		// 3. Bloom threshold: kFrameBuffer to bloomChain[0].
 		if (wantBloom) {
 			BloomThresholdCB bcb{};
 			bcb.Threshold = resolved.bloomThreshold;
@@ -1303,7 +1286,7 @@ namespace cs::features
 			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
 		}
 
-		// === 4. Bloom downsample chain ===
+		// 4. Bloom downsample chain.
 		if (wantBloom) {
 			ID3D11SamplerState* samplers[1] = { lutSampler.get() };
 			context->CSSetSamplers(0, 1, samplers);
@@ -1337,7 +1320,7 @@ namespace cs::features
 			}
 		}
 
-		// === 5. Bloom upsample (additive accumulate, ping-pongs into bloomScratch) ===
+		// 5. Bloom upsample: additive accumulate into bloomScratch.
 		if (wantBloom) {
 			float mipWeightSum = 0.0f;
 			for (int k = 0; k < settings.bloomMips - 1; ++k)
@@ -1373,7 +1356,7 @@ namespace cs::features
 			}
 		}
 
-		// === 6. Composite ===
+		// 6. Composite.
 		if (wantComposite) {
 			CompositeCB ccb{};
 			const bool wantDirt = resolved.dirtEnable && dirtTexture && dirtTexture->srv;
@@ -1396,7 +1379,7 @@ namespace cs::features
 			ccb.OutputDimensions[0]    = W;
 			ccb.OutputDimensions[1]    = H;
 
-			// Sun NDC X/Y in [-1,1] when on-screen; sentinel 2.0 = sun unavailable / off-screen / behind camera.
+			// Sun NDC [-1,1] when visible; 2.0 sentinel means unavailable/off-screen/behind.
 			float sunUVx = 2.0f, sunUVy = 2.0f;
 			float sunWSx = 0, sunWSy = 0, sunWSz = 0;
 			if (cs::engine::TryGetSunDirectionWS(sunWSx, sunWSy, sunWSz)) {
@@ -1407,7 +1390,7 @@ namespace cs::features
 					DirectX::XMMATRIX vpMat  = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(&vp));
 					DirectX::XMVECTOR clip   = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vpMat));
 					const float wClip = DirectX::XMVectorGetW(clip);
-					// w<=0: sun behind camera. abs<5 caps the divide before it can produce inf-class garbage.
+					// w<=0 is behind camera; abs<5 rejects divide garbage.
 					if (wClip > 0.0f) {
 						const float u = DirectX::XMVectorGetX(clip) / wClip;
 						const float v = DirectX::XMVectorGetY(clip) / wClip;
@@ -1462,10 +1445,10 @@ namespace cs::features
 			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
 		}
 
-		// DOF runs on the post-graded fb; reuses compositeScratch as scratch, then CopyResource back.
+		// DOF runs after grading and reuses compositeScratch.
 		RunDOF(W, H, fbTex2.get());
 
-		// One-shot CPU readback of the EMA scalar to log a probe value.
+		// One-shot EMA scalar probe.
 		static int readbackCountdown = 60;
 		if (wantAdaptive && readbackCountdown > 0) {
 			--readbackCountdown;
@@ -1690,13 +1673,12 @@ namespace cs::features
 		commitDirty();
 		ImGui::EndDisabled();
 
-		// === Per-weather profiles ===
+		// Per-weather profiles.
 		ImGui::Separator();
 		if (ImGui::CollapsingHeader("Per-weather profiles")) {
 			dirty |= ImGui::Checkbox("Enable per-weather profiles", &weatherProfiles.enablePerWeatherProfiles);
 			ImGui::SetItemTooltip("Layers per-category overlays over base settings, blended across the engine's currentWeather/lastWeather transition.");
 
-			// Live status block.
 			const auto sample = imagespace::SampleSky();
 			const auto curCat  = sample.current  ? imagespace::Classify(sample.current,  weatherProfiles.userOverrides) : imagespace::WeatherCategory::kUnknown;
 			const auto prevCat = sample.previous ? imagespace::Classify(sample.previous, weatherProfiles.userOverrides) : imagespace::WeatherCategory::kUnknown;

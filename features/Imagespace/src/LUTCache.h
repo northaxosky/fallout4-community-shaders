@@ -27,28 +27,20 @@ namespace cs::features::imagespace
 		LUTLoadStatus                            status = LUTLoadStatus::Ok;
 	};
 
-	// Shared loader used by both LUTCache and Imagespace::LoadLUTFromDisk. a_filename is the base name
-	// (no extension, no directory prefix). DeviceNotReady is non-terminal: callers should not negative-cache
-	// since the device may become available on a later call.
+	// Shared LUT loader; DeviceNotReady is non-terminal and must not be negative-cached.
 	[[nodiscard]] LUTLoadResult LoadLUTFromFile(std::string_view a_filename);
 
-	// Maps base LUT filename (without ".dds" extension and directory prefix) to an SRV referencing the
-	// loaded 32x32x32 Texture3D. The cache decouples per-frame LUT selection from synchronous DDS I/O:
-	// LUTs are populated via Preload/GetOrLoad on the config-apply path (game thread / ImGui), and the
-	// render thread calls only TryGet which is a pure lookup.
+	// Maps LUT base names to 32x32x32 Texture3D SRVs; render thread uses TryGet only.
 	class LUTCache
 	{
 	public:
-		// CONFIG-APPLY THREAD ONLY. Performs synchronous DDS load on cache miss. Returns nullptr on
-		// failure (missing file, bad dims, device error). Successful loads are cached for the
-		// lifetime of the LUTCache instance. DeviceNotReady misses are NOT cached (caller can retry
-		// once the device is up).
+		// CONFIG-APPLY THREAD ONLY. Synchronously loads misses; DeviceNotReady misses are retryable.
 		ID3D11ShaderResourceView* GetOrLoad(const std::string& a_filename);
 
-		// CONFIG-APPLY THREAD ONLY. Convenience: GetOrLoad each filename and ignore the return value.
+		// CONFIG-APPLY THREAD ONLY. Loads each filename and ignores failures.
 		void Preload(const std::vector<std::string>& a_filenames);
 
-		// RENDER-THREAD SAFE. Pure cache lookup; returns nullptr if a_filename was never preloaded.
+		// RENDER-THREAD SAFE. Pure cache lookup; never loads.
 		[[nodiscard]] ID3D11ShaderResourceView* TryGet(const std::string& a_filename) const;
 
 		void Clear() { entries.clear(); }

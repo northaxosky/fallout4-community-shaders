@@ -30,12 +30,7 @@ namespace cs::features
 
 	namespace
 	{
-		// Detect FO4 runtime variant from the loaded Fallout4.exe file-version. Exact builds:
-		//   1.10.163  -> OG    (pre-Next-Gen)
-		//   1.10.980  -> AE
-		//   1.10.984  -> NG    (Bethesda Next-Gen Update)
-		// Unknown builds default to OG (conservative); the catalog stores the runtime tag
-		// verbatim and the importer can re-categorize if needed.
+		// Runtime tags: 1.10.163=OG, 1.10.980=AE, 1.10.984=NG; unknown builds default to OG.
 		const char* DetectRuntime()
 		{
 			HMODULE m = ::GetModuleHandleW(L"Fallout4.exe");
@@ -99,7 +94,6 @@ namespace cs::features
 		_settings.catalogPath = settings["catalog_path"].value_or(_settings.catalogPath);
 		_settings.symbolicationBudgetUs = static_cast<int>(settings["symbolication_budget_us"].value_or<int64_t>(_settings.symbolicationBudgetUs));
 
-		// Clamp pathological values.
 		if (_settings.writerFlushIntervalMs < 100)    _settings.writerFlushIntervalMs = 100;
 		if (_settings.writerFlushIntervalMs > 60000)  _settings.writerFlushIntervalMs = 60000;
 	}
@@ -138,7 +132,7 @@ namespace cs::features
 
 		catalog::Sha1InitOnce();
 
-		// Patch subclass reload/setup slots before D3D hooks see engine shader creation.
+		// Patch subclass reload/setup slots before D3D shader-creation hooks run.
 		catalog::subclass_hooks::InstallAll();
 
 		catalog::DbConfig dbc;

@@ -15,11 +15,8 @@ namespace cs::engine
 		return singleton.get();
 	}
 
-	// DrawWorld camera near/far globals, per Fallout4RE exports/cs-camera-near-far-globals.json @ 2b79e7c.
-	// Written by DrawWorld::SetNearDistance / SetFarDistance; read at frustum-refresh sites within the same
-	// DrawWorld frame. For per-camera live frustum values prefer NiCamera::viewFrustum.near/far (see
-	// cs-camera-projection-data-path.json); use the globals only for code that mirrors the engine's own
-	// per-frame setup (DLSS/FSR3/Imagespace DOF linearization).
+	// DrawWorld near/far globals, per Fallout4RE cs-camera-near-far-globals.json @ 2b79e7c.
+	// Prefer NiCamera::viewFrustum for live per-camera values; use these only to mirror engine frame setup.
 	[[nodiscard]] inline float GetCameraNear()
 	{
 		static REL::Relocation<float*> near_{ REL::ID({ 57985, 2712882, 2712882 }) };
@@ -32,11 +29,8 @@ namespace cs::engine
 		return *far_.get();
 	}
 
-	// RenderTargetManager dynamic-resolution field offsets, per Fallout4RE
-	// exports/cs-rtm-dynamic-res-offsets.json @ a124812. OG has no 0x30 pad at 0xDC4; NG/AE do.
-	// CommonLibF4 compiles a unified padded layout (widthRatio=0xFB8, heightRatio=0xFBC,
-	// isActivated=0xFD8), which matches NG/AE for width/height but not OG and not isActivated.
-	// Always go through these accessors; do not read the struct members directly.
+	// Dynres offsets, per Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812; OG lacks NG/AE padding.
+	// CommonLibF4's unified layout is wrong for OG and isActivated; always use these accessors.
 	namespace dynres
 	{
 		struct Offsets
@@ -80,12 +74,8 @@ namespace cs::engine
 			*reinterpret_cast<float*>(base + off.heightRatio) = a_height;
 			*reinterpret_cast<bool*>(base + off.isActivated)  = a_activated;
 
-			// Sync CommonLibF4 struct members so existing struct-reader code (e.g. older callers that
-			// haven't migrated to these accessors) stays in sync. On NG/AE this writes the same memory
-			// as widthRatio/heightRatio above; on OG the compiled struct offsets overlap the `create`
-			// function pointer at 0xFB8 (called on window resize per Fallout4RE
-			// exports/cs-rtm-create-field-og.json @ 8256239), so the sync would AV the game on the next
-			// resize. Skip the sync on OG. All consumers must go through cs::engine::dynres::* on OG.
+			// Sync CommonLibF4 fields on NG/AE only; on OG they overlap `create` and crash on resize.
+			// Source: Fallout4RE cs-rtm-create-field-og.json @ 8256239; OG callers must use dynres accessors.
 			if (!REX::FModule::IsRuntimeOG()) {
 				a_rtm->dynamicWidthRatio = a_width;
 				a_rtm->dynamicHeightRatio = a_height;
@@ -137,9 +127,7 @@ namespace cs::engine
 		kMainDepthMips = 39,
 		kSSLRRaytracing = 40,  // Fallout4RE cs-engine-h-rt-enum-extension.json @ 2d73ccf.
 
-		// Full-res (matches frame dim) R8G8B8A8 SAO buffers with full SRV+RTV+UAV bind. Identified via runtime
-		// probe + RenderDoc capture: this trio holds the SAO output that the deferred ambient pass actually
-		// samples (t9). The half-res kSSAO=28 / kSSAOTemp[1-3]=48-50 are compute scratch / blur intermediates.
+		// Full-res SAO buffers sampled by deferred ambient pass (t9), verified by runtime probe + RenderDoc.
 		kSSAOFinal = 45,
 		kSSAOFinalSwap = 46,
 		kSSAOFinalSwap2 = 47,

@@ -14,11 +14,7 @@ namespace cs
 			return;
 		}
 
-		// CS-stage hygiene: clear the slots our dispatches likely touched so the next CS
-		// dispatch starts clean. Width is capped at 8 - widening to the D3D11 maximums
-		// (128 SRVs / 14 CBs / 16 samplers) caused dark boxes at building positions when an
-		// injected compute pass ran, because the engine keeps CS-stage resources bound at high
-		// slots during deferred passes and a full-width null sweep stomps them.
+		// Clear only 8 CS slots; full D3D11-width clears stomp engine high-slot bindings and cause dark boxes.
 		constexpr UINT kClearWidth = 8;
 
 		ID3D11ShaderResourceView*  nullSRVs[kClearWidth]     = {};

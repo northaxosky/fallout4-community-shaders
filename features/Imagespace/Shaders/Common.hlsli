@@ -36,9 +36,7 @@ cbuffer CompositeCB : register(b0)
     float  DirtIntensity;
 };
 
-// Approximation: pure power, not the piecewise sRGB curve. Polynomial form is ~3-5x cheaper
-// than pow(saturate(c), 2.2); max sampled error vs pow is 0.001 / 0.002 over [0,1]. Adequate
-// for grading work where the source/output buffer is sRGB-encoded.
+// Cheap sRGB approximation: ~3-5x faster than pow, max sampled error ~0.002 over [0,1].
 float3 SRGBToLinear(float3 c)
 {
     c = saturate(c);

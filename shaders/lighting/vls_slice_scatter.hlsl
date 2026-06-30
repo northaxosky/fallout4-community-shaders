@@ -1,94 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
-// Reconstruction of FO4 corpus blob Shaders011.fxp #2147.
-//
-// Status: REFERENCE - asm-level transcription, role CONFIRMED.
-//   ROLE CONFIRMED 2026-05-19: this is
-//   a per-slice scatter pixel shader in FO4's Volumetric Light
-//   Scattering (VLS) subsystem - NOT a directional sun-shadow PS as
-//   the initial classifier output suggested. Filename updated
-//   from `directional_sun_light.hlsl` to `vls_slice_scatter.hlsl`
-//   at the same time.
-//
-// Canonical mapping:
-//   * Corpus blob:    Shaders011.fxp blob 2147
-//   * Corpus sha1:    8fb709c2fdf0...
-//   * Runtime sha1:   46b911cb8053bbe1fc529ff4e32c78293c902cb7  (eid 45401
-//     in FO4_frame5407.rdc; 22 dispatches at eids 45401-45623) - mnemonic
-//     stream IDENTICAL to corpus blob (62 insns / 1 sample exact match).
-//   * Source asm:     Shaders011.2147.8fb709c2fdf0.dxbc.asm
-//   * Shape:          ps_5_0, 62 instructions, 1 sample, 1 SRV (t7), 4 CBs
-//                     (CB0[1], CB1[14], CB2[5], CB12[28]), 1 sampler s7
-//                     (mode_default - NOT comparison; this is NOT a PCF
-//                     hardware shadow sampler).
-//
-// Subsystem context (confirmed via Fallout4 PDB symbol-table walk):
-//   * BSShader subclass: BSImagespaceShaderVLSSliceScatterInterp
-//     (high-confidence candidate from a 6-class VLS family; locking
-//     to certainty requires per-subclass SetupTechnique cross-read or
-//     per-BSShader-subclass catalog enrichment)
-//     - OG  RVA 0x028050A0   AE RVA 0x021A18B0   (NG: stripped)
-//   * Effect class:      ImageSpaceEffectVLSLight (per-light variant)
-//     - OG  RVA 0x028D7DF0   AE RVA 0x022562D0   (NG: stripped)
-//   * NVIDIA helper:     NVGodrays::RenderVolume(BSShadowLight*, int)
-//     - OG  RVA 0x02878FE0   AE RVA 0x02211740   (NG: stripped)
-//   * 22-dispatch pattern explanation:
-//     N slices x M shadow lights. Each ImageSpaceEffectVLSLight::Render
-//     iterates per-slice PS dispatches for one shadow-light volume.
-//     Sun + interior windows easily yields 22 dispatches.
-//
-// What this shader does (interpreted from asm, now contextualized):
-//   1. Normalizes a passed-in 3D vector from TEXCOORD0 - this is the
-//      per-vertex view-space ray direction emitted by the VS for each
-//      slice's screen-space rectangle.
-//   2. Samples linear depth (.y of t7) from the gbuffer at the
-//      SV_POSITION-derived UV.
-//   3. Depth-based matrix select on depth<0.01 (CB12[24..27] near vs
-//      [20..23] far). SHARED with the deferred composite (blob 3539);
-//      these are global per-frame reprojection matrices reused across
-//      deferred-pipeline shaders.
-//   4. Reconstructs view-space position; back-projects to a ray.
-//   5. Dot product of the back-projected ray against cb2[4].xyz (the
-//      sun direction in view space).
-//   6. Two smoothstep distance/dot fades using cb1[12].xy and
-//      cb1[13].xy as range parameters. These are the per-light VLS
-//      falloff parameters.
-//   7. Output color = lerp(cb1[1].xyz, cb1[0].xyz, smoothstep_factor)
-//      - this is the canonical sky-color-A / sky-color-B endpoint
-//      lerp for atmospheric scattering.
-//   8. Output alpha = fade * sunDot + cb1[12].z (additive bias).
-//
-// What this shader is NOT:
-//   * NOT a directional sun-shadow PS (no SampleCmp, no PCF sampler,
-//     no shadow-map filtering math).
-//   * NOT a deferred-light BRDF (no normal-N.L pattern, no albedo
-//     read).
-//   * NOT a tonemap composite (no log-luminance conversion).
-//
-// What it IS:
-//   A per-slice scatter pixel shader in the Volumetric Light
-//   Scattering pipeline. Dispatched once per (slice x shadow-light)
-//   pair, accumulating atmospheric scatter contribution into the
-//   main HDR scene buffer (RT 172 = kMain).
-//
-// Limits of this reconstruction (be honest):
-//   * CB0/CB1/CB2/CB12 field NAMES are placeholder; only the indices
-//     used are known. IDA Hex-Rays on ImageSpaceEffectVLSLight::Setup
-//     (AE RVA 0x02255F90, OG RVA also in PDB) would lock semantics.
-//   * The exact BSShader subclass (one of 6 VLS-family candidates) is
-//     the leading candidate: `BSImagespaceShaderVLSSliceScatterInterp`.
-//     Confirming to 100% certainty requires per-subclass
-//     SetupTechnique cross-read OR per-BSShader-subclass catalog enrichment.
-//   * The single SRV t7 is sampled .y of texture - same channel access
-//     pattern as in the composite (blob 3539) where t7 was identified as
-//     the linear-depth gbuffer. Almost certainly the same gbuffer here.
+// Reconstruction of FO4 VLS slice-scatter PS, Shaders011.fxp #2147 (corpus 8fb709c2fdf0..., runtime 46b911cb8053..., eid 45401).
+// Status: reference asm transcription; role confirmed as Volumetric Light Scattering, not directional sun-shadow.
+// Context: likely BSImagespaceShaderVLSSliceScatterInterp / ImageSpaceEffectVLSLight; 22 dispatches = slices x shadow lights.
+// Flow: normalize slice ray, sample depth, select shared Far/Near reproj, back-project view ray, apply two VLS smoothstep fades, output sky-color lerp + alpha bias.
+// Not: no SampleCmp/PCF, no deferred BRDF, no tonemap composite.
+// Limits: CB names are placeholders; exact VLS subclass and t7 producer need dispatch-site cross-read.
 
-// ----------------------------------------------------------------------------
-// Constant buffer layouts. Index-only references; field-level semantics are
-// `// TODO: identify` markers (no-speculation rule).
-// ----------------------------------------------------------------------------
-
-// Shared CB12[0..27] schema (consumed below).
 #include "deferred_contracts.hlsli"
 
 cbuffer PerCall_CB0 : register(b0)
@@ -163,9 +80,7 @@ cbuffer PerFrame_CB12 : register(b12)
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 };
 
-// ----------------------------------------------------------------------------
 // Resource bindings. Single SRV + sampler.
-// ----------------------------------------------------------------------------
 
 // t7: linear-depth-style buffer; .y channel sampled. Same channel access
 //     pattern as the deferred composite (blob 3539)'s t7 = main depth target.
@@ -176,9 +91,7 @@ Texture2D<float4> g_tLinearDepth : register(t7);
 //     shadow PCF sampler).
 SamplerState g_sDepth : register(s7);
 
-// ----------------------------------------------------------------------------
 // Entry point.
-// ----------------------------------------------------------------------------
 
 struct PS_INPUT
 {
@@ -271,7 +184,7 @@ PS_OUTPUT main(PS_INPUT input)
     float fadePrimary   = saturate(1.0 - distNorm);
     float fadeSecondary = saturate(1.0 - dotNorm);
 
-    // -------- First smoothstep using cb1[12] range -------------------------
+    // First smoothstep using cb1[12] range.
     // Insn 41-44: linear remap fadePrimary into [cb1[12].y, cb1[12].x]
     //   rangeA = cb1[12].xw - cb1[12].yz   (vector form of (start, end))
     //   x      = fadePrimary - cb1[12].y
@@ -290,7 +203,7 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 51: o0.w = fadeA * sunDot + cb1[12].z
     output.color.w = fadeA * sunDot + cb1_idx12_fade_range_a.z;
 
-    // -------- Second smoothstep using cb1[13] range ------------------------
+    // Second smoothstep using cb1[13] range.
     // Insn 52-55: linear remap fadeSecondary into [cb1[13].y, cb1[13].x]
     float rangeB = cb1_idx13_fade_range_b.x - cb1_idx13_fade_range_b.y;
     float t1     = saturate((fadeSecondary - cb1_idx13_fade_range_b.y) / rangeB);
@@ -310,16 +223,12 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
-//
 // This file was authored as a one-pass asm-to-HLSL transcription of corpus
 // blob 2147 (sha1 8fb709c2fdf0...) against the disassembly at
 // Shaders011.2147.8fb709c2fdf0.dxbc.asm.
-//
 // dxc round-trip status: see local roundtrip notes for the
 // fxc compile output + insn-count delta against the original.
-//
 // What is faithfully reconstructed:
 //   * Resource declarations (1 SRV, 1 sampler, 4 CBs) at exact slot indices.
 //   * Input signature (SV_POSITION + TEXCOORD0 used; POSITION + TEXCOORD4
@@ -329,7 +238,6 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Single texture sample with .y channel selector preserved.
 //   * Both smoothstep computations (one inverse-smoothstep^0.33 for alpha
 //     fade, one direct smoothstep for color lerp).
-//
 // What needs cross-read to finalize:
 //   * The ROLE of this shader. The original "sun-shadow" label does
 //     not match the asm. Best-guess role from math: god-rays / volumetric
@@ -339,7 +247,6 @@ PS_OUTPUT main(PS_INPUT input)
 //     semantic names (currently `cb<N>_idx<M>_*` placeholders).
 //   * Whether t7 is the same depth gbuffer as in the composite (very
 //     likely) or a different per-light volume depth.
-//
 // What is intentionally NOT done in this revision (separate work):
 //   * Permutation diff against a second RenderDoc capture. The captured
 //     runtime PS at eid 45401 fires 22 times in the deferred chain; if
@@ -354,4 +261,3 @@ PS_OUTPUT main(PS_INPUT input)
 //     accurate label (e.g. `god_rays_sky_sampling.hlsl`). Filename
 //     change deferred until role is confirmed; existing references in
 //     README + analysis docs would all need updating.
-// ============================================================================

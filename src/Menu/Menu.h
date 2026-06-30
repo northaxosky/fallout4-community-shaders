@@ -29,10 +29,7 @@ namespace cs
 		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
 		IDXGIAdapter3* GetDXGIAdapter3();
 
-		// Drop a transient top-center notification onto the screen for `a_durationSec`. Replaces
-		// any toast still visible; the most recent message wins. Thread-safe so features can call
-		// this off the render thread (e.g. settings commits triggered from worker threads). Uses
-		// steady_clock for timestamps so ImGui APIs are never touched from the calling thread.
+		// Thread-safe top-center toast; newest message wins and callers never touch ImGui off-thread.
 		static void ShowToast(std::string a_text, double a_durationSec = 3.0);
 
 	private:
@@ -77,10 +74,7 @@ namespace cs
 		using PFN_Present = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
 		PFN_Present _origPresent = nullptr;
 
-		// Toast state. Single slot; new ShowToast calls replace any in-flight message. The
-		// monotonically increasing _toastSeq guards against a write-during-expiry race where
-		// the render thread would otherwise clear a brand-new toast posted right between its
-		// read-then-clear pair of lock acquisitions.
+		// Single toast slot; _toastSeq prevents expiry cleanup from clearing a just-posted toast.
 		std::mutex                            _toastMutex;
 		std::string                           _toastText;
 		std::chrono::steady_clock::time_point _toastShown{};

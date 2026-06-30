@@ -61,6 +61,7 @@ namespace cs::features
 		static_cast<std::uint64_t>(BSShaderProperty::EShaderPropertyFlag::kLODLandBlend) |
 		static_cast<std::uint64_t>(BSShaderProperty::EShaderPropertyFlag::kMultiTextureLandscape);
 
+	// UI event thread updates this flag; render hooks only need a best-effort loading-menu gate.
 	static std::atomic_bool g_isLoadingMenuOpen{ false };
 
 	class MenuOpenCloseHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -173,13 +174,11 @@ namespace cs::features
 
 	void MotionVectorFixes::Load()
 	{
-		// Fix weapon model world transform getting overwritten during player idle update
+		// Preserve weapon-model previousWorld across player idle updates.
 		stl::detour_thunk<OnIdle_UpdatePlayer>(REL::ID({ 1318162, 2228929, 2228929 }));
 
-		// Fix incorrect previousWorld on animated objects (e.g., doors)
-		// Source: Fallout4RE/Workspace/exports/cs-mvf-setsequenceposition-call.json
-		//   commit @ Fallout4RE 2026-05-23. OG/NG/AE all share offset 0x1D7 at the
-		//   direct E8 call to NiAVObject::Update inside TESObjectREFR::SetSequencePosition.
+		// Source: Fallout4RE cs-mvf-setsequenceposition-call.json, 2026-05-23.
+		// OG/NG/AE offset 0x1D7 is the direct E8 NiAVObject::Update call in SetSequencePosition.
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0x1D7, 0x1D7, 0x1D7 };
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
@@ -192,7 +191,7 @@ namespace cs::features
 			}
 		}
 
-		// Fix vanilla motion vectors not updating in menus or when time is frozen
+		// Keep previousWorld current while menus or frozen time stop vanilla motion-vector updates.
 		stl::write_vfunc<43, BSLightingShaderProperty_GetRenderPasses>(RE::VTABLE::BSLightingShaderProperty[0]);
 
 		L->info("Installed hooks");

@@ -4,8 +4,7 @@
 
 namespace cs::features::catalog::context
 {
-	// Thread-local "who is loading shaders right now" context, pushed by per-subclass
-	// ReloadShaders hooks and read by the device-vtable CreatePixelShader hook.
+	// Thread-local shader-loading context shared by subclass hooks and CreatePixelShader.
 	struct Context
 	{
 		const char*   subclass_name  = nullptr;  // string literal; process-lifetime

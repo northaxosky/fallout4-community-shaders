@@ -160,7 +160,6 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 	auto frameGen = FrameGeneration::GetSingleton();
 
 	if (pSwapChainDesc->Windowed) {
-		// Log GPU info
 		if (pAdapter) {
 			DXGI_ADAPTER_DESC adapterDesc;
 			if (SUCCEEDED(pAdapter->GetDesc(&adapterDesc))) {
@@ -175,13 +174,10 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 		auto fidelityFX = FidelityFX::GetSingleton();
 
-		// User-disabled FG: skip D3D12 proxy entirely so FO4 stays on native D3D11.
-		// Lets RenderDoc captures see the actual game rendering instead of the proxy swap chain.
+		// User-disabled FG keeps FO4 on native D3D11 for clean captures.
 		bool userEnabled = frameGen->settings.frameGenerationMode;
 
-		// RenderDoc.dll injected into the process: force-skip every FG backend so captures see the
-		// real D3D11 swap chain. Otherwise FSR3/XeSS-FG quietly run through the D3D12 proxy and the
-		// user gets empty captures. (DLSS-G already refuses in RenderDoc::Load + Streamline init.)
+		// RenderDoc needs the real D3D11 chain; FSR3/XeSS-FG proxy captures are empty.
 		if (userEnabled && cs::env::IsRenderDocActive()) {
 			L->warn("RenderDoc detected; disabling FrameGeneration for this session to preserve native D3D11 capture path");
 			userEnabled = false;
@@ -265,8 +261,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 					}
 				}
 
-				// DLSS-G: upgrade device+factory via Streamline, then set device
-				// slSetD3DDevice must come before proxy API calls trigger plugin hooks
+				// DLSS-G: upgrade device/factory, then slSetD3DDevice before proxy hooks fire.
 				if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 					auto* core = cs::Streamline::GetSingleton();
 
@@ -336,7 +331,6 @@ void DX11Hooks::Install()
 	auto frameGen = FrameGeneration::GetSingleton();
 	auto fidelityFX = FidelityFX::GetSingleton();
 
-	// Always load FidelityFX as fallback
 	fidelityFX->LoadFFX();
 
 	if (frameGen->settings.frameGenType == 1) {
@@ -352,7 +346,7 @@ void DX11Hooks::Install()
 
 	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
 
-	// Defensive CreateDXGIFactory1 hook only when an FG backend can actually use the proxy. Skip when no backend loaded so non-FG users don't get their dxgi calls intercepted.
+	// Hook CreateDXGIFactory1 only when an FG backend can use the proxy; avoid intercepting non-FG users.
 	if (fidelityFX->module ||
 		(frameGen->settings.frameGenType == 1 && cs::Streamline::GetSingleton()->interposer) ||
 		(frameGen->settings.frameGenType == 2 && XeSSFG::GetSingleton()->fgModule)) {

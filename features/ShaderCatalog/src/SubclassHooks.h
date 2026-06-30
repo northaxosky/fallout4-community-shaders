@@ -4,14 +4,10 @@
 
 namespace cs::features::catalog::subclass_hooks
 {
-	// Patches ReloadShaders (slot 0x0B) and SetupTechnique (slot 0x02) on each known concrete
-	// BSShader subclass. ReloadShaders attributes explicit reloads; SetupTechnique retroactively
-	// attributes runtime rows from the subclass's pixelShaders map.
-	//
+	// Patch ReloadShaders (0x0B) and SetupTechnique (0x02) to attribute explicit and runtime shader rows.
 	// Idempotent: guarded by a process-wide once-flag.
 	void InstallAll();
 
-	// Diagnostics surface for the feature panel.
 	struct InstallStats
 	{
 		unsigned attempted = 0;

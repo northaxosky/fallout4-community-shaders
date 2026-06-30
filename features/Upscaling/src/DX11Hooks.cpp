@@ -86,7 +86,7 @@ namespace DX11Hooks
 		uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 		kHook->info("Module base: {:#x}", moduleBase);
 
-		// Hook BSGraphics::CreateD3DAndSwapChain::D3D11CreateDeviceAndSwapChain to use D3D_FEATURE_LEVEL_11_1
+		// Force BSGraphics::CreateD3DAndSwapChain to request D3D_FEATURE_LEVEL_11_1.
 		kHook->info("Installing IAT hook for D3D11CreateDeviceAndSwapChain");
 		(uintptr_t&)hkD3D11CreateDeviceAndSwapChain::func = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::thunk);
 		kHook->info("IAT hook installed, original func: {:#x}", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::func.get());

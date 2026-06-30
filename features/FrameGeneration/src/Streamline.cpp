@@ -160,11 +160,11 @@ void StreamlineFG::Present(
 
 	auto* core = cs::Streamline::GetSingleton();
 
-	// Set per-frame constants - matrices MUST be unjittered per DLSS-G docs
+	// DLSS-G constants require unjittered matrices.
 	if (core->slSetConstants) {
 		sl::Constants constants{};
 
-		// Derive unjittered projection: inv(viewMat) * viewProjUnjittered
+		// Derive unjittered projection: inv(viewMat) * viewProjUnjittered.
 		sl::float4x4 viewMatrix = toSLMatrix(a_camera.viewMat);
 		sl::float4x4 invView;
 		sl::matrixFullInvert(invView, viewMatrix);

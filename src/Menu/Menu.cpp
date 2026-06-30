@@ -214,8 +214,7 @@ namespace cs
 		if (elapsed >= duration) {
 			std::lock_guard lock(_toastMutex);
 			if (_toastSeq == seq) {
-				// Same toast we just inspected; safe to clear. If a writer raced in between
-				// release and re-acquire, _toastSeq has advanced and we leave the new toast alone.
+				// Only clear the same toast; a raced-in replacement advances _toastSeq.
 				_toastText.clear();
 			}
 			return;
@@ -352,8 +351,7 @@ namespace cs
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-		// Always-on overlays render every frame regardless of _open; features that don't
-		// want one have an empty default override and pay nothing.
+		// Always-on overlays render even when the settings menu is closed.
 		if (_overlayVisible) {
 			for (auto* feat : FeatureManager::Get().GetAll()) {
 				CS_FEATURE_ZONE(feat, "DrawOverlay");
@@ -474,7 +472,6 @@ namespace cs
 		auto& pm = PresetManager::Get();
 		const auto& presets = pm.List();
 
-		// Status line.
 		if (pm.activeIdentity.empty()) {
 			ImGui::TextDisabled("Active: (none)");
 		} else {
@@ -491,7 +488,6 @@ namespace cs
 			ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", pm.lastError.c_str());
 		}
 
-		// Combo.
 		std::string pendingLabel;
 		if (pm.pendingComboIdentity.empty() && !presets.empty()) {
 			pm.pendingComboIdentity = presets.front().identity;
@@ -522,7 +518,6 @@ namespace cs
 		}
 		ImGui::EndDisabled();
 
-		// Action buttons.
 		const auto* pending = pm.FindByIdentity(pm.pendingComboIdentity);
 		const auto* active  = pm.FindByIdentity(pm.activeIdentity);
 		const bool  canSave = active && !active->builtin;
@@ -585,7 +580,6 @@ namespace cs
 		}
 		ImGui::SetItemTooltip("On next plugin load, the active preset is reapplied across every participating feature. Overridden by the .cs_force_preset marker.");
 
-		// Save As modal.
 		if (ImGui::BeginPopupModal("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::InputText("Name", pm.saveAsBuf, sizeof(pm.saveAsBuf));
 			ImGui::TextDisabled("Letters, digits, underscore, hyphen. 1-64 chars.");
@@ -620,7 +614,6 @@ namespace cs
 			ImGui::EndPopup();
 		}
 
-		// Delete confirm modal.
 		if (ImGui::BeginPopupModal("Delete Preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
 			ImGui::Text("Delete preset '%s'?", active ? active->name.c_str() : "");
 			ImGui::TextDisabled("File is removed from disk. This cannot be undone.");
@@ -689,8 +682,7 @@ namespace cs
 		if (m._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-		// Only block the game's wndproc when ImGui is actively using the input (hover or text focus).
-		// Otherwise the game keeps responding to movement keys / mouselook while the menu is open.
+		// Block the game only when ImGui is actively using input; otherwise movement/mouselook continue.
 		if (m._open && m._imguiInited) {
 			const auto& io = ImGui::GetIO();
 			const bool isMouse =

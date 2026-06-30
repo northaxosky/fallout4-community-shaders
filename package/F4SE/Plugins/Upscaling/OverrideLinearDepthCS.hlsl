@@ -15,7 +15,6 @@ float GetScreenDepth(float depth)
 }
 
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
-	// Early exit if dispatch thread is outside texture dimensions
 	if (any(dispatchID.xy >= ScreenSize))
 		return;
 

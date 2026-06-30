@@ -6,10 +6,7 @@
 
 namespace cs::features::replacement::hooks
 {
-	// Second-stage CreatePixelShader vtable detour. Installed AFTER ShaderCatalog's so the
-	// chain is: engine -> our thunk -> ShaderCatalog's thunk -> original. After the original
-	// writes *a_out we sha1 the bytecode, look it up in Registry, and swap *a_out for our
-	// pre-compiled replacement when matched + enabled + compile-ok.
+	// Second-stage CreatePixelShader detour: engine -> replacement -> ShaderCatalog -> original, then swap matched shaders.
 	struct CreatePixelShaderReplaceHook
 	{
 		static HRESULT STDMETHODCALLTYPE thunk(

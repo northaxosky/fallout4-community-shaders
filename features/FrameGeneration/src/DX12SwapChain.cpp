@@ -225,8 +225,7 @@ HRESULT DX12SwapChain::GetBuffer(REFIID riid, void** ppSurface)
 		*ppSurface = nullptr;
 		return DXGI_ERROR_INVALID_CALL;
 	}
-	// QueryInterface returns the requested interface with an owning reference, as the real
-	// IDXGISwapChain::GetBuffer contract requires (callers Release what they get back).
+	// QueryInterface returns the owning ref required by IDXGISwapChain::GetBuffer.
 	return swapChainBufferProxy->resource11->QueryInterface(riid, ppSurface);
 }
 
@@ -236,19 +235,18 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (FrameGeneration::GetSingleton()->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG)
 		FrameGeneration::GetSingleton()->GenerateUIAlphaMask();
 
-	// FSR-like strategy for all framegen modes: present the full proxy backbuffer (scene + UI) and let DLSS-G/FFX warp the entire image as one.
+	// Present full proxy backbuffer (scene + UI); DLSS-G/FFX warp it as one image.
 	d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
 
-	// Wait for D3D11 to finish
+	// Fence D3D11 work before D3D12 reads the shared texture.
 	DX::ThrowIfFailed(d3d11Context->Signal(d3d11Fence.get(), fenceValue));
 	DX::ThrowIfFailed(commandQueue->Wait(d3d12Fence.get(), fenceValue));
 	fenceValue++;
 
-	// New frame, reset
 	DX::ThrowIfFailed(commandAllocators[frameIndex]->Reset());
 	DX::ThrowIfFailed(commandLists[frameIndex]->Reset(commandAllocators[frameIndex].get(), nullptr));
 
-	// Transfer frame to swap chain buffer
+	// Copy the shared D3D11 texture into the D3D12 swap-chain backbuffer.
 	{
 		auto srcResource = swapChainBufferWrapped[frameIndex]->resource.get();
 		auto dstResource = swapChainBuffers[frameIndex].get();
@@ -283,10 +281,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		}
 	}
 
-	// Publish the per-engine-tick multiplier so PerformanceOverlay can show the displayed
-	// FPS. FSR3 and XeSS-FG are 2x only; DLSS-G honours frameGenFrames for MFG (3x/4x on
-	// RTX 50+). Active backend is what's running this frame, not settings.frameGenType
-	// (e.g. DLSS-G fell back to FSR3 at init).
+	// Publish displayed-FPS multiplier; use the active backend after init fallback.
 	int multiplier = 1;
 	if (useFrameGenerationThisFrame) {
 		switch (frameGen->activeFrameGenType) {
@@ -300,11 +295,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	}
 	cs::env::SetDisplayedFrameMultiplier(multiplier);
 
-	// Approach B post-FG FPS source. Query the active backend for the actual frames-
-	// presented delta and accumulate into a monotonic counter; PerformanceOverlay deltas
-	// this against wall time to derive the displayed-FPS readout. Falls back to multiplier
-	// when the backend doesn't report (FSR3 has no safe per-frame counter without
-	// hijacking presentCallback, which would break UI composition).
+	// Accumulate actual presented frames; FSR3 falls back to multiplier to avoid hijacking presentCallback.
 	uint32_t actualFrames = 0;
 	if (useFrameGenerationThisFrame) {
 		switch (frameGen->activeFrameGenType) {
@@ -327,15 +318,14 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
-		// Toggle DLSS-G on/off only on state changes (matches XeSS pattern)
+		// Toggle DLSS-G only on state changes, matching XeSS.
 		static bool dlssgWasEnabled = false;
 		if (useFrameGenerationThisFrame != dlssgWasEnabled) {
 			dlssg->SetEnabled(useFrameGenerationThisFrame);
 			dlssgWasEnabled = useFrameGenerationThisFrame;
 		}
 
-		// Per-frame sequence matching NVIDIA sample ordering:
-		// 1. Frame token → 2. Sleep → 3. Sim markers → 4. Constants+tags → 5. Render markers → 6. Present markers
+		// NVIDIA order: token -> sleep -> sim markers -> constants/tags -> render markers -> present markers.
 		dlssg->AcquireFrameToken();
 
 		if (dlssg->slReflexSleep && dlssg->frameToken)
@@ -344,7 +334,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationStart);
 		dlssg->SetPCLMarker(sl::PCLMarker::eSimulationEnd);
 
-		// Set constants and tag resources
 		static auto gameViewport = cs::engine::GetGraphicsState();
 
 		auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
@@ -386,7 +375,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	} else if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (xess->initialized) {
-			// Toggle enable only on state changes
+			// Toggle XeSS-FG only on state changes.
 			static bool xessFGWasEnabled = false;
 			if (useFrameGenerationThisFrame != xessFGWasEnabled) {
 				xess->SetEnabled(useFrameGenerationThisFrame ? 1 : 0);
@@ -405,23 +394,19 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 
-	// Bracket GPU work submission with render markers
+	// Bracket GPU submission with render markers.
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_START, xessFrameId - 1);
 
 	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
 	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
 
-	// XeSS-FG: tag resources AFTER main command list execute (matching sample flow)
-	// Uses the other command list slot for tagging, submitted before Present
+	// XeSS-FG tags resources after the main list, using the other command-list slot before Present.
 	if (isXeSSFrame && useFrameGenerationThisFrame) {
 		auto xess = XeSSFG::GetSingleton();
 		int tagListIdx = (frameIndex + 1) % 2;
 
-		// NOTE: Resetting commandAllocators[tagListIdx] here without an explicit GPU fence wait.
-		// This is safe in practice because the tag list from the previous frame was submitted
-		// before Present, and the frame latency waitable object + Present sync guarantee the GPU
-		// has retired it by the time we reach this point in the next frame.
+		// Safe without an explicit fence: Present sync retires last frame's tag list before reuse.
 		DX::ThrowIfFailed(commandAllocators[tagListIdx]->Reset());
 		DX::ThrowIfFailed(commandLists[tagListIdx]->Reset(commandAllocators[tagListIdx].get(), nullptr));
 
@@ -432,7 +417,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		jitterNorm.x = -gameViewport->offsetX / 2.0f;
 		jitterNorm.y = gameViewport->offsetY / 2.0f;
 
-		// Frame time delta
 		static LARGE_INTEGER frequency = []() {
 			LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f;
 		}();
@@ -445,7 +429,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			static_cast<float>(frequency.QuadPart) * 1000.0f;
 		lastXeSSFrame = currentTime;
 
-		// Extract row-major view and projection matrices
 		auto& camView = gameViewport->cameraState.camViewData;
 		alignas(16) float viewMat[16];
 		alignas(16) float projMat[16];
@@ -475,11 +458,10 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_END, xessFrameId - 1);
 
-	// Fix FPS cap being e.g. 55 instead of 60
 	if (!frameGen->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
-	// Bracket Present with markers
+	// Bracket Present with latency markers.
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_START, xessFrameId - 1);
 
@@ -488,25 +470,19 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
-	// Wait for previous frame to have finished (handle may be null if swap chain
-	// was created without DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT -
-	// FSR3/DLSS-G wrapped swap chains manage latency internally)
+	// Null when wrapped swap chains manage latency internally.
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
 	if (frameLatencyWaitableObject)
 		WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
 
-	// Update the frame index
 	frameIndex = swapChain->GetCurrentBackBufferIndex();
 
-	// Clear resources
 	frameGen->Reset();
 
-	// Fix game running too fast
 	if (!frameGen->highFPSPhysicsFixLoaded)
 		frameGen->GameFrameLimiter();
 
-	// If VSync is disabled and HighFPSPhysicsFix isn't handling pacing, use our limiter.
-	// Skip when HFPF is loaded - it handles pacing correctly including loading screens.
+	// Use our limiter only when VSync and HighFPSPhysicsFix pacing are both absent.
 	if (SyncInterval == 0 && !frameGen->highFPSPhysicsFixLoaded)
 		frameGen->FrameLimiter(useFrameGenerationThisFrame);
 
@@ -525,17 +501,16 @@ HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
 
 WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device)
 {
-	// Create D3D11 shared texture directly instead of wrapping D3D12 resource
+	// Share D3D11-created textures with D3D12; wrapping D3D12 resources broke interop.
 	a_texDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 	DX::ThrowIfFailed(a_d3d11Device->CreateTexture2D(&a_texDesc, nullptr, &resource11));
 
-	// Get shared handle from D3D11 texture to enable D3D12 access
+	// CreateSharedHandle transfers cross-API access; close the HANDLE after OpenSharedHandle.
 	winrt::com_ptr<IDXGIResource1> dxgiResource;
 	DX::ThrowIfFailed(resource11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 	HANDLE sharedHandle = nullptr;
 	DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr, &sharedHandle));
 
-	// Open the shared D3D11 texture as D3D12 resource
 	DX::ThrowIfFailed(a_d3d12Device->OpenSharedHandle(sharedHandle, IID_PPV_ARGS(resource.put())));
 	CloseHandle(sharedHandle);
 
@@ -713,8 +688,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(UINT BufferCount, UI
 	HRESULT hr = swapChain->ResizeBuffers(BufferCount, Width, Height, NewFormat, SwapChainFlags);
 	if (SUCCEEDED(hr)) {
 		dx12.RecreateWrappedBuffers();
-		// Reflex state is bound to the swap chain; underlying rebuild can drop it. Cheap
-		// to re-push; no-op when DLSS-G isn't active.
+		// Reflex state is swap-chain-bound; rebuilds can drop it, so re-push cheaply.
 		StreamlineFG::GetSingleton()->ReapplyReflexOptions();
 	}
 	return hr;

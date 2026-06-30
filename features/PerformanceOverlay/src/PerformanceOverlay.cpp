@@ -196,7 +196,7 @@ namespace cs::features
 	{
 		if (_refreshKnown)
 			return;
-		// Pull current monitor's refresh rate via EnumDisplaySettings; cheap and accurate enough.
+		// EnumDisplaySettings gives a cheap, accurate-enough refresh rate.
 		DEVMODEW devMode{};
 		devMode.dmSize = sizeof(devMode);
 		if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &devMode)) {
@@ -218,8 +218,7 @@ namespace cs::features
 
 		if (_lastFrameQpc > 0.0) {
 			const float dtMs = static_cast<float>((nowSec - _lastFrameQpc) * 1000.0);
-			// Discard implausibly large deltas (overlay was hidden, app paused, etc.) so the
-			// stats and graph don't get poisoned by a single multi-second sample.
+			// Drop multi-second samples from pauses/hidden overlay so stats stay sane.
 			if (dtMs > 0.0f && dtMs < 1000.0f) {
 				_curFrameMs = dtMs;
 				_frameTimesMs[_frameTimesHead] = dtMs;
@@ -232,16 +231,13 @@ namespace cs::features
 		}
 		_lastFrameQpc = nowSec;
 
-		// Recompute the displayed FPS / frame time at the user-controlled cadence so the readout
-		// doesn't flicker per frame. Stats are recomputed on the same cadence; cheap given history<=600.
+		// Recompute readouts at the user cadence to avoid per-frame flicker.
 		if (nowSec - _lastDisplayUpdate >= settings.updateInterval) {
 			_displayedFrameMs = _curFrameMs;
 			_displayedFps = _curFrameMs > 0.0f ? 1000.0f / _curFrameMs : 0.0f;
 			_displayedFrameMultiplier = displayedFrameMultiplier;
 
-			// Approach B: derive measured displayed FPS from the env counter delta over the
-			// elapsed wall-clock window. Falls back to estimate (engine FPS * multiplier)
-			// when the window is too short, the counter hasn't advanced, or FG is off.
+			// Prefer backend frame-counter deltas; fall back to engine FPS * multiplier.
 			const uint64_t totalNow = cs::env::GetDisplayedFrameTotal();
 			const double windowSec = nowSec - _lastDisplayedSampleSec;
 			if (_lastDisplayedSampleSec > 0.0 && windowSec > 0.0 && totalNow >= _lastDisplayedFrameTotal) {
@@ -282,7 +278,7 @@ namespace cs::features
 		}
 		_stddevMs = static_cast<float>(std::sqrt(sqDiff / sorted.size()));
 
-		// Lows = high frame-time tail (slow frames).
+		// Lows report the slow-frame tail.
 		const auto idx99   = static_cast<size_t>(sorted.size() * 99 / 100);
 		const auto idx999  = static_cast<size_t>(sorted.size() * 999 / 1000);
 		_onePctLowMs       = sorted[std::min(idx99,  sorted.size() - 1)];
@@ -305,7 +301,7 @@ namespace cs::features
 		ImGuiIO& io = ImGui::GetIO();
 		const ImVec2 viewport = io.DisplaySize;
 
-		// Position: 4-corner snap by default, free-drag opt-in.
+		// Corner snap by default; free-drag opt-in.
 		ImGuiCond posCond = ImGuiCond_Always;
 		ImVec2 pos{ 10.0f, 10.0f };
 		ImVec2 pivot{ 0.0f, 0.0f };
@@ -349,8 +345,7 @@ namespace cs::features
 
 			ImGui::SetWindowFontScale(settings.fontScale);
 
-			// Color helpers; high-contrast forces white regardless of FPS coding.
-			const ImVec4 colGood  = ImVec4(0.20f, 1.00f, 0.20f, 1.00f);
+				const ImVec4 colGood  = ImVec4(0.20f, 1.00f, 0.20f, 1.00f);
 			const ImVec4 colWarn  = ImVec4(1.00f, 0.85f, 0.20f, 1.00f);
 			const ImVec4 colBad   = ImVec4(1.00f, 0.30f, 0.30f, 1.00f);
 			const ImVec4 colHi    = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
@@ -450,7 +445,7 @@ namespace cs::features
 			}
 
 			if (settings.showGraph && _frameTimesCount > 1) {
-				// Re-sort window for ImGui::PlotLines requires linear array; reorder ringbuf into a temp.
+				// PlotLines needs a linear array, so reorder the ring buffer into temp storage.
 				static std::array<float, kHistoryCapacity> linear{};
 				static std::array<float, kHistoryCapacity> linearPostFg{};
 				for (int i = 0; i < _frameTimesCount; ++i) {
@@ -461,18 +456,13 @@ namespace cs::features
 				}
 				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
 				const float maxReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
-				// Stable Y-max via stddev: avg + 3 sigma covers the spike envelope of the last
-				// recompute window without snapping to a single outlier. Floor with refresh*2 and
-				// the slowest reference line so the chart stays readable on a quiet frame stream.
+				// Y-max uses avg + 3 sigma plus floors so one outlier does not dominate.
 				const float ymaxTarget = std::max({
 					refreshMs * 2.0f,
 					_avgMs + 3.0f * _stddevMs,
 					maxReferenceMs * 1.05f,
 				});
-				// EMA toward the target so a single spike doesn't bounce the axis. RecomputeStats
-				// runs at settings.updateInterval (0.5s default), so 0.25 reaches ~95% within ~6
-				// recomputes (~3s) - tight enough to follow real shifts, loose enough to ignore
-				// transient hitches.
+				// Smooth Y-max over ~6 recomputes so real shifts track while hitches fade.
 				if (_graphYMaxSmoothed <= 0.0f) {
 					_graphYMaxSmoothed = ymaxTarget;
 				} else {
@@ -481,7 +471,7 @@ namespace cs::features
 				const float ymax = _graphYMaxSmoothed;
 				ImGui::TextUnformatted("Frame Time");
 				if (settings.showEstimatedPostFGFrameTime) {
-					// Compact legend: small colored chip + short label, tooltip carries the detail.
+					// Compact legend; tooltip carries the detail.
 					ImGui::SameLine();
 					const float lineH = ImGui::GetTextLineHeight();
 					const float chipW = lineH * 0.6f;
@@ -504,7 +494,7 @@ namespace cs::features
 			}
 
 			if (settings.showStats) {
-				// Stacked because the single-line form would exceed the pinned width.
+				// Stack stats to fit the pinned width.
 				ImGui::Text("avg     %5.2f ms", _avgMs);
 				ImGui::Text("1%% low  %5.2f ms", _onePctLowMs);
 				ImGui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
@@ -530,8 +520,7 @@ namespace cs::features
 				}
 			}
 		}
-		// Reset font scale outside the if(Begin()) block so a collapsed/clipped window
-		// doesn't leave the global scale stuck. End() must always pair with Begin().
+		// Reset font scale even when Begin() returns false; End() still pairs with Begin().
 		ImGui::SetWindowFontScale(1.0f);
 		ImGui::End();
 	}
@@ -552,8 +541,7 @@ namespace cs::features
 
 		ImGui::Separator();
 
-		// Sliders save on commit (mouse-release / keyboard-deactivate) rather than per-tick;
-		// otherwise a slider drag triggers a full TOML rewrite on the render thread every frame.
+		// Save sliders on commit only; per-tick TOML rewrites would hit the render thread.
 		auto sliderCommit = [] { return ImGui::IsItemDeactivatedAfterEdit(); };
 
 		static const char* presetLabels[] = { "Off", "Minimal", "Standard", "Verbose" };
@@ -635,7 +623,7 @@ namespace cs::features
 				settings.historySize    = std::clamp(settings.historySize, 30, kHistoryCapacity);
 				settings.graphHeightPx  = std::clamp(settings.graphHeightPx, 40.0f, 160.0f);
 				if (historyCommitted) {
-					// History buffer changes shape; reset rather than reinterpret stale data.
+					// Reset after history-size changes instead of reinterpreting stale samples.
 					_frameTimesHead = 0;
 					_frameTimesCount = 0;
 				}

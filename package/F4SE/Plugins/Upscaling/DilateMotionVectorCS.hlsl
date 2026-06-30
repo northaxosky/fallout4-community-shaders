@@ -16,13 +16,12 @@ float GetScreenDepth(float depth)
 }
 
 [numthreads(8, 8, 1)] void main(uint3 dispatchID : SV_DispatchThreadID) {
-	// Early exit if dispatch thread is outside texture dimensions
 	if (any(dispatchID.xy >= RenderSize))
 		return;
 
 	float depth = DepthInput[dispatchID.xy];
 
-	// Find longest motion vector in 5x5 neighborhood
+	// Dilate using the longest closer motion vector in a 5x5 neighborhood.
 	float2 motionVector = MotionVectorInput[dispatchID.xy];
 	float2 longestMotionVector = motionVector;
 	float maxMotionLengthSq = dot(motionVector, motionVector);
@@ -34,17 +33,14 @@ float GetScreenDepth(float depth)
 			for (int x = -2; x <= 2; x++) {
 				int2 samplePos = int2(dispatchID.xy) + int2(x, y);
 
-				// Skip samples outside texture dimensions
 				if (any(samplePos < 0) || any(samplePos >= int2(RenderSize)))
 					continue;
 
 				float neighborDepth = DepthInput[samplePos];
 
-				// Take neighbor if it's longer AND closer
 				if (neighborDepth < depth){
 					float2 neighborMotionVector = MotionVectorInput[samplePos];
 
-					// Square motion vector for length
 					float motionLengthSq = dot(neighborMotionVector, neighborMotionVector);
 
 					if (motionLengthSq > maxMotionLengthSq){

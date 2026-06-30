@@ -1,5 +1,4 @@
-// 9-tap tent upsample with additive accumulate: SrcMip is the smaller already-blurred mip.
-// Iterating coarsest-to-finest builds the stacked-mip bloom shape.
+// Additive 9-tap tent upsample; coarsest-to-finest builds stacked-mip bloom.
 
 Texture2D<float4>     SrcMip : register(t0);
 Texture2D<float4>     DstReadMip : register(t1);

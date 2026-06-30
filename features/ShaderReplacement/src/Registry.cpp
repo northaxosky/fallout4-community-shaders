@@ -15,9 +15,7 @@ namespace cs::features::replacement
 	{
 		auto* L = cs::log::Get("cs.feature.shaderreplacement");
 
-		// Minimal JSON parser tailored to the manifest schema. Supports objects, arrays,
-		// strings (with simple escapes), numbers, true/false/null. Comments are NOT supported;
-		// keep the manifest strict-JSON to stay portable with external tooling.
+		// Minimal strict-JSON parser for the manifest schema; no comments, for tooling portability.
 		struct JsonValue;
 		using JsonObject = std::vector<std::pair<std::string, std::shared_ptr<JsonValue>>>;
 		using JsonArray  = std::vector<std::shared_ptr<JsonValue>>;
@@ -331,7 +329,7 @@ namespace cs::features::replacement
 			}
 			std::filesystem::path hlsl_path;
 			std::filesystem::path rel(hlsl_rel);
-			// Strip leading "Shaders/" or "Shaders\\" so the path resolves under shaders_root.
+			// Strip a leading Shaders/ prefix so paths resolve under shaders_root.
 			std::string rel_str = rel.generic_string();
 			if (rel_str.rfind("Shaders/", 0) == 0)
 				rel = std::filesystem::path(rel_str.substr(std::string("Shaders/").size()));

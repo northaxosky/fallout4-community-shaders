@@ -130,8 +130,7 @@ namespace cs::features
 		void RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex);
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);
 		bool LoadLUTFromDisk(const std::string& a_filename);
-		// Loads the base LUT (if configured) and preloads referenced overlay LUTs. Safe to call after
-		// each settings/preset change and from OnD3D11Ready; no-op if device isn't ready yet.
+		// Applies base/overlay LUT state after settings changes or D3D11 init; no-op pre-device.
 		void ApplyLUTState();
 
 		// Composite (tonemap + LUT + bloom-add + lens).
@@ -194,7 +193,7 @@ namespace cs::features
 		bool                                        firstFireLogged = false;
 		bool                                        testModeActive  = false;
 
-		// Preset staging scratch. Filled by StageFromPreset, swapped into live state by CommitStaged.
+		// Preset staging scratch; Stage fills it, Commit swaps it into live state.
 		Settings                    stagedSettings;
 		imagespace::WeatherProfiles stagedWeatherProfiles;
 		bool                        stagedValid = false;

@@ -1,94 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-//
-// FO4 deferred G-buffer prepass PS (standard-opaque permutation).
-//
-// This is the geometry pass that fills the G-buffer: albedo, octahedral-
-// encoded normal, packed material data, motion vector. It is consumed by
-// the downstream deferred lights + ambient/IBL + composite chain whose
-// reconstructions live in sibling files in this directory.
-//
-// Status: REFERENCE - asm-level transcription with structural fidelity high.
-//
-// Canonical mapping:
-//   * Runtime sha1:   c493970c042c... (eid 13220 in FO4_frame9483.rdc)
-//   * Source asm:     runtime/deferred-prepass/asm/
-//                     eid-13220.c493970c042c.0000.c493970c042c.dxbc.asm
-//   * Source dxbc:    runtime/deferred-prepass/
-//                     eid-13220.c493970c042c.dxbc (3212 bytes)
-//   * Shape:          ps_5_0, 80 instructions, 3 samples, 3 SRVs
-//                     (t0/t1/t2 texture2d), 3 default samplers (s0/s1/s2),
-//                     2 CBs (CB12[41] per-frame, CB2[6] per-call), 6
-//                     input registers, 6 MRT outputs.
-//
-// Host dispatch (cross-runtime confirmed):
-//   DrawWorld::DeferredPrePass  (REL::IDs {OG=56596, NG=2318301, AE=2318301})
-//     OG RVA 0x02850cb0   NG RVA 0x02096710   AE RVA 0x021ebda0
-//
-// Permutation axes (NOT reconstructed here; documented for future work):
-//   FO4_frame9483.rdc has 8 captured deferred-prepass PSes across eids
-//   13220, 13241, 13259, 13507, 13546, 31244, 38343, 39205. The
-//   eid 13220 capture is the standard opaque material variant; the
-//   others are skin / hair / decal / projected / two-sided / alpha-test
-//   permutations selected by BSShader subclass + technique bits. They
-//   share resource binding shape but differ in body math (sampling
-//   extra detail maps, alpha-test discard, etc.). TODO: reconstruct
-//   per-permutation; the standard-opaque is the most common dispatch.
-//
-// What this PS does (interpreted from asm):
-//   1. Sample albedo from t0 (insn 6), tinted by an alpha-fade modulator
-//      (cb2[4].w sentinel + cb12[30].x global fade). Output to o0.xyz;
-//      o0.w is the alpha test constant cb2[0].z.
-//   2. Decode an octahedral-encoded geometry normal (v3, the per-vertex
-//      world-space normal interpolant) and combine with a tangent-space
-//      perturbation sampled from t1.zw (normal map). Re-encode as 2-channel
-//      octahedral (hemisphere flag derived from is_front_face v6.x and
-//      raw .z sign). Output to o1.xy.
-//   3. Sample material data from t2 (insn 12): .x = smoothness/roughness,
-//      .y = a packed mask. Pack into o2:
-//        o2.x = material-id flag (0 or 1.0 = 0x3f800000) from a couple
-//               of cb2[4]/cb12[30] tests (insns 45-49).
-//        o2.y = cb2[5].x * (1/255)  - the material-id index (0..255 byte
-//               packed as float in [0,1]).
-//        o2.z = sqrt(scaled_smoothness * 0.02)  - the gloss term encoded
-//               for the lighting pass.
-//        o2.w = saturate(cb2[5].x)  - the material-id flag (binary).
-//   4. Compute a scrolling UV pair into o3.xy (cb2[0].xy + cb2[2].xy
-//      delta * global fade + is-positive sentinel). o3.z = cb2[0].w * 0.01
-//      (the linearized depth factor for the secondary buffer), o3.w = 1.
-//   5. Pass cb2[1].xyz straight through to o4 (specular tint / emissive).
-//   6. Compute the motion vector. v4.xyzw is the current-frame world
-//      position; v5.xyzw is the previous-frame world position (both with
-//      .w = u/v offset, .xyz = position). Project each through CB12's
-//      curr-frame W2C (cb12[37..40]) and prev-frame W2C (cb12[31..34])
-//      respectively; perspective-divide; emit the screen-space delta
-//      scaled by (-0.5, 0.5) into o5.xy.
-//
-// MRT semantic mapping (from lighting-shader-id-map.json + render-subsystem
-// export):
-//   o0 -> kGbufferAlbedo (R8G8B8A8_SRGB)        : albedo + alpha
-//   o1 -> kGbufferNormal (R16G16_UNORM)         : octahedral normal
-//   o2 -> kGbufferMaterial (R8G8B8A8_UNORM)     : material packed data
-//   o3 -> auxiliary G-buffer (likely emissive / scroll-UV)
-//   o4 -> auxiliary G-buffer (specular tint passthrough)
-//   o5 -> kGbufferMotionVector (R16G16_FLOAT)   : screen-space MV
-//
-// Limits of this reconstruction (be honest):
-//   * cb2 field semantics are inferred; cb2[4].w == -1.0 sentinel and
-//     cb12[30].x global fade are runtime-evidenced but the exact lookup
-//     name on the C++ side (e.g. AlphaFadeAmount) needs IDA cross-read of
-//     DrawWorld::DeferredPrePass.
-//   * cb12[31..34] vs cb12[37..40] split: only rows 0/1/3 are read for
-//     each (the .z / row-2 are not, because NDC z is unused for MV).
-//     This is consistent with the engine packing only the rows it needs.
-//     Rows 33, 35, 36, 39 of CB12 are NOT read by this PS - they likely
-//     hold the unused .z rows + jitter parameters used by sibling passes.
-//   * The 8 prepass permutations beyond standard-opaque (skin / hair /
-//     decal / projected / two-sided / alpha-test ...) are documented
-//     above but not reconstructed.
-
-// ----------------------------------------------------------------------------
-// Constant buffer layouts.
-// ----------------------------------------------------------------------------
+// FO4 deferred G-buffer prepass PS, standard opaque variant (runtime c493970c042c..., eid 13220 in FO4_frame9483).
+// Status: reference asm transcription; host DrawWorld::DeferredPrePass REL::ID {OG=56596, NG=2318301, AE=2318301}.
+// Flow: sample albedo/normal/material, apply alpha fade, encode octa normal, pack material data, pass aux/spec tint, and emit motion vectors from prev/current W2C rows.
+// MRTs: albedo, oct normal, material data, aux A/B, and motion vectors.
+// Limits: cb2 semantics and alternate skin/hair/decal/projected/two-sided/alpha-test permutations need cross-read.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -161,9 +76,7 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_idx5_material_id_and_smoothness;
 };
 
-// ----------------------------------------------------------------------------
 // Resource bindings. Slot indices match the asm dcls exactly.
-// ----------------------------------------------------------------------------
 
 // t0: albedo / diffuse texture. Sampled at insn 6 by the per-pixel UV
 //     packed as (v4.w, v5.w).
@@ -181,9 +94,7 @@ SamplerState g_sAlbedo   : register(s0);
 SamplerState g_sNormalMap : register(s1);
 SamplerState g_sMaterial : register(s2);
 
-// ----------------------------------------------------------------------------
 // Entry point.
-// ----------------------------------------------------------------------------
 
 struct PS_INPUT
 {
@@ -336,13 +247,10 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// ============================================================================
 // Round-trip notes (for the reviewer + future maintainer)
-//
 // fxc /T ps_5_0 /O3 /E main against this file produces a dxbc whose
 // insn count is compared against the original 80 insns of eid 13220.
 // See local roundtrip notes for the up-to-date compile delta.
-//
 // What is faithfully reconstructed (structurally):
 //   * Resource declarations (3 SRVs + 3 default samplers + 2 CBs) at
 //     exact slot indices.
@@ -354,7 +262,6 @@ PS_OUTPUT main(PS_INPUT input)
 //     packing, scrolling UV pair via cb12[30] lerp, current/previous
 //     frame world-to-clip dp4 + perspective-divide for motion vector.
 //   * cb12[31..34] / cb12[37..40] only-rows-0-1-3 read pattern.
-//
 // What is approximated rather than asm-exact:
 //   * The `min(NdotN, 0)` axisZ clamp at insn 20 is intentional in the
 //     asm (the world-space normal must point INTO the surface for the
@@ -363,11 +270,9 @@ PS_OUTPUT main(PS_INPUT input)
 //   * cb2[4].w == -1.0 sentinel is implemented as `==` equality on
 //     float; fxc may emit it as a bitwise compare. The semantic is
 //     identical.
-//
 // What needs cross-read to finalize:
 //   * cb12[30].x exact semantic (likely AlphaFadeAmount or LOD fade).
 //   * cb2[4] / cb2[5] field-by-field semantics. The runtime
 //     CB2 dump from a single dispatch could lock the names; queued.
 //   * Per-permutation deltas vs eids 13241/13259/13507/13546/31244/
 //     38343/39205 (skin/hair/decal/projected/two-sided/alpha-test).
-// ============================================================================

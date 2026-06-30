@@ -103,9 +103,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// SetUseDynamicResolutionViewportAsDefaultViewport(This, a_setting) call site after the post-
-		// upscale buffer has been written. Order: engine func first, then Imagespace post-FX, then
-		// FG HUDLess capture (so FG captures post-imagespace pixels for DLSS-G judder-free output).
+		// Post-upscale viewport reset: engine first, then Imagespace post-FX, then FG captures post-FX pixels.
 		struct PostDynResViewport_Hook
 		{
 			static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_setting)
@@ -122,10 +120,8 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// REL::ID 587723 / 2318322 / 2318322 + offsets { 0xE1, 0xC5, 0xC5 } is the single E8 call site
-		// inside the deferred composite epilogue that re-arms the engine viewport after Upscaling has
-		// written the post-upscale buffer. Confirmed shared by Imagespace + FrameGeneration; cited in
-		// Fallout4RE/Workspace/exports/cs-render-subsystem-ids.json (commit 20e5fa7).
+		// REL::ID 587723/2318322/2318322 + {0xE1,0xC5,0xC5}: shared viewport re-arm E8 after upscaling.
+		// Source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 		void EnsurePostDynResViewportInstalled()
 		{
 			if (g_postDynResViewportInstalled) {
@@ -173,13 +169,8 @@ namespace cs::engine
 		}
 	}
 
-	// REL::ID confirmed in Fallout4RE/exports/cs-render-subsystem-ids.json
-	// (commit 20e5fa7) by anchor-walking from DrawWorld::Render_PreUI:
-	//   OG  RVA 0x02855E60  AL id 728427
-	//   NG  RVA 0x0209B100  AL id 2318313
-	//   AE  RVA 0x021F0790  AL id 2318313
-	// NG and AE compile to identical body sizes / instruction counts /
-	// mnemonic hashes, and Address Library v2 issues the same id in both.
+	// REL::ID 728427/2318313/2318313 from DrawWorld::Render_PreUI anchor walk; NG/AE bodies match.
+	// Source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
 		AssertRegistrationAllowed();
