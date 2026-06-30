@@ -10,6 +10,10 @@ namespace cs
 
 	ComputeScope::~ComputeScope() noexcept
 	{
+		if (!_ctx) {
+			return;
+		}
+
 		// CS-stage hygiene: clear the slots our dispatches likely touched so the next CS
 		// dispatch starts clean. Width is capped at 8 - widening to the D3D11 maximums
 		// (128 SRVs / 14 CBs / 16 samplers) caused dark boxes at building positions when an

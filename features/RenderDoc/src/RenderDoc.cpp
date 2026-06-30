@@ -152,12 +152,16 @@ namespace cs::features
 		auto getApi = reinterpret_cast<pRENDERDOC_GetAPI>(GetProcAddress(_module, "RENDERDOC_GetAPI"));
 		if (!getApi) {
 			L->warn("RENDERDOC_GetAPI not found in {}", _settings.dllPath);
+			FreeLibrary(_module);
+			_module = nullptr;
 			return false;
 		}
 
 		if (getApi(eRENDERDOC_API_Version_1_7_0, reinterpret_cast<void**>(&_api)) != 1 || !_api) {
 			L->warn("RENDERDOC_GetAPI returned no API for version 1.7.0");
 			_api = nullptr;
+			FreeLibrary(_module);
+			_module = nullptr;
 			return false;
 		}
 
@@ -229,7 +233,13 @@ namespace cs::features
 			L->warn("TriggerCapture called while feature disabled");
 			return;
 		}
-		if (!TryLoadRuntime() || !CheckCaptureDiskSpace())
+		// Never LoadLibrary after D3D init (TryLoadRuntime warns this can crash). The runtime is
+		// only loaded at startup Load(); if it isn't present now, a restart is required.
+		if (!_api) {
+			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
+			return;
+		}
+		if (!CheckCaptureDiskSpace())
 			return;
 
 		_api->TriggerCapture();
@@ -244,7 +254,11 @@ namespace cs::features
 			L->warn("TriggerMultiFrameCapture called while feature disabled");
 			return;
 		}
-		if (!TryLoadRuntime() || !CheckCaptureDiskSpace())
+		if (!_api) {
+			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
+			return;
+		}
+		if (!CheckCaptureDiskSpace())
 			return;
 		if (!_api->TriggerMultiFrameCapture) {
 			L->warn("RenderDoc runtime does not expose TriggerMultiFrameCapture");

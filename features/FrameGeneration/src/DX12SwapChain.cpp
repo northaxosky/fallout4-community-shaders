@@ -219,10 +219,15 @@ void DX12SwapChain::SetD3D11DeviceContext(ID3D11DeviceContext* a_d3d11Context)
 	DX::ThrowIfFailed(a_d3d11Context->QueryInterface(IID_PPV_ARGS(&d3d11Context)));
 }
 
-HRESULT DX12SwapChain::GetBuffer(void** ppSurface)
+HRESULT DX12SwapChain::GetBuffer(REFIID riid, void** ppSurface)
 {
-	*ppSurface = swapChainBufferProxy->resource11;
-	return S_OK;
+	if (!swapChainBufferProxy || !swapChainBufferProxy->resource11) {
+		*ppSurface = nullptr;
+		return DXGI_ERROR_INVALID_CALL;
+	}
+	// QueryInterface returns the requested interface with an owning reference, as the real
+	// IDXGISwapChain::GetBuffer contract requires (callers Release what they get back).
+	return swapChainBufferProxy->resource11->QueryInterface(riid, ppSurface);
 }
 
 HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
@@ -511,8 +516,8 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
 {
 	if (uuid == __uuidof(ID3D11Device) || uuid == __uuidof(ID3D11Device1) || uuid == __uuidof(ID3D11Device2) || uuid == __uuidof(ID3D11Device3) || uuid == __uuidof(ID3D11Device4) || uuid == __uuidof(ID3D11Device5)) {
-		*ppDevice = d3d11Device.get();
-		return S_OK;
+		// QueryInterface AddRefs; IDXGIDeviceSubObject::GetDevice transfers an owning reference.
+		return d3d11Device->QueryInterface(uuid, ppDevice);
 	}
 
 	return swapChain->GetDevice(uuid, ppDevice);
@@ -681,9 +686,9 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::Present(UINT SyncInterval, UINT Fl
 	return DX12SwapChain::GetSingleton()->Present(SyncInterval, Flags);
 }
 
-HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBuffer(UINT, _In_ REFIID, _COM_Outptr_ void** ppSurface)
+HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBuffer(UINT, _In_ REFIID riid, _COM_Outptr_ void** ppSurface)
 {
-	return DX12SwapChain::GetSingleton()->GetBuffer(ppSurface);
+	return DX12SwapChain::GetSingleton()->GetBuffer(riid, ppSurface);
 }
 
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetFullscreenState(BOOL Fullscreen, _In_opt_ IDXGIOutput* pTarget)

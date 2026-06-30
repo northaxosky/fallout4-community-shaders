@@ -233,8 +233,8 @@ void FrameGeneration::CreateFrameGenerationResources()
 		auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
 		{
-			IDXGIResource1* dxgiResource = nullptr;
-			DX::ThrowIfFailed(HUDLessBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+			winrt::com_ptr<IDXGIResource1> dxgiResource;
+			DX::ThrowIfFailed(HUDLessBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 
 			if (dx12SwapChain->swapChain) {
 				HANDLE sharedHandle = nullptr;
@@ -253,8 +253,8 @@ void FrameGeneration::CreateFrameGenerationResources()
 		}
 
 		{
-			IDXGIResource1* dxgiResource = nullptr;
-			DX::ThrowIfFailed(depthBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+			winrt::com_ptr<IDXGIResource1> dxgiResource;
+			DX::ThrowIfFailed(depthBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 
 			if (dx12SwapChain->swapChain) {
 				HANDLE sharedHandle = nullptr;
@@ -273,8 +273,8 @@ void FrameGeneration::CreateFrameGenerationResources()
 		}
 
 		{
-			IDXGIResource1* dxgiResource = nullptr;
-			DX::ThrowIfFailed(motionVectorBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+			winrt::com_ptr<IDXGIResource1> dxgiResource;
+			DX::ThrowIfFailed(motionVectorBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 
 			if (dx12SwapChain->swapChain) {
 				HANDLE sharedHandle = nullptr;
@@ -293,8 +293,8 @@ void FrameGeneration::CreateFrameGenerationResources()
 		}
 
 		{
-			IDXGIResource1* dxgiResource = nullptr;
-			DX::ThrowIfFailed(UIAlphaBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(&dxgiResource)));
+			winrt::com_ptr<IDXGIResource1> dxgiResource;
+			DX::ThrowIfFailed(UIAlphaBufferShared[index]->resource->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 
 			if (dx12SwapChain->swapChain) {
 				HANDLE sharedHandle = nullptr;
@@ -387,7 +387,9 @@ void FrameGeneration::PostAlpha()
 			}
 		}
 
-		ID3D11ShaderResourceView* views[3] = { nullptr, nullptr, nullptr };
+		// Clear all four SRV slots we bound above; leaving slot 3 (depth) bound is the OM/CS
+		// hazard the audit flagged - a later DSV/RTV use can silently null it or poison a dispatch.
+		ID3D11ShaderResourceView* views[4] = { nullptr, nullptr, nullptr, nullptr };
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
 		ID3D11UnorderedAccessView* uavs[3] = { nullptr, nullptr, nullptr };
