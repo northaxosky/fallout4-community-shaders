@@ -1,4 +1,4 @@
-#include "Menu.h"
+#include "Menu/Menu.h"
 
 #include <imgui.h>
 #include <imgui_impl_dx11.h>
@@ -18,8 +18,8 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Plugin.h"
-#include "PresetManager.h"
-#include "Theme.h"
+#include "Settings/PresetManager.h"
+#include "Menu/Theme.h"
 
 namespace
 {

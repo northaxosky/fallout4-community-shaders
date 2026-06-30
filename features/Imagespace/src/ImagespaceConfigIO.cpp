@@ -11,7 +11,7 @@
 #include <system_error>
 #include <utility>
 
-#include "TomlUtil.h"
+#include "Settings/TomlUtil.h"
 
 namespace cs::features::imagespace
 {

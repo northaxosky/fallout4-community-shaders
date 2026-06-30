@@ -2,7 +2,7 @@
 #include "FrameGeneration.h"
 
 #include "Log.h"
-#include "StreamlineCore.h"
+#include "Render/StreamlineCore.h"
 
 namespace cs::features::framegeneration
 {

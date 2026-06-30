@@ -11,7 +11,7 @@ namespace cs::toml_util
 	// Reads scalar TOML keys with default fallback, clamping where a range is supplied, and emits a
 	// standardized warning when a present key has the wrong type so user-edited TOMLs surface typos
 	// instead of silently falling back. a_logCtx is a short label that identifies the feature, e.g.
-	// "ssgi.settings" or "imagespace.tonemap"; it shows up verbatim in the warning line.
+	// "imagespace.tonemap" or "frame_generation.settings"; it shows up verbatim in the warning line.
 	//
 	// Missing keys are silent. Wrong-type keys log once per call and return the default. Numeric
 	// reads clamp to [a_min, a_max] when the source value is in range of the storage type. Bool and

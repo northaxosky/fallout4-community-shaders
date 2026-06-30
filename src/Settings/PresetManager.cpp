@@ -1,8 +1,8 @@
-#include "PresetManager.h"
+#include "Settings/PresetManager.h"
 
 #include "Feature.h"
 #include "Log.h"
-#include "Menu.h"
+#include "Menu/Menu.h"
 
 #include <algorithm>
 #include <array>

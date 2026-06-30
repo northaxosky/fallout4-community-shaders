@@ -8,14 +8,14 @@
 #include <cstdint>
 #include <fstream>
 
-#include "CSUtil.h"
+#include "Utils/CSUtil.h"
 #include "DX11Hooks.h"
 #include "Env.h"
 #include "Feature.h"
-#include "Engine.h"
+#include "Render/Engine.h"
 #include "Log.h"
-#include "Menu.h"
-#include "StreamlineCore.h"
+#include "Menu/Menu.h"
+#include "Render/StreamlineCore.h"
 namespace cs::features
 {
 	using namespace upscaling;

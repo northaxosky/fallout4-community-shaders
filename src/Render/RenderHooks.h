@@ -12,9 +12,9 @@ namespace cs::engine
 	// unless an explicit slot below applies to your callback's semantics.
 	//
 	// Slot conventions (PostDeferredLightsImpl has the only multi-feature ordering constraint today):
-	//   Default - multiplicative darken (vanilla AO darken, ScreenSpaceShadows apply, SSGI Apply)
+	//   Default - multiplicative darken (e.g. vanilla AO darken, occlusion/shadow apply passes)
 	//   Late    - additive contributions that must not be modulated by their own darken pass
-	//             (SSGI ApplyIL - indirect bounce on top of shaded base)
+	//             (e.g. indirect-bounce apply on top of the shaded base)
 	enum class HookPriority : int {
 		Early   = -100,
 		Default =    0,

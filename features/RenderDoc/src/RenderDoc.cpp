@@ -11,7 +11,7 @@
 #include <fstream>
 
 #include "Log.h"
-#include "Menu.h"
+#include "Menu/Menu.h"
 
 namespace cs::features
 {

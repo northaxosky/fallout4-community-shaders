@@ -13,6 +13,6 @@ namespace cs::settings_overrides
 	//
 	// Caller is expected to feed the returned table back through the same feature's ParseSettings
 	// helper as a second pass so absent keys keep the base TOML value and present keys overlay.
-	// See ScreenSpaceShadows::LoadSettings for the canonical call pattern.
+	// See Imagespace's settings load (Imagespace.cpp) for the canonical call pattern.
 	std::optional<toml::table> TryLoad(std::string_view a_featureName);
 }

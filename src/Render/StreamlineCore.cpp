@@ -1,4 +1,4 @@
-#include "StreamlineCore.h"
+#include "Render/StreamlineCore.h"
 
 #include <algorithm>
 

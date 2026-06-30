@@ -4,8 +4,8 @@
 
 #include "Env.h"
 #include "Log.h"
-#include "Menu.h"
-#include "StreamlineCore.h"
+#include "Menu/Menu.h"
+#include "Render/StreamlineCore.h"
 
 namespace cs::features::upscaling
 {

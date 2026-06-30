@@ -9,17 +9,17 @@
 #include <fstream>
 
 #include "DX12SwapChain.h"
-#include "CSUtil.h"
+#include "Utils/CSUtil.h"
 #include "DirectXMath.h"
-#include "Engine.h"
+#include "Render/Engine.h"
 #include "Env.h"
 #include "Feature.h"
 #include "DX11Hooks.h"
 #include "Log.h"
-#include "Menu.h"
-#include "RenderHooks.h"
+#include "Menu/Menu.h"
+#include "Render/RenderHooks.h"
 #include "Streamline.h"
-#include "StreamlineCore.h"
+#include "Render/StreamlineCore.h"
 
 namespace cs::features
 {

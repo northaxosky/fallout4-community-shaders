@@ -1,4 +1,4 @@
-#include "ComputeScope.h"
+#include "Render/ComputeScope.h"
 
 namespace cs
 {
@@ -12,8 +12,8 @@ namespace cs
 	{
 		// CS-stage hygiene: clear the slots our dispatches likely touched so the next CS
 		// dispatch starts clean. Width is capped at 8 - widening to the D3D11 maximums
-		// (128 SRVs / 14 CBs / 16 samplers) caused dark boxes at building positions whenever
-		// SSGI or SSS was enabled, because the engine has CS-stage resources bound at high
+		// (128 SRVs / 14 CBs / 16 samplers) caused dark boxes at building positions when an
+		// injected compute pass ran, because the engine keeps CS-stage resources bound at high
 		// slots during deferred passes and a full-width null sweep stomps them.
 		constexpr UINT kClearWidth = 8;
 

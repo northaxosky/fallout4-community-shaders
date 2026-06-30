@@ -1,7 +1,7 @@
 #include "Streamline.h"
 
-#include "StreamlineCore.h"
-#include "Engine.h"
+#include "Render/StreamlineCore.h"
+#include "Render/Engine.h"
 #include "Log.h"
 namespace cs::features::upscaling
 {

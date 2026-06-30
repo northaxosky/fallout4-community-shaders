@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CSSha1.h"
+#include "Utils/CSSha1.h"
 
 namespace cs::features::catalog
 {

@@ -2,7 +2,7 @@
 
 #include "Log.h"
 #include "Plugin.h"
-#include "PresetManager.h"
+#include "Settings/PresetManager.h"
 
 #include <toml++/toml.hpp>
 

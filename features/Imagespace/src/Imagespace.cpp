@@ -18,18 +18,18 @@
 
 #include <DirectXMath.h>
 
-#include "ComputeScope.h"
-#include "Engine.h"
-#include "CSUtil.h"
+#include "Render/ComputeScope.h"
+#include "Render/Engine.h"
+#include "Utils/CSUtil.h"
 #include "Env.h"
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
-#include "Menu.h"
-#include "PresetManager.h"
-#include "RenderHooks.h"
-#include "SettingsOverrideManager.h"
-#include "Sky.h"
-#include "Weather.h"
+#include "Menu/Menu.h"
+#include "Settings/PresetManager.h"
+#include "Render/RenderHooks.h"
+#include "Settings/SettingsOverrideManager.h"
+#include "World/Sky.h"
+#include "World/Weather.h"
 #include "WeatherProfiles.h"
 
 namespace cs::features

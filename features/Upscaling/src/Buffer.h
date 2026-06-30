@@ -1,6 +1,6 @@
 #pragma once
 
-#include "CSBuffer.h"
+#include "Utils/CSBuffer.h"
 
 namespace cs::features::upscaling
 {
