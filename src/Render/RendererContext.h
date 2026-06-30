@@ -2,6 +2,8 @@
 
 #include <d3d11.h>
 
+#include "Render/ComputeScope.h"
+
 namespace RE::BSGraphics
 {
 	class Context;
@@ -49,5 +51,27 @@ namespace cs::engine
 		ID3D11DeviceContext*    _ctx;
 		ID3D11RenderTargetView* _savedRTVs[D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT];
 		ID3D11DepthStencilView* _savedDSV;
+	};
+
+	// Combined OM+CS guard for compute dispatches that sample engine render targets. Member order
+	// makes the contract correct by construction: _om constructs first (save+unbind OM) and, on
+	// reverse-order destruction, _cs clears the CS slots first, then _om restores OM. Prefer this
+	// over hand-pairing OMScope + ComputeScope. Nesting is safe (the inner guard is a redundant
+	// no-op), but a caller relying on its own CS bindings surviving a nested dispatch is not.
+	class ComputeOMScope
+	{
+	public:
+		explicit ComputeOMScope(ID3D11DeviceContext* a_ctx) noexcept :
+			_om(a_ctx), _cs(a_ctx)
+		{}
+
+		ComputeOMScope(const ComputeOMScope&)            = delete;
+		ComputeOMScope(ComputeOMScope&&)                 = delete;
+		ComputeOMScope& operator=(const ComputeOMScope&) = delete;
+		ComputeOMScope& operator=(ComputeOMScope&&)      = delete;
+
+	private:
+		OMScope          _om;  // declared first: ctor save+unbind OM, dtor restores OM (runs 2nd)
+		cs::ComputeScope _cs;  // declared second: ctor no-op, dtor clears CS slots (runs 1st)
 	};
 }
