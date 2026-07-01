@@ -128,7 +128,7 @@ namespace cs::features
 		bool EnsureBloomResources(uint32_t a_width, uint32_t a_height, int a_mips);
 		bool EnsureDOFResources(uint32_t a_width, uint32_t a_height);
 		void RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex);
-		ID3D11ComputeShader* GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name);
+		ID3D11ComputeShader* GetCS(const wchar_t* a_path, winrt::com_ptr<ID3D11ComputeShader>& a_slot, const char* a_name);
 		bool LoadLUTFromDisk(const std::string& a_filename);
 		// Applies base/overlay LUT state after settings changes or D3D11 init; no-op pre-device.
 		void ApplyLUTState();
@@ -136,7 +136,7 @@ namespace cs::features
 		// Composite (tonemap + LUT + bloom-add + lens).
 		std::unique_ptr<imagespace::Texture2D>      compositeScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> compositeCB;
-		ID3D11ComputeShader*                        compositeCS = nullptr;
+		winrt::com_ptr<ID3D11ComputeShader>         compositeCS;
 		std::unique_ptr<imagespace::Texture2D>      dirtTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView>    lutSRV;
 		winrt::com_ptr<ID3D11SamplerState>          lutSampler;
@@ -147,11 +147,11 @@ namespace cs::features
 		std::vector<winrt::com_ptr<ID3D11ShaderResourceView>> lumPyramidMipSRVs;
 		std::vector<winrt::com_ptr<ID3D11UnorderedAccessView>> lumPyramidUAVs;
 		std::unique_ptr<imagespace::ConstantBuffer> pyramidCB;
-		ID3D11ComputeShader*                        lumPyramidCS     = nullptr;
-		ID3D11ComputeShader*                        lumPyramidTailCS = nullptr;
+		winrt::com_ptr<ID3D11ComputeShader>         lumPyramidCS;
+		winrt::com_ptr<ID3D11ComputeShader>         lumPyramidTailCS;
 		std::array<std::unique_ptr<imagespace::Texture2D>, 2> expoPingPong;
 		std::unique_ptr<imagespace::ConstantBuffer> exposureCB;
-		ID3D11ComputeShader*                        exposureCS = nullptr;
+		winrt::com_ptr<ID3D11ComputeShader>         exposureCS;
 		uint32_t                                    pyramidMipCount  = 0;
 		int                                         expoFrameIdx     = 0;
 
@@ -160,9 +160,9 @@ namespace cs::features
 		std::array<std::unique_ptr<imagespace::Texture2D>, 6> bloomScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> bloomCB;
 		std::unique_ptr<imagespace::ConstantBuffer> bloomThresholdCB;
-		ID3D11ComputeShader*                        bloomThresholdCS = nullptr;
-		ID3D11ComputeShader*                        bloomDownCS      = nullptr;
-		ID3D11ComputeShader*                        bloomUpCS        = nullptr;
+		winrt::com_ptr<ID3D11ComputeShader>         bloomThresholdCS;
+		winrt::com_ptr<ID3D11ComputeShader>         bloomDownCS;
+		winrt::com_ptr<ID3D11ComputeShader>         bloomUpCS;
 		int                                         bloomMipsAlloc   = 0;
 
 		// Bokeh DOF.
@@ -172,10 +172,10 @@ namespace cs::features
 		std::unique_ptr<imagespace::Texture2D>      dofNearBlurred;        // half-res R11G11B10F foreground blur output
 		std::unique_ptr<imagespace::Texture2D>      dofFarBlurred;         // half-res R11G11B10F background blur output
 		std::unique_ptr<imagespace::ConstantBuffer> dofCB;
-		ID3D11ComputeShader*                        dofDepthCoCCS    = nullptr;
-		ID3D11ComputeShader*                        dofDilateCS      = nullptr;
-		ID3D11ComputeShader*                        dofBlurCS        = nullptr;
-		ID3D11ComputeShader*                        dofCompositeCS   = nullptr;
+		winrt::com_ptr<ID3D11ComputeShader>         dofDepthCoCCS;
+		winrt::com_ptr<ID3D11ComputeShader>         dofDilateCS;
+		winrt::com_ptr<ID3D11ComputeShader>         dofBlurCS;
+		winrt::com_ptr<ID3D11ComputeShader>         dofCompositeCS;
 		winrt::com_ptr<ID3D11SamplerState>          dofLinearClampSampler;
 		uint32_t                                    dofWidth         = 0;
 		uint32_t                                    dofHeight        = 0;

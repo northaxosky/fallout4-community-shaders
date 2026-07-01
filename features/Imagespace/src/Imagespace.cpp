@@ -435,12 +435,14 @@ namespace cs::features
 		imagespace::EmitWeather(table, weatherProfiles, /*a_includeOverrides=*/true);
 
 		std::ofstream out(kConfigPath);
-		if (!out)
-			throw std::runtime_error(std::string("failed to open Imagespace config for write: ") + std::string(kConfigPath));
+		if (!out) {
+			L->error("Failed to open Imagespace config for write: {}", kConfigPath);
+			return;
+		}
 		out << table;
 		out.flush();
 		if (!out.good())
-			throw std::runtime_error(std::string("failed to write Imagespace config: ") + std::string(kConfigPath));
+			L->error("Failed to write Imagespace config: {}", kConfigPath);
 	}
 
 	bool Imagespace::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err)
@@ -476,7 +478,7 @@ namespace cs::features
 	void Imagespace::ExportToPreset(toml::table& a_subtable)
 	{
 		imagespace::EmitSettings(a_subtable, settings);
-		imagespace::EmitWeather(a_subtable, weatherProfiles, /*a_includeOverrides=*/false);
+		imagespace::EmitWeather(a_subtable, weatherProfiles, /*a_includeOverrides=*/true);
 	}
 
 	struct StyleValues
@@ -915,7 +917,7 @@ namespace cs::features
 		cb.HalfDimensions[1] = dofHeight;
 		cb.FullDimensions[0] = a_width;
 		cb.FullDimensions[1] = a_height;
-		cb.QualityLevel   = static_cast<uint32_t>(std::clamp(settings.dofQuality, 0, 2));
+		cb.QualityLevel   = static_cast<uint32_t>(std::clamp(settings.dofQuality, 0, 1));
 		cb.NearPlane      = nearP;
 		cb.FarPlane       = farP;
 		cb.BokehIntensity = settings.bokehIntensity;
@@ -1004,15 +1006,15 @@ namespace cs::features
 		}
 	}
 
-	ID3D11ComputeShader* Imagespace::GetCS(const wchar_t* a_path, ID3D11ComputeShader*& a_slot, const char* a_name)
+	ID3D11ComputeShader* Imagespace::GetCS(const wchar_t* a_path, winrt::com_ptr<ID3D11ComputeShader>& a_slot, const char* a_name)
 	{
 		if (!a_slot) {
 			std::vector<std::pair<const char*, const char*>> defines;
-			a_slot = reinterpret_cast<ID3D11ComputeShader*>(
-				cs::util::CompileShader(a_path, defines, "cs_5_0"));
+			a_slot.attach(reinterpret_cast<ID3D11ComputeShader*>(
+				cs::util::CompileShader(a_path, defines, "cs_5_0")));
 			if (a_slot) L->info("Compiled {}", a_name);
 		}
-		return a_slot;
+		return a_slot.get();
 	}
 
 	bool Imagespace::LoadLUTFromDisk(const std::string& a_filename)
@@ -1448,34 +1450,6 @@ namespace cs::features
 
 		// DOF runs after grading and reuses compositeScratch.
 		RunDOF(W, H, fbTex2.get());
-
-		// One-shot EMA scalar probe.
-		static int readbackCountdown = 60;
-		if (wantAdaptive && readbackCountdown > 0) {
-			--readbackCountdown;
-			if (readbackCountdown == 0) {
-				auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
-				D3D11_TEXTURE2D_DESC sd{};
-				sd.Width = 1;
-				sd.Height = 1;
-				sd.MipLevels = 1;
-				sd.ArraySize = 1;
-				sd.Format = DXGI_FORMAT_R32_FLOAT;
-				sd.SampleDesc.Count = 1;
-				sd.Usage = D3D11_USAGE_STAGING;
-				sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-				winrt::com_ptr<ID3D11Texture2D> staging;
-				if (SUCCEEDED(device->CreateTexture2D(&sd, nullptr, staging.put()))) {
-					context->CopyResource(staging.get(), expoPingPong[expoFrameIdx]->resource.get());
-					D3D11_MAPPED_SUBRESOURCE mapped{};
-					if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
-						const float expo = *reinterpret_cast<const float*>(mapped.pData);
-						context->Unmap(staging.get(), 0);
-						L->info("Probe expoPong={:.4f} fb={}x{} fmt={}", expo, W, H, static_cast<int>(fbDesc.Format));
-					}
-				}
-			}
-		}
 	}
 
 	void Imagespace::RestoreDefaultSettings()
@@ -1633,8 +1607,8 @@ namespace cs::features
 		ImGui::SliderFloat("Focus range", &settings.focusRange, 10.0f, 10000.0f, "%.0f", ImGuiSliderFlags_Logarithmic);
 		ImGui::SetItemTooltip("Width of the sharp zone around the focus plane.");
 		commitDirty();
-		const char* qualityNames[] = { "Performance (12 taps)", "Balanced (24 taps)", "Quality (24 taps)" };
-		int qualityIdx = std::clamp(settings.dofQuality, 0, 2);
+		const char* qualityNames[] = { "Performance (12 taps)", "Quality (24 taps)" };
+		int qualityIdx = std::clamp(settings.dofQuality, 0, 1);
 		if (ImGui::Combo("Quality", &qualityIdx, qualityNames, IM_ARRAYSIZE(qualityNames))) {
 			settings.dofQuality = qualityIdx;
 			dirty = true;

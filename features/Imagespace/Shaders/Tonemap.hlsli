@@ -22,6 +22,7 @@ float3 Tonemap_Reinhard(float3 c)
 // Lottes parametric. GDC 2016 ("Advanced Techniques and Optimization of HDR Color Pipelines").
 float3 Tonemap_Lottes(float3 x)
 {
+    x = max(x, 0.0);  // pow() of a negative channel yields NaN
     const float a       = 1.6;
     const float d       = 0.977;
     const float hdrMax  = 8.0;

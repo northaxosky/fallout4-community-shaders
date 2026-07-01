@@ -56,7 +56,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
     const float radiusPx = max(1.0, abs(coc));
 
     // Split gather by CoC sign so foreground blur can composite over background blur.
-    const uint sampleCount = (QualityLevel == 0u) ? 12u : (QualityLevel == 1u ? 24u : 24u);
+    const uint sampleCount = (QualityLevel == 0u) ? 12u : 24u;
     float3 nearAccum = 0.0;
     float3 farAccum = 0.0;
     float3 nearMax = 0.0;
