@@ -57,13 +57,6 @@ void FrameGeneration::LoadSettings()
 	}
 }
 
-void FrameGeneration::ReloadSettingsIfNeeded()
-{
-	static int frameCounter = 0;
-	if (++frameCounter % 60 != 0) return;
-	LoadSettings();
-}
-
 void FrameGeneration::SaveSettings()
 {
 	toml::table table;

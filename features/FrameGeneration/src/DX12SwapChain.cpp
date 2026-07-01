@@ -267,7 +267,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	}
 
 	auto frameGen = FrameGeneration::GetSingleton();
-	frameGen->ReloadSettingsIfNeeded();
 
 	bool useFrameGenerationThisFrame = false;
 	bool isDLSSGFrame = false;
@@ -620,12 +619,18 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void**
 
 ULONG STDMETHODCALLTYPE DXGISwapChainProxy::AddRef()
 {
-	return swapChain->AddRef();
+	return refCount.fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
 ULONG STDMETHODCALLTYPE DXGISwapChainProxy::Release()
 {
-	return swapChain->Release();
+	const ULONG ref = refCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
+	if (ref == 0) {
+		// The inner chain is owned by DX12SwapChain, not the proxy; only free the proxy node.
+		DX12SwapChain::GetSingleton()->swapChainProxy = nullptr;
+		delete this;
+	}
+	return ref;
 }
 
 /****IDXGIObject****/

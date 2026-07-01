@@ -62,7 +62,6 @@ public:
 
 	void LoadSettings();
 	void SaveSettings();
-	void ReloadSettingsIfNeeded();
 
 	void CreateFrameGenerationResources();
 	void PreAlpha();

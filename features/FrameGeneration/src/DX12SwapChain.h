@@ -9,6 +9,8 @@
 #include <d3d11_4.h>
 #include <d3d12.h>
 
+#include <atomic>
+
 #include "Buffer.h"
 
 namespace cs::features::framegeneration
@@ -36,6 +38,9 @@ public:
 	DXGISwapChainProxy(IDXGISwapChain4* a_swapChain);
 
 	IDXGISwapChain4* swapChain;
+
+	// Own COM refcount so the proxy's lifetime is independent of the inner chain it borrows.
+	std::atomic<ULONG> refCount{ 1 };
 
 	/****IUnknown****/
 	virtual HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObj) override;

@@ -104,17 +104,23 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	// DLSS-G: upgrade device+factory via Streamline
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
-		auto* core = cs::Streamline::GetSingleton();
+		if (cs::env::IsENBLoaded()) {
+			// ENB owns the swap chain; Streamline must not upgrade it (repo-wide ENB rule). Use FSR3.
+			L->warn("DLSS-G unavailable under ENB (swap chain owned by ENB); falling back to FSR3");
+			frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
+		} else {
+			auto* core = cs::Streamline::GetSingleton();
 
-		ID3D12Device* rawDevice = proxy->d3d12Device.get();
-		core->slUpgradeInterface((void**)&rawDevice);
-		proxy->d3d12Device.copy_from(rawDevice);
+			ID3D12Device* rawDevice = proxy->d3d12Device.get();
+			core->slUpgradeInterface((void**)&rawDevice);
+			proxy->d3d12Device.copy_from(rawDevice);
 
-		IDXGIFactory* rawFactory = (IDXGIFactory*)factory;
-		core->slUpgradeInterface((void**)&rawFactory);
-		factory = (IDXGIFactory5*)rawFactory;
+			IDXGIFactory* rawFactory = (IDXGIFactory*)factory;
+			core->slUpgradeInterface((void**)&rawFactory);
+			factory = (IDXGIFactory5*)rawFactory;
 
-		StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
+			StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
+		}
 	}
 
 	proxy->CreateD3D12CommandQueues();
