@@ -40,9 +40,7 @@ namespace cs::features::imagespace
 		// CONFIG-APPLY THREAD ONLY. Loads each filename and ignores failures.
 		void Preload(const std::vector<std::string>& a_filenames);
 
-		// RENDER-THREAD SAFE under Imagespace's single-render-thread invariant. Pure lookup; never loads.
-		// The returned raw pointer stays valid only while no Clear()/Preload() runs, which the invariant
-		// guarantees (both happen end-frame on the same thread, after the render-frame read).
+		// Render-thread-safe under Imagespace's single-thread invariant; pure lookup, never loads.
 		[[nodiscard]] ID3D11ShaderResourceView* TryGet(const std::string& a_filename) const;
 
 		void Clear() { entries.clear(); }

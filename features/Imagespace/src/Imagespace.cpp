@@ -41,11 +41,7 @@ namespace cs::features
 
 	namespace detail
 	{
-		// Imagespace shared state is single-threaded by construction: RunFrame reads it mid-frame from
-		// the PostDynResViewport render hook, and DrawSettings / preset commits write it end-frame from
-		// the Present hook - both on the render thread, never overlapping, so access is lock-free. This
-		// tripwire catches any future change that breaks that invariant (e.g. an off-thread menu), which
-		// would silently turn the lock-free access into a real data race.
+		// Tripwire: shared state is lock-free only because RunFrame + DrawSettings/preset commits are serialized on the render thread; catch any off-thread access.
 		void AssertRenderThread(const char* a_where)
 		{
 			static std::atomic<std::thread::id> established{};

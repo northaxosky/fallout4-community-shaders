@@ -32,9 +32,7 @@ namespace cs::engine
 		return *far_.get();
 	}
 
-	// Vertical field of view in radians, from the engine projection. projMat[1][1] is the vertical
-	// projection scale (cot(fovY/2)); jitter only perturbs the projection's translation, not this
-	// scale, so the raw projMat is fine. Returns 0 if the state/scale is unavailable.
+	// Vertical FOV (radians) from projMat[1][1] = cot(fovY/2) (jitter doesn't affect it); 0 if unavailable.
 	[[nodiscard]] inline float GetVerticalFOV()
 	{
 		auto* state = GetGraphicsState();

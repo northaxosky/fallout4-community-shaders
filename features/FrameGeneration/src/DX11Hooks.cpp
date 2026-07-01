@@ -101,8 +101,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 		}
 	}
 
-	// DLSS-G: upgrade device+factory via Streamline. Backend selection already routed DLSS-G away
-	// from ENB (ENB owns the swap chain), so this only runs when Streamline may own it.
+	// DLSS-G: upgrade device+factory via Streamline (selection already routed DLSS-G away from ENB).
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto* core = cs::Streamline::GetSingleton();
@@ -195,8 +194,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
 		if (userEnabled && frameGen->settings.frameGenType == 1) {
 			if (cs::env::IsENBLoaded()) {
-				// ENB owns the swap chain, so Streamline can't upgrade it for DLSS-G. Use FSR3-FG when
-				// its runtime is loaded, otherwise leave FG off rather than crash in the FSR3 path later.
+				// ENB owns the swap chain (no DLSS-G upgrade); use FSR3-FG if its runtime loaded, else disable FG.
 				if (fidelityFX->module) {
 					L->warn("DLSS-G unavailable under ENB; using FSR3 frame generation instead");
 					frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
@@ -362,9 +360,7 @@ void DX11Hooks::Install()
 
 	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
 
-	// Hook CreateDXGIFactory1 only when an FG backend can actually use the proxy. Under ENB the
-	// DLSS-G interposer path can't wrap ENB's swap chain (it falls back to FSR3, gated by module),
-	// so don't let a missing-FSR3 DLSS-G+ENB install intercept factories and crash the FSR3 path.
+	// Hook factory creation only when an FG backend can use the proxy; under ENB DLSS-G needs the FSR3 module (fallback), so require it.
 	if (fidelityFX->module ||
 		(frameGen->settings.frameGenType == 1 && cs::Streamline::GetSingleton()->interposer && !cs::env::IsENBLoaded()) ||
 		(frameGen->settings.frameGenType == 2 && XeSSFG::GetSingleton()->fgModule)) {

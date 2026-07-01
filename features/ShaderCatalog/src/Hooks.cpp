@@ -20,8 +20,7 @@ namespace cs::features::catalog::hooks
 		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
 		std::atomic<std::uint64_t> g_missedBinds{ 0 };
 
-		// Published once from OnD3D11Ready with release ordering; the hot path acquire-loads it, which
-		// also makes the registry's compiled replacements visible to shader-creation threads.
+		// Published once (release) from OnD3D11Ready; hot path acquire-loads it, publishing compiled replacements to shader-creation threads.
 		std::atomic<ShaderCatalog::PixelShaderSwapCallback> g_psSwapCallback{ nullptr };
 
 		// Hot path for every stage: SHA1, stack capture, enqueue; cost is mostly bytecode hashing.

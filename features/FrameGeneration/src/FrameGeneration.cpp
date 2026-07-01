@@ -603,7 +603,6 @@ void FrameGeneration::GenerateUIAlphaMask()
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
 	// Proxy backbuffer may still be bound as RTV from game rendering; D3D11 returns zeros if read while bound.
-	// Unbind + restore engine OM around the UI-alpha dispatch; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);

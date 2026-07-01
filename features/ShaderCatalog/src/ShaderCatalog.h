@@ -27,9 +27,7 @@ namespace cs::features
 		void DrawSettings() override;
 		bool HooksInstalled() const noexcept { return _hooksInstalled.load(std::memory_order_acquire); }
 
-		// Broker: one optional callback the single CreatePixelShader hook offers each created shader.
-		// It runs after the shader is recorded/tracked; return true and swap *a_out (AddRef the
-		// replacement, Release the incoming shader) to substitute. Register from OnD3D11Ready only.
+		// Optional callback the CreatePixelShader hook offers each shader after tracking; return true and swap *a_out (AddRef replacement, Release incoming) to substitute.
 		using PixelShaderSwapCallback = bool (*)(const void* a_bytecode, std::size_t a_bytecode_len,
 			const catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out);
 		void RegisterPixelShaderSwapCallback(PixelShaderSwapCallback a_cb) noexcept;
