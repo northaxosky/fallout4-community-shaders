@@ -362,9 +362,11 @@ void DX11Hooks::Install()
 
 	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
 
-	// Hook CreateDXGIFactory1 only when an FG backend can use the proxy; avoid intercepting non-FG users.
+	// Hook CreateDXGIFactory1 only when an FG backend can actually use the proxy. Under ENB the
+	// DLSS-G interposer path can't wrap ENB's swap chain (it falls back to FSR3, gated by module),
+	// so don't let a missing-FSR3 DLSS-G+ENB install intercept factories and crash the FSR3 path.
 	if (fidelityFX->module ||
-		(frameGen->settings.frameGenType == 1 && cs::Streamline::GetSingleton()->interposer) ||
+		(frameGen->settings.frameGenType == 1 && cs::Streamline::GetSingleton()->interposer && !cs::env::IsENBLoaded()) ||
 		(frameGen->settings.frameGenType == 2 && XeSSFG::GetSingleton()->fgModule)) {
 		(uintptr_t&)ptrCreateDXGIFactory1 = Detours::IATHook(moduleBase, "dxgi.dll", "CreateDXGIFactory1", (uintptr_t)hk_CreateDXGIFactory1);
 	}
