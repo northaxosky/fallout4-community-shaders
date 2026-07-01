@@ -12,6 +12,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Feature.h"
 #include "Render/StreamlineCore.h"
 #include "XeSSFG.h"
 
@@ -298,6 +299,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 				// Proxy path returns early instead of chaining to Upscaling's IAT thunk; drive shared Streamline init here.
 				cs::Streamline::GetSingleton()->Initialize();
 				cs::Streamline::GetSingleton()->OnD3D11Ready(pAdapter, *ppDevice);
+				cs::FeatureManager::Get().OnD3D11ReadyAll(pAdapter, *ppDevice);
 
 				return S_OK;
 			}

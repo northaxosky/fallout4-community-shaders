@@ -366,4 +366,15 @@ namespace cs
 		}
 		PresetManager::Get().ResolveAndApplyBootPreset();
 	}
+
+	void FeatureManager::OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device)
+	{
+		if (_d3d11ReadyDone) {
+			return;
+		}
+		_d3d11ReadyDone = true;
+		for (auto* feature : _loadedFeatures) {
+			feature->OnD3D11Ready(a_adapter, a_device);
+		}
+	}
 }

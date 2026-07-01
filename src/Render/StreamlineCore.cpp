@@ -19,7 +19,8 @@ namespace cs
 
 	Streamline::~Streamline()
 	{
-		if (interposer) {
+		// Only free the interposer if we loaded it; a GetModuleHandleW handle is borrowed.
+		if (interposer && _interposerOwned) {
 			FreeLibrary(interposer);
 			interposer = nullptr;
 		}
@@ -42,12 +43,17 @@ namespace cs
 			return;
 		}
 
-		// Defer to an existing handle in case another plugin (e.g. an ENB shim) loaded the interposer first.
+		// Defer to an existing handle in case another plugin (e.g. an ENB shim) loaded the interposer
+		// first; that handle is borrowed and must not be freed by us.
 		interposer = GetModuleHandleW(L"sl.interposer.dll");
-		if (!interposer)
+		if (!interposer) {
 			interposer = LoadLibraryW(L"Data/F4SE/Plugins/Streamline/sl.interposer.dll");
-		if (!interposer)
+			_interposerOwned = (interposer != nullptr);
+		}
+		if (!interposer) {
 			interposer = LoadLibraryW(L"Data/F4SE/Plugins/Upscaling/Streamline/sl.interposer.dll");
+			_interposerOwned = (interposer != nullptr);
+		}
 
 		if (!interposer) {
 			L->warn("Failed to load sl.interposer.dll: {:#x}", GetLastError());
@@ -168,8 +174,5 @@ namespace cs
 			}
 			_featureSweepDone = true;
 		}
-
-		for (auto* feat : FeatureManager::Get().GetAll())
-			feat->OnD3D11Ready(adapter, device);
 	}
 }

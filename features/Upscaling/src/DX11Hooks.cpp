@@ -5,6 +5,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Feature.h"
 #include "Render/StreamlineCore.h"
 
 namespace cs::features::upscaling
@@ -68,6 +69,9 @@ struct hkD3D11CreateDeviceAndSwapChain
 		} else {
 			kSL->info("Streamline not initialized, skipping device registration");
 		}
+
+		// Device is ready: drive the core feature fan-out regardless of Streamline init success.
+		cs::FeatureManager::Get().OnD3D11ReadyAll(pAdapter, *ppDevice);
 
 		cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
 		cs::Menu::Get().HookPresentOn(*ppSwapChain);

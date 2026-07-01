@@ -78,6 +78,7 @@ namespace cs
 		Streamline& operator=(const Streamline&) = delete;
 
 		bool              _interposerAttempted = false;
+		bool              _interposerOwned = false;
 		bool              _initAttempted = false;
 		std::atomic<bool> _d3dDeviceRegistered{ false };
 		bool              _featureSweepDone = false;

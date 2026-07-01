@@ -129,12 +129,17 @@ namespace cs
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
 
+		// Fan out OnD3D11Ready to every loaded feature exactly once, on first D3D11 device
+		// creation. Driven from the device-creation hook independently of Streamline init success.
+		void OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
+
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
 
 	private:
 		FeatureManager() = default;
 		std::vector<Feature*> _features;
 		std::vector<Feature*> _loadedFeatures;
+		bool                  _d3d11ReadyDone = false;
 	};
 }
 
