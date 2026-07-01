@@ -106,6 +106,10 @@ namespace cs::features
 			float       anamorphRatio      = 1.0f;
 		};
 
+		// Render-thread-owned state. RunFrame reads these mid-frame (PostDynResViewport hook); DrawSettings
+		// and preset commits write them end-frame (Present hook). Both run on the render thread and never
+		// overlap, so no locking is needed - but that invariant is load-bearing (see AssertRenderThread):
+		// touching these from another thread would be a real data race.
 		Settings settings;
 		imagespace::WeatherProfiles weatherProfiles;
 		imagespace::LUTCache        lutCache;

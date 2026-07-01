@@ -3,6 +3,7 @@
 #include <DirectXTex.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <charconv>
 #include <cmath>
@@ -13,6 +14,7 @@
 #include <fstream>
 #include <imgui.h>
 #include <stdexcept>
+#include <thread>
 #include <toml++/toml.hpp>
 #include <vector>
 
@@ -36,6 +38,29 @@
 namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.imagespace"); }
+
+	namespace
+	{
+		// Imagespace shared state is single-threaded by construction: RunFrame reads it mid-frame from
+		// the PostDynResViewport render hook, and DrawSettings / preset commits write it end-frame from
+		// the Present hook - both on the render thread, never overlapping, so access is lock-free. This
+		// tripwire catches any future change that breaks that invariant (e.g. an off-thread menu), which
+		// would silently turn the lock-free access into a real data race.
+		void AssertRenderThread(const char* a_where)
+		{
+			static std::atomic<std::thread::id> established{};
+			const std::thread::id self = std::this_thread::get_id();
+			std::thread::id none{};
+			if (established.compare_exchange_strong(none, self, std::memory_order_relaxed))
+				return;
+			if (established.load(std::memory_order_relaxed) != self) {
+				static std::atomic_bool logged{ false };
+				if (!logged.exchange(true))
+					L->error("Imagespace same-thread invariant broken at {}: shared state touched off the render thread", a_where);
+				assert(false && "Imagespace shared state must be accessed only from the render thread");
+			}
+		}
+	}
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.toml";
 	constexpr const char* kOpMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
@@ -463,6 +488,7 @@ namespace cs::features
 
 	void Imagespace::CommitStagedSwap()
 	{
+		AssertRenderThread("CommitStagedSwap");
 		if (!stagedValid) return;
 		settings        = std::move(stagedSettings);
 		weatherProfiles = std::move(stagedWeatherProfiles);
@@ -1056,6 +1082,7 @@ namespace cs::features
 
 	void Imagespace::RunFrame()
 	{
+		AssertRenderThread("RunFrame");
 		if (!settings.enabled)
 			return;
 		// Suite-wide ENB yield; bForceWithENB opts into stacking.
@@ -1463,6 +1490,7 @@ namespace cs::features
 
 	void Imagespace::DrawSettings()
 	{
+		AssertRenderThread("DrawSettings");
 		bool dirty = false;
 		auto commitDirty = [&] { if (ImGui::IsItemDeactivatedAfterEdit()) dirty = true; };
 		auto markCustomIfEdited = [&] {
