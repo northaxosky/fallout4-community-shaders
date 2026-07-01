@@ -142,7 +142,7 @@ void FidelityFX::Present(bool a_useFrameGeneration)
 		dispatchParameters.cameraNear = cs::engine::GetCameraNear();
 		dispatchParameters.cameraFar = cs::engine::GetCameraFar();
 
-		dispatchParameters.cameraFovAngleVertical = 1.0f;
+		dispatchParameters.cameraFovAngleVertical = cs::engine::GetVerticalFOV();
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
 
 		dispatchParameters.frameID = frameID;

@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cmath>
+#include <xmmintrin.h>
+
 namespace cs::engine
 {
 	// Engine singleton accessors - canonical home for cross-feature renderer-state lookups.
@@ -27,6 +30,20 @@ namespace cs::engine
 	{
 		static REL::Relocation<float*> far_{ REL::ID({ 958877, 2712883, 2712883 }) };
 		return *far_.get();
+	}
+
+	// Vertical field of view in radians, from the engine projection. projMat[1][1] is the vertical
+	// projection scale (cot(fovY/2)); jitter only perturbs the projection's translation, not this
+	// scale, so the raw projMat is fine. Returns 0 if the state/scale is unavailable.
+	[[nodiscard]] inline float GetVerticalFOV()
+	{
+		auto* state = GetGraphicsState();
+		if (!state) {
+			return 0.0f;
+		}
+		alignas(16) float row1[4];
+		_mm_store_ps(row1, state->cameraState.camViewData.projMat[1]);
+		return (row1[1] != 0.0f) ? 2.0f * std::atan(1.0f / row1[1]) : 0.0f;
 	}
 
 	// Dynres offsets, per Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812; OG lacks NG/AE padding.
