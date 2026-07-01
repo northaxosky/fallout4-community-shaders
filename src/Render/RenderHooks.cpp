@@ -32,7 +32,9 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 
-#if !defined(NDEBUG)
+		// Registration must run on the startup thread before any render hook fires. Enforced in
+		// release too: MarkRegistrationClosed runs on the first thunk, and a late or off-thread
+		// Register* is rejected (logged) instead of mutating the vectors while Dispatch may iterate.
 		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
 		std::atomic_bool g_registrationClosed{ false };
 
@@ -41,17 +43,18 @@ namespace cs::engine
 			g_registrationClosed.store(true, std::memory_order_relaxed);
 		}
 
-		void AssertRegistrationAllowed()
+		bool RegistrationAllowed(const char* a_where)
 		{
-			assert(::GetCurrentThreadId() == g_registrationThreadId &&
-				"RenderHooks registration must run on the startup thread");
-			assert(!g_registrationClosed.load(std::memory_order_relaxed) &&
-				"RenderHooks registration must finish before render hooks fire");
+			const bool onStartupThread = (::GetCurrentThreadId() == g_registrationThreadId);
+			const bool stillOpen       = !g_registrationClosed.load(std::memory_order_relaxed);
+			assert(onStartupThread && "RenderHooks registration must run on the startup thread");
+			assert(stillOpen && "RenderHooks registration must finish before render hooks fire");
+			if (!onStartupThread || !stillOpen) {
+				L->error("Rejected RenderHooks registration for {} (late or off-thread)", a_where);
+				return false;
+			}
+			return true;
 		}
-#else
-		void MarkRegistrationClosed() noexcept {}
-		void AssertRegistrationAllowed() noexcept {}
-#endif
 
 		void InsertPrioritized(std::vector<PrioritizedCallback>& v, RenderHookCallback&& cb, HookPriority p)
 		{
@@ -138,7 +141,7 @@ namespace cs::engine
 
 	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
-		AssertRegistrationAllowed();
+		if (!RegistrationAllowed("PostDeferredPrePass")) return;
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
 		if (!g_prePassInstalled) {
 			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
@@ -149,7 +152,7 @@ namespace cs::engine
 
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
-		AssertRegistrationAllowed();
+		if (!RegistrationAllowed("PreDeferredLightsImpl")) return;
 		InsertPrioritized(g_preDeferredLightsImpl, std::move(callback), priority);
 		if (!g_lightsImplInstalled) {
 			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
@@ -160,7 +163,7 @@ namespace cs::engine
 
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
-		AssertRegistrationAllowed();
+		if (!RegistrationAllowed("PostDeferredLightsImpl")) return;
 		InsertPrioritized(g_postDeferredLightsImpl, std::move(callback), priority);
 		if (!g_lightsImplInstalled) {
 			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
@@ -173,7 +176,7 @@ namespace cs::engine
 	// Source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
-		AssertRegistrationAllowed();
+		if (!RegistrationAllowed("PostDeferredComposite")) return;
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		if (!g_compositeInstalled) {
 			stl::detour_thunk<DeferredComposite_Hook>(REL::ID({ 728427, 2318313, 2318313 }));
@@ -184,14 +187,14 @@ namespace cs::engine
 
 	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback)
 	{
-		AssertRegistrationAllowed();
+		if (!RegistrationAllowed("PostDynResViewport_Imagespace")) return;
 		g_postDynResViewport_Imagespace.push_back(std::move(callback));
 		EnsurePostDynResViewportInstalled();
 	}
 
 	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback)
 	{
-		AssertRegistrationAllowed();
+		if (!RegistrationAllowed("PostDynResViewport_FGCapture")) return;
 		g_postDynResViewport_FGCapture.push_back(std::move(callback));
 		EnsurePostDynResViewportInstalled();
 	}
