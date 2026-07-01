@@ -152,6 +152,11 @@ namespace cs::features
 		}
 	}
 
+	void ShaderCatalog::RegisterPixelShaderSwapCallback(PixelShaderSwapCallback a_cb) noexcept
+	{
+		catalog::hooks::SetPixelShaderSwapCallback(a_cb);
+	}
+
 	void ShaderCatalog::OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !device)

@@ -12,7 +12,6 @@
 #include <toml++/toml.hpp>
 
 #include "Compiler.h"
-#include "Hooks.h"
 #include "Log.h"
 #include "Registry.h"
 #include "ShaderCatalog.h"
@@ -178,7 +177,6 @@ namespace cs::features
 	void ShaderReplacement::OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !device) return;
-		if (_hookInstalled.exchange(true, std::memory_order_acq_rel)) return;
 
 		// Also compile entries without runtime SHA1 so ImGui can show status, though they never match.
 		std::size_t want = 0, got = 0;
@@ -190,9 +188,34 @@ namespace cs::features
 		}
 		L->info("Compiled {}/{} replacements", got, want);
 
+		// Register with ShaderCatalog's single CreatePixelShader hook instead of a second detour.
+		ShaderCatalog::GetSingleton()->RegisterPixelShaderSwapCallback(
+			[](const void* /*a_bytecode*/, std::size_t /*a_bytecode_len*/,
+				const cs::features::catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out) -> bool {
+				auto* entry = replacement::Registry::Get().FindByRuntimeSha1(a_sha);
+				if (!entry)
+					return false;
+				entry->match_hits.fetch_add(1, std::memory_order_relaxed);
+				if (!entry->enabled_in_ini) {
+					entry->passthrough_disabled.fetch_add(1, std::memory_order_relaxed);
+					return false;
+				}
+				if (!entry->compile_ok || !entry->compiled_ps) {
+					entry->passthrough_compile_fail.fetch_add(1, std::memory_order_relaxed);
+					return false;
+				}
+				// Swap *a_out while preserving a net refcount of 1: AddRef ours, Release engine's.
+				ID3D11PixelShader* mine = entry->compiled_ps.get();
+				mine->AddRef();
+				(*a_out)->Release();
+				*a_out = mine;
+				const auto prev = entry->substitution_hits.fetch_add(1, std::memory_order_relaxed);
+				if (prev == 0)
+					L->info("Replaced PS sha={} -> {}", replacement::Sha1ToHex(a_sha), entry->name);
+				return true;
+			});
 		const bool catalogHooked = ShaderCatalog::GetSingleton()->HooksInstalled();
-		replacement::hooks::Install(device);
-		L->info("Device-vtable hook installed (slot 15, catalog chain={}).", catalogHooked ? "present" : "absent");
+		L->info("Registered pixel-shader swap callback (catalog hook={}).", catalogHooked ? "present" : "absent");
 	}
 
 	void ShaderReplacement::DrawSettings()

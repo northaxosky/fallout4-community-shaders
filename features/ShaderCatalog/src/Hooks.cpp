@@ -20,6 +20,10 @@ namespace cs::features::catalog::hooks
 		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
 		std::atomic<std::uint64_t> g_missedBinds{ 0 };
 
+		// Published once from OnD3D11Ready with release ordering; the hot path acquire-loads it, which
+		// also makes the registry's compiled replacements visible to shader-creation threads.
+		std::atomic<ShaderCatalog::PixelShaderSwapCallback> g_psSwapCallback{ nullptr };
+
 		// Hot path for every stage: SHA1, stack capture, enqueue; cost is mostly bytecode hashing.
 		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len) noexcept
 		{
@@ -75,6 +79,14 @@ namespace cs::features::catalog::hooks
 		if (!RecordingSuppressed() && SUCCEEDED(hr) && a_out && *a_out && a_bytecode && a_bytecode_len != 0) {
 			const auto hash = Sha1Compute(a_bytecode, a_bytecode_len);
 			shader_tracker::TrackPixelShader(*a_out, hash);
+
+			// Broker: offer the created shader to the optional consumer (ShaderReplacement).
+			if (const auto swapCb = g_psSwapCallback.load(std::memory_order_acquire)) {
+				swapCb(a_bytecode, a_bytecode_len, hash, a_out);
+				// If it swapped *a_out, re-track the replacement under the same SHA1 for attribution.
+				if (*a_out)
+					shader_tracker::TrackPixelShader(*a_out, hash, true);
+			}
 		}
 		return hr;
 	}
@@ -155,6 +167,11 @@ namespace cs::features::catalog::hooks
 			context->Release();
 			g_psSetShaderHookInstalled.store(true, std::memory_order_release);
 		}
+	}
+
+	void SetPixelShaderSwapCallback(ShaderCatalog::PixelShaderSwapCallback a_cb) noexcept
+	{
+		g_psSwapCallback.store(a_cb, std::memory_order_release);
 	}
 
 	RuntimeAttributionStats GetRuntimeAttributionStats()

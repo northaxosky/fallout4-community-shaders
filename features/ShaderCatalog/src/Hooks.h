@@ -3,6 +3,7 @@
 #include <d3d11.h>
 
 #include "PCH.h"
+#include "ShaderCatalog.h"
 
 namespace cs::features::catalog::hooks
 {
@@ -91,6 +92,9 @@ namespace cs::features::catalog::hooks
 
 	// Install D3D11 vtable detours once; repeat calls would re-chain prior thunks.
 	void InstallAll(ID3D11Device* a_device);
+
+	// Sets the optional pixel-shader swap callback the CreatePixelShader hook offers each shader.
+	void SetPixelShaderSwapCallback(ShaderCatalog::PixelShaderSwapCallback a_cb) noexcept;
 
 	struct RuntimeAttributionStats
 	{

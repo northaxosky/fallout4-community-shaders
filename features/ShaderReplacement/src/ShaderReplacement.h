@@ -55,6 +55,5 @@ namespace cs::features
 
 		Settings           _settings;
 		std::atomic<bool>  _started{ false };
-		std::atomic<bool>  _hookInstalled{ false };
 	};
 }
