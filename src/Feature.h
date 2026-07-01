@@ -31,6 +31,14 @@ namespace cs
 		// Runs after all features' Load(). Defer here to wrap hooks installed in another feature's Load().
 		virtual void OnPostPostLoad() {}
 
+		// A feature may call FailLoad() from within Load() to signal a recoverable failure; the
+		// manager then skips it (and anything depending on it) instead of treating it as loaded.
+		void FailLoad(std::string a_reason) noexcept
+		{
+			_loadFailed = true;
+			_loadFailureReason = std::move(a_reason);
+		}
+
 		virtual void DrawSettings() {}
 
 		// Reset persisted settings and derived caches; opt in via HasResettableSettings().
@@ -42,7 +50,7 @@ namespace cs
 		// Always-on overlay rendered on top of the game even when the settings menu is closed.
 		virtual void DrawOverlay() {}
 
-		// Fired by cs::Streamline once the D3D11 device exists and the SDK is initialized.
+		// Fired once by FeatureManager::OnD3D11ReadyAll after the D3D11 device exists.
 		virtual void OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* /*device*/) {}
 
 		// Discovery/menu defaults mirror Skyrim CS; features opt in by overriding.
@@ -98,8 +106,12 @@ namespace cs
 	private:
 		friend class FeatureManager;
 		void SetLoaded(bool a_loaded) noexcept { _loaded = a_loaded; }
+		bool HasLoadFailed() const noexcept { return _loadFailed; }
+		const std::string& LoadFailureReason() const noexcept { return _loadFailureReason; }
 
-		bool _loaded = false;
+		bool        _loaded = false;
+		bool        _loadFailed = false;
+		std::string _loadFailureReason;
 	};
 
 #ifdef TRACY_SUPPORT

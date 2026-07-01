@@ -10,6 +10,7 @@
 #include <cctype>
 #include <cstddef>
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -267,7 +268,17 @@ namespace
 
 		if (sorted.size() != count) {
 			ReportDependencyCycles(adjacency, a_features);
-			return a_features;
+			// Kahn's result holds exactly the features that could be ordered; the rest are in a
+			// cycle or downstream of one. Return only the safe subset and exclude the others, rather
+			// than falling back to registration order and loading them with an undefined dep order.
+			std::unordered_set<const cs::Feature*> orderable(sorted.begin(), sorted.end());
+			for (auto* feature : a_features) {
+				if (orderable.find(feature) == orderable.end()) {
+					L->error("Feature {} excluded from load: part of or downstream of a dependency cycle",
+						feature->GetName());
+				}
+			}
+			return sorted;
 		}
 
 		return sorted;
@@ -319,11 +330,13 @@ namespace cs
 		std::unordered_map<std::string_view, bool> installedByName;
 		installedByName.reserve(_features.size());
 		for (auto* feature : _features) {
-			bool installed = true;
+			bool installed;
 			if (autoInstallAll) {
-				if (!EnsureFeatureConfig(*feature)) {
-					L->warn("Feature {} INI missing but auto-install is enabled; loading without a companion INI",
-						feature->GetName());
+				// Auto-install only counts as installed if the companion INI actually exists now;
+				// a failed create must not masquerade as a successful install.
+				installed = EnsureFeatureConfig(*feature);
+				if (!installed) {
+					L->warn("Feature {} INI could not be created; treating as not installed", feature->GetName());
 				}
 			} else {
 				installed = feature->IsInstalled();
@@ -331,24 +344,53 @@ namespace cs
 			installedByName.insert_or_assign(feature->GetName(), installed);
 		}
 
+		// Track which features actually loaded so a dependent can be skipped when a prerequisite
+		// is missing, uninstalled, or failed. Topological order guarantees deps are attempted first.
+		std::unordered_set<std::string_view> loadedNames;
+		loadedNames.reserve(_features.size());
+
 		for (auto* feature : _features) {
 			if (const auto installedIt = installedByName.find(feature->GetName()); installedIt == installedByName.end() || !installedIt->second) {
 				L->info("Feature {} not installed (no INI); skipping", feature->GetName());
 				continue;
 			}
 
+			bool depsSatisfied = true;
 			for (const auto dependency : feature->GetDependencies()) {
-				const auto dependencyIt = installedByName.find(dependency);
-				if (dependencyIt != installedByName.end() && !dependencyIt->second) {
-					L->warn("Feature {} depends on {} which is not installed; loading may be unstable",
-						feature->GetName(), dependency);
+				if (loadedNames.find(dependency) == loadedNames.end()) {
+					L->error("Feature {} requires {} which did not load; skipping", feature->GetName(), dependency);
+					depsSatisfied = false;
+					break;
 				}
+			}
+			if (!depsSatisfied) {
+				continue;
 			}
 
 			L->info("Loading feature: {}", feature->GetName());
-			feature->Load();
+			bool ok = true;
+			try {
+				feature->Load();
+				if (feature->HasLoadFailed()) {
+					ok = false;
+					L->error("Feature {} reported a load failure: {}", feature->GetName(), feature->LoadFailureReason());
+				}
+			} catch (const std::exception& e) {
+				ok = false;
+				L->error("Feature {} threw during Load(): {}", feature->GetName(), e.what());
+			} catch (...) {
+				ok = false;
+				L->error("Feature {} threw a non-standard exception during Load()", feature->GetName());
+			}
+
+			if (!ok) {
+				feature->SetLoaded(false);
+				continue;
+			}
+
 			feature->SetLoaded(true);
 			_loadedFeatures.push_back(feature);
+			loadedNames.insert(feature->GetName());
 		}
 	}
 
