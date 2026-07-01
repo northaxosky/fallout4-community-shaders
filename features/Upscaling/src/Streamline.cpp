@@ -3,6 +3,7 @@
 #include "Render/StreamlineCore.h"
 #include "Render/Engine.h"
 #include "Log.h"
+#include "Upscaling.h"
 
 #include <cmath>
 #include <xmmintrin.h>
@@ -30,6 +31,18 @@ namespace cs::features::upscaling
 			alignas(16) float vals[4];
 			_mm_store_ps(vals, a_v);
 			return sl::float3(vals[0], vals[1], vals[2]);
+		}
+
+		// Curated DLSS model presets; K/L/M are the current transformer-based defaults.
+		sl::DLSSPreset MapDLSSPreset(uint a_idx)
+		{
+			switch (a_idx) {
+			case 1: return sl::DLSSPreset::ePresetJ;
+			case 2: return sl::DLSSPreset::ePresetK;
+			case 3: return sl::DLSSPreset::ePresetL;
+			case 4: return sl::DLSSPreset::ePresetM;
+			default: return sl::DLSSPreset::eDefault;
+			}
 		}
 	}
 
@@ -81,6 +94,13 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 			colorDesc.Format == DXGI_FORMAT_R16G16B16A16_FLOAT ||
 			colorDesc.Format == DXGI_FORMAT_R32G32B32A32_FLOAT;
 		dlssOptions.colorBuffersHDR = colorHDR ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+
+		const sl::DLSSPreset dlssPreset = MapDLSSPreset(Upscaling::GetSingleton()->settings.presetDLSS);
+		dlssOptions.dlaaPreset = dlssPreset;
+		dlssOptions.qualityPreset = dlssPreset;
+		dlssOptions.balancedPreset = dlssPreset;
+		dlssOptions.performancePreset = dlssPreset;
+		dlssOptions.ultraPerformancePreset = dlssPreset;
 
 		if (SL_FAILED(result, slDLSSSetOptions(viewport, dlssOptions))) {
 			L->critical("Could not enable DLSS");

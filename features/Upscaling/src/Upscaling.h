@@ -25,7 +25,7 @@ public:
 	}
 
 	std::string_view GetName() const override { return "Upscaling"; }
-	std::string GetFeatureSummary() const override { return "DLSS, FSR2, FSR3, XeSS, and TAAU spatial upscaling integrated with the engine's render pipeline."; }
+	std::string GetFeatureSummary() const override { return "DLSS and FSR3 spatial upscaling integrated with the engine's render pipeline, with native TAA fallback."; }
 	std::string GetCategory() const override { return "Upscaling"; }
 	void Load() override;
 	void OnDataLoaded() override;
@@ -49,6 +49,10 @@ public:
 		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS;
 		// Upscaler quality: 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
 		uint qualityMode = 1;
+		// FSR3 RCAS sharpening strength, 0 (off) to 1. DLSS sharpening is deprecated by Streamline; use Imagespace CAS.
+		float sharpnessFSR = 0.0f;
+		// DLSS model preset: 0=Default, 1=J, 2=K (transformer), 3=L, 4=M.
+		uint presetDLSS = 0;
 	};
 
 	Settings settings;

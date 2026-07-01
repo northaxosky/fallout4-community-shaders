@@ -199,10 +199,11 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 		dispatchParameters.cameraNear = cs::engine::GetCameraNear();
 		dispatchParameters.cameraFar = cs::engine::GetCameraFar();
 
-		dispatchParameters.enableSharpening = true;
-		dispatchParameters.sharpness = 0.0f;
+		const auto& upSettings = Upscaling::GetSingleton()->settings;
+		dispatchParameters.enableSharpening = upSettings.sharpnessFSR > 0.0f;
+		dispatchParameters.sharpness = upSettings.sharpnessFSR;
 
-		dispatchParameters.cameraFovAngleVertical = 1.0f;
+		dispatchParameters.cameraFovAngleVertical = cs::engine::GetVerticalFOV();
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
 		dispatchParameters.reset = false;
 		dispatchParameters.preExposure = 1.0f;

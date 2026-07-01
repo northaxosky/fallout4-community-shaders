@@ -87,12 +87,6 @@ struct DrawWorld_Imagespace_RenderEffectRange
 		auto originalOffsetX = gameViewport->offsetX;
 		auto originalOffsetY = gameViewport->offsetY;
 
-		// Preserve jitter for upscaler-aware post passes.
-		if (upscaling->upscaleMethod != Upscaling::UpscaleMethod::kDisabled){
-			gameViewport->offsetX = originalOffsetX;
-			gameViewport->offsetY = originalOffsetY;
-		}
-
 		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
 		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
 
@@ -395,25 +389,33 @@ void Upscaling::LoadSettings()
 	toml::table table;
 	try {
 		table = toml::parse_file(kConfigPath);
-	} catch (const toml::parse_error&) {
+	} catch (const toml::parse_error& e) {
+		L->warn("Failed to parse {}: {}; keeping defaults", kConfigPath, e.description());
 		return;
 	}
 
 	const auto rawMethod = table["settings"]["upscale_method_preference"].value_or<int64_t>(static_cast<int64_t>(settings.upscaleMethodPreference));
 	const auto rawQuality = table["settings"]["quality_mode"].value_or<int64_t>(static_cast<int64_t>(settings.qualityMode));
+	const auto rawPreset = table["settings"]["preset_dlss"].value_or<int64_t>(static_cast<int64_t>(settings.presetDLSS));
 	const auto method = std::clamp(rawMethod, int64_t{ 0 }, int64_t{ 2 });
 	const auto quality = std::clamp(rawQuality, int64_t{ 0 }, int64_t{ 4 });
+	const auto preset = std::clamp(rawPreset, int64_t{ 0 }, int64_t{ 4 });
 	if (method != rawMethod) {
 		L->warn("Clamped invalid upscale_method_preference {} -> {}", rawMethod, method);
 	}
 	if (quality != rawQuality) {
 		L->warn("Clamped invalid quality_mode {} -> {}", rawQuality, quality);
 	}
+	if (preset != rawPreset) {
+		L->warn("Clamped invalid preset_dlss {} -> {}", rawPreset, preset);
+	}
 	settings.upscaleMethodPreference = static_cast<uint>(method);
 	settings.qualityMode = static_cast<uint>(quality);
+	settings.presetDLSS = static_cast<uint>(preset);
+	settings.sharpnessFSR = std::clamp(static_cast<float>(table["settings"]["sharpness_fsr"].value_or<double>(static_cast<double>(settings.sharpnessFSR))), 0.0f, 1.0f);
 
-	L->info("Loaded: upscaleMethod={}, qualityMode={}",
-		settings.upscaleMethodPreference, settings.qualityMode);
+	L->info("Loaded: upscaleMethod={}, qualityMode={}, presetDLSS={}, sharpnessFSR={:.2f}",
+		settings.upscaleMethodPreference, settings.qualityMode, settings.presetDLSS, settings.sharpnessFSR);
 }
 
 void Upscaling::SaveSettings()
@@ -421,13 +423,16 @@ void Upscaling::SaveSettings()
 	toml::table table;
 	try {
 		table = toml::parse_file(kConfigPath);
-	} catch (const toml::parse_error&) {
+	} catch (const toml::parse_error& e) {
+		L->warn("Overwriting unparseable {}: {}", kConfigPath, e.description());
 		table = toml::table{};
 	}
 
 	auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
 	settingsTable.insert_or_assign("upscale_method_preference", static_cast<int64_t>(settings.upscaleMethodPreference));
 	settingsTable.insert_or_assign("quality_mode", static_cast<int64_t>(settings.qualityMode));
+	settingsTable.insert_or_assign("sharpness_fsr", static_cast<double>(settings.sharpnessFSR));
+	settingsTable.insert_or_assign("preset_dlss", static_cast<int64_t>(settings.presetDLSS));
 
 	std::ofstream out(kConfigPath);
 	if (out) {
@@ -470,7 +475,22 @@ void Upscaling::DrawSettings()
 		SaveSettings();
 	}
 
-	ImGui::TextDisabled("Sharpening moved to Imagespace -> Lens -> Sharpen (CAS).");
+	if (activeMethod == UpscaleMethod::kDLSS) {
+		static const char* presetLabels[] = { "Default", "Preset J", "Preset K (transformer)", "Preset L", "Preset M" };
+		int preset = static_cast<int>(settings.presetDLSS);
+		if (ImGui::Combo("DLSS preset", &preset, presetLabels, IM_ARRAYSIZE(presetLabels))) {
+			settings.presetDLSS = static_cast<uint>(std::clamp(preset, 0, 4));
+			SaveSettings();
+		}
+		ImGui::TextDisabled("DLSS sharpening moved to Imagespace -> Lens -> Sharpen (CAS).");
+	}
+
+	if (activeMethod == UpscaleMethod::kFSR) {
+		if (ImGui::SliderFloat("FSR sharpness", &settings.sharpnessFSR, 0.0f, 1.0f, "%.2f"))
+			settings.sharpnessFSR = std::clamp(settings.sharpnessFSR, 0.0f, 1.0f);
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			SaveSettings();
+	}
 }
 
 void Upscaling::OnDataLoaded()
@@ -487,6 +507,7 @@ RE::BSEventNotifyControl Upscaling::ProcessEvent(const RE::MenuOpenCloseEvent& a
 	if (a_event.menuName == "PauseMenu") {
 		if (!a_event.opening) {
 			GetSingleton()->LoadSettings();
+			GetSingleton()->UpdateGameSettings();
 		}
 	}
 
@@ -1149,7 +1170,6 @@ void Upscaling::UpdateUpscaling()
 
 	UpdateSamplerStates(currentMipBias);
 	UpdateRenderTargets(resolutionScale, resolutionScale);
-	UpdateGameSettings();
 
 	if (upscaleMethod == UpscaleMethod::kDisabled) {
 		resolutionScale = 1.0f;
