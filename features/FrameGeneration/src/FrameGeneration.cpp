@@ -12,6 +12,7 @@
 #include "Utils/CSUtil.h"
 #include "DirectXMath.h"
 #include "Render/Engine.h"
+#include "Render/RendererContext.h"
 #include "Env.h"
 #include "Feature.h"
 #include "DX11Hooks.h"
@@ -350,7 +351,8 @@ void FrameGeneration::PostAlpha()
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// Unbind + restore engine OM around the capture dispatch; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
 
 	{
 		auto& colorPreAlpha = rendererData->renderTargets[(uint)RenderTarget::kMain];
@@ -412,7 +414,8 @@ void FrameGeneration::CopyBuffersToSharedResources()
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 	
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// Unbind + restore engine OM around the depth copy/dispatch; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
 
 	auto& motionVector = rendererData->renderTargets[(uint)RenderTarget::kMotionVectors];
 	context->CopyResource(motionVectorBufferShared[dx12SwapChain->frameIndex]->resource.get(), reinterpret_cast<ID3D11Texture2D*>(motionVector.texture));
@@ -607,7 +610,8 @@ void FrameGeneration::GenerateUIAlphaMask()
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
 	// Proxy backbuffer may still be bound as RTV from game rendering; D3D11 returns zeros if read while bound.
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// Unbind + restore engine OM around the UI-alpha dispatch; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
 
 	uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
 	uint32_t dispatchY = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Height) / 8.0f);

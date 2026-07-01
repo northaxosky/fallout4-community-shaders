@@ -15,6 +15,7 @@
 #include "Render/Engine.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/RendererContext.h"
 #include "Render/StreamlineCore.h"
 namespace cs::features
 {
@@ -896,8 +897,8 @@ void Upscaling::CopyDepth()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Unbind RTs before depth compute/copy to avoid OM/CS hazards.
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// Unbind + restore engine OM around the depth compute/copy; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
 
 	static auto gameViewport = cs::engine::GetGraphicsState();
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
@@ -1192,8 +1193,8 @@ void Upscaling::Upscale()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Unbind RTs before sampling/copying the frame buffer to avoid OM/CS hazards.
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// Unbind + restore engine OM around sampling/copying the frame buffer; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
 
 	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kFrameBuffer].srView);
 
@@ -1275,7 +1276,7 @@ void Upscaling::Upscale()
 	}
 
 	// Copy upscaled output back into the frame buffer.
-	context->CopyResource(frameBufferResource.get(), upscalingTexture->resource.get());
+	cs::engine::CopyResourcePreservingOM(context, frameBufferResource.get(), upscalingTexture->resource.get());
 
 	static bool copyLogged = false;
 	if (!copyLogged) {

@@ -1,6 +1,7 @@
 #include "FidelityFX.h"
 
 #include "Render/Engine.h"
+#include "Render/RendererContext.h"
 #include "Log.h"
 #include "Upscaling.h"
 namespace cs::features::upscaling
@@ -117,7 +118,8 @@ void FidelityFX::GenerateReactiveMask()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	context->OMSetRenderTargets(0, nullptr, nullptr);
+	// Unbind + restore engine OM around the reactive-mask dispatch; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
 
 	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
 

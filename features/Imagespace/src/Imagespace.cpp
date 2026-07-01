@@ -19,6 +19,7 @@
 #include <DirectXMath.h>
 
 #include "Render/ComputeScope.h"
+#include "Render/RendererContext.h"
 #include "Render/Engine.h"
 #include "Utils/CSUtil.h"
 #include "Env.h"
@@ -891,7 +892,7 @@ namespace cs::features
 		if (!depthCoCCS || !dilateCS || !blurCS || !compCS) return;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		cs::ComputeScope scope(context);
+		cs::engine::ComputeOMScope scope(context);
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Lens");
 
 		const float nearP = cs::engine::GetCameraNear();
@@ -992,7 +993,7 @@ namespace cs::features
 			context->CSSetShaderResources(0, 4, clearSRV);
 		}
 
-		context->CopyResource(a_fbTex, compositeScratch->resource.get());
+		cs::engine::CopyResourcePreservingOM(context, a_fbTex, compositeScratch->resource.get());
 
 		static bool dofFirstFireLogged = false;
 		if (!dofFirstFireLogged) {
@@ -1156,7 +1157,7 @@ namespace cs::features
 		if (wantComposite && !compCS) return;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		cs::ComputeScope scope(context);
+		cs::engine::ComputeOMScope scope(context);
 
 		// 1. Luminance pyramid: half-res log-luma, then 2x2 reductions.
 		if (wantAdaptive) {
@@ -1442,7 +1443,7 @@ namespace cs::features
 			context->CSSetUnorderedAccessViews(0, 1, clearUAV, nullptr);
 			ID3D11ShaderResourceView* clearSRVs[5] = { nullptr, nullptr, nullptr, nullptr, nullptr };
 			context->CSSetShaderResources(0, 5, clearSRVs);
-			context->CopyResource(fbTex2.get(), compositeScratch->resource.get());
+			cs::engine::CopyResourcePreservingOM(context, fbTex2.get(), compositeScratch->resource.get());
 		}
 
 		// DOF runs after grading and reuses compositeScratch.
