@@ -2,11 +2,9 @@
 
 #include "Render/StreamlineCore.h"
 #include "Render/Engine.h"
+#include "Render/CameraConstants.h"
 #include "Log.h"
 #include "Upscaling.h"
-
-#include <cmath>
-#include <xmmintrin.h>
 
 namespace cs::features::upscaling
 {
@@ -14,25 +12,6 @@ namespace cs::features::upscaling
 
 	namespace
 	{
-		// FO4 stores camera matrices as four __m128 rows; convert to Streamline types.
-		sl::float4x4 ToSLMatrix(const __m128* a_mat)
-		{
-			sl::float4x4 result;
-			for (int i = 0; i < 4; ++i) {
-				alignas(16) float row[4];
-				_mm_store_ps(row, a_mat[i]);
-				result[i] = sl::float4(row[0], row[1], row[2], row[3]);
-			}
-			return result;
-		}
-
-		sl::float3 ToSLFloat3(const __m128& a_v)
-		{
-			alignas(16) float vals[4];
-			_mm_store_ps(vals, a_v);
-			return sl::float3(vals[0], vals[1], vals[2]);
-		}
-
 		// Curated DLSS model presets; K/L/M are the current transformer-based defaults.
 		sl::DLSSPreset MapDLSSPreset(uint a_idx)
 		{
@@ -157,47 +136,27 @@ void Streamline::UpdateConstants(float2 a_jitter)
 	const auto& camView = gameViewport->cameraState.camViewData;
 	const auto& camState = gameViewport->cameraState;
 
-	sl::Constants slConstants = {};
+	cs::engine::CameraConstants cam{};
+	cam.viewMat = camView.viewMat;
+	cam.viewProjUnjittered = camView.viewProjUnjittered;
+	cam.currentViewProjUnjittered = camView.currentViewProjUnjittered;
+	cam.previousViewProjUnjittered = camView.previousViewProjUnjittered;
+	cam.viewUp = &camView.viewUp;
+	cam.viewRight = &camView.viewRight;
+	cam.viewDir = &camView.viewDir;
+	cam.posX = camState.posAdjust.x;
+	cam.posY = camState.posAdjust.y;
+	cam.posZ = camState.posAdjust.z;
 
-	// Unjittered view-to-clip: inv(viewMat) * viewProjUnjittered, mirroring the DLSS-G path.
-	sl::float4x4 viewMatrix = ToSLMatrix(camView.viewMat);
-	sl::float4x4 invView;
-	sl::matrixFullInvert(invView, viewMatrix);
-	sl::float4x4 vpUnjittered = ToSLMatrix(camView.viewProjUnjittered);
-	sl::matrixMul(slConstants.cameraViewToClip, invView, vpUnjittered);
-	sl::matrixFullInvert(slConstants.clipToCameraView, slConstants.cameraViewToClip);
-
-	sl::float4x4 currentVP = ToSLMatrix(camView.currentViewProjUnjittered);
-	sl::float4x4 previousVP = ToSLMatrix(camView.previousViewProjUnjittered);
-	sl::float4x4 invCurrentVP;
-	sl::matrixFullInvert(invCurrentVP, currentVP);
-	sl::matrixMul(slConstants.clipToPrevClip, invCurrentVP, previousVP);
-	sl::matrixFullInvert(slConstants.prevClipToClip, slConstants.clipToPrevClip);
-
-	slConstants.cameraPos = sl::float3(camState.posAdjust.x, camState.posAdjust.y, camState.posAdjust.z);
-	slConstants.cameraUp = ToSLFloat3(camView.viewUp);
-	slConstants.cameraRight = ToSLFloat3(camView.viewRight);
-	slConstants.cameraFwd = ToSLFloat3(camView.viewDir);
-	slConstants.cameraNear = cs::engine::GetCameraNear();
-	slConstants.cameraFar = cs::engine::GetCameraFar();
-	slConstants.cameraAspectRatio = (gameViewport->screenHeight != 0)
-		? static_cast<float>(gameViewport->screenWidth) / static_cast<float>(gameViewport->screenHeight)
-		: 1.0f;
-	slConstants.cameraFOV = 2.0f * std::atan(1.0f / slConstants.cameraViewToClip[1].y);
-	slConstants.cameraMotionIncluded = sl::Boolean::eTrue;
-	slConstants.cameraPinholeOffset = { 0.f, 0.f };
-	slConstants.depthInverted = sl::Boolean::eTrue;
-	slConstants.jitterOffset = { -a_jitter.x, -a_jitter.y };
-	slConstants.mvecScale = { 1, 1 };
 	// First dispatch has undefined temporal history; reset once to avoid a startup ghost.
 	static bool firstConstantsFrame = true;
-	slConstants.reset = firstConstantsFrame ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+	const sl::Boolean resetHistory = firstConstantsFrame ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 	firstConstantsFrame = false;
-	slConstants.motionVectors3D = sl::Boolean::eFalse;
-	slConstants.motionVectorsInvalidValue = FLT_MIN;
-	slConstants.orthographicProjection = sl::Boolean::eFalse;
-	slConstants.motionVectorsDilated = sl::Boolean::eFalse;
-	slConstants.motionVectorsJittered = sl::Boolean::eFalse;
+
+	sl::Constants slConstants = cs::engine::BuildSLConstants(
+		cam, gameViewport->screenWidth, gameViewport->screenHeight,
+		cs::engine::GetCameraNear(), cs::engine::GetCameraFar(),
+		a_jitter.x, a_jitter.y, resetHistory);
 
 	if (SL_FAILED(res, core->slGetNewFrameToken(frameToken, nullptr))) {
 		L->error("Could not get frame token");

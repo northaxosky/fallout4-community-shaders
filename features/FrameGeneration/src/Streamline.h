@@ -15,6 +15,8 @@
 #include <sl_version.h>
 #pragma warning(pop)
 
+#include "Render/CameraConstants.h"
+
 namespace cs::features::framegeneration
 {
 
@@ -43,17 +45,7 @@ public:
 	void AcquireFrameToken();
 	void SetPCLMarker(sl::PCLMarker marker);
 
-	struct CameraData
-	{
-		const __m128* viewMat;
-		const __m128* viewProjUnjittered;
-		const __m128* currentViewProjUnjittered;
-		const __m128* previousViewProjUnjittered;
-		const __m128* viewUp;
-		const __m128* viewRight;
-		const __m128* viewDir;
-		float posX, posY, posZ;
-	};
+	using CameraData = cs::engine::CameraConstants;
 
 	void Present(
 		ID3D12GraphicsCommandList* a_cmdList,

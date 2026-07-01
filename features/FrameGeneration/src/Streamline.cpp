@@ -109,24 +109,6 @@ void StreamlineFG::ReapplyReflexOptions()
 		L->warn("slReflexSetOptions failed during reapply");
 }
 
-static sl::float4x4 toSLMatrix(const __m128* mat)
-{
-	sl::float4x4 result;
-	for (int i = 0; i < 4; i++) {
-		alignas(16) float row[4];
-		_mm_store_ps(row, mat[i]);
-		result[i] = sl::float4(row[0], row[1], row[2], row[3]);
-	}
-	return result;
-}
-
-static sl::float3 toSLFloat3(const __m128* v)
-{
-	alignas(16) float vals[4];
-	_mm_store_ps(vals, *v);
-	return sl::float3(vals[0], vals[1], vals[2]);
-}
-
 void StreamlineFG::AcquireFrameToken()
 {
 	auto* core = cs::Streamline::GetSingleton();
@@ -162,41 +144,9 @@ void StreamlineFG::Present(
 
 	// DLSS-G constants require unjittered matrices.
 	if (core->slSetConstants) {
-		sl::Constants constants{};
-
-		// Derive unjittered projection: inv(viewMat) * viewProjUnjittered.
-		sl::float4x4 viewMatrix = toSLMatrix(a_camera.viewMat);
-		sl::float4x4 invView;
-		sl::matrixFullInvert(invView, viewMatrix);
-		sl::float4x4 vpUnjittered = toSLMatrix(a_camera.viewProjUnjittered);
-		sl::matrixMul(constants.cameraViewToClip, invView, vpUnjittered);
-		sl::matrixFullInvert(constants.clipToCameraView, constants.cameraViewToClip);
-
-		sl::float4x4 currentVP = toSLMatrix(a_camera.currentViewProjUnjittered);
-		sl::float4x4 previousVP = toSLMatrix(a_camera.previousViewProjUnjittered);
-		sl::float4x4 invCurrentVP;
-		sl::matrixFullInvert(invCurrentVP, currentVP);
-		sl::matrixMul(constants.clipToPrevClip, invCurrentVP, previousVP);
-		sl::matrixFullInvert(constants.prevClipToClip, constants.clipToPrevClip);
-
-		constants.cameraPos = sl::float3(a_camera.posX, a_camera.posY, a_camera.posZ);
-		constants.cameraUp = toSLFloat3(a_camera.viewUp);
-		constants.cameraRight = toSLFloat3(a_camera.viewRight);
-		constants.cameraFwd = toSLFloat3(a_camera.viewDir);
-		constants.cameraNear = a_cameraNear;
-		constants.cameraFar = a_cameraFar;
-		constants.cameraAspectRatio = a_screenSize.x / a_screenSize.y;
-		constants.cameraFOV = 2.0f * std::atan(1.0f / constants.cameraViewToClip[1].y);
-		constants.cameraMotionIncluded = sl::Boolean::eTrue;
-		constants.cameraPinholeOffset = { 0.f, 0.f };
-		constants.depthInverted = sl::Boolean::eTrue;
-		constants.jitterOffset = { -a_jitter.x, -a_jitter.y };
-		constants.mvecScale = { 1.0f, 1.0f };
-		constants.reset = sl::Boolean::eFalse;
-		constants.motionVectors3D = sl::Boolean::eFalse;
-		constants.orthographicProjection = sl::Boolean::eFalse;
-		constants.motionVectorsDilated = sl::Boolean::eFalse;
-		constants.motionVectorsJittered = sl::Boolean::eFalse;
+		sl::Constants constants = cs::engine::BuildSLConstants(
+			a_camera, (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y,
+			a_cameraNear, a_cameraFar, a_jitter.x, a_jitter.y, sl::Boolean::eFalse);
 
 		if (SL_FAILED(res, core->slSetConstants(constants, *frameToken, viewport))) {
 			static bool loggedOnce = false;
