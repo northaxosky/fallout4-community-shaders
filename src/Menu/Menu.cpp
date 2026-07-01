@@ -128,9 +128,22 @@ namespace cs
 
 	Menu::~Menu()
 	{
+		// Restore the window proc first so no further input reaches our soon-invalid hook.
+		if (_wndProcHooked && _hwnd && _origWndProc) {
+			SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(_origWndProc));
+			_wndProcHooked = false;
+			_origWndProc = nullptr;
+		}
 		if (_tracyD3D11Ctx) {
 			TracyD3D11Destroy(_tracyD3D11Ctx);
 			_tracyD3D11Ctx = nullptr;
+		}
+		if (_imguiInited) {
+			ReleaseBackbufferRTV();
+			ImGui_ImplDX11_Shutdown();
+			ImGui_ImplWin32_Shutdown();
+			ImGui::DestroyContext();
+			_imguiInited = false;
 		}
 		if (_dxgiAdapter3) {
 			_dxgiAdapter3->Release();
@@ -682,20 +695,23 @@ namespace cs
 		if (m._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-		// Block the game only when ImGui is actively using input; otherwise movement/mouselook continue.
+		// While the menu is open, swallow all keyboard/mouse input so nothing leaks to the game;
+		// ImGui was already fed above, and menu/feature hotkeys ran before this point. Non-input
+		// messages still pass through.
 		if (m._open && m._imguiInited) {
-			const auto& io = ImGui::GetIO();
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||
 				a_msg == WM_RBUTTONDOWN || a_msg == WM_RBUTTONUP ||
 				a_msg == WM_MBUTTONDOWN || a_msg == WM_MBUTTONUP ||
+				a_msg == WM_XBUTTONDOWN || a_msg == WM_XBUTTONUP || a_msg == WM_XBUTTONDBLCLK ||
 				a_msg == WM_MOUSEWHEEL || a_msg == WM_MOUSEHWHEEL ||
 				a_msg == WM_LBUTTONDBLCLK || a_msg == WM_RBUTTONDBLCLK || a_msg == WM_MBUTTONDBLCLK;
 			const bool isKey =
-				a_msg == WM_KEYDOWN || a_msg == WM_KEYUP || a_msg == WM_CHAR;
+				a_msg == WM_KEYDOWN || a_msg == WM_KEYUP || a_msg == WM_CHAR ||
+				a_msg == WM_SYSKEYDOWN || a_msg == WM_SYSKEYUP;
 
-			if (isMouse && io.WantCaptureMouse)   return 0;
-			if (isKey   && io.WantCaptureKeyboard) return 0;
+			if (isMouse || isKey)
+				return 0;
 		}
 
 		return CallWindowProcW(m._origWndProc, a_hwnd, a_msg, a_wparam, a_lparam);
