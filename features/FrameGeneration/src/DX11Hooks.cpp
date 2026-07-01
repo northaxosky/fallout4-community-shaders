@@ -101,26 +101,21 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 		}
 	}
 
-	// DLSS-G: upgrade device+factory via Streamline
+	// DLSS-G: upgrade device+factory via Streamline. Backend selection already routed DLSS-G away
+	// from ENB (ENB owns the swap chain), so this only runs when Streamline may own it.
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
-		if (cs::env::IsENBLoaded()) {
-			// ENB owns the swap chain; Streamline must not upgrade it (repo-wide ENB rule). Use FSR3.
-			L->warn("DLSS-G unavailable under ENB (swap chain owned by ENB); falling back to FSR3");
-			frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
-		} else {
-			auto* core = cs::Streamline::GetSingleton();
+		auto* core = cs::Streamline::GetSingleton();
 
-			ID3D12Device* rawDevice = proxy->d3d12Device.get();
-			core->slUpgradeInterface((void**)&rawDevice);
-			proxy->d3d12Device.copy_from(rawDevice);
+		ID3D12Device* rawDevice = proxy->d3d12Device.get();
+		core->slUpgradeInterface((void**)&rawDevice);
+		proxy->d3d12Device.copy_from(rawDevice);
 
-			IDXGIFactory* rawFactory = (IDXGIFactory*)factory;
-			core->slUpgradeInterface((void**)&rawFactory);
-			factory = (IDXGIFactory5*)rawFactory;
+		IDXGIFactory* rawFactory = (IDXGIFactory*)factory;
+		core->slUpgradeInterface((void**)&rawFactory);
+		factory = (IDXGIFactory5*)rawFactory;
 
-			StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
-		}
+		StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
 	}
 
 	proxy->CreateD3D12CommandQueues();
@@ -199,8 +194,21 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
 		if (userEnabled && frameGen->settings.frameGenType == 1) {
-			frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kDLSSG;
-			hasBackend = true;
+			if (cs::env::IsENBLoaded()) {
+				// ENB owns the swap chain, so Streamline can't upgrade it for DLSS-G. Use FSR3-FG when
+				// its runtime is loaded, otherwise leave FG off rather than crash in the FSR3 path later.
+				if (fidelityFX->module) {
+					L->warn("DLSS-G unavailable under ENB; using FSR3 frame generation instead");
+					frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
+					hasBackend = true;
+				} else {
+					L->warn("DLSS-G selected under ENB but FSR3 runtime not loaded; disabling frame generation");
+					hasBackend = false;
+				}
+			} else {
+				frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kDLSSG;
+				hasBackend = true;
+			}
 		} else if (userEnabled && frameGen->settings.frameGenType == 2) {
 			auto xess = XeSSFG::GetSingleton();
 			if (xess->fgModule && xess->xellModule) {
