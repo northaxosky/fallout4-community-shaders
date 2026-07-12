@@ -64,6 +64,7 @@ When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't 
 - [CMake 3.21+](https://cmake.org/)
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment variable set
 - [Git](https://git-scm.com/)
+- [Git LFS](https://git-lfs.com/) (included with Git for Windows)
 - Python 3 with NumPy for the `generate-reactor-lut.py` LUT helper (optional)
 - The shared **devkit** workbench checked out as a sibling `../devkit/` (or `DEVKIT_DIR`) for the build/deploy/launch loop. Without it, use the raw CMake commands below and mirror `scripts/mod-manifest.toml` manually.
 
@@ -75,6 +76,7 @@ When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't 
 ## Build
 
 ```bash
+git lfs install
 git clone --recursive https://github.com/northaxosky/fallout4-community-shaders.git
 cd fallout4-community-shaders
 
@@ -83,6 +85,15 @@ cd fallout4-community-shaders
 
 cmake -S . --preset=default
 cmake --build build --config Release
+```
+
+If cloning stopped with `git-lfs: command not found`, install Git LFS, open a new shell, and resume the checkout:
+
+```bash
+git lfs install
+cd fallout4-community-shaders
+git submodule update --init --recursive --checkout
+git -C extern/Streamline lfs pull
 ```
 
 Output: `build/Release/FO4CommunityShaders.dll` plus runtime SDK DLLs staged under `package/F4SE/Plugins/`.
