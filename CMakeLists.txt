@@ -110,6 +110,23 @@ register_feature(ShaderCatalog)
 register_feature(ShaderReplacement)
 
 enable_testing()
+
+add_executable(FeatureConfigTests
+	tests/FeatureConfigTests.cpp
+	src/Settings/FeatureConfig.cpp
+	src/Settings/FeatureConfig.h
+)
+target_compile_features(FeatureConfigTests PRIVATE cxx_std_23)
+target_include_directories(FeatureConfigTests PRIVATE "${CMAKE_SOURCE_DIR}/src")
+target_link_libraries(FeatureConfigTests PRIVATE tomlplusplus::tomlplusplus)
+if(MSVC)
+	target_compile_options(FeatureConfigTests PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
+	target_link_options(FeatureConfigTests PRIVATE /WX)
+endif()
+
+add_test(NAME FeatureConfig COMMAND FeatureConfigTests)
+set_tests_properties(FeatureConfig PROPERTIES LABELS "configuration;unit")
+
 set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/verify-shader-roundtrip.ps1")
 add_test(
 	NAME ShaderRoundtrip
