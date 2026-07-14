@@ -1,0 +1,148 @@
+# Contributing
+
+FO4 Community Shaders is an experimental Windows plugin built as one F4SE DLL. Keep
+changes focused, preserve support for the declared runtime, and treat successful
+compilation as separate from in-game rendering validation.
+
+## Requirements
+
+The default local toolchain is:
+
+- Windows x64
+- Visual Studio 2026 with the Desktop development with C++ workload
+- CMake 4.2 or newer
+- [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set
+- [Git](https://git-scm.com/) and [Git LFS](https://git-lfs.com/)
+
+Visual Studio 2022 is also supported through the `ci` preset and requires CMake 3.21
+or newer. The two presets share the `build` directory, so use a clean build directory
+when switching generators.
+
+CTest additionally requires PowerShell 7 (`pwsh`) and `fxc.exe` from the Windows SDK.
+Set `FXC_PATH` to use a compiler outside the default Windows SDK location.
+
+Optional tooling:
+
+- Git Bash, `curl`, `unzip`, and `sha256sum` or `shasum` for runtime SDK staging
+- Python 3 with NumPy for `scripts/generate-reactor-lut.py`
+- The shared devkit workbench for deploy, launch, and log-tail workflows
+
+## Clone
+
+Clone recursively because CommonLibF4, FidelityFX-SDK, Streamline, and XeSS are
+submodules, and CommonLibF4 has its own nested submodule.
+
+```bash
+git lfs install
+git clone --recursive https://github.com/northaxosky/fallout4-community-shaders.git
+cd fallout4-community-shaders
+git lfs pull
+git submodule foreach --recursive "git lfs install --local && git lfs pull"
+```
+
+If checkout stopped with `git-lfs: command not found`, install Git LFS, open a new
+shell, and resume from the repository root:
+
+```bash
+git lfs install
+git submodule sync --recursive
+git submodule update --init --recursive --checkout
+git -C extern/Streamline lfs pull
+```
+
+The Streamline submodule contains LFS-backed NGX libraries required at link time.
+CMake reports an actionable error if they are missing or remain as pointer files.
+
+## Configure and build
+
+Visual Studio 2026:
+
+```bash
+cmake -S . --preset=default
+cmake --build build --config Release --target FO4CommunityShaders --parallel
+```
+
+Visual Studio 2022:
+
+```bash
+cmake -S . --preset=ci
+cmake --build build --config Release --target FO4CommunityShaders --parallel
+```
+
+The plugin is written to `build\Release\FO4CommunityShaders.dll`. Release builds use
+link-time optimization and treat compiler and linker warnings as errors.
+
+## Test
+
+Run the registered CTest suite against the Release build:
+
+```bash
+ctest --test-dir build -C Release --output-on-failure
+```
+
+`ShaderRoundtrip` recompiles the reconstructed deferred shaders under
+`shaders\lighting\` and checks their DXBC hashes. The directional
+`bsdf_light_deferred` hash is a commit-locked invariant; revert drift rather than
+re-baselining it. Update other baselines only for deliberate shader changes.
+
+## Stage runtime SDKs
+
+The source submodules provide headers and link libraries. A complete mod installation
+also needs proprietary runtime DLLs, which are not build outputs:
+
+```bash
+./scripts/fetch-sdks.sh
+```
+
+Run the script from Git Bash. It verifies and caches the NVIDIA Streamline and AMD
+FidelityFX archives, then stages NVIDIA, AMD, and Intel runtime DLLs under
+`package\F4SE\Plugins\`. Pass `--force` to refresh files already present.
+
+## Install or deploy
+
+The repository does not have a CMake install target or package-generation target.
+For a manual source installation, copy the built DLL and every required asset into a
+mod root using [scripts/mod-manifest.toml](scripts/mod-manifest.toml) as the canonical
+source-to-`Data` mapping.
+
+The optional shared devkit automates this workflow. Place it at `..\devkit\` or set
+`DEVKIT_DIR`. A first deployment should include configuration, shaders, presets, LUTs,
+and runtime SDK files:
+
+```bash
+./scripts/deploy.sh -IncludeConfig
+```
+
+Common iterative workflows:
+
+```bash
+./scripts/deploy.sh
+./scripts/deploy.sh deploy
+./scripts/test.sh
+```
+
+The last command builds, deploys, launches Fallout 4 through MO2/F4SE, and tails the
+plugin log. It does not perform automated visual comparison; rendering behavior must
+be checked in game.
+
+To diagnose a devkit setup directly:
+
+```powershell
+pwsh ..\devkit\devkit.ps1 doctor -Project community-shaders
+```
+
+## Project layout
+
+```text
+src\                Core feature framework, renderer hooks, menu, and presets
+features\<Name>\    Feature source and optional runtime-compiled shaders
+shaders\lighting\   Reconstructed deferred shaders with roundtrip baselines
+cmake\              Build integration for CommonLibF4 and graphics SDKs
+extern\             Recursive source submodules
+package\            Static mod assets and staged runtime SDK files
+scripts\            SDK, deployment, and shader-validation tooling
+docs\               User and implementation documentation
+```
+
+Before submitting a change, build the affected configuration, run CTest, and perform
+an in-game check for rendering or hook changes.

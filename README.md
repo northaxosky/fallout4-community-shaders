@@ -1,134 +1,93 @@
 # FO4 Community Shaders
 
-Port of [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders) to Fallout 4.
- 
-Press **END** in game to open the settings menu. Press **Shift+F11** to toggle the performance overlay.
+An experimental [F4SE](https://f4se.silverlock.org/) plugin that ports ideas from
+[Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders)
+to Fallout 4. It hooks the DirectX renderer to provide upscaling, frame generation,
+post-processing, diagnostics, and shader-development tools.
 
-## Game compatibility
+> [!WARNING]
+> Version `0.2.0` is active work in progress. Features are incomplete, unstable,
+> unavailable on some systems, or require a restart after settings change. The
+> repository does not currently publish a packaged release; source builds are intended
+> for development and testing.
 
-| Runtime | Status |
+## Compatibility
+
+The current plugin metadata targets Fallout 4 runtime **1.11.191**. Older `1.10.x`
+runtime-specific code paths remain in the project, but they are not currently
+advertised or validated as supported.
+
+[Fallout 4 Script Extender](https://f4se.silverlock.org/) and
+[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327) are required.
+
+## Current features
+
+Being listed here means the feature is compiled into the plugin, not that it has been
+fully validated in game.
+
+| Feature | Current implementation | Initial state |
+|---|---|---|
+| Motion Vector Fixes | Repairs player, weapon, menu, animated-object, and LOD motion-vector paths | Always active |
+| Upscaling | DLSS and FSR3 upscaling or native AA, with quality modes and sharpening controls. XeSS upscaling is not implemented | DLSS Quality |
+| Frame Generation | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop | FSR3-FG, 2x |
+| Imagespace | Tonemapping, exposure, bloom, 32^3 LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles | Enabled, Standard style |
+| Performance Overlay | FPS, frame-time, latency, and backend metrics with configurable layout and graphs | Disabled |
+| RenderDoc | In-game frame-capture controls for an external RenderDoc runtime | Disabled |
+
+### Developer tools
+
+| Feature | Current implementation | Initial state |
+|---|---|---|
+| Shader Catalog | Records D3D11 shader creation and known `BSShader` attribution to SQLite | Disabled; restart required |
+| Shader Replacement | Replaces selected pixel shaders with reconstructed HLSL for validation | Disabled; restart required |
+
+## Controls
+
+| Key | Action |
 |---|---|
-| OG (1.10.163) | Supported |
-| NG (1.10.984) | Supported |
-| AE (1.10.980) | Supported |
+| **End** | Open or close the settings menu |
+| **Shift+F11** | Toggle the Performance Overlay when it is enabled |
+| **F11** | Capture one frame when RenderDoc is enabled |
+| **Shift+F11** | Capture multiple frames when RenderDoc is enabled; this takes priority over the overlay shortcut |
 
-A single DLL handles all three runtimes via [Address Library](https://www.nexusmods.com/fallout4/mods/47327) IDs. OG/NG/AE share a single binary; nothing per-runtime needs to be selected at install time.
-
-## Features
-
-| Feature | Description |
-|---|---|
-| MotionVectorFixes | Fixes weapon ghosting, menu ghosting, animated objects, LOD motion vectors |
-| Upscaling | DLSS / FSR3 / XeSS with quality modes; replaces engine TAA, dynamic-resolution aware |
-| FrameGeneration | DLSS-G / FSR3-FG / XeSS-FG; D3D11/D3D12 interop |
-| Imagespace | Tonemap (Hable / Reinhard / Lottes), 32^3 LUT colour grading, adaptive exposure, HDR bloom, vignette + chromatic aberration + CAS sharpen, Bokeh DOF, lens flare. Per-weather profile blending, Subtle / Standard / Vivid / Cinematic presets, suite-wide ENB yield with opt-in stacking |
-| PerformanceOverlay | FPS / frametime overlay with 4 presets, four-corner snap or free-drag, Shift+F11 toggle. Backend-reported displayed FPS for DLSS-G and XeSS-FG (engine FPS shown alongside) |
-| RenderDoc | One-click frame capture from inside the menu |
-
-## Developer tools
-
-| Tool feature | Description |
-|---|---|
-| ShaderCatalog | Runtime D3D shader inventory with SQLite output and `BSShader::SetupTechnique` attribution |
-| ShaderReplacement | Development-only pixel-shader substitution harness for validating reconstructed FO4 shaders |
+Feature configuration files are stored directly under
+`Data\F4SE\Plugins\FO4CommunityShaders\`. Supporting assets such as Imagespace LUTs,
+shaders, and presets live in subdirectories beneath that path.
 
 ## Presets
 
-Cross-feature `.toml` preset library at `Data\F4SE\Plugins\FO4CommunityShaders\Presets\<name>.toml`. Five builtins ship with the package (`Default`, `Cinematic-Night`, `Neutral-Realistic`, `Reactor-Inspired`, `Vivid-Daylight`) covering Imagespace settings and per-weather profiles. Apply from the **Presets** header at the top of the menu; the active preset is restored on next launch. Authoring + scope rules in [docs/Presets.md](docs/Presets.md).
+The preset framework currently captures **Imagespace only**. Five read-only builtins
+ship under `Presets\Builtin\`: `Default`, `Cinematic-Night`, `Neutral-Realistic`,
+`Reactor-Inspired`, and `Vivid-Daylight`. User presets are stored directly under
+`Presets\`.
 
-Each feature also exposes a **Reset to defaults** button in its settings page (uniform across the menu via the `RestoreDefaultSettings` virtual).
+Presets are managed from the header at the top of the in-game menu. A selected preset
+is restored on the next launch only when **Auto-load on boot** is enabled. See
+[Preset documentation](docs/Presets.md) for paths, controls, and the TOML schema.
 
-## Installation
+## Compatibility notes
 
-1. Install [Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327) and [Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/) first.
-2. Drop the release archive into Mod Organizer 2 (or any mod manager). The shipped layout is the canonical `Data/F4SE/Plugins/...` tree.
-3. Launch the game via F4SE. On first launch the plugin writes default `.toml` configs under `Data\F4SE\Plugins\FO4CommunityShaders\<Feature>\`.
-4. In game, press **END** to open the settings menu and toggle features.
+- Frame generation requires a D3D12 feature-level 12.0 device and the runtime files
+  for the selected backend. Backend availability depends on the device and SDK.
+- Changing the frame-generation backend or multiplier requires a restart. RenderDoc,
+  Shader Catalog, and Shader Replacement are also initialized at startup.
+- ENB handling is feature-specific. Imagespace yields to ENB unless explicitly forced,
+  Upscaling is limited to Native AA, and DLSS-G is not used under ENB. Frame generation
+  may fall back to FSR3-FG when that runtime is available.
+- Imagespace does not run CAS sharpening while chromatic aberration is active.
+- RenderDoc requires an external `renderdoc.dll` exposing API 1.7.0 and is incompatible
+  with DLSS-G for that session.
+- A successful build or launch does not prove that a rendering path is visually correct.
+  In-game validation is still required.
 
-### ENB coexistence
+## Building and testing
 
-When ENB is loaded, the plugin auto-yields most effects to ENB so the two don't double-up. Each feature exposes a `force_with_enb` setting (or feature-level toggle) so you can stack specific passes on top of ENB. Streamline-based features (DLSS / DLSS-G / Reflex) skip swap-chain upgrades when ENB is detected, because ENB already owns the swap chain.
-
-### Performance notes
-
-- FrameGeneration: requires hardware support (NVIDIA RTX 40+ for DLSS-G, AMD RDNA3+ for FSR3-FG with hardware path, Intel Arc for XeSS-FG). Effective on a GPU that already runs the game at 60+ fps; below that, latency dominates the perceived smoothness benefit.
-- Use the PerformanceOverlay (Shift+F11) to bisect impact when toggling features.
-
-## Known issues
-
-- **DLSS-G crosshair / weapon-reticle ghosting.** Bulk HUD ghosting was fixed by hooking `kBufferTypeUIAlpha`, but the dot crosshair and weapon "+" reticle still motion-warp under DLSS-G because they're drawn into `kFrameBuffer` before the HUDless capture. FSR3 and XeSS-FG are unaffected. Investigation ongoing.
-
-## Requirements
-
-- [Visual Studio 2022](https://visualstudio.microsoft.com/) (Desktop C++ workload)
-- [CMake 3.21+](https://cmake.org/)
-- [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` environment variable set
-- [Git](https://git-scm.com/)
-- [Git LFS](https://git-lfs.com/) (included with Git for Windows)
-- Python 3 with NumPy for the `generate-reactor-lut.py` LUT helper (optional)
-- The shared **devkit** workbench checked out as a sibling `../devkit/` (or `DEVKIT_DIR`) for the build/deploy/launch loop. Without it, use the raw CMake commands below and mirror `scripts/mod-manifest.toml` manually.
-
-## User Requirements
-
-- [Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)
-- [Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)
-
-## Build
-
-```bash
-git lfs install
-git clone --recursive https://github.com/northaxosky/fallout4-community-shaders.git
-cd fallout4-community-shaders
-
-# Fetch proprietary SDK runtime DLLs (NVIDIA Streamline, AMD FidelityFX, Intel XeSS)
-./scripts/fetch-sdks.sh
-
-cmake -S . --preset=default
-cmake --build build --config Release
-```
-
-If cloning stopped with `git-lfs: command not found`, install Git LFS, open a new shell, and resume the checkout:
-
-```bash
-git lfs install
-cd fallout4-community-shaders
-git submodule update --init --recursive --checkout
-git -C extern/Streamline lfs pull
-```
-
-Output: `build/Release/FO4CommunityShaders.dll` plus runtime SDK DLLs staged under `package/F4SE/Plugins/`.
-
-## Deploy and test
-
-Deploy runs through the shared **devkit** workbench in the sibling `../devkit/`. Community Shaders is registered as the `community-shaders` devkit project, which builds via the `default` CMake preset and deploys into the `Community Shaders - Dev` MO2 mod. `scripts/deploy.sh` and `scripts/test.sh` are thin shims over it (set `DEVKIT_DIR` if devkit lives elsewhere).
-
-```bash
-./scripts/deploy.sh                 # build + deploy   (devkit cycle)
-./scripts/deploy.sh deploy          # deploy only      (devkit deploy)
-./scripts/deploy.sh deploy -IncludeConfig   # also push shaders / tomls / presets / SDK DLLs
-./scripts/test.sh                   # build + deploy + launch via MO2/F4SE + tail the log
-
-# Or drive devkit directly (PowerShell):
-pwsh ../devkit/devkit.ps1 doctor -Project community-shaders   # verify paths + toolchain
-pwsh ../devkit/devkit.ps1 cycle  -Project community-shaders -Launch -Tail
-```
-
-`scripts/mod-manifest.toml` is the devkit-independent record of the deployed `Data/F4SE/Plugins/...` asset layout; devkit's `community-shaders` profile mirrors it. Confirming in-game visual behavior is a human step - a successful build/deploy/launch is not proof a pass renders correctly.
-
-## Project structure
-
-```
-src/                          Core: Feature framework, F4SE entry
-features/<Name>/              One subdirectory per feature
-extern/                       Submodules: CommonLibF4, FidelityFX-SDK, Streamline, XeSS
-include/                      Shared headers (PCH, Detours static lib)
-cmake/                        Build config (Common.cmake, Plugin.h.in, Version.rc.in)
-package/F4SE/Plugins/         Static runtime assets and proprietary SDK DLL staging
-scripts/                      Build, deploy, smoke, and shader-validation helpers
-shaders/                      Reconstructed reference HLSL and shader notes
-test-results/                 Ignored runtime validation output
-```
+There is no install or archive target yet. See [CONTRIBUTING.md](CONTRIBUTING.md) for
+the supported toolchains, recursive clone and Git LFS setup, build and test commands,
+runtime SDK staging, and optional devkit deployment.
 
 ## License
 
-GPL-3.0-or-later with Modding Exception and GPL-3.0 Linking Exception (matching upstream Skyrim Community Shaders). See `LICENSE` and `EXCEPTIONS.md`.
+Licensed under GPL-3.0-or-later with the project
+[Modding and Linking Exceptions](EXCEPTIONS.md). See [LICENSE](LICENSE) for the full
+license text.
