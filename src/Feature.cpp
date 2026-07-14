@@ -292,6 +292,16 @@ namespace cs
 		return PathExists(FeatureConfigPath(*this));
 	}
 
+	ActivationResult Feature::Activate()
+	{
+		ResetLoadFailure();
+		Load();
+		if (HasLoadFailed()) {
+			return ActivationResult::Failed(LoadFailureReason());
+		}
+		return ActivationResult::Active();
+	}
+
 	std::string Feature::GetPresetKey() const
 	{
 		const auto name = GetName();
@@ -313,23 +323,35 @@ namespace cs
 
 	void FeatureManager::Register(Feature* a_feature)
 	{
-		_features.push_back(a_feature);
+		if (std::find(_registeredFeatures.begin(), _registeredFeatures.end(), a_feature) != _registeredFeatures.end()) {
+			return;
+		}
+
+		const auto name = a_feature->GetName();
+		if (std::find_if(_registeredFeatures.begin(), _registeredFeatures.end(), [name](const Feature* a_registered) {
+				return a_registered->GetName() == name;
+			}) != _registeredFeatures.end()) {
+			return;
+		}
+
+		_registeredFeatures.push_back(a_feature);
 	}
 
 	void FeatureManager::LoadAll()
 	{
-		_features = SortFeaturesByDependencies(_features);
-		_loadedFeatures.clear();
-		for (auto* feature : _features) {
-			feature->SetLoaded(false);
+		for (auto* feature : _registeredFeatures) {
+			feature->SetState({});
 		}
+
+		const auto orderedFeatures = SortFeaturesByDependencies(_registeredFeatures);
+		_loadedFeatures.clear();
 
 		const bool autoInstallAll = LoadAutoInstallAllFeatures();
 		L->info("Feature INI auto-install: {}", autoInstallAll ? "enabled" : "disabled");
 
 		std::unordered_map<std::string_view, bool> installedByName;
-		installedByName.reserve(_features.size());
-		for (auto* feature : _features) {
+		installedByName.reserve(orderedFeatures.size());
+		for (auto* feature : orderedFeatures) {
 			bool installed;
 			if (autoInstallAll) {
 				// Auto-install only counts as installed if the companion INI actually exists now;
@@ -342,14 +364,35 @@ namespace cs
 				installed = feature->IsInstalled();
 			}
 			installedByName.insert_or_assign(feature->GetName(), installed);
+			feature->SetState({
+				.installed = installed,
+				.desiredActive = installed,
+				.runtimeState = installed ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
+				.detail = installed ? std::string{} : "Feature configuration is missing"
+			});
+		}
+
+		const std::unordered_set<const Feature*> orderedSet(orderedFeatures.begin(), orderedFeatures.end());
+		for (auto* feature : _registeredFeatures) {
+			if (orderedSet.contains(feature)) {
+				continue;
+			}
+
+			const bool installed = feature->IsInstalled();
+			feature->SetState({
+				.installed = installed,
+				.desiredActive = installed,
+				.runtimeState = installed ? FeatureRuntimeState::kFailed : FeatureRuntimeState::kInactive,
+				.detail = installed ? "Dependency order could not be resolved" : "Feature configuration is missing"
+			});
 		}
 
 		// Track which features actually loaded so a dependent can be skipped when a prerequisite
 		// is missing, uninstalled, or failed. Topological order guarantees deps are attempted first.
 		std::unordered_set<std::string_view> loadedNames;
-		loadedNames.reserve(_features.size());
+		loadedNames.reserve(orderedFeatures.size());
 
-		for (auto* feature : _features) {
+		for (auto* feature : orderedFeatures) {
 			if (const auto installedIt = installedByName.find(feature->GetName()); installedIt == installedByName.end() || !installedIt->second) {
 				L->info("Feature {} not installed (no INI); skipping", feature->GetName());
 				continue;
@@ -359,6 +402,9 @@ namespace cs
 			for (const auto dependency : feature->GetDependencies()) {
 				if (loadedNames.find(dependency) == loadedNames.end()) {
 					L->error("Feature {} requires {} which did not load; skipping", feature->GetName(), dependency);
+					feature->SetRuntimeState(
+						FeatureRuntimeState::kFailed,
+						"Required feature '" + ToString(dependency) + "' did not load");
 					depsSatisfied = false;
 					break;
 				}
@@ -369,26 +415,29 @@ namespace cs
 
 			L->info("Loading feature: {}", feature->GetName());
 			bool ok = true;
+			feature->ResetLoadFailure();
 			try {
 				feature->Load();
 				if (feature->HasLoadFailed()) {
 					ok = false;
+					feature->SetRuntimeState(FeatureRuntimeState::kFailed, feature->LoadFailureReason());
 					L->error("Feature {} reported a load failure: {}", feature->GetName(), feature->LoadFailureReason());
 				}
 			} catch (const std::exception& e) {
 				ok = false;
+				feature->SetRuntimeState(FeatureRuntimeState::kDegraded, e.what());
 				L->error("Feature {} threw during Load(): {}", feature->GetName(), e.what());
 			} catch (...) {
 				ok = false;
+				feature->SetRuntimeState(FeatureRuntimeState::kDegraded, "Non-standard exception thrown during Load()");
 				L->error("Feature {} threw a non-standard exception during Load()", feature->GetName());
 			}
 
 			if (!ok) {
-				feature->SetLoaded(false);
 				continue;
 			}
 
-			feature->SetLoaded(true);
+			feature->SetRuntimeState(FeatureRuntimeState::kActive);
 			_loadedFeatures.push_back(feature);
 			loadedNames.insert(feature->GetName());
 		}

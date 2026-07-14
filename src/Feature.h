@@ -1,5 +1,7 @@
 #pragma once
 
+#include "FeatureState.h"
+
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,9 +25,14 @@ namespace cs
 		virtual std::vector<std::string_view> GetDependencies() const { return {}; }
 		virtual bool IsInstalled() const;
 
-		bool IsLoaded() const noexcept { return _loaded; }
+		const FeatureState& GetState() const noexcept { return _state; }
+		bool IsActive() const noexcept { return _state.IsActive(); }
+		bool IsDegraded() const noexcept { return _state.IsDegraded(); }
+		bool IsHealthy() const noexcept { return _state.IsHealthy(); }
+		bool IsLoaded() const noexcept { return IsHealthy(); }
 
 		virtual void Load() {}
+		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
 
 		// Runs after all features' Load(). Defer here to wrap hooks installed in another feature's Load().
@@ -70,7 +77,7 @@ namespace cs
 		// Hide a feature from the menu entirely (e.g. developer-only tooling).
 		virtual bool IsInMenu() const { return true; }
 
-		// Drawn for features that registered but did not load; unwired today (no load-state tracking).
+		// Drawn for registered features that are not active; menu wiring is deferred.
 		virtual void DrawUnloadedUI() {}
 
 		// Drawn when a feature failed to load, so the user sees why instead of a silent skip.
@@ -105,11 +112,21 @@ namespace cs
 
 	private:
 		friend class FeatureManager;
-		void SetLoaded(bool a_loaded) noexcept { _loaded = a_loaded; }
+		void SetState(FeatureState a_state) { _state = std::move(a_state); }
+		void SetRuntimeState(FeatureRuntimeState a_state, std::string a_detail = {})
+		{
+			_state.runtimeState = a_state;
+			_state.detail = std::move(a_detail);
+		}
+		void ResetLoadFailure() noexcept
+		{
+			_loadFailed = false;
+			_loadFailureReason.clear();
+		}
 		bool HasLoadFailed() const noexcept { return _loadFailed; }
 		const std::string& LoadFailureReason() const noexcept { return _loadFailureReason; }
 
-		bool        _loaded = false;
+		FeatureState _state;
 		bool        _loadFailed = false;
 		std::string _loadFailureReason;
 	};
@@ -146,10 +163,11 @@ namespace cs
 		void OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
 
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
+		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
 
 	private:
 		FeatureManager() = default;
-		std::vector<Feature*> _features;
+		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _loadedFeatures;
 		bool                  _d3d11ReadyDone = false;
 	};
