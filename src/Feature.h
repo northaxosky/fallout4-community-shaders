@@ -31,6 +31,8 @@ namespace cs
 		bool IsHealthy() const noexcept { return _state.IsHealthy(); }
 		bool IsLoaded() const noexcept { return IsHealthy(); }
 
+		// Configure must not install hooks, load providers, or register callbacks.
+		virtual bool Configure(const toml::table& /*a_config*/, std::string& /*a_error*/) { return true; }
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}

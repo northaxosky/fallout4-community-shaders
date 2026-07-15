@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "Plugin.h"
+#include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 
 #include <toml++/toml.hpp>
@@ -384,6 +385,37 @@ namespace cs
 				.detail = installed ? "Dependency order could not be resolved" : "Feature configuration is missing"
 			});
 		}
+
+		const auto failConfiguration = [](Feature* a_feature, std::string a_detail) {
+			if (a_detail.empty()) {
+				a_detail = "Feature configuration failed";
+			}
+			a_feature->SetRuntimeState(FeatureRuntimeState::kFailed, a_detail);
+			L->error("Feature {} configuration failed: {}", a_feature->GetName(), a_detail);
+		};
+
+		for (auto* feature : _activationOrder) {
+			if (!feature->GetState().installed) {
+				continue;
+			}
+
+			auto loadResult = feature_config::LoadFile(FeatureConfigPath(*feature));
+			if (loadResult.status != feature_config::FileLoadStatus::kParsed) {
+				failConfiguration(feature, std::move(loadResult.error));
+				continue;
+			}
+
+			std::string error;
+			try {
+				if (!feature->Configure(loadResult.table, error)) {
+					failConfiguration(feature, std::move(error));
+				}
+			} catch (const std::exception& e) {
+				failConfiguration(feature, e.what());
+			} catch (...) {
+				failConfiguration(feature, "Feature configuration threw a non-standard exception");
+			}
+		}
 	}
 
 	void FeatureManager::ActivateAll()
@@ -396,6 +428,9 @@ namespace cs
 		loadedNames.reserve(_activationOrder.size());
 
 		for (auto* feature : _activationOrder) {
+			if (feature->GetState().runtimeState == FeatureRuntimeState::kFailed) {
+				continue;
+			}
 			if (!feature->GetState().desiredActive) {
 				L->info("Feature {} not installed (no INI); skipping", feature->GetName());
 				continue;
