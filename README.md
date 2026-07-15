@@ -25,21 +25,40 @@ advertised or validated as supported.
 Being listed here means the feature is compiled into the plugin, not that it has been
 fully validated in game.
 
-| Feature | Current implementation | Initial state |
+| Feature | Current implementation | Packaged state |
 |---|---|---|
-| Motion Vector Fixes | Repairs player, weapon, menu, animated-object, and LOD motion-vector paths | Always active |
-| Upscaling | DLSS and FSR3 upscaling or native AA, with quality modes and sharpening controls. XeSS upscaling is not implemented | DLSS Quality |
-| Frame Generation | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop | FSR3-FG, 2x |
-| Imagespace | Tonemapping, exposure, bloom, 32^3 LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles | Enabled, Standard style |
-| Performance Overlay | FPS, frame-time, latency, and backend metrics with configurable layout and graphs | Disabled |
-| RenderDoc | In-game frame-capture controls for an external RenderDoc runtime | Disabled |
+| Motion Vector Fixes | Repairs player, weapon, menu, animated-object, and LOD motion-vector paths | Inactive |
+| Upscaling | DLSS and FSR3 upscaling or native AA, with quality modes and sharpening controls. XeSS upscaling is not implemented | Inactive |
+| Frame Generation | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop | Inactive |
+| Imagespace | Tonemapping, exposure, bloom, 32^3 LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles | Inactive |
+| Performance Overlay | FPS, frame-time, latency, and backend metrics with configurable layout and graphs | Inactive |
+| RenderDoc | In-game frame-capture controls for an external RenderDoc runtime | Inactive |
 
 ### Developer tools
 
-| Feature | Current implementation | Initial state |
+| Feature | Current implementation | Packaged state |
 |---|---|---|
-| Shader Catalog | Records D3D11 shader creation and known `BSShader` attribution to SQLite | Disabled; restart required |
-| Shader Replacement | Replaces selected pixel shaders with reconstructed HLSL for validation | Disabled; restart required |
+| Shader Catalog | Records D3D11 shader creation and known `BSShader` attribution to SQLite | Inactive |
+| Shader Replacement | Replaces selected pixel shaders with reconstructed HLSL for validation | Inactive |
+
+## Feature activation
+
+Every feature is opt-in. Its root TOML must contain:
+
+```toml
+[feature]
+enabled = true
+```
+
+Activation is evaluated once during startup. Edit the feature file under
+`Data\F4SE\Plugins\FO4CommunityShaders\`, then restart the game. The in-game menu shows
+each registered feature's requested and runtime state, but does not load or unload
+features dynamically.
+
+Existing explicit legacy toggles are honored when `[feature].enabled` is absent. Empty
+or information-only files are inactive, malformed files fail closed, and the plugin
+never rewrites feature activation during startup. Presets configure only features that
+were already activated; they cannot activate Imagespace or another feature.
 
 ## Controls
 
