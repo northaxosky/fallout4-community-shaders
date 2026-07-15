@@ -14,29 +14,6 @@ namespace cs
 		kDegraded
 	};
 
-	struct FeatureState
-	{
-		bool installed{ false };
-		bool desiredActive{ false };
-		FeatureRuntimeState runtimeState{ FeatureRuntimeState::kPending };
-		std::string detail;
-
-		bool IsActive() const noexcept
-		{
-			return runtimeState == FeatureRuntimeState::kActive || runtimeState == FeatureRuntimeState::kDegraded;
-		}
-
-		bool IsDegraded() const noexcept
-		{
-			return runtimeState == FeatureRuntimeState::kDegraded;
-		}
-
-		bool IsHealthy() const noexcept
-		{
-			return runtimeState == FeatureRuntimeState::kActive;
-		}
-	};
-
 	enum class ActivationOutcome
 	{
 		kFailed,
@@ -73,5 +50,44 @@ namespace cs
 
 		ActivationOutcome _outcome;
 		std::string       _detail;
+	};
+
+	struct FeatureState
+	{
+		bool installed{ false };
+		bool desiredActive{ false };
+		FeatureRuntimeState runtimeState{ FeatureRuntimeState::kPending };
+		std::string detail;
+
+		bool IsActive() const noexcept
+		{
+			return runtimeState == FeatureRuntimeState::kActive || runtimeState == FeatureRuntimeState::kDegraded;
+		}
+
+		bool IsDegraded() const noexcept
+		{
+			return runtimeState == FeatureRuntimeState::kDegraded;
+		}
+
+		bool IsHealthy() const noexcept
+		{
+			return runtimeState == FeatureRuntimeState::kActive;
+		}
+
+		void ApplyActivationResult(const ActivationResult& a_result)
+		{
+			switch (a_result.GetOutcome()) {
+			case ActivationOutcome::kFailed:
+				runtimeState = FeatureRuntimeState::kFailed;
+				break;
+			case ActivationOutcome::kActive:
+				runtimeState = FeatureRuntimeState::kActive;
+				break;
+			case ActivationOutcome::kDegraded:
+				runtimeState = FeatureRuntimeState::kDegraded;
+				break;
+			}
+			detail = a_result.GetDetail();
+		}
 	};
 }

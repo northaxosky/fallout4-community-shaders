@@ -118,6 +118,7 @@ namespace cs
 			_state.runtimeState = a_state;
 			_state.detail = std::move(a_detail);
 		}
+		void ApplyActivationResult(const ActivationResult& a_result) { _state.ApplyActivationResult(a_result); }
 		void ResetLoadFailure() noexcept
 		{
 			_loadFailed = false;
@@ -154,7 +155,8 @@ namespace cs
 
 		void Register(Feature* a_feature);
 
-		void LoadAll();
+		void PrepareAll();
+		void ActivateAll();
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
 
@@ -168,6 +170,7 @@ namespace cs
 	private:
 		FeatureManager() = default;
 		std::vector<Feature*> _registeredFeatures;
+		std::vector<Feature*> _activationOrder;
 		std::vector<Feature*> _loadedFeatures;
 		bool                  _d3d11ReadyDone = false;
 	};

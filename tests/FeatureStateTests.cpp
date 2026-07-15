@@ -77,12 +77,38 @@ namespace
 		CHECK(degraded.GetOutcome() == ActivationOutcome::kDegraded);
 		CHECK(degraded.GetDetail() == "hooks may remain");
 	}
+
+	void TestActivationResultApplication()
+	{
+		using cs::ActivationResult;
+		using cs::FeatureRuntimeState;
+
+		cs::FeatureState state{
+			.installed = true,
+			.desiredActive = true
+		};
+
+		state.ApplyActivationResult(ActivationResult::Active());
+		CHECK(state.installed);
+		CHECK(state.desiredActive);
+		CHECK(state.runtimeState == FeatureRuntimeState::kActive);
+		CHECK(state.detail.empty());
+
+		state.ApplyActivationResult(ActivationResult::Failed("activation failed"));
+		CHECK(state.runtimeState == FeatureRuntimeState::kFailed);
+		CHECK(state.detail == "activation failed");
+
+		state.ApplyActivationResult(ActivationResult::Degraded("hooks may remain"));
+		CHECK(state.runtimeState == FeatureRuntimeState::kDegraded);
+		CHECK(state.detail == "hooks may remain");
+	}
 }
 
 int main()
 {
 	TestStatePredicates();
 	TestActivationResults();
+	TestActivationResultApplication();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

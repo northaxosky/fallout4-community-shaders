@@ -337,21 +337,20 @@ namespace cs
 		_registeredFeatures.push_back(a_feature);
 	}
 
-	void FeatureManager::LoadAll()
+	void FeatureManager::PrepareAll()
 	{
+		_loadedFeatures.clear();
+		_activationOrder.clear();
 		for (auto* feature : _registeredFeatures) {
 			feature->SetState({});
 		}
 
-		const auto orderedFeatures = SortFeaturesByDependencies(_registeredFeatures);
-		_loadedFeatures.clear();
+		_activationOrder = SortFeaturesByDependencies(_registeredFeatures);
 
 		const bool autoInstallAll = LoadAutoInstallAllFeatures();
 		L->info("Feature INI auto-install: {}", autoInstallAll ? "enabled" : "disabled");
 
-		std::unordered_map<std::string_view, bool> installedByName;
-		installedByName.reserve(orderedFeatures.size());
-		for (auto* feature : orderedFeatures) {
+		for (auto* feature : _activationOrder) {
 			bool installed;
 			if (autoInstallAll) {
 				// Auto-install only counts as installed if the companion INI actually exists now;
@@ -363,7 +362,6 @@ namespace cs
 			} else {
 				installed = feature->IsInstalled();
 			}
-			installedByName.insert_or_assign(feature->GetName(), installed);
 			feature->SetState({
 				.installed = installed,
 				.desiredActive = installed,
@@ -372,7 +370,7 @@ namespace cs
 			});
 		}
 
-		const std::unordered_set<const Feature*> orderedSet(orderedFeatures.begin(), orderedFeatures.end());
+		const std::unordered_set<const Feature*> orderedSet(_activationOrder.begin(), _activationOrder.end());
 		for (auto* feature : _registeredFeatures) {
 			if (orderedSet.contains(feature)) {
 				continue;
@@ -386,14 +384,19 @@ namespace cs
 				.detail = installed ? "Dependency order could not be resolved" : "Feature configuration is missing"
 			});
 		}
+	}
+
+	void FeatureManager::ActivateAll()
+	{
+		_loadedFeatures.clear();
 
 		// Track which features actually loaded so a dependent can be skipped when a prerequisite
 		// is missing, uninstalled, or failed. Topological order guarantees deps are attempted first.
 		std::unordered_set<std::string_view> loadedNames;
-		loadedNames.reserve(orderedFeatures.size());
+		loadedNames.reserve(_activationOrder.size());
 
-		for (auto* feature : orderedFeatures) {
-			if (const auto installedIt = installedByName.find(feature->GetName()); installedIt == installedByName.end() || !installedIt->second) {
+		for (auto* feature : _activationOrder) {
+			if (!feature->GetState().desiredActive) {
 				L->info("Feature {} not installed (no INI); skipping", feature->GetName());
 				continue;
 			}
@@ -414,32 +417,28 @@ namespace cs
 			}
 
 			L->info("Loading feature: {}", feature->GetName());
-			bool ok = true;
-			feature->ResetLoadFailure();
 			try {
-				feature->Load();
-				if (feature->HasLoadFailed()) {
-					ok = false;
-					feature->SetRuntimeState(FeatureRuntimeState::kFailed, feature->LoadFailureReason());
-					L->error("Feature {} reported a load failure: {}", feature->GetName(), feature->LoadFailureReason());
+				const auto result = feature->Activate();
+				feature->ApplyActivationResult(result);
+				switch (result.GetOutcome()) {
+				case ActivationOutcome::kFailed:
+					L->error("Feature {} reported a load failure: {}", feature->GetName(), result.GetDetail());
+					break;
+				case ActivationOutcome::kActive:
+					_loadedFeatures.push_back(feature);
+					loadedNames.insert(feature->GetName());
+					break;
+				case ActivationOutcome::kDegraded:
+					L->error("Feature {} reported degraded activation: {}", feature->GetName(), result.GetDetail());
+					break;
 				}
 			} catch (const std::exception& e) {
-				ok = false;
-				feature->SetRuntimeState(FeatureRuntimeState::kDegraded, e.what());
-				L->error("Feature {} threw during Load(): {}", feature->GetName(), e.what());
+				feature->ApplyActivationResult(ActivationResult::Degraded(e.what()));
+				L->error("Feature {} threw during Activate(): {}", feature->GetName(), e.what());
 			} catch (...) {
-				ok = false;
-				feature->SetRuntimeState(FeatureRuntimeState::kDegraded, "Non-standard exception thrown during Load()");
-				L->error("Feature {} threw a non-standard exception during Load()", feature->GetName());
+				feature->ApplyActivationResult(ActivationResult::Degraded("Non-standard exception thrown during Activate()"));
+				L->error("Feature {} threw a non-standard exception during Activate()", feature->GetName());
 			}
-
-			if (!ok) {
-				continue;
-			}
-
-			feature->SetRuntimeState(FeatureRuntimeState::kActive);
-			_loadedFeatures.push_back(feature);
-			loadedNames.insert(feature->GetName());
 		}
 	}
 
