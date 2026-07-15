@@ -28,6 +28,23 @@ namespace cs
 		kDegraded
 	};
 
+	constexpr std::string_view FeatureRuntimeStateName(FeatureRuntimeState a_state) noexcept
+	{
+		switch (a_state) {
+		case FeatureRuntimeState::kPending:
+			return "pending";
+		case FeatureRuntimeState::kInactive:
+			return "inactive";
+		case FeatureRuntimeState::kFailed:
+			return "failed";
+		case FeatureRuntimeState::kActive:
+			return "active";
+		case FeatureRuntimeState::kDegraded:
+			return "degraded";
+		}
+		return "unknown";
+	}
+
 	enum class ActivationOutcome
 	{
 		kFailed,

@@ -99,6 +99,19 @@ namespace
 		CHECK(requirement.capability == FeatureCapability::kPixelShaderSwapBroker);
 	}
 
+	void TestRuntimeStateNames()
+	{
+		using cs::FeatureRuntimeState;
+		using cs::FeatureRuntimeStateName;
+
+		static_assert(FeatureRuntimeStateName(FeatureRuntimeState::kPending) == "pending");
+		static_assert(FeatureRuntimeStateName(FeatureRuntimeState::kInactive) == "inactive");
+		static_assert(FeatureRuntimeStateName(FeatureRuntimeState::kFailed) == "failed");
+		static_assert(FeatureRuntimeStateName(FeatureRuntimeState::kActive) == "active");
+		static_assert(FeatureRuntimeStateName(FeatureRuntimeState::kDegraded) == "degraded");
+		CHECK(FeatureRuntimeStateName(static_cast<FeatureRuntimeState>(-1)) == "unknown");
+	}
+
 	void TestActivationResultApplication()
 	{
 		using cs::ActivationResult;
@@ -130,6 +143,7 @@ int main()
 	TestStatePredicates();
 	TestActivationResults();
 	TestFeatureRequirements();
+	TestRuntimeStateNames();
 	TestActivationResultApplication();
 
 	if (failures != 0) {

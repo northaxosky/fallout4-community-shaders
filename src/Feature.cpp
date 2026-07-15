@@ -289,6 +289,28 @@ namespace
 
 		return sorted;
 	}
+
+	template <class Callback>
+	void DispatchRuntimeCallbacks(
+		cs::FeatureManager& a_manager,
+		std::string_view a_phase,
+		Callback&& a_callback) noexcept
+	{
+		for (auto* feature : a_manager.GetAll()) {
+			if (!feature || !a_manager.PrepareRuntimeCallback(*feature, a_phase)) {
+				continue;
+			}
+
+			try {
+				a_callback(*feature);
+			} catch (const std::exception& e) {
+				a_manager.QuarantineRuntimeCallback(*feature, a_phase, e.what());
+			} catch (...) {
+				a_manager.QuarantineRuntimeCallback(*feature, a_phase, "non-standard exception");
+			}
+		}
+		a_manager.FinishRuntimeCallbackPass();
+	}
 }
 
 namespace cs
@@ -341,6 +363,104 @@ namespace cs
 		}
 
 		_registeredFeatures.push_back(a_feature);
+	}
+
+	std::optional<std::string> FeatureManager::FindRequirementFailure(const Feature& a_feature) const
+	{
+		for (const auto& requirement : a_feature.GetRequirements()) {
+			const auto providerIt = std::find_if(
+				_registeredFeatures.begin(),
+				_registeredFeatures.end(),
+				[provider = requirement.provider](const Feature* a_provider) {
+					return a_provider->GetName() == provider;
+				});
+			const auto capability = CapabilityName(requirement.capability);
+			if (providerIt == _registeredFeatures.end()) {
+				return "Required provider '" + ToString(requirement.provider)
+					+ "' for capability '" + ToString(capability) + "' is not registered";
+			}
+
+			const auto* provider = *providerIt;
+			if (!provider->IsHealthy()) {
+				return "Required provider '" + ToString(requirement.provider)
+					+ "' is not healthy-active for capability '" + ToString(capability) + "'";
+			}
+			if (!provider->HasCapability(requirement.capability)) {
+				return "Required provider '" + ToString(requirement.provider)
+					+ "' does not provide capability '" + ToString(capability) + "'";
+			}
+		}
+		return std::nullopt;
+	}
+
+	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept
+	{
+		if (!a_feature.IsHealthy()) {
+			return false;
+		}
+
+		try {
+			if (auto failure = FindRequirementFailure(a_feature)) {
+				QuarantineRuntimeCallback(a_feature, a_phase, *failure);
+				return false;
+			}
+			return true;
+		} catch (const std::exception& e) {
+			QuarantineRuntimeCallback(a_feature, a_phase, e.what());
+		} catch (...) {
+			QuarantineRuntimeCallback(a_feature, a_phase, "requirement validation threw a non-standard exception");
+		}
+		return false;
+	}
+
+	void FeatureManager::QuarantineRuntimeCallback(
+		Feature& a_feature,
+		std::string_view a_phase,
+		std::string_view a_reason) noexcept
+	{
+		if (!a_feature.IsHealthy()) {
+			return;
+		}
+
+		a_feature.SetRuntimeStateOnly(FeatureRuntimeState::kDegraded);
+		try {
+			const auto phase = a_phase.empty() ? std::string_view("runtime callback") : a_phase.substr(0, 64);
+			const auto reason = a_reason.empty() ? std::string_view("unknown failure") : a_reason.substr(0, 256);
+			std::string detail;
+			detail.reserve(phase.size() + reason.size() + 96);
+			detail.append("Runtime phase '");
+			detail.append(phase);
+			detail.append("' quarantined: ");
+			detail.append(reason);
+			detail.append(". Partial hooks/resources may remain; restart required.");
+			a_feature.SetRuntimeState(FeatureRuntimeState::kDegraded, std::move(detail));
+
+			try {
+				L->error("Feature {} degraded: {}", a_feature.GetName(), a_feature.GetState().detail);
+			} catch (...) {
+			}
+		} catch (...) {
+			try {
+				a_feature.SetRuntimeState(FeatureRuntimeState::kDegraded, "Runtime quarantine; restart required");
+			} catch (...) {
+			}
+			try {
+				L->error("Feature runtime callback quarantined; restart required");
+			} catch (...) {
+			}
+		}
+	}
+
+	void FeatureManager::FinishRuntimeCallbackPass() noexcept
+	{
+		_loadedFeatures.erase(
+			std::remove_if(
+				_loadedFeatures.begin(),
+				_loadedFeatures.end(),
+				[](const Feature* a_feature) {
+					return !a_feature || !a_feature->IsHealthy();
+				}),
+			_loadedFeatures.end());
 	}
 
 	void FeatureManager::PrepareAll()
@@ -453,15 +573,22 @@ namespace cs
 	{
 		_loadedFeatures.clear();
 
-		std::unordered_map<std::string_view, Feature*> registeredByName;
-		registeredByName.reserve(_registeredFeatures.size());
-		for (auto* feature : _registeredFeatures) {
-			registeredByName.emplace(feature->GetName(), feature);
-		}
-
-		// Topological order guarantees requirement providers are attempted first.
-		std::unordered_set<std::string_view> loadedNames;
-		loadedNames.reserve(_activationOrder.size());
+		const auto failPendingRequirementValidation = [](Feature& a_feature, std::string_view a_reason) noexcept {
+			a_feature.SetRuntimeStateOnly(FeatureRuntimeState::kFailed);
+			try {
+				const auto reason = a_reason.empty() ? std::string_view("standard exception") : a_reason.substr(0, 256);
+				std::string detail = "ActivateAll requirement validation threw: ";
+				detail.append(reason);
+				a_feature.SetRuntimeState(FeatureRuntimeState::kFailed, std::move(detail));
+			} catch (...) {
+				try {
+					a_feature.SetRuntimeState(
+						FeatureRuntimeState::kFailed,
+						"ActivateAll requirement validation failed");
+				} catch (...) {
+				}
+			}
+		};
 
 		for (auto* feature : _activationOrder) {
 			const auto& state = feature->GetState();
@@ -483,43 +610,39 @@ namespace cs
 				continue;
 			}
 
-			bool requirementsSatisfied = true;
-			for (const auto& requirement : feature->GetRequirements()) {
-				const auto providerIt = registeredByName.find(requirement.provider);
-				const auto capability = CapabilityName(requirement.capability);
-				std::string failure;
-				if (providerIt == registeredByName.end()) {
-					failure = "Required provider '" + ToString(requirement.provider)
-						+ "' for capability '" + ToString(capability) + "' is not registered";
-				} else if (loadedNames.find(requirement.provider) == loadedNames.end()
-					|| !providerIt->second->IsHealthy()) {
-					failure = "Required provider '" + ToString(requirement.provider)
-						+ "' is not healthy-active for capability '" + ToString(capability) + "'";
-				} else if (!providerIt->second->HasCapability(requirement.capability)) {
-					failure = "Required provider '" + ToString(requirement.provider)
-						+ "' does not provide capability '" + ToString(capability) + "'";
+			std::optional<std::string> requirementFailure;
+			try {
+				requirementFailure = FindRequirementFailure(*feature);
+			} catch (const std::exception& e) {
+				if (wasActive) {
+					QuarantineRuntimeCallback(*feature, "ActivateAll requirement validation", e.what());
+				} else {
+					failPendingRequirementValidation(*feature, e.what());
 				}
-
-				if (!failure.empty()) {
-					if (wasActive) {
-						auto detail = "Requirement lost after activation: " + failure;
-						feature->SetRuntimeState(FeatureRuntimeState::kDegraded, detail);
-						L->error("Feature {} is degraded: {}", feature->GetName(), detail);
-					} else {
-						L->error("Feature {} requirement failed: {}; skipping", feature->GetName(), failure);
-						feature->SetRuntimeState(FeatureRuntimeState::kFailed, std::move(failure));
-					}
-					requirementsSatisfied = false;
-					break;
+				continue;
+			} catch (...) {
+				if (wasActive) {
+					QuarantineRuntimeCallback(
+						*feature,
+						"ActivateAll requirement validation",
+						"non-standard exception");
+				} else {
+					failPendingRequirementValidation(*feature, "non-standard exception");
 				}
+				continue;
 			}
-			if (!requirementsSatisfied) {
+			if (requirementFailure) {
+				if (wasActive) {
+					QuarantineRuntimeCallback(*feature, "ActivateAll", *requirementFailure);
+				} else {
+					L->error("Feature {} requirement failed: {}; skipping", feature->GetName(), *requirementFailure);
+					feature->SetRuntimeState(FeatureRuntimeState::kFailed, *requirementFailure);
+				}
 				continue;
 			}
 
 			if (wasActive) {
 				_loadedFeatures.push_back(feature);
-				loadedNames.insert(feature->GetName());
 				continue;
 			}
 
@@ -533,7 +656,6 @@ namespace cs
 					break;
 				case ActivationOutcome::kActive:
 					_loadedFeatures.push_back(feature);
-					loadedNames.insert(feature->GetName());
 					break;
 				case ActivationOutcome::kDegraded:
 					L->error("Feature {} reported degraded activation: {}", feature->GetName(), result.GetDetail());
@@ -547,20 +669,43 @@ namespace cs
 				L->error("Feature {} threw a non-standard exception during Activate()", feature->GetName());
 			}
 		}
+
+		for (auto* feature : _registeredFeatures) {
+			const auto& state = feature->GetState();
+			try {
+				if (state.detail.empty()) {
+					L->info(
+						"Feature state: {} state={} installed={} desired={}",
+						feature->GetName(),
+						FeatureRuntimeStateName(state.runtimeState),
+						state.installed,
+						state.desiredActive);
+				} else {
+					L->info(
+						"Feature state: {} state={} installed={} desired={} detail={}",
+						feature->GetName(),
+						FeatureRuntimeStateName(state.runtimeState),
+						state.installed,
+						state.desiredActive,
+						std::string_view(state.detail).substr(0, 256));
+				}
+			} catch (...) {
+			}
+		}
 	}
 
 	void FeatureManager::OnDataLoadedAll()
 	{
-		for (auto* feature : _loadedFeatures) {
-			feature->OnDataLoaded();
-		}
+		DispatchRuntimeCallbacks(*this, "OnDataLoaded", [](Feature& a_feature) {
+			a_feature.OnDataLoaded();
+		});
 	}
 
 	void FeatureManager::OnPostPostLoadAll()
 	{
-		for (auto* feature : _loadedFeatures) {
-			feature->OnPostPostLoad();
-		}
+		DispatchRuntimeCallbacks(*this, "OnPostPostLoad", [](Feature& a_feature) {
+			a_feature.OnPostPostLoad();
+		});
 		PresetManager::Get().ResolveAndApplyBootPreset();
 	}
 
@@ -570,8 +715,8 @@ namespace cs
 			return;
 		}
 		_d3d11ReadyDone = true;
-		for (auto* feature : _loadedFeatures) {
-			feature->OnD3D11Ready(a_adapter, a_device);
-		}
+		DispatchRuntimeCallbacks(*this, "OnD3D11Ready", [a_adapter, a_device](Feature& a_feature) {
+			a_feature.OnD3D11Ready(a_adapter, a_device);
+		});
 	}
 }

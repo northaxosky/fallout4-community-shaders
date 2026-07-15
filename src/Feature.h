@@ -123,6 +123,7 @@ namespace cs
 			_state.detail = std::move(a_detail);
 		}
 		void ApplyActivationResult(const ActivationResult& a_result) { _state.ApplyActivationResult(a_result); }
+		void SetRuntimeStateOnly(FeatureRuntimeState a_state) noexcept { _state.runtimeState = a_state; }
 		void ResetLoadFailure() noexcept
 		{
 			_loadFailed = false;
@@ -164,6 +165,14 @@ namespace cs
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
 
+		// Runtime callback boundaries revalidate, quarantine, and compact without unloading.
+		bool PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept;
+		void QuarantineRuntimeCallback(
+			Feature& a_feature,
+			std::string_view a_phase,
+			std::string_view a_reason) noexcept;
+		void FinishRuntimeCallbackPass() noexcept;
+
 		// Fan out OnD3D11Ready to every loaded feature exactly once, on first D3D11 device
 		// creation. Driven from the device-creation hook independently of Streamline init success.
 		void OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
@@ -173,6 +182,7 @@ namespace cs
 
 	private:
 		FeatureManager() = default;
+		std::optional<std::string> FindRequirementFailure(const Feature& a_feature) const;
 		std::vector<Feature*> _registeredFeatures;
 		std::vector<Feature*> _activationOrder;
 		std::vector<Feature*> _loadedFeatures;
