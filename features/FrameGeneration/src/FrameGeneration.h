@@ -20,6 +20,7 @@ public:
 	std::string_view GetName() const override { return "FrameGeneration"; }
 	std::string GetFeatureSummary() const override { return "Generates intermediate frames via DLSS-G, FSR3-FG, or XeSS-FG to roughly double displayed FPS."; }
 	std::string GetCategory() const override { return "Frame Generation"; }
+	bool Configure(const toml::table& a_config, std::string& a_error) override;
 	void Load() override;
 	void OnPostPostLoad() override;
 	void DrawSettings() override;
@@ -60,7 +61,6 @@ public:
 
 	bool setupBuffers = false;
 
-	void LoadSettings();
 	void SaveSettings();
 
 	void CreateFrameGenerationResources();

@@ -21,6 +21,7 @@
 #include "Render/RenderHooks.h"
 #include "Streamline.h"
 #include "Render/StreamlineCore.h"
+#include "Settings/FeatureConfig.h"
 
 namespace cs::features
 {
@@ -31,30 +32,106 @@ namespace cs::features
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.toml";
 
-void FrameGeneration::LoadSettings()
+	namespace
+	{
+		std::string SettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			std::string error = "settings.";
+			error.append(a_key);
+			error.append(": ");
+			error.append(a_reason);
+			return error;
+		}
+
+		bool ReadBoolSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			bool& a_value,
+			std::string& a_error)
+		{
+			switch (feature_config::ReadBool(a_table, a_key, a_value)) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected boolean");
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "invalid boolean value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, "boolean value is out of range");
+				break;
+			}
+			return false;
+		}
+
+		bool ReadIntegerSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::int64_t a_min,
+			std::int64_t a_max,
+			int& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::int64_t>(a_value);
+			switch (feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max)) {
+			case feature_config::ScalarReadStatus::kMissing:
+				return true;
+			case feature_config::ScalarReadStatus::kValid:
+				a_value = static_cast<int>(value);
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected integer");
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "invalid integer value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(
+					a_key,
+					"value must be in range " + std::to_string(a_min) + ".." + std::to_string(a_max));
+				break;
+			}
+			return false;
+		}
+
+		bool ParseSettingsTable(const toml::table& a_config, FrameGeneration::Settings& a_candidate, std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			return ReadBoolSetting(*settingsTable, "frame_generation_mode", a_candidate.frameGenerationMode, a_error)
+				&& ReadBoolSetting(*settingsTable, "frame_limit_mode", a_candidate.frameLimitMode, a_error)
+				&& ReadBoolSetting(*settingsTable, "disable_in_menus", a_candidate.disableInMenus, a_error)
+				&& ReadBoolSetting(*settingsTable, "enable_debug_logging", a_candidate.debugLogging, a_error)
+				&& ReadIntegerSetting(*settingsTable, "frame_gen_type", 0, 2, a_candidate.frameGenType, a_error)
+				&& ReadIntegerSetting(*settingsTable, "frame_gen_frames", 1, 3, a_candidate.frameGenFrames, a_error);
+		}
+	}
+
+bool FrameGeneration::Configure(const toml::table& a_config, std::string& a_error)
 {
-	toml::table table;
-	try {
-		table = toml::parse_file(kConfigPath);
-	} catch (const toml::parse_error&) {
-		return;
+	auto candidate = settings;
+	if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		return false;
 	}
 
-	settings.frameGenerationMode = table["settings"]["frame_generation_mode"].value_or(settings.frameGenerationMode);
-	settings.frameLimitMode = table["settings"]["frame_limit_mode"].value_or(settings.frameLimitMode);
-	settings.disableInMenus = table["settings"]["disable_in_menus"].value_or(settings.disableInMenus);
-	settings.debugLogging = table["settings"]["enable_debug_logging"].value_or(settings.debugLogging);
-	settings.frameGenType = std::clamp(static_cast<int>(table["settings"]["frame_gen_type"].value_or<int64_t>(settings.frameGenType)), 0, 2);
-	settings.frameGenFrames = std::clamp(static_cast<int>(table["settings"]["frame_gen_frames"].value_or<int64_t>(settings.frameGenFrames)), 1, 3);
-
-	static bool loggedOnce = false;
-	if (!loggedOnce) {
-		L->info("frame_generation_mode: {}", settings.frameGenerationMode);
-		L->info("frame_limit_mode: {}", settings.frameLimitMode);
-		L->info("frame_gen_type: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
-		L->info("frame_gen_frames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
-		loggedOnce = true;
-	}
+	settings = candidate;
+	L->info("frame_generation_mode: {}", settings.frameGenerationMode);
+	L->info("frame_limit_mode: {}", settings.frameLimitMode);
+	L->info("frame_gen_type: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
+	L->info("frame_gen_frames: {} (1=2x, 2=3x MFG, 3=4x MFG)", settings.frameGenFrames);
+	return true;
 }
 
 void FrameGeneration::SaveSettings()
@@ -716,8 +793,6 @@ void FrameGeneration::InstallHooks()
 
 	void FrameGeneration::Load()
 	{
-		LoadSettings();
-
 		// Gated: requesting DLSS-G triggers eUseFrameBasedResourceTagging on slInit, which breaks Upscaling's regular slSetTag path.
 		if (settings.frameGenType == 1) {
 			auto* core = cs::Streamline::GetSingleton();
