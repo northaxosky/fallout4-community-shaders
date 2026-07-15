@@ -98,7 +98,7 @@ namespace cs::features
 
 	void Imagespace::Load()
 	{
-		LoadSettings();
+		ApplySmokeMarkers();
 		L->info("Loaded: enabled={} op={} exposure={:.2f} adaptive={} bloom={} vig={} ca={} sharp={} dof={}",
 			settings.enabled, settings.tonemapOperator, settings.exposure,
 			settings.adaptiveExposure, settings.bloomEnable,

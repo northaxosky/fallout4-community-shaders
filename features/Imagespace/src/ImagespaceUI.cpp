@@ -367,7 +367,6 @@ namespace cs::features
 					SaveSettings();
 					dirty = false;
 				}
-				lutCache.Clear();
 				LoadSettings();
 			}
 			ImGui::SetItemTooltip("Flushes pending edits to disk, then reparses [weather] and refreshes the LUT cache.");

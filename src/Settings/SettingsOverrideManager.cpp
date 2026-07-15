@@ -1,6 +1,5 @@
 #include "Settings/SettingsOverrideManager.h"
 
-#include <filesystem>
 #include <string>
 
 #include "Log.h"
@@ -14,7 +13,7 @@ namespace cs::settings_overrides
 		constexpr std::string_view kRoot = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\overrides\\";
 	}
 
-	std::optional<toml::table> TryLoad(std::string_view a_featureName)
+	feature_config::FileLoadResult Load(std::string_view a_featureName)
 	{
 		std::string path;
 		path.reserve(kRoot.size() + a_featureName.size() + 5);
@@ -22,20 +21,10 @@ namespace cs::settings_overrides
 		path.append(a_featureName.data(), a_featureName.size());
 		path.append(".toml");
 
-		std::error_code ec;
-		if (!std::filesystem::exists(path, ec) || ec) {
-			return std::nullopt;
+		auto result = feature_config::LoadFile(path);
+		if (result.status == feature_config::FileLoadStatus::kParsed) {
+			L->info("loaded override {}", path);
 		}
-
-		try {
-			auto table = toml::parse_file(path);
-			L->info("applied override {}", path);
-			return std::move(table);
-		} catch (const toml::parse_error& e) {
-			L->warn("override {} parse failed: {}", path, e.what());
-		} catch (const std::exception& e) {
-			L->warn("override {} read failed: {}", path, e.what());
-		}
-		return std::nullopt;
+		return result;
 	}
 }

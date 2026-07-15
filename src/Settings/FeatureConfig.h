@@ -56,6 +56,11 @@ namespace cs::feature_config
 		float& a_value,
 		float a_min = std::numeric_limits<float>::lowest(),
 		float a_max = std::numeric_limits<float>::max());
+	ScalarReadStatus ReadFloat(
+		const toml::node& a_node,
+		float& a_value,
+		float a_min = std::numeric_limits<float>::lowest(),
+		float a_max = std::numeric_limits<float>::max());
 	ScalarReadStatus ReadString(const toml::table& a_table, std::string_view a_key, std::string& a_value);
 
 	enum class ActivationIntentSource

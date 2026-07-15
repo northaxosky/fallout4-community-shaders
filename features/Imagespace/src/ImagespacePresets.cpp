@@ -28,6 +28,7 @@
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Render/RenderHooks.h"
 #include "Settings/SettingsOverrideManager.h"
@@ -52,31 +53,60 @@ namespace cs::features
 	constexpr const char* kStyleMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_style";
 	constexpr const char* kWeatherCatMarker    = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_category";
 	constexpr const char* kWeatherFormIDMarker = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_weather_formid";
+
+	bool Imagespace::Configure(const toml::table& a_config, std::string& a_error)
+	{
+		Settings settingsCandidate{};
+		imagespace::WeatherProfiles weatherCandidate{};
+		if (!imagespace::ParseSettingsStrict(a_config, settingsCandidate, a_error)
+			|| !imagespace::ParseWeatherStrict(a_config, weatherCandidate, a_error)) {
+			return false;
+		}
+
+		auto overrideResult = cs::settings_overrides::Load("Imagespace");
+		switch (overrideResult.status) {
+		case feature_config::FileLoadStatus::kMissing:
+			break;
+		case feature_config::FileLoadStatus::kParsed:
+			if (!imagespace::ParseSettingsStrict(overrideResult.table, settingsCandidate, a_error)) {
+				a_error = "override " + a_error;
+				return false;
+			}
+			break;
+		case feature_config::FileLoadStatus::kParseError:
+		case feature_config::FileLoadStatus::kIoError:
+			a_error = std::move(overrideResult.error);
+			return false;
+		}
+
+		settings = std::move(settingsCandidate);
+		weatherProfiles = std::move(weatherCandidate);
+		return true;
+	}
+
 	void Imagespace::LoadSettings()
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
+		auto loadResult = feature_config::LoadFile(kConfigPath);
+		if (loadResult.status != feature_config::FileLoadStatus::kParsed) {
+			L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, loadResult.error);
+			return;
 		}
 
-		// Reset first so missing keys use struct defaults, not stale prior-load state.
-		settings        = Settings{};
-		weatherProfiles = imagespace::WeatherProfiles{};
-
-		imagespace::ParseSettings(table, settings);
-		imagespace::ParseWeather(table, weatherProfiles, /*a_dropOverrides=*/false);
-
-		if (auto overrideTbl = cs::settings_overrides::TryLoad("Imagespace")) {
-			imagespace::ParseSettings(*overrideTbl, settings);
+		std::string error;
+		if (!Configure(loadResult.table, error)) {
+			L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, error);
+			return;
 		}
 
-		// Defer LUT preload until D3D exists so pre-device loads do not poison the cache.
+		lutCache.Clear();
 		if (cs::util::GetD3DDevice() != nullptr) {
 			ApplyLUTState();
 		}
+		ApplySmokeMarkers();
+	}
 
+	void Imagespace::ApplySmokeMarkers()
+	{
 		// Smoke-harness one-shot markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, style_c = 0;
 		const bool opP     = cs::util::ReadMarker(kOpMarker,      op_c);

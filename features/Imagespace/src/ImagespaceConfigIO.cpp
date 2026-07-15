@@ -11,6 +11,7 @@
 #include <system_error>
 #include <utility>
 
+#include "Settings/FeatureConfig.h"
 #include "Settings/TomlUtil.h"
 
 namespace cs::features::imagespace
@@ -30,6 +31,404 @@ namespace cs::features::imagespace
 			} };
 
 		constexpr std::string_view kSettingsCtx = "imagespace.settings";
+
+		std::string QualifiedKey(std::string_view a_prefix, std::string_view a_key)
+		{
+			std::string path(a_prefix);
+			path.push_back('.');
+			path.append(a_key);
+			return path;
+		}
+
+		bool AcceptRead(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_path,
+			std::string_view a_expected,
+			std::string_view a_range,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = std::string(a_path) + ": expected " + std::string(a_expected);
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = std::string(a_path) + ": value must be finite";
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = std::string(a_path) + ": value must be in range " + std::string(a_range);
+				break;
+			}
+			return false;
+		}
+
+		bool ReadBoolStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			bool& a_value,
+			std::string& a_error)
+		{
+			const auto path = QualifiedKey(a_prefix, a_key);
+			return AcceptRead(feature_config::ReadBool(a_table, a_key, a_value), path, "boolean", {}, a_error);
+		}
+
+		bool ReadIntStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			int a_min,
+			int a_max,
+			int& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::int64_t>(a_value);
+			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
+			const auto path = QualifiedKey(a_prefix, a_key);
+			const auto range = std::to_string(a_min) + ".." + std::to_string(a_max);
+			if (!AcceptRead(status, path, "integer", range, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = static_cast<int>(value);
+			}
+			return true;
+		}
+
+		bool ReadFloatStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			float a_min,
+			float a_max,
+			float& a_value,
+			std::string& a_error)
+		{
+			const auto status = feature_config::ReadFloat(a_table, a_key, a_value, a_min, a_max);
+			const auto path = QualifiedKey(a_prefix, a_key);
+			const auto range = std::to_string(a_min) + ".." + std::to_string(a_max);
+			return AcceptRead(status, path, "number", range, a_error);
+		}
+
+		bool ReadStringStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			std::string& a_value,
+			std::string& a_error)
+		{
+			const auto path = QualifiedKey(a_prefix, a_key);
+			return AcceptRead(feature_config::ReadString(a_table, a_key, a_value), path, "string", {}, a_error);
+		}
+
+		bool ReadOptionalBoolStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			std::optional<bool>& a_value,
+			std::string& a_error)
+		{
+			auto value = a_value.value_or(false);
+			const auto status = feature_config::ReadBool(a_table, a_key, value);
+			const auto path = QualifiedKey(a_prefix, a_key);
+			if (!AcceptRead(status, path, "boolean", {}, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = value;
+			}
+			return true;
+		}
+
+		bool ReadOptionalIntStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			int a_min,
+			int a_max,
+			std::optional<int>& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::int64_t>(a_value.value_or(a_min));
+			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
+			const auto path = QualifiedKey(a_prefix, a_key);
+			const auto range = std::to_string(a_min) + ".." + std::to_string(a_max);
+			if (!AcceptRead(status, path, "integer", range, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = static_cast<int>(value);
+			}
+			return true;
+		}
+
+		bool ReadOptionalFloatStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			float a_min,
+			float a_max,
+			std::optional<float>& a_value,
+			std::string& a_error)
+		{
+			auto value = a_value.value_or(a_min);
+			const auto status = feature_config::ReadFloat(a_table, a_key, value, a_min, a_max);
+			const auto path = QualifiedKey(a_prefix, a_key);
+			const auto range = std::to_string(a_min) + ".." + std::to_string(a_max);
+			if (!AcceptRead(status, path, "number", range, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = value;
+			}
+			return true;
+		}
+
+		bool ReadOptionalStringStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			std::optional<std::string>& a_value,
+			std::string& a_error)
+		{
+			auto value = a_value.value_or(std::string{});
+			const auto status = feature_config::ReadString(a_table, a_key, value);
+			const auto path = QualifiedKey(a_prefix, a_key);
+			if (!AcceptRead(status, path, "string", {}, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = std::move(value);
+			}
+			return true;
+		}
+
+		bool ReadFloatArrayStrict(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_prefix,
+			float a_min,
+			float a_max,
+			std::array<float, 6>& a_value,
+			bool& a_present,
+			std::string& a_error)
+		{
+			a_present = false;
+			const auto* node = a_table.get(a_key);
+			if (!node) {
+				return true;
+			}
+
+			a_present = true;
+			const auto path = QualifiedKey(a_prefix, a_key);
+			const auto* array = node->as_array();
+			if (!array) {
+				a_error = path + ": expected array";
+				return false;
+			}
+			if (array->size() != a_value.size()) {
+				a_error = path + ": expected exactly 6 values";
+				return false;
+			}
+
+			std::array<float, 6> candidate{};
+			const auto range = std::to_string(a_min) + ".." + std::to_string(a_max);
+			for (std::size_t i = 0; i < candidate.size(); ++i) {
+				const auto status = feature_config::ReadFloat((*array)[i], candidate[i], a_min, a_max);
+				const auto elementPath = path + "[" + std::to_string(i) + "]";
+				if (!AcceptRead(status, elementPath, "number", range, a_error)) {
+					return false;
+				}
+			}
+
+			a_value = candidate;
+			return true;
+		}
+
+		bool ParseWeatherOverlayStrict(
+			const toml::table& a_table,
+			std::string_view a_prefix,
+			WeatherOverlay& a_overlay,
+			std::string& a_error)
+		{
+			if (!ReadOptionalFloatStrict(a_table, "exposure", a_prefix, 0.25f, 4.0f, a_overlay.exposure, a_error)
+				|| !ReadOptionalBoolStrict(a_table, "lut_enable", a_prefix, a_overlay.lutEnable, a_error)
+				|| !ReadOptionalStringStrict(a_table, "lut_path", a_prefix, a_overlay.lutPath, a_error)
+				|| !ReadOptionalFloatStrict(a_table, "lut_strength", a_prefix, 0.0f, 1.0f, a_overlay.lutStrength, a_error)
+				|| !ReadOptionalBoolStrict(a_table, "bloom_enable", a_prefix, a_overlay.bloomEnable, a_error)
+				|| !ReadOptionalFloatStrict(a_table, "bloom_threshold", a_prefix, 0.0f, 2.0f, a_overlay.bloomThreshold, a_error)
+				|| !ReadOptionalFloatStrict(a_table, "bloom_intensity", a_prefix, 0.0f, 0.3f, a_overlay.bloomIntensity, a_error)) {
+				return false;
+			}
+
+			auto weights = a_overlay.bloomMipWeights.value_or(std::array<float, 6>{});
+			bool weightsPresent = false;
+			if (!ReadFloatArrayStrict(a_table, "bloom_mip_weights", a_prefix, 0.0f, 4.0f, weights, weightsPresent, a_error)) {
+				return false;
+			}
+			if (weightsPresent) {
+				a_overlay.bloomMipWeights = weights;
+			}
+
+			return ReadOptionalBoolStrict(a_table, "vignette_enable", a_prefix, a_overlay.vignetteEnable, a_error)
+				&& ReadOptionalFloatStrict(a_table, "vignette_intensity", a_prefix, 0.0f, 1.0f, a_overlay.vignetteIntensity, a_error)
+				&& ReadOptionalBoolStrict(a_table, "ca_enable", a_prefix, a_overlay.caEnable, a_error)
+				&& ReadOptionalFloatStrict(a_table, "ca_intensity", a_prefix, 0.0f, 2.0f, a_overlay.caIntensity, a_error)
+				&& ReadOptionalBoolStrict(a_table, "lens_flare_enable", a_prefix, a_overlay.lensFlareEnable, a_error)
+				&& ReadOptionalFloatStrict(a_table, "lens_flare_intensity", a_prefix, 0.0f, 2.0f, a_overlay.lensFlareIntensity, a_error)
+				&& ReadOptionalIntStrict(a_table, "lens_flare_ghosts", a_prefix, 3, 7, a_overlay.lensFlareGhosts, a_error)
+				&& ReadOptionalBoolStrict(a_table, "dirt_enable", a_prefix, a_overlay.dirtEnable, a_error)
+				&& ReadOptionalFloatStrict(a_table, "dirt_intensity", a_prefix, 0.0f, 2.0f, a_overlay.dirtIntensity, a_error);
+		}
+	}
+
+	bool ParseSettingsStrict(const toml::table& a_root, Imagespace::Settings& s, std::string& a_error)
+	{
+		a_error.clear();
+		const auto* settingsNode = a_root.get("settings");
+		if (!settingsNode) {
+			return true;
+		}
+		const auto* settings = settingsNode->as_table();
+		if (!settings) {
+			a_error = "settings: expected table";
+			return false;
+		}
+
+		if (!ReadBoolStrict(*settings, "enabled", "settings", s.enabled, a_error)
+			|| !ReadIntStrict(*settings, "style", "settings", 0, 4, s.style, a_error)
+			|| !ReadBoolStrict(*settings, "force_with_enb", "settings", s.forceWithENB, a_error)
+			|| !ReadIntStrict(*settings, "tonemap_operator", "settings", 0, 3, s.tonemapOperator, a_error)
+			|| !ReadFloatStrict(*settings, "exposure", "settings", 0.25f, 4.0f, s.exposure, a_error)
+			|| !ReadBoolStrict(*settings, "lut_enable", "settings", s.lutEnable, a_error)
+			|| !ReadStringStrict(*settings, "lut_path", "settings", s.lutPath, a_error)
+			|| !ReadFloatStrict(*settings, "lut_strength", "settings", 0.0f, 1.0f, s.lutStrength, a_error)
+			|| !ReadBoolStrict(*settings, "adaptive_exposure", "settings", s.adaptiveExposure, a_error)
+			|| !ReadFloatStrict(*settings, "adaptation_speed_up", "settings", 0.05f, 10.0f, s.adaptationSpeedUp, a_error)
+			|| !ReadFloatStrict(*settings, "adaptation_speed_down", "settings", 0.05f, 30.0f, s.adaptationSpeedDown, a_error)
+			|| !ReadFloatStrict(*settings, "exposure_key", "settings", 0.05f, 0.5f, s.exposureKey, a_error)
+			|| !ReadFloatStrict(*settings, "exposure_min", "settings", 0.005f, 0.5f, s.exposureMin, a_error)
+			|| !ReadFloatStrict(*settings, "exposure_max", "settings", 1.0f, 16.0f, s.exposureMax, a_error)
+			|| !ReadBoolStrict(*settings, "bloom_enable", "settings", s.bloomEnable, a_error)
+			|| !ReadFloatStrict(*settings, "bloom_threshold", "settings", 0.0f, 2.0f, s.bloomThreshold, a_error)
+			|| !ReadFloatStrict(*settings, "bloom_intensity", "settings", 0.0f, 0.3f, s.bloomIntensity, a_error)
+			|| !ReadIntStrict(*settings, "bloom_mips", "settings", 3, 6, s.bloomMips, a_error)) {
+			return false;
+		}
+
+		std::array<float, 6> weights{};
+		std::copy(std::begin(s.bloomMipWeights), std::end(s.bloomMipWeights), weights.begin());
+		bool weightsPresent = false;
+		if (!ReadFloatArrayStrict(*settings, "bloom_mip_weights", "settings", 0.0f, 4.0f, weights, weightsPresent, a_error)) {
+			return false;
+		}
+		if (weightsPresent) {
+			std::copy(weights.begin(), weights.end(), std::begin(s.bloomMipWeights));
+		}
+
+		return ReadBoolStrict(*settings, "vignette_enable", "settings", s.vignetteEnable, a_error)
+			&& ReadFloatStrict(*settings, "vignette_intensity", "settings", 0.0f, 1.0f, s.vignetteIntensity, a_error)
+			&& ReadBoolStrict(*settings, "ca_enable", "settings", s.caEnable, a_error)
+			&& ReadFloatStrict(*settings, "ca_intensity", "settings", 0.0f, 2.0f, s.caIntensity, a_error)
+			&& ReadBoolStrict(*settings, "sharpen_enable", "settings", s.sharpenEnable, a_error)
+			&& ReadFloatStrict(*settings, "sharpness", "settings", 0.0f, 1.0f, s.sharpness, a_error)
+			&& ReadBoolStrict(*settings, "lens_flare_enable", "settings", s.lensFlareEnable, a_error)
+			&& ReadFloatStrict(*settings, "lens_flare_intensity", "settings", 0.0f, 2.0f, s.lensFlareIntensity, a_error)
+			&& ReadIntStrict(*settings, "lens_flare_ghosts", "settings", 3, 7, s.lensFlareGhosts, a_error)
+			&& ReadBoolStrict(*settings, "dirt_enable", "settings", s.dirtEnable, a_error)
+			&& ReadFloatStrict(*settings, "dirt_intensity", "settings", 0.0f, 2.0f, s.dirtIntensity, a_error)
+			&& ReadBoolStrict(*settings, "dof_enable", "settings", s.dofEnable, a_error)
+			&& ReadFloatStrict(*settings, "aperture", "settings", 0.0f, 0.5f, s.aperture, a_error)
+			&& ReadFloatStrict(*settings, "focus_distance", "settings", 10.0f, 100000.0f, s.focusDistance, a_error)
+			&& ReadFloatStrict(*settings, "focal_length", "settings", 1.0f, 200.0f, s.focalLength, a_error)
+			&& ReadFloatStrict(*settings, "focus_range", "settings", 10.0f, 10000.0f, s.focusRange, a_error)
+			&& ReadIntStrict(*settings, "dof_quality", "settings", 0, 2, s.dofQuality, a_error)
+			&& ReadFloatStrict(*settings, "coc_limit_factor", "settings", 0.005f, 0.10f, s.cocLimitFactor, a_error)
+			&& ReadFloatStrict(*settings, "bokeh_intensity", "settings", 0.0f, 1.0f, s.bokehIntensity, a_error)
+			&& ReadFloatStrict(*settings, "anamorph_ratio", "settings", 0.25f, 4.0f, s.anamorphRatio, a_error);
+	}
+
+	bool ParseWeatherStrict(const toml::table& a_root, WeatherProfiles& wp, std::string& a_error)
+	{
+		a_error.clear();
+		const auto* weatherNode = a_root.get("weather");
+		if (!weatherNode) {
+			return true;
+		}
+		const auto* weather = weatherNode->as_table();
+		if (!weather) {
+			a_error = "weather: expected table";
+			return false;
+		}
+
+		if (!ReadBoolStrict(*weather, "enable_per_weather_profiles", "weather", wp.enablePerWeatherProfiles, a_error)) {
+			return false;
+		}
+
+		for (const auto& [name, cat] : kCatTables) {
+			const auto* categoryNode = weather->get(name);
+			if (!categoryNode) {
+				continue;
+			}
+			const auto prefix = QualifiedKey("weather", name);
+			const auto* category = categoryNode->as_table();
+			if (!category) {
+				a_error = prefix + ": expected table";
+				return false;
+			}
+			if (!ParseWeatherOverlayStrict(
+					*category,
+					prefix,
+					wp.overlays[static_cast<std::size_t>(cat)],
+					a_error)) {
+				return false;
+			}
+		}
+
+		const auto* overridesNode = weather->get("overrides");
+		if (!overridesNode) {
+			return true;
+		}
+		const auto* overrides = overridesNode->as_table();
+		if (!overrides) {
+			a_error = "weather.overrides: expected table";
+			return false;
+		}
+
+		for (const auto& [key, valueNode] : *overrides) {
+			const std::string keyString(key.str());
+			const auto path = QualifiedKey("weather.overrides", keyString);
+			const auto* begin = keyString.data();
+			const auto* end = begin + keyString.size();
+			int base = 10;
+			if (keyString.size() > 2 && keyString[0] == '0' && (keyString[1] == 'x' || keyString[1] == 'X')) {
+				begin += 2;
+				base = 16;
+			}
+
+			std::uint32_t formID = 0;
+			const auto [ptr, ec] = std::from_chars(begin, end, formID, base);
+			if (ec != std::errc{} || ptr != end) {
+				a_error = path + ": malformed formID key";
+				return false;
+			}
+			if (!valueNode.is_string()) {
+				a_error = path + ": expected category string";
+				return false;
+			}
+
+			const auto categoryName = valueNode.as_string()->get();
+			const auto category = ParseCategory(categoryName);
+			if (!category) {
+				a_error = path + ": invalid weather category '" + categoryName + "'";
+				return false;
+			}
+			wp.userOverrides.insert_or_assign(formID, *category);
+		}
+
+		return true;
 	}
 
 	void ParseSettings(const toml::table& a_root, Imagespace::Settings& s)

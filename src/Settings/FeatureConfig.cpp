@@ -178,13 +178,18 @@ namespace cs::feature_config
 		if (!node) {
 			return ScalarReadStatus::kMissing;
 		}
-		if (!node->is_floating_point() && !node->is_integer()) {
+		return ReadFloat(*node, a_value, a_min, a_max);
+	}
+
+	ScalarReadStatus ReadFloat(const toml::node& a_node, float& a_value, float a_min, float a_max)
+	{
+		if (!a_node.is_floating_point() && !a_node.is_integer()) {
 			return ScalarReadStatus::kWrongType;
 		}
 
-		const double value = node->is_floating_point() ?
-			node->as_floating_point()->get() :
-			static_cast<double>(node->as_integer()->get());
+		const double value = a_node.is_floating_point() ?
+			a_node.as_floating_point()->get() :
+			static_cast<double>(a_node.as_integer()->get());
 		if (!std::isfinite(value)) {
 			return ScalarReadStatus::kInvalidValue;
 		}

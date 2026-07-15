@@ -13,6 +13,9 @@ namespace cs::features::imagespace
 	// Parses [weather]; a_dropOverrides skips user formID mappings for builtin presets.
 	void ParseWeather(const toml::table& a_root, WeatherProfiles& a_outProfiles, bool a_dropOverrides = false);
 
+	bool ParseSettingsStrict(const toml::table& a_root, Imagespace::Settings& a_outSettings, std::string& a_error);
+	bool ParseWeatherStrict(const toml::table& a_root, WeatherProfiles& a_outProfiles, std::string& a_error);
+
 	// Emits [settings] into a_root.
 	void EmitSettings(toml::table& a_root, const Imagespace::Settings& a_settings);
 

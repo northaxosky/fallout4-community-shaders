@@ -23,6 +23,7 @@ namespace cs::features
 		std::string GetCategory() const override { return "Post-process"; }
 		std::vector<std::string_view> GetDependencies() const override { return { "Upscaling" }; }
 
+		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnPostPostLoad() override;
 		void OnDataLoaded() override;
@@ -119,6 +120,7 @@ namespace cs::features
 
 		void LoadSettings();
 		void SaveSettings();
+		void ApplySmokeMarkers();
 
 		void ApplyStyle(Style style);
 		bool SettingsMatchStyle(Style style) const;
