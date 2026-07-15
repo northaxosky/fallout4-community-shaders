@@ -506,6 +506,17 @@ bool Upscaling::Configure(const toml::table& a_config, std::string& a_error)
 	return true;
 }
 
+std::optional<bool> Upscaling::GetLegacyActivationIntent(const toml::table& a_config) const
+{
+	const auto* settingsNode = a_config.get("settings");
+	const auto* settingsTable = settingsNode ? settingsNode->as_table() : nullptr;
+	const auto* methodNode = settingsTable ? settingsTable->get("upscale_method_preference") : nullptr;
+	if (!methodNode || !methodNode->is_integer()) {
+		return std::nullopt;
+	}
+	return methodNode->as_integer()->get() != 0;
+}
+
 void Upscaling::SaveSettings()
 {
 	toml::table table;

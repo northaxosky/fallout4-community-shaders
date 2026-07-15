@@ -32,7 +32,7 @@ namespace
 	constexpr auto kUnvisited = std::numeric_limits<std::size_t>::max();
 	constexpr const char* kConfigDir = "Data\\F4SE\\Plugins\\FO4CommunityShaders";
 	constexpr const char* kGlobalConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
-	constexpr bool kDefaultAutoInstallAllFeatures = true;
+	constexpr bool kDefaultAutoInstallAllFeatures = false;
 
 	std::string ToString(std::string_view a_value)
 	{
@@ -79,44 +79,36 @@ namespace
 
 	bool LoadAutoInstallAllFeatures()
 	{
-		toml::table table;
-		const bool configExists = PathExists(kGlobalConfigPath);
-		bool parsedOk = false;
-		if (configExists) {
-			try {
-				table = toml::parse_file(kGlobalConfigPath);
-				parsedOk = true;
-			} catch (const toml::parse_error& e) {
-				L->warn("Failed to parse global feature config {}: {}. Leaving file untouched; preset state will be preserved on a successful reparse.",
-					kGlobalConfigPath, e.description());
-				return kDefaultAutoInstallAllFeatures;
-			}
+		auto loadResult = cs::feature_config::LoadFile(kGlobalConfigPath);
+		if (loadResult.status == cs::feature_config::FileLoadStatus::kMissing) {
+			return kDefaultAutoInstallAllFeatures;
+		}
+		if (loadResult.status == cs::feature_config::FileLoadStatus::kParseError
+			|| loadResult.status == cs::feature_config::FileLoadStatus::kIoError) {
+			L->warn("Failed to load global feature config: {}. Auto-install disabled; leaving file untouched.",
+				loadResult.error);
+			return false;
 		}
 
-		const auto* features = table["features"].as_table();
-		const bool hasKey = features && features->contains("auto_install_all_features");
-		const bool autoInstall = table["features"]["auto_install_all_features"].value_or(kDefaultAutoInstallAllFeatures);
-
-		if (!configExists || !hasKey) {
-			EnsureConfigDirectory();
-			// Scoped key-level mutation so sibling blocks ([preset], owned by PresetManager) survive.
-			if (!table["info"].as_table()) {
-				table.insert_or_assign("info", toml::table{});
-			}
-			(*table["info"].as_table()).insert_or_assign("version", PluginVersionString());
-
-			if (!table["features"].as_table()) {
-				table.insert_or_assign("features", toml::table{});
-			}
-			(*table["features"].as_table()).insert_or_assign("auto_install_all_features", autoInstall);
-
-			if (!WriteToml(kGlobalConfigPath, table)) {
-				L->warn("Failed to save global feature config {}", kGlobalConfigPath);
-			}
+		const auto* featuresNode = loadResult.table.get("features");
+		if (!featuresNode) {
+			return kDefaultAutoInstallAllFeatures;
+		}
+		if (!featuresNode->is_table()) {
+			L->warn("Global feature config [features] must be a table. Auto-install disabled; leaving file untouched.");
+			return false;
 		}
 
-		(void)parsedOk;
-		return autoInstall;
+		const auto* autoInstallNode = featuresNode->as_table()->get("auto_install_all_features");
+		if (!autoInstallNode) {
+			return kDefaultAutoInstallAllFeatures;
+		}
+		if (!autoInstallNode->is_boolean()) {
+			L->warn("Global feature config features.auto_install_all_features must be a boolean. Auto-install disabled; leaving file untouched.");
+			return false;
+		}
+
+		return autoInstallNode->as_boolean()->get();
 	}
 
 	bool EnsureFeatureConfig(const cs::Feature& a_feature)
@@ -127,7 +119,10 @@ namespace
 		}
 
 		EnsureConfigDirectory();
-		toml::table table{ { "info", toml::table{ { "version", PluginVersionString() } } } };
+		toml::table table{
+			{ "info", toml::table{ { "version", PluginVersionString() } } },
+			{ "feature", toml::table{ { "enabled", false } } }
+		};
 		if (!WriteToml(path, table)) {
 			L->warn("Failed to create feature config {}", path.string());
 			return false;
@@ -347,42 +342,27 @@ namespace cs
 		}
 
 		_activationOrder = SortFeaturesByDependencies(_registeredFeatures);
+		const std::unordered_set<const Feature*> orderedSet(_activationOrder.begin(), _activationOrder.end());
 
 		const bool autoInstallAll = LoadAutoInstallAllFeatures();
-		L->info("Feature INI auto-install: {}", autoInstallAll ? "enabled" : "disabled");
+		L->info("Feature TOML auto-install: {}", autoInstallAll ? "enabled" : "disabled");
 
-		for (auto* feature : _activationOrder) {
+		for (auto* feature : _registeredFeatures) {
 			bool installed;
 			if (autoInstallAll) {
-				// Auto-install only counts as installed if the companion INI actually exists now;
-				// a failed create must not masquerade as a successful install.
+				// A failed create must not masquerade as a successful install.
 				installed = EnsureFeatureConfig(*feature);
 				if (!installed) {
-					L->warn("Feature {} INI could not be created; treating as not installed", feature->GetName());
+					L->warn("Feature {} TOML could not be created; treating as not installed", feature->GetName());
 				}
 			} else {
 				installed = feature->IsInstalled();
 			}
 			feature->SetState({
 				.installed = installed,
-				.desiredActive = installed,
+				.desiredActive = false,
 				.runtimeState = installed ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-				.detail = installed ? std::string{} : "Feature configuration is missing"
-			});
-		}
-
-		const std::unordered_set<const Feature*> orderedSet(_activationOrder.begin(), _activationOrder.end());
-		for (auto* feature : _registeredFeatures) {
-			if (orderedSet.contains(feature)) {
-				continue;
-			}
-
-			const bool installed = feature->IsInstalled();
-			feature->SetState({
-				.installed = installed,
-				.desiredActive = installed,
-				.runtimeState = installed ? FeatureRuntimeState::kFailed : FeatureRuntimeState::kInactive,
-				.detail = installed ? "Dependency order could not be resolved" : "Feature configuration is missing"
+				.detail = installed ? std::string{} : "Feature TOML configuration is missing"
 			});
 		}
 
@@ -394,7 +374,7 @@ namespace cs
 			L->error("Feature {} configuration failed: {}", a_feature->GetName(), a_detail);
 		};
 
-		for (auto* feature : _activationOrder) {
+		for (auto* feature : _registeredFeatures) {
 			if (!feature->GetState().installed) {
 				continue;
 			}
@@ -405,16 +385,57 @@ namespace cs
 				continue;
 			}
 
+			const auto canonicalActivation = feature_config::ParseActivation(loadResult.table);
+			if (!canonicalActivation.valid) {
+				const auto* featureNode = loadResult.table.get("feature");
+				const std::string detail = featureNode && !featureNode->is_table()
+					? "Invalid activation configuration: feature must be a table"
+					: "Invalid activation configuration: feature.enabled must be a boolean";
+				failConfiguration(feature, detail);
+				continue;
+			}
+
 			std::string error;
 			try {
 				if (!feature->Configure(loadResult.table, error)) {
 					failConfiguration(feature, std::move(error));
+					continue;
 				}
+
+				auto activation = canonicalActivation;
+				if (canonicalActivation.source == feature_config::ActivationIntentSource::kDefaultInactive) {
+					activation = feature_config::ParseActivation(
+						loadResult.table,
+						feature->GetLegacyActivationIntent(loadResult.table));
+				}
+
+				if (activation.source == feature_config::ActivationIntentSource::kLegacy) {
+					L->warn(
+						"Feature {} uses legacy activation intent for this launch; add [feature].enabled to select activation explicitly",
+						feature->GetName());
+				}
+
+				feature->SetState({
+					.installed = true,
+					.desiredActive = activation.enabled,
+					.runtimeState = activation.enabled ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
+					.detail = activation.enabled ? std::string{} : "Feature is inactive by TOML configuration"
+				});
 			} catch (const std::exception& e) {
 				failConfiguration(feature, e.what());
 			} catch (...) {
 				failConfiguration(feature, "Feature configuration threw a non-standard exception");
 			}
+		}
+
+		for (auto* feature : _registeredFeatures) {
+			if (orderedSet.contains(feature)
+				|| feature->GetState().runtimeState == FeatureRuntimeState::kFailed
+				|| !feature->GetState().desiredActive) {
+				continue;
+			}
+
+			feature->SetRuntimeState(FeatureRuntimeState::kFailed, "Dependency order could not be resolved");
 		}
 	}
 
@@ -428,11 +449,24 @@ namespace cs
 		loadedNames.reserve(_activationOrder.size());
 
 		for (auto* feature : _activationOrder) {
-			if (feature->GetState().runtimeState == FeatureRuntimeState::kFailed) {
+			const auto& state = feature->GetState();
+			if (state.runtimeState == FeatureRuntimeState::kActive) {
+				_loadedFeatures.push_back(feature);
+				loadedNames.insert(feature->GetName());
 				continue;
 			}
-			if (!feature->GetState().desiredActive) {
-				L->info("Feature {} not installed (no INI); skipping", feature->GetName());
+			if (state.runtimeState == FeatureRuntimeState::kFailed) {
+				continue;
+			}
+			if (state.runtimeState == FeatureRuntimeState::kInactive) {
+				if (state.installed) {
+					L->info("Feature {} inactive per TOML configuration; skipping", feature->GetName());
+				} else {
+					L->info("Feature {} not installed (no TOML configuration); skipping", feature->GetName());
+				}
+				continue;
+			}
+			if (!state.desiredActive || state.runtimeState != FeatureRuntimeState::kPending) {
 				continue;
 			}
 

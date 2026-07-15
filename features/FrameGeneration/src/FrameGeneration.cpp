@@ -134,6 +134,17 @@ bool FrameGeneration::Configure(const toml::table& a_config, std::string& a_erro
 	return true;
 }
 
+std::optional<bool> FrameGeneration::GetLegacyActivationIntent(const toml::table& a_config) const
+{
+	const auto* settingsNode = a_config.get("settings");
+	const auto* settingsTable = settingsNode ? settingsNode->as_table() : nullptr;
+	const auto* enabledNode = settingsTable ? settingsTable->get("frame_generation_mode") : nullptr;
+	if (!enabledNode || !enabledNode->is_boolean()) {
+		return std::nullopt;
+	}
+	return enabledNode->as_boolean()->get();
+}
+
 void FrameGeneration::SaveSettings()
 {
 	toml::table table;

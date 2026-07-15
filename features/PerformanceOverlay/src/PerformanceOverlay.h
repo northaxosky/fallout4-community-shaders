@@ -19,6 +19,7 @@ namespace cs::features
 		std::string GetCategory() const override { return "Diagnostics"; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
+		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
 		void Load() override;
 		void DrawSettings() override;
 		void DrawOverlay() override;

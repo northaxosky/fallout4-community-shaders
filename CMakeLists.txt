@@ -131,6 +131,12 @@ target_link_libraries(FeatureConfigTests PRIVATE tomlplusplus::tomlplusplus)
 add_test(NAME FeatureConfig COMMAND FeatureConfigTests)
 set_tests_properties(FeatureConfig PROPERTIES LABELS "configuration;unit")
 
+add_test(
+	NAME FeatureConfigSeeds
+	COMMAND FeatureConfigTests --validate-seeds "${CMAKE_SOURCE_DIR}/package/F4SE/Plugins/FO4CommunityShaders"
+)
+set_tests_properties(FeatureConfigSeeds PROPERTIES LABELS "configuration;package")
+
 add_executable(FeatureStateTests
 	tests/FeatureStateTests.cpp
 	src/FeatureState.h

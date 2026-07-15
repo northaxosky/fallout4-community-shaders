@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 
+#include "FrameGeneration.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Settings/FeatureConfig.h"
@@ -34,15 +35,10 @@ namespace cs::features
 		// RenderDoc's early D3D/DXGI detours break DLSS-G fallback; refuse to load when DLSS-G is on.
 		bool DLSSGRequested()
 		{
-			toml::table table;
-			try {
-				table = toml::parse_file("Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.toml");
-			} catch (const toml::parse_error&) {
-				return false;
-			}
-			const auto type = table["settings"]["frame_gen_type"].value_or<int64_t>(0);
-			const auto fgEnabled = table["settings"]["frame_generation_mode"].value_or(true);
-			return fgEnabled && type == 1;
+			const auto* frameGeneration = FrameGeneration::GetSingleton();
+			return frameGeneration->IsActive()
+				&& frameGeneration->settings.frameGenerationMode
+				&& frameGeneration->settings.frameGenType == static_cast<int>(FrameGeneration::FrameGenType::kDLSSG);
 		}
 
 		int ClampMultiFrameCount(int64_t a_value)
@@ -158,6 +154,17 @@ namespace cs::features
 
 		_settings = candidate;
 		return true;
+	}
+
+	std::optional<bool> RenderDoc::GetLegacyActivationIntent(const toml::table& a_config) const
+	{
+		const auto* settingsNode = a_config.get("settings");
+		const auto* settingsTable = settingsNode ? settingsNode->as_table() : nullptr;
+		const auto* enabledNode = settingsTable ? settingsTable->get("enabled") : nullptr;
+		if (!enabledNode || !enabledNode->is_boolean()) {
+			return std::nullopt;
+		}
+		return enabledNode->as_boolean()->get();
 	}
 
 	void RenderDoc::Load()

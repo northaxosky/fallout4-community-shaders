@@ -24,6 +24,7 @@ namespace cs::features
 		std::vector<std::string_view> GetDependencies() const override { return { "Upscaling" }; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
+		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
 		void Load() override;
 		void OnPostPostLoad() override;
 		void OnDataLoaded() override;

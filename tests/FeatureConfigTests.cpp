@@ -1,5 +1,6 @@
 #include "Settings/FeatureConfig.h"
 
+#include <array>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -277,21 +278,49 @@ namespace
 		CHECK(cs::feature_config::ReadString(table, "boolean", text) == kWrongType);
 		CHECK(text == "value");
 	}
+
+	void TestPackageSeeds(const std::filesystem::path& a_root)
+	{
+		constexpr std::array<std::string_view, 8> seedNames{
+			"MotionVectorFixes.toml",
+			"Upscaling.toml",
+			"FrameGeneration.toml",
+			"Imagespace.toml",
+			"PerformanceOverlay.toml",
+			"RenderDoc.toml",
+			"ShaderCatalog.toml",
+			"ShaderReplacement.toml"
+		};
+
+		for (const auto seedName : seedNames) {
+			const auto loadResult = cs::feature_config::LoadFile(a_root / seedName);
+			CHECK(loadResult.status == cs::feature_config::FileLoadStatus::kParsed);
+			CHECK(loadResult.error.empty());
+
+			const auto activation = cs::feature_config::ParseActivation(loadResult.table);
+			CHECK(activation.valid);
+			CHECK(!activation.enabled);
+			CHECK(!activation.migrationNeeded);
+			CHECK(activation.source == cs::feature_config::ActivationIntentSource::kCanonical);
+		}
+	}
 }
 
 int main(int a_argc, char* a_argv[])
 {
 	try {
-		if (a_argc < 1) {
-			throw std::runtime_error("Missing executable path");
+		if (a_argc == 3 && std::string_view(a_argv[1]) == "--validate-seeds") {
+			TestPackageSeeds(a_argv[2]);
+		} else if (a_argc == 1) {
+			const auto executableDirectory = std::filesystem::absolute(a_argv[0]).parent_path();
+			const TestDirectory directory(executableDirectory);
+			TestFileLoading(directory.path);
+			TestActivationParsing();
+			TestMigration();
+			TestScalarReaders();
+		} else {
+			throw std::runtime_error("Invalid arguments");
 		}
-
-		const auto executableDirectory = std::filesystem::absolute(a_argv[0]).parent_path();
-		const TestDirectory directory(executableDirectory);
-		TestFileLoading(directory.path);
-		TestActivationParsing();
-		TestMigration();
-		TestScalarReaders();
 	} catch (const std::exception& e) {
 		std::cerr << "Unexpected exception: " << e.what() << '\n';
 		return 1;

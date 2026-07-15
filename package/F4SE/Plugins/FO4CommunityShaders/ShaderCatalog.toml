@@ -1,3 +1,6 @@
+[feature]
+enabled = false
+
 [settings]
 # Master toggle. Ships off in v1; user opts in via the in-game settings menu.
 enabled = false

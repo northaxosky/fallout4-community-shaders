@@ -33,6 +33,7 @@ namespace cs
 
 		// Configure must not install hooks, load providers, or register callbacks.
 		virtual bool Configure(const toml::table& /*a_config*/, std::string& /*a_error*/) { return true; }
+		virtual std::optional<bool> GetLegacyActivationIntent(const toml::table& /*a_config*/) const { return std::nullopt; }
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}

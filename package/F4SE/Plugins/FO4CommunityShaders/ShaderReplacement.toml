@@ -1,3 +1,6 @@
+[feature]
+enabled = false
+
 [settings]
 # Master kill-switch. Ships off; dev opt-in only.
 enabled = false
