@@ -1,10 +1,24 @@
 #pragma once
 
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace cs
 {
+	enum class FeatureCapability
+	{
+		kPixelShaderSwapBroker
+	};
+
+	struct FeatureRequirement
+	{
+		std::string_view provider;
+		FeatureCapability capability;
+
+		bool operator==(const FeatureRequirement&) const = default;
+	};
+
 	enum class FeatureRuntimeState
 	{
 		kPending,

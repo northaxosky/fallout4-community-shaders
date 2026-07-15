@@ -22,7 +22,8 @@ namespace cs
 		virtual ~Feature() = default;
 
 		virtual std::string_view GetName() const = 0;
-		virtual std::vector<std::string_view> GetDependencies() const { return {}; }
+		virtual std::vector<FeatureRequirement> GetRequirements() const { return {}; }
+		virtual bool HasCapability(FeatureCapability /*a_capability*/) const noexcept { return false; }
 		virtual bool IsInstalled() const;
 
 		const FeatureState& GetState() const noexcept { return _state; }

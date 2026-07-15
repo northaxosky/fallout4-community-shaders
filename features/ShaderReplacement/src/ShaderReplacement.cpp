@@ -231,7 +231,8 @@ namespace cs::features
 		const auto manifest = Widen(_settings.manifestPath);
 		const auto root     = Widen(_settings.shadersRoot);
 		if (!replacement::Registry::Get().LoadFromJson(manifest, root)) {
-			L->error("Manifest load failed; feature inert.");
+			FailLoad("Shader replacement manifest failed to load");
+			L->error("Manifest load failed; feature inactive.");
 			return;
 		}
 

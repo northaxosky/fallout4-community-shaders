@@ -39,6 +39,15 @@ namespace
 		return { a_value.data(), a_value.size() };
 	}
 
+	std::string_view CapabilityName(cs::FeatureCapability a_capability)
+	{
+		switch (a_capability) {
+		case cs::FeatureCapability::kPixelShaderSwapBroker:
+			return "pixel-shader swap broker";
+		}
+		return "unknown capability";
+	}
+
 	std::string PluginVersionString()
 	{
 		char buf[32];
@@ -141,10 +150,10 @@ namespace
 			const auto name = a_features[featureIdx]->GetName();
 			names.append(name.data(), name.size());
 		}
-		L->error("Feature dependency cycle detected involving: {}", names);
+		L->error("Feature requirement cycle detected involving: {}", names);
 	}
 
-	void ReportDependencyCycles(
+	void ReportRequirementCycles(
 		const std::vector<std::vector<std::size_t>>& a_adjacency,
 		const std::vector<cs::Feature*>& a_features)
 	{
@@ -204,7 +213,7 @@ namespace
 		}
 	}
 
-	std::vector<cs::Feature*> SortFeaturesByDependencies(const std::vector<cs::Feature*>& a_features)
+	std::vector<cs::Feature*> SortFeaturesByRequirements(const std::vector<cs::Feature*>& a_features)
 	{
 		const auto count = a_features.size();
 		std::unordered_map<std::string_view, std::size_t> indexByName;
@@ -212,30 +221,33 @@ namespace
 		for (std::size_t i = 0; i < count; ++i) {
 			const auto [it, inserted] = indexByName.emplace(a_features[i]->GetName(), i);
 			if (!inserted) {
-				L->warn("Feature {} is registered more than once; dependency order may be unstable", it->first);
+				L->warn("Feature {} is registered more than once; requirement order may be unstable", it->first);
 			}
 		}
 
 		std::vector<std::vector<std::size_t>> adjacency(count);
 		std::vector<std::size_t> indegree(count, 0);
 		for (std::size_t featureIdx = 0; featureIdx < count; ++featureIdx) {
-			std::unordered_set<std::size_t> seenDependencies;
-			std::unordered_set<std::string_view> seenMissingDependencies;
-			for (const auto dependency : a_features[featureIdx]->GetDependencies()) {
-				const auto dependencyIt = indexByName.find(dependency);
-				if (dependencyIt == indexByName.end()) {
-					if (seenMissingDependencies.insert(dependency).second) {
-						L->warn("Feature {} depends on {} which is not registered; load order may be unstable",
-							a_features[featureIdx]->GetName(), dependency);
+			std::unordered_set<std::size_t> seenProviders;
+			std::unordered_set<std::string_view> seenMissingProviders;
+			for (const auto& requirement : a_features[featureIdx]->GetRequirements()) {
+				const auto providerIt = indexByName.find(requirement.provider);
+				if (providerIt == indexByName.end()) {
+					if (seenMissingProviders.insert(requirement.provider).second) {
+						L->warn(
+							"Feature {} requires capability '{}' from unregistered provider {}; activation order may be incomplete",
+							a_features[featureIdx]->GetName(),
+							CapabilityName(requirement.capability),
+							requirement.provider);
 					}
 					continue;
 				}
 
-				const auto dependencyIdx = dependencyIt->second;
-				if (!seenDependencies.insert(dependencyIdx).second) {
+				const auto providerIdx = providerIt->second;
+				if (!seenProviders.insert(providerIdx).second) {
 					continue;
 				}
-				adjacency[dependencyIdx].push_back(featureIdx);
+				adjacency[providerIdx].push_back(featureIdx);
 				++indegree[featureIdx];
 			}
 		}
@@ -263,14 +275,12 @@ namespace
 		}
 
 		if (sorted.size() != count) {
-			ReportDependencyCycles(adjacency, a_features);
-			// Kahn's result holds exactly the features that could be ordered; the rest are in a
-			// cycle or downstream of one. Return only the safe subset and exclude the others, rather
-			// than falling back to registration order and loading them with an undefined dep order.
+			ReportRequirementCycles(adjacency, a_features);
+			// Return only features with a safe requirement order.
 			std::unordered_set<const cs::Feature*> orderable(sorted.begin(), sorted.end());
 			for (auto* feature : a_features) {
 				if (orderable.find(feature) == orderable.end()) {
-					L->error("Feature {} excluded from load: part of or downstream of a dependency cycle",
+					L->error("Feature {} excluded from activation: part of or downstream of a requirement cycle",
 						feature->GetName());
 				}
 			}
@@ -341,7 +351,7 @@ namespace cs
 			feature->SetState({});
 		}
 
-		_activationOrder = SortFeaturesByDependencies(_registeredFeatures);
+		_activationOrder = SortFeaturesByRequirements(_registeredFeatures);
 		const std::unordered_set<const Feature*> orderedSet(_activationOrder.begin(), _activationOrder.end());
 
 		const bool autoInstallAll = LoadAutoInstallAllFeatures();
@@ -435,7 +445,7 @@ namespace cs
 				continue;
 			}
 
-			feature->SetRuntimeState(FeatureRuntimeState::kFailed, "Dependency order could not be resolved");
+			feature->SetRuntimeState(FeatureRuntimeState::kFailed, "Feature requirement order could not be resolved");
 		}
 	}
 
@@ -443,19 +453,20 @@ namespace cs
 	{
 		_loadedFeatures.clear();
 
-		// Track which features actually loaded so a dependent can be skipped when a prerequisite
-		// is missing, uninstalled, or failed. Topological order guarantees deps are attempted first.
+		std::unordered_map<std::string_view, Feature*> registeredByName;
+		registeredByName.reserve(_registeredFeatures.size());
+		for (auto* feature : _registeredFeatures) {
+			registeredByName.emplace(feature->GetName(), feature);
+		}
+
+		// Topological order guarantees requirement providers are attempted first.
 		std::unordered_set<std::string_view> loadedNames;
 		loadedNames.reserve(_activationOrder.size());
 
 		for (auto* feature : _activationOrder) {
 			const auto& state = feature->GetState();
-			if (state.runtimeState == FeatureRuntimeState::kActive) {
-				_loadedFeatures.push_back(feature);
-				loadedNames.insert(feature->GetName());
-				continue;
-			}
-			if (state.runtimeState == FeatureRuntimeState::kFailed) {
+			if (state.runtimeState == FeatureRuntimeState::kFailed
+				|| state.runtimeState == FeatureRuntimeState::kDegraded) {
 				continue;
 			}
 			if (state.runtimeState == FeatureRuntimeState::kInactive) {
@@ -466,22 +477,49 @@ namespace cs
 				}
 				continue;
 			}
-			if (!state.desiredActive || state.runtimeState != FeatureRuntimeState::kPending) {
+			const bool wasActive = state.runtimeState == FeatureRuntimeState::kActive;
+			if (!state.desiredActive
+				|| (!wasActive && state.runtimeState != FeatureRuntimeState::kPending)) {
 				continue;
 			}
 
-			bool depsSatisfied = true;
-			for (const auto dependency : feature->GetDependencies()) {
-				if (loadedNames.find(dependency) == loadedNames.end()) {
-					L->error("Feature {} requires {} which did not load; skipping", feature->GetName(), dependency);
-					feature->SetRuntimeState(
-						FeatureRuntimeState::kFailed,
-						"Required feature '" + ToString(dependency) + "' did not load");
-					depsSatisfied = false;
+			bool requirementsSatisfied = true;
+			for (const auto& requirement : feature->GetRequirements()) {
+				const auto providerIt = registeredByName.find(requirement.provider);
+				const auto capability = CapabilityName(requirement.capability);
+				std::string failure;
+				if (providerIt == registeredByName.end()) {
+					failure = "Required provider '" + ToString(requirement.provider)
+						+ "' for capability '" + ToString(capability) + "' is not registered";
+				} else if (loadedNames.find(requirement.provider) == loadedNames.end()
+					|| !providerIt->second->IsHealthy()) {
+					failure = "Required provider '" + ToString(requirement.provider)
+						+ "' is not healthy-active for capability '" + ToString(capability) + "'";
+				} else if (!providerIt->second->HasCapability(requirement.capability)) {
+					failure = "Required provider '" + ToString(requirement.provider)
+						+ "' does not provide capability '" + ToString(capability) + "'";
+				}
+
+				if (!failure.empty()) {
+					if (wasActive) {
+						auto detail = "Requirement lost after activation: " + failure;
+						feature->SetRuntimeState(FeatureRuntimeState::kDegraded, detail);
+						L->error("Feature {} is degraded: {}", feature->GetName(), detail);
+					} else {
+						L->error("Feature {} requirement failed: {}; skipping", feature->GetName(), failure);
+						feature->SetRuntimeState(FeatureRuntimeState::kFailed, std::move(failure));
+					}
+					requirementsSatisfied = false;
 					break;
 				}
 			}
-			if (!depsSatisfied) {
+			if (!requirementsSatisfied) {
+				continue;
+			}
+
+			if (wasActive) {
+				_loadedFeatures.push_back(feature);
+				loadedNames.insert(feature->GetName());
 				continue;
 			}
 

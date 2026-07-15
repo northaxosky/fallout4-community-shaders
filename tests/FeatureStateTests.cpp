@@ -78,6 +78,27 @@ namespace
 		CHECK(degraded.GetDetail() == "hooks may remain");
 	}
 
+	void TestFeatureRequirements()
+	{
+		using cs::FeatureCapability;
+		using cs::FeatureRequirement;
+
+		constexpr FeatureRequirement requirement{
+			"ShaderCatalog",
+			FeatureCapability::kPixelShaderSwapBroker
+		};
+		constexpr FeatureRequirement same = requirement;
+		constexpr FeatureRequirement other{
+			"OtherProvider",
+			FeatureCapability::kPixelShaderSwapBroker
+		};
+
+		static_assert(requirement == same);
+		static_assert(requirement != other);
+		CHECK(requirement.provider == "ShaderCatalog");
+		CHECK(requirement.capability == FeatureCapability::kPixelShaderSwapBroker);
+	}
+
 	void TestActivationResultApplication()
 	{
 		using cs::ActivationResult;
@@ -108,6 +129,7 @@ int main()
 {
 	TestStatePredicates();
 	TestActivationResults();
+	TestFeatureRequirements();
 	TestActivationResultApplication();
 
 	if (failures != 0) {

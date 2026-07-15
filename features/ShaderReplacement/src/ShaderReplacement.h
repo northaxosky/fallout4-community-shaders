@@ -19,7 +19,10 @@ namespace cs::features
 		std::string_view GetName() const override { return "ShaderReplacement"; }
 		std::string GetFeatureSummary() const override { return "Lets developers swap in modified compiled shaders without restarting."; }
 		std::string GetCategory() const override { return "Developer"; }
-		std::vector<std::string_view> GetDependencies() const override { return { "ShaderCatalog" }; }
+		std::vector<FeatureRequirement> GetRequirements() const override
+		{
+			return { { "ShaderCatalog", FeatureCapability::kPixelShaderSwapBroker } };
+		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;

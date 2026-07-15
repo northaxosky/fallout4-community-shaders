@@ -192,6 +192,12 @@ namespace cs::features
 		return enabledNode->as_boolean()->get();
 	}
 
+	bool ShaderCatalog::HasCapability(FeatureCapability a_capability) const noexcept
+	{
+		return a_capability == FeatureCapability::kPixelShaderSwapBroker
+			&& _started.load(std::memory_order_acquire);
+	}
+
 	void ShaderCatalog::SaveSettings()
 	{
 		toml::table table;
@@ -225,24 +231,25 @@ namespace cs::features
 
 		catalog::Sha1InitOnce();
 
-		// Patch subclass reload/setup slots before D3D shader-creation hooks run.
-		catalog::subclass_hooks::InstallAll();
-
 		catalog::DbConfig dbc;
 		dbc.catalog_path      = _settings.catalogPath;
 		dbc.flush_interval_ms = static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
 
 		const auto runtime = DetectRuntime();
 		const auto version = PluginVersionString();
-		if (catalog::CatalogDB::Get().Start(dbc, runtime, version.c_str())) {
-			catalog::shader_tracker::SetEnabled(true);
-			_started.store(true, std::memory_order_release);
-			L->info("Catalog initialized (runtime={})", runtime);
-		} else {
+		if (!catalog::CatalogDB::Get().Start(dbc, runtime, version.c_str())) {
 			catalog::shader_tracker::SetEnabled(false);
-			L->error("Catalog start failed; feature inert.");
 			_started.store(false, std::memory_order_release);
+			FailLoad("Catalog database startup failed");
+			L->error("Catalog database startup failed; feature inactive.");
+			return;
 		}
+
+		// Patch subclass reload/setup slots before D3D shader-creation hooks run.
+		catalog::subclass_hooks::InstallAll();
+		catalog::shader_tracker::SetEnabled(true);
+		_started.store(true, std::memory_order_release);
+		L->info("Catalog initialized (runtime={})", runtime);
 	}
 
 	void ShaderCatalog::RegisterPixelShaderSwapCallback(PixelShaderSwapCallback a_cb) noexcept
