@@ -1,6 +1,7 @@
 #include "Env.h"
 #include "Feature.h"
 #include "Log.h"
+#include "Render/D3D11Bootstrap.h"
 
 namespace { auto* L = cs::log::Get("cs"); }
 
@@ -58,6 +59,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	auto& featureManager = cs::FeatureManager::Get();
 	featureManager.PrepareAll();
 	featureManager.ActivateAll();
+	cs::d3d11::InstallBootstrapHook();
 
 	const auto messaging = F4SE::GetMessagingInterface();
 	messaging->RegisterListener(OnMessage);

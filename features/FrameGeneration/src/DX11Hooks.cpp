@@ -11,8 +11,6 @@
 
 #include "Env.h"
 #include "Log.h"
-#include "Menu/Menu.h"
-#include "Feature.h"
 #include "Render/StreamlineCore.h"
 #include "XeSSFG.h"
 
@@ -131,15 +129,6 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	proxy->CreateInterop();
 
 	*ppSwapChain = proxy->GetSwapChainProxy();
-
-	{
-		ID3D11DeviceContext* menuContext = nullptr;
-		a_device->GetImmediateContext(&menuContext);
-		cs::Menu::Get().OnD3D11Ready(a_device, menuContext, pDesc->OutputWindow);
-		if (menuContext)
-			menuContext->Release();
-		cs::Menu::Get().HookPresentOn(*ppSwapChain);
-	}
 
 	return S_OK;
 }
@@ -305,13 +294,9 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				*ppSwapChain = proxy->GetSwapChainProxy();
 
-				cs::Menu::Get().OnD3D11Ready(*ppDevice, *ppImmediateContext, pSwapChainDesc->OutputWindow);
-				cs::Menu::Get().HookPresentOn(*ppSwapChain);
-
-				// Proxy path returns early instead of chaining to Upscaling's IAT thunk; drive shared Streamline init here.
+				// Proxy path returns early instead of chaining to Upscaling's IAT thunk; register the shared Streamline device here.
 				cs::Streamline::GetSingleton()->Initialize();
 				cs::Streamline::GetSingleton()->OnD3D11Ready(pAdapter, *ppDevice);
-				cs::FeatureManager::Get().OnD3D11ReadyAll(pAdapter, *ppDevice);
 
 				return S_OK;
 			}
