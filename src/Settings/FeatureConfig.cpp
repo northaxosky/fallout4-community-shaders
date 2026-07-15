@@ -193,16 +193,45 @@ namespace cs::feature_config
 		if (!std::isfinite(value)) {
 			return ScalarReadStatus::kInvalidValue;
 		}
-		if (value < static_cast<double>(a_min) || value > static_cast<double>(a_max)) {
-			return ScalarReadStatus::kOutOfRange;
-		}
 
 		const auto floatValue = static_cast<float>(value);
 		if (!std::isfinite(floatValue)) {
 			return ScalarReadStatus::kOutOfRange;
 		}
+		if (floatValue < a_min || floatValue > a_max) {
+			return ScalarReadStatus::kOutOfRange;
+		}
 
 		a_value = floatValue;
+		return ScalarReadStatus::kValid;
+	}
+
+	ScalarReadStatus ReadDouble(
+		const toml::table& a_table,
+		std::string_view a_key,
+		double& a_value,
+		double a_min,
+		double a_max)
+	{
+		const auto* node = a_table.get(a_key);
+		if (!node) {
+			return ScalarReadStatus::kMissing;
+		}
+		if (!node->is_floating_point() && !node->is_integer()) {
+			return ScalarReadStatus::kWrongType;
+		}
+
+		const double value = node->is_floating_point() ?
+			node->as_floating_point()->get() :
+			static_cast<double>(node->as_integer()->get());
+		if (!std::isfinite(value)) {
+			return ScalarReadStatus::kInvalidValue;
+		}
+		if (value < a_min || value > a_max) {
+			return ScalarReadStatus::kOutOfRange;
+		}
+
+		a_value = value;
 		return ScalarReadStatus::kValid;
 	}
 

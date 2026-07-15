@@ -21,6 +21,7 @@ namespace cs::features
 		std::string GetCategory() const override { return "Diagnostics"; }
 		bool HasResettableSettings() const override { return true; }
 
+		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
@@ -40,7 +41,6 @@ namespace cs::features
 	private:
 		RenderDoc() = default;
 
-		void LoadSettings();
 		void SaveSettings();
 		bool TryLoadRuntime();
 		void ApplyCapturePath();

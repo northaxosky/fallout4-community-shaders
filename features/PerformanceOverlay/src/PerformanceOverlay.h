@@ -18,6 +18,7 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "On-screen FPS counter and frame-time graph with estimated post-FG values."; }
 		std::string GetCategory() const override { return "Diagnostics"; }
 
+		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
 		void DrawOverlay() override;
@@ -80,7 +81,6 @@ namespace cs::features
 	private:
 		PerformanceOverlay() = default;
 
-		void LoadSettings();
 		void SaveSettings();
 		void ApplyPreset(Preset preset);
 		void TickFrame();

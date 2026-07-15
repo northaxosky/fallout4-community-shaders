@@ -22,6 +22,7 @@ namespace cs::features
 		std::string GetFeatureSummary() const override { return "Captures every shader the engine compiles into a SQLite catalog for inspection."; }
 		std::string GetCategory() const override { return "Diagnostics"; }
 
+		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;
 		void DrawSettings() override;
@@ -44,7 +45,6 @@ namespace cs::features
 		ShaderCatalog() = default;
 		~ShaderCatalog() override;
 
-		void LoadSettings();
 		void SaveSettings();
 
 		Settings _settings;

@@ -14,6 +14,7 @@
 #include "Compiler.h"
 #include "Log.h"
 #include "Registry.h"
+#include "Settings/FeatureConfig.h"
 #include "ShaderCatalog.h"
 #include "Sha1.h"
 
@@ -44,6 +45,81 @@ namespace cs::features
 			if (name == "vls_slice_scatter")               return &t.vls_slice_scatter;
 			return nullptr;
 		}
+
+		std::string SettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
+		}
+
+		bool AcceptSetting(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_key,
+			std::string_view a_expected,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected " + std::string(a_expected));
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "invalid value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, "value is out of range");
+				break;
+			}
+			return false;
+		}
+
+		bool ParseSettingsTable(
+			const toml::table& a_config,
+			ShaderReplacement::Settings& a_candidate,
+			std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			auto& shaders = a_candidate.shaders;
+			return AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
+					"enabled", "boolean", a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "manifest_path", a_candidate.manifestPath),
+					"manifest_path", "string", a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "shaders_root", a_candidate.shadersRoot),
+					"shaders_root", "string", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_ambient_ibl_pass", shaders.ambient_ibl_pass),
+					"replace_ambient_ibl_pass", "boolean", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_bsdf_light_deferred_directional", shaders.bsdf_light_deferred_directional),
+					"replace_bsdf_light_deferred_directional", "boolean", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_bsdf_light_deferred_point", shaders.bsdf_light_deferred_point),
+					"replace_bsdf_light_deferred_point", "boolean", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_deferred_composite", shaders.deferred_composite),
+					"replace_deferred_composite", "boolean", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_deferred_prepass", shaders.deferred_prepass),
+					"replace_deferred_prepass", "boolean", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_vls_slice_scatter", shaders.vls_slice_scatter),
+					"replace_vls_slice_scatter", "boolean", a_error);
+		}
 	}
 
 	ShaderReplacement* ShaderReplacement::GetSingleton()
@@ -59,29 +135,15 @@ namespace cs::features
 		return false;
 	}
 
-	void ShaderReplacement::LoadSettings()
+	bool ShaderReplacement::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			return;
+		auto candidate = _settings;
+		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+			return false;
 		}
 
-		const auto settings = table["settings"];
-		_settings.enabled = settings["enabled"].value_or(_settings.enabled);
-		_settings.manifestPath = settings["manifest_path"].value_or(_settings.manifestPath);
-		_settings.shadersRoot = settings["shaders_root"].value_or(_settings.shadersRoot);
-
-		auto& s = _settings.shaders;
-		s.ambient_ibl_pass = settings["replace_ambient_ibl_pass"].value_or(s.ambient_ibl_pass);
-		s.bsdf_light_deferred_directional = settings["replace_bsdf_light_deferred_directional"].value_or(s.bsdf_light_deferred_directional);
-		s.bsdf_light_deferred_point = settings["replace_bsdf_light_deferred_point"].value_or(s.bsdf_light_deferred_point);
-		s.deferred_composite = settings["replace_deferred_composite"].value_or(s.deferred_composite);
-		s.deferred_prepass = settings["replace_deferred_prepass"].value_or(s.deferred_prepass);
-		s.vls_slice_scatter = settings["replace_vls_slice_scatter"].value_or(s.vls_slice_scatter);
-
-		ApplyMarkerOverrides();
+		_settings = candidate;
+		return true;
 	}
 
 	void ShaderReplacement::SaveSettings()
@@ -147,7 +209,7 @@ namespace cs::features
 
 	void ShaderReplacement::Load()
 	{
-		LoadSettings();
+		ApplyMarkerOverrides();
 		if (!_settings.enabled) {
 			L->info("Disabled by config; feature inert.");
 			return;

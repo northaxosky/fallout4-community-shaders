@@ -12,6 +12,7 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Settings/FeatureConfig.h"
 
 namespace cs::features
 {
@@ -55,11 +56,115 @@ namespace cs::features
 		{
 			return a_value >= 0.0 ? a_value : RenderDoc::Settings{}.minFreeDiskGiB;
 		}
+
+		std::string SettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
+		}
+
+		bool AcceptSetting(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_key,
+			std::string_view a_expected,
+			std::string_view a_range,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected " + std::string(a_expected));
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "value must be finite");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, a_range);
+				break;
+			}
+			return false;
+		}
+
+		bool ReadIntegerSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::int64_t a_min,
+			std::int64_t a_max,
+			int& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::int64_t>(a_value);
+			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
+			if (!AcceptSetting(status, a_key, "integer", "value must be in range 2..60", a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = static_cast<int>(value);
+			}
+			return true;
+		}
+
+		bool ParseSettingsTable(
+			const toml::table& a_config,
+			RenderDoc::Settings& a_candidate,
+			std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			return AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
+					"enabled", "boolean", "boolean value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "dll_path", a_candidate.dllPath),
+					"dll_path", "string", "string value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "capture_folder", a_candidate.captureFolder),
+					"capture_folder", "string", "string value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadDouble(
+						*settingsTable,
+						"min_free_disk_gib",
+						a_candidate.minFreeDiskGiB,
+						0.0,
+						std::numeric_limits<double>::max()),
+					"min_free_disk_gib", "number", "value must be greater than or equal to 0", a_error)
+				&& ReadIntegerSetting(
+					*settingsTable,
+					"multi_frame_count",
+					kMinMultiFrameCount,
+					kMaxMultiFrameCount,
+					a_candidate.multiFrameCount,
+					a_error);
+		}
+	}
+
+	bool RenderDoc::Configure(const toml::table& a_config, std::string& a_error)
+	{
+		auto candidate = _settings;
+		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+			return false;
+		}
+
+		_settings = candidate;
+		return true;
 	}
 
 	void RenderDoc::Load()
 	{
-		LoadSettings();
+		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={}",
+			_settings.enabled, _settings.dllPath, _settings.captureFolder,
+			_settings.minFreeDiskGiB, _settings.multiFrameCount);
 		cs::Menu::Get().RegisterWndProcCallback(&RenderDoc::HandleWndProc);
 
 		if (!_settings.enabled)
@@ -72,27 +177,6 @@ namespace cs::features
 		}
 		// Load before any D3D device exists; loading post-D3D-init is unreliable.
 		TryLoadRuntime();
-	}
-
-	void RenderDoc::LoadSettings()
-	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			return;
-		}
-
-		_settings.enabled        = table["settings"]["enabled"].value_or(_settings.enabled);
-		_settings.dllPath        = table["settings"]["dll_path"].value_or(_settings.dllPath);
-		_settings.captureFolder  = table["settings"]["capture_folder"].value_or(_settings.captureFolder);
-		_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(table["settings"]["min_free_disk_gib"].value_or(_settings.minFreeDiskGiB));
-		_settings.multiFrameCount = ClampMultiFrameCount(
-			table["settings"]["multi_frame_count"].value_or<int64_t>(_settings.multiFrameCount));
-
-		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={}",
-			_settings.enabled, _settings.dllPath, _settings.captureFolder,
-			_settings.minFreeDiskGiB, _settings.multiFrameCount);
 	}
 
 	void RenderDoc::SaveSettings()

@@ -16,6 +16,7 @@
 #include "Log.h"
 #include "PixelShaderTracker.h"
 #include "Plugin.h"
+#include "Settings/FeatureConfig.h"
 #include "Sha1.h"
 #include "SubclassHooks.h"
 
@@ -64,6 +65,96 @@ namespace cs::features
 				Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
 			return std::string(buf);
 		}
+
+		std::string SettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
+		}
+
+		bool AcceptSetting(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_key,
+			std::string_view a_expected,
+			std::string_view a_range,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected " + std::string(a_expected));
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "invalid value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, a_range);
+				break;
+			}
+			return false;
+		}
+
+		bool ReadIntegerSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::int64_t a_min,
+			std::int64_t a_max,
+			std::string_view a_range,
+			int& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::int64_t>(a_value);
+			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
+			if (!AcceptSetting(status, a_key, "integer", a_range, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = static_cast<int>(value);
+			}
+			return true;
+		}
+
+		bool ParseSettingsTable(
+			const toml::table& a_config,
+			ShaderCatalog::Settings& a_candidate,
+			std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			return AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
+					"enabled", "boolean", "boolean value is out of range", a_error)
+				&& ReadIntegerSetting(
+					*settingsTable,
+					"writer_flush_interval_ms",
+					100,
+					60000,
+					"value must be in range 100..60000",
+					a_candidate.writerFlushIntervalMs,
+					a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "catalog_path", a_candidate.catalogPath),
+					"catalog_path", "string", "string value is out of range", a_error)
+				&& ReadIntegerSetting(
+					*settingsTable,
+					"symbolication_budget_us",
+					std::numeric_limits<int>::min(),
+					std::numeric_limits<int>::max(),
+					"value must be representable as int",
+					a_candidate.symbolicationBudgetUs,
+					a_error);
+		}
 	}
 
 	ShaderCatalog* ShaderCatalog::GetSingleton()
@@ -79,23 +170,15 @@ namespace cs::features
 		catalog::CatalogDB::Get().Stop();
 	}
 
-	void ShaderCatalog::LoadSettings()
+	bool ShaderCatalog::Configure(const toml::table& a_config, std::string& a_error)
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			return;
+		auto candidate = _settings;
+		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+			return false;
 		}
 
-		const auto settings = table["settings"];
-		_settings.enabled = settings["enabled"].value_or(_settings.enabled);
-		_settings.writerFlushIntervalMs = static_cast<int>(settings["writer_flush_interval_ms"].value_or<int64_t>(_settings.writerFlushIntervalMs));
-		_settings.catalogPath = settings["catalog_path"].value_or(_settings.catalogPath);
-		_settings.symbolicationBudgetUs = static_cast<int>(settings["symbolication_budget_us"].value_or<int64_t>(_settings.symbolicationBudgetUs));
-
-		if (_settings.writerFlushIntervalMs < 100)    _settings.writerFlushIntervalMs = 100;
-		if (_settings.writerFlushIntervalMs > 60000)  _settings.writerFlushIntervalMs = 60000;
+		_settings = candidate;
+		return true;
 	}
 
 	void ShaderCatalog::SaveSettings()
@@ -124,7 +207,6 @@ namespace cs::features
 
 	void ShaderCatalog::Load()
 	{
-		LoadSettings();
 		if (!_settings.enabled) {
 			L->info("Disabled by config; feature inert.");
 			return;

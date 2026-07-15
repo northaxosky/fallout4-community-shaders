@@ -16,6 +16,7 @@
 #include "FrameGeneration.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Settings/FeatureConfig.h"
 
 namespace cs::features
 {
@@ -26,67 +27,152 @@ namespace cs::features
 	constexpr const char* kPostFgFrameTimeTooltip =
 		"Backend-reported when available (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus accumulate into a per-tick counter). FSR3 falls back to engine frame time divided by the configured multiplier.";
 
+	namespace
+	{
+		std::string SettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			return "settings." + std::string(a_key) + ": " + std::string(a_reason);
+		}
+
+		bool AcceptSetting(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_key,
+			std::string_view a_expected,
+			std::string_view a_range,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected " + std::string(a_expected));
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "value must be finite");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, a_range);
+				break;
+			}
+			return false;
+		}
+
+		bool ReadBoolSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			bool& a_value,
+			std::string& a_error)
+		{
+			return AcceptSetting(
+				feature_config::ReadBool(a_table, a_key, a_value),
+				a_key, "boolean", "boolean value is out of range", a_error);
+		}
+
+		bool ReadIntegerSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::int64_t a_min,
+			std::int64_t a_max,
+			std::string_view a_range,
+			int& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::int64_t>(a_value);
+			const auto status = feature_config::ReadSignedInteger(a_table, a_key, value, a_min, a_max);
+			if (!AcceptSetting(status, a_key, "integer", a_range, a_error)) {
+				return false;
+			}
+			if (status == feature_config::ScalarReadStatus::kValid) {
+				a_value = static_cast<int>(value);
+			}
+			return true;
+		}
+
+		bool ReadFloatSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			float a_min,
+			float a_max,
+			std::string_view a_range,
+			float& a_value,
+			std::string& a_error)
+		{
+			return AcceptSetting(
+				feature_config::ReadFloat(a_table, a_key, a_value, a_min, a_max),
+				a_key, "number", a_range, a_error);
+		}
+
+		bool ParseSettingsTable(
+			const toml::table& a_config,
+			PerformanceOverlay::Settings& a_candidate,
+			int a_historyCapacity,
+			std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			const auto floatLowest = std::numeric_limits<float>::lowest();
+			const auto floatMax = std::numeric_limits<float>::max();
+			return ReadBoolSetting(*settingsTable, "enabled", a_candidate.enabled, a_error)
+				&& ReadIntegerSetting(*settingsTable, "preset", 0, 3, "value must be in range 0..3", a_candidate.preset, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_fps", a_candidate.showFps, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_frame_time", a_candidate.showFrameTime, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_graph", a_candidate.showGraph, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_estimated_post_fg_frame_time", a_candidate.showEstimatedPostFGFrameTime, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_vram", a_candidate.showVram, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_stats", a_candidate.showStats, a_error)
+				&& ReadIntegerSetting(*settingsTable, "corner", 0, 3, "value must be in range 0..3", a_candidate.corner, a_error)
+				&& ReadBoolSetting(*settingsTable, "free_drag", a_candidate.freeDrag, a_error)
+				&& ReadFloatSetting(*settingsTable, "drag_pos_x", floatLowest, floatMax, "value must be representable as float", a_candidate.dragPosX, a_error)
+				&& ReadFloatSetting(*settingsTable, "drag_pos_y", floatLowest, floatMax, "value must be representable as float", a_candidate.dragPosY, a_error)
+				&& ReadFloatSetting(*settingsTable, "opacity", 0.0f, 1.0f, "value must be in range 0..1", a_candidate.opacity, a_error)
+				&& ReadBoolSetting(*settingsTable, "show_border", a_candidate.showBorder, a_error)
+				&& ReadFloatSetting(*settingsTable, "font_scale", 0.5f, 3.0f, "value must be in range 0.5..3", a_candidate.fontScale, a_error)
+				&& ReadBoolSetting(*settingsTable, "high_contrast", a_candidate.highContrast, a_error)
+				&& ReadBoolSetting(*settingsTable, "auto_thresholds", a_candidate.autoThresholds, a_error)
+				&& ReadFloatSetting(*settingsTable, "fps_good", 1.0f, 1000.0f, "value must be in range 1..1000", a_candidate.fpsGood, a_error)
+				&& ReadFloatSetting(*settingsTable, "fps_warn", 1.0f, 1000.0f, "value must be in range 1..1000", a_candidate.fpsWarn, a_error)
+				&& ReadFloatSetting(*settingsTable, "update_interval", 0.05f, 5.0f, "value must be in range 0.05..5", a_candidate.updateInterval, a_error)
+				&& ReadIntegerSetting(*settingsTable, "history_size", 30, a_historyCapacity, "value must be in range 30..600", a_candidate.historySize, a_error)
+				&& ReadFloatSetting(*settingsTable, "graph_height_px", 40.0f, 160.0f, "value must be in range 40..160", a_candidate.graphHeightPx, a_error);
+		}
+	}
+
 	PerformanceOverlay* PerformanceOverlay::GetSingleton()
 	{
 		static PerformanceOverlay instance;
 		return &instance;
 	}
 
+	bool PerformanceOverlay::Configure(const toml::table& a_config, std::string& a_error)
+	{
+		auto candidate = settings;
+		if (!ParseSettingsTable(a_config, candidate, kHistoryCapacity, a_error)) {
+			return false;
+		}
+
+		settings = candidate;
+		return true;
+	}
+
 	void PerformanceOverlay::Load()
 	{
-		LoadSettings();
-
 		LARGE_INTEGER freq;
 		QueryPerformanceFrequency(&freq);
 		_qpcFreq = static_cast<double>(freq.QuadPart);
 
 		L->info("Loaded: enabled={} preset={} corner={}",
 			settings.enabled, settings.preset, settings.corner);
-	}
-
-	void PerformanceOverlay::LoadSettings()
-	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			return;
-		}
-
-		settings.enabled        = table["settings"]["enabled"].value_or(settings.enabled);
-		settings.preset         = std::clamp(static_cast<int>(table["settings"]["preset"].value_or<int64_t>(settings.preset)), 0, 3);
-
-		settings.showFps        = table["settings"]["show_fps"].value_or(settings.showFps);
-		settings.showFrameTime  = table["settings"]["show_frame_time"].value_or(settings.showFrameTime);
-		settings.showGraph      = table["settings"]["show_graph"].value_or(settings.showGraph);
-		settings.showEstimatedPostFGFrameTime = table["settings"]["show_estimated_post_fg_frame_time"].value_or(settings.showEstimatedPostFGFrameTime);
-		settings.showVram       = table["settings"]["show_vram"].value_or(settings.showVram);
-		settings.showStats      = table["settings"]["show_stats"].value_or(settings.showStats);
-
-		settings.corner         = std::clamp(static_cast<int>(table["settings"]["corner"].value_or<int64_t>(settings.corner)), 0, 3);
-		settings.freeDrag       = table["settings"]["free_drag"].value_or(settings.freeDrag);
-		settings.dragPosX       = static_cast<float>(table["settings"]["drag_pos_x"].value_or(static_cast<double>(settings.dragPosX)));
-		settings.dragPosY       = static_cast<float>(table["settings"]["drag_pos_y"].value_or(static_cast<double>(settings.dragPosY)));
-
-		settings.opacity        = std::clamp(static_cast<float>(table["settings"]["opacity"].value_or(static_cast<double>(settings.opacity))), 0.0f, 1.0f);
-		settings.showBorder     = table["settings"]["show_border"].value_or(settings.showBorder);
-		settings.fontScale      = std::clamp(static_cast<float>(table["settings"]["font_scale"].value_or(static_cast<double>(settings.fontScale))), 0.5f, 3.0f);
-		settings.highContrast   = table["settings"]["high_contrast"].value_or(settings.highContrast);
-
-		settings.autoThresholds = table["settings"]["auto_thresholds"].value_or(settings.autoThresholds);
-		auto readFpsThreshold = [&](const char* key, float fallback) {
-			const float value = static_cast<float>(table["settings"][key].value_or(static_cast<double>(fallback)));
-			const float clamped = std::isnan(value) ? fallback : std::clamp(value, 1.0f, 1000.0f);
-			if (clamped != value || std::isnan(value))
-				L->warn("Clamped PerformanceOverlay {} from {} to {}", key, value, clamped);
-			return clamped;
-		};
-		settings.fpsGood        = readFpsThreshold("fps_good", settings.fpsGood);
-		settings.fpsWarn        = readFpsThreshold("fps_warn", settings.fpsWarn);
-
-		settings.updateInterval = std::clamp(static_cast<float>(table["settings"]["update_interval"].value_or(static_cast<double>(settings.updateInterval))), 0.05f, 5.0f);
-		settings.historySize    = std::clamp(static_cast<int>(table["settings"]["history_size"].value_or<int64_t>(settings.historySize)), 30, kHistoryCapacity);
-		settings.graphHeightPx  = std::clamp(static_cast<float>(table["settings"]["graph_height_px"].value_or(static_cast<double>(settings.graphHeightPx))), 40.0f, 160.0f);
 	}
 
 	void PerformanceOverlay::SaveSettings()

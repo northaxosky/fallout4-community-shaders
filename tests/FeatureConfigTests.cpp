@@ -198,6 +198,11 @@ namespace
 			"integer_float = 3\n"
 			"huge_float = 1e100\n"
 			"invalid_float = nan\n"
+			"float_boundary_min = 0.05\n"
+			"float_boundary_max = 0.7\n"
+			"float_out_of_range = 0.04\n"
+			"double_value = 2.5\n"
+			"integer_double = 4\n"
 			"text = \"value\"\n");
 
 		bool boolean = false;
@@ -243,6 +248,26 @@ namespace
 		CHECK(floating == 3.0F);
 		CHECK(cs::feature_config::ReadFloat(table, "invalid_float", floating) == kInvalidValue);
 		CHECK(floating == 3.0F);
+		CHECK(cs::feature_config::ReadFloat(table, "float_boundary_min", floating, 0.05F, 0.7F) == kValid);
+		CHECK(floating == 0.05F);
+		CHECK(cs::feature_config::ReadFloat(table, "float_boundary_max", floating, 0.05F, 0.7F) == kValid);
+		CHECK(floating == 0.7F);
+		CHECK(cs::feature_config::ReadFloat(table, "float_out_of_range", floating, 0.05F, 0.7F) == kOutOfRange);
+		CHECK(floating == 0.7F);
+
+		double doubleValue = 9.0;
+		CHECK(cs::feature_config::ReadDouble(table, "missing", doubleValue, 0.0, 5.0) == kMissing);
+		CHECK(doubleValue == 9.0);
+		CHECK(cs::feature_config::ReadDouble(table, "double_value", doubleValue, 0.0, 5.0) == kValid);
+		CHECK(std::abs(doubleValue - 2.5) < 0.0001);
+		CHECK(cs::feature_config::ReadDouble(table, "integer_double", doubleValue, 0.0, 5.0) == kValid);
+		CHECK(doubleValue == 4.0);
+		CHECK(cs::feature_config::ReadDouble(table, "boolean", doubleValue, 0.0, 5.0) == kWrongType);
+		CHECK(doubleValue == 4.0);
+		CHECK(cs::feature_config::ReadDouble(table, "invalid_float", doubleValue) == kInvalidValue);
+		CHECK(doubleValue == 4.0);
+		CHECK(cs::feature_config::ReadDouble(table, "double_value", doubleValue, 3.0, 5.0) == kOutOfRange);
+		CHECK(doubleValue == 4.0);
 
 		std::string text = "unchanged";
 		CHECK(cs::feature_config::ReadString(table, "missing", text) == kMissing);
