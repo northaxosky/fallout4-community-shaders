@@ -1,6 +1,7 @@
 #include "Menu/Menu.h"
 
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
@@ -9,8 +10,12 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
+#include <exception>
 #include <filesystem>
 #include <map>
+#include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -54,11 +59,108 @@ namespace
 		return a_lhs < a_rhs;
 	}
 
-	void DrawFeatureResetButton(cs::Feature* a_feature)
+	class FeatureImGuiRecoverySnapshot
 	{
-		if (!a_feature->HasResettableSettings())
-			return;
+	public:
+		static std::optional<FeatureImGuiRecoverySnapshot> Capture() noexcept
+		{
+			try {
+				auto* context = ImGui::GetCurrentContext();
+				if (!context)
+					return std::nullopt;
+				return FeatureImGuiRecoverySnapshot(*context);
+			} catch (...) {
+				return std::nullopt;
+			}
+		}
 
+		FeatureImGuiRecoverySnapshot(FeatureImGuiRecoverySnapshot&& a_other) noexcept :
+			_context(a_other._context),
+			_stackState(a_other._stackState),
+			_nextWindowData(a_other._nextWindowData),
+			_nextItemData(a_other._nextItemData),
+			_openPopupData(a_other._openPopupData),
+			_openPopupSize(a_other._openPopupSize)
+		{
+			a_other._openPopupData = nullptr;
+			a_other._openPopupSize = 0;
+		}
+
+		~FeatureImGuiRecoverySnapshot()
+		{
+			if (_openPopupData)
+				ImGui::MemFree(_openPopupData);
+		}
+
+		void Recover()
+		{
+			ImGui::SetCurrentContext(_context);
+			ImGuiIO& io = ImGui::GetIO();
+			const bool assertEnabled = io.ConfigErrorRecoveryEnableAssert;
+			io.ConfigErrorRecoveryEnableAssert = false;
+			ImGui::ErrorRecoveryTryToRecoverState(&_stackState);
+			io.ConfigErrorRecoveryEnableAssert = assertEnabled;
+
+			_context->NextWindowData = _nextWindowData;
+			_context->NextItemData = _nextItemData;
+			if (_context->OpenPopupStack.Data)
+				ImGui::MemFree(_context->OpenPopupStack.Data);
+			_context->OpenPopupStack.Data = _openPopupData;
+			_context->OpenPopupStack.Size = _openPopupSize;
+			_context->OpenPopupStack.Capacity = _openPopupSize;
+			_openPopupData = nullptr;
+			_openPopupSize = 0;
+			if (!_context->OpenPopupStack.empty())
+				ImGui::ClosePopupToLevel(0, true);
+		}
+
+	private:
+		explicit FeatureImGuiRecoverySnapshot(ImGuiContext& a_context) :
+			_context(&a_context),
+			_nextWindowData(a_context.NextWindowData),
+			_nextItemData(a_context.NextItemData)
+		{
+			ImGui::ErrorRecoveryStoreState(&_stackState);
+			if (!a_context.OpenPopupStack.empty()) {
+				_openPopupSize = a_context.OpenPopupStack.Size;
+				_openPopupData = static_cast<ImGuiPopupData*>(
+					ImGui::MemAlloc(static_cast<std::size_t>(_openPopupSize) * sizeof(ImGuiPopupData)));
+				if (!_openPopupData)
+					throw std::bad_alloc();
+				std::memcpy(
+					_openPopupData,
+					a_context.OpenPopupStack.Data,
+					static_cast<std::size_t>(_openPopupSize) * sizeof(ImGuiPopupData));
+			}
+		}
+
+		ImGuiContext* _context;
+		ImGuiErrorRecoveryState _stackState{};
+		ImGuiNextWindowData _nextWindowData;
+		ImGuiNextItemData _nextItemData;
+		ImGuiPopupData* _openPopupData = nullptr;
+		int _openPopupSize = 0;
+	};
+
+	void DrawFeatureStatus(const cs::Feature& a_feature)
+	{
+		const auto& state = a_feature.GetState();
+		const auto runtimeState = cs::FeatureRuntimeStateName(state.runtimeState);
+		ImGui::TextDisabled(
+			"TOML: %s | Startup activation: %s | Runtime: %.*s",
+			state.installed ? "installed" : "missing",
+			state.desiredActive ? "enabled" : "disabled",
+			static_cast<int>(runtimeState.size()),
+			runtimeState.data());
+		if (!state.detail.empty()) {
+			const auto detail = std::string_view(state.detail).substr(0, 512);
+			ImGui::TextWrapped("Reason: %.*s", static_cast<int>(detail.size()), detail.data());
+		}
+		ImGui::TextDisabled("Activation and unloading require restart; controlled by [feature].enabled.");
+	}
+
+	void DrawFeatureResetButton()
+	{
 		ImGui::PushID("__reset");
 
 		ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kMuted);
@@ -68,48 +170,170 @@ namespace
 		if (clicked)
 			ImGui::OpenPopup("Confirm reset");
 
-		const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-		ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-		if (ImGui::BeginPopupModal("Confirm reset", nullptr,
-				ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
-			ImGui::Text("Reset %.*s to defaults?",
-				static_cast<int>(a_feature->GetName().size()),
-				a_feature->GetName().data());
-			ImGui::Spacing();
-			ImGui::TextDisabled("This restores in-code defaults and saves immediately.");
-			ImGui::Spacing();
-			ImGui::Separator();
-			ImGui::Spacing();
-
-			if (ImGui::Button("Reset", ImVec2(120, 0))) {
-				a_feature->RestoreDefaultSettings();
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-
 		ImGui::PopID();
 	}
 
-	void DrawFeatureSettings(cs::Feature* a_feature)
+	void QuarantineFeatureMetadata(
+		cs::Feature& a_feature,
+		cs::FeatureManager& a_manager,
+		std::string_view a_phase,
+		std::string_view a_reason) noexcept
 	{
-		ImGui::PushID(a_feature->GetName().data());
-		if (ImGui::CollapsingHeader(a_feature->GetName().data())) {
-			const std::string summary = a_feature->GetFeatureSummary();
-			if (!summary.empty()) {
-				ImGui::TextDisabled("%s", summary.c_str());
-				ImGui::Separator();
+		a_manager.QuarantineRuntimeCallback(a_feature, a_phase, a_reason);
+	}
+
+	bool FeatureSupportsReset(
+		cs::Feature& a_feature,
+		cs::FeatureManager& a_manager,
+		std::string_view a_phase)
+	{
+		if (!a_manager.PrepareRuntimeCallback(a_feature, a_phase))
+			return false;
+
+		try {
+			return a_feature.HasResettableSettings();
+		} catch (const std::exception& e) {
+			QuarantineFeatureMetadata(a_feature, a_manager, a_phase, e.what());
+		} catch (...) {
+			QuarantineFeatureMetadata(a_feature, a_manager, a_phase, "non-standard exception");
+		}
+		return false;
+	}
+
+	void ServiceFeatureResetPopup(
+		cs::Feature& a_feature,
+		cs::FeatureManager& a_manager,
+		bool a_menuOpen)
+	{
+		ImGui::PushID(a_feature.GetName().data());
+		ImGui::PushID("__reset");
+
+		if (ImGui::IsPopupOpen("Confirm reset")) {
+			const bool resetAllowed = a_menuOpen
+				&& FeatureSupportsReset(a_feature, a_manager, "Menu::HasResettableSettings");
+
+			const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+			ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+			if (ImGui::BeginPopupModal("Confirm reset", nullptr,
+					ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
+				if (!resetAllowed) {
+					ImGui::CloseCurrentPopup();
+				} else {
+					ImGui::Text("Reset %.*s to defaults?",
+						static_cast<int>(a_feature.GetName().size()),
+						a_feature.GetName().data());
+					ImGui::Spacing();
+					ImGui::TextDisabled("This restores in-code defaults and saves immediately.");
+					ImGui::Spacing();
+					ImGui::Separator();
+					ImGui::Spacing();
+
+					if (ImGui::Button("Reset", ImVec2(120, 0))) {
+						ImGui::CloseCurrentPopup();
+						if (a_manager.PrepareRuntimeCallback(a_feature, "Menu::RestoreDefaultSettings")) {
+							auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
+							if (!recoveryState) {
+								a_manager.QuarantineRuntimeCallback(
+									a_feature,
+									"Menu::RestoreDefaultSettings",
+									"ImGui recovery snapshot unavailable");
+							} else {
+								try {
+									a_feature.RestoreDefaultSettings();
+								} catch (const std::exception& e) {
+									recoveryState->Recover();
+									a_manager.QuarantineRuntimeCallback(
+										a_feature,
+										"Menu::RestoreDefaultSettings",
+										e.what());
+								} catch (...) {
+									recoveryState->Recover();
+									a_manager.QuarantineRuntimeCallback(
+										a_feature,
+										"Menu::RestoreDefaultSettings",
+										"non-standard exception");
+								}
+							}
+						}
+					}
+					ImGui::SameLine();
+					if (ImGui::Button("Cancel", ImVec2(120, 0))) {
+						ImGui::CloseCurrentPopup();
+					}
+				}
+				ImGui::EndPopup();
 			}
-			CS_FEATURE_ZONE(a_feature, "DrawSettings");
-			a_feature->DrawSettings();
-			if (a_feature->HasResettableSettings()) {
+		}
+
+		ImGui::PopID();
+		ImGui::PopID();
+	}
+
+	void DrawFeatureSettings(cs::Feature& a_feature, cs::FeatureManager& a_manager)
+	{
+		ImGui::PushID(a_feature.GetName().data());
+		const bool expanded = ImGui::CollapsingHeader(a_feature.GetName().data());
+		DrawFeatureStatus(a_feature);
+
+		bool resetAllowed = false;
+		if (expanded && a_manager.PrepareRuntimeCallback(a_feature, "Menu::GetFeatureSummary")) {
+			std::string summary;
+			bool summaryCompleted = false;
+			try {
+				summary = a_feature.GetFeatureSummary();
+				summaryCompleted = true;
+			} catch (const std::exception& e) {
+				QuarantineFeatureMetadata(a_feature, a_manager, "Menu::GetFeatureSummary", e.what());
+			} catch (...) {
+				QuarantineFeatureMetadata(
+					a_feature,
+					a_manager,
+					"Menu::GetFeatureSummary",
+					"non-standard exception");
+			}
+
+			if (summaryCompleted) {
+				if (!summary.empty()) {
+					ImGui::TextDisabled("%s", summary.c_str());
+					ImGui::Separator();
+				}
+
+				bool settingsCompleted = false;
+				if (a_manager.PrepareRuntimeCallback(a_feature, "Menu::DrawSettings")) {
+					CS_FEATURE_ZONE(&a_feature, "DrawSettings");
+					auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
+					if (!recoveryState) {
+						a_manager.QuarantineRuntimeCallback(
+							a_feature,
+							"Menu::DrawSettings",
+							"ImGui recovery snapshot unavailable");
+					} else {
+						try {
+							a_feature.DrawSettings();
+							settingsCompleted = true;
+						} catch (const std::exception& e) {
+							recoveryState->Recover();
+							a_manager.QuarantineRuntimeCallback(a_feature, "Menu::DrawSettings", e.what());
+						} catch (...) {
+							recoveryState->Recover();
+							a_manager.QuarantineRuntimeCallback(
+								a_feature,
+								"Menu::DrawSettings",
+								"non-standard exception");
+						}
+					}
+				}
+
+				if (settingsCompleted)
+					resetAllowed = FeatureSupportsReset(
+						a_feature,
+						a_manager,
+						"Menu::HasResettableSettings");
+			}
+			if (resetAllowed) {
 				ImGui::Spacing();
 				ImGui::Separator();
-				DrawFeatureResetButton(a_feature);
+				DrawFeatureResetButton();
 			}
 		}
 		ImGui::PopID();
@@ -189,12 +413,18 @@ namespace cs
 		return _dxgiAdapter3;
 	}
 
-	void Menu::RegisterWndProcCallback(WndProcCallback a_callback)
+	void Menu::RegisterWndProcCallback(Feature& a_owner, WndProcCallback a_callback)
 	{
 		if (!a_callback)
 			return;
-		if (std::find(_wndProcCallbacks.begin(), _wndProcCallbacks.end(), a_callback) == _wndProcCallbacks.end())
-			_wndProcCallbacks.push_back(a_callback);
+		const auto duplicate = std::find_if(
+			_wndProcCallbacks.begin(),
+			_wndProcCallbacks.end(),
+			[&a_owner, a_callback](const WndProcCallbackEntry& a_entry) {
+				return a_entry.owner == &a_owner && a_entry.callback == a_callback;
+			});
+		if (duplicate == _wndProcCallbacks.end())
+			_wndProcCallbacks.push_back({ &a_owner, a_callback });
 	}
 
 	void Menu::ShowToast(std::string a_text, double a_durationSec)
@@ -366,14 +596,37 @@ namespace cs
 
 		// Always-on overlays render even when the settings menu is closed.
 		if (_overlayVisible) {
-			for (auto* feat : FeatureManager::Get().GetAll()) {
+			auto& featureManager = FeatureManager::Get();
+			for (auto* feat : featureManager.GetAll()) {
+				if (!feat || !featureManager.PrepareRuntimeCallback(*feat, "Menu::DrawOverlay")) {
+					continue;
+				}
 				CS_FEATURE_ZONE(feat, "DrawOverlay");
-				feat->DrawOverlay();
+				auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
+				if (!recoveryState) {
+					featureManager.QuarantineRuntimeCallback(
+						*feat,
+						"Menu::DrawOverlay",
+						"ImGui recovery snapshot unavailable");
+					continue;
+				}
+				try {
+					feat->DrawOverlay();
+				} catch (const std::exception& e) {
+					recoveryState->Recover();
+					featureManager.QuarantineRuntimeCallback(*feat, "Menu::DrawOverlay", e.what());
+				} catch (...) {
+					recoveryState->Recover();
+					featureManager.QuarantineRuntimeCallback(
+						*feat,
+						"Menu::DrawOverlay",
+						"non-standard exception");
+				}
 			}
+			featureManager.FinishRuntimeCallbackPass();
 		}
 
-		if (_open)
-			DrawDefaultUI();
+		DrawDefaultUI();
 
 		DrawToast();
 
@@ -408,7 +661,19 @@ namespace cs
 		char title[64];
 		std::snprintf(title, sizeof(title), "FO4 Community Shaders v%u.%u.%u",
 			Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
-		if (ImGui::Begin(title)) {
+		if (!_open) {
+			auto* context = ImGui::GetCurrentContext();
+			if (context && !context->OpenPopupStack.empty())
+				ImGui::ClosePopupToLevel(0, true);
+		}
+		const ImGuiWindowFlags hostFlags = _open ? ImGuiWindowFlags_None :
+			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+			ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
+			ImGuiWindowFlags_NoDocking;
+		const bool drawContents = ImGui::Begin(title, nullptr, hostFlags) && _open;
+		auto& featureManager = FeatureManager::Get();
+		if (drawContents) {
 			const float fps = ImGui::GetIO().Framerate;
 			ImGui::Text("FPS: %.1f", fps);
 			ImGui::Text("Frame: %.2f ms", fps > 0.0f ? 1000.0f / fps : 0.0f);
@@ -452,10 +717,43 @@ namespace cs
 			}
 
 			std::map<std::string, std::vector<Feature*>> featuresByCategory;
-			for (auto* feat : FeatureManager::Get().GetAll()) {
-				if (!feat->IsInMenu())
+			for (auto* feat : featureManager.GetRegisteredFeatures()) {
+				if (!feat->IsHealthy()) {
+					featuresByCategory["Misc"].push_back(feat);
 					continue;
-				std::string category = feat->GetCategory();
+				}
+
+				bool includeFeature = true;
+				try {
+					includeFeature = feat->IsInMenu();
+				} catch (const std::exception& e) {
+					featureManager.QuarantineRuntimeCallback(*feat, "Menu::IsInMenu", e.what());
+					featuresByCategory["Misc"].push_back(feat);
+					continue;
+				} catch (...) {
+					featureManager.QuarantineRuntimeCallback(
+						*feat,
+						"Menu::IsInMenu",
+						"non-standard exception");
+					featuresByCategory["Misc"].push_back(feat);
+					continue;
+				}
+				if (!includeFeature)
+					continue;
+
+				std::string category = "Misc";
+				try {
+					category = feat->GetCategory();
+				} catch (const std::exception& e) {
+					featureManager.QuarantineRuntimeCallback(*feat, "Menu::GetCategory", e.what());
+					category = "Misc";
+				} catch (...) {
+					featureManager.QuarantineRuntimeCallback(
+						*feat,
+						"Menu::GetCategory",
+						"non-standard exception");
+					category = "Misc";
+				}
 				if (category.empty())
 					category = "Misc";
 				featuresByCategory[std::move(category)].push_back(feat);
@@ -471,12 +769,18 @@ namespace cs
 			for (const auto& category : categories) {
 				if (ImGui::CollapsingHeader(category.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
 					ImGui::Indent();
-					for (auto* feat : featuresByCategory.at(category))
-						DrawFeatureSettings(feat);
+					for (auto* feat : featuresByCategory.at(category)) {
+						DrawFeatureSettings(*feat, featureManager);
+					}
 					ImGui::Unindent();
 				}
 			}
 		}
+
+		for (auto* feat : featureManager.GetRegisteredFeatures()) {
+			ServiceFeatureResetPopup(*feat, featureManager, _open);
+		}
+		featureManager.FinishRuntimeCallbackPass();
 		ImGui::End();
 	}
 
@@ -679,10 +983,28 @@ namespace cs
 			return 0;
 		}
 
-		for (auto callback : m._wndProcCallbacks) {
-			if (callback && callback(a_hwnd, a_msg, a_wparam, a_lparam))
-				return 0;
+		auto& featureManager = FeatureManager::Get();
+		for (const auto& entry : m._wndProcCallbacks) {
+			if (!entry.owner || !entry.callback
+				|| !featureManager.PrepareRuntimeCallback(*entry.owner, "Menu::WndProc")) {
+				continue;
+			}
+
+			try {
+				if (entry.callback(a_hwnd, a_msg, a_wparam, a_lparam)) {
+					featureManager.FinishRuntimeCallbackPass();
+					return 0;
+				}
+			} catch (const std::exception& e) {
+				featureManager.QuarantineRuntimeCallback(*entry.owner, "Menu::WndProc", e.what());
+			} catch (...) {
+				featureManager.QuarantineRuntimeCallback(
+					*entry.owner,
+					"Menu::WndProc",
+					"non-standard exception");
+			}
 		}
+		featureManager.FinishRuntimeCallbackPass();
 
 		// Shift+F11 toggles the always-on overlay when no feature consumes it.
 		if (a_msg == WM_KEYDOWN && a_wparam == VK_F11 && (HIWORD(a_lparam) & KF_REPEAT) == 0

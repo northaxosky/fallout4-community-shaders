@@ -172,18 +172,25 @@ namespace cs::features
 		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={}",
 			_settings.enabled, _settings.dllPath, _settings.captureFolder,
 			_settings.minFreeDiskGiB, _settings.multiFrameCount);
-		cs::Menu::Get().RegisterWndProcCallback(&RenderDoc::HandleWndProc);
 
 		if (!_settings.enabled)
 			return;
 		if (DLSSGRequested()) {
-			L->warn("RenderDoc disabled at load: incompatible with DLSS-G frame generation. "
-			        "Set frame_generation_mode=false or choose a non-DLSS-G backend before enabling RenderDoc.");
-			_settings.enabled = false;
+			constexpr std::string_view reason =
+				"RenderDoc cannot start while active FrameGeneration uses DLSS-G; "
+				"disable DLSS-G or RenderDoc and restart";
+			L->warn("{}", reason);
+			FailLoad(std::string(reason));
 			return;
 		}
 		// Load before any D3D device exists; loading post-D3D-init is unreliable.
-		TryLoadRuntime();
+		if (!TryLoadRuntime()) {
+			FailLoad("RenderDoc runtime load failed for settings.dll_path '" + _settings.dllPath
+				+ "'; verify the path and RenderDoc 1.7 API compatibility");
+			return;
+		}
+
+		cs::Menu::Get().RegisterWndProcCallback(*this, &RenderDoc::HandleWndProc);
 	}
 
 	void RenderDoc::SaveSettings()

@@ -12,6 +12,8 @@ struct IDXGIAdapter3;
 
 namespace cs
 {
+	class Feature;
+
 	class Menu
 	{
 	public:
@@ -22,7 +24,7 @@ namespace cs
 		void HookPresentOn(IDXGISwapChain* a_chain);
 
 		using WndProcCallback = bool (*)(HWND, UINT, WPARAM, LPARAM);
-		void RegisterWndProcCallback(WndProcCallback a_callback);
+		void RegisterWndProcCallback(Feature& a_owner, WndProcCallback a_callback);
 
 		bool IsOpen() const noexcept { return _open; }
 		bool IsOverlayVisible() const noexcept { return _overlayVisible; }
@@ -67,7 +69,12 @@ namespace cs
 		float   _fontScale = 1.5f;
 		int     _loggingLevelIdx = -1;
 		std::vector<std::string> _cachedLoggers;
-		std::vector<WndProcCallback> _wndProcCallbacks;
+		struct WndProcCallbackEntry
+		{
+			Feature* owner;
+			WndProcCallback callback;
+		};
+		std::vector<WndProcCallbackEntry> _wndProcCallbacks;
 
 		WNDPROC _origWndProc = nullptr;
 
