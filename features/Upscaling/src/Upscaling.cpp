@@ -17,6 +17,7 @@
 #include "Menu/Menu.h"
 #include "Render/RendererContext.h"
 #include "Render/StreamlineCore.h"
+#include "Settings/FeatureConfig.h"
 namespace cs::features
 {
 	using namespace upscaling;
@@ -26,6 +27,93 @@ namespace cs::features
 
 	namespace
 	{
+		std::string SettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			std::string error = "settings.";
+			error.append(a_key);
+			error.append(": ");
+			error.append(a_reason);
+			return error;
+		}
+
+		bool ReadUnsignedSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::uint64_t a_min,
+			std::uint64_t a_max,
+			uint& a_value,
+			std::string& a_error)
+		{
+			auto value = static_cast<std::uint64_t>(a_value);
+			switch (feature_config::ReadUnsignedInteger(a_table, a_key, value, a_min, a_max)) {
+			case feature_config::ScalarReadStatus::kMissing:
+				return true;
+			case feature_config::ScalarReadStatus::kValid:
+				a_value = static_cast<uint>(value);
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected integer");
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "invalid integer value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(
+					a_key,
+					"value must be in range " + std::to_string(a_min) + ".." + std::to_string(a_max));
+				break;
+			}
+			return false;
+		}
+
+		bool ReadFloatSetting(
+			const toml::table& a_table,
+			std::string_view a_key,
+			float a_min,
+			float a_max,
+			float& a_value,
+			std::string& a_error)
+		{
+			auto value = a_value;
+			switch (feature_config::ReadFloat(a_table, a_key, value, a_min, a_max)) {
+			case feature_config::ScalarReadStatus::kMissing:
+				return true;
+			case feature_config::ScalarReadStatus::kValid:
+				a_value = value;
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = SettingError(a_key, "expected number");
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "value must be finite");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, "value must be in range 0..1");
+				break;
+			}
+			return false;
+		}
+
+		bool ParseSettingsTable(const toml::table& a_config, Upscaling::Settings& a_candidate, std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			return ReadUnsignedSetting(*settingsTable, "upscale_method_preference", 0, 2, a_candidate.upscaleMethodPreference, a_error)
+				&& ReadUnsignedSetting(*settingsTable, "quality_mode", 0, 4, a_candidate.qualityMode, a_error)
+				&& ReadUnsignedSetting(*settingsTable, "preset_dlss", 0, 4, a_candidate.presetDLSS, a_error)
+				&& ReadFloatSetting(*settingsTable, "sharpness_fsr", 0.0f, 1.0f, a_candidate.sharpnessFSR, a_error);
+		}
+
 		bool IsAnisotropicFilter(D3D11_FILTER a_filter)
 		{
 			return a_filter == D3D11_FILTER_ANISOTROPIC
@@ -386,36 +474,36 @@ struct SamplerStates
 
 void Upscaling::LoadSettings()
 {
-	toml::table table;
-	try {
-		table = toml::parse_file(kConfigPath);
-	} catch (const toml::parse_error& e) {
-		L->warn("Failed to parse {}: {}; keeping defaults", kConfigPath, e.description());
+	auto loadResult = feature_config::LoadFile(kConfigPath);
+	if (loadResult.status != feature_config::FileLoadStatus::kParsed) {
+		L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, loadResult.error);
 		return;
 	}
 
-	const auto rawMethod = table["settings"]["upscale_method_preference"].value_or<int64_t>(static_cast<int64_t>(settings.upscaleMethodPreference));
-	const auto rawQuality = table["settings"]["quality_mode"].value_or<int64_t>(static_cast<int64_t>(settings.qualityMode));
-	const auto rawPreset = table["settings"]["preset_dlss"].value_or<int64_t>(static_cast<int64_t>(settings.presetDLSS));
-	const auto method = std::clamp(rawMethod, int64_t{ 0 }, int64_t{ 2 });
-	const auto quality = std::clamp(rawQuality, int64_t{ 0 }, int64_t{ 4 });
-	const auto preset = std::clamp(rawPreset, int64_t{ 0 }, int64_t{ 4 });
-	if (method != rawMethod) {
-		L->warn("Clamped invalid upscale_method_preference {} -> {}", rawMethod, method);
+	auto candidate = settings;
+	std::string error;
+	if (!ParseSettingsTable(loadResult.table, candidate, error)) {
+		L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, error);
+		return;
 	}
-	if (quality != rawQuality) {
-		L->warn("Clamped invalid quality_mode {} -> {}", rawQuality, quality);
-	}
-	if (preset != rawPreset) {
-		L->warn("Clamped invalid preset_dlss {} -> {}", rawPreset, preset);
-	}
-	settings.upscaleMethodPreference = static_cast<uint>(method);
-	settings.qualityMode = static_cast<uint>(quality);
-	settings.presetDLSS = static_cast<uint>(preset);
-	settings.sharpnessFSR = std::clamp(static_cast<float>(table["settings"]["sharpness_fsr"].value_or<double>(static_cast<double>(settings.sharpnessFSR))), 0.0f, 1.0f);
+
+	settings = candidate;
 
 	L->info("Loaded: upscaleMethod={}, qualityMode={}, presetDLSS={}, sharpnessFSR={:.2f}",
 		settings.upscaleMethodPreference, settings.qualityMode, settings.presetDLSS, settings.sharpnessFSR);
+}
+
+bool Upscaling::Configure(const toml::table& a_config, std::string& a_error)
+{
+	auto candidate = settings;
+	if (!ParseSettingsTable(a_config, candidate, a_error)) {
+		return false;
+	}
+
+	settings = candidate;
+	L->info("Configured: upscaleMethod={}, qualityMode={}, presetDLSS={}, sharpnessFSR={:.2f}",
+		settings.upscaleMethodPreference, settings.qualityMode, settings.presetDLSS, settings.sharpnessFSR);
+	return true;
 }
 
 void Upscaling::SaveSettings()
@@ -495,9 +583,8 @@ void Upscaling::DrawSettings()
 
 void Upscaling::OnDataLoaded()
 {
-	L->info("OnDataLoaded: registering UI event sink, loading settings, updating game settings");
+	L->info("OnDataLoaded: registering UI event sink, updating game settings");
 	RE::UI::GetSingleton()->RegisterSink<RE::MenuOpenCloseEvent>(this);
-	LoadSettings();
 	UpdateGameSettings();
 	L->info("OnDataLoaded complete");
 }
