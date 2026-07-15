@@ -27,6 +27,121 @@ namespace
 	constexpr std::string_view kGlobalConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
 	constexpr std::string_view kBootMarker       = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.cs_force_preset";
 
+	class FeatureCallbackPassGuard
+	{
+	public:
+		explicit FeatureCallbackPassGuard(cs::FeatureManager& a_manager) noexcept :
+			_manager(a_manager)
+		{}
+
+		~FeatureCallbackPassGuard() { Finish(); }
+
+		void Finish() noexcept
+		{
+			if (_finished)
+				return;
+			_manager.FinishRuntimeCallbackPass();
+			_finished = true;
+		}
+
+	private:
+		cs::FeatureManager& _manager;
+		bool _finished = false;
+	};
+
+	struct PresetParticipant
+	{
+		cs::Feature* feature;
+		std::string key;
+	};
+
+	bool CollectHealthyPresetParticipants(
+		cs::FeatureManager& a_manager,
+		std::string_view a_operation,
+		std::string_view a_presetName,
+		std::vector<PresetParticipant>& a_out,
+		std::string& a_err)
+	{
+		a_out.clear();
+		a_out.reserve(a_manager.GetAll().size());
+		for (auto* feature : a_manager.GetAll()) {
+			if (!feature
+				|| !a_manager.PrepareRuntimeCallback(*feature, "PresetManager::ParticipatesInPresets")) {
+				continue;
+			}
+
+			bool participates = false;
+			try {
+				participates = feature->ParticipatesInPresets();
+			} catch (const std::exception& e) {
+				a_manager.QuarantineRuntimeCallback(
+					*feature,
+					"PresetManager::ParticipatesInPresets",
+					e.what());
+				a_err = "preset participant metadata ParticipatesInPresets threw: " + std::string(e.what());
+				return false;
+			} catch (...) {
+				a_manager.QuarantineRuntimeCallback(
+					*feature,
+					"PresetManager::ParticipatesInPresets",
+					"non-standard exception");
+				a_err = "preset participant metadata ParticipatesInPresets threw a non-standard exception";
+				return false;
+			}
+			if (!participates)
+				continue;
+
+			if (!a_manager.PrepareRuntimeCallback(*feature, "PresetManager::GetPresetKey")) {
+				a_err = "preset participant lost health before GetPresetKey";
+				return false;
+			}
+			std::string key;
+			try {
+				key = feature->GetPresetKey();
+			} catch (const std::exception& e) {
+				a_manager.QuarantineRuntimeCallback(*feature, "PresetManager::GetPresetKey", e.what());
+				a_err = "preset participant metadata GetPresetKey threw: " + std::string(e.what());
+				return false;
+			} catch (...) {
+				a_manager.QuarantineRuntimeCallback(
+					*feature,
+					"PresetManager::GetPresetKey",
+					"non-standard exception");
+				a_err = "preset participant metadata GetPresetKey threw a non-standard exception";
+				return false;
+			}
+
+			if (!a_manager.PrepareRuntimeCallback(*feature, "PresetManager::IsInTestMode")) {
+				a_err = "preset participant '" + key + "' lost health before IsInTestMode";
+				return false;
+			}
+			bool testMode = false;
+			try {
+				testMode = feature->IsInTestMode();
+			} catch (const std::exception& e) {
+				a_manager.QuarantineRuntimeCallback(*feature, "PresetManager::IsInTestMode", e.what());
+				a_err = "preset participant '" + key + "' metadata IsInTestMode threw: " + e.what();
+				return false;
+			} catch (...) {
+				a_manager.QuarantineRuntimeCallback(
+					*feature,
+					"PresetManager::IsInTestMode",
+					"non-standard exception");
+				a_err = "preset participant '" + key
+					+ "' metadata IsInTestMode threw a non-standard exception";
+				return false;
+			}
+			if (testMode) {
+				L->info("{} preset '{}': skipping feature '{}' (test mode active)",
+					a_operation, a_presetName, key);
+				continue;
+			}
+
+			a_out.push_back({ feature, std::move(key) });
+		}
+		return true;
+	}
+
 	std::string ToLower(std::string_view a_in)
 	{
 		std::string out;
@@ -212,77 +327,147 @@ namespace cs
 		}
 
 		PresetApplyContext ctx{ a_meta.builtin };
+		auto& featureManager = FeatureManager::Get();
+		FeatureCallbackPassGuard callbackPass(featureManager);
+
+		std::vector<PresetParticipant> participants;
+		if (!CollectHealthyPresetParticipants(
+				featureManager,
+				"Apply",
+				a_meta.name,
+				participants,
+				a_err)) {
+			return false;
+		}
 
 		// Phase 1: stage matching participants; skip test mode so smoke overrides survive.
 		struct StageEntry
 		{
 			Feature*           feature;
 			const toml::table* subtable;
+			std::string        key;
 		};
 		std::vector<StageEntry> staged;
-		staged.reserve(FeatureManager::Get().GetAll().size());
+		staged.reserve(participants.size());
 
 		for (const auto& [key, node] : *featuresTbl) {
 			const auto* sub = node.as_table();
 			if (!sub) continue;
 			const std::string keyStr(key.str());
-			Feature* match = nullptr;
-			for (auto* feature : FeatureManager::Get().GetAll()) {
-				if (!feature->ParticipatesInPresets()) continue;
-				if (feature->GetPresetKey() == keyStr) {
-					match = feature;
-					break;
-				}
-			}
-			if (!match) {
-				L->warn("preset '{}' references feature '{}' which is not participating or not loaded; skipping",
+			const auto match = std::find_if(
+				participants.begin(),
+				participants.end(),
+				[&keyStr](const PresetParticipant& a_participant) {
+					return a_participant.key == keyStr;
+				});
+			if (match == participants.end()) {
+				L->warn("preset '{}' references feature '{}' which is not healthy-active or participating; skipping",
 					a_meta.name, keyStr);
-				continue;
 			}
-			if (match->IsInTestMode()) {
-				L->info("preset '{}' skipping feature '{}' (test mode active)", a_meta.name, keyStr);
-				continue;
-			}
-			staged.push_back({ match, sub });
 		}
 
-		for (const auto& s : staged) {
+		for (const auto& participant : participants) {
+			const auto* node = featuresTbl->get(participant.key);
+			const auto* sub = node ? node->as_table() : nullptr;
+			if (sub)
+				staged.push_back({ participant.feature, sub, participant.key });
+		}
+		if (staged.empty()) {
+			a_err = "preset has no matching healthy active participants";
+			return false;
+		}
+
+		for (const auto& entry : staged) {
+			if (!featureManager.PrepareRuntimeCallback(
+					*entry.feature,
+					"PresetManager::StageFromPreset")) {
+				a_err = "feature '" + entry.key + "' lost health before staging";
+				return false;
+			}
+
 			std::string stageErr;
-			if (!s.feature->StageFromPreset(*s.subtable, ctx, stageErr)) {
+			bool stageAccepted = false;
+			try {
+				stageAccepted = entry.feature->StageFromPreset(*entry.subtable, ctx, stageErr);
+			} catch (const std::exception& e) {
+				featureManager.QuarantineRuntimeCallback(
+					*entry.feature,
+					"PresetManager::StageFromPreset",
+					e.what());
+				a_err = "feature '" + entry.key + "' staging threw: " + e.what();
+				return false;
+			} catch (...) {
+				featureManager.QuarantineRuntimeCallback(
+					*entry.feature,
+					"PresetManager::StageFromPreset",
+					"non-standard exception");
+				a_err = "feature '" + entry.key + "' staging threw a non-standard exception";
+				return false;
+			}
+			if (!stageAccepted) {
 				std::ostringstream oss;
-				oss << "feature '" << s.feature->GetPresetKey() << "' failed to stage: " << stageErr;
+				oss << "feature '" << entry.key << "' failed to stage: "
+					<< (stageErr.empty() ? "validation rejected preset state" : stageErr);
 				a_err = oss.str();
 				return false;
 			}
 		}
 
+		for (const auto& entry : staged) {
+			if (!featureManager.PrepareRuntimeCallback(
+					*entry.feature,
+					"PresetManager::CommitStagedSwap")) {
+				a_err = "feature '" + entry.key + "' lost health before preset swap; no live state changed";
+				return false;
+			}
+		}
+
 		// Phase 2a: no-throw/no-I/O swap all staged scratch into live state before any finalize can fail.
-		for (const auto& s : staged) {
-			s.feature->CommitStagedSwap();
+		for (const auto& entry : staged) {
+			entry.feature->CommitStagedSwap();
 		}
 
 		// Phase 2b: persist and rebuild derived resources; failures log but do NOT abort other features.
 		// Live state stays consistent even when a failing feature's on-disk snapshot is stale.
 		std::vector<std::string> finalizeErrors;
-		for (const auto& s : staged) {
+		for (const auto& entry : staged) {
+			if (!featureManager.PrepareRuntimeCallback(
+					*entry.feature,
+					"PresetManager::CommitStagedFinalize")) {
+				finalizeErrors.emplace_back(
+					"feature '" + entry.key + "' finalize skipped because its owner is no longer healthy");
+				L->error("{}", finalizeErrors.back());
+				continue;
+			}
+
 			try {
-				s.feature->CommitStagedFinalize();
+				entry.feature->CommitStagedFinalize();
 			} catch (const std::exception& ex) {
+				featureManager.QuarantineRuntimeCallback(
+					*entry.feature,
+					"PresetManager::CommitStagedFinalize",
+					ex.what());
 				std::ostringstream oss;
-				oss << "feature '" << s.feature->GetPresetKey() << "' finalize failed: " << ex.what();
+				oss << "feature '" << entry.key << "' finalize failed: " << ex.what();
 				finalizeErrors.emplace_back(oss.str());
 				L->error("{}", finalizeErrors.back());
 			} catch (...) {
+				featureManager.QuarantineRuntimeCallback(
+					*entry.feature,
+					"PresetManager::CommitStagedFinalize",
+					"non-standard exception");
 				std::ostringstream oss;
-				oss << "feature '" << s.feature->GetPresetKey() << "' finalize failed: unknown exception";
+				oss << "feature '" << entry.key << "' finalize failed: unknown exception";
 				finalizeErrors.emplace_back(oss.str());
 				L->error("{}", finalizeErrors.back());
 			}
 		}
+		callbackPass.Finish();
 
 		if (!finalizeErrors.empty()) {
 			std::ostringstream oss;
-			oss << "applied with " << finalizeErrors.size() << " finalize error(s); see log";
+			oss << "live preset state was swapped, but " << finalizeErrors.size()
+				<< " finalize error(s) left feature files stale; active preset identity was not persisted; see log";
 			a_err = oss.str();
 			L->warn("Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
 			        "active preset on disk left unchanged so next boot reapplies the previous state",
@@ -320,20 +505,49 @@ namespace cs
 		table.insert_or_assign("features", toml::table{});
 		auto& featuresTbl = *table["features"].as_table();
 
+		auto& featureManager = FeatureManager::Get();
+		FeatureCallbackPassGuard callbackPass(featureManager);
+		std::vector<PresetParticipant> participants;
+		if (!CollectHealthyPresetParticipants(
+				featureManager,
+				"Save",
+				a_presetName,
+				participants,
+				a_err)) {
+			return false;
+		}
+
 		std::size_t emitted = 0;
-		for (auto* feature : FeatureManager::Get().GetAll()) {
-			if (!feature->ParticipatesInPresets()) continue;
-			if (feature->IsInTestMode()) {
-				L->info("Save preset '{}': skipping feature '{}' (test mode active)",
-					a_presetName, feature->GetPresetKey());
-				continue;
+		for (const auto& participant : participants) {
+			if (!featureManager.PrepareRuntimeCallback(
+					*participant.feature,
+					"PresetManager::ExportToPreset")) {
+				a_err = "feature '" + participant.key + "' lost health before preset export";
+				return false;
 			}
+
 			toml::table sub;
-			feature->ExportToPreset(sub);
+			try {
+				participant.feature->ExportToPreset(sub);
+			} catch (const std::exception& e) {
+				featureManager.QuarantineRuntimeCallback(
+					*participant.feature,
+					"PresetManager::ExportToPreset",
+					e.what());
+				a_err = "feature '" + participant.key + "' preset export threw: " + e.what();
+				return false;
+			} catch (...) {
+				featureManager.QuarantineRuntimeCallback(
+					*participant.feature,
+					"PresetManager::ExportToPreset",
+					"non-standard exception");
+				a_err = "feature '" + participant.key + "' preset export threw a non-standard exception";
+				return false;
+			}
 			if (sub.empty()) {
 				continue;
 			}
-			featuresTbl.insert_or_assign(feature->GetPresetKey(), std::move(sub));
+			featuresTbl.insert_or_assign(participant.key, std::move(sub));
 			++emitted;
 		}
 
@@ -348,6 +562,7 @@ namespace cs
 		meta.insert_or_assign("schema_version", static_cast<std::int64_t>(1));
 		meta.insert_or_assign("created_by",     std::string("FO4CommunityShaders"));
 		meta.insert_or_assign("created_at",     Iso8601UtcNow());
+		callbackPass.Finish();
 
 		std::error_code ec;
 		std::filesystem::create_directories(a_path.parent_path(), ec);

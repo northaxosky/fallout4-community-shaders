@@ -42,7 +42,7 @@ namespace cs::features
 	namespace detail
 	{
 		// Tripwire: shared state is lock-free only because RunFrame + DrawSettings/preset commits are serialized on the render thread; catch any off-thread access.
-		void AssertRenderThread(const char* a_where)
+		void AssertRenderThread(const char* a_where) noexcept
 		{
 			static std::atomic<std::thread::id> established{};
 			const std::thread::id self = std::this_thread::get_id();
@@ -51,8 +51,12 @@ namespace cs::features
 				return;
 			if (established.load(std::memory_order_relaxed) != self) {
 				static std::atomic_bool logged{ false };
-				if (!logged.exchange(true))
-					L->error("Imagespace same-thread invariant broken at {}: shared state touched off the render thread", a_where);
+				if (!logged.exchange(true)) {
+					try {
+						L->error("Imagespace same-thread invariant broken at {}: shared state touched off the render thread", a_where);
+					} catch (...) {
+					}
+				}
 				assert(false && "Imagespace shared state must be accessed only from the render thread");
 			}
 		}

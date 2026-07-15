@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <thread>
 #include <toml++/toml.hpp>
+#include <type_traits>
 #include <vector>
 
 #include <DirectXMath.h>
@@ -263,8 +264,11 @@ namespace cs::features
 		return true;
 	}
 
-	void Imagespace::CommitStagedSwap()
+	void Imagespace::CommitStagedSwap() noexcept
 	{
+		static_assert(std::is_nothrow_move_assignable_v<Settings>);
+		static_assert(std::is_nothrow_move_assignable_v<imagespace::WeatherProfiles>);
+
 		detail::AssertRenderThread("CommitStagedSwap");
 		if (!stagedValid) return;
 		settings        = std::move(stagedSettings);

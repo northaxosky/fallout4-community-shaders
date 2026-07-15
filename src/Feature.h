@@ -103,13 +103,8 @@ namespace cs
 
 		// Phase 2a swaps scratch into live state only; no throw, no I/O, all staged features first.
 		// Phase 2b persists TOML and rebuilds derived resources; failures are logged per feature.
-		virtual void CommitStagedSwap() {}
+		virtual void CommitStagedSwap() noexcept {}
 		virtual void CommitStagedFinalize() {}
-		void CommitStaged()
-		{
-			CommitStagedSwap();
-			CommitStagedFinalize();
-		}
 
 		// Emit live state into [features.<key>]; leave empty to opt out of the current save.
 		virtual void ExportToPreset(toml::table& /*a_subtable*/) {}
