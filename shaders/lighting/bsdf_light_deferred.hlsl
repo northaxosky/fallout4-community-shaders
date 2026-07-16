@@ -217,18 +217,18 @@ float3 DecodeOctahedralNormal(float2 enc01)
 //   kernelScale = cb2[20].z * 3.0 (asm's pre-computed r5.w).
 // Returns: averaged PCF result (asm equivalent of r2.y / r1.w * 0.0625 = / 16).
 float ComputeCascadePCF(float3 posView, float4 row0, float4 row1, float4 row2,
-                        float cascadeIdx, float cascadeDepthRcp, float kernelScale)
+                        float cascadeIdx, float cascadeDepthRcp, float kernelScale,
+                        float biasScale)
 {
     float4 posLightH;
     posLightH.x = dot(row0, float4(posView, 1.0));
     posLightH.y = dot(row1, float4(posView, 1.0));
     posLightH.z = dot(row2, float4(posView, 1.0));
-    // Asm uses dp4 r2.y = cb2[13].xyzw . r1.xyzw  for the depth ref;
-    // the cascade 1 variant also uses the same .z accumulator pattern.
-    // For cascade 0: r2.y = -r6.z * 0.275 + posLight.z  (insn 48)
-    // For cascade 1: r1.w = -r6.x         + posLight.z  (insn 83)
-    // Both biases are TODO; using a single zRef parameter approximates.
-    float zRef = posLightH.z - cascadeDepthRcp * 0.275;
+    // Per-cascade depth bias (corpus): cascade 0 scales the depth reciprocal by
+    // 0.275 (insn 48: mad -r6.z*0.275 + posLight.z); cascade 1 uses the full
+    // reciprocal (insn 83: add posLight.z - r6.x). Pass biasScale = 0.275 for
+    // cascade 0, 1.0 for cascade 1.
+    float zRef = posLightH.z - cascadeDepthRcp * biasScale;
 
     float accum = 0.0;
     [loop]
@@ -328,7 +328,7 @@ PS_OUTPUT main(PS_INPUT input)
         cascade0Pcf = ComputeCascadePCF(posView,
                                          cb2_cascade0_row0, cb2_cascade0_row1,
                                          cb2_cascade0_row2,
-                                         0.0, c0DepthRcp, kernelScale);
+                                         0.0, c0DepthRcp, kernelScale, 0.275);
     }
 
     // Insn 73-108: cascade-1 PCF
@@ -340,7 +340,7 @@ PS_OUTPUT main(PS_INPUT input)
         cascade1Pcf = ComputeCascadePCF(posView,
                                          cb2_cascade1_row0, cb2_cascade1_row1,
                                          cb2_cascade1_row2,
-                                         1.0, c1DepthRcp, kernelScale);
+                                         1.0, c1DepthRcp, kernelScale, 1.0);
     }
 
     // Insn 109-120: cascade blend by view-space distance.
@@ -356,13 +356,14 @@ PS_OUTPUT main(PS_INPUT input)
     if (!cascade1Active) shadowPcf = cascade0Pcf;
     if (!cascade0Active) shadowPcf = cascade1Pcf;
 
-    // Insn 121-127: distance fade.
-    //   d²_norm = saturate(dot(posView, posView) / cb2[24].x)
-    //   d4 = d²_norm * d²_norm; d8 = d4 * d4
-    //   shadowPcf = (1 - d8) * (shadowPcf - 1) + 1   (i.e. lerp toward 1)
-    float distNorm = saturate(dot(posView, posView) / cb2_idx24_distance_fade.x);
-    float dist4    = distNorm * distNorm;
-    float fadeFactor = 1.0 - dist4 * dist4;
+    // Insn 121-127: distance fade toward unshadowed (1.0) at the far range.
+    //   D    = saturate(dot(posView, posView) / cb2[24].x)   (insn 122)
+    //   fade = 1 - D^8   (insns 123-125: D^2, D^4, then 1 - (D^4)^2)
+    //   shadowPcf = fade * (shadowPcf - 1) + 1               (insns 126-127)
+    float distNorm   = saturate(dot(posView, posView) / cb2_idx24_distance_fade.x);
+    float dist2      = distNorm * distNorm;   // D^2  (insn 123)
+    float dist4      = dist2 * dist2;         // D^4  (insn 124)
+    float fadeFactor = 1.0 - dist4 * dist4;   // 1 - D^8  (insn 125)
     shadowPcf = fadeFactor * (shadowPcf - 1.0) + 1.0;
 
     // Insn 128-132: setup for sun-direction lighting.

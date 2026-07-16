@@ -108,8 +108,8 @@ cbuffer PerCall_CB2 : register(b2)
 //     decoded at insns 34-39.
 Texture2D<float4> g_tGbufferNormal : register(t1);
 
-// t2: kGbufferMaterial (RT 24). .x = material code / IBL array slice; .y
-//     used as IBL-contribution gate and gloss factor.
+// t2: kGbufferMaterial (RT 24). .y = material code / IBL array slice;
+//     .z = gloss factor.
 Texture2D<float4> g_tGbufferMaterial : register(t2);
 
 // t3: gbuffer "shading-data" packed buffer. .x = roughness;
@@ -268,21 +268,21 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 22-27: glossiness factor derivation.
     //   r0.z = shadingData.y * 3
     //   r1.y = saturate(shadingData.x - 0.3) -> rsq -> rcp -> min(1)
-    //   r0.z = r0.z * r1.y
+    //   rsq(0)=INF -> rcp=0, so rough01==0 yields 0 (unconditional, no guard).
     float yTripled    = shadingData.y * 3.0;
     float rough01     = saturate(shadingData.x - 0.3);
-    float roughInv    = (rough01 > 0.0) ? min(1.0 / sqrt(rough01), 1.0) : 1.0;
-    float glossFactor = yTripled * roughInv;
+    float roughFactor = min(sqrt(rough01), 1.0);
+    float glossFactor = yTripled * roughFactor;
 
     // Insn 28-31: gbufferMaterial sample + IBL contribution gate.
-    //   r1.yw = t2.SampleLevel(...).xy
-    //   r1.w = r1.w * r1.w * 50.0
+    //   r1.yw = t2.SampleLevel(...).yz
+    //   r1.w = t2.z * t2.z * 50.0
     //   r2.w = (0.001961 < r1.y)
     float4 matRaw = g_tGbufferMaterial.SampleLevel(g_sGbufferMaterial, uv, 0);
-    float matSliceFloat = matRaw.x;
-    float matGlossOrSpec = matRaw.y;
+    float matSliceFloat = matRaw.y;
+    float matGlossOrSpec = matRaw.z;
     float glossSquaredScaled = matGlossOrSpec * matGlossOrSpec * 50.0;
-    bool  hasIBL = (matGlossOrSpec > 0.001961);
+    bool  hasIBL = (matSliceFloat > 0.001961);
 
     // Insn 32-67: IBL cubemap reflection block.
     float3 iblColor = float3(0, 0, 0);
@@ -327,10 +327,10 @@ PS_OUTPUT main(PS_INPUT input)
         // Insn 58-62: roughness-derived mip + array slice
         //   r1.x = (1 - shadingData.x) * 6   // roughness-to-mip
         //   r1.x = linearizedDepth * 0.001953 + r1.x  // depth term
-        //   r1.y = matGlossOrSpec * 255 - 1
+        //   r1.y = matSliceFloat * 255 - 1
         //   r4.w = round_ni(r1.y)            // cubemap array slice
         float mipLevel = (1.0 - shadingData.x) * 6.0 + linearizedDepth * 0.001953;
-        float arraySlice = floor(matGlossOrSpec * 255.0 - 1.0);
+        float arraySlice = floor(matSliceFloat * 255.0 - 1.0);
 
         // Insn 63: IBL cubemap sample
         float3 cubeSample = g_tIBLProbeCube.SampleLevel(g_sIBLProbeCube,
@@ -394,7 +394,7 @@ PS_OUTPUT main(PS_INPUT input)
         // Insn 88-249: 10 ring-tap bilateral samples.
         // Each tap follows the same pattern:
         //   tap_uv = uv + tapBase * SSSS_RING_OFFSETS[i]
-        //   tap_mat = t3.Sample(tap_uv).x * 255 - 5  // skin id check
+        //   tap_mat = t3.Sample(tap_uv).w * 255 - 5  // skin id check
         //   if (abs(tap_mat) < 0.25): blend the t10 ring sample toward the
         //     t10 center (blurSourceCenter) by depth-similarity dt; else use
         //     the t10 center as the tap value.
@@ -407,7 +407,7 @@ PS_OUTPUT main(PS_INPUT input)
         {
             float2 tapUV = uv + tapBase * SSSS_RING_OFFSETS[i];
             float  tapMatId = g_tGbufferShadingData.SampleLevel(
-                                   g_sGbufferShadingData, tapUV, 0).x * 255.0 - 5.0;
+                                   g_sGbufferShadingData, tapUV, 0).w * 255.0 - 5.0;
             float3 tapBlended;
             if (abs(tapMatId) < 0.25)
             {
@@ -435,7 +435,7 @@ PS_OUTPUT main(PS_INPUT input)
         //   r6 = t6.SampleLevel(uv); r0 = t12.SampleLevel(uv)
         //   r0.xyw += r6(t6) + r4(t4 skinAux) + blurAccum
         float3 probeA = g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
-        float3 probeB = g_tAmbientProbeB.SampleLevel(g_sAmbientProbeB, uv, 0).xyw.xyz;
+        float3 probeB = g_tAmbientProbeB.SampleLevel(g_sAmbientProbeB, uv, 0).xyz;
         ambientAccum  = probeA + probeB + skinAux + blurAccum;
     }
     else
@@ -449,11 +449,11 @@ PS_OUTPUT main(PS_INPUT input)
     }
 
     // Insn 258-260: modulate by gloss + spec scaling.
-    //   r0.xyz = depth.zzz * iblLitBlend          (r0.z carries depth from earlier)
+    //   r0.xyz = glossFactor.xxx * iblLitBlend
     //   r0.xyz = glossSquaredScaled * r0.xyz
     //   r0.xyz = r0.xyz * ambientPairSum + ambientAccum
     float3 modulated = ambientAccum
-                     + (glossSquaredScaled * (linearizedDepth * iblLitBlend) * ambientPairSum);
+                     + (glossSquaredScaled * (glossFactor * iblLitBlend) * ambientPairSum);
 
     // Insn 261-262: AO modulation - THE single AO application.
     //   r0.w = t9.Sample(uv).y    (kSSAO)
