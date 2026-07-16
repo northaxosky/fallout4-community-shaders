@@ -6,9 +6,10 @@
       "name": "ambient_ibl_pass",
       "src": "shaders/lighting/ambient_ibl_pass.hlsl",
       "defines": [],
-      "sha1": "BE5D9EEED4E0883DF4250B089A7A49C4D19288EB",
+      "sha1": "55F83F9B160159C73F5C54E6FF6B25C0287C5890",
       "corpus_sha1": "7460585eaf763b27ea14ee7bf607c9dfc3837a55",
-      "corpus_blob_index": 3559
+      "corpus_blob_index": 3559,
+      "invariant": "Re-baselined for the SSSS blur center-source fix against corpus blob 3559. The bilateral blur's center (per-tap lerp target + 0.560479 center weight) and the non-skin ambient base both use the t10 center sample (corpus r8, insn 21), not skinAux/iblLitBlend; skinAux (t4) is an additive ambient term (insn 255). shader_corpus_diff.py: CONTRACT PASS, samples 44/44, temps 11/11, stream -3.4%."
     },
     {
       "name": "bsdf_light_deferred_directional",

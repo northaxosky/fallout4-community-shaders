@@ -182,9 +182,9 @@ SamplerState g_sBlurDepthRef       : register(s15);
 // sibling shader (not investigated here).
 // Tap offsets are scaled by (CB0[0].xy * base) / depth-derived factor.
 // The 10 ring taps are emitted as 5 paired CB0[0].xyxy MAD operations in
-// the corpus asm. The center weight multiplies skinAux (t4), NOT the
-// center sample of t10 (blurSourceCenter is unused once the kernel
-// begins; the earlier sample is shared with the non-skin branch).
+// the corpus asm. The center weight multiplies the t10 center sample
+// (blurSourceCenter, corpus r8 from insn 21), which is also the bilateral
+// lerp target for each ring tap.
 // Per-tap RGB weights match the Christensen-Burley SSSS approximation
 // (per-wavelength absorption, red diffuses farthest).
 
@@ -222,7 +222,7 @@ static const float3 SSSS_RING_WEIGHTS[10] =
     float3(0.004717, 0.000185, 0.000051),  // +2.0
 };
 
-// Center tap weight multiplies skinAux (t4), not blurSourceCenter (t10).
+// Center tap weight multiplies the t10 center sample (blurSourceCenter).
 static const float3 SSSS_CENTER_WEIGHT = float3(0.560479, 0.669086, 0.784728);
 
 // Entry point.
@@ -395,10 +395,11 @@ PS_OUTPUT main(PS_INPUT input)
         // Each tap follows the same pattern:
         //   tap_uv = uv + tapBase * SSSS_RING_OFFSETS[i]
         //   tap_mat = t3.Sample(tap_uv).x * 255 - 5  // skin id check
-        //   if (abs(tap_mat) < 0.25): blend t10 sample with skinAux by
-        //     depth-similarity dt; else use skinAux as the tap value.
+        //   if (abs(tap_mat) < 0.25): blend the t10 ring sample toward the
+        //     t10 center (blurSourceCenter) by depth-similarity dt; else use
+        //     the t10 center as the tap value.
         //   accumulator += tap_value * SSSS_RING_WEIGHTS[i]
-        // The center contribution (SSSS_CENTER_WEIGHT * skinAux) is
+        // The center contribution (SSSS_CENTER_WEIGHT * blurSourceCenter) is
         // added at the end.
         float3 blurAccum = float3(0, 0, 0);
         [unroll]
@@ -417,31 +418,34 @@ PS_OUTPUT main(PS_INPUT input)
                 float  dt = min(abs(-tapDepth * blurDepthScale + centerRef)
                                 * cb0_idx0_screen_scale_and_blur_tolerance.y * 0.1,
                                 1.0);
-                tapBlended = lerp(tapColor, skinAux, dt);
+                tapBlended = lerp(tapColor, blurSourceCenter, dt);
             }
             else
             {
-                tapBlended = skinAux;
+                tapBlended = blurSourceCenter;
             }
             blurAccum += tapBlended * SSSS_RING_WEIGHTS[i];
         }
 
-        // Center contribution: SSSS_CENTER_WEIGHT * skinAux.
-        blurAccum += SSSS_CENTER_WEIGHT * skinAux;
+        // Center contribution: SSSS_CENTER_WEIGHT * t10 center sample
+        // (corpus insn 104 weights r8 = the t10 sample from insn 21).
+        blurAccum += SSSS_CENTER_WEIGHT * blurSourceCenter;
 
-        // Insn 252-256: ambient probe additions + skin accumulator.        //   r6 = t6.SampleLevel(uv)
-        //   r0 = t12.SampleLevel(uv) (rgb in .xyw, .z unused)
-        //   r0.xyw += r6.xyz + r4.xyz (= iblLitBlend) + blurAccum
+        // Insn 252-256: ambient probe additions + skin accumulator.
+        //   r6 = t6.SampleLevel(uv); r0 = t12.SampleLevel(uv)
+        //   r0.xyw += r6(t6) + r4(t4 skinAux) + blurAccum
         float3 probeA = g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
         float3 probeB = g_tAmbientProbeB.SampleLevel(g_sAmbientProbeB, uv, 0).xyw.xyz;
-        ambientAccum  = probeA + probeB + iblLitBlend + blurAccum;
+        ambientAccum  = probeA + probeB + skinAux + blurAccum;
     }
     else
     {
-        // Insn 257: non-skin path -- ambient just uses the IBL-lit blend
-        // (matched against r8 in the asm flow, which was previously set to
-        // skinAux but only on the skin path).
-        ambientAccum = iblLitBlend;
+        // Non-skin path: the corpus skin branch (if_nz r1.z, insn 79) has no
+        // else, so r8 retains the t10 center sample from insn 21 as the
+        // ambient base into the final combine (insn 260). t10 is the
+        // precomputed ambient-diffuse buffer: non-skin uses it raw; skin
+        // additionally SSSS-blurs it above.
+        ambientAccum = blurSourceCenter;
     }
 
     // Insn 258-260: modulate by gloss + spec scaling.
@@ -466,22 +470,15 @@ PS_OUTPUT main(PS_INPUT input)
 // Round-trip notes (for the reviewer + future maintainer)
 // fxc round-trip status: see local roundtrip notes for the
 // compile output + insn-count delta against the original.
-// Round-trip result (fxc /T ps_5_0 /O3 /Ni, recompile + asm-mnemonic diff
-// against the original at Shaders011.3559.7460585eaf76.dxbc.asm):
-//   * Resource bindings: EXACT MATCH (14 SRVs + 14 samplers + 3 CBs).
-//   * Signature: EXACT MATCH (fullscreen-quad SV_POSITION-only input,
-//     single SV_Target output).
-//   * Instruction count: 269 vs original 265 (+4 / +1.5%) - within the
-//     ±10% threshold for this larger shader. The shared matrix-select
-//     overhead is amortized over more instructions here.
-//   * Sample count: 41 vs original 44 (-3). Cause identified: the
-//     bilateral-blur kernel in this reconstruction has 9 ring taps
-//     (-2.0, -1.28, -0.72, -0.32, -0.08, +0.08, +0.32, +0.72, +2.0)
-//     while the original asm has 10 ring taps (the same plus a
-//     +1.28 tap that pairs with the +2.0 final). The +1.28 tap is
-//     missing from the SSSS_BLUR_OFFSETS table; adding it (and a
-//     matching weight entry in SSSS_TAP_WEIGHTS) closes the sample-
-//     count gap. Tracked under §`Shaders011.3559` open items.
+// Round-trip result (shader_corpus_diff.py against corpus blob 3559):
+//   * CONTRACT: PASS - resource bindings (14 SRVs + 14 samplers + 3 CBs)
+//     and input/output signatures EXACT MATCH.
+//   * Sample count: 44 vs original 44 (EXACT). The bilateral kernel has
+//     the full 10 ring taps plus the t10 center tap; the earlier -3 gap
+//     was the t10 center sample (blurSourceCenter) being dead-stripped
+//     because the kernel wrongly used skinAux (t4) as the center source.
+//   * Instruction stream: -2.6% vs corpus; remaining delta is compiler
+//     shape noise (branch-vs-movc matrix select, register packing).
 // What is faithfully reconstructed:
 //   * Resource declarations (14 SRVs + 14 samplers + 3 CBs) at exact
 //     slot indices (t1..t12, t14, t15 - matching the corpus blob's
@@ -494,14 +491,11 @@ PS_OUTPUT main(PS_INPUT input)
 //   * View-space position reconstruction shared with composite + VLS.
 //   * Cubemap-array sampling with reflection vector + array slice +
 //     roughness-derived mip.
-//   * 9-of-10-tap separable SSSS bilateral blur with Christensen-
-//     Burley per-RGB tap weights (kernel weights are asm-exact;
-//     the +1.28 tap is the lone gap).
+//   * Full 10-ring-tap + center separable SSSS bilateral blur with
+//     Christensen-Burley per-RGB tap weights (asm-exact), bilaterally
+//     blended toward the t10 center sample.
 //   * SSGI AO-application boundary at the final multiply.
 // What needs cross-read to finalize:
-//   * Add the missing +1.28 ring tap to close the sample-count gap.
-//     Trivial: append (1.28, 1.28) to SSSS_BLUR_OFFSETS + a matching
-//     weight to SSSS_TAP_WEIGHTS; recompile.
 //   * CB12 field semantics beyond [12..14, 20..27, 30].
 //   * CB0 + CB2 field semantics.
 //   * Texture role names for t4, t6, t10, t12, t15 (medium-confidence
