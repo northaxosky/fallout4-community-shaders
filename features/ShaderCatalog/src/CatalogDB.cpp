@@ -169,13 +169,14 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		Stop();
 	}
 
-	bool CatalogDB::Start(const DbConfig& cfg, const char* engine_runtime, const char* plugin_version)
+	bool CatalogDB::Start(const DbConfig& cfg, const char* engine_runtime, const char* plugin_version, const char* engine_build)
 	{
 		if (_running.load(std::memory_order_acquire))
 			return true;
 
 		_cfg = cfg;
 		_engine_runtime = engine_runtime ? engine_runtime : "OG";
+		_engine_build = engine_build ? engine_build : "";
 		_plugin_version = plugin_version ? plugin_version : "0.0.0";
 		_session_id = NewUuidV4();
 
@@ -273,8 +274,8 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		}
 
 		{
-			const char* sql = "INSERT INTO sessions(session_id, started_at, engine_runtime, plugin_version, config_snapshot_json) "
-			                  "VALUES(?, ?, ?, ?, ?)";
+			const char* sql = "INSERT INTO sessions(session_id, started_at, engine_runtime, engine_build_hash, plugin_version, config_snapshot_json) "
+			                  "VALUES(?, ?, ?, ?, ?, ?)";
 			sqlite3_stmt* ins = nullptr;
 			if (sqlite3_prepare_v2(_db, sql, -1, &ins, nullptr) == SQLITE_OK) {
 				const auto started = IsoNowUtc();
@@ -285,9 +286,12 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 				sqlite3_bind_text(ins, 1, _session_id.c_str(), -1, SQLITE_TRANSIENT);
 				sqlite3_bind_text(ins, 2, started.c_str(),     -1, SQLITE_TRANSIENT);
 				sqlite3_bind_text(ins, 3, _engine_runtime.c_str(), -1, SQLITE_TRANSIENT);
-				sqlite3_bind_text(ins, 4, _plugin_version.c_str(), -1, SQLITE_TRANSIENT);
-				sqlite3_bind_text(ins, 5, cfg, -1, SQLITE_TRANSIENT);
-				sqlite3_step(ins);
+				if (_engine_build.empty()) sqlite3_bind_null(ins, 4);
+				else                       sqlite3_bind_text(ins, 4, _engine_build.c_str(), -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(ins, 5, _plugin_version.c_str(), -1, SQLITE_TRANSIENT);
+				sqlite3_bind_text(ins, 6, cfg, -1, SQLITE_TRANSIENT);
+				if (sqlite3_step(ins) != SQLITE_DONE)
+					L->error("Session row insert failed: {}", sqlite3_errmsg(_db));
 				sqlite3_finalize(ins);
 			}
 		}

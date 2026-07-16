@@ -31,31 +31,71 @@ namespace cs::features
 
 	namespace
 	{
-		// Runtime tags: 1.10.163=OG, 1.10.980=AE, 1.10.984=NG; unknown builds default to OG.
-		const char* DetectRuntime()
+		struct RuntimeVersion
 		{
+			std::uint16_t major = 0;
+			std::uint16_t minor = 0;
+			std::uint16_t build = 0;
+			bool          valid = false;
+		};
+
+		// Running Fallout4.exe file version (major.minor.build).
+		RuntimeVersion GetRuntimeVersion()
+		{
+			RuntimeVersion v;
 			HMODULE m = ::GetModuleHandleW(L"Fallout4.exe");
-			if (!m) return "OG";
+			if (!m) return v;
 			wchar_t path[MAX_PATH] = {};
-			if (!::GetModuleFileNameW(m, path, MAX_PATH)) return "OG";
+			if (!::GetModuleFileNameW(m, path, MAX_PATH)) return v;
 			DWORD dummy = 0;
 			const DWORD sz = ::GetFileVersionInfoSizeW(path, &dummy);
-			if (!sz) return "OG";
+			if (!sz) return v;
 			std::vector<unsigned char> buf(sz);
-			if (!::GetFileVersionInfoW(path, 0, sz, buf.data())) return "OG";
+			if (!::GetFileVersionInfoW(path, 0, sz, buf.data())) return v;
 			VS_FIXEDFILEINFO* fi = nullptr;
 			UINT fiLen = 0;
 			if (!::VerQueryValueW(buf.data(), L"\\", reinterpret_cast<LPVOID*>(&fi), &fiLen) || !fi)
-				return "OG";
-			const auto major = HIWORD(fi->dwFileVersionMS);
-			const auto minor = LOWORD(fi->dwFileVersionMS);
-			const auto build = HIWORD(fi->dwFileVersionLS);
-			if (major == 1 && minor == 10) {
-				if (build == 163) return "OG";
-				if (build == 980) return "AE";
-				if (build == 984) return "NG";
+				return v;
+			v.major = HIWORD(fi->dwFileVersionMS);
+			v.minor = LOWORD(fi->dwFileVersionMS);
+			v.build = HIWORD(fi->dwFileVersionLS);
+			v.valid = true;
+			return v;
+		}
+
+		// Coarse engine family for the catalog's engine_runtime enum (constrained to OG/NG/AE).
+		// 1.10.163=OG; 1.10.980=AE; 1.10.984 and the later 1.11.x next-gen line=NG. The exact build
+		// is recorded separately (engine_build_hash) so builds within a family stay distinguishable.
+		const char* RuntimeLabel(const RuntimeVersion& v)
+		{
+			if (!v.valid) return "OG";
+			if (v.major == 1 && v.minor == 10) {
+				if (v.build == 163) return "OG";
+				if (v.build == 980) return "AE";
+				if (v.build == 984) return "NG";
 			}
+			if (v.major == 1 && v.minor == 11)
+				return "NG";  // next-gen line (e.g. 1.11.191, 1.11.221)
 			return "OG";
+		}
+
+		// Exact "major.minor.build" for the catalog's engine_build_hash column; empty if unreadable.
+		std::string RuntimeBuildString(const RuntimeVersion& v)
+		{
+			if (!v.valid) return {};
+			char buf[24];
+			std::snprintf(buf, sizeof(buf), "%u.%u.%u", v.major, v.minor, v.build);
+			return std::string(buf);
+		}
+
+		// Subclass attribution patches BSShader vtable slots 0x0B/0x02 and reads pixelShaders at
+		// offset 0x0B0 - layout verified only for the 1.10.x line CommonLibF4 targets. On other
+		// builds (e.g. next-gen 1.11.x) those hit a mislaid slot/member and CTD on the first draw,
+		// so attribution is gated to known-good runtimes. The device swap broker is layout-independent.
+		bool RuntimeSupportsSubclassAttribution(const RuntimeVersion& v)
+		{
+			return v.valid && v.major == 1 && v.minor == 10 &&
+				(v.build == 163 || v.build == 980 || v.build == 984);
 		}
 
 		std::string PluginVersionString()
@@ -145,7 +185,10 @@ namespace cs::features
 					a_error)
 				&& AcceptSetting(
 					feature_config::ReadString(*settingsTable, "catalog_path", a_candidate.catalogPath),
-					"catalog_path", "string", "string value is out of range", a_error);
+					"catalog_path", "string", "string value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "subclass_attribution", a_candidate.subclassAttribution),
+					"subclass_attribution", "boolean", "boolean value is out of range", a_error);
 		}
 	}
 
@@ -203,6 +246,7 @@ namespace cs::features
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("writer_flush_interval_ms", static_cast<int64_t>(_settings.writerFlushIntervalMs));
 		settings.insert_or_assign("catalog_path", _settings.catalogPath);
+		settings.insert_or_assign("subclass_attribution", _settings.subclassAttribution);
 
 		std::error_code ec;
 		std::filesystem::create_directories(
@@ -226,9 +270,11 @@ namespace cs::features
 		dbc.catalog_path      = _settings.catalogPath;
 		dbc.flush_interval_ms = static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
 
-		const auto runtime = DetectRuntime();
+		const auto rtVersion = GetRuntimeVersion();
+		const char* runtime = RuntimeLabel(rtVersion);
+		const auto build = RuntimeBuildString(rtVersion);
 		const auto version = PluginVersionString();
-		if (!catalog::CatalogDB::Get().Start(dbc, runtime, version.c_str())) {
+		if (!catalog::CatalogDB::Get().Start(dbc, runtime, version.c_str(), build.empty() ? nullptr : build.c_str())) {
 			catalog::shader_tracker::SetEnabled(false);
 			_started.store(false, std::memory_order_release);
 			FailLoad("Catalog database startup failed");
@@ -236,8 +282,17 @@ namespace cs::features
 			return;
 		}
 
-		// Patch subclass reload/setup slots before D3D shader-creation hooks run.
-		catalog::subclass_hooks::InstallAll();
+		// Patch subclass reload/setup slots before D3D shader-creation hooks run, but only on
+		// runtimes whose BSShader layout is verified - otherwise the probe CTDs (next-gen 1.11.x).
+		// Skipping leaves the device swap broker + catalog fully functional, minus subclass names.
+		if (_settings.subclassAttribution && RuntimeSupportsSubclassAttribution(rtVersion)) {
+			catalog::subclass_hooks::InstallAll();
+		} else {
+			const char* why = !_settings.subclassAttribution
+				? "disabled by config"
+				: "unverified BSShader layout for this runtime";
+			L->warn("Subclass attribution skipped ({}); catalog + swap broker remain active.", why);
+		}
 		catalog::shader_tracker::SetEnabled(true);
 		_started.store(true, std::memory_order_release);
 		L->info("Catalog initialized (runtime={})", runtime);
@@ -269,6 +324,14 @@ namespace cs::features
 				ImGui::OpenPopup("Restart required##ShaderCatalog");
 		}
 		ImGui::TextDisabled("Restart the game after toggling; device-vtable hooks install once at startup.");
+
+		const bool prevAttr = _settings.subclassAttribution;
+		if (ImGui::Checkbox("Subclass attribution", &_settings.subclassAttribution)) {
+			SaveSettings();
+			if (_settings.subclassAttribution != prevAttr)
+				ImGui::OpenPopup("Restart required##ShaderCatalog");
+		}
+		ImGui::TextDisabled("Enriches PS rows with BSShader technique names. Auto-skipped on runtimes\nwith an unverified layout (e.g. next-gen 1.11.x); the swap broker is unaffected.");
 
 		ImGui::Separator();
 		ImGui::TextUnformatted("Stats");

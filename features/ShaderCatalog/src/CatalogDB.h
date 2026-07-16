@@ -47,7 +47,7 @@ namespace cs::features::catalog
 		static CatalogDB& Get();
 
 		// Open DB, bootstrap schema, insert a session, and start the writer; false leaves feature inert.
-		bool Start(const DbConfig& cfg, const char* engine_runtime, const char* plugin_version);
+		bool Start(const DbConfig& cfg, const char* engine_runtime, const char* plugin_version, const char* engine_build = nullptr);
 
 		// Stop writer, finalize session row, and close DB; idempotent.
 		void Stop();
@@ -88,6 +88,7 @@ namespace cs::features::catalog
 		DbConfig _cfg{};
 		std::string _session_id;
 		std::string _engine_runtime;
+		std::string _engine_build;
 		std::string _plugin_version;
 
 		sqlite3*       _db = nullptr;
