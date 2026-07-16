@@ -191,7 +191,7 @@ static const float2 SUN_SHADOW_POISSON[32] =
     float2(0.522752, 0.146275), float2(0.987518, 0.938994),
     float2(0.770104, 0.315531), float2(0.044832, 0.268838),
     // ... 967 more entries in the original ICB (corpus blob 3295);
-    // recover the full table with scripts/fetch-shader-corpus.ps1 then
+    // recover the full table with scripts/shaders/fetch-shader-corpus.ps1 then
     // fxc /dumpbin. TODO: inline the rest for byte-equivalent
     // round-trip; not blocking since the loop only consumes 16.
 };
@@ -254,7 +254,7 @@ float ComputeCascadePCF(float3 posView, float4 row0, float4 row1, float4 row2,
 struct PS_INPUT
 {
     float4 position : SV_POSITION;
-    float4 posUnused : POSITION;   // declared register 14, unused
+    float4 posUnused : POSITION14;   // unused interpolant; matches corpus ISGN (semantic index 14)
 };
 
 struct PS_OUTPUT
@@ -375,9 +375,12 @@ PS_OUTPUT main(PS_INPUT input)
     //   r6.z = 1.0 - r6.z * r6.w  // = 1 - (1-cb12[30].y)^5  approx Schlick
     float3 albedoPremult = albedoSample.w * albedoSample.xyz;
     float  NdotL_raw     = dot(normalView, SunDirection_and_padding.xyz);
-    float  NdotL_clamped = saturate(NdotL_raw);
-    float  oneMinusGloss = saturate(1.0 - cb12_idx30.y);
-    float  schlickFres   = 1.0 - oneMinusGloss * (oneMinusGloss * oneMinusGloss * oneMinusGloss);
+    float  NdotL_pos     = max(NdotL_raw, 0.0);
+    float  NdotL_clamped = min(NdotL_pos, 1.0);
+    float  oneMinusGloss = 1.0 - saturate(cb12_idx30.y);
+    float  oneMinusGloss2 = oneMinusGloss * oneMinusGloss;
+    float  oneMinusGloss4 = oneMinusGloss2 * oneMinusGloss2;
+    float  schlickFres   = 1.0 - oneMinusGloss * oneMinusGloss4;
 
     // Insn 137-138: material-1 (skin) test
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
@@ -389,93 +392,116 @@ PS_OUTPUT main(PS_INPUT input)
     float  brdfShadowMix = 0.0;
     if (isMaterial1)
     {
-        // Material-1 (skin) - SSS-style BRDF using cb12[28..29] for
-        // trig-rotated absorption math. The pattern at insns 149-173 is:
-        //   sincos(cb12[29].y), sincos(cb12[29].x) -> two rotation pairs.
-        //   Compute two reflection-vector dot products + log/exp pow chain
-        //   driven by cb12[28].w and cb12[28].y (exponents) + cb12[28].x
-        //   intensity. Result modulated by cb12[28].z and saturated, then
-        //   min'd against albedo.w.
-        // TODO: identify exact field semantics; the math is preserved
-        //       structurally below but the cb12[28..29] field names are
-        //       placeholders.
-        float NdotV = dot(normalView, viewDirNeg);  // r6.w in asm
-        float sin1, cos1; sincos(cb12_idx29_sss_angles.y, sin1, cos1);
-        float sin2, cos2; sincos(cb12_idx29_sss_angles.x, sin2, cos2);
-        float sinScale1 = sqrt(saturate(1.0 - NdotL_raw * NdotL_raw));
-        float sinScale2 = sqrt(saturate(1.0 - NdotV * NdotV));
+        // Insn 140-176: material-1 skin branch.
+        // Skin dots the t2 sample's xyz (a distinct normal in that gbuffer
+        // slot), not the octahedral normal the other paths decode from t1.
+        float skinNdotL = dot(matSample.xyz, SunDirection_and_padding.xyz);
+        float skinNdotV = dot(matSample.xyz, viewDirNeg);
+        float sinScaleL = sqrt(1.0 - min(skinNdotL * skinNdotL, 1.0));
+        float sinScaleV = sqrt(1.0 - min(skinNdotV * skinNdotV, 1.0));
 
-        // Two rotated cosine accumulations (insns 150-159)
-        float rot1 = -NdotL_raw * cos1 - sinScale1 * sin1;
-        float rot1_w = sqrt(max(1.0 - rot1 * rot1, 0.0));
-        float vis1   = rot1 * NdotV + sinScale2 * rot1_w;
-        vis1 = max(vis1, 0.0);
-        float pow1   = pow(vis1, cb12_idx28_sss_params.w);
-        float SSSinten1 = saturate(cb12_idx28_sss_params.z * pow1 + NdotL_clamped);
+        float sinA1, cosA1;
+        sincos(cb12_idx29_sss_angles.y, sinA1, cosA1);
+        float rot1 = -skinNdotL * cosA1 - sinScaleL * sinA1;
+        float rot1Perp = sqrt(1.0 - rot1 * rot1);
+        float vis1 = max(rot1 * skinNdotV + sinScaleV * rot1Perp, 0.0);
+        float pow1 = exp2(log2(vis1) * cb12_idx28_sss_params.w);
+        float sssIntensity = saturate(cb12_idx28_sss_params.z * pow1 + NdotL_pos);
+        brdfShadowMix = min(albedoSample.w, sssIntensity);
 
-        // Second rotated pair (insns 162-173)
-        float rot2 = -NdotL_raw * cos2 - sinScale1 * sin2;
-        float vis2 = max(rot2 * NdotV + sinScale2 * sqrt(max(1.0 - rot2 * rot2, 0.0)),
-                         0.0);
-        float pow2 = pow(vis2, cb12_idx28_sss_params.y) * cb12_idx28_sss_params.x;
+        float sinA2, cosA2;
+        sincos(cb12_idx29_sss_angles.x, sinA2, cosA2);
+        float rot2 = -skinNdotL * cosA2 - sinScaleL * sinA2;
+        float rot2Perp = sqrt(1.0 - rot2 * rot2);
+        float vis2 = max(rot2 * skinNdotV + sinScaleV * rot2Perp, 0.0);
+        float pow2 = exp2(log2(vis2) * cb12_idx28_sss_params.y) * cb12_idx28_sss_params.x;
 
-        brdfShadowMix = min(albedoSample.w, SSSinten1);
-        brdfSpecular  = pow2 * SunColor_HDR.xyz * NdotL_clamped;
-        brdfModulator = 0.0;  // r3.w = 0 (insn 176)
+        brdfSpecular  = NdotL_clamped * (pow2 * SunColor_HDR.xyz);
+        brdfModulator = 0.0;
     }
     else
     {
-        // Material non-1 (default) - standard Schlick-Fresnel + GGX-like
-        // specular against sun direction. Insns 178-241.
-        //   r3.w = depth * 100      (scale)
-        //   r3.x = exp(albedo.x*10 + 1)  -> spec exponent base
-        //   r3.z = 1.0 - schlickFres * 0.98
-        //   r6.w = r3.z * r3.x  -> combined exponent term
-        //   Then a reflection-vector dot, NdotV, NdotH, etc., culminating in
-        //   the GGX visibility/normalization at insns 194-241.
-        float schlickBase = exp2(matSample.x * 10.0 + 1.0);  // approx pow2 via exp2 of log2; runtime uses log/exp
-        float schlickComb = (1.0 - schlickFres * 0.98) * schlickBase;
+        // Insn 178-242: default Cook-Torrance branch.
+        float depthScale = matSample.z * 100.0;
+        float specExpBase = exp2(matSample.x * 10.0 + 1.0);
+        float specExpScale = 1.0 - schlickFres * 0.98;
+        float specExp = specExpScale * specExpBase;
 
-        float3 reflVec = normalize(-2.0 * dot(viewDirNeg, normalView) * normalView + viewDirNeg);
-        float3 halfish = normalize(-posView * posViewLen + SunDirection_and_padding.xyz);
-        float  NdotH   = saturate(dot(normalView, halfish));
-        float  RdotV   = saturate(dot(reflVec, normalView));
+        float NdotV_raw = dot(viewDirNeg, normalView);
+        float3 tangentV = viewDirNeg - normalView * NdotV_raw;
+        float3 tangentL = SunDirection_and_padding.xyz - normalView * NdotL_raw;
+        float tangentVL = max(dot(tangentV, tangentL), 0.0);
 
-        // GGX-like normalization (insns 209-241 condensed)
-        float ggxNum   = exp2(log2(max(NdotH, 1e-6)) * schlickComb);
-        float ggxNorm  = ggxNum * 0.159155;  // / (2*pi)
-        float visTerm  = min(NdotL_clamped, RdotV);
-        // The full GGX vis math at 219-234 is structurally preserved here
-        // but reduced for readability; the runtime divides by NdotL+RdotV
-        // and applies a min/max chain.
-        float specMag  = ggxNorm * visTerm;
-        specMag = min(specMag * 0.25, 15.0);
-        specMag = specMag * 3.141593;
+        float roughSq = roughness01 * roughness01;
+        float visA = roughSq / (roughSq + 0.57);
+        float visB = roughSq / (roughSq + 0.09);
+        visB *= 0.45;
+        visA = 1.0 - 0.5 * visA;
 
-        brdfSpecular = specMag * SunColor_HDR.xyz;
-        brdfShadowMix = albedoSample.w * specMag;
-        brdfModulator = schlickFres;
+        float tangentDenom = max(NdotL_raw, NdotV_raw);
+        float tangentSin = sqrt(saturate((1.0 - NdotV_raw * NdotV_raw)
+                                         * (1.0 - NdotL_raw * NdotL_raw)));
+        float visibilityGeom = tangentVL * visB;
+        visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
+        brdfShadowMix = NdotL_pos * visibilityGeom;
+
+        float3 halfVec = SunDirection_and_padding.xyz - posView * posViewLen;
+        halfVec *= rsqrt(dot(halfVec, halfVec));
+
+        float NdotV_sat = saturate(NdotV_raw);
+        float VdotH = saturate(dot(viewDirNeg, halfVec));
+        float NdotH = saturate(dot(halfVec, normalView));
+
+        float distributionNorm = (specExpBase * specExpScale + 2.0) * 0.159155;
+        float distribution = exp2(log2(NdotH) * specExp);
+        distributionNorm *= distribution;
+
+        float VdotH_nonneg = max(VdotH, 0.0);
+        float minN = min(NdotL_clamped, NdotV_sat);
+        float twoNdotH = NdotH + NdotH;
+        bool usePeakRatio = (VdotH_nonneg >= twoNdotH * minN);
+        bool useUnityRatio = (NdotV_sat == minN);
+        float ratioNLNV = NdotL_clamped / NdotV_sat;
+        float ratio = useUnityRatio ? 1.0 : ratioNLNV;
+        float visibility = (twoNdotH * ratio) / VdotH_nonneg;
+        float fallbackVisibility = 1.0 / NdotV_sat;
+        visibility = usePeakRatio ? visibility : fallbackVisibility;
+
+        float oneMinusVdotH = 1.0 - VdotH;
+        float oneMinusVdotH2 = oneMinusVdotH * oneMinusVdotH;
+        float oneMinusVdotH4 = oneMinusVdotH2 * oneMinusVdotH2;
+        float oneMinusVdotH5 = oneMinusVdotH * oneMinusVdotH4;
+        float fresnelTerm = (1.0 - oneMinusVdotH5) * 0.2 + oneMinusVdotH5;
+        fresnelTerm = min(fresnelTerm, 1.0);
+
+        float specMag = visibility * fresnelTerm;
+        specMag = distributionNorm * specMag;
+        specMag *= 0.25;
+        specMag = min(specMag, 15.0);
+        specMag *= matSample.y;
+        specMag *= 3.141593;
+
+        brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);
+        brdfModulator = depthScale;
     }
 
-    // Insn 243-265: final composition.
-    //   - Compute "fresnel-modulated ambient" term using normalView dot
-    //     -cb2[1].xyz against view direction (insns 243-251).
-    //   - Add diffuse contribution = cb2[2].xyz * NdotL_clamped * shadow
-    //   - Add specular contribution = brdfSpecular
-    //   - Modulate by ambient occlusion via 1 - schlickFres*0.5 factor
+    // Insn 243-269: final composition.
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
     float ambientFres = 1.0 - NdotV_view;
-    ambientFres = exp2(log2(max(ambientFres, 1e-6)) * 0.01);
+    ambientFres = exp2(log2(ambientFres) * 0.01);
 
     float fresEdge = saturate(dot(viewDirNeg, -SunDirection_and_padding.xyz));
-    // Corpus insn 251 multiplies by r0.w which is `1 - matSample.x` (set at
-    // insn 35 and not overwritten before 251). Prior reconstruction used
-    // `posViewLen` (= 1/|posView|), which crushed the ambient contribution
-    // to ~1/distance and produced ~-86% scene darkening.
     float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 
     float3 finalDiffuse  = SunColor_HDR.xyz * ambientTerm;
     finalDiffuse += SunColor_HDR.xyz * brdfShadowMix;
+
+    float backfaceWrap = saturate(-NdotL_raw);
+    finalDiffuse += SunColor_HDR.xyz * (albedoPremult * backfaceWrap);
+
+    float forwardBlend = saturate((brdfModulator + NdotL_raw) / (brdfModulator + 1.0));
+    forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
+    finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
     // Specular accumulation in o1
     float specMix = (1.0 - schlickFres * 0.5);
@@ -512,12 +538,10 @@ PS_OUTPUT main(PS_INPUT input)
 //     the original asm. The loop only accesses 16 entries so the
 //     rendered output should match for any single dispatch, but the
 //     bytecode-level icb array size differs.
-//   * The material-non-1 BRDF block (insns 178-241) is condensed for
-//     readability; the runtime version uses a more granular sequence
-//     of MAD operations that may emit different bytecode after fxc.
-//   * Round-trip target: <15% insn delta. The material BRDF condensing
-//     + ICB size delta will likely push this above ±10% but stays within
-//     documented-WIP territory.
+//   * BRDF branches (insns 139-242) are rebuilt to the corpus math;
+//     remaining drift is mostly compiler scheduling/SSA shape differences.
+//   * Round-trip target: keep instruction delta in single digits while
+//     preserving bindings/signatures and sample/load parity.
 // What needs cross-read to finalize:
 //   * CB12[28..30] field semantics. The skin BRDF uses cb12[28..29] for
 //     SSS-style rotated absorption math; the field names are placeholders.

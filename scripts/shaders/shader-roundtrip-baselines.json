@@ -14,10 +14,10 @@
       "name": "bsdf_light_deferred_directional",
       "src": "shaders/lighting/bsdf_light_deferred.hlsl",
       "defines": ["LIGHT_TYPE=1"],
-      "sha1": "F614C18D125C71F4FDC95172A749A3F7BEE5C842",
+      "sha1": "AEC3AAE80CB54A677511F4543C2D930B4AB93700",
       "corpus_sha1": "50e2618e8d1a8c3400c2bdb0129e510fe395d19a",
       "corpus_blob_index": 3295,
-      "invariant": "Re-baselined 2026-05-20: corrected ambient-term multiplier from posViewLen (= 1/|posView|) to roughness01 (= 1 - matSample.x). Corpus blob 3295 / runtime sha 8c615844e644 insn 251 multiplies by r0.w which is roughness01 set at insn 35. Prior baseline 085625AF (locked at 5845b9e) had the posViewLen bug; replacing the (separately-misattributed) runtime sha caused -86% scene darkening. The DIRECTIONAL bsdf must continue to round-trip to this exact sha1; any refactor that drifts it is wrong."
+      "invariant": "Re-baselined for the drop-in contract fix + BRDF reconstruction against corpus blob 3295. Changes: (1) input signature POSITION interpolant moved to semantic index 14 to byte-match the game ISGN (contract FAIL->PASS); (2) recovered the default-branch Cook-Torrance specular (Smith geometry/visibility, ge/eq/movc peak-selection, Fresnel-Schlick) that was previously condensed to Blinn-Phong; (3) skin branch dots the t2 sample's xyz (its own normal), not the octahedral t1 normal, per corpus insns 140-141. shader_corpus_diff.py: CONTRACT PASS, stream -5.1%, samples 8/8, temps 11/11. Historical: an earlier baseline (085625AF, locked at 5845b9e) had a posViewLen-vs-roughness01 ambient-multiplier bug fixed 2026-05-20 (F614C18D). Fidelity is now guarded by shader_corpus_diff.py against the game corpus, not just this sha1; only re-baseline for a corpus-diff-justified change."
     },
     {
       "name": "bsdf_light_deferred_point",
