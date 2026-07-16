@@ -42,7 +42,7 @@ void Streamline::CacheDLSSFunctions()
 	L->info("DLSS entry points cached");
 }
 
-void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotionVectorTexture, float2 a_jitter, float2 a_renderSize, uint a_qualityMode)
+void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotionVectorTexture, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask, float2 a_jitter, float2 a_renderSize, uint a_qualityMode)
 {
 	auto* core = cs::Streamline::GetSingleton();
 	if (!core->IsInitialized() || !slDLSSSetOptions || !core->slSetTag || !core->slEvaluateFeature)
@@ -105,8 +105,21 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 		sl::ResourceTag depthTag    = sl::ResourceTag{ &depth,    sl::kBufferTypeDepth,              sl::ResourceLifecycle::eValidUntilPresent,&lowResExtent };
 		sl::ResourceTag mvecTag     = sl::ResourceTag{ &mvec,     sl::kBufferTypeMotionVectors,      sl::ResourceLifecycle::eValidUntilPresent,&lowResExtent };
 
-		sl::ResourceTag resourceTags[] = { colorInTag, colorOutTag, depthTag, mvecTag };
-		core->slSetTag(viewport, resourceTags, _countof(resourceTags), context);
+		// Reactive (BiasCurrentColor) + transparency hints only when the encode pass produced valid masks this frame.
+		const bool masksValid = Upscaling::GetSingleton()->masksValidThisFrame && a_reactiveMask && a_transparencyMask;
+		if (masksValid) {
+			sl::Resource reactive     = { sl::ResourceType::eTex2d, a_reactiveMask->resource.get(), 0 };
+			sl::Resource transparency = { sl::ResourceType::eTex2d, a_transparencyMask->resource.get(), 0 };
+
+			sl::ResourceTag reactiveTag     = sl::ResourceTag{ &reactive,     sl::kBufferTypeBiasCurrentColorHint, sl::ResourceLifecycle::eValidUntilPresent, &lowResExtent };
+			sl::ResourceTag transparencyTag = sl::ResourceTag{ &transparency, sl::kBufferTypeTransparencyHint,     sl::ResourceLifecycle::eValidUntilPresent, &lowResExtent };
+
+			sl::ResourceTag resourceTags[] = { colorInTag, colorOutTag, depthTag, mvecTag, reactiveTag, transparencyTag };
+			core->slSetTag(viewport, resourceTags, _countof(resourceTags), context);
+		} else {
+			sl::ResourceTag resourceTags[] = { colorInTag, colorOutTag, depthTag, mvecTag };
+			core->slSetTag(viewport, resourceTags, _countof(resourceTags), context);
+		}
 	}
 
 	static bool loggedOnce = false;

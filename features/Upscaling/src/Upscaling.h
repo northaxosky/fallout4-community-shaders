@@ -57,6 +57,10 @@ public:
 		float sharpnessFSR = 0.0f;
 		// DLSS model preset: 0=Default, 1=J, 2=K (transformer), 3=L, 4=M.
 		uint presetDLSS = 0;
+		// Encode-mask reactive scale (DLSS BiasCurrentColorHint). 0..4; tune live for smear-vs-shimmer.
+		float reactiveScale = 1.0f;
+		// Encode-mask transparency/composition scale (both backends). 0..4; tune live for smear-vs-shimmer.
+		float transparencyScale = 1.0f;
 	};
 
 	Settings settings;
@@ -86,6 +90,10 @@ public:
 	float2 jitter = { 0, 0 };
 	UpscaleMethod upscaleMethodNoMenu = UpscaleMethod::kDisabled;
 	UpscaleMethod upscaleMethod = UpscaleMethod::kDisabled;
+
+	// True for the current frame once the encode pass produced valid masks (opaque captured + dispatched).
+	// Backends read this to decide whether to submit reactive/transparency hints.
+	bool masksValidThisFrame = false;
 
 	// Render target management.
 	void UpdateRenderTargets(float a_currentWidthRatio, float a_currentHeightRatio);
@@ -125,6 +133,10 @@ public:
 	ID3D11ComputeShader* GetOverrideLinearDepthCS();
 	ID3D11ComputeShader* GetOverrideDepthCS();
 
+	// Encode-mask permutations: reactive+transparency (DLSS) and transparency-only (FSR).
+	ID3D11ComputeShader* GetEncodeReactiveMaskCS();
+	ID3D11ComputeShader* GetEncodeTransparencyMaskCS();
+
 	// Custom SSR raytracing pixel shader for scaled render targets.
 	ID3D11PixelShader* GetBSImagespaceShaderSSLRRaytracing();
 
@@ -140,8 +152,18 @@ public:
 	void CreateUpscalingResources();
 	void DestroyUpscalingResources();
 
+	// Copies kMainTemp (pre-alpha) into colorOpaqueOnlyTexture; runs for any active method.
+	void CaptureOpaqueColor();
+	// Encodes reactive/transparency masks from opaque-vs-final color for the active backend.
+	void EncodeUpscaleMasks();
+
 	std::unique_ptr<upscaling::Texture2D> upscalingTexture;
 	std::unique_ptr<upscaling::Texture2D> dilatedMotionVectorTexture;
+
+	// Mask resources shared by both (mutually exclusive) backends. Opaque capture feeds the encode pass.
+	std::unique_ptr<upscaling::Texture2D> colorOpaqueOnlyTexture;
+	std::unique_ptr<upscaling::Texture2D> reactiveMaskTexture;
+	std::unique_ptr<upscaling::Texture2D> transparencyMaskTexture;
 
 	struct UpscalingCB
 	{
@@ -149,13 +171,23 @@ public:
 		uint RenderSize[2];
 		// Camera parameters: far, near, far-near, far*near.
 		float4 CameraData;
+		// x=reactiveScale, y=transparencyScale.
+		float4 MaskParams;
 	};
 
 private:
 	winrt::com_ptr<ID3D11ComputeShader> dilateMotionVectorCS;
 	winrt::com_ptr<ID3D11ComputeShader> overrideLinearDepthCS;
 	winrt::com_ptr<ID3D11ComputeShader> overrideDepthCS;
+	winrt::com_ptr<ID3D11ComputeShader> encodeReactiveMaskCS;
+	winrt::com_ptr<ID3D11ComputeShader> encodeTransparencyMaskCS;
 	winrt::com_ptr<ID3D11PixelShader> BSImagespaceShaderSSLRRaytracing;
+
+	// Fallback SRV over kMainTemp used when the engine RT exposes no srView at the encode hook.
+	winrt::com_ptr<ID3D11ShaderResourceView> mainTempFinalSRV;
+	ID3D11Resource* mainTempFinalSRVResource = nullptr;
+
+	bool opaqueCapturedThisFrame = false;
 };
 
 }

@@ -24,32 +24,27 @@ public:
 	bool IsAvailable() const override { return true; }
 	void CreateResources() override { CreateFSRResources(); }
 	void DestroyResources() override { DestroyFSRResources(); }
-	void PrepareOpaqueColor() override { CopyOpaqueTexture(); }
 	void PrepareReactiveMask() override { GenerateReactiveMask(); }
-	void Upscale(Texture2D* a_color, Texture2D*, float2 a_jitter, float2 a_renderSize, uint) override
+	void Upscale(Texture2D* a_color, Texture2D*, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask,
+		float2 a_jitter, float2 a_renderSize, uint) override
 	{
-		Upscale(a_color, a_jitter, a_renderSize);
+		Upscale(a_color, a_reactiveMask, a_transparencyMask, a_jitter, a_renderSize);
 	}
 
-	// Creates the FSR3 context, scratch buffer, opaque color, and reactive mask resources.
+	// Creates the FSR3 context and scratch buffer (mask/opaque textures are Upscaling-owned).
 	void CreateFSRResources();
 
 	// Destroys the FSR3 context and releases all FSR-owned resources.
 	void DestroyFSRResources();
 
-	// Captures opaque color before transparency so FSR3 can build a reactive mask.
-	void CopyOpaqueTexture();
-
-	// Builds the FSR3 reactive mask after transparency.
+	// Builds the FSR3 reactive mask (into Upscaling's reactiveMaskTexture) after transparency.
 	void GenerateReactiveMask();
 
 	// Runs FSR3 temporal upscaling from render to display resolution.
-	void Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize);
+	void Upscale(Texture2D* a_color, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask,
+		float2 a_jitter, float2 a_renderSize);
 
 	FfxFsr3Context fsrContext;  ///< FSR3 context handle
-
-	std::unique_ptr<Texture2D> colorOpaqueOnlyTexture;  ///< Color before transparent objects
-	std::unique_ptr<Texture2D> reactiveMaskTexture;     ///< Generated reactive mask for FSR3
 
 private:
 	void* fsrScratchBuffer = nullptr;  ///< FSR3 backend scratch memory (freed in DestroyFSRResources)

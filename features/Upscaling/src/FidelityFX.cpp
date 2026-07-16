@@ -61,18 +61,6 @@ void FidelityFX::CreateFSRResources()
 	contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY;
 	contextDescription.backendInterfaceUpscaling = fsrInterface;
 
-	auto renderer = RE::BSGraphics::GetRendererData();
-	auto& main = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp];
-
-	D3D11_TEXTURE2D_DESC texDesc{};
-	reinterpret_cast<ID3D11Texture2D*>(main.texture)->GetDesc(&texDesc);
-	texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-
-	colorOpaqueOnlyTexture = std::make_unique<Texture2D>(texDesc);
-
-	texDesc.Format = DXGI_FORMAT_R8_UNORM;
-	reactiveMaskTexture = std::make_unique<Texture2D>(texDesc);
-
 	if (ffxFsr3ContextCreate(&fsrContext, &contextDescription) != FFX_OK) {
 		L->critical("Failed to initialize FSR3 context!");
 		free(fsrScratchBuffer);
@@ -93,19 +81,6 @@ void FidelityFX::DestroyFSRResources()
 
 	free(fsrScratchBuffer);
 	fsrScratchBuffer = nullptr;
-
-	colorOpaqueOnlyTexture.reset();
-	reactiveMaskTexture.reset();
-}
-
-void FidelityFX::CopyOpaqueTexture()
-{
-	static auto rendererData = RE::BSGraphics::GetRendererData();
-	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-
-	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
-
-	context->CopyResource(colorOpaqueOnlyTexture->resource.get(), mainTexture);
 }
 
 #define FFX_FSR3UPSCALER_AUTOREACTIVEFLAGS_APPLY_TONEMAP                                    1
@@ -123,13 +98,17 @@ void FidelityFX::GenerateReactiveMask()
 
 	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
 
+	auto* upscaling = Upscaling::GetSingleton();
+	if (!upscaling->colorOpaqueOnlyTexture || !upscaling->reactiveMaskTexture)
+		return;
+
 	FfxFsr3GenerateReactiveDescription dispatchParameters{};
 
 	dispatchParameters.commandList = ffxGetCommandListDX11(context);
 
-	dispatchParameters.colorOpaqueOnly = ffxGetResource(colorOpaqueOnlyTexture->resource.get(), L"FSR3_Input_ColorOpaqueOnly", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+	dispatchParameters.colorOpaqueOnly = ffxGetResource(upscaling->colorOpaqueOnlyTexture->resource.get(), L"FSR3_Input_ColorOpaqueOnly", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 	dispatchParameters.colorPreUpscale = ffxGetResource(mainTexture, L"FSR3_Input_ColorPreUpscale", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-	dispatchParameters.outReactive = ffxGetResource(reactiveMaskTexture->resource.get(), L"FSR3_Output_OutReactive", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+	dispatchParameters.outReactive = ffxGetResource(upscaling->reactiveMaskTexture->resource.get(), L"FSR3_Output_OutReactive", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 
 	static auto gameViewport = cs::engine::GetGraphicsState();
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
@@ -147,7 +126,8 @@ void FidelityFX::GenerateReactiveMask()
 		L->critical("Failed to dispatch reactive mask!");
 }
 
-void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSize)
+void FidelityFX::Upscale(Texture2D* a_color, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask,
+	float2 a_jitter, float2 a_renderSize)
 {
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
@@ -184,8 +164,15 @@ void FidelityFX::Upscale(Texture2D* a_color, float2 a_jitter, float2 a_renderSiz
 		dispatchParameters.motionVectors = ffxGetResource(reinterpret_cast<ID3D11Texture2D*>(motionVectorTexture.texture), L"FSR3_InputMotionVectors", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchParameters.exposure = ffxGetResource(nullptr, L"FSR3_InputExposure", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchParameters.upscaleOutput = dispatchParameters.color;
-		dispatchParameters.reactive = ffxGetResource(reactiveMaskTexture->resource.get(), L"FSR3_InputReactiveMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-		dispatchParameters.transparencyAndComposition = ffxGetResource(nullptr, L"FSR3_TransparencyAndCompositionMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+		// FFX-generated reactive mask stays the FSR reactive channel; keep it independent of the encode pass.
+		dispatchParameters.reactive = a_reactiveMask
+			? ffxGetResource(a_reactiveMask->resource.get(), L"FSR3_InputReactiveMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
+			: ffxGetResource(nullptr, L"FSR3_InputReactiveMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
+		// Encode-pass transparency mask only when valid this frame; otherwise submit null (no hint).
+		const bool transparencyValid = Upscaling::GetSingleton()->masksValidThisFrame && a_transparencyMask;
+		dispatchParameters.transparencyAndComposition = transparencyValid
+			? ffxGetResource(a_transparencyMask->resource.get(), L"FSR3_TransparencyAndCompositionMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
+			: ffxGetResource(nullptr, L"FSR3_TransparencyAndCompositionMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 
 		dispatchParameters.motionVectorScale.x = a_renderSize.x;
 		dispatchParameters.motionVectorScale.y = a_renderSize.y;

@@ -91,7 +91,7 @@ namespace cs::features
 				a_error = SettingError(a_key, "value must be finite");
 				break;
 			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = SettingError(a_key, "value must be in range 0..1");
+				a_error = SettingError(a_key, "value out of allowed range");
 				break;
 			}
 			return false;
@@ -114,7 +114,9 @@ namespace cs::features
 			return ReadUnsignedSetting(*settingsTable, "upscale_method_preference", 0, 2, a_candidate.upscaleMethodPreference, a_error)
 				&& ReadUnsignedSetting(*settingsTable, "quality_mode", 0, 4, a_candidate.qualityMode, a_error)
 				&& ReadUnsignedSetting(*settingsTable, "preset_dlss", 0, 4, a_candidate.presetDLSS, a_error)
-				&& ReadFloatSetting(*settingsTable, "sharpness_fsr", 0.0f, 1.0f, a_candidate.sharpnessFSR, a_error);
+				&& ReadFloatSetting(*settingsTable, "sharpness_fsr", 0.0f, 1.0f, a_candidate.sharpnessFSR, a_error)
+				&& ReadFloatSetting(*settingsTable, "reactive_scale", 0.0f, 4.0f, a_candidate.reactiveScale, a_error)
+				&& ReadFloatSetting(*settingsTable, "transparency_scale", 0.0f, 4.0f, a_candidate.transparencyScale, a_error);
 		}
 
 		bool IsAnisotropicFilter(D3D11_FILTER a_filter)
@@ -237,7 +239,7 @@ struct DrawWorld_Render_PreUI_DeferredPrePass
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Applies sampler LOD bias during forward rendering and builds the FSR reactive mask.
+// Applies sampler LOD bias during forward rendering and builds the upscaler reactive/transparency masks.
 struct DrawWorld_Render_PreUI_Forward
 {
 	static void thunk(struct DrawWorld* This)
@@ -248,8 +250,10 @@ struct DrawWorld_Render_PreUI_Forward
 		func(This);
 		upscaling->ResetSamplerStates();
 
-		if (auto* backend = upscaling->GetActiveBackend())
+		if (auto* backend = upscaling->GetActiveBackend()) {
 			backend->PrepareReactiveMask();
+			upscaling->EncodeUpscaleMasks();
+		}
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -348,7 +352,7 @@ struct BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Captures opaque color before forward alpha for the FSR reactive mask.
+// Captures opaque color before forward alpha for the upscaler encode masks (both backends).
 struct ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth
 {
 	static void thunk(RE::BSShaderAccumulator* This)
@@ -356,8 +360,8 @@ struct ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth
 		func(This);
 		auto upscaling = Upscaling::GetSingleton();
 
-		if (auto* backend = upscaling->GetActiveBackend())
-			backend->PrepareOpaqueColor();
+		if (upscaling->GetActiveBackend())
+			upscaling->CaptureOpaqueColor();
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -532,6 +536,8 @@ void Upscaling::SaveSettings()
 	settingsTable.insert_or_assign("quality_mode", static_cast<int64_t>(settings.qualityMode));
 	settingsTable.insert_or_assign("sharpness_fsr", static_cast<double>(settings.sharpnessFSR));
 	settingsTable.insert_or_assign("preset_dlss", static_cast<int64_t>(settings.presetDLSS));
+	settingsTable.insert_or_assign("reactive_scale", static_cast<double>(settings.reactiveScale));
+	settingsTable.insert_or_assign("transparency_scale", static_cast<double>(settings.transparencyScale));
 
 	std::ofstream out(kConfigPath);
 	if (out) {
@@ -587,6 +593,21 @@ void Upscaling::DrawSettings()
 	if (activeMethod == UpscaleMethod::kFSR) {
 		if (ImGui::SliderFloat("FSR sharpness", &settings.sharpnessFSR, 0.0f, 1.0f, "%.2f"))
 			settings.sharpnessFSR = std::clamp(settings.sharpnessFSR, 0.0f, 1.0f);
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			SaveSettings();
+	}
+
+	if (activeMethod != UpscaleMethod::kDisabled) {
+		ImGui::Separator();
+		ImGui::TextDisabled("Encode masks (live-tunable; verify in-game).");
+		if (ImGui::SliderFloat("Reactive scale", &settings.reactiveScale, 0.0f, 4.0f, "%.2f"))
+			settings.reactiveScale = std::clamp(settings.reactiveScale, 0.0f, 4.0f);
+		if (ImGui::IsItemDeactivatedAfterEdit())
+			SaveSettings();
+		if (activeMethod == UpscaleMethod::kFSR)
+			ImGui::TextDisabled("Reactive scale affects DLSS only; FSR reactive uses the FFX generator.");
+		if (ImGui::SliderFloat("Transparency scale", &settings.transparencyScale, 0.0f, 4.0f, "%.2f"))
+			settings.transparencyScale = std::clamp(settings.transparencyScale, 0.0f, 4.0f);
 		if (ImGui::IsItemDeactivatedAfterEdit())
 			SaveSettings();
 	}
@@ -1194,6 +1215,24 @@ ID3D11ComputeShader* Upscaling::GetOverrideDepthCS()
 	return overrideDepthCS.get();
 }
 
+ID3D11ComputeShader* Upscaling::GetEncodeReactiveMaskCS()
+{
+	if (!encodeReactiveMaskCS) {
+		L->debug("Compiling EncodeReactiveMaskCS.hlsl (reactive+transparency)");
+		encodeReactiveMaskCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/EncodeReactiveMaskCS.hlsl", {}, "cs_5_0"));
+	}
+	return encodeReactiveMaskCS.get();
+}
+
+ID3D11ComputeShader* Upscaling::GetEncodeTransparencyMaskCS()
+{
+	if (!encodeTransparencyMaskCS) {
+		L->debug("Compiling EncodeReactiveMaskCS.hlsl (transparency-only)");
+		encodeTransparencyMaskCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/EncodeReactiveMaskCS.hlsl", { { "TRANSPARENCY_ONLY", "1" } }, "cs_5_0"));
+	}
+	return encodeTransparencyMaskCS.get();
+}
+
 ID3D11PixelShader* Upscaling::GetBSImagespaceShaderSSLRRaytracing()
 {
 	if (!BSImagespaceShaderSSLRRaytracing) {
@@ -1228,6 +1267,7 @@ void Upscaling::UpdateAndBindUpscalingCB(ID3D11DeviceContext* a_context, float2 
 	upscalingData.RenderSize[0] = static_cast<uint>(a_renderSize.x);
 	upscalingData.RenderSize[1] = static_cast<uint>(a_renderSize.y);
 	upscalingData.CameraData = cameraData;
+	upscalingData.MaskParams = { settings.reactiveScale, settings.transparencyScale, 0.0f, 0.0f };
 
 	auto upscalingCB = GetUpscalingCB();
 	upscalingCB->Update(upscalingData);
@@ -1399,7 +1439,7 @@ void Upscaling::Upscale()
 	{
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Eval");
 		if (auto* backend = GetActiveBackend())
-			backend->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
+			backend->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), reactiveMaskTexture.get(), transparencyMaskTexture.get(), jitter, renderSize, effectiveQuality);
 	}
 
 	// Copy upscaled output back into the frame buffer.
@@ -1414,21 +1454,16 @@ void Upscaling::Upscale()
 
 void Upscaling::CreateUpscalingResources()
 {
+	auto renderer = RE::BSGraphics::GetRendererData();
+
+	// DLSS-only dilated motion vectors.
 	if (cs::Streamline::GetSingleton()->featureDLSS) {
-		auto renderer = RE::BSGraphics::GetRendererData();
 		auto& main = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMain];
 
 		D3D11_TEXTURE2D_DESC texDesc{};
 		reinterpret_cast<ID3D11Texture2D*>(main.texture)->GetDesc(&texDesc);
-		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-
-		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
-			.Format = texDesc.Format,
-			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
-			.Texture2D = {
-				.MostDetailedMip = 0,
-				.MipLevels = 1 }
-		};
+		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		texDesc.Format = DXGI_FORMAT_R16G16_FLOAT;
 
 		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
 			.Format = texDesc.Format,
@@ -1436,25 +1471,168 @@ void Upscaling::CreateUpscalingResources()
 			.Texture2D = {.MipSlice = 0 }
 		};
 
-		texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-		texDesc.Format = DXGI_FORMAT_R16G16_FLOAT;
-		uavDesc.Format = texDesc.Format;
-
 		dilatedMotionVectorTexture = std::make_unique<Texture2D>(texDesc);
 		dilatedMotionVectorTexture->CreateUAV(uavDesc);
+	}
+
+	// Encode-mask resources (both backends; they are mutually exclusive so one set suffices).
+	auto& mainTemp = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp];
+	D3D11_TEXTURE2D_DESC maskDesc{};
+	reinterpret_cast<ID3D11Texture2D*>(mainTemp.texture)->GetDesc(&maskDesc);
+	maskDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+
+	// Opaque copy clones kMainTemp so CopyResource matches; sampled by the encode pass and FFX.
+	{
+		colorOpaqueOnlyTexture = std::make_unique<Texture2D>(maskDesc);
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = maskDesc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = {.MostDetailedMip = 0, .MipLevels = 1 }
+		};
+		colorOpaqueOnlyTexture->CreateSRV(srvDesc);
+	}
+
+	// Single-channel reactive + transparency masks (SRV + UAV).
+	{
+		D3D11_TEXTURE2D_DESC r8Desc = maskDesc;
+		r8Desc.Format = DXGI_FORMAT_R8_UNORM;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+			.Format = r8Desc.Format,
+			.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+			.Texture2D = {.MostDetailedMip = 0, .MipLevels = 1 }
+		};
+		D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc = {
+			.Format = r8Desc.Format,
+			.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D,
+			.Texture2D = {.MipSlice = 0 }
+		};
+
+		reactiveMaskTexture = std::make_unique<Texture2D>(r8Desc);
+		reactiveMaskTexture->CreateSRV(srvDesc);
+		reactiveMaskTexture->CreateUAV(uavDesc);
+
+		transparencyMaskTexture = std::make_unique<Texture2D>(r8Desc);
+		transparencyMaskTexture->CreateSRV(srvDesc);
+		transparencyMaskTexture->CreateUAV(uavDesc);
 	}
 }
 
 void Upscaling::DestroyUpscalingResources()
 {
-	if (cs::Streamline::GetSingleton()->featureDLSS) {
-		dilatedMotionVectorTexture = nullptr;
+	dilatedMotionVectorTexture = nullptr;
+	colorOpaqueOnlyTexture = nullptr;
+	reactiveMaskTexture = nullptr;
+	transparencyMaskTexture = nullptr;
+
+	mainTempFinalSRV = nullptr;
+	mainTempFinalSRVResource = nullptr;
+	masksValidThisFrame = false;
+	opaqueCapturedThisFrame = false;
+}
+
+void Upscaling::CaptureOpaqueColor()
+{
+	if (!colorOpaqueOnlyTexture)
+		return;
+
+	static auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
+	if (!mainTexture)
+		return;
+
+	context->CopyResource(colorOpaqueOnlyTexture->resource.get(), mainTexture);
+	opaqueCapturedThisFrame = true;
+}
+
+void Upscaling::EncodeUpscaleMasks()
+{
+	const bool opaqueReady = opaqueCapturedThisFrame;
+	opaqueCapturedThisFrame = false;
+	masksValidThisFrame = false;
+
+	if (upscaleMethod == UpscaleMethod::kDisabled)
+		return;
+	if (!opaqueReady || !colorOpaqueOnlyTexture || !reactiveMaskTexture || !transparencyMaskTexture)
+		return;
+
+	const bool isFSR = upscaleMethod == UpscaleMethod::kFSR;
+	auto* encodeCS = isFSR ? GetEncodeTransparencyMaskCS() : GetEncodeReactiveMaskCS();
+	if (!encodeCS) {
+		L->error("Encode-mask compute shader unavailable; skipping mask encode this frame");
+		return;
 	}
+
+	static auto rendererData = RE::BSGraphics::GetRendererData();
+	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+
+	// Final color SRV; fall back to a self-created SRV if the engine RT exposes none at this hook.
+	auto& mainTemp = rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp];
+	auto* finalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(mainTemp.srView);
+	if (!finalSRV) {
+		auto* tex = reinterpret_cast<ID3D11Texture2D*>(mainTemp.texture);
+		if (!tex)
+			return;
+		if (mainTempFinalSRVResource != tex || !mainTempFinalSRV) {
+			mainTempFinalSRV = nullptr;
+			mainTempFinalSRVResource = nullptr;
+			D3D11_TEXTURE2D_DESC texDesc{};
+			tex->GetDesc(&texDesc);
+			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
+				.Format = texDesc.Format,
+				.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D,
+				.Texture2D = {.MostDetailedMip = 0, .MipLevels = 1 }
+			};
+			auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
+			if (FAILED(device->CreateShaderResourceView(tex, &srvDesc, mainTempFinalSRV.put())))
+				return;
+			mainTempFinalSRVResource = tex;
+		}
+		finalSRV = mainTempFinalSRV.get();
+	}
+
+	static auto gameViewport = cs::engine::GetGraphicsState();
+	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
+	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
+	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+
+	// Unbind + restore engine OM around the encode dispatch; clears CS slots on exit.
+	cs::engine::ComputeOMScope omcs(context);
+
+	UpdateAndBindUpscalingCB(context, screenSize, renderSize);
+
+	ID3D11ShaderResourceView* views[2] = { colorOpaqueOnlyTexture->srv.get(), finalSRV };
+	context->CSSetShaderResources(0, ARRAYSIZE(views), views);
+
+	if (isFSR) {
+		// Transparency-only permutation writes u1 only; never bind/touch u0 (FFX owns FSR reactive).
+		ID3D11UnorderedAccessView* uav = transparencyMaskTexture->uav.get();
+		context->CSSetUnorderedAccessViews(1, 1, &uav, nullptr);
+	} else {
+		ID3D11UnorderedAccessView* uavs[2] = { reactiveMaskTexture->uav.get(), transparencyMaskTexture->uav.get() };
+		context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
+	}
+
+	context->CSSetShader(encodeCS, nullptr, 0);
+
+	uint dispatchX = (uint)std::ceil(renderSize.x / 8.0f);
+	uint dispatchY = (uint)std::ceil(renderSize.y / 8.0f);
+	context->Dispatch(dispatchX, dispatchY, 1);
+
+	masksValidThisFrame = true;
 }
 
 void Upscaling::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
 {
 	Streamline::GetSingleton()->CacheDLSSFunctions();
+
+	// Pre-compile both encode-mask permutations so a compile failure surfaces at startup, not mid-frame.
+	if (!GetEncodeReactiveMaskCS())
+		L->error("Failed to compile EncodeReactiveMaskCS.hlsl (reactive+transparency)");
+	if (!GetEncodeTransparencyMaskCS())
+		L->error("Failed to compile EncodeReactiveMaskCS.hlsl (transparency-only)");
 }
 
 void Upscaling::PatchSSRShader()

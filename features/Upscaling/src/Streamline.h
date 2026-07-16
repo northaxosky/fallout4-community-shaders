@@ -33,7 +33,7 @@ public:
 	// Called from Upscaling::OnD3D11Ready via cs::Streamline's feature fan-out.
 	void CacheDLSSFunctions();
 
-	void Upscale(Texture2D* a_color, Texture2D* a_dilatedMotionVectorTexture, float2 a_jitter, float2 a_renderSize, uint a_qualityMode) override;
+	void Upscale(Texture2D* a_color, Texture2D* a_dilatedMotionVectorTexture, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask, float2 a_jitter, float2 a_renderSize, uint a_qualityMode) override;
 	void UpdateConstants(float2 a_jitter);
 	void DestroyDLSSResources();
 
