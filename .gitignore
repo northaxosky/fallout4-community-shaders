@@ -18,6 +18,10 @@ docs/shader-buffers.md
 .tmp-roundtrip/
 __pycache__/
 
+# Extracted game shader corpus (Bethesda bytes; never commit). See
+# scripts/fetch-shader-corpus.ps1 + scripts/shader_corpus_diff.py.
+.corpus/
+
 # Vendored Detours static libs are NOT build output, track them.
 !include/detours/**/*.lib
 !include/detours/**/*.pdb
