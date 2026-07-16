@@ -10,13 +10,13 @@
 #include <sl_matrix_helpers.h>
 #include <sl_version.h>
 #pragma warning(pop)
-#include "Buffer.h"
+#include "IUpscalerBackend.h"
 
 namespace cs::features::upscaling
 {
 
 // DLSS dispatch helper. SDK plumbing lives in cs::Streamline; this owns the DLSS entry points and dispatch path.
-class Streamline
+class Streamline : public IUpscalerBackend
 {
 public:
 	static Streamline* GetSingleton()
@@ -25,10 +25,15 @@ public:
 		return &singleton;
 	}
 
+	bool IsAvailable() const override;
+	void CreateResources() override {}
+	void DestroyResources() override { DestroyDLSSResources(); }
+	bool NeedsDilatedMotionVectors() const override { return true; }
+
 	// Called from Upscaling::OnD3D11Ready via cs::Streamline's feature fan-out.
 	void CacheDLSSFunctions();
 
-	void Upscale(Texture2D* a_color, Texture2D* a_dilatedMotionVectorTexture, float2 a_jitter, float2 a_renderSize, uint a_qualityMode);
+	void Upscale(Texture2D* a_color, Texture2D* a_dilatedMotionVectorTexture, float2 a_jitter, float2 a_renderSize, uint a_qualityMode) override;
 	void UpdateConstants(float2 a_jitter);
 	void DestroyDLSSResources();
 

@@ -25,6 +25,11 @@ namespace cs::features::upscaling
 		}
 	}
 
+bool Streamline::IsAvailable() const
+{
+	return cs::Streamline::GetSingleton()->featureDLSS;
+}
+
 void Streamline::CacheDLSSFunctions()
 {
 	auto* core = cs::Streamline::GetSingleton();

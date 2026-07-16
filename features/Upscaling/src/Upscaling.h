@@ -1,6 +1,7 @@
 #pragma once
 #include "Buffer.h"
 #include "FidelityFX.h"
+#include "IUpscalerBackend.h"
 #include "Streamline.h"
 #include "Feature.h"
 
@@ -45,6 +46,9 @@ public:
 		kFSR,       // AMD FidelityFX Super Resolution 3
 		kDLSS       // NVIDIA Deep Learning Super Sampling
 	};
+
+	upscaling::IUpscalerBackend* GetBackend(UpscaleMethod a_method);
+	upscaling::IUpscalerBackend* GetActiveBackend() { return GetBackend(upscaleMethod); }
 
 	struct Settings
 	{

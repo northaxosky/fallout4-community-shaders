@@ -4,7 +4,7 @@
 #include <FidelityFX/host/ffx_fsr3.h>
 #include <FidelityFX/host/ffx_interface.h>
 
-#include "Buffer.h"
+#include "IUpscalerBackend.h"
 
 #include <memory>
 
@@ -12,13 +12,23 @@ namespace cs::features::upscaling
 {
 
 // FSR3 upscaling manager with reactive-mask support.
-class FidelityFX
+class FidelityFX : public IUpscalerBackend
 {
 public:
 	static FidelityFX* GetSingleton()
 	{
 		static FidelityFX singleton;
 		return &singleton;
+	}
+
+	bool IsAvailable() const override { return true; }
+	void CreateResources() override { CreateFSRResources(); }
+	void DestroyResources() override { DestroyFSRResources(); }
+	void PrepareOpaqueColor() override { CopyOpaqueTexture(); }
+	void PrepareReactiveMask() override { GenerateReactiveMask(); }
+	void Upscale(Texture2D* a_color, Texture2D*, float2 a_jitter, float2 a_renderSize, uint) override
+	{
+		Upscale(a_color, a_jitter, a_renderSize);
 	}
 
 	// Creates the FSR3 context, scratch buffer, opaque color, and reactive mask resources.

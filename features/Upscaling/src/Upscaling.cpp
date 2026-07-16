@@ -245,10 +245,8 @@ struct DrawWorld_Render_PreUI_Forward
 		func(This);
 		upscaling->ResetSamplerStates();
 
-		auto fidelityFX = FidelityFX::GetSingleton();
-
-		if (upscaling->upscaleMethod == Upscaling::UpscaleMethod::kFSR)
-			fidelityFX->GenerateReactiveMask();
+		if (auto* backend = upscaling->GetActiveBackend())
+			backend->PrepareReactiveMask();
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -354,10 +352,9 @@ struct ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth
 	{
 		func(This);
 		auto upscaling = Upscaling::GetSingleton();
-		auto fidelityFX = FidelityFX::GetSingleton();
 
-		if (upscaling->upscaleMethod == Upscaling::UpscaleMethod::kFSR)
-			fidelityFX->CopyOpaqueTexture();
+		if (auto* backend = upscaling->GetActiveBackend())
+			backend->PrepareOpaqueColor();
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -1083,6 +1080,20 @@ void Upscaling::CopyDepth()
 	}
 }
 
+IUpscalerBackend* Upscaling::GetBackend(UpscaleMethod a_method)
+{
+	switch (a_method) {
+	case UpscaleMethod::kDisabled:
+		return nullptr;
+	case UpscaleMethod::kFSR:
+		return FidelityFX::GetSingleton();
+	case UpscaleMethod::kDLSS:
+		return Streamline::GetSingleton();
+	}
+
+	return nullptr;
+}
+
 Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 {
 	static auto ui = RE::UI::GetSingleton();
@@ -1101,7 +1112,7 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 	UpscaleMethod currentUpscaleMethod = (UpscaleMethod)settings.upscaleMethodPreference;
 
 	auto* core = cs::Streamline::GetSingleton();
-	if (!core->featureDLSS && currentUpscaleMethod == UpscaleMethod::kDLSS) {
+	if (!GetBackend(UpscaleMethod::kDLSS)->IsAvailable() && currentUpscaleMethod == UpscaleMethod::kDLSS) {
 		static bool loggedDLSSFallback = false;
 		if (!loggedDLSSFallback) {
 			L->info("DLSS preferred but not available, falling back to FSR");
@@ -1133,23 +1144,21 @@ void Upscaling::CheckResources()
 {
 	static auto previousUpscaleMethodNoMenu = UpscaleMethod::kDisabled;
 
-	auto streamline = Streamline::GetSingleton();
-	auto fidelityFX = FidelityFX::GetSingleton();
-
 	if (previousUpscaleMethodNoMenu != upscaleMethodNoMenu) {
+		auto* previousBackend = GetBackend(previousUpscaleMethodNoMenu);
+		auto* backend = GetBackend(upscaleMethodNoMenu);
+
 		L->info("Method transition: {} -> {} (0=Disabled, 1=FSR, 2=DLSS)",
 			static_cast<uint>(previousUpscaleMethodNoMenu), static_cast<uint>(upscaleMethodNoMenu));
 		if (previousUpscaleMethodNoMenu == UpscaleMethod::kDisabled)
 			CreateUpscalingResources();
-		else if (previousUpscaleMethodNoMenu == UpscaleMethod::kFSR)
-			fidelityFX->DestroyFSRResources();
-		else if (previousUpscaleMethodNoMenu == UpscaleMethod::kDLSS)
-			streamline->DestroyDLSSResources();
+		if (previousBackend)
+			previousBackend->DestroyResources();
 
 		if (upscaleMethodNoMenu == UpscaleMethod::kDisabled)
 			DestroyUpscalingResources();
-		else if (upscaleMethodNoMenu == UpscaleMethod::kFSR)
-			fidelityFX->CreateFSRResources();
+		if (backend)
+			backend->CreateResources();
 
 		previousUpscaleMethodNoMenu = upscaleMethodNoMenu;
 	}
@@ -1344,7 +1353,7 @@ void Upscaling::Upscale()
 	}
 
 	// Dilate DLSS motion vectors for temporal stability.
-	if (upscaleMethod == UpscaleMethod::kDLSS){
+	if (auto* backend = GetActiveBackend(); backend && backend->NeedsDilatedMotionVectors()){
 		{
 			UpdateAndBindUpscalingCB(context, screenSize, renderSize);
 
@@ -1386,11 +1395,8 @@ void Upscaling::Upscale()
 	auto effectiveQuality = GetEffectiveQualityMode();
 	{
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Eval");
-		if (upscaleMethod == UpscaleMethod::kDLSS) {
-			Streamline::GetSingleton()->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
-		} else if (upscaleMethod == UpscaleMethod::kFSR) {
-			FidelityFX::GetSingleton()->Upscale(upscalingTexture.get(), jitter, renderSize);
-		}
+		if (auto* backend = GetActiveBackend())
+			backend->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), jitter, renderSize, effectiveQuality);
 	}
 
 	// Copy upscaled output back into the frame buffer.
