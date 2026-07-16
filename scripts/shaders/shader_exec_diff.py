@@ -19,9 +19,6 @@ from shader_corpus_diff import (
 )
 
 DEFAULT_EXECUTABLE = os.path.join(REPO_ROOT, ".shader-cache", "shader_exec_diff.exe")
-SHAPED_SHADERS = frozenset(
-    {"ambient_ibl_pass", "bsdf_light_deferred_directional"}
-)
 
 
 def _find_fxc(explicit: str | None) -> str:
@@ -120,9 +117,7 @@ def main() -> int:
         for shader in entries:
             name = shader["name"]
             defines = shader.get("defines", [])
-            shaped = name in SHAPED_SHADERS
             print(f"== {name}  (defines: {', '.join(defines) or 'none'}) ==")
-            print(f"  INPUTS: {'SHAPED' if shaped else 'UNSHAPED (advisory)'}")
 
             corpus = os.path.join(args.corpus_dir, f"{name}.dxbc")
             if not os.path.isfile(corpus):
@@ -162,6 +157,16 @@ def main() -> int:
                 command.append("--verbose")
             process = subprocess.run(command, capture_output=True, text=True)
             output = (process.stdout or "") + (process.stderr or "")
+            profile = "unshaped"
+            for line in output.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("input profile:"):
+                    profile = stripped.partition(":")[2].strip()
+                    break
+            shaped = profile != "unshaped"
+            print(
+                f"  INPUTS: {'SHAPED (' + profile + ')' if shaped else 'UNSHAPED (advisory)'}"
+            )
 
             if process.returncode == 0:
                 verdict = "PASS" if shaped else "ADVISORY (pass on unshaped inputs)"
