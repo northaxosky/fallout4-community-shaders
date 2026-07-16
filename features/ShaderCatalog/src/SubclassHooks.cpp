@@ -36,28 +36,14 @@ namespace cs::features::catalog::subclass_hooks
 
 		using PixelShaderMap = RE::BSShaderTechniqueIDMap::MapType<RE::BSGraphics::PixelShader*>;
 
-		// A scatter table at a candidate offset looks valid if _capacity (+0x0C) is a non-zero power of two
-		// within a sane bound and the entries pointer (+0x28) is non-null. Guards a wrong per-runtime offset
-		// so a layout mismatch skips attribution instead of walking garbage and CTD-ing.
-		bool ScatterTableLooksValid(const void* a_map) noexcept
-		{
-			const auto base = reinterpret_cast<std::uintptr_t>(a_map);
-			const std::uint32_t capacity = *reinterpret_cast<const std::uint32_t*>(base + 0x0C);
-			const void* const entries = *reinterpret_cast<const void* const*>(base + 0x28);
-			if (capacity == 0 || (capacity & (capacity - 1)) != 0 || capacity > (1u << 22))
-				return false;
-			return entries != nullptr;
-		}
-
 		void AttributePixelShaderFromMap(RE::BSShader* self, const char* subclassName, std::uint32_t techniqueBits)
 		{
 			if (!self || !subclassName)
 				return;
 
+			// pixelShaders offset is per-runtime (0xB0 on 1.10.x, 0x128 on next-gen 1.11.x).
 			auto* map = reinterpret_cast<PixelShaderMap*>(
 				reinterpret_cast<std::byte*>(self) + g_pixelShadersOffset.load(std::memory_order_acquire));
-			if (!ScatterTableLooksValid(map))  // wrong runtime offset -> skip, never CTD
-				return;
 
 			RE::BSGraphics::PixelShader probe{};
 			probe.id = techniqueBits;
