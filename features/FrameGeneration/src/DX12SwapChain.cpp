@@ -229,7 +229,7 @@ HRESULT DX12SwapChain::GetBuffer(REFIID riid, void** ppSurface)
 	return swapChainBufferProxy->resource11->QueryInterface(riid, ppSurface);
 }
 
-HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
+void DX12SwapChain::PrepareAndCopyBackbuffer()
 {
 	// DLSS-G recomposition needs a single-channel UI alpha tag; derive it before the cross-API fence.
 	if (FrameGeneration::GetSingleton()->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG)
@@ -265,13 +265,13 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		};
 		commandLists[frameIndex]->ResourceBarrier(2, postBarriers);
 	}
+}
 
+bool DX12SwapChain::ShouldUseFrameGeneration()
+{
 	auto frameGen = FrameGeneration::GetSingleton();
 
 	bool useFrameGenerationThisFrame = false;
-	bool isDLSSGFrame = false;
-	bool isXeSSFrame = false;
-	static uint32_t xessFrameId = 0;
 
 	if (auto main = RE::Main::GetSingleton()) {
 		if (auto ui = RE::UI::GetSingleton()) {
@@ -280,9 +280,16 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		}
 	}
 
+	return useFrameGenerationThisFrame;
+}
+
+void DX12SwapChain::PublishFrameStatistics(bool a_useFrameGen)
+{
+	auto frameGen = FrameGeneration::GetSingleton();
+
 	// Publish displayed-FPS multiplier; use the active backend after init fallback.
 	int multiplier = 1;
-	if (useFrameGenerationThisFrame) {
+	if (a_useFrameGen) {
 		switch (frameGen->activeFrameGenType) {
 			case FrameGeneration::FrameGenType::kDLSSG:
 				multiplier = 1 + std::max(1, frameGen->settings.frameGenFrames);
@@ -296,7 +303,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	// Accumulate actual presented frames; FSR3 falls back to multiplier to avoid hijacking presentCallback.
 	uint32_t actualFrames = 0;
-	if (useFrameGenerationThisFrame) {
+	if (a_useFrameGen) {
 		switch (frameGen->activeFrameGenType) {
 			case FrameGeneration::FrameGenType::kDLSSG:
 				actualFrames = StreamlineFG::GetSingleton()->ConsumeFramesPresented();
@@ -313,15 +320,20 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		actualFrames = 1;
 	}
 	cs::env::AddDisplayedFrames(actualFrames);
+}
+
+void DX12SwapChain::DispatchFrameGeneration(bool a_useFrameGen, bool& a_isDLSSGFrame, bool& a_isXeSSFrame)
+{
+	auto frameGen = FrameGeneration::GetSingleton();
 
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
 		// Toggle DLSS-G only on state changes, matching XeSS.
 		static bool dlssgWasEnabled = false;
-		if (useFrameGenerationThisFrame != dlssgWasEnabled) {
-			dlssg->SetEnabled(useFrameGenerationThisFrame);
-			dlssgWasEnabled = useFrameGenerationThisFrame;
+		if (a_useFrameGen != dlssgWasEnabled) {
+			dlssg->SetEnabled(a_useFrameGen);
+			dlssgWasEnabled = a_useFrameGen;
 		}
 
 		// NVIDIA order: token -> sleep -> sim markers -> constants/tags -> render markers -> present markers.
@@ -370,38 +382,33 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 			screenSize, jitter,
 			cameraNear, cameraFar, camera);
 
-		isDLSSGFrame = true;
+		a_isDLSSGFrame = true;
 	} else if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (xess->initialized) {
 			// Toggle XeSS-FG only on state changes.
 			static bool xessFGWasEnabled = false;
-			if (useFrameGenerationThisFrame != xessFGWasEnabled) {
-				xess->SetEnabled(useFrameGenerationThisFrame ? 1 : 0);
-				xessFGWasEnabled = useFrameGenerationThisFrame;
+			if (a_useFrameGen != xessFGWasEnabled) {
+				xess->SetEnabled(a_useFrameGen ? 1 : 0);
+				xessFGWasEnabled = a_useFrameGen;
 			}
 
 			xess->BeginFrame(xessFrameId);
 			xess->SetMarker(XELL_SIMULATION_END, xessFrameId);
 
-			isXeSSFrame = true;
+			a_isXeSSFrame = true;
 			xessFrameId++;
 		}
 	} else {
-		FidelityFX::GetSingleton()->Present(useFrameGenerationThisFrame);
+		FidelityFX::GetSingleton()->Present(a_useFrameGen);
 	}
+}
 
-	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
-
-	// Bracket GPU submission with render markers.
-	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
-	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_START, xessFrameId - 1);
-
-	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
-	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
-
+void DX12SwapChain::TagXeSSResourcesIfNeeded(bool a_useFrameGen, bool a_isXeSSFrame)
+{
 	// XeSS-FG tags resources after the main list, using the other command-list slot before Present.
-	if (isXeSSFrame && useFrameGenerationThisFrame) {
+	if (a_isXeSSFrame && a_useFrameGen) {
+		auto frameGen = FrameGeneration::GetSingleton();
 		auto xess = XeSSFG::GetSingleton();
 		int tagListIdx = (frameIndex + 1) % 2;
 
@@ -453,9 +460,31 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 		ID3D12CommandList* tagCmdLists[] = { commandLists[tagListIdx].get() };
 		commandQueue->ExecuteCommandLists(1, tagCmdLists);
 	}
+}
+
+HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
+{
+	PrepareAndCopyBackbuffer();
+	bool useFrameGenerationThisFrame = ShouldUseFrameGeneration();
+	PublishFrameStatistics(useFrameGenerationThisFrame);
+	bool isDLSSGFrame = false, isXeSSFrame = false;
+	DispatchFrameGeneration(useFrameGenerationThisFrame, isDLSSGFrame, isXeSSFrame);
+
+	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
+
+	// Bracket GPU submission with render markers.
+	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
+	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_START, xessFrameId - 1);
+
+	ID3D12CommandList* commandListsToExecute[] = { commandLists[frameIndex].get() };
+	commandQueue->ExecuteCommandLists(1, commandListsToExecute);
+
+	TagXeSSResourcesIfNeeded(useFrameGenerationThisFrame, isXeSSFrame);
 
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitEnd);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_END, xessFrameId - 1);
+
+	auto frameGen = FrameGeneration::GetSingleton();
 
 	if (!frameGen->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;

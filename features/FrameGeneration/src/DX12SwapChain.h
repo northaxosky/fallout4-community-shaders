@@ -10,6 +10,7 @@
 #include <d3d12.h>
 
 #include <atomic>
+#include <cstdint>
 
 #include "Buffer.h"
 
@@ -154,6 +155,15 @@ public:
 	HRESULT GetBuffer(REFIID riid, void** ppSurface);
 	HRESULT Present(UINT SyncInterval, UINT Flags);
 	HRESULT GetDevice(_In_ REFIID riid, _COM_Outptr_ void** ppDevice);
+
+private:
+	void PrepareAndCopyBackbuffer();
+	bool ShouldUseFrameGeneration();
+	void PublishFrameStatistics(bool a_useFrameGen);
+	void DispatchFrameGeneration(bool a_useFrameGen, bool& a_isDLSSGFrame, bool& a_isXeSSFrame);
+	void TagXeSSResourcesIfNeeded(bool a_useFrameGen, bool a_isXeSSFrame);
+
+	uint32_t xessFrameId = 0;
 };
 
 }
