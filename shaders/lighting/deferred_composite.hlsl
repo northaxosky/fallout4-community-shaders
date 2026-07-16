@@ -455,12 +455,12 @@ PS_OUTPUT main(PS_INPUT input)
 // lines ~405 and ~417-419). The `<=` fix in commit `e1e6e72` resolved the
 // original semantic miss (corpus `ge l(0.010000)` at i=3 maps to depth
 // `<= 0.01`; the pre-fix reconstruction used `<`). The repo now ships a
-// sequence-aligned corpus diff (`scripts/shader_corpus_diff.py`) that
+// sequence-aligned corpus diff (`scripts/shaders/shader_corpus_diff.py`) that
 // supersedes that by-index tool; wire composite in by adding its
 // corpus_sha1 (blob 3539) to the manifest to re-verify.
 // Local sha-stability baseline:
-//   `scripts/verify-shader-roundtrip.ps1` locks the fxc output SHA1 for
-//   this file in `scripts/shader-roundtrip-baselines.json`. After any
+//   `scripts/shaders/verify-shader-roundtrip.ps1` locks the fxc output SHA1 for
+//   this file in `scripts/shaders/shader-roundtrip-baselines.json`. After any
 //   intentional edit, re-baseline with
 //   `verify-shader-roundtrip.ps1 -UpdateBaselines`.
 // What is faithfully reconstructed:
