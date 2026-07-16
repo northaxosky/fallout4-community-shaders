@@ -29,6 +29,10 @@ namespace cs::features::catalog::hooks
 			if (RecordingSuppressed())
 				return;
 
+			// Skip invalid creation attempts D3D would reject; avoids hashing null/empty bytecode.
+			if (!bytecode || len == 0)
+				return;
+
 			CatalogEntry e{};
 			e.stage = stage;
 			e.bytecode_size = len;
