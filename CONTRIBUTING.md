@@ -23,8 +23,7 @@ Set `FXC_PATH` to use a compiler outside the default Windows SDK location.
 
 Optional tooling:
 
-- Git Bash, `curl`, `unzip`, and `sha256sum` or `shasum` for runtime SDK staging
-- Python 3 with NumPy for `scripts/generate-reactor-lut.py`
+- Windows PowerShell 5.1 or PowerShell 7 (`pwsh`), plus `curl` (bundled with Windows 10 1803+), for runtime SDK staging (`scripts/fetch-sdks.ps1`)
 - The shared devkit workbench for deploy, launch, and log-tail workflows
 
 ## Clone
@@ -94,35 +93,43 @@ re-baselining it. Update other baselines only for deliberate shader changes.
 The source submodules provide headers and link libraries. A complete mod installation
 also needs proprietary runtime DLLs, which are not build outputs:
 
-```bash
-./scripts/fetch-sdks.sh
+```powershell
+pwsh scripts\fetch-sdks.ps1
 ```
 
-Run the script from Git Bash. It verifies and caches the NVIDIA Streamline and AMD
-FidelityFX archives, then stages NVIDIA, AMD, and Intel runtime DLLs under
-`package\F4SE\Plugins\`. Pass `--force` to refresh files already present.
+Run it with PowerShell 7 (`pwsh`) or Windows PowerShell 5.1
+(`powershell.exe -File scripts\fetch-sdks.ps1`). It verifies and caches the NVIDIA
+Streamline and AMD FidelityFX archives, then stages NVIDIA, AMD, and Intel runtime DLLs
+under `package\F4SE\Plugins\`. Pass `-Force` to refresh files already present.
 
 ## Install or deploy
 
-The repository does not have a CMake install target or package-generation target.
-For a manual source installation, copy the built DLL and every required asset into a
-mod root using [scripts/mod-manifest.toml](scripts/mod-manifest.toml) as the canonical
-source-to-`Data` mapping.
+The repository does not have a CMake install target or package-generation target. For
+a manual source installation, mirror `package\F4SE\Plugins\` into the mod's
+`Data\F4SE\Plugins\`, then add the build output and the two shader trees that live
+outside `package\`:
 
-The optional shared devkit automates this workflow. Place it at `..\devkit\` or set
-`DEVKIT_DIR`. A first deployment should include configuration, shaders, presets, LUTs,
-and runtime SDK files:
+- `build\Release\FO4CommunityShaders.dll` (and `.pdb`) -> `Data\F4SE\Plugins\`
+- `features\Imagespace\Shaders\*.hlsl*` -> `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`
+- `shaders\` (recursive) -> `Data\F4SE\Plugins\FO4CommunityShaders\Shaders\`
 
-```bash
-./scripts/deploy.sh -IncludeConfig
+The shared devkit's `community-shaders.psd1` `Deploy` block encodes this same mapping
+for automated deployment.
+
+The optional shared devkit automates this workflow. Place it at `..\devkit\` (or set
+`DEVKIT_DIR`) and drive it with PowerShell. A first deployment should include
+configuration, shaders, presets, LUTs, and runtime SDK files:
+
+```powershell
+pwsh ..\devkit\devkit.ps1 deploy -Project community-shaders -IncludeConfig
 ```
 
 Common iterative workflows:
 
-```bash
-./scripts/deploy.sh
-./scripts/deploy.sh deploy
-./scripts/test.sh
+```powershell
+pwsh ..\devkit\devkit.ps1 cycle  -Project community-shaders                # build + deploy
+pwsh ..\devkit\devkit.ps1 deploy -Project community-shaders                # deploy only
+pwsh ..\devkit\devkit.ps1 cycle  -Project community-shaders -Launch -Tail  # build, deploy, launch, tail
 ```
 
 The last command builds, deploys, launches Fallout 4 through MO2/F4SE, and tails the

@@ -86,9 +86,9 @@ technique attribution before they can receive a pass-like verdict. VLS remains
 
 For a one-off manual test (without the smoke harness):
 
-1. `./scripts/deploy.sh build`
+1. `pwsh ../devkit/devkit.ps1 cycle -Project community-shaders`
 2. Edit the deployed `Data\F4SE\Plugins\FO4CommunityShaders\ShaderReplacement.toml` (NOT the `package/` seed): set `enabled = true` under `[settings]` and the per-shader flag (e.g. `replace_deferred_composite = true`) to `true`.
-3. Boot via `./scripts/test.sh` or MO2 directly.
+3. Boot via `pwsh ../devkit/devkit.ps1 cycle -Project community-shaders -Launch -Tail` or MO2 directly.
 4. Confirm log line `Replaced PS sha=... -> <name>` in `My Games\Fallout4\F4SE\FO4CommunityShaders.log` on first match.
 
 ## Status
