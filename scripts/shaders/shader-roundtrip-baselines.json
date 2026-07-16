@@ -37,7 +37,10 @@
       "name": "deferred_prepass",
       "src": "shaders/lighting/deferred_prepass.hlsl",
       "defines": [],
-      "sha1": "15EAEAD567E78EA0469180BC44A0646154375E65"
+      "sha1": "15EAEAD567E78EA0469180BC44A0646154375E65",
+      "corpus_sha1": "c493970c042ccd90363c57596ff53f6fdd22ce5f",
+      "corpus_blob_index": 2650,
+      "_note": "Rare case where the runtime PS bytecode is byte-identical to the .fxp blob, so corpus-diff validates the actual executing shader. This is a decode-contract REFERENCE (SSGI/SSS read its G-buffer output); not replaced."
     },
     {
       "name": "vls_slice_scatter",
