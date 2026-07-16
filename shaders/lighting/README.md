@@ -3,7 +3,7 @@
 Reconstructed HLSL reference for FO4's deferred lighting pipeline.
 
 This directory is a **reference**, not a runtime asset. Files here are
-human-readable reconstructions of Bethesda's precompiled `.fxp` shaders
+readable reconstructions of Bethesda's precompiled `.fxp` shaders
 intended to inform feature implementations elsewhere in the repo.
 
 ## Status
@@ -125,8 +125,10 @@ The reconstruction pipeline is:
      blob.
    * For each target asm, identify CB layout, texture slots, and BRDF
      shape. Use `// TODO: identify` rather than guessing.
-   * Cross-check by recompiling the reconstruction with `fxc.exe` /
-     `dxc.exe` and diffing the resulting DXBC against the original ASM.
+   * Cross-check by recompiling the reconstruction and diffing its ASM
+     against the original. `scripts/fetch-shader-corpus.ps1` extracts the
+     corpus blobs from the local game install and `scripts/shader_corpus_diff.py`
+     reports the drop-in contract match plus the instruction-stream delta.
 
 Any HLSL committed here is expected to either (a) round-trip to ASM
 that closely matches the original bytecode, or (b) be marked WIP with
@@ -152,5 +154,5 @@ work.
 ## License
 
 These files are derivative reverse-engineering of Bethesda's compiled
-shader binaries. They are licensed under this repo's terms (`COPYING`
+shader binaries. They are licensed under this repo's terms (`LICENSE`
 and `EXCEPTIONS.md`); see each file's header for attribution.

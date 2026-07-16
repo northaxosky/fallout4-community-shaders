@@ -9,8 +9,8 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..11]: not read directly by this PS. Per runtime evidence
-    // (cb12-runtime-evidence.json, captured FO4_frame5407.rdc):
+    // [0..11]: not read directly by this PS. Per runtime capture
+    // (FO4_frame5407.rdc):
     //   [0..2]  ViewRotation rows (orthonormal 3x3, world -> view)
     //   [3]     ViewMatrix_row3 (homogeneous identity (0,0,0,1))
     //   [4..7]  Projection rows (focal_x=1.19, focal_y=2.12, near=15);
@@ -87,8 +87,8 @@ cbuffer PerCall_CB0 : register(b0)
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
-    //      eid 45345 CB2 slot): .xy = RcpFrameDim (1/3840, 1/2160 in the
+    // [0]: per runtime capture (eid 45345 CB2 slot): .xy = RcpFrameDim
+    //      (1/3840, 1/2160 in the
     //      captured frame), .zw = FrameDim (3840, 2160). Same shape
     //      across composite, sun-light, VLS slice - shared screen-size
     //      conventions for the per-call CB.

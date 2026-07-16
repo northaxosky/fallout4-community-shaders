@@ -132,10 +132,6 @@
     }
   ],
   "schema_version": 1,
-  "source_documents": {
-    "manual_overrides": "knowledge/cross-runtime/render-subsystem-manual-overrides.json",
-    "renderer_subsystem_export": "exports/cs-render-subsystem-ids.json"
-  },
   "summary": {
     "confirmed": 3,
     "missing": 0,

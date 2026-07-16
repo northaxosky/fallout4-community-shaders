@@ -64,8 +64,8 @@ cbuffer PerFrame_CB12 : register(b12)
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
-    //      eid 44513 CB2 slot): .xy = RcpFrameDim (1/3840, 1/2160 in
+    // [0]: per runtime capture (eid 44513 CB2 slot): .xy = RcpFrameDim
+    //      (1/3840, 1/2160 in
     //      captured frame), .zw appear as denormal noise here (CB2 is
     //      patched per-call; sun-light reads only .xy of [0]).
     //      Shared screen-size convention with composite + ambient/IBL + VLS.
@@ -128,7 +128,7 @@ cbuffer PerCall_CB2 : register(b2)
 
 // Resource bindings.
 // Slot indices match the corpus blob 3295 declarations exactly.
-// Semantic names from Fallout4RE exports/cs-bsdflight-setup-decoder.json @ 43502f2.
+// Semantic names cross-read from the BSDFLight setup in the sibling fallout4-re workspace.
 
 // t0: RT26 kTAAAccumulation, used by BSDFLight as albedo/base color.
 //     Sampled at insn 27. .xyz = color, .w = some scalar (used at insn
@@ -190,9 +190,9 @@ static const float2 SUN_SHADOW_POISSON[32] =
     float2(0.164464, 0.787591), float2(0.003845, 0.938841),
     float2(0.522752, 0.146275), float2(0.987518, 0.938994),
     float2(0.770104, 0.315531), float2(0.044832, 0.268838),
-    // ... 967 more entries in the original ICB; see
-    // Scratch/shaders-extracted/ShadersFX/index/Shaders011/asm/Shaders011.3295.50e2618e8d1a.dxbc.asm
-    // lines 22-1020. TODO: inline the rest for byte-equivalent
+    // ... 967 more entries in the original ICB (corpus blob 3295);
+    // recover the full table with scripts/fetch-shader-corpus.ps1 then
+    // fxc /dumpbin. TODO: inline the rest for byte-equivalent
     // round-trip; not blocking since the loop only consumes 16.
 };
 
@@ -533,10 +533,6 @@ PS_OUTPUT main(PS_INPUT input)
 // LIGHT_TYPE_POINT branch (the unshadowed point-light path).
 // Canonical mapping:
 //   * Runtime sha1:  3f1f708c0175... (eid 46771 in FO4_frame9483.rdc)
-//   * Source asm:    runtime/bsdf-light-unshadowed/asm/
-//                    eid-46771.3f1f708c0175.0000.3f1f708c0175.dxbc.asm
-//   * Source dxbc:   runtime/bsdf-light-unshadowed/
-//                    eid-46771.3f1f708c0175.dxbc (6380 bytes)
 //   * Shape:         ps_5_0, 204 instructions, 5 samples, 5 SRVs
 //                    (t0/t1/t2/t3/t7 texture2d), 5 default samplers
 //                    (s0/s1/s2/s3/s7 - NO comparison sampler), 2 CBs

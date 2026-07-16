@@ -10,8 +10,8 @@
 
 cbuffer PerCall_CB0 : register(b0)
 {
-    // [0]: per runtime evidence (cb12-runtime-evidence.json sibling at
-    //      eid 45401 CB0 slot): .xy = RcpFrameDim (1/3840, 1/2160 in
+    // [0]: per runtime capture (eid 45401 CB0 slot): .xy = RcpFrameDim
+    //      (1/3840, 1/2160 in
     //      captured frame), .zw appear as (1, 1) here. The VLS slice
     //      PS reads .xy for screen-UV scale and .zw for view-space UV
     //      remap (the .zw=(1,1) here suggests an alternate per-call

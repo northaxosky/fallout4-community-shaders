@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // Shared per-frame contracts for FO4 deferred-lighting reconstructions.
 // CB12 macro preserves fxc RDEF reflection by keeping the historical cb12_pad_0_19[20] shape.
-// Evidence: `.agents/cb-schema-audit-findings.md` has the per-slot consistency table.
 
 #ifndef DEFERRED_CONTRACTS_HLSLI_INCLUDED
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED

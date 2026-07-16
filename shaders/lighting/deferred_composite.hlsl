@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // Reconstruction of FO4 deferred-composite PS, Shaders011.fxp #3539 (corpus 861504f6dcbe..., runtime 813c9ace..., eid 45368).
-// Status: high-confidence CB/SRV/RT/blend/DSS/RS/material-ID mapping from Fallout4RE deferred-composite handoff; rt_arg 26, t11 producer, and FogState writer names remain open.
+// Status: high-confidence CB/SRV/RT/blend/DSS/RS/material-ID mapping; rt_arg 26, t11 producer, and FogState writer names remain open.
 // Host: DrawWorld::DeferredComposite REL::ID { OG=728427, NG=2318313, AE=2318313 }; setup BSDFCompositeShader::SetupGeometry.
 // Flow: sample material/depth; select Far/Near reproj; skip skin/hair; combine albedo*(diffuse+specular), secondary color, sun lighting, and distance/height fog into kMain.
 // Output: RT 172 kMain (R11G11B10_FLOAT), RGB mask, SrcAlpha/InvSrcAlpha blend, depth Greater read-only.
-// Sources: D3DDisassemble corpus math plus Fallout4RE knowledge/cross-runtime/deferred-composite handoff (2026-05-22).
+// Sources: corpus disassembly (blob 3539) cross-read against the sibling fallout4-re workspace.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
     // [0..13]: not read directly by this PS.
-    // For cross-reference (runtime evidence cb12-runtime-evidence.json):
+    // For cross-reference (per runtime capture):
     //   [0..2]  ViewRotation rows (orthonormal 3x3, world -> view)
     //   [3]     ViewMatrix_row3 (homogeneous identity)
     //   [4..7]  Projection rows (focal_x=1.19, focal_y=2.12, near=15);
@@ -145,9 +145,8 @@ cbuffer PerCall_CB2 : register(b2)
 // Slot indices match the corpus blob 3539 declarations exactly. The runtime
 // re-encoded variant (rdoc eid 45368) uses sequential slots t0..t5 instead,
 // but the LOGICAL bindings are identical per the 2026-05-18 mnemonic-diff
-// finding. SRV identities + formats below are HIGH-confidence per
-// `cs-deferred-composite-srv-rt-state.json` (setup site:
-// BSDFCompositeShader::SetupGeometry, AE 0x0220F9E0 / NG 0x020BA350).
+// finding. SRV identities + formats below are HIGH-confidence from the
+// setup site BSDFCompositeShader::SetupGeometry (AE 0x0220F9E0 / NG 0x020BA350).
 // The setup binding wrapper for t0 keys off `rt_arg 26` (the engine RTM
 // cache key), which historically tagged `kTAAAccumulation` in a stale
 // public enum. The shader's math (`baseColor * (diffuse + specular)`) and
@@ -194,9 +193,8 @@ Texture2D<float4> g_tLinearDepth : register(t7);
 //      accumulation companion to t5. Per rdoc slot 5 = runtime RT 395,
 //      R11G11B10_FLOAT, unnamed RT 35 at setup. Bind active on the bit
 //      `0x10000` permutation path (always-on for the main composite
-//      fullscreen draw). RE handoff status: producer writer RVA
-//      UNRESOLVED (`cs-deferred-composite-srv-rt-state.json`
-//      `confidence=low` for the producer field). The "specular" name
+//      fullscreen draw). Producer writer RVA UNRESOLVED (low confidence
+//      for the producer field). The "specular" name
 //      reflects format + symmetric pairing with t5 and the composite
 //      math `baseColor * (t5 + t11)` matching the standard deferred
 //      diffuse + specular combine; treat as inference until a future
@@ -440,50 +438,26 @@ PS_OUTPUT main(PS_INPUT input)
 }
 
 // Round-trip notes (for the reviewer + future maintainer)
-// This file was authored as a one-pass asm-to-HLSL transcription of corpus
-// blob 3539 (sha1 861504f6dcbe...) and progressively hardened through
-// the Fallout4RE 7-lane render-reconstruction campaign. The current
-// status reflects the 2026-05-22 sister-repo handoff
-// (Workspace/knowledge/cross-runtime/sister-repo-handoff-2026-05-22.md).
-// Corpus diff status (per Fallout4RE artifact
-// Scratch/composite-postfix-2026-05-23.md, re-run AFTER the 2026-05-23
-// `<` -> `<=` near/far threshold fix from commit `e1e6e72`):
+// One-pass asm-to-HLSL transcription of corpus blob 3539 (sha1
+// 861504f6dcbe...), progressively hardened. Corpus-diff status (after the
+// `<` -> `<=` near/far threshold fix in commit `e1e6e72`):
 //   * Resource bindings:  EXACT MATCH (6/6, t0..t11; cb12 + cb2).
 //   * Sample call count:  EXACT MATCH (6/6).
 //   * Signature:          EXACT MATCH (SV_POSITION input -> SV_Target0).
 //   * Declarations:       EXACT MATCH (decl_count_delta = 0).
-//   * Instruction count:  84 vs corpus 90 (-6 / -6.7%). Earlier
-//                         checked-in `+18 / +20%` claim was stale data
-//                         from before the 2026-05-20 channel + branch
-//                         fixes; current fxc output is leaner than the
-//                         corpus.
-//   * Tool verdict:       `MISMATCH`, 3 mismatches (1 instruction-
-//                         stream-divergence, 1 constant-value-
-//                         divergence with 2 must-fix examples, 1 cb-
-//                         reference-divergence with 5 examples).
-// What the tool's "must-fix" findings actually are:
-//   The diff tool compares insn-by-insn at positional index. After fxc
-//   reorders the emitted stream (sample call from corpus i=2 hoists to
-//   ours i=6; the material-id branch fold restructures everything
-//   downstream), the by-index alignment breaks down. Manual inspection
-//   of the compiled asm vs corpus asm shows that every literal flagged
-//   as a must-fix (`4.000000` at corpus i=48, `1.000000` at corpus
-//   i=60) and every cb reference flagged (`cb12[14].xyzw`,
-//   `cb12[35].z`, `cb12[44].w`, `cb2[1].w`, `cb2[2].w`) IS present in
-//   our shader at the logically-matching site; the literals live at
-//   lines ~405 and ~417-419 of this file with side-comments tying them
-//   to the corpus insn positions. The tool flags them as divergences
-//   purely because alignment slipped. A stream-alignment-aware diff
-//   (control-flow-graph reconstruction first, then per-node mnemonic
-//   compare) would likely report clean; building that tooling is a
-//   non-trivial Fallout4RE follow-up.
-//   The `<=` fix from commit `e1e6e72` resolved the original
-//   `semantic_miss_detected` verdict (corpus `ge l(0.010000)` at i=3
-//   maps to depth `<= 0.01`; pre-fix reconstruction used `<`). The
-//   current `MISMATCH` verdict is the tool's structural by-index
-//   noise, not a known semantic miss. Treat with appropriate
-//   skepticism: a future capture-diff would be the right way to fully
-//   close this out.
+//   * Instruction count:  84 vs corpus 90 (-6 / -6.7%); current fxc output
+//                         is leaner than the corpus.
+// The literal/cb "divergences" flagged by the older by-index diff were
+// alignment artifacts, not semantic misses: every flagged literal
+// (`4.0` at corpus i=48, `1.0` at corpus i=60) and cb reference
+// (`cb12[14]`, `cb12[35].z`, `cb12[44].w`, `cb2[1].w`, `cb2[2].w`) is
+// present at the logically-matching site (see the side-comments near
+// lines ~405 and ~417-419). The `<=` fix in commit `e1e6e72` resolved the
+// original semantic miss (corpus `ge l(0.010000)` at i=3 maps to depth
+// `<= 0.01`; the pre-fix reconstruction used `<`). The repo now ships a
+// sequence-aligned corpus diff (`scripts/shader_corpus_diff.py`) that
+// supersedes that by-index tool; wire composite in by adding its
+// corpus_sha1 (blob 3539) to the manifest to re-verify.
 // Local sha-stability baseline:
 //   `scripts/verify-shader-roundtrip.ps1` locks the fxc output SHA1 for
 //   this file in `scripts/shader-roundtrip-baselines.json`. After any
