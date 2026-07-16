@@ -37,10 +37,10 @@
       "name": "deferred_prepass",
       "src": "shaders/lighting/deferred_prepass.hlsl",
       "defines": [],
-      "sha1": "15EAEAD567E78EA0469180BC44A0646154375E65",
+      "sha1": "32E13D8C612FC6E04BA8A5A7E981735BCF38546C",
       "corpus_sha1": "c493970c042ccd90363c57596ff53f6fdd22ce5f",
       "corpus_blob_index": 2650,
-      "_note": "Rare case where the runtime PS bytecode is byte-identical to the .fxp blob, so corpus-diff validates the actual executing shader. This is a decode-contract REFERENCE (SSGI/SSS read its G-buffer output); not replaced."
+      "_note": "Decode-contract REFERENCE (SSGI/SSS read its G-buffer output); not replaced. The game runtime PS bytecode is byte-identical to the .fxp blob. Re-baselined: the tangent-normal read was corrected from t1.zw to t1.xy -- the corpus sample 't1.zwxy -> r1.zw' followed by 'mad r2.xy, r1.zwzz' reads texture channels t1.x/t1.y (the .zw was a destination-register-vs-source-channel misread). shader_exec_diff.py (shaped inputs, full branch coverage): PASS, 0 divergent, max abs 0.0 -- exact behavioral match with the corpus."
     },
     {
       "name": "vls_slice_scatter",

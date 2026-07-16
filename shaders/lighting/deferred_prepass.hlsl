@@ -82,8 +82,9 @@ cbuffer PerCall_CB2 : register(b2)
 //     packed as (v4.w, v5.w).
 Texture2D<float4> g_tAlbedo   : register(t0);
 
-// t1: tangent-space normal map. Sampled at insn 11; .zw channels hold
-//     the encoded tangent-space xy.
+// t1: tangent-space normal map. Sampled at insn 11; .xy channels hold
+//     the encoded tangent-space xy (corpus sample t1.zwxy -> r1.zw packs
+//     t1.x/t1.y into r1.z/r1.w, so the decoded source channels are .xy).
 Texture2D<float4> g_tNormalMap : register(t1);
 
 // t2: material data texture. Sampled at insn 12; .xy channels hold
@@ -137,12 +138,12 @@ PS_OUTPUT main(PS_INPUT input)
     // Insns 8-10: normalize the interpolated world-space normal (v3).
     float3 nGeom = normalize(input.normal);
 
-    // Insns 11-12: sample normal-map (.zw) and material (.xy).
+    // Insns 11-12: sample normal-map (.xy) and material (.xy).
     float4 normalMapSample = g_tNormalMap.Sample(g_sNormalMap, uv);
     float4 materialSample  = g_tMaterial.Sample(g_sMaterial, uv);
 
     // Insns 13-18: decode tangent-space normal from 2-channel encoding.
-    float2 nts_xy = normalMapSample.zw * 2.0 - 1.0;
+    float2 nts_xy = normalMapSample.xy * 2.0 - 1.0;
     float  nts_xy_lenSq = saturate(dot(nts_xy, nts_xy));
     float  nts_z = sqrt(1.0 - nts_xy_lenSq);
     nts_z = (input.isFrontFace != 0) ? nts_z : -nts_z;
