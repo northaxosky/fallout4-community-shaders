@@ -1288,6 +1288,10 @@ void Upscaling::UpdateGameSettings()
 
 void Upscaling::UpdateUpscaling()
 {
+	// Reset per-frame mask validity at the earliest guaranteed frame point (runs before encode and Upscale).
+	// A backend submits masks only if this frame's encode later sets it true; no stale/wrong-res mask survives.
+	masksValidThisFrame = false;
+
 	static bool firstCall = true;
 	if (firstCall) {
 		L->info("UpdateUpscaling first call");
@@ -1551,7 +1555,6 @@ void Upscaling::EncodeUpscaleMasks()
 {
 	const bool opaqueReady = opaqueCapturedThisFrame;
 	opaqueCapturedThisFrame = false;
-	masksValidThisFrame = false;
 
 	if (upscaleMethod == UpscaleMethod::kDisabled)
 		return;
