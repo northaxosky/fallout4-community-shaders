@@ -146,7 +146,7 @@ configure_host_test(FeatureStateTests)
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
 
-set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/verify-shader-roundtrip.ps1")
+set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-shader-roundtrip.ps1")
 add_test(
 	NAME ShaderRoundtrip
 	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command

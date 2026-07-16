@@ -26,11 +26,11 @@
     Destination for extracted blobs. Default: <repo>\.shader-cache\corpus (gitignored).
 
 .PARAMETER Manifest
-    Shader manifest. Default: scripts\shader-roundtrip-baselines.json.
+    Shader manifest. Default: scripts\shaders\shader-roundtrip-baselines.json.
 
 .EXAMPLE
-    pwsh scripts/fetch-shader-corpus.ps1
-    pwsh scripts/fetch-shader-corpus.ps1 -GamePath "D:\SteamLibrary\steamapps\common\Fallout 4"
+    pwsh scripts/shaders/fetch-shader-corpus.ps1
+    pwsh scripts/shaders/fetch-shader-corpus.ps1 -GamePath "D:\SteamLibrary\steamapps\common\Fallout 4"
 #>
 
 [CmdletBinding()]
@@ -43,7 +43,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot  = Split-Path -Parent $scriptDir
+$repoRoot  = Split-Path -Parent (Split-Path -Parent $scriptDir)
 if (-not $OutDir)   { $OutDir   = Join-Path $repoRoot ".shader-cache\corpus" }
 if (-not $Manifest) { $Manifest = Join-Path $scriptDir "shader-roundtrip-baselines.json" }
 

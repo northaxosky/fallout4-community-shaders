@@ -126,8 +126,8 @@ The reconstruction pipeline is:
    * For each target asm, identify CB layout, texture slots, and BRDF
      shape. Use `// TODO: identify` rather than guessing.
    * Cross-check by recompiling the reconstruction and diffing its ASM
-     against the original. `scripts/fetch-shader-corpus.ps1` extracts the
-     corpus blobs from the local game install and `scripts/shader_corpus_diff.py`
+     against the original. `scripts/shaders/fetch-shader-corpus.ps1` extracts the
+     corpus blobs from the local game install and `scripts/shaders/shader_corpus_diff.py`
      reports the drop-in contract match plus the instruction-stream delta.
 
 Any HLSL committed here is expected to either (a) round-trip to ASM

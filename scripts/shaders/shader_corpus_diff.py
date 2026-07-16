@@ -38,8 +38,8 @@ import tempfile
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_MANIFEST = os.path.join(REPO_ROOT, "scripts", "shader-roundtrip-baselines.json")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+DEFAULT_MANIFEST = os.path.join(REPO_ROOT, "scripts", "shaders", "shader-roundtrip-baselines.json")
 DEFAULT_CORPUS_DIR = os.path.join(REPO_ROOT, ".shader-cache", "corpus")
 DEFAULT_FXC = r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe"
 
@@ -338,7 +338,7 @@ def main() -> int:
             blob = os.path.join(args.corpus_dir, f"{name}.dxbc")
             if not os.path.isfile(blob):
                 r.error = (f"corpus blob missing: {blob}\n"
-                           f"     run: pwsh scripts/fetch-shader-corpus.ps1")
+                           f"     run: pwsh scripts/shaders/fetch-shader-corpus.ps1")
                 print(f"  SKIP: {r.error}")
                 reports.append(r)
                 print()
@@ -387,7 +387,7 @@ def main() -> int:
     fails = [r for r in reports if r.error]
     contract_fails = [r for r in reports if not r.error and not r.contract_ok]
     if compared == 0:
-        print("Nothing compared (corpus missing). Run scripts/fetch-shader-corpus.ps1.")
+        print("Nothing compared (corpus missing). Run scripts/shaders/fetch-shader-corpus.ps1.")
         return 2
     if fails:
         print(f"ERROR: {len(fails)} shader(s) could not be compared.")

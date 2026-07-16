@@ -8,7 +8,7 @@
     Regression protection on the spec. For each tracked HLSL file in
     shaders/lighting/, compile with fxc /T ps_5_0 /O3 and compare the
     output dxbc sha1 against the stored baseline in
-    scripts/shader-roundtrip-baselines.json.
+    scripts/shaders/shader-roundtrip-baselines.json.
 
     This does NOT validate that the HLSL matches the original game corpus
     asm; the corpus-match tolerance is documented in
@@ -20,18 +20,18 @@
 
 .PARAMETER UpdateBaselines
     Re-capture the baselines after a deliberate refactor. Writes the
-    compiled sha1s back into scripts/shader-roundtrip-baselines.json.
+    compiled sha1s back into scripts/shaders/shader-roundtrip-baselines.json.
 
 .PARAMETER FxcPath
     Override the fxc.exe path. Default is the Windows 10 SDK
     10.0.26100.0 location.
 
 .EXAMPLE
-    .\scripts\verify-shader-roundtrip.ps1
+    .\scripts\shaders\verify-shader-roundtrip.ps1
     # Validate all tracked shaders against baselines. Exit 0 on PASS.
 
 .EXAMPLE
-    .\scripts\verify-shader-roundtrip.ps1 -UpdateBaselines
+    .\scripts\shaders\verify-shader-roundtrip.ps1 -UpdateBaselines
     # Re-capture baselines after an intentional refactor.
 
 .NOTES
@@ -48,7 +48,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot  = Split-Path -Parent $scriptDir
+$repoRoot  = Split-Path -Parent (Split-Path -Parent $scriptDir)
 $baselinePath = Join-Path $scriptDir "shader-roundtrip-baselines.json"
 
 if (-not (Test-Path $FxcPath)) {
@@ -143,7 +143,7 @@ foreach ($f in $fails) {
 }
 Write-Host ""
 Write-Host "If this drift is intentional (deliberate refactor), re-baseline with:"
-Write-Host "  .\scripts\verify-shader-roundtrip.ps1 -UpdateBaselines"
+Write-Host "  .\scripts\shaders\verify-shader-roundtrip.ps1 -UpdateBaselines"
 exit 1
 
 }
