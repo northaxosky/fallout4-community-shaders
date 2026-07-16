@@ -2,6 +2,10 @@
 
 #include "PCH.h"
 
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+
 #include "CatalogDB.h"
 #include "Log.h"
 #include "PixelShaderTracker.h"
@@ -28,16 +32,37 @@ namespace cs::features::catalog::subclass_hooks
 	{
 		std::atomic<std::uint64_t> g_setupCalls{ 0 };
 		std::atomic<std::uint64_t> g_mapAttributions{ 0 };
+		std::atomic<std::size_t> g_pixelShadersOffset{ 0xB0 };
+
+		using PixelShaderMap = RE::BSShaderTechniqueIDMap::MapType<RE::BSGraphics::PixelShader*>;
+
+		// A scatter table at a candidate offset looks valid if _capacity (+0x0C) is a non-zero power of two
+		// within a sane bound and the entries pointer (+0x28) is non-null. Guards a wrong per-runtime offset
+		// so a layout mismatch skips attribution instead of walking garbage and CTD-ing.
+		bool ScatterTableLooksValid(const void* a_map) noexcept
+		{
+			const auto base = reinterpret_cast<std::uintptr_t>(a_map);
+			const std::uint32_t capacity = *reinterpret_cast<const std::uint32_t*>(base + 0x0C);
+			const void* const entries = *reinterpret_cast<const void* const*>(base + 0x28);
+			if (capacity == 0 || (capacity & (capacity - 1)) != 0 || capacity > (1u << 22))
+				return false;
+			return entries != nullptr;
+		}
 
 		void AttributePixelShaderFromMap(RE::BSShader* self, const char* subclassName, std::uint32_t techniqueBits)
 		{
 			if (!self || !subclassName)
 				return;
 
+			auto* map = reinterpret_cast<PixelShaderMap*>(
+				reinterpret_cast<std::byte*>(self) + g_pixelShadersOffset.load(std::memory_order_acquire));
+			if (!ScatterTableLooksValid(map))  // wrong runtime offset -> skip, never CTD
+				return;
+
 			RE::BSGraphics::PixelShader probe{};
 			probe.id = techniqueBits;
-			const auto it = self->pixelShaders.find(&probe);
-			if (it == self->pixelShaders.end() || !*it || !(*it)->shader)
+			const auto it = map->find(&probe);
+			if (it == map->end() || !*it || !(*it)->shader)
 				return;
 
 			Sha1Result sha{};
@@ -129,8 +154,9 @@ namespace cs::features::catalog::subclass_hooks
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 
-	void InstallAll()
+	void InstallAll(std::size_t a_pixelShadersOffset)
 	{
+		g_pixelShadersOffset.store(a_pixelShadersOffset, std::memory_order_release);
 		std::call_once(g_once, [] {
 			CS_CATALOG_HOOK_SUBCLASS(BSBloodSplatterShader);
 			CS_CATALOG_HOOK_SUBCLASS(BSDFCompositeShader);

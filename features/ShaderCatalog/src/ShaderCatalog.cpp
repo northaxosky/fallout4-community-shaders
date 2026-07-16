@@ -88,14 +88,21 @@ namespace cs::features
 			return std::string(buf);
 		}
 
-		// Subclass attribution patches BSShader vtable slots 0x0B/0x02 and reads pixelShaders at
-		// offset 0x0B0 - layout verified only for the 1.10.x line CommonLibF4 targets. On other
-		// builds (e.g. next-gen 1.11.x) those hit a mislaid slot/member and CTD on the first draw,
-		// so attribution is gated to known-good runtimes. The device swap broker is layout-independent.
+		// BSShader::pixelShaders member offset: 0xB0 on the 1.10.x line (CommonLibF4), 0x128 on next-gen
+		// 1.11.x (3 inserted CRITICAL_SECTIONs, +0x78; confirmed vs fallout4-re 1.11.221 PDB).
+		std::size_t PixelShadersOffset(const RuntimeVersion& v)
+		{
+			if (v.valid && v.major == 1 && v.minor == 11)
+				return 0x128;
+			return 0xB0;
+		}
+
 		bool RuntimeSupportsSubclassAttribution(const RuntimeVersion& v)
 		{
-			return v.valid && v.major == 1 && v.minor == 10 &&
-				(v.build == 163 || v.build == 980 || v.build == 984);
+			if (!v.valid || v.major != 1) return false;
+			if (v.minor == 10 && (v.build == 163 || v.build == 980 || v.build == 984)) return true;
+			if (v.minor == 11 && v.build == 221) return true;  // pixelShaders re-pointed to 0x128
+			return false;
 		}
 
 		std::string PluginVersionString()
@@ -282,11 +289,10 @@ namespace cs::features
 			return;
 		}
 
-		// Patch subclass reload/setup slots before D3D shader-creation hooks run, but only on
-		// runtimes whose BSShader layout is verified - otherwise the probe CTDs (next-gen 1.11.x).
-		// Skipping leaves the device swap broker + catalog fully functional, minus subclass names.
+		// Patch subclass reload/setup slots before D3D shader-creation hooks run.
+		// Skipping unverified runtimes leaves the catalog functional, minus subclass names.
 		if (_settings.subclassAttribution && RuntimeSupportsSubclassAttribution(rtVersion)) {
-			catalog::subclass_hooks::InstallAll();
+			catalog::subclass_hooks::InstallAll(PixelShadersOffset(rtVersion));
 		} else {
 			const char* why = !_settings.subclassAttribution
 				? "disabled by config"
@@ -331,7 +337,7 @@ namespace cs::features
 			if (_settings.subclassAttribution != prevAttr)
 				ImGui::OpenPopup("Restart required##ShaderCatalog");
 		}
-		ImGui::TextDisabled("Enriches PS rows with BSShader technique names. Auto-skipped on runtimes\nwith an unverified layout (e.g. next-gen 1.11.x); the swap broker is unaffected.");
+		ImGui::TextDisabled("Enriches PS rows with BSShader technique names. Auto-skipped on runtimes\nwith an unverified layout; the swap broker is unaffected.");
 
 		ImGui::Separator();
 		ImGui::TextUnformatted("Stats");
