@@ -1,2 +1,6 @@
 [feature]
 enabled = false
+
+[settings]
+# In-game overlay toggle chord (e.g. "F10", "Shift+F11", "Ctrl+F9"); "none" unbinds it.
+toggle_hotkey = "F10"

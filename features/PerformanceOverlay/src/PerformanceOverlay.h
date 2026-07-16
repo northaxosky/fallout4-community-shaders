@@ -1,9 +1,11 @@
 #pragma once
 
 #include "Feature.h"
+#include "Utils/Hotkey.h"
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 struct IDXGIAdapter3;
 
@@ -75,6 +77,9 @@ namespace cs::features
 
 			// Graph height at fontScale=1.0; scales with fontScale.
 			float  graphHeightPx  = 80.0f;
+
+			// In-game overlay toggle chord; parsed via cs::input::Hotkey. "none"/"" unbinds it.
+			std::string toggleHotkey = "F10";
 		};
 
 		Settings settings;
@@ -84,6 +89,8 @@ namespace cs::features
 
 		void SaveSettings();
 		void ApplyPreset(Preset preset);
+		void RefreshToggleHotkey();
+		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 		void TickFrame();
 		void RecomputeStats();
 		void EnsureRefreshHz();
@@ -118,5 +125,8 @@ namespace cs::features
 		IDXGIAdapter3* _adapter      = nullptr;
 		uint64_t _vramUsedBytes   = 0;
 		uint64_t _vramBudgetBytes = 0;
+
+		cs::input::Hotkey _toggleHotkey;
+		std::uint32_t     _toggleReleaseVk = 0;  // VK of a consumed toggle press whose key-up is still pending
 	};
 }

@@ -141,7 +141,13 @@ namespace cs::features
 					kMinMultiFrameCount,
 					kMaxMultiFrameCount,
 					a_candidate.multiFrameCount,
-					a_error);
+					a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "capture_hotkey", a_candidate.captureHotkey),
+					"capture_hotkey", "string", "string value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "multi_capture_hotkey", a_candidate.multiCaptureHotkey),
+					"multi_capture_hotkey", "string", "string value is out of range", a_error);
 		}
 	}
 
@@ -153,6 +159,7 @@ namespace cs::features
 		}
 
 		_settings = candidate;
+		RefreshHotkeys();
 		return true;
 	}
 
@@ -169,9 +176,10 @@ namespace cs::features
 
 	void RenderDoc::Load()
 	{
-		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={}",
+		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture={} multi_capture={}",
 			_settings.enabled, _settings.dllPath, _settings.captureFolder,
-			_settings.minFreeDiskGiB, _settings.multiFrameCount);
+			_settings.minFreeDiskGiB, _settings.multiFrameCount,
+			_captureHotkey.ToString(), _multiCaptureHotkey.ToString());
 
 		if (!_settings.enabled)
 			return;
@@ -208,6 +216,8 @@ namespace cs::features
 			settings.insert_or_assign("capture_folder", _settings.captureFolder);
 			settings.insert_or_assign("min_free_disk_gib", _settings.minFreeDiskGiB);
 			settings.insert_or_assign("multi_frame_count", static_cast<int64_t>(_settings.multiFrameCount));
+			settings.insert_or_assign("capture_hotkey", _settings.captureHotkey);
+			settings.insert_or_assign("multi_capture_hotkey", _settings.multiCaptureHotkey);
 
 			if (const auto parent = configPath.parent_path(); !parent.empty()) {
 				std::filesystem::create_directories(parent);
@@ -228,6 +238,24 @@ namespace cs::features
 		} catch (const std::filesystem::filesystem_error& e) {
 			L->error("Failed to prepare RenderDoc config path {}: {}", kConfigPath, e.what());
 		}
+	}
+
+	void RenderDoc::RefreshHotkeys()
+	{
+		bool ok = false;
+		_captureHotkey = cs::input::Hotkey::Parse(_settings.captureHotkey, &ok);
+		if (!ok)
+			L->warn("Invalid capture_hotkey '{}', single-frame capture hotkey disabled", _settings.captureHotkey);
+
+		ok = false;
+		_multiCaptureHotkey = cs::input::Hotkey::Parse(_settings.multiCaptureHotkey, &ok);
+		if (!ok)
+			L->warn("Invalid multi_capture_hotkey '{}', multi-frame capture hotkey disabled", _settings.multiCaptureHotkey);
+
+		if (_captureHotkey.IsBound() && _multiCaptureHotkey.IsBound()
+			&& _captureHotkey.ToString() == _multiCaptureHotkey.ToString())
+			L->warn("capture_hotkey and multi_capture_hotkey are both '{}'; multi-frame capture takes precedence",
+				_multiCaptureHotkey.ToString());
 	}
 
 	bool RenderDoc::TryLoadRuntime()
@@ -369,19 +397,35 @@ namespace cs::features
 
 	bool RenderDoc::HandleWndProc(HWND, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
 	{
-		if (a_msg != WM_KEYDOWN || a_wparam != VK_F11 || (HIWORD(a_lparam) & KF_REPEAT) != 0)
+		auto* self = GetSingleton();
+
+		// Consume the key-up paired with a capture we fired, BEFORE any gate, so a menu opening
+		// (or the feature being disabled) between down and up can't strand this state and later
+		// eat an unrelated key-up. SC_KEYMENU guard; uniform across chords.
+		if (self->_captureReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
+			&& a_wparam == self->_captureReleaseVk) {
+			self->_captureReleaseVk = 0;
+			return true;
+		}
+
+		if (!self->_settings.enabled)
+			return false;
+		// Menu open: let ImGui own the keyboard instead of firing captures.
+		if (cs::Menu::Get().IsOpen())
 			return false;
 
-		auto* renderDoc = GetSingleton();
-		if (!renderDoc->_settings.enabled)
-			return false;
-
-		if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
-			renderDoc->TriggerMultiFrameCapture();
-		else
-			renderDoc->TriggerCapture();
-
-		return true;
+		// Multi first so a shared chord resolves to multi-frame capture.
+		if (self->_multiCaptureHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
+			self->TriggerMultiFrameCapture();
+			self->_captureReleaseVk = self->_multiCaptureHotkey.vk;
+			return true;
+		}
+		if (self->_captureHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
+			self->TriggerCapture();
+			self->_captureReleaseVk = self->_captureHotkey.vk;
+			return true;
+		}
+		return false;
 	}
 
 	void RenderDoc::DrawSettings()
@@ -396,7 +440,8 @@ namespace cs::features
 		}
 
 		ImGui::TextDisabled("Restart after enabling. DLSS-G is blocked; disable all FrameGeneration for clean D3D11 captures.");
-		ImGui::TextDisabled("F11 captures one frame. Shift+F11 captures the configured multi-frame count.");
+		ImGui::TextDisabled("%s captures one frame. %s captures the configured multi-frame count.",
+			_captureHotkey.ToString().c_str(), _multiCaptureHotkey.ToString().c_str());
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
@@ -444,6 +489,7 @@ namespace cs::features
 	void RenderDoc::RestoreDefaultSettings()
 	{
 		_settings = Settings{};
+		RefreshHotkeys();
 		SaveSettings();
 		ApplyCapturePath();
 		L->info("Settings reset to defaults");

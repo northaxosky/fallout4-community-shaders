@@ -1006,13 +1006,6 @@ namespace cs
 		}
 		featureManager.FinishRuntimeCallbackPass();
 
-		// Shift+F11 toggles the always-on overlay when no feature consumes it.
-		if (a_msg == WM_KEYDOWN && a_wparam == VK_F11 && (HIWORD(a_lparam) & KF_REPEAT) == 0
-			&& (GetKeyState(VK_SHIFT) & 0x8000) != 0) {
-			m._overlayVisible = !m._overlayVisible;
-			return 0;
-		}
-
 		// Always feed input to ImGui so widgets respond when hovered/focused.
 		if (m._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);

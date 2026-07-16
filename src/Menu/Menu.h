@@ -28,6 +28,7 @@ namespace cs
 
 		bool IsOpen() const noexcept { return _open; }
 		bool IsOverlayVisible() const noexcept { return _overlayVisible; }
+		void ToggleOverlay() noexcept { _overlayVisible = !_overlayVisible; }
 		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
 		IDXGIAdapter3* GetDXGIAdapter3();
 

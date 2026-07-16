@@ -65,9 +65,12 @@ were already activated; they cannot activate Imagespace or another feature.
 | Key | Action |
 |---|---|
 | **End** | Open or close the settings menu |
-| **Shift+F11** | Toggle the Performance Overlay when it is enabled |
+| **F10** | Toggle the Performance Overlay when it is enabled |
 | **F11** | Capture one frame when RenderDoc is enabled |
-| **Shift+F11** | Capture multiple frames when RenderDoc is enabled; this takes priority over the overlay shortcut |
+| **Shift+F11** | Capture multiple frames when RenderDoc is enabled |
+
+Each feature hotkey is configurable in its TOML: `toggle_hotkey` for the overlay,
+`capture_hotkey` and `multi_capture_hotkey` for RenderDoc. Set a key to `"none"` to unbind it.
 
 Feature configuration files are stored directly under
 `Data\F4SE\Plugins\FO4CommunityShaders\`. Supporting assets such as Imagespace LUTs,

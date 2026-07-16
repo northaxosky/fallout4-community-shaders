@@ -144,7 +144,10 @@ namespace cs::features
 				&& ReadFloatSetting(*settingsTable, "fps_warn", 1.0f, 1000.0f, "value must be in range 1..1000", a_candidate.fpsWarn, a_error)
 				&& ReadFloatSetting(*settingsTable, "update_interval", 0.05f, 5.0f, "value must be in range 0.05..5", a_candidate.updateInterval, a_error)
 				&& ReadIntegerSetting(*settingsTable, "history_size", 30, a_historyCapacity, "value must be in range 30..600", a_candidate.historySize, a_error)
-				&& ReadFloatSetting(*settingsTable, "graph_height_px", 40.0f, 160.0f, "value must be in range 40..160", a_candidate.graphHeightPx, a_error);
+				&& ReadFloatSetting(*settingsTable, "graph_height_px", 40.0f, 160.0f, "value must be in range 40..160", a_candidate.graphHeightPx, a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(*settingsTable, "toggle_hotkey", a_candidate.toggleHotkey),
+					"toggle_hotkey", "string", "string value is out of range", a_error);
 		}
 	}
 
@@ -162,6 +165,7 @@ namespace cs::features
 		}
 
 		settings = candidate;
+		RefreshToggleHotkey();
 		return true;
 	}
 
@@ -182,8 +186,46 @@ namespace cs::features
 		QueryPerformanceFrequency(&freq);
 		_qpcFreq = static_cast<double>(freq.QuadPart);
 
-		L->info("Loaded: enabled={} preset={} corner={}",
-			settings.enabled, settings.preset, settings.corner);
+		cs::Menu::Get().RegisterWndProcCallback(*this, &PerformanceOverlay::HandleWndProc);
+
+		L->info("Loaded: enabled={} preset={} corner={} toggle_hotkey={}",
+			settings.enabled, settings.preset, settings.corner, _toggleHotkey.ToString());
+	}
+
+	void PerformanceOverlay::RefreshToggleHotkey()
+	{
+		bool ok = false;
+		_toggleHotkey = cs::input::Hotkey::Parse(settings.toggleHotkey, &ok);
+		if (!ok)
+			L->warn("Invalid toggle_hotkey '{}', overlay toggle disabled", settings.toggleHotkey);
+	}
+
+	bool PerformanceOverlay::HandleWndProc(HWND, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
+	{
+		auto* self = GetSingleton();
+
+		// Consume the key-up of a press we already consumed, BEFORE any gate: a menu opening
+		// between down and up must not strand this state (else a later unrelated up is eaten).
+		// F10's WM_SYSKEYUP must never reach DefWindowProc (avoids SC_KEYMENU beep).
+		if (self->_toggleReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
+			&& a_wparam == self->_toggleReleaseVk) {
+			self->_toggleReleaseVk = 0;
+			return true;
+		}
+
+		// Menu open: let ImGui own the keyboard so typing/navigation is not hijacked.
+		if (cs::Menu::Get().IsOpen())
+			return false;
+		// Nothing to toggle unless the overlay is actually eligible to draw (matches DrawOverlay).
+		if (!self->settings.enabled || self->settings.preset == static_cast<int>(Preset::Off))
+			return false;
+
+		if (self->_toggleHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
+			cs::Menu::Get().ToggleOverlay();
+			self->_toggleReleaseVk = self->_toggleHotkey.vk;
+			return true;
+		}
+		return false;
 	}
 
 	void PerformanceOverlay::SaveSettings()
@@ -225,6 +267,7 @@ namespace cs::features
 			settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
 			settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
 			settingsTable.insert_or_assign("graph_height_px", static_cast<double>(settings.graphHeightPx));
+			settingsTable.insert_or_assign("toggle_hotkey", settings.toggleHotkey);
 
 			const std::filesystem::path configPath(kConfigPath);
 			if (const auto parent = configPath.parent_path(); !parent.empty())
@@ -625,13 +668,14 @@ namespace cs::features
 	void PerformanceOverlay::RestoreDefaultSettings()
 	{
 		settings = Settings{};
+		RefreshToggleHotkey();
 		SaveSettings();
 		cs::Menu::ShowToast("Performance Overlay reset to defaults", 2.5);
 	}
 
 	void PerformanceOverlay::DrawSettings()
 	{
-		ImGui::TextDisabled("Shift+F11 toggles the overlay in-game.");
+		ImGui::TextDisabled("%s toggles the overlay in-game.", _toggleHotkey.ToString().c_str());
 
 		if (ImGui::Checkbox("Enabled", &settings.enabled))
 			SaveSettings();

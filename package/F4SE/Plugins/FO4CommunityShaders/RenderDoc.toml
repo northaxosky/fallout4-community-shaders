@@ -1,2 +1,8 @@
 [feature]
 enabled = false
+
+[settings]
+# Single-frame capture chord; "none" unbinds it.
+capture_hotkey = "F11"
+# Multi-frame capture chord; takes precedence if identical to capture_hotkey.
+multi_capture_hotkey = "Shift+F11"
