@@ -62,8 +62,13 @@ if (-not (Test-Path $baselinePath)) {
 }
 
 $config = Get-Content $baselinePath -Raw | ConvertFrom-Json
-$tmp = Join-Path $repoRoot ".tmp-roundtrip"
+$tmp = Join-Path $repoRoot ".shader-cache\roundtrip"
+if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+
+# Wrap the body so the scratch dir is removed on every exit path; a `finally`
+# still runs when the script terminates via `exit`.
+try {
 
 $results = @()
 foreach ($shader in $config.shaders) {
@@ -140,3 +145,8 @@ Write-Host ""
 Write-Host "If this drift is intentional (deliberate refactor), re-baseline with:"
 Write-Host "  .\scripts\verify-shader-roundtrip.ps1 -UpdateBaselines"
 exit 1
+
+}
+finally {
+    if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue }
+}

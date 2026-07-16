@@ -7,13 +7,13 @@
 .DESCRIPTION
     shader_corpus_diff.py compares our reconstructed HLSL against the real game
     ASM. The game bytes are Bethesda's and must never be committed to this public
-    repo, so they are fetched on demand into a gitignored .corpus/ directory,
-    the same pattern fetch-sdks.sh uses for proprietary SDK DLLs.
+    repo, so they are fetched on demand into a gitignored .shader-cache/corpus/
+    directory, the same pattern fetch-sdks.sh uses for proprietary SDK DLLs.
 
     Steps: locate 'Fallout4 - Shaders.ba2' (BTDX/GNRL), pull the single contained
     'Shaders011.fxp', scan it for embedded DXBC blobs, and for every shader in the
     manifest that carries a corpus_sha1 write the matching blob to
-    .corpus/<name>.dxbc. Nothing is written for shaders without a corpus_sha1.
+    .shader-cache/corpus/<name>.dxbc. Nothing is written for shaders without a corpus_sha1.
 
 .PARAMETER GamePath
     Fallout 4 install root (the folder containing Data\). Auto-detected from a few
@@ -23,7 +23,7 @@
     Explicit path to 'Fallout4 - Shaders.ba2', overriding GamePath discovery.
 
 .PARAMETER OutDir
-    Destination for extracted blobs. Default: <repo>\.corpus (gitignored).
+    Destination for extracted blobs. Default: <repo>\.shader-cache\corpus (gitignored).
 
 .PARAMETER Manifest
     Shader manifest. Default: scripts\shader-roundtrip-baselines.json.
@@ -44,7 +44,7 @@ param(
 $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot  = Split-Path -Parent $scriptDir
-if (-not $OutDir)   { $OutDir   = Join-Path $repoRoot ".corpus" }
+if (-not $OutDir)   { $OutDir   = Join-Path $repoRoot ".shader-cache\corpus" }
 if (-not $Manifest) { $Manifest = Join-Path $scriptDir "shader-roundtrip-baselines.json" }
 
 function Resolve-Ba2Path {

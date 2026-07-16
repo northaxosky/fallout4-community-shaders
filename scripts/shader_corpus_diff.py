@@ -40,7 +40,7 @@ from difflib import SequenceMatcher
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_MANIFEST = os.path.join(REPO_ROOT, "scripts", "shader-roundtrip-baselines.json")
-DEFAULT_CORPUS_DIR = os.path.join(REPO_ROOT, ".corpus")
+DEFAULT_CORPUS_DIR = os.path.join(REPO_ROOT, ".shader-cache", "corpus")
 DEFAULT_FXC = r"C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\fxc.exe"
 
 PROFILE_RE = re.compile(r"^(ps|vs|cs|gs|hs|ds)_\d+_\d+\b")
