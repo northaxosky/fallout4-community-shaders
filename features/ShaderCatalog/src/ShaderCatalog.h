@@ -40,7 +40,6 @@ namespace cs::features
 			bool        enabled = false;
 			int         writerFlushIntervalMs = 5000;
 			std::string catalogPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\shader-catalog.sqlite";
-			int         symbolicationBudgetUs = 200;
 		};
 
 	private:

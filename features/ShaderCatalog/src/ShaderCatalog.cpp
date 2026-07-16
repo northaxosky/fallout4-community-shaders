@@ -145,15 +145,7 @@ namespace cs::features
 					a_error)
 				&& AcceptSetting(
 					feature_config::ReadString(*settingsTable, "catalog_path", a_candidate.catalogPath),
-					"catalog_path", "string", "string value is out of range", a_error)
-				&& ReadIntegerSetting(
-					*settingsTable,
-					"symbolication_budget_us",
-					std::numeric_limits<int>::min(),
-					std::numeric_limits<int>::max(),
-					"value must be representable as int",
-					a_candidate.symbolicationBudgetUs,
-					a_error);
+					"catalog_path", "string", "string value is out of range", a_error);
 		}
 	}
 
@@ -211,7 +203,6 @@ namespace cs::features
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("writer_flush_interval_ms", static_cast<int64_t>(_settings.writerFlushIntervalMs));
 		settings.insert_or_assign("catalog_path", _settings.catalogPath);
-		settings.insert_or_assign("symbolication_budget_us", static_cast<int64_t>(_settings.symbolicationBudgetUs));
 
 		std::error_code ec;
 		std::filesystem::create_directories(

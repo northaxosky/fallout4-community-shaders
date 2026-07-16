@@ -14,7 +14,6 @@ namespace cs::features::catalog::subclass_hooks
 		unsigned succeeded = 0;
 		unsigned failed    = 0;
 	};
-	InstallStats GetInstallStats();
 	InstallStats GetReloadInstallStats();
 	InstallStats GetSetupTechniqueInstallStats();
 

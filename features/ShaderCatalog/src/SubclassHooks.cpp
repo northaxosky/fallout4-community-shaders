@@ -159,11 +159,6 @@ namespace cs::features::catalog::subclass_hooks
 		});
 	}
 
-	InstallStats GetInstallStats()
-	{
-		return GetReloadInstallStats();
-	}
-
 	InstallStats GetReloadInstallStats()
 	{
 		return g_reloadStats;
