@@ -13,8 +13,6 @@
 namespace cs::features
 {
 
-const uint renderTargetsPatch[] = { 20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16 };
-
 // Main upscaling manager: FSR3 + DLSS dispatch, dynamic RT scaling, mip-bias, depth swap.
 class Upscaling : public cs::Feature, public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 {

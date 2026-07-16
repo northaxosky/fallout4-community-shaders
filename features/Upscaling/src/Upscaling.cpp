@@ -25,6 +25,9 @@ namespace cs::features
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.toml";
 
+	// Engine RT-pool slots rescaled/copied for dynamic-resolution upscaling.
+	constexpr uint renderTargetsPatch[] = { 20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16 };
+
 	namespace
 	{
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
