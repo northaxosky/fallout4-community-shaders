@@ -4,8 +4,8 @@
   "replacements": [
     {
       "name": "deferred_composite",
-      "runtime_sha1_hex": "813c9acec23b701bffefb2fc795a633d46a05e18",
-      "comment": "matches eid 45368 in FO4_frame5407.rdc; canonical Shaders011.fxp blob 3539",
+      "runtime_sha1_hex": "7cdee7bed35fe8fb7ea308d5b35490b3eb0870b5",
+      "comment": "BSDFCompositeShader tech=616 on 1.11.221 (catalog-attributed, single unambiguous PS row). Prior 813c9ace was a pre-next-gen capture (Shaders011.fxp blob 3539, FO4_frame5407) whose bytecode no longer exists on 1.11.221.",
       "hlsl": "Shaders/lighting/deferred_composite.hlsl",
       "entry": "main",
       "profile": "ps_5_0",
