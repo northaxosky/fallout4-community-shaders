@@ -68,9 +68,9 @@
 				"vcpkg",
 				"msvc"
 			],
-			"description": "Tooling-only config that emits compile_commands.json for clangd-based editors (Zed, VS Code, neovim). The Visual Studio generator cannot export a compile database, so this uses Ninja into a separate build-clangd/ dir. Run from a VS Developer prompt (cl + ninja on PATH) with VCPKG_ROOT pointing at your own vcpkg (a VS dev prompt may override it to the bundled copy): cmake --preset=clangd. The .clangd file points clangd at build-clangd/. Do NOT build from here; build with --preset=default.",
+			"description": "Tooling-only config that emits compile_commands.json for clangd-based editors (Zed, VS Code, neovim). The Visual Studio generator cannot export a compile database, so this uses Ninja into a separate build/clangd/ dir. Run from a VS Developer prompt (cl + ninja on PATH) with VCPKG_ROOT pointing at your own vcpkg (a VS dev prompt may override it to the bundled copy): cmake --preset=clangd. The .clangd file points clangd at build/clangd/. Do NOT build from here; build with --preset=default.",
 			"generator": "Ninja",
-			"binaryDir": "${sourceDir}/build-clangd",
+			"binaryDir": "${sourceDir}/build/clangd",
 			"cacheVariables": {
 				"CMAKE_BUILD_TYPE": "Release",
 				"CMAKE_C_COMPILER": "cl",
