@@ -19,6 +19,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Sha1.h"
 #include "SubclassHooks.h"
+#include "Telemetry/Telemetry.h"
 
 #pragma comment(lib, "version.lib")
 #pragma comment(lib, "shell32.lib")
@@ -308,6 +309,23 @@ namespace cs::features
 		const auto hs = catalog::hooks::GetRuntimeAttributionStats();
 		L->info("Device-vtable hooks installed (slots 12/13/15/16/17/18; PSSetShader={}).",
 			hs.psSetShaderHookInstalled ? "yes" : "no");
+	}
+
+	void ShaderCatalog::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		const auto stats = catalog::CatalogDB::Get().GetStats();
+		const auto binds = catalog::hooks::GetRuntimeAttributionStats();
+		a_sink
+			.Field("enabled", _settings.enabled)
+			.Field("hooks", HooksInstalled())
+			.Field("enqueued", static_cast<std::int64_t>(stats.enqueued))
+			.Field("written", static_cast<std::int64_t>(stats.written))
+			.Field("dropped", static_cast<std::int64_t>(stats.dropped))
+			.Field("attributed_ps", static_cast<std::int64_t>(stats.attributed_ps))
+			.Field("total_ps", static_cast<std::int64_t>(stats.total_ps))
+			.Field("scoped", static_cast<std::int64_t>(binds.scopedBinds))
+			.Field("matched", static_cast<std::int64_t>(binds.matchedBinds))
+			.Field("missed", static_cast<std::int64_t>(binds.missedBinds));
 	}
 
 	void ShaderCatalog::DrawSettings()

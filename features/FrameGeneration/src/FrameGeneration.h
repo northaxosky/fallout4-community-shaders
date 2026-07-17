@@ -3,6 +3,8 @@
 #include "Buffer.h"
 #include "Feature.h"
 
+#include <cstdint>
+
 namespace cs::features
 {
 
@@ -26,6 +28,8 @@ public:
 	void DrawSettings() override;
 	void RestoreDefaultSettings() override;
 	bool HasResettableSettings() const override { return true; }
+	bool ProducesTelemetry() const override { return true; }
+	void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 	struct Settings
 	{
@@ -60,6 +64,9 @@ public:
 	ID3D11ComputeShader* uiAlphaMaskCS = nullptr;
 
 	bool setupBuffers = false;
+	bool hasCapturedFrame = false;
+	std::uint32_t lastCapturedFrameIndex = 0;
+	std::uint64_t telemetryLastCapturedFrame = 0;
 
 	void SaveSettings();
 

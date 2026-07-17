@@ -16,6 +16,10 @@ struct ID3D11Device;
 namespace cs
 {
 	struct PresetApplyContext;
+	namespace telemetry
+	{
+		class Sink;
+	}
 
 	class Feature
 	{
@@ -53,6 +57,10 @@ namespace cs
 		}
 
 		virtual void DrawSettings() {}
+
+		virtual bool ProducesTelemetry() const { return false; }
+		// Telemetry collection must only read cheap cached or atomic state.
+		virtual void CollectTelemetry(telemetry::Sink& /*a_sink*/) const {}
 
 		// Reset persisted settings and derived caches; opt in via HasResettableSettings().
 		virtual void RestoreDefaultSettings() {}

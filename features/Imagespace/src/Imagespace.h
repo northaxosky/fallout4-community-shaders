@@ -6,6 +6,7 @@
 #include "WeatherProfiles.h"
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -31,6 +32,8 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 		bool ParticipatesInPresets() const override { return true; }
 		bool IsInTestMode() const override { return testModeActive; }
@@ -193,6 +196,8 @@ namespace cs::features
 
 		bool                                        dirtTextureAttempted = false;
 		bool                                        firstFireLogged = false;
+		bool                                        telemetryHasRun = false;
+		std::uint64_t                               telemetryLastRunFrame = 0;
 		bool                                        testModeActive  = false;
 
 		// Preset staging scratch; Stage fills it, Commit swaps it into live state.

@@ -6,6 +6,7 @@
 #include "Feature.h"
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 #include <winrt/base.h>
@@ -33,6 +34,8 @@ public:
 	void RestoreDefaultSettings() override;
 	bool HasResettableSettings() const override { return true; }
 	void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
+	bool ProducesTelemetry() const override { return true; }
+	void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 	// Patches render pipeline, TAA shaders, dynamic resolution, and other game systems.
 	static void InstallHooks();
@@ -187,6 +190,13 @@ private:
 	ID3D11Resource* mainTempFinalSRVResource = nullptr;
 
 	bool opaqueCapturedThisFrame = false;
+	bool telemetryHasEvaluated = false;
+	std::uint64_t telemetryLastEvaluatedFrame = 0;
+	std::uint32_t telemetryInputWidth = 0;
+	std::uint32_t telemetryInputHeight = 0;
+	std::uint32_t telemetryOutputWidth = 0;
+	std::uint32_t telemetryOutputHeight = 0;
+	uint telemetryQualityMode = 0;
 };
 
 }

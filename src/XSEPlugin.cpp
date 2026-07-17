@@ -2,6 +2,11 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Render/D3D11Bootstrap.h"
+#include "Telemetry/Telemetry.h"
+
+#include <filesystem>
+
+#include <toml++/toml.hpp>
 
 namespace { auto* L = cs::log::Get("cs"); }
 
@@ -50,6 +55,23 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	F4SE::Init(a_f4se, initInfo);
 
 	cs::log::AttachToDefaultLogger();
+	toml::table loggingConfig;
+	constexpr const char* globalConfigPath =
+		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
+	std::error_code configExistsError;
+	if (std::filesystem::exists(globalConfigPath, configExistsError) && !configExistsError) {
+		try {
+			const auto globalConfig = toml::parse_file(globalConfigPath);
+			if (const auto* logging = globalConfig["logging"].as_table())
+				loggingConfig = *logging;
+			else if (globalConfig.contains("logging"))
+				L->warn("Global config [logging] must be a table; using logging defaults");
+		} catch (const toml::parse_error& e) {
+			L->warn("Failed to parse global logging config {} ({}); using defaults",
+				globalConfigPath, e.description());
+		}
+	}
+	cs::log::ApplyConfigFromToml(loggingConfig);
 	cs::env::DetectENB();
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded",
@@ -59,6 +81,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	auto& featureManager = cs::FeatureManager::Get();
 	featureManager.PrepareAll();
 	featureManager.ActivateAll();
+	cs::telemetry::Install();
 	cs::d3d11::InstallBootstrapHook();
 
 	const auto messaging = F4SE::GetMessagingInterface();

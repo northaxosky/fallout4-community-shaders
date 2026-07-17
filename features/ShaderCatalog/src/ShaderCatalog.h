@@ -27,6 +27,8 @@ namespace cs::features
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;
 		void DrawSettings() override;
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		bool HooksInstalled() const noexcept { return _hooksInstalled.load(std::memory_order_acquire); }
 
 		// Optional callback the CreatePixelShader hook offers each shader after tracking; return true and swap *a_out (AddRef replacement, Release incoming) to substitute.

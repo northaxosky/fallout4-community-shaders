@@ -1,8 +1,17 @@
 #pragma once
 
 #include <spdlog/spdlog.h>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
+
+#include <toml++/toml.hpp>
+
+namespace cs::input
+{
+	struct Hotkey;
+}
 
 namespace cs::log
 {
@@ -14,5 +23,13 @@ namespace cs::log
 
 	void SetGlobalLevel(spdlog::level::level_enum a_level);
 	void SetLevel(const char* a_name, spdlog::level::level_enum a_level);
+	spdlog::level::level_enum GlobalLevel() noexcept;
+	std::optional<spdlog::level::level_enum> LevelFromString(std::string_view a_level);
+	std::string_view LevelToString(spdlog::level::level_enum a_level) noexcept;
 	std::vector<std::string> ListLoggers();
+
+	void ApplyConfigFromToml(const toml::table& a_logging);
+	bool SaveConfigToToml();
+	toml::table ConfigAsToml();
+	cs::input::Hotkey GetDumpHotkey();
 }

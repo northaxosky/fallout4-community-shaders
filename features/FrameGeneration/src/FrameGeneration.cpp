@@ -22,6 +22,7 @@
 #include "Streamline.h"
 #include "Render/StreamlineCore.h"
 #include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
@@ -34,6 +35,21 @@ namespace cs::features
 
 	namespace
 	{
+		std::string_view BackendName(const FrameGeneration& a_feature)
+		{
+			if (!a_feature.settings.frameGenerationMode || !a_feature.d3d12Interop)
+				return "off";
+			switch (a_feature.activeFrameGenType) {
+			case FrameGeneration::FrameGenType::kFSR3:
+				return "FSR3-FG";
+			case FrameGeneration::FrameGenType::kDLSSG:
+				return "DLSS-G";
+			case FrameGeneration::FrameGenType::kXeSSFG:
+				return "XeSS-FG";
+			}
+			return "off";
+		}
+
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{
 			std::string error = "settings.";
@@ -214,6 +230,22 @@ void FrameGeneration::DrawSettings()
 	ImGui::SetItemTooltip("Takes effect on next launch.");
 
 	ImGui::TextDisabled("Mode and MFG changes take effect on next launch.");
+}
+
+void FrameGeneration::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+{
+	const auto currentFrame = cs::telemetry::CurrentFrame();
+	const bool captured = hasCapturedFrame
+		&& currentFrame >= telemetryLastCapturedFrame
+		&& currentFrame - telemetryLastCapturedFrame <= 1;
+	a_sink
+		.Field("backend", BackendName(*this))
+		.Field("interop", d3d12Interop)
+		.Field("buffers_ready", setupBuffers)
+		.Field("captured", captured)
+		.Field("capture_index", static_cast<std::int64_t>(lastCapturedFrameIndex))
+		.Field("multiplier", static_cast<std::int64_t>(cs::env::GetDisplayedFrameMultiplier()))
+		.Field("displayed_total", static_cast<std::int64_t>(cs::env::GetDisplayedFrameTotal()));
 }
 
 void FrameGeneration::OnPostPostLoad()
@@ -652,6 +684,9 @@ void FrameGeneration::PostDisplay()
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Capture");
 		context->CopyResource(HUDLessBufferShared[dx12SwapChain->frameIndex]->resource.get(), swapChainResource);
 	}
+	lastCapturedFrameIndex = dx12SwapChain->frameIndex;
+	hasCapturedFrame = true;
+	telemetryLastCapturedFrame = cs::telemetry::CurrentFrame();
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {

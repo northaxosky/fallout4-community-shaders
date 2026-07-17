@@ -18,6 +18,7 @@
 #include "Render/RendererContext.h"
 #include "Render/StreamlineCore.h"
 #include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
 namespace cs::features
 {
 	using namespace upscaling;
@@ -30,6 +31,37 @@ namespace cs::features
 
 	namespace
 	{
+		std::string_view BackendName(Upscaling::UpscaleMethod a_method)
+		{
+			switch (a_method) {
+			case Upscaling::UpscaleMethod::kDisabled:
+				return "TAAU";
+			case Upscaling::UpscaleMethod::kFSR:
+				return "FSR3";
+			case Upscaling::UpscaleMethod::kDLSS:
+				return "DLSS";
+			}
+			return "Disabled";
+		}
+
+		std::string_view QualityName(uint a_quality)
+		{
+			switch (a_quality) {
+			case 0:
+				return "NativeAA";
+			case 1:
+				return "Quality";
+			case 2:
+				return "Balanced";
+			case 3:
+				return "Performance";
+			case 4:
+				return "UltraPerformance";
+			default:
+				return "Unknown";
+			}
+		}
+
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{
 			std::string error = "settings.";
@@ -1295,6 +1327,7 @@ void Upscaling::UpdateUpscaling()
 
 	// Convert quality mode to render scale, e.g. Quality ~1.5x -> 0.67.
 	auto effectiveQuality = GetEffectiveQualityMode();
+	telemetryQualityMode = effectiveQuality;
 	float resolutionScale = upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)effectiveQuality);
 
 	{
@@ -1369,6 +1402,10 @@ void Upscaling::Upscale()
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+	telemetryInputWidth = static_cast<std::uint32_t>(renderSize.x);
+	telemetryInputHeight = static_cast<std::uint32_t>(renderSize.y);
+	telemetryOutputWidth = static_cast<std::uint32_t>(screenSize.x);
+	telemetryOutputHeight = static_cast<std::uint32_t>(screenSize.y);
 
 	// Copy frame buffer into the DLSS/FSR input texture.
 	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource.get());
@@ -1431,8 +1468,11 @@ void Upscaling::Upscale()
 	auto effectiveQuality = GetEffectiveQualityMode();
 	{
 		TracyD3D11Zone(cs::Menu::Get().GetTracyD3D11Ctx(), "Eval");
-		if (auto* backend = GetActiveBackend())
+		if (auto* backend = GetActiveBackend()) {
 			backend->Upscale(upscalingTexture.get(), dilatedMotionVectorTexture.get(), reactiveMaskTexture.get(), transparencyMaskTexture.get(), jitter, renderSize, effectiveQuality);
+			telemetryHasEvaluated = true;
+			telemetryLastEvaluatedFrame = cs::telemetry::CurrentFrame();
+		}
 	}
 
 	// Copy upscaled output back into the frame buffer.
@@ -1443,6 +1483,23 @@ void Upscaling::Upscale()
 		L->info("CopyResource back to frame buffer executed");
 		copyLogged = true;
 	}
+}
+
+void Upscaling::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+{
+	const auto currentFrame = cs::telemetry::CurrentFrame();
+	const bool evaluated = telemetryHasEvaluated
+		&& currentFrame >= telemetryLastEvaluatedFrame
+		&& currentFrame - telemetryLastEvaluatedFrame <= 1;
+	a_sink
+		.Field("backend", BackendName(upscaleMethod))
+		.Field("mode", QualityName(telemetryQualityMode))
+		.Field("evaluated", evaluated)
+		.Dimensions("input", telemetryInputWidth, telemetryInputHeight)
+		.Dimensions("output", telemetryOutputWidth, telemetryOutputHeight)
+		.Field("masks_valid", masksValidThisFrame)
+		.Field("jitter_x", static_cast<double>(jitter.x))
+		.Field("jitter_y", static_cast<double>(jitter.y));
 }
 
 void Upscaling::CreateUpscalingResources()

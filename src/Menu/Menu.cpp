@@ -26,6 +26,8 @@
 #include "Plugin.h"
 #include "Settings/PresetManager.h"
 #include "Menu/Theme.h"
+#include "Telemetry/Telemetry.h"
+#include "Utils/Hotkey.h"
 
 namespace
 {
@@ -727,9 +729,11 @@ namespace cs
 					spdlog::level::warn, spdlog::level::err, spdlog::level::critical, spdlog::level::off
 				};
 				if (_loggingLevelIdx < 0)
-					_loggingLevelIdx = static_cast<int>(spdlog::level::info);
+					_loggingLevelIdx = static_cast<int>(cs::log::GlobalLevel());
+				bool loggingChanged = false;
 				if (ImGui::Combo("Global level", &_loggingLevelIdx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
 					cs::log::SetGlobalLevel(kLevels[_loggingLevelIdx]);
+					loggingChanged = true;
 				}
 				if (ImGui::TreeNode("Per-logger overrides")) {
 					_cachedLoggers = cs::log::ListLoggers();
@@ -737,12 +741,29 @@ namespace cs
 						ImGui::PushID(name.c_str());
 						auto logger = spdlog::get(name);
 						int idx = logger ? static_cast<int>(logger->level()) : _loggingLevelIdx;
-						if (ImGui::Combo(name.c_str(), &idx, kLevelNames, IM_ARRAYSIZE(kLevelNames)))
+						if (ImGui::Combo(name.c_str(), &idx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
 							cs::log::SetLevel(name.c_str(), kLevels[idx]);
+							loggingChanged = true;
+						}
 						ImGui::PopID();
 					}
 					ImGui::TreePop();
 				}
+
+				bool telemetryEnabled = cs::telemetry::pump::Enabled();
+				if (ImGui::Checkbox("Telemetry heartbeat", &telemetryEnabled)) {
+					cs::telemetry::pump::SetEnabled(telemetryEnabled);
+					loggingChanged = true;
+				}
+				int telemetryInterval = static_cast<int>(cs::telemetry::pump::IntervalFrames());
+				if (ImGui::SliderInt("Telemetry interval (frames)", &telemetryInterval, 1, 600)) {
+					cs::telemetry::pump::SetIntervalFrames(static_cast<std::uint32_t>(telemetryInterval));
+					loggingChanged = true;
+				}
+				if (ImGui::Button("Dump state now"))
+					cs::telemetry::pump::DumpAll();
+				if (loggingChanged)
+					cs::log::SaveConfigToToml();
 			}
 
 			if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -1000,6 +1021,19 @@ namespace cs
 	LRESULT CALLBACK Menu::hkWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
 	{
 		auto& m = Menu::Get();
+		static cs::input::Hotkey consumedDumpHotkey;
+
+		if (consumedDumpHotkey.MatchesUp(a_msg, a_wparam)) {
+			consumedDumpHotkey = {};
+			return 0;
+		}
+
+		const auto dumpHotkey = cs::log::GetDumpHotkey();
+		if (dumpHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
+			consumedDumpHotkey = dumpHotkey;
+			cs::telemetry::pump::DumpAll();
+			return 0;
+		}
 
 		// Toggle key, eaten regardless of menu state so the game never sees END.
 		if (a_msg == WM_KEYDOWN && a_wparam == VK_END && (HIWORD(a_lparam) & KF_REPEAT) == 0) {

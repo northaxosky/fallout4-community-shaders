@@ -29,6 +29,7 @@
 #include "Settings/PresetManager.h"
 #include "Render/RenderHooks.h"
 #include "Settings/SettingsOverrideManager.h"
+#include "Telemetry/Telemetry.h"
 #include "World/Sky.h"
 #include "World/Weather.h"
 #include "WeatherProfiles.h"
@@ -1103,6 +1104,27 @@ namespace cs::features
 
 		// DOF runs after grading and reuses compositeScratch.
 		RunDOF(W, H, fbTex2.get());
+		telemetryHasRun = true;
+		telemetryLastRunFrame = cs::telemetry::CurrentFrame();
+	}
+
+	void Imagespace::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		const auto currentFrame = cs::telemetry::CurrentFrame();
+		const bool ran = telemetryHasRun
+			&& currentFrame >= telemetryLastRunFrame
+			&& currentFrame - telemetryLastRunFrame <= 1;
+		const std::string_view lut = settings.lutEnable && !lutLoadedPath.empty()
+			? std::string_view(lutLoadedPath)
+			: std::string_view("off");
+		a_sink
+			.Field("enabled", settings.enabled)
+			.Field("ran", ran)
+			.Field("tonemap", settings.tonemapOperator != 0)
+			.Field("lut", lut)
+			.Field("bloom_mips", static_cast<std::int64_t>(bloomMipsAlloc))
+			.Field("dof", settings.dofEnable)
+			.Dimensions("scratch", scratchWidth, scratchHeight);
 	}
 
 }
