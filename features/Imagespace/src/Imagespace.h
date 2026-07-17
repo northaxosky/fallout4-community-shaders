@@ -24,7 +24,6 @@ namespace cs::features
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
-		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
 		void Load() override;
 		void OnPostPostLoad() override;
 		void OnDataLoaded() override;

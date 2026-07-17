@@ -131,7 +131,7 @@ namespace
 		EnsureConfigDirectory();
 		toml::table table{
 			{ "info", toml::table{ { "version", PluginVersionString() } } },
-			{ "feature", toml::table{ { "enabled", false } } }
+			{ "feature", toml::table{ { "load", false } } }
 		};
 		if (!WriteToml(path, table)) {
 			L->warn("Failed to create feature config {}", path.string());
@@ -531,12 +531,12 @@ namespace cs
 				continue;
 			}
 
-			const auto canonicalActivation = feature_config::ParseActivation(loadResult.table);
-			if (!canonicalActivation.valid) {
+			const auto activation = feature_config::ParseActivation(loadResult.table);
+			if (!activation.valid) {
 				const auto* featureNode = loadResult.table.get("feature");
 				const std::string detail = featureNode && !featureNode->is_table()
 					? "Invalid activation configuration: feature must be a table"
-					: "Invalid activation configuration: feature.enabled must be a boolean";
+					: "Invalid activation configuration: feature.load must be a boolean";
 				failConfiguration(feature, detail);
 				continue;
 			}
@@ -548,22 +548,9 @@ namespace cs
 					continue;
 				}
 
-				auto activation = canonicalActivation;
-				if (canonicalActivation.source == feature_config::ActivationIntentSource::kDefaultInactive) {
-					activation = feature_config::ParseActivation(
-						loadResult.table,
-						feature->GetLegacyActivationIntent(loadResult.table));
-				}
-
-				if (activation.source == feature_config::ActivationIntentSource::kLegacy) {
-					L->warn(
-						"Feature {} uses legacy activation intent for this launch; add [feature].enabled to select activation explicitly",
-						feature->GetName());
-				}
-
 				const bool deactivatedForEnb =
 					feature->GetEnbPolicy() == EnbPolicy::kDeactivate && cs::env::IsENBLoaded();
-				const bool desiredActive = activation.enabled && !deactivatedForEnb;
+				const bool desiredActive = activation.load && !deactivatedForEnb;
 				feature->SetState({
 					.installed = true,
 					.desiredActive = desiredActive,

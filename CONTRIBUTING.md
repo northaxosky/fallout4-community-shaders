@@ -71,7 +71,7 @@ cmake --build build --config Release --target FO4CommunityShaders --parallel
 The plugin is written to `build\Release\FO4CommunityShaders.dll`. Release builds use
 link-time optimization and treat compiler and linker warnings as errors.
 
-All packaged feature TOMLs set `[feature].enabled = false`. Enable only the feature
+All packaged feature TOMLs set `[feature].load = false`. Load only the feature
 being tested, then restart Fallout 4. The core D3D11 bootstrap and settings menu remain
 available when every feature is inactive.
 

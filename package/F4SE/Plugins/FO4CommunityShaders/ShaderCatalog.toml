@@ -1,5 +1,5 @@
 [feature]
-enabled = false
+load = false
 
 [settings]
 # Master toggle. Ships off in v1; user opts in via the in-game settings menu.

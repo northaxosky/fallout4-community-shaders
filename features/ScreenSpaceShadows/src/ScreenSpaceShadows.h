@@ -23,7 +23,6 @@ namespace cs::features
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
-		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;

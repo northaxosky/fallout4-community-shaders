@@ -22,20 +22,6 @@ namespace cs::feature_config
 				"Failed to read configuration file '" + PathText(a_path) + "': " + std::string(a_detail)
 			};
 		}
-
-		ActivationResult FromLegacy(std::optional<bool> a_legacyIntent)
-		{
-			if (!a_legacyIntent) {
-				return {};
-			}
-
-			return {
-				.enabled = *a_legacyIntent,
-				.valid = true,
-				.migrationNeeded = true,
-				.source = ActivationIntentSource::kLegacy
-			};
-		}
 	}
 
 	FileLoadResult LoadFile(const std::filesystem::path& a_path)
@@ -249,60 +235,33 @@ namespace cs::feature_config
 		return ScalarReadStatus::kValid;
 	}
 
-	ActivationResult ParseActivation(const toml::table& a_table, std::optional<bool> a_legacyIntent)
+	ActivationResult ParseActivation(const toml::table& a_table)
 	{
 		const auto* featureNode = a_table.get("feature");
 		if (!featureNode) {
-			return FromLegacy(a_legacyIntent);
+			return {};
 		}
 		if (!featureNode->is_table()) {
 			return {
-				.enabled = false,
-				.valid = false,
-				.migrationNeeded = false,
-				.source = ActivationIntentSource::kCanonical
+				.load = false,
+				.valid = false
 			};
 		}
 
-		const auto* enabledNode = featureNode->as_table()->get("enabled");
-		if (!enabledNode) {
-			return FromLegacy(a_legacyIntent);
+		const auto* loadNode = featureNode->as_table()->get("load");
+		if (!loadNode) {
+			return {};
 		}
-		if (!enabledNode->is_boolean()) {
+		if (!loadNode->is_boolean()) {
 			return {
-				.enabled = false,
-				.valid = false,
-				.migrationNeeded = false,
-				.source = ActivationIntentSource::kCanonical
+				.load = false,
+				.valid = false
 			};
 		}
 
 		return {
-			.enabled = enabledNode->as_boolean()->get(),
-			.valid = true,
-			.migrationNeeded = false,
-			.source = ActivationIntentSource::kCanonical
+			.load = loadNode->as_boolean()->get(),
+			.valid = true
 		};
-	}
-
-	MigrationStatus SetActivation(toml::table& a_table, bool a_enabled)
-	{
-		auto* featureNode = a_table.get("feature");
-		if (featureNode && !featureNode->is_table()) {
-			return MigrationStatus::kFeatureNodeNotTable;
-		}
-		if (!featureNode) {
-			a_table.insert("feature", toml::table{});
-			featureNode = a_table.get("feature");
-		}
-
-		auto& feature = *featureNode->as_table();
-		const auto* enabledNode = feature.get("enabled");
-		if (enabledNode && enabledNode->is_boolean() && enabledNode->as_boolean()->get() == a_enabled) {
-			return MigrationStatus::kUnchanged;
-		}
-
-		feature.insert_or_assign("enabled", a_enabled);
-		return MigrationStatus::kApplied;
 	}
 }

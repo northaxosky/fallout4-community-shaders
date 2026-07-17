@@ -25,7 +25,6 @@ namespace cs::features
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
-		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;
 		void DrawSettings() override;

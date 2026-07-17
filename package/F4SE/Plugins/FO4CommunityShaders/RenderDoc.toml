@@ -1,5 +1,5 @@
 [feature]
-enabled = false
+load = false
 
 [settings]
 # Single-frame capture chord; "none" unbinds it.

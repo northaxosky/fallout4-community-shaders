@@ -24,7 +24,6 @@ namespace cs::features
 		bool HasResettableSettings() const override { return true; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
-		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
 		void Load() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;

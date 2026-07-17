@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <random>
 #include <stdexcept>
 #include <string>
@@ -87,15 +88,15 @@ namespace
 		CHECK(empty.error.empty());
 
 		const auto parsedPath = a_root / "parsed.toml";
-		WriteFile(parsedPath, "name = \"kept\"\n[feature]\nenabled = true\n");
+		WriteFile(parsedPath, "name = \"kept\"\n[feature]\nload = true\n");
 		const auto parsed = cs::feature_config::LoadFile(parsedPath);
 		CHECK(parsed.status == kParsed);
 		CHECK(parsed.table["name"].value<std::string>() == std::optional<std::string>{ "kept" });
-		CHECK(parsed.table["feature"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(parsed.table["feature"]["load"].value<bool>() == std::optional<bool>{ true });
 		CHECK(parsed.error.empty());
 
 		const auto malformedPath = a_root / "malformed.toml";
-		WriteFile(malformedPath, "[feature\nenabled = true\n");
+		WriteFile(malformedPath, "[feature\nload = true\n");
 		const auto malformed = cs::feature_config::LoadFile(malformedPath);
 		CHECK(malformed.status == kParseError);
 		CHECK(malformed.table.empty());
@@ -108,83 +109,31 @@ namespace
 
 	void TestActivationParsing()
 	{
-		using cs::feature_config::ActivationIntentSource;
 		using cs::feature_config::ParseActivation;
 
-		const auto canonicalTrue = ParseActivation(Parse("[feature]\nenabled = true\n"), false);
-		CHECK(canonicalTrue.enabled);
-		CHECK(canonicalTrue.valid);
-		CHECK(!canonicalTrue.migrationNeeded);
-		CHECK(canonicalTrue.source == ActivationIntentSource::kCanonical);
+		const auto loadTrue = ParseActivation(Parse("[feature]\nload = true\n"));
+		CHECK(loadTrue.load);
+		CHECK(loadTrue.valid);
 
-		const auto canonicalFalse = ParseActivation(Parse("[feature]\nenabled = false\n"), true);
-		CHECK(!canonicalFalse.enabled);
-		CHECK(canonicalFalse.valid);
-		CHECK(!canonicalFalse.migrationNeeded);
-		CHECK(canonicalFalse.source == ActivationIntentSource::kCanonical);
+		const auto loadFalse = ParseActivation(Parse("[feature]\nload = false\n"));
+		CHECK(!loadFalse.load);
+		CHECK(loadFalse.valid);
 
-		const auto missingEnvelope = ParseActivation(Parse(""));
-		CHECK(!missingEnvelope.enabled);
-		CHECK(missingEnvelope.valid);
-		CHECK(!missingEnvelope.migrationNeeded);
-		CHECK(missingEnvelope.source == ActivationIntentSource::kDefaultInactive);
+		const auto missingFeature = ParseActivation(Parse(""));
+		CHECK(!missingFeature.load);
+		CHECK(missingFeature.valid);
 
 		const auto missingKey = ParseActivation(Parse("[feature]\nmode = \"quality\"\n"));
-		CHECK(!missingKey.enabled);
+		CHECK(!missingKey.load);
 		CHECK(missingKey.valid);
-		CHECK(missingKey.source == ActivationIntentSource::kDefaultInactive);
 
-		const auto wrongFeatureType = ParseActivation(Parse("feature = true\n"), true);
-		CHECK(!wrongFeatureType.enabled);
+		const auto wrongFeatureType = ParseActivation(Parse("feature = true\n"));
+		CHECK(!wrongFeatureType.load);
 		CHECK(!wrongFeatureType.valid);
-		CHECK(!wrongFeatureType.migrationNeeded);
-		CHECK(wrongFeatureType.source == ActivationIntentSource::kCanonical);
 
-		const auto wrongEnabledType = ParseActivation(Parse("[feature]\nenabled = \"yes\"\n"), true);
-		CHECK(!wrongEnabledType.enabled);
-		CHECK(!wrongEnabledType.valid);
-		CHECK(!wrongEnabledType.migrationNeeded);
-		CHECK(wrongEnabledType.source == ActivationIntentSource::kCanonical);
-
-		const auto legacyTrue = ParseActivation(Parse("legacy = true\n"), true);
-		CHECK(legacyTrue.enabled);
-		CHECK(legacyTrue.valid);
-		CHECK(legacyTrue.migrationNeeded);
-		CHECK(legacyTrue.source == ActivationIntentSource::kLegacy);
-
-		const auto legacyFalse = ParseActivation(Parse("legacy = false\n"), false);
-		CHECK(!legacyFalse.enabled);
-		CHECK(legacyFalse.valid);
-		CHECK(legacyFalse.migrationNeeded);
-		CHECK(legacyFalse.source == ActivationIntentSource::kLegacy);
-
-		const auto legacyWithEnvelope = ParseActivation(Parse("[feature]\nmode = \"quality\"\n"), true);
-		CHECK(legacyWithEnvelope.enabled);
-		CHECK(legacyWithEnvelope.valid);
-		CHECK(legacyWithEnvelope.migrationNeeded);
-		CHECK(legacyWithEnvelope.source == ActivationIntentSource::kLegacy);
-	}
-
-	void TestMigration()
-	{
-		using enum cs::feature_config::MigrationStatus;
-
-		auto table = Parse("name = \"kept\"\n[feature]\nmode = \"quality\"\n");
-		CHECK(cs::feature_config::SetActivation(table, true) == kApplied);
-		CHECK(table["name"].value<std::string>() == std::optional<std::string>{ "kept" });
-		CHECK(table["feature"]["mode"].value<std::string>() == std::optional<std::string>{ "quality" });
-		CHECK(table["feature"]["enabled"].value<bool>() == std::optional<bool>{ true });
-		CHECK(cs::feature_config::SetActivation(table, true) == kUnchanged);
-
-		auto missingEnvelope = Parse("other = 7\n");
-		CHECK(cs::feature_config::SetActivation(missingEnvelope, false) == kApplied);
-		CHECK(missingEnvelope["other"].value<std::int64_t>() == std::optional<std::int64_t>{ 7 });
-		CHECK(missingEnvelope["feature"]["enabled"].value<bool>() == std::optional<bool>{ false });
-
-		auto nonTable = Parse("feature = \"blocked\"\nother = 9\n");
-		CHECK(cs::feature_config::SetActivation(nonTable, true) == kFeatureNodeNotTable);
-		CHECK(nonTable["feature"].value<std::string>() == std::optional<std::string>{ "blocked" });
-		CHECK(nonTable["other"].value<std::int64_t>() == std::optional<std::int64_t>{ 9 });
+		const auto wrongLoadType = ParseActivation(Parse("[feature]\nload = \"yes\"\n"));
+		CHECK(!wrongLoadType.load);
+		CHECK(!wrongLoadType.valid);
 	}
 
 	void TestScalarReaders()
@@ -281,13 +230,14 @@ namespace
 
 	void TestPackageSeeds(const std::filesystem::path& a_root)
 	{
-		constexpr std::array<std::string_view, 8> seedNames{
+		constexpr std::array<std::string_view, 9> seedNames{
 			"MotionVectorFixes.toml",
 			"Upscaling.toml",
 			"FrameGeneration.toml",
 			"Imagespace.toml",
 			"PerformanceOverlay.toml",
 			"RenderDoc.toml",
+			"ScreenSpaceShadows.toml",
 			"ShaderCatalog.toml",
 			"ShaderReplacement.toml"
 		};
@@ -298,10 +248,7 @@ namespace
 			CHECK(loadResult.error.empty());
 
 			const auto activation = cs::feature_config::ParseActivation(loadResult.table);
-			CHECK(activation.valid);
-			CHECK(!activation.enabled);
-			CHECK(!activation.migrationNeeded);
-			CHECK(activation.source == cs::feature_config::ActivationIntentSource::kCanonical);
+			CHECK(activation.valid && !activation.load);
 		}
 	}
 }
@@ -316,7 +263,6 @@ int main(int a_argc, char* a_argv[])
 			const TestDirectory directory(executableDirectory);
 			TestFileLoading(directory.path);
 			TestActivationParsing();
-			TestMigration();
 			TestScalarReaders();
 		} else {
 			throw std::runtime_error("Invalid arguments");

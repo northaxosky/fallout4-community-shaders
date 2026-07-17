@@ -1,5 +1,5 @@
 [feature]
-enabled = false
+load = false
 
 [settings]
 # Master kill-switch. Ships off; dev opt-in only.

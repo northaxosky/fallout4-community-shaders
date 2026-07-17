@@ -47,7 +47,7 @@ Every feature is opt-in. Its root TOML must contain:
 
 ```toml
 [feature]
-enabled = true
+load = true
 ```
 
 Activation is evaluated once during startup. Edit the feature file under
@@ -55,10 +55,10 @@ Activation is evaluated once during startup. Edit the feature file under
 each registered feature's requested and runtime state, but does not load or unload
 features dynamically.
 
-Existing explicit legacy toggles are honored when `[feature].enabled` is absent. Empty
-or information-only files are inactive, malformed files fail closed, and the plugin
-never rewrites feature activation during startup. Presets configure only features that
-were already activated; they cannot activate Imagespace or another feature.
+A feature loads only when `[feature].load = true`. Empty or information-only files are
+inactive, malformed files fail closed, and the plugin never rewrites feature activation
+during startup. Presets configure only features that were already activated; they cannot
+activate Imagespace or another feature.
 
 ## Controls
 
