@@ -27,10 +27,16 @@ namespace cs::engine
 		std::vector<PrioritizedCallback>    g_postDeferredComposite;
 		std::vector<RenderHookCallback>     g_postDynResViewport_Imagespace;
 		std::vector<PostDynResViewportFGCb> g_postDynResViewport_FGCapture;
+		std::vector<PrioritizedCallback>    g_preSunLightDraw;
 		bool g_prePassInstalled            = false;
 		bool g_lightsImplInstalled         = false;
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
+		bool g_preSunLightDrawInstalled    = false;
+		// Set by DeferredLightsImpl_Hook around the engine's deferred-lighting call; read by the
+		// PreSunLightDraw thunk to restrict binding to that phase (DrawTriShape is the generic
+		// geometry draw and would otherwise fire thousands of times per frame).
+		bool g_insideDeferredLightsImpl    = false;
 
 		// Registration must run on the startup thread before any render hook fires. Enforced in
 		// release too: MarkRegistrationClosed runs on the first thunk, and a late or off-thread
@@ -89,10 +95,31 @@ namespace cs::engine
 			{
 				MarkRegistrationClosed();
 				Dispatch(g_preDeferredLightsImpl);
+				g_insideDeferredLightsImpl = true;
 				func();
+				g_insideDeferredLightsImpl = false;
 				Dispatch(g_postDeferredLightsImpl);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		// write_thunk_call on the `call BSGraphics::SetDirtyStates(bool,bool)` inside the generic
+		// DrawTriShape (REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}, AE-verified). SetDirtyStates
+		// flushes the pending PS SRV binds (it leaves t6 NULL for the sun draw), so dispatching AFTER
+		// func() lands in the window between the SRV flush and the DrawIndexed. R8D/R9D still hold
+		// DrawTriShape's startIndex/primitiveCount at the call (verified: the prologue does mov r15d,r9d
+		// without clobbering r9, and nothing writes r8/r9 before the call). primitiveCount==2 selects
+		// the fullscreen DrawIndexed(6) light passes; the phase flag restricts to DeferredLightsImpl.
+		struct PreSunLightDraw_Hook
+		{
+			static void thunk(bool a_force, bool a_clear, std::uint32_t /*a_startIndex*/, std::uint32_t a_primitiveCount)
+			{
+				func(a_force, a_clear);
+				if (g_insideDeferredLightsImpl && a_primitiveCount == 2) {
+					Dispatch(g_preSunLightDraw);
+				}
+			}
+			static inline REL::Relocation<void(bool, bool)> func;
 		};
 
 		struct DeferredComposite_Hook
@@ -137,6 +164,33 @@ namespace cs::engine
 			g_postDynResViewportInstalled = true;
 			L->info("Hook installed on SetUseDynamicResolutionViewportAsDefaultViewport (broker)");
 		}
+
+		void EnsureDeferredLightsImplInstalled()
+		{
+			if (g_lightsImplInstalled) {
+				return;
+			}
+			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
+			g_lightsImplInstalled = true;
+			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
+		}
+
+		// REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}: the SetDirtyStates call inside DrawTriShape.
+		// Source: Fallout4RE AE (1.11.221) disasm + version.bin, cross-checked against NG.
+		void EnsurePreSunLightDrawInstalled()
+		{
+			if (g_preSunLightDrawInstalled) {
+				return;
+			}
+			// The thunk's phase gate needs DeferredLightsImpl's enter/exit flag.
+			EnsureDeferredLightsImplInstalled();
+			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
+			constexpr std::ptrdiff_t offsets[] = { 0x9C, 0x9A, 0x9A };
+			stl::write_thunk_call<PreSunLightDraw_Hook>(
+				REL::ID({ 763320, 2276846, 2276846 }).address() + offsets[runtimeIdx]);
+			g_preSunLightDrawInstalled = true;
+			L->info("Hook installed on DrawTriShape SetDirtyStates call (sun-light draw anchor)");
+		}
 	}
 
 	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
@@ -154,22 +208,14 @@ namespace cs::engine
 	{
 		if (!RegistrationAllowed("PreDeferredLightsImpl")) return;
 		InsertPrioritized(g_preDeferredLightsImpl, std::move(callback), priority);
-		if (!g_lightsImplInstalled) {
-			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
-			g_lightsImplInstalled = true;
-			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
-		}
+		EnsureDeferredLightsImplInstalled();
 	}
 
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PostDeferredLightsImpl")) return;
 		InsertPrioritized(g_postDeferredLightsImpl, std::move(callback), priority);
-		if (!g_lightsImplInstalled) {
-			stl::detour_thunk<DeferredLightsImpl_Hook>(REL::ID({ 1108521, 2318312, 2318312 }));
-			g_lightsImplInstalled = true;
-			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
-		}
+		EnsureDeferredLightsImplInstalled();
 	}
 
 	// REL::ID 728427/2318313/2318313 from DrawWorld::Render_PreUI anchor walk; NG/AE bodies match.
@@ -197,5 +243,12 @@ namespace cs::engine
 		if (!RegistrationAllowed("PostDynResViewport_FGCapture")) return;
 		g_postDynResViewport_FGCapture.push_back(std::move(callback));
 		EnsurePostDynResViewportInstalled();
+	}
+
+	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PreSunLightDraw")) return;
+		InsertPrioritized(g_preSunLightDraw, std::move(callback), priority);
+		EnsurePreSunLightDrawInstalled();
 	}
 }

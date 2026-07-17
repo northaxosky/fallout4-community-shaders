@@ -26,4 +26,11 @@ namespace cs::engine
 	// Explicit named slots prevent third-party callbacks from landing between them by priority guess.
 	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback);
 	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback);
+
+	// Fires right before each fullscreen DrawIndexed(6) draw inside DeferredLightsImpl, AFTER the
+	// engine's SetDirtyStates flushes the pending PS SRVs and before the DrawIndexed. Lets a feature
+	// bind a resource the engine leaves NULL (e.g. an SSS mask) for the directional sun light draw.
+	// The anchor cannot tell the sun draw from other fullscreen deferred draws (ambient/IBL), so
+	// callbacks MUST self-filter to their target (e.g. bind only when the target slot is still NULL).
+	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 }

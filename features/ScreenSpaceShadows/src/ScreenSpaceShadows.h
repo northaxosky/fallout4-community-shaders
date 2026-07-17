@@ -37,7 +37,6 @@ namespace cs::features
 			float         shadowContrast = 1.0f;
 			std::uint32_t sampleCount = 1;
 			bool          forceWithEnb = false;
-			bool          bindMask = false;
 		};
 
 	private:
@@ -60,6 +59,8 @@ namespace cs::features
 
 		void SaveSettings();
 		void OnPreDeferredLights();
+		void OnPreSunLightDraw();
+		void OnPostDeferredLights();
 		bool EnsureResources();
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
 		std::uint32_t GetScaledSampleCount() const;
@@ -72,6 +73,7 @@ namespace cs::features
 		std::atomic_bool _deviceReady{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
+		std::atomic_bool _maskBound{ false };
 		bool _resourceInitFailed = false;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;

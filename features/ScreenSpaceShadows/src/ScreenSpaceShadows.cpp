@@ -99,9 +99,7 @@ namespace cs::features
 				|| !AcceptSetting(feature_config::ReadUnsignedInteger(*settingsTable, "sample_count", sampleCount, 1, 4),
 					"sample_count", "integer in range 1..4", a_error)
 				|| !AcceptSetting(feature_config::ReadBool(*settingsTable, "force_with_enb", a_candidate.forceWithEnb),
-					"force_with_enb", "boolean", a_error)
-				|| !AcceptSetting(feature_config::ReadBool(*settingsTable, "bind_mask", a_candidate.bindMask),
-					"bind_mask", "boolean", a_error)) {
+					"force_with_enb", "boolean", a_error)) {
 				return false;
 			}
 
@@ -154,7 +152,6 @@ namespace cs::features
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
 		settings.insert_or_assign("sample_count", _settings.sampleCount);
 		settings.insert_or_assign("force_with_enb", _settings.forceWithEnb);
-		settings.insert_or_assign("bind_mask", _settings.bindMask);
 
 		std::error_code ec;
 		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
@@ -169,8 +166,16 @@ namespace cs::features
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
+		// Bind the mask right before the sun draw (after the engine flushes/nulls PS SRVs), and
+		// unbind it when the deferred-lighting phase ends.
+		cs::engine::RegisterPreSunLightDraw([] {
+			ScreenSpaceShadows::GetSingleton()->OnPreSunLightDraw();
+		});
+		cs::engine::RegisterPostDeferredLightsImpl([] {
+			ScreenSpaceShadows::GetSingleton()->OnPostDeferredLights();
+		});
 		_started.store(true, std::memory_order_release);
-		L->info("Registered pre-deferred-lights callback (enabled={}).", _settings.enabled);
+		L->info("Registered deferred-lights callbacks (enabled={}).", _settings.enabled);
 	}
 
 	void ScreenSpaceShadows::CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height)
@@ -446,12 +451,61 @@ namespace cs::features
 		} catch (...) {
 			L->error("Raymarch dispatch failed.");
 		}
+	}
 
-		if (_settings.bindMask) {
-			// GATED OFF by default. Binding t6 is only safe once a RenderDoc capture confirms t6 is free at the directional light draw AND the SCREEN_SPACE_SHADOWS define is active in the replacement directional shaders — otherwise this stomps an engine PS-SRV binding. Flip bind_mask on only when both hold.
-			auto* srv = _maskTexture->srv.get();
-			context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
+	void ScreenSpaceShadows::OnPreSunLightDraw()
+	{
+		if (!_started.load(std::memory_order_acquire) || !_settings.enabled) {
+			return;
 		}
+		if (!_resourcesReady.load(std::memory_order_acquire) || !_maskTexture) {
+			return;
+		}
+		if (cs::env::IsENBLoaded() && !_settings.forceWithEnb) {
+			return;
+		}
+
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		// Only claim t6 when the engine left it NULL — that identifies the directional sun draw. The
+		// ambient/IBL fullscreen pass binds a real probe here (g_tAmbientProbeA at t6), so a non-null
+		// t6 means "not our draw"; skip it to avoid corrupting ambient. The mask is always valid here
+		// (cleared white when idle), so binding it is a no-op for the shader when SSS isn't shadowing.
+		ID3D11ShaderResourceView* current = nullptr;
+		context->PSGetShaderResources(kMaskPSSlot, 1, &current);
+		if (current) {
+			current->Release();
+			return;
+		}
+
+		auto* srv = _maskTexture->srv.get();
+		context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
+		_maskBound.store(true, std::memory_order_relaxed);
+	}
+
+	void ScreenSpaceShadows::OnPostDeferredLights()
+	{
+		// Restore the engine's expected NULL at t6 so its dirty-state tracking doesn't diverge.
+		if (!_maskBound.exchange(false, std::memory_order_relaxed)) {
+			return;
+		}
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		context->PSSetShaderResources(kMaskPSSlot, 1, &nullSRV);
 	}
 
 	void ScreenSpaceShadows::DrawSettings()
@@ -467,7 +521,6 @@ namespace cs::features
 			changed = true;
 		}
 		changed |= ImGui::Checkbox("Force with ENB", &_settings.forceWithEnb);
-		changed |= ImGui::Checkbox("Bind mask to PS t6 (dev/experimental)", &_settings.bindMask);
 		if (changed) {
 			SaveSettings();
 		}
