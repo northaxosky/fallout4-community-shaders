@@ -1,5 +1,5 @@
-# Generate the compile database first, from a VS Developer prompt:
-#   cmake --preset=clangd
+# Generate the compile database first (from a plain shell):
+#   pwsh scripts/gen-compile-commands.ps1     (or: cmake --preset=clangd from a VS dev prompt)
 # That writes build/clangd/compile_commands.json (gitignored); clangd reads it via the pointer below.
 CompileFlags:
   CompilationDatabase: build/clangd
