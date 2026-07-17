@@ -74,7 +74,9 @@ namespace cs::engine
 		const auto invProj = DirectX::XMMatrixInverse(nullptr, proj);
 		const auto invViewProj = DirectX::XMMatrixInverse(nullptr, viewProj);
 
-		// Reversed-Z near-plane rays avoid evaluating the potentially infinite far plane.
+		// NDC->view ray reconstruction. FO4 is standard depth (near->0, far->1);
+		// the divide-by-z below makes the mul/add independent of the chosen NDC z
+		// (a camera ray is the same at any depth), so z=1 here is fine either way.
 		const auto viewTopLeft = DirectX::XMVector4Transform(DirectX::XMVectorSet(-1.0f, 1.0f, 1.0f, 1.0f), invProj);
 		const auto viewBottomRight = DirectX::XMVector4Transform(DirectX::XMVectorSet(1.0f, -1.0f, 1.0f, 1.0f), invProj);
 		const float topLeftZ = DirectX::XMVectorGetZ(viewTopLeft);
