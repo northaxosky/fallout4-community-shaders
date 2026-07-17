@@ -44,12 +44,22 @@
     },
     {
       "name": "bsdf_light_deferred_directional",
-      "runtime_sha1_hex": "8c615844e644bf98ac3747119b8c44ec11491cd5",
-      "comment": "BSDFLightShader sun-shadow DIRECTIONAL permutation at eid 44513 in FO4_frame5407.rdc. Prior 46b911cb mapping was misattributed (that sha is a 61-insn fog/imagespace pass with t7-only and CB0/CB1/CB2[5]); substituting it with this 270-insn HLSL produced -86% scene darkening.",
+      "runtime_sha1_hex": "50e2618e8d1a8c3400c2bdb0129e510fe395d19a",
+      "comment": "BSDFLightShader sun DIRECTIONAL permutation (2-cascade), role deferred_directional_light. Live 1.11.221 runtime sha = .fxp blob 3295, body-confirmed cascade-by-depth sun (radial-attenuation-free, cb2[10] cascade ranges). Prior 8c615844 was stale; 46b911cb before that was a misattributed 61-insn fog pass.",
       "hlsl": "Shaders/lighting/bsdf_light_deferred.hlsl",
       "entry": "main",
       "profile": "ps_5_0",
       "defines": [{ "name": "LIGHT_TYPE", "value": "1" }],
+      "default_enabled": false
+    },
+    {
+      "name": "bsdf_light_deferred_directional_ibl",
+      "runtime_sha1_hex": "94f8385edd1b4eb232b1de269e1ad7b21122a293",
+      "comment": "BSDFLightShader sun DIRECTIONAL + ambient-IBL-in-light permutation, role deferred_directional_light (sibling of 50e2618e). Same role receives the SCREEN_SPACE_SHADOWS define when ScreenSpaceShadows is loaded + its mask is allocated.",
+      "hlsl": "Shaders/lighting/bsdf_light_deferred.hlsl",
+      "entry": "main",
+      "profile": "ps_5_0",
+      "defines": [{ "name": "LIGHT_TYPE", "value": "1" }, { "name": "AMBIENT_IBL_IN_LIGHT", "value": "1" }],
       "default_enabled": false
     },
     {

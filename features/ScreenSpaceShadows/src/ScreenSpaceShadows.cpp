@@ -212,11 +212,19 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		if (!_started.load(std::memory_order_acquire) || !a_device) {
-			return;
+		if (!_started.load(std::memory_order_acquire) || !a_device) return;
+		if (_settings.enabled) EnsureResources();
+	}
+
+	bool ScreenSpaceShadows::IsShadowMaskReady()
+	{
+		// Must match the ENB gate in OnPreDeferredLights/OnPreSunLightDraw: under ENB (without the
+		// force opt-in) those bail and never bind t6, so the injected shader would sample a null t6
+		// and black out the sun. Report not-ready so the vanilla (undefined) directional compiles.
+		if (cs::env::IsENBLoaded() && !_settings.forceWithEnb) {
+			return false;
 		}
-		// Defer GPU allocation to the first enabled frame so a disabled feature costs nothing.
-		_deviceReady.store(true, std::memory_order_release);
+		return _started.load(std::memory_order_acquire) && _settings.enabled && EnsureResources();
 	}
 
 	bool ScreenSpaceShadows::EnsureResources()
@@ -224,7 +232,7 @@ namespace cs::features
 		if (_resourcesReady.load(std::memory_order_acquire)) {
 			return true;
 		}
-		if (!_deviceReady.load(std::memory_order_acquire) || _resourceInitFailed) {
+		if (_resourceInitFailed) {
 			return false;
 		}
 

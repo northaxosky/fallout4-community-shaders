@@ -14,6 +14,7 @@
 #include "Compiler.h"
 #include "Log.h"
 #include "Registry.h"
+#include "ScreenSpaceShadows.h"
 #include "Settings/FeatureConfig.h"
 #include "ShaderCatalog.h"
 #include "Sha1.h"
@@ -39,6 +40,7 @@ namespace cs::features
 		{
 			if (name == "ambient_ibl_pass")                return &t.ambient_ibl_pass;
 			if (name == "bsdf_light_deferred_directional") return &t.bsdf_light_deferred_directional;
+			if (name == "bsdf_light_deferred_directional_ibl") return &t.bsdf_light_deferred_directional_ibl;
 			if (name == "bsdf_light_deferred_point")       return &t.bsdf_light_deferred_point;
 			if (name == "deferred_composite")              return &t.deferred_composite;
 			if (name == "deferred_prepass")                return &t.deferred_prepass;
@@ -108,6 +110,9 @@ namespace cs::features
 					feature_config::ReadBool(*settingsTable, "replace_bsdf_light_deferred_directional", shaders.bsdf_light_deferred_directional),
 					"replace_bsdf_light_deferred_directional", "boolean", a_error)
 				&& AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "replace_bsdf_light_deferred_directional_ibl", shaders.bsdf_light_deferred_directional_ibl),
+					"replace_bsdf_light_deferred_directional_ibl", "boolean", a_error)
+				&& AcceptSetting(
 					feature_config::ReadBool(*settingsTable, "replace_bsdf_light_deferred_point", shaders.bsdf_light_deferred_point),
 					"replace_bsdf_light_deferred_point", "boolean", a_error)
 				&& AcceptSetting(
@@ -174,6 +179,7 @@ namespace cs::features
 		auto& s = _settings.shaders;
 		settings.insert_or_assign("replace_ambient_ibl_pass", s.ambient_ibl_pass);
 		settings.insert_or_assign("replace_bsdf_light_deferred_directional", s.bsdf_light_deferred_directional);
+		settings.insert_or_assign("replace_bsdf_light_deferred_directional_ibl", s.bsdf_light_deferred_directional_ibl);
 		settings.insert_or_assign("replace_bsdf_light_deferred_point", s.bsdf_light_deferred_point);
 		settings.insert_or_assign("replace_deferred_composite", s.deferred_composite);
 		settings.insert_or_assign("replace_deferred_prepass", s.deferred_prepass);
@@ -258,6 +264,13 @@ namespace cs::features
 			auto& e = *up;
 			if (!e.enabled_in_ini) continue;
 			++want;
+			if ((e.name == "bsdf_light_deferred_directional" ||
+					e.name == "bsdf_light_deferred_directional_ibl") &&
+				cs::features::ScreenSpaceShadows::GetSingleton()->IsShadowMaskReady()) {
+				// Interim dev coupling; the general injection registry will replace this.
+				e.defines.emplace_back("SCREEN_SPACE_SHADOWS", "1");
+				L->info("Enabled SCREEN_SPACE_SHADOWS for '{}'.", e.name);
+			}
 			if (replacement::CompileEntry(device, e)) ++got;
 		}
 		L->info("Compiled {}/{} replacements", got, want);
@@ -307,6 +320,7 @@ namespace cs::features
 		bool dirty = false;
 		dirty |= ImGui::Checkbox("ambient_ibl_pass",                &s.ambient_ibl_pass);
 		dirty |= ImGui::Checkbox("bsdf_light_deferred_directional", &s.bsdf_light_deferred_directional);
+		dirty |= ImGui::Checkbox("bsdf_light_deferred_directional_ibl", &s.bsdf_light_deferred_directional_ibl);
 		dirty |= ImGui::Checkbox("bsdf_light_deferred_point",       &s.bsdf_light_deferred_point);
 		dirty |= ImGui::Checkbox("deferred_composite",              &s.deferred_composite);
 		dirty |= ImGui::Checkbox("deferred_prepass",                &s.deferred_prepass);

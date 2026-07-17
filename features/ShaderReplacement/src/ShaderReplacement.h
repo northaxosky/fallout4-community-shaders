@@ -34,6 +34,7 @@ namespace cs::features
 		{
 			bool ambient_ibl_pass                  = false;
 			bool bsdf_light_deferred_directional   = false;
+			bool bsdf_light_deferred_directional_ibl = false;
 			bool bsdf_light_deferred_point         = false;
 			bool deferred_composite                = false;
 			bool deferred_prepass                  = false;

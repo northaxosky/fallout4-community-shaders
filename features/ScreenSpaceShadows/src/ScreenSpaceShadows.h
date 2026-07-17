@@ -28,6 +28,7 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
+		bool IsShadowMaskReady();
 
 		struct Settings
 		{
@@ -70,7 +71,6 @@ namespace cs::features
 
 		Settings _settings;
 		std::atomic_bool _started{ false };
-		std::atomic_bool _deviceReady{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
 		std::atomic_bool _maskBound{ false };
