@@ -413,6 +413,21 @@ namespace cs
 		return false;
 	}
 
+	bool FeatureManager::PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept
+	{
+		const auto& state = a_feature.GetState();
+		if (!state.installed) {
+			return false;
+		}
+		// Active features get the full requirement revalidation (and may be quarantined).
+		if (a_feature.IsHealthy()) {
+			return PrepareRuntimeCallback(a_feature, a_phase);
+		}
+		// Only disabled-by-config (installed + kInactive) features expose their settings so they
+		// can be pre-configured before enabling; degraded/failed/pending/uninstalled do not draw.
+		return state.runtimeState == FeatureRuntimeState::kInactive;
+	}
+
 	void FeatureManager::QuarantineRuntimeCallback(
 		Feature& a_feature,
 		std::string_view a_phase,

@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 
 #include "Feature.h"
@@ -29,6 +30,9 @@
 namespace
 {
 	auto* L = cs::log::Get("cs.menu");
+
+	// Features whose DrawSettings threw once; suppresses re-invocation + log spam until restart.
+	std::unordered_set<const cs::Feature*> g_menuSettingsFailed;
 
 	constexpr std::array<std::string_view, 5> kFeatureCategoryOrder{
 		"Lighting",
@@ -145,18 +149,36 @@ namespace
 	void DrawFeatureStatus(const cs::Feature& a_feature)
 	{
 		const auto& state = a_feature.GetState();
-		const auto runtimeState = cs::FeatureRuntimeStateName(state.runtimeState);
-		ImGui::TextDisabled(
-			"TOML: %s | Startup activation: %s | Runtime: %.*s",
-			state.installed ? "installed" : "missing",
-			state.desiredActive ? "enabled" : "disabled",
-			static_cast<int>(runtimeState.size()),
-			runtimeState.data());
-		if (!state.detail.empty()) {
-			const auto detail = std::string_view(state.detail).substr(0, 512);
-			ImGui::TextWrapped("Reason: %.*s", static_cast<int>(detail.size()), detail.data());
+		const auto detail = std::string_view(state.detail).substr(0, 512);
+		if (!state.installed) {
+			ImGui::TextDisabled("Not installed (no configuration file present).");
+			return;
 		}
-		ImGui::TextDisabled("Activation and unloading require restart; controlled by [feature].enabled.");
+		switch (state.runtimeState) {
+		case cs::FeatureRuntimeState::kInactive:
+			ImGui::TextDisabled("Disabled. Set [feature].enabled = true in the TOML and restart to use it.");
+			break;
+		case cs::FeatureRuntimeState::kFailed:
+			if (detail.empty()) {
+				ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to load (see log).");
+			} else {
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+				ImGui::TextWrapped("Failed to load: %.*s", static_cast<int>(detail.size()), detail.data());
+				ImGui::PopStyleColor();
+			}
+			break;
+		case cs::FeatureRuntimeState::kDegraded:
+			if (detail.empty())
+				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.4f, 1.0f), "Running with reduced functionality.");
+			else
+				ImGui::TextWrapped("Running with reduced functionality: %.*s",
+					static_cast<int>(detail.size()), detail.data());
+			break;
+		case cs::FeatureRuntimeState::kActive:
+		case cs::FeatureRuntimeState::kPending:
+		default:
+			break;
+		}
 	}
 
 	void DrawFeatureResetButton()
@@ -187,7 +209,7 @@ namespace
 		cs::FeatureManager& a_manager,
 		std::string_view a_phase)
 	{
-		if (!a_manager.PrepareRuntimeCallback(a_feature, a_phase))
+		if (!a_manager.PrepareMenuCallback(a_feature, a_phase))
 			return false;
 
 		try {
@@ -230,7 +252,7 @@ namespace
 
 					if (ImGui::Button("Reset", ImVec2(120, 0))) {
 						ImGui::CloseCurrentPopup();
-						if (a_manager.PrepareRuntimeCallback(a_feature, "Menu::RestoreDefaultSettings")) {
+						if (a_manager.PrepareMenuCallback(a_feature, "Menu::RestoreDefaultSettings")) {
 							auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
 							if (!recoveryState) {
 								a_manager.QuarantineRuntimeCallback(
@@ -276,7 +298,7 @@ namespace
 		DrawFeatureStatus(a_feature);
 
 		bool resetAllowed = false;
-		if (expanded && a_manager.PrepareRuntimeCallback(a_feature, "Menu::GetFeatureSummary")) {
+		if (expanded && a_manager.PrepareMenuCallback(a_feature, "Menu::GetFeatureSummary")) {
 			std::string summary;
 			bool summaryCompleted = false;
 			try {
@@ -299,7 +321,9 @@ namespace
 				}
 
 				bool settingsCompleted = false;
-				if (a_manager.PrepareRuntimeCallback(a_feature, "Menu::DrawSettings")) {
+				if (g_menuSettingsFailed.contains(&a_feature)) {
+					ImGui::TextDisabled("Settings unavailable (a previous error was logged).");
+				} else if (a_manager.PrepareMenuCallback(a_feature, "Menu::DrawSettings")) {
 					CS_FEATURE_ZONE(&a_feature, "DrawSettings");
 					auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
 					if (!recoveryState) {
@@ -314,12 +338,18 @@ namespace
 						} catch (const std::exception& e) {
 							recoveryState->Recover();
 							a_manager.QuarantineRuntimeCallback(a_feature, "Menu::DrawSettings", e.what());
+							if (g_menuSettingsFailed.insert(&a_feature).second)
+								L->warn("Feature {} DrawSettings threw ({}); suppressing its settings UI until restart",
+									a_feature.GetName(), e.what());
 						} catch (...) {
 							recoveryState->Recover();
 							a_manager.QuarantineRuntimeCallback(
 								a_feature,
 								"Menu::DrawSettings",
 								"non-standard exception");
+							if (g_menuSettingsFailed.insert(&a_feature).second)
+								L->warn("Feature {} DrawSettings threw a non-standard exception; suppressing its settings UI until restart",
+									a_feature.GetName());
 						}
 					}
 				}
@@ -718,44 +748,35 @@ namespace cs
 
 			std::map<std::string, std::vector<Feature*>> featuresByCategory;
 			for (auto* feat : featureManager.GetRegisteredFeatures()) {
-				if (!feat->IsHealthy()) {
-					featuresByCategory["Misc"].push_back(feat);
-					continue;
-				}
-
 				bool includeFeature = true;
 				try {
 					includeFeature = feat->IsInMenu();
 				} catch (const std::exception& e) {
 					featureManager.QuarantineRuntimeCallback(*feat, "Menu::IsInMenu", e.what());
-					featuresByCategory["Misc"].push_back(feat);
-					continue;
 				} catch (...) {
 					featureManager.QuarantineRuntimeCallback(
 						*feat,
 						"Menu::IsInMenu",
 						"non-standard exception");
-					featuresByCategory["Misc"].push_back(feat);
-					continue;
 				}
 				if (!includeFeature)
 					continue;
 
+				// Group by real category regardless of active state, so a disabled feature stays
+				// in its section instead of being dumped into "Misc".
 				std::string category = "Misc";
 				try {
-					category = feat->GetCategory();
+					auto reported = feat->GetCategory();
+					if (!reported.empty())
+						category = std::move(reported);
 				} catch (const std::exception& e) {
 					featureManager.QuarantineRuntimeCallback(*feat, "Menu::GetCategory", e.what());
-					category = "Misc";
 				} catch (...) {
 					featureManager.QuarantineRuntimeCallback(
 						*feat,
 						"Menu::GetCategory",
 						"non-standard exception");
-					category = "Misc";
 				}
-				if (category.empty())
-					category = "Misc";
 				featuresByCategory[std::move(category)].push_back(feat);
 			}
 

@@ -162,6 +162,10 @@ namespace cs
 
 		// Runtime callback boundaries revalidate, quarantine, and compact without unloading.
 		bool PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept;
+		// Menu-draw gate: also lets installed, non-failed but inactive/degraded features render
+		// their settings so they can be configured before activation. Active features still get
+		// the full runtime revalidation.
+		bool PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept;
 		void QuarantineRuntimeCallback(
 			Feature& a_feature,
 			std::string_view a_phase,
