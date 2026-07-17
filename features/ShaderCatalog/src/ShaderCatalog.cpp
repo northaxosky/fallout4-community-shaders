@@ -344,6 +344,7 @@ namespace cs::features
 		const auto s = catalog::CatalogDB::Get().GetStats();
 		ImGui::Text("Shader hooks enqueued: %llu", static_cast<unsigned long long>(s.enqueued));
 		ImGui::Text("Shader rows written:   %llu", static_cast<unsigned long long>(s.written));
+		ImGui::Text("Shapes enriched:       %llu", static_cast<unsigned long long>(s.reflected));
 		ImGui::Text("Attribution events:    %llu", static_cast<unsigned long long>(s.attribution_events));
 		ImGui::Text("Dropped (ring full):   %llu", static_cast<unsigned long long>(s.dropped));
 		if (s.total_ps > 0) {

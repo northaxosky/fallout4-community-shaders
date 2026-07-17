@@ -8,11 +8,13 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <optional>
 #include <sstream>
 
 #include <sqlite3.h>
 
 #include "Log.h"
+#include "ShaderShape.h"
 
 #ifndef NT_SUCCESS
 #  define NT_SUCCESS(s) (((NTSTATUS)(s)) >= 0)
@@ -22,10 +24,17 @@ namespace cs::features::catalog
 {
 	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
 
-	// If this schema changes, bump corpus_meta.schema_version; the importer enforces it.
-	static const char* kSchemaSql = R"sql(
-PRAGMA foreign_keys = ON;
+	namespace
+	{
+		// Enrichment tunables (writer-thread backlog); base rows are never bound by these.
+		constexpr std::size_t kEnrichBatch              = 8;                  // shaders reflected per Phase B pass
+		constexpr std::size_t kMaxPendingEnrichment     = 512;               // unique shas retained for enrichment
+		constexpr std::size_t kMaxRetainedBacklogBytes  = 64ull * 1024 * 1024;  // total retained bytecode cap
+		constexpr int         kMaxEnrichAttempts        = 3;                  // transient-failure retries per shader
+	}
 
+	// If this schema changes, bump corpus_meta.schema_version (see MigrateSchema); the importer enforces it.
+	static const char* kSchemaSql = R"sql(
 CREATE TABLE IF NOT EXISTS shader_catalog (
     sha1                    TEXT PRIMARY KEY,
     size_bytes              INTEGER NOT NULL,
@@ -42,6 +51,7 @@ CREATE TABLE IF NOT EXISTS shader_catalog (
     sample_call_count       INTEGER,
     input_signature_summary TEXT,
     output_signature_summary TEXT,
+    resource_summary        TEXT,
 
     first_seen_timestamp    TEXT NOT NULL,
     first_seen_session_id   TEXT NOT NULL REFERENCES sessions(session_id),
@@ -60,7 +70,6 @@ CREATE TABLE IF NOT EXISTS shader_catalog (
 CREATE INDEX IF NOT EXISTS idx_catalog_stage    ON shader_catalog(stage);
 CREATE INDEX IF NOT EXISTS idx_catalog_subclass ON shader_catalog(bsshader_subclass);
 CREATE INDEX IF NOT EXISTS idx_catalog_runtime  ON shader_catalog(engine_runtime);
-CREATE INDEX IF NOT EXISTS idx_catalog_shape    ON shader_catalog(stage, srv_count, output_count, cb_count);
 CREATE INDEX IF NOT EXISTS idx_catalog_module   ON shader_catalog(source_module);
 
 CREATE TABLE IF NOT EXISTS compile_events (
@@ -107,7 +116,6 @@ CREATE TABLE IF NOT EXISTS corpus_meta (
 );
 
 INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
-    ('schema_version', '1'),
     ('schema_source', 'Workspace/schemas/runtime/shader-catalog.sqlite.schema.sql'),
     ('writer_invariant', 'observe-only: hooks compute sha1, enqueue, then call original Create*Shader/D3DCompile with unmodified parameters');
 )sql";
@@ -202,34 +210,91 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			return;
 		_wakeWriter.notify_one();
 
-		bool cleanShutdown = false;
-		if (_writer.joinable()) {
-			// 5s deadline; if writer is wedged we detach with a warning rather than block shutdown.
-			const HANDLE handle = _writer.native_handle();
-			const DWORD waitResult = ::WaitForSingleObject(handle, 5000);
-			if (waitResult == WAIT_OBJECT_0) {
-				_writer.join();
-				cleanShutdown = true;
-			} else {
-				L->warn("Writer thread did not drain within 5s; detaching (DB + statements leaked).");
-				_writer.detach();
+		// Writer abandons in-progress enrichment when _running is false and returns after a final
+		// base-row flush, so this join is bounded. Joining (not detaching) avoids a use-after-free
+		// of the ring and owned bytecode once this object is destroyed.
+		if (_writer.joinable())
+			_writer.join();
+
+		FinalizeSession();
+
+		if (_updateShape)       { sqlite3_finalize(_updateShape);       _updateShape = nullptr; }
+		if (_insertShader)      { sqlite3_finalize(_insertShader);      _insertShader = nullptr; }
+		if (_upsertAttribution) { sqlite3_finalize(_upsertAttribution); _upsertAttribution = nullptr; }
+		if (_updateSession)     { sqlite3_finalize(_updateSession);     _updateSession = nullptr; }
+		if (_db)                { sqlite3_close(_db); _db = nullptr; }
+	}
+
+	bool CatalogDB::MigrateSchema()
+	{
+		char* err = nullptr;
+		auto fail = [&](const char* what) {
+			L->error("{}: {}", what, err ? err : sqlite3_errmsg(_db));
+			if (err) { sqlite3_free(err); err = nullptr; }
+			sqlite3_exec(_db, "ROLLBACK;", nullptr, nullptr, nullptr);
+			return false;
+		};
+
+		// One transaction so a half-applied migration rolls back cleanly and is retry-safe.
+		if (sqlite3_exec(_db, "BEGIN IMMEDIATE;", nullptr, nullptr, &err) != SQLITE_OK)
+			return fail("migration begin failed");
+
+		if (sqlite3_exec(_db, kSchemaSql, nullptr, nullptr, &err) != SQLITE_OK)
+			return fail("schema bootstrap failed");
+
+		// Fresh DBs already have resource_summary from the CREATE; only a v1 DB needs the column added.
+		bool hasResourceSummary = false;
+		{
+			sqlite3_stmt* st = nullptr;
+			if (sqlite3_prepare_v2(_db, "PRAGMA table_info(shader_catalog)", -1, &st, nullptr) != SQLITE_OK)
+				return fail("table_info failed");
+			while (sqlite3_step(st) == SQLITE_ROW) {
+				const auto* col = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
+				if (col && std::strcmp(col, "resource_summary") == 0) {
+					hasResourceSummary = true;
+					break;
+				}
 			}
-		} else {
-			// Writer never started or already joined; safe to finalize.
-			cleanShutdown = true;
+			sqlite3_finalize(st);
+		}
+		if (!hasResourceSummary) {
+			if (sqlite3_exec(_db, "ALTER TABLE shader_catalog ADD COLUMN resource_summary TEXT;",
+				nullptr, nullptr, &err) != SQLITE_OK)
+				return fail("add resource_summary failed");
 		}
 
-		if (cleanShutdown) {
-			FinalizeSession();
+		// Shape index is created here (not in kSchemaSql) so the column is guaranteed to exist first.
+		if (sqlite3_exec(_db,
+			"CREATE INDEX IF NOT EXISTS idx_catalog_shape ON shader_catalog(stage, srv_count, output_count, cb_count);",
+			nullptr, nullptr, &err) != SQLITE_OK)
+			return fail("create idx_catalog_shape failed");
 
-			if (_insertShader)      { sqlite3_finalize(_insertShader);      _insertShader = nullptr; }
-			if (_upsertAttribution) { sqlite3_finalize(_upsertAttribution); _upsertAttribution = nullptr; }
-			if (_updateSession)     { sqlite3_finalize(_updateSession);     _updateSession = nullptr; }
-			if (_db)                { sqlite3_close(_db); _db = nullptr; }
-		} else {
-			// Detached writer still owns DB state; leak it to avoid races while WAL preserves commits.
-			L->warn("Database left open; detached writer still holds resources until process exit.");
+		// Bump to 2; guarded so re-running never downgrades a newer schema.
+		if (sqlite3_exec(_db,
+			"INSERT INTO corpus_meta(key, value) VALUES('schema_version','2') "
+			"ON CONFLICT(key) DO UPDATE SET value='2' WHERE CAST(corpus_meta.value AS INTEGER) < 2;",
+			nullptr, nullptr, &err) != SQLITE_OK)
+			return fail("schema_version upsert failed");
+
+		if (sqlite3_exec(_db, "COMMIT;", nullptr, nullptr, &err) != SQLITE_OK)
+			return fail("migration commit failed");
+
+		// Validate the version landed at >= 2.
+		int version = 0;
+		{
+			sqlite3_stmt* st = nullptr;
+			if (sqlite3_prepare_v2(_db, "SELECT CAST(value AS INTEGER) FROM corpus_meta WHERE key='schema_version'",
+				-1, &st, nullptr) == SQLITE_OK) {
+				if (sqlite3_step(st) == SQLITE_ROW)
+					version = sqlite3_column_int(st, 0);
+				sqlite3_finalize(st);
+			}
 		}
+		if (version < 2) {
+			L->error("Schema migration did not reach version 2 (got {}); disabling.", version);
+			return false;
+		}
+		return true;
 	}
 
 	bool CatalogDB::OpenAndBootstrap()
@@ -252,26 +317,8 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		sqlite3_exec(_db, "PRAGMA busy_timeout=2000;", nullptr, nullptr, &err);
 		if (err) { sqlite3_free(err); err = nullptr; }
 
-		if (sqlite3_exec(_db, kSchemaSql, nullptr, nullptr, &err) != SQLITE_OK) {
-			L->error("Schema bootstrap failed: {}", err ? err : "?");
-			if (err) sqlite3_free(err);
+		if (!MigrateSchema())
 			return false;
-		}
-
-		sqlite3_stmt* st = nullptr;
-		if (sqlite3_prepare_v2(_db, "SELECT value FROM corpus_meta WHERE key='schema_version'",
-			-1, &st, nullptr) == SQLITE_OK)
-		{
-			if (sqlite3_step(st) == SQLITE_ROW) {
-				const auto* v = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
-				if (v && std::strcmp(v, "1") != 0) {
-					L->error("Schema version mismatch: '{}' (expected '1'); disabling.", v);
-					sqlite3_finalize(st);
-					return false;
-				}
-			}
-			sqlite3_finalize(st);
-		}
 
 		{
 			const char* sql = "INSERT INTO sessions(session_id, started_at, engine_runtime, engine_build_hash, plugin_version, config_snapshot_json) "
@@ -296,14 +343,19 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			}
 		}
 
-		// Prepare hot statements once; the writer only re-binds values.
+		// Prepare hot statements once; the writer only re-binds values. Shape columns are inserted
+		// NULL by the base-row path and filled later by kUpdateShape; the COALESCE keeps any values
+		// already present (from enrichment) from being erased by repeated bytecode-less events.
 		const char* kInsertShader =
 			"INSERT INTO shader_catalog("
 			"  sha1, size_bytes, stage,"
 			"  first_seen_timestamp, first_seen_session_id, last_seen_timestamp, seen_count,"
 			"  source_pointer_va, source_module, creation_stack_top4, creation_thread_id, engine_runtime,"
-			"  bsshader_subclass, bsshader_technique_bits"
-			") VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?) "
+			"  bsshader_subclass, bsshader_technique_bits,"
+			"  profile, cb_count, srv_count, uav_count, sampler_count, output_count, input_count,"
+			"  input_has_position_only, instruction_count, sample_call_count,"
+			"  input_signature_summary, output_signature_summary, resource_summary"
+			") VALUES(?,?,?,?,?,?,1,?,?,?,?,?,?,?, NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL) "
 			"ON CONFLICT(sha1) DO UPDATE SET "
 			"  last_seen_timestamp = excluded.last_seen_timestamp, "
 			"  seen_count = seen_count + 1, "
@@ -313,7 +365,20 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			"  creation_stack_top4 = COALESCE(shader_catalog.creation_stack_top4, excluded.creation_stack_top4), "
 			"  creation_thread_id = COALESCE(shader_catalog.creation_thread_id, excluded.creation_thread_id), "
 			"  bsshader_subclass = COALESCE(shader_catalog.bsshader_subclass, excluded.bsshader_subclass), "
-			"  bsshader_technique_bits = COALESCE(shader_catalog.bsshader_technique_bits, excluded.bsshader_technique_bits)";
+			"  bsshader_technique_bits = COALESCE(shader_catalog.bsshader_technique_bits, excluded.bsshader_technique_bits), "
+			"  profile = COALESCE(shader_catalog.profile, excluded.profile), "
+			"  cb_count = COALESCE(shader_catalog.cb_count, excluded.cb_count), "
+			"  srv_count = COALESCE(shader_catalog.srv_count, excluded.srv_count), "
+			"  uav_count = COALESCE(shader_catalog.uav_count, excluded.uav_count), "
+			"  sampler_count = COALESCE(shader_catalog.sampler_count, excluded.sampler_count), "
+			"  output_count = COALESCE(shader_catalog.output_count, excluded.output_count), "
+			"  input_count = COALESCE(shader_catalog.input_count, excluded.input_count), "
+			"  input_has_position_only = COALESCE(shader_catalog.input_has_position_only, excluded.input_has_position_only), "
+			"  instruction_count = COALESCE(shader_catalog.instruction_count, excluded.instruction_count), "
+			"  sample_call_count = COALESCE(shader_catalog.sample_call_count, excluded.sample_call_count), "
+			"  input_signature_summary = COALESCE(shader_catalog.input_signature_summary, excluded.input_signature_summary), "
+			"  output_signature_summary = COALESCE(shader_catalog.output_signature_summary, excluded.output_signature_summary), "
+			"  resource_summary = COALESCE(shader_catalog.resource_summary, excluded.resource_summary)";
 		if (sqlite3_prepare_v2(_db, kInsertShader, -1, &_insertShader, nullptr) != SQLITE_OK) {
 			L->error("prepare insert shader failed: {}", sqlite3_errmsg(_db));
 			return false;
@@ -333,6 +398,19 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			return false;
 		}
 
+		// Enrichment writes shapes directly; the base row already exists, so no COALESCE is needed here.
+		const char* kUpdateShape =
+			"UPDATE shader_catalog SET "
+			"  profile=?1, cb_count=?2, srv_count=?3, uav_count=?4, sampler_count=?5, "
+			"  output_count=?6, input_count=?7, input_has_position_only=?8, instruction_count=?9, "
+			"  sample_call_count=?10, input_signature_summary=?11, output_signature_summary=?12, "
+			"  resource_summary=?13 "
+			"WHERE sha1=?14";
+		if (sqlite3_prepare_v2(_db, kUpdateShape, -1, &_updateShape, nullptr) != SQLITE_OK) {
+			L->error("prepare update shape failed: {}", sqlite3_errmsg(_db));
+			return false;
+		}
+
 		const char* kUpdateSession =
 			"UPDATE sessions SET ended_at=?, "
 			"  shaders_added_this_session=(SELECT COUNT(*) FROM shader_catalog WHERE first_seen_session_id=? AND seen_count > 0) "
@@ -345,10 +423,10 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		return true;
 	}
 
-	void CatalogDB::EnqueueShader(const CatalogEntry& e) noexcept
+	void CatalogDB::EnqueueShader(CatalogEntry e) noexcept
 	{
 		if (!_running.load(std::memory_order_acquire))
-			return;
+			return;  // e (and any owned bytecode) is freed on return.
 
 		// Bounded MPSC ring drops newest on overflow instead of blocking the render thread.
 		std::uint64_t pos = _enqPos.load(std::memory_order_relaxed);
@@ -358,14 +436,18 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			const std::int64_t diff = static_cast<std::int64_t>(seq) - static_cast<std::int64_t>(pos);
 			if (diff == 0) {
 				if (_enqPos.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed)) {
-					cell.data = e;
+					cell.data = std::move(e);
 					cell.sequence.store(pos + 1, std::memory_order_release);
 					_statEnqueued.fetch_add(1, std::memory_order_relaxed);
+					// Wake the writer on an empty->nonempty transition so base rows persist promptly;
+					// the timed wait remains a fallback if this notify races the consumer.
+					if (_deqPos.load(std::memory_order_acquire) == pos)
+						_wakeWriter.notify_one();
 					return;
 				}
 			} else if (diff < 0) {
 				_statDropped.fetch_add(1, std::memory_order_relaxed);
-				return;
+				return;  // ring full; e is freed on return.
 			} else {
 				pos = _enqPos.load(std::memory_order_relaxed);
 			}
@@ -378,6 +460,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		s.enqueued = _statEnqueued.load(std::memory_order_relaxed);
 		s.dropped  = _statDropped.load(std::memory_order_relaxed);
 		s.written  = _statWritten.load(std::memory_order_relaxed);
+		s.reflected = _statReflected.load(std::memory_order_relaxed);
 		s.attributed_ps = _statAttributedPs.load(std::memory_order_relaxed);
 		s.total_ps      = _statTotalPs.load(std::memory_order_relaxed);
 		s.attribution_events = _statAttributionEvents.load(std::memory_order_relaxed);
@@ -401,7 +484,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		e.has_subclass = true;
 		e.has_technique_bits = true;
 		e.attribution_only = true;
-		EnqueueShader(e);
+		EnqueueShader(std::move(e));
 	}
 
 	std::string CatalogDB::ResolveModule(std::uintptr_t va)
@@ -439,7 +522,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		return ss.str();
 	}
 
-	void CatalogDB::PersistShader(const CatalogEntry& e)
+	void CatalogDB::PersistShader(const CatalogEntry& e, const std::string& sha1Hex)
 	{
 		if (e.attribution_only) {
 			PersistAttribution(e);
@@ -447,7 +530,6 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		}
 
 		if (!_insertShader) return;
-		const auto sha1 = Sha1ToHex(Sha1Result{ e.sha1_bytes });
 		const auto now = IsoNowUtc();
 		char vaBuf[32];
 		std::snprintf(vaBuf, sizeof(vaBuf), "0x%llx", static_cast<unsigned long long>(e.source_va));
@@ -457,7 +539,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 
 		sqlite3_reset(_insertShader);
 		sqlite3_clear_bindings(_insertShader);
-		sqlite3_bind_text  (_insertShader,  1, sha1.c_str(),            -1, SQLITE_TRANSIENT);
+		sqlite3_bind_text  (_insertShader,  1, sha1Hex.c_str(),         -1, SQLITE_TRANSIENT);
 		sqlite3_bind_int64 (_insertShader,  2, static_cast<sqlite3_int64>(e.bytecode_size));
 		sqlite3_bind_text  (_insertShader,  3, stageText,               -1, SQLITE_STATIC);
 		sqlite3_bind_text  (_insertShader,  4, now.c_str(),             -1, SQLITE_TRANSIENT);
@@ -530,77 +612,219 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 		_statAttributedPs.store(count("SELECT COUNT(*) FROM shader_catalog WHERE stage='ps' AND bsshader_subclass IS NOT NULL"), std::memory_order_relaxed);
 	}
 
+	bool CatalogDB::RingHasReady() noexcept
+	{
+		const auto pos = _deqPos.load(std::memory_order_relaxed);
+		Cell& cell = _ring[pos & (kCapacity - 1)];
+		const auto seq = cell.sequence.load(std::memory_order_acquire);
+		return static_cast<std::int64_t>(seq) - static_cast<std::int64_t>(pos + 1) == 0;
+	}
+
+	void CatalogDB::PreloadReflectedShas()
+	{
+		if (!_db) return;
+		// Seed the dedup set from rows already enriched so we don't re-disassemble the whole corpus.
+		sqlite3_stmt* st = nullptr;
+		if (sqlite3_prepare_v2(_db, "SELECT sha1 FROM shader_catalog WHERE instruction_count IS NOT NULL",
+			-1, &st, nullptr) != SQLITE_OK)
+			return;
+		while (sqlite3_step(st) == SQLITE_ROW) {
+			const auto* sha = reinterpret_cast<const char*>(sqlite3_column_text(st, 0));
+			if (sha)
+				_reflectedShas.emplace(sha);
+		}
+		sqlite3_finalize(st);
+	}
+
+	void CatalogDB::IngestPhase()
+	{
+		if (!_db) return;
+		// Retain bytecode only while running; on shutdown we just flush base rows.
+		const bool retain = _running.load(std::memory_order_acquire);
+
+		char* err = nullptr;
+		sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err);
+		if (err) { sqlite3_free(err); err = nullptr; }
+
+		std::size_t drained = 0;
+		for (;;) {
+			const auto pos = _deqPos.load(std::memory_order_relaxed);
+			Cell& cell = _ring[pos & (kCapacity - 1)];
+			const auto seq = cell.sequence.load(std::memory_order_acquire);
+			const std::int64_t diff = static_cast<std::int64_t>(seq) - static_cast<std::int64_t>(pos + 1);
+			if (diff != 0)
+				break;
+
+			CatalogEntry e = std::move(cell.data);
+			cell.sequence.store(pos + kCapacity, std::memory_order_release);
+			_deqPos.store(pos + 1, std::memory_order_relaxed);
+
+			const std::string sha1Hex = Sha1ToHex(Sha1Result{ e.sha1_bytes });
+			PersistShader(e, sha1Hex);
+
+			// Move retained bytecode into the enrichment backlog when unseen and within caps;
+			// otherwise drop only the bytecode (base row already persisted with NULL shapes).
+			if (retain && e.bytecode && e.bytecode_size > 0 && !e.attribution_only &&
+				_reflectedShas.find(sha1Hex) == _reflectedShas.end() &&
+				_pendingShas.find(sha1Hex) == _pendingShas.end() &&
+				_pendingShas.size() < kMaxPendingEnrichment &&
+				_retainedBytes + e.bytecode_size <= kMaxRetainedBacklogBytes)
+			{
+				PendingEnrichment pe;
+				pe.sha1_hex = sha1Hex;
+				pe.size = e.bytecode_size;
+				pe.bytecode = std::move(e.bytecode);
+				_retainedBytes += pe.size;
+				_pendingShas.insert(sha1Hex);
+				_enrichQueue.push_back(std::move(pe));
+			}
+
+			if (++drained >= 1024) break;  // bound one transaction; the writer loop re-enters for the rest
+		}
+
+		sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &err);
+		if (err) { sqlite3_free(err); err = nullptr; }
+		if (drained > 0)
+			RefreshCatalogCounts();
+	}
+
+	bool CatalogDB::EnrichPhase()
+	{
+		if (!_db || !_updateShape)
+			return false;
+
+		// Transient DB failures get a bounded retry (keep the only bytecode copy); poison items drop.
+		auto requeue = [this](PendingEnrichment&& item) {
+			if (++item.attempts >= kMaxEnrichAttempts)
+				return;  // give up; bytecode freed here. Sha stays unreflected so a re-create can retry.
+			_pendingShas.insert(item.sha1_hex);
+			_retainedBytes += item.size;
+			_enrichQueue.push_back(std::move(item));
+		};
+
+		std::size_t processed = 0;
+		while (!_enrichQueue.empty() && processed < kEnrichBatch) {
+			PendingEnrichment pe = std::move(_enrichQueue.front());
+			_enrichQueue.pop_front();
+			_pendingShas.erase(pe.sha1_hex);
+			_retainedBytes -= (pe.size <= _retainedBytes) ? pe.size : _retainedBytes;
+			++processed;
+
+			// Abandon in-progress enrichment on shutdown; base rows are already durable.
+			if (!_running.load(std::memory_order_acquire))
+				return false;
+
+			if (_reflectedShas.find(pe.sha1_hex) != _reflectedShas.end())
+				continue;  // already enriched; drop the duplicate bytecode.
+
+			ShaderShape shape;
+			if (!ExtractShaderShape(pe.bytecode.get(), pe.size, shape) || !shape.extracted)
+				continue;  // deterministic reflect+disasm failure; drop (a re-create can retry later).
+
+			char* err = nullptr;
+			if (sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err) != SQLITE_OK) {
+				if (err) { sqlite3_free(err); err = nullptr; }
+				requeue(std::move(pe));  // transient; keep the bytecode for another attempt.
+				continue;
+			}
+
+			sqlite3_reset(_updateShape);
+			sqlite3_clear_bindings(_updateShape);
+			auto bindOptText = [&](int idx, const std::optional<std::string>& v) {
+				if (v) sqlite3_bind_text(_updateShape, idx, v->c_str(), -1, SQLITE_TRANSIENT);
+				else   sqlite3_bind_null(_updateShape, idx);
+			};
+			auto bindOptInt = [&](int idx, const std::optional<int>& v) {
+				if (v) sqlite3_bind_int(_updateShape, idx, *v);
+				else   sqlite3_bind_null(_updateShape, idx);
+			};
+			bindOptText(1,  shape.profile);
+			bindOptInt (2,  shape.cb_count);
+			bindOptInt (3,  shape.srv_count);
+			bindOptInt (4,  shape.uav_count);
+			bindOptInt (5,  shape.sampler_count);
+			bindOptInt (6,  shape.output_count);
+			bindOptInt (7,  shape.input_count);
+			bindOptInt (8,  shape.input_has_position_only);
+			bindOptInt (9,  shape.instruction_count);
+			bindOptInt (10, shape.sample_call_count);
+			bindOptText(11, shape.input_signature_summary);
+			bindOptText(12, shape.output_signature_summary);
+			bindOptText(13, shape.resource_summary);
+			sqlite3_bind_text(_updateShape, 14, pe.sha1_hex.c_str(), -1, SQLITE_TRANSIENT);
+
+			bool committed = false;
+			int changed = 0;
+			if (sqlite3_step(_updateShape) == SQLITE_DONE) {
+				changed = sqlite3_changes(_db);  // read before COMMIT; 0 means the base row isn't present yet
+				if (sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &err) == SQLITE_OK) {
+					committed = true;
+				} else {
+					if (err) { sqlite3_free(err); err = nullptr; }
+					sqlite3_exec(_db, "ROLLBACK", nullptr, nullptr, nullptr);
+				}
+			} else {
+				L->warn("update shape failed: {}", sqlite3_errmsg(_db));
+				sqlite3_exec(_db, "ROLLBACK", nullptr, nullptr, nullptr);
+			}
+
+			if (committed && changed > 0) {
+				// Mark reflected only after a committed UPDATE that actually hit a row.
+				_reflectedShas.insert(pe.sha1_hex);
+				_statReflected.fetch_add(1, std::memory_order_relaxed);
+			} else {
+				// Transient: BEGIN/step/commit failed, or 0 rows changed (base row not persisted yet). Retry bounded.
+				requeue(std::move(pe));
+			}
+		}
+
+		return !_enrichQueue.empty();
+	}
+
 	void CatalogDB::WriterLoop()
 	{
 		using namespace std::chrono;
 		std::uint32_t checkpointN = 0;
 		const auto flushIv = milliseconds(_cfg.flush_interval_ms == 0 ? 5000 : _cfg.flush_interval_ms);
 
+		PreloadReflectedShas();
+
 		while (_running.load(std::memory_order_acquire)) {
-			// Periodic flush, with Stop() waking the writer so teardown is not flush-interval bound.
+			// Wake on new ingress or pending backlog; timed wait is the fallback so teardown is prompt.
 			{
 				std::unique_lock lock(_wakeMutex);
 				_wakeWriter.wait_for(lock, flushIv, [this] {
-					return !_running.load(std::memory_order_acquire);
+					return !_running.load(std::memory_order_acquire) || RingHasReady() || !_enrichQueue.empty();
 				});
 			}
 
-			char* err = nullptr;
-			sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err);
-			if (err) { sqlite3_free(err); err = nullptr; }
+			// Phase A: FULLY drain the ring to base rows before any enrichment, so a burst can never
+			// overflow while slow D3DDisassemble runs. Base-row persistence always wins.
+			while (_running.load(std::memory_order_acquire) && RingHasReady())
+				IngestPhase();
 
-			std::size_t drained = 0;
-			for (;;) {
-				const auto pos = _deqPos.load(std::memory_order_relaxed);
-				Cell& cell = _ring[pos & (kCapacity - 1)];
-				const auto seq = cell.sequence.load(std::memory_order_acquire);
-				const std::int64_t diff = static_cast<std::int64_t>(seq) - static_cast<std::int64_t>(pos + 1);
-				if (diff == 0) {
-					CatalogEntry e = cell.data;
-					cell.sequence.store(pos + kCapacity, std::memory_order_release);
-					_deqPos.store(pos + 1, std::memory_order_relaxed);
-					PersistShader(e);
-					if (++drained >= 1024) break;  // checkpoint mid-batch on very large bursts
-				} else {
-					break;
-				}
-			}
+			if (!_running.load(std::memory_order_acquire))
+				break;
 
-			sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &err);
-			if (err) { sqlite3_free(err); err = nullptr; }
-			if (drained > 0)
-				RefreshCatalogCounts();
+			// Phase B: only with the ring empty, reflect a small bounded batch, then loop back so the
+			// ring is re-checked (Phase A) before the next batch.
+			EnrichPhase();
 
 			// Periodically truncate WAL so the sidecar stays bounded.
 			if ((++checkpointN % 12) == 0) {
+				char* err = nullptr;
 				sqlite3_exec(_db, "PRAGMA wal_checkpoint(TRUNCATE);", nullptr, nullptr, &err);
 				if (err) { sqlite3_free(err); err = nullptr; }
 			}
 		}
 
-		// Flush remaining entries on exit.
-		{
-			char* err = nullptr;
-			sqlite3_exec(_db, "BEGIN", nullptr, nullptr, &err);
-			if (err) { sqlite3_free(err); err = nullptr; }
-			for (;;) {
-				const auto pos = _deqPos.load(std::memory_order_relaxed);
-				Cell& cell = _ring[pos & (kCapacity - 1)];
-				const auto seq = cell.sequence.load(std::memory_order_acquire);
-				const std::int64_t diff = static_cast<std::int64_t>(seq) - static_cast<std::int64_t>(pos + 1);
-				if (diff == 0) {
-					CatalogEntry e = cell.data;
-					cell.sequence.store(pos + kCapacity, std::memory_order_release);
-					_deqPos.store(pos + 1, std::memory_order_relaxed);
-					PersistShader(e);
-				} else {
-					break;
-				}
-			}
-			sqlite3_exec(_db, "COMMIT", nullptr, nullptr, &err);
-			if (err) { sqlite3_free(err); err = nullptr; }
-			RefreshCatalogCounts();
-		}
+		// Shutdown: fully drain remaining base rows (bounded by the queued count), then release backlog.
+		while (RingHasReady())
+			IngestPhase();
+		_enrichQueue.clear();
+		_pendingShas.clear();
+		_reflectedShas.clear();
+		_retainedBytes = 0;
 	}
 
 	void CatalogDB::FinalizeSession()

@@ -8,12 +8,21 @@
 #include "SubclassContext.h"
 
 #include <atomic>
+#include <cstddef>
+#include <cstring>
+#include <memory>
+#include <new>
+#include <utility>
 
 namespace cs::features::catalog::hooks
 {
 	namespace
 	{
 		auto* L = cs::log::Get("cs.feature.catalog");
+
+		// Retain DXBC up to this size for deferred reflection; large enough for the ~25KB deferred
+		// shaders while bounding worst-case hot-path allocation. Larger blobs enqueue base-row-only.
+		constexpr SIZE_T kMaxRetainedShaderBytes = 64u * 1024;
 
 		std::atomic<bool> g_psSetShaderHookInstalled{ false };
 		std::atomic<std::uint64_t> g_scopedBinds{ 0 };
@@ -59,7 +68,17 @@ namespace cs::features::catalog::hooks
 				e.has_technique_bits = (ctx.technique_bits != 0);
 			}
 
-			CatalogDB::Get().EnqueueShader(e);
+			// Retain a copy of the DXBC for deferred reflection. NOTHROW: a throwing allocation in this
+			// noexcept hot path would terminate the game. On failure or oversize, enqueue base-row-only.
+			if (len <= kMaxRetainedShaderBytes) {
+				std::unique_ptr<std::byte[]> buf(new (std::nothrow) std::byte[len]);
+				if (buf) {
+					std::memcpy(buf.get(), bytecode, len);
+					e.bytecode = std::move(buf);
+				}
+			}
+
+			CatalogDB::Get().EnqueueShader(std::move(e));
 		}
 	}
 
