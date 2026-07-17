@@ -7,7 +7,6 @@ description = "Light touch across the suite. Hable tonemap, modest bloom and vig
 [features.imagespace.settings]
 enabled = true
 style = 0
-force_with_enb = false
 tonemap_operator = 1
 exposure = 1.0
 lut_enable = false

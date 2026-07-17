@@ -156,7 +156,10 @@ namespace
 		}
 		switch (state.runtimeState) {
 		case cs::FeatureRuntimeState::kInactive:
-			ImGui::TextDisabled("Disabled. Set [feature].enabled = true in the TOML and restart to use it.");
+			if (detail.empty())
+				ImGui::TextDisabled("Disabled. Set [feature].enabled = true in the TOML and restart to use it.");
+			else
+				ImGui::TextDisabled("Disabled: %.*s", static_cast<int>(detail.size()), detail.data());
 			break;
 		case cs::FeatureRuntimeState::kFailed:
 			if (detail.empty()) {

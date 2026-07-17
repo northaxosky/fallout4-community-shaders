@@ -24,7 +24,6 @@
 #include "Render/RendererContext.h"
 #include "Render/Engine.h"
 #include "Utils/CSUtil.h"
-#include "Env.h"
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
 #include "Menu/Menu.h"
@@ -114,12 +113,6 @@ namespace cs::features
 		};
 
 		dirty |= ImGui::Checkbox("Enabled", &settings.enabled);
-
-		if (cs::env::IsENBLoaded()) {
-			ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: suite skips by default.");
-			dirty |= ImGui::Checkbox("Force-enable with ENB", &settings.forceWithENB);
-			ImGui::SetItemTooltip("Off (default): Imagespace yields the entire post-process chain to ENB. On: stack on top (may double-grade).");
-		}
 
 		ImGui::Separator();
 		ImGui::TextDisabled("Style");
@@ -231,8 +224,6 @@ namespace cs::features
 
 		ImGui::Separator();
 		ImGui::Text("Bokeh depth of field");
-		if (cs::env::IsENBLoaded())
-			ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.4f, 1.0f), "ENB detected: ours yields to ENB DOF.");
 		dirty |= ImGui::Checkbox("DOF enable", &settings.dofEnable);
 		ImGui::BeginDisabled(!settings.dofEnable);
 		ImGui::SliderFloat("Aperture", &settings.aperture, 0.0f, 0.5f, "%.3f", ImGuiSliderFlags_Logarithmic);

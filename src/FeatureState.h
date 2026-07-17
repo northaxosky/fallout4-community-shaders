@@ -11,6 +11,12 @@ namespace cs
 		kPixelShaderSwapBroker
 	};
 
+	enum class EnbPolicy
+	{
+		kRunAnyway,
+		kDeactivate
+	};
+
 	struct FeatureRequirement
 	{
 		std::string_view provider;

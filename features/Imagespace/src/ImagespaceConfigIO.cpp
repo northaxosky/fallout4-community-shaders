@@ -299,7 +299,6 @@ namespace cs::features::imagespace
 
 		if (!ReadBoolStrict(*settings, "enabled", "settings", s.enabled, a_error)
 			|| !ReadIntStrict(*settings, "style", "settings", 0, 4, s.style, a_error)
-			|| !ReadBoolStrict(*settings, "force_with_enb", "settings", s.forceWithENB, a_error)
 			|| !ReadIntStrict(*settings, "tonemap_operator", "settings", 0, 3, s.tonemapOperator, a_error)
 			|| !ReadFloatStrict(*settings, "exposure", "settings", 0.25f, 4.0f, s.exposure, a_error)
 			|| !ReadBoolStrict(*settings, "lut_enable", "settings", s.lutEnable, a_error)
@@ -452,7 +451,6 @@ namespace cs::features::imagespace
 
 		s.enabled           = readBool("enabled", s.enabled);
 		s.style             = readInt("style", s.style, 0, 4);
-		s.forceWithENB      = readBool("force_with_enb", s.forceWithENB);
 		s.tonemapOperator   = readInt("tonemap_operator", s.tonemapOperator, 0, 3);
 		s.exposure          = readFloat("exposure", s.exposure, 0.25f, 4.0f);
 		s.lutEnable         = readBool("lut_enable", s.lutEnable);
@@ -591,7 +589,6 @@ namespace cs::features::imagespace
 		auto& s = a_root.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
 		s.insert_or_assign("enabled", settings.enabled);
 		s.insert_or_assign("style", static_cast<std::int64_t>(settings.style));
-		s.insert_or_assign("force_with_enb", settings.forceWithENB);
 		s.insert_or_assign("tonemap_operator", static_cast<std::int64_t>(settings.tonemapOperator));
 		s.insert_or_assign("exposure", static_cast<double>(settings.exposure));
 		s.insert_or_assign("lut_enable", settings.lutEnable);

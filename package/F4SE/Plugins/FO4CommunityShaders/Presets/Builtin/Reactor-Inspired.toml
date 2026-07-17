@@ -7,7 +7,6 @@ description = "Evokes the warm-midtone, gentle-S-curve character of Reactor ENB.
 [features.imagespace.settings]
 enabled = true
 style = 0
-force_with_enb = false
 tonemap_operator = 1
 exposure = 1.05
 lut_enable = true

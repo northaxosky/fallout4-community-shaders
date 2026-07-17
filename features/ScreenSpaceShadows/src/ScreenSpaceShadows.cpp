@@ -15,7 +15,6 @@
 
 #include <toml++/toml.hpp>
 
-#include "Env.h"
 #include "Log.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
@@ -97,9 +96,7 @@ namespace cs::features
 				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "shadow_contrast", a_candidate.shadowContrast, 0.0f, 4.0f),
 					"shadow_contrast", "number", a_error)
 				|| !AcceptSetting(feature_config::ReadUnsignedInteger(*settingsTable, "sample_count", sampleCount, 1, 4),
-					"sample_count", "integer in range 1..4", a_error)
-				|| !AcceptSetting(feature_config::ReadBool(*settingsTable, "force_with_enb", a_candidate.forceWithEnb),
-					"force_with_enb", "boolean", a_error)) {
+					"sample_count", "integer in range 1..4", a_error)) {
 				return false;
 			}
 
@@ -151,7 +148,6 @@ namespace cs::features
 		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
 		settings.insert_or_assign("sample_count", _settings.sampleCount);
-		settings.insert_or_assign("force_with_enb", _settings.forceWithEnb);
 
 		std::error_code ec;
 		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
@@ -218,12 +214,6 @@ namespace cs::features
 
 	bool ScreenSpaceShadows::IsShadowMaskReady()
 	{
-		// Must match the ENB gate in OnPreDeferredLights/OnPreSunLightDraw: under ENB (without the
-		// force opt-in) those bail and never bind t6, so the injected shader would sample a null t6
-		// and black out the sun. Report not-ready so the vanilla (undefined) directional compiles.
-		if (cs::env::IsENBLoaded() && !_settings.forceWithEnb) {
-			return false;
-		}
 		return _started.load(std::memory_order_acquire) && _settings.enabled && EnsureResources();
 	}
 
@@ -330,10 +320,6 @@ namespace cs::features
 	void ScreenSpaceShadows::OnPreDeferredLights()
 	{
 		if (!_started.load(std::memory_order_acquire) || !_settings.enabled) {
-			return;
-		}
-
-		if (cs::env::IsENBLoaded() && !_settings.forceWithEnb) {
 			return;
 		}
 
@@ -469,10 +455,6 @@ namespace cs::features
 		if (!_resourcesReady.load(std::memory_order_acquire) || !_maskTexture) {
 			return;
 		}
-		if (cs::env::IsENBLoaded() && !_settings.forceWithEnb) {
-			return;
-		}
-
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) {
 			return;
@@ -528,7 +510,6 @@ namespace cs::features
 			_settings.sampleCount = static_cast<std::uint32_t>(sampleCount);
 			changed = true;
 		}
-		changed |= ImGui::Checkbox("Force with ENB", &_settings.forceWithEnb);
 		if (changed) {
 			SaveSettings();
 		}

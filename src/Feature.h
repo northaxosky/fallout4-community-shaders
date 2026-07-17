@@ -24,6 +24,7 @@ namespace cs
 		virtual std::string_view GetName() const = 0;
 		virtual std::vector<FeatureRequirement> GetRequirements() const { return {}; }
 		virtual bool HasCapability(FeatureCapability /*a_capability*/) const noexcept { return false; }
+		virtual EnbPolicy GetEnbPolicy() const { return EnbPolicy::kRunAnyway; }
 		virtual bool IsInstalled() const;
 
 		const FeatureState& GetState() const noexcept { return _state; }

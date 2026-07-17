@@ -1,5 +1,6 @@
 #include "Feature.h"
 
+#include "Env.h"
 #include "Log.h"
 #include "Plugin.h"
 #include "Settings/FeatureConfig.h"
@@ -560,11 +561,16 @@ namespace cs
 						feature->GetName());
 				}
 
+				const bool deactivatedForEnb =
+					feature->GetEnbPolicy() == EnbPolicy::kDeactivate && cs::env::IsENBLoaded();
+				const bool desiredActive = activation.enabled && !deactivatedForEnb;
 				feature->SetState({
 					.installed = true,
-					.desiredActive = activation.enabled,
-					.runtimeState = activation.enabled ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-					.detail = activation.enabled ? std::string{} : "Feature is inactive by TOML configuration"
+					.desiredActive = desiredActive,
+					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
+					.detail = deactivatedForEnb
+						? "ENB is active; Community Shaders yields its overlapping effects to ENB."
+						: std::string{}
 				});
 			} catch (const std::exception& e) {
 				failConfiguration(feature, e.what());

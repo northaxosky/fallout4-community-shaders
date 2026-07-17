@@ -23,7 +23,6 @@
 #include "Render/RendererContext.h"
 #include "Render/Engine.h"
 #include "Utils/CSUtil.h"
-#include "Env.h"
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
 #include "Menu/Menu.h"
@@ -540,8 +539,6 @@ namespace cs::features
 	void Imagespace::RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex)
 	{
 		if (!settings.dofEnable) return;
-		// Yield to ENB DOF without changing the saved preference.
-		if (cs::env::IsENBLoaded()) return;
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) return;
@@ -725,15 +722,6 @@ namespace cs::features
 		detail::AssertRenderThread("RunFrame");
 		if (!settings.enabled)
 			return;
-		// Suite-wide ENB yield; bForceWithENB opts into stacking.
-		static bool enbSuppressLogged = false;
-		if (cs::env::IsENBLoaded() && !settings.forceWithENB) {
-			if (!enbSuppressLogged) {
-				L->info("Suite skipped: ENB loaded and bForceWithENB=false");
-				enbSuppressLogged = true;
-			}
-			return;
-		}
 
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData)
@@ -801,9 +789,7 @@ namespace cs::features
 
 		const bool wantAdaptive = settings.adaptiveExposure;
 		const bool wantBloom    = resolved.bloomEnable;
-		// Yield sun additions to ENB unless suite-wide stacking is enabled.
-		const bool enbYield     = cs::env::IsENBLoaded() && !settings.forceWithENB;
-		const bool wantLensFlare = resolved.lensFlareEnable && !enbYield;
+		const bool wantLensFlare = resolved.lensFlareEnable;
 		const bool wantComposite = (settings.tonemapOperator != 0) || wantBloom || resolved.vignetteEnable
 			|| resolved.caEnable || settings.sharpenEnable || (resolved.lutEnable && resolved.lutSRV)
 			|| wantLensFlare || resolved.dirtEnable;

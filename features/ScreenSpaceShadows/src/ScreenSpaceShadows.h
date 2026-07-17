@@ -20,6 +20,7 @@ namespace cs::features
 		std::string GetCategory() const override { return "Lighting"; }
 		std::string GetFeatureSummary() const override { return "Sun/moon screen-space contact shadows via Bend Studio's ray-marched depth technique."; }
 		std::vector<FeatureRequirement> GetRequirements() const override { return {}; }
+		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
@@ -37,7 +38,6 @@ namespace cs::features
 			float         bilinearThreshold = 0.02f;
 			float         shadowContrast = 1.0f;
 			std::uint32_t sampleCount = 1;
-			bool          forceWithEnb = false;
 		};
 
 	private:

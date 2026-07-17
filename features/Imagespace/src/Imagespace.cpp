@@ -23,7 +23,6 @@
 #include "Render/RendererContext.h"
 #include "Render/Engine.h"
 #include "Utils/CSUtil.h"
-#include "Env.h"
 #include "ImagespaceConfigIO.h"
 #include "Log.h"
 #include "Menu/Menu.h"
@@ -62,14 +61,12 @@ namespace cs::features
 		}
 	}
 
-	// Engine DOF vfuncs return false while ours runs; forceWithENB lets users stack with ENB.
 	struct ImageSpaceEffectDepthOfField_IsActive
 	{
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
 			const auto& s = Imagespace::GetSingleton()->settings;
-			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
-			return (!s.dofEnable || enbYield) && func(This);
+			return !s.dofEnable && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -78,8 +75,7 @@ namespace cs::features
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
 			const auto& s = Imagespace::GetSingleton()->settings;
-			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
-			return (!s.dofEnable || enbYield) && func(This);
+			return !s.dofEnable && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};
@@ -88,8 +84,7 @@ namespace cs::features
 		static bool thunk(RE::ImageSpaceEffect* This)
 		{
 			const auto& s = Imagespace::GetSingleton()->settings;
-			const bool enbYield = cs::env::IsENBLoaded() && !s.forceWithENB;
-			return (!s.dofEnable || enbYield) && func(This);
+			return !s.dofEnable && func(This);
 		}
 		static inline REL::Relocation<decltype(thunk)> func;
 	};

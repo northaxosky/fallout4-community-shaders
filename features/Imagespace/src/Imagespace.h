@@ -21,6 +21,7 @@ namespace cs::features
 		std::string_view GetName() const override { return "Imagespace"; }
 		std::string GetFeatureSummary() const override { return "Tonemapping, LUT, adaptive exposure, bloom, and lens effects replacing the engine's imagespace stack."; }
 		std::string GetCategory() const override { return "Post-process"; }
+		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		std::optional<bool> GetLegacyActivationIntent(const toml::table& a_config) const override;
@@ -56,7 +57,6 @@ namespace cs::features
 		{
 			bool        enabled            = true;
 			int         style              = static_cast<int>(Style::kStandard);
-			bool        forceWithENB       = false;
 
 			// Tonemap + LUT.
 			int         tonemapOperator    = 1;

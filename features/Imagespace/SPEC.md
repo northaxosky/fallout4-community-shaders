@@ -22,7 +22,7 @@ Layered model:
 
 ## Invariants
 
-- ENB is treated as owner of its overlapping effects unless `bForceWithENB=true`.
+- Imagespace deactivates while ENB is active.
 - Adaptive exposure generates the log-luma pyramid with per-mip SRVs and per-mip UAVs, then reads the full chain only during the exposure pass.
 - Composite output alpha stays `1.0`: FO4's `kMain` runtime format is `R11G11B10_FLOAT`, so there is no stored framebuffer alpha to preserve.
 - Lens dirt mask is 256x256 R8 procedural noise generated once at first composite dispatch; modulated by sun-glow magnitude and applied in HDR linear domain post-bloom-add, pre-exposure.
@@ -60,7 +60,7 @@ Categories: `clear`, `overcast`, `fog`, `rain`, `radstorm`, `snow`, `interior`, 
 
 Each `[weather.<category>]` table may set any subset of: `exposure`, `lut_enable`, `lut_path`, `lut_strength`, `bloom_enable`, `bloom_threshold`, `bloom_intensity`, `bloom_mip_weights`, `vignette_enable`, `vignette_intensity`, `ca_enable`, `ca_intensity`, `lens_flare_enable`, `lens_flare_intensity`, `lens_flare_ghosts`, `dirt_enable`, `dirt_intensity`. Unset keys fall through to `[settings]`.
 
-NOT overlayable: all `dof_*`/`aperture`/`focus_*` keys (hook-gated), and all global keys (`enabled`, `style`, `force_with_enb`, `tonemap_operator`, `adaptive_exposure*`, `exposure_key/min/max`, `bloom_mips`, `sharpen_*`).
+NOT overlayable: all `dof_*`/`aperture`/`focus_*` keys (hook-gated), and all global keys (`enabled`, `style`, `tonemap_operator`, `adaptive_exposure*`, `exposure_key/min/max`, `bloom_mips`, `sharpen_*`).
 
 ### Blend math
 
@@ -196,5 +196,4 @@ Rejects:
 - Any case-insensitive collision with an existing preset name (builtin or user).
 
 `PresetManager::Save` re-checks file existence right before write (TOCTOU guard between validate and write).
-
 
