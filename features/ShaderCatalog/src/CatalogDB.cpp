@@ -22,7 +22,7 @@
 
 namespace cs::features::catalog
 {
-	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
+	namespace { auto* L = cs::log::Get("cs.feature.shadercatalog"); }
 
 	namespace
 	{

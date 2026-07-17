@@ -13,7 +13,7 @@
 
 namespace cs::features::framegeneration
 {
-	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx12"); }
+	namespace { auto* L = cs::log::Get("cs.feature.framegeneration.dx12"); }
 
 
 void DX12SwapChain::CreateD3D12Device(IDXGIAdapter* a_adapter)

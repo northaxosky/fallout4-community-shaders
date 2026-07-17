@@ -20,7 +20,7 @@
 
 namespace cs::features
 {
-	namespace { auto* L = cs::log::Get("cs.feature.perfoverlay"); }
+	namespace { auto* L = cs::log::Get("cs.feature.performanceoverlay"); }
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\PerformanceOverlay.toml";
 	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };

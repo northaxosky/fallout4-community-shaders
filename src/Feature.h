@@ -7,6 +7,7 @@
 #include <string_view>
 #include <vector>
 
+#include <spdlog/spdlog.h>
 #include <toml++/toml.hpp>
 
 struct IDXGIAdapter;
@@ -22,6 +23,7 @@ namespace cs
 		virtual ~Feature() = default;
 
 		virtual std::string_view GetName() const = 0;
+		spdlog::logger* Log() const;
 		virtual std::vector<FeatureRequirement> GetRequirements() const { return {}; }
 		virtual bool HasCapability(FeatureCapability /*a_capability*/) const noexcept { return false; }
 		virtual EnbPolicy GetEnbPolicy() const { return EnbPolicy::kRunAnyway; }
@@ -127,9 +129,10 @@ namespace cs
 		bool HasLoadFailed() const noexcept { return _loadFailed; }
 		const std::string& LoadFailureReason() const noexcept { return _loadFailureReason; }
 
-		FeatureState _state;
-		bool        _loadFailed = false;
-		std::string _loadFailureReason;
+		FeatureState            _state;
+		mutable spdlog::logger* _log = nullptr;
+		bool                    _loadFailed = false;
+		std::string             _loadFailureReason;
 	};
 
 #ifdef TRACY_SUPPORT

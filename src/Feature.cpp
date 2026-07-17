@@ -331,6 +331,23 @@ namespace cs
 		return ActivationResult::Active();
 	}
 
+	spdlog::logger* Feature::Log() const
+	{
+		if (_log) {
+			return _log;
+		}
+
+		const auto featureName = GetName();
+		std::string loggerName = "cs.feature.";
+		loggerName.reserve(loggerName.size() + featureName.size());
+		for (const char c : featureName) {
+			loggerName.push_back(c >= 'A' && c <= 'Z' ? static_cast<char>(c + ('a' - 'A')) : c);
+		}
+
+		_log = cs::log::Get(loggerName.c_str());
+		return _log;
+	}
+
 	std::string Feature::GetPresetKey() const
 	{
 		const auto name = GetName();

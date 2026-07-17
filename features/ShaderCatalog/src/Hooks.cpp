@@ -18,7 +18,7 @@ namespace cs::features::catalog::hooks
 {
 	namespace
 	{
-		auto* L = cs::log::Get("cs.feature.catalog");
+		auto* L = cs::log::Get("cs.feature.shadercatalog");
 
 		// Retain DXBC up to this size for deferred reflection; large enough for the ~25KB deferred
 		// shaders while bounding worst-case hot-path allocation. Larger blobs enqueue base-row-only.

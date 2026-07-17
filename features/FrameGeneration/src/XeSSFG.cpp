@@ -8,8 +8,8 @@
 namespace cs::features::framegeneration
 {
 	namespace {
-		auto* L         = cs::log::Get("cs.feature.framegen.xess");
-		auto* kInternal = cs::log::Get("cs.feature.framegen.xess.internal");
+		auto* L         = cs::log::Get("cs.feature.framegeneration.xess");
+		auto* kInternal = cs::log::Get("cs.feature.framegeneration.xess.internal");
 	}
 
 XeSSFG::~XeSSFG()

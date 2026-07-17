@@ -54,6 +54,7 @@ find_package(directx-headers CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
 if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
@@ -146,6 +147,17 @@ configure_host_test(FeatureStateTests)
 
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
+
+add_executable(LogThrottleTests
+	tests/LogThrottleTests.cpp
+	include/LogThrottle.h
+)
+configure_host_test(LogThrottleTests)
+target_include_directories(LogThrottleTests PRIVATE "${CMAKE_SOURCE_DIR}/include")
+target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
+
+add_test(NAME LogThrottle COMMAND LogThrottleTests)
+set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
 set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-shader-roundtrip.ps1")
 add_test(

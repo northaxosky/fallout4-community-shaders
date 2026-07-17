@@ -26,7 +26,7 @@
 
 namespace cs::features::catalog::subclass_hooks
 {
-	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
+	namespace { auto* L = cs::log::Get("cs.feature.shadercatalog"); }
 
 	namespace
 	{

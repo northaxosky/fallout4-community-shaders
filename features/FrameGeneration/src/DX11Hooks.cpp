@@ -16,7 +16,7 @@
 
 namespace cs::features::framegeneration
 {
-	namespace { auto* L = cs::log::Get("cs.feature.framegen.dx11"); }
+	namespace { auto* L = cs::log::Get("cs.feature.framegeneration.dx11"); }
 
 
 decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;

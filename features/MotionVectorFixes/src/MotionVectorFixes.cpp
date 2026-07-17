@@ -12,7 +12,7 @@
 
 namespace cs::features
 {
-	namespace { auto* L = cs::log::Get("cs.feature.mv"); }
+	namespace { auto* L = cs::log::Get("cs.feature.motionvectorfixes"); }
 
 	// Local mirror until Dear-Modding-FO4/commonlibf4 exposes BSShaderProperty::flags.
 	struct __declspec(novtable) BSShaderProperty : public RE::NiShadeProperty

@@ -6,7 +6,7 @@
 
 namespace cs::features::framegeneration
 {
-	namespace { auto* L = cs::log::Get("cs.feature.framegen.dlssg"); }
+	namespace { auto* L = cs::log::Get("cs.feature.framegeneration.dlssg"); }
 
 void StreamlineFG::SetD3DDevice(ID3D12Device* a_device)
 {

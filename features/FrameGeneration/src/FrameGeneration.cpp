@@ -28,7 +28,7 @@ namespace cs::features
 	using namespace framegeneration;
 	using cs::engine::RenderTarget;
 	using cs::engine::DepthStencilTarget;
-	namespace { auto* L = cs::log::Get("cs.feature.framegen"); }
+	namespace { auto* L = cs::log::Get("cs.feature.framegeneration"); }
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.toml";
 

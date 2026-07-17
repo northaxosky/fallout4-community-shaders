@@ -25,7 +25,7 @@
 
 namespace cs::features
 {
-	namespace { auto* L = cs::log::Get("cs.feature.catalog"); }
+	namespace { auto* L = cs::log::Get("cs.feature.shadercatalog"); }
 
 	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderCatalog.toml";
 
