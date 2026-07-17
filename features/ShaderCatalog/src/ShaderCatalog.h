@@ -41,8 +41,7 @@ namespace cs::features
 			bool        enabled = false;
 			int         writerFlushIntervalMs = 5000;
 			std::string catalogPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\shader-catalog.sqlite";
-			// BSShader subclass technique attribution. Auto-skipped on runtimes whose vtable/member
-			// layout isn't verified (prevents next-gen CTD); the swap broker is unaffected.
+			// BSShader subclass technique attribution skips unverified layouts to prevent next-gen CTDs without affecting the swap broker.
 			bool        subclassAttribution = true;
 		};
 

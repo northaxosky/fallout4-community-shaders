@@ -20,8 +20,7 @@ struct sqlite3_stmt;
 
 namespace cs::features::catalog
 {
-	// Enqueued by the Create*Shader thunks. Move-only: it can own a heap copy of the DXBC blob
-	// so the writer can reflect it off the hot path.
+	// Create*Shader thunks enqueue move-only entries that may own a heap DXBC copy for off-hot-path reflection.
 	struct CatalogEntry
 	{
 		std::array<uint8_t, 20> sha1_bytes{};

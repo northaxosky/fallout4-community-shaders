@@ -38,8 +38,7 @@ namespace cs
 		// Case-insensitive match on display name. Used for marker payloads that supply a bare name.
 		const PresetMeta* FindByName(std::string_view a_name, bool a_preferUser = true) const;
 
-		// Two-phase apply: stage all feature scratch, then no-throw swap all live state before finalize.
-		// Finalize failures leave live state consistent but skip [preset] persistence for next-boot safety.
+		// Stage all features, no-throw swap live state, then finalize; failures preserve consistency and skip [preset] persistence for next-boot safety.
 		bool Apply(const PresetMeta& a_meta, std::string& a_err);
 
 		// Saves live participant state; a_allowOverwrite=false re-checks existence to narrow TOCTOU.

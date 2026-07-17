@@ -5,8 +5,7 @@
 
 namespace cs::features::catalog::subclass_hooks
 {
-	// Patch ReloadShaders (0x0B) and SetupTechnique (0x02) to attribute explicit and runtime shader rows.
-	// Idempotent: guarded by a process-wide once-flag.
+	// Idempotently patch ReloadShaders (0x0B) and SetupTechnique (0x02) once to attribute explicit and runtime shader rows.
 	void InstallAll(std::size_t a_pixelShadersOffset);
 
 	struct InstallStats

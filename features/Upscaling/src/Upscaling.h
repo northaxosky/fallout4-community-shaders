@@ -93,8 +93,7 @@ public:
 	UpscaleMethod upscaleMethodNoMenu = UpscaleMethod::kDisabled;
 	UpscaleMethod upscaleMethod = UpscaleMethod::kDisabled;
 
-	// True for the current frame once the encode pass produced valid masks (opaque captured + dispatched).
-	// Backends read this to decide whether to submit reactive/transparency hints.
+	// True after this frame's encode captures opaque input and dispatches valid masks; backends use it to submit reactive/transparency hints.
 	bool masksValidThisFrame = false;
 
 	// Render target management.

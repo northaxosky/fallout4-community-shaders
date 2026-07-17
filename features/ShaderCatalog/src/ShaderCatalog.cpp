@@ -64,9 +64,8 @@ namespace cs::features
 			return v;
 		}
 
-		// Coarse engine family for the catalog's engine_runtime enum (constrained to OG/NG/AE).
-		// 1.10.163=OG; 1.10.980=AE; 1.10.984 and the later 1.11.x next-gen line=NG. The exact build
-		// is recorded separately (engine_build_hash) so builds within a family stay distinguishable.
+		// Catalog engine_runtime is constrained to OG/NG/AE: 1.10.163=OG; 1.10.980=AE; 1.10.984 and the later 1.11.x next-gen line=NG.
+		// engine_build_hash records the exact build so builds within a family remain distinguishable.
 		const char* RuntimeLabel(const RuntimeVersion& v)
 		{
 			if (!v.valid) return "OG";
@@ -89,8 +88,7 @@ namespace cs::features
 			return std::string(buf);
 		}
 
-		// BSShader::pixelShaders member offset: 0xB0 on the 1.10.x line (CommonLibF4), 0x128 on next-gen
-		// 1.11.x (3 inserted CRITICAL_SECTIONs, +0x78; confirmed vs fallout4-re 1.11.221 PDB).
+		// BSShader::pixelShaders member offset: 0xB0 on 1.10.x (CommonLibF4); 0x128 on next-gen 1.11.x due to 3 inserted CRITICAL_SECTIONs (+0x78), confirmed vs fallout4-re 1.11.221 PDB.
 		std::size_t PixelShadersOffset(const RuntimeVersion& v)
 		{
 			if (v.valid && v.major == 1 && v.minor == 11)
@@ -279,8 +277,7 @@ namespace cs::features
 			return;
 		}
 
-		// Patch subclass reload/setup slots before D3D shader-creation hooks run.
-		// Skipping unverified runtimes leaves the catalog functional, minus subclass names.
+		// Patch subclass reload/setup slots before D3D shader-creation hooks; unverified runtimes retain catalog function without subclass names.
 		if (_settings.subclassAttribution && RuntimeSupportsSubclassAttribution(rtVersion)) {
 			catalog::subclass_hooks::InstallAll(PixelShadersOffset(rtVersion));
 		} else {

@@ -4,8 +4,7 @@
 
 namespace cs
 {
-	// Clears only 8 CS slots; wider sweeps stomp engine high-slot bindings and cause dark boxes.
-	// Not re-entrant.
+	// Clears only 8 CS slots; wider sweeps stomp engine high-slot bindings and cause dark boxes. Not re-entrant.
 	class ComputeScope
 	{
 	public:

@@ -43,8 +43,7 @@ namespace cs
 			return;
 		}
 
-		// Defer to an existing handle in case another plugin (e.g. an ENB shim) loaded the interposer
-		// first; that handle is borrowed and must not be freed by us.
+		// Borrow any interposer handle loaded first by another plugin (e.g. an ENB shim); do not free it.
 		interposer = GetModuleHandleW(L"sl.interposer.dll");
 		if (!interposer) {
 			interposer = LoadLibraryW(L"Data/F4SE/Plugins/Streamline/sl.interposer.dll");

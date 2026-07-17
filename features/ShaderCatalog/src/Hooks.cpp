@@ -20,8 +20,7 @@ namespace cs::features::catalog::hooks
 	{
 		auto* L = cs::log::Get("cs.feature.shadercatalog");
 
-		// Retain DXBC up to this size for deferred reflection; large enough for the ~25KB deferred
-		// shaders while bounding worst-case hot-path allocation. Larger blobs enqueue base-row-only.
+		// Retain DXBC for deferred reflection up to the cap, covering ~25KB deferred shaders while bounding hot-path allocation; larger blobs enqueue base-row-only.
 		constexpr SIZE_T kMaxRetainedShaderBytes = 64u * 1024;
 
 		std::atomic<bool> g_psSetShaderHookInstalled{ false };
@@ -68,8 +67,7 @@ namespace cs::features::catalog::hooks
 				e.has_technique_bits = (ctx.technique_bits != 0);
 			}
 
-			// Retain a copy of the DXBC for deferred reflection. NOTHROW: a throwing allocation in this
-			// noexcept hot path would terminate the game. On failure or oversize, enqueue base-row-only.
+			// Retain a DXBC copy for deferred reflection; NOTHROW avoids termination from allocation in this noexcept hot path, and failures/oversize enqueue base-row-only.
 			if (len <= kMaxRetainedShaderBytes) {
 				std::unique_ptr<std::byte[]> buf(new (std::nothrow) std::byte[len]);
 				if (buf) {

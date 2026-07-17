@@ -388,9 +388,8 @@ namespace cs::features
 	{
 		auto* self = GetSingleton();
 
-		// Consume the key-up paired with a capture we fired, BEFORE any gate, so a menu opening
-		// (or the feature being disabled) between down and up can't strand this state and later
-		// eat an unrelated key-up. SC_KEYMENU guard; uniform across chords.
+		// Consume the key-up paired with a fired capture BEFORE any gate, so a menu opening or feature disable cannot strand state and eat an unrelated key-up.
+		// SC_KEYMENU guard; uniform across chords.
 		if (self->_captureReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
 			&& a_wparam == self->_captureReleaseVk) {
 			self->_captureReleaseVk = 0;

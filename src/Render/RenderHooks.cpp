@@ -33,14 +33,12 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 		bool g_preSunLightDrawInstalled    = false;
-		// Set by DeferredLightsImpl_Hook around the engine's deferred-lighting call; read by the
-		// PreSunLightDraw thunk to restrict binding to that phase (DrawTriShape is the generic
-		// geometry draw and would otherwise fire thousands of times per frame).
+		// DeferredLightsImpl_Hook sets g_insideDeferredLightsImpl around the engine call; PreSunLightDraw reads it to limit binding to that phase.
+		// DrawTriShape is generic and otherwise fires thousands of times per frame.
 		bool g_insideDeferredLightsImpl    = false;
 
-		// Registration must run on the startup thread before any render hook fires. Enforced in
-		// release too: MarkRegistrationClosed runs on the first thunk, and a late or off-thread
-		// Register* is rejected (logged) instead of mutating the vectors while Dispatch may iterate.
+		// Registration must run on the startup thread before any render hook; the first thunk calls MarkRegistrationClosed, enforcing this in release.
+		// Late or off-thread Register* is rejected (logged), never mutating vectors while Dispatch iterates.
 		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
 		std::atomic_bool g_registrationClosed{ false };
 
@@ -103,13 +101,10 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// write_thunk_call on the `call BSGraphics::SetDirtyStates(bool,bool)` inside the generic
-		// DrawTriShape (REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}, AE-verified). SetDirtyStates
-		// flushes the pending PS SRV binds (it leaves t6 NULL for the sun draw), so dispatching AFTER
-		// func() lands in the window between the SRV flush and the DrawIndexed. R8D/R9D still hold
-		// DrawTriShape's startIndex/primitiveCount at the call (verified: the prologue does mov r15d,r9d
-		// without clobbering r9, and nothing writes r8/r9 before the call). primitiveCount==2 selects
-		// the fullscreen DrawIndexed(6) light passes; the phase flag restricts to DeferredLightsImpl.
+		// write_thunk_call targets `call BSGraphics::SetDirtyStates(bool,bool)` in generic DrawTriShape at REL::ID 763320/2276846/2276846 +
+		// {0x9C,0x9A,0x9A}, AE-verified. SetDirtyStates flushes pending PS SRV binds and leaves t6 NULL for the sun draw; dispatch AFTER func() lands between the SRV flush and DrawIndexed.
+		// R8D/R9D hold DrawTriShape's startIndex/primitiveCount: prologue mov r15d,r9d does not clobber r9, and nothing writes r8/r9 before the call.
+		// primitiveCount==2 selects fullscreen DrawIndexed(6); the DeferredLightsImpl phase flag restricts it.
 		struct PreSunLightDraw_Hook
 		{
 			static void thunk(bool a_force, bool a_clear, std::uint32_t /*a_startIndex*/, std::uint32_t a_primitiveCount)
@@ -150,8 +145,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// REL::ID 587723/2318322/2318322 + {0xE1,0xC5,0xC5}: shared viewport re-arm E8 after upscaling.
-		// Source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
+		// REL::ID 587723/2318322/2318322 + {0xE1,0xC5,0xC5}: shared viewport re-arm E8 after upscaling; source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 		void EnsurePostDynResViewportInstalled()
 		{
 			if (g_postDynResViewportInstalled) {
@@ -175,8 +169,7 @@ namespace cs::engine
 			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 		}
 
-		// REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}: the SetDirtyStates call inside DrawTriShape.
-		// Source: Fallout4RE AE (1.11.221) disasm + version.bin, cross-checked against NG.
+		// REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}: SetDirtyStates call inside DrawTriShape; source: Fallout4RE AE (1.11.221) disasm + version.bin, cross-checked against NG.
 		void EnsurePreSunLightDrawInstalled()
 		{
 			if (g_preSunLightDrawInstalled) {
@@ -218,8 +211,7 @@ namespace cs::engine
 		EnsureDeferredLightsImplInstalled();
 	}
 
-	// REL::ID 728427/2318313/2318313 from DrawWorld::Render_PreUI anchor walk; NG/AE bodies match.
-	// Source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
+	// REL::ID 728427/2318313/2318313 from DrawWorld::Render_PreUI anchor walk, with matching NG/AE bodies; source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PostDeferredComposite")) return;

@@ -427,8 +427,7 @@ namespace cs
 			entry.feature->CommitStagedSwap();
 		}
 
-		// Phase 2b: persist and rebuild derived resources; failures log but do NOT abort other features.
-		// Live state stays consistent even when a failing feature's on-disk snapshot is stale.
+		// Phase 2b: persist and rebuild derived resources; failures log, do NOT abort other features, and leave live state consistent but on-disk snapshots stale.
 		std::vector<std::string> finalizeErrors;
 		for (const auto& entry : staged) {
 			if (!featureManager.PrepareRuntimeCallback(

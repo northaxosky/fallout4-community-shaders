@@ -16,8 +16,7 @@ namespace cs::input
 		bool          ctrl  = false;
 		bool          alt   = false;
 
-		// Parses "Shift+F11", "F10", "Ctrl+F9"; "none"/"" -> unbound. a_ok (if given) reports spec
-		// validity: true for a real chord or the deliberate unbind, false for a malformed spec.
+		// Parse "Shift+F11", "F10", or "Ctrl+F9"; "none"/"" deliberately unbinds, and a_ok distinguishes valid chords/unbinds from malformed specs.
 		static Hotkey Parse(std::string_view a_spec, bool* a_ok = nullptr);
 
 		bool IsBound() const noexcept { return vk != 0; }

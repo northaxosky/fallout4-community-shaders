@@ -441,8 +441,7 @@ namespace cs
 		if (a_feature.IsHealthy()) {
 			return PrepareRuntimeCallback(a_feature, a_phase);
 		}
-		// Only disabled-by-config (installed + kInactive) features expose their settings so they
-		// can be pre-configured before enabling; degraded/failed/pending/uninstalled do not draw.
+		// Only installed kInactive features draw settings before enabling; degraded, failed, pending, and uninstalled features do not.
 		return state.runtimeState == FeatureRuntimeState::kInactive;
 	}
 

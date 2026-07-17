@@ -786,8 +786,7 @@ namespace cs
 				if (!includeFeature)
 					continue;
 
-				// Group by real category regardless of active state, so a disabled feature stays
-				// in its section instead of being dumped into "Misc".
+				// Group by real category regardless of state so disabled features remain in their section instead of "Misc".
 				std::string category = "Misc";
 				try {
 					auto reported = feat->GetCategory();
@@ -1068,9 +1067,7 @@ namespace cs
 		if (m._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-		// While the menu is open, swallow all keyboard/mouse input so nothing leaks to the game;
-		// ImGui was already fed above, and menu/feature hotkeys ran before this point. Non-input
-		// messages still pass through.
+		// With the menu open, swallow keyboard/mouse input after ImGui and hotkeys; pass non-input messages through.
 		if (m._open && m._imguiInited) {
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||

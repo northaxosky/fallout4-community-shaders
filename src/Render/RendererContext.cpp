@@ -6,8 +6,7 @@ namespace cs::engine
 	{
 		using Context = RE::BSGraphics::Context;
 
-		// Main Context global: OG/NG/AE 0x061DDC68/0x03624C98/0x038CAA98; matches engine TLS fallback.
-		// Source: Fallout4RE knowledge/cross-runtime/bsgraphics-active-context.md (Option 2).
+		// Main Context global: OG/NG/AE 0x061DDC68/0x03624C98/0x038CAA98, matching engine TLS fallback; source: Fallout4RE knowledge/cross-runtime/bsgraphics-active-context.md (Option 2).
 		static REL::Relocation<Context**> ptr{ REL::ID({ 33539, 2704428, 2704428 }) };
 		return ptr ? *ptr : nullptr;
 	}

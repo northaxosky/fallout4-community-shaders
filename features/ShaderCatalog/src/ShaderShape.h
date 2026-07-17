@@ -6,8 +6,7 @@
 
 namespace cs::features::catalog
 {
-	// Structural fingerprint extracted from a shader's DXBC via D3DReflect + D3DDisassemble.
-	// Unset optionals map to SQL NULL; extracted==false means reflect AND disasm both failed.
+	// DXBC structural fingerprint from D3DReflect + D3DDisassemble; unset optionals map to SQL NULL, and extracted==false means both failed.
 	struct ShaderShape
 	{
 		bool extracted = false;
@@ -26,7 +25,6 @@ namespace cs::features::catalog
 		std::optional<std::string> resource_summary;
 	};
 
-	// Reflect + disassemble a DXBC blob into a ShaderShape. Device-free and thread-safe
-	// (no COM apartment required). Returns false only when both passes fail.
+	// Reflect and disassemble DXBC into ShaderShape without a device or COM apartment; thread-safe and false only if both passes fail.
 	bool ExtractShaderShape(const void* dxbc, std::size_t len, ShaderShape& out);
 }

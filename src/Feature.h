@@ -48,8 +48,7 @@ namespace cs
 		// Runs after all features' Load(). Defer here to wrap hooks installed in another feature's Load().
 		virtual void OnPostPostLoad() {}
 
-		// A feature may call FailLoad() from within Load() to signal a recoverable failure; the
-		// manager then skips it (and anything depending on it) instead of treating it as loaded.
+		// FailLoad() marks a recoverable Load() failure so the manager skips the feature and its dependents.
 		void FailLoad(std::string a_reason) noexcept
 		{
 			_loadFailed = true;
@@ -111,8 +110,7 @@ namespace cs
 									 const PresetApplyContext& /*a_ctx*/,
 									 std::string& /*a_err*/) { return true; }
 
-		// Phase 2a swaps scratch into live state only; no throw, no I/O, all staged features first.
-		// Phase 2b persists TOML and rebuilds derived resources; failures are logged per feature.
+		// Phase 2a no-throw swaps all staged state before phase 2b persists TOML and rebuilds resources; log failures per feature.
 		virtual void CommitStagedSwap() noexcept {}
 		virtual void CommitStagedFinalize() {}
 
@@ -173,9 +171,7 @@ namespace cs
 
 		// Runtime callback boundaries revalidate, quarantine, and compact without unloading.
 		bool PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept;
-		// Menu-draw gate: also lets installed, non-failed but inactive/degraded features render
-		// their settings so they can be configured before activation. Active features still get
-		// the full runtime revalidation.
+		// Let installed non-failed inactive/degraded features draw settings before activation; fully revalidate active features.
 		bool PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept;
 		void QuarantineRuntimeCallback(
 			Feature& a_feature,
@@ -183,8 +179,7 @@ namespace cs
 			std::string_view a_reason) noexcept;
 		void FinishRuntimeCallbackPass() noexcept;
 
-		// Fan out OnD3D11Ready to every loaded feature exactly once, on first D3D11 device
-		// creation. Driven from the device-creation hook independently of Streamline init success.
+		// Fan out OnD3D11Ready once per loaded feature on first D3D11 device creation, independent of Streamline initialization.
 		void OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
 
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }

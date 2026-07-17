@@ -8,8 +8,7 @@
 
 namespace cs::util
 {
-	// Compile one HLSL shader from disk; returns nullptr on logged failure.
-	// a_defines are macros, a_programType is "ps_5_0"/"vs_5_0"/"cs_5_0", a_program is the entry point.
+	// Compile one HLSL file; a_defines are macros, a_programType is "ps_5_0"/"vs_5_0"/"cs_5_0", and a_program is the entry point; log and return nullptr on failure.
 	ID3D11DeviceChild* CompileShader(
 		const wchar_t* a_filePath,
 		const std::vector<std::pair<const char*, const char*>>& a_defines,

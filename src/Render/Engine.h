@@ -21,8 +21,7 @@ namespace cs::engine
 		return singleton.get();
 	}
 
-	// DrawWorld near/far globals, per Fallout4RE cs-camera-near-far-globals.json @ 2b79e7c.
-	// Prefer NiCamera::viewFrustum for live per-camera values; use these only to mirror engine frame setup.
+	// DrawWorld near/far globals from Fallout4RE cs-camera-near-far-globals.json @ 2b79e7c; prefer NiCamera::viewFrustum except when mirroring engine frame setup.
 	[[nodiscard]] inline float GetCameraNear()
 	{
 		static REL::Relocation<float*> near_{ REL::ID({ 57985, 2712882, 2712882 }) };
@@ -74,9 +73,8 @@ namespace cs::engine
 		const auto invProj = DirectX::XMMatrixInverse(nullptr, proj);
 		const auto invViewProj = DirectX::XMMatrixInverse(nullptr, viewProj);
 
-		// NDC->view ray reconstruction. FO4 is standard depth (near->0, far->1);
-		// the divide-by-z below makes the mul/add independent of the chosen NDC z
-		// (a camera ray is the same at any depth), so z=1 here is fine either way.
+		// NDC->view ray reconstruction: FO4 standard depth is near->0, far->1.
+		// The divide-by-z makes mul/add independent of NDC z, so z=1 yields the same camera ray.
 		const auto viewTopLeft = DirectX::XMVector4Transform(DirectX::XMVectorSet(-1.0f, 1.0f, 1.0f, 1.0f), invProj);
 		const auto viewBottomRight = DirectX::XMVector4Transform(DirectX::XMVectorSet(1.0f, -1.0f, 1.0f, 1.0f), invProj);
 		const float topLeftZ = DirectX::XMVectorGetZ(viewTopLeft);
@@ -103,8 +101,7 @@ namespace cs::engine
 		return true;
 	}
 
-	// Dynres offsets, per Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812; OG lacks NG/AE padding.
-	// CommonLibF4's unified layout is wrong for OG and isActivated; always use these accessors.
+	// Dynres offsets from Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812 account for missing OG padding; CommonLibF4's unified layout is wrong for OG and isActivated, so use these accessors.
 	namespace dynres
 	{
 		struct Offsets
@@ -148,8 +145,7 @@ namespace cs::engine
 			*reinterpret_cast<float*>(base + off.heightRatio) = a_height;
 			*reinterpret_cast<bool*>(base + off.isActivated)  = a_activated;
 
-			// Sync CommonLibF4 fields on NG/AE only; on OG they overlap `create` and crash on resize.
-			// Source: Fallout4RE cs-rtm-create-field-og.json @ 8256239; OG callers must use dynres accessors.
+			// Sync CommonLibF4 fields only on NG/AE; on OG they overlap `create` and crash on resize per Fallout4RE cs-rtm-create-field-og.json @ 8256239, so OG callers must use dynres accessors.
 			if (!REX::FModule::IsRuntimeOG()) {
 				a_rtm->dynamicWidthRatio = a_width;
 				a_rtm->dynamicHeightRatio = a_height;

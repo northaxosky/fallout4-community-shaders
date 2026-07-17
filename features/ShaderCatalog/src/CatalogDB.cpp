@@ -210,9 +210,8 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			return;
 		_wakeWriter.notify_one();
 
-		// Writer abandons in-progress enrichment when _running is false and returns after a final
-		// base-row flush, so this join is bounded. Joining (not detaching) avoids a use-after-free
-		// of the ring and owned bytecode once this object is destroyed.
+		// When _running is false, the writer abandons enrichment and returns after a final base-row flush, bounding this join.
+		// Joining instead of detaching prevents use-after-free of the ring and owned bytecode during destruction.
 		if (_writer.joinable())
 			_writer.join();
 
@@ -343,9 +342,8 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			}
 		}
 
-		// Prepare hot statements once; the writer only re-binds values. Shape columns are inserted
-		// NULL by the base-row path and filled later by kUpdateShape; the COALESCE keeps any values
-		// already present (from enrichment) from being erased by repeated bytecode-less events.
+		// Prepare hot statements once; the writer only re-binds values. The base-row path inserts shape columns as NULL for later kUpdateShape;
+		// COALESCE preserves enriched values across repeated bytecode-less events.
 		const char* kInsertShader =
 			"INSERT INTO shader_catalog("
 			"  sha1, size_bytes, stage,"
@@ -439,8 +437,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 					cell.data = std::move(e);
 					cell.sequence.store(pos + 1, std::memory_order_release);
 					_statEnqueued.fetch_add(1, std::memory_order_relaxed);
-					// Wake the writer on an empty->nonempty transition so base rows persist promptly;
-					// the timed wait remains a fallback if this notify races the consumer.
+					// Wake the writer on empty->nonempty so base rows persist promptly; the timed wait handles a consumer notify race.
 					if (_deqPos.load(std::memory_order_acquire) == pos)
 						_wakeWriter.notify_one();
 					return;
@@ -662,8 +659,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			const std::string sha1Hex = Sha1ToHex(Sha1Result{ e.sha1_bytes });
 			PersistShader(e, sha1Hex);
 
-			// Move retained bytecode into the enrichment backlog when unseen and within caps;
-			// otherwise drop only the bytecode (base row already persisted with NULL shapes).
+			// Move unseen retained bytecode within caps to the enrichment backlog; otherwise drop only bytecode because the base row already persisted with NULL shapes.
 			if (retain && e.bytecode && e.bytecode_size > 0 && !e.attribution_only &&
 				_reflectedShas.find(sha1Hex) == _reflectedShas.end() &&
 				_pendingShas.find(sha1Hex) == _pendingShas.end() &&
@@ -798,16 +794,14 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 				});
 			}
 
-			// Phase A: FULLY drain the ring to base rows before any enrichment, so a burst can never
-			// overflow while slow D3DDisassemble runs. Base-row persistence always wins.
+			// Phase A: FULLY drain the ring to base rows before slow D3DDisassemble enrichment to prevent burst overflow; base-row persistence always wins.
 			while (_running.load(std::memory_order_acquire) && RingHasReady())
 				IngestPhase();
 
 			if (!_running.load(std::memory_order_acquire))
 				break;
 
-			// Phase B: only with the ring empty, reflect a small bounded batch, then loop back so the
-			// ring is re-checked (Phase A) before the next batch.
+			// Phase B: with the ring empty, reflect a small bounded batch, then return to Phase A before the next batch.
 			EnrichPhase();
 
 			// Periodically truncate WAL so the sidecar stays bounded.
