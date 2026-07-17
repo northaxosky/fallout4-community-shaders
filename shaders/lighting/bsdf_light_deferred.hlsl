@@ -171,6 +171,13 @@ SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth      : register(s3);
 SamplerComparisonState g_sCascadeShadowCmp : register(s5);  // mode_comparison
 
+#ifdef SCREEN_SPACE_SHADOWS
+// Bend SSS shadow mask (R8, unshadowed = 1), bound by the ScreenSpaceShadows
+// feature before deferred directional lighting. Injected drop-in resource at a
+// free slot (t6), NOT part of the vanilla contract.
+Texture2D<float> g_tScreenSpaceShadow : register(t6);
+#endif
+
 // Stratified Poisson PCF kernel.
 // Asm's dcl_immediateConstantBuffer has 999 vec2 entries (from line 22
 // to line 1020 of the original asm). The cascade-PCF loops below index
@@ -394,6 +401,14 @@ PS_OUTPUT main(PS_INPUT input)
     float dist4      = dist2 * dist2;         // D^4  (insn 124)
     float fadeFactor = 1.0 - dist4 * dist4;   // 1 - D^8  (insn 125)
     shadowPcf = fadeFactor * (shadowPcf - 1.0) + 1.0;
+
+#ifdef SCREEN_SPACE_SHADOWS
+    // SSS injection: multiply the Bend screen-space shadow into the sun shadow
+    // term (upstream analog: dirDetailedShadow *= GetScreenSpaceShadow). Texel
+    // load at the pixel coord; the mask reads 1 (unshadowed) where the feature
+    // is inactive, so this is a no-op with SSS off.
+    shadowPcf *= g_tScreenSpaceShadow.Load(int3(int2(input.position.xy), 0)).x;
+#endif
 
     // Insn 128-132: setup for sun-direction lighting.
     //   r2.yzw = albedo.w * albedo.xyz   (premult albedo by .w)
