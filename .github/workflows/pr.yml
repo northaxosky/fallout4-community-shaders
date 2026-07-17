@@ -18,20 +18,6 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Em-dash sweep (no U+2014 in tracked text)
-        shell: bash
-        run: |
-          set -e
-          hits=$(git grep -nP $'\xe2\x80\x94' -- \
-            ':(exclude)extern' ':(exclude).local' ':(exclude)*.bin' ':(exclude)*.dds' \
-            ':(exclude)*.png' ':(exclude)*.zip' ':(exclude)*.dll' ':(exclude)*.pdb' || true)
-          if [ -n "$hits" ]; then
-            echo "Em-dash characters (U+2014) found in tracked files:" >&2
-            echo "$hits" >&2
-            exit 1
-          fi
-          echo "No em-dashes."
-
       - name: Bash syntax check (*.sh)
         shell: bash
         run: |

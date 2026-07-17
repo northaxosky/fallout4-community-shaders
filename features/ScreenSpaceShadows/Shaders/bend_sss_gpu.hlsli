@@ -113,8 +113,8 @@ struct DispatchParameters
 								// If 'PointBorderSampler' is an Unnormalized sampler, then this value can be hard-coded to 1.
 								// The 'USE_HALF_PIXEL_OFFSET' macro might need to be defined if sampling at exact pixel coordinates isn't precise (e.g., if odd patterns appear in the shadow).
 
-	// TERRAIN_BLENDING ON  -> bound to TerrainBlending::blendedDepthTexture (R32_FLOAT) — must NOT be unorm.
-	// TERRAIN_BLENDING OFF -> bound to game's kPOST_ZPREPASS_COPY (R24_UNORM_X8_TYPELESS) — unorm.
+	// TERRAIN_BLENDING ON  -> bound to TerrainBlending::blendedDepthTexture (R32_FLOAT); must NOT be unorm.
+	// TERRAIN_BLENDING OFF -> bound to game's kPOST_ZPREPASS_COPY (R24_UNORM_X8_TYPELESS); unorm.
 #if defined(TERRAIN_BLENDING)
 	Texture2D<float> DepthTexture;  // Depth Buffer Texture (rasterized non-linear depth, R32_FLOAT)
 #else
