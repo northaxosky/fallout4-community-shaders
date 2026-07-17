@@ -1,0 +1,11 @@
+# clangd config for editors (Zed, VS Code, neovim, ...). Editor-agnostic on purpose.
+# Generate the compile database first, from a VS Developer prompt:
+#   cmake --preset=clangd
+# That writes build-clangd/compile_commands.json (gitignored); clangd reads it via the pointer below.
+CompileFlags:
+  CompilationDatabase: build-clangd
+  # Drop MSVC precompiled-header flags: clangd cannot load a cl.exe-produced .pch and builds its
+  # own preamble. The /FI force-include of the pch wrapper header is kept (clangd parses it fine).
+  Remove:
+    - /Yu*
+    - /Fp*
