@@ -76,17 +76,6 @@ Feature configuration files are stored directly under
 `Data\F4SE\Plugins\FO4CommunityShaders\`. Supporting assets such as Imagespace LUTs,
 shaders, and presets live in subdirectories beneath that path.
 
-## Presets
-
-The preset framework currently captures **Imagespace only**. Five read-only builtins
-ship under `Presets\Builtin\`: `Default`, `Cinematic-Night`, `Neutral-Realistic`,
-`Reactor-Inspired`, and `Vivid-Daylight`. User presets are stored directly under
-`Presets\`.
-
-Presets are managed from the header at the top of the in-game menu. A selected preset
-is restored on the next launch only when **Auto-load on boot** is enabled. See
-[Preset documentation](docs/Presets.md) for paths, controls, and the TOML schema.
-
 ## Compatibility notes
 
 - Frame generation requires a D3D12 feature-level 12.0 device and the runtime files
@@ -101,12 +90,6 @@ is restored on the next launch only when **Auto-load on boot** is enabled. See
   with DLSS-G for that session.
 - A successful build or launch does not prove that a rendering path is visually correct.
   In-game validation is still required.
-
-## Building and testing
-
-There is no install or archive target yet. See [CONTRIBUTING.md](CONTRIBUTING.md) for
-the supported toolchains, recursive clone and Git LFS setup, build and test commands,
-runtime SDK staging, and optional devkit deployment.
 
 ## License
 
