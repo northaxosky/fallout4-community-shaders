@@ -1,5 +1,8 @@
 #pragma once
 
+#include <DirectXMath.h>
+#include <d3d11.h>
+
 #include <cmath>
 #include <xmmintrin.h>
 
@@ -42,6 +45,60 @@ namespace cs::engine
 		alignas(16) float row1[4];
 		_mm_store_ps(row1, state->cameraState.camViewData.projMat[1]);
 		return (row1[1] != 0.0f) ? 2.0f * std::atan(1.0f / row1[1]) : 0.0f;
+	}
+
+	struct CameraMatrices
+	{
+		DirectX::XMFLOAT4X4 view;
+		DirectX::XMFLOAT4X4 proj;
+		DirectX::XMFLOAT4X4 viewProj;
+		DirectX::XMFLOAT4X4 invView;
+		DirectX::XMFLOAT4X4 invProj;
+		DirectX::XMFLOAT4X4 invViewProj;
+		DirectX::XMFLOAT4   ndcToViewMul;
+		DirectX::XMFLOAT4   ndcToViewAdd;
+	};
+
+	[[nodiscard]] inline bool TryGetCameraMatrices(CameraMatrices& a_out)
+	{
+		auto* state = GetGraphicsState();
+		if (!state) {
+			return false;
+		}
+
+		const auto& camera = state->cameraState.camViewData;
+		const auto view = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(camera.viewMat));
+		const auto proj = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(camera.projMat));
+		const auto viewProj = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(camera.viewProjMat));
+		const auto invView = DirectX::XMMatrixInverse(nullptr, view);
+		const auto invProj = DirectX::XMMatrixInverse(nullptr, proj);
+		const auto invViewProj = DirectX::XMMatrixInverse(nullptr, viewProj);
+
+		// Reversed-Z near-plane rays avoid evaluating the potentially infinite far plane.
+		const auto viewTopLeft = DirectX::XMVector4Transform(DirectX::XMVectorSet(-1.0f, 1.0f, 1.0f, 1.0f), invProj);
+		const auto viewBottomRight = DirectX::XMVector4Transform(DirectX::XMVectorSet(1.0f, -1.0f, 1.0f, 1.0f), invProj);
+		const float topLeftZ = DirectX::XMVectorGetZ(viewTopLeft);
+		const float bottomRightZ = DirectX::XMVectorGetZ(viewBottomRight);
+		if (topLeftZ == 0.0f || bottomRightZ == 0.0f) {
+			return false;
+		}
+
+		DirectX::XMFLOAT4 topLeft;
+		DirectX::XMFLOAT4 bottomRight;
+		DirectX::XMStoreFloat4(&topLeft, DirectX::XMVectorScale(viewTopLeft, 1.0f / topLeftZ));
+		DirectX::XMStoreFloat4(&bottomRight, DirectX::XMVectorScale(viewBottomRight, 1.0f / bottomRightZ));
+
+		CameraMatrices result{};
+		DirectX::XMStoreFloat4x4(&result.view, view);
+		DirectX::XMStoreFloat4x4(&result.proj, proj);
+		DirectX::XMStoreFloat4x4(&result.viewProj, viewProj);
+		DirectX::XMStoreFloat4x4(&result.invView, invView);
+		DirectX::XMStoreFloat4x4(&result.invProj, invProj);
+		DirectX::XMStoreFloat4x4(&result.invViewProj, invViewProj);
+		result.ndcToViewMul = { bottomRight.x - topLeft.x, bottomRight.y - topLeft.y, 0.0f, 0.0f };
+		result.ndcToViewAdd = { topLeft.x, topLeft.y, 0.0f, 0.0f };
+		a_out = result;
+		return true;
 	}
 
 	// Dynres offsets, per Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812; OG lacks NG/AE padding.
@@ -180,4 +237,24 @@ namespace cs::engine
 
 		kCount = 13
 	};
+
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetSceneDepthSRV()
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11ShaderResourceView*>(
+			rendererData->depthStencilTargets[static_cast<uint>(DepthStencilTarget::kMain)].srViewDepth);
+	}
+
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetSRV(RenderTarget a_renderTarget)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11ShaderResourceView*>(
+			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].srView);
+	}
 }
