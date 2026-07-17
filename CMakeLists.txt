@@ -106,6 +106,7 @@ register_feature(FrameGeneration)
 register_feature(RenderDoc)
 register_feature(PerformanceOverlay)
 register_feature(Imagespace)
+register_feature(ScreenSpaceShadows)
 register_feature(ShaderCatalog)
 register_feature(ShaderReplacement)
 
