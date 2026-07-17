@@ -17,8 +17,7 @@ bin/
 docs/shader-buffers.md
 __pycache__/
 
-# Shader validation scratch + corpus cache (Bethesda bytes; never commit). See
-# scripts/shaders/verify-shader-roundtrip.ps1, fetch-shader-corpus.ps1, shader_corpus_diff.py.
+# Shader validation scratch + corpus cache
 .shader-cache/
 
 # Vendored Detours static libs are NOT build output, track them.
@@ -52,16 +51,6 @@ package/F4SE/Plugins/FrameGeneration/XeSS/
 
 # Test output
 test-results/
-
-# Local agent / instruction files (private per global CLAUDE.md policy)
-CLAUDE.md
-AGENTS.md
-GEMINI.md
-.github/copilot-instructions.md
-
-# Local-only project notes (also caught by user-global gitignore but explicit here)
-.local/
-.agents/
 
 # OS
 .DS_Store
