@@ -1178,6 +1178,9 @@ void ShapeDirectionalLightingConstants(
         std::abs(values[10]) + 0.5f,
         0.0f,
     });
+    SetVector(values, 6, {0.08f, 0.02f, 0.01f, 0.35f});
+    SetVector(values, 7, {-0.03f, 0.07f, 0.02f, 0.32f});
+    SetVector(values, 8, {0.02f, -0.03f, 0.09f, 0.30f});
     SetVector(values, 10, {0.35f, 0.65f, 0.0f, 0.0f});
     for (const UINT firstRow : {11u, 14u})
     {

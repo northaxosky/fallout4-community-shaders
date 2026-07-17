@@ -86,8 +86,20 @@ cbuffer PerCall_CB2 : register(b2)
     //      before dispatch). .w = 0 here.
     float4 SunColor_HDR;
 
+#ifdef AMBIENT_IBL_IN_LIGHT
+    // [3..5], [9]: TODO: identify
+    float4 cb2_pad_3_5[3];
+
+    // [6..8]: directional ambient-gradient rows for diffuse/specular IBL.
+    float4 cb2_ambient_gradient_row0;
+    float4 cb2_ambient_gradient_row1;
+    float4 cb2_ambient_gradient_row2;
+
+    float4 cb2_pad_9;
+#else
     // [3..9]: TODO: identify
     float4 cb2_pad_3_9[7];
+#endif
 
     // [10]: .x = cascade-1 active threshold (insn 74); .y = cascade-0
     //       active threshold (insn 39); .xy = cascade blend range
@@ -209,6 +221,18 @@ float3 DecodeOctahedralNormal(float2 enc01)
     return float3(enc * scale, z);
 }
 
+#ifdef AMBIENT_IBL_IN_LIGHT
+float3 EvaluateAmbientGradient(float3 direction)
+{
+    float4 directionH = float4(direction, 1.0);
+    float3 encoded;
+    encoded.x = dot(cb2_ambient_gradient_row0, directionH);
+    encoded.y = dot(cb2_ambient_gradient_row1, directionH);
+    encoded.z = dot(cb2_ambient_gradient_row2, directionH);
+    return exp2(log2(encoded) * 2.2);
+}
+#endif
+
 // Per-cascade PCF shadow factor.
 //   posView    = the view-space position to project into light space.
 //   row0/1/2   = 3 view-to-light-space rows (cb2[11..13] or cb2[14..16]).
@@ -304,6 +328,11 @@ PS_OUTPUT main(PS_INPUT input)
 
     // Insn 29-34: decode octahedral normal
     float3 normalView = DecodeOctahedralNormal(normalEnc);
+
+#ifdef AMBIENT_IBL_IN_LIGHT
+    float3 ambientDiffuse = EvaluateAmbientGradient(normalView);
+    float3 ambientSpecular = 0.0;
+#endif
 
     // Insn 35-38: 1 - albedo.x for some roughness-like factor; negate
     // normal length variant.
@@ -429,6 +458,15 @@ PS_OUTPUT main(PS_INPUT input)
         float specExp = specExpScale * specExpBase;
 
         float NdotV_raw = dot(viewDirNeg, normalView);
+#ifdef AMBIENT_IBL_IN_LIGHT
+        float3 reflectionDir = 2.0 * NdotV_raw * normalView - viewDirNeg;
+        float oneMinusNdotV = 1.0 - saturate(NdotV_raw);
+        float ambientSpecularFactor =
+            exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
+        ambientSpecular =
+            matSample.y * ambientSpecularFactor *
+            EvaluateAmbientGradient(reflectionDir);
+#endif
         float3 tangentV = viewDirNeg - normalView * NdotV_raw;
         float3 tangentL = SunDirection_and_padding.xyz - normalView * NdotL_raw;
         float tangentVL = max(dot(tangentV, tangentL), 0.0);
@@ -507,10 +545,17 @@ PS_OUTPUT main(PS_INPUT input)
     // Specular accumulation in o1
     float specMix = (1.0 - schlickFres * 0.5);
     output.specular.xyz = shadowPcf * specMix * brdfSpecular;
+#ifdef AMBIENT_IBL_IN_LIGHT
+    output.specular.xyz += ambientSpecular;
+#endif
     output.specular.w   = 1.0;
 
     // Diffuse: scaled by 1/3 (insn 269 div by 3,3,3,3)
-    output.diffuse.xyz = (shadowPcf * finalDiffuse) / 3.0;
+    output.diffuse.xyz = shadowPcf * finalDiffuse;
+#ifdef AMBIENT_IBL_IN_LIGHT
+    output.diffuse.xyz += ambientDiffuse;
+#endif
+    output.diffuse.xyz /= 3.0;
     output.diffuse.w   = 0.0;
 
     return output;
