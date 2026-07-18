@@ -37,7 +37,7 @@ $command = @(
     "&&",
     "call `"$vcvars64`" >nul",
     "&&",
-    "cl /nologo /std:c++17 /O2 /EHsc /W4",
+    "cl /nologo /std:c++17 /O2 /EHsc /W4 /WX",
     "`"$source`"",
     "/Fo`"$object`"",
     "/Fd`"$compilerPdb`"",

@@ -39,6 +39,9 @@ struct Options
     float toleranceAbsolute = 2.0e-3f;
     float toleranceRelative = 1.0e-2f;
     bool verbose = false;
+    bool xegtaoAo = false;
+    std::string referencePrefilterPath;
+    std::string candidatePrefilterPath;
 };
 
 struct ConstantBufferBinding
@@ -2375,6 +2378,827 @@ void PrintReport(
     }
 }
 
+struct TextureResource
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11ShaderResourceView> view;
+};
+
+struct ComputeOutput
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11UnorderedAccessView> view;
+    ComPtr<ID3D11Texture2D> staging;
+};
+
+struct ScratchUav
+{
+    ComPtr<ID3D11Texture2D> texture;
+    ComPtr<ID3D11UnorderedAccessView> view;
+};
+
+struct DepthPyramidOutput
+{
+    TextureResource resource;
+    std::array<ComPtr<ID3D11UnorderedAccessView>, 5> mipViews;
+    ComPtr<ID3D11Texture2D> staging;
+};
+
+struct alignas(16) XeGTAOConstants
+{
+    std::array<float, 4> ndcToViewMul{};
+    std::array<float, 4> ndcToViewAdd{};
+    std::array<float, 2> textureDimensions{};
+    std::array<float, 2> reciprocalTextureDimensions{};
+    std::array<float, 2> frameDimensions{};
+    std::array<float, 2> reciprocalFrameDimensions{};
+    std::uint32_t frameIndex = 0;
+    std::uint32_t numSlices = 0;
+    std::uint32_t numSteps = 0;
+    float minimumScreenRadius = 0.0f;
+    float aoRadius = 0.0f;
+    float effectRadius = 0.0f;
+    float thickness = 0.0f;
+    float aoPower = 0.0f;
+    std::array<float, 2> depthFadeRange{};
+    float depthFadeScale = 0.0f;
+    float padding = 0.0f;
+};
+static_assert(sizeof(XeGTAOConstants) == 7 * 16);
+
+struct alignas(16) UpstreamSSGIConstants
+{
+    std::array<float, 16> previousInverseView{};
+    std::array<float, 4> ndcToViewMul{};
+    std::array<float, 4> ndcToViewAdd{};
+    std::array<float, 2> textureDimensions{};
+    std::array<float, 2> reciprocalTextureDimensions{};
+    std::array<float, 2> frameDimensions{};
+    std::array<float, 2> reciprocalFrameDimensions{};
+    std::uint32_t frameIndex = 0;
+    std::uint32_t numSlices = 0;
+    std::uint32_t numSteps = 0;
+    float minimumScreenRadius = 0.0f;
+    float aoRadius = 0.0f;
+    float giRadius = 0.0f;
+    float effectRadius = 0.0f;
+    float thickness = 0.0f;
+    std::array<float, 2> depthFadeRange{};
+    float depthFadeScale = 0.0f;
+    float giSaturation = 0.0f;
+    float giDistanceCompensation = 0.0f;
+    float giCompensationMaximumDistance = 0.0f;
+    float padding1 = 0.0f;
+    float aoPower = 0.0f;
+    float giStrength = 0.0f;
+    float depthDisocclusion = 0.0f;
+    float normalDisocclusion = 0.0f;
+    std::uint32_t maximumAccumulationFrames = 0;
+    float blurRadius = 0.0f;
+    float distanceNormalisation = 0.0f;
+    std::array<float, 2> padding{};
+};
+static_assert(sizeof(UpstreamSSGIConstants) == 14 * 16);
+
+template <class Constants>
+ComPtr<ID3D11Buffer> CreateConstantBuffer(
+    ID3D11Device* device,
+    const Constants& constants)
+{
+    static_assert(sizeof(Constants) % 16 == 0);
+    D3D11_BUFFER_DESC desc{};
+    desc.ByteWidth = static_cast<UINT>(sizeof(Constants));
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+
+    D3D11_SUBRESOURCE_DATA initialData{};
+    initialData.pSysMem = &constants;
+
+    ComPtr<ID3D11Buffer> buffer;
+    CheckHRESULT(
+        device->CreateBuffer(&desc, &initialData, &buffer),
+        "CreateBuffer for XeGTAO constants");
+    return buffer;
+}
+
+std::array<float, 3> Normalize(const std::array<float, 3>& value)
+{
+    const float length = std::sqrt(
+        value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+    if (length == 0.0f)
+        ThrowFailure("cannot normalize zero-length synthetic normal");
+    return {value[0] / length, value[1] / length, value[2] / length};
+}
+
+std::array<float, 2> EncodeUpstreamNormal(const std::array<float, 3>& input)
+{
+    std::array<float, 3> normal{-input[0], -input[1], -input[2]};
+    const float reciprocalLength =
+        1.0f / (std::abs(normal[0]) + std::abs(normal[1]) + std::abs(normal[2]));
+    for (float& component : normal)
+        component *= reciprocalLength;
+    if (normal[2] < 0.0f)
+    {
+        const float oldX = normal[0];
+        normal[0] = (1.0f - std::abs(normal[1])) * (oldX >= 0.0f ? 1.0f : -1.0f);
+        normal[1] = (1.0f - std::abs(oldX)) *
+            (normal[1] >= 0.0f ? 1.0f : -1.0f);
+    }
+    return {normal[0] * 0.5f + 0.5f, normal[1] * 0.5f + 0.5f};
+}
+
+std::array<float, 3> DecodeUpstreamNormal(const std::array<float, 2>& encoded)
+{
+    std::array<float, 3> normal{
+        encoded[0] * 2.0f - 1.0f,
+        encoded[1] * 2.0f - 1.0f,
+        0.0f,
+    };
+    normal[2] = 1.0f - std::abs(normal[0]) - std::abs(normal[1]);
+    const float folded = std::max(-normal[2], 0.0f);
+    normal[0] += normal[0] >= 0.0f ? -folded : folded;
+    normal[1] += normal[1] >= 0.0f ? -folded : folded;
+    const std::array<float, 3> decoded = Normalize(normal);
+    return {-decoded[0], -decoded[1], -decoded[2]};
+}
+
+void BuildXeGTAOScene(
+    UINT width,
+    UINT height,
+    std::vector<float>& depths,
+    std::vector<float>& ndcDepths,
+    std::vector<Pixel>& rawNormals,
+    std::vector<Pixel>& encodedNormals)
+{
+    depths.resize(static_cast<std::size_t>(width) * height);
+    ndcDepths.resize(depths.size());
+    rawNormals.resize(depths.size());
+    encodedNormals.resize(depths.size());
+
+    const std::array<float, 3> sphereCenter{5.0f, -3.0f, 52.0f};
+    constexpr float sphereRadius = 13.0f;
+    const std::array<float, 3> planeNormal =
+        Normalize({0.12f, -0.08f, -1.0f});
+
+    for (UINT y = 0; y < height; ++y)
+    {
+        for (UINT x = 0; x < width; ++x)
+        {
+            const float rayX =
+                2.0f * (static_cast<float>(x) + 0.5f) / width - 1.0f;
+            const float rayY =
+                1.0f - 2.0f * (static_cast<float>(y) + 0.5f) / height;
+            const std::array<float, 3> ray{rayX, rayY, 1.0f};
+            const float planeDepth = 78.0f / (1.0f - 0.12f * rayX +
+                                                  0.08f * rayY);
+
+            const float a = rayX * rayX + rayY * rayY + 1.0f;
+            const float rayDotCenter =
+                rayX * sphereCenter[0] + rayY * sphereCenter[1] + sphereCenter[2];
+            const float c =
+                sphereCenter[0] * sphereCenter[0] +
+                sphereCenter[1] * sphereCenter[1] +
+                sphereCenter[2] * sphereCenter[2] -
+                sphereRadius * sphereRadius;
+            const float discriminant =
+                rayDotCenter * rayDotCenter - a * c;
+            float depth = planeDepth;
+            std::array<float, 3> normal = planeNormal;
+            if (discriminant >= 0.0f)
+            {
+                const float sphereDepth =
+                    (rayDotCenter - std::sqrt(discriminant)) / a;
+                if (sphereDepth > 0.0f && sphereDepth < planeDepth)
+                {
+                    depth = sphereDepth;
+                    normal = Normalize({
+                        sphereDepth * rayX - sphereCenter[0],
+                        sphereDepth * rayY - sphereCenter[1],
+                        sphereDepth - sphereCenter[2],
+                    });
+                }
+            }
+
+            const std::array<float, 2> encoded = EncodeUpstreamNormal(normal);
+            const std::array<float, 3> decoded = DecodeUpstreamNormal(encoded);
+            const std::size_t index = static_cast<std::size_t>(y) * width + x;
+            const float ndcDepth = 1.0f - 1.0f / depth;
+            depths[index] = 1.0f / (1.0f - ndcDepth);
+            ndcDepths[index] = ndcDepth;
+            rawNormals[index] = {decoded[0], decoded[1], decoded[2], 1.0f};
+            encodedNormals[index] = {encoded[0], encoded[1], 0.0f, 1.0f};
+        }
+    }
+}
+
+TextureResource CreateScalarTexture(
+    ID3D11Device* device,
+    UINT width,
+    UINT height,
+    const std::vector<float>& values,
+    const char* label)
+{
+    D3D11_SUBRESOURCE_DATA initialData{};
+    initialData.pSysMem = values.data();
+    initialData.SysMemPitch = width * sizeof(float);
+
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    TextureResource result;
+    CheckHRESULT(
+        device->CreateTexture2D(&desc, &initialData, &result.texture),
+        std::string("CreateTexture2D for ") + label);
+    CheckHRESULT(
+        device->CreateShaderResourceView(result.texture.Get(), nullptr, &result.view),
+        std::string("CreateShaderResourceView for ") + label);
+    return result;
+}
+
+DepthPyramidOutput CreateDepthPyramidOutput(
+    ID3D11Device* device,
+    UINT width,
+    UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 5;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE |
+        D3D11_BIND_UNORDERED_ACCESS;
+
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    DepthPyramidOutput output;
+    CheckHRESULT(
+        device->CreateTexture2D(&desc, nullptr, &output.resource.texture),
+        "CreateTexture2D for XeGTAO filtered depth");
+    CheckHRESULT(
+        device->CreateShaderResourceView(
+            output.resource.texture.Get(), nullptr, &output.resource.view),
+        "CreateShaderResourceView for XeGTAO filtered depth");
+    for (UINT mip = 0; mip < output.mipViews.size(); ++mip)
+    {
+        D3D11_UNORDERED_ACCESS_VIEW_DESC viewDesc{};
+        viewDesc.Format = desc.Format;
+        viewDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
+        viewDesc.Texture2D.MipSlice = mip;
+        CheckHRESULT(
+            device->CreateUnorderedAccessView(
+                output.resource.texture.Get(), &viewDesc, &output.mipViews[mip]),
+            "CreateUnorderedAccessView for XeGTAO filtered depth");
+    }
+    CheckHRESULT(
+        device->CreateTexture2D(&stagingDesc, nullptr, &output.staging),
+        "CreateTexture2D for XeGTAO filtered-depth readback");
+    return output;
+}
+
+std::vector<std::vector<float>> DispatchXeGTAOPrefilter(
+    ID3D11DeviceContext* context,
+    ID3D11ComputeShader* shader,
+    bool upstream,
+    ID3D11Buffer* constants,
+    ID3D11Buffer* sharedDataConstants,
+    const TextureResource& source,
+    ID3D11SamplerState* sampler,
+    DepthPyramidOutput& output,
+    UINT width,
+    UINT height)
+{
+    context->ClearState();
+    ID3D11Buffer* constantBuffer = constants;
+    context->CSSetConstantBuffers(upstream ? 1u : 0u, 1, &constantBuffer);
+    if (upstream)
+        context->CSSetConstantBuffers(5, 1, &sharedDataConstants);
+
+    ID3D11ShaderResourceView* sourceView = source.view.Get();
+    context->CSSetShaderResources(0, 1, &sourceView);
+    context->CSSetSamplers(0, 1, &sampler);
+
+    std::array<ID3D11UnorderedAccessView*, 5> views{};
+    for (std::size_t index = 0; index < views.size(); ++index)
+        views[index] = output.mipViews[index].Get();
+    context->CSSetUnorderedAccessViews(
+        0, static_cast<UINT>(views.size()), views.data(), nullptr);
+    context->CSSetShader(shader, nullptr, 0);
+    context->Dispatch(width / 16, height / 16, 1);
+
+    views.fill(nullptr);
+    context->CSSetUnorderedAccessViews(
+        0, static_cast<UINT>(views.size()), views.data(), nullptr);
+    context->CopyResource(output.staging.Get(), output.resource.texture.Get());
+
+    std::vector<std::vector<float>> levels(output.mipViews.size());
+    UINT mipWidth = width;
+    UINT mipHeight = height;
+    for (UINT mip = 0; mip < levels.size(); ++mip)
+    {
+        levels[mip].resize(static_cast<std::size_t>(mipWidth) * mipHeight);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        CheckHRESULT(
+            context->Map(output.staging.Get(), mip, D3D11_MAP_READ, 0, &mapped),
+            "Map XeGTAO filtered-depth readback");
+        for (UINT y = 0; y < mipHeight; ++y)
+        {
+            const auto* sourceRow =
+                static_cast<const std::uint8_t*>(mapped.pData) +
+                static_cast<std::size_t>(y) * mapped.RowPitch;
+            std::memcpy(
+                levels[mip].data() + static_cast<std::size_t>(y) * mipWidth,
+                sourceRow,
+                static_cast<std::size_t>(mipWidth) * sizeof(float));
+        }
+        context->Unmap(output.staging.Get(), mip);
+        mipWidth = std::max(1u, mipWidth / 2);
+        mipHeight = std::max(1u, mipHeight / 2);
+    }
+    return levels;
+}
+
+TextureResource CreateFloat4Texture(
+    ID3D11Device* device,
+    UINT width,
+    UINT height,
+    const std::vector<Pixel>& pixels,
+    const char* label)
+{
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_IMMUTABLE;
+    desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+    D3D11_SUBRESOURCE_DATA initialData{};
+    initialData.pSysMem = pixels.data();
+    initialData.SysMemPitch = width * sizeof(Pixel);
+
+    TextureResource result;
+    CheckHRESULT(
+        device->CreateTexture2D(&desc, &initialData, &result.texture),
+        std::string("CreateTexture2D for ") + label);
+    CheckHRESULT(
+        device->CreateShaderResourceView(result.texture.Get(), nullptr, &result.view),
+        std::string("CreateShaderResourceView for ") + label);
+    return result;
+}
+
+std::uint32_t HashNoise(std::uint32_t value)
+{
+    value ^= value >> 16;
+    value *= 0x7FEB352Du;
+    value ^= value >> 15;
+    value *= 0x846CA68Bu;
+    value ^= value >> 16;
+    return value;
+}
+
+TextureResource CreateNoiseTexture(ID3D11Device* device)
+{
+    constexpr UINT noiseWidth = 128;
+    constexpr UINT noiseHeight = 128;
+    std::vector<Pixel> pixels(noiseWidth * noiseHeight);
+    for (UINT y = 0; y < noiseHeight; ++y)
+    {
+        for (UINT x = 0; x < noiseWidth; ++x)
+        {
+            const std::uint32_t hash =
+                HashNoise(x + y * noiseWidth + 0x9E3779B9u);
+            const std::uint32_t second = HashNoise(hash);
+            pixels[static_cast<std::size_t>(y) * noiseWidth + x] = {
+                static_cast<float>(hash & 0xFFFFu) / 65535.0f,
+                static_cast<float>(second & 0xFFFFu) / 65535.0f,
+                0.0f,
+                1.0f,
+            };
+        }
+    }
+    return CreateFloat4Texture(
+        device, noiseWidth, noiseHeight, pixels, "XeGTAO noise");
+}
+
+ComputeOutput CreateComputeOutput(
+    ID3D11Device* device,
+    UINT width,
+    UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+
+    D3D11_TEXTURE2D_DESC stagingDesc = desc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    ComputeOutput output;
+    CheckHRESULT(
+        device->CreateTexture2D(&desc, nullptr, &output.texture),
+        "CreateTexture2D for XeGTAO output");
+    CheckHRESULT(
+        device->CreateUnorderedAccessView(
+            output.texture.Get(), nullptr, &output.view),
+        "CreateUnorderedAccessView for XeGTAO output");
+    CheckHRESULT(
+        device->CreateTexture2D(&stagingDesc, nullptr, &output.staging),
+        "CreateTexture2D for XeGTAO readback");
+    return output;
+}
+
+ScratchUav CreateScratchUav(
+    ID3D11Device* device,
+    UINT width,
+    UINT height)
+{
+    D3D11_TEXTURE2D_DESC desc{};
+    desc.Width = width;
+    desc.Height = height;
+    desc.MipLevels = 1;
+    desc.ArraySize = 1;
+    desc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    desc.SampleDesc.Count = 1;
+    desc.Usage = D3D11_USAGE_DEFAULT;
+    desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+
+    ScratchUav scratch;
+    CheckHRESULT(
+        device->CreateTexture2D(&desc, nullptr, &scratch.texture),
+        "CreateTexture2D for upstream scratch UAV");
+    CheckHRESULT(
+        device->CreateUnorderedAccessView(
+            scratch.texture.Get(), nullptr, &scratch.view),
+        "CreateUnorderedAccessView for upstream scratch UAV");
+    return scratch;
+}
+
+std::vector<float> DispatchXeGTAO(
+    ID3D11DeviceContext* context,
+    ID3D11ComputeShader* shader,
+    bool upstream,
+    ID3D11Buffer* constants,
+    ID3D11Buffer* upstreamFrameConstants,
+    const TextureResource& depth,
+    const TextureResource& normals,
+    const TextureResource& noise,
+    ID3D11SamplerState* sampler,
+    const std::array<ScratchUav, 3>* upstreamScratch,
+    ComputeOutput& output,
+    UINT width,
+    UINT height)
+{
+    context->ClearState();
+    const float clear[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    context->ClearUnorderedAccessViewFloat(output.view.Get(), clear);
+
+    ID3D11Buffer* constantBuffer = constants;
+    context->CSSetConstantBuffers(upstream ? 1u : 0u, 1, &constantBuffer);
+    if (upstream)
+        context->CSSetConstantBuffers(12, 1, &upstreamFrameConstants);
+
+    ID3D11ShaderResourceView* depthView = depth.view.Get();
+    ID3D11ShaderResourceView* normalView = normals.view.Get();
+    ID3D11ShaderResourceView* noiseView = noise.view.Get();
+    context->CSSetShaderResources(0, 1, &depthView);
+    context->CSSetShaderResources(upstream ? 8u : 1u, 1, &normalView);
+    context->CSSetShaderResources(upstream ? 3u : 2u, 1, &noiseView);
+    context->CSSetSamplers(0, 1, &sampler);
+
+    std::array<ID3D11UnorderedAccessView*, 5> outputViews{};
+    outputViews[0] = output.view.Get();
+    UINT outputViewCount = 1;
+    if (upstream)
+    {
+        if (upstreamScratch == nullptr)
+            ThrowFailure("upstream XeGTAO scratch UAVs are missing");
+        outputViews[1] = (*upstreamScratch)[0].view.Get();
+        outputViews[2] = (*upstreamScratch)[1].view.Get();
+        outputViews[4] = (*upstreamScratch)[2].view.Get();
+        outputViewCount = static_cast<UINT>(outputViews.size());
+    }
+    context->CSSetUnorderedAccessViews(
+        0, outputViewCount, outputViews.data(), nullptr);
+    context->CSSetShader(shader, nullptr, 0);
+    context->Dispatch(width / 8, height / 8, 1);
+
+    outputViews.fill(nullptr);
+    context->CSSetUnorderedAccessViews(
+        0, outputViewCount, outputViews.data(), nullptr);
+    context->CopyResource(output.staging.Get(), output.texture.Get());
+
+    std::vector<float> pixels(static_cast<std::size_t>(width) * height);
+    D3D11_MAPPED_SUBRESOURCE mapped{};
+    CheckHRESULT(
+        context->Map(output.staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+        "Map XeGTAO readback");
+    for (UINT y = 0; y < height; ++y)
+    {
+        const auto* source =
+            static_cast<const std::uint8_t*>(mapped.pData) +
+            static_cast<std::size_t>(y) * mapped.RowPitch;
+        std::memcpy(
+            pixels.data() + static_cast<std::size_t>(y) * width,
+            source,
+            static_cast<std::size_t>(width) * sizeof(float));
+    }
+    context->Unmap(output.staging.Get(), 0);
+    return pixels;
+}
+
+int RunXeGTAO(
+    const Options& options,
+    const std::vector<std::uint8_t>& referenceBytecode,
+    const std::vector<std::uint8_t>& candidateBytecode,
+    const std::vector<std::uint8_t>& referencePrefilterBytecode,
+    const std::vector<std::uint8_t>& candidatePrefilterBytecode)
+{
+    if (options.width < 32 || options.height < 32 ||
+        options.width % 16 != 0 || options.height % 16 != 0)
+    {
+        ThrowFailure("XeGTAO dimensions must be at least 32 and divisible by 16");
+    }
+
+    D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
+    D3D_FEATURE_LEVEL createdFeatureLevel{};
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    CheckHRESULT(
+        D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
+            &featureLevel, 1, D3D11_SDK_VERSION,
+            &device, &createdFeatureLevel, &context),
+        "D3D11CreateDevice(WARP)");
+    if (createdFeatureLevel != D3D_FEATURE_LEVEL_11_0)
+        ThrowFailure("WARP did not create a feature-level 11_0 device");
+
+    ComPtr<ID3D11ComputeShader> referenceShader;
+    ComPtr<ID3D11ComputeShader> candidateShader;
+    ComPtr<ID3D11ComputeShader> referencePrefilterShader;
+    ComPtr<ID3D11ComputeShader> candidatePrefilterShader;
+    CheckHRESULT(
+        device->CreateComputeShader(
+            referenceBytecode.data(), referenceBytecode.size(), nullptr,
+            &referenceShader),
+        "CreateComputeShader(reference)");
+    CheckHRESULT(
+        device->CreateComputeShader(
+            candidateBytecode.data(), candidateBytecode.size(), nullptr,
+            &candidateShader),
+        "CreateComputeShader(candidate)");
+    CheckHRESULT(
+        device->CreateComputeShader(
+            referencePrefilterBytecode.data(), referencePrefilterBytecode.size(),
+            nullptr, &referencePrefilterShader),
+        "CreateComputeShader(reference prefilter)");
+    CheckHRESULT(
+        device->CreateComputeShader(
+            candidatePrefilterBytecode.data(), candidatePrefilterBytecode.size(),
+            nullptr, &candidatePrefilterShader),
+        "CreateComputeShader(candidate prefilter)");
+
+    std::vector<float> depths;
+    std::vector<float> ndcDepths;
+    std::vector<Pixel> rawNormals;
+    std::vector<Pixel> encodedNormals;
+    BuildXeGTAOScene(
+        options.width, options.height, depths, ndcDepths,
+        rawNormals, encodedNormals);
+    const TextureResource candidateDepthInput = CreateScalarTexture(
+        device.Get(), options.width, options.height, depths,
+        "linear view-space depth");
+    const TextureResource upstreamDepthInput = CreateScalarTexture(
+        device.Get(), options.width, options.height, ndcDepths,
+        "upstream NDC depth");
+    const TextureResource candidateNormals = CreateFloat4Texture(
+        device.Get(), options.width, options.height, rawNormals,
+        "raw view-space normals");
+    const TextureResource upstreamNormals = CreateFloat4Texture(
+        device.Get(), options.width, options.height, encodedNormals,
+        "upstream octahedral normals");
+    const TextureResource noise = CreateNoiseTexture(device.Get());
+
+    XeGTAOConstants candidateConstants{};
+    candidateConstants.ndcToViewMul = {2.0f, -2.0f, 0.0f, 0.0f};
+    candidateConstants.ndcToViewAdd = {-1.0f, 1.0f, 0.0f, 0.0f};
+    candidateConstants.textureDimensions = {
+        static_cast<float>(options.width), static_cast<float>(options.height)};
+    candidateConstants.reciprocalTextureDimensions = {
+        1.0f / options.width, 1.0f / options.height};
+    candidateConstants.frameDimensions = candidateConstants.textureDimensions;
+    candidateConstants.reciprocalFrameDimensions =
+        candidateConstants.reciprocalTextureDimensions;
+    candidateConstants.frameIndex = 0;
+    candidateConstants.numSlices = 3;
+    candidateConstants.numSteps = 8;
+    candidateConstants.minimumScreenRadius = 3.0f;
+    candidateConstants.aoRadius = 1.0f;
+    candidateConstants.effectRadius = 35.0f;
+    candidateConstants.thickness = 8.0f;
+    candidateConstants.aoPower = 1.5f;
+    // Overlap scene depths (~39-97) so depthFade varies and the needGI upper cull fires.
+    candidateConstants.depthFadeRange = {60.0f, 90.0f};
+    candidateConstants.depthFadeScale = 0.025f;
+
+    UpstreamSSGIConstants upstreamConstants{};
+    upstreamConstants.ndcToViewMul = candidateConstants.ndcToViewMul;
+    upstreamConstants.ndcToViewAdd = candidateConstants.ndcToViewAdd;
+    upstreamConstants.textureDimensions = candidateConstants.textureDimensions;
+    upstreamConstants.reciprocalTextureDimensions =
+        candidateConstants.reciprocalTextureDimensions;
+    upstreamConstants.frameDimensions = candidateConstants.frameDimensions;
+    upstreamConstants.reciprocalFrameDimensions =
+        candidateConstants.reciprocalFrameDimensions;
+    upstreamConstants.frameIndex = candidateConstants.frameIndex;
+    upstreamConstants.numSlices = candidateConstants.numSlices;
+    upstreamConstants.numSteps = candidateConstants.numSteps;
+    upstreamConstants.minimumScreenRadius =
+        candidateConstants.minimumScreenRadius;
+    upstreamConstants.aoRadius = candidateConstants.aoRadius;
+    upstreamConstants.effectRadius = candidateConstants.effectRadius;
+    upstreamConstants.thickness = candidateConstants.thickness;
+    upstreamConstants.depthFadeRange = candidateConstants.depthFadeRange;
+    upstreamConstants.depthFadeScale = candidateConstants.depthFadeScale;
+    upstreamConstants.aoPower = candidateConstants.aoPower;
+
+    std::array<float, 45 * 4> upstreamFrameData{};
+    for (UINT diagonal = 0; diagonal < 4; ++diagonal)
+        upstreamFrameData[28 * 4 + diagonal * 4 + diagonal] = 1.0f;
+    std::array<float, 64 * 4> upstreamSharedData{};
+    upstreamSharedData[36 * 4 + 0] = 1.0f;
+    upstreamSharedData[36 * 4 + 2] = 1.0f;
+    upstreamSharedData[36 * 4 + 3] = 1.0f;
+
+    const ComPtr<ID3D11Buffer> candidateConstantBuffer =
+        CreateConstantBuffer(device.Get(), candidateConstants);
+    const ComPtr<ID3D11Buffer> upstreamConstantBuffer =
+        CreateConstantBuffer(device.Get(), upstreamConstants);
+    const ComPtr<ID3D11Buffer> upstreamFrameBuffer =
+        CreateConstantBuffer(device.Get(), upstreamFrameData);
+    const ComPtr<ID3D11Buffer> upstreamSharedDataBuffer =
+        CreateConstantBuffer(device.Get(), upstreamSharedData);
+
+    D3D11_SAMPLER_DESC samplerDesc{};
+    samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+    samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+    ComPtr<ID3D11SamplerState> sampler;
+    CheckHRESULT(
+        device->CreateSamplerState(&samplerDesc, &sampler),
+        "CreateSamplerState for XeGTAO");
+
+    DepthPyramidOutput referenceDepth =
+        CreateDepthPyramidOutput(device.Get(), options.width, options.height);
+    DepthPyramidOutput candidateDepth =
+        CreateDepthPyramidOutput(device.Get(), options.width, options.height);
+    const std::vector<std::vector<float>> referenceDepthLevels =
+        DispatchXeGTAOPrefilter(
+            context.Get(), referencePrefilterShader.Get(), true,
+            upstreamConstantBuffer.Get(), upstreamSharedDataBuffer.Get(),
+            upstreamDepthInput, sampler.Get(), referenceDepth,
+            options.width, options.height);
+    const std::vector<std::vector<float>> candidateDepthLevels =
+        DispatchXeGTAOPrefilter(
+            context.Get(), candidatePrefilterShader.Get(), false,
+            candidateConstantBuffer.Get(), nullptr,
+            candidateDepthInput, sampler.Get(), candidateDepth,
+            options.width, options.height);
+
+    std::uint64_t prefilterDivergentValues = 0;
+    double prefilterMaximumAbsoluteDifference = 0.0;
+    double prefilterMaximumRelativeDifference = 0.0;
+    std::uint64_t prefilterComparedValues = 0;
+    for (std::size_t level = 0; level < referenceDepthLevels.size(); ++level)
+    {
+        if (referenceDepthLevels[level].size() !=
+            candidateDepthLevels[level].size())
+        {
+            ThrowFailure("XeGTAO filtered-depth dimensions differ");
+        }
+        for (std::size_t index = 0;
+             index < referenceDepthLevels[level].size(); ++index)
+        {
+            const ValueComparison difference = CompareValue(
+                referenceDepthLevels[level][index],
+                candidateDepthLevels[level][index],
+                options.toleranceAbsolute, options.toleranceRelative);
+            ++prefilterComparedValues;
+            if (difference.divergent)
+                ++prefilterDivergentValues;
+            prefilterMaximumAbsoluteDifference = std::max(
+                prefilterMaximumAbsoluteDifference,
+                difference.absoluteDifference);
+            prefilterMaximumRelativeDifference = std::max(
+                prefilterMaximumRelativeDifference,
+                difference.relativeDifference);
+        }
+    }
+
+    ComputeOutput referenceOutput =
+        CreateComputeOutput(device.Get(), options.width, options.height);
+    ComputeOutput candidateOutput =
+        CreateComputeOutput(device.Get(), options.width, options.height);
+    const std::array<ScratchUav, 3> upstreamScratch{
+        CreateScratchUav(device.Get(), options.width, options.height),
+        CreateScratchUav(device.Get(), options.width, options.height),
+        CreateScratchUav(device.Get(), options.width, options.height),
+    };
+    const std::vector<float> referencePixels = DispatchXeGTAO(
+        context.Get(), referenceShader.Get(), true,
+        upstreamConstantBuffer.Get(), upstreamFrameBuffer.Get(),
+        referenceDepth.resource, upstreamNormals, noise, sampler.Get(),
+        &upstreamScratch, referenceOutput,
+        options.width, options.height);
+    const std::vector<float> candidatePixels = DispatchXeGTAO(
+        context.Get(), candidateShader.Get(), false,
+        candidateConstantBuffer.Get(), nullptr,
+        candidateDepth.resource, candidateNormals, noise, sampler.Get(),
+        nullptr, candidateOutput,
+        options.width, options.height);
+
+    std::uint64_t divergentPixels = 0;
+    double maximumAbsoluteDifference = 0.0;
+    double maximumRelativeDifference = 0.0;
+    std::size_t worstIndex = 0;
+    float minimumOutput = std::numeric_limits<float>::infinity();
+    float maximumOutput = -std::numeric_limits<float>::infinity();
+    for (std::size_t index = 0; index < referencePixels.size(); ++index)
+    {
+        const ValueComparison difference = CompareValue(
+            referencePixels[index], candidatePixels[index],
+            options.toleranceAbsolute, options.toleranceRelative);
+        if (difference.divergent)
+            ++divergentPixels;
+        if (difference.absoluteDifference > maximumAbsoluteDifference)
+        {
+            maximumAbsoluteDifference = difference.absoluteDifference;
+            worstIndex = index;
+        }
+        maximumRelativeDifference =
+            std::max(maximumRelativeDifference, difference.relativeDifference);
+        minimumOutput = std::min(minimumOutput, referencePixels[index]);
+        maximumOutput = std::max(maximumOutput, referencePixels[index]);
+    }
+    if (!std::isfinite(minimumOutput) || !std::isfinite(maximumOutput) ||
+        maximumOutput - minimumOutput < 1.0e-3f)
+    {
+        ThrowFailure("XeGTAO synthetic scene did not produce a finite, nontrivial AO image");
+    }
+
+    const bool passed =
+        prefilterDivergentValues == 0 && divergentPixels == 0;
+    std::cout << (passed ? "PASS" : "DIVERGE") << "\n"
+              << "  input profile: xegtao-ao\n"
+              << "  scene: tilted-plane+sphere\n"
+              << "  size: " << options.width << "x" << options.height << "\n"
+              << "  prefilter compared values: " << prefilterComparedValues << "\n"
+              << "  prefilter divergent values: "
+              << prefilterDivergentValues << "\n"
+              << "  compared pixels: " << referencePixels.size() << "\n"
+              << "  divergent pixels: " << divergentPixels << "\n"
+              << std::scientific << std::setprecision(7)
+              << "  prefilter max abs diff: "
+              << prefilterMaximumAbsoluteDifference << "\n"
+              << "  prefilter max rel diff: "
+              << prefilterMaximumRelativeDifference << "\n"
+              << "  max abs diff: " << maximumAbsoluteDifference << "\n"
+              << "  max rel diff: " << maximumRelativeDifference << "\n"
+              << "  output range: [" << minimumOutput << ", "
+              << maximumOutput << "]\n";
+    if (maximumAbsoluteDifference > 0.0)
+    {
+        std::cout << "  worst: (" << worstIndex % options.width << ","
+                  << worstIndex / options.width << ") ref "
+                  << referencePixels[worstIndex] << " cand "
+                  << candidatePixels[worstIndex] << "\n";
+    }
+    return passed ? 0 : 1;
+}
+
 UINT ParseUnsigned(const std::string& option, const char* value)
 {
     std::size_t consumed = 0;
@@ -2401,7 +3225,8 @@ Options ParseOptions(int argumentCount, char** arguments)
         ThrowFailure(
             "usage: shader_exec_diff.exe <reference.dxbc> <candidate.dxbc> "
             "[--seeds N] [--width W] [--height H] [--tol-abs A] "
-            "[--tol-rel R] [--verbose]");
+            "[--tol-rel R] [--verbose] [--xegtao-ao "
+            "--reference-prefilter PATH --candidate-prefilter PATH]");
     }
 
     Options options;
@@ -2413,6 +3238,11 @@ Options ParseOptions(int argumentCount, char** arguments)
         if (option == "--verbose")
         {
             options.verbose = true;
+            continue;
+        }
+        if (option == "--xegtao-ao")
+        {
+            options.xegtaoAo = true;
             continue;
         }
         if (index + 1 >= argumentCount)
@@ -2429,6 +3259,10 @@ Options ParseOptions(int argumentCount, char** arguments)
             options.toleranceAbsolute = ParseFloat(option, value);
         else if (option == "--tol-rel")
             options.toleranceRelative = ParseFloat(option, value);
+        else if (option == "--reference-prefilter")
+            options.referencePrefilterPath = value;
+        else if (option == "--candidate-prefilter")
+            options.candidatePrefilterPath = value;
         else
             ThrowFailure("unknown option: " + option);
     }
@@ -2441,6 +3275,22 @@ int Run(const Options& options)
         ReadFile(options.referencePath);
     const std::vector<std::uint8_t> candidateBytecode =
         ReadFile(options.candidatePath);
+
+    if (options.xegtaoAo)
+    {
+        if (options.referencePrefilterPath.empty() ||
+            options.candidatePrefilterPath.empty())
+        {
+            ThrowFailure("XeGTAO mode requires both prefilter shader paths");
+        }
+        const std::vector<std::uint8_t> referencePrefilterBytecode =
+            ReadFile(options.referencePrefilterPath);
+        const std::vector<std::uint8_t> candidatePrefilterBytecode =
+            ReadFile(options.candidatePrefilterPath);
+        return RunXeGTAO(
+            options, referenceBytecode, candidateBytecode,
+            referencePrefilterBytecode, candidatePrefilterBytecode);
+    }
 
     ShaderContract referenceContract = ReflectShader(referenceBytecode);
     ShaderContract candidateContract = ReflectShader(candidateBytecode);
