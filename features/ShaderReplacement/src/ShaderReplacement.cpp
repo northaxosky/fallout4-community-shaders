@@ -14,6 +14,7 @@
 #include "Compiler.h"
 #include "Log.h"
 #include "Registry.h"
+#include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
 #include "Settings/FeatureConfig.h"
 #include "ShaderCatalog.h"
@@ -260,6 +261,11 @@ namespace cs::features
 				// Interim dev coupling; the general injection registry will replace this.
 				e.defines.emplace_back("SCREEN_SPACE_SHADOWS", "1");
 				L->info("Enabled SCREEN_SPACE_SHADOWS for '{}'.", e.name);
+			}
+			if (e.name == "ambient_ibl_pass" &&
+				cs::features::ScreenSpaceGI::GetSingleton()->IsReady()) {
+				e.defines.emplace_back("SSGI", "1");
+				L->info("Enabled SSGI for '{}'.", e.name);
 			}
 			if (replacement::CompileEntry(device, e)) ++got;
 		}
