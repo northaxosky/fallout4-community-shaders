@@ -8,11 +8,17 @@
 #include <algorithm>
 #include <cstdint>
 #include <filesystem>
+#include <format>
 #include <fstream>
+#include <memory>
 
+#include "F4SE/API.h"
 #include "FrameGeneration.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "REX/CONVERT.h"
+#include "REX/W32/OLE32.h"
+#include "REX/W32/SHELL32.h"
 #include "Settings/FeatureConfig.h"
 
 namespace cs::features
@@ -23,6 +29,7 @@ namespace cs::features
 	constexpr double      kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
 	constexpr int         kMinMultiFrameCount = 2;
 	constexpr int         kMaxMultiFrameCount = 60;
+	constexpr std::string_view kLegacyCaptureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
 
 	RenderDoc* RenderDoc::GetSingleton()
 	{
@@ -51,6 +58,70 @@ namespace cs::features
 		double ClampMinFreeDiskGiB(double a_value)
 		{
 			return a_value >= 0.0 ? a_value : RenderDoc::Settings{}.minFreeDiskGiB;
+		}
+
+		std::string PathToUtf8(const std::filesystem::path& a_path)
+		{
+			std::string utf8;
+			if (REX::UTF16_TO_UTF8(a_path.native(), utf8)) {
+				return utf8;
+			}
+			return a_path.string();
+		}
+
+		std::filesystem::path ExpandCaptureFolderEnvironment(const std::string& a_configured)
+		{
+			std::wstring configured;
+			if (!REX::UTF8_TO_UTF16(a_configured, configured)) {
+				L->warn("Failed to decode RenderDoc capture folder as UTF-8; using it without environment expansion");
+				return a_configured;
+			}
+
+			const auto requiredSize = REX::W32::ExpandEnvironmentStringsW(configured.c_str(), nullptr, 0);
+			if (requiredSize == 0) {
+				L->warn("Failed to expand environment variables in RenderDoc capture folder; using the configured path");
+				return configured;
+			}
+
+			std::wstring expanded(requiredSize, L'\0');
+			const auto expandedSize = REX::W32::ExpandEnvironmentStringsW(
+				configured.c_str(), expanded.data(), requiredSize);
+			if (expandedSize == 0 || expandedSize > requiredSize) {
+				L->warn("Failed to expand environment variables in RenderDoc capture folder; using the configured path");
+				return configured;
+			}
+
+			expanded.resize(expandedSize - 1);
+			return expanded;
+		}
+
+		std::filesystem::path ResolveCaptureFolder(const std::string& a_configured)
+		{
+			if (!a_configured.empty()) {
+				return ExpandCaptureFolderEnvironment(a_configured);
+			}
+
+			auto saveFolderName = F4SE::GetSaveFolderName();
+			if (saveFolderName.empty()) {
+				saveFolderName = "Fallout4";
+			}
+
+			wchar_t* knownBuffer = nullptr;
+			const auto knownResult = REX::W32::SHGetKnownFolderPath(
+				REX::W32::FOLDERID_Documents,
+				REX::W32::KF_FLAG_DEFAULT,
+				nullptr,
+				std::addressof(knownBuffer));
+			std::unique_ptr<wchar_t[], decltype(&REX::W32::CoTaskMemFree)> knownPath(
+				knownBuffer, REX::W32::CoTaskMemFree);
+			if (!knownPath || knownResult != 0) {
+				L->warn("Failed to resolve the Documents folder for RenderDoc captures; using {}", kLegacyCaptureFolder);
+				return kLegacyCaptureFolder;
+			}
+
+			std::filesystem::path path = knownPath.get();
+			path /= std::format("My Games/{}/F4SE/FO4CommunityShaders/captures", saveFolderName);
+			return path;
 		}
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
@@ -290,17 +361,19 @@ namespace cs::features
 	{
 		if (!_api)
 			return;
+
+		_resolvedCaptureFolder = ResolveCaptureFolder(_settings.captureFolder);
+		L->info("RenderDoc capture folder: {}", PathToUtf8(_resolvedCaptureFolder));
+
 		std::error_code ec;
-		std::filesystem::create_directories(_settings.captureFolder, ec);
-		auto pathTemplate = (std::filesystem::path(_settings.captureFolder) / "FO4").string();
+		std::filesystem::create_directories(_resolvedCaptureFolder, ec);
+		auto pathTemplate = PathToUtf8(_resolvedCaptureFolder / "FO4");
 		_api->SetCaptureFilePathTemplate(pathTemplate.c_str());
 	}
 
 	bool RenderDoc::CheckCaptureDiskSpace() const
 	{
-		std::filesystem::path captureDir(_settings.captureFolder);
-		if (captureDir.empty())
-			captureDir = ".";
+		const auto& captureDir = _resolvedCaptureFolder;
 
 		std::error_code ec;
 		std::filesystem::create_directories(captureDir, ec);

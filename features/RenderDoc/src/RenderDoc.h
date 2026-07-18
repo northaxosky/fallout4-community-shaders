@@ -5,6 +5,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 
 #include <Windows.h>
@@ -35,7 +36,7 @@ namespace cs::features
 		{
 			bool        enabled = false;
 			std::string dllPath = "Data\\F4SE\\Plugins\\RenderDoc\\renderdoc.dll";
-			std::string captureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
+			std::string captureFolder = "";
 			double      minFreeDiskGiB = 1.0;
 			int         multiFrameCount = 5;
 
@@ -55,7 +56,8 @@ namespace cs::features
 		void ApplyPendingComments();
 		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 
-		Settings _settings;
+		Settings              _settings;
+		std::filesystem::path _resolvedCaptureFolder;
 		HMODULE              _module = nullptr;
 		RENDERDOC_API_1_7_0* _api    = nullptr;
 		bool _attemptedLoad = false;
