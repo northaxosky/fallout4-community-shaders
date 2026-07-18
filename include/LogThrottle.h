@@ -19,10 +19,12 @@
 	} while (0)
 
 // CS_LOG_EVERY_N logs on the first hit and every N hits after it.
+// suppress: 4127 - n is often a compile-time constant, making the guard a constant condition.
 #define CS_LOG_EVERY_N(logger, n, level, ...) \
 	do { \
 		static thread_local std::uint64_t csLogEveryNCounter = 0; \
 		const auto csLogEveryNIntervalValue = (n); \
+		__pragma(warning(suppress: 4127)) \
 		if (csLogEveryNIntervalValue >= 1) { \
 			const auto csLogEveryNInterval = static_cast<std::uint64_t>(csLogEveryNIntervalValue); \
 			if (csLogEveryNCounter == 0) { \
