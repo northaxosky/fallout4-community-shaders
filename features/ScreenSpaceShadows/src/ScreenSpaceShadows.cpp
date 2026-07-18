@@ -1,6 +1,8 @@
 #include "ScreenSpaceShadows.h"
 
 #include <DirectXMath.h>
+#include <RE/M/Main.h>
+#include <RE/N/NiCamera.h>
 #include <RE/S/Sky.h>
 #include <d3d11.h>
 #include <imgui.h>
@@ -16,6 +18,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
@@ -86,7 +89,6 @@ namespace cs::features
 				return false;
 			}
 
-			std::uint64_t sampleCount = a_candidate.sampleCount;
 			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
 					"enabled", "boolean", a_error)
 				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "surface_thickness", a_candidate.surfaceThickness, 0.005f, 0.05f),
@@ -95,12 +97,11 @@ namespace cs::features
 					"bilinear_threshold", "number", a_error)
 				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "shadow_contrast", a_candidate.shadowContrast, 0.0f, 4.0f),
 					"shadow_contrast", "number", a_error)
-				|| !AcceptSetting(feature_config::ReadUnsignedInteger(*settingsTable, "sample_count", sampleCount, 1, 4),
-					"sample_count", "integer in range 1..4", a_error)) {
+				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "max_shadow_length_percent", a_candidate.maxShadowLengthPercent, 0.5f, 15.0f),
+					"max_shadow_length_percent", "number", a_error)) {
 				return false;
 			}
 
-			a_candidate.sampleCount = static_cast<std::uint32_t>(sampleCount);
 			return true;
 		}
 	}
@@ -136,7 +137,7 @@ namespace cs::features
 		settings.insert_or_assign("surface_thickness", _settings.surfaceThickness);
 		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
-		settings.insert_or_assign("sample_count", _settings.sampleCount);
+		settings.insert_or_assign("max_shadow_length_percent", _settings.maxShadowLengthPercent);
 
 		std::error_code ec;
 		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
@@ -269,19 +270,20 @@ namespace cs::features
 
 	std::uint32_t ScreenSpaceShadows::GetScaledSampleCount() const
 	{
+		constexpr std::uint32_t kMinSampleCount = 8;
+		constexpr std::uint32_t kMaxSampleCount = 512;
 		auto* state = cs::engine::GetGraphicsState();
 		auto* rtm = cs::engine::GetRenderTargetManager();
 		if (!state || !rtm) {
-			return 8;
+			return kMinSampleCount;
 		}
 
-		const float width = static_cast<float>(state->screenWidth) * cs::engine::dynres::GetWidthRatio(rtm);
 		const float height = static_cast<float>(state->screenHeight) * cs::engine::dynres::GetHeightRatio(rtm);
-		const float areaScale = std::sqrt((width * height) / (1920.0f * 1080.0f));
-		auto scaled = static_cast<std::uint32_t>(
-			std::round(static_cast<float>(_settings.sampleCount) * 60.0f * areaScale));
-		scaled = ((scaled + 7u) / 8u) * 8u;
-		return std::max(scaled, 8u);
+		// SAMPLE_COUNT is the max march reach in screen pixels; derive it from a fraction of render height.
+		const float reachPixels = (_settings.maxShadowLengthPercent / 100.0f) * height;
+		auto scaled = static_cast<std::uint32_t>(std::round(reachPixels));
+		scaled = ((scaled + 7u) / 8u) * 8u;  // quantize to 8 to avoid DRS-oscillation recompiles
+		return std::clamp(scaled, kMinSampleCount, kMaxSampleCount);
 	}
 
 	ID3D11ComputeShader* ScreenSpaceShadows::GetComputeRaymarch()
@@ -308,11 +310,20 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnPreDeferredLights()
 	{
-		if (!_started.load(std::memory_order_acquire) || !_settings.enabled) {
+		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
 
-		if (!EnsureResources()) {
+		// The SCREEN_SPACE_SHADOWS define is compiled into the directional shaders at startup, so once
+		// active they always sample the mask at t6. Keep the mask allocated + white-cleared whenever it
+		// exists (even when runtime-disabled) so the t6 multiply stays a no-op; otherwise a disabled
+		// toggle leaves t6 unbound (reads 0) and blacks out the sun. Only the raymarch dispatch below is
+		// gated on the enabled toggle.
+		if (_settings.enabled) {
+			if (!EnsureResources()) {
+				return;
+			}
+		} else if (!_resourcesReady.load(std::memory_order_acquire)) {
 			return;
 		}
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
@@ -348,7 +359,7 @@ namespace cs::features
 
 		try {
 			auto* sky = RE::Sky::GetSingleton();
-			auto* shader = sky && sky->mode.get() == RE::Sky::Mode::kFull ?
+			auto* shader = (_settings.enabled && sky && sky->mode.get() == RE::Sky::Mode::kFull) ?
 				GetComputeRaymarch() : nullptr;
 
 			float sx = 0.0f;
@@ -370,9 +381,19 @@ namespace cs::features
 					if (viewportSize[0] > 0 && viewportSize[1] > 0) {
 						cs::engine::ComputeOMScope scope(context);
 
+						// TryGetSunDirectionWS returns the light-travel direction (cached in the sun node's
+						// world.rotate row 0); negate for the toward-sun vector. Source world->clip from the
+						// persistent scene camera (camViewData is per-pass scratch the fullscreen deferred pass
+						// overwrites). NiCamera::worldToCam is column-vector (clip = M * v), so transform against
+						// its transpose; this yields clip.w = dot(toward-sun, view-forward), a proper directional
+						// w, instead of the camera world position leaking in and pinning the sun to screen center.
+						auto* sceneCamera = RE::Main::WorldRootCamera();
+						if (!sceneCamera) {
+							return;
+						}
 						DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sx, -sy, -sz, 0.0f);
-						DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(
-							&state->cameraState.camViewData.viewProjMat));
+						DirectX::XMMATRIX vp = DirectX::XMLoadFloat4x4(
+							reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam));
 						DirectX::XMVECTOR clip = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vp));
 						float lightProj[4] = {
 							DirectX::XMVectorGetX(clip),
@@ -385,47 +406,65 @@ namespace cs::features
 						int maxBounds[2] = { viewportSize[0], viewportSize[1] };
 						auto dispatchList = Bend::BuildDispatchList(lightProj, viewportSize, minBounds, maxBounds);
 
-						ID3D11ShaderResourceView* srvs[1] = { depthSRV };
-						ID3D11UnorderedAccessView* uavs[1] = { _maskTexture->uav.get() };
-						ID3D11SamplerState* samplers[1] = { _pointBorderSampler.get() };
-						ID3D11Buffer* buffers[1] = { _raymarchCB->CB() };
-						context->CSSetShaderResources(0, 1, srvs);
-						context->CSSetSamplers(0, 1, samplers);
-						context->CSSetConstantBuffers(1, 1, buffers);
-						context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
-						context->CSSetShader(shader, nullptr, 0);
-
-						for (int i = 0; i < dispatchList.DispatchCount; ++i) {
-							const auto& dispatch = dispatchList.Dispatch[i];
-							RaymarchCB cb{};
-							std::copy_n(dispatchList.LightCoordinate_Shader, 4, cb.LightCoordinate);
-							std::copy_n(dispatch.WaveOffset_Shader, 2, cb.WaveOffset);
-							cb.FarDepthValue = kFarDepthValue;
-							cb.NearDepthValue = kNearDepthValue;
-							cb.InvDepthTextureSize[0] = 1.0f / static_cast<float>(viewportSize[0]);
-							cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
-							cb.DynamicRes[0] = widthRatio;
-							cb.DynamicRes[1] = heightRatio;
-							cb.SurfaceThickness = _settings.surfaceThickness;
-							cb.BilinearThreshold = _settings.bilinearThreshold;
-							cb.ShadowContrast = _settings.shadowContrast;
-							_raymarchCB->Update(cb);
-							context->Dispatch(
-								static_cast<UINT>(dispatch.WaveCount[0]),
-								static_cast<UINT>(dispatch.WaveCount[1]),
-								static_cast<UINT>(dispatch.WaveCount[2]));
-							_dispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
+						// Debug telemetry (throttled ~2/s): sun projection + dispatch state to sanity-check SSS
+						// from the log. Enable via [logging].channels."cs.feature.screenspaceshadows" = "debug".
+						// Gated on should_log first so it costs nothing (no clock/format) at the default level.
+						if (L->should_log(spdlog::level::debug)) {
+							CS_LOG_EVERY_MS(L, 500, spdlog::level::debug,
+								"SSS: sunWS=({:.4f},{:.4f},{:.4f}) lightCoord=({:.1f},{:.1f},{:.5f},{:.1f}) "
+								"clipW={:.4f} vp={}x{} dispatches={}",
+								sx, sy, sz,
+								dispatchList.LightCoordinate_Shader[0], dispatchList.LightCoordinate_Shader[1],
+								dispatchList.LightCoordinate_Shader[2], dispatchList.LightCoordinate_Shader[3],
+								lightProj[3], viewportSize[0], viewportSize[1], dispatchList.DispatchCount);
 						}
 
-						ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
-						ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
-						ID3D11SamplerState* nullSamplers[1] = { nullptr };
-						ID3D11Buffer* nullBuffers[1] = { nullptr };
-						context->CSSetShaderResources(0, 1, nullSRVs);
-						context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
-						context->CSSetShader(nullptr, nullptr, 0);
-						context->CSSetSamplers(0, 1, nullSamplers);
-						context->CSSetConstantBuffers(1, 1, nullBuffers);
+						// Dispatch for all sun orientations (matches upstream, which ships no behind-camera
+						// gate and trusts Bend's own w=+/-1 front/behind march machinery). The mask is
+						// white-cleared each frame, so a degenerate frame still reads "no shadow".
+						{
+							ID3D11ShaderResourceView* srvs[1] = { depthSRV };
+							ID3D11UnorderedAccessView* uavs[1] = { _maskTexture->uav.get() };
+							ID3D11SamplerState* samplers[1] = { _pointBorderSampler.get() };
+							ID3D11Buffer* buffers[1] = { _raymarchCB->CB() };
+							context->CSSetShaderResources(0, 1, srvs);
+							context->CSSetSamplers(0, 1, samplers);
+							context->CSSetConstantBuffers(1, 1, buffers);
+							context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+							context->CSSetShader(shader, nullptr, 0);
+
+							for (int i = 0; i < dispatchList.DispatchCount; ++i) {
+								const auto& dispatch = dispatchList.Dispatch[i];
+								RaymarchCB cb{};
+								std::copy_n(dispatchList.LightCoordinate_Shader, 4, cb.LightCoordinate);
+								std::copy_n(dispatch.WaveOffset_Shader, 2, cb.WaveOffset);
+								cb.FarDepthValue = kFarDepthValue;
+								cb.NearDepthValue = kNearDepthValue;
+								cb.InvDepthTextureSize[0] = 1.0f / static_cast<float>(viewportSize[0]);
+								cb.InvDepthTextureSize[1] = 1.0f / static_cast<float>(viewportSize[1]);
+								cb.DynamicRes[0] = widthRatio;
+								cb.DynamicRes[1] = heightRatio;
+								cb.SurfaceThickness = _settings.surfaceThickness;
+								cb.BilinearThreshold = _settings.bilinearThreshold;
+								cb.ShadowContrast = _settings.shadowContrast;
+								_raymarchCB->Update(cb);
+								context->Dispatch(
+									static_cast<UINT>(dispatch.WaveCount[0]),
+									static_cast<UINT>(dispatch.WaveCount[1]),
+									static_cast<UINT>(dispatch.WaveCount[2]));
+								_dispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
+							}
+
+							ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
+							ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+							ID3D11SamplerState* nullSamplers[1] = { nullptr };
+							ID3D11Buffer* nullBuffers[1] = { nullptr };
+							context->CSSetShaderResources(0, 1, nullSRVs);
+							context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+							context->CSSetShader(nullptr, nullptr, 0);
+							context->CSSetSamplers(0, 1, nullSamplers);
+							context->CSSetConstantBuffers(1, 1, nullBuffers);
+						}
 					}
 				}
 			}
@@ -438,9 +477,11 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnPreSunLightDraw()
 	{
-		if (!_started.load(std::memory_order_acquire) || !_settings.enabled) {
+		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
+		// Bind whenever resources exist, regardless of the enabled toggle: when disabled the mask is
+		// white (no-op multiply), keeping the compiled-in t6 sample safe. See OnPreDeferredLights.
 		if (!_resourcesReady.load(std::memory_order_acquire) || !_maskTexture) {
 			return;
 		}
@@ -453,10 +494,8 @@ namespace cs::features
 			return;
 		}
 
-		// Only claim t6 when the engine left it NULL — that identifies the directional sun draw. The
-		// ambient/IBL fullscreen pass binds a real probe here (g_tAmbientProbeA at t6), so a non-null
-		// t6 means "not our draw"; skip it to avoid corrupting ambient. The mask is always valid here
-		// (cleared white when idle), so binding it is a no-op for the shader when SSS isn't shadowing.
+		// Bind t6 only when the engine left it null: the ambient/IBL pass binds g_tAmbientProbeA there,
+		// so a non-null t6 means this isn't the directional sun draw and we skip it.
 		ID3D11ShaderResourceView* current = nullptr;
 		context->PSGetShaderResources(kMaskPSSlot, 1, &current);
 		if (current) {
@@ -494,11 +533,7 @@ namespace cs::features
 		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);
 		changed |= ImGui::SliderFloat("Shadow contrast", &_settings.shadowContrast, 0.0f, 4.0f);
 
-		int sampleCount = static_cast<int>(_settings.sampleCount);
-		if (ImGui::SliderInt("Sample count multiplier", &sampleCount, 1, 4)) {
-			_settings.sampleCount = static_cast<std::uint32_t>(sampleCount);
-			changed = true;
-		}
+		changed |= ImGui::SliderFloat("Max shadow length", &_settings.maxShadowLengthPercent, 0.5f, 15.0f, "%.1f%% of screen height");
 		if (changed) {
 			SaveSettings();
 		}
@@ -507,6 +542,23 @@ namespace cs::features
 			"Resources: %s | wave dispatches last frame: %u",
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));
+
+		// Debug: preview the raw R8 shadow mask so its coverage/placement is visible in-game
+		// (bright = lit, dark = shadowed). Lets us judge SSS without a RenderDoc capture.
+		static bool s_showMaskPreview = false;
+		ImGui::Checkbox("Show shadow-mask preview (debug)", &s_showMaskPreview);
+		if (s_showMaskPreview) {
+			if (_maskTexture && _maskTexture->srv && _allocWidth > 0 && _allocHeight > 0) {
+				const float aspect = static_cast<float>(_allocWidth) / static_cast<float>(_allocHeight);
+				const float previewWidth = 480.0f;
+				const float previewHeight = previewWidth / aspect;
+				ImGui::TextDisabled("Mask %ux%u (bright = lit, dark = shadowed)", _allocWidth, _allocHeight);
+				ImGui::Image(reinterpret_cast<ImTextureID>(_maskTexture->srv.get()),
+					ImVec2(previewWidth, previewHeight));
+			} else {
+				ImGui::TextDisabled("Mask not allocated.");
+			}
+		}
 	}
 
 	void ScreenSpaceShadows::RestoreDefaultSettings()
