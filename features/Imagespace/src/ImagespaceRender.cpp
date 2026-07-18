@@ -19,6 +19,9 @@
 
 #include <DirectXMath.h>
 
+#include <RE/M/Main.h>
+#include <RE/N/NiCamera.h>
+
 #include "Render/ComputeScope.h"
 #include "Render/RendererContext.h"
 #include "Render/Engine.h"
@@ -1040,11 +1043,12 @@ namespace cs::features
 			float sunUVx = 2.0f, sunUVy = 2.0f;
 			float sunWSx = 0, sunWSy = 0, sunWSz = 0;
 			if (cs::engine::TryGetSunDirectionWS(sunWSx, sunWSy, sunWSz)) {
-				auto* viewport = cs::engine::GetGraphicsState();
-				if (viewport) {
-					const auto& vp = viewport->cameraState.camViewData.viewProjMat;
+				auto* sceneCamera = RE::Main::WorldRootCamera();
+				if (sceneCamera) {
+					// Project through the persistent scene camera's world->clip (column-vector, hence the
+					// transpose); the per-pass camViewData is a degenerate placeholder at this stage.
 					DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sunWSx, -sunWSy, -sunWSz, 0.0f);
-					DirectX::XMMATRIX vpMat  = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(&vp));
+					DirectX::XMMATRIX vpMat  = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam));
 					DirectX::XMVECTOR clip   = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vpMat));
 					const float wClip = DirectX::XMVectorGetW(clip);
 					// w<=0 is behind camera; abs<5 rejects divide garbage.
