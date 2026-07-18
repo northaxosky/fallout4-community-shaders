@@ -17,6 +17,7 @@
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
@@ -411,6 +412,30 @@ namespace cs::features
 		const auto idx999  = static_cast<size_t>(sorted.size() * 999 / 1000);
 		_onePctLowMs       = sorted[std::min(idx99,  sorted.size() - 1)];
 		_pointOnePctLowMs  = sorted[std::min(idx999, sorted.size() - 1)];
+	}
+
+	void PerformanceOverlay::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		const auto presetName = [](int p) -> std::string_view {
+			switch (static_cast<Preset>(p)) {
+			case Preset::Off:      return "off";
+			case Preset::Minimal:  return "minimal";
+			case Preset::Standard: return "standard";
+			case Preset::Verbose:  return "verbose";
+			default:               return "unknown";
+			}
+		};
+		a_sink
+			.Field("enabled", settings.enabled)
+			.Field("preset", presetName(settings.preset))
+			.Field("fps", static_cast<double>(_displayedFps))
+			.Field("frame_ms", static_cast<double>(_curFrameMs))
+			.Field("avg_ms", static_cast<double>(_avgMs))
+			.Field("low_1pct_ms", static_cast<double>(_onePctLowMs))
+			.Field("refresh_hz", static_cast<double>(_refreshHz))
+			.Field("multiplier", static_cast<std::int64_t>(_displayedFrameMultiplier))
+			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsedBytes / (1024 * 1024)))
+			.Field("vram_budget_mb", static_cast<std::int64_t>(_vramBudgetBytes / (1024 * 1024)));
 	}
 
 	void PerformanceOverlay::DrawOverlay()

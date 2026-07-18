@@ -9,6 +9,7 @@
 #include <imgui.h>
 
 #include "Log.h"
+#include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
@@ -187,6 +188,7 @@ namespace cs::features
 				L->warn("SetSequencePosition call-site opcode mismatch at {:#x}; skipping hook", setSeqAddr);
 			} else {
 				stl::write_thunk_call<TESObjectREFR_SetSequencePosition>(setSeqAddr);
+				_setSeqHooked = true;
 			}
 		}
 
@@ -207,6 +209,13 @@ namespace cs::features
 		ImGui::TextUnformatted("Active. No user-tunable options.");
 		ImGui::TextDisabled("Fixes weapon-idle motion vectors, animated-object previousWorld,");
 		ImGui::TextDisabled("and motion vectors during menus / time freeze.");
+	}
+
+	void MotionVectorFixes::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		a_sink
+			.Field("setseq_hook", _setSeqHooked)
+			.Field("loading_menu", g_isLoadingMenuOpen.load(std::memory_order_relaxed));
 	}
 
 	namespace

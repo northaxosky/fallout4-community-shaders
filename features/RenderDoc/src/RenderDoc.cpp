@@ -20,6 +20,7 @@
 #include "REX/W32/OLE32.h"
 #include "REX/W32/SHELL32.h"
 #include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
@@ -363,7 +364,8 @@ namespace cs::features
 			return;
 
 		_resolvedCaptureFolder = ResolveCaptureFolder(_settings.captureFolder);
-		L->info("RenderDoc capture folder: {}", PathToUtf8(_resolvedCaptureFolder));
+		_resolvedCaptureFolderUtf8 = PathToUtf8(_resolvedCaptureFolder);
+		L->info("RenderDoc capture folder: {}", _resolvedCaptureFolderUtf8);
 
 		std::error_code ec;
 		std::filesystem::create_directories(_resolvedCaptureFolder, ec);
@@ -413,6 +415,17 @@ namespace cs::features
 		_commentsBuf[0] = 0;
 	}
 
+	void RenderDoc::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		a_sink
+			.Field("enabled", _settings.enabled)
+			.Field("loaded", _api != nullptr)
+			.Field("attempted", _attemptedLoad)
+			.Field("captures", static_cast<std::int64_t>(_captureCount.load(std::memory_order_relaxed)))
+			.Field("multi_frames", static_cast<std::int64_t>(_settings.multiFrameCount))
+			.Field("folder", _resolvedCaptureFolderUtf8);
+	}
+
 	void RenderDoc::TriggerCapture()
 	{
 		if (!_settings.enabled) {
@@ -429,6 +442,7 @@ namespace cs::features
 
 		_api->TriggerCapture();
 		ApplyPendingComments();
+		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
 		L->info("Single-frame capture triggered");
 	}
@@ -453,6 +467,7 @@ namespace cs::features
 		const auto frameCount = static_cast<uint32_t>(ClampMultiFrameCount(_settings.multiFrameCount));
 		_api->TriggerMultiFrameCapture(frameCount);
 		ApplyPendingComments();
+		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
 		L->info("Multi-frame capture triggered: {} frames", frameCount);
 	}

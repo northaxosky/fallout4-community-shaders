@@ -16,5 +16,10 @@ namespace cs::features
 		void Load() override;
 		void OnDataLoaded() override;
 		void DrawSettings() override;
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+
+	private:
+		bool _setSeqHooked = false;
 	};
 }

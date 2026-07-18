@@ -26,6 +26,8 @@ namespace cs::features
 		void DrawOverlay() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 		enum class Preset : int
 		{

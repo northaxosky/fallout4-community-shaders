@@ -3,6 +3,7 @@
 #include "Feature.h"
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -28,6 +29,8 @@ namespace cs::features
 		void Load() override;
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device) override;
 		void DrawSettings() override;
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 		struct PerShaderToggle
 		{
@@ -59,5 +62,7 @@ namespace cs::features
 
 		Settings           _settings;
 		std::atomic<bool>  _started{ false };
+		std::size_t        _compiledWant = 0;
+		std::size_t        _compiledGot  = 0;
 	};
 }

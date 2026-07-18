@@ -4,6 +4,7 @@
 #include "Utils/Hotkey.h"
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <filesystem>
 #include <string>
@@ -28,6 +29,8 @@ namespace cs::features
 		void Load() override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
 		void TriggerCapture();
 		void TriggerMultiFrameCapture();
@@ -58,9 +61,11 @@ namespace cs::features
 
 		Settings              _settings;
 		std::filesystem::path _resolvedCaptureFolder;
+		std::string           _resolvedCaptureFolderUtf8;
 		HMODULE              _module = nullptr;
 		RENDERDOC_API_1_7_0* _api    = nullptr;
 		bool _attemptedLoad = false;
+		std::atomic<std::uint32_t> _captureCount{ 0 };
 
 		cs::input::Hotkey _captureHotkey;
 		cs::input::Hotkey _multiCaptureHotkey;

@@ -18,6 +18,7 @@
 #include "Settings/FeatureConfig.h"
 #include "ShaderCatalog.h"
 #include "Sha1.h"
+#include "Telemetry/Telemetry.h"
 
 namespace cs::features
 {
@@ -263,6 +264,8 @@ namespace cs::features
 			if (replacement::CompileEntry(device, e)) ++got;
 		}
 		L->info("Compiled {}/{} replacements", got, want);
+		_compiledWant = want;
+		_compiledGot  = got;
 
 		// Register with ShaderCatalog's single CreatePixelShader hook instead of a second detour.
 		ShaderCatalog::GetSingleton()->RegisterPixelShaderSwapCallback(
@@ -292,6 +295,22 @@ namespace cs::features
 			});
 		const bool catalogHooked = ShaderCatalog::GetSingleton()->HooksInstalled();
 		L->info("Registered pixel-shader swap callback (catalog hook={}).", catalogHooked ? "present" : "absent");
+	}
+
+	void ShaderReplacement::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		std::uint64_t subs = 0, matches = 0;
+		for (const auto& up : replacement::Registry::Get().All()) {
+			subs    += up->substitution_hits.load(std::memory_order_relaxed);
+			matches += up->match_hits.load(std::memory_order_relaxed);
+		}
+		a_sink
+			.Field("enabled", _settings.enabled)
+			.Field("started", _started.load(std::memory_order_acquire))
+			.Field("compiled", static_cast<std::int64_t>(_compiledGot))
+			.Field("requested", static_cast<std::int64_t>(_compiledWant))
+			.Field("substitutions", static_cast<std::int64_t>(subs))
+			.Field("matches", static_cast<std::int64_t>(matches));
 	}
 
 	void ShaderReplacement::DrawSettings()
