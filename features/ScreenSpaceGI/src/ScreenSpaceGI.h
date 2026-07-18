@@ -8,6 +8,8 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <string>
+#include <vector>
 
 #include <winrt/base.h>
 
@@ -35,6 +37,16 @@ namespace cs::features
 		struct Settings
 		{
 			bool enabled = false;
+		};
+
+		struct CaptureConfig
+		{
+			bool                       enabled = false;
+			std::vector<std::uint32_t> formIds;
+			int                        settleFrames = 300;
+			int                        intervalFrames = 120;
+			int                        maxSnapshots = 4;
+			std::string                output = "ScreenSpaceGI\\oracle_capture.json";
 		};
 
 	private:
@@ -84,11 +96,13 @@ namespace cs::features
 		void SaveSettings();
 		void OnComputeResolve();
 		bool EnsureResources();
+		void CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state);
 
 		static constexpr std::uint32_t kBouncePSSlot = 0;
 		static constexpr std::uint32_t kAOPSSlot = 13;
 
 		Settings _settings;
+		CaptureConfig _capture;
 		std::atomic_bool _started{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _resourceInitFailed{ false };
@@ -113,5 +127,10 @@ namespace cs::features
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;
+		std::uint32_t _captureStartFrame = 0;
+		bool _captureArmed = false;
+		int _snapshotCount = 0;
+		std::uint32_t _lastCaptureFrame = 0;
+		std::string _captureJson;
 	};
 }

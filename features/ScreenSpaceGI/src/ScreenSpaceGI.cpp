@@ -3,16 +3,25 @@
 #include <d3d11.h>
 #include <imgui.h>
 
+#include <algorithm>
 #include <cfloat>
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
+#include <limits>
 #include <memory>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <toml++/toml.hpp>
+
+#include <RE/T/TESForm.h>
+#include <RE/T/TESObjectREFR.h>
 
 #include "Log.h"
 #include "Render/Engine.h"
@@ -83,6 +92,104 @@ namespace cs::features
 				"enabled", "boolean", a_error);
 		}
 
+		std::string CaptureSettingError(std::string_view a_key, std::string_view a_reason)
+		{
+			return "capture." + std::string(a_key) + ": " + std::string(a_reason);
+		}
+
+		bool AcceptCaptureSetting(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_key,
+			std::string_view a_expected,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = CaptureSettingError(a_key, "expected " + std::string(a_expected));
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = CaptureSettingError(a_key, "invalid value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = CaptureSettingError(a_key, "value is out of range");
+				break;
+			}
+			return false;
+		}
+
+		bool ParseCaptureTable(
+			const toml::table& a_config,
+			ScreenSpaceGI::CaptureConfig& a_candidate,
+			std::string& a_error)
+		{
+			const auto* captureNode = a_config.get("capture");
+			if (!captureNode) {
+				return true;
+			}
+
+			const auto* captureTable = captureNode->as_table();
+			if (!captureTable) {
+				a_error = "capture: expected table";
+				return false;
+			}
+
+			if (!AcceptCaptureSetting(
+					feature_config::ReadBool(*captureTable, "enabled", a_candidate.enabled),
+					"enabled", "boolean", a_error)) {
+				return false;
+			}
+			if (!AcceptCaptureSetting(
+					feature_config::ReadString(*captureTable, "output", a_candidate.output),
+					"output", "string", a_error)) {
+				return false;
+			}
+
+			auto readInteger = [&](std::string_view a_key, int& a_value) {
+				auto value = static_cast<std::int64_t>(a_value);
+				const auto status = feature_config::ReadSignedInteger(
+					*captureTable, a_key, value, 0, std::numeric_limits<int>::max());
+				if (!AcceptCaptureSetting(status, a_key, "integer", a_error)) {
+					return false;
+				}
+				if (status == feature_config::ScalarReadStatus::kValid) {
+					a_value = static_cast<int>(value);
+				}
+				return true;
+			};
+			if (!readInteger("settle_frames", a_candidate.settleFrames) ||
+				!readInteger("interval_frames", a_candidate.intervalFrames) ||
+				!readInteger("max_snapshots", a_candidate.maxSnapshots)) {
+				return false;
+			}
+
+			const auto* formIdsNode = captureTable->get("form_ids");
+			if (!formIdsNode) {
+				return true;
+			}
+			const auto* formIdsArray = formIdsNode->as_array();
+			if (!formIdsArray) {
+				a_error = CaptureSettingError("form_ids", "expected array of integers");
+				return false;
+			}
+
+			std::vector<std::uint32_t> formIds;
+			formIds.reserve(formIdsArray->size());
+			for (const auto& node : *formIdsArray) {
+				const auto formId = node.value<std::int64_t>();
+				if (!formId || *formId < 0 ||
+					*formId > static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())) {
+					a_error = CaptureSettingError("form_ids", "expected uint32 integers");
+					return false;
+				}
+				formIds.push_back(static_cast<std::uint32_t>(*formId));
+			}
+			a_candidate.formIds = std::move(formIds);
+			return true;
+		}
+
 		std::unique_ptr<cs::buffer::Texture2D> CreateTexture(
 			std::uint32_t a_width,
 			std::uint32_t a_height,
@@ -126,6 +233,63 @@ namespace cs::features
 		{
 			return CreateTexture(a_width, a_height, DXGI_FORMAT_R16G16B16A16_FLOAT);
 		}
+
+		bool IsCaptureDepthFormat(DXGI_FORMAT a_format)
+		{
+			switch (a_format) {
+			case DXGI_FORMAT_R24G8_TYPELESS:
+			case DXGI_FORMAT_D24_UNORM_S8_UINT:
+			case DXGI_FORMAT_R32_TYPELESS:
+			case DXGI_FORMAT_R32_FLOAT:
+			case DXGI_FORMAT_D32_FLOAT:
+			case DXGI_FORMAT_R32G8X24_TYPELESS:
+			case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		std::size_t CaptureDepthTexelBytes(DXGI_FORMAT a_format)
+		{
+			switch (a_format) {
+			case DXGI_FORMAT_R32G8X24_TYPELESS:
+			case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+				return 8;  // 32-bit depth + 8-bit stencil + 24-bit pad
+			default:
+				return 4;
+			}
+		}
+
+		float ReadCaptureDepth(const std::uint8_t* a_texel, DXGI_FORMAT a_format)
+		{
+			if (a_format == DXGI_FORMAT_R24G8_TYPELESS || a_format == DXGI_FORMAT_D24_UNORM_S8_UINT) {
+				std::uint32_t packedDepth{};
+				std::memcpy(&packedDepth, a_texel, sizeof(packedDepth));
+				return static_cast<float>(packedDepth & 0x00FFFFFFu) / 16777215.0f;
+			}
+
+			float depth{};
+			std::memcpy(&depth, a_texel, sizeof(depth));
+			return depth;
+		}
+
+		void AppendPoint3(std::ostringstream& a_json, const RE::NiPoint3& a_point)
+		{
+			a_json << '[' << a_point.x << ',' << a_point.y << ',' << a_point.z << ']';
+		}
+
+		void AppendMatrix(std::ostringstream& a_json, const DirectX::XMFLOAT4X4& a_matrix)
+		{
+			a_json << '['
+				<< a_matrix._11 << ',' << a_matrix._12 << ',' << a_matrix._13 << ',' << a_matrix._14 << ','
+				<< a_matrix._21 << ',' << a_matrix._22 << ',' << a_matrix._23 << ',' << a_matrix._24 << ','
+				<< a_matrix._31 << ',' << a_matrix._32 << ',' << a_matrix._33 << ',' << a_matrix._34 << ','
+				<< a_matrix._41 << ',' << a_matrix._42 << ',' << a_matrix._43 << ',' << a_matrix._44
+				<< ']';
+		}
+
+		bool s_loggedUnsupportedCaptureDepthFormat = false;
 	}
 
 	ScreenSpaceGI* ScreenSpaceGI::GetSingleton()
@@ -140,8 +304,18 @@ namespace cs::features
 		if (!ParseSettingsTable(a_config, candidate, a_error)) {
 			return false;
 		}
+		CaptureConfig captureCandidate;
+		if (!ParseCaptureTable(a_config, captureCandidate, a_error)) {
+			return false;
+		}
 
 		_settings = candidate;
+		_capture = std::move(captureCandidate);
+		_captureStartFrame = 0;
+		_captureArmed = false;
+		_snapshotCount = 0;
+		_lastCaptureFrame = 0;
+		_captureJson.clear();
 		return true;
 	}
 
@@ -384,6 +558,196 @@ namespace cs::features
 		}
 	}
 
+	void ScreenSpaceGI::CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state)
+	{
+		if (!_capture.enabled || _capture.formIds.empty()) {
+			return;
+		}
+
+		const std::uint32_t frame = static_cast<std::uint32_t>(a_state->frameCount);
+		if (!_captureArmed) {
+			_captureArmed = true;
+			_captureStartFrame = frame;
+			_captureJson.clear();
+			L->info("SSGI oracle capture armed at frame {}.", frame);
+		}
+		if (_snapshotCount >= _capture.maxSnapshots) {
+			return;
+		}
+
+		const long relativeFrame = static_cast<long>(frame) - static_cast<long>(_captureStartFrame) -
+			static_cast<long>(_capture.settleFrames);
+		if (relativeFrame < 0 ||
+			(_capture.intervalFrames > 0 && (relativeFrame % _capture.intervalFrames) != 0) ||
+			frame == _lastCaptureFrame) {
+			return;
+		}
+		_lastCaptureFrame = frame;
+
+		try {
+			cs::engine::CameraMatrices cam{};
+			auto* rtm = cs::engine::GetRenderTargetManager();
+			if (!rtm || !cs::engine::TryGetCameraMatrices(cam)) {
+				return;
+			}
+
+			const int frameW = static_cast<int>(
+				static_cast<float>(_allocW) * cs::engine::dynres::GetWidthRatio(rtm));
+			const int frameH = static_cast<int>(
+				static_cast<float>(_allocH) * cs::engine::dynres::GetHeightRatio(rtm));
+			if (frameW <= 0 || frameH <= 0) {
+				return;
+			}
+
+			auto* depthSRV = cs::engine::GetSceneDepthSRV();
+			auto* device = cs::util::GetD3DDevice();
+			if (!depthSRV || !device) {
+				return;
+			}
+
+			winrt::com_ptr<ID3D11Resource> depthResource;
+			depthSRV->GetResource(depthResource.put());
+			auto depthTexture = depthResource.try_as<ID3D11Texture2D>();
+			if (!depthTexture) {
+				return;
+			}
+
+			D3D11_TEXTURE2D_DESC depthDesc{};
+			depthTexture->GetDesc(&depthDesc);
+			if (!IsCaptureDepthFormat(depthDesc.Format)) {
+				if (!s_loggedUnsupportedCaptureDepthFormat) {
+					s_loggedUnsupportedCaptureDepthFormat = true;
+					L->warn("SSGI oracle capture does not support depth format {}.", static_cast<int>(depthDesc.Format));
+				}
+				return;
+			}
+			if (depthDesc.SampleDesc.Count != 1 ||
+				depthDesc.Width < static_cast<std::uint32_t>(frameW) ||
+				depthDesc.Height < static_cast<std::uint32_t>(frameH)) {
+				L->warn("SSGI oracle capture depth dimensions do not match the render frame.");
+				return;
+			}
+
+			D3D11_TEXTURE2D_DESC stagingDesc = depthDesc;
+			stagingDesc.Usage = D3D11_USAGE_STAGING;
+			stagingDesc.BindFlags = 0;
+			stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+			stagingDesc.MiscFlags = 0;
+
+			winrt::com_ptr<ID3D11Texture2D> staging;
+			DX::ThrowIfFailed(device->CreateTexture2D(&stagingDesc, nullptr, staging.put()));
+			a_context->CopyResource(staging.get(), depthTexture.get());
+
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			DX::ThrowIfFailed(a_context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped));
+			bool mappedDepth = true;
+			try {
+				const RE::NiPoint3 posAdjust = a_state->cameraState.currentPosAdjust;
+				std::ostringstream snapshot;
+				snapshot << std::setprecision(std::numeric_limits<float>::max_digits10);
+				snapshot << "{\"frame\":" << frame
+					<< ",\"frameDim\":[" << frameW << ',' << frameH << ']'
+					<< ",\"posAdjust\":";
+				AppendPoint3(snapshot, posAdjust);
+				snapshot << ",\"view\":";
+				AppendMatrix(snapshot, cam.view);
+				snapshot << ",\"proj\":";
+				AppendMatrix(snapshot, cam.proj);
+				snapshot << ",\"viewProj\":";
+				AppendMatrix(snapshot, cam.viewProj);
+				snapshot << ",\"invProj\":";
+				AppendMatrix(snapshot, cam.invProj);
+				snapshot << ",\"samples\":[";
+
+				int sampleCount = 0;
+				const auto viewProj = DirectX::XMLoadFloat4x4(&cam.viewProj);
+				for (const std::uint32_t formId : _capture.formIds) {
+					auto* refr = RE::TESForm::GetFormByID<RE::TESObjectREFR>(formId);
+					if (!refr || !refr->Get3D()) {
+						continue;
+					}
+
+					const RE::NiPoint3 worldPos = refr->GetPosition();
+					const DirectX::XMVECTOR rendererWorldPos = DirectX::XMVectorSet(
+						worldPos.x - posAdjust.x,
+						worldPos.y - posAdjust.y,
+						worldPos.z - posAdjust.z,
+						1.0f);
+					DirectX::XMFLOAT4 clip{};
+					DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(rendererWorldPos, viewProj));
+					if (clip.w <= 0.0f) {
+						continue;
+					}
+
+					const float ndcX = clip.x / clip.w;
+					const float ndcY = clip.y / clip.w;
+					if (!std::isfinite(ndcX) || !std::isfinite(ndcY) ||
+						std::abs(ndcX) > 1.2f || std::abs(ndcY) > 1.2f) {
+						continue;
+					}
+
+					const float uvX = ndcX * 0.5f + 0.5f;
+					const float uvY = (1.0f - ndcY) * 0.5f;
+					const int px = std::clamp(static_cast<int>(std::floor(uvX * frameW)), 0, frameW - 1);
+					const int py = std::clamp(static_cast<int>(std::floor(uvY * frameH)), 0, frameH - 1);
+					const auto* texel = static_cast<const std::uint8_t*>(mapped.pData) +
+						static_cast<std::size_t>(py) * mapped.RowPitch +
+						static_cast<std::size_t>(px) * CaptureDepthTexelBytes(depthDesc.Format);
+					const float storedDepth = ReadCaptureDepth(texel, depthDesc.Format);
+
+					if (sampleCount++ > 0) {
+						snapshot << ',';
+					}
+					snapshot << "{\"formId\":" << formId << ",\"worldPos\":";
+					AppendPoint3(snapshot, worldPos);
+					snapshot << ",\"uv\":[" << uvX << ',' << uvY << ']'
+						<< ",\"storedDepth\":" << storedDepth << '}';
+				}
+				snapshot << "]}";
+
+				a_context->Unmap(staging.get(), 0);
+				mappedDepth = false;
+
+				if (!_captureJson.empty()) {
+					_captureJson += ',';
+				}
+				_captureJson += snapshot.str();
+				++_snapshotCount;
+
+				const auto outputPath = std::filesystem::path("Data\\F4SE\\Plugins\\FO4CommunityShaders") / _capture.output;
+				std::error_code error;
+				std::filesystem::create_directories(outputPath.parent_path(), error);
+				if (error) {
+					L->warn("SSGI oracle capture could not create output directory: {}.", error.message());
+					return;
+				}
+				std::ofstream output(outputPath);
+				if (!output) {
+					L->warn("SSGI oracle capture could not write {}.", outputPath.string());
+					return;
+				}
+				output << "{\"schema\":\"ssgi-oracle-capture/1\",\"allocDim\":["
+					<< _allocW << ',' << _allocH << "],\"snapshots\":[" << _captureJson << "]}";
+				if (!output) {
+					L->warn("SSGI oracle capture failed writing {}.", outputPath.string());
+					return;
+				}
+				L->info(
+					"SSGI oracle snapshot {}/{} frame {} wrote {} samples.",
+					_snapshotCount, _capture.maxSnapshots, frame, sampleCount);
+			} catch (...) {
+				if (mappedDepth) {
+					a_context->Unmap(staging.get(), 0);
+				}
+				throw;
+			}
+		} catch (const std::exception& e) {
+			L->warn("SSGI oracle capture failed: {}.", e.what());
+		} catch (...) {
+			L->warn("SSGI oracle capture failed.");
+		}
+	}
+
 	void ScreenSpaceGI::OnComputeResolve()
 	{
 		if (!_started.load(std::memory_order_acquire) || !_settings.enabled) {
@@ -405,6 +769,8 @@ namespace cs::features
 
 		try {
 			cs::engine::ComputeOMScope scope(context);
+
+			CaptureOracle(context, state);
 
 			const bool xegtaoReady =
 				_decodeCS && _prefilterCS && _aoCS &&
