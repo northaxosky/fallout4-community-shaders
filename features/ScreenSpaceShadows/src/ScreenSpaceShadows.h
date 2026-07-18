@@ -30,6 +30,9 @@ namespace cs::features
 		bool HasResettableSettings() const override { return true; }
 		bool IsShadowMaskReady();
 
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+
 		struct Settings
 		{
 			bool          enabled = false;
@@ -73,6 +76,13 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
 		std::atomic_bool _maskBound{ false };
+		std::atomic_bool _maskBoundLastFrame{ false };
+		std::atomic<float> _sunX{ 0.0f };
+		std::atomic<float> _sunY{ 0.0f };
+		std::atomic<float> _sunZ{ 0.0f };
+		std::atomic<float> _lightX{ 0.0f };
+		std::atomic<float> _lightY{ 0.0f };
+		std::atomic<float> _clipW{ 0.0f };
 		bool _resourceInitFailed = false;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;

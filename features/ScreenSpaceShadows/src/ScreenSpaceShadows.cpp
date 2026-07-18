@@ -18,11 +18,11 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
-#include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
 
@@ -327,6 +327,7 @@ namespace cs::features
 			return;
 		}
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
+		_maskBoundLastFrame.store(false, std::memory_order_relaxed);
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) {
@@ -406,18 +407,15 @@ namespace cs::features
 						int maxBounds[2] = { viewportSize[0], viewportSize[1] };
 						auto dispatchList = Bend::BuildDispatchList(lightProj, viewportSize, minBounds, maxBounds);
 
-						// Debug telemetry (throttled ~2/s): sun projection + dispatch state to sanity-check SSS
-						// from the log. Enable via [logging].channels."cs.feature.screenspaceshadows" = "debug".
-						// Gated on should_log first so it costs nothing (no clock/format) at the default level.
-						if (L->should_log(spdlog::level::debug)) {
-							CS_LOG_EVERY_MS(L, 500, spdlog::level::debug,
-								"SSS: sunWS=({:.4f},{:.4f},{:.4f}) lightCoord=({:.1f},{:.1f},{:.5f},{:.1f}) "
-								"clipW={:.4f} vp={}x{} dispatches={}",
-								sx, sy, sz,
-								dispatchList.LightCoordinate_Shader[0], dispatchList.LightCoordinate_Shader[1],
-								dispatchList.LightCoordinate_Shader[2], dispatchList.LightCoordinate_Shader[3],
-								lightProj[3], viewportSize[0], viewportSize[1], dispatchList.DispatchCount);
-						}
+						// Snapshot the sun projection for the telemetry pump / Ctrl+F12 dump, which read it
+						// off cheap cached atomics. LightCoordinate_Shader[0..1] is the screen-space sun
+						// position; lightProj[3] is clip.w = dot(toward-sun, view-forward).
+						_sunX.store(sx, std::memory_order_relaxed);
+						_sunY.store(sy, std::memory_order_relaxed);
+						_sunZ.store(sz, std::memory_order_relaxed);
+						_lightX.store(dispatchList.LightCoordinate_Shader[0], std::memory_order_relaxed);
+						_lightY.store(dispatchList.LightCoordinate_Shader[1], std::memory_order_relaxed);
+						_clipW.store(lightProj[3], std::memory_order_relaxed);
 
 						// Dispatch for all sun orientations (matches upstream, which ships no behind-camera
 						// gate and trusts Bend's own w=+/-1 front/behind march machinery). The mask is
@@ -506,6 +504,7 @@ namespace cs::features
 		auto* srv = _maskTexture->srv.get();
 		context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
 		_maskBound.store(true, std::memory_order_relaxed);
+		_maskBoundLastFrame.store(true, std::memory_order_relaxed);
 	}
 
 	void ScreenSpaceShadows::OnPostDeferredLights()
@@ -524,6 +523,22 @@ namespace cs::features
 		}
 		ID3D11ShaderResourceView* nullSRV = nullptr;
 		context->PSSetShaderResources(kMaskPSSlot, 1, &nullSRV);
+	}
+
+	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		a_sink
+			.Field("enabled", _settings.enabled)
+			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
+			.Field("mask_bound", _maskBoundLastFrame.load(std::memory_order_relaxed))
+			.Field("dispatches", static_cast<std::int64_t>(_dispatchedLastFrame.load(std::memory_order_relaxed)))
+			.Dimensions("mask", _allocWidth, _allocHeight)
+			.Field("sun_x", static_cast<double>(_sunX.load(std::memory_order_relaxed)))
+			.Field("sun_y", static_cast<double>(_sunY.load(std::memory_order_relaxed)))
+			.Field("sun_z", static_cast<double>(_sunZ.load(std::memory_order_relaxed)))
+			.Field("light_x", static_cast<double>(_lightX.load(std::memory_order_relaxed)))
+			.Field("light_y", static_cast<double>(_lightY.load(std::memory_order_relaxed)))
+			.Field("clip_w", static_cast<double>(_clipW.load(std::memory_order_relaxed)));
 	}
 
 	void ScreenSpaceShadows::DrawSettings()
