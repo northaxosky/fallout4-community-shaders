@@ -9,6 +9,7 @@
 
 struct IDXGIAdapter;
 struct ID3D11Device;
+struct ID3D11PixelShader;
 
 namespace cs::features
 {
@@ -53,6 +54,7 @@ namespace cs::features
 
 		const Settings& GetSettings() const noexcept { return _settings; }
 		bool IsShaderEnabled(const std::string& a_name) const noexcept;
+		ID3D11PixelShader* GetReplacementPixelShader(std::string_view a_name) const noexcept;
 
 	private:
 		ShaderReplacement() = default;

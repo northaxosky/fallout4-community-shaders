@@ -29,6 +29,7 @@
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
+#include "ShaderReplacement.h"
 #include "Utils/CSUtil.h"
 
 namespace cs::features
@@ -354,6 +355,12 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
+		cs::engine::RegisterPreSunLightDraw([] {
+			ScreenSpaceGI::GetSingleton()->OnPreSunLightDraw();
+		});
+		cs::engine::RegisterPostDeferredLightsImpl([] {
+			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
+		});
 		if (_capture.enabled) {
 			cs::engine::RegisterPreDeferredLightsImpl([] {
 				ScreenSpaceGI::GetSingleton()->OnAnchorDumpFrameBegin();
@@ -413,8 +420,7 @@ namespace cs::features
 
 	bool ScreenSpaceGI::IsReady()
 	{
-		// Phase 2: gate on _started && enabled && per-frame-valid outputs.
-		return false;
+		return _started.load(std::memory_order_acquire) && _settings.enabled && EnsureResources();
 	}
 
 	bool ScreenSpaceGI::EnsureResources()
@@ -916,6 +922,7 @@ namespace cs::features
 		_dumpOrdinal = 0;
 		_dumpTripleMatches = 0;
 		_dumpMatchOrdinal = -1;
+		_dumpIdentityMatches = 0;
 		_dumpArmed.store(true, std::memory_order_relaxed);
 		auto* state = cs::engine::GetGraphicsState();
 		const auto frame = state ? static_cast<std::uint32_t>(state->frameCount) : 0u;
@@ -993,28 +1000,35 @@ namespace cs::features
 			return;
 		}
 		L->info(
-			"SSGI anchor-dump FRAME END: {} primCount==2 DLI draws; {} matched the triple; matchOrdinal={} lastOrdinal={} matchIsLast={}",
+			"SSGI anchor-dump FRAME END: {} primCount==2 DLI draws; {} matched the triple; matchOrdinal={} lastOrdinal={} matchIsLast={}; identityMatches={}",
 			_dumpOrdinal,
 			_dumpTripleMatches,
 			_dumpMatchOrdinal,
 			_dumpOrdinal - 1,
-			_dumpTripleMatches > 0 && _dumpMatchOrdinal == _dumpOrdinal - 1);
+			_dumpTripleMatches > 0 && _dumpMatchOrdinal == _dumpOrdinal - 1,
+			_dumpIdentityMatches);
 		_dumpArmed.store(false, std::memory_order_relaxed);
 		++_dumpFramesLogged;
 	}
 
 	void ScreenSpaceGI::OnComputeResolve()
 	{
-		if (!_started.load(std::memory_order_acquire) || !_settings.enabled) {
+		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
-		if (!EnsureResources() || !_resourcesReady.load(std::memory_order_acquire)) {
+		if (_settings.enabled) {
+			if (!EnsureResources()) {
+				return;
+			}
+		} else if (!_resourcesReady.load(std::memory_order_acquire)) {
+			return;
+		} else if (!EnsureResources()) {
 			return;
 		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* state = cs::engine::GetGraphicsState();
-		if (!rendererData || !state || !_resolveCB || !_bounceTexture || !_aoTexture || !_resolveCS) {
+		if (!rendererData || !state || !_bounceTexture || !_aoTexture) {
 			return;
 		}
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
@@ -1027,6 +1041,7 @@ namespace cs::features
 
 			CaptureOracle(context, state);
 
+			bool aoProducedThisFrame = false;
 			const bool xegtaoReady =
 				_decodeCS && _prefilterCS && _aoCS &&
 				_linearDepthTex && _workingDepthTex && _viewNormalTex && _aoRawTex &&
@@ -1038,7 +1053,7 @@ namespace cs::features
 			DirectX::XMFLOAT4X4 worldInvProj{};
 			DirectX::XMFLOAT4 worldNdcToViewMul{};
 			DirectX::XMFLOAT4 worldNdcToViewAdd{};
-			if (xegtaoReady && rtm &&
+			if (_settings.enabled && xegtaoReady && rtm &&
 				cs::engine::TryGetWorldSceneProjection(
 					worldProj,
 					worldInvProj,
@@ -1157,6 +1172,7 @@ namespace cs::features
 						(static_cast<std::uint32_t>(frameW) + 7u) / 8u,
 						(static_cast<std::uint32_t>(frameH) + 7u) / 8u,
 						1);
+					aoProducedThisFrame = true;
 
 					ID3D11ShaderResourceView* nullAOSRVs[3] = { nullptr, nullptr, nullptr };
 					ID3D11UnorderedAccessView* nullAOUAVs[1] = { nullptr };
@@ -1169,32 +1185,111 @@ namespace cs::features
 				}
 			}
 
-			ResolveCB cb{};
-			cb.Extent[0] = _allocW;
-			cb.Extent[1] = _allocH;
-			cb.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
-			_resolveCB->Update(cb);
+			if (_resolveCS && _resolveCB) {
+				ResolveCB cb{};
+				cb.Extent[0] = _allocW;
+				cb.Extent[1] = _allocH;
+				cb.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
+				cb.HasAO = aoProducedThisFrame ? 1u : 0u;
+				_resolveCB->Update(cb);
 
-			ID3D11Buffer* buffers[1] = { _resolveCB->CB() };
-			ID3D11UnorderedAccessView* uavs[2] = {
-				_bounceTexture->uav.get(),
-				_aoTexture->uav.get()
-			};
-			context->CSSetConstantBuffers(0, 1, buffers);
-			context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
-			context->CSSetShader(_resolveCS.get(), nullptr, 0);
-			context->Dispatch((_allocW + 7u) / 8u, (_allocH + 7u) / 8u, 1);
+				ID3D11ShaderResourceView* resolveSRVs[1] = {
+					aoProducedThisFrame ? _aoRawTex->srv.get() : nullptr
+				};
+				ID3D11Buffer* buffers[1] = { _resolveCB->CB() };
+				ID3D11UnorderedAccessView* uavs[2] = {
+					_bounceTexture->uav.get(),
+					_aoTexture->uav.get()
+				};
+				context->CSSetShaderResources(0, 1, resolveSRVs);
+				context->CSSetConstantBuffers(0, 1, buffers);
+				context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
+				context->CSSetShader(_resolveCS.get(), nullptr, 0);
+				context->Dispatch((_allocW + 7u) / 8u, (_allocH + 7u) / 8u, 1);
 
-			ID3D11UnorderedAccessView* nullUAVs[2] = { nullptr, nullptr };
-			ID3D11Buffer* nullBuffers[1] = { nullptr };
-			context->CSSetUnorderedAccessViews(0, 2, nullUAVs, nullptr);
-			context->CSSetShader(nullptr, nullptr, 0);
-			context->CSSetConstantBuffers(0, 1, nullBuffers);
+				ID3D11ShaderResourceView* nullResolveSRVs[1] = { nullptr };
+				ID3D11UnorderedAccessView* nullUAVs[2] = { nullptr, nullptr };
+				ID3D11Buffer* nullBuffers[1] = { nullptr };
+				context->CSSetShaderResources(0, 1, nullResolveSRVs);
+				context->CSSetUnorderedAccessViews(0, 2, nullUAVs, nullptr);
+				context->CSSetShader(nullptr, nullptr, 0);
+				context->CSSetConstantBuffers(0, 1, nullBuffers);
+			} else {
+				const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+				const float black[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+				context->ClearUnorderedAccessViewFloat(_aoTexture->uav.get(), white);
+				context->ClearUnorderedAccessViewFloat(_bounceTexture->uav.get(), black);
+			}
 		} catch (const std::exception& e) {
 			L->error("Resolve dispatch failed: {}", e.what());
 		} catch (...) {
 			L->error("Resolve dispatch failed.");
 		}
+	}
+
+	void ScreenSpaceGI::OnPreSunLightDraw()
+	{
+		if (!_started.load(std::memory_order_acquire)) {
+			return;
+		}
+		if (!_resourcesReady.load(std::memory_order_acquire) || !_bounceTexture || !_aoTexture) {
+			return;
+		}
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		ID3D11PixelShader* ambientPS =
+			cs::features::ShaderReplacement::GetSingleton()->GetReplacementPixelShader("ambient_ibl_pass");
+		ID3D11PixelShader* boundPS = nullptr;
+		context->PSGetShader(&boundPS, nullptr, nullptr);
+		const bool isAmbientPass = ambientPS != nullptr && boundPS == ambientPS;
+		if (_dumpArmed.load(std::memory_order_relaxed)) {
+			L->info(
+				"SSGI identity-match draw {}: boundPS={:p} ambientPS={:p} identityMatch={}",
+				_dumpOrdinal,
+				static_cast<const void*>(boundPS),
+				static_cast<const void*>(ambientPS),
+				isAmbientPass);
+			if (isAmbientPass) {
+				++_dumpIdentityMatches;
+			}
+		}
+		if (boundPS) {
+			boundPS->Release();
+		}
+		if (!isAmbientPass) {
+			return;
+		}
+
+		ID3D11ShaderResourceView* bounce = _bounceTexture->srv.get();
+		ID3D11ShaderResourceView* ao = _aoTexture->srv.get();
+		context->PSSetShaderResources(kBouncePSSlot, 1, &bounce);
+		context->PSSetShaderResources(kAOPSSlot, 1, &ao);
+		_ssgiBound.store(true, std::memory_order_relaxed);
+	}
+
+	void ScreenSpaceGI::OnPostDeferredLights()
+	{
+		if (!_ssgiBound.exchange(false, std::memory_order_relaxed)) {
+			return;
+		}
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		context->PSSetShaderResources(kBouncePSSlot, 1, &nullSRV);
+		context->PSSetShaderResources(kAOPSSlot, 1, &nullSRV);
 	}
 
 	void ScreenSpaceGI::DrawSettings()

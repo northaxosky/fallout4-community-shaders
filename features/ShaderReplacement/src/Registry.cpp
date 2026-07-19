@@ -230,6 +230,16 @@ namespace cs::features::replacement
 		return instance;
 	}
 
+	ReplacementEntry* Registry::FindByName(std::string_view a_name) noexcept
+	{
+		for (auto& entry : _entries) {
+			if (entry->name == a_name) {
+				return entry.get();
+			}
+		}
+		return nullptr;
+	}
+
 	ReplacementEntry* Registry::FindByRuntimeSha1(const Sha1Result& s) noexcept
 	{
 		if (Sha1IsZero(s))

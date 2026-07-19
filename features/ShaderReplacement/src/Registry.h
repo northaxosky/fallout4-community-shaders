@@ -5,6 +5,7 @@
 #include <atomic>
 #include <d3d11.h>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <winrt/base.h>
@@ -47,6 +48,7 @@ namespace cs::features::replacement
 
 		bool LoadFromJson(const std::wstring& path, const std::wstring& shaders_root);
 
+		ReplacementEntry* FindByName(std::string_view a_name) noexcept;
 		ReplacementEntry* FindByRuntimeSha1(const Sha1Result& s) noexcept;
 		std::vector<std::unique_ptr<ReplacementEntry>>&       All() noexcept       { return _entries; }
 		const std::vector<std::unique_ptr<ReplacementEntry>>& All() const noexcept { return _entries; }

@@ -56,7 +56,8 @@ namespace cs::features
 			std::uint32_t Extent[2];
 			std::uint32_t Origin[2];
 			std::uint32_t FrameIndex;
-			std::uint32_t Padding[3];
+			std::uint32_t HasAO;
+			std::uint32_t Padding[2];
 		};
 		static_assert(sizeof(ResolveCB) % 16 == 0);
 
@@ -99,6 +100,8 @@ namespace cs::features
 		void OnAnchorDumpFrameBegin();
 		void OnAnchorDumpDraw();
 		void OnAnchorDumpFrameEnd();
+		void OnPreSunLightDraw();
+		void OnPostDeferredLights();
 		bool EnsureResources();
 		void CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state);
 
@@ -110,6 +113,7 @@ namespace cs::features
 		std::atomic_bool _started{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _resourceInitFailed{ false };
+		std::atomic_bool _ssgiBound{ false };
 
 		std::unique_ptr<cs::buffer::Texture2D> _bounceTexture;
 		std::unique_ptr<cs::buffer::Texture2D> _aoTexture;
@@ -141,5 +145,6 @@ namespace cs::features
 		int _dumpFramesLogged = 0;
 		int _dumpTripleMatches = 0;
 		int _dumpMatchOrdinal = -1;
+		int _dumpIdentityMatches = 0;
 	};
 }

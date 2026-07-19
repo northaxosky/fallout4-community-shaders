@@ -135,6 +135,12 @@ namespace cs::features
 		return &instance;
 	}
 
+	ID3D11PixelShader* ShaderReplacement::GetReplacementPixelShader(std::string_view a_name) const noexcept
+	{
+		auto* entry = replacement::Registry::Get().FindByName(a_name);
+		return entry ? entry->compiled_ps.get() : nullptr;
+	}
+
 	bool ShaderReplacement::IsShaderEnabled(const std::string& a_name) const noexcept
 	{
 		auto& t = const_cast<PerShaderToggle&>(_settings.shaders);
