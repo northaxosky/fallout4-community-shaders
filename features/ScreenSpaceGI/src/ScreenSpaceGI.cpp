@@ -1,4 +1,5 @@
 #include "ScreenSpaceGI.h"
+#include "OracleProjectionEmbed.h"
 
 #include <d3d11.h>
 #include <imgui.h>
@@ -602,6 +603,89 @@ namespace cs::features
 				return;
 			}
 			const auto* worldToCam = reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam);
+			const double embeddedWorldToCam[]{
+				static_cast<double>(worldToCam->_11), static_cast<double>(worldToCam->_12), static_cast<double>(worldToCam->_13), static_cast<double>(worldToCam->_14),
+				static_cast<double>(worldToCam->_21), static_cast<double>(worldToCam->_22), static_cast<double>(worldToCam->_23), static_cast<double>(worldToCam->_24),
+				static_cast<double>(worldToCam->_31), static_cast<double>(worldToCam->_32), static_cast<double>(worldToCam->_33), static_cast<double>(worldToCam->_34),
+				static_cast<double>(worldToCam->_41), static_cast<double>(worldToCam->_42), static_cast<double>(worldToCam->_43), static_cast<double>(worldToCam->_44)
+			};
+			const auto& rotation = sceneCamera->world.rotate;
+			const double rotationRows[]{
+				static_cast<double>(rotation[0].x), static_cast<double>(rotation[0].y), static_cast<double>(rotation[0].z),
+				static_cast<double>(rotation[1].x), static_cast<double>(rotation[1].y), static_cast<double>(rotation[1].z),
+				static_cast<double>(rotation[2].x), static_cast<double>(rotation[2].y), static_cast<double>(rotation[2].z)
+			};
+			const auto& translation = sceneCamera->world.translate;
+			const double cameraWorld[]{
+				static_cast<double>(translation.x),
+				static_cast<double>(translation.y),
+				static_cast<double>(translation.z)
+			};
+			double embeddedProjection[16]{};
+			cs::ssgi::dev::EmbedProjectionFromWorldToCam(
+				embeddedWorldToCam,
+				rotationRows,
+				cameraWorld,
+				embeddedProjection);
+
+			DirectX::XMFLOAT4X4 builtProjection{};
+			DirectX::XMFLOAT4X4 inverseBuiltProjection{};
+			DirectX::XMFLOAT4 ndcToViewMul{};
+			DirectX::XMFLOAT4 ndcToViewAdd{};
+			if (!cs::engine::TryGetWorldSceneProjection(
+					builtProjection,
+					inverseBuiltProjection,
+					ndcToViewMul,
+					ndcToViewAdd)) {
+				L->warn("SSGI frustum extent-semantics assert: could not build world scene projection.");
+			} else {
+				const double builtProjectionRows[]{
+					static_cast<double>(builtProjection._11), static_cast<double>(builtProjection._12), static_cast<double>(builtProjection._13), static_cast<double>(builtProjection._14),
+					static_cast<double>(builtProjection._21), static_cast<double>(builtProjection._22), static_cast<double>(builtProjection._23), static_cast<double>(builtProjection._24),
+					static_cast<double>(builtProjection._31), static_cast<double>(builtProjection._32), static_cast<double>(builtProjection._33), static_cast<double>(builtProjection._34),
+					static_cast<double>(builtProjection._41), static_cast<double>(builtProjection._42), static_cast<double>(builtProjection._43), static_cast<double>(builtProjection._44)
+				};
+				double maxAbsElemDiff = 0.0;
+				for (std::size_t index = 0; index < 16; ++index) {
+					maxAbsElemDiff = std::max(
+						maxAbsElemDiff,
+						std::fabs(builtProjectionRows[index] - embeddedProjection[index]));
+				}
+
+				std::ostringstream message;
+				message << std::setprecision(17)
+						<< "SSGI frustum extent-semantics assert: maxDiff=" << maxAbsElemDiff
+						<< " P_built=[";
+				for (std::size_t row = 0; row < 4; ++row) {
+					if (row != 0) {
+						message << ',';
+					}
+					message << '[';
+					for (std::size_t column = 0; column < 4; ++column) {
+						if (column != 0) {
+							message << ',';
+						}
+						message << builtProjectionRows[row * 4 + column];
+					}
+					message << ']';
+				}
+				message << "] P_emb=[";
+				for (std::size_t row = 0; row < 4; ++row) {
+					if (row != 0) {
+						message << ',';
+					}
+					message << '[';
+					for (std::size_t column = 0; column < 4; ++column) {
+						if (column != 0) {
+							message << ',';
+						}
+						message << embeddedProjection[row * 4 + column];
+					}
+					message << ']';
+				}
+				message << ']';
+				L->info("{}", message.str());
+			}
 			const DirectX::XMMATRIX worldToCamMatrix = DirectX::XMLoadFloat4x4(worldToCam);
 			const DirectX::XMMATRIX worldToCamTransform = DirectX::XMMatrixTranspose(worldToCamMatrix);
 
