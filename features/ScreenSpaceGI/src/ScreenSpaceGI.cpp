@@ -29,6 +29,7 @@
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
+#include "ShaderCatalog.h"
 #include "ShaderReplacement.h"
 #include "Utils/CSUtil.h"
 
@@ -981,8 +982,15 @@ namespace cs::features
 			}
 		}
 
+		winrt::com_ptr<ID3D11PixelShader> boundPS;
+		context->PSGetShader(boundPS.put(), nullptr, nullptr);
+		std::string boundSha;
+		if (auto* catalog = ShaderCatalog::GetSingleton()) {
+			boundSha = catalog->GetShaForPixelShader(boundPS.get());
+		}
+
 		L->info(
-			"SSGI anchor-dump draw {}: t: {} triple={} t0={:p} t6={:p} t13={:p} t6Resource={:p} t6Name=\"{}\" ambientMatch=n/a",
+			"SSGI anchor-dump draw {}: t: {} triple={} t0={:p} t6={:p} t13={:p} t6Resource={:p} t6Name=\"{}\" boundPS={:p} boundSha=\"{}\"",
 			_dumpOrdinal,
 			slotMap.data(),
 			tripleMatch,
@@ -990,7 +998,9 @@ namespace cs::features
 			static_cast<const void*>(srvs[6]),
 			static_cast<const void*>(srvs[kAOPSSlot]),
 			static_cast<const void*>(slot6Resource.get()),
-			slot6DebugName.data());
+			slot6DebugName.data(),
+			static_cast<const void*>(boundPS.get()),
+			boundSha.empty() ? "unmapped" : boundSha.c_str());
 		++_dumpOrdinal;
 	}
 

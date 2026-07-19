@@ -31,6 +31,9 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		bool HooksInstalled() const noexcept { return _hooksInstalled.load(std::memory_order_acquire); }
 
+		// Resolve a bound pixel-shader pointer to its tracked DXBC SHA1 hex (empty if untracked or the tracker is disabled). Dev-only diagnostic; read-thread-safe.
+		std::string GetShaForPixelShader(ID3D11PixelShader* a_shader) const noexcept;
+
 		// Optional callback the CreatePixelShader hook offers each shader after tracking; return true and swap *a_out (AddRef replacement, Release incoming) to substitute.
 		using PixelShaderSwapCallback = bool (*)(const void* a_bytecode, std::size_t a_bytecode_len,
 			const catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out);

@@ -296,6 +296,18 @@ namespace cs::features
 		catalog::hooks::SetPixelShaderSwapCallback(a_cb);
 	}
 
+	std::string ShaderCatalog::GetShaForPixelShader(ID3D11PixelShader* a_shader) const noexcept
+	{
+		catalog::Sha1Result sha{};
+		if (!catalog::shader_tracker::TryGetPixelShaderSha1(a_shader, sha))
+			return {};
+		try {
+			return catalog::Sha1ToHex(sha);
+		} catch (...) {
+			return {};
+		}
+	}
+
 	void ShaderCatalog::OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !device)
