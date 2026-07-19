@@ -837,8 +837,16 @@ namespace cs::features
 				_workingDepthMipUAVs[0] && _workingDepthMipUAVs[1] && _workingDepthMipUAVs[2] &&
 				_workingDepthMipUAVs[3] && _workingDepthMipUAVs[4];
 			auto* rtm = cs::engine::GetRenderTargetManager();
-			cs::engine::CameraMatrices cam{};
-			if (xegtaoReady && rtm && cs::engine::TryGetCameraMatrices(cam)) {
+			DirectX::XMFLOAT4X4 worldProj{};
+			DirectX::XMFLOAT4X4 worldInvProj{};
+			DirectX::XMFLOAT4 worldNdcToViewMul{};
+			DirectX::XMFLOAT4 worldNdcToViewAdd{};
+			if (xegtaoReady && rtm &&
+				cs::engine::TryGetWorldSceneProjection(
+					worldProj,
+					worldInvProj,
+					worldNdcToViewMul,
+					worldNdcToViewAdd)) {
 				const float widthRatio = cs::engine::dynres::GetWidthRatio(rtm);
 				const float heightRatio = cs::engine::dynres::GetHeightRatio(rtm);
 				const int frameW = static_cast<int>(static_cast<float>(_allocW) * widthRatio);
@@ -852,7 +860,7 @@ namespace cs::features
 					const float frameHeight = static_cast<float>(frameH);
 
 					DecodeCB decodeCB{};
-					decodeCB.InvProj = cam.invProj;
+					decodeCB.InvProj = worldInvProj;
 					decodeCB.RcpFrameDim[0] = 1.0f / frameWidth;
 					decodeCB.RcpFrameDim[1] = 1.0f / frameHeight;
 					decodeCB.FrameDim[0] = frameWidth;
@@ -860,14 +868,14 @@ namespace cs::features
 					_decodeCB->Update(decodeCB);
 
 					XeGTAOCB xegtaoCB{};
-					xegtaoCB.NDCToViewMul[0] = cam.ndcToViewMul.x;
-					xegtaoCB.NDCToViewMul[1] = cam.ndcToViewMul.y;
-					xegtaoCB.NDCToViewMul[2] = cam.ndcToViewMul.z;
-					xegtaoCB.NDCToViewMul[3] = cam.ndcToViewMul.w;
-					xegtaoCB.NDCToViewAdd[0] = cam.ndcToViewAdd.x;
-					xegtaoCB.NDCToViewAdd[1] = cam.ndcToViewAdd.y;
-					xegtaoCB.NDCToViewAdd[2] = cam.ndcToViewAdd.z;
-					xegtaoCB.NDCToViewAdd[3] = cam.ndcToViewAdd.w;
+					xegtaoCB.NDCToViewMul[0] = worldNdcToViewMul.x;
+					xegtaoCB.NDCToViewMul[1] = worldNdcToViewMul.y;
+					xegtaoCB.NDCToViewMul[2] = worldNdcToViewMul.z;
+					xegtaoCB.NDCToViewMul[3] = worldNdcToViewMul.w;
+					xegtaoCB.NDCToViewAdd[0] = worldNdcToViewAdd.x;
+					xegtaoCB.NDCToViewAdd[1] = worldNdcToViewAdd.y;
+					xegtaoCB.NDCToViewAdd[2] = worldNdcToViewAdd.z;
+					xegtaoCB.NDCToViewAdd[3] = worldNdcToViewAdd.w;
 					xegtaoCB.TexDim[0] = texWidth;
 					xegtaoCB.TexDim[1] = texHeight;
 					xegtaoCB.RcpTexDim[0] = 1.0f / texWidth;
