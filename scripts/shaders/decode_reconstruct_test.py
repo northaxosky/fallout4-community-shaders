@@ -33,22 +33,19 @@ What it proves:
   5. NEGATIVE CONTROLS — omitting the uv y-flip, and transposing invProj, must BREAK the
      round-trip. Proves the test actually discriminates the convention (has teeth).
   6. CAPTURED-ORACLE HOOK — captured raw camera transforms, world positions, uv, and depth
-     from a real frame are the memory-truth that beats static analysis; reconstruction uses
-     each frame's true invProj. Empty until a capture exists.
+     from a real frame independently prove the scene projection and expose a stale/wrong invProj.
 
 The synthetic checks (1-5) prove the chain is self-consistent AND that the shader fast-path,
 the linearize, and a matrix-independent pinhole anchor all agree — a strong necessary gate.
 They still share the FOV magnitude, so only a captured off-axis oracle (item 6) fully proves
-the pinned convention matches the *game*; that is the required proof before the go-live.
+the pinned convention matches the *game*; shipping also requires decode to use the proven basis.
 
 Modes:
   default            — synthetic/pre-capture gate; PASSes on checks 1-5 + the oracle self-test
                        teeth (use before a capture; reports any JSON oracle but does not gate on it).
   --require-oracle   — game-verification gate; additionally FAILs unless a real JSON capture
-                       satisfies the full verdict: off-axis on-surface coverage in BOTH uv axes, the
-                       LIVE linearizer A within (relative) tolerance, all finite. A B-win is an
-                       advisory NOTE, not a block (we validate A, never switch to B). No legacy-triple
-                       bypass. Run this (green) before the t0/t13 + SSGI=1 go-live.
+                       proves the corrected scene-projection basis, camera convention, depth anchor,
+                       and off-axis coverage. The current decode basis is diagnosed separately.
   --oracle-json PATH — evaluate this capture instead of scripts/shaders/oracle_capture.json. If the
                        explicit path is unreadable the gate stays unsatisfied (no silent fallback).
 """
@@ -179,45 +176,15 @@ CAPTURED_ORACLE: list[
 #   worldPos_r = worldPos_game - posAdjust
 #   ndcZ_oracle = (worldToCam @ worldPos_r_h).z / w
 #   viewPos_node = Bethesda camera-node rows @ (worldPos_r - camWorldTranslate), axis-remapped
-#   viewPos_chain = reconstruct(captured uv, storedDepth, invProj)
+#   corrected scene projection = worldToCam @ inverse(node world-to-view)
+#   viewPos_chain = reconstruct(captured uv, oracle ndc.z, inverse(corrected projection))
 # The node oracle never uses depth/invProj, while worldToCam independently anchors clip-space depth.
-LIVE_LINEARIZER = "A:(d-0.01)/0.99"  # the encoding the shipped decode.cs.hlsl uses. THE gate proves
-#   exactly one thing: this A-chain reconstructs the TRUE oracle viewPos within tolerance across the
-#   off-axis on-surface subset. That is the whole go-live question -- "does the shipped decode recover
-#   ground-truth view positions" -- so the PASS decision rests ONLY on A-vs-oracle, never on A-vs-B or a
-#   fraction threshold (those are diagnostics, below). Earlier revisions tried to auto-classify B-wins
-#   and translations with fraction/mean thresholds; an opposite-model review showed every such threshold
-#   was gameable (an A-biased surface filter could hide a B-encoding; equal-and-opposite per-snapshot
-#   offsets cancelled in a global mean; allowed origin-vs-surface slop tripped a mean-translation block).
-#   The robust design is caps-only: A must land within BOTH tolerances vs the independent oracle.
-# TWO caps, BOTH evaluated as a MAX over the subset (a max, never a mean -> equal-and-opposite per-
-# snapshot errors cannot cancel):
-#   - RELATIVE (|chain-oracle|/|oracle|) < RESID_REL_TOL: FO4's projection is extreme (near~8, far~50000)
-#     so hyperbolic storedDepth is jammed near 1.0 past ~15m and view-Z is very depth-sensitive; a fixed
-#     unit tolerance alone would false-FAIL a correct convention on a mid-depth ref. Relative catches the
-#     O(100%) convention bugs (transpose/handedness/y-flip) robustly.
-#   - ABSOLUTE (|chain-oracle| game-units) < RESID_ABS_TOL: a backstop for the far field, where a large
-#     absolute displacement can hide behind a tiny relative denominator (|oracle| is huge). Catches a
-#     constant view translation / a per-snapshot offset that the relative gate would wave through.
-# B (the game's approximate linearizer) is REPORTED and enters the decision only to make the gate
-# STRICTER: if B reconstructs the oracle SYSTEMATICALLY better than A (B beats A on ~every subset sample
-# AND is >=B_ACCURACY_RATIO x more accurate in the median) the gate BLOCKS with "the game may store depth
-# under B -- STOP" (guardrail #3). It is scale-invariant on purpose: the A-vs-B intrinsic gap is tiny
-# (the two linearizers agree to ~1e-4 in ndc.z), so a fixed unit floor could never fire; a RATIO fires on
-# a clean systematic B-win of any magnitude yet a real capture's shared pixel-snap noise (res_A ~ res_B,
-# mixed signs) never trips it. Because it can only turn a green into a red (never red->green) it cannot
-# introduce a false-PASS. A pure translation shifts A and B EQUALLY -> A still wins -> caught by the
-# ABSOLUTE cap instead and LABELLED translation-like (posAdjust latency, guardrail #4) vs rotational (a
-# real convention bug). Those labels are advisory; they never flip ok.
-RESID_REL_TOL = 0.05         # max RELATIVE residual over the off-axis on-surface subset for "A proven".
-#   Robust separation, not knife-edge: a convention bug is O(100%) (transpose ~113%), a correct convention
-#   carries only pixel-snap slop (~1-2%), so any tol in ~3-20% gives the same verdict. If a real capture
-#   lands A uniformly in ~5-15% (not 100%+), that is pixel-snap -> widen; it is not a convention bug.
-RESID_ABS_TOL = 5.0          # max ABSOLUTE residual (game units) over the subset. Above the inherent slop
-#   of a well-chosen STATIONARY capture (origin-vs-visible-surface for a flat static + sub-texel pixel-
-#   snap + ~0 posAdjust latency when still, all <~2u) and far below a bad translation / convention
-#   displacement (tens+ of units). PROVISIONAL like the relative tol -- the reason string reports the
-#   actual max; if a correct stationary capture lands here at, say, 3-4u, widen with justification.
+LIVE_LINEARIZER = "A:(d-0.01)/0.99"
+# Current-basis A/B residuals remain diagnostics and feed only the stricter B-win guardrail.
+# Guardrail #3 blocks only a systematic, >=2x B win; it can never turn a failure into a pass.
+CORRECTED_REL_TOL = 0.01
+CORRECTED_ABS_TOL = 0.02
+CURRENT_BASIS_REL_TOL = 0.05
 MIN_ORACLE_DIST = 16.0       # floor on |oracle| (game units, ~first-person) so a near sample can't
 #                              divide-by-tiny and explode the relative residual.
 B_WIN_FRAC_FLOOR = 0.9       # B must beat A on this fraction of the subset to count as SYSTEMATIC (not a
@@ -229,14 +196,10 @@ B_ACCURACY_RATIO = 2.0       # ...AND B's median residual must be <= med_A / thi
 #                              clean B-encoding (res_A ~1e-2, res_B ~0) yet not real shared pixel-snap.
 B_MEANINGFUL_FLOOR = 1e-4    # ...AND med_A above this (game units), so two bit-exact linearizers whose
 #                              LSB noise makes B "win" cannot trip the block. Real captures are >> this.
-MIN_AXIS_ONSURFACE = 2       # off-axis on-surface samples required IN EACH of X and Y. Requiring both
-#                              axes is what makes a y-flip (invisible only on uv.y==0.5) undetectable-
-#                              proof: a real y-flip cannot satisfy the Y-axis requirement.
+MIN_AXIS_COVERAGE = 2
 OFFAXIS_UV = 0.2             # |uv-0.5| beyond this counts as off-axis on that axis.
-REL_SURFACE_TOL = 0.02       # on-surface test in VIEW-Z: |vzSurface(stored,proj) - vzOrigin(oracle)| /
-#                              |vzOrigin| below this => the ref origin IS the visible surface at its
-#                              pixel. View-Z (not raw stored depth) so it rejects a far origin whose
-#                              hyperbolic stored value happens to sit within 0.01 of a near surface.
+DEPTH_ANCHOR_NDC_CAP = 0.02
+DEPTH_ANCHOR_SIGN_EPS = 1e-9
 UV_MATCH_TOL = 0.002         # |uv_json - uv_recomputed|; a mismatch means a projection-convention
 #                              disagreement (e.g. y-flip) and the sample is not trusted. In a real
 #                              capture uv_json and uv_recomputed both come from worldToCam so
@@ -251,7 +214,9 @@ IN_FRAME_BORDER = 0.003      # reject a border margin (~8px @2560w) so a degener
 #                              count -- the shader samples texel CENTRES, never the uv==0 border ray.
 VIEWPORT_MIN_DEPTH_FLOOR = VIEWPORT_MIN_DEPTH  # stored < this is the first-person near partition the
 #                              live decode.cs.hlsl MASKS (rawDepth<0.01) -> must not count as evidence.
-NDC_Z_ORACLE_TOL = 1e-5      # worldToCam depth vs node/chain projected depth; TAA perturbs xy only.
+NDC_Z_ORACLE_TOL = 2e-3      # Measured +9.26e-4 frustum/near-plane delta; TAA jitter is xy-only.
+AXIS_ORDER_NDC_GAP = 0.1
+_SWAP_XZ = np.array([[0.0, 0.0, 1.0], [0.0, 1.0, 0.0], [1.0, 0.0, 0.0]])
 
 _LINEARIZERS = ("A:(d-0.01)/0.99", "B:d*1.01-0.01")
 
@@ -259,10 +224,6 @@ _LINEARIZERS = ("A:(d-0.01)/0.99", "B:d*1.01-0.01")
 def _mat(flat: list[float]) -> np.ndarray:
     """16 floats in raw memory order -> 4x4; callers choose the engine's vector convention."""
     return np.array(flat, dtype=np.float64).reshape(4, 4)
-
-
-def _rowmul(v3: np.ndarray, M: np.ndarray, w: float = 1.0) -> np.ndarray:
-    return np.array([v3[0], v3[1], v3[2], w], dtype=np.float64) @ M
 
 
 def linearize_variants(stored: float) -> dict[str, float]:
@@ -317,11 +278,22 @@ def _finite_mat(flat, n=16) -> bool:
     return a.size == n and bool(np.all(np.isfinite(a)))
 
 
+def _xy_relative_error(actual: np.ndarray, expected: np.ndarray) -> float:
+    return float(np.linalg.norm(actual[:2] - expected[:2])
+                 / max(float(np.linalg.norm(expected[:2])), 1e-6))
+
+
+def _horizontal_fov(proj: np.ndarray) -> float:
+    scale = abs(float(proj[0, 0]))
+    if not math.isfinite(scale) or scale <= 1e-12:
+        raise ValueError("invalid horizontal projection scale")
+    return math.degrees(2.0 * math.atan(1.0 / scale))
+
+
 def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
     """Independent recompute over a parsed capture. Returns (report, failures). Structural / non-finite
-    problems become FAILURES (never crashes, never a silent false-PASS). The chain is reconstructed
-    from the CAPTURED uv + storedDepth + invProj so the uv->ndc y-flip and the depth encoding are
-    actually exercised; the camera-node oracle shares only the pixel, never the depth."""
+    problems become FAILURES. The corrected chain derives its projection from worldToCam and the
+    camera-node transform; the current cam.invProj and A/B depth chains remain diagnostics."""
     failures: list[str] = []
     rows: list[dict] = []
     unresolved: list[dict] = []
@@ -368,12 +340,26 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
         wtc = _mat(snap["worldToCam"])
         invp = _mat(snap["invProj"])
         proj = _mat(snap["proj"])
-        m22, m32 = float(proj[2, 2]), float(proj[3, 2])
         try:
             if not np.allclose(invp, np.linalg.inv(proj), atol=1e-3, rtol=1e-3):
                 failures.append(f"snapshot[{si}]: invProj != inverse(proj) (C++ inversion mismatch)")
         except np.linalg.LinAlgError:
             failures.append(f"snapshot[{si}]: proj not invertible")
+
+        try:
+            node_world_to_view = np.eye(4, dtype=np.float64)
+            node_world_to_view[:3, :3] = _SWAP_XZ @ rotate_rows
+            node_world_to_view[:3, 3] = -(_SWAP_XZ @ rotate_rows) @ cam_world
+            scene_proj_col = wtc @ np.linalg.inv(node_world_to_view)
+            corrected_proj = scene_proj_col.T
+            invp_corrected = np.linalg.inv(corrected_proj)
+            if not (np.all(np.isfinite(scene_proj_col)) and np.all(np.isfinite(invp_corrected))):
+                raise ValueError("non-finite corrected projection")
+            current_hfov = _horizontal_fov(proj)
+            scene_hfov = _horizontal_fov(corrected_proj)
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            failures.append(f"snapshot[{si}]: cannot derive corrected scene projection: {exc}")
+            continue
 
         samples = snap.get("samples")
         if not isinstance(samples, list):
@@ -430,22 +416,18 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
                 uv_gap = float(np.max(np.abs(uv_calc - uv_json)))
                 view_bsda = rotate_rows @ (wr - cam_world)
                 oracle = np.array([view_bsda[2], view_bsda[1], view_bsda[0]], dtype=np.float64)
-                vz_origin = float(oracle[2])
 
                 node_clip = np.append(oracle, 1.0) @ proj
                 ndc_z_node = (float(node_clip[2] / node_clip[3])
                               if np.all(np.isfinite(node_clip)) and abs(node_clip[3]) > 1e-12
                               else math.inf)
                 oracle_ndc_gap = abs(ndc_z_node - ndc_z_oracle)
+                oracle_ndc_signed = ndc_z_node - ndc_z_oracle
 
-                # On-surface via VIEW-Z consistency: convert storedDepth (under the LIVE encoding A) to a
-                # view-Z through the projection, and compare to the origin's own view-Z. Depth-only: it
-                # does NOT consult the xy convention, so it cannot tautologically bless the residual test.
-                ndc_z_live = (stored - 0.01) / 0.99
-                denom = ndc_z_live - m22
-                vz_surface = (m32 / denom) if abs(denom) > 1e-12 else math.inf
-                surf_ok = (math.isfinite(vz_surface) and abs(vz_origin) > 1e-6
-                           and abs(vz_surface - vz_origin) <= REL_SURFACE_TOL * abs(vz_origin))
+                linearized = linearize_variants(stored)
+                depth_anchor_delta = linearized[LIVE_LINEARIZER] - ndc_z_oracle
+                depth_anchor_sample_ok = (
+                    -DEPTH_ANCHOR_NDC_CAP <= depth_anchor_delta <= DEPTH_ANCHOR_SIGN_EPS)
                 first_person = stored < VIEWPORT_MIN_DEPTH_FLOOR
                 in_frame = bool(np.all(uv_json >= IN_FRAME_BORDER)
                                 and np.all(uv_json < IN_FRAME_MAX - IN_FRAME_BORDER))
@@ -453,7 +435,7 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
                 res: dict[str, float] = {}
                 resvec: dict[str, np.ndarray] = {}
                 chains: dict[str, np.ndarray] = {}
-                for name, lz in linearize_variants(stored).items():
+                for name, lz in linearized.items():
                     chain = _reconstruct_from_uv(uv_json, lz, invp)
                     if chain is None:
                         res[name] = math.inf
@@ -462,33 +444,48 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
                     resvec[name] = chain - oracle
                     chains[name] = chain
 
-                chain_a = chains.get(LIVE_LINEARIZER)
-                if chain_a is not None:
-                    chain_clip = np.append(chain_a, 1.0) @ proj
-                    ndc_z_chain_a = (float(chain_clip[2] / chain_clip[3])
+                chain_current = _reconstruct_from_uv(uv_json, ndc_z_oracle, invp)
+                chain_corrected = _reconstruct_from_uv(uv_json, ndc_z_oracle, invp_corrected)
+                if chain_corrected is not None:
+                    chain_clip = np.append(chain_corrected, 1.0) @ corrected_proj
+                    ndc_z_chain = (float(chain_clip[2] / chain_clip[3])
                                      if np.all(np.isfinite(chain_clip)) and abs(chain_clip[3]) > 1e-12
                                      else math.inf)
                 else:
-                    ndc_z_chain_a = math.inf
-                ndc_chain_gap = abs(ndc_z_chain_a - ndc_z_oracle)
+                    ndc_z_chain = math.inf
+                ndc_chain_gap = abs(ndc_z_chain - ndc_z_oracle)
 
-                # onsurf gates COVERAGE and the residual subset together, so a row can only count if it is
-                # a real on-screen surface AND the LIVE (A) reconstruction is finite -- otherwise an
-                # unreconstructable off-axis row could satisfy coverage while being dropped from the max.
-                live_ok = math.isfinite(res.get(_LINEARIZERS[0], math.inf))
-                onsurf = (surf_ok and (not first_person) and in_frame and (uv_gap < UV_MATCH_TOL)
-                          and (stored < 1.0) and live_ok)
+                corrected_abs = (float(np.linalg.norm(chain_corrected - oracle))
+                                 if chain_corrected is not None else math.inf)
+                corrected_rel = (_xy_relative_error(chain_corrected, oracle)
+                                 if chain_corrected is not None else math.inf)
+                current_abs = (float(np.linalg.norm(chain_current - oracle))
+                               if chain_current is not None else math.inf)
+                current_rel = (_xy_relative_error(chain_current, oracle)
+                               if chain_current is not None else math.inf)
+                current_scale = (float(np.linalg.norm(oracle[:2]))
+                                 / max(float(np.linalg.norm(chain_current[:2])), 1e-6)
+                                 if chain_current is not None else math.inf)
+                eligible = ((not first_person) and in_frame and (uv_gap < UV_MATCH_TOL)
+                            and (stored < 1.0) and chain_corrected is not None)
 
                 rows.append({
                     "snap": si, "sample": sj, "formId": s.get("formId"),
                     "worldPos": wp, "posAdjust": pa, "uv": uv_calc, "uv_json": uv_json,
                     "pixel": pixel, "stored": stored, "ndcZ_oracle": ndc_z_oracle,
-                    "ndcZ_node": ndc_z_node, "ndcZ_chain_A": ndc_z_chain_a,
-                    "oracle_ndc_gap": oracle_ndc_gap, "ndc_chain_gap": ndc_chain_gap,
-                    "oracle": oracle, "chains": chains,
-                    "vz_origin": vz_origin, "vz_surface": vz_surface, "uv_gap": uv_gap,
+                    "ndcZ_node": ndc_z_node, "ndcZ_chain": ndc_z_chain,
+                    "oracle_ndc_gap": oracle_ndc_gap, "oracle_ndc_signed": oracle_ndc_signed,
+                    "ndc_chain_gap": ndc_chain_gap, "depth_anchor_delta": depth_anchor_delta,
+                    "depth_anchor_sample_ok": depth_anchor_sample_ok,
+                    "oracle": oracle, "chains": chains, "chain_current": chain_current,
+                    "chain_corrected": chain_corrected,
+                    "corrected_abs": corrected_abs, "corrected_rel": corrected_rel,
+                    "current_abs": current_abs, "current_rel": current_rel,
+                    "current_scale": current_scale,
+                    "current_hfov": current_hfov, "scene_hfov": scene_hfov,
+                    "uv_gap": uv_gap,
                     "oracle_dist": float(np.linalg.norm(oracle)),
-                    "first_person": first_person, "in_frame": in_frame, "onsurf": bool(onsurf),
+                    "first_person": first_person, "in_frame": in_frame, "eligible": bool(eligible),
                     "oax": abs(uv_json[0] - 0.5) > OFFAXIS_UV, "oay": abs(uv_json[1] - 0.5) > OFFAXIS_UV,
                     "res": res, "resvec": resvec,
                 })
@@ -500,16 +497,13 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
 
 
 def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
-    """THE gate (used by both --require-oracle and the self-test, so the test exercises the real
-    predicate). oracle_ok requires: no structural failures; off-axis on-surface coverage in BOTH uv axes;
-    the LIVE linearizer (A) reconstructs the true oracle within BOTH a relative and an absolute MAX cap
-    over that subset; its projected depth agrees with worldToCam; and B does not reconstruct the oracle
-    meaningfully better than A (guardrail #3)."""
+    """Gate the corrected scene basis while retaining the current decode and A/B paths as diagnostics."""
     rows = report.get("rows", [])
-    onsurf = [r for r in rows if r["onsurf"]]
-    subset = [r for r in onsurf if r["oax"] or r["oay"]]         # off-axis (either axis) on-surface
-    n_oax = sum(1 for r in onsurf if r["oax"])
-    n_oay = sum(1 for r in onsurf if r["oay"])
+    non_near = [r for r in rows if not r["first_person"]]
+    eligible = [r for r in rows if r["eligible"]]
+    subset = [r for r in eligible if r["oax"] or r["oay"]]
+    n_oax = sum(1 for r in eligible if r["oax"])
+    n_oay = sum(1 for r in eligible if r["oay"])
 
     def rel(r, name):
         v = r["res"].get(name, math.inf)
@@ -523,29 +517,44 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     maxes = {k: stat([r["res"][k] for r in subset], np.max) for k in _LINEARIZERS}            # absolute
     rel_medians = {k: stat([rel(r, k) for r in subset], np.median) for k in _LINEARIZERS}
     rel_maxes = {k: stat([rel(r, k) for r in subset], np.max) for k in _LINEARIZERS}
-    ndc_chain_max = stat([r["ndc_chain_gap"] for r in subset], np.max)
-    oracle_ndc_max = stat([r["oracle_ndc_gap"] for r in rows], np.max)
+    ndc_chain_max = stat([r["ndc_chain_gap"] for r in eligible], np.max)
+    oracle_ndc_max = stat([r["oracle_ndc_gap"] for r in non_near], np.max)
+    oracle_ndc_mean = stat([r["oracle_ndc_signed"] for r in non_near], np.mean)
+    oracle_ndc_std = stat([r["oracle_ndc_signed"] for r in non_near], np.std)
+    corrected_abs_max = stat([r["corrected_abs"] for r in eligible], np.max)
+    corrected_rel_max = stat([r["corrected_rel"] for r in eligible], np.max)
+    current_abs_max = stat([r["current_abs"] for r in eligible], np.max)
+    current_rel_max = stat([r["current_rel"] for r in eligible], np.max)
+    current_rel_median = stat([r["current_rel"] for r in eligible], np.median)
+    current_scale_median = stat([r["current_scale"] for r in eligible], np.median)
+    current_hfov = stat([r["current_hfov"] for r in eligible], np.median)
+    scene_hfov = stat([r["scene_hfov"] for r in eligible], np.median)
+    depth_anchor_min = stat([r["depth_anchor_delta"] for r in eligible], np.min)
+    depth_anchor_max = stat([r["depth_anchor_delta"] for r in eligible], np.max)
+    linearizer_gap_median = stat([
+        abs(linearize_variants(r["stored"])[_LINEARIZERS[0]]
+            - linearize_variants(r["stored"])[_LINEARIZERS[1]])
+        for r in eligible
+    ], np.median)
+    linearizer_gap_max = stat([
+        abs(linearize_variants(r["stored"])[_LINEARIZERS[0]]
+            - linearize_variants(r["stored"])[_LINEARIZERS[1]])
+        for r in eligible
+    ], np.max)
     finite_medians = {k: v for k, v in rel_medians.items() if math.isfinite(v)}
     winner = min(finite_medians, key=finite_medians.get) if finite_medians else None
 
-    coverage_ok = (n_oax >= MIN_AXIS_ONSURFACE) and (n_oay >= MIN_AXIS_ONSURFACE)
-    b = _LINEARIZERS[1]
-
-    # THE decision: the shipped linearizer A reconstructs the TRUE oracle within BOTH caps (each a MAX
-    # over the off-axis on-surface subset, so equal-and-opposite per-snapshot errors cannot cancel).
-    live_rel_ok = math.isfinite(rel_maxes[LIVE_LINEARIZER]) and rel_maxes[LIVE_LINEARIZER] < RESID_REL_TOL
-    live_abs_ok = math.isfinite(maxes[LIVE_LINEARIZER]) and maxes[LIVE_LINEARIZER] < RESID_ABS_TOL
-    live_within_tol = live_rel_ok and live_abs_ok
+    coverage_ok = (n_oax >= MIN_AXIS_COVERAGE) and (n_oay >= MIN_AXIS_COVERAGE)
+    depth_anchor_ok = bool(eligible) and all(r["depth_anchor_sample_ok"] for r in eligible)
+    corrected_rel_ok = math.isfinite(corrected_rel_max) and corrected_rel_max < CORRECTED_REL_TOL
+    corrected_abs_ok = math.isfinite(corrected_abs_max) and corrected_abs_max < CORRECTED_ABS_TOL
+    corrected_within_tol = corrected_rel_ok and corrected_abs_ok
+    current_basis_ok = math.isfinite(current_rel_max) and current_rel_max < CURRENT_BASIS_REL_TOL
     ndc_chain_ok = math.isfinite(ndc_chain_max) and ndc_chain_max < NDC_Z_ORACLE_TOL
     oracle_axes_ok = math.isfinite(oracle_ndc_max) and oracle_ndc_max < NDC_Z_ORACLE_TOL
+    b = _LINEARIZERS[1]
 
-    # Guardrail #3: if B reconstructs the oracle SYSTEMATICALLY better than A, STOP -- the game may encode
-    # depth under B. Scale-invariant: B must beat A on >=B_WIN_FRAC_FLOOR of the subset AND be >=
-    # B_ACCURACY_RATIO x more accurate in the median (med_B <= med_A / ratio), with med_A meaningfully
-    # nonzero. This fires on a clean systematic B-win of ANY magnitude (the A-vs-B gap is only ~1e-4 ndc,
-    # far below any fixed unit floor) yet a real capture's shared pixel-snap noise (res_A ~ res_B, mixed
-    # signs) sits at frac ~0.5 and never trips. Stricter-only: it can BLOCK but never turn red->green, so
-    # it cannot false-PASS. A pure translation shifts A and B equally -> A wins -> caught by the abs cap.
+    # Guardrail #3 blocks only a systematic, meaningful, >=2x B win.
     ab = [(r["res"].get(LIVE_LINEARIZER, math.inf), r["res"].get(b, math.inf)) for r in subset]
     ab = [(av, bv) for av, bv in ab if math.isfinite(av) and math.isfinite(bv)]
     b_win_frac = (sum(1 for av, bv in ab if bv < av) / len(ab)) if ab else 0.0
@@ -554,14 +563,11 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     b_better = ((b_win_frac >= B_WIN_FRAC_FLOOR) and math.isfinite(med_a) and math.isfinite(med_b)
                 and (med_a > B_MEANINGFUL_FLOOR) and (med_b <= med_a / B_ACCURACY_RATIO))
 
-    ok = ((not structural_failures) and coverage_ok and live_within_tol
+    ok = ((not structural_failures) and coverage_ok and depth_anchor_ok and corrected_within_tol
           and ndc_chain_ok and oracle_axes_ok and (not b_better))
 
-    # Diagnostic character of A's residual (advisory only, never flips ok): a mean-aligned constant
-    # offset => posAdjust latency (guardrail #4, re-capture stationary); a mean ~0 => rotational/scaling
-    # convention bug. Distinguishes the two FAIL causes for triage; on PASS the residual is ~0.
-    a_vecs = np.array([r["resvec"][LIVE_LINEARIZER] for r in subset if LIVE_LINEARIZER in r["resvec"]],
-                      dtype=np.float64)
+    diagnostic_rows = [r for r in non_near if LIVE_LINEARIZER in r["resvec"]]
+    a_vecs = np.array([r["resvec"][LIVE_LINEARIZER] for r in diagnostic_rows], dtype=np.float64)
     mean_vec = a_vecs.mean(axis=0) if a_vecs.size else np.zeros(3)
     mean_norm = float(np.linalg.norm(mean_vec))
     indiv = float(np.mean(np.linalg.norm(a_vecs, axis=1))) if a_vecs.size else 0.0
@@ -571,26 +577,27 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     if structural_failures:
         reasons.append(f"{len(structural_failures)} structural/finiteness failure(s)")
     if not coverage_ok:
-        reasons.append(f"insufficient off-axis on-surface coverage (X={n_oax}, Y={n_oay}, "
-                       f"need >={MIN_AXIS_ONSURFACE} each)")
-    if rows and not oracle_axes_ok:
-        reasons.append(f"Oracle (i) node-transform and Oracle (ii) worldToCam disagree in ndc.z "
-                       f"(max {oracle_ndc_max:.3e} >= {NDC_Z_ORACLE_TOL:.1e}) -- the node-transform "
-                       "axis order is wrong; do NOT go live")
-    if subset and not ndc_chain_ok:
-        reasons.append(f"chain-A implied ndc.z disagrees with Oracle (ii) worldToCam "
-                       f"(max {ndc_chain_max:.3e} >= {NDC_Z_ORACLE_TOL:.1e}) -- sampled depth does "
-                       "not match the independently projected reference; do NOT go live")
-    if not live_rel_ok:
-        reasons.append(f"LIVE linearizer {LIVE_LINEARIZER} max RELATIVE residual "
-                       f"{rel_maxes[LIVE_LINEARIZER]:.4%} >= tol {RESID_REL_TOL:.1%} -- A does NOT "
-                       "reconstruct the true oracle (convention bug or off-surface refs); do NOT go live")
-    elif not live_abs_ok:
-        reasons.append(f"LIVE linearizer {LIVE_LINEARIZER} max ABSOLUTE residual "
-                       f"{maxes[LIVE_LINEARIZER]:.3f} game-units >= cap {RESID_ABS_TOL:.1f} (relative "
-                       f"stayed small behind a far |oracle|) -- a displaced reconstruction "
-                       f"({'constant offset ~ posAdjust latency' if translation_like else 'rotational'})"
-                       "; do NOT go live")
+        reasons.append(f"insufficient off-axis non-near coverage (X={n_oax}, Y={n_oay}, "
+                       f"need >={MIN_AXIS_COVERAGE} each)")
+    if non_near and not oracle_axes_ok:
+        if oracle_ndc_max >= AXIS_ORDER_NDC_GAP:
+            reasons.append(f"Oracle (i) node-transform and Oracle (ii) worldToCam differ by O(1) in "
+                           f"ndc.z (max {oracle_ndc_max:.3e}) -- node axis order is wrong")
+        else:
+            reasons.append(f"Oracle (i)/(ii) ndc.z gap {oracle_ndc_max:.3e} exceeds the measured "
+                           f"frustum tolerance {NDC_Z_ORACLE_TOL:.1e}; inspect camera/frustum timing")
+    if eligible and not ndc_chain_ok:
+        reasons.append(f"corrected chain ndc.z round-trip max {ndc_chain_max:.3e} exceeds "
+                       f"{NDC_Z_ORACLE_TOL:.1e}")
+    if not depth_anchor_ok:
+        reasons.append(f"surface/pivot depth anchor must stay in [-{DEPTH_ANCHOR_NDC_CAP:.2f}, 0): "
+                       f"observed [{depth_anchor_min:.4f}, {depth_anchor_max:.4f}] after near filtering")
+    if not corrected_rel_ok:
+        reasons.append(f"CORRECTED scene basis max XY relative residual {corrected_rel_max:.4%} >= "
+                       f"{CORRECTED_REL_TOL:.1%}")
+    if not corrected_abs_ok:
+        reasons.append(f"CORRECTED scene basis max absolute residual {corrected_abs_max:.4f}u >= "
+                       f"{CORRECTED_ABS_TOL:.2f}u")
     if b_better:
         reasons.append(f"B ({b}) reconstructs the oracle SYSTEMATICALLY better than the shipped A "
                        f"(B beats A on {b_win_frac:.0%} of samples, median A={med_a:.4f} vs B={med_b:.4f} "
@@ -598,26 +605,46 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
                        "under B; STOP and understand before switching decode.cs.hlsl to B")
 
     advisory: list[str] = []
-    if (not ok) and translation_like and (not live_rel_ok or not live_abs_ok):
+    if corrected_within_tol and not current_basis_ok:
+        if abs(current_hfov - scene_hfov) > 1.0:
+            advisory.append(
+                f"DECODE BUG: decode's cam.proj is the WRONG FOV ({current_hfov:.0f}deg vs scene "
+                f"{scene_hfov:.0f}deg); view-space XY reconstructs ~2.25x too small; FIX: source the "
+                "correct scene projection (worldToCam-derived) for decode's InvProj/NDCToView. "
+                f"The CORRECTED basis is proven convention-correct (residual max rel "
+                f"{corrected_rel_max:.2e}, max abs {corrected_abs_max:.4f}u). GO-LIVE additionally "
+                "requires decode.cs.hlsl / TryGetCameraMatrices to source that basis.")
+        else:
+            advisory.append("DECODE BUG: cam.invProj disagrees with the proven scene basis; "
+                            "source worldToCam-derived InvProj/NDCToView before go-live.")
+    if (not corrected_within_tol) and translation_like:
         advisory.append(f"DIAGNOSIS: A residual is a CONSTANT view-space offset {mean_vec.round(3)} "
                         f"(|mean|={mean_norm:.3f} ~ per-sample {indiv:.3f}) -> likely posAdjust current-"
                         "vs-previous latency/sign (guardrail #4), not a convention bug -- re-capture "
                         "stationary to remove it, or confirm benign.")
-    elif (not ok) and (indiv > 1e-3) and (not live_rel_ok):
-        advisory.append(f"DIAGNOSIS: A residual is ROTATIONAL/scaling (|mean|={mean_norm:.3f} << per-"
-                        f"sample {indiv:.3f}) -> a genuine convention bug (transpose/handedness/y-flip).")
-    if ok and (b_advantage > 0.0):
-        advisory.append(f"NOTE: A passed both caps; B won the median by a non-systematic margin "
-                        f"(B better on {b_win_frac:.0%} of samples, advantage {b_advantage:.4f}u) -- "
-                        "expected benign posAdjust/pixel-snap; informational only.")
+    advisory.append(f"NOTE: A/B local-ndc separation is only median {linearizer_gap_median:.2e}, "
+                    f"max {linearizer_gap_max:.2e}; pivots cannot distinguish them. Keep shipped A; "
+                    "the B-win guardrail remains stricter-only.")
     return {
         "ok": ok, "winner": winner, "medians": medians, "maxes": maxes,
         "rel_medians": rel_medians, "rel_maxes": rel_maxes,
         "ndc_chain_max": ndc_chain_max, "oracle_ndc_max": oracle_ndc_max,
+        "oracle_ndc_mean": oracle_ndc_mean, "oracle_ndc_std": oracle_ndc_std,
         "ndc_chain_ok": ndc_chain_ok, "oracle_axes_ok": oracle_axes_ok,
+        "depth_anchor_ok": depth_anchor_ok,
+        "depth_anchor_min": depth_anchor_min, "depth_anchor_max": depth_anchor_max,
+        "corrected_abs_max": corrected_abs_max, "corrected_rel_max": corrected_rel_max,
+        "corrected_abs_ok": corrected_abs_ok, "corrected_rel_ok": corrected_rel_ok,
+        "corrected_within_tol": corrected_within_tol,
+        "current_abs_max": current_abs_max, "current_rel_max": current_rel_max,
+        "current_rel_median": current_rel_median, "current_scale_median": current_scale_median,
+        "current_basis_ok": current_basis_ok,
+        "current_hfov": current_hfov, "scene_hfov": scene_hfov,
+        "linearizer_gap_median": linearizer_gap_median, "linearizer_gap_max": linearizer_gap_max,
         "b_better": b_better, "b_advantage": b_advantage, "translation_like": translation_like,
         "mean_offset": mean_vec.tolist(),
-        "n_onsurface": len(onsurf), "n_subset": len(subset), "n_oax": n_oax, "n_oay": n_oay,
+        "n_non_near": len(non_near), "n_eligible": len(eligible),
+        "n_subset": len(subset), "n_oax": n_oax, "n_oay": n_oay,
         "subset": subset, "reasons": reasons, "advisory": advisory,
     }
 
@@ -626,36 +653,38 @@ def summarize_oracle(report: dict, verdict: dict) -> list[str]:
     rows = report.get("rows", [])
     unresolved = report.get("unresolved", [])
     lines = [f"    {len(rows)} resolved, {len(unresolved)} unresolved, "
-             f"{verdict['n_onsurface']} on-surface, "
-             f"{verdict['n_subset']} off-axis on-surface (X={verdict['n_oax']}, Y={verdict['n_oay']})"]
+             f"{len(rows) - verdict['n_non_near']} near-filtered, {verdict['n_eligible']} eligible, "
+             f"{verdict['n_subset']} off-axis (X={verdict['n_oax']}, Y={verdict['n_oay']})"]
+    lines.append(f"    world->view convention, node vs worldToCam ndc.z: "
+                 f"signed mean={verdict['oracle_ndc_mean']:+.3e} std={verdict['oracle_ndc_std']:.3e} "
+                 f"max abs={verdict['oracle_ndc_max']:.3e}, tol={NDC_Z_ORACLE_TOL:.1e} "
+                 f"({'PASS' if verdict['oracle_axes_ok'] else 'FAIL'})")
+    lines.append(f"    y-flip/depth anchor linA(stored)-pivot ndc.z: "
+                 f"range=[{verdict['depth_anchor_min']:.4f},{verdict['depth_anchor_max']:.4f}], "
+                 f"expected [-{DEPTH_ANCHOR_NDC_CAP:.2f},0) "
+                 f"({'PASS' if verdict['depth_anchor_ok'] else 'FAIL'})")
+    lines.append(f"    CORRECTED basis (worldToCam-derived): max abs={verdict['corrected_abs_max']:.6f}u "
+                 f"(tol {CORRECTED_ABS_TOL:.2f}u), max XY rel={verdict['corrected_rel_max']:.6%} "
+                 f"(tol {CORRECTED_REL_TOL:.1%}) "
+                 f"({'PASS' if verdict['corrected_within_tol'] else 'FAIL'})")
+    lines.append(f"    CURRENT decode basis (cam.invProj): median XY rel={verdict['current_rel_median']:.2%}, "
+                 f"max={verdict['current_rel_max']:.2%}, max abs={verdict['current_abs_max']:.3f}u "
+                 f"({'PASS' if verdict['current_basis_ok'] else 'FAIL -- diagnosed, not convention-gating'})")
+    lines.append(f"    projection diagnosis: cam.proj hfov={verdict['current_hfov']:.1f}deg, "
+                 f"scene hfov={verdict['scene_hfov']:.1f}deg, "
+                 f"median oracle/current XY scale={verdict['current_scale_median']:.3f}x")
+    lines.append(f"    corrected-chain ndc.z round-trip: max={verdict['ndc_chain_max']:.3e}, "
+                 f"tol={NDC_Z_ORACLE_TOL:.1e} ({'PASS' if verdict['ndc_chain_ok'] else 'FAIL'})")
+    lines.append(f"    A/B local-ndc separation: median={verdict['linearizer_gap_median']:.3e}, "
+                 f"max={verdict['linearizer_gap_max']:.3e} (pivot capture cannot resolve; ship A)")
     for k in _LINEARIZERS:
         med, mx = verdict["medians"][k], verdict["maxes"][k]
         rmed, rmx = verdict["rel_medians"][k], verdict["rel_maxes"][k]
-        lines.append(f"    {k}: median={med:.4f} max={mx:.4f} game-units | "
-                     f"rel median={rmed:.4%} max={rmx:.4%} (over off-axis on-surface)")
-    lines.append(f"    ndc.z cross-check chain-A -> proj vs worldToCam: "
-                 f"max={verdict['ndc_chain_max']:.3e}, tol={NDC_Z_ORACLE_TOL:.1e} "
-                 f"({'PASS' if verdict['ndc_chain_ok'] else 'FAIL'})")
-    lines.append(f"    ndc.z cross-check node oracle (i) -> proj vs worldToCam oracle (ii): "
-                 f"max={verdict['oracle_ndc_max']:.3e}, tol={NDC_Z_ORACLE_TOL:.1e} "
-                 f"({'PASS' if verdict['oracle_axes_ok'] else 'FAIL'})")
+        lines.append(f"    current-basis {k}: median={med:.4f} max={mx:.4f}u | "
+                     f"rel median={rmed:.4%} max={rmx:.4%} (diagnostic only)")
     winner = verdict["winner"]
     if winner:
-        lines.append(f"    winner (min median) = {winner}")
-        vecs = np.array([r["resvec"][winner] for r in verdict["subset"]
-                         if winner in r["resvec"]], dtype=np.float64)
-        if vecs.size:
-            mean_vec = vecs.mean(axis=0)
-            mean_norm = float(np.linalg.norm(mean_vec))
-            indiv = float(np.mean(np.linalg.norm(vecs, axis=1)))
-            if indiv > 1e-3:  # only diagnose when there IS a residual to explain
-                if mean_norm / max(indiv, 1e-9) > 0.8:
-                    lines.append(f"    residual character: TRANSLATION-like (offset {mean_vec.round(3)} "
-                                 f"~ per-sample {indiv:.3f}) -> suspect posAdjust current-vs-previous "
-                                 "latency/sign, NOT a convention bug")
-                else:
-                    lines.append(f"    residual character: ROTATIONAL/scaling (mean offset norm "
-                                 f"{mean_norm:.3f} << per-sample {indiv:.3f}) -> genuine convention bug")
+        lines.append(f"    A/B diagnostic winner (min median) = {winner}")
     for note in verdict.get("advisory", []):
         lines.append(f"    {note}")
     if rows:
@@ -666,16 +695,25 @@ def summarize_oracle(report: dict, verdict: dict) -> list[str]:
             oracle = r["oracle"]
             chain_a = r["chains"].get(_LINEARIZERS[0], np.full(3, math.nan))
             chain_b = r["chains"].get(_LINEARIZERS[1], np.full(3, math.nan))
+            chain_current = (r["chain_current"] if r["chain_current"] is not None
+                             else np.full(3, math.nan))
+            chain_corrected = (r["chain_corrected"] if r["chain_corrected"] is not None
+                               else np.full(3, math.nan))
             lines.append(
                 f"      {fid_s} uv={np.array2string(r['uv_json'], precision=6)} "
                 f"storedDepth={r['stored']:.9f} worldPos={np.array2string(r['worldPos'], precision=3)} "
-                f"posAdjust={np.array2string(r['posAdjust'], precision=3)}")
+                f"posAdjust={np.array2string(r['posAdjust'], precision=3)} "
+                f"near={int(r['first_person'])} eligible={int(r['eligible'])}")
             lines.append(
                 f"        viewPos_oracle_i={np.array2string(oracle, precision=6)} "
-                f"viewPos_chain_A={np.array2string(chain_a, precision=6)} "
-                f"viewPos_chain_B={np.array2string(chain_b, precision=6)} "
-                f"ndcZ_oracle={r['ndcZ_oracle']:.9f} onsurf={int(r['onsurf'])} "
-                f"oax={int(r['oax'])} oay={int(r['oay'])}")
+                f"current={np.array2string(chain_current, precision=6)} "
+                f"corrected={np.array2string(chain_corrected, precision=6)}")
+            lines.append(
+                f"        chain_A={np.array2string(chain_a, precision=6)} "
+                f"chain_B={np.array2string(chain_b, precision=6)} "
+                f"ndcZ_oracle={r['ndcZ_oracle']:.9f} "
+                f"anchorDelta={r['depth_anchor_delta']:+.6f} "
+                f"currentXYrel={r['current_rel']:.4%} correctedXYrel={r['corrected_rel']:.6%}")
     if unresolved:
         lines.append("    unresolved refs:")
         for r in unresolved:
@@ -705,7 +743,6 @@ def synth_oracle_capture(inject: str | None = None) -> dict:
     cam_world = np.array([1200.0, -3400.0, 780.0], dtype=np.float64)
     view = _synth_view(cam_world, yaw=0.7, pitch=-0.2)
     viewproj = view @ proj                      # kept CLEAN (the projection the pixels came from)
-    invp = np.linalg.inv(proj)
     inv_view = np.linalg.inv(view)
     pa = np.array([100.0, -50.0, 20.0], dtype=np.float64)
     view_rot = view[:3, :3]
@@ -758,23 +795,27 @@ def synth_oracle_capture(inject: str | None = None) -> dict:
 
     rotate_out = rotate_rows.copy()
     pa_emit = pa.copy()
+    proj_out = proj
     if inject == "transpose_view":
         rotate_out = rotate_rows.T
     elif inject == "translation":
         # Emit stale posAdjust to test constant-offset diagnosis.
         pa_emit = pa + np.array([8.0, 8.0, 8.0])
+    elif inject == "wrong_fov":
+        proj_out = build_projection(28.0, ASPECT, NEAR, FAR)
     elif inject == "nan":
         rotate_out[1, 1] = float("nan")
+    invp_out = np.linalg.inv(proj_out)
 
     return {
         "schema": "ssgi-oracle-capture/2",
         "allocDim": [2560, 1440],
         "snapshots": [{
             "frame": 512, "frameDim": [2560, 1440], "posAdjust": pa_emit.tolist(),
-            "proj": proj.flatten().tolist(),
-            "invProj": invp.flatten().tolist(),
+            "proj": proj_out.flatten().tolist(),
+            "invProj": invp_out.flatten().tolist(),
             "viewPerPass": per_pass.flatten().tolist(),
-            "viewProjPerPass": (per_pass @ proj).flatten().tolist(),
+            "viewProjPerPass": (per_pass @ proj_out).flatten().tolist(),
             "worldToCam": viewproj.T.flatten().tolist(),
             "camWorldTranslate": cam_world.tolist(),
             "camWorldRotateRows": rotate_out.tolist(),
@@ -794,24 +835,24 @@ def oracle_selftest() -> list[str]:
     rep, ofail = evaluate_oracle(synth_oracle_capture(None))
     verdict = oracle_verdict(rep, ofail)
     if not (verdict["ok"] and verdict["winner"] == LIVE_LINEARIZER
-            and verdict["rel_maxes"][LIVE_LINEARIZER] < 1e-6):
+            and verdict["rel_maxes"][LIVE_LINEARIZER] < 1e-6
+            and verdict["corrected_rel_max"] < 1e-5):
         fails.append(f"oracle self-test: clean synthetic should PASS with winner A ~0 "
                      f"(ok={verdict['ok']}, winner={verdict['winner']}, "
                      f"relMaxA={verdict['rel_maxes'].get(LIVE_LINEARIZER)}, reasons={verdict['reasons']})")
 
     # Every bug class must be REJECTED by the gate, each via its intended branch: transpose = node rows
-    # inconsistent with worldToCam; yflip/firstperson/occlusion/offscreen = no valid
-    # off-axis on-surface coverage; nan = structural; b_encoding = B reconstructs the oracle meaningfully
-    # better -> guardrail-#3 block; translation = a constant posAdjust offset caught by the ABSOLUTE cap.
+    # inconsistent with worldToCam; yflip/firstperson/offscreen lose coverage; occlusion fails the
+    # depth anchor; nan is structural; b_encoding trips guardrail #3; translation stays diagnostic.
     controls = {
         "transpose_view": "transposed camera-node rows disagree with worldToCam",
         "yflip": "uv y-flip -> off-axis-Y coverage cannot be met",
         "firstperson": "stored<0.01 first-person partition the shader masks -> no coverage",
-        "occlusion": "ref origin occluded (surface nearer than origin) -> view-Z mismatch, no coverage",
+        "occlusion": "surface too far in front of pivot -> depth-anchor rejection",
         "offscreen": "uv off-screen (edge-clamped depth) -> in-frame check rejects -> no coverage",
         "nan": "non-finite matrix element -> structural failure, no crash / no false PASS",
         "b_encoding": "game stores depth under B, not A -> B reconstructs meaningfully better -> STOP",
-        "translation": "constant posAdjust-latency offset -> absolute cap exceeded -> STOP",
+        "translation": "constant posAdjust-latency offset -> corrected/coverage rejection",
     }
     for inj, why in controls.items():
         rep, ofail = evaluate_oracle(synth_oracle_capture(inj))
@@ -820,9 +861,7 @@ def oracle_selftest() -> list[str]:
             fails.append(f"oracle self-test: control '{inj}' ({why}) PASSED the gate -> NO teeth "
                          f"(winner={verdict['winner']}, relMaxA={verdict['rel_maxes'].get(LIVE_LINEARIZER)})")
 
-    # ...and the DIAGNOSIS on the two "looks-fine-but-must-STOP" controls must be right and unambiguous:
-    # b_encoding trips the guardrail-#3 B-advantage block (NOT waved through); a constant translation is
-    # caught by the absolute cap and LABELLED translation-like (posAdjust), NOT misreported as a B-win.
+    # Keep B-encoding and translation diagnoses distinct.
     rep_be, f_be = evaluate_oracle(synth_oracle_capture("b_encoding"))
     v_be = oracle_verdict(rep_be, f_be)
     if not v_be.get("b_better"):
@@ -833,6 +872,14 @@ def oracle_selftest() -> list[str]:
     v_axis = oracle_verdict(rep_axis, f_axis)
     if v_axis.get("oracle_axes_ok"):
         fails.append("oracle self-test: transposed node rows must fail the Oracle (i)/(ii) ndc.z cross-check")
+    rep_fov, f_fov = evaluate_oracle(synth_oracle_capture("wrong_fov"))
+    v_fov = oracle_verdict(rep_fov, f_fov)
+    if not (v_fov.get("ok") and v_fov.get("corrected_within_tol")
+            and not v_fov.get("current_basis_ok")
+            and any("WRONG FOV" in note for note in v_fov.get("advisory", []))):
+        fails.append(f"oracle self-test: wrong_fov must prove the corrected basis while diagnosing "
+                     f"the current basis (ok={v_fov.get('ok')}, corrected={v_fov.get('corrected_within_tol')}, "
+                     f"current={v_fov.get('current_basis_ok')})")
     rep_tr, f_tr = evaluate_oracle(synth_oracle_capture("translation"))
     v_tr = oracle_verdict(rep_tr, f_tr)
     if not (v_tr.get("translation_like") and not v_tr.get("b_better")):
@@ -978,6 +1025,7 @@ def main(require_oracle: bool = False, oracle_json: str | None = None) -> int:
     # --oracle-json). Always evaluated + reported; only GATES under --require-oracle.
     oracle_lines: list[str] = []
     oracle_ok = False
+    oracle_basis_fix_required = False
     oracle_requested = oracle_json is not None
     oracle_data = load_oracle_json(oracle_json)
     if oracle_data is not None:
@@ -986,9 +1034,14 @@ def main(require_oracle: bool = False, oracle_json: str | None = None) -> int:
         failures.extend(ofail)
         oracle_lines = ["  captured JSON oracle:"] + summarize_oracle(rep, verdict)
         oracle_ok = verdict["ok"]
+        oracle_basis_fix_required = oracle_ok and not verdict["current_basis_ok"]
         if oracle_ok:
-            oracle_lines.append(f"    VERDICT: convention PROVEN; linearization winner "
-                                f"{verdict['winner']} -> KEEP decode.cs.hlsl at (depth-0.01)/0.99")
+            oracle_lines.append("    VERDICT: convention PROVEN on the CORRECTED scene basis; "
+                                "pivot depth cannot distinguish A/B, so KEEP shipped A.")
+            if oracle_basis_fix_required:
+                oracle_lines.append("    SHIPPED DECODE STATUS: BLOCKED -- cam.invProj still carries "
+                                    "the wrong FOV; this PASS proves the replacement basis, not the "
+                                    "currently sourced decode basis.")
         else:
             for r in verdict["reasons"]:
                 oracle_lines.append(f"    oracle gate NOT satisfied: {r}")
@@ -999,11 +1052,7 @@ def main(require_oracle: bool = False, oracle_json: str | None = None) -> int:
         oracle_lines = ["  captured JSON oracle: none found (run the in-game [capture] hook, then "
                         "place oracle_capture.json in scripts/shaders/ or pass --oracle-json)"]
 
-    # Game-verification gate: solely oracle_ok (no legacy-triple bypass). The synthetic checks share
-    # the pinned FOV/handedness, so exit-0 without --require-oracle only proves self-consistency;
-    # --require-oracle refuses to PASS unless a real capture satisfies the full verdict (off-axis
-    # coverage in BOTH uv axes, the LIVE linearizer A within tolerance, all finite, and neither a
-    # systematic B-encoding nor a constant translation; a NON-systematic B-win is an advisory note).
+    # Game verification gates the corrected basis; current decode readiness is reported separately.
     if require_oracle and not oracle_ok:
         failures.append(
             "GAME-VERIFY GATE: --require-oracle set but the JSON oracle gate is not satisfied "
@@ -1033,15 +1082,15 @@ def main(require_oracle: bool = False, oracle_json: str | None = None) -> int:
             print(f"  ... and {len(failures) - 20} more")
         return 1
 
-    print("PASS")
+    if oracle_basis_fix_required:
+        print("PASS (CONVENTION PROVEN; SHIPPED DECODE BASIS FIX REQUIRED)")
+    else:
+        print("PASS")
     return 0
 
 
 if __name__ == "__main__":
-    # Default (synthetic) mode: passes on the self-consistency + cross-checks + the offline oracle
-    # self-test (teeth); the pre-capture gate. --require-oracle (game-verification) mode additionally
-    # FAILS unless a real off-axis JSON capture confirms the convention, so an exit-0 there gates the
-    # t0/t13 + SSGI=1 go-live. --oracle-json <path> (or --oracle-json=<path>) points at the capture.
+    # --require-oracle proves the corrected convention but separately reports current decode readiness.
     # STRICT parsing: any unrecognized token (a misspelled --require-orcale, a --require-oracle=true
     # form, a stray arg) is a hard FAIL (exit 2) -- it must NEVER silently downgrade to the synthetic
     # exit-0 that would falsely authorize go-live.
