@@ -64,18 +64,18 @@ namespace cs::features
 			return v;
 		}
 
-		// Catalog engine_runtime is constrained to OG/NG/AE: 1.10.163=OG; 1.10.980=AE; 1.10.984 and the later 1.11.x next-gen line=NG.
+		// Catalog engine_runtime is constrained to OG/NG/AE: OG=1.10.163; NG=1.10.980/1.10.984; AE=the 1.11.x line (1.11.137..1.11.221).
 		// engine_build_hash records the exact build so builds within a family remain distinguishable.
 		const char* RuntimeLabel(const RuntimeVersion& v)
 		{
 			if (!v.valid) return "OG";
 			if (v.major == 1 && v.minor == 10) {
 				if (v.build == 163) return "OG";
-				if (v.build == 980) return "AE";
+				if (v.build == 980) return "NG";
 				if (v.build == 984) return "NG";
 			}
 			if (v.major == 1 && v.minor == 11)
-				return "NG";  // next-gen line (e.g. 1.11.191, 1.11.221)
+				return "AE";  // Anniversary Edition line (e.g. 1.11.191, 1.11.221)
 			return "OG";
 		}
 
