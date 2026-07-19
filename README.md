@@ -13,7 +13,7 @@ post-processing, diagnostics, and shader-development tools.
 
 ## Compatibility
 
-The current plugin metadata targets Fallout 4 runtime **1.11.191**. Older `1.10.x`
+The current plugin metadata targets Fallout 4 runtime **1.11.221**. Older `1.10.x`
 runtime-specific code paths remain in the project, but they are not currently
 advertised or validated as supported.
 
