@@ -291,4 +291,24 @@ namespace cs::engine
 		return reinterpret_cast<ID3D11ShaderResourceView*>(
 			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].srView);
 	}
+
+	[[nodiscard]] inline ID3D11RenderTargetView* GetRenderTargetRTV(RenderTarget a_renderTarget)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11RenderTargetView*>(
+			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].rtView);
+	}
+
+	[[nodiscard]] inline ID3D11UnorderedAccessView* GetRenderTargetUAV(RenderTarget a_renderTarget)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11UnorderedAccessView*>(
+			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].uaView);
+	}
 }

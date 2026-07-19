@@ -1,6 +1,7 @@
 #include "ScreenSpaceGI.h"
 #include "OracleProjectionEmbed.h"
 
+#include <DirectXPackedVector.h>
 #include <d3d11.h>
 #include <imgui.h>
 
@@ -44,6 +45,9 @@ namespace cs::features
 		constexpr const wchar_t* kDecodePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\decode.cs.hlsl";
 		constexpr const wchar_t* kPrefilterPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\prefilterDepths.cs.hlsl";
 		constexpr const wchar_t* kAOPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\gi.cs.hlsl";
+		constexpr const wchar_t* kKssaoOverwritePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\KssaoOverwriteCS.hlsl";
+		constexpr std::uint32_t kLumaSampleExtent = 16;
+		constexpr std::uint32_t kLumaReadbackInterval = 60;
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{
@@ -90,9 +94,41 @@ namespace cs::features
 				return false;
 			}
 
-			return AcceptSetting(
-				feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
-				"enabled", "boolean", a_error);
+			if (!AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
+					"enabled", "boolean", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "kssao_probe_enabled", a_candidate.kssaoProbeEnabled),
+					"kssao_probe_enabled", "boolean", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "kssao_probe_all_final", a_candidate.kssaoProbeAllFinal),
+					"kssao_probe_all_final", "boolean", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadFloat(*settingsTable, "kssao_probe_value", a_candidate.kssaoProbeValue),
+					"kssao_probe_value", "number", a_error)) {
+				return false;
+			}
+
+			auto readInteger = [&](std::string_view a_key, int& a_value, std::int64_t a_min, std::int64_t a_max) {
+				auto value = static_cast<std::int64_t>(a_value);
+				const auto status = feature_config::ReadSignedInteger(
+					*settingsTable, a_key, value, a_min, a_max);
+				if (!AcceptSetting(status, a_key, "integer", a_error)) {
+					return false;
+				}
+				if (status == feature_config::ScalarReadStatus::kValid) {
+					a_value = static_cast<int>(value);
+				}
+				return true;
+			};
+
+			return readInteger("kssao_probe_mode", a_candidate.kssaoProbeMode, 0, 2) &&
+				readInteger(
+					"kssao_probe_rt",
+					a_candidate.kssaoProbeRt,
+					0,
+					static_cast<std::int64_t>(cs::engine::RenderTarget::kCount) - 1) &&
+				readInteger("kssao_probe_anchor", a_candidate.kssaoProbeAnchor, 0, 2);
 		}
 
 		std::string CaptureSettingError(std::string_view a_key, std::string_view a_reason)
@@ -279,6 +315,154 @@ namespace cs::features
 			return depth;
 		}
 
+		std::uint32_t KssaoTargetComponents(DXGI_FORMAT a_format)
+		{
+			switch (a_format) {
+			case DXGI_FORMAT_R8_UNORM:
+			case DXGI_FORMAT_R8_SNORM:
+			case DXGI_FORMAT_R16_FLOAT:
+			case DXGI_FORMAT_R16_UNORM:
+			case DXGI_FORMAT_R16_SNORM:
+			case DXGI_FORMAT_R32_FLOAT:
+				return 1;
+			case DXGI_FORMAT_R8G8_UNORM:
+			case DXGI_FORMAT_R8G8_SNORM:
+			case DXGI_FORMAT_R16G16_FLOAT:
+			case DXGI_FORMAT_R16G16_UNORM:
+			case DXGI_FORMAT_R16G16_SNORM:
+			case DXGI_FORMAT_R32G32_FLOAT:
+				return 2;
+			case DXGI_FORMAT_R11G11B10_FLOAT:
+				return 4;
+			case DXGI_FORMAT_R8G8B8A8_UNORM:
+			case DXGI_FORMAT_R8G8B8A8_SNORM:
+			case DXGI_FORMAT_R10G10B10A2_UNORM:
+			case DXGI_FORMAT_R16G16B16A16_FLOAT:
+			case DXGI_FORMAT_R16G16B16A16_UNORM:
+			case DXGI_FORMAT_R16G16B16A16_SNORM:
+			case DXGI_FORMAT_R32G32B32A32_FLOAT:
+				return 4;
+			default:
+				return 0;
+			}
+		}
+
+		std::size_t LumaTexelBytes(DXGI_FORMAT a_format)
+		{
+			switch (a_format) {
+			case DXGI_FORMAT_R8G8B8A8_UNORM:
+			case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+			case DXGI_FORMAT_B8G8R8A8_UNORM:
+			case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+			case DXGI_FORMAT_B8G8R8X8_UNORM:
+			case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+			case DXGI_FORMAT_R10G10B10A2_UNORM:
+			case DXGI_FORMAT_R11G11B10_FLOAT:
+				return 4;
+			case DXGI_FORMAT_R16G16B16A16_FLOAT:
+			case DXGI_FORMAT_R16G16B16A16_UNORM:
+				return 8;
+			case DXGI_FORMAT_R32G32B32A32_FLOAT:
+				return 16;
+			default:
+				return 0;
+			}
+		}
+
+		float SrgbToLinear(float a_value)
+		{
+			return a_value <= 0.04045f ?
+				a_value / 12.92f :
+				std::pow((a_value + 0.055f) / 1.055f, 2.4f);
+		}
+
+		bool ReadLuminance(const std::uint8_t* a_texel, DXGI_FORMAT a_format, float& a_luminance)
+		{
+			DirectX::XMFLOAT3 rgb{};
+			bool srgb = false;
+			switch (a_format) {
+			case DXGI_FORMAT_R8G8B8A8_UNORM:
+			case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+				rgb = {
+					static_cast<float>(a_texel[0]) / 255.0f,
+					static_cast<float>(a_texel[1]) / 255.0f,
+					static_cast<float>(a_texel[2]) / 255.0f
+				};
+				srgb = a_format == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+				break;
+			case DXGI_FORMAT_B8G8R8A8_UNORM:
+			case DXGI_FORMAT_B8G8R8A8_UNORM_SRGB:
+			case DXGI_FORMAT_B8G8R8X8_UNORM:
+			case DXGI_FORMAT_B8G8R8X8_UNORM_SRGB:
+				rgb = {
+					static_cast<float>(a_texel[2]) / 255.0f,
+					static_cast<float>(a_texel[1]) / 255.0f,
+					static_cast<float>(a_texel[0]) / 255.0f
+				};
+				srgb =
+					a_format == DXGI_FORMAT_B8G8R8A8_UNORM_SRGB ||
+					a_format == DXGI_FORMAT_B8G8R8X8_UNORM_SRGB;
+				break;
+			case DXGI_FORMAT_R10G10B10A2_UNORM:
+			{
+				std::uint32_t packed{};
+				std::memcpy(&packed, a_texel, sizeof(packed));
+				rgb = {
+					static_cast<float>(packed & 0x3FFu) / 1023.0f,
+					static_cast<float>((packed >> 10) & 0x3FFu) / 1023.0f,
+					static_cast<float>((packed >> 20) & 0x3FFu) / 1023.0f
+				};
+				break;
+			}
+			case DXGI_FORMAT_R11G11B10_FLOAT:
+			{
+				DirectX::PackedVector::XMFLOAT3PK packed{};
+				std::memcpy(&packed, a_texel, sizeof(packed));
+				DirectX::XMStoreFloat3(
+					&rgb,
+					DirectX::PackedVector::XMLoadFloat3PK(&packed));
+				break;
+			}
+			case DXGI_FORMAT_R16G16B16A16_FLOAT:
+			{
+				DirectX::PackedVector::XMHALF4 packed{};
+				std::memcpy(&packed, a_texel, sizeof(packed));
+				DirectX::XMStoreFloat3(
+					&rgb,
+					DirectX::PackedVector::XMLoadHalf4(&packed));
+				break;
+			}
+			case DXGI_FORMAT_R16G16B16A16_UNORM:
+			{
+				std::uint16_t channels[4]{};
+				std::memcpy(channels, a_texel, sizeof(channels));
+				rgb = {
+					static_cast<float>(channels[0]) / 65535.0f,
+					static_cast<float>(channels[1]) / 65535.0f,
+					static_cast<float>(channels[2]) / 65535.0f
+				};
+				break;
+			}
+			case DXGI_FORMAT_R32G32B32A32_FLOAT:
+			{
+				float channels[4]{};
+				std::memcpy(channels, a_texel, sizeof(channels));
+				rgb = { channels[0], channels[1], channels[2] };
+				break;
+			}
+			default:
+				return false;
+			}
+
+			if (srgb) {
+				rgb.x = SrgbToLinear(rgb.x);
+				rgb.y = SrgbToLinear(rgb.y);
+				rgb.z = SrgbToLinear(rgb.z);
+			}
+			a_luminance = rgb.x * 0.2126f + rgb.y * 0.7152f + rgb.z * 0.0722f;
+			return std::isfinite(a_luminance);
+		}
+
 		void AppendPoint3(std::ostringstream& a_json, const RE::NiPoint3& a_point)
 		{
 			a_json << '[' << a_point.x << ',' << a_point.y << ',' << a_point.z << ']';
@@ -342,6 +526,12 @@ namespace cs::features
 
 		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
 		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign("kssao_probe_enabled", _settings.kssaoProbeEnabled);
+		settings.insert_or_assign("kssao_probe_mode", _settings.kssaoProbeMode);
+		settings.insert_or_assign("kssao_probe_value", _settings.kssaoProbeValue);
+		settings.insert_or_assign("kssao_probe_rt", _settings.kssaoProbeRt);
+		settings.insert_or_assign("kssao_probe_anchor", _settings.kssaoProbeAnchor);
+		settings.insert_or_assign("kssao_probe_all_final", _settings.kssaoProbeAllFinal);
 
 		std::error_code ec;
 		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
@@ -356,11 +546,23 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
+		cs::engine::RegisterPostDeferredPrePass([] {
+			ScreenSpaceGI::GetSingleton()->OnKssaoOverwrite(0);
+		});
+		cs::engine::RegisterPreDeferredLightsImpl([] {
+			ScreenSpaceGI::GetSingleton()->OnKssaoOverwrite(1);
+		});
 		cs::engine::RegisterPreSunLightDraw([] {
 			ScreenSpaceGI::GetSingleton()->OnPreSunLightDraw();
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
+		});
+		cs::engine::RegisterPostDeferredLightsImpl([] {
+			ScreenSpaceGI::GetSingleton()->OnKssaoOverwrite(2);
+		});
+		cs::engine::RegisterPostDeferredComposite([] {
+			ScreenSpaceGI::GetSingleton()->OnKssaoReadback();
 		});
 		if (_capture.enabled) {
 			cs::engine::RegisterPreDeferredLightsImpl([] {
@@ -419,6 +621,22 @@ namespace cs::features
 			samplerDesc.MinLOD = 0.0f;
 			samplerDesc.MaxLOD = FLT_MAX;
 			DX::ThrowIfFailed(cs::util::GetD3DDevice()->CreateSamplerState(&samplerDesc, _pointClampSampler.put()));
+		}
+
+		if (_settings.kssaoProbeEnabled) {
+			static constexpr const char* componentCounts[] = { "1", "2", "3", "4" };
+			for (std::size_t index = 0; index < _kssaoOverwriteCS.size(); ++index) {
+				_kssaoOverwriteCS[index].attach(reinterpret_cast<ID3D11ComputeShader*>(
+					cs::util::CompileShader(
+						kKssaoOverwritePath,
+						{ { "TARGET_COMPONENTS", componentCounts[index] } },
+						"cs_5_0")));
+			}
+			_kssaoOverwriteCB = std::make_unique<cs::buffer::ConstantBuffer>(
+				cs::buffer::ConstantBufferDesc<KssaoOverwriteCB>());
+			if (std::ranges::any_of(_kssaoOverwriteCS, [](const auto& a_shader) { return !a_shader; })) {
+				L->warn("Failed to compile one or more kSSAO overwrite shader variants.");
+			}
 		}
 	}
 
@@ -1057,6 +1275,59 @@ namespace cs::features
 		}
 		L->info("SSGI bind-trace: sha={} insideDLI={} ptr={:p}",
 			sha, insideDLI, static_cast<const void*>(a_bound));
+
+		// RT->slot probe: match this PS's bound SRVs against the engine SSAO-family
+		// render targets so we learn which SAO RT the ambient/IBL composite samples
+		// (and, since Final ping-pongs, which of 45/46/47 is the current-frame buffer).
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
+		if (!context) {
+			return;
+		}
+		ID3D11ShaderResourceView* srvs[16] = {};
+		context->PSGetShaderResources(0, 16, srvs);
+		std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 16> ownedSRVs;
+		for (std::size_t index = 0; index < ownedSRVs.size(); ++index) {
+			ownedSRVs[index].attach(srvs[index]);
+		}
+
+		struct SaoRt
+		{
+			cs::engine::RenderTarget rt;
+			const char* name;
+		};
+		static constexpr SaoRt kSaoRts[] = {
+			{ cs::engine::RenderTarget::kSSAO, "kSSAO(28)" },
+			{ cs::engine::RenderTarget::kSSAOFinal, "kSSAOFinal(45)" },
+			{ cs::engine::RenderTarget::kSSAOFinalSwap, "kSSAOFinalSwap(46)" },
+			{ cs::engine::RenderTarget::kSSAOFinalSwap2, "kSSAOFinalSwap2(47)" },
+			{ cs::engine::RenderTarget::kSSAOTemp, "kSSAOTemp(48)" },
+			{ cs::engine::RenderTarget::kSSAOTemp2, "kSSAOTemp2(49)" },
+			{ cs::engine::RenderTarget::kSSAOTemp3, "kSSAOTemp3(50)" },
+		};
+
+		std::string saoMap;
+		for (std::size_t slot = 0; slot < ownedSRVs.size(); ++slot) {
+			if (!ownedSRVs[slot]) {
+				continue;
+			}
+			winrt::com_ptr<ID3D11Resource> boundResource;
+			ownedSRVs[slot]->GetResource(boundResource.put());
+			if (!boundResource) {
+				continue;
+			}
+			for (const auto& candidate : kSaoRts) {
+				auto* rtResource = reinterpret_cast<ID3D11Resource*>(
+					rendererData->renderTargets[static_cast<uint>(candidate.rt)].texture);
+				if (rtResource && rtResource == boundResource.get()) {
+					saoMap += " t" + std::to_string(slot) + "=" + candidate.name;
+					break;
+				}
+			}
+		}
+		if (!saoMap.empty()) {
+			L->info("SSGI sao-slot-map: sha={} insideDLI={}{}", sha, insideDLI, saoMap);
+		}
 	}
 
 	void ScreenSpaceGI::OnComputeResolve()
@@ -1272,6 +1543,320 @@ namespace cs::features
 			L->error("Resolve dispatch failed: {}", e.what());
 		} catch (...) {
 			L->error("Resolve dispatch failed.");
+		}
+	}
+
+	void ScreenSpaceGI::OnKssaoOverwrite(int a_anchor)
+	{
+		if (!_settings.kssaoProbeEnabled || a_anchor != _settings.kssaoProbeAnchor) {
+			return;
+		}
+
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		const auto target = static_cast<cs::engine::RenderTarget>(_settings.kssaoProbeRt);
+
+		if (_settings.kssaoProbeMode == 0) {
+			const float value = _settings.kssaoProbeValue;
+			const float color[4] = { value, value, value, value };
+			if (_settings.kssaoProbeAllFinal) {
+				for (const auto rt : {
+						 cs::engine::RenderTarget::kSSAOFinal,
+						 cs::engine::RenderTarget::kSSAOFinalSwap,
+						 cs::engine::RenderTarget::kSSAOFinalSwap2 }) {
+					if (auto* rtv = cs::engine::GetRenderTargetRTV(rt)) {
+						context->ClearRenderTargetView(rtv, color);
+					}
+				}
+			} else if (auto* targetRTV = cs::engine::GetRenderTargetRTV(target)) {
+				context->ClearRenderTargetView(targetRTV, color);
+			}
+			return;
+		}
+
+		if (!IsReady() || !_aoTexture) {
+			if (!_kssaoNotReadyLogged) {
+				_kssaoNotReadyLogged = true;
+				L->warn("SSGI kSSAO-probe: AO is not ready; skipping mode {}.", _settings.kssaoProbeMode);
+			}
+			return;
+		}
+		_kssaoNotReadyLogged = false;
+
+		auto& targetEntry = rendererData->renderTargets[static_cast<uint>(target)];
+		auto* targetTexture = reinterpret_cast<ID3D11Texture2D*>(targetEntry.texture);
+		auto* targetUAV = cs::engine::GetRenderTargetUAV(target);
+		auto* targetSRV = cs::engine::GetRenderTargetSRV(target);
+		auto* rtm = cs::engine::GetRenderTargetManager();
+		if (!targetTexture || !targetUAV || !targetSRV || !rtm || !_kssaoOverwriteCB) {
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC targetDesc{};
+		targetTexture->GetDesc(&targetDesc);
+		D3D11_UNORDERED_ACCESS_VIEW_DESC targetUAVDesc{};
+		targetUAV->GetDesc(&targetUAVDesc);
+		const std::uint32_t targetComponents = KssaoTargetComponents(targetUAVDesc.Format);
+		if (targetComponents == 0 || targetUAVDesc.ViewDimension != D3D11_UAV_DIMENSION_TEXTURE2D ||
+			targetDesc.SampleDesc.Count != 1) {
+			if (!_kssaoUnsupportedLogged) {
+				_kssaoUnsupportedLogged = true;
+				L->warn(
+					"SSGI kSSAO-probe: unsupported target format={} view={} samples={}.",
+					static_cast<int>(targetUAVDesc.Format),
+					static_cast<int>(targetUAVDesc.ViewDimension),
+					targetDesc.SampleDesc.Count);
+			}
+			return;
+		}
+		auto* overwriteCS = _kssaoOverwriteCS[targetComponents - 1].get();
+		if (!overwriteCS) {
+			return;
+		}
+
+		const float widthRatio = cs::engine::dynres::GetWidthRatio(rtm);
+		const float heightRatio = cs::engine::dynres::GetHeightRatio(rtm);
+		const auto scaledExtent = [](std::uint32_t a_extent, float a_ratio) {
+			if (a_ratio <= 0.0f) {
+				return 0u;
+			}
+			return std::min(a_extent, static_cast<std::uint32_t>(static_cast<float>(a_extent) * a_ratio));
+		};
+		const std::uint32_t targetW = scaledExtent(targetDesc.Width, widthRatio);
+		const std::uint32_t targetH = scaledExtent(targetDesc.Height, heightRatio);
+		const std::uint32_t sourceW = scaledExtent(_allocW, widthRatio);
+		const std::uint32_t sourceH = scaledExtent(_allocH, heightRatio);
+		if (targetW == 0 || targetH == 0 || sourceW == 0 || sourceH == 0) {
+			return;
+		}
+
+		const bool copyCompatible =
+			_settings.kssaoProbeMode == 1 &&
+			targetW == targetDesc.Width && targetH == targetDesc.Height &&
+			sourceW == _aoTexture->desc.Width && sourceH == _aoTexture->desc.Height &&
+			targetDesc.Width == _aoTexture->desc.Width &&
+			targetDesc.Height == _aoTexture->desc.Height &&
+			targetDesc.MipLevels == _aoTexture->desc.MipLevels &&
+			targetDesc.ArraySize == _aoTexture->desc.ArraySize &&
+			targetDesc.Format == _aoTexture->desc.Format &&
+			targetDesc.SampleDesc.Count == _aoTexture->desc.SampleDesc.Count &&
+			targetDesc.SampleDesc.Quality == _aoTexture->desc.SampleDesc.Quality;
+		if (copyCompatible) {
+			cs::engine::CopyResourcePreservingOM(
+				context,
+				targetTexture,
+				_aoTexture->resource.get());
+			return;
+		}
+
+		try {
+			cs::engine::ComputeOMScope scope(context);
+
+			ID3D11ShaderResourceView* engineAO = nullptr;
+			if (_settings.kssaoProbeMode == 2) {
+				D3D11_SHADER_RESOURCE_VIEW_DESC engineSRVDesc{};
+				targetSRV->GetDesc(&engineSRVDesc);
+				if (engineSRVDesc.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D) {
+					return;
+				}
+
+				if (!_kssaoScratch ||
+					_kssaoScratchW != targetDesc.Width ||
+					_kssaoScratchH != targetDesc.Height ||
+					_kssaoScratchFormat != targetDesc.Format) {
+					D3D11_TEXTURE2D_DESC scratchDesc{};
+					scratchDesc.Width = targetDesc.Width;
+					scratchDesc.Height = targetDesc.Height;
+					scratchDesc.MipLevels = 1;
+					scratchDesc.ArraySize = 1;
+					scratchDesc.Format = targetDesc.Format;
+					scratchDesc.SampleDesc.Count = 1;
+					scratchDesc.Usage = D3D11_USAGE_DEFAULT;
+					scratchDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+					winrt::com_ptr<ID3D11Texture2D> scratch;
+					DX::ThrowIfFailed(reinterpret_cast<ID3D11Device*>(rendererData->device)->CreateTexture2D(
+						&scratchDesc, nullptr, scratch.put()));
+
+					engineSRVDesc.Texture2D.MostDetailedMip = 0;
+					engineSRVDesc.Texture2D.MipLevels = 1;
+					winrt::com_ptr<ID3D11ShaderResourceView> scratchSRV;
+					DX::ThrowIfFailed(reinterpret_cast<ID3D11Device*>(rendererData->device)->CreateShaderResourceView(
+						scratch.get(), &engineSRVDesc, scratchSRV.put()));
+
+					_kssaoScratch = std::move(scratch);
+					_kssaoScratchSRV = std::move(scratchSRV);
+					_kssaoScratchW = targetDesc.Width;
+					_kssaoScratchH = targetDesc.Height;
+					_kssaoScratchFormat = targetDesc.Format;
+				}
+
+				const D3D11_BOX sourceBox{ 0, 0, 0, targetW, targetH, 1 };
+				context->CopySubresourceRegion(
+					_kssaoScratch.get(), 0, 0, 0, 0, targetTexture, 0, &sourceBox);
+				engineAO = _kssaoScratchSRV.get();
+			}
+
+			KssaoOverwriteCB cb{};
+			cb.TargetExtent[0] = targetW;
+			cb.TargetExtent[1] = targetH;
+			cb.SourceExtent[0] = sourceW;
+			cb.SourceExtent[1] = sourceH;
+			cb.Mode = static_cast<std::uint32_t>(_settings.kssaoProbeMode);
+			_kssaoOverwriteCB->Update(cb);
+
+			ID3D11ShaderResourceView* srvs[2] = { engineAO, _aoTexture->srv.get() };
+			ID3D11Buffer* buffers[1] = { _kssaoOverwriteCB->CB() };
+			ID3D11UnorderedAccessView* uavs[1] = { targetUAV };
+			context->CSSetShaderResources(0, 2, srvs);
+			context->CSSetConstantBuffers(0, 1, buffers);
+			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+			context->CSSetShader(overwriteCS, nullptr, 0);
+			context->Dispatch((targetW + 7u) / 8u, (targetH + 7u) / 8u, 1);
+		} catch (const std::exception& e) {
+			L->warn("SSGI kSSAO-probe overwrite failed: {}.", e.what());
+		} catch (...) {
+			L->warn("SSGI kSSAO-probe overwrite failed.");
+		}
+	}
+
+	void ScreenSpaceGI::OnKssaoReadback()
+	{
+		if (!_settings.kssaoProbeEnabled) {
+			return;
+		}
+		if ((_kssaoReadbackFrame++ % kLumaReadbackInterval) != 0) {
+			return;
+		}
+
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* rtm = cs::engine::GetRenderTargetManager();
+		if (!rendererData || !rtm) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		auto* frameBuffer = reinterpret_cast<ID3D11Texture2D*>(
+			rendererData->renderTargets[static_cast<uint>(cs::engine::RenderTarget::kFrameBuffer)].texture);
+		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
+		if (!context || !frameBuffer || !device) {
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC frameDesc{};
+		frameBuffer->GetDesc(&frameDesc);
+		DXGI_FORMAT readFormat = frameDesc.Format;
+		if (auto* frameBufferRTV = cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kFrameBuffer)) {
+			D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};
+			frameBufferRTV->GetDesc(&rtvDesc);
+			if (rtvDesc.Format != DXGI_FORMAT_UNKNOWN) {
+				readFormat = rtvDesc.Format;
+			}
+		}
+		const std::size_t texelBytes = LumaTexelBytes(readFormat);
+		if (texelBytes == 0 || frameDesc.SampleDesc.Count != 1) {
+			if (!_kssaoReadbackUnsupportedLogged) {
+				_kssaoReadbackUnsupportedLogged = true;
+				L->warn(
+					"SSGI kSSAO-probe: unsupported framebuffer format={} viewFormat={} samples={}.",
+					static_cast<int>(frameDesc.Format),
+					static_cast<int>(readFormat),
+					frameDesc.SampleDesc.Count);
+			}
+			return;
+		}
+
+		const std::uint32_t activeW = std::min(
+			frameDesc.Width,
+			static_cast<std::uint32_t>(
+				static_cast<float>(frameDesc.Width) * cs::engine::dynres::GetWidthRatio(rtm)));
+		const std::uint32_t activeH = std::min(
+			frameDesc.Height,
+			static_cast<std::uint32_t>(
+				static_cast<float>(frameDesc.Height) * cs::engine::dynres::GetHeightRatio(rtm)));
+		const std::uint32_t sampleW = std::min(kLumaSampleExtent, activeW);
+		const std::uint32_t sampleH = std::min(kLumaSampleExtent, activeH);
+		if (sampleW == 0 || sampleH == 0) {
+			return;
+		}
+
+		try {
+			if (!_kssaoLumaStaging ||
+				_kssaoLumaW != sampleW ||
+				_kssaoLumaH != sampleH ||
+				_kssaoLumaFormat != frameDesc.Format) {
+				D3D11_TEXTURE2D_DESC stagingDesc{};
+				stagingDesc.Width = sampleW;
+				stagingDesc.Height = sampleH;
+				stagingDesc.MipLevels = 1;
+				stagingDesc.ArraySize = 1;
+				stagingDesc.Format = frameDesc.Format;
+				stagingDesc.SampleDesc.Count = 1;
+				stagingDesc.Usage = D3D11_USAGE_STAGING;
+				stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+				winrt::com_ptr<ID3D11Texture2D> staging;
+				DX::ThrowIfFailed(device->CreateTexture2D(&stagingDesc, nullptr, staging.put()));
+				_kssaoLumaStaging = std::move(staging);
+				_kssaoLumaW = sampleW;
+				_kssaoLumaH = sampleH;
+				_kssaoLumaFormat = frameDesc.Format;
+			}
+
+			const std::uint32_t left = (activeW - sampleW) / 2;
+			const std::uint32_t top = (activeH - sampleH) / 2;
+			const D3D11_BOX sourceBox{ left, top, 0, left + sampleW, top + sampleH, 1 };
+			{
+				cs::engine::OMScope scope(context);
+				context->CopySubresourceRegion(
+					_kssaoLumaStaging.get(), 0, 0, 0, 0, frameBuffer, 0, &sourceBox);
+			}
+
+			D3D11_MAPPED_SUBRESOURCE mapped{};
+			DX::ThrowIfFailed(context->Map(_kssaoLumaStaging.get(), 0, D3D11_MAP_READ, 0, &mapped));
+			bool mappedStaging = true;
+			try {
+				double luminanceSum = 0.0;
+				for (std::uint32_t y = 0; y < sampleH; ++y) {
+					const auto* row = static_cast<const std::uint8_t*>(mapped.pData) +
+						static_cast<std::size_t>(y) * mapped.RowPitch;
+					for (std::uint32_t x = 0; x < sampleW; ++x) {
+						float luminance{};
+						if (!ReadLuminance(row + static_cast<std::size_t>(x) * texelBytes, readFormat, luminance)) {
+							throw std::runtime_error("framebuffer luminance decode failed");
+						}
+						luminanceSum += static_cast<double>(luminance);
+					}
+				}
+				context->Unmap(_kssaoLumaStaging.get(), 0);
+				mappedStaging = false;
+
+				const double luminanceMean =
+					luminanceSum / static_cast<double>(sampleW * sampleH);
+				L->info(
+					"SSGI kSSAO-probe: enabled=1 mode={} rt={} allFinal={} anchor={} value={:.3f} lumaMean={:.6f}",
+					_settings.kssaoProbeMode,
+					_settings.kssaoProbeRt,
+					_settings.kssaoProbeAllFinal ? 1 : 0,
+					_settings.kssaoProbeAnchor,
+					_settings.kssaoProbeValue,
+					luminanceMean);
+			} catch (...) {
+				if (mappedStaging) {
+					context->Unmap(_kssaoLumaStaging.get(), 0);
+				}
+				throw;
+			}
+		} catch (const std::exception& e) {
+			L->warn("SSGI kSSAO-probe readback failed: {}.", e.what());
+		} catch (...) {
+			L->warn("SSGI kSSAO-probe readback failed.");
 		}
 	}
 

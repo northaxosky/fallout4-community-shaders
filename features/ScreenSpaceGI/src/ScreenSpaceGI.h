@@ -38,7 +38,13 @@ namespace cs::features
 
 		struct Settings
 		{
-			bool enabled = false;
+			bool  enabled = false;
+			bool  kssaoProbeEnabled = false;
+			int   kssaoProbeMode = 0;
+			float kssaoProbeValue = 0.0f;
+			int   kssaoProbeRt = 45;
+			int   kssaoProbeAnchor = 2;
+			bool  kssaoProbeAllFinal = false;
 		};
 
 		struct CaptureConfig
@@ -95,10 +101,21 @@ namespace cs::features
 		};
 		static_assert(sizeof(DecodeCB) % 16 == 0);
 
+		struct alignas(16) KssaoOverwriteCB
+		{
+			std::uint32_t TargetExtent[2];
+			std::uint32_t SourceExtent[2];
+			std::uint32_t Mode;
+			std::uint32_t Padding[3];
+		};
+		static_assert(sizeof(KssaoOverwriteCB) % 16 == 0);
+
 		ScreenSpaceGI() = default;
 
 		void SaveSettings();
 		void OnComputeResolve();
+		void OnKssaoOverwrite(int a_anchor);
+		void OnKssaoReadback();
 		void OnAnchorDumpFrameBegin();
 		void OnAnchorDumpDraw();
 		void OnAnchorDumpFrameEnd();
@@ -137,6 +154,21 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _decodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
 		winrt::com_ptr<ID3D11ComputeShader> _aoCS;
+		std::array<winrt::com_ptr<ID3D11ComputeShader>, 4> _kssaoOverwriteCS;
+		std::unique_ptr<cs::buffer::ConstantBuffer> _kssaoOverwriteCB;
+		winrt::com_ptr<ID3D11Texture2D> _kssaoScratch;
+		winrt::com_ptr<ID3D11ShaderResourceView> _kssaoScratchSRV;
+		winrt::com_ptr<ID3D11Texture2D> _kssaoLumaStaging;
+		DXGI_FORMAT _kssaoScratchFormat = DXGI_FORMAT_UNKNOWN;
+		DXGI_FORMAT _kssaoLumaFormat = DXGI_FORMAT_UNKNOWN;
+		std::uint32_t _kssaoScratchW = 0;
+		std::uint32_t _kssaoScratchH = 0;
+		std::uint32_t _kssaoLumaW = 0;
+		std::uint32_t _kssaoLumaH = 0;
+		std::uint32_t _kssaoReadbackFrame = 0;
+		bool _kssaoNotReadyLogged = false;
+		bool _kssaoUnsupportedLogged = false;
+		bool _kssaoReadbackUnsupportedLogged = false;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;
