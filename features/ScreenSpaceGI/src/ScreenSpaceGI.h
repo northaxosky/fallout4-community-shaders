@@ -46,6 +46,7 @@ namespace cs::features
 			int                        settleFrames = 300;
 			int                        intervalFrames = 120;
 			int                        maxSnapshots = 4;
+			int                        hotkey = 0x78;
 			std::string                output = "ScreenSpaceGI\\oracle_capture.json";
 		};
 
@@ -127,10 +128,9 @@ namespace cs::features
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;
-		std::uint32_t _captureStartFrame = 0;
 		bool _captureArmed = false;
+		bool _captureKeyDown = false;
 		int _snapshotCount = 0;
-		std::uint32_t _lastCaptureFrame = 0;
 		std::string _captureJson;
 	};
 }

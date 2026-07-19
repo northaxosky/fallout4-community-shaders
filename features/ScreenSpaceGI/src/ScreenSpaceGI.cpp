@@ -147,10 +147,10 @@ namespace cs::features
 				return false;
 			}
 
-			auto readInteger = [&](std::string_view a_key, int& a_value) {
+			auto readInteger = [&](std::string_view a_key, int& a_value, std::int64_t a_max) {
 				auto value = static_cast<std::int64_t>(a_value);
 				const auto status = feature_config::ReadSignedInteger(
-					*captureTable, a_key, value, 0, std::numeric_limits<int>::max());
+					*captureTable, a_key, value, 0, a_max);
 				if (!AcceptCaptureSetting(status, a_key, "integer", a_error)) {
 					return false;
 				}
@@ -159,9 +159,11 @@ namespace cs::features
 				}
 				return true;
 			};
-			if (!readInteger("settle_frames", a_candidate.settleFrames) ||
-				!readInteger("interval_frames", a_candidate.intervalFrames) ||
-				!readInteger("max_snapshots", a_candidate.maxSnapshots)) {
+			constexpr auto maxInt = static_cast<std::int64_t>(std::numeric_limits<int>::max());
+			if (!readInteger("settle_frames", a_candidate.settleFrames, maxInt) ||
+				!readInteger("interval_frames", a_candidate.intervalFrames, maxInt) ||
+				!readInteger("max_snapshots", a_candidate.maxSnapshots, maxInt) ||
+				!readInteger("hotkey", a_candidate.hotkey, 0xFFFF)) {
 				return false;
 			}
 
@@ -289,7 +291,15 @@ namespace cs::features
 				<< ']';
 		}
 
+		void AppendMatrix3Rows(std::ostringstream& a_json, const RE::NiMatrix3& a_matrix)
+		{
+			a_json << "[[" << a_matrix[0].x << ',' << a_matrix[0].y << ',' << a_matrix[0].z
+				<< "],[" << a_matrix[1].x << ',' << a_matrix[1].y << ',' << a_matrix[1].z
+				<< "],[" << a_matrix[2].x << ',' << a_matrix[2].y << ',' << a_matrix[2].z << "]]";
+		}
+
 		bool s_loggedUnsupportedCaptureDepthFormat = false;
+		bool s_loggedMissingCaptureCamera = false;
 	}
 
 	ScreenSpaceGI* ScreenSpaceGI::GetSingleton()
@@ -311,10 +321,9 @@ namespace cs::features
 
 		_settings = candidate;
 		_capture = std::move(captureCandidate);
-		_captureStartFrame = 0;
 		_captureArmed = false;
+		_captureKeyDown = false;
 		_snapshotCount = 0;
-		_lastCaptureFrame = 0;
 		_captureJson.clear();
 		return true;
 	}
@@ -567,22 +576,16 @@ namespace cs::features
 		const std::uint32_t frame = static_cast<std::uint32_t>(a_state->frameCount);
 		if (!_captureArmed) {
 			_captureArmed = true;
-			_captureStartFrame = frame;
 			_captureJson.clear();
-			L->info("SSGI oracle capture armed at frame {}.", frame);
-		}
-		if (_snapshotCount >= _capture.maxSnapshots) {
-			return;
+			L->info("SSGI oracle capture armed at frame {} (hotkey {:#x}).", frame, _capture.hotkey);
 		}
 
-		const long relativeFrame = static_cast<long>(frame) - static_cast<long>(_captureStartFrame) -
-			static_cast<long>(_capture.settleFrames);
-		if (relativeFrame < 0 ||
-			(_capture.intervalFrames > 0 && (relativeFrame % _capture.intervalFrames) != 0) ||
-			frame == _lastCaptureFrame) {
+		const bool nowDown = (GetAsyncKeyState(_capture.hotkey) & 0x8000) != 0;
+		const bool capturePressed = nowDown && !_captureKeyDown;
+		_captureKeyDown = nowDown;
+		if (!capturePressed || _snapshotCount >= _capture.maxSnapshots) {
 			return;
 		}
-		_lastCaptureFrame = frame;
 
 		try {
 			cs::engine::CameraMatrices cam{};
@@ -590,6 +593,17 @@ namespace cs::features
 			if (!rtm || !cs::engine::TryGetCameraMatrices(cam)) {
 				return;
 			}
+			auto* sceneCamera = RE::Main::WorldRootCamera();
+			if (!sceneCamera) {
+				if (!s_loggedMissingCaptureCamera) {
+					s_loggedMissingCaptureCamera = true;
+					L->warn("SSGI oracle capture has no world-root camera.");
+				}
+				return;
+			}
+			const auto* worldToCam = reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam);
+			const DirectX::XMMATRIX worldToCamMatrix = DirectX::XMLoadFloat4x4(worldToCam);
+			const DirectX::XMMATRIX worldToCamTransform = DirectX::XMMatrixTranspose(worldToCamMatrix);
 
 			const int frameW = static_cast<int>(
 				static_cast<float>(_allocW) * cs::engine::dynres::GetWidthRatio(rtm));
@@ -649,33 +663,66 @@ namespace cs::features
 					<< ",\"frameDim\":[" << frameW << ',' << frameH << ']'
 					<< ",\"posAdjust\":";
 				AppendPoint3(snapshot, posAdjust);
-				snapshot << ",\"view\":";
-				AppendMatrix(snapshot, cam.view);
 				snapshot << ",\"proj\":";
 				AppendMatrix(snapshot, cam.proj);
-				snapshot << ",\"viewProj\":";
-				AppendMatrix(snapshot, cam.viewProj);
 				snapshot << ",\"invProj\":";
 				AppendMatrix(snapshot, cam.invProj);
+				snapshot << ",\"viewPerPass\":";
+				AppendMatrix(snapshot, cam.view);
+				snapshot << ",\"viewProjPerPass\":";
+				AppendMatrix(snapshot, cam.viewProj);
+				// Engine convention is column-vector clip = M * v.
+				snapshot << ",\"worldToCam\":";
+				AppendMatrix(snapshot, *worldToCam);
+				snapshot << ",\"camWorldTranslate\":";
+				AppendPoint3(snapshot, sceneCamera->world.translate);
+				snapshot << ",\"camWorldRotateRows\":";
+				AppendMatrix3Rows(snapshot, sceneCamera->world.rotate);
 				snapshot << ",\"samples\":[";
 
 				int sampleCount = 0;
-				const auto viewProj = DirectX::XMLoadFloat4x4(&cam.viewProj);
+				int resolvedCount = 0;
 				for (const std::uint32_t formId : _capture.formIds) {
+					auto appendUnresolved = [&](std::string_view a_reason, const RE::NiPoint3* a_worldPos) {
+						if (sampleCount++ > 0) {
+							snapshot << ',';
+						}
+						snapshot << "{\"formId\":" << formId
+							<< ",\"resolved\":false,\"culledReason\":\"" << a_reason << "\",\"worldPos\":";
+						if (a_worldPos) {
+							AppendPoint3(snapshot, *a_worldPos);
+							L->info(
+								"SSGI oracle ref formId={:#010x} resolved=false worldPos=({:.3f},{:.3f},{:.3f}) culled:{}.",
+								formId, a_worldPos->x, a_worldPos->y, a_worldPos->z, a_reason);
+						} else {
+							snapshot << "null";
+							L->info("SSGI oracle ref formId={:#010x} resolved=false worldPos=null culled:{}.",
+								formId, a_reason);
+						}
+						snapshot << '}';
+					};
+
 					auto* refr = RE::TESForm::GetFormByID<RE::TESObjectREFR>(formId);
-					if (!refr || !refr->Get3D()) {
+					if (!refr) {
+						appendUnresolved("no_ref", nullptr);
 						continue;
 					}
 
 					const RE::NiPoint3 worldPos = refr->GetPosition();
+					if (!refr->Get3D()) {
+						appendUnresolved("no_3d", &worldPos);
+						continue;
+					}
 					const DirectX::XMVECTOR rendererWorldPos = DirectX::XMVectorSet(
 						worldPos.x - posAdjust.x,
 						worldPos.y - posAdjust.y,
 						worldPos.z - posAdjust.z,
 						1.0f);
 					DirectX::XMFLOAT4 clip{};
-					DirectX::XMStoreFloat4(&clip, DirectX::XMVector4Transform(rendererWorldPos, viewProj));
+					DirectX::XMStoreFloat4(
+						&clip, DirectX::XMVector4Transform(rendererWorldPos, worldToCamTransform));
 					if (clip.w <= 0.0f) {
+						appendUnresolved("behind_camera", &worldPos);
 						continue;
 					}
 
@@ -683,6 +730,7 @@ namespace cs::features
 					const float ndcY = clip.y / clip.w;
 					if (!std::isfinite(ndcX) || !std::isfinite(ndcY) ||
 						std::abs(ndcX) > 1.2f || std::abs(ndcY) > 1.2f) {
+						appendUnresolved("offscreen", &worldPos);
 						continue;
 					}
 
@@ -694,14 +742,24 @@ namespace cs::features
 						static_cast<std::size_t>(py) * mapped.RowPitch +
 						static_cast<std::size_t>(px) * CaptureDepthTexelBytes(depthDesc.Format);
 					const float storedDepth = ReadCaptureDepth(texel, depthDesc.Format);
+					if (!std::isfinite(storedDepth)) {
+						appendUnresolved("depth_read_failed", &worldPos);
+						continue;
+					}
 
 					if (sampleCount++ > 0) {
 						snapshot << ',';
 					}
-					snapshot << "{\"formId\":" << formId << ",\"worldPos\":";
+					++resolvedCount;
+					snapshot << "{\"formId\":" << formId
+						<< ",\"resolved\":true,\"culledReason\":\"\",\"worldPos\":";
 					AppendPoint3(snapshot, worldPos);
 					snapshot << ",\"uv\":[" << uvX << ',' << uvY << ']'
+						<< ",\"pixel\":[" << px << ',' << py << ']'
 						<< ",\"storedDepth\":" << storedDepth << '}';
+					L->info(
+						"SSGI oracle ref formId={:#010x} resolved=true worldPos=({:.3f},{:.3f},{:.3f}) uv=({:.6f},{:.6f}).",
+						formId, worldPos.x, worldPos.y, worldPos.z, uvX, uvY);
 				}
 				snapshot << "]}";
 
@@ -726,15 +784,15 @@ namespace cs::features
 					L->warn("SSGI oracle capture could not write {}.", outputPath.string());
 					return;
 				}
-				output << "{\"schema\":\"ssgi-oracle-capture/1\",\"allocDim\":["
+				output << "{\"schema\":\"ssgi-oracle-capture/2\",\"allocDim\":["
 					<< _allocW << ',' << _allocH << "],\"snapshots\":[" << _captureJson << "]}";
 				if (!output) {
 					L->warn("SSGI oracle capture failed writing {}.", outputPath.string());
 					return;
 				}
 				L->info(
-					"SSGI oracle snapshot {}/{} frame {} wrote {} samples.",
-					_snapshotCount, _capture.maxSnapshots, frame, sampleCount);
+					"SSGI oracle snapshot {}/{} frame {} wrote {} samples ({} resolved).",
+					_snapshotCount, _capture.maxSnapshots, frame, sampleCount, resolvedCount);
 			} catch (...) {
 				if (mappedDepth) {
 					a_context->Unmap(staging.get(), 0);

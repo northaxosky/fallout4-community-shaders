@@ -32,9 +32,9 @@ What it proves:
      handedness error that the round-trip alone would cancel.
   5. NEGATIVE CONTROLS — omitting the uv y-flip, and transposing invProj, must BREAK the
      round-trip. Proves the test actually discriminates the convention (has teeth).
-  6. CAPTURED-ORACLE HOOK — captured (uv, depth, viewPos, projMat) tuples from a real frame
-     are the memory-truth that beats static analysis; each carries its OWN frame projMat, so
-     reconstruction uses the true per-frame invProj. Empty until a capture exists.
+  6. CAPTURED-ORACLE HOOK — captured raw camera transforms, world positions, uv, and depth
+     from a real frame are the memory-truth that beats static analysis; reconstruction uses
+     each frame's true invProj. Empty until a capture exists.
 
 The synthetic checks (1-5) prove the chain is self-consistent AND that the shader fast-path,
 the linearize, and a matrix-independent pinhole anchor all agree — a strong necessary gate.
@@ -175,19 +175,12 @@ CAPTURED_ORACLE: list[
 
 
 # --- Independent JSON-capture oracle -----------------------------------------------------------
-# The in-game capture hook (ScreenSpaceGI [capture] toml) dumps, per snapshot: the row-major
-# view/proj/viewProj/invProj matrices, currentPosAdjust, and per configured static ref a
-# (formId, worldPos_game, uv, storedDepth) tuple. This module recomputes EVERYTHING derived here
-# (different author from the C++ writer) so the gate is an honest independent check:
-#   worldPos_r     = worldPos_game - posAdjust            (rebase into renderer/view space)
-#   viewPos_oracle = (worldPos_r, 1) @ view               (GROUND TRUTH; no depth, no invProj)
-#   ndc            = ((worldPos_r,1) @ viewProj) / w       (locate the pixel; shares only uv)
-#   viewPos_chain  = reconstruct(ndc.xy, linearize(storedDepth), invProj)   (the path under test)
-# viewPos_oracle uses the view matrix + a game-sim world position and NEVER the depth->invProj
-# chain, so agreement is non-circular. CRITICAL (issue found in review): the chain is reconstructed
-# from the CAPTURED uv (uv -> ndc.xy with the y-flip, the actual convention under test) + storedDepth
-# + invProj -- NOT from worldPos@viewProj-derived ndc (that trivially round-trips and never consults
-# uv or the depth encoding, so it cannot catch a y-flip / handedness / linearization bug).
+# The in-game hook dumps raw persistent-camera ingredients. This module independently derives:
+#   worldPos_r = worldPos_game - posAdjust
+#   ndcZ_oracle = (worldToCam @ worldPos_r_h).z / w
+#   viewPos_node = Bethesda camera-node rows @ (worldPos_r - camWorldTranslate), axis-remapped
+#   viewPos_chain = reconstruct(captured uv, storedDepth, invProj)
+# The node oracle never uses depth/invProj, while worldToCam independently anchors clip-space depth.
 LIVE_LINEARIZER = "A:(d-0.01)/0.99"  # the encoding the shipped decode.cs.hlsl uses. THE gate proves
 #   exactly one thing: this A-chain reconstructs the TRUE oracle viewPos within tolerance across the
 #   off-axis on-surface subset. That is the whole go-live question -- "does the shipped decode recover
@@ -246,7 +239,7 @@ REL_SURFACE_TOL = 0.02       # on-surface test in VIEW-Z: |vzSurface(stored,proj
 #                              hyperbolic stored value happens to sit within 0.01 of a near surface.
 UV_MATCH_TOL = 0.002         # |uv_json - uv_recomputed|; a mismatch means a projection-convention
 #                              disagreement (e.g. y-flip) and the sample is not trusted. In a real
-#                              capture uv_json and uv_recomputed both come from worldPos@viewProj so
+#                              capture uv_json and uv_recomputed both come from worldToCam so
 #                              they agree to ~1e-6; 0.002 (~5px @2560w) rejects a corrupted/hand-edited
 #                              uv while never false-flagging float noise. (Was 0.01 ~= 23px -- too loose.)
 IN_FRAME_MAX = 1.0           # a ref only counts if its captured uv is ON-screen in
@@ -258,12 +251,13 @@ IN_FRAME_BORDER = 0.003      # reject a border margin (~8px @2560w) so a degener
 #                              count -- the shader samples texel CENTRES, never the uv==0 border ray.
 VIEWPORT_MIN_DEPTH_FLOOR = VIEWPORT_MIN_DEPTH  # stored < this is the first-person near partition the
 #                              live decode.cs.hlsl MASKS (rawDepth<0.01) -> must not count as evidence.
+NDC_Z_ORACLE_TOL = 1e-5      # worldToCam depth vs node/chain projected depth; TAA perturbs xy only.
 
 _LINEARIZERS = ("A:(d-0.01)/0.99", "B:d*1.01-0.01")
 
 
 def _mat(flat: list[float]) -> np.ndarray:
-    """16 row-major floats (XMFLOAT4X4 memory order) -> 4x4, applied as row-vector v @ M."""
+    """16 floats in raw memory order -> 4x4; callers choose the engine's vector convention."""
     return np.array(flat, dtype=np.float64).reshape(4, 4)
 
 
@@ -327,12 +321,15 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
     """Independent recompute over a parsed capture. Returns (report, failures). Structural / non-finite
     problems become FAILURES (never crashes, never a silent false-PASS). The chain is reconstructed
     from the CAPTURED uv + storedDepth + invProj so the uv->ndc y-flip and the depth encoding are
-    actually exercised; the oracle (worldPos_rebased @ view) shares only the pixel, never the depth."""
+    actually exercised; the camera-node oracle shares only the pixel, never the depth."""
     failures: list[str] = []
     rows: list[dict] = []
+    unresolved: list[dict] = []
 
     if not isinstance(data, dict):
         return {"rows": rows}, ["capture is not a JSON object"]
+    if data.get("schema") != "ssgi-oracle-capture/2":
+        return {"rows": rows}, ["capture schema must be ssgi-oracle-capture/2"]
     snaps = data.get("snapshots")
     if not isinstance(snaps, list) or not snaps:
         return {"rows": rows}, ["capture has no snapshots[]"]
@@ -341,23 +338,34 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
         if not isinstance(snap, dict):
             failures.append(f"snapshot[{si}]: not an object")
             continue
-        for key in ("view", "viewProj", "invProj", "proj"):
+        for key in ("proj", "invProj", "viewPerPass", "viewProjPerPass", "worldToCam"):
             if not _finite_mat(snap.get(key)):
                 failures.append(f"snapshot[{si}]: missing/non-finite {key}")
-        pa_raw = snap.get("posAdjust")
+        vectors: dict[str, np.ndarray] = {}
+        for key in ("posAdjust", "camWorldTranslate"):
+            try:
+                value = np.asarray(snap.get(key), dtype=np.float64)
+                valid = value.shape == (3,) and bool(np.all(np.isfinite(value)))
+            except (TypeError, ValueError):
+                valid = False
+            if not valid:
+                failures.append(f"snapshot[{si}]: missing/non-finite/mis-shaped {key}")
+            else:
+                vectors[key] = value
         try:
-            pa = np.asarray(pa_raw, dtype=np.float64)
-            pa_ok = pa.shape == (3,) and bool(np.all(np.isfinite(pa)))
+            rotate_rows = np.asarray(snap.get("camWorldRotateRows"), dtype=np.float64)
+            rotate_ok = rotate_rows.shape == (3, 3) and bool(np.all(np.isfinite(rotate_rows)))
         except (TypeError, ValueError):
-            pa_ok = False
-        if not pa_ok:
-            failures.append(f"snapshot[{si}]: missing/non-finite/mis-shaped posAdjust")
+            rotate_ok = False
+        if not rotate_ok:
+            failures.append(f"snapshot[{si}]: missing/non-finite/mis-shaped camWorldRotateRows")
         # If any structural piece is bad, we cannot trust this snapshot at all.
         if any(f.startswith(f"snapshot[{si}]:") for f in failures):
             continue
 
-        view = _mat(snap["view"])
-        vproj = _mat(snap["viewProj"])
+        pa = vectors["posAdjust"]
+        cam_world = vectors["camWorldTranslate"]
+        wtc = _mat(snap["worldToCam"])
         invp = _mat(snap["invProj"])
         proj = _mat(snap["proj"])
         m22, m32 = float(proj[2, 2]), float(proj[3, 2])
@@ -366,19 +374,6 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
                 failures.append(f"snapshot[{si}]: invProj != inverse(proj) (C++ inversion mismatch)")
         except np.linalg.LinAlgError:
             failures.append(f"snapshot[{si}]: proj not invertible")
-        # The oracle rebases worldPos through `view`; the chain reconstructs through `invProj`(=inv(proj));
-        # the C++ hook derives each sample's uv through `viewProj`. Those three must be a single coherent
-        # snapshot, i.e. viewProj == view @ proj (row-vector). A capture that corrupts `view` alone (a
-        # bad/stale camera translation) while leaving viewProj clean would otherwise pass every other
-        # check with a silently WRONG oracle. Relative-Frobenius so sub-pixel TAA jitter (which perturbs a
-        # couple of entries by ~1/width) is tolerated while a gross translation (orders of magnitude
-        # larger) is rejected. Provisional tolerance -- confirm against the first real capture.
-        vp_expect = view @ proj
-        vp_den = float(np.linalg.norm(vproj)) or 1.0
-        if float(np.linalg.norm(vproj - vp_expect)) / vp_den > 0.02:
-            failures.append(f"snapshot[{si}]: viewProj != view @ proj (row-vector; rel-Frobenius "
-                            f"{float(np.linalg.norm(vproj - vp_expect)) / vp_den:.3g}) -- the oracle's "
-                            "view is inconsistent with the chain's proj; capture is internally corrupt")
 
         samples = snap.get("samples")
         if not isinstance(samples, list):
@@ -388,30 +383,60 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
             if not isinstance(s, dict):
                 failures.append(f"snapshot[{si}].sample[{sj}]: not an object")
                 continue
+            resolved = s.get("resolved")
+            reason = s.get("culledReason")
+            if not isinstance(resolved, bool) or not isinstance(reason, str):
+                failures.append(f"snapshot[{si}].sample[{sj}]: missing/malformed resolved/culledReason")
+                continue
+            if not resolved:
+                if reason not in {
+                    "no_ref", "no_3d", "behind_camera", "offscreen", "depth_read_failed"
+                }:
+                    failures.append(f"snapshot[{si}].sample[{sj}]: invalid culledReason '{reason}'")
+                    continue
+                unresolved.append({
+                    "snap": si, "sample": sj, "formId": s.get("formId"),
+                    "reason": reason, "worldPos": s.get("worldPos"),
+                })
+                continue
+            if reason:
+                failures.append(f"snapshot[{si}].sample[{sj}]: resolved sample has culledReason")
+                continue
             try:
                 wp = np.asarray(s["worldPos"], dtype=np.float64)
                 uv_json = np.asarray(s["uv"], dtype=np.float64)
+                pixel = np.asarray(s["pixel"], dtype=np.float64)
                 stored = float(s["storedDepth"])
             except (KeyError, TypeError, ValueError):
-                failures.append(f"snapshot[{si}].sample[{sj}]: missing/malformed worldPos/uv/storedDepth")
+                failures.append(
+                    f"snapshot[{si}].sample[{sj}]: missing/malformed worldPos/uv/pixel/storedDepth")
                 continue
-            # STRICT 1-D shapes (not just .size): a rank-2 [[x],[y],[z]] has size 3 but would crash the
-            # row-vector matmul; reject it as a structural failure instead of tracebacking.
             if not (wp.shape == (3,) and uv_json.shape == (2,) and np.all(np.isfinite(wp))
-                    and np.all(np.isfinite(uv_json)) and math.isfinite(stored)):
-                failures.append(f"snapshot[{si}].sample[{sj}]: non-finite/mis-shaped worldPos/uv/storedDepth")
+                    and pixel.shape == (2,) and np.all(np.isfinite(uv_json))
+                    and np.all(np.isfinite(pixel)) and math.isfinite(stored)):
+                failures.append(
+                    f"snapshot[{si}].sample[{sj}]: non-finite/mis-shaped worldPos/uv/pixel/storedDepth")
                 continue
 
             try:
                 wr = wp - pa
-                oracle = _rowmul(wr, view)[:3]            # GROUND TRUTH, independent of depth/invProj
-                clip = _rowmul(wr, vproj)
+                clip = wtc @ np.append(wr, 1.0)           # column-vector engine convention
                 if not np.all(np.isfinite(clip)) or clip[3] <= 0.0:
-                    continue                               # behind camera / degenerate; not usable
+                    failures.append(f"snapshot[{si}].sample[{sj}]: resolved sample has invalid clip")
+                    continue
                 ndc = clip[:3] / clip[3]
+                ndc_z_oracle = float(ndc[2])
                 uv_calc = np.array([(ndc[0] + 1.0) * 0.5, (1.0 - ndc[1]) * 0.5])
                 uv_gap = float(np.max(np.abs(uv_calc - uv_json)))
-                vz_origin = float(oracle[2])               # view-space forward Z of the true origin
+                view_bsda = rotate_rows @ (wr - cam_world)
+                oracle = np.array([view_bsda[2], view_bsda[1], view_bsda[0]], dtype=np.float64)
+                vz_origin = float(oracle[2])
+
+                node_clip = np.append(oracle, 1.0) @ proj
+                ndc_z_node = (float(node_clip[2] / node_clip[3])
+                              if np.all(np.isfinite(node_clip)) and abs(node_clip[3]) > 1e-12
+                              else math.inf)
+                oracle_ndc_gap = abs(ndc_z_node - ndc_z_oracle)
 
                 # On-surface via VIEW-Z consistency: convert storedDepth (under the LIVE encoding A) to a
                 # view-Z through the projection, and compare to the origin's own view-Z. Depth-only: it
@@ -427,6 +452,7 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
 
                 res: dict[str, float] = {}
                 resvec: dict[str, np.ndarray] = {}
+                chains: dict[str, np.ndarray] = {}
                 for name, lz in linearize_variants(stored).items():
                     chain = _reconstruct_from_uv(uv_json, lz, invp)
                     if chain is None:
@@ -434,6 +460,17 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
                         continue
                     res[name] = float(np.linalg.norm(chain - oracle))
                     resvec[name] = chain - oracle
+                    chains[name] = chain
+
+                chain_a = chains.get(LIVE_LINEARIZER)
+                if chain_a is not None:
+                    chain_clip = np.append(chain_a, 1.0) @ proj
+                    ndc_z_chain_a = (float(chain_clip[2] / chain_clip[3])
+                                     if np.all(np.isfinite(chain_clip)) and abs(chain_clip[3]) > 1e-12
+                                     else math.inf)
+                else:
+                    ndc_z_chain_a = math.inf
+                ndc_chain_gap = abs(ndc_z_chain_a - ndc_z_oracle)
 
                 # onsurf gates COVERAGE and the residual subset together, so a row can only count if it is
                 # a real on-screen surface AND the LIVE (A) reconstruction is finite -- otherwise an
@@ -444,7 +481,11 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
 
                 rows.append({
                     "snap": si, "sample": sj, "formId": s.get("formId"),
-                    "uv": uv_calc, "uv_json": uv_json, "stored": stored, "ndcZ": float(ndc[2]),
+                    "worldPos": wp, "posAdjust": pa, "uv": uv_calc, "uv_json": uv_json,
+                    "pixel": pixel, "stored": stored, "ndcZ_oracle": ndc_z_oracle,
+                    "ndcZ_node": ndc_z_node, "ndcZ_chain_A": ndc_z_chain_a,
+                    "oracle_ndc_gap": oracle_ndc_gap, "ndc_chain_gap": ndc_chain_gap,
+                    "oracle": oracle, "chains": chains,
                     "vz_origin": vz_origin, "vz_surface": vz_surface, "uv_gap": uv_gap,
                     "oracle_dist": float(np.linalg.norm(oracle)),
                     "first_person": first_person, "in_frame": in_frame, "onsurf": bool(onsurf),
@@ -455,16 +496,15 @@ def evaluate_oracle(data: dict) -> tuple[dict, list[str]]:
                 failures.append(f"snapshot[{si}].sample[{sj}]: reconstruction error: {exc}")
                 continue
 
-    return {"rows": rows}, failures
+    return {"rows": rows, "unresolved": unresolved}, failures
 
 
 def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     """THE gate (used by both --require-oracle and the self-test, so the test exercises the real
     predicate). oracle_ok requires: no structural failures; off-axis on-surface coverage in BOTH uv axes;
     the LIVE linearizer (A) reconstructs the true oracle within BOTH a relative and an absolute MAX cap
-    over that subset; and B does not reconstruct the oracle meaningfully better than A (guardrail #3).
-    Relative AND absolute (not one alone): relative is depth-robust for the O(100%) convention bugs, the
-    absolute cap backstops a far-field displacement that hides behind a huge |oracle| denominator."""
+    over that subset; its projected depth agrees with worldToCam; and B does not reconstruct the oracle
+    meaningfully better than A (guardrail #3)."""
     rows = report.get("rows", [])
     onsurf = [r for r in rows if r["onsurf"]]
     subset = [r for r in onsurf if r["oax"] or r["oay"]]         # off-axis (either axis) on-surface
@@ -483,6 +523,8 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     maxes = {k: stat([r["res"][k] for r in subset], np.max) for k in _LINEARIZERS}            # absolute
     rel_medians = {k: stat([rel(r, k) for r in subset], np.median) for k in _LINEARIZERS}
     rel_maxes = {k: stat([rel(r, k) for r in subset], np.max) for k in _LINEARIZERS}
+    ndc_chain_max = stat([r["ndc_chain_gap"] for r in subset], np.max)
+    oracle_ndc_max = stat([r["oracle_ndc_gap"] for r in rows], np.max)
     finite_medians = {k: v for k, v in rel_medians.items() if math.isfinite(v)}
     winner = min(finite_medians, key=finite_medians.get) if finite_medians else None
 
@@ -494,6 +536,8 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     live_rel_ok = math.isfinite(rel_maxes[LIVE_LINEARIZER]) and rel_maxes[LIVE_LINEARIZER] < RESID_REL_TOL
     live_abs_ok = math.isfinite(maxes[LIVE_LINEARIZER]) and maxes[LIVE_LINEARIZER] < RESID_ABS_TOL
     live_within_tol = live_rel_ok and live_abs_ok
+    ndc_chain_ok = math.isfinite(ndc_chain_max) and ndc_chain_max < NDC_Z_ORACLE_TOL
+    oracle_axes_ok = math.isfinite(oracle_ndc_max) and oracle_ndc_max < NDC_Z_ORACLE_TOL
 
     # Guardrail #3: if B reconstructs the oracle SYSTEMATICALLY better than A, STOP -- the game may encode
     # depth under B. Scale-invariant: B must beat A on >=B_WIN_FRAC_FLOOR of the subset AND be >=
@@ -510,7 +554,8 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     b_better = ((b_win_frac >= B_WIN_FRAC_FLOOR) and math.isfinite(med_a) and math.isfinite(med_b)
                 and (med_a > B_MEANINGFUL_FLOOR) and (med_b <= med_a / B_ACCURACY_RATIO))
 
-    ok = (not structural_failures) and coverage_ok and live_within_tol and (not b_better)
+    ok = ((not structural_failures) and coverage_ok and live_within_tol
+          and ndc_chain_ok and oracle_axes_ok and (not b_better))
 
     # Diagnostic character of A's residual (advisory only, never flips ok): a mean-aligned constant
     # offset => posAdjust latency (guardrail #4, re-capture stationary); a mean ~0 => rotational/scaling
@@ -528,6 +573,14 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     if not coverage_ok:
         reasons.append(f"insufficient off-axis on-surface coverage (X={n_oax}, Y={n_oay}, "
                        f"need >={MIN_AXIS_ONSURFACE} each)")
+    if rows and not oracle_axes_ok:
+        reasons.append(f"Oracle (i) node-transform and Oracle (ii) worldToCam disagree in ndc.z "
+                       f"(max {oracle_ndc_max:.3e} >= {NDC_Z_ORACLE_TOL:.1e}) -- the node-transform "
+                       "axis order is wrong; do NOT go live")
+    if subset and not ndc_chain_ok:
+        reasons.append(f"chain-A implied ndc.z disagrees with Oracle (ii) worldToCam "
+                       f"(max {ndc_chain_max:.3e} >= {NDC_Z_ORACLE_TOL:.1e}) -- sampled depth does "
+                       "not match the independently projected reference; do NOT go live")
     if not live_rel_ok:
         reasons.append(f"LIVE linearizer {LIVE_LINEARIZER} max RELATIVE residual "
                        f"{rel_maxes[LIVE_LINEARIZER]:.4%} >= tol {RESID_REL_TOL:.1%} -- A does NOT "
@@ -560,6 +613,8 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
     return {
         "ok": ok, "winner": winner, "medians": medians, "maxes": maxes,
         "rel_medians": rel_medians, "rel_maxes": rel_maxes,
+        "ndc_chain_max": ndc_chain_max, "oracle_ndc_max": oracle_ndc_max,
+        "ndc_chain_ok": ndc_chain_ok, "oracle_axes_ok": oracle_axes_ok,
         "b_better": b_better, "b_advantage": b_advantage, "translation_like": translation_like,
         "mean_offset": mean_vec.tolist(),
         "n_onsurface": len(onsurf), "n_subset": len(subset), "n_oax": n_oax, "n_oay": n_oay,
@@ -569,13 +624,21 @@ def oracle_verdict(report: dict, structural_failures: list[str]) -> dict:
 
 def summarize_oracle(report: dict, verdict: dict) -> list[str]:
     rows = report.get("rows", [])
-    lines = [f"    {len(rows)} projected, {verdict['n_onsurface']} on-surface, "
+    unresolved = report.get("unresolved", [])
+    lines = [f"    {len(rows)} resolved, {len(unresolved)} unresolved, "
+             f"{verdict['n_onsurface']} on-surface, "
              f"{verdict['n_subset']} off-axis on-surface (X={verdict['n_oax']}, Y={verdict['n_oay']})"]
     for k in _LINEARIZERS:
         med, mx = verdict["medians"][k], verdict["maxes"][k]
         rmed, rmx = verdict["rel_medians"][k], verdict["rel_maxes"][k]
         lines.append(f"    {k}: median={med:.4f} max={mx:.4f} game-units | "
                      f"rel median={rmed:.4%} max={rmx:.4%} (over off-axis on-surface)")
+    lines.append(f"    ndc.z cross-check chain-A -> proj vs worldToCam: "
+                 f"max={verdict['ndc_chain_max']:.3e}, tol={NDC_Z_ORACLE_TOL:.1e} "
+                 f"({'PASS' if verdict['ndc_chain_ok'] else 'FAIL'})")
+    lines.append(f"    ndc.z cross-check node oracle (i) -> proj vs worldToCam oracle (ii): "
+                 f"max={verdict['oracle_ndc_max']:.3e}, tol={NDC_Z_ORACLE_TOL:.1e} "
+                 f"({'PASS' if verdict['oracle_axes_ok'] else 'FAIL'})")
     winner = verdict["winner"]
     if winner:
         lines.append(f"    winner (min median) = {winner}")
@@ -595,17 +658,30 @@ def summarize_oracle(report: dict, verdict: dict) -> list[str]:
                                  f"{mean_norm:.3f} << per-sample {indiv:.3f}) -> genuine convention bug")
     for note in verdict.get("advisory", []):
         lines.append(f"    {note}")
-    # Per-sample raw dump so the numbers can be eyeballed (requested at checkpoint).
     if rows:
-        lines.append("    per-sample (formId uv stored | vzOrigin vzSurf | onsurf oax oay | resA resB):")
-        for r in rows[:24]:
+        lines.append("    per-sample raw ingredients and derived oracles:")
+        for r in rows:
             fid = r["formId"]
             fid_s = f"0x{fid:X}" if isinstance(fid, int) else str(fid)
+            oracle = r["oracle"]
+            chain_a = r["chains"].get(_LINEARIZERS[0], np.full(3, math.nan))
+            chain_b = r["chains"].get(_LINEARIZERS[1], np.full(3, math.nan))
             lines.append(
-                f"      {fid_s} uv=({r['uv_json'][0]:.4f},{r['uv_json'][1]:.4f}) d={r['stored']:.5f} | "
-                f"vzO={r['vz_origin']:.1f} vzS={r['vz_surface']:.1f} | "
-                f"{int(r['onsurf'])} {int(r['oax'])} {int(r['oay'])} | "
-                f"A={r['res'].get(_LINEARIZERS[0]):.3f} B={r['res'].get(_LINEARIZERS[1]):.3f}")
+                f"      {fid_s} uv={np.array2string(r['uv_json'], precision=6)} "
+                f"storedDepth={r['stored']:.9f} worldPos={np.array2string(r['worldPos'], precision=3)} "
+                f"posAdjust={np.array2string(r['posAdjust'], precision=3)}")
+            lines.append(
+                f"        viewPos_oracle_i={np.array2string(oracle, precision=6)} "
+                f"viewPos_chain_A={np.array2string(chain_a, precision=6)} "
+                f"viewPos_chain_B={np.array2string(chain_b, precision=6)} "
+                f"ndcZ_oracle={r['ndcZ_oracle']:.9f} onsurf={int(r['onsurf'])} "
+                f"oax={int(r['oax'])} oay={int(r['oay'])}")
+    if unresolved:
+        lines.append("    unresolved refs:")
+        for r in unresolved:
+            fid = r["formId"]
+            fid_s = f"0x{fid:X}" if isinstance(fid, int) else str(fid)
+            lines.append(f"      {fid_s} culledReason={r['reason']} worldPos={r['worldPos']}")
     return lines
 
 
@@ -632,15 +708,19 @@ def synth_oracle_capture(inject: str | None = None) -> dict:
     invp = np.linalg.inv(proj)
     inv_view = np.linalg.inv(view)
     pa = np.array([100.0, -50.0, 20.0], dtype=np.float64)
+    view_rot = view[:3, :3]
+    rotate_rows = np.stack((view_rot[:, 2], view_rot[:, 1], view_rot[:, 0]))
+    per_pass = np.array(
+        [[1.0, 0.0, 0.0, 0.0], [0.0, 0.0, 1.0, 0.0],
+         [0.0, 1.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
 
     samples = []
     for i, vpv in enumerate(make_sample_view_positions()):
         vpv = np.asarray(vpv, dtype=np.float64)
         if inject == "offscreen":
-            # Force this ref off the right edge (ndc.x = 1.08) with a fully CONSISTENT worldPos, so
-            # uv_calc == uv_json (uv_gap ~ 0) and ONLY the in-frame check can reject it -- this proves
-            # the in-frame gate has independent teeth (a real off-screen ref keeps a matching uv because
-            # the C++ hook writes worldPos@viewProj regardless of on-screen-ness).
+            # Keep the control resolved to exercise the evaluator's in-frame guard.
             vpv = vpv.copy()
             vpv[0] = 1.08 * float(vpv[2]) / proj[0, 0]   # ndc.x = vx*p00/vz = 1.08
         world_r = (np.append(vpv, 1.0) @ inv_view)[:3]
@@ -665,34 +745,39 @@ def synth_oracle_capture(inject: str | None = None) -> dict:
             stored = float(0.01 + near_ndc_z * 0.99)
         samples.append({
             "formId": 0x1000 + i,
+            "resolved": True,
+            "culledReason": "",
             "worldPos": (world_r + pa).tolist(),
             "uv": uv,
+            "pixel": [
+                int(np.clip(math.floor(uv[0] * 2560), 0, 2559)),
+                int(np.clip(math.floor(uv[1] * 1440), 0, 1439)),
+            ],
             "storedDepth": stored,
         })
 
-    view_out = view.copy()
+    rotate_out = rotate_rows.copy()
     pa_emit = pa.copy()
     if inject == "transpose_view":
-        view_out = view.T                       # convention bug: oracle uses a transposed view
+        rotate_out = rotate_rows.T
     elif inject == "translation":
-        # posAdjust latency: worldPos was rebased in-engine with the TRUE pa, but the capture emits a
-        # STALE pa (current-vs-previous frame). view/viewProj/proj stay a coherent snapshot (no
-        # structural trip); the Python rebases with pa_emit -> a CONSTANT view-space offset of |delta|
-        # (~13.9u here) that the ABSOLUTE cap must reject and the report must label translation-like.
+        # Emit stale posAdjust to test constant-offset diagnosis.
         pa_emit = pa + np.array([8.0, 8.0, 8.0])
     elif inject == "nan":
-        view_out = view.copy()
-        view_out[1, 1] = float("nan")           # non-finite element => structural rejection, no crash
+        rotate_out[1, 1] = float("nan")
 
     return {
-        "schema": "ssgi-oracle-capture/1",
+        "schema": "ssgi-oracle-capture/2",
         "allocDim": [2560, 1440],
         "snapshots": [{
             "frame": 512, "frameDim": [2560, 1440], "posAdjust": pa_emit.tolist(),
-            "view": view_out.flatten().tolist(),
             "proj": proj.flatten().tolist(),
-            "viewProj": viewproj.flatten().tolist(),
             "invProj": invp.flatten().tolist(),
+            "viewPerPass": per_pass.flatten().tolist(),
+            "viewProjPerPass": (per_pass @ proj).flatten().tolist(),
+            "worldToCam": viewproj.T.flatten().tolist(),
+            "camWorldTranslate": cam_world.tolist(),
+            "camWorldRotateRows": rotate_out.tolist(),
             "samples": samples,
         }],
     }
@@ -714,12 +799,12 @@ def oracle_selftest() -> list[str]:
                      f"(ok={verdict['ok']}, winner={verdict['winner']}, "
                      f"relMaxA={verdict['rel_maxes'].get(LIVE_LINEARIZER)}, reasons={verdict['reasons']})")
 
-    # Every bug class must be REJECTED by the gate, each via its intended branch: transpose = a view
-    # inconsistent with the clean viewProj (structural); yflip/firstperson/occlusion/offscreen = no valid
+    # Every bug class must be REJECTED by the gate, each via its intended branch: transpose = node rows
+    # inconsistent with worldToCam; yflip/firstperson/occlusion/offscreen = no valid
     # off-axis on-surface coverage; nan = structural; b_encoding = B reconstructs the oracle meaningfully
     # better -> guardrail-#3 block; translation = a constant posAdjust offset caught by the ABSOLUTE cap.
     controls = {
-        "transpose_view": "transposed view != clean viewProj -> structural rejection",
+        "transpose_view": "transposed camera-node rows disagree with worldToCam",
         "yflip": "uv y-flip -> off-axis-Y coverage cannot be met",
         "firstperson": "stored<0.01 first-person partition the shader masks -> no coverage",
         "occlusion": "ref origin occluded (surface nearer than origin) -> view-Z mismatch, no coverage",
@@ -744,6 +829,10 @@ def oracle_selftest() -> list[str]:
         fails.append(f"oracle self-test: b_encoding must trip the guardrail-#3 systematic-B block "
                      f"(b_advantage={v_be.get('b_advantage')}, need frac>={B_WIN_FRAC_FLOOR} & "
                      f">={B_ACCURACY_RATIO}x more accurate)")
+    rep_axis, f_axis = evaluate_oracle(synth_oracle_capture("transpose_view"))
+    v_axis = oracle_verdict(rep_axis, f_axis)
+    if v_axis.get("oracle_axes_ok"):
+        fails.append("oracle self-test: transposed node rows must fail the Oracle (i)/(ii) ndc.z cross-check")
     rep_tr, f_tr = evaluate_oracle(synth_oracle_capture("translation"))
     v_tr = oracle_verdict(rep_tr, f_tr)
     if not (v_tr.get("translation_like") and not v_tr.get("b_better")):
@@ -871,7 +960,7 @@ def main(require_oracle: bool = False, oracle_json: str | None = None) -> int:
     # 6. CAPTURED-ORACLE (memory-truth; the SSS lesson - trust the oracle over analysis).
     #    Two sources: (legacy) hardcoded CAPTURED_ORACLE triples, and (primary) a JSON capture from
     #    the in-game oracle hook. The JSON path is fully INDEPENDENT of the depth->invProj chain:
-    #    ground-truth viewPos = (worldPos - posAdjust) @ view, sharing only the pixel uv.
+    #    ground-truth viewPos comes from the camera node, sharing only the pixel uv.
     off_axis_captured = 0
     for label, uv_t, depth_t, vp_t, proj_rows in CAPTURED_ORACLE:
         cap_inv = np.linalg.inv(np.array(proj_rows, dtype=np.float64))
