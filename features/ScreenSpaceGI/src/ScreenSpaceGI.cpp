@@ -354,6 +354,17 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
+		if (_capture.enabled) {
+			cs::engine::RegisterPreDeferredLightsImpl([] {
+				ScreenSpaceGI::GetSingleton()->OnAnchorDumpFrameBegin();
+			});
+			cs::engine::RegisterPreSunLightDraw([] {
+				ScreenSpaceGI::GetSingleton()->OnAnchorDumpDraw();
+			});
+			cs::engine::RegisterPostDeferredLightsImpl([] {
+				ScreenSpaceGI::GetSingleton()->OnAnchorDumpFrameEnd();
+			});
+		}
 		_started.store(true, std::memory_order_release);
 		L->info("Registered post-deferred-prepass callback (enabled={}).", _settings.enabled);
 	}
@@ -888,6 +899,108 @@ namespace cs::features
 		} catch (...) {
 			L->warn("SSGI oracle capture failed.");
 		}
+	}
+
+	void ScreenSpaceGI::OnAnchorDumpFrameBegin()
+	{
+		_dumpArmed.store(false, std::memory_order_relaxed);
+
+		const bool nowDown = (GetAsyncKeyState(_capture.hotkey) & 0x8000) != 0;
+		const bool dumpPressed = nowDown && !_dumpKeyDown;
+		_dumpKeyDown = nowDown;
+		const int frameCap = _capture.maxSnapshots > 0 ? _capture.maxSnapshots : 8;
+		if (!dumpPressed || _dumpFramesLogged >= frameCap) {
+			return;
+		}
+
+		_dumpOrdinal = 0;
+		_dumpTripleMatches = 0;
+		_dumpMatchOrdinal = -1;
+		_dumpArmed.store(true, std::memory_order_relaxed);
+		auto* state = cs::engine::GetGraphicsState();
+		const auto frame = state ? static_cast<std::uint32_t>(state->frameCount) : 0u;
+		L->info("SSGI anchor-dump FRAME BEGIN (frame {})", frame);
+	}
+
+	void ScreenSpaceGI::OnAnchorDumpDraw()
+	{
+		if (!_dumpArmed.load(std::memory_order_relaxed)) {
+			return;
+		}
+
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		ID3D11ShaderResourceView* srvs[16] = {};
+		context->PSGetShaderResources(0, 16, srvs);
+		std::array<winrt::com_ptr<ID3D11ShaderResourceView>, 16> ownedSRVs;
+		for (std::size_t index = 0; index < ownedSRVs.size(); ++index) {
+			ownedSRVs[index].attach(srvs[index]);
+		}
+
+		std::array<char, 17> slotMap{};
+		for (std::size_t index = 0; index < ownedSRVs.size(); ++index) {
+			slotMap[index] = srvs[index] ? 'X' : '.';
+		}
+		const bool tripleMatch =
+			srvs[kBouncePSSlot] == nullptr &&
+			srvs[kAOPSSlot] == nullptr &&
+			srvs[6] != nullptr;
+		if (tripleMatch) {
+			++_dumpTripleMatches;
+			_dumpMatchOrdinal = _dumpOrdinal;
+		}
+
+		winrt::com_ptr<ID3D11Resource> slot6Resource;
+		std::array<char, 256> slot6DebugName{};
+		if (srvs[6]) {
+			srvs[6]->GetResource(slot6Resource.put());
+			if (slot6Resource) {
+				UINT debugNameSize = static_cast<UINT>(slot6DebugName.size() - 1);
+				if (SUCCEEDED(slot6Resource->GetPrivateData(
+						WKPDID_D3DDebugObjectName,
+						&debugNameSize,
+						slot6DebugName.data()))) {
+					slot6DebugName[std::min<std::size_t>(
+						debugNameSize,
+						slot6DebugName.size() - 1)] = '\0';
+				}
+			}
+		}
+
+		L->info(
+			"SSGI anchor-dump draw {}: t: {} triple={} t0={:p} t6={:p} t13={:p} t6Resource={:p} t6Name=\"{}\" ambientMatch=n/a",
+			_dumpOrdinal,
+			slotMap.data(),
+			tripleMatch,
+			static_cast<const void*>(srvs[kBouncePSSlot]),
+			static_cast<const void*>(srvs[6]),
+			static_cast<const void*>(srvs[kAOPSSlot]),
+			static_cast<const void*>(slot6Resource.get()),
+			slot6DebugName.data());
+		++_dumpOrdinal;
+	}
+
+	void ScreenSpaceGI::OnAnchorDumpFrameEnd()
+	{
+		if (!_dumpArmed.load(std::memory_order_relaxed)) {
+			return;
+		}
+		L->info(
+			"SSGI anchor-dump FRAME END: {} primCount==2 DLI draws; {} matched the triple; matchOrdinal={} lastOrdinal={} matchIsLast={}",
+			_dumpOrdinal,
+			_dumpTripleMatches,
+			_dumpMatchOrdinal,
+			_dumpOrdinal - 1,
+			_dumpTripleMatches > 0 && _dumpMatchOrdinal == _dumpOrdinal - 1);
+		_dumpArmed.store(false, std::memory_order_relaxed);
+		++_dumpFramesLogged;
 	}
 
 	void ScreenSpaceGI::OnComputeResolve()

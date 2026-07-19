@@ -96,6 +96,9 @@ namespace cs::features
 
 		void SaveSettings();
 		void OnComputeResolve();
+		void OnAnchorDumpFrameBegin();
+		void OnAnchorDumpDraw();
+		void OnAnchorDumpFrameEnd();
 		bool EnsureResources();
 		void CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state);
 
@@ -132,5 +135,11 @@ namespace cs::features
 		bool _captureKeyDown = false;
 		int _snapshotCount = 0;
 		std::string _captureJson;
+		std::atomic_bool _dumpArmed{ false };
+		bool _dumpKeyDown = false;
+		int _dumpOrdinal = 0;
+		int _dumpFramesLogged = 0;
+		int _dumpTripleMatches = 0;
+		int _dumpMatchOrdinal = -1;
 	};
 }
