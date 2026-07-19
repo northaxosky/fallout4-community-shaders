@@ -171,6 +171,17 @@ target_link_libraries(ProjectionMathTests PRIVATE Microsoft::DirectXMath)
 add_test(NAME ProjectionMath COMMAND ProjectionMathTests)
 set_tests_properties(ProjectionMath PROPERTIES LABELS "render;unit")
 
+add_executable(ShaderCompileTests
+	tests/ShaderCompileTests.cpp
+	src/Utils/ShaderCompile.cpp
+	src/Utils/ShaderCompile.h
+)
+configure_host_test(ShaderCompileTests)
+target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
+
+add_test(NAME ShaderCompile COMMAND ShaderCompileTests "${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders")
+set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
+
 set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-shader-roundtrip.ps1")
 add_test(
 	NAME ShaderRoundtrip
