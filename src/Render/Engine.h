@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/ProjectionMath.h"
+
 #include <DirectXMath.h>
 #include <d3d11.h>
 
@@ -118,47 +120,21 @@ namespace cs::engine
 		// NiCamera::viewFrustum (+0x160) retains the world/far projection after the near/first-person (~41deg) pass clobbers camViewData.projMat; decode needs this view-space basis.
 		const auto& frustum = sceneCamera->viewFrustum;
 		const auto& [left, right, top, bottom, nearPlane, farPlane, ortho] = frustum;
-		if (ortho ||
-			!std::isfinite(left) ||
-			!std::isfinite(right) ||
-			!std::isfinite(top) ||
-			!std::isfinite(bottom) ||
-			!std::isfinite(nearPlane) ||
-			!std::isfinite(farPlane) ||
-			nearPlane <= 0.0f ||
-			farPlane <= nearPlane ||
-			left >= right ||
-			bottom >= top) {
+		if (ortho) {
 			return false;
 		}
 
-		const auto proj = DirectX::XMMatrixPerspectiveOffCenterLH(
-			nearPlane * left,
-			nearPlane * right,
-			nearPlane * bottom,
-			nearPlane * top,
+		return cs::engine::BuildPerspectiveFromFrustum(
+			left,
+			right,
+			top,
+			bottom,
 			nearPlane,
-			farPlane);
-		const auto invProj = DirectX::XMMatrixInverse(nullptr, proj);
-
-		const auto viewTopLeft = DirectX::XMVector4Transform(DirectX::XMVectorSet(-1.0f, 1.0f, 1.0f, 1.0f), invProj);
-		const auto viewBottomRight = DirectX::XMVector4Transform(DirectX::XMVectorSet(1.0f, -1.0f, 1.0f, 1.0f), invProj);
-		const float topLeftZ = DirectX::XMVectorGetZ(viewTopLeft);
-		const float bottomRightZ = DirectX::XMVectorGetZ(viewBottomRight);
-		if (topLeftZ == 0.0f || bottomRightZ == 0.0f) {
-			return false;
-		}
-
-		DirectX::XMFLOAT4 topLeft;
-		DirectX::XMFLOAT4 bottomRight;
-		DirectX::XMStoreFloat4(&topLeft, DirectX::XMVectorScale(viewTopLeft, 1.0f / topLeftZ));
-		DirectX::XMStoreFloat4(&bottomRight, DirectX::XMVectorScale(viewBottomRight, 1.0f / bottomRightZ));
-
-		DirectX::XMStoreFloat4x4(&a_outProj, proj);
-		DirectX::XMStoreFloat4x4(&a_outInvProj, invProj);
-		a_outNdcToViewMul = { bottomRight.x - topLeft.x, bottomRight.y - topLeft.y, 0.0f, 0.0f };
-		a_outNdcToViewAdd = { topLeft.x, topLeft.y, 0.0f, 0.0f };
-		return true;
+			farPlane,
+			a_outProj,
+			a_outInvProj,
+			a_outNdcToViewMul,
+			a_outNdcToViewAdd);
 	}
 
 	// Dynres offsets from Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812 account for missing OG padding; CommonLibF4's unified layout is wrong for OG and isActivated, so use these accessors.
