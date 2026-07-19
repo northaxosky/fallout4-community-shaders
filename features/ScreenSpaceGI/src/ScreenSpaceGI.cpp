@@ -1590,10 +1590,36 @@ namespace cs::features
 		}
 		_kssaoNotReadyLogged = false;
 
-		auto& targetEntry = rendererData->renderTargets[static_cast<uint>(target)];
+		// The SAO-Final family (45/46/47) is triple-buffered and the buffer the ambient
+		// composite samples can rotate per frame, so honor kssao_probe_all_final by writing
+		// all three; otherwise write the single configured target.
+		if (_settings.kssaoProbeAllFinal) {
+			for (const auto rt : {
+					 cs::engine::RenderTarget::kSSAOFinal,
+					 cs::engine::RenderTarget::kSSAOFinalSwap,
+					 cs::engine::RenderTarget::kSSAOFinalSwap2 }) {
+				OverwriteRt(rt);
+			}
+		} else {
+			OverwriteRt(target);
+		}
+	}
+
+	void ScreenSpaceGI::OverwriteRt(cs::engine::RenderTarget a_target)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		auto& targetEntry = rendererData->renderTargets[static_cast<uint>(a_target)];
 		auto* targetTexture = reinterpret_cast<ID3D11Texture2D*>(targetEntry.texture);
-		auto* targetUAV = cs::engine::GetRenderTargetUAV(target);
-		auto* targetSRV = cs::engine::GetRenderTargetSRV(target);
+		auto* targetUAV = cs::engine::GetRenderTargetUAV(a_target);
+		auto* targetSRV = cs::engine::GetRenderTargetSRV(a_target);
 		auto* rtm = cs::engine::GetRenderTargetManager();
 		if (!targetTexture || !targetUAV || !targetSRV || !rtm || !_kssaoOverwriteCB) {
 			return;
@@ -1823,6 +1849,8 @@ namespace cs::features
 			bool mappedStaging = true;
 			try {
 				double luminanceSum = 0.0;
+				std::vector<float> luminances;
+				luminances.reserve(static_cast<std::size_t>(sampleW) * sampleH);
 				for (std::uint32_t y = 0; y < sampleH; ++y) {
 					const auto* row = static_cast<const std::uint8_t*>(mapped.pData) +
 						static_cast<std::size_t>(y) * mapped.RowPitch;
@@ -1832,6 +1860,7 @@ namespace cs::features
 							throw std::runtime_error("framebuffer luminance decode failed");
 						}
 						luminanceSum += static_cast<double>(luminance);
+						luminances.push_back(luminance);
 					}
 				}
 				context->Unmap(_kssaoLumaStaging.get(), 0);
@@ -1839,14 +1868,23 @@ namespace cs::features
 
 				const double luminanceMean =
 					luminanceSum / static_cast<double>(sampleW * sampleH);
+				// 10th-percentile luma: the shadowed/ambient-dominated tail moves most when
+				// the ambient AO term is zeroed, so it is a more sensitive probe signal than
+				// the mean over a bright exterior.
+				std::sort(luminances.begin(), luminances.end());
+				const std::size_t p10Index =
+					static_cast<std::size_t>(0.1 * static_cast<double>(luminances.size() - 1));
+				const float luminanceP10 = luminances[p10Index];
 				L->info(
-					"SSGI kSSAO-probe: enabled=1 mode={} rt={} allFinal={} anchor={} value={:.3f} lumaMean={:.6f}",
+					"SSGI kSSAO-probe: enabled=1 mode={} rt={} allFinal={} anchor={} value={:.3f} lumaMean={:.6f} lumaP10={:.6f} frame={}",
 					_settings.kssaoProbeMode,
 					_settings.kssaoProbeRt,
 					_settings.kssaoProbeAllFinal ? 1 : 0,
 					_settings.kssaoProbeAnchor,
 					_settings.kssaoProbeValue,
-					luminanceMean);
+					luminanceMean,
+					luminanceP10,
+					_kssaoReadbackFrame);
 			} catch (...) {
 				if (mappedStaging) {
 					context->Unmap(_kssaoLumaStaging.get(), 0);

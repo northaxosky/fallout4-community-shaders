@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "Render/Engine.h"
 #include "Utils/CSBuffer.h"
 
 #include <DirectXMath.h>
@@ -126,6 +127,8 @@ namespace cs::features
 		static void PixelShaderBindTrampoline(ID3D11PixelShader* a_bound);
 		bool EnsureResources();
 		void CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state);
+		// Writes our AO into one engine SAO render target; OnKssaoOverwrite loops it over the SAO-Final family when kssao_probe_all_final is set.
+		void OverwriteRt(cs::engine::RenderTarget a_target);
 
 		static constexpr std::uint32_t kBouncePSSlot = 0;
 		static constexpr std::uint32_t kAOPSSlot = 13;
