@@ -51,6 +51,7 @@ add_subdirectory(${COMMONLIBF4_SHIM_DIR} CommonLibF4 EXCLUDE_FROM_ALL)
 find_package(directxtk CONFIG REQUIRED)
 find_package(directxtex CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
+find_package(directxmath CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
@@ -159,6 +160,16 @@ target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
 
 add_test(NAME LogThrottle COMMAND LogThrottleTests)
 set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
+
+add_executable(ProjectionMathTests
+	tests/ProjectionMathTests.cpp
+	src/Render/ProjectionMath.h
+)
+configure_host_test(ProjectionMathTests)
+target_link_libraries(ProjectionMathTests PRIVATE Microsoft::DirectXMath)
+
+add_test(NAME ProjectionMath COMMAND ProjectionMathTests)
+set_tests_properties(ProjectionMath PROPERTIES LABELS "render;unit")
 
 set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-shader-roundtrip.ps1")
 add_test(
