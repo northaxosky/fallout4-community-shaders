@@ -8,7 +8,9 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 #include <winrt/base.h>
@@ -102,6 +104,9 @@ namespace cs::features
 		void OnAnchorDumpFrameEnd();
 		void OnPreSunLightDraw();
 		void OnPostDeferredLights();
+		// Dev diagnostic: brokered PSSetShader bind-trace. Logs each distinct bound-PS sha + DLI phase during the armed dump window to locate the ambient/IBL draw.
+		void OnPixelShaderBind(ID3D11PixelShader* a_bound);
+		static void PixelShaderBindTrampoline(ID3D11PixelShader* a_bound);
 		bool EnsureResources();
 		void CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state);
 
@@ -146,5 +151,9 @@ namespace cs::features
 		int _dumpTripleMatches = 0;
 		int _dumpMatchOrdinal = -1;
 		int _dumpIdentityMatches = 0;
+		std::atomic_bool _insideDLI{ false };
+		std::atomic_bool _bindTraceArmed{ false };
+		std::mutex _bindTraceMutex;
+		std::unordered_set<std::string> _bindTraceSeen;
 	};
 }

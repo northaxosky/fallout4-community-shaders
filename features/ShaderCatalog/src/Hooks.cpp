@@ -31,6 +31,9 @@ namespace cs::features::catalog::hooks
 		// Published once (release) from OnD3D11Ready; hot path acquire-loads it, publishing compiled replacements to shader-creation threads.
 		std::atomic<ShaderCatalog::PixelShaderSwapCallback> g_psSwapCallback{ nullptr };
 
+		// Optional dev diagnostic: invoked for every PSSetShader bind with the bound shader (may be null).
+		std::atomic<ShaderCatalog::PixelShaderBindObserver> g_psBindObserver{ nullptr };
+
 		// Hot path for every stage: SHA1, stack capture, enqueue; cost is mostly bytecode hashing.
 		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len) noexcept
 		{
@@ -119,6 +122,18 @@ namespace cs::features::catalog::hooks
 	{
 		func(a_this, a_shader, a_classInstances, a_numClassInstances);
 
+		// Dev diagnostic: observe every bind (including context-less fullscreen composites) before the subclass-attribution gate.
+		// Contained: the observer must never unwind this render hook (that would skip attribution/ClearSticky and propagate across the C ABI into the engine).
+		if (a_shader) {
+			if (const auto obs = g_psBindObserver.load(std::memory_order_acquire)) {
+				try {
+					obs(a_shader);
+				} catch (...) {
+					// A diagnostic failure (e.g. bad_alloc) is swallowed; a dropped trace entry must not break rendering.
+				}
+			}
+		}
+
 		const auto ctx = context::CurrentOrSticky();
 		if (!ctx.active || !ctx.subclass_name)
 			return;
@@ -192,6 +207,11 @@ namespace cs::features::catalog::hooks
 	void SetPixelShaderSwapCallback(ShaderCatalog::PixelShaderSwapCallback a_cb) noexcept
 	{
 		g_psSwapCallback.store(a_cb, std::memory_order_release);
+	}
+
+	void SetPixelShaderBindObserver(ShaderCatalog::PixelShaderBindObserver a_cb) noexcept
+	{
+		g_psBindObserver.store(a_cb, std::memory_order_release);
 	}
 
 	RuntimeAttributionStats GetRuntimeAttributionStats()

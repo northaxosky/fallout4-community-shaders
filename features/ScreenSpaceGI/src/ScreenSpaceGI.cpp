@@ -372,6 +372,9 @@ namespace cs::features
 			cs::engine::RegisterPostDeferredLightsImpl([] {
 				ScreenSpaceGI::GetSingleton()->OnAnchorDumpFrameEnd();
 			});
+			if (auto* catalog = ShaderCatalog::GetSingleton()) {
+				catalog->RegisterPixelShaderBindObserver(&ScreenSpaceGI::PixelShaderBindTrampoline);
+			}
 		}
 		_started.store(true, std::memory_order_release);
 		L->info("Registered post-deferred-prepass callback (enabled={}).", _settings.enabled);
@@ -911,6 +914,7 @@ namespace cs::features
 	void ScreenSpaceGI::OnAnchorDumpFrameBegin()
 	{
 		_dumpArmed.store(false, std::memory_order_relaxed);
+		_bindTraceArmed.store(false, std::memory_order_relaxed);
 
 		const bool nowDown = (GetAsyncKeyState(_capture.hotkey) & 0x8000) != 0;
 		const bool dumpPressed = nowDown && !_dumpKeyDown;
@@ -924,6 +928,12 @@ namespace cs::features
 		_dumpTripleMatches = 0;
 		_dumpMatchOrdinal = -1;
 		_dumpIdentityMatches = 0;
+		{
+			std::scoped_lock lk(_bindTraceMutex);
+			_bindTraceSeen.clear();
+		}
+		_insideDLI.store(true, std::memory_order_relaxed);
+		_bindTraceArmed.store(true, std::memory_order_relaxed);
 		_dumpArmed.store(true, std::memory_order_relaxed);
 		auto* state = cs::engine::GetGraphicsState();
 		const auto frame = state ? static_cast<std::uint32_t>(state->frameCount) : 0u;
@@ -1018,7 +1028,35 @@ namespace cs::features
 			_dumpTripleMatches > 0 && _dumpMatchOrdinal == _dumpOrdinal - 1,
 			_dumpIdentityMatches);
 		_dumpArmed.store(false, std::memory_order_relaxed);
+		_insideDLI.store(false, std::memory_order_relaxed);
 		++_dumpFramesLogged;
+	}
+
+	void ScreenSpaceGI::PixelShaderBindTrampoline(ID3D11PixelShader* a_bound)
+	{
+		if (auto* self = GetSingleton())
+			self->OnPixelShaderBind(a_bound);
+	}
+
+	// Dev diagnostic: during the armed dump window, log each distinct bound-PS sha + DLI phase to locate the fullscreen ambient/IBL draw the primCount==2 anchor cannot see.
+	void ScreenSpaceGI::OnPixelShaderBind(ID3D11PixelShader* a_bound)
+	{
+		if (!_bindTraceArmed.load(std::memory_order_relaxed) || !a_bound)
+			return;
+		auto* catalog = ShaderCatalog::GetSingleton();
+		if (!catalog)
+			return;
+		const std::string sha = catalog->GetShaForPixelShader(a_bound);
+		if (sha.empty())
+			return;
+		const bool insideDLI = _insideDLI.load(std::memory_order_relaxed);
+		{
+			std::scoped_lock lk(_bindTraceMutex);
+			if (!_bindTraceSeen.insert(insideDLI ? sha + "#dli" : sha).second)
+				return;
+		}
+		L->info("SSGI bind-trace: sha={} insideDLI={} ptr={:p}",
+			sha, insideDLI, static_cast<const void*>(a_bound));
 	}
 
 	void ScreenSpaceGI::OnComputeResolve()

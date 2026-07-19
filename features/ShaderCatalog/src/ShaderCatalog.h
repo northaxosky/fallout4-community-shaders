@@ -39,6 +39,10 @@ namespace cs::features
 			const catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out);
 		void RegisterPixelShaderSwapCallback(PixelShaderSwapCallback a_cb) noexcept;
 
+		// Optional observer invoked for every PSSetShader bind (render thread, before subclass attribution) with the bound shader. Dev-only diagnostic; must be null-safe and non-throwing.
+		using PixelShaderBindObserver = void (*)(ID3D11PixelShader* a_bound);
+		void RegisterPixelShaderBindObserver(PixelShaderBindObserver a_cb) noexcept;
+
 		struct Settings
 		{
 			bool        enabled = false;

@@ -296,6 +296,11 @@ namespace cs::features
 		catalog::hooks::SetPixelShaderSwapCallback(a_cb);
 	}
 
+	void ShaderCatalog::RegisterPixelShaderBindObserver(PixelShaderBindObserver a_cb) noexcept
+	{
+		catalog::hooks::SetPixelShaderBindObserver(a_cb);
+	}
+
 	std::string ShaderCatalog::GetShaForPixelShader(ID3D11PixelShader* a_shader) const noexcept
 	{
 		catalog::Sha1Result sha{};

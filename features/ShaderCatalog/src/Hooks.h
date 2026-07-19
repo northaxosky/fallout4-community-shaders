@@ -96,6 +96,9 @@ namespace cs::features::catalog::hooks
 	// Sets the optional pixel-shader swap callback the CreatePixelShader hook offers each shader.
 	void SetPixelShaderSwapCallback(ShaderCatalog::PixelShaderSwapCallback a_cb) noexcept;
 
+	// Sets the optional pixel-shader bind observer the PSSetShader hook invokes for every bind on the tracked context.
+	void SetPixelShaderBindObserver(ShaderCatalog::PixelShaderBindObserver a_cb) noexcept;
+
 	struct RuntimeAttributionStats
 	{
 		bool psSetShaderHookInstalled = false;
