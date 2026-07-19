@@ -1,0 +1,19 @@
+#pragma once
+
+#include <d3dcommon.h>
+#include <wrl/client.h>
+
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace cs::util
+{
+	// Device-free shader compilation with runtime include resolution.
+	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
+		const wchar_t* a_filePath,
+		const std::vector<std::pair<const char*, const char*>>& a_defines,
+		const char* a_programType,
+		const char* a_program,
+		std::string* a_outError = nullptr);
+}
