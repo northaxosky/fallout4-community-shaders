@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Settings/FeatureConfig.h"
 
 #include <algorithm>
 #include <array>
@@ -24,7 +25,6 @@ namespace
 
 	constexpr std::string_view kPresetsRoot      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
 	constexpr std::string_view kPresetsBuiltin   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets\\Builtin";
-	constexpr std::string_view kGlobalConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
 	constexpr std::string_view kBootMarker       = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.cs_force_preset";
 
 	class FeatureCallbackPassGuard
@@ -614,13 +614,7 @@ namespace cs
 		activeName.clear();
 		autoLoadOnBoot = false;
 
-		toml::table table;
-		try {
-			table = toml::parse_file(kGlobalConfigPath);
-		} catch (const toml::parse_error&) {
-			return;
-		}
-
+		const auto table = cs::feature_config::GetMergedRoot();
 		const auto* presetTbl = table["preset"].as_table();
 		if (!presetTbl) return;
 
@@ -632,34 +626,15 @@ namespace cs
 
 	bool PresetManager::SaveCoreConfig()
 	{
-		// Parse-merge-write preserves Feature.cpp-owned siblings; parse failure leaves the file untouched.
-		toml::table table;
-		const bool fileExists = std::filesystem::exists(kGlobalConfigPath);
-		if (fileExists) {
-			try {
-				table = toml::parse_file(kGlobalConfigPath);
-			} catch (const toml::parse_error& e) {
-				L->warn("SaveCoreConfig: skipping write; failed to parse {} ({}). The [preset] block is not persisted this call.",
-					kGlobalConfigPath, e.description());
-				return false;
-			}
-		}
-
-		if (!table["preset"].as_table()) {
-			table.insert_or_assign("preset", toml::table{});
-		}
-		auto& p = *table["preset"].as_table();
+		toml::table p;
 		p.insert_or_assign("active",            activeIdentity);
 		p.insert_or_assign("auto_load_on_boot", autoLoadOnBoot);
 
-		std::error_code ec;
-		std::filesystem::create_directories(std::filesystem::path(kGlobalConfigPath).parent_path(), ec);
-
-		std::filesystem::path outPath{ kGlobalConfigPath };
-		std::ofstream         out(outPath);
-		if (!out) return false;
-		out << table;
-		return out.good();
+		const auto result = cs::feature_config::UpdateTopLevelSection("preset", p);
+		if (!result) {
+			L->warn("SaveCoreConfig failed: {}", result.error);
+		}
+		return result.success;
 	}
 
 	void PresetManager::ResolveAndApplyBootPreset()
@@ -715,7 +690,7 @@ namespace cs
 					L->warn("auto-load preset '{}' apply failed: {}", meta->name, err);
 				}
 			} else {
-				L->warn("auto-load preset '{}' not found; per-feature TOML settings remain in effect",
+				L->warn("auto-load preset '{}' not found; unified TOML settings remain in effect",
 					activeName.empty() ? activeIdentity : activeName);
 			}
 		}

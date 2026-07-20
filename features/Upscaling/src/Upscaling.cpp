@@ -6,7 +6,6 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <fstream>
 
 #include "Utils/CSUtil.h"
 #include "DX11Hooks.h"
@@ -23,8 +22,6 @@ namespace cs::features
 {
 	using namespace upscaling;
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling"); }
-
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Upscaling.toml";
 
 	// Engine RT-pool slots rescaled/copied for dynamic-resolution upscaling.
 	constexpr uint renderTargetsPatch[] = { 20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16 };
@@ -510,16 +507,24 @@ struct SamplerStates
 
 void Upscaling::LoadSettings()
 {
-	auto loadResult = feature_config::LoadFile(kConfigPath);
-	if (loadResult.status != feature_config::FileLoadStatus::kParsed) {
-		L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, loadResult.error);
+	const auto reload = feature_config::Reload();
+	if (!reload.defaultLoaded) {
+		L->warn("Failed to reload unified configuration: {}; keeping current settings", reload.defaultError);
+		return;
+	}
+	if (!reload.userWarning.empty()) {
+		L->warn("Ignoring unified user configuration during reload: {}", reload.userWarning);
+	}
+	const auto config = feature_config::GetFeature(GetConfigKey());
+	if (!config) {
+		L->warn("Unified configuration has no {} feature; keeping current settings", GetConfigKey());
 		return;
 	}
 
 	auto candidate = settings;
 	std::string error;
-	if (!ParseSettingsTable(loadResult.table, candidate, error)) {
-		L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, error);
+	if (!ParseSettingsTable(*config, candidate, error)) {
+		L->warn("Failed to reload settings: {}; keeping current settings", error);
 		return;
 	}
 
@@ -544,15 +549,7 @@ bool Upscaling::Configure(const toml::table& a_config, std::string& a_error)
 
 void Upscaling::SaveSettings()
 {
-	toml::table table;
-	try {
-		table = toml::parse_file(kConfigPath);
-	} catch (const toml::parse_error& e) {
-		L->warn("Overwriting unparseable {}: {}", kConfigPath, e.description());
-		table = toml::table{};
-	}
-
-	auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+	toml::table settingsTable;
 	settingsTable.insert_or_assign("upscale_method_preference", static_cast<int64_t>(settings.upscaleMethodPreference));
 	settingsTable.insert_or_assign("quality_mode", static_cast<int64_t>(settings.qualityMode));
 	settingsTable.insert_or_assign("sharpness_fsr", static_cast<double>(settings.sharpnessFSR));
@@ -560,9 +557,8 @@ void Upscaling::SaveSettings()
 	settingsTable.insert_or_assign("reactive_scale", static_cast<double>(settings.reactiveScale));
 	settingsTable.insert_or_assign("transparency_scale", static_cast<double>(settings.transparencyScale));
 
-	std::ofstream out(kConfigPath);
-	if (out) {
-		out << table;
+	if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settingsTable); !result) {
+		L->error("Failed to save settings: {}", result.error);
 	}
 }
 

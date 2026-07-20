@@ -153,13 +153,14 @@ namespace
 		const auto& state = a_feature.GetState();
 		const auto detail = std::string_view(state.detail).substr(0, 512);
 		if (!state.installed) {
-			ImGui::TextDisabled("Not installed (no configuration file present).");
+			ImGui::TextDisabled("Not installed (missing from unified configuration).");
 			return;
 		}
 		switch (state.runtimeState) {
 		case cs::FeatureRuntimeState::kInactive:
 			if (detail.empty())
-				ImGui::TextDisabled("Not loaded. Set [feature].load = true in the feature's .toml and restart.");
+				ImGui::TextDisabled("Not loaded. Set [features.%s].load = true and restart.",
+					a_feature.GetConfigKey().c_str());
 			else
 				ImGui::TextDisabled("Disabled: %.*s", static_cast<int>(detail.size()), detail.data());
 			break;

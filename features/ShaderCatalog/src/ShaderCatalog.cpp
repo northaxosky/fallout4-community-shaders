@@ -28,8 +28,6 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.shadercatalog"); }
 
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderCatalog.toml";
-
 	namespace
 	{
 		struct RuntimeVersion
@@ -229,25 +227,14 @@ namespace cs::features
 
 	void ShaderCatalog::SaveSettings()
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
-
-		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		toml::table settings;
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("writer_flush_interval_ms", static_cast<int64_t>(_settings.writerFlushIntervalMs));
 		settings.insert_or_assign("catalog_path", _settings.catalogPath);
 		settings.insert_or_assign("subclass_attribution", _settings.subclassAttribution);
 
-		std::error_code ec;
-		std::filesystem::create_directories(
-			std::filesystem::path(kConfigPath).parent_path(), ec);
-		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
+		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
 	}
 

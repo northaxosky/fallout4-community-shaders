@@ -5,8 +5,6 @@
 
 #include <algorithm>
 #include <cfloat>
-#include <filesystem>
-#include <fstream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -30,7 +28,6 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenspacegi");
 
-		constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI.toml";
 		constexpr const wchar_t* kResolvePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\ResolveCS.hlsl";
 		constexpr const wchar_t* kDecodePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\decode.cs.hlsl";
 		constexpr const wchar_t* kPrefilterPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\prefilterDepths.cs.hlsl";
@@ -237,14 +234,7 @@ namespace cs::features
 
 	void ScreenSpaceGI::SaveSettings()
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
-
-		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		toml::table settings;
 		settings.insert_or_assign("denoise_enabled", _settings.denoiseEnabled);
 		settings.insert_or_assign("denoise_radius", _settings.denoiseRadius);
 		settings.insert_or_assign("effect_radius", _settings.effectRadius);
@@ -257,11 +247,8 @@ namespace cs::features
 		settings.insert_or_assign("mode", _settings.mode);
 		settings.insert_or_assign("noise_frozen", _settings.noiseFrozen);
 
-		std::error_code ec;
-		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
-		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
+		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
 	}
 

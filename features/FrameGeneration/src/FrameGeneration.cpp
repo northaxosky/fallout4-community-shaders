@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <fstream>
 
 #include "DX12SwapChain.h"
 #include "Utils/CSUtil.h"
@@ -30,8 +29,6 @@ namespace cs::features
 	using cs::engine::RenderTarget;
 	using cs::engine::DepthStencilTarget;
 	namespace { auto* L = cs::log::Get("cs.feature.framegeneration"); }
-
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FrameGeneration.toml";
 
 	namespace
 	{
@@ -152,14 +149,7 @@ bool FrameGeneration::Configure(const toml::table& a_config, std::string& a_erro
 
 void FrameGeneration::SaveSettings()
 {
-	toml::table table;
-	try {
-		table = toml::parse_file(kConfigPath);
-	} catch (const toml::parse_error&) {
-		table = toml::table{};
-	}
-
-	auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+	toml::table settingsTable;
 	settingsTable.insert_or_assign("frame_generation_mode", settings.frameGenerationMode);
 	settingsTable.insert_or_assign("frame_limit_mode", settings.frameLimitMode);
 	settingsTable.insert_or_assign("disable_in_menus", settings.disableInMenus);
@@ -167,9 +157,8 @@ void FrameGeneration::SaveSettings()
 	settingsTable.insert_or_assign("frame_gen_type", static_cast<int64_t>(settings.frameGenType));
 	settingsTable.insert_or_assign("frame_gen_frames", static_cast<int64_t>(settings.frameGenFrames));
 
-	std::ofstream out(kConfigPath);
-	if (out) {
-		out << table;
+	if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settingsTable); !result) {
+		L->error("Failed to save settings: {}", result.error);
 	}
 }
 

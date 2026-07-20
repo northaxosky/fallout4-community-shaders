@@ -27,6 +27,7 @@ namespace cs
 		virtual ~Feature() = default;
 
 		virtual std::string_view GetName() const = 0;
+		virtual std::string GetConfigKey() const { return std::string(GetName()); }
 		spdlog::logger* Log() const;
 		virtual std::vector<FeatureRequirement> GetRequirements() const { return {}; }
 		virtual bool HasCapability(FeatureCapability /*a_capability*/) const noexcept { return false; }

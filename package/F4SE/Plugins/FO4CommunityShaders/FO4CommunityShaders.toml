@@ -1,0 +1,125 @@
+[info]
+schema_version = 1
+
+[logging]
+level = "info"
+telemetry = false
+telemetry_interval_frames = 60
+dump_hotkey = "Ctrl+F12"
+
+[logging.channels]
+
+[preset]
+active = ""
+auto_load_on_boot = false
+
+[features.ScreenSpaceGI]
+load = false
+
+[features.ScreenSpaceGI.settings]
+# Master kill-switch. Ships disabled pending rollout.
+enabled = false
+
+# XeGTAO quality.
+num_slices = 4
+num_steps = 16
+effect_radius = 256.0
+ao_power = 2.5
+
+# Denoise.
+denoise_enabled = true
+denoise_radius = 2.0
+
+# Distance fade (game units).
+depth_fade_start = 40000.0
+depth_fade_end = 50000.0
+
+# AO integration mode: 1 = replace engine AO, 2 = min-blend with engine AO.
+mode = 2
+
+# Frozen blue-noise sequence for stable, flicker-free AO.
+noise_frozen = true
+
+# AO is integrated into engine render-target index 25. That index is confirmed only on
+# AE 1.11.221; OG 1.10.163 and NG 1.10.984 layouts must be validated before rollout.
+
+[features.ScreenSpaceShadows]
+load = false
+
+[features.ScreenSpaceShadows.settings]
+
+[features.Imagespace]
+load = false
+
+[features.Imagespace.settings]
+
+[features.Upscaling]
+load = false
+
+[features.Upscaling.settings]
+
+[features.FrameGeneration]
+load = false
+
+[features.FrameGeneration.settings]
+
+[features.MotionVectorFixes]
+load = false
+
+[features.PerformanceOverlay]
+load = false
+
+[features.PerformanceOverlay.settings]
+# In-game overlay toggle chord (e.g. "F10", "Shift+F11", "Ctrl+F9"); "none" unbinds it.
+toggle_hotkey = "F10"
+
+[features.RenderDoc]
+load = false
+
+[features.RenderDoc.settings]
+# Capture output folder. Default (unset): <Documents>\My Games\Fallout4\F4SE\FO4CommunityShaders\captures
+# (beside the F4SE log, outside the MO2 virtual file system). Environment variables are expanded.
+# capture_folder = "%USERPROFILE%\\Documents\\My Games\\Fallout4\\F4SE\\FO4CommunityShaders\\captures"
+# Single-frame capture chord; "none" unbinds it.
+capture_hotkey = "F11"
+# Multi-frame capture chord; takes precedence if identical to capture_hotkey.
+multi_capture_hotkey = "Shift+F11"
+
+[features.ShaderCatalog]
+load = false
+
+[features.ShaderCatalog.settings]
+# Master toggle. Ships off in v1; user opts in via the in-game settings menu.
+enabled = false
+
+# Writer thread flush cadence. Lower = more responsive UI counter, higher = less
+# SQLite work. 5000ms is a good default.
+writer_flush_interval_ms = 5000
+
+# Where to write the catalog file. Path is relative to the FO4 install dir.
+catalog_path = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\shader-catalog.sqlite"
+
+# BSShader subclass technique attribution (enriches PS rows with subclass/technique names).
+# Auto-skipped on runtimes with an unverified BSShader layout (e.g. next-gen 1.11.x) to avoid a
+# crash; the device swap broker and catalog stay fully functional when it's skipped.
+subclass_attribution = true
+
+[features.ShaderReplacement]
+load = false
+
+[features.ShaderReplacement.settings]
+# Master kill-switch. Ships off; dev opt-in only.
+enabled = false
+
+# Manifest + HLSL root paths (relative to FO4 install dir).
+manifest_path = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderReplacement.json"
+shaders_root = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders"
+
+# Per-shader toggles (all default off).
+replace_ambient_ibl_pass = false
+replace_bsdf_light_deferred_directional = false
+replace_bsdf_light_deferred_directional_ibl = false
+replace_bsdf_light_deferred_point = false
+replace_deferred_composite = false
+replace_deferred_prepass = false
+replace_vls_slice_scatter = false

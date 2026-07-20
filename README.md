@@ -45,22 +45,23 @@ fully validated in game.
 
 ## Feature activation
 
-Every feature is opt-in. Its root TOML must contain:
+Every feature is opt-in. Add its exact key to
+`Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml`:
 
 ```toml
-[feature]
+[features.Imagespace]
 load = true
 ```
 
-Activation is evaluated once during startup. Edit the feature file under
-`Data\F4SE\Plugins\FO4CommunityShaders\`, then restart the game. The in-game menu shows
-each registered feature's requested and runtime state, but does not load or unload
-features dynamically.
+Activation is evaluated once during startup. The shipped `FO4CommunityShaders.toml`
+contains documented defaults and is never modified by the plugin. User and in-game changes
+are written atomically to `FO4CommunityShaders.User.toml`. Restart the game after changing
+activation. The in-game menu shows each registered feature's requested and runtime state,
+but does not load or unload features dynamically.
 
-A feature loads only when `[feature].load = true`. Empty or information-only files are
-inactive, malformed files fail closed, and the plugin never rewrites feature activation
-during startup. Presets configure only features that were already activated; they cannot
-activate Imagespace or another feature.
+A feature loads only when its `[features.<Name>].load` value is true. A malformed Default
+file disables all features; a malformed User file is ignored. Presets configure only
+features that were already activated; they cannot activate Imagespace or another feature.
 
 ## Controls
 
@@ -71,7 +72,7 @@ activate Imagespace or another feature.
 | **F11** | Capture one frame when RenderDoc is enabled |
 | **Shift+F11** | Capture multiple frames when RenderDoc is enabled |
 
-Each feature hotkey is configurable in its TOML: `toggle_hotkey` for the overlay,
+Feature hotkeys are configurable in the unified TOML: `toggle_hotkey` for the overlay,
 `capture_hotkey` and `multi_capture_hotkey` for RenderDoc. Set a key to `"none"` to unbind it.
 
 Feature configuration files are stored directly under

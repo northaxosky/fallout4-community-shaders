@@ -1,4 +1,5 @@
 #include "Settings/FeatureConfig.h"
+#include "Settings/FeatureKeys.h"
 
 #include <array>
 #include <cmath>
@@ -7,6 +8,7 @@
 #include <iostream>
 #include <optional>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -111,29 +113,122 @@ namespace
 	{
 		using cs::feature_config::ParseActivation;
 
-		const auto loadTrue = ParseActivation(Parse("[feature]\nload = true\n"));
+		const auto loadTrue = ParseActivation(Parse("load = true\n"));
 		CHECK(loadTrue.load);
 		CHECK(loadTrue.valid);
+		CHECK(loadTrue.present);
 
-		const auto loadFalse = ParseActivation(Parse("[feature]\nload = false\n"));
+		const auto loadFalse = ParseActivation(Parse("load = false\n"));
 		CHECK(!loadFalse.load);
 		CHECK(loadFalse.valid);
+		CHECK(loadFalse.present);
 
 		const auto missingFeature = ParseActivation(Parse(""));
 		CHECK(!missingFeature.load);
 		CHECK(missingFeature.valid);
+		CHECK(!missingFeature.present);
 
-		const auto missingKey = ParseActivation(Parse("[feature]\nmode = \"quality\"\n"));
+		const auto missingKey = ParseActivation(Parse("mode = \"quality\"\n"));
 		CHECK(!missingKey.load);
 		CHECK(missingKey.valid);
+		CHECK(!missingKey.present);
 
-		const auto wrongFeatureType = ParseActivation(Parse("feature = true\n"));
-		CHECK(!wrongFeatureType.load);
-		CHECK(!wrongFeatureType.valid);
-
-		const auto wrongLoadType = ParseActivation(Parse("[feature]\nload = \"yes\"\n"));
+		const auto wrongLoadType = ParseActivation(Parse("load = \"yes\"\n"));
 		CHECK(!wrongLoadType.load);
 		CHECK(!wrongLoadType.valid);
+		CHECK(wrongLoadType.present);
+	}
+
+	void TestDeepMerge()
+	{
+		auto base = Parse(
+			"[logging]\n"
+			"level = \"info\"\n"
+			"telemetry = false\n"
+			"[features.One]\n"
+			"load = false\n"
+			"[features.One.settings]\n"
+			"enabled = false\n"
+			"quality = 2\n"
+			"[features.Two]\n"
+			"load = false\n");
+		const auto user = Parse(
+			"[logging]\n"
+			"telemetry = true\n"
+			"[features.One.settings]\n"
+			"enabled = true\n");
+
+		cs::feature_config::DeepMerge(base, user);
+		CHECK(base["logging"]["level"].value<std::string>() == std::optional<std::string>{ "info" });
+		CHECK(base["logging"]["telemetry"].value<bool>() == std::optional<bool>{ true });
+		CHECK(base["features"]["One"]["load"].value<bool>() == std::optional<bool>{ false });
+		CHECK(base["features"]["One"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(base["features"]["One"]["settings"]["quality"].value<std::int64_t>() == std::optional<std::int64_t>{ 2 });
+		CHECK(base["features"]["Two"]["load"].value<bool>() == std::optional<bool>{ false });
+	}
+
+	void TestMergedLoadFailureModes(const std::filesystem::path& a_root)
+	{
+		const auto defaultPath = a_root / "Default.toml";
+		const auto userPath = a_root / "User.toml";
+
+		WriteFile(defaultPath, "[features.MotionVectorFixes]\nload = false\n");
+		WriteFile(userPath, "[features.MotionVectorFixes\nload = true\n");
+		const auto malformedUser = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		CHECK(malformedUser.defaultLoaded);
+		CHECK(!malformedUser.userLoaded);
+		CHECK(!malformedUser.userWarning.empty());
+		CHECK(malformedUser.root["features"]["MotionVectorFixes"]["load"].value<bool>() == std::optional<bool>{ false });
+
+		WriteFile(defaultPath, "[features.MotionVectorFixes\nload = false\n");
+		WriteFile(userPath, "[features.MotionVectorFixes]\nload = true\n");
+		const auto malformedDefault = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		CHECK(!malformedDefault.defaultLoaded);
+		CHECK(!malformedDefault.defaultError.empty());
+		CHECK(malformedDefault.root.empty());
+
+		WriteFile(defaultPath, "[features.MotionVectorFixes]\nload = false\n");
+		std::filesystem::remove(userPath);
+		const auto motionVectors = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		const auto* feature = motionVectors.root["features"]["MotionVectorFixes"].as_table();
+		CHECK(feature != nullptr);
+		CHECK(feature && !feature->contains("settings"));
+		const auto activation = feature ? cs::feature_config::ParseActivation(*feature) :
+			cs::feature_config::ActivationResult{};
+		CHECK(activation.valid && activation.present && !activation.load);
+	}
+
+	void TestAtomicWriteRoundTrip(const std::filesystem::path& a_root)
+	{
+		const auto userPath = a_root / "Atomic.User.toml";
+		WriteFile(
+			userPath,
+			"[logging]\n"
+			"level = \"debug\"\n"
+			"[features.One]\n"
+			"load = true\n"
+			"[features.One.settings]\n"
+			"enabled = false\n"
+			"[features.Two]\n"
+			"load = false\n");
+
+		const std::array path{
+			std::string_view("features"),
+			std::string_view("One"),
+			std::string_view("settings")
+		};
+		const auto result = cs::feature_config::UpdateUserTableAt(
+			userPath, path, Parse("enabled = true\nquality = 3\n"));
+		CHECK(result.success);
+		CHECK(result.error.empty());
+
+		const auto written = cs::feature_config::LoadFile(userPath);
+		CHECK(written.status == cs::feature_config::FileLoadStatus::kParsed);
+		CHECK(written.table["logging"]["level"].value<std::string>() == std::optional<std::string>{ "debug" });
+		CHECK(written.table["features"]["One"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(written.table["features"]["One"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(written.table["features"]["One"]["settings"]["quality"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
+		CHECK(written.table["features"]["Two"]["load"].value<bool>() == std::optional<bool>{ false });
 	}
 
 	void TestScalarReaders()
@@ -228,28 +323,34 @@ namespace
 		CHECK(text == "value");
 	}
 
-	void TestPackageSeeds(const std::filesystem::path& a_root)
+	void TestPackageSeed(const std::filesystem::path& a_path)
 	{
-		constexpr std::array<std::string_view, 9> seedNames{
-			"MotionVectorFixes.toml",
-			"Upscaling.toml",
-			"FrameGeneration.toml",
-			"Imagespace.toml",
-			"PerformanceOverlay.toml",
-			"RenderDoc.toml",
-			"ScreenSpaceShadows.toml",
-			"ShaderCatalog.toml",
-			"ShaderReplacement.toml"
-		};
+		const auto loadResult = cs::feature_config::LoadFile(a_path);
+		CHECK(loadResult.status == cs::feature_config::FileLoadStatus::kParsed);
+		CHECK(loadResult.error.empty());
 
-		for (const auto seedName : seedNames) {
-			const auto loadResult = cs::feature_config::LoadFile(a_root / seedName);
-			CHECK(loadResult.status == cs::feature_config::FileLoadStatus::kParsed);
-			CHECK(loadResult.error.empty());
-
-			const auto activation = cs::feature_config::ParseActivation(loadResult.table);
-			CHECK(activation.valid && !activation.load);
+		const auto* features = loadResult.table["features"].as_table();
+		CHECK(features != nullptr);
+		if (!features) {
+			return;
 		}
+
+		std::set<std::string> actual;
+		for (const auto& [key, node] : *features) {
+			actual.emplace(key.str());
+			const auto* feature = node.as_table();
+			CHECK(feature != nullptr);
+			if (feature) {
+				const auto activation = cs::feature_config::ParseActivation(*feature);
+				CHECK(activation.valid && activation.present && !activation.load);
+			}
+		}
+
+		std::set<std::string> expected;
+		for (const auto key : cs::feature_config::kAllFeatureKeys) {
+			expected.emplace(key);
+		}
+		CHECK(actual == expected);
 	}
 }
 
@@ -257,12 +358,15 @@ int main(int a_argc, char* a_argv[])
 {
 	try {
 		if (a_argc == 3 && std::string_view(a_argv[1]) == "--validate-seeds") {
-			TestPackageSeeds(a_argv[2]);
+			TestPackageSeed(a_argv[2]);
 		} else if (a_argc == 1) {
 			const auto executableDirectory = std::filesystem::absolute(a_argv[0]).parent_path();
 			const TestDirectory directory(executableDirectory);
 			TestFileLoading(directory.path);
 			TestActivationParsing();
+			TestDeepMerge();
+			TestMergedLoadFailureModes(directory.path);
+			TestAtomicWriteRoundTrip(directory.path);
 			TestScalarReaders();
 		} else {
 			throw std::runtime_error("Invalid arguments");

@@ -42,7 +42,6 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.imagespace"); }
 
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace.toml";
 	constexpr const char* kOpMarker      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_operator";
 	constexpr const char* kLutMarker     = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_lut";
 	constexpr const char* kAdaptMarker   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.imagespace_force_adaptive_exposure";
@@ -87,15 +86,23 @@ namespace cs::features
 
 	void Imagespace::LoadSettings()
 	{
-		auto loadResult = feature_config::LoadFile(kConfigPath);
-		if (loadResult.status != feature_config::FileLoadStatus::kParsed) {
-			L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, loadResult.error);
+		const auto reload = feature_config::Reload();
+		if (!reload.defaultLoaded) {
+			L->warn("Failed to reload unified configuration: {}; keeping current settings", reload.defaultError);
+			return;
+		}
+		if (!reload.userWarning.empty()) {
+			L->warn("Ignoring unified user configuration during reload: {}", reload.userWarning);
+		}
+		const auto config = feature_config::GetFeature(GetConfigKey());
+		if (!config) {
+			L->warn("Unified configuration has no {} feature; keeping current settings", GetConfigKey());
 			return;
 		}
 
 		std::string error;
-		if (!Configure(loadResult.table, error)) {
-			L->warn("Failed to load {}: {}; keeping current settings", kConfigPath, error);
+		if (!Configure(*config, error)) {
+			L->warn("Failed to reload settings: {}; keeping current settings", error);
 			return;
 		}
 
@@ -216,25 +223,13 @@ namespace cs::features
 		if (testModeActive)
 			return;
 
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
+		toml::table feature;
+		imagespace::EmitSettings(feature, settings);
+		imagespace::EmitWeather(feature, weatherProfiles, /*a_includeOverrides=*/true);
 
-		imagespace::EmitSettings(table, settings);
-		imagespace::EmitWeather(table, weatherProfiles, /*a_includeOverrides=*/true);
-
-		std::ofstream out(kConfigPath);
-		if (!out) {
-			L->error("Failed to open Imagespace config for write: {}", kConfigPath);
-			return;
+		if (const auto result = feature_config::UpdateFeature(GetConfigKey(), feature); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
-		out << table;
-		out.flush();
-		if (!out.good())
-			L->error("Failed to write Imagespace config: {}", kConfigPath);
 	}
 
 	bool Imagespace::StageFromPreset(const toml::table& a_subtable, const cs::PresetApplyContext& a_ctx, std::string& a_err)

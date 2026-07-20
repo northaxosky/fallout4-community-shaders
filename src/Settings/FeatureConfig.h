@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <limits>
+#include <span>
 #include <string>
 #include <string_view>
 
@@ -10,6 +11,11 @@
 
 namespace cs::feature_config
 {
+	inline constexpr char kDefaultConfigPath[] =
+		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
+	inline constexpr char kUserConfigPath[] =
+		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.User.toml";
+
 	enum class FileLoadStatus
 	{
 		kMissing,
@@ -26,6 +32,40 @@ namespace cs::feature_config
 	};
 
 	FileLoadResult LoadFile(const std::filesystem::path& a_path);
+
+	struct UnifiedLoadResult
+	{
+		toml::table root;
+		bool defaultLoaded{ false };
+		bool userLoaded{ false };
+		std::string defaultError;
+		std::string userWarning;
+	};
+
+	void DeepMerge(toml::table& a_base, const toml::table& a_override);
+	UnifiedLoadResult LoadMergedFiles(
+		const std::filesystem::path& a_defaultPath,
+		const std::filesystem::path& a_userPath);
+	UnifiedLoadResult Reload();
+	toml::table GetMergedRoot();
+	std::optional<toml::table> GetFeature(std::string_view a_key);
+
+	struct WriteResult
+	{
+		bool success{ false };
+		std::string error;
+
+		explicit operator bool() const noexcept { return success; }
+	};
+
+	WriteResult UpdateUserTableAt(
+		const std::filesystem::path& a_userPath,
+		std::span<const std::string_view> a_path,
+		const toml::table& a_value);
+	WriteResult UpdateFeatureSettings(std::string_view a_featureKey, const toml::table& a_settings);
+	WriteResult UpdateFeature(std::string_view a_featureKey, const toml::table& a_feature);
+	WriteResult UpdateFeatureLoad(std::string_view a_featureKey, bool a_load);
+	WriteResult UpdateTopLevelSection(std::string_view a_section, const toml::table& a_value);
 
 	enum class ScalarReadStatus
 	{
@@ -72,6 +112,7 @@ namespace cs::feature_config
 	{
 		bool load{ false };
 		bool valid{ true };
+		bool present{ false };
 	};
 
 	ActivationResult ParseActivation(const toml::table& a_table);

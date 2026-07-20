@@ -10,8 +10,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cfloat>
-#include <filesystem>
-#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -37,7 +35,6 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows");
 
-		constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.toml";
 		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
 
 		// FO4 uses standard non-linear depth, near=0/far=1.
@@ -125,25 +122,15 @@ namespace cs::features
 
 	void ScreenSpaceShadows::SaveSettings()
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
-
-		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		toml::table settings;
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("surface_thickness", _settings.surfaceThickness);
 		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
 		settings.insert_or_assign("max_shadow_length_percent", _settings.maxShadowLengthPercent);
 
-		std::error_code ec;
-		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
-		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
+		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
 	}
 

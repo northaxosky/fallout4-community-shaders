@@ -23,7 +23,6 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.performanceoverlay"); }
 
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\PerformanceOverlay.toml";
 	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };
 	constexpr const char* kPostFgFrameTimeTooltip =
 		"Backend-reported when available (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus accumulate into a per-tick counter). FSR3 falls back to engine frame time divided by the configured multiplier.";
@@ -218,66 +217,33 @@ namespace cs::features
 
 	void PerformanceOverlay::SaveSettings()
 	{
-		toml::table table;
-		try {
-			try {
-				table = toml::parse_file(kConfigPath);
-			} catch (const toml::parse_error& e) {
-				L->warn("Ignoring malformed PerformanceOverlay config while saving: {}", e.what());
-				table = toml::table{};
-			}
+		toml::table settingsTable;
+		settingsTable.insert_or_assign("enabled", settings.enabled);
+		settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
+		settingsTable.insert_or_assign("show_fps", settings.showFps);
+		settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
+		settingsTable.insert_or_assign("show_graph", settings.showGraph);
+		settingsTable.insert_or_assign("show_estimated_post_fg_frame_time", settings.showEstimatedPostFGFrameTime);
+		settingsTable.insert_or_assign("show_vram", settings.showVram);
+		settingsTable.insert_or_assign("show_stats", settings.showStats);
+		settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
+		settingsTable.insert_or_assign("free_drag", settings.freeDrag);
+		settingsTable.insert_or_assign("drag_pos_x", static_cast<double>(settings.dragPosX));
+		settingsTable.insert_or_assign("drag_pos_y", static_cast<double>(settings.dragPosY));
+		settingsTable.insert_or_assign("opacity", static_cast<double>(settings.opacity));
+		settingsTable.insert_or_assign("show_border", settings.showBorder);
+		settingsTable.insert_or_assign("font_scale", static_cast<double>(settings.fontScale));
+		settingsTable.insert_or_assign("high_contrast", settings.highContrast);
+		settingsTable.insert_or_assign("auto_thresholds", settings.autoThresholds);
+		settingsTable.insert_or_assign("fps_good", static_cast<double>(settings.fpsGood));
+		settingsTable.insert_or_assign("fps_warn", static_cast<double>(settings.fpsWarn));
+		settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
+		settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
+		settingsTable.insert_or_assign("graph_height_px", static_cast<double>(settings.graphHeightPx));
+		settingsTable.insert_or_assign("toggle_hotkey", settings.toggleHotkey);
 
-			auto& settingsTable = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-			settingsTable.insert_or_assign("enabled", settings.enabled);
-			settingsTable.insert_or_assign("preset", static_cast<int64_t>(settings.preset));
-
-			settingsTable.insert_or_assign("show_fps", settings.showFps);
-			settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
-			settingsTable.insert_or_assign("show_graph", settings.showGraph);
-			settingsTable.insert_or_assign("show_estimated_post_fg_frame_time", settings.showEstimatedPostFGFrameTime);
-			settingsTable.insert_or_assign("show_vram", settings.showVram);
-			settingsTable.insert_or_assign("show_stats", settings.showStats);
-
-			settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
-			settingsTable.insert_or_assign("free_drag", settings.freeDrag);
-			settingsTable.insert_or_assign("drag_pos_x", static_cast<double>(settings.dragPosX));
-			settingsTable.insert_or_assign("drag_pos_y", static_cast<double>(settings.dragPosY));
-
-			settingsTable.insert_or_assign("opacity", static_cast<double>(settings.opacity));
-			settingsTable.insert_or_assign("show_border", settings.showBorder);
-			settingsTable.insert_or_assign("font_scale", static_cast<double>(settings.fontScale));
-			settingsTable.insert_or_assign("high_contrast", settings.highContrast);
-
-			settingsTable.insert_or_assign("auto_thresholds", settings.autoThresholds);
-			settingsTable.insert_or_assign("fps_good", static_cast<double>(settings.fpsGood));
-			settingsTable.insert_or_assign("fps_warn", static_cast<double>(settings.fpsWarn));
-
-			settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
-			settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
-			settingsTable.insert_or_assign("graph_height_px", static_cast<double>(settings.graphHeightPx));
-			settingsTable.insert_or_assign("toggle_hotkey", settings.toggleHotkey);
-
-			const std::filesystem::path configPath(kConfigPath);
-			if (const auto parent = configPath.parent_path(); !parent.empty())
-				std::filesystem::create_directories(parent);
-
-			std::ofstream out(configPath, std::ios::out | std::ios::trunc);
-			if (!out) {
-				L->error("Failed to open PerformanceOverlay config for write: {}", kConfigPath);
-				return;
-			}
-			out << table;
-			out.flush();
-			if (!out.good()) {
-				L->error("Failed to write PerformanceOverlay config: {}", kConfigPath);
-				return;
-			}
-		} catch (const toml::parse_error& e) {
-			L->error("Failed to save PerformanceOverlay config after TOML error: {}", e.what());
-			return;
-		} catch (const std::filesystem::filesystem_error& e) {
-			L->error("Failed to save PerformanceOverlay config after filesystem error: {}", e.what());
-			return;
+		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settingsTable); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
 	}
 

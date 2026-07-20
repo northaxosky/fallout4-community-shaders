@@ -2,7 +2,6 @@
 
 #include "Env.h"
 #include "Log.h"
-#include "Plugin.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 
@@ -11,29 +10,20 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
-#include <cstdio>
 #include <exception>
-#include <filesystem>
-#include <fstream>
 #include <functional>
 #include <limits>
 #include <queue>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace
 {
-	namespace fs = std::filesystem;
-
 	auto* L = cs::log::Get("cs");
 	constexpr auto kUnvisited = std::numeric_limits<std::size_t>::max();
-	constexpr const char* kConfigDir = "Data\\F4SE\\Plugins\\FO4CommunityShaders";
-	constexpr const char* kGlobalConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
-	constexpr bool kDefaultAutoInstallAllFeatures = false;
 
 	std::string ToString(std::string_view a_value)
 	{
@@ -47,98 +37,6 @@ namespace
 			return "pixel-shader swap broker";
 		}
 		return "unknown capability";
-	}
-
-	std::string PluginVersionString()
-	{
-		char buf[32];
-		std::snprintf(buf, sizeof(buf), "%u.%u.%u", Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
-		return buf;
-	}
-
-	fs::path FeatureConfigPath(const cs::Feature& a_feature)
-	{
-		return fs::path(kConfigDir) / (ToString(a_feature.GetName()) + ".toml");
-	}
-
-	bool PathExists(const fs::path& a_path)
-	{
-		std::error_code ec;
-		const bool exists = fs::exists(a_path, ec);
-		return exists && !ec;
-	}
-
-	void EnsureConfigDirectory()
-	{
-		std::error_code ec;
-		fs::create_directories(kConfigDir, ec);
-		if (ec) {
-			L->warn("Failed to create feature config directory {}: {}", kConfigDir, ec.message());
-		}
-	}
-
-	bool WriteToml(const fs::path& a_path, const toml::table& a_table)
-	{
-		std::ofstream out(a_path);
-		if (!out) {
-			return false;
-		}
-		out << a_table;
-		return out.good();
-	}
-
-	bool LoadAutoInstallAllFeatures()
-	{
-		auto loadResult = cs::feature_config::LoadFile(kGlobalConfigPath);
-		if (loadResult.status == cs::feature_config::FileLoadStatus::kMissing) {
-			return kDefaultAutoInstallAllFeatures;
-		}
-		if (loadResult.status == cs::feature_config::FileLoadStatus::kParseError
-			|| loadResult.status == cs::feature_config::FileLoadStatus::kIoError) {
-			L->warn("Failed to load global feature config: {}. Auto-install disabled; leaving file untouched.",
-				loadResult.error);
-			return false;
-		}
-
-		const auto* featuresNode = loadResult.table.get("features");
-		if (!featuresNode) {
-			return kDefaultAutoInstallAllFeatures;
-		}
-		if (!featuresNode->is_table()) {
-			L->warn("Global feature config [features] must be a table. Auto-install disabled; leaving file untouched.");
-			return false;
-		}
-
-		const auto* autoInstallNode = featuresNode->as_table()->get("auto_install_all_features");
-		if (!autoInstallNode) {
-			return kDefaultAutoInstallAllFeatures;
-		}
-		if (!autoInstallNode->is_boolean()) {
-			L->warn("Global feature config features.auto_install_all_features must be a boolean. Auto-install disabled; leaving file untouched.");
-			return false;
-		}
-
-		return autoInstallNode->as_boolean()->get();
-	}
-
-	bool EnsureFeatureConfig(const cs::Feature& a_feature)
-	{
-		const auto path = FeatureConfigPath(a_feature);
-		if (PathExists(path)) {
-			return true;
-		}
-
-		EnsureConfigDirectory();
-		toml::table table{
-			{ "info", toml::table{ { "version", PluginVersionString() } } },
-			{ "feature", toml::table{ { "load", false } } }
-		};
-		if (!WriteToml(path, table)) {
-			L->warn("Failed to create feature config {}", path.string());
-			return false;
-		}
-		L->info("Created feature config {}", path.string());
-		return true;
 	}
 
 	void LogCycle(const std::vector<std::size_t>& a_component, const std::vector<cs::Feature*>& a_features)
@@ -318,7 +216,7 @@ namespace cs
 {
 	bool Feature::IsInstalled() const
 	{
-		return PathExists(FeatureConfigPath(*this));
+		return feature_config::GetFeature(GetConfigKey()).has_value();
 	}
 
 	ActivationResult Feature::Activate()
@@ -506,26 +404,45 @@ namespace cs
 		_activationOrder = SortFeaturesByRequirements(_registeredFeatures);
 		const std::unordered_set<const Feature*> orderedSet(_activationOrder.begin(), _activationOrder.end());
 
-		const bool autoInstallAll = LoadAutoInstallAllFeatures();
-		L->info("Feature TOML auto-install: {}", autoInstallAll ? "enabled" : "disabled");
-
+		const auto configRoot = feature_config::GetMergedRoot();
+		const auto* features = configRoot["features"].as_table();
+		std::unordered_set<std::string> registeredKeys;
+		registeredKeys.reserve(_registeredFeatures.size());
 		for (auto* feature : _registeredFeatures) {
-			bool installed;
-			if (autoInstallAll) {
-				// A failed create must not masquerade as a successful install.
-				installed = EnsureFeatureConfig(*feature);
-				if (!installed) {
-					L->warn("Feature {} TOML could not be created; treating as not installed", feature->GetName());
+			registeredKeys.insert(feature->GetConfigKey());
+		}
+		if (features) {
+			for (const auto& [key, node] : *features) {
+				if (!registeredKeys.contains(std::string(key.str()))) {
+					L->warn("Ignoring unknown unified configuration feature key '{}'", key.str());
 				}
-			} else {
-				installed = feature->IsInstalled();
+			}
+		}
+
+		std::vector<std::string> missingKeys;
+		for (auto* feature : _registeredFeatures) {
+			const auto key = feature->GetConfigKey();
+			const auto* featureNode = features ? features->get(key) : nullptr;
+			const bool installed = featureNode && featureNode->is_table();
+			if (!installed) {
+				missingKeys.push_back(key);
 			}
 			feature->SetState({
 				.installed = installed,
 				.desiredActive = false,
 				.runtimeState = installed ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
-				.detail = installed ? std::string{} : "Feature TOML configuration is missing"
+				.detail = installed ? std::string{} : "Unified feature configuration is missing"
 			});
+		}
+		if (!missingKeys.empty()) {
+			std::string names;
+			for (const auto& key : missingKeys) {
+				if (!names.empty()) {
+					names += ", ";
+				}
+				names += key;
+			}
+			L->warn("Registered features absent from unified configuration: {}", names);
 		}
 
 		const auto failConfiguration = [](Feature* a_feature, std::string a_detail) {
@@ -541,32 +458,26 @@ namespace cs
 				continue;
 			}
 
-			auto loadResult = feature_config::LoadFile(FeatureConfigPath(*feature));
-			if (loadResult.status != feature_config::FileLoadStatus::kParsed) {
-				failConfiguration(feature, std::move(loadResult.error));
-				continue;
+			const auto key = feature->GetConfigKey();
+			const auto* featureTable = features->get(key)->as_table();
+			const auto activation = feature_config::ParseActivation(*featureTable);
+			if (!activation.present) {
+				L->warn("Feature {} configuration has no boolean load key; treating as false", key);
 			}
-
-			const auto activation = feature_config::ParseActivation(loadResult.table);
 			if (!activation.valid) {
-				const auto* featureNode = loadResult.table.get("feature");
-				const std::string detail = featureNode && !featureNode->is_table()
-					? "Invalid activation configuration: feature must be a table"
-					: "Invalid activation configuration: feature.load must be a boolean";
-				failConfiguration(feature, detail);
-				continue;
+				L->warn("Feature {} configuration load key must be a boolean; treating as false", key);
 			}
 
 			std::string error;
 			try {
-				if (!feature->Configure(loadResult.table, error)) {
+				if (!feature->Configure(*featureTable, error)) {
 					failConfiguration(feature, std::move(error));
 					continue;
 				}
 
 				const bool deactivatedForEnb =
 					feature->GetEnbPolicy() == EnbPolicy::kDeactivate && cs::env::IsENBLoaded();
-				const bool desiredActive = activation.load && !deactivatedForEnb;
+				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb;
 				feature->SetState({
 					.installed = true,
 					.desiredActive = desiredActive,

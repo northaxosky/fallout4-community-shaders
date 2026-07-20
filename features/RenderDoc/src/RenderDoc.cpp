@@ -26,7 +26,6 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.renderdoc"); }
 
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\RenderDoc.toml";
 	constexpr double      kBytesPerGiB = 1024.0 * 1024.0 * 1024.0;
 	constexpr int         kMinMultiFrameCount = 2;
 	constexpr int         kMaxMultiFrameCount = 60;
@@ -264,40 +263,17 @@ namespace cs::features
 
 	void RenderDoc::SaveSettings()
 	{
-		try {
-			const std::filesystem::path configPath(kConfigPath);
-			toml::table table;
-			if (std::filesystem::exists(configPath)) {
-				table = toml::parse_file(kConfigPath);
-			}
+		toml::table settings;
+		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign("dll_path", _settings.dllPath);
+		settings.insert_or_assign("capture_folder", _settings.captureFolder);
+		settings.insert_or_assign("min_free_disk_gib", _settings.minFreeDiskGiB);
+		settings.insert_or_assign("multi_frame_count", static_cast<int64_t>(_settings.multiFrameCount));
+		settings.insert_or_assign("capture_hotkey", _settings.captureHotkey);
+		settings.insert_or_assign("multi_capture_hotkey", _settings.multiCaptureHotkey);
 
-			auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
-			settings.insert_or_assign("enabled", _settings.enabled);
-			settings.insert_or_assign("dll_path", _settings.dllPath);
-			settings.insert_or_assign("capture_folder", _settings.captureFolder);
-			settings.insert_or_assign("min_free_disk_gib", _settings.minFreeDiskGiB);
-			settings.insert_or_assign("multi_frame_count", static_cast<int64_t>(_settings.multiFrameCount));
-			settings.insert_or_assign("capture_hotkey", _settings.captureHotkey);
-			settings.insert_or_assign("multi_capture_hotkey", _settings.multiCaptureHotkey);
-
-			if (const auto parent = configPath.parent_path(); !parent.empty()) {
-				std::filesystem::create_directories(parent);
-			}
-
-			std::ofstream out(configPath);
-			if (!out) {
-				L->error("Failed to open RenderDoc config for write: {}", kConfigPath);
-				return;
-			}
-			out << table;
-			out.flush();
-			if (!out.good()) {
-				L->error("Failed to write RenderDoc config: {}", kConfigPath);
-			}
-		} catch (const toml::parse_error& e) {
-			L->error("Failed to parse RenderDoc config while saving {}: {}", kConfigPath, e.what());
-		} catch (const std::filesystem::filesystem_error& e) {
-			L->error("Failed to prepare RenderDoc config path {}: {}", kConfigPath, e.what());
+		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
 	}
 

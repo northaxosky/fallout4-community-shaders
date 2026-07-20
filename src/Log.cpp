@@ -1,13 +1,12 @@
 #include "Log.h"
 
+#include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/Hotkey.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cctype>
-#include <filesystem>
-#include <fstream>
 #include <limits>
 #include <mutex>
 #include <unordered_map>
@@ -19,9 +18,6 @@ namespace cs::log
 	{
 		// Override of F4SE's default pattern; %n surfaces the logger name per line.
 		constexpr const char* kPattern = "[%T.%e] [%=5t] [%L] [%n] %v";
-		constexpr const char* kGlobalConfigPath =
-			"Data\\F4SE\\Plugins\\FO4CommunityShaders\\FO4CommunityShaders.toml";
-
 		struct ConfigState
 		{
 			std::atomic<spdlog::level::level_enum> globalLevel{ spdlog::level::info };
@@ -295,40 +291,9 @@ namespace cs::log
 	bool SaveConfigToToml()
 	{
 		auto* logger = Get("cs.log");
-		toml::table table;
-		std::error_code existsError;
-		const bool fileExists = std::filesystem::exists(kGlobalConfigPath, existsError);
-		if (existsError) {
-			logger->warn("Failed to inspect {}: {}", kGlobalConfigPath, existsError.message());
-			return false;
-		}
-		if (fileExists) {
-			try {
-				table = toml::parse_file(kGlobalConfigPath);
-			} catch (const toml::parse_error& e) {
-				logger->warn("Skipping logging config write; failed to parse {} ({})",
-					kGlobalConfigPath, e.description());
-				return false;
-			}
-		}
-
-		table.insert_or_assign("logging", ConfigAsToml());
-		std::error_code directoryError;
-		std::filesystem::create_directories(
-			std::filesystem::path(kGlobalConfigPath).parent_path(), directoryError);
-		if (directoryError) {
-			logger->warn("Failed to create logging config directory: {}", directoryError.message());
-			return false;
-		}
-
-		std::ofstream out(kGlobalConfigPath);
-		if (!out) {
-			logger->warn("Failed to open {} for logging config write", kGlobalConfigPath);
-			return false;
-		}
-		out << table;
-		if (!out.good()) {
-			logger->warn("Failed to write logging config to {}", kGlobalConfigPath);
+		const auto result = feature_config::UpdateTopLevelSection("logging", ConfigAsToml());
+		if (!result) {
+			logger->warn("Failed to save logging configuration: {}", result.error);
 			return false;
 		}
 		return true;

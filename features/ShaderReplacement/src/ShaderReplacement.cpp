@@ -25,7 +25,6 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.shaderreplacement"); }
 
-	constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ShaderReplacement.toml";
 	constexpr const char* kMarkerPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.shaderreplace_force";
 
 	namespace
@@ -161,14 +160,7 @@ namespace cs::features
 
 	void ShaderReplacement::SaveSettings()
 	{
-		toml::table table;
-		try {
-			table = toml::parse_file(kConfigPath);
-		} catch (const toml::parse_error&) {
-			table = toml::table{};
-		}
-
-		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		toml::table settings;
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("manifest_path", _settings.manifestPath);
 		settings.insert_or_assign("shaders_root", _settings.shadersRoot);
@@ -182,11 +174,8 @@ namespace cs::features
 		settings.insert_or_assign("replace_deferred_prepass", s.deferred_prepass);
 		settings.insert_or_assign("replace_vls_slice_scatter", s.vls_slice_scatter);
 
-		std::error_code ec;
-		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
-		std::ofstream out(kConfigPath);
-		if (out) {
-			out << table;
+		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
+			L->error("Failed to save settings: {}", result.error);
 		}
 	}
 
