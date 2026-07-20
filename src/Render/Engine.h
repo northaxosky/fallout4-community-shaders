@@ -220,6 +220,9 @@ namespace cs::engine
 		kGbufferEmissive = 23,
 		kGbufferMaterial = 24,  // Glossiness, Specular, Backlighting, SSS
 
+		// Confirmed on AE 1.11.221; OG 1.10.163 and NG 1.10.984 require validation before rollout.
+		kSSAOFinal = 25,
+
 		kTAAAccumulation = 26,
 		kTAAAccumulationSwap = 27,
 
@@ -232,11 +235,6 @@ namespace cs::engine
 
 		kMainDepthMips = 39,
 		kSSLRRaytracing = 40,  // Fallout4RE cs-engine-h-rt-enum-extension.json @ 2d73ccf.
-
-		// Full-res SAO buffers sampled by deferred ambient pass (t9), verified by runtime probe + RenderDoc.
-		kSSAOFinal = 45,
-		kSSAOFinalSwap = 46,
-		kSSAOFinalSwap2 = 47,
 
 		kSSAOTemp = 48,
 		kSSAOTemp2 = 49,

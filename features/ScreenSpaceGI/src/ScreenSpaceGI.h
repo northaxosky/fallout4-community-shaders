@@ -9,9 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <unordered_set>
 #include <vector>
 
 #include <winrt/base.h>
@@ -48,25 +46,8 @@ namespace cs::features
 			int   numSlices = 4;
 			int   numSteps = 16;
 			bool  enabled = false;
-			bool  kssaoProbeEnabled = false;
-			int   kssaoProbeMode = 0;
-			float kssaoProbeValue = 0.0f;
-			int   kssaoProbeRt = 45;
-			int   kssaoProbeAnchor = 2;
-			int   kssaoProbeLumaRt = 3;
-			bool  kssaoProbeAllFinal = false;
+			int   mode = 2;
 			bool  noiseFrozen = true;
-		};
-
-		struct CaptureConfig
-		{
-			bool                       enabled = false;
-			std::vector<std::uint32_t> formIds;
-			int                        settleFrames = 300;
-			int                        intervalFrames = 120;
-			int                        maxSnapshots = 4;
-			int                        hotkey = 0x78;
-			std::string                output = "ScreenSpaceGI\\oracle_capture.json";
 		};
 
 	private:
@@ -116,39 +97,29 @@ namespace cs::features
 		};
 		static_assert(sizeof(DecodeCB) % 16 == 0);
 
-		struct alignas(16) KssaoOverwriteCB
+		struct alignas(16) AOIntegrationCB
 		{
 			std::uint32_t TargetExtent[2];
 			std::uint32_t SourceExtent[2];
 			std::uint32_t Mode;
 			std::uint32_t Padding[3];
 		};
-		static_assert(sizeof(KssaoOverwriteCB) % 16 == 0);
+		static_assert(sizeof(AOIntegrationCB) % 16 == 0);
 
 		ScreenSpaceGI() = default;
 
 		void SaveSettings();
 		void OnComputeResolve();
-		void OnKssaoOverwrite(int a_anchor);
-		void OnKssaoReadback();
-		void OnAnchorDumpFrameBegin();
-		void OnAnchorDumpDraw();
-		void OnAnchorDumpFrameEnd();
+		void OnAOIntegration();
 		void OnPreSunLightDraw();
 		void OnPostDeferredLights();
-		// Dev diagnostic: brokered PSSetShader bind-trace. Logs each distinct bound-PS sha + DLI phase during the armed dump window to locate the ambient/IBL draw.
-		void OnPixelShaderBind(ID3D11PixelShader* a_bound);
-		static void PixelShaderBindTrampoline(ID3D11PixelShader* a_bound);
 		bool EnsureResources();
-		void CaptureOracle(ID3D11DeviceContext* a_context, RE::BSGraphics::State* a_state);
-		// Writes our AO into one engine SAO render target; OnKssaoOverwrite loops it over the SAO-Final family when kssao_probe_all_final is set.
-		void OverwriteRt(cs::engine::RenderTarget a_target);
+		void IntegrateAO(cs::engine::RenderTarget a_target);
 
 		static constexpr std::uint32_t kBouncePSSlot = 0;
 		static constexpr std::uint32_t kAOPSSlot = 13;
 
 		Settings _settings;
-		CaptureConfig _capture;
 		std::atomic_bool _started{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _resourceInitFailed{ false };
@@ -173,52 +144,17 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
 		winrt::com_ptr<ID3D11ComputeShader> _aoCS;
 		winrt::com_ptr<ID3D11ComputeShader> _denoiseCS;
-		std::array<winrt::com_ptr<ID3D11ComputeShader>, 4> _kssaoOverwriteCS;
-		std::unique_ptr<cs::buffer::ConstantBuffer> _kssaoOverwriteCB;
-		winrt::com_ptr<ID3D11Texture2D> _kssaoScratch;
-		winrt::com_ptr<ID3D11ShaderResourceView> _kssaoScratchSRV;
-		winrt::com_ptr<ID3D11Texture2D> _kssaoLumaStaging;
-		DXGI_FORMAT _kssaoScratchFormat = DXGI_FORMAT_UNKNOWN;
-		DXGI_FORMAT _kssaoLumaFormat = DXGI_FORMAT_UNKNOWN;
-		std::uint32_t _kssaoScratchW = 0;
-		std::uint32_t _kssaoScratchH = 0;
-		std::uint32_t _kssaoLumaW = 0;
-		std::uint32_t _kssaoLumaH = 0;
-		std::uint32_t _kssaoReadbackFrame = 0;
-		bool _kssaoNotReadyLogged = false;
-		bool _kssaoUnsupportedLogged = false;
-		bool _kssaoReadbackUnsupportedLogged = false;
-		bool _kssaoReadbackEnteredLogged = false;
-		bool _kssaoReadbackNullRtmLogged = false;
-		bool _kssaoReadbackNullDeviceLogged = false;
-		bool _kssaoReadbackZeroExtentLogged = false;
-		bool _kssaoOverwriteFiredLogged = false;
-		bool _kssaoOverwriteMode0Logged = false;
-		bool _kssaoDispatchLoggedOnce = false;
-		bool _kssaoOverwriteSkipLogged = false;
-		bool _compositeSlotMapLogged = false;
-		bool _xegtaoGateLogged = false;
-		bool _xegtaoProducedLogged = false;
-		bool _xegtaoCbLogged = false;
-		bool _xegtaoInnerFailLogged = false;
-		bool _aoStatsLogged = false;
+		std::array<winrt::com_ptr<ID3D11ComputeShader>, 4> _aoIntegrationCS;
+		std::unique_ptr<cs::buffer::ConstantBuffer> _aoIntegrationCB;
+		winrt::com_ptr<ID3D11Texture2D> _aoIntegrationScratch;
+		winrt::com_ptr<ID3D11ShaderResourceView> _aoIntegrationScratchSRV;
+		DXGI_FORMAT _aoIntegrationScratchFormat = DXGI_FORMAT_UNKNOWN;
+		std::uint32_t _aoIntegrationScratchW = 0;
+		std::uint32_t _aoIntegrationScratchH = 0;
+		bool _aoIntegrationUnsupportedLogged = false;
+		bool _aoIntegrationSkipLogged = false;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;
-		bool _captureArmed = false;
-		bool _captureKeyDown = false;
-		int _snapshotCount = 0;
-		std::string _captureJson;
-		std::atomic_bool _dumpArmed{ false };
-		bool _dumpKeyDown = false;
-		int _dumpOrdinal = 0;
-		int _dumpFramesLogged = 0;
-		int _dumpTripleMatches = 0;
-		int _dumpMatchOrdinal = -1;
-		int _dumpIdentityMatches = 0;
-		std::atomic_bool _insideDLI{ false };
-		std::atomic_bool _bindTraceArmed{ false };
-		std::mutex _bindTraceMutex;
-		std::unordered_set<std::string> _bindTraceSeen;
 	};
 }

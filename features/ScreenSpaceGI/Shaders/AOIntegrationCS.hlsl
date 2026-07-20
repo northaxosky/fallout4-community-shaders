@@ -2,7 +2,7 @@
 #define TARGET_COMPONENTS 4
 #endif
 
-cbuffer OverwriteCB : register(b0)
+cbuffer AOIntegrationCB : register(b0)
 {
     uint2 gTargetExtent;
     uint2 gSourceExtent;
@@ -41,11 +41,6 @@ void main(uint3 id : SV_DispatchThreadID)
     float4 result = ao.xxxx;
     if (gMode == 2) {
         result = min(gEngineAO.Load(int3(id.xy, 0)), result);
-    } else if (gMode == 3) {
-        // Diagnostic half-split: left half occluded (0), right half unoccluded (1).
-        // A razor-sharp vertical seam in the ambient term that weather cannot produce,
-        // proving whether the composite samples this buffer.
-        result = (id.x < (gTargetExtent.x / 2u)) ? float4(0.0, 0.0, 0.0, 0.0) : float4(1.0, 1.0, 1.0, 1.0);
     }
     gTarget[id.xy] = PackTarget(result);
 }
