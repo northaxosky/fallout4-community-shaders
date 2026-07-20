@@ -145,7 +145,9 @@ namespace cs::features
 				return true;
 			};
 
-			return readInteger("kssao_probe_mode", a_candidate.kssaoProbeMode, 0, 3) &&
+			return readInteger("num_slices", a_candidate.numSlices, 1, 64) &&
+				readInteger("num_steps", a_candidate.numSteps, 1, 64) &&
+				readInteger("kssao_probe_mode", a_candidate.kssaoProbeMode, 0, 3) &&
 				readInteger(
 					"kssao_probe_rt",
 					a_candidate.kssaoProbeRt,
@@ -559,6 +561,8 @@ namespace cs::features
 		settings.insert_or_assign("ao_power", _settings.aoPower);
 		settings.insert_or_assign("depth_fade_start", _settings.depthFadeStart);
 		settings.insert_or_assign("depth_fade_end", _settings.depthFadeEnd);
+		settings.insert_or_assign("num_slices", _settings.numSlices);
+		settings.insert_or_assign("num_steps", _settings.numSteps);
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("kssao_probe_enabled", _settings.kssaoProbeEnabled);
 		settings.insert_or_assign("kssao_probe_mode", _settings.kssaoProbeMode);
@@ -1505,8 +1509,8 @@ namespace cs::features
 					xegtaoCB.RcpFrameDim[1] = 1.0f / frameHeight;
 					xegtaoCB.FrameIndex =
 						_settings.noiseFrozen ? 0u : static_cast<std::uint32_t>(state->frameCount);
-					xegtaoCB.NumSlices = 4;
-					xegtaoCB.NumSteps = 8;
+					xegtaoCB.NumSlices = static_cast<std::uint32_t>(_settings.numSlices);
+					xegtaoCB.NumSteps = static_cast<std::uint32_t>(_settings.numSteps);
 					xegtaoCB.MinScreenRadius = 3.0f;
 					xegtaoCB.AORadius = 1.0f;
 					// EffectRadius/AOPower are live toml knobs. Defaults are FO4 game-unit scale

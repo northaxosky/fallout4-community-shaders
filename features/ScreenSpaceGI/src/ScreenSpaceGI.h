@@ -45,6 +45,8 @@ namespace cs::features
 			float aoPower = 2.5f;
 			float depthFadeStart = 40000.0f;
 			float depthFadeEnd = 50000.0f;
+			int   numSlices = 4;
+			int   numSteps = 16;
 			bool  enabled = false;
 			bool  kssaoProbeEnabled = false;
 			int   kssaoProbeMode = 0;
