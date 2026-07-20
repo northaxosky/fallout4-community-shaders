@@ -151,6 +151,7 @@ namespace cs::features
 		DXGI_FORMAT _aoIntegrationScratchFormat = DXGI_FORMAT_UNKNOWN;
 		std::uint32_t _aoIntegrationScratchW = 0;
 		std::uint32_t _aoIntegrationScratchH = 0;
+		bool _aoIntegrationUnsupportedRuntimeLogged = false;
 		bool _aoIntegrationUnsupportedLogged = false;
 		bool _aoIntegrationSkipLogged = false;
 		std::uint32_t _allocW = 0;
