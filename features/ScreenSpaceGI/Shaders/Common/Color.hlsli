@@ -3,10 +3,7 @@
 
 namespace Color
 {
-	// Attempt to match vanilla materials that are darker than PBR
-	// (upstream Skyrim value; FO4 color-space parity unverified - validate the
-	// 1.6 irradiance gamma + this scale against FO4's albedo convention when the
-	// GI resolve pass lands, and tune in-game).
+	// Skyrim-derived scale; FO4 color-space parity is unverified.
 	const static float PBRLightingScale = 0.65;
 
 	float3 RGBToYCoCg(float3 color)

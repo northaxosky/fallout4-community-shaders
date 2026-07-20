@@ -62,7 +62,7 @@ namespace cs::features
 		};
 		static_assert(sizeof(ResolveCB) % 16 == 0);
 
-		// Matches XeGTAOCB in Shaders/XeGTAO/common.hlsli (128 bytes, 8x16).
+		// Must match Shaders/XeGTAO/common.hlsli.
 		struct alignas(16) XeGTAOCB
 		{
 			float         NDCToViewMul[4];
@@ -88,10 +88,10 @@ namespace cs::features
 		};
 		static_assert(sizeof(XeGTAOCB) == 128);
 
-		// Matches DecodeCB in Shaders/XeGTAO/decode.cs.hlsl.
+		// Must match Shaders/XeGTAO/decode.cs.hlsl.
 		struct alignas(16) DecodeCB
 		{
-			DirectX::XMFLOAT4X4 InvProj;      // row-major; = CameraMatrices.invProj
+			DirectX::XMFLOAT4X4 InvProj;  // row-major, untransposed
 			float               RcpFrameDim[2];
 			float               FrameDim[2];
 		};

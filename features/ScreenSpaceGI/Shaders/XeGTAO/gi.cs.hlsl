@@ -144,6 +144,6 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 		CalculateGI(pxCoord, uv, viewspaceZ, viewspaceNormal, currAo);
 	}
 
-	// Stored AO is occlusion: 0 is open and 1 is fully occluded.
+	// Output is occlusion: 0=open, 1=occluded.
 	outAo[pxCoord] = currAo;
 }

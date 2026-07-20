@@ -363,19 +363,14 @@ namespace cs::features
 		try {
 			auto* state = cs::engine::GetGraphicsState();
 			if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
-				// A transient invalid graphics state (0 dims during a menu/loading/alt-tab blip)
-				// must not invalidate an already-valid full-res allocation: keep the existing
-				// resources so IsReady() stays true and every frame writes our AO (no fallback-
-				// to-engine-AO flicker). Only fail when there is nothing allocated yet.
+				// Preserve valid resources across transient zero-sized frames.
 				if (hadResources) {
 					return true;
 				}
 				throw std::runtime_error("graphics state has no screen dimensions");
 			}
 
-			// Allocate at full display resolution (DRS-invariant), reallocating only on a
-			// true resolution change, mirroring ScreenSpaceShadows' mask. Sizing to the
-			// dynres-scaled extent would reallocate every frame as the ratio jitters.
+			// Full-resolution allocation avoids churn as dynamic resolution changes.
 			const std::uint32_t width = state->screenWidth;
 			const std::uint32_t height = state->screenHeight;
 
@@ -635,13 +630,10 @@ namespace cs::features
 					xegtaoCB.NumSteps = static_cast<std::uint32_t>(_settings.numSteps);
 					xegtaoCB.MinScreenRadius = 3.0f;
 					xegtaoCB.AORadius = 1.0f;
-					// Defaults use FO4 game-unit scale (~70 units/m): radius 256 is about 3.6m.
 					xegtaoCB.EffectRadius = _settings.effectRadius;
 					xegtaoCB.Thickness = 32.0f;
 					xegtaoCB.AOPower = _settings.aoPower;
-					// View-space depth (decode.cs) is raw FO4 game units (~70/m). Fade AO out over a
-					// large game-unit range (default 40000-50000) so indoor / near-exterior geometry
-					// (tens of metres) isn't culled; 60/90 zeroed everything past ~1.3m. Live knobs.
+					// FO4 view depth uses world units; metric-scale fades suppress nearly all AO.
 					xegtaoCB.DepthFadeRange[0] = _settings.depthFadeStart;
 					xegtaoCB.DepthFadeRange[1] = _settings.depthFadeEnd;
 					const float depthFadeSpan = _settings.depthFadeEnd - _settings.depthFadeStart;
@@ -833,7 +825,7 @@ namespace cs::features
 		auto* targetUAV = cs::engine::GetRenderTargetUAV(a_target);
 		auto* targetSRV = cs::engine::GetRenderTargetSRV(a_target);
 		auto* rtm = cs::engine::GetRenderTargetManager();
-		const bool needSRV = _settings.mode == 2;  // only the min-blend path reads the engine AO SRV
+		const bool needSRV = _settings.mode == 2;
 		if (!targetTexture || !targetUAV || !rtm || !_aoIntegrationCB || (needSRV && !targetSRV)) {
 			if (!_aoIntegrationSkipLogged) {
 				_aoIntegrationSkipLogged = true;
@@ -888,7 +880,6 @@ namespace cs::features
 			return;
 		}
 
-		// Mode 1 (replace) with a matched full-res target skips the compute pass entirely.
 		const bool copyCompatible =
 			_settings.mode == 1 &&
 			targetW == targetDesc.Width && targetH == targetDesc.Height &&
@@ -919,8 +910,7 @@ namespace cs::features
 					return;
 				}
 
-				// Scratch copy: mode 2 both reads the engine AO and writes its UAV, so snapshot
-				// the engine AO into a private SRV before overwriting the target in place.
+				// Avoid binding the engine AO as both SRV and UAV.
 				if (!_aoIntegrationScratch ||
 					_aoIntegrationScratchW != targetDesc.Width ||
 					_aoIntegrationScratchH != targetDesc.Height ||

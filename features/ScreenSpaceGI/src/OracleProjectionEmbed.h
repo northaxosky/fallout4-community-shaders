@@ -63,7 +63,7 @@ namespace cs::ssgi::dev
 		}
 	}
 
-	// Ports decode_reconstruct_test.py:350-354.
+	// Mirrors the offline reconstruction test.
 	inline void EmbedProjectionFromWorldToCam(
 		const double a_worldToCam[16],
 		const double a_rotationRows[9],

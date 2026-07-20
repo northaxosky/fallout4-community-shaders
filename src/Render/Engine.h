@@ -117,7 +117,7 @@ namespace cs::engine
 			return false;
 		}
 
-		// NiCamera::viewFrustum (+0x160) retains the world/far projection after the near/first-person (~41deg) pass clobbers camViewData.projMat; decode needs this view-space basis.
+		// viewFrustum retains the world projection after the first-person pass overwrites projMat.
 		const auto& frustum = sceneCamera->viewFrustum;
 		const auto& [left, right, top, bottom, nearPlane, farPlane, ortho] = frustum;
 		if (ortho) {
@@ -220,7 +220,7 @@ namespace cs::engine
 		kGbufferEmissive = 23,
 		kGbufferMaterial = 24,  // Glossiness, Specular, Backlighting, SSS
 
-		// Confirmed on AE 1.11.221; OG 1.10.163 and NG 1.10.984 require validation before rollout.
+		// RT25 is AE 1.11.221-only until OG/NG indices are validated.
 		kSSAOFinal = 25,
 
 		kTAAAccumulation = 26,

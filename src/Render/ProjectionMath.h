@@ -6,7 +6,7 @@
 
 namespace cs::engine
 {
-	// Builds a D3D LH perspective from unit-depth frustum half-extents and its UV-to-view ray transform.
+	// FO4 world projection and UV-to-view ray transform.
 	[[nodiscard]] inline bool BuildPerspectiveFromFrustum(
 		float left,
 		float right,
