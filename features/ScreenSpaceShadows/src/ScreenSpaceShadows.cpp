@@ -40,7 +40,7 @@ namespace cs::features
 		constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.toml";
 		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
 
-		// FO4 uses standard non-linear depth, near=0/far=1 (confirmed by the working DOF Linearize in Imagespace/DepthCoCCS.hlsl). Border color + FarDepthValue must match. If a RenderDoc depth histogram of DepthStencilTarget::kMain shows near objects at 1.0 (reversed-Z), flip to Far=0/Near=1 and set the sampler border to 0.
+		// FO4 uses standard non-linear depth, near=0/far=1
 		constexpr float kFarDepthValue = 1.0f;
 		constexpr float kNearDepthValue = 0.0f;
 
@@ -152,8 +152,7 @@ namespace cs::features
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
-		// Bind the mask right before the sun draw (after the engine flushes/nulls PS SRVs), and
-		// unbind it when the deferred-lighting phase ends.
+		// Bind the mask right before the sun draw when the deferred-lighting phase ends.
 		cs::engine::RegisterPreSunLightDraw([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreSunLightDraw();
 		});
@@ -314,11 +313,7 @@ namespace cs::features
 			return;
 		}
 
-		// The SCREEN_SPACE_SHADOWS define is compiled into the directional shaders at startup, so once
-		// active they always sample the mask at t6. Keep the mask allocated + white-cleared whenever it
-		// exists (even when runtime-disabled) so the t6 multiply stays a no-op; otherwise a disabled
-		// toggle leaves t6 unbound (reads 0) and blacks out the sun. Only the raymarch dispatch below is
-		// gated on the enabled toggle.
+		// The SCREEN_SPACE_SHADOWS define is compiled into the directional shaders at startup
 		if (_settings.enabled) {
 			if (!EnsureResources()) {
 				return;
@@ -382,12 +377,7 @@ namespace cs::features
 					if (viewportSize[0] > 0 && viewportSize[1] > 0) {
 						cs::engine::ComputeOMScope scope(context);
 
-						// TryGetSunDirectionWS returns the light-travel direction (cached in the sun node's
-						// world.rotate row 0); negate for the toward-sun vector. Source world->clip from the
-						// persistent scene camera (camViewData is per-pass scratch the fullscreen deferred pass
-						// overwrites). NiCamera::worldToCam is column-vector (clip = M * v), so transform against
-						// its transpose; this yields clip.w = dot(toward-sun, view-forward), a proper directional
-						// w, instead of the camera world position leaking in and pinning the sun to screen center.
+						// TryGetSunDirectionWS returns the light-travel direction
 						auto* sceneCamera = RE::Main::WorldRootCamera();
 						if (!sceneCamera) {
 							return;
