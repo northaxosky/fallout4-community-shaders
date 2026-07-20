@@ -45,8 +45,10 @@ namespace cs::features
 		constexpr const wchar_t* kDecodePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\decode.cs.hlsl";
 		constexpr const wchar_t* kPrefilterPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\prefilterDepths.cs.hlsl";
 		constexpr const wchar_t* kAOPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\gi.cs.hlsl";
+		constexpr const wchar_t* kDenoisePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\denoise.cs.hlsl";
 		constexpr const wchar_t* kKssaoOverwritePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\KssaoOverwriteCS.hlsl";
-		constexpr std::uint32_t kLumaSampleExtent = 16;
+		constexpr std::uint32_t kLumaSampleWidth = 1024;
+		constexpr std::uint32_t kLumaSampleHeight = 128;
 		constexpr std::uint32_t kLumaReadbackInterval = 60;
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
@@ -95,6 +97,24 @@ namespace cs::features
 			}
 
 			if (!AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "denoise_enabled", a_candidate.denoiseEnabled),
+					"denoise_enabled", "boolean", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadFloat(*settingsTable, "denoise_radius", a_candidate.denoiseRadius),
+					"denoise_radius", "number", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadFloat(*settingsTable, "effect_radius", a_candidate.effectRadius),
+					"effect_radius", "number", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadFloat(*settingsTable, "ao_power", a_candidate.aoPower),
+					"ao_power", "number", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadFloat(*settingsTable, "depth_fade_start", a_candidate.depthFadeStart),
+					"depth_fade_start", "number", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadFloat(*settingsTable, "depth_fade_end", a_candidate.depthFadeEnd),
+					"depth_fade_end", "number", a_error) ||
+				!AcceptSetting(
 					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
 					"enabled", "boolean", a_error) ||
 				!AcceptSetting(
@@ -105,7 +125,10 @@ namespace cs::features
 					"kssao_probe_all_final", "boolean", a_error) ||
 				!AcceptSetting(
 					feature_config::ReadFloat(*settingsTable, "kssao_probe_value", a_candidate.kssaoProbeValue),
-					"kssao_probe_value", "number", a_error)) {
+					"kssao_probe_value", "number", a_error) ||
+				!AcceptSetting(
+					feature_config::ReadBool(*settingsTable, "noise_frozen", a_candidate.noiseFrozen),
+					"noise_frozen", "boolean", a_error)) {
 				return false;
 			}
 
@@ -122,13 +145,18 @@ namespace cs::features
 				return true;
 			};
 
-			return readInteger("kssao_probe_mode", a_candidate.kssaoProbeMode, 0, 2) &&
+			return readInteger("kssao_probe_mode", a_candidate.kssaoProbeMode, 0, 3) &&
 				readInteger(
 					"kssao_probe_rt",
 					a_candidate.kssaoProbeRt,
 					0,
 					static_cast<std::int64_t>(cs::engine::RenderTarget::kCount) - 1) &&
-				readInteger("kssao_probe_anchor", a_candidate.kssaoProbeAnchor, 0, 2);
+				readInteger("kssao_probe_anchor", a_candidate.kssaoProbeAnchor, 0, 2) &&
+				readInteger(
+					"kssao_probe_luma_rt",
+					a_candidate.kssaoProbeLumaRt,
+					0,
+					static_cast<std::int64_t>(cs::engine::RenderTarget::kCount) - 1);
 		}
 
 		std::string CaptureSettingError(std::string_view a_key, std::string_view a_reason)
@@ -525,13 +553,21 @@ namespace cs::features
 		}
 
 		auto& settings = table.insert_or_assign("settings", toml::table{}).first->second.as_table()->ref<toml::table>();
+		settings.insert_or_assign("denoise_enabled", _settings.denoiseEnabled);
+		settings.insert_or_assign("denoise_radius", _settings.denoiseRadius);
+		settings.insert_or_assign("effect_radius", _settings.effectRadius);
+		settings.insert_or_assign("ao_power", _settings.aoPower);
+		settings.insert_or_assign("depth_fade_start", _settings.depthFadeStart);
+		settings.insert_or_assign("depth_fade_end", _settings.depthFadeEnd);
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("kssao_probe_enabled", _settings.kssaoProbeEnabled);
 		settings.insert_or_assign("kssao_probe_mode", _settings.kssaoProbeMode);
 		settings.insert_or_assign("kssao_probe_value", _settings.kssaoProbeValue);
 		settings.insert_or_assign("kssao_probe_rt", _settings.kssaoProbeRt);
 		settings.insert_or_assign("kssao_probe_anchor", _settings.kssaoProbeAnchor);
+		settings.insert_or_assign("kssao_probe_luma_rt", _settings.kssaoProbeLumaRt);
 		settings.insert_or_assign("kssao_probe_all_final", _settings.kssaoProbeAllFinal);
+		settings.insert_or_assign("noise_frozen", _settings.noiseFrozen);
 
 		std::error_code ec;
 		std::filesystem::create_directories(std::filesystem::path(kConfigPath).parent_path(), ec);
@@ -611,6 +647,12 @@ namespace cs::features
 			L->warn("Failed to compile XeGTAO AO shader.");
 		}
 
+		_denoiseCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
+			cs::util::CompileShader(kDenoisePath, {}, "cs_5_0")));
+		if (!_denoiseCS) {
+			L->warn("Failed to compile XeGTAO denoise shader.");
+		}
+
 		if (!_pointClampSampler) {
 			D3D11_SAMPLER_DESC samplerDesc{};
 			samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
@@ -658,6 +700,13 @@ namespace cs::features
 		try {
 			auto* state = cs::engine::GetGraphicsState();
 			if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
+				// A transient invalid graphics state (0 dims during a menu/loading/alt-tab blip)
+				// must not invalidate an already-valid full-res allocation: keep the existing
+				// resources so IsReady() stays true and every frame writes our AO (no fallback-
+				// to-engine-AO flicker). Only fail when there is nothing allocated yet.
+				if (hadResources) {
+					return true;
+				}
 				throw std::runtime_error("graphics state has no screen dimensions");
 			}
 
@@ -679,6 +728,7 @@ namespace cs::features
 			auto workingDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT, 5, false);
 			auto viewNormalTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
 			auto aoRawTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
+			auto aoDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
 			auto xegtaoCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<XeGTAOCB>());
 			auto decodeCB = std::make_unique<cs::buffer::ConstantBuffer>(
@@ -701,17 +751,38 @@ namespace cs::features
 				constexpr std::uint32_t kNoiseWidth = 128;
 				constexpr std::uint32_t kNoiseHeight = 8192;
 				std::vector<std::uint8_t> noiseData(kNoiseWidth * kNoiseHeight * 2);
-				auto hash = [](std::uint32_t a_value) {
-					a_value ^= a_value >> 16;
-					a_value *= 0x7FEB352Du;
-					a_value ^= a_value >> 15;
-					a_value *= 0x846CA68Bu;
-					a_value ^= a_value >> 16;
-					return a_value;
+				auto hilbertIndex = [](std::uint32_t a_posX, std::uint32_t a_posY) -> std::uint32_t {
+					std::uint32_t index = 0u;
+					for (std::uint32_t curLevel = 64u / 2u; curLevel > 0u; curLevel /= 2u) {
+						const std::uint32_t regionX = (a_posX & curLevel) > 0u ? 1u : 0u;
+						const std::uint32_t regionY = (a_posY & curLevel) > 0u ? 1u : 0u;
+						index += curLevel * curLevel * ((3u * regionX) ^ regionY);
+						if (regionY == 0u) {
+							if (regionX == 1u) {
+								a_posX = 63u - a_posX;
+								a_posY = 63u - a_posY;
+							}
+							std::swap(a_posX, a_posY);
+						}
+					}
+					return index;
 				};
-				for (std::uint32_t texel = 0; texel < kNoiseWidth * kNoiseHeight; ++texel) {
-					noiseData[texel * 2] = static_cast<std::uint8_t>(hash(texel) >> 24);
-					noiseData[texel * 2 + 1] = static_cast<std::uint8_t>(hash(texel ^ 0x9E3779B9u) >> 24);
+				constexpr double kR2X = 0.75487766624669276005;
+				constexpr double kR2Y = 0.569840290998053414;
+				for (std::uint32_t t = 0; t < 64u; ++t) {
+					for (std::uint32_t yy = 0; yy < 128u; ++yy) {
+						for (std::uint32_t x = 0; x < 128u; ++x) {
+							const std::uint32_t index = hilbertIndex(x % 64u, yy % 64u) + 288u * t;
+							const double nx = std::fmod(0.5 + static_cast<double>(index) * kR2X, 1.0);
+							const double ny = std::fmod(0.5 + static_cast<double>(index) * kR2Y, 1.0);
+							const std::size_t texel =
+								(static_cast<std::size_t>(t) * 128u + yy) * 128u + x;
+							noiseData[texel * 2 + 0] =
+								static_cast<std::uint8_t>(std::lround(nx * 255.0));
+							noiseData[texel * 2 + 1] =
+								static_cast<std::uint8_t>(std::lround(ny * 255.0));
+						}
+					}
 				}
 
 				D3D11_TEXTURE2D_DESC noiseDesc{};
@@ -746,6 +817,7 @@ namespace cs::features
 			_workingDepthMipUAVs = std::move(workingDepthMipUAVs);
 			_viewNormalTex = std::move(viewNormalTex);
 			_aoRawTex = std::move(aoRawTex);
+			_aoDenoisedTex = std::move(aoDenoisedTex);
 			_xegtaoCB = std::move(xegtaoCB);
 			_decodeCB = std::move(decodeCB);
 			if (noiseTex) {
@@ -771,6 +843,7 @@ namespace cs::features
 				_workingDepthMipUAVs = {};
 				_viewNormalTex.reset();
 				_aoRawTex.reset();
+				_aoDenoisedTex.reset();
 				_noiseTex = nullptr;
 				_noiseSRV = nullptr;
 				_pointClampSampler = nullptr;
@@ -794,6 +867,7 @@ namespace cs::features
 				_workingDepthMipUAVs = {};
 				_viewNormalTex.reset();
 				_aoRawTex.reset();
+				_aoDenoisedTex.reset();
 				_noiseTex = nullptr;
 				_noiseSRV = nullptr;
 				_pointClampSampler = nullptr;
@@ -1276,9 +1350,11 @@ namespace cs::features
 		L->info("SSGI bind-trace: sha={} insideDLI={} ptr={:p}",
 			sha, insideDLI, static_cast<const void*>(a_bound));
 
-		// RT->slot probe: match this PS's bound SRVs against the engine SSAO-family
-		// render targets so we learn which SAO RT the ambient/IBL composite samples
-		// (and, since Final ping-pongs, which of 45/46/47 is the current-frame buffer).
+		// RT->slot probe: match this PS's bound SRVs against the ENTIRE engine
+		// render-target pool (0..kCount-1), not just the SAO family, so we learn the
+		// exact engine RT index feeding each slot of the ambient/IBL composite -- in
+		// particular which enum the AO input (t9) resolves to. Dims/format are logged so
+		// a resource that is NOT a managed pool RT is still characterized.
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* context = rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
 		if (!context) {
@@ -1291,22 +1367,8 @@ namespace cs::features
 			ownedSRVs[index].attach(srvs[index]);
 		}
 
-		struct SaoRt
-		{
-			cs::engine::RenderTarget rt;
-			const char* name;
-		};
-		static constexpr SaoRt kSaoRts[] = {
-			{ cs::engine::RenderTarget::kSSAO, "kSSAO(28)" },
-			{ cs::engine::RenderTarget::kSSAOFinal, "kSSAOFinal(45)" },
-			{ cs::engine::RenderTarget::kSSAOFinalSwap, "kSSAOFinalSwap(46)" },
-			{ cs::engine::RenderTarget::kSSAOFinalSwap2, "kSSAOFinalSwap2(47)" },
-			{ cs::engine::RenderTarget::kSSAOTemp, "kSSAOTemp(48)" },
-			{ cs::engine::RenderTarget::kSSAOTemp2, "kSSAOTemp2(49)" },
-			{ cs::engine::RenderTarget::kSSAOTemp3, "kSSAOTemp3(50)" },
-		};
-
-		std::string saoMap;
+		const uint rtCount = static_cast<uint>(cs::engine::RenderTarget::kCount);
+		std::string slotMap;
 		for (std::size_t slot = 0; slot < ownedSRVs.size(); ++slot) {
 			if (!ownedSRVs[slot]) {
 				continue;
@@ -1316,17 +1378,32 @@ namespace cs::features
 			if (!boundResource) {
 				continue;
 			}
-			for (const auto& candidate : kSaoRts) {
+			int matchedRt = -1;
+			for (uint rt = 0; rt < rtCount; ++rt) {
 				auto* rtResource = reinterpret_cast<ID3D11Resource*>(
-					rendererData->renderTargets[static_cast<uint>(candidate.rt)].texture);
+					rendererData->renderTargets[rt].texture);
 				if (rtResource && rtResource == boundResource.get()) {
-					saoMap += " t" + std::to_string(slot) + "=" + candidate.name;
+					matchedRt = static_cast<int>(rt);
 					break;
 				}
 			}
+			uint w = 0;
+			uint h = 0;
+			uint fmt = 0;
+			winrt::com_ptr<ID3D11Texture2D> tex;
+			if (SUCCEEDED(boundResource->QueryInterface(IID_PPV_ARGS(tex.put())))) {
+				D3D11_TEXTURE2D_DESC desc{};
+				tex->GetDesc(&desc);
+				w = desc.Width;
+				h = desc.Height;
+				fmt = static_cast<uint>(desc.Format);
+			}
+			slotMap += " t" + std::to_string(slot) + "=RT" +
+			           (matchedRt >= 0 ? std::to_string(matchedRt) : std::string("none")) +
+			           "(" + std::to_string(w) + "x" + std::to_string(h) + " fmt" + std::to_string(fmt) + ")";
 		}
-		if (!saoMap.empty()) {
-			L->info("SSGI sao-slot-map: sha={} insideDLI={}{}", sha, insideDLI, saoMap);
+		if (!slotMap.empty()) {
+			L->info("SSGI rt-slot-map: sha={} insideDLI={}{}", sha, insideDLI, slotMap);
 		}
 	}
 
@@ -1361,9 +1438,10 @@ namespace cs::features
 			CaptureOracle(context, state);
 
 			bool aoProducedThisFrame = false;
+			bool denoisedThisFrame = false;
 			const bool xegtaoReady =
-				_decodeCS && _prefilterCS && _aoCS &&
-				_linearDepthTex && _workingDepthTex && _viewNormalTex && _aoRawTex &&
+				_decodeCS && _prefilterCS && _aoCS && _denoiseCS &&
+				_linearDepthTex && _workingDepthTex && _viewNormalTex && _aoRawTex && _aoDenoisedTex &&
 				_noiseSRV && _pointClampSampler && _xegtaoCB && _decodeCB &&
 				_workingDepthMipUAVs[0] && _workingDepthMipUAVs[1] && _workingDepthMipUAVs[2] &&
 				_workingDepthMipUAVs[3] && _workingDepthMipUAVs[4];
@@ -1372,12 +1450,22 @@ namespace cs::features
 			DirectX::XMFLOAT4X4 worldInvProj{};
 			DirectX::XMFLOAT4 worldNdcToViewMul{};
 			DirectX::XMFLOAT4 worldNdcToViewAdd{};
-			if (_settings.enabled && xegtaoReady && rtm &&
+			const bool projOk = rtm &&
 				cs::engine::TryGetWorldSceneProjection(
 					worldProj,
 					worldInvProj,
 					worldNdcToViewMul,
-					worldNdcToViewAdd)) {
+					worldNdcToViewAdd);
+			if (_settings.enabled && !_xegtaoGateLogged) {
+				_xegtaoGateLogged = true;
+				L->info(
+					"SSGI XeGTAO gate: xegtaoReady={} rtm={} proj={} (decodeCS={} prefilterCS={} aoCS={} noise={} aoRaw={} linDepth={} workDepth={} viewNrm={}).",
+					xegtaoReady, rtm != nullptr, projOk,
+					_decodeCS != nullptr, _prefilterCS != nullptr, _aoCS != nullptr,
+					_noiseSRV != nullptr, _aoRawTex != nullptr,
+					_linearDepthTex != nullptr, _workingDepthTex != nullptr, _viewNormalTex != nullptr);
+			}
+			if (_settings.enabled && xegtaoReady && projOk) {
 				const float widthRatio = cs::engine::dynres::GetWidthRatio(rtm);
 				const float heightRatio = cs::engine::dynres::GetHeightRatio(rtm);
 				const int frameW = static_cast<int>(static_cast<float>(_allocW) * widthRatio);
@@ -1415,19 +1503,39 @@ namespace cs::features
 					xegtaoCB.FrameDim[1] = frameHeight;
 					xegtaoCB.RcpFrameDim[0] = 1.0f / frameWidth;
 					xegtaoCB.RcpFrameDim[1] = 1.0f / frameHeight;
-					xegtaoCB.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
-					xegtaoCB.NumSlices = 3;
+					xegtaoCB.FrameIndex =
+						_settings.noiseFrozen ? 0u : static_cast<std::uint32_t>(state->frameCount);
+					xegtaoCB.NumSlices = 4;
 					xegtaoCB.NumSteps = 8;
 					xegtaoCB.MinScreenRadius = 3.0f;
 					xegtaoCB.AORadius = 1.0f;
-					xegtaoCB.EffectRadius = 35.0f;
-					xegtaoCB.Thickness = 8.0f;
-					xegtaoCB.AOPower = 1.5f;
-					// Synthetic scene tuning placeholders; retune to FO4 world scale at go-live.
-					xegtaoCB.DepthFadeRange[0] = 60.0f;
-					xegtaoCB.DepthFadeRange[1] = 90.0f;
-					xegtaoCB.DepthFadeScaleConst = 0.025f;
+					// EffectRadius/AOPower are live toml knobs. Defaults are FO4 game-unit scale
+					// (~70 units/m): EffectRadius 256 ~= 3.6m, matching the config that measured
+					// indoor occ mean ~0.3. Sweep in-game against the one-shot occ histogram below.
+					xegtaoCB.EffectRadius = _settings.effectRadius;
+					xegtaoCB.Thickness = 32.0f;
+					xegtaoCB.AOPower = _settings.aoPower;
+					// View-space depth (decode.cs) is raw FO4 game units (~70/m). Fade AO out over a
+					// large game-unit range (default 40000-50000) so indoor / near-exterior geometry
+					// (tens of metres) isn't culled; 60/90 zeroed everything past ~1.3m. Live knobs.
+					xegtaoCB.DepthFadeRange[0] = _settings.depthFadeStart;
+					xegtaoCB.DepthFadeRange[1] = _settings.depthFadeEnd;
+					const float depthFadeSpan = _settings.depthFadeEnd - _settings.depthFadeStart;
+					xegtaoCB.DepthFadeScaleConst = depthFadeSpan > 1.0f ? 1.0f / depthFadeSpan : 1.0f;
+					xegtaoCB.BlurRadius = _settings.denoiseRadius;
+					xegtaoCB.DistanceNormalisation = 2.0f;
+					xegtaoCB.CenterBeta = 1.0f;
 					_xegtaoCB->Update(xegtaoCB);
+
+					if (!_xegtaoCbLogged) {
+						_xegtaoCbLogged = true;
+						L->info(
+							"SSGI XeGTAOCB: EffectRadius={:.1f} AORadius={:.3f} Thickness={:.1f} AOPower={:.3f} "
+							"DepthFade=[{:.1f},{:.1f}] DepthFadeScale={:.6f} NumSlices={} NumSteps={} MinScreenRadius={:.2f}",
+							xegtaoCB.EffectRadius, xegtaoCB.AORadius, xegtaoCB.Thickness, xegtaoCB.AOPower,
+							xegtaoCB.DepthFadeRange[0], xegtaoCB.DepthFadeRange[1], xegtaoCB.DepthFadeScaleConst,
+							xegtaoCB.NumSlices, xegtaoCB.NumSteps, xegtaoCB.MinScreenRadius);
+					}
 
 					ID3D11ShaderResourceView* decodeSRVs[2] = { depthSRV, normalSRV };
 					ID3D11Buffer* decodeBuffers[1] = { _decodeCB->CB() };
@@ -1492,6 +1600,10 @@ namespace cs::features
 						(static_cast<std::uint32_t>(frameH) + 7u) / 8u,
 						1);
 					aoProducedThisFrame = true;
+					if (!_xegtaoProducedLogged) {
+						_xegtaoProducedLogged = true;
+						L->info("SSGI XeGTAO PRODUCED real AO (frame {}x{}).", frameW, frameH);
+					}
 
 					ID3D11ShaderResourceView* nullAOSRVs[3] = { nullptr, nullptr, nullptr };
 					ID3D11UnorderedAccessView* nullAOUAVs[1] = { nullptr };
@@ -1501,6 +1613,104 @@ namespace cs::features
 					context->CSSetSamplers(0, 1, nullSamplers);
 					context->CSSetConstantBuffers(0, 1, nullBuffers);
 					context->CSSetShader(nullptr, nullptr, 0);
+
+					if (_settings.denoiseEnabled && aoProducedThisFrame) {
+						ID3D11ShaderResourceView* denoiseSRVs[3] = {
+							_workingDepthTex->srv.get(),
+							_viewNormalTex->srv.get(),
+							_aoRawTex->srv.get()
+						};
+						ID3D11UnorderedAccessView* denoiseUAVs[1] = { _aoDenoisedTex->uav.get() };
+						context->CSSetShaderResources(0, 3, denoiseSRVs);
+						context->CSSetConstantBuffers(0, 1, xegtaoBuffers);
+						context->CSSetSamplers(0, 1, pointClampSamplers);
+						context->CSSetUnorderedAccessViews(0, 1, denoiseUAVs, nullptr);
+						context->CSSetShader(_denoiseCS.get(), nullptr, 0);
+						context->Dispatch(
+							(static_cast<std::uint32_t>(frameW) + 7u) / 8u,
+							(static_cast<std::uint32_t>(frameH) + 7u) / 8u,
+							1);
+						denoisedThisFrame = true;
+
+						context->CSSetShaderResources(0, 3, nullAOSRVs);
+						context->CSSetUnorderedAccessViews(0, 1, nullAOUAVs, nullptr);
+						context->CSSetSamplers(0, 1, nullSamplers);
+						context->CSSetConstantBuffers(0, 1, nullBuffers);
+						context->CSSetShader(nullptr, nullptr, 0);
+					}
+
+					const auto* aoStatsTex = denoisedThisFrame ? _aoDenoisedTex.get() : _aoRawTex.get();
+					// One-shot occlusion histogram over the resolved AO input (0=open, 1=occluded): ground-
+					// truths the AO strength so tuning EffectRadius/AOPower/NumSlices is measured,
+					// not guessed. A single full-frame copy+map stall is fine for a launch-once
+					// diagnostic. Uses the immediate context (same one OnKssaoReadback maps).
+					if (!_aoStatsLogged && aoStatsTex) {
+						_aoStatsLogged = true;
+						const auto fw = static_cast<std::uint32_t>(frameW);
+						const auto fh = static_cast<std::uint32_t>(frameH);
+						auto* device = cs::util::GetD3DDevice();
+						if (device && fw > 0u && fh > 0u) {
+							D3D11_TEXTURE2D_DESC sd{};
+							sd.Width = fw;
+							sd.Height = fh;
+							sd.MipLevels = 1;
+							sd.ArraySize = 1;
+							sd.Format = DXGI_FORMAT_R8_UNORM;
+							sd.SampleDesc.Count = 1;
+							sd.Usage = D3D11_USAGE_STAGING;
+							sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+							winrt::com_ptr<ID3D11Texture2D> staging;
+							if (SUCCEEDED(device->CreateTexture2D(&sd, nullptr, staging.put()))) {
+								const D3D11_BOX box{ 0, 0, 0, fw, fh, 1 };
+								context->CopySubresourceRegion(
+									staging.get(), 0, 0, 0, 0, aoStatsTex->resource.get(), 0, &box);
+								D3D11_MAPPED_SUBRESOURCE m{};
+								if (SUCCEEDED(context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &m))) {
+									double rawSum = 0.0;
+									double finalSum = 0.0;
+									double occludedSum = 0.0;
+									std::uint32_t n = 0;
+									std::uint32_t occludedN = 0;
+									std::uint8_t lo = 255;
+									std::uint8_t hi = 0;
+									for (std::uint32_t y = 0; y < fh; y += 8u) {
+										const auto* rowPtr = static_cast<const std::uint8_t*>(m.pData) +
+											static_cast<std::size_t>(y) * m.RowPitch;
+										for (std::uint32_t x = 0; x < fw; x += 8u) {
+											const std::uint8_t v = rowPtr[x];
+											const double occ = static_cast<double>(v) / 255.0;
+											const double finalOcc = 1.0 - std::pow(1.0 - occ, static_cast<double>(_settings.aoPower));
+											lo = (std::min)(lo, v);
+											hi = (std::max)(hi, v);
+											rawSum += occ;
+											finalSum += finalOcc;
+											if (occ > 0.01) {
+												occludedSum += occ;
+												++occludedN;
+											}
+											++n;
+										}
+									}
+									context->Unmap(staging.get(), 0);
+									if (n > 0u) {
+										L->info(
+											"SSGI AO occ stats (one-shot): rawMean={:.3f} finalMean={:.3f} occludedMean={:.3f} min={:.3f} max={:.3f} (0=open 1=occluded, {} samples).",
+											rawSum / static_cast<double>(n),
+											finalSum / static_cast<double>(n),
+											occludedN > 0u ? occludedSum / static_cast<double>(occludedN) : 0.0,
+											static_cast<double>(lo) / 255.0,
+											static_cast<double>(hi) / 255.0,
+											n);
+									}
+								}
+							}
+						}
+					}
+				} else if (!_xegtaoInnerFailLogged) {
+					_xegtaoInnerFailLogged = true;
+					L->warn(
+						"SSGI XeGTAO inner-gate fail (real AO skipped): frameW={} frameH={} depthSRV={} normalSRV={}.",
+						frameW, frameH, depthSRV != nullptr, normalSRV != nullptr);
 				}
 			}
 
@@ -1510,10 +1720,15 @@ namespace cs::features
 				cb.Extent[1] = _allocH;
 				cb.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
 				cb.HasAO = aoProducedThisFrame ? 1u : 0u;
+				cb.AoPower = _settings.aoPower;
 				_resolveCB->Update(cb);
 
 				ID3D11ShaderResourceView* resolveSRVs[1] = {
-					aoProducedThisFrame ? _aoRawTex->srv.get() : nullptr
+					aoProducedThisFrame ?
+						((_settings.denoiseEnabled && denoisedThisFrame) ?
+								_aoDenoisedTex->srv.get() :
+								_aoRawTex->srv.get()) :
+						nullptr
 				};
 				ID3D11Buffer* buffers[1] = { _resolveCB->CB() };
 				ID3D11UnorderedAccessView* uavs[2] = {
@@ -1561,27 +1776,57 @@ namespace cs::features
 			return;
 		}
 
+		if (!_kssaoOverwriteFiredLogged) {
+			_kssaoOverwriteFiredLogged = true;
+			L->info(
+				"SSGI kSSAO-probe: overwrite fired anchor={} mode={} allFinal={}.",
+				a_anchor,
+				_settings.kssaoProbeMode,
+				_settings.kssaoProbeAllFinal ? 1 : 0);
+		}
+
 		const auto target = static_cast<cs::engine::RenderTarget>(_settings.kssaoProbeRt);
 
 		if (_settings.kssaoProbeMode == 0) {
 			const float value = _settings.kssaoProbeValue;
 			const float color[4] = { value, value, value, value };
-			if (_settings.kssaoProbeAllFinal) {
-				for (const auto rt : {
-						 cs::engine::RenderTarget::kSSAOFinal,
-						 cs::engine::RenderTarget::kSSAOFinalSwap,
-						 cs::engine::RenderTarget::kSSAOFinalSwap2 }) {
-					if (auto* rtv = cs::engine::GetRenderTargetRTV(rt)) {
-						context->ClearRenderTargetView(rtv, color);
-					}
+			const bool logThis = !_kssaoOverwriteMode0Logged;
+			_kssaoOverwriteMode0Logged = true;
+			// SAO buffers are compute-written (UAV-only), so their cached RTV is usually
+			// null; fall back to a UAV clear so the write actually lands. Mirrors the UAV
+			// path the real-AO overwrite (OverwriteRt) already uses.
+			auto clearRt = [&](cs::engine::RenderTarget a_rt) {
+				auto* rtv = cs::engine::GetRenderTargetRTV(a_rt);
+				auto* uav = cs::engine::GetRenderTargetUAV(a_rt);
+				const char* via = "SKIPPED";
+				if (rtv) {
+					context->ClearRenderTargetView(rtv, color);
+					via = "RTV";
+				} else if (uav) {
+					context->ClearUnorderedAccessViewFloat(uav, color);
+					via = "UAV";
 				}
-			} else if (auto* targetRTV = cs::engine::GetRenderTargetRTV(target)) {
-				context->ClearRenderTargetView(targetRTV, color);
+				if (logThis) {
+					L->info(
+						"SSGI kSSAO-probe: mode0 rt={} rtv={} uav={} cleared-via={}.",
+						static_cast<int>(a_rt),
+						rtv != nullptr,
+						uav != nullptr,
+						via);
+				}
+			};
+			if (_settings.kssaoProbeAllFinal) {
+				clearRt(cs::engine::RenderTarget::kSSAOFinal);
+				clearRt(cs::engine::RenderTarget::kSSAOFinalSwap);
+				clearRt(cs::engine::RenderTarget::kSSAOFinalSwap2);
+			} else {
+				clearRt(target);
 			}
 			return;
 		}
 
-		if (!IsReady() || !_aoTexture) {
+		// mode 3 (diagnostic pattern) writes a fixed spatial signal and does not need real AO.
+		if (_settings.kssaoProbeMode != 3 && (!IsReady() || !_aoTexture)) {
 			if (!_kssaoNotReadyLogged) {
 				_kssaoNotReadyLogged = true;
 				L->warn("SSGI kSSAO-probe: AO is not ready; skipping mode {}.", _settings.kssaoProbeMode);
@@ -1621,7 +1866,20 @@ namespace cs::features
 		auto* targetUAV = cs::engine::GetRenderTargetUAV(a_target);
 		auto* targetSRV = cs::engine::GetRenderTargetSRV(a_target);
 		auto* rtm = cs::engine::GetRenderTargetManager();
-		if (!targetTexture || !targetUAV || !targetSRV || !rtm || !_kssaoOverwriteCB) {
+		const bool needSRV = _settings.kssaoProbeMode == 2;  // only the blend path reads the engine SRV
+		if (!targetTexture || !targetUAV || !rtm || !_kssaoOverwriteCB || (needSRV && !targetSRV)) {
+			if (!_kssaoOverwriteSkipLogged) {
+				_kssaoOverwriteSkipLogged = true;
+				L->warn(
+					"SSGI kSSAO-probe: OverwriteRt SKIPPED rt={} mode={} texture={} uav={} srv={} rtm={} cb={}.",
+					static_cast<int>(a_target),
+					_settings.kssaoProbeMode,
+					targetTexture != nullptr,
+					targetUAV != nullptr,
+					targetSRV != nullptr,
+					rtm != nullptr,
+					_kssaoOverwriteCB != nullptr);
+			}
 			return;
 		}
 
@@ -1738,7 +1996,7 @@ namespace cs::features
 			cb.Mode = static_cast<std::uint32_t>(_settings.kssaoProbeMode);
 			_kssaoOverwriteCB->Update(cb);
 
-			ID3D11ShaderResourceView* srvs[2] = { engineAO, _aoTexture->srv.get() };
+			ID3D11ShaderResourceView* srvs[2] = { engineAO, _aoTexture ? _aoTexture->srv.get() : nullptr };
 			ID3D11Buffer* buffers[1] = { _kssaoOverwriteCB->CB() };
 			ID3D11UnorderedAccessView* uavs[1] = { targetUAV };
 			context->CSSetShaderResources(0, 2, srvs);
@@ -1746,6 +2004,15 @@ namespace cs::features
 			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 			context->CSSetShader(overwriteCS, nullptr, 0);
 			context->Dispatch((targetW + 7u) / 8u, (targetH + 7u) / 8u, 1);
+			if (!_kssaoDispatchLoggedOnce) {
+				_kssaoDispatchLoggedOnce = true;
+				L->info(
+					"SSGI kSSAO-probe: dispatch wrote {}x{} to rt={} mode={}.",
+					targetW,
+					targetH,
+					static_cast<int>(a_target),
+					_settings.kssaoProbeMode);
+			}
 		} catch (const std::exception& e) {
 			L->warn("SSGI kSSAO-probe overwrite failed: {}.", e.what());
 		} catch (...) {
@@ -1758,6 +2025,114 @@ namespace cs::features
 		if (!_settings.kssaoProbeEnabled) {
 			return;
 		}
+		if (!_kssaoReadbackEnteredLogged) {
+			_kssaoReadbackEnteredLogged = true;
+			L->info("SSGI kSSAO-probe: readback ENTERED (composite anchor fired).");
+		}
+
+		// One-shot: dump the PS SRV bindings live at the post-composite anchor (the
+		// composite draw has just run, so t9=AO is still bound here -- unlike the
+		// PSSetShader-time observer, which sees a stale/partial set). Match each bound
+		// SRV against the full engine RT pool so we learn the exact enum feeding t9.
+		if (!_compositeSlotMapLogged) {
+			auto* rd = RE::BSGraphics::GetRendererData();
+			auto* ctx = rd ? reinterpret_cast<ID3D11DeviceContext*>(rd->context) : nullptr;
+			if (ctx) {
+				_compositeSlotMapLogged = true;
+				ID3D11ShaderResourceView* srvs[16] = {};
+				ctx->PSGetShaderResources(0, 16, srvs);
+				const uint rtCount = static_cast<uint>(cs::engine::RenderTarget::kCount);
+				std::string slotMap;
+				for (uint slot = 0; slot < 16; ++slot) {
+					if (!srvs[slot]) {
+						continue;
+					}
+					winrt::com_ptr<ID3D11ShaderResourceView> ownedSrv;
+					ownedSrv.attach(srvs[slot]);
+					winrt::com_ptr<ID3D11Resource> res;
+					ownedSrv->GetResource(res.put());
+					if (!res) {
+						continue;
+					}
+					int matchedRt = -1;
+					for (uint rt = 0; rt < rtCount; ++rt) {
+						auto* rtRes = reinterpret_cast<ID3D11Resource*>(rd->renderTargets[rt].texture);
+						if (rtRes && rtRes == res.get()) {
+							matchedRt = static_cast<int>(rt);
+							break;
+						}
+					}
+					uint w = 0;
+					uint h = 0;
+					uint fmt = 0;
+					winrt::com_ptr<ID3D11Texture2D> tex;
+					if (SUCCEEDED(res->QueryInterface(IID_PPV_ARGS(tex.put())))) {
+						D3D11_TEXTURE2D_DESC d{};
+						tex->GetDesc(&d);
+						w = d.Width;
+						h = d.Height;
+						fmt = static_cast<uint>(d.Format);
+					}
+					std::string views;
+					if (matchedRt >= 0) {
+						const auto& e = rd->renderTargets[static_cast<uint>(matchedRt)];
+						views = std::string(" rtv") + (e.rtView ? "1" : "0") +
+						        " srv" + (e.srView ? "1" : "0") +
+						        " uav" + (e.uaView ? "1" : "0");
+					}
+					slotMap += " t" + std::to_string(slot) + "=RT" +
+					           (matchedRt >= 0 ? std::to_string(matchedRt) : std::string("none")) +
+					           "(" + std::to_string(w) + "x" + std::to_string(h) + " fmt" + std::to_string(fmt) + views + ")";
+				}
+					// Also capture the composite's OUTPUT RTV(s) -> pool enum. The AO
+					// multiplies only the composite's output, never the inputs it samples
+					// (e.g. RT3 at t10 is prior-lit INPUT), so the luma readback must target
+					// this output RT to see any AO effect.
+					{
+						ID3D11RenderTargetView* rtvs[8] = {};
+						ID3D11DepthStencilView* dsv = nullptr;
+						ctx->OMGetRenderTargets(8, rtvs, &dsv);
+						for (uint o = 0; o < 8; ++o) {
+							if (!rtvs[o]) {
+								continue;
+							}
+							winrt::com_ptr<ID3D11RenderTargetView> ownedRtv;
+							ownedRtv.attach(rtvs[o]);
+							winrt::com_ptr<ID3D11Resource> ores;
+							ownedRtv->GetResource(ores.put());
+							if (!ores) {
+								continue;
+							}
+							int matchedOut = -1;
+							for (uint rt = 0; rt < rtCount; ++rt) {
+								auto* rtRes = reinterpret_cast<ID3D11Resource*>(rd->renderTargets[rt].texture);
+								if (rtRes && rtRes == ores.get()) {
+									matchedOut = static_cast<int>(rt);
+									break;
+								}
+							}
+							uint ow = 0;
+							uint oh = 0;
+							uint ofmt = 0;
+							winrt::com_ptr<ID3D11Texture2D> otex;
+							if (SUCCEEDED(ores->QueryInterface(IID_PPV_ARGS(otex.put())))) {
+								D3D11_TEXTURE2D_DESC d{};
+								otex->GetDesc(&d);
+								ow = d.Width;
+								oh = d.Height;
+								ofmt = static_cast<uint>(d.Format);
+							}
+							slotMap += " o" + std::to_string(o) + "=RT" +
+							           (matchedOut >= 0 ? std::to_string(matchedOut) : std::string("none")) +
+							           "(" + std::to_string(ow) + "x" + std::to_string(oh) + " fmt" + std::to_string(ofmt) + ")";
+						}
+						if (dsv) {
+							dsv->Release();
+						}
+					}
+					L->info("SSGI composite-slot-map (post-composite):{}", slotMap);
+			}
+		}
 		if ((_kssaoReadbackFrame++ % kLumaReadbackInterval) != 0) {
 			return;
 		}
@@ -1765,20 +2140,39 @@ namespace cs::features
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* rtm = cs::engine::GetRenderTargetManager();
 		if (!rendererData || !rtm) {
+			if (!_kssaoReadbackNullRtmLogged) {
+				_kssaoReadbackNullRtmLogged = true;
+				L->warn(
+					"SSGI kSSAO-probe: readback abort (rendererData_null={} rtm_null={}).",
+					!rendererData,
+					!rtm);
+			}
 			return;
 		}
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		auto* frameBuffer = reinterpret_cast<ID3D11Texture2D*>(
-			rendererData->renderTargets[static_cast<uint>(cs::engine::RenderTarget::kFrameBuffer)].texture);
+		const auto lumaRt = static_cast<cs::engine::RenderTarget>(_settings.kssaoProbeLumaRt);
+		const auto lumaRtIndex = static_cast<uint>(_settings.kssaoProbeLumaRt);
+		auto* frameBuffer = (lumaRtIndex < static_cast<uint>(cs::engine::RenderTarget::kCount))
+			? reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[lumaRtIndex].texture)
+			: nullptr;
 		auto* device = reinterpret_cast<ID3D11Device*>(rendererData->device);
 		if (!context || !frameBuffer || !device) {
+			if (!_kssaoReadbackNullDeviceLogged) {
+				_kssaoReadbackNullDeviceLogged = true;
+				L->warn(
+					"SSGI kSSAO-probe: readback abort (lumaRt={} context_null={} frameBuffer_null={} device_null={}).",
+					_settings.kssaoProbeLumaRt,
+					!context,
+					!frameBuffer,
+					!device);
+			}
 			return;
 		}
 
 		D3D11_TEXTURE2D_DESC frameDesc{};
 		frameBuffer->GetDesc(&frameDesc);
 		DXGI_FORMAT readFormat = frameDesc.Format;
-		if (auto* frameBufferRTV = cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kFrameBuffer)) {
+		if (auto* frameBufferRTV = cs::engine::GetRenderTargetRTV(lumaRt)) {
 			D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};
 			frameBufferRTV->GetDesc(&rtvDesc);
 			if (rtvDesc.Format != DXGI_FORMAT_UNKNOWN) {
@@ -1806,9 +2200,18 @@ namespace cs::features
 			frameDesc.Height,
 			static_cast<std::uint32_t>(
 				static_cast<float>(frameDesc.Height) * cs::engine::dynres::GetHeightRatio(rtm)));
-		const std::uint32_t sampleW = std::min(kLumaSampleExtent, activeW);
-		const std::uint32_t sampleH = std::min(kLumaSampleExtent, activeH);
+		const std::uint32_t sampleW = std::min(kLumaSampleWidth, activeW);
+		const std::uint32_t sampleH = std::min(kLumaSampleHeight, activeH);
 		if (sampleW == 0 || sampleH == 0) {
+			if (!_kssaoReadbackZeroExtentLogged) {
+				_kssaoReadbackZeroExtentLogged = true;
+				L->warn(
+					"SSGI kSSAO-probe: readback abort (activeW={} activeH={} frameW={} frameH={}).",
+					activeW,
+					activeH,
+					frameDesc.Width,
+					frameDesc.Height);
+			}
 			return;
 		}
 
@@ -1849,8 +2252,11 @@ namespace cs::features
 			bool mappedStaging = true;
 			try {
 				double luminanceSum = 0.0;
-				std::vector<float> luminances;
-				luminances.reserve(static_cast<std::size_t>(sampleW) * sampleH);
+				const std::uint32_t seamColumn = sampleW / 2;
+				std::vector<float> leftLum;
+				std::vector<float> rightLum;
+				leftLum.reserve(static_cast<std::size_t>(seamColumn) * sampleH);
+				rightLum.reserve(static_cast<std::size_t>(sampleW - seamColumn) * sampleH);
 				for (std::uint32_t y = 0; y < sampleH; ++y) {
 					const auto* row = static_cast<const std::uint8_t*>(mapped.pData) +
 						static_cast<std::size_t>(y) * mapped.RowPitch;
@@ -1860,7 +2266,7 @@ namespace cs::features
 							throw std::runtime_error("framebuffer luminance decode failed");
 						}
 						luminanceSum += static_cast<double>(luminance);
-						luminances.push_back(luminance);
+						(x < seamColumn ? leftLum : rightLum).push_back(luminance);
 					}
 				}
 				context->Unmap(_kssaoLumaStaging.get(), 0);
@@ -1868,22 +2274,46 @@ namespace cs::features
 
 				const double luminanceMean =
 					luminanceSum / static_cast<double>(sampleW * sampleH);
-				// 10th-percentile luma: the shadowed/ambient-dominated tail moves most when
-				// the ambient AO term is zeroed, so it is a more sensitive probe signal than
-				// the mean over a bright exterior.
-				std::sort(luminances.begin(), luminances.end());
-				const std::size_t p10Index =
-					static_cast<std::size_t>(0.1 * static_cast<double>(luminances.size() - 1));
-				const float luminanceP10 = luminances[p10Index];
+				// Within-frame half-split: the readback band is centered on screen, so its left
+				// columns fall on the left half of the frame (screen x < center) and its right
+				// columns on the right half. When a probe writes a left/right AO pattern (or an
+				// injected AO the composite consumes), lumaLeft < lumaRight IN THE SAME FRAME
+				// proves the target/anchor reaches the composite; weather / time-of-day / sun are
+				// common-mode and cancel. p10 per half isolates the shadowed, ambient-dominated
+				// tail, which moves most when the ambient AO term changes.
+				const auto halfStats = [](std::vector<float>& a_v, double& a_mean, float& a_p10) {
+					if (a_v.empty()) {
+						a_mean = 0.0;
+						a_p10 = 0.0f;
+						return;
+					}
+					double sum = 0.0;
+					for (const float v : a_v) {
+						sum += static_cast<double>(v);
+					}
+					a_mean = sum / static_cast<double>(a_v.size());
+					std::sort(a_v.begin(), a_v.end());
+					a_p10 = a_v[static_cast<std::size_t>(0.1 * static_cast<double>(a_v.size() - 1))];
+				};
+				double leftMean = 0.0;
+				double rightMean = 0.0;
+				float leftP10 = 0.0f;
+				float rightP10 = 0.0f;
+				halfStats(leftLum, leftMean, leftP10);
+				halfStats(rightLum, rightMean, rightP10);
 				L->info(
-					"SSGI kSSAO-probe: enabled=1 mode={} rt={} allFinal={} anchor={} value={:.3f} lumaMean={:.6f} lumaP10={:.6f} frame={}",
+					"SSGI kSSAO-probe: enabled=1 mode={} rt={} allFinal={} anchor={} value={:.3f} lumaRt={} lumaMean={:.6f} lumaLeftMean={:.6f} lumaLeftP10={:.6f} lumaRightMean={:.6f} lumaRightP10={:.6f} frame={}",
 					_settings.kssaoProbeMode,
 					_settings.kssaoProbeRt,
 					_settings.kssaoProbeAllFinal ? 1 : 0,
 					_settings.kssaoProbeAnchor,
 					_settings.kssaoProbeValue,
+					_settings.kssaoProbeLumaRt,
 					luminanceMean,
-					luminanceP10,
+					leftMean,
+					leftP10,
+					rightMean,
+					rightP10,
 					_kssaoReadbackFrame);
 			} catch (...) {
 				if (mappedStaging) {

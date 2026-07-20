@@ -39,13 +39,21 @@ namespace cs::features
 
 		struct Settings
 		{
+			bool  denoiseEnabled = true;
+			float denoiseRadius = 2.0f;
+			float effectRadius = 256.0f;
+			float aoPower = 2.5f;
+			float depthFadeStart = 40000.0f;
+			float depthFadeEnd = 50000.0f;
 			bool  enabled = false;
 			bool  kssaoProbeEnabled = false;
 			int   kssaoProbeMode = 0;
 			float kssaoProbeValue = 0.0f;
 			int   kssaoProbeRt = 45;
 			int   kssaoProbeAnchor = 2;
+			int   kssaoProbeLumaRt = 3;
 			bool  kssaoProbeAllFinal = false;
+			bool  noiseFrozen = true;
 		};
 
 		struct CaptureConfig
@@ -66,11 +74,12 @@ namespace cs::features
 			std::uint32_t Origin[2];
 			std::uint32_t FrameIndex;
 			std::uint32_t HasAO;
-			std::uint32_t Padding[2];
+			float         AoPower;
+			std::uint32_t Padding;
 		};
 		static_assert(sizeof(ResolveCB) % 16 == 0);
 
-		// Matches XeGTAOCB in Shaders/XeGTAO/common.hlsli (112 bytes, 7x16).
+		// Matches XeGTAOCB in Shaders/XeGTAO/common.hlsli (128 bytes, 8x16).
 		struct alignas(16) XeGTAOCB
 		{
 			float         NDCToViewMul[4];
@@ -89,9 +98,12 @@ namespace cs::features
 			float         AOPower;
 			float         DepthFadeRange[2];
 			float         DepthFadeScaleConst;
-			float         _pad;
+			float         BlurRadius;
+			float         DistanceNormalisation;
+			float         CenterBeta;
+			float         _pad[2];
 		};
-		static_assert(sizeof(XeGTAOCB) == 112);
+		static_assert(sizeof(XeGTAOCB) == 128);
 
 		// Matches DecodeCB in Shaders/XeGTAO/decode.cs.hlsl.
 		struct alignas(16) DecodeCB
@@ -148,6 +160,7 @@ namespace cs::features
 		std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, 5> _workingDepthMipUAVs;
 		std::unique_ptr<cs::buffer::Texture2D> _viewNormalTex;
 		std::unique_ptr<cs::buffer::Texture2D> _aoRawTex;
+		std::unique_ptr<cs::buffer::Texture2D> _aoDenoisedTex;
 		winrt::com_ptr<ID3D11Texture2D> _noiseTex;
 		winrt::com_ptr<ID3D11ShaderResourceView> _noiseSRV;
 		winrt::com_ptr<ID3D11SamplerState> _pointClampSampler;
@@ -157,6 +170,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _decodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
 		winrt::com_ptr<ID3D11ComputeShader> _aoCS;
+		winrt::com_ptr<ID3D11ComputeShader> _denoiseCS;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 4> _kssaoOverwriteCS;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _kssaoOverwriteCB;
 		winrt::com_ptr<ID3D11Texture2D> _kssaoScratch;
@@ -172,6 +186,20 @@ namespace cs::features
 		bool _kssaoNotReadyLogged = false;
 		bool _kssaoUnsupportedLogged = false;
 		bool _kssaoReadbackUnsupportedLogged = false;
+		bool _kssaoReadbackEnteredLogged = false;
+		bool _kssaoReadbackNullRtmLogged = false;
+		bool _kssaoReadbackNullDeviceLogged = false;
+		bool _kssaoReadbackZeroExtentLogged = false;
+		bool _kssaoOverwriteFiredLogged = false;
+		bool _kssaoOverwriteMode0Logged = false;
+		bool _kssaoDispatchLoggedOnce = false;
+		bool _kssaoOverwriteSkipLogged = false;
+		bool _compositeSlotMapLogged = false;
+		bool _xegtaoGateLogged = false;
+		bool _xegtaoProducedLogged = false;
+		bool _xegtaoCbLogged = false;
+		bool _xegtaoInnerFailLogged = false;
+		bool _aoStatsLogged = false;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;

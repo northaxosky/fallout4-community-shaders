@@ -121,7 +121,6 @@ void CalculateGI(
 
 	visibility *= rcpNumSlices;
 	visibility = lerp(saturate(visibility), 0, depthFade);
-	visibility = 1 - pow(abs(1 - visibility), AOPower);
 
 	o_ao = visibility;
 }

@@ -4,7 +4,8 @@ cbuffer ResolveCB : register(b0)
     uint2 gOrigin;
     uint gFrameIndex;
     uint gHasAO;
-    uint2 _pad;
+    float gAoPower;
+    uint _pad;
 };
 
 Texture2D<float> gAoRaw : register(t0); // XeGTAO occlusion: 0 open, 1 occluded
@@ -19,7 +20,7 @@ void main(uint3 id : SV_DispatchThreadID)
     float vis = 1.0;
     if (gHasAO != 0) {
         float occ = gAoRaw.Load(int3(p, 0));
-        vis = saturate(1.0 - occ);
+        vis = pow(saturate(1.0 - occ), gAoPower);
     }
     gAO[p] = float4(vis, vis, vis, 1.0);
     gBounce[p] = float4(0.0, 0.0, 0.0, 0.0);

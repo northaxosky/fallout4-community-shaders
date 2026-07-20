@@ -28,7 +28,11 @@ cbuffer XeGTAOCB : register(b0)
 
 	float2 DepthFadeRange;
 	float DepthFadeScaleConst;
-	float _pad;
+	float BlurRadius;
+
+	float DistanceNormalisation;
+	float CenterBeta;
+	float2 _pad;
 };
 
 SamplerState samplerPointClamp : register(s0);
@@ -44,6 +48,11 @@ float3 ScreenToViewPosition(const float2 screenPos, const float viewspaceDepth)
 	ret.xy = (NDCToViewMul.xy * screenPos.xy + NDCToViewAdd.xy) * viewspaceDepth;
 	ret.z = viewspaceDepth;
 	return ret;
+}
+
+float2 ViewToUV(const float3 viewPos)
+{
+	return ((viewPos.xy / viewPos.z) - NDCToViewAdd.xy) / NDCToViewMul.xy;
 }
 
 #endif  // XEGTAO_COMMON
