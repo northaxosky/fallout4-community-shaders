@@ -114,7 +114,7 @@ void FidelityFX::GenerateReactiveMask()
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * renderTargetManager->GetDynamicWidthRatio(), screenSize.y * renderTargetManager->GetDynamicHeightRatio());
 
 	dispatchParameters.renderSize.width = static_cast<uint>(renderSize.x);
 	dispatchParameters.renderSize.height = static_cast<uint>(renderSize.y);

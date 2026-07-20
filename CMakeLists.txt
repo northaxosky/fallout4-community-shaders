@@ -164,10 +164,9 @@ set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
 add_executable(ProjectionMathTests
 	tests/ProjectionMathTests.cpp
-	src/Render/ProjectionMath.h
 )
 configure_host_test(ProjectionMathTests)
-target_link_libraries(ProjectionMathTests PRIVATE Microsoft::DirectXMath)
+target_link_libraries(ProjectionMathTests PRIVATE CommonLibF4::CommonLibF4 Microsoft::DirectXMath)
 
 add_test(NAME ProjectionMath COMMAND ProjectionMathTests)
 set_tests_properties(ProjectionMath PROPERTIES LABELS "render;unit")

@@ -581,8 +581,8 @@ namespace cs::features
 					worldNdcToViewMul,
 					worldNdcToViewAdd);
 			if (_settings.enabled && xegtaoReady && projOk) {
-				const float widthRatio = cs::engine::dynres::GetWidthRatio(rtm);
-				const float heightRatio = cs::engine::dynres::GetHeightRatio(rtm);
+				const float widthRatio = rtm->GetDynamicWidthRatio();
+				const float heightRatio = rtm->GetDynamicHeightRatio();
 				const int frameW = static_cast<int>(static_cast<float>(_allocW) * widthRatio);
 				const int frameH = static_cast<int>(static_cast<float>(_allocH) * heightRatio);
 				auto* depthSRV = cs::engine::GetSceneDepthSRV();
@@ -868,8 +868,8 @@ namespace cs::features
 			return;
 		}
 
-		const float widthRatio = cs::engine::dynres::GetWidthRatio(rtm);
-		const float heightRatio = cs::engine::dynres::GetHeightRatio(rtm);
+		const float widthRatio = rtm->GetDynamicWidthRatio();
+		const float heightRatio = rtm->GetDynamicHeightRatio();
 		const auto scaledExtent = [](std::uint32_t a_extent, float a_ratio) {
 			if (a_ratio <= 0.0f) {
 				return 0u;

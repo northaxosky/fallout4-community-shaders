@@ -204,26 +204,26 @@ struct DrawWorld_Imagespace_RenderEffectRange
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 		static auto gameViewport = cs::engine::GetGraphicsState();
 
-		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = renderTargetManager->GetDynamicHeightRatio() != 1.0 || renderTargetManager->GetDynamicWidthRatio() != 1.0;
 
 		auto originalOffsetX = gameViewport->offsetX;
 		auto originalOffsetY = gameViewport->offsetY;
 
-		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = renderTargetManager->GetDynamicHeightRatio();
+		originalDynamicWidthRatio = renderTargetManager->GetDynamicWidthRatio();
 
 		if (requiresOverride) {
 
 			func(This, 0, 3, 1, 1);
 			upscaling->OverrideRenderTargets({1, 4, 29, 16});
 			upscaling->OverrideDepth(true);
-			cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
+			renderTargetManager->SetDynamicResolutionState(1.0f, 1.0f, false);
 
 			func(This, 4, 13, 1, 1);
 			upscaling->ResetDepth();
 			upscaling->ResetRenderTargets({4});
 
-			cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			renderTargetManager->SetDynamicResolutionState(originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		} else {
 			func(This, a2, a3, a4, a5);
@@ -247,10 +247,10 @@ struct DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
-		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = renderTargetManager->GetDynamicHeightRatio();
+		originalDynamicWidthRatio = renderTargetManager->GetDynamicWidthRatio();
 
-		cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
+		renderTargetManager->SetDynamicResolutionState(1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -295,15 +295,15 @@ struct DrawWorld_Render_PreUI_NVHBAO
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = renderTargetManager->GetDynamicHeightRatio() != 1.0 || renderTargetManager->GetDynamicWidthRatio() != 1.0;
 
-		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = renderTargetManager->GetDynamicHeightRatio();
+		originalDynamicWidthRatio = renderTargetManager->GetDynamicWidthRatio();
 
 		if (requiresOverride) {
 			upscaling->OverrideDepth(true);
 			upscaling->OverrideRenderTargets({20});
-			cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
+			renderTargetManager->SetDynamicResolutionState(1.0f, 1.0f, false);
 		}
 
 		func(This);
@@ -311,7 +311,7 @@ struct DrawWorld_Render_PreUI_NVHBAO
 		if (requiresOverride) {
 			upscaling->ResetDepth();
 			upscaling->ResetRenderTargets({20});
-			cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			renderTargetManager->SetDynamicResolutionState(originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
 	}
@@ -326,15 +326,15 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = renderTargetManager->GetDynamicHeightRatio() != 1.0 || renderTargetManager->GetDynamicWidthRatio() != 1.0;
 
-		originalDynamicHeightRatio = cs::engine::dynres::GetHeightRatio(renderTargetManager);
-		originalDynamicWidthRatio = cs::engine::dynres::GetWidthRatio(renderTargetManager);
+		originalDynamicHeightRatio = renderTargetManager->GetDynamicHeightRatio();
+		originalDynamicWidthRatio = renderTargetManager->GetDynamicWidthRatio();
 
 		if (requiresOverride) {
 			upscaling->OverrideRenderTargets({20, 25, 57, 24, 23, 58, 59, 3, 9, 60, 61, 28});
 			upscaling->OverrideDepth(true);
-			cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
+			renderTargetManager->SetDynamicResolutionState(1.0f, 1.0f, false);
 		}
 
 		func(This, a2, a3);
@@ -342,7 +342,7 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 		if (requiresOverride) {
 			upscaling->ResetRenderTargets({4});
 			upscaling->ResetDepth();
-			cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+			renderTargetManager->SetDynamicResolutionState(originalDynamicWidthRatio, originalDynamicHeightRatio,
 				originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 		}
 	}
@@ -357,7 +357,7 @@ struct BSImagespaceShaderLensFlare_RenderLensFlare
 		auto upscaling = Upscaling::GetSingleton();
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		bool requiresOverride = cs::engine::dynres::GetHeightRatio(renderTargetManager) != 1.0 || cs::engine::dynres::GetWidthRatio(renderTargetManager) != 1.0;
+		bool requiresOverride = renderTargetManager->GetDynamicHeightRatio() != 1.0 || renderTargetManager->GetDynamicWidthRatio() != 1.0;
 
 		if (requiresOverride)
 			upscaling->OverrideDepth(true);
@@ -403,7 +403,7 @@ struct LoadingMenu_Render_UpdateTemporalData
 		func(This);
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
-		cs::engine::dynres::Set(renderTargetManager, 1.0f, 1.0f, false);
+		renderTargetManager->SetDynamicResolutionState(1.0f, 1.0f, false);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
 };
@@ -417,7 +417,7 @@ struct DrawWorld_Imagespace
 
 		static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
-		cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+		renderTargetManager->SetDynamicResolutionState(originalDynamicWidthRatio, originalDynamicHeightRatio,
 			originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 	}
 	static inline REL::Relocation<decltype(thunk)> func;
@@ -878,8 +878,8 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 	// Keep engine RT metadata in scaled resolution for dimension queries.
 	for (int i = 0; i < 100; i++) {
 		originalRenderTargetData[i] = renderTargetManager->renderTargetData[i];
-		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * cs::engine::dynres::GetWidthRatio(renderTargetManager));
-		renderTargetManager->renderTargetData[i].height = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].height) * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * renderTargetManager->GetDynamicWidthRatio());
+		renderTargetManager->renderTargetData[i].height = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].height) * renderTargetManager->GetDynamicHeightRatio());
 	}
 
 	static auto rendererData = RE::BSGraphics::GetRendererData();
@@ -1061,13 +1061,13 @@ void Upscaling::CopyDepth()
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * renderTargetManager->GetDynamicWidthRatio(), screenSize.y * renderTargetManager->GetDynamicHeightRatio());
 
 	static bool loggedOnce = false;
 	if (!loggedOnce) {
 		L->info("First CopyDepth: screen={}x{}, render={}x{}, widthRatio={:.4f}, heightRatio={:.4f}",
 			(uint)screenSize.x, (uint)screenSize.y, (uint)renderSize.x, (uint)renderSize.y,
-			cs::engine::dynres::GetWidthRatio(renderTargetManager), cs::engine::dynres::GetHeightRatio(renderTargetManager));
+			renderTargetManager->GetDynamicWidthRatio(), renderTargetManager->GetDynamicHeightRatio());
 		loggedOnce = true;
 	}
 
@@ -1370,7 +1370,7 @@ void Upscaling::UpdateUpscaling()
 	originalDynamicHeightRatio = resolutionScale;
 	originalDynamicWidthRatio = resolutionScale;
 
-	cs::engine::dynres::Set(renderTargetManager, originalDynamicWidthRatio, originalDynamicHeightRatio,
+	renderTargetManager->SetDynamicResolutionState(originalDynamicWidthRatio, originalDynamicHeightRatio,
 		originalDynamicWidthRatio != 1.0f || originalDynamicHeightRatio != 1.0f);
 
 	CheckResources();
@@ -1396,7 +1396,7 @@ void Upscaling::Upscale()
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * renderTargetManager->GetDynamicWidthRatio(), screenSize.y * renderTargetManager->GetDynamicHeightRatio());
 	telemetryInputWidth = static_cast<std::uint32_t>(renderSize.x);
 	telemetryInputHeight = static_cast<std::uint32_t>(renderSize.y);
 	telemetryOutputWidth = static_cast<std::uint32_t>(screenSize.x);
@@ -1416,7 +1416,7 @@ void Upscaling::Upscale()
 			jitter.x, jitter.y, settings.qualityMode);
 		L->info("FrameBuffer texture: {}x{} format={}", fbDesc.Width, fbDesc.Height, (uint)fbDesc.Format);
 		L->info("Upscaling texture: {}x{} format={}", utDesc.Width, utDesc.Height, (uint)utDesc.Format);
-		L->info("dynamicWidthRatio={}, dynamicHeightRatio={}", cs::engine::dynres::GetWidthRatio(renderTargetManager), cs::engine::dynres::GetHeightRatio(renderTargetManager));
+		L->info("dynamicWidthRatio={}, dynamicHeightRatio={}", renderTargetManager->GetDynamicWidthRatio(), renderTargetManager->GetDynamicHeightRatio());
 		loggedOnce = true;
 	}
 
@@ -1640,7 +1640,7 @@ void Upscaling::EncodeUpscaleMasks()
 	static auto gameViewport = cs::engine::GetGraphicsState();
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
-	auto renderSize = float2(screenSize.x * cs::engine::dynres::GetWidthRatio(renderTargetManager), screenSize.y * cs::engine::dynres::GetHeightRatio(renderTargetManager));
+	auto renderSize = float2(screenSize.x * renderTargetManager->GetDynamicWidthRatio(), screenSize.y * renderTargetManager->GetDynamicHeightRatio());
 
 	// Unbind + restore engine OM around the encode dispatch; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);

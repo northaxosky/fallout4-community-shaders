@@ -1,4 +1,4 @@
-#include "Render/ProjectionMath.h"
+#include "RE/N/NiFrustum.h"
 
 #include <DirectXMath.h>
 
@@ -160,13 +160,8 @@ namespace
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		const bool built = cs::engine::BuildPerspectiveFromFrustum(
-			left,
-			right,
-			top,
-			bottom,
-			nearZ,
-			farZ,
+		const bool built = RE::BuildPerspectiveFromFrustum(
+			{ left, right, top, bottom, nearZ, farZ, false },
 			projection,
 			inverseProjection,
 			ndcToViewMul,
@@ -195,13 +190,8 @@ namespace
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		const bool built = cs::engine::BuildPerspectiveFromFrustum(
-			left,
-			right,
-			top,
-			bottom,
-			nearZ,
-			farZ,
+		const bool built = RE::BuildPerspectiveFromFrustum(
+			{ left, right, top, bottom, nearZ, farZ, false },
 			projection,
 			inverseProjection,
 			ndcToViewMul,
@@ -251,13 +241,8 @@ namespace
 		DirectX::XMFLOAT4X4 inverseProjection{};
 		DirectX::XMFLOAT4 ndcToViewMul{};
 		DirectX::XMFLOAT4 ndcToViewAdd{};
-		const bool built = cs::engine::BuildPerspectiveFromFrustum(
-			left,
-			right,
-			top,
-			bottom,
-			nearZ,
-			farZ,
+		const bool built = RE::BuildPerspectiveFromFrustum(
+			{ left, right, top, bottom, nearZ, farZ, false },
 			projection,
 			inverseProjection,
 			ndcToViewMul,

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Render/ProjectionMath.h"
-
 #include <DirectXMath.h>
 #include <d3d11.h>
 
@@ -116,75 +114,12 @@ namespace cs::engine
 
 		// viewFrustum retains the world projection after the first-person pass overwrites projMat.
 		const auto& frustum = sceneCamera->viewFrustum;
-		const auto& [left, right, top, bottom, nearPlane, farPlane, ortho] = frustum;
-		if (ortho) {
-			return false;
-		}
-
-		return cs::engine::BuildPerspectiveFromFrustum(
-			left,
-			right,
-			top,
-			bottom,
-			nearPlane,
-			farPlane,
+		return RE::BuildPerspectiveFromFrustum(
+			frustum,
 			a_outProj,
 			a_outInvProj,
 			a_outNdcToViewMul,
 			a_outNdcToViewAdd);
-	}
-
-	// Dynres offsets from Fallout4RE cs-rtm-dynamic-res-offsets.json @ a124812 account for missing OG padding; CommonLibF4's unified layout is wrong for OG and isActivated, so use these accessors.
-	namespace dynres
-	{
-		struct Offsets
-		{
-			std::ptrdiff_t widthRatio;
-			std::ptrdiff_t heightRatio;
-			std::ptrdiff_t isActivated;
-		};
-
-		inline constexpr Offsets kOG{ 0xF88, 0xF8C, 0xFA8 };
-		inline constexpr Offsets kNGAE{ 0xFB8, 0xFBC, 0xFE5 };
-
-		[[nodiscard]] inline Offsets Get()
-		{
-			return REX::FModule::IsRuntimeOG() ? kOG : kNGAE;
-		}
-
-		[[nodiscard]] inline float GetWidthRatio(RE::BSGraphics::RenderTargetManager* a_rtm)
-		{
-			const auto off = Get();
-			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(a_rtm) + off.widthRatio);
-		}
-
-		[[nodiscard]] inline float GetHeightRatio(RE::BSGraphics::RenderTargetManager* a_rtm)
-		{
-			const auto off = Get();
-			return *reinterpret_cast<float*>(reinterpret_cast<uintptr_t>(a_rtm) + off.heightRatio);
-		}
-
-		[[nodiscard]] inline bool IsActivated(RE::BSGraphics::RenderTargetManager* a_rtm)
-		{
-			const auto off = Get();
-			return *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(a_rtm) + off.isActivated);
-		}
-
-		inline void Set(RE::BSGraphics::RenderTargetManager* a_rtm, float a_width, float a_height, bool a_activated)
-		{
-			const auto off = Get();
-			auto base = reinterpret_cast<uintptr_t>(a_rtm);
-			*reinterpret_cast<float*>(base + off.widthRatio)  = a_width;
-			*reinterpret_cast<float*>(base + off.heightRatio) = a_height;
-			*reinterpret_cast<bool*>(base + off.isActivated)  = a_activated;
-
-			// Sync CommonLibF4 fields only on NG/AE; on OG they overlap `create` and crash on resize per Fallout4RE cs-rtm-create-field-og.json @ 8256239, so OG callers must use dynres accessors.
-			if (!REX::FModule::IsRuntimeOG()) {
-				a_rtm->dynamicWidthRatio = a_width;
-				a_rtm->dynamicHeightRatio = a_height;
-				a_rtm->isDynamicResolutionCurrentlyActivated = a_activated;
-			}
-		}
 	}
 
 	// FO4's render-target indices; canonical source for cross-feature engine-RE constants.

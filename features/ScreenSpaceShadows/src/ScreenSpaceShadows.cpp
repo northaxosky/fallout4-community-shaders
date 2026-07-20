@@ -264,7 +264,7 @@ namespace cs::features
 			return kMinSampleCount;
 		}
 
-		const float height = static_cast<float>(state->screenHeight) * cs::engine::dynres::GetHeightRatio(rtm);
+		const float height = static_cast<float>(state->screenHeight) * rtm->GetDynamicHeightRatio();
 		// SAMPLE_COUNT is the max march reach in screen pixels; derive it from a fraction of render height.
 		const float reachPixels = (_settings.maxShadowLengthPercent / 100.0f) * height;
 		auto scaled = static_cast<std::uint32_t>(std::round(reachPixels));
@@ -352,8 +352,8 @@ namespace cs::features
 				auto* depthSRV = cs::engine::GetSceneDepthSRV();
 				auto* rtm = cs::engine::GetRenderTargetManager();
 				if (depthSRV && rtm && _raymarchCB && _pointBorderSampler) {
-					const float widthRatio = cs::engine::dynres::GetWidthRatio(rtm);
-					const float heightRatio = cs::engine::dynres::GetHeightRatio(rtm);
+					const float widthRatio = rtm->GetDynamicWidthRatio();
+					const float heightRatio = rtm->GetDynamicHeightRatio();
 					const float renderWidth = static_cast<float>(state->screenWidth) * widthRatio;
 					const float renderHeight = static_cast<float>(state->screenHeight) * heightRatio;
 					int viewportSize[2] = {
