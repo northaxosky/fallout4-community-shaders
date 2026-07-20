@@ -30,6 +30,8 @@ fully validated in game.
 | Motion Vector Fixes | Repairs player, weapon, menu, animated-object, and LOD motion-vector paths | Inactive |
 | Upscaling | DLSS and FSR3 upscaling or native AA, with quality modes and sharpening controls. XeSS upscaling is not implemented | Inactive |
 | Frame Generation | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop | Inactive |
+| Screen Space Shadows | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light | Inactive |
+| Screen Space GI | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass | Inactive |
 | Imagespace | Tonemapping, exposure, bloom, 32^3 LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles | Inactive |
 | Performance Overlay | FPS, frame-time, latency, and backend metrics with configurable layout and graphs | Inactive |
 | RenderDoc | In-game frame-capture controls for an external RenderDoc runtime | Inactive |
