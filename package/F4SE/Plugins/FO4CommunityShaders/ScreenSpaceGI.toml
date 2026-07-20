@@ -1,2 +1,29 @@
 [feature]
 load = false
+
+[settings]
+# Master kill-switch. Ships disabled pending rollout.
+enabled = false
+
+# XeGTAO quality.
+num_slices = 4
+num_steps = 16
+effect_radius = 256.0
+ao_power = 2.5
+
+# Denoise.
+denoise_enabled = true
+denoise_radius = 2.0
+
+# Distance fade (game units).
+depth_fade_start = 40000.0
+depth_fade_end = 50000.0
+
+# AO integration mode: 1 = replace engine AO, 2 = min-blend with engine AO.
+mode = 2
+
+# Frozen blue-noise sequence for stable, flicker-free AO.
+noise_frozen = true
+
+# AO is integrated into engine render-target index 25. That index is confirmed only on
+# AE 1.11.221; OG 1.10.163 and NG 1.10.984 layouts must be validated before rollout.
