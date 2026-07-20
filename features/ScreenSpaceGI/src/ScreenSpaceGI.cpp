@@ -15,11 +15,13 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
 #include "ShaderReplacement.h"
+#include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 
 namespace cs::features
@@ -528,6 +530,11 @@ namespace cs::features
 
 	void ScreenSpaceGI::OnComputeResolve()
 	{
+		_ssgiBoundLastFrame.store(false, std::memory_order_relaxed);
+		_aoProducedLastFrame.store(false, std::memory_order_relaxed);
+		_denoisedLastFrame.store(false, std::memory_order_relaxed);
+		_resolveDispatchedLastFrame.store(0, std::memory_order_relaxed);
+
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
@@ -730,6 +737,9 @@ namespace cs::features
 				}
 			}
 
+			_aoProducedLastFrame.store(aoProducedThisFrame, std::memory_order_relaxed);
+			_denoisedLastFrame.store(denoisedThisFrame, std::memory_order_relaxed);
+
 			if (_resolveCS && _resolveCB) {
 				ResolveCB cb{};
 				cb.Extent[0] = _allocW;
@@ -756,6 +766,7 @@ namespace cs::features
 				context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
 				context->CSSetShader(_resolveCS.get(), nullptr, 0);
 				context->Dispatch((_allocW + 7u) / 8u, (_allocH + 7u) / 8u, 1);
+				_resolveDispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
 
 				ID3D11ShaderResourceView* nullResolveSRVs[1] = { nullptr };
 				ID3D11UnorderedAccessView* nullUAVs[2] = { nullptr, nullptr };
@@ -771,23 +782,31 @@ namespace cs::features
 				context->ClearUnorderedAccessViewFloat(_bounceTexture->uav.get(), black);
 			}
 		} catch (const std::exception& e) {
-			L->error("Resolve dispatch failed: {}", e.what());
+			if (L->should_log(spdlog::level::err)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Resolve dispatch failed: {}", e.what());
+			}
 		} catch (...) {
-			L->error("Resolve dispatch failed.");
+			if (L->should_log(spdlog::level::err)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Resolve dispatch failed.");
+			}
 		}
 	}
 
 	void ScreenSpaceGI::OnAOIntegration()
 	{
+		_aoIntegrationActiveLastFrame.store(false, std::memory_order_relaxed);
+		_aoIntegrationDispatchedLastFrame.store(0, std::memory_order_relaxed);
+
 		if (!_settings.enabled) {
 			return;
 		}
-		if (!SupportsAOIntegration()) {
-			if (!_aoIntegrationUnsupportedRuntimeLogged) {
-				_aoIntegrationUnsupportedRuntimeLogged = true;
-				L->warn(
-					"SSGI AO integration is AE 1.11.221-only until OG/NG render-target indices are validated; skipping.");
-			}
+		const bool integrationSupported = SupportsAOIntegration();
+		_aoIntegrationSupported.store(integrationSupported, std::memory_order_relaxed);
+		if (!integrationSupported) {
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"SSGI AO integration is AE 1.11.221-only until OG/NG render-target indices are validated; skipping.");
 			return;
 		}
 		if (!IsReady() || !_aoTexture) {
@@ -814,18 +833,17 @@ namespace cs::features
 		auto* rtm = cs::engine::GetRenderTargetManager();
 		const bool needSRV = _settings.mode == 2;
 		if (!targetTexture || !targetUAV || !rtm || !_aoIntegrationCB || (needSRV && !targetSRV)) {
-			if (!_aoIntegrationSkipLogged) {
-				_aoIntegrationSkipLogged = true;
-				L->warn(
-					"SSGI AO integration skipped: rt={} mode={} texture={} uav={} srv={} rtm={} cb={}.",
-					static_cast<int>(a_target),
-					_settings.mode,
-					targetTexture != nullptr,
-					targetUAV != nullptr,
-					targetSRV != nullptr,
-					rtm != nullptr,
-					_aoIntegrationCB != nullptr);
-			}
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"SSGI AO integration skipped: rt={} mode={} texture={} uav={} srv={} rtm={} cb={}.",
+				static_cast<int>(a_target),
+				_settings.mode,
+				targetTexture != nullptr,
+				targetUAV != nullptr,
+				targetSRV != nullptr,
+				rtm != nullptr,
+				_aoIntegrationCB != nullptr);
 			return;
 		}
 
@@ -836,14 +854,13 @@ namespace cs::features
 		const std::uint32_t targetComponents = AOTargetComponents(targetUAVDesc.Format);
 		if (targetComponents == 0 || targetUAVDesc.ViewDimension != D3D11_UAV_DIMENSION_TEXTURE2D ||
 			targetDesc.SampleDesc.Count != 1) {
-			if (!_aoIntegrationUnsupportedLogged) {
-				_aoIntegrationUnsupportedLogged = true;
-				L->warn(
-					"SSGI AO integration: unsupported target format={} view={} samples={}.",
-					static_cast<int>(targetUAVDesc.Format),
-					static_cast<int>(targetUAVDesc.ViewDimension),
-					targetDesc.SampleDesc.Count);
-			}
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"SSGI AO integration: unsupported target format={} view={} samples={}.",
+				static_cast<int>(targetUAVDesc.Format),
+				static_cast<int>(targetUAVDesc.ViewDimension),
+				targetDesc.SampleDesc.Count);
 			return;
 		}
 		auto* integrationCS = _aoIntegrationCS[targetComponents - 1].get();
@@ -879,6 +896,7 @@ namespace cs::features
 			targetDesc.SampleDesc.Count == _aoTexture->desc.SampleDesc.Count &&
 			targetDesc.SampleDesc.Quality == _aoTexture->desc.SampleDesc.Quality;
 		if (copyCompatible) {
+			_aoIntegrationActiveLastFrame.store(true, std::memory_order_relaxed);
 			cs::engine::CopyResourcePreservingOM(
 				context,
 				targetTexture,
@@ -950,11 +968,17 @@ namespace cs::features
 			context->CSSetConstantBuffers(0, 1, buffers);
 			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 			context->CSSetShader(integrationCS, nullptr, 0);
+			_aoIntegrationActiveLastFrame.store(true, std::memory_order_relaxed);
 			context->Dispatch((targetW + 7u) / 8u, (targetH + 7u) / 8u, 1);
+			_aoIntegrationDispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
 		} catch (const std::exception& e) {
-			L->warn("SSGI AO integration failed: {}.", e.what());
+			if (L->should_log(spdlog::level::warn)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "SSGI AO integration failed: {}.", e.what());
+			}
 		} catch (...) {
-			L->warn("SSGI AO integration failed.");
+			if (L->should_log(spdlog::level::warn)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "SSGI AO integration failed.");
+			}
 		}
 	}
 
@@ -992,6 +1016,7 @@ namespace cs::features
 		context->PSSetShaderResources(kBouncePSSlot, 1, &bounce);
 		context->PSSetShaderResources(kAOPSSlot, 1, &ao);
 		_ssgiBound.store(true, std::memory_order_relaxed);
+		_ssgiBoundLastFrame.store(true, std::memory_order_relaxed);
 	}
 
 	void ScreenSpaceGI::OnPostDeferredLights()
@@ -1012,9 +1037,50 @@ namespace cs::features
 		context->PSSetShaderResources(kAOPSSlot, 1, &nullSRV);
 	}
 
+	void ScreenSpaceGI::CollectTelemetry(cs::telemetry::Sink& a_sink) const
+	{
+		a_sink
+			.Field("enabled", _settings.enabled)
+			.Field("mode", static_cast<std::int64_t>(_settings.mode))
+			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
+			.Field("resource_init_failed", _resourceInitFailed.load(std::memory_order_acquire))
+			.Field("ssgi_bound", _ssgiBoundLastFrame.load(std::memory_order_relaxed))
+			.Field("ao_produced", _aoProducedLastFrame.load(std::memory_order_relaxed))
+			.Field("denoised", _denoisedLastFrame.load(std::memory_order_relaxed))
+			.Field("ao_integration_supported", _aoIntegrationSupported.load(std::memory_order_relaxed))
+			.Field("ao_integration_active", _aoIntegrationActiveLastFrame.load(std::memory_order_relaxed))
+			.Field("resolve_dispatches", static_cast<std::int64_t>(
+				_resolveDispatchedLastFrame.load(std::memory_order_relaxed)))
+			.Field("ao_integration_dispatches", static_cast<std::int64_t>(
+				_aoIntegrationDispatchedLastFrame.load(std::memory_order_relaxed)))
+			.Dimensions("working", _allocW, _allocH)
+			.Field("generation", static_cast<std::int64_t>(_generation));
+	}
+
 	void ScreenSpaceGI::DrawSettings()
 	{
-		if (ImGui::Checkbox("Enabled", &_settings.enabled)) {
+		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+
+		const char* modes[] = { "Replace engine AO", "Min-blend with engine AO" };
+		int modeIndex = std::clamp(_settings.mode, 1, 2) - 1;
+		if (ImGui::Combo("AO integration mode", &modeIndex, modes, static_cast<int>(std::size(modes)))) {
+			_settings.mode = modeIndex + 1;
+			changed = true;
+		}
+
+		changed |= ImGui::SliderInt("Slices", &_settings.numSlices, 1, 8);
+		changed |= ImGui::SliderInt("Steps", &_settings.numSteps, 4, 32);
+		changed |= ImGui::SliderFloat("Effect radius (game units)", &_settings.effectRadius, 16.0f, 512.0f);
+		changed |= ImGui::SliderFloat("AO power", &_settings.aoPower, 0.5f, 5.0f);
+		changed |= ImGui::Checkbox("Denoise", &_settings.denoiseEnabled);
+		changed |= ImGui::SliderFloat("Denoise radius", &_settings.denoiseRadius, 0.5f, 4.0f);
+		changed |= ImGui::SliderFloat(
+			"Depth fade start (game units)", &_settings.depthFadeStart, 0.0f, 60000.0f);
+		changed |= ImGui::SliderFloat(
+			"Depth fade end (game units)", &_settings.depthFadeEnd, 0.0f, 80000.0f);
+		changed |= ImGui::Checkbox("Freeze noise", &_settings.noiseFrozen);
+
+		if (changed) {
 			SaveSettings();
 		}
 

@@ -35,6 +35,9 @@ namespace cs::features
 		bool HasResettableSettings() const override { return true; }
 		bool IsReady();
 
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+
 		struct Settings
 		{
 			bool  denoiseEnabled = true;
@@ -124,6 +127,13 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _resourceInitFailed{ false };
 		std::atomic_bool _ssgiBound{ false };
+		std::atomic_bool _ssgiBoundLastFrame{ false };
+		std::atomic_bool _aoProducedLastFrame{ false };
+		std::atomic_bool _denoisedLastFrame{ false };
+		std::atomic_bool _aoIntegrationSupported{ false };
+		std::atomic_bool _aoIntegrationActiveLastFrame{ false };
+		std::atomic_uint32_t _resolveDispatchedLastFrame{ 0 };
+		std::atomic_uint32_t _aoIntegrationDispatchedLastFrame{ 0 };
 
 		std::unique_ptr<cs::buffer::Texture2D> _bounceTexture;
 		std::unique_ptr<cs::buffer::Texture2D> _aoTexture;
@@ -151,9 +161,6 @@ namespace cs::features
 		DXGI_FORMAT _aoIntegrationScratchFormat = DXGI_FORMAT_UNKNOWN;
 		std::uint32_t _aoIntegrationScratchW = 0;
 		std::uint32_t _aoIntegrationScratchH = 0;
-		bool _aoIntegrationUnsupportedRuntimeLogged = false;
-		bool _aoIntegrationUnsupportedLogged = false;
-		bool _aoIntegrationSkipLogged = false;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;
