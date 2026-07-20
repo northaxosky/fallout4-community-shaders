@@ -95,6 +95,7 @@ void CalculateGI(
 				float mipLevel = clamp(log2(s) + logLenOmega - 3.3, 0, 5);
 
 				float SZ = srcWorkingDepth.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel);
+				if (SZ <= FP_Z) continue;
 
 				float3 samplePos = ScreenToViewPosition(sampleScreenPos, SZ);
 				float3 sampleDelta = samplePos - pixCenterPos;
