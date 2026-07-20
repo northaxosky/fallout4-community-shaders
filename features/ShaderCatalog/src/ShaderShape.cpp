@@ -167,9 +167,7 @@ namespace cs::features::catalog
 
 		int CountSampleOps(const std::string& text)
 		{
-			// Opcodes sit at column 0 (no numbering); anchoring at line start avoids comment false positives.
-			// (?:^|\n) instead of the multiline flag: MSVC's <regex> lacks regex_constants::multiline on the
-			// windows-2022 CI toolchain, and matching string-start-or-after-newline counts identically here.
+			// Opcodes sit at column 0; use (?:^|\n), not multiline flag, because MSVC <regex> lacks regex_constants::multiline on windows-2022; same counts, fewer comment false positives.
 			static const std::regex re(
 				R"((?:^|\n)(sample\w*|gather4\w*|lod)\b)",
 				std::regex_constants::ECMAScript | std::regex_constants::icase);

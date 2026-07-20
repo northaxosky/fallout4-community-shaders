@@ -373,7 +373,7 @@ struct BSImagespaceShaderLensFlare_RenderLensFlare
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Replaces SSLR raytracing shader for scaled render targets.
+// Replaces BSImagespaceShaderSSLRRaytracing via REL::ID({779077,2317302,2317302})+0x1C (all runtimes) for scaled RTs.
 struct BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique
 {
 	static void thunk(RE::BSShader* This, uint a2, uint a3, uint a4, uint a5)

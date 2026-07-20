@@ -210,8 +210,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			return;
 		_wakeWriter.notify_one();
 
-		// When _running is false, the writer abandons enrichment and returns after a final base-row flush, bounding this join.
-		// Joining instead of detaching prevents use-after-free of the ring and owned bytecode during destruction.
+		// With _running false, writer skips enrichment after a final base-row flush, bounding join; join avoids UAF of ring/owned bytecode.
 		if (_writer.joinable())
 			_writer.join();
 
@@ -342,8 +341,7 @@ INSERT OR IGNORE INTO corpus_meta(key, value) VALUES
 			}
 		}
 
-		// Prepare hot statements once; the writer only re-binds values. The base-row path inserts shape columns as NULL for later kUpdateShape;
-		// COALESCE preserves enriched values across repeated bytecode-less events.
+		// Prepare hot statements once; writer only re-binds values; base rows leave shape columns NULL for kUpdateShape; COALESCE preserves enrichment across bytecode-less events.
 		const char* kInsertShader =
 			"INSERT INTO shader_catalog("
 			"  sha1, size_bytes, stage,"

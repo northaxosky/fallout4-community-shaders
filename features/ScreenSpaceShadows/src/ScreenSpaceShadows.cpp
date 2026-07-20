@@ -40,7 +40,7 @@ namespace cs::features
 		constexpr const char* kConfigPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows.toml";
 		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
 
-		// FO4 uses standard non-linear depth, near=0/far=1
+		// FO4 uses standard non-linear depth, near=0/far=1.
 		constexpr float kFarDepthValue = 1.0f;
 		constexpr float kNearDepthValue = 0.0f;
 
@@ -152,7 +152,7 @@ namespace cs::features
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
-		// Bind the mask right before the sun draw when the deferred-lighting phase ends.
+		// PreSunLightDraw anchor: DrawTriShape SetDirtyStates call REL::ID({763320,2276846,2276846})+{0x9C,0x9A,0x9A}; bind mask right before sun draw.
 		cs::engine::RegisterPreSunLightDraw([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreSunLightDraw();
 		});
@@ -377,7 +377,7 @@ namespace cs::features
 					if (viewportSize[0] > 0 && viewportSize[1] > 0) {
 						cs::engine::ComputeOMScope scope(context);
 
-						// TryGetSunDirectionWS returns the light-travel direction
+						// Sun projection: negate TryGetSunDirectionWS travel dir; use WorldRootCamera::worldToCam, not degenerate per-pass camViewData; column-vector matrix, so transpose for XMVector4Transform.
 						auto* sceneCamera = RE::Main::WorldRootCamera();
 						if (!sceneCamera) {
 							return;
@@ -397,9 +397,7 @@ namespace cs::features
 						int maxBounds[2] = { viewportSize[0], viewportSize[1] };
 						auto dispatchList = Bend::BuildDispatchList(lightProj, viewportSize, minBounds, maxBounds);
 
-						// Snapshot the sun projection for the telemetry pump / Ctrl+F12 dump, which read it
-						// off cheap cached atomics. LightCoordinate_Shader[0..1] is the screen-space sun
-						// position; lightProj[3] is clip.w = dot(toward-sun, view-forward).
+						// Telemetry cache: LightCoordinate_Shader[0..1]=screen-space sun; lightProj[3]=clip.w=dot(toward-sun, view-forward); pump/Ctrl+F12 reads atomics.
 						_sunX.store(sx, std::memory_order_relaxed);
 						_sunY.store(sy, std::memory_order_relaxed);
 						_sunZ.store(sz, std::memory_order_relaxed);
@@ -407,9 +405,7 @@ namespace cs::features
 						_lightY.store(dispatchList.LightCoordinate_Shader[1], std::memory_order_relaxed);
 						_clipW.store(lightProj[3], std::memory_order_relaxed);
 
-						// Dispatch for all sun orientations (matches upstream, which ships no behind-camera
-						// gate and trusts Bend's own w=+/-1 front/behind march machinery). The mask is
-						// white-cleared each frame, so a degenerate frame still reads "no shadow".
+						// Dispatch all sun orientations: upstream has no behind-camera gate and trusts Bend w=+/-1 front/behind march; white-clear keeps degenerate frames "no shadow".
 						{
 							ID3D11ShaderResourceView* srvs[1] = { depthSRV };
 							ID3D11UnorderedAccessView* uavs[1] = { _maskTexture->uav.get() };
@@ -468,8 +464,7 @@ namespace cs::features
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
-		// Bind whenever resources exist, regardless of the enabled toggle: when disabled the mask is
-		// white (no-op multiply), keeping the compiled-in t6 sample safe. See OnPreDeferredLights.
+		// Bind whenever resources exist; disabled still reads the white no-op mask, keeping compiled-in t6 safe. See OnPreDeferredLights.
 		if (!_resourcesReady.load(std::memory_order_acquire) || !_maskTexture) {
 			return;
 		}
@@ -482,8 +477,7 @@ namespace cs::features
 			return;
 		}
 
-		// Bind t6 only when the engine left it null: the ambient/IBL pass binds g_tAmbientProbeA there,
-		// so a non-null t6 means this isn't the directional sun draw and we skip it.
+		// Bind t6 only when engine left it null; ambient/IBL binds g_tAmbientProbeA there, so non-null means not directional sun.
 		ID3D11ShaderResourceView* current = nullptr;
 		context->PSGetShaderResources(kMaskPSSlot, 1, &current);
 		if (current) {
@@ -548,8 +542,7 @@ namespace cs::features
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));
 
-		// Debug: preview the raw R8 shadow mask so its coverage/placement is visible in-game
-		// (bright = lit, dark = shadowed). Lets us judge SSS without a RenderDoc capture.
+		// Debug mask preview: raw R8 coverage/placement in-game, bright=lit/dark=shadowed, no RenderDoc needed.
 		static bool s_showMaskPreview = false;
 		ImGui::Checkbox("Show shadow-mask preview (debug)", &s_showMaskPreview);
 		if (s_showMaskPreview) {

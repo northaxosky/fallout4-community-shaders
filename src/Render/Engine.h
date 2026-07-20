@@ -75,11 +75,8 @@ namespace cs::engine
 		const auto invProj = DirectX::XMMatrixInverse(nullptr, proj);
 		const auto invViewProj = DirectX::XMMatrixInverse(nullptr, viewProj);
 
-		// NDC->view ray reconstruction: FO4 standard depth is near->0, far->1 (RE-confirmed: the game's
-		// own deferred_composite branches depth<=0.01 as the near path, and the DOF Linearize maps 0->near).
-		// Note the Streamline depthInverted=eTrue in CameraConstants.h is a DLSS/FSR-contract flag, not the
-		// sampled-buffer convention; don't read it as reversed-Z.
-		// The divide-by-z makes mul/add independent of NDC z, so z=1 yields the same camera ray.
+		// NDC->view ray reconstruction: FO4 standard depth is near->0, far->1 (RE: deferred_composite depth<=0.01 near path; DOF Linearize maps 0->near); Streamline depthInverted=eTrue is a DLSS/FSR contract flag, not reversed-Z.
+		// Divide-by-z makes mul/add independent of NDC z, so z=1 yields the same camera ray.
 		const auto viewTopLeft = DirectX::XMVector4Transform(DirectX::XMVectorSet(-1.0f, 1.0f, 1.0f, 1.0f), invProj);
 		const auto viewBottomRight = DirectX::XMVector4Transform(DirectX::XMVectorSet(1.0f, -1.0f, 1.0f, 1.0f), invProj);
 		const float topLeftZ = DirectX::XMVectorGetZ(viewTopLeft);

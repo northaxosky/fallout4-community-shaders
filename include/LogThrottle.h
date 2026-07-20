@@ -7,8 +7,7 @@
 
 #include <spdlog/spdlog.h>
 
-// Each macro keeps independent thread-local state at its expansion site.
-// CS_LOG_ONCE logs only on the first hit.
+// CS_LOG_ONCE logs only on first hit; each macro has independent thread-local state per expansion site.
 #define CS_LOG_ONCE(logger, level, ...) \
 	do { \
 		static thread_local bool csLogOnceLogged = false; \
@@ -18,8 +17,7 @@
 		} \
 	} while (0)
 
-// CS_LOG_EVERY_N logs on the first hit and every N hits after it.
-// suppress: 4127 - n is often a compile-time constant, making the guard a constant condition.
+// CS_LOG_EVERY_N logs on first hit and every N hits after; suppress 4127 because constant n makes the guard constant.
 #define CS_LOG_EVERY_N(logger, n, level, ...) \
 	do { \
 		static thread_local std::uint64_t csLogEveryNCounter = 0; \

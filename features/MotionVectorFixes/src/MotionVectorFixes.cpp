@@ -178,7 +178,7 @@ namespace cs::features
 		// Preserve weapon-model previousWorld across player idle updates.
 		stl::detour_thunk<OnIdle_UpdatePlayer>(REL::ID({ 1318162, 2228929, 2228929 }));
 
-		// Fallout4RE cs-mvf-setsequenceposition-call.json, 2026-05-23: OG/NG/AE offset 0x1D7 is the direct E8 NiAVObject::Update call in SetSequencePosition.
+		// Fallout4RE cs-mvf-setsequenceposition-call.json, 2026-05-23: OG/NG/AE +0x1D7 is the direct E8 NiAVObject::Update call; opcode check skips stale offsets.
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0x1D7, 0x1D7, 0x1D7 };
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());

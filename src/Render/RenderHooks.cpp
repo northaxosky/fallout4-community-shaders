@@ -33,12 +33,10 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 		bool g_preSunLightDrawInstalled    = false;
-		// DeferredLightsImpl_Hook sets g_insideDeferredLightsImpl around the engine call; PreSunLightDraw reads it to limit binding to that phase.
-		// DrawTriShape is generic and otherwise fires thousands of times per frame.
+		// DeferredLightsImpl_Hook wraps the engine call with g_insideDeferredLightsImpl; PreSunLightDraw uses it because generic DrawTriShape fires thousands of times per frame.
 		bool g_insideDeferredLightsImpl    = false;
 
-		// Registration must run on the startup thread before any render hook; the first thunk calls MarkRegistrationClosed, enforcing this in release.
-		// Late or off-thread Register* is rejected (logged), never mutating vectors while Dispatch iterates.
+		// Registration must run on the startup thread before any render hook; first thunk closes registration, so late/off-thread Register* logs and never mutates vectors during Dispatch.
 		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
 		std::atomic_bool g_registrationClosed{ false };
 
@@ -101,10 +99,8 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// write_thunk_call targets `call BSGraphics::SetDirtyStates(bool,bool)` in generic DrawTriShape at REL::ID 763320/2276846/2276846 +
-		// {0x9C,0x9A,0x9A}, AE-verified. SetDirtyStates flushes pending PS SRV binds and leaves t6 NULL for the sun draw; dispatch AFTER func() lands between the SRV flush and DrawIndexed.
-		// R8D/R9D hold DrawTriShape's startIndex/primitiveCount: prologue mov r15d,r9d does not clobber r9, and nothing writes r8/r9 before the call.
-		// primitiveCount==2 selects fullscreen DrawIndexed(6); the DeferredLightsImpl phase flag restricts it.
+		// write_thunk_call targets generic DrawTriShape `call BSGraphics::SetDirtyStates(bool,bool)` at REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}, AE-verified; after func(), PS SRVs are flushed, t6 is NULL for sun, and dispatch lands before DrawIndexed.
+		// R8D/R9D hold startIndex/primitiveCount: prologue mov r15d,r9d does not clobber r9 and nothing writes r8/r9 before the call; primitiveCount==2 selects fullscreen DrawIndexed(6), restricted by the DeferredLightsImpl phase flag.
 		struct PreSunLightDraw_Hook
 		{
 			static void thunk(bool a_force, bool a_clear, std::uint32_t /*a_startIndex*/, std::uint32_t a_primitiveCount)

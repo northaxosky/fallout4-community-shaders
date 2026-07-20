@@ -194,8 +194,7 @@ namespace cs::features
 	{
 		auto* self = GetSingleton();
 
-		// Consume the key-up paired with an already-consumed press BEFORE any gate, so opening a menu cannot strand state and eat a later unrelated key-up.
-		// Never pass F10's WM_SYSKEYUP to DefWindowProc; avoids the SC_KEYMENU beep.
+		// Consume paired key-up before gates so menus cannot strand state/eat later key-ups; never pass F10 WM_SYSKEYUP to DefWindowProc, avoiding SC_KEYMENU beep.
 		if (self->_toggleReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
 			&& a_wparam == self->_toggleReleaseVk) {
 			self->_toggleReleaseVk = 0;

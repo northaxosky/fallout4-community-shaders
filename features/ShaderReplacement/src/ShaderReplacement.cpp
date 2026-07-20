@@ -192,7 +192,7 @@ namespace cs::features
 
 	void ShaderReplacement::ApplyMarkerOverrides()
 	{
-		// One-shot marker: smoke harness writes a tag string and overrides in-memory config.
+		// One-shot smoke marker: tag string overrides in-memory config.
 		FILE* f = nullptr;
 		if (fopen_s(&f, kMarkerPath, "r") != 0 || !f) return;
 		char buf[64] = {};
@@ -255,7 +255,7 @@ namespace cs::features
 	{
 		if (!_started.load(std::memory_order_acquire) || !device) return;
 
-		// Also compile entries without runtime SHA1 so ImGui can show status, though they never match.
+		// Compile SHA1-less entries for ImGui status; they can never match runtime bytecode.
 		std::size_t want = 0, got = 0;
 		for (auto& up : replacement::Registry::Get().All()) {
 			auto& e = *up;
@@ -264,7 +264,7 @@ namespace cs::features
 			if ((e.name == "bsdf_light_deferred_directional" ||
 					e.name == "bsdf_light_deferred_directional_ibl") &&
 				cs::features::ScreenSpaceShadows::GetSingleton()->IsShadowMaskReady()) {
-				// Interim dev coupling; the general injection registry will replace this.
+				// Interim ShaderReplacement<->SSS coupling: define SCREEN_SPACE_SHADOWS only when SSS loaded and mask-ready; registry will replace this.
 				e.defines.emplace_back("SCREEN_SPACE_SHADOWS", "1");
 				L->info("Enabled SCREEN_SPACE_SHADOWS for '{}'.", e.name);
 			}
@@ -279,10 +279,11 @@ namespace cs::features
 		_compiledWant = want;
 		_compiledGot  = got;
 
-		// Register with ShaderCatalog's single CreatePixelShader hook instead of a second detour.
+		// Use ShaderCatalog's CreatePixelShader vtable slot-15 hook; one detour owns PS swaps.
 		ShaderCatalog::GetSingleton()->RegisterPixelShaderSwapCallback(
 			[](const void* /*a_bytecode*/, std::size_t /*a_bytecode_len*/,
 				const cs::features::catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out) -> bool {
+				// Only runtime-SHA1 matches may replace; false returns keep byte-identical/OFF-path parity.
 				auto* entry = replacement::Registry::Get().FindByRuntimeSha1(a_sha);
 				if (!entry)
 					return false;
@@ -295,7 +296,7 @@ namespace cs::features
 					entry->passthrough_compile_fail.fetch_add(1, std::memory_order_relaxed);
 					return false;
 				}
-				// Swap *a_out while preserving a net refcount of 1: AddRef ours, Release engine's.
+				// Swap *a_out with net refcount 1: AddRef ours, Release engine's.
 				ID3D11PixelShader* mine = entry->compiled_ps.get();
 				mine->AddRef();
 				(*a_out)->Release();

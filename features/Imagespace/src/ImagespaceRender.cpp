@@ -1045,8 +1045,7 @@ namespace cs::features
 			if (cs::engine::TryGetSunDirectionWS(sunWSx, sunWSy, sunWSz)) {
 				auto* sceneCamera = RE::Main::WorldRootCamera();
 				if (sceneCamera) {
-					// Project through the persistent scene camera's world->clip (column-vector, hence the
-					// transpose); the per-pass camViewData is a degenerate placeholder at this stage.
+					// Persistent scene camera world->clip (column-vector, transpose); per-pass camViewData is a degenerate placeholder here.
 					DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sunWSx, -sunWSy, -sunWSz, 0.0f);
 					DirectX::XMMATRIX vpMat  = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam));
 					DirectX::XMVECTOR clip   = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vpMat));

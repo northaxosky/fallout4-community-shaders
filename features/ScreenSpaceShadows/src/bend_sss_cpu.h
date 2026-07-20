@@ -21,19 +21,13 @@
 // We are *always* looking for talented graphics and technical programmers!
 // https://www.bendstudio.com/careers
 
-// Common screen space shadow projection code (CPU):
-//--------------------------------------------------------------
+// Common screen space shadow projection code (CPU).
 
 namespace Bend
 {
-	// Generating a screen-space-shadow requires a number of Compute Shader dispatches
-	// The compute shader reads from a depth buffer, and writes a single-channel texture of the same dimensions
-	// Each dispatch is of the same compute shader, (see bend_sss_gpu.h).
-	// The number of dispatches required varies based on the on-screen location of the light.
-	// Typically there will be just one or two dispatches when the light is off-screen, and 4 to 6 when the light is on-screen.
-	// Syncing the GPU between individual dispatches is not required
+	// Builds 1-8 same-CS dispatches over depth into a same-size single-channel shadow texture; off-screen lights usually need 1-2, on-screen 4-6; no inter-dispatch GPU sync.
 
-	// These structures and function are used to generate the number of dispatches, the wave count of each dispatch (X/Y/Z) and shader parameters for each dispatch
+	// Produces dispatch count, per-dispatch X/Y/Z wave counts, and shader parameters.
 
 	/** @brief Per-dispatch data containing wave counts and shader wave offsets for a single compute dispatch. */
 	struct DispatchData
@@ -73,8 +67,7 @@ namespace Bend
 	{
 		DispatchList result = {};
 
-		// Floating point division in the shader has a practical limit for precision when the light is *very* far off screen (~1m pixels+)
-		// So when computing the light XY coordinate, use an adjusted w value to handle these extreme values
+		// Clamp W for light XY when the light is extremely off-screen (~1m px+) to avoid shader FP division precision loss.
 		float xy_light_w = inLightProjection[3];
 		float FP_limit = 0.000002f * (float)inWaveSize;
 
@@ -103,10 +96,7 @@ namespace Bend
 			-(inMinRenderBounds[1] - light_xy[1]),
 		};
 
-		// Process 4 quadrants around the light center,
-		// They each form a rectangle with one corner on the light XY coordinate
-		// If the rectangle isn't square, it will need breaking in two on the larger axis
-		// 0 = bottom left, 1 = bottom right, 2 = top left, 2 = top right
+		// Process 4 light-centered quadrants; non-square rectangles split on the larger axis; 0=BL, 1=BR, 2=TL, 3=TR.
 		for (int q = 0; q < 4; q++) {
 			// Quads 0 and 3 needs to be +1 vertically, 1 and 2 need to be +1 horizontally
 			bool vertical = q == 0 || q == 3;
@@ -131,8 +121,7 @@ namespace Bend
 				disp.WaveOffset_Shader[0] = ((q & 1) ? bounds[0] : -bounds[2]) + bias_x;
 				disp.WaveOffset_Shader[1] = ((q & 2) ? -bounds[3] : bounds[1]) + bias_y;
 
-				// We want the far corner of this quadrant relative to the light,
-				// as we need to know where the diagonal light ray intersects with the edge of the bounds
+				// Need the quadrant far corner relative to the light to intersect the diagonal ray with the bounds edge.
 				int axis_delta = +biased_bounds[0] - biased_bounds[1];
 				if (q == 1)
 					axis_delta = +biased_bounds[2] + biased_bounds[1];
@@ -202,45 +191,14 @@ namespace Bend
 }
 
 /*
-* Common Problems, and tips to solve them:
-*
-* The shader doesn't compile?
-*  -	The shader is only tested with HLSL (DXC compiler) and PS5 using a HLSL->PS5 warpper
-*		It should be possible to compile for DX11 with FXC, with features removed (early-out's use of wave intrinsics is not supported in DX11)
-*		Other shader languages (e.g., glsl) are unsupported and will require manual conversion
-*
-* I have it compiled and running, but I'm seeing complete nonsense?
-*  -	Start by enabling 'DebugOutputWaveIndex' to visualize the wavefront layout.
-*		You should see wavefronts aligned and projected towards the light position / direction. If not, then 'inLightProjection' is probably wrong.
-*
-* Struggling to get 'inLightProjection' right?
-*  -	Think of this as similar to what a vertex-shader would output for position export; that is, a 4-component transformed position (e.g., SV_POSITION output from the VS)
-*		This usually means:
-*		inLightProjection = float4(position,1) * ViewProjectionMatrix		- positional light
-*		or:
-*		inLightProjection = float4(direction,0) * ViewProjectionMatrix		- directional light
-*
-* Almost everything is in shadow?
-* Is the background around an object casting a shadow on to it?
-* Does everything look like a weird paper cut-out?
-* There is a big shadow halo around the light source?
-*  -	FarDepthValue / NearDepthValue may not be set correctly
-*		These are the values you'd see in the depth buffer for objects at the near and far clip plane (typically far = 0, near = 1)
-*		In very rare cases, the vertex shader may be expected to output a [-1,+1] z-range, which becomes [0,1] in the depth buffer. If this is the case, enable 'inExpandedZRange'.
-*
-* There are small glitchy lines all over the output?
-*  -	Try with/without 'USE_HALF_PIXEL_OFFSET' defined in the shader. This is enabled by default for HLSL.
-*
-* Invalid shadows occasionally appear from offscreen / at the edge of the screen?
-*  -	The 'PointBorderSampler' may not be setup correctly. The shader will intentionally read from offscreen, so the sampler must return an invalid value (e.g., FarDepthValue) in these cases by using clamp-to-border.
-*
-* Light is always coming from the same direction no matter how I rotate the camera?
-*  -	You may be using just the ProjectionMatrix, not the ViewProjectionMatrix when computing 'inLightProjection'.
-*
-* Shadow is extremely thick, or very faded?
-*  -	Try scaling 'SurfaceThickness' up and down, start with 0.005, and scale up/down in multiples of 2. Make sure to scale BilinearThreshold in a similar way.
-*
-* I see lots of striated patterns on flat surfaces?
-*  -	'BilinearThreshold' may not be set to an ideal value (enable 'DebugOutputEdgeMask' to debug it), or try enabling 'IgnoreEdgePixels'
-*  -	These issues can be more common in otherwise occluded areas when BilinearSamplingOffsetMode is false, and may be prevalent if visualizing the shadow - but not noticeable in a lit scene.
+* Common problems:
+* - Compile: tested with HLSL/DXC and PS5 HLSL->PS5 wrapper; DX11/FXC may work only after removing unsupported features such as early-out wave intrinsics; other shader languages need manual conversion.
+* - Nonsense output: enable DebugOutputWaveIndex; wavefronts should align/project toward the light, otherwise inLightProjection is wrong.
+* - inLightProjection: treat as VS SV_POSITION export; use float4(position,1) * ViewProjectionMatrix for positional lights, float4(direction,0) * ViewProjectionMatrix for directional.
+* - Excess/halo/cut-out shadows: FarDepthValue/NearDepthValue are wrong (typically far=0, near=1); enable inExpandedZRange only when VS z is [-1,+1] mapped to [0,1] depth.
+* - Glitch lines: try toggling USE_HALF_PIXEL_OFFSET, enabled by default for HLSL.
+* - Offscreen/edge invalid shadows: PointBorderSampler must clamp-to-border with an invalid value such as FarDepthValue because the shader intentionally samples offscreen.
+* - Light fixed under camera rotation: using ProjectionMatrix instead of ViewProjectionMatrix.
+* - Thick/faded shadow: scale SurfaceThickness from 0.005 by powers of 2 and scale BilinearThreshold similarly.
+* - Striated flats: tune BilinearThreshold with DebugOutputEdgeMask or enable IgnoreEdgePixels; more common in occluded/visualized output with BilinearSamplingOffsetMode=false, less noticeable lit.
 */

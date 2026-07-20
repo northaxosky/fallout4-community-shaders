@@ -64,8 +64,7 @@ namespace cs::features
 			return v;
 		}
 
-		// Catalog engine_runtime is constrained to OG/NG/AE: OG=1.10.163; NG=1.10.980/1.10.984; AE=the 1.11.x line (1.11.137..1.11.221).
-		// engine_build_hash records the exact build so builds within a family remain distinguishable.
+		// Catalog runtime families: OG=1.10.163; NG=1.10.980/1.10.984; AE=the 1.11.x line incl 1.11.221; engine_build_hash keeps exact builds distinct.
 		const char* RuntimeLabel(const RuntimeVersion& v)
 		{
 			if (!v.valid) return "OG";
