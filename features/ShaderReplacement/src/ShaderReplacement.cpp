@@ -10,7 +10,6 @@
 #include "Log.h"
 #include "Registry.h"
 #include "Render/ShaderInjection.h"
-#include "ScreenSpaceGI.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -140,12 +139,6 @@ namespace cs::features
 		return &instance;
 	}
 
-	ID3D11PixelShader* ShaderReplacement::GetReplacementPixelShader(std::string_view a_name) const noexcept
-	{
-		const auto* target = cs::engine::FindShaderInjectionTarget(a_name);
-		return target ? cs::engine::GetInjectedPixelShader(target->id) : nullptr;
-	}
-
 	bool ShaderReplacement::IsShaderEnabled(const std::string& a_name) const noexcept
 	{
 		auto& t = const_cast<PerShaderToggle&>(_settings.shaders);
@@ -250,16 +243,6 @@ namespace cs::features
 				: cs::engine::DeveloperShaderOverride::kForceOff;
 			(void)cs::engine::SetDeveloperShaderOverride(target.id, shaderOverride);
 		}
-
-		(void)cs::engine::RegisterReplacement({
-			.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
-			.contributor = "ShaderReplacement legacy ScreenSpaceGI define",
-			.defines = { { "SSGI", "1" } },
-			.isReady = [this] {
-				return IsShaderEnabled("ambient_ibl_pass")
-					&& cs::features::ScreenSpaceGI::GetSingleton()->IsReady();
-			}
-		});
 
 		if (!_developerForceOffActive) {
 			L->info("Developer mode is off; force-off overrides are treated as Auto.");

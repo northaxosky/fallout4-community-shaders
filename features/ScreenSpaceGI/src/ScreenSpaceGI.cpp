@@ -426,14 +426,30 @@ namespace cs::features
 
 	void ScreenSpaceGI::Load()
 	{
+		const bool ambientRegistered = cs::engine::RegisterReplacement({
+			.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+			.contributor = "ScreenSpaceGI",
+			.defines = { { "SSGI", "1" } },
+			.isReady = [this] {
+				return _settings.bounceDelivery == 1 && IsReady() && _bounceTexture;
+			},
+			.bind = [this](ID3D11DeviceContext* a_context) {
+				OnAmbientPassInjection(a_context);
+			},
+			.slotClaims = {
+				{
+					.stage = cs::engine::ShaderStage::kPixel,
+					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+					.slot = kBouncePSSlot
+				}
+			}
+		});
+		if (!ambientRegistered) {
+			L->error("Failed to register ambient shader replacement.");
+		}
+
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
-		});
-		cs::engine::RegisterShaderInjectionBind(
-		cs::engine::ShaderInjectionTarget::kAmbientIblPass,
-		"ScreenSpaceGI mode-1 injection",
-		[](ID3D11DeviceContext* a_context) {
-			ScreenSpaceGI::GetSingleton()->OnAmbientPassInjection(a_context);
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();

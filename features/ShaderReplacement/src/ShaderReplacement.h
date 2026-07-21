@@ -7,8 +7,6 @@
 #include <string>
 #include <string_view>
 
-struct ID3D11PixelShader;
-
 namespace cs::features
 {
 	class ShaderReplacement : public Feature
@@ -44,15 +42,12 @@ namespace cs::features
 			std::string      shadersRoot  = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders";
 		};
 
-		const Settings& GetSettings() const noexcept { return _settings; }
-		bool IsShaderEnabled(const std::string& a_name) const noexcept;
-		ID3D11PixelShader* GetReplacementPixelShader(std::string_view a_name) const noexcept;
-
 	private:
 		ShaderReplacement() = default;
 
 		void SaveSettings();
 		void ApplyMarkerOverrides();
+		bool IsShaderEnabled(const std::string& a_name) const noexcept;
 
 		Settings           _settings;
 		std::atomic<bool>  _started{ false };

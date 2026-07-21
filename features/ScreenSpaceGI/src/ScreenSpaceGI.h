@@ -34,7 +34,6 @@ namespace cs::features
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
-		bool IsReady();
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -140,6 +139,7 @@ namespace cs::features
 		void OnAOIntegration();
 		void OnAmbientPassInjection(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();
+		bool IsReady();
 		bool EnsureResources();
 		void IntegrateAO(cs::engine::RenderTarget a_target);
 		void IntegrateBounce();

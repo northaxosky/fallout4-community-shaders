@@ -2,7 +2,6 @@
 
 #include <memory>
 #include <string>
-#include <string_view>
 #include <vector>
 
 namespace cs::features::replacement
@@ -22,7 +21,6 @@ namespace cs::features::replacement
 
 		bool LoadFromJson(const std::wstring& path);
 
-		ReplacementEntry* FindByName(std::string_view a_name) noexcept;
 		std::vector<std::unique_ptr<ReplacementEntry>>&       All() noexcept       { return _entries; }
 		const std::vector<std::unique_ptr<ReplacementEntry>>& All() const noexcept { return _entries; }
 

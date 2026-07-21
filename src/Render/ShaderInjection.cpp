@@ -131,13 +131,6 @@ namespace cs::engine
 			kPublished
 		};
 
-		struct BindRegistration
-		{
-			ShaderInjectionTarget       target = ShaderInjectionTarget::kCount;
-			std::string                 contributor;
-			ShaderInjectionBindCallback callback;
-		};
-
 		struct TargetRuntimeState
 		{
 			std::atomic<bool>          requested{ false };
@@ -189,7 +182,6 @@ namespace cs::engine
 			std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
-			std::vector<BindRegistration> bindRegistrations;
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
@@ -290,7 +282,6 @@ namespace cs::engine
 
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
-			const std::vector<BindRegistration>& a_bindRegistrations,
 			bool a_developerForceOffEnabled,
 			const std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>& a_developerOverrides)
@@ -362,13 +353,6 @@ namespace cs::engine
 
 				if (developerOverride == DeveloperShaderOverride::kForceOff)
 					requested = false;
-
-				if (requested && !target.slotCollision) {
-					for (const auto& bindRegistration : a_bindRegistrations) {
-						if (bindRegistration.target == metadata.id)
-							target.binds.push_back(bindRegistration.callback);
-					}
-				}
 
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
@@ -601,29 +585,6 @@ namespace cs::engine
 		return true;
 	}
 
-	bool RegisterShaderInjectionBind(
-		ShaderInjectionTarget a_target,
-		std::string a_contributor,
-		ShaderInjectionBindCallback a_callback)
-	{
-		if (!IsValidTarget(a_target) || !a_callback)
-			return false;
-
-		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Injection bind registration");
-			return false;
-		}
-
-		service.bindRegistrations.push_back({
-			a_target,
-			std::move(a_contributor),
-			std::move(a_callback)
-		});
-		return true;
-	}
-
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled)
 	{
 		auto& service = GetService();
@@ -681,7 +642,6 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		std::vector<ShaderReplacementRegistration> registrations;
-		std::vector<BindRegistration> bindRegistrations;
 		std::array<DeveloperShaderOverride,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 		std::wstring developerSourceRoot;
@@ -698,7 +658,6 @@ namespace cs::engine
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
 			registrations = service.registrations;
-			bindRegistrations = service.bindRegistrations;
 		}
 
 		sha1::Sha1InitOnce();
@@ -713,7 +672,6 @@ namespace cs::engine
 		} else {
 			auto frozenTargets = FreezeTargets(
 				registrations,
-				bindRegistrations,
 				developerForceOffEnabled,
 				developerOverrides);
 			compileRequested = frozenTargets.size();

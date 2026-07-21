@@ -121,10 +121,6 @@ namespace cs::engine
 	const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(std::string_view a_name) noexcept;
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
-	bool RegisterShaderInjectionBind(
-		ShaderInjectionTarget a_target,
-		std::string a_contributor,
-		ShaderInjectionBindCallback a_callback);
 
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled);
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
