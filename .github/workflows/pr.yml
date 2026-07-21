@@ -115,3 +115,8 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: Run unit + shader-compile tests
+        shell: pwsh
+        run: |
+          ctest --test-dir build -C Release -E ShaderRoundtrip --output-on-failure --no-tests=error
