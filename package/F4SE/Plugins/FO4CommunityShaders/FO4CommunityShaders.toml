@@ -24,7 +24,12 @@ enabled = false
 num_slices = 4
 num_steps = 16
 effect_radius = 256.0
-ao_power = 2.5
+ao_power = 3.0
+bounce_strength = 2.0
+radiance_source_rt = 3
+
+# Bounce delivery: 0 = telemetry only, 1 = shader injection, 2 = engine RT additive.
+bounce_delivery = 2
 
 # Denoise.
 denoise_enabled = true

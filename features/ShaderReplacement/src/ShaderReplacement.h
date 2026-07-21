@@ -5,10 +5,14 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <string>
+#include <string_view>
+#include <vector>
 
 struct IDXGIAdapter;
 struct ID3D11Device;
+struct ID3D11DeviceContext;
 struct ID3D11PixelShader;
 
 namespace cs::features
@@ -56,7 +60,17 @@ namespace cs::features
 		bool IsShaderEnabled(const std::string& a_name) const noexcept;
 		ID3D11PixelShader* GetReplacementPixelShader(std::string_view a_name) const noexcept;
 
+		using InjectionCallback = std::function<void(ID3D11DeviceContext*)>;
+		void RegisterInjection(std::string a_passName, InjectionCallback a_callback);
+		void DispatchInjections(std::string_view a_passName, ID3D11DeviceContext* a_context) noexcept;
+
 	private:
+		struct Injection
+		{
+			std::string passName;
+			InjectionCallback callback;
+		};
+
 		ShaderReplacement() = default;
 
 		void SaveSettings();
@@ -66,5 +80,6 @@ namespace cs::features
 		std::atomic<bool>  _started{ false };
 		std::size_t        _compiledWant = 0;
 		std::size_t        _compiledGot  = 0;
+		std::vector<Injection> _injections;
 	};
 }

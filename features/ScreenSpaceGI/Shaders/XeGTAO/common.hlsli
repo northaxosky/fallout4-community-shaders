@@ -33,6 +33,12 @@ cbuffer XeGTAOCB : register(b0)
 	float DistanceNormalisation;
 	float CenterBeta;
 	float2 _pad;
+
+#ifdef SSGI_BOUNCE
+	float2 RadianceScale;
+	float2 _bouncePad;
+	float4 ViewToWorld[3];
+#endif
 };
 
 SamplerState samplerPointClamp : register(s0);
@@ -54,5 +60,15 @@ float2 ViewToUV(const float3 viewPos)
 {
 	return ((viewPos.xy / viewPos.z) - NDCToViewAdd.xy) / NDCToViewMul.xy;
 }
+
+#ifdef SSGI_BOUNCE
+float3 ViewToWorldDirection(float3 direction)
+{
+	return normalize(float3(
+		dot(ViewToWorld[0].xyz, direction),
+		dot(ViewToWorld[1].xyz, direction),
+		dot(ViewToWorld[2].xyz, direction)));
+}
+#endif
 
 #endif  // XEGTAO_COMMON

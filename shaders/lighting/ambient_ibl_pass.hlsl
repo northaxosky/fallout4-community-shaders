@@ -161,11 +161,10 @@ Texture2D<float4> g_tBlurDepthRef : register(t15);
 
 #ifdef SSGI
 // SSGI injection (drop-in, not part of the vanilla contract): the GI resolve
-// pass writes these full-res, ready-to-combine buffers, bound at free slots.
+// pass writes full-res, ready-to-combine bounce at a free slot.
 //   t0  = indirect diffuse bounce (il * linAlbedo)
-//   t13 = MultiBounceAO(albedo, ao) color
 Texture2D<float4> g_tSSGIBounce : register(t0);
-Texture2D<float4> g_tSSGIAO     : register(t13);
+// Future albedo-aware MultiBounceAO may use t13 again.
 #endif
 
 // Samplers (all mode_default; addressing modes set by D3D11 sampler state
@@ -467,16 +466,13 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 261-262: AO modulation - THE single AO application.
     //   r0.w = t9.Sample(uv).y    (kSSAO)
     //   o0.xyz = r0.w * r0.xyz
-#ifdef SSGI
-    // Option A: the GI resolve pass already did the SH eval + albedo-tint +
-    // multi-bounce AO, so injection is a color-AO multiply on the ambient term
-    // plus the pre-tinted indirect bounce. Full-res texel fetch at the pixel.
-    int3 ssgiPx = int3(int2(input.position.xy), 0);
-    float3 mbAO     = g_tSSGIAO.Load(ssgiPx).rgb;
-    float3 giBounce = g_tSSGIBounce.Load(ssgiPx).rgb;
-    output.color.xyz = mbAO * modulated + giBounce;
-#else
     float aoFactor = g_tSSAO.Sample(g_sSSAO, uv).y;
+#ifdef SSGI
+    // AO already arrives through the integrated engine t9 path.
+    int3 ssgiPx = int3(int2(input.position.xy), 0);
+    float3 giBounce = g_tSSGIBounce.Load(ssgiPx).rgb;
+    output.color.xyz = aoFactor * modulated + giBounce;
+#else
     output.color.xyz = aoFactor * modulated;
 #endif
 

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -36,6 +37,8 @@ namespace cs::features
 		constexpr const wchar_t* kAOPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\gi.cs.hlsl";
 		constexpr const wchar_t* kDenoisePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\denoise.cs.hlsl";
 		constexpr const wchar_t* kAOIntegrationPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\AOIntegrationCS.hlsl";
+		constexpr const wchar_t* kBounceTelemetryPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\BounceTelemetryCS.hlsl";
+		constexpr const wchar_t* kBounceIntegrationPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\BounceIntegrationPS.hlsl";
 
 		bool SupportsAOIntegration()
 		{
@@ -77,6 +80,160 @@ namespace cs::features
 			return false;
 		}
 
+		void StoreViewToWorld(const RE::NiMatrix3& a_rotation, float* a_output)
+		{
+			for (std::size_t row = 0; row < 3; ++row) {
+				a_output[row * 4 + 0] = a_rotation.entry[row].x;
+				a_output[row * 4 + 1] = a_rotation.entry[row].y;
+				a_output[row * 4 + 2] = a_rotation.entry[row].z;
+				a_output[row * 4 + 3] = 0.0f;
+			}
+		}
+
+		bool IsFullResolutionHDR(
+			ID3D11ShaderResourceView* a_srv,
+			std::uint32_t a_width,
+			std::uint32_t a_height,
+			D3D11_TEXTURE2D_DESC& a_desc)
+		{
+			if (!a_srv) {
+				return false;
+			}
+
+			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+			a_srv->GetDesc(&srvDesc);
+			if (srvDesc.ViewDimension != D3D11_SRV_DIMENSION_TEXTURE2D ||
+				srvDesc.Format != DXGI_FORMAT_R11G11B10_FLOAT) {
+				return false;
+			}
+
+			winrt::com_ptr<ID3D11Resource> resource;
+			a_srv->GetResource(resource.put());
+			auto texture = resource.try_as<ID3D11Texture2D>();
+			if (!texture) {
+				return false;
+			}
+
+			texture->GetDesc(&a_desc);
+			return a_desc.Width == a_width &&
+				a_desc.Height == a_height &&
+				a_desc.SampleDesc.Count == 1;
+		}
+
+		class FullscreenDrawScope
+		{
+		public:
+			explicit FullscreenDrawScope(ID3D11DeviceContext* a_context) noexcept :
+				_context(a_context)
+			{
+				_context->OMGetBlendState(
+					_blendState.put(), _blendFactor.data(), &_sampleMask);
+				_context->OMGetDepthStencilState(
+					_depthStencilState.put(), &_stencilRef);
+				_context->RSGetState(_rasterizerState.put());
+				_viewportCount = static_cast<UINT>(_viewports.size());
+				_context->RSGetViewports(&_viewportCount, _viewports.data());
+				_context->IAGetInputLayout(_inputLayout.put());
+				_context->IAGetPrimitiveTopology(&_topology);
+
+				_vsClassCount = static_cast<UINT>(_vsClasses.size());
+				_context->VSGetShader(_vertexShader.put(), _vsClasses.data(), &_vsClassCount);
+				_hsClassCount = static_cast<UINT>(_hsClasses.size());
+				_context->HSGetShader(_hullShader.put(), _hsClasses.data(), &_hsClassCount);
+				_dsClassCount = static_cast<UINT>(_dsClasses.size());
+				_context->DSGetShader(_domainShader.put(), _dsClasses.data(), &_dsClassCount);
+				_gsClassCount = static_cast<UINT>(_gsClasses.size());
+				_context->GSGetShader(_geometryShader.put(), _gsClasses.data(), &_gsClassCount);
+				_psClassCount = static_cast<UINT>(_psClasses.size());
+				_context->PSGetShader(_pixelShader.put(), _psClasses.data(), &_psClassCount);
+
+				ID3D11ShaderResourceView* shaderResource = nullptr;
+				_context->PSGetShaderResources(0, 1, &shaderResource);
+				_pixelShaderResource.attach(shaderResource);
+				ID3D11Buffer* constantBuffer = nullptr;
+				_context->PSGetConstantBuffers(0, 1, &constantBuffer);
+				_pixelConstantBuffer.attach(constantBuffer);
+			}
+
+			~FullscreenDrawScope() noexcept
+			{
+				ID3D11ShaderResourceView* nullSRV = nullptr;
+				_context->PSSetShaderResources(0, 1, &nullSRV);
+				_context->OMSetRenderTargets(0, nullptr, nullptr);
+
+				ID3D11Buffer* constantBuffer = _pixelConstantBuffer.get();
+				_context->PSSetConstantBuffers(0, 1, &constantBuffer);
+				ID3D11ShaderResourceView* shaderResource = _pixelShaderResource.get();
+				_context->PSSetShaderResources(0, 1, &shaderResource);
+				_context->PSSetShader(_pixelShader.get(), _psClasses.data(), _psClassCount);
+				_context->GSSetShader(_geometryShader.get(), _gsClasses.data(), _gsClassCount);
+				_context->DSSetShader(_domainShader.get(), _dsClasses.data(), _dsClassCount);
+				_context->HSSetShader(_hullShader.get(), _hsClasses.data(), _hsClassCount);
+				_context->VSSetShader(_vertexShader.get(), _vsClasses.data(), _vsClassCount);
+				_context->IASetPrimitiveTopology(_topology);
+				_context->IASetInputLayout(_inputLayout.get());
+				_context->RSSetViewports(_viewportCount, _viewports.data());
+				_context->RSSetState(_rasterizerState.get());
+				_context->OMSetDepthStencilState(_depthStencilState.get(), _stencilRef);
+				_context->OMSetBlendState(
+					_blendState.get(), _blendFactor.data(), _sampleMask);
+
+				ReleaseClassInstances(_vsClasses, _vsClassCount);
+				ReleaseClassInstances(_hsClasses, _hsClassCount);
+				ReleaseClassInstances(_dsClasses, _dsClassCount);
+				ReleaseClassInstances(_gsClasses, _gsClassCount);
+				ReleaseClassInstances(_psClasses, _psClassCount);
+			}
+
+			FullscreenDrawScope(const FullscreenDrawScope&) = delete;
+			FullscreenDrawScope(FullscreenDrawScope&&) = delete;
+			FullscreenDrawScope& operator=(const FullscreenDrawScope&) = delete;
+			FullscreenDrawScope& operator=(FullscreenDrawScope&&) = delete;
+
+		private:
+			template <std::size_t Size>
+			static void ReleaseClassInstances(
+				std::array<ID3D11ClassInstance*, Size>& a_instances,
+				UINT a_count) noexcept
+			{
+				for (UINT index = 0; index < a_count; ++index) {
+					if (a_instances[index]) {
+						a_instances[index]->Release();
+					}
+				}
+			}
+
+			ID3D11DeviceContext* _context;
+			winrt::com_ptr<ID3D11BlendState> _blendState;
+			std::array<float, 4> _blendFactor{};
+			UINT _sampleMask = 0;
+			winrt::com_ptr<ID3D11DepthStencilState> _depthStencilState;
+			UINT _stencilRef = 0;
+			winrt::com_ptr<ID3D11RasterizerState> _rasterizerState;
+			std::array<D3D11_VIEWPORT, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE>
+				_viewports{};
+			UINT _viewportCount = 0;
+			winrt::com_ptr<ID3D11InputLayout> _inputLayout;
+			D3D11_PRIMITIVE_TOPOLOGY _topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+			winrt::com_ptr<ID3D11VertexShader> _vertexShader;
+			winrt::com_ptr<ID3D11HullShader> _hullShader;
+			winrt::com_ptr<ID3D11DomainShader> _domainShader;
+			winrt::com_ptr<ID3D11GeometryShader> _geometryShader;
+			winrt::com_ptr<ID3D11PixelShader> _pixelShader;
+			std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _vsClasses{};
+			std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _hsClasses{};
+			std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _dsClasses{};
+			std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _gsClasses{};
+			std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _psClasses{};
+			UINT _vsClassCount = 0;
+			UINT _hsClassCount = 0;
+			UINT _dsClassCount = 0;
+			UINT _gsClassCount = 0;
+			UINT _psClassCount = 0;
+			winrt::com_ptr<ID3D11ShaderResourceView> _pixelShaderResource;
+			winrt::com_ptr<ID3D11Buffer> _pixelConstantBuffer;
+		};
+
 		bool ParseSettingsTable(
 			const toml::table& a_config,
 			ScreenSpaceGI::Settings& a_candidate,
@@ -107,6 +264,10 @@ namespace cs::features
 					feature_config::ReadFloat(*settingsTable, "ao_power", a_candidate.aoPower),
 					"ao_power", "number", a_error) ||
 				!AcceptSetting(
+					feature_config::ReadFloat(
+						*settingsTable, "bounce_strength", a_candidate.bounceStrength, 0.0f, 8.0f),
+					"bounce_strength", "number", a_error) ||
+				!AcceptSetting(
 					feature_config::ReadFloat(*settingsTable, "depth_fade_start", a_candidate.depthFadeStart),
 					"depth_fade_start", "number", a_error) ||
 				!AcceptSetting(
@@ -136,7 +297,13 @@ namespace cs::features
 
 			return readInteger("num_slices", a_candidate.numSlices, 1, 64) &&
 				readInteger("num_steps", a_candidate.numSteps, 1, 64) &&
-				readInteger("mode", a_candidate.mode, 1, 2);
+				readInteger("mode", a_candidate.mode, 1, 2) &&
+				readInteger(
+					"radiance_source_rt",
+					a_candidate.radianceSourceRT,
+					0,
+					static_cast<int>(cs::engine::RenderTarget::kCount) - 1) &&
+				readInteger("bounce_delivery", a_candidate.bounceDelivery, 0, 2);
 		}
 
 		std::unique_ptr<cs::buffer::Texture2D> CreateTexture(
@@ -183,7 +350,7 @@ namespace cs::features
 			return CreateTexture(a_width, a_height, DXGI_FORMAT_R16G16B16A16_FLOAT);
 		}
 
-		std::uint32_t AOTargetComponents(DXGI_FORMAT a_format)
+		std::uint32_t TargetComponents(DXGI_FORMAT a_format)
 		{
 			switch (a_format) {
 			case DXGI_FORMAT_R8_UNORM:
@@ -241,6 +408,9 @@ namespace cs::features
 		settings.insert_or_assign("denoise_radius", _settings.denoiseRadius);
 		settings.insert_or_assign("effect_radius", _settings.effectRadius);
 		settings.insert_or_assign("ao_power", _settings.aoPower);
+		settings.insert_or_assign("bounce_strength", _settings.bounceStrength);
+		settings.insert_or_assign("radiance_source_rt", _settings.radianceSourceRT);
+		settings.insert_or_assign("bounce_delivery", _settings.bounceDelivery);
 		settings.insert_or_assign("depth_fade_start", _settings.depthFadeStart);
 		settings.insert_or_assign("depth_fade_end", _settings.depthFadeEnd);
 		settings.insert_or_assign("num_slices", _settings.numSlices);
@@ -259,10 +429,15 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
-		cs::engine::RegisterPreSunLightDraw([] {
-			ScreenSpaceGI::GetSingleton()->OnPreSunLightDraw();
+		ShaderReplacement::GetSingleton()->RegisterInjection(
+			"ambient_ibl_pass",
+			[](ID3D11DeviceContext* a_context) {
+				ScreenSpaceGI::GetSingleton()->OnAmbientPassInjection(a_context);
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
+			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
+		});
+		cs::engine::RegisterPostDeferredComposite([] {
 			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
@@ -280,7 +455,7 @@ namespace cs::features
 		_resolveCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 			cs::util::CompileShader(kResolvePath, {}, "cs_5_0")));
 		if (_resolveCS) {
-			L->info("Compiled neutral resolve shader.");
+			L->info("Compiled resolve shader.");
 		}
 
 		_decodeCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
@@ -301,10 +476,30 @@ namespace cs::features
 			L->warn("Failed to compile XeGTAO AO shader.");
 		}
 
+		_bounceCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
+			cs::util::CompileShader(kAOPath, { { "SSGI_BOUNCE", "1" } }, "cs_5_0")));
+		if (!_bounceCS) {
+			L->warn("Failed to compile XeGTAO bounce shader.");
+		}
+
 		_denoiseCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 			cs::util::CompileShader(kDenoisePath, {}, "cs_5_0")));
 		if (!_denoiseCS) {
 			L->warn("Failed to compile XeGTAO denoise shader.");
+		}
+
+		_bounceDenoiseCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
+			cs::util::CompileShader(kDenoisePath, { { "SSGI_BOUNCE", "1" } }, "cs_5_0")));
+		if (!_bounceDenoiseCS) {
+			L->warn("Failed to compile XeGTAO bounce denoise shader.");
+		}
+
+		_bounceTelemetryCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
+			cs::util::CompileShader(kBounceTelemetryPath, {}, "cs_5_0")));
+		_bounceTelemetryCB = std::make_unique<cs::buffer::ConstantBuffer>(
+			cs::buffer::ConstantBufferDesc<BounceTelemetryCB>());
+		if (!_bounceTelemetryCS) {
+			L->warn("Failed to compile bounce telemetry shader.");
 		}
 
 		if (!_pointClampSampler) {
@@ -332,6 +527,43 @@ namespace cs::features
 		if (std::ranges::any_of(_aoIntegrationCS, [](const auto& a_shader) { return !a_shader; })) {
 			L->warn("Failed to compile one or more AO integration shader variants.");
 		}
+
+		_bounceIntegrationVS.attach(reinterpret_cast<ID3D11VertexShader*>(
+			cs::util::CompileShader(kBounceIntegrationPath, {}, "vs_5_0", "VSMain")));
+		_bounceIntegrationPS.attach(reinterpret_cast<ID3D11PixelShader*>(
+			cs::util::CompileShader(kBounceIntegrationPath, {}, "ps_5_0", "PSMain")));
+		_bounceIntegrationCB = std::make_unique<cs::buffer::ConstantBuffer>(
+			cs::buffer::ConstantBufferDesc<BounceIntegrationCB>());
+		if (!_bounceIntegrationVS || !_bounceIntegrationPS) {
+			L->warn("Failed to compile bounce integration graphics shaders.");
+		}
+
+		D3D11_BLEND_DESC blendDesc{};
+		auto& renderTargetBlend = blendDesc.RenderTarget[0];
+		renderTargetBlend.BlendEnable = TRUE;
+		renderTargetBlend.SrcBlend = D3D11_BLEND_ONE;
+		renderTargetBlend.DestBlend = D3D11_BLEND_ONE;
+		renderTargetBlend.BlendOp = D3D11_BLEND_OP_ADD;
+		renderTargetBlend.SrcBlendAlpha = D3D11_BLEND_ONE;
+		renderTargetBlend.DestBlendAlpha = D3D11_BLEND_ONE;
+		renderTargetBlend.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+		renderTargetBlend.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+		DX::ThrowIfFailed(a_device->CreateBlendState(
+			&blendDesc, _bounceIntegrationBlendState.put()));
+
+		D3D11_DEPTH_STENCIL_DESC depthStencilDesc{};
+		depthStencilDesc.DepthEnable = FALSE;
+		depthStencilDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+		depthStencilDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
+		DX::ThrowIfFailed(a_device->CreateDepthStencilState(
+			&depthStencilDesc, _bounceIntegrationDepthStencilState.put()));
+
+		D3D11_RASTERIZER_DESC rasterizerDesc{};
+		rasterizerDesc.FillMode = D3D11_FILL_SOLID;
+		rasterizerDesc.CullMode = D3D11_CULL_NONE;
+		rasterizerDesc.DepthClipEnable = TRUE;
+		DX::ThrowIfFailed(a_device->CreateRasterizerState(
+			&rasterizerDesc, _bounceIntegrationRasterizerState.put()));
 	}
 
 	bool ScreenSpaceGI::IsReady()
@@ -376,12 +608,29 @@ namespace cs::features
 			auto viewNormalTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
 			auto aoRawTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
 			auto aoDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
+			auto bounceSHRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
+			auto bounceCoCgRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT);
+			auto bounceSHDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
+			auto bounceCoCgDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT);
+			auto bounceTelemetryStats = CreateTexture(
+				kBounceTelemetryWidth,
+				kBounceTelemetryHeight,
+				DXGI_FORMAT_R32G32B32A32_FLOAT);
 			auto xegtaoCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<XeGTAOCB>());
 			auto decodeCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<DecodeCB>());
 
 			auto* device = cs::util::GetD3DDevice();
+			D3D11_TEXTURE2D_DESC readbackDesc = bounceTelemetryStats->desc;
+			readbackDesc.Usage = D3D11_USAGE_STAGING;
+			readbackDesc.BindFlags = 0;
+			readbackDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+			readbackDesc.MiscFlags = 0;
+			winrt::com_ptr<ID3D11Texture2D> bounceTelemetryReadback;
+			DX::ThrowIfFailed(device->CreateTexture2D(
+				&readbackDesc, nullptr, bounceTelemetryReadback.put()));
+
 			std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, 5> workingDepthMipUAVs;
 			D3D11_UNORDERED_ACCESS_VIEW_DESC mipUAVDesc{};
 			mipUAVDesc.Format = DXGI_FORMAT_R32_FLOAT;
@@ -465,6 +714,17 @@ namespace cs::features
 			_viewNormalTex = std::move(viewNormalTex);
 			_aoRawTex = std::move(aoRawTex);
 			_aoDenoisedTex = std::move(aoDenoisedTex);
+			_bounceSHRawTex = std::move(bounceSHRawTex);
+			_bounceCoCgRawTex = std::move(bounceCoCgRawTex);
+			_bounceSHDenoisedTex = std::move(bounceSHDenoisedTex);
+			_bounceCoCgDenoisedTex = std::move(bounceCoCgDenoisedTex);
+			_bounceTelemetryStats = std::move(bounceTelemetryStats);
+			_bounceTelemetryReadback = std::move(bounceTelemetryReadback);
+			_bounceTelemetryPending = false;
+			_bounceTelemetryReady.store(false, std::memory_order_relaxed);
+			_bounceMean.store(0.0f, std::memory_order_relaxed);
+			_bounceMax.store(0.0f, std::memory_order_relaxed);
+			_bounceNonzeroFraction.store(0.0f, std::memory_order_relaxed);
 			_xegtaoCB = std::move(xegtaoCB);
 			_decodeCB = std::move(decodeCB);
 			if (noiseTex) {
@@ -491,6 +751,13 @@ namespace cs::features
 				_viewNormalTex.reset();
 				_aoRawTex.reset();
 				_aoDenoisedTex.reset();
+				_bounceSHRawTex.reset();
+				_bounceCoCgRawTex.reset();
+				_bounceSHDenoisedTex.reset();
+				_bounceCoCgDenoisedTex.reset();
+				_bounceTelemetryStats.reset();
+				_bounceTelemetryReadback = nullptr;
+				_bounceTelemetryPending = false;
 				_noiseTex = nullptr;
 				_noiseSRV = nullptr;
 				_pointClampSampler = nullptr;
@@ -515,6 +782,13 @@ namespace cs::features
 				_viewNormalTex.reset();
 				_aoRawTex.reset();
 				_aoDenoisedTex.reset();
+				_bounceSHRawTex.reset();
+				_bounceCoCgRawTex.reset();
+				_bounceSHDenoisedTex.reset();
+				_bounceCoCgDenoisedTex.reset();
+				_bounceTelemetryStats.reset();
+				_bounceTelemetryReadback = nullptr;
+				_bounceTelemetryPending = false;
 				_noiseTex = nullptr;
 				_noiseSRV = nullptr;
 				_pointClampSampler = nullptr;
@@ -531,7 +805,13 @@ namespace cs::features
 	void ScreenSpaceGI::OnComputeResolve()
 	{
 		_ssgiBoundLastFrame.store(false, std::memory_order_relaxed);
+		_bounceInjectedLastFrame.store(false, std::memory_order_relaxed);
+		_bounceAnchorBindsLastFrame.store(0, std::memory_order_relaxed);
+		_bounceRTVActiveLastFrame.store(false, std::memory_order_relaxed);
+		_bounceRTVDrawsLastFrame.store(0, std::memory_order_relaxed);
 		_aoProducedLastFrame.store(false, std::memory_order_relaxed);
+		_bounceProducedLastFrame.store(false, std::memory_order_relaxed);
+		_radianceAvailableLastFrame.store(false, std::memory_order_relaxed);
 		_denoisedLastFrame.store(false, std::memory_order_relaxed);
 		_resolveDispatchedLastFrame.store(0, std::memory_order_relaxed);
 
@@ -558,11 +838,17 @@ namespace cs::features
 			return;
 		}
 
+		PollBounceTelemetry(context);
+
 		try {
 			cs::engine::ComputeOMScope scope(context);
 
 			bool aoProducedThisFrame = false;
+			bool bounceProducedThisFrame = false;
+			bool bounceDenoisedThisFrame = false;
 			bool denoisedThisFrame = false;
+			std::uint32_t activeWidth = 0;
+			std::uint32_t activeHeight = 0;
 			const bool xegtaoReady =
 				_decodeCS && _prefilterCS && _aoCS && _denoiseCS &&
 				_linearDepthTex && _workingDepthTex && _viewNormalTex && _aoRawTex && _aoDenoisedTex &&
@@ -574,6 +860,7 @@ namespace cs::features
 			DirectX::XMFLOAT4X4 worldInvProj{};
 			DirectX::XMFLOAT4 worldNdcToViewMul{};
 			DirectX::XMFLOAT4 worldNdcToViewAdd{};
+			auto* sceneCamera = RE::Main::WorldRootCamera();
 			const bool projOk = rtm &&
 				cs::engine::TryGetWorldSceneProjection(
 					worldProj,
@@ -588,6 +875,8 @@ namespace cs::features
 				auto* depthSRV = cs::engine::GetSceneDepthSRV();
 				auto* normalSRV = cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
 				if (frameW > 0 && frameH > 0 && depthSRV && normalSRV) {
+					activeWidth = static_cast<std::uint32_t>(frameW);
+					activeHeight = static_cast<std::uint32_t>(frameH);
 					const float texWidth = static_cast<float>(_allocW);
 					const float texHeight = static_cast<float>(_allocH);
 					const float frameWidth = static_cast<float>(frameW);
@@ -635,6 +924,30 @@ namespace cs::features
 					xegtaoCB.BlurRadius = _settings.denoiseRadius;
 					xegtaoCB.DistanceNormalisation = 2.0f;
 					xegtaoCB.CenterBeta = 1.0f;
+					D3D11_TEXTURE2D_DESC radianceDesc{};
+					const auto radianceTarget =
+						static_cast<cs::engine::RenderTarget>(_settings.radianceSourceRT);
+					auto* radianceSRV = cs::engine::GetRenderTargetSRV(radianceTarget);
+					const bool bounceResourcesReady =
+						_bounceCS &&
+						_bounceSHRawTex && _bounceCoCgRawTex &&
+						_bounceSHDenoisedTex && _bounceCoCgDenoisedTex;
+					const bool radianceAvailable =
+						sceneCamera &&
+						bounceResourcesReady &&
+						IsFullResolutionHDR(radianceSRV, _allocW, _allocH, radianceDesc);
+					_radianceAvailableLastFrame.store(radianceAvailable, std::memory_order_relaxed);
+					if (radianceAvailable) {
+						xegtaoCB.RadianceScale[0] = frameWidth / static_cast<float>(radianceDesc.Width);
+						xegtaoCB.RadianceScale[1] = frameHeight / static_cast<float>(radianceDesc.Height);
+						StoreViewToWorld(sceneCamera->world.rotate, xegtaoCB.ViewToWorld);
+					} else {
+						CS_LOG_ONCE(
+							L,
+							spdlog::level::warn,
+							"SSGI bounce unavailable: rt={} must expose a full-resolution R11G11B10_FLOAT SRV.",
+							_settings.radianceSourceRT);
+					}
 					_xegtaoCB->Update(xegtaoCB);
 
 					ID3D11ShaderResourceView* decodeSRVs[2] = { depthSRV, normalSRV };
@@ -684,52 +997,73 @@ namespace cs::features
 					context->CSSetShaderResources(0, 1, nullPrefilterSRVs);
 					context->CSSetUnorderedAccessViews(0, 5, nullPrefilterUAVs, nullptr);
 
-					ID3D11ShaderResourceView* aoSRVs[3] = {
+					ID3D11ShaderResourceView* aoSRVs[4] = {
 						_workingDepthTex->srv.get(),
 						_viewNormalTex->srv.get(),
-						_noiseSRV.get()
+						_noiseSRV.get(),
+						radianceAvailable ? radianceSRV : nullptr
 					};
-					ID3D11UnorderedAccessView* aoUAVs[1] = { _aoRawTex->uav.get() };
-					context->CSSetShaderResources(0, 3, aoSRVs);
+					ID3D11UnorderedAccessView* aoUAVs[3] = {
+						_aoRawTex->uav.get(),
+						radianceAvailable ? _bounceSHRawTex->uav.get() : nullptr,
+						radianceAvailable ? _bounceCoCgRawTex->uav.get() : nullptr
+					};
+					const UINT aoSRVCount = radianceAvailable ? 4u : 3u;
+					const UINT aoUAVCount = radianceAvailable ? 3u : 1u;
+					context->CSSetShaderResources(0, aoSRVCount, aoSRVs);
 					context->CSSetConstantBuffers(0, 1, xegtaoBuffers);
 					context->CSSetSamplers(0, 1, pointClampSamplers);
-					context->CSSetUnorderedAccessViews(0, 1, aoUAVs, nullptr);
-					context->CSSetShader(_aoCS.get(), nullptr, 0);
+					context->CSSetUnorderedAccessViews(0, aoUAVCount, aoUAVs, nullptr);
+					context->CSSetShader(radianceAvailable ? _bounceCS.get() : _aoCS.get(), nullptr, 0);
 					context->Dispatch(
 						(static_cast<std::uint32_t>(frameW) + 7u) / 8u,
 						(static_cast<std::uint32_t>(frameH) + 7u) / 8u,
 						1);
 					aoProducedThisFrame = true;
+					bounceProducedThisFrame = radianceAvailable;
 
-					ID3D11ShaderResourceView* nullAOSRVs[3] = { nullptr, nullptr, nullptr };
-					ID3D11UnorderedAccessView* nullAOUAVs[1] = { nullptr };
+					ID3D11ShaderResourceView* nullAOSRVs[5] = {
+						nullptr, nullptr, nullptr, nullptr, nullptr
+					};
+					ID3D11UnorderedAccessView* nullAOUAVs[3] = { nullptr, nullptr, nullptr };
 					ID3D11SamplerState* nullSamplers[1] = { nullptr };
-					context->CSSetShaderResources(0, 3, nullAOSRVs);
-					context->CSSetUnorderedAccessViews(0, 1, nullAOUAVs, nullptr);
+					context->CSSetShaderResources(0, aoSRVCount, nullAOSRVs);
+					context->CSSetUnorderedAccessViews(0, aoUAVCount, nullAOUAVs, nullptr);
 					context->CSSetSamplers(0, 1, nullSamplers);
 					context->CSSetConstantBuffers(0, 1, nullBuffers);
 					context->CSSetShader(nullptr, nullptr, 0);
 
 					if (_settings.denoiseEnabled && aoProducedThisFrame) {
-						ID3D11ShaderResourceView* denoiseSRVs[3] = {
+						const bool denoiseBounce = bounceProducedThisFrame && _bounceDenoiseCS;
+						ID3D11ShaderResourceView* denoiseSRVs[5] = {
 							_workingDepthTex->srv.get(),
 							_viewNormalTex->srv.get(),
-							_aoRawTex->srv.get()
+							_aoRawTex->srv.get(),
+							denoiseBounce ? _bounceSHRawTex->srv.get() : nullptr,
+							denoiseBounce ? _bounceCoCgRawTex->srv.get() : nullptr
 						};
-						ID3D11UnorderedAccessView* denoiseUAVs[1] = { _aoDenoisedTex->uav.get() };
-						context->CSSetShaderResources(0, 3, denoiseSRVs);
+						ID3D11UnorderedAccessView* denoiseUAVs[3] = {
+							_aoDenoisedTex->uav.get(),
+							denoiseBounce ? _bounceSHDenoisedTex->uav.get() : nullptr,
+							denoiseBounce ? _bounceCoCgDenoisedTex->uav.get() : nullptr
+						};
+						const UINT denoiseSRVCount = denoiseBounce ? 5u : 3u;
+						const UINT denoiseUAVCount = denoiseBounce ? 3u : 1u;
+						context->CSSetShaderResources(0, denoiseSRVCount, denoiseSRVs);
 						context->CSSetConstantBuffers(0, 1, xegtaoBuffers);
 						context->CSSetSamplers(0, 1, pointClampSamplers);
-						context->CSSetUnorderedAccessViews(0, 1, denoiseUAVs, nullptr);
-						context->CSSetShader(_denoiseCS.get(), nullptr, 0);
+						context->CSSetUnorderedAccessViews(0, denoiseUAVCount, denoiseUAVs, nullptr);
+						context->CSSetShader(
+							denoiseBounce ? _bounceDenoiseCS.get() : _denoiseCS.get(), nullptr, 0);
 						context->Dispatch(
 							(static_cast<std::uint32_t>(frameW) + 7u) / 8u,
 							(static_cast<std::uint32_t>(frameH) + 7u) / 8u,
 							1);
 						denoisedThisFrame = true;
+						bounceDenoisedThisFrame = denoiseBounce;
 
-						context->CSSetShaderResources(0, 3, nullAOSRVs);
-						context->CSSetUnorderedAccessViews(0, 1, nullAOUAVs, nullptr);
+						context->CSSetShaderResources(0, denoiseSRVCount, nullAOSRVs);
+						context->CSSetUnorderedAccessViews(0, denoiseUAVCount, nullAOUAVs, nullptr);
 						context->CSSetSamplers(0, 1, nullSamplers);
 						context->CSSetConstantBuffers(0, 1, nullBuffers);
 						context->CSSetShader(nullptr, nullptr, 0);
@@ -741,40 +1075,71 @@ namespace cs::features
 			_denoisedLastFrame.store(denoisedThisFrame, std::memory_order_relaxed);
 
 			if (_resolveCS && _resolveCB) {
+				auto* albedoSRV =
+					cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferAlbedo);
+				const bool resolveBounce = bounceProducedThisFrame && albedoSRV && sceneCamera;
 				ResolveCB cb{};
 				cb.Extent[0] = _allocW;
 				cb.Extent[1] = _allocH;
 				cb.FrameIndex = static_cast<std::uint32_t>(state->frameCount);
 				cb.HasAO = aoProducedThisFrame ? 1u : 0u;
 				cb.AoPower = _settings.aoPower;
+				cb.HasBounce = resolveBounce ? 1u : 0u;
+				cb.BounceStrength = _settings.bounceStrength;
+				if (sceneCamera) {
+					StoreViewToWorld(sceneCamera->world.rotate, cb.ViewToWorld);
+				}
 				_resolveCB->Update(cb);
 
-				ID3D11ShaderResourceView* resolveSRVs[1] = {
+				ID3D11ShaderResourceView* resolveSRVs[5] = {
 					aoProducedThisFrame ?
 						((_settings.denoiseEnabled && denoisedThisFrame) ?
 								_aoDenoisedTex->srv.get() :
 								_aoRawTex->srv.get()) :
-						nullptr
+						nullptr,
+					resolveBounce ?
+						(bounceDenoisedThisFrame ?
+								_bounceSHDenoisedTex->srv.get() :
+								_bounceSHRawTex->srv.get()) :
+						nullptr,
+					resolveBounce ?
+						(bounceDenoisedThisFrame ?
+								_bounceCoCgDenoisedTex->srv.get() :
+								_bounceCoCgRawTex->srv.get()) :
+						nullptr,
+					resolveBounce ? _viewNormalTex->srv.get() : nullptr,
+					resolveBounce ? albedoSRV : nullptr
 				};
 				ID3D11Buffer* buffers[1] = { _resolveCB->CB() };
 				ID3D11UnorderedAccessView* uavs[2] = {
 					_bounceTexture->uav.get(),
 					_aoTexture->uav.get()
 				};
-				context->CSSetShaderResources(0, 1, resolveSRVs);
+				context->CSSetShaderResources(0, 5, resolveSRVs);
 				context->CSSetConstantBuffers(0, 1, buffers);
 				context->CSSetUnorderedAccessViews(0, 2, uavs, nullptr);
 				context->CSSetShader(_resolveCS.get(), nullptr, 0);
 				context->Dispatch((_allocW + 7u) / 8u, (_allocH + 7u) / 8u, 1);
 				_resolveDispatchedLastFrame.fetch_add(1, std::memory_order_relaxed);
+				_bounceProducedLastFrame.store(resolveBounce, std::memory_order_relaxed);
 
-				ID3D11ShaderResourceView* nullResolveSRVs[1] = { nullptr };
+				ID3D11ShaderResourceView* nullResolveSRVs[5] = {
+					nullptr, nullptr, nullptr, nullptr, nullptr
+				};
 				ID3D11UnorderedAccessView* nullUAVs[2] = { nullptr, nullptr };
 				ID3D11Buffer* nullBuffers[1] = { nullptr };
-				context->CSSetShaderResources(0, 1, nullResolveSRVs);
+				context->CSSetShaderResources(0, 5, nullResolveSRVs);
 				context->CSSetUnorderedAccessViews(0, 2, nullUAVs, nullptr);
 				context->CSSetShader(nullptr, nullptr, 0);
 				context->CSSetConstantBuffers(0, 1, nullBuffers);
+
+				if (resolveBounce && activeWidth > 0 && activeHeight > 0) {
+					QueueBounceTelemetry(
+						context,
+						activeWidth,
+						activeHeight,
+						static_cast<std::uint32_t>(state->frameCount));
+				}
 			} else {
 				const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
 				const float black[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -790,6 +1155,117 @@ namespace cs::features
 				CS_LOG_EVERY_MS(L, 2000, spdlog::level::err, "Resolve dispatch failed.");
 			}
 		}
+	}
+
+	void ScreenSpaceGI::PollBounceTelemetry(ID3D11DeviceContext* a_context)
+	{
+		if (!_bounceTelemetryPending || !_bounceTelemetryReadback) {
+			return;
+		}
+
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		const HRESULT result = a_context->Map(
+			_bounceTelemetryReadback.get(),
+			0,
+			D3D11_MAP_READ,
+			D3D11_MAP_FLAG_DO_NOT_WAIT,
+			&mapped);
+		if (result == DXGI_ERROR_WAS_STILL_DRAWING) {
+			return;
+		}
+		if (FAILED(result)) {
+			_bounceTelemetryPending = false;
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::warn,
+				"SSGI bounce telemetry readback failed: 0x{:08X}.",
+				static_cast<std::uint32_t>(result));
+			return;
+		}
+
+		double sum = 0.0;
+		double maximum = 0.0;
+		double nonzero = 0.0;
+		double count = 0.0;
+		for (std::uint32_t y = 0; y < kBounceTelemetryHeight; ++y) {
+			const auto* row = reinterpret_cast<const float*>(
+				static_cast<const std::byte*>(mapped.pData) +
+				static_cast<std::size_t>(y) * mapped.RowPitch);
+			for (std::uint32_t x = 0; x < kBounceTelemetryWidth; ++x) {
+				const float* stats = row + static_cast<std::size_t>(x) * 4;
+				if (std::isfinite(stats[0]) &&
+					std::isfinite(stats[1]) &&
+					std::isfinite(stats[2]) &&
+					std::isfinite(stats[3])) {
+					sum += stats[0];
+					maximum = std::max(maximum, static_cast<double>(stats[1]));
+					nonzero += stats[2];
+					count += stats[3];
+				}
+			}
+		}
+		a_context->Unmap(_bounceTelemetryReadback.get(), 0);
+		_bounceTelemetryPending = false;
+
+		if (count > 0.0) {
+			_bounceMean.store(static_cast<float>(sum / count), std::memory_order_relaxed);
+			_bounceMax.store(static_cast<float>(maximum), std::memory_order_relaxed);
+			_bounceNonzeroFraction.store(
+				static_cast<float>(nonzero / count), std::memory_order_relaxed);
+			_bounceTelemetryReady.store(true, std::memory_order_release);
+		}
+	}
+
+	void ScreenSpaceGI::QueueBounceTelemetry(
+		ID3D11DeviceContext* a_context,
+		std::uint32_t a_sourceWidth,
+		std::uint32_t a_sourceHeight,
+		std::uint32_t a_frameIndex)
+	{
+		if (_bounceTelemetryPending ||
+			!_bounceTelemetryCS ||
+			!_bounceTelemetryCB ||
+			!_bounceTelemetryStats ||
+			!_bounceTelemetryReadback) {
+			return;
+		}
+		if (_bounceTelemetryReady.load(std::memory_order_acquire) &&
+			a_frameIndex - _bounceTelemetryLastQueuedFrame < kBounceTelemetryIntervalFrames) {
+			return;
+		}
+
+		BounceTelemetryCB cb{};
+		cb.SourceExtent[0] = a_sourceWidth;
+		cb.SourceExtent[1] = a_sourceHeight;
+		cb.OutputExtent[0] = kBounceTelemetryWidth;
+		cb.OutputExtent[1] = kBounceTelemetryHeight;
+		_bounceTelemetryCB->Update(cb);
+
+		ID3D11ShaderResourceView* srvs[1] = { _bounceTexture->srv.get() };
+		ID3D11Buffer* buffers[1] = { _bounceTelemetryCB->CB() };
+		ID3D11UnorderedAccessView* uavs[1] = { _bounceTelemetryStats->uav.get() };
+		a_context->CSSetShaderResources(0, 1, srvs);
+		a_context->CSSetConstantBuffers(0, 1, buffers);
+		a_context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
+		a_context->CSSetShader(_bounceTelemetryCS.get(), nullptr, 0);
+		a_context->Dispatch(
+			(kBounceTelemetryWidth + 7u) / 8u,
+			(kBounceTelemetryHeight + 7u) / 8u,
+			1);
+
+		ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
+		ID3D11Buffer* nullBuffers[1] = { nullptr };
+		ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
+		a_context->CSSetShaderResources(0, 1, nullSRVs);
+		a_context->CSSetConstantBuffers(0, 1, nullBuffers);
+		a_context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
+		a_context->CSSetShader(nullptr, nullptr, 0);
+		a_context->CopyResource(
+			_bounceTelemetryReadback.get(),
+			_bounceTelemetryStats->resource.get());
+		_bounceTelemetryPending = true;
+		_bounceTelemetryLastQueuedFrame = a_frameIndex;
 	}
 
 	void ScreenSpaceGI::OnAOIntegration()
@@ -813,6 +1289,18 @@ namespace cs::features
 			return;
 		}
 		IntegrateAO(cs::engine::RenderTarget::kSSAOFinal);
+		if (_settings.bounceDelivery == 2 &&
+			_bounceProducedLastFrame.load(std::memory_order_relaxed)) {
+			IntegrateBounce();
+		}
+
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* context = rendererData ?
+			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			nullptr;
+		ShaderReplacement::GetSingleton()->DispatchInjections(
+			"ambient_ibl_pass",
+			context);
 	}
 
 	void ScreenSpaceGI::IntegrateAO(cs::engine::RenderTarget a_target)
@@ -851,7 +1339,7 @@ namespace cs::features
 		targetTexture->GetDesc(&targetDesc);
 		D3D11_UNORDERED_ACCESS_VIEW_DESC targetUAVDesc{};
 		targetUAV->GetDesc(&targetUAVDesc);
-		const std::uint32_t targetComponents = AOTargetComponents(targetUAVDesc.Format);
+		const std::uint32_t targetComponents = TargetComponents(targetUAVDesc.Format);
 		if (targetComponents == 0 || targetUAVDesc.ViewDimension != D3D11_UAV_DIMENSION_TEXTURE2D ||
 			targetDesc.SampleDesc.Count != 1) {
 			CS_LOG_ONCE(
@@ -982,14 +1470,8 @@ namespace cs::features
 		}
 	}
 
-	void ScreenSpaceGI::OnPreSunLightDraw()
+	void ScreenSpaceGI::IntegrateBounce()
 	{
-		if (!_started.load(std::memory_order_acquire)) {
-			return;
-		}
-		if (!_resourcesReady.load(std::memory_order_acquire) || !_bounceTexture || !_aoTexture) {
-			return;
-		}
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) {
 			return;
@@ -999,24 +1481,145 @@ namespace cs::features
 			return;
 		}
 
-		ID3D11PixelShader* ambientPS =
-			cs::features::ShaderReplacement::GetSingleton()->GetReplacementPixelShader("ambient_ibl_pass");
-		ID3D11PixelShader* boundPS = nullptr;
-		context->PSGetShader(&boundPS, nullptr, nullptr);
-		const bool isAmbientPass = ambientPS != nullptr && boundPS == ambientPS;
-		if (boundPS) {
-			boundPS->Release();
+		constexpr auto target = cs::engine::RenderTarget::kDiffuseBuffer;
+		auto& targetEntry = rendererData->renderTargets[static_cast<uint>(target)];
+		auto* targetTexture = reinterpret_cast<ID3D11Texture2D*>(targetEntry.texture);
+		auto* targetRTV = cs::engine::GetRenderTargetRTV(target);
+		auto* rtm = cs::engine::GetRenderTargetManager();
+		if (!targetTexture ||
+			!targetRTV ||
+			!rtm ||
+			!_bounceTexture ||
+			!_bounceIntegrationVS ||
+			!_bounceIntegrationPS ||
+			!_bounceIntegrationCB ||
+			!_bounceIntegrationBlendState ||
+			!_bounceIntegrationDepthStencilState ||
+			!_bounceIntegrationRasterizerState) {
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"SSGI bounce integration skipped: rt={} texture={} rtv={} rtm={} shaders={} cb={} states={}.",
+				static_cast<int>(target),
+				targetTexture != nullptr,
+				targetRTV != nullptr,
+				rtm != nullptr,
+				_bounceIntegrationVS != nullptr && _bounceIntegrationPS != nullptr,
+				_bounceIntegrationCB != nullptr,
+				_bounceIntegrationBlendState != nullptr &&
+					_bounceIntegrationDepthStencilState != nullptr &&
+					_bounceIntegrationRasterizerState != nullptr);
+			return;
 		}
-		if (!isAmbientPass) {
+
+		D3D11_TEXTURE2D_DESC targetDesc{};
+		targetTexture->GetDesc(&targetDesc);
+		D3D11_RENDER_TARGET_VIEW_DESC targetRTVDesc{};
+		targetRTV->GetDesc(&targetRTVDesc);
+		if (targetDesc.Format != DXGI_FORMAT_R11G11B10_FLOAT ||
+			targetRTVDesc.Format != DXGI_FORMAT_R11G11B10_FLOAT ||
+			targetRTVDesc.ViewDimension != D3D11_RTV_DIMENSION_TEXTURE2D ||
+			targetDesc.SampleDesc.Count != 1) {
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"SSGI bounce integration: unsupported target format={} view={} samples={}.",
+				static_cast<int>(targetRTVDesc.Format),
+				static_cast<int>(targetRTVDesc.ViewDimension),
+				targetDesc.SampleDesc.Count);
+			return;
+		}
+
+		const float widthRatio = rtm->GetDynamicWidthRatio();
+		const float heightRatio = rtm->GetDynamicHeightRatio();
+		const auto scaledExtent = [](std::uint32_t a_extent, float a_ratio) {
+			if (a_ratio <= 0.0f) {
+				return 0u;
+			}
+			return std::min(a_extent, static_cast<std::uint32_t>(static_cast<float>(a_extent) * a_ratio));
+		};
+		const std::uint32_t targetW = scaledExtent(targetDesc.Width, widthRatio);
+		const std::uint32_t targetH = scaledExtent(targetDesc.Height, heightRatio);
+		const std::uint32_t sourceW = scaledExtent(_allocW, widthRatio);
+		const std::uint32_t sourceH = scaledExtent(_allocH, heightRatio);
+		if (targetW == 0 || targetH == 0 || sourceW == 0 || sourceH == 0) {
+			return;
+		}
+
+		try {
+			BounceIntegrationCB cb{};
+			cb.TargetExtent[0] = targetW;
+			cb.TargetExtent[1] = targetH;
+			cb.SourceExtent[0] = sourceW;
+			cb.SourceExtent[1] = sourceH;
+			_bounceIntegrationCB->Update(cb);
+
+			cs::engine::OMScope omScope(context);
+			FullscreenDrawScope drawScope(context);
+
+			const D3D11_VIEWPORT viewport{
+				0.0f,
+				0.0f,
+				static_cast<float>(targetW),
+				static_cast<float>(targetH),
+				0.0f,
+				1.0f
+			};
+			const std::array<float, 4> blendFactor{};
+			ID3D11ShaderResourceView* bounceSRV = _bounceTexture->srv.get();
+			ID3D11Buffer* buffers[1] = { _bounceIntegrationCB->CB() };
+			context->OMSetRenderTargets(1, &targetRTV, nullptr);
+			context->OMSetBlendState(
+				_bounceIntegrationBlendState.get(), blendFactor.data(), 0xffffffffu);
+			context->OMSetDepthStencilState(_bounceIntegrationDepthStencilState.get(), 0);
+			context->RSSetState(_bounceIntegrationRasterizerState.get());
+			context->RSSetViewports(1, &viewport);
+			context->IASetInputLayout(nullptr);
+			context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+			context->VSSetShader(_bounceIntegrationVS.get(), nullptr, 0);
+			context->HSSetShader(nullptr, nullptr, 0);
+			context->DSSetShader(nullptr, nullptr, 0);
+			context->GSSetShader(nullptr, nullptr, 0);
+			context->PSSetShader(_bounceIntegrationPS.get(), nullptr, 0);
+			context->PSSetShaderResources(0, 1, &bounceSRV);
+			context->PSSetConstantBuffers(0, 1, buffers);
+			context->Draw(3, 0);
+
+			_bounceRTVActiveLastFrame.store(true, std::memory_order_relaxed);
+			_bounceRTVDrawsLastFrame.fetch_add(1, std::memory_order_relaxed);
+			_bounceInjectedLastFrame.store(true, std::memory_order_relaxed);
+		} catch (const std::exception& e) {
+			if (L->should_log(spdlog::level::warn)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "SSGI bounce integration failed: {}.", e.what());
+			}
+		} catch (...) {
+			if (L->should_log(spdlog::level::warn)) {
+				CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn, "SSGI bounce integration failed.");
+			}
+		}
+	}
+
+	void ScreenSpaceGI::OnAmbientPassInjection(ID3D11DeviceContext* a_context)
+	{
+		if (!_started.load(std::memory_order_acquire)) {
+			return;
+		}
+		if (!_resourcesReady.load(std::memory_order_acquire) || !_bounceTexture || !_aoTexture) {
+			return;
+		}
+		if (!a_context) {
+			return;
+		}
+		if (_settings.bounceDelivery != 1) {
 			return;
 		}
 
 		ID3D11ShaderResourceView* bounce = _bounceTexture->srv.get();
-		ID3D11ShaderResourceView* ao = _aoTexture->srv.get();
-		context->PSSetShaderResources(kBouncePSSlot, 1, &bounce);
-		context->PSSetShaderResources(kAOPSSlot, 1, &ao);
+		a_context->PSSetShaderResources(kBouncePSSlot, 1, &bounce);
+		_bounceAnchorBindsLastFrame.fetch_add(1, std::memory_order_relaxed);
 		_ssgiBound.store(true, std::memory_order_relaxed);
 		_ssgiBoundLastFrame.store(true, std::memory_order_relaxed);
+		_bounceInjectedLastFrame.store(true, std::memory_order_relaxed);
 	}
 
 	void ScreenSpaceGI::OnPostDeferredLights()
@@ -1034,7 +1637,6 @@ namespace cs::features
 		}
 		ID3D11ShaderResourceView* nullSRV = nullptr;
 		context->PSSetShaderResources(kBouncePSSlot, 1, &nullSRV);
-		context->PSSetShaderResources(kAOPSSlot, 1, &nullSRV);
 	}
 
 	void ScreenSpaceGI::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -1045,7 +1647,30 @@ namespace cs::features
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
 			.Field("resource_init_failed", _resourceInitFailed.load(std::memory_order_acquire))
 			.Field("ssgi_bound", _ssgiBoundLastFrame.load(std::memory_order_relaxed))
+			.Field("bounce_injected", _bounceInjectedLastFrame.load(std::memory_order_relaxed))
+			.Field(
+				"bounce_anchor_binds",
+				static_cast<std::int64_t>(
+					_bounceAnchorBindsLastFrame.load(std::memory_order_relaxed)))
+			.Field("bounce_rtv_active", _bounceRTVActiveLastFrame.load(std::memory_order_relaxed))
+			.Field(
+				"bounce_rtv_draws",
+				static_cast<std::int64_t>(
+					_bounceRTVDrawsLastFrame.load(std::memory_order_relaxed)))
 			.Field("ao_produced", _aoProducedLastFrame.load(std::memory_order_relaxed))
+			.Field("radiance_available", _radianceAvailableLastFrame.load(std::memory_order_relaxed))
+			.Field("bounce_produced", _bounceProducedLastFrame.load(std::memory_order_relaxed))
+			.Field("bounce_readback_ready", _bounceTelemetryReady.load(std::memory_order_acquire))
+			.Field("bounce_mean", static_cast<double>(_bounceMean.load(std::memory_order_relaxed)))
+			.Field("bounce_max", static_cast<double>(_bounceMax.load(std::memory_order_relaxed)))
+			.Field(
+				"bounce_nonzero_frac",
+				static_cast<double>(_bounceNonzeroFraction.load(std::memory_order_relaxed)))
+			.Field("radiance_source_rt", static_cast<std::int64_t>(_settings.radianceSourceRT))
+			.Field("bounce_delivery", static_cast<std::int64_t>(_settings.bounceDelivery))
+			.Field(
+				"bounce_target_rt",
+				static_cast<std::int64_t>(cs::engine::RenderTarget::kDiffuseBuffer))
 			.Field("denoised", _denoisedLastFrame.load(std::memory_order_relaxed))
 			.Field("ao_integration_supported", _aoIntegrationSupported.load(std::memory_order_relaxed))
 			.Field("ao_integration_active", _aoIntegrationActiveLastFrame.load(std::memory_order_relaxed))
@@ -1072,6 +1697,22 @@ namespace cs::features
 		changed |= ImGui::SliderInt("Steps", &_settings.numSteps, 4, 32);
 		changed |= ImGui::SliderFloat("Effect radius (game units)", &_settings.effectRadius, 16.0f, 512.0f);
 		changed |= ImGui::SliderFloat("AO power", &_settings.aoPower, 0.5f, 5.0f);
+		changed |= ImGui::SliderFloat("Bounce strength", &_settings.bounceStrength, 0.0f, 8.0f);
+		changed |= ImGui::SliderInt(
+			"Radiance source RT",
+			&_settings.radianceSourceRT,
+			0,
+			static_cast<int>(cs::engine::RenderTarget::kCount) - 1);
+		const char* bounceDeliveryModes[] = {
+			"Telemetry only",
+			"Shader injection",
+			"Engine RT additive"
+		};
+		changed |= ImGui::Combo(
+			"Bounce delivery",
+			&_settings.bounceDelivery,
+			bounceDeliveryModes,
+			static_cast<int>(std::size(bounceDeliveryModes)));
 		changed |= ImGui::Checkbox("Denoise", &_settings.denoiseEnabled);
 		changed |= ImGui::SliderFloat("Denoise radius", &_settings.denoiseRadius, 0.5f, 4.0f);
 		changed |= ImGui::SliderFloat(

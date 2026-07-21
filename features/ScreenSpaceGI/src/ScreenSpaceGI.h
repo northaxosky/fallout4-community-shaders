@@ -43,9 +43,12 @@ namespace cs::features
 			bool  denoiseEnabled = true;
 			float denoiseRadius = 2.0f;
 			float effectRadius = 256.0f;
-			float aoPower = 2.5f;
+			float aoPower = 3.0f;
 			float depthFadeStart = 40000.0f;
 			float depthFadeEnd = 50000.0f;
+			float bounceStrength = 2.0f;
+			int   radianceSourceRT = static_cast<int>(cs::engine::RenderTarget::kMain);
+			int   bounceDelivery = 2;
 			int   numSlices = 4;
 			int   numSteps = 16;
 			bool  enabled = false;
@@ -61,7 +64,10 @@ namespace cs::features
 			std::uint32_t FrameIndex;
 			std::uint32_t HasAO;
 			float         AoPower;
-			std::uint32_t Padding;
+			std::uint32_t HasBounce;
+			float         BounceStrength;
+			float         Padding[3];
+			float         ViewToWorld[12];
 		};
 		static_assert(sizeof(ResolveCB) % 16 == 0);
 
@@ -88,8 +94,11 @@ namespace cs::features
 			float         DistanceNormalisation;
 			float         CenterBeta;
 			float         _pad[2];
+			float         RadianceScale[2];
+			float         _bouncePad[2];
+			float         ViewToWorld[12];
 		};
-		static_assert(sizeof(XeGTAOCB) == 128);
+		static_assert(sizeof(XeGTAOCB) == 192);
 
 		// Must match Shaders/XeGTAO/decode.cs.hlsl.
 		struct alignas(16) DecodeCB
@@ -109,18 +118,41 @@ namespace cs::features
 		};
 		static_assert(sizeof(AOIntegrationCB) % 16 == 0);
 
+		struct alignas(16) BounceIntegrationCB
+		{
+			std::uint32_t TargetExtent[2];
+			std::uint32_t SourceExtent[2];
+		};
+		static_assert(sizeof(BounceIntegrationCB) == 16);
+
+		struct alignas(16) BounceTelemetryCB
+		{
+			std::uint32_t SourceExtent[2];
+			std::uint32_t OutputExtent[2];
+		};
+		static_assert(sizeof(BounceTelemetryCB) == 16);
+
 		ScreenSpaceGI() = default;
 
 		void SaveSettings();
 		void OnComputeResolve();
 		void OnAOIntegration();
-		void OnPreSunLightDraw();
+		void OnAmbientPassInjection(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();
 		bool EnsureResources();
 		void IntegrateAO(cs::engine::RenderTarget a_target);
+		void IntegrateBounce();
+		void PollBounceTelemetry(ID3D11DeviceContext* a_context);
+		void QueueBounceTelemetry(
+			ID3D11DeviceContext* a_context,
+			std::uint32_t a_sourceWidth,
+			std::uint32_t a_sourceHeight,
+			std::uint32_t a_frameIndex);
 
 		static constexpr std::uint32_t kBouncePSSlot = 0;
-		static constexpr std::uint32_t kAOPSSlot = 13;
+		static constexpr std::uint32_t kBounceTelemetryWidth = 64;
+		static constexpr std::uint32_t kBounceTelemetryHeight = 36;
+		static constexpr std::uint32_t kBounceTelemetryIntervalFrames = 30;
 
 		Settings _settings;
 		std::atomic_bool _started{ false };
@@ -128,12 +160,22 @@ namespace cs::features
 		std::atomic_bool _resourceInitFailed{ false };
 		std::atomic_bool _ssgiBound{ false };
 		std::atomic_bool _ssgiBoundLastFrame{ false };
+		std::atomic_bool _bounceInjectedLastFrame{ false };
+		std::atomic_uint32_t _bounceAnchorBindsLastFrame{ 0 };
+		std::atomic_bool _bounceRTVActiveLastFrame{ false };
+		std::atomic_uint32_t _bounceRTVDrawsLastFrame{ 0 };
 		std::atomic_bool _aoProducedLastFrame{ false };
+		std::atomic_bool _bounceProducedLastFrame{ false };
+		std::atomic_bool _radianceAvailableLastFrame{ false };
 		std::atomic_bool _denoisedLastFrame{ false };
 		std::atomic_bool _aoIntegrationSupported{ false };
 		std::atomic_bool _aoIntegrationActiveLastFrame{ false };
 		std::atomic_uint32_t _resolveDispatchedLastFrame{ 0 };
 		std::atomic_uint32_t _aoIntegrationDispatchedLastFrame{ 0 };
+		std::atomic_bool _bounceTelemetryReady{ false };
+		std::atomic<float> _bounceMean{ 0.0f };
+		std::atomic<float> _bounceMax{ 0.0f };
+		std::atomic<float> _bounceNonzeroFraction{ 0.0f };
 
 		std::unique_ptr<cs::buffer::Texture2D> _bounceTexture;
 		std::unique_ptr<cs::buffer::Texture2D> _aoTexture;
@@ -144,6 +186,10 @@ namespace cs::features
 		std::unique_ptr<cs::buffer::Texture2D> _viewNormalTex;
 		std::unique_ptr<cs::buffer::Texture2D> _aoRawTex;
 		std::unique_ptr<cs::buffer::Texture2D> _aoDenoisedTex;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceSHRawTex;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceCoCgRawTex;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceSHDenoisedTex;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceCoCgDenoisedTex;
 		winrt::com_ptr<ID3D11Texture2D> _noiseTex;
 		winrt::com_ptr<ID3D11ShaderResourceView> _noiseSRV;
 		winrt::com_ptr<ID3D11SamplerState> _pointClampSampler;
@@ -153,7 +199,15 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _decodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _prefilterCS;
 		winrt::com_ptr<ID3D11ComputeShader> _aoCS;
+		winrt::com_ptr<ID3D11ComputeShader> _bounceCS;
 		winrt::com_ptr<ID3D11ComputeShader> _denoiseCS;
+		winrt::com_ptr<ID3D11ComputeShader> _bounceDenoiseCS;
+		winrt::com_ptr<ID3D11ComputeShader> _bounceTelemetryCS;
+		std::unique_ptr<cs::buffer::ConstantBuffer> _bounceTelemetryCB;
+		std::unique_ptr<cs::buffer::Texture2D> _bounceTelemetryStats;
+		winrt::com_ptr<ID3D11Texture2D> _bounceTelemetryReadback;
+		bool _bounceTelemetryPending = false;
+		std::uint32_t _bounceTelemetryLastQueuedFrame = 0;
 		std::array<winrt::com_ptr<ID3D11ComputeShader>, 4> _aoIntegrationCS;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _aoIntegrationCB;
 		winrt::com_ptr<ID3D11Texture2D> _aoIntegrationScratch;
@@ -161,6 +215,12 @@ namespace cs::features
 		DXGI_FORMAT _aoIntegrationScratchFormat = DXGI_FORMAT_UNKNOWN;
 		std::uint32_t _aoIntegrationScratchW = 0;
 		std::uint32_t _aoIntegrationScratchH = 0;
+		winrt::com_ptr<ID3D11VertexShader> _bounceIntegrationVS;
+		winrt::com_ptr<ID3D11PixelShader> _bounceIntegrationPS;
+		std::unique_ptr<cs::buffer::ConstantBuffer> _bounceIntegrationCB;
+		winrt::com_ptr<ID3D11BlendState> _bounceIntegrationBlendState;
+		winrt::com_ptr<ID3D11DepthStencilState> _bounceIntegrationDepthStencilState;
+		winrt::com_ptr<ID3D11RasterizerState> _bounceIntegrationRasterizerState;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;

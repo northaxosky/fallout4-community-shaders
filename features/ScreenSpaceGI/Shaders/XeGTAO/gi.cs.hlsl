@@ -3,13 +3,24 @@
 
 #include "../Common/FastMath.hlsli"
 #include "../Common/Math.hlsli"
+#ifdef SSGI_BOUNCE
+#include "../Common/Color.hlsli"
+#include "../Common/SphericalHarmonics.hlsli"
+#endif
 #include "common.hlsli"
 
 Texture2D<float> srcWorkingDepth : register(t0);
 Texture2D<float3> srcNormal : register(t1);
 Texture2D<unorm float2> srcNoise : register(t2);
+#ifdef SSGI_BOUNCE
+Texture2D<float3> srcRadiance : register(t3);
+#endif
 
 RWTexture2D<unorm float> outAo : register(u0);
+#ifdef SSGI_BOUNCE
+RWTexture2D<float4> outBounceSH : register(u1);
+RWTexture2D<float2> outBounceCoCg : register(u2);
+#endif
 
 float GetDepthFade(float depth)
 {
@@ -24,7 +35,11 @@ float2 SpatioTemporalNoise(uint2 pixCoord, uint temporalIndex)
 
 void CalculateGI(
 	uint2 dtid, float2 uv, float viewspaceZ, float3 viewspaceNormal,
-	out float o_ao)
+	out float o_ao
+#ifdef SSGI_BOUNCE
+	, out float4 o_bounceSH, out float2 o_bounceCoCg
+#endif
+)
 {
 	const float2 frameScale = FrameDim * RcpTexDim;
 
@@ -52,6 +67,10 @@ void CalculateGI(
 		viewspaceNormal = -viewspaceNormal;
 
 	float visibility = 0;
+#ifdef SSGI_BOUNCE
+	float4 radianceY = 0;
+	float2 radianceCoCg = 0;
+#endif
 
 	for (uint slice = 0; slice < NumSlices; slice++) {
 		float phi = (Math::PI * rcpNumSlices) * (slice + noiseSlice);
@@ -73,6 +92,9 @@ void CalculateGI(
 		float n = signNorm * FastMath::ACos(cosNorm);
 
 		uint bitmask = 0;
+#ifdef SSGI_BOUNCE
+		uint bitmaskGI = 0;
+#endif
 
 		float stepNoise = frac(noiseStep + slice * 0.6180339887498948482);
 
@@ -111,6 +133,31 @@ void CalculateGI(
 				uint2 bitsRange = uint2(round(angleRange.x * 32u), round((angleRange.y - angleRange.x) * 32u));
 				uint maskedBits = s < AORadius ? ((1 << bitsRange.y) - 1) << bitsRange.x : 0;
 
+#ifdef SSGI_BOUNCE
+				uint validBits = maskedBits & ~bitmaskGI;
+				bitmaskGI |= maskedBits;
+				if (validBits != 0) {
+					float3 sampleNormal = normalize(
+						srcNormal.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0));
+					if (dot(samplePos, sampleNormal) > 0)
+						sampleNormal = -sampleNormal;
+
+					float frontBackMult = max(0, -dot(sampleNormal, sampleHorizonVec));
+					if (frontBackMult > 0) {
+						float angularWeight = countbits(validBits) * 0.03125;
+						float3 sampleRadiance = max(
+							0,
+							srcRadiance.SampleLevel(
+								samplerPointClamp, sampleUV * RadianceScale, mipLevel));
+						sampleRadiance *= frontBackMult * angularWeight;
+
+						float3 sampleYCoCg = Color::RGBToYCoCg(sampleRadiance);
+						float3 horizonVecWS = ViewToWorldDirection(sampleHorizonVec);
+						radianceY += sampleYCoCg.x * SphericalHarmonics::Evaluate(horizonVecWS);
+						radianceCoCg += sampleYCoCg.yz;
+					}
+				}
+#endif
 				bitmask |= maskedBits;
 			}
 		}
@@ -124,6 +171,12 @@ void CalculateGI(
 	visibility = lerp(saturate(visibility), 0, depthFade);
 
 	o_ao = visibility;
+#ifdef SSGI_BOUNCE
+	radianceY *= rcpNumSlices;
+	radianceCoCg *= rcpNumSlices;
+	o_bounceSH = lerp(radianceY, 0, depthFade);
+	o_bounceCoCg = lerp(radianceCoCg, 0, depthFade);
+#endif
 }
 
 [numthreads(8, 8, 1)]
@@ -138,12 +191,25 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 	viewspaceZ *= 0.99920h;
 
 	float currAo = 0;
+#ifdef SSGI_BOUNCE
+	float4 currBounceSH = 0;
+	float2 currBounceCoCg = 0;
+#endif
 
 	bool needGI = viewspaceZ > FP_Z && viewspaceZ < DepthFadeRange.y;
 	if (needGI) {
-		CalculateGI(pxCoord, uv, viewspaceZ, viewspaceNormal, currAo);
+		CalculateGI(
+			pxCoord, uv, viewspaceZ, viewspaceNormal, currAo
+#ifdef SSGI_BOUNCE
+			, currBounceSH, currBounceCoCg
+#endif
+		);
 	}
 
 	// Output is occlusion: 0=open, 1=occluded.
 	outAo[pxCoord] = currAo;
+#ifdef SSGI_BOUNCE
+	outBounceSH[pxCoord] = currBounceSH;
+	outBounceCoCg[pxCoord] = currBounceCoCg;
+#endif
 }

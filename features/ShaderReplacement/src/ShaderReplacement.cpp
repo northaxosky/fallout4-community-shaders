@@ -5,14 +5,17 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #include <toml++/toml.hpp>
 
 #include "Compiler.h"
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Registry.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
@@ -138,6 +141,56 @@ namespace cs::features
 	{
 		auto* entry = replacement::Registry::Get().FindByName(a_name);
 		return entry ? entry->compiled_ps.get() : nullptr;
+	}
+
+	void ShaderReplacement::RegisterInjection(
+		std::string a_passName,
+		InjectionCallback a_callback)
+	{
+		if (a_passName.empty() || !a_callback) {
+			return;
+		}
+		_injections.push_back({ std::move(a_passName), std::move(a_callback) });
+	}
+
+	void ShaderReplacement::DispatchInjections(
+		std::string_view a_passName,
+		ID3D11DeviceContext* a_context) noexcept
+	{
+		auto* entry = replacement::Registry::Get().FindByName(a_passName);
+		if (!a_context ||
+			!_settings.enabled ||
+			!entry ||
+			!entry->enabled_in_ini ||
+			!entry->compile_ok ||
+			!entry->compiled_ps ||
+			entry->substitution_hits.load(std::memory_order_relaxed) == 0) {
+			return;
+		}
+
+		for (const auto& injection : _injections) {
+			if (injection.passName != a_passName) {
+				continue;
+			}
+			try {
+				injection.callback(a_context);
+			} catch (const std::exception& e) {
+				CS_LOG_EVERY_MS(
+					L,
+					2000,
+					spdlog::level::warn,
+					"Shader injection for '{}' failed: {}.",
+					entry->name,
+					e.what());
+			} catch (...) {
+				CS_LOG_EVERY_MS(
+					L,
+					2000,
+					spdlog::level::warn,
+					"Shader injection for '{}' failed.",
+					entry->name);
+			}
+		}
 	}
 
 	bool ShaderReplacement::IsShaderEnabled(const std::string& a_name) const noexcept

@@ -5,7 +5,15 @@
 Texture2D<float> srcWorkingDepth : register(t0);
 Texture2D<float3> srcNormal : register(t1);
 Texture2D<unorm float> srcAO : register(t2);
+#ifdef SSGI_BOUNCE
+Texture2D<float4> srcBounceSH : register(t3);
+Texture2D<float2> srcBounceCoCg : register(t4);
+#endif
 RWTexture2D<unorm float> outAO : register(u0);
+#ifdef SSGI_BOUNCE
+RWTexture2D<float4> outBounceSH : register(u1);
+RWTexture2D<float2> outBounceCoCg : register(u2);
+#endif
 
 static const float3 g_Poisson8[8] = {
 	float3(-0.4706069, -0.4427112, +0.6461146),
@@ -46,6 +54,10 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 	float centerAO = srcAO[dtid];
 	if (!ValidDepth(depth)) {
 		outAO[dtid] = 0.0;
+#ifdef SSGI_BOUNCE
+		outBounceSH[dtid] = 0;
+		outBounceCoCg[dtid] = 0;
+#endif
 		return;
 	}
 
@@ -61,6 +73,10 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 
 	float aoSum = centerAO * CenterBeta;
 	float wSum = CenterBeta;
+#ifdef SSGI_BOUNCE
+	float4 bounceSHSum = srcBounceSH[dtid] * CenterBeta;
+	float2 bounceCoCgSum = srcBounceCoCg[dtid] * CenterBeta;
+#endif
 
 	[unroll] for (uint i = 0; i < 8; i++) {
 		float w = GaussianWeight(g_Poisson8[i].z);
@@ -81,9 +97,17 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 		if (w > 1e-8) {
 			float aoSample = srcAO.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0);
 			aoSum += aoSample * w;
+#ifdef SSGI_BOUNCE
+			bounceSHSum += srcBounceSH.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0) * w;
+			bounceCoCgSum += srcBounceCoCg.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0) * w;
+#endif
 			wSum += w;
 		}
 	}
 
 	outAO[dtid] = aoSum / max(wSum, 1e-6);
+#ifdef SSGI_BOUNCE
+	outBounceSH[dtid] = bounceSHSum / max(wSum, 1e-6);
+	outBounceCoCg[dtid] = bounceCoCgSum / max(wSum, 1e-6);
+#endif
 }
