@@ -383,6 +383,20 @@ float4 PSMain(VSOutput input) : SV_Target
 		}
 	}
 
+	bool IsFeatureLoadedThisSession(const cs::Feature& a_feature) noexcept
+	{
+		switch (a_feature.GetState().runtimeState) {
+		case cs::FeatureRuntimeState::kPending:
+		case cs::FeatureRuntimeState::kActive:
+		case cs::FeatureRuntimeState::kDegraded:
+			return true;
+		case cs::FeatureRuntimeState::kInactive:
+		case cs::FeatureRuntimeState::kFailed:
+			return false;
+		}
+		return false;
+	}
+
 	class FeatureImGuiRecoverySnapshot
 	{
 	public:
@@ -1423,8 +1437,38 @@ namespace cs
 		return true;
 	}
 
+	void Menu::RefreshFeatureLoadCache()
+	{
+		// Reload first so reopening the menu sees load writes made after startup.
+		feature_config::Reload();
+		const auto root = feature_config::GetMergedRoot();
+		const auto* features = root["features"].as_table();
+		const auto& registeredFeatures = FeatureManager::Get().GetRegisteredFeatures();
+
+		_featureLoadDesired.clear();
+		_featureLoadDesired.reserve(registeredFeatures.size());
+		for (const auto* feature : registeredFeatures) {
+			if (!feature)
+				continue;
+
+			const std::string key = feature->GetConfigKey();
+			bool desiredLoad = false;
+			if (features) {
+				const auto* featureNode = features->get(key);
+				if (featureNode && featureNode->is_table()) {
+					desiredLoad = feature_config::ParseActivation(*featureNode->as_table()).load;
+				}
+			}
+			_featureLoadDesired.insert_or_assign(key, desiredLoad);
+		}
+		_featureLoadDirty = false;
+	}
+
 	void Menu::DrawOverviewPage(const std::vector<FeatureListEntry>& a_features)
 	{
+		if (_featureLoadDirty)
+			RefreshFeatureLoadCache();
+
 		DrawPanelTitle("Overview");
 		ImGui::Spacing();
 		ImGui::Text("FO4 Community Shaders v%u.%u.%u",
@@ -1435,16 +1479,56 @@ namespace cs
 		ImGui::Spacing();
 
 		DrawSectionLabel("Feature status");
-		DrawSubtext("Feature load state is applied at startup; changing load requires a restart.");
+		DrawSubtext("Load settings are applied at startup. Changes require a game restart.");
 
-		// TODO(menu-2b): master + per-feature enable
+		const auto setVisibleFeatureLoads = [this, &a_features](bool a_load) {
+			std::size_t attempted = 0;
+			std::size_t failures = 0;
+			for (const auto& entry : a_features) {
+				if (!_developerMode && entry.category == FeatureCategories::kDevTools)
+					continue;
+
+				++attempted;
+				const std::string key = entry.feature->GetConfigKey();
+				const auto result = feature_config::UpdateFeatureLoad(key, a_load);
+				if (result) {
+					_featureLoadDesired.insert_or_assign(key, a_load);
+				} else {
+					++failures;
+					L->warn("Failed to update feature load for {}: {}", key, result.error);
+				}
+			}
+
+			if (failures == 0) {
+				ShowToast(a_load
+					? "All visible features will load on next restart."
+					: "All visible features will not load on next restart.");
+			} else {
+				ShowToast(
+					std::to_string(failures) + " of " + std::to_string(attempted) +
+					" feature load settings failed to update.");
+			}
+		};
+
+		ImGui::Spacing();
+		if (ImGui::Button("Load all"))
+			setVisibleFeatureLoads(true);
+		ImGui::SameLine();
+		if (ImGui::Button("Unload all"))
+			setVisibleFeatureLoads(false);
+		ImGui::Spacing();
+
 		const ImGuiTableFlags tableFlags =
 			ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_BordersInnerV |
 			ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp;
-		if (ImGui::BeginTable("##feature_status", 3, tableFlags)) {
-			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.45f);
-			ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-			ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+		if (ImGui::BeginTable("##feature_status", 4, tableFlags)) {
+			ImGui::TableSetupColumn(
+				"Load",
+				ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHide,
+				70.0f * _fontScale);
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.30f);
+			ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+			ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 0.45f);
 			ImGui::TableHeadersRow();
 
 			for (const auto& entry : a_features) {
@@ -1453,14 +1537,35 @@ namespace cs
 
 				auto& feature = *entry.feature;
 				const auto name = feature.GetName();
+				const std::string key = feature.GetConfigKey();
 				const auto status = GetFeatureStatusPresentation(feature);
+				const auto desiredIt = _featureLoadDesired.find(key);
+				const bool previousDesired = desiredIt != _featureLoadDesired.end() && desiredIt->second;
+				bool desired = previousDesired;
 
 				ImGui::TableNextRow();
 				ImGui::TableSetColumnIndex(0);
-				ImGui::TextUnformatted(name.data(), name.data() + name.size());
+				ImGui::PushID(key.c_str());
+				if (ImGui::Checkbox("##load", &desired)) {
+					const auto result = feature_config::UpdateFeatureLoad(key, desired);
+					if (result) {
+						_featureLoadDesired.insert_or_assign(key, desired);
+						ShowToast(std::string(name) + (desired
+							? " will load on next restart."
+							: " will not load on next restart."));
+					} else {
+						desired = previousDesired;
+						_featureLoadDesired.insert_or_assign(key, previousDesired);
+						ShowToast("Failed to update load setting.");
+						L->warn("Failed to update feature load for {}: {}", key, result.error);
+					}
+				}
+				ImGui::PopID();
 				ImGui::TableSetColumnIndex(1);
-				ImGui::TextUnformatted(entry.category.c_str());
+				ImGui::TextUnformatted(name.data(), name.data() + name.size());
 				ImGui::TableSetColumnIndex(2);
+				ImGui::TextUnformatted(entry.category.c_str());
+				ImGui::TableSetColumnIndex(3);
 				ImGui::TextColored(status.color, "%.*s",
 					static_cast<int>(status.label.size()), status.label.data());
 
@@ -1468,6 +1573,10 @@ namespace cs
 				if (!detail.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
 					ImGui::SetTooltip("%.*s",
 						static_cast<int>(std::min<std::size_t>(detail.size(), 512)), detail.data());
+				}
+				if (desired != IsFeatureLoadedThisSession(feature)) {
+					ImGui::SameLine();
+					ImGui::TextColored(cs::theme::colors::kWarning, "(restart to apply)");
 				}
 			}
 			ImGui::EndTable();
@@ -1963,6 +2072,11 @@ namespace cs
 	void Menu::Toggle()
 	{
 		_open = !_open;
+		if (_open) {
+			// Refresh happens on the render thread in DrawOverviewPage; Toggle runs on the
+			// WndProc/input thread, so only flip the flag here (never touch the cache/config off-thread).
+			_featureLoadDirty = true;
+		}
 		ImGui::GetIO().ClearInputKeys();
 	}
 

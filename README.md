@@ -56,8 +56,8 @@ load = true
 Activation is evaluated once during startup. The shipped `FO4CommunityShaders.toml`
 contains documented defaults and is never modified by the plugin. User and in-game changes
 are written atomically to `FO4CommunityShaders.User.toml`. Restart the game after changing
-activation. The in-game menu shows each registered feature's requested and runtime state,
-but does not load or unload features dynamically.
+activation. The in-game menu can update each registered feature's requested load state for
+the next launch and shows its runtime state, but it does not hot-load or unload features.
 
 A feature loads only when its `[features.<Name>].load` value is true. A malformed Default
 file disables all features; a malformed User file is ignored. Presets configure only

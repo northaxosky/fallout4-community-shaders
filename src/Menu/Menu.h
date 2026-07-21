@@ -7,6 +7,7 @@
 #include <chrono>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 struct IDXGIAdapter3;
@@ -67,6 +68,7 @@ namespace cs
 		void DrawToast();
 		void LoadSettings();
 		bool SaveSettings() const;
+		void RefreshFeatureLoadCache();
 		void Toggle();
 		void EnsureBackbufferRTV();
 		void ReleaseBackbufferRTV();
@@ -122,6 +124,8 @@ namespace cs
 		BuiltInPage           _selectedPage    = BuiltInPage::kOverview;
 		Feature*              _selectedFeature = nullptr;
 		std::array<char, 128> _featureSearch{};
+		std::unordered_map<std::string, bool> _featureLoadDesired;
+		bool _featureLoadDirty = true;
 		std::vector<std::string> _cachedLoggers;
 		struct WndProcCallbackEntry
 		{
