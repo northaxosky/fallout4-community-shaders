@@ -14,7 +14,7 @@ namespace
 	{
 		const ImVec4 kText               { 0.90f, 0.94f, 0.90f, 1.00f };
 		const ImVec4 kTextDisabled       { 0.52f, 0.58f, 0.52f, 1.00f };
-		const ImVec4 kWindowBg           { 0.043f, 0.047f, 0.043f, 0.96f };
+		const ImVec4 kWindowBg           { 0.043f, 0.055f, 0.043f, 0.64f };
 		const ImVec4 kChildBg            { 0.043f, 0.047f, 0.043f, 0.52f };
 		const ImVec4 kPopupBg            { 0.078f, 0.082f, 0.078f, 0.98f };
 		const ImVec4 kSurface            { 0.078f, 0.090f, 0.078f, 1.00f };

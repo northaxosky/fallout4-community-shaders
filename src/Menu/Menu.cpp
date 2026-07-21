@@ -5,11 +5,13 @@
 #include <imgui_impl_dx11.h>
 #include <imgui_impl_win32.h>
 
+#include <d3dcompiler.h>
 #include <dxgi1_4.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -38,6 +40,237 @@ namespace
 
 	// Features whose DrawSettings threw once; suppresses re-invocation + log spam until restart.
 	std::unordered_set<const cs::Feature*> g_menuSettingsFailed;
+
+	constexpr const char* kFrostShaderSource = R"(
+Texture2D SourceTexture : register(t0);
+SamplerState LinearClamp : register(s0);
+
+cbuffer FrostConstants : register(b0)
+{
+	float2 TexelSize;
+	float Offset;
+	float Intensity;
+};
+
+struct VSOutput
+{
+	float4 Position : SV_Position;
+	float2 UV : TEXCOORD0;
+};
+
+VSOutput VSMain(uint vertexID : SV_VertexID)
+{
+	VSOutput output;
+	output.UV = float2((vertexID << 1) & 2, vertexID & 2);
+	output.Position = float4(output.UV * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
+	return output;
+}
+
+float4 PSMain(VSOutput input) : SV_Target
+{
+	const float2 radius = TexelSize * Offset * Intensity;
+	const float4 blurred = (
+		SourceTexture.Sample(LinearClamp, input.UV + float2(-radius.x, -radius.y)) +
+		SourceTexture.Sample(LinearClamp, input.UV + float2( radius.x, -radius.y)) +
+		SourceTexture.Sample(LinearClamp, input.UV + float2(-radius.x,  radius.y)) +
+		SourceTexture.Sample(LinearClamp, input.UV + float2( radius.x,  radius.y))) * 0.25;
+	// Force opaque alpha: the game backbuffer alpha is ~0, and the ImGui composite
+	// alpha-blends the frost image, so passing it through renders fully transparent.
+	return float4(blurred.rgb, 1.0);
+}
+)";
+
+	struct alignas(16) FrostConstants
+	{
+		float texelSize[2];
+		float offset;
+		float intensity;
+	};
+	static_assert(sizeof(FrostConstants) == 16);
+
+	template <class T>
+	void ReleaseCom(T*& a_value) noexcept
+	{
+		if (a_value) {
+			a_value->Release();
+			a_value = nullptr;
+		}
+	}
+
+	bool CompileFrostShader(const char* a_entry, const char* a_target, ID3DBlob** a_blob)
+	{
+		ID3DBlob* errors = nullptr;
+		constexpr UINT flags =
+			D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
+		const HRESULT hr = D3DCompile(
+			kFrostShaderSource,
+			std::strlen(kFrostShaderSource),
+			"MenuFrost",
+			nullptr,
+			nullptr,
+			a_entry,
+			a_target,
+			flags,
+			0,
+			a_blob,
+			&errors);
+		if (FAILED(hr)) {
+			if (errors && errors->GetBufferPointer()) {
+				const std::string_view message(
+					static_cast<const char*>(errors->GetBufferPointer()),
+					errors->GetBufferSize());
+				L->warn("Failed to compile menu frost shader {}: {}", a_entry, message);
+			} else {
+				L->warn(
+					"Failed to compile menu frost shader {} (hr={:#x})",
+					a_entry,
+					static_cast<unsigned>(hr));
+			}
+		}
+		ReleaseCom(errors);
+		return SUCCEEDED(hr) && *a_blob;
+	}
+
+	class ScopedFrostState
+	{
+	public:
+		explicit ScopedFrostState(ID3D11DeviceContext* a_context) :
+			_context(a_context)
+		{
+			_context->OMGetRenderTargets(
+				static_cast<UINT>(_renderTargets.size()),
+				_renderTargets.data(),
+				&_depthStencilView);
+			_viewportCount = static_cast<UINT>(_viewports.size());
+			_context->RSGetViewports(&_viewportCount, _viewports.data());
+
+			_vsInstanceCount = static_cast<UINT>(_vsInstances.size());
+			_context->VSGetShader(&_vertexShader, _vsInstances.data(), &_vsInstanceCount);
+			_psInstanceCount = static_cast<UINT>(_psInstances.size());
+			_context->PSGetShader(&_pixelShader, _psInstances.data(), &_psInstanceCount);
+			_gsInstanceCount = static_cast<UINT>(_gsInstances.size());
+			_context->GSGetShader(&_geometryShader, _gsInstances.data(), &_gsInstanceCount);
+			_hsInstanceCount = static_cast<UINT>(_hsInstances.size());
+			_context->HSGetShader(&_hullShader, _hsInstances.data(), &_hsInstanceCount);
+			_dsInstanceCount = static_cast<UINT>(_dsInstances.size());
+			_context->DSGetShader(&_domainShader, _dsInstances.data(), &_dsInstanceCount);
+
+			_context->IAGetInputLayout(&_inputLayout);
+			_context->IAGetPrimitiveTopology(&_topology);
+			_context->IAGetVertexBuffers(0, 1, &_vertexBuffer, &_vertexStride, &_vertexOffset);
+			_context->IAGetIndexBuffer(&_indexBuffer, &_indexFormat, &_indexOffset);
+
+			_context->PSGetShaderResources(0, 1, &_shaderResource);
+			_context->PSGetSamplers(0, 1, &_sampler);
+			_context->PSGetConstantBuffers(0, 1, &_constantBuffer);
+			_context->OMGetBlendState(&_blendState, _blendFactor.data(), &_sampleMask);
+			_context->OMGetDepthStencilState(&_depthState, &_stencilRef);
+			_context->RSGetState(&_rasterState);
+		}
+
+		~ScopedFrostState()
+		{
+			ID3D11ShaderResourceView* nullSRV = nullptr;
+			_context->PSSetShaderResources(0, 1, &nullSRV);
+			_context->OMSetRenderTargets(
+				static_cast<UINT>(_renderTargets.size()),
+				_renderTargets.data(),
+				_depthStencilView);
+			_context->RSSetViewports(_viewportCount, _viewports.data());
+
+			_context->VSSetShader(_vertexShader, _vsInstances.data(), _vsInstanceCount);
+			_context->PSSetShader(_pixelShader, _psInstances.data(), _psInstanceCount);
+			_context->GSSetShader(_geometryShader, _gsInstances.data(), _gsInstanceCount);
+			_context->HSSetShader(_hullShader, _hsInstances.data(), _hsInstanceCount);
+			_context->DSSetShader(_domainShader, _dsInstances.data(), _dsInstanceCount);
+
+			_context->IASetInputLayout(_inputLayout);
+			_context->IASetPrimitiveTopology(_topology);
+			_context->IASetVertexBuffers(0, 1, &_vertexBuffer, &_vertexStride, &_vertexOffset);
+			_context->IASetIndexBuffer(_indexBuffer, _indexFormat, _indexOffset);
+
+			_context->PSSetShaderResources(0, 1, &_shaderResource);
+			_context->PSSetSamplers(0, 1, &_sampler);
+			_context->PSSetConstantBuffers(0, 1, &_constantBuffer);
+			_context->OMSetBlendState(_blendState, _blendFactor.data(), _sampleMask);
+			_context->OMSetDepthStencilState(_depthState, _stencilRef);
+			_context->RSSetState(_rasterState);
+
+			for (auto*& renderTarget : _renderTargets)
+				ReleaseCom(renderTarget);
+			ReleaseCom(_depthStencilView);
+			ReleaseShader(_vertexShader, _vsInstances, _vsInstanceCount);
+			ReleaseShader(_pixelShader, _psInstances, _psInstanceCount);
+			ReleaseShader(_geometryShader, _gsInstances, _gsInstanceCount);
+			ReleaseShader(_hullShader, _hsInstances, _hsInstanceCount);
+			ReleaseShader(_domainShader, _dsInstances, _dsInstanceCount);
+			ReleaseCom(_inputLayout);
+			ReleaseCom(_vertexBuffer);
+			ReleaseCom(_indexBuffer);
+			ReleaseCom(_shaderResource);
+			ReleaseCom(_sampler);
+			ReleaseCom(_constantBuffer);
+			ReleaseCom(_blendState);
+			ReleaseCom(_depthState);
+			ReleaseCom(_rasterState);
+		}
+
+		ScopedFrostState(const ScopedFrostState&) = delete;
+		ScopedFrostState& operator=(const ScopedFrostState&) = delete;
+
+	private:
+		template <class T, std::size_t N>
+		static void ReleaseShader(
+			T*& a_shader,
+			std::array<ID3D11ClassInstance*, N>& a_instances,
+			UINT a_instanceCount) noexcept
+		{
+			ReleaseCom(a_shader);
+			for (UINT i = 0; i < a_instanceCount; ++i)
+				ReleaseCom(a_instances[i]);
+		}
+
+		ID3D11DeviceContext* _context;
+		std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> _renderTargets{};
+		ID3D11DepthStencilView* _depthStencilView = nullptr;
+		std::array<D3D11_VIEWPORT, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE> _viewports{};
+		UINT _viewportCount = 0;
+
+		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _vsInstances{};
+		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _psInstances{};
+		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _gsInstances{};
+		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _hsInstances{};
+		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _dsInstances{};
+		ID3D11VertexShader* _vertexShader = nullptr;
+		ID3D11PixelShader* _pixelShader = nullptr;
+		ID3D11GeometryShader* _geometryShader = nullptr;
+		ID3D11HullShader* _hullShader = nullptr;
+		ID3D11DomainShader* _domainShader = nullptr;
+		UINT _vsInstanceCount = 0;
+		UINT _psInstanceCount = 0;
+		UINT _gsInstanceCount = 0;
+		UINT _hsInstanceCount = 0;
+		UINT _dsInstanceCount = 0;
+
+		ID3D11InputLayout* _inputLayout = nullptr;
+		D3D11_PRIMITIVE_TOPOLOGY _topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+		ID3D11Buffer* _vertexBuffer = nullptr;
+		UINT _vertexStride = 0;
+		UINT _vertexOffset = 0;
+		ID3D11Buffer* _indexBuffer = nullptr;
+		DXGI_FORMAT _indexFormat = DXGI_FORMAT_UNKNOWN;
+		UINT _indexOffset = 0;
+
+		ID3D11ShaderResourceView* _shaderResource = nullptr;
+		ID3D11SamplerState* _sampler = nullptr;
+		ID3D11Buffer* _constantBuffer = nullptr;
+		ID3D11BlendState* _blendState = nullptr;
+		std::array<float, 4> _blendFactor{};
+		UINT _sampleMask = 0;
+		ID3D11DepthStencilState* _depthState = nullptr;
+		UINT _stencilRef = 0;
+		ID3D11RasterizerState* _rasterState = nullptr;
+	};
 
 	int FeatureCategoryRank(std::string_view a_category)
 	{
@@ -486,6 +719,7 @@ namespace cs
 		}
 		if (_imguiInited) {
 			ReleaseBackbufferRTV();
+			ReleaseFrostResources();
 			ImGui_ImplDX11_Shutdown();
 			ImGui_ImplWin32_Shutdown();
 			ImGui::DestroyContext();
@@ -693,12 +927,349 @@ namespace cs
 
 	void Menu::ReleaseBackbufferRTV()
 	{
+		ReleaseFrostTextures();
 		if (_backbufferRTV) {
 			_backbufferRTV->Release();
 			_backbufferRTV = nullptr;
 		}
 		_backbufferW = 0;
 		_backbufferH = 0;
+	}
+
+	bool Menu::EnsureFrostPipeline()
+	{
+		if (_frostVS && _frostPS && _frostConstants && _frostSampler &&
+			_frostBlendState && _frostRasterState && _frostDepthState)
+			return true;
+		if (_frostPipelineTried || !_device)
+			return false;
+
+		_frostPipelineTried = true;
+		ID3DBlob* vertexBlob = nullptr;
+		ID3DBlob* pixelBlob = nullptr;
+		if (!CompileFrostShader("VSMain", "vs_5_0", &vertexBlob) ||
+			!CompileFrostShader("PSMain", "ps_5_0", &pixelBlob)) {
+			ReleaseCom(vertexBlob);
+			ReleaseCom(pixelBlob);
+			return false;
+		}
+
+		const auto fail = [this](const char* a_stage, HRESULT a_hr) {
+			L->warn(
+				"Failed to create menu frost {} (hr={:#x}); backdrop blur disabled",
+				a_stage,
+				static_cast<unsigned>(a_hr));
+			ReleaseFrostResources();
+		};
+
+		HRESULT hr = _device->CreateVertexShader(
+			vertexBlob->GetBufferPointer(),
+			vertexBlob->GetBufferSize(),
+			nullptr,
+			&_frostVS);
+		if (FAILED(hr)) {
+			ReleaseCom(vertexBlob);
+			ReleaseCom(pixelBlob);
+			fail("vertex shader", hr);
+			return false;
+		}
+		hr = _device->CreatePixelShader(
+			pixelBlob->GetBufferPointer(),
+			pixelBlob->GetBufferSize(),
+			nullptr,
+			&_frostPS);
+		ReleaseCom(vertexBlob);
+		ReleaseCom(pixelBlob);
+		if (FAILED(hr)) {
+			fail("pixel shader", hr);
+			return false;
+		}
+
+		D3D11_BUFFER_DESC constantDesc{};
+		constantDesc.ByteWidth = static_cast<UINT>(sizeof(FrostConstants));
+		constantDesc.Usage = D3D11_USAGE_DEFAULT;
+		constantDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		hr = _device->CreateBuffer(&constantDesc, nullptr, &_frostConstants);
+		if (FAILED(hr)) {
+			fail("constant buffer", hr);
+			return false;
+		}
+
+		D3D11_SAMPLER_DESC samplerDesc{};
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+		hr = _device->CreateSamplerState(&samplerDesc, &_frostSampler);
+		if (FAILED(hr)) {
+			fail("sampler", hr);
+			return false;
+		}
+
+		D3D11_BLEND_DESC blendDesc{};
+		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
+		hr = _device->CreateBlendState(&blendDesc, &_frostBlendState);
+		if (FAILED(hr)) {
+			fail("blend state", hr);
+			return false;
+		}
+
+		D3D11_RASTERIZER_DESC rasterDesc{};
+		rasterDesc.FillMode = D3D11_FILL_SOLID;
+		rasterDesc.CullMode = D3D11_CULL_NONE;
+		rasterDesc.DepthClipEnable = TRUE;
+		hr = _device->CreateRasterizerState(&rasterDesc, &_frostRasterState);
+		if (FAILED(hr)) {
+			fail("rasterizer state", hr);
+			return false;
+		}
+
+		D3D11_DEPTH_STENCIL_DESC depthDesc{};
+		depthDesc.DepthEnable = FALSE;
+		depthDesc.StencilEnable = FALSE;
+		hr = _device->CreateDepthStencilState(&depthDesc, &_frostDepthState);
+		if (FAILED(hr)) {
+			fail("depth-stencil state", hr);
+			return false;
+		}
+
+		return true;
+	}
+
+	void Menu::EnsureFrostResources()
+	{
+		if (_frostResourcesFailed || !EnsureFrostPipeline() || !_chain || !_device)
+			return;
+
+		ID3D11Texture2D* backbuffer = nullptr;
+		const HRESULT bufferHR = _chain->GetBuffer(
+			0,
+			__uuidof(ID3D11Texture2D),
+			reinterpret_cast<void**>(&backbuffer));
+		if (FAILED(bufferHR) || !backbuffer) {
+			if (backbuffer)
+				backbuffer->Release();
+			L->warn(
+				"Failed to get the backbuffer for menu frost resources (hr={:#x}); backdrop blur disabled",
+				static_cast<unsigned>(bufferHR));
+			_frostResourcesFailed = true;
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC backbufferDesc{};
+		backbuffer->GetDesc(&backbufferDesc);
+		backbuffer->Release();
+		if (_frostCopy && _frostA && _frostB &&
+			_frostW == backbufferDesc.Width &&
+			_frostH == backbufferDesc.Height &&
+			_frostFormat == backbufferDesc.Format)
+			return;
+
+		ReleaseFrostTextures();
+		if (backbufferDesc.Width == 0 || backbufferDesc.Height == 0 ||
+			backbufferDesc.SampleDesc.Count != 1) {
+			L->warn(
+				"Unsupported menu frost backbuffer {}x{}, samples={}; backdrop blur disabled",
+				backbufferDesc.Width,
+				backbufferDesc.Height,
+				backbufferDesc.SampleDesc.Count);
+			_frostResourcesFailed = true;
+			return;
+		}
+
+		const auto fail = [this](const char* a_stage, HRESULT a_hr) {
+			L->warn(
+				"Failed to create menu frost {} (hr={:#x}); backdrop blur disabled",
+				a_stage,
+				static_cast<unsigned>(a_hr));
+			ReleaseFrostTextures();
+			_frostResourcesFailed = true;
+		};
+
+		D3D11_TEXTURE2D_DESC copyDesc = backbufferDesc;
+		copyDesc.Usage = D3D11_USAGE_DEFAULT;
+		copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		copyDesc.CPUAccessFlags = 0;
+		copyDesc.MiscFlags = 0;
+		HRESULT hr = _device->CreateTexture2D(&copyDesc, nullptr, &_frostCopy);
+		if (FAILED(hr)) {
+			fail("backbuffer copy", hr);
+			return;
+		}
+		hr = _device->CreateShaderResourceView(_frostCopy, nullptr, &_frostCopySRV);
+		if (FAILED(hr)) {
+			fail("backbuffer copy SRV", hr);
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC blurDesc{};
+		blurDesc.Width = std::max(1u, backbufferDesc.Width / 4);
+		blurDesc.Height = std::max(1u, backbufferDesc.Height / 4);
+		blurDesc.MipLevels = 1;
+		blurDesc.ArraySize = 1;
+		blurDesc.Format = backbufferDesc.Format;
+		blurDesc.SampleDesc.Count = 1;
+		blurDesc.Usage = D3D11_USAGE_DEFAULT;
+		blurDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
+
+		hr = _device->CreateTexture2D(&blurDesc, nullptr, &_frostA);
+		if (FAILED(hr)) {
+			fail("ping texture A", hr);
+			return;
+		}
+		hr = _device->CreateShaderResourceView(_frostA, nullptr, &_frostASRV);
+		if (FAILED(hr)) {
+			fail("ping texture A SRV", hr);
+			return;
+		}
+		hr = _device->CreateRenderTargetView(_frostA, nullptr, &_frostARTV);
+		if (FAILED(hr)) {
+			fail("ping texture A RTV", hr);
+			return;
+		}
+
+		hr = _device->CreateTexture2D(&blurDesc, nullptr, &_frostB);
+		if (FAILED(hr)) {
+			fail("pong texture B", hr);
+			return;
+		}
+		hr = _device->CreateShaderResourceView(_frostB, nullptr, &_frostBSRV);
+		if (FAILED(hr)) {
+			fail("pong texture B SRV", hr);
+			return;
+		}
+		hr = _device->CreateRenderTargetView(_frostB, nullptr, &_frostBRTV);
+		if (FAILED(hr)) {
+			fail("pong texture B RTV", hr);
+			return;
+		}
+
+		_frostW = backbufferDesc.Width;
+		_frostH = backbufferDesc.Height;
+		_frostFormat = backbufferDesc.Format;
+	}
+
+	void Menu::RenderFrostBackdrop()
+	{
+		_frostSRV = nullptr;
+		if (!_context || !_chain || !_frostCopy || !_frostCopySRV ||
+			!_frostA || !_frostASRV || !_frostARTV ||
+			!_frostB || !_frostBSRV || !_frostBRTV)
+			return;
+
+		ID3D11Texture2D* backbuffer = nullptr;
+		const HRESULT hr = _chain->GetBuffer(
+			0,
+			__uuidof(ID3D11Texture2D),
+			reinterpret_cast<void**>(&backbuffer));
+		if (FAILED(hr) || !backbuffer) {
+			if (backbuffer)
+				backbuffer->Release();
+			return;
+		}
+
+		ScopedFrostState savedState(_context);
+		_context->OMSetRenderTargets(0, nullptr, nullptr);
+		_context->CopyResource(_frostCopy, backbuffer);
+		backbuffer->Release();
+
+		ID3D11Buffer* nullVertexBuffer = nullptr;
+		UINT zero = 0;
+		_context->IASetInputLayout(nullptr);
+		_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		_context->IASetVertexBuffers(0, 1, &nullVertexBuffer, &zero, &zero);
+		_context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 0);
+		_context->VSSetShader(_frostVS, nullptr, 0);
+		_context->PSSetShader(_frostPS, nullptr, 0);
+		_context->GSSetShader(nullptr, nullptr, 0);
+		_context->HSSetShader(nullptr, nullptr, 0);
+		_context->DSSetShader(nullptr, nullptr, 0);
+		_context->PSSetSamplers(0, 1, &_frostSampler);
+		_context->PSSetConstantBuffers(0, 1, &_frostConstants);
+		constexpr std::array<float, 4> blendFactor{};
+		_context->OMSetBlendState(_frostBlendState, blendFactor.data(), UINT_MAX);
+		_context->OMSetDepthStencilState(_frostDepthState, 0);
+		_context->RSSetState(_frostRasterState);
+
+		const UINT blurW = std::max(1u, _frostW / 4);
+		const UINT blurH = std::max(1u, _frostH / 4);
+		const D3D11_VIEWPORT viewport{
+			0.0f,
+			0.0f,
+			static_cast<float>(blurW),
+			static_cast<float>(blurH),
+			0.0f,
+			1.0f
+		};
+		_context->RSSetViewports(1, &viewport);
+
+		const auto drawPass = [this](
+								  ID3D11ShaderResourceView* a_source,
+								  ID3D11RenderTargetView* a_target,
+								  UINT a_sourceW,
+								  UINT a_sourceH,
+								  float a_offset) {
+			const FrostConstants constants{
+				{ 1.0f / static_cast<float>(a_sourceW), 1.0f / static_cast<float>(a_sourceH) },
+				a_offset,
+				_frostIntensity
+			};
+			_context->UpdateSubresource(_frostConstants, 0, nullptr, &constants, 0, 0);
+			_context->OMSetRenderTargets(1, &a_target, nullptr);
+			_context->PSSetShaderResources(0, 1, &a_source);
+			_context->Draw(3, 0);
+			ID3D11ShaderResourceView* nullSRV = nullptr;
+			_context->PSSetShaderResources(0, 1, &nullSRV);
+		};
+
+		drawPass(_frostCopySRV, _frostARTV, _frostW, _frostH, 0.5f);
+
+		ID3D11ShaderResourceView* currentSRV = _frostASRV;
+		bool currentIsA = true;
+		const int blurPassCount = std::clamp(
+			static_cast<int>(std::lround(2.0f + 2.0f * _frostIntensity)),
+			2,
+			6);
+		for (int pass = 0; pass < blurPassCount; ++pass) {
+			ID3D11RenderTargetView* const targetRTV = currentIsA ? _frostBRTV : _frostARTV;
+			ID3D11ShaderResourceView* const targetSRV = currentIsA ? _frostBSRV : _frostASRV;
+			const float offset = 0.75f + 0.5f * static_cast<float>(pass);
+			drawPass(currentSRV, targetRTV, blurW, blurH, offset);
+			currentSRV = targetSRV;
+			currentIsA = !currentIsA;
+		}
+		_frostSRV = currentSRV;
+	}
+
+	void Menu::ReleaseFrostTextures()
+	{
+		_frostSRV = nullptr;
+		ReleaseCom(_frostCopySRV);
+		ReleaseCom(_frostCopy);
+		ReleaseCom(_frostASRV);
+		ReleaseCom(_frostARTV);
+		ReleaseCom(_frostA);
+		ReleaseCom(_frostBSRV);
+		ReleaseCom(_frostBRTV);
+		ReleaseCom(_frostB);
+		_frostW = 0;
+		_frostH = 0;
+		_frostFormat = DXGI_FORMAT_UNKNOWN;
+		_frostResourcesFailed = false;
+	}
+
+	void Menu::ReleaseFrostResources()
+	{
+		ReleaseFrostTextures();
+		ReleaseCom(_frostVS);
+		ReleaseCom(_frostPS);
+		ReleaseCom(_frostConstants);
+		ReleaseCom(_frostSampler);
+		ReleaseCom(_frostBlendState);
+		ReleaseCom(_frostRasterState);
+		ReleaseCom(_frostDepthState);
 	}
 
 	void Menu::Render()
@@ -709,6 +1280,12 @@ namespace cs
 		EnsureBackbufferRTV();
 		if (!_backbufferRTV)
 			return;
+
+		_frostSRV = nullptr;
+		if (_open && _frostEnabled) {
+			EnsureFrostResources();
+			RenderFrostBackdrop();
+		}
 
 		ImGui::GetIO().FontGlobalScale = _fontScale;
 		ImGui::GetIO().MouseDrawCursor = _open;
@@ -782,6 +1359,8 @@ namespace cs
 	void Menu::LoadSettings()
 	{
 		_developerMode = false;
+		_frostEnabled = true;
+		_frostIntensity = 1.0f;
 		const auto root = feature_config::GetMergedRoot();
 		const auto* menuNode = root.get("menu");
 		if (!menuNode)
@@ -804,12 +1383,38 @@ namespace cs
 			L->warn("menu.developer_mode must be a boolean; using false");
 			break;
 		}
+
+		bool frostEnabled = true;
+		switch (feature_config::ReadBool(*menu, "background_blur", frostEnabled)) {
+		case feature_config::ScalarReadStatus::kValid:
+			_frostEnabled = frostEnabled;
+			break;
+		case feature_config::ScalarReadStatus::kMissing:
+			break;
+		default:
+			L->warn("menu.background_blur must be a boolean; using true");
+			break;
+		}
+
+		float frostIntensity = 1.0f;
+		switch (feature_config::ReadFloat(*menu, "blur_intensity", frostIntensity, 0.25f, 2.0f)) {
+		case feature_config::ScalarReadStatus::kValid:
+			_frostIntensity = frostIntensity;
+			break;
+		case feature_config::ScalarReadStatus::kMissing:
+			break;
+		default:
+			L->warn("menu.blur_intensity must be a number from 0.25 to 2.0; using 1.0");
+			break;
+		}
 	}
 
 	bool Menu::SaveSettings() const
 	{
 		toml::table menu;
 		menu.insert_or_assign("developer_mode", _developerMode);
+		menu.insert_or_assign("background_blur", _frostEnabled);
+		menu.insert_or_assign("blur_intensity", _frostIntensity);
 		const auto result = feature_config::UpdateTopLevelSection("menu", menu);
 		if (!result) {
 			L->warn("Failed to save menu configuration: {}", result.error);
@@ -880,6 +1485,29 @@ namespace cs
 		ImGui::SameLine();
 		if (ImGui::Button("Reset to 1.5x"))
 			_fontScale = 1.5f;
+
+		ImGui::Spacing();
+		DrawSectionLabel("Backdrop");
+		bool frostEnabled = _frostEnabled;
+		if (ImGui::Checkbox("Background blur", &frostEnabled)) {
+			const bool previous = _frostEnabled;
+			_frostEnabled = frostEnabled;
+			if (!SaveSettings()) {
+				_frostEnabled = previous;
+				ShowToast("Background blur setting could not be saved.");
+			}
+		}
+		ImGui::BeginDisabled(!_frostEnabled);
+		float frostIntensity = _frostIntensity;
+		if (ImGui::SliderFloat("Blur intensity", &frostIntensity, 0.25f, 2.0f, "%.2fx")) {
+			const float previous = _frostIntensity;
+			_frostIntensity = frostIntensity;
+			if (!SaveSettings()) {
+				_frostIntensity = previous;
+				ShowToast("Blur intensity could not be saved.");
+			}
+		}
+		ImGui::EndDisabled();
 	}
 
 	void Menu::DrawAdvancedPage()
@@ -959,7 +1587,25 @@ namespace cs
 			ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoFocusOnAppearing |
 			ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
 			ImGuiWindowFlags_NoDocking;
-		const bool drawContents = ImGui::Begin(title, nullptr, hostFlags) && _open;
+		const bool windowVisible = ImGui::Begin(title, nullptr, hostFlags);
+		if (_open && _frostEnabled && _frostSRV && _backbufferW > 0 && _backbufferH > 0) {
+			const ImVec2 wpos = ImGui::GetWindowPos();
+			const ImVec2 wsize = ImGui::GetWindowSize();
+			const ImVec2 wmax(wpos.x + wsize.x, wpos.y + wsize.y);
+			const float backbufferW = static_cast<float>(_backbufferW);
+			const float backbufferH = static_cast<float>(_backbufferH);
+			const ImVec2 uv0(wpos.x / backbufferW, wpos.y / backbufferH);
+			const ImVec2 uv1(wmax.x / backbufferW, wmax.y / backbufferH);
+			ImGui::GetBackgroundDrawList()->AddImageRounded(
+				reinterpret_cast<ImTextureID>(_frostSRV),
+				wpos,
+				wmax,
+				uv0,
+				uv1,
+				IM_COL32_WHITE,
+				ImGui::GetStyle().WindowRounding);
+		}
+		const bool drawContents = windowVisible && _open;
 		auto& featureManager = FeatureManager::Get();
 		if (drawContents) {
 			std::map<std::string, std::vector<Feature*>> featuresByCategory;

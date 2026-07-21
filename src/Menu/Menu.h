@@ -70,6 +70,11 @@ namespace cs
 		void Toggle();
 		void EnsureBackbufferRTV();
 		void ReleaseBackbufferRTV();
+		bool EnsureFrostPipeline();
+		void EnsureFrostResources();
+		void RenderFrostBackdrop();
+		void ReleaseFrostTextures();
+		void ReleaseFrostResources();
 
 		ID3D11Device*           _device         = nullptr;
 		ID3D11DeviceContext*    _context        = nullptr;
@@ -81,13 +86,37 @@ namespace cs
 		UINT                    _backbufferW    = 0;
 		UINT                    _backbufferH    = 0;
 
+		ID3D11Texture2D*          _frostCopy          = nullptr;
+		ID3D11ShaderResourceView* _frostCopySRV       = nullptr;
+		ID3D11Texture2D*          _frostA             = nullptr;
+		ID3D11ShaderResourceView* _frostASRV          = nullptr;
+		ID3D11RenderTargetView*   _frostARTV          = nullptr;
+		ID3D11Texture2D*          _frostB             = nullptr;
+		ID3D11ShaderResourceView* _frostBSRV          = nullptr;
+		ID3D11RenderTargetView*   _frostBRTV          = nullptr;
+		ID3D11ShaderResourceView* _frostSRV           = nullptr;
+		ID3D11VertexShader*       _frostVS            = nullptr;
+		ID3D11PixelShader*        _frostPS            = nullptr;
+		ID3D11Buffer*             _frostConstants     = nullptr;
+		ID3D11SamplerState*       _frostSampler       = nullptr;
+		ID3D11BlendState*         _frostBlendState    = nullptr;
+		ID3D11RasterizerState*    _frostRasterState   = nullptr;
+		ID3D11DepthStencilState*  _frostDepthState    = nullptr;
+		UINT                      _frostW             = 0;
+		UINT                      _frostH             = 0;
+		DXGI_FORMAT               _frostFormat        = DXGI_FORMAT_UNKNOWN;
+		bool                      _frostPipelineTried = false;
+		bool                      _frostResourcesFailed = false;
+
 		bool    _imguiInited           = false;
 		bool    _wndProcHooked         = false;
 		bool    _open                  = false;
 		bool    _overlayVisible        = true;
 		bool    _dxgiAdapter3InitTried = false;
+		bool    _frostEnabled          = true;
 
 		float                 _fontScale       = 1.5f;
+		float                 _frostIntensity  = 1.0f;
 		int                   _loggingLevelIdx = -1;
 		bool                  _developerMode   = false;
 		BuiltInPage           _selectedPage    = BuiltInPage::kOverview;
