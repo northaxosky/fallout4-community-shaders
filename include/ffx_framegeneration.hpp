@@ -70,4 +70,14 @@ struct struct_type<ffxConfigureDescFrameGenerationRegisterDistortionFieldResourc
 
 struct ConfigureDescFrameGenerationRegisterDistortionFieldResource : public InitHelper<ffxConfigureDescFrameGenerationRegisterDistortionFieldResource> {};
 
+template<>
+struct struct_type<ffxDispatchDescFrameGenerationPrepareCameraInfo> : std::integral_constant<uint64_t, FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO> {};
+
+struct DispatchDescFrameGenerationPrepareCameraInfo : public InitHelper<ffxDispatchDescFrameGenerationPrepareCameraInfo> {};
+
+template<>
+struct struct_type<ffxQueryDescFrameGenerationGetGPUMemoryUsageV2> : std::integral_constant<uint64_t, FFX_API_QUERY_DESC_TYPE_FRAMEGENERATION_GPU_MEMORY_USAGE_V2> {};
+
+struct QueryDescFrameGenerationGetGPUMemoryUsageV2 : public InitHelper<ffxQueryDescFrameGenerationGetGPUMemoryUsageV2> {};
+
 }

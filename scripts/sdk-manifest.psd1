@@ -27,15 +27,16 @@
         }
         @{
             Name     = 'FidelityFX'
-            Version  = 'v1.1.4'
-            Archive  = 'FidelityFX-SDK-v1.1.4.zip'
-            Url      = 'https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/download/v1.1.4/FidelityFX-SDK-v1.1.4.zip'
-            Sha256   = '0216556bfb0e243cec30004a2a98d38f4e3f7406cb7938e3c1b85c758e95d952'
-            EntryDir = 'PrebuiltSignedDLL'
+            Version  = 'v2.0.0'
+            Archive  = 'FidelityFX-SDK-v2.0.0.zip'
+            Url      = 'https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/releases/download/v2.0.0/FidelityFX-SDK-v2.0.0.zip'
+            Sha256   = '2c353f94a20a233e033a15c0ddfecaa93500846fc399f13e753f0ac27b9f63dd'
+            EntryDir = 'Kits/FidelityFX/signedbin'
             Dest     = 'F4SE\Plugins\FrameGeneration\FidelityFX'
-            Sentinel = 'amd_fidelityfx_dx12.dll'
+            Sentinel = 'amd_fidelityfx_framegeneration_dx12.dll'
             Dlls     = @(
-                'amd_fidelityfx_dx12.dll'
+                'amd_fidelityfx_loader_dx12.dll'
+                'amd_fidelityfx_framegeneration_dx12.dll'
             )
         }
     )

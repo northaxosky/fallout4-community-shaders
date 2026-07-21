@@ -16,7 +16,10 @@ namespace cs::features::framegeneration
 
 void FidelityFX::LoadFFX()
 {
-	module = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\FidelityFX\\amd_fidelityfx_dx12.dll");
+	// SDK 2.0 split the monolithic amd_fidelityfx_dx12.dll into a loader + per-effect DLLs; the
+	// loader is the interface/behaviour-compatible drop-in and resolves the frame-generation effect
+	// DLL (amd_fidelityfx_framegeneration_dx12.dll) sitting alongside it.
+	module = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\FidelityFX\\amd_fidelityfx_loader_dx12.dll");
 
 	if (module)
 		ffxLoadFunctions(&ffxModule, module);

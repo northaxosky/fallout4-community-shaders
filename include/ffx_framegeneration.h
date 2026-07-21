@@ -39,6 +39,7 @@ enum FfxApiCreateContextFramegenerationFlags
     FFX_FRAMEGENERATION_ENABLE_DEPTH_INVERTED                      = (1<<3), ///< A bit indicating that the input depth buffer data provided is inverted [1..0].
     FFX_FRAMEGENERATION_ENABLE_DEPTH_INFINITE                      = (1<<4), ///< A bit indicating that the input depth buffer data provided is using an infinite far plane.
     FFX_FRAMEGENERATION_ENABLE_HIGH_DYNAMIC_RANGE                  = (1<<5), ///< A bit indicating if the input color data provided to all inputs is using a high-dynamic range.
+    FFX_FRAMEGENERATION_ENABLE_DEBUG_CHECKING                      = (1<<6), ///< A bit indicating that the runtime should check some API values and report issues.
 };
 
 enum FfxApiDispatchFramegenerationFlags
@@ -48,6 +49,8 @@ enum FfxApiDispatchFramegenerationFlags
     FFX_FRAMEGENERATION_FLAG_DRAW_DEBUG_VIEW = (1 << 2),              ///< A bit indicating that the generated output resource will contain debug views with relevant information.
     FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY = (1 << 3),  ///< A bit indicating that the context should only run frame interpolation and not modify the swapchain.
     FFX_FRAMEGENERATION_FLAG_DRAW_DEBUG_PACING_LINES = (1 << 4),      ///< A bit indicating that the debug pacing lines will be drawn to the generated output.
+    FFX_FRAMEGENERATION_FLAG_RESERVED_1 = (1 << 5),
+    FFX_FRAMEGENERATION_FLAG_RESERVED_2 = (1 << 6),
 };
 
 enum FfxApiUiCompositionFlags
@@ -169,6 +172,31 @@ struct ffxCreateContextDescFrameGenerationHudless
 {
     ffxCreateContextDescHeader header;
     uint32_t hudlessBackBufferFormat;           ///< The surface format for the hudless back buffer. One of the values from FfxApiSurfaceFormat.
+};
+
+#define FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO 0x0002000au
+// Link this struct after ffxDispatchDescFrameGenerationPrepare. This is a required input to FSR3.1.4 and onwards for best quality.
+struct ffxDispatchDescFrameGenerationPrepareCameraInfo
+{
+    ffxConfigureDescHeader header;
+    float                  cameraPosition[3];   ///< The camera position in world space
+    float                  cameraUp[3];         ///< The camera up normalized vector in world space.
+    float                  cameraRight[3];      ///< The camera right normalized vector in world space.
+    float                  cameraForward[3];    ///< The camera forward normalized vector in world space.
+};
+
+#define FFX_API_QUERY_DESC_TYPE_FRAMEGENERATION_GPU_MEMORY_USAGE_V2 0x0002000bu
+struct ffxQueryDescFrameGenerationGetGPUMemoryUsageV2
+{
+    ffxQueryDescHeader header;
+    void* device;                               ///< For DX12: pointer to ID3D12Device. For VK, pointer to VkDevice. App needs to fill out before Query() call.
+    struct FfxApiDimensions2D  maxRenderSize;   ///< App needs to fill out before Query() call.
+    struct FfxApiDimensions2D  displaySize;     ///< App needs to fill out before Query() call.
+    uint32_t createFlags;                       ///< A combination of zero or more values from FfxApiCreateContextFramegenerationFlags.
+    uint32_t dispatchFlags;                     ///< A combination of zero or more values from FfxApiDispatchFrameGenerationFlags.
+    uint32_t backBufferFormat;                  ///< The surface format for the backbuffer. One of the values from FfxApiSurfaceFormat. App needs to fill out before Query() call.
+    uint32_t hudlessBackBufferFormat;           ///< The surface format for HUDLessColor if used. Otherwise set value to FFX_API_SURFACE_FORMAT_UNKNOWN(0). App needs to fill out before Query() call.
+    struct FfxApiEffectMemoryUsage* gpuMemoryUsageFrameGeneration; ///< Output values by Query() call.
 };
 
 #if defined(__cplusplus)
