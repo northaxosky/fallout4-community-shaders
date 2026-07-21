@@ -17,10 +17,10 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Registry.h"
+#include "Render/PixelShaderSwapBroker.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
 #include "Settings/FeatureConfig.h"
-#include "ShaderCatalog.h"
 #include "Sha1.h"
 #include "Telemetry/Telemetry.h"
 
@@ -321,10 +321,9 @@ namespace cs::features
 		_compiledWant = want;
 		_compiledGot  = got;
 
-		// Use ShaderCatalog's CreatePixelShader vtable slot-15 hook; one detour owns PS swaps.
-		ShaderCatalog::GetSingleton()->RegisterPixelShaderSwapCallback(
+		const bool resolverRegistered = cs::engine::RegisterPixelShaderSwapResolver(
 			[](const void* /*a_bytecode*/, std::size_t /*a_bytecode_len*/,
-				const cs::features::catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out) -> bool {
+				const cs::sha1::Sha1Result& a_sha, ID3D11PixelShader** a_out) noexcept -> bool {
 				// Only runtime-SHA1 matches may replace; false returns keep byte-identical/OFF-path parity.
 				auto* entry = replacement::Registry::Get().FindByRuntimeSha1(a_sha);
 				if (!entry)
@@ -348,8 +347,11 @@ namespace cs::features
 					L->info("Replaced PS sha={} -> {}", replacement::Sha1ToHex(a_sha), entry->name);
 				return true;
 			});
-		const bool catalogHooked = ShaderCatalog::GetSingleton()->HooksInstalled();
-		L->info("Registered pixel-shader swap callback (catalog hook={}).", catalogHooked ? "present" : "absent");
+		const bool brokerHooked = cs::engine::PixelShaderSwapBrokerHooksInstalled();
+		if (resolverRegistered)
+			L->info("Registered pixel-shader swap callback (broker hook={}).", brokerHooked ? "present" : "absent");
+		else
+			L->error("Pixel-shader swap callback registration failed (broker hook={}).", brokerHooked ? "present" : "absent");
 	}
 
 	void ShaderReplacement::CollectTelemetry(cs::telemetry::Sink& a_sink) const

@@ -3,8 +3,8 @@
 #include "CatalogDB.h"
 #include "Log.h"
 #include "PixelShaderTracker.h"
+#include "Render/PixelShaderSwapBroker.h"
 #include "Sha1.h"
-#include "ShaderCatalogSuppression.h"
 #include "SubclassContext.h"
 
 #include <atomic>
@@ -28,15 +28,9 @@ namespace cs::features::catalog::hooks
 		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
 		std::atomic<std::uint64_t> g_missedBinds{ 0 };
 
-		// Published once (release) from OnD3D11Ready; hot path acquire-loads it, publishing compiled replacements to shader-creation threads.
-		std::atomic<ShaderCatalog::PixelShaderSwapCallback> g_psSwapCallback{ nullptr };
-
 		// Hot path for every stage: SHA1, stack capture, enqueue; cost is mostly bytecode hashing.
-		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len) noexcept
+		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len, ULONG stackFramesToSkip = 2) noexcept
 		{
-			if (RecordingSuppressed())
-				return;
-
 			// Skip invalid creation attempts D3D would reject; avoids hashing null/empty bytecode.
 			if (!bytecode || len == 0)
 				return;
@@ -56,7 +50,7 @@ namespace cs::features::catalog::hooks
 
 			// Cheap stack capture (RVAs only); symbolication is deferred to the writer.
 			void* frames[4] = {};
-			CaptureStackBackTrace(2, 4, frames, nullptr);
+			CaptureStackBackTrace(stackFramesToSkip, 4, frames, nullptr);
 			for (int i = 0; i < 4; ++i) e.stack_frames[i] = frames[i];
 
 			const auto& ctx = context::g_ctx;
@@ -78,6 +72,22 @@ namespace cs::features::catalog::hooks
 
 			CatalogDB::Get().EnqueueShader(std::move(e));
 		}
+
+		void ObservePixelShaderBytecode(const void* a_bytecode, std::size_t a_bytecodeLength) noexcept
+		{
+			RecordEntry('p', a_bytecode, a_bytecodeLength, 3);
+		}
+
+		void ObserveOriginalPixelShader(const cs::sha1::Sha1Result& a_sha, ID3D11PixelShader* a_shader) noexcept
+		{
+			shader_tracker::TrackPixelShader(a_shader, a_sha);
+		}
+
+		void ObserveResolvedPixelShader(const cs::sha1::Sha1Result& a_sha, ID3D11PixelShader* a_shader) noexcept
+		{
+			if (a_shader)
+				shader_tracker::TrackPixelShader(a_shader, a_sha, true);
+		}
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateVertexShaderHook::thunk(
@@ -86,29 +96,6 @@ namespace cs::features::catalog::hooks
 	{
 		RecordEntry('v', a_bytecode, a_bytecode_len);
 		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
-	}
-
-	HRESULT STDMETHODCALLTYPE CreatePixelShaderHook::thunk(
-		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
-		ID3D11ClassLinkage* a_linkage, ID3D11PixelShader** a_out)
-	{
-		if (!RecordingSuppressed())
-			RecordEntry('p', a_bytecode, a_bytecode_len);
-
-		const HRESULT hr = func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
-		if (!RecordingSuppressed() && SUCCEEDED(hr) && a_out && *a_out && a_bytecode && a_bytecode_len != 0) {
-			const auto hash = Sha1Compute(a_bytecode, a_bytecode_len);
-			shader_tracker::TrackPixelShader(*a_out, hash);
-
-			// Broker: offer the created shader to the optional consumer (ShaderReplacement).
-			if (const auto swapCb = g_psSwapCallback.load(std::memory_order_acquire)) {
-				swapCb(a_bytecode, a_bytecode_len, hash, a_out);
-				// If it swapped *a_out, re-track the replacement under the same SHA1 for attribution.
-				if (*a_out)
-					shader_tracker::TrackPixelShader(*a_out, hash, true);
-			}
-		}
-		return hr;
 	}
 
 	void STDMETHODCALLTYPE PSSetShaderHook::thunk(
@@ -175,7 +162,13 @@ namespace cs::features::catalog::hooks
 		// D3D11 device vtable slots from d3d11-device-vtable-map.md; identical across OG/NG/AE.
 		stl::detour_vfunc<12, CreateVertexShaderHook  >(a_device);
 		stl::detour_vfunc<13, CreateGeometryShaderHook>(a_device);
-		stl::detour_vfunc<15, CreatePixelShaderHook   >(a_device);
+		const bool observerRegistered = cs::engine::RegisterPixelShaderSwapObserver({
+			&ObservePixelShaderBytecode,
+			&ObserveOriginalPixelShader,
+			&ObserveResolvedPixelShader
+		});
+		if (!observerRegistered)
+			L->error("Pixel-shader catalog observer registration failed.");
 		stl::detour_vfunc<16, CreateHullShaderHook    >(a_device);
 		stl::detour_vfunc<17, CreateDomainShaderHook  >(a_device);
 		stl::detour_vfunc<18, CreateComputeShaderHook >(a_device);
@@ -187,11 +180,6 @@ namespace cs::features::catalog::hooks
 			context->Release();
 			g_psSetShaderHookInstalled.store(true, std::memory_order_release);
 		}
-	}
-
-	void SetPixelShaderSwapCallback(ShaderCatalog::PixelShaderSwapCallback a_cb) noexcept
-	{
-		g_psSwapCallback.store(a_cb, std::memory_order_release);
 	}
 
 	RuntimeAttributionStats GetRuntimeAttributionStats()

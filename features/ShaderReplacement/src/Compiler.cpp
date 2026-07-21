@@ -1,8 +1,8 @@
 #include "Compiler.h"
 
 #include "Log.h"
+#include "Render/PixelShaderSwapBroker.h"
 #include "Sha1.h"
-#include "ShaderCatalogSuppression.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -71,7 +71,7 @@ namespace cs::features::replacement
 
 		winrt::com_ptr<ID3D11PixelShader> ps;
 		{
-			cs::features::catalog::hooks::ScopedRecordSuppression suppressCatalog;
+			cs::engine::ScopedPixelShaderBrokerBypass bypassBroker;
 			hr = device->CreatePixelShader(blob->GetBufferPointer(), blob->GetBufferSize(), nullptr, ps.put());
 		}
 		if (FAILED(hr) || !ps) {

@@ -10,6 +10,7 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/PixelShaderSwapBroker.h"
 
 namespace cs::d3d11
 {
@@ -91,6 +92,9 @@ namespace cs::d3d11
 				&& *a_immediateContext;
 			bool expected = false;
 			if (complete && ready.compare_exchange_strong(expected, true)) {
+				InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
+					engine::SetPixelShaderSwapBrokerDevice(*a_device);
+				});
 				InvokeOwner("FeatureManager D3D11 readiness", [&] {
 					FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);
 				});

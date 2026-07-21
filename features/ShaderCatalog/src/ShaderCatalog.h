@@ -2,15 +2,12 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Sha1.h"
 
 #include <atomic>
-#include <cstddef>
 #include <string>
 
 struct IDXGIAdapter;
 struct ID3D11Device;
-struct ID3D11PixelShader;
 
 namespace cs::features
 {
@@ -31,11 +28,6 @@ namespace cs::features
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		bool HooksInstalled() const noexcept { return _hooksInstalled.load(std::memory_order_acquire); }
-
-		// Optional callback the CreatePixelShader hook offers each shader after tracking; return true and swap *a_out (AddRef replacement, Release incoming) to substitute.
-		using PixelShaderSwapCallback = bool (*)(const void* a_bytecode, std::size_t a_bytecode_len,
-			const catalog::Sha1Result& a_sha, ID3D11PixelShader** a_out);
-		void RegisterPixelShaderSwapCallback(PixelShaderSwapCallback a_cb) noexcept;
 
 		struct Settings
 		{

@@ -3,7 +3,6 @@
 #include <d3d11.h>
 
 #include "PCH.h"
-#include "ShaderCatalog.h"
 
 namespace cs::features::catalog::hooks
 {
@@ -17,18 +16,6 @@ namespace cs::features::catalog::hooks
 			ID3D11VertexShader** a_out);
 		static inline HRESULT (STDMETHODCALLTYPE *func)(
 			ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11VertexShader**) = nullptr;
-	};
-
-	struct CreatePixelShaderHook
-	{
-		static HRESULT STDMETHODCALLTYPE thunk(
-			ID3D11Device*        a_this,
-			const void*          a_bytecode,
-			SIZE_T               a_bytecode_len,
-			ID3D11ClassLinkage*  a_linkage,
-			ID3D11PixelShader**  a_out);
-		static inline HRESULT (STDMETHODCALLTYPE *func)(
-			ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11PixelShader**) = nullptr;
 	};
 
 	struct PSSetShaderHook
@@ -92,9 +79,6 @@ namespace cs::features::catalog::hooks
 
 	// Install D3D11 vtable detours once; repeat calls would re-chain prior thunks.
 	void InstallAll(ID3D11Device* a_device);
-
-	// Sets the optional pixel-shader swap callback the CreatePixelShader hook offers each shader.
-	void SetPixelShaderSwapCallback(ShaderCatalog::PixelShaderSwapCallback a_cb) noexcept;
 
 	struct RuntimeAttributionStats
 	{
