@@ -11,7 +11,6 @@
 #include "Registry.h"
 #include "Render/ShaderInjection.h"
 #include "ScreenSpaceGI.h"
-#include "ScreenSpaceShadows.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -251,23 +250,6 @@ namespace cs::features
 				: cs::engine::DeveloperShaderOverride::kForceOff;
 			(void)cs::engine::SetDeveloperShaderOverride(target.id, shaderOverride);
 		}
-
-		const auto registerDirectionalDefine = [this](cs::engine::ShaderInjectionTarget a_target) {
-			(void)cs::engine::RegisterReplacement({
-				.targetId = a_target,
-				.contributor = "ShaderReplacement legacy ScreenSpaceShadows define",
-				.defines = { { "SCREEN_SPACE_SHADOWS", "1" } },
-				.isReady = [this, a_target] {
-					const auto* target = cs::engine::GetShaderInjectionTarget(a_target);
-					return target
-						&& IsShaderEnabled(std::string(target->name))
-						&& cs::features::ScreenSpaceShadows::GetSingleton()->IsShadowMaskReady();
-				}
-			});
-		};
-		// TODO(inject-step5): ScreenSpaceShadows registers these contributors.
-		registerDirectionalDefine(cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional);
-		registerDirectionalDefine(cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl);
 
 		(void)cs::engine::RegisterReplacement({
 			.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,

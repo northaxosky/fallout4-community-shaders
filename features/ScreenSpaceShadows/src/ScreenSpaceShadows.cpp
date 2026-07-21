@@ -8,6 +8,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cfloat>
 #include <stdexcept>
@@ -19,6 +20,7 @@
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
+#include "Render/ShaderInjection.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -136,6 +138,35 @@ namespace cs::features
 
 	void ScreenSpaceShadows::Load()
 	{
+		const auto registerDirectionalReplacement =
+			[this](cs::engine::ShaderInjectionTarget a_target) {
+				return cs::engine::RegisterReplacement({
+					.targetId = a_target,
+					.contributor = "ScreenSpaceShadows",
+					.defines = { { "SCREEN_SPACE_SHADOWS", "1" } },
+					.isReady = [this] {
+						return IsShadowMaskReady();
+					},
+					.bind = [this](ID3D11DeviceContext* a_context) {
+						BindShadowMask(a_context);
+					},
+					.slotClaims = {
+						{
+							.stage = cs::engine::ShaderStage::kPixel,
+							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+							.slot = kMaskPSSlot
+						}
+					}
+				});
+			};
+		const bool directionalRegistered = registerDirectionalReplacement(
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional);
+		const bool directionalIblRegistered = registerDirectionalReplacement(
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl);
+		if (!directionalRegistered || !directionalIblRegistered) {
+			L->error("Failed to register directional shader replacements.");
+		}
+
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
@@ -451,10 +482,6 @@ namespace cs::features
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
-		// Bind whenever resources exist; disabled still reads the white no-op mask, keeping compiled-in t6 safe. See OnPreDeferredLights.
-		if (!_resourcesReady.load(std::memory_order_acquire) || !_maskTexture) {
-			return;
-		}
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) {
 			return;
@@ -464,16 +491,43 @@ namespace cs::features
 			return;
 		}
 
+		winrt::com_ptr<ID3D11PixelShader> boundShader;
+		context->PSGetShader(boundShader.put(), nullptr, nullptr);
+		if (!boundShader) {
+			return;
+		}
+
+		constexpr std::array directionalTargets{
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+		};
+		for (const auto target : directionalTargets) {
+			if (boundShader.get() == cs::engine::GetInjectedPixelShader(target)) {
+				cs::engine::DispatchShaderInjections(target, context);
+				return;
+			}
+		}
+	}
+
+	void ScreenSpaceShadows::BindShadowMask(ID3D11DeviceContext* a_context)
+	{
+		// Bind whenever resources exist; disabled still reads the white no-op mask, keeping compiled-in t6 safe.
+		if (!a_context ||
+			!_resourcesReady.load(std::memory_order_acquire) ||
+			!_maskTexture) {
+			return;
+		}
+
 		// Bind t6 only when engine left it null; ambient/IBL binds g_tAmbientProbeA there, so non-null means not directional sun.
 		ID3D11ShaderResourceView* current = nullptr;
-		context->PSGetShaderResources(kMaskPSSlot, 1, &current);
+		a_context->PSGetShaderResources(kMaskPSSlot, 1, &current);
 		if (current) {
 			current->Release();
 			return;
 		}
 
 		auto* srv = _maskTexture->srv.get();
-		context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
+		a_context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
 		_maskBound.store(true, std::memory_order_relaxed);
 		_maskBoundLastFrame.store(true, std::memory_order_relaxed);
 	}

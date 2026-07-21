@@ -21,6 +21,13 @@
       "invariant": "Re-baselined for the drop-in contract fix + BRDF reconstruction against corpus blob 3295. Changes: (1) input signature POSITION interpolant moved to semantic index 14 to byte-match the game ISGN (contract FAIL->PASS); (2) recovered the default-branch Cook-Torrance specular (Smith geometry/visibility, ge/eq/movc peak-selection, Fresnel-Schlick) that was previously condensed to Blinn-Phong; (3) skin branch dots the t2 sample's xyz (its own normal), not the octahedral t1 normal, per corpus insns 140-141. shader_corpus_diff.py: CONTRACT PASS, stream -5.1%, samples 8/8, temps 11/11. Historical: an earlier baseline (085625AF, locked at 5845b9e) had a posViewLen-vs-roughness01 ambient-multiplier bug fixed 2026-05-20 (F614C18D). Fidelity is guarded by shader_exec_diff.py (differential WARP execution vs the game corpus on shaped inputs) -- the real proof -- with shader_corpus_diff.py as the static contract check; this sha1 is only a drift alarm and is NOT set in stone -- re-baseline it for any corpus-justified fix. Two further fidelity bugs found by shader_exec_diff.py, both missed by corpus-diff: distance fade is 1 - D^8 (corpus insns 121-127), not 1 - D^4; per-cascade shadow bias scales the depth reciprocal by 0.275 for cascade 0 (insn 48) and 1.0 for cascade 1 (insn 83), via a biasScale param. shader_exec_diff.py (shaped inputs): PASS, 0/4194304 divergent channels, max abs 2.1e-7."
     },
     {
+      "name": "bsdf_light_deferred_directional_sss",
+      "src": "shaders/lighting/bsdf_light_deferred.hlsl",
+      "defines": ["LIGHT_TYPE=1", "SCREEN_SPACE_SHADOWS=1"],
+      "sha1": "BBE1ACB5DE6E328AAE4B49458B070A8B92830FE5",
+      "invariant": "Drift guard for the production SSS permutation; a white t6 mask leaves shadowPcf unchanged."
+    },
+    {
       "name": "bsdf_light_deferred_directional_ibl",
       "src": "shaders/lighting/bsdf_light_deferred.hlsl",
       "defines": ["LIGHT_TYPE=1", "AMBIENT_IBL_IN_LIGHT=1"],
@@ -28,6 +35,13 @@
       "corpus_sha1": "94f8385edd1b4eb232b1de269e1ad7b21122a293",
       "corpus_blob_index": 3232,
       "invariant": "Directional sun permutation with cb2[6..8] ambient-gradient evaluation folded into diffuse (N) and specular (R). shader_exec_diff.py (shaped inputs): PASS, 0/16777216 divergent channels, max abs 7.72e-5."
+    },
+    {
+      "name": "bsdf_light_deferred_directional_ibl_sss",
+      "src": "shaders/lighting/bsdf_light_deferred.hlsl",
+      "defines": ["LIGHT_TYPE=1", "AMBIENT_IBL_IN_LIGHT=1", "SCREEN_SPACE_SHADOWS=1"],
+      "sha1": "CDD88A3CC864EF1D81A8FCD52648393B8F75B1A9",
+      "invariant": "Drift guard for the production SSS+IBL permutation; a white t6 mask leaves shadowPcf unchanged."
     },
     {
       "name": "bsdf_light_deferred_point",
