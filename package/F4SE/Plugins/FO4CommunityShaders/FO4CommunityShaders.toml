@@ -9,6 +9,9 @@ dump_hotkey = "Ctrl+F12"
 
 [logging.channels]
 
+[menu]
+developer_mode = false
+
 [preset]
 active = ""
 auto_load_on_boot = false

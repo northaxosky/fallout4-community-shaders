@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureCategories.h"
 #include "Render/Engine.h"
 #include "Utils/CSBuffer.h"
 
@@ -22,7 +23,7 @@ namespace cs::features
 		static ScreenSpaceGI* GetSingleton();
 
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
-		std::string GetCategory() const override { return "Lighting"; }
+		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override { return "Screen-space ambient occlusion and indirect diffuse lighting."; }
 		std::vector<FeatureRequirement> GetRequirements() const override { return {}; }
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }

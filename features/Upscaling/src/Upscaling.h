@@ -4,6 +4,7 @@
 #include "IUpscalerBackend.h"
 #include "Streamline.h"
 #include "Feature.h"
+#include "FeatureCategories.h"
 
 #include <array>
 #include <cstdint>
@@ -26,7 +27,7 @@ public:
 
 	std::string_view GetName() const override { return "Upscaling"; }
 	std::string GetFeatureSummary() const override { return "DLSS and FSR3 spatial upscaling integrated with the engine's render pipeline, with native TAA fallback."; }
-	std::string GetCategory() const override { return "Upscaling"; }
+	std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 	bool Configure(const toml::table& a_config, std::string& a_error) override;
 	void Load() override;
 	void OnDataLoaded() override;

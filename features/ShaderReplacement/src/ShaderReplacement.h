@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureCategories.h"
 
 #include <atomic>
 #include <cstddef>
@@ -24,7 +25,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "ShaderReplacement"; }
 		std::string GetFeatureSummary() const override { return "Lets developers swap in modified compiled shaders without restarting."; }
-		std::string GetCategory() const override { return "Developer"; }
+		std::string GetCategory() const override { return FeatureCategories::kDevTools; }
 		std::vector<FeatureRequirement> GetRequirements() const override
 		{
 			return { { "ShaderCatalog", FeatureCapability::kPixelShaderSwapBroker } };

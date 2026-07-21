@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FeatureCategories.h"
 #include "FeatureState.h"
 
 #include <optional>
@@ -86,7 +87,7 @@ namespace cs
 		virtual bool IsCore() const { return false; }
 
 		// Category label used for menu grouping (e.g. "Lighting", "Post-process", "Diagnostics").
-		virtual std::string GetCategory() const { return "Misc"; }
+		virtual std::string GetCategory() const { return FeatureCategories::kMisc; }
 
 		// Hide a feature from the menu entirely (e.g. developer-only tooling).
 		virtual bool IsInMenu() const { return true; }

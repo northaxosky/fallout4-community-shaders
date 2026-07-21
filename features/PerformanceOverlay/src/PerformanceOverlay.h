@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureCategories.h"
 #include "Utils/Hotkey.h"
 
 #include <array>
@@ -18,7 +19,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "PerformanceOverlay"; }
 		std::string GetFeatureSummary() const override { return "On-screen FPS counter and frame-time graph with estimated post-FG values."; }
-		std::string GetCategory() const override { return "Diagnostics"; }
+		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

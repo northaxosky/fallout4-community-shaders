@@ -3,6 +3,7 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
+#include <array>
 #include <chrono>
 #include <mutex>
 #include <string>
@@ -38,6 +39,20 @@ namespace cs
 	private:
 		Menu() = default;
 
+		enum class BuiltInPage
+		{
+			kOverview,
+			kSettings,
+			kAdvanced,
+			kPresets
+		};
+
+		struct FeatureListEntry
+		{
+			Feature* feature;
+			std::string category;
+		};
+
 		static HRESULT WINAPI hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags);
 		static LRESULT CALLBACK hkWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam);
 
@@ -45,8 +60,13 @@ namespace cs
 		void HookWndProc();
 		void Render();
 		void DrawDefaultUI();
+		void DrawOverviewPage(const std::vector<FeatureListEntry>& a_features);
+		void DrawSettingsPage();
+		void DrawAdvancedPage();
 		void DrawPresetsUI();
 		void DrawToast();
+		void LoadSettings();
+		bool SaveSettings() const;
 		void Toggle();
 		void EnsureBackbufferRTV();
 		void ReleaseBackbufferRTV();
@@ -67,8 +87,12 @@ namespace cs
 		bool    _overlayVisible        = true;
 		bool    _dxgiAdapter3InitTried = false;
 
-		float   _fontScale = 1.5f;
-		int     _loggingLevelIdx = -1;
+		float                 _fontScale       = 1.5f;
+		int                   _loggingLevelIdx = -1;
+		bool                  _developerMode   = false;
+		BuiltInPage           _selectedPage    = BuiltInPage::kOverview;
+		Feature*              _selectedFeature = nullptr;
+		std::array<char, 128> _featureSearch{};
 		std::vector<std::string> _cachedLoggers;
 		struct WndProcCallbackEntry
 		{

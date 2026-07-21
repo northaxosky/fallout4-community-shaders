@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureCategories.h"
 
 namespace cs::features
 {
@@ -11,7 +12,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "MotionVectorFixes"; }
 		std::string GetFeatureSummary() const override { return "Restores correct motion vectors for upscalers and frame generation."; }
-		std::string GetCategory() const override { return "Compatibility"; }
+		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 
 		void Load() override;
 		void OnDataLoaded() override;

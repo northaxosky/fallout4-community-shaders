@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureCategories.h"
 #include "Sha1.h"
 
 #include <atomic>
@@ -20,7 +21,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "ShaderCatalog"; }
 		std::string GetFeatureSummary() const override { return "Captures every shader the engine compiles into a SQLite catalog for inspection."; }
-		std::string GetCategory() const override { return "Diagnostics"; }
+		std::string GetCategory() const override { return FeatureCategories::kDevTools; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		bool HasCapability(FeatureCapability a_capability) const noexcept override;

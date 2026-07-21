@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -22,10 +23,12 @@
 #include <vector>
 
 #include "Feature.h"
+#include "FeatureCategories.h"
 #include "Log.h"
 #include "Plugin.h"
-#include "Settings/PresetManager.h"
 #include "Menu/Theme.h"
+#include "Settings/FeatureConfig.h"
+#include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/Hotkey.h"
 
@@ -36,24 +39,15 @@ namespace
 	// Features whose DrawSettings threw once; suppresses re-invocation + log spam until restart.
 	std::unordered_set<const cs::Feature*> g_menuSettingsFailed;
 
-	constexpr std::array<std::string_view, 5> kFeatureCategoryOrder{
-		"Lighting",
-		"Post-process",
-		"Upscaling",
-		"Frame Generation",
-		"Diagnostics"
-	};
-	constexpr std::string_view kMiscFeatureCategory = "Misc";
-
 	int FeatureCategoryRank(std::string_view a_category)
 	{
-		for (std::size_t i = 0; i < kFeatureCategoryOrder.size(); ++i) {
-			if (a_category == kFeatureCategoryOrder[i])
+		for (std::size_t i = 0; i < cs::FeatureCategories::kRenderOrder.size(); ++i) {
+			if (a_category == cs::FeatureCategories::kRenderOrder[i])
 				return static_cast<int>(i);
 		}
 
-		const int fallbackRank = static_cast<int>(kFeatureCategoryOrder.size());
-		return a_category == kMiscFeatureCategory ? fallbackRank + 1 : fallbackRank;
+		const int fallbackRank = static_cast<int>(cs::FeatureCategories::kRenderOrder.size());
+		return a_category == cs::FeatureCategories::kMisc ? fallbackRank + 1 : fallbackRank;
 	}
 
 	bool FeatureCategoryLess(const std::string& a_lhs, const std::string& a_rhs)
@@ -63,6 +57,97 @@ namespace
 		if (lhsRank != rhsRank)
 			return lhsRank < rhsRank;
 		return a_lhs < a_rhs;
+	}
+
+	class ScopedFont
+	{
+	public:
+		explicit ScopedFont(ImFont* a_font) :
+			_pushed(a_font != nullptr)
+		{
+			if (_pushed)
+				ImGui::PushFont(a_font);
+		}
+
+		~ScopedFont()
+		{
+			if (_pushed)
+				ImGui::PopFont();
+		}
+
+		ScopedFont(const ScopedFont&) = delete;
+		ScopedFont& operator=(const ScopedFont&) = delete;
+
+	private:
+		bool _pushed;
+	};
+
+	void DrawPanelTitle(std::string_view a_title)
+	{
+		ScopedFont titleFont(cs::theme::GetFonts().Title);
+		ImGui::TextUnformatted(a_title.data(), a_title.data() + a_title.size());
+	}
+
+	void DrawSectionLabel(const char* a_label)
+	{
+		ScopedFont headingFont(cs::theme::GetFonts().Heading);
+		ImGui::SeparatorText(a_label);
+	}
+
+	void DrawSubtext(std::string_view a_text)
+	{
+		ScopedFont subtextFont(cs::theme::GetFonts().Subtext);
+		ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kMuted);
+		ImGui::PushTextWrapPos();
+		ImGui::TextUnformatted(a_text.data(), a_text.data() + a_text.size());
+		ImGui::PopTextWrapPos();
+		ImGui::PopStyleColor();
+	}
+
+	bool MatchesSearch(std::string_view a_text, std::string_view a_search)
+	{
+		if (a_search.empty())
+			return true;
+
+		return std::search(
+			a_text.begin(),
+			a_text.end(),
+			a_search.begin(),
+			a_search.end(),
+			[](char a_lhs, char a_rhs) {
+				const auto lhs = static_cast<unsigned char>(a_lhs);
+				const auto rhs = static_cast<unsigned char>(a_rhs);
+				return std::tolower(lhs) == std::tolower(rhs);
+			}) != a_text.end();
+	}
+
+	struct FeatureStatusPresentation
+	{
+		std::string_view label;
+		ImVec4 color;
+	};
+
+	FeatureStatusPresentation GetFeatureStatusPresentation(const cs::Feature& a_feature)
+	{
+		const auto& state = a_feature.GetState();
+		if (!state.installed)
+			return { "Not installed", cs::theme::colors::kMuted };
+		if (a_feature.IsHealthy())
+			return { "Active", cs::theme::colors::kSuccess };
+		if (a_feature.IsDegraded())
+			return { "Degraded", cs::theme::colors::kWarning };
+		if (a_feature.IsActive())
+			return { "Loaded", cs::theme::colors::kInfo };
+
+		switch (state.runtimeState) {
+		case cs::FeatureRuntimeState::kFailed:
+			return { "Load failed", cs::theme::colors::kError };
+		case cs::FeatureRuntimeState::kPending:
+			return { "Loaded", cs::theme::colors::kInfo };
+		case cs::FeatureRuntimeState::kInactive:
+		default:
+			return { "Not loaded", cs::theme::colors::kMuted };
+		}
 	}
 
 	class FeatureImGuiRecoverySnapshot
@@ -166,16 +251,16 @@ namespace
 			break;
 		case cs::FeatureRuntimeState::kFailed:
 			if (detail.empty()) {
-				ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "Failed to load (see log).");
+				ImGui::TextColored(cs::theme::colors::kError, "Failed to load (see log).");
 			} else {
-				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.4f, 0.4f, 1.0f));
+				ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kError);
 				ImGui::TextWrapped("Failed to load: %.*s", static_cast<int>(detail.size()), detail.data());
 				ImGui::PopStyleColor();
 			}
 			break;
 		case cs::FeatureRuntimeState::kDegraded:
 			if (detail.empty())
-				ImGui::TextColored(ImVec4(1.0f, 0.7f, 0.4f, 1.0f), "Running with reduced functionality.");
+				ImGui::TextColored(cs::theme::colors::kWarning, "Running with reduced functionality.");
 			else
 				ImGui::TextWrapped("Running with reduced functionality: %.*s",
 					static_cast<int>(detail.size()), detail.data());
@@ -297,14 +382,15 @@ namespace
 		ImGui::PopID();
 	}
 
-	void DrawFeatureSettings(cs::Feature& a_feature, cs::FeatureManager& a_manager)
+	void DrawFeaturePanel(cs::Feature& a_feature, cs::FeatureManager& a_manager)
 	{
 		ImGui::PushID(a_feature.GetName().data());
-		const bool expanded = ImGui::CollapsingHeader(a_feature.GetName().data());
+		DrawPanelTitle(a_feature.GetName());
+		ImGui::Spacing();
 		DrawFeatureStatus(a_feature);
 
 		bool resetAllowed = false;
-		if (expanded && a_manager.PrepareMenuCallback(a_feature, "Menu::GetFeatureSummary")) {
+		if (a_manager.PrepareMenuCallback(a_feature, "Menu::GetFeatureSummary")) {
 			std::string summary;
 			bool summaryCompleted = false;
 			try {
@@ -322,7 +408,7 @@ namespace
 
 			if (summaryCompleted) {
 				if (!summary.empty()) {
-					ImGui::TextDisabled("%s", summary.c_str());
+					DrawSubtext(summary);
 					ImGui::Separator();
 				}
 
@@ -561,6 +647,7 @@ namespace cs
 		static const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\imgui.ini";
 		io.IniFilename = kIniPath;
 
+		LoadSettings();
 		cs::theme::LoadFonts(io);
 		cs::theme::ApplyDarkTheme(ImGui::GetStyle());
 
@@ -692,6 +779,171 @@ namespace cs
 			prevDSV->Release();
 	}
 
+	void Menu::LoadSettings()
+	{
+		_developerMode = false;
+		const auto root = feature_config::GetMergedRoot();
+		const auto* menuNode = root.get("menu");
+		if (!menuNode)
+			return;
+
+		const auto* menu = menuNode->as_table();
+		if (!menu) {
+			L->warn("Unified config [menu] must be a table; using menu defaults");
+			return;
+		}
+
+		bool developerMode = false;
+		switch (feature_config::ReadBool(*menu, "developer_mode", developerMode)) {
+		case feature_config::ScalarReadStatus::kValid:
+			_developerMode = developerMode;
+			break;
+		case feature_config::ScalarReadStatus::kMissing:
+			break;
+		default:
+			L->warn("menu.developer_mode must be a boolean; using false");
+			break;
+		}
+	}
+
+	bool Menu::SaveSettings() const
+	{
+		toml::table menu;
+		menu.insert_or_assign("developer_mode", _developerMode);
+		const auto result = feature_config::UpdateTopLevelSection("menu", menu);
+		if (!result) {
+			L->warn("Failed to save menu configuration: {}", result.error);
+			return false;
+		}
+		return true;
+	}
+
+	void Menu::DrawOverviewPage(const std::vector<FeatureListEntry>& a_features)
+	{
+		DrawPanelTitle("Overview");
+		ImGui::Spacing();
+		ImGui::Text("FO4 Community Shaders v%u.%u.%u",
+			Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
+
+		const float fps = ImGui::GetIO().Framerate;
+		ImGui::Text("%.1f FPS  /  %.2f ms", fps, fps > 0.0f ? 1000.0f / fps : 0.0f);
+		ImGui::Spacing();
+
+		DrawSectionLabel("Feature status");
+		DrawSubtext("Feature load state is applied at startup; changing load requires a restart.");
+
+		// TODO(menu-2b): master + per-feature enable
+		const ImGuiTableFlags tableFlags =
+			ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_BordersInnerV |
+			ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp;
+		if (ImGui::BeginTable("##feature_status", 3, tableFlags)) {
+			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.45f);
+			ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthStretch, 0.30f);
+			ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 0.25f);
+			ImGui::TableHeadersRow();
+
+			for (const auto& entry : a_features) {
+				if (!_developerMode && entry.category == FeatureCategories::kDevTools)
+					continue;
+
+				auto& feature = *entry.feature;
+				const auto name = feature.GetName();
+				const auto status = GetFeatureStatusPresentation(feature);
+
+				ImGui::TableNextRow();
+				ImGui::TableSetColumnIndex(0);
+				ImGui::TextUnformatted(name.data(), name.data() + name.size());
+				ImGui::TableSetColumnIndex(1);
+				ImGui::TextUnformatted(entry.category.c_str());
+				ImGui::TableSetColumnIndex(2);
+				ImGui::TextColored(status.color, "%.*s",
+					static_cast<int>(status.label.size()), status.label.data());
+
+				const auto& detail = feature.GetState().detail;
+				if (!detail.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
+					ImGui::SetTooltip("%.*s",
+						static_cast<int>(std::min<std::size_t>(detail.size(), 512)), detail.data());
+				}
+			}
+			ImGui::EndTable();
+		}
+	}
+
+	void Menu::DrawSettingsPage()
+	{
+		DrawPanelTitle("Settings");
+		ImGui::Spacing();
+		DrawSectionLabel("Interface");
+		ImGui::SliderFloat("Font scale", &_fontScale, 0.5f, 3.0f, "%.2fx");
+		if (ImGui::Button("Reset to 1.0x"))
+			_fontScale = 1.0f;
+		ImGui::SameLine();
+		if (ImGui::Button("Reset to 1.5x"))
+			_fontScale = 1.5f;
+	}
+
+	void Menu::DrawAdvancedPage()
+	{
+		DrawPanelTitle("Advanced");
+		ImGui::Spacing();
+
+		DrawSectionLabel("Logging");
+		static const char* kLevelNames[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };
+		static const spdlog::level::level_enum kLevels[] = {
+			spdlog::level::trace, spdlog::level::debug, spdlog::level::info,
+			spdlog::level::warn, spdlog::level::err, spdlog::level::critical, spdlog::level::off
+		};
+		if (_loggingLevelIdx < 0)
+			_loggingLevelIdx = static_cast<int>(cs::log::GlobalLevel());
+		bool loggingChanged = false;
+		if (ImGui::Combo("Global level", &_loggingLevelIdx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
+			cs::log::SetGlobalLevel(kLevels[_loggingLevelIdx]);
+			loggingChanged = true;
+		}
+		if (ImGui::TreeNode("Per-logger overrides")) {
+			_cachedLoggers = cs::log::ListLoggers();
+			for (const auto& name : _cachedLoggers) {
+				ImGui::PushID(name.c_str());
+				auto logger = spdlog::get(name);
+				int idx = logger ? static_cast<int>(logger->level()) : _loggingLevelIdx;
+				if (ImGui::Combo(name.c_str(), &idx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
+					cs::log::SetLevel(name.c_str(), kLevels[idx]);
+					loggingChanged = true;
+				}
+				ImGui::PopID();
+			}
+			ImGui::TreePop();
+		}
+
+		DrawSectionLabel("Telemetry");
+		bool telemetryEnabled = cs::telemetry::pump::Enabled();
+		if (ImGui::Checkbox("Telemetry heartbeat", &telemetryEnabled)) {
+			cs::telemetry::pump::SetEnabled(telemetryEnabled);
+			loggingChanged = true;
+		}
+		int telemetryInterval = static_cast<int>(cs::telemetry::pump::IntervalFrames());
+		if (ImGui::SliderInt("Telemetry interval (frames)", &telemetryInterval, 1, 600)) {
+			cs::telemetry::pump::SetIntervalFrames(static_cast<std::uint32_t>(telemetryInterval));
+			loggingChanged = true;
+		}
+		if (ImGui::Button("Dump state now"))
+			cs::telemetry::pump::DumpAll();
+		if (loggingChanged)
+			cs::log::SaveConfigToToml();
+
+		DrawSectionLabel("Developer");
+		DrawSubtext("Show capture, shader catalog, and shader replacement tools.");
+		bool developerMode = _developerMode;
+		if (ImGui::Checkbox("Developer mode", &developerMode)) {
+			const bool previousMode = _developerMode;
+			_developerMode = developerMode;
+			if (!SaveSettings()) {
+				_developerMode = previousMode;
+				ShowToast("Developer mode could not be saved.");
+			}
+		}
+	}
+
 	void Menu::DrawDefaultUI()
 	{
 		char title[64];
@@ -710,69 +962,12 @@ namespace cs
 		const bool drawContents = ImGui::Begin(title, nullptr, hostFlags) && _open;
 		auto& featureManager = FeatureManager::Get();
 		if (drawContents) {
-			const float fps = ImGui::GetIO().Framerate;
-			ImGui::Text("FPS: %.1f", fps);
-			ImGui::Text("Frame: %.2f ms", fps > 0.0f ? 1000.0f / fps : 0.0f);
-			ImGui::Separator();
-
-			if (ImGui::CollapsingHeader("Menu Settings", ImGuiTreeNodeFlags_DefaultOpen)) {
-				ImGui::SliderFloat("Font scale", &_fontScale, 0.5f, 3.0f, "%.2fx");
-				if (ImGui::Button("Reset to 1.0x"))
-					_fontScale = 1.0f;
-				ImGui::SameLine();
-				if (ImGui::Button("Reset to 1.5x"))
-					_fontScale = 1.5f;
-
-				ImGui::SeparatorText("Logging");
-				static const char* kLevelNames[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };
-				static const spdlog::level::level_enum kLevels[] = {
-					spdlog::level::trace, spdlog::level::debug, spdlog::level::info,
-					spdlog::level::warn, spdlog::level::err, spdlog::level::critical, spdlog::level::off
-				};
-				if (_loggingLevelIdx < 0)
-					_loggingLevelIdx = static_cast<int>(cs::log::GlobalLevel());
-				bool loggingChanged = false;
-				if (ImGui::Combo("Global level", &_loggingLevelIdx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
-					cs::log::SetGlobalLevel(kLevels[_loggingLevelIdx]);
-					loggingChanged = true;
-				}
-				if (ImGui::TreeNode("Per-logger overrides")) {
-					_cachedLoggers = cs::log::ListLoggers();
-					for (const auto& name : _cachedLoggers) {
-						ImGui::PushID(name.c_str());
-						auto logger = spdlog::get(name);
-						int idx = logger ? static_cast<int>(logger->level()) : _loggingLevelIdx;
-						if (ImGui::Combo(name.c_str(), &idx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
-							cs::log::SetLevel(name.c_str(), kLevels[idx]);
-							loggingChanged = true;
-						}
-						ImGui::PopID();
-					}
-					ImGui::TreePop();
-				}
-
-				bool telemetryEnabled = cs::telemetry::pump::Enabled();
-				if (ImGui::Checkbox("Telemetry heartbeat", &telemetryEnabled)) {
-					cs::telemetry::pump::SetEnabled(telemetryEnabled);
-					loggingChanged = true;
-				}
-				int telemetryInterval = static_cast<int>(cs::telemetry::pump::IntervalFrames());
-				if (ImGui::SliderInt("Telemetry interval (frames)", &telemetryInterval, 1, 600)) {
-					cs::telemetry::pump::SetIntervalFrames(static_cast<std::uint32_t>(telemetryInterval));
-					loggingChanged = true;
-				}
-				if (ImGui::Button("Dump state now"))
-					cs::telemetry::pump::DumpAll();
-				if (loggingChanged)
-					cs::log::SaveConfigToToml();
-			}
-
-			if (ImGui::CollapsingHeader("Presets", ImGuiTreeNodeFlags_DefaultOpen)) {
-				DrawPresetsUI();
-			}
-
 			std::map<std::string, std::vector<Feature*>> featuresByCategory;
+			std::vector<FeatureListEntry> features;
 			for (auto* feat : featureManager.GetRegisteredFeatures()) {
+				if (!feat)
+					continue;
+
 				bool includeFeature = true;
 				try {
 					includeFeature = feat->IsInMenu();
@@ -787,8 +982,7 @@ namespace cs
 				if (!includeFeature)
 					continue;
 
-				// Group by real category regardless of state so disabled features remain in their section instead of "Misc".
-				std::string category = "Misc";
+				std::string category = FeatureCategories::kMisc;
 				try {
 					auto reported = feat->GetCategory();
 					if (!reported.empty())
@@ -801,30 +995,148 @@ namespace cs
 						"Menu::GetCategory",
 						"non-standard exception");
 				}
-				featuresByCategory[std::move(category)].push_back(feat);
+				featuresByCategory[category].push_back(feat);
+				features.push_back({ feat, std::move(category) });
 			}
 
 			std::vector<std::string> categories;
 			categories.reserve(featuresByCategory.size());
-			for (const auto& entry : featuresByCategory) {
+			for (const auto& entry : featuresByCategory)
 				categories.push_back(entry.first);
-			}
 			std::sort(categories.begin(), categories.end(), FeatureCategoryLess);
 
-			for (const auto& category : categories) {
-				if (ImGui::CollapsingHeader(category.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-					ImGui::Indent();
-					for (auto* feat : featuresByCategory.at(category)) {
-						DrawFeatureSettings(*feat, featureManager);
+			const bool selectedFeatureVisible = _selectedFeature == nullptr ||
+				std::ranges::any_of(features, [this](const auto& entry) {
+					return entry.feature == _selectedFeature &&
+						(_developerMode || entry.category != FeatureCategories::kDevTools);
+				});
+			if (!selectedFeatureVisible) {
+				_selectedFeature = nullptr;
+				_selectedPage = BuiltInPage::kOverview;
+			}
+
+			const ImGuiTableFlags layoutFlags =
+				ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
+				ImGuiTableFlags_SizingStretchProp;
+			if (ImGui::BeginTable(
+					"##menu_layout",
+					2,
+					layoutFlags,
+					ImVec2(0.0f, ImGui::GetContentRegionAvail().y))) {
+				ImGui::TableSetupColumn(
+					"Navigation",
+					ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHide,
+					200.0f * _fontScale);
+				ImGui::TableSetupColumn(
+					"Details",
+					ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide);
+				ImGui::TableNextRow();
+
+				ImGui::TableSetColumnIndex(0);
+				const bool drawSidebar = ImGui::BeginChild("##menu_sidebar");
+				if (drawSidebar) {
+					const auto drawPageLink = [this](const char* a_label, BuiltInPage a_page) {
+						const bool selected = _selectedFeature == nullptr && _selectedPage == a_page;
+						if (ImGui::Selectable(a_label, selected)) {
+							_selectedPage = a_page;
+							_selectedFeature = nullptr;
+						}
+					};
+
+					drawPageLink("Overview", BuiltInPage::kOverview);
+					drawPageLink("Settings", BuiltInPage::kSettings);
+					drawPageLink("Advanced", BuiltInPage::kAdvanced);
+					ImGui::Separator();
+					drawPageLink("Presets", BuiltInPage::kPresets);
+					ImGui::Separator();
+
+					{
+						ScopedFont headingFont(theme::GetFonts().Heading);
+						ImGui::TextUnformatted("Features");
 					}
-					ImGui::Unindent();
+					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+					ImGui::InputTextWithHint(
+						"##feature_search",
+						"Search features...",
+						_featureSearch.data(),
+						_featureSearch.size());
+
+					const std::string_view search(_featureSearch.data());
+					for (const auto& category : categories) {
+						if (!_developerMode && category == FeatureCategories::kDevTools)
+							continue;
+
+						const auto& categoryFeatures = featuresByCategory.at(category);
+						const bool hasMatch = std::ranges::any_of(categoryFeatures, [search](const Feature* a_feature) {
+							return MatchesSearch(a_feature->GetName(), search);
+						});
+						if (!hasMatch)
+							continue;
+
+						ImGui::PushID(category.c_str());
+						bool categoryOpen = false;
+						{
+							ScopedFont headingFont(theme::GetFonts().Heading);
+							categoryOpen = ImGui::TreeNodeEx(
+								"##category",
+								ImGuiTreeNodeFlags_SpanAvailWidth,
+								"%s",
+								category.c_str());
+						}
+						if (categoryOpen) {
+							for (auto* feature : categoryFeatures) {
+								const auto name = feature->GetName();
+								if (!MatchesSearch(name, search))
+									continue;
+
+								const std::string label(name);
+								ImGui::PushID(feature);
+								const bool selected = _selectedFeature == feature;
+								if (ImGui::Selectable(label.c_str(), selected)) {
+									_selectedFeature = feature;
+								}
+								ImGui::PopID();
+							}
+							ImGui::TreePop();
+						}
+						ImGui::PopID();
+					}
 				}
+				ImGui::EndChild();
+
+				ImGui::TableSetColumnIndex(1);
+				const bool drawDetails = ImGui::BeginChild("##menu_details");
+				if (drawDetails) {
+					if (_selectedFeature) {
+						DrawFeaturePanel(*_selectedFeature, featureManager);
+					} else {
+						switch (_selectedPage) {
+						case BuiltInPage::kOverview:
+							DrawOverviewPage(features);
+							break;
+						case BuiltInPage::kSettings:
+							DrawSettingsPage();
+							break;
+						case BuiltInPage::kAdvanced:
+							DrawAdvancedPage();
+							break;
+						case BuiltInPage::kPresets:
+							DrawPanelTitle("Presets");
+							ImGui::Spacing();
+							DrawPresetsUI();
+							break;
+						}
+					}
+				}
+				for (auto* feat : featureManager.GetRegisteredFeatures()) {
+					if (feat)
+						ServiceFeatureResetPopup(*feat, featureManager, _open);
+				}
+				ImGui::EndChild();
+				ImGui::EndTable();
 			}
 		}
 
-		for (auto* feat : featureManager.GetRegisteredFeatures()) {
-			ServiceFeatureResetPopup(*feat, featureManager, _open);
-		}
 		featureManager.FinishRuntimeCallbackPass();
 		ImGui::End();
 	}

@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "Feature.h"
+#include "FeatureCategories.h"
 
 #include <cstdint>
 
@@ -21,7 +22,7 @@ public:
 
 	std::string_view GetName() const override { return "FrameGeneration"; }
 	std::string GetFeatureSummary() const override { return "Generates intermediate frames via DLSS-G, FSR3-FG, or XeSS-FG to roughly double displayed FPS."; }
-	std::string GetCategory() const override { return "Frame Generation"; }
+	std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 	bool Configure(const toml::table& a_config, std::string& a_error) override;
 	void Load() override;
 	void OnPostPostLoad() override;

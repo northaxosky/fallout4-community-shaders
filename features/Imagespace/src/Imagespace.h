@@ -2,6 +2,7 @@
 
 #include "Buffer.h"
 #include "Feature.h"
+#include "FeatureCategories.h"
 #include "LUTCache.h"
 #include "WeatherProfiles.h"
 
@@ -21,7 +22,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "Imagespace"; }
 		std::string GetFeatureSummary() const override { return "Tonemapping, LUT, adaptive exposure, bloom, and lens effects replacing the engine's imagespace stack."; }
-		std::string GetCategory() const override { return "Post-process"; }
+		std::string GetCategory() const override { return FeatureCategories::kPostProcess; }
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
