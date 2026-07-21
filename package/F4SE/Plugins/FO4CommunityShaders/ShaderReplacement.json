@@ -1,75 +1,40 @@
 {
-  "schema_version": 1,
-  "_doc": "Maps runtime PS sha1 (the bytecode the engine presents at ID3D11Device::CreatePixelShader) to a reconstructed HLSL replacement. Sha1s captured via the ShaderCatalog sqlite, cross-referenced against RenderDoc-confirmed pass identity.",
+  "schema_version": 2,
+  "_doc": "Developer overlay for the core ShaderInjection target registry. Core owns source paths, compile profiles, defines, and runtime SHA1 identities.",
   "replacements": [
     {
       "name": "deferred_composite",
-      "runtime_sha1_hex": null,
       "comment": "HELD/unmapped. Live 1.11.221 composite runtime sha is 7cdee7be (BSDFCompositeShader tech=616, .fxp blob 3531: 139 insns, t0-t9 incl. a texturecubearray@t8, CB2[6] - the rich cubemap-array IBL variant). Our deferred_composite.hlsl reconstructs blob 3539 (90 insns, t0/t3/t4/t5/t7/t11, CB2[3] - simpler variant) whose SRV/sampler contract is INCOMPATIBLE with 3531 (declares t11/s11 the runtime lacks; missing t6/t8-cubearray/t9) -> would hazard, not just mis-shade. Needs a reconstruction of blob 3531 before mapping. Prior 813c9ace was a pre-next-gen sha (never matches on 1.11.221).",
-      "hlsl": "Shaders/lighting/deferred_composite.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [],
       "default_enabled": false
     },
     {
       "name": "deferred_prepass",
-      "runtime_sha1_hex": "c493970c042ccd90363c57596ff53f6fdd22ce5f",
       "comment": "matches eid 13220 in FO4_frame9483.rdc",
-      "hlsl": "Shaders/lighting/deferred_prepass.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [],
       "default_enabled": false
     },
     {
       "name": "bsdf_light_deferred_point",
-      "runtime_sha1_hex": "3f1f708c01758a3d20267e5c1b7a6472b8c9d336",
       "comment": "matches eid 46771 in FO4_frame9483.rdc; POINT permutation",
-      "hlsl": "Shaders/lighting/bsdf_light_deferred.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [{ "name": "LIGHT_TYPE", "value": "2" }],
       "default_enabled": false
     },
     {
       "name": "ambient_ibl_pass",
-      "runtime_sha1_hex": "2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
       "comment": "ambient/IBL deferred PS (the 4-sample permutation the 1.11.221 engine binds at the ambient draw; sample_call_count=4). Contract-identical 8-sample sibling is 7460585eaf763b27ea14ee7bf607c9dfc3837a55 (same 14-srv/t8:texcubearray/cb0-cb2-cb12/t0+t13-free layout, roundtrip-validated) - remap here if the engine binds that variant instead. TODO (injection-registry #4): map BOTH permutations to this one reconstruction so AO holds across IBL-quality settings. Prior 761d4100 was a stale pre-next-gen bombshell-capture sha that never matched on 1.11.221.",
-      "hlsl": "Shaders/lighting/ambient_ibl_pass.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [],
       "default_enabled": false
     },
     {
       "name": "bsdf_light_deferred_directional",
-      "runtime_sha1_hex": "50e2618e8d1a8c3400c2bdb0129e510fe395d19a",
       "comment": "BSDFLightShader sun DIRECTIONAL permutation (2-cascade), role deferred_directional_light. Live 1.11.221 runtime sha = .fxp blob 3295, body-confirmed cascade-by-depth sun (radial-attenuation-free, cb2[10] cascade ranges). Prior 8c615844 was stale; 46b911cb before that was a misattributed 61-insn fog pass.",
-      "hlsl": "Shaders/lighting/bsdf_light_deferred.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [{ "name": "LIGHT_TYPE", "value": "1" }],
       "default_enabled": false
     },
     {
       "name": "bsdf_light_deferred_directional_ibl",
-      "runtime_sha1_hex": "94f8385edd1b4eb232b1de269e1ad7b21122a293",
       "comment": "BSDFLightShader sun DIRECTIONAL + ambient-IBL-in-light permutation, role deferred_directional_light (sibling of 50e2618e). Same role receives the SCREEN_SPACE_SHADOWS define when ScreenSpaceShadows is loaded + its mask is allocated.",
-      "hlsl": "Shaders/lighting/bsdf_light_deferred.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [{ "name": "LIGHT_TYPE", "value": "1" }, { "name": "AMBIENT_IBL_IN_LIGHT", "value": "1" }],
       "default_enabled": false
     },
     {
       "name": "vls_slice_scatter",
-      "runtime_sha1_hex": null,
       "comment": "PENDING: needs outdoor capture; VLS PS only fires when sun-shafts active",
-      "hlsl": "Shaders/lighting/vls_slice_scatter.hlsl",
-      "entry": "main",
-      "profile": "ps_5_0",
-      "defines": [],
       "default_enabled": false
     }
   ]

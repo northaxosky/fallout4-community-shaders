@@ -3,7 +3,6 @@
 #include "Log.h"
 
 #include <cstdio>
-#include <filesystem>
 #include <fstream>
 #include <memory>
 #include <sstream>
@@ -240,19 +239,7 @@ namespace cs::features::replacement
 		return nullptr;
 	}
 
-	ReplacementEntry* Registry::FindByRuntimeSha1(const Sha1Result& s) noexcept
-	{
-		if (Sha1IsZero(s))
-			return nullptr;
-
-		for (auto& e : _entries) {
-			if (!e->runtime_sha1_known) continue;
-			if (e->runtime_sha1.bytes == s.bytes) return e.get();
-		}
-		return nullptr;
-	}
-
-	bool Registry::LoadFromJson(const std::wstring& path, const std::wstring& shaders_root)
+	bool Registry::LoadFromJson(const std::wstring& path)
 	{
 		_entries.clear();
 		_loaded = false;
@@ -290,8 +277,6 @@ namespace cs::features::replacement
 			return false;
 		}
 
-		const std::filesystem::path root_dir(shaders_root);
-
 		for (const auto& item : (*repls)->as_array()) {
 			if (!item || !item->is_object()) {
 				L->warn("ShaderReplacement entry skipped (not an object).");
@@ -306,9 +291,7 @@ namespace cs::features::replacement
 			};
 
 			auto e = std::make_unique<ReplacementEntry>();
-			e->name    = get_str("name");
-			e->entry   = get_str("entry");   if (e->entry.empty())   e->entry = "main";
-			e->profile = get_str("profile"); if (e->profile.empty()) e->profile = "ps_5_0";
+			e->name = get_str("name");
 			e->comment = get_str("comment");
 
 			if (e->name.empty()) {
@@ -316,59 +299,15 @@ namespace cs::features::replacement
 				continue;
 			}
 
-			auto* sha_f = GetField(eo, "runtime_sha1_hex");
-			if (sha_f && *sha_f) {
-				if ((*sha_f)->is_string()) {
-					const auto& hex = (*sha_f)->as_string();
-					if (!hex.empty()) {
-						if (!Sha1FromHex(hex, e->runtime_sha1)) {
-							L->warn("Entry '{}' has invalid runtime_sha1_hex; treated as unknown.", e->name);
-						} else {
-							e->runtime_sha1_known = true;
-						}
-					}
-				} else if (!(*sha_f)->is_null()) {
-					L->warn("Entry '{}' has non-string runtime_sha1_hex; treated as unknown.", e->name);
-				}
-			}
-
-			auto hlsl_rel = get_str("hlsl");
-			if (hlsl_rel.empty()) {
-				L->warn("Entry '{}' skipped (no 'hlsl').", e->name);
-				continue;
-			}
-			std::filesystem::path hlsl_path;
-			std::filesystem::path rel(hlsl_rel);
-			// Strip a leading Shaders/ prefix so paths resolve under shaders_root.
-			std::string rel_str = rel.generic_string();
-			if (rel_str.rfind("Shaders/", 0) == 0)
-				rel = std::filesystem::path(rel_str.substr(std::string("Shaders/").size()));
-			hlsl_path = root_dir / rel;
-			e->hlsl_abs_path = hlsl_path.wstring();
-
 			auto* def_f = GetField(eo, "default_enabled");
 			if (def_f && *def_f && (*def_f)->is_bool())
 				e->default_enabled = (*def_f)->as_bool();
-
-			auto* defs_f = GetField(eo, "defines");
-			if (defs_f && *defs_f && (*defs_f)->is_array()) {
-				for (const auto& d : (*defs_f)->as_array()) {
-					if (!d || !d->is_object()) continue;
-					const auto& dobj = d->as_object();
-					auto* nm = GetField(dobj, "name");
-					auto* vl = GetField(dobj, "value");
-					if (nm && *nm && (*nm)->is_string() && vl && *vl && (*vl)->is_string())
-						e->defines.emplace_back((*nm)->as_string(), (*vl)->as_string());
-				}
-			}
 
 			_entries.push_back(std::move(e));
 		}
 
 		_loaded = true;
-		L->info("Manifest loaded: {} entries ({} with known runtime sha1).",
-			_entries.size(),
-			[&]() { std::size_t n = 0; for (auto& e : _entries) if (e->runtime_sha1_known) ++n; return n; }());
+		L->info("Manifest overlay loaded: {} entries.", _entries.size());
 		return true;
 	}
 }

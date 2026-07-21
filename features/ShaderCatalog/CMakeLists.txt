@@ -13,5 +13,4 @@ target_include_directories(FO4CommunityShaders PRIVATE
 
 target_link_libraries(FO4CommunityShaders PRIVATE
 	unofficial::sqlite3::sqlite3
-	bcrypt.lib
 )

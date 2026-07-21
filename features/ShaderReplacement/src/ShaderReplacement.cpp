@@ -1,27 +1,18 @@
 #include "ShaderReplacement.h"
 
 #include <Windows.h>
-#include <d3d11.h>
 #include <imgui.h>
 
-#include <algorithm>
-#include <exception>
-#include <filesystem>
-#include <fstream>
 #include <string>
-#include <utility>
 
 #include <toml++/toml.hpp>
 
-#include "Compiler.h"
 #include "Log.h"
-#include "LogThrottle.h"
 #include "Registry.h"
-#include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderInjection.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
 #include "Settings/FeatureConfig.h"
-#include "Sha1.h"
 #include "Telemetry/Telemetry.h"
 
 namespace cs::features
@@ -50,6 +41,19 @@ namespace cs::features
 			if (name == "deferred_prepass")                return &t.deferred_prepass;
 			if (name == "vls_slice_scatter")               return &t.vls_slice_scatter;
 			return nullptr;
+		}
+
+		bool DeveloperModeEnabled()
+		{
+			const auto root = feature_config::GetMergedRoot();
+			const auto* menu = root["menu"].as_table();
+			if (!menu)
+				return false;
+
+			bool enabled = false;
+			return feature_config::ReadBool(*menu, "developer_mode", enabled)
+					== feature_config::ScalarReadStatus::kValid
+				&& enabled;
 		}
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
@@ -139,58 +143,8 @@ namespace cs::features
 
 	ID3D11PixelShader* ShaderReplacement::GetReplacementPixelShader(std::string_view a_name) const noexcept
 	{
-		auto* entry = replacement::Registry::Get().FindByName(a_name);
-		return entry ? entry->compiled_ps.get() : nullptr;
-	}
-
-	void ShaderReplacement::RegisterInjection(
-		std::string a_passName,
-		InjectionCallback a_callback)
-	{
-		if (a_passName.empty() || !a_callback) {
-			return;
-		}
-		_injections.push_back({ std::move(a_passName), std::move(a_callback) });
-	}
-
-	void ShaderReplacement::DispatchInjections(
-		std::string_view a_passName,
-		ID3D11DeviceContext* a_context) noexcept
-	{
-		auto* entry = replacement::Registry::Get().FindByName(a_passName);
-		if (!a_context ||
-			!_settings.enabled ||
-			!entry ||
-			!entry->enabled_in_ini ||
-			!entry->compile_ok ||
-			!entry->compiled_ps ||
-			entry->substitution_hits.load(std::memory_order_relaxed) == 0) {
-			return;
-		}
-
-		for (const auto& injection : _injections) {
-			if (injection.passName != a_passName) {
-				continue;
-			}
-			try {
-				injection.callback(a_context);
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::warn,
-					"Shader injection for '{}' failed: {}.",
-					entry->name,
-					e.what());
-			} catch (...) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::warn,
-					"Shader injection for '{}' failed.",
-					entry->name);
-			}
-		}
+		const auto* target = cs::engine::FindShaderInjectionTarget(a_name);
+		return target ? cs::engine::GetInjectedPixelShader(target->id) : nullptr;
 	}
 
 	bool ShaderReplacement::IsShaderEnabled(const std::string& a_name) const noexcept
@@ -271,11 +225,8 @@ namespace cs::features
 			return;
 		}
 
-		replacement::Sha1InitOnce();
-
 		const auto manifest = Widen(_settings.manifestPath);
-		const auto root     = Widen(_settings.shadersRoot);
-		if (!replacement::Registry::Get().LoadFromJson(manifest, root)) {
+		if (!replacement::Registry::Get().LoadFromJson(manifest)) {
 			FailLoad("Shader replacement manifest failed to load");
 			L->error("Manifest load failed; feature inactive.");
 			return;
@@ -290,84 +241,60 @@ namespace cs::features
 				e.enabled_in_ini = e.default_enabled;
 		}
 
-		_started.store(true, std::memory_order_release);
-	}
-
-	void ShaderReplacement::OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* device)
-	{
-		if (!_started.load(std::memory_order_acquire) || !device) return;
-
-		// Compile SHA1-less entries for ImGui status; they can never match runtime bytecode.
-		std::size_t want = 0, got = 0;
-		for (auto& up : replacement::Registry::Get().All()) {
-			auto& e = *up;
-			if (!e.enabled_in_ini) continue;
-			++want;
-			if ((e.name == "bsdf_light_deferred_directional" ||
-					e.name == "bsdf_light_deferred_directional_ibl") &&
-				cs::features::ScreenSpaceShadows::GetSingleton()->IsShadowMaskReady()) {
-				// Interim ShaderReplacement<->SSS coupling: define SCREEN_SPACE_SHADOWS only when SSS loaded and mask-ready; registry will replace this.
-				e.defines.emplace_back("SCREEN_SPACE_SHADOWS", "1");
-				L->info("Enabled SCREEN_SPACE_SHADOWS for '{}'.", e.name);
-			}
-			if (e.name == "ambient_ibl_pass" &&
-				cs::features::ScreenSpaceGI::GetSingleton()->IsReady()) {
-				e.defines.emplace_back("SSGI", "1");
-				L->info("Enabled SSGI for '{}'.", e.name);
-			}
-			if (replacement::CompileEntry(device, e)) ++got;
+		_developerForceOffActive = DeveloperModeEnabled();
+		(void)cs::engine::SetDeveloperShaderForceOffEnabled(_developerForceOffActive);
+		(void)cs::engine::SetDeveloperShaderSourceRoot(Widen(_settings.shadersRoot));
+		for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
+			const bool forceOn = IsShaderEnabled(std::string(target.name));
+			const auto shaderOverride = forceOn
+				? cs::engine::DeveloperShaderOverride::kForceOn
+				: cs::engine::DeveloperShaderOverride::kForceOff;
+			(void)cs::engine::SetDeveloperShaderOverride(target.id, shaderOverride);
 		}
-		L->info("Compiled {}/{} replacements", got, want);
-		_compiledWant = want;
-		_compiledGot  = got;
 
-		const bool resolverRegistered = cs::engine::RegisterPixelShaderSwapResolver(
-			[](const void* /*a_bytecode*/, std::size_t /*a_bytecode_len*/,
-				const cs::sha1::Sha1Result& a_sha, ID3D11PixelShader** a_out) noexcept -> bool {
-				// Only runtime-SHA1 matches may replace; false returns keep byte-identical/OFF-path parity.
-				auto* entry = replacement::Registry::Get().FindByRuntimeSha1(a_sha);
-				if (!entry)
-					return false;
-				entry->match_hits.fetch_add(1, std::memory_order_relaxed);
-				if (!entry->enabled_in_ini) {
-					entry->passthrough_disabled.fetch_add(1, std::memory_order_relaxed);
-					return false;
+		const auto registerDirectionalDefine = [this](cs::engine::ShaderInjectionTarget a_target) {
+			(void)cs::engine::RegisterReplacement({
+				.targetId = a_target,
+				.contributor = "ShaderReplacement legacy ScreenSpaceShadows define",
+				.defines = { { "SCREEN_SPACE_SHADOWS", "1" } },
+				.isReady = [this, a_target] {
+					const auto* target = cs::engine::GetShaderInjectionTarget(a_target);
+					return target
+						&& IsShaderEnabled(std::string(target->name))
+						&& cs::features::ScreenSpaceShadows::GetSingleton()->IsShadowMaskReady();
 				}
-				if (!entry->compile_ok || !entry->compiled_ps) {
-					entry->passthrough_compile_fail.fetch_add(1, std::memory_order_relaxed);
-					return false;
-				}
-				// Swap *a_out with net refcount 1: AddRef ours, Release engine's.
-				ID3D11PixelShader* mine = entry->compiled_ps.get();
-				mine->AddRef();
-				(*a_out)->Release();
-				*a_out = mine;
-				const auto prev = entry->substitution_hits.fetch_add(1, std::memory_order_relaxed);
-				if (prev == 0)
-					L->info("Replaced PS sha={} -> {}", replacement::Sha1ToHex(a_sha), entry->name);
-				return true;
 			});
-		const bool brokerHooked = cs::engine::PixelShaderSwapBrokerHooksInstalled();
-		if (resolverRegistered)
-			L->info("Registered pixel-shader swap callback (broker hook={}).", brokerHooked ? "present" : "absent");
-		else
-			L->error("Pixel-shader swap callback registration failed (broker hook={}).", brokerHooked ? "present" : "absent");
+		};
+		// TODO(inject-step5): ScreenSpaceShadows registers these contributors.
+		registerDirectionalDefine(cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional);
+		registerDirectionalDefine(cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl);
+
+		(void)cs::engine::RegisterReplacement({
+			.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+			.contributor = "ShaderReplacement legacy ScreenSpaceGI define",
+			.defines = { { "SSGI", "1" } },
+			.isReady = [this] {
+				return IsShaderEnabled("ambient_ibl_pass")
+					&& cs::features::ScreenSpaceGI::GetSingleton()->IsReady();
+			}
+		});
+
+		if (!_developerForceOffActive) {
+			L->info("Developer mode is off; force-off overrides are treated as Auto.");
+		}
+		_started.store(true, std::memory_order_release);
 	}
 
 	void ShaderReplacement::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		std::uint64_t subs = 0, matches = 0;
-		for (const auto& up : replacement::Registry::Get().All()) {
-			subs    += up->substitution_hits.load(std::memory_order_relaxed);
-			matches += up->match_hits.load(std::memory_order_relaxed);
-		}
+		const auto summary = cs::engine::GetShaderInjectionSummary();
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("started", _started.load(std::memory_order_acquire))
-			.Field("compiled", static_cast<std::int64_t>(_compiledGot))
-			.Field("requested", static_cast<std::int64_t>(_compiledWant))
-			.Field("substitutions", static_cast<std::int64_t>(subs))
-			.Field("matches", static_cast<std::int64_t>(matches));
+			.Field("compiled", static_cast<std::int64_t>(summary.compiled))
+			.Field("requested", static_cast<std::int64_t>(summary.requested))
+			.Field("substitutions", static_cast<std::int64_t>(summary.substitutions))
+			.Field("matches", static_cast<std::int64_t>(summary.matches));
 	}
 
 	void ShaderReplacement::DrawSettings()
@@ -412,21 +339,26 @@ namespace cs::features
 				ImGui::TableHeadersRow();
 				for (auto& up : replacement::Registry::Get().All()) {
 					const auto& e = *up;
+					const auto* target = cs::engine::FindShaderInjectionTarget(e.name);
+					const auto status = target
+						? cs::engine::GetShaderInjectionTargetSnapshot(target->id)
+						: cs::engine::ShaderInjectionTargetSnapshot{};
 					ImGui::TableNextRow();
 					ImGui::TableSetColumnIndex(0); ImGui::TextUnformatted(e.name.c_str());
 					ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(e.enabled_in_ini ? "yes" : "no");
 					ImGui::TableSetColumnIndex(2);
-					if (!e.compile_attempted)      ImGui::TextDisabled("skipped");
-					else if (e.compile_ok)         ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1), "ok");
-					else                           ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1), "FAIL");
+					if (!target)                         ImGui::TextDisabled("unsupported");
+					else if (!status.compileAttempted)   ImGui::TextDisabled("skipped");
+					else if (status.compileOk)           ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1), "ok");
+					else                                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1), "FAIL");
 					ImGui::TableSetColumnIndex(3);
-					ImGui::Text("%llu", static_cast<unsigned long long>(e.match_hits.load(std::memory_order_relaxed)));
+					ImGui::Text("%llu", static_cast<unsigned long long>(status.matches));
 					ImGui::TableSetColumnIndex(4);
-					ImGui::Text("%llu", static_cast<unsigned long long>(e.substitution_hits.load(std::memory_order_relaxed)));
-					if (!e.compile_ok && !e.compile_error.empty()) {
+					ImGui::Text("%llu", static_cast<unsigned long long>(status.substitutions));
+					if (!status.compileOk && !status.compileError.empty()) {
 						ImGui::TableNextRow();
 						ImGui::TableSetColumnIndex(0);
-						ImGui::TextWrapped("    %s", e.compile_error.c_str());
+						ImGui::TextWrapped("    %s", status.compileError.c_str());
 					}
 				}
 				ImGui::EndTable();

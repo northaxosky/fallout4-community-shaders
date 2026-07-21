@@ -21,7 +21,7 @@
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
-#include "ShaderReplacement.h"
+#include "Render/ShaderInjection.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 
@@ -429,10 +429,11 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
-		ShaderReplacement::GetSingleton()->RegisterInjection(
-			"ambient_ibl_pass",
-			[](ID3D11DeviceContext* a_context) {
-				ScreenSpaceGI::GetSingleton()->OnAmbientPassInjection(a_context);
+		cs::engine::RegisterShaderInjectionBind(
+		cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+		"ScreenSpaceGI mode-1 injection",
+		[](ID3D11DeviceContext* a_context) {
+			ScreenSpaceGI::GetSingleton()->OnAmbientPassInjection(a_context);
 		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
@@ -1298,8 +1299,8 @@ namespace cs::features
 		auto* context = rendererData ?
 			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 			nullptr;
-		ShaderReplacement::GetSingleton()->DispatchInjections(
-			"ambient_ibl_pass",
+		cs::engine::DispatchShaderInjections(
+			cs::engine::ShaderInjectionTarget::kAmbientIblPass,
 			context);
 	}
 

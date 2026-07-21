@@ -88,6 +88,7 @@ target_link_libraries(FO4CommunityShaders PRIVATE
 	Microsoft::DirectXTK
 	Microsoft::DirectXTex
 	Microsoft::DirectX-Headers
+	bcrypt.lib
 	d3d12.lib
 	magic_enum::magic_enum
 	d3dcompiler.lib

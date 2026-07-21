@@ -11,6 +11,7 @@
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderInjection.h"
 
 namespace cs::d3d11
 {
@@ -97,6 +98,9 @@ namespace cs::d3d11
 				});
 				InvokeOwner("FeatureManager D3D11 readiness", [&] {
 					FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);
+				});
+				InvokeOwner("ShaderInjection freeze and compile", [&] {
+					engine::FreezeAndCompileShaderInjections(*a_device);
 				});
 				InvokeOwner("Menu D3D11 initialization", [&] {
 					Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
