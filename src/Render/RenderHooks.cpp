@@ -7,6 +7,8 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace { auto* L = cs::log::Get("cs.hooks"); }
@@ -33,6 +35,9 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 		bool g_preSunLightDrawInstalled    = false;
+		// Owner ("Upscaling", etc.) that patched REL::ID(587723)+0xE1 before the broker; empty means no pre-thunk chained in. Startup-thread-only via RegistrationAllowed, so unguarded.
+		std::string g_postDynResViewportPreThunkOwner;
+		bool        g_postDynResViewportPreThunkClaimed = false;
 		// DeferredLightsImpl_Hook wraps the engine call with g_insideDeferredLightsImpl; PreSunLightDraw uses it because generic DrawTriShape fires thousands of times per frame.
 		bool g_insideDeferredLightsImpl    = false;
 
@@ -147,6 +152,12 @@ namespace cs::engine
 			if (g_postDynResViewportInstalled) {
 				return;
 			}
+			// Chain contract: pre-thunk owner (Upscaling) must patch first, so its body wraps engine and the broker wraps IT to fire Imagespace/FGCapture after. Log the claim state at broker-install time to make an inverted wrap fail loud.
+			if (g_postDynResViewportPreThunkClaimed) {
+				L->info("Broker chaining PostDynResViewport after pre-thunk '{}'.", g_postDynResViewportPreThunkOwner);
+			} else {
+				L->info("Broker installing PostDynResViewport without a pre-thunk (e.g. Upscaling disabled).");
+			}
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 			constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
 			stl::write_thunk_call<PostDynResViewport_Hook>(
@@ -238,5 +249,23 @@ namespace cs::engine
 		if (!RegistrationAllowed("PreSunLightDraw")) return;
 		InsertPrioritized(g_preSunLightDraw, std::move(callback), priority);
 		EnsurePreSunLightDrawInstalled();
+	}
+
+	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel)
+	{
+		if (!RegistrationAllowed("PostDynResViewport_PreThunk")) return;
+		if (g_postDynResViewportPreThunkClaimed) {
+			L->error("Duplicate PostDynResViewport pre-thunk claim: existing '{}', new '{}'. Two owners fighting for REL::ID(587723)+0xE1 will silently chain in load order.",
+				g_postDynResViewportPreThunkOwner, a_ownerLabel);
+			return;
+		}
+		g_postDynResViewportPreThunkOwner = std::string(a_ownerLabel);
+		g_postDynResViewportPreThunkClaimed = true;
+		if (g_postDynResViewportInstalled) {
+			L->error("PostDynResViewport pre-thunk '{}' installed AFTER the broker; wrap order is inverted. Imagespace post-FX and FGCapture will now run before the pre-thunk body (pre-upscale pixels).",
+				a_ownerLabel);
+		} else {
+			L->info("PostDynResViewport pre-thunk '{}' claimed; broker will chain after it.", a_ownerLabel);
+		}
 	}
 }

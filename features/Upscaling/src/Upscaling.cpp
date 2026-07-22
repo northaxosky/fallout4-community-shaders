@@ -14,6 +14,7 @@
 #include "Render/Engine.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/RenderHooks.h"
 #include "Render/RendererContext.h"
 #include "Render/StreamlineCore.h"
 #include "Settings/FeatureConfig.h"
@@ -479,6 +480,7 @@ void Upscaling::InstallHooks()
 	{
 		constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
 		stl::write_thunk_call<DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport>(REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
+		cs::engine::MarkPostDynResViewportPreThunkInstalled("Upscaling");
 	}
 
 	L->info("Installing DrawWorld_Render_PreUI_DeferredPrePass hook");
