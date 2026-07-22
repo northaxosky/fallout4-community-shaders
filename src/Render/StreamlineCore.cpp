@@ -89,15 +89,6 @@ namespace cs
 		slGetFeatureFunction     = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
 		slGetNewFrameToken       = (PFun_slGetNewFrameToken*)  GetProcAddress(interposer, "slGetNewFrameToken");
 		slSetD3DDevice           = (PFun_slSetD3DDevice*)      GetProcAddress(interposer, "slSetD3DDevice");
-
-		// Pre-load plugin DLLs so MO2's USVFS doesn't hide them when slInit walks the directory.
-		LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
-		for (auto f : _requestedFeatures) {
-			if (f == sl::kFeatureDLSS_G)  LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
-			if (f == sl::kFeatureDLSS)    LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss.dll");
-			if (f == sl::kFeatureReflex)  LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.reflex.dll");
-			if (f == sl::kFeaturePCL)     LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.pcl.dll");
-		}
 	}
 
 	bool Streamline::Initialize()
@@ -137,6 +128,15 @@ namespace cs
 
 		pref.featuresToLoad = _requestedFeatures.data();
 		pref.numFeaturesToLoad = static_cast<uint32_t>(_requestedFeatures.size());
+
+		// Pre-load the final feature set so MO2's USVFS cannot hide plugins from slInit.
+		LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
+		for (auto f : _requestedFeatures) {
+			if (f == sl::kFeatureDLSS_G)  LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");
+			if (f == sl::kFeatureDLSS)    LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss.dll");
+			if (f == sl::kFeatureReflex)  LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.reflex.dll");
+			if (f == sl::kFeaturePCL)     LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.pcl.dll");
+		}
 
 		const auto result = slInit(pref, sl::kSDKVersion);
 		L->info("slInit result: {} (features requested: {})", (int)result, _requestedFeatures.size());
