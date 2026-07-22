@@ -7,10 +7,10 @@
     Archives = @(
         @{
             Name     = 'Streamline'
-            Version  = 'v2.11.1'
-            Archive  = 'streamline-sdk-v2.11.1.zip'
-            Url      = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.11.1/streamline-sdk-v2.11.1.zip'
-            Sha256   = '0c1d562e59557434cabfb8997157cb8c04fc7d23f077c8bdf5260975b73dfb89'
+            Version  = 'v2.12.0'
+            Archive  = 'streamline-sdk-v2.12.0.zip'
+            Url      = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.12.0/streamline-sdk-v2.12.0.zip'
+            Sha256   = 'f5c0a3d870707dddc3570fb4bcd3655cf48a8a68c3a9d342910cfa21b77dcf48'
             EntryDir = 'bin/x64'
             Dest     = 'F4SE\Plugins\Streamline'
             Sentinel = 'sl.interposer.dll'
