@@ -2,6 +2,7 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Render/D3D11Bootstrap.h"
+#include "Render/PresentationCoordinator.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -77,6 +78,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	featureManager.ActivateAll();
 	cs::telemetry::Install();
 	cs::d3d11::InstallBootstrapHook();
+	cs::render::InstallPresentationCoordinatorHook();
 
 	const auto messaging = F4SE::GetMessagingInterface();
 	messaging->RegisterListener(OnMessage);

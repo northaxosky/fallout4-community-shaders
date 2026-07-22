@@ -44,6 +44,44 @@ namespace cs::d3d11
 			}
 		}
 
+		void RunBootstrapPostCreate(
+			HRESULT a_result,
+			IDXGIAdapter* a_adapter,
+			const DXGI_SWAP_CHAIN_DESC* a_swapChainDesc,
+			IDXGISwapChain** a_swapChain,
+			ID3D11Device** a_device,
+			ID3D11DeviceContext** a_immediateContext)
+		{
+			const bool complete =
+				SUCCEEDED(a_result)
+				&& a_swapChainDesc
+				&& a_swapChainDesc->OutputWindow
+				&& a_swapChain
+				&& *a_swapChain
+				&& a_device
+				&& *a_device
+				&& a_immediateContext
+				&& *a_immediateContext;
+			bool expected = false;
+			if (complete && ready.compare_exchange_strong(expected, true)) {
+				InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
+					engine::SetPixelShaderSwapBrokerDevice(*a_device);
+				});
+				InvokeOwner("FeatureManager D3D11 readiness", [&] {
+					FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);
+				});
+				InvokeOwner("ShaderInjection freeze and compile", [&] {
+					engine::FreezeAndCompileShaderInjections(*a_device);
+				});
+				InvokeOwner("Menu D3D11 initialization", [&] {
+					Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
+				});
+				InvokeOwner("Menu Present hook", [&] {
+					Menu::Get().HookPresentOn(*a_swapChain);
+				});
+			}
+		}
+
 		HRESULT WINAPI CreateDeviceAndSwapChainThunk(
 			IDXGIAdapter* a_adapter,
 			D3D_DRIVER_TYPE a_driverType,
@@ -83,34 +121,13 @@ namespace cs::d3d11
 				a_featureLevel,
 				a_immediateContext);
 
-			const bool complete =
-				SUCCEEDED(result)
-				&& a_swapChainDesc
-				&& a_swapChainDesc->OutputWindow
-				&& a_swapChain
-				&& *a_swapChain
-				&& a_device
-				&& *a_device
-				&& a_immediateContext
-				&& *a_immediateContext;
-			bool expected = false;
-			if (complete && ready.compare_exchange_strong(expected, true)) {
-				InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
-					engine::SetPixelShaderSwapBrokerDevice(*a_device);
-				});
-				InvokeOwner("FeatureManager D3D11 readiness", [&] {
-					FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);
-				});
-				InvokeOwner("ShaderInjection freeze and compile", [&] {
-					engine::FreezeAndCompileShaderInjections(*a_device);
-				});
-				InvokeOwner("Menu D3D11 initialization", [&] {
-					Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
-				});
-				InvokeOwner("Menu Present hook", [&] {
-					Menu::Get().HookPresentOn(*a_swapChain);
-				});
-			}
+			RunBootstrapPostCreate(
+				result,
+				a_adapter,
+				a_swapChainDesc,
+				a_swapChain,
+				a_device,
+				a_immediateContext);
 
 			return result;
 		}

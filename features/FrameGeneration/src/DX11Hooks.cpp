@@ -134,7 +134,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	return S_OK;
 }
 
-HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
+static HRESULT RunFrameGenerationCreate(
 	IDXGIAdapter* pAdapter,
 	D3D_DRIVER_TYPE DriverType,
 	HMODULE Software,
@@ -336,6 +336,35 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 		ppImmediateContext);
 
 	return ret;
+}
+
+HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
+	IDXGIAdapter* pAdapter,
+	D3D_DRIVER_TYPE DriverType,
+	HMODULE Software,
+	UINT Flags,
+	const D3D_FEATURE_LEVEL* pFeatureLevels,
+	UINT FeatureLevels,
+	UINT SDKVersion,
+	DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+	IDXGISwapChain** ppSwapChain,
+	ID3D11Device** ppDevice,
+	D3D_FEATURE_LEVEL* pFeatureLevel,
+	ID3D11DeviceContext** ppImmediateContext)
+{
+	return RunFrameGenerationCreate(
+		pAdapter,
+		DriverType,
+		Software,
+		Flags,
+		pFeatureLevels,
+		FeatureLevels,
+		SDKVersion,
+		pSwapChainDesc,
+		ppSwapChain,
+		ppDevice,
+		pFeatureLevel,
+		ppImmediateContext);
 }
 
 void DX11Hooks::Install()

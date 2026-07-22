@@ -29,51 +29,94 @@ struct hkD3D11CreateDeviceAndSwapChain
 		IDXGISwapChain** ppSwapChain,
 		ID3D11Device** ppDevice,
 		D3D_FEATURE_LEVEL* pFeatureLevel,
-		ID3D11DeviceContext** ppImmediateContext)
-	{
-		CS_LOG_ONCE(L, spdlog::level::info, "Upscaling swap-chain thunk ran");
-		L->info("D3D11CreateDeviceAndSwapChain called, forcing feature level 11_1");
-		const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
-		pFeatureLevels = &featureLevel;
-		FeatureLevels = 1;
-
-		DX::ThrowIfFailed(func(pAdapter,
-			DriverType,
-			Software,
-			Flags,
-			pFeatureLevels,
-			FeatureLevels,
-			SDKVersion,
-			pSwapChainDesc,
-			ppSwapChain,
-			ppDevice,
-			pFeatureLevel,
-			ppImmediateContext));
-
-		L->info("Device created successfully, feature level: 0x{:x}", static_cast<uint>(*pFeatureLevel));
-		if (pSwapChainDesc) {
-			L->info("SwapChain: {}x{}, format={}, bufferCount={}", pSwapChainDesc->BufferDesc.Width, pSwapChainDesc->BufferDesc.Height, static_cast<uint>(pSwapChainDesc->BufferDesc.Format), pSwapChainDesc->BufferCount);
-		}
-
-		auto* core = cs::Streamline::GetSingleton();
-		core->Initialize();
-		if (core->IsInitialized()) {
-			// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
-			if (!cs::env::IsENBLoaded() && core->slUpgradeInterface) {
-				kSL->info("Upgrading swap chain interface (no ENB)");
-				core->slUpgradeInterface((void**)&(*ppSwapChain));
-			} else if (cs::env::IsENBLoaded()) {
-				kSL->info("Skipping swap chain upgrade (ENB loaded)");
-			}
-			core->OnD3D11Ready(pAdapter, *ppDevice);
-		} else {
-			kSL->info("Streamline not initialized, skipping device registration");
-		}
-
-		return S_OK;
-	}
+		ID3D11DeviceContext** ppImmediateContext);
 	static inline REL::Relocation<decltype(thunk)> func;
 };
+
+static HRESULT RunUpscalingCreate(
+	IDXGIAdapter* pAdapter,
+	D3D_DRIVER_TYPE DriverType,
+	HMODULE Software,
+	UINT Flags,
+	const D3D_FEATURE_LEVEL* pFeatureLevels,
+	UINT FeatureLevels,
+	UINT SDKVersion,
+	const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+	IDXGISwapChain** ppSwapChain,
+	ID3D11Device** ppDevice,
+	D3D_FEATURE_LEVEL* pFeatureLevel,
+	ID3D11DeviceContext** ppImmediateContext)
+{
+	CS_LOG_ONCE(L, spdlog::level::info, "Upscaling swap-chain thunk ran");
+	L->info("D3D11CreateDeviceAndSwapChain called, forcing feature level 11_1");
+	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
+	pFeatureLevels = &featureLevel;
+	FeatureLevels = 1;
+
+	DX::ThrowIfFailed(hkD3D11CreateDeviceAndSwapChain::func(pAdapter,
+		DriverType,
+		Software,
+		Flags,
+		pFeatureLevels,
+		FeatureLevels,
+		SDKVersion,
+		pSwapChainDesc,
+		ppSwapChain,
+		ppDevice,
+		pFeatureLevel,
+		ppImmediateContext));
+
+	L->info("Device created successfully, feature level: 0x{:x}", static_cast<uint>(*pFeatureLevel));
+	if (pSwapChainDesc) {
+		L->info("SwapChain: {}x{}, format={}, bufferCount={}", pSwapChainDesc->BufferDesc.Width, pSwapChainDesc->BufferDesc.Height, static_cast<uint>(pSwapChainDesc->BufferDesc.Format), pSwapChainDesc->BufferCount);
+	}
+
+	auto* core = cs::Streamline::GetSingleton();
+	core->Initialize();
+	if (core->IsInitialized()) {
+		// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
+		if (!cs::env::IsENBLoaded() && core->slUpgradeInterface) {
+			kSL->info("Upgrading swap chain interface (no ENB)");
+			core->slUpgradeInterface((void**)&(*ppSwapChain));
+		} else if (cs::env::IsENBLoaded()) {
+			kSL->info("Skipping swap chain upgrade (ENB loaded)");
+		}
+		core->OnD3D11Ready(pAdapter, *ppDevice);
+	} else {
+		kSL->info("Streamline not initialized, skipping device registration");
+	}
+
+	return S_OK;
+}
+
+HRESULT WINAPI hkD3D11CreateDeviceAndSwapChain::thunk(
+	IDXGIAdapter* pAdapter,
+	D3D_DRIVER_TYPE DriverType,
+	HMODULE Software,
+	UINT Flags,
+	const D3D_FEATURE_LEVEL* pFeatureLevels,
+	UINT FeatureLevels,
+	UINT SDKVersion,
+	const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
+	IDXGISwapChain** ppSwapChain,
+	ID3D11Device** ppDevice,
+	D3D_FEATURE_LEVEL* pFeatureLevel,
+	ID3D11DeviceContext** ppImmediateContext)
+{
+	return RunUpscalingCreate(
+		pAdapter,
+		DriverType,
+		Software,
+		Flags,
+		pFeatureLevels,
+		FeatureLevels,
+		SDKVersion,
+		pSwapChainDesc,
+		ppSwapChain,
+		ppDevice,
+		pFeatureLevel,
+		ppImmediateContext);
+}
 
 namespace DX11Hooks
 {
