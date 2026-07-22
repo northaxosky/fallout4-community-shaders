@@ -41,6 +41,42 @@ namespace cs::features
 			return "Disabled";
 		}
 
+		std::string_view UpscaleMethodName(Upscaling::UpscaleMethod a_method)
+		{
+			switch (a_method) {
+			case Upscaling::UpscaleMethod::kDisabled:
+				return "disabled";
+			case Upscaling::UpscaleMethod::kFSR:
+				return "fsr3";
+			case Upscaling::UpscaleMethod::kDLSS:
+				return "dlss_sr";
+			}
+			return "disabled";
+		}
+
+		std::string_view RequestedUpscaleName(uint a_preference)
+		{
+			switch (a_preference) {
+			case 0:
+				return "disabled";
+			case 1:
+				return "fsr3";
+			case 2:
+				return "dlss_sr";
+			}
+			return "disabled";
+		}
+
+		std::string_view UpscaleReasonName(uint a_preference, Upscaling::UpscaleMethod a_effective)
+		{
+			if (a_effective == Upscaling::UpscaleMethod::kDisabled)
+				return "disabled";
+			if (a_preference == static_cast<uint>(Upscaling::UpscaleMethod::kDLSS) &&
+				a_effective == Upscaling::UpscaleMethod::kFSR)
+				return "dlss_unavailable_fallback_fsr";
+			return "active";
+		}
+
 		std::string_view QualityName(uint a_quality)
 		{
 			switch (a_quality) {
@@ -1488,6 +1524,9 @@ void Upscaling::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 		&& currentFrame - telemetryLastEvaluatedFrame <= 1;
 	a_sink
 		.Field("backend", BackendName(upscaleMethod))
+		.Field("requested_upscale", RequestedUpscaleName(settings.upscaleMethodPreference))
+		.Field("effective_upscale", UpscaleMethodName(upscaleMethodNoMenu))
+		.Field("reason", UpscaleReasonName(settings.upscaleMethodPreference, upscaleMethodNoMenu))
 		.Field("mode", QualityName(telemetryQualityMode))
 		.Field("evaluated", evaluated)
 		.Dimensions("input", telemetryInputWidth, telemetryInputHeight)

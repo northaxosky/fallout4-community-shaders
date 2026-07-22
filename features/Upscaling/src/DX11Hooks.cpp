@@ -4,6 +4,7 @@
 
 #include "Env.h"
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/StreamlineCore.h"
 
 namespace cs::features::upscaling
@@ -30,6 +31,7 @@ struct hkD3D11CreateDeviceAndSwapChain
 		D3D_FEATURE_LEVEL* pFeatureLevel,
 		ID3D11DeviceContext** ppImmediateContext)
 	{
+		CS_LOG_ONCE(L, spdlog::level::info, "Upscaling swap-chain thunk ran");
 		L->info("D3D11CreateDeviceAndSwapChain called, forcing feature level 11_1");
 		const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
 		pFeatureLevels = &featureLevel;
@@ -85,7 +87,8 @@ namespace DX11Hooks
 		// Force BSGraphics::CreateD3DAndSwapChain to request D3D_FEATURE_LEVEL_11_1.
 		kHook->info("Installing IAT hook for D3D11CreateDeviceAndSwapChain");
 		(uintptr_t&)hkD3D11CreateDeviceAndSwapChain::func = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::thunk);
-		kHook->info("IAT hook installed, original func: {:#x}", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::func.get());
+		kHook->info("Upscaling IAT hook install for d3d11.dll!D3D11CreateDeviceAndSwapChain (previous={:#x})",
+			(uintptr_t)hkD3D11CreateDeviceAndSwapChain::func.get());
 	}
 }
 

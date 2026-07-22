@@ -1,6 +1,8 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
+#include <string_view>
 #include <vector>
 
 #include <Windows.h>
@@ -30,6 +32,13 @@ namespace cs
 	class Streamline
 	{
 	public:
+		enum class DeviceAPI : std::uint8_t
+		{
+			kNone,
+			kD3D11,
+			kD3D12
+		};
+
 		static Streamline* GetSingleton();
 
 		// Add to featuresToLoad. Must run before Initialize(). Deduplicated; safe to call repeatedly.
@@ -45,9 +54,10 @@ namespace cs
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device);
 
 		// FG sets this after binding D3D12 so a later D3D11 OnD3D11Ready doesn't overwrite the D3D12 binding.
-		void MarkD3DDeviceRegistered();
+		void MarkD3DDeviceRegistered(DeviceAPI a_api);
 
 		bool IsInitialized() const noexcept { return _initialized; }
+		std::string_view GetRegisteredDeviceAPIName() const noexcept;
 
 		bool featureDLSS    = false;
 		bool featureDLSSG   = false;
@@ -81,6 +91,7 @@ namespace cs
 		bool              _interposerOwned = false;
 		bool              _initAttempted = false;
 		std::atomic<bool> _d3dDeviceRegistered{ false };
+		std::atomic<DeviceAPI> _registeredDeviceAPI{ DeviceAPI::kNone };
 		bool              _featureSweepDone = false;
 		bool              _initialized = false;
 		std::vector<sl::Feature> _requestedFeatures;

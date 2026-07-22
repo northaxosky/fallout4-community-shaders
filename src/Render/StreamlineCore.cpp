@@ -129,9 +129,23 @@ namespace cs
 		return _initialized;
 	}
 
-	void Streamline::MarkD3DDeviceRegistered()
+	void Streamline::MarkD3DDeviceRegistered(DeviceAPI a_api)
 	{
+		_registeredDeviceAPI.store(a_api, std::memory_order_release);
 		_d3dDeviceRegistered.store(true, std::memory_order_release);
+	}
+
+	std::string_view Streamline::GetRegisteredDeviceAPIName() const noexcept
+	{
+		switch (_registeredDeviceAPI.load(std::memory_order_acquire)) {
+		case DeviceAPI::kNone:
+			return "none";
+		case DeviceAPI::kD3D11:
+			return "D3D11";
+		case DeviceAPI::kD3D12:
+			return "D3D12";
+		}
+		return "none";
 	}
 
 	void Streamline::OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device)
@@ -142,6 +156,9 @@ namespace cs
 		if (!_d3dDeviceRegistered.load(std::memory_order_acquire) && slSetD3DDevice && device) {
 			const auto r = slSetD3DDevice(device);
 			L->info("slSetD3DDevice result: {}", (int)r);
+			_registeredDeviceAPI.store(
+				r == sl::Result::eOk ? DeviceAPI::kD3D11 : DeviceAPI::kNone,
+				std::memory_order_release);
 			_d3dDeviceRegistered.store(true, std::memory_order_release);
 		}
 

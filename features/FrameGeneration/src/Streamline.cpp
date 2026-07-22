@@ -13,9 +13,13 @@ void StreamlineFG::SetD3DDevice(ID3D12Device* a_device)
 	d3d12Device = a_device;
 	auto* core = cs::Streamline::GetSingleton();
 	if (core->slSetD3DDevice && core->IsInitialized() && a_device) {
-		core->slSetD3DDevice(a_device);
-		core->MarkD3DDeviceRegistered();
-		L->info("D3D12 device set");
+		const auto result = core->slSetD3DDevice(a_device);
+		core->MarkD3DDeviceRegistered(
+			result == sl::Result::eOk ? cs::Streamline::DeviceAPI::kD3D12 : cs::Streamline::DeviceAPI::kNone);
+		if (result == sl::Result::eOk)
+			L->info("D3D12 device set");
+		else
+			L->warn("D3D12 device registration failed: {}", (int)result);
 	}
 }
 

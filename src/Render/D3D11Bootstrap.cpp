@@ -9,6 +9,7 @@
 
 #include "Feature.h"
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Menu/Menu.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
@@ -57,6 +58,7 @@ namespace cs::d3d11
 			D3D_FEATURE_LEVEL* a_featureLevel,
 			ID3D11DeviceContext** a_immediateContext)
 		{
+			CS_LOG_ONCE(L, spdlog::level::info, "Core bootstrap swap-chain thunk ran");
 			auto next = nextCreateDeviceAndSwapChain.load(std::memory_order_acquire);
 			if (!next) {
 				std::scoped_lock lock(installMutex);
@@ -140,6 +142,6 @@ namespace cs::d3d11
 		nextCreateDeviceAndSwapChain.store(
 			reinterpret_cast<CreateDeviceAndSwapChain>(previous),
 			std::memory_order_release);
-		L->info("Installed D3D11 bootstrap hook (next={:#x})", previous);
+		L->info("Core bootstrap installed d3d11.dll!D3D11CreateDeviceAndSwapChain IAT hook (previous={:#x})", previous);
 	}
 }

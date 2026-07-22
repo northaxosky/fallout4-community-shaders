@@ -4,6 +4,7 @@
 #include "Feature.h"
 #include "FeatureCategories.h"
 
+#include <atomic>
 #include <cstdint>
 
 namespace cs::features
@@ -13,6 +14,16 @@ class FrameGeneration : public cs::Feature
 {
 public:
 	enum class FrameGenType : int { kFSR3 = 0, kDLSSG = 1, kXeSSFG = 2 };
+	enum class FrameGenSkipReason : std::uint8_t
+	{
+		kNotDecided,
+		kActive,
+		kUserDisabled,
+		kExclusiveFullscreen,
+		kNoModule,
+		kENBSwapChainOwner,
+		kRenderDoc
+	};
 
 	static FrameGeneration* GetSingleton()
 	{
@@ -90,6 +101,30 @@ public:
 	void Reset();
 
 	static void InstallHooks();
+
+	void SetFrameGenSkipReason(FrameGenSkipReason a_reason) noexcept
+	{
+		_frameGenSkipReason.store(a_reason, std::memory_order_relaxed);
+	}
+
+	FrameGenSkipReason GetFrameGenSkipReason() const noexcept
+	{
+		return _frameGenSkipReason.load(std::memory_order_relaxed);
+	}
+
+	void SetLastKnownWindowed(bool a_windowed) noexcept
+	{
+		_wasExclusiveFullscreen.store(!a_windowed, std::memory_order_relaxed);
+	}
+
+	bool WasExclusiveFullscreen() const noexcept
+	{
+		return _wasExclusiveFullscreen.load(std::memory_order_relaxed);
+	}
+
+private:
+	std::atomic<FrameGenSkipReason> _frameGenSkipReason{ FrameGenSkipReason::kNotDecided };
+	std::atomic<bool> _wasExclusiveFullscreen{ false };
 };
 
 }

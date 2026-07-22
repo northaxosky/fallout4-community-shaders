@@ -47,6 +47,56 @@ namespace cs::features
 			return "off";
 		}
 
+		std::string_view RequestedFrameGenerationName(int a_type)
+		{
+			switch (a_type) {
+			case 0:
+				return "fsr3";
+			case 1:
+				return "dlss_g";
+			case 2:
+				return "xess_fg";
+			}
+			return "unknown";
+		}
+
+		std::string_view EffectiveFrameGenerationName(const FrameGeneration& a_feature)
+		{
+			if (!a_feature.settings.frameGenerationMode || !a_feature.d3d12Interop ||
+				a_feature.GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kActive)
+				return "off";
+			switch (a_feature.activeFrameGenType) {
+			case FrameGeneration::FrameGenType::kFSR3:
+				return "fsr3_fg";
+			case FrameGeneration::FrameGenType::kDLSSG:
+				return "dlss_g";
+			case FrameGeneration::FrameGenType::kXeSSFG:
+				return "xess_fg";
+			}
+			return "off";
+		}
+
+		std::string_view FrameGenSkipReasonName(FrameGeneration::FrameGenSkipReason a_reason)
+		{
+			switch (a_reason) {
+			case FrameGeneration::FrameGenSkipReason::kNotDecided:
+				return "not_decided";
+			case FrameGeneration::FrameGenSkipReason::kActive:
+				return "active";
+			case FrameGeneration::FrameGenSkipReason::kUserDisabled:
+				return "user_disabled";
+			case FrameGeneration::FrameGenSkipReason::kExclusiveFullscreen:
+				return "exclusive_fullscreen";
+			case FrameGeneration::FrameGenSkipReason::kNoModule:
+				return "no_module";
+			case FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner:
+				return "enb_swapchain_owner";
+			case FrameGeneration::FrameGenSkipReason::kRenderDoc:
+				return "renderdoc";
+			}
+			return "not_decided";
+		}
+
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{
 			std::string error = "settings.";
@@ -140,6 +190,8 @@ bool FrameGeneration::Configure(const toml::table& a_config, std::string& a_erro
 	}
 
 	settings = candidate;
+	if (!settings.frameGenerationMode)
+		SetFrameGenSkipReason(FrameGenSkipReason::kUserDisabled);
 	L->info("frame_generation_mode: {}", settings.frameGenerationMode);
 	L->info("frame_limit_mode: {}", settings.frameLimitMode);
 	L->info("frame_gen_type: {} (0=FSR3, 1=DLSS-G, 2=XeSS-FG)", settings.frameGenType);
@@ -165,6 +217,10 @@ void FrameGeneration::SaveSettings()
 void FrameGeneration::RestoreDefaultSettings()
 {
 	settings = Settings{};
+	if (d3d12Interop)
+		SetFrameGenSkipReason(FrameGenSkipReason::kActive);
+	else if (WasExclusiveFullscreen())
+		SetFrameGenSkipReason(FrameGenSkipReason::kExclusiveFullscreen);
 	SaveSettings();
 	cs::Menu::ShowToast("Frame Generation reset to defaults", 2.5);
 }
@@ -172,7 +228,8 @@ void FrameGeneration::RestoreDefaultSettings()
 void FrameGeneration::DrawSettings()
 {
 	const char* activeStr = "Inactive";
-	if (settings.frameGenerationMode) {
+	if (settings.frameGenerationMode && d3d12Interop &&
+		GetFrameGenSkipReason() == FrameGenSkipReason::kActive) {
 		switch (activeFrameGenType) {
 			case FrameGenType::kFSR3:   activeStr = "FSR3"; break;
 			case FrameGenType::kDLSSG:  activeStr = "DLSS-G"; break;
@@ -181,13 +238,23 @@ void FrameGeneration::DrawSettings()
 	}
 	ImGui::Text("Active: %s", activeStr);
 
+	if (settings.frameGenerationMode && WasExclusiveFullscreen())
+		ImGui::TextWrapped("Frame generation requires borderless/windowed mode; currently exclusive fullscreen - frame generation is inactive.");
+
 	if (cs::env::IsENBLoaded())
 		ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "ENB detected: frame generation routes through ENB's swap-chain wrapper; FSR3 path is most compatible.");
 
 	ImGui::Separator();
 
-	if (ImGui::Checkbox("Enable frame generation", &settings.frameGenerationMode))
+	if (ImGui::Checkbox("Enable frame generation", &settings.frameGenerationMode)) {
+		if (!settings.frameGenerationMode)
+			SetFrameGenSkipReason(FrameGenSkipReason::kUserDisabled);
+		else if (d3d12Interop)
+			SetFrameGenSkipReason(FrameGenSkipReason::kActive);
+		else if (WasExclusiveFullscreen())
+			SetFrameGenSkipReason(FrameGenSkipReason::kExclusiveFullscreen);
 		SaveSettings();
+	}
 
 	static const char* fgTypeLabels[] = {
 		"FSR3 (any GPU)",
@@ -227,8 +294,14 @@ void FrameGeneration::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	const bool captured = hasCapturedFrame
 		&& currentFrame >= telemetryLastCapturedFrame
 		&& currentFrame - telemetryLastCapturedFrame <= 1;
+	const auto skipReason = settings.frameGenerationMode ?
+		GetFrameGenSkipReason() : FrameGenSkipReason::kUserDisabled;
 	a_sink
 		.Field("backend", BackendName(*this))
+		.Field("requested_fg", RequestedFrameGenerationName(settings.frameGenType))
+		.Field("effective_fg", EffectiveFrameGenerationName(*this))
+		.Field("reason", FrameGenSkipReasonName(skipReason))
+		.Field("sl_device_api", cs::Streamline::GetSingleton()->GetRegisteredDeviceAPIName())
 		.Field("interop", d3d12Interop)
 		.Field("buffers_ready", setupBuffers)
 		.Field("captured", captured)

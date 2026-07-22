@@ -11,6 +11,7 @@
 
 #include "Env.h"
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/StreamlineCore.h"
 #include "XeSSFG.h"
 
@@ -148,6 +149,8 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 	ID3D11DeviceContext** ppImmediateContext)
 {
 	auto frameGen = FrameGeneration::GetSingleton();
+	CS_LOG_ONCE(L, spdlog::level::info, "FrameGeneration swap-chain thunk ran");
+	frameGen->SetLastKnownWindowed(pSwapChainDesc->Windowed != FALSE);
 
 	if (pSwapChainDesc->Windowed) {
 		if (pAdapter) {
@@ -165,19 +168,23 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 		auto fidelityFX = FidelityFX::GetSingleton();
 
 		// User-disabled FG keeps FO4 on native D3D11 for clean captures.
-		bool userEnabled = frameGen->settings.frameGenerationMode;
+		const bool frameGenerationRequested = frameGen->settings.frameGenerationMode;
+		bool userEnabled = frameGenerationRequested;
+		if (!frameGenerationRequested)
+			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kUserDisabled);
 
 		// RenderDoc needs the real D3D11 chain; FSR3/XeSS-FG proxy captures are empty.
 		if (userEnabled && cs::env::IsRenderDocActive()) {
-			L->warn("RenderDoc detected; disabling FrameGeneration for this session to preserve native D3D11 capture path");
+			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kRenderDoc);
+			CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=renderdoc");
 			userEnabled = false;
 		}
 
 		bool hasBackend = userEnabled && fidelityFX->module;
-		if (!userEnabled) {
+		if (!frameGenerationRequested) {
 			L->info("FrameGeneration disabled in INI; skipping D3D12 swap-chain proxy");
-		} else {
-			L->info("Frame Generation enabled, using D3D12 proxy");
+		} else if (userEnabled) {
+			L->info("Frame Generation requested; evaluating D3D12 proxy backend");
 		}
 
 		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
@@ -189,7 +196,8 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 					frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
 					hasBackend = true;
 				} else {
-					L->warn("DLSS-G selected under ENB but FSR3 runtime not loaded; disabling frame generation");
+					frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner);
+					CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=enb_swapchain_owner");
 					hasBackend = false;
 				}
 			} else {
@@ -205,6 +213,7 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 		}
 
 		if (hasBackend) {
+			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kActive);
 			frameGen->d3d12Interop = true;
 			frameGen->refreshRate = FrameGeneration::GetRefreshRate(pSwapChainDesc->OutputWindow);
 
@@ -300,10 +309,16 @@ HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
 
 				return S_OK;
 			}
-
-		} else {
-			L->warn("No frame generation backend available, skipping proxy");
+		} else if (userEnabled &&
+			frameGen->GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner) {
+			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kNoModule);
+			CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=no_module");
 		}
+	} else if (frameGen->settings.frameGenerationMode) {
+		frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kExclusiveFullscreen);
+		CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=exclusive_fullscreen");
+	} else {
+		frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kUserDisabled);
 	}
 
 	auto ret = ptrD3D11CreateDeviceAndSwapChain(
@@ -344,6 +359,8 @@ void DX11Hooks::Install()
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 
 	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
+	L->info("FrameGeneration IAT hook install for d3d11.dll!D3D11CreateDeviceAndSwapChain (previous={:#x})",
+		(uintptr_t)ptrD3D11CreateDeviceAndSwapChain);
 
 	// Hook factory creation only when an FG backend can use the proxy; under ENB DLSS-G needs the FSR3 module (fallback), so require it.
 	if (fidelityFX->module ||
