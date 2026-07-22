@@ -7,6 +7,7 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Render/D3D11Bootstrap.h"
 
 namespace cs::render
 {
@@ -19,7 +20,7 @@ namespace cs::render
 		std::mutex installMutex;
 		bool installAttempted = false;
 
-		HRESULT WINAPI CreateDeviceAndSwapChainForwardThunk(
+		HRESULT WINAPI CreateDeviceAndSwapChainThunk(
 			IDXGIAdapter* a_adapter,
 			D3D_DRIVER_TYPE a_driverType,
 			HMODULE a_software,
@@ -33,13 +34,13 @@ namespace cs::render
 			D3D_FEATURE_LEVEL* a_featureLevel,
 			ID3D11DeviceContext** a_immediateContext)
 		{
-			CS_LOG_ONCE(L, spdlog::level::info, "PresentationCoordinator forward thunk ran");
+			CS_LOG_ONCE(L, spdlog::level::info, "PresentationCoordinator thunk ran");
 			const auto next = nextCreateDeviceAndSwapChain.load(std::memory_order_acquire);
 			if (!next) {
-				L->error("PresentationCoordinator forward thunk has no next hook; returning E_FAIL");
+				L->error("PresentationCoordinator thunk has no next hook; returning E_FAIL");
 				return E_FAIL;
 			}
-			return next(
+			const HRESULT result = next(
 				a_adapter,
 				a_driverType,
 				a_software,
@@ -52,6 +53,16 @@ namespace cs::render
 				a_device,
 				a_featureLevel,
 				a_immediateContext);
+
+			cs::d3d11::RunBootstrapPostCreate(
+				result,
+				a_adapter,
+				a_swapChainDesc,
+				a_swapChain,
+				a_device,
+				a_immediateContext);
+
+			return result;
 		}
 	}
 
@@ -72,7 +83,7 @@ namespace cs::render
 			module,
 			"d3d11.dll",
 			"D3D11CreateDeviceAndSwapChain",
-			reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainForwardThunk));
+			reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainThunk));
 		nextCreateDeviceAndSwapChain.store(
 			reinterpret_cast<CreateDeviceAndSwapChain>(previous),
 			std::memory_order_release);
