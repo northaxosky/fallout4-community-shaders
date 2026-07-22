@@ -7,7 +7,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Render/PresentationCoordinator.h"
+#include "Render/SwapChainHook.h"
 #include "Render/StreamlineCore.h"
 
 namespace cs::features::upscaling
@@ -22,7 +22,7 @@ static bool IsUpscalingActive() noexcept
 	return Upscaling::GetSingleton()->IsLoaded();
 }
 
-static void RunUpscalingPreCreate(cs::render::PresentationCreateContext& a_context)
+static void RunUpscalingPreCreate(cs::render::SwapChainCreateContext& a_context)
 {
 	CS_LOG_ONCE(L, spdlog::level::info, "Upscaling create pre phase ran");
 	L->info("D3D11CreateDeviceAndSwapChain called, forcing feature level 11_1");
@@ -31,7 +31,7 @@ static void RunUpscalingPreCreate(cs::render::PresentationCreateContext& a_conte
 
 static HRESULT RunUpscalingPostCreate(
 	HRESULT a_factoryResult,
-	cs::render::PresentationCreateContext& a_context)
+	cs::render::SwapChainCreateContext& a_context)
 {
 	DX::ThrowIfFailed(a_factoryResult);
 

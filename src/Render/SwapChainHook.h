@@ -7,7 +7,7 @@ namespace cs::render
 {
 	using CreateDeviceAndSwapChain = decltype(&D3D11CreateDeviceAndSwapChain);
 
-	struct PresentationCreateContext
+	struct SwapChainCreateContext
 	{
 		IDXGIAdapter* adapter;
 		D3D_DRIVER_TYPE driverType;
@@ -54,10 +54,10 @@ namespace cs::render
 	};
 
 	using IsCreateProviderActive = bool (*)() noexcept;
-	using FrameGenerationEvaluate = FrameGenerationCreateRoute (*)(PresentationCreateContext&);
-	using FrameGenerationInline = HRESULT (*)(PresentationCreateContext&, IDXGIFactory4*);
-	using UpscalingPreCreate = void (*)(PresentationCreateContext&);
-	using UpscalingPostCreate = HRESULT (*)(HRESULT, PresentationCreateContext&);
+	using FrameGenerationEvaluate = FrameGenerationCreateRoute (*)(SwapChainCreateContext&);
+	using FrameGenerationInline = HRESULT (*)(SwapChainCreateContext&, IDXGIFactory4*);
+	using UpscalingPreCreate = void (*)(SwapChainCreateContext&);
+	using UpscalingPostCreate = HRESULT (*)(HRESULT, SwapChainCreateContext&);
 
 	void RegisterFrameGenerationCreatePhases(
 		IsCreateProviderActive a_isActive,
@@ -67,5 +67,5 @@ namespace cs::render
 		IsCreateProviderActive a_isActive,
 		UpscalingPreCreate a_preCreate,
 		UpscalingPostCreate a_postCreate);
-	void InstallPresentationCoordinatorHook();
+	void InstallSwapChainHook();
 }

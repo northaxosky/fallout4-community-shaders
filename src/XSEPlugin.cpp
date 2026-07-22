@@ -1,7 +1,7 @@
 #include "Env.h"
 #include "Feature.h"
 #include "Log.h"
-#include "Render/PresentationCoordinator.h"
+#include "Render/SwapChainHook.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -76,7 +76,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	featureManager.PrepareAll();
 	featureManager.ActivateAll();
 	cs::telemetry::Install();
-	cs::render::InstallPresentationCoordinatorHook();
+	cs::render::InstallSwapChainHook();
 
 	const auto messaging = F4SE::GetMessagingInterface();
 	messaging->RegisterListener(OnMessage);

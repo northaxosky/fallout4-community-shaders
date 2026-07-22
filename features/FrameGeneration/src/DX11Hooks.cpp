@@ -13,7 +13,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "LogThrottle.h"
-#include "Render/PresentationCoordinator.h"
+#include "Render/SwapChainHook.h"
 #include "Render/StreamlineCore.h"
 #include "XeSSFG.h"
 
@@ -140,7 +140,7 @@ static bool IsFrameGenerationActive() noexcept
 }
 
 static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
-	cs::render::PresentationCreateContext& a_context)
+	cs::render::SwapChainCreateContext& a_context)
 {
 	auto* pAdapter = a_context.adapter;
 	auto* pSwapChainDesc = a_context.swapChainDesc;
@@ -255,7 +255,7 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 }
 
 static HRESULT RunFrameGenerationInlineCreate(
-	cs::render::PresentationCreateContext& a_context,
+	cs::render::SwapChainCreateContext& a_context,
 	IDXGIFactory4* a_dxgiFactory)
 {
 	auto frameGen = FrameGeneration::GetSingleton();

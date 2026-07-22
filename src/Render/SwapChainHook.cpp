@@ -1,4 +1,4 @@
-#include "Render/PresentationCoordinator.h"
+#include "Render/SwapChainHook.h"
 
 #include <atomic>
 #include <cstdint>
@@ -12,7 +12,7 @@ namespace cs::render
 {
 	namespace
 	{
-		auto* L = cs::log::Get("cs.render.presentationcoordinator");
+		auto* L = cs::log::Get("cs.render.swapchainhook");
 		std::atomic<CreateDeviceAndSwapChain> nextCreateDeviceAndSwapChain{ nullptr };
 		std::mutex installMutex;
 		bool installAttempted = false;
@@ -37,14 +37,14 @@ namespace cs::render
 			D3D_FEATURE_LEVEL* a_featureLevel,
 			ID3D11DeviceContext** a_immediateContext)
 		{
-			CS_LOG_ONCE(L, spdlog::level::info, "PresentationCoordinator thunk ran");
+			CS_LOG_ONCE(L, spdlog::level::info, "SwapChainHook thunk ran");
 			const auto next = nextCreateDeviceAndSwapChain.load(std::memory_order_acquire);
 			if (!next) {
-				L->error("PresentationCoordinator thunk has no next hook; returning E_FAIL");
+				L->error("SwapChainHook thunk has no next hook; returning E_FAIL");
 				return E_FAIL;
 			}
 
-			PresentationCreateContext context{
+			SwapChainCreateContext context{
 				.adapter = a_adapter,
 				.driverType = a_driverType,
 				.software = a_software,
@@ -112,7 +112,7 @@ namespace cs::render
 		runUpscalingPostCreate = a_postCreate;
 	}
 
-	void InstallPresentationCoordinatorHook()
+	void InstallSwapChainHook()
 	{
 		std::scoped_lock lock(installMutex);
 		if (installAttempted) {
@@ -122,7 +122,7 @@ namespace cs::render
 
 		const auto module = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
 		if (!module) {
-			L->error("PresentationCoordinator: GetModuleHandle failed; hook not installed");
+			L->error("SwapChainHook: GetModuleHandle failed; hook not installed");
 			return;
 		}
 		const auto previous = Detours::IATHook(
@@ -133,6 +133,6 @@ namespace cs::render
 		nextCreateDeviceAndSwapChain.store(
 			reinterpret_cast<CreateDeviceAndSwapChain>(previous),
 			std::memory_order_release);
-		L->info("PresentationCoordinator IAT hook installed (next={:#x})", previous);
+		L->info("SwapChainHook IAT hook installed (next={:#x})", previous);
 	}
 }
