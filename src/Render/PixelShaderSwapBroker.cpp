@@ -117,6 +117,11 @@ namespace cs::engine
 				expected, a_resolver, std::memory_order_release, std::memory_order_acquire))
 			return false;
 
+		// Diagnostic snapshot: with ShaderCatalog enabled, a nonzero count confirms observer-before-resolver on this boot; a zero means either ordering inverted or ShaderCatalog was inactive.
+		const auto observers = g_observers.load(std::memory_order_acquire);
+		const auto observerCount = observers ? observers->size() : 0;
+		L->info("Resolver registered; observers_at_resolver_register={}.", observerCount);
+
 		RequestHookInstall();
 		return true;
 	}

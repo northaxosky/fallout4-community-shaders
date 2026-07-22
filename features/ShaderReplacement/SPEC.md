@@ -1,6 +1,6 @@
 # ShaderReplacement feature
 
-Phase 1 validation harness for the reconstructed `shaders/lighting/` HLSLs. At `OnD3D11Ready` we install a second `ID3D11Device::CreatePixelShader` vtable detour (slot 15), sha1 each blob the engine submits, and swap the engine's output `ID3D11PixelShader*` for our pre-compiled replacement when the sha1 matches the manifest and the per-shader INI toggle is on.
+Phase 1 validation harness for the reconstructed `shaders/lighting/` HLSLs. We register as the resolver on `cs::engine::PixelShaderSwapBroker`'s shared slot-15 `CreatePixelShader` detour, sha1 each blob the engine submits, and swap the engine's output `ID3D11PixelShader*` for our pre-compiled replacement when the sha1 matches the manifest and the per-shader INI toggle is on.
 
 The product is a substrate for visual equivalence: prove our HLSL produces the same frame as the engine's bytecode for one PS at a time, then build features on top.
 
@@ -10,10 +10,10 @@ One detour on `ID3D11Device`:
 
 - Slot 15: `CreatePixelShader`
 
-Preferred chain order when ShaderCatalog is enabled: engine -> ShaderReplacement thunk -> ShaderCatalog thunk -> original. ShaderReplacement registers AFTER ShaderCatalog in the top-level `CMakeLists.txt` so its `OnD3D11Ready` runs after the catalog has installed its detour.
+Both features share a single slot-15 detour owned by `cs::engine::PixelShaderSwapBroker`. ShaderCatalog registers as an *observer* from `ShaderCatalog::OnD3D11Ready`; ShaderReplacement registers as the sole *resolver* from `cs::engine::FreezeAndCompileShaderInjections`, which the app invokes from `src/Render/D3D11Bootstrap.cpp:66` — always after `FeatureManager::OnD3D11ReadyAll` returns. The broker's slot-15 thunk (`src/Render/PixelShaderSwapBroker.cpp:31-77`) dispatches `observeBytecode` -> engine `CreatePixelShader` -> `observeOriginal` -> resolver swap -> `observeResolved`, so ShaderReplacement sees the engine's bytecode/hash and ShaderCatalog records both the pre- and post-swap `ID3D11PixelShader*`.
 
-The hook is no-op (immediate return after the chained call) when:
-- Master `enabled = false` (in which case the hook is never installed).
+ShaderReplacement leaves the engine's `ID3D11PixelShader*` unchanged (broker's slot-15 thunk still fires; ShaderCatalog observers and any other feature's resolver participation still happens) when:
+- Master `enabled = false` (skips ShaderReplacement's manifest registration; ShaderCatalog's observer and other features' replacements — ScreenSpaceGI, ScreenSpaceShadows via `cs::engine::RegisterReplacement` — still exercise the shared broker).
 - The sha1 of the engine's bytecode does not match any registry entry.
 - The matched entry's per-shader toggle is off (passthrough counter increments).
 - The matched entry's compile failed at boot (passthrough-due-to-compile-fail counter increments; engine bytecode is used).
@@ -45,9 +45,9 @@ The `hlsl` path is resolved against the configured `sShadersRoot` after strippin
 
 ## Compile
 
-`OnD3D11Ready` iterates enabled entries and calls `D3DCompileFromFile` with `D3D_COMPILE_STANDARD_FILE_INCLUDE`, profile `ps_5_0`, entry `main`, flags `D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3` (matches the `verify-shader-roundtrip.ps1` fxc `/O3` baseline). Compile failures are loud (error log, `compile_error` populated, ImGui surfaces the message); the runtime hook falls back to engine bytecode on compile failure.
+`cs::engine::FreezeAndCompileShaderInjections` (invoked from `src/Render/D3D11Bootstrap.cpp:66` after `FeatureManager::OnD3D11ReadyAll` returns) iterates enabled entries and calls `D3DCompileFromFile` with `D3D_COMPILE_STANDARD_FILE_INCLUDE`, profile `ps_5_0`, entry `main`, flags `D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3` (matches the `verify-shader-roundtrip.ps1` fxc `/O3` baseline). Compile failures are loud (error log, `compile_error` populated, ImGui surfaces the message); the runtime hook falls back to engine bytecode on compile failure.
 
-Replacement-created pixel shaders are wrapped in `ShaderCatalog`'s thread-local record-suppression scope so the catalog remains an engine-originated shader inventory when both features are enabled.
+Replacement-created pixel shaders are wrapped in `cs::engine::ScopedPixelShaderBrokerBypass` (`src/Render/ShaderInjection.cpp:423`), a thread-local depth counter the broker's slot-15 thunk checks at `PixelShaderSwapBroker.cpp:40` to short-circuit both observer dispatch and resolver swap — so ShaderCatalog remains an engine-originated shader inventory and the resolver does not recurse on its own replacement blobs.
 
 ## Settings
 
@@ -97,7 +97,7 @@ Phase 1 ships 5-of-6 runtime sha1 mappings. `vls_slice_scatter` is wired but `ru
 
 ## Not implemented (out of scope for Phase 1)
 
-- Hot reload of HLSL at runtime. Compiles happen once at `OnD3D11Ready`.
+- Hot reload of HLSL at runtime. Compiles happen once during `cs::engine::FreezeAndCompileShaderInjections`.
 - VS/CS/GS/HS/DS replacement. Pixel-shader only.
 - Spot-light `bsdf_light_deferred.hlsl` permutation (still a stub in source).
 - Mnemonic-stream matching (ShaderCatalog Phase 2 territory; here we key on raw runtime sha1).
@@ -107,4 +107,4 @@ Phase 1 ships 5-of-6 runtime sha1 mappings. `vls_slice_scatter` is wired but `ru
 
 - **PS pointer caching.** If the engine caches the `ID3D11PixelShader*` it received during a previous `CreatePixelShader` call and rebuilds it later via a path that does not re-call the device entry (resolution change, shader reload console command), our substitution is bypassed for that copy. Mitigation: stack-walk first hit if substitution counter drops to 0 between scene loads.
 - **Compile drift vs runtime equivalence.** `verify-shader-roundtrip.ps1` confirms our HLSL produces a fxc-equivalent DXBC blob offline; `D3DCompileFromFile` (d3dcompiler_47) is the same compiler family but is not guaranteed byte-identical to fxc-on-Win10-SDK-26100. Static gate stays in CI; runtime gate is the screenshot diff.
-- **Static-init order across TUs.** Both `ShaderCatalog` and `ShaderReplacement` self-register via TU-local `AutoRegister`. MSVC link order follows `register_feature(...)` order in the top-level `CMakeLists.txt`; this is the preferred ordering for the hook chain. Refactoring the registration system or reordering features in `CMakeLists.txt` should re-check catalog + replacement interop.
+- **Static-init order across TUs.** Both `ShaderCatalog` and `ShaderReplacement` self-register via TU-local `AutoRegister`. MSVC link order follows `register_feature(...)` order in the top-level `CMakeLists.txt`, and with no `FeatureRequirement`s declared that order also determines `Load()` and `OnD3D11Ready` dispatch. The observer-before-resolver invariant does not depend on it, though: `cs::engine::FreezeAndCompileShaderInjections` (which registers the resolver) runs from `src/Render/D3D11Bootstrap.cpp:66` after `FeatureManager::OnD3D11ReadyAll` returns, so ShaderCatalog's observer is always in place first. The two features are otherwise independent — either one runs correctly with the other disabled.
