@@ -254,11 +254,21 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kNoModule);
 			CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=no_module");
 		}
-	} else if (frameGen->settings.frameGenerationMode) {
-		frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kExclusiveFullscreen);
-		CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=exclusive_fullscreen");
 	} else {
-		frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kUserDisabled);
+		if (frameGen->settings.frameGenType == static_cast<int>(FrameGeneration::FrameGenType::kDLSSG)) {
+			// Keep shared Streamline initialization DLSS-only when FG cannot run.
+			auto* core = cs::Streamline::GetSingleton();
+			core->RemoveRequestedFeature(sl::kFeatureDLSS_G);
+			core->RemoveRequestedFeature(sl::kFeatureReflex);
+			core->RemoveRequestedFeature(sl::kFeaturePCL);
+		}
+
+		if (frameGen->settings.frameGenerationMode) {
+			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kExclusiveFullscreen);
+			CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=exclusive_fullscreen");
+		} else {
+			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kUserDisabled);
+		}
 	}
 
 	return {};

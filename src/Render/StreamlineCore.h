@@ -44,6 +44,9 @@ namespace cs
 		// Add to featuresToLoad. Must run before Initialize(). Deduplicated; safe to call repeatedly.
 		void RequestFeature(sl::Feature feature);
 
+		// Remove from featuresToLoad before Initialize(). Returns false if absent or initialization already started.
+		bool RemoveRequestedFeature(sl::Feature feature);
+
 		// Idempotent. Loads sl.interposer.dll when any feature has been requested.
 		void LoadInterposer();
 

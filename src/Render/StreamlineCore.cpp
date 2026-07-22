@@ -32,6 +32,22 @@ namespace cs
 			_requestedFeatures.push_back(feature);
 	}
 
+	bool Streamline::RemoveRequestedFeature(sl::Feature feature)
+	{
+		if (_initAttempted) {
+			L->warn("Cannot remove Streamline feature {} after initialization started", feature);
+			return false;
+		}
+
+		const auto it = std::find(_requestedFeatures.begin(), _requestedFeatures.end(), feature);
+		if (it == _requestedFeatures.end())
+			return false;
+
+		_requestedFeatures.erase(it);
+		L->info("Removed pending Streamline feature {}", feature);
+		return true;
+	}
+
 	void Streamline::LoadInterposer()
 	{
 		if (_interposerAttempted)
