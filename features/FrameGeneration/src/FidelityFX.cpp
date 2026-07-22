@@ -8,6 +8,8 @@
 
 #include "Log.h"
 
+#include <filesystem>
+
 ffxFunctions ffxModule;
 
 namespace cs::features::framegeneration
@@ -16,13 +18,30 @@ namespace cs::features::framegeneration
 
 void FidelityFX::LoadFFX()
 {
-	// SDK 2.0 split the monolithic amd_fidelityfx_dx12.dll into a loader + per-effect DLLs; the
-	// loader is the interface/behaviour-compatible drop-in and resolves the frame-generation effect
-	// DLL (amd_fidelityfx_framegeneration_dx12.dll) sitting alongside it.
-	module = LoadLibrary(L"Data\\F4SE\\Plugins\\FrameGeneration\\FidelityFX\\amd_fidelityfx_loader_dx12.dll");
+	// SDK 2.0's loader resolves the frame-generation effect DLL lazily (at ffx context creation) by
+	// base name, so its directory must stay on the process search path past this call. AddDllDirectory
+	// is additive; SetDefaultDllDirectories makes a plain LoadLibrary honor it (SetDllDirectory drops cwd).
+	wchar_t exePath[MAX_PATH]{};
+	const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+	if (len == 0 || len >= MAX_PATH) {
+		L->critical("Failed to resolve game directory for the FidelityFX DLL search path!");
+		return;
+	}
+
+	const std::filesystem::path ffxDir =
+		std::filesystem::path(exePath).parent_path() / L"Data\\F4SE\\Plugins\\FrameGeneration\\FidelityFX";
+
+	SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+	if (!AddDllDirectory(ffxDir.c_str()))
+		L->warn("AddDllDirectory failed for '{}' (error {})", ffxDir.string(), GetLastError());
+
+	const std::filesystem::path loaderPath = ffxDir / L"amd_fidelityfx_loader_dx12.dll";
+	module = LoadLibraryExW(loaderPath.c_str(), nullptr, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
 
 	if (module)
 		ffxLoadFunctions(&ffxModule, module);
+	else
+		L->critical("Failed to load '{}' (error {})", loaderPath.string(), GetLastError());
 }
 
 void FidelityFX::SetupFrameGeneration()
