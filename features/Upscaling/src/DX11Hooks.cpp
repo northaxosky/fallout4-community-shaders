@@ -2,9 +2,12 @@
 
 #include <d3d11.h>
 
+#include "Upscaling.h"
+
 #include "Env.h"
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Render/PresentationCoordinator.h"
 #include "Render/StreamlineCore.h"
 
 namespace cs::features::upscaling
@@ -14,61 +17,27 @@ namespace cs::features::upscaling
 		auto* kSL = cs::log::Get("cs.feature.upscaling.streamline");
 	}
 
-
-struct hkD3D11CreateDeviceAndSwapChain
+static bool IsUpscalingActive() noexcept
 {
-	static HRESULT WINAPI thunk(
-		IDXGIAdapter* pAdapter,
-		D3D_DRIVER_TYPE DriverType,
-		HMODULE Software,
-		UINT Flags,
-		const D3D_FEATURE_LEVEL* pFeatureLevels,
-		UINT FeatureLevels,
-		UINT SDKVersion,
-		const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-		IDXGISwapChain** ppSwapChain,
-		ID3D11Device** ppDevice,
-		D3D_FEATURE_LEVEL* pFeatureLevel,
-		ID3D11DeviceContext** ppImmediateContext);
-	static inline REL::Relocation<decltype(thunk)> func;
-};
+	return Upscaling::GetSingleton()->IsLoaded();
+}
 
-static HRESULT RunUpscalingCreate(
-	IDXGIAdapter* pAdapter,
-	D3D_DRIVER_TYPE DriverType,
-	HMODULE Software,
-	UINT Flags,
-	const D3D_FEATURE_LEVEL* pFeatureLevels,
-	UINT FeatureLevels,
-	UINT SDKVersion,
-	const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-	IDXGISwapChain** ppSwapChain,
-	ID3D11Device** ppDevice,
-	D3D_FEATURE_LEVEL* pFeatureLevel,
-	ID3D11DeviceContext** ppImmediateContext)
+static void RunUpscalingPreCreate(cs::render::PresentationCreateContext& a_context)
 {
-	CS_LOG_ONCE(L, spdlog::level::info, "Upscaling swap-chain thunk ran");
+	CS_LOG_ONCE(L, spdlog::level::info, "Upscaling create pre phase ran");
 	L->info("D3D11CreateDeviceAndSwapChain called, forcing feature level 11_1");
-	const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
-	pFeatureLevels = &featureLevel;
-	FeatureLevels = 1;
+	a_context.ForceFeatureLevel11_1();
+}
 
-	DX::ThrowIfFailed(hkD3D11CreateDeviceAndSwapChain::func(pAdapter,
-		DriverType,
-		Software,
-		Flags,
-		pFeatureLevels,
-		FeatureLevels,
-		SDKVersion,
-		pSwapChainDesc,
-		ppSwapChain,
-		ppDevice,
-		pFeatureLevel,
-		ppImmediateContext));
+static HRESULT RunUpscalingPostCreate(
+	HRESULT a_factoryResult,
+	cs::render::PresentationCreateContext& a_context)
+{
+	DX::ThrowIfFailed(a_factoryResult);
 
-	L->info("Device created successfully, feature level: 0x{:x}", static_cast<uint>(*pFeatureLevel));
-	if (pSwapChainDesc) {
-		L->info("SwapChain: {}x{}, format={}, bufferCount={}", pSwapChainDesc->BufferDesc.Width, pSwapChainDesc->BufferDesc.Height, static_cast<uint>(pSwapChainDesc->BufferDesc.Format), pSwapChainDesc->BufferCount);
+	L->info("Device created successfully, feature level: 0x{:x}", static_cast<uint>(*a_context.featureLevel));
+	if (a_context.swapChainDesc) {
+		L->info("SwapChain: {}x{}, format={}, bufferCount={}", a_context.swapChainDesc->BufferDesc.Width, a_context.swapChainDesc->BufferDesc.Height, static_cast<uint>(a_context.swapChainDesc->BufferDesc.Format), a_context.swapChainDesc->BufferCount);
 	}
 
 	auto* core = cs::Streamline::GetSingleton();
@@ -77,11 +46,11 @@ static HRESULT RunUpscalingCreate(
 		// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
 		if (!cs::env::IsENBLoaded() && core->slUpgradeInterface) {
 			kSL->info("Upgrading swap chain interface (no ENB)");
-			core->slUpgradeInterface((void**)&(*ppSwapChain));
+			core->slUpgradeInterface((void**)&(*a_context.swapChain));
 		} else if (cs::env::IsENBLoaded()) {
 			kSL->info("Skipping swap chain upgrade (ENB loaded)");
 		}
-		core->OnD3D11Ready(pAdapter, *ppDevice);
+		core->OnD3D11Ready(a_context.adapter, *a_context.device);
 	} else {
 		kSL->info("Streamline not initialized, skipping device registration");
 	}
@@ -89,49 +58,14 @@ static HRESULT RunUpscalingCreate(
 	return S_OK;
 }
 
-HRESULT WINAPI hkD3D11CreateDeviceAndSwapChain::thunk(
-	IDXGIAdapter* pAdapter,
-	D3D_DRIVER_TYPE DriverType,
-	HMODULE Software,
-	UINT Flags,
-	const D3D_FEATURE_LEVEL* pFeatureLevels,
-	UINT FeatureLevels,
-	UINT SDKVersion,
-	const DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-	IDXGISwapChain** ppSwapChain,
-	ID3D11Device** ppDevice,
-	D3D_FEATURE_LEVEL* pFeatureLevel,
-	ID3D11DeviceContext** ppImmediateContext)
-{
-	return RunUpscalingCreate(
-		pAdapter,
-		DriverType,
-		Software,
-		Flags,
-		pFeatureLevels,
-		FeatureLevels,
-		SDKVersion,
-		pSwapChainDesc,
-		ppSwapChain,
-		ppDevice,
-		pFeatureLevel,
-		ppImmediateContext);
-}
-
 namespace DX11Hooks
 {
-	namespace { auto* kHook = cs::log::Get("cs.feature.upscaling.hook"); }
-
 	void Install()
 	{
-		uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
-		kHook->info("Module base: {:#x}", moduleBase);
-
-		// Force BSGraphics::CreateD3DAndSwapChain to request D3D_FEATURE_LEVEL_11_1.
-		kHook->info("Installing IAT hook for D3D11CreateDeviceAndSwapChain");
-		(uintptr_t&)hkD3D11CreateDeviceAndSwapChain::func = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hkD3D11CreateDeviceAndSwapChain::thunk);
-		kHook->info("Upscaling IAT hook install for d3d11.dll!D3D11CreateDeviceAndSwapChain (previous={:#x})",
-			(uintptr_t)hkD3D11CreateDeviceAndSwapChain::func.get());
+		cs::render::RegisterUpscalingCreatePhases(
+			&IsUpscalingActive,
+			&RunUpscalingPreCreate,
+			&RunUpscalingPostCreate);
 	}
 }
 

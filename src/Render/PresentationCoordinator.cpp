@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <d3d11.h>
 #include <mutex>
 
 #include "Log.h"
@@ -13,12 +12,16 @@ namespace cs::render
 {
 	namespace
 	{
-		using CreateDeviceAndSwapChain = decltype(&D3D11CreateDeviceAndSwapChain);
-
 		auto* L = cs::log::Get("cs.render.presentationcoordinator");
 		std::atomic<CreateDeviceAndSwapChain> nextCreateDeviceAndSwapChain{ nullptr };
 		std::mutex installMutex;
 		bool installAttempted = false;
+		IsCreateProviderActive isFrameGenerationActive = nullptr;
+		FrameGenerationEvaluate evaluateFrameGeneration = nullptr;
+		FrameGenerationInline runFrameGenerationInline = nullptr;
+		IsCreateProviderActive isUpscalingActive = nullptr;
+		UpscalingPreCreate runUpscalingPreCreate = nullptr;
+		UpscalingPostCreate runUpscalingPostCreate = nullptr;
 
 		HRESULT WINAPI CreateDeviceAndSwapChainThunk(
 			IDXGIAdapter* a_adapter,
@@ -40,19 +43,42 @@ namespace cs::render
 				L->error("PresentationCoordinator thunk has no next hook; returning E_FAIL");
 				return E_FAIL;
 			}
-			const HRESULT result = next(
-				a_adapter,
-				a_driverType,
-				a_software,
-				a_flags,
-				a_featureLevels,
-				a_featureLevelCount,
-				a_sdkVersion,
-				a_swapChainDesc,
-				a_swapChain,
-				a_device,
-				a_featureLevel,
-				a_immediateContext);
+
+			PresentationCreateContext context{
+				.adapter = a_adapter,
+				.driverType = a_driverType,
+				.software = a_software,
+				.flags = a_flags,
+				.featureLevels = a_featureLevels,
+				.featureLevelCount = a_featureLevelCount,
+				.sdkVersion = a_sdkVersion,
+				.swapChainDesc = a_swapChainDesc,
+				.swapChain = a_swapChain,
+				.device = a_device,
+				.featureLevel = a_featureLevel,
+				.immediateContext = a_immediateContext
+			};
+
+			FrameGenerationCreateRoute frameGenerationRoute{};
+			const bool frameGenerationActive = isFrameGenerationActive && isFrameGenerationActive();
+			if (frameGenerationActive) {
+				frameGenerationRoute = evaluateFrameGeneration(context);
+			}
+
+			const bool upscalingActive = isUpscalingActive && isUpscalingActive();
+			if (upscalingActive) {
+				runUpscalingPreCreate(context);
+			}
+
+			HRESULT result;
+			if (frameGenerationRoute.inlineProxy) {
+				result = runFrameGenerationInline(context, frameGenerationRoute.factory);
+			} else {
+				result = context.Call(next);
+				if (upscalingActive) {
+					result = runUpscalingPostCreate(result, context);
+				}
+			}
 
 			cs::d3d11::RunBootstrapPostCreate(
 				result,
@@ -64,6 +90,26 @@ namespace cs::render
 
 			return result;
 		}
+	}
+
+	void RegisterFrameGenerationCreatePhases(
+		IsCreateProviderActive a_isActive,
+		FrameGenerationEvaluate a_evaluate,
+		FrameGenerationInline a_inline)
+	{
+		isFrameGenerationActive = a_isActive;
+		evaluateFrameGeneration = a_evaluate;
+		runFrameGenerationInline = a_inline;
+	}
+
+	void RegisterUpscalingCreatePhases(
+		IsCreateProviderActive a_isActive,
+		UpscalingPreCreate a_preCreate,
+		UpscalingPostCreate a_postCreate)
+	{
+		isUpscalingActive = a_isActive;
+		runUpscalingPreCreate = a_preCreate;
+		runUpscalingPostCreate = a_postCreate;
 	}
 
 	void InstallPresentationCoordinatorHook()

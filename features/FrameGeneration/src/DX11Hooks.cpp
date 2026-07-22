@@ -12,6 +12,7 @@
 #include "Env.h"
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Render/PresentationCoordinator.h"
 #include "Render/StreamlineCore.h"
 #include "XeSSFG.h"
 
@@ -19,8 +20,6 @@ namespace cs::features::framegeneration
 {
 	namespace { auto* L = cs::log::Get("cs.feature.framegeneration.dx11"); }
 
-
-decltype(&D3D11CreateDeviceAndSwapChain) ptrD3D11CreateDeviceAndSwapChain;
 decltype(&IDXGIFactory::CreateSwapChain) ptrCreateSwapChain;
 decltype(&CreateDXGIFactory1) ptrCreateDXGIFactory1;
 
@@ -134,22 +133,18 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	return S_OK;
 }
 
-static HRESULT RunFrameGenerationCreate(
-	IDXGIAdapter* pAdapter,
-	D3D_DRIVER_TYPE DriverType,
-	HMODULE Software,
-	UINT Flags,
-	const D3D_FEATURE_LEVEL* pFeatureLevels,
-	UINT FeatureLevels,
-	UINT SDKVersion,
-	DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-	IDXGISwapChain** ppSwapChain,
-	ID3D11Device** ppDevice,
-	D3D_FEATURE_LEVEL* pFeatureLevel,
-	ID3D11DeviceContext** ppImmediateContext)
+static bool IsFrameGenerationActive() noexcept
 {
+	return FrameGeneration::GetSingleton()->IsLoaded();
+}
+
+static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
+	cs::render::PresentationCreateContext& a_context)
+{
+	auto* pAdapter = a_context.adapter;
+	auto* pSwapChainDesc = a_context.swapChainDesc;
 	auto frameGen = FrameGeneration::GetSingleton();
-	CS_LOG_ONCE(L, spdlog::level::info, "FrameGeneration swap-chain thunk ran");
+	CS_LOG_ONCE(L, spdlog::level::info, "FrameGeneration create evaluation ran");
 	frameGen->SetLastKnownWindowed(pSwapChainDesc->Windowed != FALSE);
 
 	if (pSwapChainDesc->Windowed) {
@@ -220,94 +215,12 @@ static HRESULT RunFrameGenerationCreate(
 			IDXGIFactory4* dxgiFactory;
 			pAdapter->GetParent(IID_PPV_ARGS(&dxgiFactory));
 
-			const D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_1;
-			pFeatureLevels = &featureLevel;
-			FeatureLevels = 1;
+			a_context.ForceFeatureLevel11_1();
 
 			// Slot-10 install on the engine's adapter-parent factory. Atomic-once across both install sites.
 			InstallSlot10Once(dxgiFactory);
 			if (!cs::env::IsENBLoaded()) {
-				DX::ThrowIfFailed(D3D11CreateDevice(
-					pAdapter,
-					DriverType,
-					Software,
-					Flags,
-					pFeatureLevels,
-					FeatureLevels,
-					SDKVersion,
-					ppDevice,
-					pFeatureLevel,
-					ppImmediateContext));
-
-				IDXGIDevice* dxgiDevice = nullptr;
-				DX::ThrowIfFailed((*ppDevice)->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice));
-
-				IDXGIAdapter* adapter = nullptr;
-				DX::ThrowIfFailed(dxgiDevice->GetAdapter(&adapter));
-				dxgiDevice->Release();
-
-				auto proxy = DX12SwapChain::GetSingleton();
-
-				proxy->SetD3D11Device(*ppDevice);
-
-				ID3D11DeviceContext* context;
-				(*ppDevice)->GetImmediateContext(&context);
-				proxy->SetD3D11DeviceContext(context);
-				context->Release();
-
-				// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
-				if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
-					cs::Streamline::GetSingleton()->Initialize();
-				}
-
-				proxy->CreateD3D12Device(adapter);
-				adapter->Release();
-
-				// XeSS-FG: create contexts after D3D12 device, no device/factory upgrade needed
-				if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
-					auto xess = XeSSFG::GetSingleton();
-					if (!xess->CreateContexts(proxy->d3d12Device.get())) {
-						L->warn("XeSS-FG context creation failed, falling back to FSR3");
-						frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
-					}
-				}
-
-				// DLSS-G: upgrade device/factory, then slSetD3DDevice before proxy hooks fire.
-				if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
-					auto* core = cs::Streamline::GetSingleton();
-
-					ID3D12Device* rawDevice = proxy->d3d12Device.get();
-					core->slUpgradeInterface((void**)&rawDevice);
-					proxy->d3d12Device.copy_from(rawDevice);
-
-					IDXGIFactory* rawFactory = (IDXGIFactory*)dxgiFactory;
-					core->slUpgradeInterface((void**)&rawFactory);
-					dxgiFactory = (IDXGIFactory4*)rawFactory;
-
-					StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
-				}
-
-				proxy->CreateD3D12CommandQueues();
-				proxy->CreateSwapChain((IDXGIFactory5*)dxgiFactory, *pSwapChainDesc);
-
-				if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
-					auto dlssg = StreamlineFG::GetSingleton();
-
-					if (!dlssg->CheckAndEnableDLSSG()) {
-						L->warn("DLSS-G enable failed, falling back to FSR3");
-						frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
-					}
-				}
-
-				proxy->CreateInterop();
-
-				*ppSwapChain = proxy->GetSwapChainProxy();
-
-				// Proxy path returns early instead of chaining to Upscaling's IAT thunk; register the shared Streamline device here.
-				cs::Streamline::GetSingleton()->Initialize();
-				cs::Streamline::GetSingleton()->OnD3D11Ready(pAdapter, *ppDevice);
-
-				return S_OK;
+				return { true, dxgiFactory };
 			}
 		} else if (userEnabled &&
 			frameGen->GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner) {
@@ -321,50 +234,95 @@ static HRESULT RunFrameGenerationCreate(
 		frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kUserDisabled);
 	}
 
-	auto ret = ptrD3D11CreateDeviceAndSwapChain(
-		pAdapter,
-		DriverType,
-		Software,
-		Flags,
-		pFeatureLevels,
-		FeatureLevels,
-		SDKVersion,
-		pSwapChainDesc,
-		ppSwapChain,
-		ppDevice,
-		pFeatureLevel,
-		ppImmediateContext);
-
-	return ret;
+	return {};
 }
 
-HRESULT WINAPI hk_D3D11CreateDeviceAndSwapChain(
-	IDXGIAdapter* pAdapter,
-	D3D_DRIVER_TYPE DriverType,
-	HMODULE Software,
-	UINT Flags,
-	const D3D_FEATURE_LEVEL* pFeatureLevels,
-	UINT FeatureLevels,
-	UINT SDKVersion,
-	DXGI_SWAP_CHAIN_DESC* pSwapChainDesc,
-	IDXGISwapChain** ppSwapChain,
-	ID3D11Device** ppDevice,
-	D3D_FEATURE_LEVEL* pFeatureLevel,
-	ID3D11DeviceContext** ppImmediateContext)
+static HRESULT RunFrameGenerationInlineCreate(
+	cs::render::PresentationCreateContext& a_context,
+	IDXGIFactory4* a_dxgiFactory)
 {
-	return RunFrameGenerationCreate(
-		pAdapter,
-		DriverType,
-		Software,
-		Flags,
-		pFeatureLevels,
-		FeatureLevels,
-		SDKVersion,
-		pSwapChainDesc,
-		ppSwapChain,
-		ppDevice,
-		pFeatureLevel,
-		ppImmediateContext);
+	auto frameGen = FrameGeneration::GetSingleton();
+
+	DX::ThrowIfFailed(D3D11CreateDevice(
+		a_context.adapter,
+		a_context.driverType,
+		a_context.software,
+		a_context.flags,
+		a_context.featureLevels,
+		a_context.featureLevelCount,
+		a_context.sdkVersion,
+		a_context.device,
+		a_context.featureLevel,
+		a_context.immediateContext));
+
+	IDXGIDevice* dxgiDevice = nullptr;
+	DX::ThrowIfFailed((*a_context.device)->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice));
+
+	IDXGIAdapter* adapter = nullptr;
+	DX::ThrowIfFailed(dxgiDevice->GetAdapter(&adapter));
+	dxgiDevice->Release();
+
+	auto proxy = DX12SwapChain::GetSingleton();
+
+	proxy->SetD3D11Device(*a_context.device);
+
+	ID3D11DeviceContext* context;
+	(*a_context.device)->GetImmediateContext(&context);
+	proxy->SetD3D11DeviceContext(context);
+	context->Release();
+
+	// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
+	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
+		cs::Streamline::GetSingleton()->Initialize();
+	}
+
+	proxy->CreateD3D12Device(adapter);
+	adapter->Release();
+
+	// XeSS-FG: create contexts after D3D12 device, no device/factory upgrade needed
+	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
+		auto xess = XeSSFG::GetSingleton();
+		if (!xess->CreateContexts(proxy->d3d12Device.get())) {
+			L->warn("XeSS-FG context creation failed, falling back to FSR3");
+			frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
+		}
+	}
+
+	// DLSS-G: upgrade device/factory, then slSetD3DDevice before proxy hooks fire.
+	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
+		auto* core = cs::Streamline::GetSingleton();
+
+		ID3D12Device* rawDevice = proxy->d3d12Device.get();
+		core->slUpgradeInterface((void**)&rawDevice);
+		proxy->d3d12Device.copy_from(rawDevice);
+
+		IDXGIFactory* rawFactory = (IDXGIFactory*)a_dxgiFactory;
+		core->slUpgradeInterface((void**)&rawFactory);
+		a_dxgiFactory = (IDXGIFactory4*)rawFactory;
+
+		StreamlineFG::GetSingleton()->SetD3DDevice(proxy->d3d12Device.get());
+	}
+
+	proxy->CreateD3D12CommandQueues();
+	proxy->CreateSwapChain((IDXGIFactory5*)a_dxgiFactory, *a_context.swapChainDesc);
+
+	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
+		auto dlssg = StreamlineFG::GetSingleton();
+
+		if (!dlssg->CheckAndEnableDLSSG()) {
+			L->warn("DLSS-G enable failed, falling back to FSR3");
+			frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
+		}
+	}
+
+	proxy->CreateInterop();
+
+	*a_context.swapChain = proxy->GetSwapChainProxy();
+
+	cs::Streamline::GetSingleton()->Initialize();
+	cs::Streamline::GetSingleton()->OnD3D11Ready(a_context.adapter, *a_context.device);
+
+	return S_OK;
 }
 
 void DX11Hooks::Install()
@@ -387,9 +345,10 @@ void DX11Hooks::Install()
 
 	uintptr_t moduleBase = (uintptr_t)GetModuleHandle(nullptr);
 
-	(uintptr_t&)ptrD3D11CreateDeviceAndSwapChain = Detours::IATHook(moduleBase, "d3d11.dll", "D3D11CreateDeviceAndSwapChain", (uintptr_t)hk_D3D11CreateDeviceAndSwapChain);
-	L->info("FrameGeneration IAT hook install for d3d11.dll!D3D11CreateDeviceAndSwapChain (previous={:#x})",
-		(uintptr_t)ptrD3D11CreateDeviceAndSwapChain);
+	cs::render::RegisterFrameGenerationCreatePhases(
+		&IsFrameGenerationActive,
+		&EvaluateFrameGenerationCreate,
+		&RunFrameGenerationInlineCreate);
 
 	// Hook factory creation only when an FG backend can use the proxy; under ENB DLSS-G needs the FSR3 module (fallback), so require it.
 	if (fidelityFX->module ||
