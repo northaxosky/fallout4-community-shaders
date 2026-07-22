@@ -67,6 +67,13 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	// ENB path: ENB's wrapped factory calls CreateSwapChain - we intercept to insert our D3D12 proxy
 	auto frameGen = FrameGeneration::GetSingleton();
 
+	if (!pDesc->Windowed) {
+		frameGen->SetLastKnownWindowed(false);
+		frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kExclusiveFullscreen);
+		CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=exclusive_fullscreen");
+		return (This->*ptrCreateSwapChain)(a_device, pDesc, ppSwapChain);
+	}
+
 	IDXGIDevice* dxgiDevice = nullptr;
 	DX::ThrowIfFailed(a_device->QueryInterface(__uuidof(IDXGIDevice), (void**)&dxgiDevice));
 
@@ -146,6 +153,9 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 	auto* pSwapChainDesc = a_context.swapChainDesc;
 	auto frameGen = FrameGeneration::GetSingleton();
 	CS_LOG_ONCE(L, spdlog::level::info, "FrameGeneration create evaluation ran");
+	L->info("FrameGeneration swap-chain create: Windowed={}, OutputWindow={:#x}",
+		pSwapChainDesc->Windowed != FALSE,
+		reinterpret_cast<uintptr_t>(pSwapChainDesc->OutputWindow));
 	frameGen->SetLastKnownWindowed(pSwapChainDesc->Windowed != FALSE);
 
 	if (pSwapChainDesc->Windowed) {
