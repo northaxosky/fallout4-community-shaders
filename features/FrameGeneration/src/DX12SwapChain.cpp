@@ -270,6 +270,8 @@ void DX12SwapChain::PrepareAndCopyBackbuffer()
 bool DX12SwapChain::ShouldUseFrameGeneration()
 {
 	auto frameGen = FrameGeneration::GetSingleton();
+	if (frameGen->GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kActive)
+		return false;
 
 	bool useFrameGenerationThisFrame = false;
 
