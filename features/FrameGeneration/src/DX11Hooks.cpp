@@ -7,6 +7,7 @@
 #include "DX12SwapChain.h"
 #include "FidelityFX.h"
 #include "Streamline.h"
+#include "Upscaling.h"
 #include <nvsdk_ngx.h>
 
 #include "Env.h"
@@ -196,8 +197,23 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 					hasBackend = false;
 				}
 			} else {
-				frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kDLSSG;
-				hasBackend = true;
+				auto upscaling = Upscaling::GetSingleton();
+				const bool conflictsWithDlssUpscaling = upscaling->IsLoaded() &&
+					upscaling->settings.upscaleMethodPreference == static_cast<uint>(Upscaling::UpscaleMethod::kDLSS);
+				if (conflictsWithDlssUpscaling) {
+					if (fidelityFX->module) {
+						L->warn("DLSS-G cannot run alongside DLSS upscaling (Streamline one-device-per-instance limit; see issue #7) - using FSR3 frame generation instead");
+						frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
+						hasBackend = true;
+					} else {
+						frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kDlssgUpscalerConflict);
+						CS_LOG_ONCE(L, spdlog::level::warn, "DLSS-G cannot run alongside DLSS upscaling (Streamline one-device-per-instance limit; see issue #7), and the FSR3 frame generation module is unavailable - disabling frame generation");
+						hasBackend = false;
+					}
+				} else {
+					frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kDLSSG;
+					hasBackend = true;
+				}
 			}
 		} else if (userEnabled && frameGen->settings.frameGenType == 2) {
 			auto xess = XeSSFG::GetSingleton();
@@ -223,7 +239,8 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 				return { true, dxgiFactory };
 			}
 		} else if (userEnabled &&
-			frameGen->GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner) {
+			frameGen->GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner &&
+			frameGen->GetFrameGenSkipReason() != FrameGeneration::FrameGenSkipReason::kDlssgUpscalerConflict) {
 			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kNoModule);
 			CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=no_module");
 		}

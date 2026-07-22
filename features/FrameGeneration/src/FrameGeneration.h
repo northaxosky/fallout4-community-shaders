@@ -22,6 +22,7 @@ public:
 		kExclusiveFullscreen,
 		kNoModule,
 		kENBSwapChainOwner,
+		kDlssgUpscalerConflict,
 		kRenderDoc
 	};
 

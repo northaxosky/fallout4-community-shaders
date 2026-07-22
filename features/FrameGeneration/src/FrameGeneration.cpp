@@ -91,6 +91,8 @@ namespace cs::features
 				return "no_module";
 			case FrameGeneration::FrameGenSkipReason::kENBSwapChainOwner:
 				return "enb_swapchain_owner";
+			case FrameGeneration::FrameGenSkipReason::kDlssgUpscalerConflict:
+				return "dlssg_conflicts_with_dlss_sr";
 			case FrameGeneration::FrameGenSkipReason::kRenderDoc:
 				return "renderdoc";
 			}
