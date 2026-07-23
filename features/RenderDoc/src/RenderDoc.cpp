@@ -14,6 +14,7 @@
 
 #include "F4SE/API.h"
 #include "FrameGeneration.h"
+#include "Upscaling.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "REX/CONVERT.h"
@@ -39,13 +40,22 @@ namespace cs::features
 
 	namespace
 	{
-		// RenderDoc's early D3D/DXGI detours break DLSS-G fallback; refuse to load when DLSS-G is on.
+		// RenderDoc's early D3D/DXGI detours conflict with Streamline's interposer, which backs BOTH
+		// DLSS-G (FrameGeneration) and DLSS-SR (Upscaling=DLSS); either one blacks the present under a
+		// capture. FSR/XeSS don't use Streamline, so they're fine. Refuse to load when DLSS is requested.
 		bool DLSSGRequested()
 		{
 			const auto* frameGeneration = FrameGeneration::GetSingleton();
 			return frameGeneration->IsActive()
 				&& frameGeneration->settings.frameGenerationMode
 				&& frameGeneration->settings.frameGenType == static_cast<int>(FrameGeneration::FrameGenType::kDLSSG);
+		}
+
+		bool DLSSUpscalingRequested()
+		{
+			const auto* upscaling = Upscaling::GetSingleton();
+			return upscaling->IsLoaded()
+				&& upscaling->settings.upscaleMethodPreference == static_cast<unsigned int>(Upscaling::UpscaleMethod::kDLSS);
 		}
 
 		int ClampMultiFrameCount(int64_t a_value)
@@ -243,10 +253,11 @@ namespace cs::features
 
 		if (!_settings.enabled)
 			return;
-		if (DLSSGRequested()) {
+		if (DLSSGRequested() || DLSSUpscalingRequested()) {
 			constexpr std::string_view reason =
-				"RenderDoc cannot start while active FrameGeneration uses DLSS-G; "
-				"disable DLSS-G or RenderDoc and restart";
+				"RenderDoc cannot start while DLSS is active (Streamline conflicts with RenderDoc's DXGI "
+				"hooks and blacks the present); disable FrameGeneration DLSS-G and set Upscaling to Native "
+				"or FSR, then restart";
 			L->warn("{}", reason);
 			FailLoad(std::string(reason));
 			return;
@@ -490,7 +501,7 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		ImGui::TextDisabled("Restart after enabling. DLSS-G is blocked; disable all FrameGeneration for clean D3D11 captures.");
+		ImGui::TextDisabled("Restart after enabling. DLSS is blocked (Streamline vs RenderDoc's DXGI hooks); disable FrameGeneration and set Upscaling to Native/FSR for clean D3D11 captures.");
 		ImGui::TextDisabled("%s captures one frame. %s captures the configured multi-frame count.",
 			_captureHotkey.ToString().c_str(), _multiCaptureHotkey.ToString().c_str());
 
