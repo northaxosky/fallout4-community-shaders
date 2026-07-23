@@ -169,7 +169,6 @@ namespace cs::features
 		std::atomic_bool _bounceProducedLastFrame{ false };
 		std::atomic_bool _radianceAvailableLastFrame{ false };
 		std::atomic_bool _denoisedLastFrame{ false };
-		std::atomic_bool _aoIntegrationSupported{ false };
 		std::atomic_bool _aoIntegrationActiveLastFrame{ false };
 		std::atomic_uint32_t _resolveDispatchedLastFrame{ 0 };
 		std::atomic_uint32_t _aoIntegrationDispatchedLastFrame{ 0 };

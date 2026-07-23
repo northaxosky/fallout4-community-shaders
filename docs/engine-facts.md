@@ -38,22 +38,22 @@ Canonical registry of the reverse-engineered facts the plugin depends on — ren
 | Runtime enum for branching | `Runtime::kOG=0, kNG=1, kAE=2` | ✅·✅·✅ | Source | matches `REL::ID` tuple order | `REX::FModule` (`Runtime`) |
 | Runtime detection | `ver==OG_LATEST → OG`; `OG < ver ≤ NG_LATEST → NG`; `ver > NG_LATEST → AE` | ✅·✅·✅ | Source | CommonLibF4 impl | `REX::FModule` |
 | Plugin's tested/primary target | **AE 1.11.221**; OG/NG paths retained but unvalidated | ❓·❓·✅ | Confirmed (AE) | only AE test machine exists | `README.md` |
-| Per-file version gate | `REL::GetFileVersion(L"Fallout4.exe")`, exact `major==1 && minor==11 && patch==221` gates AE-only code | ❓·❓·✅ | Source | gates SGGI AO integration | `SupportsAOIntegration()` (free fn, anon namespace in `ScreenSpaceGI.cpp`) |
+| Per-file version gate | **None in SGGI** — the former `SupportsAOIntegration()` (exact `major==1 && minor==11 && patch==221`) was removed 2026-07-22 after its RT indices were RE-confirmed cross-runtime. Branch on the `REL::ID` tuple / runtime enum, not `GetFileVersion`. | ✅·✅·✅ | Source | — | — |
 | **`REL::ID` tuple pattern** | `REL::ID({ og, ng, ae })` — one Address Library ID per runtime, order OG·NG·AE. **NG and AE frequently share the same ID; OG is usually distinct.** | ✅·✅·✅ | Source | e.g. graphics-state `{600795, 2704621, 2704621}` | `cs::engine::GetGraphicsState`, `src/Render/Engine.h` |
 
 ---
 
 ## Render targets & engine state
 
-`RenderTarget` / `DepthStencilTarget` are index enums into the engine's RT pool — a single shared enum (indices are engine constants, not relocated addresses), so no `REL::ID` per index. The **indices are runtime-confirmed on AE only**; OG/NG index equivalence is a rollout gate.
+`RenderTarget` / `DepthStencilTarget` are index enums into the engine's RT pool — a single shared enum (indices are engine constants, not relocated addresses), so no `REL::ID` per index. The SGGI delivery targets — **`kSSAOFinal=25`, `kDiffuseBuffer=58`, `kSpecularBuffer=59` — are RE-confirmed identical across OG·NG·AE** (fallout4-re `BSGraphics::BSShaderRenderTargets::Create`, REL::ID 2318909 NG==AE / OG RVA `0x2896680`, 2026-07-22; literal `CreateRenderTarget(index, …)` args match target-for-target, only cosmetic deltas at slots 22↔23 + the 41–51 loop region). Other indices below remain AE-sourced unless a row says otherwise.
 
 | Fact | Value | OG·NG·AE | Confidence | Provenance | Code ref |
 |---|---|---|---|---|---|
 | G-buffer material RT (glossiness/specular/backlighting/SSS) | `RenderTarget::kGbufferMaterial = 24` | ❓·❓·✅ | Source | enum + SGGI context | `cs::engine::RenderTarget`, `src/Render/Engine.h` |
-| **SAO/AO-final RT the deferred ambient composite samples** | `RenderTarget::kSSAOFinal = 25` ("RT25") | ❓·❓·✅ | **Confirmed (AE)** | RenderDoc + luma A/B during SGGI validation; code comment marks it AE-only pending OG/NG validation | `cs::engine::RenderTarget::kSSAOFinal` |
+| **SAO/AO-final RT the deferred ambient composite samples** | `RenderTarget::kSSAOFinal = 25` ("RT25") | ✅·✅·✅ | **Confirmed** | RenderDoc + luma A/B (AE); fallout4-re `BSShaderRenderTargets::Create` literal index confirms OG·NG·AE identical (quarter-res, format enum 24, created right after kGbufferMaterial) | `cs::engine::RenderTarget::kSSAOFinal` |
 | TAA accumulation / swap | `kTAAAccumulation = 26`, `kTAAAccumulationSwap = 27` | ❓·❓·✅ | Source | enum | `cs::engine::RenderTarget` |
 | Raw/pre-integration SSAO buffer (distinct from RT25) | `kSSAO = 28` | ❓·❓·❓ | Source | enum | `cs::engine::RenderTarget` |
-| **Ambient composite diffuse/probe inputs (deferred ambient PS t5/t6)** | `kDiffuseBuffer = 58` = t5 (`g_tAmbientDiffuseA`), `kSpecularBuffer = 59` = t6 (`g_tAmbientProbeA`); both R11G11B10F full-res, **SRV\|RTV, no UAV**. t5 is scaled `(ambientA+ambientB)*3` in the composite (×3 amplification for anything injected into RT58). RT59 is the probe/skin path, not specular despite the enum name. | ❓·❓·✅ | **Confirmed (AE)** | copy-probe correlation, capture `FO4_frame6902`: ordered 1×1 CopySrc from pool 58/59 == ambient draw t5/t6 ResourceId (449/452); probe mask bits {1,2,58,59}. Write-window additive-safe (writes done @4216, ambient read @4403, AO anchor @4257 sits inside) | `cs::engine::RenderTarget::kDiffuseBuffer/kSpecularBuffer`; `shaders/lighting/ambient_ibl_pass.hlsl` t5/t6 |
+| **Ambient composite diffuse/probe inputs (deferred ambient PS t5/t6)** | `kDiffuseBuffer = 58` = t5 (`g_tAmbientDiffuseA`), `kSpecularBuffer = 59` = t6 (`g_tAmbientProbeA`); both R11G11B10F full-res, **SRV\|RTV, no UAV**. t5 is scaled `(ambientA+ambientB)*3` in the composite (×3 amplification for anything injected into RT58). RT59 is the probe/skin path, not specular despite the enum name. | ✅·✅·✅ | **Confirmed** | OG·NG·AE via fallout4-re `BSShaderRenderTargets::Create` (adjacent pair, full-res, format enum 28=R11G11B10F, byte-identical across runtimes). AE copy-probe correlation, capture `FO4_frame6902`: ordered 1×1 CopySrc from pool 58/59 == ambient draw t5/t6 ResourceId (449/452); probe mask bits {1,2,58,59}. Write-window additive-safe (writes done @4216, ambient read @4403, AO anchor @4257 sits inside) | `cs::engine::RenderTarget::kDiffuseBuffer/kSpecularBuffer`; `shaders/lighting/ambient_ibl_pass.hlsl` t5/t6 |
 | Main scene depth index | `DepthStencilTarget::kMain = 2` | ❓·❓·✅ | Source | backs `GetSceneDepthSRV()` | `cs::engine::DepthStencilTarget` |
 | `BSGraphics::State` singleton (camera/FOV source) | `REL::ID({ 600795, 2704621, 2704621 })` | ✅·✅·✅ | Source | NG/AE share ID | `cs::engine::GetGraphicsState` |
 | `BSGraphics::RenderTargetManager` singleton (backs `dynres`) | `REL::ID({ 1508457, 2666735, 2666735 })` | ✅·✅·✅ | Source | NG/AE share ID | `cs::engine::GetRenderTargetManager` |
@@ -61,7 +61,7 @@ Canonical registry of the reverse-engineered facts the plugin depends on — ren
 | **`dynres` fields are runtime-split, NOT a 3-way `REL::ID`** | raw byte offsets: `kOG = {0xF88, 0xF8C, 0xFA8}` vs `kNGAE = {0xFB8, 0xFBC, 0xFE5}` (widthRatio, heightRatio, isActivated). CommonLibF4's named-member block follows the OG layout; its version-aware accessors select the correct runtime offsets | ❓·❓·✅ | Source / Unvalidated | **always use the CommonLibF4 accessors, never read the RTM fields directly** | `RE::BSGraphics::RenderTargetManager::GetDynamicWidthRatio/GetDynamicHeightRatio/SetDynamicResolutionState` |
 | Engine-state accessors (the sanctioned entry points) | `GetSceneDepthSRV()`, `GetRenderTargetSRV/RTV/UAV(RenderTarget)`, `TryGetCameraMatrices(out)`, `GetVerticalFOV()`, `RenderTargetManager::GetDynamicWidthRatio/GetDynamicHeightRatio()` | ✅·✅·✅ (compile) / ❓·❓·✅ (behavior) | Source | prefer these over raw struct reads | `src/Render/Engine.h`, CommonLibF4 `RE/B/BSGraphics.h` |
 
-> **RT-index caveat:** a wrong index on OG/NG doesn't error — it stomps an unrelated buffer (24=gbuffer material, 26=TAA are the neighbors of 25). Validate against a capture per runtime before un-gating `SupportsAOIntegration()`.
+> **RT-index caveat:** a wrong index doesn't error — it silently stomps an unrelated buffer (24=gbuffer material, 26=TAA neighbor 25). The SGGI targets (25/58/59) are now RE-confirmed identical OG·NG·AE (above), so `SupportsAOIntegration()` was removed (2026-07-22). For any *new* pool slot, still confirm per-runtime against `BSShaderRenderTargets::Create` or a capture before relying on it.
 
 ---
 
@@ -153,7 +153,7 @@ The #1 recurring bug: D3D11 **silently nulls an SRV** that aliases a resource st
 | `ScreenSpaceGI::OnComputeResolve` | `PostDeferredPrePass` | AO compute chain |
 | `ScreenSpaceGI::OnPreSunLightDraw` | `PreSunLightDraw` | |
 | `ScreenSpaceGI::OnPostDeferredLights` | `PostDeferredLightsImpl` | |
-| **`ScreenSpaceGI::OnAOIntegration`** | `PostDeferredLightsImpl` (2nd registration → runs after `OnPostDeferredLights`) | integrates AO into `kSSAOFinal` (RT25); **gated AE-only** via `SupportsAOIntegration()`. (Older notes called this "anchor 2" — not a real engine term; it's the second `PostDeferredLightsImpl` registration.) |
+| **`ScreenSpaceGI::OnAOIntegration`** | `PostDeferredLightsImpl` (2nd registration → runs after `OnPostDeferredLights`) | integrates AO into `kSSAOFinal` (RT25) on all runtimes (RT indices RE-confirmed OG·NG·AE; the AE-only `SupportsAOIntegration()` gate was removed 2026-07-22). (Older notes called this "anchor 2" — not a real engine term; it's the second `PostDeferredLightsImpl` registration.) |
 | `ScreenSpaceShadows::OnPreDeferredLights` | `PreDeferredLightsImpl` | |
 | `ScreenSpaceShadows::OnPreSunLightDraw` | `PreSunLightDraw` | binds the mask right before the sun draw |
 | `ScreenSpaceShadows::OnPostDeferredLights` | `PostDeferredLightsImpl` | |
@@ -176,7 +176,7 @@ Only `VK_END` is hardcoded; the rest are **TOML-configurable defaults**. Chord g
 
 ## Open gaps (rollout blockers)
 
-- **OG/NG render-target indices unvalidated.** `kSSAOFinal=25` (and its neighbors 24/26/28) are AE-confirmed only; SGGI AO integration is hard-gated to AE 1.11.221. Un-gating needs a per-runtime RenderDoc check that RT25 is the SAO-final target on OG and NG.
+- **OG/NG SGGI render-target indices — confirmed.** `kSSAOFinal=25`, `kDiffuseBuffer=58`, `kSpecularBuffer=59` RE-confirmed identical OG·NG·AE (fallout4-re `BSShaderRenderTargets::Create`, REL::ID 2318909); the AE-only SGGI gate was removed 2026-07-22. Neighbors 24/26/28 co-confirmed in the same create sequence. Any *new* pool slot still needs per-runtime confirmation before use.
 - **NG/AE share `REL::ID`s; OG is distinct and unverified.** Every tuple found has NG==AE; OG IDs are present but never run against a live OG binary.
 - **`inv1stPersonProjMat` (`ViewData +0x1D0`) has no accessor** — first-person reprojection is only *masked*, not decoded.
 - **`NiAVObject::world` axis order (x/z swap) is unvalidated** — no instantiated usage in-repo; confirm against a capture before relying on it.

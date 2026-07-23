@@ -152,7 +152,7 @@ namespace cs::engine
 		kGbufferEmissive = 23,
 		kGbufferMaterial = 24,  // Glossiness, Specular, Backlighting, SSS
 
-		// RT25 is AE 1.11.221-only until OG/NG indices are validated.
+		// SAO/AO-final the deferred ambient composite samples. Confirmed OG·NG·AE (fallout4-re BSShaderRenderTargets::Create, REL::ID 2318909).
 		kSSAOFinal = 25,
 
 		kTAAAccumulation = 26,

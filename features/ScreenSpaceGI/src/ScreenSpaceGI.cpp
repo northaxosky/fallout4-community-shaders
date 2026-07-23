@@ -12,7 +12,6 @@
 #include <string_view>
 #include <vector>
 
-#include <REL/Version.h>
 #include <toml++/toml.hpp>
 
 #include "Log.h"
@@ -39,18 +38,6 @@ namespace cs::features
 		constexpr const wchar_t* kAOIntegrationPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\AOIntegrationCS.hlsl";
 		constexpr const wchar_t* kBounceTelemetryPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\BounceTelemetryCS.hlsl";
 		constexpr const wchar_t* kBounceIntegrationPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\BounceIntegrationPS.hlsl";
-
-		bool SupportsAOIntegration()
-		{
-			static const bool supported = [] {
-				const auto runtime = REL::GetFileVersion(L"Fallout4.exe");
-				return runtime &&
-					runtime->major() == 1 &&
-					runtime->minor() == 11 &&
-					runtime->patch() == 221;
-			}();
-			return supported;
-		}
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{
@@ -1293,15 +1280,6 @@ namespace cs::features
 		if (!_settings.enabled) {
 			return;
 		}
-		const bool integrationSupported = SupportsAOIntegration();
-		_aoIntegrationSupported.store(integrationSupported, std::memory_order_relaxed);
-		if (!integrationSupported) {
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::warn,
-				"SSGI AO integration is AE 1.11.221-only until OG/NG render-target indices are validated; skipping.");
-			return;
-		}
 		if (!IsReady() || !_aoTexture) {
 			return;
 		}
@@ -1689,7 +1667,6 @@ namespace cs::features
 				"bounce_target_rt",
 				static_cast<std::int64_t>(cs::engine::RenderTarget::kDiffuseBuffer))
 			.Field("denoised", _denoisedLastFrame.load(std::memory_order_relaxed))
-			.Field("ao_integration_supported", _aoIntegrationSupported.load(std::memory_order_relaxed))
 			.Field("ao_integration_active", _aoIntegrationActiveLastFrame.load(std::memory_order_relaxed))
 			.Field("resolve_dispatches", static_cast<std::int64_t>(
 				_resolveDispatchedLastFrame.load(std::memory_order_relaxed)))
