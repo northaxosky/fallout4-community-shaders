@@ -51,6 +51,12 @@ noise_frozen = true
 # AO is integrated into engine render-target index 25. That index is confirmed only on
 # AE 1.11.221; OG 1.10.163 and NG 1.10.984 layouts must be validated before rollout.
 
+[features.WetnessEffects]
+load = false
+
+[features.WetnessEffects.settings]
+enabled = false
+
 [features.ScreenSpaceShadows]
 load = false
 
