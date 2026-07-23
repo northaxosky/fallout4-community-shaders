@@ -37,6 +37,7 @@ hooking the DirectX renderer directly.
 | **Game** | Fallout 4 runtime **1.11.221**. Older `1.10.x` code paths remain in the project but are not currently advertised or validated. |
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
+| **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
 
 ---
 
