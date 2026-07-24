@@ -27,4 +27,9 @@ namespace cs::features::catalog::orderly_exit
 
 	bool Install(FinalizerCallback a_callback) noexcept;
 	bool IsInstalled() noexcept;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+	using ThunkEnteredCallbackForTesting = void (*)() noexcept;
+	void SetThunkEnteredCallbackForTesting(
+		ThunkEnteredCallbackForTesting a_callback) noexcept;
+#endif
 }

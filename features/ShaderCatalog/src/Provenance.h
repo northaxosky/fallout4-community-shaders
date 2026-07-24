@@ -360,6 +360,10 @@ namespace cs::features::catalog
 		std::string& a_fingerprint,
 		std::string& a_error) noexcept;
 #ifdef FO4CS_SHADER_CATALOG_TESTING
+	using BeforeDirectoryCreateForTesting =
+		void (*)(const std::filesystem::path&) noexcept;
+	void SetBeforeDirectoryCreateForTesting(
+		BeforeDirectoryCreateForTesting a_callback) noexcept;
 	void HoldNextPublishedWinnerForTesting() noexcept;
 	bool PublishedWinnerHeldForTesting() noexcept;
 	bool PublicationCollisionRetriedForTesting() noexcept;

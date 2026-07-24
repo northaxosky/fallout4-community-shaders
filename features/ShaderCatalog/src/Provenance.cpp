@@ -367,6 +367,8 @@ namespace cs::features::catalog
 		};
 
 #ifdef FO4CS_SHADER_CATALOG_TESTING
+		std::atomic<BeforeDirectoryCreateForTesting>
+			g_beforeDirectoryCreate{ nullptr };
 		std::atomic<bool> g_holdNextPublishedWinner{ false };
 		std::atomic<bool> g_publishedWinnerHeld{ false };
 		std::atomic<bool> g_releasePublishedWinner{ false };
@@ -512,14 +514,29 @@ namespace cs::features::catalog
 				}
 				a_directory /= component;
 				std::error_code ec;
-				if (!std::filesystem::exists(a_directory, ec)) {
-					if (!std::filesystem::create_directory(a_directory, ec)
-						|| ec) {
+				const bool exists =
+					std::filesystem::exists(a_directory, ec);
+				if (ec) {
+					a_error = "unable to inspect publication directory";
+					return false;
+				}
+				if (!exists) {
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+					if (const auto callback =
+							g_beforeDirectoryCreate.load(
+								std::memory_order_acquire)) {
+						callback(a_directory);
+					}
+#endif
+					ec.clear();
+					(void)std::filesystem::create_directory(
+						a_directory, ec);
+					if (ec) {
 						a_error = "unable to create publication directory";
 						return false;
 					}
 				}
-				if (ec || !openDirectory(a_directory, false))
+				if (!openDirectory(a_directory, false))
 					return false;
 			}
 			return true;
@@ -1476,6 +1493,13 @@ namespace cs::features::catalog
 	}
 
 #ifdef FO4CS_SHADER_CATALOG_TESTING
+	void SetBeforeDirectoryCreateForTesting(
+		BeforeDirectoryCreateForTesting a_callback) noexcept
+	{
+		g_beforeDirectoryCreate.store(
+			a_callback, std::memory_order_release);
+	}
+
 	void HoldNextPublishedWinnerForTesting() noexcept
 	{
 		g_releasePublishedWinner.store(false, std::memory_order_release);

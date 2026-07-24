@@ -123,6 +123,49 @@ namespace
 		std::filesystem::path path;
 	};
 
+	std::filesystem::path g_directoryRaceTarget;
+	std::atomic<unsigned> g_directoryRaceWins{ 0 };
+	std::atomic<bool> g_directoryRaceFailed{ false };
+
+	void WinDirectoryCreateRace(
+		const std::filesystem::path& a_path) noexcept
+	{
+		try {
+			if (a_path != g_directoryRaceTarget)
+				return;
+			std::error_code error;
+			if (std::filesystem::create_directory(a_path, error)
+				&& !error) {
+				g_directoryRaceWins.fetch_add(
+					1, std::memory_order_relaxed);
+			} else {
+				g_directoryRaceFailed.store(
+					true, std::memory_order_relaxed);
+			}
+		} catch (...) {
+			g_directoryRaceFailed.store(
+				true, std::memory_order_relaxed);
+		}
+	}
+
+	struct DirectoryCreateRace
+	{
+		explicit DirectoryCreateRace(
+			std::filesystem::path a_target)
+		{
+			g_directoryRaceTarget = std::move(a_target);
+			g_directoryRaceWins.store(0, std::memory_order_relaxed);
+			g_directoryRaceFailed.store(false, std::memory_order_relaxed);
+			SetBeforeDirectoryCreateForTesting(
+				&WinDirectoryCreateRace);
+		}
+
+		~DirectoryCreateRace()
+		{
+			SetBeforeDirectoryCreateForTesting(nullptr);
+		}
+	};
+
 	void SqlExec(const std::filesystem::path& a_path, const char* a_sql)
 	{
 		sqlite3* database = nullptr;
@@ -524,6 +567,78 @@ namespace
 			!PublishBlob(
 				tree.path, "../escape", bytes.data(), bytes.size()).success,
 			"traversal digest was accepted");
+	}
+
+	void TestDirectoryCreateConvergence()
+	{
+		const std::string manifest = "{\"value\":1}\n";
+		{
+			TempTree tree("manifest-directory-race");
+			std::filesystem::create_directory(tree.path / "runs");
+			DirectoryCreateRace race(
+				tree.path / "runs" / "concurrent-run");
+			auto staged = StageManifest(
+				tree.path, "concurrent-run", manifest);
+			Check(
+				staged.result.success,
+				"manifest staging rejected concurrent directory creation");
+			Check(
+				g_directoryRaceWins.load(std::memory_order_relaxed) == 1
+					&& !g_directoryRaceFailed.load(
+						std::memory_order_relaxed),
+				"manifest directory race seam did not win exactly once");
+			DiscardStagedManifest(staged);
+		}
+
+		const auto bytes = SyntheticDxbc();
+		ContentDigest digest{};
+		Check(
+			ComputeDigests(bytes.data(), bytes.size(), digest),
+			"directory convergence blob digest failed");
+		const auto sha256 = HexLower(
+			digest.sha256.data(), digest.sha256.size());
+		const auto prefix = sha256.substr(0, 2);
+		{
+			TempTree tree("blob-directory-race");
+			std::filesystem::create_directories(
+				tree.path / "blobs" / "sha256");
+			DirectoryCreateRace race(
+				tree.path / "blobs" / "sha256" / prefix);
+			const auto result = PublishBlob(
+				tree.path, sha256, bytes.data(), bytes.size());
+			Check(
+				result.success,
+				"blob publication rejected concurrent directory creation");
+			Check(
+				g_directoryRaceWins.load(std::memory_order_relaxed) == 1
+					&& !g_directoryRaceFailed.load(
+						std::memory_order_relaxed),
+				"blob directory race seam did not win exactly once");
+		}
+
+		{
+			TempTree tree("manifest-directory-file");
+			std::filesystem::create_directory(tree.path / "runs");
+			std::ofstream(tree.path / "runs" / "file-component")
+				<< "not a directory";
+			auto staged = StageManifest(
+				tree.path, "file-component", manifest);
+			Check(
+				!staged.result.success,
+				"manifest accepted a file as a directory component");
+		}
+		{
+			TempTree tree("blob-directory-file");
+			std::filesystem::create_directories(
+				tree.path / "blobs" / "sha256");
+			std::ofstream(
+				tree.path / "blobs" / "sha256" / prefix)
+				<< "not a directory";
+			Check(
+				!PublishBlob(
+					tree.path, sha256, bytes.data(), bytes.size()).success,
+				"blob publication accepted a file as a directory component");
+		}
 	}
 
 	void TestReparseDefense()
@@ -2380,6 +2495,10 @@ int main()
 	Run("stream-output identity", &TestStreamOutputIdentity, failures);
 	Run("manifest determinism", &TestManifestDeterminism, failures);
 	Run("blob publication", &TestBlobPublication, failures);
+	Run(
+		"directory create convergence",
+		&TestDirectoryCreateConvergence,
+		failures);
 	Run("reparse defense", &TestReparseDefense, failures);
 	Run(
 		"immutable manifest publication",

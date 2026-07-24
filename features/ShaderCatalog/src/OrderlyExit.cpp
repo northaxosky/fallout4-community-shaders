@@ -10,14 +10,30 @@ namespace cs::features::catalog::orderly_exit
 {
 	namespace
 	{
+		enum class FinalizationState : unsigned
+		{
+			kNotStarted,
+			kRunning,
+			kCompleted
+		};
+
 		struct State
 		{
 			std::atomic<FinalizerCallback> callback{ nullptr };
 			std::atomic<bool> installed{ false };
 			std::atomic<unsigned> installState{ 0 };
+			std::atomic<FinalizationState> finalizationState{
+				FinalizationState::kNotStarted
+			};
 			std::atomic<LONG> transactionResult{ NO_ERROR };
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+			std::atomic<ThunkEnteredCallbackForTesting>
+				thunkEnteredCallback{ nullptr };
+#endif
 			std::mutex installMutex;
 		};
+
+		thread_local bool g_finalizerThread = false;
 
 		State& GetState()
 		{
@@ -34,6 +50,39 @@ namespace cs::features::catalog::orderly_exit
 			a_state.installState.notify_all();
 		}
 
+		void FinalizeOnce(State& a_state) noexcept
+		{
+			if (g_finalizerThread)
+				return;
+
+			auto finalization = FinalizationState::kNotStarted;
+			if (a_state.finalizationState.compare_exchange_strong(
+					finalization, FinalizationState::kRunning,
+					std::memory_order_acq_rel,
+					std::memory_order_acquire)) {
+				g_finalizerThread = true;
+				if (const auto callback =
+						a_state.callback.load(
+							std::memory_order_acquire)) {
+					callback();
+				}
+				g_finalizerThread = false;
+				a_state.finalizationState.store(
+					FinalizationState::kCompleted,
+					std::memory_order_release);
+				a_state.finalizationState.notify_all();
+				return;
+			}
+
+			while (finalization == FinalizationState::kRunning) {
+				a_state.finalizationState.wait(
+					FinalizationState::kRunning,
+					std::memory_order_acquire);
+				finalization = a_state.finalizationState.load(
+					std::memory_order_acquire);
+			}
+		}
+
 		struct ExitProcessHook
 		{
 			[[noreturn]] static void WINAPI thunk(UINT a_exitCode) noexcept
@@ -47,10 +96,14 @@ namespace cs::features::catalog::orderly_exit
 					installation =
 						state.installState.load(std::memory_order_acquire);
 				}
+#ifdef FO4CS_SHADER_CATALOG_TESTING
 				if (const auto callback =
-						state.callback.load(std::memory_order_acquire)) {
+						state.thunkEnteredCallback.load(
+							std::memory_order_acquire)) {
 					callback();
 				}
+#endif
+				FinalizeOnce(state);
 				target(a_exitCode);
 				TerminateProcess(GetCurrentProcess(), a_exitCode);
 				__assume(0);
@@ -115,4 +168,13 @@ namespace cs::features::catalog::orderly_exit
 		return GetState().installed.load(std::memory_order_acquire)
 			&& ExitProcessHook::target != nullptr;
 	}
+
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+	void SetThunkEnteredCallbackForTesting(
+		ThunkEnteredCallbackForTesting a_callback) noexcept
+	{
+		GetState().thunkEnteredCallback.store(
+			a_callback, std::memory_order_release);
+	}
+#endif
 }
