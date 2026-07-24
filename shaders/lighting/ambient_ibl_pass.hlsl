@@ -151,6 +151,10 @@ Texture2D<float4> g_tAmbientDiffuseB : register(t11);
 //      block (insn 253), added to t6.
 Texture2D<float4> g_tAmbientProbeB : register(t12);
 
+#ifdef WETNESS_EFFECTS
+Texture2D<float> g_tWetnessMask : register(t13);
+#endif
+
 // t14: lit screen target (likely kMainPreAlpha = RT 2 or kMain).
 Texture2D<float4> g_tLitScene : register(t14);
 
@@ -164,7 +168,6 @@ Texture2D<float4> g_tBlurDepthRef : register(t15);
 // pass writes full-res, ready-to-combine bounce at a free slot.
 //   t0  = indirect diffuse bounce (il * linAlbedo)
 Texture2D<float4> g_tSSGIBounce : register(t0);
-// Future albedo-aware MultiBounceAO may use t13 again.
 #endif
 
 // Samplers (all mode_default; addressing modes set by D3D11 sampler state
@@ -248,6 +251,10 @@ struct PS_OUTPUT
 PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
+
+#ifdef WETNESS_EFFECTS
+    float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;
+#endif
 
     // Insn 0: screen-space UV.
     float2 uv = input.position.xy * ScreenSize.xy;
@@ -461,8 +468,15 @@ PS_OUTPUT main(PS_INPUT input)
     //   r0.xyz = glossFactor.xxx * iblLitBlend
     //   r0.xyz = glossSquaredScaled * r0.xyz
     //   r0.xyz = r0.xyz * ambientPairSum + ambientAccum
+#ifdef WETNESS_EFFECTS
+    ambientAccum *= lerp(1.0, 0.5, wetness);
+    float wetShine = lerp(1.0, 2.0, wetness);
+    float3 modulated = ambientAccum
+                     + wetShine * (glossSquaredScaled * (glossFactor * iblLitBlend) * ambientPairSum);
+#else
     float3 modulated = ambientAccum
                      + (glossSquaredScaled * (glossFactor * iblLitBlend) * ambientPairSum);
+#endif
 
     // Insn 261-262: AO modulation - THE single AO application.
     //   r0.w = t9.Sample(uv).y    (kSSAO)

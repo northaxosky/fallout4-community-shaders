@@ -4,6 +4,7 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <memory>
@@ -18,6 +19,7 @@
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
+#include "Render/ShaderInjection.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -138,11 +140,68 @@ namespace cs::features
 
 	void WetnessEffects::Load()
 	{
+		const auto registerWetnessReplacement =
+			[this](cs::engine::ShaderInjectionTarget a_target, std::uint32_t a_slot) {
+				return cs::engine::RegisterReplacement({
+					.targetId = a_target,
+					.contributor = "WetnessEffects",
+					.defines = { { "WETNESS_EFFECTS", "1" } },
+					.isReady = [this] {
+						return IsWetnessMaskReady();
+					},
+					.bind = [this, a_slot](ID3D11DeviceContext* a_context) {
+						BindWetnessMask(a_context, a_slot);
+					},
+					.slotClaims = {
+						{
+							.stage = cs::engine::ShaderStage::kPixel,
+							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+							.slot = a_slot
+						}
+					}
+				});
+			};
+		const bool directionalRegistered = registerWetnessReplacement(
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			kMaskPSSlotDirectional);
+		const bool directionalIblRegistered = registerWetnessReplacement(
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
+			kMaskPSSlotDirectional);
+		// The reconstructed ambient_ibl_pass is interior-derived; swapping it in on
+		// exteriors diverges from the game's real ambient shader (metal-reflection +
+		// fog pop-in with camera angle, visible even at wetness=0). Gate the ambient
+		// injection off until that reconstruction is exterior-faithful (shared blocker
+		// with the SSR feature). Directional (sun) wetness is unaffected.
+		constexpr bool kInjectAmbientPass = false;
+		bool ambientRegistered = true;
+		if constexpr (kInjectAmbientPass) {
+			ambientRegistered = registerWetnessReplacement(
+				cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+				kMaskPSSlotAmbient);
+		}
+		if (!directionalRegistered || !directionalIblRegistered || !ambientRegistered) {
+			L->error("Failed to register wetness shader replacements.");
+		}
+
 		cs::engine::RegisterPostDeferredPrePass([] {
 			WetnessEffects::GetSingleton()->OnComputeWetness();
 		});
+		cs::engine::RegisterPreSunLightDraw([] {
+			WetnessEffects::GetSingleton()->OnPreSunLightDraw();
+		});
+		cs::engine::RegisterPostDeferredLightsImpl([] {
+			WetnessEffects::GetSingleton()->RestoreWetnessMaskBindings();
+		});
+		cs::engine::RegisterPostDeferredComposite([] {
+			WetnessEffects::GetSingleton()->RestoreWetnessMaskBindings();
+		});
+		if constexpr (kInjectAmbientPass) {
+			cs::engine::RegisterPostDeferredLightsImpl([] {
+				WetnessEffects::GetSingleton()->OnAmbientPassDispatch();
+			});
+		}
 		_started.store(true, std::memory_order_release);
-		L->info("Registered wetness-mask post-deferred-prepass callback (enabled={}).", _settings.enabled);
+		L->info("Registered wetness-mask lighting callbacks (enabled={}).", _settings.enabled);
 	}
 
 	void WetnessEffects::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -171,6 +230,15 @@ namespace cs::features
 		}
 	}
 
+	bool WetnessEffects::IsWetnessMaskReady() const
+	{
+		return _started.load(std::memory_order_acquire) &&
+			_settings.enabled &&
+			_wetnessCS &&
+			_wetnessCB &&
+			_resourcesReady.load(std::memory_order_acquire);
+	}
+
 	bool WetnessEffects::EnsureResources()
 	{
 		if (_resourceInitFailed.load(std::memory_order_acquire) || !cs::util::GetD3DDevice()) {
@@ -193,7 +261,17 @@ namespace cs::features
 				return true;
 			}
 
+			auto* rendererData = RE::BSGraphics::GetRendererData();
+			auto* context = rendererData ?
+				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+				nullptr;
+			if (!context) {
+				throw std::runtime_error("renderer context unavailable");
+			}
+
 			auto wetnessMask = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
+			const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+			context->ClearUnorderedAccessViewFloat(wetnessMask->uav.get(), zero);
 			auto telemetryStats =
 				CreateTexture(kTelemetryWidth, kTelemetryHeight, DXGI_FORMAT_R32G32B32A32_FLOAT);
 
@@ -241,14 +319,13 @@ namespace cs::features
 		_dispatchesLastFrame.store(0, std::memory_order_relaxed);
 		_workingWidth.store(0, std::memory_order_relaxed);
 		_workingHeight.store(0, std::memory_order_relaxed);
-		if (!_started.load(std::memory_order_acquire) || !_settings.enabled || !EnsureResources()) {
+		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
+		const bool resourcesReady = EnsureResources();
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* state = cs::engine::GetGraphicsState();
-		auto* rtm = cs::engine::GetRenderTargetManager();
-		if (!rendererData || !state || !rtm || !_wetnessCS || !_wetnessCB || !_wetnessMask) {
+		if (!rendererData || !_wetnessMask) {
 			return;
 		}
 
@@ -256,7 +333,22 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
+		// Clear the mask to 0 (dry) EVERY frame, BEFORE the enabled gate. The
+		// WETNESS_EFFECTS define is baked at startup and the bind force-binds, so a
+		// runtime disable must leave the mask reading 0 (else the shader samples a
+		// frozen stale mask -> the "leftover mask stuck on screen" artifact).
+		const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+		context->ClearUnorderedAccessViewFloat(_wetnessMask->uav.get(), zero);
+		if (!_settings.enabled || !resourcesReady) {
+			return;
+		}
 		PollTelemetry(context);
+
+		auto* state = cs::engine::GetGraphicsState();
+		auto* rtm = cs::engine::GetRenderTargetManager();
+		if (!state || !rtm || !_wetnessCS || !_wetnessCB) {
+			return;
+		}
 
 		const auto scaledExtent = [](std::uint32_t a_extent, float a_ratio) {
 			if (a_ratio <= 0.0f) {
@@ -270,8 +362,9 @@ namespace cs::features
 		const std::uint32_t height = scaledExtent(_allocHeight, rtm->GetDynamicHeightRatio());
 		auto* normalSRV =
 			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
+		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* sceneCamera = RE::Main::WorldRootCamera();
-		if (width == 0 || height == 0 || !normalSRV || !sceneCamera) {
+		if (width == 0 || height == 0 || !normalSRV || !depthSRV || !sceneCamera) {
 			return;
 		}
 
@@ -296,10 +389,10 @@ namespace cs::features
 
 			cs::engine::ComputeOMScope scope(context);
 
-			ID3D11ShaderResourceView* srvs[1] = { normalSRV };
+			ID3D11ShaderResourceView* srvs[2] = { normalSRV, depthSRV };
 			ID3D11Buffer* buffers[1] = { _wetnessCB->CB() };
 			ID3D11UnorderedAccessView* uavs[1] = { _wetnessMask->uav.get() };
-			context->CSSetShaderResources(0, 1, srvs);
+			context->CSSetShaderResources(0, 2, srvs);
 			context->CSSetConstantBuffers(0, 1, buffers);
 			context->CSSetUnorderedAccessViews(0, 1, uavs, nullptr);
 			context->CSSetShader(_wetnessCS.get(), nullptr, 0);
@@ -308,10 +401,10 @@ namespace cs::features
 			_workingWidth.store(width, std::memory_order_relaxed);
 			_workingHeight.store(height, std::memory_order_relaxed);
 
-			ID3D11ShaderResourceView* nullSRVs[1] = { nullptr };
+			ID3D11ShaderResourceView* nullSRVs[2] = { nullptr, nullptr };
 			ID3D11Buffer* nullBuffers[1] = { nullptr };
 			ID3D11UnorderedAccessView* nullUAVs[1] = { nullptr };
-			context->CSSetShaderResources(0, 1, nullSRVs);
+			context->CSSetShaderResources(0, 2, nullSRVs);
 			context->CSSetConstantBuffers(0, 1, nullBuffers);
 			context->CSSetUnorderedAccessViews(0, 1, nullUAVs, nullptr);
 			context->CSSetShader(nullptr, nullptr, 0);
@@ -328,6 +421,102 @@ namespace cs::features
 				spdlog::level::err,
 				"Wetness-mask dispatch failed: {}.",
 				e.what());
+		}
+	}
+
+	void WetnessEffects::OnPreSunLightDraw()
+	{
+		if (!_started.load(std::memory_order_acquire)) {
+			return;
+		}
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		winrt::com_ptr<ID3D11PixelShader> boundShader;
+		context->PSGetShader(boundShader.put(), nullptr, nullptr);
+		if (!boundShader) {
+			return;
+		}
+
+		constexpr std::array directionalTargets{
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+		};
+		for (const auto target : directionalTargets) {
+			if (boundShader.get() == cs::engine::GetInjectedPixelShader(target)) {
+				cs::engine::DispatchShaderInjections(target, context);
+				return;
+			}
+		}
+	}
+
+	void WetnessEffects::OnAmbientPassDispatch()
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* context = rendererData ?
+			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			nullptr;
+		cs::engine::DispatchShaderInjections(
+			cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+			context);
+	}
+
+	void WetnessEffects::BindWetnessMask(
+		ID3D11DeviceContext* a_context,
+		std::uint32_t a_slot)
+	{
+		if (!a_context ||
+			!_resourcesReady.load(std::memory_order_acquire) ||
+			!_wetnessMask) {
+			return;
+		}
+
+		// Force-bind (mirror SGGI's OnAmbientPassInjection). The old SSS-style
+		// "skip if slot occupied" guard was WRONG here: t4/t13 retain stale SRVs
+		// from prior draws, so skipping made the injected shader read that stale
+		// texture as `wetness` (garbage != 0), breaking the wet=0 no-op. Our
+		// dispatch is already pass-discriminated, so unconditionally binding our
+		// mask is correct and keeps dry == stock.
+		auto* srv = _wetnessMask->srv.get();
+		a_context->PSSetShaderResources(a_slot, 1, &srv);
+		if (a_slot == kMaskPSSlotDirectional) {
+			_directionalMaskBound.store(true, std::memory_order_relaxed);
+		} else if (a_slot == kMaskPSSlotAmbient) {
+			_ambientMaskBound.store(true, std::memory_order_relaxed);
+		}
+	}
+
+	void WetnessEffects::RestoreWetnessMaskBindings()
+	{
+		const bool restoreDirectional =
+			_directionalMaskBound.exchange(false, std::memory_order_relaxed);
+		const bool restoreAmbient =
+			_ambientMaskBound.exchange(false, std::memory_order_relaxed);
+		if (!restoreDirectional && !restoreAmbient) {
+			return;
+		}
+
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return;
+		}
+		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
+		if (!context) {
+			return;
+		}
+
+		ID3D11ShaderResourceView* nullSRV = nullptr;
+		if (restoreDirectional) {
+			context->PSSetShaderResources(kMaskPSSlotDirectional, 1, &nullSRV);
+		}
+		if (restoreAmbient) {
+			context->PSSetShaderResources(kMaskPSSlotAmbient, 1, &nullSRV);
 		}
 	}
 
@@ -469,6 +658,31 @@ namespace cs::features
 		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
 			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
 		ImGui::TextDisabled("Resources: %s | extent: %ux%u", status, _allocWidth, _allocHeight);
+		ImGui::TextDisabled(
+			"rain: %.2f | mean: %.3f | coverage: %.3f",
+			_rainIntensity.load(std::memory_order_relaxed),
+			_wetnessMean.load(std::memory_order_relaxed),
+			_wetnessCoverage.load(std::memory_order_relaxed));
+
+		// Debug mask preview: raw R8 wetness in-game, bright = wet, dark = dry, no
+		// RenderDoc needed. Mirrors ScreenSpaceShadows' mask preview. Watch this
+		// thumbnail while rotating the camera over fixed ground: a correct mask is
+		// world-locked (a given surface holds its value); a camera-dependent mask
+		// visibly shifts with view angle.
+		static bool s_showMaskPreview = false;
+		ImGui::Checkbox("Show wetness-mask preview (debug)", &s_showMaskPreview);
+		if (s_showMaskPreview) {
+			if (_wetnessMask && _wetnessMask->srv && _allocWidth > 0 && _allocHeight > 0) {
+				const float aspect = static_cast<float>(_allocWidth) / static_cast<float>(_allocHeight);
+				const float previewWidth = 480.0f;
+				const float previewHeight = previewWidth / aspect;
+				ImGui::TextDisabled("Mask %ux%u (bright = wet, dark = dry)", _allocWidth, _allocHeight);
+				ImGui::Image(reinterpret_cast<ImTextureID>(_wetnessMask->srv.get()),
+					ImVec2(previewWidth, previewHeight));
+			} else {
+				ImGui::TextDisabled("Mask not allocated.");
+			}
+		}
 	}
 
 	void WetnessEffects::RestoreDefaultSettings()

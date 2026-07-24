@@ -60,6 +60,11 @@ namespace cs::features
 
 		void SaveSettings();
 		void OnComputeWetness();
+		void OnPreSunLightDraw();
+		void OnAmbientPassDispatch();
+		void RestoreWetnessMaskBindings();
+		void BindWetnessMask(ID3D11DeviceContext* a_context, std::uint32_t a_slot);
+		bool IsWetnessMaskReady() const;
 		bool EnsureResources();
 		void PollTelemetry(ID3D11DeviceContext* a_context);
 		void QueueTelemetry(
@@ -68,6 +73,8 @@ namespace cs::features
 			std::uint32_t a_sourceHeight,
 			std::uint32_t a_frameIndex);
 
+		static constexpr std::uint32_t kMaskPSSlotDirectional = 4;
+		static constexpr std::uint32_t kMaskPSSlotAmbient = 13;
 		static constexpr std::uint32_t kTelemetryWidth = 64;
 		static constexpr std::uint32_t kTelemetryHeight = 36;
 		static constexpr std::uint32_t kTelemetryIntervalFrames = 30;
@@ -84,6 +91,8 @@ namespace cs::features
 		std::atomic_uint32_t _workingWidth{ 0 };
 		std::atomic_uint32_t _workingHeight{ 0 };
 		std::atomic_bool _telemetryReady{ false };
+		std::atomic_bool _directionalMaskBound{ false };
+		std::atomic_bool _ambientMaskBound{ false };
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _wetnessCB;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _telemetryCB;
