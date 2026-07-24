@@ -16,6 +16,11 @@ set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 
 option(TRACY_SUPPORT "Enable Tracy profiler instrumentation" OFF)
+option(FO4CS_HOST_TESTS_ONLY "Configure host tests without the plugin target" OFF)
+set_source_files_properties(
+	features/ShaderCatalog/src/OrderlyExit.cpp
+	PROPERTIES SKIP_PRECOMPILE_HEADERS ON
+)
 
 file(STRINGS "${CMAKE_SOURCE_DIR}/version.txt" FO4CS_VERSION LIMIT_COUNT 1)
 string(STRIP "${FO4CS_VERSION}" FO4CS_VERSION)
@@ -37,15 +42,28 @@ if(NOT BUILD_DESCRIBE)
 	set(BUILD_DESCRIBE "unknown")
 endif()
 
-# Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so generate a CMake shim in the build tree.
-set(COMMONLIBF4_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/CommonLibF4")
-set(COMMONLIBF4_SHIM_DIR "${CMAKE_BINARY_DIR}/CommonLibF4-shim")
-configure_file(
-	${CMAKE_SOURCE_DIR}/cmake/CommonLibF4.cmake.txt
-	${COMMONLIBF4_SHIM_DIR}/CMakeLists.txt
-	@ONLY
+execute_process(
+	COMMAND git rev-parse HEAD
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+	OUTPUT_VARIABLE BUILD_GIT_SHA
+	OUTPUT_STRIP_TRAILING_WHITESPACE
+	ERROR_QUIET
 )
-add_subdirectory(${COMMONLIBF4_SHIM_DIR} CommonLibF4 EXCLUDE_FROM_ALL)
+if(NOT BUILD_GIT_SHA)
+	set(BUILD_GIT_SHA "unknown")
+endif()
+
+if(NOT FO4CS_HOST_TESTS_ONLY)
+	# Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so generate a CMake shim in the build tree.
+	set(COMMONLIBF4_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/CommonLibF4")
+	set(COMMONLIBF4_SHIM_DIR "${CMAKE_BINARY_DIR}/CommonLibF4-shim")
+	configure_file(
+		${CMAKE_SOURCE_DIR}/cmake/CommonLibF4.cmake.txt
+		${COMMONLIBF4_SHIM_DIR}/CMakeLists.txt
+		@ONLY
+	)
+	add_subdirectory(${COMMONLIBF4_SHIM_DIR} CommonLibF4 EXCLUDE_FROM_ALL)
+endif()
 
 # vcpkg packages
 find_package(directxtk CONFIG REQUIRED)
@@ -57,6 +75,21 @@ find_package(imgui CONFIG REQUIRED)
 find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
+find_path(MICROSOFT_DETOURS_INCLUDE_DIR "detours/detours.h" REQUIRED)
+find_library(MICROSOFT_DETOURS_LIBRARY_RELEASE
+	NAMES detours
+	PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
+	PATH_SUFFIXES lib
+	NO_DEFAULT_PATH
+	REQUIRED
+)
+find_library(MICROSOFT_DETOURS_LIBRARY_DEBUG
+	NAMES detours
+	PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
+	PATH_SUFFIXES debug/lib
+	NO_DEFAULT_PATH
+	REQUIRED
+)
 if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
 endif()
@@ -64,56 +97,63 @@ endif()
 # Lightweight INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
 add_subdirectory(cmake/Streamline)
 add_subdirectory(cmake/XeSS)
-include(Ngx)
+if(NOT FO4CS_HOST_TESTS_ONLY)
+	include(Ngx)
 
-# Single unified DLL target.
-add_library(FO4CommunityShaders SHARED)
+	# Single unified DLL target.
+	add_library(FO4CommunityShaders SHARED)
 
-# Core sources.
-file(GLOB_RECURSE CORE_SOURCES
-	LIST_DIRECTORIES false
-	CONFIGURE_DEPENDS
-	"${CMAKE_SOURCE_DIR}/src/*.cpp"
-	"${CMAKE_SOURCE_DIR}/src/*.h"
-)
-target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
+	# Core sources.
+	file(GLOB_RECURSE CORE_SOURCES
+		LIST_DIRECTORIES false
+		CONFIGURE_DEPENDS
+		"${CMAKE_SOURCE_DIR}/src/*.cpp"
+		"${CMAKE_SOURCE_DIR}/src/*.h"
+	)
+	target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
 
-include(Common)
-include(FidelityFX)
-configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
+	include(Common)
+	include(FidelityFX)
+	configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
 
-target_link_libraries(FO4CommunityShaders PRIVATE
-	debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
-	optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
-	Microsoft::DirectXTK
-	Microsoft::DirectXTex
-	Microsoft::DirectX-Headers
-	bcrypt.lib
-	d3d12.lib
-	magic_enum::magic_enum
-	d3dcompiler.lib
-	imgui::imgui
-	tomlplusplus::tomlplusplus
-	$<$<BOOL:${TRACY_SUPPORT}>:Tracy::TracyClient>
-)
+	target_include_directories(FO4CommunityShaders BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+	)
+	target_link_libraries(FO4CommunityShaders PRIVATE
+		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
+		debug ${MICROSOFT_DETOURS_LIBRARY_DEBUG}
+		optimized ${MICROSOFT_DETOURS_LIBRARY_RELEASE}
+		Microsoft::DirectXTK
+		Microsoft::DirectXTex
+		Microsoft::DirectX-Headers
+		bcrypt.lib
+		d3d12.lib
+		magic_enum::magic_enum
+		d3dcompiler.lib
+		imgui::imgui
+		tomlplusplus::tomlplusplus
+		$<$<BOOL:${TRACY_SUPPORT}>:Tracy::TracyClient>
+	)
 
-if(TRACY_SUPPORT)
-	target_compile_definitions(FO4CommunityShaders PRIVATE TRACY_SUPPORT TRACY_ENABLE)
+	if(TRACY_SUPPORT)
+		target_compile_definitions(FO4CommunityShaders PRIVATE TRACY_SUPPORT TRACY_ENABLE)
+	endif()
+
+	# Features attach their own sources to FO4CommunityShaders via target_sources.
+	# Lifecycle dependencies are declared through cs::Feature::GetDependencies().
+	register_feature(MotionVectorFixes)
+	register_feature(Upscaling)
+	register_feature(FrameGeneration)
+	register_feature(RenderDoc)
+	register_feature(PerformanceOverlay)
+	register_feature(Imagespace)
+	register_feature(ScreenSpaceShadows)
+	register_feature(ScreenSpaceGI)
+	register_feature(WetnessEffects)
+	register_feature(ShaderCatalog)
+	register_feature(ShaderReplacement)
 endif()
-
-# Features attach their own sources to FO4CommunityShaders via target_sources.
-# Lifecycle dependencies are declared through cs::Feature::GetDependencies().
-register_feature(MotionVectorFixes)
-register_feature(Upscaling)
-register_feature(FrameGeneration)
-register_feature(RenderDoc)
-register_feature(PerformanceOverlay)
-register_feature(Imagespace)
-register_feature(ScreenSpaceShadows)
-register_feature(ScreenSpaceGI)
-register_feature(WetnessEffects)
-register_feature(ShaderCatalog)
-register_feature(ShaderReplacement)
 
 enable_testing()
 
@@ -164,14 +204,16 @@ target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
 add_test(NAME LogThrottle COMMAND LogThrottleTests)
 set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
-add_executable(ProjectionMathTests
-	tests/ProjectionMathTests.cpp
-)
-configure_host_test(ProjectionMathTests)
-target_link_libraries(ProjectionMathTests PRIVATE CommonLibF4::CommonLibF4 Microsoft::DirectXMath)
+if(NOT FO4CS_HOST_TESTS_ONLY)
+	add_executable(ProjectionMathTests
+		tests/ProjectionMathTests.cpp
+	)
+	configure_host_test(ProjectionMathTests)
+	target_link_libraries(ProjectionMathTests PRIVATE CommonLibF4::CommonLibF4 Microsoft::DirectXMath)
 
-add_test(NAME ProjectionMath COMMAND ProjectionMathTests)
-set_tests_properties(ProjectionMath PROPERTIES LABELS "render;unit")
+	add_test(NAME ProjectionMath COMMAND ProjectionMathTests)
+	set_tests_properties(ProjectionMath PROPERTIES LABELS "render;unit")
+endif()
 
 add_executable(FrustumEmbedTests
 	tests/FrustumEmbedTests.cpp
@@ -193,6 +235,124 @@ target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
 
 add_test(NAME ShaderCompile COMMAND ShaderCompileTests "${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders")
 set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
+
+add_executable(ShaderCatalogTests
+	tests/ShaderCatalogTests.cpp
+	features/ShaderCatalog/src/CatalogDB.cpp
+	features/ShaderCatalog/src/CatalogDB.h
+	features/ShaderCatalog/src/Provenance.cpp
+	features/ShaderCatalog/src/Provenance.h
+	features/ShaderCatalog/src/PixelShaderTracker.cpp
+	features/ShaderCatalog/src/PixelShaderTracker.h
+	features/ShaderCatalog/src/ShaderShape.cpp
+	features/ShaderCatalog/src/ShaderShape.h
+	src/Render/PixelShaderSwapModel.cpp
+	src/Render/PixelShaderSwapBroker.h
+	src/Utils/CSSha1.cpp
+	src/Utils/CSSha1.h
+)
+configure_host_test(ShaderCatalogTests)
+target_include_directories(ShaderCatalogTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/include"
+	"${CMAKE_SOURCE_DIR}/features/ShaderCatalog/src"
+)
+target_compile_definitions(
+	ShaderCatalogTests PRIVATE FO4CS_SHADER_CATALOG_TESTING=1)
+target_link_libraries(ShaderCatalogTests PRIVATE
+	unofficial::sqlite3::sqlite3
+	spdlog::spdlog
+	bcrypt.lib
+	d3dcompiler.lib
+)
+
+add_test(NAME ShaderCatalog COMMAND ShaderCatalogTests)
+set_tests_properties(ShaderCatalog PROPERTIES LABELS "shader;catalog;unit" TIMEOUT 120)
+
+if(FO4CS_HOST_TESTS_ONLY)
+	find_package(xbyak CONFIG REQUIRED)
+	set(PROJECT_VERSION_MAJOR "${FO4CS_VERSION_MAJOR}")
+	set(PROJECT_VERSION_MINOR "${FO4CS_VERSION_MINOR}")
+	set(PROJECT_VERSION_PATCH "${FO4CS_VERSION_PATCH}")
+	set(PROJECT_NAME "FO4CommunityShaders")
+	configure_file(
+		"${CMAKE_SOURCE_DIR}/cmake/Plugin.h.in"
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders/Plugin.h"
+		@ONLY
+	)
+	add_library(ShaderCatalogCompileChecks OBJECT
+		features/ShaderCatalog/src/Hooks.cpp
+		features/ShaderCatalog/src/OrderlyExit.cpp
+		features/ShaderCatalog/src/PixelShaderTracker.cpp
+		features/ShaderCatalog/src/ShaderCatalog.cpp
+		src/Render/PixelShaderSwapBroker.cpp
+		src/Render/PixelShaderSwapModel.cpp
+	)
+	configure_host_test(ShaderCatalogCompileChecks)
+	target_precompile_headers(ShaderCatalogCompileChecks PRIVATE
+		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+	)
+	target_compile_definitions(ShaderCatalogCompileChecks PRIVATE
+		_WINDOWS
+		_AMD64_
+		_UNICODE
+		COMMONLIB_RUNTIMECOUNT=3
+	)
+	target_compile_options(ShaderCatalogCompileChecks PRIVATE
+		/wd4200
+		/wd4201
+		/wd4324
+	)
+	target_include_directories(ShaderCatalogCompileChecks BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
+		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/features/ShaderCatalog/src"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+	)
+	target_link_libraries(ShaderCatalogCompileChecks PRIVATE
+		debug ${MICROSOFT_DETOURS_LIBRARY_DEBUG}
+		optimized ${MICROSOFT_DETOURS_LIBRARY_RELEASE}
+		Microsoft::DirectXTK
+		Microsoft::DirectX-Headers
+		imgui::imgui
+		magic_enum::magic_enum
+		spdlog::spdlog
+		tomlplusplus::tomlplusplus
+		xbyak::xbyak
+	)
+
+	add_executable(ShaderCatalogOrderlyExitTests
+		tests/ShaderCatalogOrderlyExitTests.cpp
+		features/ShaderCatalog/src/OrderlyExit.cpp
+	)
+	configure_host_test(ShaderCatalogOrderlyExitTests)
+	target_compile_definitions(ShaderCatalogOrderlyExitTests PRIVATE
+		_WINDOWS
+		_AMD64_
+		_UNICODE
+		COMMONLIB_RUNTIMECOUNT=3
+	)
+	target_include_directories(ShaderCatalogOrderlyExitTests BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/features/ShaderCatalog/src"
+	)
+	target_link_libraries(ShaderCatalogOrderlyExitTests PRIVATE
+		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
+		debug ${MICROSOFT_DETOURS_LIBRARY_DEBUG}
+		optimized ${MICROSOFT_DETOURS_LIBRARY_RELEASE}
+	)
+	add_test(
+		NAME ShaderCatalogOrderlyExit
+		COMMAND ShaderCatalogOrderlyExitTests
+	)
+	set_tests_properties(ShaderCatalogOrderlyExit PROPERTIES
+		LABELS "catalog;shader;unit"
+	)
+endif()
 
 set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-shader-roundtrip.ps1")
 add_test(

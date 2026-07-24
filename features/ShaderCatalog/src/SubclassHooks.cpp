@@ -36,7 +36,11 @@ namespace cs::features::catalog::subclass_hooks
 
 		using PixelShaderMap = RE::BSShaderTechniqueIDMap::MapType<RE::BSGraphics::PixelShader*>;
 
-		void AttributePixelShaderFromMap(RE::BSShader* self, const char* subclassName, std::uint32_t techniqueBits)
+		void AttributePixelShaderFromMap(
+			RE::BSShader* self,
+			const char* subclassName,
+			std::uint32_t techniqueBits,
+			const CatalogDB::ProducerLease& lease)
 		{
 			if (!self || !subclassName)
 				return;
@@ -51,13 +55,25 @@ namespace cs::features::catalog::subclass_hooks
 			if (it == map->end() || !*it || !(*it)->shader)
 				return;
 
-			Sha1Result sha{};
+			shader_tracker::Lookup lookup;
 			auto* d3dShader = reinterpret_cast<ID3D11PixelShader*>((*it)->shader);
-			if (!shader_tracker::TryGetPixelShaderSha1(d3dShader, sha))
+			if (!shader_tracker::TryGetPixelShader(d3dShader, lookup))
 				return;
+			if (lookup.ambiguousOrigin) {
+				CatalogDB::Get().RecordHookObserverGap();
+				return;
+			}
 
 			g_mapAttributions.fetch_add(1, std::memory_order_relaxed);
-			CatalogDB::Get().EnqueueAttribution(sha, subclassName, techniqueBits);
+			CatalogDB::Get().EnqueueAttribution(
+				lookup.sha,
+				subclassName,
+				techniqueBits,
+				AttributionKind::kTechniqueMapAssociation,
+				lookup.alias
+					? AttributionObjectKind::kReplacementUnknown
+					: AttributionObjectKind::kStock,
+				&lease);
 		}
 
 		// One hook type per subclass; size is ReloadShaders slot 0x0B and func receives the original.
@@ -82,12 +98,14 @@ namespace cs::features::catalog::subclass_hooks
 
 			static bool thunk(RE::BSShader* self, std::uint32_t techniqueBits)
 			{
+				auto lease = CatalogDB::Get().TryAcquireProducerLease();
 				g_setupCalls.fetch_add(1, std::memory_order_relaxed);
 				context::SetSticky(Tag::Name(), techniqueBits);
 				context::Scope scope(Tag::Name(), techniqueBits);
 				const bool ok = func(self, techniqueBits);
-				if (ok)
-					AttributePixelShaderFromMap(self, Tag::Name(), techniqueBits);
+				if (ok && lease)
+					AttributePixelShaderFromMap(
+						self, Tag::Name(), techniqueBits, lease);
 				else
 					context::ClearSticky();
 				return ok;

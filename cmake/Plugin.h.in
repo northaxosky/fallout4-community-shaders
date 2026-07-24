@@ -3,6 +3,7 @@
 #include <string_view>
 
 #define CS_BUILD_DESCRIBE "@BUILD_DESCRIBE@"
+#define CS_BUILD_GIT_SHA "@BUILD_GIT_SHA@"
 
 namespace Plugin
 {

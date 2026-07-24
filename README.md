@@ -65,7 +65,7 @@ hooking the DirectX renderer directly.
 
 | Feature | Implementation |
 |---|---|
-| **Shader Catalog** | Records D3D11 shader creation and known `BSShader` attribution to SQLite. |
+| **Shader Catalog** | Records per-run D3D11 shader creation provenance to SQLite and a canonical importer manifest. Creation is not execution evidence. |
 | **Shader Replacement** | Replaces selected pixel shaders with reconstructed HLSL for validation. |
 
 </details>
@@ -147,6 +147,12 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   DLSS-G for that session.
 - A successful build or launch does **not** prove a rendering path is visually correct - in-game
   validation is still required.
+- Shader Catalog creation success does **not** prove shader binding or execution. RenderDoc is
+  still required for executed-event evidence. Optional raw DXBC export requires an absolute,
+  caller-owned `FO4_SHADER_CORPUS_ROOT`; an empty value is invalid. Authoritative runs also
+  require complete D3D11 hook coverage, a validated orderly `ExitProcess` finalizer, and
+  lossless final publication. Crashes and forced termination are recovered as abandoned. See
+  `features/ShaderCatalog/SPEC.md`.
 
 ---
 

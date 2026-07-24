@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "OrderlyExit.h"
 
 #include <atomic>
 #include <string>
@@ -43,9 +44,13 @@ namespace cs::features
 		~ShaderCatalog() override;
 
 		void SaveSettings();
+		static void FinalizeForProcessExit() noexcept;
+		void FinalizeOrderly() noexcept;
 
 		Settings _settings;
+		catalog::orderly_exit::FinalizerGate _finalizerGate;
 		std::atomic<bool> _started{ false };
+		std::atomic<bool> _hookInstallInProgress{ false };
 		std::atomic<bool> _hooksInstalled{ false };
 	};
 }

@@ -14,9 +14,31 @@ namespace cs::features::catalog::shader_tracker
 		std::uint64_t aliases = 0;
 	};
 
-	void TrackPixelShader(ID3D11PixelShader* shader, const Sha1Result& sha, bool alias = false) noexcept;
-	bool TryGetPixelShaderSha1(ID3D11PixelShader* shader, Sha1Result& sha) noexcept;
+	struct Lookup
+	{
+		Sha1Result sha{};
+		bool alias = false;
+		bool ambiguousOrigin = false;
+	};
+
+	enum class TrackResult
+	{
+		kIgnored,
+		kTracked,
+		kUpdated,
+		kAmbiguousOrigin,
+		kAllocationFailure
+	};
+
+	TrackResult TrackPixelShader(
+		ID3D11PixelShader* shader,
+		const Sha1Result& sha,
+		bool alias = false) noexcept;
+	bool TryGetPixelShader(ID3D11PixelShader* shader, Lookup& result) noexcept;
 	void SetEnabled(bool enabled) noexcept;
 	void Clear() noexcept;
 	Stats GetStats() noexcept;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+	void FailNextAllocationForTesting() noexcept;
+#endif
 }

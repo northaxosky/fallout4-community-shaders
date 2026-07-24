@@ -103,7 +103,7 @@ multi_capture_hotkey = "Shift+F11"
 load = false
 
 [features.ShaderCatalog.settings]
-# Master toggle. Ships off in v1; user opts in via the in-game settings menu.
+# Master toggle. Ships off; user opts in via the in-game settings menu.
 enabled = false
 
 # Writer thread flush cadence. Lower = more responsive UI counter, higher = less
@@ -111,6 +111,9 @@ enabled = false
 writer_flush_interval_ms = 5000
 
 # Where to write the catalog file. Path is relative to the FO4 install dir.
+# Schema v3 keeps legacy global tables and adds explicit per-run provenance tables.
+# Manifest/raw export orchestration is environment-only. Present-empty values are invalid,
+# and authority requires complete shader-hook coverage; see features/ShaderCatalog/SPEC.md.
 catalog_path = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\shader-catalog.sqlite"
 
 # BSShader subclass technique attribution (enriches PS rows with subclass/technique names).

@@ -35,7 +35,7 @@ using TracyD3D11Ctx = void*;
 #include <string>
 using namespace std::literals;
 
-#include "detours/detours.h"
+#include "detours/NukemDetours.h"
 
 #include "SimpleMath.h"
 

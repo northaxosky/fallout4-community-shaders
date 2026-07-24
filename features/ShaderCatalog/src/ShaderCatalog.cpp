@@ -7,8 +7,10 @@
 #include <toml++/toml.hpp>
 
 #include <cstdio>
+#include <exception>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 
 #include "CatalogDB.h"
@@ -65,7 +67,7 @@ namespace cs::features
 		// Catalog runtime families: OG=1.10.163; NG=1.10.980/1.10.984; AE=the 1.11.x line incl 1.11.221; engine_build_hash keeps exact builds distinct.
 		const char* RuntimeLabel(const RuntimeVersion& v)
 		{
-			if (!v.valid) return "OG";
+			if (!v.valid) return "unknown";
 			if (v.major == 1 && v.minor == 10) {
 				if (v.build == 163) return "OG";
 				if (v.build == 980) return "NG";
@@ -73,7 +75,7 @@ namespace cs::features
 			}
 			if (v.major == 1 && v.minor == 11)
 				return "AE";  // Anniversary Edition line (e.g. 1.11.191, 1.11.221)
-			return "OG";
+			return "unknown";
 		}
 
 		// Exact "major.minor.build" for the catalog's engine_build_hash column; empty if unreadable.
@@ -107,6 +109,46 @@ namespace cs::features
 			std::snprintf(buf, sizeof(buf), "%u.%u.%u",
 				Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
 			return std::string(buf);
+		}
+
+		std::optional<std::string> WideToUtf8(const wchar_t* a_value)
+		{
+			if (!a_value || !*a_value)
+				return std::nullopt;
+			const int wideLength = static_cast<int>(wcsnlen_s(a_value, 128));
+			const int required = WideCharToMultiByte(
+				CP_UTF8, WC_ERR_INVALID_CHARS, a_value, wideLength,
+				nullptr, 0, nullptr, nullptr);
+			if (required <= 0)
+				return std::nullopt;
+			std::string result(static_cast<std::size_t>(required), '\0');
+			if (WideCharToMultiByte(
+					CP_UTF8, WC_ERR_INVALID_CHARS, a_value, wideLength,
+					result.data(), required, nullptr, nullptr) != required)
+				return std::nullopt;
+			return result;
+		}
+
+		std::string FeatureLevelName(D3D_FEATURE_LEVEL a_level)
+		{
+			switch (a_level) {
+			case D3D_FEATURE_LEVEL_9_1:
+				return "9_1";
+			case D3D_FEATURE_LEVEL_9_2:
+				return "9_2";
+			case D3D_FEATURE_LEVEL_9_3:
+				return "9_3";
+			case D3D_FEATURE_LEVEL_10_0:
+				return "10_0";
+			case D3D_FEATURE_LEVEL_10_1:
+				return "10_1";
+			case D3D_FEATURE_LEVEL_11_0:
+				return "11_0";
+			case D3D_FEATURE_LEVEL_11_1:
+				return "11_1";
+			default:
+				return "unknown";
+			}
 		}
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
@@ -197,15 +239,32 @@ namespace cs::features
 
 	ShaderCatalog* ShaderCatalog::GetSingleton()
 	{
-		static ShaderCatalog instance;
-		return &instance;
+		static auto* instance = new ShaderCatalog();
+		return instance;
 	}
 
 	ShaderCatalog::~ShaderCatalog()
+	{}
+
+	void ShaderCatalog::FinalizeForProcessExit() noexcept
 	{
-		// Best-effort teardown; DLL unload order may already have torn things down.
+		GetSingleton()->FinalizeOrderly();
+	}
+
+	void ShaderCatalog::FinalizeOrderly() noexcept
+	{
+		if (!_finalizerGate.TryBegin())
+			return;
+		try {
+			if (!catalog::CatalogDB::Get().Stop())
+				L->warn("Catalog process-exit finalization completed non-authoritatively.");
+		} catch (const std::exception& e) {
+			L->critical("Catalog process-exit finalization failed: {}", e.what());
+		} catch (...) {
+			L->critical("Catalog process-exit finalization failed: unknown exception");
+		}
 		catalog::shader_tracker::SetEnabled(false);
-		catalog::CatalogDB::Get().Stop();
+		_started.store(false, std::memory_order_release);
 	}
 
 	bool ShaderCatalog::Configure(const toml::table& a_config, std::string& a_error)
@@ -248,19 +307,36 @@ namespace cs::features
 		catalog::Sha1InitOnce();
 
 		catalog::DbConfig dbc;
-		dbc.catalog_path      = _settings.catalogPath;
-		dbc.flush_interval_ms = static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
+		dbc.catalogPath = _settings.catalogPath;
+		dbc.flushIntervalMs =
+			static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
 
 		const auto rtVersion = GetRuntimeVersion();
 		const char* runtime = RuntimeLabel(rtVersion);
 		const auto build = RuntimeBuildString(rtVersion);
 		const auto version = PluginVersionString();
-		if (!catalog::CatalogDB::Get().Start(dbc, runtime, version.c_str(), build.empty() ? nullptr : build.c_str())) {
+		catalog::RuntimeIdentity identity;
+		identity.runtimeFamily = runtime;
+		if (!build.empty())
+			identity.runtimeVersion = build;
+		identity.pluginVersion = version;
+		identity.pluginBuildDescribe = CS_BUILD_DESCRIBE;
+		identity.pluginGitIdentity = CS_BUILD_GIT_SHA;
+		if (!catalog::CatalogDB::Get().Start(dbc, std::move(identity))) {
 			catalog::shader_tracker::SetEnabled(false);
 			_started.store(false, std::memory_order_release);
 			FailLoad("Catalog database startup failed");
 			L->error("Catalog database startup failed; feature inactive.");
 			return;
+		}
+		const bool orderlyFinalizerReady =
+			catalog::orderly_exit::Install(
+				&ShaderCatalog::FinalizeForProcessExit)
+			&& catalog::orderly_exit::IsInstalled()
+			&& catalog::CatalogDB::Get().MarkOrderlyFinalizerReady();
+		if (!orderlyFinalizerReady) {
+			L->error(
+				"ExitProcess finalizer hook failed; catalog run cannot be authoritative.");
 		}
 
 		// Patch subclass reload/setup slots before D3D shader-creation hooks; unverified runtimes retain catalog function without subclass names.
@@ -277,16 +353,41 @@ namespace cs::features
 		L->info("Catalog initialized (runtime={})", runtime);
 	}
 
-	void ShaderCatalog::OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* device)
+	void ShaderCatalog::OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !device)
 			return;
-		if (_hooksInstalled.exchange(true, std::memory_order_acq_rel))
+		if (_hooksInstalled.load(std::memory_order_acquire))
 			return;
-		catalog::hooks::InstallAll(device);
+		std::optional<std::string> adapterName;
+		if (adapter) {
+			DXGI_ADAPTER_DESC description{};
+			if (SUCCEEDED(adapter->GetDesc(&description)))
+				adapterName = WideToUtf8(description.Description);
+		}
+		catalog::CatalogDB::Get().SetGraphicsFacts(
+			std::move(adapterName),
+			FeatureLevelName(device->GetFeatureLevel()));
+		bool expected = false;
+		if (!_hookInstallInProgress.compare_exchange_strong(
+				expected, true, std::memory_order_acq_rel))
+			return;
+		bool installed = false;
+		try {
+			installed = catalog::hooks::InstallAll(device);
+		} catch (...) {
+			_hookInstallInProgress.store(false, std::memory_order_release);
+			throw;
+		}
+		_hooksInstalled.store(installed, std::memory_order_release);
+		_hookInstallInProgress.store(false, std::memory_order_release);
 		const auto hs = catalog::hooks::GetRuntimeAttributionStats();
-		L->info("Device-vtable hooks installed (slots 12/13/15/16/17/18; PSSetShader={}).",
-			hs.psSetShaderHookInstalled ? "yes" : "no");
+		if (installed) {
+			L->info("Device-vtable hooks installed (slots 12/13/14/15/16/17/18; PSSetShader={}).",
+				hs.psSetShaderHookInstalled ? "yes" : "no");
+		} else {
+			L->error("Device-vtable hook coverage incomplete; run is non-authoritative.");
+		}
 	}
 
 	void ShaderCatalog::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -296,11 +397,34 @@ namespace cs::features
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("hooks", HooksInstalled())
-			.Field("enqueued", static_cast<std::int64_t>(stats.enqueued))
-			.Field("written", static_cast<std::int64_t>(stats.written))
-			.Field("dropped", static_cast<std::int64_t>(stats.dropped))
-			.Field("attributed_ps", static_cast<std::int64_t>(stats.attributed_ps))
-			.Field("total_ps", static_cast<std::int64_t>(stats.total_ps))
+			.Field("run_id", stats.generatedRunId)
+			.Field("external_run_id", stats.externalRunId.value_or(""))
+			.Field("scenario_id", stats.scenarioId.value_or(""))
+			.Field("lifecycle", stats.lifecycle)
+			.Field("authoritative", stats.authoritative)
+			.Field("attempts", static_cast<std::int64_t>(stats.attempts))
+			.Field("successes", static_cast<std::int64_t>(stats.successes))
+			.Field("failures", static_cast<std::int64_t>(stats.failures))
+			.Field("unique_observations", static_cast<std::int64_t>(stats.uniqueObservations))
+			.Field("unique_contents", static_cast<std::int64_t>(stats.uniqueContents))
+			.Field("attribution_events", static_cast<std::int64_t>(stats.attributionEvents))
+			.Field("queue_overflow", static_cast<std::int64_t>(stats.quality.queueOverflow))
+			.Field("malformed", static_cast<std::int64_t>(stats.quality.malformedBytecode))
+			.Field("unsupported_size", static_cast<std::int64_t>(stats.quality.unsupportedSize))
+			.Field("allocation_failure", static_cast<std::int64_t>(stats.quality.allocationFailure))
+			.Field("hash_failure", static_cast<std::int64_t>(stats.quality.hashFailure))
+			.Field("db_failure", static_cast<std::int64_t>(stats.quality.dbWriteFailure))
+			.Field("raw_export_failure", static_cast<std::int64_t>(stats.quality.rawExportFailure))
+			.Field("manifest_failure", static_cast<std::int64_t>(stats.quality.manifestFailure))
+			.Field("raw_export_requested", stats.rawExportRequested)
+			.Field("raw_export_complete", stats.rawExportComplete)
+			.Field("writer_drained", stats.writerDrained)
+			.Field("hook_coverage_ready", stats.hookCoverageReady)
+			.Field(
+				"orderly_finalizer_ready",
+				stats.orderlyFinalizerReady)
+			.Field("attributed_ps", static_cast<std::int64_t>(stats.attributedPs))
+			.Field("total_ps", static_cast<std::int64_t>(stats.totalPs))
 			.Field("scoped", static_cast<std::int64_t>(binds.scopedBinds))
 			.Field("matched", static_cast<std::int64_t>(binds.matchedBinds))
 			.Field("missed", static_cast<std::int64_t>(binds.missedBinds));
@@ -327,16 +451,58 @@ namespace cs::features
 		ImGui::Separator();
 		ImGui::TextUnformatted("Stats");
 		const auto s = catalog::CatalogDB::Get().GetStats();
-		ImGui::Text("Shader hooks enqueued: %llu", static_cast<unsigned long long>(s.enqueued));
-		ImGui::Text("Shader rows written:   %llu", static_cast<unsigned long long>(s.written));
+		ImGui::Text(
+			"Generated run: %s",
+			s.generatedRunId.empty() ? "inactive" : s.generatedRunId.c_str());
+		ImGui::Text(
+			"External run:  %s",
+			s.externalRunId ? s.externalRunId->c_str() : "unknown");
+		ImGui::Text(
+			"Scenario:      %s",
+			s.scenarioId ? s.scenarioId->c_str() : "unknown");
+		ImGui::Text("Lifecycle:     %s", s.lifecycle.c_str());
+		ImGui::Text("Authoritative: %s", s.authoritative ? "yes" : "no");
+		ImGui::Text(
+			"Hook coverage:  %s",
+			s.hookCoverageReady ? "ready" : "incomplete");
+		ImGui::Text(
+			"Exit finalizer: %s",
+			s.orderlyFinalizerReady ? "ready" : "unavailable");
+		ImGui::Text(
+			"Attempts:       %llu (%llu success, %llu failure)",
+			static_cast<unsigned long long>(s.attempts),
+			static_cast<unsigned long long>(s.successes),
+			static_cast<unsigned long long>(s.failures));
+		ImGui::Text(
+			"Unique observations:   %llu",
+			static_cast<unsigned long long>(s.uniqueObservations));
+		ImGui::Text(
+			"Unique contents:       %llu",
+			static_cast<unsigned long long>(s.uniqueContents));
 		ImGui::Text("Shapes enriched:       %llu", static_cast<unsigned long long>(s.reflected));
-		ImGui::Text("Attribution events:    %llu", static_cast<unsigned long long>(s.attribution_events));
-		ImGui::Text("Dropped (ring full):   %llu", static_cast<unsigned long long>(s.dropped));
-		if (s.total_ps > 0) {
-			const auto pct = (100.0 * static_cast<double>(s.attributed_ps)) / static_cast<double>(s.total_ps);
+		ImGui::Text(
+			"Attribution events:    %llu",
+			static_cast<unsigned long long>(s.attributionEvents));
+		ImGui::Text(
+			"Dropped (queue):       %llu",
+			static_cast<unsigned long long>(s.quality.queueOverflow));
+		ImGui::Text(
+			"Dropped (input/hash):  %llu",
+			static_cast<unsigned long long>(
+				s.quality.malformedBytecode + s.quality.unsupportedSize
+				+ s.quality.allocationFailure + s.quality.copyFailure
+				+ s.quality.hashFailure));
+		ImGui::Text(
+			"Raw export:             %s",
+			!s.rawExportRequested ? "disabled"
+				: (s.rawExportComplete ? "complete" : "incomplete"));
+		if (s.totalPs > 0) {
+			const auto pct =
+				(100.0 * static_cast<double>(s.attributedPs))
+				/ static_cast<double>(s.totalPs);
 			ImGui::Text("Attributed PS rows:    %llu / %llu (%.1f%%)",
-				static_cast<unsigned long long>(s.attributed_ps),
-				static_cast<unsigned long long>(s.total_ps), pct);
+				static_cast<unsigned long long>(s.attributedPs),
+				static_cast<unsigned long long>(s.totalPs), pct);
 		} else {
 			ImGui::Text("Attributed PS rows:    0 / 0");
 		}

@@ -1,15 +1,13 @@
 #include "Hooks.h"
 
 #include "CatalogDB.h"
+#include "AttributionPolicy.h"
 #include "Log.h"
 #include "PixelShaderTracker.h"
 #include "Render/PixelShaderSwapBroker.h"
-#include "Sha1.h"
 #include "SubclassContext.h"
 
 #include <atomic>
-#include <cstddef>
-#include <cstring>
 #include <memory>
 #include <new>
 #include <utility>
@@ -20,166 +18,391 @@ namespace cs::features::catalog::hooks
 	{
 		auto* L = cs::log::Get("cs.feature.shadercatalog");
 
-		// Retain DXBC for deferred reflection up to the cap, covering ~25KB deferred shaders while bounding hot-path allocation; larger blobs enqueue base-row-only.
-		constexpr SIZE_T kMaxRetainedShaderBytes = 64u * 1024;
-
 		std::atomic<bool> g_psSetShaderHookInstalled{ false };
+		std::atomic<bool> g_pixelObserverRegistered{ false };
 		std::atomic<std::uint64_t> g_scopedBinds{ 0 };
 		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
 		std::atomic<std::uint64_t> g_missedBinds{ 0 };
 
-		// Hot path for every stage: SHA1, stack capture, enqueue; cost is mostly bytecode hashing.
-		__forceinline void RecordEntry(char stage, const void* bytecode, SIZE_T len, ULONG stackFramesToSkip = 2) noexcept
+		struct PixelToken
 		{
-			// Skip invalid creation attempts D3D would reject; avoids hashing null/empty bytecode.
-			if (!bytecode || len == 0)
+			PreparedObservation prepared;
+		};
+
+		bool BeginPixelShaderAdmission() noexcept
+		{
+			return CatalogDB::Get().TryBeginProducerAdmission();
+		}
+
+		void EndPixelShaderAdmission() noexcept
+		{
+			CatalogDB::Get().EndProducerAdmission();
+		}
+
+		PreparedObservation Prepare(
+			char a_stage,
+			const void* a_bytecode,
+			SIZE_T a_bytecodeLength,
+			ULONG a_stackFramesToSkip = 2) noexcept
+		{
+			return PrepareObservation(
+				a_stage,
+				a_bytecode,
+				static_cast<std::size_t>(a_bytecodeLength),
+				CatalogDB::Get().NextSequence(),
+				a_stackFramesToSkip);
+		}
+
+		template <class Shader>
+		void Complete(
+			PreparedObservation a_prepared,
+			HRESULT a_result,
+			Shader** a_output,
+			const CatalogDB::ProducerLease& a_lease) noexcept
+		{
+			ObservationOutcome observation;
+			observation.prepared = std::move(a_prepared);
+			observation.hresult = static_cast<std::int32_t>(a_result);
+			observation.outputRequested = a_output != nullptr;
+			observation.outputNonNull = a_output && *a_output;
+			const bool usable = SUCCEEDED(a_result)
+				&& observation.outputRequested
+				&& observation.outputNonNull;
+			observation.finalIsStock = usable;
+			observation.finalIsNull =
+				observation.outputRequested && !observation.outputNonNull;
+			CatalogDB::Get().EnqueueObservation(
+				std::move(observation), &a_lease);
+		}
+
+		void* PreparePixelShaderBytecode(
+			const void* a_bytecode,
+			std::size_t a_bytecodeLength) noexcept
+		{
+			auto* token = new (std::nothrow) PixelToken{
+				Prepare('p', a_bytecode, a_bytecodeLength, 3)
+			};
+			if (!token)
+				CatalogDB::Get().RecordAllocationFailure();
+			return token;
+		}
+
+		void ObserveOriginalPixelShader(
+			void*,
+			const cs::sha1::Sha1Result& a_sha,
+			ID3D11PixelShader* a_shader) noexcept
+		{
+			const auto result =
+				shader_tracker::TrackPixelShader(a_shader, a_sha);
+			if (result == shader_tracker::TrackResult::kAllocationFailure)
+				CatalogDB::Get().RecordAllocationFailure();
+			else if (result == shader_tracker::TrackResult::kAmbiguousOrigin)
+				CatalogDB::Get().RecordHookObserverGap();
+		}
+
+		void CompletePixelShader(
+			void* a_token,
+			const cs::engine::PixelShaderSwapCompletion& a_completion) noexcept
+		{
+			std::unique_ptr<PixelToken> token(
+				static_cast<PixelToken*>(a_token));
+			if (!token)
 				return;
+			auto& prepared = token->prepared;
 
-			CatalogEntry e{};
-			e.stage = stage;
-			e.bytecode_size = len;
-			e.source_va = reinterpret_cast<std::uintptr_t>(bytecode);
-			e.thread_id = ::GetCurrentThreadId();
-			LARGE_INTEGER c;
-			QueryPerformanceCounter(&c);
-			e.timestamp_qpc = c.QuadPart;
-
-			// SHA1 over the raw bytecode; deterministic across runtimes/processes.
-			const auto hash = Sha1Compute(bytecode, len);
-			e.sha1_bytes = hash.bytes;
-
-			// Cheap stack capture (RVAs only); symbolication is deferred to the writer.
-			void* frames[4] = {};
-			CaptureStackBackTrace(stackFramesToSkip, 4, frames, nullptr);
-			for (int i = 0; i < 4; ++i) e.stack_frames[i] = frames[i];
-
-			const auto& ctx = context::g_ctx;
-			if (ctx.active && ctx.subclass_name) {
-				e.subclass_name      = ctx.subclass_name;
-				e.has_subclass       = true;
-				e.technique_bits     = ctx.technique_bits;
-				e.has_technique_bits = (ctx.technique_bits != 0);
+			if (a_completion.finalIsReplacement
+				&& a_completion.finalOutput
+				&& prepared.digest) {
+				Sha1Result sha{};
+				sha.bytes = prepared.digest->sha1;
+				const auto result = shader_tracker::TrackPixelShader(
+					a_completion.finalOutput, sha, true);
+				if (result == shader_tracker::TrackResult::kAllocationFailure)
+					CatalogDB::Get().RecordAllocationFailure();
+				else if (result
+					== shader_tracker::TrackResult::kAmbiguousOrigin)
+					CatalogDB::Get().RecordHookObserverGap();
 			}
 
-			// Retain a DXBC copy for deferred reflection; NOTHROW avoids termination from allocation in this noexcept hot path, and failures/oversize enqueue base-row-only.
-			if (len <= kMaxRetainedShaderBytes) {
-				std::unique_ptr<std::byte[]> buf(new (std::nothrow) std::byte[len]);
-				if (buf) {
-					std::memcpy(buf.get(), bytecode, len);
-					e.bytecode = std::move(buf);
-				}
+			std::optional<Sha1Result> attributionSha;
+			const auto& attribution = context::g_ctx;
+			if (prepared.digest && attribution.active
+				&& attribution.subclass_name) {
+				Sha1Result sha{};
+				sha.bytes = prepared.digest->sha1;
+				attributionSha = sha;
 			}
 
-			CatalogDB::Get().EnqueueShader(std::move(e));
-		}
+			ObservationOutcome observation;
+			observation.prepared = std::move(prepared);
+			observation.hresult = a_completion.originalResult;
+			observation.outputRequested = a_completion.outputRequested;
+			observation.outputNonNull =
+				a_completion.stockOutput != nullptr;
+			observation.resolverInvoked =
+				a_completion.resolverInvoked;
+			observation.resolverReportedReplacement =
+				a_completion.resolverReportedReplacement;
+			observation.finalIsStock = a_completion.finalIsStock;
+			observation.finalIsReplacement =
+				a_completion.finalIsReplacement;
+			observation.finalIsNull = a_completion.finalIsNull;
+			CatalogDB::Get().EnqueueObservationAdmitted(
+				std::move(observation));
 
-		void ObservePixelShaderBytecode(const void* a_bytecode, std::size_t a_bytecodeLength) noexcept
-		{
-			RecordEntry('p', a_bytecode, a_bytecodeLength, 3);
-		}
-
-		void ObserveOriginalPixelShader(const cs::sha1::Sha1Result& a_sha, ID3D11PixelShader* a_shader) noexcept
-		{
-			shader_tracker::TrackPixelShader(a_shader, a_sha);
-		}
-
-		void ObserveResolvedPixelShader(const cs::sha1::Sha1Result& a_sha, ID3D11PixelShader* a_shader) noexcept
-		{
-			if (a_shader)
-				shader_tracker::TrackPixelShader(a_shader, a_sha, true);
+			if (attributionSha) {
+				CatalogDB::Get().EnqueueAttributionAdmitted(
+					*attributionSha,
+					attribution.subclass_name,
+					attribution.technique_bits,
+					AttributionKind::kCreationContext,
+					CreationAttributionObjectKind(
+						a_completion.finalIsStock,
+						a_completion.finalIsReplacement));
+			}
 		}
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateVertexShaderHook::thunk(
-		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
-		ID3D11ClassLinkage* a_linkage, ID3D11VertexShader** a_out)
+		ID3D11Device* a_this,
+		const void* a_bytecode,
+		SIZE_T a_bytecode_len,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11VertexShader** a_out)
 	{
-		RecordEntry('v', a_bytecode, a_bytecode_len);
-		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto prepared = lease
+			? Prepare('v', a_bytecode, a_bytecode_len)
+			: PreparedObservation{};
+		const HRESULT result = func(
+			a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (lease)
+			Complete(std::move(prepared), result, a_out, lease);
+		return result;
 	}
 
 	void STDMETHODCALLTYPE PSSetShaderHook::thunk(
-		ID3D11DeviceContext*       a_this,
-		ID3D11PixelShader*         a_shader,
+		ID3D11DeviceContext* a_this,
+		ID3D11PixelShader* a_shader,
 		ID3D11ClassInstance* const* a_classInstances,
-		UINT                       a_numClassInstances)
+		UINT a_numClassInstances)
 	{
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
 		func(a_this, a_shader, a_classInstances, a_numClassInstances);
 
-		const auto ctx = context::CurrentOrSticky();
-		if (!ctx.active || !ctx.subclass_name)
+		if (!lease) {
+			context::ClearSticky();
 			return;
-		if (!a_shader)
+		}
+		const auto current = context::CurrentOrSticky();
+		if (!current.active || !current.subclass_name || !a_shader) {
+			context::ClearSticky();
 			return;
+		}
 
 		g_scopedBinds.fetch_add(1, std::memory_order_relaxed);
-		Sha1Result sha{};
-		if (shader_tracker::TryGetPixelShaderSha1(a_shader, sha)) {
+		shader_tracker::Lookup lookup;
+		if (shader_tracker::TryGetPixelShader(a_shader, lookup)) {
+			if (lookup.ambiguousOrigin) {
+				CatalogDB::Get().RecordHookObserverGap();
+				context::ClearSticky();
+				return;
+			}
 			g_matchedBinds.fetch_add(1, std::memory_order_relaxed);
-			CatalogDB::Get().EnqueueAttribution(sha, ctx.subclass_name, ctx.technique_bits);
+			CatalogDB::Get().EnqueueAttribution(
+				lookup.sha,
+				current.subclass_name,
+				current.technique_bits,
+				AttributionKind::kObservedBinding,
+				lookup.alias
+					? AttributionObjectKind::kReplacementUnknown
+					: AttributionObjectKind::kStock,
+				&lease);
 		} else {
-			const auto miss = g_missedBinds.fetch_add(1, std::memory_order_relaxed);
+			const auto miss = g_missedBinds.fetch_add(
+				1, std::memory_order_relaxed);
 			if (miss < 8)
-				L->debug("PSSetShader in {} scope missed pixel-shader tracker", ctx.subclass_name);
+				L->debug(
+					"PSSetShader in {} scope missed pixel-shader tracker",
+					current.subclass_name);
 		}
 		context::ClearSticky();
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateGeometryShaderHook::thunk(
-		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
-		ID3D11ClassLinkage* a_linkage, ID3D11GeometryShader** a_out)
+		ID3D11Device* a_this,
+		const void* a_bytecode,
+		SIZE_T a_bytecode_len,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11GeometryShader** a_out)
 	{
-		RecordEntry('g', a_bytecode, a_bytecode_len);
-		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto prepared = lease
+			? Prepare('g', a_bytecode, a_bytecode_len)
+			: PreparedObservation{};
+		const HRESULT result = func(
+			a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (lease)
+			Complete(std::move(prepared), result, a_out, lease);
+		return result;
+	}
+
+	HRESULT STDMETHODCALLTYPE CreateGeometryShaderWithStreamOutputHook::thunk(
+		ID3D11Device* a_this,
+		const void* a_bytecode,
+		SIZE_T a_bytecode_len,
+		const D3D11_SO_DECLARATION_ENTRY* a_declaration,
+		UINT a_entry_count,
+		const UINT* a_strides,
+		UINT a_stride_count,
+		UINT a_rasterized_stream,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11GeometryShader** a_out)
+	{
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto prepared = lease
+			? Prepare('g', a_bytecode, a_bytecode_len)
+			: PreparedObservation{};
+		if (lease) {
+			prepared.streamOutput = PrepareStreamOutputIdentity(
+				a_declaration,
+				a_entry_count,
+				a_strides,
+				a_stride_count,
+				a_rasterized_stream);
+		}
+		const HRESULT result = func(
+			a_this,
+			a_bytecode,
+			a_bytecode_len,
+			a_declaration,
+			a_entry_count,
+			a_strides,
+			a_stride_count,
+			a_rasterized_stream,
+			a_linkage,
+			a_out);
+		if (lease)
+			Complete(std::move(prepared), result, a_out, lease);
+		return result;
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateComputeShaderHook::thunk(
-		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
-		ID3D11ClassLinkage* a_linkage, ID3D11ComputeShader** a_out)
+		ID3D11Device* a_this,
+		const void* a_bytecode,
+		SIZE_T a_bytecode_len,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11ComputeShader** a_out)
 	{
-		RecordEntry('c', a_bytecode, a_bytecode_len);
-		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto prepared = lease
+			? Prepare('c', a_bytecode, a_bytecode_len)
+			: PreparedObservation{};
+		const HRESULT result = func(
+			a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (lease)
+			Complete(std::move(prepared), result, a_out, lease);
+		return result;
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateHullShaderHook::thunk(
-		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
-		ID3D11ClassLinkage* a_linkage, ID3D11HullShader** a_out)
+		ID3D11Device* a_this,
+		const void* a_bytecode,
+		SIZE_T a_bytecode_len,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11HullShader** a_out)
 	{
-		RecordEntry('h', a_bytecode, a_bytecode_len);
-		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto prepared = lease
+			? Prepare('h', a_bytecode, a_bytecode_len)
+			: PreparedObservation{};
+		const HRESULT result = func(
+			a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (lease)
+			Complete(std::move(prepared), result, a_out, lease);
+		return result;
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateDomainShaderHook::thunk(
-		ID3D11Device* a_this, const void* a_bytecode, SIZE_T a_bytecode_len,
-		ID3D11ClassLinkage* a_linkage, ID3D11DomainShader** a_out)
+		ID3D11Device* a_this,
+		const void* a_bytecode,
+		SIZE_T a_bytecode_len,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11DomainShader** a_out)
 	{
-		RecordEntry('d', a_bytecode, a_bytecode_len);
-		return func(a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto prepared = lease
+			? Prepare('d', a_bytecode, a_bytecode_len)
+			: PreparedObservation{};
+		const HRESULT result = func(
+			a_this, a_bytecode, a_bytecode_len, a_linkage, a_out);
+		if (lease)
+			Complete(std::move(prepared), result, a_out, lease);
+		return result;
 	}
 
-	void InstallAll(ID3D11Device* a_device)
+	bool InstallAll(ID3D11Device* a_device)
 	{
-		// D3D11 device vtable slots from d3d11-device-vtable-map.md; identical across OG/NG/AE.
-		stl::detour_vfunc<12, CreateVertexShaderHook  >(a_device);
-		stl::detour_vfunc<13, CreateGeometryShaderHook>(a_device);
-		const bool observerRegistered = cs::engine::RegisterPixelShaderSwapObserver({
-			&ObservePixelShaderBytecode,
-			&ObserveOriginalPixelShader,
-			&ObserveResolvedPixelShader
-		});
-		if (!observerRegistered)
+		if (!CreateVertexShaderHook::func)
+			stl::detour_vfunc<12, CreateVertexShaderHook>(a_device);
+		if (!CreateGeometryShaderHook::func)
+			stl::detour_vfunc<13, CreateGeometryShaderHook>(a_device);
+		if (!CreateGeometryShaderWithStreamOutputHook::func)
+			stl::detour_vfunc<14, CreateGeometryShaderWithStreamOutputHook>(a_device);
+		bool observerRegistered =
+			g_pixelObserverRegistered.load(std::memory_order_acquire);
+		if (!observerRegistered) {
+			observerRegistered =
+				cs::engine::RegisterPixelShaderSwapObserver({
+					&BeginPixelShaderAdmission,
+					&EndPixelShaderAdmission,
+					&PreparePixelShaderBytecode,
+					&ObserveOriginalPixelShader,
+					&CompletePixelShader
+				});
+			if (observerRegistered) {
+				g_pixelObserverRegistered.store(
+					true, std::memory_order_release);
+			}
+		}
+		if (!observerRegistered) {
 			L->error("Pixel-shader catalog observer registration failed.");
-		stl::detour_vfunc<16, CreateHullShaderHook    >(a_device);
-		stl::detour_vfunc<17, CreateDomainShaderHook  >(a_device);
-		stl::detour_vfunc<18, CreateComputeShaderHook >(a_device);
+		}
+		cs::engine::SetPixelShaderSwapBrokerDevice(a_device);
+		if (!CreateHullShaderHook::func)
+			stl::detour_vfunc<16, CreateHullShaderHook>(a_device);
+		if (!CreateDomainShaderHook::func)
+			stl::detour_vfunc<17, CreateDomainShaderHook>(a_device);
+		if (!CreateComputeShaderHook::func)
+			stl::detour_vfunc<18, CreateComputeShaderHook>(a_device);
 
 		ID3D11DeviceContext* context = nullptr;
 		a_device->GetImmediateContext(&context);
-		if (context) {
+		if (context && !PSSetShaderHook::func) {
 			stl::detour_vfunc<9, PSSetShaderHook>(context);
-			context->Release();
-			g_psSetShaderHookInstalled.store(true, std::memory_order_release);
 		}
+		if (context)
+			context->Release();
+		const HookCoverage coverage{
+			CreateVertexShaderHook::func != nullptr,
+			CreateGeometryShaderHook::func != nullptr,
+			CreateGeometryShaderWithStreamOutputHook::func != nullptr,
+			cs::engine::PixelShaderSwapBrokerHooksInstalled(),
+			CreateHullShaderHook::func != nullptr,
+			CreateDomainShaderHook::func != nullptr,
+			CreateComputeShaderHook::func != nullptr,
+			PSSetShaderHook::func != nullptr,
+			observerRegistered
+		};
+		g_psSetShaderHookInstalled.store(
+			coverage.pixelBinding, std::memory_order_release);
+		if (coverage.Complete())
+			CatalogDB::Get().MarkHookCoverageReady();
+		else {
+			CatalogDB::Get().RecordHookObserverGap();
+			L->error("Shader catalog hook coverage is incomplete.");
+		}
+		return coverage.Complete();
 	}
 
 	RuntimeAttributionStats GetRuntimeAttributionStats()

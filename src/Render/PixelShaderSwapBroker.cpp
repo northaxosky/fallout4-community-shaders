@@ -4,6 +4,8 @@
 #include "PCH.h"
 
 #include <atomic>
+#include <algorithm>
+#include <array>
 #include <d3d11.h>
 #include <memory>
 #include <mutex>
@@ -14,6 +16,7 @@ namespace cs::engine
 	namespace
 	{
 		using ObserverList = std::vector<PixelShaderSwapObserver>;
+		constexpr std::size_t kMaxObservers = 8;
 
 		auto* L = cs::log::Get("cs.render.pixelshaderswap");
 
@@ -41,33 +44,56 @@ namespace cs::engine
 					return func(a_this, a_bytecode, a_bytecodeLength, a_linkage, a_out);
 
 				const auto observers = g_observers.load(std::memory_order_acquire);
-				const bool validBytecode = a_bytecode && a_bytecodeLength != 0;
-				if (validBytecode && observers) {
-					for (const auto& observer : *observers) {
-						if (observer.observeBytecode)
-							observer.observeBytecode(a_bytecode, a_bytecodeLength);
+				std::array<PixelShaderSwapObserverInvocation, kMaxObservers>
+					invocations{};
+				std::size_t observerCount = 0;
+				if (observers) {
+					observerCount = std::min(observers->size(), kMaxObservers);
+					for (std::size_t i = 0; i < observerCount; ++i) {
+						invocations[i] = BeginPixelShaderSwapObserver(
+							(*observers)[i], a_bytecode, a_bytecodeLength);
 					}
 				}
 
 				const HRESULT hr = func(a_this, a_bytecode, a_bytecodeLength, a_linkage, a_out);
-				if (FAILED(hr) || !a_out || !*a_out || !validBytecode)
-					return hr;
+				ID3D11PixelShader* stockOutput = a_out ? *a_out : nullptr;
+				const bool canResolve = SUCCEEDED(hr)
+					&& stockOutput
+					&& a_bytecode
+					&& a_bytecodeLength != 0;
+				bool resolverInvoked = false;
+				bool resolverReportedReplacement = false;
+				if (canResolve) {
+					const auto hash = sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
+					if (observers) {
+						for (std::size_t i = 0; i < observerCount; ++i) {
+							const auto& observer = (*observers)[i];
+							if (invocations[i].active
+								&& observer.observeOriginal) {
+								observer.observeOriginal(
+									invocations[i].token, hash, stockOutput);
+							}
+						}
+					}
 
-				const auto hash = sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
-				if (observers) {
-					for (const auto& observer : *observers) {
-						if (observer.observeOriginal)
-							observer.observeOriginal(hash, *a_out);
+					if (const auto resolver = g_resolver.load(std::memory_order_acquire)) {
+						resolverInvoked = true;
+						resolverReportedReplacement = resolver(
+							a_bytecode, a_bytecodeLength, hash, a_out);
 					}
 				}
 
-				if (const auto resolver = g_resolver.load(std::memory_order_acquire)) {
-					(void)resolver(a_bytecode, a_bytecodeLength, hash, a_out);
-					if (observers) {
-						for (const auto& observer : *observers) {
-							if (observer.observeResolved)
-								observer.observeResolved(hash, *a_out);
-						}
+				const auto completion = ClassifyPixelShaderSwapCompletion(
+					static_cast<std::int32_t>(hr),
+					a_out != nullptr,
+					stockOutput,
+					resolverInvoked,
+					resolverReportedReplacement,
+					a_out ? *a_out : nullptr);
+				if (observers) {
+					for (std::size_t i = 0; i < observerCount; ++i) {
+						CompletePixelShaderSwapObserver(
+							invocations[i], completion);
 					}
 				}
 				return hr;
@@ -83,8 +109,12 @@ namespace cs::engine
 				return;
 
 			stl::detour_vfunc<15, CreatePixelShaderHook>(g_device);
-			g_hookInstalled.store(true, std::memory_order_release);
-			L->info("Device-vtable hook installed (slot 15).");
+			const bool installed = CreatePixelShaderHook::func != nullptr;
+			g_hookInstalled.store(installed, std::memory_order_release);
+			if (installed)
+				L->info("Device-vtable hook installed (slot 15).");
+			else
+				L->error("Device-vtable hook slot 15 has no original.");
 		}
 
 		void RequestHookInstall()
@@ -128,7 +158,12 @@ namespace cs::engine
 
 	bool RegisterPixelShaderSwapObserver(PixelShaderSwapObserver a_observer)
 	{
-		if (!a_observer.observeBytecode && !a_observer.observeOriginal && !a_observer.observeResolved)
+		if (!a_observer.prepare && !a_observer.observeOriginal && !a_observer.complete)
+			return false;
+		if (static_cast<bool>(a_observer.beginAdmission)
+			!= static_cast<bool>(a_observer.endAdmission))
+			return false;
+		if (a_observer.prepare && !a_observer.complete)
 			return false;
 
 		{
@@ -136,11 +171,15 @@ namespace cs::engine
 			const auto current = g_observers.load(std::memory_order_acquire);
 			if (current) {
 				for (const auto& observer : *current) {
-					if (observer.observeBytecode == a_observer.observeBytecode
+					if (observer.beginAdmission == a_observer.beginAdmission
+						&& observer.endAdmission == a_observer.endAdmission
+						&& observer.prepare == a_observer.prepare
 						&& observer.observeOriginal == a_observer.observeOriginal
-						&& observer.observeResolved == a_observer.observeResolved)
+						&& observer.complete == a_observer.complete)
 						return false;
 				}
+				if (current->size() >= kMaxObservers)
+					return false;
 			}
 
 			auto updated = current
@@ -156,6 +195,8 @@ namespace cs::engine
 
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept
 	{
+		std::scoped_lock lock(g_installMutex);
+		InstallHookIfReady();
 		return g_hookInstalled.load(std::memory_order_acquire);
 	}
 
