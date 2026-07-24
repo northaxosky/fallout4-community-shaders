@@ -263,7 +263,8 @@ PS_OUTPUT main(PS_INPUT input)
     // (insns 7-20). Per-row ternary gives `movc rN, ...` which is the
     // closest fxc gets without [branch] making the issue worse.
     float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).y;
-    bool isNearPath = (depth < 0.01);
+    // Native near select is inclusive (exec-diff verified at exactly 0.01).
+    bool isNearPath = (depth <= 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
     float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
     float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;

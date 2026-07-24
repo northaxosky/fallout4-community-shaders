@@ -309,9 +309,10 @@ PS_OUTPUT main(PS_INPUT input)
     float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv,
                                            ddx_.xx, ddy_.xx).x;
 
+    // Native near select is inclusive (exec-diff verified at exactly 0.01).
     // Insn 4-17: depth-based matrix select.
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
-    bool isNearPath = (depth < 0.01);
+    bool isNearPath = (depth <= 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
     float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
     float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;

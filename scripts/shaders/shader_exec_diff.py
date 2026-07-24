@@ -275,13 +275,20 @@ DIRECTIONAL_DEPTH_NEW = """// Insn 4-17: depth-based matrix select.
     bool isNearPath = (depth <= 0.01);"""
 
 
+def _ensure_inclusive(text: str, old: str, new: str, transform: str) -> str:
+    # Idempotent: the shipped source may already carry the inclusive form.
+    if old not in text and text.count(new) == 1:
+        return text
+    return _replace_exact(text, old, new, transform)
+
+
 def apply_inclusive_depth_control(source: str, target: str) -> str:
     if target == "ambient_ibl_pass":
-        return _replace_exact(
+        return _ensure_inclusive(
             source, AMBIENT_DEPTH_OLD, AMBIENT_DEPTH_NEW, "inclusive-depth-control"
         )
     if target.startswith("bsdf_light_deferred_directional"):
-        return _replace_exact(
+        return _ensure_inclusive(
             source,
             DIRECTIONAL_DEPTH_OLD,
             DIRECTIONAL_DEPTH_NEW,
