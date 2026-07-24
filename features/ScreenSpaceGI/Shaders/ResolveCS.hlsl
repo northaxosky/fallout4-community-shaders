@@ -11,7 +11,7 @@ cbuffer ResolveCB : register(b0)
     uint gHasBounce;
     float gBounceStrength;
     float3 _pad;
-    float4 gViewToWorld[3];
+    float4 gViewToWorld[3]; // Raw Ni camera rows: forward, up, right.
 };
 
 Texture2D<float> gAoRaw : register(t0); // XeGTAO occlusion: 0 open, 1 occluded
@@ -24,10 +24,11 @@ RWTexture2D<float4> gAO : register(u1);
 
 float3 ViewToWorldDirection(float3 direction)
 {
-    return normalize(float3(
-        dot(gViewToWorld[0].xyz, direction),
-        dot(gViewToWorld[1].xyz, direction),
-        dot(gViewToWorld[2].xyz, direction)));
+    float3 directionNi = direction.zyx;
+    return normalize(
+        directionNi.x * gViewToWorld[0].xyz +
+        directionNi.y * gViewToWorld[1].xyz +
+        directionNi.z * gViewToWorld[2].xyz);
 }
 
 [numthreads(8, 8, 1)]

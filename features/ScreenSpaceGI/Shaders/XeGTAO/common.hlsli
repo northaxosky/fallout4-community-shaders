@@ -37,7 +37,7 @@ cbuffer XeGTAOCB : register(b0)
 #ifdef SSGI_BOUNCE
 	float2 RadianceScale;
 	float2 _bouncePad;
-	float4 ViewToWorld[3];
+	float4 ViewToWorld[3]; // Raw Ni camera rows: forward, up, right.
 #endif
 };
 
@@ -64,10 +64,11 @@ float2 ViewToUV(const float3 viewPos)
 #ifdef SSGI_BOUNCE
 float3 ViewToWorldDirection(float3 direction)
 {
-	return normalize(float3(
-		dot(ViewToWorld[0].xyz, direction),
-		dot(ViewToWorld[1].xyz, direction),
-		dot(ViewToWorld[2].xyz, direction)));
+	float3 directionNi = direction.zyx;
+	return normalize(
+		directionNi.x * ViewToWorld[0].xyz +
+		directionNi.y * ViewToWorld[1].xyz +
+		directionNi.z * ViewToWorld[2].xyz);
 }
 #endif
 
