@@ -3,6 +3,8 @@
 #include <d3d11.h>
 #include <d3d11shader.h>
 #include <d3dcompiler.h>
+#include <bcrypt.h>
+#include <winver.h>
 #include <wrl/client.h>
 
 #include <algorithm>
@@ -22,24 +24,61 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
+
+#ifndef FO4CS_EXEC_HARNESS_SOURCE_SHA256
+#define FO4CS_EXEC_HARNESS_SOURCE_SHA256 "unembedded"
+#endif
 
 using Microsoft::WRL::ComPtr;
 
 namespace
 {
+enum class Fixture
+{
+    Adversarial,
+    Native,
+};
+
+const char* FixtureName(Fixture fixture)
+{
+    return fixture == Fixture::Native ? "native" : "adversarial";
+}
+
+constexpr const char* FrontFaceProbeVersion = "front-face-probe-v1";
+constexpr const char* FrontFaceProbeVertexSource =
+    "float4 main(uint id:SV_VertexID):SV_Position{"
+    "float2 p[3]={float2(-1,-1),float2(3,-1),float2(-1,3)};"
+    "return float4(p[id],0,1);}";
+constexpr const char* FrontFaceProbePixelSource =
+    "float main(bool front:SV_IsFrontFace):SV_Target{"
+    "return front?1.0f:0.0f;}";
+
+struct FrontFaceProbeResult
+{
+    bool clockwiseStateFront = false;
+    bool counterClockwiseStateFront = false;
+};
+
 struct Options
 {
     std::string referencePath;
     std::string candidatePath;
     UINT seeds = 8;
+    UINT seedBase = 0;
     UINT width = 256;
     UINT height = 256;
     float toleranceAbsolute = 2.0e-3f;
     float toleranceRelative = 1.0e-2f;
     bool verbose = false;
     bool xegtaoAo = false;
+    bool selfTest = false;
+    Fixture fixture = Fixture::Adversarial;
+    std::string measurementJsonPath;
+    UINT minimumBucketPopulation = 64;
+    std::vector<std::string> requiredBuckets;
     std::string referencePrefilterPath;
     std::string candidatePrefilterPath;
 };
@@ -122,22 +161,31 @@ struct InputScenario
     UINT id = 0;
     UINT randomSeed = 0;
     bool dedicated = false;
-    std::vector<std::string> coverageBuckets;
+    std::string semanticId;
     std::map<std::string, float> controls;
 };
 
-struct AxisChoice
+struct ResourceFormatRecord
 {
-    std::string bucket;
-    std::map<std::string, float> controls;
-};
+    UINT bindPoint = 0;
+    std::string dimension;
+    std::string resourceFormat;
+    std::string srvFormat;
 
-using CoverageAxis = std::vector<AxisChoice>;
+    bool operator<(const ResourceFormatRecord& other) const
+    {
+        return std::tie(bindPoint, dimension, resourceFormat, srvFormat) <
+            std::tie(
+                other.bindPoint, other.dimension,
+                other.resourceFormat, other.srvFormat);
+    }
+};
 
 struct BoundConstantBuffer
 {
     UINT bindPoint = 0;
     ComPtr<ID3D11Buffer> buffer;
+    std::vector<float> values;
 };
 
 struct BoundResource
@@ -145,12 +193,19 @@ struct BoundResource
     UINT bindPoint = 0;
     ComPtr<ID3D11Resource> resource;
     ComPtr<ID3D11ShaderResourceView> view;
+    UINT width = 0;
+    UINT height = 0;
+    UINT arraySize = 0;
+    std::vector<std::uint8_t> encodedBytes;
+    std::vector<float> decodedValues;
+    ResourceFormatRecord format;
 };
 
 struct BoundSampler
 {
     UINT bindPoint = 0;
     ComPtr<ID3D11SamplerState> sampler;
+    D3D11_SAMPLER_DESC descriptor{};
 };
 
 struct SeedResources
@@ -158,6 +213,7 @@ struct SeedResources
     std::vector<BoundConstantBuffer> constantBuffers;
     std::vector<BoundResource> resources;
     std::vector<BoundSampler> samplers;
+    std::vector<ResourceFormatRecord> formats;
 };
 
 using Pixel = std::array<float, 4>;
@@ -191,21 +247,28 @@ struct DivergentPixel
 
 struct ComparisonStats
 {
+    std::uint64_t totalPixels = 0;
     std::uint64_t totalChannels = 0;
     std::uint64_t divergentChannels = 0;
     std::uint64_t divergentPixels = 0;
     double maximumAbsoluteDifference = 0.0;
     double maximumRelativeDifference = 0.0;
+    double absoluteDifferenceSum = 0.0;
+    double relativeDifferenceSum = 0.0;
     WorstComponent worst;
     std::vector<DivergentPixel> topDivergences;
 };
 
 struct CoverageStats
 {
-    UINT cases = 0;
-    std::uint64_t divergentPixels = 0;
-    double maximumAbsoluteDifference = 0.0;
-    double maximumRelativeDifference = 0.0;
+    std::uint64_t population = 0;
+    ComparisonStats comparison;
+};
+
+struct BucketMask
+{
+    std::uint64_t population = 0;
+    std::vector<std::uint8_t> pixels;
 };
 
 [[noreturn]] void ThrowFailure(const std::string& message)
@@ -222,6 +285,216 @@ void CheckHRESULT(HRESULT result, const std::string& action)
                 << static_cast<unsigned long>(result) << ")";
         ThrowFailure(message.str());
     }
+}
+
+class Sha256
+{
+public:
+    Sha256()
+    {
+        CheckStatus(
+            BCryptOpenAlgorithmProvider(
+                &algorithm_, BCRYPT_SHA256_ALGORITHM, nullptr, 0),
+            "BCryptOpenAlgorithmProvider");
+        DWORD objectSize = 0;
+        DWORD returned = 0;
+        CheckStatus(
+            BCryptGetProperty(
+                algorithm_, BCRYPT_OBJECT_LENGTH,
+                reinterpret_cast<PUCHAR>(&objectSize), sizeof(objectSize),
+                &returned, 0),
+            "BCryptGetProperty");
+        object_.resize(objectSize);
+        CheckStatus(
+            BCryptCreateHash(
+                algorithm_, &hash_, object_.data(), objectSize,
+                nullptr, 0, 0),
+            "BCryptCreateHash");
+    }
+
+    Sha256(const Sha256&) = delete;
+    Sha256& operator=(const Sha256&) = delete;
+
+    ~Sha256()
+    {
+        if (hash_ != nullptr)
+            BCryptDestroyHash(hash_);
+        if (algorithm_ != nullptr)
+            BCryptCloseAlgorithmProvider(algorithm_, 0);
+    }
+
+    void Add(const void* data, std::size_t size)
+    {
+        if (finished_)
+            ThrowFailure("SHA-256 input added after finalization");
+        const auto* bytes = static_cast<const std::uint8_t*>(data);
+        while (size != 0)
+        {
+            const ULONG chunk = static_cast<ULONG>(std::min<std::size_t>(
+                size, std::numeric_limits<ULONG>::max()));
+            CheckStatus(
+                BCryptHashData(
+                    hash_, const_cast<PUCHAR>(bytes), chunk, 0),
+                "BCryptHashData");
+            bytes += chunk;
+            size -= chunk;
+        }
+    }
+
+    template <class Value>
+    void AddValue(const Value& value)
+    {
+        static_assert(std::is_trivially_copyable_v<Value>);
+        Add(&value, sizeof(value));
+    }
+
+    void AddString(const std::string& value)
+    {
+        const std::uint64_t size = value.size();
+        AddValue(size);
+        Add(value.data(), value.size());
+    }
+
+    std::string Finish()
+    {
+        if (finished_)
+            return digest_;
+        std::array<std::uint8_t, 32> bytes{};
+        CheckStatus(
+            BCryptFinishHash(
+                hash_, bytes.data(), static_cast<ULONG>(bytes.size()), 0),
+            "BCryptFinishHash");
+        std::ostringstream text;
+        text << std::hex << std::setfill('0');
+        for (const std::uint8_t byte : bytes)
+            text << std::setw(2) << static_cast<unsigned>(byte);
+        digest_ = text.str();
+        finished_ = true;
+        return digest_;
+    }
+
+private:
+    static void CheckStatus(NTSTATUS status, const char* action)
+    {
+        if (status < 0)
+            ThrowFailure(std::string(action) + " failed");
+    }
+
+    BCRYPT_ALG_HANDLE algorithm_ = nullptr;
+    BCRYPT_HASH_HANDLE hash_ = nullptr;
+    std::vector<std::uint8_t> object_;
+    bool finished_ = false;
+    std::string digest_;
+};
+
+struct RuntimeComponent
+{
+    std::string name;
+    std::string state = "unavailable";
+    std::string version;
+    std::string sha256;
+    std::uint64_t size = 0;
+};
+
+std::string FileVersion(const wchar_t* path)
+{
+    DWORD handle = 0;
+    const DWORD size = GetFileVersionInfoSizeW(path, &handle);
+    if (size == 0)
+        return "unknown";
+    std::vector<std::uint8_t> bytes(size);
+    if (!GetFileVersionInfoW(path, 0, size, bytes.data()))
+        return "unknown";
+    VS_FIXEDFILEINFO* info = nullptr;
+    UINT infoSize = 0;
+    if (!VerQueryValueW(
+            bytes.data(), L"\\",
+            reinterpret_cast<void**>(&info), &infoSize) ||
+        info == nullptr ||
+        infoSize < static_cast<UINT>(sizeof(VS_FIXEDFILEINFO)))
+    {
+        return "unknown";
+    }
+    std::ostringstream version;
+    version << HIWORD(info->dwFileVersionMS) << "."
+            << LOWORD(info->dwFileVersionMS) << "."
+            << HIWORD(info->dwFileVersionLS) << "."
+            << LOWORD(info->dwFileVersionLS);
+    return version.str();
+}
+
+RuntimeComponent FingerprintRuntimeComponent(
+    const wchar_t* moduleName,
+    const char* stableName)
+{
+    RuntimeComponent component;
+    component.name = stableName;
+    HMODULE module = LoadLibraryW(moduleName);
+    if (module == nullptr)
+        return component;
+
+    std::vector<wchar_t> path(32768);
+    const DWORD pathLength = GetModuleFileNameW(
+        module, path.data(), static_cast<DWORD>(path.size()));
+    if (pathLength == 0 ||
+        pathLength >= static_cast<DWORD>(path.size()))
+    {
+        FreeLibrary(module);
+        return component;
+    }
+
+    HANDLE file = CreateFileW(
+        path.data(), GENERIC_READ,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE)
+    {
+        FreeLibrary(module);
+        return component;
+    }
+
+    LARGE_INTEGER fileSize{};
+    Sha256 hash;
+    std::array<std::uint8_t, 65536> buffer{};
+    bool complete = GetFileSizeEx(file, &fileSize) != FALSE;
+    while (complete)
+    {
+        DWORD bytesRead = 0;
+        if (!::ReadFile(
+                file, buffer.data(), static_cast<DWORD>(buffer.size()),
+                &bytesRead, nullptr))
+        {
+            complete = false;
+            break;
+        }
+        if (bytesRead == 0)
+            break;
+        hash.Add(buffer.data(), bytesRead);
+    }
+    CloseHandle(file);
+    if (complete && fileSize.QuadPart >= 0)
+    {
+        component.state = "available";
+        component.version = FileVersion(path.data());
+        component.sha256 = hash.Finish();
+        component.size = static_cast<std::uint64_t>(fileSize.QuadPart);
+    }
+    FreeLibrary(module);
+    return component;
+}
+
+std::vector<RuntimeComponent> RuntimeComponents()
+{
+    std::vector<RuntimeComponent> components{
+        FingerprintRuntimeComponent(L"d3d10warp.dll", "d3d10warp.dll"),
+        FingerprintRuntimeComponent(L"d3d11.dll", "d3d11.dll"),
+    };
+    std::sort(
+        components.begin(), components.end(),
+        [](const RuntimeComponent& left, const RuntimeComponent& right) {
+            return left.name < right.name;
+        });
+    return components;
 }
 
 std::vector<std::uint8_t> ReadFile(const std::string& path)
@@ -553,24 +826,8 @@ void WarnMapDifference(
     const std::map<UINT, Value>& candidate)
 {
     if (reference == candidate)
-    {
         return;
-    }
-    std::cerr << "WARNING: candidate " << label << " contract differs from reference\n";
-    for (const auto& [bindPoint, value] : reference)
-    {
-        const auto found = candidate.find(bindPoint);
-        if (found == candidate.end())
-            std::cerr << "  reference-only register " << bindPoint << "\n";
-        else if (found->second != value)
-            std::cerr << "  register " << bindPoint << " has a different declaration\n";
-    }
-    for (const auto& [bindPoint, value] : candidate)
-    {
-        (void)value;
-        if (reference.count(bindPoint) == 0)
-            std::cerr << "  candidate-only register " << bindPoint << "\n";
-    }
+    ThrowFailure(std::string("contract_mismatch: ") + label);
 }
 
 void WarnContractDifferences(
@@ -607,20 +864,10 @@ void WarnContractDifferences(
         for (UINT offset = 0; offset < binding.bindCount; ++offset)
             candidateSamplers.insert(binding.bindPoint + offset);
     if (referenceSamplers != candidateSamplers)
-    {
-        std::cerr << "WARNING: candidate sampler-register contract differs from reference\n";
-        for (const UINT bindPoint : referenceSamplers)
-            if (candidateSamplers.count(bindPoint) == 0)
-                std::cerr << "  reference-only register " << bindPoint << "\n";
-        for (const UINT bindPoint : candidateSamplers)
-            if (referenceSamplers.count(bindPoint) == 0)
-                std::cerr << "  candidate-only register " << bindPoint << "\n";
-    }
+        ThrowFailure("contract_mismatch: sampler registers");
     if (referenceDisassembly.comparisonSamplers !=
         candidateDisassembly.comparisonSamplers)
-    {
-        std::cerr << "WARNING: candidate comparison-sampler declarations differ from reference\n";
-    }
+        ThrowFailure("contract_mismatch: comparison samplers");
 
     const auto signatureKey = [](const SignatureParameter& parameter) {
         return std::make_tuple(
@@ -634,9 +881,7 @@ void WarnContractDifferences(
     for (const SignatureParameter& parameter : candidate.inputs)
         candidateInputs.push_back(signatureKey(parameter));
     if (referenceInputs != candidateInputs)
-    {
-        std::cerr << "WARNING: candidate input signature differs from reference\n";
-    }
+        ThrowFailure("contract_mismatch: input signature");
 
     std::vector<decltype(signatureKey(reference.outputs.front()))> referenceOutputs;
     std::vector<decltype(signatureKey(reference.outputs.front()))> candidateOutputs;
@@ -645,9 +890,7 @@ void WarnContractDifferences(
     for (const SignatureParameter& parameter : candidate.outputs)
         candidateOutputs.push_back(signatureKey(parameter));
     if (referenceOutputs != candidateOutputs)
-    {
-        std::cerr << "WARNING: candidate output signature differs from reference\n";
-    }
+        ThrowFailure("contract_mismatch: output signature");
 }
 
 UINT ComponentCount(BYTE mask)
@@ -852,6 +1095,128 @@ ComPtr<ID3D11VertexShader> CreatePassthroughVertexShader(
     return shader;
 }
 
+FrontFaceProbeResult ProbeFrontFaceStates(
+    ID3D11Device* device,
+    ID3D11DeviceContext* context,
+    ID3D11RasterizerState* clockwiseState,
+    ID3D11RasterizerState* counterClockwiseState)
+{
+    const auto compile = [](const char* source, const char* target) {
+        ComPtr<ID3DBlob> bytecode;
+        ComPtr<ID3DBlob> errors;
+        const HRESULT result = D3DCompile(
+            source, std::strlen(source), FrontFaceProbeVersion,
+            nullptr, nullptr, "main", target,
+            D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &bytecode, &errors);
+        if (FAILED(result))
+        {
+            std::string message = "front_face_probe: shader compilation";
+            if (errors != nullptr)
+            {
+                message += ": ";
+                message.append(
+                    static_cast<const char*>(errors->GetBufferPointer()),
+                    errors->GetBufferSize());
+            }
+            ThrowFailure(message);
+        }
+        return bytecode;
+    };
+
+    const ComPtr<ID3DBlob> vertexBytecode =
+        compile(FrontFaceProbeVertexSource, "vs_5_0");
+    const ComPtr<ID3DBlob> pixelBytecode =
+        compile(FrontFaceProbePixelSource, "ps_5_0");
+    ComPtr<ID3D11VertexShader> vertexShader;
+    ComPtr<ID3D11PixelShader> pixelShader;
+    CheckHRESULT(
+        device->CreateVertexShader(
+            vertexBytecode->GetBufferPointer(), vertexBytecode->GetBufferSize(),
+            nullptr, &vertexShader),
+        "front_face_probe: CreateVertexShader");
+    CheckHRESULT(
+        device->CreatePixelShader(
+            pixelBytecode->GetBufferPointer(), pixelBytecode->GetBufferSize(),
+            nullptr, &pixelShader),
+        "front_face_probe: CreatePixelShader");
+
+    D3D11_TEXTURE2D_DESC targetDesc{};
+    targetDesc.Width = 1;
+    targetDesc.Height = 1;
+    targetDesc.MipLevels = 1;
+    targetDesc.ArraySize = 1;
+    targetDesc.Format = DXGI_FORMAT_R32_FLOAT;
+    targetDesc.SampleDesc.Count = 1;
+    targetDesc.Usage = D3D11_USAGE_DEFAULT;
+    targetDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+    D3D11_TEXTURE2D_DESC stagingDesc = targetDesc;
+    stagingDesc.Usage = D3D11_USAGE_STAGING;
+    stagingDesc.BindFlags = 0;
+    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+    ComPtr<ID3D11Texture2D> target;
+    ComPtr<ID3D11RenderTargetView> targetView;
+    ComPtr<ID3D11Texture2D> staging;
+    CheckHRESULT(
+        device->CreateTexture2D(&targetDesc, nullptr, &target),
+        "front_face_probe: CreateTexture2D");
+    CheckHRESULT(
+        device->CreateRenderTargetView(target.Get(), nullptr, &targetView),
+        "front_face_probe: CreateRenderTargetView");
+    CheckHRESULT(
+        device->CreateTexture2D(&stagingDesc, nullptr, &staging),
+        "front_face_probe: CreateTexture2D staging");
+
+    D3D11_DEPTH_STENCIL_DESC depthDesc{};
+    depthDesc.DepthEnable = FALSE;
+    depthDesc.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    depthDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    ComPtr<ID3D11DepthStencilState> depthState;
+    CheckHRESULT(
+        device->CreateDepthStencilState(&depthDesc, &depthState),
+        "front_face_probe: CreateDepthStencilState");
+
+    const auto render = [&](ID3D11RasterizerState* rasterizer) {
+        context->ClearState();
+        const float clear[4] = {0.25f, 0.0f, 0.0f, 0.0f};
+        context->ClearRenderTargetView(targetView.Get(), clear);
+        ID3D11RenderTargetView* rawTarget = targetView.Get();
+        context->OMSetRenderTargets(1, &rawTarget, nullptr);
+        context->OMSetDepthStencilState(depthState.Get(), 0);
+        D3D11_VIEWPORT viewport{};
+        viewport.Width = 1.0f;
+        viewport.Height = 1.0f;
+        viewport.MinDepth = 0.0f;
+        viewport.MaxDepth = 1.0f;
+        context->RSSetViewports(1, &viewport);
+        context->RSSetState(rasterizer);
+        context->IASetInputLayout(nullptr);
+        context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        context->VSSetShader(vertexShader.Get(), nullptr, 0);
+        context->PSSetShader(pixelShader.Get(), nullptr, 0);
+        context->Draw(3, 0);
+        context->OMSetRenderTargets(0, nullptr, nullptr);
+        context->CopyResource(staging.Get(), target.Get());
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        CheckHRESULT(
+            context->Map(staging.Get(), 0, D3D11_MAP_READ, 0, &mapped),
+            "front_face_probe: Map");
+        float value = 0.0f;
+        std::memcpy(&value, mapped.pData, sizeof(value));
+        context->Unmap(staging.Get(), 0);
+        if (value != 0.0f && value != 1.0f)
+            ThrowFailure("front_face_probe: invalid readback");
+        return value == 1.0f;
+    };
+
+    FrontFaceProbeResult result;
+    result.clockwiseStateFront = render(clockwiseState);
+    result.counterClockwiseStateFront = render(counterClockwiseState);
+    if (result.clockwiseStateFront == result.counterClockwiseStateFront)
+        ThrowFailure("front_face_probe: states are not complementary");
+    return result;
+}
+
 float RandomConstant(std::mt19937& random)
 {
     std::uniform_int_distribution<int> category(0, 9);
@@ -972,121 +1337,214 @@ float ScenarioControl(
     return found != scenario.controls.end() ? found->second : fallback;
 }
 
-void ExpandCoverageAxes(
-    const std::vector<CoverageAxis>& axes,
-    std::size_t axisIndex,
-    InputScenario scenario,
-    std::vector<InputScenario>& output)
-{
-    if (axisIndex == axes.size())
-    {
-        scenario.id = static_cast<UINT>(output.size());
-        scenario.randomSeed = 0xA511E9B3u + scenario.id * 0x9E3779B9u;
-        scenario.dedicated = true;
-        output.push_back(std::move(scenario));
-        return;
-    }
-
-    for (const AxisChoice& choice : axes[axisIndex])
-    {
-        InputScenario next = scenario;
-        next.coverageBuckets.push_back(choice.bucket);
-        next.controls.insert(choice.controls.begin(), choice.controls.end());
-        ExpandCoverageAxes(axes, axisIndex + 1, std::move(next), output);
-    }
-}
-
 std::vector<InputScenario> BuildInputScenarios(
     InputProfile profile,
-    UINT randomSeedCount)
+    Fixture fixture,
+    UINT randomSeedCount,
+    UINT seedBase)
 {
     std::vector<InputScenario> scenarios;
-    scenarios.reserve(randomSeedCount + 32);
+    scenarios.reserve(randomSeedCount + 24);
     for (UINT seed = 0; seed < randomSeedCount; ++seed)
-        scenarios.push_back({seed, seed, false, {}, {}});
+        scenarios.push_back(
+            {seed, seedBase + seed, false, "random-" + std::to_string(seed), {}});
 
-    std::vector<CoverageAxis> axes;
+    const auto add = [&](const std::string& id,
+                         std::initializer_list<std::pair<const std::string, float>>
+                             overrides) {
+        InputScenario scenario;
+        scenario.id = static_cast<UINT>(scenarios.size());
+        scenario.randomSeed =
+            seedBase + 0xA511E9B3u + scenario.id * 0x9E3779B9u;
+        scenario.dedicated = true;
+        scenario.semanticId = id;
+        if (profile == InputProfile::AmbientIbl)
+        {
+            scenario.controls = {
+                {"ambient_depth", 1.0f},
+                {"ambient_ibl", 1.0f},
+                {"ambient_skin", 1.0f},
+                {"ambient_rough01", 0.35f},
+                {"ambient_tap_skin", 1.0f},
+            };
+        }
+        else if (profile == InputProfile::DirectionalLighting)
+        {
+            scenario.controls = {
+                {"directional_depth", 1.0f},
+                {"directional_cascade", 2.0f},
+                {"directional_fade", 0.0f},
+                {"directional_light", 1.0f},
+                {"directional_brdf", 0.0f},
+                {"directional_skin", 0.0f},
+                {"directional_roughness", 0.45f},
+            };
+        }
+        else if (profile == InputProfile::DeferredPrepass)
+        {
+            scenario.controls = {
+                {"prepass_bypass_fade", 0.0f},
+                {"prepass_front_face", 1.0f},
+                {"prepass_normal_clamped", 0.0f},
+                {"prepass_smooth_gate_zero", 0.0f},
+                {"prepass_smooth_span", 1.0f},
+                {"prepass_flag_a", 0.0f},
+                {"prepass_flag_b", 0.0f},
+                {"prepass_scroll_x", 1.0f},
+                {"prepass_scroll_y", 1.0f},
+            };
+        }
+        for (const auto& [name, value] : overrides)
+            scenario.controls[name] = value;
+        scenarios.push_back(std::move(scenario));
+    };
+
     if (profile == InputProfile::AmbientIbl)
     {
-        axes = {
-            {
-                {"rough01=zero", {{"ambient_rough01", 0.0f}}},
-                {"rough01=mid", {{"ambient_rough01", 0.35f}}},
-                {"rough01=high", {{"ambient_rough01", 0.7f}}},
-            },
-            {
-                {"ibl=off", {{"ambient_ibl", 0.0f}}},
-                {"ibl=on", {{"ambient_ibl", 1.0f}}},
-            },
-            {
-                {"material=default", {{"ambient_skin", 0.0f}}},
-                {"material=skin", {{"ambient_skin", 1.0f}}},
-            },
-            {
-                {"depth-probe=near", {{"ambient_near", 1.0f}}},
-                {"depth-probe=far", {{"ambient_near", 0.0f}}},
-            },
-        };
+        add("depth-near", {{"ambient_depth", -1.0f}});
+        if (fixture == Fixture::Adversarial)
+            add("depth-equal", {{"ambient_depth", 0.0f}});
+        add("depth-far", {{"ambient_depth", 1.0f}});
+        add("ibl-off", {{"ambient_ibl", 0.0f}});
+        add("ibl-on", {{"ambient_ibl", 1.0f}});
+        add("material-default", {{"ambient_skin", 0.0f}});
+        add("material-skin", {{"ambient_skin", 1.0f}});
+        add("roughness-zero", {{"ambient_rough01", 0.0f}});
+        add("roughness-mid", {{"ambient_rough01", 0.35f}});
+        add("roughness-high", {{"ambient_rough01", 0.7f}});
+        add("skin-taps-default", {{"ambient_tap_skin", 0.0f}});
+        add("skin-taps-skin", {{"ambient_tap_skin", 1.0f}});
     }
     else if (profile == InputProfile::DirectionalLighting)
     {
-        axes = {
-            {
-                {"cascade=0", {{"directional_cascade", 0.0f}}},
-                {"cascade=1", {{"directional_cascade", 1.0f}}},
-                {"cascade=blend", {{"directional_cascade", 2.0f}}},
-            },
-            {
-                {"distance-fade=inside", {{"directional_fade", 0.0f}}},
-                {"distance-fade=outside", {{"directional_fade", 1.0f}}},
-            },
-            {
-                {"material=default", {{"directional_skin", 0.0f}}},
-                {"material=skin", {{"directional_skin", 1.0f}}},
-            },
-            {
-                {"light-range=inside", {{"directional_light", 1.0f}}},
-                {"light-range=outside", {{"directional_light", 0.0f}}},
-            },
-        };
+        add("depth-near", {{"directional_depth", -1.0f}});
+        if (fixture == Fixture::Adversarial)
+            add("depth-equal", {{"directional_depth", 0.0f}});
+        add("depth-far", {{"directional_depth", 1.0f}});
+        add("cascade-0", {{"directional_cascade", 0.0f}});
+        add("cascade-blend", {{"directional_cascade", 2.0f}});
+        add("cascade-1", {{"directional_cascade", 1.0f}});
+        add("fade-inside", {{"directional_fade", 0.0f}});
+        add("fade-outside", {{"directional_fade", 1.0f}});
+        add("light-front", {{"directional_light", 1.0f}});
+        add("light-grazing", {{"directional_light", 0.0f}});
+        add("light-back", {{"directional_light", -1.0f}});
+        add("material-default", {{"directional_skin", 0.0f}});
+        add("material-skin", {{"directional_skin", 1.0f}});
+        add("roughness-low", {{"directional_roughness", 0.1f}});
+        add("roughness-mid", {{"directional_roughness", 0.45f}});
+        add("roughness-high", {{"directional_roughness", 0.85f}});
+        add("brdf-fallback", {{"directional_brdf", 1.0f}});
+        add("brdf-nonunity", {{"directional_brdf", 2.0f}});
     }
     else if (profile == InputProfile::DeferredPrepass)
     {
-        axes = {
-            {
-                {"alpha-fade=active", {{"prepass_bypass_fade", 0.0f}}},
-                {"alpha-fade=bypass", {{"prepass_bypass_fade", 1.0f}}},
-            },
-            {
-                {"smoothness=direct", {{"prepass_smooth_span", 0.0f}}},
-                {"smoothness=span", {{"prepass_smooth_span", 1.0f}}},
-            },
-            {
-                {"face=front", {{"prepass_front_face", 1.0f}}},
-                {"face=back", {{"prepass_front_face", 0.0f}}},
-            },
-        };
-    }
-
-    if (!axes.empty())
-    {
-        std::vector<InputScenario> dedicated;
-        ExpandCoverageAxes(axes, 0, {}, dedicated);
-        for (InputScenario& scenario : dedicated)
-        {
-            scenario.id += randomSeedCount;
-            if (profile == InputProfile::AmbientIbl &&
-                ScenarioControl(scenario, "ambient_rough01", -1.0f) == 0.0f &&
-                ScenarioControl(scenario, "ambient_ibl", 0.0f) == 1.0f &&
-                ScenarioControl(scenario, "ambient_skin", 1.0f) == 0.0f)
-            {
-                scenario.coverageBuckets.push_back(
-                    "required=rough0+ibl+live-gloss");
-            }
-            scenarios.push_back(std::move(scenario));
-        }
+        add("alpha-active", {{"prepass_bypass_fade", 0.0f}});
+        add("alpha-bypass", {{"prepass_bypass_fade", 1.0f}});
+        add("face-front", {{"prepass_front_face", 1.0f}});
+        add("face-back", {{"prepass_front_face", 0.0f}});
+        add("normal-interior", {{"prepass_normal_clamped", 0.0f}});
+        add("normal-clamped", {{"prepass_normal_clamped", 1.0f}});
+        add("smooth-gate-zero", {{"prepass_smooth_gate_zero", 1.0f}});
+        add("smooth-gate-live", {{"prepass_smooth_gate_zero", 0.0f}});
+        add("smooth-direct", {{"prepass_smooth_span", 0.0f}});
+        add("smooth-span", {{"prepass_smooth_span", 1.0f}});
+        add("flags-none", {});
+        add("flags-a", {{"prepass_flag_a", 1.0f}});
+        add("flags-b", {{"prepass_flag_b", 1.0f}});
+        add("flags-both", {{"prepass_flag_a", 1.0f}, {"prepass_flag_b", 1.0f}});
+        add("scroll-positive", {});
+        add("scroll-negative",
+            {{"prepass_scroll_x", -1.0f}, {"prepass_scroll_y", -1.0f}});
     }
     return scenarios;
+}
+
+void AddExecutionConfigurationHash(
+    Sha256& hash,
+    const Options& options,
+    InputProfile profile,
+    const ShaderContract& contract,
+    const std::vector<InputScenario>& scenarios,
+    const D3D11_RASTERIZER_DESC& clockwiseRasterizer,
+    const D3D11_RASTERIZER_DESC& counterClockwiseRasterizer,
+    const D3D11_DEPTH_STENCIL_DESC& depthStencil,
+    const FrontFaceProbeResult& frontFaceProbe)
+{
+    hash.AddString("fo4cs.shader-exec-inputs-v1");
+    hash.AddString(FO4CS_EXEC_HARNESS_SOURCE_SHA256);
+    hash.AddString(InputProfileName(profile));
+    hash.AddString(FixtureName(options.fixture));
+    hash.AddValue(options.width);
+    hash.AddValue(options.height);
+    hash.AddValue(options.seedBase);
+    hash.AddValue(options.seeds);
+    for (UINT index = 0; index < options.seeds; ++index)
+        hash.AddValue(options.seedBase + index);
+    for (const InputScenario& scenario : scenarios)
+    {
+        hash.AddValue(scenario.id);
+        hash.AddValue(scenario.randomSeed);
+        hash.AddString(scenario.semanticId);
+    }
+
+    hash.AddString("generated-fullscreen-triangle-v1");
+    hash.AddValue(contract.renderTargetCount);
+    for (const SignatureParameter& input : contract.inputs)
+    {
+        hash.AddString(input.semanticName);
+        hash.AddValue(input.semanticIndex);
+        hash.AddValue(input.shaderRegister);
+        hash.AddValue(input.mask);
+        hash.AddValue(input.componentType);
+        hash.AddValue(input.systemValue);
+    }
+
+    hash.AddString("viewport");
+    const float topLeft = 0.0f;
+    const float viewportWidth = static_cast<float>(options.width);
+    const float viewportHeight = static_cast<float>(options.height);
+    const float minimumDepth = 0.0f;
+    const float maximumDepth = 1.0f;
+    hash.AddValue(topLeft);
+    hash.AddValue(topLeft);
+    hash.AddValue(viewportWidth);
+    hash.AddValue(viewportHeight);
+    hash.AddValue(minimumDepth);
+    hash.AddValue(maximumDepth);
+
+    const auto addRasterizer = [&hash](const D3D11_RASTERIZER_DESC& descriptor) {
+        hash.AddValue(descriptor.FillMode);
+        hash.AddValue(descriptor.CullMode);
+        hash.AddValue(descriptor.FrontCounterClockwise);
+        hash.AddValue(descriptor.DepthBias);
+        hash.AddValue(descriptor.DepthBiasClamp);
+        hash.AddValue(descriptor.SlopeScaledDepthBias);
+        hash.AddValue(descriptor.DepthClipEnable);
+        hash.AddValue(descriptor.ScissorEnable);
+        hash.AddValue(descriptor.MultisampleEnable);
+        hash.AddValue(descriptor.AntialiasedLineEnable);
+    };
+    hash.AddString("rasterizer-clockwise-front");
+    addRasterizer(clockwiseRasterizer);
+    hash.AddString("rasterizer-counter-clockwise-front");
+    addRasterizer(counterClockwiseRasterizer);
+
+    hash.AddString("depth-stencil");
+    hash.AddValue(depthStencil.DepthEnable);
+    hash.AddValue(depthStencil.DepthWriteMask);
+    hash.AddValue(depthStencil.DepthFunc);
+    hash.AddValue(depthStencil.StencilEnable);
+    hash.AddValue(depthStencil.StencilReadMask);
+    hash.AddValue(depthStencil.StencilWriteMask);
+    hash.AddString("driver=WARP");
+    hash.AddString("feature-level=11_0");
+    hash.AddString("render-target=R32G32B32A32_FLOAT");
+    hash.AddString(FrontFaceProbeVersion);
+    hash.AddString(FrontFaceProbeVertexSource);
+    hash.AddString(FrontFaceProbePixelSource);
+    hash.AddValue(frontFaceProbe.clockwiseStateFront);
+    hash.AddValue(frontFaceProbe.counterClockwiseStateFront);
 }
 
 void SetVector(
@@ -1098,6 +1556,86 @@ void SetVector(
     if (offset + vector.size() > values.size())
         ThrowFailure("probe constant-buffer shape exceeds reflected size");
     std::copy(vector.begin(), vector.end(), values.begin() + offset);
+}
+
+using Matrix4 = std::array<std::array<float, 4>, 4>;
+
+void SetMatrix(
+    std::vector<float>& values,
+    UINT firstRow,
+    const Matrix4& matrix)
+{
+    for (UINT row = 0; row < 4; ++row)
+        SetVector(values, firstRow + row, matrix[row]);
+}
+
+Matrix4 ReadMatrix(const std::vector<float>& values, UINT firstRow)
+{
+    Matrix4 matrix{};
+    const std::size_t offset = static_cast<std::size_t>(firstRow) * 4;
+    if (offset + 16 > values.size())
+        ThrowFailure("matrix_assertion: matrix exceeds uploaded constant buffer");
+    std::memcpy(matrix.data(), values.data() + offset, 16 * sizeof(float));
+    return matrix;
+}
+
+double MatrixDeterminant(Matrix4 matrix)
+{
+    double determinant = 1.0;
+    for (UINT pivot = 0; pivot < 4; ++pivot)
+    {
+        UINT selected = pivot;
+        for (UINT row = pivot + 1; row < 4; ++row)
+        {
+            if (std::abs(matrix[row][pivot]) >
+                std::abs(matrix[selected][pivot]))
+            {
+                selected = row;
+            }
+        }
+        if (std::abs(matrix[selected][pivot]) < 1.0e-12)
+            return 0.0;
+        if (selected != pivot)
+        {
+            std::swap(matrix[selected], matrix[pivot]);
+            determinant = -determinant;
+        }
+        const double diagonal = matrix[pivot][pivot];
+        determinant *= diagonal;
+        for (UINT row = pivot + 1; row < 4; ++row)
+        {
+            const double factor = matrix[row][pivot] / diagonal;
+            for (UINT column = pivot; column < 4; ++column)
+            {
+                matrix[row][column] = static_cast<float>(
+                    matrix[row][column] - factor * matrix[pivot][column]);
+            }
+        }
+    }
+    return determinant;
+}
+
+void AssertMatrixPair(
+    const std::string& name,
+    const Matrix4& left,
+    const Matrix4& right)
+{
+    if (std::abs(MatrixDeterminant(left)) <= 0.1 ||
+        std::abs(MatrixDeterminant(right)) <= 0.1)
+    {
+        ThrowFailure("matrix_assertion: " + name + " determinant");
+    }
+    bool nearEqual = true;
+    for (UINT row = 0; row < 4; ++row)
+    {
+        for (UINT column = 0; column < 4; ++column)
+        {
+            if (std::abs(left[row][column] - right[row][column]) > 1.0e-5f)
+                nearEqual = false;
+        }
+    }
+    if (nearEqual)
+        ThrowFailure("matrix_assertion: " + name + " banks are near-equal");
 }
 
 void ShapeSharedCameraConstants(
@@ -1133,15 +1671,21 @@ void ShapeSharedCameraConstants(
     SetVector(values, 18, {sine, 0.0f, cosine, 0.0f});
     SetVector(values, 19, {0.1f, 0.001f, 0.0f, 0.0f});
 
-    const float scaleX = 0.7f + unit(random) * 0.3f;
-    const float scaleY = 0.4f + unit(random) * 0.25f;
-    for (const UINT firstRow : {20u, 24u})
-    {
-        SetVector(values, firstRow + 0, {scaleX, 0.0f, 0.0f, 0.0f});
-        SetVector(values, firstRow + 1, {0.0f, scaleY, 0.0f, 0.0f});
-        SetVector(values, firstRow + 2, {0.0f, 0.0f, 1.0f, 0.0f});
-        SetVector(values, firstRow + 3, {0.0f, 0.0f, 0.0f, 1.0f});
-    }
+    const Matrix4 farReprojection{{
+        {1.15f, -0.06f, 0.08f, -0.13f},
+        {0.05f, 0.78f, -0.04f, 0.09f},
+        {-0.01f, 0.04f, 1.10f, -0.15f},
+        {-0.02f, 0.01f, 0.08f, 1.20f},
+    }};
+    const Matrix4 nearReprojection{{
+        {0.70f, 0.08f, 0.03f, 0.11f},
+        {-0.04f, 0.55f, 0.02f, -0.07f},
+        {0.02f, -0.03f, 0.90f, 0.20f},
+        {0.01f, 0.02f, 0.05f, 1.00f},
+    }};
+    SetMatrix(values, 20, farReprojection);
+    SetMatrix(values, 24, nearReprojection);
+    AssertMatrixPair("reprojection", farReprojection, nearReprojection);
 }
 
 void ShapeDirectionalLightingConstants(
@@ -1167,14 +1711,19 @@ void ShapeDirectionalLightingConstants(
         1.0f / static_cast<float>(width),
         1.0f / static_cast<float>(height),
     });
-    const bool lightInside =
-        ScenarioControl(scenario, "directional_light", 1.0f) != 0.0f;
-    SetVector(values, 1, {
-        lightInside ? 0.6f : -0.6f,
-        0.0f,
-        lightInside ? 0.8f : -0.8f,
-        0.0f,
-    });
+    const float lightFacing =
+        ScenarioControl(scenario, "directional_light", 1.0f);
+    const float brdfScenario =
+        ScenarioControl(scenario, "directional_brdf", 0.0f);
+    SetVector(values, 1, brdfScenario == 1.0f
+        ? std::array<float, 4>{0.0f, 0.0f, -1.0f, 0.0f}
+        : (brdfScenario == 2.0f
+            ? std::array<float, 4>{0.9797959f, 0.0f, -0.2f, 0.0f}
+            : (lightFacing > 0.5f
+                ? std::array<float, 4>{0.6f, 0.0f, 0.8f, 0.0f}
+                : (lightFacing < -0.5f
+                    ? std::array<float, 4>{-0.6f, 0.0f, -0.8f, 0.0f}
+                    : std::array<float, 4>{0.0f, 1.0f, 0.0f, 0.0f}))));
     SetVector(values, 2, {
         std::abs(values[8]) + 0.5f,
         std::abs(values[9]) + 0.5f,
@@ -1185,19 +1734,31 @@ void ShapeDirectionalLightingConstants(
     SetVector(values, 7, {-0.03f, 0.07f, 0.02f, 0.32f});
     SetVector(values, 8, {0.02f, -0.03f, 0.09f, 0.30f});
     SetVector(values, 10, {0.35f, 0.65f, 0.0f, 0.0f});
-    for (const UINT firstRow : {11u, 14u})
+    const Matrix4 cascade0{{
+        {0.80f, 0.03f, 0.01f, 0.50f},
+        {-0.02f, 0.70f, 0.04f, 0.50f},
+        {0.01f, -0.03f, 0.60f, 0.50f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    }};
+    const Matrix4 cascade1{{
+        {0.55f, -0.04f, 0.02f, 0.45f},
+        {0.03f, 0.65f, 0.01f, 0.55f},
+        {-0.02f, 0.03f, 0.75f, 0.60f},
+        {0.0f, 0.0f, 0.0f, 1.0f},
+    }};
+    for (UINT row = 0; row < 3; ++row)
     {
-        SetVector(values, firstRow + 0, {0.5f, 0.0f, 0.0f, 0.5f});
-        SetVector(values, firstRow + 1, {0.0f, 0.5f, 0.0f, 0.5f});
-        SetVector(values, firstRow + 2, {0.0f, 0.0f, 0.25f, 0.5f});
+        SetVector(values, 11 + row, cascade0[row]);
+        SetVector(values, 14 + row, cascade1[row]);
     }
+    AssertMatrixPair("cascade", cascade0, cascade1);
     SetVector(values, 20, {0.0f, 0.0f, 1.0f / 64.0f, 0.0f});
     SetVector(values, 21, {0.0f, 0.0f, 0.0f, 64.0f});
     SetVector(values, 22, {0.0f, 0.0f, 0.0f, 64.0f});
     const bool outsideFade =
         ScenarioControl(scenario, "directional_fade", 0.0f) != 0.0f;
     SetVector(values, 24, {
-        outsideFade ? 1.0e-4f : 16.0f,
+        outsideFade ? 1.0e-4f : 1.0e6f,
         0.0f, 0.0f, 0.0f,
     });
 }
@@ -1209,6 +1770,8 @@ void ShapeAmbientConstants(
     UINT height,
     std::mt19937& random)
 {
+    (void)width;
+    (void)height;
     std::uniform_real_distribution<float> unit(0.0f, 1.0f);
     if (bindPoint == 12)
     {
@@ -1221,7 +1784,7 @@ void ShapeAmbientConstants(
     if (bindPoint == 0)
     {
         SetVector(values, 0, {
-            1.0f / static_cast<float>(width),
+            4.0f,
             1.0f,
             0.5f + unit(random),
             0.0f,
@@ -1234,8 +1797,8 @@ void ShapeAmbientConstants(
     if (bindPoint == 2)
     {
         SetVector(values, 0, {
-            1.0f / static_cast<float>(width),
-            1.0f / static_cast<float>(height),
+            0.0f,
+            0.0f,
             1.0f,
             1.0f,
         });
@@ -1251,14 +1814,21 @@ void ShapeDeferredPrepassConstants(
     if (bindPoint == 12)
     {
         SetVector(values, 30, {0.65f, 0.0f, 0.0f, 0.0f});
-        for (const UINT firstRow : {31u, 37u})
-        {
-            SetVector(values, firstRow + 0, {1.0f, 0.0f, 0.0f, 0.0f});
-            SetVector(values, firstRow + 1, {0.0f, 1.0f, 0.0f, 0.0f});
-            SetVector(values, firstRow + 2, {0.0f, 0.0f, 1.0f, 0.0f});
-            SetVector(values, firstRow + 3, {0.0f, 0.0f, 0.0f, 1.0f});
-        }
-        SetVector(values, 37, {1.0f, 0.0f, 0.0f, 0.01f});
+        const Matrix4 previous{{
+            {0.85f, 0.05f, 0.02f, -0.10f},
+            {-0.03f, 0.75f, 0.04f, 0.08f},
+            {0.01f, -0.02f, 0.95f, 0.12f},
+            {0.02f, 0.01f, 0.06f, 1.10f},
+        }};
+        const Matrix4 current{{
+            {1.10f, -0.04f, 0.03f, 0.14f},
+            {0.02f, 0.90f, -0.05f, -0.06f},
+            {-0.01f, 0.03f, 1.05f, -0.09f},
+            {-0.02f, 0.02f, 0.04f, 0.95f},
+        }};
+        SetMatrix(values, 31, previous);
+        SetMatrix(values, 37, current);
+        AssertMatrixPair("prepass-motion", previous, current);
         return;
     }
     if (bindPoint != 2)
@@ -1268,11 +1838,32 @@ void ShapeDeferredPrepassConstants(
         ScenarioControl(scenario, "prepass_bypass_fade", 0.0f) != 0.0f;
     const bool span =
         ScenarioControl(scenario, "prepass_smooth_span", 1.0f) != 0.0f;
+    const bool gateZero =
+        ScenarioControl(scenario, "prepass_smooth_gate_zero", 0.0f) != 0.0f;
+    const bool flagA =
+        ScenarioControl(scenario, "prepass_flag_a", 0.0f) != 0.0f;
+    const bool flagB =
+        ScenarioControl(scenario, "prepass_flag_b", 0.0f) != 0.0f;
+    const float scrollX =
+        ScenarioControl(scenario, "prepass_scroll_x", 1.0f);
+    const float scrollY =
+        ScenarioControl(scenario, "prepass_scroll_y", 1.0f);
     SetVector(values, 0, {0.25f, 0.5f, 0.8f, 1.0f});
     SetVector(values, 1, {0.7f, 0.8f, 0.9f, 0.0f});
-    SetVector(values, 2, {0.35f, 0.6f, 0.0f, 0.0f});
-    SetVector(values, 4, {1.0f, 1.0f, 0.5f, bypass ? -1.0f : 0.5f});
-    SetVector(values, 5, {5.0f, span ? 1.0f : 0.0f, 0.2f, 0.8f});
+    SetVector(values, 2, {
+        scrollX > 0.0f ? 0.35f : -0.35f,
+        scrollY > 0.0f ? 0.6f : -0.6f,
+        0.0f, 0.0f});
+    SetVector(values, 4, {
+        flagB ? 1.0f : 0.0f,
+        flagA ? 1.0f : 0.0f,
+        0.5f,
+        bypass ? -1.0f : 0.5f});
+    SetVector(values, 5, {
+        5.0f,
+        span ? 1.0f : 0.0f,
+        0.2f,
+        gateZero ? -0.2f : 0.8f});
 }
 
 void FillUnitRandom(std::vector<float>& values, std::mt19937& random)
@@ -1349,6 +1940,7 @@ void FillAmbientTexture(
     UINT height,
     UINT arraySize,
     std::mt19937& random,
+    Fixture fixture,
     const InputScenario& scenario)
 {
     const std::size_t pixelCount =
@@ -1389,7 +1981,8 @@ void FillAmbientTexture(
         const bool skin = ScenarioControl(
             scenario, "ambient_skin",
             static_cast<float>(std::uniform_int_distribution<int>(0, 1)(random))) != 0.0f;
-        const float materialId = (skin ? 5.0f : 1.0f) / 255.0f;
+        const bool tapSkin =
+            ScenarioControl(scenario, "ambient_tap_skin", 1.0f) != 0.0f;
         const float selectedRoughness =
             ScenarioControl(scenario, "ambient_rough01", -1.0f);
         for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
@@ -1397,7 +1990,9 @@ void FillAmbientTexture(
             if (selectedRoughness >= 0.0f)
             {
                 values[pixel * 4 + 0] =
-                    std::min(1.0f, selectedRoughness + 0.3f);
+                    selectedRoughness == 0.0f && fixture == Fixture::Native
+                    ? 0.25f
+                    : std::min(1.0f, selectedRoughness + 0.3f);
             }
             else
             {
@@ -1406,7 +2001,10 @@ void FillAmbientTexture(
             }
             values[pixel * 4 + 1] = range(0.05f, 0.5f);
             values[pixel * 4 + 2] = unit(random);
-            values[pixel * 4 + 3] = materialId;
+            const bool pixelSkin =
+                skin && (tapSkin || pixel == 0);
+            values[pixel * 4 + 3] =
+                (pixelSkin ? 5.0f : 1.0f) / 255.0f;
         }
         return;
     }
@@ -1434,10 +2032,22 @@ void FillAmbientTexture(
         float fixedDepth = -1.0f;
         if (scenario.dedicated)
         {
-            fixedDepth =
-                ScenarioControl(scenario, "ambient_near", 0.0f) != 0.0f
-                ? 0.005f
-                : 0.75f;
+            const float mode =
+                ScenarioControl(scenario, "ambient_depth", 1.0f);
+            if (fixture == Fixture::Adversarial)
+            {
+                const float boundary = 0.01f;
+                fixedDepth = mode < -0.5f
+                    ? std::nextafter(boundary, 0.0f)
+                    : (mode > 0.5f
+                        ? std::nextafter(
+                            boundary, std::numeric_limits<float>::infinity())
+                        : boundary);
+            }
+            else
+            {
+                fixedDepth = mode < 0.0f ? 0.005f : 0.75f;
+            }
         }
         FillDeferredDepthTexture(values, pixelCount, random, fixedDepth);
         return;
@@ -1455,6 +2065,16 @@ void FillAmbientTexture(
     {
         minimum = 0.01f;
         maximum = 1.0f;
+    }
+
+    if (scenario.dedicated && (bindPoint == 11 || bindPoint == 12))
+    {
+        const Pixel fixed = bindPoint == 11
+            ? Pixel{0.125f, 0.25f, 0.375f, 1.0f}
+            : Pixel{0.75f, 0.5f, 0.25f, 1.0f};
+        for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            std::copy(fixed.begin(), fixed.end(), values.begin() + pixel * 4);
+        return;
     }
 
     if (bindPoint == 10)
@@ -1510,6 +2130,7 @@ void FillDirectionalTexture(
     UINT height,
     UINT arraySize,
     std::mt19937& random,
+    Fixture fixture,
     const InputScenario& scenario)
 {
     const std::size_t pixelCount =
@@ -1517,8 +2138,22 @@ void FillDirectionalTexture(
     std::uniform_real_distribution<float> unit(0.0f, 1.0f);
     if (bindPoint == 1)
     {
-        FillDeferredNormalTexture(
-            values, pixelCount, random, scenario.dedicated);
+        const float brdfScenario =
+            ScenarioControl(scenario, "directional_brdf", 0.0f);
+        if (brdfScenario != 0.0f)
+        {
+            for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            {
+                StoreEncodedUnitNormal(
+                    values.data() + pixel * 4,
+                    0.0f, 0.0f, -1.0f, random);
+            }
+        }
+        else
+        {
+            FillDeferredNormalTexture(
+                values, pixelCount, random, scenario.dedicated);
+        }
         return;
     }
     if (bindPoint == 2)
@@ -1527,7 +2162,9 @@ void FillDirectionalTexture(
             ScenarioControl(scenario, "directional_skin", 0.0f) != 0.0f;
         for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
         {
-            values[pixel * 4 + 0] = skin ? 0.6f : unit(random);
+            const float roughness =
+                ScenarioControl(scenario, "directional_roughness", 0.45f);
+            values[pixel * 4 + 0] = skin ? 0.6f : 1.0f - roughness;
             values[pixel * 4 + 1] = skin ? 0.0f : unit(random);
             values[pixel * 4 + 2] = skin ? 0.8f : unit(random);
             values[pixel * 4 + 3] = (skin ? 1.0f : 2.0f) / 255.0f;
@@ -1539,10 +2176,33 @@ void FillDirectionalTexture(
         float fixedDepth = -1.0f;
         if (scenario.dedicated)
         {
-            const float cascade =
-                ScenarioControl(scenario, "directional_cascade", 2.0f);
-            fixedDepth = cascade == 0.0f ? 0.2f :
-                (cascade == 1.0f ? 0.8f : 0.5f);
+            if (scenario.semanticId.rfind("cascade-", 0) == 0)
+            {
+                const float cascade =
+                    ScenarioControl(scenario, "directional_cascade", 2.0f);
+                fixedDepth = cascade == 0.0f ? 0.2f :
+                    (cascade == 1.0f ? 0.8f : 0.5f);
+            }
+            else
+            {
+                const float mode =
+                    ScenarioControl(scenario, "directional_depth", 1.0f);
+                if (fixture == Fixture::Adversarial)
+                {
+                    const float boundary = 0.01f;
+                    fixedDepth = mode < -0.5f
+                        ? std::nextafter(boundary, 0.0f)
+                        : (mode > 0.5f
+                            ? std::nextafter(
+                                boundary,
+                                std::numeric_limits<float>::infinity())
+                            : boundary);
+                }
+                else
+                {
+                    fixedDepth = mode < 0.0f ? 0.005f : 0.75f;
+                }
+            }
         }
         FillDeferredDepthTexture(values, pixelCount, random, fixedDepth);
         return;
@@ -1556,20 +2216,25 @@ void FillDeferredPrepassTexture(
     UINT width,
     UINT height,
     UINT arraySize,
-    std::mt19937& random)
+    std::mt19937& random,
+    const InputScenario& scenario)
 {
     const std::size_t pixelCount =
         static_cast<std::size_t>(width) * height * arraySize;
     if (bindPoint == 1)
     {
+        const bool clamped =
+            ScenarioControl(scenario, "prepass_normal_clamped", 0.0f) != 0.0f;
         for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
         {
-            const float x =
-                std::uniform_real_distribution<float>(-0.6f, 0.6f)(random);
+            const float x = scenario.dedicated
+                ? (clamped ? 1.0f : 0.25f)
+                : std::uniform_real_distribution<float>(-0.6f, 0.6f)(random);
             const float yLimit =
                 std::sqrt(std::max(0.0f, 0.36f - x * x));
-            const float y =
-                std::uniform_real_distribution<float>(-yLimit, yLimit)(random);
+            const float y = scenario.dedicated
+                ? (clamped ? 1.0f : -0.25f)
+                : std::uniform_real_distribution<float>(-yLimit, yLimit)(random);
             values[pixel * 4 + 0] = x * 0.5f + 0.5f;
             values[pixel * 4 + 1] = y * 0.5f + 0.5f;
             values[pixel * 4 + 2] = 0.65f;
@@ -1588,22 +2253,23 @@ void FillProfileTexture(
     UINT height,
     UINT arraySize,
     std::mt19937& random,
+    Fixture fixture,
     const InputScenario& scenario)
 {
     if (profile == InputProfile::AmbientIbl)
     {
         FillAmbientTexture(
-            values, bindPoint, width, height, arraySize, random, scenario);
+            values, bindPoint, width, height, arraySize, random, fixture, scenario);
     }
     else if (profile == InputProfile::DirectionalLighting)
     {
         FillDirectionalTexture(
-            values, bindPoint, width, height, arraySize, random, scenario);
+            values, bindPoint, width, height, arraySize, random, fixture, scenario);
     }
     else if (profile == InputProfile::DeferredPrepass)
     {
         FillDeferredPrepassTexture(
-            values, bindPoint, width, height, arraySize, random);
+            values, bindPoint, width, height, arraySize, random, scenario);
     }
     else
     {
@@ -1711,6 +2377,320 @@ BoundResource CreateTexture1DResource(
     return result;
 }
 
+const char* FormatName(DXGI_FORMAT format)
+{
+    switch (format)
+    {
+    case DXGI_FORMAT_R32G32B32A32_FLOAT:
+        return "R32G32B32A32_FLOAT";
+    case DXGI_FORMAT_R16G16B16A16_FLOAT:
+        return "R16G16B16A16_FLOAT";
+    case DXGI_FORMAT_R16G16_FLOAT:
+        return "R16G16_FLOAT";
+    case DXGI_FORMAT_R16G16_UNORM:
+        return "R16G16_UNORM";
+    case DXGI_FORMAT_R8G8_UNORM:
+        return "R8G8_UNORM";
+    case DXGI_FORMAT_R8G8B8A8_UNORM:
+        return "R8G8B8A8_UNORM";
+    case DXGI_FORMAT_R8G8B8A8_UNORM_SRGB:
+        return "R8G8B8A8_UNORM_SRGB";
+    case DXGI_FORMAT_R24G8_TYPELESS:
+        return "R24G8_TYPELESS";
+    case DXGI_FORMAT_R24_UNORM_X8_TYPELESS:
+        return "R24_UNORM_X8_TYPELESS";
+    case DXGI_FORMAT_R16_UNORM:
+        return "R16_UNORM";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+struct TextureFormatSpec
+{
+    DXGI_FORMAT resource = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    DXGI_FORMAT view = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    UINT bytesPerPixel = 16;
+};
+
+TextureFormatSpec SelectTextureFormat(
+    InputProfile profile,
+    Fixture fixture,
+    UINT bindPoint)
+{
+    if (fixture == Fixture::Adversarial)
+        return {};
+    if (profile == InputProfile::DirectionalLighting)
+    {
+        if (bindPoint == 0)
+            return {
+                DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4};
+        if (bindPoint == 1)
+            return {DXGI_FORMAT_R16G16_UNORM, DXGI_FORMAT_R16G16_UNORM, 4};
+        if (bindPoint == 2)
+            return {
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                DXGI_FORMAT_R8G8B8A8_UNORM, 4};
+        if (bindPoint == 3)
+            return {
+                DXGI_FORMAT_R24G8_TYPELESS,
+                DXGI_FORMAT_R24_UNORM_X8_TYPELESS, 4};
+        if (bindPoint == 5)
+            return {DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16_UNORM, 2};
+    }
+    else if (profile == InputProfile::AmbientIbl)
+    {
+        if (bindPoint == 1)
+            return {DXGI_FORMAT_R16G16_UNORM, DXGI_FORMAT_R16G16_UNORM, 4};
+        if (bindPoint == 2 || bindPoint == 3)
+            return {
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                DXGI_FORMAT_R8G8B8A8_UNORM, 4};
+        if (bindPoint == 7 || bindPoint == 15)
+            return {DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16G16_FLOAT, 4};
+    }
+    else if (profile == InputProfile::DeferredPrepass)
+    {
+        if (bindPoint == 0)
+            return {
+                DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4};
+        if (bindPoint == 1)
+            return {DXGI_FORMAT_R8G8_UNORM, DXGI_FORMAT_R8G8_UNORM, 2};
+        if (bindPoint == 2)
+            return {
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                DXGI_FORMAT_R8G8B8A8_UNORM, 4};
+    }
+    return {
+        DXGI_FORMAT_R16G16B16A16_FLOAT,
+        DXGI_FORMAT_R16G16B16A16_FLOAT, 8};
+}
+
+std::uint16_t FloatToHalf(float value)
+{
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, sizeof(bits));
+    const std::uint32_t sign = (bits >> 16) & 0x8000u;
+    const std::uint32_t exponent = (bits >> 23) & 0xFFu;
+    std::uint32_t mantissa = bits & 0x7FFFFFu;
+    if (exponent == 0xFFu)
+    {
+        if (mantissa == 0)
+            return static_cast<std::uint16_t>(sign | 0x7C00u);
+        const std::uint16_t payload = static_cast<std::uint16_t>(
+            std::max<std::uint32_t>(1u, mantissa >> 13));
+        return static_cast<std::uint16_t>(sign | 0x7C00u | payload);
+    }
+
+    int halfExponent = static_cast<int>(exponent) - 127 + 15;
+    if (halfExponent >= 31)
+        return static_cast<std::uint16_t>(sign | 0x7C00u);
+    if (halfExponent <= 0)
+    {
+        if (halfExponent < -10)
+            return static_cast<std::uint16_t>(sign);
+        mantissa |= 0x800000u;
+        const unsigned shift = static_cast<unsigned>(14 - halfExponent);
+        std::uint32_t rounded = mantissa >> shift;
+        const std::uint32_t remainder = mantissa & ((1u << shift) - 1u);
+        const std::uint32_t halfway = 1u << (shift - 1u);
+        if (remainder > halfway ||
+            (remainder == halfway && (rounded & 1u) != 0))
+        {
+            ++rounded;
+        }
+        return static_cast<std::uint16_t>(sign | rounded);
+    }
+
+    std::uint32_t halfMantissa = mantissa >> 13;
+    const std::uint32_t remainder = mantissa & 0x1FFFu;
+    if (remainder > 0x1000u ||
+        (remainder == 0x1000u && (halfMantissa & 1u) != 0))
+    {
+        ++halfMantissa;
+        if (halfMantissa == 0x400u)
+        {
+            halfMantissa = 0;
+            ++halfExponent;
+            if (halfExponent >= 31)
+                return static_cast<std::uint16_t>(sign | 0x7C00u);
+        }
+    }
+    return static_cast<std::uint16_t>(
+        sign |
+        (static_cast<std::uint32_t>(halfExponent) << 10) |
+        halfMantissa);
+}
+
+float HalfToFloat(std::uint16_t value)
+{
+    const std::uint32_t sign =
+        static_cast<std::uint32_t>(value & 0x8000u) << 16;
+    std::uint32_t exponent = (value >> 10) & 0x1Fu;
+    std::uint32_t mantissa = value & 0x3FFu;
+    std::uint32_t bits = 0;
+    if (exponent == 0)
+    {
+        if (mantissa == 0)
+        {
+            bits = sign;
+        }
+        else
+        {
+            int adjusted = -14;
+            while ((mantissa & 0x400u) == 0)
+            {
+                mantissa <<= 1;
+                --adjusted;
+            }
+            mantissa &= 0x3FFu;
+            bits = sign |
+                (static_cast<std::uint32_t>(adjusted + 127) << 23) |
+                (mantissa << 13);
+        }
+    }
+    else if (exponent == 31)
+    {
+        bits = sign | 0x7F800000u | (mantissa << 13);
+    }
+    else
+    {
+        bits = sign | ((exponent - 15u + 127u) << 23) | (mantissa << 13);
+    }
+    float result = 0.0f;
+    std::memcpy(&result, &bits, sizeof(result));
+    return result;
+}
+
+float LinearToSrgb(float value)
+{
+    value = std::clamp(value, 0.0f, 1.0f);
+    return value <= 0.0031308f
+        ? value * 12.92f
+        : 1.055f * std::pow(value, 1.0f / 2.4f) - 0.055f;
+}
+
+float SrgbToLinear(float value)
+{
+    return value <= 0.04045f
+        ? value / 12.92f
+        : std::pow((value + 0.055f) / 1.055f, 2.4f);
+}
+
+std::uint32_t QuantizeUnorm(float value, std::uint32_t maximum)
+{
+    return static_cast<std::uint32_t>(
+        std::lround(std::clamp(value, 0.0f, 1.0f) * maximum));
+}
+
+struct TexturePayload
+{
+    std::vector<std::uint8_t> bytes;
+    std::vector<float> decoded;
+};
+
+TexturePayload EncodeTexture(
+    const std::vector<float>& source,
+    const TextureFormatSpec& format)
+{
+    const std::size_t pixelCount = source.size() / 4;
+    TexturePayload payload;
+    payload.bytes.resize(pixelCount * format.bytesPerPixel);
+    payload.decoded.assign(pixelCount * 4, 0.0f);
+    for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+    {
+        const float* input = source.data() + pixel * 4;
+        float* decoded = payload.decoded.data() + pixel * 4;
+        std::uint8_t* output =
+            payload.bytes.data() + pixel * format.bytesPerPixel;
+        if (format.view == DXGI_FORMAT_R32G32B32A32_FLOAT)
+        {
+            std::memcpy(output, input, 4 * sizeof(float));
+            std::copy(input, input + 4, decoded);
+        }
+        else if (format.view == DXGI_FORMAT_R16G16B16A16_FLOAT)
+        {
+            for (UINT channel = 0; channel < 4; ++channel)
+            {
+                const std::uint16_t encoded = FloatToHalf(input[channel]);
+                std::memcpy(output + channel * 2, &encoded, sizeof(encoded));
+                decoded[channel] = HalfToFloat(encoded);
+            }
+        }
+        else if (format.view == DXGI_FORMAT_R16G16_FLOAT)
+        {
+            for (UINT channel = 0; channel < 2; ++channel)
+            {
+                const std::uint16_t encoded = FloatToHalf(input[channel]);
+                std::memcpy(output + channel * 2, &encoded, sizeof(encoded));
+                decoded[channel] = HalfToFloat(encoded);
+            }
+            decoded[3] = 1.0f;
+        }
+        else if (format.view == DXGI_FORMAT_R16G16_UNORM)
+        {
+            for (UINT channel = 0; channel < 2; ++channel)
+            {
+                const std::uint16_t encoded = static_cast<std::uint16_t>(
+                    QuantizeUnorm(input[channel], 65535));
+                std::memcpy(output + channel * 2, &encoded, sizeof(encoded));
+                decoded[channel] = static_cast<float>(encoded) / 65535.0f;
+            }
+            decoded[3] = 1.0f;
+        }
+        else if (format.view == DXGI_FORMAT_R8G8_UNORM)
+        {
+            for (UINT channel = 0; channel < 2; ++channel)
+            {
+                output[channel] = static_cast<std::uint8_t>(
+                    QuantizeUnorm(input[channel], 255));
+                decoded[channel] = static_cast<float>(output[channel]) / 255.0f;
+            }
+            decoded[3] = 1.0f;
+        }
+        else if (format.view == DXGI_FORMAT_R8G8B8A8_UNORM ||
+                 format.view == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB)
+        {
+            const bool srgb =
+                format.view == DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+            for (UINT channel = 0; channel < 4; ++channel)
+            {
+                const float encodedValue =
+                    srgb && channel < 3 ? LinearToSrgb(input[channel]) : input[channel];
+                output[channel] = static_cast<std::uint8_t>(
+                    QuantizeUnorm(encodedValue, 255));
+                const float normalized =
+                    static_cast<float>(output[channel]) / 255.0f;
+                decoded[channel] =
+                    srgb && channel < 3 ? SrgbToLinear(normalized) : normalized;
+            }
+        }
+        else if (format.view == DXGI_FORMAT_R24_UNORM_X8_TYPELESS)
+        {
+            const std::uint32_t encoded =
+                QuantizeUnorm(input[0], 0xFFFFFFu);
+            std::memcpy(output, &encoded, sizeof(encoded));
+            decoded[0] = static_cast<float>(encoded) / 16777215.0f;
+            decoded[3] = 1.0f;
+        }
+        else if (format.view == DXGI_FORMAT_R16_UNORM)
+        {
+            const std::uint16_t encoded = static_cast<std::uint16_t>(
+                QuantizeUnorm(input[0], 65535));
+            std::memcpy(output, &encoded, sizeof(encoded));
+            decoded[0] = static_cast<float>(encoded) / 65535.0f;
+            decoded[3] = 1.0f;
+        }
+        else
+        {
+            ThrowFailure("unsupported native texture format");
+        }
+    }
+    return payload;
+}
+
 BoundResource CreateTexture2DResource(
     ID3D11Device* device,
     ID3D11DeviceContext* context,
@@ -1718,6 +2698,7 @@ BoundResource CreateTexture2DResource(
     UINT bindPoint,
     std::mt19937& random,
     InputProfile profile,
+    Fixture fixture,
     const InputScenario& scenario)
 {
     constexpr UINT width = 64;
@@ -1739,7 +2720,9 @@ BoundResource CreateTexture2DResource(
     textureDesc.Height = height;
     textureDesc.MipLevels = 1;
     textureDesc.ArraySize = arraySize;
-    textureDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
+    const TextureFormatSpec format =
+        SelectTextureFormat(profile, fixture, bindPoint);
+    textureDesc.Format = format.resource;
     textureDesc.SampleDesc.Count = multisampled ? 4u : 1u;
     textureDesc.Usage = multisampled ? D3D11_USAGE_DEFAULT : D3D11_USAGE_IMMUTABLE;
     textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE |
@@ -1749,21 +2732,25 @@ BoundResource CreateTexture2DResource(
         textureDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
 
     std::vector<float> values;
+    TexturePayload payload;
     std::vector<D3D11_SUBRESOURCE_DATA> initialData;
     if (!multisampled)
     {
         values.resize(static_cast<std::size_t>(width) * height * arraySize * 4);
         FillProfileTexture(
-            values, profile, bindPoint, width, height, arraySize, random, scenario);
+            values, profile, bindPoint, width, height, arraySize,
+            random, fixture, scenario);
+        payload = EncodeTexture(values, format);
         initialData.resize(arraySize);
-        const std::size_t floatsPerSlice =
-            static_cast<std::size_t>(width) * height * 4;
+        const std::size_t bytesPerSlice =
+            static_cast<std::size_t>(width) * height * format.bytesPerPixel;
         for (UINT slice = 0; slice < arraySize; ++slice)
         {
-            initialData[slice].pSysMem = values.data() + slice * floatsPerSlice;
-            initialData[slice].SysMemPitch = width * sizeof(Pixel);
+            initialData[slice].pSysMem =
+                payload.bytes.data() + slice * bytesPerSlice;
+            initialData[slice].SysMemPitch = width * format.bytesPerPixel;
             initialData[slice].SysMemSlicePitch =
-                width * height * sizeof(Pixel);
+                width * height * format.bytesPerPixel;
         }
     }
 
@@ -1803,7 +2790,7 @@ BoundResource CreateTexture2DResource(
     }
 
     D3D11_SHADER_RESOURCE_VIEW_DESC viewDesc{};
-    viewDesc.Format = textureDesc.Format;
+    viewDesc.Format = format.view;
     viewDesc.ViewDimension = binding.dimension;
     switch (binding.dimension)
     {
@@ -1839,6 +2826,17 @@ BoundResource CreateTexture2DResource(
 
     BoundResource result;
     result.bindPoint = bindPoint;
+    result.width = width;
+    result.height = height;
+    result.arraySize = arraySize;
+    result.encodedBytes = std::move(payload.bytes);
+    result.decodedValues = std::move(payload.decoded);
+    result.format = {
+        bindPoint,
+        DimensionName(binding.dimension),
+        FormatName(format.resource),
+        FormatName(format.view),
+    };
     CheckHRESULT(device->CreateShaderResourceView(texture.Get(), &viewDesc, &result.view),
                  "CreateShaderResourceView for t" + std::to_string(bindPoint));
     result.resource = texture;
@@ -1896,6 +2894,7 @@ BoundResource CreateResource(
     UINT bindPoint,
     std::mt19937& random,
     InputProfile profile,
+    Fixture fixture,
     const InputScenario& scenario)
 {
     switch (binding.dimension)
@@ -1913,7 +2912,7 @@ BoundResource CreateResource(
     case D3D_SRV_DIMENSION_TEXTURECUBE:
     case D3D_SRV_DIMENSION_TEXTURECUBEARRAY:
         return CreateTexture2DResource(
-            device, context, binding, bindPoint, random, profile, scenario);
+            device, context, binding, bindPoint, random, profile, fixture, scenario);
     case D3D_SRV_DIMENSION_TEXTURE3D:
         return CreateTexture3DResource(device, bindPoint, random);
     default:
@@ -1929,9 +2928,12 @@ SeedResources CreateSeedResources(
     const ShaderContract& contract,
     const DisassemblyInfo& disassembly,
     InputProfile profile,
+    Fixture fixture,
     const InputScenario& scenario,
     UINT width,
-    UINT height)
+    UINT height,
+    bool gpuFrontFace,
+    Sha256& inputHash)
 {
     std::mt19937 random(scenario.randomSeed);
     SeedResources result;
@@ -1974,6 +2976,7 @@ SeedResources CreateSeedResources(
 
         BoundConstantBuffer constantBuffer;
         constantBuffer.bindPoint = binding.bindPoint;
+        constantBuffer.values = values;
         CheckHRESULT(device->CreateBuffer(
                          &bufferDesc, &initialData, &constantBuffer.buffer),
                      "CreateBuffer for b" + std::to_string(binding.bindPoint));
@@ -1986,7 +2989,7 @@ SeedResources CreateSeedResources(
         {
             result.resources.push_back(CreateResource(
                 device, context, binding, binding.bindPoint + offset, random,
-                profile, scenario));
+                profile, fixture, scenario));
         }
     }
 
@@ -2002,7 +3005,10 @@ SeedResources CreateSeedResources(
             D3D11_SAMPLER_DESC samplerDesc{};
             samplerDesc.Filter = comparison
                 ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR
-                : D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+                : (profile == InputProfile::AmbientIbl &&
+                   sampler.bindPoint == 3
+                    ? D3D11_FILTER_MIN_MAG_MIP_POINT
+                    : D3D11_FILTER_MIN_MAG_MIP_LINEAR);
             samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
             samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
             samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
@@ -2014,8 +3020,65 @@ SeedResources CreateSeedResources(
             CheckHRESULT(device->CreateSamplerState(&samplerDesc, &sampler.sampler),
                          "CreateSamplerState for s" +
                              std::to_string(sampler.bindPoint));
+            sampler.descriptor = samplerDesc;
             result.samplers.push_back(std::move(sampler));
         }
+    }
+
+    inputHash.AddString("scenario");
+    inputHash.AddValue(scenario.id);
+    inputHash.AddValue(scenario.randomSeed);
+    inputHash.AddValue(scenario.dedicated);
+    inputHash.AddString(scenario.semanticId);
+    inputHash.AddString(FixtureName(fixture));
+    inputHash.AddValue(gpuFrontFace);
+    for (const BoundConstantBuffer& buffer : result.constantBuffers)
+    {
+        inputHash.AddString("constant-buffer");
+        inputHash.AddValue(buffer.bindPoint);
+        const std::uint64_t byteCount =
+            buffer.values.size() * sizeof(float);
+        inputHash.AddValue(byteCount);
+        inputHash.Add(buffer.values.data(), static_cast<std::size_t>(byteCount));
+    }
+    for (const BoundResource& resource : result.resources)
+    {
+        if (resource.encodedBytes.empty() ||
+            resource.format.resourceFormat.empty() ||
+            resource.format.srvFormat.empty())
+        {
+            ThrowFailure(
+                "unsupported_input_resource: t" +
+                std::to_string(resource.bindPoint));
+        }
+        inputHash.AddString("resource");
+        inputHash.AddValue(resource.bindPoint);
+        inputHash.AddValue(resource.width);
+        inputHash.AddValue(resource.height);
+        inputHash.AddValue(resource.arraySize);
+        inputHash.AddString(resource.format.dimension);
+        inputHash.AddString(resource.format.resourceFormat);
+        inputHash.AddString(resource.format.srvFormat);
+        const std::uint64_t byteCount = resource.encodedBytes.size();
+        inputHash.AddValue(byteCount);
+        inputHash.Add(resource.encodedBytes.data(), resource.encodedBytes.size());
+        result.formats.push_back(resource.format);
+    }
+    for (const BoundSampler& sampler : result.samplers)
+    {
+        inputHash.AddString("sampler");
+        inputHash.AddValue(sampler.bindPoint);
+        inputHash.AddValue(sampler.descriptor.Filter);
+        inputHash.AddValue(sampler.descriptor.AddressU);
+        inputHash.AddValue(sampler.descriptor.AddressV);
+        inputHash.AddValue(sampler.descriptor.AddressW);
+        inputHash.AddValue(sampler.descriptor.MipLODBias);
+        inputHash.AddValue(sampler.descriptor.MaxAnisotropy);
+        inputHash.AddValue(sampler.descriptor.ComparisonFunc);
+        for (const float component : sampler.descriptor.BorderColor)
+            inputHash.AddValue(component);
+        inputHash.AddValue(sampler.descriptor.MinLOD);
+        inputHash.AddValue(sampler.descriptor.MaxLOD);
     }
     return result;
 }
@@ -2051,6 +3114,591 @@ void BindSeedResources(ID3D11DeviceContext* context, const SeedResources& resour
         ID3D11SamplerState* sampler = binding.sampler.Get();
         context->PSSetSamplers(binding.bindPoint, 1, &sampler);
     }
+}
+
+const BoundResource& FindResource(
+    const SeedResources& resources,
+    UINT bindPoint)
+{
+    const auto found = std::find_if(
+        resources.resources.begin(), resources.resources.end(),
+        [bindPoint](const BoundResource& resource) {
+            return resource.bindPoint == bindPoint;
+        });
+    if (found == resources.resources.end() || found->decodedValues.empty())
+        ThrowFailure("bucket classification resource missing");
+    return *found;
+}
+
+const BoundConstantBuffer& FindConstantBuffer(
+    const SeedResources& resources,
+    UINT bindPoint)
+{
+    const auto found = std::find_if(
+        resources.constantBuffers.begin(), resources.constantBuffers.end(),
+        [bindPoint](const BoundConstantBuffer& buffer) {
+            return buffer.bindPoint == bindPoint;
+        });
+    if (found == resources.constantBuffers.end())
+        ThrowFailure("bucket classification constant buffer missing");
+    return *found;
+}
+
+const BoundSampler& FindSampler(
+    const SeedResources& resources,
+    UINT bindPoint)
+{
+    const auto found = std::find_if(
+        resources.samplers.begin(), resources.samplers.end(),
+        [bindPoint](const BoundSampler& sampler) {
+            return sampler.bindPoint == bindPoint;
+        });
+    if (found == resources.samplers.end())
+        ThrowFailure("bucket classification sampler missing");
+    return *found;
+}
+
+std::array<float, 4> ConstantVector(
+    const SeedResources& resources,
+    UINT bindPoint,
+    UINT vectorIndex)
+{
+    const std::vector<float>& values =
+        FindConstantBuffer(resources, bindPoint).values;
+    const std::size_t offset = static_cast<std::size_t>(vectorIndex) * 4;
+    if (offset + 4 > values.size())
+        ThrowFailure("bucket classification constant vector missing");
+    return {
+        values[offset], values[offset + 1],
+        values[offset + 2], values[offset + 3]};
+}
+
+Pixel ResourcePixel(
+    const BoundResource& resource,
+    UINT x = 0,
+    UINT y = 0,
+    UINT slice = 0)
+{
+    if (x >= resource.width || y >= resource.height ||
+        slice >= resource.arraySize)
+    {
+        ThrowFailure("bucket classification texel out of range");
+    }
+    const std::size_t index =
+        ((static_cast<std::size_t>(slice) * resource.height + y) *
+         resource.width + x) * 4;
+    return {
+        resource.decodedValues[index],
+        resource.decodedValues[index + 1],
+        resource.decodedValues[index + 2],
+        resource.decodedValues[index + 3],
+    };
+}
+
+UINT WrapTexel(int coordinate, UINT dimension)
+{
+    const int signedDimension = static_cast<int>(dimension);
+    return static_cast<UINT>(
+        (coordinate % signedDimension + signedDimension) % signedDimension);
+}
+
+Pixel SampleResource2D(
+    const BoundResource& resource,
+    const BoundSampler& sampler,
+    float u,
+    float v)
+{
+    if (sampler.descriptor.AddressU != D3D11_TEXTURE_ADDRESS_WRAP ||
+        sampler.descriptor.AddressV != D3D11_TEXTURE_ADDRESS_WRAP)
+    {
+        ThrowFailure("bucket classification sampler addressing unsupported");
+    }
+    if (sampler.descriptor.Filter == D3D11_FILTER_MIN_MAG_MIP_POINT)
+    {
+        const UINT x = WrapTexel(
+            static_cast<int>(std::floor(u * resource.width)),
+            resource.width);
+        const UINT y = WrapTexel(
+            static_cast<int>(std::floor(v * resource.height)),
+            resource.height);
+        return ResourcePixel(resource, x, y);
+    }
+
+    const float texelX = u * resource.width - 0.5f;
+    const float texelY = v * resource.height - 0.5f;
+    const int x0 = static_cast<int>(std::floor(texelX));
+    const int y0 = static_cast<int>(std::floor(texelY));
+    const float weightX = texelX - std::floor(texelX);
+    const float weightY = texelY - std::floor(texelY);
+    const Pixel samples[4] = {
+        ResourcePixel(
+            resource, WrapTexel(x0, resource.width),
+            WrapTexel(y0, resource.height)),
+        ResourcePixel(
+            resource, WrapTexel(x0 + 1, resource.width),
+            WrapTexel(y0, resource.height)),
+        ResourcePixel(
+            resource, WrapTexel(x0, resource.width),
+            WrapTexel(y0 + 1, resource.height)),
+        ResourcePixel(
+            resource, WrapTexel(x0 + 1, resource.width),
+            WrapTexel(y0 + 1, resource.height)),
+    };
+    Pixel result{};
+    for (UINT channel = 0; channel < 4; ++channel)
+    {
+        const float top =
+            samples[0][channel] * (1.0f - weightX) +
+            samples[1][channel] * weightX;
+        const float bottom =
+            samples[2][channel] * (1.0f - weightX) +
+            samples[3][channel] * weightX;
+        result[channel] =
+            top * (1.0f - weightY) + bottom * weightY;
+    }
+    return result;
+}
+
+void AddUniformBucket(
+    std::map<std::string, BucketMask>& buckets,
+    const std::string& name,
+    bool matches,
+    std::uint64_t population,
+    std::size_t pixelCount)
+{
+    if (!matches)
+        return;
+    BucketMask mask;
+    mask.population = population;
+    mask.pixels.assign(pixelCount, 1);
+    buckets.emplace(name, std::move(mask));
+}
+
+std::array<float, 3> DecodeDeferredNormal(const Pixel& encoded)
+{
+    const float x = encoded[0] * 4.0f - 2.0f;
+    const float y = encoded[1] * 4.0f - 2.0f;
+    const float lengthSquared = x * x + y * y;
+    const float scale = std::sqrt(std::max(0.0f, 1.0f - lengthSquared * 0.25f));
+    return {
+        x * scale,
+        y * scale,
+        -(1.0f - lengthSquared * 0.5f),
+    };
+}
+
+float DotRow(const std::array<float, 4>& row, const Pixel& value)
+{
+    return row[0] * value[0] + row[1] * value[1] +
+        row[2] * value[2] + row[3] * value[3];
+}
+
+std::map<std::string, BucketMask> ClassifyBuckets(
+    InputProfile profile,
+    const InputScenario& scenario,
+    const SeedResources& resources,
+    UINT width,
+    UINT height,
+    bool gpuFrontFace)
+{
+    std::map<std::string, BucketMask> buckets;
+    if (!scenario.dedicated)
+        return buckets;
+    const std::size_t pixelCount = static_cast<std::size_t>(width) * height;
+    const float depthBoundary = 0.01f;
+
+    if (profile == InputProfile::AmbientIbl)
+    {
+        const Pixel depth = ResourcePixel(FindResource(resources, 7));
+        AddUniformBucket(
+            buckets, "depth.near", depth[1] < depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.equal", depth[1] == depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.far", depth[1] > depthBoundary,
+            pixelCount, pixelCount);
+
+        const Pixel material = ResourcePixel(FindResource(resources, 2));
+        AddUniformBucket(
+            buckets, "ibl.off", material[1] <= 0.001961f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "ibl.on", material[1] > 0.001961f,
+            pixelCount, pixelCount);
+
+        const BoundResource& shadingResource = FindResource(resources, 3);
+        const BoundSampler& shadingSampler = FindSampler(resources, 3);
+        const Pixel shading =
+            SampleResource2D(shadingResource, shadingSampler, 0.0f, 0.0f);
+        const bool skin = std::abs(shading[3] * 255.0f - 5.0f) < 0.25f;
+        AddUniformBucket(
+            buckets, "material.skin", skin, pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "material.default", !skin, pixelCount, pixelCount);
+        const float roughness = std::clamp(shading[0] - 0.3f, 0.0f, 1.0f);
+        AddUniformBucket(
+            buckets, "roughness.zero", roughness == 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "roughness.mid", roughness > 0.0f && roughness < 0.6f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "roughness.high", roughness >= 0.6f,
+            pixelCount, pixelCount);
+
+        if (skin)
+        {
+            static const std::array<float, 10> tapOffsets{
+                -2.0f, -1.28f, -0.72f, -0.32f, -0.08f,
+                0.08f, 0.32f, 0.72f, 1.28f, 2.0f};
+            const Pixel blurDepth = ResourcePixel(FindResource(resources, 15));
+            const auto blurConstants = ConstantVector(resources, 0, 0);
+            const float depthMask = depth[1] >= depthBoundary ? 1.0f : 0.0f;
+            const float centerRef =
+                (depthMask * blurConstants[2] + 1.0f) * blurDepth[1];
+            const float tapBaseX =
+                blurConstants[0] * 0.078125f / centerRef;
+            const float tapBaseY =
+                blurConstants[0] * 0.138890f / centerRef;
+            UINT skinTaps = 0;
+            UINT defaultTaps = 0;
+            for (const float offset : tapOffsets)
+            {
+                const Pixel tap = SampleResource2D(
+                    shadingResource, shadingSampler,
+                    tapBaseX * offset, tapBaseY * offset);
+                if (std::abs(tap[3] * 255.0f - 5.0f) < 0.25f)
+                    ++skinTaps;
+                else
+                    ++defaultTaps;
+            }
+            AddUniformBucket(
+                buckets, "skin-taps.skin", skinTaps != 0,
+                pixelCount * skinTaps, pixelCount);
+            AddUniformBucket(
+                buckets, "skin-taps.default", defaultTaps != 0,
+                pixelCount * defaultTaps, pixelCount);
+        }
+    }
+    else if (profile == InputProfile::DirectionalLighting)
+    {
+        const BoundResource& depthResource = FindResource(resources, 3);
+        const BoundSampler& depthSampler = FindSampler(resources, 3);
+        const BoundResource& materialResource = FindResource(resources, 2);
+        const BoundSampler& materialSampler = FindSampler(resources, 2);
+        const BoundResource& normalResource = FindResource(resources, 1);
+        const BoundSampler& normalSampler = FindSampler(resources, 1);
+        const Pixel depth = ResourcePixel(depthResource);
+        AddUniformBucket(
+            buckets, "depth.near", depth[0] < depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.equal", depth[0] == depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.far", depth[0] > depthBoundary,
+            pixelCount, pixelCount);
+        const float linearizedDepth = depth[0] < depthBoundary
+            ? depth[0] * 100.0f
+            : depth[0] * 1.01f - 0.01f;
+        const auto cascadeRange = ConstantVector(resources, 2, 10);
+        const bool cascade0 = linearizedDepth < cascadeRange[1];
+        const bool cascade1 = cascadeRange[0] < linearizedDepth;
+        AddUniformBucket(
+            buckets, "cascade.0-only", cascade0 && !cascade1,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "cascade.blend", cascade0 && cascade1,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "cascade.1-only", !cascade0 && cascade1,
+            pixelCount, pixelCount);
+
+        const Pixel material = ResourcePixel(materialResource);
+        const bool skin =
+            std::abs(material[3] * 255.0f - 1.0f) < 0.25f;
+        AddUniformBucket(
+            buckets, "material.skin", skin, pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "material.default", !skin, pixelCount, pixelCount);
+        const float roughness = 1.0f - material[0];
+        AddUniformBucket(
+            buckets, "roughness.low", roughness < 0.25f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "roughness.mid",
+            roughness >= 0.25f && roughness < 0.7f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "roughness.high", roughness >= 0.7f,
+            pixelCount, pixelCount);
+
+        const std::array<float, 3> normal =
+            DecodeDeferredNormal(ResourcePixel(normalResource));
+        const auto light = ConstantVector(resources, 2, 1);
+        const float normalDotLight =
+            normal[0] * light[0] + normal[1] * light[1] +
+            normal[2] * light[2];
+        AddUniformBucket(
+            buckets, "light.front", normalDotLight > 0.5f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "light.grazing", std::abs(normalDotLight) <= 0.1f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "light.back", normalDotLight < -0.5f,
+            pixelCount, pixelCount);
+
+        const std::array<std::array<float, 4>, 4> farRows{
+            ConstantVector(resources, 12, 20),
+            ConstantVector(resources, 12, 21),
+            ConstantVector(resources, 12, 22),
+            ConstantVector(resources, 12, 23),
+        };
+        const std::array<std::array<float, 4>, 4> nearRows{
+            ConstantVector(resources, 12, 24),
+            ConstantVector(resources, 12, 25),
+            ConstantVector(resources, 12, 26),
+            ConstantVector(resources, 12, 27),
+        };
+        const auto screen = ConstantVector(resources, 2, 0);
+        const float fadeLimit = ConstantVector(resources, 2, 24)[0];
+        BucketMask inside;
+        BucketMask outside;
+        BucketMask brdfPeak;
+        BucketMask brdfFallback;
+        BucketMask brdfUnityRatio;
+        BucketMask brdfNonunityRatio;
+        inside.pixels.assign(pixelCount, 0);
+        outside.pixels.assign(pixelCount, 0);
+        brdfPeak.pixels.assign(pixelCount, 0);
+        brdfFallback.pixels.assign(pixelCount, 0);
+        brdfUnityRatio.pixels.assign(pixelCount, 0);
+        brdfNonunityRatio.pixels.assign(pixelCount, 0);
+        constexpr float selectorEpsilon = 1.0e-3f;
+        for (UINT y = 0; y < height; ++y)
+        {
+            for (UINT x = 0; x < width; ++x)
+            {
+                const float positionX = static_cast<float>(x) + 0.5f;
+                const float positionY = static_cast<float>(y) + 0.5f;
+                const float sampleU = positionX * screen[0];
+                const float sampleV = positionY * screen[1];
+                const Pixel sampledDepth = SampleResource2D(
+                    depthResource, depthSampler, sampleU, sampleV);
+                const float sampledLinearizedDepth =
+                    sampledDepth[0] < depthBoundary
+                    ? sampledDepth[0] * 100.0f
+                    : sampledDepth[0] * 1.01f - 0.01f;
+                const auto& sampledRows =
+                    sampledDepth[0] < depthBoundary ? nearRows : farRows;
+                const Pixel position{
+                    positionX * screen[2] * 2.0f - 1.0f,
+                    positionY * screen[3] * -2.0f + 1.0f,
+                    sampledLinearizedDepth,
+                    1.0f,
+                };
+                const float w = DotRow(sampledRows[3], position);
+                const float px = DotRow(sampledRows[0], position) / w;
+                const float py = DotRow(sampledRows[1], position) / w;
+                const float pz = DotRow(sampledRows[2], position) / w;
+                const bool isInside =
+                    (px * px + py * py + pz * pz) / fadeLimit < 1.0f;
+                const std::size_t index =
+                    static_cast<std::size_t>(y) * width + x;
+                (isInside ? inside.pixels : outside.pixels)[index] = 1;
+                ++(isInside ? inside.population : outside.population);
+
+                const Pixel sampledMaterial = SampleResource2D(
+                    materialResource, materialSampler, sampleU, sampleV);
+                const bool sampledSkin =
+                    std::abs(sampledMaterial[3] * 255.0f - 1.0f) < 0.25f;
+                if (!sampledSkin)
+                {
+                    const std::array<float, 3> sampledNormal =
+                        DecodeDeferredNormal(SampleResource2D(
+                            normalResource, normalSampler, sampleU, sampleV));
+                    const float sampledNormalDotLight =
+                        sampledNormal[0] * light[0] +
+                        sampledNormal[1] * light[1] +
+                        sampledNormal[2] * light[2];
+                    const float positionLengthSquared =
+                        px * px + py * py + pz * pz;
+                    if (positionLengthSquared > 0.0f)
+                    {
+                        const float reciprocalLength =
+                            1.0f / std::sqrt(positionLengthSquared);
+                        const std::array<float, 3> viewDirection{
+                            -px * reciprocalLength,
+                            -py * reciprocalLength,
+                            -pz * reciprocalLength,
+                        };
+                        std::array<float, 3> halfVector{
+                            light[0] + viewDirection[0],
+                            light[1] + viewDirection[1],
+                            light[2] + viewDirection[2],
+                        };
+                        const float halfLengthSquared =
+                            halfVector[0] * halfVector[0] +
+                            halfVector[1] * halfVector[1] +
+                            halfVector[2] * halfVector[2];
+                        if (halfLengthSquared > 0.0f)
+                        {
+                            const float halfReciprocalLength =
+                                1.0f / std::sqrt(halfLengthSquared);
+                            for (float& component : halfVector)
+                                component *= halfReciprocalLength;
+                            const float normalDotView = std::clamp(
+                                sampledNormal[0] * viewDirection[0] +
+                                sampledNormal[1] * viewDirection[1] +
+                                sampledNormal[2] * viewDirection[2],
+                                0.0f, 1.0f);
+                            const float normalDotLightClamped =
+                                std::clamp(
+                                    sampledNormalDotLight, 0.0f, 1.0f);
+                            const float viewDotHalf = std::clamp(
+                                viewDirection[0] * halfVector[0] +
+                                viewDirection[1] * halfVector[1] +
+                                viewDirection[2] * halfVector[2],
+                                0.0f, 1.0f);
+                            const float normalDotHalf = std::clamp(
+                                sampledNormal[0] * halfVector[0] +
+                                sampledNormal[1] * halfVector[1] +
+                                sampledNormal[2] * halfVector[2],
+                                0.0f, 1.0f);
+                            const float minimumNormalDot =
+                                std::min(
+                                    normalDotLightClamped, normalDotView);
+                            const float peakDelta =
+                                viewDotHalf -
+                                2.0f * normalDotHalf * minimumNormalDot;
+                            if (peakDelta > selectorEpsilon)
+                            {
+                                brdfPeak.pixels[index] = 1;
+                                ++brdfPeak.population;
+                            }
+                            else if (peakDelta < -selectorEpsilon)
+                            {
+                                brdfFallback.pixels[index] = 1;
+                                ++brdfFallback.population;
+                            }
+
+                            const float ratioDelta =
+                                normalDotView - normalDotLightClamped;
+                            if (ratioDelta < -selectorEpsilon)
+                            {
+                                brdfUnityRatio.pixels[index] = 1;
+                                ++brdfUnityRatio.population;
+                            }
+                            else if (ratioDelta > selectorEpsilon)
+                            {
+                                brdfNonunityRatio.pixels[index] = 1;
+                                ++brdfNonunityRatio.population;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (inside.population != 0)
+            buckets.emplace("distance-fade.inside", std::move(inside));
+        if (outside.population != 0)
+            buckets.emplace("distance-fade.outside", std::move(outside));
+        if (brdfPeak.population != 0)
+            buckets.emplace("brdf.peak", std::move(brdfPeak));
+        if (brdfFallback.population != 0)
+            buckets.emplace("brdf.fallback", std::move(brdfFallback));
+        if (brdfUnityRatio.population != 0)
+            buckets.emplace("brdf.unity-ratio", std::move(brdfUnityRatio));
+        if (brdfNonunityRatio.population != 0)
+            buckets.emplace(
+                "brdf.nonunity-ratio", std::move(brdfNonunityRatio));
+    }
+    else if (profile == InputProfile::DeferredPrepass)
+    {
+        const auto fade = ConstantVector(resources, 2, 4);
+        const bool bypass = fade[3] == -1.0f;
+        AddUniformBucket(
+            buckets, "alpha.bypass", bypass, pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "alpha.active", !bypass, pixelCount, pixelCount);
+        const bool front = gpuFrontFace;
+        AddUniformBucket(
+            buckets, "face.front", front, pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "face.back", !front, pixelCount, pixelCount);
+
+        const Pixel normalMap = ResourcePixel(FindResource(resources, 1));
+        const float nx = normalMap[0] * 2.0f - 1.0f;
+        const float ny = normalMap[1] * 2.0f - 1.0f;
+        const float normalLength = nx * nx + ny * ny;
+        AddUniformBucket(
+            buckets, "normal.xy-interior", normalLength < 1.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "normal.xy-clamped", normalLength >= 1.0f,
+            pixelCount, pixelCount);
+        const float nz =
+            std::sqrt(1.0f - std::clamp(normalLength, 0.0f, 1.0f));
+        const float tangentZ = front ? nz : -nz;
+        const float axis = -tangentZ;
+        AddUniformBucket(
+            buckets, "normal.axis-negative", axis < 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "normal.axis-clamped", axis >= 0.0f,
+            pixelCount, pixelCount);
+
+        const auto smoothness = ConstantVector(resources, 2, 5);
+        AddUniformBucket(
+            buckets, "smoothness.gate-zero", smoothness[3] < 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "smoothness.gate-live", smoothness[3] >= 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "smoothness.direct", smoothness[1] == 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "smoothness.span", smoothness[1] != 0.0f,
+            pixelCount, pixelCount);
+
+        const float globalFade = ConstantVector(resources, 12, 30)[0];
+        const bool bitA = globalFade != 0.0f && fade[1] != 0.0f;
+        const bool bitB = fade[0] != 0.0f;
+        AddUniformBucket(
+            buckets, "flags.none", !bitA && !bitB,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "flags.a", bitA && !bitB,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "flags.b", !bitA && bitB,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "flags.both", bitA && bitB,
+            pixelCount, pixelCount);
+
+        const auto scroll = ConstantVector(resources, 2, 2);
+        AddUniformBucket(
+            buckets, "scroll.x-positive", scroll[0] >= 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "scroll.x-negative", scroll[0] < 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "scroll.y-positive", scroll[1] >= 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "scroll.y-negative", scroll[1] < 0.0f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "motion.distinct-banks", true,
+            pixelCount, pixelCount);
+    }
+    return buckets;
 }
 
 RenderOutputs RenderShader(
@@ -2171,8 +3819,8 @@ ValueComparison CompareValue(
     {
         return {
             true,
-            std::numeric_limits<double>::infinity(),
-            std::numeric_limits<double>::infinity(),
+            static_cast<double>(std::numeric_limits<float>::max()),
+            static_cast<double>(std::numeric_limits<float>::max()),
         };
     }
 
@@ -2208,6 +3856,7 @@ void MergeComparisonStats(
     const ComparisonStats& scenario)
 {
     aggregate.totalChannels += scenario.totalChannels;
+    aggregate.totalPixels += scenario.totalPixels;
     aggregate.divergentChannels += scenario.divergentChannels;
     aggregate.divergentPixels += scenario.divergentPixels;
     aggregate.maximumAbsoluteDifference = std::max(
@@ -2216,6 +3865,8 @@ void MergeComparisonStats(
     aggregate.maximumRelativeDifference = std::max(
         aggregate.maximumRelativeDifference,
         scenario.maximumRelativeDifference);
+    aggregate.absoluteDifferenceSum += scenario.absoluteDifferenceSum;
+    aggregate.relativeDifferenceSum += scenario.relativeDifferenceSum;
     if (scenario.worst.present &&
         (!aggregate.worst.present ||
          scenario.worst.absoluteDifference >
@@ -2234,10 +3885,24 @@ void CompareOutputs(
     UINT seed,
     UINT width,
     float toleranceAbsolute,
-    float toleranceRelative)
+    float toleranceRelative,
+    const std::vector<std::uint8_t>* pixelMask = nullptr)
 {
     if (reference.size() != candidate.size())
         ThrowFailure("render-target count changed between shader executions");
+    if (reference.empty())
+        ThrowFailure("render-target output is empty");
+    std::vector<std::uint8_t> divergentPixelFlags(
+        reference.front().size(), 0);
+    if (pixelMask == nullptr)
+    {
+        stats.totalPixels += reference.front().size();
+    }
+    else
+    {
+        stats.totalPixels += static_cast<std::uint64_t>(
+            std::count(pixelMask->begin(), pixelMask->end(), std::uint8_t{1}));
+    }
 
     for (UINT target = 0; target < reference.size(); ++target)
     {
@@ -2247,6 +3912,11 @@ void CompareOutputs(
         for (std::size_t pixelIndex = 0;
              pixelIndex < reference[target].size(); ++pixelIndex)
         {
+            if (pixelMask != nullptr &&
+                (pixelIndex >= pixelMask->size() || (*pixelMask)[pixelIndex] == 0))
+            {
+                continue;
+            }
             bool pixelDivergent = false;
             double pixelScore = 0.0;
             for (UINT channel = 0; channel < 4; ++channel)
@@ -2262,6 +3932,8 @@ void CompareOutputs(
                 stats.maximumRelativeDifference =
                     std::max(stats.maximumRelativeDifference,
                              difference.relativeDifference);
+                stats.absoluteDifferenceSum += difference.absoluteDifference;
+                stats.relativeDifferenceSum += difference.relativeDifference;
 
                 if (!stats.worst.present ||
                     difference.absoluteDifference > stats.worst.absoluteDifference)
@@ -2290,7 +3962,7 @@ void CompareOutputs(
 
             if (pixelDivergent)
             {
-                ++stats.divergentPixels;
+                divergentPixelFlags[pixelIndex] = 1;
                 RecordTopDivergence(stats, {
                     seed,
                     target,
@@ -2303,6 +3975,10 @@ void CompareOutputs(
             }
         }
     }
+    stats.divergentPixels += static_cast<std::uint64_t>(
+        std::count(
+            divergentPixelFlags.begin(), divergentPixelFlags.end(),
+            std::uint8_t{1}));
 }
 
 void PrintPixel(const Pixel& pixel)
@@ -2323,21 +3999,31 @@ void PrintReport(
     const ComparisonStats& stats,
     UINT dedicatedScenarioCount,
     const std::map<std::string, CoverageStats>& coverage,
-    InputProfile profile)
+    InputProfile profile,
+    bool complete)
 {
-    const bool passed = stats.divergentPixels == 0;
-    std::cout << (passed ? "PASS" : "DIVERGE") << "\n"
+    const bool passed = stats.divergentPixels == 0 && complete;
+    std::cout << (passed ? "PASS" : (complete ? "DIVERGE" : "UNPROVEN")) << "\n"
               << "  input profile: " << InputProfileName(profile) << "\n"
+              << "  fixture: " << FixtureName(options.fixture) << "\n"
               << "  random seeds: " << options.seeds
               << "  dedicated scenarios: " << dedicatedScenarioCount
               << "  size: " << options.width << "x" << options.height
               << "  render targets: " << contract.renderTargetCount << "\n"
               << "  compared pixel-channels: " << stats.totalChannels << "\n"
+              << "  compared pixels: " << stats.totalPixels << "\n"
               << "  divergent pixels: " << stats.divergentPixels
               << "  divergent channels: " << stats.divergentChannels << "\n"
               << std::scientific << std::setprecision(7)
               << "  max abs diff: " << stats.maximumAbsoluteDifference
-              << "  max rel diff: " << stats.maximumRelativeDifference << "\n";
+              << "  mean abs diff: "
+              << (stats.totalChannels != 0
+                    ? stats.absoluteDifferenceSum / stats.totalChannels : 0.0)
+              << "  max rel diff: " << stats.maximumRelativeDifference
+              << "  mean rel diff: "
+              << (stats.totalChannels != 0
+                    ? stats.relativeDifferenceSum / stats.totalChannels : 0.0)
+              << "\n";
 
     if (!coverage.empty())
     {
@@ -2345,9 +4031,11 @@ void PrintReport(
         for (const auto& [bucket, bucketStats] : coverage)
         {
             std::cout << "    " << bucket
-                      << ": " << bucketStats.cases << " cases"
-                      << "  max abs " << bucketStats.maximumAbsoluteDifference
-                      << "  divergent pixels " << bucketStats.divergentPixels
+                      << ": population " << bucketStats.population
+                      << "  max abs "
+                      << bucketStats.comparison.maximumAbsoluteDifference
+                      << "  divergent pixels "
+                      << bucketStats.comparison.divergentPixels
                       << "\n";
         }
     }
@@ -2376,6 +4064,163 @@ void PrintReport(
             std::cout << "\n";
         }
     }
+}
+
+std::string JsonEscape(const std::string& value)
+{
+    std::ostringstream escaped;
+    for (const unsigned char character : value)
+    {
+        switch (character)
+        {
+        case '"':
+            escaped << "\\\"";
+            break;
+        case '\\':
+            escaped << "\\\\";
+            break;
+        case '\n':
+            escaped << "\\n";
+            break;
+        case '\r':
+            escaped << "\\r";
+            break;
+        case '\t':
+            escaped << "\\t";
+            break;
+        default:
+            if (character < 0x20)
+            {
+                escaped << "\\u" << std::hex << std::setw(4)
+                        << std::setfill('0')
+                        << static_cast<unsigned>(character)
+                        << std::dec;
+            }
+            else
+            {
+                escaped << static_cast<char>(character);
+            }
+        }
+    }
+    return escaped.str();
+}
+
+void WriteMetricsJson(std::ostream& stream, const ComparisonStats& stats)
+{
+    const double meanAbsolute = stats.totalChannels != 0
+        ? stats.absoluteDifferenceSum / stats.totalChannels : 0.0;
+    const double meanRelative = stats.totalChannels != 0
+        ? stats.relativeDifferenceSum / stats.totalChannels : 0.0;
+    stream << "{\"total_pixels\":" << stats.totalPixels
+           << ",\"total_channels\":" << stats.totalChannels
+           << ",\"divergent_channels\":" << stats.divergentChannels
+           << ",\"divergent_pixels\":" << stats.divergentPixels
+           << ",\"max_absolute_error\":" << std::setprecision(17)
+           << stats.maximumAbsoluteDifference
+           << ",\"mean_absolute_error\":" << meanAbsolute
+           << ",\"max_relative_error\":" << stats.maximumRelativeDifference
+           << ",\"mean_relative_error\":" << meanRelative << "}";
+}
+
+void WriteMeasurementReport(
+    const Options& options,
+    InputProfile profile,
+    const std::string& generatedInputHash,
+    const ComparisonStats& aggregate,
+    const std::map<std::string, CoverageStats>& coverage,
+    std::vector<ResourceFormatRecord> formats,
+    const std::vector<InputScenario>& scenarios,
+    const std::vector<std::pair<std::string, std::string>>& failures)
+{
+    if (options.measurementJsonPath.empty())
+        return;
+    std::sort(formats.begin(), formats.end());
+    formats.erase(std::unique(
+        formats.begin(), formats.end(),
+        [](const ResourceFormatRecord& left, const ResourceFormatRecord& right) {
+            return !(left < right) && !(right < left);
+        }), formats.end());
+    std::ofstream stream(options.measurementJsonPath, std::ios::binary);
+    if (!stream)
+        ThrowFailure("could not open measurement JSON");
+    const char* verdict = !failures.empty()
+        ? "UNPROVEN"
+        : (aggregate.divergentPixels == 0 ? "PASS" : "FAIL");
+    stream << "{\"schema\":\"fo4cs.shader-exec-measurement\""
+           << ",\"schema_version\":1"
+           << ",\"harness_version\":3"
+           << ",\"source_sha256\":\""
+           << FO4CS_EXEC_HARNESS_SOURCE_SHA256 << "\""
+           << ",\"profile\":\"" << InputProfileName(profile) << "\""
+           << ",\"fixture\":\"" << FixtureName(options.fixture) << "\""
+           << ",\"width\":" << options.width
+           << ",\"height\":" << options.height
+           << ",\"execution_environment\":{"
+           << "\"driver_type\":\"WARP\","
+           << "\"feature_level\":\"11_0\","
+           << "\"runtime_fingerprint\":\"system-d3d11-runtime\","
+           << "\"limitation\":\"runtime binary identity is external to this receipt\"}"
+           << ",\"measurement_format\":\"R32G32B32A32_FLOAT\""
+           << ",\"generated_inputs_sha256\":\"" << generatedInputHash << "\""
+           << ",\"seed_base\":" << options.seedBase
+           << ",\"seeds\":[";
+    for (UINT index = 0; index < options.seeds; ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        stream << options.seedBase + index;
+    }
+    stream << "],\"scenario_seeds\":[";
+    for (std::size_t index = 0; index < scenarios.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        stream << scenarios[index].randomSeed;
+    }
+    stream << "],\"formats\":[";
+    for (std::size_t index = 0; index < formats.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        const ResourceFormatRecord& format = formats[index];
+        stream << "{\"bind_point\":" << format.bindPoint
+               << ",\"dimension\":\"" << JsonEscape(format.dimension) << "\""
+               << ",\"resource_format\":\""
+               << JsonEscape(format.resourceFormat) << "\""
+               << ",\"srv_format\":\"" << JsonEscape(format.srvFormat) << "\"}";
+    }
+    stream << "],\"matrix_assertions\":{"
+           << "\"minimum_absolute_determinant\":0.1,"
+           << "\"distinct_epsilon\":1e-05,\"verdict\":\"PASS\"}"
+           << ",\"aggregate\":";
+    WriteMetricsJson(stream, aggregate);
+    stream << ",\"buckets\":[";
+    std::size_t bucketIndex = 0;
+    for (const auto& [name, bucket] : coverage)
+    {
+        if (bucketIndex++ != 0)
+            stream << ",";
+        stream << "{\"name\":\"" << JsonEscape(name) << "\""
+               << ",\"population\":" << bucket.population
+               << ",\"required_minimum\":"
+               << options.minimumBucketPopulation << ",";
+        std::ostringstream metrics;
+        WriteMetricsJson(metrics, bucket.comparison);
+        const std::string text = metrics.str();
+        stream << text.substr(1);
+    }
+    stream << "],\"failures\":[";
+    for (std::size_t index = 0; index < failures.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        stream << "{\"code\":\"" << JsonEscape(failures[index].first)
+               << "\",\"detail\":\"" << JsonEscape(failures[index].second)
+               << "\"}";
+    }
+    stream << "],\"verdict\":\"" << verdict << "\"}\n";
+    if (!stream)
+        ThrowFailure("could not write measurement JSON");
 }
 
 struct TextureResource
@@ -3209,6 +5054,18 @@ UINT ParseUnsigned(const std::string& option, const char* value)
     return static_cast<UINT>(parsed);
 }
 
+UINT ParseNonnegativeUnsigned(const std::string& option, const char* value)
+{
+    std::size_t consumed = 0;
+    const unsigned long parsed = std::stoul(value, &consumed);
+    if (consumed != std::strlen(value) ||
+        parsed > std::numeric_limits<UINT>::max())
+    {
+        ThrowFailure("invalid value for " + option + ": " + value);
+    }
+    return static_cast<UINT>(parsed);
+}
+
 float ParseFloat(const std::string& option, const char* value)
 {
     std::size_t consumed = 0;
@@ -3218,14 +5075,151 @@ float ParseFloat(const std::string& option, const char* value)
     return parsed;
 }
 
+std::string SelfTestConfigurationHash(
+    UINT width,
+    UINT height,
+    const FrontFaceProbeResult& frontFaceProbe)
+{
+    Options options;
+    options.width = width;
+    options.height = height;
+    options.seeds = 1;
+    options.seedBase = 17;
+    ShaderContract contract;
+    contract.renderTargetCount = 1;
+    contract.inputs.push_back({
+        "SV_Position", 0, 0, 0xFu,
+        D3D_REGISTER_COMPONENT_FLOAT32, D3D_NAME_POSITION});
+    const std::vector<InputScenario> scenarios{
+        {0, 17, false, "random-0", {}}};
+    D3D11_RASTERIZER_DESC clockwise{};
+    clockwise.FillMode = D3D11_FILL_SOLID;
+    clockwise.CullMode = D3D11_CULL_NONE;
+    clockwise.DepthClipEnable = TRUE;
+    D3D11_RASTERIZER_DESC counterClockwise = clockwise;
+    counterClockwise.FrontCounterClockwise = TRUE;
+    D3D11_DEPTH_STENCIL_DESC depth{};
+    depth.DepthEnable = FALSE;
+    depth.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    depth.DepthFunc = D3D11_COMPARISON_ALWAYS;
+    Sha256 hash;
+    AddExecutionConfigurationHash(
+        hash, options, InputProfile::AmbientIbl, contract, scenarios,
+        clockwise, counterClockwise, depth, frontFaceProbe);
+    return hash.Finish();
+}
+
+int RunSelfTest()
+{
+    const std::array<std::pair<float, std::uint32_t>, 9> vectors{{
+        {0.0f, 0x0000u},
+        {1.0f, 0x3C00u},
+        {0.5f, 0x3800u},
+        {0.4999f, 0x3800u},
+        {std::nextafter(1.0f, 0.0f), 0x3C00u},
+        {std::nextafter(1.0f, 2.0f), 0x3C00u},
+        {6.103515625e-5f, 0x0400u},
+        {5.960464477539063e-8f, 0x0001u},
+        {65504.0f, 0x7BFFu},
+    }};
+    for (const auto& [value, expected] : vectors)
+    {
+        if (FloatToHalf(value) != expected)
+            ThrowFailure("self_test: binary16 conversion");
+    }
+    if (HalfToFloat(0x3800u) != 0.5f ||
+        HalfToFloat(0x3C00u) != 1.0f ||
+        HalfToFloat(0x0000u) != 0.0f)
+    {
+        ThrowFailure("self_test: binary16 decode");
+    }
+    D3D_FEATURE_LEVEL requestedFeatureLevel = D3D_FEATURE_LEVEL_11_0;
+    D3D_FEATURE_LEVEL createdFeatureLevel{};
+    ComPtr<ID3D11Device> device;
+    ComPtr<ID3D11DeviceContext> context;
+    CheckHRESULT(
+        D3D11CreateDevice(
+            nullptr, D3D_DRIVER_TYPE_WARP, nullptr, 0,
+            &requestedFeatureLevel, 1, D3D11_SDK_VERSION,
+            &device, &createdFeatureLevel, &context),
+        "self_test: D3D11CreateDevice(WARP)");
+    if (createdFeatureLevel != D3D_FEATURE_LEVEL_11_0)
+        ThrowFailure("self_test: WARP feature level");
+
+    D3D11_RASTERIZER_DESC clockwise{};
+    clockwise.FillMode = D3D11_FILL_SOLID;
+    clockwise.CullMode = D3D11_CULL_NONE;
+    clockwise.DepthClipEnable = TRUE;
+    D3D11_RASTERIZER_DESC counterClockwise = clockwise;
+    counterClockwise.FrontCounterClockwise = TRUE;
+    ComPtr<ID3D11RasterizerState> clockwiseState;
+    ComPtr<ID3D11RasterizerState> counterClockwiseState;
+    CheckHRESULT(
+        device->CreateRasterizerState(&clockwise, &clockwiseState),
+        "self_test: CreateRasterizerState");
+    CheckHRESULT(
+        device->CreateRasterizerState(
+            &counterClockwise, &counterClockwiseState),
+        "self_test: CreateRasterizerState(counter-clockwise)");
+    const FrontFaceProbeResult frontFaceProbe = ProbeFrontFaceStates(
+        device.Get(), context.Get(),
+        clockwiseState.Get(), counterClockwiseState.Get());
+    if (SelfTestConfigurationHash(16, 16, frontFaceProbe) ==
+        SelfTestConfigurationHash(17, 16, frontFaceProbe))
+    {
+        ThrowFailure("self_test: dimension hash");
+    }
+    const std::vector<RuntimeComponent> runtimeComponents =
+        RuntimeComponents();
+    std::cout
+        << "{\"schema\":\"fo4cs.shader-exec-self-test\","
+        << "\"schema_version\":1,\"harness_version\":3,"
+        << "\"source_sha256\":\"" << FO4CS_EXEC_HARNESS_SOURCE_SHA256 << "\","
+        << "\"front_face_probe\":{\"version\":\""
+        << FrontFaceProbeVersion << "\",\"clockwise_state_front\":"
+        << (frontFaceProbe.clockwiseStateFront ? "true" : "false")
+        << ",\"counter_clockwise_state_front\":"
+        << (frontFaceProbe.counterClockwiseStateFront ? "true" : "false")
+        << "},"
+        << "\"runtime_components\":[";
+    for (std::size_t index = 0; index < runtimeComponents.size(); ++index)
+    {
+        if (index != 0)
+            std::cout << ",";
+        const RuntimeComponent& component = runtimeComponents[index];
+        std::cout << "{\"name\":\"" << JsonEscape(component.name)
+                  << "\",\"state\":\"" << JsonEscape(component.state) << "\"";
+        if (component.state == "available")
+        {
+            std::cout << ",\"version\":\"" << JsonEscape(component.version)
+                      << "\",\"sha256\":\"" << component.sha256
+                      << "\",\"size\":" << component.size;
+        }
+        std::cout << "}";
+    }
+    std::cout
+        << "],\"tests\":{\"binary16\":\"PASS\","
+        << "\"dimension_hash\":\"PASS\","
+        << "\"front_face_probe\":\"PASS\"},"
+        << "\"verdict\":\"PASS\"}\n";
+    return 0;
+}
+
 Options ParseOptions(int argumentCount, char** arguments)
 {
+    if (argumentCount == 2 && std::string(arguments[1]) == "--self-test")
+    {
+        Options options;
+        options.selfTest = true;
+        return options;
+    }
     if (argumentCount < 3)
     {
         ThrowFailure(
             "usage: shader_exec_diff.exe <reference.dxbc> <candidate.dxbc> "
             "[--seeds N] [--width W] [--height H] [--tol-abs A] "
-            "[--tol-rel R] [--verbose] [--xegtao-ao "
+            "[--tol-rel R] [--fixture adversarial|native] "
+            "[--seed-base N] [--measurement-json PATH] [--verbose] [--xegtao-ao "
             "--reference-prefilter PATH --candidate-prefilter PATH]");
     }
 
@@ -3251,6 +5245,8 @@ Options ParseOptions(int argumentCount, char** arguments)
         const char* value = arguments[++index];
         if (option == "--seeds")
             options.seeds = ParseUnsigned(option, value);
+        else if (option == "--seed-base")
+            options.seedBase = ParseNonnegativeUnsigned(option, value);
         else if (option == "--width")
             options.width = ParseUnsigned(option, value);
         else if (option == "--height")
@@ -3259,6 +5255,22 @@ Options ParseOptions(int argumentCount, char** arguments)
             options.toleranceAbsolute = ParseFloat(option, value);
         else if (option == "--tol-rel")
             options.toleranceRelative = ParseFloat(option, value);
+        else if (option == "--fixture")
+        {
+            const std::string fixture = value;
+            if (fixture == "adversarial")
+                options.fixture = Fixture::Adversarial;
+            else if (fixture == "native")
+                options.fixture = Fixture::Native;
+            else
+                ThrowFailure("invalid value for --fixture: " + fixture);
+        }
+        else if (option == "--measurement-json")
+            options.measurementJsonPath = value;
+        else if (option == "--minimum-bucket-population")
+            options.minimumBucketPopulation = ParseUnsigned(option, value);
+        else if (option == "--required-bucket")
+            options.requiredBuckets.push_back(value);
         else if (option == "--reference-prefilter")
             options.referencePrefilterPath = value;
         else if (option == "--candidate-prefilter")
@@ -3271,6 +5283,8 @@ Options ParseOptions(int argumentCount, char** arguments)
 
 int Run(const Options& options)
 {
+    if (options.selfTest)
+        return RunSelfTest();
     const std::vector<std::uint8_t> referenceBytecode =
         ReadFile(options.referencePath);
     const std::vector<std::uint8_t> candidateBytecode =
@@ -3305,8 +5319,11 @@ int Run(const Options& options)
         referenceDisassembly, candidateDisassembly);
     const InputProfile profile =
         DetectInputProfile(referenceContract, referenceDisassembly);
+    if (profile == InputProfile::Unshaped)
+        ThrowFailure("unshaped: no measured input profile");
     const std::vector<InputScenario> scenarios =
-        BuildInputScenarios(profile, options.seeds);
+        BuildInputScenarios(
+            profile, options.fixture, options.seeds, options.seedBase);
 
     D3D_FEATURE_LEVEL featureLevel = D3D_FEATURE_LEVEL_11_0;
     D3D_FEATURE_LEVEL createdFeatureLevel{};
@@ -3342,15 +5359,21 @@ int Run(const Options& options)
     rasterizerDesc.FillMode = D3D11_FILL_SOLID;
     rasterizerDesc.CullMode = D3D11_CULL_NONE;
     rasterizerDesc.DepthClipEnable = TRUE;
+    const D3D11_RASTERIZER_DESC clockwiseRasterizerDesc = rasterizerDesc;
     ComPtr<ID3D11RasterizerState> clockwiseRasterizerState;
     CheckHRESULT(device->CreateRasterizerState(
                      &rasterizerDesc, &clockwiseRasterizerState),
                  "CreateRasterizerState");
     rasterizerDesc.FrontCounterClockwise = TRUE;
+    const D3D11_RASTERIZER_DESC counterClockwiseRasterizerDesc = rasterizerDesc;
     ComPtr<ID3D11RasterizerState> counterClockwiseRasterizerState;
     CheckHRESULT(device->CreateRasterizerState(
                      &rasterizerDesc, &counterClockwiseRasterizerState),
                  "CreateRasterizerState(counter-clockwise)");
+    const FrontFaceProbeResult frontFaceProbe = ProbeFrontFaceStates(
+        device.Get(), context.Get(),
+        clockwiseRasterizerState.Get(),
+        counterClockwiseRasterizerState.Get());
 
     D3D11_DEPTH_STENCIL_DESC depthStencilDesc{};
     depthStencilDesc.DepthEnable = FALSE;
@@ -3363,18 +5386,38 @@ int Run(const Options& options)
 
     ComparisonStats stats;
     std::map<std::string, CoverageStats> coverage;
+    std::vector<ResourceFormatRecord> formats;
+    std::vector<std::pair<std::string, std::string>> failures;
+    Sha256 inputHash;
+    AddExecutionConfigurationHash(
+        inputHash, options, profile, referenceContract, scenarios,
+        clockwiseRasterizerDesc, counterClockwiseRasterizerDesc,
+        depthStencilDesc, frontFaceProbe);
     for (const InputScenario& scenario : scenarios)
     {
         context->ClearState();
+        const bool requestedFrontFace =
+            ScenarioControl(scenario, "prepass_front_face", 1.0f) != 0.0f;
+        const bool useClockwiseState =
+            requestedFrontFace == frontFaceProbe.clockwiseStateFront;
+        ID3D11RasterizerState* rasterizerState = useClockwiseState
+            ? clockwiseRasterizerState.Get()
+            : counterClockwiseRasterizerState.Get();
+        const bool gpuFrontFace = useClockwiseState
+            ? frontFaceProbe.clockwiseStateFront
+            : frontFaceProbe.counterClockwiseStateFront;
         const SeedResources seedResources = CreateSeedResources(
             device.Get(), context.Get(), referenceContract,
             referenceDisassembly, profile,
-            scenario, options.width, options.height);
-        const bool frontFace =
-            ScenarioControl(scenario, "prepass_front_face", 1.0f) != 0.0f;
-        ID3D11RasterizerState* rasterizerState = frontFace
-            ? counterClockwiseRasterizerState.Get()
-            : clockwiseRasterizerState.Get();
+            options.fixture, scenario, options.width, options.height,
+            gpuFrontFace, inputHash);
+        formats.insert(
+            formats.end(),
+            seedResources.formats.begin(), seedResources.formats.end());
+        const std::map<std::string, BucketMask> bucketMasks =
+            ClassifyBuckets(
+                profile, scenario, seedResources,
+                options.width, options.height, gpuFrontFace);
         const RenderOutputs referenceOutputs = RenderShader(
             device.Get(), context.Get(), vertexShader.Get(), referenceShader.Get(),
             rasterizerState, depthStencilState.Get(), seedResources,
@@ -3389,25 +5432,87 @@ int Run(const Options& options)
             options.width,
             options.toleranceAbsolute, options.toleranceRelative);
         MergeComparisonStats(stats, scenarioStats);
-        for (const std::string& bucket : scenario.coverageBuckets)
+        for (const auto& [bucketName, mask] : bucketMasks)
         {
-            CoverageStats& bucketStats = coverage[bucket];
-            ++bucketStats.cases;
-            bucketStats.divergentPixels += scenarioStats.divergentPixels;
-            bucketStats.maximumAbsoluteDifference = std::max(
-                bucketStats.maximumAbsoluteDifference,
-                scenarioStats.maximumAbsoluteDifference);
-            bucketStats.maximumRelativeDifference = std::max(
-                bucketStats.maximumRelativeDifference,
-                scenarioStats.maximumRelativeDifference);
+            ComparisonStats bucketScenario;
+            CompareOutputs(
+                bucketScenario, referenceOutputs, candidateOutputs,
+                scenario.randomSeed, options.width,
+                options.toleranceAbsolute, options.toleranceRelative,
+                &mask.pixels);
+            CoverageStats& bucket = coverage[bucketName];
+            bucket.population += mask.population;
+            MergeComparisonStats(bucket.comparison, bucketScenario);
         }
     }
 
+    for (const std::string& required : options.requiredBuckets)
+    {
+        const auto found = coverage.find(required);
+        if (found == coverage.end())
+            failures.emplace_back("missing_bucket", required);
+        else if (found->second.population < options.minimumBucketPopulation)
+            failures.emplace_back("bucket_population", required);
+    }
+    const std::string generatedInputHash = inputHash.Finish();
+    WriteMeasurementReport(
+        options, profile, generatedInputHash, stats,
+        coverage, formats, scenarios, failures);
     PrintReport(
         options, referenceContract, stats,
         static_cast<UINT>(scenarios.size()) - options.seeds,
-        coverage, profile);
+        coverage, profile, failures.empty());
+    if (!failures.empty())
+        return 2;
     return stats.divergentPixels == 0 ? 0 : 1;
+}
+
+std::pair<std::string, int> ClassifyFailure(const std::string& message)
+{
+    for (const std::string& code : {
+             std::string("contract_mismatch"),
+             std::string("front_face_probe"),
+             std::string("matrix_assertion"),
+             std::string("unsupported_input_resource"),
+             std::string("unshaped")})
+    {
+        if (message.rfind(code, 0) == 0)
+            return {code, 2};
+    }
+    return {"internal_failure", 3};
+}
+
+void WriteFailureReport(
+    const Options& options,
+    const std::string& code)
+{
+    if (options.measurementJsonPath.empty())
+        return;
+    std::ofstream stream(options.measurementJsonPath, std::ios::binary);
+    if (!stream)
+        return;
+    stream << "{\"schema\":\"fo4cs.shader-exec-measurement\","
+           << "\"schema_version\":1,\"harness_version\":3,"
+           << "\"source_sha256\":\""
+           << FO4CS_EXEC_HARNESS_SOURCE_SHA256 << "\","
+           << "\"profile\":\"unshaped\",\"fixture\":\""
+           << FixtureName(options.fixture) << "\","
+           << "\"width\":" << options.width
+           << ",\"height\":" << options.height << ","
+           << "\"execution_environment\":{\"driver_type\":\"WARP\","
+           << "\"feature_level\":\"11_0\","
+           << "\"runtime_fingerprint\":\"system-d3d11-runtime\","
+           << "\"limitation\":\"runtime binary identity is external to this receipt\"},"
+           << "\"measurement_format\":\"R32G32B32A32_FLOAT\","
+           << "\"generated_inputs_sha256\":\"\","
+           << "\"seed_base\":" << options.seedBase
+           << ",\"seeds\":[],\"scenario_seeds\":[],"
+           << "\"formats\":[],\"matrix_assertions\":{\"verdict\":\"FAIL\"},"
+           << "\"aggregate\":";
+    WriteMetricsJson(stream, {});
+    stream << ",\"buckets\":[],\"failures\":[{\"code\":\""
+           << JsonEscape(code) << "\",\"detail\":\""
+           << JsonEscape(code) << "\"}],\"verdict\":\"UNPROVEN\"}\n";
 }
 }
 
@@ -3415,7 +5520,18 @@ int main(int argumentCount, char** arguments)
 {
     try
     {
-        return Run(ParseOptions(argumentCount, arguments));
+        const Options options = ParseOptions(argumentCount, arguments);
+        try
+        {
+            return Run(options);
+        }
+        catch (const std::exception& error)
+        {
+            const auto [code, exitCode] = ClassifyFailure(error.what());
+            WriteFailureReport(options, code);
+            std::cerr << "ERROR: " << error.what() << "\n";
+            return exitCode;
+        }
     }
     catch (const std::exception& error)
     {

@@ -236,6 +236,56 @@ target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
 add_test(NAME ShaderCompile COMMAND ShaderCompileTests "${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders")
 set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
+set(SHADER_EXEC_DIFF_SOURCE
+	"${CMAKE_SOURCE_DIR}/scripts/shaders/shader_exec_diff/main.cpp")
+set_property(DIRECTORY APPEND PROPERTY
+	CMAKE_CONFIGURE_DEPENDS "${SHADER_EXEC_DIFF_SOURCE}")
+file(SHA256 "${SHADER_EXEC_DIFF_SOURCE}" SHADER_EXEC_DIFF_SOURCE_SHA256)
+add_executable(ShaderExecDiffHarness "${SHADER_EXEC_DIFF_SOURCE}")
+set_target_properties(ShaderExecDiffHarness PROPERTIES
+	CXX_STANDARD 17
+	CXX_STANDARD_REQUIRED ON
+	CXX_EXTENSIONS OFF
+)
+target_compile_definitions(ShaderExecDiffHarness PRIVATE
+	"FO4CS_EXEC_HARNESS_SOURCE_SHA256=\"${SHADER_EXEC_DIFF_SOURCE_SHA256}\"")
+target_link_libraries(ShaderExecDiffHarness PRIVATE
+	d3d11.lib
+	dxgi.lib
+	d3dcompiler.lib
+	dxguid.lib
+	bcrypt.lib
+	version.lib
+)
+if(MSVC)
+	target_compile_options(ShaderExecDiffHarness PRIVATE /O2 /W4 /WX /Brepro)
+	target_link_options(ShaderExecDiffHarness PRIVATE /WX /Brepro)
+endif()
+
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(
+	NAME ShaderExecDiffUnit
+	COMMAND "${CMAKE_COMMAND}" -E env
+		"FO4CS_EXEC_HARNESS=$<TARGET_FILE:ShaderExecDiffHarness>"
+		FO4CS_REQUIRE_EXEC_HARNESS=1
+		"${Python3_EXECUTABLE}"
+		"${CMAKE_SOURCE_DIR}/scripts/shaders/test_shader_exec_diff.py"
+)
+set_tests_properties(ShaderExecDiffUnit PROPERTIES LABELS "shader;unit")
+add_test(
+	NAME ShaderExecDiffSmoke
+	COMMAND "${CMAKE_COMMAND}" -E env
+		"FO4CS_EXEC_HARNESS=$<TARGET_FILE:ShaderExecDiffHarness>"
+		FO4CS_REQUIRE_EXEC_HARNESS=1
+		"${Python3_EXECUTABLE}"
+		"${CMAKE_SOURCE_DIR}/scripts/shaders/test_shader_exec_diff.py"
+		--self-smoke
+)
+set_tests_properties(ShaderExecDiffSmoke PROPERTIES
+	LABELS "shader;integration"
+	TIMEOUT 600
+)
+
 add_executable(ShaderCatalogTests
 	tests/ShaderCatalogTests.cpp
 	features/ShaderCatalog/src/CatalogDB.cpp

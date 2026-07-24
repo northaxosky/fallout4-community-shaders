@@ -24,6 +24,7 @@ if (-not (Test-Path -LiteralPath $vcvars64 -PathType Leaf)) {
 $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
 $cacheDir = Join-Path $repoRoot ".shader-cache"
 $source = Join-Path $PSScriptRoot "main.cpp"
+$sourceSha256 = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
 $executable = Join-Path $cacheDir "shader_exec_diff.exe"
 $object = Join-Path $cacheDir "shader_exec_diff.obj"
 $compilerPdb = Join-Path $cacheDir "shader_exec_diff-compiler.pdb"
@@ -37,12 +38,13 @@ $command = @(
     "&&",
     "call `"$vcvars64`" >nul",
     "&&",
-    "cl /nologo /std:c++17 /O2 /EHsc /W4 /WX",
+    "cl /nologo /std:c++17 /O2 /EHsc /W4 /WX /Brepro",
+    "/DFO4CS_EXEC_HARNESS_SOURCE_SHA256=\`"$sourceSha256\`"",
     "`"$source`"",
     "/Fo`"$object`"",
     "/Fd`"$compilerPdb`"",
     "/Fe`"$executable`"",
-    "/link d3d11.lib dxgi.lib d3dcompiler.lib dxguid.lib",
+    "/link /Brepro d3d11.lib dxgi.lib d3dcompiler.lib dxguid.lib bcrypt.lib version.lib",
     "/PDB:`"$linkerPdb`""
 ) -join " "
 

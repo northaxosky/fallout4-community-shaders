@@ -1,0 +1,272 @@
+{
+  "schema": "fo4cs.shader-exec-contracts",
+  "schema_version": 1,
+  "harness_version": 3,
+  "minimum_bucket_population": 64,
+  "fixtures": [
+    "adversarial",
+    "native"
+  ],
+  "profiles": {
+    "ambient-ibl": {
+      "predicates": {
+        "depth.near": "decoded(t7.y) < float32(0.01)",
+        "depth.equal": "decoded(t7.y) == float32(0.01)",
+        "depth.far": "decoded(t7.y) > float32(0.01)",
+        "ibl.off": "decoded(t2.y) <= float32(0.001961)",
+        "ibl.on": "decoded(t2.y) > float32(0.001961)",
+        "material.default": "abs(decoded(t3.w) * 255 - 5) >= 0.25",
+        "material.skin": "abs(decoded(t3.w) * 255 - 5) < 0.25",
+        "roughness.zero": "saturate(decoded(t3.x) - 0.3) == 0",
+        "roughness.mid": "0 < saturate(decoded(t3.x) - 0.3) < 0.6",
+        "roughness.high": "saturate(decoded(t3.x) - 0.3) >= 0.6",
+        "skin-taps.default": "skin center and abs(decoded(t3.w at tap) * 255 - 5) >= 0.25",
+        "skin-taps.skin": "skin center and abs(decoded(t3.w at tap) * 255 - 5) < 0.25"
+      },
+      "required_buckets": {
+        "adversarial": [
+          "depth.near",
+          "depth.equal",
+          "depth.far",
+          "ibl.off",
+          "ibl.on",
+          "material.default",
+          "material.skin",
+          "roughness.zero",
+          "roughness.mid",
+          "roughness.high",
+          "skin-taps.default",
+          "skin-taps.skin"
+        ],
+        "native": [
+          "depth.near",
+          "depth.far",
+          "ibl.off",
+          "ibl.on",
+          "material.default",
+          "material.skin",
+          "roughness.zero",
+          "roughness.mid",
+          "roughness.high",
+          "skin-taps.default",
+          "skin-taps.skin"
+        ]
+      }
+    },
+    "directional-lighting": {
+      "predicates": {
+        "depth.near": "decoded(t3.x) < float32(0.01)",
+        "depth.equal": "decoded(t3.x) == float32(0.01)",
+        "depth.far": "decoded(t3.x) > float32(0.01)",
+        "cascade.0-only": "linearized_depth < cb2[10].y and not cb2[10].x < linearized_depth",
+        "cascade.blend": "linearized_depth < cb2[10].y and cb2[10].x < linearized_depth",
+        "cascade.1-only": "not linearized_depth < cb2[10].y and cb2[10].x < linearized_depth",
+        "distance-fade.inside": "dot(cpu_pos_view, cpu_pos_view) / cb2[24].x < 1",
+        "distance-fade.outside": "dot(cpu_pos_view, cpu_pos_view) / cb2[24].x >= 1",
+        "light.front": "dot(decoded_normal, cb2[1].xyz) > 0.5",
+        "light.grazing": "abs(dot(decoded_normal, cb2[1].xyz)) <= 0.1",
+        "light.back": "dot(decoded_normal, cb2[1].xyz) < -0.5",
+        "material.default": "abs(decoded(t2.w) * 255 - 1) >= 0.25",
+        "material.skin": "abs(decoded(t2.w) * 255 - 1) < 0.25",
+        "roughness.low": "1 - decoded(t2.x) < 0.25",
+        "roughness.mid": "0.25 <= 1 - decoded(t2.x) < 0.7",
+        "roughness.high": "1 - decoded(t2.x) >= 0.7",
+        "brdf.peak": "default material and VdotH_nonneg - 2 * NdotH * min(NdotL_clamped, NdotV_sat) > selector_epsilon",
+        "brdf.fallback": "default material and VdotH_nonneg - 2 * NdotH * min(NdotL_clamped, NdotV_sat) < -selector_epsilon",
+        "brdf.unity-ratio": "default material and NdotV_sat < NdotL_clamped - selector_epsilon",
+        "brdf.nonunity-ratio": "default material and NdotV_sat > NdotL_clamped + selector_epsilon"
+      },
+      "required_buckets": {
+        "adversarial": [
+          "depth.near",
+          "depth.equal",
+          "depth.far",
+          "cascade.0-only",
+          "cascade.blend",
+          "cascade.1-only",
+          "distance-fade.inside",
+          "distance-fade.outside",
+          "light.front",
+          "light.grazing",
+          "light.back",
+          "material.default",
+          "material.skin",
+          "roughness.low",
+          "roughness.mid",
+          "roughness.high",
+          "brdf.peak",
+          "brdf.fallback",
+          "brdf.unity-ratio",
+          "brdf.nonunity-ratio"
+        ],
+        "native": [
+          "depth.near",
+          "depth.far",
+          "cascade.0-only",
+          "cascade.blend",
+          "cascade.1-only",
+          "distance-fade.inside",
+          "distance-fade.outside",
+          "light.front",
+          "light.grazing",
+          "light.back",
+          "material.default",
+          "material.skin",
+          "roughness.low",
+          "roughness.mid",
+          "roughness.high",
+          "brdf.peak",
+          "brdf.fallback",
+          "brdf.unity-ratio",
+          "brdf.nonunity-ratio"
+        ]
+      }
+    },
+    "deferred-prepass": {
+      "predicates": {
+        "alpha.bypass": "float32(cb2[4].w) == -1",
+        "alpha.active": "float32(cb2[4].w) != -1",
+        "face.front": "uploaded rasterizer winding yields SV_IsFrontFace true",
+        "face.back": "uploaded rasterizer winding yields SV_IsFrontFace false",
+        "normal.xy-interior": "dot(decoded(t1.xy) * 2 - 1, decoded(t1.xy) * 2 - 1) < 1",
+        "normal.xy-clamped": "dot(decoded(t1.xy) * 2 - 1, decoded(t1.xy) * 2 - 1) >= 1",
+        "normal.axis-negative": "dot(uploaded geometric normal, decoded tangent normal) < 0",
+        "normal.axis-clamped": "dot(uploaded geometric normal, decoded tangent normal) >= 0",
+        "smoothness.gate-zero": "float32(cb2[5].w) < 0",
+        "smoothness.gate-live": "float32(cb2[5].w) >= 0",
+        "smoothness.direct": "float32(cb2[5].y) == 0",
+        "smoothness.span": "float32(cb2[5].y) != 0",
+        "flags.none": "not bitA and not bitB",
+        "flags.a": "bitA and not bitB",
+        "flags.b": "not bitA and bitB",
+        "flags.both": "bitA and bitB",
+        "scroll.x-positive": "float32(cb2[2].x) >= 0",
+        "scroll.x-negative": "float32(cb2[2].x) < 0",
+        "scroll.y-positive": "float32(cb2[2].y) >= 0",
+        "scroll.y-negative": "float32(cb2[2].y) < 0",
+        "motion.distinct-banks": "uploaded cb12[31..34] and cb12[37..40] are invertible and not near-equal"
+      },
+      "required_buckets": {
+        "adversarial": [
+          "alpha.bypass",
+          "alpha.active",
+          "face.front",
+          "face.back",
+          "normal.xy-interior",
+          "normal.xy-clamped",
+          "normal.axis-negative",
+          "normal.axis-clamped",
+          "smoothness.gate-zero",
+          "smoothness.gate-live",
+          "smoothness.direct",
+          "smoothness.span",
+          "flags.none",
+          "flags.a",
+          "flags.b",
+          "flags.both",
+          "scroll.x-positive",
+          "scroll.x-negative",
+          "scroll.y-positive",
+          "scroll.y-negative",
+          "motion.distinct-banks"
+        ],
+        "native": [
+          "alpha.bypass",
+          "alpha.active",
+          "face.front",
+          "face.back",
+          "normal.xy-interior",
+          "normal.xy-clamped",
+          "normal.axis-negative",
+          "normal.axis-clamped",
+          "smoothness.gate-zero",
+          "smoothness.gate-live",
+          "smoothness.direct",
+          "smoothness.span",
+          "flags.none",
+          "flags.a",
+          "flags.b",
+          "flags.both",
+          "scroll.x-positive",
+          "scroll.x-negative",
+          "scroll.y-positive",
+          "scroll.y-negative",
+          "motion.distinct-banks"
+        ]
+      }
+    }
+  },
+  "contracts": [
+    {
+      "name": "ambient_ibl_pass",
+      "profile": "ambient-ibl",
+      "ibl_in_light": false
+    },
+    {
+      "name": "bsdf_light_deferred_directional",
+      "profile": "directional-lighting",
+      "ibl_in_light": false
+    },
+    {
+      "name": "bsdf_light_deferred_directional_ibl",
+      "profile": "directional-lighting",
+      "ibl_in_light": true
+    },
+    {
+      "name": "deferred_prepass",
+      "profile": "deferred-prepass",
+      "ibl_in_light": false
+    }
+  ],
+  "mutations": [
+    {
+      "id": "depth-exclusive-boundary",
+      "class": "boundary-operator",
+      "target": "ambient_ibl_pass",
+      "fixture": "adversarial",
+      "expected_bucket": "depth.equal"
+    },
+    {
+      "id": "transposed-reprojection",
+      "class": "matrix-orientation",
+      "target": "ambient_ibl_pass",
+      "fixture": "adversarial",
+      "expected_bucket": "depth.far"
+    },
+    {
+      "id": "missing-axis-zyx",
+      "class": "axis-swizzle",
+      "target": "ambient_ibl_pass",
+      "fixture": "adversarial",
+      "expected_bucket": "ibl.on"
+    },
+    {
+      "id": "flipped-view-direction",
+      "class": "vector-sign",
+      "target": "bsdf_light_deferred_directional",
+      "fixture": "adversarial",
+      "expected_bucket": "light.front"
+    },
+    {
+      "id": "omitted-t12-sample",
+      "class": "omitted-sample",
+      "target": "ambient_ibl_pass",
+      "fixture": "adversarial",
+      "expected_bucket": "material.skin"
+    },
+    {
+      "id": "wrong-texture-slot",
+      "class": "resource-slot",
+      "target": "ambient_ibl_pass",
+      "fixture": "adversarial",
+      "expected_bucket": "material.skin"
+    },
+    {
+      "id": "omitted-material-branch",
+      "class": "branch-elision",
+      "target": "ambient_ibl_pass",
+      "fixture": "adversarial",
+      "expected_bucket": "material.skin"
+    }
+  ]
+}
