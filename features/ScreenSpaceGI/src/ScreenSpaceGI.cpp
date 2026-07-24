@@ -1724,6 +1724,30 @@ namespace cs::features
 		ImGui::TextDisabled(
 			"Resources: %s | extent: %ux%u | generation: %u",
 			status, _allocW, _allocH, _generation);
+
+		// Debug preview: raw AO / bounce buffer in-game, no RenderDoc needed.
+		// Mirrors ScreenSpaceShadows' mask preview. Watch while rotating over fixed
+		// geometry: a correct buffer is world-locked (a surface holds its value).
+		static bool s_showPreview = false;
+		static int s_previewSource = 0;
+		ImGui::Checkbox("Show GI buffer preview (debug)", &s_showPreview);
+		if (s_showPreview) {
+			ImGui::RadioButton("AO", &s_previewSource, 0);
+			ImGui::SameLine();
+			ImGui::RadioButton("Bounce", &s_previewSource, 1);
+			const auto& tex = (s_previewSource == 1) ? _bounceTexture : _aoTexture;
+			const char* label = (s_previewSource == 1) ? "Bounce (indirect GI)" : "AO (bright = unoccluded)";
+			if (tex && tex->srv && _allocW > 0 && _allocH > 0) {
+				const float aspect = static_cast<float>(_allocW) / static_cast<float>(_allocH);
+				const float previewWidth = 480.0f;
+				const float previewHeight = previewWidth / aspect;
+				ImGui::TextDisabled("%s %ux%u", label, _allocW, _allocH);
+				ImGui::Image(reinterpret_cast<ImTextureID>(tex->srv.get()),
+					ImVec2(previewWidth, previewHeight));
+			} else {
+				ImGui::TextDisabled("Buffer not allocated.");
+			}
+		}
 	}
 
 	void ScreenSpaceGI::RestoreDefaultSettings()
