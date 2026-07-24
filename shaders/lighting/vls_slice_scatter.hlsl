@@ -45,8 +45,7 @@ cbuffer PerLight_CB1 : register(b1)
     float4 cb1_pad_11;
 
     // [12]: .x and .y form the first-smoothstep range start/end;
-    //       .z used as additive bias on output alpha (insn 51);
-    //       .w used with .x in the range computation (insn 41).
+    //       .z and .w are the output-alpha endpoints (insn 51).
     //       TODO: identify; likely god-rays / volumetric scattering
     //       fade range + intensity.
     float4 cb1_idx12_fade_range_a;
@@ -82,9 +81,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
 // Resource bindings. Single SRV + sampler.
 
-// t7: linear-depth-style buffer; .y channel sampled. Same channel access
-//     pattern as the deferred composite (blob 3539)'s t7 = main depth target.
-//     TODO: confirm via IDA on PSSetShaderResources at the dispatch site.
+// t7: main depth, R24G8_TYPELESS with an R24_UNORM_X8_TYPELESS SRV.
 Texture2D<float4> g_tLinearDepth : register(t7);
 
 // s7: mode_default sampler (NOT mode_comparison; this is NOT a hardware
@@ -96,7 +93,7 @@ SamplerState g_sDepth : register(s7);
 struct PS_INPUT
 {
     float4 position : SV_POSITION;     // v0; .xy used
-    float3 rayDir   : TEXCOORD0;       // v1; per-vertex 3D direction
+    float4 rayDir   : TEXCOORD0;       // v1; per-vertex 3D direction
                                        // (probably world/view-space ray
                                        // from camera origin through the
                                        // light volume's vertex).
@@ -116,19 +113,20 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 
     // Insn 0-2: r0.xyz = normalize(input.rayDir)
-    float3 rayUnit = normalize(input.rayDir);
+    float3 rayUnit = normalize(input.rayDir.xyz);
 
     // Insn 3: r1.xy = uv = SV_POSITION.xy * cb0[0].xy
     float2 uv = input.position.xy * ScreenSize.xy;
 
-    // Insn 4: r0.w = linear depth = t7.Sample(s7, uv).y
-    float depth = g_tLinearDepth.Sample(g_sDepth, uv).y;
+    // Insn 4: r0.w = main depth = t7.Sample(s7, uv).x
+    float depth = g_tLinearDepth.Sample(g_sDepth, uv).x;
 
     // Insn 5-18: depth-threshold matrix select - SHARED with composite
-    //   if (depth < 0.01)   -> near matrix CB12[24..27], depth *= 100
+    //   if (depth <= 0.01)  -> near matrix CB12[24..27], depth *= 100
     //   else                -> far  matrix CB12[20..23], depth *= 1.01 - 0.01
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
-    bool isNearPath = (depth < 0.01);
+    // Native near select is inclusive (exec-diff verified at exactly 0.01).
+    bool isNearPath = (depth <= 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
     float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
     float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
@@ -200,8 +198,10 @@ PS_OUTPUT main(PS_INPUT input)
     float invSmoothA = 1.0 - (3.0 - 2.0 * t0) * (t0 * t0);
     float fadeA      = pow(invSmoothA, 0.33);
 
-    // Insn 51: o0.w = fadeA * sunDot + cb1[12].z
-    output.color.w = fadeA * sunDot + cb1_idx12_fade_range_a.z;
+    // Insn 51: o0.w interpolates cb1[12].z..w by fadeA.
+    output.color.w = fadeA *
+        (cb1_idx12_fade_range_a.w - cb1_idx12_fade_range_a.z) +
+        cb1_idx12_fade_range_a.z;
 
     // Second smoothstep using cb1[13] range.
     // Insn 52-55: linear remap fadeSecondary into [cb1[13].y, cb1[13].x]
@@ -235,7 +235,7 @@ PS_OUTPUT main(PS_INPUT input)
 //     declared-but-unused per the original).
 //   * Output signature (1 SV_Target).
 //   * Control flow (depth-based matrix select, then linear math).
-//   * Single texture sample with .y channel selector preserved.
+//   * Single texture sample with .x channel selector preserved.
 //   * Both smoothstep computations (one inverse-smoothstep^0.33 for alpha
 //     fade, one direct smoothstep for color lerp).
 // What needs cross-read to finalize:
@@ -245,8 +245,6 @@ PS_OUTPUT main(PS_INPUT input)
 //     dispatch site C++ should resolve which BSShader subclass owns it.
 //   * CB0[0].zw, CB1[0..1], CB1[10].w, CB1[12], CB1[13], CB2[4] field
 //     semantic names (currently `cb<N>_idx<M>_*` placeholders).
-//   * Whether t7 is the same depth gbuffer as in the composite (very
-//     likely) or a different per-light volume depth.
 // What is intentionally NOT done in this revision (separate work):
 //   * Permutation diff against a second RenderDoc capture. The captured
 //     runtime PS at eid 45401 fires 22 times in the deferred chain; if

@@ -29,7 +29,7 @@ namespace cs::engine
 			"c493970c042ccd90363c57596ff53f6fdd22ce5f"
 		};
 		constexpr std::array<std::string_view, 1> kBsdfPointSha1s{
-			"3f1f708c01758a3d20267e5c1b7a6472b8c9d336"
+			"9969e800683c8a7c8afc25f41582415d79cbe47e"
 		};
 		constexpr std::array<std::string_view, 1> kAmbientIblSha1s{
 			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383"

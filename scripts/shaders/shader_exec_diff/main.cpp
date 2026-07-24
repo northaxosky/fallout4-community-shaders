@@ -137,8 +137,10 @@ enum class InputProfile
 {
     Unshaped,
     DirectionalLighting,
+    PointLightingLive,
     AmbientIbl,
     DeferredPrepass,
+    VlsSliceScatter,
 };
 
 const char* InputProfileName(InputProfile profile)
@@ -147,10 +149,14 @@ const char* InputProfileName(InputProfile profile)
     {
     case InputProfile::DirectionalLighting:
         return "directional-lighting";
+    case InputProfile::PointLightingLive:
+        return "point-lighting-live";
     case InputProfile::AmbientIbl:
         return "ambient-ibl";
     case InputProfile::DeferredPrepass:
         return "deferred-prepass";
+    case InputProfile::VlsSliceScatter:
+        return "vls-slice-scatter";
     default:
         return "unshaped";
     }
@@ -171,13 +177,15 @@ struct ResourceFormatRecord
     std::string dimension;
     std::string resourceFormat;
     std::string srvFormat;
+    std::string limitation;
 
     bool operator<(const ResourceFormatRecord& other) const
     {
-        return std::tie(bindPoint, dimension, resourceFormat, srvFormat) <
+        return std::tie(
+                   bindPoint, dimension, resourceFormat, srvFormat, limitation) <
             std::tie(
                 other.bindPoint, other.dimension,
-                other.resourceFormat, other.srvFormat);
+                other.resourceFormat, other.srvFormat, other.limitation);
     }
 };
 
@@ -1006,6 +1014,21 @@ std::string DeferredPrepassValueExpression(
     }
 }
 
+std::string ProfileValueExpression(
+    const SignatureParameter& parameter,
+    InputProfile profile)
+{
+    if (profile == InputProfile::DeferredPrepass)
+        return DeferredPrepassValueExpression(parameter);
+    if (profile == InputProfile::VlsSliceScatter &&
+        parameter.semanticName == "TEXCOORD" &&
+        parameter.semanticIndex == 0)
+    {
+        return "float4(0.20f * clip.x, 0.15f * clip.y, -1.0f, 1.0f)";
+    }
+    return "";
+}
+
 ComPtr<ID3D11VertexShader> CreatePassthroughVertexShader(
     ID3D11Device* device,
     const ShaderContract& contract,
@@ -1052,13 +1075,11 @@ ComPtr<ID3D11VertexShader> CreatePassthroughVertexShader(
         }
         else
         {
-            const std::string prepassValue =
-                profile == InputProfile::DeferredPrepass
-                ? DeferredPrepassValueExpression(parameter)
-                : "";
+            const std::string profileValue =
+                ProfileValueExpression(parameter, profile);
             source << "  output.value" << index << " = "
-                   << (!prepassValue.empty()
-                       ? prepassValue
+                   << (!profileValue.empty()
+                       ? profileValue
                        : ValueExpression(
                            parameter.componentType,
                            ComponentCount(parameter.mask), width, height))
@@ -1228,6 +1249,120 @@ float RandomConstant(std::mt19937& random)
     return std::uniform_real_distribution<float>(0.0f, 4.0f)(random);
 }
 
+bool HasExactConstantBuffer(
+    const ShaderContract& contract,
+    UINT bindPoint,
+    UINT float4Count)
+{
+    return std::any_of(
+        contract.constantBuffers.begin(), contract.constantBuffers.end(),
+        [bindPoint, float4Count](const ConstantBufferBinding& binding) {
+            return binding.bindPoint == bindPoint &&
+                binding.size == float4Count * 16;
+        });
+}
+
+bool HasExactTexture2D(const ShaderContract& contract, UINT bindPoint)
+{
+    return std::any_of(
+        contract.resources.begin(), contract.resources.end(),
+        [bindPoint](const ResourceBinding& binding) {
+            return binding.bindPoint == bindPoint &&
+                binding.bindCount == 1 &&
+                binding.dimension == D3D_SRV_DIMENSION_TEXTURE2D;
+        });
+}
+
+bool HasExactSampler(const ShaderContract& contract, UINT bindPoint)
+{
+    return std::any_of(
+        contract.samplers.begin(), contract.samplers.end(),
+        [bindPoint](const SamplerBinding& binding) {
+            return binding.bindPoint == bindPoint && binding.bindCount == 1;
+        });
+}
+
+bool HasExactBindPoints(
+    const ShaderContract& contract,
+    std::initializer_list<UINT> textureSlots,
+    std::initializer_list<UINT> samplerSlots)
+{
+    return contract.resources.size() == textureSlots.size() &&
+        contract.samplers.size() == samplerSlots.size() &&
+        std::all_of(
+            textureSlots.begin(), textureSlots.end(),
+            [&contract](UINT slot) { return HasExactTexture2D(contract, slot); }) &&
+        std::all_of(
+            samplerSlots.begin(), samplerSlots.end(),
+            [&contract](UINT slot) { return HasExactSampler(contract, slot); });
+}
+
+bool HasExactFloatInput(
+    const ShaderContract& contract,
+    const char* semanticName,
+    UINT semanticIndex,
+    UINT shaderRegister,
+    BYTE mask,
+    D3D_NAME systemValue)
+{
+    return std::any_of(
+        contract.inputs.begin(), contract.inputs.end(),
+        [semanticName, semanticIndex, shaderRegister, mask, systemValue](
+            const SignatureParameter& input) {
+            return input.semanticName == semanticName &&
+                input.semanticIndex == semanticIndex &&
+                input.shaderRegister == shaderRegister &&
+                input.mask == mask &&
+                input.componentType == D3D_REGISTER_COMPONENT_FLOAT32 &&
+                input.systemValue == systemValue;
+        });
+}
+
+bool IsPointLightingLiveContract(
+    const ShaderContract& contract,
+    const DisassemblyInfo& disassembly)
+{
+    const std::set<UINT> samplers{0, 1, 2, 3, 7};
+    return contract.renderTargetCount == 2 &&
+        contract.constantBuffers.size() == 2 &&
+        HasExactConstantBuffer(contract, 12, 30) &&
+        HasExactConstantBuffer(contract, 2, 15) &&
+        HasExactBindPoints(
+            contract, {0, 1, 2, 3, 7}, {0, 1, 2, 3, 7}) &&
+        disassembly.samplers == samplers &&
+        disassembly.comparisonSamplers.empty() &&
+        contract.inputs.size() == 2 &&
+        HasExactFloatInput(
+            contract, "SV_POSITION", 0, 0, 0xf, D3D_NAME_POSITION) &&
+        HasExactFloatInput(
+            contract, "POSITION", 14, 1, 0xf, D3D_NAME_UNDEFINED);
+}
+
+bool IsVlsSliceScatterContract(
+    const ShaderContract& contract,
+    const DisassemblyInfo& disassembly)
+{
+    const std::set<UINT> samplers{7};
+    return contract.renderTargetCount == 1 &&
+        contract.constantBuffers.size() == 4 &&
+        HasExactConstantBuffer(contract, 0, 1) &&
+        HasExactConstantBuffer(contract, 1, 14) &&
+        HasExactConstantBuffer(contract, 2, 5) &&
+        HasExactConstantBuffer(contract, 12, 28) &&
+        HasExactBindPoints(contract, {7}, {7}) &&
+        disassembly.samplers == samplers &&
+        disassembly.comparisonSamplers.empty() &&
+        contract.inputs.size() == 4 &&
+        HasExactFloatInput(
+            contract, "SV_POSITION", 0, 0, 0xf, D3D_NAME_POSITION) &&
+        HasExactFloatInput(
+            contract, "TEXCOORD", 0, 1, 0xf, D3D_NAME_UNDEFINED) &&
+        HasExactFloatInput(
+            contract, "POSITION", 0, 2, 0xf, D3D_NAME_UNDEFINED) &&
+        HasExactFloatInput(
+            contract, "TEXCOORD", 4, 3, 0xf, D3D_NAME_UNDEFINED);
+}
+
 bool IsDirectionalLightingContract(
     const ShaderContract& contract,
     const DisassemblyInfo& disassembly)
@@ -1321,10 +1456,14 @@ InputProfile DetectInputProfile(
 {
     if (IsDirectionalLightingContract(contract, disassembly))
         return InputProfile::DirectionalLighting;
+    if (IsPointLightingLiveContract(contract, disassembly))
+        return InputProfile::PointLightingLive;
     if (IsAmbientIblContract(contract, disassembly))
         return InputProfile::AmbientIbl;
     if (IsDeferredPrepassContract(contract, disassembly))
         return InputProfile::DeferredPrepass;
+    if (IsVlsSliceScatterContract(contract, disassembly))
+        return InputProfile::VlsSliceScatter;
     return InputProfile::Unshaped;
 }
 
@@ -1380,6 +1519,15 @@ std::vector<InputScenario> BuildInputScenarios(
                 {"directional_roughness", 0.45f},
             };
         }
+        else if (profile == InputProfile::PointLightingLive)
+        {
+            scenario.controls = {
+                {"point_depth", 1.0f},
+                {"point_skin", 0.0f},
+                {"point_attenuation", 1.0f},
+                {"point_direction", 0.0f},
+            };
+        }
         else if (profile == InputProfile::DeferredPrepass)
         {
             scenario.controls = {
@@ -1392,6 +1540,14 @@ std::vector<InputScenario> BuildInputScenarios(
                 {"prepass_flag_b", 0.0f},
                 {"prepass_scroll_x", 1.0f},
                 {"prepass_scroll_y", 1.0f},
+            };
+        }
+        else if (profile == InputProfile::VlsSliceScatter)
+        {
+            scenario.controls = {
+                {"vls_depth", 1.0f},
+                {"vls_primary_region", 1.0f},
+                {"vls_secondary_region", 1.0f},
             };
         }
         for (const auto& [name, value] : overrides)
@@ -1437,6 +1593,22 @@ std::vector<InputScenario> BuildInputScenarios(
         add("brdf-fallback", {{"directional_brdf", 1.0f}});
         add("brdf-nonunity", {{"directional_brdf", 2.0f}});
     }
+    else if (profile == InputProfile::PointLightingLive)
+    {
+        add("depth-near", {{"point_depth", -1.0f}});
+        if (fixture == Fixture::Adversarial)
+            add("depth-equal", {{"point_depth", 0.0f}});
+        add("depth-far", {{"point_depth", 1.0f}});
+        add("material-default", {{"point_skin", 0.0f}});
+        add("material-skin", {{"point_skin", 1.0f}});
+        add("attenuation-inner", {{"point_attenuation", 0.0f}});
+        add("attenuation-mid", {{"point_attenuation", 1.0f}});
+        add("attenuation-edge", {{"point_attenuation", 2.0f}});
+        add("attenuation-culled", {{"point_attenuation", 3.0f}});
+        add("cookie-direction-0", {{"point_direction", 0.0f}});
+        add("cookie-direction-1", {{"point_direction", 1.0f}});
+        add("cookie-direction-2", {{"point_direction", 2.0f}});
+    }
     else if (profile == InputProfile::DeferredPrepass)
     {
         add("alpha-active", {{"prepass_bypass_fade", 0.0f}});
@@ -1456,6 +1628,19 @@ std::vector<InputScenario> BuildInputScenarios(
         add("scroll-positive", {});
         add("scroll-negative",
             {{"prepass_scroll_x", -1.0f}, {"prepass_scroll_y", -1.0f}});
+    }
+    else if (profile == InputProfile::VlsSliceScatter)
+    {
+        add("depth-near", {{"vls_depth", -1.0f}});
+        if (fixture == Fixture::Adversarial)
+            add("depth-equal", {{"vls_depth", 0.0f}});
+        add("depth-far", {{"vls_depth", 1.0f}});
+        add("primary-fade-low", {{"vls_primary_region", 0.0f}});
+        add("primary-fade-mid", {{"vls_primary_region", 1.0f}});
+        add("primary-fade-high", {{"vls_primary_region", 2.0f}});
+        add("secondary-fade-low", {{"vls_secondary_region", 0.0f}});
+        add("secondary-fade-mid", {{"vls_secondary_region", 1.0f}});
+        add("secondary-fade-high", {{"vls_secondary_region", 2.0f}});
     }
     return scenarios;
 }
@@ -1559,6 +1744,20 @@ void SetVector(
 }
 
 using Matrix4 = std::array<std::array<float, 4>, 4>;
+
+const Matrix4 SharedFarReprojection{{
+    {1.15f, -0.06f, 0.08f, -0.13f},
+    {0.05f, 0.78f, -0.04f, 0.09f},
+    {-0.01f, 0.04f, 1.10f, -0.15f},
+    {-0.02f, 0.01f, 0.08f, 1.20f},
+}};
+
+const Matrix4 SharedNearReprojection{{
+    {0.70f, 0.08f, 0.03f, 0.11f},
+    {-0.04f, 0.55f, 0.02f, -0.07f},
+    {0.02f, -0.03f, 0.90f, 0.20f},
+    {0.01f, 0.02f, 0.05f, 1.00f},
+}};
 
 void SetMatrix(
     std::vector<float>& values,
@@ -1671,21 +1870,145 @@ void ShapeSharedCameraConstants(
     SetVector(values, 18, {sine, 0.0f, cosine, 0.0f});
     SetVector(values, 19, {0.1f, 0.001f, 0.0f, 0.0f});
 
-    const Matrix4 farReprojection{{
-        {1.15f, -0.06f, 0.08f, -0.13f},
-        {0.05f, 0.78f, -0.04f, 0.09f},
-        {-0.01f, 0.04f, 1.10f, -0.15f},
-        {-0.02f, 0.01f, 0.08f, 1.20f},
+    SetMatrix(values, 20, SharedFarReprojection);
+    SetMatrix(values, 24, SharedNearReprojection);
+    AssertMatrixPair(
+        "reprojection", SharedFarReprojection, SharedNearReprojection);
+}
+
+float ProfileDepth(
+    const InputScenario& scenario,
+    const std::string& control,
+    Fixture fixture)
+{
+    const float fallback = (scenario.randomSeed & 1u) != 0 ? -1.0f : 1.0f;
+    const float mode = ScenarioControl(scenario, control, fallback);
+    if (fixture == Fixture::Native)
+        return mode < 0.0f ? 0.005f : 0.75f;
+    constexpr float boundary = 0.01f;
+    if (mode < -0.5f)
+        return std::nextafter(boundary, 0.0f);
+    if (mode > 0.5f)
+        return std::nextafter(
+            boundary, std::numeric_limits<float>::infinity());
+    return boundary;
+}
+
+bool IsPointSkin(const InputScenario& scenario)
+{
+    const float fallback =
+        (scenario.randomSeed & 2u) != 0 ? 1.0f : 0.0f;
+    return ScenarioControl(scenario, "point_skin", fallback) != 0.0f;
+}
+
+UINT PointAttenuationRegion(const InputScenario& scenario)
+{
+    const float fallback = static_cast<float>(scenario.randomSeed % 4u);
+    return static_cast<UINT>(
+        ScenarioControl(scenario, "point_attenuation", fallback));
+}
+
+UINT PointDirectionIndex(const InputScenario& scenario)
+{
+    const float fallback = static_cast<float>(scenario.randomSeed % 3u);
+    return static_cast<UINT>(
+        ScenarioControl(scenario, "point_direction", fallback));
+}
+
+std::array<float, 3> ReprojectionCenter(float depth)
+{
+    const float linearizedDepth =
+        depth <= 0.01f ? depth * 100.0f : depth * 1.01f - 0.01f;
+    const std::array<float, 4> input{0.0f, 0.0f, linearizedDepth, 1.0f};
+    const Matrix4& matrix =
+        depth <= 0.01f ? SharedNearReprojection : SharedFarReprojection;
+    std::array<float, 4> projected{};
+    for (UINT row = 0; row < 4; ++row)
+    {
+        for (UINT column = 0; column < 4; ++column)
+            projected[row] += matrix[row][column] * input[column];
+    }
+    return {
+        projected[0] / projected[3],
+        projected[1] / projected[3],
+        projected[2] / projected[3],
+    };
+}
+
+void ShapePointLightingConstants(
+    UINT bindPoint,
+    std::vector<float>& values,
+    UINT width,
+    UINT height,
+    Fixture fixture,
+    const InputScenario& scenario)
+{
+    if (bindPoint == 12)
+    {
+        SetVector(values, 28, {0.02f, 2.0f, 1.0f, 2.0f});
+        SetVector(values, 29, {0.36f, -0.4f, 0.0f, 0.0f});
+        return;
+    }
+    if (bindPoint != 2)
+        return;
+
+    SetVector(values, 0, {
+        1.0f / static_cast<float>(width),
+        1.0f / static_cast<float>(height),
+        1.0f / static_cast<float>(width),
+        1.0f / static_cast<float>(height),
+    });
+
+    static constexpr std::array<std::array<float, 3>, 3> directions{{
+        {0.35f, -0.25f, 0.9027735f},
+        {-0.75f, 0.40f, 0.5267827f},
+        {0.20f, 0.90f, -0.3872983f},
     }};
-    const Matrix4 nearReprojection{{
-        {0.70f, 0.08f, 0.03f, 0.11f},
-        {-0.04f, 0.55f, 0.02f, -0.07f},
-        {0.02f, -0.03f, 0.90f, 0.20f},
-        {0.01f, 0.02f, 0.05f, 1.00f},
-    }};
-    SetMatrix(values, 20, farReprojection);
-    SetMatrix(values, 24, nearReprojection);
-    AssertMatrixPair("reprojection", farReprojection, nearReprojection);
+    static constexpr std::array<float, 4> distanceRatios{
+        0.15f, 0.55f, 0.90f, 1.25f,
+    };
+    const UINT directionIndex = PointDirectionIndex(scenario) % 3u;
+    const UINT attenuationRegion = PointAttenuationRegion(scenario) % 4u;
+    const std::array<float, 3>& direction = directions[directionIndex];
+    constexpr float radius = 4.0f;
+    const std::array<float, 3> center = ReprojectionCenter(
+        ProfileDepth(scenario, "point_depth", fixture));
+    const float distance = radius * distanceRatios[attenuationRegion];
+    const std::array<float, 3> lightPosition{
+        center[0] + direction[0] * distance,
+        center[1] + direction[1] * distance,
+        center[2] + direction[2] * distance,
+    };
+    SetVector(values, 1, {
+        lightPosition[0], lightPosition[1], lightPosition[2], radius,
+    });
+    SetVector(values, 2, {2.0f, 1.4f, 0.8f, 0.0f});
+    SetVector(values, 3, {0.0f, 1.0f, 2.0f, 0.0f});
+
+    static constexpr std::array<std::array<std::array<float, 3>, 3>, 3>
+        rotations{{
+            {{{1.0f, 0.0f, 0.0f},
+              {0.0f, 1.0f, 0.0f},
+              {0.0f, 0.0f, 1.0f}}},
+            {{{0.0f, 0.0f, 1.0f},
+              {0.0f, 1.0f, 0.0f},
+              {-1.0f, 0.0f, 0.0f}}},
+            {{{1.0f, 0.0f, 0.0f},
+              {0.0f, 0.0f, -1.0f},
+              {0.0f, 1.0f, 0.0f}}},
+        }};
+    const auto& rotation = rotations[directionIndex];
+    for (UINT row = 0; row < 3; ++row)
+    {
+        const float translation =
+            -(rotation[row][0] * lightPosition[0] +
+              rotation[row][1] * lightPosition[1] +
+              rotation[row][2] * lightPosition[2]);
+        SetVector(values, 11 + row, {
+            rotation[row][0], rotation[row][1], rotation[row][2], translation,
+        });
+    }
+    SetVector(values, 14, {0.0f, 0.0f, 0.0f, 1.0f});
 }
 
 void ShapeDirectionalLightingConstants(
@@ -1804,6 +2127,54 @@ void ShapeAmbientConstants(
         });
         SetVector(values, 5, {1.0f, 1.0f, 0.0f, 0.0f});
     }
+}
+
+std::array<float, 2> VlsFadeRange(float region)
+{
+    if (region == 0.0f)
+        return {1.0f, 0.99f};
+    if (region == 2.0f)
+        return {0.85f, 0.10f};
+    return {1.0f, 0.80f};
+}
+
+void ShapeVlsSliceScatterConstants(
+    UINT bindPoint,
+    std::vector<float>& values,
+    UINT width,
+    UINT height,
+    std::mt19937& random,
+    const InputScenario& scenario)
+{
+    if (bindPoint == 0)
+    {
+        SetVector(values, 0, {
+            1.0f / static_cast<float>(width),
+            1.0f / static_cast<float>(height),
+            1.0f,
+            1.0f,
+        });
+        return;
+    }
+    if (bindPoint == 1)
+    {
+        const float primaryRegion = ScenarioControl(
+            scenario, "vls_primary_region",
+            static_cast<float>(std::uniform_int_distribution<UINT>(0, 2)(random)));
+        const float secondaryRegion = ScenarioControl(
+            scenario, "vls_secondary_region",
+            static_cast<float>(std::uniform_int_distribution<UINT>(0, 2)(random)));
+        const std::array<float, 2> primary = VlsFadeRange(primaryRegion);
+        const std::array<float, 2> secondary = VlsFadeRange(secondaryRegion);
+        SetVector(values, 0, {0.08f, 0.12f, 0.18f, 1.0f});
+        SetVector(values, 1, {0.42f, 0.50f, 0.62f, 1.0f});
+        SetVector(values, 10, {0.0f, 0.0f, 0.0f, 10.0f});
+        SetVector(values, 12, {primary[0], primary[1], 0.02f, 0.85f});
+        SetVector(values, 13, {secondary[0], secondary[1], 0.0f, 0.0f});
+        return;
+    }
+    if (bindPoint == 2)
+        SetVector(values, 4, {0.0f, 0.0f, 1.0f, 0.10f});
 }
 
 void ShapeDeferredPrepassConstants(
@@ -1930,6 +2301,73 @@ void FillDeferredDepthTexture(
         values[pixel * 4 + 1] = depth;
         values[pixel * 4 + 2] = depth;
         values[pixel * 4 + 3] = 1.0f;
+    }
+}
+
+void FillPointLightingTexture(
+    std::vector<float>& values,
+    UINT bindPoint,
+    UINT width,
+    UINT height,
+    UINT arraySize,
+    std::mt19937& random,
+    Fixture fixture,
+    const InputScenario& scenario)
+{
+    const std::size_t pixelCount =
+        static_cast<std::size_t>(width) * height * arraySize;
+    if (bindPoint == 3)
+    {
+        FillDeferredDepthTexture(
+            values, pixelCount, random,
+            ProfileDepth(scenario, "point_depth", fixture));
+        return;
+    }
+
+    const bool skin = IsPointSkin(scenario);
+    const float directionOffset =
+        static_cast<float>(PointDirectionIndex(scenario) % 3u) / 3.0f;
+    for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+    {
+        const float x = static_cast<float>(pixel % width) /
+            static_cast<float>(width - 1);
+        const float y = static_cast<float>((pixel / width) % height) /
+            static_cast<float>(height - 1);
+        const float normalZ = -0.8f + y * 1.6f;
+        const float radial =
+            std::sqrt(std::max(0.0f, 1.0f - normalZ * normalZ));
+        const float azimuth =
+            (x + directionOffset) * 6.28318531f;
+        const float normalX = radial * std::cos(azimuth);
+        const float normalY = radial * std::sin(azimuth);
+
+        float* destination = values.data() + pixel * 4;
+        if (bindPoint == 0)
+        {
+            destination[0] = 0.15f + x * 0.65f;
+            destination[1] = 0.20f + y * 0.55f;
+            destination[2] = 0.25f + (x + y) * 0.25f;
+            destination[3] = 0.20f + (x + y) * 0.35f;
+        }
+        else if (bindPoint == 1)
+        {
+            StoreEncodedUnitNormal(
+                destination, normalX, normalY, normalZ, random);
+        }
+        else if (bindPoint == 2)
+        {
+            destination[0] = skin ? normalX : 0.10f + x * 0.80f;
+            destination[1] = skin ? normalY : 0.10f + y * 0.75f;
+            destination[2] = skin ? normalZ : 0.20f + (x + y) * 0.30f;
+            destination[3] = (skin ? 1.0f : 2.0f) / 255.0f;
+        }
+        else if (bindPoint == 7)
+        {
+            destination[0] = 0.10f + x * 0.80f;
+            destination[1] = 0.15f + y * 0.70f;
+            destination[2] = 0.20f + (1.0f - x) * 0.60f;
+            destination[3] = 0.25f + (1.0f - y) * 0.50f;
+        }
     }
 }
 
@@ -2245,6 +2683,22 @@ void FillDeferredPrepassTexture(
     FillUnitRandom(values, random);
 }
 
+void FillVlsSliceScatterTexture(
+    std::vector<float>& values,
+    UINT width,
+    UINT height,
+    UINT arraySize,
+    std::mt19937& random,
+    Fixture fixture,
+    const InputScenario& scenario)
+{
+    const std::size_t pixelCount =
+        static_cast<std::size_t>(width) * height * arraySize;
+    FillDeferredDepthTexture(
+        values, pixelCount, random,
+        ProfileDepth(scenario, "vls_depth", fixture));
+}
+
 void FillProfileTexture(
     std::vector<float>& values,
     InputProfile profile,
@@ -2266,10 +2720,21 @@ void FillProfileTexture(
         FillDirectionalTexture(
             values, bindPoint, width, height, arraySize, random, fixture, scenario);
     }
+    else if (profile == InputProfile::PointLightingLive)
+    {
+        FillPointLightingTexture(
+            values, bindPoint, width, height, arraySize,
+            random, fixture, scenario);
+    }
     else if (profile == InputProfile::DeferredPrepass)
     {
         FillDeferredPrepassTexture(
             values, bindPoint, width, height, arraySize, random, scenario);
+    }
+    else if (profile == InputProfile::VlsSliceScatter)
+    {
+        FillVlsSliceScatterTexture(
+            values, width, height, arraySize, random, fixture, scenario);
     }
     else
     {
@@ -2411,6 +2876,7 @@ struct TextureFormatSpec
     DXGI_FORMAT resource = DXGI_FORMAT_R32G32B32A32_FLOAT;
     DXGI_FORMAT view = DXGI_FORMAT_R32G32B32A32_FLOAT;
     UINT bytesPerPixel = 16;
+    std::string limitation;
 };
 
 TextureFormatSpec SelectTextureFormat(
@@ -2439,6 +2905,31 @@ TextureFormatSpec SelectTextureFormat(
         if (bindPoint == 5)
             return {DXGI_FORMAT_R16_UNORM, DXGI_FORMAT_R16_UNORM, 2};
     }
+    else if (profile == InputProfile::PointLightingLive)
+    {
+        if (bindPoint == 0)
+            return {
+                DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,
+                DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, 4};
+        if (bindPoint == 1)
+            return {DXGI_FORMAT_R16G16_UNORM, DXGI_FORMAT_R16G16_UNORM, 4};
+        if (bindPoint == 2 || bindPoint == 7)
+        {
+            TextureFormatSpec format{
+                DXGI_FORMAT_R8G8B8A8_UNORM,
+                DXGI_FORMAT_R8G8B8A8_UNORM, 4};
+            if (bindPoint == 7)
+            {
+                format.limitation =
+                    "UNPROVEN exact runtime format; representative xyz color cookie";
+            }
+            return format;
+        }
+        if (bindPoint == 3)
+            return {
+                DXGI_FORMAT_R24G8_TYPELESS,
+                DXGI_FORMAT_R24_UNORM_X8_TYPELESS, 4};
+    }
     else if (profile == InputProfile::AmbientIbl)
     {
         if (bindPoint == 1)
@@ -2462,6 +2953,12 @@ TextureFormatSpec SelectTextureFormat(
             return {
                 DXGI_FORMAT_R8G8B8A8_UNORM,
                 DXGI_FORMAT_R8G8B8A8_UNORM, 4};
+    }
+    else if (profile == InputProfile::VlsSliceScatter && bindPoint == 7)
+    {
+        return {
+            DXGI_FORMAT_R24G8_TYPELESS,
+            DXGI_FORMAT_R24_UNORM_X8_TYPELESS, 4};
     }
     return {
         DXGI_FORMAT_R16G16B16A16_FLOAT,
@@ -2836,6 +3333,7 @@ BoundResource CreateTexture2DResource(
         DimensionName(binding.dimension),
         FormatName(format.resource),
         FormatName(format.view),
+        format.limitation,
     };
     CheckHRESULT(device->CreateShaderResourceView(texture.Get(), &viewDesc, &result.view),
                  "CreateShaderResourceView for t" + std::to_string(bindPoint));
@@ -2960,12 +3458,18 @@ SeedResources CreateSeedResources(
         if (profile == InputProfile::DirectionalLighting)
             ShapeDirectionalLightingConstants(
                 binding.bindPoint, values, width, height, scenario);
+        else if (profile == InputProfile::PointLightingLive)
+            ShapePointLightingConstants(
+                binding.bindPoint, values, width, height, fixture, scenario);
         else if (profile == InputProfile::AmbientIbl)
             ShapeAmbientConstants(
                 binding.bindPoint, values, width, height, random);
         else if (profile == InputProfile::DeferredPrepass)
             ShapeDeferredPrepassConstants(
                 binding.bindPoint, values, scenario);
+        else if (profile == InputProfile::VlsSliceScatter)
+            ShapeVlsSliceScatterConstants(
+                binding.bindPoint, values, width, height, random, scenario);
 
         D3D11_BUFFER_DESC bufferDesc{};
         bufferDesc.ByteWidth = binding.size;
@@ -3616,6 +4120,151 @@ std::map<std::string, BucketMask> ClassifyBuckets(
             buckets.emplace(
                 "brdf.nonunity-ratio", std::move(brdfNonunityRatio));
     }
+    else if (profile == InputProfile::PointLightingLive)
+    {
+        const BoundResource& depthResource = FindResource(resources, 3);
+        const BoundSampler& depthSampler = FindSampler(resources, 3);
+        const BoundResource& materialResource = FindResource(resources, 2);
+        const Pixel depth = ResourcePixel(depthResource);
+        AddUniformBucket(
+            buckets, "depth.near", depth[0] < depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.equal", depth[0] == depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.far", depth[0] > depthBoundary,
+            pixelCount, pixelCount);
+
+        const Pixel material = ResourcePixel(materialResource);
+        const bool skin = std::abs(material[3] * 255.0f - 1.0f) < 0.25f;
+        AddUniformBucket(
+            buckets, "material.skin", skin, pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "material.default", !skin, pixelCount, pixelCount);
+
+        const std::array<std::array<float, 4>, 4> farRows{
+            ConstantVector(resources, 12, 20),
+            ConstantVector(resources, 12, 21),
+            ConstantVector(resources, 12, 22),
+            ConstantVector(resources, 12, 23),
+        };
+        const std::array<std::array<float, 4>, 4> nearRows{
+            ConstantVector(resources, 12, 24),
+            ConstantVector(resources, 12, 25),
+            ConstantVector(resources, 12, 26),
+            ConstantVector(resources, 12, 27),
+        };
+        AssertMatrixPair("point-reprojection", farRows, nearRows);
+        AddUniformBucket(
+            buckets, "reprojection.distinct-banks", true,
+            pixelCount, pixelCount);
+
+        const auto screen = ConstantVector(resources, 2, 0);
+        const auto light = ConstantVector(resources, 2, 1);
+        const auto attenuationCurve = ConstantVector(resources, 2, 3);
+        const std::array<std::array<float, 4>, 4> lightRows{
+            ConstantVector(resources, 2, 11),
+            ConstantVector(resources, 2, 12),
+            ConstantVector(resources, 2, 13),
+            ConstantVector(resources, 2, 14),
+        };
+        BucketMask attenuationLive;
+        BucketMask attenuationCulled;
+        BucketMask finiteLive;
+        BucketMask cookieFront;
+        BucketMask cookieBack;
+        for (BucketMask* mask : {
+                 &attenuationLive, &attenuationCulled, &finiteLive,
+                 &cookieFront, &cookieBack})
+        {
+            mask->pixels.assign(pixelCount, 0);
+        }
+        for (UINT y = 0; y < height; ++y)
+        {
+            for (UINT x = 0; x < width; ++x)
+            {
+                const float positionX = static_cast<float>(x) + 0.5f;
+                const float positionY = static_cast<float>(y) + 0.5f;
+                const Pixel sampledDepth = SampleResource2D(
+                    depthResource, depthSampler,
+                    positionX * screen[0], positionY * screen[1]);
+                const bool nearPath = sampledDepth[0] <= depthBoundary;
+                const float linearizedDepth = nearPath
+                    ? sampledDepth[0] * 100.0f
+                    : sampledDepth[0] * 1.01f - 0.01f;
+                const Pixel position{
+                    positionX * screen[2] * 2.0f - 1.0f,
+                    positionY * screen[3] * -2.0f + 1.0f,
+                    linearizedDepth,
+                    1.0f,
+                };
+                const auto& rows = nearPath ? nearRows : farRows;
+                const float positionW = DotRow(rows[3], position);
+                const Pixel positionView{
+                    DotRow(rows[0], position) / positionW,
+                    DotRow(rows[1], position) / positionW,
+                    DotRow(rows[2], position) / positionW,
+                    1.0f,
+                };
+                const float dx = light[0] - positionView[0];
+                const float dy = light[1] - positionView[1];
+                const float dz = light[2] - positionView[2];
+                const float distance =
+                    std::sqrt(dx * dx + dy * dy + dz * dz);
+                const float distanceNormalized =
+                    std::clamp(distance / light[3], 0.0f, 1.0f);
+                const float distancePower =
+                    std::pow(distanceNormalized, attenuationCurve[2]);
+                const float linearFalloff = std::clamp(
+                    attenuationCurve[1] * distancePower +
+                        attenuationCurve[0],
+                    0.0f, 1.0f);
+                const float attenuation =
+                    std::pow(1.0f - linearFalloff, 2.2f);
+                const bool live = attenuation > 0.001f;
+                const std::size_t index =
+                    static_cast<std::size_t>(y) * width + x;
+                BucketMask& attenuationBucket =
+                    live ? attenuationLive : attenuationCulled;
+                attenuationBucket.pixels[index] = 1;
+                ++attenuationBucket.population;
+
+                const float lightSpaceZ = DotRow(lightRows[2], positionView);
+                const bool negativeHemisphere =
+                    lightSpaceZ * 0.5f + 0.5f < 0.0f;
+                BucketMask& cookieBucket =
+                    negativeHemisphere ? cookieBack : cookieFront;
+                cookieBucket.pixels[index] = 1;
+                ++cookieBucket.population;
+
+                const bool finite =
+                    live && light[3] != 0.0f && distance > 0.0f &&
+                    positionW != 0.0f &&
+                    std::isfinite(positionView[0]) &&
+                    std::isfinite(positionView[1]) &&
+                    std::isfinite(positionView[2]) &&
+                    std::isfinite(attenuation) &&
+                    DotRow(lightRows[3], positionView) != 0.0f;
+                if (finite)
+                {
+                    finiteLive.pixels[index] = 1;
+                    ++finiteLive.population;
+                }
+            }
+        }
+        if (attenuationLive.population != 0)
+            buckets.emplace("attenuation.live", std::move(attenuationLive));
+        if (attenuationCulled.population != 0)
+            buckets.emplace(
+                "attenuation.culled", std::move(attenuationCulled));
+        if (finiteLive.population != 0)
+            buckets.emplace("finite.live", std::move(finiteLive));
+        if (cookieFront.population != 0)
+            buckets.emplace("cookie.front", std::move(cookieFront));
+        if (cookieBack.population != 0)
+            buckets.emplace("cookie.back", std::move(cookieBack));
+    }
     else if (profile == InputProfile::DeferredPrepass)
     {
         const auto fade = ConstantVector(resources, 2, 4);
@@ -3697,6 +4346,148 @@ std::map<std::string, BucketMask> ClassifyBuckets(
         AddUniformBucket(
             buckets, "motion.distinct-banks", true,
             pixelCount, pixelCount);
+    }
+    else if (profile == InputProfile::VlsSliceScatter)
+    {
+        const BoundResource& depthResource = FindResource(resources, 7);
+        const BoundSampler& depthSampler = FindSampler(resources, 7);
+        const Pixel depth = ResourcePixel(depthResource);
+        AddUniformBucket(
+            buckets, "depth.near", depth[0] < depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.equal", depth[0] == depthBoundary,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "depth.far", depth[0] > depthBoundary,
+            pixelCount, pixelCount);
+
+        const std::array<std::array<float, 4>, 4> farRows{
+            ConstantVector(resources, 12, 20),
+            ConstantVector(resources, 12, 21),
+            ConstantVector(resources, 12, 22),
+            ConstantVector(resources, 12, 23),
+        };
+        const std::array<std::array<float, 4>, 4> nearRows{
+            ConstantVector(resources, 12, 24),
+            ConstantVector(resources, 12, 25),
+            ConstantVector(resources, 12, 26),
+            ConstantVector(resources, 12, 27),
+        };
+        AssertMatrixPair("vls-reprojection", farRows, nearRows);
+        AddUniformBucket(
+            buckets, "reprojection.distinct-banks", true,
+            pixelCount, pixelCount);
+
+        const auto colorA = ConstantVector(resources, 1, 0);
+        const auto colorB = ConstantVector(resources, 1, 1);
+        const auto primaryFade = ConstantVector(resources, 1, 12);
+        const auto secondaryFade = ConstantVector(resources, 1, 13);
+        const float primaryWidth =
+            std::abs(primaryFade[0] - primaryFade[1]);
+        const float secondaryWidth =
+            std::abs(secondaryFade[0] - secondaryFade[1]);
+        AddUniformBucket(
+            buckets, "fade.primary-narrow", primaryWidth < 0.05f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "fade.primary-medium",
+            primaryWidth >= 0.05f && primaryWidth < 0.5f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "fade.primary-wide", primaryWidth >= 0.5f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "fade.secondary-narrow", secondaryWidth < 0.05f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "fade.secondary-medium",
+            secondaryWidth >= 0.05f && secondaryWidth < 0.5f,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "fade.secondary-wide", secondaryWidth >= 0.5f,
+            pixelCount, pixelCount);
+        const bool alphaEndpointsDistinct =
+            primaryFade[2] != primaryFade[3];
+        const bool colorEndpointsDistinct =
+            colorA[0] != colorB[0] ||
+            colorA[1] != colorB[1] ||
+            colorA[2] != colorB[2];
+        AddUniformBucket(
+            buckets, "alpha.endpoints-distinct", alphaEndpointsDistinct,
+            pixelCount, pixelCount);
+        AddUniformBucket(
+            buckets, "color.endpoints-distinct", colorEndpointsDistinct,
+            pixelCount, pixelCount);
+
+        const auto screen = ConstantVector(resources, 0, 0);
+        const auto fadeScale = ConstantVector(resources, 1, 10);
+        const auto scatter = ConstantVector(resources, 2, 4);
+        BucketMask finiteLive;
+        finiteLive.pixels.assign(pixelCount, 0);
+        for (UINT y = 0; y < height; ++y)
+        {
+            for (UINT x = 0; x < width; ++x)
+            {
+                const float positionX = static_cast<float>(x) + 0.5f;
+                const float positionY = static_cast<float>(y) + 0.5f;
+                const float u = positionX * screen[0];
+                const float v = positionY * screen[1];
+                const Pixel sampledDepth =
+                    SampleResource2D(depthResource, depthSampler, u, v);
+                const bool nearPath = sampledDepth[0] <= depthBoundary;
+                const float linearizedDepth = nearPath
+                    ? sampledDepth[0] * 100.0f
+                    : sampledDepth[0] * 1.01f - 0.01f;
+                const Pixel position{
+                    u * screen[2] * 2.0f - 1.0f,
+                    (-v * screen[3] + 1.0f) * 2.0f - 1.0f,
+                    linearizedDepth,
+                    1.0f,
+                };
+                const auto& rows = nearPath ? nearRows : farRows;
+                const float positionW = DotRow(rows[3], position);
+                const float px = DotRow(rows[0], position) / positionW;
+                const float py = DotRow(rows[1], position) / positionW;
+                const float pz = DotRow(rows[2], position) / positionW;
+                const float positionLength =
+                    std::sqrt(px * px + py * py + pz * pz);
+                const float rayX = 0.20f * (u * 2.0f - 1.0f);
+                const float rayY = 0.15f * (1.0f - v * 2.0f);
+                const float rayLength =
+                    std::sqrt(rayX * rayX + rayY * rayY + 1.0f);
+                const float backX = -positionLength * rayX / rayLength;
+                const float backY = -positionLength * rayY / rayLength;
+                const float backZ = positionLength / rayLength;
+                const float scatterDot =
+                    backX * scatter[0] +
+                    backY * scatter[1] +
+                    backZ * scatter[2];
+                const float inverseRatio = 1.0f - scatter[3] / scatterDot;
+                const float distanceNormalized =
+                    positionLength * inverseRatio / fadeScale[3];
+                const float dotNormalized =
+                    std::abs(scatterDot) * inverseRatio / fadeScale[3];
+                const bool finite =
+                    positionW != 0.0f && rayLength > 0.0f &&
+                    scatterDot != 0.0f && fadeScale[3] != 0.0f &&
+                    primaryFade[0] != primaryFade[1] &&
+                    secondaryFade[0] != secondaryFade[1] &&
+                    alphaEndpointsDistinct && colorEndpointsDistinct &&
+                    std::isfinite(positionLength) &&
+                    std::isfinite(distanceNormalized) &&
+                    std::isfinite(dotNormalized);
+                if (finite)
+                {
+                    const std::size_t index =
+                        static_cast<std::size_t>(y) * width + x;
+                    finiteLive.pixels[index] = 1;
+                    ++finiteLive.population;
+                }
+            }
+        }
+        if (finiteLive.population != 0)
+            buckets.emplace("finite.live", std::move(finiteLive));
     }
     return buckets;
 }
@@ -4187,7 +4978,13 @@ void WriteMeasurementReport(
                << ",\"dimension\":\"" << JsonEscape(format.dimension) << "\""
                << ",\"resource_format\":\""
                << JsonEscape(format.resourceFormat) << "\""
-               << ",\"srv_format\":\"" << JsonEscape(format.srvFormat) << "\"}";
+               << ",\"srv_format\":\"" << JsonEscape(format.srvFormat) << "\"";
+        if (!format.limitation.empty())
+        {
+            stream << ",\"limitation\":\""
+                   << JsonEscape(format.limitation) << "\"";
+        }
+        stream << "}";
     }
     stream << "],\"matrix_assertions\":{"
            << "\"minimum_absolute_determinant\":0.1,"

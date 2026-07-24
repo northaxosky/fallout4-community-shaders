@@ -61,7 +61,9 @@
       "defines": [
         "LIGHT_TYPE=2"
       ],
-      "sha1": "301B2CFD363DB202F74163C0F59C14ABBA5EEEED"
+      "sha1": "D025C12B6A57B5FC3C8A8366F73E13058E600197",
+      "corpus_sha1": "9969e800683c8a7c8afc25f41582415d79cbe47e",
+      "corpus_blob_index": 3287
     },
     {
       "name": "deferred_composite",
@@ -83,7 +85,9 @@
       "name": "vls_slice_scatter",
       "src": "shaders/lighting/vls_slice_scatter.hlsl",
       "defines": [],
-      "sha1": "65C54A65B061558F9B4D91CAEA1BE0D10F315AAC"
+      "sha1": "4F7A976547912B87B381964625331510B4340DF7",
+      "corpus_sha1": "8fb709c2fdf00a201227a0e7af60212dcdff9acf",
+      "corpus_blob_index": 2147
     }
   ]
 }

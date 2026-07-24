@@ -72,7 +72,7 @@
       ],
       "role": "deferred-lights",
       "role_description": "Deferred lighting accumulation: directional sun + point/spot lights write the diffuse and specular accumulation buffers from the G-buffer. The ambient/IBL pass that consumes kSSAO lives inside this dispatch group.",
-      "reconstruction_hlsl": "shaders/lighting/bsdf_light_deferred.hlsl (LIGHT_TYPE_DIRECTIONAL via blob 3295 sha 50e2618e8d1a; LIGHT_TYPE_POINT via eid 46771 sha 3f1f708c0175; LIGHT_TYPE_SPOT stub). Sibling: shaders/lighting/ambient_ibl_pass.hlsl (blob 3559 sha 7460585eaf76).",
+      "reconstruction_hlsl": "shaders/lighting/bsdf_light_deferred.hlsl (LIGHT_TYPE_DIRECTIONAL via blob 3295 sha 50e2618e8d1a; live canonical LIGHT_TYPE_POINT via blobs 3287/3316 and FO4_frame24669 sha 9969e800683c, historical frame9483 sha 3f1f708c0175 is a different permutation; LIGHT_TYPE_SPOT stub). Sibling: shaders/lighting/ambient_ibl_pass.hlsl (blob 3559 sha 7460585eaf76).",
       "rva_OG_NG_AE": [
         "0x028529b0",
         "0x02097e30",

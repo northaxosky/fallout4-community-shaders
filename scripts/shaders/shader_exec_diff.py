@@ -41,6 +41,17 @@ MANIFEST_FILENAME = "shader-exec-diff-run.json"
 COMPILE_FLAGS = ("/nologo", "/T", "ps_5_0", "/O3", "/E", "main")
 FIXTURE_ORDER = ("adversarial", "native")
 VERDICTS = ("PASS", "FAIL", "UNPROVEN", "STALE")
+REQUIRED_MUTATION_IDS = {
+    "depth-exclusive-boundary",
+    "transposed-reprojection",
+    "missing-axis-zyx",
+    "flipped-view-direction",
+    "omitted-t12-sample",
+    "wrong-texture-slot",
+    "omitted-material-branch",
+    "point-depth-exclusive-boundary",
+    "vls-depth-exclusive-boundary",
+}
 
 
 class StableFailure(Exception):
@@ -236,11 +247,13 @@ def validate_contracts(contracts: Any) -> None:
         if not isinstance(entry.get("ibl_in_light"), bool):
             raise StableFailure("contracts_schema", "ibl_in_light must be boolean")
     mutations = contracts.get("mutations")
-    if not isinstance(mutations, list) or len(mutations) != 7:
-        raise StableFailure("contracts_schema", "seven mutations are required")
+    if not isinstance(mutations, list):
+        raise StableFailure("contracts_schema", "mutations are required")
     mutation_ids = [entry.get("id") for entry in mutations]
     if len(mutation_ids) != len(set(mutation_ids)):
         raise StableFailure("contracts_schema", "mutations must be unique")
+    if set(mutation_ids) != REQUIRED_MUTATION_IDS:
+        raise StableFailure("contracts_schema", "required mutation set mismatch")
     known = set(names)
     for mutation in mutations:
         if not mutation.get("class"):
@@ -273,6 +286,16 @@ DIRECTIONAL_DEPTH_OLD = """// Insn 4-17: depth-based matrix select.
 DIRECTIONAL_DEPTH_NEW = """// Insn 4-17: depth-based matrix select.
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
     bool isNearPath = (depth <= 0.01);"""
+POINT_DEPTH_OLD = """// Insn 6-19: depth-based matrix select (same pattern as directional).
+    bool isNearPath = (depth < 0.01);"""
+POINT_DEPTH_NEW = """// Insn 6-19: depth-based matrix select (same pattern as directional).
+    // Native near select is inclusive (exec-diff verified at exactly 0.01).
+    bool isNearPath = (depth <= 0.01);"""
+VLS_DEPTH_OLD = """// Per-row ternary matches corpus shape closer than `float4x4` ?:.
+    bool isNearPath = (depth < 0.01);"""
+VLS_DEPTH_NEW = """// Per-row ternary matches corpus shape closer than `float4x4` ?:.
+    // Native near select is inclusive (exec-diff verified at exactly 0.01).
+    bool isNearPath = (depth <= 0.01);"""
 
 
 def _ensure_inclusive(text: str, old: str, new: str, transform: str) -> str:
@@ -294,6 +317,20 @@ def apply_inclusive_depth_control(source: str, target: str) -> str:
             DIRECTIONAL_DEPTH_NEW,
             "inclusive-depth-control",
         )
+    if target == "bsdf_light_deferred_point":
+        return _ensure_inclusive(
+            source,
+            POINT_DEPTH_OLD,
+            POINT_DEPTH_NEW,
+            "inclusive-depth-control",
+        )
+    if target == "vls_slice_scatter":
+        return _ensure_inclusive(
+            source,
+            VLS_DEPTH_OLD,
+            VLS_DEPTH_NEW,
+            "inclusive-depth-control",
+        )
     return source
 
 
@@ -303,6 +340,20 @@ def apply_mutation(source: str, mutation_id: str) -> str:
             source,
             AMBIENT_DEPTH_NEW,
             AMBIENT_DEPTH_OLD,
+            mutation_id,
+        )
+    if mutation_id == "point-depth-exclusive-boundary":
+        return _replace_exact(
+            source,
+            POINT_DEPTH_NEW,
+            POINT_DEPTH_OLD,
+            mutation_id,
+        )
+    if mutation_id == "vls-depth-exclusive-boundary":
+        return _replace_exact(
+            source,
+            VLS_DEPTH_NEW,
+            VLS_DEPTH_OLD,
             mutation_id,
         )
     if mutation_id == "transposed-reprojection":
@@ -972,6 +1023,7 @@ def _mutation_result(
     expected = mutation["expected_bucket"]
     population = 0
     divergent_pixels = 0
+    other_depth_divergent_pixels = 0
     control_divergent = -1
     if control:
         control_divergent = int(control.get("aggregate", {}).get("divergent_pixels", -1))
@@ -983,6 +1035,12 @@ def _mutation_result(
         if bucket:
             population = int(bucket.get("population", 0))
             divergent_pixels = int(bucket.get("divergent_pixels", 0))
+        if mutation["class"] == "boundary-operator":
+            other_depth_divergent_pixels = sum(
+                int(item.get("divergent_pixels", 0))
+                for item in mutant.get("buckets", [])
+                if item.get("name") in {"depth.near", "depth.far"}
+            )
     caught = (
         infrastructure_failure is None
         and control is not None
@@ -990,6 +1048,7 @@ def _mutation_result(
         and control_divergent == 0
         and population >= minimum_population
         and divergent_pixels > 0
+        and other_depth_divergent_pixels == 0
     )
     verdict = (
         "UNPROVEN"
@@ -1007,6 +1066,10 @@ def _mutation_result(
             ("artifacts", artifacts or OrderedDict()),
             ("expected_bucket_population", population),
             ("expected_bucket_divergent_pixels", divergent_pixels),
+            (
+                "other_depth_bucket_divergent_pixels",
+                other_depth_divergent_pixels,
+            ),
             ("control_divergent_pixels", control_divergent),
             ("verdict", verdict),
         )

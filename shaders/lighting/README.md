@@ -14,7 +14,7 @@ intended to inform feature implementations elsewhere in the repo.
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
 | `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **reconstructed-roundtrip-1.25pct** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
-| `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-reconstructed-roundtrip-26.5pct; spot STUB** |
+| `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -97,16 +97,23 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   cascade, 2 cascades + smooth blend). Round-trip via fxc /T ps_5_0 /O3:
   248 vs 272 insns (-8.8%), sample count EXACT match (8/8).
 
-  **Point-light branch** (`-D LIGHT_TYPE=2`) reconstructed from
-  FO4_frame9483.rdc eid 46771 (sha1 `3f1f708c0175`, 204 insns,
-  `bsdf-light-unshadowed` permutation): unshadowed point light with
-  radial attenuation curve (`cb2[1].w` radius + `cb2[3].xyz` curve
-  params) and an octahedral 2D light-cookie sample at `t7` driven by a
-  `cb2[11..14]` light-space transform. Resource bindings exact-match
-  (5 SRVs `t0/t1/t2/t3/t7`, 5 default samplers `s0/s1/s2/s3/s7` - no
-  comparison sampler), 5/5 samples, signature exact-match (o0 + o1).
-  Round-trip 150 vs 204 insns (-26.5%, BRDF condensation comparable to
-  the sun_light precedent's -28.7%).
+  **Point-light branch** (`-D LIGHT_TYPE=2`) uses the live canonical
+  QASmoke + Pip-Boy-light shader from `FO4_frame24669`: sha1
+  `9969e800683c8a7c8afc25f41582415d79cbe47e`, 6,432 bytes, 205
+  executable instructions, also present byte-for-byte at `Shaders011.fxp`
+  blobs **3287** and **3316**. Its exact contract is CB12[30], CB2[15];
+  `t0/t1/t2/t3/t7` Texture2D with default samplers
+  `s0/s1/s2/s3/s7`; SV_POSITION plus unused POSITION14; and
+  two MRT outputs. The body starts with `v0.xy * cb2[0].xy`, without a
+  secondary screen scale. The point path applies radial attenuation,
+  the complete skin/default BRDF, and a dual-paraboloid t7 cookie driven
+  by `cb2[11..14]`.
+  `shader_corpus_diff.py` is CONTRACT PASS (15/15 declarations, 5/5
+  samples; 205 corpus vs 198 reconstructed executable instructions).
+  Historical frame9483 sha1 `3f1f708c01758a3d20267e5c1b7a6472b8c9d336`
+  is a different permutation: CB2[23], a `cb2[22]` secondary screen
+  scale, no POSITION14 input, and an octahedral cookie projection. It is
+  not the live canonical point shader.
 
   Spot stub at the end of the file documents the expected math sketch;
   reconstruction awaits a canonical spot-light capture.

@@ -656,21 +656,18 @@ PS_OUTPUT main(PS_INPUT input)
 
 // LIGHT_TYPE_POINT branch (the unshadowed point-light path).
 // Canonical mapping:
-//   * Runtime sha1:  3f1f708c0175... (eid 46771 in FO4_frame9483.rdc)
-//   * Shape:         ps_5_0, 204 instructions, 5 samples, 5 SRVs
+//   * Runtime sha1:  9969e800683c... (FO4_frame24669, QASmoke + Pip-Boy light)
+//   * Shape:         ps_5_0, 215 instructions, 5 samples, 5 SRVs
 //                    (t0/t1/t2/t3/t7 texture2d), 5 default samplers
 //                    (s0/s1/s2/s3/s7 - NO comparison sampler), 2 CBs
-//                    (CB12[30], CB2[23]), 1 input register (SV_POSITION),
+//                    (CB12[30], CB2[15]), SV_POSITION plus unused POSITION14,
 //                    2 MRT outputs (o0.xyzw + o1.xyzw).
 // "unshadowed" classification: this PS has no SampleCmp instructions and
 // no cascade/cube-shadow texture array. It is dispatched for point
 // lights that either (a) have shadow casting disabled, or (b) bake their
-// per-pixel attenuation into a 2D light-cookie texture (t7) addressed
-// octahedrally. Insns 45-64 transform view-space pos into light space
-// via cb2[11..14] (a 4x4 light view+projection matrix), perspective-
-// divide, normalize, and octahedral-encode the resulting direction
-// vector to sample t7. This is the canonical FO4 "omnidirectional
-// projected cookie" pattern for unshadowed point lights.
+// per-pixel attenuation into a 2D light-cookie texture (t7). The tail
+// transforms view-space position through cb2[11..14], perspective-divides,
+// and applies the bytecode's dual-paraboloid projection before sampling t7.
 // What the point branch does (interpreted from asm):
 //   1. Reconstruct view-space position from screen UV + depth via the
 //      same Far/Near reproject matrix pair as directional (cb12[20..27]).
@@ -679,18 +676,17 @@ PS_OUTPUT main(PS_INPUT input)
 //      where the exponent z = cb2[3].z and the linear scale/bias come
 //      from cb2[3].y / cb2[3].x. cb2[1].w is the light radius.
 //   4. Light-cookie sample: project posView through cb2[11..14],
-//      perspective-divide, octahedral-encode, sample t7. The cookie
-//      result (.yzw) modulates both diffuse and specular at the end.
+//      perspective-divide, dual-paraboloid-project, sample t7. The cookie
+//      result (.xyz) modulates both diffuse and specular at the end.
 //   5. Early-out: if attenuation <= 0.001, write zeros and return.
 //   6. Gbuffer decode + octahedral normal decode identical to directional.
 //   7. Material-id branched BRDF (skin SSS vs Schlick+GGX) identical to
 //      directional, but using toLight_normalized instead of sun direction.
 //   8. MRT: o0 = diffuse * cookie * attenuation / 3, o1 = spec * cookie *
 //      attenuation; o1.w = 1.
-// Limits of this reconstruction (be honest):
-//   * cb2 field semantics are inferred. The exact role of cb2[22].xy
-//     (the extra screen-scale at insn 0) is unclear; it may be a render-
-//     target dimension multiplier for sub-rect rendering. TODO.
+// Limits of this reconstruction:
+//   * cb2 field semantics are inferred from the live bytecode and shaped
+//     differential execution.
 //   * cb2[11..14] is annotated as a generic 4x4 light-space transform.
 //     For an omnidirectional cookie the rows are likely a view-space-
 //     to-light-local rotation; the perspective-divide may be a no-op
@@ -722,56 +718,44 @@ cbuffer PerCall_CB2 : register(b2)
     float4 ScreenSize;
 
     // [1]: .xyz = view-space light position, .w = light radius.
-    //      Used at insn 28 as `cb2[1].xyz - posView = toLight` and
-    //      insn 31 as `d / cb2[1].w` for normalized distance.
+    //      `cb2[1].xyz - posView = toLight`; .w normalizes distance.
     float4 LightPos_and_Radius;
 
     // [2]: .xyz = light color HDR.
     float4 LightColor_HDR;
 
-    // [3]: .x = falloff bias (insn 35 mad_sat add term);
-    //      .y = falloff scale (insn 35 mad_sat multiply);
-    //      .z = falloff exponent for (d/r) curve (insn 33).
+    // [3]: .x = falloff bias; .y = falloff scale;
+    //      .z = falloff exponent for the normalized-distance curve.
     //      TODO: identify exact attenuation curve formula.
     float4 cb2_idx3_attenuation_curve;
 
     // [4..10]: not read by this PS.
     float4 cb2_pad_4_10[7];
 
-    // [11..14]: 4x4 light-space transform matrix. Used at insns 45-48
-    //           via dp4 against (posView, 1) to compute light-space
-    //           position; the result is perspective-divided and
-    //           octahedrally encoded to sample the cookie at t7.
+    // [11..14]: 4x4 light-space transform matrix. A dp4 against
+    //           (posView, 1) yields the projected vector for t7.
     float4 cb2_lightspace_row0;
     float4 cb2_lightspace_row1;
     float4 cb2_lightspace_row2;
     float4 cb2_lightspace_row3;
 
-    // [15..21]: not read by this PS. TODO: identify.
-    float4 cb2_pad_15_21[7];
-
-    // [22]: .xy = secondary screen-scale (sub-rect multiplier?).
-    //       Read at insn 0 as `v0.xy * cb2[22].xy * cb2[0].xy`.
-    //       TODO: identify exact role.
-    float4 cb2_idx22_subrect_scale;
 };
 
 // Resource bindings (point-light variant).
 
-// t0: RT26 kTAAAccumulation. Sampled at insn 42 (.w channel used for alpha mix).
+// t0: RT26 kTAAAccumulation; .w supplies the skin alpha mix.
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
 
-// t1: RT27 kTAAAccumulationSwap (octahedral 2-channel). Sampled at insn 43.
+// t1: RT27 kTAAAccumulationSwap (octahedral 2-channel normal).
 Texture2D<float4> g_tGbufferNormal : register(t1);
 
-// t2: RT30 unnamed G-buffer auxiliary. Sampled at insn 41.
+// t2: RT30 unnamed G-buffer auxiliary.
 Texture2D<float4> g_tGbufferMaterial : register(t2);
 
-// t3: main depth. Sampled at insn 5 with explicit gradients.
+// t3: main depth, sampled with explicit gradients.
 Texture2D<float4> g_tMainDepth : register(t3);
 
-// t7: light cookie / projected texture. Sampled at insn 65 via
-//     octahedral UV computed from light-space direction.
+// t7: light cookie / projected texture, addressed via dual paraboloid.
 Texture2D<float4> g_tLightCookie : register(t7);
 
 SamplerState g_sGbufferAlbedo   : register(s0);
@@ -793,21 +777,17 @@ float3 DecodeOctahedralNormal(float2 enc01)
     return float3(enc * scale, z);
 }
 
-// Octahedral encode of a unit-length direction vector to 2D UV. Used to
-// sample the 2D light cookie at t7 from a light-space direction.
-//   Matches asm insns 51-64 (sign-extended hemisphere flag pattern).
-float2 EncodeOctahedralUV(float3 dirLightSpace)
+// Dual-paraboloid cookie projection from the transformed light-space vector.
+float2 ProjectCookieUV(float3 dirLightSpace, float unprojectedZ)
 {
     float3 d = normalize(dirLightSpace);
-    float  absSum = abs(d.x) + abs(d.y) + abs(d.z);
-    float2 uv = d.xy / absSum;
-    if (d.z < 0.0)
-    {
-        float2 sgn = float2(d.x >= 0.0 ? 1.0 : -1.0,
-                            d.y >= 0.0 ? 1.0 : -1.0);
-        uv = (1.0 - abs(uv.yx)) * sgn;
-    }
-    return uv * 0.5 + 0.5;
+    bool negativeHemisphere = (unprojectedZ * 0.5 + 0.5) < 0.0;
+    d.z += negativeHemisphere ? -1.0 : 1.0;
+    d = normalize(d);
+    float2 uv = d.xy / d.zz;
+    uv = uv * 0.5 + 0.5;
+    uv.y = negativeHemisphere ? (1.0 - uv.y) * 0.5 + 0.5 : uv.y * 0.5;
+    return uv;
 }
 
 // Entry point (point-light variant).
@@ -815,6 +795,7 @@ float2 EncodeOctahedralUV(float3 dirLightSpace)
 struct PS_INPUT
 {
     float4 position : SV_POSITION;
+    float4 posUnused : POSITION14;
 };
 
 struct PS_OUTPUT
@@ -827,9 +808,9 @@ PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
 
-    // Insn 0-2: screen UV (with the cb2[22] secondary scale).
-    float2 uv = input.position.xy * cb2_idx22_subrect_scale.xy * ScreenSize.xy;
-    float  uxRaw = input.position.x * ScreenSize.x;
+    // Screen UV and reconstruction coordinates.
+    float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+    float2 uv = uv4.xy;
 
     // Insn 3-5: depth sample with derivative-based gradient.
     float ddx_ = ddx_coarse(uv.x);
@@ -838,7 +819,8 @@ PS_OUTPUT main(PS_INPUT input)
                                            ddx_.xx, ddy_.xx).x;
 
     // Insn 6-19: depth-based matrix select (same pattern as directional).
-    bool isNearPath = (depth < 0.01);
+    // Native near select is inclusive (exec-diff verified at exactly 0.01).
+    bool isNearPath = (depth <= 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
     float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
     float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
@@ -846,8 +828,7 @@ PS_OUTPUT main(PS_INPUT input)
     float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
     // Insn 20-27: reconstruct view-space position.
-    float uvY = 1.0 - input.position.y * ScreenSize.y;
-    float2 uvNDC = float2(uxRaw, uvY) * 2.0 - 1.0;
+    float2 uvNDC = uv4.zw * float2(2.0, -2.0) + float2(-1.0, 1.0);
     float4 pos4  = float4(uvNDC, linearizedDepth, 1.0);
     float4 posViewH;
     posViewH.x = dot(reprojRow0, pos4);
@@ -861,117 +842,155 @@ PS_OUTPUT main(PS_INPUT input)
     float  toLightLenSq = dot(toLight, toLight);
     float  d           = sqrt(toLightLenSq);
     float  dNorm       = saturate(d / LightPos_and_Radius.w);
-    float  dPowZ       = pow(max(dNorm, 1e-6), cb2_idx3_attenuation_curve.z);
+    float  dPowZ       = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
     float  falloffLin  = saturate(cb2_idx3_attenuation_curve.y * dPowZ
                                   + cb2_idx3_attenuation_curve.x);
-    float  attenuation = pow(max(1.0 - falloffLin, 1e-6), 2.2);
+    float  attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
 
-    // Insn 40: early-out test.
     bool nearZero = (attenuation <= 0.001);
 
-    // Insn 41-43: sample gbuffer (material, albedo.w, normal-encoding xy).
-    float4 matSample    = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
-    float  albedoW      = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
-    float2 normalEnc    = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
-
-    // Insn 44-65: light-cookie sample via light-space dp4 + octahedral.
-    float4 posViewHomog = float4(posView, 1.0);
-    float lsX = dot(cb2_lightspace_row0, posViewHomog);
-    float lsY = dot(cb2_lightspace_row1, posViewHomog);
-    float lsZ = dot(cb2_lightspace_row2, posViewHomog);
-    float lsW = dot(cb2_lightspace_row3, posViewHomog);
-    float3 lsDir = float3(lsX, lsY, lsZ) / lsW.xxx;
-    float2 cookieUV = EncodeOctahedralUV(lsDir);
-    float3 cookieRGB = g_tLightCookie.Sample(g_sLightCookie, cookieUV).yzw;
-
-    // Insn 66-70: early-out branch.
     if (nearZero)
     {
-        output.diffuse  = float4(0, 0, 0, 0);
+        output.diffuse = float4(0, 0, 0, 0);
         output.specular = float4(0, 0, 0, 0);
         return output;
     }
 
-    // Insn 71-72: lightDir = toLight / d.
-    float3 lightDir = toLight / d.xxx;
+    float3 lightDir = toLight * rsqrt(toLightLenSq);
 
-    // Insn 73-78: octahedral normal decode (same helper as directional).
+    // Sample G-buffer material and normal.
+    float4 matSample    = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
+    float2 normalEnc    = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
+
     float3 normalView = DecodeOctahedralNormal(normalEnc);
 
-    // Insn 79: roughness-like factor.
     float roughness01 = 1.0 - matSample.x;
 
-    // Insn 80-82: view direction (camera-to-surface negated => surface-to-cam).
+    // Surface-to-camera direction.
     float posViewLenInv = rsqrt(dot(posView, posView));
     float3 viewDirNeg = -posView * posViewLenInv.xxx;
 
-    // Insn 83-85: NdotL_raw / NdotL_sat / NdotL_clamped against lightDir.
     float NdotL_raw     = dot(normalView, lightDir);
     float NdotL_sat     = max(NdotL_raw, 0.0);
     float NdotL_clamped = saturate(NdotL_sat);
 
-    // Insn 86-87: material-1 (skin) test.
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 
-    // Insns 88-184: same material-branched BRDF block as the directional
-    // path. The math reads from cb12[28..29] for SSS, cb2[2] for light
-    // color, and uses lightDir (not sun direction) as the lighting axis.
+    // Point permutation's skin/default material BRDF.
     float3 brdfSpecular = float3(0, 0, 0);
     float  brdfShadowMix = 0.0;
     if (isMaterial1)
     {
-        float NdotV = dot(normalView, viewDirNeg);
-        float sin1, cos1; sincos(cb12_idx29_sss_angles.y, sin1, cos1);
-        float sin2, cos2; sincos(cb12_idx29_sss_angles.x, sin2, cos2);
-        float sinScale1 = sqrt(saturate(1.0 - NdotL_raw * NdotL_raw));
-        float sinScale2 = sqrt(saturate(1.0 - NdotV * NdotV));
+        float albedoW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+        float skinNdotL = dot(matSample.xyz, lightDir);
+        float skinNdotV = dot(matSample.xyz, viewDirNeg);
+        float sinScaleL = sqrt(1.0 - min(skinNdotL * skinNdotL, 1.0));
+        float sinScaleV = sqrt(1.0 - min(skinNdotV * skinNdotV, 1.0));
 
-        float rot1   = -NdotL_raw * cos1 - sinScale1 * sin1;
-        float rot1_w = sqrt(max(1.0 - rot1 * rot1, 0.0));
-        float vis1   = max(rot1 * NdotV + sinScale2 * rot1_w, 0.0);
-        float pow1   = pow(max(vis1, 1e-6), cb12_idx28_sss_params.w);
-        float SSSinten1 = saturate(cb12_idx28_sss_params.z * pow1 + NdotL_clamped);
+        float sinA1, cosA1;
+        sincos(cb12_idx29_sss_angles.y, sinA1, cosA1);
+        float rot1 = -skinNdotL * cosA1 - sinScaleL * sinA1;
+        float rot1Perp = sqrt(1.0 - rot1 * rot1);
+        float vis1 = max(rot1 * skinNdotV + sinScaleV * rot1Perp, 0.0);
+        float pow1 = exp2(log2(vis1) * cb12_idx28_sss_params.w);
+        float sssIntensity =
+            saturate(cb12_idx28_sss_params.z * pow1 + NdotL_sat);
+        brdfShadowMix = min(albedoW, sssIntensity);
 
-        float rot2 = -NdotL_raw * cos2 - sinScale1 * sin2;
-        float vis2 = max(rot2 * NdotV + sinScale2 * sqrt(max(1.0 - rot2 * rot2, 0.0)),
-                         0.0);
-        float pow2 = pow(max(vis2, 1e-6), cb12_idx28_sss_params.y) * cb12_idx28_sss_params.x;
+        float sinA2, cosA2;
+        sincos(cb12_idx29_sss_angles.x, sinA2, cosA2);
+        float rot2 = -skinNdotL * cosA2 - sinScaleL * sinA2;
+        float rot2Perp = sqrt(1.0 - rot2 * rot2);
+        float vis2 = max(rot2 * skinNdotV + sinScaleV * rot2Perp, 0.0);
+        float pow2 =
+            exp2(log2(vis2) * cb12_idx28_sss_params.y) *
+            cb12_idx28_sss_params.x;
 
-        brdfShadowMix = min(albedoW, SSSinten1);
-        brdfSpecular  = pow2 * LightColor_HDR.xyz * NdotL_clamped;
+        brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
     }
     else
     {
-        // Material non-1: Schlick + GGX-like (asm insns 122-183).
-        float schlickBase = exp2(matSample.x * 10.0 + 1.0);
-        float NdotV = saturate(dot(normalView, viewDirNeg));
-        float3 reflVec = normalize(-2.0 * dot(viewDirNeg, normalView) * normalView + viewDirNeg);
-        float3 halfish = normalize(lightDir + viewDirNeg);
-        float  NdotH   = saturate(dot(normalView, halfish));
-        float  RdotV   = saturate(dot(reflVec, normalView));
+        float specExp = exp2(matSample.x * 10.0 + 1.0);
+        float NdotV_raw = dot(viewDirNeg, normalView);
+        float3 tangentV = viewDirNeg - normalView * NdotV_raw;
+        float3 tangentL = lightDir - normalView * NdotL_raw;
+        float tangentVL = max(dot(tangentV, tangentL), 0.0);
 
-        float ggxNum   = exp2(log2(max(NdotH, 1e-6)) * schlickBase);
-        float ggxNorm  = ggxNum * 0.159155;
-        float visTerm  = min(NdotL_clamped, RdotV);
-        float specMag  = min(ggxNorm * visTerm * 0.25, 15.0) * 3.141593;
+        float roughSq = roughness01 * roughness01;
+        float visA = roughSq / (roughSq + 0.57);
+        float visB = roughSq / (roughSq + 0.09);
+        visB *= 0.45;
+        visA = 1.0 - 0.5 * visA;
 
-        brdfSpecular  = specMag * LightColor_HDR.xyz;
-        brdfShadowMix = albedoW * specMag;
+        float tangentDenom = max(NdotL_raw, NdotV_raw);
+        float tangentSin = sqrt(saturate((1.0 - NdotV_raw * NdotV_raw)
+                                         * (1.0 - NdotL_raw * NdotL_raw)));
+        float visibilityGeom = tangentVL * visB;
+        visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
+        brdfShadowMix = NdotL_sat * visibilityGeom;
+
+        float3 halfVec = lightDir + viewDirNeg;
+        halfVec *= rsqrt(dot(halfVec, halfVec));
+
+        float NdotV_sat = saturate(NdotV_raw);
+        float VdotH = saturate(dot(viewDirNeg, halfVec));
+        float NdotH = saturate(dot(halfVec, normalView));
+
+        float distributionNorm = (specExp + 2.0) * 0.159155;
+        float distribution = exp2(log2(NdotH) * specExp);
+        distributionNorm *= distribution;
+
+        float VdotH_nonneg = max(VdotH, 0.0);
+        float minN = min(NdotL_clamped, NdotV_sat);
+        float twoNdotH = NdotH + NdotH;
+        bool usePeakRatio = (VdotH_nonneg >= twoNdotH * minN);
+        bool useUnityRatio = (NdotV_sat == minN);
+        float ratioNLNV = NdotL_clamped / NdotV_sat;
+        float ratio = useUnityRatio ? 1.0 : ratioNLNV;
+        float visibility = (twoNdotH * ratio) / VdotH_nonneg;
+        float fallbackVisibility = 1.0 / NdotV_sat;
+        visibility = usePeakRatio ? visibility : fallbackVisibility;
+
+        float oneMinusVdotH = 1.0 - VdotH;
+        float oneMinusVdotH2 = oneMinusVdotH * oneMinusVdotH;
+        float oneMinusVdotH4 = oneMinusVdotH2 * oneMinusVdotH2;
+        float oneMinusVdotH5 = oneMinusVdotH * oneMinusVdotH4;
+        float fresnelTerm =
+            (1.0 - oneMinusVdotH5) * 0.2 + oneMinusVdotH5;
+        fresnelTerm = min(fresnelTerm, 1.0);
+
+        float specMag = visibility * fresnelTerm;
+        specMag = distributionNorm * specMag;
+        specMag *= 0.25;
+        specMag = min(specMag, 15.0);
+        specMag *= matSample.y;
+        specMag *= 3.141593;
+
+        brdfSpecular =
+            NdotL_clamped * (specMag * LightColor_HDR.xyz);
     }
 
-    // Insn 185-193: edge-fresnel ambient-like contribution.
+    // Edge-fresnel contribution.
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
-    float edge = exp2(log2(max(1.0 - NdotV_view, 1e-6)) * 0.01);
+    float edge = exp2(log2(1.0 - NdotV_view) * 0.01);
     float toLightDotView = saturate(dot(viewDirNeg, -lightDir));
     float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
 
-    // Insn 194-199: final composition.
     float3 diffuseAccum = LightColor_HDR.xyz * ambientTerm;
     diffuseAccum += LightColor_HDR.xyz * brdfShadowMix;
+
+    float4 posViewHomog = float4(posView, 1.0);
+    float3 lsDir;
+    lsDir.x = dot(cb2_lightspace_row0, posViewHomog);
+    lsDir.y = dot(cb2_lightspace_row1, posViewHomog);
+    lsDir.z = dot(cb2_lightspace_row2, posViewHomog);
+    float lsW = dot(cb2_lightspace_row3, posViewHomog);
+    float2 cookieUV = ProjectCookieUV(lsDir / lsW.xxx, lsDir.z);
+    float3 cookieRGB = g_tLightCookie.Sample(g_sLightCookie, cookieUV).xyz;
+
     diffuseAccum *= cookieRGB;
     float3 specAccum   = cookieRGB * brdfSpecular;
 
-    // Insn 198-202: multiply by attenuation, divide diffuse by 3, write o0/o1.
     output.specular.xyz = attenuation * specAccum;
     output.specular.w   = 1.0;
     output.diffuse.xyz  = (attenuation * diffuseAccum) / 3.0;
@@ -982,32 +1001,19 @@ PS_OUTPUT main(PS_INPUT input)
 
 #endif // LIGHT_TYPE == LIGHT_TYPE_POINT
 
-// Round-trip notes for the point branch (for the reviewer + future
-// maintainer)
-// fxc /T ps_5_0 /O3 against eid 46771's 204 insns target: 150 vs 204
-// (-26.5%, comparable to the -28.7% BRDF condensation precedent set by
-// the prior sun_light reconstruction). Resource bindings, sample count
-// (5/5), and signature are EXACT match. The delta is entirely in the
-// material-non-1 GGX block (condensed for readability) plus the
-// octahedral cookie encode being collapsed to a normalize+sign helper.
-// What is faithfully reconstructed (structurally):
+// Live point proof: FO4_frame24669 sha1 9969e800683c8a7c8afc25f41582415d79cbe47e.
+// shader_corpus_diff.py reports CONTRACT PASS, 15/15 declarations, 5/5
+// samples, and 205 corpus vs 198 reconstructed executable instructions.
+// Reconstructed invariants:
 //   * Resource declarations (5 SRVs + 5 default samplers + 2 CBs) at
 //     exact slot indices (t0/t1/t2/t3/t7, s0/s1/s2/s3/s7).
-//   * Input + output signatures (SV_POSITION only; MRT to o0 + o1).
+//   * CB12[30], CB2[15], SV_POSITION + unused POSITION14, MRT o0 + o1.
 //   * Major control flow: depth-based reproject matrix select, radial
-//     attenuation curve via pow + linear + pow chain, octahedral light-
-//     cookie sample, early-out branch, material-id BRDF branch, final
-//     composition with cookie modulation.
+//     attenuation curve, early-out, material-id BRDF branch, dual-paraboloid
+//     cookie sample, and final cookie-modulated composition.
 //   * Shared CB12[20..27] reprojection matrix infrastructure (now the
 //     5th shader to use this pattern).
 //   * Diffuse / 3 normalization to match directional.
-// What is approximated rather than asm-exact:
-//   * The octahedral cookie encoding (EncodeOctahedralUV helper) is
-//     written in canonical form; the asm's exact insn-by-insn sign
-//     handling at 51-64 may compile to different bytecode but produces
-//     equivalent UV values.
-//   * Material-non-1 BRDF block is condensed identically to directional
-//     (the asm's GGX vis chain is preserved in structure, not by insn).
 
 // LIGHT_TYPE_SPOT stub - reconstruction TODO
 // Awaits canonical capture from FO4_frame9483.rdc (interior cell with

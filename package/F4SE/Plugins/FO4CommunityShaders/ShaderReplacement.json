@@ -14,7 +14,7 @@
     },
     {
       "name": "bsdf_light_deferred_point",
-      "comment": "matches eid 46771 in FO4_frame9483.rdc; POINT permutation",
+      "comment": "Live AE POINT permutation from FO4_frame24669: sha 9969e800683c8a7c8afc25f41582415d79cbe47e, Shaders011 blobs 3287/3316, CB12[30], CB2[15]. Historical frame9483 sha 3f1f708c is a different CB2[23] permutation and is not mapped.",
       "default_enabled": false
     },
     {

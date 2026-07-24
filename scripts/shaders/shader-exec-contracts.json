@@ -122,6 +122,48 @@
         ]
       }
     },
+    "point-lighting-live": {
+      "predicates": {
+        "depth.near": "decoded(t3.x) < float32(0.01)",
+        "depth.equal": "decoded(t3.x) == float32(0.01)",
+        "depth.far": "decoded(t3.x) > float32(0.01)",
+        "material.default": "abs(decoded(t2.w) * 255 - 1) >= 0.25",
+        "material.skin": "abs(decoded(t2.w) * 255 - 1) < 0.25",
+        "attenuation.live": "uploaded radial attenuation computed from decoded(t3.x) is > 0.001",
+        "attenuation.culled": "uploaded radial attenuation computed from decoded(t3.x) is <= 0.001",
+        "cookie.front": "uploaded cb2[13] dot reconstructed position yields z * 0.5 + 0.5 >= 0",
+        "cookie.back": "uploaded cb2[13] dot reconstructed position yields z * 0.5 + 0.5 < 0",
+        "reprojection.distinct-banks": "uploaded cb12[20..23] and cb12[24..27] are invertible and not near-equal",
+        "finite.live": "uploaded live-attenuation inputs have finite reconstructed position and nonzero divisors"
+      },
+      "required_buckets": {
+        "adversarial": [
+          "depth.near",
+          "depth.equal",
+          "depth.far",
+          "material.default",
+          "material.skin",
+          "attenuation.live",
+          "attenuation.culled",
+          "cookie.front",
+          "cookie.back",
+          "reprojection.distinct-banks",
+          "finite.live"
+        ],
+        "native": [
+          "depth.near",
+          "depth.far",
+          "material.default",
+          "material.skin",
+          "attenuation.live",
+          "attenuation.culled",
+          "cookie.front",
+          "cookie.back",
+          "reprojection.distinct-banks",
+          "finite.live"
+        ]
+      }
+    },
     "deferred-prepass": {
       "predicates": {
         "alpha.bypass": "float32(cb2[4].w) == -1",
@@ -194,6 +236,54 @@
           "motion.distinct-banks"
         ]
       }
+    },
+    "vls-slice-scatter": {
+      "predicates": {
+        "depth.near": "decoded(t7.x) < float32(0.01)",
+        "depth.equal": "decoded(t7.x) == float32(0.01)",
+        "depth.far": "decoded(t7.x) > float32(0.01)",
+        "fade.primary-narrow": "abs(uploaded cb1[12].x - cb1[12].y) < 0.05",
+        "fade.primary-medium": "0.05 <= abs(uploaded cb1[12].x - cb1[12].y) < 0.5",
+        "fade.primary-wide": "abs(uploaded cb1[12].x - cb1[12].y) >= 0.5",
+        "fade.secondary-narrow": "abs(uploaded cb1[13].x - cb1[13].y) < 0.05",
+        "fade.secondary-medium": "0.05 <= abs(uploaded cb1[13].x - cb1[13].y) < 0.5",
+        "fade.secondary-wide": "abs(uploaded cb1[13].x - cb1[13].y) >= 0.5",
+        "alpha.endpoints-distinct": "uploaded cb1[12].z != cb1[12].w",
+        "color.endpoints-distinct": "uploaded cb1[0].xyz != cb1[1].xyz",
+        "reprojection.distinct-banks": "uploaded cb12[20..23] and cb12[24..27] are invertible and not near-equal",
+        "finite.live": "uploaded constants and decoded depth produce finite VLS reprojection and nonzero divisors"
+      },
+      "required_buckets": {
+        "adversarial": [
+          "depth.near",
+          "depth.equal",
+          "depth.far",
+          "fade.primary-narrow",
+          "fade.primary-medium",
+          "fade.primary-wide",
+          "fade.secondary-narrow",
+          "fade.secondary-medium",
+          "fade.secondary-wide",
+          "alpha.endpoints-distinct",
+          "color.endpoints-distinct",
+          "reprojection.distinct-banks",
+          "finite.live"
+        ],
+        "native": [
+          "depth.near",
+          "depth.far",
+          "fade.primary-narrow",
+          "fade.primary-medium",
+          "fade.primary-wide",
+          "fade.secondary-narrow",
+          "fade.secondary-medium",
+          "fade.secondary-wide",
+          "alpha.endpoints-distinct",
+          "color.endpoints-distinct",
+          "reprojection.distinct-banks",
+          "finite.live"
+        ]
+      }
     }
   },
   "contracts": [
@@ -213,8 +303,18 @@
       "ibl_in_light": true
     },
     {
+      "name": "bsdf_light_deferred_point",
+      "profile": "point-lighting-live",
+      "ibl_in_light": false
+    },
+    {
       "name": "deferred_prepass",
       "profile": "deferred-prepass",
+      "ibl_in_light": false
+    },
+    {
+      "name": "vls_slice_scatter",
+      "profile": "vls-slice-scatter",
       "ibl_in_light": false
     }
   ],
@@ -267,6 +367,20 @@
       "target": "ambient_ibl_pass",
       "fixture": "adversarial",
       "expected_bucket": "material.skin"
+    },
+    {
+      "id": "point-depth-exclusive-boundary",
+      "class": "boundary-operator",
+      "target": "bsdf_light_deferred_point",
+      "fixture": "adversarial",
+      "expected_bucket": "depth.equal"
+    },
+    {
+      "id": "vls-depth-exclusive-boundary",
+      "class": "boundary-operator",
+      "target": "vls_slice_scatter",
+      "fixture": "adversarial",
+      "expected_bucket": "depth.equal"
     }
   ]
 }

@@ -44,17 +44,9 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             {"adversarial", "native"}, set(self.contracts["fixtures"])
         )
         mutations = self.contracts["mutations"]
-        self.assertEqual(7, len(mutations))
+        self.assertEqual(len(subject.REQUIRED_MUTATION_IDS), len(mutations))
         self.assertEqual(
-            {
-                "depth-exclusive-boundary",
-                "transposed-reprojection",
-                "missing-axis-zyx",
-                "flipped-view-direction",
-                "omitted-t12-sample",
-                "wrong-texture-slot",
-                "omitted-material-branch",
-            },
+            subject.REQUIRED_MUTATION_IDS,
             {item["id"] for item in mutations},
         )
         self.assertTrue(all(item["class"] for item in mutations))
@@ -71,6 +63,22 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     directional["required_buckets"][fixture]
                 )
             )
+        contract_profiles = {
+            item["name"]: item["profile"]
+            for item in self.contracts["contracts"]
+        }
+        self.assertEqual(
+            "point-lighting-live",
+            contract_profiles["bsdf_light_deferred_point"],
+        )
+        self.assertEqual(
+            "vls-slice-scatter",
+            contract_profiles["vls_slice_scatter"],
+        )
+        for profile_name in ("point-lighting-live", "vls-slice-scatter"):
+            required = self.contracts["profiles"][profile_name]["required_buckets"]
+            self.assertIn("depth.equal", required["adversarial"])
+            self.assertNotIn("depth.equal", required["native"])
 
     def test_source_transforms_are_exact_and_nonmutating(self):
         before = {}
@@ -149,7 +157,10 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_structured_result_classification(self):
         zero = subject._measurement_metrics_zero()
-        mutations = [{"verdict": "CAUGHT"} for _ in range(7)]
+        mutations = [
+            {"verdict": "CAUGHT"}
+            for _ in subject.REQUIRED_MUTATION_IDS
+        ]
         self.assertEqual(
             ("PASS", 0),
             subject.classify_result(True, True, [], zero, mutations),
@@ -638,6 +649,14 @@ def run_self_smoke():
                 return_code != 1
                 or failures
                 or bucket["divergent_pixels"] == 0
+                or (
+                    mutation["class"] == "boundary-operator"
+                    and any(
+                        item["divergent_pixels"] != 0
+                        for item in measurement["buckets"]
+                        if item["name"] in {"depth.near", "depth.far"}
+                    )
+                )
             ):
                 raise AssertionError((failures, bucket, human))
             print(f"{mutation['id']}: CAUGHT")
