@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderVariantResolver.h"
 #include "Utils/CSSha1.h"
 #include "Utils/ShaderCompile.h"
 
@@ -124,9 +125,9 @@ namespace cs::engine
 				{
 					Target::kAmbientIblPass,
 					"tilelight",
-					PixelShaderTechnique{
+					PixelShaderVariant{
 						"BSDFCompositeShader",
-						0x10B60
+						shader_variants::kBsdfCompositeAmbientIblTilelight
 					},
 					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
 					{}
@@ -451,7 +452,7 @@ namespace cs::engine
 			const ShaderReplacementVariantRegistration& a_variant)
 		{
 			PixelShaderSwapVariantKey key;
-			key.technique = a_variant.technique;
+			key.variant = a_variant.variant;
 			key.routeGroup = ToIndex(a_variant.targetId);
 			if (a_variant.expectedStockSha1.empty())
 				return key;
@@ -592,7 +593,7 @@ namespace cs::engine
 		bool ResolveInjectedPixelShader(
 			const void*,
 			std::size_t,
-			std::optional<PixelShaderTechniqueView> a_technique,
+			std::optional<PixelShaderVariantView> a_resolvedVariant,
 			const sha1::Sha1Result& a_sha,
 			ID3D11PixelShader** a_out) noexcept
 		{
@@ -604,10 +605,27 @@ namespace cs::engine
 
 				const auto selection = SelectPixelShaderSwapVariant(
 					plan->variantKeys,
-					a_technique,
+					a_resolvedVariant,
 					a_sha);
 				if (selection.kind
 					== PixelShaderSwapSelectionKind::kNoMatch) {
+					return false;
+				}
+				if (selection.kind
+					== PixelShaderSwapSelectionKind::kUnmappedVariant) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::warn,
+						"Kept stock PS sha={}: no replacement registered "
+						"for variant {}+0x{:X}.",
+						sha1::Sha1ToHex(a_sha),
+						a_resolvedVariant
+							? a_resolvedVariant->subclass
+							: "<none>",
+						a_resolvedVariant
+							? a_resolvedVariant->key.Value()
+							: 0);
 					return false;
 				}
 				if (selection.variantIndex >= plan->variants.size())
@@ -629,11 +647,15 @@ namespace cs::engine
 						2000,
 						spdlog::level::err,
 						"Refused PS replacement '{}/{}': "
-						"technique {}+0x{:X} expected sha={} but received {}.",
+						"variant {}+0x{:X} expected sha={} but received {}.",
 						kTargets[ToIndex(variant.targetId)].name,
 						variant.name,
-						a_technique ? a_technique->subclass : "<none>",
-						a_technique ? a_technique->techniqueBits : 0,
+						a_resolvedVariant
+							? a_resolvedVariant->subclass
+							: "<none>",
+						a_resolvedVariant
+							? a_resolvedVariant->key.Value()
+							: 0,
 						expected,
 						sha1::Sha1ToHex(a_sha));
 					return false;
@@ -745,11 +767,20 @@ namespace cs::engine
 				kTargets[ToIndex(a_registration.targetId)].name);
 			return false;
 		}
-		if (a_registration.technique
-			&& a_registration.technique->subclass.empty()) {
+		if (a_registration.variant
+			&& a_registration.variant->subclass.empty()) {
 			L->error(
 				"Replacement variant '{}/{}' rejected: "
 				"empty shader subclass.",
+				kTargets[ToIndex(a_registration.targetId)].name,
+				a_registration.name);
+			return false;
+		}
+		if (a_registration.variant
+			&& a_registration.expectedStockSha1.empty()) {
+			L->error(
+				"Replacement variant '{}/{}' rejected: "
+				"missing expected stock SHA1 guard.",
 				kTargets[ToIndex(a_registration.targetId)].name,
 				a_registration.name);
 			return false;
@@ -765,6 +796,8 @@ namespace cs::engine
 					a_registration.name);
 				return false;
 			}
+			a_registration.expectedStockSha1 =
+				sha1::Sha1ToHex(expected);
 		}
 
 		for (const auto& existing : service.variantRegistrations) {
@@ -777,18 +810,18 @@ namespace cs::engine
 					a_registration.name);
 				return false;
 			}
-			if (existing.technique && a_registration.technique
-				&& existing.technique->subclass
-					== a_registration.technique->subclass
-				&& existing.technique->techniqueBits
-					== a_registration.technique->techniqueBits) {
+			if (existing.variant && a_registration.variant
+				&& existing.variant->subclass
+					== a_registration.variant->subclass
+				&& existing.variant->key
+					== a_registration.variant->key) {
 				L->error(
 					"Replacement variant '{}/{}' rejected: "
-					"duplicate technique {}+0x{:X}.",
+					"duplicate variant key {}+0x{:X}.",
 					kTargets[ToIndex(a_registration.targetId)].name,
 					a_registration.name,
-					a_registration.technique->subclass,
-					a_registration.technique->techniqueBits);
+					a_registration.variant->subclass,
+					a_registration.variant->key.Value());
 				return false;
 			}
 			if (!existing.expectedStockSha1.empty()
@@ -941,7 +974,7 @@ namespace cs::engine
 					++targetCompiled;
 					onlyCompiledSha1 = compiled->compiledSha1;
 					targetSwappable = targetSwappable
-						|| compiled->key.technique.has_value()
+						|| compiled->key.variant.has_value()
 						|| compiled->key.expectedStockSha1.has_value();
 					plan->variantKeys.push_back(
 						std::move(compiled->key));
@@ -984,7 +1017,7 @@ namespace cs::engine
 			const bool hasSwappableTarget = std::ranges::any_of(
 				plan->variantKeys,
 				[](const PixelShaderSwapVariantKey& a_key) {
-					return a_key.technique.has_value()
+					return a_key.variant.has_value()
 						|| a_key.expectedStockSha1.has_value();
 				});
 			if (hasSwappableTarget && !service.resolverRegistered) {

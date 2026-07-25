@@ -20,6 +20,7 @@ namespace cs::features::catalog::hooks
 
 		std::atomic<bool> g_psSetShaderHookInstalled{ false };
 		std::atomic<bool> g_pixelObserverRegistered{ false };
+		std::atomic<bool> g_subclassAttributionEnabled{ false };
 		std::atomic<std::uint64_t> g_scopedBinds{ 0 };
 		std::atomic<std::uint64_t> g_matchedBinds{ 0 };
 		std::atomic<std::uint64_t> g_missedBinds{ 0 };
@@ -127,7 +128,8 @@ namespace cs::features::catalog::hooks
 			std::optional<Sha1Result> attributionSha;
 			const auto attribution =
 				cs::engine::shader_context::Current();
-			if (prepared.digest && attribution.active
+			if (g_subclassAttributionEnabled.load(std::memory_order_acquire)
+				&& prepared.digest && attribution.active
 				&& attribution.subclassName) {
 				Sha1Result sha{};
 				sha.bytes = prepared.digest->sha1;
@@ -191,6 +193,11 @@ namespace cs::features::catalog::hooks
 		auto lease = CatalogDB::Get().TryAcquireProducerLease();
 		func(a_this, a_shader, a_classInstances, a_numClassInstances);
 
+		if (!g_subclassAttributionEnabled.load(
+				std::memory_order_acquire)) {
+			cs::engine::shader_context::ClearSticky();
+			return;
+		}
 		if (!lease) {
 			cs::engine::shader_context::ClearSticky();
 			return;
@@ -229,6 +236,12 @@ namespace cs::features::catalog::hooks
 					current.subclassName);
 		}
 		cs::engine::shader_context::ClearSticky();
+	}
+
+	void SetSubclassAttributionEnabled(bool a_enabled) noexcept
+	{
+		g_subclassAttributionEnabled.store(
+			a_enabled, std::memory_order_release);
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateGeometryShaderHook::thunk(

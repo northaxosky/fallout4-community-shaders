@@ -82,7 +82,7 @@ namespace cs::engine
 						resolverReportedReplacement = resolver(
 							a_bytecode,
 							a_bytecodeLength,
-							shader_context::CurrentTechnique(),
+							shader_context::CurrentVariant(),
 							hash,
 							a_out);
 					}

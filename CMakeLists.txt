@@ -351,8 +351,13 @@ add_executable(PixelShaderSwapTests
 	tests/PixelShaderSwapTests.cpp
 	src/Render/PixelShaderSwapModel.cpp
 	src/Render/PixelShaderSwapBroker.h
+	src/Render/ShaderVariantResolver.cpp
+	src/Render/ShaderVariantResolver.h
+	src/Utils/CSSha1.cpp
+	src/Utils/CSSha1.h
 )
 configure_host_test(PixelShaderSwapTests)
+target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
 set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
@@ -378,6 +383,7 @@ if(FO4CS_HOST_TESTS_ONLY)
 		src/Render/PixelShaderSwapModel.cpp
 		src/Render/ShaderSubclassContext.cpp
 		src/Render/ShaderSubclassHooks.cpp
+		src/Render/ShaderVariantResolver.cpp
 	)
 	configure_host_test(ShaderCatalogCompileChecks)
 	target_precompile_headers(ShaderCatalogCompileChecks PRIVATE

@@ -235,7 +235,7 @@ namespace cs::engine
 					"(no SetupTechnique hooks installed).");
 			} else {
 				L->info(
-					"Shader injection dispatch mode: subclass+technique "
+					"Shader injection dispatch mode: resolved variant key "
 					"with exact-hash fallback.");
 			}
 		});

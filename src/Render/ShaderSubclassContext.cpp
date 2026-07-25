@@ -1,5 +1,7 @@
 #include "Render/ShaderSubclassContext.h"
 
+#include "Render/ShaderVariantResolver.h"
+
 namespace cs::engine::shader_context
 {
 	namespace
@@ -18,16 +20,15 @@ namespace cs::engine::shader_context
 		return g_current.active ? g_current : g_sticky;
 	}
 
-	std::optional<PixelShaderTechniqueView> CurrentTechnique() noexcept
+	std::optional<PixelShaderVariantView> CurrentVariant() noexcept
 	{
 		if (!g_current.active || !g_current.techniqueKnown
 			|| !g_current.subclassName) {
 			return std::nullopt;
 		}
-		return PixelShaderTechniqueView{
+		return ResolvePixelShaderVariant(
 			g_current.subclassName,
-			g_current.techniqueBits
-		};
+			g_current.techniqueBits);
 	}
 
 	void SetSticky(

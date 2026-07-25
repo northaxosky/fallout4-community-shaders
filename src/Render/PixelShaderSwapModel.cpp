@@ -16,24 +16,23 @@ namespace cs::engine
 
 	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
 		std::span<const PixelShaderSwapVariantKey> a_variants,
-		std::optional<PixelShaderTechniqueView> a_technique,
+		std::optional<PixelShaderVariantView> a_variant,
 		const sha1::Sha1Result& a_stockSha1) noexcept
 	{
-		if (a_technique) {
+		if (a_variant) {
 			for (std::size_t i = 0; i < a_variants.size(); ++i) {
 				const auto& variant = a_variants[i];
-				if (!variant.technique
-					|| variant.technique->subclass
-						!= a_technique->subclass) {
+				if (!variant.variant
+					|| variant.variant->subclass
+						!= a_variant->subclass) {
 					continue;
 				}
 
-				if (variant.technique->techniqueBits
-					!= a_technique->techniqueBits) {
+				if (variant.variant->key != a_variant->key) {
 					continue;
 				}
-				if (variant.expectedStockSha1
-					&& !Sha1Equals(
+				if (!variant.expectedStockSha1
+					|| !Sha1Equals(
 						*variant.expectedStockSha1,
 						a_stockSha1)) {
 					return {
@@ -49,7 +48,7 @@ namespace cs::engine
 
 			for (std::size_t i = 0; i < a_variants.size(); ++i) {
 				const auto& variant = a_variants[i];
-				if (variant.technique
+				if (variant.variant
 					|| !variant.expectedStockSha1
 					|| !Sha1Equals(
 						*variant.expectedStockSha1,
@@ -57,18 +56,18 @@ namespace cs::engine
 					continue;
 				}
 
-				const bool groupHasTechniqueRoutes =
+				const bool groupHasVariantRoutes =
 					std::ranges::any_of(
 						a_variants,
-						[&variant, &a_technique](
+						[&variant, &a_variant](
 							const PixelShaderSwapVariantKey& a_candidate) {
 							return a_candidate.routeGroup
 									== variant.routeGroup
-								&& a_candidate.technique
-								&& a_candidate.technique->subclass
-									== a_technique->subclass;
+								&& a_candidate.variant
+								&& a_candidate.variant->subclass
+									== a_variant->subclass;
 						});
-				if (!groupHasTechniqueRoutes) {
+				if (!groupHasVariantRoutes) {
 					return {
 						PixelShaderSwapSelectionKind::kSelected,
 						i,
@@ -76,7 +75,9 @@ namespace cs::engine
 					};
 				}
 			}
-			return {};
+			return {
+				PixelShaderSwapSelectionKind::kUnmappedVariant
+			};
 		}
 
 		for (std::size_t i = 0; i < a_variants.size(); ++i) {

@@ -106,6 +106,7 @@ namespace cs::features::catalog::hooks
 
 	// Install D3D11 vtable detours once; repeat calls would re-chain prior thunks.
 	bool InstallAll(ID3D11Device* a_device);
+	void SetSubclassAttributionEnabled(bool a_enabled) noexcept;
 
 	struct RuntimeAttributionStats
 	{

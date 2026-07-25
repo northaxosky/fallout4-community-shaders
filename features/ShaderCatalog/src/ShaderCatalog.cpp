@@ -326,7 +326,11 @@ namespace cs::features
 
 		const auto subclassLayout =
 			cs::engine::GetShaderSubclassRuntimeLayout();
-		if (_settings.subclassAttribution && subclassLayout.verified) {
+		const bool subclassAttributionEnabled =
+			_settings.subclassAttribution && subclassLayout.verified;
+		catalog::hooks::SetSubclassAttributionEnabled(
+			subclassAttributionEnabled);
+		if (subclassAttributionEnabled) {
 			if (!catalog::subclass_attribution::Register(
 					subclassLayout.pixelShadersOffset)) {
 				L->error(

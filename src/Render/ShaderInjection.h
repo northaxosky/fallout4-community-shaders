@@ -72,7 +72,7 @@ namespace cs::engine
 		ShaderInjectionTarget                targetId =
 			ShaderInjectionTarget::kCount;
 		std::string                          name;
-		std::optional<PixelShaderTechnique>  technique;
+		std::optional<PixelShaderVariant>    variant;
 		std::string                          expectedStockSha1;
 		ShaderInjectionDefines               defines;
 	};

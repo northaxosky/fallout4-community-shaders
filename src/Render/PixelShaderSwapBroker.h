@@ -3,6 +3,7 @@
 #include "Utils/CSSha1.h"
 
 #include <cstddef>
+#include <compare>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -14,21 +15,40 @@ struct ID3D11PixelShader;
 
 namespace cs::engine
 {
-	struct PixelShaderTechnique
+	class ShaderVariantKey
 	{
-		std::string subclass;
-		std::uint32_t techniqueBits = 0;
+	public:
+		constexpr ShaderVariantKey() noexcept = default;
+		explicit constexpr ShaderVariantKey(std::uint32_t a_value) noexcept :
+			_value(a_value)
+		{}
+
+		[[nodiscard]] constexpr std::uint32_t Value() const noexcept
+		{
+			return _value;
+		}
+
+		auto operator<=>(const ShaderVariantKey&) const = default;
+
+	private:
+		std::uint32_t _value = 0;
 	};
 
-	struct PixelShaderTechniqueView
+	struct PixelShaderVariant
+	{
+		std::string subclass;
+		ShaderVariantKey key;
+	};
+
+	struct PixelShaderVariantView
 	{
 		std::string_view subclass;
-		std::uint32_t techniqueBits = 0;
+		ShaderVariantKey key;
 	};
 
 	struct PixelShaderSwapVariantKey
 	{
-		std::optional<PixelShaderTechnique> technique;
+		std::optional<PixelShaderVariant> variant;
 		std::optional<sha1::Sha1Result> expectedStockSha1;
 		std::size_t routeGroup = 0;
 	};
@@ -36,6 +56,7 @@ namespace cs::engine
 	enum class PixelShaderSwapSelectionKind : std::uint8_t
 	{
 		kNoMatch,
+		kUnmappedVariant,
 		kSelected,
 		kHashMismatch
 	};
@@ -50,14 +71,14 @@ namespace cs::engine
 
 	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
 		std::span<const PixelShaderSwapVariantKey> a_variants,
-		std::optional<PixelShaderTechniqueView> a_technique,
+		std::optional<PixelShaderVariantView> a_variant,
 		const sha1::Sha1Result& a_stockSha1) noexcept;
 
 	// A successful resolver replaces *a_out with net refcount one.
 	using PixelShaderSwapResolver = bool (*)(
 		const void* a_bytecode,
 		std::size_t a_bytecodeLength,
-		std::optional<PixelShaderTechniqueView> a_technique,
+		std::optional<PixelShaderVariantView> a_variant,
 		const sha1::Sha1Result& a_sha,
 		ID3D11PixelShader** a_out) noexcept;
 

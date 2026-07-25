@@ -1,4 +1,5 @@
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderVariantResolver.h"
 
 #include <iostream>
 #include <stdexcept>
@@ -26,76 +27,170 @@ namespace
 		return result;
 	}
 
-	void TestTechniqueSelectsVariant()
+	cs::sha1::Sha1Result Sha(std::string_view a_hex)
+	{
+		cs::sha1::Sha1Result result{};
+		Check(
+			cs::sha1::Sha1FromHex(std::string(a_hex), result),
+			"invalid SHA1 fixture");
+		return result;
+	}
+
+	void TestVariantKeySelectsVariant()
 	{
 		using namespace cs::engine;
 		const auto stock = Sha(0x31);
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderTechnique{ "BSDFCompositeShader", 0xB60 },
+				PixelShaderVariant{
+					"BSDFCompositeShader",
+					shader_variants::kBsdfCompositeAmbientIbl
+				},
 				stock
 			},
 			PixelShaderSwapVariantKey{
-				PixelShaderTechnique{ "BSDFCompositeShader", 0x10B60 },
+				PixelShaderVariant{
+					"BSDFCompositeShader",
+					shader_variants::kBsdfCompositeAmbientIblTilelight
+				},
 				stock
 			}
 		};
 
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants,
-			PixelShaderTechniqueView{ "BSDFCompositeShader", 0x10B60 },
+			PixelShaderVariantView{
+				"BSDFCompositeShader",
+				shader_variants::kBsdfCompositeAmbientIblTilelight
+			},
 			stock);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kSelected
 				&& selection.variantIndex == 1,
-			"technique key did not select the matching variant");
+			"variant key did not select the matching variant");
 	}
 
-	void TestTechniqueHashMismatchRefused()
+	void TestVariantHashMismatchRefused()
 	{
 		using namespace cs::engine;
+		const auto tilelight = Sha(
+			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
+		const auto noTilelight = Sha(
+			"6d726d0fe6b6c474da30edbffcecfa067c795873");
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderTechnique{ "BSDFCompositeShader", 0x10B60 },
-				Sha(0x31)
+				PixelShaderVariant{
+					"BSDFCompositeShader",
+					shader_variants::kBsdfCompositeAmbientIbl
+				},
+				tilelight
 			},
 			PixelShaderSwapVariantKey{
 				std::nullopt,
-				Sha(0x62)
+				noTilelight,
+				1
 			}
 		};
 
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants,
-			PixelShaderTechniqueView{ "BSDFCompositeShader", 0x10B60 },
-			Sha(0x62));
+			PixelShaderVariantView{
+				"BSDFCompositeShader",
+				shader_variants::kBsdfCompositeAmbientIbl
+			},
+			noTilelight);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch
 				&& selection.variantIndex == 0,
-			"technique hash mismatch did not refuse hash fallback");
+			"variant hash mismatch did not refuse hash fallback");
 	}
 
-	void TestUnavailableAttributionFallsBackToHash()
+	void TestHashlessVariantRefused()
 	{
 		using namespace cs::engine;
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderTechnique{ "BSDFCompositeShader", 0x10B60 },
-				Sha(0x31)
-			},
-			PixelShaderSwapVariantKey{
-				std::nullopt,
-				Sha(0x62)
+				PixelShaderVariant{
+					"BSDFCompositeShader",
+					shader_variants::kBsdfCompositeAmbientIbl
+				}
 			}
 		};
 
 		const auto selection = SelectPixelShaderSwapVariant(
-			variants, std::nullopt, Sha(0x62));
+			variants,
+			PixelShaderVariantView{
+				"BSDFCompositeShader",
+				shader_variants::kBsdfCompositeAmbientIbl
+			},
+			Sha("6d726d0fe6b6c474da30edbffcecfa067c795873"));
+		Check(
+			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch,
+			"hashless keyed variant bypassed the stock SHA1 guard");
+	}
+
+	void TestUnmappedVariantRemainsStock()
+	{
+		using namespace cs::engine;
+		const auto tilelight = Sha(
+			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
+		const auto noTilelight = Sha(
+			"6d726d0fe6b6c474da30edbffcecfa067c795873");
+		const std::vector variants{
+			PixelShaderSwapVariantKey{
+				PixelShaderVariant{
+					"BSDFCompositeShader",
+					shader_variants::kBsdfCompositeAmbientIblTilelight
+				},
+				tilelight
+			}
+		};
+
+		const auto selection = SelectPixelShaderSwapVariant(
+			variants,
+			PixelShaderVariantView{
+				"BSDFCompositeShader",
+				shader_variants::kBsdfCompositeAmbientIbl
+			},
+			noTilelight);
+		Check(
+			selection.kind
+				== PixelShaderSwapSelectionKind::kUnmappedVariant,
+			"known unmapped variant did not remain stock");
+	}
+
+	void TestUnavailableResolutionFallsBackToHash()
+	{
+		using namespace cs::engine;
+		const auto tilelight = Sha(
+			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
+		const std::vector variants{
+			PixelShaderSwapVariantKey{
+				PixelShaderVariant{
+					"BSDFCompositeShader",
+					shader_variants::kBsdfCompositeAmbientIblTilelight
+				},
+				tilelight
+			}
+		};
+
+		const auto selection = SelectPixelShaderSwapVariant(
+			variants, std::nullopt, tilelight);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.variantIndex == 1
+				&& selection.variantIndex == 0
 				&& selection.usedHashFallback,
-			"missing attribution did not fall back to exact hash");
+			"unresolved variant did not fall back to exact hash");
+	}
+
+	void TestCompositeResolutionStaysUnavailable()
+	{
+		using namespace cs::engine;
+		Check(
+			!ResolvePixelShaderVariant("BSDFCompositeShader", 0xB60)
+				&& !ResolvePixelShaderVariant(
+					"BSDFCompositeShader", 0x10B60),
+			"unresolved Tilelight state produced a variant key");
 	}
 }
 
@@ -107,9 +202,12 @@ int main()
 		void (*run)();
 	};
 	const Test tests[]{
-		{ "technique selects variant", &TestTechniqueSelectsVariant },
-		{ "technique hash mismatch refused", &TestTechniqueHashMismatchRefused },
-		{ "unavailable attribution falls back", &TestUnavailableAttributionFallsBackToHash }
+		{ "variant key selects variant", &TestVariantKeySelectsVariant },
+		{ "variant hash mismatch refused", &TestVariantHashMismatchRefused },
+		{ "hashless variant refused", &TestHashlessVariantRefused },
+		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
+		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
+		{ "composite resolution stays unavailable", &TestCompositeResolutionStaysUnavailable }
 	};
 
 	unsigned failures = 0;
