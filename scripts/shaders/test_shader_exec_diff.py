@@ -1126,6 +1126,10 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             contract_profiles["ambient_ibl_pass_runtime"],
         )
         self.assertEqual(
+            "ambient-ibl-runtime",
+            contract_profiles["ambient_ibl_pass_runtime_no_tilelight"],
+        )
+        self.assertEqual(
             "vls-slice-scatter",
             contract_profiles["vls_slice_scatter"],
         )
@@ -1159,7 +1163,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             ambient["source"],
         )
         self.assertEqual(
-            [{"id": "ambient-runtime", "defines": []}],
+            [{"id": "ambient-runtime", "defines": ["TILELIGHT=1"]}],
             ambient["variants"],
         )
         self.assertEqual(
@@ -1213,7 +1217,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             ["adversarial", "native"],
             [item["id"] for item in feature["fixtures"]],
         )
-        self.assertEqual(10, len(self.contracts["mutations"]))
+        self.assertEqual(11, len(self.contracts["mutations"]))
         self.assertEqual(
             subject.REQUIRED_MUTATION_IDS,
             {item["id"] for item in self.contracts["mutations"]},
@@ -2287,7 +2291,10 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 mutation["target"],
                 mutation["id"],
             )
-            self.assertNotEqual(control, mutant)
+            if mutation["class"] == "reference-identity":
+                self.assertEqual(control, mutant)
+            else:
+                self.assertNotEqual(control, mutant)
             self.assertEqual(original_bytes, Path(path).read_bytes())
         for path, original_bytes in before.items():
             self.assertEqual(original_bytes, Path(path).read_bytes())
@@ -2472,6 +2479,13 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
         )
         self.assertTrue(relevant)
         self.assertEqual(selected, {item["target"] for item in relevant})
+        no_tilelight = {"ambient_ibl_pass_runtime_no_tilelight"}
+        self.assertEqual(
+            {"ambient_ibl_pass_runtime"},
+            subject._mutation_reference_dependencies(
+                self.contracts["mutations"], no_tilelight
+            ),
+        )
         caught = [{"verdict": "CAUGHT"} for _ in relevant]
         self.assertEqual(
             ("PASS", 0),
@@ -2832,6 +2846,7 @@ def run_self_smoke():
         item["name"]: item for item in contracts["contracts"]
     }
     with tempfile.TemporaryDirectory() as temporary:
+        compiled_by_name = {}
         for contract in contracts["contracts"]:
             entry = entries[contract["name"]]
             source = os.path.join(subject.REPO_ROOT, entry["src"])
@@ -2847,10 +2862,11 @@ def run_self_smoke():
             )
             if not compiled:
                 raise AssertionError(log)
+            compiled_by_name[contract["name"]] = bytecode
             for fixture in subject.FIXTURE_ORDER:
-                required = contracts["profiles"][contract["profile"]][
-                    "required_buckets"
-                ][fixture]
+                required = subject._required_buckets_for_contract(
+                    contracts, contract, fixture
+                )
                 measurement, return_code, human = subject._run_harness(
                     executable,
                     bytecode,
@@ -2889,32 +2905,38 @@ def run_self_smoke():
             contract = contract_by_name[mutation["target"]]
             entry = entries[mutation["target"]]
             source = os.path.join(subject.REPO_ROOT, entry["src"])
-            original = Path(source).read_text(encoding="utf-8-sig")
-            control, mutant = subject.build_mutation_sources(
-                original, mutation["target"], mutation["id"]
+            if mutation["class"] == "reference-identity":
+                bytecodes = [
+                    compiled_by_name[mutation["target"]],
+                    compiled_by_name[mutation["wrong_reference"]],
+                ]
+            else:
+                original = Path(source).read_text(encoding="utf-8-sig")
+                control, mutant = subject.build_mutation_sources(
+                    original, mutation["target"], mutation["id"]
+                )
+                bytecodes = []
+                for kind, text in (("control", control), ("mutant", mutant)):
+                    hlsl = os.path.join(
+                        temporary, f"{mutation['id']}-{kind}.hlsl"
+                    )
+                    bytecode = os.path.join(
+                        temporary, f"{mutation['id']}-{kind}.dxbc"
+                    )
+                    Path(hlsl).write_text(text, encoding="utf-8", newline="\n")
+                    compiled, log = subject._compile_shader(
+                        fxc,
+                        hlsl,
+                        os.path.dirname(source),
+                        entry.get("defines", []),
+                        bytecode,
+                    )
+                    if not compiled:
+                        raise AssertionError(log)
+                    bytecodes.append(bytecode)
+            required = subject._required_buckets_for_contract(
+                contracts, contract, mutation["fixture"]
             )
-            bytecodes = []
-            for kind, text in (("control", control), ("mutant", mutant)):
-                hlsl = os.path.join(
-                    temporary, f"{mutation['id']}-{kind}.hlsl"
-                )
-                bytecode = os.path.join(
-                    temporary, f"{mutation['id']}-{kind}.dxbc"
-                )
-                Path(hlsl).write_text(text, encoding="utf-8", newline="\n")
-                compiled, log = subject._compile_shader(
-                    fxc,
-                    hlsl,
-                    os.path.dirname(source),
-                    entry.get("defines", []),
-                    bytecode,
-                )
-                if not compiled:
-                    raise AssertionError(log)
-                bytecodes.append(bytecode)
-            required = contracts["profiles"][contract["profile"]][
-                "required_buckets"
-            ][mutation["fixture"]]
             measurement, return_code, human = subject._run_harness(
                 executable,
                 bytecodes[0],
@@ -2933,6 +2955,19 @@ def run_self_smoke():
                 mutation["id"],
                 False,
             )
+            if mutation["class"] == "reference-identity":
+                failures = subject.validate_reference_identity_failure(
+                    measurement,
+                    return_code,
+                    mutation["fixture"],
+                    16,
+                    16,
+                    source_sha256,
+                )
+                if failures:
+                    raise AssertionError((failures, human))
+                print(f"{mutation['id']}: CAUGHT")
+                continue
             failures = subject.validate_harness_result(
                 measurement,
                 return_code,

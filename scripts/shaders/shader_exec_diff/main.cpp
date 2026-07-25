@@ -1471,10 +1471,9 @@ bool IsDirectionalLightingContract(
 bool IsAmbientIblContractWithCb12Size(
     const ShaderContract& contract,
     const DisassemblyInfo& disassembly,
-    UINT cb12Float4Count)
+    UINT cb12Float4Count,
+    const std::set<UINT>& slots)
 {
-    static const std::set<UINT> slots{
-        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15};
     const bool hasCubeArray = std::any_of(
         contract.resources.begin(), contract.resources.end(),
         [](const ResourceBinding& binding) {
@@ -1510,14 +1509,24 @@ bool IsAmbientIblContract(
     const ShaderContract& contract,
     const DisassemblyInfo& disassembly)
 {
-    return IsAmbientIblContractWithCb12Size(contract, disassembly, 31);
+    static const std::set<UINT> slots{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15};
+    return IsAmbientIblContractWithCb12Size(
+        contract, disassembly, 31, slots);
 }
 
 bool IsAmbientIblRuntimeContract(
     const ShaderContract& contract,
     const DisassemblyInfo& disassembly)
 {
-    return IsAmbientIblContractWithCb12Size(contract, disassembly, 47);
+    static const std::set<UINT> tilelightSlots{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15};
+    static const std::set<UINT> noTilelightSlots{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 14, 15};
+    return IsAmbientIblContractWithCb12Size(
+               contract, disassembly, 47, tilelightSlots) ||
+        IsAmbientIblContractWithCb12Size(
+               contract, disassembly, 47, noTilelightSlots);
 }
 
 bool IsDeferredPrepassContract(
@@ -4009,7 +4018,7 @@ void BindSeedResources(ID3D11DeviceContext* context, const SeedResources& resour
     }
 }
 
-const BoundResource& FindResource(
+const BoundResource* FindResourceOptional(
     const SeedResources& resources,
     UINT bindPoint)
 {
@@ -4018,7 +4027,17 @@ const BoundResource& FindResource(
         [bindPoint](const BoundResource& resource) {
             return resource.bindPoint == bindPoint;
         });
-    if (found == resources.resources.end() || found->decodedValues.empty())
+    return found == resources.resources.end() || found->decodedValues.empty()
+        ? nullptr
+        : &*found;
+}
+
+const BoundResource& FindResource(
+    const SeedResources& resources,
+    UINT bindPoint)
+{
+    const BoundResource* found = FindResourceOptional(resources, bindPoint);
+    if (!found)
         ThrowFailure("bucket classification resource missing");
     return *found;
 }
@@ -4303,11 +4322,16 @@ std::map<std::string, BucketMask> ClassifyBuckets(
                 buckets, "reprojection.distinct-banks", true,
                 pixelCount, pixelCount);
 
-            const Pixel sslr = ResourcePixel(FindResource(resources, 12));
-            const bool sslrLive =
-                skin && (sslr[0] != 0.0f || sslr[1] != 0.0f || sslr[2] != 0.0f);
-            AddUniformBucket(
-                buckets, "sslr.live", sslrLive, pixelCount, pixelCount);
+            if (const BoundResource* sslrResource =
+                    FindResourceOptional(resources, 12))
+            {
+                const Pixel sslr = ResourcePixel(*sslrResource);
+                const bool sslrLive =
+                    skin &&
+                    (sslr[0] != 0.0f || sslr[1] != 0.0f || sslr[2] != 0.0f);
+                AddUniformBucket(
+                    buckets, "sslr.live", sslrLive, pixelCount, pixelCount);
+            }
 
             const auto screen = ConstantVector(resources, 2, 0);
             const float sampleU = 0.5f * screen[0];
@@ -6841,7 +6865,7 @@ void WriteAmbientWetnessMeasurement(
            << "\"stock_to_feature\":\"only-texture2d-t13-added\","
            << "\"mutation_t13_optimization_away_allowed\":false,"
            << "\"verdict\":\"PASS\"},\"variants\":["
-           << "{\"id\":\"ambient-runtime\",\"defines\":[]}],\"properties\":{";
+           << "{\"id\":\"ambient-runtime\",\"defines\":[\"TILELIGHT=1\"]}],\"properties\":{";
 
     stream << "\"neutral_identity\":{\"tolerance_absolute\":0,"
            << "\"tolerance_relative\":0,\"comparisons\":"

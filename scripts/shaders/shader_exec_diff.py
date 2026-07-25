@@ -56,6 +56,7 @@ REQUIRED_MUTATION_IDS = {
     "omitted-material-branch",
     "point-depth-exclusive-boundary",
     "runtime-depth-exclusive-boundary",
+    "runtime-no-tilelight-wrong-reference",
     "vls-depth-exclusive-boundary",
 }
 
@@ -323,6 +324,19 @@ def _load_json(path: str, failure_code: str) -> Any:
         raise StableFailure(failure_code, error.__class__.__name__) from error
 
 
+def _required_buckets_for_contract(
+    contracts: dict[str, Any], contract: dict[str, Any], fixture: str
+) -> list[str]:
+    omitted = set(contract.get("omit_required_buckets", []))
+    return [
+        name
+        for name in contracts["profiles"][contract["profile"]]["required_buckets"][
+            fixture
+        ]
+        if name not in omitted
+    ]
+
+
 def validate_contracts(contracts: Any) -> None:
     if not isinstance(contracts, dict):
         raise StableFailure("contracts_schema", "root must be an object")
@@ -368,6 +382,19 @@ def validate_contracts(contracts: Any) -> None:
             raise StableFailure("contracts_schema", "contract profile is unknown")
         if not isinstance(entry.get("ibl_in_light"), bool):
             raise StableFailure("contracts_schema", "ibl_in_light must be boolean")
+        omitted = entry.get("omit_required_buckets", [])
+        if (
+            not isinstance(omitted, list)
+            or len(omitted) != len(set(omitted))
+            or any(
+                name not in profiles[entry["profile"]]["required_buckets"][fixture]
+                for name in omitted
+                for fixture in FIXTURE_ORDER
+            )
+        ):
+            raise StableFailure(
+                "contracts_schema", "omitted required bucket is invalid"
+            )
     mutations = contracts.get("mutations")
     if not isinstance(mutations, list):
         raise StableFailure("contracts_schema", "mutations are required")
@@ -382,10 +409,22 @@ def validate_contracts(contracts: Any) -> None:
             raise StableFailure("contracts_schema", "mutation class missing")
         if mutation.get("target") not in known:
             raise StableFailure("contracts_schema", "mutation target is unknown")
+        if mutation["class"] == "reference-identity":
+            wrong_reference = mutation.get("wrong_reference")
+            if wrong_reference not in known or wrong_reference == mutation["target"]:
+                raise StableFailure(
+                    "contracts_schema", "mutation wrong reference is invalid"
+                )
+        elif "wrong_reference" in mutation:
+            raise StableFailure(
+                "contracts_schema", "wrong reference requires reference identity"
+            )
         if mutation.get("fixture") not in FIXTURE_ORDER:
             raise StableFailure("contracts_schema", "mutation fixture is unknown")
         target = next(item for item in contract_entries if item["name"] == mutation["target"])
-        required = profiles[target["profile"]]["required_buckets"][mutation["fixture"]]
+        required = _required_buckets_for_contract(
+            contracts, target, mutation["fixture"]
+        )
         if mutation.get("expected_bucket") not in required:
             raise StableFailure("contracts_schema", "mutation bucket is not required")
 def _mutation_replacements_digest(value: Any) -> str | None:
@@ -470,7 +509,7 @@ def validate_additive_features(features: Any) -> None:
             "value_type": "float",
         }
         or ambient.get("variants")
-        != [{"id": "ambient-runtime", "defines": []}]
+        != [{"id": "ambient-runtime", "defines": ["TILELIGHT=1"]}]
         or ambient.get("scenario_buckets")
         != [
             "combined",
@@ -756,6 +795,8 @@ def build_mutation_sources(
     control = apply_inclusive_depth_control(
         original.replace("\r\n", "\n"), target
     )
+    if mutation_id == "runtime-no-tilelight-wrong-reference":
+        return control, control
     if mutation_id == "missing-axis-zyx":
         old = """float3 reflWorld;
         reflWorld.x = dot(ViewToWorld_row0.xyz, reflView);
@@ -1184,6 +1225,41 @@ def validate_harness_result(
             )
         )
     return failures
+
+
+def validate_reference_identity_failure(
+    measurement: Any,
+    return_code: int,
+    fixture: str,
+    width: int,
+    height: int,
+    expected_source_sha256: str,
+) -> list[OrderedDict[str, str]]:
+    valid = (
+        isinstance(measurement, dict)
+        and measurement.get("schema") == MEASUREMENT_SCHEMA
+        and measurement.get("schema_version") == 1
+        and measurement.get("harness_version") == HARNESS_VERSION
+        and measurement.get("source_sha256") == expected_source_sha256
+        and measurement.get("profile") == "unshaped"
+        and measurement.get("fixture") == fixture
+        and measurement.get("width") == width
+        and measurement.get("height") == height
+        and measurement.get("verdict") == "UNPROVEN"
+        and measurement.get("failures")
+        == [{"code": "contract_mismatch", "detail": "contract_mismatch"}]
+        and return_code == 2
+    )
+    if valid:
+        return []
+    return [
+        OrderedDict(
+            (
+                ("code", "reference_identity_protocol"),
+                ("detail", "contract_mismatch"),
+            )
+        )
+    ]
 
 
 def _expected_wetness_mask_payloads(
@@ -3976,6 +4052,16 @@ def _relevant_mutations(
     ]
 
 
+def _mutation_reference_dependencies(
+    mutations: list[dict[str, Any]], selected_targets: set[str]
+) -> set[str]:
+    return {
+        mutation["wrong_reference"]
+        for mutation in _relevant_mutations(mutations, selected_targets)
+        if mutation.get("wrong_reference") not in (None, mutation["target"])
+    }
+
+
 def _fixture_result(
     target: str,
     profile: str,
@@ -4035,14 +4121,25 @@ def _mutation_result(
                 for item in mutant.get("buckets", [])
                 if item.get("name") in {"depth.near", "depth.far"}
             )
-    caught = (
-        infrastructure_failure is None
-        and control is not None
+    identity_caught = (
+        mutation["class"] == "reference-identity"
         and mutant is not None
-        and control_divergent == 0
-        and population >= minimum_population
-        and divergent_pixels > 0
-        and other_depth_divergent_pixels == 0
+        and mutant.get("failures")
+        == [{"code": "contract_mismatch", "detail": "contract_mismatch"}]
+    )
+    caught = infrastructure_failure is None and control is not None and (
+        (
+            identity_caught
+            and control_divergent == 0
+        )
+        or (
+            mutation["class"] != "reference-identity"
+            and mutant is not None
+            and control_divergent == 0
+            and population >= minimum_population
+            and divergent_pixels > 0
+            and other_depth_divergent_pixels == 0
+        )
     )
     verdict = (
         "UNPROVEN"
@@ -5080,7 +5177,7 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
     )
     runtime_components = harness_self_test["runtime_components"]
     manifest = _load_json(args.manifest, "manifest_read")
-    _, entries = _entry_maps(manifest, contracts)
+    manifest_entries, entries = _entry_maps(manifest, contracts)
     if args.shader:
         requested = set(args.shader)
         entries = [entry for entry in entries if entry["name"] in requested]
@@ -5091,6 +5188,9 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
         raise StableFailure("shader_selection", "no contracts selected")
     all_targets = {entry["name"] for entry in contracts["contracts"]}
     selected_targets = {entry["name"] for entry in entries}
+    relevant_mutations = _relevant_mutations(
+        contracts["mutations"], selected_targets
+    )
     scope = _report_scope(selected_targets, all_targets)
     _validate_scope_artifacts(scope, args.manifest_dir, args.check_report)
 
@@ -5105,24 +5205,34 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
     compiled: dict[str, str] = {}
     corpus_paths: dict[str, str] = {}
 
+    def load_corpus(
+        name: str, entry: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]] | None:
+        corpus = os.path.join(args.corpus_dir, f"{name}.dxbc")
+        if not entry.get("corpus_sha1") or not os.path.isfile(corpus):
+            failures.append(
+                OrderedDict((("code", "corpus_missing"), ("detail", name)))
+            )
+            return None
+        native_hash = _hash_file(corpus)
+        if native_hash["sha1"].lower() != str(entry["corpus_sha1"]).lower():
+            failures.append(
+                OrderedDict(
+                    (("code", "corpus_hash_mismatch"), ("detail", name))
+                )
+            )
+            return None
+        corpus_paths[name] = corpus
+        return corpus, native_hash
+
     with tempfile.TemporaryDirectory(prefix="fo4cs-exec-diff-") as temporary:
         for entry in entries:
             name = entry["name"]
             source = os.path.join(REPO_ROOT, entry["src"])
-            corpus = os.path.join(args.corpus_dir, f"{name}.dxbc")
-            if not entry.get("corpus_sha1") or not os.path.isfile(corpus):
-                failures.append(
-                    OrderedDict((("code", "corpus_missing"), ("detail", name)))
-                )
+            loaded_corpus = load_corpus(name, entry)
+            if loaded_corpus is None:
                 continue
-            native_hash = _hash_file(corpus)
-            if native_hash["sha1"].lower() != str(entry["corpus_sha1"]).lower():
-                failures.append(
-                    OrderedDict(
-                        (("code", "corpus_hash_mismatch"), ("detail", name))
-                    )
-                )
-                continue
+            corpus, native_hash = loaded_corpus
             candidate = os.path.join(temporary, f"{name}.dxbc")
             compiled_ok, compile_log = _compile_shader(
                 fxc,
@@ -5172,17 +5282,17 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                 )
             )
             print(f"== {name} ==")
-            required_by_fixture = contracts["profiles"][entry["profile"]][
-                "required_buckets"
-            ]
             for fixture in selected_fixtures:
+                required = _required_buckets_for_contract(
+                    contracts, entry, fixture
+                )
                 measurement, return_code, human = _run_harness(
                     args.exe,
                     corpus,
                     candidate,
                     fixture,
                     entry["profile"],
-                    required_by_fixture[fixture],
+                    required,
                     minimum_population,
                     args.seeds,
                     args.seed_base,
@@ -5205,7 +5315,7 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                     return_code,
                     entry["profile"],
                     fixture,
-                    required_by_fixture[fixture],
+                    required,
                     minimum_population,
                     name,
                     args.width,
@@ -5228,18 +5338,25 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                     )
                 )
 
+        for dependency in sorted(
+            _mutation_reference_dependencies(
+                contracts["mutations"], selected_targets
+            )
+        ):
+            if dependency not in corpus_paths:
+                load_corpus(dependency, manifest_entries[dependency])
+
         if args.mutation_suite == "required":
             entry_by_name = {entry["name"]: entry for entry in entries}
-            relevant_mutations = _relevant_mutations(
-                contracts["mutations"], set(entry_by_name)
-            )
             for mutation in relevant_mutations:
                 target = mutation["target"]
                 entry = entry_by_name.get(target)
+                wrong_reference = mutation.get("wrong_reference", target)
                 if (
                     entry is None
                     or target not in corpus_paths
                     or target not in compiled
+                    or wrong_reference not in corpus_paths
                 ):
                     failures.append(
                         OrderedDict(
@@ -5348,9 +5465,9 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                         )
                     )
                     continue
-                required = contracts["profiles"][entry["profile"]][
-                    "required_buckets"
-                ][mutation["fixture"]]
+                required = _required_buckets_for_contract(
+                    contracts, entry, mutation["fixture"]
+                )
                 control_measurement, control_return_code, control_human = _run_harness(
                     args.exe,
                     corpus_paths[target],
@@ -5371,7 +5488,7 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                 )
                 mutant_measurement, mutant_return_code, mutant_human = _run_harness(
                     args.exe,
-                    corpus_paths[target],
+                    corpus_paths[wrong_reference],
                     mutant_dxbc,
                     mutation["fixture"],
                     entry["profile"],
@@ -5412,18 +5529,28 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                     failures.extend(control_validation)
                 mutant_validation: list[OrderedDict[str, str]] = []
                 if mutant_measurement is not None:
-                    mutant_validation = validate_harness_result(
-                        mutant_measurement,
-                        mutant_return_code,
-                        entry["profile"],
-                        mutation["fixture"],
-                        required,
-                        minimum_population,
-                        f"{mutation['id']}:mutant",
-                        args.width,
-                        args.height,
-                        expected_harness_source_sha256,
-                    )
+                    if mutation["class"] == "reference-identity":
+                        mutant_validation = validate_reference_identity_failure(
+                            mutant_measurement,
+                            mutant_return_code,
+                            mutation["fixture"],
+                            args.width,
+                            args.height,
+                            expected_harness_source_sha256,
+                        )
+                    else:
+                        mutant_validation = validate_harness_result(
+                            mutant_measurement,
+                            mutant_return_code,
+                            entry["profile"],
+                            mutation["fixture"],
+                            required,
+                            minimum_population,
+                            f"{mutation['id']}:mutant",
+                            args.width,
+                            args.height,
+                            expected_harness_source_sha256,
+                        )
                     failures.extend(mutant_validation)
                 if control_validation or mutant_validation:
                     infrastructure_failure = "mutation_protocol"
@@ -5499,6 +5626,14 @@ def run(arguments: list[str] | None = None) -> tuple[OrderedDict[str, Any], int]
                                             ),
                                         )
                                     ),
+                                ),
+                                (
+                                    "control_reference",
+                                    _hash_file(corpus_paths[target]),
+                                ),
+                                (
+                                    "mutant_reference",
+                                    _hash_file(corpus_paths[wrong_reference]),
                                 ),
                                 ("control_dxbc", _hash_file(control_dxbc)),
                                 ("mutant_dxbc", _hash_file(mutant_dxbc)),

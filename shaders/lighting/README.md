@@ -11,7 +11,7 @@ intended to inform feature implementations elsewhere in the repo.
 | File | Role | Source binding (RT in/out) | REL::ID OG/NG/AE | Status |
 |---|---|---|---|---|
 | `ambient_ibl_pass.hlsl`     | interior/reference ambient + IBL, blob 3559 | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **exec-diff-zero** |
-| `ambient_ibl_pass_runtime.hlsl` | exterior/runtime ambient + IBL + fog, blob 3560 | same 33 bindings; t12 is blurred SSLR in the material-5 path | same | **live-mapped; exec-diff-zero** |
+| `ambient_ibl_pass_runtime.hlsl` | exterior/runtime BSDFComposite family, PSIDs `0x10B60` and `0xB60` | Tilelight adds t11 ambient diffuse B and t12 blurred SSLR | same | **both live-mapped; exec-diff-zero** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
 | `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **reconstructed-roundtrip-1.25pct** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
@@ -26,12 +26,12 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   `Shaders011.fxp` blob **3559**, sha1 `7460585eaf76`, CB12[31].
   Its 33 declarations and 44 samples match the native contract, and its
   shaped execution diff remains zero.
-* **`ambient_ibl_pass_runtime.hlsl`** reconstructs the live exterior
-  permutation: blob **3560**, sha1 `2b6e36c08aca`, CB12[47]. It adds the
-  post-AO fog/color stack and consumes blurred SSLR at t12 in the material-5
-  path. The hardened oracle covers both fixture classes, all material and fog
-  branches, distinct reprojection banks, and seven cubemap mips with zero
-  divergent pixels; ShaderInjection maps the live hash to this source.
+* **`ambient_ibl_pass_runtime.hlsl`** is the live exterior BSDFComposite family
+  source for Tilelight PSID `0x10B60` (blob **3560**, sha1 `2b6e36c08aca`) and
+  no-Tilelight PSID `0xB60` (blob **3495**, sha1 `6d726d0fe6b6`). Both use
+  CB12[47] and the same post-AO fog/color stack. `TILELIGHT` adds t11 ambient
+  diffuse B and t12 blurred SSLR; the hardened oracle validates each build
+  against its own blob and rejects the no-Tilelight build against blob 3560.
 * **`deferred_composite.hlsl`** - **reconstructed, round-trip WIP**
   (canonical blob 3539). Canonical blob: `Shaders011.fxp` blob 3539
   (sha1 `861504f6dcbe`), identified by mnemonic-stream equivalence

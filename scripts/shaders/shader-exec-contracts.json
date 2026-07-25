@@ -373,6 +373,14 @@
       "ibl_in_light": false
     },
     {
+      "name": "ambient_ibl_pass_runtime_no_tilelight",
+      "profile": "ambient-ibl-runtime",
+      "ibl_in_light": false,
+      "omit_required_buckets": [
+        "sslr.live"
+      ]
+    },
+    {
       "name": "bsdf_light_deferred_directional",
       "profile": "directional-lighting",
       "ibl_in_light": false
@@ -463,6 +471,14 @@
       "expected_bucket": "depth.equal"
     },
     {
+      "id": "runtime-no-tilelight-wrong-reference",
+      "class": "reference-identity",
+      "target": "ambient_ibl_pass_runtime_no_tilelight",
+      "wrong_reference": "ambient_ibl_pass_runtime",
+      "fixture": "adversarial",
+      "expected_bucket": "material.default"
+    },
+    {
       "id": "vls-depth-exclusive-boundary",
       "class": "boundary-operator",
       "target": "vls_slice_scatter",
@@ -517,7 +533,9 @@
         "variants": [
           {
             "id": "ambient-runtime",
-            "defines": []
+            "defines": [
+              "TILELIGHT=1"
+            ]
           }
         ],
         "scenario_buckets": [

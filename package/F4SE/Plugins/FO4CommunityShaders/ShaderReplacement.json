@@ -19,7 +19,7 @@
     },
     {
       "name": "ambient_ibl_pass",
-      "comment": "ambient/IBL deferred PS (the 4-sample permutation the 1.11.221 engine binds at the ambient draw; sample_call_count=4). Contract-identical 8-sample sibling is 7460585eaf763b27ea14ee7bf607c9dfc3837a55 (same 14-srv/t8:texcubearray/cb0-cb2-cb12/t0+t13-free layout, roundtrip-validated) - remap here if the engine binds that variant instead. TODO (injection-registry #4): map BOTH permutations to this one reconstruction so AO holds across IBL-quality settings. Prior 761d4100 was a stale pre-next-gen bombshell-capture sha that never matched on 1.11.221.",
+      "comment": "BSDFComposite family source covering PSID 0x10B60 with Tilelight and PSID 0xB60 without it.",
       "default_enabled": false
     },
     {

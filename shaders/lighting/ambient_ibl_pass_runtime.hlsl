@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// Reconstruction of the current exterior ambient/IBL PS:
-// Shaders011.fxp blob 3560, sha1 2b6e36c08aca7ff0a3bd10da326e00b3b0367383.
-// Unlike the proven blob-3559 reference, this CB12[47] permutation applies
-// the fog/color stack after AO and consumes t12 in the material-5 blur path.
+// BSDFComposite exterior ambient/IBL family source for PSIDs 0xB60 and 0x10B60.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -58,10 +55,10 @@ Texture2D<float4> g_tMainDepth           : register(t7);
 TextureCubeArray<float4> g_tIblProbeCube : register(t8);
 Texture2D<float4> g_tSsao                : register(t9);
 Texture2D<float4> g_tBlurSource          : register(t10);
+#ifdef TILELIGHT
 Texture2D<float4> g_tAmbientDiffuseB     : register(t11);
-// Frame 9219 binds the fullscreen draw's blurred SSLR source here. Blob 3560
-// samples it only inside the explicit material-5 blur branch.
 Texture2D<float4> g_tBlurredSslr         : register(t12);
+#endif
 #ifdef WETNESS_EFFECTS
 Texture2D<float> g_tWetnessMask : register(t13);
 #endif
@@ -82,8 +79,10 @@ SamplerState g_sMainDepth          : register(s7);
 SamplerState g_sIblProbeCube       : register(s8);
 SamplerState g_sSsao               : register(s9);
 SamplerState g_sBlurSource         : register(s10);
+#ifdef TILELIGHT
 SamplerState g_sAmbientDiffuseB    : register(s11);
 SamplerState g_sBlurredSslr        : register(s12);
+#endif
 SamplerState g_sLitScene           : register(s14);
 SamplerState g_sBlurDepthRef       : register(s15);
 
@@ -278,9 +277,13 @@ PS_OUTPUT main(PS_INPUT input)
 
         float3 probeA =
             g_tAmbientProbeA.SampleLevel(g_sAmbientProbeA, uv, 0).xyz;
+#ifdef TILELIGHT
         float3 blurredSslr =
             g_tBlurredSslr.SampleLevel(g_sBlurredSslr, uv, 0).xyz;
         ambientAccum = probeA + blurredSslr + skinAux + blurAccum;
+#else
+        ambientAccum = probeA + skinAux + blurAccum;
+#endif
     }
 
     if (isMaterial2 || isMaterial3)
@@ -290,8 +293,12 @@ PS_OUTPUT main(PS_INPUT input)
     }
 
     float3 ambientPair =
-        (g_tAmbientDiffuseA.SampleLevel(g_sAmbientDiffuseA, uv, 0).xyz +
-         g_tAmbientDiffuseB.SampleLevel(g_sAmbientDiffuseB, uv, 0).xyz) * 3.0;
+        g_tAmbientDiffuseA.SampleLevel(g_sAmbientDiffuseA, uv, 0).xyz;
+#ifdef TILELIGHT
+    ambientPair +=
+        g_tAmbientDiffuseB.SampleLevel(g_sAmbientDiffuseB, uv, 0).xyz;
+#endif
+    ambientPair *= 3.0;
     float glossFactor =
         shadingData.y * 3.0 * min(sqrt(saturate(shadingData.x - 0.3)), 1.0);
     float glossSquaredScaled = material.z * material.z * 50.0;
@@ -383,4 +390,4 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// Static contract: CB12[47], CB0[3], CB2[6], 33 declarations, 44 samples.
+// TILELIGHT: 33 declarations, 44 samples. No TILELIGHT: 29 declarations, 42 samples.

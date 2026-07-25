@@ -14,11 +14,22 @@
     {
       "name": "ambient_ibl_pass_runtime",
       "src": "shaders/lighting/ambient_ibl_pass_runtime.hlsl",
-      "defines": [],
+      "defines": [
+        "TILELIGHT=1"
+      ],
       "sha1": "A2E4D539EE76E0BD3449C0D8009D8289ACA8E01C",
       "corpus_sha1": "2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
       "corpus_blob_index": 3560,
       "invariant": "Exterior/runtime ambient permutation with the CB12[47] fog/color stack and t12 blurred-SSLR contribution in the material-5 blur path. Authoritative harness-v4 exec-diff: adversarial 0/1703936 divergent pixels (0/6815744 channels), max abs 1.4305115e-06; native-format 0/1638400 pixels (0/6553600 channels), max abs 9.9778175e-05. The exclusive-depth-boundary mutant diverges all 65536 depth.equal pixels with a zero-divergence control and zero near/far spill."
+    },
+    {
+      "name": "ambient_ibl_pass_runtime_no_tilelight",
+      "src": "shaders/lighting/ambient_ibl_pass_runtime.hlsl",
+      "defines": [],
+      "sha1": "FDE86CBD1ED56D1DC7638AAA9322C47E8A666F01",
+      "corpus_sha1": "6d726d0fe6b6c474da30edbffcecfa067c795873",
+      "corpus_blob_index": 3495,
+      "invariant": "PSID 0xB60 omits Tilelight t11/s11 and t12/s12 while retaining the same CB12[47] fog/color program."
     },
     {
       "name": "bsdf_light_deferred_directional",

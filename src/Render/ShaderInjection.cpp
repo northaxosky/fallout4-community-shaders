@@ -162,7 +162,17 @@ namespace cs::engine
 							shader_variants::
 								kBsdfCompositeAmbientIblTilelight)
 					},
-					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383"),
+					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
+					{ { "TILELIGHT", "1" } }),
+				MakeDefaultVariantRegistration(
+					Target::kAmbientIblPass,
+					"no-tilelight",
+					{
+						OwnShaderVariantKey(
+							shader_variants::
+								kBsdfCompositeAmbientIbl)
+					},
+					"6d726d0fe6b6c474da30edbffcecfa067c795873"),
 				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredDirectional,
 					"default",
