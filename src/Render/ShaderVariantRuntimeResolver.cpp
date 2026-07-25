@@ -6,11 +6,14 @@ namespace cs::engine
 {
 	namespace
 	{
-		std::optional<bool> QueryTileLightingEnabled() noexcept
+		std::optional<bool> QueryNgAeTileLightingEnabled() noexcept
 		{
-			if (!IsPixelShaderVariantResolutionAvailable())
+			if (!REX::FModule::IsRuntimeNG()
+				&& !REX::FModule::IsRuntimeAE()) {
 				return std::nullopt;
+			}
 
+			// This ID is shared by NG/AE; OG is intentionally unresolved.
 			static REL::Relocation<bool()> tileLightingGetter{
 				REL::ID(2318371)
 			};
@@ -42,6 +45,6 @@ namespace cs::engine
 		return ResolvePixelShaderVariant(
 			a_subclass,
 			a_techniqueBits,
-			QueryTileLightingEnabled());
+			QueryNgAeTileLightingEnabled());
 	}
 }

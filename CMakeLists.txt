@@ -362,6 +362,51 @@ target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
 set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
 
+if(NOT FO4CS_HOST_TESTS_ONLY)
+	add_executable(ShaderInjectionRegistrationTests
+		tests/ShaderInjectionRegistrationTests.cpp
+		src/Render/ShaderInjection.cpp
+		src/Render/PixelShaderSwapModel.cpp
+		src/Utils/CSSha1.cpp
+	)
+	configure_host_test(ShaderInjectionRegistrationTests)
+	target_precompile_headers(ShaderInjectionRegistrationTests PRIVATE
+		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+	)
+	target_compile_definitions(ShaderInjectionRegistrationTests PRIVATE
+		_WINDOWS
+		_AMD64_
+		_UNICODE
+		COMMONLIB_RUNTIMECOUNT=3
+	)
+	target_include_directories(ShaderInjectionRegistrationTests BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
+		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+	)
+	target_link_libraries(ShaderInjectionRegistrationTests PRIVATE
+		CommonLibF4::CommonLibF4
+		Microsoft::DirectXTK
+		Microsoft::DirectX-Headers
+		bcrypt.lib
+		imgui::imgui
+		magic_enum::magic_enum
+		spdlog::spdlog
+		tomlplusplus::tomlplusplus
+	)
+
+	add_test(
+		NAME ShaderInjectionRegistration
+		COMMAND ShaderInjectionRegistrationTests
+	)
+	set_tests_properties(ShaderInjectionRegistration PROPERTIES
+		LABELS "render;shader;unit"
+	)
+endif()
+
 if(FO4CS_HOST_TESTS_ONLY)
 	find_package(xbyak CONFIG REQUIRED)
 	set(PROJECT_VERSION_MAJOR "${FO4CS_VERSION_MAJOR}")
