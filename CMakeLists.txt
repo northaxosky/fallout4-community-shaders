@@ -384,6 +384,7 @@ if(FO4CS_HOST_TESTS_ONLY)
 		src/Render/ShaderSubclassContext.cpp
 		src/Render/ShaderSubclassHooks.cpp
 		src/Render/ShaderVariantResolver.cpp
+		src/Render/ShaderVariantRuntimeResolver.cpp
 	)
 	configure_host_test(ShaderCatalogCompileChecks)
 	target_precompile_headers(ShaderCatalogCompileChecks PRIVATE

@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/ShaderSubclassContext.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 
 #include <Windows.h>
 
@@ -233,6 +234,10 @@ namespace cs::engine
 				L->error(
 					"Shader injection dispatch mode: exact-hash fallback "
 					"(no SetupTechnique hooks installed).");
+			} else if (!IsPixelShaderVariantResolutionAvailable()) {
+				L->info(
+					"Shader injection dispatch mode: exact-hash fallback "
+					"(resolved variant keys unavailable for this runtime).");
 			} else {
 				L->info(
 					"Shader injection dispatch mode: resolved variant key "

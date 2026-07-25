@@ -93,6 +93,14 @@ namespace cs::engine
 		return {};
 	}
 
+	bool PixelShaderVariantKeysConflict(
+		PixelShaderVariantView a_left,
+		PixelShaderVariantView a_right) noexcept
+	{
+		return a_left.subclass == a_right.subclass
+			&& a_left.key == a_right.key;
+	}
+
 	bool ShouldSubstitutePixelShader(
 		PixelShaderSwapSelectionKind a_selection,
 		bool a_replacementReady) noexcept

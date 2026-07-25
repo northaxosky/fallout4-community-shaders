@@ -1,6 +1,6 @@
 #include "Render/ShaderSubclassContext.h"
 
-#include "Render/ShaderVariantResolver.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 
 namespace cs::engine::shader_context
 {

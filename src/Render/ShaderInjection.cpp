@@ -839,10 +839,15 @@ namespace cs::engine
 				return false;
 			}
 			if (existing.variant && a_registration.variant
-				&& existing.variant->subclass
-					== a_registration.variant->subclass
-				&& existing.variant->key
-					== a_registration.variant->key) {
+				&& PixelShaderVariantKeysConflict(
+					{
+						existing.variant->subclass,
+						existing.variant->key
+					},
+					{
+						a_registration.variant->subclass,
+						a_registration.variant->key
+					})) {
 				L->error(
 					"Replacement variant '{}/{}' rejected: "
 					"duplicate variant key {}+0x{:X}.",

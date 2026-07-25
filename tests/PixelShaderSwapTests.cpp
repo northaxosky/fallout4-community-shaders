@@ -187,10 +187,54 @@ namespace
 	{
 		using namespace cs::engine;
 		Check(
-			!ResolvePixelShaderVariant("BSDFCompositeShader", 0xB60)
+			!ResolvePixelShaderVariant(
+				"BSDFCompositeShader", 0xB60, std::nullopt)
 				&& !ResolvePixelShaderVariant(
-					"BSDFCompositeShader", 0x10B60),
+					"BSDFCompositeShader", 0x10B60, std::nullopt),
 			"unresolved Tilelight state produced a variant key");
+	}
+
+	void TestCompositeResolverMasksAndForcesTilelight()
+	{
+		using namespace cs::engine;
+		const auto noTilelight = ResolvePixelShaderVariant(
+			"BSDFCompositeShader", 0x10B60, false);
+		const auto tilelight = ResolvePixelShaderVariant(
+			"BSDFCompositeShader", 0xB60, true);
+		Check(
+			noTilelight
+				&& noTilelight->key
+					== shader_variants::kBsdfCompositeAmbientIbl,
+			"Composite resolver did not force Tilelight off");
+		Check(
+			tilelight
+				&& tilelight->key
+					== shader_variants::kBsdfCompositeAmbientIblTilelight,
+			"Composite resolver did not force Tilelight on");
+
+		for (const std::uint32_t discardedBit :
+			{ 0x2u, 0x4u, 0x10u, 0x400u, 0x416u }) {
+			const auto collapsed = ResolvePixelShaderVariant(
+				"BSDFCompositeShader",
+				0xB60 | discardedBit,
+				false);
+			Check(
+				collapsed && noTilelight
+					&& collapsed->key == noTilelight->key,
+				"Composite resolver did not collapse discarded technique bits");
+			Check(
+				collapsed && noTilelight
+					&& PixelShaderVariantKeysConflict(
+						{
+							"BSDFCompositeShader",
+							collapsed->key
+						},
+						{
+							"BSDFCompositeShader",
+							noTilelight->key
+						}),
+				"collapsed Composite PSIDs did not conflict");
+		}
 	}
 
 	void TestNotReadyReplacementKeepsStock()
@@ -224,7 +268,8 @@ int main()
 		{ "hashless variant refused", &TestHashlessVariantRefused },
 		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
 		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
-		{ "composite resolution stays unavailable", &TestCompositeResolutionStaysUnavailable },
+		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
+		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
 		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock }
 	};
 
