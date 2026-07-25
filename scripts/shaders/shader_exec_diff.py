@@ -42,7 +42,7 @@ HARNESS_SOURCE = os.path.join(
 )
 MANIFEST_FILENAME = "shader-exec-diff-run.json"
 FEATURE_MANIFEST_FILENAME = "wetness-effects-warp-run.json"
-FEATURE_PROTOCOL_VERSION = 1
+FEATURE_PROTOCOL_VERSION = 2
 COMPILE_FLAGS = ("/nologo", "/T", "ps_5_0", "/O3", "/E", "main")
 FIXTURE_ORDER = ("adversarial", "native")
 VERDICTS = ("PASS", "FAIL", "UNPROVEN", "STALE")
@@ -399,7 +399,7 @@ def validate_additive_features(features: Any) -> None:
         != "reconstructed-stock-vs-reconstructed-feature"
         or feature.get("native_bytecode_used") is not False
         or feature.get("profile") != "wetness-directional-lighting"
-        or feature.get("measurement_protocol") != "wetness-warp-v1"
+        or feature.get("measurement_protocol") != "wetness-warp-v2"
         or feature.get("source")
         != "shaders/lighting/bsdf_light_deferred.hlsl"
     ):
@@ -436,6 +436,40 @@ def validate_additive_features(features: Any) -> None:
         },
     ]:
         raise StableFailure("feature_contracts_schema", "variants")
+    ambient = feature.get("ambient_runtime")
+    if (
+        not isinstance(ambient, dict)
+        or ambient.get("id") != "ambient-runtime"
+        or ambient.get("profile") != "wetness-ambient-ibl-runtime"
+        or ambient.get("source")
+        != "shaders/lighting/ambient_ibl_pass_runtime.hlsl"
+        or ambient.get("resource_delta")
+        != {
+            "kind": "Texture2D",
+            "bind_point": 13,
+            "value_type": "float",
+        }
+        or ambient.get("variants")
+        != [{"id": "ambient-runtime", "defines": []}]
+        or ambient.get("scenario_buckets")
+        != ["combined", "diffuse", "reflection"]
+        or ambient.get("output_buckets") != ["color"]
+    ):
+        raise StableFailure("feature_contracts_schema", "ambient runtime")
+    ambient_mutation = ambient.get("mutation")
+    if (
+        not isinstance(ambient_mutation, dict)
+        or ambient_mutation.get("id") != "ambient-wetness-load-zero"
+        or ambient_mutation.get("class") != "feature-neutering"
+        or ambient_mutation.get("expected_failed_property")
+        != "active_locality"
+        or ambient_mutation.get("old")
+        != "float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;"
+        or ambient_mutation.get("new") != "float wetness = 0.0;"
+    ):
+        raise StableFailure(
+            "feature_contracts_schema", "ambient mutation"
+        )
     fixtures = feature.get("fixtures")
     if fixtures != [
         {"id": "adversarial", "wetness_format": "R32_FLOAT"},
@@ -462,6 +496,20 @@ def validate_additive_features(features: Any) -> None:
         or mutation.get("new") != "float wetness = 0.0;"
     ):
         raise StableFailure("feature_contracts_schema", "mutation")
+
+
+def _feature_target_contract(
+    feature_contract: dict[str, Any], target: str
+) -> dict[str, Any]:
+    if target == "directional":
+        contract = dict(feature_contract)
+    elif target == "ambient-runtime":
+        contract = dict(feature_contract)
+        contract.update(feature_contract["ambient_runtime"])
+    else:
+        raise StableFailure("feature_contracts_schema", "unknown target")
+    contract["target"] = target
+    return contract
 
 
 def _replace_exact(text: str, old: str, new: str, transform: str) -> str:
@@ -1162,6 +1210,573 @@ def _feature_failure_record(
     )
 
 
+def _validate_ambient_feature_measurement(
+    measurement: Any,
+    fixture: str,
+    feature_contract: dict[str, Any],
+    width: int,
+    height: int,
+    expected_source_sha256: str,
+) -> list[OrderedDict[str, str]]:
+    failures: list[OrderedDict[str, str]] = []
+    target_contract = _feature_target_contract(
+        feature_contract, "ambient-runtime"
+    )
+
+    def fail(detail: str) -> None:
+        failures.append(
+            _feature_failure_record(
+                "feature_measurement_protocol", detail
+            )
+        )
+
+    def number(value: Any) -> bool:
+        return (
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+        )
+
+    def close(left: Any, right: Any, tolerance: float = 1.0e-9) -> bool:
+        return (
+            number(left)
+            and number(right)
+            and math.isclose(
+                float(left),
+                float(right),
+                rel_tol=tolerance,
+                abs_tol=tolerance,
+            )
+        )
+
+    if (
+        not isinstance(measurement, dict)
+        or measurement.get("schema") != FEATURE_MEASUREMENT_SCHEMA
+        or measurement.get("schema_version") != 1
+    ):
+        fail("schema")
+        return failures
+    expected_scalars = {
+        "harness_version": HARNESS_VERSION,
+        "source_sha256": expected_source_sha256,
+        "evidence_class": "additive-feature",
+        "comparison": "reconstructed-stock-vs-reconstructed-feature",
+        "native_bytecode_used": False,
+        "target": "ambient-runtime",
+        "profile": target_contract["profile"],
+        "fixture": fixture,
+        "width": width,
+        "height": height,
+        "measurement_protocol": feature_contract["measurement_protocol"],
+        "wetness_format": next(
+            item["wetness_format"]
+            for item in feature_contract["fixtures"]
+            if item["id"] == fixture
+        ),
+    }
+    for name, expected in expected_scalars.items():
+        if measurement.get(name) != expected:
+            fail(name)
+    raw_harness_failures = measurement.get("failures")
+    if raw_harness_failures:
+        if (
+            not isinstance(raw_harness_failures, list)
+            or any(
+                not isinstance(item, dict)
+                or item.get("schema") != FEATURE_MEASUREMENT_SCHEMA
+                or item.get("schema_version") != 1
+                or item.get("evidence_class") != "additive-feature"
+                or item.get("comparison")
+                != "reconstructed-stock-vs-reconstructed-feature"
+                or item.get("native_bytecode_used") is not False
+                or not isinstance(item.get("code"), str)
+                or not isinstance(item.get("detail"), str)
+                for item in raw_harness_failures
+            )
+        ):
+            fail("failure_receipt")
+        else:
+            for item in raw_harness_failures:
+                failures.append(
+                    _feature_failure_record(item["code"], item["detail"])
+                )
+        if measurement.get("verdict") != "UNPROVEN":
+            fail("failure_verdict")
+        if _has_absolute_path(measurement):
+            fail("absolute_path")
+        return failures
+    if raw_harness_failures is not None and raw_harness_failures != []:
+        fail("failures")
+
+    if measurement.get("measurement_format") != "R32G32B32A32_FLOAT":
+        fail("measurement_format")
+    formats = measurement.get("formats")
+    if not isinstance(formats, list) or not formats:
+        fail("formats")
+    else:
+        wetness_formats = [
+            item
+            for item in formats
+            if isinstance(item, dict) and item.get("bind_point") == 13
+        ]
+        if (
+            len(wetness_formats) != 1
+            or wetness_formats[0].get("dimension") != "texture2d"
+            or wetness_formats[0].get("resource_format")
+            != expected_scalars["wetness_format"]
+            or wetness_formats[0].get("srv_format")
+            != expected_scalars["wetness_format"]
+        ):
+            fail("wetness_format_record")
+    environment = measurement.get("execution_environment")
+    if (
+        not isinstance(environment, dict)
+        or environment.get("driver_type") != "WARP"
+        or environment.get("feature_level") != "11_0"
+        or environment.get("native_bytecode_used") is not False
+    ):
+        fail("execution_environment")
+    seeds = measurement.get("seeds")
+    if (
+        not isinstance(seeds, list)
+        or len(seeds) != 3
+        or any(not isinstance(seed, int) for seed in seeds)
+    ):
+        fail("seeds")
+    generated = measurement.get("generated_inputs_sha256")
+    if (
+        not isinstance(generated, str)
+        or re.fullmatch(r"[0-9a-f]{64}", generated) is None
+    ):
+        fail("generated_inputs_sha256")
+
+    expected_mask_ids = [
+        "active-pattern",
+        "level-0",
+        "level-1",
+        "level-2",
+        "level-3",
+        "level-4",
+        "neutral-zero",
+    ]
+    expected_mask_payloads = _expected_wetness_mask_payloads(
+        fixture,
+        width,
+        height,
+        feature_contract["monotonic_levels"],
+    )
+    expected_bucket_evidence = _wetness_bucket_evidence_from_payload(
+        fixture, expected_mask_payloads["active-pattern"]
+    )
+    hashes = measurement.get("hashes")
+    mask_records: dict[str, list[dict[str, Any]]] = {}
+    if not isinstance(hashes, dict):
+        fail("hashes")
+    else:
+        for name in ("uploaded_masks", "readback_masks"):
+            records = hashes.get(name)
+            if (
+                not isinstance(records, list)
+                or any(not isinstance(item, dict) for item in records)
+            ):
+                fail(name)
+                continue
+            if [item.get("id") for item in records] != expected_mask_ids:
+                fail(f"{name}_order")
+            for item in records:
+                payload = expected_mask_payloads.get(item.get("id"))
+                if (
+                    payload is None
+                    or item.get("sha256")
+                    != hashlib.sha256(payload or b"").hexdigest()
+                    or item.get("size") != len(payload or b"")
+                ):
+                    fail(f"{name}_record")
+                    break
+            mask_records[name] = records
+        uploaded = mask_records.get("uploaded_masks")
+        readback = mask_records.get("readback_masks")
+        if uploaded is not None and readback is not None:
+            if uploaded != readback:
+                fail("mask_hash_pair")
+
+    contract_delta = measurement.get("contract_delta")
+    if (
+        not isinstance(contract_delta, dict)
+        or contract_delta.get("stock_to_feature")
+        != "only-texture2d-t13-added"
+        or contract_delta.get(
+            "mutation_t13_optimization_away_allowed"
+        )
+        is not True
+        or contract_delta.get("verdict") != "PASS"
+    ):
+        fail("contract_delta")
+    if measurement.get("variants") != target_contract["variants"]:
+        fail("variants")
+
+    properties = measurement.get("properties")
+    monotonicity: Any = None
+    if not isinstance(properties, dict):
+        fail("properties")
+    else:
+        neutral = properties.get("neutral_identity")
+        if (
+            not isinstance(neutral, dict)
+            or neutral.get("tolerance_absolute") != 0
+            or neutral.get("tolerance_relative") != 0
+            or neutral.get("comparisons") != 3
+            or neutral.get("violations") != []
+            or neutral.get("verdict") != "PASS"
+        ):
+            fail("property:neutral_identity")
+        locality = properties.get("active_locality")
+        if (
+            not isinstance(locality, dict)
+            or locality.get("zero_tolerance") is not True
+            or locality.get("bucket_basis")
+            != (
+                "t13 GPU readback after fixture quantization; "
+                "scenario from controlled ambient inputs"
+            )
+            or locality.get("violations") != []
+            or locality.get("verdict") != "PASS"
+        ):
+            fail("property:active_locality")
+        elif locality.get("pattern") != {
+            "exact_zero": True,
+            "exact_one": True,
+            "smooth_strict_partial_ramp": True,
+            "isolated_full_patch_with_zero_moat": True,
+        }:
+            fail("active_locality:pattern")
+        magnitude = properties.get("magnitude")
+        if (
+            not isinstance(magnitude, dict)
+            or magnitude.get("rgb_only") is not True
+            or magnitude.get("invalid_denominator_buckets") != 0
+            or magnitude.get("reflection_probe")
+            != {
+                "scenario": "reflection",
+                "mask": "mask.full",
+                "output": "color",
+            }
+            or magnitude.get("verdict") != "PASS"
+        ):
+            fail("property:magnitude")
+
+        requested_levels = [
+            float(value) for value in feature_contract["monotonic_levels"]
+        ]
+        uploaded_levels = [
+            (
+                math.floor(value * 255.0 + 0.5) / 255.0
+                if fixture == "native"
+                else value
+            )
+            for value in requested_levels
+        ]
+        monotonicity = properties.get("monotonicity")
+        series = (
+            monotonicity.get("series")
+            if isinstance(monotonicity, dict)
+            else None
+        )
+        if (
+            not isinstance(monotonicity, dict)
+            or monotonicity.get("violations") != 0
+            or monotonicity.get("verdict") != "PASS"
+            or not isinstance(series, list)
+            or [item.get("scenario") for item in series if isinstance(item, dict)]
+            != target_contract["scenario_buckets"]
+        ):
+            fail("property:monotonicity")
+        elif len(series) == len(target_contract["scenario_buckets"]):
+            for item in series:
+                levels = item.get("levels")
+                if (
+                    item.get("violations") != 0
+                    or item.get("verdict") != "PASS"
+                    or not isinstance(levels, list)
+                    or len(levels) != len(requested_levels)
+                ):
+                    fail("monotonicity:series")
+                    continue
+                previous = -1.0
+                for index, level in enumerate(levels):
+                    energy = (
+                        level.get("delta_energy")
+                        if isinstance(level, dict)
+                        else None
+                    )
+                    if (
+                        not isinstance(level, dict)
+                        or not close(
+                            level.get("requested"),
+                            requested_levels[index],
+                        )
+                        or not close(
+                            level.get("uploaded"),
+                            uploaded_levels[index],
+                            1.0e-7,
+                        )
+                        or not number(energy)
+                        or energy < 0
+                        or energy + 1.0e-12 < previous
+                        or (index == 0 and not close(energy, 0.0))
+                    ):
+                        fail("monotonicity:levels")
+                        break
+                    previous = float(energy)
+        mutation = properties.get("mutation_sensitivity")
+        if (
+            not isinstance(mutation, dict)
+            or mutation.get("id")
+            != target_contract["mutation"]["id"]
+            or mutation.get("expected_failed_property")
+            != target_contract["mutation"]["expected_failed_property"]
+            or mutation.get("observed_failed_properties")
+            != ["active_locality"]
+            or mutation.get("neutral_identity") != "PASS"
+            or mutation.get("active_locality") != "FAIL"
+            or mutation.get("verdict") != "CAUGHT"
+        ):
+            fail("property:mutation_sensitivity")
+
+    buckets = measurement.get("cross_buckets")
+    expected_keys = [
+        (mask, scenario)
+        for scenario in target_contract["scenario_buckets"]
+        for mask in feature_contract["mask_buckets"]
+    ]
+    observed_keys: list[tuple[str, str]] = []
+    bucket_by_key: dict[tuple[str, str], dict[str, Any]] = {}
+    populations: dict[str, set[int]] = {
+        name: set() for name in feature_contract["mask_buckets"]
+    }
+    ranges: dict[str, set[tuple[float, float]]] = {
+        name: set() for name in feature_contract["mask_buckets"]
+    }
+    if not isinstance(buckets, list):
+        fail("cross_buckets")
+    else:
+        for bucket in buckets:
+            if not isinstance(bucket, dict):
+                fail("cross_bucket")
+                continue
+            key = (str(bucket.get("mask")), str(bucket.get("scenario")))
+            observed_keys.append(key)
+            bucket_by_key[key] = bucket
+            population = bucket.get("population")
+            evidence = expected_bucket_evidence.get(key[0])
+            if (
+                bucket.get("fixture") != fixture
+                or not isinstance(population, int)
+                or isinstance(population, bool)
+                or population < feature_contract["minimum_bucket_population"]
+                or population > width * height
+                or evidence is None
+                or population != evidence["population"]
+            ):
+                fail("cross_bucket_population")
+                population = 0
+            if key[0] in populations and population:
+                populations[key[0]].add(population)
+            post_upload = bucket.get("post_upload")
+            if (
+                not isinstance(post_upload, dict)
+                or not number(post_upload.get("minimum"))
+                or not number(post_upload.get("maximum"))
+                or post_upload["minimum"] > post_upload["maximum"]
+            ):
+                fail("post_upload")
+            elif evidence is not None:
+                minimum = float(post_upload["minimum"])
+                maximum = float(post_upload["maximum"])
+                if (
+                    not close(minimum, evidence["minimum"], 1.0e-7)
+                    or not close(maximum, evidence["maximum"], 1.0e-7)
+                ):
+                    fail("post_upload_expected_range")
+                if key[0] in ranges:
+                    ranges[key[0]].add((minimum, maximum))
+
+            output = bucket.get("output")
+            distribution = (
+                output.get("absolute_delta")
+                if isinstance(output, dict)
+                else None
+            )
+            signed_distribution = (
+                output.get("signed_delta")
+                if isinstance(output, dict)
+                else None
+            )
+            numeric_fields = (
+                "population",
+                "changed_pixels",
+                "changed_channels",
+                "stock_energy",
+                "delta_energy",
+                "denominator_threshold",
+                "delta_fraction_of_stock",
+            )
+            if (
+                not isinstance(output, dict)
+                or output.get("name") != "color"
+                or any(
+                    not number(output.get(name)) or output[name] < 0
+                    for name in numeric_fields
+                )
+                or not isinstance(output.get("population"), int)
+                or not isinstance(output.get("changed_pixels"), int)
+                or not isinstance(output.get("changed_channels"), int)
+                or output["population"] != population
+                or output["changed_pixels"] > population
+                or output["changed_channels"] > population * 3
+                or output.get("energy_verdict") != "PROVEN"
+                or not isinstance(distribution, dict)
+                or any(
+                    not number(distribution.get(name))
+                    or distribution[name] < 0
+                    for name in ("min", "mean", "p50", "p95", "p99", "max")
+                )
+                or not isinstance(signed_distribution, dict)
+                or any(
+                    not number(signed_distribution.get(name))
+                    for name in ("min", "mean", "p05", "p50", "p95", "max")
+                )
+            ):
+                fail("output_stats")
+                continue
+            ordered = [
+                distribution["min"],
+                distribution["p50"],
+                distribution["p95"],
+                distribution["p99"],
+                distribution["max"],
+            ]
+            if (
+                ordered != sorted(ordered)
+                or not (
+                    distribution["min"]
+                    <= distribution["mean"]
+                    <= distribution["max"]
+                )
+            ):
+                fail("output_distribution_order")
+            signed_ordered = [
+                signed_distribution["min"],
+                signed_distribution["p05"],
+                signed_distribution["p50"],
+                signed_distribution["p95"],
+                signed_distribution["max"],
+            ]
+            if (
+                signed_ordered != sorted(signed_ordered)
+                or not (
+                    signed_distribution["min"]
+                    <= signed_distribution["mean"]
+                    <= signed_distribution["max"]
+                )
+            ):
+                fail("output_signed_distribution_order")
+            channel_count = population * 3
+            if not close(
+                distribution["mean"] * channel_count,
+                output["delta_energy"],
+                1.0e-8,
+            ):
+                fail("output_mean_energy")
+            expected_threshold = max(1.0e-12, population * 3.0e-12)
+            if (
+                output["stock_energy"] <= output["denominator_threshold"]
+                or not close(
+                    output["denominator_threshold"],
+                    expected_threshold,
+                    1.0e-12,
+                )
+                or not close(
+                    output["delta_fraction_of_stock"],
+                    output["delta_energy"] / output["stock_energy"],
+                    1.0e-8,
+                )
+            ):
+                fail("output_energy_fraction")
+            if key[0] == "mask.zero":
+                if (
+                    output["changed_pixels"] != 0
+                    or output["changed_channels"] != 0
+                    or output["delta_energy"] != 0
+                    or output["delta_fraction_of_stock"] != 0
+                    or any(value != 0 for value in distribution.values())
+                    or any(
+                        value != 0
+                        for value in signed_distribution.values()
+                    )
+                ):
+                    fail("output_expected_zero")
+            elif (
+                output["changed_pixels"] != population
+                or output["changed_channels"] < population
+                or output["delta_energy"] <= 0
+            ):
+                fail("output_active_locality")
+            if (
+                key[0] != "mask.zero"
+                and key[1] == "diffuse"
+                and signed_distribution["max"] >= 0
+            ):
+                fail("output_diffuse_direction")
+            if (
+                key[0] != "mask.zero"
+                and key[1] == "reflection"
+                and signed_distribution["min"] <= 0
+            ):
+                fail("output_reflection_direction")
+        if observed_keys != expected_keys or len(buckets) != len(expected_keys):
+            fail("cross_bucket_matrix")
+        for mask in feature_contract["mask_buckets"]:
+            if len(populations[mask]) != 1 or len(ranges[mask]) != 1:
+                fail(f"cross_bucket_consistency:{mask}")
+        if isinstance(monotonicity, dict):
+            series = monotonicity.get("series")
+            if isinstance(series, list):
+                for item in series:
+                    if not isinstance(item, dict):
+                        continue
+                    levels = item.get("levels")
+                    full = bucket_by_key.get(
+                        ("mask.full", str(item.get("scenario")))
+                    )
+                    if (
+                        not isinstance(levels, list)
+                        or not levels
+                        or not isinstance(levels[-1], dict)
+                        or full is None
+                        or not isinstance(full.get("output"), dict)
+                        or not number(levels[-1].get("delta_energy"))
+                        or not number(full["output"].get("delta_energy"))
+                        or levels[-1]["delta_energy"]
+                        + 1.0e-8
+                        < full["output"]["delta_energy"]
+                    ):
+                        fail("monotonicity:cross_evidence")
+
+    reflection = bucket_by_key.get(("mask.full", "reflection"))
+    if (
+        not isinstance(reflection, dict)
+        or not isinstance(reflection.get("output"), dict)
+        or reflection["output"].get("delta_energy", 0) <= 0
+    ):
+        fail("magnitude:reflection_probe")
+    if measurement.get("verdict") != "PASS":
+        fail("verdict")
+    if _has_absolute_path(measurement):
+        fail("absolute_path")
+    return failures
+
+
 def validate_feature_measurement(
     measurement: Any,
     fixture: str,
@@ -1170,6 +1785,18 @@ def validate_feature_measurement(
     height: int,
     expected_source_sha256: str,
 ) -> list[OrderedDict[str, str]]:
+    if (
+        isinstance(measurement, dict)
+        and measurement.get("target") == "ambient-runtime"
+    ):
+        return _validate_ambient_feature_measurement(
+            measurement,
+            fixture,
+            feature_contract,
+            width,
+            height,
+            expected_source_sha256,
+        )
     failures: list[OrderedDict[str, str]] = []
 
     def fail(detail: str) -> None:
@@ -1211,6 +1838,7 @@ def validate_feature_measurement(
         "evidence_class": "additive-feature",
         "comparison": "reconstructed-stock-vs-reconstructed-feature",
         "native_bytecode_used": False,
+        "target": "directional",
         "profile": feature_contract["profile"],
         "fixture": fixture,
         "width": width,
@@ -1985,6 +2613,57 @@ def _run_feature_harness(
     return measurement, process.returncode, human
 
 
+def _run_ambient_feature_harness(
+    executable: str,
+    artifacts: dict[str, str],
+    fixture: str,
+    minimum_population: int,
+    seed_base: int,
+    width: int,
+    height: int,
+    temporary_directory: str,
+    verbose: bool,
+) -> tuple[dict[str, Any] | None, int, str]:
+    measurement_path = os.path.join(
+        temporary_directory, f"wetness-ambient-{fixture}.json"
+    )
+    command = [
+        executable,
+        artifacts["stock"],
+        artifacts["feature"],
+        "--wetness-feature",
+        "--wetness-target",
+        "ambient-runtime",
+        "--mutant",
+        artifacts["mutant"],
+        "--fixture",
+        fixture,
+        "--seed-base",
+        str(seed_base),
+        "--width",
+        str(width),
+        "--height",
+        str(height),
+        "--minimum-bucket-population",
+        str(minimum_population),
+        "--measurement-json",
+        measurement_path,
+    ]
+    if verbose:
+        command.append("--verbose")
+    process = subprocess.run(command, capture_output=True, text=True)
+    human = (process.stdout or "") + (process.stderr or "")
+    if not os.path.isfile(measurement_path):
+        return None, process.returncode, human
+    try:
+        measurement = _load_json(
+            measurement_path, "feature_measurement_protocol"
+        )
+    except StableFailure:
+        return None, process.returncode, human
+    return measurement, process.returncode, human
+
+
 def _entry_maps(
     manifest: dict[str, Any], contracts: dict[str, Any]
 ) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
@@ -2211,6 +2890,7 @@ def _feature_property_summary(
         fixture_verdicts.append(
             OrderedDict(
                 (
+                    ("target", str(measurement.get("target", "unknown"))),
                     ("fixture", str(measurement.get("fixture", "unknown"))),
                     ("verdict", property_verdict),
                 )
@@ -2278,23 +2958,43 @@ def run_additive_feature(
     if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", compiler_version) is None:
         raise StableFailure("compiler_identity", "fxc version is unavailable")
     compiler_banner = _compiler_banner(fxc)
-    source_label = feature["source"]
-    source_path = os.path.join(REPO_ROOT, source_label.replace("/", os.sep))
-    source_closure, source_captures = _capture_hlsl_closure(source_path)
-    source_capture = next(
+    target_contracts = OrderedDict(
         (
-            capture
-            for capture in source_captures
-            if capture["label"] == source_label
-        ),
-        None,
+            (
+                "directional",
+                _feature_target_contract(feature, "directional"),
+            ),
+            (
+                "ambient-runtime",
+                _feature_target_contract(feature, "ambient-runtime"),
+            ),
+        )
     )
-    if source_capture is None:
-        raise StableFailure("feature_source_closure", source_label)
-    original_bytes = source_capture["data"]
-    original = original_bytes.decode("utf-8-sig")
-    mutant = build_additive_feature_mutant(original, feature)
-    mutant_bytes = mutant.encode("utf-8")
+    source_closures: dict[str, OrderedDict[str, Any]] = {}
+    source_captures_by_target: dict[str, list[dict[str, Any]]] = {}
+    mutant_bytes_by_target: dict[str, bytes] = {}
+    for target, target_contract in target_contracts.items():
+        source_label = target_contract["source"]
+        source_path = os.path.join(
+            REPO_ROOT, source_label.replace("/", os.sep)
+        )
+        source_closure, source_captures = _capture_hlsl_closure(source_path)
+        source_capture = next(
+            (
+                capture
+                for capture in source_captures
+                if capture["label"] == source_label
+            ),
+            None,
+        )
+        if source_capture is None:
+            raise StableFailure("feature_source_closure", source_label)
+        source_closures[target] = source_closure
+        source_captures_by_target[target] = source_captures
+        mutant_bytes_by_target[target] = build_additive_feature_mutant(
+            source_capture["data"].decode("utf-8-sig"),
+            target_contract,
+        ).encode("utf-8")
 
     live_captures = [
         contracts_capture,
@@ -2302,13 +3002,17 @@ def run_additive_feature(
         harness_source_capture,
         harness_executable_capture,
         compiler_capture,
-        *source_captures,
+        *[
+            capture
+            for captures in source_captures_by_target.values()
+            for capture in captures
+        ],
     ]
     harness_source = harness_source_capture["artifact"]
     harness_self_test = _run_harness_self_test(
         args.exe, harness_source["sha256"]
     )
-    artifact_paths: dict[str, dict[str, str]] = {}
+    artifact_paths: dict[str, dict[str, dict[str, str]]] = {}
     variant_records: list[OrderedDict[str, Any]] = []
     measurements: list[dict[str, Any]] = []
     failures: list[OrderedDict[str, str]] = []
@@ -2317,187 +3021,190 @@ def run_additive_feature(
     with tempfile.TemporaryDirectory(
         prefix="fo4cs-wetness-feature-"
     ) as temporary:
-        snapshot_root = os.path.join(temporary, "source-snapshot")
-        snapshot_source = _write_hlsl_snapshot(
-            snapshot_root, source_captures, source_label
-        )
-        for capture in source_captures:
-            snapshot_path = os.path.join(
-                snapshot_root, *str(capture["label"]).split("/")
+        snapshot_sources: dict[str, str] = {}
+        mutant_sources: dict[str, str] = {}
+        mutation_labels: dict[str, str] = {}
+        for target, target_contract in target_contracts.items():
+            source_label = target_contract["source"]
+            source_captures = source_captures_by_target[target]
+            snapshot_root = os.path.join(
+                temporary, "source-snapshot", target
             )
-            snapshot_capture = _capture_file(
-                snapshot_path, f"snapshot/{capture['label']}"
+            snapshot_sources[target] = _write_hlsl_snapshot(
+                snapshot_root, source_captures, source_label
             )
-            if snapshot_capture["data"] != capture["data"]:
-                raise StableFailure(
-                    "feature_source_snapshot", str(capture["label"])
+            for capture in source_captures:
+                snapshot_path = os.path.join(
+                    snapshot_root, *str(capture["label"]).split("/")
                 )
-            generated_captures.append(snapshot_capture)
-        mutant_source = os.path.join(
-            temporary, "generated", "wetness-load-zero.hlsl"
-        )
-        Path(mutant_source).parent.mkdir(parents=True, exist_ok=True)
-        Path(mutant_source).write_bytes(mutant_bytes)
-        generated_captures.append(
-            _capture_file(
-                mutant_source, "generated/wetness-load-zero.hlsl"
-            )
-        )
-        for variant in feature["variants"]:
-            variant_id = variant["id"]
-            stock_defines = list(variant["defines"])
-            feature_defines = sorted([*stock_defines, "WETNESS_EFFECTS=1"])
-            artifact_paths[variant_id] = {}
-            artifact_records: list[
-                tuple[str, list[str], str, OrderedDict[str, Any]]
-            ] = []
-            for kind, compile_source, defines in (
-                ("stock", snapshot_source, stock_defines),
-                ("feature", snapshot_source, feature_defines),
-                ("mutant", mutant_source, feature_defines),
-            ):
-                output_name = f"{variant_id}-{kind}.dxbc"
-                output = os.path.join(temporary, output_name)
-                compiled, log = _compile_shader(
-                    fxc,
-                    compile_source,
-                    os.path.dirname(snapshot_source),
-                    defines,
-                    output,
+                snapshot_capture = _capture_file(
+                    snapshot_path,
+                    f"snapshot/{target}/{capture['label']}",
                 )
-                if not compiled:
-                    if log.strip():
-                        print(log.rstrip(), file=sys.stderr)
+                if snapshot_capture["data"] != capture["data"]:
                     raise StableFailure(
-                        "feature_compile_failed", f"{variant_id}:{kind}"
+                        "feature_source_snapshot",
+                        f"{target}:{capture['label']}",
                     )
-                artifact_paths[variant_id][kind] = output
-                artifact_capture = _capture_file(
-                    output, f"generated/{output_name}"
+                generated_captures.append(snapshot_capture)
+            mutation_id = target_contract["mutation"]["id"]
+            mutation_label = f"generated/{target}/{mutation_id}.hlsl"
+            mutant_source = os.path.join(
+                temporary, *mutation_label.split("/")
+            )
+            Path(mutant_source).parent.mkdir(parents=True, exist_ok=True)
+            Path(mutant_source).write_bytes(mutant_bytes_by_target[target])
+            generated_captures.append(
+                _capture_file(mutant_source, mutation_label)
+            )
+            mutant_sources[target] = mutant_source
+            mutation_labels[target] = mutation_label
+
+        for target, target_contract in target_contracts.items():
+            source_label = target_contract["source"]
+            snapshot_source = snapshot_sources[target]
+            mutant_source = mutant_sources[target]
+            artifact_paths[target] = {}
+            for variant in target_contract["variants"]:
+                variant_id = variant["id"]
+                stock_defines = list(variant["defines"])
+                feature_defines = sorted(
+                    [*stock_defines, "WETNESS_EFFECTS=1"]
                 )
-                generated_captures.append(artifact_capture)
-                artifact_records.append(
-                    (
-                        kind,
+                artifact_paths[target][variant_id] = {}
+                artifact_records: dict[
+                    str, tuple[list[str], str, OrderedDict[str, Any]]
+                ] = {}
+                for kind, compile_source, defines in (
+                    ("stock", snapshot_source, stock_defines),
+                    ("feature", snapshot_source, feature_defines),
+                    ("mutant", mutant_source, feature_defines),
+                ):
+                    output_name = (
+                        f"{target}-{variant_id}-{kind}.dxbc"
+                    )
+                    output = os.path.join(temporary, output_name)
+                    compiled, log = _compile_shader(
+                        fxc,
+                        compile_source,
+                        os.path.dirname(snapshot_source),
+                        defines,
+                        output,
+                    )
+                    if not compiled:
+                        if log.strip():
+                            print(log.rstrip(), file=sys.stderr)
+                        raise StableFailure(
+                            "feature_compile_failed",
+                            f"{target}:{variant_id}:{kind}",
+                        )
+                    artifact_paths[target][variant_id][kind] = output
+                    artifact_capture = _capture_file(
+                        output, f"generated/{output_name}"
+                    )
+                    generated_captures.append(artifact_capture)
+                    artifact_records[kind] = (
                         defines,
                         output_name,
                         artifact_capture["artifact"],
                     )
-                )
-            variant_records.append(
-                OrderedDict(
-                    (
-                        ("id", variant_id),
-                        ("ibl", variant["ibl"]),
-                        (
-                            "stock",
-                            OrderedDict(
-                                (
-                                    ("defines", stock_defines),
-                                    (
-                                        "compiler_flags",
-                                        _feature_compiler_flags(
-                                            source_label,
-                                            stock_defines,
-                                            artifact_records[0][2],
-                                        ),
-                                    ),
-                                    (
-                                        "dxbc",
-                                        artifact_records[0][3],
-                                    ),
-                                )
-                            ),
-                        ),
-                        (
-                            "feature",
-                            OrderedDict(
-                                (
-                                    ("defines", feature_defines),
-                                    (
-                                        "compiler_flags",
-                                        _feature_compiler_flags(
-                                            source_label,
-                                            feature_defines,
-                                            artifact_records[1][2],
-                                        ),
-                                    ),
-                                    (
-                                        "dxbc",
-                                        artifact_records[1][3],
-                                    ),
-                                )
-                            ),
-                        ),
-                        (
-                            "mutant",
-                            OrderedDict(
-                                (
-                                    ("defines", feature_defines),
-                                    (
-                                        "compiler_flags",
-                                        _feature_compiler_flags(
-                                            "generated/wetness-load-zero.hlsl",
-                                            feature_defines,
-                                            artifact_records[2][2],
-                                        ),
-                                    ),
-                                    (
-                                        "dxbc",
-                                        artifact_records[2][3],
-                                    ),
-                                )
-                            ),
-                        ),
+                record_items: list[tuple[str, Any]] = [
+                    ("target", target),
+                    ("id", variant_id),
+                ]
+                if "ibl" in variant:
+                    record_items.append(("ibl", variant["ibl"]))
+                for kind in ("stock", "feature", "mutant"):
+                    defines, output_name, artifact = artifact_records[kind]
+                    compile_label = (
+                        mutation_labels[target]
+                        if kind == "mutant"
+                        else source_label
                     )
-                )
-            )
+                    record_items.append(
+                        (
+                            kind,
+                            OrderedDict(
+                                (
+                                    ("defines", defines),
+                                    (
+                                        "compiler_flags",
+                                        _feature_compiler_flags(
+                                            compile_label,
+                                            defines,
+                                            output_name,
+                                        ),
+                                    ),
+                                    ("dxbc", artifact),
+                                )
+                            ),
+                        )
+                    )
+                variant_records.append(OrderedDict(record_items))
 
-        for fixture in FIXTURE_ORDER:
-            measurement, return_code, human = _run_feature_harness(
-                args.exe,
-                artifact_paths,
-                fixture,
-                feature["minimum_bucket_population"],
-                args.seed_base,
-                args.width,
-                args.height,
-                temporary,
-                args.verbose,
-            )
-            if args.verbose and human.strip():
-                for line in human.rstrip().splitlines():
-                    print(f"  {line}")
-            if measurement is None:
-                raise StableFailure(
-                    "feature_harness_runtime", f"{fixture}: no measurement"
-                )
-            validation = validate_feature_measurement(
-                measurement,
-                fixture,
-                feature,
-                args.width,
-                args.height,
-                harness_source["sha256"],
-            )
-            failures.extend(validation)
-            if return_code == 1:
-                failures.append(
-                    _feature_failure_record(
-                        "feature_property_failure", fixture
+        for target in target_contracts:
+            for fixture in FIXTURE_ORDER:
+                if target == "directional":
+                    measurement, return_code, human = _run_feature_harness(
+                        args.exe,
+                        artifact_paths[target],
+                        fixture,
+                        feature["minimum_bucket_population"],
+                        args.seed_base,
+                        args.width,
+                        args.height,
+                        temporary,
+                        args.verbose,
                     )
-                )
-            elif return_code != 0:
-                failures.append(
-                    _feature_failure_record(
-                        "feature_harness_runtime", fixture
+                else:
+                    measurement, return_code, human = (
+                        _run_ambient_feature_harness(
+                            args.exe,
+                            artifact_paths[target]["ambient-runtime"],
+                            fixture,
+                            feature["minimum_bucket_population"],
+                            args.seed_base,
+                            args.width,
+                            args.height,
+                            temporary,
+                            args.verbose,
+                        )
                     )
+                if args.verbose and human.strip():
+                    for line in human.rstrip().splitlines():
+                        print(f"  {line}")
+                detail = f"{target}:{fixture}"
+                if measurement is None:
+                    raise StableFailure(
+                        "feature_harness_runtime",
+                        f"{detail}: no measurement",
+                    )
+                validation = validate_feature_measurement(
+                    measurement,
+                    fixture,
+                    feature,
+                    args.width,
+                    args.height,
+                    harness_source["sha256"],
                 )
-            measurements.append(measurement)
-            print(
-                f"== WetnessEffects {fixture}: "
-                f"{measurement.get('verdict', 'UNPROVEN')} =="
-            )
+                failures.extend(validation)
+                if return_code == 1:
+                    failures.append(
+                        _feature_failure_record(
+                            "feature_property_failure", detail
+                        )
+                    )
+                elif return_code != 0:
+                    failures.append(
+                        _feature_failure_record(
+                            "feature_harness_runtime", detail
+                        )
+                    )
+                measurements.append(measurement)
+                print(
+                    f"== WetnessEffects {target} {fixture}: "
+                    f"{measurement.get('verdict', 'UNPROVEN')} =="
+                )
 
         stale_inputs = _verify_captured_files(
             [*live_captures, *generated_captures]
@@ -2506,8 +3213,19 @@ def run_additive_feature(
             failures.append(
                 _feature_failure_record("stale_input", label)
             )
-        variant_records.sort(key=lambda item: item["id"])
-        measurements.sort(key=lambda item: str(item.get("fixture", "unknown")))
+        variant_records.sort(
+            key=lambda item: (item["target"], item["id"])
+        )
+        target_order = {"directional": 0, "ambient-runtime": 1}
+        fixture_order = {
+            fixture: index for index, fixture in enumerate(FIXTURE_ORDER)
+        }
+        measurements.sort(
+            key=lambda item: (
+                target_order.get(str(item.get("target")), 99),
+                fixture_order.get(str(item.get("fixture")), 99),
+            )
+        )
         failures = sorted(
             {
                 json.dumps(item, sort_keys=True): item
@@ -2528,53 +3246,94 @@ def run_additive_feature(
             )
             for name in property_names
         )
-        mutation_fixtures: list[OrderedDict[str, Any]] = []
-        for measurement in measurements:
-            measurement_properties = measurement.get("properties")
-            mutation = (
-                measurement_properties.get("mutation_sensitivity")
-                if isinstance(measurement_properties, dict)
-                else None
-            )
-            mutation = mutation if isinstance(mutation, dict) else {}
-            mutation_fixtures.append(
+        mutation_targets: list[OrderedDict[str, Any]] = []
+        for target, target_contract in target_contracts.items():
+            mutation_fixtures: list[OrderedDict[str, Any]] = []
+            for measurement in measurements:
+                if measurement.get("target") != target:
+                    continue
+                measurement_properties = measurement.get("properties")
+                mutation = (
+                    measurement_properties.get("mutation_sensitivity")
+                    if isinstance(measurement_properties, dict)
+                    else None
+                )
+                mutation = mutation if isinstance(mutation, dict) else {}
+                mutation_fixtures.append(
+                    OrderedDict(
+                        (
+                            (
+                                "fixture",
+                                str(
+                                    measurement.get(
+                                        "fixture", "unknown"
+                                    )
+                                ),
+                            ),
+                            (
+                                "expected_failed_property",
+                                mutation.get(
+                                    "expected_failed_property"
+                                ),
+                            ),
+                            (
+                                "observed_failed_properties",
+                                mutation.get(
+                                    "observed_failed_properties", []
+                                ),
+                            ),
+                            (
+                                "verdict",
+                                mutation.get("verdict", "UNPROVEN"),
+                            ),
+                        )
+                    )
+                )
+            target_verdict = "CAUGHT"
+            if any(
+                item["verdict"] == "UNPROVEN"
+                for item in mutation_fixtures
+            ):
+                target_verdict = "UNPROVEN"
+            elif any(
+                item["verdict"] != "CAUGHT"
+                for item in mutation_fixtures
+            ):
+                target_verdict = "MISSED"
+            mutation_targets.append(
                 OrderedDict(
                     (
-                        (
-                            "fixture",
-                            str(measurement.get("fixture", "unknown")),
-                        ),
+                        ("target", target),
+                        ("id", target_contract["mutation"]["id"]),
                         (
                             "expected_failed_property",
-                            mutation.get("expected_failed_property"),
+                            target_contract["mutation"][
+                                "expected_failed_property"
+                            ],
                         ),
-                        (
-                            "observed_failed_properties",
-                            mutation.get("observed_failed_properties", []),
-                        ),
-                        ("verdict", mutation.get("verdict", "UNPROVEN")),
+                        ("fixtures", mutation_fixtures),
+                        ("verdict", target_verdict),
                     )
                 )
             )
-        mutation_verdict = "CAUGHT"
-        if any(
-            item["verdict"] == "UNPROVEN"
-            for item in mutation_fixtures
-        ):
-            mutation_verdict = "UNPROVEN"
-        elif any(
-            item["verdict"] != "CAUGHT"
-            for item in mutation_fixtures
-        ):
-            mutation_verdict = "MISSED"
+        mutation_verdict = (
+            "UNPROVEN"
+            if any(
+                item["verdict"] == "UNPROVEN"
+                for item in mutation_targets
+            )
+            else (
+                "CAUGHT"
+                if all(
+                    item["verdict"] == "CAUGHT"
+                    for item in mutation_targets
+                )
+                else "MISSED"
+            )
+        )
         properties["mutation_sensitivity"] = OrderedDict(
             (
-                ("id", feature["mutation"]["id"]),
-                (
-                    "expected_failed_property",
-                    feature["mutation"]["expected_failed_property"],
-                ),
-                ("fixtures", mutation_fixtures),
+                ("targets", mutation_targets),
                 ("verdict", mutation_verdict),
             )
         )
@@ -2625,10 +3384,11 @@ def run_additive_feature(
                     "profile",
                     OrderedDict(
                         (
-                            ("name", feature["profile"]),
+                            ("name", "wetness-deferred-lighting"),
                             (
                                 "claim",
-                                "WetnessEffects additive behavior only; "
+                                "Directional and ambient-runtime WetnessEffects "
+                                "additive behavior only; "
                                 "not game or native-bytecode parity",
                             ),
                         )
@@ -2692,28 +3452,50 @@ def run_additive_feature(
                             ),
                             (
                                 "stock_to_feature_delta",
-                                "only Texture2D t4 may be added",
+                                "only Texture2D t4 or t13 may be added "
+                                "for its declared target",
                             ),
                             (
                                 "mutation_exception",
-                                "t4 may optimize away only in mutation mode",
+                                "the declared wetness texture may optimize "
+                                "away only in mutation mode",
                             ),
                         )
                     ),
                 ),
-                ("source_closure", source_closure),
                 (
-                    "mutation_source",
-                    OrderedDict(
-                        (
-                            ("label", "generated/wetness-load-zero.hlsl"),
+                    "source_closures",
+                    [
+                        OrderedDict(
                             (
-                                "sha256",
-                                hashlib.sha256(mutant_bytes).hexdigest(),
-                            ),
-                            ("size", len(mutant_bytes)),
+                                ("target", target),
+                                ("closure", source_closures[target]),
+                            )
                         )
-                    ),
+                        for target in target_contracts
+                    ],
+                ),
+                (
+                    "mutation_sources",
+                    [
+                        OrderedDict(
+                            (
+                                ("target", target),
+                                ("label", mutation_labels[target]),
+                                (
+                                    "sha256",
+                                    hashlib.sha256(
+                                        mutant_bytes_by_target[target]
+                                    ).hexdigest(),
+                                ),
+                                (
+                                    "size",
+                                    len(mutant_bytes_by_target[target]),
+                                ),
+                            )
+                        )
+                        for target in target_contracts
+                    ],
                 ),
                 (
                     "compiler",
@@ -2767,33 +3549,38 @@ def _feature_driver_failure_report(
     safe_detail = code if _has_absolute_path(detail) else detail
     failure = _feature_failure_record(code, safe_detail)
     fixtures = []
-    for fixture, wetness_format in (
-        ("adversarial", "R32_FLOAT"),
-        ("native", "R8_UNORM"),
+    for target, profile in (
+        ("directional", "wetness-directional-lighting"),
+        ("ambient-runtime", "wetness-ambient-ibl-runtime"),
     ):
-        fixtures.append(
-            OrderedDict(
-                (
-                    ("schema", FEATURE_MEASUREMENT_SCHEMA),
-                    ("schema_version", 1),
-                    ("harness_version", HARNESS_VERSION),
-                    ("evidence_class", "additive-feature"),
+        for fixture, wetness_format in (
+            ("adversarial", "R32_FLOAT"),
+            ("native", "R8_UNORM"),
+        ):
+            fixtures.append(
+                OrderedDict(
                     (
-                        "comparison",
-                        "reconstructed-stock-vs-reconstructed-feature",
-                    ),
-                    ("native_bytecode_used", False),
-                    ("profile", "wetness-directional-lighting"),
-                    ("fixture", fixture),
-                    ("width", args.width),
-                    ("height", args.height),
-                    ("measurement_protocol", "wetness-warp-v1"),
-                    ("wetness_format", wetness_format),
-                    ("failures", [failure]),
-                    ("verdict", "UNPROVEN"),
+                        ("schema", FEATURE_MEASUREMENT_SCHEMA),
+                        ("schema_version", 1),
+                        ("harness_version", HARNESS_VERSION),
+                        ("evidence_class", "additive-feature"),
+                        (
+                            "comparison",
+                            "reconstructed-stock-vs-reconstructed-feature",
+                        ),
+                        ("native_bytecode_used", False),
+                        ("target", target),
+                        ("profile", profile),
+                        ("fixture", fixture),
+                        ("width", args.width),
+                        ("height", args.height),
+                        ("measurement_protocol", "wetness-warp-v2"),
+                        ("wetness_format", wetness_format),
+                        ("failures", [failure]),
+                        ("verdict", "UNPROVEN"),
+                    )
                 )
             )
-        )
     report = OrderedDict(
         (
             ("schema", FEATURE_RUN_SCHEMA),
@@ -2808,10 +3595,11 @@ def _feature_driver_failure_report(
                 "profile",
                 OrderedDict(
                     (
-                        ("name", "wetness-directional-lighting"),
+                        ("name", "wetness-deferred-lighting"),
                         (
                             "claim",
-                            "WetnessEffects additive behavior only; "
+                            "Directional and ambient-runtime WetnessEffects "
+                            "additive behavior only; "
                             "not game or native-bytecode parity",
                         ),
                     )

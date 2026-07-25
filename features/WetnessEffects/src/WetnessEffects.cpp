@@ -167,12 +167,8 @@ namespace cs::features
 		const bool directionalIblRegistered = registerWetnessReplacement(
 			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 			kMaskPSSlotDirectional);
-		// The reconstructed ambient_ibl_pass is interior-derived; swapping it in on
-		// exteriors diverges from the game's real ambient shader (metal-reflection +
-		// fog pop-in with camera angle, visible even at wetness=0). Gate the ambient
-		// injection off until that reconstruction is exterior-faithful (shared blocker
-		// with the SSR feature). Directional (sun) wetness is unaffected.
-		constexpr bool kInjectAmbientPass = false;
+		// Blob 3560 is the live exterior ambient reconstruction.
+		constexpr bool kInjectAmbientPass = true;
 		bool ambientRegistered = true;
 		if constexpr (kInjectAmbientPass) {
 			ambientRegistered = registerWetnessReplacement(

@@ -62,6 +62,9 @@ Texture2D<float4> g_tAmbientDiffuseB     : register(t11);
 // Frame 9219 binds the fullscreen draw's blurred SSLR source here. Blob 3560
 // samples it only inside the explicit material-5 blur branch.
 Texture2D<float4> g_tBlurredSslr         : register(t12);
+#ifdef WETNESS_EFFECTS
+Texture2D<float> g_tWetnessMask : register(t13);
+#endif
 Texture2D<float4> g_tLitScene            : register(t14);
 Texture2D<float4> g_tBlurDepthRef        : register(t15);
 
@@ -128,6 +131,9 @@ struct PS_OUTPUT
 PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
+#ifdef WETNESS_EFFECTS
+    float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;
+#endif
     float2 uv = input.position.xy * ScreenSize.xy;
 
     float3 shadingData =
@@ -250,8 +256,16 @@ PS_OUTPUT main(PS_INPUT input)
     float litAlpha = min(litScene.w * LitSceneAlpha.z, 1.0);
     float3 iblLitBlend = lerp(
         iblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
+#ifdef WETNESS_EFFECTS
+    ambientAccum *= lerp(1.0, 0.5, wetness);
+    float wetShine = lerp(1.0, 2.0, wetness);
+    float3 modulated =
+        ambientAccum +
+        wetShine * (glossSquaredScaled * glossFactor * iblLitBlend * ambientPair);
+#else
     float3 modulated =
         ambientAccum + glossSquaredScaled * glossFactor * iblLitBlend * ambientPair;
+#endif
     float ao = g_tSsao.Sample(g_sSsao, uv).x;
     float3 aoColor = ao * modulated;
 #ifdef SSGI

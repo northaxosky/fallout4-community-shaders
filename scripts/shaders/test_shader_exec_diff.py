@@ -180,6 +180,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             "evidence_class": "additive-feature",
             "comparison": "reconstructed-stock-vs-reconstructed-feature",
             "native_bytecode_used": False,
+            "target": "directional",
             "profile": feature["profile"],
             "fixture": fixture,
             "width": 16,
@@ -276,6 +277,254 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             "verdict": "PASS",
         }
 
+    @classmethod
+    def ambient_feature_measurement(cls, fixture):
+        feature = cls.contracts["additive_features"]["wetness-effects"]
+        ambient = feature["ambient_runtime"]
+        wetness_format = next(
+            item["wetness_format"]
+            for item in feature["fixtures"]
+            if item["id"] == fixture
+        )
+        requested_levels = feature["monotonic_levels"]
+        uploaded_levels = [
+            (
+                int(value * 255.0 + 0.5) / 255.0
+                if fixture == "native"
+                else value
+            )
+            for value in requested_levels
+        ]
+        mask_payloads = subject._expected_wetness_mask_payloads(
+            fixture, 16, 16, requested_levels
+        )
+        expected_buckets = subject._wetness_bucket_evidence_from_payload(
+            fixture, mask_payloads["active-pattern"]
+        )
+        mask_ids = [
+            "active-pattern",
+            "level-0",
+            "level-1",
+            "level-2",
+            "level-3",
+            "level-4",
+            "neutral-zero",
+        ]
+        mask_hashes = [
+            {
+                "id": mask_id,
+                "sha256": hashlib.sha256(
+                    mask_payloads[mask_id]
+                ).hexdigest(),
+                "size": len(mask_payloads[mask_id]),
+            }
+            for mask_id in mask_ids
+        ]
+        cross_buckets = []
+        for scenario in ambient["scenario_buckets"]:
+            for mask in feature["mask_buckets"]:
+                evidence = expected_buckets[mask]
+                population = evidence["population"]
+                zero_delta = mask == "mask.zero"
+                distribution = (
+                    {
+                        "min": 0.0,
+                        "mean": 0.0,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "p99": 0.0,
+                        "max": 0.0,
+                    }
+                    if zero_delta
+                    else {
+                        "min": 0.05,
+                        "mean": 0.1,
+                        "p50": 0.1,
+                        "p95": 0.15,
+                        "p99": 0.19,
+                        "max": 0.2,
+                    }
+                )
+                signed_distribution = (
+                    {
+                        "min": 0.0,
+                        "mean": 0.0,
+                        "p05": 0.0,
+                        "p50": 0.0,
+                        "p95": 0.0,
+                        "max": 0.0,
+                    }
+                    if zero_delta
+                    else (
+                        {
+                            "min": -0.2,
+                            "mean": -0.1,
+                            "p05": -0.19,
+                            "p50": -0.1,
+                            "p95": -0.05,
+                            "max": -0.05,
+                        }
+                        if scenario == "diffuse"
+                        else {
+                            "min": 0.05,
+                            "mean": 0.1,
+                            "p05": 0.05,
+                            "p50": 0.1,
+                            "p95": 0.15,
+                            "max": 0.2,
+                        }
+                    )
+                )
+                stock_energy = float(population * 3)
+                delta_energy = (
+                    0.0 if zero_delta else population * 3 * 0.1
+                )
+                cross_buckets.append(
+                    {
+                        "fixture": fixture,
+                        "mask": mask,
+                        "scenario": scenario,
+                        "population": population,
+                        "post_upload": {
+                            "minimum": evidence["minimum"],
+                            "maximum": evidence["maximum"],
+                        },
+                        "output": {
+                            "name": "color",
+                            "population": population,
+                            "changed_pixels": (
+                                0 if zero_delta else population
+                            ),
+                            "changed_channels": (
+                                0 if zero_delta else population * 3
+                            ),
+                            "absolute_delta": distribution,
+                            "signed_delta": signed_distribution,
+                            "stock_energy": stock_energy,
+                            "delta_energy": delta_energy,
+                            "denominator_threshold": max(
+                                1e-12, population * 3e-12
+                            ),
+                            "delta_fraction_of_stock": (
+                                delta_energy / stock_energy
+                            ),
+                            "energy_verdict": "PROVEN",
+                        },
+                    }
+                )
+        return {
+            "schema": subject.FEATURE_MEASUREMENT_SCHEMA,
+            "schema_version": 1,
+            "harness_version": subject.HARNESS_VERSION,
+            "source_sha256": cls.harness_source_sha256,
+            "evidence_class": "additive-feature",
+            "comparison": "reconstructed-stock-vs-reconstructed-feature",
+            "native_bytecode_used": False,
+            "target": "ambient-runtime",
+            "profile": ambient["profile"],
+            "fixture": fixture,
+            "width": 16,
+            "height": 16,
+            "execution_environment": {
+                "driver_type": "WARP",
+                "feature_level": "11_0",
+                "native_bytecode_used": False,
+            },
+            "measurement_protocol": feature["measurement_protocol"],
+            "wetness_format": wetness_format,
+            "measurement_format": "R32G32B32A32_FLOAT",
+            "formats": [
+                {
+                    "bind_point": 13,
+                    "dimension": "texture2d",
+                    "resource_format": wetness_format,
+                    "srv_format": wetness_format,
+                }
+            ],
+            "seeds": [1, 2, 3],
+            "generated_inputs_sha256": "0" * 64,
+            "hashes": {
+                "uploaded_masks": [dict(item) for item in mask_hashes],
+                "readback_masks": [dict(item) for item in mask_hashes],
+            },
+            "contract_delta": {
+                "stock_to_feature": "only-texture2d-t13-added",
+                "mutation_t13_optimization_away_allowed": True,
+                "verdict": "PASS",
+            },
+            "variants": ambient["variants"],
+            "properties": {
+                "neutral_identity": {
+                    "tolerance_absolute": 0,
+                    "tolerance_relative": 0,
+                    "comparisons": 3,
+                    "violations": [],
+                    "verdict": "PASS",
+                },
+                "active_locality": {
+                    "zero_tolerance": True,
+                    "bucket_basis": (
+                        "t13 GPU readback after fixture quantization; "
+                        "scenario from controlled ambient inputs"
+                    ),
+                    "pattern": {
+                        "exact_zero": True,
+                        "exact_one": True,
+                        "smooth_strict_partial_ramp": True,
+                        "isolated_full_patch_with_zero_moat": True,
+                    },
+                    "violations": [],
+                    "verdict": "PASS",
+                },
+                "magnitude": {
+                    "rgb_only": True,
+                    "invalid_denominator_buckets": 0,
+                    "reflection_probe": {
+                        "scenario": "reflection",
+                        "mask": "mask.full",
+                        "output": "color",
+                    },
+                    "verdict": "PASS",
+                },
+                "monotonicity": {
+                    "claim": (
+                        "absolute RGB delta is nondecreasing across "
+                        "uploaded levels"
+                    ),
+                    "series": [
+                        {
+                            "scenario": scenario,
+                            "levels": [
+                                {
+                                    "requested": requested,
+                                    "uploaded": uploaded,
+                                    "delta_energy": float(index * 25),
+                                }
+                                for index, (requested, uploaded) in enumerate(
+                                    zip(requested_levels, uploaded_levels)
+                                )
+                            ],
+                            "violations": 0,
+                            "verdict": "PASS",
+                        }
+                        for scenario in ambient["scenario_buckets"]
+                    ],
+                    "violations": 0,
+                    "verdict": "PASS",
+                },
+                "mutation_sensitivity": {
+                    "id": "ambient-wetness-load-zero",
+                    "expected_failed_property": "active_locality",
+                    "observed_failed_properties": ["active_locality"],
+                    "neutral_identity": "PASS",
+                    "active_locality": "FAIL",
+                    "verdict": "CAUGHT",
+                },
+            },
+            "cross_buckets": cross_buckets,
+            "verdict": "PASS",
+        }
+
     def test_contract_schema_and_predicates(self):
         subject.validate_contracts(self.contracts)
         self.assertEqual(["adversarial", "native"], self.contracts["fixtures"])
@@ -350,6 +599,16 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             ["directional", "directional-ibl"],
             [item["id"] for item in feature["variants"]],
         )
+        ambient = feature["ambient_runtime"]
+        self.assertEqual("ambient-runtime", ambient["id"])
+        self.assertEqual(
+            "shaders/lighting/ambient_ibl_pass_runtime.hlsl",
+            ambient["source"],
+        )
+        self.assertEqual(
+            [{"id": "ambient-runtime", "defines": []}],
+            ambient["variants"],
+        )
         self.assertEqual(
             ["adversarial", "native"],
             [item["id"] for item in feature["fixtures"]],
@@ -362,22 +621,26 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_additive_feature_mutation_is_exact_and_nonmutating(self):
         feature = self.contracts["additive_features"]["wetness-effects"]
-        source = os.path.join(subject.REPO_ROOT, feature["source"])
-        before = Path(source).read_bytes()
-        mutant = subject.build_additive_feature_mutant(
-            before.decode("utf-8-sig"), feature
-        )
-        self.assertEqual(1, mutant.count(feature["mutation"]["new"]))
-        self.assertNotIn(feature["mutation"]["old"], mutant)
-        self.assertEqual(before, Path(source).read_bytes())
-        with self.assertRaises(subject.StableFailure):
-            subject.build_additive_feature_mutant(
-                before.decode("utf-8-sig").replace(
-                    feature["mutation"]["old"],
-                    feature["mutation"]["old"] * 2,
-                ),
-                feature,
+        for target in ("directional", "ambient-runtime"):
+            contract = subject._feature_target_contract(feature, target)
+            source = os.path.join(subject.REPO_ROOT, contract["source"])
+            before = Path(source).read_bytes()
+            mutant = subject.build_additive_feature_mutant(
+                before.decode("utf-8-sig"), contract
             )
+            self.assertEqual(
+                1, mutant.count(contract["mutation"]["new"])
+            )
+            self.assertNotIn(contract["mutation"]["old"], mutant)
+            self.assertEqual(before, Path(source).read_bytes())
+            with self.assertRaises(subject.StableFailure):
+                subject.build_additive_feature_mutant(
+                    before.decode("utf-8-sig").replace(
+                        contract["mutation"]["old"],
+                        contract["mutation"]["old"] * 2,
+                    ),
+                    contract,
+                )
 
     def test_additive_feature_measurement_schema_and_matrix(self):
         feature = self.contracts["additive_features"]["wetness-effects"]
@@ -407,6 +670,139 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     for item in measurement["cross_buckets"]
                 )
             )
+            ambient_measurement = self.ambient_feature_measurement(fixture)
+            self.assertEqual(
+                [],
+                subject.validate_feature_measurement(
+                    ambient_measurement,
+                    fixture,
+                    feature,
+                    16,
+                    16,
+                    self.harness_source_sha256,
+                ),
+            )
+            ambient_keys = {
+                (item["mask"], item["scenario"])
+                for item in ambient_measurement["cross_buckets"]
+            }
+            self.assertEqual(9, len(ambient_keys))
+            self.assertTrue(
+                all(
+                    item["output"]["name"] == "color"
+                    and item["post_upload"]
+                    for item in ambient_measurement["cross_buckets"]
+                )
+            )
+        ambient_mutation_missed = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        ambient_mutation_missed["properties"]["mutation_sensitivity"][
+            "verdict"
+        ] = "MISSED"
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_mutation_missed,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_inactive = self.ambient_feature_measurement("adversarial")
+        ambient_bucket = next(
+            item
+            for item in ambient_inactive["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        ambient_bucket["output"]["changed_pixels"] = 0
+        ambient_bucket["output"]["changed_channels"] = 0
+        ambient_bucket["output"]["delta_energy"] = 0.0
+        ambient_bucket["output"]["delta_fraction_of_stock"] = 0.0
+        ambient_bucket["output"]["absolute_delta"] = {
+            name: 0.0
+            for name in ("min", "mean", "p50", "p95", "p99", "max")
+        }
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_inactive,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_inverted = self.ambient_feature_measurement("adversarial")
+        diffuse_bucket = next(
+            item
+            for item in ambient_inverted["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "diffuse"
+        )
+        diffuse_bucket["output"]["signed_delta"] = {
+            "min": 0.05,
+            "mean": 0.1,
+            "p05": 0.05,
+            "p50": 0.1,
+            "p95": 0.15,
+            "max": 0.2,
+        }
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_inverted,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        reflection_inverted = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        reflection_bucket = next(
+            item
+            for item in reflection_inverted["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        reflection_bucket["output"]["signed_delta"] = {
+            "min": -0.2,
+            "mean": -0.1,
+            "p05": -0.19,
+            "p50": -0.1,
+            "p95": -0.05,
+            "max": -0.05,
+        }
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                reflection_inverted,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_missing_level = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        ambient_missing_level["properties"]["monotonicity"]["series"][1][
+            "levels"
+        ].pop()
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_missing_level,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
         malformed = self.feature_measurement("adversarial")
         malformed["properties"]["mutation_sensitivity"]["verdict"] = "MISSED"
         self.assertTrue(
@@ -625,6 +1021,8 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     [
                         self.feature_measurement("adversarial"),
                         self.feature_measurement("native"),
+                        self.ambient_feature_measurement("adversarial"),
+                        self.ambient_feature_measurement("native"),
                     ],
                 ),
                 ("verdict", "PASS"),
@@ -647,33 +1045,41 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_feature_source_snapshot_and_staleness_detection(self):
         feature = self.contracts["additive_features"]["wetness-effects"]
-        source = os.path.join(subject.REPO_ROOT, feature["source"])
-        report, captures = subject._capture_hlsl_closure(source)
-        self.assertGreaterEqual(len(captures), 2)
-        self.assertRegex(report["combined_sha256"], r"^[0-9a-f]{64}$")
+        for target in ("directional", "ambient-runtime"):
+            contract = subject._feature_target_contract(feature, target)
+            source = os.path.join(subject.REPO_ROOT, contract["source"])
+            report, captures = subject._capture_hlsl_closure(source)
+            self.assertGreaterEqual(len(captures), 1)
+            self.assertRegex(
+                report["combined_sha256"], r"^[0-9a-f]{64}$"
+            )
+            with tempfile.TemporaryDirectory() as temporary:
+                snapshot = subject._write_hlsl_snapshot(
+                    temporary, captures, contract["source"]
+                )
+                self.assertEqual(
+                    next(
+                        item["data"]
+                        for item in captures
+                        if item["label"] == contract["source"]
+                    ),
+                    Path(snapshot).read_bytes(),
+                )
+                label = f"snapshot/{target}/{contract['source']}"
+                snapshot_capture = subject._capture_file(
+                    snapshot, label
+                )
+                self.assertEqual(
+                    [], subject._verify_captured_files([snapshot_capture])
+                )
+                Path(snapshot).write_bytes(
+                    Path(snapshot).read_bytes() + b"\n"
+                )
+                self.assertEqual(
+                    [label],
+                    subject._verify_captured_files([snapshot_capture]),
+                )
         with tempfile.TemporaryDirectory() as temporary:
-            snapshot = subject._write_hlsl_snapshot(
-                temporary, captures, feature["source"]
-            )
-            self.assertEqual(
-                next(
-                    item["data"]
-                    for item in captures
-                    if item["label"] == feature["source"]
-                ),
-                Path(snapshot).read_bytes(),
-            )
-            snapshot_capture = subject._capture_file(
-                snapshot, f"snapshot/{feature['source']}"
-            )
-            self.assertEqual(
-                [], subject._verify_captured_files([snapshot_capture])
-            )
-            Path(snapshot).write_bytes(Path(snapshot).read_bytes() + b"\n")
-            self.assertEqual(
-                [f"snapshot/{feature['source']}"],
-                subject._verify_captured_files([snapshot_capture]),
-            )
             probe = os.path.join(temporary, "probe.bin")
             Path(probe).write_bytes(b"before")
             capture = subject._capture_file(probe, "probe.bin")
@@ -1004,8 +1410,16 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 subject._canonical_bytes(report), Path(output).read_bytes()
             )
             self.assertEqual(
-                ["adversarial", "native"],
-                [item["fixture"] for item in report["fixtures"]],
+                [
+                    ("directional", "adversarial"),
+                    ("directional", "native"),
+                    ("ambient-runtime", "adversarial"),
+                    ("ambient-runtime", "native"),
+                ],
+                [
+                    (item["target"], item["fixture"])
+                    for item in report["fixtures"]
+                ],
             )
             for receipt in report["fixtures"]:
                 self.assertEqual(
@@ -1433,14 +1847,21 @@ def run_wetness_smoke():
             ):
                 raise AssertionError(first_report)
             fixtures = first_report["fixtures"]
-            if [item["fixture"] for item in fixtures] != [
-                "adversarial",
-                "native",
+            if [
+                (item["target"], item["fixture"]) for item in fixtures
+            ] != [
+                ("directional", "adversarial"),
+                ("directional", "native"),
+                ("ambient-runtime", "adversarial"),
+                ("ambient-runtime", "native"),
             ]:
                 raise AssertionError(fixtures)
             for fixture in fixtures:
+                expected_buckets = (
+                    12 if fixture["target"] == "directional" else 9
+                )
                 if (
-                    len(fixture["cross_buckets"]) != 12
+                    len(fixture["cross_buckets"]) != expected_buckets
                     or fixture["properties"]["neutral_identity"]["verdict"]
                     != "PASS"
                     or fixture["properties"]["active_locality"]["verdict"]

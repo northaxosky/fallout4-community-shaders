@@ -476,7 +476,7 @@
       "comparison": "reconstructed-stock-vs-reconstructed-feature",
       "native_bytecode_used": false,
       "profile": "wetness-directional-lighting",
-      "measurement_protocol": "wetness-warp-v1",
+      "measurement_protocol": "wetness-warp-v2",
       "source": "shaders/lighting/bsdf_light_deferred.hlsl",
       "minimum_bucket_population": 4,
       "dimensions": {
@@ -505,6 +505,37 @@
           "ibl": "active"
         }
       ],
+      "ambient_runtime": {
+        "id": "ambient-runtime",
+        "profile": "wetness-ambient-ibl-runtime",
+        "source": "shaders/lighting/ambient_ibl_pass_runtime.hlsl",
+        "resource_delta": {
+          "kind": "Texture2D",
+          "bind_point": 13,
+          "value_type": "float"
+        },
+        "variants": [
+          {
+            "id": "ambient-runtime",
+            "defines": []
+          }
+        ],
+        "scenario_buckets": [
+          "combined",
+          "diffuse",
+          "reflection"
+        ],
+        "output_buckets": [
+          "color"
+        ],
+        "mutation": {
+          "id": "ambient-wetness-load-zero",
+          "class": "feature-neutering",
+          "expected_failed_property": "active_locality",
+          "old": "float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;",
+          "new": "float wetness = 0.0;"
+        }
+      },
       "fixtures": [
         {
           "id": "adversarial",
