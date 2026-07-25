@@ -151,6 +151,40 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "verdict": "PASS",
                 }
             )
+        directional_ambient_levels = []
+        substrate_diffuse = [0.1, 0.2, 0.3]
+        substrate_specular = [0.01, 0.02, 0.03]
+        ambient_film = [0.04, 0.05, 0.06]
+        for index, (requested, uploaded) in enumerate(
+            zip(requested_levels, uploaded_levels)
+        ):
+            attenuation = 1.0 if index == 0 else 1.0 - index * 0.2
+            directional_ambient_levels.append(
+                {
+                    "requested": requested,
+                    "uploaded": uploaded,
+                    "attenuation_mean": attenuation,
+                    "representative_attenuation": attenuation,
+                    "substrate_diffuse": substrate_diffuse,
+                    "layered_diffuse": [
+                        value * attenuation for value in substrate_diffuse
+                    ],
+                    "substrate_specular": substrate_specular,
+                    "layered_specular": [
+                        substrate_specular[channel] * attenuation
+                        + ambient_film[channel] * (1.0 - attenuation)
+                        for channel in range(3)
+                    ],
+                    "recovered_film": (
+                        [0.0, 0.0, 0.0]
+                        if index == 0
+                        else ambient_film
+                    ),
+                    "maximum_diffuse_factor_spread": 0.0,
+                    "maximum_film_residual": 0.0,
+                    "maximum_untouched_mutant_residual": 0.0,
+                }
+            )
         mask_ids = [
             "active-pattern",
             "level-0",
@@ -215,7 +249,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 "neutral_identity": {
                     "tolerance_absolute": 0,
                     "tolerance_relative": 0,
-                    "comparisons": 8,
+                    "comparisons": 12,
                     "violations": [],
                     "verdict": "PASS",
                 },
@@ -239,19 +273,43 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "invalid_denominator_buckets": 0,
                     "verdict": "PASS",
                 },
+                "wet_lobe_scale": {
+                    "stock_scale_symbol": "FO4_DIRECTIONAL_SPECULAR_SCALE",
+                    "film_scale_symbol": "FO4_DIRECTIONAL_SPECULAR_SCALE",
+                    "stock_scale": 3.141593,
+                    "expected_derating_ratio": 0.65,
+                    "expected_difference_ratio": 0.35,
+                    "proven_channels": 128,
+                    "corrected_lobe_mean": 0.01,
+                    "corrected_lobe_max": 0.02,
+                    "maximum_absolute_residual": 0.0,
+                    "maximum_relative_residual": 0.0,
+                    "violations": [],
+                    "verdict": "PASS",
+                },
+                "ambient_ibl_layering": {
+                    "diffuse_formula": (
+                        "Dwet=Dstock*(1-ambientWetnessF)"
+                    ),
+                    "specular_formula": (
+                        "Swet=Sstock*(1-ambientWetnessF)+"
+                        "film*ambientWetnessF"
+                    ),
+                    "levels": directional_ambient_levels,
+                    "violations": [],
+                    "verdict": "PASS",
+                },
                 "monotonicity": {
                     "direct_specular_claim": "not-claimed",
                     "diffuse_series": diffuse_series,
                     "ibl_specular_probe": {
-                        "scope": "ambientSpecular remains substrate-owned",
-                        "claim": (
-                            "wet film does not modify the stock ambient gradient"
-                        ),
+                        "scope": "paired directional-IBL activity",
+                        "claim": "ambient gradient wetness delta is measured",
                         "levels": [
                             {
                                 "requested": requested,
                                 "uploaded": uploaded,
-                                "delta_energy": 0.0,
+                                "delta_energy": float(index * 10),
                             }
                             for index, (requested, uploaded) in enumerate(
                                 zip(requested_levels, uploaded_levels)
@@ -264,8 +322,12 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "verdict": "PASS",
                 },
                 "mutation_sensitivity": {
-                    "id": feature["mutation"]["id"],
+                    "mutants": [
+                    {
+                    "id": feature["mutations"][0]["id"],
+                    "class": "historical-regression",
                     "expected_failed_property": "directional_layering",
+                    "variants": ["directional", "directional-ibl"],
                     "observed_failed_properties": [
                         "directional_layering"
                     ],
@@ -327,6 +389,31 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                         "delta_fraction_of_stock": 0.1,
                         "energy_verdict": "PROVEN",
                     },
+                    "verdict": "CAUGHT",
+                    },
+                    {
+                        "id": feature["mutations"][1]["id"],
+                        "class": "historical-regression",
+                        "expected_failed_property": "wet_lobe_scale",
+                        "variants": ["directional"],
+                        "neutral_identity": "PASS",
+                        "wet_lobe_scale": "FAIL",
+                        "expected_ratio": 0.65,
+                        "maximum_absolute_residual": 0.0,
+                        "maximum_relative_residual": 0.0,
+                        "verdict": "CAUGHT",
+                    },
+                    {
+                        "id": feature["mutations"][2]["id"],
+                        "class": "omission-regression",
+                        "expected_failed_property": "ambient_ibl_layering",
+                        "variants": ["directional-ibl"],
+                        "neutral_identity": "PASS",
+                        "ambient_ibl_layering": "FAIL",
+                        "maximum_untouched_residual": 0.0,
+                        "verdict": "CAUGHT",
+                    },
+                    ],
                     "verdict": "CAUGHT",
                 },
             },
@@ -889,9 +976,9 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_contract_schema_and_predicates(self):
         subject.validate_contracts(self.contracts)
-        self.assertEqual(4, subject.FEATURE_PROTOCOL_VERSION)
+        self.assertEqual(5, subject.FEATURE_PROTOCOL_VERSION)
         self.assertEqual(
-            "wetness-warp-v4",
+            "wetness-warp-v5",
             self.contracts["additive_features"]["wetness-effects"][
                 "measurement_protocol"
             ],
@@ -1002,6 +1089,25 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             ambient["mutation"]["id"], subject.REQUIRED_MUTATION_IDS
         )
         self.assertEqual(
+            [
+                "directional-wetness-old-substrate-floors-output-multiply",
+                "directional-wetness-historical-pi-065-derating",
+                "directional-wetness-ambient-ibl-untouched",
+            ],
+            [item["id"] for item in feature["mutations"]],
+        )
+        source = Path(
+            subject.REPO_ROOT,
+            "shaders",
+            "lighting",
+            "bsdf_light_deferred.hlsl",
+        ).read_text(encoding="utf-8")
+        self.assertEqual(6, source.count("#ifdef WETNESS_EFFECTS"))
+        self.assertEqual(
+            3, source.count("FO4_DIRECTIONAL_SPECULAR_SCALE")
+        )
+        self.assertNotIn("FO4_DIRECTIONAL_SPECULAR_SCALE * 0.65", source)
+        self.assertEqual(
             ["adversarial", "native"],
             [item["id"] for item in feature["fixtures"]],
         )
@@ -1017,35 +1123,30 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             contract = subject._feature_target_contract(feature, target)
             source = os.path.join(subject.REPO_ROOT, contract["source"])
             before = Path(source).read_bytes()
-            mutant = subject.build_additive_feature_mutant(
-                before.decode("utf-8-sig"), contract
-            )
-            replacements = contract["mutation"].get(
-                "replacements",
-                [
-                    {
-                        "old": contract["mutation"].get("old"),
-                        "new": contract["mutation"].get("new"),
-                    }
-                ],
-            )
             original = before.decode("utf-8-sig").replace("\r\n", "\n")
-            for replacement in replacements:
-                self.assertEqual(
-                    original.count(replacement["new"]) + 1,
-                    mutant.count(replacement["new"]),
+            for mutation in subject._feature_mutations(contract):
+                mutant = subject.build_additive_feature_mutant(
+                    original, contract, mutation
                 )
-                self.assertNotIn(replacement["old"], mutant)
-            self.assertEqual(before, Path(source).read_bytes())
-            with self.assertRaises(subject.StableFailure):
-                first = replacements[0]
-                subject.build_additive_feature_mutant(
-                    original.replace(
-                        first["old"],
-                        first["old"] * 2,
-                    ),
-                    contract,
-                )
+                replacements = mutation["replacements"]
+                for replacement in replacements:
+                    if replacement["new"]:
+                        self.assertEqual(
+                            original.count(replacement["new"]) + 1,
+                            mutant.count(replacement["new"]),
+                        )
+                    self.assertNotIn(replacement["old"], mutant)
+                self.assertEqual(before, Path(source).read_bytes())
+                with self.assertRaises(subject.StableFailure):
+                    first = replacements[0]
+                    subject.build_additive_feature_mutant(
+                        original.replace(
+                            first["old"],
+                            first["old"] * 2,
+                        ),
+                        contract,
+                        mutation,
+                    )
 
     def test_additive_feature_measurement_schema_and_matrix(self):
         feature = self.contracts["additive_features"]["wetness-effects"]
@@ -1424,15 +1525,143 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             )
         )
         directional_mutation_missed = self.feature_measurement("adversarial")
-        directional_mutation_missed["properties"]["mutation_sensitivity"][
-            "specular_probe"
-        ]["changed_pixels"] = 0
-        directional_mutation_missed["properties"]["mutation_sensitivity"][
-            "specular_probe"
-        ]["delta_energy"] = 0.0
+        old_mutant = directional_mutation_missed["properties"][
+            "mutation_sensitivity"
+        ]["mutants"][0]
+        old_mutant["specular_probe"]["changed_pixels"] = 0
+        old_mutant["specular_probe"]["delta_energy"] = 0.0
         self.assertTrue(
             subject.validate_feature_measurement(
                 directional_mutation_missed,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        scale_zero = self.feature_measurement("adversarial")
+        scale_zero["properties"]["wet_lobe_scale"][
+            "corrected_lobe_mean"
+        ] = 0.0
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                scale_zero,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        pi_ratio_tampered = self.feature_measurement("adversarial")
+        pi_ratio_tampered["properties"]["mutation_sensitivity"]["mutants"][1][
+            "expected_ratio"
+        ] = 0.66
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                pi_ratio_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_layering_missing = self.feature_measurement("adversarial")
+        ambient_level = ambient_layering_missing["properties"][
+            "ambient_ibl_layering"
+        ]["levels"][1]
+        ambient_level["layered_diffuse"] = list(
+            ambient_level["substrate_diffuse"]
+        )
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_layering_missing,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_specular_tampered = self.feature_measurement("adversarial")
+        ambient_specular_tampered["properties"]["ambient_ibl_layering"][
+            "levels"
+        ][1]["layered_specular"] = [99.0, 98.0, 97.0]
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_specular_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_attenuation_missing = self.feature_measurement("adversarial")
+        ambient_attenuation_missing["properties"]["ambient_ibl_layering"][
+            "levels"
+        ][1].pop("representative_attenuation")
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_attenuation_missing,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_attenuation_invalid = self.feature_measurement("adversarial")
+        ambient_attenuation_invalid["properties"]["ambient_ibl_layering"][
+            "levels"
+        ][1]["representative_attenuation"] = -0.5
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_attenuation_invalid,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_film_zero = self.feature_measurement("adversarial")
+        ambient_film_zero["properties"]["ambient_ibl_layering"]["levels"][1][
+            "recovered_film"
+        ] = [0.0, 0.0, 0.0]
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_film_zero,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        ambient_mutant_missed = self.feature_measurement("adversarial")
+        ambient_mutant_missed["properties"]["mutation_sensitivity"]["mutants"][
+            2
+        ]["ambient_ibl_layering"] = "PASS"
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                ambient_mutant_missed,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        mutant_dry_identity_failed = self.feature_measurement("adversarial")
+        mutant_dry_identity_failed["properties"]["mutation_sensitivity"][
+            "mutants"
+        ][1]["neutral_identity"] = "FAIL"
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                mutant_dry_identity_failed,
                 "adversarial",
                 feature,
                 16,

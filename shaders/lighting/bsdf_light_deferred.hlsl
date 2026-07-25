@@ -221,6 +221,8 @@ static const float2 SUN_SHADOW_POISSON[32] =
 
 // Helpers
 
+static const float FO4_DIRECTIONAL_SPECULAR_SCALE = 3.141593;
+
 // Decode octahedral normal (matches insns 29-34).
 float3 DecodeOctahedralNormal(float2 enc01)
 {
@@ -553,7 +555,7 @@ PS_OUTPUT main(PS_INPUT input)
         specMag *= 0.25;
         specMag = min(specMag, 15.0);
         specMag *= matSample.y;
-        specMag *= 3.141593;
+        specMag *= FO4_DIRECTIONAL_SPECULAR_SCALE;
 
         brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);
         brdfModulator = depthScale;
@@ -583,9 +585,26 @@ PS_OUTPUT main(PS_INPUT input)
     float wetVisL =
         wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);
     float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);
+    float wetSpecMag = min(wetD * wetG * wetnessF, 15.0);
     float3 wetFilmSpecular =
-        wetD * wetG * wetnessF * wetNdotL * SunColor_HDR.xyz *
-        (3.141593 * 0.65);
+        wetNdotL * wetSpecMag * SunColor_HDR.xyz *
+        FO4_DIRECTIONAL_SPECULAR_SCALE;
+#ifdef AMBIENT_IBL_IN_LIGHT
+    float wetAmbientNdotVRaw = dot(wetFilmNormal, viewDirNeg);
+    float wetAmbientOneMinusNdotV =
+        1.0 - saturate(wetAmbientNdotVRaw);
+    float wetAmbientOneMinusNdotV2 =
+        wetAmbientOneMinusNdotV * wetAmbientOneMinusNdotV;
+    float wetAmbientFresnel =
+        0.02 +
+        0.98 * wetAmbientOneMinusNdotV2 * wetAmbientOneMinusNdotV2 *
+            wetAmbientOneMinusNdotV;
+    float ambientWetnessF = wetFilmStrength * wetAmbientFresnel;
+    float3 wetAmbientReflection =
+        2.0 * wetAmbientNdotVRaw * wetFilmNormal - viewDirNeg;
+    float3 wetFilmAmbient =
+        EvaluateAmbientGradient(wetAmbientReflection);
+#endif
 #endif
 
     // Insn 243-269: final composition.
@@ -612,6 +631,11 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef WETNESS_EFFECTS
     output.specular.xyz *= 1.0 - wetnessF;
     output.specular.xyz += shadowPcf * wetFilmSpecular;
+#ifdef AMBIENT_IBL_IN_LIGHT
+    ambientSpecular =
+        ambientSpecular * (1.0 - ambientWetnessF) +
+        wetFilmAmbient * ambientWetnessF;
+#endif
 #endif
 #ifdef AMBIENT_IBL_IN_LIGHT
     output.specular.xyz += ambientSpecular;
@@ -622,6 +646,9 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse.xyz = shadowPcf * finalDiffuse;
 #ifdef WETNESS_EFFECTS
     output.diffuse.xyz *= 1.0 - wetnessF;
+#ifdef AMBIENT_IBL_IN_LIGHT
+    ambientDiffuse *= 1.0 - ambientWetnessF;
+#endif
 #endif
 #ifdef AMBIENT_IBL_IN_LIGHT
     output.diffuse.xyz += ambientDiffuse;

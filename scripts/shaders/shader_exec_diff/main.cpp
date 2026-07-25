@@ -88,6 +88,8 @@ struct Options
     std::string featureIblPath;
     std::string mutantPath;
     std::string mutantIblPath;
+    std::string piDeratingMutantPath;
+    std::string ambientUntouchedMutantIblPath;
 };
 
 struct ConstantBufferBinding
@@ -5623,6 +5625,38 @@ struct AmbientFilmBlendEvidence
     std::vector<std::string> violations;
 };
 
+struct WetLobeScaleEvidence
+{
+    std::uint64_t provenChannels = 0;
+    double correctedLobeMean = 0.0;
+    double correctedLobeMaximum = 0.0;
+    double maximumAbsoluteResidual = 0.0;
+    double maximumRelativeResidual = 0.0;
+    std::vector<std::string> violations;
+};
+
+struct DirectionalAmbientIblLevel
+{
+    float requested = 0.0f;
+    float uploaded = 0.0f;
+    double attenuationMean = 0.0;
+    double representativeAttenuation = 0.0;
+    std::array<double, 3> substrateDiffuse{};
+    std::array<double, 3> layeredDiffuse{};
+    std::array<double, 3> substrateSpecular{};
+    std::array<double, 3> layeredSpecular{};
+    std::array<double, 3> recoveredFilm{};
+    double maximumDiffuseFactorSpread = 0.0;
+    double maximumFilmResidual = 0.0;
+    double maximumUntouchedMutantResidual = 0.0;
+};
+
+struct DirectionalAmbientIblEvidence
+{
+    std::vector<DirectionalAmbientIblLevel> levels;
+    std::vector<std::string> violations;
+};
+
 struct WetnessPatternEvidence
 {
     bool exactZero = false;
@@ -6146,8 +6180,14 @@ void WriteWetnessMeasurement(
     const DeltaDistribution& mutationDiffuseDelta,
     const DeltaDistribution& mutationSpecularDelta,
     double mutationDiffuseScaleResidual,
+    const WetLobeScaleEvidence& wetLobeScale,
+    const DirectionalAmbientIblEvidence& ambientIblLayering,
     bool mutationNeutralIdentity,
-    bool mutationDirectionalLayeringFailed)
+    bool mutationDirectionalLayeringFailed,
+    bool piDeratingMutationNeutralIdentity,
+    bool piDeratingMutationCaught,
+    bool ambientUntouchedMutationNeutralIdentity,
+    bool ambientUntouchedMutationCaught)
 {
     if (options.measurementJsonPath.empty())
         return;
@@ -6161,14 +6201,30 @@ void WriteWetnessMeasurement(
         });
     const bool monotonicPassed =
         diffuseViolations == 0 && iblSpecularViolations == 0;
-    const bool mutationCaught =
+    const bool oldMutationCaught =
         mutationNeutralIdentity &&
         mutationDirectionalLayeringFailed &&
         mutationObservedProperties ==
             std::vector<std::string>{"directional_layering"};
+    const bool wetLobeScalePassed = wetLobeScale.violations.empty();
+    const bool ambientIblLayeringPassed =
+        ambientIblLayering.violations.empty();
+    const bool mutationCaught =
+        oldMutationCaught &&
+        piDeratingMutationCaught &&
+        ambientUntouchedMutationCaught;
+    double ambientUntouchedResidual = 0.0;
+    for (const DirectionalAmbientIblLevel& level :
+         ambientIblLayering.levels)
+    {
+        ambientUntouchedResidual = std::max(
+            ambientUntouchedResidual,
+            level.maximumUntouchedMutantResidual);
+    }
     const bool passed =
         neutralPassed && localityPassed && magnitudePassed &&
-        monotonicPassed && mutationCaught;
+        monotonicPassed && wetLobeScalePassed &&
+        ambientIblLayeringPassed && mutationCaught;
     std::sort(formats.begin(), formats.end());
     formats.erase(std::unique(
         formats.begin(), formats.end(),
@@ -6194,7 +6250,7 @@ void WriteWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v4\""
+           << ",\"measurement_protocol\":\"wetness-warp-v5\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6274,6 +6330,61 @@ void WriteWetnessMeasurement(
            << "\"},\"magnitude\":{\"rgb_only\":true,"
            << "\"invalid_denominator_buckets\":" << invalidMagnitudeBuckets
            << ",\"verdict\":\"" << (magnitudePassed ? "PASS" : "UNPROVEN")
+           << "\"},\"wet_lobe_scale\":{"
+           << "\"stock_scale_symbol\":\"FO4_DIRECTIONAL_SPECULAR_SCALE\","
+           << "\"film_scale_symbol\":\"FO4_DIRECTIONAL_SPECULAR_SCALE\","
+           << "\"stock_scale\":3.141593,\"expected_derating_ratio\":0.65,"
+           << "\"expected_difference_ratio\":0.35,"
+           << "\"proven_channels\":" << wetLobeScale.provenChannels
+           << ",\"corrected_lobe_mean\":" << std::setprecision(17)
+           << wetLobeScale.correctedLobeMean
+           << ",\"corrected_lobe_max\":"
+           << wetLobeScale.correctedLobeMaximum
+           << ",\"maximum_absolute_residual\":"
+           << wetLobeScale.maximumAbsoluteResidual
+           << ",\"maximum_relative_residual\":"
+           << wetLobeScale.maximumRelativeResidual
+           << ",\"violations\":";
+    WriteStringArray(stream, wetLobeScale.violations);
+    stream << ",\"verdict\":\""
+           << (wetLobeScalePassed ? "PASS" : "FAIL")
+           << "\"},\"ambient_ibl_layering\":{"
+           << "\"diffuse_formula\":\"Dwet=Dstock*(1-ambientWetnessF)\","
+           << "\"specular_formula\":\"Swet=Sstock*(1-ambientWetnessF)+film*ambientWetnessF\","
+           << "\"levels\":[";
+    for (std::size_t index = 0;
+         index < ambientIblLayering.levels.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        const DirectionalAmbientIblLevel& level =
+            ambientIblLayering.levels[index];
+        stream << "{\"requested\":" << std::setprecision(17)
+               << level.requested << ",\"uploaded\":" << level.uploaded
+               << ",\"attenuation_mean\":" << level.attenuationMean
+               << ",\"representative_attenuation\":"
+               << level.representativeAttenuation
+               << ",\"substrate_diffuse\":";
+        WriteRgbArray(stream, level.substrateDiffuse);
+        stream << ",\"layered_diffuse\":";
+        WriteRgbArray(stream, level.layeredDiffuse);
+        stream << ",\"substrate_specular\":";
+        WriteRgbArray(stream, level.substrateSpecular);
+        stream << ",\"layered_specular\":";
+        WriteRgbArray(stream, level.layeredSpecular);
+        stream << ",\"recovered_film\":";
+        WriteRgbArray(stream, level.recoveredFilm);
+        stream << ",\"maximum_diffuse_factor_spread\":"
+               << level.maximumDiffuseFactorSpread
+               << ",\"maximum_film_residual\":"
+               << level.maximumFilmResidual
+               << ",\"maximum_untouched_mutant_residual\":"
+               << level.maximumUntouchedMutantResidual << "}";
+    }
+    stream << "],\"violations\":";
+    WriteStringArray(stream, ambientIblLayering.violations);
+    stream << ",\"verdict\":\""
+           << (ambientIblLayeringPassed ? "PASS" : "FAIL")
            << "\"},\"monotonicity\":{\"claim\":"
            << "\"diffuse absolute delta is nondecreasing across uploaded levels\","
            << "\"direct_specular_claim\":\"not-claimed\","
@@ -6301,8 +6412,8 @@ void WriteWetnessMeasurement(
                << (series.violations == 0 ? "PASS" : "FAIL") << "\"}";
     }
     stream << "],\"ibl_specular_probe\":{"
-           << "\"scope\":\"ambientSpecular remains substrate-owned\","
-           << "\"claim\":\"wet film does not modify the stock ambient gradient\","
+           << "\"scope\":\"paired directional-IBL activity\","
+           << "\"claim\":\"ambient gradient wetness delta is measured\","
            << "\"levels\":[";
     for (std::size_t index = 0; index < iblSpecularSeries.size(); ++index)
     {
@@ -6319,9 +6430,11 @@ void WriteWetnessMeasurement(
            << (iblSpecularViolations == 0 ? "PASS" : "FAIL")
            << "\"},\"violations\":" << diffuseViolations + iblSpecularViolations
            << ",\"verdict\":\"" << (monotonicPassed ? "PASS" : "FAIL")
-           << "\"},\"mutation_sensitivity\":{"
+           << "\"},\"mutation_sensitivity\":{\"mutants\":[{"
            << "\"id\":\"directional-wetness-old-substrate-floors-output-multiply\","
+           << "\"class\":\"historical-regression\","
            << "\"expected_failed_property\":\"directional_layering\","
+           << "\"variants\":[\"directional\",\"directional-ibl\"],"
            << "\"neutral_identity\":\""
            << (mutationNeutralIdentity ? "PASS" : "FAIL") << "\","
            << "\"directional_layering\":\""
@@ -6339,7 +6452,34 @@ void WriteWetnessMeasurement(
     std::ostringstream mutationSpecular;
     WriteDeltaDistribution(mutationSpecular, mutationSpecularDelta);
     stream << mutationSpecular.str().substr(1)
-           << ",\"verdict\":\"" << (mutationCaught ? "CAUGHT" : "MISSED")
+           << ",\"verdict\":\"" << (oldMutationCaught ? "CAUGHT" : "MISSED")
+           << "\"},{\"id\":\"directional-wetness-historical-pi-065-derating\","
+           << "\"class\":\"historical-regression\","
+           << "\"expected_failed_property\":\"wet_lobe_scale\","
+           << "\"variants\":[\"directional\"],\"neutral_identity\":\""
+           << (piDeratingMutationNeutralIdentity ? "PASS" : "FAIL")
+           << "\",\"wet_lobe_scale\":\""
+           << (piDeratingMutationCaught ? "FAIL" : "PASS")
+           << "\",\"expected_ratio\":0.65,"
+           << "\"maximum_absolute_residual\":"
+           << wetLobeScale.maximumAbsoluteResidual
+           << ",\"maximum_relative_residual\":"
+           << wetLobeScale.maximumRelativeResidual
+           << ",\"verdict\":\""
+           << (piDeratingMutationCaught ? "CAUGHT" : "MISSED")
+           << "\"},{\"id\":\"directional-wetness-ambient-ibl-untouched\","
+           << "\"class\":\"omission-regression\","
+           << "\"expected_failed_property\":\"ambient_ibl_layering\","
+           << "\"variants\":[\"directional-ibl\"],"
+           << "\"neutral_identity\":\""
+           << (ambientUntouchedMutationNeutralIdentity ? "PASS" : "FAIL")
+           << "\",\"ambient_ibl_layering\":\""
+           << (ambientUntouchedMutationCaught ? "FAIL" : "PASS")
+           << "\",\"maximum_untouched_residual\":"
+           << ambientUntouchedResidual << ",\"verdict\":\""
+           << (ambientUntouchedMutationCaught ? "CAUGHT" : "MISSED")
+           << "\"}],\"verdict\":\""
+           << (mutationCaught ? "CAUGHT" : "MISSED")
            << "\"}},\"cross_buckets\":[";
     for (std::size_t index = 0; index < crossBuckets.size(); ++index)
     {
@@ -6450,7 +6590,7 @@ void WriteAmbientWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v4\""
+           << ",\"measurement_protocol\":\"wetness-warp-v5\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6788,7 +6928,9 @@ int RunWetnessFeature(
     const std::vector<std::uint8_t>& stockIblBytecode,
     const std::vector<std::uint8_t>& featureIblBytecode,
     const std::vector<std::uint8_t>& mutantBytecode,
-    const std::vector<std::uint8_t>& mutantIblBytecode)
+    const std::vector<std::uint8_t>& mutantIblBytecode,
+    const std::vector<std::uint8_t>& piDeratingMutantBytecode,
+    const std::vector<std::uint8_t>& ambientUntouchedMutantIblBytecode)
 {
     if (options.width < 16 || options.height < 16)
         ThrowFailure("wetness_feature: dimensions must be at least 16x16");
@@ -6799,6 +6941,10 @@ int RunWetnessFeature(
     ShaderContract featureIblContract = ReflectShader(featureIblBytecode);
     ShaderContract mutantContract = ReflectShader(mutantBytecode);
     ShaderContract mutantIblContract = ReflectShader(mutantIblBytecode);
+    ShaderContract piDeratingMutantContract =
+        ReflectShader(piDeratingMutantBytecode);
+    ShaderContract ambientUntouchedMutantIblContract =
+        ReflectShader(ambientUntouchedMutantIblBytecode);
     const DisassemblyInfo stockDisassembly =
         InspectDisassembly(stockBytecode);
     const DisassemblyInfo featureDisassembly =
@@ -6811,12 +6957,21 @@ int RunWetnessFeature(
         InspectDisassembly(mutantBytecode);
     const DisassemblyInfo mutantIblDisassembly =
         InspectDisassembly(mutantIblBytecode);
+    const DisassemblyInfo piDeratingMutantDisassembly =
+        InspectDisassembly(piDeratingMutantBytecode);
+    const DisassemblyInfo ambientUntouchedMutantIblDisassembly =
+        InspectDisassembly(ambientUntouchedMutantIblBytecode);
     ApplyDisassemblyContract(stockContract, stockDisassembly);
     ApplyDisassemblyContract(featureContract, featureDisassembly);
     ApplyDisassemblyContract(stockIblContract, stockIblDisassembly);
     ApplyDisassemblyContract(featureIblContract, featureIblDisassembly);
     ApplyDisassemblyContract(mutantContract, mutantDisassembly);
     ApplyDisassemblyContract(mutantIblContract, mutantIblDisassembly);
+    ApplyDisassemblyContract(
+        piDeratingMutantContract, piDeratingMutantDisassembly);
+    ApplyDisassemblyContract(
+        ambientUntouchedMutantIblContract,
+        ambientUntouchedMutantIblDisassembly);
     try
     {
         WarnContractDifferences(
@@ -6841,6 +6996,12 @@ int RunWetnessFeature(
     ValidateWetnessFeatureContract(
         stockIblContract, mutantIblContract,
         stockIblDisassembly, mutantIblDisassembly, 4, false);
+    ValidateWetnessFeatureContract(
+        stockContract, piDeratingMutantContract,
+        stockDisassembly, piDeratingMutantDisassembly, 4, false);
+    ValidateWetnessFeatureContract(
+        stockIblContract, ambientUntouchedMutantIblContract,
+        stockIblDisassembly, ambientUntouchedMutantIblDisassembly, 4, false);
     if (DetectInputProfile(stockContract, stockDisassembly) !=
             InputProfile::DirectionalLighting ||
         DetectInputProfile(stockIblContract, stockIblDisassembly) !=
@@ -6883,6 +7044,13 @@ int RunWetnessFeature(
         createPixelShader(mutantBytecode, "wetness mutant");
     const ComPtr<ID3D11PixelShader> mutantIblShader =
         createPixelShader(mutantIblBytecode, "wetness mutant IBL");
+    const ComPtr<ID3D11PixelShader> piDeratingMutantShader =
+        createPixelShader(
+            piDeratingMutantBytecode, "wetness PI 0.65 mutant");
+    const ComPtr<ID3D11PixelShader> ambientUntouchedMutantIblShader =
+        createPixelShader(
+            ambientUntouchedMutantIblBytecode,
+            "wetness ambient IBL untouched mutant");
     const ComPtr<ID3D11VertexShader> vertexShader =
         CreatePassthroughVertexShader(
             device.Get(), stockContract, InputProfile::DirectionalLighting,
@@ -7027,6 +7195,12 @@ int RunWetnessFeature(
     DeltaDistribution mutationDiffuseDelta;
     DeltaDistribution mutationSpecularDelta;
     double mutationDiffuseScaleResidual = 0.0;
+    WetLobeScaleEvidence wetLobeScale;
+    DirectionalAmbientIblEvidence ambientIblLayering;
+    bool piDeratingMutationNeutralIdentity = true;
+    bool ambientUntouchedMutationNeutralIdentity = true;
+    bool piDeratingMutationCaught = false;
+    bool ambientUntouchedMutationCaught = false;
 
     const auto render = [&](ID3D11PixelShader* shader,
                             const SeedResources& resources,
@@ -7089,13 +7263,26 @@ int RunWetnessFeature(
             render(stockIblShader.Get(), resources, neutralMask);
         const RenderOutputs featureIblNeutral =
             render(featureIblShader.Get(), resources, neutralMask);
+        const RenderOutputs piDeratingMutantNeutral =
+            render(piDeratingMutantShader.Get(), resources, neutralMask);
+        const RenderOutputs ambientUntouchedMutantIblNeutral =
+            render(
+                ambientUntouchedMutantIblShader.Get(),
+                resources, neutralMask);
         AssertFiniteOutputs(stockNeutral, scenario);
         AssertFiniteOutputs(stockIblNeutral, scenario);
-        neutralComparisons += 4;
+        neutralComparisons += 6;
         if (!OutputsExact(stockNeutral, featureNeutral))
             neutralViolations.push_back(material + ":ibl.inactive");
         if (!OutputsExact(stockIblNeutral, featureIblNeutral))
             neutralViolations.push_back(material + ":ibl.active");
+        piDeratingMutationNeutralIdentity =
+            piDeratingMutationNeutralIdentity &&
+            OutputsExact(stockNeutral, piDeratingMutantNeutral);
+        ambientUntouchedMutationNeutralIdentity =
+            ambientUntouchedMutationNeutralIdentity &&
+            OutputsExact(
+                stockIblNeutral, ambientUntouchedMutantIblNeutral);
 
         const RenderOutputs stockActive =
             render(stockShader.Get(), resources, activeMask);
@@ -7153,6 +7340,10 @@ int RunWetnessFeature(
             const WetnessMaskResource& fullMask = findMask("level-4");
             const RenderOutputs stockFull =
                 render(stockShader.Get(), resources, fullMask);
+            const RenderOutputs featureFull =
+                render(featureShader.Get(), resources, fullMask);
+            const RenderOutputs piDeratingMutantFull =
+                render(piDeratingMutantShader.Get(), resources, fullMask);
             const RenderOutputs mutantFull =
                 render(mutantShader.Get(), resources, fullMask);
             const RenderOutputs featureIblFull =
@@ -7186,6 +7377,54 @@ int RunWetnessFeature(
                 mutationDiffuseScaleResidual <= 1.0e-5 &&
                 mutationSpecularDelta.changedPixels > 0 &&
                 mutationSpecularDelta.deltaEnergy > 0.0;
+
+            for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            {
+                for (UINT channel = 0; channel < 3; ++channel)
+                {
+                    const double stockDiffuse =
+                        stockFull[0][pixel][channel];
+                    if (std::abs(stockDiffuse) <= 1.0e-6)
+                        continue;
+                    const double attenuation =
+                        static_cast<double>(
+                            featureFull[0][pixel][channel]) /
+                        stockDiffuse;
+                    const double attenuatedStockSpecular =
+                        attenuation *
+                        static_cast<double>(
+                            stockFull[1][pixel][channel]);
+                    const double correctedLobe =
+                        static_cast<double>(
+                            featureFull[1][pixel][channel]) -
+                        attenuatedStockSpecular;
+                    if (correctedLobe <= 1.0e-6)
+                        continue;
+                    const double deratedLobe =
+                        static_cast<double>(
+                            piDeratingMutantFull[1][pixel][channel]) -
+                        attenuatedStockSpecular;
+                    const double ratioResidual =
+                        std::abs(deratedLobe - correctedLobe * 0.65);
+                    const double differenceResidual = std::abs(
+                        (static_cast<double>(
+                             featureFull[1][pixel][channel]) -
+                         piDeratingMutantFull[1][pixel][channel]) -
+                        correctedLobe * 0.35);
+                    const double residual =
+                        std::max(ratioResidual, differenceResidual);
+                    wetLobeScale.maximumAbsoluteResidual = std::max(
+                        wetLobeScale.maximumAbsoluteResidual, residual);
+                    wetLobeScale.maximumRelativeResidual = std::max(
+                        wetLobeScale.maximumRelativeResidual,
+                        residual / correctedLobe);
+                    wetLobeScale.correctedLobeMean += correctedLobe;
+                    wetLobeScale.correctedLobeMaximum = std::max(
+                        wetLobeScale.correctedLobeMaximum,
+                        correctedLobe);
+                    ++wetLobeScale.provenChannels;
+                }
+            }
         }
 
         DiffuseMonotonicSeries directSeries;
@@ -7196,6 +7435,9 @@ int RunWetnessFeature(
         activeIblSeries.ibl = "active";
         std::vector<double> previousDirect(pixelCount * 3, 0.0);
         std::vector<double> previousIbl(pixelCount * 3, 0.0);
+        std::vector<double> recoveredAmbientFilm(
+            pixelCount * 3,
+            std::numeric_limits<double>::quiet_NaN());
         for (std::size_t level = 0; level < RequestedLevels.size(); ++level)
         {
             const WetnessMaskResource& levelMask =
@@ -7204,6 +7446,13 @@ int RunWetnessFeature(
                 render(featureShader.Get(), resources, levelMask);
             const RenderOutputs featureLevelIbl =
                 render(featureIblShader.Get(), resources, levelMask);
+            RenderOutputs ambientUntouchedLevelIbl;
+            if (!uploadedSkin)
+            {
+                ambientUntouchedLevelIbl = render(
+                    ambientUntouchedMutantIblShader.Get(),
+                    resources, levelMask);
+            }
             MonotonicLevel directLevel{
                 RequestedLevels[level], levelMask.readbackValues.front(), 0.0};
             MonotonicLevel iblLevel = directLevel;
@@ -7238,21 +7487,197 @@ int RunWetnessFeature(
 
                     if (!uploadedSkin)
                     {
-                        const double ambientDelta =
-                            (static_cast<double>(
-                                 featureLevelIbl[1][pixel][channel]) -
-                             stockIblNeutral[1][pixel][channel]) -
-                            (static_cast<double>(
-                                 featureLevelDirect[1][pixel][channel]) -
-                             stockNeutral[1][pixel][channel]);
+                        const double substrateAmbient =
+                            static_cast<double>(
+                                stockIblNeutral[1][pixel][channel]) -
+                            stockNeutral[1][pixel][channel];
+                        const double layeredAmbient =
+                            static_cast<double>(
+                                featureLevelIbl[1][pixel][channel]) -
+                            featureLevelDirect[1][pixel][channel];
                         ambientLevel.deltaEnergy +=
-                            std::abs(ambientDelta);
-                        if (std::abs(ambientDelta) > 1.0e-6)
-                        {
-                            ++iblSpecularViolations;
-                        }
+                            std::abs(layeredAmbient - substrateAmbient);
                     }
                 }
+            }
+            if (!uploadedSkin)
+            {
+                DirectionalAmbientIblLevel evidenceLevel;
+                evidenceLevel.requested = RequestedLevels[level];
+                evidenceLevel.uploaded =
+                    levelMask.readbackValues.front();
+                double attenuationSum = 0.0;
+                std::uint64_t attenuationCount = 0;
+                for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+                {
+                    double minimumAttenuation =
+                        std::numeric_limits<double>::infinity();
+                    double maximumAttenuation =
+                        -std::numeric_limits<double>::infinity();
+                    for (UINT channel = 0; channel < 3; ++channel)
+                    {
+                        const std::size_t index = pixel * 3 + channel;
+                        const double substrateDiffuse =
+                            static_cast<double>(
+                                stockIblNeutral[0][pixel][channel]) -
+                            stockNeutral[0][pixel][channel];
+                        const double layeredDiffuse =
+                            static_cast<double>(
+                                featureLevelIbl[0][pixel][channel]) -
+                            featureLevelDirect[0][pixel][channel];
+                        const double untouchedDiffuse =
+                            static_cast<double>(
+                                ambientUntouchedLevelIbl[0][pixel][channel]) -
+                            featureLevelDirect[0][pixel][channel];
+                        const double substrateSpecular =
+                            static_cast<double>(
+                                stockIblNeutral[1][pixel][channel]) -
+                            stockNeutral[1][pixel][channel];
+                        const double layeredSpecular =
+                            static_cast<double>(
+                                featureLevelIbl[1][pixel][channel]) -
+                            featureLevelDirect[1][pixel][channel];
+                        const double untouchedSpecular =
+                            static_cast<double>(
+                                ambientUntouchedLevelIbl[1][pixel][channel]) -
+                            featureLevelDirect[1][pixel][channel];
+                        if (pixel == 0)
+                        {
+                            evidenceLevel.substrateDiffuse[channel] =
+                                substrateDiffuse;
+                            evidenceLevel.layeredDiffuse[channel] =
+                                layeredDiffuse;
+                            evidenceLevel.substrateSpecular[channel] =
+                                substrateSpecular;
+                            evidenceLevel.layeredSpecular[channel] =
+                                layeredSpecular;
+                        }
+                        evidenceLevel.maximumUntouchedMutantResidual =
+                            std::max(
+                                evidenceLevel
+                                    .maximumUntouchedMutantResidual,
+                                std::max(
+                                    std::abs(
+                                        untouchedDiffuse -
+                                        substrateDiffuse),
+                                    std::abs(
+                                        untouchedSpecular -
+                                        substrateSpecular)));
+                        if (std::abs(substrateDiffuse) <= 1.0e-6)
+                        {
+                            ambientIblLayering.violations.push_back(
+                                "level-" + std::to_string(level) +
+                                ":diffuse-denominator");
+                            continue;
+                        }
+                        const double attenuation =
+                            layeredDiffuse / substrateDiffuse;
+                        if (pixel == 0 && channel == 0)
+                        {
+                            evidenceLevel.representativeAttenuation =
+                                attenuation;
+                        }
+                        minimumAttenuation =
+                            std::min(minimumAttenuation, attenuation);
+                        maximumAttenuation =
+                            std::max(maximumAttenuation, attenuation);
+                        attenuationSum += attenuation;
+                        ++attenuationCount;
+                        if (attenuation < -1.0e-5 ||
+                            attenuation > 1.0 + 1.0e-5)
+                        {
+                            ambientIblLayering.violations.push_back(
+                                "level-" + std::to_string(level) +
+                                ":attenuation-range");
+                        }
+                        const double ambientF = 1.0 - attenuation;
+                        if (level == 0)
+                        {
+                            if (std::abs(ambientF) > 1.0e-5)
+                            {
+                                ambientIblLayering.violations.push_back(
+                                    "level-0:identity");
+                            }
+                            continue;
+                        }
+                        if (ambientF <= 1.0e-6)
+                        {
+                            ambientIblLayering.violations.push_back(
+                                "level-" + std::to_string(level) +
+                                ":film-zero");
+                            continue;
+                        }
+                        const double recoveredFilm =
+                            (layeredSpecular -
+                             substrateSpecular * attenuation) /
+                            ambientF;
+                        if (pixel == 0)
+                        {
+                            evidenceLevel.recoveredFilm[channel] =
+                                recoveredFilm;
+                        }
+                        if (recoveredFilm <= 0.0)
+                        {
+                            ambientIblLayering.violations.push_back(
+                                "level-" + std::to_string(level) +
+                                ":film-source");
+                        }
+                        if (level == 1)
+                        {
+                            recoveredAmbientFilm[index] = recoveredFilm;
+                        }
+                        else if (std::isfinite(
+                                     recoveredAmbientFilm[index]))
+                        {
+                            const double residual = std::abs(
+                                recoveredFilm -
+                                recoveredAmbientFilm[index]);
+                            evidenceLevel.maximumFilmResidual =
+                                std::max(
+                                    evidenceLevel.maximumFilmResidual,
+                                    residual);
+                            const double tolerance =
+                                2.0e-5 +
+                                2.0e-4 *
+                                    std::abs(
+                                        recoveredAmbientFilm[index]);
+                            if (residual > tolerance)
+                            {
+                                ambientIblLayering.violations.push_back(
+                                    "level-" + std::to_string(level) +
+                                    ":film-consistency");
+                            }
+                        }
+                    }
+                    if (std::isfinite(minimumAttenuation) &&
+                        std::isfinite(maximumAttenuation))
+                    {
+                        evidenceLevel.maximumDiffuseFactorSpread =
+                            std::max(
+                                evidenceLevel
+                                    .maximumDiffuseFactorSpread,
+                                maximumAttenuation -
+                                    minimumAttenuation);
+                    }
+                }
+                if (attenuationCount != 0)
+                {
+                    evidenceLevel.attenuationMean =
+                        attenuationSum / attenuationCount;
+                }
+                if (evidenceLevel.maximumDiffuseFactorSpread > 1.0e-5)
+                {
+                    ambientIblLayering.violations.push_back(
+                        "level-" + std::to_string(level) +
+                        ":diffuse-factor-spread");
+                }
+                if (evidenceLevel.maximumUntouchedMutantResidual > 1.0e-5)
+                {
+                    ambientIblLayering.violations.push_back(
+                        "level-" + std::to_string(level) +
+                        ":mutant-signature");
+                }
+                ambientIblLayering.levels.push_back(evidenceLevel);
             }
             directSeries.levels.push_back(directLevel);
             activeIblSeries.levels.push_back(iblLevel);
@@ -7262,6 +7687,47 @@ int RunWetnessFeature(
         diffuseSeries.push_back(std::move(directSeries));
         diffuseSeries.push_back(std::move(activeIblSeries));
     }
+
+    if (wetLobeScale.provenChannels == 0)
+    {
+        wetLobeScale.violations.push_back("no-proven-channels");
+    }
+    else
+    {
+        wetLobeScale.correctedLobeMean /=
+            static_cast<double>(wetLobeScale.provenChannels);
+    }
+    if (wetLobeScale.maximumAbsoluteResidual > 1.0e-5)
+        wetLobeScale.violations.push_back("absolute-residual");
+    if (wetLobeScale.maximumRelativeResidual > 1.0e-4)
+        wetLobeScale.violations.push_back("relative-residual");
+    std::sort(
+        wetLobeScale.violations.begin(), wetLobeScale.violations.end());
+    wetLobeScale.violations.erase(
+        std::unique(
+            wetLobeScale.violations.begin(),
+            wetLobeScale.violations.end()),
+        wetLobeScale.violations.end());
+    piDeratingMutationCaught =
+        piDeratingMutationNeutralIdentity &&
+        wetLobeScale.violations.empty();
+
+    if (ambientIblLayering.levels.size() != RequestedLevels.size())
+        ambientIblLayering.violations.push_back("level-count");
+    std::sort(
+        ambientIblLayering.violations.begin(),
+        ambientIblLayering.violations.end());
+    ambientIblLayering.violations.erase(
+        std::unique(
+            ambientIblLayering.violations.begin(),
+            ambientIblLayering.violations.end()),
+        ambientIblLayering.violations.end());
+    ambientUntouchedMutationCaught =
+        ambientUntouchedMutationNeutralIdentity &&
+        ambientIblLayering.violations.empty();
+    iblSpecularViolations =
+        static_cast<std::uint64_t>(
+            ambientIblLayering.violations.size());
 
     for (const std::string& material : {
              std::string("material.default"),
@@ -7359,24 +7825,35 @@ int RunWetnessFeature(
         invalidMagnitudeBuckets, diffuseSeries, iblSpecularSeries,
         iblSpecularViolations, mutationObservedProperties,
         mutationDiffuseDelta, mutationSpecularDelta,
-        mutationDiffuseScaleResidual, mutationNeutralIdentity,
-        mutationDirectionalLayeringFailed);
+        mutationDiffuseScaleResidual, wetLobeScale,
+        ambientIblLayering, mutationNeutralIdentity,
+        mutationDirectionalLayeringFailed,
+        piDeratingMutationNeutralIdentity,
+        piDeratingMutationCaught,
+        ambientUntouchedMutationNeutralIdentity,
+        ambientUntouchedMutationCaught);
 
     const bool diffuseMonotonic = std::all_of(
         diffuseSeries.begin(), diffuseSeries.end(),
         [](const DiffuseMonotonicSeries& series) {
             return series.violations == 0;
         });
-    const bool mutationCaught =
+    const bool oldMutationCaught =
         mutationNeutralIdentity && mutationDirectionalLayeringFailed &&
         mutationObservedProperties ==
             std::vector<std::string>{"directional_layering"};
+    const bool mutationCaught =
+        oldMutationCaught &&
+        piDeratingMutationCaught &&
+        ambientUntouchedMutationCaught;
     const bool passed =
         neutralViolations.empty() &&
         localityViolations.empty() &&
         invalidMagnitudeBuckets == 0 &&
         diffuseMonotonic &&
         iblSpecularViolations == 0 &&
+        wetLobeScale.violations.empty() &&
+        ambientIblLayering.violations.empty() &&
         mutationCaught;
     std::cout << (passed ? "PASS" : "FAIL") << "\n"
               << "  evidence class: additive-feature\n"
@@ -7396,7 +7873,13 @@ int RunWetnessFeature(
               << "  monotonicity: "
               << (diffuseMonotonic && iblSpecularViolations == 0
                   ? "PASS" : "FAIL") << "\n"
-              << "  mutation directional historical model: "
+              << "  wet lobe scale: "
+              << (wetLobeScale.violations.empty() ? "PASS" : "FAIL")
+              << "\n"
+              << "  ambient IBL layering: "
+              << (ambientIblLayering.violations.empty() ? "PASS" : "FAIL")
+              << "\n"
+              << "  directional mutants: "
               << (mutationCaught ? "CAUGHT" : "MISSED") << "\n";
     return passed ? 0 : 1;
 }
@@ -9219,7 +9702,9 @@ Options ParseOptions(int argumentCount, char** arguments)
             "--reference-prefilter PATH --candidate-prefilter PATH] "
             "[--wetness-feature --wetness-target directional|ambient-runtime "
             "--stock-ibl PATH --feature-ibl PATH "
-            "--mutant PATH --mutant-ibl PATH]");
+            "--mutant PATH --mutant-ibl PATH "
+            "--pi-derating-mutant PATH "
+            "--ambient-untouched-mutant-ibl PATH]");
     }
 
     Options options;
@@ -9298,6 +9783,10 @@ Options ParseOptions(int argumentCount, char** arguments)
             options.mutantPath = value;
         else if (option == "--mutant-ibl")
             options.mutantIblPath = value;
+        else if (option == "--pi-derating-mutant")
+            options.piDeratingMutantPath = value;
+        else if (option == "--ambient-untouched-mutant-ibl")
+            options.ambientUntouchedMutantIblPath = value;
         else
             ThrowFailure("unknown option: " + option);
     }
@@ -9329,7 +9818,9 @@ int Run(const Options& options)
         if (options.stockIblPath.empty() ||
             options.featureIblPath.empty() ||
             options.mutantPath.empty() ||
-            options.mutantIblPath.empty())
+            options.mutantIblPath.empty() ||
+            options.piDeratingMutantPath.empty() ||
+            options.ambientUntouchedMutantIblPath.empty())
         {
             ThrowFailure(
                 "wetness_feature: all stock, feature, and mutant variants required");
@@ -9339,7 +9830,9 @@ int Run(const Options& options)
             ReadFile(options.stockIblPath),
             ReadFile(options.featureIblPath),
             ReadFile(options.mutantPath),
-            ReadFile(options.mutantIblPath));
+            ReadFile(options.mutantIblPath),
+            ReadFile(options.piDeratingMutantPath),
+            ReadFile(options.ambientUntouchedMutantIblPath));
     }
 
     if (options.xegtaoAo)
@@ -9567,7 +10060,7 @@ void WriteFailureReport(
                << "\"fixture\":\"" << FixtureName(options.fixture) << "\","
                << "\"width\":" << options.width
                << ",\"height\":" << options.height << ","
-               << "\"measurement_protocol\":\"wetness-warp-v4\","
+               << "\"measurement_protocol\":\"wetness-warp-v5\","
                << "\"wetness_format\":\""
                << (options.fixture == Fixture::Native
                    ? "R8_UNORM" : "R32_FLOAT") << "\","

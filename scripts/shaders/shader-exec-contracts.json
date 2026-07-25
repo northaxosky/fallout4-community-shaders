@@ -476,7 +476,7 @@
       "comparison": "reconstructed-stock-vs-reconstructed-feature",
       "native_bytecode_used": false,
       "profile": "wetness-directional-lighting",
-      "measurement_protocol": "wetness-warp-v4",
+      "measurement_protocol": "wetness-warp-v5",
       "source": "shaders/lighting/bsdf_light_deferred.hlsl",
       "minimum_bucket_population": 4,
       "dimensions": {
@@ -573,37 +573,75 @@
         0.75,
         1.0
       ],
-      "mutation": {
-        "id": "directional-wetness-old-substrate-floors-output-multiply",
-        "class": "historical-regression",
-        "expected_failed_property": "directional_layering",
-        "replacements": [
-          {
-            "old": "    float wetFilmRoughness = max(saturate(1.0 - wetness), 0.05);\n    float wetFilmStrength = saturate(1.0 - wetFilmRoughness);\n    float3 wetFilmNormal = isMaterial1 ? matSample.xyz : normalView;\n    wetFilmNormal *=\n        rsqrt(max(dot(wetFilmNormal, wetFilmNormal), 1.0e-8));\n    float3 wetFilmHalf = viewDirNeg + SunDirection_and_padding.xyz;\n    wetFilmHalf *= rsqrt(max(dot(wetFilmHalf, wetFilmHalf), 1.0e-8));",
-            "new": "    float wetGloss = max(matSample.x, wetness * 0.7);\n    float wetSpecMag = max(matSample.y, wetness * 0.25);"
-          },
-          {
-            "old": "        float specExpBase = exp2(matSample.x * 10.0 + 1.0);",
-            "new": "        float specExpBase = exp2(wetGloss * 10.0 + 1.0);"
-          },
-          {
-            "old": "        float ambientSpecularFactor =\n            exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;\n        ambientSpecular =\n            matSample.y * ambientSpecularFactor *\n            EvaluateAmbientGradient(reflectionDir);",
-            "new": "        float ambientSpecularFactor =\n            exp2(log2(oneMinusNdotV) * (3.0 - wetGloss)) * 0.25;\n        ambientSpecular =\n            wetSpecMag * ambientSpecularFactor *\n            EvaluateAmbientGradient(reflectionDir);"
-          },
-          {
-            "old": "        specMag *= matSample.y;\n        specMag *= 3.141593;\n\n        brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);\n        brdfModulator = depthScale;\n    }\n\n#ifdef WETNESS_EFFECTS",
-            "new": "        specMag *= wetSpecMag;\n        specMag *= 3.141593;\n\n        brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);\n        brdfModulator = depthScale;\n    }\n\n#ifdef WETNESS_EFFECTS"
-          },
-          {
-            "old": "    float wetNdotL = clamp(\n        dot(wetFilmNormal, SunDirection_and_padding.xyz), 1.0e-5, 1.0);\n    float wetNdotV =\n        saturate(abs(dot(wetFilmNormal, viewDirNeg)) + 1.0e-5);\n    float wetNdotH = saturate(dot(wetFilmNormal, wetFilmHalf));\n    float wetVdotH = saturate(dot(viewDirNeg, wetFilmHalf));\n    float wetOneMinusVdotH = 1.0 - wetVdotH;\n    float wetOneMinusVdotH2 = wetOneMinusVdotH * wetOneMinusVdotH;\n    float wetFresnel =\n        0.02 +\n        0.98 * wetOneMinusVdotH2 * wetOneMinusVdotH2 *\n            wetOneMinusVdotH;\n    float wetnessF = wetFilmStrength * wetFresnel;\n\n    float wetA = wetFilmRoughness * wetFilmRoughness;\n    float wetA2 = wetA * wetA;\n    float wetDdenom = wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;\n    float wetD = wetA2 / (3.141593 * wetDdenom * wetDdenom);\n    float wetVisV =\n        wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);\n    float wetVisL =\n        wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);\n    float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);\n    float3 wetFilmSpecular =\n        wetD * wetG * wetnessF * wetNdotL * SunColor_HDR.xyz *\n        (3.141593 * 0.65);",
-            "new": "    float wetnessF = 0.0;\n    float3 wetFilmSpecular = float3(0.0, 0.0, 0.0);"
-          },
-          {
-            "old": "    output.diffuse.xyz *= 1.0 - wetnessF;",
-            "new": "    output.diffuse.xyz *= lerp(1.0, 0.5, wetness);"
-          }
-        ]
-      }
+      "mutations": [
+        {
+          "id": "directional-wetness-old-substrate-floors-output-multiply",
+          "class": "historical-regression",
+          "expected_failed_property": "directional_layering",
+          "variants": [
+            "directional",
+            "directional-ibl"
+          ],
+          "replacements": [
+            {
+              "old": "    float wetFilmRoughness = max(saturate(1.0 - wetness), 0.05);\n    float wetFilmStrength = saturate(1.0 - wetFilmRoughness);\n    float3 wetFilmNormal = isMaterial1 ? matSample.xyz : normalView;\n    wetFilmNormal *=\n        rsqrt(max(dot(wetFilmNormal, wetFilmNormal), 1.0e-8));\n    float3 wetFilmHalf = viewDirNeg + SunDirection_and_padding.xyz;\n    wetFilmHalf *= rsqrt(max(dot(wetFilmHalf, wetFilmHalf), 1.0e-8));",
+              "new": "    float wetGloss = max(matSample.x, wetness * 0.7);\n    float wetSpecMag = max(matSample.y, wetness * 0.25);"
+            },
+            {
+              "old": "        float specExpBase = exp2(matSample.x * 10.0 + 1.0);",
+              "new": "        float specExpBase = exp2(wetGloss * 10.0 + 1.0);"
+            },
+            {
+              "old": "        float ambientSpecularFactor =\n            exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;\n        ambientSpecular =\n            matSample.y * ambientSpecularFactor *\n            EvaluateAmbientGradient(reflectionDir);",
+              "new": "        float ambientSpecularFactor =\n            exp2(log2(oneMinusNdotV) * (3.0 - wetGloss)) * 0.25;\n        ambientSpecular =\n            wetSpecMag * ambientSpecularFactor *\n            EvaluateAmbientGradient(reflectionDir);"
+            },
+            {
+              "old": "        specMag *= matSample.y;\n        specMag *= FO4_DIRECTIONAL_SPECULAR_SCALE;\n\n        brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);\n        brdfModulator = depthScale;\n    }\n\n#ifdef WETNESS_EFFECTS",
+              "new": "        specMag *= wetSpecMag;\n        specMag *= FO4_DIRECTIONAL_SPECULAR_SCALE;\n\n        brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);\n        brdfModulator = depthScale;\n    }\n\n#ifdef WETNESS_EFFECTS"
+            },
+            {
+              "old": "    float wetNdotL = clamp(\n        dot(wetFilmNormal, SunDirection_and_padding.xyz), 1.0e-5, 1.0);\n    float wetNdotV =\n        saturate(abs(dot(wetFilmNormal, viewDirNeg)) + 1.0e-5);\n    float wetNdotH = saturate(dot(wetFilmNormal, wetFilmHalf));\n    float wetVdotH = saturate(dot(viewDirNeg, wetFilmHalf));\n    float wetOneMinusVdotH = 1.0 - wetVdotH;\n    float wetOneMinusVdotH2 = wetOneMinusVdotH * wetOneMinusVdotH;\n    float wetFresnel =\n        0.02 +\n        0.98 * wetOneMinusVdotH2 * wetOneMinusVdotH2 *\n            wetOneMinusVdotH;\n    float wetnessF = wetFilmStrength * wetFresnel;\n\n    float wetA = wetFilmRoughness * wetFilmRoughness;\n    float wetA2 = wetA * wetA;\n    float wetDdenom = wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;\n    float wetD = wetA2 / (3.141593 * wetDdenom * wetDdenom);\n    float wetVisV =\n        wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);\n    float wetVisL =\n        wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);\n    float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);\n    float wetSpecMag = min(wetD * wetG * wetnessF, 15.0);\n    float3 wetFilmSpecular =\n        wetNdotL * wetSpecMag * SunColor_HDR.xyz *\n        FO4_DIRECTIONAL_SPECULAR_SCALE;\n#ifdef AMBIENT_IBL_IN_LIGHT\n    float wetAmbientNdotVRaw = dot(wetFilmNormal, viewDirNeg);\n    float wetAmbientOneMinusNdotV =\n        1.0 - saturate(wetAmbientNdotVRaw);\n    float wetAmbientOneMinusNdotV2 =\n        wetAmbientOneMinusNdotV * wetAmbientOneMinusNdotV;\n    float wetAmbientFresnel =\n        0.02 +\n        0.98 * wetAmbientOneMinusNdotV2 * wetAmbientOneMinusNdotV2 *\n            wetAmbientOneMinusNdotV;\n    float ambientWetnessF = wetFilmStrength * wetAmbientFresnel;\n    float3 wetAmbientReflection =\n        2.0 * wetAmbientNdotVRaw * wetFilmNormal - viewDirNeg;\n    float3 wetFilmAmbient =\n        EvaluateAmbientGradient(wetAmbientReflection);\n#endif",
+              "new": "    float wetnessF = 0.0;\n    float3 wetFilmSpecular = float3(0.0, 0.0, 0.0);\n#ifdef AMBIENT_IBL_IN_LIGHT\n    float ambientWetnessF = 0.0;\n    float3 wetFilmAmbient = float3(0.0, 0.0, 0.0);\n#endif"
+            },
+            {
+              "old": "    output.diffuse.xyz *= 1.0 - wetnessF;",
+              "new": "    output.diffuse.xyz *= lerp(1.0, 0.5, wetness);"
+            }
+          ]
+        },
+        {
+          "id": "directional-wetness-historical-pi-065-derating",
+          "class": "historical-regression",
+          "expected_failed_property": "wet_lobe_scale",
+          "variants": [
+            "directional"
+          ],
+          "replacements": [
+            {
+              "old": "        wetNdotL * wetSpecMag * SunColor_HDR.xyz *\n        FO4_DIRECTIONAL_SPECULAR_SCALE;",
+              "new": "        wetNdotL * wetSpecMag * SunColor_HDR.xyz *\n        (FO4_DIRECTIONAL_SPECULAR_SCALE * 0.65);"
+            }
+          ]
+        },
+        {
+          "id": "directional-wetness-ambient-ibl-untouched",
+          "class": "omission-regression",
+          "expected_failed_property": "ambient_ibl_layering",
+          "variants": [
+            "directional-ibl"
+          ],
+          "replacements": [
+            {
+              "old": "#ifdef AMBIENT_IBL_IN_LIGHT\n    ambientSpecular =\n        ambientSpecular * (1.0 - ambientWetnessF) +\n        wetFilmAmbient * ambientWetnessF;\n#endif",
+              "new": ""
+            },
+            {
+              "old": "#ifdef AMBIENT_IBL_IN_LIGHT\n    ambientDiffuse *= 1.0 - ambientWetnessF;\n#endif",
+              "new": ""
+            }
+          ]
+        }
+      ]
     }
   }
 }

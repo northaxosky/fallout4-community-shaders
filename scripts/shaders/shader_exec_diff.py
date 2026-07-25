@@ -42,7 +42,7 @@ HARNESS_SOURCE = os.path.join(
 )
 MANIFEST_FILENAME = "shader-exec-diff-run.json"
 FEATURE_MANIFEST_FILENAME = "wetness-effects-warp-run.json"
-FEATURE_PROTOCOL_VERSION = 4
+FEATURE_PROTOCOL_VERSION = 5
 COMPILE_FLAGS = ("/nologo", "/T", "ps_5_0", "/O3", "/E", "main")
 FIXTURE_ORDER = ("adversarial", "native")
 VERDICTS = ("PASS", "FAIL", "UNPROVEN", "STALE")
@@ -419,7 +419,7 @@ def validate_additive_features(features: Any) -> None:
         != "reconstructed-stock-vs-reconstructed-feature"
         or feature.get("native_bytecode_used") is not False
         or feature.get("profile") != "wetness-directional-lighting"
-        or feature.get("measurement_protocol") != "wetness-warp-v4"
+        or feature.get("measurement_protocol") != "wetness-warp-v5"
         or feature.get("source")
         != "shaders/lighting/bsdf_light_deferred.hlsl"
     ):
@@ -516,20 +516,45 @@ def validate_additive_features(features: Any) -> None:
     for name, expected in expected_lists.items():
         if feature.get(name) != expected:
             raise StableFailure("feature_contracts_schema", name)
-    mutation = feature.get("mutation")
-    if (
-        not isinstance(mutation, dict)
-        or mutation.get("id")
-        != "directional-wetness-old-substrate-floors-output-multiply"
-        or mutation.get("class") != "historical-regression"
-        or mutation.get("expected_failed_property")
-        != "directional_layering"
-        or _mutation_replacements_digest(mutation.get("replacements"))
-        != "b9d85503b71d7f3ccb5a9980b30da89f9c07c520bf6d9442e15d3b0e3c8e797b"
-        or "old" in mutation
-        or "new" in mutation
-    ):
-        raise StableFailure("feature_contracts_schema", "mutation")
+    mutations = feature.get("mutations")
+    expected_mutations = [
+        (
+            "directional-wetness-old-substrate-floors-output-multiply",
+            "historical-regression",
+            "directional_layering",
+            ["directional", "directional-ibl"],
+            "7f9ff7c84aaf44d072d5eb6f9933a76a0b3de38eb09e81e82cf75b849a9303c6",
+        ),
+        (
+            "directional-wetness-historical-pi-065-derating",
+            "historical-regression",
+            "wet_lobe_scale",
+            ["directional"],
+            "40223248e41858c1bc44a78a8b41586314b44ba7b3def2a1738bf434c69ca9ae",
+        ),
+        (
+            "directional-wetness-ambient-ibl-untouched",
+            "omission-regression",
+            "ambient_ibl_layering",
+            ["directional-ibl"],
+            "060d5d39e0ba948a12af6aea06c1db13484e90432578feedc795f624c30966d8",
+        ),
+    ]
+    if not isinstance(mutations, list) or len(mutations) != 3:
+        raise StableFailure("feature_contracts_schema", "mutations")
+    for mutation, expected in zip(mutations, expected_mutations):
+        if (
+            not isinstance(mutation, dict)
+            or mutation.get("id") != expected[0]
+            or mutation.get("class") != expected[1]
+            or mutation.get("expected_failed_property") != expected[2]
+            or mutation.get("variants") != expected[3]
+            or _mutation_replacements_digest(mutation.get("replacements"))
+            != expected[4]
+            or "old" in mutation
+            or "new" in mutation
+        ):
+            raise StableFailure("feature_contracts_schema", "mutation")
 
 
 def _feature_target_contract(
@@ -537,13 +562,24 @@ def _feature_target_contract(
 ) -> dict[str, Any]:
     if target == "directional":
         contract = dict(feature_contract)
+        contract["mutation"] = feature_contract["mutations"][0]
     elif target == "ambient-runtime":
         contract = dict(feature_contract)
         contract.update(feature_contract["ambient_runtime"])
+        contract.pop("mutations", None)
     else:
         raise StableFailure("feature_contracts_schema", "unknown target")
     contract["target"] = target
     return contract
+
+
+def _feature_mutations(
+    target_contract: dict[str, Any],
+) -> list[dict[str, Any]]:
+    mutations = target_contract.get("mutations")
+    if isinstance(mutations, list):
+        return mutations
+    return [target_contract["mutation"]]
 
 
 def _replace_exact(text: str, old: str, new: str, transform: str) -> str:
@@ -729,9 +765,11 @@ def build_mutation_sources(
 
 
 def build_additive_feature_mutant(
-    original: str, feature_contract: dict[str, Any]
+    original: str,
+    feature_contract: dict[str, Any],
+    mutation: dict[str, Any] | None = None,
 ) -> str:
-    mutation = feature_contract["mutation"]
+    mutation = mutation or feature_contract["mutation"]
     normalized = original.replace("\r\n", "\n")
     replacements = mutation.get("replacements")
     if replacements is None:
@@ -1809,6 +1847,169 @@ def _validate_ambient_feature_measurement(
                     or abs(computed_observed_energy) > 6.0e-5
                 ):
                     fail("ambient_film_blend:energy")
+        wet_lobe_scale = properties.get("wet_lobe_scale")
+        if wet_lobe_scale is not None and (
+            not isinstance(wet_lobe_scale, dict)
+            or wet_lobe_scale.get("stock_scale_symbol")
+            != "FO4_DIRECTIONAL_SPECULAR_SCALE"
+            or wet_lobe_scale.get("film_scale_symbol")
+            != "FO4_DIRECTIONAL_SPECULAR_SCALE"
+            or wet_lobe_scale.get("stock_scale") != 3.141593
+            or wet_lobe_scale.get("expected_derating_ratio") != 0.65
+            or wet_lobe_scale.get("expected_difference_ratio") != 0.35
+            or not isinstance(
+                wet_lobe_scale.get("proven_channels"), int
+            )
+            or wet_lobe_scale["proven_channels"] <= 0
+            or not number(wet_lobe_scale.get("corrected_lobe_mean"))
+            or wet_lobe_scale["corrected_lobe_mean"] <= 0
+            or not number(wet_lobe_scale.get("corrected_lobe_max"))
+            or wet_lobe_scale["corrected_lobe_max"]
+            < wet_lobe_scale["corrected_lobe_mean"]
+            or not number(
+                wet_lobe_scale.get("maximum_absolute_residual")
+            )
+            or wet_lobe_scale["maximum_absolute_residual"] > 1.0e-5
+            or not number(
+                wet_lobe_scale.get("maximum_relative_residual")
+            )
+            or wet_lobe_scale["maximum_relative_residual"] > 1.0e-4
+            or wet_lobe_scale.get("violations") != []
+            or wet_lobe_scale.get("verdict") != "PASS"
+        ):
+            fail("property:wet_lobe_scale")
+
+        ambient_layering = properties.get("ambient_ibl_layering")
+        ambient_levels = (
+            ambient_layering.get("levels")
+            if isinstance(ambient_layering, dict)
+            else None
+        )
+        recovered_reference: list[float] | None = None
+        if ambient_layering is not None and (
+            not isinstance(ambient_layering, dict)
+            or ambient_layering.get("diffuse_formula")
+            != "Dwet=Dstock*(1-ambientWetnessF)"
+            or ambient_layering.get("specular_formula")
+            != "Swet=Sstock*(1-ambientWetnessF)+film*ambientWetnessF"
+            or not isinstance(ambient_levels, list)
+            or len(ambient_levels) != len(requested_levels)
+            or ambient_layering.get("violations") != []
+            or ambient_layering.get("verdict") != "PASS"
+        ):
+            fail("property:ambient_ibl_layering")
+        elif isinstance(ambient_levels, list):
+            for index, level in enumerate(ambient_levels):
+                arrays = {
+                    name: level.get(name)
+                    for name in (
+                        "substrate_diffuse",
+                        "layered_diffuse",
+                        "substrate_specular",
+                        "layered_specular",
+                        "recovered_film",
+                    )
+                } if isinstance(level, dict) else {}
+                if (
+                    not isinstance(level, dict)
+                    or not close(
+                        level.get("requested"), requested_levels[index]
+                    )
+                    or not close(
+                        level.get("uploaded"),
+                        uploaded_levels[index],
+                        1.0e-7,
+                    )
+                    or not number(level.get("attenuation_mean"))
+                    or not (-1.0e-5 <= level["attenuation_mean"] <= 1.00001)
+                    or not number(
+                        level.get("representative_attenuation")
+                    )
+                    or not (
+                        -1.0e-5
+                        <= level["representative_attenuation"]
+                        <= 1.00001
+                    )
+                    or any(
+                        not isinstance(values, list)
+                        or len(values) != 3
+                        or any(not number(value) for value in values)
+                        for values in arrays.values()
+                    )
+                    or not number(
+                        level.get("maximum_diffuse_factor_spread")
+                    )
+                    or level["maximum_diffuse_factor_spread"] > 1.0e-5
+                    or not number(level.get("maximum_film_residual"))
+                    or level["maximum_film_residual"]
+                    > 2.0e-5 + 2.0e-4
+                    or not number(
+                        level.get("maximum_untouched_mutant_residual")
+                    )
+                    or level["maximum_untouched_mutant_residual"] > 1.0e-5
+                ):
+                    fail("ambient_ibl_layering:level")
+                    continue
+                attenuation = float(
+                    level["representative_attenuation"]
+                )
+                for channel in range(3):
+                    expected_diffuse = (
+                        float(arrays["substrate_diffuse"][channel]) *
+                        attenuation
+                    )
+                    if not close(
+                        arrays["layered_diffuse"][channel],
+                        expected_diffuse,
+                        1.0e-4,
+                    ):
+                        fail("ambient_ibl_layering:diffuse")
+                        break
+                    expected_specular = (
+                        float(arrays["substrate_specular"][channel]) *
+                        attenuation
+                        + float(arrays["recovered_film"][channel]) *
+                        (1.0 - attenuation)
+                    )
+                    if not close(
+                        arrays["layered_specular"][channel],
+                        expected_specular,
+                        1.0e-4,
+                    ):
+                        fail("ambient_ibl_layering:specular")
+                        break
+                if index == 0:
+                    if (
+                        not close(attenuation, 1.0, 1.0e-5)
+                        or any(
+                            not close(value, 0.0, 1.0e-8)
+                            for value in arrays["recovered_film"]
+                        )
+                    ):
+                        fail("ambient_ibl_layering:identity")
+                else:
+                    if (
+                        attenuation >= 1.0
+                        or any(
+                            value <= 0
+                            for value in arrays["recovered_film"]
+                        )
+                    ):
+                        fail("ambient_ibl_layering:film")
+                    if recovered_reference is None:
+                        recovered_reference = [
+                            float(value)
+                            for value in arrays["recovered_film"]
+                        ]
+                    elif any(
+                        not close(value, reference, 5.0e-4)
+                        for value, reference in zip(
+                            arrays["recovered_film"],
+                            recovered_reference,
+                        )
+                    ):
+                        fail("ambient_ibl_layering:film_consistency")
+
         monotonicity = properties.get("monotonicity")
         series = (
             monotonicity.get("series")
@@ -2545,7 +2746,7 @@ def validate_feature_measurement(
             not isinstance(neutral, dict)
             or neutral.get("tolerance_absolute") != 0
             or neutral.get("tolerance_relative") != 0
-            or neutral.get("comparisons") != 8
+            or neutral.get("comparisons") != 12
             or neutral.get("violations") != []
             or neutral.get("verdict") != "PASS"
         ):
@@ -2593,6 +2794,168 @@ def validate_feature_measurement(
             )
             for value in requested_levels
         ]
+
+        wet_lobe_scale = properties.get("wet_lobe_scale")
+        if (
+            not isinstance(wet_lobe_scale, dict)
+            or wet_lobe_scale.get("stock_scale_symbol")
+            != "FO4_DIRECTIONAL_SPECULAR_SCALE"
+            or wet_lobe_scale.get("film_scale_symbol")
+            != "FO4_DIRECTIONAL_SPECULAR_SCALE"
+            or wet_lobe_scale.get("stock_scale") != 3.141593
+            or wet_lobe_scale.get("expected_derating_ratio") != 0.65
+            or wet_lobe_scale.get("expected_difference_ratio") != 0.35
+            or not isinstance(
+                wet_lobe_scale.get("proven_channels"), int
+            )
+            or wet_lobe_scale["proven_channels"] <= 0
+            or not number(wet_lobe_scale.get("corrected_lobe_mean"))
+            or wet_lobe_scale["corrected_lobe_mean"] <= 0
+            or not number(wet_lobe_scale.get("corrected_lobe_max"))
+            or wet_lobe_scale["corrected_lobe_max"]
+            < wet_lobe_scale["corrected_lobe_mean"]
+            or not number(
+                wet_lobe_scale.get("maximum_absolute_residual")
+            )
+            or wet_lobe_scale["maximum_absolute_residual"] > 1.0e-5
+            or not number(
+                wet_lobe_scale.get("maximum_relative_residual")
+            )
+            or wet_lobe_scale["maximum_relative_residual"] > 1.0e-4
+            or wet_lobe_scale.get("violations") != []
+            or wet_lobe_scale.get("verdict") != "PASS"
+        ):
+            fail("property:wet_lobe_scale")
+
+        ambient_layering = properties.get("ambient_ibl_layering")
+        ambient_levels = (
+            ambient_layering.get("levels")
+            if isinstance(ambient_layering, dict)
+            else None
+        )
+        recovered_reference: list[float] | None = None
+        if (
+            not isinstance(ambient_layering, dict)
+            or ambient_layering.get("diffuse_formula")
+            != "Dwet=Dstock*(1-ambientWetnessF)"
+            or ambient_layering.get("specular_formula")
+            != "Swet=Sstock*(1-ambientWetnessF)+film*ambientWetnessF"
+            or not isinstance(ambient_levels, list)
+            or len(ambient_levels) != len(requested_levels)
+            or ambient_layering.get("violations") != []
+            or ambient_layering.get("verdict") != "PASS"
+        ):
+            fail("property:ambient_ibl_layering")
+        elif isinstance(ambient_levels, list):
+            for index, level in enumerate(ambient_levels):
+                arrays = {
+                    name: level.get(name)
+                    for name in (
+                        "substrate_diffuse",
+                        "layered_diffuse",
+                        "substrate_specular",
+                        "layered_specular",
+                        "recovered_film",
+                    )
+                } if isinstance(level, dict) else {}
+                if (
+                    not isinstance(level, dict)
+                    or not close(
+                        level.get("requested"), requested_levels[index]
+                    )
+                    or not close(
+                        level.get("uploaded"),
+                        uploaded_levels[index],
+                        1.0e-7,
+                    )
+                    or not number(level.get("attenuation_mean"))
+                    or not (-1.0e-5 <= level["attenuation_mean"] <= 1.00001)
+                    or not number(
+                        level.get("representative_attenuation")
+                    )
+                    or not (
+                        -1.0e-5
+                        <= level["representative_attenuation"]
+                        <= 1.00001
+                    )
+                    or any(
+                        not isinstance(values, list)
+                        or len(values) != 3
+                        or any(not number(value) for value in values)
+                        for values in arrays.values()
+                    )
+                    or not number(
+                        level.get("maximum_diffuse_factor_spread")
+                    )
+                    or level["maximum_diffuse_factor_spread"] > 1.0e-5
+                    or not number(level.get("maximum_film_residual"))
+                    or level["maximum_film_residual"] > 5.0e-4
+                    or not number(
+                        level.get("maximum_untouched_mutant_residual")
+                    )
+                    or level["maximum_untouched_mutant_residual"] > 1.0e-5
+                ):
+                    fail("ambient_ibl_layering:level")
+                    continue
+                attenuation = float(
+                    level["representative_attenuation"]
+                )
+                for channel in range(3):
+                    expected_diffuse = (
+                        float(arrays["substrate_diffuse"][channel]) *
+                        attenuation
+                    )
+                    if not close(
+                        arrays["layered_diffuse"][channel],
+                        expected_diffuse,
+                        1.0e-4,
+                    ):
+                        fail("ambient_ibl_layering:diffuse")
+                        break
+                    expected_specular = (
+                        float(arrays["substrate_specular"][channel]) *
+                        attenuation
+                        + float(arrays["recovered_film"][channel]) *
+                        (1.0 - attenuation)
+                    )
+                    if not close(
+                        arrays["layered_specular"][channel],
+                        expected_specular,
+                        1.0e-4,
+                    ):
+                        fail("ambient_ibl_layering:specular")
+                        break
+                if index == 0:
+                    if (
+                        not close(attenuation, 1.0, 1.0e-5)
+                        or any(
+                            not close(value, 0.0, 1.0e-8)
+                            for value in arrays["recovered_film"]
+                        )
+                    ):
+                        fail("ambient_ibl_layering:identity")
+                else:
+                    if (
+                        attenuation >= 1.0
+                        or any(
+                            value <= 0
+                            for value in arrays["recovered_film"]
+                        )
+                    ):
+                        fail("ambient_ibl_layering:film")
+                    if recovered_reference is None:
+                        recovered_reference = [
+                            float(value)
+                            for value in arrays["recovered_film"]
+                        ]
+                    elif any(
+                        not close(value, reference, 5.0e-4)
+                        for value, reference in zip(
+                            arrays["recovered_film"],
+                            recovered_reference,
+                        )
+                    ):
+                        fail("ambient_ibl_layering:film_consistency")
 
         def validate_levels(
             levels: Any,
@@ -2666,9 +3029,9 @@ def validate_feature_measurement(
             if (
                 not isinstance(probe, dict)
                 or probe.get("scope")
-                != "ambientSpecular remains substrate-owned"
+                != "paired directional-IBL activity"
                 or probe.get("claim")
-                != "wet film does not modify the stock ambient gradient"
+                != "ambient gradient wetness delta is measured"
                 or probe.get("violations") != 0
                 or probe.get("verdict") != "PASS"
             ):
@@ -2695,8 +3058,14 @@ def validate_feature_measurement(
                             )
                             or not number(level.get("delta_energy"))
                             or level["delta_energy"] < 0
-                            or level["delta_energy"]
-                            > width * height * 3.0e-6
+                            or (
+                                index == 0
+                                and level["delta_energy"] > 1.0e-6
+                            )
+                            or (
+                                index != 0
+                                and level["delta_energy"] <= 0
+                            )
                         ):
                             fail("monotonicity:ibl_specular_levels")
                             break
@@ -2718,14 +3087,34 @@ def validate_feature_measurement(
                     fail("monotonicity:violation_total")
 
         mutation = properties.get("mutation_sensitivity")
-        mutation_diffuse = (
-            mutation.get("diffuse_probe")
+        mutants = (
+            mutation.get("mutants")
             if isinstance(mutation, dict)
             else None
         )
+        old_mutant = (
+            mutants[0]
+            if isinstance(mutants, list) and len(mutants) == 3
+            else None
+        )
+        pi_mutant = (
+            mutants[1]
+            if isinstance(mutants, list) and len(mutants) == 3
+            else None
+        )
+        ambient_mutant = (
+            mutants[2]
+            if isinstance(mutants, list) and len(mutants) == 3
+            else None
+        )
+        mutation_diffuse = (
+            old_mutant.get("diffuse_probe")
+            if isinstance(old_mutant, dict)
+            else None
+        )
         mutation_specular = (
-            mutation.get("specular_probe")
-            if isinstance(mutation, dict)
+            old_mutant.get("specular_probe")
+            if isinstance(old_mutant, dict)
             else None
         )
         mutation_diffuse_signed = (
@@ -2735,13 +3124,18 @@ def validate_feature_measurement(
         )
         if (
             not isinstance(mutation, dict)
-            or mutation.get("id") != feature_contract["mutation"]["id"]
-            or mutation.get("expected_failed_property")
-            != feature_contract["mutation"]["expected_failed_property"]
-            or mutation.get("observed_failed_properties")
+            or not isinstance(mutants, list)
+            or len(mutants) != 3
+            or mutation.get("verdict") != "CAUGHT"
+            or not isinstance(old_mutant, dict)
+            or old_mutant.get("id")
+            != feature_contract["mutations"][0]["id"]
+            or old_mutant.get("expected_failed_property")
+            != "directional_layering"
+            or old_mutant.get("observed_failed_properties")
             != ["directional_layering"]
-            or mutation.get("neutral_identity") != "PASS"
-            or mutation.get("directional_layering") != "FAIL"
+            or old_mutant.get("neutral_identity") != "PASS"
+            or old_mutant.get("directional_layering") != "FAIL"
             or not isinstance(mutation_diffuse, dict)
             or mutation_diffuse.get("name") != "diffuse"
             or mutation_diffuse.get("population") != width * height
@@ -2749,14 +3143,38 @@ def validate_feature_measurement(
             or not isinstance(mutation_diffuse_signed, dict)
             or not number(mutation_diffuse_signed.get("max"))
             or mutation_diffuse_signed["max"] >= 0
-            or mutation.get("expected_full_wet_scale") != 0.5
-            or not number(mutation.get("maximum_scale_residual"))
-            or mutation["maximum_scale_residual"] > 1.0e-5
+            or old_mutant.get("expected_full_wet_scale") != 0.5
+            or not number(old_mutant.get("maximum_scale_residual"))
+            or old_mutant["maximum_scale_residual"] > 1.0e-5
             or not isinstance(mutation_specular, dict)
             or mutation_specular.get("name") != "specular"
             or mutation_specular.get("changed_pixels", 0) <= 0
             or mutation_specular.get("delta_energy", 0) <= 0
-            or mutation.get("verdict") != "CAUGHT"
+            or old_mutant.get("verdict") != "CAUGHT"
+            or not isinstance(pi_mutant, dict)
+            or pi_mutant.get("id")
+            != feature_contract["mutations"][1]["id"]
+            or pi_mutant.get("expected_failed_property") != "wet_lobe_scale"
+            or pi_mutant.get("neutral_identity") != "PASS"
+            or pi_mutant.get("wet_lobe_scale") != "FAIL"
+            or pi_mutant.get("expected_ratio") != 0.65
+            or not number(pi_mutant.get("maximum_absolute_residual"))
+            or pi_mutant["maximum_absolute_residual"] > 1.0e-5
+            or not number(pi_mutant.get("maximum_relative_residual"))
+            or pi_mutant["maximum_relative_residual"] > 1.0e-4
+            or pi_mutant.get("verdict") != "CAUGHT"
+            or not isinstance(ambient_mutant, dict)
+            or ambient_mutant.get("id")
+            != feature_contract["mutations"][2]["id"]
+            or ambient_mutant.get("expected_failed_property")
+            != "ambient_ibl_layering"
+            or ambient_mutant.get("neutral_identity") != "PASS"
+            or ambient_mutant.get("ambient_ibl_layering") != "FAIL"
+            or not number(
+                ambient_mutant.get("maximum_untouched_residual")
+            )
+            or ambient_mutant["maximum_untouched_residual"] > 1.0e-5
+            or ambient_mutant.get("verdict") != "CAUGHT"
         ):
             fail("property:mutation_sensitivity")
 
@@ -3021,8 +3439,7 @@ def validate_feature_measurement(
                     or not probe_levels
                     or not isinstance(probe_levels[-1], dict)
                     or not number(probe_levels[-1].get("delta_energy"))
-                    or probe_levels[-1]["delta_energy"]
-                    > width * height * 3.0e-6
+                    or probe_levels[-1]["delta_energy"] <= 0
                 ):
                     fail("monotonicity:ibl_specular_cross_evidence")
 
@@ -3171,6 +3588,14 @@ def _run_feature_harness(
         artifacts["directional"]["mutant"],
         "--mutant-ibl",
         artifacts["directional-ibl"]["mutant"],
+        "--pi-derating-mutant",
+        artifacts["directional"]["mutants"][
+            "directional-wetness-historical-pi-065-derating"
+        ],
+        "--ambient-untouched-mutant-ibl",
+        artifacts["directional-ibl"]["mutants"][
+            "directional-wetness-ambient-ibl-untouched"
+        ],
         "--fixture",
         fixture,
         "--seed-base",
@@ -3562,7 +3987,7 @@ def run_additive_feature(
     )
     source_closures: dict[str, OrderedDict[str, Any]] = {}
     source_captures_by_target: dict[str, list[dict[str, Any]]] = {}
-    mutant_bytes_by_target: dict[str, bytes] = {}
+    mutant_bytes_by_target: dict[str, OrderedDict[str, bytes]] = {}
     for target, target_contract in target_contracts.items():
         source_label = target_contract["source"]
         source_path = os.path.join(
@@ -3581,10 +4006,16 @@ def run_additive_feature(
             raise StableFailure("feature_source_closure", source_label)
         source_closures[target] = source_closure
         source_captures_by_target[target] = source_captures
-        mutant_bytes_by_target[target] = build_additive_feature_mutant(
-            source_capture["data"].decode("utf-8-sig"),
-            target_contract,
-        ).encode("utf-8")
+        original = source_capture["data"].decode("utf-8-sig")
+        mutant_bytes_by_target[target] = OrderedDict(
+            (
+                mutation["id"],
+                build_additive_feature_mutant(
+                    original, target_contract, mutation
+                ).encode("utf-8"),
+            )
+            for mutation in _feature_mutations(target_contract)
+        )
 
     live_captures = [
         contracts_capture,
@@ -3612,8 +4043,8 @@ def run_additive_feature(
         prefix="fo4cs-wetness-feature-"
     ) as temporary:
         snapshot_sources: dict[str, str] = {}
-        mutant_sources: dict[str, str] = {}
-        mutation_labels: dict[str, str] = {}
+        mutant_sources: dict[str, OrderedDict[str, str]] = {}
+        mutation_labels: dict[str, OrderedDict[str, str]] = {}
         for target, target_contract in target_contracts.items():
             source_label = target_contract["source"]
             source_captures = source_captures_by_target[target]
@@ -3637,23 +4068,29 @@ def run_additive_feature(
                         f"{target}:{capture['label']}",
                     )
                 generated_captures.append(snapshot_capture)
-            mutation_id = target_contract["mutation"]["id"]
-            mutation_label = f"generated/{target}/{mutation_id}.hlsl"
-            mutant_source = os.path.join(
-                temporary, *mutation_label.split("/")
-            )
-            Path(mutant_source).parent.mkdir(parents=True, exist_ok=True)
-            Path(mutant_source).write_bytes(mutant_bytes_by_target[target])
-            generated_captures.append(
-                _capture_file(mutant_source, mutation_label)
-            )
-            mutant_sources[target] = mutant_source
-            mutation_labels[target] = mutation_label
+            mutant_sources[target] = OrderedDict()
+            mutation_labels[target] = OrderedDict()
+            for mutation in _feature_mutations(target_contract):
+                mutation_id = mutation["id"]
+                mutation_label = f"generated/{target}/{mutation_id}.hlsl"
+                mutant_source = os.path.join(
+                    temporary, *mutation_label.split("/")
+                )
+                Path(mutant_source).parent.mkdir(
+                    parents=True, exist_ok=True
+                )
+                Path(mutant_source).write_bytes(
+                    mutant_bytes_by_target[target][mutation_id]
+                )
+                generated_captures.append(
+                    _capture_file(mutant_source, mutation_label)
+                )
+                mutant_sources[target][mutation_id] = mutant_source
+                mutation_labels[target][mutation_id] = mutation_label
 
         for target, target_contract in target_contracts.items():
             source_label = target_contract["source"]
             snapshot_source = snapshot_sources[target]
-            mutant_source = mutant_sources[target]
             artifact_paths[target] = {}
             for variant in target_contract["variants"]:
                 variant_id = variant["id"]
@@ -3661,14 +4098,13 @@ def run_additive_feature(
                 feature_defines = sorted(
                     [*stock_defines, "WETNESS_EFFECTS=1"]
                 )
-                artifact_paths[target][variant_id] = {}
+                artifact_paths[target][variant_id] = {"mutants": {}}
                 artifact_records: dict[
                     str, tuple[list[str], str, OrderedDict[str, Any]]
                 ] = {}
                 for kind, compile_source, defines in (
                     ("stock", snapshot_source, stock_defines),
                     ("feature", snapshot_source, feature_defines),
-                    ("mutant", mutant_source, feature_defines),
                 ):
                     output_name = (
                         f"{target}-{variant_id}-{kind}.dxbc"
@@ -3698,19 +4134,67 @@ def run_additive_feature(
                         output_name,
                         artifact_capture["artifact"],
                     )
+                mutant_records: list[OrderedDict[str, Any]] = []
+                for mutation in _feature_mutations(target_contract):
+                    mutation_variants = mutation.get("variants")
+                    if (
+                        isinstance(mutation_variants, list)
+                        and variant_id not in mutation_variants
+                    ):
+                        continue
+                    mutation_id = mutation["id"]
+                    output_name = (
+                        f"{target}-{variant_id}-mutant-{mutation_id}.dxbc"
+                    )
+                    output = os.path.join(temporary, output_name)
+                    compiled, log = _compile_shader(
+                        fxc,
+                        mutant_sources[target][mutation_id],
+                        os.path.dirname(snapshot_source),
+                        feature_defines,
+                        output,
+                    )
+                    if not compiled:
+                        if log.strip():
+                            print(log.rstrip(), file=sys.stderr)
+                        raise StableFailure(
+                            "feature_compile_failed",
+                            f"{target}:{variant_id}:{mutation_id}",
+                        )
+                    artifact_paths[target][variant_id]["mutants"][
+                        mutation_id
+                    ] = output
+                    if mutation_id == target_contract["mutation"]["id"]:
+                        artifact_paths[target][variant_id]["mutant"] = output
+                    artifact_capture = _capture_file(
+                        output, f"generated/{output_name}"
+                    )
+                    generated_captures.append(artifact_capture)
+                    mutant_records.append(
+                        OrderedDict(
+                            (
+                                ("id", mutation_id),
+                                ("defines", feature_defines),
+                                (
+                                    "compiler_flags",
+                                    _feature_compiler_flags(
+                                        mutation_labels[target][mutation_id],
+                                        feature_defines,
+                                        output_name,
+                                    ),
+                                ),
+                                ("dxbc", artifact_capture["artifact"]),
+                            )
+                        )
+                    )
                 record_items: list[tuple[str, Any]] = [
                     ("target", target),
                     ("id", variant_id),
                 ]
                 if "ibl" in variant:
                     record_items.append(("ibl", variant["ibl"]))
-                for kind in ("stock", "feature", "mutant"):
+                for kind in ("stock", "feature"):
                     defines, output_name, artifact = artifact_records[kind]
-                    compile_label = (
-                        mutation_labels[target]
-                        if kind == "mutant"
-                        else source_label
-                    )
                     record_items.append(
                         (
                             kind,
@@ -3720,7 +4204,7 @@ def run_additive_feature(
                                     (
                                         "compiler_flags",
                                         _feature_compiler_flags(
-                                            compile_label,
+                                            source_label,
                                             defines,
                                             output_name,
                                         ),
@@ -3730,6 +4214,7 @@ def run_additive_feature(
                             ),
                         )
                     )
+                record_items.append(("mutants", mutant_records))
                 variant_records.append(OrderedDict(record_items))
 
         for target in target_contracts:
@@ -3765,6 +4250,8 @@ def run_additive_feature(
                         print(f"  {line}")
                 detail = f"{target}:{fixture}"
                 if measurement is None:
+                    if human.strip():
+                        print(human.rstrip(), file=sys.stderr)
                     raise StableFailure(
                         "feature_harness_runtime",
                         f"{detail}: no measurement",
@@ -3827,10 +4314,22 @@ def run_additive_feature(
             "neutral_identity",
             "active_locality",
             "magnitude",
+            "wet_lobe_scale",
+            "ambient_ibl_layering",
             "matte_sheen",
             "no_ibl_film",
+            "ambient_film_blend",
             "monotonicity",
         )
+        directional_properties = {
+            "wet_lobe_scale",
+            "ambient_ibl_layering",
+        }
+        ambient_properties = {
+            "matte_sheen",
+            "no_ibl_film",
+            "ambient_film_blend",
+        }
         properties = OrderedDict(
             (
                 name,
@@ -3838,9 +4337,13 @@ def run_additive_feature(
                     measurements,
                     name,
                     (
-                        "ambient-runtime"
-                        if name in {"matte_sheen", "no_ibl_film"}
-                        else None
+                        "directional"
+                        if name in directional_properties
+                        else (
+                            "ambient-runtime"
+                            if name in ambient_properties
+                            else None
+                        )
                     ),
                 ),
             )
@@ -3848,74 +4351,102 @@ def run_additive_feature(
         )
         mutation_targets: list[OrderedDict[str, Any]] = []
         for target, target_contract in target_contracts.items():
-            mutation_fixtures: list[OrderedDict[str, Any]] = []
-            for measurement in measurements:
-                if measurement.get("target") != target:
-                    continue
-                measurement_properties = measurement.get("properties")
-                mutation = (
-                    measurement_properties.get("mutation_sensitivity")
-                    if isinstance(measurement_properties, dict)
-                    else None
-                )
-                mutation = mutation if isinstance(mutation, dict) else {}
-                mutation_fixtures.append(
+            for contract_mutation in _feature_mutations(target_contract):
+                mutation_fixtures: list[OrderedDict[str, Any]] = []
+                for measurement in measurements:
+                    if measurement.get("target") != target:
+                        continue
+                    measurement_properties = measurement.get("properties")
+                    sensitivity = (
+                        measurement_properties.get(
+                            "mutation_sensitivity"
+                        )
+                        if isinstance(measurement_properties, dict)
+                        else None
+                    )
+                    sensitivity = (
+                        sensitivity if isinstance(sensitivity, dict) else {}
+                    )
+                    if target == "directional":
+                        mutation = next(
+                            (
+                                item
+                                for item in sensitivity.get("mutants", [])
+                                if isinstance(item, dict)
+                                and item.get("id")
+                                == contract_mutation["id"]
+                            ),
+                            {},
+                        )
+                    else:
+                        mutation = sensitivity
+                    mutation_fixtures.append(
+                        OrderedDict(
+                            (
+                                (
+                                    "fixture",
+                                    str(
+                                        measurement.get(
+                                            "fixture", "unknown"
+                                        )
+                                    ),
+                                ),
+                                (
+                                    "expected_failed_property",
+                                    mutation.get(
+                                        "expected_failed_property"
+                                    ),
+                                ),
+                                (
+                                    "observed_failed_properties",
+                                    mutation.get(
+                                        "observed_failed_properties",
+                                        [
+                                            contract_mutation[
+                                                "expected_failed_property"
+                                            ]
+                                        ]
+                                        if mutation.get("verdict")
+                                        == "CAUGHT"
+                                        else [],
+                                    ),
+                                ),
+                                (
+                                    "verdict",
+                                    mutation.get(
+                                        "verdict", "UNPROVEN"
+                                    ),
+                                ),
+                            )
+                        )
+                    )
+                target_verdict = "CAUGHT"
+                if any(
+                    item["verdict"] == "UNPROVEN"
+                    for item in mutation_fixtures
+                ):
+                    target_verdict = "UNPROVEN"
+                elif any(
+                    item["verdict"] != "CAUGHT"
+                    for item in mutation_fixtures
+                ):
+                    target_verdict = "MISSED"
+                mutation_targets.append(
                     OrderedDict(
                         (
-                            (
-                                "fixture",
-                                str(
-                                    measurement.get(
-                                        "fixture", "unknown"
-                                    )
-                                ),
-                            ),
+                            ("target", target),
+                            ("id", contract_mutation["id"]),
                             (
                                 "expected_failed_property",
-                                mutation.get(
+                                contract_mutation[
                                     "expected_failed_property"
-                                ),
+                                ],
                             ),
-                            (
-                                "observed_failed_properties",
-                                mutation.get(
-                                    "observed_failed_properties", []
-                                ),
-                            ),
-                            (
-                                "verdict",
-                                mutation.get("verdict", "UNPROVEN"),
-                            ),
+                            ("fixtures", mutation_fixtures),
+                            ("verdict", target_verdict),
                         )
                     )
                 )
-            target_verdict = "CAUGHT"
-            if any(
-                item["verdict"] == "UNPROVEN"
-                for item in mutation_fixtures
-            ):
-                target_verdict = "UNPROVEN"
-            elif any(
-                item["verdict"] != "CAUGHT"
-                for item in mutation_fixtures
-            ):
-                target_verdict = "MISSED"
-            mutation_targets.append(
-                OrderedDict(
-                    (
-                        ("target", target),
-                        ("id", target_contract["mutation"]["id"]),
-                        (
-                            "expected_failed_property",
-                            target_contract["mutation"][
-                                "expected_failed_property"
-                            ],
-                        ),
-                        ("fixtures", mutation_fixtures),
-                        ("verdict", target_verdict),
-                    )
-                )
-            )
         mutation_verdict = (
             "UNPROVEN"
             if any(
@@ -4081,20 +4612,23 @@ def run_additive_feature(
                         OrderedDict(
                             (
                                 ("target", target),
-                                ("label", mutation_labels[target]),
+                                ("id", mutation_id),
+                                (
+                                    "label",
+                                    mutation_labels[target][mutation_id],
+                                ),
                                 (
                                     "sha256",
                                     hashlib.sha256(
-                                        mutant_bytes_by_target[target]
+                                        mutant_bytes
                                     ).hexdigest(),
                                 ),
-                                (
-                                    "size",
-                                    len(mutant_bytes_by_target[target]),
-                                ),
+                                ("size", len(mutant_bytes)),
                             )
                         )
                         for target in target_contracts
+                        for mutation_id, mutant_bytes in
+                        mutant_bytes_by_target[target].items()
                     ],
                 ),
                 (
@@ -4174,7 +4708,7 @@ def _feature_driver_failure_report(
                         ("fixture", fixture),
                         ("width", args.width),
                         ("height", args.height),
-                        ("measurement_protocol", "wetness-warp-v4"),
+                        ("measurement_protocol", "wetness-warp-v5"),
                         ("wetness_format", wetness_format),
                         ("failures", [failure]),
                         ("verdict", "UNPROVEN"),
