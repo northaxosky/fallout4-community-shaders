@@ -285,6 +285,19 @@ set_tests_properties(ShaderExecDiffSmoke PROPERTIES
 	LABELS "shader;integration"
 	TIMEOUT 600
 )
+add_test(
+	NAME ShaderWetnessFeatureSmoke
+	COMMAND "${CMAKE_COMMAND}" -E env
+		"FO4CS_EXEC_HARNESS=$<TARGET_FILE:ShaderExecDiffHarness>"
+		FO4CS_REQUIRE_EXEC_HARNESS=1
+		"${Python3_EXECUTABLE}"
+		"${CMAKE_SOURCE_DIR}/scripts/shaders/test_shader_exec_diff.py"
+		--wetness-smoke
+)
+set_tests_properties(ShaderWetnessFeatureSmoke PROPERTIES
+	LABELS "shader;integration"
+	TIMEOUT 600
+)
 
 add_executable(ShaderCatalogTests
 	tests/ShaderCatalogTests.cpp

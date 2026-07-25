@@ -469,5 +469,79 @@
       "fixture": "adversarial",
       "expected_bucket": "depth.equal"
     }
-  ]
+  ],
+  "additive_features": {
+    "wetness-effects": {
+      "evidence_class": "additive-feature",
+      "comparison": "reconstructed-stock-vs-reconstructed-feature",
+      "native_bytecode_used": false,
+      "profile": "wetness-directional-lighting",
+      "measurement_protocol": "wetness-warp-v1",
+      "source": "shaders/lighting/bsdf_light_deferred.hlsl",
+      "minimum_bucket_population": 4,
+      "dimensions": {
+        "minimum_width": 16,
+        "minimum_height": 16
+      },
+      "resource_delta": {
+        "kind": "Texture2D",
+        "bind_point": 4,
+        "value_type": "float"
+      },
+      "variants": [
+        {
+          "id": "directional",
+          "defines": [
+            "LIGHT_TYPE=1"
+          ],
+          "ibl": "inactive"
+        },
+        {
+          "id": "directional-ibl",
+          "defines": [
+            "AMBIENT_IBL_IN_LIGHT=1",
+            "LIGHT_TYPE=1"
+          ],
+          "ibl": "active"
+        }
+      ],
+      "fixtures": [
+        {
+          "id": "adversarial",
+          "wetness_format": "R32_FLOAT"
+        },
+        {
+          "id": "native",
+          "wetness_format": "R8_UNORM"
+        }
+      ],
+      "mask_buckets": [
+        "mask.zero",
+        "mask.partial",
+        "mask.full"
+      ],
+      "material_buckets": [
+        "material.default",
+        "material.skin"
+      ],
+      "mrt_buckets": [
+        "diffuse",
+        "specular"
+      ],
+      "monotonic_levels": [
+        0.0,
+        0.25,
+        0.5,
+        0.75,
+        1.0
+      ],
+      "mutation": {
+        "id": "wetness-load-zero",
+        "class": "feature-neutering",
+        "expected_failed_property": "active_locality",
+        "old": "float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;",
+        "new": "float wetness = 0.0;"
+      }
+    }
+  }
 }
