@@ -139,6 +139,7 @@ enum class InputProfile
     DirectionalLighting,
     PointLightingLive,
     AmbientIbl,
+    AmbientIblRuntime,
     DeferredPrepass,
     VlsSliceScatter,
 };
@@ -153,6 +154,8 @@ const char* InputProfileName(InputProfile profile)
         return "point-lighting-live";
     case InputProfile::AmbientIbl:
         return "ambient-ibl";
+    case InputProfile::AmbientIblRuntime:
+        return "ambient-ibl-runtime";
     case InputProfile::DeferredPrepass:
         return "deferred-prepass";
     case InputProfile::VlsSliceScatter:
@@ -160,6 +163,12 @@ const char* InputProfileName(InputProfile profile)
     default:
         return "unshaped";
     }
+}
+
+bool IsAmbientIblProfile(InputProfile profile)
+{
+    return profile == InputProfile::AmbientIbl ||
+        profile == InputProfile::AmbientIblRuntime;
 }
 
 struct InputScenario
@@ -1387,35 +1396,56 @@ bool IsDirectionalLightingContract(
         disassembly.comparisonSamplers.count(5) != 0;
 }
 
+bool IsAmbientIblContractWithCb12Size(
+    const ShaderContract& contract,
+    const DisassemblyInfo& disassembly,
+    UINT cb12Float4Count)
+{
+    static const std::set<UINT> slots{
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 14, 15};
+    const bool hasCubeArray = std::any_of(
+        contract.resources.begin(), contract.resources.end(),
+        [](const ResourceBinding& binding) {
+            return binding.bindPoint == 8 &&
+                binding.bindCount == 1 &&
+                binding.dimension == D3D_SRV_DIMENSION_TEXTURECUBEARRAY;
+        });
+    const bool hasTexture2DSlots = std::all_of(
+        slots.begin(), slots.end(),
+        [&contract](UINT bindPoint) {
+            return bindPoint == 8 || HasExactTexture2D(contract, bindPoint);
+        });
+    const bool hasSamplerSlots = std::all_of(
+        slots.begin(), slots.end(),
+        [&contract](UINT bindPoint) {
+            return HasExactSampler(contract, bindPoint);
+        });
+    return contract.renderTargetCount == 1 &&
+        contract.constantBuffers.size() == 3 &&
+        HasExactConstantBuffer(contract, 0, 3) &&
+        HasExactConstantBuffer(contract, 2, 6) &&
+        HasExactConstantBuffer(contract, 12, cb12Float4Count) &&
+        contract.resources.size() == slots.size() &&
+        contract.samplers.size() == slots.size() &&
+        hasCubeArray &&
+        hasTexture2DSlots &&
+        hasSamplerSlots &&
+        disassembly.samplers == slots &&
+        disassembly.comparisonSamplers.empty();
+}
+
 bool IsAmbientIblContract(
     const ShaderContract& contract,
     const DisassemblyInfo& disassembly)
 {
-    const auto hasConstantBuffer = [&contract](UINT bindPoint, UINT size) {
-        return std::any_of(
-            contract.constantBuffers.begin(), contract.constantBuffers.end(),
-            [bindPoint, size](const ConstantBufferBinding& binding) {
-                return binding.bindPoint == bindPoint && binding.size >= size;
-            });
-    };
-    const auto hasResource = [&contract](
-                                 UINT bindPoint,
-                                 D3D_SRV_DIMENSION dimension) {
-        return std::any_of(
-            contract.resources.begin(), contract.resources.end(),
-            [bindPoint, dimension](const ResourceBinding& binding) {
-                return binding.bindPoint == bindPoint &&
-                    binding.dimension == dimension;
-            });
-    };
-    return contract.renderTargetCount == 1 &&
-        hasConstantBuffer(0, 3 * 16) &&
-        hasConstantBuffer(2, 6 * 16) &&
-        hasConstantBuffer(12, 31 * 16) &&
-        hasResource(1, D3D_SRV_DIMENSION_TEXTURE2D) &&
-        hasResource(8, D3D_SRV_DIMENSION_TEXTURECUBEARRAY) &&
-        hasResource(15, D3D_SRV_DIMENSION_TEXTURE2D) &&
-        disassembly.comparisonSamplers.empty();
+    return IsAmbientIblContractWithCb12Size(contract, disassembly, 31);
+}
+
+bool IsAmbientIblRuntimeContract(
+    const ShaderContract& contract,
+    const DisassemblyInfo& disassembly)
+{
+    return IsAmbientIblContractWithCb12Size(contract, disassembly, 47);
 }
 
 bool IsDeferredPrepassContract(
@@ -1458,6 +1488,8 @@ InputProfile DetectInputProfile(
         return InputProfile::DirectionalLighting;
     if (IsPointLightingLiveContract(contract, disassembly))
         return InputProfile::PointLightingLive;
+    if (IsAmbientIblRuntimeContract(contract, disassembly))
+        return InputProfile::AmbientIblRuntime;
     if (IsAmbientIblContract(contract, disassembly))
         return InputProfile::AmbientIbl;
     if (IsDeferredPrepassContract(contract, disassembly))
@@ -1483,7 +1515,7 @@ std::vector<InputScenario> BuildInputScenarios(
     UINT seedBase)
 {
     std::vector<InputScenario> scenarios;
-    scenarios.reserve(randomSeedCount + 24);
+    scenarios.reserve(randomSeedCount + 40);
     for (UINT seed = 0; seed < randomSeedCount; ++seed)
         scenarios.push_back(
             {seed, seedBase + seed, false, "random-" + std::to_string(seed), {}});
@@ -1497,7 +1529,18 @@ std::vector<InputScenario> BuildInputScenarios(
             seedBase + 0xA511E9B3u + scenario.id * 0x9E3779B9u;
         scenario.dedicated = true;
         scenario.semanticId = id;
-        if (profile == InputProfile::AmbientIbl)
+        if (profile == InputProfile::AmbientIblRuntime)
+        {
+            scenario.controls = {
+                {"ambient_depth", 1.0f},
+                {"ambient_ibl", 1.0f},
+                {"ambient_material", 1.0f},
+                {"ambient_rough01", 0.35f},
+                {"ambient_tap_skin", 1.0f},
+                {"ambient_fog_distance", 0.5f},
+            };
+        }
+        else if (IsAmbientIblProfile(profile))
         {
             scenario.controls = {
                 {"ambient_depth", 1.0f},
@@ -1555,7 +1598,35 @@ std::vector<InputScenario> BuildInputScenarios(
         scenarios.push_back(std::move(scenario));
     };
 
-    if (profile == InputProfile::AmbientIbl)
+    if (profile == InputProfile::AmbientIblRuntime)
+    {
+        add("depth-near", {{"ambient_depth", -1.0f}});
+        if (fixture == Fixture::Adversarial)
+            add("depth-equal", {{"ambient_depth", 0.0f}});
+        add("depth-far", {{"ambient_depth", 1.0f}});
+        add("ibl-off", {{"ambient_ibl", 0.0f}});
+        add("ibl-on", {{"ambient_ibl", 1.0f}});
+        add("material-default", {{"ambient_material", 1.0f}});
+        add("material-skin", {{"ambient_material", 5.0f}});
+        add("material-zero-2", {{"ambient_material", 2.0f}});
+        add("material-zero-3", {{"ambient_material", 3.0f}});
+        add("roughness-zero", {{"ambient_rough01", 0.0f}});
+        add("roughness-mid", {{"ambient_rough01", 0.35f}});
+        add("roughness-high", {{"ambient_rough01", 0.7f}});
+        add("skin-taps-default", {
+            {"ambient_material", 5.0f},
+            {"ambient_tap_skin", 0.0f},
+        });
+        add("skin-taps-skin", {
+            {"ambient_material", 5.0f},
+            {"ambient_tap_skin", 1.0f},
+        });
+        add("sslr-live", {{"ambient_material", 5.0f}});
+        add("fog-near", {{"ambient_fog_distance", 0.01f}});
+        add("fog-main", {{"ambient_fog_distance", 0.5f}});
+        add("fog-tail", {{"ambient_fog_distance", 0.9f}});
+    }
+    else if (IsAmbientIblProfile(profile))
     {
         add("depth-near", {{"ambient_depth", -1.0f}});
         if (fixture == Fixture::Adversarial)
@@ -2091,7 +2162,9 @@ void ShapeAmbientConstants(
     std::vector<float>& values,
     UINT width,
     UINT height,
-    std::mt19937& random)
+    std::mt19937& random,
+    InputProfile profile,
+    const InputScenario& scenario)
 {
     (void)width;
     (void)height;
@@ -2101,6 +2174,22 @@ void ShapeAmbientConstants(
         SetVector(values, 28, {0.02f, 0.5f, 0.2f, 0.8f});
         SetVector(values, 29, {0.36f, -0.4f, 0.0f, 0.0f});
         SetVector(values, 30, {0.0f, unit(random), 0.0f, 0.0f});
+        if (profile == InputProfile::AmbientIblRuntime)
+        {
+            static constexpr std::array<float, 3> distances{
+                0.01f, 0.5f, 0.9f};
+            const float fallback =
+                distances[scenario.randomSeed % distances.size()];
+            const float distance = ScenarioControl(
+                scenario, "ambient_fog_distance", fallback);
+            SetVector(values, 35, {0.0f, 0.0f, 0.15f, 0.0f});
+            SetVector(values, 41, {0.0f, 0.0f, -distance, 0.0f});
+            SetVector(values, 42, {0.08f, 0.10f, 0.12f, 1.25f});
+            SetVector(values, 43, {0.12f, 0.15f, 0.18f, 0.05f});
+            SetVector(values, 44, {0.30f, 0.35f, 0.40f, 0.90f});
+            SetVector(values, 45, {0.45f, 0.50f, 0.55f, 0.0f});
+            SetVector(values, 46, {0.04f, 0.02f, -0.20f, -0.10f});
+        }
         return;
     }
 
@@ -2125,6 +2214,11 @@ void ShapeAmbientConstants(
             1.0f,
             1.0f,
         });
+        if (profile == InputProfile::AmbientIblRuntime)
+        {
+            SetVector(values, 1, {0.4f, 0.2f, 0.8f, 0.75f});
+            SetVector(values, 2, {0.8f, 0.7f, 0.6f, 4.0f});
+        }
         SetVector(values, 5, {1.0f, 1.0f, 0.0f, 0.0f});
     }
 }
@@ -2373,6 +2467,7 @@ void FillPointLightingTexture(
 
 void FillAmbientTexture(
     std::vector<float>& values,
+    InputProfile profile,
     UINT bindPoint,
     UINT width,
     UINT height,
@@ -2416,9 +2511,19 @@ void FillAmbientTexture(
 
     if (bindPoint == 3)
     {
-        const bool skin = ScenarioControl(
-            scenario, "ambient_skin",
-            static_cast<float>(std::uniform_int_distribution<int>(0, 1)(random))) != 0.0f;
+        const bool runtime = profile == InputProfile::AmbientIblRuntime;
+        const float randomMaterial =
+            static_cast<float>(std::array<UINT, 4>{1, 2, 3, 5}[
+                scenario.randomSeed % 4u]);
+        const float materialId = runtime
+            ? ScenarioControl(scenario, "ambient_material", randomMaterial)
+            : (ScenarioControl(
+                   scenario, "ambient_skin",
+                   static_cast<float>(
+                       std::uniform_int_distribution<int>(0, 1)(random))) != 0.0f
+                ? 5.0f
+                : 1.0f);
+        const bool skin = std::abs(materialId - 5.0f) < 0.25f;
         const bool tapSkin =
             ScenarioControl(scenario, "ambient_tap_skin", 1.0f) != 0.0f;
         const float selectedRoughness =
@@ -2441,8 +2546,9 @@ void FillAmbientTexture(
             values[pixel * 4 + 2] = unit(random);
             const bool pixelSkin =
                 skin && (tapSkin || pixel == 0);
-            values[pixel * 4 + 3] =
-                (pixelSkin ? 5.0f : 1.0f) / 255.0f;
+            const float pixelMaterialId =
+                skin ? (pixelSkin ? 5.0f : 1.0f) : materialId;
+            values[pixel * 4 + 3] = pixelMaterialId / 255.0f;
         }
         return;
     }
@@ -2710,10 +2816,11 @@ void FillProfileTexture(
     Fixture fixture,
     const InputScenario& scenario)
 {
-    if (profile == InputProfile::AmbientIbl)
+    if (IsAmbientIblProfile(profile))
     {
         FillAmbientTexture(
-            values, bindPoint, width, height, arraySize, random, fixture, scenario);
+            values, profile, bindPoint, width, height, arraySize,
+            random, fixture, scenario);
     }
     else if (profile == InputProfile::DirectionalLighting)
     {
@@ -2930,7 +3037,7 @@ TextureFormatSpec SelectTextureFormat(
                 DXGI_FORMAT_R24G8_TYPELESS,
                 DXGI_FORMAT_R24_UNORM_X8_TYPELESS, 4};
     }
-    else if (profile == InputProfile::AmbientIbl)
+    else if (IsAmbientIblProfile(profile))
     {
         if (bindPoint == 1)
             return {DXGI_FORMAT_R16G16_UNORM, DXGI_FORMAT_R16G16_UNORM, 4};
@@ -3210,12 +3317,16 @@ BoundResource CreateTexture2DResource(
     else if (binding.dimension == D3D_SRV_DIMENSION_TEXTURECUBE)
         arraySize = 6;
     else if (binding.dimension == D3D_SRV_DIMENSION_TEXTURECUBEARRAY)
-        arraySize = profile == InputProfile::AmbientIbl ? 24u : 6u;
+        arraySize = IsAmbientIblProfile(profile) ? 24u : 6u;
+    const UINT mipLevels =
+        profile == InputProfile::AmbientIblRuntime && bindPoint == 8
+        ? 7u
+        : 1u;
 
     D3D11_TEXTURE2D_DESC textureDesc{};
     textureDesc.Width = width;
     textureDesc.Height = height;
-    textureDesc.MipLevels = 1;
+    textureDesc.MipLevels = mipLevels;
     textureDesc.ArraySize = arraySize;
     const TextureFormatSpec format =
         SelectTextureFormat(profile, fixture, bindPoint);
@@ -3228,26 +3339,35 @@ BoundResource CreateTexture2DResource(
         binding.dimension == D3D_SRV_DIMENSION_TEXTURECUBEARRAY)
         textureDesc.MiscFlags = D3D11_RESOURCE_MISC_TEXTURECUBE;
 
-    std::vector<float> values;
-    TexturePayload payload;
+    std::vector<TexturePayload> mipPayloads(mipLevels);
     std::vector<D3D11_SUBRESOURCE_DATA> initialData;
     if (!multisampled)
     {
-        values.resize(static_cast<std::size_t>(width) * height * arraySize * 4);
-        FillProfileTexture(
-            values, profile, bindPoint, width, height, arraySize,
-            random, fixture, scenario);
-        payload = EncodeTexture(values, format);
-        initialData.resize(arraySize);
-        const std::size_t bytesPerSlice =
-            static_cast<std::size_t>(width) * height * format.bytesPerPixel;
-        for (UINT slice = 0; slice < arraySize; ++slice)
+        initialData.resize(static_cast<std::size_t>(arraySize) * mipLevels);
+        for (UINT mip = 0; mip < mipLevels; ++mip)
         {
-            initialData[slice].pSysMem =
-                payload.bytes.data() + slice * bytesPerSlice;
-            initialData[slice].SysMemPitch = width * format.bytesPerPixel;
-            initialData[slice].SysMemSlicePitch =
-                width * height * format.bytesPerPixel;
+            const UINT mipWidth = std::max(1u, width >> mip);
+            const UINT mipHeight = std::max(1u, height >> mip);
+            std::vector<float> values(
+                static_cast<std::size_t>(mipWidth) *
+                mipHeight * arraySize * 4);
+            FillProfileTexture(
+                values, profile, bindPoint, mipWidth, mipHeight, arraySize,
+                random, fixture, scenario);
+            mipPayloads[mip] = EncodeTexture(values, format);
+            const std::size_t bytesPerSlice =
+                static_cast<std::size_t>(mipWidth) *
+                mipHeight * format.bytesPerPixel;
+            for (UINT slice = 0; slice < arraySize; ++slice)
+            {
+                D3D11_SUBRESOURCE_DATA& data = initialData[
+                    D3D11CalcSubresource(mip, slice, mipLevels)];
+                data.pSysMem =
+                    mipPayloads[mip].bytes.data() + slice * bytesPerSlice;
+                data.SysMemPitch = mipWidth * format.bytesPerPixel;
+                data.SysMemSlicePitch =
+                    mipWidth * mipHeight * format.bytesPerPixel;
+            }
         }
     }
 
@@ -3293,11 +3413,11 @@ BoundResource CreateTexture2DResource(
     {
     case D3D_SRV_DIMENSION_TEXTURE2D:
         viewDesc.Texture2D.MostDetailedMip = 0;
-        viewDesc.Texture2D.MipLevels = 1;
+        viewDesc.Texture2D.MipLevels = mipLevels;
         break;
     case D3D_SRV_DIMENSION_TEXTURE2DARRAY:
         viewDesc.Texture2DArray.MostDetailedMip = 0;
-        viewDesc.Texture2DArray.MipLevels = 1;
+        viewDesc.Texture2DArray.MipLevels = mipLevels;
         viewDesc.Texture2DArray.FirstArraySlice = 0;
         viewDesc.Texture2DArray.ArraySize = arraySize;
         break;
@@ -3309,11 +3429,11 @@ BoundResource CreateTexture2DResource(
         break;
     case D3D_SRV_DIMENSION_TEXTURECUBE:
         viewDesc.TextureCube.MostDetailedMip = 0;
-        viewDesc.TextureCube.MipLevels = 1;
+        viewDesc.TextureCube.MipLevels = mipLevels;
         break;
     case D3D_SRV_DIMENSION_TEXTURECUBEARRAY:
         viewDesc.TextureCubeArray.MostDetailedMip = 0;
-        viewDesc.TextureCubeArray.MipLevels = 1;
+        viewDesc.TextureCubeArray.MipLevels = mipLevels;
         viewDesc.TextureCubeArray.First2DArrayFace = 0;
         viewDesc.TextureCubeArray.NumCubes = arraySize / 6;
         break;
@@ -3326,8 +3446,14 @@ BoundResource CreateTexture2DResource(
     result.width = width;
     result.height = height;
     result.arraySize = arraySize;
-    result.encodedBytes = std::move(payload.bytes);
-    result.decodedValues = std::move(payload.decoded);
+    for (TexturePayload& payload : mipPayloads)
+    {
+        result.encodedBytes.insert(
+            result.encodedBytes.end(),
+            payload.bytes.begin(), payload.bytes.end());
+    }
+    if (!mipPayloads.empty())
+        result.decodedValues = std::move(mipPayloads.front().decoded);
     result.format = {
         bindPoint,
         DimensionName(binding.dimension),
@@ -3461,9 +3587,10 @@ SeedResources CreateSeedResources(
         else if (profile == InputProfile::PointLightingLive)
             ShapePointLightingConstants(
                 binding.bindPoint, values, width, height, fixture, scenario);
-        else if (profile == InputProfile::AmbientIbl)
+        else if (IsAmbientIblProfile(profile))
             ShapeAmbientConstants(
-                binding.bindPoint, values, width, height, random);
+                binding.bindPoint, values, width, height, random,
+                profile, scenario);
         else if (profile == InputProfile::DeferredPrepass)
             ShapeDeferredPrepassConstants(
                 binding.bindPoint, values, scenario);
@@ -3509,7 +3636,7 @@ SeedResources CreateSeedResources(
             D3D11_SAMPLER_DESC samplerDesc{};
             samplerDesc.Filter = comparison
                 ? D3D11_FILTER_COMPARISON_MIN_MAG_MIP_LINEAR
-                : (profile == InputProfile::AmbientIbl &&
+                : (IsAmbientIblProfile(profile) &&
                    sampler.bindPoint == 3
                     ? D3D11_FILTER_MIN_MAG_MIP_POINT
                     : D3D11_FILTER_MIN_MAG_MIP_LINEAR);
@@ -3811,7 +3938,7 @@ std::map<std::string, BucketMask> ClassifyBuckets(
     const std::size_t pixelCount = static_cast<std::size_t>(width) * height;
     const float depthBoundary = 0.01f;
 
-    if (profile == InputProfile::AmbientIbl)
+    if (IsAmbientIblProfile(profile))
     {
         const Pixel depth = ResourcePixel(FindResource(resources, 7));
         AddUniformBucket(
@@ -3836,11 +3963,28 @@ std::map<std::string, BucketMask> ClassifyBuckets(
         const BoundSampler& shadingSampler = FindSampler(resources, 3);
         const Pixel shading =
             SampleResource2D(shadingResource, shadingSampler, 0.0f, 0.0f);
-        const bool skin = std::abs(shading[3] * 255.0f - 5.0f) < 0.25f;
+        const float materialId = shading[3] * 255.0f;
+        const bool skin = std::abs(materialId - 5.0f) < 0.25f;
+        const bool material2 = std::abs(materialId - 2.0f) < 0.25f;
+        const bool material3 = std::abs(materialId - 3.0f) < 0.25f;
         AddUniformBucket(
             buckets, "material.skin", skin, pixelCount, pixelCount);
-        AddUniformBucket(
-            buckets, "material.default", !skin, pixelCount, pixelCount);
+        if (profile == InputProfile::AmbientIblRuntime)
+        {
+            AddUniformBucket(
+                buckets, "material.zero-2", material2, pixelCount, pixelCount);
+            AddUniformBucket(
+                buckets, "material.zero-3", material3, pixelCount, pixelCount);
+            AddUniformBucket(
+                buckets, "material.default",
+                !skin && !material2 && !material3,
+                pixelCount, pixelCount);
+        }
+        else
+        {
+            AddUniformBucket(
+                buckets, "material.default", !skin, pixelCount, pixelCount);
+        }
         const float roughness = std::clamp(shading[0] - 0.3f, 0.0f, 1.0f);
         AddUniformBucket(
             buckets, "roughness.zero", roughness == 0.0f,
@@ -3884,6 +4028,135 @@ std::map<std::string, BucketMask> ClassifyBuckets(
             AddUniformBucket(
                 buckets, "skin-taps.default", defaultTaps != 0,
                 pixelCount * defaultTaps, pixelCount);
+        }
+
+        if (profile == InputProfile::AmbientIblRuntime)
+        {
+            const Matrix4 farRows = ReadMatrix(
+                FindConstantBuffer(resources, 12).values, 20);
+            const Matrix4 nearRows = ReadMatrix(
+                FindConstantBuffer(resources, 12).values, 24);
+            AssertMatrixPair("runtime-ambient-reprojection", farRows, nearRows);
+            AddUniformBucket(
+                buckets, "reprojection.distinct-banks", true,
+                pixelCount, pixelCount);
+
+            const Pixel sslr = ResourcePixel(FindResource(resources, 12));
+            const bool sslrLive =
+                skin && (sslr[0] != 0.0f || sslr[1] != 0.0f || sslr[2] != 0.0f);
+            AddUniformBucket(
+                buckets, "sslr.live", sslrLive, pixelCount, pixelCount);
+
+            const auto screen = ConstantVector(resources, 2, 0);
+            const float sampleU = 0.5f * screen[0];
+            const float sampleV = 0.5f * screen[1];
+            const Pixel sampledDepth = SampleResource2D(
+                FindResource(resources, 7), FindSampler(resources, 7),
+                sampleU, sampleV);
+            const bool nearPath = sampledDepth[1] <= depthBoundary;
+            const float linearizedDepth = nearPath
+                ? sampledDepth[1] * 100.0f
+                : sampledDepth[1] * 1.01f - 0.01f;
+            const Pixel positionInput{
+                sampleU * screen[2] * 2.0f - 1.0f,
+                (-sampleV * screen[3] + 1.0f) * 2.0f - 1.0f,
+                linearizedDepth,
+                1.0f,
+            };
+            const Matrix4& rows = nearPath ? nearRows : farRows;
+            const float positionW = DotRow(rows[3], positionInput);
+            const float positionX = DotRow(rows[0], positionInput) / positionW;
+            const float positionY = DotRow(rows[1], positionInput) / positionW;
+            const float positionZ = DotRow(rows[2], positionInput) / positionW;
+            const float positionLengthSquared =
+                positionX * positionX +
+                positionY * positionY +
+                positionZ * positionZ;
+
+            const auto cameraAdjust = ConstantVector(resources, 12, 35);
+            const auto viewToWorldRow2 = ConstantVector(resources, 12, 14);
+            const auto fogDistance = ConstantVector(resources, 12, 41);
+            const auto fogNearLow = ConstantVector(resources, 12, 42);
+            const auto fogNearHigh = ConstantVector(resources, 12, 43);
+            const auto fogFarLow = ConstantVector(resources, 12, 44);
+            const auto fogHeight = ConstantVector(resources, 12, 46);
+            const float fogPlaneDistance =
+                viewToWorldRow2[0] * positionX +
+                viewToWorldRow2[1] * positionY +
+                viewToWorldRow2[2] * positionZ +
+                viewToWorldRow2[3] +
+                cameraAdjust[2];
+            const float distanceRamp =
+                std::sqrt(positionLengthSquared) * fogDistance[0] -
+                fogDistance[2];
+            const float distanceFactor =
+                std::clamp(distanceRamp, 0.0f, 1.0f);
+            const float fogRemapLow = std::clamp(
+                fogPlaneDistance * fogHeight[0] - fogHeight[2],
+                0.0f, 1.0f);
+            const float fogRemapHigh = std::clamp(
+                fogPlaneDistance * fogHeight[1] - fogHeight[3],
+                0.0f, 1.0f);
+            const float fogBlend =
+                fogRemapLow +
+                (fogRemapHigh - fogRemapLow) * distanceFactor;
+            const float fogIntensityClamp = distanceRamp > 0.75f
+                ? std::min(
+                    (distanceFactor - 0.75f) * 4.0f *
+                        (1.0f - fogNearHigh[3]) +
+                        fogNearHigh[3],
+                    1.0f)
+                : fogNearHigh[3];
+            const float nearEscape = distanceRamp < 0.015f
+                ? distanceFactor * 66.666672f
+                : 1.0f;
+            const float fogIntensity = std::min(
+                fogIntensityClamp,
+                std::pow(distanceFactor, fogNearLow[3]));
+            const float fogBlendWeight =
+                fogBlend * fogFarLow[3] + (1.0f - fogBlend);
+            const float fogMixFactor =
+                fogBlendWeight * fogIntensity * nearEscape;
+
+            AddUniformBucket(
+                buckets, "fog.distance-near", distanceRamp < 0.015f,
+                pixelCount, pixelCount);
+            AddUniformBucket(
+                buckets, "fog.distance-main",
+                distanceRamp >= 0.015f && distanceRamp <= 0.75f,
+                pixelCount, pixelCount);
+            AddUniformBucket(
+                buckets, "fog.distance-tail", distanceRamp > 0.75f,
+                pixelCount, pixelCount);
+            AddUniformBucket(
+                buckets, "fog.stack-grayscale",
+                fogMixFactor < fogNearHigh[3],
+                pixelCount, pixelCount);
+            AddUniformBucket(
+                buckets, "fog.stack-color",
+                fogMixFactor >= fogNearHigh[3],
+                pixelCount, pixelCount);
+
+            const auto blur = ConstantVector(resources, 0, 0);
+            const float blurDepth = ResourcePixel(
+                FindResource(resources, 15))[1];
+            const float blurDepthScale =
+                (sampledDepth[1] >= depthBoundary ? 1.0f : 0.0f) *
+                    blur[2] +
+                1.0f;
+            const float centerRef = blurDepthScale * blurDepth;
+            const bool finite =
+                positionW != 0.0f &&
+                positionLengthSquared > 0.0f &&
+                (!skin || centerRef != 0.0f) &&
+                std::isfinite(positionX) &&
+                std::isfinite(positionY) &&
+                std::isfinite(positionZ) &&
+                std::isfinite(distanceRamp) &&
+                std::isfinite(fogMixFactor);
+            AddUniformBucket(
+                buckets, "finite.live", finite,
+                pixelCount, pixelCount);
         }
     }
     else if (profile == InputProfile::DirectionalLighting)
@@ -4582,6 +4855,25 @@ RenderOutputs RenderShader(
     return outputs;
 }
 
+void AssertFiniteOutputs(
+    const RenderOutputs& outputs,
+    const InputScenario& scenario)
+{
+    for (const RenderTargetPixels& target : outputs)
+    {
+        for (const Pixel& pixel : target)
+        {
+            if (std::any_of(
+                    pixel.begin(), pixel.end(),
+                    [](float value) { return !std::isfinite(value); }))
+            {
+                ThrowFailure(
+                    "nonfinite_reference: " + scenario.semanticId);
+            }
+        }
+    }
+}
+
 struct ValueComparison
 {
     bool divergent = false;
@@ -4939,7 +5231,7 @@ void WriteMeasurementReport(
         : (aggregate.divergentPixels == 0 ? "PASS" : "FAIL");
     stream << "{\"schema\":\"fo4cs.shader-exec-measurement\""
            << ",\"schema_version\":1"
-           << ",\"harness_version\":3"
+           << ",\"harness_version\":4"
            << ",\"source_sha256\":\""
            << FO4CS_EXEC_HARNESS_SOURCE_SHA256 << "\""
            << ",\"profile\":\"" << InputProfileName(profile) << "\""
@@ -5970,7 +6262,7 @@ int RunSelfTest()
         RuntimeComponents();
     std::cout
         << "{\"schema\":\"fo4cs.shader-exec-self-test\","
-        << "\"schema_version\":1,\"harness_version\":3,"
+        << "\"schema_version\":1,\"harness_version\":4,"
         << "\"source_sha256\":\"" << FO4CS_EXEC_HARNESS_SOURCE_SHA256 << "\","
         << "\"front_face_probe\":{\"version\":\""
         << FrontFaceProbeVersion << "\",\"clockwise_state_front\":"
@@ -6219,6 +6511,8 @@ int Run(const Options& options)
             device.Get(), context.Get(), vertexShader.Get(), referenceShader.Get(),
             rasterizerState, depthStencilState.Get(), seedResources,
             referenceContract.renderTargetCount, options.width, options.height);
+        if (profile == InputProfile::AmbientIblRuntime)
+            AssertFiniteOutputs(referenceOutputs, scenario);
         const RenderOutputs candidateOutputs = RenderShader(
             device.Get(), context.Get(), vertexShader.Get(), candidateShader.Get(),
             rasterizerState, depthStencilState.Get(), seedResources,
@@ -6270,6 +6564,7 @@ std::pair<std::string, int> ClassifyFailure(const std::string& message)
              std::string("contract_mismatch"),
              std::string("front_face_probe"),
              std::string("matrix_assertion"),
+             std::string("nonfinite_reference"),
              std::string("unsupported_input_resource"),
              std::string("unshaped")})
     {
@@ -6289,7 +6584,7 @@ void WriteFailureReport(
     if (!stream)
         return;
     stream << "{\"schema\":\"fo4cs.shader-exec-measurement\","
-           << "\"schema_version\":1,\"harness_version\":3,"
+           << "\"schema_version\":1,\"harness_version\":4,"
            << "\"source_sha256\":\""
            << FO4CS_EXEC_HARNESS_SOURCE_SHA256 << "\","
            << "\"profile\":\"unshaped\",\"fixture\":\""

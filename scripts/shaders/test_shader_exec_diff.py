@@ -72,10 +72,18 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             contract_profiles["bsdf_light_deferred_point"],
         )
         self.assertEqual(
+            "ambient-ibl-runtime",
+            contract_profiles["ambient_ibl_pass_runtime"],
+        )
+        self.assertEqual(
             "vls-slice-scatter",
             contract_profiles["vls_slice_scatter"],
         )
-        for profile_name in ("point-lighting-live", "vls-slice-scatter"):
+        for profile_name in (
+            "ambient-ibl-runtime",
+            "point-lighting-live",
+            "vls-slice-scatter",
+        ):
             required = self.contracts["profiles"][profile_name]["required_buckets"]
             self.assertIn("depth.equal", required["adversarial"])
             self.assertNotIn("depth.equal", required["native"])

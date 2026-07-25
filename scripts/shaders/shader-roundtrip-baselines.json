@@ -12,6 +12,15 @@
       "invariant": "Re-baselined for the SSSS blur center-source fix against corpus blob 3559. The bilateral blur's center (per-tap lerp target + 0.560479 center weight) and the non-skin ambient base both use the t10 center sample (corpus r8, insn 21), not skinAux/iblLitBlend; skinAux (t4) is an additive ambient term (insn 255). Six further fidelity bugs found by shader_exec_diff.py (all missed by corpus-diff, which reported 44/44 samples PASS): t2 material channels are .y (IBL gate + cubemap array slice) and .z (gloss), not .x/.y; roughFactor = min(sqrt(rough01), 1) computed unconditionally (corpus rsq->rcp->min yields 0 at rough01=0), not a guarded 1/sqrt returning 1 for rough01<=0; final modulation multiplies glossFactor (r0.z, insn 258), not linearizedDepth; skin ring-tap material-id reads t3.w, not t3.x; probe-B reads t12.xyz, not t12.xyw. shader_exec_diff.py (shaped inputs): PASS, 0/2097152 divergent channels, max abs 4.9e-4."
     },
     {
+      "name": "ambient_ibl_pass_runtime",
+      "src": "shaders/lighting/ambient_ibl_pass_runtime.hlsl",
+      "defines": [],
+      "sha1": "A2E4D539EE76E0BD3449C0D8009D8289ACA8E01C",
+      "corpus_sha1": "2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
+      "corpus_blob_index": 3560,
+      "invariant": "Exterior/runtime ambient permutation with the CB12[47] fog/color stack and t12 blurred-SSLR contribution in the material-5 blur path. Authoritative harness-v4 exec-diff: adversarial 0/1703936 divergent pixels (0/6815744 channels), max abs 1.4305115e-06; native-format 0/1638400 pixels (0/6553600 channels), max abs 9.9778175e-05. The exclusive-depth-boundary mutant diverges all 65536 depth.equal pixels with a zero-divergence control and zero near/far spill."
+    },
+    {
       "name": "bsdf_light_deferred_directional",
       "src": "shaders/lighting/bsdf_light_deferred.hlsl",
       "defines": [

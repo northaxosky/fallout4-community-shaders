@@ -1,7 +1,7 @@
 {
   "schema": "fo4cs.shader-exec-contracts",
   "schema_version": 1,
-  "harness_version": 3,
+  "harness_version": 4,
   "minimum_bucket_population": 64,
   "fixtures": [
     "adversarial",
@@ -50,6 +50,81 @@
           "roughness.high",
           "skin-taps.default",
           "skin-taps.skin"
+        ]
+      }
+    },
+    "ambient-ibl-runtime": {
+      "predicates": {
+        "depth.near": "decoded(t7.y) < float32(0.01)",
+        "depth.equal": "decoded(t7.y) == float32(0.01)",
+        "depth.far": "decoded(t7.y) > float32(0.01)",
+        "ibl.off": "decoded(t2.y) <= float32(0.001961)",
+        "ibl.on": "decoded(t2.y) > float32(0.001961)",
+        "material.default": "all(abs(decoded(t3.w) * 255 - id) >= 0.25 for id in [2,3,5])",
+        "material.skin": "abs(decoded(t3.w) * 255 - 5) < 0.25",
+        "material.zero-2": "abs(decoded(t3.w) * 255 - 2) < 0.25",
+        "material.zero-3": "abs(decoded(t3.w) * 255 - 3) < 0.25",
+        "roughness.zero": "saturate(decoded(t3.x) - 0.3) == 0",
+        "roughness.mid": "0 < saturate(decoded(t3.x) - 0.3) < 0.6",
+        "roughness.high": "saturate(decoded(t3.x) - 0.3) >= 0.6",
+        "skin-taps.default": "skin center and abs(decoded(t3.w at tap) * 255 - 5) >= 0.25",
+        "skin-taps.skin": "skin center and abs(decoded(t3.w at tap) * 255 - 5) < 0.25",
+        "sslr.live": "skin center and decoded(t12.rgb) is nonzero",
+        "fog.distance-near": "distanceRamp < 0.015",
+        "fog.distance-main": "0.015 <= distanceRamp <= 0.75",
+        "fog.distance-tail": "distanceRamp > 0.75",
+        "fog.stack-grayscale": "fogMixFactor < uploaded cb12[43].w",
+        "fog.stack-color": "fogMixFactor >= uploaded cb12[43].w",
+        "reprojection.distinct-banks": "uploaded cb12[20..23] and cb12[24..27] are invertible and not near-equal",
+        "finite.live": "uploaded constants and decoded resources produce finite runtime ambient intermediates and nonzero divisors"
+      },
+      "required_buckets": {
+        "adversarial": [
+          "depth.near",
+          "depth.equal",
+          "depth.far",
+          "ibl.off",
+          "ibl.on",
+          "material.default",
+          "material.skin",
+          "material.zero-2",
+          "material.zero-3",
+          "roughness.zero",
+          "roughness.mid",
+          "roughness.high",
+          "skin-taps.default",
+          "skin-taps.skin",
+          "sslr.live",
+          "fog.distance-near",
+          "fog.distance-main",
+          "fog.distance-tail",
+          "fog.stack-grayscale",
+          "fog.stack-color",
+          "reprojection.distinct-banks",
+          "finite.live"
+        ],
+        "native": [
+          "depth.near",
+          "depth.far",
+          "ibl.off",
+          "ibl.on",
+          "material.default",
+          "material.skin",
+          "material.zero-2",
+          "material.zero-3",
+          "roughness.zero",
+          "roughness.mid",
+          "roughness.high",
+          "skin-taps.default",
+          "skin-taps.skin",
+          "sslr.live",
+          "fog.distance-near",
+          "fog.distance-main",
+          "fog.distance-tail",
+          "fog.stack-grayscale",
+          "fog.stack-color",
+          "reprojection.distinct-banks",
+          "finite.live"
         ]
       }
     },
@@ -293,6 +368,11 @@
       "ibl_in_light": false
     },
     {
+      "name": "ambient_ibl_pass_runtime",
+      "profile": "ambient-ibl-runtime",
+      "ibl_in_light": false
+    },
+    {
       "name": "bsdf_light_deferred_directional",
       "profile": "directional-lighting",
       "ibl_in_light": false
@@ -372,6 +452,13 @@
       "id": "point-depth-exclusive-boundary",
       "class": "boundary-operator",
       "target": "bsdf_light_deferred_point",
+      "fixture": "adversarial",
+      "expected_bucket": "depth.equal"
+    },
+    {
+      "id": "runtime-depth-exclusive-boundary",
+      "class": "boundary-operator",
+      "target": "ambient_ibl_pass_runtime",
       "fixture": "adversarial",
       "expected_bucket": "depth.equal"
     },

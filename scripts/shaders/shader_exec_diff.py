@@ -24,8 +24,8 @@ from shader_corpus_diff import (
     REPO_ROOT,
 )
 
-TOOL_VERSION = 3
-HARNESS_VERSION = 3
+TOOL_VERSION = 4
+HARNESS_VERSION = 4
 REPORT_SCHEMA = "fo4cs.shader-exec-diff-report"
 RUN_SCHEMA = "fo4cs.shader-exec-diff-run"
 MEASUREMENT_SCHEMA = "fo4cs.shader-exec-measurement"
@@ -50,6 +50,7 @@ REQUIRED_MUTATION_IDS = {
     "wrong-texture-slot",
     "omitted-material-branch",
     "point-depth-exclusive-boundary",
+    "runtime-depth-exclusive-boundary",
     "vls-depth-exclusive-boundary",
 }
 
@@ -280,6 +281,8 @@ def _replace_exact(text: str, old: str, new: str, transform: str) -> str:
 
 AMBIENT_DEPTH_OLD = "bool isNearPath = (depth < 0.01);"
 AMBIENT_DEPTH_NEW = "bool isNearPath = (depth <= 0.01);"
+RUNTIME_AMBIENT_DEPTH_OLD = "bool isNearPath = depth < 0.01;"
+RUNTIME_AMBIENT_DEPTH_NEW = "bool isNearPath = depth <= 0.01;"
 DIRECTIONAL_DEPTH_OLD = """// Insn 4-17: depth-based matrix select.
     // Per-row ternary matches corpus shape closer than `float4x4` ?:.
     bool isNearPath = (depth < 0.01);"""
@@ -309,6 +312,13 @@ def apply_inclusive_depth_control(source: str, target: str) -> str:
     if target == "ambient_ibl_pass":
         return _ensure_inclusive(
             source, AMBIENT_DEPTH_OLD, AMBIENT_DEPTH_NEW, "inclusive-depth-control"
+        )
+    if target == "ambient_ibl_pass_runtime":
+        return _ensure_inclusive(
+            source,
+            RUNTIME_AMBIENT_DEPTH_OLD,
+            RUNTIME_AMBIENT_DEPTH_NEW,
+            "inclusive-depth-control",
         )
     if target.startswith("bsdf_light_deferred_directional"):
         return _ensure_inclusive(
@@ -347,6 +357,13 @@ def apply_mutation(source: str, mutation_id: str) -> str:
             source,
             POINT_DEPTH_NEW,
             POINT_DEPTH_OLD,
+            mutation_id,
+        )
+    if mutation_id == "runtime-depth-exclusive-boundary":
+        return _replace_exact(
+            source,
+            RUNTIME_AMBIENT_DEPTH_NEW,
+            RUNTIME_AMBIENT_DEPTH_OLD,
             mutation_id,
         )
     if mutation_id == "vls-depth-exclusive-boundary":

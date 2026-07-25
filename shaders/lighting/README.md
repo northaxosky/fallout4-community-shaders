@@ -10,7 +10,8 @@ intended to inform feature implementations elsewhere in the repo.
 
 | File | Role | Source binding (RT in/out) | REL::ID OG/NG/AE | Status |
 |---|---|---|---|---|
-| `ambient_ibl_pass.hlsl`     | ambient + image-based lighting consuming kSSAO | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **reconstructed-roundtrip-1.5pct** |
+| `ambient_ibl_pass.hlsl`     | interior/reference ambient + IBL, blob 3559 | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **exec-diff-zero** |
+| `ambient_ibl_pass_runtime.hlsl` | exterior/runtime ambient + IBL + fog, blob 3560 | same 33 bindings; t12 is blurred SSLR in the material-5 path | same | **live-mapped; exec-diff-zero** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
 | `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **reconstructed-roundtrip-1.25pct** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
@@ -21,27 +22,16 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
 ## Reconstruction status
 
-* **`ambient_ibl_pass.hlsl`** - **reconstructed, round-trip +1.5%**.
-  Canonical blob: `Shaders011.fxp` blob **3559** (sha1 `7460585eaf76`),
-  mnemonic-stream-exact-match sibling of the structurally-equivalent
-  blob 3560. 263-instruction ambient/IBL deferred PS including the
-  9-tap SSSS-style bilateral blur. Resource bindings (14 SRVs + 14 samplers +
-  3 CBs) + signature exact-match. Round-trip via fxc /T ps_5_0 /O3: 269
-  vs 265 insns (+1.5%, within the ±10% threshold for this larger
-  shader). Sample count 41 vs 44 (3 short due to a missing +1.28 ring
-  tap). Key findings:
-  * **AO-application boundary** at the final multiply on the
-    combined ambient+IBL term (no direct-light contamination).
-  * **kSSAO write timeline**: SAO writes at
-    `Render_PreUI +0x036b`; ambient PS reads at `+0x039c`. Hook point:
-    `RegisterPreDeferredLightsImpl` (already implemented).
-  * **SRV map**: 14 SRVs identified via RenderDoc capture
-    `FO4_frame5407.rdc` event-id 45345. High-confidence: t1=kGbufferNormal,
-    t4=kGbufferAlbedo, t7=main depth, t8=IBL probe cubemap array,
-    t9=kSSAO, t14=kMainPreAlpha (lit scene), t15=kMainDepthMips.
-    Medium-confidence: t2/t3=gbuffer aux, t5/t11=ambient diffuse pair,
-    t6/t10/t12=screen-space ambient HDR scratch.
-  * **Output**: o0 = kDiffuseBuffer (R11G11B10F).
+* **`ambient_ibl_pass.hlsl`** preserves the interior/reference permutation:
+  `Shaders011.fxp` blob **3559**, sha1 `7460585eaf76`, CB12[31].
+  Its 33 declarations and 44 samples match the native contract, and its
+  shaped execution diff remains zero.
+* **`ambient_ibl_pass_runtime.hlsl`** reconstructs the live exterior
+  permutation: blob **3560**, sha1 `2b6e36c08aca`, CB12[47]. It adds the
+  post-AO fog/color stack and consumes blurred SSLR at t12 in the material-5
+  path. The hardened oracle covers both fixture classes, all material and fog
+  branches, distinct reprojection banks, and seven cubemap mips with zero
+  divergent pixels; ShaderInjection maps the live hash to this source.
 * **`deferred_composite.hlsl`** - **reconstructed, round-trip WIP**
   (canonical blob 3539). Canonical blob: `Shaders011.fxp` blob 3539
   (sha1 `861504f6dcbe`), identified by mnemonic-stream equivalence

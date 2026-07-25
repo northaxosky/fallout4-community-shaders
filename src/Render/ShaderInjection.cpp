@@ -84,7 +84,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kAmbientIblPass,
 				"ambient_ibl_pass",
-				L"lighting/ambient_ibl_pass.hlsl",
+				L"lighting/ambient_ibl_pass_runtime.hlsl",
 				"main",
 				"ps_5_0",
 				kAmbientIblSha1s,
