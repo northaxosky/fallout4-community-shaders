@@ -42,7 +42,7 @@ HARNESS_SOURCE = os.path.join(
 )
 MANIFEST_FILENAME = "shader-exec-diff-run.json"
 FEATURE_MANIFEST_FILENAME = "wetness-effects-warp-run.json"
-FEATURE_PROTOCOL_VERSION = 6
+FEATURE_PROTOCOL_VERSION = 7
 COMPILE_FLAGS = ("/nologo", "/T", "ps_5_0", "/O3", "/E", "main")
 FIXTURE_ORDER = ("adversarial", "native")
 VERDICTS = ("PASS", "FAIL", "UNPROVEN", "STALE")
@@ -419,7 +419,7 @@ def validate_additive_features(features: Any) -> None:
         != "reconstructed-stock-vs-reconstructed-feature"
         or feature.get("native_bytecode_used") is not False
         or feature.get("profile") != "wetness-directional-lighting"
-        or feature.get("measurement_protocol") != "wetness-warp-v6"
+        or feature.get("measurement_protocol") != "wetness-warp-v7"
         or feature.get("source")
         != "shaders/lighting/bsdf_light_deferred.hlsl"
     ):
@@ -523,7 +523,7 @@ def validate_additive_features(features: Any) -> None:
             "historical-regression",
             "directional_layering",
             ["directional", "directional-ibl"],
-            "3d08c999b7f6d9284bcd9e196c4a712b084f2003701baab759efe947db2b85ab",
+            "05743f9d736ea4f55e536c17f99ff91582b1a43e63a7c5c2fe1666d8f5b83c6e",
         ),
         (
             "directional-wetness-historical-pi-065-derating",
@@ -544,10 +544,17 @@ def validate_additive_features(features: Any) -> None:
             "historical-regression",
             "wet_lobe_commensurability",
             ["directional"],
-            "79a4c3751a0c9db522c37bfd95154ff67bbb027187d88bf347d9a2250c2c61b8",
+            "d6b3cae9e7becaec155dfbaf8be2921438bee76cf2a4d8606c4feae4dc4a20a6",
+        ),
+        (
+            "directional-wetness-strength-inside-clamp",
+            "historical-regression",
+            "wet_lobe_peak_ordering",
+            ["directional"],
+            "f81eefacfbb0238c48eaf58bae3c1c3df19064bf9571f3b767ce37eef4476eb8",
         ),
     ]
-    if not isinstance(mutations, list) or len(mutations) != 4:
+    if not isinstance(mutations, list) or len(mutations) != 5:
         raise StableFailure("feature_contracts_schema", "mutations")
     for mutation, expected in zip(mutations, expected_mutations):
         if (
@@ -2985,19 +2992,34 @@ def validate_feature_measurement(
             fail("property:wet_lobe_commensurability")
         elif isinstance(cosine_levels, list):
             for index, level in enumerate(cosine_levels):
-                ndotl = expected_ndotl[index]
+                requested_ndotl = expected_ndotl[index]
+                actual_ndotl = (
+                    float(level.get("ndotl"))
+                    if isinstance(level, dict)
+                    and number(level.get("ndotl"))
+                    else -1.0
+                )
                 if (
                     not isinstance(level, dict)
-                    or not close(level.get("ndotl"), ndotl, 1.0e-8)
                     or not close(
-                        level.get("before_film_to_stock_ratio"),
-                        1.0 / ndotl,
+                        level.get("requested_ndotl"),
+                        requested_ndotl,
                         1.0e-8,
                     )
                     or not close(
-                        level.get("after_film_to_stock_ratio"),
+                        actual_ndotl, requested_ndotl, 1.0e-3
+                    )
+                    or not close(
+                        level.get("missing_to_corrected_ratio"),
+                        1.0 / actual_ndotl,
+                        1.0e-3,
+                    )
+                    or not close(
+                        level.get(
+                            "corrected_to_fo4_reference_ratio"
+                        ),
                         1.0,
-                        1.0e-8,
+                        1.0e-3,
                     )
                     or not isinstance(
                         level.get("proven_channels"), int
@@ -3012,7 +3034,7 @@ def validate_feature_measurement(
                     or not close(
                         level["corrected_lobe_mean"] /
                         level["missing_cosine_lobe_mean"],
-                        ndotl,
+                        actual_ndotl,
                         1.0e-3,
                     )
                     or not number(
@@ -3021,6 +3043,124 @@ def validate_feature_measurement(
                     or level["maximum_ratio_residual"] > 1.0e-3
                 ):
                     fail("wet_lobe_commensurability:level")
+
+        peak_ordering = properties.get("wet_lobe_peak_ordering")
+        peak_levels = (
+            peak_ordering.get("levels")
+            if isinstance(peak_ordering, dict)
+            else None
+        )
+        expected_angles = [0.0, 0.25, 0.5, 0.75, 1.0]
+        if (
+            not isinstance(peak_ordering, dict)
+            or peak_ordering.get("correct_formula")
+            != "min(core*fresnel*NdotL,15)*strength"
+            or peak_ordering.get("wrong_formula")
+            != "min(core*fresnel*strength*NdotL,15)"
+            or not isinstance(peak_levels, list)
+            or len(peak_levels) != len(expected_angles)
+            or peak_ordering.get("violations") != []
+            or peak_ordering.get("verdict") != "PASS"
+        ):
+            fail("property:wet_lobe_peak_ordering")
+        elif isinstance(peak_levels, list):
+            for index, level in enumerate(peak_levels):
+                if (
+                    not isinstance(level, dict)
+                    or not close(
+                        level.get("half_angle_degrees"),
+                        expected_angles[index],
+                        1.0e-8,
+                    )
+                    or any(
+                        not number(level.get(name))
+                        for name in (
+                            "ndotl",
+                            "ndotv",
+                            "ndoth",
+                            "vdoth",
+                            "expected_correct_magnitude",
+                            "expected_wrong_magnitude",
+                            "measured_correct_magnitude",
+                            "measured_wrong_magnitude",
+                            "maximum_correct_residual",
+                            "maximum_wrong_residual",
+                        )
+                    )
+                    or not isinstance(
+                        level.get("proven_channels"), int
+                    )
+                    or level["proven_channels"] != width * height * 3
+                    or not all(
+                        0.0 <= level[name] <= 1.0
+                        for name in ("ndotl", "ndotv", "ndoth", "vdoth")
+                    )
+                ):
+                    fail("wet_lobe_peak_ordering:level")
+                    continue
+                wet_ndotl = float(level["ndotl"])
+                wet_ndotv = float(level["ndotv"])
+                wet_ndoth = float(level["ndoth"])
+                wet_vdoth = float(level["vdoth"])
+                wet_a = 0.05 * 0.05
+                wet_a2 = wet_a * wet_a
+                wet_denom = (
+                    wet_ndoth * wet_ndoth * (wet_a2 - 1.0) + 1.0
+                )
+                wet_d = wet_a2 / (
+                    3.141593 * wet_denom * wet_denom
+                )
+                wet_vis_v = wet_ndotl * (
+                    wet_ndotv * (1.0 + wet_a) + wet_a
+                )
+                wet_vis_l = wet_ndotv * (
+                    wet_ndotl * (1.0 + wet_a) + wet_a
+                )
+                wet_g = 0.5 / max(wet_vis_v + wet_vis_l, 1.0e-6)
+                one_minus_vdoth = 1.0 - wet_vdoth
+                fresnel = 0.02 + 0.98 * one_minus_vdoth**5
+                core = wet_d * wet_g * fresnel * wet_ndotl
+                expected_correct = min(core, 15.0) * 0.95
+                expected_wrong = min(core * 0.95, 15.0)
+                if (
+                    not close(
+                        level["expected_correct_magnitude"],
+                        expected_correct,
+                        1.0e-8,
+                    )
+                    or not close(
+                        level["expected_wrong_magnitude"],
+                        expected_wrong,
+                        1.0e-8,
+                    )
+                ):
+                    fail("wet_lobe_peak_ordering:expected")
+                correct_tolerance = (
+                    5.0e-4 +
+                    5.0e-3 *
+                    abs(expected_correct)
+                )
+                wrong_tolerance = (
+                    5.0e-4 +
+                    5.0e-3 *
+                    abs(expected_wrong)
+                )
+                if (
+                    abs(
+                        level["measured_correct_magnitude"] -
+                        expected_correct
+                    )
+                    > correct_tolerance
+                    or abs(
+                        level["measured_wrong_magnitude"] -
+                        expected_wrong
+                    )
+                    > wrong_tolerance
+                    or level["maximum_correct_residual"]
+                    > correct_tolerance
+                    or level["maximum_wrong_residual"] > wrong_tolerance
+                ):
+                    fail("wet_lobe_peak_ordering:formula")
 
         def validate_levels(
             levels: Any,
@@ -3159,22 +3299,27 @@ def validate_feature_measurement(
         )
         old_mutant = (
             mutants[0]
-            if isinstance(mutants, list) and len(mutants) == 4
+            if isinstance(mutants, list) and len(mutants) == 5
             else None
         )
         pi_mutant = (
             mutants[1]
-            if isinstance(mutants, list) and len(mutants) == 4
+            if isinstance(mutants, list) and len(mutants) == 5
             else None
         )
         ambient_mutant = (
             mutants[2]
-            if isinstance(mutants, list) and len(mutants) == 4
+            if isinstance(mutants, list) and len(mutants) == 5
             else None
         )
         missing_cosine_mutant = (
             mutants[3]
-            if isinstance(mutants, list) and len(mutants) == 4
+            if isinstance(mutants, list) and len(mutants) == 5
+            else None
+        )
+        strength_clamp_mutant = (
+            mutants[4]
+            if isinstance(mutants, list) and len(mutants) == 5
             else None
         )
         mutation_diffuse = (
@@ -3195,7 +3340,7 @@ def validate_feature_measurement(
         if (
             not isinstance(mutation, dict)
             or not isinstance(mutants, list)
-            or len(mutants) != 4
+            or len(mutants) != 5
             or mutation.get("verdict") != "CAUGHT"
             or not isinstance(old_mutant, dict)
             or old_mutant.get("id")
@@ -3260,6 +3405,19 @@ def validate_feature_measurement(
             )
             or missing_cosine_mutant["maximum_ratio_residual"] > 1.0e-3
             or missing_cosine_mutant.get("verdict") != "CAUGHT"
+            or not isinstance(strength_clamp_mutant, dict)
+            or strength_clamp_mutant.get("id")
+            != feature_contract["mutations"][4]["id"]
+            or strength_clamp_mutant.get("expected_failed_property")
+            != "wet_lobe_peak_ordering"
+            or strength_clamp_mutant.get("neutral_identity") != "PASS"
+            or strength_clamp_mutant.get("wet_lobe_peak_ordering")
+            != "FAIL"
+            or not number(
+                strength_clamp_mutant.get("maximum_formula_residual")
+            )
+            or strength_clamp_mutant["maximum_formula_residual"] > 0.1
+            or strength_clamp_mutant.get("verdict") != "CAUGHT"
         ):
             fail("property:mutation_sensitivity")
 
@@ -3684,6 +3842,10 @@ def _run_feature_harness(
         "--missing-cosine-mutant",
         artifacts["directional"]["mutants"][
             "directional-wetness-missing-fo4-cosine"
+        ],
+        "--strength-inside-clamp-mutant",
+        artifacts["directional"]["mutants"][
+            "directional-wetness-strength-inside-clamp"
         ],
         "--fixture",
         fixture,
@@ -4405,6 +4567,7 @@ def run_additive_feature(
             "magnitude",
             "wet_lobe_scale",
             "wet_lobe_commensurability",
+            "wet_lobe_peak_ordering",
             "ambient_ibl_layering",
             "matte_sheen",
             "no_ibl_film",
@@ -4414,6 +4577,7 @@ def run_additive_feature(
         directional_properties = {
             "wet_lobe_scale",
             "wet_lobe_commensurability",
+            "wet_lobe_peak_ordering",
             "ambient_ibl_layering",
         }
         ambient_properties = {
@@ -4799,7 +4963,7 @@ def _feature_driver_failure_report(
                         ("fixture", fixture),
                         ("width", args.width),
                         ("height", args.height),
-                        ("measurement_protocol", "wetness-warp-v6"),
+                        ("measurement_protocol", "wetness-warp-v7"),
                         ("wetness_format", wetness_format),
                         ("failures", [failure]),
                         ("verdict", "UNPROVEN"),

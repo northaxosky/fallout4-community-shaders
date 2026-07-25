@@ -2,6 +2,7 @@
 
 import json
 import hashlib
+import math
 import os
 import subprocess
 import sys
@@ -151,6 +152,47 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "verdict": "PASS",
                 }
             )
+        peak_levels = []
+        for angle in (0.0, 0.25, 0.5, 0.75, 1.0):
+            theta = math.radians(angle)
+            wet_ndotl = 1.0
+            wet_ndotv = min(abs(math.cos(theta * 2.0)) + 1.0e-5, 1.0)
+            wet_ndoth = math.cos(theta)
+            wet_a = 0.05 * 0.05
+            wet_a2 = wet_a * wet_a
+            wet_denom = (
+                wet_ndoth * wet_ndoth * (wet_a2 - 1.0) + 1.0
+            )
+            wet_d = wet_a2 / (
+                3.141593 * wet_denom * wet_denom
+            )
+            wet_vis_v = wet_ndotl * (
+                wet_ndotv * (1.0 + wet_a) + wet_a
+            )
+            wet_vis_l = wet_ndotv * (
+                wet_ndotl * (1.0 + wet_a) + wet_a
+            )
+            wet_g = 0.5 / max(wet_vis_v + wet_vis_l, 1.0e-6)
+            fresnel = 0.02 + 0.98 * (1.0 - wet_ndoth) ** 5
+            core = wet_d * wet_g * fresnel * wet_ndotl
+            correct = min(core, 15.0) * 0.95
+            wrong = min(core * 0.95, 15.0)
+            peak_levels.append(
+                {
+                    "half_angle_degrees": angle,
+                    "ndotl": wet_ndotl,
+                    "ndotv": wet_ndotv,
+                    "ndoth": wet_ndoth,
+                    "vdoth": wet_ndoth,
+                    "expected_correct_magnitude": correct,
+                    "expected_wrong_magnitude": wrong,
+                    "measured_correct_magnitude": correct,
+                    "measured_wrong_magnitude": wrong,
+                    "proven_channels": 768,
+                    "maximum_correct_residual": 0.0,
+                    "maximum_wrong_residual": 0.0,
+                }
+            )
         directional_ambient_levels = []
         substrate_diffuse = [0.1, 0.2, 0.3]
         substrate_specular = [0.01, 0.02, 0.03]
@@ -293,9 +335,10 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     ),
                     "levels": [
                         {
+                            "requested_ndotl": ndotl,
                             "ndotl": ndotl,
-                            "before_film_to_stock_ratio": 1.0 / ndotl,
-                            "after_film_to_stock_ratio": 1.0,
+                            "missing_to_corrected_ratio": 1.0 / ndotl,
+                            "corrected_to_fo4_reference_ratio": 1.0,
                             "proven_channels": 768,
                             "corrected_lobe_mean": 0.01 * ndotl,
                             "missing_cosine_lobe_mean": 0.01,
@@ -303,6 +346,17 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                         }
                         for ndotl in (1.0, 0.1, 0.01)
                     ],
+                    "violations": [],
+                    "verdict": "PASS",
+                },
+                "wet_lobe_peak_ordering": {
+                    "correct_formula": (
+                        "min(core*fresnel*NdotL,15)*strength"
+                    ),
+                    "wrong_formula": (
+                        "min(core*fresnel*strength*NdotL,15)"
+                    ),
+                    "levels": peak_levels,
                     "violations": [],
                     "verdict": "PASS",
                 },
@@ -442,6 +496,18 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                         "neutral_identity": "PASS",
                         "wet_lobe_commensurability": "FAIL",
                         "maximum_ratio_residual": 0.0,
+                        "verdict": "CAUGHT",
+                    },
+                    {
+                        "id": feature["mutations"][4]["id"],
+                        "class": "historical-regression",
+                        "expected_failed_property": (
+                            "wet_lobe_peak_ordering"
+                        ),
+                        "variants": ["directional"],
+                        "neutral_identity": "PASS",
+                        "wet_lobe_peak_ordering": "FAIL",
+                        "maximum_formula_residual": 0.0,
                         "verdict": "CAUGHT",
                     },
                     ],
@@ -1007,9 +1073,9 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_contract_schema_and_predicates(self):
         subject.validate_contracts(self.contracts)
-        self.assertEqual(6, subject.FEATURE_PROTOCOL_VERSION)
+        self.assertEqual(7, subject.FEATURE_PROTOCOL_VERSION)
         self.assertEqual(
-            "wetness-warp-v6",
+            "wetness-warp-v7",
             self.contracts["additive_features"]["wetness-effects"][
                 "measurement_protocol"
             ],
@@ -1125,6 +1191,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 "directional-wetness-historical-pi-065-derating",
                 "directional-wetness-ambient-ibl-untouched",
                 "directional-wetness-missing-fo4-cosine",
+                "directional-wetness-strength-inside-clamp",
             ],
             [item["id"] for item in feature["mutations"]],
         )
@@ -1140,7 +1207,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
         )
         self.assertNotIn("FO4_DIRECTIONAL_SPECULAR_SCALE * 0.65", source)
         self.assertIn(
-            "wetD * wetG * wetnessF * wetNdotL", source
+            "wetD * wetG * wetFresnel * wetNdotL", source
         )
         self.assertEqual(
             ["adversarial", "native"],
@@ -1170,7 +1237,8 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                             original.count(replacement["new"]) + 1,
                             mutant.count(replacement["new"]),
                         )
-                    self.assertNotIn(replacement["old"], mutant)
+                    if replacement["old"] not in replacement["new"]:
+                        self.assertNotIn(replacement["old"], mutant)
                 self.assertEqual(before, Path(source).read_bytes())
                 with self.assertRaises(subject.StableFailure):
                     first = replacements[0]
@@ -1592,7 +1660,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
         cosine_ratio_tampered = self.feature_measurement("adversarial")
         cosine_ratio_tampered["properties"]["wet_lobe_commensurability"][
             "levels"
-        ][1]["after_film_to_stock_ratio"] = 10.0
+        ][1]["corrected_to_fo4_reference_ratio"] = 10.0
         self.assertTrue(
             subject.validate_feature_measurement(
                 cosine_ratio_tampered,
@@ -1624,6 +1692,34 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
         self.assertTrue(
             subject.validate_feature_measurement(
                 cosine_mutant_missed,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        peak_formula_tampered = self.feature_measurement("adversarial")
+        peak_formula_tampered["properties"]["wet_lobe_peak_ordering"][
+            "levels"
+        ][0]["measured_correct_magnitude"] = 15.0
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                peak_formula_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        peak_mutant_missed = self.feature_measurement("adversarial")
+        peak_mutant_missed["properties"]["mutation_sensitivity"]["mutants"][
+            4
+        ]["wet_lobe_peak_ordering"] = "PASS"
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                peak_mutant_missed,
                 "adversarial",
                 feature,
                 16,

@@ -91,6 +91,7 @@ struct Options
     std::string piDeratingMutantPath;
     std::string ambientUntouchedMutantIblPath;
     std::string missingCosineMutantPath;
+    std::string strengthInsideClampMutantPath;
 };
 
 struct ConstantBufferBinding
@@ -2165,6 +2166,35 @@ void ShapeDirectionalLightingConstants(
         SetVector(values, 28, {0.02f, 2.0f, 1.0f, 2.0f});
         SetVector(values, 29, {0.36f, -0.4f, 0.0f, 0.0f});
         SetVector(values, 30, {0.0f, 0.5f, 0.0f, 0.0f});
+        const float peakHalfAngle = ScenarioControl(
+            scenario, "directional_peak_half_angle_degrees", -1.0f);
+        if (peakHalfAngle >= 0.0f)
+        {
+            const float viewAngle =
+                peakHalfAngle * 2.0f * 3.14159265358979323846f / 180.0f;
+            const float cosine = std::cos(viewAngle);
+            const float sine = std::sin(viewAngle);
+            const std::array<float, 3> viewDirection{
+                0.6f * cosine + 0.8f * sine,
+                0.0f,
+                0.8f * cosine - 0.6f * sine,
+            };
+            for (UINT base : {20u, 24u})
+            {
+                SetVector(
+                    values, base + 0,
+                    {0.0f, 0.0f, 0.0f, -viewDirection[0]});
+                SetVector(
+                    values, base + 1,
+                    {0.0f, 0.0f, 0.0f, -viewDirection[1]});
+                SetVector(
+                    values, base + 2,
+                    {0.0f, 0.0f, 0.0f, -viewDirection[2]});
+                SetVector(
+                    values, base + 3,
+                    {0.0f, 0.0f, 0.0f, 1.0f});
+            }
+        }
         return;
     }
     if (bindPoint != 2)
@@ -5654,9 +5684,10 @@ struct WetLobeScaleEvidence
 
 struct WetLobeCommensurabilityLevel
 {
+    double requestedNdotL = 0.0;
     double ndotl = 0.0;
-    double beforeFilmToStockRatio = 0.0;
-    double afterFilmToStockRatio = 0.0;
+    double missingToCorrectedRatio = 0.0;
+    double correctedToFo4ReferenceRatio = 0.0;
     std::uint64_t provenChannels = 0;
     double correctedLobeMean = 0.0;
     double missingCosineLobeMean = 0.0;
@@ -5666,6 +5697,28 @@ struct WetLobeCommensurabilityLevel
 struct WetLobeCommensurabilityEvidence
 {
     std::vector<WetLobeCommensurabilityLevel> levels;
+    std::vector<std::string> violations;
+};
+
+struct WetLobePeakLevel
+{
+    double halfAngleDegrees = 0.0;
+    double ndotl = 0.0;
+    double ndotv = 0.0;
+    double ndoth = 0.0;
+    double vdoth = 0.0;
+    double expectedCorrectMagnitude = 0.0;
+    double expectedWrongMagnitude = 0.0;
+    double measuredCorrectMagnitude = 0.0;
+    double measuredWrongMagnitude = 0.0;
+    std::uint64_t provenChannels = 0;
+    double maximumCorrectResidual = 0.0;
+    double maximumWrongResidual = 0.0;
+};
+
+struct WetLobePeakEvidence
+{
+    std::vector<WetLobePeakLevel> levels;
     std::vector<std::string> violations;
 };
 
@@ -6216,6 +6269,7 @@ void WriteWetnessMeasurement(
     double mutationDiffuseScaleResidual,
     const WetLobeScaleEvidence& wetLobeScale,
     const WetLobeCommensurabilityEvidence& wetLobeCommensurability,
+    const WetLobePeakEvidence& wetLobePeak,
     const DirectionalAmbientIblEvidence& ambientIblLayering,
     bool mutationNeutralIdentity,
     bool mutationDirectionalLayeringFailed,
@@ -6224,7 +6278,9 @@ void WriteWetnessMeasurement(
     bool ambientUntouchedMutationNeutralIdentity,
     bool ambientUntouchedMutationCaught,
     bool missingCosineMutationNeutralIdentity,
-    bool missingCosineMutationCaught)
+    bool missingCosineMutationCaught,
+    bool strengthInsideClampMutationNeutralIdentity,
+    bool strengthInsideClampMutationCaught)
 {
     if (options.measurementJsonPath.empty())
         return;
@@ -6246,13 +6302,15 @@ void WriteWetnessMeasurement(
     const bool wetLobeScalePassed = wetLobeScale.violations.empty();
     const bool wetLobeCommensurabilityPassed =
         wetLobeCommensurability.violations.empty();
+    const bool wetLobePeakPassed = wetLobePeak.violations.empty();
     const bool ambientIblLayeringPassed =
         ambientIblLayering.violations.empty();
     const bool mutationCaught =
         oldMutationCaught &&
         piDeratingMutationCaught &&
         ambientUntouchedMutationCaught &&
-        missingCosineMutationCaught;
+        missingCosineMutationCaught &&
+        strengthInsideClampMutationCaught;
     double ambientUntouchedResidual = 0.0;
     for (const DirectionalAmbientIblLevel& level :
          ambientIblLayering.levels)
@@ -6261,10 +6319,20 @@ void WriteWetnessMeasurement(
             ambientUntouchedResidual,
             level.maximumUntouchedMutantResidual);
     }
+    double peakOrderingResidual = 0.0;
+    for (const WetLobePeakLevel& level : wetLobePeak.levels)
+    {
+        peakOrderingResidual = std::max(
+            peakOrderingResidual,
+            std::max(
+                level.maximumCorrectResidual,
+                level.maximumWrongResidual));
+    }
     const bool passed =
         neutralPassed && localityPassed && magnitudePassed &&
         monotonicPassed && wetLobeScalePassed &&
         wetLobeCommensurabilityPassed &&
+        wetLobePeakPassed &&
         ambientIblLayeringPassed && mutationCaught;
     std::sort(formats.begin(), formats.end());
     formats.erase(std::unique(
@@ -6291,7 +6359,7 @@ void WriteWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v6\""
+           << ",\"measurement_protocol\":\"wetness-warp-v7\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6399,11 +6467,12 @@ void WriteWetnessMeasurement(
             stream << ",";
         const WetLobeCommensurabilityLevel& level =
             wetLobeCommensurability.levels[index];
-        stream << "{\"ndotl\":" << std::setprecision(17)
-               << level.ndotl << ",\"before_film_to_stock_ratio\":"
-               << level.beforeFilmToStockRatio
-               << ",\"after_film_to_stock_ratio\":"
-               << level.afterFilmToStockRatio
+        stream << "{\"requested_ndotl\":" << std::setprecision(17)
+               << level.requestedNdotL << ",\"ndotl\":" << level.ndotl
+               << ",\"missing_to_corrected_ratio\":"
+               << level.missingToCorrectedRatio
+               << ",\"corrected_to_fo4_reference_ratio\":"
+               << level.correctedToFo4ReferenceRatio
                << ",\"proven_channels\":" << level.provenChannels
                << ",\"corrected_lobe_mean\":"
                << level.correctedLobeMean
@@ -6416,6 +6485,39 @@ void WriteWetnessMeasurement(
     WriteStringArray(stream, wetLobeCommensurability.violations);
     stream << ",\"verdict\":\""
            << (wetLobeCommensurabilityPassed ? "PASS" : "FAIL")
+           << "\"},\"wet_lobe_peak_ordering\":{"
+           << "\"correct_formula\":\"min(core*fresnel*NdotL,15)*strength\","
+           << "\"wrong_formula\":\"min(core*fresnel*strength*NdotL,15)\","
+           << "\"levels\":[";
+    for (std::size_t index = 0; index < wetLobePeak.levels.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        const WetLobePeakLevel& level = wetLobePeak.levels[index];
+        stream << "{\"half_angle_degrees\":" << std::setprecision(17)
+               << level.halfAngleDegrees
+               << ",\"ndotl\":" << level.ndotl
+               << ",\"ndotv\":" << level.ndotv
+               << ",\"ndoth\":" << level.ndoth
+               << ",\"vdoth\":" << level.vdoth
+               << ",\"expected_correct_magnitude\":"
+               << level.expectedCorrectMagnitude
+               << ",\"expected_wrong_magnitude\":"
+               << level.expectedWrongMagnitude
+               << ",\"measured_correct_magnitude\":"
+               << level.measuredCorrectMagnitude
+               << ",\"measured_wrong_magnitude\":"
+               << level.measuredWrongMagnitude
+               << ",\"proven_channels\":" << level.provenChannels
+               << ",\"maximum_correct_residual\":"
+               << level.maximumCorrectResidual
+               << ",\"maximum_wrong_residual\":"
+               << level.maximumWrongResidual << "}";
+    }
+    stream << "],\"violations\":";
+    WriteStringArray(stream, wetLobePeak.violations);
+    stream << ",\"verdict\":\""
+           << (wetLobePeakPassed ? "PASS" : "FAIL")
            << "\"},\"ambient_ibl_layering\":{"
            << "\"diffuse_formula\":\"Dwet=Dstock*(1-ambientWetnessF)\","
            << "\"specular_formula\":\"Swet=Sstock*(1-ambientWetnessF)+film*ambientWetnessF\","
@@ -6566,6 +6668,16 @@ void WriteWetnessMeasurement(
                          })->maximumRatioResidual)
            << ",\"verdict\":\""
            << (missingCosineMutationCaught ? "CAUGHT" : "MISSED")
+           << "\"},{\"id\":\"directional-wetness-strength-inside-clamp\","
+           << "\"class\":\"historical-regression\","
+           << "\"expected_failed_property\":\"wet_lobe_peak_ordering\","
+           << "\"variants\":[\"directional\"],\"neutral_identity\":\""
+           << (strengthInsideClampMutationNeutralIdentity ? "PASS" : "FAIL")
+           << "\",\"wet_lobe_peak_ordering\":\""
+           << (strengthInsideClampMutationCaught ? "FAIL" : "PASS")
+           << "\",\"maximum_formula_residual\":"
+           << peakOrderingResidual << ",\"verdict\":\""
+           << (strengthInsideClampMutationCaught ? "CAUGHT" : "MISSED")
            << "\"}],\"verdict\":\""
            << (mutationCaught ? "CAUGHT" : "MISSED")
            << "\"}},\"cross_buckets\":[";
@@ -6678,7 +6790,7 @@ void WriteAmbientWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v6\""
+           << ",\"measurement_protocol\":\"wetness-warp-v7\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -7019,7 +7131,8 @@ int RunWetnessFeature(
     const std::vector<std::uint8_t>& mutantIblBytecode,
     const std::vector<std::uint8_t>& piDeratingMutantBytecode,
     const std::vector<std::uint8_t>& ambientUntouchedMutantIblBytecode,
-    const std::vector<std::uint8_t>& missingCosineMutantBytecode)
+    const std::vector<std::uint8_t>& missingCosineMutantBytecode,
+    const std::vector<std::uint8_t>& strengthInsideClampMutantBytecode)
 {
     if (options.width < 16 || options.height < 16)
         ThrowFailure("wetness_feature: dimensions must be at least 16x16");
@@ -7036,6 +7149,8 @@ int RunWetnessFeature(
         ReflectShader(ambientUntouchedMutantIblBytecode);
     ShaderContract missingCosineMutantContract =
         ReflectShader(missingCosineMutantBytecode);
+    ShaderContract strengthInsideClampMutantContract =
+        ReflectShader(strengthInsideClampMutantBytecode);
     const DisassemblyInfo stockDisassembly =
         InspectDisassembly(stockBytecode);
     const DisassemblyInfo featureDisassembly =
@@ -7054,6 +7169,8 @@ int RunWetnessFeature(
         InspectDisassembly(ambientUntouchedMutantIblBytecode);
     const DisassemblyInfo missingCosineMutantDisassembly =
         InspectDisassembly(missingCosineMutantBytecode);
+    const DisassemblyInfo strengthInsideClampMutantDisassembly =
+        InspectDisassembly(strengthInsideClampMutantBytecode);
     ApplyDisassemblyContract(stockContract, stockDisassembly);
     ApplyDisassemblyContract(featureContract, featureDisassembly);
     ApplyDisassemblyContract(stockIblContract, stockIblDisassembly);
@@ -7067,6 +7184,9 @@ int RunWetnessFeature(
         ambientUntouchedMutantIblDisassembly);
     ApplyDisassemblyContract(
         missingCosineMutantContract, missingCosineMutantDisassembly);
+    ApplyDisassemblyContract(
+        strengthInsideClampMutantContract,
+        strengthInsideClampMutantDisassembly);
     try
     {
         WarnContractDifferences(
@@ -7100,6 +7220,9 @@ int RunWetnessFeature(
     ValidateWetnessFeatureContract(
         stockContract, missingCosineMutantContract,
         stockDisassembly, missingCosineMutantDisassembly, 4, false);
+    ValidateWetnessFeatureContract(
+        stockContract, strengthInsideClampMutantContract,
+        stockDisassembly, strengthInsideClampMutantDisassembly, 4, false);
     if (DetectInputProfile(stockContract, stockDisassembly) !=
             InputProfile::DirectionalLighting ||
         DetectInputProfile(stockIblContract, stockIblDisassembly) !=
@@ -7153,6 +7276,10 @@ int RunWetnessFeature(
         createPixelShader(
             missingCosineMutantBytecode,
             "wetness missing FO4 cosine mutant");
+    const ComPtr<ID3D11PixelShader> strengthInsideClampMutantShader =
+        createPixelShader(
+            strengthInsideClampMutantBytecode,
+            "wetness strength-inside-clamp mutant");
     const ComPtr<ID3D11VertexShader> vertexShader =
         CreatePassthroughVertexShader(
             device.Get(), stockContract, InputProfile::DirectionalLighting,
@@ -7299,13 +7426,16 @@ int RunWetnessFeature(
     double mutationDiffuseScaleResidual = 0.0;
     WetLobeScaleEvidence wetLobeScale;
     WetLobeCommensurabilityEvidence wetLobeCommensurability;
+    WetLobePeakEvidence wetLobePeak;
     DirectionalAmbientIblEvidence ambientIblLayering;
     bool piDeratingMutationNeutralIdentity = true;
     bool ambientUntouchedMutationNeutralIdentity = true;
     bool missingCosineMutationNeutralIdentity = true;
+    bool strengthInsideClampMutationNeutralIdentity = true;
     bool piDeratingMutationCaught = false;
     bool ambientUntouchedMutationCaught = false;
     bool missingCosineMutationCaught = false;
+    bool strengthInsideClampMutationCaught = false;
 
     const auto render = [&](ID3D11PixelShader* shader,
                             const SeedResources& resources,
@@ -7359,7 +7489,6 @@ int RunWetnessFeature(
             ? "material.skin" : "material.default";
         formats.insert(
             formats.end(), resources.formats.begin(), resources.formats.end());
-
         const RenderOutputs stockNeutral =
             render(stockShader.Get(), resources, neutralMask);
         const RenderOutputs featureNeutral =
@@ -7825,6 +7954,24 @@ int RunWetnessFeature(
             options.width, options.height, true, inputHash);
         formats.insert(
             formats.end(), resources.formats.begin(), resources.formats.end());
+        std::array<float, 3> uploadedNormal =
+            DecodeDeferredNormal(
+                ResourcePixel(FindResource(resources, 1)));
+        const double uploadedNormalLength = std::sqrt(
+            static_cast<double>(uploadedNormal[0]) * uploadedNormal[0] +
+            static_cast<double>(uploadedNormal[1]) * uploadedNormal[1] +
+            static_cast<double>(uploadedNormal[2]) * uploadedNormal[2]);
+        for (float& component : uploadedNormal)
+        {
+            component = static_cast<float>(
+                component / uploadedNormalLength);
+        }
+        const auto uploadedLight = ConstantVector(resources, 2, 1);
+        const double actualNdotL = std::clamp(
+            static_cast<double>(uploadedNormal[0]) * uploadedLight[0] +
+                static_cast<double>(uploadedNormal[1]) * uploadedLight[1] +
+                static_cast<double>(uploadedNormal[2]) * uploadedLight[2],
+            1.0e-5, 1.0);
         const RenderOutputs stockNeutral =
             render(stockShader.Get(), resources, neutralMask);
         const RenderOutputs missingNeutral =
@@ -7840,9 +7987,14 @@ int RunWetnessFeature(
         const RenderOutputs missingFull =
             render(missingCosineMutantShader.Get(), resources, fullMask);
         WetLobeCommensurabilityLevel level;
-        level.ndotl = ndotl;
-        level.beforeFilmToStockRatio = 1.0 / ndotl;
-        level.afterFilmToStockRatio = 1.0;
+        level.requestedNdotL = ndotl;
+        level.ndotl = actualNdotL;
+        if (std::abs(actualNdotL - ndotl) > 1.0e-3)
+        {
+            wetLobeCommensurability.violations.push_back(
+                "ndotl-" + std::to_string(probeIndex) +
+                ":uploaded-value");
+        }
         for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
         {
             for (UINT channel = 0; channel < 3; ++channel)
@@ -7874,7 +8026,7 @@ int RunWetnessFeature(
                 }
                 const double residual =
                     std::abs(
-                        correctedLobe / missingLobe - ndotl);
+                        correctedLobe / missingLobe - actualNdotL);
                 level.maximumRatioResidual =
                     std::max(level.maximumRatioResidual, residual);
                 level.correctedLobeMean += correctedLobe;
@@ -7892,6 +8044,12 @@ int RunWetnessFeature(
         {
             level.correctedLobeMean /= level.provenChannels;
             level.missingCosineLobeMean /= level.provenChannels;
+            level.missingToCorrectedRatio =
+                level.missingCosineLobeMean /
+                level.correctedLobeMean;
+            level.correctedToFo4ReferenceRatio =
+                level.correctedLobeMean /
+                    (level.missingCosineLobeMean * actualNdotL);
         }
         if (level.maximumRatioResidual > 1.0e-3)
         {
@@ -7900,6 +8058,237 @@ int RunWetnessFeature(
                 ":gpu-ratio");
         }
         wetLobeCommensurability.levels.push_back(level);
+    }
+
+    static constexpr std::array<double, 5> PeakHalfAngles{
+        0.0, 0.25, 0.5, 0.75, 1.0};
+    for (std::size_t probeIndex = 0;
+         probeIndex < PeakHalfAngles.size(); ++probeIndex)
+    {
+        const double halfAngleDegrees = PeakHalfAngles[probeIndex];
+        InputScenario scenario;
+        scenario.id = static_cast<UINT>(200 + probeIndex);
+        scenario.randomSeed =
+            options.seedBase + 0x50454100u +
+            static_cast<UINT>(probeIndex);
+        scenario.dedicated = true;
+        scenario.semanticId =
+            "wetness-peak-" + std::to_string(probeIndex);
+        scenario.controls = {
+            {"directional_depth", 1.0f},
+            {"directional_cascade", 2.0f},
+            {"directional_fade", 1.0f},
+            {"directional_light", 1.0f},
+            {"directional_brdf", 0.0f},
+            {"directional_skin", 0.0f},
+            {"directional_roughness", 0.85f},
+            {"directional_specular", 0.03f},
+            {"directional_cosine_ndotl", 1.0f},
+            {"directional_peak_half_angle_degrees",
+             static_cast<float>(halfAngleDegrees)},
+            {"wetness_probe", 1.0f},
+        };
+        const SeedResources resources = CreateSeedResources(
+            device.Get(), context.Get(), stockContract, stockDisassembly,
+            InputProfile::DirectionalLighting, options.fixture, scenario,
+            options.width, options.height, true, inputHash);
+        formats.insert(
+            formats.end(), resources.formats.begin(), resources.formats.end());
+        const RenderOutputs stockNeutral =
+            render(stockShader.Get(), resources, neutralMask);
+        const RenderOutputs wrongNeutral =
+            render(
+                strengthInsideClampMutantShader.Get(),
+                resources, neutralMask);
+        strengthInsideClampMutationNeutralIdentity =
+            strengthInsideClampMutationNeutralIdentity &&
+            OutputsExact(stockNeutral, wrongNeutral);
+        const WetnessMaskResource& fullMask = findMask("level-4");
+        const RenderOutputs stockFull =
+            render(stockShader.Get(), resources, fullMask);
+        const RenderOutputs featureFull =
+            render(featureShader.Get(), resources, fullMask);
+        const RenderOutputs wrongFull =
+            render(
+                strengthInsideClampMutantShader.Get(),
+                resources, fullMask);
+        const auto sunColor = ConstantVector(resources, 2, 2);
+        std::array<float, 3> wetNormal =
+            DecodeDeferredNormal(
+                ResourcePixel(FindResource(resources, 1)));
+        const double normalLength = std::sqrt(
+            static_cast<double>(wetNormal[0]) * wetNormal[0] +
+            static_cast<double>(wetNormal[1]) * wetNormal[1] +
+            static_cast<double>(wetNormal[2]) * wetNormal[2]);
+        for (float& component : wetNormal)
+            component = static_cast<float>(component / normalLength);
+        const auto light = ConstantVector(resources, 2, 1);
+        const auto reprojRow0 = ConstantVector(resources, 12, 20);
+        const auto reprojRow1 = ConstantVector(resources, 12, 21);
+        const auto reprojRow2 = ConstantVector(resources, 12, 22);
+        std::array<double, 3> viewDirection{
+            -static_cast<double>(reprojRow0[3]),
+            -static_cast<double>(reprojRow1[3]),
+            -static_cast<double>(reprojRow2[3]),
+        };
+        const double viewLength = std::sqrt(
+            viewDirection[0] * viewDirection[0] +
+            viewDirection[1] * viewDirection[1] +
+            viewDirection[2] * viewDirection[2]);
+        for (double& component : viewDirection)
+            component /= viewLength;
+        std::array<double, 3> halfVector{
+            viewDirection[0] + light[0],
+            viewDirection[1] + light[1],
+            viewDirection[2] + light[2],
+        };
+        const double halfLength = std::sqrt(
+            halfVector[0] * halfVector[0] +
+            halfVector[1] * halfVector[1] +
+            halfVector[2] * halfVector[2]);
+        for (double& component : halfVector)
+            component /= halfLength;
+        const double wetNdotL = std::clamp(
+            static_cast<double>(wetNormal[0]) * light[0] +
+                static_cast<double>(wetNormal[1]) * light[1] +
+                static_cast<double>(wetNormal[2]) * light[2],
+            1.0e-5, 1.0);
+        const double wetNdotV = std::clamp(
+            std::abs(
+                static_cast<double>(wetNormal[0]) * viewDirection[0] +
+                static_cast<double>(wetNormal[1]) * viewDirection[1] +
+                static_cast<double>(wetNormal[2]) * viewDirection[2]) +
+                1.0e-5,
+            0.0, 1.0);
+        const double wetNdotH = std::clamp(
+            static_cast<double>(wetNormal[0]) * halfVector[0] +
+                static_cast<double>(wetNormal[1]) * halfVector[1] +
+                static_cast<double>(wetNormal[2]) * halfVector[2],
+            0.0, 1.0);
+        const double wetVdotH = std::clamp(
+            viewDirection[0] * halfVector[0] +
+                viewDirection[1] * halfVector[1] +
+                viewDirection[2] * halfVector[2],
+            0.0, 1.0);
+        const double roughness = 0.05;
+        const double wetA = roughness * roughness;
+        const double wetA2 = wetA * wetA;
+        const double wetDdenom =
+            wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;
+        const double wetD =
+            wetA2 /
+            (3.141593 * wetDdenom * wetDdenom);
+        const double wetVisV =
+            wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);
+        const double wetVisL =
+            wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);
+        const double wetG =
+            0.5 / std::max(wetVisV + wetVisL, 1.0e-6);
+        const double oneMinusVdotH = 1.0 - wetVdotH;
+        const double fresnel =
+            0.02 +
+            0.98 * oneMinusVdotH * oneMinusVdotH *
+                oneMinusVdotH * oneMinusVdotH *
+                oneMinusVdotH;
+        const double filmStrength = 0.95;
+        const double core = wetD * wetG * fresnel * wetNdotL;
+
+        WetLobePeakLevel level;
+        level.halfAngleDegrees = halfAngleDegrees;
+        level.ndotl = wetNdotL;
+        level.ndotv = wetNdotV;
+        level.ndoth = wetNdotH;
+        level.vdoth = wetVdotH;
+        level.expectedCorrectMagnitude =
+            std::min(core, 15.0) * filmStrength;
+        level.expectedWrongMagnitude =
+            std::min(core * filmStrength, 15.0);
+        for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+        {
+            for (UINT channel = 0; channel < 3; ++channel)
+            {
+                const double stockDiffuse =
+                    stockFull[0][pixel][channel];
+                const double colorScale =
+                    static_cast<double>(sunColor[channel]) *
+                    3.141593 * wetNdotL;
+                if (std::abs(stockDiffuse) <= 1.0e-8 ||
+                    std::abs(colorScale) <= 1.0e-8)
+                {
+                    continue;
+                }
+                const double attenuation =
+                    static_cast<double>(
+                        featureFull[0][pixel][channel]) /
+                    stockDiffuse;
+                const double attenuatedStockSpecular =
+                    attenuation *
+                    static_cast<double>(
+                        stockFull[1][pixel][channel]);
+                const double correctedMagnitude =
+                    (static_cast<double>(
+                         featureFull[1][pixel][channel]) -
+                     attenuatedStockSpecular) /
+                    colorScale;
+                const double wrongMagnitude =
+                    (static_cast<double>(
+                         wrongFull[1][pixel][channel]) -
+                     attenuatedStockSpecular) /
+                    colorScale;
+                const double correctResidual = std::abs(
+                    correctedMagnitude -
+                    level.expectedCorrectMagnitude);
+                const double wrongResidual = std::abs(
+                    wrongMagnitude -
+                    level.expectedWrongMagnitude);
+                level.maximumCorrectResidual =
+                    std::max(
+                        level.maximumCorrectResidual,
+                        correctResidual);
+                level.maximumWrongResidual =
+                    std::max(
+                        level.maximumWrongResidual,
+                        wrongResidual);
+                level.measuredCorrectMagnitude +=
+                    correctedMagnitude;
+                level.measuredWrongMagnitude += wrongMagnitude;
+                ++level.provenChannels;
+            }
+        }
+        if (level.provenChannels != pixelCount * 3)
+        {
+            wetLobePeak.violations.push_back(
+                "angle-" + std::to_string(probeIndex) +
+                ":channel-coverage");
+        }
+        if (level.provenChannels != 0)
+        {
+            level.measuredCorrectMagnitude /=
+                level.provenChannels;
+            level.measuredWrongMagnitude /=
+                level.provenChannels;
+        }
+        const double correctTolerance =
+            5.0e-4 +
+            5.0e-3 *
+                std::abs(level.expectedCorrectMagnitude);
+        const double wrongTolerance =
+            5.0e-4 +
+            5.0e-3 *
+                std::abs(level.expectedWrongMagnitude);
+        if (level.maximumCorrectResidual > correctTolerance)
+        {
+            wetLobePeak.violations.push_back(
+                "angle-" + std::to_string(probeIndex) +
+                ":correct-formula");
+        }
+        if (level.maximumWrongResidual > wrongTolerance)
+        {
+            wetLobePeak.violations.push_back(
+                "angle-" + std::to_string(probeIndex) +
+                ":wrong-formula");
+        }
+        wetLobePeak.levels.push_back(level);
     }
 
     if (wetLobeScale.provenChannels == 0)
@@ -7934,11 +8323,12 @@ int RunWetnessFeature(
     for (const WetLobeCommensurabilityLevel& level :
          wetLobeCommensurability.levels)
     {
-        if (std::abs(level.afterFilmToStockRatio - 1.0) > 1.0e-12)
+        if (std::abs(
+                level.correctedToFo4ReferenceRatio - 1.0) > 1.0e-3)
             wetLobeCommensurability.violations.push_back("after-ratio");
         if (std::abs(
-                level.beforeFilmToStockRatio * level.ndotl - 1.0) >
-            1.0e-12)
+                level.missingToCorrectedRatio * level.ndotl - 1.0) >
+            1.0e-3)
         {
             wetLobeCommensurability.violations.push_back("before-ratio");
         }
@@ -7954,6 +8344,19 @@ int RunWetnessFeature(
     missingCosineMutationCaught =
         missingCosineMutationNeutralIdentity &&
         wetLobeCommensurability.violations.empty();
+
+    if (wetLobePeak.levels.size() != PeakHalfAngles.size())
+        wetLobePeak.violations.push_back("level-count");
+    std::sort(
+        wetLobePeak.violations.begin(), wetLobePeak.violations.end());
+    wetLobePeak.violations.erase(
+        std::unique(
+            wetLobePeak.violations.begin(),
+            wetLobePeak.violations.end()),
+        wetLobePeak.violations.end());
+    strengthInsideClampMutationCaught =
+        strengthInsideClampMutationNeutralIdentity &&
+        wetLobePeak.violations.empty();
 
     if (ambientIblLayering.levels.size() != RequestedLevels.size())
         ambientIblLayering.violations.push_back("level-count");
@@ -8069,7 +8472,8 @@ int RunWetnessFeature(
         iblSpecularViolations, mutationObservedProperties,
         mutationDiffuseDelta, mutationSpecularDelta,
         mutationDiffuseScaleResidual, wetLobeScale,
-        wetLobeCommensurability, ambientIblLayering,
+        wetLobeCommensurability, wetLobePeak,
+        ambientIblLayering,
         mutationNeutralIdentity,
         mutationDirectionalLayeringFailed,
         piDeratingMutationNeutralIdentity,
@@ -8077,7 +8481,9 @@ int RunWetnessFeature(
         ambientUntouchedMutationNeutralIdentity,
         ambientUntouchedMutationCaught,
         missingCosineMutationNeutralIdentity,
-        missingCosineMutationCaught);
+        missingCosineMutationCaught,
+        strengthInsideClampMutationNeutralIdentity,
+        strengthInsideClampMutationCaught);
 
     const bool diffuseMonotonic = std::all_of(
         diffuseSeries.begin(), diffuseSeries.end(),
@@ -8092,7 +8498,8 @@ int RunWetnessFeature(
         oldMutationCaught &&
         piDeratingMutationCaught &&
         ambientUntouchedMutationCaught &&
-        missingCosineMutationCaught;
+        missingCosineMutationCaught &&
+        strengthInsideClampMutationCaught;
     const bool passed =
         neutralViolations.empty() &&
         localityViolations.empty() &&
@@ -8101,6 +8508,7 @@ int RunWetnessFeature(
         iblSpecularViolations == 0 &&
         wetLobeScale.violations.empty() &&
         wetLobeCommensurability.violations.empty() &&
+        wetLobePeak.violations.empty() &&
         ambientIblLayering.violations.empty() &&
         mutationCaught;
     std::cout << (passed ? "PASS" : "FAIL") << "\n"
@@ -8127,6 +8535,9 @@ int RunWetnessFeature(
               << "  wet lobe commensurability: "
               << (wetLobeCommensurability.violations.empty()
                       ? "PASS" : "FAIL")
+              << "\n"
+              << "  wet lobe peak ordering: "
+              << (wetLobePeak.violations.empty() ? "PASS" : "FAIL")
               << "\n"
               << "  ambient IBL layering: "
               << (ambientIblLayering.violations.empty() ? "PASS" : "FAIL")
@@ -9957,7 +10368,8 @@ Options ParseOptions(int argumentCount, char** arguments)
             "--mutant PATH --mutant-ibl PATH "
             "--pi-derating-mutant PATH "
             "--ambient-untouched-mutant-ibl PATH "
-            "--missing-cosine-mutant PATH]");
+            "--missing-cosine-mutant PATH "
+            "--strength-inside-clamp-mutant PATH]");
     }
 
     Options options;
@@ -10042,6 +10454,8 @@ Options ParseOptions(int argumentCount, char** arguments)
             options.ambientUntouchedMutantIblPath = value;
         else if (option == "--missing-cosine-mutant")
             options.missingCosineMutantPath = value;
+        else if (option == "--strength-inside-clamp-mutant")
+            options.strengthInsideClampMutantPath = value;
         else
             ThrowFailure("unknown option: " + option);
     }
@@ -10076,7 +10490,8 @@ int Run(const Options& options)
             options.mutantIblPath.empty() ||
             options.piDeratingMutantPath.empty() ||
             options.ambientUntouchedMutantIblPath.empty() ||
-            options.missingCosineMutantPath.empty())
+            options.missingCosineMutantPath.empty() ||
+            options.strengthInsideClampMutantPath.empty())
         {
             ThrowFailure(
                 "wetness_feature: all stock, feature, and mutant variants required");
@@ -10089,7 +10504,8 @@ int Run(const Options& options)
             ReadFile(options.mutantIblPath),
             ReadFile(options.piDeratingMutantPath),
             ReadFile(options.ambientUntouchedMutantIblPath),
-            ReadFile(options.missingCosineMutantPath));
+            ReadFile(options.missingCosineMutantPath),
+            ReadFile(options.strengthInsideClampMutantPath));
     }
 
     if (options.xegtaoAo)
@@ -10317,7 +10733,7 @@ void WriteFailureReport(
                << "\"fixture\":\"" << FixtureName(options.fixture) << "\","
                << "\"width\":" << options.width
                << ",\"height\":" << options.height << ","
-               << "\"measurement_protocol\":\"wetness-warp-v6\","
+               << "\"measurement_protocol\":\"wetness-warp-v7\","
                << "\"wetness_format\":\""
                << (options.fixture == Fixture::Native
                    ? "R8_UNORM" : "R32_FLOAT") << "\","
