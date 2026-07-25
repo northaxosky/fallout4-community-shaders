@@ -21,6 +21,7 @@
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
+#include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -95,10 +96,41 @@ namespace cs::features
 				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "bilinear_threshold", a_candidate.bilinearThreshold, 0.02f, 1.0f),
 					"bilinear_threshold", "number", a_error)
 				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "shadow_contrast", a_candidate.shadowContrast, 0.0f, 4.0f),
-					"shadow_contrast", "number", a_error)
-				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "max_shadow_length_percent", a_candidate.maxShadowLengthPercent, 0.5f, 15.0f),
-					"max_shadow_length_percent", "number", a_error)) {
+					"shadow_contrast", "number", a_error)) {
 				return false;
+			}
+
+			auto sampleCount = static_cast<std::uint64_t>(a_candidate.sampleCount);
+			const auto sampleCountStatus = feature_config::ReadUnsignedInteger(
+				*settingsTable,
+				"sample_count",
+				sampleCount,
+				sss_math::kMinSampleMultiplier,
+				sss_math::kMaxSampleMultiplier);
+			if (!AcceptSetting(sampleCountStatus, "sample_count", "integer", a_error)) {
+				return false;
+			}
+			if (sampleCountStatus == feature_config::ScalarReadStatus::kValid) {
+				a_candidate.sampleCount = static_cast<std::uint32_t>(sampleCount);
+				return true;
+			}
+
+			float legacyPercent = 0.0f;
+			const auto legacyStatus = feature_config::ReadFloat(
+				*settingsTable,
+				"max_shadow_length_percent",
+				legacyPercent,
+				0.5f,
+				15.0f);
+			if (!AcceptSetting(legacyStatus, "max_shadow_length_percent", "number", a_error)) {
+				return false;
+			}
+			if (legacyStatus == feature_config::ScalarReadStatus::kValid) {
+				a_candidate.sampleCount = sss_math::MigrateLegacyShadowLengthPercent(legacyPercent);
+				L->info(
+					"Mapped legacy max_shadow_length_percent={} to sample_count={}; save settings to persist the canonical key.",
+					legacyPercent,
+					a_candidate.sampleCount);
 			}
 
 			return true;
@@ -129,7 +161,7 @@ namespace cs::features
 		settings.insert_or_assign("surface_thickness", _settings.surfaceThickness);
 		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
-		settings.insert_or_assign("max_shadow_length_percent", _settings.maxShadowLengthPercent);
+		settings.insert_or_assign("sample_count", static_cast<std::int64_t>(_settings.sampleCount));
 
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
 			L->error("Failed to save settings: {}", result.error);
@@ -216,12 +248,12 @@ namespace cs::features
 	void ScreenSpaceShadows::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !a_device) return;
-		if (_settings.enabled) EnsureResources();
+		EnsureResources();
 	}
 
 	bool ScreenSpaceShadows::IsShadowMaskReady()
 	{
-		return _started.load(std::memory_order_acquire) && _settings.enabled && EnsureResources();
+		return _started.load(std::memory_order_acquire) && EnsureResources();
 	}
 
 	bool ScreenSpaceShadows::EnsureResources()
@@ -287,20 +319,15 @@ namespace cs::features
 
 	std::uint32_t ScreenSpaceShadows::GetScaledSampleCount() const
 	{
-		constexpr std::uint32_t kMinSampleCount = 8;
-		constexpr std::uint32_t kMaxSampleCount = 512;
 		auto* state = cs::engine::GetGraphicsState();
 		auto* rtm = cs::engine::GetRenderTargetManager();
 		if (!state || !rtm) {
-			return kMinSampleCount;
+			return sss_math::kMinSampleCount;
 		}
 
+		const float width = static_cast<float>(state->screenWidth) * rtm->GetDynamicWidthRatio();
 		const float height = static_cast<float>(state->screenHeight) * rtm->GetDynamicHeightRatio();
-		// SAMPLE_COUNT is the max march reach in screen pixels; derive it from a fraction of render height.
-		const float reachPixels = (_settings.maxShadowLengthPercent / 100.0f) * height;
-		auto scaled = static_cast<std::uint32_t>(std::round(reachPixels));
-		scaled = ((scaled + 7u) / 8u) * 8u;  // quantize to 8 to avoid DRS-oscillation recompiles
-		return std::clamp(scaled, kMinSampleCount, kMaxSampleCount);
+		return sss_math::ScaleSampleCount(_settings.sampleCount, width, height);
 	}
 
 	ID3D11ComputeShader* ScreenSpaceShadows::GetComputeRaymarch()
@@ -331,16 +358,11 @@ namespace cs::features
 			return;
 		}
 
-		// The SCREEN_SPACE_SHADOWS define is compiled into the directional shaders at startup
-		if (_settings.enabled) {
-			if (!EnsureResources()) {
-				return;
-			}
-		} else if (!_resourcesReady.load(std::memory_order_acquire)) {
-			return;
-		}
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
 		_maskBoundLastFrame.store(false, std::memory_order_relaxed);
+		if (!EnsureResources()) {
+			return;
+		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) {
@@ -573,7 +595,11 @@ namespace cs::features
 		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);
 		changed |= ImGui::SliderFloat("Shadow contrast", &_settings.shadowContrast, 0.0f, 4.0f);
 
-		changed |= ImGui::SliderFloat("Max shadow length", &_settings.maxShadowLengthPercent, 0.5f, 15.0f, "%.1f%% of screen height");
+		auto sampleCount = static_cast<int>(_settings.sampleCount);
+		if (ImGui::SliderInt("Sample count multiplier", &sampleCount, 1, 4)) {
+			_settings.sampleCount = static_cast<std::uint32_t>(sampleCount);
+			changed = true;
+		}
 		if (changed) {
 			SaveSettings();
 		}

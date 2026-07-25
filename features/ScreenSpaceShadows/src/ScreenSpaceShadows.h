@@ -40,7 +40,7 @@ namespace cs::features
 			float         surfaceThickness = 0.02f;
 			float         bilinearThreshold = 0.02f;
 			float         shadowContrast = 1.0f;
-			float         maxShadowLengthPercent = 2.0f;  // max shadow reach as a percentage of render height
+			std::uint32_t sampleCount = 1;
 		};
 
 	private:

@@ -193,6 +193,18 @@ configure_host_test(FeatureStateTests)
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
 
+add_executable(ScreenSpaceShadowsMathTests
+	tests/ScreenSpaceShadowsMathTests.cpp
+	features/ScreenSpaceShadows/src/ScreenSpaceShadowsMath.h
+)
+configure_host_test(ScreenSpaceShadowsMathTests)
+target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/src"
+)
+
+add_test(NAME ScreenSpaceShadowsMath COMMAND ScreenSpaceShadowsMathTests)
+set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
+
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
 	include/LogThrottle.h
