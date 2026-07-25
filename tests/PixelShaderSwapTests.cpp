@@ -94,6 +94,51 @@ namespace
 			"variant hash mismatch did not refuse hash fallback");
 	}
 
+	void TestCrossSubclassKeyCollisionStaysGuarded()
+	{
+		using namespace cs::engine;
+		const ShaderVariantKeyView composite{
+			"BSDFCompositeShader",
+			ShaderStage::kPixel,
+			ShaderVariantId{ 0x00100048 }
+		};
+		const ShaderVariantKeyView light{
+			"BSDFLightShader",
+			ShaderStage::kPixel,
+			ShaderVariantId{ 0x00100048 }
+		};
+		const auto compositeHash = Sha(
+			"3c1355737e77d36cdbc37d6b76015b8eb2a15b53");
+		const auto lightHash = Sha(
+			"9969e800683c8a7c8afc25f41582415d79cbe47e");
+		const std::vector variants{
+			PixelShaderSwapVariantKey{
+				OwnShaderVariantKey(composite),
+				compositeHash
+			},
+			PixelShaderSwapVariantKey{
+				OwnShaderVariantKey(light),
+				lightHash
+			}
+		};
+
+		const auto lightSelection = SelectPixelShaderSwapVariant(
+			variants, light, lightHash);
+		Check(
+			lightSelection.kind
+					== PixelShaderSwapSelectionKind::kSelected
+				&& lightSelection.variantIndex == 1,
+			"cross-subclass archive key selected the wrong row");
+
+		const auto mismatch = SelectPixelShaderSwapVariant(
+			variants, composite, lightHash);
+		Check(
+			mismatch.kind
+					== PixelShaderSwapSelectionKind::kHashMismatch
+				&& mismatch.variantIndex == 0,
+			"cross-block key collision bypassed the stock SHA1 guard");
+	}
+
 	void TestHashlessVariantRefused()
 	{
 		using namespace cs::engine;
@@ -261,10 +306,10 @@ namespace
 		}
 
 		const auto unknownBits = ResolvePixelShaderVariant(
-			"BSDFCompositeShader", 0x80000B60, false);
+			"BSDFCompositeShader", 0x00100048, false);
 		Check(
 			unknownBits
-				&& unknownBits->id.Value() == 0x80000B60,
+				&& unknownBits->id.Value() == 0x00100048,
 			"Composite resolver discarded an opaque technique bit");
 	}
 
@@ -296,6 +341,7 @@ int main()
 	const Test tests[]{
 		{ "variant key selects variant", &TestVariantKeySelectsVariant },
 		{ "variant hash mismatch refused", &TestVariantHashMismatchRefused },
+		{ "cross-subclass key collision guarded", &TestCrossSubclassKeyCollisionStaysGuarded },
 		{ "hashless variant refused", &TestHashlessVariantRefused },
 		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
 		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
