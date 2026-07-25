@@ -21,6 +21,7 @@
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
 #include "Render/ShaderInjection.h"
+#include "ScreenSpaceGILifecycle.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 
@@ -418,7 +419,7 @@ namespace cs::features
 			.contributor = "ScreenSpaceGI",
 			.defines = { { "SSGI", "1" } },
 			.isReady = [this] {
-				return _settings.bounceDelivery == 1 && IsReady() && _bounceTexture;
+				return IsReady();
 			},
 			.bind = [this](ID3D11DeviceContext* a_context) {
 				OnAmbientPassInjection(a_context);
@@ -454,7 +455,7 @@ namespace cs::features
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !a_device) return;
-		if (_settings.enabled) EnsureResources();
+		EnsureResources();
 
 		_resolveCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 			cs::util::CompileShader(kResolvePath, {}, "cs_5_0")));
@@ -572,7 +573,12 @@ namespace cs::features
 
 	bool ScreenSpaceGI::IsReady()
 	{
-		return _started.load(std::memory_order_acquire) && _settings.enabled && EnsureResources();
+		return ssgi_lifecycle::CanBakeAmbientInjection(
+			_started.load(std::memory_order_acquire),
+			_resourcesReady.load(std::memory_order_acquire),
+			_bounceTexture != nullptr,
+			_settings.enabled,
+			_settings.bounceDelivery);
 	}
 
 	bool ScreenSpaceGI::EnsureResources()
@@ -603,10 +609,22 @@ namespace cs::features
 				return true;
 			}
 
+			auto* rendererData = RE::BSGraphics::GetRendererData();
+			auto* context = rendererData ?
+				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+				nullptr;
+			if (!context) {
+				throw std::runtime_error("renderer context unavailable");
+			}
+
 			auto resolveCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<ResolveCB>());
 			auto bounceTexture = CreateOutputTexture(width, height);
 			auto aoTexture = CreateOutputTexture(width, height);
+			context->ClearUnorderedAccessViewFloat(
+				bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+			context->ClearUnorderedAccessViewFloat(
+				aoTexture->uav.get(), ssgi_lifecycle::kAOIdentity.data());
 			auto linearDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT);
 			auto workingDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT, 5, false);
 			auto viewNormalTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
@@ -822,23 +840,34 @@ namespace cs::features
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
-		if (_settings.enabled) {
-			if (!EnsureResources()) {
-				return;
-			}
-		} else if (!_resourcesReady.load(std::memory_order_acquire)) {
-			return;
-		} else if (!EnsureResources()) {
-			return;
-		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* state = cs::engine::GetGraphicsState();
-		if (!rendererData || !state || !_bounceTexture || !_aoTexture) {
+		if (!rendererData) {
 			return;
 		}
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		if (!context) {
+			return;
+		}
+
+		if (_bounceTexture) {
+			context->ClearUnorderedAccessViewFloat(
+				_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+		}
+		if (_aoTexture) {
+			context->ClearUnorderedAccessViewFloat(
+				_aoTexture->uav.get(), ssgi_lifecycle::kAOIdentity.data());
+		}
+		if (!EnsureResources() || !_bounceTexture || !_aoTexture) {
+			return;
+		}
+		context->ClearUnorderedAccessViewFloat(
+			_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+		context->ClearUnorderedAccessViewFloat(
+			_aoTexture->uav.get(), ssgi_lifecycle::kAOIdentity.data());
+
+		auto* state = cs::engine::GetGraphicsState();
+		if (!state || !_settings.enabled) {
 			return;
 		}
 
@@ -1277,22 +1306,24 @@ namespace cs::features
 		_aoIntegrationActiveLastFrame.store(false, std::memory_order_relaxed);
 		_aoIntegrationDispatchedLastFrame.store(0, std::memory_order_relaxed);
 
-		if (!_settings.enabled) {
-			return;
-		}
-		if (!IsReady() || !_aoTexture) {
-			return;
-		}
-		IntegrateAO(cs::engine::RenderTarget::kSSAOFinal);
-		if (_settings.bounceDelivery == 2 &&
-			_bounceProducedLastFrame.load(std::memory_order_relaxed)) {
-			IntegrateBounce();
+		if (_settings.enabled && IsReady() && _aoTexture) {
+			IntegrateAO(cs::engine::RenderTarget::kSSAOFinal);
+			if (_settings.bounceDelivery == 2 &&
+				_bounceProducedLastFrame.load(std::memory_order_relaxed)) {
+				IntegrateBounce();
+			}
 		}
 
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		auto* context = rendererData ?
 			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 			nullptr;
+		if (context && _bounceTexture &&
+			!ssgi_lifecycle::UsesDirectAmbientBounce(
+				_settings.enabled, _settings.bounceDelivery)) {
+			context->ClearUnorderedAccessViewFloat(
+				_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+		}
 		cs::engine::DispatchShaderInjections(
 			cs::engine::ShaderInjectionTarget::kAmbientIblPass,
 			context);
@@ -1605,10 +1636,6 @@ namespace cs::features
 		if (!a_context) {
 			return;
 		}
-		if (_settings.bounceDelivery != 1) {
-			return;
-		}
-
 		ID3D11ShaderResourceView* bounce = _bounceTexture->srv.get();
 		a_context->PSSetShaderResources(kBouncePSSlot, 1, &bounce);
 		_bounceAnchorBindsLastFrame.fetch_add(1, std::memory_order_relaxed);

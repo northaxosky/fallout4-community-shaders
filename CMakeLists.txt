@@ -187,8 +187,12 @@ set_tests_properties(FeatureConfigSeeds PROPERTIES LABELS "configuration;package
 add_executable(FeatureStateTests
 	tests/FeatureStateTests.cpp
 	src/FeatureState.h
+	features/ScreenSpaceGI/src/ScreenSpaceGILifecycle.h
 )
 configure_host_test(FeatureStateTests)
+target_include_directories(FeatureStateTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src"
+)
 
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")

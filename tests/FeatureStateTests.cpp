@@ -1,4 +1,5 @@
 #include "FeatureState.h"
+#include "ScreenSpaceGILifecycle.h"
 
 #include <iostream>
 #include <string>
@@ -136,6 +137,30 @@ namespace
 		CHECK(state.runtimeState == FeatureRuntimeState::kDegraded);
 		CHECK(state.detail == "hooks may remain");
 	}
+
+	void TestScreenSpaceGILifecycle()
+	{
+		using namespace cs::features::ssgi_lifecycle;
+
+		for (const bool enabled : { false, true }) {
+			for (int delivery = 0; delivery <= 2; ++delivery) {
+				CHECK(CanBakeAmbientInjection(true, true, true, enabled, delivery));
+			}
+		}
+		CHECK(!CanBakeAmbientInjection(false, true, true, true, 1));
+		CHECK(!CanBakeAmbientInjection(true, false, true, true, 1));
+		CHECK(!CanBakeAmbientInjection(true, true, false, true, 1));
+
+		CHECK(!UsesDirectAmbientBounce(false, 1));
+		CHECK(!UsesDirectAmbientBounce(true, 0));
+		CHECK(UsesDirectAmbientBounce(true, 1));
+		CHECK(!UsesDirectAmbientBounce(true, 2));
+
+		constexpr std::array aoIdentity{ 1.0f, 1.0f, 1.0f, 1.0f };
+		constexpr std::array bounceIdentity{ 0.0f, 0.0f, 0.0f, 0.0f };
+		CHECK(kAOIdentity == aoIdentity);
+		CHECK(kBounceIdentity == bounceIdentity);
+	}
 }
 
 int main()
@@ -145,6 +170,7 @@ int main()
 	TestFeatureRequirements();
 	TestRuntimeStateNames();
 	TestActivationResultApplication();
+	TestScreenSpaceGILifecycle();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";
