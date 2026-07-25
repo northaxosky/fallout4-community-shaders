@@ -71,9 +71,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     population = populations[mask]
                     mrt = []
                     for name in feature["mrt_buckets"]:
-                        zero_delta = mask == "mask.zero" or (
-                            material == "material.skin" and name == "specular"
-                        )
+                        zero_delta = mask == "mask.zero"
                         distribution = (
                             {
                                 "min": 0.0,
@@ -209,7 +207,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             },
             "contract_delta": {
                 "stock_to_feature": "only-texture2d-t4-added",
-                "mutation_t4_optimization_away_allowed": True,
+                "mutation_t4_optimization_away_allowed": False,
                 "verdict": "PASS",
             },
             "variants": feature["variants"],
@@ -245,14 +243,15 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "direct_specular_claim": "not-claimed",
                     "diffuse_series": diffuse_series,
                     "ibl_specular_probe": {
-                        "scope": (
-                            "controlled-positive-gradient-ambientSpecular"
+                        "scope": "ambientSpecular remains substrate-owned",
+                        "claim": (
+                            "wet film does not modify the stock ambient gradient"
                         ),
                         "levels": [
                             {
                                 "requested": requested,
                                 "uploaded": uploaded,
-                                "delta_energy": float(index * 25),
+                                "delta_energy": 0.0,
                             }
                             for index, (requested, uploaded) in enumerate(
                                 zip(requested_levels, uploaded_levels)
@@ -265,11 +264,69 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "verdict": "PASS",
                 },
                 "mutation_sensitivity": {
-                    "id": "wetness-load-zero",
-                    "expected_failed_property": "active_locality",
-                    "observed_failed_properties": ["active_locality"],
+                    "id": feature["mutation"]["id"],
+                    "expected_failed_property": "directional_layering",
+                    "observed_failed_properties": [
+                        "directional_layering"
+                    ],
                     "neutral_identity": "PASS",
-                    "active_locality": "FAIL",
+                    "directional_layering": "FAIL",
+                    "diffuse_probe": {
+                        "name": "diffuse",
+                        "population": 256,
+                        "changed_pixels": 256,
+                        "changed_channels": 768,
+                        "absolute_delta": {
+                            "min": 0.1,
+                            "mean": 0.1,
+                            "p50": 0.1,
+                            "p95": 0.1,
+                            "p99": 0.1,
+                            "max": 0.1,
+                        },
+                        "signed_delta": {
+                            "min": -0.1,
+                            "mean": -0.1,
+                            "p05": -0.1,
+                            "p50": -0.1,
+                            "p95": -0.1,
+                            "max": -0.1,
+                        },
+                        "stock_energy": 768.0,
+                        "delta_energy": 76.8,
+                        "denominator_threshold": 768e-12,
+                        "delta_fraction_of_stock": 0.1,
+                        "energy_verdict": "PROVEN",
+                    },
+                    "expected_full_wet_scale": 0.5,
+                    "maximum_scale_residual": 0.0,
+                    "specular_probe": {
+                        "name": "specular",
+                        "population": 256,
+                        "changed_pixels": 256,
+                        "changed_channels": 768,
+                        "absolute_delta": {
+                            "min": 0.1,
+                            "mean": 0.1,
+                            "p50": 0.1,
+                            "p95": 0.1,
+                            "p99": 0.1,
+                            "max": 0.1,
+                        },
+                        "signed_delta": {
+                            "min": 0.1,
+                            "mean": 0.1,
+                            "p05": 0.1,
+                            "p50": 0.1,
+                            "p95": 0.1,
+                            "max": 0.1,
+                        },
+                        "stock_energy": 768.0,
+                        "delta_energy": 76.8,
+                        "denominator_threshold": 768e-12,
+                        "delta_fraction_of_stock": 0.1,
+                        "energy_verdict": "PROVEN",
+                    },
                     "verdict": "CAUGHT",
                 },
             },
@@ -375,7 +432,11 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                         }
                     )
                 )
-                stock_energy = float(population * 3)
+                stock_energy = (
+                    0.0
+                    if scenario == "matte"
+                    else float(population * 3)
+                )
                 delta_energy = (
                     0.0 if zero_delta else population * 3 * 0.1
                 )
@@ -407,11 +468,50 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                             ),
                             "delta_fraction_of_stock": (
                                 delta_energy / stock_energy
+                                if stock_energy
+                                else 0.0
                             ),
-                            "energy_verdict": "PROVEN",
+                            "energy_verdict": (
+                                "UNPROVEN"
+                                if scenario == "matte"
+                                else "PROVEN"
+                            ),
                         },
                     }
                 )
+        film_substrate = [0.5625, 0.375, 0.1875]
+        film_source = [0.1875, 0.375, 0.5625]
+        film_ndotv = 0.1
+        one_minus_ndotv = 1.0 - film_ndotv
+        film_fresnel = 0.02 + 0.98 * one_minus_ndotv**5
+        film_levels = []
+        for index, (requested, uploaded) in enumerate(
+            zip(requested_levels, uploaded_levels)
+        ):
+            wetness_f = min(uploaded, 0.95) * film_fresnel
+            expected_delta = [
+                wetness_f * (film_source[channel] - film_substrate[channel])
+                for channel in range(3)
+            ]
+            expected_film = [
+                wetness_f * film_source[channel] for channel in range(3)
+            ]
+            film_levels.append(
+                {
+                    "requested": requested,
+                    "uploaded": uploaded,
+                    "wetness_f": wetness_f,
+                    "expected_delta": expected_delta,
+                    "observed_delta": list(expected_delta),
+                    "expected_film": expected_film,
+                    "observed_film": list(expected_film),
+                    "maximum_residual": 0.0,
+                    "expected_energy_delta": sum(expected_delta),
+                    "observed_energy_delta": sum(expected_delta),
+                    "film_nonzero_required": index != 0,
+                    "film_nonzero": True,
+                }
+            )
         return {
             "schema": subject.FEATURE_MEASUREMENT_SCHEMA,
             "schema_version": 1,
@@ -441,7 +541,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "srv_format": wetness_format,
                 }
             ],
-            "seeds": [1, 2, 3],
+            "seeds": [1, 2, 3, 4, 5, 6],
             "generated_inputs_sha256": "0" * 64,
             "hashes": {
                 "uploaded_masks": [dict(item) for item in mask_hashes],
@@ -449,7 +549,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             },
             "contract_delta": {
                 "stock_to_feature": "only-texture2d-t13-added",
-                "mutation_t13_optimization_away_allowed": True,
+                "mutation_t13_optimization_away_allowed": False,
                 "verdict": "PASS",
             },
             "variants": ambient["variants"],
@@ -457,7 +557,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 "neutral_identity": {
                     "tolerance_absolute": 0,
                     "tolerance_relative": 0,
-                    "comparisons": 3,
+                    "comparisons": 6,
                     "violations": [],
                     "verdict": "PASS",
                 },
@@ -478,22 +578,123 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 },
                 "magnitude": {
                     "rgb_only": True,
-                    "invalid_denominator_buckets": 0,
-                    "reflection_probe": {
+                    "invalid_magnitude_buckets": 0,
+                    "glossy_probe": {
                         "scenario": "reflection",
                         "mask": "mask.full",
                         "output": "color",
+                        "denominator_policy": "stock-energy-proven",
+                        "maximum_delta_fraction_of_stock": 2.5,
+                        "maximum_p95_absolute_delta": 0.9,
+                        "maximum_absolute_delta": 1.0,
+                        "maximum_positive_delta": 1.0,
+                        "inputs": {
+                            "smoothness": 0.85,
+                            "spec_magnitude": 0.35,
+                            "decoded_material": 0.5,
+                            "encoded_material": (0.5 * 0.02) ** 0.5,
+                            "maximum_encoded_material": 0.02**0.5,
+                        },
                     },
+                    "verdict": "PASS",
+                },
+                "matte_sheen": {
+                    "probe": {
+                        "scenario": "matte",
+                        "mask": "mask.full",
+                        "output": "color",
+                    },
+                    "inputs": {
+                        "smoothness": 0.25,
+                        "smoothness_maximum": 0.3,
+                        "spec_magnitude": 0.05,
+                        "encoded_material": (0.01 * 0.02) ** 0.5,
+                    },
+                    "film_model": {
+                        "substrate_independent": True,
+                        "coverage_source": "t13",
+                        "roughness_formula": (
+                            "max(saturate(1-wetness),0.05)"
+                        ),
+                        "minimum_water_roughness": 0.05,
+                        "smoothness_formula": "1-wetFilmRoughness",
+                        "strength_formula": (
+                            "saturate(1-wetFilmRoughness)"
+                        ),
+                        "full_wetness_roughness": 0.05,
+                        "full_wetness_smoothness": 0.95,
+                        "f0": 0.02,
+                        "full_wetness_strength": 0.95,
+                        "fresnel_model": "schlick",
+                        "energy_attenuation": "substrate*(1-wetnessF)",
+                        "lobe_path": "ambient-ibl",
+                        "normal_incidence_reflection_scalar": 0.95 * 0.02,
+                    },
+                    "signed_rule": "feature-stock RGB strictly positive",
+                    "stock_denominator": "expected-zero",
+                    "violations": [],
+                    "verdict": "PASS",
+                },
+                "no_ibl_film": {
+                    "probe": {
+                        "scenario": "no-ibl",
+                        "mask": "mask.full",
+                        "output": "color",
+                    },
+                    "inputs": {
+                        "substrate_ibl_available": False,
+                        "material_probe_selector": 0,
+                        "smoothness": 0.25,
+                        "spec_magnitude": 0.05,
+                        "encoded_material": (0.01 * 0.02) ** 0.5,
+                        "ambient_base": [0.2, 0.2, 0.2],
+                        "lit_scene": [0.6, 0.45, 0.3, 1],
+                        "lit_scene_weight": 0.75,
+                        "lit_scene_alpha": 1,
+                    },
+                    "signed_rule": "feature-stock RGB strictly positive",
+                    "stock_denominator": "proven",
+                    "violations": [],
+                    "verdict": "PASS",
+                },
+                "ambient_film_blend": {
+                    "probe": {
+                        "scenario": "layered-matte-grazing",
+                        "mask": "levels",
+                        "output": "color",
+                    },
+                    "ndotv": film_ndotv,
+                    "ndotv_range": {
+                        "exclusive_minimum": 0,
+                        "inclusive_maximum": 0.125,
+                    },
+                    "substrate": film_substrate,
+                    "film_source": film_source,
+                    "formula": (
+                        "substrate*(1-wetnessF)+film*wetnessF"
+                    ),
+                    "absolute_tolerance": 2e-5,
+                    "relative_tolerance": 2e-4,
+                    "maximum_energy_residual": 6e-5,
+                    "levels": film_levels,
+                    "violations": [],
                     "verdict": "PASS",
                 },
                 "monotonicity": {
                     "claim": (
-                        "absolute RGB delta is nondecreasing across "
-                        "uploaded levels"
+                        "isolated diffuse absolute RGB delta is nondecreasing"
                     ),
                     "series": [
                         {
                             "scenario": scenario,
+                            "claim": (
+                                "absolute RGB delta is nondecreasing"
+                                if scenario == "diffuse"
+                                else (
+                                    "net layered delta measured; "
+                                    "monotonicity not claimed"
+                                )
+                            ),
                             "levels": [
                                 {
                                     "requested": requested,
@@ -513,11 +714,172 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "verdict": "PASS",
                 },
                 "mutation_sensitivity": {
-                    "id": "ambient-wetness-load-zero",
-                    "expected_failed_property": "active_locality",
-                    "observed_failed_properties": ["active_locality"],
+                    "id": "ambient-wetness-old-output-multiply",
+                    "expected_failed_property": "matte_sheen",
+                    "observed_failed_properties": [
+                        "matte_sheen",
+                        "no_ibl_film",
+                        "ambient_film_blend",
+                    ],
                     "neutral_identity": "PASS",
-                    "active_locality": "FAIL",
+                    "matte_sheen": "FAIL",
+                    "no_ibl_film": "FAIL",
+                    "ambient_film_blend": "FAIL",
+                    "glossy_reflection": "PASS",
+                    "matte_probe": {
+                        "name": "color",
+                        "population": expected_buckets["mask.full"][
+                            "population"
+                        ],
+                        "changed_pixels": 0,
+                        "changed_channels": 0,
+                        "absolute_delta": {
+                            name: 0.0
+                            for name in (
+                                "min",
+                                "mean",
+                                "p50",
+                                "p95",
+                                "p99",
+                                "max",
+                            )
+                        },
+                        "signed_delta": {
+                            name: 0.0
+                            for name in (
+                                "min",
+                                "mean",
+                                "p05",
+                                "p50",
+                                "p95",
+                                "max",
+                            )
+                        },
+                        "stock_energy": 0.0,
+                        "delta_energy": 0.0,
+                        "denominator_threshold": max(
+                            1e-12,
+                            expected_buckets["mask.full"]["population"]
+                            * 3e-12,
+                        ),
+                        "delta_fraction_of_stock": 0.0,
+                        "energy_verdict": "UNPROVEN",
+                    },
+                    "no_ibl_probe": {
+                        "name": "color",
+                        "population": expected_buckets["mask.full"][
+                            "population"
+                        ],
+                        "changed_pixels": expected_buckets["mask.full"][
+                            "population"
+                        ],
+                        "changed_channels": expected_buckets["mask.full"][
+                            "population"
+                        ]
+                        * 3,
+                        "absolute_delta": {
+                            "min": 0.05,
+                            "mean": 0.1,
+                            "p50": 0.1,
+                            "p95": 0.15,
+                            "p99": 0.19,
+                            "max": 0.2,
+                        },
+                        "signed_delta": {
+                            "min": -0.2,
+                            "mean": -0.1,
+                            "p05": -0.19,
+                            "p50": -0.1,
+                            "p95": -0.05,
+                            "max": -0.05,
+                        },
+                        "stock_energy": float(
+                            expected_buckets["mask.full"]["population"] * 3
+                        ),
+                        "delta_energy": float(
+                            expected_buckets["mask.full"]["population"]
+                            * 3
+                            * 0.1
+                        ),
+                        "denominator_threshold": max(
+                            1e-12,
+                            expected_buckets["mask.full"]["population"]
+                            * 3e-12,
+                        ),
+                        "delta_fraction_of_stock": 0.1,
+                        "energy_verdict": "PROVEN",
+                    },
+                    "layered_probe": {
+                        "name": "color",
+                        "population": 256,
+                        "changed_pixels": 256,
+                        "changed_channels": 768,
+                        "absolute_delta": {
+                            "min": 0.05,
+                            "mean": 0.1,
+                            "p50": 0.1,
+                            "p95": 0.15,
+                            "p99": 0.19,
+                            "max": 0.2,
+                        },
+                        "signed_delta": {
+                            "min": -0.2,
+                            "mean": -0.1,
+                            "p05": -0.19,
+                            "p50": -0.1,
+                            "p95": -0.05,
+                            "max": -0.05,
+                        },
+                        "stock_energy": 288.0,
+                        "delta_energy": 76.8,
+                        "denominator_threshold": 768e-12,
+                        "delta_fraction_of_stock": 76.8 / 288.0,
+                        "energy_verdict": "PROVEN",
+                    },
+                    "glossy_probe": {
+                        "name": "color",
+                        "population": expected_buckets["mask.full"][
+                            "population"
+                        ],
+                        "changed_pixels": expected_buckets["mask.full"][
+                            "population"
+                        ],
+                        "changed_channels": expected_buckets["mask.full"][
+                            "population"
+                        ]
+                        * 3,
+                        "absolute_delta": {
+                            "min": 0.05,
+                            "mean": 0.1,
+                            "p50": 0.1,
+                            "p95": 0.15,
+                            "p99": 0.19,
+                            "max": 0.2,
+                        },
+                        "signed_delta": {
+                            "min": 0.05,
+                            "mean": 0.1,
+                            "p05": 0.05,
+                            "p50": 0.1,
+                            "p95": 0.15,
+                            "max": 0.2,
+                        },
+                        "stock_energy": float(
+                            expected_buckets["mask.full"]["population"] * 3
+                        ),
+                        "delta_energy": float(
+                            expected_buckets["mask.full"]["population"]
+                            * 3
+                            * 0.1
+                        ),
+                        "denominator_threshold": max(
+                            1e-12,
+                            expected_buckets["mask.full"]["population"]
+                            * 3e-12,
+                        ),
+                        "delta_fraction_of_stock": 0.1,
+                        "energy_verdict": "PROVEN",
+                    },
                     "verdict": "CAUGHT",
                 },
             },
@@ -527,6 +889,13 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_contract_schema_and_predicates(self):
         subject.validate_contracts(self.contracts)
+        self.assertEqual(4, subject.FEATURE_PROTOCOL_VERSION)
+        self.assertEqual(
+            "wetness-warp-v4",
+            self.contracts["additive_features"]["wetness-effects"][
+                "measurement_protocol"
+            ],
+        )
         self.assertEqual(["adversarial", "native"], self.contracts["fixtures"])
         for profile in self.contracts["profiles"].values():
             for fixture in subject.FIXTURE_ORDER:
@@ -610,6 +979,29 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             ambient["variants"],
         )
         self.assertEqual(
+            [
+                "combined",
+                "diffuse",
+                "reflection",
+                "matte",
+                "no-ibl",
+                "layered-matte-grazing",
+            ],
+            ambient["scenario_buckets"],
+        )
+        self.assertEqual(
+            "ambient-wetness-old-output-multiply",
+            ambient["mutation"]["id"],
+        )
+        self.assertEqual(
+            "matte_sheen",
+            ambient["mutation"]["expected_failed_property"],
+        )
+        self.assertEqual(1, len(ambient["mutation"]["replacements"]))
+        self.assertNotIn(
+            ambient["mutation"]["id"], subject.REQUIRED_MUTATION_IDS
+        )
+        self.assertEqual(
             ["adversarial", "native"],
             [item["id"] for item in feature["fixtures"]],
         )
@@ -628,16 +1020,29 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             mutant = subject.build_additive_feature_mutant(
                 before.decode("utf-8-sig"), contract
             )
-            self.assertEqual(
-                1, mutant.count(contract["mutation"]["new"])
+            replacements = contract["mutation"].get(
+                "replacements",
+                [
+                    {
+                        "old": contract["mutation"].get("old"),
+                        "new": contract["mutation"].get("new"),
+                    }
+                ],
             )
-            self.assertNotIn(contract["mutation"]["old"], mutant)
+            original = before.decode("utf-8-sig").replace("\r\n", "\n")
+            for replacement in replacements:
+                self.assertEqual(
+                    original.count(replacement["new"]) + 1,
+                    mutant.count(replacement["new"]),
+                )
+                self.assertNotIn(replacement["old"], mutant)
             self.assertEqual(before, Path(source).read_bytes())
             with self.assertRaises(subject.StableFailure):
+                first = replacements[0]
                 subject.build_additive_feature_mutant(
-                    before.decode("utf-8-sig").replace(
-                        contract["mutation"]["old"],
-                        contract["mutation"]["old"] * 2,
+                    original.replace(
+                        first["old"],
+                        first["old"] * 2,
                     ),
                     contract,
                 )
@@ -686,7 +1091,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 (item["mask"], item["scenario"])
                 for item in ambient_measurement["cross_buckets"]
             }
-            self.assertEqual(9, len(ambient_keys))
+            self.assertEqual(18, len(ambient_keys))
             self.assertTrue(
                 all(
                     item["output"]["name"] == "color"
@@ -715,7 +1120,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             item
             for item in ambient_inactive["cross_buckets"]
             if item["mask"] == "mask.full"
-            and item["scenario"] == "reflection"
+            and item["scenario"] == "combined"
         )
         ambient_bucket["output"]["changed_pixels"] = 0
         ambient_bucket["output"]["changed_channels"] = 0
@@ -777,9 +1182,374 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             "p95": -0.05,
             "max": -0.05,
         }
-        self.assertTrue(
+        self.assertEqual(
+            [],
             subject.validate_feature_measurement(
                 reflection_inverted,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        matte_inactive = self.ambient_feature_measurement("adversarial")
+        matte_bucket = next(
+            item
+            for item in matte_inactive["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "matte"
+        )
+        matte_bucket["output"]["changed_pixels"] = 0
+        matte_bucket["output"]["changed_channels"] = 0
+        matte_bucket["output"]["delta_energy"] = 0.0
+        matte_bucket["output"]["absolute_delta"] = {
+            name: 0.0
+            for name in ("min", "mean", "p50", "p95", "p99", "max")
+        }
+        matte_bucket["output"]["signed_delta"] = {
+            name: 0.0
+            for name in ("min", "mean", "p05", "p50", "p95", "max")
+        }
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                matte_inactive,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        no_ibl_inactive = self.ambient_feature_measurement("adversarial")
+        no_ibl_bucket = next(
+            item
+            for item in no_ibl_inactive["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "no-ibl"
+        )
+        no_ibl_bucket["output"]["changed_pixels"] = 0
+        no_ibl_bucket["output"]["changed_channels"] = 0
+        no_ibl_bucket["output"]["delta_energy"] = 0.0
+        no_ibl_bucket["output"]["delta_fraction_of_stock"] = 0.0
+        no_ibl_bucket["output"]["absolute_delta"] = {
+            name: 0.0
+            for name in ("min", "mean", "p50", "p95", "p99", "max")
+        }
+        no_ibl_bucket["output"]["signed_delta"] = {
+            name: 0.0
+            for name in ("min", "mean", "p05", "p50", "p95", "max")
+        }
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                no_ibl_inactive,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        no_ibl_mutation_missed = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        mutation = no_ibl_mutation_missed["properties"][
+            "mutation_sensitivity"
+        ]
+        mutation["no_ibl_film"] = "PASS"
+        mutation["observed_failed_properties"] = ["matte_sheen"]
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                no_ibl_mutation_missed,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_gate_regression = self.ambient_feature_measurement("adversarial")
+        gated_level = film_gate_regression["properties"][
+            "ambient_film_blend"
+        ]["levels"][1]
+        gated_level["observed_delta"] = [
+            -0.08,
+            -0.05,
+            -0.02,
+        ]
+        gated_level["observed_film"] = [0.0, 0.0, 0.0]
+        gated_level["maximum_residual"] = 0.08
+        gated_level["observed_energy_delta"] = -0.15
+        gated_level["film_nonzero"] = False
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_gate_regression,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_wrong_magnitude = self.ambient_feature_measurement("adversarial")
+        wrong_level = film_wrong_magnitude["properties"][
+            "ambient_film_blend"
+        ]["levels"][1]
+        wrong_level["observed_delta"][0] *= 0.5
+        wrong_level["observed_film"][0] *= 0.5
+        wrong_level["maximum_residual"] = 0.01
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_wrong_magnitude,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_energy_leak = self.ambient_feature_measurement("adversarial")
+        film_energy_leak["properties"]["ambient_film_blend"]["levels"][1][
+            "observed_energy_delta"
+        ] = -0.01
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_energy_leak,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_residual_tampered = self.ambient_feature_measurement("adversarial")
+        film_residual_tampered["properties"]["ambient_film_blend"]["levels"][
+            1
+        ]["maximum_residual"] = 1.0
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_residual_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_energy_summary_tampered = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        level = film_energy_summary_tampered["properties"][
+            "ambient_film_blend"
+        ]["levels"][1]
+        level["observed_delta"] = [
+            value + 5.0e-5 for value in level["observed_delta"]
+        ]
+        level["observed_film"] = [
+            value + 5.0e-5 for value in level["observed_film"]
+        ]
+        level["maximum_residual"] = 5.0e-5
+        level["observed_energy_delta"] = 0.0
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_energy_summary_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_bad_angle = self.ambient_feature_measurement("adversarial")
+        film_bad_angle["properties"]["ambient_film_blend"]["ndotv"] = 0.2
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_bad_angle,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_missing_level = self.ambient_feature_measurement("adversarial")
+        film_missing_level["properties"]["ambient_film_blend"]["levels"].pop()
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_missing_level,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_fixture_tampered = self.ambient_feature_measurement("adversarial")
+        film_fixture_tampered["properties"]["ambient_film_blend"][
+            "substrate"
+        ] = [1.0, 1.0, 1.0]
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_fixture_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        film_factor_tampered = self.ambient_feature_measurement("adversarial")
+        blend = film_factor_tampered["properties"]["ambient_film_blend"]
+        level = blend["levels"][1]
+        level["wetness_f"] = 0.001
+        level["expected_delta"] = [
+            0.001 * (blend["film_source"][channel] - blend["substrate"][channel])
+            for channel in range(3)
+        ]
+        level["observed_delta"] = list(level["expected_delta"])
+        level["expected_film"] = [
+            0.001 * value for value in blend["film_source"]
+        ]
+        level["observed_film"] = list(level["expected_film"])
+        level["expected_energy_delta"] = sum(level["expected_delta"])
+        level["observed_energy_delta"] = sum(level["observed_delta"])
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                film_factor_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        directional_mutation_missed = self.feature_measurement("adversarial")
+        directional_mutation_missed["properties"]["mutation_sensitivity"][
+            "specular_probe"
+        ]["changed_pixels"] = 0
+        directional_mutation_missed["properties"]["mutation_sensitivity"][
+            "specular_probe"
+        ]["delta_energy"] = 0.0
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                directional_mutation_missed,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        glossy_amplified = self.ambient_feature_measurement("adversarial")
+        glossy_bucket = next(
+            item
+            for item in glossy_amplified["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        glossy_output = glossy_bucket["output"]
+        glossy_output["stock_energy"] = glossy_output["delta_energy"] / 2.51
+        glossy_output["delta_fraction_of_stock"] = 2.51
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                glossy_amplified,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        glossy_p95_outlier = self.ambient_feature_measurement("adversarial")
+        glossy_p95_bucket = next(
+            item
+            for item in glossy_p95_outlier["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        glossy_p95_bucket["output"]["absolute_delta"]["p95"] = 0.91
+        glossy_p95_bucket["output"]["absolute_delta"]["p99"] = 0.91
+        glossy_p95_bucket["output"]["absolute_delta"]["max"] = 0.91
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                glossy_p95_outlier,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        glossy_max_outlier = self.ambient_feature_measurement("adversarial")
+        glossy_max_bucket = next(
+            item
+            for item in glossy_max_outlier["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        glossy_max_bucket["output"]["absolute_delta"]["max"] = 1.01
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                glossy_max_outlier,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        glossy_positive_outlier = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        glossy_positive_bucket = next(
+            item
+            for item in glossy_positive_outlier["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        glossy_positive_bucket["output"]["signed_delta"]["max"] = 1.01
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                glossy_positive_outlier,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        glossy_invalid_encoding = self.ambient_feature_measurement(
+            "adversarial"
+        )
+        glossy_invalid_encoding["properties"]["magnitude"]["glossy_probe"][
+            "inputs"
+        ]["encoded_material"] = 0.15
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                glossy_invalid_encoding,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        glossy_unproven = self.ambient_feature_measurement("adversarial")
+        glossy_unproven_bucket = next(
+            item
+            for item in glossy_unproven["cross_buckets"]
+            if item["mask"] == "mask.full"
+            and item["scenario"] == "reflection"
+        )
+        glossy_unproven_output = glossy_unproven_bucket["output"]
+        glossy_unproven_output["stock_energy"] = glossy_unproven_output[
+            "denominator_threshold"
+        ]
+        glossy_unproven_output["delta_fraction_of_stock"] = 0.0
+        glossy_unproven_output["energy_verdict"] = "UNPROVEN"
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                glossy_unproven,
                 "adversarial",
                 feature,
                 16,
@@ -1804,77 +2574,105 @@ def run_wetness_smoke():
     fxc = subject._find_fxc(None)
     with tempfile.TemporaryDirectory() as first_directory:
         with tempfile.TemporaryDirectory() as second_directory:
-            arguments = [
-                "--additive-feature",
-                "wetness-effects",
-                "--exe",
-                executable,
-                "--fxc",
-                fxc,
-                "--width",
-                "16",
-                "--height",
-                "16",
-                "--seeds",
-                "1",
-                "--seed-base",
-                "31",
-                "--manifest-dir",
-                first_directory,
-            ]
-            first_report, first_code = subject.run(arguments)
-            arguments[-1] = second_directory
-            second_report, second_code = subject.run(arguments)
-            if first_code != 0 or second_code != 0:
-                raise AssertionError((first_report, second_report))
-            first_path = os.path.join(
-                first_directory, subject.FEATURE_MANIFEST_FILENAME
-            )
-            second_path = os.path.join(
-                second_directory, subject.FEATURE_MANIFEST_FILENAME
-            )
-            if Path(first_path).read_bytes() != Path(second_path).read_bytes():
-                raise AssertionError("WetnessEffects manifest is not deterministic")
-            if first_report != second_report:
-                raise AssertionError("WetnessEffects report is not deterministic")
-            if (
-                first_report["schema"] != subject.FEATURE_RUN_SCHEMA
-                or first_report["evidence_class"] != "additive-feature"
-                or first_report["comparison"]
-                != "reconstructed-stock-vs-reconstructed-feature"
-                or first_report["native_bytecode_used"] is not False
-                or first_report["verdict"] != "PASS"
-            ):
-                raise AssertionError(first_report)
-            fixtures = first_report["fixtures"]
-            if [
-                (item["target"], item["fixture"]) for item in fixtures
-            ] != [
-                ("directional", "adversarial"),
-                ("directional", "native"),
-                ("ambient-runtime", "adversarial"),
-                ("ambient-runtime", "native"),
-            ]:
-                raise AssertionError(fixtures)
-            for fixture in fixtures:
-                expected_buckets = (
-                    12 if fixture["target"] == "directional" else 9
+            for seed in (31, 32749, 65521):
+                first_seed_directory = os.path.join(first_directory, str(seed))
+                second_seed_directory = os.path.join(second_directory, str(seed))
+                os.makedirs(first_seed_directory)
+                os.makedirs(second_seed_directory)
+                arguments = [
+                    "--additive-feature",
+                    "wetness-effects",
+                    "--exe",
+                    executable,
+                    "--fxc",
+                    fxc,
+                    "--width",
+                    "16",
+                    "--height",
+                    "16",
+                    "--seeds",
+                    "1",
+                    "--seed-base",
+                    str(seed),
+                    "--manifest-dir",
+                    first_seed_directory,
+                ]
+                first_report, first_code = subject.run(arguments)
+                arguments[-1] = second_seed_directory
+                second_report, second_code = subject.run(arguments)
+                if first_code != 0 or second_code != 0:
+                    raise AssertionError((first_report, second_report))
+                first_path = os.path.join(
+                    first_seed_directory, subject.FEATURE_MANIFEST_FILENAME
                 )
+                second_path = os.path.join(
+                    second_seed_directory, subject.FEATURE_MANIFEST_FILENAME
+                )
+                if Path(first_path).read_bytes() != Path(second_path).read_bytes():
+                    raise AssertionError(
+                        "WetnessEffects manifest is not deterministic"
+                    )
+                if first_report != second_report:
+                    raise AssertionError(
+                        "WetnessEffects report is not deterministic"
+                    )
                 if (
-                    len(fixture["cross_buckets"]) != expected_buckets
-                    or fixture["properties"]["neutral_identity"]["verdict"]
-                    != "PASS"
-                    or fixture["properties"]["active_locality"]["verdict"]
-                    != "PASS"
-                    or fixture["properties"]["magnitude"]["verdict"]
-                    != "PASS"
-                    or fixture["properties"]["monotonicity"]["verdict"]
-                    != "PASS"
-                    or fixture["properties"]["mutation_sensitivity"]["verdict"]
-                    != "CAUGHT"
+                    first_report["schema"] != subject.FEATURE_RUN_SCHEMA
+                    or first_report["evidence_class"] != "additive-feature"
+                    or first_report["comparison"]
+                    != "reconstructed-stock-vs-reconstructed-feature"
+                    or first_report["native_bytecode_used"] is not False
+                    or first_report["verdict"] != "PASS"
                 ):
-                    raise AssertionError(fixture)
-            print("WetnessEffects additive-feature WARP: PASS")
+                    raise AssertionError(first_report)
+                fixtures = first_report["fixtures"]
+                if [
+                    (item["target"], item["fixture"]) for item in fixtures
+                ] != [
+                    ("directional", "adversarial"),
+                    ("directional", "native"),
+                    ("ambient-runtime", "adversarial"),
+                    ("ambient-runtime", "native"),
+                ]:
+                    raise AssertionError(fixtures)
+                for fixture in fixtures:
+                    expected_buckets = (
+                        18
+                        if fixture["target"] == "ambient-runtime"
+                        else (12 if fixture["target"] == "directional" else 0)
+                    )
+                    if (
+                        len(fixture["cross_buckets"]) != expected_buckets
+                        or fixture["properties"]["neutral_identity"]["verdict"]
+                        != "PASS"
+                        or fixture["properties"]["active_locality"]["verdict"]
+                        != "PASS"
+                        or fixture["properties"]["magnitude"]["verdict"]
+                        != "PASS"
+                        or (
+                            fixture["target"] == "ambient-runtime"
+                            and fixture["properties"]["matte_sheen"]["verdict"]
+                            != "PASS"
+                        )
+                        or (
+                            fixture["target"] == "ambient-runtime"
+                            and fixture["properties"]["no_ibl_film"]["verdict"]
+                            != "PASS"
+                        )
+                        or (
+                            fixture["target"] == "ambient-runtime"
+                            and fixture["properties"]["ambient_film_blend"][
+                                "verdict"
+                            ]
+                            != "PASS"
+                        )
+                        or fixture["properties"]["monotonicity"]["verdict"]
+                        != "PASS"
+                        or fixture["properties"]["mutation_sensitivity"]["verdict"]
+                        != "CAUGHT"
+                    ):
+                        raise AssertionError(fixture)
+            print("WetnessEffects additive-feature WARP multi-seed: PASS")
 
 
 if __name__ == "__main__":

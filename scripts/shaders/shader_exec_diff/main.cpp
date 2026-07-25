@@ -2243,6 +2243,9 @@ void ShapeAmbientConstants(
     (void)width;
     (void)height;
     std::uniform_real_distribution<float> unit(0.0f, 1.0f);
+    const bool layeredGrazing =
+        ScenarioControl(
+            scenario, "wetness_ambient_layered_grazing", 0.0f) != 0.0f;
     if (bindPoint == 12)
     {
         SetVector(values, 28, {0.02f, 0.5f, 0.2f, 0.8f});
@@ -2263,20 +2266,41 @@ void ShapeAmbientConstants(
             SetVector(values, 44, {0.30f, 0.35f, 0.40f, 0.90f});
             SetVector(values, 45, {0.45f, 0.50f, 0.55f, 0.0f});
             SetVector(values, 46, {0.04f, 0.02f, -0.20f, -0.10f});
+            if (layeredGrazing)
+            {
+                for (UINT base : {20u, 24u})
+                {
+                    SetVector(values, base + 0, {0.0f, 0.0f, 0.0f, 0.0f});
+                    SetVector(values, base + 1, {0.0f, 0.0f, 0.0f, 0.0f});
+                    SetVector(values, base + 2, {0.0f, 0.0f, 0.0f, -1.0f});
+                    SetVector(values, base + 3, {0.0f, 0.0f, 0.0f, 1.0f});
+                }
+            }
         }
         return;
     }
-
     if (bindPoint == 0)
     {
+        const bool noIblFallback =
+            ScenarioControl(
+                scenario, "wetness_ambient_no_ibl", 0.0f) != 0.0f;
         SetVector(values, 0, {
             4.0f,
             1.0f,
             0.5f + unit(random),
             0.0f,
         });
-        SetVector(values, 1, {0.5f + unit(random), 0.0f, 0.0f, 0.0f});
-        SetVector(values, 2, {0.0f, 0.0f, 0.5f + unit(random), 0.0f});
+        SetVector(values, 1, {
+            layeredGrazing ? 1.0f :
+                (noIblFallback ? 0.75f : 0.5f + unit(random)),
+            0.0f, 0.0f, 0.0f,
+        });
+        SetVector(values, 2, {
+            0.0f, 0.0f,
+            layeredGrazing || noIblFallback
+                ? 1.0f : 0.5f + unit(random),
+            0.0f,
+        });
         return;
     }
 
@@ -2558,6 +2582,14 @@ void FillAmbientTexture(
     };
     const bool wetnessProbe =
         ScenarioControl(scenario, "wetness_ambient_probe", 0.0f) != 0.0f;
+    const bool noIblFallback =
+        wetnessProbe &&
+        ScenarioControl(
+            scenario, "wetness_ambient_no_ibl", 0.0f) != 0.0f;
+    const bool layeredGrazing =
+        wetnessProbe &&
+        ScenarioControl(
+            scenario, "wetness_ambient_layered_grazing", 0.0f) != 0.0f;
     const bool diffuseOnly =
         wetnessProbe &&
         ScenarioControl(
@@ -2569,9 +2601,38 @@ void FillAmbientTexture(
                 scenario, "wetness_ambient_reflection_only", 0.0f) != 0.0f;
         const Pixel fixed = bindPoint == 9
             ? Pixel{1.0f, 1.0f, 1.0f, 1.0f}
-            : (reflectionOnly
+            : (layeredGrazing
+                ? Pixel{0.5625f, 0.375f, 0.1875f, 1.0f}
+                : (reflectionOnly
                 ? Pixel{0.0f, 0.0f, 0.0f, 1.0f}
-                : Pixel{0.4f, 0.35f, 0.3f, 1.0f});
+                : (noIblFallback
+                    ? Pixel{0.2f, 0.2f, 0.2f, 1.0f}
+                    : Pixel{0.4f, 0.35f, 0.3f, 1.0f})));
+        for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            std::copy(fixed.begin(), fixed.end(), values.begin() + pixel * 4);
+        return;
+    }
+    if (diffuseOnly && (bindPoint == 5 || bindPoint == 11))
+    {
+        std::fill(values.begin(), values.end(), 0.0f);
+        return;
+    }
+    if (layeredGrazing &&
+        (bindPoint == 5 || bindPoint == 11 || bindPoint == 14))
+    {
+        const Pixel fixed =
+            bindPoint == 5 ? Pixel{0.25f, 0.25f, 0.25f, 1.0f} :
+            (bindPoint == 11 ? Pixel{0.0f, 0.0f, 0.0f, 1.0f} :
+             Pixel{0.25f, 0.5f, 0.75f, 1.0f});
+        for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            std::copy(fixed.begin(), fixed.end(), values.begin() + pixel * 4);
+        return;
+    }
+    if (noIblFallback && (bindPoint == 5 || bindPoint == 14))
+    {
+        const Pixel fixed = bindPoint == 5
+            ? Pixel{0.125f, 0.25f, 0.375f, 1.0f}
+            : Pixel{0.6f, 0.45f, 0.3f, 1.0f};
         for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
             std::copy(fixed.begin(), fixed.end(), values.begin() + pixel * 4);
         return;
@@ -2579,7 +2640,21 @@ void FillAmbientTexture(
 
     if (bindPoint == 1)
     {
-        FillDeferredNormalTexture(values, pixelCount, random, false);
+        if (layeredGrazing)
+        {
+            const float normalZ = 0.1f;
+            const float normalX = std::sqrt(1.0f - normalZ * normalZ);
+            for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            {
+                StoreEncodedUnitNormal(
+                    values.data() + pixel * 4,
+                    normalX, 0.0f, normalZ, random);
+            }
+        }
+        else
+        {
+            FillDeferredNormalTexture(values, pixelCount, random, false);
+        }
         return;
     }
 
@@ -2588,6 +2663,8 @@ void FillAmbientTexture(
         const UINT cubeSlice = std::uniform_int_distribution<UINT>(0, 3)(random);
         const bool hasIbl =
             ScenarioControl(scenario, "ambient_ibl", 1.0f) != 0.0f;
+        const float selectedEncodedMaterial =
+            ScenarioControl(scenario, "ambient_encoded_material", -1.0f);
         const float encodedSlice = hasIbl
             ? (static_cast<float>(cubeSlice) + 1.25f) / 255.0f
             : 0.0f;
@@ -2597,9 +2674,11 @@ void FillAmbientTexture(
             values[pixel * 4 + 1] = encodedSlice;
             values[pixel * 4 + 2] = diffuseOnly
                 ? 0.0f
-                : (scenario.dedicated
-                    ? 0.5f
-                    : range(0.05f, 0.8f));
+                : (selectedEncodedMaterial >= 0.0f
+                    ? selectedEncodedMaterial
+                    : (scenario.dedicated
+                        ? 0.5f
+                        : range(0.05f, 0.8f)));
             values[pixel * 4 + 3] = unit(random);
         }
         return;
@@ -2624,9 +2703,17 @@ void FillAmbientTexture(
             ScenarioControl(scenario, "ambient_tap_skin", 1.0f) != 0.0f;
         const float selectedRoughness =
             ScenarioControl(scenario, "ambient_rough01", -1.0f);
+        const float selectedSmoothness =
+            ScenarioControl(scenario, "ambient_smoothness", -1.0f);
+        const float selectedSpecMagnitude =
+            ScenarioControl(scenario, "ambient_spec_magnitude", -1.0f);
         for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
         {
-            if (selectedRoughness >= 0.0f)
+            if (selectedSmoothness >= 0.0f)
+            {
+                values[pixel * 4 + 0] = selectedSmoothness;
+            }
+            else if (selectedRoughness >= 0.0f)
             {
                 values[pixel * 4 + 0] =
                     selectedRoughness == 0.0f && fixture == Fixture::Native
@@ -2638,7 +2725,8 @@ void FillAmbientTexture(
                 values[pixel * 4 + 0] =
                     pixel % 16 == 0 ? 0.3f : range(0.0f, 1.0f);
             }
-            values[pixel * 4 + 1] = range(0.05f, 0.5f);
+            values[pixel * 4 + 1] = selectedSpecMagnitude >= 0.0f
+                ? selectedSpecMagnitude : range(0.05f, 0.5f);
             values[pixel * 4 + 2] = unit(random);
             const bool pixelSkin =
                 skin && (tapSkin || pixel == 0);
@@ -5510,6 +5598,31 @@ struct AmbientMonotonicSeries
     std::uint64_t violations = 0;
 };
 
+struct AmbientFilmBlendLevel
+{
+    float requested = 0.0f;
+    float uploaded = 0.0f;
+    double wetnessF = 0.0;
+    std::array<double, 3> expectedDelta{};
+    std::array<double, 3> observedDelta{};
+    std::array<double, 3> expectedFilm{};
+    std::array<double, 3> observedFilm{};
+    double maximumResidual = 0.0;
+    double expectedEnergyDelta = 0.0;
+    double observedEnergyDelta = 0.0;
+    bool filmNonzeroRequired = false;
+    bool filmNonzero = false;
+};
+
+struct AmbientFilmBlendEvidence
+{
+    double ndotv = 0.0;
+    std::array<double, 3> substrate{};
+    std::array<double, 3> filmSource{};
+    std::vector<AmbientFilmBlendLevel> levels;
+    std::vector<std::string> violations;
+};
+
 struct WetnessPatternEvidence
 {
     bool exactZero = false;
@@ -5832,6 +5945,14 @@ void WriteStringArray(
     stream << "]";
 }
 
+void WriteRgbArray(
+    std::ostream& stream,
+    const std::array<double, 3>& values)
+{
+    stream << "[" << std::setprecision(17)
+           << values[0] << "," << values[1] << "," << values[2] << "]";
+}
+
 void WriteDeltaDistribution(
     std::ostream& stream,
     const DeltaDistribution& delta)
@@ -5973,6 +6094,21 @@ void AppendAmbientWetnessBuckets(
     }
 }
 
+const AmbientWetnessBucket& FindAmbientWetnessBucket(
+    const std::vector<AmbientWetnessBucket>& buckets,
+    const std::string& mask,
+    const std::string& scenario)
+{
+    const auto found = std::find_if(
+        buckets.begin(), buckets.end(),
+        [&](const AmbientWetnessBucket& bucket) {
+            return bucket.mask == mask && bucket.scenario == scenario;
+        });
+    if (found == buckets.end())
+        ThrowFailure("wetness_feature: ambient cross bucket missing");
+    return *found;
+}
+
 const WetnessCrossBucket& FindWetnessBucket(
     const std::vector<WetnessCrossBucket>& buckets,
     const std::string& mask,
@@ -6007,8 +6143,11 @@ void WriteWetnessMeasurement(
     const std::vector<MonotonicLevel>& iblSpecularSeries,
     std::uint64_t iblSpecularViolations,
     const std::vector<std::string>& mutationObservedProperties,
+    const DeltaDistribution& mutationDiffuseDelta,
+    const DeltaDistribution& mutationSpecularDelta,
+    double mutationDiffuseScaleResidual,
     bool mutationNeutralIdentity,
-    bool mutationActiveLocalityFailed)
+    bool mutationDirectionalLayeringFailed)
 {
     if (options.measurementJsonPath.empty())
         return;
@@ -6024,9 +6163,9 @@ void WriteWetnessMeasurement(
         diffuseViolations == 0 && iblSpecularViolations == 0;
     const bool mutationCaught =
         mutationNeutralIdentity &&
-        mutationActiveLocalityFailed &&
+        mutationDirectionalLayeringFailed &&
         mutationObservedProperties ==
-            std::vector<std::string>{"active_locality"};
+            std::vector<std::string>{"directional_layering"};
     const bool passed =
         neutralPassed && localityPassed && magnitudePassed &&
         monotonicPassed && mutationCaught;
@@ -6055,7 +6194,7 @@ void WriteWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v2\""
+           << ",\"measurement_protocol\":\"wetness-warp-v4\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6102,7 +6241,7 @@ void WriteWetnessMeasurement(
     }
     stream << "]},\"contract_delta\":{"
            << "\"stock_to_feature\":\"only-texture2d-t4-added\","
-           << "\"mutation_t4_optimization_away_allowed\":true,"
+           << "\"mutation_t4_optimization_away_allowed\":false,"
            << "\"verdict\":\"PASS\"},\"variants\":["
            << "{\"id\":\"directional\",\"defines\":[\"LIGHT_TYPE=1\"],"
            << "\"ibl\":\"inactive\"},"
@@ -6127,7 +6266,7 @@ void WriteWetnessMeasurement(
            << (pattern.isolatedFullPatchWithZeroMoat ? "true" : "false")
            << "},"
            << "\"rules\":[\"mask.zero exact identity\","
-           << "\"skin specular exact identity\","
+           << "\"skin wet-film specular active\","
            << "\"default diffuse and specular measured\","
            << "\"skin diffuse active\"],\"violations\":";
     WriteStringArray(stream, localityViolations);
@@ -6162,8 +6301,8 @@ void WriteWetnessMeasurement(
                << (series.violations == 0 ? "PASS" : "FAIL") << "\"}";
     }
     stream << "],\"ibl_specular_probe\":{"
-           << "\"scope\":\"controlled-positive-gradient-ambientSpecular\","
-           << "\"claim\":\"isolated ambientSpecular delta is nondecreasing\","
+           << "\"scope\":\"ambientSpecular remains substrate-owned\","
+           << "\"claim\":\"wet film does not modify the stock ambient gradient\","
            << "\"levels\":[";
     for (std::size_t index = 0; index < iblSpecularSeries.size(); ++index)
     {
@@ -6181,15 +6320,26 @@ void WriteWetnessMeasurement(
            << "\"},\"violations\":" << diffuseViolations + iblSpecularViolations
            << ",\"verdict\":\"" << (monotonicPassed ? "PASS" : "FAIL")
            << "\"},\"mutation_sensitivity\":{"
-           << "\"id\":\"wetness-load-zero\","
-           << "\"expected_failed_property\":\"active_locality\","
+           << "\"id\":\"directional-wetness-old-substrate-floors-output-multiply\","
+           << "\"expected_failed_property\":\"directional_layering\","
            << "\"neutral_identity\":\""
            << (mutationNeutralIdentity ? "PASS" : "FAIL") << "\","
-           << "\"active_locality\":\""
-           << (mutationActiveLocalityFailed ? "FAIL" : "PASS") << "\","
+           << "\"directional_layering\":\""
+           << (mutationDirectionalLayeringFailed ? "FAIL" : "PASS") << "\","
            << "\"observed_failed_properties\":";
     WriteStringArray(stream, mutationObservedProperties);
-    stream << ",\"verdict\":\"" << (mutationCaught ? "CAUGHT" : "MISSED")
+    stream << ",\"diffuse_probe\":{\"name\":\"diffuse\",";
+    std::ostringstream mutationDiffuse;
+    WriteDeltaDistribution(mutationDiffuse, mutationDiffuseDelta);
+    stream << mutationDiffuse.str().substr(1)
+           << ",\"expected_full_wet_scale\":0.5,"
+           << "\"maximum_scale_residual\":"
+           << std::setprecision(17) << mutationDiffuseScaleResidual
+           << ",\"specular_probe\":{\"name\":\"specular\",";
+    std::ostringstream mutationSpecular;
+    WriteDeltaDistribution(mutationSpecular, mutationSpecularDelta);
+    stream << mutationSpecular.str().substr(1)
+           << ",\"verdict\":\"" << (mutationCaught ? "CAUGHT" : "MISSED")
            << "\"}},\"cross_buckets\":[";
     for (std::size_t index = 0; index < crossBuckets.size(); ++index)
     {
@@ -6223,7 +6373,7 @@ void WriteWetnessMeasurement(
 void WriteAmbientWetnessMeasurement(
     const Options& options,
     const std::string& generatedInputHash,
-    const std::array<UINT, 3>& seeds,
+    const std::array<UINT, 6>& seeds,
     const std::map<std::string, const WetnessMaskResource*>& masks,
     std::vector<ResourceFormatRecord> formats,
     const std::vector<AmbientWetnessBucket>& crossBuckets,
@@ -6232,16 +6382,29 @@ void WriteAmbientWetnessMeasurement(
     std::uint64_t neutralComparisons,
     const std::vector<std::string>& localityViolations,
     std::uint64_t invalidMagnitudeBuckets,
+    const std::vector<std::string>& matteSheenViolations,
+    const std::vector<std::string>& noIblFilmViolations,
+    const AmbientFilmBlendEvidence& filmBlend,
     const std::vector<AmbientMonotonicSeries>& monotonicSeries,
     const std::vector<std::string>& mutationObservedProperties,
+    const DeltaDistribution& mutationMatteDelta,
+    const DeltaDistribution& mutationNoIblDelta,
+    const DeltaDistribution& mutationFilmBlendDelta,
+    const DeltaDistribution& mutationGlossyDelta,
     bool mutationNeutralIdentity,
-    bool mutationActiveLocalityFailed)
+    bool mutationMatteSheenFailed,
+    bool mutationNoIblFilmFailed,
+    bool mutationFilmBlendFailed,
+    bool mutationGlossyPlausible)
 {
     if (options.measurementJsonPath.empty())
         return;
     const bool neutralPassed = neutralViolations.empty();
     const bool localityPassed = localityViolations.empty();
     const bool magnitudePassed = invalidMagnitudeBuckets == 0;
+    const bool matteSheenPassed = matteSheenViolations.empty();
+    const bool noIblFilmPassed = noIblFilmViolations.empty();
+    const bool filmBlendPassed = filmBlend.violations.empty();
     const std::uint64_t monotonicViolations = std::accumulate(
         monotonicSeries.begin(), monotonicSeries.end(), std::uint64_t{0},
         [](std::uint64_t value, const AmbientMonotonicSeries& series) {
@@ -6250,12 +6413,18 @@ void WriteAmbientWetnessMeasurement(
     const bool monotonicPassed = monotonicViolations == 0;
     const bool mutationCaught =
         mutationNeutralIdentity &&
-        mutationActiveLocalityFailed &&
+        mutationMatteSheenFailed &&
+        mutationNoIblFilmFailed &&
+        mutationFilmBlendFailed &&
+        mutationGlossyPlausible &&
         mutationObservedProperties ==
-            std::vector<std::string>{"active_locality"};
+            std::vector<std::string>{
+                "matte_sheen", "no_ibl_film", "ambient_film_blend"};
     const bool passed =
         neutralPassed && localityPassed && magnitudePassed &&
-        monotonicPassed && mutationCaught;
+        matteSheenPassed && noIblFilmPassed && filmBlendPassed &&
+        monotonicPassed &&
+        mutationCaught;
     std::sort(formats.begin(), formats.end());
     formats.erase(std::unique(
         formats.begin(), formats.end(),
@@ -6281,7 +6450,7 @@ void WriteAmbientWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v2\""
+           << ",\"measurement_protocol\":\"wetness-warp-v4\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6305,7 +6474,8 @@ void WriteAmbientWetnessMeasurement(
         stream << "}";
     }
     stream << "],\"seeds\":[" << seeds[0] << "," << seeds[1]
-           << "," << seeds[2] << "]"
+           << "," << seeds[2] << "," << seeds[3] << "," << seeds[4]
+           << "," << seeds[5] << "]"
            << ",\"generated_inputs_sha256\":\"" << generatedInputHash << "\""
            << ",\"hashes\":{\"uploaded_masks\":[";
     std::size_t maskIndex = 0;
@@ -6329,7 +6499,7 @@ void WriteAmbientWetnessMeasurement(
     }
     stream << "]},\"contract_delta\":{"
            << "\"stock_to_feature\":\"only-texture2d-t13-added\","
-           << "\"mutation_t13_optimization_away_allowed\":true,"
+           << "\"mutation_t13_optimization_away_allowed\":false,"
            << "\"verdict\":\"PASS\"},\"variants\":["
            << "{\"id\":\"ambient-runtime\",\"defines\":[]}],\"properties\":{";
 
@@ -6349,20 +6519,116 @@ void WriteAmbientWetnessMeasurement(
            << ",\"isolated_full_patch_with_zero_moat\":"
            << (pattern.isolatedFullPatchWithZeroMoat ? "true" : "false")
            << "},\"rules\":[\"mask.zero exact identity\","
-           << "\"masked pixels change\",\"alpha exact\","
+           << "\"wet film changes masked pixels\",\"alpha exact\","
            << "\"diffuse probe signed negative\","
-           << "\"reflection probe signed positive\","
-           << "\"combined, diffuse, and reflection scenarios measured\"],"
+           << "\"matte full probe strictly positive\","
+           << "\"no-IBL fallback probe strictly positive\","
+           << "\"layered matte grazing exact film blend\","
+           << "\"all six ambient scenarios measured\"],"
            << "\"violations\":";
     WriteStringArray(stream, localityViolations);
     stream << ",\"verdict\":\"" << (localityPassed ? "PASS" : "FAIL")
            << "\"},\"magnitude\":{\"rgb_only\":true,"
-           << "\"invalid_denominator_buckets\":" << invalidMagnitudeBuckets
-           << ",\"reflection_probe\":{\"scenario\":\"reflection\","
-           << "\"mask\":\"mask.full\",\"output\":\"color\"},"
+           << "\"invalid_magnitude_buckets\":" << invalidMagnitudeBuckets
+           << ",\"glossy_probe\":{\"scenario\":\"reflection\","
+           << "\"mask\":\"mask.full\",\"output\":\"color\","
+           << "\"denominator_policy\":\"stock-energy-proven\","
+           << "\"maximum_delta_fraction_of_stock\":2.5,"
+           << "\"maximum_p95_absolute_delta\":0.9,"
+           << "\"maximum_absolute_delta\":1.0,"
+           << "\"maximum_positive_delta\":1.0,"
+           << "\"inputs\":{\"smoothness\":0.85,"
+           << "\"spec_magnitude\":0.35,\"decoded_material\":0.5,"
+           << "\"encoded_material\":" << std::setprecision(17)
+           << std::sqrt(0.5 * 0.02)
+           << ",\"maximum_encoded_material\":" << std::sqrt(0.02)
+           << "}},"
            << "\"verdict\":\"" << (magnitudePassed ? "PASS" : "UNPROVEN")
+           << "\"},\"matte_sheen\":{"
+           << "\"probe\":{\"scenario\":\"matte\",\"mask\":\"mask.full\","
+           << "\"output\":\"color\"},\"inputs\":{\"smoothness\":0.25,"
+           << "\"smoothness_maximum\":0.29999999999999999,"
+           << "\"spec_magnitude\":0.050000000000000003,"
+           << "\"encoded_material\":" << std::setprecision(17)
+           << std::sqrt(0.01 * 0.02) << "},"
+           << "\"film_model\":{\"substrate_independent\":true,"
+           << "\"coverage_source\":\"t13\","
+           << "\"roughness_formula\":\"max(saturate(1-wetness),0.05)\","
+           << "\"minimum_water_roughness\":0.050000000000000003,"
+           << "\"smoothness_formula\":\"1-wetFilmRoughness\","
+           << "\"strength_formula\":\"saturate(1-wetFilmRoughness)\","
+           << "\"full_wetness_roughness\":0.050000000000000003,"
+           << "\"full_wetness_smoothness\":0.94999999999999996,"
+           << "\"f0\":0.02,\"full_wetness_strength\":0.94999999999999996,"
+           << "\"fresnel_model\":\"schlick\","
+           << "\"energy_attenuation\":\"substrate*(1-wetnessF)\","
+           << "\"lobe_path\":\"ambient-ibl\","
+           << "\"normal_incidence_reflection_scalar\":"
+           << 0.95 * 0.02 << "},"
+           << "\"signed_rule\":\"feature-stock RGB strictly positive\","
+           << "\"stock_denominator\":\"expected-zero\","
+           << "\"violations\":";
+    WriteStringArray(stream, matteSheenViolations);
+    stream << ",\"verdict\":\"" << (matteSheenPassed ? "PASS" : "FAIL")
+           << "\"},\"no_ibl_film\":{"
+           << "\"probe\":{\"scenario\":\"no-ibl\",\"mask\":\"mask.full\","
+           << "\"output\":\"color\"},"
+           << "\"inputs\":{\"substrate_ibl_available\":false,"
+           << "\"material_probe_selector\":0,"
+           << "\"smoothness\":0.25,\"spec_magnitude\":0.05,"
+           << "\"encoded_material\":" << std::setprecision(17)
+           << std::sqrt(0.01 * 0.02) << ","
+           << "\"ambient_base\":[0.2,0.2,0.2],"
+           << "\"lit_scene\":[0.6,0.45,0.3,1],"
+           << "\"lit_scene_weight\":0.75,\"lit_scene_alpha\":1},"
+           << "\"signed_rule\":\"feature-stock RGB strictly positive\","
+           << "\"stock_denominator\":\"proven\","
+           << "\"violations\":";
+    WriteStringArray(stream, noIblFilmViolations);
+    stream << ",\"verdict\":\"" << (noIblFilmPassed ? "PASS" : "FAIL")
+           << "\"},\"ambient_film_blend\":{"
+           << "\"probe\":{\"scenario\":\"layered-matte-grazing\","
+           << "\"mask\":\"levels\",\"output\":\"color\"},"
+           << "\"ndotv\":" << std::setprecision(17) << filmBlend.ndotv
+           << ",\"ndotv_range\":{\"exclusive_minimum\":0,"
+           << "\"inclusive_maximum\":0.125},\"substrate\":";
+    WriteRgbArray(stream, filmBlend.substrate);
+    stream << ",\"film_source\":";
+    WriteRgbArray(stream, filmBlend.filmSource);
+    stream << ",\"formula\":\"substrate*(1-wetnessF)+film*wetnessF\","
+           << "\"absolute_tolerance\":2e-5,\"relative_tolerance\":2e-4,"
+           << "\"maximum_energy_residual\":6e-5,\"levels\":[";
+    for (std::size_t index = 0; index < filmBlend.levels.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        const AmbientFilmBlendLevel& level = filmBlend.levels[index];
+        stream << "{\"requested\":" << std::setprecision(17)
+               << level.requested << ",\"uploaded\":" << level.uploaded
+               << ",\"wetness_f\":" << level.wetnessF
+               << ",\"expected_delta\":";
+        WriteRgbArray(stream, level.expectedDelta);
+        stream << ",\"observed_delta\":";
+        WriteRgbArray(stream, level.observedDelta);
+        stream << ",\"expected_film\":";
+        WriteRgbArray(stream, level.expectedFilm);
+        stream << ",\"observed_film\":";
+        WriteRgbArray(stream, level.observedFilm);
+        stream << ",\"maximum_residual\":" << level.maximumResidual
+               << ",\"expected_energy_delta\":"
+               << level.expectedEnergyDelta
+               << ",\"observed_energy_delta\":"
+               << level.observedEnergyDelta
+               << ",\"film_nonzero_required\":"
+               << (level.filmNonzeroRequired ? "true" : "false")
+               << ",\"film_nonzero\":"
+               << (level.filmNonzero ? "true" : "false") << "}";
+    }
+    stream << "],\"violations\":";
+    WriteStringArray(stream, filmBlend.violations);
+    stream << ",\"verdict\":\"" << (filmBlendPassed ? "PASS" : "FAIL")
            << "\"},\"monotonicity\":{"
-           << "\"claim\":\"absolute RGB delta is nondecreasing across uploaded levels\","
+           << "\"claim\":\"isolated diffuse absolute RGB delta is nondecreasing\","
            << "\"series\":[";
     for (std::size_t index = 0; index < monotonicSeries.size(); ++index)
     {
@@ -6370,6 +6636,10 @@ void WriteAmbientWetnessMeasurement(
             stream << ",";
         const AmbientMonotonicSeries& series = monotonicSeries[index];
         stream << "{\"scenario\":\"" << JsonEscape(series.scenario)
+               << "\",\"claim\":\""
+               << (series.scenario == "diffuse"
+                       ? "absolute RGB delta is nondecreasing"
+                       : "net layered delta measured; monotonicity not claimed")
                << "\",\"levels\":[";
         for (std::size_t level = 0; level < series.levels.size(); ++level)
         {
@@ -6388,15 +6658,37 @@ void WriteAmbientWetnessMeasurement(
     stream << "],\"violations\":" << monotonicViolations
            << ",\"verdict\":\"" << (monotonicPassed ? "PASS" : "FAIL")
            << "\"},\"mutation_sensitivity\":{"
-           << "\"id\":\"ambient-wetness-load-zero\","
-           << "\"expected_failed_property\":\"active_locality\","
+           << "\"id\":\"ambient-wetness-old-output-multiply\","
+           << "\"expected_failed_property\":\"matte_sheen\","
            << "\"neutral_identity\":\""
            << (mutationNeutralIdentity ? "PASS" : "FAIL") << "\","
-           << "\"active_locality\":\""
-           << (mutationActiveLocalityFailed ? "FAIL" : "PASS") << "\","
+           << "\"matte_sheen\":\""
+           << (mutationMatteSheenFailed ? "FAIL" : "PASS") << "\","
+           << "\"no_ibl_film\":\""
+           << (mutationNoIblFilmFailed ? "FAIL" : "PASS") << "\","
+           << "\"ambient_film_blend\":\""
+           << (mutationFilmBlendFailed ? "FAIL" : "PASS") << "\","
+           << "\"glossy_reflection\":\""
+           << (mutationGlossyPlausible ? "PASS" : "FAIL") << "\","
            << "\"observed_failed_properties\":";
     WriteStringArray(stream, mutationObservedProperties);
-    stream << ",\"verdict\":\"" << (mutationCaught ? "CAUGHT" : "MISSED")
+    stream << ",\"matte_probe\":{\"name\":\"color\",";
+    std::ostringstream mutationMatte;
+    WriteDeltaDistribution(mutationMatte, mutationMatteDelta);
+    stream << mutationMatte.str().substr(1)
+           << ",\"no_ibl_probe\":{\"name\":\"color\",";
+    std::ostringstream mutationNoIbl;
+    WriteDeltaDistribution(mutationNoIbl, mutationNoIblDelta);
+    stream << mutationNoIbl.str().substr(1)
+           << ",\"layered_probe\":{\"name\":\"color\",";
+    std::ostringstream mutationFilmBlend;
+    WriteDeltaDistribution(mutationFilmBlend, mutationFilmBlendDelta);
+    stream << mutationFilmBlend.str().substr(1)
+           << ",\"glossy_probe\":{\"name\":\"color\",";
+    std::ostringstream mutationGlossy;
+    WriteDeltaDistribution(mutationGlossy, mutationGlossyDelta);
+    stream << mutationGlossy.str().substr(1)
+           << ",\"verdict\":\"" << (mutationCaught ? "CAUGHT" : "MISSED")
            << "\"}},\"cross_buckets\":[";
     for (std::size_t index = 0; index < crossBuckets.size(); ++index)
     {
@@ -6545,10 +6837,10 @@ int RunWetnessFeature(
         stockIblDisassembly, featureIblDisassembly, 4, false);
     ValidateWetnessFeatureContract(
         stockContract, mutantContract,
-        stockDisassembly, mutantDisassembly, 4, true);
+        stockDisassembly, mutantDisassembly, 4, false);
     ValidateWetnessFeatureContract(
         stockIblContract, mutantIblContract,
-        stockIblDisassembly, mutantIblDisassembly, 4, true);
+        stockIblDisassembly, mutantIblDisassembly, 4, false);
     if (DetectInputProfile(stockContract, stockDisassembly) !=
             InputProfile::DirectionalLighting ||
         DetectInputProfile(stockIblContract, stockIblDisassembly) !=
@@ -6731,7 +7023,10 @@ int RunWetnessFeature(
     std::uint64_t neutralComparisons = 0;
     std::uint64_t iblSpecularViolations = 0;
     bool mutationNeutralIdentity = true;
-    bool mutationActiveLocalityFailed = true;
+    bool mutationDirectionalLayeringFailed = false;
+    DeltaDistribution mutationDiffuseDelta;
+    DeltaDistribution mutationSpecularDelta;
+    double mutationDiffuseScaleResidual = 0.0;
 
     const auto render = [&](ID3D11PixelShader* shader,
                             const SeedResources& resources,
@@ -6745,12 +7040,7 @@ int RunWetnessFeature(
     };
     const std::vector<std::uint8_t> zeroPixels =
         WetnessBucketMask(activeMask.readbackValues, "mask.zero");
-    std::vector<std::uint8_t> activePixels(pixelCount, 0);
-    for (std::size_t index = 0; index < pixelCount; ++index)
-    {
-        activePixels[index] =
-            activeMask.readbackValues[index] > 0.0f ? 1u : 0u;
-    }
+    const std::vector<std::uint8_t> allPixels(pixelCount, 1u);
     WetnessPatternEvidence pattern;
     pattern.exactZero = std::any_of(
         activeMask.readbackValues.begin(),
@@ -6858,18 +7148,45 @@ int RunWetnessFeature(
             mutationNeutralIdentity &&
             OutputsExact(stockNeutral, mutantNeutral) &&
             OutputsExact(stockIblNeutral, mutantIblNeutral);
-        const RenderOutputs mutantActive =
-            render(mutantShader.Get(), resources, activeMask);
-        const RenderOutputs mutantIblActive =
-            render(mutantIblShader.Get(), resources, activeMask);
-        const DeltaDistribution mutantDiffuse = MeasureDelta(
-            stockActive, mutantActive, 0, activePixels);
-        const DeltaDistribution mutantIblDiffuse = MeasureDelta(
-            stockIblActive, mutantIblActive, 0, activePixels);
-        mutationActiveLocalityFailed =
-            mutationActiveLocalityFailed &&
-            mutantDiffuse.changedPixels == 0 &&
-            mutantIblDiffuse.changedPixels == 0;
+        if (!uploadedSkin)
+        {
+            const WetnessMaskResource& fullMask = findMask("level-4");
+            const RenderOutputs stockFull =
+                render(stockShader.Get(), resources, fullMask);
+            const RenderOutputs mutantFull =
+                render(mutantShader.Get(), resources, fullMask);
+            const RenderOutputs featureIblFull =
+                render(featureIblShader.Get(), resources, fullMask);
+            const RenderOutputs mutantIblFull =
+                render(mutantIblShader.Get(), resources, fullMask);
+            mutationDiffuseDelta = MeasureDelta(
+                stockFull, mutantFull, 0, allPixels);
+            mutationSpecularDelta = MeasureDelta(
+                featureIblFull, mutantIblFull, 1, allPixels);
+            for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+            {
+                for (UINT channel = 0; channel < 3; ++channel)
+                {
+                    mutationDiffuseScaleResidual = std::max(
+                        mutationDiffuseScaleResidual,
+                        std::abs(
+                            static_cast<double>(
+                                mutantFull[0][pixel][channel]) -
+                            static_cast<double>(
+                                stockFull[0][pixel][channel]) * 0.5));
+                }
+            }
+            mutationDirectionalLayeringFailed =
+                mutationDiffuseDelta.changedPixels ==
+                    mutationDiffuseDelta.population &&
+                !mutationDiffuseDelta.signedDeltas.empty() &&
+                *std::max_element(
+                    mutationDiffuseDelta.signedDeltas.begin(),
+                    mutationDiffuseDelta.signedDeltas.end()) < 0.0 &&
+                mutationDiffuseScaleResidual <= 1.0e-5 &&
+                mutationSpecularDelta.changedPixels > 0 &&
+                mutationSpecularDelta.deltaEnergy > 0.0;
+        }
 
         DiffuseMonotonicSeries directSeries;
         directSeries.material = material;
@@ -6879,7 +7196,6 @@ int RunWetnessFeature(
         activeIblSeries.ibl = "active";
         std::vector<double> previousDirect(pixelCount * 3, 0.0);
         std::vector<double> previousIbl(pixelCount * 3, 0.0);
-        std::vector<double> previousAmbient(pixelCount * 3, 0.0);
         for (std::size_t level = 0; level < RequestedLevels.size(); ++level)
         {
             const WetnessMaskResource& levelMask =
@@ -6930,15 +7246,11 @@ int RunWetnessFeature(
                                  featureLevelDirect[1][pixel][channel]) -
                              stockNeutral[1][pixel][channel]);
                         ambientLevel.deltaEnergy +=
-                            std::max(0.0, ambientDelta);
-                        if (ambientDelta < -1.0e-6 ||
-                            (level != 0 &&
-                             ambientDelta + 1.0e-6 <
-                                 previousAmbient[index]))
+                            std::abs(ambientDelta);
+                        if (std::abs(ambientDelta) > 1.0e-6)
                         {
                             ++iblSpecularViolations;
                         }
-                        previousAmbient[index] = ambientDelta;
                     }
                 }
             }
@@ -6986,7 +7298,7 @@ int RunWetnessFeature(
                         localityViolations.push_back(
                             material + ":" + ibl + ":" + mask + ":diffuse");
                     }
-                    if (specular.changedPixels != 0)
+                    if (specular.changedPixels == 0)
                     {
                         localityViolations.push_back(
                             material + ":" + ibl + ":" + mask + ":specular");
@@ -7037,8 +7349,8 @@ int RunWetnessFeature(
     std::vector<std::string> mutationObservedProperties;
     if (!mutationNeutralIdentity)
         mutationObservedProperties.push_back("neutral_identity");
-    if (mutationActiveLocalityFailed)
-        mutationObservedProperties.push_back("active_locality");
+    if (mutationDirectionalLayeringFailed)
+        mutationObservedProperties.push_back("directional_layering");
     const std::string generatedInputHash = inputHash.Finish();
     WriteWetnessMeasurement(
         options, generatedInputHash, seeds, maskRecords, formats, crossBuckets,
@@ -7046,7 +7358,9 @@ int RunWetnessFeature(
         neutralViolations, neutralComparisons, localityViolations,
         invalidMagnitudeBuckets, diffuseSeries, iblSpecularSeries,
         iblSpecularViolations, mutationObservedProperties,
-        mutationNeutralIdentity, mutationActiveLocalityFailed);
+        mutationDiffuseDelta, mutationSpecularDelta,
+        mutationDiffuseScaleResidual, mutationNeutralIdentity,
+        mutationDirectionalLayeringFailed);
 
     const bool diffuseMonotonic = std::all_of(
         diffuseSeries.begin(), diffuseSeries.end(),
@@ -7054,9 +7368,9 @@ int RunWetnessFeature(
             return series.violations == 0;
         });
     const bool mutationCaught =
-        mutationNeutralIdentity && mutationActiveLocalityFailed &&
+        mutationNeutralIdentity && mutationDirectionalLayeringFailed &&
         mutationObservedProperties ==
-            std::vector<std::string>{"active_locality"};
+            std::vector<std::string>{"directional_layering"};
     const bool passed =
         neutralViolations.empty() &&
         localityViolations.empty() &&
@@ -7082,7 +7396,7 @@ int RunWetnessFeature(
               << "  monotonicity: "
               << (diffuseMonotonic && iblSpecularViolations == 0
                   ? "PASS" : "FAIL") << "\n"
-              << "  mutation wetness-load-zero: "
+              << "  mutation directional historical model: "
               << (mutationCaught ? "CAUGHT" : "MISSED") << "\n";
     return passed ? 0 : 1;
 }
@@ -7113,7 +7427,7 @@ int RunAmbientWetnessFeature(
         stockDisassembly, featureDisassembly, 13, false);
     ValidateWetnessFeatureContract(
         stockContract, mutantContract,
-        stockDisassembly, mutantDisassembly, 13, true);
+        stockDisassembly, mutantDisassembly, 13, false);
     if (DetectInputProfile(stockContract, stockDisassembly) !=
         InputProfile::AmbientIblRuntime)
     {
@@ -7206,10 +7520,13 @@ int RunAmbientWetnessFeature(
     const WetnessMaskResource& neutralMask = findMask("neutral-zero");
     const WetnessMaskResource& activeMask = findMask("active-pattern");
 
-    const std::array<UINT, 3> seeds{
+    const std::array<UINT, 6> seeds{
         options.seedBase + 0x414D4249u,
         options.seedBase + 0x44494646u,
         options.seedBase + 0x5245464Cu,
+        options.seedBase + 0x4D415454u,
+        options.seedBase + 0x4E4F4942u,
+        options.seedBase + 0x4752415Au,
     };
     std::vector<InputScenario> scenarios;
     for (UINT index = 0; index < seeds.size(); ++index)
@@ -7218,27 +7535,44 @@ int RunAmbientWetnessFeature(
         scenario.id = index;
         scenario.randomSeed = seeds[index];
         scenario.dedicated = true;
-        scenario.semanticId =
-            index == 0 ? "wetness-ambient-combined" :
-            (index == 1
-                ? "wetness-ambient-diffuse"
-                : "wetness-ambient-reflection");
+        static constexpr std::array<const char*, 6> SemanticIds{
+            "wetness-ambient-combined",
+            "wetness-ambient-diffuse",
+            "wetness-ambient-reflection",
+            "wetness-ambient-matte",
+            "wetness-ambient-no-ibl",
+            "wetness-ambient-layered-matte-grazing",
+        };
+        scenario.semanticId = SemanticIds[index];
+        const bool matte = index >= 3;
+        const bool noIbl = index == 4;
+        const bool layeredGrazing = index == 5;
         scenario.controls = {
             {"ambient_depth", 1.0f},
-            {"ambient_ibl", 1.0f},
+            {"ambient_ibl", noIbl || layeredGrazing ? 0.0f : 1.0f},
             {"ambient_material", 1.0f},
             {"ambient_rough01", 0.35f},
+            {"ambient_smoothness", matte ? 0.25f : 0.85f},
+            {"ambient_spec_magnitude", matte ? 0.05f : 0.35f},
+            {"ambient_encoded_material",
+             matte
+                 ? std::sqrt(0.01f * 0.02f)
+                 : std::sqrt(0.5f * 0.02f)},
             {"ambient_tap_skin", 1.0f},
             {"ambient_fog_distance", 0.0f},
             {"wetness_ambient_probe", 1.0f},
             {"wetness_ambient_diffuse_only", index == 1 ? 1.0f : 0.0f},
-            {"wetness_ambient_reflection_only", index == 2 ? 1.0f : 0.0f},
+            {"wetness_ambient_reflection_only",
+             index == 2 || index == 3 ? 1.0f : 0.0f},
+            {"wetness_ambient_no_ibl", noIbl ? 1.0f : 0.0f},
+            {"wetness_ambient_layered_grazing",
+             layeredGrazing ? 1.0f : 0.0f},
         };
         scenarios.push_back(std::move(scenario));
     }
 
     Sha256 inputHash;
-    inputHash.AddString("fo4cs.wetness-ambient-warp-inputs-v1");
+    inputHash.AddString("fo4cs.wetness-ambient-warp-inputs-v5");
     inputHash.AddString(FO4CS_EXEC_HARNESS_SOURCE_SHA256);
     inputHash.AddString(FixtureName(options.fixture));
     inputHash.AddValue(options.width);
@@ -7287,10 +7621,20 @@ int RunAmbientWetnessFeature(
     formats.push_back(activeMask.binding.format);
     std::vector<std::string> neutralViolations;
     std::vector<std::string> localityViolations;
+    std::vector<std::string> matteSheenViolations;
+    std::vector<std::string> noIblFilmViolations;
+    AmbientFilmBlendEvidence filmBlend;
     std::vector<AmbientMonotonicSeries> monotonicSeries;
     std::uint64_t neutralComparisons = 0;
     bool mutationNeutralIdentity = true;
-    bool mutationActiveLocalityFailed = true;
+    bool mutationMatteSheenFailed = false;
+    bool mutationNoIblFilmFailed = false;
+    bool mutationFilmBlendFailed = false;
+    bool mutationGlossyPlausible = false;
+    DeltaDistribution mutationMatteDelta;
+    DeltaDistribution mutationNoIblDelta;
+    DeltaDistribution mutationFilmBlendDelta;
+    DeltaDistribution mutationGlossyDelta;
 
     const auto render = [&](ID3D11PixelShader* shader,
                             const SeedResources& resources,
@@ -7304,12 +7648,9 @@ int RunAmbientWetnessFeature(
     };
     const std::vector<std::uint8_t> zeroPixels =
         WetnessBucketMask(activeMask.readbackValues, "mask.zero");
-    std::vector<std::uint8_t> activePixels(pixelCount, 0);
-    for (std::size_t index = 0; index < pixelCount; ++index)
-    {
-        activePixels[index] =
-            activeMask.readbackValues[index] > 0.0f ? 1u : 0u;
-    }
+    const std::vector<std::uint8_t> fullPixels =
+        WetnessBucketMask(activeMask.readbackValues, "mask.full");
+    const std::vector<std::uint8_t> allPixels(pixelCount, 1u);
     WetnessPatternEvidence pattern;
     pattern.exactZero = std::any_of(
         activeMask.readbackValues.begin(),
@@ -7337,8 +7678,9 @@ int RunAmbientWetnessFeature(
          scenarioIndex < scenarios.size(); ++scenarioIndex)
     {
         const InputScenario& scenario = scenarios[scenarioIndex];
-        static constexpr std::array<const char*, 3> ScenarioNames{
-            "combined", "diffuse", "reflection"};
+        static constexpr std::array<const char*, 6> ScenarioNames{
+            "combined", "diffuse", "reflection", "matte", "no-ibl",
+            "layered-matte-grazing"};
         const std::string scenarioName = ScenarioNames[scenarioIndex];
         const SeedResources resources = CreateSeedResources(
             device.Get(), context.Get(), stockContract, stockDisassembly,
@@ -7352,6 +7694,39 @@ int RunAmbientWetnessFeature(
         const RenderOutputs featureNeutral =
             render(featureShader.Get(), resources, neutralMask);
         AssertFiniteOutputs(stockNeutral, scenario);
+        if (scenarioName == "layered-matte-grazing")
+        {
+            const std::array<float, 3> normal =
+                DecodeDeferredNormal(
+                    ResourcePixel(FindResource(resources, 1)));
+            filmBlend.ndotv = std::clamp(
+                static_cast<double>(normal[2]), 0.0, 1.0);
+            const Pixel ambientA =
+                ResourcePixel(FindResource(resources, 5));
+            const Pixel ambientB =
+                ResourcePixel(FindResource(resources, 11));
+            const Pixel litScene =
+                ResourcePixel(FindResource(resources, 14));
+            const auto litWeight = ConstantVector(resources, 0, 1);
+            const auto litAlphaControl = ConstantVector(resources, 0, 2);
+            const double litAlpha = std::min(
+                static_cast<double>(litScene[3]) *
+                    litAlphaControl[2],
+                1.0);
+            for (UINT channel = 0; channel < 3; ++channel)
+            {
+                filmBlend.substrate[channel] =
+                    stockNeutral[0][0][channel];
+                const double ambientPair =
+                    (static_cast<double>(ambientA[channel]) +
+                     ambientB[channel]) * 3.0;
+                filmBlend.filmSource[channel] =
+                    static_cast<double>(litScene[channel]) *
+                    litWeight[0] * litAlpha * ambientPair;
+            }
+            if (filmBlend.ndotv <= 0.0 || filmBlend.ndotv > 0.125)
+                filmBlend.violations.push_back("ndotv-range");
+        }
         ++neutralComparisons;
         if (!OutputsExact(stockNeutral, featureNeutral, nullptr, 0, 1))
             neutralViolations.push_back(scenarioName);
@@ -7386,21 +7761,210 @@ int RunAmbientWetnessFeature(
             OutputsExact(stockNeutral, mutantNeutral, nullptr, 0, 1);
         const RenderOutputs mutantActive =
             render(mutantShader.Get(), resources, activeMask);
-        const DeltaDistribution mutantDelta = MeasureDelta(
-            stockActive, mutantActive, 0, activePixels);
-        mutationActiveLocalityFailed =
-            mutationActiveLocalityFailed &&
-            mutantDelta.changedPixels == 0;
+        if (scenarioName == "matte")
+        {
+            mutationMatteDelta = MeasureDelta(
+                stockActive, mutantActive, 0, fullPixels);
+            mutationMatteSheenFailed =
+                mutationMatteDelta.changedPixels == 0 &&
+                mutationMatteDelta.deltaEnergy == 0.0;
+        }
+        else if (scenarioName == "no-ibl")
+        {
+            mutationNoIblDelta = MeasureDelta(
+                stockActive, mutantActive, 0, fullPixels);
+            mutationNoIblFilmFailed =
+                mutationNoIblDelta.changedPixels !=
+                    mutationNoIblDelta.population ||
+                mutationNoIblDelta.signedDeltas.empty() ||
+                *std::min_element(
+                    mutationNoIblDelta.signedDeltas.begin(),
+                    mutationNoIblDelta.signedDeltas.end()) <= 0.0;
+        }
+        else if (scenarioName == "reflection")
+        {
+            mutationGlossyDelta = MeasureDelta(
+                stockActive, mutantActive, 0, fullPixels);
+            const double threshold = std::max(
+                1.0e-12,
+                static_cast<double>(mutationGlossyDelta.population) *
+                    3.0e-12);
+            const double fraction =
+                mutationGlossyDelta.stockEnergy > threshold
+                ? mutationGlossyDelta.deltaEnergy /
+                    mutationGlossyDelta.stockEnergy
+                : 0.0;
+            mutationGlossyPlausible =
+                mutationGlossyDelta.changedPixels ==
+                    mutationGlossyDelta.population &&
+                !mutationGlossyDelta.signedDeltas.empty() &&
+                *std::min_element(
+                    mutationGlossyDelta.signedDeltas.begin(),
+                    mutationGlossyDelta.signedDeltas.end()) > 0.0 &&
+                fraction > 0.0 && fraction <= 1.01;
+        }
 
         AmbientMonotonicSeries series;
         series.scenario = scenarioName;
         std::vector<double> previous(pixelCount * 3, 0.0);
+        const bool claimsMonotonic = scenarioName == "diffuse";
         for (std::size_t level = 0; level < RequestedLevels.size(); ++level)
         {
             const WetnessMaskResource& levelMask =
                 findMask("level-" + std::to_string(level));
             const RenderOutputs featureAtLevel =
                 render(featureShader.Get(), resources, levelMask);
+            if (scenarioName == "layered-matte-grazing")
+            {
+                AmbientFilmBlendLevel blendLevel;
+                blendLevel.requested = RequestedLevels[level];
+                blendLevel.uploaded = levelMask.readbackValues.front();
+                const double roughness = std::max(
+                    std::clamp(
+                        1.0 - static_cast<double>(blendLevel.uploaded),
+                        0.0, 1.0),
+                    0.05);
+                const double strength =
+                    std::clamp(1.0 - roughness, 0.0, 1.0);
+                const double oneMinusNdotV =
+                    1.0 - std::clamp(filmBlend.ndotv, 0.0, 1.0);
+                const double oneMinusNdotV2 =
+                    oneMinusNdotV * oneMinusNdotV;
+                const double fresnel =
+                    0.02 +
+                    0.98 * oneMinusNdotV2 * oneMinusNdotV2 *
+                        oneMinusNdotV;
+                blendLevel.wetnessF = strength * fresnel;
+                blendLevel.filmNonzeroRequired =
+                    blendLevel.uploaded > 0.0f;
+                double minimumFilm =
+                    std::numeric_limits<double>::infinity();
+                double maximumEnergyResidual = 0.0;
+                for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+                {
+                    double observedEnergyDelta = 0.0;
+                    double expectedEnergyDelta = 0.0;
+                    for (UINT channel = 0; channel < 3; ++channel)
+                    {
+                        const double stock =
+                            stockNeutral[0][pixel][channel];
+                        const double observed =
+                            featureAtLevel[0][pixel][channel];
+                        const double expected =
+                            stock * (1.0 - blendLevel.wetnessF) +
+                            filmBlend.filmSource[channel] *
+                                blendLevel.wetnessF;
+                        const double observedDelta = observed - stock;
+                        const double expectedDelta = expected - stock;
+                        const double observedFilm =
+                            observed -
+                            stock * (1.0 - blendLevel.wetnessF);
+                        const double expectedFilm =
+                            filmBlend.filmSource[channel] *
+                            blendLevel.wetnessF;
+                        const double residual =
+                            std::abs(observed - expected);
+                        const double tolerance =
+                            2.0e-5 +
+                            2.0e-4 *
+                                std::max(std::abs(stock), std::abs(expected));
+                        blendLevel.maximumResidual =
+                            std::max(
+                                blendLevel.maximumResidual, residual);
+                        if (residual > tolerance)
+                        {
+                            filmBlend.violations.push_back(
+                                "level-" + std::to_string(level) +
+                                ":formula");
+                        }
+                        minimumFilm = std::min(minimumFilm, observedFilm);
+                        observedEnergyDelta += observedDelta;
+                        expectedEnergyDelta += expectedDelta;
+                        if (pixel == 0)
+                        {
+                            blendLevel.expectedDelta[channel] =
+                                expectedDelta;
+                            blendLevel.observedDelta[channel] =
+                                observedDelta;
+                            blendLevel.expectedFilm[channel] =
+                                expectedFilm;
+                            blendLevel.observedFilm[channel] =
+                                observedFilm;
+                        }
+                    }
+                    maximumEnergyResidual = std::max(
+                        maximumEnergyResidual,
+                        std::abs(
+                            observedEnergyDelta - expectedEnergyDelta));
+                    if (pixel == 0)
+                    {
+                        blendLevel.observedEnergyDelta =
+                            observedEnergyDelta;
+                        blendLevel.expectedEnergyDelta =
+                            expectedEnergyDelta;
+                    }
+                }
+                blendLevel.filmNonzero =
+                    !blendLevel.filmNonzeroRequired ||
+                    minimumFilm > 0.0;
+                if (!blendLevel.filmNonzero)
+                {
+                    filmBlend.violations.push_back(
+                        "level-" + std::to_string(level) +
+                        ":film-zero");
+                }
+                if (maximumEnergyResidual > 6.0e-5)
+                {
+                    filmBlend.violations.push_back(
+                        "level-" + std::to_string(level) +
+                        ":energy");
+                }
+                filmBlend.levels.push_back(blendLevel);
+
+                if (level == 1)
+                {
+                    const RenderOutputs mutantAtLevel =
+                        render(mutantShader.Get(), resources, levelMask);
+                    mutationFilmBlendDelta = MeasureDelta(
+                        stockNeutral, mutantAtLevel, 0, allPixels);
+                    double mutantMaximumResidual = 0.0;
+                    double mutantMinimumFilm =
+                        std::numeric_limits<double>::infinity();
+                    for (std::size_t pixel = 0;
+                         pixel < pixelCount; ++pixel)
+                    {
+                        double energyResidual = 0.0;
+                        for (UINT channel = 0; channel < 3; ++channel)
+                        {
+                            const double stock =
+                                stockNeutral[0][pixel][channel];
+                            const double observed =
+                                mutantAtLevel[0][pixel][channel];
+                            const double expected =
+                                stock * (1.0 - blendLevel.wetnessF) +
+                                filmBlend.filmSource[channel] *
+                                    blendLevel.wetnessF;
+                            mutantMaximumResidual = std::max(
+                                mutantMaximumResidual,
+                                std::abs(observed - expected));
+                            mutantMinimumFilm = std::min(
+                                mutantMinimumFilm,
+                                observed -
+                                    stock *
+                                        (1.0 - blendLevel.wetnessF));
+                            energyResidual +=
+                                (observed - stock) -
+                                (expected - stock);
+                        }
+                        mutantMaximumResidual = std::max(
+                            mutantMaximumResidual,
+                            std::abs(energyResidual));
+                    }
+                    mutationFilmBlendFailed =
+                        mutantMaximumResidual > 6.0e-5 ||
+                        mutantMinimumFilm <= 0.0;
+                }
+            }
             MonotonicLevel measured{
                 RequestedLevels[level], levelMask.readbackValues.front(), 0.0};
             for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
@@ -7414,7 +7978,8 @@ int RunAmbientWetnessFeature(
                         stockNeutral[0][pixel][channel]);
                     measured.deltaEnergy += delta;
                     if ((level == 0 && delta != 0.0) ||
-                        (level != 0 &&
+                        (claimsMonotonic &&
+                         level != 0 &&
                          delta + 1.0e-7 < previous[index]))
                     {
                         ++series.violations;
@@ -7443,7 +8008,9 @@ int RunAmbientWetnessFeature(
                     bucket.scenario + ":mask.zero");
             }
         }
-        else if (output.changedPixels != bucket.population)
+        else if (
+            bucket.mask == "mask.full" &&
+            output.changedPixels != bucket.population)
         {
             localityViolations.push_back(
                 bucket.scenario + ":" + bucket.mask + ":color");
@@ -7458,26 +8025,97 @@ int RunAmbientWetnessFeature(
             localityViolations.push_back(
                 bucket.scenario + ":" + bucket.mask + ":direction");
         }
-        if (bucket.mask != "mask.zero" &&
-            bucket.scenario == "reflection" &&
-            (output.signedDeltas.empty() ||
-             *std::min_element(
-                 output.signedDeltas.begin(),
-                 output.signedDeltas.end()) <= 0.0))
-        {
-            localityViolations.push_back(
-                bucket.scenario + ":" + bucket.mask + ":direction");
-        }
     }
+
+    const AmbientWetnessBucket& matteFull =
+        FindAmbientWetnessBucket(crossBuckets, "mask.full", "matte");
+    const DeltaDistribution& matteOutput = matteFull.output.delta;
+    const double matteDenominatorThreshold = std::max(
+        1.0e-12,
+        static_cast<double>(matteOutput.population) * 3.0e-12);
+    if (matteOutput.changedPixels != matteOutput.population)
+        matteSheenViolations.push_back("matte:mask.full:changed-pixels");
+    if (matteOutput.changedChannels != matteOutput.population * 3)
+        matteSheenViolations.push_back("matte:mask.full:changed-channels");
+    if (matteOutput.deltaEnergy <= 0.0)
+        matteSheenViolations.push_back("matte:mask.full:delta");
+    if (matteOutput.signedDeltas.empty() ||
+        *std::min_element(
+            matteOutput.signedDeltas.begin(),
+            matteOutput.signedDeltas.end()) <= 0.0)
+    {
+        matteSheenViolations.push_back("matte:mask.full:direction");
+    }
+    if (matteOutput.stockEnergy > matteDenominatorThreshold)
+        matteSheenViolations.push_back("matte:mask.full:stock-denominator");
+
+    const AmbientWetnessBucket& noIblFull =
+        FindAmbientWetnessBucket(crossBuckets, "mask.full", "no-ibl");
+    const DeltaDistribution& noIblOutput = noIblFull.output.delta;
+    const double noIblDenominatorThreshold = std::max(
+        1.0e-12,
+        static_cast<double>(noIblOutput.population) * 3.0e-12);
+    if (noIblOutput.changedPixels != noIblOutput.population)
+        noIblFilmViolations.push_back("no-ibl:mask.full:changed-pixels");
+    if (noIblOutput.changedChannels != noIblOutput.population * 3)
+        noIblFilmViolations.push_back("no-ibl:mask.full:changed-channels");
+    if (noIblOutput.deltaEnergy <= 0.0)
+        noIblFilmViolations.push_back("no-ibl:mask.full:delta");
+    if (noIblOutput.signedDeltas.empty() ||
+        *std::min_element(
+            noIblOutput.signedDeltas.begin(),
+            noIblOutput.signedDeltas.end()) <= 0.0)
+    {
+        noIblFilmViolations.push_back("no-ibl:mask.full:direction");
+    }
+    if (noIblOutput.stockEnergy <= noIblDenominatorThreshold)
+        noIblFilmViolations.push_back("no-ibl:mask.full:stock-denominator");
 
     std::uint64_t invalidMagnitudeBuckets = 0;
     for (const AmbientWetnessBucket& bucket : crossBuckets)
     {
+        if (bucket.scenario == "matte" || bucket.scenario == "no-ibl")
+            continue;
         const double threshold = std::max(
             1.0e-12,
             static_cast<double>(bucket.output.delta.population) * 3.0e-12);
         if (bucket.output.delta.stockEnergy <= threshold)
             ++invalidMagnitudeBuckets;
+    }
+    const AmbientWetnessBucket& glossyFull =
+        FindAmbientWetnessBucket(crossBuckets, "mask.full", "reflection");
+    const DeltaDistribution& glossyOutput = glossyFull.output.delta;
+    const double glossyDenominatorThreshold = std::max(
+        1.0e-12,
+        static_cast<double>(glossyOutput.population) * 3.0e-12);
+    const bool glossyDenominatorProven =
+        glossyOutput.stockEnergy > glossyDenominatorThreshold;
+    const double glossyFraction = glossyDenominatorProven
+        ? glossyOutput.deltaEnergy / glossyOutput.stockEnergy : 0.0;
+    const double glossyP95 = Quantile(glossyOutput.absoluteDeltas, 0.95);
+    const double glossyMaximum = glossyOutput.absoluteDeltas.empty()
+        ? 0.0
+        : *std::max_element(
+              glossyOutput.absoluteDeltas.begin(),
+              glossyOutput.absoluteDeltas.end());
+    const double glossyPositiveMaximum = glossyOutput.signedDeltas.empty()
+        ? 0.0
+        : std::max(
+              0.0,
+              *std::max_element(
+                  glossyOutput.signedDeltas.begin(),
+                  glossyOutput.signedDeltas.end()));
+    if (!glossyDenominatorProven ||
+        !std::isfinite(glossyFraction) ||
+        glossyFraction > 2.5 ||
+        !std::isfinite(glossyP95) ||
+        glossyP95 > 0.9 ||
+        !std::isfinite(glossyMaximum) ||
+        glossyMaximum > 1.0 ||
+        !std::isfinite(glossyPositiveMaximum) ||
+        glossyPositiveMaximum > 1.0)
+    {
+        ++invalidMagnitudeBuckets;
     }
     std::sort(
         neutralViolations.begin(), neutralViolations.end());
@@ -7491,19 +8129,45 @@ int RunAmbientWetnessFeature(
         std::unique(
             localityViolations.begin(), localityViolations.end()),
         localityViolations.end());
+    std::sort(
+        matteSheenViolations.begin(), matteSheenViolations.end());
+    matteSheenViolations.erase(
+        std::unique(
+            matteSheenViolations.begin(), matteSheenViolations.end()),
+        matteSheenViolations.end());
+    std::sort(
+        noIblFilmViolations.begin(), noIblFilmViolations.end());
+    noIblFilmViolations.erase(
+        std::unique(
+            noIblFilmViolations.begin(), noIblFilmViolations.end()),
+        noIblFilmViolations.end());
+    std::sort(
+        filmBlend.violations.begin(), filmBlend.violations.end());
+    filmBlend.violations.erase(
+        std::unique(
+            filmBlend.violations.begin(), filmBlend.violations.end()),
+        filmBlend.violations.end());
 
     std::vector<std::string> mutationObservedProperties;
     if (!mutationNeutralIdentity)
         mutationObservedProperties.push_back("neutral_identity");
-    if (mutationActiveLocalityFailed)
-        mutationObservedProperties.push_back("active_locality");
+    if (mutationMatteSheenFailed)
+        mutationObservedProperties.push_back("matte_sheen");
+    if (mutationNoIblFilmFailed)
+        mutationObservedProperties.push_back("no_ibl_film");
+    if (mutationFilmBlendFailed)
+        mutationObservedProperties.push_back("ambient_film_blend");
     const std::string generatedInputHash = inputHash.Finish();
     WriteAmbientWetnessMeasurement(
         options, generatedInputHash, seeds, maskRecords, formats, crossBuckets,
         pattern, neutralViolations, neutralComparisons, localityViolations,
-        invalidMagnitudeBuckets, monotonicSeries,
-        mutationObservedProperties, mutationNeutralIdentity,
-        mutationActiveLocalityFailed);
+        invalidMagnitudeBuckets, matteSheenViolations, noIblFilmViolations,
+        filmBlend, monotonicSeries, mutationObservedProperties,
+        mutationMatteDelta, mutationNoIblDelta, mutationFilmBlendDelta,
+        mutationGlossyDelta, mutationNeutralIdentity,
+        mutationMatteSheenFailed, mutationNoIblFilmFailed,
+        mutationFilmBlendFailed,
+        mutationGlossyPlausible);
 
     const bool monotonic = std::all_of(
         monotonicSeries.begin(), monotonicSeries.end(),
@@ -7511,13 +8175,19 @@ int RunAmbientWetnessFeature(
             return series.violations == 0;
         });
     const bool mutationCaught =
-        mutationNeutralIdentity && mutationActiveLocalityFailed &&
+        mutationNeutralIdentity && mutationMatteSheenFailed &&
+        mutationNoIblFilmFailed && mutationFilmBlendFailed &&
+        mutationGlossyPlausible &&
         mutationObservedProperties ==
-            std::vector<std::string>{"active_locality"};
+            std::vector<std::string>{
+                "matte_sheen", "no_ibl_film", "ambient_film_blend"};
     const bool passed =
         neutralViolations.empty() &&
         localityViolations.empty() &&
         invalidMagnitudeBuckets == 0 &&
+        matteSheenViolations.empty() &&
+        noIblFilmViolations.empty() &&
+        filmBlend.violations.empty() &&
         monotonic &&
         mutationCaught;
     std::cout << (passed ? "PASS" : "FAIL") << "\n"
@@ -7536,9 +8206,15 @@ int RunAmbientWetnessFeature(
               << "  magnitude: "
               << (invalidMagnitudeBuckets == 0 ? "PASS" : "UNPROVEN")
               << "\n"
+              << "  matte sheen: "
+              << (matteSheenViolations.empty() ? "PASS" : "FAIL") << "\n"
+              << "  no-IBL film: "
+              << (noIblFilmViolations.empty() ? "PASS" : "FAIL") << "\n"
+              << "  ambient film blend: "
+              << (filmBlend.violations.empty() ? "PASS" : "FAIL") << "\n"
               << "  monotonicity: "
               << (monotonic ? "PASS" : "FAIL") << "\n"
-              << "  mutation ambient-wetness-load-zero: "
+              << "  mutation ambient-wetness-old-output-multiply: "
               << (mutationCaught ? "CAUGHT" : "MISSED") << "\n";
     return passed ? 0 : 1;
 }
@@ -8891,7 +9567,7 @@ void WriteFailureReport(
                << "\"fixture\":\"" << FixtureName(options.fixture) << "\","
                << "\"width\":" << options.width
                << ",\"height\":" << options.height << ","
-               << "\"measurement_protocol\":\"wetness-warp-v2\","
+               << "\"measurement_protocol\":\"wetness-warp-v4\","
                << "\"wetness_format\":\""
                << (options.fixture == Fixture::Native
                    ? "R8_UNORM" : "R32_FLOAT") << "\","

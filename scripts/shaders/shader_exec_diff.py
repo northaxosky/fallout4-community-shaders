@@ -42,7 +42,7 @@ HARNESS_SOURCE = os.path.join(
 )
 MANIFEST_FILENAME = "shader-exec-diff-run.json"
 FEATURE_MANIFEST_FILENAME = "wetness-effects-warp-run.json"
-FEATURE_PROTOCOL_VERSION = 2
+FEATURE_PROTOCOL_VERSION = 4
 COMPILE_FLAGS = ("/nologo", "/T", "ps_5_0", "/O3", "/E", "main")
 FIXTURE_ORDER = ("adversarial", "native")
 VERDICTS = ("PASS", "FAIL", "UNPROVEN", "STALE")
@@ -388,6 +388,26 @@ def validate_contracts(contracts: Any) -> None:
         required = profiles[target["profile"]]["required_buckets"][mutation["fixture"]]
         if mutation.get("expected_bucket") not in required:
             raise StableFailure("contracts_schema", "mutation bucket is not required")
+def _mutation_replacements_digest(value: Any) -> str | None:
+    if (
+        not isinstance(value, list)
+        or not value
+        or any(
+            not isinstance(item, dict)
+            or set(item) != {"old", "new"}
+            or not isinstance(item["old"], str)
+            or not item["old"]
+            or not isinstance(item["new"], str)
+            for item in value
+        )
+    ):
+        return None
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def validate_additive_features(features: Any) -> None:
     if not isinstance(features, dict) or set(features) != {"wetness-effects"}:
         raise StableFailure("feature_contracts_schema", "wetness-effects missing")
@@ -399,7 +419,7 @@ def validate_additive_features(features: Any) -> None:
         != "reconstructed-stock-vs-reconstructed-feature"
         or feature.get("native_bytecode_used") is not False
         or feature.get("profile") != "wetness-directional-lighting"
-        or feature.get("measurement_protocol") != "wetness-warp-v2"
+        or feature.get("measurement_protocol") != "wetness-warp-v4"
         or feature.get("source")
         != "shaders/lighting/bsdf_light_deferred.hlsl"
     ):
@@ -452,20 +472,31 @@ def validate_additive_features(features: Any) -> None:
         or ambient.get("variants")
         != [{"id": "ambient-runtime", "defines": []}]
         or ambient.get("scenario_buckets")
-        != ["combined", "diffuse", "reflection"]
+        != [
+            "combined",
+            "diffuse",
+            "reflection",
+            "matte",
+            "no-ibl",
+            "layered-matte-grazing",
+        ]
         or ambient.get("output_buckets") != ["color"]
     ):
         raise StableFailure("feature_contracts_schema", "ambient runtime")
     ambient_mutation = ambient.get("mutation")
     if (
         not isinstance(ambient_mutation, dict)
-        or ambient_mutation.get("id") != "ambient-wetness-load-zero"
-        or ambient_mutation.get("class") != "feature-neutering"
+        or ambient_mutation.get("id")
+        != "ambient-wetness-old-output-multiply"
+        or ambient_mutation.get("class") != "historical-regression"
         or ambient_mutation.get("expected_failed_property")
-        != "active_locality"
-        or ambient_mutation.get("old")
-        != "float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;"
-        or ambient_mutation.get("new") != "float wetness = 0.0;"
+        != "matte_sheen"
+        or _mutation_replacements_digest(
+            ambient_mutation.get("replacements")
+        )
+        != "3b435c4cb902dae8ed56172275b562ceee7f44f2dad4d815ca67d8449c5d8619"
+        or "old" in ambient_mutation
+        or "new" in ambient_mutation
     ):
         raise StableFailure(
             "feature_contracts_schema", "ambient mutation"
@@ -488,12 +519,15 @@ def validate_additive_features(features: Any) -> None:
     mutation = feature.get("mutation")
     if (
         not isinstance(mutation, dict)
-        or mutation.get("id") != "wetness-load-zero"
-        or mutation.get("class") != "feature-neutering"
-        or mutation.get("expected_failed_property") != "active_locality"
-        or mutation.get("old")
-        != "float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;"
-        or mutation.get("new") != "float wetness = 0.0;"
+        or mutation.get("id")
+        != "directional-wetness-old-substrate-floors-output-multiply"
+        or mutation.get("class") != "historical-regression"
+        or mutation.get("expected_failed_property")
+        != "directional_layering"
+        or _mutation_replacements_digest(mutation.get("replacements"))
+        != "b9d85503b71d7f3ccb5a9980b30da89f9c07c520bf6d9442e15d3b0e3c8e797b"
+        or "old" in mutation
+        or "new" in mutation
     ):
         raise StableFailure("feature_contracts_schema", "mutation")
 
@@ -699,12 +733,18 @@ def build_additive_feature_mutant(
 ) -> str:
     mutation = feature_contract["mutation"]
     normalized = original.replace("\r\n", "\n")
-    return _replace_exact(
-        normalized,
-        mutation["old"],
-        mutation["new"],
-        mutation["id"],
-    )
+    replacements = mutation.get("replacements")
+    if replacements is None:
+        replacements = [{"old": mutation["old"], "new": mutation["new"]}]
+    mutant = normalized
+    for index, replacement in enumerate(replacements):
+        mutant = _replace_exact(
+            mutant,
+            replacement["old"],
+            replacement["new"],
+            f"{mutation['id']}:{index}",
+        )
+    return mutant
 
 
 def _compile_shader(
@@ -1339,7 +1379,7 @@ def _validate_ambient_feature_measurement(
     seeds = measurement.get("seeds")
     if (
         not isinstance(seeds, list)
-        or len(seeds) != 3
+        or len(seeds) != len(target_contract["scenario_buckets"])
         or any(not isinstance(seed, int) for seed in seeds)
     ):
         fail("seeds")
@@ -1408,7 +1448,7 @@ def _validate_ambient_feature_measurement(
         or contract_delta.get(
             "mutation_t13_optimization_away_allowed"
         )
-        is not True
+        is not False
         or contract_delta.get("verdict") != "PASS"
     ):
         fail("contract_delta")
@@ -1425,7 +1465,8 @@ def _validate_ambient_feature_measurement(
             not isinstance(neutral, dict)
             or neutral.get("tolerance_absolute") != 0
             or neutral.get("tolerance_relative") != 0
-            or neutral.get("comparisons") != 3
+            or neutral.get("comparisons")
+            != len(target_contract["scenario_buckets"])
             or neutral.get("violations") != []
             or neutral.get("verdict") != "PASS"
         ):
@@ -1454,16 +1495,117 @@ def _validate_ambient_feature_measurement(
         if (
             not isinstance(magnitude, dict)
             or magnitude.get("rgb_only") is not True
-            or magnitude.get("invalid_denominator_buckets") != 0
-            or magnitude.get("reflection_probe")
+            or magnitude.get("invalid_magnitude_buckets") != 0
+            or magnitude.get("glossy_probe")
             != {
                 "scenario": "reflection",
                 "mask": "mask.full",
                 "output": "color",
+                "denominator_policy": "stock-energy-proven",
+                "maximum_delta_fraction_of_stock": 2.5,
+                "maximum_p95_absolute_delta": 0.9,
+                "maximum_absolute_delta": 1.0,
+                "maximum_positive_delta": 1.0,
+                "inputs": {
+                    "smoothness": 0.85,
+                    "spec_magnitude": 0.35,
+                    "decoded_material": 0.5,
+                    "encoded_material": math.sqrt(0.5 * 0.02),
+                    "maximum_encoded_material": math.sqrt(0.02),
+                },
             }
             or magnitude.get("verdict") != "PASS"
         ):
             fail("property:magnitude")
+        glossy_probe = (
+            magnitude.get("glossy_probe")
+            if isinstance(magnitude, dict)
+            else None
+        )
+        glossy_inputs = (
+            glossy_probe.get("inputs")
+            if isinstance(glossy_probe, dict)
+            else None
+        )
+        if (
+            not isinstance(glossy_inputs, dict)
+            or not number(glossy_inputs.get("encoded_material"))
+            or not number(glossy_inputs.get("maximum_encoded_material"))
+            or glossy_inputs["encoded_material"] < 0
+            or glossy_inputs["encoded_material"]
+            > glossy_inputs["maximum_encoded_material"]
+            or glossy_inputs["maximum_encoded_material"]
+            > math.sqrt(0.02) + 1.0e-12
+        ):
+            fail("magnitude:glossy_inputs")
+        matte_sheen = properties.get("matte_sheen")
+        if (
+            not isinstance(matte_sheen, dict)
+            or matte_sheen.get("probe")
+            != {
+                "scenario": "matte",
+                "mask": "mask.full",
+                "output": "color",
+            }
+            or matte_sheen.get("inputs")
+            != {
+                "smoothness": 0.25,
+                "smoothness_maximum": 0.3,
+                "spec_magnitude": 0.05,
+                "encoded_material": math.sqrt(0.01 * 0.02),
+            }
+            or matte_sheen.get("film_model")
+            != {
+                "substrate_independent": True,
+                "coverage_source": "t13",
+                "roughness_formula": "max(saturate(1-wetness),0.05)",
+                "minimum_water_roughness": 0.05,
+                "smoothness_formula": "1-wetFilmRoughness",
+                "strength_formula": "saturate(1-wetFilmRoughness)",
+                "full_wetness_roughness": 0.05,
+                "full_wetness_smoothness": 0.95,
+                "f0": 0.02,
+                "full_wetness_strength": 0.95,
+                "fresnel_model": "schlick",
+                "energy_attenuation": "substrate*(1-wetnessF)",
+                "lobe_path": "ambient-ibl",
+                "normal_incidence_reflection_scalar": 0.95 * 0.02,
+            }
+            or matte_sheen.get("signed_rule")
+            != "feature-stock RGB strictly positive"
+            or matte_sheen.get("stock_denominator") != "expected-zero"
+            or matte_sheen.get("violations") != []
+            or matte_sheen.get("verdict") != "PASS"
+        ):
+            fail("property:matte_sheen")
+        no_ibl_film = properties.get("no_ibl_film")
+        if (
+            not isinstance(no_ibl_film, dict)
+            or no_ibl_film.get("probe")
+            != {
+                "scenario": "no-ibl",
+                "mask": "mask.full",
+                "output": "color",
+            }
+            or no_ibl_film.get("inputs")
+            != {
+                "substrate_ibl_available": False,
+                "material_probe_selector": 0,
+                "smoothness": 0.25,
+                "spec_magnitude": 0.05,
+                "encoded_material": math.sqrt(0.01 * 0.02),
+                "ambient_base": [0.2, 0.2, 0.2],
+                "lit_scene": [0.6, 0.45, 0.3, 1],
+                "lit_scene_weight": 0.75,
+                "lit_scene_alpha": 1,
+            }
+            or no_ibl_film.get("signed_rule")
+            != "feature-stock RGB strictly positive"
+            or no_ibl_film.get("stock_denominator") != "proven"
+            or no_ibl_film.get("violations") != []
+            or no_ibl_film.get("verdict") != "PASS"
+        ):
+            fail("property:no_ibl_film")
 
         requested_levels = [
             float(value) for value in feature_contract["monotonic_levels"]
@@ -1476,6 +1618,197 @@ def _validate_ambient_feature_measurement(
             )
             for value in requested_levels
         ]
+        film_blend = properties.get("ambient_film_blend")
+        film_levels = (
+            film_blend.get("levels")
+            if isinstance(film_blend, dict)
+            else None
+        )
+        film_substrate = (
+            film_blend.get("substrate")
+            if isinstance(film_blend, dict)
+            else None
+        )
+        film_source = (
+            film_blend.get("film_source")
+            if isinstance(film_blend, dict)
+            else None
+        )
+        if (
+            not isinstance(film_blend, dict)
+            or film_blend.get("probe")
+            != {
+                "scenario": "layered-matte-grazing",
+                "mask": "levels",
+                "output": "color",
+            }
+            or not number(film_blend.get("ndotv"))
+            or not (0 < film_blend["ndotv"] <= 0.125)
+            or not close(film_blend["ndotv"], 0.1, 1.0e-4)
+            or film_blend.get("ndotv_range")
+            != {"exclusive_minimum": 0, "inclusive_maximum": 0.125}
+            or not isinstance(film_substrate, list)
+            or len(film_substrate) != 3
+            or any(not number(value) for value in film_substrate)
+            or any(
+                not close(value, expected, 1.0e-8)
+                for value, expected in zip(
+                    film_substrate, [0.5625, 0.375, 0.1875]
+                )
+            )
+            or not isinstance(film_source, list)
+            or len(film_source) != 3
+            or any(not number(value) for value in film_source)
+            or any(
+                not close(value, expected, 1.0e-8)
+                for value, expected in zip(
+                    film_source, [0.1875, 0.375, 0.5625]
+                )
+            )
+            or film_blend.get("formula")
+            != "substrate*(1-wetnessF)+film*wetnessF"
+            or film_blend.get("absolute_tolerance") != 2.0e-5
+            or film_blend.get("relative_tolerance") != 2.0e-4
+            or film_blend.get("maximum_energy_residual") != 6.0e-5
+            or film_blend.get("violations") != []
+            or film_blend.get("verdict") != "PASS"
+            or not isinstance(film_levels, list)
+            or len(film_levels) != len(requested_levels)
+        ):
+            fail("property:ambient_film_blend")
+        elif isinstance(film_levels, list):
+            for index, level in enumerate(film_levels):
+                arrays = {
+                    name: level.get(name)
+                    for name in (
+                        "expected_delta",
+                        "observed_delta",
+                        "expected_film",
+                        "observed_film",
+                    )
+                } if isinstance(level, dict) else {}
+                if (
+                    not isinstance(level, dict)
+                    or not close(level.get("requested"), requested_levels[index])
+                    or not close(
+                        level.get("uploaded"),
+                        uploaded_levels[index],
+                        1.0e-7,
+                    )
+                    or not number(level.get("wetness_f"))
+                    or level["wetness_f"] < 0
+                    or any(
+                        not isinstance(values, list)
+                        or len(values) != 3
+                        or any(not number(value) for value in values)
+                        for values in arrays.values()
+                    )
+                    or not number(level.get("maximum_residual"))
+                    or level["maximum_residual"] < 0
+                    or not number(level.get("expected_energy_delta"))
+                    or not number(level.get("observed_energy_delta"))
+                    or level.get("film_nonzero_required")
+                    is not (index != 0)
+                    or level.get("film_nonzero") is not True
+                ):
+                    fail("ambient_film_blend:level")
+                    continue
+                roughness = max(
+                    min(
+                        max(1.0 - float(level["uploaded"]), 0.0),
+                        1.0,
+                    ),
+                    0.05,
+                )
+                strength = min(max(1.0 - roughness, 0.0), 1.0)
+                one_minus_ndotv = 1.0 - float(film_blend["ndotv"])
+                expected_wetness_f = strength * (
+                    0.02 + 0.98 * one_minus_ndotv**5
+                )
+                if not close(
+                    level["wetness_f"], expected_wetness_f, 1.0e-8
+                ):
+                    fail("ambient_film_blend:wetness_f")
+                wetness_f = expected_wetness_f
+                computed_maximum_residual = 0.0
+                for channel in range(3):
+                    expected_delta = wetness_f * (
+                        float(film_source[channel]) -
+                        float(film_substrate[channel])
+                    )
+                    expected_film = wetness_f * float(film_source[channel])
+                    tolerance = 2.0e-5 + 2.0e-4 * max(
+                        abs(float(film_substrate[channel])),
+                        abs(
+                            float(film_substrate[channel]) +
+                            expected_delta
+                        ),
+                    )
+                    if (
+                        not close(
+                            arrays["expected_delta"][channel],
+                            expected_delta,
+                            1.0e-8,
+                        )
+                        or not close(
+                            arrays["expected_film"][channel],
+                            expected_film,
+                            1.0e-8,
+                        )
+                        or abs(
+                            float(arrays["observed_delta"][channel]) -
+                            expected_delta
+                        )
+                        > tolerance
+                        or abs(
+                            float(arrays["observed_film"][channel]) -
+                            expected_film
+                        )
+                        > tolerance
+                        or (
+                            index != 0
+                            and arrays["observed_film"][channel] <= 0
+                        )
+                    ):
+                        fail("ambient_film_blend:formula")
+                        break
+                    computed_maximum_residual = max(
+                        computed_maximum_residual,
+                        abs(
+                            float(arrays["observed_delta"][channel]) -
+                            expected_delta
+                        ),
+                        abs(
+                            float(arrays["observed_film"][channel]) -
+                            expected_film
+                        ),
+                    )
+                computed_expected_energy = sum(
+                    float(value) for value in arrays["expected_delta"]
+                )
+                computed_observed_energy = sum(
+                    float(value) for value in arrays["observed_delta"]
+                )
+                if (
+                    not close(
+                        level["maximum_residual"],
+                        computed_maximum_residual,
+                        1.0e-8,
+                    )
+                    or not close(
+                        level["expected_energy_delta"],
+                        computed_expected_energy,
+                        1.0e-8,
+                    )
+                    or not close(
+                        level["observed_energy_delta"],
+                        computed_observed_energy,
+                        1.0e-8,
+                    )
+                    or abs(computed_expected_energy) > 1.0e-8
+                    or abs(computed_observed_energy) > 6.0e-5
+                ):
+                    fail("ambient_film_blend:energy")
         monotonicity = properties.get("monotonicity")
         series = (
             monotonicity.get("series")
@@ -1484,6 +1817,8 @@ def _validate_ambient_feature_measurement(
         )
         if (
             not isinstance(monotonicity, dict)
+            or monotonicity.get("claim")
+            != "isolated diffuse absolute RGB delta is nondecreasing"
             or monotonicity.get("violations") != 0
             or monotonicity.get("verdict") != "PASS"
             or not isinstance(series, list)
@@ -1494,9 +1829,16 @@ def _validate_ambient_feature_measurement(
         elif len(series) == len(target_contract["scenario_buckets"]):
             for item in series:
                 levels = item.get("levels")
+                claims_monotonic = item.get("scenario") == "diffuse"
+                expected_claim = (
+                    "absolute RGB delta is nondecreasing"
+                    if claims_monotonic
+                    else "net layered delta measured; monotonicity not claimed"
+                )
                 if (
                     item.get("violations") != 0
                     or item.get("verdict") != "PASS"
+                    or item.get("claim") != expected_claim
                     or not isinstance(levels, list)
                     or len(levels) != len(requested_levels)
                 ):
@@ -1522,7 +1864,10 @@ def _validate_ambient_feature_measurement(
                         )
                         or not number(energy)
                         or energy < 0
-                        or energy + 1.0e-12 < previous
+                        or (
+                            claims_monotonic
+                            and energy + 1.0e-12 < previous
+                        )
                         or (index == 0 and not close(energy, 0.0))
                     ):
                         fail("monotonicity:levels")
@@ -1536,12 +1881,124 @@ def _validate_ambient_feature_measurement(
             or mutation.get("expected_failed_property")
             != target_contract["mutation"]["expected_failed_property"]
             or mutation.get("observed_failed_properties")
-            != ["active_locality"]
+            != ["matte_sheen", "no_ibl_film", "ambient_film_blend"]
             or mutation.get("neutral_identity") != "PASS"
-            or mutation.get("active_locality") != "FAIL"
+            or mutation.get("matte_sheen") != "FAIL"
+            or mutation.get("no_ibl_film") != "FAIL"
+            or mutation.get("ambient_film_blend") != "FAIL"
+            or mutation.get("glossy_reflection") != "PASS"
             or mutation.get("verdict") != "CAUGHT"
         ):
             fail("property:mutation_sensitivity")
+        else:
+            mutation_matte = mutation.get("matte_probe")
+            mutation_no_ibl = mutation.get("no_ibl_probe")
+            mutation_layered = mutation.get("layered_probe")
+            mutation_glossy = mutation.get("glossy_probe")
+            full_population = expected_bucket_evidence["mask.full"][
+                "population"
+            ]
+            matte_absolute = (
+                mutation_matte.get("absolute_delta")
+                if isinstance(mutation_matte, dict)
+                else None
+            )
+            matte_signed = (
+                mutation_matte.get("signed_delta")
+                if isinstance(mutation_matte, dict)
+                else None
+            )
+            if (
+                not isinstance(mutation_matte, dict)
+                or mutation_matte.get("name") != "color"
+                or mutation_matte.get("population") != full_population
+                or mutation_matte.get("changed_pixels") != 0
+                or mutation_matte.get("changed_channels") != 0
+                or mutation_matte.get("stock_energy") != 0
+                or mutation_matte.get("delta_energy") != 0
+                or mutation_matte.get("delta_fraction_of_stock") != 0
+                or mutation_matte.get("energy_verdict") != "UNPROVEN"
+                or not isinstance(matte_absolute, dict)
+                or any(value != 0 for value in matte_absolute.values())
+                or not isinstance(matte_signed, dict)
+                or any(value != 0 for value in matte_signed.values())
+            ):
+                fail("mutation_sensitivity:matte_probe")
+            no_ibl_signed = (
+                mutation_no_ibl.get("signed_delta")
+                if isinstance(mutation_no_ibl, dict)
+                else None
+            )
+            if (
+                not isinstance(mutation_no_ibl, dict)
+                or mutation_no_ibl.get("name") != "color"
+                or mutation_no_ibl.get("population") != full_population
+                or mutation_no_ibl.get("changed_pixels") != full_population
+                or mutation_no_ibl.get("changed_channels")
+                != full_population * 3
+                or not number(mutation_no_ibl.get("stock_energy"))
+                or mutation_no_ibl["stock_energy"] <= 0
+                or not number(mutation_no_ibl.get("delta_energy"))
+                or mutation_no_ibl["delta_energy"] <= 0
+                or not number(
+                    mutation_no_ibl.get("delta_fraction_of_stock")
+                )
+                or not (
+                    0
+                    < mutation_no_ibl["delta_fraction_of_stock"]
+                    <= 1.01
+                )
+                or mutation_no_ibl.get("energy_verdict") != "PROVEN"
+                or not isinstance(no_ibl_signed, dict)
+                or not number(no_ibl_signed.get("max"))
+                or no_ibl_signed["max"] >= 0
+            ):
+                fail("mutation_sensitivity:no_ibl_probe")
+            layered_signed = (
+                mutation_layered.get("signed_delta")
+                if isinstance(mutation_layered, dict)
+                else None
+            )
+            if (
+                not isinstance(mutation_layered, dict)
+                or mutation_layered.get("name") != "color"
+                or mutation_layered.get("population") != width * height
+                or mutation_layered.get("changed_pixels") != width * height
+                or mutation_layered.get("changed_channels")
+                != width * height * 3
+                or not number(mutation_layered.get("delta_energy"))
+                or mutation_layered["delta_energy"] <= 0
+                or not isinstance(layered_signed, dict)
+                or not number(layered_signed.get("max"))
+                or layered_signed["max"] >= 0
+            ):
+                fail("mutation_sensitivity:layered_probe")
+            glossy_signed = (
+                mutation_glossy.get("signed_delta")
+                if isinstance(mutation_glossy, dict)
+                else None
+            )
+            if (
+                not isinstance(mutation_glossy, dict)
+                or mutation_glossy.get("name") != "color"
+                or mutation_glossy.get("population") != full_population
+                or mutation_glossy.get("changed_pixels") != full_population
+                or not number(mutation_glossy.get("delta_energy"))
+                or mutation_glossy["delta_energy"] <= 0
+                or not number(
+                    mutation_glossy.get("delta_fraction_of_stock")
+                )
+                or not (
+                    0
+                    < mutation_glossy["delta_fraction_of_stock"]
+                    <= 1.01
+                )
+                or mutation_glossy.get("energy_verdict") != "PROVEN"
+                or not isinstance(glossy_signed, dict)
+                or not number(glossy_signed.get("min"))
+                or glossy_signed["min"] <= 0
+            ):
+                fail("mutation_sensitivity:glossy_probe")
 
     buckets = measurement.get("cross_buckets")
     expected_keys = [
@@ -1621,6 +2078,11 @@ def _validate_ambient_feature_measurement(
                 "denominator_threshold",
                 "delta_fraction_of_stock",
             )
+            expected_energy_verdict = (
+                "UNPROVEN"
+                if key[1] == "matte"
+                else "PROVEN"
+            )
             if (
                 not isinstance(output, dict)
                 or output.get("name") != "color"
@@ -1634,7 +2096,7 @@ def _validate_ambient_feature_measurement(
                 or output["population"] != population
                 or output["changed_pixels"] > population
                 or output["changed_channels"] > population * 3
-                or output.get("energy_verdict") != "PROVEN"
+                or output.get("energy_verdict") != expected_energy_verdict
                 or not isinstance(distribution, dict)
                 or any(
                     not number(distribution.get(name))
@@ -1689,13 +2151,20 @@ def _validate_ambient_feature_measurement(
             ):
                 fail("output_mean_energy")
             expected_threshold = max(1.0e-12, population * 3.0e-12)
-            if (
+            if not close(
+                output["denominator_threshold"],
+                expected_threshold,
+                1.0e-12,
+            ):
+                fail("output_energy_fraction")
+            elif key[1] == "matte":
+                if (
+                    output["stock_energy"] > output["denominator_threshold"]
+                    or output["delta_fraction_of_stock"] != 0
+                ):
+                    fail("output_energy_fraction")
+            elif (
                 output["stock_energy"] <= output["denominator_threshold"]
-                or not close(
-                    output["denominator_threshold"],
-                    expected_threshold,
-                    1.0e-12,
-                )
                 or not close(
                     output["delta_fraction_of_stock"],
                     output["delta_energy"] / output["stock_energy"],
@@ -1717,9 +2186,15 @@ def _validate_ambient_feature_measurement(
                 ):
                     fail("output_expected_zero")
             elif (
-                output["changed_pixels"] != population
-                or output["changed_channels"] < population
-                or output["delta_energy"] <= 0
+                (
+                    key[0] == "mask.full"
+                    and output["changed_pixels"] != population
+                )
+                or output["changed_channels"] < output["changed_pixels"]
+                or (
+                    key[0] == "mask.full"
+                    and output["delta_energy"] <= 0
+                )
             ):
                 fail("output_active_locality")
             if (
@@ -1728,12 +2203,6 @@ def _validate_ambient_feature_measurement(
                 and signed_distribution["max"] >= 0
             ):
                 fail("output_diffuse_direction")
-            if (
-                key[0] != "mask.zero"
-                and key[1] == "reflection"
-                and signed_distribution["min"] <= 0
-            ):
-                fail("output_reflection_direction")
         if observed_keys != expected_keys or len(buckets) != len(expected_keys):
             fail("cross_bucket_matrix")
         for mask in feature_contract["mask_buckets"]:
@@ -1764,12 +2233,81 @@ def _validate_ambient_feature_measurement(
                         fail("monotonicity:cross_evidence")
 
     reflection = bucket_by_key.get(("mask.full", "reflection"))
+    reflection_output = (
+        reflection.get("output") if isinstance(reflection, dict) else None
+    )
+    reflection_absolute = (
+        reflection_output.get("absolute_delta")
+        if isinstance(reflection_output, dict)
+        else None
+    )
+    reflection_signed = (
+        reflection_output.get("signed_delta")
+        if isinstance(reflection_output, dict)
+        else None
+    )
     if (
-        not isinstance(reflection, dict)
-        or not isinstance(reflection.get("output"), dict)
-        or reflection["output"].get("delta_energy", 0) <= 0
+        not isinstance(reflection_output, dict)
+        or reflection_output.get("changed_pixels")
+        != reflection_output.get("population")
+        or reflection_output.get("delta_energy", 0) <= 0
+        or reflection_output.get("energy_verdict") != "PROVEN"
+        or reflection_output.get("stock_energy", 0)
+        <= reflection_output.get("denominator_threshold", 0)
+        or reflection_output.get("delta_fraction_of_stock", 2.51) > 2.5
+        or not isinstance(reflection_absolute, dict)
+        or reflection_absolute.get("p95", 0.91) > 0.9
+        or reflection_absolute.get("max", 1.01) > 1.0
+        or not isinstance(reflection_signed, dict)
+        or reflection_signed.get("max", 1.01) > 1.0
     ):
-        fail("magnitude:reflection_probe")
+        fail("magnitude:glossy_probe")
+    matte = bucket_by_key.get(("mask.full", "matte"))
+    matte_output = (
+        matte.get("output") if isinstance(matte, dict) else None
+    )
+    matte_signed = (
+        matte_output.get("signed_delta")
+        if isinstance(matte_output, dict)
+        else None
+    )
+    if (
+        not isinstance(matte_output, dict)
+        or matte_output.get("changed_pixels") != matte_output.get("population")
+        or matte_output.get("changed_channels")
+        != matte_output.get("population", 0) * 3
+        or matte_output.get("delta_energy", 0) <= 0
+        or matte_output.get("stock_energy") != 0
+        or matte_output.get("delta_fraction_of_stock") != 0
+        or matte_output.get("energy_verdict") != "UNPROVEN"
+        or not isinstance(matte_signed, dict)
+        or matte_signed.get("min", 0) <= 0
+    ):
+        fail("matte_sheen:probe")
+    no_ibl = bucket_by_key.get(("mask.full", "no-ibl"))
+    no_ibl_output = (
+        no_ibl.get("output") if isinstance(no_ibl, dict) else None
+    )
+    no_ibl_signed = (
+        no_ibl_output.get("signed_delta")
+        if isinstance(no_ibl_output, dict)
+        else None
+    )
+    if (
+        not isinstance(no_ibl_output, dict)
+        or no_ibl_output.get("changed_pixels")
+        != no_ibl_output.get("population")
+        or no_ibl_output.get("changed_channels")
+        != no_ibl_output.get("population", 0) * 3
+        or no_ibl_output.get("delta_energy", 0) <= 0
+        or no_ibl_output.get("stock_energy", 0)
+        <= no_ibl_output.get("denominator_threshold", 0)
+        or no_ibl_output.get("delta_fraction_of_stock", 0) <= 0
+        or no_ibl_output.get("energy_verdict") != "PROVEN"
+        or not isinstance(no_ibl_signed, dict)
+        or no_ibl_signed.get("min", 0) <= 0
+    ):
+        fail("no_ibl_film:probe")
     if measurement.get("verdict") != "PASS":
         fail("verdict")
     if _has_absolute_path(measurement):
@@ -1990,7 +2528,7 @@ def validate_feature_measurement(
     if (
         not isinstance(contract_delta, dict)
         or contract_delta.get("stock_to_feature") != "only-texture2d-t4-added"
-        or contract_delta.get("mutation_t4_optimization_away_allowed") is not True
+        or contract_delta.get("mutation_t4_optimization_away_allowed") is not False
         or contract_delta.get("verdict") != "PASS"
     ):
         fail("contract_delta")
@@ -2128,17 +2666,40 @@ def validate_feature_measurement(
             if (
                 not isinstance(probe, dict)
                 or probe.get("scope")
-                != "controlled-positive-gradient-ambientSpecular"
+                != "ambientSpecular remains substrate-owned"
+                or probe.get("claim")
+                != "wet film does not modify the stock ambient gradient"
                 or probe.get("violations") != 0
                 or probe.get("verdict") != "PASS"
             ):
                 fail("monotonicity:ibl_specular_probe")
             else:
-                validate_levels(
-                    probe.get("levels"),
-                    "delta_energy",
-                    "monotonicity:ibl_specular_levels",
-                )
+                probe_levels = probe.get("levels")
+                if (
+                    not isinstance(probe_levels, list)
+                    or len(probe_levels) != len(requested_levels)
+                ):
+                    fail("monotonicity:ibl_specular_levels")
+                else:
+                    for index, level in enumerate(probe_levels):
+                        if (
+                            not isinstance(level, dict)
+                            or not close(
+                                level.get("requested"),
+                                requested_levels[index],
+                            )
+                            or not close(
+                                level.get("uploaded"),
+                                uploaded_levels[index],
+                                1.0e-7,
+                            )
+                            or not number(level.get("delta_energy"))
+                            or level["delta_energy"] < 0
+                            or level["delta_energy"]
+                            > width * height * 3.0e-6
+                        ):
+                            fail("monotonicity:ibl_specular_levels")
+                            break
             if isinstance(diffuse_series, list) and isinstance(probe, dict):
                 violation_values = [
                     series.get("violations")
@@ -2157,14 +2718,44 @@ def validate_feature_measurement(
                     fail("monotonicity:violation_total")
 
         mutation = properties.get("mutation_sensitivity")
+        mutation_diffuse = (
+            mutation.get("diffuse_probe")
+            if isinstance(mutation, dict)
+            else None
+        )
+        mutation_specular = (
+            mutation.get("specular_probe")
+            if isinstance(mutation, dict)
+            else None
+        )
+        mutation_diffuse_signed = (
+            mutation_diffuse.get("signed_delta")
+            if isinstance(mutation_diffuse, dict)
+            else None
+        )
         if (
             not isinstance(mutation, dict)
             or mutation.get("id") != feature_contract["mutation"]["id"]
             or mutation.get("expected_failed_property")
             != feature_contract["mutation"]["expected_failed_property"]
-            or mutation.get("observed_failed_properties") != ["active_locality"]
+            or mutation.get("observed_failed_properties")
+            != ["directional_layering"]
             or mutation.get("neutral_identity") != "PASS"
-            or mutation.get("active_locality") != "FAIL"
+            or mutation.get("directional_layering") != "FAIL"
+            or not isinstance(mutation_diffuse, dict)
+            or mutation_diffuse.get("name") != "diffuse"
+            or mutation_diffuse.get("population") != width * height
+            or mutation_diffuse.get("changed_pixels") != width * height
+            or not isinstance(mutation_diffuse_signed, dict)
+            or not number(mutation_diffuse_signed.get("max"))
+            or mutation_diffuse_signed["max"] >= 0
+            or mutation.get("expected_full_wet_scale") != 0.5
+            or not number(mutation.get("maximum_scale_residual"))
+            or mutation["maximum_scale_residual"] > 1.0e-5
+            or not isinstance(mutation_specular, dict)
+            or mutation_specular.get("name") != "specular"
+            or mutation_specular.get("changed_pixels", 0) <= 0
+            or mutation_specular.get("delta_energy", 0) <= 0
             or mutation.get("verdict") != "CAUGHT"
         ):
             fail("property:mutation_sensitivity")
@@ -2348,13 +2939,7 @@ def validate_feature_measurement(
                     )
                 ):
                     fail("mrt_energy_fraction")
-                zero_delta_expected = (
-                    key[0] == "mask.zero"
-                    or (
-                        key[1] == "material.skin"
-                        and stats["name"] == "specular"
-                    )
-                )
+                zero_delta_expected = key[0] == "mask.zero"
                 if zero_delta_expected:
                     if (
                         changed_pixels != 0
@@ -2436,7 +3021,8 @@ def validate_feature_measurement(
                     or not probe_levels
                     or not isinstance(probe_levels[-1], dict)
                     or not number(probe_levels[-1].get("delta_energy"))
-                    or probe_levels[-1]["delta_energy"] <= 0
+                    or probe_levels[-1]["delta_energy"]
+                    > width * height * 3.0e-6
                 ):
                     fail("monotonicity:ibl_specular_cross_evidence")
 
@@ -2870,10 +3456,14 @@ def _feature_compiler_flags(
 
 
 def _feature_property_summary(
-    measurements: list[dict[str, Any]], property_name: str
+    measurements: list[dict[str, Any]],
+    property_name: str,
+    target: str | None = None,
 ) -> OrderedDict[str, Any]:
     fixture_verdicts: list[OrderedDict[str, Any]] = []
     for measurement in measurements:
+        if target is not None and measurement.get("target") != target:
+            continue
         properties = measurement.get("properties")
         property_value = (
             properties.get(property_name)
@@ -3237,12 +3827,22 @@ def run_additive_feature(
             "neutral_identity",
             "active_locality",
             "magnitude",
+            "matte_sheen",
+            "no_ibl_film",
             "monotonicity",
         )
         properties = OrderedDict(
             (
                 name,
-                _feature_property_summary(measurements, name),
+                _feature_property_summary(
+                    measurements,
+                    name,
+                    (
+                        "ambient-runtime"
+                        if name in {"matte_sheen", "no_ibl_film"}
+                        else None
+                    ),
+                ),
             )
             for name in property_names
         )
@@ -3574,7 +4174,7 @@ def _feature_driver_failure_report(
                         ("fixture", fixture),
                         ("width", args.width),
                         ("height", args.height),
-                        ("measurement_protocol", "wetness-warp-v2"),
+                        ("measurement_protocol", "wetness-warp-v4"),
                         ("wetness_format", wetness_format),
                         ("failures", [failure]),
                         ("verdict", "UNPROVEN"),

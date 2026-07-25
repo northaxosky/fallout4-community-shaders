@@ -303,7 +303,8 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
 
 #ifdef WETNESS_EFFECTS
-    float wetness = g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x;
+    float wetness = saturate(
+        g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x);
 #endif
 
     // Insn 0: r0.xyzw = position.xy * cb2[0].xyzw -> uv + scaled coords
@@ -439,6 +440,16 @@ PS_OUTPUT main(PS_INPUT input)
     // Insn 137-138: material-1 (skin) test
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 
+#ifdef WETNESS_EFFECTS
+    float wetFilmRoughness = max(saturate(1.0 - wetness), 0.05);
+    float wetFilmStrength = saturate(1.0 - wetFilmRoughness);
+    float3 wetFilmNormal = isMaterial1 ? matSample.xyz : normalView;
+    wetFilmNormal *=
+        rsqrt(max(dot(wetFilmNormal, wetFilmNormal), 1.0e-8));
+    float3 wetFilmHalf = viewDirNeg + SunDirection_and_padding.xyz;
+    wetFilmHalf *= rsqrt(max(dot(wetFilmHalf, wetFilmHalf), 1.0e-8));
+#endif
+
     // Material-id-branched BRDF block (insns 139-242).
     // Both branches compute a "specular contribution" r7.xyz and accumulate.
     float3 brdfSpecular = float3(0, 0, 0);
@@ -477,17 +488,7 @@ PS_OUTPUT main(PS_INPUT input)
     {
         // Insn 178-242: default Cook-Torrance branch.
         float depthScale = matSample.z * 100.0;
-#ifdef WETNESS_EFFECTS
-        // Wet surfaces read glossier (higher spec exponent) and get a specular-
-        // magnitude floor, so the sun spec lobe (below) and the ambientSpecular
-        // sky-sheen pick up the wet cue from the mask. The floors are gated by the
-        // mask value, so wetness=0 is exact identity with the stock matSample path.
-        float wetGloss = max(matSample.x, wetness * 0.7);
-        float wetSpecMag = max(matSample.y, wetness * 0.25);
-        float specExpBase = exp2(wetGloss * 10.0 + 1.0);
-#else
         float specExpBase = exp2(matSample.x * 10.0 + 1.0);
-#endif
         float specExpScale = 1.0 - schlickFres * 0.98;
         float specExp = specExpScale * specExpBase;
 
@@ -495,24 +496,11 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef AMBIENT_IBL_IN_LIGHT
         float3 reflectionDir = 2.0 * NdotV_raw * normalView - viewDirNeg;
         float oneMinusNdotV = 1.0 - saturate(NdotV_raw);
-#ifdef WETNESS_EFFECTS
-        // Wet environment sheen: reflect the (smooth) ambient sky gradient more
-        // broadly + with a matte-surface floor. This is the STABLE wet cue (the
-        // sun-specular glint alone sweeps as a tight patch); done here in the
-        // well-reconstructed directional-IBL shader instead of the interior-
-        // derived ambient_ibl_pass. Exact identity at wetness=0.
-        float ambientSpecularFactor =
-            exp2(log2(oneMinusNdotV) * (3.0 - wetGloss)) * 0.25;
-        ambientSpecular =
-            wetSpecMag * ambientSpecularFactor *
-            EvaluateAmbientGradient(reflectionDir);
-#else
         float ambientSpecularFactor =
             exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
         ambientSpecular =
             matSample.y * ambientSpecularFactor *
             EvaluateAmbientGradient(reflectionDir);
-#endif
 #endif
         float3 tangentV = viewDirNeg - normalView * NdotV_raw;
         float3 tangentL = SunDirection_and_padding.xyz - normalView * NdotL_raw;
@@ -564,16 +552,41 @@ PS_OUTPUT main(PS_INPUT input)
         specMag = distributionNorm * specMag;
         specMag *= 0.25;
         specMag = min(specMag, 15.0);
-#ifdef WETNESS_EFFECTS
-        specMag *= wetSpecMag;
-#else
         specMag *= matSample.y;
-#endif
         specMag *= 3.141593;
 
         brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);
         brdfModulator = depthScale;
     }
+
+#ifdef WETNESS_EFFECTS
+    float wetNdotL = clamp(
+        dot(wetFilmNormal, SunDirection_and_padding.xyz), 1.0e-5, 1.0);
+    float wetNdotV =
+        saturate(abs(dot(wetFilmNormal, viewDirNeg)) + 1.0e-5);
+    float wetNdotH = saturate(dot(wetFilmNormal, wetFilmHalf));
+    float wetVdotH = saturate(dot(viewDirNeg, wetFilmHalf));
+    float wetOneMinusVdotH = 1.0 - wetVdotH;
+    float wetOneMinusVdotH2 = wetOneMinusVdotH * wetOneMinusVdotH;
+    float wetFresnel =
+        0.02 +
+        0.98 * wetOneMinusVdotH2 * wetOneMinusVdotH2 *
+            wetOneMinusVdotH;
+    float wetnessF = wetFilmStrength * wetFresnel;
+
+    float wetA = wetFilmRoughness * wetFilmRoughness;
+    float wetA2 = wetA * wetA;
+    float wetDdenom = wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;
+    float wetD = wetA2 / (3.141593 * wetDdenom * wetDdenom);
+    float wetVisV =
+        wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);
+    float wetVisL =
+        wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);
+    float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);
+    float3 wetFilmSpecular =
+        wetD * wetG * wetnessF * wetNdotL * SunColor_HDR.xyz *
+        (3.141593 * 0.65);
+#endif
 
     // Insn 243-269: final composition.
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
@@ -596,6 +609,10 @@ PS_OUTPUT main(PS_INPUT input)
     // Specular accumulation in o1
     float specMix = (1.0 - schlickFres * 0.5);
     output.specular.xyz = shadowPcf * specMix * brdfSpecular;
+#ifdef WETNESS_EFFECTS
+    output.specular.xyz *= 1.0 - wetnessF;
+    output.specular.xyz += shadowPcf * wetFilmSpecular;
+#endif
 #ifdef AMBIENT_IBL_IN_LIGHT
     output.specular.xyz += ambientSpecular;
 #endif
@@ -603,11 +620,11 @@ PS_OUTPUT main(PS_INPUT input)
 
     // Diffuse: scaled by 1/3 (insn 269 div by 3,3,3,3)
     output.diffuse.xyz = shadowPcf * finalDiffuse;
+#ifdef WETNESS_EFFECTS
+    output.diffuse.xyz *= 1.0 - wetnessF;
+#endif
 #ifdef AMBIENT_IBL_IN_LIGHT
     output.diffuse.xyz += ambientDiffuse;
-#endif
-#ifdef WETNESS_EFFECTS
-    output.diffuse.xyz *= lerp(1.0, 0.5, wetness);
 #endif
     output.diffuse.xyz /= 3.0;
     output.diffuse.w   = 0.0;

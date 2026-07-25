@@ -165,8 +165,31 @@ PS_OUTPUT main(PS_INPUT input)
         g_tGbufferMaterial.SampleLevel(g_sGbufferMaterial, uv, 0);
     bool hasIbl = material.y > 0.001961;
     float3 iblColor = float3(0.0, 0.0, 0.0);
+#ifdef WETNESS_EFFECTS
+    float3 wetFilmIblColor = float3(0.0, 0.0, 0.0);
+    float wetFilmRoughness = max(saturate(1.0 - wetness), 0.05);
+    float wetFilmSmoothness = 1.0 - wetFilmRoughness;
+    float2 encodedNormal =
+        g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
+    float encodedLengthSquared = dot(encodedNormal, encodedNormal);
+    float3 normalView = float3(
+        encodedNormal * sqrt(1.0 - encodedLengthSquared * 0.25),
+        -(1.0 - encodedLengthSquared * 0.5));
+    float3 wetFilmViewDirection =
+        -positionView * rsqrt(dot(positionView, positionView));
+    float wetFilmNdotV = dot(wetFilmViewDirection, normalView);
+    float oneMinusNdotV = 1.0 - saturate(wetFilmNdotV);
+    float oneMinusNdotVSquared = oneMinusNdotV * oneMinusNdotV;
+    float wetFilmFresnel =
+        0.02 +
+        0.98 * oneMinusNdotVSquared * oneMinusNdotVSquared *
+            oneMinusNdotV;
+    float wetnessStrength = saturate(1.0 - wetFilmRoughness);
+    float wetnessF = wetnessStrength * wetFilmFresnel;
+#endif
     if (hasIbl)
     {
+#ifndef WETNESS_EFFECTS
         float2 encodedNormal =
             g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy * 4.0 - 2.0;
         float encodedLengthSquared = dot(encodedNormal, encodedNormal);
@@ -175,8 +198,15 @@ PS_OUTPUT main(PS_INPUT input)
             -(1.0 - encodedLengthSquared * 0.5));
         float3 viewDirection =
             -positionView * rsqrt(dot(positionView, positionView));
+#endif
+#ifdef WETNESS_EFFECTS
+        float3 reflectionView =
+            wetFilmViewDirection -
+            normalView * (2.0 * dot(wetFilmViewDirection, normalView));
+#else
         float3 reflectionView =
             viewDirection - normalView * (2.0 * dot(viewDirection, normalView));
+#endif
         float3 reflectionWorld;
         reflectionWorld.x = dot(ViewToWorld_row0.xyz, reflectionView);
         reflectionWorld.y = dot(ViewToWorld_row1.xyz, reflectionView);
@@ -189,6 +219,20 @@ PS_OUTPUT main(PS_INPUT input)
         float luminance = dot(cubeSample, float3(0.299, 0.587, 0.114));
         iblColor = lerp(
             cubeSample, luminance.xxx, IblDesaturation.y * 0.9);
+#ifdef WETNESS_EFFECTS
+        float wetFilmMipLevel =
+            (1.0 - wetFilmSmoothness) * 6.0 + linearizedDepth * 0.001953;
+        float3 wetFilmCubeSample = g_tIblProbeCube.SampleLevel(
+            g_sIblProbeCube,
+            float4(reflectionWorld, arraySlice),
+            wetFilmMipLevel).xyz;
+        float wetFilmLuminance =
+            dot(wetFilmCubeSample, float3(0.299, 0.587, 0.114));
+        wetFilmIblColor = lerp(
+            wetFilmCubeSample,
+            wetFilmLuminance.xxx,
+            IblDesaturation.y * 0.9);
+#endif
     }
 
     float materialId = shadingData.z * 255.0;
@@ -257,11 +301,14 @@ PS_OUTPUT main(PS_INPUT input)
     float3 iblLitBlend = lerp(
         iblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
 #ifdef WETNESS_EFFECTS
-    ambientAccum *= lerp(1.0, 0.5, wetness);
-    float wetShine = lerp(1.0, 2.0, wetness);
+    // FO4 uses prefiltered IBL here because the deferred pass has no light or half vector.
+    float3 wetFilmIblLitBlend = lerp(
+        wetFilmIblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
     float3 modulated =
-        ambientAccum +
-        wetShine * (glossSquaredScaled * glossFactor * iblLitBlend * ambientPair);
+        (ambientAccum +
+         glossSquaredScaled * glossFactor * iblLitBlend * ambientPair) *
+            (1.0 - wetnessF) +
+        wetnessF * wetFilmIblLitBlend * ambientPair;
 #else
     float3 modulated =
         ambientAccum + glossSquaredScaled * glossFactor * iblLitBlend * ambientPair;
