@@ -476,7 +476,7 @@
       "comparison": "reconstructed-stock-vs-reconstructed-feature",
       "native_bytecode_used": false,
       "profile": "wetness-directional-lighting",
-      "measurement_protocol": "wetness-warp-v5",
+      "measurement_protocol": "wetness-warp-v6",
       "source": "shaders/lighting/bsdf_light_deferred.hlsl",
       "minimum_bucket_population": 4,
       "dimensions": {
@@ -600,7 +600,7 @@
               "new": "        specMag *= wetSpecMag;\n        specMag *= FO4_DIRECTIONAL_SPECULAR_SCALE;\n\n        brdfSpecular = NdotL_clamped * (specMag * SunColor_HDR.xyz);\n        brdfModulator = depthScale;\n    }\n\n#ifdef WETNESS_EFFECTS"
             },
             {
-              "old": "    float wetNdotL = clamp(\n        dot(wetFilmNormal, SunDirection_and_padding.xyz), 1.0e-5, 1.0);\n    float wetNdotV =\n        saturate(abs(dot(wetFilmNormal, viewDirNeg)) + 1.0e-5);\n    float wetNdotH = saturate(dot(wetFilmNormal, wetFilmHalf));\n    float wetVdotH = saturate(dot(viewDirNeg, wetFilmHalf));\n    float wetOneMinusVdotH = 1.0 - wetVdotH;\n    float wetOneMinusVdotH2 = wetOneMinusVdotH * wetOneMinusVdotH;\n    float wetFresnel =\n        0.02 +\n        0.98 * wetOneMinusVdotH2 * wetOneMinusVdotH2 *\n            wetOneMinusVdotH;\n    float wetnessF = wetFilmStrength * wetFresnel;\n\n    float wetA = wetFilmRoughness * wetFilmRoughness;\n    float wetA2 = wetA * wetA;\n    float wetDdenom = wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;\n    float wetD = wetA2 / (3.141593 * wetDdenom * wetDdenom);\n    float wetVisV =\n        wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);\n    float wetVisL =\n        wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);\n    float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);\n    float wetSpecMag = min(wetD * wetG * wetnessF, 15.0);\n    float3 wetFilmSpecular =\n        wetNdotL * wetSpecMag * SunColor_HDR.xyz *\n        FO4_DIRECTIONAL_SPECULAR_SCALE;\n#ifdef AMBIENT_IBL_IN_LIGHT\n    float wetAmbientNdotVRaw = dot(wetFilmNormal, viewDirNeg);\n    float wetAmbientOneMinusNdotV =\n        1.0 - saturate(wetAmbientNdotVRaw);\n    float wetAmbientOneMinusNdotV2 =\n        wetAmbientOneMinusNdotV * wetAmbientOneMinusNdotV;\n    float wetAmbientFresnel =\n        0.02 +\n        0.98 * wetAmbientOneMinusNdotV2 * wetAmbientOneMinusNdotV2 *\n            wetAmbientOneMinusNdotV;\n    float ambientWetnessF = wetFilmStrength * wetAmbientFresnel;\n    float3 wetAmbientReflection =\n        2.0 * wetAmbientNdotVRaw * wetFilmNormal - viewDirNeg;\n    float3 wetFilmAmbient =\n        EvaluateAmbientGradient(wetAmbientReflection);\n#endif",
+              "old": "    float wetNdotL = clamp(\n        dot(wetFilmNormal, SunDirection_and_padding.xyz), 1.0e-5, 1.0);\n    float wetNdotV =\n        saturate(abs(dot(wetFilmNormal, viewDirNeg)) + 1.0e-5);\n    float wetNdotH = saturate(dot(wetFilmNormal, wetFilmHalf));\n    float wetVdotH = saturate(dot(viewDirNeg, wetFilmHalf));\n    float wetOneMinusVdotH = 1.0 - wetVdotH;\n    float wetOneMinusVdotH2 = wetOneMinusVdotH * wetOneMinusVdotH;\n    float wetFresnel =\n        0.02 +\n        0.98 * wetOneMinusVdotH2 * wetOneMinusVdotH2 *\n            wetOneMinusVdotH;\n    float wetnessF = wetFilmStrength * wetFresnel;\n\n    float wetA = wetFilmRoughness * wetFilmRoughness;\n    float wetA2 = wetA * wetA;\n    float wetDdenom = wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;\n    float wetD = wetA2 / (3.141593 * wetDdenom * wetDdenom);\n    float wetVisV =\n        wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);\n    float wetVisL =\n        wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);\n    float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);\n    float wetSpecMag =\n        min(wetD * wetG * wetnessF * wetNdotL, 15.0);\n    float3 wetFilmSpecular =\n        wetNdotL * wetSpecMag * SunColor_HDR.xyz *\n        FO4_DIRECTIONAL_SPECULAR_SCALE;\n#ifdef AMBIENT_IBL_IN_LIGHT\n    float wetAmbientNdotVRaw = dot(wetFilmNormal, viewDirNeg);\n    float wetAmbientOneMinusNdotV =\n        1.0 - saturate(wetAmbientNdotVRaw);\n    float wetAmbientOneMinusNdotV2 =\n        wetAmbientOneMinusNdotV * wetAmbientOneMinusNdotV;\n    float wetAmbientFresnel =\n        0.02 +\n        0.98 * wetAmbientOneMinusNdotV2 * wetAmbientOneMinusNdotV2 *\n            wetAmbientOneMinusNdotV;\n    float ambientWetnessF = wetFilmStrength * wetAmbientFresnel;\n    float3 wetAmbientReflection =\n        2.0 * wetAmbientNdotVRaw * wetFilmNormal - viewDirNeg;\n    float3 wetFilmAmbient =\n        EvaluateAmbientGradient(wetAmbientReflection);\n#endif",
               "new": "    float wetnessF = 0.0;\n    float3 wetFilmSpecular = float3(0.0, 0.0, 0.0);\n#ifdef AMBIENT_IBL_IN_LIGHT\n    float ambientWetnessF = 0.0;\n    float3 wetFilmAmbient = float3(0.0, 0.0, 0.0);\n#endif"
             },
             {
@@ -638,6 +638,20 @@
             {
               "old": "#ifdef AMBIENT_IBL_IN_LIGHT\n    ambientDiffuse *= 1.0 - ambientWetnessF;\n#endif",
               "new": ""
+            }
+          ]
+        },
+        {
+          "id": "directional-wetness-missing-fo4-cosine",
+          "class": "historical-regression",
+          "expected_failed_property": "wet_lobe_commensurability",
+          "variants": [
+            "directional"
+          ],
+          "replacements": [
+            {
+              "old": "    float wetSpecMag =\n        min(wetD * wetG * wetnessF * wetNdotL, 15.0);",
+              "new": "    float wetSpecMag = min(wetD * wetG * wetnessF, 15.0);"
             }
           ]
         }

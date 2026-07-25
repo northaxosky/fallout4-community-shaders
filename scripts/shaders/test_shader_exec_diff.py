@@ -287,6 +287,25 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                     "violations": [],
                     "verdict": "PASS",
                 },
+                "wet_lobe_commensurability": {
+                    "claim": (
+                        "film and FO4 stock carry the same net NdotL order"
+                    ),
+                    "levels": [
+                        {
+                            "ndotl": ndotl,
+                            "before_film_to_stock_ratio": 1.0 / ndotl,
+                            "after_film_to_stock_ratio": 1.0,
+                            "proven_channels": 768,
+                            "corrected_lobe_mean": 0.01 * ndotl,
+                            "missing_cosine_lobe_mean": 0.01,
+                            "maximum_ratio_residual": 0.0,
+                        }
+                        for ndotl in (1.0, 0.1, 0.01)
+                    ],
+                    "violations": [],
+                    "verdict": "PASS",
+                },
                 "ambient_ibl_layering": {
                     "diffuse_formula": (
                         "Dwet=Dstock*(1-ambientWetnessF)"
@@ -411,6 +430,18 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                         "neutral_identity": "PASS",
                         "ambient_ibl_layering": "FAIL",
                         "maximum_untouched_residual": 0.0,
+                        "verdict": "CAUGHT",
+                    },
+                    {
+                        "id": feature["mutations"][3]["id"],
+                        "class": "historical-regression",
+                        "expected_failed_property": (
+                            "wet_lobe_commensurability"
+                        ),
+                        "variants": ["directional"],
+                        "neutral_identity": "PASS",
+                        "wet_lobe_commensurability": "FAIL",
+                        "maximum_ratio_residual": 0.0,
                         "verdict": "CAUGHT",
                     },
                     ],
@@ -976,9 +1007,9 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
 
     def test_contract_schema_and_predicates(self):
         subject.validate_contracts(self.contracts)
-        self.assertEqual(5, subject.FEATURE_PROTOCOL_VERSION)
+        self.assertEqual(6, subject.FEATURE_PROTOCOL_VERSION)
         self.assertEqual(
-            "wetness-warp-v5",
+            "wetness-warp-v6",
             self.contracts["additive_features"]["wetness-effects"][
                 "measurement_protocol"
             ],
@@ -1093,6 +1124,7 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
                 "directional-wetness-old-substrate-floors-output-multiply",
                 "directional-wetness-historical-pi-065-derating",
                 "directional-wetness-ambient-ibl-untouched",
+                "directional-wetness-missing-fo4-cosine",
             ],
             [item["id"] for item in feature["mutations"]],
         )
@@ -1107,6 +1139,9 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
             3, source.count("FO4_DIRECTIONAL_SPECULAR_SCALE")
         )
         self.assertNotIn("FO4_DIRECTIONAL_SPECULAR_SCALE * 0.65", source)
+        self.assertIn(
+            "wetD * wetG * wetnessF * wetNdotL", source
+        )
         self.assertEqual(
             ["adversarial", "native"],
             [item["id"] for item in feature["fixtures"]],
@@ -1547,6 +1582,48 @@ class ShaderExecDiffUnitTests(unittest.TestCase):
         self.assertTrue(
             subject.validate_feature_measurement(
                 scale_zero,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        cosine_ratio_tampered = self.feature_measurement("adversarial")
+        cosine_ratio_tampered["properties"]["wet_lobe_commensurability"][
+            "levels"
+        ][1]["after_film_to_stock_ratio"] = 10.0
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                cosine_ratio_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        cosine_coverage_tampered = self.feature_measurement("adversarial")
+        cosine_coverage_tampered["properties"][
+            "wet_lobe_commensurability"
+        ]["levels"][1]["proven_channels"] = 1
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                cosine_coverage_tampered,
+                "adversarial",
+                feature,
+                16,
+                16,
+                self.harness_source_sha256,
+            )
+        )
+        cosine_mutant_missed = self.feature_measurement("adversarial")
+        cosine_mutant_missed["properties"]["mutation_sensitivity"]["mutants"][
+            3
+        ]["wet_lobe_commensurability"] = "PASS"
+        self.assertTrue(
+            subject.validate_feature_measurement(
+                cosine_mutant_missed,
                 "adversarial",
                 feature,
                 16,

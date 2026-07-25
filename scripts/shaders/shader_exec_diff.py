@@ -42,7 +42,7 @@ HARNESS_SOURCE = os.path.join(
 )
 MANIFEST_FILENAME = "shader-exec-diff-run.json"
 FEATURE_MANIFEST_FILENAME = "wetness-effects-warp-run.json"
-FEATURE_PROTOCOL_VERSION = 5
+FEATURE_PROTOCOL_VERSION = 6
 COMPILE_FLAGS = ("/nologo", "/T", "ps_5_0", "/O3", "/E", "main")
 FIXTURE_ORDER = ("adversarial", "native")
 VERDICTS = ("PASS", "FAIL", "UNPROVEN", "STALE")
@@ -419,7 +419,7 @@ def validate_additive_features(features: Any) -> None:
         != "reconstructed-stock-vs-reconstructed-feature"
         or feature.get("native_bytecode_used") is not False
         or feature.get("profile") != "wetness-directional-lighting"
-        or feature.get("measurement_protocol") != "wetness-warp-v5"
+        or feature.get("measurement_protocol") != "wetness-warp-v6"
         or feature.get("source")
         != "shaders/lighting/bsdf_light_deferred.hlsl"
     ):
@@ -523,7 +523,7 @@ def validate_additive_features(features: Any) -> None:
             "historical-regression",
             "directional_layering",
             ["directional", "directional-ibl"],
-            "7f9ff7c84aaf44d072d5eb6f9933a76a0b3de38eb09e81e82cf75b849a9303c6",
+            "3d08c999b7f6d9284bcd9e196c4a712b084f2003701baab759efe947db2b85ab",
         ),
         (
             "directional-wetness-historical-pi-065-derating",
@@ -539,8 +539,15 @@ def validate_additive_features(features: Any) -> None:
             ["directional-ibl"],
             "060d5d39e0ba948a12af6aea06c1db13484e90432578feedc795f624c30966d8",
         ),
+        (
+            "directional-wetness-missing-fo4-cosine",
+            "historical-regression",
+            "wet_lobe_commensurability",
+            ["directional"],
+            "79a4c3751a0c9db522c37bfd95154ff67bbb027187d88bf347d9a2250c2c61b8",
+        ),
     ]
-    if not isinstance(mutations, list) or len(mutations) != 3:
+    if not isinstance(mutations, list) or len(mutations) != 4:
         raise StableFailure("feature_contracts_schema", "mutations")
     for mutation, expected in zip(mutations, expected_mutations):
         if (
@@ -2957,6 +2964,64 @@ def validate_feature_measurement(
                     ):
                         fail("ambient_ibl_layering:film_consistency")
 
+        commensurability = properties.get(
+            "wet_lobe_commensurability"
+        )
+        cosine_levels = (
+            commensurability.get("levels")
+            if isinstance(commensurability, dict)
+            else None
+        )
+        expected_ndotl = [1.0, 0.1, 0.01]
+        if (
+            not isinstance(commensurability, dict)
+            or commensurability.get("claim")
+            != "film and FO4 stock carry the same net NdotL order"
+            or not isinstance(cosine_levels, list)
+            or len(cosine_levels) != len(expected_ndotl)
+            or commensurability.get("violations") != []
+            or commensurability.get("verdict") != "PASS"
+        ):
+            fail("property:wet_lobe_commensurability")
+        elif isinstance(cosine_levels, list):
+            for index, level in enumerate(cosine_levels):
+                ndotl = expected_ndotl[index]
+                if (
+                    not isinstance(level, dict)
+                    or not close(level.get("ndotl"), ndotl, 1.0e-8)
+                    or not close(
+                        level.get("before_film_to_stock_ratio"),
+                        1.0 / ndotl,
+                        1.0e-8,
+                    )
+                    or not close(
+                        level.get("after_film_to_stock_ratio"),
+                        1.0,
+                        1.0e-8,
+                    )
+                    or not isinstance(
+                        level.get("proven_channels"), int
+                    )
+                    or level["proven_channels"] != width * height * 3
+                    or not number(level.get("corrected_lobe_mean"))
+                    or level["corrected_lobe_mean"] <= 0
+                    or not number(
+                        level.get("missing_cosine_lobe_mean")
+                    )
+                    or level["missing_cosine_lobe_mean"] <= 0
+                    or not close(
+                        level["corrected_lobe_mean"] /
+                        level["missing_cosine_lobe_mean"],
+                        ndotl,
+                        1.0e-3,
+                    )
+                    or not number(
+                        level.get("maximum_ratio_residual")
+                    )
+                    or level["maximum_ratio_residual"] > 1.0e-3
+                ):
+                    fail("wet_lobe_commensurability:level")
+
         def validate_levels(
             levels: Any,
             energy_name: str,
@@ -3094,17 +3159,22 @@ def validate_feature_measurement(
         )
         old_mutant = (
             mutants[0]
-            if isinstance(mutants, list) and len(mutants) == 3
+            if isinstance(mutants, list) and len(mutants) == 4
             else None
         )
         pi_mutant = (
             mutants[1]
-            if isinstance(mutants, list) and len(mutants) == 3
+            if isinstance(mutants, list) and len(mutants) == 4
             else None
         )
         ambient_mutant = (
             mutants[2]
-            if isinstance(mutants, list) and len(mutants) == 3
+            if isinstance(mutants, list) and len(mutants) == 4
+            else None
+        )
+        missing_cosine_mutant = (
+            mutants[3]
+            if isinstance(mutants, list) and len(mutants) == 4
             else None
         )
         mutation_diffuse = (
@@ -3125,7 +3195,7 @@ def validate_feature_measurement(
         if (
             not isinstance(mutation, dict)
             or not isinstance(mutants, list)
-            or len(mutants) != 3
+            or len(mutants) != 4
             or mutation.get("verdict") != "CAUGHT"
             or not isinstance(old_mutant, dict)
             or old_mutant.get("id")
@@ -3175,6 +3245,21 @@ def validate_feature_measurement(
             )
             or ambient_mutant["maximum_untouched_residual"] > 1.0e-5
             or ambient_mutant.get("verdict") != "CAUGHT"
+            or not isinstance(missing_cosine_mutant, dict)
+            or missing_cosine_mutant.get("id")
+            != feature_contract["mutations"][3]["id"]
+            or missing_cosine_mutant.get("expected_failed_property")
+            != "wet_lobe_commensurability"
+            or missing_cosine_mutant.get("neutral_identity") != "PASS"
+            or missing_cosine_mutant.get(
+                "wet_lobe_commensurability"
+            )
+            != "FAIL"
+            or not number(
+                missing_cosine_mutant.get("maximum_ratio_residual")
+            )
+            or missing_cosine_mutant["maximum_ratio_residual"] > 1.0e-3
+            or missing_cosine_mutant.get("verdict") != "CAUGHT"
         ):
             fail("property:mutation_sensitivity")
 
@@ -3595,6 +3680,10 @@ def _run_feature_harness(
         "--ambient-untouched-mutant-ibl",
         artifacts["directional-ibl"]["mutants"][
             "directional-wetness-ambient-ibl-untouched"
+        ],
+        "--missing-cosine-mutant",
+        artifacts["directional"]["mutants"][
+            "directional-wetness-missing-fo4-cosine"
         ],
         "--fixture",
         fixture,
@@ -4315,6 +4404,7 @@ def run_additive_feature(
             "active_locality",
             "magnitude",
             "wet_lobe_scale",
+            "wet_lobe_commensurability",
             "ambient_ibl_layering",
             "matte_sheen",
             "no_ibl_film",
@@ -4323,6 +4413,7 @@ def run_additive_feature(
         )
         directional_properties = {
             "wet_lobe_scale",
+            "wet_lobe_commensurability",
             "ambient_ibl_layering",
         }
         ambient_properties = {
@@ -4708,7 +4799,7 @@ def _feature_driver_failure_report(
                         ("fixture", fixture),
                         ("width", args.width),
                         ("height", args.height),
-                        ("measurement_protocol", "wetness-warp-v5"),
+                        ("measurement_protocol", "wetness-warp-v6"),
                         ("wetness_format", wetness_format),
                         ("failures", [failure]),
                         ("verdict", "UNPROVEN"),

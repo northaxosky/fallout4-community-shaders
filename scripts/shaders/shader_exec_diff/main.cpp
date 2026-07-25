@@ -90,6 +90,7 @@ struct Options
     std::string mutantIblPath;
     std::string piDeratingMutantPath;
     std::string ambientUntouchedMutantIblPath;
+    std::string missingCosineMutantPath;
 };
 
 struct ConstantBufferBinding
@@ -2179,7 +2180,22 @@ void ShapeDirectionalLightingConstants(
         ScenarioControl(scenario, "directional_light", 1.0f);
     const float brdfScenario =
         ScenarioControl(scenario, "directional_brdf", 0.0f);
-    SetVector(values, 1, brdfScenario == 1.0f
+    const float cosineProbe =
+        ScenarioControl(scenario, "directional_cosine_ndotl", -1.0f);
+    if (cosineProbe >= 0.0f)
+    {
+        const float tangentScale =
+            std::sqrt(std::max(0.0f, 1.0f - cosineProbe * cosineProbe));
+        SetVector(values, 1, {
+            0.6f * cosineProbe + 0.8f * tangentScale,
+            0.0f,
+            0.8f * cosineProbe - 0.6f * tangentScale,
+            0.0f,
+        });
+    }
+    else
+    {
+        SetVector(values, 1, brdfScenario == 1.0f
         ? std::array<float, 4>{0.0f, 0.0f, -1.0f, 0.0f}
         : (brdfScenario == 2.0f
             ? std::array<float, 4>{0.9797959f, 0.0f, -0.2f, 0.0f}
@@ -2188,6 +2204,7 @@ void ShapeDirectionalLightingConstants(
                 : (lightFacing < -0.5f
                     ? std::array<float, 4>{-0.6f, 0.0f, -0.8f, 0.0f}
                     : std::array<float, 4>{0.0f, 1.0f, 0.0f, 0.0f}))));
+    }
     SetVector(values, 2, {
         std::abs(values[8]) + 0.5f,
         std::abs(values[9]) + 0.5f,
@@ -5635,6 +5652,23 @@ struct WetLobeScaleEvidence
     std::vector<std::string> violations;
 };
 
+struct WetLobeCommensurabilityLevel
+{
+    double ndotl = 0.0;
+    double beforeFilmToStockRatio = 0.0;
+    double afterFilmToStockRatio = 0.0;
+    std::uint64_t provenChannels = 0;
+    double correctedLobeMean = 0.0;
+    double missingCosineLobeMean = 0.0;
+    double maximumRatioResidual = 0.0;
+};
+
+struct WetLobeCommensurabilityEvidence
+{
+    std::vector<WetLobeCommensurabilityLevel> levels;
+    std::vector<std::string> violations;
+};
+
 struct DirectionalAmbientIblLevel
 {
     float requested = 0.0f;
@@ -6181,13 +6215,16 @@ void WriteWetnessMeasurement(
     const DeltaDistribution& mutationSpecularDelta,
     double mutationDiffuseScaleResidual,
     const WetLobeScaleEvidence& wetLobeScale,
+    const WetLobeCommensurabilityEvidence& wetLobeCommensurability,
     const DirectionalAmbientIblEvidence& ambientIblLayering,
     bool mutationNeutralIdentity,
     bool mutationDirectionalLayeringFailed,
     bool piDeratingMutationNeutralIdentity,
     bool piDeratingMutationCaught,
     bool ambientUntouchedMutationNeutralIdentity,
-    bool ambientUntouchedMutationCaught)
+    bool ambientUntouchedMutationCaught,
+    bool missingCosineMutationNeutralIdentity,
+    bool missingCosineMutationCaught)
 {
     if (options.measurementJsonPath.empty())
         return;
@@ -6207,12 +6244,15 @@ void WriteWetnessMeasurement(
         mutationObservedProperties ==
             std::vector<std::string>{"directional_layering"};
     const bool wetLobeScalePassed = wetLobeScale.violations.empty();
+    const bool wetLobeCommensurabilityPassed =
+        wetLobeCommensurability.violations.empty();
     const bool ambientIblLayeringPassed =
         ambientIblLayering.violations.empty();
     const bool mutationCaught =
         oldMutationCaught &&
         piDeratingMutationCaught &&
-        ambientUntouchedMutationCaught;
+        ambientUntouchedMutationCaught &&
+        missingCosineMutationCaught;
     double ambientUntouchedResidual = 0.0;
     for (const DirectionalAmbientIblLevel& level :
          ambientIblLayering.levels)
@@ -6224,6 +6264,7 @@ void WriteWetnessMeasurement(
     const bool passed =
         neutralPassed && localityPassed && magnitudePassed &&
         monotonicPassed && wetLobeScalePassed &&
+        wetLobeCommensurabilityPassed &&
         ambientIblLayeringPassed && mutationCaught;
     std::sort(formats.begin(), formats.end());
     formats.erase(std::unique(
@@ -6250,7 +6291,7 @@ void WriteWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v5\""
+           << ",\"measurement_protocol\":\"wetness-warp-v6\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6348,6 +6389,33 @@ void WriteWetnessMeasurement(
     WriteStringArray(stream, wetLobeScale.violations);
     stream << ",\"verdict\":\""
            << (wetLobeScalePassed ? "PASS" : "FAIL")
+           << "\"},\"wet_lobe_commensurability\":{"
+           << "\"claim\":\"film and FO4 stock carry the same net NdotL order\","
+           << "\"levels\":[";
+    for (std::size_t index = 0;
+         index < wetLobeCommensurability.levels.size(); ++index)
+    {
+        if (index != 0)
+            stream << ",";
+        const WetLobeCommensurabilityLevel& level =
+            wetLobeCommensurability.levels[index];
+        stream << "{\"ndotl\":" << std::setprecision(17)
+               << level.ndotl << ",\"before_film_to_stock_ratio\":"
+               << level.beforeFilmToStockRatio
+               << ",\"after_film_to_stock_ratio\":"
+               << level.afterFilmToStockRatio
+               << ",\"proven_channels\":" << level.provenChannels
+               << ",\"corrected_lobe_mean\":"
+               << level.correctedLobeMean
+               << ",\"missing_cosine_lobe_mean\":"
+               << level.missingCosineLobeMean
+               << ",\"maximum_ratio_residual\":"
+               << level.maximumRatioResidual << "}";
+    }
+    stream << "],\"violations\":";
+    WriteStringArray(stream, wetLobeCommensurability.violations);
+    stream << ",\"verdict\":\""
+           << (wetLobeCommensurabilityPassed ? "PASS" : "FAIL")
            << "\"},\"ambient_ibl_layering\":{"
            << "\"diffuse_formula\":\"Dwet=Dstock*(1-ambientWetnessF)\","
            << "\"specular_formula\":\"Swet=Sstock*(1-ambientWetnessF)+film*ambientWetnessF\","
@@ -6478,6 +6546,26 @@ void WriteWetnessMeasurement(
            << "\",\"maximum_untouched_residual\":"
            << ambientUntouchedResidual << ",\"verdict\":\""
            << (ambientUntouchedMutationCaught ? "CAUGHT" : "MISSED")
+           << "\"},{\"id\":\"directional-wetness-missing-fo4-cosine\","
+           << "\"class\":\"historical-regression\","
+           << "\"expected_failed_property\":\"wet_lobe_commensurability\","
+           << "\"variants\":[\"directional\"],\"neutral_identity\":\""
+           << (missingCosineMutationNeutralIdentity ? "PASS" : "FAIL")
+           << "\",\"wet_lobe_commensurability\":\""
+           << (missingCosineMutationCaught ? "FAIL" : "PASS")
+           << "\",\"maximum_ratio_residual\":"
+           << (wetLobeCommensurability.levels.empty()
+                   ? 0.0
+                   : std::max_element(
+                         wetLobeCommensurability.levels.begin(),
+                         wetLobeCommensurability.levels.end(),
+                         [](const WetLobeCommensurabilityLevel& left,
+                            const WetLobeCommensurabilityLevel& right) {
+                             return left.maximumRatioResidual <
+                                 right.maximumRatioResidual;
+                         })->maximumRatioResidual)
+           << ",\"verdict\":\""
+           << (missingCosineMutationCaught ? "CAUGHT" : "MISSED")
            << "\"}],\"verdict\":\""
            << (mutationCaught ? "CAUGHT" : "MISSED")
            << "\"}},\"cross_buckets\":[";
@@ -6590,7 +6678,7 @@ void WriteAmbientWetnessMeasurement(
            << ",\"execution_environment\":{\"driver_type\":\"WARP\","
            << "\"feature_level\":\"11_0\",\"native_bytecode_used\":false,"
            << "\"limitation\":\"additive feature evidence; not game or native-bytecode parity\"}"
-           << ",\"measurement_protocol\":\"wetness-warp-v5\""
+           << ",\"measurement_protocol\":\"wetness-warp-v6\""
            << ",\"wetness_format\":\""
            << (options.fixture == Fixture::Native ? "R8_UNORM" : "R32_FLOAT")
            << "\",\"measurement_format\":\"R32G32B32A32_FLOAT\""
@@ -6930,7 +7018,8 @@ int RunWetnessFeature(
     const std::vector<std::uint8_t>& mutantBytecode,
     const std::vector<std::uint8_t>& mutantIblBytecode,
     const std::vector<std::uint8_t>& piDeratingMutantBytecode,
-    const std::vector<std::uint8_t>& ambientUntouchedMutantIblBytecode)
+    const std::vector<std::uint8_t>& ambientUntouchedMutantIblBytecode,
+    const std::vector<std::uint8_t>& missingCosineMutantBytecode)
 {
     if (options.width < 16 || options.height < 16)
         ThrowFailure("wetness_feature: dimensions must be at least 16x16");
@@ -6945,6 +7034,8 @@ int RunWetnessFeature(
         ReflectShader(piDeratingMutantBytecode);
     ShaderContract ambientUntouchedMutantIblContract =
         ReflectShader(ambientUntouchedMutantIblBytecode);
+    ShaderContract missingCosineMutantContract =
+        ReflectShader(missingCosineMutantBytecode);
     const DisassemblyInfo stockDisassembly =
         InspectDisassembly(stockBytecode);
     const DisassemblyInfo featureDisassembly =
@@ -6961,6 +7052,8 @@ int RunWetnessFeature(
         InspectDisassembly(piDeratingMutantBytecode);
     const DisassemblyInfo ambientUntouchedMutantIblDisassembly =
         InspectDisassembly(ambientUntouchedMutantIblBytecode);
+    const DisassemblyInfo missingCosineMutantDisassembly =
+        InspectDisassembly(missingCosineMutantBytecode);
     ApplyDisassemblyContract(stockContract, stockDisassembly);
     ApplyDisassemblyContract(featureContract, featureDisassembly);
     ApplyDisassemblyContract(stockIblContract, stockIblDisassembly);
@@ -6972,6 +7065,8 @@ int RunWetnessFeature(
     ApplyDisassemblyContract(
         ambientUntouchedMutantIblContract,
         ambientUntouchedMutantIblDisassembly);
+    ApplyDisassemblyContract(
+        missingCosineMutantContract, missingCosineMutantDisassembly);
     try
     {
         WarnContractDifferences(
@@ -7002,6 +7097,9 @@ int RunWetnessFeature(
     ValidateWetnessFeatureContract(
         stockIblContract, ambientUntouchedMutantIblContract,
         stockIblDisassembly, ambientUntouchedMutantIblDisassembly, 4, false);
+    ValidateWetnessFeatureContract(
+        stockContract, missingCosineMutantContract,
+        stockDisassembly, missingCosineMutantDisassembly, 4, false);
     if (DetectInputProfile(stockContract, stockDisassembly) !=
             InputProfile::DirectionalLighting ||
         DetectInputProfile(stockIblContract, stockIblDisassembly) !=
@@ -7051,6 +7149,10 @@ int RunWetnessFeature(
         createPixelShader(
             ambientUntouchedMutantIblBytecode,
             "wetness ambient IBL untouched mutant");
+    const ComPtr<ID3D11PixelShader> missingCosineMutantShader =
+        createPixelShader(
+            missingCosineMutantBytecode,
+            "wetness missing FO4 cosine mutant");
     const ComPtr<ID3D11VertexShader> vertexShader =
         CreatePassthroughVertexShader(
             device.Get(), stockContract, InputProfile::DirectionalLighting,
@@ -7196,11 +7298,14 @@ int RunWetnessFeature(
     DeltaDistribution mutationSpecularDelta;
     double mutationDiffuseScaleResidual = 0.0;
     WetLobeScaleEvidence wetLobeScale;
+    WetLobeCommensurabilityEvidence wetLobeCommensurability;
     DirectionalAmbientIblEvidence ambientIblLayering;
     bool piDeratingMutationNeutralIdentity = true;
     bool ambientUntouchedMutationNeutralIdentity = true;
+    bool missingCosineMutationNeutralIdentity = true;
     bool piDeratingMutationCaught = false;
     bool ambientUntouchedMutationCaught = false;
+    bool missingCosineMutationCaught = false;
 
     const auto render = [&](ID3D11PixelShader* shader,
                             const SeedResources& resources,
@@ -7688,6 +7793,115 @@ int RunWetnessFeature(
         diffuseSeries.push_back(std::move(activeIblSeries));
     }
 
+    static constexpr std::array<double, 3> CosineProbeNdotL{
+        1.0, 0.1, 0.01};
+    for (std::size_t probeIndex = 0;
+         probeIndex < CosineProbeNdotL.size(); ++probeIndex)
+    {
+        const double ndotl = CosineProbeNdotL[probeIndex];
+        InputScenario scenario;
+        scenario.id = static_cast<UINT>(100 + probeIndex);
+        scenario.randomSeed =
+            options.seedBase + 0x434F5300u +
+            static_cast<UINT>(probeIndex);
+        scenario.dedicated = true;
+        scenario.semanticId =
+            "wetness-cosine-" + std::to_string(probeIndex);
+        scenario.controls = {
+            {"directional_depth", 1.0f},
+            {"directional_cascade", 2.0f},
+            {"directional_fade", 0.0f},
+            {"directional_light", 1.0f},
+            {"directional_brdf", 0.0f},
+            {"directional_skin", 0.0f},
+            {"directional_roughness", 0.85f},
+            {"directional_specular", 0.03f},
+            {"directional_cosine_ndotl", static_cast<float>(ndotl)},
+            {"wetness_probe", 1.0f},
+        };
+        const SeedResources resources = CreateSeedResources(
+            device.Get(), context.Get(), stockContract, stockDisassembly,
+            InputProfile::DirectionalLighting, options.fixture, scenario,
+            options.width, options.height, true, inputHash);
+        formats.insert(
+            formats.end(), resources.formats.begin(), resources.formats.end());
+        const RenderOutputs stockNeutral =
+            render(stockShader.Get(), resources, neutralMask);
+        const RenderOutputs missingNeutral =
+            render(missingCosineMutantShader.Get(), resources, neutralMask);
+        missingCosineMutationNeutralIdentity =
+            missingCosineMutationNeutralIdentity &&
+            OutputsExact(stockNeutral, missingNeutral);
+        const WetnessMaskResource& fullMask = findMask("level-4");
+        const RenderOutputs stockFull =
+            render(stockShader.Get(), resources, fullMask);
+        const RenderOutputs featureFull =
+            render(featureShader.Get(), resources, fullMask);
+        const RenderOutputs missingFull =
+            render(missingCosineMutantShader.Get(), resources, fullMask);
+        WetLobeCommensurabilityLevel level;
+        level.ndotl = ndotl;
+        level.beforeFilmToStockRatio = 1.0 / ndotl;
+        level.afterFilmToStockRatio = 1.0;
+        for (std::size_t pixel = 0; pixel < pixelCount; ++pixel)
+        {
+            for (UINT channel = 0; channel < 3; ++channel)
+            {
+                const double stockDiffuse =
+                    stockFull[0][pixel][channel];
+                if (std::abs(stockDiffuse) <= 1.0e-8)
+                    continue;
+                const double attenuation =
+                    static_cast<double>(
+                        featureFull[0][pixel][channel]) /
+                    stockDiffuse;
+                const double attenuatedStockSpecular =
+                    attenuation *
+                    static_cast<double>(
+                        stockFull[1][pixel][channel]);
+                const double correctedLobe =
+                    static_cast<double>(
+                        featureFull[1][pixel][channel]) -
+                    attenuatedStockSpecular;
+                const double missingLobe =
+                    static_cast<double>(
+                        missingFull[1][pixel][channel]) -
+                    attenuatedStockSpecular;
+                if (correctedLobe <= 1.0e-10 ||
+                    missingLobe <= 1.0e-10)
+                {
+                    continue;
+                }
+                const double residual =
+                    std::abs(
+                        correctedLobe / missingLobe - ndotl);
+                level.maximumRatioResidual =
+                    std::max(level.maximumRatioResidual, residual);
+                level.correctedLobeMean += correctedLobe;
+                level.missingCosineLobeMean += missingLobe;
+                ++level.provenChannels;
+            }
+        }
+        if (level.provenChannels != pixelCount * 3)
+        {
+            wetLobeCommensurability.violations.push_back(
+                "ndotl-" + std::to_string(probeIndex) +
+                ":channel-coverage");
+        }
+        if (level.provenChannels != 0)
+        {
+            level.correctedLobeMean /= level.provenChannels;
+            level.missingCosineLobeMean /= level.provenChannels;
+        }
+        if (level.maximumRatioResidual > 1.0e-3)
+        {
+            wetLobeCommensurability.violations.push_back(
+                "ndotl-" + std::to_string(probeIndex) +
+                ":gpu-ratio");
+        }
+        wetLobeCommensurability.levels.push_back(level);
+    }
+
     if (wetLobeScale.provenChannels == 0)
     {
         wetLobeScale.violations.push_back("no-proven-channels");
@@ -7711,6 +7925,35 @@ int RunWetnessFeature(
     piDeratingMutationCaught =
         piDeratingMutationNeutralIdentity &&
         wetLobeScale.violations.empty();
+
+    if (wetLobeCommensurability.levels.size() !=
+        CosineProbeNdotL.size())
+    {
+        wetLobeCommensurability.violations.push_back("level-count");
+    }
+    for (const WetLobeCommensurabilityLevel& level :
+         wetLobeCommensurability.levels)
+    {
+        if (std::abs(level.afterFilmToStockRatio - 1.0) > 1.0e-12)
+            wetLobeCommensurability.violations.push_back("after-ratio");
+        if (std::abs(
+                level.beforeFilmToStockRatio * level.ndotl - 1.0) >
+            1.0e-12)
+        {
+            wetLobeCommensurability.violations.push_back("before-ratio");
+        }
+    }
+    std::sort(
+        wetLobeCommensurability.violations.begin(),
+        wetLobeCommensurability.violations.end());
+    wetLobeCommensurability.violations.erase(
+        std::unique(
+            wetLobeCommensurability.violations.begin(),
+            wetLobeCommensurability.violations.end()),
+        wetLobeCommensurability.violations.end());
+    missingCosineMutationCaught =
+        missingCosineMutationNeutralIdentity &&
+        wetLobeCommensurability.violations.empty();
 
     if (ambientIblLayering.levels.size() != RequestedLevels.size())
         ambientIblLayering.violations.push_back("level-count");
@@ -7826,12 +8069,15 @@ int RunWetnessFeature(
         iblSpecularViolations, mutationObservedProperties,
         mutationDiffuseDelta, mutationSpecularDelta,
         mutationDiffuseScaleResidual, wetLobeScale,
-        ambientIblLayering, mutationNeutralIdentity,
+        wetLobeCommensurability, ambientIblLayering,
+        mutationNeutralIdentity,
         mutationDirectionalLayeringFailed,
         piDeratingMutationNeutralIdentity,
         piDeratingMutationCaught,
         ambientUntouchedMutationNeutralIdentity,
-        ambientUntouchedMutationCaught);
+        ambientUntouchedMutationCaught,
+        missingCosineMutationNeutralIdentity,
+        missingCosineMutationCaught);
 
     const bool diffuseMonotonic = std::all_of(
         diffuseSeries.begin(), diffuseSeries.end(),
@@ -7845,7 +8091,8 @@ int RunWetnessFeature(
     const bool mutationCaught =
         oldMutationCaught &&
         piDeratingMutationCaught &&
-        ambientUntouchedMutationCaught;
+        ambientUntouchedMutationCaught &&
+        missingCosineMutationCaught;
     const bool passed =
         neutralViolations.empty() &&
         localityViolations.empty() &&
@@ -7853,6 +8100,7 @@ int RunWetnessFeature(
         diffuseMonotonic &&
         iblSpecularViolations == 0 &&
         wetLobeScale.violations.empty() &&
+        wetLobeCommensurability.violations.empty() &&
         ambientIblLayering.violations.empty() &&
         mutationCaught;
     std::cout << (passed ? "PASS" : "FAIL") << "\n"
@@ -7875,6 +8123,10 @@ int RunWetnessFeature(
                   ? "PASS" : "FAIL") << "\n"
               << "  wet lobe scale: "
               << (wetLobeScale.violations.empty() ? "PASS" : "FAIL")
+              << "\n"
+              << "  wet lobe commensurability: "
+              << (wetLobeCommensurability.violations.empty()
+                      ? "PASS" : "FAIL")
               << "\n"
               << "  ambient IBL layering: "
               << (ambientIblLayering.violations.empty() ? "PASS" : "FAIL")
@@ -9704,7 +9956,8 @@ Options ParseOptions(int argumentCount, char** arguments)
             "--stock-ibl PATH --feature-ibl PATH "
             "--mutant PATH --mutant-ibl PATH "
             "--pi-derating-mutant PATH "
-            "--ambient-untouched-mutant-ibl PATH]");
+            "--ambient-untouched-mutant-ibl PATH "
+            "--missing-cosine-mutant PATH]");
     }
 
     Options options;
@@ -9787,6 +10040,8 @@ Options ParseOptions(int argumentCount, char** arguments)
             options.piDeratingMutantPath = value;
         else if (option == "--ambient-untouched-mutant-ibl")
             options.ambientUntouchedMutantIblPath = value;
+        else if (option == "--missing-cosine-mutant")
+            options.missingCosineMutantPath = value;
         else
             ThrowFailure("unknown option: " + option);
     }
@@ -9820,7 +10075,8 @@ int Run(const Options& options)
             options.mutantPath.empty() ||
             options.mutantIblPath.empty() ||
             options.piDeratingMutantPath.empty() ||
-            options.ambientUntouchedMutantIblPath.empty())
+            options.ambientUntouchedMutantIblPath.empty() ||
+            options.missingCosineMutantPath.empty())
         {
             ThrowFailure(
                 "wetness_feature: all stock, feature, and mutant variants required");
@@ -9832,7 +10088,8 @@ int Run(const Options& options)
             ReadFile(options.mutantPath),
             ReadFile(options.mutantIblPath),
             ReadFile(options.piDeratingMutantPath),
-            ReadFile(options.ambientUntouchedMutantIblPath));
+            ReadFile(options.ambientUntouchedMutantIblPath),
+            ReadFile(options.missingCosineMutantPath));
     }
 
     if (options.xegtaoAo)
@@ -10060,7 +10317,7 @@ void WriteFailureReport(
                << "\"fixture\":\"" << FixtureName(options.fixture) << "\","
                << "\"width\":" << options.width
                << ",\"height\":" << options.height << ","
-               << "\"measurement_protocol\":\"wetness-warp-v5\","
+               << "\"measurement_protocol\":\"wetness-warp-v6\","
                << "\"wetness_format\":\""
                << (options.fixture == Fixture::Native
                    ? "R8_UNORM" : "R32_FLOAT") << "\","

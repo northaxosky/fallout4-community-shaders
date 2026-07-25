@@ -585,7 +585,8 @@ PS_OUTPUT main(PS_INPUT input)
     float wetVisL =
         wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);
     float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);
-    float wetSpecMag = min(wetD * wetG * wetnessF, 15.0);
+    float wetSpecMag =
+        min(wetD * wetG * wetnessF * wetNdotL, 15.0);
     float3 wetFilmSpecular =
         wetNdotL * wetSpecMag * SunColor_HDR.xyz *
         FO4_DIRECTIONAL_SPECULAR_SCALE;
