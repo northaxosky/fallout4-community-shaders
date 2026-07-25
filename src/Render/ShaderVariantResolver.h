@@ -10,11 +10,20 @@ namespace cs::engine
 {
 	namespace shader_variants
 	{
-		inline constexpr ShaderVariantKey kBsdfCompositeAmbientIbl{ 0xB60 };
-		inline constexpr ShaderVariantKey kBsdfCompositeAmbientIblTilelight{ 0x10B60 };
+		inline constexpr ShaderVariantKeyView kBsdfCompositeAmbientIbl{
+			"BSDFCompositeShader",
+			ShaderStage::kPixel,
+			ShaderVariantId{ 0xB60 }
+		};
+		inline constexpr ShaderVariantKeyView
+			kBsdfCompositeAmbientIblTilelight{
+				"BSDFCompositeShader",
+				ShaderStage::kPixel,
+				ShaderVariantId{ 0x10B60 }
+			};
 	}
 
-	std::optional<PixelShaderVariantView> ResolvePixelShaderVariant(
+	std::optional<ShaderVariantKeyView> ResolvePixelShaderVariant(
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits,
 		std::optional<bool> a_tileLightingEnabled) noexcept;

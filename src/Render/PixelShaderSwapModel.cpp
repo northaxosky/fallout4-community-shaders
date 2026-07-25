@@ -16,21 +16,19 @@ namespace cs::engine
 
 	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
 		std::span<const PixelShaderSwapVariantKey> a_variants,
-		std::optional<PixelShaderVariantView> a_variant,
+		std::optional<ShaderVariantKeyView> a_variant,
 		const sha1::Sha1Result& a_stockSha1) noexcept
 	{
 		if (a_variant) {
 			for (std::size_t i = 0; i < a_variants.size(); ++i) {
 				const auto& variant = a_variants[i];
 				if (!variant.variant
-					|| variant.variant->subclass
-						!= a_variant->subclass) {
+					|| !ShaderVariantKeysConflict(
+						ViewShaderVariantKey(*variant.variant),
+						*a_variant)) {
 					continue;
 				}
 
-				if (variant.variant->key != a_variant->key) {
-					continue;
-				}
 				if (!variant.expectedStockSha1
 					|| !Sha1Equals(
 						*variant.expectedStockSha1,
@@ -65,7 +63,9 @@ namespace cs::engine
 									== variant.routeGroup
 								&& a_candidate.variant
 								&& a_candidate.variant->subclass
-									== a_variant->subclass;
+									== a_variant->subclass
+								&& a_candidate.variant->stage
+									== a_variant->stage;
 						});
 				if (!groupHasVariantRoutes) {
 					return {
@@ -93,12 +93,13 @@ namespace cs::engine
 		return {};
 	}
 
-	bool PixelShaderVariantKeysConflict(
-		PixelShaderVariantView a_left,
-		PixelShaderVariantView a_right) noexcept
+	bool ShaderVariantKeysConflict(
+		ShaderVariantKeyView a_left,
+		ShaderVariantKeyView a_right) noexcept
 	{
 		return a_left.subclass == a_right.subclass
-			&& a_left.key == a_right.key;
+			&& a_left.stage == a_right.stage
+			&& a_left.id == a_right.id;
 	}
 
 	bool ShouldSubstitutePixelShader(

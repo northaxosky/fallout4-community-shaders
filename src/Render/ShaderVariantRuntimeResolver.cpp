@@ -25,7 +25,7 @@ namespace cs::engine
 			|| REX::FModule::IsRuntimeAE();
 	}
 
-	std::optional<PixelShaderVariantView> ResolvePixelShaderVariant(
+	std::optional<ShaderVariantKeyView> ResolvePixelShaderVariant(
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits) noexcept
 	{

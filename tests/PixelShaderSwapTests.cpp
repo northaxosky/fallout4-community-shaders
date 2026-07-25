@@ -42,27 +42,21 @@ namespace
 		const auto stock = Sha(0x31);
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderVariant{
-					"BSDFCompositeShader",
-					shader_variants::kBsdfCompositeAmbientIbl
-				},
+				OwnShaderVariantKey(
+					shader_variants::kBsdfCompositeAmbientIbl),
 				stock
 			},
 			PixelShaderSwapVariantKey{
-				PixelShaderVariant{
-					"BSDFCompositeShader",
-					shader_variants::kBsdfCompositeAmbientIblTilelight
-				},
+				OwnShaderVariantKey(
+					shader_variants::
+						kBsdfCompositeAmbientIblTilelight),
 				stock
 			}
 		};
 
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants,
-			PixelShaderVariantView{
-				"BSDFCompositeShader",
-				shader_variants::kBsdfCompositeAmbientIblTilelight
-			},
+			shader_variants::kBsdfCompositeAmbientIblTilelight,
 			stock);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kSelected
@@ -79,10 +73,8 @@ namespace
 			"6d726d0fe6b6c474da30edbffcecfa067c795873");
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderVariant{
-					"BSDFCompositeShader",
-					shader_variants::kBsdfCompositeAmbientIbl
-				},
+				OwnShaderVariantKey(
+					shader_variants::kBsdfCompositeAmbientIbl),
 				tilelight
 			},
 			PixelShaderSwapVariantKey{
@@ -94,10 +86,7 @@ namespace
 
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants,
-			PixelShaderVariantView{
-				"BSDFCompositeShader",
-				shader_variants::kBsdfCompositeAmbientIbl
-			},
+			shader_variants::kBsdfCompositeAmbientIbl,
 			noTilelight);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch
@@ -110,19 +99,14 @@ namespace
 		using namespace cs::engine;
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderVariant{
-					"BSDFCompositeShader",
-					shader_variants::kBsdfCompositeAmbientIbl
-				}
+				OwnShaderVariantKey(
+					shader_variants::kBsdfCompositeAmbientIbl)
 			}
 		};
 
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants,
-			PixelShaderVariantView{
-				"BSDFCompositeShader",
-				shader_variants::kBsdfCompositeAmbientIbl
-			},
+			shader_variants::kBsdfCompositeAmbientIbl,
 			Sha("6d726d0fe6b6c474da30edbffcecfa067c795873"));
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch,
@@ -138,20 +122,16 @@ namespace
 			"6d726d0fe6b6c474da30edbffcecfa067c795873");
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderVariant{
-					"BSDFCompositeShader",
-					shader_variants::kBsdfCompositeAmbientIblTilelight
-				},
+				OwnShaderVariantKey(
+					shader_variants::
+						kBsdfCompositeAmbientIblTilelight),
 				tilelight
 			}
 		};
 
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants,
-			PixelShaderVariantView{
-				"BSDFCompositeShader",
-				shader_variants::kBsdfCompositeAmbientIbl
-			},
+			shader_variants::kBsdfCompositeAmbientIbl,
 			noTilelight);
 		Check(
 			selection.kind
@@ -166,10 +146,9 @@ namespace
 			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				PixelShaderVariant{
-					"BSDFCompositeShader",
-					shader_variants::kBsdfCompositeAmbientIblTilelight
-				},
+				OwnShaderVariantKey(
+					shader_variants::
+						kBsdfCompositeAmbientIblTilelight),
 				tilelight
 			}
 		};
@@ -181,6 +160,56 @@ namespace
 				&& selection.variantIndex == 0
 				&& selection.usedHashFallback,
 			"unresolved variant did not fall back to exact hash");
+	}
+
+	void TestVariantKeyScopeIncludesStage()
+	{
+		using namespace cs::engine;
+		const ShaderVariantKeyView pixel{
+			"BSDFCompositeShader",
+			ShaderStage::kPixel,
+			ShaderVariantId{ 0 }
+		};
+		const ShaderVariantKeyView vertex{
+			"BSDFCompositeShader",
+			ShaderStage::kVertex,
+			ShaderVariantId{ 0 }
+		};
+		const ShaderVariantKeyView otherSubclass{
+			"BSDFLightShader",
+			ShaderStage::kPixel,
+			ShaderVariantId{ 0 }
+		};
+		Check(
+			!ShaderVariantKeysConflict(pixel, vertex),
+			"different shader stages collided");
+		Check(
+			!ShaderVariantKeysConflict(pixel, otherSubclass),
+			"different shader subclasses collided");
+		Check(
+			ShaderVariantKeysConflict(pixel, pixel),
+			"identical scoped keys did not conflict");
+
+		const auto stock = Sha(0x51);
+		const std::vector variants{
+			PixelShaderSwapVariantKey{
+				OwnShaderVariantKey(vertex),
+				stock,
+				7
+			},
+			PixelShaderSwapVariantKey{
+				std::nullopt,
+				stock,
+				7
+			}
+		};
+		const auto selection = SelectPixelShaderSwapVariant(
+			variants, pixel, stock);
+		Check(
+			selection.kind == PixelShaderSwapSelectionKind::kSelected
+				&& selection.variantIndex == 1
+				&& selection.usedHashFallback,
+			"vertex route blocked pixel hash fallback");
 	}
 
 	void TestCompositeResolutionStaysUnavailable()
@@ -203,13 +232,14 @@ namespace
 			"BSDFCompositeShader", 0xB60, true);
 		Check(
 			noTilelight
-				&& noTilelight->key
+				&& *noTilelight
 					== shader_variants::kBsdfCompositeAmbientIbl,
 			"Composite resolver did not force Tilelight off");
 		Check(
 			tilelight
-				&& tilelight->key
-					== shader_variants::kBsdfCompositeAmbientIblTilelight,
+				&& *tilelight
+					== shader_variants::
+						kBsdfCompositeAmbientIblTilelight,
 			"Composite resolver did not force Tilelight on");
 
 		for (const std::uint32_t discardedBit :
@@ -220,21 +250,22 @@ namespace
 				false);
 			Check(
 				collapsed && noTilelight
-					&& collapsed->key == noTilelight->key,
+					&& *collapsed == *noTilelight,
 				"Composite resolver did not collapse discarded technique bits");
 			Check(
 				collapsed && noTilelight
-					&& PixelShaderVariantKeysConflict(
-						{
-							"BSDFCompositeShader",
-							collapsed->key
-						},
-						{
-							"BSDFCompositeShader",
-							noTilelight->key
-						}),
+					&& ShaderVariantKeysConflict(
+						*collapsed,
+						*noTilelight),
 				"collapsed Composite PSIDs did not conflict");
 		}
+
+		const auto unknownBits = ResolvePixelShaderVariant(
+			"BSDFCompositeShader", 0x80000B60, false);
+		Check(
+			unknownBits
+				&& unknownBits->id.Value() == 0x80000B60,
+			"Composite resolver discarded an opaque technique bit");
 	}
 
 	void TestNotReadyReplacementKeepsStock()
@@ -268,6 +299,7 @@ int main()
 		{ "hashless variant refused", &TestHashlessVariantRefused },
 		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
 		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
+		{ "variant key scope includes stage", &TestVariantKeyScopeIncludesStage },
 		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
 		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
 		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock }

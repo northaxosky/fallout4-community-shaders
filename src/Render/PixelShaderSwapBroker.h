@@ -15,11 +15,17 @@ struct ID3D11PixelShader;
 
 namespace cs::engine
 {
-	class ShaderVariantKey
+	enum class ShaderStage : std::uint8_t
+	{
+		kVertex,
+		kPixel
+	};
+
+	class ShaderVariantId
 	{
 	public:
-		constexpr ShaderVariantKey() noexcept = default;
-		explicit constexpr ShaderVariantKey(std::uint32_t a_value) noexcept :
+		constexpr ShaderVariantId() noexcept = default;
+		explicit constexpr ShaderVariantId(std::uint32_t a_value) noexcept :
 			_value(a_value)
 		{}
 
@@ -28,27 +34,46 @@ namespace cs::engine
 			return _value;
 		}
 
-		auto operator<=>(const ShaderVariantKey&) const = default;
+		auto operator<=>(const ShaderVariantId&) const = default;
 
 	private:
 		std::uint32_t _value = 0;
 	};
 
-	struct PixelShaderVariant
+	struct ShaderVariantKey
 	{
 		std::string subclass;
-		ShaderVariantKey key;
+		ShaderStage stage = ShaderStage::kPixel;
+		ShaderVariantId id;
 	};
 
-	struct PixelShaderVariantView
+	struct ShaderVariantKeyView
 	{
 		std::string_view subclass;
-		ShaderVariantKey key;
+		ShaderStage stage = ShaderStage::kPixel;
+		ShaderVariantId id;
+
+		auto operator<=>(const ShaderVariantKeyView&) const = default;
 	};
+
+	inline ShaderVariantKeyView ViewShaderVariantKey(
+		const ShaderVariantKey& a_key) noexcept
+	{
+		return { a_key.subclass, a_key.stage, a_key.id };
+	}
+
+	inline ShaderVariantKey OwnShaderVariantKey(ShaderVariantKeyView a_key)
+	{
+		return {
+			std::string(a_key.subclass),
+			a_key.stage,
+			a_key.id
+		};
+	}
 
 	struct PixelShaderSwapVariantKey
 	{
-		std::optional<PixelShaderVariant> variant;
+		std::optional<ShaderVariantKey> variant;
 		std::optional<sha1::Sha1Result> expectedStockSha1;
 		std::size_t routeGroup = 0;
 	};
@@ -71,11 +96,11 @@ namespace cs::engine
 
 	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
 		std::span<const PixelShaderSwapVariantKey> a_variants,
-		std::optional<PixelShaderVariantView> a_variant,
+		std::optional<ShaderVariantKeyView> a_variant,
 		const sha1::Sha1Result& a_stockSha1) noexcept;
-	bool PixelShaderVariantKeysConflict(
-		PixelShaderVariantView a_left,
-		PixelShaderVariantView a_right) noexcept;
+	bool ShaderVariantKeysConflict(
+		ShaderVariantKeyView a_left,
+		ShaderVariantKeyView a_right) noexcept;
 	bool ShouldSubstitutePixelShader(
 		PixelShaderSwapSelectionKind a_selection,
 		bool a_replacementReady) noexcept;
@@ -84,7 +109,7 @@ namespace cs::engine
 	using PixelShaderSwapResolver = bool (*)(
 		const void* a_bytecode,
 		std::size_t a_bytecodeLength,
-		std::optional<PixelShaderVariantView> a_variant,
+		std::optional<ShaderVariantKeyView> a_variant,
 		const sha1::Sha1Result& a_sha,
 		ID3D11PixelShader** a_out) noexcept;
 

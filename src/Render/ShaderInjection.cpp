@@ -98,7 +98,7 @@ namespace cs::engine
 			MakeDefaultVariantRegistration(
 				ShaderInjectionTarget a_target,
 				std::string a_name,
-				std::optional<PixelShaderVariant> a_variant,
+				std::optional<ShaderVariantKey> a_variant,
 				std::string a_expectedStockSha1,
 				ShaderInjectionDefines a_defines = {})
 		{
@@ -144,10 +144,9 @@ namespace cs::engine
 				MakeDefaultVariantRegistration(
 					Target::kAmbientIblPass,
 					"tilelight",
-					PixelShaderVariant{
-						"BSDFCompositeShader",
-						shader_variants::kBsdfCompositeAmbientIblTilelight
-					},
+					OwnShaderVariantKey(
+						shader_variants::
+							kBsdfCompositeAmbientIblTilelight),
 					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383"),
 				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredDirectional,
@@ -587,7 +586,7 @@ namespace cs::engine
 		bool ResolveInjectedPixelShader(
 			const void*,
 			std::size_t,
-			std::optional<PixelShaderVariantView> a_resolvedVariant,
+			std::optional<ShaderVariantKeyView> a_resolvedVariant,
 			const sha1::Sha1Result& a_sha,
 			ID3D11PixelShader** a_out) noexcept
 		{
@@ -612,13 +611,18 @@ namespace cs::engine
 						2000,
 						spdlog::level::warn,
 						"Kept stock PS sha={}: no replacement registered "
-						"for variant {}+0x{:X}.",
+						"for variant {}:{}+0x{:X}.",
 						sha1::Sha1ToHex(a_sha),
 						a_resolvedVariant
 							? a_resolvedVariant->subclass
 							: "<none>",
 						a_resolvedVariant
-							? a_resolvedVariant->key.Value()
+							&& a_resolvedVariant->stage
+								== ShaderStage::kPixel
+							? "ps"
+							: "vs",
+						a_resolvedVariant
+							? a_resolvedVariant->id.Value()
 							: 0);
 					return false;
 				}
@@ -641,14 +645,19 @@ namespace cs::engine
 						2000,
 						spdlog::level::err,
 						"Refused PS replacement '{}/{}': "
-						"variant {}+0x{:X} expected sha={} but received {}.",
+						"variant {}:{}+0x{:X} expected sha={} but received {}.",
 						kTargets[ToIndex(variant.targetId)].name,
 						variant.name,
 						a_resolvedVariant
 							? a_resolvedVariant->subclass
 							: "<none>",
 						a_resolvedVariant
-							? a_resolvedVariant->key.Value()
+							&& a_resolvedVariant->stage
+								== ShaderStage::kPixel
+							? "ps"
+							: "vs",
+						a_resolvedVariant
+							? a_resolvedVariant->id.Value()
 							: 0,
 						expected,
 						sha1::Sha1ToHex(a_sha));
@@ -839,22 +848,21 @@ namespace cs::engine
 				return false;
 			}
 			if (existing.variant && a_registration.variant
-				&& PixelShaderVariantKeysConflict(
-					{
-						existing.variant->subclass,
-						existing.variant->key
-					},
-					{
-						a_registration.variant->subclass,
-						a_registration.variant->key
-					})) {
+				&& ShaderVariantKeysConflict(
+					ViewShaderVariantKey(*existing.variant),
+					ViewShaderVariantKey(
+						*a_registration.variant))) {
 				L->error(
 					"Replacement variant '{}/{}' rejected: "
-					"duplicate variant key {}+0x{:X}.",
+					"duplicate variant key {}:{}+0x{:X}.",
 					kTargets[ToIndex(a_registration.targetId)].name,
 					a_registration.name,
 					a_registration.variant->subclass,
-					a_registration.variant->key.Value());
+					a_registration.variant->stage
+							== ShaderStage::kPixel
+						? "ps"
+						: "vs",
+					a_registration.variant->id.Value());
 				return false;
 			}
 			if (!existing.expectedStockSha1.empty()

@@ -17,7 +17,7 @@ namespace cs::engine::shader_context
 
 	Context Current() noexcept;
 	Context CurrentOrSticky() noexcept;
-	std::optional<PixelShaderVariantView> CurrentVariant() noexcept;
+	std::optional<ShaderVariantKeyView> CurrentVariant() noexcept;
 
 	void SetSticky(const char* a_name, std::uint32_t a_techniqueBits) noexcept;
 	void ClearSticky() noexcept;

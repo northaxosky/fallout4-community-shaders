@@ -20,7 +20,7 @@ namespace cs::engine::shader_context
 		return g_current.active ? g_current : g_sticky;
 	}
 
-	std::optional<PixelShaderVariantView> CurrentVariant() noexcept
+	std::optional<ShaderVariantKeyView> CurrentVariant() noexcept
 	{
 		if (!g_current.active || !g_current.techniqueKnown
 			|| !g_current.subclassName) {

@@ -31,11 +31,6 @@ namespace cs::engine
 		kCount
 	};
 
-	enum class ShaderStage : std::uint8_t
-	{
-		kPixel
-	};
-
 	enum class ShaderResourceType : std::uint8_t
 	{
 		kConstantBuffer,
@@ -80,7 +75,7 @@ namespace cs::engine
 		ShaderInjectionTarget                targetId =
 			ShaderInjectionTarget::kCount;
 		std::string                          name;
-		std::optional<PixelShaderVariant>    variant;
+		std::optional<ShaderVariantKey>      variant;
 		std::string                          expectedStockSha1;
 		ShaderVariantCompilationDescriptor   compilation;
 	};
