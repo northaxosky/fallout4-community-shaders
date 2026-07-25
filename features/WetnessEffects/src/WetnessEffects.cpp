@@ -225,15 +225,14 @@ namespace cs::features
 		if (!_telemetryCS) {
 			L->warn("Failed to compile wetness telemetry shader.");
 		}
-		if (_settings.enabled) {
-			EnsureResources();
-		}
+		// Allocate regardless of the runtime toggle: injection readiness is frozen
+		// once at startup, so gating here permanently drops the shader replacement.
+		EnsureResources();
 	}
 
 	bool WetnessEffects::IsWetnessMaskReady() const
 	{
 		return _started.load(std::memory_order_acquire) &&
-			_settings.enabled &&
 			_wetnessCS &&
 			_wetnessCB &&
 			_resourcesReady.load(std::memory_order_acquire);
@@ -317,6 +316,11 @@ namespace cs::features
 	void WetnessEffects::OnComputeWetness()
 	{
 		_dispatchesLastFrame.store(0, std::memory_order_relaxed);
+		_sunHookCalls.store(0, std::memory_order_relaxed);
+		_sunHookNoShader.store(0, std::memory_order_relaxed);
+		_sunHookMatched.store(0, std::memory_order_relaxed);
+		_sunHookUnmatched.store(0, std::memory_order_relaxed);
+		_maskBinds.store(0, std::memory_order_relaxed);
 		_workingWidth.store(0, std::memory_order_relaxed);
 		_workingHeight.store(0, std::memory_order_relaxed);
 		if (!_started.load(std::memory_order_acquire)) {
@@ -429,6 +433,7 @@ namespace cs::features
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
+		_sunHookCalls.fetch_add(1, std::memory_order_relaxed);
 		auto* rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) {
 			return;
@@ -441,6 +446,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11PixelShader> boundShader;
 		context->PSGetShader(boundShader.put(), nullptr, nullptr);
 		if (!boundShader) {
+			_sunHookNoShader.fetch_add(1, std::memory_order_relaxed);
 			return;
 		}
 
@@ -450,10 +456,12 @@ namespace cs::features
 		};
 		for (const auto target : directionalTargets) {
 			if (boundShader.get() == cs::engine::GetInjectedPixelShader(target)) {
+				_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
 				cs::engine::DispatchShaderInjections(target, context);
 				return;
 			}
 		}
+		_sunHookUnmatched.fetch_add(1, std::memory_order_relaxed);
 	}
 
 	void WetnessEffects::OnAmbientPassDispatch()
@@ -485,6 +493,7 @@ namespace cs::features
 		// mask is correct and keeps dry == stock.
 		auto* srv = _wetnessMask->srv.get();
 		a_context->PSSetShaderResources(a_slot, 1, &srv);
+		_maskBinds.fetch_add(1, std::memory_order_relaxed);
 		if (a_slot == kMaskPSSlotDirectional) {
 			_directionalMaskBound.store(true, std::memory_order_relaxed);
 		} else if (a_slot == kMaskPSSlotAmbient) {
@@ -646,7 +655,22 @@ namespace cs::features
 			.Dimensions(
 				"working",
 				_workingWidth.load(std::memory_order_relaxed),
-				_workingHeight.load(std::memory_order_relaxed));
+				_workingHeight.load(std::memory_order_relaxed))
+			.Field(
+				"sun_hook_calls",
+				static_cast<std::int64_t>(_sunHookCalls.load(std::memory_order_relaxed)))
+			.Field(
+				"sun_hook_no_shader",
+				static_cast<std::int64_t>(_sunHookNoShader.load(std::memory_order_relaxed)))
+			.Field(
+				"sun_hook_matched",
+				static_cast<std::int64_t>(_sunHookMatched.load(std::memory_order_relaxed)))
+			.Field(
+				"sun_hook_unmatched",
+				static_cast<std::int64_t>(_sunHookUnmatched.load(std::memory_order_relaxed)))
+			.Field(
+				"mask_binds",
+				static_cast<std::int64_t>(_maskBinds.load(std::memory_order_relaxed)));
 	}
 
 	void WetnessEffects::DrawSettings()

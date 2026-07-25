@@ -307,9 +307,15 @@ namespace cs::engine
 					registrationIndex < a_registrations.size();
 					++registrationIndex) {
 					const auto& registration = a_registrations[registrationIndex];
-					if (registration.targetId != metadata.id
-						|| !IsReady(registration, registrationIndex))
+					if (registration.targetId != metadata.id)
 						continue;
+					if (!IsReady(registration, registrationIndex)) {
+						L->warn(
+							"Contributor '{}' was not ready at freeze; '{}' will run stock for this session (injection readiness is frozen once at startup).",
+							registration.contributor,
+							metadata.name);
+						continue;
+					}
 
 					std::string_view conflictingName;
 					std::string_view existingValue;
@@ -711,7 +717,13 @@ namespace cs::engine
 				}
 			}
 		}
-		L->info("Compiled {}/{} replacements", compileSucceeded, compileRequested);
+		if (compileRequested == 0 && !registrations.empty()) {
+			L->warn(
+				"{} injection contributor(s) registered but no target was baked; all shaders remain stock.",
+				registrations.size());
+		} else {
+			L->info("Compiled {}/{} replacements", compileSucceeded, compileRequested);
+		}
 	}
 
 	void DispatchShaderInjections(

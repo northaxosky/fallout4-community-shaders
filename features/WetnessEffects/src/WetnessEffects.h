@@ -94,6 +94,13 @@ namespace cs::features
 		std::atomic_bool _directionalMaskBound{ false };
 		std::atomic_bool _ambientMaskBound{ false };
 
+		// Per-frame sun-hook trace: separates "never fired" from "never matched".
+		std::atomic_uint32_t _sunHookCalls{ 0 };
+		std::atomic_uint32_t _sunHookNoShader{ 0 };
+		std::atomic_uint32_t _sunHookMatched{ 0 };
+		std::atomic_uint32_t _sunHookUnmatched{ 0 };
+		std::atomic_uint32_t _maskBinds{ 0 };
+
 		std::unique_ptr<cs::buffer::ConstantBuffer> _wetnessCB;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _telemetryCB;
 		std::unique_ptr<cs::buffer::Texture2D> _wetnessMask;
