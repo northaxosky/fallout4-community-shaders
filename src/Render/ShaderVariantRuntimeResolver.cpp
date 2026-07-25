@@ -29,8 +29,15 @@ namespace cs::engine
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits) noexcept
 	{
-		if (a_subclass != "BSDFCompositeShader")
+		if (!IsPixelShaderVariantResolutionAvailable())
 			return std::nullopt;
+
+		if (a_subclass != "BSDFCompositeShader") {
+			return ResolvePixelShaderVariant(
+				a_subclass,
+				a_techniqueBits,
+				std::nullopt);
+		}
 
 		return ResolvePixelShaderVariant(
 			a_subclass,

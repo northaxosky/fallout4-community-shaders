@@ -98,7 +98,7 @@ namespace cs::engine
 			MakeDefaultVariantRegistration(
 				ShaderInjectionTarget a_target,
 				std::string a_name,
-				std::optional<ShaderVariantKey> a_variant,
+				std::vector<ShaderVariantKey> a_variantKeys,
 				std::string a_expectedStockSha1,
 				ShaderInjectionDefines a_defines = {})
 		{
@@ -107,7 +107,7 @@ namespace cs::engine
 			ShaderReplacementVariantRegistration registration;
 			registration.targetId = a_target;
 			registration.name = std::move(a_name);
-			registration.variant = std::move(a_variant);
+			registration.variantKeys = std::move(a_variantKeys);
 			registration.expectedStockSha1 =
 				std::move(a_expectedStockSha1);
 			registration.compilation.sourcePath =
@@ -121,6 +121,17 @@ namespace cs::engine
 			return registration;
 		}
 
+		template <std::size_t Size>
+		std::vector<ShaderVariantKey> OwnVariantKeys(
+			const std::array<ShaderVariantKeyView, Size>& a_keys)
+		{
+			std::vector<ShaderVariantKey> keys;
+			keys.reserve(a_keys.size());
+			for (const auto key : a_keys)
+				keys.push_back(OwnShaderVariantKey(key));
+			return keys;
+		}
+
 		std::vector<ShaderReplacementVariantRegistration>
 		DefaultVariantRegistrations()
 		{
@@ -129,39 +140,47 @@ namespace cs::engine
 				MakeDefaultVariantRegistration(
 					Target::kDeferredComposite,
 					"default",
-					std::nullopt,
+					{},
 					{}),
 				MakeDefaultVariantRegistration(
 					Target::kDeferredPrepass,
 					"default",
-					std::nullopt,
+					{},
 					"c493970c042ccd90363c57596ff53f6fdd22ce5f"),
 				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredPoint,
 					"default",
-					std::nullopt,
+					OwnVariantKeys(
+						shader_variants::
+							kBsdfLightDeferredPoint),
 					"9969e800683c8a7c8afc25f41582415d79cbe47e"),
 				MakeDefaultVariantRegistration(
 					Target::kAmbientIblPass,
 					"tilelight",
-					OwnShaderVariantKey(
-						shader_variants::
-							kBsdfCompositeAmbientIblTilelight),
+					{
+						OwnShaderVariantKey(
+							shader_variants::
+								kBsdfCompositeAmbientIblTilelight)
+					},
 					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383"),
 				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredDirectional,
 					"default",
-					std::nullopt,
+					OwnVariantKeys(
+						shader_variants::
+							kBsdfLightDeferredDirectional),
 					"50e2618e8d1a8c3400c2bdb0129e510fe395d19a"),
 				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredDirectionalIbl,
 					"default",
-					std::nullopt,
+					OwnVariantKeys(
+						shader_variants::
+							kBsdfLightDeferredDirectionalIbl),
 					"94f8385edd1b4eb232b1de269e1ad7b21122a293"),
 				MakeDefaultVariantRegistration(
 					Target::kVlsSliceScatter,
 					"default",
-					std::nullopt,
+					{},
 					{})
 			};
 		}
@@ -219,7 +238,7 @@ namespace cs::engine
 		struct PreparedVariant
 		{
 			PublishedVariant variant;
-			PixelShaderSwapVariantKey key;
+			std::vector<PixelShaderSwapVariantKey> keys;
 			ShaderVariantCompilationState compilationState =
 				ShaderVariantCompilationState::kFailed;
 			std::string compiledSha1;
@@ -463,22 +482,42 @@ namespace cs::engine
 			return root / a_sourcePath;
 		}
 
-		std::optional<PixelShaderSwapVariantKey> BuildVariantKey(
+		std::optional<std::vector<PixelShaderSwapVariantKey>>
+			BuildVariantKeys(
 			const ShaderReplacementVariantRegistration& a_variant)
 		{
-			PixelShaderSwapVariantKey key;
-			key.variant = a_variant.variant;
-			key.routeGroup = ToIndex(a_variant.targetId);
-			if (a_variant.expectedStockSha1.empty())
-				return key;
-
-			sha1::Sha1Result expected;
-			if (!sha1::Sha1FromHex(
-					a_variant.expectedStockSha1, expected)) {
-				return std::nullopt;
+			std::optional<sha1::Sha1Result> expected;
+			if (!a_variant.expectedStockSha1.empty()) {
+				sha1::Sha1Result parsed;
+				if (!sha1::Sha1FromHex(
+						a_variant.expectedStockSha1,
+						parsed)) {
+					return std::nullopt;
+				}
+				expected = parsed;
 			}
-			key.expectedStockSha1 = expected;
-			return key;
+
+			std::vector<PixelShaderSwapVariantKey> keys;
+			keys.reserve(
+				std::max<std::size_t>(
+					1,
+					a_variant.variantKeys.size()));
+			if (a_variant.variantKeys.empty()) {
+				keys.push_back({
+					.variant = std::nullopt,
+					.expectedStockSha1 = expected,
+					.routeGroup = ToIndex(a_variant.targetId)
+				});
+				return keys;
+			}
+			for (const auto& variantKey : a_variant.variantKeys) {
+				keys.push_back({
+					.variant = variantKey,
+					.expectedStockSha1 = expected,
+					.routeGroup = ToIndex(a_variant.targetId)
+				});
+			}
+			return keys;
 		}
 
 		std::optional<PreparedVariant> PrepareVariant(
@@ -491,8 +530,8 @@ namespace cs::engine
 		{
 			const auto targetIndex = ToIndex(a_target.metadata->id);
 			auto& runtime = GetService().runtime[targetIndex];
-			const auto key = BuildVariantKey(a_variant);
-			if (!key) {
+			auto keys = BuildVariantKeys(a_variant);
+			if (!keys) {
 				a_error = "invalid expected stock SHA1";
 				L->error(
 					"Compile '{}/{}' rejected: {}",
@@ -566,7 +605,7 @@ namespace cs::engine
 			prepared.variant.targetId = a_target.metadata->id;
 			prepared.variant.name = a_variant.name;
 			prepared.variant.compilation = std::move(result.handle);
-			prepared.key = *key;
+			prepared.keys = std::move(*keys);
 			prepared.compilationState = result.state;
 			prepared.compiledSha1 = std::move(result.compiledSha1);
 			return prepared;
@@ -626,17 +665,21 @@ namespace cs::engine
 							: 0);
 					return false;
 				}
-				if (selection.variantIndex >= plan->variants.size())
+				if (selection.routeIndex
+					>= plan->variantKeys.size()
+					|| selection.replacementIndex
+						>= plan->variants.size()) {
 					return false;
+				}
 
 				const auto& variant =
-					plan->variants[selection.variantIndex];
+					plan->variants[selection.replacementIndex];
 				auto& runtime =
 					GetService().runtime[ToIndex(variant.targetId)];
 				if (selection.kind
 					== PixelShaderSwapSelectionKind::kHashMismatch) {
 					const auto& key =
-						plan->variantKeys[selection.variantIndex];
+						plan->variantKeys[selection.routeIndex];
 					const auto expected = key.expectedStockSha1
 						? sha1::Sha1ToHex(*key.expectedStockSha1)
 						: std::string("<unknown>");
@@ -780,16 +823,17 @@ namespace cs::engine
 				kTargets[ToIndex(a_registration.targetId)].name);
 			return false;
 		}
-		if (a_registration.variant
-			&& a_registration.variant->subclass.empty()) {
-			L->error(
-				"Replacement variant '{}/{}' rejected: "
-				"empty shader subclass.",
-				kTargets[ToIndex(a_registration.targetId)].name,
-				a_registration.name);
-			return false;
+		for (const auto& key : a_registration.variantKeys) {
+			if (key.subclass.empty()) {
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"empty shader subclass.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name);
+				return false;
+			}
 		}
-		if (a_registration.variant
+		if (!a_registration.variantKeys.empty()
 			&& a_registration.expectedStockSha1.empty()) {
 			L->error(
 				"Replacement variant '{}/{}' rejected: "
@@ -837,6 +881,35 @@ namespace cs::engine
 				sha1::Sha1ToHex(expected);
 		}
 
+		for (std::size_t i = 0;
+			i < a_registration.variantKeys.size();
+			++i) {
+			for (std::size_t j = i + 1;
+				j < a_registration.variantKeys.size();
+				++j) {
+				if (!ShaderVariantKeysConflict(
+						ViewShaderVariantKey(
+							a_registration.variantKeys[i]),
+						ViewShaderVariantKey(
+							a_registration.variantKeys[j]))) {
+					continue;
+				}
+				const auto& duplicate =
+					a_registration.variantKeys[j];
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"duplicate variant key {}:{}+0x{:X}.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name,
+					duplicate.subclass,
+					duplicate.stage == ShaderStage::kPixel
+						? "ps"
+						: "vs",
+					duplicate.id.Value());
+				return false;
+			}
+		}
+
 		for (const auto& existing : service.variantRegistrations) {
 			if (existing.targetId == a_registration.targetId
 				&& existing.name == a_registration.name) {
@@ -847,23 +920,27 @@ namespace cs::engine
 					a_registration.name);
 				return false;
 			}
-			if (existing.variant && a_registration.variant
-				&& ShaderVariantKeysConflict(
-					ViewShaderVariantKey(*existing.variant),
-					ViewShaderVariantKey(
-						*a_registration.variant))) {
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"duplicate variant key {}:{}+0x{:X}.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name,
-					a_registration.variant->subclass,
-					a_registration.variant->stage
-							== ShaderStage::kPixel
-						? "ps"
-						: "vs",
-					a_registration.variant->id.Value());
-				return false;
+			for (const auto& existingKey : existing.variantKeys) {
+				for (const auto& newKey :
+					a_registration.variantKeys) {
+					if (!ShaderVariantKeysConflict(
+							ViewShaderVariantKey(existingKey),
+							ViewShaderVariantKey(newKey))) {
+						continue;
+					}
+					L->error(
+						"Replacement variant '{}/{}' rejected: "
+						"duplicate variant key {}:{}+0x{:X}.",
+						kTargets[ToIndex(
+							a_registration.targetId)].name,
+						a_registration.name,
+						newKey.subclass,
+						newKey.stage == ShaderStage::kPixel
+							? "ps"
+							: "vs",
+						newKey.id.Value());
+					return false;
+				}
 			}
 			if (!existing.expectedStockSha1.empty()
 				&& !a_registration.expectedStockSha1.empty()
@@ -982,7 +1059,14 @@ namespace cs::engine
 				developerOverrides);
 			plan->targets.reserve(frozenTargets.size());
 			plan->variants.reserve(variantRegistrations.size());
-			plan->variantKeys.reserve(variantRegistrations.size());
+			std::size_t routeCount = 0;
+			for (const auto& registration :
+				variantRegistrations) {
+				routeCount += std::max<std::size_t>(
+					1,
+					registration.variantKeys.size());
+			}
+			plan->variantKeys.reserve(routeCount);
 			for (const auto& frozenTarget : frozenTargets) {
 				if (frozenTarget.slotCollision)
 					continue;
@@ -1023,10 +1107,21 @@ namespace cs::engine
 						onlyCompiledSha1 = prepared->compiledSha1;
 					}
 					targetSwappable = targetSwappable
-						|| prepared->key.variant.has_value()
-						|| prepared->key.expectedStockSha1.has_value();
-					plan->variantKeys.push_back(
-						std::move(prepared->key));
+						|| std::ranges::any_of(
+							prepared->keys,
+							[](const auto& a_key) {
+								return a_key.variant.has_value()
+									|| a_key.expectedStockSha1
+										.has_value();
+							});
+					const auto replacementIndex =
+						plan->variants.size();
+					for (auto& key : prepared->keys) {
+						key.replacementIndex =
+							replacementIndex;
+						plan->variantKeys.push_back(
+							std::move(key));
+					}
 					plan->variants.push_back(
 						std::move(prepared->variant));
 				}

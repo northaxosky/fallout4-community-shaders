@@ -76,6 +76,7 @@ namespace cs::engine
 		std::optional<ShaderVariantKey> variant;
 		std::optional<sha1::Sha1Result> expectedStockSha1;
 		std::size_t routeGroup = 0;
+		std::size_t replacementIndex = 0;
 	};
 
 	enum class PixelShaderSwapSelectionKind : std::uint8_t
@@ -90,7 +91,8 @@ namespace cs::engine
 	{
 		PixelShaderSwapSelectionKind kind =
 			PixelShaderSwapSelectionKind::kNoMatch;
-		std::size_t variantIndex = 0;
+		std::size_t routeIndex = 0;
+		std::size_t replacementIndex = 0;
 		bool usedHashFallback = false;
 	};
 

@@ -44,13 +44,17 @@ namespace
 			PixelShaderSwapVariantKey{
 				OwnShaderVariantKey(
 					shader_variants::kBsdfCompositeAmbientIbl),
-				stock
+				stock,
+				0,
+				0
 			},
 			PixelShaderSwapVariantKey{
 				OwnShaderVariantKey(
 					shader_variants::
 						kBsdfCompositeAmbientIblTilelight),
-				stock
+				stock,
+				0,
+				1
 			}
 		};
 
@@ -60,8 +64,44 @@ namespace
 			stock);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.variantIndex == 1,
+				&& selection.routeIndex == 1
+				&& selection.replacementIndex == 1,
 			"variant key did not select the matching variant");
+	}
+
+	void TestMultipleKeysShareReplacement()
+	{
+		using namespace cs::engine;
+		const auto stock = Sha(
+			"9969e800683c8a7c8afc25f41582415d79cbe47e");
+		const std::vector variants{
+			PixelShaderSwapVariantKey{
+				OwnShaderVariantKey(
+					shader_variants::
+						kBsdfLightDeferredPoint[0]),
+				stock,
+				2,
+				4
+			},
+			PixelShaderSwapVariantKey{
+				OwnShaderVariantKey(
+					shader_variants::
+						kBsdfLightDeferredPoint[1]),
+				stock,
+				2,
+				4
+			}
+		};
+
+		const auto selection = SelectPixelShaderSwapVariant(
+			variants,
+			shader_variants::kBsdfLightDeferredPoint[1],
+			stock);
+		Check(
+			selection.kind == PixelShaderSwapSelectionKind::kSelected
+				&& selection.routeIndex == 1
+				&& selection.replacementIndex == 4,
+			"alias route did not select the shared replacement");
 	}
 
 	void TestVariantHashMismatchRefused()
@@ -90,7 +130,7 @@ namespace
 			noTilelight);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch
-				&& selection.variantIndex == 0,
+				&& selection.routeIndex == 0,
 			"variant hash mismatch did not refuse hash fallback");
 	}
 
@@ -118,7 +158,9 @@ namespace
 			},
 			PixelShaderSwapVariantKey{
 				OwnShaderVariantKey(light),
-				lightHash
+				lightHash,
+				0,
+				1
 			}
 		};
 
@@ -127,7 +169,8 @@ namespace
 		Check(
 			lightSelection.kind
 					== PixelShaderSwapSelectionKind::kSelected
-				&& lightSelection.variantIndex == 1,
+				&& lightSelection.routeIndex == 1
+				&& lightSelection.replacementIndex == 1,
 			"cross-subclass archive key selected the wrong row");
 
 		const auto mismatch = SelectPixelShaderSwapVariant(
@@ -135,7 +178,7 @@ namespace
 		Check(
 			mismatch.kind
 					== PixelShaderSwapSelectionKind::kHashMismatch
-				&& mismatch.variantIndex == 0,
+				&& mismatch.routeIndex == 0,
 			"cross-block key collision bypassed the stock SHA1 guard");
 	}
 
@@ -202,7 +245,7 @@ namespace
 			variants, std::nullopt, tilelight);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.variantIndex == 0
+				&& selection.routeIndex == 0
 				&& selection.usedHashFallback,
 			"unresolved variant did not fall back to exact hash");
 	}
@@ -245,14 +288,16 @@ namespace
 			PixelShaderSwapVariantKey{
 				std::nullopt,
 				stock,
-				7
+				7,
+				1
 			}
 		};
 		const auto selection = SelectPixelShaderSwapVariant(
 			variants, pixel, stock);
 		Check(
 			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.variantIndex == 1
+				&& selection.routeIndex == 1
+				&& selection.replacementIndex == 1
 				&& selection.usedHashFallback,
 			"vertex route blocked pixel hash fallback");
 	}
@@ -313,6 +358,55 @@ namespace
 			"Composite resolver discarded an opaque technique bit");
 	}
 
+	void TestBsdfLightResolverMasksTechnique()
+	{
+		using namespace cs::engine;
+		const auto checkKnownKeys = [](const auto& a_keys) {
+			for (const auto key : a_keys) {
+				const auto resolved = ResolvePixelShaderVariant(
+					key.subclass,
+					key.id.Value(),
+					std::nullopt);
+				Check(
+					resolved && *resolved == key,
+					"Light resolver changed a shipped PSID");
+			}
+		};
+		checkKnownKeys(shader_variants::kBsdfLightDeferredPoint);
+		checkKnownKeys(
+			shader_variants::kBsdfLightDeferredDirectional);
+		checkKnownKeys(
+			shader_variants::
+				kBsdfLightDeferredDirectionalIbl);
+
+		const auto setupAlias = ResolvePixelShaderVariant(
+			"BSDFLightShader", 0x02001204, std::nullopt);
+		Check(
+			setupAlias
+				&& setupAlias->id.Value() == 0x00001204,
+			"Light fallback mask retained CPU-only setup bit");
+
+		const auto keyFeature = ResolvePixelShaderVariant(
+			"BSDFLightShader", 0x10000002, std::nullopt);
+		Check(
+			keyFeature
+				&& keyFeature->id.Value() == 0x10000002,
+			"Light key-feature branch was not identity");
+
+		const auto overdraw = ResolvePixelShaderVariant(
+			"BSDFLightShader", 0xFFFFFFFF, std::nullopt);
+		Check(
+			overdraw
+				&& overdraw->id.Value() == 0xF801257F,
+			"Light overdraw mask produced the wrong PSID");
+
+		const auto stencil = ResolvePixelShaderVariant(
+			"BSDFLightShader", 0x104, std::nullopt);
+		Check(
+			stencil && stencil->id.Value() == 0x104,
+			"Light stencil technique resolved incorrectly");
+	}
+
 	void TestNotReadyReplacementKeepsStock()
 	{
 		using namespace cs::engine;
@@ -340,6 +434,7 @@ int main()
 	};
 	const Test tests[]{
 		{ "variant key selects variant", &TestVariantKeySelectsVariant },
+		{ "multiple keys share replacement", &TestMultipleKeysShareReplacement },
 		{ "variant hash mismatch refused", &TestVariantHashMismatchRefused },
 		{ "cross-subclass key collision guarded", &TestCrossSubclassKeyCollisionStaysGuarded },
 		{ "hashless variant refused", &TestHashlessVariantRefused },
@@ -348,6 +443,7 @@ int main()
 		{ "variant key scope includes stage", &TestVariantKeyScopeIncludesStage },
 		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
 		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
+		{ "Light resolver masks technique", &TestBsdfLightResolverMasksTechnique },
 		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock }
 	};
 

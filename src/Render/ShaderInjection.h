@@ -75,7 +75,7 @@ namespace cs::engine
 		ShaderInjectionTarget                targetId =
 			ShaderInjectionTarget::kCount;
 		std::string                          name;
-		std::optional<ShaderVariantKey>      variant;
+		std::vector<ShaderVariantKey>        variantKeys;
 		std::string                          expectedStockSha1;
 		ShaderVariantCompilationDescriptor   compilation;
 	};

@@ -34,13 +34,17 @@ namespace cs::engine
 						*variant.expectedStockSha1,
 						a_stockSha1)) {
 					return {
-						PixelShaderSwapSelectionKind::kHashMismatch,
-						i
+						.kind =
+							PixelShaderSwapSelectionKind::kHashMismatch,
+						.routeIndex = i,
+						.replacementIndex =
+							variant.replacementIndex
 					};
 				}
 				return {
-					PixelShaderSwapSelectionKind::kSelected,
-					i
+					.kind = PixelShaderSwapSelectionKind::kSelected,
+					.routeIndex = i,
+					.replacementIndex = variant.replacementIndex
 				};
 			}
 
@@ -69,14 +73,17 @@ namespace cs::engine
 						});
 				if (!groupHasVariantRoutes) {
 					return {
-						PixelShaderSwapSelectionKind::kSelected,
-						i,
-						true
+						.kind = PixelShaderSwapSelectionKind::kSelected,
+						.routeIndex = i,
+						.replacementIndex =
+							variant.replacementIndex,
+						.usedHashFallback = true
 					};
 				}
 			}
 			return {
-				PixelShaderSwapSelectionKind::kUnmappedVariant
+				.kind =
+					PixelShaderSwapSelectionKind::kUnmappedVariant
 			};
 		}
 
@@ -84,9 +91,11 @@ namespace cs::engine
 			const auto& expected = a_variants[i].expectedStockSha1;
 			if (expected && Sha1Equals(*expected, a_stockSha1)) {
 				return {
-					PixelShaderSwapSelectionKind::kSelected,
-					i,
-					true
+					.kind = PixelShaderSwapSelectionKind::kSelected,
+					.routeIndex = i,
+					.replacementIndex =
+						a_variants[i].replacementIndex,
+					.usedHashFallback = true
 				};
 			}
 		}
