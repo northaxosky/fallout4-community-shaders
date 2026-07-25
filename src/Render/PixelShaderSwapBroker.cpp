@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "PCH.h"
+#include "Render/ShaderSubclassContext.h"
 
 #include <atomic>
 #include <algorithm>
@@ -79,7 +80,11 @@ namespace cs::engine
 					if (const auto resolver = g_resolver.load(std::memory_order_acquire)) {
 						resolverInvoked = true;
 						resolverReportedReplacement = resolver(
-							a_bytecode, a_bytecodeLength, hash, a_out);
+							a_bytecode,
+							a_bytecodeLength,
+							shader_context::CurrentTechnique(),
+							hash,
+							a_out);
 					}
 				}
 

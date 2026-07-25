@@ -1,7 +1,97 @@
 #include "Render/PixelShaderSwapBroker.h"
 
+#include <algorithm>
+
 namespace cs::engine
 {
+	namespace
+	{
+		bool Sha1Equals(
+			const sha1::Sha1Result& a_left,
+			const sha1::Sha1Result& a_right) noexcept
+		{
+			return a_left.bytes == a_right.bytes;
+		}
+	}
+
+	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
+		std::span<const PixelShaderSwapVariantKey> a_variants,
+		std::optional<PixelShaderTechniqueView> a_technique,
+		const sha1::Sha1Result& a_stockSha1) noexcept
+	{
+		if (a_technique) {
+			for (std::size_t i = 0; i < a_variants.size(); ++i) {
+				const auto& variant = a_variants[i];
+				if (!variant.technique
+					|| variant.technique->subclass
+						!= a_technique->subclass) {
+					continue;
+				}
+
+				if (variant.technique->techniqueBits
+					!= a_technique->techniqueBits) {
+					continue;
+				}
+				if (variant.expectedStockSha1
+					&& !Sha1Equals(
+						*variant.expectedStockSha1,
+						a_stockSha1)) {
+					return {
+						PixelShaderSwapSelectionKind::kHashMismatch,
+						i
+					};
+				}
+				return {
+					PixelShaderSwapSelectionKind::kSelected,
+					i
+				};
+			}
+
+			for (std::size_t i = 0; i < a_variants.size(); ++i) {
+				const auto& variant = a_variants[i];
+				if (variant.technique
+					|| !variant.expectedStockSha1
+					|| !Sha1Equals(
+						*variant.expectedStockSha1,
+						a_stockSha1)) {
+					continue;
+				}
+
+				const bool groupHasTechniqueRoutes =
+					std::ranges::any_of(
+						a_variants,
+						[&variant, &a_technique](
+							const PixelShaderSwapVariantKey& a_candidate) {
+							return a_candidate.routeGroup
+									== variant.routeGroup
+								&& a_candidate.technique
+								&& a_candidate.technique->subclass
+									== a_technique->subclass;
+						});
+				if (!groupHasTechniqueRoutes) {
+					return {
+						PixelShaderSwapSelectionKind::kSelected,
+						i,
+						true
+					};
+				}
+			}
+			return {};
+		}
+
+		for (std::size_t i = 0; i < a_variants.size(); ++i) {
+			const auto& expected = a_variants[i].expectedStockSha1;
+			if (expected && Sha1Equals(*expected, a_stockSha1)) {
+				return {
+					PixelShaderSwapSelectionKind::kSelected,
+					i,
+					true
+				};
+			}
+		}
+		return {};
+	}
+
 	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
 		PixelShaderSwapObserver a_observer,
 		const void* a_bytecode,

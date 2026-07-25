@@ -5,7 +5,7 @@
 #include "Log.h"
 #include "PixelShaderTracker.h"
 #include "Render/PixelShaderSwapBroker.h"
-#include "SubclassContext.h"
+#include "Render/ShaderSubclassContext.h"
 
 #include <atomic>
 #include <memory>
@@ -125,9 +125,10 @@ namespace cs::features::catalog::hooks
 			}
 
 			std::optional<Sha1Result> attributionSha;
-			const auto& attribution = context::g_ctx;
+			const auto attribution =
+				cs::engine::shader_context::Current();
 			if (prepared.digest && attribution.active
-				&& attribution.subclass_name) {
+				&& attribution.subclassName) {
 				Sha1Result sha{};
 				sha.bytes = prepared.digest->sha1;
 				attributionSha = sha;
@@ -153,8 +154,8 @@ namespace cs::features::catalog::hooks
 			if (attributionSha) {
 				CatalogDB::Get().EnqueueAttributionAdmitted(
 					*attributionSha,
-					attribution.subclass_name,
-					attribution.technique_bits,
+					attribution.subclassName,
+					attribution.techniqueBits,
 					AttributionKind::kCreationContext,
 					CreationAttributionObjectKind(
 						a_completion.finalIsStock,
@@ -191,12 +192,13 @@ namespace cs::features::catalog::hooks
 		func(a_this, a_shader, a_classInstances, a_numClassInstances);
 
 		if (!lease) {
-			context::ClearSticky();
+			cs::engine::shader_context::ClearSticky();
 			return;
 		}
-		const auto current = context::CurrentOrSticky();
-		if (!current.active || !current.subclass_name || !a_shader) {
-			context::ClearSticky();
+		const auto current =
+			cs::engine::shader_context::CurrentOrSticky();
+		if (!current.active || !current.subclassName || !a_shader) {
+			cs::engine::shader_context::ClearSticky();
 			return;
 		}
 
@@ -205,14 +207,14 @@ namespace cs::features::catalog::hooks
 		if (shader_tracker::TryGetPixelShader(a_shader, lookup)) {
 			if (lookup.ambiguousOrigin) {
 				CatalogDB::Get().RecordHookObserverGap();
-				context::ClearSticky();
+				cs::engine::shader_context::ClearSticky();
 				return;
 			}
 			g_matchedBinds.fetch_add(1, std::memory_order_relaxed);
 			CatalogDB::Get().EnqueueAttribution(
 				lookup.sha,
-				current.subclass_name,
-				current.technique_bits,
+				current.subclassName,
+				current.techniqueBits,
 				AttributionKind::kObservedBinding,
 				lookup.alias
 					? AttributionObjectKind::kReplacementUnknown
@@ -224,9 +226,9 @@ namespace cs::features::catalog::hooks
 			if (miss < 8)
 				L->debug(
 					"PSSetShader in {} scope missed pixel-shader tracker",
-					current.subclass_name);
+					current.subclassName);
 		}
-		context::ClearSticky();
+		cs::engine::shader_context::ClearSticky();
 	}
 
 	HRESULT STDMETHODCALLTYPE CreateGeometryShaderHook::thunk(

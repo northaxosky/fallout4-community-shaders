@@ -1,9 +1,12 @@
 #pragma once
 
+#include "Render/PixelShaderSwapBroker.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -64,6 +67,16 @@ namespace cs::engine
 		std::vector<ShaderSlotClaim>  slotClaims;
 	};
 
+	struct ShaderReplacementVariantRegistration
+	{
+		ShaderInjectionTarget                targetId =
+			ShaderInjectionTarget::kCount;
+		std::string                          name;
+		std::optional<PixelShaderTechnique>  technique;
+		std::string                          expectedStockSha1;
+		ShaderInjectionDefines               defines;
+	};
+
 	enum class DeveloperShaderOverride : std::uint8_t
 	{
 		kAuto,
@@ -84,7 +97,6 @@ namespace cs::engine
 		std::wstring_view                             sourcePath;
 		std::string_view                              entryPoint;
 		std::string_view                              profile;
-		std::span<const std::string_view>              stockSha1s;
 		std::span<const ShaderInjectionDefineMetadata> baseDefines;
 	};
 
@@ -121,6 +133,8 @@ namespace cs::engine
 	const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(std::string_view a_name) noexcept;
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
+	bool RegisterReplacementVariant(
+		ShaderReplacementVariantRegistration a_registration);
 
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled);
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
@@ -133,6 +147,9 @@ namespace cs::engine
 		ID3D11DeviceContext* a_context) noexcept;
 
 	ID3D11PixelShader* GetInjectedPixelShader(ShaderInjectionTarget a_target) noexcept;
+	bool IsInjectedPixelShader(
+		ShaderInjectionTarget a_target,
+		ID3D11PixelShader* a_shader) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
 }

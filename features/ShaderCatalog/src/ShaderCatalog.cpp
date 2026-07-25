@@ -18,9 +18,10 @@
 #include "Log.h"
 #include "PixelShaderTracker.h"
 #include "Plugin.h"
+#include "Render/ShaderSubclassHooks.h"
 #include "Settings/FeatureConfig.h"
 #include "Sha1.h"
-#include "SubclassHooks.h"
+#include "SubclassAttribution.h"
 #include "Telemetry/Telemetry.h"
 
 #pragma comment(lib, "version.lib")
@@ -85,22 +86,6 @@ namespace cs::features
 			char buf[24];
 			std::snprintf(buf, sizeof(buf), "%u.%u.%u", v.major, v.minor, v.build);
 			return std::string(buf);
-		}
-
-		// BSShader::pixelShaders member offset: 0xB0 on 1.10.x (CommonLibF4); 0x128 on next-gen 1.11.x due to 3 inserted CRITICAL_SECTIONs (+0x78), confirmed vs fallout4-re 1.11.221 PDB.
-		std::size_t PixelShadersOffset(const RuntimeVersion& v)
-		{
-			if (v.valid && v.major == 1 && v.minor == 11)
-				return 0x128;
-			return 0xB0;
-		}
-
-		bool RuntimeSupportsSubclassAttribution(const RuntimeVersion& v)
-		{
-			if (!v.valid || v.major != 1) return false;
-			if (v.minor == 10 && (v.build == 163 || v.build == 980 || v.build == 984)) return true;
-			if (v.minor == 11 && v.build == 221) return true;  // pixelShaders re-pointed to 0x128
-			return false;
 		}
 
 		std::string PluginVersionString()
@@ -339,14 +324,22 @@ namespace cs::features
 				"ExitProcess finalizer hook failed; catalog run cannot be authoritative.");
 		}
 
-		// Patch subclass reload/setup slots before D3D shader-creation hooks; unverified runtimes retain catalog function without subclass names.
-		if (_settings.subclassAttribution && RuntimeSupportsSubclassAttribution(rtVersion)) {
-			catalog::subclass_hooks::InstallAll(PixelShadersOffset(rtVersion));
+		const auto subclassLayout =
+			cs::engine::GetShaderSubclassRuntimeLayout();
+		if (_settings.subclassAttribution && subclassLayout.verified) {
+			if (!catalog::subclass_attribution::Register(
+					subclassLayout.pixelShadersOffset)) {
+				L->error(
+					"Subclass attribution observer registration failed.");
+			}
 		} else {
 			const char* why = !_settings.subclassAttribution
 				? "disabled by config"
 				: "unverified BSShader layout for this runtime";
-			L->warn("Subclass attribution skipped ({}); catalog + swap broker remain active.", why);
+			L->warn(
+				"Catalog subclass attribution skipped ({}); "
+				"shader injection remains active.",
+				why);
 		}
 		catalog::shader_tracker::SetEnabled(true);
 		_started.store(true, std::memory_order_release);
@@ -506,13 +499,16 @@ namespace cs::features
 		} else {
 			ImGui::Text("Attributed PS rows:    0 / 0");
 		}
-		const auto reloadHooks = catalog::subclass_hooks::GetReloadInstallStats();
+		const auto reloadHooks =
+			cs::engine::GetReloadShaderHookInstallStats();
 		ImGui::Text("ReloadShaders hooks:   %u/%u patched (%u failed)",
 			reloadHooks.succeeded, reloadHooks.attempted, reloadHooks.failed);
-		const auto setupHooks = catalog::subclass_hooks::GetSetupTechniqueInstallStats();
+		const auto setupHooks =
+			cs::engine::GetSetupTechniqueHookInstallStats();
 		ImGui::Text("SetupTechnique hooks:  %u/%u patched (%u failed)",
 			setupHooks.succeeded, setupHooks.attempted, setupHooks.failed);
-		const auto subclassRt = catalog::subclass_hooks::GetRuntimeStats();
+		const auto subclassRt =
+			catalog::subclass_attribution::GetRuntimeStats();
 		ImGui::Text("SetupTechnique maps:   %llu / %llu attributed",
 			static_cast<unsigned long long>(subclassRt.mapAttributions),
 			static_cast<unsigned long long>(subclassRt.setupTechniqueCalls));

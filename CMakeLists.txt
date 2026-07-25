@@ -347,6 +347,16 @@ target_link_libraries(ShaderCatalogTests PRIVATE
 add_test(NAME ShaderCatalog COMMAND ShaderCatalogTests)
 set_tests_properties(ShaderCatalog PROPERTIES LABELS "shader;catalog;unit" TIMEOUT 120)
 
+add_executable(PixelShaderSwapTests
+	tests/PixelShaderSwapTests.cpp
+	src/Render/PixelShaderSwapModel.cpp
+	src/Render/PixelShaderSwapBroker.h
+)
+configure_host_test(PixelShaderSwapTests)
+
+add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
+set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
+
 if(FO4CS_HOST_TESTS_ONLY)
 	find_package(xbyak CONFIG REQUIRED)
 	set(PROJECT_VERSION_MAJOR "${FO4CS_VERSION_MAJOR}")
@@ -363,8 +373,11 @@ if(FO4CS_HOST_TESTS_ONLY)
 		features/ShaderCatalog/src/OrderlyExit.cpp
 		features/ShaderCatalog/src/PixelShaderTracker.cpp
 		features/ShaderCatalog/src/ShaderCatalog.cpp
+		features/ShaderCatalog/src/SubclassAttribution.cpp
 		src/Render/PixelShaderSwapBroker.cpp
 		src/Render/PixelShaderSwapModel.cpp
+		src/Render/ShaderSubclassContext.cpp
+		src/Render/ShaderSubclassHooks.cpp
 	)
 	configure_host_test(ShaderCatalogCompileChecks)
 	target_precompile_headers(ShaderCatalogCompileChecks PRIVATE

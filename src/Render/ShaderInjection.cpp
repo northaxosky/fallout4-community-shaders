@@ -22,24 +22,7 @@ namespace cs::engine
 {
 	namespace
 	{
-		constexpr std::array<std::string_view, 0> kNoStockSha1s{};
 		constexpr std::array<ShaderInjectionDefineMetadata, 0> kNoDefines{};
-
-		constexpr std::array<std::string_view, 1> kDeferredPrepassSha1s{
-			"c493970c042ccd90363c57596ff53f6fdd22ce5f"
-		};
-		constexpr std::array<std::string_view, 1> kBsdfPointSha1s{
-			"9969e800683c8a7c8afc25f41582415d79cbe47e"
-		};
-		constexpr std::array<std::string_view, 1> kAmbientIblSha1s{
-			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383"
-		};
-		constexpr std::array<std::string_view, 1> kBsdfDirectionalSha1s{
-			"50e2618e8d1a8c3400c2bdb0129e510fe395d19a"
-		};
-		constexpr std::array<std::string_view, 1> kBsdfDirectionalIblSha1s{
-			"94f8385edd1b4eb232b1de269e1ad7b21122a293"
-		};
 
 		constexpr std::array<ShaderInjectionDefineMetadata, 1> kBsdfPointDefines{ {
 			{ "LIGHT_TYPE", "2" }
@@ -60,7 +43,6 @@ namespace cs::engine
 				L"lighting/deferred_composite.hlsl",
 				"main",
 				"ps_5_0",
-				kNoStockSha1s,
 				kNoDefines
 			},
 			{
@@ -69,7 +51,6 @@ namespace cs::engine
 				L"lighting/deferred_prepass.hlsl",
 				"main",
 				"ps_5_0",
-				kDeferredPrepassSha1s,
 				kNoDefines
 			},
 			{
@@ -78,7 +59,6 @@ namespace cs::engine
 				L"lighting/bsdf_light_deferred.hlsl",
 				"main",
 				"ps_5_0",
-				kBsdfPointSha1s,
 				kBsdfPointDefines
 			},
 			{
@@ -87,7 +67,6 @@ namespace cs::engine
 				L"lighting/ambient_ibl_pass_runtime.hlsl",
 				"main",
 				"ps_5_0",
-				kAmbientIblSha1s,
 				kNoDefines
 			},
 			{
@@ -96,7 +75,6 @@ namespace cs::engine
 				L"lighting/bsdf_light_deferred.hlsl",
 				"main",
 				"ps_5_0",
-				kBsdfDirectionalSha1s,
 				kBsdfDirectionalDefines
 			},
 			{
@@ -105,7 +83,6 @@ namespace cs::engine
 				L"lighting/bsdf_light_deferred.hlsl",
 				"main",
 				"ps_5_0",
-				kBsdfDirectionalIblSha1s,
 				kBsdfDirectionalIblDefines
 			},
 			{
@@ -114,10 +91,69 @@ namespace cs::engine
 				L"lighting/vls_slice_scatter.hlsl",
 				"main",
 				"ps_5_0",
-				kNoStockSha1s,
 				kNoDefines
 			}
 		} };
+
+		std::vector<ShaderReplacementVariantRegistration>
+		DefaultVariantRegistrations()
+		{
+			using Target = ShaderInjectionTarget;
+			return {
+				{
+					Target::kDeferredComposite,
+					"default",
+					std::nullopt,
+					{},
+					{}
+				},
+				{
+					Target::kDeferredPrepass,
+					"default",
+					std::nullopt,
+					"c493970c042ccd90363c57596ff53f6fdd22ce5f",
+					{}
+				},
+				{
+					Target::kBsdfLightDeferredPoint,
+					"default",
+					std::nullopt,
+					"9969e800683c8a7c8afc25f41582415d79cbe47e",
+					{}
+				},
+				{
+					Target::kAmbientIblPass,
+					"tilelight",
+					PixelShaderTechnique{
+						"BSDFCompositeShader",
+						0x10B60
+					},
+					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
+					{}
+				},
+				{
+					Target::kBsdfLightDeferredDirectional,
+					"default",
+					std::nullopt,
+					"50e2618e8d1a8c3400c2bdb0129e510fe395d19a",
+					{}
+				},
+				{
+					Target::kBsdfLightDeferredDirectionalIbl,
+					"default",
+					std::nullopt,
+					"94f8385edd1b4eb232b1de269e1ad7b21122a293",
+					{}
+				},
+				{
+					Target::kVlsSliceScatter,
+					"default",
+					std::nullopt,
+					{},
+					{}
+				}
+			};
+		}
 
 		constexpr auto kDefaultShaderRoot =
 			L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders";
@@ -155,21 +191,37 @@ namespace cs::engine
 			const ShaderInjectionTargetMetadata* metadata = nullptr;
 			ShaderInjectionDefines               defines;
 			std::vector<ShaderInjectionBindCallback> binds;
+			std::vector<ShaderReplacementVariantRegistration> variants;
 			std::size_t                          contributors = 0;
 			bool                                 slotCollision = false;
 		};
 
+		struct PublishedVariant
+		{
+			ShaderInjectionTarget            targetId =
+				ShaderInjectionTarget::kCount;
+			std::string                      name;
+			winrt::com_ptr<ID3D11PixelShader> shader;
+		};
+
+		struct CompiledVariant
+		{
+			PublishedVariant variant;
+			PixelShaderSwapVariantKey key;
+			std::string compiledSha1;
+		};
+
 		struct PublishedTarget
 		{
-			ShaderInjectionTarget              id = ShaderInjectionTarget::kCount;
-			std::vector<sha1::Sha1Result>       stockSha1s;
-			winrt::com_ptr<ID3D11PixelShader>   shader;
+			ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
 			std::vector<ShaderInjectionBindCallback> binds;
 		};
 
 		struct PublishedPlan
 		{
 			std::vector<PublishedTarget> targets;
+			std::vector<PublishedVariant> variants;
+			std::vector<PixelShaderSwapVariantKey> variantKeys;
 		};
 
 		struct Service
@@ -182,6 +234,8 @@ namespace cs::engine
 			std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
+			std::vector<ShaderReplacementVariantRegistration>
+				variantRegistrations = DefaultVariantRegistrations();
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
@@ -282,6 +336,8 @@ namespace cs::engine
 
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
+			const std::vector<ShaderReplacementVariantRegistration>&
+				a_variantRegistrations,
 			bool a_developerForceOffEnabled,
 			const std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>& a_developerOverrides)
@@ -360,6 +416,11 @@ namespace cs::engine
 				if (developerOverride == DeveloperShaderOverride::kForceOff)
 					requested = false;
 
+				for (const auto& variant : a_variantRegistrations) {
+					if (variant.targetId == metadata.id)
+						target.variants.push_back(variant);
+				}
+
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
 				runtime.slotCollision.store(target.slotCollision, std::memory_order_relaxed);
@@ -386,22 +447,68 @@ namespace cs::engine
 			return root / a_metadata.sourcePath;
 		}
 
-		std::optional<PublishedTarget> CompileTarget(
+		std::optional<PixelShaderSwapVariantKey> BuildVariantKey(
+			const ShaderReplacementVariantRegistration& a_variant)
+		{
+			PixelShaderSwapVariantKey key;
+			key.technique = a_variant.technique;
+			key.routeGroup = ToIndex(a_variant.targetId);
+			if (a_variant.expectedStockSha1.empty())
+				return key;
+
+			sha1::Sha1Result expected;
+			if (!sha1::Sha1FromHex(
+					a_variant.expectedStockSha1, expected)) {
+				return std::nullopt;
+			}
+			key.expectedStockSha1 = expected;
+			return key;
+		}
+
+		std::optional<CompiledVariant> CompileVariant(
 			ID3D11Device* a_device,
 			const FrozenTarget& a_target,
-			const std::wstring& a_developerSourceRoot)
+			const ShaderReplacementVariantRegistration& a_variant,
+			const std::wstring& a_developerSourceRoot,
+			std::string& a_error)
 		{
 			const auto targetIndex = ToIndex(a_target.metadata->id);
 			auto& runtime = GetService().runtime[targetIndex];
-			runtime.compileAttempted.store(true, std::memory_order_relaxed);
+			const auto key = BuildVariantKey(a_variant);
+			if (!key) {
+				a_error = "invalid expected stock SHA1";
+				L->error(
+					"Compile '{}/{}' rejected: {}",
+					a_target.metadata->name,
+					a_variant.name,
+					a_error);
+				return std::nullopt;
+			}
 
 			const auto sourcePath = ResolveSourcePath(
 				*a_target.metadata,
 				runtime.developerOverride,
 				a_developerSourceRoot);
+			auto mergedDefines = a_target.defines;
+			for (const auto& [name, value] : a_variant.defines) {
+				const auto [it, inserted] =
+					mergedDefines.emplace(name, value);
+				if (!inserted && it->second != value) {
+					a_error =
+						"variant define conflicts with target define: "
+						+ name;
+					L->error(
+						"Compile '{}/{}' rejected: {}",
+						a_target.metadata->name,
+						a_variant.name,
+						a_error);
+					return std::nullopt;
+				}
+			}
+
 			std::vector<std::pair<const char*, const char*>> defines;
-			defines.reserve(a_target.defines.size());
-			for (const auto& [name, value] : a_target.defines)
+			defines.reserve(mergedDefines.size());
+			for (const auto& [name, value] : mergedDefines)
 				defines.emplace_back(name.c_str(), value.c_str());
 
 			std::string compileError;
@@ -412,14 +519,15 @@ namespace cs::engine
 				a_target.metadata->entryPoint.data(),
 				&compileError);
 			if (!blob) {
-				runtime.compileError = compileError.empty()
+				a_error = compileError.empty()
 					? "shader compilation failed"
 					: std::move(compileError);
 				L->error(
-					"Compile '{}' failed ({}): {}",
+					"Compile '{}/{}' failed ({}): {}",
 					a_target.metadata->name,
+					a_variant.name,
 					sourcePath.string(),
-					runtime.compileError);
+					a_error);
 				return std::nullopt;
 			}
 
@@ -440,40 +548,34 @@ namespace cs::engine
 					sizeof(buffer),
 					"CreatePixelShader hr=0x%08x",
 					static_cast<unsigned>(result));
-				runtime.compileError = buffer;
+				a_error = buffer;
 				L->error(
-					"Compile '{}' failed: {}",
+					"Compile '{}/{}' failed: {}",
 					a_target.metadata->name,
-					runtime.compileError);
+					a_variant.name,
+					a_error);
 				return std::nullopt;
 			}
 
 			const auto compiledSha1 = sha1::Sha1Compute(
 				blob->GetBufferPointer(),
 				blob->GetBufferSize());
-			runtime.compiledSha1 = sha1::Sha1ToHex(compiledSha1);
-			runtime.compileError.clear();
-			runtime.compileOk.store(true, std::memory_order_release);
-
-			PublishedTarget publishedTarget;
-			publishedTarget.id = a_target.metadata->id;
-			publishedTarget.shader = std::move(shader);
-			publishedTarget.binds = a_target.binds;
-			for (const auto stockSha1Hex : a_target.metadata->stockSha1s) {
-				sha1::Sha1Result stockSha1;
-				if (sha1::Sha1FromHex(std::string(stockSha1Hex), stockSha1))
-					publishedTarget.stockSha1s.push_back(stockSha1);
-			}
-			runtime.swappable.store(
-				!publishedTarget.stockSha1s.empty(),
-				std::memory_order_release);
+			const auto compiledSha1Hex = sha1::Sha1ToHex(compiledSha1);
 
 			L->info(
-				"Compile '{}' ok: {} bytes, dxbc-sha1={}",
+				"Compile '{}/{}' ok: {} bytes, dxbc-sha1={}",
 				a_target.metadata->name,
+				a_variant.name,
 				static_cast<std::size_t>(blob->GetBufferSize()),
-				runtime.compiledSha1);
-			return publishedTarget;
+				compiledSha1Hex);
+
+			CompiledVariant compiled;
+			compiled.variant.targetId = a_target.metadata->id;
+			compiled.variant.name = a_variant.name;
+			compiled.variant.shader = std::move(shader);
+			compiled.key = *key;
+			compiled.compiledSha1 = compiledSha1Hex;
+			return compiled;
 		}
 
 		const PublishedTarget* FindPublishedTarget(
@@ -487,63 +589,93 @@ namespace cs::engine
 			return target == a_plan.targets.end() ? nullptr : &*target;
 		}
 
-		bool Sha1Equals(const sha1::Sha1Result& a_left, const sha1::Sha1Result& a_right)
-		{
-			return a_left.bytes == a_right.bytes;
-		}
-
-		const ShaderInjectionTargetMetadata* FindTargetBySha1(
-			const sha1::Sha1Result& a_sha)
-		{
-			for (const auto& target : kTargets) {
-				for (const auto stockSha1Hex : target.stockSha1s) {
-					sha1::Sha1Result stockSha1;
-					if (sha1::Sha1FromHex(std::string(stockSha1Hex), stockSha1)
-						&& Sha1Equals(stockSha1, a_sha))
-						return &target;
-				}
-			}
-			return nullptr;
-		}
-
 		bool ResolveInjectedPixelShader(
 			const void*,
 			std::size_t,
+			std::optional<PixelShaderTechniqueView> a_technique,
 			const sha1::Sha1Result& a_sha,
 			ID3D11PixelShader** a_out) noexcept
 		{
 			try {
-				const auto* metadata = FindTargetBySha1(a_sha);
-				if (!metadata)
+				const auto plan =
+					GetService().published.load(std::memory_order_acquire);
+				if (!plan)
 					return false;
 
-				auto& runtime = GetService().runtime[ToIndex(metadata->id)];
-				runtime.matches.fetch_add(1, std::memory_order_relaxed);
+				const auto selection = SelectPixelShaderSwapVariant(
+					plan->variantKeys,
+					a_technique,
+					a_sha);
+				if (selection.kind
+					== PixelShaderSwapSelectionKind::kNoMatch) {
+					return false;
+				}
+				if (selection.variantIndex >= plan->variants.size())
+					return false;
 
-				const auto plan = GetService().published.load(std::memory_order_acquire);
-				const auto* target = plan ? FindPublishedTarget(*plan, metadata->id) : nullptr;
-				if (!target || !runtime.requested.load(std::memory_order_relaxed)) {
+				const auto& variant =
+					plan->variants[selection.variantIndex];
+				auto& runtime =
+					GetService().runtime[ToIndex(variant.targetId)];
+				if (selection.kind
+					== PixelShaderSwapSelectionKind::kHashMismatch) {
+					const auto& key =
+						plan->variantKeys[selection.variantIndex];
+					const auto expected = key.expectedStockSha1
+						? sha1::Sha1ToHex(*key.expectedStockSha1)
+						: std::string("<unknown>");
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::err,
+						"Refused PS replacement '{}/{}': "
+						"technique {}+0x{:X} expected sha={} but received {}.",
+						kTargets[ToIndex(variant.targetId)].name,
+						variant.name,
+						a_technique ? a_technique->subclass : "<none>",
+						a_technique ? a_technique->techniqueBits : 0,
+						expected,
+						sha1::Sha1ToHex(a_sha));
+					return false;
+				}
+
+				runtime.matches.fetch_add(1, std::memory_order_relaxed);
+				if (!runtime.requested.load(std::memory_order_relaxed)) {
 					runtime.passthroughDisabled.fetch_add(1, std::memory_order_relaxed);
 					return false;
 				}
-				if (!target->shader || target->stockSha1s.empty()) {
+				if (!variant.shader) {
 					runtime.passthroughCompileFail.fetch_add(1, std::memory_order_relaxed);
 					return false;
 				}
 
-				ID3D11PixelShader* replacement = target->shader.get();
+				ID3D11PixelShader* replacement = variant.shader.get();
 				replacement->AddRef();
 				(*a_out)->Release();
 				*a_out = replacement;
 				const auto previous = runtime.substitutions.fetch_add(1, std::memory_order_relaxed);
 				if (previous == 0) {
 					L->info(
-						"Replaced PS sha={} -> {}",
+						"Replaced PS sha={} -> {}/{}",
 						sha1::Sha1ToHex(a_sha),
-						metadata->name);
+						kTargets[ToIndex(variant.targetId)].name,
+						variant.name);
 				}
 				return true;
+			} catch (const std::exception& e) {
+				CS_LOG_EVERY_MS(
+					L,
+					2000,
+					spdlog::level::err,
+					"Pixel-shader replacement resolution failed: {}.",
+					e.what());
+				return false;
 			} catch (...) {
+				CS_LOG_EVERY_MS(
+					L,
+					2000,
+					spdlog::level::err,
+					"Pixel-shader replacement resolution failed.");
 				return false;
 			}
 		}
@@ -588,6 +720,94 @@ namespace cs::engine
 		}
 
 		service.registrations.push_back(std::move(a_registration));
+		return true;
+	}
+
+	bool RegisterReplacementVariant(
+		ShaderReplacementVariantRegistration a_registration)
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		if (service.lifecycle != Lifecycle::kCollecting) {
+			LogLateMutation("Replacement variant registration");
+			return false;
+		}
+		if (!IsValidTarget(a_registration.targetId)) {
+			L->error(
+				"Replacement variant registration rejected: "
+				"unknown target.");
+			return false;
+		}
+		if (a_registration.name.empty()) {
+			L->error(
+				"Replacement variant registration for '{}' rejected: "
+				"empty name.",
+				kTargets[ToIndex(a_registration.targetId)].name);
+			return false;
+		}
+		if (a_registration.technique
+			&& a_registration.technique->subclass.empty()) {
+			L->error(
+				"Replacement variant '{}/{}' rejected: "
+				"empty shader subclass.",
+				kTargets[ToIndex(a_registration.targetId)].name,
+				a_registration.name);
+			return false;
+		}
+		if (!a_registration.expectedStockSha1.empty()) {
+			sha1::Sha1Result expected;
+			if (!sha1::Sha1FromHex(
+					a_registration.expectedStockSha1, expected)) {
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"invalid expected stock SHA1.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name);
+				return false;
+			}
+		}
+
+		for (const auto& existing : service.variantRegistrations) {
+			if (existing.targetId == a_registration.targetId
+				&& existing.name == a_registration.name) {
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"duplicate name.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name);
+				return false;
+			}
+			if (existing.technique && a_registration.technique
+				&& existing.technique->subclass
+					== a_registration.technique->subclass
+				&& existing.technique->techniqueBits
+					== a_registration.technique->techniqueBits) {
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"duplicate technique {}+0x{:X}.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name,
+					a_registration.technique->subclass,
+					a_registration.technique->techniqueBits);
+				return false;
+			}
+			if (!existing.expectedStockSha1.empty()
+				&& !a_registration.expectedStockSha1.empty()
+				&& existing.expectedStockSha1
+					== a_registration.expectedStockSha1) {
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"stock SHA1 already maps to '{}/{}'.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name,
+					kTargets[ToIndex(existing.targetId)].name,
+					existing.name);
+				return false;
+			}
+		}
+
+		service.variantRegistrations.push_back(
+			std::move(a_registration));
 		return true;
 	}
 
@@ -648,6 +868,8 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		std::vector<ShaderReplacementRegistration> registrations;
+		std::vector<ShaderReplacementVariantRegistration>
+			variantRegistrations;
 		std::array<DeveloperShaderOverride,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 		std::wstring developerSourceRoot;
@@ -664,6 +886,7 @@ namespace cs::engine
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
 			registrations = service.registrations;
+			variantRegistrations = service.variantRegistrations;
 		}
 
 		sha1::Sha1InitOnce();
@@ -678,19 +901,78 @@ namespace cs::engine
 		} else {
 			auto frozenTargets = FreezeTargets(
 				registrations,
+				variantRegistrations,
 				developerForceOffEnabled,
 				developerOverrides);
-			compileRequested = frozenTargets.size();
 			plan->targets.reserve(frozenTargets.size());
+			plan->variants.reserve(variantRegistrations.size());
+			plan->variantKeys.reserve(variantRegistrations.size());
 			for (const auto& frozenTarget : frozenTargets) {
 				if (frozenTarget.slotCollision)
 					continue;
-				if (auto compiledTarget = CompileTarget(
+
+				const auto targetIndex =
+					ToIndex(frozenTarget.metadata->id);
+				auto& runtime = service.runtime[targetIndex];
+				runtime.compileAttempted.store(
+					!frozenTarget.variants.empty(),
+					std::memory_order_relaxed);
+				compileRequested += frozenTarget.variants.size();
+
+				std::size_t targetCompiled = 0;
+				bool targetSwappable = false;
+				std::string firstError;
+				std::string onlyCompiledSha1;
+				for (const auto& variant : frozenTarget.variants) {
+					std::string compileError;
+					auto compiled = CompileVariant(
 						a_device,
 						frozenTarget,
-						developerSourceRoot)) {
+						variant,
+						developerSourceRoot,
+						compileError);
+					if (!compiled) {
+						if (firstError.empty())
+							firstError = std::move(compileError);
+						continue;
+					}
+
 					++compileSucceeded;
-					plan->targets.push_back(std::move(*compiledTarget));
+					++targetCompiled;
+					onlyCompiledSha1 = compiled->compiledSha1;
+					targetSwappable = targetSwappable
+						|| compiled->key.technique.has_value()
+						|| compiled->key.expectedStockSha1.has_value();
+					plan->variantKeys.push_back(
+						std::move(compiled->key));
+					plan->variants.push_back(
+						std::move(compiled->variant));
+				}
+
+				runtime.compileOk.store(
+					targetCompiled > 0,
+					std::memory_order_release);
+				runtime.swappable.store(
+					targetSwappable,
+					std::memory_order_release);
+				runtime.compileError =
+					targetCompiled == frozenTarget.variants.size()
+					? std::string{}
+					: std::move(firstError);
+				if (targetCompiled == 1) {
+					runtime.compiledSha1 =
+						std::move(onlyCompiledSha1);
+				} else if (targetCompiled > 1) {
+					runtime.compiledSha1 =
+						std::to_string(targetCompiled)
+						+ " variants";
+				}
+
+				if (targetCompiled > 0) {
+					plan->targets.push_back(PublishedTarget{
+						frozenTarget.metadata->id,
+						frozenTarget.binds
+					});
 				}
 			}
 		}
@@ -700,9 +982,10 @@ namespace cs::engine
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
 			const bool hasSwappableTarget = std::ranges::any_of(
-				plan->targets,
-				[](const PublishedTarget& a_target) {
-					return !a_target.stockSha1s.empty() && a_target.shader;
+				plan->variantKeys,
+				[](const PixelShaderSwapVariantKey& a_key) {
+					return a_key.technique.has_value()
+						|| a_key.expectedStockSha1.has_value();
 				});
 			if (hasSwappableTarget && !service.resolverRegistered) {
 				service.resolverRegistered =
@@ -770,8 +1053,31 @@ namespace cs::engine
 		if (!IsValidTarget(a_target))
 			return nullptr;
 		const auto plan = GetService().published.load(std::memory_order_acquire);
-		const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr;
-		return target ? target->shader.get() : nullptr;
+		if (!plan)
+			return nullptr;
+		const auto variant = std::ranges::find(
+			plan->variants,
+			a_target,
+			&PublishedVariant::targetId);
+		return variant == plan->variants.end()
+			? nullptr
+			: variant->shader.get();
+	}
+
+	bool IsInjectedPixelShader(
+		ShaderInjectionTarget a_target,
+		ID3D11PixelShader* a_shader) noexcept
+	{
+		if (!a_shader || !IsValidTarget(a_target))
+			return false;
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		return plan && std::ranges::any_of(
+			plan->variants,
+			[a_target, a_shader](const PublishedVariant& a_variant) {
+				return a_variant.targetId == a_target
+					&& a_variant.shader.get() == a_shader;
+			});
 	}
 
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(

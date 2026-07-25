@@ -524,7 +524,8 @@ namespace cs::features
 			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
 		};
 		for (const auto target : directionalTargets) {
-			if (boundShader.get() == cs::engine::GetInjectedPixelShader(target)) {
+			if (cs::engine::IsInjectedPixelShader(
+					target, boundShader.get())) {
 				cs::engine::DispatchShaderInjections(target, context);
 				return;
 			}

@@ -4,15 +4,62 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
 
 struct ID3D11Device;
 struct ID3D11PixelShader;
 
 namespace cs::engine
 {
+	struct PixelShaderTechnique
+	{
+		std::string subclass;
+		std::uint32_t techniqueBits = 0;
+	};
+
+	struct PixelShaderTechniqueView
+	{
+		std::string_view subclass;
+		std::uint32_t techniqueBits = 0;
+	};
+
+	struct PixelShaderSwapVariantKey
+	{
+		std::optional<PixelShaderTechnique> technique;
+		std::optional<sha1::Sha1Result> expectedStockSha1;
+		std::size_t routeGroup = 0;
+	};
+
+	enum class PixelShaderSwapSelectionKind : std::uint8_t
+	{
+		kNoMatch,
+		kSelected,
+		kHashMismatch
+	};
+
+	struct PixelShaderSwapSelection
+	{
+		PixelShaderSwapSelectionKind kind =
+			PixelShaderSwapSelectionKind::kNoMatch;
+		std::size_t variantIndex = 0;
+		bool usedHashFallback = false;
+	};
+
+	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
+		std::span<const PixelShaderSwapVariantKey> a_variants,
+		std::optional<PixelShaderTechniqueView> a_technique,
+		const sha1::Sha1Result& a_stockSha1) noexcept;
+
 	// A successful resolver replaces *a_out with net refcount one.
-	using PixelShaderSwapResolver = bool (*)(const void* a_bytecode, std::size_t a_bytecodeLength,
-		const sha1::Sha1Result& a_sha, ID3D11PixelShader** a_out) noexcept;
+	using PixelShaderSwapResolver = bool (*)(
+		const void* a_bytecode,
+		std::size_t a_bytecodeLength,
+		std::optional<PixelShaderTechniqueView> a_technique,
+		const sha1::Sha1Result& a_sha,
+		ID3D11PixelShader** a_out) noexcept;
 
 	struct PixelShaderSwapCompletion
 	{

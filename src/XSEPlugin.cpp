@@ -1,6 +1,7 @@
 #include "Env.h"
 #include "Feature.h"
 #include "Log.h"
+#include "Render/ShaderSubclassHooks.h"
 #include "Render/SwapChainHook.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
@@ -71,6 +72,8 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	L->info("FO4CommunityShaders v{}.{}.{} loaded",
 		Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
 	L->info("BUILD_DESCRIBE {}", CS_BUILD_DESCRIBE);
+
+	cs::engine::InstallShaderSubclassHooks();
 
 	auto& featureManager = cs::FeatureManager::Get();
 	featureManager.PrepareAll();

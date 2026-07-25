@@ -451,7 +451,8 @@ namespace cs::features
 			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
 		};
 		for (const auto target : directionalTargets) {
-			if (boundShader.get() == cs::engine::GetInjectedPixelShader(target)) {
+			if (cs::engine::IsInjectedPixelShader(
+					target, boundShader.get())) {
 				_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
 				cs::engine::DispatchShaderInjections(target, context);
 				return;
