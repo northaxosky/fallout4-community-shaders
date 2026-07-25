@@ -156,6 +156,13 @@ namespace
 		CHECK(UsesDirectAmbientBounce(true, 1));
 		CHECK(!UsesDirectAmbientBounce(true, 2));
 
+		constexpr auto disabledPlan = InitialTexturePlan(false);
+		CHECK(disabledPlan.bakeCritical);
+		CHECK(!disabledPlan.enableOnly);
+		constexpr auto enabledPlan = InitialTexturePlan(true);
+		CHECK(enabledPlan.bakeCritical);
+		CHECK(enabledPlan.enableOnly);
+
 		constexpr std::array aoIdentity{ 1.0f, 1.0f, 1.0f, 1.0f };
 		constexpr std::array bounceIdentity{ 0.0f, 0.0f, 0.0f, 0.0f };
 		CHECK(kAOIdentity == aoIdentity);

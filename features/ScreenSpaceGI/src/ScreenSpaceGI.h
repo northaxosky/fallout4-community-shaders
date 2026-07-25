@@ -140,6 +140,7 @@ namespace cs::features
 		void OnAmbientPassInjection(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();
 		bool IsReady();
+		bool EnsureBakeResources();
 		bool EnsureResources();
 		void IntegrateAO(cs::engine::RenderTarget a_target);
 		void IntegrateBounce();
@@ -157,6 +158,8 @@ namespace cs::features
 
 		Settings _settings;
 		std::atomic_bool _started{ false };
+		std::atomic_bool _bakeResourcesReady{ false };
+		std::atomic_bool _bakeResourceInitFailed{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _resourceInitFailed{ false };
 		std::atomic_bool _ssgiBound{ false };
@@ -221,6 +224,8 @@ namespace cs::features
 		winrt::com_ptr<ID3D11BlendState> _bounceIntegrationBlendState;
 		winrt::com_ptr<ID3D11DepthStencilState> _bounceIntegrationDepthStencilState;
 		winrt::com_ptr<ID3D11RasterizerState> _bounceIntegrationRasterizerState;
+		std::uint32_t _bounceAllocW = 0;
+		std::uint32_t _bounceAllocH = 0;
 		std::uint32_t _allocW = 0;
 		std::uint32_t _allocH = 0;
 		std::uint32_t _generation = 0;

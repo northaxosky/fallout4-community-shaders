@@ -455,7 +455,14 @@ namespace cs::features
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !a_device) return;
-		EnsureResources();
+		const auto allocationPlan =
+			ssgi_lifecycle::InitialTexturePlan(_settings.enabled);
+		if (allocationPlan.bakeCritical) {
+			EnsureBakeResources();
+		}
+		if (allocationPlan.enableOnly) {
+			EnsureResources();
+		}
 
 		_resolveCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 			cs::util::CompileShader(kResolvePath, {}, "cs_5_0")));
@@ -575,14 +582,94 @@ namespace cs::features
 	{
 		return ssgi_lifecycle::CanBakeAmbientInjection(
 			_started.load(std::memory_order_acquire),
-			_resourcesReady.load(std::memory_order_acquire),
+			_bakeResourcesReady.load(std::memory_order_acquire),
 			_bounceTexture != nullptr,
 			_settings.enabled,
 			_settings.bounceDelivery);
 	}
 
+	bool ScreenSpaceGI::EnsureBakeResources()
+	{
+		if (_bakeResourceInitFailed.load(std::memory_order_acquire)) {
+			return false;
+		}
+		if (!cs::util::GetD3DDevice()) {
+			return false;
+		}
+
+		const bool hadResources =
+			_bakeResourcesReady.load(std::memory_order_acquire) && _bounceTexture;
+		try {
+			auto* state = cs::engine::GetGraphicsState();
+			if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
+				if (hadResources) {
+					return true;
+				}
+				throw std::runtime_error("graphics state has no screen dimensions");
+			}
+
+			auto* rendererData = RE::BSGraphics::GetRendererData();
+			auto* context = rendererData ?
+				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+				nullptr;
+			if (!context) {
+				throw std::runtime_error("renderer context unavailable");
+			}
+
+			if (hadResources && _bounceTexture->uav) {
+				context->ClearUnorderedAccessViewFloat(
+					_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+			}
+
+			const std::uint32_t width = state->screenWidth;
+			const std::uint32_t height = state->screenHeight;
+			if (hadResources && width == _bounceAllocW && height == _bounceAllocH) {
+				return true;
+			}
+			_resourcesReady.store(false, std::memory_order_release);
+
+			auto bounceTexture = CreateOutputTexture(width, height);
+			context->ClearUnorderedAccessViewFloat(
+				bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+
+			_bounceTexture = std::move(bounceTexture);
+			_bounceAllocW = width;
+			_bounceAllocH = height;
+			_bakeResourcesReady.store(true, std::memory_order_release);
+			L->info("Bake resources ready ({}x{}).", _bounceAllocW, _bounceAllocH);
+			return true;
+		} catch (const std::exception& e) {
+			if (hadResources) {
+				L->error("Bake resource resize failed: {}", e.what());
+			} else {
+				_bakeResourceInitFailed.store(true, std::memory_order_release);
+				_bounceTexture.reset();
+				_bounceAllocW = 0;
+				_bounceAllocH = 0;
+				_bakeResourcesReady.store(false, std::memory_order_release);
+				L->critical("Bake resource creation failed: {}", e.what());
+			}
+			return false;
+		} catch (...) {
+			if (hadResources) {
+				L->error("Bake resource resize failed.");
+			} else {
+				_bakeResourceInitFailed.store(true, std::memory_order_release);
+				_bounceTexture.reset();
+				_bounceAllocW = 0;
+				_bounceAllocH = 0;
+				_bakeResourcesReady.store(false, std::memory_order_release);
+				L->critical("Bake resource creation failed.");
+			}
+			return false;
+		}
+	}
+
 	bool ScreenSpaceGI::EnsureResources()
 	{
+		if (!EnsureBakeResources()) {
+			return false;
+		}
 		if (_resourceInitFailed.load(std::memory_order_acquire)) {
 			return false;
 		}
@@ -590,13 +677,16 @@ namespace cs::features
 			return false;
 		}
 
-		const bool hadResources = _resourcesReady.load(std::memory_order_acquire);
+		const bool resourcesReady = _resourcesReady.load(std::memory_order_acquire);
+		const bool hadResources = _aoTexture != nullptr;
 		try {
 			auto* state = cs::engine::GetGraphicsState();
 			if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
-				// Preserve valid resources across transient zero-sized frames.
-				if (hadResources) {
+				if (resourcesReady) {
 					return true;
+				}
+				if (hadResources) {
+					return false;
 				}
 				throw std::runtime_error("graphics state has no screen dimensions");
 			}
@@ -605,8 +695,11 @@ namespace cs::features
 			const std::uint32_t width = state->screenWidth;
 			const std::uint32_t height = state->screenHeight;
 
-			if (hadResources && width == _allocW && height == _allocH) {
+			if (resourcesReady && width == _allocW && height == _allocH) {
 				return true;
+			}
+			if (hadResources) {
+				_resourcesReady.store(false, std::memory_order_release);
 			}
 
 			auto* rendererData = RE::BSGraphics::GetRendererData();
@@ -619,10 +712,7 @@ namespace cs::features
 
 			auto resolveCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<ResolveCB>());
-			auto bounceTexture = CreateOutputTexture(width, height);
 			auto aoTexture = CreateOutputTexture(width, height);
-			context->ClearUnorderedAccessViewFloat(
-				bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
 			context->ClearUnorderedAccessViewFloat(
 				aoTexture->uav.get(), ssgi_lifecycle::kAOIdentity.data());
 			auto linearDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT);
@@ -728,7 +818,6 @@ namespace cs::features
 
 			_resourcesReady.store(false, std::memory_order_release);
 			_resolveCB = std::move(resolveCB);
-			_bounceTexture = std::move(bounceTexture);
 			_aoTexture = std::move(aoTexture);
 			_linearDepthTex = std::move(linearDepthTex);
 			_workingDepthTex = std::move(workingDepthTex);
@@ -764,7 +853,6 @@ namespace cs::features
 				L->error("Resource resize failed: {}", e.what());
 			} else {
 				_resourceInitFailed.store(true, std::memory_order_release);
-				_bounceTexture.reset();
 				_aoTexture.reset();
 				_resolveCB.reset();
 				_linearDepthTex.reset();
@@ -795,7 +883,6 @@ namespace cs::features
 				L->error("Resource resize failed.");
 			} else {
 				_resourceInitFailed.store(true, std::memory_order_release);
-				_bounceTexture.reset();
 				_aoTexture.reset();
 				_resolveCB.reset();
 				_linearDepthTex.reset();
@@ -858,16 +945,22 @@ namespace cs::features
 			context->ClearUnorderedAccessViewFloat(
 				_aoTexture->uav.get(), ssgi_lifecycle::kAOIdentity.data());
 		}
-		if (!EnsureResources() || !_bounceTexture || !_aoTexture) {
+		if (!EnsureBakeResources() || !_bounceTexture) {
 			return;
 		}
 		context->ClearUnorderedAccessViewFloat(
 			_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
+		if (!_settings.enabled) {
+			return;
+		}
+		if (!EnsureResources() || !_aoTexture) {
+			return;
+		}
 		context->ClearUnorderedAccessViewFloat(
 			_aoTexture->uav.get(), ssgi_lifecycle::kAOIdentity.data());
 
 		auto* state = cs::engine::GetGraphicsState();
-		if (!state || !_settings.enabled) {
+		if (!state) {
 			return;
 		}
 
@@ -1306,7 +1399,9 @@ namespace cs::features
 		_aoIntegrationActiveLastFrame.store(false, std::memory_order_relaxed);
 		_aoIntegrationDispatchedLastFrame.store(0, std::memory_order_relaxed);
 
-		if (_settings.enabled && IsReady() && _aoTexture) {
+		if (_settings.enabled &&
+			_resourcesReady.load(std::memory_order_acquire) &&
+			_aoTexture) {
 			IntegrateAO(cs::engine::RenderTarget::kSSAOFinal);
 			if (_settings.bounceDelivery == 2 &&
 				_bounceProducedLastFrame.load(std::memory_order_relaxed)) {
@@ -1318,9 +1413,12 @@ namespace cs::features
 		auto* context = rendererData ?
 			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 			nullptr;
-		if (context && _bounceTexture &&
-			!ssgi_lifecycle::UsesDirectAmbientBounce(
-				_settings.enabled, _settings.bounceDelivery)) {
+		const bool directBounceReady =
+			ssgi_lifecycle::UsesDirectAmbientBounce(
+				_settings.enabled, _settings.bounceDelivery) &&
+			_resourcesReady.load(std::memory_order_acquire) &&
+			_bounceProducedLastFrame.load(std::memory_order_relaxed);
+		if (context && _bounceTexture && !directBounceReady) {
 			context->ClearUnorderedAccessViewFloat(
 				_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
 		}
@@ -1630,7 +1728,7 @@ namespace cs::features
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
-		if (!_resourcesReady.load(std::memory_order_acquire) || !_bounceTexture || !_aoTexture) {
+		if (!_bakeResourcesReady.load(std::memory_order_acquire) || !_bounceTexture) {
 			return;
 		}
 		if (!a_context) {
@@ -1666,6 +1764,8 @@ namespace cs::features
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("mode", static_cast<std::int64_t>(_settings.mode))
+			.Field("bake_resources_ready", _bakeResourcesReady.load(std::memory_order_acquire))
+			.Field("bake_resource_init_failed", _bakeResourceInitFailed.load(std::memory_order_acquire))
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
 			.Field("resource_init_failed", _resourceInitFailed.load(std::memory_order_acquire))
 			.Field("ssgi_bound", _ssgiBoundLastFrame.load(std::memory_order_relaxed))
@@ -1705,7 +1805,12 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+		const bool enabledChanged = ImGui::Checkbox("Enabled", &_settings.enabled);
+		bool changed = enabledChanged;
+		if (enabledChanged && _settings.enabled && !EnsureResources()) {
+			_settings.enabled = false;
+			L->error("SSGI could not be enabled because its resources are unavailable.");
+		}
 
 		const char* modes[] = { "Replace engine AO", "Min-blend with engine AO" };
 		int modeIndex = std::clamp(_settings.mode, 1, 2) - 1;
@@ -1746,11 +1851,13 @@ namespace cs::features
 			SaveSettings();
 		}
 
+		const char* bakeStatus = _bakeResourceInitFailed.load(std::memory_order_acquire) ? "failed" :
+			(_bakeResourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
 		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
 			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
 		ImGui::TextDisabled(
-			"Resources: %s | extent: %ux%u | generation: %u",
-			status, _allocW, _allocH, _generation);
+			"Bake: %s (%ux%u) | Runtime: %s (%ux%u) | generation: %u",
+			bakeStatus, _bounceAllocW, _bounceAllocH, status, _allocW, _allocH, _generation);
 
 		// Debug preview: raw AO / bounce buffer in-game, no RenderDoc needed.
 		// Mirrors ScreenSpaceShadows' mask preview. Watch while rotating over fixed
@@ -1764,11 +1871,13 @@ namespace cs::features
 			ImGui::RadioButton("Bounce", &s_previewSource, 1);
 			const auto& tex = (s_previewSource == 1) ? _bounceTexture : _aoTexture;
 			const char* label = (s_previewSource == 1) ? "Bounce (indirect GI)" : "AO (bright = unoccluded)";
-			if (tex && tex->srv && _allocW > 0 && _allocH > 0) {
-				const float aspect = static_cast<float>(_allocW) / static_cast<float>(_allocH);
+			const std::uint32_t previewW = s_previewSource == 1 ? _bounceAllocW : _allocW;
+			const std::uint32_t previewH = s_previewSource == 1 ? _bounceAllocH : _allocH;
+			if (tex && tex->srv && previewW > 0 && previewH > 0) {
+				const float aspect = static_cast<float>(previewW) / static_cast<float>(previewH);
 				const float previewWidth = 480.0f;
 				const float previewHeight = previewWidth / aspect;
-				ImGui::TextDisabled("%s %ux%u", label, _allocW, _allocH);
+				ImGui::TextDisabled("%s %ux%u", label, previewW, previewH);
 				ImGui::Image(reinterpret_cast<ImTextureID>(tex->srv.get()),
 					ImVec2(previewWidth, previewHeight));
 			} else {
