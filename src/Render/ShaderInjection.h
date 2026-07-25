@@ -67,6 +67,14 @@ namespace cs::engine
 		std::vector<ShaderSlotClaim>  slotClaims;
 	};
 
+	struct ShaderVariantCompilationDescriptor
+	{
+		std::wstring            sourcePath;
+		std::string             entryPoint;
+		std::string             profile;
+		ShaderInjectionDefines  defines;
+	};
+
 	struct ShaderReplacementVariantRegistration
 	{
 		ShaderInjectionTarget                targetId =
@@ -74,7 +82,7 @@ namespace cs::engine
 		std::string                          name;
 		std::optional<PixelShaderVariant>    variant;
 		std::string                          expectedStockSha1;
-		ShaderInjectionDefines               defines;
+		ShaderVariantCompilationDescriptor   compilation;
 	};
 
 	enum class DeveloperShaderOverride : std::uint8_t

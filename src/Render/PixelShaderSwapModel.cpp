@@ -93,6 +93,14 @@ namespace cs::engine
 		return {};
 	}
 
+	bool ShouldSubstitutePixelShader(
+		PixelShaderSwapSelectionKind a_selection,
+		bool a_replacementReady) noexcept
+	{
+		return a_selection == PixelShaderSwapSelectionKind::kSelected
+			&& a_replacementReady;
+	}
+
 	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
 		PixelShaderSwapObserver a_observer,
 		const void* a_bytecode,

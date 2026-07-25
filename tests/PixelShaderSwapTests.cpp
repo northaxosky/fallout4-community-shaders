@@ -192,6 +192,23 @@ namespace
 					"BSDFCompositeShader", 0x10B60),
 			"unresolved Tilelight state produced a variant key");
 	}
+
+	void TestNotReadyReplacementKeepsStock()
+	{
+		using namespace cs::engine;
+		Check(
+			!ShouldSubstitutePixelShader(
+				PixelShaderSwapSelectionKind::kSelected, false),
+			"selected but not-ready replacement did not retain stock");
+		Check(
+			ShouldSubstitutePixelShader(
+				PixelShaderSwapSelectionKind::kSelected, true),
+			"ready selected replacement did not substitute");
+		Check(
+			!ShouldSubstitutePixelShader(
+				PixelShaderSwapSelectionKind::kHashMismatch, true),
+			"guard mismatch allowed substitution");
+	}
 }
 
 int main()
@@ -207,7 +224,8 @@ int main()
 		{ "hashless variant refused", &TestHashlessVariantRefused },
 		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
 		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
-		{ "composite resolution stays unavailable", &TestCompositeResolutionStaysUnavailable }
+		{ "composite resolution stays unavailable", &TestCompositeResolutionStaysUnavailable },
+		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock }
 	};
 
 	unsigned failures = 0;

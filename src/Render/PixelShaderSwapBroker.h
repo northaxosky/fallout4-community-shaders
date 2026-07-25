@@ -73,6 +73,9 @@ namespace cs::engine
 		std::span<const PixelShaderSwapVariantKey> a_variants,
 		std::optional<PixelShaderVariantView> a_variant,
 		const sha1::Sha1Result& a_stockSha1) noexcept;
+	bool ShouldSubstitutePixelShader(
+		PixelShaderSwapSelectionKind a_selection,
+		bool a_replacementReady) noexcept;
 
 	// A successful resolver replaces *a_out with net refcount one.
 	using PixelShaderSwapResolver = bool (*)(

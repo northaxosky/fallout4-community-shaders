@@ -3,21 +3,19 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderVariantCompilation.h"
 #include "Render/ShaderVariantResolver.h"
 #include "Utils/CSSha1.h"
-#include "Utils/ShaderCompile.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
-#include <cstdio>
 #include <d3d11.h>
 #include <exception>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <winrt/base.h>
 
 namespace cs::engine
 {
@@ -96,63 +94,76 @@ namespace cs::engine
 			}
 		} };
 
+		ShaderReplacementVariantRegistration
+			MakeDefaultVariantRegistration(
+				ShaderInjectionTarget a_target,
+				std::string a_name,
+				std::optional<PixelShaderVariant> a_variant,
+				std::string a_expectedStockSha1,
+				ShaderInjectionDefines a_defines = {})
+		{
+			const auto& metadata =
+				kTargets[static_cast<std::size_t>(a_target)];
+			ShaderReplacementVariantRegistration registration;
+			registration.targetId = a_target;
+			registration.name = std::move(a_name);
+			registration.variant = std::move(a_variant);
+			registration.expectedStockSha1 =
+				std::move(a_expectedStockSha1);
+			registration.compilation.sourcePath =
+				std::wstring(metadata.sourcePath);
+			registration.compilation.entryPoint =
+				std::string(metadata.entryPoint);
+			registration.compilation.profile =
+				std::string(metadata.profile);
+			registration.compilation.defines =
+				std::move(a_defines);
+			return registration;
+		}
+
 		std::vector<ShaderReplacementVariantRegistration>
 		DefaultVariantRegistrations()
 		{
 			using Target = ShaderInjectionTarget;
 			return {
-				{
+				MakeDefaultVariantRegistration(
 					Target::kDeferredComposite,
 					"default",
 					std::nullopt,
-					{},
-					{}
-				},
-				{
+					{}),
+				MakeDefaultVariantRegistration(
 					Target::kDeferredPrepass,
 					"default",
 					std::nullopt,
-					"c493970c042ccd90363c57596ff53f6fdd22ce5f",
-					{}
-				},
-				{
+					"c493970c042ccd90363c57596ff53f6fdd22ce5f"),
+				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredPoint,
 					"default",
 					std::nullopt,
-					"9969e800683c8a7c8afc25f41582415d79cbe47e",
-					{}
-				},
-				{
+					"9969e800683c8a7c8afc25f41582415d79cbe47e"),
+				MakeDefaultVariantRegistration(
 					Target::kAmbientIblPass,
 					"tilelight",
 					PixelShaderVariant{
 						"BSDFCompositeShader",
 						shader_variants::kBsdfCompositeAmbientIblTilelight
 					},
-					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
-					{}
-				},
-				{
+					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383"),
+				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredDirectional,
 					"default",
 					std::nullopt,
-					"50e2618e8d1a8c3400c2bdb0129e510fe395d19a",
-					{}
-				},
-				{
+					"50e2618e8d1a8c3400c2bdb0129e510fe395d19a"),
+				MakeDefaultVariantRegistration(
 					Target::kBsdfLightDeferredDirectionalIbl,
 					"default",
 					std::nullopt,
-					"94f8385edd1b4eb232b1de269e1ad7b21122a293",
-					{}
-				},
-				{
+					"94f8385edd1b4eb232b1de269e1ad7b21122a293"),
+				MakeDefaultVariantRegistration(
 					Target::kVlsSliceScatter,
 					"default",
 					std::nullopt,
-					{},
-					{}
-				}
+					{})
 			};
 		}
 
@@ -179,6 +190,7 @@ namespace cs::engine
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
+			std::atomic<std::uint64_t> passthroughNotReady{ 0 };
 			std::atomic<std::uint64_t> passthroughDisabled{ 0 };
 			std::atomic<std::uint64_t> dispatches{ 0 };
 			DeveloperShaderOverride   developerOverride = DeveloperShaderOverride::kAuto;
@@ -202,13 +214,15 @@ namespace cs::engine
 			ShaderInjectionTarget            targetId =
 				ShaderInjectionTarget::kCount;
 			std::string                      name;
-			winrt::com_ptr<ID3D11PixelShader> shader;
+			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
 		};
 
-		struct CompiledVariant
+		struct PreparedVariant
 		{
 			PublishedVariant variant;
 			PixelShaderSwapVariantKey key;
+			ShaderVariantCompilationState compilationState =
+				ShaderVariantCompilationState::kFailed;
 			std::string compiledSha1;
 		};
 
@@ -220,6 +234,8 @@ namespace cs::engine
 
 		struct PublishedPlan
 		{
+			std::shared_ptr<ShaderVariantCompilationPolicy>
+				compilationPolicy;
 			std::vector<PublishedTarget> targets;
 			std::vector<PublishedVariant> variants;
 			std::vector<PixelShaderSwapVariantKey> variantKeys;
@@ -436,7 +452,7 @@ namespace cs::engine
 		}
 
 		std::filesystem::path ResolveSourcePath(
-			const ShaderInjectionTargetMetadata& a_metadata,
+			const std::wstring& a_sourcePath,
 			DeveloperShaderOverride a_developerOverride,
 			const std::wstring& a_developerSourceRoot)
 		{
@@ -445,7 +461,7 @@ namespace cs::engine
 				&& !a_developerSourceRoot.empty();
 			const std::filesystem::path root =
 				useDeveloperRoot ? a_developerSourceRoot : kDefaultShaderRoot;
-			return root / a_metadata.sourcePath;
+			return root / a_sourcePath;
 		}
 
 		std::optional<PixelShaderSwapVariantKey> BuildVariantKey(
@@ -466,7 +482,8 @@ namespace cs::engine
 			return key;
 		}
 
-		std::optional<CompiledVariant> CompileVariant(
+		std::optional<PreparedVariant> PrepareVariant(
+			ShaderVariantCompilationPolicy& a_policy,
 			ID3D11Device* a_device,
 			const FrozenTarget& a_target,
 			const ShaderReplacementVariantRegistration& a_variant,
@@ -487,11 +504,12 @@ namespace cs::engine
 			}
 
 			const auto sourcePath = ResolveSourcePath(
-				*a_target.metadata,
+				a_variant.compilation.sourcePath,
 				runtime.developerOverride,
 				a_developerSourceRoot);
 			auto mergedDefines = a_target.defines;
-			for (const auto& [name, value] : a_variant.defines) {
+			for (const auto& [name, value] :
+				a_variant.compilation.defines) {
 				const auto [it, inserted] =
 					mergedDefines.emplace(name, value);
 				if (!inserted && it->second != value) {
@@ -507,22 +525,21 @@ namespace cs::engine
 				}
 			}
 
-			std::vector<std::pair<const char*, const char*>> defines;
-			defines.reserve(mergedDefines.size());
-			for (const auto& [name, value] : mergedDefines)
-				defines.emplace_back(name.c_str(), value.c_str());
+			ShaderVariantCompilationRequest request;
+			request.device.copy_from(a_device);
+			request.sourcePath = sourcePath;
+			request.entryPoint = a_variant.compilation.entryPoint;
+			request.profile = a_variant.compilation.profile;
+			request.defines.reserve(mergedDefines.size());
+			for (const auto& define : mergedDefines)
+				request.defines.push_back(define);
 
-			std::string compileError;
-			const auto blob = util::CompileShaderToBlob(
-				sourcePath.c_str(),
-				defines,
-				a_target.metadata->profile.data(),
-				a_target.metadata->entryPoint.data(),
-				&compileError);
-			if (!blob) {
-				a_error = compileError.empty()
-					? "shader compilation failed"
-					: std::move(compileError);
+			auto result = a_policy.Prepare(std::move(request));
+			if (result.state == ShaderVariantCompilationState::kFailed
+				|| !result.handle) {
+				a_error = result.error.empty()
+					? "compilation policy failed"
+					: std::move(result.error);
 				L->error(
 					"Compile '{}/{}' failed ({}): {}",
 					a_target.metadata->name,
@@ -532,51 +549,28 @@ namespace cs::engine
 				return std::nullopt;
 			}
 
-			winrt::com_ptr<ID3D11PixelShader> shader;
-			HRESULT result = E_FAIL;
-			{
-				ScopedPixelShaderBrokerBypass bypassBroker;
-				result = a_device->CreatePixelShader(
-					blob->GetBufferPointer(),
-					blob->GetBufferSize(),
-					nullptr,
-					shader.put());
-			}
-			if (FAILED(result) || !shader) {
-				char buffer[64]{};
-				std::snprintf(
-					buffer,
-					sizeof(buffer),
-					"CreatePixelShader hr=0x%08x",
-					static_cast<unsigned>(result));
-				a_error = buffer;
-				L->error(
-					"Compile '{}/{}' failed: {}",
+			if (result.state == ShaderVariantCompilationState::kReady) {
+				L->info(
+					"Compile '{}/{}' ok: {} bytes, dxbc-sha1={}",
 					a_target.metadata->name,
 					a_variant.name,
-					a_error);
-				return std::nullopt;
+					result.bytecodeSize,
+					result.compiledSha1);
+			} else {
+				L->info(
+					"Compile '{}/{}' pending.",
+					a_target.metadata->name,
+					a_variant.name);
 			}
 
-			const auto compiledSha1 = sha1::Sha1Compute(
-				blob->GetBufferPointer(),
-				blob->GetBufferSize());
-			const auto compiledSha1Hex = sha1::Sha1ToHex(compiledSha1);
-
-			L->info(
-				"Compile '{}/{}' ok: {} bytes, dxbc-sha1={}",
-				a_target.metadata->name,
-				a_variant.name,
-				static_cast<std::size_t>(blob->GetBufferSize()),
-				compiledSha1Hex);
-
-			CompiledVariant compiled;
-			compiled.variant.targetId = a_target.metadata->id;
-			compiled.variant.name = a_variant.name;
-			compiled.variant.shader = std::move(shader);
-			compiled.key = *key;
-			compiled.compiledSha1 = compiledSha1Hex;
-			return compiled;
+			PreparedVariant prepared;
+			prepared.variant.targetId = a_target.metadata->id;
+			prepared.variant.name = a_variant.name;
+			prepared.variant.compilation = std::move(result.handle);
+			prepared.key = *key;
+			prepared.compilationState = result.state;
+			prepared.compiledSha1 = std::move(result.compiledSha1);
+			return prepared;
 		}
 
 		const PublishedTarget* FindPublishedTarget(
@@ -666,15 +660,25 @@ namespace cs::engine
 					runtime.passthroughDisabled.fetch_add(1, std::memory_order_relaxed);
 					return false;
 				}
-				if (!variant.shader) {
-					runtime.passthroughCompileFail.fetch_add(1, std::memory_order_relaxed);
+				auto replacement = variant.compilation
+					? variant.compilation->AcquireOrRequest()
+					: winrt::com_ptr<ID3D11PixelShader>{};
+				if (!ShouldSubstitutePixelShader(
+						selection.kind,
+						static_cast<bool>(replacement))) {
+					const auto state = variant.compilation
+						? variant.compilation->GetState()
+						: ShaderVariantCompilationState::kFailed;
+					auto& counter =
+						state == ShaderVariantCompilationState::kFailed
+						? runtime.passthroughCompileFail
+						: runtime.passthroughNotReady;
+					counter.fetch_add(1, std::memory_order_relaxed);
 					return false;
 				}
 
-				ID3D11PixelShader* replacement = variant.shader.get();
-				replacement->AddRef();
 				(*a_out)->Release();
-				*a_out = replacement;
+				*a_out = replacement.detach();
 				const auto previous = runtime.substitutions.fetch_add(1, std::memory_order_relaxed);
 				if (previous == 0) {
 					L->info(
@@ -781,6 +785,30 @@ namespace cs::engine
 			L->error(
 				"Replacement variant '{}/{}' rejected: "
 				"missing expected stock SHA1 guard.",
+				kTargets[ToIndex(a_registration.targetId)].name,
+				a_registration.name);
+			return false;
+		}
+		if (a_registration.compilation.sourcePath.empty()) {
+			L->error(
+				"Replacement variant '{}/{}' rejected: "
+				"empty source path.",
+				kTargets[ToIndex(a_registration.targetId)].name,
+				a_registration.name);
+			return false;
+		}
+		if (a_registration.compilation.entryPoint.empty()) {
+			L->error(
+				"Replacement variant '{}/{}' rejected: "
+				"empty entry point.",
+				kTargets[ToIndex(a_registration.targetId)].name,
+				a_registration.name);
+			return false;
+		}
+		if (a_registration.compilation.profile.empty()) {
+			L->error(
+				"Replacement variant '{}/{}' rejected: "
+				"empty shader profile.",
 				kTargets[ToIndex(a_registration.targetId)].name,
 				a_registration.name);
 			return false;
@@ -924,6 +952,8 @@ namespace cs::engine
 
 		sha1::Sha1InitOnce();
 		auto plan = std::make_shared<PublishedPlan>();
+		plan->compilationPolicy =
+			CreateEagerShaderVariantCompilationPolicy();
 		std::size_t compileRequested = 0;
 		std::size_t compileSucceeded = 0;
 
@@ -952,56 +982,62 @@ namespace cs::engine
 					std::memory_order_relaxed);
 				compileRequested += frozenTarget.variants.size();
 
-				std::size_t targetCompiled = 0;
+				std::size_t targetPrepared = 0;
+				std::size_t targetReady = 0;
 				bool targetSwappable = false;
 				std::string firstError;
 				std::string onlyCompiledSha1;
 				for (const auto& variant : frozenTarget.variants) {
 					std::string compileError;
-					auto compiled = CompileVariant(
+					auto prepared = PrepareVariant(
+						*plan->compilationPolicy,
 						a_device,
 						frozenTarget,
 						variant,
 						developerSourceRoot,
 						compileError);
-					if (!compiled) {
+					if (!prepared) {
 						if (firstError.empty())
 							firstError = std::move(compileError);
 						continue;
 					}
 
-					++compileSucceeded;
-					++targetCompiled;
-					onlyCompiledSha1 = compiled->compiledSha1;
+					++targetPrepared;
+					if (prepared->compilationState
+						== ShaderVariantCompilationState::kReady) {
+						++compileSucceeded;
+						++targetReady;
+						onlyCompiledSha1 = prepared->compiledSha1;
+					}
 					targetSwappable = targetSwappable
-						|| compiled->key.variant.has_value()
-						|| compiled->key.expectedStockSha1.has_value();
+						|| prepared->key.variant.has_value()
+						|| prepared->key.expectedStockSha1.has_value();
 					plan->variantKeys.push_back(
-						std::move(compiled->key));
+						std::move(prepared->key));
 					plan->variants.push_back(
-						std::move(compiled->variant));
+						std::move(prepared->variant));
 				}
 
 				runtime.compileOk.store(
-					targetCompiled > 0,
+					targetReady > 0,
 					std::memory_order_release);
 				runtime.swappable.store(
 					targetSwappable,
 					std::memory_order_release);
 				runtime.compileError =
-					targetCompiled == frozenTarget.variants.size()
+					targetPrepared == frozenTarget.variants.size()
 					? std::string{}
 					: std::move(firstError);
-				if (targetCompiled == 1) {
+				if (targetReady == 1) {
 					runtime.compiledSha1 =
 						std::move(onlyCompiledSha1);
-				} else if (targetCompiled > 1) {
+				} else if (targetReady > 1) {
 					runtime.compiledSha1 =
-						std::to_string(targetCompiled)
+						std::to_string(targetReady)
 						+ " variants";
 				}
 
-				if (targetCompiled > 0) {
+				if (targetPrepared > 0) {
 					plan->targets.push_back(PublishedTarget{
 						frozenTarget.metadata->id,
 						frozenTarget.binds
@@ -1092,9 +1128,18 @@ namespace cs::engine
 			plan->variants,
 			a_target,
 			&PublishedVariant::targetId);
-		return variant == plan->variants.end()
-			? nullptr
-			: variant->shader.get();
+		for (auto current = variant;
+			current != plan->variants.end()
+				&& current->targetId == a_target;
+			++current) {
+			if (current->compilation) {
+				if (auto* shader =
+						current->compilation->PeekPixelShader()) {
+					return shader;
+				}
+			}
+		}
+		return nullptr;
 	}
 
 	bool IsInjectedPixelShader(
@@ -1109,7 +1154,9 @@ namespace cs::engine
 			plan->variants,
 			[a_target, a_shader](const PublishedVariant& a_variant) {
 				return a_variant.targetId == a_target
-					&& a_variant.shader.get() == a_shader;
+					&& a_variant.compilation
+					&& a_variant.compilation->PeekPixelShader()
+						== a_shader;
 			});
 	}
 
