@@ -4,7 +4,6 @@
 #include <cstdio>
 #include <filesystem>
 #include <string>
-#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -88,7 +87,7 @@ namespace
 				shader.profile,
 				shader.entryPoint);
 		}
-		std::printf("ShaderCompileLighting checked %zu compile-only permutations\n", cases.size());
+		std::printf("ShaderCompile checked %zu compile-only lighting permutations\n", cases.size());
 	}
 }
 
@@ -97,23 +96,15 @@ int main(int argc, char** argv)
 	if (argc != 3) {
 		std::fprintf(
 			stderr,
-			"Usage: ShaderCompileTests <--screen-space-gi|--lighting> <shader directory>\n");
+			"Usage: ShaderCompileTests <ScreenSpaceGI shader directory> <lighting shader directory>\n");
 		return 2;
 	}
 
-	const std::string_view suite{ argv[1] };
-	const std::filesystem::path root{ argv[2] };
-	if (suite == "--screen-space-gi") {
-		CompileScreenSpaceGI(root);
-	} else if (suite == "--lighting") {
-		CompileLighting(root);
-	} else {
-		std::fprintf(stderr, "Unknown shader compile suite: %s\n", argv[1]);
-		return 2;
-	}
+	CompileScreenSpaceGI(argv[1]);
+	CompileLighting(argv[2]);
 
 	if (failures == 0)
-		std::printf("ShaderCompile %s suite passed\n", argv[1]);
+		std::printf("ShaderCompile passed\n");
 	else
 		std::printf("%d shader(s) failed to compile\n", failures);
 

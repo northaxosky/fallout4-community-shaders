@@ -252,18 +252,10 @@ target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
 add_test(
 	NAME ShaderCompile
 	COMMAND ShaderCompileTests
-		--screen-space-gi
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
-)
-set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
-
-add_test(
-	NAME ShaderCompileLighting
-	COMMAND ShaderCompileTests
-		--lighting
 		"${CMAKE_SOURCE_DIR}/shaders/lighting"
 )
-set_tests_properties(ShaderCompileLighting PROPERTIES LABELS "shader;unit")
+set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
 add_executable(ShaderCatalogTests
 	tests/ShaderCatalogTests.cpp
@@ -457,15 +449,8 @@ add_test(
 		-File "${_shader_roundtrip_test_script}"
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
-add_test(
-	NAME ShaderRoundtripManifestWindowsPowerShellUnit
-	COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
-		-File "${_shader_roundtrip_test_script}"
-	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-)
 set_tests_properties(
 	ShaderRoundtripManifestUnit
-	ShaderRoundtripManifestWindowsPowerShellUnit
 	PROPERTIES
 	LABELS "shader;unit"
 	TIMEOUT 120

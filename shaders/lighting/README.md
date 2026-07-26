@@ -116,12 +116,12 @@ live in `northaxosky/fallout4-re`. This repository consumes the published
 the corpus or RE tools.
 
 `ShaderRoundtrip` validates the eight producer-proven variants against that
-manifest. `ShaderCompileLighting` separately compiles the three shipping
-permutations without native fidelity evidence: deferred composite and the two
-Screen Space Shadows directional variants. Replacing three machine-specific
-exec-diff tests with these clean-clone gates strengthens the suite: conformance
-is no longer self-rebaselinable, while every shipping lighting permutation
-still receives compile coverage.
+manifest. `ShaderCompile` also compiles the three shipping permutations without
+native fidelity evidence: deferred composite and the two Screen Space Shadows
+directional variants. Replacing three machine-specific exec-diff tests with
+these clean-clone gates strengthens the suite: conformance is no longer
+self-rebaselinable, while every shipping lighting permutation still receives
+compile coverage.
 
 The manifest is producer output and must never be hand-edited. After an
 intentional shader change, leave `ShaderRoundtrip` failing until
@@ -129,10 +129,11 @@ intentional shader change, leave `ShaderRoundtrip` failing until
 
 ```powershell
 Set-Location <fallout4-re-checkout>
-python -m harness.shader_corpus --json fidelity publish-conformance `
+python -m harness.shader_corpus fidelity publish-conformance `
   --manifest .shader-cache/exec-diff-run/shader-exec-diff-run.json `
   --contracts harness/shaders/shader-exec-contracts.json `
   --native-manifest harness/shaders/native-shader-targets.json `
+  --archive "<Fallout 4 Data>/Fallout4 - Shaders.ba2" `
   --corpus-dir .shader-cache/corpus `
   --source-root <fallout4-community-shaders-checkout> `
   --output harness/shaders/shader-fidelity-conformance.json
