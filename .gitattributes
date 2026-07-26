@@ -1,2 +1,5 @@
 *.sh text eol=lf
 *.py text eol=lf
+
+# Producer-published artifact: must stay byte-identical to fallout4-re.
+scripts/shaders/shader-fidelity-conformance.json -text
