@@ -234,6 +234,9 @@ add_executable(SssDxbcPatchTests
 	features/ScreenSpaceShadows/src/SssMaskBinding.h
 )
 configure_host_test(SssDxbcPatchTests)
+target_compile_definitions(SssDxbcPatchTests PRIVATE
+	FO4CS_SSS_DXBC_PATCH_TESTING=1
+)
 target_include_directories(SssDxbcPatchTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/src"
 )

@@ -23,6 +23,9 @@ namespace cs::features::sss_dxbc_patch
 		std::uint64_t patchedDrawMatched = 0;
 		std::uint64_t stockShaderFallback = 0;
 		std::uint64_t stockShaderFallbackFailed = 0;
+		std::uint64_t realMaskBinds = 0;
+		std::uint64_t whiteFallbackBinds = 0;
+		std::uint64_t invariantViolations = 0;
 		std::uint64_t unknownStockFallback = 0;
 		std::size_t coveragePass = 0;
 		std::size_t coverageCandidates = 0;
@@ -137,22 +140,64 @@ namespace cs::features::sss_dxbc_patch
 		std::atomic_uint8_t _state{ 0 };
 	};
 
-	struct AtomicCounters
+	struct CounterDelta
 	{
-		std::atomic_uint64_t candidateSeen{ 0 };
-		std::atomic_uint64_t exactRouteAdmitted{ 0 };
-		std::atomic_uint64_t hashMismatch{ 0 };
-		std::atomic_uint64_t preimageMismatch{ 0 };
-		std::atomic_uint64_t patchBuilt{ 0 };
-		std::atomic_uint64_t checksumHashMismatch{ 0 };
-		std::atomic_uint64_t createPsAccepted{ 0 };
-		std::atomic_uint64_t createPsRejected{ 0 };
-		std::atomic_uint64_t identityPublished{ 0 };
-		std::atomic_uint64_t patchedDrawMatched{ 0 };
-		std::atomic_uint64_t stockShaderFallback{ 0 };
-		std::atomic_uint64_t stockShaderFallbackFailed{ 0 };
-		std::atomic_uint64_t unknownStockFallback{ 0 };
+		std::uint64_t candidateSeen = 0;
+		std::uint64_t exactRouteAdmitted = 0;
+		std::uint64_t hashMismatch = 0;
+		std::uint64_t preimageMismatch = 0;
+		std::uint64_t patchBuilt = 0;
+		std::uint64_t checksumHashMismatch = 0;
+		std::uint64_t createPsAccepted = 0;
+		std::uint64_t createPsRejected = 0;
+		std::uint64_t identityPublished = 0;
+		std::uint64_t patchedDrawMatched = 0;
+		std::uint64_t stockShaderFallback = 0;
+		std::uint64_t stockShaderFallbackFailed = 0;
+		std::uint64_t realMaskBinds = 0;
+		std::uint64_t whiteFallbackBinds = 0;
+		std::uint64_t invariantViolations = 0;
+		std::uint64_t unknownStockFallback = 0;
 	};
+
+	class AtomicCounters
+	{
+	public:
+		void Publish(const CounterDelta& a_delta) noexcept;
+
+	private:
+		friend TelemetrySnapshot SnapshotCounters(
+			const AtomicCounters& a_counters) noexcept;
+
+		std::atomic_uint64_t _sequence{ 0 };
+		std::atomic_uint64_t _candidateSeen{ 0 };
+		std::atomic_uint64_t _exactRouteAdmitted{ 0 };
+		std::atomic_uint64_t _hashMismatch{ 0 };
+		std::atomic_uint64_t _preimageMismatch{ 0 };
+		std::atomic_uint64_t _patchBuilt{ 0 };
+		std::atomic_uint64_t _checksumHashMismatch{ 0 };
+		std::atomic_uint64_t _createPsAccepted{ 0 };
+		std::atomic_uint64_t _createPsRejected{ 0 };
+		std::atomic_uint64_t _identityPublished{ 0 };
+		std::atomic_uint64_t _patchedDrawMatched{ 0 };
+		std::atomic_uint64_t _stockShaderFallback{ 0 };
+		std::atomic_uint64_t _stockShaderFallbackFailed{ 0 };
+		std::atomic_uint64_t _realMaskBinds{ 0 };
+		std::atomic_uint64_t _whiteFallbackBinds{ 0 };
+		std::atomic_uint64_t _invariantViolations{ 0 };
+		std::atomic_uint64_t _unknownStockFallback{ 0 };
+	};
+	static_assert(std::atomic_uint64_t::is_always_lock_free);
+
+#ifdef FO4CS_SSS_DXBC_PATCH_TESTING
+	enum class SnapshotTestPoint : std::uint8_t
+	{
+		kCandidateSeen,
+		kPatchedDrawMatched
+	};
+	using SnapshotTestHook = void (*)(SnapshotTestPoint) noexcept;
+	void SetSnapshotTestHook(SnapshotTestHook a_hook) noexcept;
+#endif
 
 	engine::PixelShaderSwapResolverResult ResolveRequest(
 		const engine::dxbc_patch::Artifact& a_artifact,

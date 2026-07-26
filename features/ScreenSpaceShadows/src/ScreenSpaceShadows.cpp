@@ -925,8 +925,6 @@ namespace cs::features
 		ID3D11DeviceContext* a_context,
 		bool a_patchedDraw)
 	{
-		if (a_patchedDraw)
-			sss_dxbc_patch::RecordPatchedDrawMatched();
 		const sss_mask_binding::Api api{
 			.context = a_context,
 			.get = &GetPixelShaderResource,
@@ -944,7 +942,12 @@ namespace cs::features
 				realMask,
 				_whiteFallbackSRV.get());
 			_maskBound.store(false, std::memory_order_relaxed);
-			(void)sss_dxbc_patch::RestoreStockShader(a_context);
+			const bool stockRestored =
+				sss_dxbc_patch::RestoreStockShader(a_context);
+			sss_dxbc_patch::RecordPatchedDraw({
+				.stockShaderFallback = stockRestored,
+				.stockShaderFallbackFailed = !stockRestored
+			});
 			return;
 		}
 		const auto result = sss_mask_binding::Bind(
@@ -957,21 +960,21 @@ namespace cs::features
 			_whiteFallbackExtent.allocated,
 			_requiredMaskExtent);
 		if (a_patchedDraw) {
-			if (result.source
+			const bool realMaskBound =
+				result.source
 				== sss_mask_binding::Source::kRealMask
-				&& result.validBinding) {
-				_realMaskBinds.fetch_add(1, std::memory_order_relaxed);
-			} else if (result.source
+				&& result.validBinding;
+			const bool whiteFallbackBound =
+				result.source
 					== sss_mask_binding::Source::kWhiteFallback
-				&& result.validBinding) {
-				_whiteFallbackBinds.fetch_add(
-					1,
-					std::memory_order_relaxed);
-			}
-			if (result.foreignBindingDetected
-				|| !result.validBinding) {
+				&& result.validBinding;
+			const bool invariantViolated =
+				result.foreignBindingDetected
+				|| !result.validBinding;
+			bool stockFallbackAttempted = false;
+			bool stockRestored = false;
+			if (invariantViolated) {
 				sss_dxbc_patch::BreakBindingInvariant();
-				bool stockRestored = false;
 				if (!result.validBinding) {
 					_maskBound.store(
 						false,
@@ -981,12 +984,21 @@ namespace cs::features
 							api,
 							kMaskPSSlot);
 					}
+					stockFallbackAttempted = true;
 					stockRestored =
 						sss_dxbc_patch::RestoreStockShader(a_context);
 				}
-				_invariantViolations.fetch_add(
-					1,
-					std::memory_order_relaxed);
+			}
+			sss_dxbc_patch::RecordPatchedDraw({
+				.realMaskBound = realMaskBound,
+				.whiteFallbackBound = whiteFallbackBound,
+				.invariantViolated = invariantViolated,
+				.stockShaderFallback =
+					stockFallbackAttempted && stockRestored,
+				.stockShaderFallbackFailed =
+					stockFallbackAttempted && !stockRestored
+			});
+			if (invariantViolated) {
 				if (L->should_log(spdlog::level::err)) {
 					CS_LOG_EVERY_MS(
 						L,
@@ -1038,12 +1050,11 @@ namespace cs::features
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		const auto patchTelemetry = sss_dxbc_patch::GetTelemetry();
-		const auto realMaskBinds =
-			_realMaskBinds.load(std::memory_order_relaxed);
+		const auto realMaskBinds = patchTelemetry.realMaskBinds;
 		const auto whiteFallbackBinds =
-			_whiteFallbackBinds.load(std::memory_order_relaxed);
+			patchTelemetry.whiteFallbackBinds;
 		const auto invariantViolations =
-			_invariantViolations.load(std::memory_order_relaxed);
+			patchTelemetry.invariantViolations;
 		const bool startupInjectionReady =
 			_injectionReady.load(std::memory_order_acquire);
 		const bool patchMode =

@@ -102,9 +102,6 @@ namespace cs::features
 		std::atomic<float> _lightX{ 0.0f };
 		std::atomic<float> _lightY{ 0.0f };
 		std::atomic<float> _clipW{ 0.0f };
-		std::atomic_uint64_t _realMaskBinds{ 0 };
-		std::atomic_uint64_t _whiteFallbackBinds{ 0 };
-		std::atomic_uint64_t _invariantViolations{ 0 };
 		std::atomic_uint32_t _requiredMaskWidthTelemetry{ 0 };
 		std::atomic_uint32_t _requiredMaskHeightTelemetry{ 0 };
 		std::atomic_uint32_t _whiteFallbackWidthTelemetry{ 0 };

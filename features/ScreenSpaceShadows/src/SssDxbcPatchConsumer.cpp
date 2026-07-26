@@ -298,21 +298,13 @@ namespace cs::features::sss_dxbc_patch
 	{
 		auto& service = GetService();
 		const auto artifact = service.artifact;
-		if (!a_context || !artifact) {
-			service.counters.stockShaderFallbackFailed.fetch_add(
-				1,
-				std::memory_order_relaxed);
+		if (!a_context || !artifact)
 			return false;
-		}
 
 		ID3D11PixelShader* shader = nullptr;
 		a_context->PSGetShader(&shader, nullptr, nullptr);
-		if (!shader) {
-			service.counters.stockShaderFallbackFailed.fetch_add(
-				1,
-				std::memory_order_relaxed);
+		if (!shader)
 			return false;
-		}
 		ID3D11Device* device = nullptr;
 		a_context->GetDevice(&device);
 		const auto status = RestoreStockPixelShader(
@@ -325,23 +317,29 @@ namespace cs::features::sss_dxbc_patch
 		if (device)
 			device->Release();
 		shader->Release();
-		if (status == RestoreStockStatus::kRestored) {
-			service.counters.stockShaderFallback.fetch_add(
-				1,
-				std::memory_order_relaxed);
-			return true;
-		}
-		service.counters.stockShaderFallbackFailed.fetch_add(
-			1,
-			std::memory_order_relaxed);
-		return false;
+		return status == RestoreStockStatus::kRestored;
 	}
 
-	void RecordPatchedDrawMatched() noexcept
+	void RecordPatchedDraw(PatchedDrawTelemetry a_telemetry) noexcept
 	{
-		GetService().counters.patchedDrawMatched.fetch_add(
-			1,
-			std::memory_order_relaxed);
+		GetService().counters.Publish({
+			.patchedDrawMatched = 1,
+			.stockShaderFallback =
+				static_cast<std::uint64_t>(
+					a_telemetry.stockShaderFallback),
+			.stockShaderFallbackFailed =
+				static_cast<std::uint64_t>(
+					a_telemetry.stockShaderFallbackFailed),
+			.realMaskBinds =
+				static_cast<std::uint64_t>(
+					a_telemetry.realMaskBound),
+			.whiteFallbackBinds =
+				static_cast<std::uint64_t>(
+					a_telemetry.whiteFallbackBound),
+			.invariantViolations =
+				static_cast<std::uint64_t>(
+					a_telemetry.invariantViolated)
+		});
 	}
 
 	TelemetrySnapshot GetTelemetry() noexcept

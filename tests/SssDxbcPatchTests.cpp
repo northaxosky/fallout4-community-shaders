@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -39,6 +40,57 @@ namespace
 	{
 		if (!a_condition)
 			throw Failure(std::string(a_message));
+	}
+
+	struct SnapshotRaceFixture
+	{
+		features::sss_dxbc_patch::SnapshotTestPoint point;
+		std::atomic_bool readerPaused{ false };
+		std::atomic_bool writerDone{ false };
+	};
+
+	SnapshotRaceFixture* g_snapshotRaceFixture = nullptr;
+
+	void PauseSnapshot(
+		features::sss_dxbc_patch::SnapshotTestPoint a_point) noexcept
+	{
+		if (!g_snapshotRaceFixture
+			|| a_point != g_snapshotRaceFixture->point
+			|| g_snapshotRaceFixture->readerPaused.exchange(
+				true,
+				std::memory_order_acq_rel)) {
+			return;
+		}
+		g_snapshotRaceFixture->readerPaused.notify_one();
+		g_snapshotRaceFixture->writerDone.wait(
+			false,
+			std::memory_order_acquire);
+	}
+
+	features::sss_dxbc_patch::TelemetrySnapshot
+		SnapshotDuringConcurrentPublish(
+			features::sss_dxbc_patch::SnapshotTestPoint a_point,
+			const features::sss_dxbc_patch::CounterDelta& a_delta)
+	{
+		features::sss_dxbc_patch::AtomicCounters counters;
+		SnapshotRaceFixture fixture{ .point = a_point };
+		g_snapshotRaceFixture = &fixture;
+		features::sss_dxbc_patch::SetSnapshotTestHook(&PauseSnapshot);
+		std::thread writer([&] {
+			fixture.readerPaused.wait(
+				false,
+				std::memory_order_acquire);
+			counters.Publish(a_delta);
+			fixture.writerDone.store(true, std::memory_order_release);
+			fixture.writerDone.notify_one();
+		});
+
+		const auto snapshot =
+			features::sss_dxbc_patch::SnapshotCounters(counters);
+		writer.join();
+		features::sss_dxbc_patch::SetSnapshotTestHook(nullptr);
+		g_snapshotRaceFixture = nullptr;
+		return snapshot;
 	}
 
 	std::string ReadFile(const std::filesystem::path& a_path)
@@ -1665,6 +1717,45 @@ namespace
 			"telemetry allowed ready=true with a broken invariant");
 	}
 
+	void TestConcurrentTelemetrySnapshot()
+	{
+		const auto resolverSnapshot =
+			SnapshotDuringConcurrentPublish(
+				features::sss_dxbc_patch::SnapshotTestPoint::
+					kCandidateSeen,
+				{
+					.candidateSeen = 1,
+					.exactRouteAdmitted = 1
+				});
+		Check(
+			features::sss_dxbc_patch::TelemetryRelationshipsHold(
+				resolverSnapshot)
+				&& resolverSnapshot.candidateSeen == 1
+				&& resolverSnapshot.exactRouteAdmitted == 1,
+			"concurrent resolver update produced an incoherent telemetry snapshot");
+
+		const auto drawSnapshot =
+			SnapshotDuringConcurrentPublish(
+				features::sss_dxbc_patch::SnapshotTestPoint::
+					kPatchedDrawMatched,
+				{
+					.patchedDrawMatched = 1,
+					.realMaskBinds = 1
+				});
+		Check(
+			drawSnapshot.patchedDrawMatched == 1
+				&& drawSnapshot.realMaskBinds == 1
+				&& features::sss_mask_binding::
+					TelemetryBindingCountsHold(
+						drawSnapshot.patchedDrawMatched,
+						drawSnapshot.realMaskBinds,
+						drawSnapshot.whiteFallbackBinds,
+						drawSnapshot.invariantViolations,
+						drawSnapshot.stockShaderFallback,
+						drawSnapshot.stockShaderFallbackFailed),
+			"concurrent patched draw update produced an incoherent telemetry snapshot");
+	}
+
 	void TestStickyBindingInvariant()
 	{
 		features::sss_dxbc_patch::BindingReadinessLatch latch;
@@ -1928,6 +2019,7 @@ int main(int a_argc, char** a_argv)
 			{ "integrated patch resolver", &TestIntegratedResolver },
 			{ "transactional t6 binding", &TestMaskBinding },
 			{ "telemetry relationships", &TestTelemetryRelationships },
+			{ "concurrent telemetry snapshot", &TestConcurrentTelemetrySnapshot },
 			{ "sticky binding invariant", &TestStickyBindingInvariant },
 			{ "effective patch admission", &TestEffectivePatchAdmission },
 			{ "fallback allocation backoff", &TestFallbackAllocationBackoff }

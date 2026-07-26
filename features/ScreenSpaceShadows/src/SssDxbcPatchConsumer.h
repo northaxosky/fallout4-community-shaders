@@ -8,6 +8,15 @@
 
 namespace cs::features::sss_dxbc_patch
 {
+	struct PatchedDrawTelemetry
+	{
+		bool realMaskBound = false;
+		bool whiteFallbackBound = false;
+		bool invariantViolated = false;
+		bool stockShaderFallback = false;
+		bool stockShaderFallbackFailed = false;
+	};
+
 	bool Prepare(
 		const std::filesystem::path& a_artifactPath,
 		std::string& a_error);
@@ -20,6 +29,6 @@ namespace cs::features::sss_dxbc_patch
 		ID3D11PixelShader* a_shader) noexcept;
 	bool RestoreStockShader(
 		ID3D11DeviceContext* a_context) noexcept;
-	void RecordPatchedDrawMatched() noexcept;
+	void RecordPatchedDraw(PatchedDrawTelemetry a_telemetry) noexcept;
 	TelemetrySnapshot GetTelemetry() noexcept;
 }
