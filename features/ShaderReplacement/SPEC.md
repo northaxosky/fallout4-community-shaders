@@ -1,6 +1,6 @@
 # ShaderReplacement feature
 
-Phase 1 validation harness for the reconstructed `shaders/lighting/` HLSLs. We register as the resolver on `cs::engine::PixelShaderSwapBroker`'s shared slot-15 `CreatePixelShader` detour, sha1 each blob the engine submits, and swap the engine's output `ID3D11PixelShader*` for our pre-compiled replacement when the sha1 matches the manifest and the per-shader INI toggle is on.
+Phase 1 validation harness for the reconstructed `shaders/lighting/` HLSLs. We register an HLSL resolver on `cs::engine::PixelShaderSwapBroker`'s shared slot-15 `CreatePixelShader` detour, sha1 each blob the engine submits, and swap the engine's output `ID3D11PixelShader*` for our pre-compiled replacement when the sha1 matches the manifest and the per-shader INI toggle is on.
 
 The product is a substrate for visual equivalence: prove our HLSL produces the same frame as the engine's bytecode for one PS at a time, then build features on top.
 
@@ -10,10 +10,14 @@ One detour on `ID3D11Device`:
 
 - Slot 15: `CreatePixelShader`
 
-Both features share a single slot-15 detour owned by `cs::engine::PixelShaderSwapBroker`. ShaderCatalog registers as an *observer* from `ShaderCatalog::OnD3D11Ready`; ShaderReplacement registers as the sole *resolver* from `cs::engine::FreezeAndCompileShaderInjections`, which the app invokes after `FeatureManager::OnD3D11ReadyAll` returns. The broker dispatches observer preparation and its run lease over stock bytecode, engine `CreatePixelShader`, original-object registration, the resolver, then an always-run completion callback. Completion records original `HRESULT`/output validity, resolver invocation/reporting, and final stock/replacement/null classification. A usable object requires a successful result, a requested output, and a non-null pointer. Failed stale pointers are never classified as stock or replacement. Passthrough is not registered as an alias, and the stock digest is never claimed as replacement bytecode identity. Replacement aliases preserve originating-stock metadata but are emitted as `replacement_unknown`, not as stock-object bindings.
+Both features share a single slot-15 detour owned by `cs::engine::PixelShaderSwapBroker`. ShaderCatalog registers as an *observer* from `ShaderCatalog::OnD3D11Ready`; ShaderReplacement registers the default-priority HLSL resolver from `cs::engine::FreezeAndCompileShaderInjections`, which the app invokes after `FeatureManager::OnD3D11ReadyAll` returns. The broker dispatches observer preparation and its run lease over stock bytecode, engine `CreatePixelShader`, original-object registration, ordered resolvers, then one always-run completion callback. Bytecode patch resolvers run before HLSL and can claim a route as stock on validation failure. Completion records original `HRESULT`/output validity, resolver invocation/reporting, and final stock/replacement/null classification. A usable object requires a successful result, a requested output, and a non-null pointer. Failed stale pointers are never classified as stock or replacement. Passthrough is not registered as an alias, and the stock digest is never claimed as replacement bytecode identity. Replacement aliases preserve originating-stock metadata but are emitted as `replacement_unknown`, not as stock-object bindings.
+
+Exclusive bytecode-patch targets suppress same-target HLSL contributors before compilation and retain their
+names/counts in target snapshots, telemetry, and the settings status table. `IsInjectedPixelShader` reports only
+retained HLSL replacement ownership; central draw dispatch uses a separate patched-object predicate.
 
 ShaderReplacement leaves the engine's `ID3D11PixelShader*` unchanged (broker's slot-15 thunk still fires; ShaderCatalog observers and any other feature's resolver participation still happens) when:
-- Master `enabled = false` (skips ShaderReplacement's manifest registration; ShaderCatalog's observer and other features' replacements, including ScreenSpaceGI and ScreenSpaceShadows via `cs::engine::RegisterReplacement`, still exercise the shared broker).
+- Master `enabled = false` (skips ShaderReplacement's manifest registration; ShaderCatalog observers and independently registered feature replacements still exercise the shared broker).
 - The sha1 of the engine's bytecode does not match any registry entry.
 - The matched entry's per-shader toggle is off (passthrough counter increments).
 - The matched entry's compile failed at boot (passthrough-due-to-compile-fail counter increments; engine bytecode is used).
@@ -47,7 +51,7 @@ The `hlsl` path is resolved against the configured `sShadersRoot` after strippin
 
 `cs::engine::FreezeAndCompileShaderInjections` (invoked from `src/Render/D3D11Bootstrap.cpp:66` after `FeatureManager::OnD3D11ReadyAll` returns) iterates enabled entries and calls `D3DCompileFromFile` with `D3D_COMPILE_STANDARD_FILE_INCLUDE`, profile `ps_5_0`, entry `main`, flags `D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3` (matches the producer-backed `verify-shader-roundtrip.ps1` fxc `/O3` conformance gate). Compile failures are loud (error log, `compile_error` populated, ImGui surfaces the message); the runtime hook falls back to engine bytecode on compile failure.
 
-Replacement-created pixel shaders are wrapped in `cs::engine::ScopedPixelShaderBrokerBypass` (`src/Render/ShaderInjection.cpp:423`), a thread-local depth counter the broker's slot-15 thunk checks at `PixelShaderSwapBroker.cpp:40` to short-circuit both observer dispatch and resolver swap. ShaderCatalog therefore remains an engine-originated shader inventory and the resolver does not recurse on its own replacement blobs.
+Replacement-created pixel shaders are wrapped in `cs::engine::ScopedPixelShaderBrokerBypass`; the broker pipeline short-circuits observers and all resolvers while the scope is active. ShaderCatalog therefore remains an engine-originated shader inventory and resolvers do not recurse on their own replacement blobs.
 
 ## Settings
 

@@ -11,18 +11,24 @@
 #include <array>
 #include <cmath>
 #include <cfloat>
+#include <limits>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
+#include "SssDxbcPatchConsumer.h"
+#include "SssMaskBinding.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
 #include "World/Sky.h"
@@ -39,6 +45,7 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows");
 
 		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
+		constexpr const wchar_t* kDxbcPatchArtifactPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\sss-dxbc-patch-plans.json";
 
 		// FO4 uses standard non-linear depth, near=0/far=1.
 		constexpr float kFarDepthValue = 1.0f;
@@ -89,6 +96,31 @@ namespace cs::features
 				return false;
 			}
 
+			auto injectionMode =
+				std::string(SssInjectionModeName(a_candidate.injectionMode));
+			const auto injectionModeStatus = feature_config::ReadString(
+				*settingsTable,
+				"injection_mode",
+				injectionMode);
+			if (!AcceptSetting(
+					injectionModeStatus,
+					"injection_mode",
+					"string",
+					a_error)) {
+				return false;
+			}
+			if (injectionModeStatus
+				== feature_config::ScalarReadStatus::kValid) {
+				const auto parsedMode = ParseSssInjectionMode(injectionMode);
+				if (!parsedMode) {
+					a_error = SettingError(
+						"injection_mode",
+						"expected stock, dxbc_patch, or hlsl_reconstruction");
+					return false;
+				}
+				a_candidate.injectionMode = *parsedMode;
+			}
+
 			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
 					"enabled", "boolean", a_error)
 				|| !AcceptSetting(feature_config::ReadFloat(*settingsTable, "surface_thickness", a_candidate.surfaceThickness, 0.005f, 0.05f),
@@ -135,6 +167,28 @@ namespace cs::features
 
 			return true;
 		}
+
+		void GetPixelShaderResource(
+			void* a_context,
+			std::uint32_t a_slot,
+			ID3D11ShaderResourceView** a_view) noexcept
+		{
+			static_cast<ID3D11DeviceContext*>(a_context)->PSGetShaderResources(
+				static_cast<UINT>(a_slot),
+				1,
+				a_view);
+		}
+
+		void SetPixelShaderResource(
+			void* a_context,
+			std::uint32_t a_slot,
+			ID3D11ShaderResourceView* a_view) noexcept
+		{
+			static_cast<ID3D11DeviceContext*>(a_context)->PSSetShaderResources(
+				static_cast<UINT>(a_slot),
+				1,
+				&a_view);
+		}
 	}
 
 	ScreenSpaceShadows* ScreenSpaceShadows::GetSingleton()
@@ -158,6 +212,9 @@ namespace cs::features
 	{
 		toml::table settings;
 		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign(
+			"injection_mode",
+			SssInjectionModeName(_settings.injectionMode));
 		settings.insert_or_assign("surface_thickness", _settings.surfaceThickness);
 		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
@@ -170,6 +227,8 @@ namespace cs::features
 
 	void ScreenSpaceShadows::Load()
 	{
+		_activeInjectionMode = _settings.injectionMode;
+		bool injectionReady = false;
 		const auto registerDirectionalReplacement =
 			[this](cs::engine::ShaderInjectionTarget a_target) {
 				return cs::engine::RegisterReplacement({
@@ -180,7 +239,7 @@ namespace cs::features
 						return IsShadowMaskReady();
 					},
 					.bind = [this](ID3D11DeviceContext* a_context) {
-						BindShadowMask(a_context);
+						BindShadowMask(a_context, false);
 					},
 					.slotClaims = {
 						{
@@ -191,14 +250,91 @@ namespace cs::features
 					}
 				});
 			};
-		const bool directionalRegistered = registerDirectionalReplacement(
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional);
-		const bool directionalIblRegistered = registerDirectionalReplacement(
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl);
-		if (!directionalRegistered || !directionalIblRegistered) {
-			L->error("Failed to register directional shader replacements.");
+
+		if (_activeInjectionMode
+			== SssInjectionMode::kHlslReconstruction) {
+			const bool directionalRegistered =
+				registerDirectionalReplacement(
+					cs::engine::ShaderInjectionTarget::
+						kBsdfLightDeferredDirectional);
+			const bool directionalIblRegistered =
+				registerDirectionalReplacement(
+					cs::engine::ShaderInjectionTarget::
+						kBsdfLightDeferredDirectionalIbl);
+			injectionReady =
+				directionalRegistered && directionalIblRegistered;
+			if (!injectionReady)
+				L->error("Failed to register reconstructed directional shaders.");
+		} else if (_activeInjectionMode
+			== SssInjectionMode::kDxbcPatch) {
+			std::string error;
+			const bool artifactPrepared =
+				sss_dxbc_patch::Prepare(
+					kDxbcPatchArtifactPath,
+					error);
+			if (!artifactPrepared) {
+				L->error(
+					"Provisional DXBC patch mode stayed stock: {}.",
+					error);
+			}
+			const auto registerPatchedDispatch =
+				[this](cs::engine::ShaderInjectionTarget a_target) {
+					return cs::engine::RegisterPatchedShaderDispatch({
+						.targetId = a_target,
+						.contributor = "ScreenSpaceShadows.DxbcPatch",
+						.matches =
+							&sss_dxbc_patch::MatchesPatchedShader,
+						.bind =
+							[this](ID3D11DeviceContext* a_context) {
+								BindShadowMask(a_context, true);
+							},
+						.slotClaims = {
+							{
+								.stage =
+									cs::engine::ShaderStage::kPixel,
+								.resourceType =
+									cs::engine::ShaderResourceType::
+										kShaderResource,
+								.slot = kMaskPSSlot
+							}
+						}
+					});
+				};
+			const bool directionalRegistered =
+				registerPatchedDispatch(
+					cs::engine::ShaderInjectionTarget::
+						kBsdfLightDeferredDirectional);
+			const bool directionalIblRegistered =
+				registerPatchedDispatch(
+					cs::engine::ShaderInjectionTarget::
+						kBsdfLightDeferredDirectionalIbl);
+			const bool claimsRegistered =
+				directionalRegistered && directionalIblRegistered;
+			injectionReady =
+				artifactPrepared
+				&& claimsRegistered
+				&& sss_dxbc_patch::ActivateResolver();
+			if (!claimsRegistered) {
+				L->error(
+					"Exclusive DXBC stock claims failed to register.");
+			}
+			if (artifactPrepared && !injectionReady) {
+				L->error(
+					"Provisional DXBC patch activation failed; exclusive targets remain stock.");
+			}
+		} else {
+			L->info(
+				"Injection mode is stock; SSS shader substitution is disabled.");
 		}
 
+		const auto startup = DecideSssStartup(
+			_activeInjectionMode,
+			injectionReady);
+		_injectionReady.store(
+			startup.injectionReady,
+			std::memory_order_release);
+		if (!startup.runLifecycle)
+			return;
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
@@ -206,7 +342,15 @@ namespace cs::features
 			ScreenSpaceShadows::GetSingleton()->OnPostDeferredLights();
 		});
 		_started.store(true, std::memory_order_release);
-		L->info("Registered deferred-lights callbacks (enabled={}).", _settings.enabled);
+		if (startup.routeFallsBackToStock) {
+			L->warn(
+				"SSS injection is unavailable; Bend mask lifecycle remains active while shader routing stays stock.");
+		}
+		L->info(
+			"Registered deferred-lights callbacks (enabled={}, injection_mode={}, injection_ready={}).",
+			_settings.enabled,
+			SssInjectionModeName(_activeInjectionMode),
+			startup.injectionReady);
 	}
 
 	void ScreenSpaceShadows::CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height)
@@ -241,15 +385,261 @@ namespace cs::features
 		_allocHeight = a_height;
 	}
 
+	bool ScreenSpaceShadows::TryGetMaskExtents(
+		sss_mask_binding::Extent& a_required,
+		sss_mask_binding::Extent& a_allocation) const
+	{
+		auto* state = cs::engine::GetGraphicsState();
+		if (!state || state->screenWidth == 0 || state->screenHeight == 0)
+			return false;
+		float widthRatio = 1.0f;
+		float heightRatio = 1.0f;
+		if (auto* rtm = cs::engine::GetRenderTargetManager()) {
+			widthRatio = rtm->GetDynamicWidthRatio();
+			heightRatio = rtm->GetDynamicHeightRatio();
+		}
+		if (!std::isfinite(widthRatio) || widthRatio <= 0.0f)
+			widthRatio = 1.0f;
+		if (!std::isfinite(heightRatio) || heightRatio <= 0.0f)
+			heightRatio = 1.0f;
+		const auto requiredWidth = std::ceil(
+			static_cast<double>(state->screenWidth)
+			* static_cast<double>(widthRatio));
+		const auto requiredHeight = std::ceil(
+			static_cast<double>(state->screenHeight)
+			* static_cast<double>(heightRatio));
+		if (requiredWidth < 1.0
+			|| requiredHeight < 1.0
+			|| requiredWidth
+				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
+			|| requiredHeight
+				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION) {
+			return false;
+		}
+		a_required = {
+			static_cast<std::uint32_t>(requiredWidth),
+			static_cast<std::uint32_t>(requiredHeight)
+		};
+		a_allocation = {
+			std::max(state->screenWidth, a_required.width),
+			std::max(state->screenHeight, a_required.height)
+		};
+		return true;
+	}
+
+	bool ScreenSpaceShadows::CreateWhiteFallback(
+		ID3D11Device* a_device,
+		sss_mask_binding::Extent a_allocation)
+	{
+		if (!a_device
+			|| a_allocation.width == 0
+			|| a_allocation.height == 0
+			|| a_allocation.width
+				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
+			|| a_allocation.height
+				> D3D11_REQ_TEXTURE2D_U_OR_V_DIMENSION
+			|| a_allocation.width
+				> std::numeric_limits<std::size_t>::max()
+					/ a_allocation.height) {
+			if (L->should_log(spdlog::level::err)) {
+				CS_LOG_EVERY_MS(
+					L,
+					5000,
+					spdlog::level::err,
+					"Rejected invalid full-extent white SSS fallback allocation ({}x{}).",
+					a_allocation.width,
+					a_allocation.height);
+			}
+			return false;
+		}
+
+		const auto pixelCount =
+			static_cast<std::size_t>(a_allocation.width)
+			* a_allocation.height;
+		std::vector<std::uint8_t> white;
+		try {
+			white.assign(
+				pixelCount,
+				sss_mask_binding::kWhiteR8Unorm);
+		} catch (...) {
+			if (L->should_log(spdlog::level::err)) {
+				CS_LOG_EVERY_MS(
+					L,
+					5000,
+					spdlog::level::err,
+					"Failed to allocate CPU initialization bytes for the full-extent white SSS fallback ({}x{}).",
+					a_allocation.width,
+					a_allocation.height);
+			}
+			return false;
+		}
+
+		D3D11_TEXTURE2D_DESC textureDesc{};
+		textureDesc.Width = a_allocation.width;
+		textureDesc.Height = a_allocation.height;
+		textureDesc.MipLevels = 1;
+		textureDesc.ArraySize = 1;
+		textureDesc.Format = DXGI_FORMAT_R8_UNORM;
+		textureDesc.SampleDesc.Count = 1;
+		textureDesc.Usage = D3D11_USAGE_IMMUTABLE;
+		textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SUBRESOURCE_DATA initialData{};
+		initialData.pSysMem = white.data();
+		initialData.SysMemPitch = a_allocation.width;
+		initialData.SysMemSlicePitch =
+			static_cast<UINT>(pixelCount);
+
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		if (FAILED(a_device->CreateTexture2D(
+				&textureDesc,
+				&initialData,
+				texture.put()))) {
+			if (L->should_log(spdlog::level::err)) {
+				CS_LOG_EVERY_MS(
+					L,
+					5000,
+					spdlog::level::err,
+					"Failed to create the full-extent white SSS fallback texture ({}x{}).",
+					a_allocation.width,
+					a_allocation.height);
+			}
+			return false;
+		}
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		if (FAILED(a_device->CreateShaderResourceView(
+				texture.get(),
+				nullptr,
+				srv.put()))) {
+			if (L->should_log(spdlog::level::err)) {
+				CS_LOG_EVERY_MS(
+					L,
+					5000,
+					spdlog::level::err,
+					"Failed to create the full-extent white SSS fallback SRV ({}x{}).",
+					a_allocation.width,
+					a_allocation.height);
+			}
+			return false;
+		}
+		_whiteFallbackSRV = std::move(srv);
+		(void)_whiteFallbackExtent.CompleteAllocation(
+			a_allocation,
+			true);
+		return true;
+	}
+
+	bool ScreenSpaceShadows::EnsureWhiteFallback(
+		ID3D11Device* a_device,
+		sss_mask_binding::Extent a_required,
+		sss_mask_binding::Extent a_allocation)
+	{
+		const sss_mask_binding::FallbackAllocationKey key{
+			a_allocation,
+			_deviceGeneration
+		};
+		const bool needsAllocation =
+			!_whiteFallbackSRV
+			|| _whiteFallbackExtent.allocated != a_allocation;
+		if (!needsAllocation) {
+			if (_whiteFallbackBackoff.HasFailure()
+				&& !_whiteFallbackBackoff.IsLatchedFor(key)) {
+				_whiteFallbackBackoff.RecordSuccess();
+			}
+		} else if (_whiteFallbackBackoff.ShouldAttempt(key)) {
+			_whiteFallbackAllocationAttempts.fetch_add(
+				1,
+				std::memory_order_relaxed);
+			if (CreateWhiteFallback(a_device, a_allocation)) {
+				_whiteFallbackBackoff.RecordSuccess();
+			} else {
+				_whiteFallbackBackoff.RecordFailure(key);
+				_whiteFallbackAllocationFailures.fetch_add(
+					1,
+					std::memory_order_relaxed);
+			}
+		}
+		const bool ready =
+			_whiteFallbackSRV
+			&& _whiteFallbackExtent.IsCompatible(a_required);
+		_whiteFallbackFailureLatchedTelemetry.store(
+			needsAllocation
+				&& _whiteFallbackBackoff.IsLatchedFor(key),
+			std::memory_order_relaxed);
+		_whiteFallbackWidthTelemetry.store(
+			_whiteFallbackExtent.allocated.width,
+			std::memory_order_relaxed);
+		_whiteFallbackHeightTelemetry.store(
+			_whiteFallbackExtent.allocated.height,
+			std::memory_order_relaxed);
+		_whiteFallbackReady.store(ready, std::memory_order_release);
+		return ready;
+	}
+
 	void ScreenSpaceShadows::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
 		if (!_started.load(std::memory_order_acquire) || !a_device) return;
-		EnsureResources();
+		if (_deviceIdentity != a_device) {
+			_deviceIdentity = a_device;
+			++_deviceGeneration;
+			_resourcesReady.store(false, std::memory_order_release);
+			_whiteFallbackReady.store(false, std::memory_order_release);
+			_resourceInitFailed = false;
+			_realMaskReadyForDraw = false;
+			_raymarchCB.reset();
+			_maskTexture.reset();
+			_pointBorderSampler = nullptr;
+			_raymarchCS = nullptr;
+			_whiteFallbackSRV = nullptr;
+			_allocWidth = 0;
+			_allocHeight = 0;
+			_lastCompiledSampleCount = 0;
+			_whiteFallbackExtent = {};
+			_whiteFallbackBackoff.RecordSuccess();
+			_maskBound.store(false, std::memory_order_relaxed);
+		}
+		sss_mask_binding::Extent required;
+		sss_mask_binding::Extent allocation;
+		const bool fallbackReady =
+			TryGetMaskExtents(required, allocation)
+			&& EnsureWhiteFallback(
+				a_device,
+				required,
+				allocation);
+		_requiredMaskExtent = required;
+		_requiredMaskWidthTelemetry.store(
+			required.width,
+			std::memory_order_relaxed);
+		_requiredMaskHeightTelemetry.store(
+			required.height,
+			std::memory_order_relaxed);
+		if (_activeInjectionMode == SssInjectionMode::kDxbcPatch)
+			sss_dxbc_patch::SetBindingReady(fallbackReady);
+		(void)EnsureResources();
 	}
 
 	bool ScreenSpaceShadows::IsShadowMaskReady()
 	{
-		return _started.load(std::memory_order_acquire) && EnsureResources();
+		if (!_started.load(std::memory_order_acquire))
+			return false;
+		(void)EnsureResources();
+		sss_mask_binding::Extent required;
+		sss_mask_binding::Extent allocation;
+		auto* device = cs::util::GetD3DDevice();
+		const bool fallbackReady =
+			device
+			&& TryGetMaskExtents(required, allocation)
+			&& EnsureWhiteFallback(
+				device,
+				required,
+				allocation);
+		_requiredMaskExtent = required;
+		_requiredMaskWidthTelemetry.store(
+			required.width,
+			std::memory_order_relaxed);
+		_requiredMaskHeightTelemetry.store(
+			required.height,
+			std::memory_order_relaxed);
+		return fallbackReady;
 	}
 
 	bool ScreenSpaceShadows::EnsureResources()
@@ -284,11 +674,12 @@ namespace cs::features
 			samplerDesc.MaxLOD = FLT_MAX;
 			DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, _pointBorderSampler.put()));
 
-			auto* state = cs::engine::GetGraphicsState();
-			if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
+			sss_mask_binding::Extent required;
+			sss_mask_binding::Extent allocation;
+			if (!TryGetMaskExtents(required, allocation)) {
 				throw std::runtime_error("graphics state has no screen dimensions");
 			}
-			CreateMaskTexture(state->screenWidth, state->screenHeight);
+			CreateMaskTexture(allocation.width, allocation.height);
 			_resourcesReady.store(true, std::memory_order_release);
 			L->info("Resources ready ({}x{}).", _allocWidth, _allocHeight);
 			return true;
@@ -350,12 +741,35 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnPreDeferredLights()
 	{
+		_realMaskReadyForDraw = false;
 		if (!_started.load(std::memory_order_acquire)) {
 			return;
 		}
 
 		_dispatchedLastFrame.store(0, std::memory_order_relaxed);
 		_maskBoundLastFrame.store(false, std::memory_order_relaxed);
+		sss_mask_binding::Extent required;
+		sss_mask_binding::Extent allocation;
+		auto* device = cs::util::GetD3DDevice();
+		const bool extentsValid =
+			device && TryGetMaskExtents(required, allocation);
+		_requiredMaskExtent = required;
+		_requiredMaskWidthTelemetry.store(
+			required.width,
+			std::memory_order_relaxed);
+		_requiredMaskHeightTelemetry.store(
+			required.height,
+			std::memory_order_relaxed);
+		const bool fallbackReady =
+			extentsValid
+			&& EnsureWhiteFallback(
+				device,
+				required,
+				allocation);
+		if (_activeInjectionMode == SssInjectionMode::kDxbcPatch)
+			sss_dxbc_patch::SetBindingReady(fallbackReady);
+		if (!extentsValid)
+			return;
 		if (!EnsureResources()) {
 			return;
 		}
@@ -365,29 +779,41 @@ namespace cs::features
 			return;
 		}
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		if (!context || !_maskTexture) {
+		if (!context) {
 			return;
 		}
 
 		const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
-		context->ClearUnorderedAccessViewFloat(_maskTexture->uav.get(), white);
-
 		auto* state = cs::engine::GetGraphicsState();
 		if (!state || state->screenWidth == 0 || state->screenHeight == 0) {
 			return;
 		}
-		if (state->screenWidth != _allocWidth || state->screenHeight != _allocHeight) {
+		if (allocation.width != _allocWidth
+			|| allocation.height != _allocHeight) {
 			try {
-				CreateMaskTexture(state->screenWidth, state->screenHeight);
-				context->ClearUnorderedAccessViewFloat(_maskTexture->uav.get(), white);
+				CreateMaskTexture(
+					allocation.width,
+					allocation.height);
 			} catch (const std::exception& e) {
 				L->error("Mask resize failed: {}", e.what());
-				return;
 			} catch (...) {
 				L->error("Mask resize failed.");
-				return;
 			}
 		}
+		const sss_mask_binding::Extent realExtent{
+			_allocWidth,
+			_allocHeight
+		};
+		if (_maskTexture
+			&& _maskTexture->uav
+			&& sss_mask_binding::Covers(realExtent, required)) {
+			context->ClearUnorderedAccessViewFloat(
+				_maskTexture->uav.get(),
+				white);
+			_realMaskReadyForDraw = true;
+		}
+		if (!_realMaskReadyForDraw)
+			return;
 
 		try {
 			auto* sky = RE::Sky::GetSingleton();
@@ -495,32 +921,93 @@ namespace cs::features
 		}
 	}
 
-	void ScreenSpaceShadows::BindShadowMask(ID3D11DeviceContext* a_context)
+	void ScreenSpaceShadows::BindShadowMask(
+		ID3D11DeviceContext* a_context,
+		bool a_patchedDraw)
 	{
-		// Bind whenever resources exist; disabled still reads the white no-op mask, keeping compiled-in t6 safe.
-		if (!a_context ||
-			!_resourcesReady.load(std::memory_order_acquire) ||
-			!_maskTexture) {
+		if (a_patchedDraw)
+			sss_dxbc_patch::RecordPatchedDrawMatched();
+		const sss_mask_binding::Api api{
+			.context = a_context,
+			.get = &GetPixelShaderResource,
+			.set = &SetPixelShaderResource
+		};
+		auto* realMask =
+			_maskTexture && _maskTexture->srv
+			? _maskTexture->srv.get()
+			: nullptr;
+		if (a_patchedDraw
+			&& sss_dxbc_patch::BindingInvariantBroken()) {
+			(void)sss_mask_binding::RestoreNullIfOwned(
+				api,
+				kMaskPSSlot,
+				realMask,
+				_whiteFallbackSRV.get());
+			_maskBound.store(false, std::memory_order_relaxed);
+			(void)sss_dxbc_patch::RestoreStockShader(a_context);
 			return;
 		}
-
-		// Bind t6 only when engine left it null; ambient/IBL binds g_tAmbientProbeA there, so non-null means not directional sun.
-		ID3D11ShaderResourceView* current = nullptr;
-		a_context->PSGetShaderResources(kMaskPSSlot, 1, &current);
-		if (current) {
-			current->Release();
-			return;
+		const auto result = sss_mask_binding::Bind(
+			api,
+			kMaskPSSlot,
+			realMask,
+			{ _allocWidth, _allocHeight },
+			_realMaskReadyForDraw,
+			_whiteFallbackSRV.get(),
+			_whiteFallbackExtent.allocated,
+			_requiredMaskExtent);
+		if (a_patchedDraw) {
+			if (result.source
+				== sss_mask_binding::Source::kRealMask
+				&& result.validBinding) {
+				_realMaskBinds.fetch_add(1, std::memory_order_relaxed);
+			} else if (result.source
+					== sss_mask_binding::Source::kWhiteFallback
+				&& result.validBinding) {
+				_whiteFallbackBinds.fetch_add(
+					1,
+					std::memory_order_relaxed);
+			}
+			if (result.foreignBindingDetected
+				|| !result.validBinding) {
+				sss_dxbc_patch::BreakBindingInvariant();
+				bool stockRestored = false;
+				if (!result.validBinding) {
+					_maskBound.store(
+						false,
+						std::memory_order_relaxed);
+					if (!result.foreignBindingDetected) {
+						sss_mask_binding::RestoreNull(
+							api,
+							kMaskPSSlot);
+					}
+					stockRestored =
+						sss_dxbc_patch::RestoreStockShader(a_context);
+				}
+				_invariantViolations.fetch_add(
+					1,
+					std::memory_order_relaxed);
+				if (L->should_log(spdlog::level::err)) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::err,
+						"Patched SSS draw t6 invariant failed (foreign={}, valid_extent_binding={}, stock_restored={}); further patch admission disabled.",
+						result.foreignBindingDetected,
+						result.validBinding,
+						stockRestored);
+				}
+			}
 		}
-
-		auto* srv = _maskTexture->srv.get();
-		a_context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
-		_maskBound.store(true, std::memory_order_relaxed);
-		_maskBoundLastFrame.store(true, std::memory_order_relaxed);
+		if (result.validBinding) {
+			_maskBound.store(true, std::memory_order_relaxed);
+			_maskBoundLastFrame.store(true, std::memory_order_relaxed);
+		}
 	}
 
 	void ScreenSpaceShadows::OnPostDeferredLights()
 	{
-		// Restore the engine's expected NULL at t6 so its dirty-state tracking doesn't diverge.
+		// Restore only plugin-owned t6 to the engine's expected NULL.
 		if (!_maskBound.exchange(false, std::memory_order_relaxed)) {
 			return;
 		}
@@ -532,29 +1019,194 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		ID3D11ShaderResourceView* nullSRV = nullptr;
-		context->PSSetShaderResources(kMaskPSSlot, 1, &nullSRV);
+		const sss_mask_binding::Api api{
+			.context = context,
+			.get = &GetPixelShaderResource,
+			.set = &SetPixelShaderResource
+		};
+		auto* realMask =
+			_maskTexture && _maskTexture->srv
+			? _maskTexture->srv.get()
+			: nullptr;
+		(void)sss_mask_binding::RestoreNullIfOwned(
+			api,
+			kMaskPSSlot,
+			realMask,
+			_whiteFallbackSRV.get());
 	}
 
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
+		const auto patchTelemetry = sss_dxbc_patch::GetTelemetry();
+		const auto realMaskBinds =
+			_realMaskBinds.load(std::memory_order_relaxed);
+		const auto whiteFallbackBinds =
+			_whiteFallbackBinds.load(std::memory_order_relaxed);
+		const auto invariantViolations =
+			_invariantViolations.load(std::memory_order_relaxed);
+		const bool startupInjectionReady =
+			_injectionReady.load(std::memory_order_acquire);
+		const bool patchMode =
+			_activeInjectionMode == SssInjectionMode::kDxbcPatch;
+		const bool effectivePatchAdmission =
+			patchMode
+			&& startupInjectionReady
+			&& patchTelemetry.admissionReady
+			&& invariantViolations == 0;
+		const bool effectiveInjectionReady =
+			patchMode
+			? effectivePatchAdmission
+			: startupInjectionReady;
+		const bool effectiveStockFallback =
+			_started.load(std::memory_order_acquire)
+			&& !effectiveInjectionReady;
+		const bool patchInvariantBroken =
+			patchTelemetry.invariantBroken || invariantViolations != 0;
+		const bool bindingRelationshipsHold =
+			sss_mask_binding::TelemetryBindingCountsHold(
+				patchTelemetry.patchedDrawMatched,
+				realMaskBinds,
+				whiteFallbackBinds,
+				invariantViolations,
+				patchTelemetry.stockShaderFallback,
+				patchTelemetry.stockShaderFallbackFailed);
+		std::size_t suppressedHlslContributors = 0;
+		std::string suppressedHlslNames;
+		for (const auto target : {
+				cs::engine::ShaderInjectionTarget::
+					kBsdfLightDeferredDirectional,
+				cs::engine::ShaderInjectionTarget::
+					kBsdfLightDeferredDirectionalIbl }) {
+			const auto snapshot =
+				cs::engine::GetShaderInjectionTargetSnapshot(target);
+			suppressedHlslContributors +=
+				snapshot.suppressedContributors;
+			for (const auto& contributor :
+				snapshot.suppressedContributorNames) {
+				if (!suppressedHlslNames.empty())
+					suppressedHlslNames += ",";
+				suppressedHlslNames += snapshot.name;
+				suppressedHlslNames += ":";
+				suppressedHlslNames += contributor;
+			}
+		}
 		a_sink
 			.Field("enabled", _settings.enabled)
+			.Field(
+				"injection_mode",
+				SssInjectionModeName(_activeInjectionMode))
+			.Field(
+				"injection_ready",
+				effectiveInjectionReady)
+			.Field(
+				"injection_stock_fallback",
+				effectiveStockFallback)
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
+			.Field("white_fallback_ready", _whiteFallbackReady.load(std::memory_order_acquire))
+			.Field(
+				"white_fallback_allocation_attempts",
+				static_cast<std::int64_t>(
+					_whiteFallbackAllocationAttempts.load(
+						std::memory_order_relaxed)))
+			.Field(
+				"white_fallback_allocation_failures",
+				static_cast<std::int64_t>(
+					_whiteFallbackAllocationFailures.load(
+						std::memory_order_relaxed)))
+			.Field(
+				"white_fallback_failure_latched",
+				_whiteFallbackFailureLatchedTelemetry.load(
+					std::memory_order_relaxed))
+			.Field(
+				"white_fallback_stock_latched",
+				_whiteFallbackFailureLatchedTelemetry.load(
+					std::memory_order_relaxed)
+					&& !_whiteFallbackReady.load(
+						std::memory_order_acquire))
 			.Field("mask_bound", _maskBoundLastFrame.load(std::memory_order_relaxed))
 			.Field("dispatches", static_cast<std::int64_t>(_dispatchedLastFrame.load(std::memory_order_relaxed)))
 			.Dimensions("mask", _allocWidth, _allocHeight)
+			.Dimensions(
+				"patch_required_extent",
+				_requiredMaskWidthTelemetry.load(std::memory_order_relaxed),
+				_requiredMaskHeightTelemetry.load(std::memory_order_relaxed))
+			.Dimensions(
+				"patch_white_fallback",
+				_whiteFallbackWidthTelemetry.load(std::memory_order_relaxed),
+				_whiteFallbackHeightTelemetry.load(std::memory_order_relaxed))
 			.Field("sun_x", static_cast<double>(_sunX.load(std::memory_order_relaxed)))
 			.Field("sun_y", static_cast<double>(_sunY.load(std::memory_order_relaxed)))
 			.Field("sun_z", static_cast<double>(_sunZ.load(std::memory_order_relaxed)))
 			.Field("light_x", static_cast<double>(_lightX.load(std::memory_order_relaxed)))
 			.Field("light_y", static_cast<double>(_lightY.load(std::memory_order_relaxed)))
-			.Field("clip_w", static_cast<double>(_clipW.load(std::memory_order_relaxed)));
+			.Field("clip_w", static_cast<double>(_clipW.load(std::memory_order_relaxed)))
+			.Field("patch_artifact_loaded", patchTelemetry.artifactLoaded)
+			.Field("patch_runtime_exact", patchTelemetry.runtimeExact)
+			.Field("patch_resolver_active", patchTelemetry.resolverActive)
+			.Field(
+				"patch_extent_binding_ready",
+				patchTelemetry.bindingReady)
+			.Field("patch_binding_ready", effectivePatchAdmission)
+			.Field("patch_admission_ready", effectivePatchAdmission)
+			.Field(
+				"patch_stock_fallback",
+				patchMode && !effectivePatchAdmission)
+			.Field("patch_invariant_broken", patchInvariantBroken)
+			.Field(
+				"patch_suppressed_hlsl_contributors",
+				static_cast<std::int64_t>(
+					suppressedHlslContributors))
+			.Field(
+				"patch_suppressed_hlsl_names",
+				suppressedHlslNames)
+			.Field(
+				"patch_status",
+				SssPatchStatusName(
+					patchTelemetry.artifactLoaded))
+			.Field("patch_coverage_pass", static_cast<std::int64_t>(patchTelemetry.coveragePass))
+			.Field("patch_coverage_candidates", static_cast<std::int64_t>(patchTelemetry.coverageCandidates))
+			.Field("patch_candidate_seen", static_cast<std::int64_t>(patchTelemetry.candidateSeen))
+			.Field("patch_exact_route_admitted", static_cast<std::int64_t>(patchTelemetry.exactRouteAdmitted))
+			.Field("patch_hash_mismatch", static_cast<std::int64_t>(patchTelemetry.hashMismatch))
+			.Field("patch_preimage_mismatch", static_cast<std::int64_t>(patchTelemetry.preimageMismatch))
+			.Field("patch_built", static_cast<std::int64_t>(patchTelemetry.patchBuilt))
+			.Field("patch_checksum_hash_mismatch", static_cast<std::int64_t>(patchTelemetry.checksumHashMismatch))
+			.Field("patch_create_ps_accepted", static_cast<std::int64_t>(patchTelemetry.createPsAccepted))
+			.Field("patch_create_ps_rejected", static_cast<std::int64_t>(patchTelemetry.createPsRejected))
+			.Field("patch_identity_published", static_cast<std::int64_t>(patchTelemetry.identityPublished))
+			.Field("patch_draw_matched", static_cast<std::int64_t>(patchTelemetry.patchedDrawMatched))
+			.Field("patch_stock_shader_fallback", static_cast<std::int64_t>(patchTelemetry.stockShaderFallback))
+			.Field("patch_stock_shader_fallback_failed", static_cast<std::int64_t>(patchTelemetry.stockShaderFallbackFailed))
+			.Field("patch_real_mask_bind", static_cast<std::int64_t>(realMaskBinds))
+			.Field("patch_white_fallback_bind", static_cast<std::int64_t>(whiteFallbackBinds))
+			.Field("patch_invariant_violation", static_cast<std::int64_t>(invariantViolations))
+			.Field("patch_unknown_stock_fallback", static_cast<std::int64_t>(patchTelemetry.unknownStockFallback))
+			.Field(
+				"patch_telemetry_relationships_ok",
+				sss_dxbc_patch::TelemetryRelationshipsHold(patchTelemetry)
+					&& bindingRelationshipsHold);
 	}
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+		static constexpr const char* kInjectionModes[]{
+			"Stock (no substitution)",
+			"DXBC patch (provisional developer mode)",
+			"HLSL reconstruction (developer validation)"
+		};
+		auto injectionMode = static_cast<int>(_settings.injectionMode);
+		bool changed = ImGui::Combo(
+			"Injection mode",
+			&injectionMode,
+			kInjectionModes,
+			static_cast<int>(std::size(kInjectionModes)));
+		if (changed) {
+			_settings.injectionMode =
+				static_cast<SssInjectionMode>(injectionMode);
+		}
+		ImGui::TextDisabled(
+			"Restart required. DXBC coverage is provisional and not a release-coverage claim.");
+		changed |= ImGui::Checkbox("Enabled", &_settings.enabled);
 		changed |= ImGui::SliderFloat("Surface thickness", &_settings.surfaceThickness, 0.005f, 0.05f);
 		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);
 		changed |= ImGui::SliderFloat("Shadow contrast", &_settings.shadowContrast, 0.0f, 4.0f);
@@ -572,6 +1224,16 @@ namespace cs::features
 			"Resources: %s | wave dispatches last frame: %u",
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));
+		const auto patchTelemetry = sss_dxbc_patch::GetTelemetry();
+		if (_activeInjectionMode == SssInjectionMode::kDxbcPatch) {
+			ImGui::TextDisabled(
+				"DXBC patch coverage: %zu/%zu (%s)",
+				patchTelemetry.coveragePass,
+				patchTelemetry.coverageCandidates,
+				patchTelemetry.runtimeExact
+					? "exact AE runtime"
+					: "runtime mismatch; stock");
+		}
 
 		// Debug mask preview: raw R8 coverage/placement in-game, bright=lit/dark=shadowed, no RenderDoc needed.
 		static bool s_showMaskPreview = false;

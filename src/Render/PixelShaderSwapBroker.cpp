@@ -17,11 +17,15 @@ namespace cs::engine
 	namespace
 	{
 		using ObserverList = std::vector<PixelShaderSwapObserver>;
+		using ResolverList =
+			std::vector<PixelShaderSwapResolverRegistration>;
 		constexpr std::size_t kMaxObservers = 8;
+		constexpr std::size_t kMaxResolvers = 8;
 
 		auto* L = cs::log::Get("cs.render.pixelshaderswap");
 
-		std::atomic<PixelShaderSwapResolver> g_resolver{ nullptr };
+		std::atomic<std::shared_ptr<const ResolverList>> g_resolvers;
+		std::mutex g_resolverRegistrationMutex;
 		std::atomic<std::shared_ptr<const ObserverList>> g_observers;
 		std::mutex g_observerRegistrationMutex;
 
@@ -29,8 +33,6 @@ namespace cs::engine
 		ID3D11Device* g_device = nullptr;
 		bool g_installRequested = false;
 		std::atomic<bool> g_hookInstalled{ false };
-
-		thread_local unsigned g_bypassDepth = 0;
 
 		struct CreatePixelShaderHook
 		{
@@ -41,71 +43,32 @@ namespace cs::engine
 				ID3D11ClassLinkage* a_linkage,
 				ID3D11PixelShader** a_out)
 			{
-				if (g_bypassDepth != 0)
-					return func(a_this, a_bytecode, a_bytecodeLength, a_linkage, a_out);
-
 				const auto observers = g_observers.load(std::memory_order_acquire);
-				std::array<PixelShaderSwapObserverInvocation, kMaxObservers>
-					invocations{};
-				std::size_t observerCount = 0;
-				if (observers) {
-					observerCount = std::min(observers->size(), kMaxObservers);
-					for (std::size_t i = 0; i < observerCount; ++i) {
-						invocations[i] = BeginPixelShaderSwapObserver(
-							(*observers)[i], a_bytecode, a_bytecodeLength);
-					}
-				}
-
-				const HRESULT hr = func(a_this, a_bytecode, a_bytecodeLength, a_linkage, a_out);
-				ID3D11PixelShader* stockOutput = a_out ? *a_out : nullptr;
-				const bool canResolve = SUCCEEDED(hr)
-					&& stockOutput
-					&& a_bytecode
-					&& a_bytecodeLength != 0;
-				bool resolverInvoked = false;
-				bool resolverReportedReplacement = false;
-				if (canResolve) {
-					const auto hash = sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
-					if (observers) {
-						for (std::size_t i = 0; i < observerCount; ++i) {
-							const auto& observer = (*observers)[i];
-							if (invocations[i].active
-								&& observer.observeOriginal) {
-								observer.observeOriginal(
-									invocations[i].token, hash, stockOutput);
-							}
-						}
-					}
-
-					if (const auto resolver = g_resolver.load(std::memory_order_acquire)) {
-						resolverInvoked = true;
-						resolverReportedReplacement = resolver(
-							a_bytecode,
-							a_bytecodeLength,
-							shader_context::CurrentVariant(),
-							hash,
-							a_out);
-					}
-				}
-
-				const auto completion = ClassifyPixelShaderSwapCompletion(
-					static_cast<std::int32_t>(hr),
-					a_out != nullptr,
-					stockOutput,
-					resolverInvoked,
-					resolverReportedReplacement,
-					a_out ? *a_out : nullptr);
-				if (observers) {
-					for (std::size_t i = 0; i < observerCount; ++i) {
-						CompletePixelShaderSwapObserver(
-							invocations[i], completion);
-					}
-				}
-				return hr;
+				const auto resolvers = g_resolvers.load(std::memory_order_acquire);
+				const std::span<const PixelShaderSwapObserver> observerSpan =
+					observers ? std::span<const PixelShaderSwapObserver>(*observers)
+						: std::span<const PixelShaderSwapObserver>{};
+				const std::span<const PixelShaderSwapResolverRegistration>
+					resolverSpan =
+						resolvers
+						? std::span<const PixelShaderSwapResolverRegistration>(
+							*resolvers)
+						: std::span<
+							const PixelShaderSwapResolverRegistration>{};
+				return ExecutePixelShaderSwapPipeline(
+					func,
+					observerSpan,
+					resolverSpan,
+					shader_context::CurrentVariant(),
+					PixelShaderBrokerBypassActive(),
+					a_this,
+					a_bytecode,
+					a_bytecodeLength,
+					a_linkage,
+					a_out);
 			}
 
-			static inline HRESULT (STDMETHODCALLTYPE *func)(
-				ID3D11Device*, const void*, SIZE_T, ID3D11ClassLinkage*, ID3D11PixelShader**) = nullptr;
+			static inline CreatePixelShaderFunction func = nullptr;
 		};
 
 		void InstallHookIfReady()
@@ -144,18 +107,54 @@ namespace cs::engine
 
 	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver a_resolver)
 	{
-		if (!a_resolver)
-			return false;
+		return RegisterPixelShaderSwapResolver({
+			.resolver = a_resolver,
+			.priority = kHlslReplacementResolverPriority
+		});
+	}
 
-		PixelShaderSwapResolver expected = nullptr;
-		if (!g_resolver.compare_exchange_strong(
-				expected, a_resolver, std::memory_order_release, std::memory_order_acquire))
+	bool RegisterPixelShaderSwapResolver(
+		PixelShaderSwapResolverRegistration a_registration)
+	{
+		if (!a_registration.resolver)
 			return false;
+		std::size_t resolverCount = 0;
+		{
+			std::scoped_lock lock(g_resolverRegistrationMutex);
+			const auto current = g_resolvers.load(std::memory_order_acquire);
+			if (current) {
+				if (current->size() >= kMaxResolvers
+					|| std::ranges::any_of(
+						*current,
+						[&a_registration](
+							const PixelShaderSwapResolverRegistration& a_existing) {
+							return a_existing.resolver
+								== a_registration.resolver;
+						})) {
+					return false;
+				}
+			}
+			auto updated = current
+				? std::make_shared<ResolverList>(*current)
+				: std::make_shared<ResolverList>();
+			updated->push_back(a_registration);
+			std::stable_sort(
+				updated->begin(),
+				updated->end(),
+				[](const auto& a_left, const auto& a_right) {
+					return a_left.priority < a_right.priority;
+				});
+			resolverCount = updated->size();
+			g_resolvers.store(std::move(updated), std::memory_order_release);
+		}
 
-		// Diagnostic snapshot: with ShaderCatalog enabled, a nonzero count confirms observer-before-resolver on this boot; a zero means either ordering inverted or ShaderCatalog was inactive.
 		const auto observers = g_observers.load(std::memory_order_acquire);
 		const auto observerCount = observers ? observers->size() : 0;
-		L->info("Resolver registered; observers_at_resolver_register={}.", observerCount);
+		L->info(
+			"Resolver registered (priority={}, resolvers={}, observers_at_register={}).",
+			a_registration.priority,
+			resolverCount,
+			observerCount);
 
 		RequestHookInstall();
 		return true;
@@ -205,13 +204,4 @@ namespace cs::engine
 		return g_hookInstalled.load(std::memory_order_acquire);
 	}
 
-	ScopedPixelShaderBrokerBypass::ScopedPixelShaderBrokerBypass() noexcept
-	{
-		++g_bypassDepth;
-	}
-
-	ScopedPixelShaderBrokerBypass::~ScopedPixelShaderBrokerBypass() noexcept
-	{
-		--g_bypassDepth;
-	}
 }

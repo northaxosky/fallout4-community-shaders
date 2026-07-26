@@ -1,6 +1,7 @@
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderVariantResolver.h"
 
+#include <array>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -34,6 +35,100 @@ namespace
 			cs::sha1::Sha1FromHex(std::string(a_hex), result),
 			"invalid SHA1 fixture");
 		return result;
+	}
+
+	struct PipelineFixture
+	{
+		ID3D11Device* expectedDevice = nullptr;
+		ID3D11ClassLinkage* expectedLinkage = nullptr;
+		ID3D11PixelShader* stock = nullptr;
+		ID3D11PixelShader* replacement = nullptr;
+		HRESULT originalResult = S_OK;
+		std::vector<int> order;
+		cs::engine::PixelShaderSwapCompletion completion;
+		bool resolverForwarded = false;
+		cs::engine::PixelShaderSwapResolverResult firstResolverResult =
+			cs::engine::PixelShaderSwapResolverResult::kNoMatch;
+		bool lowerResolverCalled = false;
+	};
+
+	PipelineFixture* g_pipelineFixture = nullptr;
+
+	HRESULT STDMETHODCALLTYPE PipelineOriginal(
+		ID3D11Device* a_device,
+		const void*,
+		SIZE_T,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11PixelShader** a_output)
+	{
+		auto& fixture = *g_pipelineFixture;
+		fixture.order.push_back(2);
+		Check(
+			a_device == fixture.expectedDevice
+				&& a_linkage == fixture.expectedLinkage,
+			"original CreatePS did not receive broker device/linkage");
+		if (a_output)
+			*a_output = fixture.stock;
+		return fixture.originalResult;
+	}
+
+	void* PreparePipelineObserver(
+		const void*,
+		std::size_t) noexcept
+	{
+		g_pipelineFixture->order.push_back(1);
+		return g_pipelineFixture;
+	}
+
+	void ObservePipelineOriginal(
+		void*,
+		const cs::sha1::Sha1Result&,
+		ID3D11PixelShader* a_shader) noexcept
+	{
+		g_pipelineFixture->order.push_back(3);
+		g_pipelineFixture->resolverForwarded =
+			g_pipelineFixture->resolverForwarded
+			|| a_shader == g_pipelineFixture->stock;
+	}
+
+	void CompletePipelineObserver(
+		void*,
+		const cs::engine::PixelShaderSwapCompletion& a_completion) noexcept
+	{
+		g_pipelineFixture->order.push_back(5);
+		g_pipelineFixture->completion = a_completion;
+	}
+
+	cs::engine::PixelShaderSwapResolverResult PipelineResolver(
+		const cs::engine::PixelShaderSwapRequest& a_request) noexcept
+	{
+		auto& fixture = *g_pipelineFixture;
+		fixture.order.push_back(4);
+		fixture.resolverForwarded =
+			fixture.resolverForwarded
+			&& a_request.device == fixture.expectedDevice
+			&& a_request.linkage == fixture.expectedLinkage
+			&& a_request.stockOutput == fixture.stock
+			&& a_request.output
+			&& *a_request.output == fixture.stock;
+		if (a_request.output)
+			*a_request.output = fixture.replacement;
+		return cs::engine::PixelShaderSwapResolverResult::kReplaced;
+	}
+
+	cs::engine::PixelShaderSwapResolverResult FirstPipelineResolver(
+		const cs::engine::PixelShaderSwapRequest&) noexcept
+	{
+		return g_pipelineFixture->firstResolverResult;
+	}
+
+	cs::engine::PixelShaderSwapResolverResult LowerPipelineResolver(
+		const cs::engine::PixelShaderSwapRequest& a_request) noexcept
+	{
+		g_pipelineFixture->lowerResolverCalled = true;
+		if (a_request.output)
+			*a_request.output = g_pipelineFixture->replacement;
+		return cs::engine::PixelShaderSwapResolverResult::kReplaced;
 	}
 
 	void TestVariantKeySelectsVariant()
@@ -423,6 +518,198 @@ namespace
 				PixelShaderSwapSelectionKind::kHashMismatch, true),
 			"guard mismatch allowed substitution");
 	}
+
+	void TestBrokerPipelineOrderingAndForwarding()
+	{
+		using namespace cs::engine;
+		std::byte deviceToken{};
+		std::byte linkageToken{};
+		std::byte stockToken{};
+		std::byte replacementToken{};
+		PipelineFixture fixture{
+			.expectedDevice =
+				reinterpret_cast<ID3D11Device*>(&deviceToken),
+			.expectedLinkage =
+				reinterpret_cast<ID3D11ClassLinkage*>(&linkageToken),
+			.stock =
+				reinterpret_cast<ID3D11PixelShader*>(&stockToken),
+			.replacement =
+				reinterpret_cast<ID3D11PixelShader*>(&replacementToken)
+		};
+		g_pipelineFixture = &fixture;
+		const std::array observers{
+			PixelShaderSwapObserver{
+				.prepare = &PreparePipelineObserver,
+				.observeOriginal = &ObservePipelineOriginal,
+				.complete = &CompletePipelineObserver
+			}
+		};
+		const std::array resolvers{
+			PixelShaderSwapResolverRegistration{
+				.resolver = &PipelineResolver
+			}
+		};
+		const std::array<std::byte, 4> bytecode{
+			std::byte{ 1 },
+			std::byte{ 2 },
+			std::byte{ 3 },
+			std::byte{ 4 }
+		};
+		ID3D11PixelShader* output = nullptr;
+		cs::sha1::Sha1InitOnce();
+		const auto result = ExecutePixelShaderSwapPipeline(
+			&PipelineOriginal,
+			observers,
+			resolvers,
+			ShaderVariantKeyView{
+				"BSDFLightShader",
+				ShaderStage::kPixel,
+				ShaderVariantId{ 0x1234 }
+			},
+			false,
+			fixture.expectedDevice,
+			bytecode.data(),
+			bytecode.size(),
+			fixture.expectedLinkage,
+			&output);
+		Check(result == S_OK, "broker did not preserve original HRESULT");
+		Check(
+			output == fixture.replacement,
+			"broker did not publish resolver replacement");
+		Check(
+			fixture.order == std::vector<int>{ 1, 2, 3, 4, 5 },
+			"broker observer/resolver ordering changed");
+		Check(
+			fixture.resolverForwarded,
+			"broker did not forward stock/device/linkage to resolver");
+		Check(
+			fixture.completion.originalResult == S_OK
+				&& fixture.completion.stockOutput == fixture.stock
+				&& fixture.completion.finalOutput == fixture.replacement
+				&& fixture.completion.resolverInvoked
+				&& fixture.completion.resolverReportedReplacement
+				&& fixture.completion.finalIsReplacement,
+			"broker completion did not preserve stock and final state");
+
+		fixture.order.clear();
+		output = nullptr;
+		{
+			ScopedPixelShaderBrokerBypass bypass;
+			Check(
+				ExecutePixelShaderSwapPipeline(
+					&PipelineOriginal,
+					observers,
+					resolvers,
+					std::nullopt,
+					PixelShaderBrokerBypassActive(),
+					fixture.expectedDevice,
+					bytecode.data(),
+					bytecode.size(),
+					fixture.expectedLinkage,
+					&output)
+					== S_OK,
+				"bypassed CreatePS changed original HRESULT");
+		}
+		Check(
+			fixture.order == std::vector<int>{ 2 }
+				&& output == fixture.stock,
+			"broker bypass recursed into observers or resolvers");
+
+		fixture.order.clear();
+		fixture.originalResult = E_FAIL;
+		output = nullptr;
+		Check(
+			ExecutePixelShaderSwapPipeline(
+				&PipelineOriginal,
+				observers,
+				resolvers,
+				std::nullopt,
+				false,
+				fixture.expectedDevice,
+				bytecode.data(),
+				bytecode.size(),
+				fixture.expectedLinkage,
+				&output)
+				== E_FAIL,
+			"failed stock CreatePS HRESULT was not preserved");
+		Check(
+			fixture.order == std::vector<int>{ 1, 2, 5 }
+				&& !fixture.completion.resolverInvoked
+				&& !fixture.completion.finalIsStock
+				&& !fixture.completion.finalIsReplacement,
+			"failed stock CreatePS invoked resolver or classified stale output");
+	}
+
+	void TestResolverClaimStopsLowerPriority()
+	{
+		using namespace cs::engine;
+		std::byte deviceToken{};
+		std::byte linkageToken{};
+		std::byte stockToken{};
+		std::byte replacementToken{};
+		PipelineFixture fixture{
+			.expectedDevice =
+				reinterpret_cast<ID3D11Device*>(&deviceToken),
+			.expectedLinkage =
+				reinterpret_cast<ID3D11ClassLinkage*>(&linkageToken),
+			.stock =
+				reinterpret_cast<ID3D11PixelShader*>(&stockToken),
+			.replacement =
+				reinterpret_cast<ID3D11PixelShader*>(&replacementToken),
+			.firstResolverResult =
+				PixelShaderSwapResolverResult::kKeepStock
+		};
+		g_pipelineFixture = &fixture;
+		const std::array resolvers{
+			PixelShaderSwapResolverRegistration{
+				.resolver = &FirstPipelineResolver,
+				.priority = kBytecodePatchResolverPriority
+			},
+			PixelShaderSwapResolverRegistration{
+				.resolver = &LowerPipelineResolver,
+				.priority = kHlslReplacementResolverPriority
+			}
+		};
+		const std::array<std::byte, 1> bytecode{ std::byte{ 1 } };
+		ID3D11PixelShader* output = nullptr;
+		Check(
+			ExecutePixelShaderSwapPipeline(
+				&PipelineOriginal,
+				{},
+				resolvers,
+				std::nullopt,
+				false,
+				fixture.expectedDevice,
+				bytecode.data(),
+				bytecode.size(),
+				fixture.expectedLinkage,
+				&output)
+				== S_OK
+				&& output == fixture.stock
+				&& !fixture.lowerResolverCalled,
+			"claimed stock route fell through to lower HLSL resolver");
+
+		fixture.firstResolverResult =
+			PixelShaderSwapResolverResult::kNoMatch;
+		fixture.lowerResolverCalled = false;
+		output = nullptr;
+		Check(
+			ExecutePixelShaderSwapPipeline(
+				&PipelineOriginal,
+				{},
+				resolvers,
+				std::nullopt,
+				false,
+				fixture.expectedDevice,
+				bytecode.data(),
+				bytecode.size(),
+				fixture.expectedLinkage,
+				&output)
+				== S_OK
+				&& output == fixture.replacement
+				&& fixture.lowerResolverCalled,
+			"unmatched patch route did not reach lower HLSL resolver");
+	}
 }
 
 int main()
@@ -444,7 +731,9 @@ int main()
 		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
 		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
 		{ "Light resolver masks technique", &TestBsdfLightResolverMasksTechnique },
-		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock }
+		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock },
+		{ "broker pipeline ordering and forwarding", &TestBrokerPipelineOrderingAndForwarding },
+		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority }
 	};
 
 	unsigned failures = 0;

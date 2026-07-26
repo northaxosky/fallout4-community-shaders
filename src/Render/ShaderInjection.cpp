@@ -216,6 +216,7 @@ namespace cs::engine
 			std::atomic<bool>          swappable{ false };
 			std::atomic<bool>          slotCollision{ false };
 			std::atomic<std::size_t>   contributors{ 0 };
+			std::atomic<std::size_t>   suppressedContributors{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
@@ -223,6 +224,7 @@ namespace cs::engine
 			std::atomic<std::uint64_t> passthroughDisabled{ 0 };
 			std::atomic<std::uint64_t> dispatches{ 0 };
 			DeveloperShaderOverride   developerOverride = DeveloperShaderOverride::kAuto;
+			std::vector<std::string>  suppressedContributorNames;
 			ShaderInjectionDefines    defines;
 			std::string               compiledSha1;
 			std::string               compileError;
@@ -233,9 +235,12 @@ namespace cs::engine
 			const ShaderInjectionTargetMetadata* metadata = nullptr;
 			ShaderInjectionDefines               defines;
 			std::vector<ShaderInjectionBindCallback> binds;
+			std::vector<ShaderPatchedPixelShaderMatcher> patchedMatchers;
 			std::vector<ShaderReplacementVariantRegistration> variants;
+			std::vector<std::string>              suppressedContributorNames;
 			std::size_t                          contributors = 0;
 			bool                                 slotCollision = false;
+			bool                                 bytecodePatchExclusive = false;
 		};
 
 		struct PublishedVariant
@@ -259,6 +264,7 @@ namespace cs::engine
 		{
 			ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
 			std::vector<ShaderInjectionBindCallback> binds;
+			std::vector<ShaderPatchedPixelShaderMatcher> patchedMatchers;
 		};
 
 		struct PublishedPlan
@@ -280,6 +286,8 @@ namespace cs::engine
 			std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
+			std::vector<ShaderPatchedDispatchRegistration>
+				patchedDispatchRegistrations;
 			std::vector<ShaderReplacementVariantRegistration>
 				variantRegistrations = DefaultVariantRegistrations();
 			std::array<TargetRuntimeState,
@@ -321,7 +329,8 @@ namespace cs::engine
 			L->warn("{} rejected after shader-injection freeze; restart required.", a_operation);
 		}
 
-		bool RegistrationHasDuplicateClaims(const ShaderReplacementRegistration& a_registration)
+		template <class Registration>
+		bool RegistrationHasDuplicateClaims(const Registration& a_registration)
 		{
 			auto claims = a_registration.slotClaims;
 			std::ranges::sort(claims);
@@ -369,8 +378,9 @@ namespace cs::engine
 			return false;
 		}
 
+		template <class Registration>
 		std::optional<ShaderSlotClaim> FindSlotCollision(
-			const ShaderReplacementRegistration& a_registration,
+			const Registration& a_registration,
 			const std::vector<ShaderSlotClaim>& a_claimedSlots)
 		{
 			for (const auto& claim : a_registration.slotClaims) {
@@ -382,6 +392,8 @@ namespace cs::engine
 
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
+			const std::vector<ShaderPatchedDispatchRegistration>&
+				a_patchedDispatchRegistrations,
 			const std::vector<ShaderReplacementVariantRegistration>&
 				a_variantRegistrations,
 			bool a_developerForceOffEnabled,
@@ -404,9 +416,36 @@ namespace cs::engine
 					developerOverride = DeveloperShaderOverride::kAuto;
 				bool requested = developerOverride == DeveloperShaderOverride::kForceOn;
 				std::vector<ShaderSlotClaim> claimedSlots;
+				const bool hasExclusivePatch = std::ranges::any_of(
+					a_patchedDispatchRegistrations,
+					[&metadata](
+						const ShaderPatchedDispatchRegistration& a_registration) {
+						return a_registration.targetId == metadata.id;
+					});
+				if (hasExclusivePatch) {
+					for (std::size_t registrationIndex = 0;
+						registrationIndex < a_registrations.size();
+						++registrationIndex) {
+						const auto& registration =
+							a_registrations[registrationIndex];
+						if (registration.targetId != metadata.id)
+							continue;
+						const auto contributor = std::string(
+							ContributorName(
+								registration,
+								registrationIndex));
+						target.suppressedContributorNames.push_back(
+							contributor);
+						L->warn(
+							"Exclusive DXBC patch for '{}' suppressed HLSL contributor '{}'.",
+							metadata.name,
+							contributor);
+					}
+				}
 
 				for (std::size_t registrationIndex = 0;
-					registrationIndex < a_registrations.size();
+					!hasExclusivePatch
+						&& registrationIndex < a_registrations.size();
 					++registrationIndex) {
 					const auto& registration = a_registrations[registrationIndex];
 					if (registration.targetId != metadata.id)
@@ -462,19 +501,48 @@ namespace cs::engine
 				if (developerOverride == DeveloperShaderOverride::kForceOff)
 					requested = false;
 
-				for (const auto& variant : a_variantRegistrations) {
-					if (variant.targetId == metadata.id)
-						target.variants.push_back(variant);
+				for (const auto& registration :
+					a_patchedDispatchRegistrations) {
+					if (registration.targetId != metadata.id)
+						continue;
+					target.bytecodePatchExclusive = true;
+					++target.contributors;
+					claimedSlots.insert(
+						claimedSlots.end(),
+						registration.slotClaims.begin(),
+						registration.slotClaims.end());
+					target.patchedMatchers.push_back(registration.matches);
+					target.binds.push_back(registration.bind);
+				}
+
+				if (target.bytecodePatchExclusive) {
+					if (requested)
+						L->warn(
+							"Exclusive DXBC patch for '{}' suppressed the developer HLSL force-on override.",
+							metadata.name);
+					requested = false;
+				}
+
+				if (!target.bytecodePatchExclusive) {
+					for (const auto& variant : a_variantRegistrations) {
+						if (variant.targetId == metadata.id)
+							target.variants.push_back(variant);
+					}
 				}
 
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
 				runtime.slotCollision.store(target.slotCollision, std::memory_order_relaxed);
 				runtime.contributors.store(target.contributors, std::memory_order_relaxed);
+				runtime.suppressedContributors.store(
+					target.suppressedContributorNames.size(),
+					std::memory_order_relaxed);
 				runtime.developerOverride = developerOverride;
+				runtime.suppressedContributorNames =
+					target.suppressedContributorNames;
 				runtime.defines = target.defines;
 
-				if (requested)
+				if (requested || !target.patchedMatchers.empty())
 					frozen.push_back(std::move(target));
 			}
 			return frozen;
@@ -633,12 +701,14 @@ namespace cs::engine
 			return target == a_plan.targets.end() ? nullptr : &*target;
 		}
 
-		bool MatchesInjectedPixelShader(
+		bool MatchesHlslInjectedPixelShader(
 			const PublishedPlan& a_plan,
 			ShaderInjectionTarget a_target,
 			ID3D11PixelShader* a_shader) noexcept
 		{
-			return a_shader && std::ranges::any_of(
+			if (!a_shader)
+				return false;
+			return std::ranges::any_of(
 				a_plan.variants,
 				[a_target, a_shader](const PublishedVariant& a_variant) {
 					return a_variant.targetId == a_target
@@ -648,18 +718,46 @@ namespace cs::engine
 				});
 		}
 
-		bool ResolveInjectedPixelShader(
-			const void*,
-			std::size_t,
-			std::optional<ShaderVariantKeyView> a_resolvedVariant,
-			const sha1::Sha1Result& a_sha,
-			ID3D11PixelShader** a_out) noexcept
+		bool MatchesPatchedDispatchPixelShader(
+			const PublishedPlan& a_plan,
+			ShaderInjectionTarget a_target,
+			ID3D11PixelShader* a_shader) noexcept
+		{
+			if (!a_shader)
+				return false;
+			const auto* target = FindPublishedTarget(a_plan, a_target);
+			return target && std::ranges::any_of(
+				target->patchedMatchers,
+				[a_target, a_shader](ShaderPatchedPixelShaderMatcher a_matcher) {
+					return a_matcher && a_matcher(a_target, a_shader);
+				});
+		}
+
+		bool MatchesDispatchPixelShader(
+			const PublishedPlan& a_plan,
+			ShaderInjectionTarget a_target,
+			ID3D11PixelShader* a_shader) noexcept
+		{
+			return MatchesHlslInjectedPixelShader(
+				a_plan,
+				a_target,
+				a_shader)
+				|| MatchesPatchedDispatchPixelShader(
+					a_plan,
+					a_target,
+					a_shader);
+		}
+
+		PixelShaderSwapResolverResult ResolveInjectedPixelShader(
+			const PixelShaderSwapRequest& a_request) noexcept
 		{
 			try {
+				const auto& a_resolvedVariant = a_request.variant;
+				const auto& a_sha = a_request.stockSha1;
 				const auto plan =
 					GetService().published.load(std::memory_order_acquire);
 				if (!plan)
-					return false;
+					return PixelShaderSwapResolverResult::kNoMatch;
 
 				const auto selection = SelectPixelShaderSwapVariant(
 					plan->variantKeys,
@@ -667,7 +765,7 @@ namespace cs::engine
 					a_sha);
 				if (selection.kind
 					== PixelShaderSwapSelectionKind::kNoMatch) {
-					return false;
+					return PixelShaderSwapResolverResult::kNoMatch;
 				}
 				if (selection.kind
 					== PixelShaderSwapSelectionKind::kUnmappedVariant) {
@@ -689,13 +787,13 @@ namespace cs::engine
 						a_resolvedVariant
 							? a_resolvedVariant->id.Value()
 							: 0);
-					return false;
+					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 				if (selection.routeIndex
 					>= plan->variantKeys.size()
 					|| selection.replacementIndex
 						>= plan->variants.size()) {
-					return false;
+					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 
 				const auto& variant =
@@ -730,13 +828,13 @@ namespace cs::engine
 							: 0,
 						expected,
 						sha1::Sha1ToHex(a_sha));
-					return false;
+					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 
 				runtime.matches.fetch_add(1, std::memory_order_relaxed);
 				if (!runtime.requested.load(std::memory_order_relaxed)) {
 					runtime.passthroughDisabled.fetch_add(1, std::memory_order_relaxed);
-					return false;
+					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 				auto replacement = variant.compilation
 					? variant.compilation->AcquireOrRequest()
@@ -752,11 +850,13 @@ namespace cs::engine
 						? runtime.passthroughCompileFail
 						: runtime.passthroughNotReady;
 					counter.fetch_add(1, std::memory_order_relaxed);
-					return false;
+					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 
-				(*a_out)->Release();
-				*a_out = replacement.detach();
+				if (!a_request.output || !*a_request.output)
+					return PixelShaderSwapResolverResult::kKeepStock;
+				(*a_request.output)->Release();
+				*a_request.output = replacement.detach();
 				const auto previous = runtime.substitutions.fetch_add(1, std::memory_order_relaxed);
 				if (previous == 0) {
 					L->info(
@@ -765,7 +865,7 @@ namespace cs::engine
 						kTargets[ToIndex(variant.targetId)].name,
 						variant.name);
 				}
-				return true;
+				return PixelShaderSwapResolverResult::kReplaced;
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,
@@ -773,14 +873,14 @@ namespace cs::engine
 					spdlog::level::err,
 					"Pixel-shader replacement resolution failed: {}.",
 					e.what());
-				return false;
+				return PixelShaderSwapResolverResult::kKeepStock;
 			} catch (...) {
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
 					spdlog::level::err,
 					"Pixel-shader replacement resolution failed.");
-				return false;
+				return PixelShaderSwapResolverResult::kKeepStock;
 			}
 		}
 	}
@@ -1001,6 +1101,44 @@ namespace cs::engine
 		return true;
 	}
 
+	bool RegisterPatchedShaderDispatch(
+		ShaderPatchedDispatchRegistration a_registration)
+	{
+		auto& service = GetService();
+		{
+			std::scoped_lock lock(service.mutex);
+			if (service.lifecycle != Lifecycle::kCollecting) {
+				LogLateMutation("Patched shader dispatch registration");
+				return false;
+			}
+			if (!IsValidTarget(a_registration.targetId)
+				|| !a_registration.matches
+				|| !a_registration.bind
+				|| a_registration.contributor.empty()
+				|| RegistrationHasDuplicateClaims(a_registration)) {
+				L->error("Patched shader dispatch registration rejected.");
+				return false;
+			}
+			if (std::ranges::any_of(
+					service.patchedDispatchRegistrations,
+					[&a_registration](
+						const ShaderPatchedDispatchRegistration& a_existing) {
+						return a_existing.targetId
+							== a_registration.targetId;
+					})) {
+				L->error(
+					"Patched shader dispatch '{}' for '{}' is duplicated.",
+					a_registration.contributor,
+					kTargets[ToIndex(a_registration.targetId)].name);
+				return false;
+			}
+			service.patchedDispatchRegistrations.push_back(
+				std::move(a_registration));
+		}
+		EnsurePreSunLightDrawInstalled();
+		return true;
+	}
+
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled)
 	{
 		auto& service = GetService();
@@ -1058,6 +1196,8 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		std::vector<ShaderReplacementRegistration> registrations;
+		std::vector<ShaderPatchedDispatchRegistration>
+			patchedDispatchRegistrations;
 		std::vector<ShaderReplacementVariantRegistration>
 			variantRegistrations;
 		std::array<DeveloperShaderOverride,
@@ -1076,6 +1216,8 @@ namespace cs::engine
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
 			registrations = service.registrations;
+			patchedDispatchRegistrations =
+				service.patchedDispatchRegistrations;
 			variantRegistrations = service.variantRegistrations;
 		}
 
@@ -1093,6 +1235,7 @@ namespace cs::engine
 		} else {
 			auto frozenTargets = FreezeTargets(
 				registrations,
+				patchedDispatchRegistrations,
 				variantRegistrations,
 				developerForceOffEnabled,
 				developerOverrides);
@@ -1184,10 +1327,12 @@ namespace cs::engine
 						+ " variants";
 				}
 
-				if (targetPrepared > 0) {
+				if (targetPrepared > 0
+					|| !frozenTarget.patchedMatchers.empty()) {
 					plan->targets.push_back(PublishedTarget{
 						frozenTarget.metadata->id,
-						frozenTarget.binds
+						frozenTarget.binds,
+						frozenTarget.patchedMatchers
 					});
 				}
 			}
@@ -1208,7 +1353,7 @@ namespace cs::engine
 					RegisterPixelShaderSwapResolver(&ResolveInjectedPixelShader);
 				if (service.resolverRegistered) {
 					L->info(
-						"Registered sole pixel-shader swap resolver (broker hook={}).",
+						"Registered HLSL pixel-shader swap resolver (broker hook={}).",
 						PixelShaderSwapBrokerHooksInstalled() ? "present" : "absent");
 				} else {
 					L->error(
@@ -1238,9 +1383,6 @@ namespace cs::engine
 			return;
 
 		auto& runtime = GetService().runtime[ToIndex(a_target)];
-		if (runtime.substitutions.load(std::memory_order_relaxed) == 0)
-			return;
-
 		for (const auto& bind : target->binds) {
 			try {
 				bind(a_context);
@@ -1282,10 +1424,7 @@ namespace cs::engine
 		for (const auto& target : plan->targets) {
 			if (target.binds.empty())
 				continue;
-			const auto& runtime = GetService().runtime[ToIndex(target.id)];
-			if (runtime.substitutions.load(std::memory_order_relaxed) == 0)
-				continue;
-			if (MatchesInjectedPixelShader(*plan, target.id, boundShader)) {
+			if (MatchesDispatchPixelShader(*plan, target.id, boundShader)) {
 				DispatchShaderInjections(target.id, a_context);
 				break;
 			}
@@ -1326,7 +1465,24 @@ namespace cs::engine
 			return false;
 		const auto plan =
 			GetService().published.load(std::memory_order_acquire);
-		return plan && MatchesInjectedPixelShader(*plan, a_target, a_shader);
+		return plan && MatchesHlslInjectedPixelShader(
+			*plan,
+			a_target,
+			a_shader);
+	}
+
+	bool IsPatchedDispatchPixelShader(
+		ShaderInjectionTarget a_target,
+		ID3D11PixelShader* a_shader) noexcept
+	{
+		if (!a_shader || !IsValidTarget(a_target))
+			return false;
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		return plan && MatchesPatchedDispatchPixelShader(
+			*plan,
+			a_target,
+			a_shader);
 	}
 
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(
@@ -1349,6 +1505,10 @@ namespace cs::engine
 		snapshot.slotCollision = runtime.slotCollision.load(std::memory_order_relaxed);
 		snapshot.developerOverride = runtime.developerOverride;
 		snapshot.contributors = runtime.contributors.load(std::memory_order_relaxed);
+		snapshot.suppressedContributors =
+			runtime.suppressedContributors.load(std::memory_order_relaxed);
+		snapshot.suppressedContributorNames =
+			runtime.suppressedContributorNames;
 		snapshot.defines = runtime.defines;
 		snapshot.compiledSha1 = runtime.compiledSha1;
 		snapshot.compileError = runtime.compileError;
@@ -1366,10 +1526,95 @@ namespace cs::engine
 				++summary.requested;
 			if (runtime.compileOk.load(std::memory_order_relaxed))
 				++summary.compiled;
+			summary.suppressedContributors +=
+				runtime.suppressedContributors.load(
+					std::memory_order_relaxed);
 			summary.matches += runtime.matches.load(std::memory_order_relaxed);
 			summary.substitutions += runtime.substitutions.load(std::memory_order_relaxed);
 			summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 		}
 		return summary;
 	}
+
+#ifdef FO4CS_SHADER_INJECTION_TESTING
+	ShaderInjectionFreezePreview PreviewShaderInjectionFreeze(
+		ShaderInjectionTarget a_target)
+	{
+		ShaderInjectionFreezePreview preview;
+		if (!IsValidTarget(a_target))
+			return preview;
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		const auto frozen = FreezeTargets(
+			service.registrations,
+			service.patchedDispatchRegistrations,
+			service.variantRegistrations,
+			service.developerForceOffEnabled,
+			service.developerOverrides);
+		preview.hlslRequested = service.runtime[ToIndex(a_target)]
+			.requested.load(std::memory_order_relaxed);
+		const auto target = std::ranges::find_if(
+			frozen,
+			[a_target](const FrozenTarget& a_candidate) {
+				return a_candidate.metadata
+					&& a_candidate.metadata->id == a_target;
+			});
+		if (target == frozen.end())
+			return preview;
+		preview.published = true;
+		preview.bytecodePatchExclusive =
+			target->bytecodePatchExclusive;
+		preview.slotCollision = target->slotCollision;
+		preview.variants = target->variants.size();
+		preview.binds = target->binds.size();
+		preview.patchedMatchers = target->patchedMatchers.size();
+		preview.suppressedContributors =
+			target->suppressedContributorNames.size();
+		preview.suppressedContributorNames =
+			target->suppressedContributorNames;
+		return preview;
+	}
+
+	bool PublishShaderInjectionFreezePreview()
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		const auto frozen = FreezeTargets(
+			service.registrations,
+			service.patchedDispatchRegistrations,
+			service.variantRegistrations,
+			service.developerForceOffEnabled,
+			service.developerOverrides);
+		auto plan = std::make_shared<PublishedPlan>();
+		for (const auto& target : frozen) {
+			if (!target.patchedMatchers.empty()) {
+				plan->targets.push_back({
+					target.metadata->id,
+					target.binds,
+					target.patchedMatchers
+				});
+			}
+		}
+		service.published.store(plan, std::memory_order_release);
+		return !plan->targets.empty();
+	}
+
+	bool DispatchShaderInjectionForTesting(
+		ShaderInjectionTarget a_target,
+		ID3D11PixelShader* a_shader,
+		ID3D11DeviceContext* a_context)
+	{
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		if (!plan
+			|| !MatchesDispatchPixelShader(
+				*plan,
+				a_target,
+				a_shader)) {
+			return false;
+		}
+		DispatchShaderInjections(a_target, a_context);
+		return true;
+	}
+#endif
 }

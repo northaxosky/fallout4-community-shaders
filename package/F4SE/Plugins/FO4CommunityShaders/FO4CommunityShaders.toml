@@ -67,6 +67,9 @@ inject_ambient_pass = false
 load = false
 
 [features.ScreenSpaceShadows.settings]
+# Explicit restart-time selection: stock, dxbc_patch, or hlsl_reconstruction.
+# DXBC patch coverage is provisional developer-only (2/64); shipped default stays stock.
+injection_mode = "stock"
 
 [features.Imagespace]
 load = false

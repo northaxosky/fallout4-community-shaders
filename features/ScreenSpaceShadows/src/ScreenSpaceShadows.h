@@ -2,6 +2,8 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "SssMaskBinding.h"
+#include "SssInjectionMode.h"
 #include "Utils/CSBuffer.h"
 
 #include <atomic>
@@ -37,6 +39,7 @@ namespace cs::features
 		struct Settings
 		{
 			bool          enabled = false;
+			SssInjectionMode injectionMode = SssInjectionMode::kStock;
 			float         surfaceThickness = 0.02f;
 			float         bilinearThreshold = 0.02f;
 			float         shadowContrast = 1.0f;
@@ -63,9 +66,21 @@ namespace cs::features
 
 		void SaveSettings();
 		void OnPreDeferredLights();
-		void BindShadowMask(ID3D11DeviceContext* a_context);
+		void BindShadowMask(
+			ID3D11DeviceContext* a_context,
+			bool a_patchedDraw);
 		void OnPostDeferredLights();
 		bool EnsureResources();
+		bool TryGetMaskExtents(
+			sss_mask_binding::Extent& a_required,
+			sss_mask_binding::Extent& a_allocation) const;
+		bool EnsureWhiteFallback(
+			ID3D11Device* a_device,
+			sss_mask_binding::Extent a_required,
+			sss_mask_binding::Extent a_allocation);
+		bool CreateWhiteFallback(
+			ID3D11Device* a_device,
+			sss_mask_binding::Extent a_allocation);
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
@@ -73,8 +88,11 @@ namespace cs::features
 		static constexpr uint kMaskPSSlot = 6;
 
 		Settings _settings;
+		SssInjectionMode _activeInjectionMode = SssInjectionMode::kStock;
 		std::atomic_bool _started{ false };
+		std::atomic_bool _injectionReady{ false };
 		std::atomic_bool _resourcesReady{ false };
+		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
 		std::atomic_bool _maskBound{ false };
 		std::atomic_bool _maskBoundLastFrame{ false };
@@ -84,12 +102,30 @@ namespace cs::features
 		std::atomic<float> _lightX{ 0.0f };
 		std::atomic<float> _lightY{ 0.0f };
 		std::atomic<float> _clipW{ 0.0f };
+		std::atomic_uint64_t _realMaskBinds{ 0 };
+		std::atomic_uint64_t _whiteFallbackBinds{ 0 };
+		std::atomic_uint64_t _invariantViolations{ 0 };
+		std::atomic_uint32_t _requiredMaskWidthTelemetry{ 0 };
+		std::atomic_uint32_t _requiredMaskHeightTelemetry{ 0 };
+		std::atomic_uint32_t _whiteFallbackWidthTelemetry{ 0 };
+		std::atomic_uint32_t _whiteFallbackHeightTelemetry{ 0 };
+		std::atomic_uint64_t _whiteFallbackAllocationAttempts{ 0 };
+		std::atomic_uint64_t _whiteFallbackAllocationFailures{ 0 };
+		std::atomic_bool _whiteFallbackFailureLatchedTelemetry{ false };
 		bool _resourceInitFailed = false;
+		bool _realMaskReadyForDraw = false;
+		ID3D11Device* _deviceIdentity = nullptr;
+		std::uint64_t _deviceGeneration = 0;
+		sss_mask_binding::Extent _requiredMaskExtent;
+		sss_mask_binding::ExtentState _whiteFallbackExtent;
+		sss_mask_binding::FallbackAllocationBackoff
+			_whiteFallbackBackoff;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _raymarchCB;
 		std::unique_ptr<cs::buffer::Texture2D> _maskTexture;
 		winrt::com_ptr<ID3D11SamplerState> _pointBorderSampler;
 		winrt::com_ptr<ID3D11ComputeShader> _raymarchCS;
+		winrt::com_ptr<ID3D11ShaderResourceView> _whiteFallbackSRV;
 		std::uint32_t _allocWidth = 0;
 		std::uint32_t _allocHeight = 0;
 		std::uint32_t _lastCompiledSampleCount = 0;

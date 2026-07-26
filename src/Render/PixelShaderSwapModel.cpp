@@ -1,11 +1,15 @@
 #include "Render/PixelShaderSwapBroker.h"
 
 #include <algorithm>
+#include <array>
 
 namespace cs::engine
 {
 	namespace
 	{
+		constexpr std::size_t kMaxObserverInvocations = 8;
+		thread_local unsigned g_bypassDepth = 0;
+
 		bool Sha1Equals(
 			const sha1::Sha1Result& a_left,
 			const sha1::Sha1Result& a_right) noexcept
@@ -180,5 +184,120 @@ namespace cs::engine
 			&& a_stockOutput != nullptr
 			&& a_finalOutput != a_stockOutput;
 		return result;
+	}
+
+	HRESULT ExecutePixelShaderSwapPipeline(
+		CreatePixelShaderFunction a_original,
+		std::span<const PixelShaderSwapObserver> a_observers,
+		std::span<const PixelShaderSwapResolverRegistration> a_resolvers,
+		std::optional<ShaderVariantKeyView> a_variant,
+		bool a_bypass,
+		ID3D11Device* a_device,
+		const void* a_bytecode,
+		SIZE_T a_bytecodeLength,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11PixelShader** a_output) noexcept
+	{
+		if (!a_original)
+			return E_POINTER;
+		if (a_bypass) {
+			return a_original(
+				a_device,
+				a_bytecode,
+				a_bytecodeLength,
+				a_linkage,
+				a_output);
+		}
+
+		std::array<PixelShaderSwapObserverInvocation,
+			kMaxObserverInvocations> invocations{};
+		const auto observerCount =
+			std::min(a_observers.size(), invocations.size());
+		for (std::size_t index = 0; index < observerCount; ++index) {
+			invocations[index] = BeginPixelShaderSwapObserver(
+				a_observers[index],
+				a_bytecode,
+				a_bytecodeLength);
+		}
+
+		const HRESULT result = a_original(
+			a_device,
+			a_bytecode,
+			a_bytecodeLength,
+			a_linkage,
+			a_output);
+		ID3D11PixelShader* stockOutput = a_output ? *a_output : nullptr;
+		const bool canResolve = SUCCEEDED(result)
+			&& stockOutput
+			&& a_bytecode
+			&& a_bytecodeLength != 0;
+		bool resolverInvoked = false;
+		bool resolverReportedReplacement = false;
+		if (canResolve) {
+			const auto stockSha1 =
+				sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
+			for (std::size_t index = 0; index < observerCount; ++index) {
+				const auto& observer = a_observers[index];
+				if (invocations[index].active
+					&& observer.observeOriginal) {
+					observer.observeOriginal(
+						invocations[index].token,
+						stockSha1,
+						stockOutput);
+				}
+			}
+
+			const PixelShaderSwapRequest request{
+				.device = a_device,
+				.linkage = a_linkage,
+				.bytecode = a_bytecode,
+				.bytecodeLength = a_bytecodeLength,
+				.variant = a_variant,
+				.stockSha1 = stockSha1,
+				.stockOutput = stockOutput,
+				.output = a_output
+			};
+			for (const auto& registration : a_resolvers) {
+				if (!registration.resolver)
+					continue;
+				resolverInvoked = true;
+				const auto resolution = registration.resolver(request);
+				if (resolution
+					== PixelShaderSwapResolverResult::kReplaced) {
+					resolverReportedReplacement = true;
+					break;
+				}
+				if (resolution
+					== PixelShaderSwapResolverResult::kKeepStock) {
+					break;
+				}
+			}
+		}
+
+		const auto completion = ClassifyPixelShaderSwapCompletion(
+			static_cast<std::int32_t>(result),
+			a_output != nullptr,
+			stockOutput,
+			resolverInvoked,
+			resolverReportedReplacement,
+			a_output ? *a_output : nullptr);
+		for (std::size_t index = 0; index < observerCount; ++index)
+			CompletePixelShaderSwapObserver(invocations[index], completion);
+		return result;
+	}
+
+	bool PixelShaderBrokerBypassActive() noexcept
+	{
+		return g_bypassDepth != 0;
+	}
+
+	ScopedPixelShaderBrokerBypass::ScopedPixelShaderBrokerBypass() noexcept
+	{
+		++g_bypassDepth;
+	}
+
+	ScopedPixelShaderBrokerBypass::~ScopedPixelShaderBrokerBypass() noexcept
+	{
+		--g_bypassDepth;
 	}
 }

@@ -258,6 +258,10 @@ namespace cs::features
 			.Field("started", _started.load(std::memory_order_acquire))
 			.Field("compiled", static_cast<std::int64_t>(summary.compiled))
 			.Field("requested", static_cast<std::int64_t>(summary.requested))
+			.Field(
+				"suppressed_contributors",
+				static_cast<std::int64_t>(
+					summary.suppressedContributors))
 			.Field("substitutions", static_cast<std::int64_t>(summary.substitutions))
 			.Field("matches", static_cast<std::int64_t>(summary.matches));
 	}
@@ -313,6 +317,7 @@ namespace cs::features
 					ImGui::TableSetColumnIndex(1); ImGui::TextUnformatted(e.enabled_in_ini ? "yes" : "no");
 					ImGui::TableSetColumnIndex(2);
 					if (!target)                         ImGui::TextDisabled("unsupported");
+					else if (status.suppressedContributors > 0) ImGui::TextDisabled("suppressed");
 					else if (!status.compileAttempted)   ImGui::TextDisabled("skipped");
 					else if (status.compileOk)           ImGui::TextColored(ImVec4(0.4f, 1.0f, 0.4f, 1), "ok");
 					else                                 ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1), "FAIL");
@@ -324,6 +329,20 @@ namespace cs::features
 						ImGui::TableNextRow();
 						ImGui::TableSetColumnIndex(0);
 						ImGui::TextWrapped("    %s", status.compileError.c_str());
+					}
+					if (!status.suppressedContributorNames.empty()) {
+						std::string suppressed;
+						for (const auto& contributor :
+							status.suppressedContributorNames) {
+							if (!suppressed.empty())
+								suppressed += ", ";
+							suppressed += contributor;
+						}
+						ImGui::TableNextRow();
+						ImGui::TableSetColumnIndex(0);
+						ImGui::TextWrapped(
+							"    exclusive patch suppressed: %s",
+							suppressed.c_str());
 					}
 				}
 				ImGui::EndTable();

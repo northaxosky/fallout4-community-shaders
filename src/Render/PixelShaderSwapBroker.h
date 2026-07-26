@@ -2,6 +2,11 @@
 
 #include "Utils/CSSha1.h"
 
+#ifndef NOMINMAX
+#  define NOMINMAX
+#endif
+#include <d3d11.h>
+
 #include <cstddef>
 #include <compare>
 #include <cstdint>
@@ -9,9 +14,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-
-struct ID3D11Device;
-struct ID3D11PixelShader;
 
 namespace cs::engine
 {
@@ -107,13 +109,36 @@ namespace cs::engine
 		PixelShaderSwapSelectionKind a_selection,
 		bool a_replacementReady) noexcept;
 
-	// A successful resolver replaces *a_out with net refcount one.
-	using PixelShaderSwapResolver = bool (*)(
-		const void* a_bytecode,
-		std::size_t a_bytecodeLength,
-		std::optional<ShaderVariantKeyView> a_variant,
-		const sha1::Sha1Result& a_sha,
-		ID3D11PixelShader** a_out) noexcept;
+	struct PixelShaderSwapRequest
+	{
+		ID3D11Device* device = nullptr;
+		ID3D11ClassLinkage* linkage = nullptr;
+		const void* bytecode = nullptr;
+		std::size_t bytecodeLength = 0;
+		std::optional<ShaderVariantKeyView> variant;
+		sha1::Sha1Result stockSha1;
+		ID3D11PixelShader* stockOutput = nullptr;
+		ID3D11PixelShader** output = nullptr;
+	};
+
+	enum class PixelShaderSwapResolverResult : std::uint8_t
+	{
+		kNoMatch,
+		kKeepStock,
+		kReplaced
+	};
+
+	using PixelShaderSwapResolver = PixelShaderSwapResolverResult (*)(
+		const PixelShaderSwapRequest& a_request) noexcept;
+
+	struct PixelShaderSwapResolverRegistration
+	{
+		PixelShaderSwapResolver resolver = nullptr;
+		int priority = 0;
+	};
+
+	inline constexpr int kBytecodePatchResolverPriority = -100;
+	inline constexpr int kHlslReplacementResolverPriority = 0;
 
 	struct PixelShaderSwapCompletion
 	{
@@ -171,10 +196,32 @@ namespace cs::engine
 		bool a_resolverReportedReplacement,
 		ID3D11PixelShader* a_finalOutput) noexcept;
 
+	using CreatePixelShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+		ID3D11Device*,
+		const void*,
+		SIZE_T,
+		ID3D11ClassLinkage*,
+		ID3D11PixelShader**);
+
+	HRESULT ExecutePixelShaderSwapPipeline(
+		CreatePixelShaderFunction a_original,
+		std::span<const PixelShaderSwapObserver> a_observers,
+		std::span<const PixelShaderSwapResolverRegistration> a_resolvers,
+		std::optional<ShaderVariantKeyView> a_variant,
+		bool a_bypass,
+		ID3D11Device* a_device,
+		const void* a_bytecode,
+		SIZE_T a_bytecodeLength,
+		ID3D11ClassLinkage* a_linkage,
+		ID3D11PixelShader** a_output) noexcept;
+
 	void SetPixelShaderSwapBrokerDevice(ID3D11Device* a_device);
 	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver a_resolver);
+	bool RegisterPixelShaderSwapResolver(
+		PixelShaderSwapResolverRegistration a_registration);
 	bool RegisterPixelShaderSwapObserver(PixelShaderSwapObserver a_observer);
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept;
+	bool PixelShaderBrokerBypassActive() noexcept;
 
 	class ScopedPixelShaderBrokerBypass
 	{

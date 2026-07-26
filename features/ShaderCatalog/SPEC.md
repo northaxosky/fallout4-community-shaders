@@ -84,12 +84,12 @@ manifest generation run off the creation thread.
 
 ## PixelShaderSwapBroker ordering
 
-The broker remains the sole slot-15 owner and sole resolver registry. Its order is:
+The broker remains the sole slot-15 owner and ordered resolver registry. Its order is:
 
 1. Observer preparation over stock submitted bytecode
 2. Original `CreatePixelShader`
 3. Original-object observer registration
-4. Resolver invocation, when eligible
+4. Ordered resolver invocation, when eligible (bytecode patches before HLSL)
 5. Completion observer for every result, including failure and null output
 
 The original object is tracked before replacement. A final alias is registered only when
