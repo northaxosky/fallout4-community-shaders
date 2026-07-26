@@ -2669,7 +2669,12 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		}
 		const std::string configSnapshot =
 			"{\"writer_flush_interval_ms\":"
-			+ std::to_string(_config.flushIntervalMs) + "}";
+			+ std::to_string(_config.flushIntervalMs)
+			+ ",\"subclass_attribution_requested\":"
+			+ (_config.subclassAttributionRequested ? "true" : "false")
+			+ ",\"subclass_attribution_enabled\":"
+			+ (_config.subclassAttributionEnabled ? "true" : "false")
+			+ "}";
 		if (success) {
 			success =
 				BindText(legacy, 1, _generatedRunId)
@@ -3020,6 +3025,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		a_document.evidenceMode = _policy.evidenceMode;
 		a_document.evidenceIdsSatisfied = _policy.evidenceIdsSatisfied;
 		a_document.rawExportRequested = _policy.rawExportRequested;
+		a_document.writerFlushIntervalMs = _config.flushIntervalMs;
+		a_document.subclassAttributionRequested =
+			_config.subclassAttributionRequested;
+		a_document.subclassAttributionEnabled =
+			_config.subclassAttributionEnabled;
 		a_document.hookCoverageReady =
 			_hookCoverageReady.load(std::memory_order_acquire);
 		a_document.startedAt = _startedAt;

@@ -1605,6 +1605,12 @@ namespace cs::features::catalog
 		JsonBool(json, a_document.evidenceIdsSatisfied);
 		json << ",\"raw_export_requested\":";
 		JsonBool(json, a_document.rawExportRequested);
+		json << ",\"writer_flush_interval_ms\":"
+			 << a_document.writerFlushIntervalMs
+			 << ",\"subclass_attribution_requested\":";
+		JsonBool(json, a_document.subclassAttributionRequested);
+		json << ",\"subclass_attribution_enabled\":";
+		JsonBool(json, a_document.subclassAttributionEnabled);
 		json << "},\"lifecycle\":{\"state\":";
 		JsonString(json, a_document.lifecycle);
 		json << ",\"started_at\":";

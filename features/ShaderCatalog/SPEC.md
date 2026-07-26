@@ -13,11 +13,17 @@ The producer exposes these constants in `Provenance.h`:
 
 - Live SQLite schema: `kCatalogSchemaVersion = 3`
 - Manifest schema: `fo4cs.shader-catalog-run`
-- Manifest schema version: `kManifestSchemaVersion = 1`
+- Manifest schema version: `kManifestSchemaVersion = 2`
 
 An importer must reject a different manifest name, an unsupported manifest version, or a
 newer live schema version. ShaderCatalog rejects a newer or malformed database without
 resetting it.
+
+Manifest-schema-v2 producers emit only schema-v2 documents. Consumers must accept immutable
+manifest schema v1 and v2; v1 has no writer-cadence or subclass-attribution fields. The
+publication path remains `runs/<generated-run-id>/manifest.v1.json` for all manifest schema
+versions; its `v1` names the publication layout, while document `schema_version` names the
+manifest schema.
 
 Schema v3 preserves the v1/v2 `sessions`, `shader_catalog`, and `compile_events` tables as
 legacy global state. New runs may continue to update those operational tables, but no
@@ -214,6 +220,9 @@ The manifest is locale-independent canonical UTF-8 JSON with a final LF, fixed o
 blob, observation, HRESULT, and attribution arrays. It contains:
 
 - Generated, external, scenario, config, and source IDs
+- Writer flush cadence plus subclass-attribution state. `requested` is the config setting;
+  `enabled` means requested and matched to a verified BSShader layout before hook installation.
+  It does not guarantee that attribution events were produced.
 - Runtime family/version, plugin semantic version, build describe, git identity, PID, and
   honestly available adapter/feature-level facts
 - Lifecycle, authority, export, drain, hook coverage, orderly-finalizer readiness, and quality

@@ -248,6 +248,8 @@ namespace
 		DbConfig config;
 		config.catalogPath = a_database.string();
 		config.flushIntervalMs = 10;
+		config.subclassAttributionRequested = true;
+		config.subclassAttributionEnabled = false;
 		config.policyOverride = ParseRunPolicy({});
 		config.artifactRootOverride = a_artifacts;
 		config.orderlyFinalizerReadyForTesting = true;
@@ -453,6 +455,9 @@ namespace
 		document.processId = 42;
 		document.evidenceMode = true;
 		document.evidenceIdsSatisfied = true;
+		document.writerFlushIntervalMs = 1234;
+		document.subclassAttributionRequested = true;
+		document.subclassAttributionEnabled = false;
 		document.lifecycle = "finalized";
 		document.startedAt = "2026-01-01T00:00:00.000Z";
 		document.endedAt = "2026-01-01T00:00:01.000Z";
@@ -517,8 +522,15 @@ namespace
 		Check(firstJson.ends_with('\n'), "manifest has no final LF");
 		Check(
 			firstJson.starts_with(
-				"{\"schema\":\"fo4cs.shader-catalog-run\",\"schema_version\":1"),
+				"{\"schema\":\"fo4cs.shader-catalog-run\",\"schema_version\":2"),
 			"manifest key order or schema is wrong");
+		Check(
+			firstJson.find(
+				"\"writer_flush_interval_ms\":1234,"
+				"\"subclass_attribution_requested\":true,"
+				"\"subclass_attribution_enabled\":false")
+				!= std::string::npos,
+			"manifest omitted effective catalog settings");
 		Check(
 			firstJson.find("C:\\\\") == std::string::npos,
 			"manifest contains an absolute Windows path");
@@ -883,6 +895,14 @@ namespace
 		catalog.EnqueueObservation(MakeOutcome(bytes, 2, E_FAIL, false));
 		catalog.EnqueueObservation(MakeOutcome(bytes, 3, S_OK, false));
 		Check(catalog.Stop(), "catalog run 1 failed to finalize");
+		Check(
+			SqlText(
+				database,
+				"SELECT config_snapshot_json FROM sessions LIMIT 1")
+				== "{\"writer_flush_interval_ms\":10,"
+				   "\"subclass_attribution_requested\":true,"
+				   "\"subclass_attribution_enabled\":false}",
+			"legacy config snapshot omitted effective catalog settings");
 		Check(
 			SqlInt(
 				database,

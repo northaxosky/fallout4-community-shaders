@@ -291,10 +291,16 @@ namespace cs::features
 
 		catalog::Sha1InitOnce();
 
+		const auto subclassLayout =
+			cs::engine::GetShaderSubclassRuntimeLayout();
+		const bool subclassAttributionEnabled =
+			_settings.subclassAttribution && subclassLayout.verified;
 		catalog::DbConfig dbc;
 		dbc.catalogPath = _settings.catalogPath;
 		dbc.flushIntervalMs =
 			static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
+		dbc.subclassAttributionRequested = _settings.subclassAttribution;
+		dbc.subclassAttributionEnabled = subclassAttributionEnabled;
 
 		const auto rtVersion = GetRuntimeVersion();
 		const char* runtime = RuntimeLabel(rtVersion);
@@ -324,10 +330,6 @@ namespace cs::features
 				"ExitProcess finalizer hook failed; catalog run cannot be authoritative.");
 		}
 
-		const auto subclassLayout =
-			cs::engine::GetShaderSubclassRuntimeLayout();
-		const bool subclassAttributionEnabled =
-			_settings.subclassAttribution && subclassLayout.verified;
 		catalog::hooks::SetSubclassAttributionEnabled(
 			subclassAttributionEnabled);
 		if (subclassAttributionEnabled) {

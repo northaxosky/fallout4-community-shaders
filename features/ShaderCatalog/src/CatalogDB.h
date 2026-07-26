@@ -33,6 +33,8 @@ namespace cs::features::catalog
 
 		std::string catalogPath;
 		std::uint32_t flushIntervalMs = 5000;
+		bool subclassAttributionRequested = false;
+		bool subclassAttributionEnabled = false;
 		std::optional<RunPolicy> policyOverride;
 		std::optional<std::filesystem::path> artifactRootOverride;
 #ifdef FO4CS_SHADER_CATALOG_TESTING
@@ -270,7 +272,8 @@ namespace cs::features::catalog
 		std::condition_variable _wakeWriter;
 		std::mutex _wakeMutex;
 
-		static constexpr std::size_t kCapacity = 4096;
+		// AE startup can enqueue more than 4096 events before SQLite catches up.
+		static constexpr std::size_t kCapacity = 8192;
 		static_assert((kCapacity & (kCapacity - 1)) == 0);
 		std::array<Cell, kCapacity> _ring{};
 		std::atomic<std::uint64_t> _enqueuePosition{ 0 };

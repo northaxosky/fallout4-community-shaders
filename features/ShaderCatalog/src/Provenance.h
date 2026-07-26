@@ -21,7 +21,7 @@
 namespace cs::features::catalog
 {
 	inline constexpr int kCatalogSchemaVersion = 3;
-	inline constexpr int kManifestSchemaVersion = 1;
+	inline constexpr int kManifestSchemaVersion = 2;
 	inline constexpr std::string_view kManifestSchema = "fo4cs.shader-catalog-run";
 	inline constexpr std::size_t kMaxShaderBytecodeBytes = 16u * 1024u * 1024u;
 	inline constexpr std::size_t kMaxCatalogIdentifierBytes = 128;
@@ -275,6 +275,9 @@ namespace cs::features::catalog
 		bool evidenceMode = false;
 		bool evidenceIdsSatisfied = false;
 		bool rawExportRequested = false;
+		std::uint32_t writerFlushIntervalMs = 5000;
+		bool subclassAttributionRequested = false;
+		bool subclassAttributionEnabled = false;
 		bool rawExportComplete = false;
 		std::string lifecycle;
 		std::string startedAt;
