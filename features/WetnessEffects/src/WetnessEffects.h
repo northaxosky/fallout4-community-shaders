@@ -61,7 +61,6 @@ namespace cs::features
 		void SaveSettings();
 		void OnComputeWetness();
 		void OnPreSunLightDraw();
-		void OnAmbientPassDispatch();
 		void RestoreWetnessMaskBindings();
 		void BindWetnessMask(ID3D11DeviceContext* a_context, std::uint32_t a_slot);
 		bool IsWetnessMaskReady() const;
@@ -100,6 +99,9 @@ namespace cs::features
 		std::atomic_uint32_t _sunHookMatched{ 0 };
 		std::atomic_uint32_t _sunHookUnmatched{ 0 };
 		std::atomic_uint32_t _maskBinds{ 0 };
+		std::atomic_uint32_t _ambientMaskBinds{ 0 };
+		std::atomic_uint32_t _ambientPreDrawMatches{ 0 };
+		std::atomic_uint32_t _ambientPreDrawMaskBinds{ 0 };
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _wetnessCB;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _telemetryCB;

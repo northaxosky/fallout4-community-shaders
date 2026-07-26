@@ -63,7 +63,6 @@ namespace cs::features
 
 		void SaveSettings();
 		void OnPreDeferredLights();
-		void OnPreSunLightDraw();
 		void BindShadowMask(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();
 		bool EnsureResources();

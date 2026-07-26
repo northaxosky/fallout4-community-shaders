@@ -1,6 +1,7 @@
 #include "Render/RenderHooks.h"
 
 #include "Log.h"
+#include "Render/ShaderInjection.h"
 
 #include <algorithm>
 #include <atomic>
@@ -112,6 +113,10 @@ namespace cs::engine
 			{
 				func(a_force, a_clear);
 				if (g_insideDeferredLightsImpl && a_primitiveCount == 2) {
+					auto* rendererData = RE::BSGraphics::GetRendererData();
+					DispatchInjectionsForBoundPixelShader(rendererData ?
+						reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+						nullptr);
 					Dispatch(g_preSunLightDraw);
 				}
 			}
@@ -177,7 +182,7 @@ namespace cs::engine
 		}
 
 		// REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}: SetDirtyStates call inside DrawTriShape; source: Fallout4RE AE (1.11.221) disasm + version.bin, cross-checked against NG.
-		void EnsurePreSunLightDrawInstalled()
+		void InstallPreSunLightDrawHook()
 		{
 			if (g_preSunLightDrawInstalled) {
 				return;
@@ -191,6 +196,12 @@ namespace cs::engine
 			g_preSunLightDrawInstalled = true;
 			L->info("Hook installed on DrawTriShape SetDirtyStates call (sun-light draw anchor)");
 		}
+	}
+
+	void EnsurePreSunLightDrawInstalled()
+	{
+		if (!RegistrationAllowed("PreSunLightDraw")) return;
+		InstallPreSunLightDrawHook();
 	}
 
 	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
@@ -248,7 +259,7 @@ namespace cs::engine
 	{
 		if (!RegistrationAllowed("PreSunLightDraw")) return;
 		InsertPrioritized(g_preSunLightDraw, std::move(callback), priority);
-		EnsurePreSunLightDrawInstalled();
+		InstallPreSunLightDrawHook();
 	}
 
 	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel)

@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/RenderHooks.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/ShaderVariantResolver.h"
 #include "Utils/CSSha1.h"
@@ -632,6 +633,21 @@ namespace cs::engine
 			return target == a_plan.targets.end() ? nullptr : &*target;
 		}
 
+		bool MatchesInjectedPixelShader(
+			const PublishedPlan& a_plan,
+			ShaderInjectionTarget a_target,
+			ID3D11PixelShader* a_shader) noexcept
+		{
+			return a_shader && std::ranges::any_of(
+				a_plan.variants,
+				[a_target, a_shader](const PublishedVariant& a_variant) {
+					return a_variant.targetId == a_target
+						&& a_variant.compilation
+						&& a_variant.compilation->PeekPixelShader()
+							== a_shader;
+				});
+		}
+
 		bool ResolveInjectedPixelShader(
 			const void*,
 			std::size_t,
@@ -790,24 +806,30 @@ namespace cs::engine
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration)
 	{
 		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Replacement registration");
-			return false;
-		}
-		if (!IsValidTarget(a_registration.targetId)) {
-			L->error("Replacement registration rejected: unknown target.");
-			return false;
-		}
-		if (RegistrationHasDuplicateClaims(a_registration)) {
-			L->error(
-				"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
-				a_registration.contributor,
-				kTargets[ToIndex(a_registration.targetId)].name);
-			return false;
+		const bool installsPreDrawHook = static_cast<bool>(a_registration.bind);
+		{
+			std::scoped_lock lock(service.mutex);
+			if (service.lifecycle != Lifecycle::kCollecting) {
+				LogLateMutation("Replacement registration");
+				return false;
+			}
+			if (!IsValidTarget(a_registration.targetId)) {
+				L->error("Replacement registration rejected: unknown target.");
+				return false;
+			}
+			if (RegistrationHasDuplicateClaims(a_registration)) {
+				L->error(
+					"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
+					a_registration.contributor,
+					kTargets[ToIndex(a_registration.targetId)].name);
+				return false;
+			}
+
+			service.registrations.push_back(std::move(a_registration));
 		}
 
-		service.registrations.push_back(std::move(a_registration));
+		if (installsPreDrawHook)
+			EnsurePreSunLightDrawInstalled();
 		return true;
 	}
 
@@ -1235,6 +1257,35 @@ namespace cs::engine
 		}
 	}
 
+	void DispatchInjectionsForBoundPixelShader(
+		ID3D11DeviceContext* a_context) noexcept
+	{
+		if (!a_context)
+			return;
+
+		const auto plan = GetService().published.load(std::memory_order_acquire);
+		if (!plan)
+			return;
+
+		ID3D11PixelShader* boundShader = nullptr;
+		a_context->PSGetShader(&boundShader, nullptr, nullptr);
+		if (!boundShader)
+			return;
+
+		for (const auto& target : plan->targets) {
+			if (target.binds.empty())
+				continue;
+			const auto& runtime = GetService().runtime[ToIndex(target.id)];
+			if (runtime.substitutions.load(std::memory_order_relaxed) == 0)
+				continue;
+			if (MatchesInjectedPixelShader(*plan, target.id, boundShader)) {
+				DispatchShaderInjections(target.id, a_context);
+				break;
+			}
+		}
+		boundShader->Release();
+	}
+
 	ID3D11PixelShader* GetInjectedPixelShader(ShaderInjectionTarget a_target) noexcept
 	{
 		if (!IsValidTarget(a_target))
@@ -1268,14 +1319,7 @@ namespace cs::engine
 			return false;
 		const auto plan =
 			GetService().published.load(std::memory_order_acquire);
-		return plan && std::ranges::any_of(
-			plan->variants,
-			[a_target, a_shader](const PublishedVariant& a_variant) {
-				return a_variant.targetId == a_target
-					&& a_variant.compilation
-					&& a_variant.compilation->PeekPixelShader()
-						== a_shader;
-			});
+		return plan && MatchesInjectedPixelShader(*plan, a_target, a_shader);
 	}
 
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(

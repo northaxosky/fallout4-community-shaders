@@ -7,6 +7,11 @@
 #include <string>
 #include <string_view>
 
+namespace
+{
+	std::uint32_t g_preDrawInstallRequests = 0;
+}
+
 namespace cs::log
 {
 	spdlog::logger* Get(const char*)
@@ -31,6 +36,11 @@ namespace cs::engine
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept
 	{
 		return true;
+	}
+
+	void EnsurePreSunLightDrawInstalled()
+	{
+		++g_preDrawInstallRequests;
 	}
 }
 
@@ -72,9 +82,29 @@ namespace
 
 int main()
 {
+	ShaderReplacementRegistration noBindRegistration;
+	noBindRegistration.targetId = ShaderInjectionTarget::kDeferredPrepass;
+	noBindRegistration.contributor = "registration-no-bind";
+	bool ok = Check(
+		RegisterReplacement(std::move(noBindRegistration)),
+		"registration without a bind was rejected");
+	ok &= Check(
+		g_preDrawInstallRequests == 0,
+		"registration without a bind installed the pre-draw hook");
+
+	ShaderReplacementRegistration bindRegistration;
+	bindRegistration.targetId = ShaderInjectionTarget::kAmbientIblPass;
+	bindRegistration.contributor = "registration-with-bind";
+	bindRegistration.bind = [](ID3D11DeviceContext*) {};
+	ok &= Check(
+		RegisterReplacement(std::move(bindRegistration)),
+		"registration with a bind was rejected");
+	ok &= Check(
+		g_preDrawInstallRequests == 1,
+		"registration with a bind did not install the pre-draw hook");
+
 	constexpr auto baseSha =
 		"1111111111111111111111111111111111111111";
-	bool ok = true;
 	ok &= Check(
 		RegisterReplacementVariant(
 			MakeRegistration("registration-base", 0xABC001, baseSha)),

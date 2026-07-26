@@ -148,6 +148,8 @@ namespace cs::engine
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
 		ID3D11DeviceContext* a_context) noexcept;
+	void DispatchInjectionsForBoundPixelShader(
+		ID3D11DeviceContext* a_context) noexcept;
 
 	ID3D11PixelShader* GetInjectedPixelShader(ShaderInjectionTarget a_target) noexcept;
 	bool IsInjectedPixelShader(

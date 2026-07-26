@@ -439,6 +439,9 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
+		cs::engine::RegisterPreSunLightDraw([] {
+			ScreenSpaceGI::GetSingleton()->OnPreSunLightDraw();
+		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
 		});
@@ -916,6 +919,8 @@ namespace cs::features
 		_ssgiBoundLastFrame.store(false, std::memory_order_relaxed);
 		_bounceInjectedLastFrame.store(false, std::memory_order_relaxed);
 		_bounceAnchorBindsLastFrame.store(0, std::memory_order_relaxed);
+		_ambientPreDrawMatchesLastFrame.store(0, std::memory_order_relaxed);
+		_ambientPreDrawBounceBindsLastFrame.store(0, std::memory_order_relaxed);
 		_bounceRTVActiveLastFrame.store(false, std::memory_order_relaxed);
 		_bounceRTVDrawsLastFrame.store(0, std::memory_order_relaxed);
 		_aoProducedLastFrame.store(false, std::memory_order_relaxed);
@@ -1422,9 +1427,6 @@ namespace cs::features
 			context->ClearUnorderedAccessViewFloat(
 				_bounceTexture->uav.get(), ssgi_lifecycle::kBounceIdentity.data());
 		}
-		cs::engine::DispatchShaderInjections(
-			cs::engine::ShaderInjectionTarget::kAmbientIblPass,
-			context);
 	}
 
 	void ScreenSpaceGI::IntegrateAO(cs::engine::RenderTarget a_target)
@@ -1723,6 +1725,35 @@ namespace cs::features
 		}
 	}
 
+	void ScreenSpaceGI::OnPreSunLightDraw()
+	{
+		if (!_started.load(std::memory_order_acquire)) {
+			return;
+		}
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		auto* context = rendererData ?
+			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+			nullptr;
+		if (!context) {
+			return;
+		}
+
+		winrt::com_ptr<ID3D11PixelShader> boundShader;
+		context->PSGetShader(boundShader.put(), nullptr, nullptr);
+		if (!boundShader ||
+			!cs::engine::IsInjectedPixelShader(
+				cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+				boundShader.get())) {
+			return;
+		}
+
+		_ambientPreDrawMatchesLastFrame.fetch_add(1, std::memory_order_relaxed);
+		if (_bounceAnchorBindsLastFrame.load(std::memory_order_relaxed) >
+			_ambientPreDrawBounceBindsLastFrame.load(std::memory_order_relaxed)) {
+			_ambientPreDrawBounceBindsLastFrame.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
 	void ScreenSpaceGI::OnAmbientPassInjection(ID3D11DeviceContext* a_context)
 	{
 		if (!_started.load(std::memory_order_acquire)) {
@@ -1774,6 +1805,14 @@ namespace cs::features
 				"bounce_anchor_binds",
 				static_cast<std::int64_t>(
 					_bounceAnchorBindsLastFrame.load(std::memory_order_relaxed)))
+			.Field(
+				"ambient_pre_draw_matches",
+				static_cast<std::int64_t>(
+					_ambientPreDrawMatchesLastFrame.load(std::memory_order_relaxed)))
+			.Field(
+				"ambient_pre_draw_bounce_binds",
+				static_cast<std::int64_t>(
+					_ambientPreDrawBounceBindsLastFrame.load(std::memory_order_relaxed)))
 			.Field("bounce_rtv_active", _bounceRTVActiveLastFrame.load(std::memory_order_relaxed))
 			.Field(
 				"bounce_rtv_draws",

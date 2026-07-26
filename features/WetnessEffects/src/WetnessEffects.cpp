@@ -191,11 +191,6 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredComposite([] {
 			WetnessEffects::GetSingleton()->RestoreWetnessMaskBindings();
 		});
-		if constexpr (kInjectAmbientPass) {
-			cs::engine::RegisterPostDeferredLightsImpl([] {
-				WetnessEffects::GetSingleton()->OnAmbientPassDispatch();
-			});
-		}
 		_started.store(true, std::memory_order_release);
 		L->info("Registered wetness-mask lighting callbacks (enabled={}).", _settings.enabled);
 	}
@@ -317,6 +312,9 @@ namespace cs::features
 		_sunHookMatched.store(0, std::memory_order_relaxed);
 		_sunHookUnmatched.store(0, std::memory_order_relaxed);
 		_maskBinds.store(0, std::memory_order_relaxed);
+		_ambientMaskBinds.store(0, std::memory_order_relaxed);
+		_ambientPreDrawMatches.store(0, std::memory_order_relaxed);
+		_ambientPreDrawMaskBinds.store(0, std::memory_order_relaxed);
 		_workingWidth.store(0, std::memory_order_relaxed);
 		_workingHeight.store(0, std::memory_order_relaxed);
 		if (!_started.load(std::memory_order_acquire)) {
@@ -446,30 +444,26 @@ namespace cs::features
 			return;
 		}
 
-		constexpr std::array directionalTargets{
+		constexpr std::array targets{
 			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
+			cs::engine::ShaderInjectionTarget::kAmbientIblPass
 		};
-		for (const auto target : directionalTargets) {
+		for (const auto target : targets) {
 			if (cs::engine::IsInjectedPixelShader(
 					target, boundShader.get())) {
 				_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
-				cs::engine::DispatchShaderInjections(target, context);
+				if (target == cs::engine::ShaderInjectionTarget::kAmbientIblPass) {
+					_ambientPreDrawMatches.fetch_add(1, std::memory_order_relaxed);
+					if (_ambientMaskBinds.load(std::memory_order_relaxed) >
+						_ambientPreDrawMaskBinds.load(std::memory_order_relaxed)) {
+						_ambientPreDrawMaskBinds.fetch_add(1, std::memory_order_relaxed);
+					}
+				}
 				return;
 			}
 		}
 		_sunHookUnmatched.fetch_add(1, std::memory_order_relaxed);
-	}
-
-	void WetnessEffects::OnAmbientPassDispatch()
-	{
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		auto* context = rendererData ?
-			reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
-			nullptr;
-		cs::engine::DispatchShaderInjections(
-			cs::engine::ShaderInjectionTarget::kAmbientIblPass,
-			context);
 	}
 
 	void WetnessEffects::BindWetnessMask(
@@ -494,6 +488,7 @@ namespace cs::features
 		if (a_slot == kMaskPSSlotDirectional) {
 			_directionalMaskBound.store(true, std::memory_order_relaxed);
 		} else if (a_slot == kMaskPSSlotAmbient) {
+			_ambientMaskBinds.fetch_add(1, std::memory_order_relaxed);
 			_ambientMaskBound.store(true, std::memory_order_relaxed);
 		}
 	}
@@ -667,7 +662,19 @@ namespace cs::features
 				static_cast<std::int64_t>(_sunHookUnmatched.load(std::memory_order_relaxed)))
 			.Field(
 				"mask_binds",
-				static_cast<std::int64_t>(_maskBinds.load(std::memory_order_relaxed)));
+				static_cast<std::int64_t>(_maskBinds.load(std::memory_order_relaxed)))
+			.Field(
+				"ambient_mask_binds",
+				static_cast<std::int64_t>(
+					_ambientMaskBinds.load(std::memory_order_relaxed)))
+			.Field(
+				"ambient_pre_draw_matches",
+				static_cast<std::int64_t>(
+					_ambientPreDrawMatches.load(std::memory_order_relaxed)))
+			.Field(
+				"ambient_pre_draw_mask_binds",
+				static_cast<std::int64_t>(
+					_ambientPreDrawMaskBinds.load(std::memory_order_relaxed)));
 	}
 
 	void WetnessEffects::DrawSettings()

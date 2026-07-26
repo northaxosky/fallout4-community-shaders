@@ -28,5 +28,6 @@ namespace cs::engine
 	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel);
 
 	// Fires before each fullscreen DrawIndexed(6) in DeferredLightsImpl, after SetDirtyStates flushes PS SRVs and before DrawIndexed; bind only engine-left-NULL resources (e.g. SSS mask) and self-filter ambient/IBL.
+	void EnsurePreSunLightDrawInstalled();
 	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 }

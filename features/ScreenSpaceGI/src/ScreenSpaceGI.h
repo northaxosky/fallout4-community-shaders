@@ -137,6 +137,7 @@ namespace cs::features
 		void SaveSettings();
 		void OnComputeResolve();
 		void OnAOIntegration();
+		void OnPreSunLightDraw();
 		void OnAmbientPassInjection(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();
 		bool IsReady();
@@ -166,6 +167,8 @@ namespace cs::features
 		std::atomic_bool _ssgiBoundLastFrame{ false };
 		std::atomic_bool _bounceInjectedLastFrame{ false };
 		std::atomic_uint32_t _bounceAnchorBindsLastFrame{ 0 };
+		std::atomic_uint32_t _ambientPreDrawMatchesLastFrame{ 0 };
+		std::atomic_uint32_t _ambientPreDrawBounceBindsLastFrame{ 0 };
 		std::atomic_bool _bounceRTVActiveLastFrame{ false };
 		std::atomic_uint32_t _bounceRTVDrawsLastFrame{ 0 };
 		std::atomic_bool _aoProducedLastFrame{ false };

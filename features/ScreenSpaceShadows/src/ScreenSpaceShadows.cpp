@@ -202,10 +202,6 @@ namespace cs::features
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
-		// PreSunLightDraw anchor: DrawTriShape SetDirtyStates call REL::ID({763320,2276846,2276846})+{0x9C,0x9A,0x9A}; bind mask right before sun draw.
-		cs::engine::RegisterPreSunLightDraw([] {
-			ScreenSpaceShadows::GetSingleton()->OnPreSunLightDraw();
-		});
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPostDeferredLights();
 		});
@@ -496,39 +492,6 @@ namespace cs::features
 			L->error("Raymarch dispatch failed: {}", e.what());
 		} catch (...) {
 			L->error("Raymarch dispatch failed.");
-		}
-	}
-
-	void ScreenSpaceShadows::OnPreSunLightDraw()
-	{
-		if (!_started.load(std::memory_order_acquire)) {
-			return;
-		}
-		auto* rendererData = RE::BSGraphics::GetRendererData();
-		if (!rendererData) {
-			return;
-		}
-		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
-		if (!context) {
-			return;
-		}
-
-		winrt::com_ptr<ID3D11PixelShader> boundShader;
-		context->PSGetShader(boundShader.put(), nullptr, nullptr);
-		if (!boundShader) {
-			return;
-		}
-
-		constexpr std::array directionalTargets{
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
-		};
-		for (const auto target : directionalTargets) {
-			if (cs::engine::IsInjectedPixelShader(
-					target, boundShader.get())) {
-				cs::engine::DispatchShaderInjections(target, context);
-				return;
-			}
 		}
 	}
 
