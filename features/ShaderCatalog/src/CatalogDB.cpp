@@ -758,7 +758,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			admission = _producerAdmission.load(std::memory_order_acquire);
 		}
 		_running.store(false, std::memory_order_release);
-		_wakeWriter.notify_one();
+		WakeWriter();
 		if (_writer.joinable())
 			_writer.join();
 
@@ -1160,6 +1160,12 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		_hookCoverageReady.store(true, std::memory_order_release);
 	}
 
+	void CatalogDB::WakeWriter() noexcept
+	{
+		std::lock_guard lock(_wakeMutex);
+		_wakeWriter.notify_one();
+	}
+
 	bool CatalogDB::Enqueue(Event a_event, bool a_admitted) noexcept
 	{
 		ProducerLease localLease;
@@ -1182,7 +1188,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 					cell.data = std::move(a_event);
 					cell.sequence.store(position + 1, std::memory_order_release);
 					if (_dequeuePosition.load(std::memory_order_acquire) == position)
-						_wakeWriter.notify_one();
+						WakeWriter();
 					return true;
 				}
 			} else if (difference < 0) {

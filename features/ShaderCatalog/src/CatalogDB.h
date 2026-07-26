@@ -201,6 +201,7 @@ namespace cs::features::catalog
 			AttributionObjectKind a_objectKind,
 			bool a_admitted) noexcept;
 		void ReleaseProducerLease() noexcept;
+		void WakeWriter() noexcept;
 		bool RingHasReady() noexcept;
 		void WriterLoop();
 		std::vector<Event> DequeueBatch();
@@ -270,6 +271,7 @@ namespace cs::features::catalog
 		std::mutex _wakeMutex;
 
 		static constexpr std::size_t kCapacity = 4096;
+		static_assert((kCapacity & (kCapacity - 1)) == 0);
 		std::array<Cell, kCapacity> _ring{};
 		std::atomic<std::uint64_t> _enqueuePosition{ 0 };
 		std::atomic<std::uint64_t> _dequeuePosition{ 0 };
