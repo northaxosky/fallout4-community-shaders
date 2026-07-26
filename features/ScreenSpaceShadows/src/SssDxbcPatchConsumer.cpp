@@ -11,6 +11,7 @@
 
 #include <Windows.h>
 
+#include <array>
 #include <cstdio>
 #include <memory>
 #include <mutex>
@@ -32,6 +33,12 @@ namespace cs::features::sss_dxbc_patch
 			"BSDFLightShaderMacros::Get+GetPixelShaderID@fallout4-ae-1.11.221.0";
 
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows.dxbcpatch");
+		constexpr std::array kDispatchTargets{
+			engine::ShaderInjectionTarget::
+				kBsdfLightDeferredDirectional,
+			engine::ShaderInjectionTarget::
+				kBsdfLightDeferredDirectionalIbl
+		};
 
 		struct Service
 		{
@@ -167,6 +174,8 @@ namespace cs::features::sss_dxbc_patch
 			return ResolveRequest(
 				*artifact,
 				service.runtimeExact.load(std::memory_order_acquire),
+				engine::ArePatchedShaderDispatchesPublished(
+					kDispatchTargets),
 				service.bindingReadiness.IsReady(),
 				service.counters,
 				a_request,
@@ -348,6 +357,11 @@ namespace cs::features::sss_dxbc_patch
 			std::memory_order_acquire);
 		snapshot.resolverActive = service.resolverActive.load(
 			std::memory_order_acquire);
+		snapshot.brokerHookInstalled =
+			engine::PixelShaderSwapBrokerHooksInstalled();
+		snapshot.dispatchPublished =
+			engine::ArePatchedShaderDispatchesPublished(
+				kDispatchTargets);
 		const auto binding =
 			service.bindingReadiness.GetSnapshot();
 		snapshot.bindingReady = binding.ready;
@@ -356,6 +370,8 @@ namespace cs::features::sss_dxbc_patch
 			snapshot.artifactLoaded,
 			snapshot.runtimeExact,
 			snapshot.resolverActive,
+			snapshot.brokerHookInstalled,
+			snapshot.dispatchPublished,
 			snapshot.bindingReady,
 			snapshot.invariantBroken);
 		snapshot.admissionReady = admission.ready;

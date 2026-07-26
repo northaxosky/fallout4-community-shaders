@@ -7,6 +7,7 @@ namespace cs::features::sss_dxbc_patch
 	engine::PixelShaderSwapResolverResult ResolveRequest(
 		const engine::dxbc_patch::Artifact& a_artifact,
 		bool a_runtimeExact,
+		bool a_dispatchPublished,
 		bool a_bindingReady,
 		AtomicCounters& a_counters,
 		const engine::PixelShaderSwapRequest& a_request,
@@ -21,7 +22,9 @@ namespace cs::features::sss_dxbc_patch
 			return engine::PixelShaderSwapResolverResult::kNoMatch;
 
 		a_counters.candidateSeen.fetch_add(1, std::memory_order_relaxed);
-		if (!a_runtimeExact || !a_bindingReady) {
+		if (!a_runtimeExact
+			|| !a_dispatchPublished
+			|| !a_bindingReady) {
 			a_counters.unknownStockFallback.fetch_add(
 				1,
 				std::memory_order_relaxed);

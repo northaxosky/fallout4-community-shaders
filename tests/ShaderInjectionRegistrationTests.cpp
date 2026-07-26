@@ -2,6 +2,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
 
+#include <array>
 #include <cstddef>
 #include <iostream>
 #include <memory>
@@ -176,6 +177,74 @@ int main()
 	ok &= Check(
 		!RegisterPatchedShaderDispatch(std::move(patchedRegistration)),
 		"duplicate patched dispatch was accepted");
+	const std::array patchTargets{
+		ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+		ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+	};
+	ok &= Check(
+		!ArePatchedShaderDispatchesPublished(patchTargets),
+		"patched dispatch reported ready before freeze publication");
+	ok &= Check(
+		SetShaderInjectionEnabled(false)
+			&& !PublishShaderInjectionFreezePreview()
+			&& !ArePatchedShaderDispatchesPublished(patchTargets),
+		"disabled shader injection published patched dispatch targets");
+	ok &= Check(
+		SetShaderInjectionEnabled(true),
+		"shader injection could not be re-enabled after kill-switch test");
+
+	ok &= Check(
+		SetDeveloperShaderOverride(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			DeveloperShaderOverride::kForceOn),
+		"directional developer force-on setup was rejected");
+	const auto developerExclusivePreview = PreviewShaderInjectionFreeze(
+		ShaderInjectionTarget::kBsdfLightDeferredDirectional);
+	ok &= Check(
+		developerExclusivePreview.published
+			&& developerExclusivePreview.bytecodePatchExclusive
+			&& !developerExclusivePreview.hlslRequested
+			&& developerExclusivePreview.variants == 0
+			&& developerExclusivePreview.suppressedContributors == 1
+			&& developerExclusivePreview.suppressedContributorNames
+				== std::vector<std::string>{
+					"ShaderReplacement.DeveloperForceOn" },
+		"exclusive DXBC patch did not retain the developer force-on suppression");
+	std::byte shaderToken{};
+	std::byte contextToken{};
+	g_patchedShader =
+		reinterpret_cast<ID3D11PixelShader*>(&shaderToken);
+	ok &= Check(
+		PublishShaderInjectionFreezePreview()
+			&& ArePatchedShaderDispatchesPublished(patchTargets),
+		"developer force-on exclusive preview was not published");
+	ok &= Check(
+		!IsInjectedPixelShader(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			g_patchedShader)
+			&& !DispatchShaderInjectionForTesting(
+				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+				g_patchedShader,
+				reinterpret_cast<ID3D11DeviceContext*>(&contextToken))
+			&& g_sssBinds == 0
+			&& g_wetnessBinds == 0,
+		"suppressed developer force-on retained HLSL match or bind ownership");
+	const auto developerSuppressedSnapshot =
+		GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional);
+	const auto developerSuppressedSummary = GetShaderInjectionSummary();
+	ok &= Check(
+		developerSuppressedSnapshot.suppressedContributors == 1
+			&& developerSuppressedSnapshot.suppressedContributorNames
+				== std::vector<std::string>{
+					"ShaderReplacement.DeveloperForceOn" }
+			&& developerSuppressedSummary.suppressedContributors == 1,
+		"developer force-on suppression was absent from status or summary");
+	ok &= Check(
+		SetDeveloperShaderOverride(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			DeveloperShaderOverride::kAuto),
+		"directional developer override reset was rejected");
 
 	ShaderReplacementRegistration conflictingHlsl;
 	conflictingHlsl.targetId =
@@ -226,10 +295,6 @@ int main()
 			&& exclusiveIblPreview.suppressedContributorNames
 				== std::vector<std::string>{ "WetnessEffects" },
 		"second exclusive DXBC claim did not suppress Wetness");
-	std::byte shaderToken{};
-	std::byte contextToken{};
-	g_patchedShader =
-		reinterpret_cast<ID3D11PixelShader*>(&shaderToken);
 	ok &= Check(
 		PublishShaderInjectionFreezePreview(),
 		"artifact-failure exclusive claims were not published");

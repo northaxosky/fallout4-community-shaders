@@ -12,9 +12,10 @@ One detour on `ID3D11Device`:
 
 Both features share a single slot-15 detour owned by `cs::engine::PixelShaderSwapBroker`. ShaderCatalog registers as an *observer* from `ShaderCatalog::OnD3D11Ready`; ShaderReplacement registers the default-priority HLSL resolver from `cs::engine::FreezeAndCompileShaderInjections`, which the app invokes after `FeatureManager::OnD3D11ReadyAll` returns. The broker dispatches observer preparation and its run lease over stock bytecode, engine `CreatePixelShader`, original-object registration, ordered resolvers, then one always-run completion callback. Bytecode patch resolvers run before HLSL and can claim a route as stock on validation failure. Completion records original `HRESULT`/output validity, resolver invocation/reporting, and final stock/replacement/null classification. A usable object requires a successful result, a requested output, and a non-null pointer. Failed stale pointers are never classified as stock or replacement. Passthrough is not registered as an alias, and the stock digest is never claimed as replacement bytecode identity. Replacement aliases preserve originating-stock metadata but are emitted as `replacement_unknown`, not as stock-object bindings.
 
-Exclusive bytecode-patch targets suppress same-target HLSL contributors before compilation and retain their
-names/counts in target snapshots, telemetry, and the settings status table. `IsInjectedPixelShader` reports only
-retained HLSL replacement ownership; central draw dispatch uses a separate patched-object predicate.
+Exclusive bytecode-patch targets suppress same-target HLSL registrations and developer force-on overrides before
+compilation. They retain each contributor name and count in target snapshots, telemetry, and the settings status
+table. `IsInjectedPixelShader` reports only retained HLSL replacement ownership; central draw dispatch uses a
+separate patched-object predicate.
 
 ShaderReplacement leaves the engine's `ID3D11PixelShader*` unchanged (broker's slot-15 thunk still fires; ShaderCatalog observers and any other feature's resolver participation still happens) when:
 - Master `enabled = false` (skips ShaderReplacement's manifest registration; ShaderCatalog observers and independently registered feature replacements still exercise the shared broker).

@@ -29,6 +29,8 @@ namespace cs::features::sss_dxbc_patch
 		bool artifactLoaded = false;
 		bool runtimeExact = false;
 		bool resolverActive = false;
+		bool brokerHookInstalled = false;
+		bool dispatchPublished = false;
 		bool bindingReady = false;
 		bool invariantBroken = false;
 		bool admissionReady = false;
@@ -45,6 +47,8 @@ namespace cs::features::sss_dxbc_patch
 		bool a_artifactLoaded,
 		bool a_runtimeExact,
 		bool a_resolverActive,
+		bool a_brokerHookInstalled,
+		bool a_dispatchPublished,
 		bool a_bindingReady,
 		bool a_invariantBroken) noexcept
 	{
@@ -52,6 +56,8 @@ namespace cs::features::sss_dxbc_patch
 			a_artifactLoaded
 			&& a_runtimeExact
 			&& a_resolverActive
+			&& a_brokerHookInstalled
+			&& a_dispatchPublished
 			&& a_bindingReady
 			&& !a_invariantBroken;
 		return {
@@ -151,6 +157,7 @@ namespace cs::features::sss_dxbc_patch
 	engine::PixelShaderSwapResolverResult ResolveRequest(
 		const engine::dxbc_patch::Artifact& a_artifact,
 		bool a_runtimeExact,
+		bool a_dispatchPublished,
 		bool a_bindingReady,
 		AtomicCounters& a_counters,
 		const engine::PixelShaderSwapRequest& a_request,
@@ -164,6 +171,8 @@ namespace cs::features::sss_dxbc_patch
 			a_snapshot.artifactLoaded,
 			a_snapshot.runtimeExact,
 			a_snapshot.resolverActive,
+			a_snapshot.brokerHookInstalled,
+			a_snapshot.dispatchPublished,
 			a_snapshot.bindingReady,
 			a_snapshot.invariantBroken);
 		return a_snapshot.exactRouteAdmitted <= a_snapshot.candidateSeen

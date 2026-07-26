@@ -178,6 +178,8 @@ namespace cs::engine
 	bool IsPatchedDispatchPixelShader(
 		ShaderInjectionTarget a_target,
 		ID3D11PixelShader* a_shader) noexcept;
+	bool ArePatchedShaderDispatchesPublished(
+		std::span<const ShaderInjectionTarget> a_targets) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
 

@@ -1159,6 +1159,7 @@ namespace
 					artifact,
 					true,
 					true,
+					true,
 					counters,
 					request,
 					&CreatePatchedShader)
@@ -1205,6 +1206,7 @@ namespace
 					artifact,
 					true,
 					true,
+					true,
 					counters,
 					request,
 					&CreatePatchedShader)
@@ -1236,6 +1238,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					preimageArtifact,
+					true,
 					true,
 					true,
 					counters,
@@ -1272,6 +1275,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					true,
 					counters,
@@ -1316,6 +1320,7 @@ namespace
 					artifact,
 					true,
 					true,
+					true,
 					counters,
 					request,
 					&CreatePatchedShader)
@@ -1350,6 +1355,7 @@ namespace
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
 					true,
+					true,
 					false,
 					counters,
 					request,
@@ -1361,6 +1367,42 @@ namespace
 					&& features::sss_dxbc_patch::
 						SnapshotCounters(counters).unknownStockFallback == 1,
 				"binding-not-ready route did not stay stock");
+		}
+		{
+			FakePixelShader stock;
+			ID3D11PixelShader* output = &stock;
+			CreateFixture create{
+				.expectedDevice = device,
+				.expectedLinkage = linkage
+			};
+			g_createFixture = &create;
+			const engine::PixelShaderSwapRequest request{
+				.device = device,
+				.linkage = linkage,
+				.bytecode = stockBytes.data(),
+				.bytecodeLength = stockBytes.size(),
+				.variant = variant,
+				.stockSha1 = plan.stock.sha1,
+				.stockOutput = &stock,
+				.output = &output
+			};
+			features::sss_dxbc_patch::AtomicCounters counters;
+			Check(
+				features::sss_dxbc_patch::ResolveRequest(
+					artifact,
+					true,
+					false,
+					true,
+					counters,
+					request,
+					&CreatePatchedShader)
+						== engine::PixelShaderSwapResolverResult::kKeepStock
+					&& output == &stock
+					&& stock.references == 1
+					&& !create.called
+					&& features::sss_dxbc_patch::
+						SnapshotCounters(counters).unknownStockFallback == 1,
+				"unpublished dispatch route did not stay stock");
 		}
 		{
 			FakePixelShader stock;
@@ -1387,6 +1429,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					true,
 					counters,
@@ -1676,6 +1719,7 @@ namespace
 			features::sss_dxbc_patch::ResolveRequest(
 				artifact,
 				true,
+				true,
 				latch.IsReady(),
 				counters,
 				request,
@@ -1689,16 +1733,20 @@ namespace
 
 	void TestEffectivePatchAdmission()
 	{
-		for (unsigned mask = 0; mask < 32; ++mask) {
+		for (unsigned mask = 0; mask < 128; ++mask) {
 			const bool artifactLoaded = (mask & 1u) != 0;
 			const bool runtimeExact = (mask & 2u) != 0;
 			const bool resolverActive = (mask & 4u) != 0;
-			const bool bindingReady = (mask & 8u) != 0;
-			const bool invariantBroken = (mask & 16u) != 0;
+			const bool brokerHookInstalled = (mask & 8u) != 0;
+			const bool dispatchPublished = (mask & 16u) != 0;
+			const bool bindingReady = (mask & 32u) != 0;
+			const bool invariantBroken = (mask & 64u) != 0;
 			const bool expectedReady =
 				artifactLoaded
 				&& runtimeExact
 				&& resolverActive
+				&& brokerHookInstalled
+				&& dispatchPublished
 				&& bindingReady
 				&& !invariantBroken;
 			const auto admission =
@@ -1706,6 +1754,8 @@ namespace
 					artifactLoaded,
 					runtimeExact,
 					resolverActive,
+					brokerHookInstalled,
+					dispatchPublished,
 					bindingReady,
 					invariantBroken);
 			Check(
@@ -1713,6 +1763,60 @@ namespace
 					&& admission.stockFallback == !expectedReady,
 				"effective patch admission combination was contradictory");
 		}
+
+		const bool resolverRegistrationSucceeded = true;
+		const auto installFailure =
+			features::sss_dxbc_patch::EvaluatePatchAdmission(
+				true,
+				true,
+				resolverRegistrationSucceeded,
+				false,
+				true,
+				true,
+				false);
+		Check(
+			!installFailure.ready && installFailure.stockFallback,
+			"broker install failure was reported as patch-ready");
+
+		features::sss_dxbc_patch::TelemetrySnapshot telemetry;
+		telemetry.coveragePass = 2;
+		telemetry.coverageCandidates = 64;
+		telemetry.artifactLoaded = true;
+		telemetry.runtimeExact = true;
+		telemetry.resolverActive = resolverRegistrationSucceeded;
+		telemetry.brokerHookInstalled = false;
+		telemetry.dispatchPublished = true;
+		telemetry.bindingReady = true;
+		telemetry.admissionReady = installFailure.ready;
+		telemetry.stockFallback = installFailure.stockFallback;
+		Check(
+			features::sss_dxbc_patch::TelemetryRelationshipsHold(telemetry),
+			"broker install failure produced contradictory fallback telemetry");
+		telemetry.admissionReady = true;
+		telemetry.stockFallback = false;
+		Check(
+			!features::sss_dxbc_patch::TelemetryRelationshipsHold(telemetry),
+			"telemetry accepted patch admission without the broker hook");
+
+		const auto publicationFailure =
+			features::sss_dxbc_patch::EvaluatePatchAdmission(
+				true,
+				true,
+				resolverRegistrationSucceeded,
+				true,
+				false,
+				true,
+				false);
+		telemetry.brokerHookInstalled = true;
+		telemetry.dispatchPublished = false;
+		telemetry.admissionReady = publicationFailure.ready;
+		telemetry.stockFallback = publicationFailure.stockFallback;
+		Check(
+			!publicationFailure.ready
+				&& publicationFailure.stockFallback
+				&& features::sss_dxbc_patch::
+					TelemetryRelationshipsHold(telemetry),
+			"missing dispatch publication produced contradictory telemetry");
 	}
 
 	void TestFallbackAllocationBackoff()

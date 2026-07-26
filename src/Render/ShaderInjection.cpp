@@ -198,6 +198,8 @@ namespace cs::engine
 
 		constexpr auto kDefaultShaderRoot =
 			L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders";
+		constexpr std::string_view kDeveloperForceOnContributor =
+			"ShaderReplacement.DeveloperForceOn";
 
 		auto* L = cs::log::Get("cs.render.shaderinjection");
 
@@ -516,10 +518,15 @@ namespace cs::engine
 				}
 
 				if (target.bytecodePatchExclusive) {
-					if (requested)
+					if (developerOverride
+						== DeveloperShaderOverride::kForceOn) {
+						target.suppressedContributorNames.emplace_back(
+							kDeveloperForceOnContributor);
 						L->warn(
-							"Exclusive DXBC patch for '{}' suppressed the developer HLSL force-on override.",
-							metadata.name);
+							"Exclusive DXBC patch for '{}' suppressed HLSL contributor '{}'.",
+							metadata.name,
+							kDeveloperForceOnContributor);
+					}
 					requested = false;
 				}
 
@@ -1485,6 +1492,26 @@ namespace cs::engine
 			a_shader);
 	}
 
+	bool ArePatchedShaderDispatchesPublished(
+		std::span<const ShaderInjectionTarget> a_targets) noexcept
+	{
+		if (a_targets.empty())
+			return false;
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		return plan && std::ranges::all_of(
+			a_targets,
+			[&plan](ShaderInjectionTarget a_target) {
+				if (!IsValidTarget(a_target))
+					return false;
+				const auto* target =
+					FindPublishedTarget(*plan, a_target);
+				return target
+					&& !target->patchedMatchers.empty()
+					&& !target->binds.empty();
+			});
+	}
+
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(
 		ShaderInjectionTarget a_target)
 	{
@@ -1579,20 +1606,22 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		std::scoped_lock lock(service.mutex);
-		const auto frozen = FreezeTargets(
-			service.registrations,
-			service.patchedDispatchRegistrations,
-			service.variantRegistrations,
-			service.developerForceOffEnabled,
-			service.developerOverrides);
 		auto plan = std::make_shared<PublishedPlan>();
-		for (const auto& target : frozen) {
-			if (!target.patchedMatchers.empty()) {
-				plan->targets.push_back({
-					target.metadata->id,
-					target.binds,
-					target.patchedMatchers
-				});
+		if (service.enabled) {
+			const auto frozen = FreezeTargets(
+				service.registrations,
+				service.patchedDispatchRegistrations,
+				service.variantRegistrations,
+				service.developerForceOffEnabled,
+				service.developerOverrides);
+			for (const auto& target : frozen) {
+				if (!target.patchedMatchers.empty()) {
+					plan->targets.push_back({
+						target.metadata->id,
+						target.binds,
+						target.patchedMatchers
+					});
+				}
 			}
 		}
 		service.published.store(plan, std::memory_order_release);

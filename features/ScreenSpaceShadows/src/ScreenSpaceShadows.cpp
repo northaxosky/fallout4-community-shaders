@@ -1144,6 +1144,12 @@ namespace cs::features
 			.Field("patch_runtime_exact", patchTelemetry.runtimeExact)
 			.Field("patch_resolver_active", patchTelemetry.resolverActive)
 			.Field(
+				"patch_broker_hook_installed",
+				patchTelemetry.brokerHookInstalled)
+			.Field(
+				"patch_dispatch_published",
+				patchTelemetry.dispatchPublished)
+			.Field(
 				"patch_extent_binding_ready",
 				patchTelemetry.bindingReady)
 			.Field("patch_binding_ready", effectivePatchAdmission)
