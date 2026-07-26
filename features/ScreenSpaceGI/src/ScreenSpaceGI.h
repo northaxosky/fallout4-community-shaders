@@ -54,6 +54,7 @@ namespace cs::features
 			bool  enabled = false;
 			int   mode = 2;
 			bool  noiseFrozen = true;
+			bool  injectAmbientPass = false;
 		};
 
 	private:
@@ -182,6 +183,7 @@ namespace cs::features
 		std::atomic<float> _bounceMean{ 0.0f };
 		std::atomic<float> _bounceMax{ 0.0f };
 		std::atomic<float> _bounceNonzeroFraction{ 0.0f };
+		bool _ambientPassRegistered = false;
 
 		std::unique_ptr<cs::buffer::Texture2D> _bounceTexture;
 		std::unique_ptr<cs::buffer::Texture2D> _aoTexture;

@@ -136,6 +136,9 @@ namespace cs::engine
 	const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(std::string_view a_name) noexcept;
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
+	bool RegisterReplacementIfEnabled(
+		bool a_enabled,
+		ShaderReplacementRegistration a_registration);
 	bool RegisterReplacementVariant(
 		ShaderReplacementVariantRegistration a_registration);
 

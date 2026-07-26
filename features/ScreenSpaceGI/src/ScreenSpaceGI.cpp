@@ -265,6 +265,12 @@ namespace cs::features
 					feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
 					"enabled", "boolean", a_error) ||
 				!AcceptSetting(
+					feature_config::ReadBool(
+						*settingsTable,
+						"inject_ambient_pass",
+						a_candidate.injectAmbientPass),
+					"inject_ambient_pass", "boolean", a_error) ||
+				!AcceptSetting(
 					feature_config::ReadBool(*settingsTable, "noise_frozen", a_candidate.noiseFrozen),
 					"noise_frozen", "boolean", a_error)) {
 				return false;
@@ -406,6 +412,7 @@ namespace cs::features
 		settings.insert_or_assign("enabled", _settings.enabled);
 		settings.insert_or_assign("mode", _settings.mode);
 		settings.insert_or_assign("noise_frozen", _settings.noiseFrozen);
+		settings.insert_or_assign("inject_ambient_pass", _settings.injectAmbientPass);
 
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
 			L->error("Failed to save settings: {}", result.error);
@@ -414,45 +421,60 @@ namespace cs::features
 
 	void ScreenSpaceGI::Load()
 	{
-		const bool ambientRegistered = cs::engine::RegisterReplacement({
-			.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
-			.contributor = "ScreenSpaceGI",
-			.defines = { { "SSGI", "1" } },
-			.isReady = [this] {
-				return IsReady();
-			},
-			.bind = [this](ID3D11DeviceContext* a_context) {
-				OnAmbientPassInjection(a_context);
-			},
-			.slotClaims = {
+		const bool ambientRegistrationSucceeded =
+			cs::engine::RegisterReplacementIfEnabled(
+				_settings.injectAmbientPass,
 				{
-					.stage = cs::engine::ShaderStage::kPixel,
-					.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-					.slot = kBouncePSSlot
-				}
-			}
-		});
-		if (!ambientRegistered) {
+					.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+					.contributor = "ScreenSpaceGI",
+					.defines = { { "SSGI", "1" } },
+					.isReady = [this] {
+						return IsReady();
+					},
+					.bind = [this](ID3D11DeviceContext* a_context) {
+						OnAmbientPassInjection(a_context);
+					},
+					.slotClaims = {
+						{
+							.stage = cs::engine::ShaderStage::kPixel,
+							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+							.slot = kBouncePSSlot
+						}
+					}
+				});
+		_ambientPassRegistered =
+			_settings.injectAmbientPass && ambientRegistrationSucceeded;
+		if (_settings.injectAmbientPass && !ambientRegistrationSucceeded) {
 			L->error("Failed to register ambient shader replacement.");
+		}
+		if (_settings.bounceDelivery == 1 && !_ambientPassRegistered) {
+			L->warn(
+				"Shader-injection bounce requested without the ambient pass; "
+				"using engine RT additive delivery.");
 		}
 
 		cs::engine::RegisterPostDeferredPrePass([] {
 			ScreenSpaceGI::GetSingleton()->OnComputeResolve();
 		});
-		cs::engine::RegisterPreSunLightDraw([] {
-			ScreenSpaceGI::GetSingleton()->OnPreSunLightDraw();
-		});
-		cs::engine::RegisterPostDeferredLightsImpl([] {
-			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
-		});
-		cs::engine::RegisterPostDeferredComposite([] {
-			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
-		});
+		if (_ambientPassRegistered) {
+			cs::engine::RegisterPreSunLightDraw([] {
+				ScreenSpaceGI::GetSingleton()->OnPreSunLightDraw();
+			});
+			cs::engine::RegisterPostDeferredLightsImpl([] {
+				ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
+			});
+			cs::engine::RegisterPostDeferredComposite([] {
+				ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
+			});
+		}
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceGI::GetSingleton()->OnAOIntegration();
 		});
 		_started.store(true, std::memory_order_release);
-		L->info("Registered post-deferred-prepass callback (enabled={}).", _settings.enabled);
+		L->info(
+			"Registered post-deferred-prepass callback (enabled={}, ambient_pass={}).",
+			_settings.enabled,
+			_ambientPassRegistered);
 	}
 
 	void ScreenSpaceGI::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -1403,12 +1425,15 @@ namespace cs::features
 	{
 		_aoIntegrationActiveLastFrame.store(false, std::memory_order_relaxed);
 		_aoIntegrationDispatchedLastFrame.store(0, std::memory_order_relaxed);
+		const int bounceDelivery = ssgi_lifecycle::ResolveBounceDelivery(
+			_settings.bounceDelivery,
+			_ambientPassRegistered);
 
 		if (_settings.enabled &&
 			_resourcesReady.load(std::memory_order_acquire) &&
 			_aoTexture) {
 			IntegrateAO(cs::engine::RenderTarget::kSSAOFinal);
-			if (_settings.bounceDelivery == 2 &&
+			if (bounceDelivery == 2 &&
 				_bounceProducedLastFrame.load(std::memory_order_relaxed)) {
 				IntegrateBounce();
 			}
@@ -1420,7 +1445,7 @@ namespace cs::features
 			nullptr;
 		const bool directBounceReady =
 			ssgi_lifecycle::UsesDirectAmbientBounce(
-				_settings.enabled, _settings.bounceDelivery) &&
+				_settings.enabled, bounceDelivery) &&
 			_resourcesReady.load(std::memory_order_acquire) &&
 			_bounceProducedLastFrame.load(std::memory_order_relaxed);
 		if (context && _bounceTexture && !directBounceReady) {
@@ -1795,6 +1820,8 @@ namespace cs::features
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("mode", static_cast<std::int64_t>(_settings.mode))
+			.Field("inject_ambient_pass", _settings.injectAmbientPass)
+			.Field("ambient_pass_registered", _ambientPassRegistered)
 			.Field("bake_resources_ready", _bakeResourcesReady.load(std::memory_order_acquire))
 			.Field("bake_resource_init_failed", _bakeResourceInitFailed.load(std::memory_order_acquire))
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
@@ -1829,6 +1856,11 @@ namespace cs::features
 				static_cast<double>(_bounceNonzeroFraction.load(std::memory_order_relaxed)))
 			.Field("radiance_source_rt", static_cast<std::int64_t>(_settings.radianceSourceRT))
 			.Field("bounce_delivery", static_cast<std::int64_t>(_settings.bounceDelivery))
+			.Field(
+				"bounce_delivery_effective",
+				static_cast<std::int64_t>(ssgi_lifecycle::ResolveBounceDelivery(
+					_settings.bounceDelivery,
+					_ambientPassRegistered)))
 			.Field(
 				"bounce_target_rt",
 				static_cast<std::int64_t>(cs::engine::RenderTarget::kDiffuseBuffer))
@@ -1868,9 +1900,14 @@ namespace cs::features
 			&_settings.radianceSourceRT,
 			0,
 			static_cast<int>(cs::engine::RenderTarget::kCount) - 1);
+		changed |= ImGui::Checkbox(
+			"Experimental ambient pass (restart required)",
+			&_settings.injectAmbientPass);
+		ImGui::TextDisabled(
+			"Uses a reconstructed ambient pass known to regress distance fog.");
 		const char* bounceDeliveryModes[] = {
 			"Telemetry only",
-			"Shader injection",
+			"Shader injection (requires ambient pass)",
 			"Engine RT additive"
 		};
 		changed |= ImGui::Combo(
@@ -1878,6 +1915,10 @@ namespace cs::features
 			&_settings.bounceDelivery,
 			bounceDeliveryModes,
 			static_cast<int>(std::size(bounceDeliveryModes)));
+		if (_settings.bounceDelivery == 1 && !_ambientPassRegistered) {
+			ImGui::TextDisabled(
+				"Ambient pass unavailable this session; using Engine RT additive.");
+		}
 		changed |= ImGui::Checkbox("Denoise", &_settings.denoiseEnabled);
 		changed |= ImGui::SliderFloat("Denoise radius", &_settings.denoiseRadius, 0.5f, 4.0f);
 		changed |= ImGui::SliderFloat(

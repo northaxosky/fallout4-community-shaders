@@ -53,21 +53,26 @@ namespace cs::features
 				return false;
 			}
 
-			switch (feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled)) {
-			case feature_config::ScalarReadStatus::kMissing:
-			case feature_config::ScalarReadStatus::kValid:
-				return true;
-			case feature_config::ScalarReadStatus::kWrongType:
-				a_error = "settings.enabled: expected boolean";
+			const auto readBool = [&](std::string_view a_key, bool& a_value) {
+				switch (feature_config::ReadBool(*settingsTable, a_key, a_value)) {
+				case feature_config::ScalarReadStatus::kMissing:
+				case feature_config::ScalarReadStatus::kValid:
+					return true;
+				case feature_config::ScalarReadStatus::kWrongType:
+					a_error = "settings." + std::string(a_key) + ": expected boolean";
+					return false;
+				case feature_config::ScalarReadStatus::kInvalidValue:
+					a_error = "settings." + std::string(a_key) + ": invalid value";
+					return false;
+				case feature_config::ScalarReadStatus::kOutOfRange:
+					a_error = "settings." + std::string(a_key) + ": value is out of range";
+					return false;
+				}
 				return false;
-			case feature_config::ScalarReadStatus::kInvalidValue:
-				a_error = "settings.enabled: invalid value";
-				return false;
-			case feature_config::ScalarReadStatus::kOutOfRange:
-				a_error = "settings.enabled: value is out of range";
-				return false;
-			}
-			return false;
+			};
+
+			return readBool("enabled", a_candidate.enabled) &&
+				readBool("inject_ambient_pass", a_candidate.injectAmbientPass);
 		}
 
 		std::unique_ptr<cs::buffer::Texture2D> CreateTexture(
@@ -133,6 +138,7 @@ namespace cs::features
 	{
 		toml::table settings;
 		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign("inject_ambient_pass", _settings.injectAmbientPass);
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
 			L->error("Failed to save settings: {}", result.error);
 		}
@@ -167,15 +173,31 @@ namespace cs::features
 		const bool directionalIblRegistered = registerWetnessReplacement(
 			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 			kMaskPSSlotDirectional);
-		// Blob 3560 is the live exterior ambient reconstruction.
-		constexpr bool kInjectAmbientPass = true;
-		bool ambientRegistered = true;
-		if constexpr (kInjectAmbientPass) {
-			ambientRegistered = registerWetnessReplacement(
-				cs::engine::ShaderInjectionTarget::kAmbientIblPass,
-				kMaskPSSlotAmbient);
-		}
-		if (!directionalRegistered || !directionalIblRegistered || !ambientRegistered) {
+		const bool ambientRegistrationSucceeded =
+			cs::engine::RegisterReplacementIfEnabled(
+				_settings.injectAmbientPass,
+				{
+					.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+					.contributor = "WetnessEffects",
+					.defines = { { "WETNESS_EFFECTS", "1" } },
+					.isReady = [this] {
+						return IsWetnessMaskReady();
+					},
+					.bind = [this](ID3D11DeviceContext* a_context) {
+						BindWetnessMask(a_context, kMaskPSSlotAmbient);
+					},
+					.slotClaims = {
+						{
+							.stage = cs::engine::ShaderStage::kPixel,
+							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+							.slot = kMaskPSSlotAmbient
+						}
+					}
+				});
+		_ambientPassRegistered =
+			_settings.injectAmbientPass && ambientRegistrationSucceeded;
+		if (!directionalRegistered || !directionalIblRegistered ||
+			(_settings.injectAmbientPass && !ambientRegistrationSucceeded)) {
 			L->error("Failed to register wetness shader replacements.");
 		}
 
@@ -188,11 +210,16 @@ namespace cs::features
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			WetnessEffects::GetSingleton()->RestoreWetnessMaskBindings();
 		});
-		cs::engine::RegisterPostDeferredComposite([] {
-			WetnessEffects::GetSingleton()->RestoreWetnessMaskBindings();
-		});
+		if (_ambientPassRegistered) {
+			cs::engine::RegisterPostDeferredComposite([] {
+				WetnessEffects::GetSingleton()->RestoreWetnessMaskBindings();
+			});
+		}
 		_started.store(true, std::memory_order_release);
-		L->info("Registered wetness-mask lighting callbacks (enabled={}).", _settings.enabled);
+		L->info(
+			"Registered wetness-mask lighting callbacks (enabled={}, ambient_pass={}).",
+			_settings.enabled,
+			_ambientPassRegistered);
 	}
 
 	void WetnessEffects::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
@@ -444,24 +471,28 @@ namespace cs::features
 			return;
 		}
 
-		constexpr std::array targets{
+		constexpr std::array directionalTargets{
 			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
-			cs::engine::ShaderInjectionTarget::kAmbientIblPass
+			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
 		};
-		for (const auto target : targets) {
+		for (const auto target : directionalTargets) {
 			if (cs::engine::IsInjectedPixelShader(
 					target, boundShader.get())) {
 				_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
-				if (target == cs::engine::ShaderInjectionTarget::kAmbientIblPass) {
-					_ambientPreDrawMatches.fetch_add(1, std::memory_order_relaxed);
-					if (_ambientMaskBinds.load(std::memory_order_relaxed) >
-						_ambientPreDrawMaskBinds.load(std::memory_order_relaxed)) {
-						_ambientPreDrawMaskBinds.fetch_add(1, std::memory_order_relaxed);
-					}
-				}
 				return;
 			}
+		}
+		if (_ambientPassRegistered &&
+			cs::engine::IsInjectedPixelShader(
+				cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+				boundShader.get())) {
+			_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
+			_ambientPreDrawMatches.fetch_add(1, std::memory_order_relaxed);
+			if (_ambientMaskBinds.load(std::memory_order_relaxed) >
+				_ambientPreDrawMaskBinds.load(std::memory_order_relaxed)) {
+				_ambientPreDrawMaskBinds.fetch_add(1, std::memory_order_relaxed);
+			}
+			return;
 		}
 		_sunHookUnmatched.fetch_add(1, std::memory_order_relaxed);
 	}
@@ -630,6 +661,8 @@ namespace cs::features
 	{
 		a_sink
 			.Field("enabled", _settings.enabled)
+			.Field("inject_ambient_pass", _settings.injectAmbientPass)
+			.Field("ambient_pass_registered", _ambientPassRegistered)
 			.Field("is_exterior", _isExterior.load(std::memory_order_relaxed))
 			.Field(
 				"rain_intensity",
@@ -682,6 +715,13 @@ namespace cs::features
 		if (ImGui::Checkbox("Enabled", &_settings.enabled)) {
 			SaveSettings();
 		}
+		if (ImGui::Checkbox(
+				"Experimental ambient pass (restart required)",
+				&_settings.injectAmbientPass)) {
+			SaveSettings();
+		}
+		ImGui::TextDisabled(
+			"Uses a reconstructed ambient pass known to regress distance fog.");
 
 		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
 			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");

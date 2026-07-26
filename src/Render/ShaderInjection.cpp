@@ -833,6 +833,13 @@ namespace cs::engine
 		return true;
 	}
 
+	bool RegisterReplacementIfEnabled(
+		bool a_enabled,
+		ShaderReplacementRegistration a_registration)
+	{
+		return !a_enabled || RegisterReplacement(std::move(a_registration));
+	}
+
 	bool RegisterReplacementVariant(
 		ShaderReplacementVariantRegistration a_registration)
 	{

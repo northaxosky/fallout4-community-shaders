@@ -35,4 +35,13 @@ namespace cs::features::ssgi_lifecycle
 	{
 		return a_enabled && a_delivery == 1;
 	}
+
+	constexpr int ResolveBounceDelivery(
+		int a_requestedDelivery,
+		bool a_ambientPassAvailable) noexcept
+	{
+		return a_requestedDelivery == 1 && !a_ambientPassAvailable ?
+			2 :
+			a_requestedDelivery;
+	}
 }

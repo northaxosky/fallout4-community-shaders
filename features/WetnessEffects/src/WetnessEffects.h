@@ -37,6 +37,7 @@ namespace cs::features
 		struct Settings
 		{
 			bool enabled = false;
+			bool injectAmbientPass = false;
 		};
 
 	private:
@@ -102,6 +103,7 @@ namespace cs::features
 		std::atomic_uint32_t _ambientMaskBinds{ 0 };
 		std::atomic_uint32_t _ambientPreDrawMatches{ 0 };
 		std::atomic_uint32_t _ambientPreDrawMaskBinds{ 0 };
+		bool _ambientPassRegistered = false;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _wetnessCB;
 		std::unique_ptr<cs::buffer::ConstantBuffer> _telemetryCB;

@@ -155,6 +155,10 @@ namespace
 		CHECK(!UsesDirectAmbientBounce(true, 0));
 		CHECK(UsesDirectAmbientBounce(true, 1));
 		CHECK(!UsesDirectAmbientBounce(true, 2));
+		CHECK(ResolveBounceDelivery(0, false) == 0);
+		CHECK(ResolveBounceDelivery(1, false) == 2);
+		CHECK(ResolveBounceDelivery(1, true) == 1);
+		CHECK(ResolveBounceDelivery(2, false) == 2);
 
 		constexpr auto disabledPlan = InitialTexturePlan(false);
 		CHECK(disabledPlan.bakeCritical);

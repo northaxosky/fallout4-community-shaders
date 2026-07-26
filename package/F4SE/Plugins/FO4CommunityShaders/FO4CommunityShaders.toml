@@ -23,6 +23,9 @@ load = false
 # Master kill-switch. Ships disabled pending rollout.
 enabled = false
 
+# Experimental reconstructed ambient pass; known to regress distance fog. Restart required.
+inject_ambient_pass = false
+
 # XeGTAO quality.
 num_slices = 4
 num_steps = 16
@@ -56,6 +59,9 @@ load = false
 
 [features.WetnessEffects.settings]
 enabled = false
+
+# Experimental reconstructed ambient pass; known to regress distance fog. Restart required.
+inject_ambient_pass = false
 
 [features.ScreenSpaceShadows]
 load = false

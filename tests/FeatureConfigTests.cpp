@@ -351,6 +351,45 @@ namespace
 			expected.emplace(key);
 		}
 		CHECK(actual == expected);
+
+		for (const std::string_view key : { "ScreenSpaceGI", "WetnessEffects" }) {
+			const auto* settings =
+				(*features)[key]["settings"].as_table();
+			CHECK(settings != nullptr);
+			if (!settings) {
+				continue;
+			}
+			bool injectAmbientPass = true;
+			CHECK(
+				cs::feature_config::ReadBool(
+					*settings,
+					"inject_ambient_pass",
+					injectAmbientPass) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(!injectAmbientPass);
+		}
+
+		const auto* shaderReplacementSettings =
+			(*features)["ShaderReplacement"]["settings"].as_table();
+		CHECK(shaderReplacementSettings != nullptr);
+		if (shaderReplacementSettings) {
+			bool enabled = true;
+			bool replaceAmbientPass = true;
+			CHECK(
+				cs::feature_config::ReadBool(
+					*shaderReplacementSettings,
+					"enabled",
+					enabled) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(
+				cs::feature_config::ReadBool(
+					*shaderReplacementSettings,
+					"replace_ambient_ibl_pass",
+					replaceAmbientPass) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(!enabled);
+			CHECK(!replaceAmbientPass);
+		}
 	}
 }
 

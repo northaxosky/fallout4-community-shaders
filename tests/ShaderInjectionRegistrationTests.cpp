@@ -82,10 +82,33 @@ namespace
 
 int main()
 {
+	ShaderReplacementRegistration disabledWetnessAmbient;
+	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
+	disabledWetnessAmbient.contributor = "WetnessEffects";
+	disabledWetnessAmbient.bind = [](ID3D11DeviceContext*) {};
+	bool ok = Check(
+		RegisterReplacementIfEnabled(
+			false,
+			std::move(disabledWetnessAmbient)),
+		"disabled WetnessEffects ambient registration failed");
+
+	ShaderReplacementRegistration disabledSsgiAmbient;
+	disabledSsgiAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
+	disabledSsgiAmbient.contributor = "ScreenSpaceGI";
+	disabledSsgiAmbient.bind = [](ID3D11DeviceContext*) {};
+	ok &= Check(
+		RegisterReplacementIfEnabled(
+			false,
+			std::move(disabledSsgiAmbient)),
+		"disabled ScreenSpaceGI ambient registration failed");
+	ok &= Check(
+		g_preDrawInstallRequests == 0,
+		"disabled ambient registrations installed the pre-draw hook");
+
 	ShaderReplacementRegistration noBindRegistration;
 	noBindRegistration.targetId = ShaderInjectionTarget::kDeferredPrepass;
 	noBindRegistration.contributor = "registration-no-bind";
-	bool ok = Check(
+	ok &= Check(
 		RegisterReplacement(std::move(noBindRegistration)),
 		"registration without a bind was rejected");
 	ok &= Check(
