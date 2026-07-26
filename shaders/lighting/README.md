@@ -98,8 +98,8 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   secondary screen scale. The point path applies radial attenuation,
   the complete skin/default BRDF, and a dual-paraboloid t7 cookie driven
   by `cb2[11..14]`.
-  `shader_corpus_diff.py` is CONTRACT PASS (15/15 declarations, 5/5
-  samples; 205 corpus vs 198 reconstructed executable instructions).
+  The producer conformance evidence is CONTRACT PASS (15/15 declarations,
+  5/5 samples; 205 corpus vs 198 reconstructed executable instructions).
   Historical frame9483 sha1 `3f1f708c01758a3d20267e5c1b7a6472b8c9d336`
   is a different permutation: CB2[23], a `cb2[22]` secondary screen
   scale, no POSITION14 input, and an octahedral cookie projection. It is
@@ -110,26 +110,38 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
 ## Workflow
 
-The reconstruction pipeline is:
+Game-bytecode extraction, reconstruction evidence, and executable comparison
+live in `northaxosky/fallout4-re`. This repository consumes the published
+`scripts/shaders/shader-fidelity-conformance.json` artifact and does not carry
+the corpus or RE tools.
 
-1. **Mechanical stage** (automated): extract `Data/Fallout4 - Shaders.ba2`,
-   disassemble every blob in `Shaders011.fxp`, and group PSes by
-   resource-binding shape into candidate clusters per deferred-pipeline
-   role.
-2. **Manual stage** (per-shader):
-   * Pick a representative from the dominant shape bucket; cross-check
-     against the live capture sha for the role to lock the canonical
-     blob.
-   * For each target asm, identify CB layout, texture slots, and BRDF
-     shape. Use `// TODO: identify` rather than guessing.
-   * Cross-check by recompiling the reconstruction and diffing its ASM
-     against the original. `scripts/shaders/fetch-shader-corpus.ps1` extracts the
-     corpus blobs from the local game install and `scripts/shaders/shader_corpus_diff.py`
-     reports the drop-in contract match plus the instruction-stream delta.
+`ShaderRoundtrip` validates the eight producer-proven variants against that
+manifest. `ShaderCompileLighting` separately compiles the three shipping
+permutations without native fidelity evidence: deferred composite and the two
+Screen Space Shadows directional variants. Replacing three machine-specific
+exec-diff tests with these clean-clone gates strengthens the suite: conformance
+is no longer self-rebaselinable, while every shipping lighting permutation
+still receives compile coverage.
 
-Any HLSL committed here is expected to either (a) round-trip to ASM
-that closely matches the original bytecode, or (b) be marked WIP with
-explicit `// TODO` blocks and a documented instruction-count delta.
+The manifest is producer output and must never be hand-edited. After an
+intentional shader change, leave `ShaderRoundtrip` failing until
+`fallout4-re` reruns conformance and republishes the artifact:
+
+```powershell
+Set-Location <fallout4-re-checkout>
+python -m harness.shader_corpus --json fidelity publish-conformance `
+  --manifest .shader-cache/exec-diff-run/shader-exec-diff-run.json `
+  --contracts harness/shaders/shader-exec-contracts.json `
+  --native-manifest harness/shaders/native-shader-targets.json `
+  --corpus-dir .shader-cache/corpus `
+  --source-root <fallout4-community-shaders-checkout> `
+  --output harness/shaders/shader-fidelity-conformance.json
+Copy-Item harness/shaders/shader-fidelity-conformance.json `
+  <fallout4-community-shaders-checkout>/scripts/shaders/shader-fidelity-conformance.json
+```
+
+Copy the generated JSON byte-for-byte, review its source and evidence hashes,
+then rerun `ShaderRoundtrip`.
 
 ## Why these shaders
 

@@ -249,71 +249,21 @@ add_executable(ShaderCompileTests
 configure_host_test(ShaderCompileTests)
 target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
 
-add_test(NAME ShaderCompile COMMAND ShaderCompileTests "${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders")
+add_test(
+	NAME ShaderCompile
+	COMMAND ShaderCompileTests
+		--screen-space-gi
+		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
+)
 set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
-set(SHADER_EXEC_DIFF_SOURCE
-	"${CMAKE_SOURCE_DIR}/scripts/shaders/shader_exec_diff/main.cpp")
-set_property(DIRECTORY APPEND PROPERTY
-	CMAKE_CONFIGURE_DEPENDS "${SHADER_EXEC_DIFF_SOURCE}")
-file(SHA256 "${SHADER_EXEC_DIFF_SOURCE}" SHADER_EXEC_DIFF_SOURCE_SHA256)
-add_executable(ShaderExecDiffHarness "${SHADER_EXEC_DIFF_SOURCE}")
-set_target_properties(ShaderExecDiffHarness PROPERTIES
-	CXX_STANDARD 17
-	CXX_STANDARD_REQUIRED ON
-	CXX_EXTENSIONS OFF
-)
-target_compile_definitions(ShaderExecDiffHarness PRIVATE
-	"FO4CS_EXEC_HARNESS_SOURCE_SHA256=\"${SHADER_EXEC_DIFF_SOURCE_SHA256}\"")
-target_link_libraries(ShaderExecDiffHarness PRIVATE
-	d3d11.lib
-	dxgi.lib
-	d3dcompiler.lib
-	dxguid.lib
-	bcrypt.lib
-	version.lib
-)
-if(MSVC)
-	target_compile_options(ShaderExecDiffHarness PRIVATE /O2 /W4 /WX /Brepro)
-	target_link_options(ShaderExecDiffHarness PRIVATE /WX /Brepro)
-endif()
-
-find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
-	NAME ShaderExecDiffUnit
-	COMMAND "${CMAKE_COMMAND}" -E env
-		"FO4CS_EXEC_HARNESS=$<TARGET_FILE:ShaderExecDiffHarness>"
-		FO4CS_REQUIRE_EXEC_HARNESS=1
-		"${Python3_EXECUTABLE}"
-		"${CMAKE_SOURCE_DIR}/scripts/shaders/test_shader_exec_diff.py"
+	NAME ShaderCompileLighting
+	COMMAND ShaderCompileTests
+		--lighting
+		"${CMAKE_SOURCE_DIR}/shaders/lighting"
 )
-set_tests_properties(ShaderExecDiffUnit PROPERTIES LABELS "shader;unit")
-add_test(
-	NAME ShaderExecDiffSmoke
-	COMMAND "${CMAKE_COMMAND}" -E env
-		"FO4CS_EXEC_HARNESS=$<TARGET_FILE:ShaderExecDiffHarness>"
-		FO4CS_REQUIRE_EXEC_HARNESS=1
-		"${Python3_EXECUTABLE}"
-		"${CMAKE_SOURCE_DIR}/scripts/shaders/test_shader_exec_diff.py"
-		--self-smoke
-)
-set_tests_properties(ShaderExecDiffSmoke PROPERTIES
-	LABELS "shader;integration"
-	TIMEOUT 600
-)
-add_test(
-	NAME ShaderWetnessFeatureSmoke
-	COMMAND "${CMAKE_COMMAND}" -E env
-		"FO4CS_EXEC_HARNESS=$<TARGET_FILE:ShaderExecDiffHarness>"
-		FO4CS_REQUIRE_EXEC_HARNESS=1
-		"${Python3_EXECUTABLE}"
-		"${CMAKE_SOURCE_DIR}/scripts/shaders/test_shader_exec_diff.py"
-		--wetness-smoke
-)
-set_tests_properties(ShaderWetnessFeatureSmoke PROPERTIES
-	LABELS "shader;integration"
-	TIMEOUT 600
-)
+set_tests_properties(ShaderCompileLighting PROPERTIES LABELS "shader;unit")
 
 add_executable(ShaderCatalogTests
 	tests/ShaderCatalogTests.cpp
@@ -500,6 +450,26 @@ if(FO4CS_HOST_TESTS_ONLY)
 endif()
 
 set(_shader_roundtrip_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-shader-roundtrip.ps1")
+set(_shader_roundtrip_test_script "${CMAKE_SOURCE_DIR}/scripts/shaders/test-verify-shader-roundtrip.ps1")
+add_test(
+	NAME ShaderRoundtripManifestUnit
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass
+		-File "${_shader_roundtrip_test_script}"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+add_test(
+	NAME ShaderRoundtripManifestWindowsPowerShellUnit
+	COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+		-File "${_shader_roundtrip_test_script}"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(
+	ShaderRoundtripManifestUnit
+	ShaderRoundtripManifestWindowsPowerShellUnit
+	PROPERTIES
+	LABELS "shader;unit"
+	TIMEOUT 120
+)
 add_test(
 	NAME ShaderRoundtrip
 	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command

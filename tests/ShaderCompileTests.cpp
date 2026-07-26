@@ -1,14 +1,24 @@
 #include "Utils/ShaderCompile.h"
 
+#include <array>
 #include <cstdio>
 #include <filesystem>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 namespace
 {
 	using ShaderDefines = std::vector<std::pair<const char*, const char*>>;
+
+	struct ShaderCase
+	{
+		const char*   path;
+		ShaderDefines defines;
+		const char*   profile{ "cs_5_0" };
+		const char*   entryPoint{ "main" };
+	};
 
 	int failures = 0;
 
@@ -31,29 +41,79 @@ namespace
 			++failures;
 		}
 	}
+
+	void CompileScreenSpaceGI(const std::filesystem::path& a_root)
+	{
+		Compile(a_root / "XeGTAO" / "decode.cs.hlsl", {});
+		Compile(a_root / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
+		Compile(a_root / "XeGTAO" / "gi.cs.hlsl", {});
+		Compile(a_root / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
+		Compile(a_root / "XeGTAO" / "denoise.cs.hlsl", {});
+		Compile(a_root / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
+		Compile(a_root / "ResolveCS.hlsl", {});
+		Compile(a_root / "BounceTelemetryCS.hlsl", {});
+		Compile(a_root / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
+		Compile(a_root / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
+	}
+
+	void CompileLighting(const std::filesystem::path& a_root)
+	{
+		// Deliberate independent coverage friction: keep this compile-only gap explicit.
+		const std::array<ShaderCase, 3> cases{ {
+			{ "deferred_composite.hlsl", {}, "ps_5_0" },
+			{
+				"bsdf_light_deferred.hlsl",
+				{
+					{ "LIGHT_TYPE", "1" },
+					{ "SCREEN_SPACE_SHADOWS", "1" }
+				},
+				"ps_5_0"
+			},
+			{
+				"bsdf_light_deferred.hlsl",
+				{
+					{ "AMBIENT_IBL_IN_LIGHT", "1" },
+					{ "LIGHT_TYPE", "1" },
+					{ "SCREEN_SPACE_SHADOWS", "1" }
+				},
+				"ps_5_0"
+			}
+		} };
+		static_assert(cases.size() == 3);
+
+		for (const auto& shader : cases) {
+			Compile(
+				a_root / shader.path,
+				shader.defines,
+				shader.profile,
+				shader.entryPoint);
+		}
+		std::printf("ShaderCompileLighting checked %zu compile-only permutations\n", cases.size());
+	}
 }
 
 int main(int argc, char** argv)
 {
-	if (argc != 2) {
-		std::fprintf(stderr, "Usage: ShaderCompileTests <ScreenSpaceGI Shaders directory>\n");
+	if (argc != 3) {
+		std::fprintf(
+			stderr,
+			"Usage: ShaderCompileTests <--screen-space-gi|--lighting> <shader directory>\n");
 		return 2;
 	}
 
-	const std::filesystem::path root{ argv[1] };
-	Compile(root / "XeGTAO" / "decode.cs.hlsl", {});
-	Compile(root / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
-	Compile(root / "XeGTAO" / "gi.cs.hlsl", {});
-	Compile(root / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-	Compile(root / "XeGTAO" / "denoise.cs.hlsl", {});
-	Compile(root / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-	Compile(root / "ResolveCS.hlsl", {});
-	Compile(root / "BounceTelemetryCS.hlsl", {});
-	Compile(root / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
-	Compile(root / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
+	const std::string_view suite{ argv[1] };
+	const std::filesystem::path root{ argv[2] };
+	if (suite == "--screen-space-gi") {
+		CompileScreenSpaceGI(root);
+	} else if (suite == "--lighting") {
+		CompileLighting(root);
+	} else {
+		std::fprintf(stderr, "Unknown shader compile suite: %s\n", argv[1]);
+		return 2;
+	}
 
 	if (failures == 0)
-		std::printf("ShaderCompile tests passed: decode, prefilterDepths, gi, denoise, resolve, telemetry, integration VS/PS\n");
+		std::printf("ShaderCompile %s suite passed\n", argv[1]);
 	else
 		std::printf("%d shader(s) failed to compile\n", failures);
 
