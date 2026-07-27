@@ -1,6 +1,7 @@
 #include "Log.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
+#include "SssDxbcPatchResolver.h"
 
 #include <array>
 #include <cstddef>
@@ -103,11 +104,42 @@ namespace
 
 int main()
 {
+	constexpr auto v1Registration =
+		cs::features::sss_dxbc_patch::
+			EvaluateRuntimePatchRegistration(
+				true,
+				cs::features::sss_dxbc_patch::
+					kSchemaV1RouteIdentityExact,
+				true);
+	bool ok = Check(
+		!v1Registration.registerResolver
+			&& !v1Registration.registerPatchedDispatch,
+		"schema-v1 route identity enabled runtime registration");
+	ok &= Check(
+		SetDeveloperShaderOverride(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			DeveloperShaderOverride::kForceOn),
+		"directional HLSL contributor setup was rejected");
+	const auto blockedV1Preview = PreviewShaderInjectionFreeze(
+		ShaderInjectionTarget::kBsdfLightDeferredDirectional);
+	ok &= Check(
+		blockedV1Preview.published
+			&& !blockedV1Preview.bytecodePatchExclusive
+			&& blockedV1Preview.variants != 0
+			&& blockedV1Preview.patchedMatchers == 0
+			&& blockedV1Preview.suppressedContributors == 0,
+		"blocked schema-v1 route suppressed a valid HLSL contributor");
+	ok &= Check(
+		SetDeveloperShaderOverride(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			DeveloperShaderOverride::kAuto),
+		"directional HLSL contributor reset was rejected");
+
 	ShaderReplacementRegistration disabledWetnessAmbient;
 	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
 	disabledWetnessAmbient.contributor = "WetnessEffects";
 	disabledWetnessAmbient.bind = [](ID3D11DeviceContext*) {};
-	bool ok = Check(
+	ok &= Check(
 		RegisterReplacementIfEnabled(
 			false,
 			std::move(disabledWetnessAmbient)),
@@ -297,7 +329,7 @@ int main()
 		"second exclusive DXBC claim did not suppress Wetness");
 	ok &= Check(
 		PublishShaderInjectionFreezePreview(),
-		"artifact-failure exclusive claims were not published");
+		"explicit generic patch claims were not published");
 	ok &= Check(
 		!IsInjectedPixelShader(
 			ShaderInjectionTarget::
@@ -315,7 +347,7 @@ int main()
 					&contextToken))
 			&& g_sssBinds == 0
 			&& g_wetnessBinds == 0,
-		"missing artifact did not preserve exclusive stock routing");
+		"inactive generic matcher did not preserve registered stock routing");
 	g_patchMatcherActive = true;
 	ok &= Check(
 		PublishShaderInjectionFreezePreview(),

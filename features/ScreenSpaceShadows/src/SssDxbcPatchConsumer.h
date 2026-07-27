@@ -20,6 +20,8 @@ namespace cs::features::sss_dxbc_patch
 	bool Prepare(
 		const std::filesystem::path& a_artifactPath,
 		std::string& a_error);
+	RuntimePatchRegistrationDecision
+		GetRuntimePatchRegistrationDecision();
 	bool ActivateResolver();
 	void SetBindingReady(bool a_ready) noexcept;
 	void BreakBindingInvariant() noexcept;

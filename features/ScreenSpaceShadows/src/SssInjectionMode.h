@@ -59,8 +59,13 @@ namespace cs::features
 	}
 
 	inline constexpr std::string_view SssPatchStatusName(
-		bool a_artifactLoaded) noexcept
+		bool a_artifactLoaded,
+		bool a_routeIdentityExact) noexcept
 	{
-		return a_artifactLoaded ? "provisional" : "unavailable";
+		if (!a_artifactLoaded)
+			return "unavailable";
+		return a_routeIdentityExact
+			? "route_identity_exact"
+			: "route_identity_unproven";
 	}
 }

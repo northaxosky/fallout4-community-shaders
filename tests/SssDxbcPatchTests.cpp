@@ -577,7 +577,7 @@ namespace
 			parsed.artifact->coverage.pass == 2
 				&& parsed.artifact->coverage.candidates == 64
 				&& parsed.artifact->coverage.unproven == 62,
-			"package artifact did not report provisional 2/64 coverage");
+			"package artifact did not retain 2/64 recipe evidence");
 
 		sha256::Sha256Result expected{};
 		Check(
@@ -612,11 +612,61 @@ namespace
 				&& features::ParseSssInjectionMode("dxbc_patch")
 					== features::SssInjectionMode::kDxbcPatch
 				&& !features::ParseSssInjectionMode("beta")
-				&& features::SssPatchStatusName(true)
-					== "provisional"
-				&& features::SssPatchStatusName(false)
+				&& features::SssPatchStatusName(true, false)
+					== "route_identity_unproven"
+				&& features::SssPatchStatusName(true, true)
+					== "route_identity_exact"
+				&& features::SssPatchStatusName(false, false)
 					== "unavailable",
 			"SSS injection mode parser is not fail-closed");
+		const auto v1Registration =
+			features::sss_dxbc_patch::
+				EvaluateRuntimePatchRegistration(
+					true,
+					features::sss_dxbc_patch::
+						kSchemaV1RouteIdentityExact,
+					true);
+		Check(
+			v1Registration.artifactLoaded
+				&& !v1Registration.routeIdentityExact
+				&& v1Registration.runtimeExact
+				&& !v1Registration.registerResolver
+				&& !v1Registration.registerPatchedDispatch,
+			"schema-v1 artifact enabled runtime patch registration");
+		const auto v1Admission =
+			features::sss_dxbc_patch::EvaluatePatchAdmission(
+				true,
+				features::sss_dxbc_patch::
+					kSchemaV1RouteIdentityExact,
+				true,
+				true,
+				true,
+				true,
+				true,
+				false);
+		Check(
+			!v1Admission.ready && v1Admission.stockFallback,
+			"schema-v1 route identity enabled runtime admission");
+		features::sss_dxbc_patch::TelemetrySnapshot v1Telemetry{
+			.coveragePass = 2,
+			.coverageCandidates = 64,
+			.artifactLoaded = true,
+			.routeIdentityExact = false,
+			.runtimeExact = true,
+			.resolverActive = false,
+			.brokerHookInstalled = true,
+			.dispatchPublished = false,
+			.bindingReady = true,
+			.admissionReady = v1Admission.ready,
+			.stockFallback = v1Admission.stockFallback
+		};
+		Check(
+			!v1Telemetry.routeIdentityExact
+				&& !v1Telemetry.admissionReady
+				&& v1Telemetry.stockFallback
+				&& features::sss_dxbc_patch::
+					TelemetryRelationshipsHold(v1Telemetry),
+			"schema-v1 route telemetry was not fail-closed");
 		const auto missingArtifactStartup =
 			features::DecideSssStartup(
 				features::SssInjectionMode::kDxbcPatch,
@@ -717,7 +767,7 @@ namespace
 			"unsupported runtime was accepted");
 	}
 
-	void TestExactIdentitySelection(
+	void TestSchemaV1RecipeTupleSelection(
 		const std::filesystem::path& a_artifactPath)
 	{
 		const auto parsed =
@@ -730,13 +780,13 @@ namespace
 				return a_route.status
 					== engine::dxbc_patch::CandidateStatus::kPass;
 			});
-		Check(route != artifact.routes.end(), "artifact has no PASS route");
+		Check(route != artifact.routes.end(), "artifact has no PASS recipe");
 		Check(
 			engine::dxbc_patch::FindCandidateRoute(
 				artifact,
 				engine::ViewShaderVariantKey(route->variant))
 				== &*route,
-			"exact route was not selected");
+			"exact schema-v1 recipe tuple was not selected");
 
 		auto wrongVariant = engine::ViewShaderVariantKey(route->variant);
 		wrongVariant.subclass = "BSDFCompositeShader";
@@ -744,14 +794,14 @@ namespace
 			!engine::dxbc_patch::FindCandidateRoute(
 				artifact,
 				wrongVariant),
-			"wrong subclass was admitted");
+			"wrong recipe subclass was selected");
 		wrongVariant = engine::ViewShaderVariantKey(route->variant);
 		wrongVariant.stage = engine::ShaderStage::kVertex;
 		Check(
 			!engine::dxbc_patch::FindCandidateRoute(
 				artifact,
 				wrongVariant),
-			"wrong stage was admitted");
+			"wrong recipe stage was selected");
 		wrongVariant = engine::ViewShaderVariantKey(route->variant);
 		wrongVariant.id = engine::ShaderVariantId{
 			wrongVariant.id.Value() ^ 1
@@ -760,7 +810,7 @@ namespace
 			!engine::dxbc_patch::FindCandidateRoute(
 				artifact,
 				wrongVariant),
-			"wrong PSID or hash-only fallback was admitted");
+			"wrong schema-v1 opaque_psid field or hash fallback was selected");
 
 		auto runtime = artifact.runtime;
 		Check(
@@ -1206,9 +1256,54 @@ namespace
 				.output = &output
 			};
 			features::sss_dxbc_patch::AtomicCounters counters;
+			const auto result =
+				features::sss_dxbc_patch::ResolveRequest(
+					artifact,
+					false,
+					true,
+					true,
+					true,
+					counters,
+					request,
+					&CreatePatchedShader);
+			const auto snapshot =
+				features::sss_dxbc_patch::SnapshotCounters(counters);
+			Check(
+				result == engine::PixelShaderSwapResolverResult::kNoMatch
+					&& output == &stock
+					&& stock.references == 1
+					&& !create.called
+					&& snapshot.candidateSeen == 0
+					&& snapshot.patchBuilt == 0
+					&& snapshot.createPsAccepted == 0
+					&& snapshot.identityPublished == 0,
+				"schema-v1 runtime route entered the CreatePixelShader patch path");
+		}
+		{
+			FakePixelShader stock;
+			FakePixelShader patched;
+			ID3D11PixelShader* output = &stock;
+			CreateFixture create{
+				.expectedDevice = device,
+				.expectedLinkage = linkage,
+				.shader = &patched
+			};
+			g_createFixture = &create;
+			const engine::PixelShaderSwapRequest request{
+				.device = device,
+				.linkage = linkage,
+				.bytecode = stockBytes.data(),
+				.bytecodeLength = stockBytes.size(),
+				.variant = variant,
+				.stockSha1 = plan.stock.sha1,
+				.stockOutput = &stock,
+				.output = &output
+			};
+			features::sss_dxbc_patch::AtomicCounters counters;
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					true,
 					true,
@@ -1259,6 +1354,7 @@ namespace
 					true,
 					true,
 					true,
+					true,
 					counters,
 					request,
 					&CreatePatchedShader)
@@ -1290,6 +1386,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					preimageArtifact,
+					true,
 					true,
 					true,
 					true,
@@ -1327,6 +1424,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					true,
 					true,
@@ -1373,6 +1471,7 @@ namespace
 					true,
 					true,
 					true,
+					true,
 					counters,
 					request,
 					&CreatePatchedShader)
@@ -1406,6 +1505,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					true,
 					false,
@@ -1442,6 +1542,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					false,
 					true,
@@ -1481,6 +1582,7 @@ namespace
 			Check(
 				features::sss_dxbc_patch::ResolveRequest(
 					artifact,
+					true,
 					true,
 					true,
 					true,
@@ -1811,6 +1913,7 @@ namespace
 				artifact,
 				true,
 				true,
+				true,
 				latch.IsReady(),
 				counters,
 				request,
@@ -1824,16 +1927,18 @@ namespace
 
 	void TestEffectivePatchAdmission()
 	{
-		for (unsigned mask = 0; mask < 128; ++mask) {
+		for (unsigned mask = 0; mask < 256; ++mask) {
 			const bool artifactLoaded = (mask & 1u) != 0;
-			const bool runtimeExact = (mask & 2u) != 0;
-			const bool resolverActive = (mask & 4u) != 0;
-			const bool brokerHookInstalled = (mask & 8u) != 0;
-			const bool dispatchPublished = (mask & 16u) != 0;
-			const bool bindingReady = (mask & 32u) != 0;
-			const bool invariantBroken = (mask & 64u) != 0;
+			const bool routeIdentityExact = (mask & 2u) != 0;
+			const bool runtimeExact = (mask & 4u) != 0;
+			const bool resolverActive = (mask & 8u) != 0;
+			const bool brokerHookInstalled = (mask & 16u) != 0;
+			const bool dispatchPublished = (mask & 32u) != 0;
+			const bool bindingReady = (mask & 64u) != 0;
+			const bool invariantBroken = (mask & 128u) != 0;
 			const bool expectedReady =
 				artifactLoaded
+				&& routeIdentityExact
 				&& runtimeExact
 				&& resolverActive
 				&& brokerHookInstalled
@@ -1843,6 +1948,7 @@ namespace
 			const auto admission =
 				features::sss_dxbc_patch::EvaluatePatchAdmission(
 					artifactLoaded,
+					routeIdentityExact,
 					runtimeExact,
 					resolverActive,
 					brokerHookInstalled,
@@ -1860,6 +1966,7 @@ namespace
 			features::sss_dxbc_patch::EvaluatePatchAdmission(
 				true,
 				true,
+				true,
 				resolverRegistrationSucceeded,
 				false,
 				true,
@@ -1873,6 +1980,7 @@ namespace
 		telemetry.coveragePass = 2;
 		telemetry.coverageCandidates = 64;
 		telemetry.artifactLoaded = true;
+		telemetry.routeIdentityExact = true;
 		telemetry.runtimeExact = true;
 		telemetry.resolverActive = resolverRegistrationSucceeded;
 		telemetry.brokerHookInstalled = false;
@@ -1891,6 +1999,7 @@ namespace
 
 		const auto publicationFailure =
 			features::sss_dxbc_patch::EvaluatePatchAdmission(
+				true,
 				true,
 				true,
 				resolverRegistrationSucceeded,
@@ -2010,8 +2119,8 @@ int main(int a_argc, char** a_argv)
 			return 0;
 		TestArtifactRejections(artifactPath);
 		std::cout << "PASS: strict artifact rejection\n";
-		TestExactIdentitySelection(artifactPath);
-		std::cout << "PASS: exact identity selection\n";
+		TestSchemaV1RecipeTupleSelection(artifactPath);
+		std::cout << "PASS: schema-v1 recipe tuple selection (offline only)\n";
 		const Test tests[]{
 			{ "bounded patch builder", &TestPatchBuilder },
 			{ "independent DXBC checksum vectors", &TestDxbcChecksumVectors },

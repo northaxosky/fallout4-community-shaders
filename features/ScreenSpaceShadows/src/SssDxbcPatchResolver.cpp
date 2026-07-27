@@ -94,6 +94,7 @@ namespace cs::features::sss_dxbc_patch
 
 	engine::PixelShaderSwapResolverResult ResolveRequest(
 		const engine::dxbc_patch::Artifact& a_artifact,
+		bool a_routeIdentityExact,
 		bool a_runtimeExact,
 		bool a_dispatchPublished,
 		bool a_bindingReady,
@@ -101,6 +102,8 @@ namespace cs::features::sss_dxbc_patch
 		const engine::PixelShaderSwapRequest& a_request,
 		CreatePatchedPixelShaderFunction a_create) noexcept
 	{
+		if (!a_routeIdentityExact)
+			return engine::PixelShaderSwapResolverResult::kNoMatch;
 		if (!a_request.variant)
 			return engine::PixelShaderSwapResolverResult::kNoMatch;
 		const auto* route = engine::dxbc_patch::FindCandidateRoute(

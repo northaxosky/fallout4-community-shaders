@@ -385,6 +385,7 @@ set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
+		features/ScreenSpaceShadows/src/SssDxbcPatchResolver.h
 		src/Render/ShaderInjection.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
@@ -405,6 +406,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/include"
 		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/src"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)

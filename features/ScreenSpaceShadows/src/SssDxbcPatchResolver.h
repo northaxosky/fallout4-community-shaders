@@ -9,6 +9,8 @@
 
 namespace cs::features::sss_dxbc_patch
 {
+	inline constexpr bool kSchemaV1RouteIdentityExact = false;
+
 	struct TelemetrySnapshot
 	{
 		std::uint64_t candidateSeen = 0;
@@ -30,6 +32,7 @@ namespace cs::features::sss_dxbc_patch
 		std::size_t coveragePass = 0;
 		std::size_t coverageCandidates = 0;
 		bool artifactLoaded = false;
+		bool routeIdentityExact = false;
 		bool runtimeExact = false;
 		bool resolverActive = false;
 		bool brokerHookInstalled = false;
@@ -40,6 +43,34 @@ namespace cs::features::sss_dxbc_patch
 		bool stockFallback = true;
 	};
 
+	struct RuntimePatchRegistrationDecision
+	{
+		bool artifactLoaded = false;
+		bool routeIdentityExact = false;
+		bool runtimeExact = false;
+		bool registerResolver = false;
+		bool registerPatchedDispatch = false;
+	};
+
+	inline constexpr RuntimePatchRegistrationDecision
+		EvaluateRuntimePatchRegistration(
+			bool a_artifactLoaded,
+			bool a_routeIdentityExact,
+			bool a_runtimeExact) noexcept
+	{
+		const bool registerRuntime =
+			a_artifactLoaded
+			&& a_routeIdentityExact
+			&& a_runtimeExact;
+		return {
+			.artifactLoaded = a_artifactLoaded,
+			.routeIdentityExact = a_routeIdentityExact,
+			.runtimeExact = a_runtimeExact,
+			.registerResolver = registerRuntime,
+			.registerPatchedDispatch = registerRuntime
+		};
+	}
+
 	struct PatchAdmissionSnapshot
 	{
 		bool ready = false;
@@ -48,6 +79,7 @@ namespace cs::features::sss_dxbc_patch
 
 	inline constexpr PatchAdmissionSnapshot EvaluatePatchAdmission(
 		bool a_artifactLoaded,
+		bool a_routeIdentityExact,
 		bool a_runtimeExact,
 		bool a_resolverActive,
 		bool a_brokerHookInstalled,
@@ -57,6 +89,7 @@ namespace cs::features::sss_dxbc_patch
 	{
 		const bool ready =
 			a_artifactLoaded
+			&& a_routeIdentityExact
 			&& a_runtimeExact
 			&& a_resolverActive
 			&& a_brokerHookInstalled
@@ -201,6 +234,7 @@ namespace cs::features::sss_dxbc_patch
 
 	engine::PixelShaderSwapResolverResult ResolveRequest(
 		const engine::dxbc_patch::Artifact& a_artifact,
+		bool a_routeIdentityExact,
 		bool a_runtimeExact,
 		bool a_dispatchPublished,
 		bool a_bindingReady,
@@ -214,6 +248,7 @@ namespace cs::features::sss_dxbc_patch
 	{
 		const auto admission = EvaluatePatchAdmission(
 			a_snapshot.artifactLoaded,
+			a_snapshot.routeIdentityExact,
 			a_snapshot.runtimeExact,
 			a_snapshot.resolverActive,
 			a_snapshot.brokerHookInstalled,

@@ -46,6 +46,7 @@ namespace cs::features::sss_dxbc_patch
 			std::shared_ptr<const engine::dxbc_patch::Artifact> artifact;
 			engine::dxbc_patch::RuntimeIdentity runtime;
 			std::atomic_bool runtimeExact{ false };
+			std::atomic_bool routeIdentityExact{ false };
 			BindingReadinessLatch bindingReadiness;
 			std::atomic_bool resolverActive{ false };
 			AtomicCounters counters;
@@ -173,6 +174,8 @@ namespace cs::features::sss_dxbc_patch
 				return engine::PixelShaderSwapResolverResult::kNoMatch;
 			return ResolveRequest(
 				*artifact,
+				service.routeIdentityExact.load(
+					std::memory_order_acquire),
 				service.runtimeExact.load(std::memory_order_acquire),
 				engine::ArePatchedShaderDispatchesPublished(
 					kDispatchTargets),
@@ -234,8 +237,11 @@ namespace cs::features::sss_dxbc_patch
 				*service.artifact,
 				*runtime);
 		service.runtimeExact.store(exact, std::memory_order_release);
+		service.routeIdentityExact.store(
+			kSchemaV1RouteIdentityExact,
+			std::memory_order_release);
 		L->info(
-			"Loaded provisional SSS DXBC patch artifact: coverage={}/{}, runtime_exact={}, release_scope={}.",
+			"Loaded SSS DXBC v1 recipe artifact: recipes={}/{}, runtime_exact={}, route_identity=UNPROVEN, runtime_admission=unavailable, release_scope={}.",
 			service.artifact->coverage.pass,
 			service.artifact->coverage.candidates,
 			exact,
@@ -243,11 +249,28 @@ namespace cs::features::sss_dxbc_patch
 		return true;
 	}
 
+	RuntimePatchRegistrationDecision
+		GetRuntimePatchRegistrationDecision()
+	{
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		return EvaluateRuntimePatchRegistration(
+			static_cast<bool>(service.artifact),
+			service.routeIdentityExact.load(
+				std::memory_order_acquire),
+			service.runtimeExact.load(std::memory_order_acquire));
+	}
+
 	bool ActivateResolver()
 	{
 		auto& service = GetService();
 		std::scoped_lock lock(service.mutex);
-		if (!service.artifact
+		const auto registration = EvaluateRuntimePatchRegistration(
+			static_cast<bool>(service.artifact),
+			service.routeIdentityExact.load(
+				std::memory_order_acquire),
+			service.runtimeExact.load(std::memory_order_acquire));
+		if (!registration.registerResolver
 			|| service.resolverActive.load(
 				std::memory_order_acquire))
 			return false;
@@ -284,9 +307,12 @@ namespace cs::features::sss_dxbc_patch
 		ID3D11PixelShader* a_shader) noexcept
 	{
 		const auto mapped = MapTarget(a_target);
-		const auto artifact = GetService().artifact;
+		auto& service = GetService();
+		const auto artifact = service.artifact;
 		return mapped
 			&& artifact
+			&& service.routeIdentityExact.load(
+				std::memory_order_acquire)
 			&& MatchesPatchedPixelShader(
 				a_shader,
 				*mapped,
@@ -351,6 +377,9 @@ namespace cs::features::sss_dxbc_patch
 		snapshot.coverageCandidates =
 			artifact ? artifact->coverage.candidates : 0;
 		snapshot.artifactLoaded = static_cast<bool>(artifact);
+		snapshot.routeIdentityExact =
+			service.routeIdentityExact.load(
+				std::memory_order_acquire);
 		snapshot.runtimeExact = service.runtimeExact.load(
 			std::memory_order_acquire);
 		snapshot.resolverActive = service.resolverActive.load(
@@ -366,6 +395,7 @@ namespace cs::features::sss_dxbc_patch
 		snapshot.invariantBroken = binding.broken;
 		const auto admission = EvaluatePatchAdmission(
 			snapshot.artifactLoaded,
+			snapshot.routeIdentityExact,
 			snapshot.runtimeExact,
 			snapshot.resolverActive,
 			snapshot.brokerHookInstalled,

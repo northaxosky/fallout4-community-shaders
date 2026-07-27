@@ -274,53 +274,75 @@ namespace cs::features
 					error);
 			if (!artifactPrepared) {
 				L->error(
-					"Provisional DXBC patch mode stayed stock: {}.",
+					"SSS DXBC v1 recipe artifact is unavailable; runtime admission remains stock: {}.",
 					error);
 			}
-			const auto registerPatchedDispatch =
-				[this](cs::engine::ShaderInjectionTarget a_target) {
-					return cs::engine::RegisterPatchedShaderDispatch({
-						.targetId = a_target,
-						.contributor = "ScreenSpaceShadows.DxbcPatch",
-						.matches =
-							&sss_dxbc_patch::MatchesPatchedShader,
-						.bind =
-							[this](ID3D11DeviceContext* a_context) {
-								BindShadowMask(a_context, true);
-							},
-						.slotClaims = {
-							{
-								.stage =
-									cs::engine::ShaderStage::kPixel,
-								.resourceType =
-									cs::engine::ShaderResourceType::
-										kShaderResource,
-								.slot = kMaskPSSlot
-							}
-						}
-					});
-				};
-			const bool directionalRegistered =
-				registerPatchedDispatch(
-					cs::engine::ShaderInjectionTarget::
-						kBsdfLightDeferredDirectional);
-			const bool directionalIblRegistered =
-				registerPatchedDispatch(
-					cs::engine::ShaderInjectionTarget::
-						kBsdfLightDeferredDirectionalIbl);
-			const bool claimsRegistered =
-				directionalRegistered && directionalIblRegistered;
-			injectionReady =
-				artifactPrepared
-				&& claimsRegistered
-				&& sss_dxbc_patch::ActivateResolver();
-			if (!claimsRegistered) {
+			const auto registration =
+				sss_dxbc_patch::GetRuntimePatchRegistrationDecision();
+			if (artifactPrepared
+				&& !registration.routeIdentityExact) {
 				L->error(
-					"Exclusive DXBC stock claims failed to register.");
-			}
-			if (artifactPrepared && !injectionReady) {
+					"SSS DXBC v1 route identity is UNPROVEN; resolver and patched-dispatch registration are blocked, and stock routing remains active.");
+			} else if (artifactPrepared
+				&& !registration.runtimeExact) {
 				L->error(
-					"Provisional DXBC patch activation failed; exclusive targets remain stock.");
+					"SSS DXBC runtime identity is unavailable; resolver and patched-dispatch registration are blocked.");
+			} else if (registration.registerPatchedDispatch) {
+				const auto registerPatchedDispatch =
+					[this](
+						cs::engine::ShaderInjectionTarget a_target) {
+						return cs::engine::
+							RegisterPatchedShaderDispatch({
+								.targetId = a_target,
+								.contributor =
+									"ScreenSpaceShadows.DxbcPatch",
+								.matches =
+									&sss_dxbc_patch::
+										MatchesPatchedShader,
+								.bind =
+									[this](
+										ID3D11DeviceContext*
+											a_context) {
+										BindShadowMask(
+											a_context,
+											true);
+									},
+								.slotClaims = {
+									{
+										.stage =
+											cs::engine::
+												ShaderStage::kPixel,
+										.resourceType =
+											cs::engine::
+												ShaderResourceType::
+													kShaderResource,
+										.slot = kMaskPSSlot
+									}
+								}
+							});
+					};
+				const bool directionalRegistered =
+					registerPatchedDispatch(
+						cs::engine::ShaderInjectionTarget::
+							kBsdfLightDeferredDirectional);
+				const bool directionalIblRegistered =
+					registerPatchedDispatch(
+						cs::engine::ShaderInjectionTarget::
+							kBsdfLightDeferredDirectionalIbl);
+				const bool claimsRegistered =
+					directionalRegistered
+					&& directionalIblRegistered;
+				injectionReady =
+					claimsRegistered
+					&& registration.registerResolver
+					&& sss_dxbc_patch::ActivateResolver();
+				if (!claimsRegistered) {
+					L->error(
+						"SSS DXBC patched-dispatch registration failed; runtime admission remains stock.");
+				} else if (!injectionReady) {
+					L->error(
+						"SSS DXBC resolver activation failed; runtime admission remains stock.");
+				}
 			}
 		} else {
 			L->info(
@@ -1152,6 +1174,9 @@ namespace cs::features
 			.Field("light_y", static_cast<double>(_lightY.load(std::memory_order_relaxed)))
 			.Field("clip_w", static_cast<double>(_clipW.load(std::memory_order_relaxed)))
 			.Field("patch_artifact_loaded", patchTelemetry.artifactLoaded)
+			.Field(
+				"patch_route_identity_exact",
+				patchTelemetry.routeIdentityExact)
 			.Field("patch_runtime_exact", patchTelemetry.runtimeExact)
 			.Field("patch_resolver_active", patchTelemetry.resolverActive)
 			.Field(
@@ -1179,7 +1204,8 @@ namespace cs::features
 			.Field(
 				"patch_status",
 				SssPatchStatusName(
-					patchTelemetry.artifactLoaded))
+					patchTelemetry.artifactLoaded,
+					patchTelemetry.routeIdentityExact))
 			.Field("patch_coverage_pass", static_cast<std::int64_t>(patchTelemetry.coveragePass))
 			.Field("patch_coverage_candidates", static_cast<std::int64_t>(patchTelemetry.coverageCandidates))
 			.Field("patch_candidate_seen", static_cast<std::int64_t>(patchTelemetry.candidateSeen))
@@ -1208,7 +1234,7 @@ namespace cs::features
 	{
 		static constexpr const char* kInjectionModes[]{
 			"Stock (no substitution)",
-			"DXBC patch (provisional developer mode)",
+			"DXBC v1 recipe evidence (runtime blocked)",
 			"HLSL reconstruction (developer validation)"
 		};
 		auto injectionMode = static_cast<int>(_settings.injectionMode);
@@ -1222,7 +1248,7 @@ namespace cs::features
 				static_cast<SssInjectionMode>(injectionMode);
 		}
 		ImGui::TextDisabled(
-			"Restart required. DXBC coverage is provisional and not a release-coverage claim.");
+			"Restart required. DXBC v1 route identity is unproven; runtime admission remains stock.");
 		changed |= ImGui::Checkbox("Enabled", &_settings.enabled);
 		changed |= ImGui::SliderFloat("Surface thickness", &_settings.surfaceThickness, 0.005f, 0.05f);
 		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);

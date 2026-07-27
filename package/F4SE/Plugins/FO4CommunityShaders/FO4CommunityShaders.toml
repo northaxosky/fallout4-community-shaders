@@ -68,7 +68,7 @@ load = false
 
 [features.ScreenSpaceShadows.settings]
 # Explicit restart-time selection: stock, dxbc_patch, or hlsl_reconstruction.
-# DXBC patch coverage is provisional developer-only (2/64); shipped default stays stock.
+# DXBC v1 has 2/64 recipe evidence, but route identity is unproven and runtime admission is blocked.
 injection_mode = "stock"
 
 [features.Imagespace]
