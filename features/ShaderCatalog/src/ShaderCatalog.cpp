@@ -559,9 +559,23 @@ namespace cs::features
 				&ShaderCatalog::FinalizeForProcessExit)
 			&& catalog::orderly_exit::IsInstalled()
 			&& catalog::CatalogDB::Get().MarkOrderlyFinalizerReady();
+		const auto orderlyExitStatus =
+			catalog::orderly_exit::GetInstallStatus();
 		if (!orderlyFinalizerReady) {
 			L->error(
-				"ExitProcess finalizer hook failed; catalog run cannot be authoritative.");
+				"Normal-exit finalizer hooks incomplete; catalog run cannot be authoritative "
+				"(ExitProcess={}, RtlExitUserProcess={}, aliased={}, error={}).",
+				orderlyExitStatus.exitProcessCovered,
+				orderlyExitStatus.rtlExitUserProcessCovered,
+				orderlyExitStatus.targetsAliased,
+				orderlyExitStatus.transactionResult);
+		} else {
+			L->info(
+				"Normal-exit finalizer hooks ready "
+				"(ExitProcess={}, RtlExitUserProcess={}, aliased={}).",
+				orderlyExitStatus.exitProcessCovered,
+				orderlyExitStatus.rtlExitUserProcessCovered,
+				orderlyExitStatus.targetsAliased);
 		}
 
 		catalog::hooks::SetSubclassAttributionEnabled(
@@ -627,6 +641,8 @@ namespace cs::features
 	{
 		const auto stats = catalog::CatalogDB::Get().GetStats();
 		const auto binds = catalog::hooks::GetRuntimeAttributionStats();
+		const auto orderlyExit =
+			catalog::orderly_exit::GetInstallStatus();
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("hooks", HooksInstalled())
@@ -656,6 +672,19 @@ namespace cs::features
 			.Field(
 				"orderly_finalizer_ready",
 				stats.orderlyFinalizerReady)
+			.Field(
+				"orderly_exitprocess_covered",
+				orderlyExit.exitProcessCovered)
+			.Field(
+				"orderly_rtl_exit_user_process_covered",
+				orderlyExit.rtlExitUserProcessCovered)
+			.Field(
+				"orderly_exit_targets_aliased",
+				orderlyExit.targetsAliased)
+			.Field(
+				"orderly_exit_install_error",
+				static_cast<std::int64_t>(
+					orderlyExit.transactionResult))
 			.Field(
 				"route_capture_requested",
 				stats.routeCaptureRequested)

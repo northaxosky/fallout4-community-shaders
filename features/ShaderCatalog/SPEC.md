@@ -136,15 +136,19 @@ Startup changes every prior v3 `running` row to `abandoned` and increments its l
 quality counter, except a verified same-root pending publication, which startup promotes.
 Only the observed finalizer or that conservative reconciliation can establish `finalized`.
 
-When the enabled catalog starts, it attaches the normal Win32 `ExitProcess` path with a
-checked Microsoft Detours transaction. The relocated target pointer must be available before
-`orderly_finalizer_ready` is persisted. Its idempotent thunk finalizes the catalog before
-`ExitProcess` terminates worker threads, then chains to the original no-return function. The
-hook is process-lifetime and is not detached during DLL teardown.
+When the enabled catalog starts, one checked Microsoft Detours transaction covers both normal
+process-exit paths: `Kernel32!ExitProcess` and `ntdll!RtlExitUserProcess`. Targets are normalized
+before installation; if both exports resolve to the same code, one physical detour covers both
+logical paths. Any pre-commit attach failure aborts the whole transaction. Readiness is published
+only after both paths are covered and the finalizer callback is visible. Both thunks share one
+idempotent gate, finalize before worker teardown, then chain their exact original no-return target.
+The hooks are process-lifetime and are not detached during DLL teardown.
 
 The ShaderCatalog destructor is nonblocking and performs no database or tracker teardown.
-Explicit DLL unload is unsupported. DLL unload, crashes, `TerminateProcess`, and any exit path
-that bypasses the hook leave the run `running`; the next startup marks it `abandoned`.
+Explicit DLL unload is unsupported. DLL unload, crashes, `TerminateProcess`, last-thread
+termination that bypasses both covered process-exit APIs, and other abnormal termination leave the
+run `running`; the next startup marks it `abandoned`. A later controlled WM_CLOSE run must confirm
+which covered normal path the game uses before that runtime result is authoritative.
 
 Finalization performs this sequence:
 

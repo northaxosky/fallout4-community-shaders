@@ -17,7 +17,11 @@ namespace
 	enum class ChildMode
 	{
 		kConcurrent,
-		kReentrant
+		kReentrant,
+		kDirectRtl,
+		kAlias,
+		kPartial,
+		kHandledFailure
 	};
 
 	struct Marker
@@ -27,6 +31,11 @@ namespace
 		std::uint32_t thunkCallers = 0;
 		std::uint32_t finalizers = 0;
 		std::uint32_t completed = 0;
+		std::uint32_t installReady = 0;
+		std::uint32_t exitProcessCovered = 0;
+		std::uint32_t rtlExitUserProcessCovered = 0;
+		std::uint32_t targetsAliased = 0;
+		std::int32_t transactionResult = 0;
 	};
 
 	ChildMode g_mode = ChildMode::kConcurrent;
@@ -37,6 +46,29 @@ namespace
 	std::atomic<std::uint32_t> g_callers{ 0 };
 	std::atomic<std::uint32_t> g_thunkCallers{ 0 };
 	std::atomic<std::uint32_t> g_finalizers{ 0 };
+
+	using RtlExitUserProcessFunction = void (NTAPI*)(LONG);
+
+	RtlExitUserProcessFunction ResolveRtlExitUserProcess() noexcept
+	{
+		const auto ntdll = GetModuleHandleW(L"ntdll.dll");
+		return reinterpret_cast<RtlExitUserProcessFunction>(
+			ntdll
+				? GetProcAddress(ntdll, "RtlExitUserProcess")
+				: nullptr);
+	}
+
+	void AddInstallStatus(Marker& a_marker) noexcept
+	{
+		const auto status =
+			cs::features::catalog::orderly_exit::GetInstallStatus();
+		a_marker.installReady = status.ready;
+		a_marker.exitProcessCovered = status.exitProcessCovered;
+		a_marker.rtlExitUserProcessCovered =
+			status.rtlExitUserProcessCovered;
+		a_marker.targetsAliased = status.targetsAliased;
+		a_marker.transactionResult = status.transactionResult;
+	}
 
 	bool WriteMarker(
 		const std::wstring& a_path,
@@ -81,6 +113,12 @@ namespace
 	{
 		const auto callers =
 			g_thunkCallers.fetch_add(1, std::memory_order_acq_rel) + 1;
+		if (g_mode == ChildMode::kPartial) {
+			Marker entered;
+			entered.thunkCallers = callers;
+			(void)WriteMarker(g_completionPath, entered);
+			return;
+		}
 		if (callers == 2)
 			SetEvent(g_thunkCallersReady);
 	}
@@ -92,11 +130,13 @@ namespace
 		if (g_mode == ChildMode::kReentrant) {
 			Marker entered;
 			entered.finalizers = finalizers;
+			AddInstallStatus(entered);
 			(void)WriteMarker(g_enteredPath, entered);
 			ExitProcess(kReentrantExitCode);
 		}
 
-		(void)WaitForSingleObject(g_thunkCallersReady, INFINITE);
+		if (g_mode == ChildMode::kConcurrent)
+			(void)WaitForSingleObject(g_thunkCallersReady, INFINITE);
 		Marker completed;
 		completed.callers =
 			g_callers.load(std::memory_order_acquire);
@@ -104,25 +144,34 @@ namespace
 			g_thunkCallers.load(std::memory_order_acquire);
 		completed.finalizers =
 			g_finalizers.load(std::memory_order_acquire);
-		completed.completed = 1;
+		completed.completed =
+			g_mode == ChildMode::kHandledFailure ? 0 : 1;
+		AddInstallStatus(completed);
 		(void)WriteMarker(g_completionPath, completed);
 	}
 
-	DWORD WINAPI ExitCaller(void*)
+	DWORD WINAPI ExitCaller(void* a_native)
 	{
 		const auto callers =
 			g_callers.fetch_add(1, std::memory_order_acq_rel) + 1;
 		if (callers == 2)
 			SetEvent(g_callersReady);
 		(void)WaitForSingleObject(g_callersReady, INFINITE);
+		if (a_native) {
+			if (const auto rtl = ResolveRtlExitUserProcess())
+				rtl(0);
+			TerminateProcess(GetCurrentProcess(), 0xf1);
+		}
 		ExitProcess(0);
 	}
 
-	int InstallFinalizer()
+	int InstallFinalizer(
+		cs::features::catalog::orderly_exit::FinalizerCallback
+			a_callback = &Finalize)
 	{
 		using namespace cs::features::catalog::orderly_exit;
 		(void)Detours::GetGlobalOptions();
-		return Install(&Finalize) && Install(&Finalize) && IsInstalled()
+		return Install(a_callback) && Install(a_callback) && IsInstalled()
 			? 0
 			: 1;
 	}
@@ -141,7 +190,8 @@ namespace
 		HANDLE first = CreateThread(
 			nullptr, 0, &ExitCaller, nullptr, CREATE_SUSPENDED, nullptr);
 		HANDLE second = CreateThread(
-			nullptr, 0, &ExitCaller, nullptr, CREATE_SUSPENDED, nullptr);
+			nullptr, 0, &ExitCaller,
+			reinterpret_cast<void*>(1), CREATE_SUSPENDED, nullptr);
 		if (!first || !second) {
 			if (first)
 				TerminateThread(first, 2);
@@ -179,6 +229,67 @@ namespace
 		if (InstallFinalizer() != 0)
 			return 8;
 		ExitProcess(11);
+	}
+
+	int RunDirectRtlChild(const wchar_t* a_basePath)
+	{
+		g_mode = ChildMode::kDirectRtl;
+		g_completionPath = std::wstring(a_basePath) + L".completed";
+		if (InstallFinalizer() != 0)
+			return 14;
+		const auto rtl = ResolveRtlExitUserProcess();
+		if (!rtl)
+			return 15;
+		rtl(17);
+		return 15;
+	}
+
+	int RunAliasChild(const wchar_t* a_basePath)
+	{
+		using namespace cs::features::catalog::orderly_exit;
+		g_mode = ChildMode::kAlias;
+		g_completionPath = std::wstring(a_basePath) + L".completed";
+		SetRtlExitUserProcessTargetForTesting(
+			reinterpret_cast<void*>(&ExitProcess));
+		if (InstallFinalizer() != 0)
+			return 16;
+		const auto status = GetInstallStatus();
+		if (!status.targetsAliased)
+			return 17;
+		ExitProcess(19);
+	}
+
+	int RunPartialFailureChild(const wchar_t* a_basePath)
+	{
+		using namespace cs::features::catalog::orderly_exit;
+		g_mode = ChildMode::kPartial;
+		g_enteredPath = std::wstring(a_basePath) + L".entered";
+		g_completionPath = std::wstring(a_basePath) + L".completed";
+		SetThunkEnteredCallbackForTesting(&ThunkEntered);
+		SetInstallFailurePointForTesting(
+			InstallFailurePoint::kBeforeSecondAttach);
+		const bool installed = Install(&Finalize);
+		Marker status;
+		AddInstallStatus(status);
+		if (installed || status.installReady
+			|| status.transactionResult == NO_ERROR)
+			return 18;
+		if (!WriteMarker(g_enteredPath, status))
+			return 19;
+		ExitProcess(29);
+	}
+
+	int RunHandledFailureChild(const wchar_t* a_basePath)
+	{
+		g_mode = ChildMode::kHandledFailure;
+		g_completionPath = std::wstring(a_basePath) + L".completed";
+		if (InstallFinalizer() != 0)
+			return 20;
+		const auto rtl = ResolveRtlExitUserProcess();
+		if (!rtl)
+			return 21;
+		rtl(31);
+		return 21;
 	}
 
 	std::wstring TemporaryBase()
@@ -287,7 +398,65 @@ namespace
 			&& GetFileAttributesW(completionPath.c_str())
 				== INVALID_FILE_ATTRIBUTES;
 		CleanupTemporaryBase(reentrantBase);
-		return reentrantValid ? 0 : 13;
+		if (!reentrantValid)
+			return 13;
+
+		const auto directBase = TemporaryBase();
+		const bool directValid =
+			!directBase.empty()
+			&& RunChildProcess(L"--direct-rtl", directBase, 17)
+			&& ReadMarker(
+				directBase + L".completed", completed)
+			&& completed.finalizers == 1
+			&& completed.completed == 1
+			&& completed.installReady == 1
+			&& completed.exitProcessCovered == 1
+			&& completed.rtlExitUserProcessCovered == 1;
+		CleanupTemporaryBase(directBase);
+		if (!directValid)
+			return 22;
+
+		const auto aliasBase = TemporaryBase();
+		const bool aliasValid =
+			!aliasBase.empty()
+			&& RunChildProcess(L"--alias", aliasBase, 19)
+			&& ReadMarker(aliasBase + L".completed", completed)
+			&& completed.finalizers == 1
+			&& completed.targetsAliased == 1
+			&& completed.installReady == 1;
+		CleanupTemporaryBase(aliasBase);
+		if (!aliasValid)
+			return 23;
+
+		const auto partialBase = TemporaryBase();
+		Marker partial;
+		const bool partialValid =
+			!partialBase.empty()
+			&& RunChildProcess(L"--partial", partialBase, 29)
+			&& ReadMarker(partialBase + L".entered", partial)
+			&& partial.installReady == 0
+			&& partial.exitProcessCovered == 0
+			&& partial.rtlExitUserProcessCovered == 0
+			&& partial.transactionResult != NO_ERROR
+			&& GetFileAttributesW(
+				(partialBase + L".completed").c_str())
+				== INVALID_FILE_ATTRIBUTES;
+		CleanupTemporaryBase(partialBase);
+		if (!partialValid)
+			return 24;
+
+		const auto handledBase = TemporaryBase();
+		const bool handledValid =
+			!handledBase.empty()
+			&& RunChildProcess(
+				L"--handled-failure", handledBase, 31)
+			&& ReadMarker(
+				handledBase + L".completed", completed)
+			&& completed.finalizers == 1
+			&& completed.completed == 0
+			&& completed.installReady == 1;
+		CleanupTemporaryBase(handledBase);
+		return handledValid ? 0 : 25;
 	}
 }
 
@@ -299,6 +468,14 @@ int wmain(int a_argc, wchar_t** a_argv)
 			return RunConcurrentChild(a_argv[2]);
 		if (mode == L"--reentrant")
 			return RunReentrantChild(a_argv[2]);
+		if (mode == L"--direct-rtl")
+			return RunDirectRtlChild(a_argv[2]);
+		if (mode == L"--alias")
+			return RunAliasChild(a_argv[2]);
+		if (mode == L"--partial")
+			return RunPartialFailureChild(a_argv[2]);
+		if (mode == L"--handled-failure")
+			return RunHandledFailureChild(a_argv[2]);
 	}
 	return RunParent();
 }
