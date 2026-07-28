@@ -2,7 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "OrderlyExit.h"
+#include "RouteCaptureCoordinator.h"
 
 #include <atomic>
 #include <string>
@@ -39,6 +39,8 @@ namespace cs::features
 			bool        subclassAttribution = true;
 			bool        routeReceiptCapture = false;
 			std::string routeReceiptOutputRoot;
+			int         routeReceiptCaptureDurationSeconds =
+				catalog::route_capture::kDefaultCaptureSeconds;
 		};
 
 	private:
@@ -47,10 +49,9 @@ namespace cs::features
 
 		void SaveSettings();
 		static void FinalizeForProcessExit() noexcept;
-		void FinalizeOrderly() noexcept;
+		bool FinalizeOrderly() noexcept;
 
 		Settings _settings;
-		catalog::orderly_exit::FinalizerGate _finalizerGate;
 		std::atomic<bool> _started{ false };
 		std::atomic<bool> _hookInstallInProgress{ false };
 		std::atomic<bool> _hooksInstalled{ false };

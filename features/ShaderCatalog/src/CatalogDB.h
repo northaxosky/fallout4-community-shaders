@@ -40,6 +40,9 @@ namespace cs::features::catalog
 			bool publication = false;
 		};
 
+		// Reports whether a finalization timeout was latched, and seals later latches.
+		using FinalizationDecisionSeal = bool (*)() noexcept;
+
 		std::string catalogPath;
 		std::uint32_t flushIntervalMs = 5000;
 		bool subclassAttributionRequested = false;
@@ -47,8 +50,25 @@ namespace cs::features::catalog
 		std::optional<RunPolicy> policyOverride;
 		std::optional<std::filesystem::path> artifactRootOverride;
 		RouteCaptureConfig routeCapture;
+		FinalizationDecisionSeal finalizationSeal = nullptr;
 #ifdef FO4CS_SHADER_CATALOG_TESTING
 		bool orderlyFinalizerReadyForTesting = false;
+		// Fails after bootstrap and recovery, at the long-lived statement prepare step.
+		bool failStatementPrepareForTesting = false;
+		// Fails after statements are prepared and before the run row is inserted.
+		bool failWriterStartForTesting = false;
+		// Fails the run row bind/step work while its transaction is still open.
+		bool failRunInsertForTesting = false;
+		// Fails the startup commit itself, leaving the transaction to roll back.
+		bool failRunCommitForTesting = false;
+		// Throws while a transient bootstrap statement is still live.
+		bool failBootstrapStatementForTesting = false;
+		// Throws after the sealed context and before any route publication.
+		bool failBeforeRoutePublicationForTesting = false;
+		// Throws inside LoadManifestDocument while a transient statement is live.
+		bool failManifestLoadForTesting = false;
+		// Throws after route publication and before main persistence.
+		bool failAfterRoutePublicationForTesting = false;
 #endif
 		FinalizationFaults finalizationFaults;
 	};
@@ -87,10 +107,14 @@ namespace cs::features::catalog
 
 		bool Start(const DbConfig& a_config, RuntimeIdentity a_identity);
 		bool Stop();
-
 		ProducerLease TryAcquireProducerLease() noexcept;
 		bool TryBeginProducerAdmission() noexcept;
 		void EndProducerAdmission() noexcept;
+
+		// Route tokens hold the outer producer admission for their whole lifetime.
+		static void ReleaseOuterAdmissionThunk(void* a_owner) noexcept;
+		void AttachOuterAdmission(RouteCaptureAdmission& a_admission) noexcept;
+		void AttachOuterAdmission(RouteBindAdmission& a_admission) noexcept;
 		std::uint64_t NextSequence() noexcept;
 		void EnqueueObservation(
 			ObservationOutcome a_observation,
@@ -137,6 +161,8 @@ namespace cs::features::catalog
 			std::optional<std::string> externalRunId;
 			std::optional<std::string> scenarioId;
 			std::string lifecycle = "inactive";
+			// Monotonic in-process run generation; zero until a commit publishes one.
+			std::uint64_t generation = 0;
 			bool authoritative = false;
 			bool rawExportRequested = false;
 			bool rawExportComplete = false;
@@ -162,12 +188,89 @@ namespace cs::features::catalog
 			const std::filesystem::path& a_path,
 			int& a_version,
 			std::string& a_error);
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		using AdmissionClosedCallbackForTesting = void (*)() noexcept;
+		static void SetAdmissionClosedCallbackForTesting(
+			AdmissionClosedCallbackForTesting a_callback) noexcept;
+		// Runs after the shared gate closes and before route generation or publisher close.
+		using SharedGateClosedCallbackForTesting = void (*)() noexcept;
+		static void SetSharedGateClosedCallbackForTesting(
+			SharedGateClosedCallbackForTesting a_callback) noexcept;
+		// Transient statements live when the manifest-load seam threw.
+		[[nodiscard]] static std::size_t
+			LastManifestThrowActiveStatementsForTesting() noexcept;
+		// Outstanding producer admissions, including those held by route tokens.
+		[[nodiscard]] std::uint64_t
+			ActiveProducerAdmissionsForTesting() const noexcept;
+		// True while the route publisher and its frozen records are still retained.
+		[[nodiscard]] bool RoutePublisherPresentForTesting() const noexcept;
+		// Runs at the startup commit point with the insert transaction still open.
+		using BeforeRunCommitCallbackForTesting = void (*)() noexcept;
+		static void SetBeforeRunCommitCallbackForTesting(
+			BeforeRunCommitCallbackForTesting a_callback) noexcept;
+		// Runs after route capture freezes and before any route publication.
+		using RouteCaptureFrozenCallbackForTesting = void (*)() noexcept;
+		static void SetRouteCaptureFrozenCallbackForTesting(
+			RouteCaptureFrozenCallbackForTesting a_callback) noexcept;
+		// The sealed close context, handed to tests at the publication barrier.
+		struct SealedContextForTesting
+		{
+			bool hookCoverageReady = false;
+			bool orderlyFinalizerReady = false;
+			bool routeHookCoverageReady = false;
+			bool drained = false;
+			bool finalizationTimedOut = false;
+			std::uint64_t lifecycleFailure = 0;
+			std::uint64_t malformedBytecode = 0;
+			std::uint64_t hookObserverGap = 0;
+		};
+		// Runs once with the sealed context, immediately before the first publication.
+		using ContextSealedCallbackForTesting =
+			void (*)(const SealedContextForTesting&) noexcept;
+		static void SetContextSealedCallbackForTesting(
+			ContextSealedCallbackForTesting a_callback) noexcept;
+		// Counts writer entries past the gate, so an abort can be proven inert.
+		[[nodiscard]] static std::uint64_t
+			WriterRunEntriesForTesting() noexcept;
+		// Live transient statements; must be zero once any startup phase returns.
+		[[nodiscard]] static std::int64_t
+			ActiveTransientStatementsForTesting() noexcept;
+		// The last sqlite3_close result from startup cleanup; BUSY must never appear.
+		[[nodiscard]] static int LastStartupCloseResultForTesting() noexcept;
+		// Attempted identity, which public stats hide until the commit publishes it.
+		[[nodiscard]] std::string AttemptedRunIdForTesting() const;
+		// Generation-aware admission, so a stale generation can be proven to reject.
+		RouteCaptureAdmission BeginRouteCreateForGenerationForTesting(
+			std::uint64_t a_generation,
+			const RouteCreateInput& a_input) noexcept;
+		RouteBindAdmission BeginRouteBindForGenerationForTesting(
+			std::uint64_t a_generation) noexcept;
+		// Counts route-admission cutoff calls, which must be exactly one per close.
+		[[nodiscard]] static std::uint64_t
+			RouteAdmissionCloseCallsForTesting() noexcept;
+		// Forces sqlite3_close to report BUSY by holding one prepared statement.
+		bool HoldStatementForCloseBusyForTesting() noexcept;
+		void ReleaseHeldStatementForTesting() noexcept;
+		// Retries the checked close after a BUSY retention so the singleton continues.
+		bool RetryCheckedCloseForTesting() noexcept;
+
+	// True while a BUSY close retained the handle in terminal non-service state.
+	[[nodiscard]] bool CloseRetainedBusyForTesting() const noexcept;
+#endif
 
 	private:
 		enum class EventKind
 		{
 			kObservation,
 			kAttribution
+		};
+
+		// Holds the writer out of its loop until the run row and service state are committed.
+		enum class WriterGate : std::uint8_t
+		{
+			kWaiting,
+			kRun,
+			kAbort
 		};
 
 		struct Event
@@ -197,6 +300,22 @@ namespace cs::features::catalog
 			Event data{};
 		};
 
+		// Phased close context: each source is frozen once and never reread after.
+		struct FinalizationContext
+		{
+			// Frozen at the first Stop cutoff, before generic admission closes.
+			bool hookCoverageReady = false;
+			bool orderlyFinalizerReady = false;
+			bool routeHookCoverageReady = false;
+			// Identity the whole finalization must agree on, frozen with readiness.
+			RuntimeIdentity identity;
+			std::optional<std::string> graphicsAdapter;
+			std::optional<std::string> graphicsFeatureLevel;
+			// Frozen only after the producer drain and the writer join.
+			bool drained = false;
+			QualityCounters quality;
+		};
+
 		struct PendingEnrichment
 		{
 			std::string sha256;
@@ -210,13 +329,20 @@ namespace cs::features::catalog
 		CatalogDB& operator=(const CatalogDB&) = delete;
 
 		void ResetState();
+		// The one logical admission cutoff; returns the admission word it observed.
+		std::uint64_t CloseAdmissionCutoff() noexcept;
+		bool StopImpl();
+		void AbortStopAfterException(const char* a_reason) noexcept;
+		bool BeginRun(const DbConfig& a_config, RuntimeIdentity a_identity);
 		bool OpenAndBootstrap();
 		bool MigrateSchema();
 		bool RecoverAbandonedRuns();
 		bool InsertRun();
 		bool PrepareStatements();
 		bool FinalizeStatements();
-		bool Enqueue(Event a_event, bool a_admitted = false) noexcept;
+		void AbortStartupBeforeRun() noexcept;
+		static void LogStartupAbort(const char* a_reason) noexcept;
+		bool Enqueue(Event a_event) noexcept;
 		void EnqueueObservationImpl(
 			ObservationOutcome a_observation,
 			bool a_admitted) noexcept;
@@ -241,7 +367,7 @@ namespace cs::features::catalog
 		void EnrichOne();
 		void ExportObservation(const ObservationOutcome& a_observation);
 		bool UpdateContentShape(const PendingEnrichment& a_item);
-		bool PersistQuality();
+		bool PersistQuality(const QualityCounters* a_frozen = nullptr);
 		bool RefreshStats();
 		bool CheckRawExportAssociations(bool& a_complete);
 		bool PersistFinalRunState(
@@ -249,11 +375,13 @@ namespace cs::features::catalog
 			bool a_rawExportComplete,
 			bool a_authoritative,
 			std::string_view a_manifestSha256,
-			std::size_t a_manifestSize);
+			std::size_t a_manifestSize,
+			const FinalizationContext& a_context);
 		bool RepairFailedPublication(const std::string& a_endedAt);
 		bool FinalizeLegacySession(const std::string& a_endedAt);
 		bool LoadManifestDocument(
 			const std::string& a_endedAt,
+			const FinalizationContext& a_context,
 			ManifestDocument& a_document);
 		bool RecoverPublicationWindows();
 		bool Checkpoint(int a_mode, const char* a_name);
@@ -264,6 +392,10 @@ namespace cs::features::catalog
 		void StoreStatsIdentity();
 
 		DbConfig _config{};
+		// Serializes whole Start and Stop operations; never taken by producers or the writer.
+		std::mutex _lifecycleMutex;
+		std::atomic<unsigned long> _lifecycleOwner{ 0 };
+		bool _closeRetainedBusy = false;
 		RuntimeIdentity _identity{};
 		RunPolicy _policy{};
 		std::filesystem::path _artifactRoot;
@@ -287,6 +419,7 @@ namespace cs::features::catalog
 		sqlite3_stmt* _updateQuality = nullptr;
 
 		std::thread _writer;
+		std::atomic<WriterGate> _writerGate{ WriterGate::kWaiting };
 		std::atomic<bool> _running{ false };
 		std::atomic<bool> _accepting{ false };
 		static constexpr std::uint64_t kProducerAdmissionClosed = 1ull << 63;
@@ -328,13 +461,23 @@ namespace cs::features::catalog
 		std::atomic<std::uint64_t> _statReflected{ 0 };
 		std::atomic<std::uint64_t> _statAttributedPs{ 0 };
 		std::atomic<std::uint64_t> _statTotalPs{ 0 };
-		std::atomic<int> _lifecycle{ 0 };
-		std::atomic<bool> _authoritative{ false };
+		// Guarded by _identityMutex together with _statsIdentity; lifecycle -> identity order.
+		int _lifecycle = 0;
+		bool _identityPublished = false;
+		bool _authoritativePublic = false;
+		std::uint64_t _runGenerationPublic = 0;
 		std::atomic<bool> _rawExportComplete{ false };
 		std::atomic<bool> _writerDrained{ false };
 		std::atomic<bool> _hookCoverageReady{ false };
 		std::atomic<bool> _orderlyFinalizerReady{ false };
 		std::atomic<bool> _writerPersistenceHealthy{ true };
+		// Coherent caches so GetStats never reads mutable config or the publisher.
+		bool _routeCaptureRequestedPublic = false;
+		bool _routeCaptureActivePublic = false;
+		// Nonzero only while route Begin may admit; carries the owning run generation.
+		std::atomic<std::uint64_t> _routeCaptureGeneration{ 0 };
+		// Never reset, so every committed run gets a strictly larger generation.
+		std::atomic<std::uint64_t> _generationCounter{ 0 };
 
 		std::atomic<std::uint64_t> _qualityQueueOverflow{ 0 };
 		std::atomic<std::uint64_t> _qualityMalformedBytecode{ 0 };

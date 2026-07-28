@@ -376,6 +376,8 @@ namespace cs::features::catalog
 		std::atomic<bool> g_publishedWinnerHeld{ false };
 		std::atomic<bool> g_releasePublishedWinner{ false };
 		std::atomic<bool> g_publicationCollisionRetried{ false };
+		std::atomic<std::uint64_t> g_routePublisherDestructions{ 0 };
+		std::atomic<bool> g_failNextObservationPublish{ false };
 #endif
 
 		bool HandleAttributes(
@@ -1528,6 +1530,17 @@ namespace cs::features::catalog
 		g_releasePublishedWinner.store(true, std::memory_order_release);
 		g_releasePublishedWinner.notify_all();
 	}
+
+	std::uint64_t RoutePublisherDestructionsForTesting() noexcept
+	{
+		return g_routePublisherDestructions.load(std::memory_order_acquire);
+	}
+
+	void FailNextObservationPublishForTesting(bool a_fail) noexcept
+	{
+		g_failNextObservationPublish.store(
+			a_fail, std::memory_order_release);
+	}
 #endif
 
 	namespace
@@ -2583,6 +2596,7 @@ namespace cs::features::catalog
 
 		std::mutex publicationMutex;
 		bool captureFrozen = false;
+		bool frozenHookCoverageReady = false;
 		bool publisherAdmissionOpen = false;
 		bool finalized = false;
 		bool globalStockOnlyViolation = false;
@@ -2615,6 +2629,13 @@ namespace cs::features::catalog
 					1, std::memory_order_acq_rel);
 			if ((previous & kRouteAdmissionCountMask) == 1)
 				captureAdmission.notify_all();
+		}
+
+		// Idempotently shuts admission without waiting; the drain is a separate step.
+		void MarkCaptureAdmissionClosed() noexcept
+		{
+			captureAdmission.fetch_or(
+				kRouteAdmissionClosed, std::memory_order_acq_rel);
 		}
 
 		void CloseCapture() noexcept
@@ -2684,6 +2705,7 @@ namespace cs::features::catalog
 	{
 		if (_owner)
 			_owner->AbandonCreate(*this);
+		ReleaseCatalogAdmission();
 	}
 
 	RouteCaptureAdmission::RouteCaptureAdmission(
@@ -2693,7 +2715,9 @@ namespace cs::features::catalog
 		_threadId(a_other._threadId),
 		_classLinkagePresent(a_other._classLinkagePresent),
 		_included(a_other._included),
-		_route(std::move(a_other._route))
+		_route(std::move(a_other._route)),
+		_catalogOwner(std::exchange(a_other._catalogOwner, nullptr)),
+		_catalogRelease(std::exchange(a_other._catalogRelease, nullptr))
 	{}
 
 	RouteCaptureAdmission& RouteCaptureAdmission::operator=(
@@ -2702,6 +2726,7 @@ namespace cs::features::catalog
 		if (this != &a_other) {
 			if (_owner)
 				_owner->AbandonCreate(*this);
+			ReleaseCatalogAdmission();
 			_owner = std::exchange(a_other._owner, nullptr);
 			_createSequence = a_other._createSequence;
 			_threadId = a_other._threadId;
@@ -2709,6 +2734,9 @@ namespace cs::features::catalog
 				a_other._classLinkagePresent;
 			_included = a_other._included;
 			_route = std::move(a_other._route);
+			_catalogOwner = std::exchange(a_other._catalogOwner, nullptr);
+			_catalogRelease =
+				std::exchange(a_other._catalogRelease, nullptr);
 		}
 		return *this;
 	}
@@ -2717,11 +2745,14 @@ namespace cs::features::catalog
 	{
 		if (_owner)
 			_owner->ReleaseBind(*this);
+		ReleaseCatalogAdmission();
 	}
 
 	RouteBindAdmission::RouteBindAdmission(
 		RouteBindAdmission&& a_other) noexcept :
-		_owner(std::exchange(a_other._owner, nullptr))
+		_owner(std::exchange(a_other._owner, nullptr)),
+		_catalogOwner(std::exchange(a_other._catalogOwner, nullptr)),
+		_catalogRelease(std::exchange(a_other._catalogRelease, nullptr))
 	{}
 
 	RouteBindAdmission& RouteBindAdmission::operator=(
@@ -2730,7 +2761,11 @@ namespace cs::features::catalog
 		if (this != &a_other) {
 			if (_owner)
 				_owner->ReleaseBind(*this);
+			ReleaseCatalogAdmission();
 			_owner = std::exchange(a_other._owner, nullptr);
+			_catalogOwner = std::exchange(a_other._catalogOwner, nullptr);
+			_catalogRelease =
+				std::exchange(a_other._catalogRelease, nullptr);
 		}
 		return *this;
 	}
@@ -2740,7 +2775,12 @@ namespace cs::features::catalog
 		_impl(std::move(a_impl))
 	{}
 
-	StockRuntimeRoutePublisher::~StockRuntimeRoutePublisher() = default;
+	StockRuntimeRoutePublisher::~StockRuntimeRoutePublisher()
+	{
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		g_routePublisherDestructions.fetch_add(1, std::memory_order_acq_rel);
+#endif
+	}
 
 	std::unique_ptr<StockRuntimeRoutePublisher>
 		StockRuntimeRoutePublisher::Open(
@@ -3120,8 +3160,26 @@ namespace cs::features::catalog
 		}
 	}
 
+	bool StockRuntimeRoutePublisher::SampleHookCoverageReady() const noexcept
+	{
+		if (!_impl)
+			return false;
+		try {
+			return _impl->scope.hookCoverageReady();
+		} catch (...) {
+			return false;
+		}
+	}
+
+	void StockRuntimeRoutePublisher::CloseCaptureAdmission() noexcept
+	{
+		if (_impl)
+			_impl->MarkCaptureAdmissionClosed();
+	}
+
 	bool StockRuntimeRoutePublisher::CloseCaptureAdmissionAndFreeze(
 		FrozenRouteSnapshot& a_snapshot,
+		bool a_hookCoverageReady,
 		RoutePublicationError& a_error) noexcept
 	{
 		a_error = RoutePublicationError::kNone;
@@ -3138,6 +3196,8 @@ namespace cs::features::catalog
 					RoutePublicationError::kCaptureAdmissionClosed;
 				return false;
 			}
+			// Authority uses the caller's cutoff sample, never a later live read.
+			_impl->frozenHookCoverageReady = a_hookCoverageReady;
 			_impl->registryClose =
 				_impl->scope.resolverRegistrySnapshot();
 			if (!_impl->registryClose.valid
@@ -3282,6 +3342,16 @@ namespace cs::features::catalog
 			}
 			_impl->persistenceAttempts.fetch_add(
 				1, std::memory_order_relaxed);
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+			// Consumes one armed failure, accounted exactly like a failed write.
+			if (g_failNextObservationPublish.exchange(
+					false, std::memory_order_acq_rel)) {
+				_impl->persistenceFailures.fetch_add(
+					1, std::memory_order_relaxed);
+				failure.error = RoutePublicationError::kIoFailed;
+				return failure;
+			}
+#endif
 			auto result =
 				_impl->PublishDocument("observations", json);
 			if (!result.success) {
@@ -3332,7 +3402,8 @@ namespace cs::features::catalog
 		}
 	}
 
-	RoutePublicationResult StockRuntimeRoutePublisher::FinalizeRun() noexcept
+	RoutePublicationResult StockRuntimeRoutePublisher::FinalizeRun(
+		const RouteFinalizationVeto& a_veto) noexcept
 	{
 		RoutePublicationResult failure;
 		if (!_impl) {
@@ -3413,7 +3484,7 @@ namespace cs::features::catalog
 				_impl->eventSequence.load(
 					std::memory_order_relaxed);
 			const bool hookCoverageReady =
-				_impl->scope.hookCoverageReady();
+				_impl->frozenHookCoverageReady;
 
 			std::unordered_set<std::uint64_t> committedSequences;
 			std::unordered_set<std::string> recordIds;
@@ -3557,7 +3628,9 @@ namespace cs::features::catalog
 				reasons.emplace_back("counter-mismatch");
 			if (identityDuplicate)
 				reasons.emplace_back("identity-duplicate");
-			if (!hookCoverageReady && reasons.empty())
+			// An external veto uses the closed contract fallback, never a new wire reason.
+			if ((!hookCoverageReady || a_veto.producerDeclined)
+				&& reasons.empty())
 				reasons.emplace_back("producer-declined");
 			reasons =
 				SortUniqueRouteReasons(std::move(reasons));

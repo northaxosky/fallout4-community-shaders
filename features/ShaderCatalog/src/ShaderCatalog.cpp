@@ -6,6 +6,7 @@
 #include <imgui.h>
 #include <toml++/toml.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include "CatalogDB.h"
 #include "Hooks.h"
 #include "Log.h"
+#include "OrderlyExit.h"
 #include "PixelShaderTracker.h"
 #include "Plugin.h"
 #include "Render/PixelShaderSwapBroker.h"
@@ -436,7 +438,15 @@ namespace cs::features
 						"route_receipt_output_root",
 						a_candidate.routeReceiptOutputRoot),
 					"route_receipt_output_root", "string",
-					"string value is out of range", a_error);
+					"string value is out of range", a_error)
+				&& ReadIntegerSetting(
+					*settingsTable,
+					"route_receipt_capture_duration_seconds",
+					catalog::route_capture::kMinCaptureSeconds,
+					catalog::route_capture::kMaxCaptureSeconds,
+					"value must be in range 1..3600",
+					a_candidate.routeReceiptCaptureDurationSeconds,
+					a_error);
 		}
 	}
 
@@ -451,23 +461,29 @@ namespace cs::features
 
 	void ShaderCatalog::FinalizeForProcessExit() noexcept
 	{
-		GetSingleton()->FinalizeOrderly();
+		auto& coordinator = catalog::route_capture::Coordinator::Get();
+		coordinator.RequestClose(
+			catalog::route_capture::CloseReason::kProcessExit);
+		(void)coordinator.WaitForTerminal(
+			catalog::route_capture::kFinalizationBudget);
 	}
 
-	void ShaderCatalog::FinalizeOrderly() noexcept
+	// Coordinator close action; runs once, on the coordinator worker thread.
+	bool ShaderCatalog::FinalizeOrderly() noexcept
 	{
-		if (!_finalizerGate.TryBegin())
-			return;
+		bool authoritative = false;
 		try {
-			if (!catalog::CatalogDB::Get().Stop())
-				L->warn("Catalog process-exit finalization completed non-authoritatively.");
+			authoritative = catalog::CatalogDB::Get().Stop();
+			if (!authoritative)
+				L->warn("Catalog finalization completed non-authoritatively.");
 		} catch (const std::exception& e) {
-			L->critical("Catalog process-exit finalization failed: {}", e.what());
+			L->critical("Catalog finalization failed: {}", e.what());
 		} catch (...) {
-			L->critical("Catalog process-exit finalization failed: unknown exception");
+			L->critical("Catalog finalization failed: unknown exception");
 		}
 		catalog::shader_tracker::SetEnabled(false);
 		_started.store(false, std::memory_order_release);
+		return authoritative;
 	}
 
 	bool ShaderCatalog::Configure(const toml::table& a_config, std::string& a_error)
@@ -500,6 +516,10 @@ namespace cs::features
 		settings.insert_or_assign(
 			"route_receipt_output_root",
 			_settings.routeReceiptOutputRoot);
+		settings.insert_or_assign(
+			"route_receipt_capture_duration_seconds",
+			static_cast<int64_t>(
+				_settings.routeReceiptCaptureDurationSeconds));
 
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
 			L->error("Failed to save settings: {}", result.error);
@@ -526,6 +546,8 @@ namespace cs::features
 			static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
 		dbc.subclassAttributionRequested = _settings.subclassAttribution;
 		dbc.subclassAttributionEnabled = subclassAttributionEnabled;
+		dbc.finalizationSeal =
+			&catalog::route_capture::SealProcessFinalizationDecision;
 		std::string routeCaptureError;
 		if (!BuildRouteCaptureConfig(
 				_settings,
@@ -547,7 +569,30 @@ namespace cs::features
 		identity.pluginVersion = version;
 		identity.pluginBuildDescribe = CS_BUILD_DESCRIBE;
 		identity.pluginGitIdentity = CS_BUILD_GIT_SHA;
-		if (!catalog::CatalogDB::Get().Start(dbc, std::move(identity))) {
+		// A serviceable close worker exists before any admission or callback does.
+		auto& coordinator = catalog::route_capture::Coordinator::Get();
+		if (!coordinator.Begin(
+				[] { return GetSingleton()->FinalizeOrderly(); })) {
+			catalog::shader_tracker::SetEnabled(false);
+			_started.store(false, std::memory_order_release);
+			FailLoad("Close coordinator worker unavailable");
+			L->error(
+				"Close coordinator worker unavailable; no catalog run, admission, "
+				"or exit callback is established.");
+			return;
+		}
+		bool catalogStarted = false;
+		try {
+			catalogStarted =
+				catalog::CatalogDB::Get().Start(dbc, std::move(identity));
+		} catch (const std::exception& e) {
+			L->critical("Catalog database startup raised: {}", e.what());
+		} catch (...) {
+			L->critical("Catalog database startup raised an unknown exception.");
+		}
+		if (!catalogStarted) {
+			if (!coordinator.AbortBeforeClose())
+				L->error("Close coordinator rollback was refused.");
 			catalog::shader_tracker::SetEnabled(false);
 			_started.store(false, std::memory_order_release);
 			FailLoad("Catalog database startup failed");
@@ -563,7 +608,7 @@ namespace cs::features
 			catalog::orderly_exit::GetInstallStatus();
 		if (!orderlyFinalizerReady) {
 			L->error(
-				"Normal-exit finalizer hooks incomplete; catalog run cannot be authoritative "
+				"Exit fallback readiness incomplete; catalog run cannot be authoritative "
 				"(ExitProcess={}, RtlExitUserProcess={}, aliased={}, error={}).",
 				orderlyExitStatus.exitProcessCovered,
 				orderlyExitStatus.rtlExitUserProcessCovered,
@@ -571,7 +616,7 @@ namespace cs::features
 				orderlyExitStatus.transactionResult);
 		} else {
 			L->info(
-				"Normal-exit finalizer hooks ready "
+				"Catalog finalizer ready: in-process close coordinator plus exit fallback "
 				"(ExitProcess={}, RtlExitUserProcess={}, aliased={}).",
 				orderlyExitStatus.exitProcessCovered,
 				orderlyExitStatus.rtlExitUserProcessCovered,
@@ -635,6 +680,24 @@ namespace cs::features
 		} else {
 			L->error("Device-vtable hook coverage incomplete; run is non-authoritative.");
 		}
+		if (installed
+			&& catalog::CatalogDB::Get().GetStats().routeCaptureActive
+			&& RouteCaptureHooksReady()) {
+			const bool armed =
+				catalog::route_capture::Coordinator::Get()
+					.ArmCaptureDeadline(std::chrono::seconds(
+						_settings.routeReceiptCaptureDurationSeconds));
+			if (armed) {
+				L->info(
+					"Route receipt capture window armed for {}s; the run finalizes "
+					"in process at the deadline.",
+					_settings.routeReceiptCaptureDurationSeconds);
+			} else {
+				L->error(
+					"Route receipt capture window could not be armed; capture relies "
+					"on an explicit close request.");
+			}
+		}
 	}
 
 	void ShaderCatalog::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -643,6 +706,9 @@ namespace cs::features
 		const auto binds = catalog::hooks::GetRuntimeAttributionStats();
 		const auto orderlyExit =
 			catalog::orderly_exit::GetInstallStatus();
+		const auto capture =
+			catalog::route_capture::Coordinator::Get()
+				.TelemetrySnapshot();
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("hooks", HooksInstalled())
@@ -691,6 +757,24 @@ namespace cs::features
 			.Field(
 				"route_capture_active",
 				stats.routeCaptureActive)
+			.Field(
+				"route_capture_state",
+				std::string_view(
+					catalog::route_capture::StateName(capture.state)))
+			.Field(
+				"route_capture_close_reason",
+				std::string_view(
+					catalog::route_capture::CloseReasonName(
+						capture.reason)))
+			.Field(
+				"route_capture_deadline_armed",
+				capture.deadlineArmed)
+			.Field(
+				"route_capture_remaining_seconds",
+				capture.remainingCaptureSeconds)
+			.Field(
+				"route_capture_finalization_timeout",
+				capture.finalizationTimedOut)
 			.Field("attributed_ps", static_cast<std::int64_t>(stats.attributedPs))
 			.Field("total_ps", static_cast<std::int64_t>(stats.totalPs))
 			.Field("scoped", static_cast<std::int64_t>(binds.scopedBinds))
@@ -715,6 +799,35 @@ namespace cs::features
 				ImGui::OpenPopup("Restart required##ShaderCatalog");
 		}
 		ImGui::TextDisabled("Enriches PS rows with BSShader technique names. Auto-skipped on runtimes\nwith an unverified layout; the swap broker is unaffected.");
+
+		if (_settings.routeReceiptCapture) {
+			ImGui::Separator();
+			ImGui::TextUnformatted("Stock route receipt capture");
+			auto& coordinator =
+				catalog::route_capture::Coordinator::Get();
+			const auto capture = coordinator.Snapshot();
+			ImGui::Text(
+				"Capture state: %s (%s)",
+				catalog::route_capture::StateName(capture.state),
+				catalog::route_capture::CloseReasonName(capture.reason));
+			ImGui::Text(
+				"Window:        %ds configured, %lld remaining",
+				_settings.routeReceiptCaptureDurationSeconds,
+				static_cast<long long>(capture.remainingCaptureSeconds));
+			const bool capturing =
+				capture.state == catalog::route_capture::State::kCapturing;
+			ImGui::BeginDisabled(!capturing);
+			if (ImGui::Button("Close capture now")) {
+				coordinator.RequestClose(
+					catalog::route_capture::CloseReason::kUserRequest);
+			}
+			ImGui::EndDisabled();
+			ImGui::TextDisabled("Requests the same one-way close the capture deadline uses.\nFinalization runs off this thread and the game keeps running.");
+			if (capture.finalizationTimedOut) {
+				ImGui::TextUnformatted(
+					"Finalization timed out; this run is not authoritative.");
+			}
+		}
 
 		ImGui::Separator();
 		ImGui::TextUnformatted("Stats");

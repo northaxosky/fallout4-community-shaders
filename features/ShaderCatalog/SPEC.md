@@ -134,31 +134,103 @@ Windows reparse point in its path. Invalid requested export is a durable quality
 Every process gets a cryptographically generated internal UUID. A run starts as `running`.
 Startup changes every prior v3 `running` row to `abandoned` and increments its lifecycle
 quality counter, except a verified same-root pending publication, which startup promotes.
-Only the observed finalizer or that conservative reconciliation can establish `finalized`.
+Only a completed in-process close with its publication, or that conservative reconciliation,
+can establish `finalized`.
+
+Startup has one commit point: the transaction that inserts the run row. Every fallible
+prerequisite runs before it, in order: database open and migration, prior-run recovery,
+long-lived statement preparation, stored run identity, and the writer thread, which is
+constructed but held at a gate. A failure at any of those steps aborts and joins the gated
+writer, rolls back any open transaction, closes the database, and returns false, leaving no
+durable state for the new run. Schema migration and prior-run recovery are deliberately durable
+and are unaffected. Only after that commit succeeds does startup publish lifecycle,
+producer admission, and service state, and only then is the writer released. That tail is
+nonthrowing atomic publication plus the gate release, so a half-started run is never
+observable and a committed run never lacks its writer. A finalization that raises runs
+fail-closed cleanup instead: it cannot leave an authoritative catalog context. One lifecycle
+mutex serializes complete
+start and stop operations, so concurrent callers cannot interleave into shared handles; it is
+never taken by producer admission, enqueue, or the writer that a close waits on.
 
 When the enabled catalog starts, one checked Microsoft Detours transaction covers both normal
 process-exit paths: `Kernel32!ExitProcess` and `ntdll!RtlExitUserProcess`. Targets are normalized
 before installation; if both exports resolve to the same code, one physical detour covers both
-logical paths. Any pre-commit attach failure aborts the whole transaction. Readiness is published
-only after both paths are covered and the finalizer callback is visible. Both thunks share one
-idempotent gate, finalize before worker teardown, then chain their exact original no-return target.
-The hooks are process-lifetime and are not detached during DLL teardown.
+logical paths. Any pre-commit attach failure aborts the whole transaction. That transaction runs
+only after the close coordinator worker is live, so an installed callback is always serviceable,
+and readiness is published only after both paths are covered and the callback is visible. Both
+thunks share one idempotent gate, request the close coordinator, then chain their exact original
+no-return target. The hooks are process-lifetime and are not detached during DLL teardown. They
+are fallback requesters; they are not the authority for finalization.
+
+An enabled run owns one in-process close coordinator. Its state is one-way: `inactive`,
+`capturing`, `closing`, `finalized_inert`, plus `aborted` for a failed startup. The worker is
+established before the database run, admissions, or any exit callback exists; if it cannot start,
+none of those are created. If database startup then fails, the idle coordinator is rolled back to
+`aborted`, which joins the worker, drops the close action, and refuses every later run or request.
+One coordinator-owned worker is the only caller of `CatalogDB::Stop`. The optional capture
+deadline, the ShaderCatalog UI button, and both exit thunks only request that close, and repeated,
+reentrant, and concurrent requests coalesce into exactly one `Stop`. No request runs finalization
+on a shader, observer, render, ImGui, or exit thread, and every fallback wait is bounded. After
+the sole `Stop` returns, the run is inert: the tracker is disabled, later create, bind, and generic
+producer admissions are rejected without changing published evidence, and no run is reopened in
+process.
+
+Finalization must reach its publication decision within a 30 second monotonic budget. Sealing that
+decision is the only authority latch: it happens exactly once, after every unbounded drain and
+before any publication, and it latches a veto when the budget has already elapsed. Because the
+clock is monotonic, an overdue decision that is still open stays overdue and is latched by that
+later seal. Observers never mutate the decision; a latched decision reads as timed out, a sealed
+decision never does, and an open decision is reported as timed out only while the close is overdue.
+A latched timeout is durable and is never promoted by later completion: it increments the catalog
+`lifecycle_failure` quality counter, keeps the run non-authoritative, is reported exactly in
+coordinator telemetry, and vetoes route manifest authority without adding a route wire reason.
+Remaining in `closing` with admission shut is acceptable; external termination before publication
+still produces no authoritative manifest and the next startup stays conservative.
 
 The ShaderCatalog destructor is nonblocking and performs no database or tracker teardown.
 Explicit DLL unload is unsupported. DLL unload, crashes, `TerminateProcess`, last-thread
-termination that bypasses both covered process-exit APIs, and other abnormal termination leave the
-run `running`; the next startup marks it `abandoned`. A later controlled WM_CLOSE run must confirm
-which covered normal path the game uses before that runtime result is authoritative.
+termination, and other abnormal termination before the close completes leave the run `running`;
+the next startup marks it `abandoned`. Authority comes from a completed in-process close and its
+publication. Which covered exit path a runtime takes is diagnostic only and never establishes
+authority by itself.
 
 Finalization performs this sequence:
 
+0. Snapshot hook coverage, orderly-finalizer readiness, route combined hook coverage, and graphics
+   identity at the close cutoff, before lease admission closes
 1. Close lease admission and wait for all in-flight shader calls
-2. Drain and commit the queue with bounded transaction retries
-3. Finish deferred shape and requested raw publication work
-4. Query final state and stage a verified manifest under a non-contract temporary name
-5. Persist quality, legacy state, final run state, hook readiness, and publication intent
-6. Perform the checked final `PASSIVE` checkpoint and close SQLite
-7. Rename to `manifest.v1.json` as the last fallible authoritative operation
+2. Drain and commit the queue with bounded transaction retries, completing deferred shape and
+   requested raw publication work as the writer finishes and joins, then snapshot drain state and
+   durable quality
+3. Seal the finalization decision once and carry any latched timeout veto into route and run
+   authority
+4. Publish route observations and the route manifest under that sealed decision
+5. Query final state and stage a verified manifest under a non-contract temporary name
+6. Persist quality, legacy state, final run state, hook readiness, and publication intent
+7. Perform the checked final `PASSIVE` checkpoint and close SQLite
+8. Rename to `manifest.v1.json` as the last fallible authoritative operation
+
+Close inputs are phased, and each becomes immutable at its own point. Readiness, graphics, and
+runtime identity freeze at the cutoff in step 0; the resolver registry freezes at the route capture
+freeze; drain state and durable quality freeze only after admitted producers have drained and the
+writer has joined, so a producer admitted before the cutoff still counts if it settles before the
+drain completes. Once sealed, that context is the only source for the quality veto, catalog
+authority, route and main manifest fields, the final database row, and publication. Nothing rereads
+live readiness, the route hook provider, the registry, or quality afterwards. Readiness or provider
+state that changes after its snapshot is ignored in both directions: it can neither promote a vetoed
+run nor demote a clean one. Producer work rejected after the cutoff never reaches any of it.
+
+Route capture admission is not a second gate. Route create and bind acquire the same producer
+admission that generic work uses, and hold it for the whole token lifetime, so the single
+`fetch_or` that closes producer admission linearizes generic and route entry at one instant and no
+route token can appear after it. Because a live token keeps that admission, the producer drain also
+waits for route tokens, and the publisher can only be waited on, frozen, and released afterwards;
+no route token can hold a raw publisher pointer across that release.
+
+Every deferred preparation that can affect authority, and every veto input, completes before the
+Seal, and the Seal precedes route publication. This is a within-process sequence only. It is not a
+cross-file atomic commit: route and catalog artifacts stay independent, as Authority composition
+describes.
 
 If any pre-publication gate fails, no contract manifest appears. If the final rename fails,
 the database is reopened only to mark the run abandoned and persist manifest/lifecycle
@@ -276,6 +348,14 @@ Route receipt capture is a separate, disabled-by-default producer. It starts onl
 explicit absolute, existing, non-reparse directory. There is no environment, current-directory,
 temporary-directory, or repository fallback.
 
+`settings.route_receipt_capture_duration_seconds` bounds one capture window. It defaults to 90,
+is validated to 1 through 3600, is persisted with the other settings, and is inert while route
+capture is disabled. The window arms once, on a monotonic clock, and only after device hook
+installation reports complete coverage, `hook_coverage_ready` is established, and the route
+publisher is open. At the deadline the coordinator closes and finalizes the run in process while
+the game keeps running; the UI button requests that same one-way close earlier. Capture never
+depends on observing process exit.
+
 The wire contract is `fo4cs.stock-runtime-route-observation` v1 plus
 `fo4cs.stock-runtime-route-run-manifest` v1. Canonical files use sorted-key compact JSON with
 one final LF and publish without replacement at:
@@ -312,6 +392,11 @@ successful non-stock final object makes the run non-authoritative. Failed, null-
 ambiguous, duplicate, and route-mismatched records remain visible but only make their own record
 non-authoritative when run accounting is otherwise complete.
 
+A close that misses the finalization budget vetoes route manifest authority without adding a wire
+reason. The manifest keeps its closed derived reason set: when derived reasons exist it publishes
+exactly those, and when none exist it publishes the contract fallback `producer-declined`. The
+exact timeout fact stays in coordinator telemetry and in the catalog `lifecycle_failure` counter.
+
 The plugin retains only successful, non-null final stock objects for route lineage. Failed stale
 pointers, replacements, null shaders, untracked binds, and repeated terminal binds receive no route
 event. Bind observation proves API binding only. It does not prove draw submission, GPU execution,
@@ -320,3 +405,34 @@ presentation, or fidelity.
 Plugin route documents are archive-blind. Their typed API has no archive, FXP, shader-key, ordinal,
 offset, occurrence, corpus, participant, recipe, policy, admission, verdict, draw, or fidelity field.
 Archive occurrence selection and route-join verdicts remain fallout4-re responsibilities.
+
+## Authority composition
+
+Observation `capture_authoritative` is row-local: it states only that this record's own
+accounting and stock-only conditions hold. Route manifest `capture_authoritative` is
+route-local: it states only that this capture run's own membership and accounting hold.
+
+Downstream promotion requires route membership authority, which is the manifest and the row
+together, plus an authoritative enclosing catalog context with exact run and build binding:
+
+```text
+membership = route_manifest.capture_authoritative AND observation.capture_authoritative
+promotion  = membership AND authoritative enclosing catalog context, exact run/build binding
+```
+
+That promotion gate belongs to fallout4-re. Community Shaders publishes route-local facts and
+never asserts catalog authority from a route document. A false route manifest may still contain
+true rows, and no row is promotable on route facts alone.
+
+A structurally valid route artifact left behind by process death or by a failed catalog
+finalization is an orphan, never a final accepted handoff. Route documents publish before
+catalog persistence, the final checkpoint, and the contract manifest rename, and that plugin
+publication order is not proof of cross-artifact trust: the two roots are independent files and
+are not atomically committed. An orphan is rejected because its enclosing catalog context is
+non-authoritative, not because of any ordering claim.
+
+Coordinator telemetry is a packed lock-free word, refreshed only when the coordinator publishes
+a status or a caller takes a snapshot. Read before the coordinator observes the clock it can lag
+the monotonic budget and still report an overdue close as not timed out. That lag is diagnostic
+only and never establishes, delays, or removes authority. Sealing the finalization decision is
+authoritative.

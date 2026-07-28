@@ -387,6 +387,7 @@ namespace cs::features::catalog
 	};
 
 	class StockRuntimeRoutePublisher;
+	class CatalogDB;
 
 	class RouteCaptureAdmission
 	{
@@ -401,12 +402,23 @@ namespace cs::features::catalog
 
 	private:
 		friend class StockRuntimeRoutePublisher;
+		friend class CatalogDB;
+		// Releases the outer catalog admission the token holds for its whole life.
+		void ReleaseCatalogAdmission() noexcept
+		{
+			if (_catalogRelease) {
+				const auto release = std::exchange(_catalogRelease, nullptr);
+				release(std::exchange(_catalogOwner, nullptr));
+			}
+		}
 		StockRuntimeRoutePublisher* _owner = nullptr;
 		std::uint64_t _createSequence = 0;
 		std::uint64_t _threadId = 0;
 		bool _classLinkagePresent = false;
 		bool _included = false;
 		RouteSnapshot _route;
+		void* _catalogOwner = nullptr;
+		void (*_catalogRelease)(void*) noexcept = nullptr;
 	};
 
 	struct RouteCreateCommitResult
@@ -429,7 +441,18 @@ namespace cs::features::catalog
 
 	private:
 		friend class StockRuntimeRoutePublisher;
+		friend class CatalogDB;
+		// Releases the outer catalog admission the token holds for its whole life.
+		void ReleaseCatalogAdmission() noexcept
+		{
+			if (_catalogRelease) {
+				const auto release = std::exchange(_catalogRelease, nullptr);
+				release(std::exchange(_catalogOwner, nullptr));
+			}
+		}
 		StockRuntimeRoutePublisher* _owner = nullptr;
+		void* _catalogOwner = nullptr;
+		void (*_catalogRelease)(void*) noexcept = nullptr;
 	};
 
 	struct FrozenRouteRecord
@@ -467,6 +490,12 @@ namespace cs::features::catalog
 		std::filesystem::path path;
 	};
 
+	// External authority veto decided outside the publisher; the wire keeps its closed reason set.
+	struct RouteFinalizationVeto
+	{
+		bool producerDeclined = false;
+	};
+
 	struct RoutePublicationResult
 	{
 		bool success = false;
@@ -500,12 +529,18 @@ namespace cs::features::catalog
 		void ReleaseBindReservation(
 			const std::shared_ptr<RouteCaptureRecordState>& a_record) noexcept;
 
+		// Shuts route admission without waiting, freezing, or publishing; idempotent.
+		void CloseCaptureAdmission() noexcept;
 		bool CloseCaptureAdmissionAndFreeze(
 			FrozenRouteSnapshot& a_snapshot,
+			bool a_hookCoverageReady,
 			RoutePublicationError& a_error) noexcept;
+		// Samples the scope hook provider once, at the caller's close cutoff.
+		[[nodiscard]] bool SampleHookCoverageReady() const noexcept;
 		RoutePublicationResult PublishObservation(
 			const FrozenRouteRecord& a_record) noexcept;
-		RoutePublicationResult FinalizeRun() noexcept;
+		RoutePublicationResult FinalizeRun(
+			const RouteFinalizationVeto& a_veto = {}) noexcept;
 
 	private:
 		friend class RouteCaptureAdmission;
@@ -751,6 +786,10 @@ namespace cs::features::catalog
 	bool PublishedWinnerHeldForTesting() noexcept;
 	bool PublicationCollisionRetriedForTesting() noexcept;
 	void ReleasePublishedWinnerForTesting() noexcept;
+	// Counts route publisher destructions so retention leaks are observable.
+	std::uint64_t RoutePublisherDestructionsForTesting() noexcept;
+	// Arms one observation publish to fail exactly as a local write failure would.
+	void FailNextObservationPublishForTesting(bool a_fail) noexcept;
 #endif
 	bool IsValidUtf8(std::string_view a_value) noexcept;
 	std::string BuildCanonicalManifest(ManifestDocument a_document);

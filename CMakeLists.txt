@@ -343,6 +343,8 @@ add_executable(ShaderCatalogTests
 	features/ShaderCatalog/src/Provenance.h
 	features/ShaderCatalog/src/PixelShaderTracker.cpp
 	features/ShaderCatalog/src/PixelShaderTracker.h
+	features/ShaderCatalog/src/RouteCaptureCoordinator.cpp
+	features/ShaderCatalog/src/RouteCaptureCoordinator.h
 	features/ShaderCatalog/src/ShaderShape.cpp
 	features/ShaderCatalog/src/ShaderShape.h
 	src/Render/PixelShaderSwapModel.cpp
@@ -445,6 +447,7 @@ if(FO4CS_HOST_TESTS_ONLY)
 		features/ShaderCatalog/src/Hooks.cpp
 		features/ShaderCatalog/src/OrderlyExit.cpp
 		features/ShaderCatalog/src/PixelShaderTracker.cpp
+		features/ShaderCatalog/src/RouteCaptureCoordinator.cpp
 		features/ShaderCatalog/src/ShaderCatalog.cpp
 		features/ShaderCatalog/src/SubclassAttribution.cpp
 		src/Render/PixelShaderSwapBroker.cpp

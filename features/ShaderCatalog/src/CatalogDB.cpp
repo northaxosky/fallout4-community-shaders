@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <limits>
 #include <sstream>
+#include <system_error>
 #include <utility>
 
 namespace cs::features::catalog
@@ -27,6 +28,24 @@ namespace cs::features::catalog
 		constexpr std::size_t kMaxRetainedBacklogBytes = 64ull * 1024ull * 1024ull;
 		constexpr int kMaxTransactionAttempts = 3;
 		constexpr int kMaxHresultDetails = 8;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		std::atomic<CatalogDB::AdmissionClosedCallbackForTesting>
+			g_admissionClosedCallbackForTesting{ nullptr };
+		std::atomic<CatalogDB::SharedGateClosedCallbackForTesting>
+			g_sharedGateClosedCallbackForTesting{ nullptr };
+		std::atomic<CatalogDB::BeforeRunCommitCallbackForTesting>
+			g_beforeRunCommitCallbackForTesting{ nullptr };
+		std::atomic<CatalogDB::RouteCaptureFrozenCallbackForTesting>
+			g_routeCaptureFrozenCallbackForTesting{ nullptr };
+		std::atomic<CatalogDB::ContextSealedCallbackForTesting>
+			g_contextSealedCallbackForTesting{ nullptr };
+		std::atomic<std::uint64_t> g_writerRunEntriesForTesting{ 0 };
+		std::atomic<std::int64_t> g_activeTransientStatements{ 0 };
+		std::atomic<int> g_lastStartupCloseResult{ SQLITE_OK };
+		std::atomic<std::uint64_t> g_routeAdmissionCloseCalls{ 0 };
+		std::atomic<std::size_t> g_lastManifestThrowActiveStatements{ 0 };
+		sqlite3_stmt* g_heldStatementForTesting = nullptr;
+#endif
 
 		constexpr const char* kLegacySchemaSql = R"sql(
 CREATE TABLE IF NOT EXISTS sessions (
@@ -379,13 +398,80 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			return result;
 		}
 
+		// Owns one transient statement so no throw can bypass its finalize.
+		class ScopedStatement
+		{
+		public:
+			ScopedStatement() = default;
+			~ScopedStatement() { Finalize(); }
+			ScopedStatement(const ScopedStatement&) = delete;
+			ScopedStatement& operator=(const ScopedStatement&) = delete;
+
+			// Hands Prepare an owned slot, discarding any statement held before.
+			sqlite3_stmt** Receive() noexcept
+			{
+				Finalize();
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+				g_activeTransientStatements.fetch_add(
+					1, std::memory_order_acq_rel);
+#endif
+				_owned = true;
+				return &_statement;
+			}
+
+			operator sqlite3_stmt*() const noexcept { return _statement; }
+
+			int Finalize() noexcept
+			{
+				int result = SQLITE_OK;
+				if (_statement) {
+					result = sqlite3_finalize(_statement);
+					_statement = nullptr;
+				}
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+				if (_owned)
+					g_activeTransientStatements.fetch_sub(
+						1, std::memory_order_acq_rel);
+#endif
+				_owned = false;
+				return result;
+			}
+
+		private:
+			sqlite3_stmt* _statement = nullptr;
+			bool _owned = false;
+		};
+
+		// Publishes the lifecycle owner so a reentrant Start or Stop fails instead of hanging.
+		class LifecycleOwnerScope
+		{
+		public:
+			explicit LifecycleOwnerScope(
+				std::atomic<unsigned long>& a_owner) noexcept :
+				_owner(a_owner)
+			{
+				_owner.store(GetCurrentThreadId(), std::memory_order_release);
+			}
+
+			~LifecycleOwnerScope()
+			{
+				_owner.store(0, std::memory_order_release);
+			}
+
+			LifecycleOwnerScope(const LifecycleOwnerScope&) = delete;
+			LifecycleOwnerScope& operator=(const LifecycleOwnerScope&) = delete;
+
+		private:
+			std::atomic<unsigned long>& _owner;
+		};
+
 		bool TableExists(sqlite3* a_db, const char* a_name)
 		{
-			sqlite3_stmt* statement = nullptr;
+			ScopedStatement statement;
 			if (!Prepare(
 					a_db,
 					"SELECT 1 FROM sqlite_master WHERE type='table' AND name=?1",
-					&statement, "prepare table existence check"))
+					statement.Receive(), "prepare table existence check"))
 				return false;
 			const bool bound = BindText(statement, 1, a_name);
 			const int first = bound ? sqlite3_step(statement) : SQLITE_ERROR;
@@ -393,16 +479,16 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			const bool complete = (first == SQLITE_DONE)
 				|| (first == SQLITE_ROW
 					&& sqlite3_step(statement) == SQLITE_DONE);
-			sqlite3_finalize(statement);
+			statement.Finalize();
 			return complete && exists;
 		}
 
 		bool ColumnExists(sqlite3* a_db, const char* a_table, const char* a_column)
 		{
 			const std::string sql = "PRAGMA table_info(" + std::string(a_table) + ")";
-			sqlite3_stmt* statement = nullptr;
+			ScopedStatement statement;
 			if (!Prepare(
-					a_db, sql.c_str(), &statement,
+					a_db, sql.c_str(), statement.Receive(),
 					"prepare table column inspection"))
 				return false;
 			bool found = false;
@@ -412,7 +498,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				if (name && *name == a_column)
 					found = true;
 			}
-			sqlite3_finalize(statement);
+			statement.Finalize();
 			return step == SQLITE_DONE && found;
 		}
 
@@ -421,24 +507,21 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			const char* a_table,
 			std::string_view a_fragment)
 		{
-			sqlite3_stmt* statement = nullptr;
+			ScopedStatement statement;
 			if (!Prepare(
 					a_db,
 					"SELECT sql FROM sqlite_master "
 					"WHERE type='table' AND name=?1",
-					&statement, "prepare table definition inspection")
-				|| !BindText(statement, 1, a_table)) {
-				if (statement)
-					sqlite3_finalize(statement);
+					statement.Receive(), "prepare table definition inspection")
+				|| !BindText(statement, 1, a_table))
 				return false;
-			}
 			const int row = sqlite3_step(statement);
 			const auto sql = row == SQLITE_ROW
 				? ColumnOptionalText(statement, 0)
 				: std::nullopt;
 			const bool complete = row == SQLITE_ROW
 				&& sqlite3_step(statement) == SQLITE_DONE;
-			sqlite3_finalize(statement);
+			statement.Finalize();
 			return complete && sql
 				&& sql->find(a_fragment) != std::string::npos;
 		}
@@ -456,17 +539,17 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				return true;
 			}
 
-			sqlite3_stmt* statement = nullptr;
+			ScopedStatement statement;
 			if (!Prepare(
 					a_db,
 					"SELECT value FROM corpus_meta WHERE key='schema_version'",
-					&statement, "prepare schema version read")) {
+					statement.Receive(), "prepare schema version read")) {
 				a_error = sqlite3_errmsg(a_db);
 				return false;
 			}
 			const int step = sqlite3_step(statement);
 			if (step == SQLITE_DONE) {
-				sqlite3_finalize(statement);
+				statement.Finalize();
 				if (TableExists(a_db, "sessions")
 					|| TableExists(a_db, "shader_catalog")
 					|| TableExists(a_db, "compile_events")) {
@@ -477,12 +560,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			}
 			if (step != SQLITE_ROW) {
 				a_error = sqlite3_errmsg(a_db);
-				sqlite3_finalize(statement);
 				return false;
 			}
 			const auto text = ColumnOptionalText(statement, 0);
 			const bool complete = sqlite3_step(statement) == SQLITE_DONE;
-			sqlite3_finalize(statement);
+			statement.Finalize();
 			if (!complete || !text) {
 				a_error = "schema_version is null";
 				return false;
@@ -607,7 +689,9 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	void CatalogDB::ResetState()
 	{
+		_closeRetainedBusy = false;
 		_routePublisher.reset();
+		_writerGate.store(WriterGate::kWaiting, std::memory_order_release);
 		_enqueuePosition.store(0, std::memory_order_relaxed);
 		_dequeuePosition.store(0, std::memory_order_relaxed);
 		_nextSequence.store(1, std::memory_order_relaxed);
@@ -623,9 +707,20 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		_exportAttempts.clear();
 		_moduleCache.clear();
 		_retainedBytes = 0;
-		_graphicsAdapter.reset();
-		_graphicsFeatureLevel.reset();
-		_statsIdentity = {};
+		{
+			// One publication: lifecycle, identity and route fields move together.
+			std::scoped_lock identity(_identityMutex);
+			_lifecycle = 0;
+			_identityPublished = false;
+			_authoritativePublic = false;
+			_routeCaptureRequestedPublic = false;
+			_routeCaptureActivePublic = false;
+			_runGenerationPublic = 0;
+			_graphicsAdapter.reset();
+			_graphicsFeatureLevel.reset();
+			_statsIdentity = {};
+		}
+		_routeCaptureGeneration.store(0, std::memory_order_release);
 
 #define RESET_ATOMIC(name, value) name.store(value, std::memory_order_relaxed)
 		RESET_ATOMIC(_statAttempts, 0);
@@ -637,8 +732,6 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		RESET_ATOMIC(_statReflected, 0);
 		RESET_ATOMIC(_statAttributedPs, 0);
 		RESET_ATOMIC(_statTotalPs, 0);
-		RESET_ATOMIC(_lifecycle, 0);
-		RESET_ATOMIC(_authoritative, false);
 		RESET_ATOMIC(_rawExportComplete, false);
 		RESET_ATOMIC(_writerDrained, false);
 		RESET_ATOMIC(_hookCoverageReady, false);
@@ -665,11 +758,69 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	bool CatalogDB::Start(const DbConfig& a_config, RuntimeIdentity a_identity)
 	{
+		// Lock order: lifecycle -> producer admission atomics -> writer gate/join -> DB.
+		if (_lifecycleOwner.load(std::memory_order_acquire)
+			== GetCurrentThreadId())
+			return false;
+		std::scoped_lock lifecycle(_lifecycleMutex);
+		const LifecycleOwnerScope owner(_lifecycleOwner);
 		if (_running.load(std::memory_order_acquire)
 			|| _accepting.load(std::memory_order_acquire)
 			|| _db)
 			return false;
 
+		// One startup boundary: no failure before the commit escapes or leaks.
+		bool ready = false;
+		try {
+			ready = BeginRun(a_config, std::move(a_identity));
+		} catch (const std::exception& e) {
+			LogStartupAbort(e.what());
+		} catch (...) {
+			LogStartupAbort("unknown exception");
+		}
+		if (!ready) {
+			AbortStartupBeforeRun();
+			return false;
+		}
+
+		// Post-commit tail: one locked publication, then release the gated writer.
+		const auto generation =
+			_generationCounter.fetch_add(1, std::memory_order_acq_rel) + 1;
+		{
+			std::scoped_lock identity(_identityMutex);
+			_routeCaptureRequestedPublic = _config.routeCapture.requested;
+			_routeCaptureActivePublic = static_cast<bool>(_routePublisher);
+			_runGenerationPublic = generation;
+			_identityPublished = true;
+			_authoritativePublic = false;
+			_lifecycle = 1;
+		}
+		_routeCaptureGeneration.store(
+			_routePublisher ? generation : 0, std::memory_order_release);
+		_producerAdmission.store(0, std::memory_order_release);
+		_accepting.store(true, std::memory_order_release);
+		_running.store(true, std::memory_order_release);
+		_writerGate.store(WriterGate::kRun, std::memory_order_release);
+		_writerGate.notify_all();
+		try {
+			if (auto logger = Logger(); logger) {
+				logger->info(
+					"Catalog run started: generated_run_id={} external_run_id={} scenario_id={} schema={}",
+					_generatedRunId,
+					_policy.externalRunId.value_or("null"),
+					_policy.scenarioId.value_or("null"),
+					kCatalogSchemaVersion);
+			}
+		} catch (...) {
+		}
+		return true;
+	}
+
+	// The whole fallible startup phase; the caller owns cleanup for every false or throw.
+	bool CatalogDB::BeginRun(
+		const DbConfig& a_config,
+		RuntimeIdentity a_identity)
+	{
 		ResetState();
 		_config = a_config;
 #ifdef FO4CS_SHADER_CATALOG_TESTING
@@ -746,41 +897,191 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			return false;
 		}
 
-		if (!OpenAndBootstrap()) {
-			FinalizeStatements();
-			if (_db) {
-				sqlite3_close(_db);
-				_db = nullptr;
-			}
+		if (!OpenAndBootstrap())
 			return false;
-		}
 
 		StoreStatsIdentity();
-		_lifecycle.store(1, std::memory_order_release);
-		_producerAdmission.store(0, std::memory_order_release);
-		_accepting.store(true, std::memory_order_release);
-		_running.store(true, std::memory_order_release);
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		if (_config.failWriterStartForTesting)
+			throw std::system_error(
+				std::make_error_code(
+					std::errc::resource_unavailable_try_again),
+				"injected writer start failure");
+#endif
 		_writer = std::thread(&CatalogDB::WriterLoop, this);
-		if (auto logger = Logger(); logger) {
-			logger->info(
-				"Catalog run started: generated_run_id={} external_run_id={} scenario_id={} schema={}",
-				_generatedRunId,
-				_policy.externalRunId.value_or("null"),
-				_policy.scenarioId.value_or("null"),
-				kCatalogSchemaVersion);
+		if (!InsertRun()) {
+			LogStartupAbort("run insert did not commit");
+			return false;
 		}
 		return true;
 	}
 
+	void CatalogDB::LogStartupAbort(const char* a_reason) noexcept
+	{
+		try {
+			if (auto logger = Logger(); logger) {
+				logger->critical(
+					"Catalog startup aborted before its run row committed: {}",
+					a_reason ? a_reason : "unknown");
+			}
+		} catch (...) {
+		}
+	}
+
+	// The run row never committed, so leave no database, publisher, admission, or writer.
+	void CatalogDB::AbortStartupBeforeRun() noexcept
+	{
+		_writerGate.store(WriterGate::kAbort, std::memory_order_release);
+		_writerGate.notify_all();
+		try {
+			if (_writer.joinable())
+				_writer.join();
+		} catch (...) {
+		}
+		_accepting.store(false, std::memory_order_release);
+		_running.store(false, std::memory_order_release);
+		{
+			std::scoped_lock identity(_identityMutex);
+			_lifecycle = 0;
+			_identityPublished = false;
+			_authoritativePublic = false;
+			_routeCaptureRequestedPublic = false;
+			_routeCaptureActivePublic = false;
+			_runGenerationPublic = 0;
+		}
+		_routeCaptureGeneration.store(0, std::memory_order_release);
+		_producerAdmission.store(
+			kProducerAdmissionClosed, std::memory_order_release);
+		try {
+			_routePublisher.reset();
+			if (_db && sqlite3_get_autocommit(_db) == 0)
+				Exec(_db, "ROLLBACK", "startup abort rollback");
+			FinalizeStatements();
+		} catch (...) {
+		}
+		bool closed = true;
+		if (_db) {
+			const int closeResult = sqlite3_close(_db);
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+			g_lastStartupCloseResult.store(
+				closeResult, std::memory_order_release);
+#endif
+			if (closeResult == SQLITE_OK) {
+				_db = nullptr;
+			} else {
+				// Retaining the handle keeps the object unusable instead of lying.
+				closed = false;
+				try {
+					if (auto logger = Logger(); logger) {
+						logger->critical(
+							"Catalog startup cleanup could not close the database: {}; "
+							"the connection is retained and no run may start.",
+							sqlite3_errstr(closeResult));
+					}
+				} catch (...) {
+				}
+			}
+		}
+		// No attempted-run identity may survive a run row that never committed.
+		try {
+			ResetState();
+			_config = {};
+			_policy = {};
+			_identity = {};
+			_generatedRunId.clear();
+			_startedAt.clear();
+			_artifactRootFingerprint.clear();
+			_artifactRoot.clear();
+		} catch (...) {
+		}
+		try {
+			if (auto logger = Logger(); logger) {
+				logger->error(
+					"Catalog startup cleanup released the publisher, admission, and "
+					"gated writer; no run row was committed (database_closed={}).",
+					closed);
+			}
+		} catch (...) {
+		}
+	}
+
 	bool CatalogDB::Stop()
 	{
-		if (!_db)
+		// Lock order: lifecycle -> producer admission atomics -> writer gate/join -> DB.
+		if (_lifecycleOwner.load(std::memory_order_acquire)
+			== GetCurrentThreadId())
+			return false;
+		std::scoped_lock lifecycle(_lifecycleMutex);
+		const LifecycleOwnerScope owner(_lifecycleOwner);
+		// A retained busy handle is terminal non-service; never re-run finalization.
+		if (!_db || _closeRetainedBusy)
 			return false;
 
+		// Finalization never throws out of the public close; failure is fail-closed.
+		try {
+			return StopImpl();
+		} catch (const std::exception& e) {
+			AbortStopAfterException(e.what());
+		} catch (...) {
+			AbortStopAfterException("unknown exception");
+		}
+		return false;
+	}
+
+	// The one logical cutoff: a single atomic gate close, then unobservable bookkeeping.
+	std::uint64_t CatalogDB::CloseAdmissionCutoff() noexcept
+	{
 		_accepting.store(false, std::memory_order_release);
 		auto admission = _producerAdmission.fetch_or(
 			kProducerAdmissionClosed, std::memory_order_acq_rel);
 		admission |= kProducerAdmissionClosed;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		// The shared gate alone must already reject every route Begin here.
+		if (const auto sharedGateClosed =
+				g_sharedGateClosedCallbackForTesting.load(
+					std::memory_order_acquire))
+			sharedGateClosed();
+#endif
+		{
+			std::scoped_lock identity(_identityMutex);
+			_routeCaptureActivePublic = false;
+		}
+		_routeCaptureGeneration.store(0, std::memory_order_release);
+		if (_routePublisher) {
+			_routePublisher->CloseCaptureAdmission();
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+			g_routeAdmissionCloseCalls.fetch_add(
+				1, std::memory_order_acq_rel);
+#endif
+		}
+		return admission;
+	}
+
+	bool CatalogDB::StopImpl()
+	{		// Cutoff phase: readiness after this instant can never promote authority.
+		FinalizationContext context;
+		context.hookCoverageReady =
+			_hookCoverageReady.load(std::memory_order_acquire);
+		context.orderlyFinalizerReady =
+			_orderlyFinalizerReady.load(std::memory_order_acquire);
+		context.routeHookCoverageReady =
+			!_routePublisher || _routePublisher->SampleHookCoverageReady();
+		{
+			// Graphics and runtime identity freeze with readiness, in one barrier.
+			std::scoped_lock identity(_identityMutex);
+			context.identity = _identity;
+			context.graphicsAdapter = _graphicsAdapter;
+			context.graphicsFeatureLevel = _graphicsFeatureLevel;
+		}
+
+		// One cutoff: generic and route admission shut together, before any wait.
+		auto admission = CloseAdmissionCutoff();
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		if (const auto admissionClosed =
+				g_admissionClosedCallbackForTesting.load(
+					std::memory_order_acquire))
+			admissionClosed();
+#endif
 		while ((admission & kProducerCountMask) != 0) {
 			_producerAdmission.wait(admission, std::memory_order_acquire);
 			admission = _producerAdmission.load(std::memory_order_acquire);
@@ -788,46 +1089,31 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		FrozenRouteSnapshot routeSnapshot;
 		RoutePublicationError routeFreezeError =
 			RoutePublicationError::kNone;
+		// Admission already shut; this waits existing route tokens then freezes.
 		const bool routeFrozen = !_routePublisher
 			|| _routePublisher->CloseCaptureAdmissionAndFreeze(
-				routeSnapshot, routeFreezeError);
+				routeSnapshot, context.routeHookCoverageReady,
+				routeFreezeError);
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		if (const auto routeFrozenCallback =
+				g_routeCaptureFrozenCallbackForTesting.load(
+					std::memory_order_acquire))
+			routeFrozenCallback();
+#endif
 		_running.store(false, std::memory_order_release);
 		WakeWriter();
 		if (_writer.joinable())
 			_writer.join();
 
-		if (_routePublisher) {
-			bool routePublished = routeFrozen;
-			if (routePublished) {
-				for (const auto& record : routeSnapshot.records) {
-					if (!_routePublisher->PublishObservation(record).success)
-						routePublished = false;
-				}
-			}
-			const auto routeManifest =
-				_routePublisher->FinalizeRun();
-			if (auto logger = Logger(); logger) {
-				if (routePublished && routeManifest.success) {
-					logger->info(
-						"Stock route receipt capture finalized: records={} manifest={}",
-						routeSnapshot.records.size(),
-						routeManifest.document.path.string());
-				} else {
-					logger->error(
-						"Stock route receipt capture finalized non-authoritatively: freeze_error={} manifest_error={}",
-						static_cast<int>(routeFreezeError),
-						static_cast<int>(routeManifest.error));
-				}
-			}
-		}
-
-		const bool drained =
+		// Drain phase: in-flight accounting is final only after the writer joined.
+		context.drained =
 			_enqueuePosition.load(std::memory_order_acquire)
 			== _dequeuePosition.load(std::memory_order_acquire);
+		const bool drained = context.drained;
 		_writerDrained.store(drained, std::memory_order_release);
 		if (!drained)
 			_qualityWriterDrainFailure.fetch_add(1, std::memory_order_relaxed);
-		if (!_hookCoverageReady.load(std::memory_order_acquire)) {
+		if (!context.hookCoverageReady) {
 			std::uint64_t noReportedGap = 0;
 			_qualityHookObserverGap.compare_exchange_strong(
 				noReportedGap, 1, std::memory_order_relaxed);
@@ -854,18 +1140,92 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				&& _qualityRawExportFailure.load(std::memory_order_relaxed) == 0);
 		_rawExportComplete.store(rawExportComplete, std::memory_order_release);
 
-		const auto quality = QualitySnapshot();
+		// Quality phase: frozen once, after every admitted callback and the join.
+		context.quality = QualitySnapshot();
+
+		// Sole decision point: after every unbounded wait and before any publication.
+		const bool finalizationTimedOut =
+			_config.finalizationSeal && _config.finalizationSeal();
+		if (finalizationTimedOut) {
+			_qualityLifecycleFailure.fetch_add(1, std::memory_order_relaxed);
+			// Applied as a delta so the sealed context is never rebuilt from live state.
+			++context.quality.lifecycleFailure;
+		}
+		const RouteFinalizationVeto routeVeto{
+			.producerDeclined = finalizationTimedOut
+		};
+		// The context is complete and sealed; nothing below rereads live state.
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		if (const auto contextSealed =
+				g_contextSealedCallbackForTesting.load(
+					std::memory_order_acquire)) {
+			contextSealed(
+				SealedContextForTesting{
+					.hookCoverageReady = context.hookCoverageReady,
+					.orderlyFinalizerReady = context.orderlyFinalizerReady,
+					.routeHookCoverageReady =
+						context.routeHookCoverageReady,
+					.drained = context.drained,
+					.finalizationTimedOut = finalizationTimedOut,
+					.lifecycleFailure = context.quality.lifecycleFailure,
+					.malformedBytecode = context.quality.malformedBytecode,
+					.hookObserverGap = context.quality.hookObserverGap });
+		}
+#endif
+
+		if (_routePublisher) {
+			bool routePublished = routeFrozen;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+			// Throws before any route observation or manifest is written.
+			if (_config.failBeforeRoutePublicationForTesting)
+				throw std::bad_alloc();
+#endif
+			if (routePublished) {
+				for (const auto& record : routeSnapshot.records) {
+					if (!_routePublisher->PublishObservation(record).success)
+						routePublished = false;
+				}
+			}
+			const auto routeManifest =
+				_routePublisher->FinalizeRun(routeVeto);
+			if (auto logger = Logger(); logger) {
+				if (routePublished
+					&& routeManifest.success
+					&& !finalizationTimedOut) {
+					logger->info(
+						"Stock route receipt capture finalized: records={} manifest={}",
+						routeSnapshot.records.size(),
+						routeManifest.document.path.string());
+				} else {
+					logger->error(
+						"Stock route receipt capture finalized non-authoritatively: freeze_error={} manifest_error={} finalization_timeout={}",
+						static_cast<int>(routeFreezeError),
+						static_cast<int>(routeManifest.error),
+						finalizationTimedOut);
+				}
+			}
+		}
+		// Publication is complete and every route admission has drained, so the
+		// frozen records can be released before main finalization.
+		_routePublisher.reset();
+
+		const auto& quality = context.quality;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		// Throws after route publication, before any main persistence.
+		if (_config.failAfterRoutePublicationForTesting)
+			throw std::bad_alloc();
+#endif
 		bool authoritative = complete
 			&& _policy.environmentValid
 			&& _policy.evidenceIdsSatisfied
 			&& drained
 			&& rawExportComplete
-			&& _hookCoverageReady.load(std::memory_order_acquire)
-			&& _orderlyFinalizerReady.load(std::memory_order_acquire)
+			&& context.hookCoverageReady
+			&& context.orderlyFinalizerReady
 			&& !quality.HasLossOrFailure();
 
 		ManifestDocument document;
-		if (!complete || !LoadManifestDocument(endedAt, document)) {
+		if (!complete || !LoadManifestDocument(endedAt, context, document)) {
 			_qualityDbWriteFailure.fetch_add(1, std::memory_order_relaxed);
 			authoritative = false;
 			complete = false;
@@ -876,10 +1236,9 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			document.writerDrained = drained;
 			document.rawExportComplete = rawExportComplete;
 			document.manifestPublished = true;
-			document.hookCoverageReady =
-				_hookCoverageReady.load(std::memory_order_acquire);
-			document.orderlyFinalizerReady =
-				_orderlyFinalizerReady.load(std::memory_order_acquire);
+			document.hookCoverageReady = context.hookCoverageReady;
+			document.orderlyFinalizerReady = context.orderlyFinalizerReady;
+			document.quality = context.quality;
 			document.authoritative = authoritative;
 		}
 
@@ -915,11 +1274,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			if (_config.finalizationFaults.persistence
 				|| !(transactionStarted =
 					Exec(_db, "BEGIN IMMEDIATE", "finalization begin"))
-				|| !PersistQuality()
+				|| !PersistQuality(&context.quality)
 				|| !FinalizeLegacySession(endedAt)
 				|| !PersistFinalRunState(
 					endedAt, rawExportComplete, authoritative,
-					manifestSha256, manifestJson.size())
+					manifestSha256, manifestJson.size(), context)
 				|| !Exec(_db, "COMMIT", "finalization commit")) {
 				if (transactionStarted)
 					Exec(_db, "ROLLBACK", "finalization rollback");
@@ -973,51 +1332,259 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			RepairFailedPublication(endedAt);
 		}
 
-		_authoritative.store(authoritative, std::memory_order_release);
-		_lifecycle.store(complete ? 2 : 0, std::memory_order_release);
+		// Checked close before the terminal tuple, so a retained handle denies authority.
+		bool closed = true;
 		if (_db) {
 			(void)FinalizeStatements();
-			sqlite3_close(_db);
-			_db = nullptr;
+			const int closeResult = sqlite3_close(_db);
+			if (closeResult == SQLITE_OK) {
+				_db = nullptr;
+			} else {
+				closed = false;
+				_closeRetainedBusy = true;
+				if (auto logger = Logger(); logger) {
+					logger->critical(
+						"Catalog database close failed at finalization: {}; "
+						"the connection is retained and the run is not authoritative.",
+						sqlite3_errstr(closeResult));
+				}
+			}
+		}
+		authoritative = authoritative && closed;
+		complete = complete && closed;
+		{
+			// Terminal lifecycle, identity and authority publish together.
+			std::scoped_lock identity(_identityMutex);
+			_lifecycle = complete ? 2 : 0;
+			_identityPublished = complete;
+			_authoritativePublic = complete && authoritative;
+			if (!complete) {
+				// An inactive terminal exposes no run-local fields at all.
+				_statsIdentity = {};
+				_routeCaptureRequestedPublic = false;
+				_runGenerationPublic = 0;
+			}
+			_routeCaptureActivePublic = false;
 		}
 		return complete && authoritative;
+	}
+
+	// Fail-closed cleanup for a finalization that threw; never throws itself.
+	void CatalogDB::AbortStopAfterException(const char* a_reason) noexcept
+	{
+		try {
+			if (auto logger = Logger(); logger) {
+				logger->critical(
+					"Catalog finalization raised: {}; running fail-closed cleanup.",
+					a_reason ? a_reason : "unknown");
+			}
+		} catch (...) {
+		}
+		// Shut both admissions idempotently, then drain what was already admitted.
+		_accepting.store(false, std::memory_order_release);
+		{
+			std::scoped_lock identity(_identityMutex);
+			_routeCaptureActivePublic = false;
+		}
+		_routeCaptureGeneration.store(0, std::memory_order_release);
+		try {
+			if (_routePublisher)
+				_routePublisher->CloseCaptureAdmission();
+		} catch (...) {
+		}
+		auto admission = _producerAdmission.fetch_or(
+			kProducerAdmissionClosed, std::memory_order_acq_rel);
+		admission |= kProducerAdmissionClosed;
+		while ((admission & kProducerCountMask) != 0) {
+			_producerAdmission.wait(admission, std::memory_order_acquire);
+			admission = _producerAdmission.load(std::memory_order_acquire);
+		}
+		_running.store(false, std::memory_order_release);
+		try {
+			WakeWriter();
+			if (_writer.joinable())
+				_writer.join();
+		} catch (...) {
+		}
+		_qualityLifecycleFailure.fetch_add(1, std::memory_order_relaxed);
+		try {
+			if (_db && sqlite3_get_autocommit(_db) == 0)
+				Exec(_db, "ROLLBACK", "finalization abort rollback");
+			RepairFailedPublication(IsoNowUtc());
+		} catch (...) {
+		}
+		try {
+			FinalizeStatements();
+		} catch (...) {
+		}
+		if (_db) {
+			const int closeResult = sqlite3_close(_db);
+			if (closeResult == SQLITE_OK) {
+				_db = nullptr;
+				_closeRetainedBusy = false;
+			} else {
+				// A retained handle is terminal; the guard must block re-entry.
+				_closeRetainedBusy = true;
+				try {
+					if (auto logger = Logger(); logger) {
+						logger->critical(
+							"Catalog abort cleanup could not close the database: {}; "
+							"the connection is retained.",
+							sqlite3_errstr(closeResult));
+					}
+				} catch (...) {
+				}
+			}
+		}
+		// Route tokens have drained, so the publisher can be released safely.
+		try {
+			_routePublisher.reset();
+		} catch (...) {
+		}
+		try {
+			std::scoped_lock identity(_identityMutex);
+			_lifecycle = 0;
+			_identityPublished = false;
+			_authoritativePublic = false;
+			_runGenerationPublic = 0;
+			_routeCaptureRequestedPublic = false;
+			_routeCaptureActivePublic = false;
+			_statsIdentity = {};
+		} catch (...) {
+		}
 	}
 
 	RouteCaptureAdmission CatalogDB::BeginRouteCreate(
 		const RouteCreateInput& a_input) noexcept
 	{
-		return _routePublisher
-			? _routePublisher->BeginCreate(a_input)
-			: RouteCaptureAdmission{};
+		// The shared producer gate is the single cutoff for generic and route work.
+		if (!TryBeginProducerAdmission())
+			return {};
+		if (_routeCaptureGeneration.load(std::memory_order_acquire) == 0
+			|| !_routePublisher) {
+			EndProducerAdmission();
+			return {};
+		}
+		auto admission = _routePublisher->BeginCreate(a_input);
+		if (!admission) {
+			EndProducerAdmission();
+			return {};
+		}
+		AttachOuterAdmission(admission);
+		return admission;
 	}
 
 	RouteCreateCommitResult CatalogDB::CompleteRouteCreate(
 		RouteCaptureAdmission&& a_admission,
 		const RouteCreateOutcome& a_outcome) noexcept
 	{
-		return _routePublisher
+		auto result = _routePublisher
 			? _routePublisher->CompleteCreate(
 				std::move(a_admission), a_outcome)
 			: RouteCreateCommitResult{};
+		// The outer admission ends exactly when the publisher claim ends.
+		if (!a_admission)
+			a_admission.ReleaseCatalogAdmission();
+		return result;
 	}
 
 	RouteBindAdmission CatalogDB::BeginRouteBind() noexcept
 	{
-		return _routePublisher
-			? _routePublisher->BeginBind()
-			: RouteBindAdmission{};
+		// The shared producer gate is the single cutoff for generic and route work.
+		if (!TryBeginProducerAdmission())
+			return {};
+		if (_routeCaptureGeneration.load(std::memory_order_acquire) == 0
+			|| !_routePublisher) {
+			EndProducerAdmission();
+			return {};
+		}
+		auto admission = _routePublisher->BeginBind();
+		if (!admission) {
+			EndProducerAdmission();
+			return {};
+		}
+		AttachOuterAdmission(admission);
+		return admission;
 	}
+
+	void CatalogDB::ReleaseOuterAdmissionThunk(void* a_owner) noexcept
+	{
+		static_cast<CatalogDB*>(a_owner)->EndProducerAdmission();
+	}
+
+	void CatalogDB::AttachOuterAdmission(
+		RouteCaptureAdmission& a_admission) noexcept
+	{
+		a_admission._catalogOwner = this;
+		a_admission._catalogRelease = &CatalogDB::ReleaseOuterAdmissionThunk;
+	}
+
+	void CatalogDB::AttachOuterAdmission(
+		RouteBindAdmission& a_admission) noexcept
+	{
+		a_admission._catalogOwner = this;
+		a_admission._catalogRelease = &CatalogDB::ReleaseOuterAdmissionThunk;
+	}
+
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+	RouteCaptureAdmission CatalogDB::BeginRouteCreateForGenerationForTesting(
+		std::uint64_t a_generation,
+		const RouteCreateInput& a_input) noexcept
+	{
+		if (!TryBeginProducerAdmission())
+			return {};
+		if (a_generation == 0
+			|| _routeCaptureGeneration.load(std::memory_order_acquire)
+				!= a_generation
+			|| !_routePublisher) {
+			EndProducerAdmission();
+			return {};
+		}
+		auto admission = _routePublisher->BeginCreate(a_input);
+		if (!admission) {
+			EndProducerAdmission();
+			return {};
+		}
+		AttachOuterAdmission(admission);
+		return admission;
+	}
+
+	RouteBindAdmission CatalogDB::BeginRouteBindForGenerationForTesting(
+		std::uint64_t a_generation) noexcept
+	{
+		if (!TryBeginProducerAdmission())
+			return {};
+		if (a_generation == 0
+			|| _routeCaptureGeneration.load(std::memory_order_acquire)
+				!= a_generation
+			|| !_routePublisher) {
+			EndProducerAdmission();
+			return {};
+		}
+		auto admission = _routePublisher->BeginBind();
+		if (!admission) {
+			EndProducerAdmission();
+			return {};
+		}
+		AttachOuterAdmission(admission);
+		return admission;
+	}
+#endif
 
 	bool CatalogDB::RecordRouteBind(
 		RouteBindAdmission&& a_admission,
 		const std::shared_ptr<RouteCaptureRecordState>& a_record,
 		std::optional<RouteBindSnapshot> a_routeSnapshot) noexcept
 	{
-		return _routePublisher
+		const bool recorded = _routePublisher
 			&& _routePublisher->RecordBind(
 				std::move(a_admission),
 				a_record,
 				std::move(a_routeSnapshot));
+		// The outer admission ends exactly when the publisher claim ends.
+		if (!a_admission)
+			a_admission.ReleaseCatalogAdmission();
+		return recorded;
 	}
 
 	void CatalogDB::ReleaseRouteBindReservation(
@@ -1029,7 +1596,8 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	bool CatalogDB::RouteCaptureActive() const noexcept
 	{
-		return static_cast<bool>(_routePublisher);
+		// Reads the coherent cache; the publisher itself is lifecycle-owned.
+		return _routeCaptureGeneration.load(std::memory_order_acquire) != 0;
 	}
 
 	CatalogDB::ProducerLease CatalogDB::TryAcquireProducerLease() noexcept
@@ -1090,6 +1658,13 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		ObservationOutcome a_observation,
 		bool a_admitted) noexcept
 	{
+		// One lease spans validation, accounting, and the queue write.
+		ProducerLease lease;
+		if (!a_admitted) {
+			lease = TryAcquireProducerLease();
+			if (!lease)
+				return;
+		}
 		switch (a_observation.prepared.bytecodeState) {
 		case BytecodeState::kNull:
 		case BytecodeState::kEmpty:
@@ -1134,7 +1709,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		Event event;
 		event.kind = EventKind::kObservation;
 		event.observation = std::move(a_observation);
-		Enqueue(std::move(event), a_admitted);
+		Enqueue(std::move(event));
 	}
 
 	void CatalogDB::EnqueueAttribution(
@@ -1170,6 +1745,13 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		AttributionObjectKind a_objectKind,
 		bool a_admitted) noexcept
 	{
+		// One lease spans validation, accounting, and the queue write.
+		ProducerLease lease;
+		if (!a_admitted) {
+			lease = TryAcquireProducerLease();
+			if (!lease)
+				return;
+		}
 		if (!a_subclassName || Sha1IsZero(a_sha))
 			return;
 		try {
@@ -1192,7 +1774,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			LARGE_INTEGER counter{};
 			if (QueryPerformanceCounter(&counter))
 				event.attributionQpc = counter.QuadPart;
-			Enqueue(std::move(event), a_admitted);
+			Enqueue(std::move(event));
 		} catch (const std::bad_alloc&) {
 			_qualityAllocationFailure.fetch_add(1, std::memory_order_relaxed);
 		}
@@ -1274,15 +1856,9 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		_wakeWriter.notify_one();
 	}
 
-	bool CatalogDB::Enqueue(Event a_event, bool a_admitted) noexcept
+	// Every caller already holds the single lease that spans validation and accounting.
+	bool CatalogDB::Enqueue(Event a_event) noexcept
 	{
-		ProducerLease localLease;
-		if (!a_admitted) {
-			localLease = TryAcquireProducerLease();
-			if (!localLease)
-				return false;
-		}
-
 		std::uint64_t position = _enqueuePosition.load(std::memory_order_relaxed);
 		for (;;) {
 			Cell& cell = _ring[position & (kCapacity - 1)];
@@ -1339,6 +1915,18 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	void CatalogDB::WriterLoop()
 	{
+		// Acquire pairs with the release store that publishes the committed run state.
+		auto gate = _writerGate.load(std::memory_order_acquire);
+		while (gate == WriterGate::kWaiting) {
+			_writerGate.wait(gate, std::memory_order_acquire);
+			gate = _writerGate.load(std::memory_order_acquire);
+		}
+		if (gate != WriterGate::kRun)
+			return;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		g_writerRunEntriesForTesting.fetch_add(1, std::memory_order_release);
+#endif
+
 		using namespace std::chrono;
 		const auto interval = milliseconds(
 			_config.flushIntervalMs == 0 ? 5000 : _config.flushIntervalMs);
@@ -1840,11 +2428,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		return result;
 	}
 
-	bool CatalogDB::PersistQuality()
+	bool CatalogDB::PersistQuality(const QualityCounters* a_frozen)
 	{
 		if (!_updateQuality)
 			return false;
-		const auto quality = QualitySnapshot();
+		const auto quality = a_frozen ? *a_frozen : QualitySnapshot();
 		if (!Reset(_updateQuality))
 			return false;
 		const std::uint64_t values[] = {
@@ -1873,7 +2461,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	bool CatalogDB::RefreshStats()
 	{
-		sqlite3_stmt* statement = nullptr;
+		ScopedStatement statement;
 		constexpr const char* sql =
 			"SELECT "
 			"COALESCE(SUM(attempts),0), COALESCE(SUM(successes),0), "
@@ -1888,15 +2476,15 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			") THEN 1 ELSE 0 END), "
 			"COALESCE(SUM(other_hresult_count),0) "
 			"FROM catalog_run_observations WHERE generated_run_id=?1";
-		if (!Prepare(_db, sql, &statement, "prepare run stats")
+		if (!Prepare(_db, sql, statement.Receive(), "prepare run stats")
 			|| !BindText(statement, 1, _generatedRunId)) {
 			if (statement)
-				sqlite3_finalize(statement);
+				statement.Finalize();
 			return false;
 		}
 
 		if (sqlite3_step(statement) != SQLITE_ROW) {
-			sqlite3_finalize(statement);
+			statement.Finalize();
 			return false;
 		}
 		_statAttempts.store(
@@ -1927,14 +2515,14 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			static_cast<std::uint64_t>(sqlite3_column_int64(statement, 8)),
 			std::memory_order_relaxed);
 		const bool complete = sqlite3_step(statement) == SQLITE_DONE;
-		sqlite3_finalize(statement);
+		statement.Finalize();
 		return complete;
 	}
 
 	bool CatalogDB::CheckRawExportAssociations(bool& a_complete)
 	{
 		a_complete = true;
-		sqlite3_stmt* statement = nullptr;
+		ScopedStatement statement;
 		if (!Prepare(
 				_db,
 				"SELECT exact.sha256,b.relative_path FROM ("
@@ -1945,11 +2533,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				") exact LEFT JOIN catalog_run_blobs b "
 				"ON b.generated_run_id=?2 AND b.sha256=exact.sha256 "
 				"ORDER BY exact.sha256",
-				&statement, "prepare raw export association check")
+				statement.Receive(), "prepare raw export association check")
 			|| !BindText(statement, 1, _generatedRunId)
 			|| !BindText(statement, 2, _generatedRunId)) {
 			if (statement)
-				sqlite3_finalize(statement);
+				statement.Finalize();
 			return false;
 		}
 		int step = SQLITE_OK;
@@ -1963,7 +2551,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				a_complete = false;
 			}
 		}
-		sqlite3_finalize(statement);
+		statement.Finalize();
 		return step == SQLITE_DONE;
 	}
 
@@ -1971,25 +2559,25 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 	{
 		Stats result;
 		try {
+			// One critical section: attempted identity stays hidden until published.
 			std::scoped_lock lock(_identityMutex);
-			result = _statsIdentity;
+			if (_identityPublished)
+				result = _statsIdentity;
+			result.lifecycle = _lifecycle == 1
+				? "running"
+				: (_lifecycle == 2 ? "finalized" : "inactive");
+			result.authoritative = _authoritativePublic;
+			result.generation = _runGenerationPublic;
+			result.routeCaptureRequested = _routeCaptureRequestedPublic;
+			result.routeCaptureActive = _routeCaptureActivePublic;
 		} catch (...) {
 		}
-		const int lifecycle = _lifecycle.load(std::memory_order_acquire);
-		result.lifecycle = lifecycle == 1
-			? "running"
-			: (lifecycle == 2 ? "finalized" : "inactive");
-		result.authoritative = _authoritative.load(std::memory_order_acquire);
 		result.rawExportComplete = _rawExportComplete.load(std::memory_order_acquire);
 		result.writerDrained = _writerDrained.load(std::memory_order_acquire);
 		result.hookCoverageReady =
 			_hookCoverageReady.load(std::memory_order_acquire);
 		result.orderlyFinalizerReady =
 			_orderlyFinalizerReady.load(std::memory_order_acquire);
-		result.routeCaptureRequested =
-			_config.routeCapture.requested;
-		result.routeCaptureActive =
-			lifecycle == 1 && static_cast<bool>(_routePublisher);
 		result.attempts = _statAttempts.load(std::memory_order_relaxed);
 		result.successes = _statSuccesses.load(std::memory_order_relaxed);
 		result.failures = _statFailures.load(std::memory_order_relaxed);
@@ -2084,19 +2672,21 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			|| !Exec(_db, "PRAGMA synchronous=NORMAL", "set synchronous mode"))
 			return false;
 
-		sqlite3_stmt* journal = nullptr;
+		ScopedStatement journal;
 		if (!Prepare(
-				_db, "PRAGMA journal_mode=WAL", &journal,
+				_db, "PRAGMA journal_mode=WAL", journal.Receive(),
 				"prepare WAL mode")
-			|| sqlite3_step(journal) != SQLITE_ROW) {
-			if (journal)
-				sqlite3_finalize(journal);
+			|| sqlite3_step(journal) != SQLITE_ROW)
 			return false;
-		}
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		// Throws while the transient journal statement is still live.
+		if (_config.failBootstrapStatementForTesting)
+			throw std::bad_alloc();
+#endif
 		const auto journalMode = ColumnOptionalText(journal, 0);
 		const bool journalComplete =
 			sqlite3_step(journal) == SQLITE_DONE;
-		sqlite3_finalize(journal);
+		journal.Finalize();
 		if (!journalComplete || !journalMode || *journalMode != "wal") {
 			if (auto logger = Logger(); logger)
 				logger->error("Catalog database refused WAL journal mode.");
@@ -2105,28 +2695,28 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 		if (!MigrateSchema()
 			|| !RecoverPublicationWindows()
-			|| !RecoverAbandonedRuns()
-			|| !InsertRun()
-			|| !PrepareStatements())
+			|| !RecoverAbandonedRuns())
 			return false;
-		return true;
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		if (_config.failStatementPrepareForTesting)
+			return false;
+#endif
+		// The run row is inserted by Start only after every other prerequisite is ready.
+		return PrepareStatements();
 	}
 
 	bool CatalogDB::MigrateSchema()
 	{
-		sqlite3_stmt* integrity = nullptr;
+		ScopedStatement integrity;
 		if (!Prepare(
-				_db, "PRAGMA quick_check", &integrity,
+				_db, "PRAGMA quick_check", integrity.Receive(),
 				"prepare database integrity check")
-			|| sqlite3_step(integrity) != SQLITE_ROW) {
-			if (integrity)
-				sqlite3_finalize(integrity);
+			|| sqlite3_step(integrity) != SQLITE_ROW)
 			return false;
-		}
 		const auto integrityResult = ColumnOptionalText(integrity, 0);
 		const bool integrityComplete =
 			sqlite3_step(integrity) == SQLITE_DONE;
-		sqlite3_finalize(integrity);
+		integrity.Finalize();
 		if (!integrityComplete
 			|| !integrityResult || *integrityResult != "ok") {
 			if (auto logger = Logger(); logger)
@@ -2547,16 +3137,15 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		for (const auto& [table, column] : requiredColumns)
 			success = success && ColumnExists(_db, table, column);
 
-		sqlite3_stmt* foreignKeys = nullptr;
+		ScopedStatement foreignKeys;
 		if (success) {
 			success = Prepare(
-				_db, "PRAGMA foreign_key_check", &foreignKeys,
+				_db, "PRAGMA foreign_key_check", foreignKeys.Receive(),
 				"prepare foreign key check");
 			if (success)
 				success = sqlite3_step(foreignKeys) == SQLITE_DONE;
 		}
-		if (foreignKeys)
-			sqlite3_finalize(foreignKeys);
+		foreignKeys.Finalize();
 
 		if (success) {
 			success = Exec(
@@ -2592,17 +3181,14 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			std::string rootFingerprint;
 		};
 		std::vector<Pending> pending;
-		sqlite3_stmt* query = nullptr;
+		ScopedStatement query;
 		if (!Prepare(
 				_db,
 				"SELECT generated_run_id,manifest_relative_path,"
 				"manifest_sha256,manifest_size,artifact_root_fingerprint "
 				"FROM catalog_runs WHERE publication_pending=1",
-				&query, "prepare publication recovery query")) {
-			if (query)
-				sqlite3_finalize(query);
+				query.Receive(), "prepare publication recovery query"))
 			return false;
-		}
 		int step = SQLITE_OK;
 		while ((step = sqlite3_step(query)) == SQLITE_ROW) {
 			Pending item;
@@ -2617,7 +3203,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				ColumnOptionalText(query, 4).value_or("");
 			pending.push_back(std::move(item));
 		}
-		sqlite3_finalize(query);
+		query.Finalize();
 		if (step != SQLITE_DONE)
 			return false;
 		if (pending.empty())
@@ -2639,7 +3225,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			const bool confirmed = pinned.success;
 			if (confirmed)
 				pinnedFiles.push_back(std::move(pinned));
-			sqlite3_stmt* update = nullptr;
+			ScopedStatement update;
 			const char* sql = confirmed
 				? "UPDATE catalog_runs SET lifecycle='finalized',"
 				  "authoritative=pending_authoritative,"
@@ -2653,28 +3239,27 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				  "pending_authoritative=0 "
 				  "WHERE generated_run_id=?1 AND publication_pending=1";
 			success = Prepare(
-				_db, sql, &update, "prepare publication recovery update")
+				_db, sql, update.Receive(),
+				"prepare publication recovery update")
 				&& BindText(update, 1, item.runId)
 				&& sqlite3_step(update) == SQLITE_DONE
 				&& sqlite3_changes(_db) == 1;
-			if (update)
-				sqlite3_finalize(update);
+			update.Finalize();
 			if (!success)
 				break;
 			if (!confirmed) {
-				sqlite3_stmt* quality = nullptr;
+				ScopedStatement quality;
 				success = Prepare(
 					_db,
 					"UPDATE catalog_run_quality SET "
 					"lifecycle_failure=lifecycle_failure+1 "
 					"WHERE generated_run_id=?1",
-					&quality,
+					quality.Receive(),
 					"prepare publication recovery quality")
 					&& BindText(quality, 1, item.runId)
 					&& sqlite3_step(quality) == SQLITE_DONE
 					&& sqlite3_changes(_db) == 1;
-				if (quality)
-					sqlite3_finalize(quality);
+				quality.Finalize();
 				if (!success)
 					break;
 			}
@@ -2691,28 +3276,26 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		if (!Exec(_db, "BEGIN IMMEDIATE", "abandoned-run recovery begin"))
 			return false;
 		const auto now = IsoNowUtc();
-		sqlite3_stmt* quality = nullptr;
-		sqlite3_stmt* runs = nullptr;
+		ScopedStatement quality;
+		ScopedStatement runs;
 		const bool prepared =
 			Prepare(
 				_db,
 				"UPDATE catalog_run_quality SET lifecycle_failure=lifecycle_failure+1 "
 				"WHERE generated_run_id IN "
 				"(SELECT generated_run_id FROM catalog_runs WHERE lifecycle='running')",
-				&quality, "prepare abandoned quality update")
+				quality.Receive(), "prepare abandoned quality update")
 			&& Prepare(
 				_db,
 				"UPDATE catalog_runs SET lifecycle='abandoned', ended_at=?1, "
 				"authoritative=0 WHERE lifecycle='running'",
-				&runs, "prepare abandoned run update");
+				runs.Receive(), "prepare abandoned run update");
 		const bool success = prepared
 			&& sqlite3_step(quality) == SQLITE_DONE
 			&& BindText(runs, 1, now)
 			&& sqlite3_step(runs) == SQLITE_DONE;
-		if (quality)
-			sqlite3_finalize(quality);
-		if (runs)
-			sqlite3_finalize(runs);
+		quality.Finalize();
+		runs.Finalize();
 		if (success && Exec(_db, "COMMIT", "abandoned-run recovery commit"))
 			return true;
 		Exec(_db, "ROLLBACK", "abandoned-run recovery rollback");
@@ -2721,11 +3304,22 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	bool CatalogDB::InsertRun()
 	{
+		// Every allocation happens before the transaction opens, so no throw can strand it.
+		const std::string configSnapshot =
+			"{\"writer_flush_interval_ms\":"
+			+ std::to_string(_config.flushIntervalMs)
+			+ ",\"subclass_attribution_requested\":"
+			+ (_config.subclassAttributionRequested ? "true" : "false")
+			+ ",\"subclass_attribution_enabled\":"
+			+ (_config.subclassAttributionEnabled ? "true" : "false")
+			+ "}";
+		const std::string legacyRuntime =
+			LegacyRuntime(_identity.runtimeFamily);
 		if (!Exec(_db, "BEGIN IMMEDIATE", "run insert begin"))
 			return false;
-		sqlite3_stmt* run = nullptr;
-		sqlite3_stmt* quality = nullptr;
-		sqlite3_stmt* legacy = nullptr;
+		ScopedStatement run;
+		ScopedStatement quality;
+		ScopedStatement legacy;
 		constexpr const char* runSql =
 			"INSERT INTO catalog_runs("
 			"generated_run_id,external_run_id,scenario_id,config_id,source_id,"
@@ -2740,12 +3334,14 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			"plugin_version,plugin_git_sha,config_snapshot_json"
 			") VALUES(?1,?2,?3,?4,?5,?6,?7)";
 		bool success =
-			Prepare(_db, runSql, &run, "prepare run insert")
+			Prepare(_db, runSql, run.Receive(), "prepare run insert")
 			&& Prepare(
 				_db,
 				"INSERT INTO catalog_run_quality(generated_run_id) VALUES(?1)",
-				&quality, "prepare run quality insert")
-			&& Prepare(_db, legacySql, &legacy, "prepare legacy session insert");
+				quality.Receive(), "prepare run quality insert")
+			&& Prepare(
+				_db, legacySql, legacy.Receive(),
+				"prepare legacy session insert");
 		if (success) {
 			success =
 				BindText(run, 1, _generatedRunId)
@@ -2779,20 +3375,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				&& BindText(quality, 1, _generatedRunId)
 				&& sqlite3_step(quality) == SQLITE_DONE;
 		}
-		const std::string configSnapshot =
-			"{\"writer_flush_interval_ms\":"
-			+ std::to_string(_config.flushIntervalMs)
-			+ ",\"subclass_attribution_requested\":"
-			+ (_config.subclassAttributionRequested ? "true" : "false")
-			+ ",\"subclass_attribution_enabled\":"
-			+ (_config.subclassAttributionEnabled ? "true" : "false")
-			+ "}";
 		if (success) {
 			success =
 				BindText(legacy, 1, _generatedRunId)
 				&& BindText(legacy, 2, _startedAt)
-				&& BindText(
-					legacy, 3, LegacyRuntime(_identity.runtimeFamily))
+				&& BindText(legacy, 3, legacyRuntime)
 				&& BindOptionalText(legacy, 4, _identity.runtimeVersion)
 				&& BindText(legacy, 5, _identity.pluginVersion)
 				&& BindText(legacy, 6, _identity.pluginGitIdentity)
@@ -2800,11 +3387,22 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				&& sqlite3_step(legacy) == SQLITE_DONE;
 		}
 		if (run)
-			sqlite3_finalize(run);
+			run.Finalize();
 		if (quality)
-			sqlite3_finalize(quality);
+			quality.Finalize();
 		if (legacy)
-			sqlite3_finalize(legacy);
+			legacy.Finalize();
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		if (_config.failRunInsertForTesting)
+			success = false;
+		if (const auto beforeCommit =
+				g_beforeRunCommitCallbackForTesting.load(
+					std::memory_order_acquire))
+			beforeCommit();
+		if (_config.failRunCommitForTesting)
+			success = false;
+#endif
+		// The startup commit point: nothing before it is durable or observable.
 		if (success && Exec(_db, "COMMIT", "run insert commit"))
 			return true;
 		Exec(_db, "ROLLBACK", "run insert rollback");
@@ -2993,9 +3591,10 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		bool a_rawExportComplete,
 		bool a_authoritative,
 		std::string_view a_manifestSha256,
-		std::size_t a_manifestSize)
+		std::size_t a_manifestSize,
+		const FinalizationContext& a_context)
 	{
-		sqlite3_stmt* statement = nullptr;
+		ScopedStatement statement;
 		constexpr const char* sql =
 			"UPDATE catalog_runs SET lifecycle='running',ended_at=?1,"
 			"authoritative=0,writer_drained=?2,raw_export_complete=?3,"
@@ -3005,14 +3604,14 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			"hook_coverage_ready=?8,orderly_finalizer_ready=?9,"
 			"graphics_adapter=?10,graphics_feature_level=?11 "
 			"WHERE generated_run_id=?12 AND lifecycle='running'";
-		if (!Prepare(_db, sql, &statement, "prepare run finalization"))
+		if (!Prepare(_db, sql, statement.Receive(), "prepare run finalization"))
 			return false;
 		std::optional<std::string> adapter;
 		std::optional<std::string> featureLevel;
 		{
-			std::scoped_lock lock(_identityMutex);
-			adapter = _graphicsAdapter;
-			featureLevel = _graphicsFeatureLevel;
+			// Graphics facts come only from the sealed context, never live.
+			adapter = a_context.graphicsAdapter;
+			featureLevel = a_context.graphicsFeatureLevel;
 		}
 		const std::string manifestPath =
 			"runs/" + _generatedRunId + "/manifest.v1.json";
@@ -3029,21 +3628,15 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			&& sqlite3_bind_int(
 				statement, 7, a_authoritative ? 1 : 0) == SQLITE_OK
 			&& sqlite3_bind_int(
-				statement, 8,
-				_hookCoverageReady.load(std::memory_order_acquire)
-					? 1
-					: 0) == SQLITE_OK
+				statement, 8, a_context.hookCoverageReady ? 1 : 0) == SQLITE_OK
 			&& sqlite3_bind_int(
-				statement, 9,
-				_orderlyFinalizerReady.load(std::memory_order_acquire)
-					? 1
-					: 0) == SQLITE_OK
+				statement, 9, a_context.orderlyFinalizerReady ? 1 : 0) == SQLITE_OK
 			&& BindOptionalText(statement, 10, adapter)
 			&& BindOptionalText(statement, 11, featureLevel)
 			&& BindText(statement, 12, _generatedRunId)
 			&& sqlite3_step(statement) == SQLITE_DONE
 			&& sqlite3_changes(_db) == 1;
-		sqlite3_finalize(statement);
+		statement.Finalize();
 		return success;
 	}
 
@@ -3065,12 +3658,15 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				|| !PrepareStatements())
 				return false;
 		}
+		// The caller may have finalized statements while keeping the handle open.
+		if (!_updateQuality && !PrepareStatements())
+			return false;
 		if (!Exec(_db, "BEGIN IMMEDIATE", "publication repair begin"))
 			return false;
 		const bool legacyFinalized = FinalizeLegacySession(a_endedAt);
 		if (!legacyFinalized)
 			_qualityDbWriteFailure.fetch_add(1, std::memory_order_relaxed);
-		sqlite3_stmt* run = nullptr;
+		ScopedStatement run;
 		const bool success =
 			PersistQuality()
 			&& Prepare(
@@ -3081,13 +3677,13 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				"manifest_size=NULL,publication_pending=0,"
 				"pending_authoritative=0 "
 				"WHERE generated_run_id=?2",
-				&run, "prepare publication repair")
+				run.Receive(), "prepare publication repair")
 			&& BindText(run, 1, a_endedAt)
 			&& BindText(run, 2, _generatedRunId)
 			&& sqlite3_step(run) == SQLITE_DONE
 			&& sqlite3_changes(_db) == 1;
 		if (run)
-			sqlite3_finalize(run);
+			run.Finalize();
 		if (success
 			&& Exec(_db, "COMMIT", "publication repair commit")
 			&& Checkpoint(
@@ -3116,23 +3712,25 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	bool CatalogDB::LoadManifestDocument(
 		const std::string&,
+		const FinalizationContext& a_context,
 		ManifestDocument& a_document)
 	{
-		a_document.producerVersion = _identity.pluginVersion;
-		a_document.producerBuildDescribe = _identity.pluginBuildDescribe;
-		a_document.producerGitIdentity = _identity.pluginGitIdentity;
+		a_document.producerVersion = a_context.identity.pluginVersion;
+		a_document.producerBuildDescribe =
+			a_context.identity.pluginBuildDescribe;
+		a_document.producerGitIdentity = a_context.identity.pluginGitIdentity;
 		a_document.generatedRunId = _generatedRunId;
 		a_document.externalRunId = _policy.externalRunId;
 		a_document.scenarioId = _policy.scenarioId;
 		a_document.configId = _policy.configId;
 		a_document.sourceId = _policy.sourceId;
-		a_document.runtimeFamily = _identity.runtimeFamily;
-		a_document.runtimeVersion = _identity.runtimeVersion;
+		a_document.runtimeFamily = a_context.identity.runtimeFamily;
+		a_document.runtimeVersion = a_context.identity.runtimeVersion;
 		a_document.processId = GetCurrentProcessId();
 		{
-			std::scoped_lock lock(_identityMutex);
-			a_document.graphicsAdapter = _graphicsAdapter;
-			a_document.graphicsFeatureLevel = _graphicsFeatureLevel;
+			// Graphics facts come only from the sealed context, never live.
+			a_document.graphicsAdapter = a_context.graphicsAdapter;
+			a_document.graphicsFeatureLevel = a_context.graphicsFeatureLevel;
 		}
 		a_document.evidenceMode = _policy.evidenceMode;
 		a_document.evidenceIdsSatisfied = _policy.evidenceIdsSatisfied;
@@ -3142,10 +3740,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			_config.subclassAttributionRequested;
 		a_document.subclassAttributionEnabled =
 			_config.subclassAttributionEnabled;
-		a_document.hookCoverageReady =
-			_hookCoverageReady.load(std::memory_order_acquire);
+		// Seeded from the sealed context so no live readiness or quality can leak in.
+		a_document.hookCoverageReady = a_context.hookCoverageReady;
+		a_document.orderlyFinalizerReady = a_context.orderlyFinalizerReady;
 		a_document.startedAt = _startedAt;
-		a_document.quality = QualitySnapshot();
+		a_document.quality = a_context.quality;
 		a_document.counters.attempts = _statAttempts.load(std::memory_order_relaxed);
 		a_document.counters.successes = _statSuccesses.load(std::memory_order_relaxed);
 		a_document.counters.failures = _statFailures.load(std::memory_order_relaxed);
@@ -3156,7 +3755,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		a_document.counters.attributionEvents =
 			_statAttributionEvents.load(std::memory_order_relaxed);
 
-		sqlite3_stmt* blobs = nullptr;
+		ScopedStatement blobs;
 		constexpr const char* blobsSql =
 			"SELECT c.sha256,c.sha1,c.size_bytes,b.relative_path,"
 			"c.profile,c.cb_count,c.srv_count,c.uav_count,c.sampler_count,"
@@ -3170,12 +3769,22 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			"SELECT 1 FROM catalog_run_observations o "
 			"WHERE o.generated_run_id=?1 AND o.content_sha256=c.sha256"
 			") ORDER BY c.sha256";
-		if (!Prepare(_db, blobsSql, &blobs, "prepare manifest blobs")
+		if (!Prepare(_db, blobsSql, blobs.Receive(), "prepare manifest blobs")
 			|| !BindText(blobs, 1, _generatedRunId)) {
 			if (blobs)
-				sqlite3_finalize(blobs);
+				blobs.Finalize();
 			return false;
 		}
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+		// Throws while a live prepared and bound transient statement is held.
+		if (_config.failManifestLoadForTesting) {
+			g_lastManifestThrowActiveStatements.store(
+				static_cast<std::size_t>(g_activeTransientStatements.load(
+					std::memory_order_acquire)),
+				std::memory_order_release);
+			throw std::bad_alloc();
+		}
+#endif
 		int blobStep = SQLITE_OK;
 		while ((blobStep = sqlite3_step(blobs)) == SQLITE_ROW) {
 			ManifestBlob blob;
@@ -3189,7 +3798,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				|| (blob.relativePath
 					&& *blob.relativePath
 						!= BlobRelativePath(blob.sha256))) {
-				sqlite3_finalize(blobs);
+				blobs.Finalize();
 				return false;
 			}
 			auto optionalInt = [&](int a_index) -> std::optional<int> {
@@ -3212,11 +3821,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			blob.shape.resourceSummary = ColumnOptionalText(blobs, 16);
 			a_document.blobs.push_back(std::move(blob));
 		}
-		sqlite3_finalize(blobs);
+		blobs.Finalize();
 		if (blobStep != SQLITE_DONE)
 			return false;
 
-		sqlite3_stmt* observations = nullptr;
+		ScopedStatement observations;
 		constexpr const char* observationsSql =
 			"SELECT o.observation_key,o.stage,o.content_sha256,c.sha1,"
 			"o.bytecode_state,o.submitted_size,o.stream_output_digest,"
@@ -3235,11 +3844,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			"LEFT JOIN catalog_content_identities c ON c.sha256=o.content_sha256 "
 			"WHERE o.generated_run_id=?1 ORDER BY o.observation_key";
 		if (!Prepare(
-				_db, observationsSql, &observations,
+				_db, observationsSql, observations.Receive(),
 				"prepare manifest observations")
 			|| !BindText(observations, 1, _generatedRunId)) {
 			if (observations)
-				sqlite3_finalize(observations);
+				observations.Finalize();
 			return false;
 		}
 		int observationStep = SQLITE_OK;
@@ -3337,17 +3946,17 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 				observation.streamOutput.declarationState == "copy_failure"
 				|| observation.streamOutput.stridesState == "copy_failure";
 
-			sqlite3_stmt* hresults = nullptr;
+			ScopedStatement hresults;
 			if (!Prepare(
 					_db,
 					"SELECT hresult,occurrence_count FROM catalog_run_hresult_details "
 					"WHERE generated_run_id=?1 AND observation_key=?2 ORDER BY hresult",
-					&hresults, "prepare manifest HRESULT details")
+					hresults.Receive(), "prepare manifest HRESULT details")
 				|| !BindText(hresults, 1, _generatedRunId)
 				|| !BindText(hresults, 2, observation.key)) {
 				if (hresults)
-					sqlite3_finalize(hresults);
-				sqlite3_finalize(observations);
+					hresults.Finalize();
+				observations.Finalize();
 				return false;
 			}
 			int hresultStep = SQLITE_OK;
@@ -3358,18 +3967,18 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 						sqlite3_column_int64(hresults, 1))
 				});
 			}
-			sqlite3_finalize(hresults);
+			hresults.Finalize();
 			if (hresultStep != SQLITE_DONE) {
-				sqlite3_finalize(observations);
+				observations.Finalize();
 				return false;
 			}
 			a_document.observations.push_back(std::move(observation));
 		}
-		sqlite3_finalize(observations);
+		observations.Finalize();
 		if (observationStep != SQLITE_DONE)
 			return false;
 
-		sqlite3_stmt* attributions = nullptr;
+		ScopedStatement attributions;
 		constexpr const char* attributionSql =
 			"SELECT a.sha1,"
 			"(SELECT CASE WHEN COUNT(*)=1 THEN MIN(c.sha256) ELSE NULL END "
@@ -3379,11 +3988,11 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			"FROM catalog_run_attributions a WHERE a.generated_run_id=?1 "
 			"ORDER BY a.sha1,a.subclass_name,a.technique_bits";
 		if (!Prepare(
-				_db, attributionSql, &attributions,
+				_db, attributionSql, attributions.Receive(),
 				"prepare manifest attributions")
 			|| !BindText(attributions, 1, _generatedRunId)) {
 			if (attributions)
-				sqlite3_finalize(attributions);
+				attributions.Finalize();
 			return false;
 		}
 		int attributionStep = SQLITE_OK;
@@ -3420,12 +4029,12 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 					&& attribution.objectKind != "replacement_unknown"
 					&& attribution.objectKind != "originating_stock"
 					&& attribution.objectKind != "submission_no_object")) {
-				sqlite3_finalize(attributions);
+				attributions.Finalize();
 				return false;
 			}
 			a_document.attributions.push_back(std::move(attribution));
 		}
-		sqlite3_finalize(attributions);
+		attributions.Finalize();
 		return attributionStep == SQLITE_DONE;
 	}
 
@@ -3449,4 +4058,122 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		sqlite3_close(database);
 		return success;
 	}
+
+#ifdef FO4CS_SHADER_CATALOG_TESTING
+	void CatalogDB::SetAdmissionClosedCallbackForTesting(
+		AdmissionClosedCallbackForTesting a_callback) noexcept
+	{
+		g_admissionClosedCallbackForTesting.store(
+			a_callback, std::memory_order_release);
+	}
+
+	void CatalogDB::SetBeforeRunCommitCallbackForTesting(
+		BeforeRunCommitCallbackForTesting a_callback) noexcept
+	{
+		g_beforeRunCommitCallbackForTesting.store(
+			a_callback, std::memory_order_release);
+	}
+
+	void CatalogDB::SetSharedGateClosedCallbackForTesting(
+		SharedGateClosedCallbackForTesting a_callback) noexcept
+	{
+		g_sharedGateClosedCallbackForTesting.store(
+			a_callback, std::memory_order_release);
+	}
+
+	std::size_t
+		CatalogDB::LastManifestThrowActiveStatementsForTesting() noexcept
+	{
+		return g_lastManifestThrowActiveStatements.load(
+			std::memory_order_acquire);
+	}
+
+	std::uint64_t
+		CatalogDB::ActiveProducerAdmissionsForTesting() const noexcept
+	{
+		return _producerAdmission.load(std::memory_order_acquire)
+			& kProducerCountMask;
+	}
+
+	bool CatalogDB::RoutePublisherPresentForTesting() const noexcept
+	{
+		return static_cast<bool>(_routePublisher);
+	}
+
+	void CatalogDB::SetRouteCaptureFrozenCallbackForTesting(
+		RouteCaptureFrozenCallbackForTesting a_callback) noexcept
+	{
+		g_routeCaptureFrozenCallbackForTesting.store(
+			a_callback, std::memory_order_release);
+	}
+
+	void CatalogDB::SetContextSealedCallbackForTesting(
+		ContextSealedCallbackForTesting a_callback) noexcept
+	{
+		g_contextSealedCallbackForTesting.store(
+			a_callback, std::memory_order_release);
+	}
+
+	std::uint64_t CatalogDB::WriterRunEntriesForTesting() noexcept
+	{
+		return g_writerRunEntriesForTesting.load(std::memory_order_acquire);
+	}
+
+	std::int64_t CatalogDB::ActiveTransientStatementsForTesting() noexcept
+	{
+		return g_activeTransientStatements.load(std::memory_order_acquire);
+	}
+
+	int CatalogDB::LastStartupCloseResultForTesting() noexcept
+	{
+		return g_lastStartupCloseResult.load(std::memory_order_acquire);
+	}
+
+	std::string CatalogDB::AttemptedRunIdForTesting() const
+	{
+		std::scoped_lock lock(_identityMutex);
+		return _statsIdentity.generatedRunId;
+	}
+
+	std::uint64_t CatalogDB::RouteAdmissionCloseCallsForTesting() noexcept
+	{
+		return g_routeAdmissionCloseCalls.load(std::memory_order_acquire);
+	}
+
+	bool CatalogDB::HoldStatementForCloseBusyForTesting() noexcept
+	{
+		if (!_db || g_heldStatementForTesting)
+			return false;
+		return sqlite3_prepare_v2(
+				   _db, "SELECT 1 FROM corpus_meta", -1,
+				   &g_heldStatementForTesting, nullptr)
+			== SQLITE_OK;
+	}
+
+	void CatalogDB::ReleaseHeldStatementForTesting() noexcept
+	{
+		if (g_heldStatementForTesting) {
+			sqlite3_finalize(g_heldStatementForTesting);
+			g_heldStatementForTesting = nullptr;
+		}
+	}
+
+	bool CatalogDB::RetryCheckedCloseForTesting() noexcept
+	{
+		if (!_db) {
+			_closeRetainedBusy = false;
+			return true;
+		}
+		if (sqlite3_close(_db) != SQLITE_OK)
+			return false;
+		_db = nullptr;
+		_closeRetainedBusy = false;
+		return true;
+	}
+
+	bool CatalogDB::CloseRetainedBusyForTesting() const noexcept
+	{
+		return _closeRetainedBusy;
+	}
+#endif
 }
