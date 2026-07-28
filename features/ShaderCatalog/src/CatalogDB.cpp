@@ -607,6 +607,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 
 	void CatalogDB::ResetState()
 	{
+		_routePublisher.reset();
 		_enqueuePosition.store(0, std::memory_order_relaxed);
 		_dequeuePosition.store(0, std::memory_order_relaxed);
 		_nextSequence.store(1, std::memory_order_relaxed);
@@ -689,6 +690,33 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		_generatedRunId = *generated;
 		_startedAt = IsoNowUtc();
 
+		if (_config.routeCapture.requested) {
+			RoutePublicationError routeError =
+				RoutePublicationError::kNone;
+			RouteRunIdentity routeRun{
+				.runId = _generatedRunId
+			};
+			_routePublisher = StockRuntimeRoutePublisher::Open(
+				_config.routeCapture.outputRoot,
+				_config.routeCapture.producer,
+				_config.routeCapture.runtime,
+				routeRun,
+				_config.routeCapture.scope,
+				routeError);
+			if (auto logger = Logger(); logger) {
+				if (_routePublisher) {
+					logger->info(
+						"Stock route receipt capture opened: run={} root={}",
+						_generatedRunId,
+						_config.routeCapture.outputRoot.string());
+				} else {
+					logger->error(
+						"Stock route receipt capture inactive: error={}",
+						static_cast<int>(routeError));
+				}
+			}
+		}
+
 		if (!_policy.environmentValid || !_policy.evidenceIdsSatisfied)
 			_qualityConfigurationFailure.fetch_add(1, std::memory_order_relaxed);
 		if (_policy.rawExportRequested && !_policy.exportRootValid)
@@ -757,10 +785,41 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			_producerAdmission.wait(admission, std::memory_order_acquire);
 			admission = _producerAdmission.load(std::memory_order_acquire);
 		}
+		FrozenRouteSnapshot routeSnapshot;
+		RoutePublicationError routeFreezeError =
+			RoutePublicationError::kNone;
+		const bool routeFrozen = !_routePublisher
+			|| _routePublisher->CloseCaptureAdmissionAndFreeze(
+				routeSnapshot, routeFreezeError);
 		_running.store(false, std::memory_order_release);
 		WakeWriter();
 		if (_writer.joinable())
 			_writer.join();
+
+		if (_routePublisher) {
+			bool routePublished = routeFrozen;
+			if (routePublished) {
+				for (const auto& record : routeSnapshot.records) {
+					if (!_routePublisher->PublishObservation(record).success)
+						routePublished = false;
+				}
+			}
+			const auto routeManifest =
+				_routePublisher->FinalizeRun();
+			if (auto logger = Logger(); logger) {
+				if (routePublished && routeManifest.success) {
+					logger->info(
+						"Stock route receipt capture finalized: records={} manifest={}",
+						routeSnapshot.records.size(),
+						routeManifest.document.path.string());
+				} else {
+					logger->error(
+						"Stock route receipt capture finalized non-authoritatively: freeze_error={} manifest_error={}",
+						static_cast<int>(routeFreezeError),
+						static_cast<int>(routeManifest.error));
+				}
+			}
+		}
 
 		const bool drained =
 			_enqueuePosition.load(std::memory_order_acquire)
@@ -922,6 +981,55 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			_db = nullptr;
 		}
 		return complete && authoritative;
+	}
+
+	RouteCaptureAdmission CatalogDB::BeginRouteCreate(
+		const RouteCreateInput& a_input) noexcept
+	{
+		return _routePublisher
+			? _routePublisher->BeginCreate(a_input)
+			: RouteCaptureAdmission{};
+	}
+
+	RouteCreateCommitResult CatalogDB::CompleteRouteCreate(
+		RouteCaptureAdmission&& a_admission,
+		const RouteCreateOutcome& a_outcome) noexcept
+	{
+		return _routePublisher
+			? _routePublisher->CompleteCreate(
+				std::move(a_admission), a_outcome)
+			: RouteCreateCommitResult{};
+	}
+
+	RouteBindAdmission CatalogDB::BeginRouteBind() noexcept
+	{
+		return _routePublisher
+			? _routePublisher->BeginBind()
+			: RouteBindAdmission{};
+	}
+
+	bool CatalogDB::RecordRouteBind(
+		RouteBindAdmission&& a_admission,
+		const std::shared_ptr<RouteCaptureRecordState>& a_record,
+		std::optional<RouteBindSnapshot> a_routeSnapshot) noexcept
+	{
+		return _routePublisher
+			&& _routePublisher->RecordBind(
+				std::move(a_admission),
+				a_record,
+				std::move(a_routeSnapshot));
+	}
+
+	void CatalogDB::ReleaseRouteBindReservation(
+		const std::shared_ptr<RouteCaptureRecordState>& a_record) noexcept
+	{
+		if (_routePublisher)
+			_routePublisher->ReleaseBindReservation(a_record);
+	}
+
+	bool CatalogDB::RouteCaptureActive() const noexcept
+	{
+		return static_cast<bool>(_routePublisher);
 	}
 
 	CatalogDB::ProducerLease CatalogDB::TryAcquireProducerLease() noexcept
@@ -1878,6 +1986,10 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			_hookCoverageReady.load(std::memory_order_acquire);
 		result.orderlyFinalizerReady =
 			_orderlyFinalizerReady.load(std::memory_order_acquire);
+		result.routeCaptureRequested =
+			_config.routeCapture.requested;
+		result.routeCaptureActive =
+			lifecycle == 1 && static_cast<bool>(_routePublisher);
 		result.attempts = _statAttempts.load(std::memory_order_relaxed);
 		result.successes = _statSuccesses.load(std::memory_order_relaxed);
 		result.failures = _statFailures.load(std::memory_order_relaxed);

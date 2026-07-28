@@ -18,7 +18,9 @@
 #include "Log.h"
 #include "PixelShaderTracker.h"
 #include "Plugin.h"
+#include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderSubclassHooks.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 #include "Settings/FeatureConfig.h"
 #include "Sha1.h"
 #include "SubclassAttribution.h"
@@ -94,6 +96,208 @@ namespace cs::features
 			std::snprintf(buf, sizeof(buf), "%u.%u.%u",
 				Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
 			return std::string(buf);
+		}
+
+		catalog::RouteResolverRegistrySnapshot
+			ReadRouteResolverRegistry() noexcept
+		{
+			const auto snapshot =
+				cs::engine::GetPixelShaderResolverRegistrySnapshot();
+			return {
+				snapshot.valid,
+				snapshot.generation,
+				snapshot.empty,
+				snapshot.sha256
+			};
+		}
+
+		bool RouteCaptureHooksReady() noexcept
+		{
+			const auto setupHooks =
+				cs::engine::GetSetupTechniqueHookInstallStats();
+			return catalog::CatalogDB::Get()
+					.GetStats().hookCoverageReady
+				&& setupHooks.attempted != 0
+				&& setupHooks.succeeded == setupHooks.attempted
+				&& setupHooks.failed == 0;
+		}
+
+		bool GetModulePath(
+			std::uintptr_t a_address,
+			HMODULE& a_module,
+			std::filesystem::path& a_path,
+			std::string& a_error)
+		{
+			a_module = nullptr;
+			if (!GetModuleHandleExW(
+					GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS
+						| GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+					reinterpret_cast<LPCWSTR>(a_address),
+					&a_module)
+				|| !a_module) {
+				a_error = "unable to resolve loaded plugin module";
+				return false;
+			}
+			std::vector<wchar_t> path(32768);
+			const DWORD length = GetModuleFileNameW(
+				a_module,
+				path.data(),
+				static_cast<DWORD>(path.size()));
+			if (length == 0
+				|| static_cast<std::size_t>(length) >= path.size()) {
+				a_error = "unable to resolve loaded plugin path";
+				return false;
+			}
+			a_path = std::filesystem::path(
+				path.data(), path.data() + length);
+			return true;
+		}
+
+		bool BuildRouteCaptureConfig(
+			const ShaderCatalog::Settings& a_settings,
+			const RuntimeVersion& a_runtimeVersion,
+			catalog::DbConfig::RouteCaptureConfig& a_config,
+			std::string& a_error)
+		{
+			a_config = {};
+			a_config.requested =
+				a_settings.routeReceiptCapture;
+			if (!a_settings.routeReceiptCapture)
+				return true;
+			if (a_settings.routeReceiptOutputRoot.empty()) {
+				a_error =
+					"RouteReceiptOutputRoot is required when route receipt capture is enabled";
+				return false;
+			}
+			const std::filesystem::path outputRoot(
+				a_settings.routeReceiptOutputRoot);
+			if (!outputRoot.is_absolute()) {
+				a_error =
+					"RouteReceiptOutputRoot must be absolute";
+				return false;
+			}
+
+			const auto createHookAddress =
+				cs::engine::PixelShaderSwapBrokerCreateHookAddress();
+			HMODULE pluginModule = nullptr;
+			std::filesystem::path pluginPath;
+			if (!GetModulePath(
+					createHookAddress,
+					pluginModule,
+					pluginPath,
+					a_error)) {
+				return false;
+			}
+			std::string pluginSha256;
+			std::uint64_t pluginLength = 0;
+			if (!catalog::ComputeRouteFileSha256(
+					pluginPath,
+					pluginSha256,
+					pluginLength,
+					a_error)) {
+				return false;
+			}
+
+			HMODULE executable = GetModuleHandleW(L"Fallout4.exe");
+			if (!executable) {
+				a_error = "unable to resolve Fallout4.exe";
+				return false;
+			}
+			std::vector<wchar_t> executablePathBuffer(32768);
+			const DWORD executablePathLength = GetModuleFileNameW(
+				executable,
+				executablePathBuffer.data(),
+				static_cast<DWORD>(executablePathBuffer.size()));
+			if (executablePathLength == 0
+				|| static_cast<std::size_t>(executablePathLength)
+					>= executablePathBuffer.size()) {
+				a_error = "unable to resolve Fallout4.exe path";
+				return false;
+			}
+			const std::filesystem::path executablePath(
+				executablePathBuffer.data(),
+				executablePathBuffer.data() + executablePathLength);
+			std::string executableSha256;
+			std::uint64_t executableLength = 0;
+			if (!catalog::ComputeRouteFileSha256(
+					executablePath,
+					executableSha256,
+					executableLength,
+					a_error)) {
+				return false;
+			}
+
+			catalog::RouteCodeIdentity createHook;
+			if (!catalog::ResolveRouteCodeIdentity(
+					pluginPath,
+					reinterpret_cast<std::uintptr_t>(pluginModule),
+					createHookAddress,
+					"PixelShaderSwapBroker::CreatePixelShaderHook::thunk",
+					createHook,
+					a_error)) {
+				return false;
+			}
+			catalog::RouteCodeIdentity bindHook;
+			if (!catalog::ResolveRouteCodeIdentity(
+					pluginPath,
+					reinterpret_cast<std::uintptr_t>(pluginModule),
+					reinterpret_cast<std::uintptr_t>(
+						&catalog::hooks::PSSetShaderHook::thunk),
+					"ShaderCatalog::PSSetShaderHook::thunk",
+					bindHook,
+					a_error)) {
+				return false;
+			}
+			const auto resolverAddresses =
+				cs::engine::
+					GetPixelShaderRuntimeResolverCodeAddresses();
+			const std::array resolverRanges{
+				catalog::RouteResolverCodeRangeRequest{
+					{ "runtime-gate", "tiled-state" },
+					"ResolvePixelShaderRuntimeRoute",
+					resolverAddresses.runtimeResolver
+				},
+				catalog::RouteResolverCodeRangeRequest{
+					{ "formula" },
+					"ResolvePixelShaderVariantFormula",
+					resolverAddresses.formulaResolver
+				}
+			};
+			catalog::RoutePluginRuntimeResolverIdentity resolver;
+			if (!catalog::ResolveRoutePluginRuntimeResolverIdentity(
+					pluginPath,
+					reinterpret_cast<std::uintptr_t>(pluginModule),
+					"ShaderVariantRuntimeResolver",
+					"1",
+					"fo4cs.pixel-shader-runtime-route.v1",
+					resolverRanges,
+					resolver,
+					a_error)) {
+				return false;
+			}
+
+			a_config.outputRoot = outputRoot;
+			a_config.producer = {
+				"FO4CommunityShaders",
+				PluginVersionString(),
+				std::move(pluginSha256)
+			};
+			a_config.runtime = {
+				RuntimeLabel(a_runtimeVersion),
+				RuntimeBuildString(a_runtimeVersion),
+				std::move(executableSha256)
+			};
+			a_config.scope.createHook = std::move(createHook);
+			a_config.scope.bindHook = std::move(bindHook);
+			a_config.scope.pluginRuntimeResolver =
+				std::move(resolver);
+			a_config.scope.resolverRegistryOpen =
+				ReadRouteResolverRegistry();
+			a_config.scope.resolverRegistrySnapshot =
+				&ReadRouteResolverRegistry;
+			a_config.scope.hookCoverageReady =
+				&RouteCaptureHooksReady;
+			return true;
 		}
 
 		std::optional<std::string> WideToUtf8(const wchar_t* a_value)
@@ -218,7 +422,21 @@ namespace cs::features
 					"catalog_path", "string", "string value is out of range", a_error)
 				&& AcceptSetting(
 					feature_config::ReadBool(*settingsTable, "subclass_attribution", a_candidate.subclassAttribution),
-					"subclass_attribution", "boolean", "boolean value is out of range", a_error);
+					"subclass_attribution", "boolean", "boolean value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadBool(
+						*settingsTable,
+						"route_receipt_capture",
+						a_candidate.routeReceiptCapture),
+					"route_receipt_capture", "boolean",
+					"boolean value is out of range", a_error)
+				&& AcceptSetting(
+					feature_config::ReadString(
+						*settingsTable,
+						"route_receipt_output_root",
+						a_candidate.routeReceiptOutputRoot),
+					"route_receipt_output_root", "string",
+					"string value is out of range", a_error);
 		}
 	}
 
@@ -276,6 +494,12 @@ namespace cs::features
 		settings.insert_or_assign("writer_flush_interval_ms", static_cast<int64_t>(_settings.writerFlushIntervalMs));
 		settings.insert_or_assign("catalog_path", _settings.catalogPath);
 		settings.insert_or_assign("subclass_attribution", _settings.subclassAttribution);
+		settings.insert_or_assign(
+			"route_receipt_capture",
+			_settings.routeReceiptCapture);
+		settings.insert_or_assign(
+			"route_receipt_output_root",
+			_settings.routeReceiptOutputRoot);
 
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
 			L->error("Failed to save settings: {}", result.error);
@@ -295,14 +519,24 @@ namespace cs::features
 			cs::engine::GetShaderSubclassRuntimeLayout();
 		const bool subclassAttributionEnabled =
 			_settings.subclassAttribution && subclassLayout.verified;
+		const auto rtVersion = GetRuntimeVersion();
 		catalog::DbConfig dbc;
 		dbc.catalogPath = _settings.catalogPath;
 		dbc.flushIntervalMs =
 			static_cast<std::uint32_t>(_settings.writerFlushIntervalMs);
 		dbc.subclassAttributionRequested = _settings.subclassAttribution;
 		dbc.subclassAttributionEnabled = subclassAttributionEnabled;
+		std::string routeCaptureError;
+		if (!BuildRouteCaptureConfig(
+				_settings,
+				rtVersion,
+				dbc.routeCapture,
+				routeCaptureError)) {
+			L->error(
+				"Stock route receipt capture configuration rejected: {}",
+				routeCaptureError);
+		}
 
-		const auto rtVersion = GetRuntimeVersion();
 		const char* runtime = RuntimeLabel(rtVersion);
 		const auto build = RuntimeBuildString(rtVersion);
 		const auto version = PluginVersionString();
@@ -422,6 +656,12 @@ namespace cs::features
 			.Field(
 				"orderly_finalizer_ready",
 				stats.orderlyFinalizerReady)
+			.Field(
+				"route_capture_requested",
+				stats.routeCaptureRequested)
+			.Field(
+				"route_capture_active",
+				stats.routeCaptureActive)
 			.Field("attributed_ps", static_cast<std::int64_t>(stats.attributedPs))
 			.Field("total_ps", static_cast<std::int64_t>(stats.totalPs))
 			.Field("scoped", static_cast<std::int64_t>(binds.scopedBinds))

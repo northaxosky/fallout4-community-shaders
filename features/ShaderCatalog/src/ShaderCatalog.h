@@ -37,6 +37,8 @@ namespace cs::features
 			std::string catalogPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\shader-catalog.sqlite";
 			// Catalog map enrichment stays off when the BSShader layout is unverified.
 			bool        subclassAttribution = true;
+			bool        routeReceiptCapture = false;
+			std::string routeReceiptOutputRoot;
 		};
 
 	private:

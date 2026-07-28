@@ -6,6 +6,21 @@ namespace cs::engine
 {
 	namespace
 	{
+		__declspec(noinline)
+		std::optional<ShaderVariantKeyView>
+			ResolvePixelShaderVariantFormulaForIdentity(
+				std::string_view a_subclass,
+				std::uint32_t a_techniqueBits,
+				std::optional<bool> a_tiledLighting) noexcept
+		{
+			volatile std::uint32_t stableTechnique =
+				a_techniqueBits;
+			return ResolvePixelShaderVariant(
+				a_subclass,
+				stableTechnique,
+				a_tiledLighting);
+		}
+
 		std::optional<bool> QueryNgAeTileLightingEnabled() noexcept
 		{
 			if (!REX::FModule::IsRuntimeNG()
@@ -32,19 +47,54 @@ namespace cs::engine
 		std::string_view a_subclass,
 		std::uint32_t a_techniqueBits) noexcept
 	{
-		if (!IsPixelShaderVariantResolutionAvailable())
+		const auto route = ResolvePixelShaderRuntimeRoute(
+			a_subclass, a_techniqueBits);
+		if (!route || !route->pluginResolvedPsid)
+			return std::nullopt;
+		return ShaderVariantKeyView{
+			route->subclass,
+			route->stage,
+			*route->pluginResolvedPsid
+		};
+	}
+
+	std::optional<PixelShaderRuntimeRoute> ResolvePixelShaderRuntimeRoute(
+		std::string_view a_subclass,
+		std::uint32_t a_techniqueBits) noexcept
+	{
+		if (a_subclass.empty())
 			return std::nullopt;
 
-		if (a_subclass != "BSDFCompositeShader") {
-			return ResolvePixelShaderVariant(
-				a_subclass,
-				a_techniqueBits,
-				std::nullopt);
+		PixelShaderRuntimeRoute route{
+			.subclass = a_subclass,
+			.stage = ShaderStage::kPixel,
+			.rawTechnique = a_techniqueBits
+		};
+		if (!IsPixelShaderVariantResolutionAvailable())
+			return route;
+
+		if (a_subclass == "BSDFCompositeShader") {
+			route.tiledLighting = QueryNgAeTileLightingEnabled();
 		}
 
-		return ResolvePixelShaderVariant(
+		const auto variant =
+			ResolvePixelShaderVariantFormulaForIdentity(
 			a_subclass,
 			a_techniqueBits,
-			QueryNgAeTileLightingEnabled());
+			route.tiledLighting);
+		if (variant)
+			route.pluginResolvedPsid = variant->id;
+		return route;
+	}
+
+	PixelShaderRuntimeResolverCodeAddresses
+		GetPixelShaderRuntimeResolverCodeAddresses() noexcept
+	{
+		return {
+			reinterpret_cast<std::uintptr_t>(
+				&ResolvePixelShaderRuntimeRoute),
+			reinterpret_cast<std::uintptr_t>(
+				&ResolvePixelShaderVariantFormulaForIdentity)
+		};
 	}
 }

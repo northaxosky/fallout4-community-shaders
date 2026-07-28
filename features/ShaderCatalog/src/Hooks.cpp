@@ -6,6 +6,7 @@
 #include "PixelShaderTracker.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderSubclassContext.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 
 #include <atomic>
 #include <memory>
@@ -28,6 +29,7 @@ namespace cs::features::catalog::hooks
 		struct PixelToken
 		{
 			PreparedObservation prepared;
+			RouteCaptureAdmission routeAdmission;
 		};
 
 		bool BeginPixelShaderAdmission() noexcept
@@ -76,15 +78,42 @@ namespace cs::features::catalog::hooks
 				std::move(observation), &a_lease);
 		}
 
-		void* PreparePixelShaderBytecode(
-			const void* a_bytecode,
-			std::size_t a_bytecodeLength) noexcept
+		void* PreparePixelShaderBytecodeDetailed(
+			const cs::engine::PixelShaderCreationDescriptor&
+				a_descriptor) noexcept
 		{
-			auto* token = new (std::nothrow) PixelToken{
-				Prepare('p', a_bytecode, a_bytecodeLength, 3)
+			RouteCreateInput routeInput{
+				.routePresent = a_descriptor.route.has_value(),
+				.classLinkagePresent =
+					a_descriptor.classLinkagePresent
 			};
+			if (a_descriptor.route) {
+				routeInput.subclass =
+					a_descriptor.route->subclass;
+				routeInput.rawTechnique =
+					a_descriptor.route->rawTechnique;
+				if (a_descriptor.route->pluginResolvedPsid) {
+					routeInput.pluginResolvedPsid =
+						a_descriptor.route
+							->pluginResolvedPsid->Value();
+				}
+				routeInput.tiledLighting =
+					a_descriptor.route->tiledLighting;
+			}
+			auto routeAdmission =
+				CatalogDB::Get().BeginRouteCreate(routeInput);
+			auto* token = new (std::nothrow) PixelToken;
 			if (!token)
 				CatalogDB::Get().RecordAllocationFailure();
+			else {
+				token->routeAdmission =
+					std::move(routeAdmission);
+				token->prepared = Prepare(
+					'p',
+					a_descriptor.bytecode,
+					a_descriptor.bytecodeLength,
+					3);
+			}
 			return token;
 		}
 
@@ -110,6 +139,67 @@ namespace cs::features::catalog::hooks
 			if (!token)
 				return;
 			auto& prepared = token->prepared;
+			RouteCreateCommitResult routeCommit;
+			if (token->routeAdmission) {
+				RouteCreateOutcome routeOutcome{
+					.byteLength = prepared.submittedSize,
+					.hresult = static_cast<std::uint32_t>(
+						a_completion.originalResult),
+					.creationSucceeded =
+						SUCCEEDED(a_completion.originalResult),
+					.outputNonNull =
+						a_completion.stockOutput != nullptr,
+					.originalInputUnchanged =
+						a_completion.originalInputUnchanged,
+					.resolverInvoked =
+						a_completion.resolverInvoked
+				};
+				if (prepared.digest) {
+					routeOutcome.sha1 = HexLower(
+						prepared.digest->sha1.data(),
+						prepared.digest->sha1.size());
+					routeOutcome.sha256 = HexLower(
+						prepared.digest->sha256.data(),
+						prepared.digest->sha256.size());
+				}
+				if (routeOutcome.creationSucceeded
+					&& routeOutcome.outputNonNull) {
+					routeOutcome.finalObjectStock =
+						a_completion.finalIsStock;
+				}
+				routeCommit =
+					CatalogDB::Get().CompleteRouteCreate(
+						std::move(token->routeAdmission),
+						routeOutcome);
+				if (routeCommit.enqueued
+					&& routeCommit.usableStockObject
+					&& routeCommit.record
+					&& a_completion.stockOutput
+					&& prepared.digest) {
+					Sha1Result sha{};
+					sha.bytes = prepared.digest->sha1;
+					const auto routeTracked =
+						shader_tracker::TrackRouteLineage(
+							a_completion.stockOutput,
+							sha,
+							routeCommit.record);
+					if (routeTracked
+						== shader_tracker::RouteTrackResult::
+							kAllocationFailure) {
+						CatalogDB::Get()
+							.RecordAllocationFailure();
+					} else if (
+						routeTracked
+							== shader_tracker::RouteTrackResult::
+								kAmbiguous
+						|| routeTracked
+							== shader_tracker::RouteTrackResult::
+								kDuplicate) {
+						CatalogDB::Get()
+							.RecordHookObserverGap();
+					}
+				}
+			}
 
 			if (a_completion.finalIsReplacement
 				&& a_completion.finalOutput
@@ -191,7 +281,41 @@ namespace cs::features::catalog::hooks
 		UINT a_numClassInstances)
 	{
 		auto lease = CatalogDB::Get().TryAcquireProducerLease();
+		auto routeBind = CatalogDB::Get().BeginRouteBind();
 		func(a_this, a_shader, a_classInstances, a_numClassInstances);
+
+		if (routeBind && a_shader) {
+			const auto routeRecord =
+				shader_tracker::TryReserveRouteBind(a_shader);
+			if (routeRecord) {
+				std::optional<RouteBindSnapshot> bindRoute;
+				const auto current =
+					cs::engine::shader_context::CurrentOrSticky();
+				if (current.active
+					&& current.techniqueKnown
+					&& current.subclassName) {
+					const auto resolved =
+						cs::engine::ResolvePixelShaderRuntimeRoute(
+							current.subclassName,
+							current.techniqueBits);
+					if (resolved) {
+						bindRoute = RouteBindSnapshot{
+							std::string(resolved->subclass),
+							"ps",
+							resolved->rawTechnique,
+							resolved->tiledLighting
+						};
+					}
+				}
+				if (!CatalogDB::Get().RecordRouteBind(
+						std::move(routeBind),
+						routeRecord,
+						std::move(bindRoute))) {
+					CatalogDB::Get()
+						.ReleaseRouteBindReservation(routeRecord);
+				}
+			}
+		}
 
 		if (!g_subclassAttributionEnabled.load(
 				std::memory_order_acquire)) {
@@ -369,11 +493,12 @@ namespace cs::features::catalog::hooks
 		if (!observerRegistered) {
 			observerRegistered =
 				cs::engine::RegisterPixelShaderSwapObserver({
-					&BeginPixelShaderAdmission,
-					&EndPixelShaderAdmission,
-					&PreparePixelShaderBytecode,
-					&ObserveOriginalPixelShader,
-					&CompletePixelShader
+					.beginAdmission = &BeginPixelShaderAdmission,
+					.endAdmission = &EndPixelShaderAdmission,
+					.observeOriginal = &ObserveOriginalPixelShader,
+					.complete = &CompletePixelShader,
+					.prepareDetailed =
+						&PreparePixelShaderBytecodeDetailed
 				});
 			if (observerRegistered) {
 				g_pixelObserverRegistered.store(

@@ -9,11 +9,13 @@
 
 #include <array>
 #include <cstddef>
+#include <compare>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
-#include <memory>
+#include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -167,6 +169,384 @@ namespace cs::features::catalog
 		std::filesystem::path relativePath;
 		std::string error;
 	};
+
+	struct RouteCodeRange
+	{
+		std::uint32_t startRva = 0;
+		std::uint64_t byteLength = 0;
+	};
+
+	struct RouteCodeIdentity
+	{
+		std::string module = "FO4CommunityShaders.dll";
+		std::string symbol;
+		std::uint32_t rva = 0;
+		RouteCodeRange codeRange;
+		std::string codeSha256;
+	};
+
+	struct RouteResolverCodeRange
+	{
+		std::vector<std::string> roles;
+		std::string symbol;
+		std::uint32_t rva = 0;
+		RouteCodeRange codeRange;
+		std::string codeSha256;
+	};
+
+	struct RoutePluginRuntimeResolverIdentity
+	{
+		std::string name;
+		std::string version;
+		std::string formulaId;
+		std::string implementationSha256;
+		std::vector<RouteResolverCodeRange> codeRanges;
+	};
+
+	struct RouteProducerIdentity
+	{
+		std::string name = "FO4CommunityShaders";
+		std::string version;
+		std::string binarySha256;
+	};
+
+	struct RouteRuntimeIdentity
+	{
+		std::string name;
+		std::string version;
+		std::string executableSha256;
+	};
+
+	struct RouteRunIdentity
+	{
+		std::string runId;
+		std::string scenarioId = "stock-pixel-shader-routes-v1";
+		bool stockOnly = true;
+	};
+
+	struct RouteResolverRegistrySnapshot
+	{
+		bool valid = false;
+		std::uint64_t generation = 0;
+		bool empty = true;
+		std::string sha256;
+	};
+
+	using RouteResolverRegistrySnapshotProvider =
+		RouteResolverRegistrySnapshot (*)() noexcept;
+	using RouteHookCoverageProvider = bool (*)() noexcept;
+
+	struct RouteCaptureScope
+	{
+		bool enabled = true;
+		std::string configurationSha256;
+		std::vector<std::string> includedSubclasses{ "*" };
+		std::vector<std::string> includedStages{ "ps" };
+		std::vector<std::string> eligibilityRules{
+			"scoped-setup-technique",
+			"stock-create-pixel-shader-callback",
+			"stock-only-run"
+		};
+
+		RouteCodeIdentity createHook;
+		RouteCodeIdentity bindHook;
+		RoutePluginRuntimeResolverIdentity pluginRuntimeResolver;
+		RouteResolverRegistrySnapshot resolverRegistryOpen;
+		RouteResolverRegistrySnapshotProvider resolverRegistrySnapshot = nullptr;
+		RouteHookCoverageProvider hookCoverageReady = nullptr;
+	};
+
+	struct RouteSnapshot
+	{
+		std::string subclass;
+		std::string stage = "ps";
+		std::uint32_t rawTechnique = 0;
+		std::optional<std::uint32_t> observedLookupPsid;
+		std::optional<std::uint32_t> pluginResolvedPsid;
+		std::optional<RoutePluginRuntimeResolverIdentity>
+			pluginRuntimeResolver;
+		std::optional<bool> tiledLighting;
+	};
+
+	struct RouteBindSnapshot
+	{
+		std::string subclass;
+		std::string stage = "ps";
+		std::uint32_t rawTechnique = 0;
+		std::optional<bool> tiledLighting;
+
+		auto operator<=>(const RouteBindSnapshot&) const = default;
+	};
+
+	struct RouteCreateEvent
+	{
+		std::string eventId;
+		std::uint64_t sequence = 0;
+		std::uint64_t threadId = 0;
+		RouteCodeIdentity hook;
+		std::string classLinkageState = "absent";
+	};
+
+	struct RouteBindEvent
+	{
+		std::string eventId;
+		std::uint64_t sequence = 0;
+		std::uint64_t threadId = 0;
+		RouteCodeIdentity hook;
+		std::optional<RouteBindSnapshot> routeSnapshot;
+	};
+
+	enum class RouteLineageStatus
+	{
+		kNotCreated,
+		kPendingBind,
+		kLinked,
+		kAmbiguous,
+		kDuplicate,
+		kRouteMismatch
+	};
+
+	struct RouteLineage
+	{
+		RouteLineageStatus status = RouteLineageStatus::kNotCreated;
+		std::optional<std::string> shaderObjectId;
+		bool queueEnqueueSucceeded = false;
+		std::optional<std::uint64_t> queueEnqueueSequence;
+		std::optional<std::string> pointerLineageEventId;
+		std::optional<bool> bindRouteContextMatch;
+	};
+
+	struct RouteObservationFacts
+	{
+		bool routeContextObserved = true;
+		bool engineLookupObserved = false;
+		bool creationObserved = true;
+		bool creationSucceeded = false;
+		bool creationOutputNonNull = false;
+		bool bindObserved = false;
+		bool gpuExecutionObserved = false;
+	};
+
+	struct RouteStockAuthority
+	{
+		bool originalInputUnchanged = true;
+		std::optional<bool> finalObjectStock;
+		bool resolverInvoked = false;
+	};
+
+	struct StockRuntimeRouteObservation
+	{
+		RouteProducerIdentity producer;
+		RouteRuntimeIdentity runtime;
+		RouteRunIdentity run;
+		std::string recordId;
+		std::uint64_t recordSequence = 0;
+		std::uint64_t byteLength = 0;
+		std::string sha1;
+		std::string sha256;
+		RouteSnapshot route;
+		RouteCreateEvent stockCreate;
+		std::optional<RouteBindEvent> bind;
+		RouteLineage lineage;
+		RouteObservationFacts facts;
+		RouteStockAuthority stockAuthority;
+		bool captureAuthoritative = false;
+		std::vector<std::string> authorityReasons;
+	};
+
+	struct RouteCaptureRecordState
+	{
+		mutable std::mutex mutex;
+		StockRuntimeRouteObservation observation;
+		bool bindReserved = false;
+	};
+
+	struct RouteCreateInput
+	{
+		bool routePresent = false;
+		bool routeAmbiguous = false;
+		std::string_view subclass;
+		std::string_view stage = "ps";
+		std::uint32_t rawTechnique = 0;
+		std::optional<std::uint32_t> pluginResolvedPsid;
+		std::optional<bool> tiledLighting;
+		bool classLinkagePresent = false;
+	};
+
+	struct RouteCreateOutcome
+	{
+		std::uint64_t byteLength = 0;
+		std::string sha1;
+		std::string sha256;
+		std::uint32_t hresult = 0;
+		bool creationSucceeded = false;
+		bool outputNonNull = false;
+		bool originalInputUnchanged = true;
+		std::optional<bool> finalObjectStock;
+		bool resolverInvoked = false;
+	};
+
+	class StockRuntimeRoutePublisher;
+
+	class RouteCaptureAdmission
+	{
+	public:
+		RouteCaptureAdmission() = default;
+		~RouteCaptureAdmission();
+		RouteCaptureAdmission(RouteCaptureAdmission&& a_other) noexcept;
+		RouteCaptureAdmission& operator=(RouteCaptureAdmission&& a_other) noexcept;
+		RouteCaptureAdmission(const RouteCaptureAdmission&) = delete;
+		RouteCaptureAdmission& operator=(const RouteCaptureAdmission&) = delete;
+		explicit operator bool() const noexcept { return _owner != nullptr; }
+
+	private:
+		friend class StockRuntimeRoutePublisher;
+		StockRuntimeRoutePublisher* _owner = nullptr;
+		std::uint64_t _createSequence = 0;
+		std::uint64_t _threadId = 0;
+		bool _classLinkagePresent = false;
+		bool _included = false;
+		RouteSnapshot _route;
+	};
+
+	struct RouteCreateCommitResult
+	{
+		bool enqueued = false;
+		bool usableStockObject = false;
+		std::shared_ptr<RouteCaptureRecordState> record;
+	};
+
+	class RouteBindAdmission
+	{
+	public:
+		RouteBindAdmission() = default;
+		~RouteBindAdmission();
+		RouteBindAdmission(RouteBindAdmission&& a_other) noexcept;
+		RouteBindAdmission& operator=(RouteBindAdmission&& a_other) noexcept;
+		RouteBindAdmission(const RouteBindAdmission&) = delete;
+		RouteBindAdmission& operator=(const RouteBindAdmission&) = delete;
+		explicit operator bool() const noexcept { return _owner != nullptr; }
+
+	private:
+		friend class StockRuntimeRoutePublisher;
+		StockRuntimeRoutePublisher* _owner = nullptr;
+	};
+
+	struct FrozenRouteRecord
+	{
+		StockRuntimeRouteObservation observation;
+	};
+
+	struct FrozenRouteSnapshot
+	{
+		std::vector<FrozenRouteRecord> records;
+	};
+
+	enum class RoutePublicationError
+	{
+		kNone,
+		kInvalidRoot,
+		kInvalidIdentity,
+		kInvalidScope,
+		kStockOnlyViolation,
+		kInvalidRecord,
+		kCaptureAdmissionClosed,
+		kPublisherAdmissionClosed,
+		kAlreadyFinalized,
+		kUnsafePath,
+		kCanonicalizationFailed,
+		kIoFailed,
+		kFlushFailed,
+		kCollision
+	};
+
+	struct PublishedRouteDocument
+	{
+		std::array<std::uint8_t, 32> sha256{};
+		std::uint64_t byteLength = 0;
+		std::filesystem::path path;
+	};
+
+	struct RoutePublicationResult
+	{
+		bool success = false;
+		PublishedRouteDocument document;
+		RoutePublicationError error = RoutePublicationError::kNone;
+	};
+
+	class StockRuntimeRoutePublisher
+	{
+	public:
+		static std::unique_ptr<StockRuntimeRoutePublisher> Open(
+			const std::filesystem::path& a_publicationRoot,
+			const RouteProducerIdentity& a_producer,
+			const RouteRuntimeIdentity& a_runtime,
+			const RouteRunIdentity& a_run,
+			const RouteCaptureScope& a_scope,
+			RoutePublicationError& a_error) noexcept;
+
+		~StockRuntimeRoutePublisher();
+
+		RouteCaptureAdmission BeginCreate(
+			const RouteCreateInput& a_input) noexcept;
+		RouteCreateCommitResult CompleteCreate(
+			RouteCaptureAdmission&& a_admission,
+			const RouteCreateOutcome& a_outcome) noexcept;
+		RouteBindAdmission BeginBind() noexcept;
+		bool RecordBind(
+			RouteBindAdmission&& a_admission,
+			const std::shared_ptr<RouteCaptureRecordState>& a_record,
+			std::optional<RouteBindSnapshot> a_routeSnapshot) noexcept;
+		void ReleaseBindReservation(
+			const std::shared_ptr<RouteCaptureRecordState>& a_record) noexcept;
+
+		bool CloseCaptureAdmissionAndFreeze(
+			FrozenRouteSnapshot& a_snapshot,
+			RoutePublicationError& a_error) noexcept;
+		RoutePublicationResult PublishObservation(
+			const FrozenRouteRecord& a_record) noexcept;
+		RoutePublicationResult FinalizeRun() noexcept;
+
+	private:
+		friend class RouteCaptureAdmission;
+		friend class RouteBindAdmission;
+		struct Impl;
+		explicit StockRuntimeRoutePublisher(std::unique_ptr<Impl> a_impl);
+		void AbandonCreate(RouteCaptureAdmission& a_admission) noexcept;
+		void ReleaseBind(RouteBindAdmission& a_admission) noexcept;
+		std::unique_ptr<Impl> _impl;
+	};
+
+	struct RouteResolverCodeRangeRequest
+	{
+		std::vector<std::string> roles;
+		std::string symbol;
+		std::uintptr_t functionAddress = 0;
+	};
+
+	bool ComputeRouteFileSha256(
+		const std::filesystem::path& a_path,
+		std::string& a_sha256,
+		std::uint64_t& a_length,
+		std::string& a_error) noexcept;
+	bool ResolveRouteCodeIdentity(
+		const std::filesystem::path& a_modulePath,
+		std::uintptr_t a_loadedModuleBase,
+		std::uintptr_t a_functionAddress,
+		std::string_view a_symbol,
+		RouteCodeIdentity& a_identity,
+		std::string& a_error) noexcept;
+	bool ResolveRoutePluginRuntimeResolverIdentity(
+		const std::filesystem::path& a_modulePath,
+		std::uintptr_t a_loadedModuleBase,
+		std::string_view a_name,
+		std::string_view a_version,
+		std::string_view a_formulaId,
+		std::span<const RouteResolverCodeRangeRequest> a_ranges,
+		RoutePluginRuntimeResolverIdentity& a_identity,
+		std::string& a_error) noexcept;
+	std::string BuildCanonicalRouteObservation(
+		const StockRuntimeRouteObservation& a_observation);
 
 	struct ManifestShape
 	{

@@ -24,6 +24,15 @@ namespace cs::features::catalog
 {
 	struct DbConfig
 	{
+		struct RouteCaptureConfig
+		{
+			bool requested = false;
+			std::filesystem::path outputRoot;
+			RouteProducerIdentity producer;
+			RouteRuntimeIdentity runtime;
+			RouteCaptureScope scope;
+		};
+
 		struct FinalizationFaults
 		{
 			bool persistence = false;
@@ -37,6 +46,7 @@ namespace cs::features::catalog
 		bool subclassAttributionEnabled = false;
 		std::optional<RunPolicy> policyOverride;
 		std::optional<std::filesystem::path> artifactRootOverride;
+		RouteCaptureConfig routeCapture;
 #ifdef FO4CS_SHADER_CATALOG_TESTING
 		bool orderlyFinalizerReadyForTesting = false;
 #endif
@@ -107,6 +117,19 @@ namespace cs::features::catalog
 		void MarkHookCoverageReady() noexcept;
 		void RecordHookObserverGap() noexcept;
 		void RecordAllocationFailure() noexcept;
+		RouteCaptureAdmission BeginRouteCreate(
+			const RouteCreateInput& a_input) noexcept;
+		RouteCreateCommitResult CompleteRouteCreate(
+			RouteCaptureAdmission&& a_admission,
+			const RouteCreateOutcome& a_outcome) noexcept;
+		RouteBindAdmission BeginRouteBind() noexcept;
+		bool RecordRouteBind(
+			RouteBindAdmission&& a_admission,
+			const std::shared_ptr<RouteCaptureRecordState>& a_record,
+			std::optional<RouteBindSnapshot> a_routeSnapshot) noexcept;
+		void ReleaseRouteBindReservation(
+			const std::shared_ptr<RouteCaptureRecordState>& a_record) noexcept;
+		[[nodiscard]] bool RouteCaptureActive() const noexcept;
 
 		struct Stats
 		{
@@ -120,6 +143,8 @@ namespace cs::features::catalog
 			bool writerDrained = false;
 			bool hookCoverageReady = false;
 			bool orderlyFinalizerReady = false;
+			bool routeCaptureRequested = false;
+			bool routeCaptureActive = false;
 			std::uint64_t attempts = 0;
 			std::uint64_t successes = 0;
 			std::uint64_t failures = 0;
@@ -245,6 +270,7 @@ namespace cs::features::catalog
 		std::string _artifactRootFingerprint;
 		std::string _generatedRunId;
 		std::string _startedAt;
+		std::unique_ptr<StockRuntimeRoutePublisher> _routePublisher;
 
 		sqlite3* _db = nullptr;
 		sqlite3_stmt* _upsertContent = nullptr;

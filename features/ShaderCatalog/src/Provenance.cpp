@@ -9,10 +9,13 @@
 #include <charconv>
 #include <cstdio>
 #include <cstring>
+#include <fstream>
 #include <limits>
 #include <locale>
 #include <sstream>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #ifndef NT_SUCCESS
@@ -1526,6 +1529,2179 @@ namespace cs::features::catalog
 		g_releasePublishedWinner.notify_all();
 	}
 #endif
+
+	namespace
+	{
+		std::string_view RouteLineageStatusName(
+			RouteLineageStatus a_status) noexcept
+		{
+			switch (a_status) {
+			case RouteLineageStatus::kNotCreated:
+				return "not-created";
+			case RouteLineageStatus::kPendingBind:
+				return "pending-bind";
+			case RouteLineageStatus::kLinked:
+				return "linked";
+			case RouteLineageStatus::kAmbiguous:
+				return "ambiguous";
+			case RouteLineageStatus::kDuplicate:
+				return "duplicate";
+			case RouteLineageStatus::kRouteMismatch:
+				return "route-mismatch";
+			}
+			return "not-created";
+		}
+
+		void AppendRouteStringArray(
+			std::ostringstream& a_json,
+			const std::vector<std::string>& a_values)
+		{
+			a_json << '[';
+			for (std::size_t index = 0; index < a_values.size(); ++index) {
+				if (index != 0)
+					a_json << ',';
+				JsonString(a_json, a_values[index]);
+			}
+			a_json << ']';
+		}
+
+		void AppendRouteCodeRange(
+			std::ostringstream& a_json,
+			const RouteCodeRange& a_range)
+		{
+			a_json << "{\"byte_length\":" << a_range.byteLength
+				<< ",\"start_rva\":" << a_range.startRva << '}';
+		}
+
+		void AppendRouteResolverCodeRange(
+			std::ostringstream& a_json,
+			const RouteResolverCodeRange& a_range)
+		{
+			a_json << "{\"code_range\":";
+			AppendRouteCodeRange(a_json, a_range.codeRange);
+			a_json << ",\"code_sha256\":";
+			JsonString(a_json, a_range.codeSha256);
+			a_json << ",\"roles\":";
+			AppendRouteStringArray(a_json, a_range.roles);
+			a_json << ",\"rva\":" << a_range.rva << ",\"symbol\":";
+			JsonString(a_json, a_range.symbol);
+			a_json << '}';
+		}
+
+		void AppendRouteResolver(
+			std::ostringstream& a_json,
+			const RoutePluginRuntimeResolverIdentity& a_resolver)
+		{
+			a_json << "{\"code_ranges\":[";
+			for (std::size_t index = 0;
+				 index < a_resolver.codeRanges.size();
+				 ++index) {
+				if (index != 0)
+					a_json << ',';
+				AppendRouteResolverCodeRange(
+					a_json, a_resolver.codeRanges[index]);
+			}
+			a_json << "],\"formula_id\":";
+			JsonString(a_json, a_resolver.formulaId);
+			a_json << ",\"implementation_sha256\":";
+			JsonString(a_json, a_resolver.implementationSha256);
+			a_json << ",\"name\":";
+			JsonString(a_json, a_resolver.name);
+			a_json << ",\"version\":";
+			JsonString(a_json, a_resolver.version);
+			a_json << '}';
+		}
+
+		void AppendRouteProducer(
+			std::ostringstream& a_json,
+			const RouteProducerIdentity& a_producer)
+		{
+			a_json << "{\"binary_sha256\":";
+			JsonString(a_json, a_producer.binarySha256);
+			a_json << ",\"name\":";
+			JsonString(a_json, a_producer.name);
+			a_json << ",\"version\":";
+			JsonString(a_json, a_producer.version);
+			a_json << '}';
+		}
+
+		void AppendRouteRuntime(
+			std::ostringstream& a_json,
+			const RouteRuntimeIdentity& a_runtime)
+		{
+			a_json << "{\"executable_sha256\":";
+			JsonString(a_json, a_runtime.executableSha256);
+			a_json << ",\"name\":";
+			JsonString(a_json, a_runtime.name);
+			a_json << ",\"version\":";
+			JsonString(a_json, a_runtime.version);
+			a_json << '}';
+		}
+
+		void AppendRouteRun(
+			std::ostringstream& a_json,
+			const RouteRunIdentity& a_run)
+		{
+			a_json << "{\"run_id\":";
+			JsonString(a_json, a_run.runId);
+			a_json << ",\"scenario_id\":";
+			JsonString(a_json, a_run.scenarioId);
+			a_json << ",\"stock_only\":";
+			JsonBool(a_json, a_run.stockOnly);
+			a_json << '}';
+		}
+
+		void AppendRouteSnapshot(
+			std::ostringstream& a_json,
+			const RouteSnapshot& a_route)
+		{
+			a_json << "{\"observed_lookup_psid\":";
+			if (a_route.observedLookupPsid)
+				a_json << *a_route.observedLookupPsid;
+			else
+				a_json << "null";
+			a_json << ",\"plugin_resolved_psid\":";
+			if (a_route.pluginResolvedPsid)
+				a_json << *a_route.pluginResolvedPsid;
+			else
+				a_json << "null";
+			a_json << ",\"plugin_runtime_resolver\":";
+			if (a_route.pluginRuntimeResolver)
+				AppendRouteResolver(
+					a_json, *a_route.pluginRuntimeResolver);
+			else
+				a_json << "null";
+			a_json << ",\"raw_technique\":" << a_route.rawTechnique
+				<< ",\"stage\":";
+			JsonString(a_json, a_route.stage);
+			a_json << ",\"subclass\":";
+			JsonString(a_json, a_route.subclass);
+			a_json << ",\"tiled_lighting\":";
+			if (a_route.tiledLighting)
+				JsonBool(a_json, *a_route.tiledLighting);
+			else
+				a_json << "null";
+			a_json << '}';
+		}
+
+		void AppendRouteBindSnapshot(
+			std::ostringstream& a_json,
+			const RouteBindSnapshot& a_route)
+		{
+			a_json << "{\"raw_technique\":" << a_route.rawTechnique
+				<< ",\"stage\":";
+			JsonString(a_json, a_route.stage);
+			a_json << ",\"subclass\":";
+			JsonString(a_json, a_route.subclass);
+			a_json << ",\"tiled_lighting\":";
+			if (a_route.tiledLighting)
+				JsonBool(a_json, *a_route.tiledLighting);
+			else
+				a_json << "null";
+			a_json << '}';
+		}
+
+		bool RouteAscii(std::string_view a_value) noexcept
+		{
+			if (a_value.empty())
+				return false;
+			return std::ranges::all_of(
+				a_value,
+				[](unsigned char a_character) {
+					return a_character >= 0x20 && a_character <= 0x7e;
+				});
+		}
+
+		bool RouteIdentityValid(
+			const RouteProducerIdentity& a_producer,
+			const RouteRuntimeIdentity& a_runtime,
+			const RouteRunIdentity& a_run) noexcept
+		{
+			return RouteAscii(a_producer.name)
+				&& RouteAscii(a_producer.version)
+				&& IsLowerHexDigest(a_producer.binarySha256, 64)
+				&& RouteAscii(a_runtime.name)
+				&& RouteAscii(a_runtime.version)
+				&& IsLowerHexDigest(a_runtime.executableSha256, 64)
+				&& ValidIdentifier(
+					std::optional<std::string>(a_run.runId))
+				&& a_run.scenarioId
+					== "stock-pixel-shader-routes-v1"
+				&& a_run.stockOnly;
+		}
+
+		std::vector<std::string> SortUniqueRouteReasons(
+			std::vector<std::string> a_reasons)
+		{
+			std::sort(a_reasons.begin(), a_reasons.end());
+			a_reasons.erase(
+				std::unique(a_reasons.begin(), a_reasons.end()),
+				a_reasons.end());
+			return a_reasons;
+		}
+
+		std::vector<std::string> DeriveRouteObservationReasons(
+			const StockRuntimeRouteObservation& a_observation,
+			bool a_globalStockOnlyViolation)
+		{
+			std::vector<std::string> reasons;
+			if (!a_observation.facts.creationSucceeded)
+				reasons.emplace_back("create-failed");
+			if (!a_observation.facts.creationOutputNonNull)
+				reasons.emplace_back("create-output-null");
+			const bool usableStockObject =
+				a_observation.facts.creationSucceeded
+				&& a_observation.facts.creationOutputNonNull
+				&& a_observation.stockAuthority.finalObjectStock
+				&& *a_observation.stockAuthority.finalObjectStock;
+			if (usableStockObject && !a_observation.bind)
+				reasons.emplace_back("bind-missing");
+			if (a_observation.lineage.status
+				== RouteLineageStatus::kAmbiguous)
+				reasons.emplace_back("lineage-ambiguous");
+			if (a_observation.lineage.status
+				== RouteLineageStatus::kDuplicate)
+				reasons.emplace_back("lineage-duplicate");
+			if (a_observation.bind
+				&& a_observation.lineage.bindRouteContextMatch
+				&& !*a_observation.lineage.bindRouteContextMatch)
+				reasons.emplace_back("bind-route-mismatch");
+			if (!a_observation.stockAuthority.originalInputUnchanged)
+				reasons.emplace_back("original-input-changed");
+			if (a_observation.stockAuthority.resolverInvoked)
+				reasons.emplace_back("resolver-invoked");
+			if (a_observation.facts.creationSucceeded
+				&& a_observation.facts.creationOutputNonNull
+				&& a_observation.stockAuthority.finalObjectStock
+				&& !*a_observation.stockAuthority.finalObjectStock)
+				reasons.emplace_back("final-object-non-stock");
+			if (a_globalStockOnlyViolation)
+				reasons.emplace_back("run-stock-only-violation");
+			return SortUniqueRouteReasons(std::move(reasons));
+		}
+
+		bool RouteObservationAuthorityConditionsHold(
+			const StockRuntimeRouteObservation& a_observation) noexcept
+		{
+			const auto projected = RouteBindSnapshot{
+				a_observation.route.subclass,
+				a_observation.route.stage,
+				a_observation.route.rawTechnique,
+				a_observation.route.tiledLighting
+			};
+			const bool routeMatches =
+				a_observation.bind
+				&& a_observation.bind->routeSnapshot
+				&& *a_observation.bind->routeSnapshot == projected;
+			return a_observation.run.stockOnly
+				&& a_observation.facts.routeContextObserved
+				&& a_observation.facts.creationObserved
+				&& a_observation.facts.creationSucceeded
+				&& a_observation.facts.creationOutputNonNull
+				&& a_observation.facts.bindObserved
+				&& !a_observation.facts.gpuExecutionObserved
+				&& a_observation.facts.engineLookupObserved
+					== a_observation.route.observedLookupPsid.has_value()
+				&& a_observation.lineage.queueEnqueueSucceeded
+				&& a_observation.lineage.queueEnqueueSequence
+				&& a_observation.stockCreate.sequence
+					< *a_observation.lineage.queueEnqueueSequence
+				&& a_observation.bind
+				&& *a_observation.lineage.queueEnqueueSequence
+					< a_observation.bind->sequence
+				&& a_observation.lineage.status
+					== RouteLineageStatus::kLinked
+				&& a_observation.lineage.shaderObjectId
+				&& routeMatches
+				&& a_observation.stockAuthority.originalInputUnchanged
+				&& a_observation.stockAuthority.finalObjectStock
+				&& *a_observation.stockAuthority.finalObjectStock
+				&& !a_observation.stockAuthority.resolverInvoked
+				&& (a_observation.route.pluginResolvedPsid.has_value()
+					== a_observation.route.pluginRuntimeResolver.has_value());
+		}
+
+		bool ReadRouteFile(
+			const std::filesystem::path& a_path,
+			std::vector<std::byte>& a_bytes,
+			std::string& a_error)
+		{
+			std::ifstream input(a_path, std::ios::binary | std::ios::ate);
+			if (!input.is_open()) {
+				a_error = "unable to open identity file";
+				return false;
+			}
+			const auto end = input.tellg();
+			if (end <= 0
+				|| static_cast<std::uint64_t>(end)
+					> static_cast<std::uint64_t>(
+						std::numeric_limits<std::size_t>::max())) {
+				a_error = "identity file size is invalid";
+				return false;
+			}
+			a_bytes.resize(static_cast<std::size_t>(end));
+			input.seekg(0, std::ios::beg);
+			input.read(
+				reinterpret_cast<char*>(a_bytes.data()),
+				static_cast<std::streamsize>(a_bytes.size()));
+			if (!input || input.gcount()
+					!= static_cast<std::streamsize>(a_bytes.size())) {
+				a_error = "unable to read identity file";
+				a_bytes.clear();
+				return false;
+			}
+			return true;
+		}
+
+		template <class T>
+		bool ReadRouteStruct(
+			std::span<const std::byte> a_bytes,
+			std::size_t a_offset,
+			T& a_value) noexcept
+		{
+			if (a_offset > a_bytes.size()
+				|| sizeof(T) > a_bytes.size() - a_offset)
+				return false;
+			std::memcpy(
+				&a_value, a_bytes.data() + a_offset, sizeof(T));
+			return true;
+		}
+
+		struct RoutePeView
+		{
+			IMAGE_FILE_HEADER fileHeader{};
+			IMAGE_OPTIONAL_HEADER64 optionalHeader{};
+			std::vector<IMAGE_SECTION_HEADER> sections;
+		};
+
+		bool ParseRoutePe(
+			std::span<const std::byte> a_bytes,
+			RoutePeView& a_view,
+			std::string& a_error)
+		{
+			IMAGE_DOS_HEADER dos{};
+			if (!ReadRouteStruct(a_bytes, 0, dos)
+				|| dos.e_magic != IMAGE_DOS_SIGNATURE
+				|| dos.e_lfanew < 0) {
+				a_error = "plugin PE DOS header is invalid";
+				return false;
+			}
+			const auto ntOffset = static_cast<std::size_t>(dos.e_lfanew);
+			DWORD signature = 0;
+			if (!ReadRouteStruct(a_bytes, ntOffset, signature)
+				|| signature != IMAGE_NT_SIGNATURE
+				|| !ReadRouteStruct(
+					a_bytes,
+					ntOffset + sizeof(signature),
+					a_view.fileHeader)
+				|| a_view.fileHeader.Machine
+					!= IMAGE_FILE_MACHINE_AMD64
+				|| !ReadRouteStruct(
+					a_bytes,
+					ntOffset + sizeof(signature)
+						+ sizeof(IMAGE_FILE_HEADER),
+					a_view.optionalHeader)
+				|| a_view.optionalHeader.Magic
+					!= IMAGE_NT_OPTIONAL_HDR64_MAGIC) {
+				a_error = "plugin PE headers are invalid";
+				return false;
+			}
+			const auto sectionOffset =
+				ntOffset + sizeof(signature)
+				+ sizeof(IMAGE_FILE_HEADER)
+				+ a_view.fileHeader.SizeOfOptionalHeader;
+			try {
+				a_view.sections.resize(
+					a_view.fileHeader.NumberOfSections);
+			} catch (...) {
+				a_error = "unable to allocate plugin PE sections";
+				return false;
+			}
+			for (std::size_t index = 0;
+				 index < a_view.sections.size();
+				 ++index) {
+				if (!ReadRouteStruct(
+						a_bytes,
+						sectionOffset
+							+ index * sizeof(IMAGE_SECTION_HEADER),
+						a_view.sections[index])) {
+					a_error = "plugin PE section table is truncated";
+					return false;
+				}
+			}
+			return true;
+		}
+
+		std::optional<std::size_t> RouteRvaToFileOffset(
+			std::span<const std::byte> a_bytes,
+			const RoutePeView& a_view,
+			std::uint32_t a_rva,
+			std::string& a_error)
+		{
+			std::optional<std::size_t> result;
+			for (const auto& section : a_view.sections) {
+				const std::uint64_t start = section.VirtualAddress;
+				const std::uint64_t end =
+					start + section.SizeOfRawData;
+				if (a_rva < start || a_rva >= end)
+					continue;
+				const std::uint64_t raw =
+					static_cast<std::uint64_t>(
+						section.PointerToRawData)
+					+ (a_rva - start);
+				if (raw >= a_bytes.size()) {
+					a_error = "plugin PE RVA maps outside the file";
+					return std::nullopt;
+				}
+				if (result) {
+					a_error = "plugin PE RVA has overlapping mappings";
+					return std::nullopt;
+				}
+				result = static_cast<std::size_t>(raw);
+			}
+			if (!result)
+				a_error = "plugin PE RVA is not file-backed";
+			return result;
+		}
+
+		bool ResolveRouteCodeIdentityFromBytes(
+			std::span<const std::byte> a_bytes,
+			std::uint32_t a_functionRva,
+			std::string_view a_symbol,
+			RouteCodeIdentity& a_identity,
+			std::string& a_error)
+		{
+			RoutePeView view;
+			if (!ParseRoutePe(a_bytes, view, a_error))
+				return false;
+			const auto& exceptionDirectory =
+				view.optionalHeader.DataDirectory[
+					IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+			if (exceptionDirectory.VirtualAddress == 0
+				|| exceptionDirectory.Size
+					< sizeof(RUNTIME_FUNCTION)
+				|| exceptionDirectory.Size
+					% sizeof(RUNTIME_FUNCTION) != 0) {
+				a_error = "plugin PE exception directory is invalid";
+				return false;
+			}
+			const auto exceptionOffset = RouteRvaToFileOffset(
+				a_bytes,
+				view,
+				exceptionDirectory.VirtualAddress,
+				a_error);
+			if (!exceptionOffset
+				|| exceptionDirectory.Size
+					> a_bytes.size() - *exceptionOffset) {
+				a_error = "plugin PE exception directory is truncated";
+				return false;
+			}
+			std::optional<RUNTIME_FUNCTION> found;
+			const auto count =
+				exceptionDirectory.Size / sizeof(RUNTIME_FUNCTION);
+			for (std::size_t index = 0; index < count; ++index) {
+				RUNTIME_FUNCTION entry{};
+				if (!ReadRouteStruct(
+						a_bytes,
+						*exceptionOffset
+							+ index * sizeof(RUNTIME_FUNCTION),
+						entry)) {
+					a_error =
+						"plugin PE runtime function is truncated";
+					return false;
+				}
+				if (entry.BeginAddress != a_functionRva)
+					continue;
+				if (found) {
+					a_error =
+						"plugin PE runtime function is duplicated";
+					return false;
+				}
+				found = entry;
+			}
+			if (!found || found->BeginAddress >= found->EndAddress) {
+				a_error =
+					"plugin PE runtime function range is unavailable";
+				return false;
+			}
+			const auto length = static_cast<std::uint64_t>(
+				found->EndAddress - found->BeginAddress);
+			std::vector<std::byte> code;
+			try {
+				code.reserve(static_cast<std::size_t>(length));
+			} catch (...) {
+				a_error = "unable to allocate plugin code identity";
+				return false;
+			}
+			for (std::uint64_t offset = 0; offset < length; ++offset) {
+				const auto raw = RouteRvaToFileOffset(
+					a_bytes,
+					view,
+					found->BeginAddress
+						+ static_cast<std::uint32_t>(offset),
+					a_error);
+				if (!raw)
+					return false;
+				code.push_back(a_bytes[*raw]);
+			}
+			ContentDigest digest{};
+			if (!ComputeDigests(code.data(), code.size(), digest)) {
+				a_error = "unable to hash plugin code identity";
+				return false;
+			}
+			a_identity = {
+				.module = "FO4CommunityShaders.dll",
+				.symbol = std::string(a_symbol),
+				.rva = found->BeginAddress,
+				.codeRange = {
+					found->BeginAddress,
+					length
+				},
+				.codeSha256 = HexLower(
+					digest.sha256.data(), digest.sha256.size())
+			};
+			return true;
+		}
+
+		std::string BuildRouteResolverDescriptor(
+			const RoutePluginRuntimeResolverIdentity& a_identity,
+			std::string_view a_moduleSha256)
+		{
+			std::ostringstream json;
+			json.imbue(std::locale::classic());
+			json << "{\"code_ranges\":[";
+			for (std::size_t index = 0;
+				 index < a_identity.codeRanges.size();
+				 ++index) {
+				if (index != 0)
+					json << ',';
+				AppendRouteResolverCodeRange(
+					json, a_identity.codeRanges[index]);
+			}
+			json << "],\"formula_id\":";
+			JsonString(json, a_identity.formulaId);
+			json << ",\"module\":\"FO4CommunityShaders.dll\","
+				"\"module_sha256\":";
+			JsonString(json, a_moduleSha256);
+			json << ",\"name\":";
+			JsonString(json, a_identity.name);
+			json << ",\"schema\":"
+				"\"fo4cs.plugin-runtime-resolver-implementation\","
+				"\"schema_version\":1,\"version\":";
+			JsonString(json, a_identity.version);
+			json << "}\n";
+			return json.str();
+		}
+	}
+
+	std::string BuildCanonicalRouteObservation(
+		const StockRuntimeRouteObservation& a_observation)
+	{
+		std::ostringstream json;
+		json.imbue(std::locale::classic());
+		json << "{\"authority_reasons\":";
+		AppendRouteStringArray(json, a_observation.authorityReasons);
+		json << ",\"bind\":";
+		if (a_observation.bind) {
+			json << "{\"code_range\":";
+			AppendRouteCodeRange(
+				json, a_observation.bind->hook.codeRange);
+			json << ",\"code_sha256\":";
+			JsonString(
+				json, a_observation.bind->hook.codeSha256);
+			json << ",\"event_id\":";
+			JsonString(json, a_observation.bind->eventId);
+			json << ",\"hook_module\":";
+			JsonString(json, a_observation.bind->hook.module);
+			json << ",\"hook_rva\":"
+				<< a_observation.bind->hook.rva
+				<< ",\"hook_symbol\":";
+			JsonString(json, a_observation.bind->hook.symbol);
+			json << ",\"route_snapshot\":";
+			if (a_observation.bind->routeSnapshot)
+				AppendRouteBindSnapshot(
+					json, *a_observation.bind->routeSnapshot);
+			else
+				json << "null";
+			json << ",\"sequence\":"
+				<< a_observation.bind->sequence
+				<< ",\"thread_id\":"
+				<< a_observation.bind->threadId << '}';
+		} else {
+			json << "null";
+		}
+		json << ",\"bytecode\":{\"byte_length\":"
+			<< a_observation.byteLength << ",\"sha1\":";
+		JsonString(json, a_observation.sha1);
+		json << ",\"sha256\":";
+		JsonString(json, a_observation.sha256);
+		json << "},\"capture_authoritative\":";
+		JsonBool(json, a_observation.captureAuthoritative);
+		json << ",\"facts\":{\"bind_observed\":";
+		JsonBool(json, a_observation.facts.bindObserved);
+		json << ",\"creation_observed\":";
+		JsonBool(json, a_observation.facts.creationObserved);
+		json << ",\"creation_output_nonnull\":";
+		JsonBool(json, a_observation.facts.creationOutputNonNull);
+		json << ",\"creation_succeeded\":";
+		JsonBool(json, a_observation.facts.creationSucceeded);
+		json << ",\"engine_lookup_observed\":";
+		JsonBool(json, a_observation.facts.engineLookupObserved);
+		json << ",\"gpu_execution_observed\":";
+		JsonBool(json, a_observation.facts.gpuExecutionObserved);
+		json << ",\"route_context_observed\":";
+		JsonBool(json, a_observation.facts.routeContextObserved);
+		json << "},\"lineage\":{\"bind_route_context_match\":";
+		if (a_observation.lineage.bindRouteContextMatch)
+			JsonBool(
+				json,
+				*a_observation.lineage.bindRouteContextMatch);
+		else
+			json << "null";
+		json << ",\"pointer_lineage_event_id\":";
+		JsonOptionalString(
+			json, a_observation.lineage.pointerLineageEventId);
+		json << ",\"queue_enqueue_sequence\":";
+		if (a_observation.lineage.queueEnqueueSequence)
+			json << *a_observation.lineage.queueEnqueueSequence;
+		else
+			json << "null";
+		json << ",\"queue_enqueue_succeeded\":";
+		JsonBool(
+			json,
+			a_observation.lineage.queueEnqueueSucceeded);
+		json << ",\"shader_object_id\":";
+		JsonOptionalString(
+			json, a_observation.lineage.shaderObjectId);
+		json << ",\"status\":";
+		JsonString(
+			json,
+			RouteLineageStatusName(a_observation.lineage.status));
+		json << "},\"producer\":";
+		AppendRouteProducer(json, a_observation.producer);
+		json << ",\"record\":{\"record_id\":";
+		JsonString(json, a_observation.recordId);
+		json << ",\"sequence\":"
+			<< a_observation.recordSequence
+			<< "},\"route\":";
+		AppendRouteSnapshot(json, a_observation.route);
+		json << ",\"run\":";
+		AppendRouteRun(json, a_observation.run);
+		json << ",\"runtime\":";
+		AppendRouteRuntime(json, a_observation.runtime);
+		json << ",\"schema\":"
+			"\"fo4cs.stock-runtime-route-observation\","
+			"\"schema_version\":1,\"stock_authority\":"
+			"{\"final_object_stock\":";
+		if (a_observation.stockAuthority.finalObjectStock)
+			JsonBool(
+				json,
+				*a_observation.stockAuthority.finalObjectStock);
+		else
+			json << "null";
+		json << ",\"original_input_unchanged\":";
+		JsonBool(
+			json,
+			a_observation.stockAuthority.originalInputUnchanged);
+		json << ",\"resolver_invoked\":";
+		JsonBool(json, a_observation.stockAuthority.resolverInvoked);
+		json << "},\"stock_create\":{\"class_linkage_state\":";
+		JsonString(
+			json, a_observation.stockCreate.classLinkageState);
+		json << ",\"code_range\":";
+		AppendRouteCodeRange(
+			json, a_observation.stockCreate.hook.codeRange);
+		json << ",\"code_sha256\":";
+		JsonString(
+			json, a_observation.stockCreate.hook.codeSha256);
+		json << ",\"event_id\":";
+		JsonString(json, a_observation.stockCreate.eventId);
+		json << ",\"hook_module\":";
+		JsonString(json, a_observation.stockCreate.hook.module);
+		json << ",\"hook_rva\":"
+			<< a_observation.stockCreate.hook.rva
+			<< ",\"hook_symbol\":";
+		JsonString(json, a_observation.stockCreate.hook.symbol);
+		json << ",\"sequence\":"
+			<< a_observation.stockCreate.sequence
+			<< ",\"thread_id\":"
+			<< a_observation.stockCreate.threadId << "}}\n";
+		return json.str();
+	}
+
+	bool ComputeRouteFileSha256(
+		const std::filesystem::path& a_path,
+		std::string& a_sha256,
+		std::uint64_t& a_length,
+		std::string& a_error) noexcept
+	{
+		try {
+			std::vector<std::byte> bytes;
+			if (!ReadRouteFile(a_path, bytes, a_error))
+				return false;
+			ContentDigest digest{};
+			if (!ComputeDigests(bytes.data(), bytes.size(), digest)) {
+				a_error = "unable to hash identity file";
+				return false;
+			}
+			a_length = bytes.size();
+			a_sha256 = HexLower(
+				digest.sha256.data(), digest.sha256.size());
+			return true;
+		} catch (...) {
+			a_error = "unable to compute identity file digest";
+			return false;
+		}
+	}
+
+	bool ResolveRouteCodeIdentity(
+		const std::filesystem::path& a_modulePath,
+		std::uintptr_t a_loadedModuleBase,
+		std::uintptr_t a_functionAddress,
+		std::string_view a_symbol,
+		RouteCodeIdentity& a_identity,
+		std::string& a_error) noexcept
+	{
+		try {
+			if (a_loadedModuleBase == 0
+				|| a_functionAddress < a_loadedModuleBase
+				|| a_functionAddress - a_loadedModuleBase
+					> std::numeric_limits<std::uint32_t>::max()
+				|| !RouteAscii(a_symbol)) {
+				a_error = "plugin function identity input is invalid";
+				return false;
+			}
+			std::vector<std::byte> bytes;
+			if (!ReadRouteFile(a_modulePath, bytes, a_error))
+				return false;
+			return ResolveRouteCodeIdentityFromBytes(
+				bytes,
+				static_cast<std::uint32_t>(
+					a_functionAddress - a_loadedModuleBase),
+				a_symbol,
+				a_identity,
+				a_error);
+		} catch (...) {
+			a_error = "unable to resolve plugin function identity";
+			return false;
+		}
+	}
+
+	bool ResolveRoutePluginRuntimeResolverIdentity(
+		const std::filesystem::path& a_modulePath,
+		std::uintptr_t a_loadedModuleBase,
+		std::string_view a_name,
+		std::string_view a_version,
+		std::string_view a_formulaId,
+		std::span<const RouteResolverCodeRangeRequest> a_ranges,
+		RoutePluginRuntimeResolverIdentity& a_identity,
+		std::string& a_error) noexcept
+	{
+		try {
+			if (!RouteAscii(a_name)
+				|| !RouteAscii(a_version)
+				|| !RouteAscii(a_formulaId)
+				|| a_ranges.empty()) {
+				a_error = "plugin resolver identity input is invalid";
+				return false;
+			}
+			RoutePluginRuntimeResolverIdentity identity;
+			identity.name = a_name;
+			identity.version = a_version;
+			identity.formulaId = a_formulaId;
+			for (const auto& request : a_ranges) {
+				if (request.roles.empty()) {
+					a_error = "plugin resolver role set is empty";
+					return false;
+				}
+				RouteCodeIdentity code;
+				if (!ResolveRouteCodeIdentity(
+						a_modulePath,
+						a_loadedModuleBase,
+						request.functionAddress,
+						request.symbol,
+						code,
+						a_error)) {
+					return false;
+				}
+				auto roles = request.roles;
+				std::sort(roles.begin(), roles.end());
+				if (std::adjacent_find(
+						roles.begin(), roles.end())
+					!= roles.end()) {
+					a_error = "plugin resolver roles are duplicated";
+					return false;
+				}
+				identity.codeRanges.push_back({
+					std::move(roles),
+					code.symbol,
+					code.rva,
+					code.codeRange,
+					code.codeSha256
+				});
+			}
+			std::sort(
+				identity.codeRanges.begin(),
+				identity.codeRanges.end(),
+				[](const auto& a_left, const auto& a_right) {
+					return std::tie(
+						a_left.rva,
+						a_left.symbol,
+						a_left.roles)
+						< std::tie(
+							a_right.rva,
+							a_right.symbol,
+							a_right.roles);
+				});
+			std::vector<std::string> allRoles;
+			for (const auto& range : identity.codeRanges)
+				allRoles.insert(
+					allRoles.end(),
+					range.roles.begin(),
+					range.roles.end());
+			allRoles = SortUniqueRouteReasons(std::move(allRoles));
+			const std::vector<std::string> expected{
+				"formula",
+				"runtime-gate",
+				"tiled-state"
+			};
+			if (allRoles != expected) {
+				a_error = "plugin resolver role coverage is incomplete";
+				return false;
+			}
+			std::string moduleSha256;
+			std::uint64_t moduleLength = 0;
+			if (!ComputeRouteFileSha256(
+					a_modulePath,
+					moduleSha256,
+					moduleLength,
+					a_error)) {
+				return false;
+			}
+			const auto descriptor =
+				BuildRouteResolverDescriptor(
+					identity, moduleSha256);
+			ContentDigest digest{};
+			if (!ComputeDigests(
+					descriptor.data(), descriptor.size(), digest)) {
+				a_error = "unable to hash plugin resolver identity";
+				return false;
+			}
+			identity.implementationSha256 = HexLower(
+				digest.sha256.data(), digest.sha256.size());
+			a_identity = std::move(identity);
+			return true;
+		} catch (...) {
+			a_error = "unable to resolve plugin resolver identity";
+			return false;
+		}
+	}
+
+	namespace
+	{
+		constexpr std::uint64_t kRouteAdmissionClosed = 1ull << 63;
+		constexpr std::uint64_t kRouteAdmissionCountMask =
+			kRouteAdmissionClosed - 1;
+		constexpr std::size_t kRouteQueueCapacity = 8192;
+
+		bool RouteCodeIdentityValid(
+			const RouteCodeIdentity& a_identity) noexcept
+		{
+			return a_identity.module == "FO4CommunityShaders.dll"
+				&& RouteAscii(a_identity.symbol)
+				&& a_identity.rva == a_identity.codeRange.startRva
+				&& a_identity.codeRange.byteLength != 0
+				&& IsLowerHexDigest(a_identity.codeSha256, 64);
+		}
+
+		bool RouteResolverIdentityValid(
+			const RoutePluginRuntimeResolverIdentity& a_identity) noexcept
+		{
+			if (!RouteAscii(a_identity.name)
+				|| !RouteAscii(a_identity.version)
+				|| !RouteAscii(a_identity.formulaId)
+				|| !IsLowerHexDigest(
+					a_identity.implementationSha256, 64)
+				|| a_identity.codeRanges.empty())
+				return false;
+			if (!std::is_sorted(
+					a_identity.codeRanges.begin(),
+					a_identity.codeRanges.end(),
+					[](const auto& a_left, const auto& a_right) {
+						return std::tie(
+							a_left.rva,
+							a_left.symbol,
+							a_left.roles)
+							< std::tie(
+								a_right.rva,
+								a_right.symbol,
+								a_right.roles);
+					}))
+				return false;
+			std::vector<std::string> roles;
+			for (const auto& range : a_identity.codeRanges) {
+				if (!RouteAscii(range.symbol)
+					|| range.rva != range.codeRange.startRva
+					|| range.codeRange.byteLength == 0
+					|| !IsLowerHexDigest(range.codeSha256, 64)
+					|| range.roles.empty())
+					return false;
+				if (!std::is_sorted(
+						range.roles.begin(), range.roles.end())
+					|| std::adjacent_find(
+						range.roles.begin(), range.roles.end())
+						!= range.roles.end())
+					return false;
+				roles.insert(
+					roles.end(),
+					range.roles.begin(),
+					range.roles.end());
+			}
+			roles = SortUniqueRouteReasons(std::move(roles));
+			return roles == std::vector<std::string>{
+				"formula", "runtime-gate", "tiled-state"
+			};
+		}
+
+		std::string BuildRouteScopeDescriptor(
+			const RouteRunIdentity& a_run,
+			const RouteCaptureScope& a_scope)
+		{
+			std::ostringstream json;
+			json.imbue(std::locale::classic());
+			json << "{\"eligibility_rules\":";
+			AppendRouteStringArray(json, a_scope.eligibilityRules);
+			json << ",\"enabled\":";
+			JsonBool(json, a_scope.enabled);
+			json << ",\"included_stages\":";
+			AppendRouteStringArray(json, a_scope.includedStages);
+			json << ",\"included_subclasses\":";
+			AppendRouteStringArray(json, a_scope.includedSubclasses);
+			json << ",\"scenario_id\":";
+			JsonString(json, a_run.scenarioId);
+			json << ",\"schema\":"
+				"\"fo4cs.stock-runtime-route-capture-scope\","
+				"\"schema_version\":1}\n";
+			return json.str();
+		}
+
+		bool RouteScopeValid(
+			const RouteRunIdentity& a_run,
+			const RouteCaptureScope& a_scope,
+			std::string& a_digest)
+		{
+			const std::vector<std::string> expectedRules{
+				"scoped-setup-technique",
+				"stock-create-pixel-shader-callback",
+				"stock-only-run"
+			};
+			if (!a_scope.enabled
+				|| a_scope.includedSubclasses
+					!= std::vector<std::string>{ "*" }
+				|| a_scope.includedStages
+					!= std::vector<std::string>{ "ps" }
+				|| a_scope.eligibilityRules != expectedRules)
+				return false;
+			const auto descriptor =
+				BuildRouteScopeDescriptor(a_run, a_scope);
+			ContentDigest digest{};
+			if (!ComputeDigests(
+					descriptor.data(), descriptor.size(), digest))
+				return false;
+			a_digest = HexLower(
+				digest.sha256.data(), digest.sha256.size());
+			return a_scope.configurationSha256.empty()
+				|| a_scope.configurationSha256 == a_digest;
+		}
+
+		RoutePublicationError MapRoutePublicationError(
+			const PublicationResult& a_result) noexcept
+		{
+			if (a_result.error.find("collision") != std::string::npos
+				|| (a_result.alreadyExisted && !a_result.success))
+				return RoutePublicationError::kCollision;
+			if (a_result.error.find("reparse") != std::string::npos
+				|| a_result.error.find("escaped") != std::string::npos
+				|| a_result.error.find("traversal") != std::string::npos)
+				return RoutePublicationError::kUnsafePath;
+			if (a_result.error.find("flush") != std::string::npos)
+				return RoutePublicationError::kFlushFailed;
+			return RoutePublicationError::kIoFailed;
+		}
+	}
+
+	struct StockRuntimeRoutePublisher::Impl
+	{
+		struct ManifestRow
+		{
+			std::string recordId;
+			std::uint64_t recordSequence = 0;
+			std::string observationSha256;
+			std::uint64_t observationByteLength = 0;
+			std::string stockCreateEventId;
+			std::uint64_t stockCreateSequence = 0;
+			std::optional<std::string> bindEventId;
+			std::optional<std::uint64_t> bindSequence;
+			std::uint64_t enqueueSequence = 0;
+			bool captureAuthoritative = false;
+			StockRuntimeRouteObservation observation;
+		};
+
+		std::filesystem::path root;
+		RouteProducerIdentity producer;
+		RouteRuntimeIdentity runtime;
+		RouteRunIdentity run;
+		RouteCaptureScope scope;
+		RouteResolverRegistrySnapshot registryClose;
+
+		std::atomic<std::uint64_t> captureAdmission{ 0 };
+		std::atomic<std::uint64_t> eventSequence{ 0 };
+		std::atomic<std::uint64_t> recordSequence{ 0 };
+		std::atomic<std::uint64_t> objectSequence{ 0 };
+
+		std::atomic<std::uint64_t> observerCallbacks{ 0 };
+		std::atomic<std::uint64_t> includedCallbacks{ 0 };
+		std::atomic<std::uint64_t> excludedCallbacks{ 0 };
+		std::atomic<std::uint64_t> excludedMissingRoute{ 0 };
+		std::atomic<std::uint64_t> excludedAmbiguousRoute{ 0 };
+		std::atomic<std::uint64_t> excludedSubclass{ 0 };
+		std::atomic<std::uint64_t> excludedStage{ 0 };
+		std::atomic<std::uint64_t> createAttempts{ 0 };
+		std::atomic<std::uint64_t> queueAttempts{ 0 };
+		std::atomic<std::uint64_t> queueSuccesses{ 0 };
+		std::atomic<std::uint64_t> queueFailures{ 0 };
+		std::atomic<std::uint64_t> persistenceAttempts{ 0 };
+		std::atomic<std::uint64_t> persistenceSuccesses{ 0 };
+		std::atomic<std::uint64_t> persistenceFailures{ 0 };
+		std::atomic<std::uint64_t> excludedInputChanges{ 0 };
+		std::atomic<std::uint64_t> excludedResolverInvocations{ 0 };
+		std::atomic<std::uint64_t> excludedNonStockFinalObjects{ 0 };
+		std::atomic<std::uint64_t> excludedCompletionLosses{ 0 };
+
+		std::mutex recordsMutex;
+		std::vector<std::shared_ptr<RouteCaptureRecordState>> records;
+
+		std::mutex publicationMutex;
+		bool captureFrozen = false;
+		bool publisherAdmissionOpen = false;
+		bool finalized = false;
+		bool globalStockOnlyViolation = false;
+		std::unordered_map<std::string, std::string> frozenDocuments;
+		std::unordered_set<std::string> publishedRecords;
+		std::vector<ManifestRow> rows;
+
+		bool TryAcquireCapture() noexcept
+		{
+			auto admission =
+				captureAdmission.load(std::memory_order_acquire);
+			while ((admission & kRouteAdmissionClosed) == 0) {
+				if ((admission & kRouteAdmissionCountMask)
+					== kRouteAdmissionCountMask)
+					return false;
+				if (captureAdmission.compare_exchange_weak(
+						admission,
+						admission + 1,
+						std::memory_order_acq_rel,
+						std::memory_order_acquire))
+					return true;
+			}
+			return false;
+		}
+
+		void ReleaseCapture() noexcept
+		{
+			const auto previous =
+				captureAdmission.fetch_sub(
+					1, std::memory_order_acq_rel);
+			if ((previous & kRouteAdmissionCountMask) == 1)
+				captureAdmission.notify_all();
+		}
+
+		void CloseCapture() noexcept
+		{
+			auto admission = captureAdmission.fetch_or(
+				kRouteAdmissionClosed, std::memory_order_acq_rel);
+			admission |= kRouteAdmissionClosed;
+			while ((admission & kRouteAdmissionCountMask) != 0) {
+				captureAdmission.wait(
+					admission, std::memory_order_acquire);
+				admission =
+					captureAdmission.load(std::memory_order_acquire);
+			}
+		}
+
+		std::uint64_t NextEventSequence() noexcept
+		{
+			return eventSequence.fetch_add(
+				1, std::memory_order_relaxed) + 1;
+		}
+
+		RoutePublicationResult PublishDocument(
+			std::string_view a_folder,
+			std::string_view a_json)
+		{
+			RoutePublicationResult result;
+			ContentDigest digest{};
+			if (a_json.empty()
+				|| a_json.back() != '\n'
+				|| !ComputeDigests(
+					a_json.data(), a_json.size(), digest)) {
+				result.error =
+					RoutePublicationError::kCanonicalizationFailed;
+				return result;
+			}
+			const auto sha256 = HexLower(
+				digest.sha256.data(), digest.sha256.size());
+			auto staged = StageImmutable(
+				root,
+				std::filesystem::path(a_folder)
+					/ (sha256 + ".json"),
+				a_json.data(),
+				a_json.size(),
+				sha256);
+			if (!staged.result.success) {
+				result.error =
+					MapRoutePublicationError(staged.result);
+				return result;
+			}
+			const auto published = PublishStagedState(staged);
+			if (!published.success) {
+				result.error =
+					MapRoutePublicationError(published);
+				return result;
+			}
+			result.success = true;
+			result.document.sha256 = digest.sha256;
+			result.document.byteLength = a_json.size();
+			result.document.path =
+				std::filesystem::absolute(root)
+				/ published.relativePath;
+			return result;
+		}
+	};
+
+	RouteCaptureAdmission::~RouteCaptureAdmission()
+	{
+		if (_owner)
+			_owner->AbandonCreate(*this);
+	}
+
+	RouteCaptureAdmission::RouteCaptureAdmission(
+		RouteCaptureAdmission&& a_other) noexcept :
+		_owner(std::exchange(a_other._owner, nullptr)),
+		_createSequence(a_other._createSequence),
+		_threadId(a_other._threadId),
+		_classLinkagePresent(a_other._classLinkagePresent),
+		_included(a_other._included),
+		_route(std::move(a_other._route))
+	{}
+
+	RouteCaptureAdmission& RouteCaptureAdmission::operator=(
+		RouteCaptureAdmission&& a_other) noexcept
+	{
+		if (this != &a_other) {
+			if (_owner)
+				_owner->AbandonCreate(*this);
+			_owner = std::exchange(a_other._owner, nullptr);
+			_createSequence = a_other._createSequence;
+			_threadId = a_other._threadId;
+			_classLinkagePresent =
+				a_other._classLinkagePresent;
+			_included = a_other._included;
+			_route = std::move(a_other._route);
+		}
+		return *this;
+	}
+
+	RouteBindAdmission::~RouteBindAdmission()
+	{
+		if (_owner)
+			_owner->ReleaseBind(*this);
+	}
+
+	RouteBindAdmission::RouteBindAdmission(
+		RouteBindAdmission&& a_other) noexcept :
+		_owner(std::exchange(a_other._owner, nullptr))
+	{}
+
+	RouteBindAdmission& RouteBindAdmission::operator=(
+		RouteBindAdmission&& a_other) noexcept
+	{
+		if (this != &a_other) {
+			if (_owner)
+				_owner->ReleaseBind(*this);
+			_owner = std::exchange(a_other._owner, nullptr);
+		}
+		return *this;
+	}
+
+	StockRuntimeRoutePublisher::StockRuntimeRoutePublisher(
+		std::unique_ptr<Impl> a_impl) :
+		_impl(std::move(a_impl))
+	{}
+
+	StockRuntimeRoutePublisher::~StockRuntimeRoutePublisher() = default;
+
+	std::unique_ptr<StockRuntimeRoutePublisher>
+		StockRuntimeRoutePublisher::Open(
+			const std::filesystem::path& a_publicationRoot,
+			const RouteProducerIdentity& a_producer,
+			const RouteRuntimeIdentity& a_runtime,
+			const RouteRunIdentity& a_run,
+			const RouteCaptureScope& a_scope,
+			RoutePublicationError& a_error) noexcept
+	{
+		a_error = RoutePublicationError::kNone;
+		try {
+			if (!RouteIdentityValid(
+					a_producer, a_runtime, a_run)) {
+				a_error =
+					RoutePublicationError::kInvalidIdentity;
+				return nullptr;
+			}
+			std::string scopeDigest;
+			if (!RouteScopeValid(a_run, a_scope, scopeDigest)
+				|| !RouteCodeIdentityValid(a_scope.createHook)
+				|| !RouteCodeIdentityValid(a_scope.bindHook)
+				|| !RouteResolverIdentityValid(
+					a_scope.pluginRuntimeResolver)) {
+				a_error = RoutePublicationError::kInvalidScope;
+				return nullptr;
+			}
+			if (!a_scope.resolverRegistryOpen.valid
+				|| !a_scope.resolverRegistryOpen.empty
+				|| !IsLowerHexDigest(
+					a_scope.resolverRegistryOpen.sha256, 64)
+				|| !a_scope.resolverRegistrySnapshot
+				|| !a_scope.hookCoverageReady) {
+				a_error =
+					RoutePublicationError::kStockOnlyViolation;
+				return nullptr;
+			}
+			constexpr std::string_view emptyRegistryDescriptor =
+				"{\"resolvers\":[],\"schema\":"
+				"\"fo4cs.broker-resolver-registry\","
+				"\"schema_version\":1}\n";
+			ContentDigest emptyRegistryDigest{};
+			if (!ComputeDigests(
+					emptyRegistryDescriptor.data(),
+					emptyRegistryDescriptor.size(),
+					emptyRegistryDigest)
+				|| a_scope.resolverRegistryOpen.sha256
+					!= HexLower(
+						emptyRegistryDigest.sha256.data(),
+						emptyRegistryDigest.sha256.size())) {
+				a_error =
+					RoutePublicationError::kStockOnlyViolation;
+				return nullptr;
+			}
+			std::string rootError;
+			if (!a_publicationRoot.is_absolute()
+				|| !ValidatePublicationRoot(
+					a_publicationRoot, rootError)) {
+				a_error =
+					rootError.find("reparse") != std::string::npos
+					? RoutePublicationError::kUnsafePath
+					: RoutePublicationError::kInvalidRoot;
+				return nullptr;
+			}
+			auto impl = std::make_unique<Impl>();
+			impl->root = a_publicationRoot;
+			impl->producer = a_producer;
+			impl->runtime = a_runtime;
+			impl->run = a_run;
+			impl->scope = a_scope;
+			impl->scope.configurationSha256 =
+				std::move(scopeDigest);
+			impl->records.reserve(kRouteQueueCapacity);
+			return std::unique_ptr<StockRuntimeRoutePublisher>(
+				new StockRuntimeRoutePublisher(std::move(impl)));
+		} catch (...) {
+			a_error = RoutePublicationError::kInvalidScope;
+			return nullptr;
+		}
+	}
+
+	RouteCaptureAdmission StockRuntimeRoutePublisher::BeginCreate(
+		const RouteCreateInput& a_input) noexcept
+	{
+		RouteCaptureAdmission admission;
+		if (!_impl || !_impl->TryAcquireCapture())
+			return admission;
+		_impl->observerCallbacks.fetch_add(
+			1, std::memory_order_relaxed);
+		if (!a_input.routePresent) {
+			_impl->excludedCallbacks.fetch_add(
+				1, std::memory_order_relaxed);
+			_impl->excludedMissingRoute.fetch_add(
+				1, std::memory_order_relaxed);
+			admission._owner = this;
+			admission._included = false;
+			return admission;
+		}
+		if (a_input.routeAmbiguous) {
+			_impl->excludedCallbacks.fetch_add(
+				1, std::memory_order_relaxed);
+			_impl->excludedAmbiguousRoute.fetch_add(
+				1, std::memory_order_relaxed);
+			admission._owner = this;
+			admission._included = false;
+			return admission;
+		}
+		if (a_input.stage != "ps") {
+			_impl->excludedCallbacks.fetch_add(
+				1, std::memory_order_relaxed);
+			_impl->excludedStage.fetch_add(
+				1, std::memory_order_relaxed);
+			admission._owner = this;
+			admission._included = false;
+			return admission;
+		}
+		if (a_input.subclass.empty()) {
+			_impl->excludedCallbacks.fetch_add(
+				1, std::memory_order_relaxed);
+			_impl->excludedSubclass.fetch_add(
+				1, std::memory_order_relaxed);
+			admission._owner = this;
+			admission._included = false;
+			return admission;
+		}
+		_impl->includedCallbacks.fetch_add(
+			1, std::memory_order_relaxed);
+		_impl->createAttempts.fetch_add(
+			1, std::memory_order_relaxed);
+		_impl->queueAttempts.fetch_add(
+			1, std::memory_order_relaxed);
+		admission._owner = this;
+		admission._included = true;
+		admission._createSequence =
+			_impl->NextEventSequence();
+		admission._threadId = GetCurrentThreadId();
+		admission._classLinkagePresent =
+			a_input.classLinkagePresent;
+		try {
+			admission._route.subclass = a_input.subclass;
+			admission._route.stage = a_input.stage;
+			admission._route.rawTechnique =
+				a_input.rawTechnique;
+			admission._route.pluginResolvedPsid =
+				a_input.pluginResolvedPsid;
+			admission._route.tiledLighting =
+				a_input.tiledLighting;
+			if (a_input.pluginResolvedPsid) {
+				admission._route.pluginRuntimeResolver =
+					_impl->scope.pluginRuntimeResolver;
+			}
+		} catch (...) {
+			AbandonCreate(admission);
+		}
+		return admission;
+	}
+
+	void StockRuntimeRoutePublisher::AbandonCreate(
+		RouteCaptureAdmission& a_admission) noexcept
+	{
+		if (!_impl || a_admission._owner != this)
+			return;
+		if (a_admission._included) {
+			_impl->queueFailures.fetch_add(
+				1, std::memory_order_relaxed);
+		} else {
+			_impl->excludedCompletionLosses.fetch_add(
+				1, std::memory_order_relaxed);
+		}
+		a_admission._owner = nullptr;
+		_impl->ReleaseCapture();
+	}
+
+	RouteCreateCommitResult
+		StockRuntimeRoutePublisher::CompleteCreate(
+			RouteCaptureAdmission&& a_admission,
+			const RouteCreateOutcome& a_outcome) noexcept
+	{
+		RouteCreateCommitResult result;
+		if (!_impl || a_admission._owner != this)
+			return result;
+		if (!a_admission._included) {
+			_impl->excludedInputChanges.fetch_add(
+				!a_outcome.originalInputUnchanged,
+				std::memory_order_relaxed);
+			_impl->excludedResolverInvocations.fetch_add(
+				a_outcome.resolverInvoked,
+				std::memory_order_relaxed);
+			_impl->excludedNonStockFinalObjects.fetch_add(
+				a_outcome.creationSucceeded
+					&& a_outcome.outputNonNull
+					&& a_outcome.finalObjectStock
+					&& !*a_outcome.finalObjectStock,
+				std::memory_order_relaxed);
+			a_admission._owner = nullptr;
+			_impl->ReleaseCapture();
+			return result;
+		}
+		auto fail = [&]() noexcept {
+			_impl->queueFailures.fetch_add(
+				1, std::memory_order_relaxed);
+			a_admission._owner = nullptr;
+			_impl->ReleaseCapture();
+			return result;
+		};
+		try {
+			if (a_outcome.byteLength == 0
+				|| !IsLowerHexDigest(a_outcome.sha1, 40)
+				|| !IsLowerHexDigest(a_outcome.sha256, 64))
+				return fail();
+			const auto recordId = GenerateUuidV4();
+			const auto createEventId = GenerateUuidV4();
+			if (!recordId || !createEventId)
+				return fail();
+
+			StockRuntimeRouteObservation observation;
+			observation.producer = _impl->producer;
+			observation.runtime = _impl->runtime;
+			observation.run = _impl->run;
+			observation.recordId = *recordId;
+			observation.byteLength = a_outcome.byteLength;
+			observation.sha1 = a_outcome.sha1;
+			observation.sha256 = a_outcome.sha256;
+			observation.route = std::move(a_admission._route);
+			observation.stockCreate = {
+				.eventId = *createEventId,
+				.sequence = a_admission._createSequence,
+				.threadId = a_admission._threadId,
+				.hook = _impl->scope.createHook,
+				.classLinkageState =
+					a_admission._classLinkagePresent
+						? "present"
+						: "absent"
+			};
+			observation.facts.creationSucceeded =
+				a_outcome.creationSucceeded;
+			observation.facts.creationOutputNonNull =
+				a_outcome.outputNonNull;
+			observation.stockAuthority.originalInputUnchanged =
+				a_outcome.originalInputUnchanged;
+			observation.stockAuthority.finalObjectStock =
+				a_outcome.finalObjectStock;
+			observation.stockAuthority.resolverInvoked =
+				a_outcome.resolverInvoked;
+			result.usableStockObject =
+				a_outcome.creationSucceeded
+				&& a_outcome.outputNonNull
+				&& a_outcome.finalObjectStock
+				&& *a_outcome.finalObjectStock;
+			if (result.usableStockObject) {
+				const auto objectId =
+					_impl->objectSequence.fetch_add(
+						1, std::memory_order_relaxed) + 1;
+				observation.lineage.shaderObjectId =
+					"shader-object-" + std::to_string(objectId);
+				observation.lineage.status =
+					RouteLineageStatus::kPendingBind;
+			}
+			const auto record =
+				std::make_shared<RouteCaptureRecordState>();
+			record->observation = std::move(observation);
+			const auto enqueueSequence =
+				_impl->NextEventSequence();
+			{
+				std::scoped_lock lock(_impl->recordsMutex);
+				if (_impl->records.size()
+					>= kRouteQueueCapacity)
+					return fail();
+				record->observation.recordSequence =
+					_impl->recordSequence.fetch_add(
+						1, std::memory_order_relaxed) + 1;
+				record->observation.lineage
+					.queueEnqueueSucceeded = true;
+				record->observation.lineage
+					.queueEnqueueSequence = enqueueSequence;
+				_impl->records.push_back(record);
+			}
+			_impl->queueSuccesses.fetch_add(
+				1, std::memory_order_relaxed);
+			result.enqueued = true;
+			result.record = std::move(record);
+			a_admission._owner = nullptr;
+			_impl->ReleaseCapture();
+			return result;
+		} catch (...) {
+			return fail();
+		}
+	}
+
+	RouteBindAdmission StockRuntimeRoutePublisher::BeginBind() noexcept
+	{
+		RouteBindAdmission admission;
+		if (_impl && _impl->TryAcquireCapture())
+			admission._owner = this;
+		return admission;
+	}
+
+	void StockRuntimeRoutePublisher::ReleaseBind(
+		RouteBindAdmission& a_admission) noexcept
+	{
+		if (!_impl || a_admission._owner != this)
+			return;
+		a_admission._owner = nullptr;
+		_impl->ReleaseCapture();
+	}
+
+	void StockRuntimeRoutePublisher::ReleaseBindReservation(
+		const std::shared_ptr<RouteCaptureRecordState>& a_record) noexcept
+	{
+		if (!a_record)
+			return;
+		std::scoped_lock lock(a_record->mutex);
+		a_record->bindReserved = false;
+	}
+
+	bool StockRuntimeRoutePublisher::RecordBind(
+		RouteBindAdmission&& a_admission,
+		const std::shared_ptr<RouteCaptureRecordState>& a_record,
+		std::optional<RouteBindSnapshot> a_routeSnapshot) noexcept
+	{
+		if (!_impl
+			|| a_admission._owner != this
+			|| !a_record) {
+			return false;
+		}
+		try {
+			const auto sequence = _impl->NextEventSequence();
+			const auto eventId = GenerateUuidV4();
+			if (!eventId) {
+				ReleaseBindReservation(a_record);
+				ReleaseBind(a_admission);
+				return false;
+			}
+			{
+				std::scoped_lock lock(a_record->mutex);
+				if (!a_record->bindReserved
+					|| a_record->observation.lineage.status
+						!= RouteLineageStatus::kPendingBind) {
+					a_record->bindReserved = false;
+					ReleaseBind(a_admission);
+					return false;
+				}
+				RouteBindEvent bind{
+					.eventId = *eventId,
+					.sequence = sequence,
+					.threadId = GetCurrentThreadId(),
+					.hook = _impl->scope.bindHook,
+					.routeSnapshot = std::move(a_routeSnapshot)
+				};
+				const RouteBindSnapshot creation{
+					a_record->observation.route.subclass,
+					a_record->observation.route.stage,
+					a_record->observation.route.rawTechnique,
+					a_record->observation.route.tiledLighting
+				};
+				const bool match =
+					bind.routeSnapshot
+					&& *bind.routeSnapshot == creation;
+				a_record->observation.bind = std::move(bind);
+				a_record->observation.facts.bindObserved = true;
+				a_record->observation.lineage
+					.pointerLineageEventId = *eventId;
+				a_record->observation.lineage
+					.bindRouteContextMatch = match;
+				a_record->observation.lineage.status =
+					match
+						? RouteLineageStatus::kLinked
+						: RouteLineageStatus::kRouteMismatch;
+				a_record->bindReserved = false;
+			}
+			ReleaseBind(a_admission);
+			return true;
+		} catch (...) {
+			ReleaseBindReservation(a_record);
+			ReleaseBind(a_admission);
+			return false;
+		}
+	}
+
+	bool StockRuntimeRoutePublisher::CloseCaptureAdmissionAndFreeze(
+		FrozenRouteSnapshot& a_snapshot,
+		RoutePublicationError& a_error) noexcept
+	{
+		a_error = RoutePublicationError::kNone;
+		if (!_impl) {
+			a_error = RoutePublicationError::kInvalidRecord;
+			return false;
+		}
+		try {
+			_impl->CloseCapture();
+			std::scoped_lock publicationLock(
+				_impl->publicationMutex);
+			if (_impl->captureFrozen) {
+				a_error =
+					RoutePublicationError::kCaptureAdmissionClosed;
+				return false;
+			}
+			_impl->registryClose =
+				_impl->scope.resolverRegistrySnapshot();
+			if (!_impl->registryClose.valid
+				|| !IsLowerHexDigest(
+					_impl->registryClose.sha256, 64)) {
+				a_error =
+					RoutePublicationError::kStockOnlyViolation;
+				return false;
+			}
+			constexpr std::string_view emptyRegistryDescriptor =
+				"{\"resolvers\":[],\"schema\":"
+				"\"fo4cs.broker-resolver-registry\","
+				"\"schema_version\":1}\n";
+			ContentDigest emptyRegistryDigest{};
+			if (!ComputeDigests(
+					emptyRegistryDescriptor.data(),
+					emptyRegistryDescriptor.size(),
+					emptyRegistryDigest)
+				|| (_impl->registryClose.empty
+					&& _impl->registryClose.sha256
+					!= HexLower(
+						emptyRegistryDigest.sha256.data(),
+						emptyRegistryDigest.sha256.size()))) {
+				a_error =
+					RoutePublicationError::kStockOnlyViolation;
+				return false;
+			}
+			bool originalInputChanges = false;
+			bool resolverInvocations = false;
+			bool nonStockFinalObjects = false;
+			std::vector<std::shared_ptr<RouteCaptureRecordState>>
+				records;
+			{
+				std::scoped_lock recordsLock(
+					_impl->recordsMutex);
+				records = _impl->records;
+			}
+			for (const auto& record : records) {
+				std::scoped_lock lock(record->mutex);
+				const auto& observation = record->observation;
+				originalInputChanges =
+					originalInputChanges
+					|| !observation.stockAuthority
+						.originalInputUnchanged;
+				resolverInvocations =
+					resolverInvocations
+					|| observation.stockAuthority
+						.resolverInvoked;
+				nonStockFinalObjects =
+					nonStockFinalObjects
+					|| (observation.facts.creationSucceeded
+						&& observation.facts
+							.creationOutputNonNull
+						&& observation.stockAuthority
+							.finalObjectStock
+						&& !*observation.stockAuthority
+							.finalObjectStock);
+			}
+			_impl->globalStockOnlyViolation =
+				!_impl->registryClose.valid
+				|| !_impl->registryClose.empty
+				|| _impl->registryClose.generation
+					!= _impl->scope.resolverRegistryOpen.generation
+				|| _impl->registryClose.sha256
+					!= _impl->scope.resolverRegistryOpen.sha256
+				|| originalInputChanges
+				|| resolverInvocations
+				|| nonStockFinalObjects
+				|| _impl->excludedInputChanges.load(
+					std::memory_order_relaxed) != 0
+				|| _impl->excludedResolverInvocations.load(
+					std::memory_order_relaxed) != 0
+				|| _impl->excludedNonStockFinalObjects.load(
+					std::memory_order_relaxed) != 0;
+			a_snapshot.records.clear();
+			for (const auto& record : records) {
+				StockRuntimeRouteObservation observation;
+				{
+					std::scoped_lock lock(record->mutex);
+					record->observation.authorityReasons =
+						DeriveRouteObservationReasons(
+							record->observation,
+							_impl->globalStockOnlyViolation);
+					record->observation.captureAuthoritative =
+						record->observation.authorityReasons.empty()
+						&& RouteObservationAuthorityConditionsHold(
+							record->observation);
+					if (!record->observation.captureAuthoritative
+						&& record->observation
+							.authorityReasons.empty()) {
+						record->observation.authorityReasons = {
+							"producer-declined"
+						};
+					}
+					observation = record->observation;
+				}
+				const auto json =
+					BuildCanonicalRouteObservation(observation);
+				_impl->frozenDocuments.emplace(
+					observation.recordId, json);
+				a_snapshot.records.push_back({
+					std::move(observation)
+				});
+			}
+			_impl->captureFrozen = true;
+			_impl->publisherAdmissionOpen = true;
+			return true;
+		} catch (...) {
+			a_error = RoutePublicationError::kInvalidRecord;
+			return false;
+		}
+	}
+
+	RoutePublicationResult
+		StockRuntimeRoutePublisher::PublishObservation(
+			const FrozenRouteRecord& a_record) noexcept
+	{
+		RoutePublicationResult failure;
+		if (!_impl) {
+			failure.error = RoutePublicationError::kInvalidRecord;
+			return failure;
+		}
+		try {
+			std::scoped_lock lock(_impl->publicationMutex);
+			if (!_impl->publisherAdmissionOpen) {
+				failure.error =
+					RoutePublicationError::kPublisherAdmissionClosed;
+				return failure;
+			}
+			const auto expected = _impl->frozenDocuments.find(
+				a_record.observation.recordId);
+			const auto json =
+				BuildCanonicalRouteObservation(
+					a_record.observation);
+			if (expected == _impl->frozenDocuments.end()
+				|| expected->second != json
+				|| _impl->publishedRecords.contains(
+					a_record.observation.recordId)) {
+				failure.error =
+					RoutePublicationError::kInvalidRecord;
+				return failure;
+			}
+			_impl->persistenceAttempts.fetch_add(
+				1, std::memory_order_relaxed);
+			auto result =
+				_impl->PublishDocument("observations", json);
+			if (!result.success) {
+				_impl->persistenceFailures.fetch_add(
+					1, std::memory_order_relaxed);
+				return result;
+			}
+			_impl->persistenceSuccesses.fetch_add(
+				1, std::memory_order_relaxed);
+			_impl->publishedRecords.emplace(
+				a_record.observation.recordId);
+			_impl->rows.push_back({
+				.recordId = a_record.observation.recordId,
+				.recordSequence =
+					a_record.observation.recordSequence,
+				.observationSha256 = HexLower(
+					result.document.sha256.data(),
+					result.document.sha256.size()),
+				.observationByteLength =
+					result.document.byteLength,
+				.stockCreateEventId =
+					a_record.observation.stockCreate.eventId,
+				.stockCreateSequence =
+					a_record.observation.stockCreate.sequence,
+				.bindEventId =
+					a_record.observation.bind
+						? std::optional<std::string>(
+							a_record.observation.bind->eventId)
+						: std::nullopt,
+				.bindSequence =
+					a_record.observation.bind
+						? std::optional<std::uint64_t>(
+							a_record.observation.bind->sequence)
+						: std::nullopt,
+				.enqueueSequence =
+					*a_record.observation.lineage
+						.queueEnqueueSequence,
+				.captureAuthoritative =
+					a_record.observation.captureAuthoritative,
+				.observation = a_record.observation
+			});
+			return result;
+		} catch (...) {
+			_impl->persistenceFailures.fetch_add(
+				1, std::memory_order_relaxed);
+			failure.error = RoutePublicationError::kIoFailed;
+			return failure;
+		}
+	}
+
+	RoutePublicationResult StockRuntimeRoutePublisher::FinalizeRun() noexcept
+	{
+		RoutePublicationResult failure;
+		if (!_impl) {
+			failure.error = RoutePublicationError::kInvalidRecord;
+			return failure;
+		}
+		try {
+			std::scoped_lock lock(_impl->publicationMutex);
+			if (_impl->finalized) {
+				failure.error =
+					RoutePublicationError::kAlreadyFinalized;
+				return failure;
+			}
+			if (!_impl->captureFrozen) {
+				failure.error =
+					RoutePublicationError::kCaptureAdmissionClosed;
+				return failure;
+			}
+			_impl->publisherAdmissionOpen = false;
+			_impl->finalized = true;
+			std::sort(
+				_impl->rows.begin(),
+				_impl->rows.end(),
+				[](const auto& a_left, const auto& a_right) {
+					return std::tie(
+						a_left.recordSequence,
+						a_left.recordId,
+						a_left.observationSha256)
+						< std::tie(
+							a_right.recordSequence,
+							a_right.recordId,
+							a_right.observationSha256);
+				});
+
+			const auto observerCallbacks =
+				_impl->observerCallbacks.load(
+					std::memory_order_relaxed);
+			const auto includedCallbacks =
+				_impl->includedCallbacks.load(
+					std::memory_order_relaxed);
+			const auto excludedCallbacks =
+				_impl->excludedCallbacks.load(
+					std::memory_order_relaxed);
+			const auto excludedMissing =
+				_impl->excludedMissingRoute.load(
+					std::memory_order_relaxed);
+			const auto excludedAmbiguous =
+				_impl->excludedAmbiguousRoute.load(
+					std::memory_order_relaxed);
+			const auto excludedSubclass =
+				_impl->excludedSubclass.load(
+					std::memory_order_relaxed);
+			const auto excludedStage =
+				_impl->excludedStage.load(
+					std::memory_order_relaxed);
+			const auto createAttempts =
+				_impl->createAttempts.load(
+					std::memory_order_relaxed);
+			const auto queueAttempts =
+				_impl->queueAttempts.load(
+					std::memory_order_relaxed);
+			const auto queueSuccesses =
+				_impl->queueSuccesses.load(
+					std::memory_order_relaxed);
+			const auto queueFailures =
+				_impl->queueFailures.load(
+					std::memory_order_relaxed);
+			const auto persistenceAttempts =
+				_impl->persistenceAttempts.load(
+					std::memory_order_relaxed);
+			const auto persistenceSuccesses =
+				_impl->persistenceSuccesses.load(
+					std::memory_order_relaxed);
+			const auto persistenceFailures =
+				_impl->persistenceFailures.load(
+					std::memory_order_relaxed);
+			const auto allocatedSequences =
+				_impl->eventSequence.load(
+					std::memory_order_relaxed);
+			const bool hookCoverageReady =
+				_impl->scope.hookCoverageReady();
+
+			std::unordered_set<std::uint64_t> committedSequences;
+			std::unordered_set<std::string> recordIds;
+			std::unordered_set<std::uint64_t> recordSequences;
+			std::unordered_set<std::string> digests;
+			std::unordered_set<std::string> eventIds;
+			std::unordered_set<std::uint64_t> eventSequences;
+			bool identityDuplicate = false;
+			std::uint64_t failedCreates = 0;
+			std::uint64_t nullOutputs = 0;
+			std::uint64_t ambiguous = 0;
+			std::uint64_t duplicate = 0;
+			std::uint64_t mismatches = 0;
+			std::uint64_t inputChanges = 0;
+			std::uint64_t resolverInvocations = 0;
+			std::uint64_t nonStock = 0;
+			std::uint64_t incompleteBinds = 0;
+			for (const auto& row : _impl->rows) {
+				identityDuplicate =
+					identityDuplicate
+					|| !recordIds.emplace(row.recordId).second
+					|| !recordSequences.emplace(
+						row.recordSequence).second
+					|| !digests.emplace(
+						row.observationSha256).second
+					|| !eventIds.emplace(
+						row.stockCreateEventId).second
+					|| !eventSequences.emplace(
+						row.stockCreateSequence).second
+					|| !eventSequences.emplace(
+						row.enqueueSequence).second;
+				if (row.bindEventId) {
+					identityDuplicate =
+						identityDuplicate
+						|| !eventIds.emplace(
+							*row.bindEventId).second
+						|| !eventSequences.emplace(
+							*row.bindSequence).second;
+				}
+				committedSequences.emplace(
+					row.stockCreateSequence);
+				committedSequences.emplace(
+					row.enqueueSequence);
+				if (row.bindSequence)
+					committedSequences.emplace(
+						*row.bindSequence);
+				const auto& observation = row.observation;
+				failedCreates +=
+					!observation.facts.creationSucceeded;
+				nullOutputs +=
+					!observation.facts.creationOutputNonNull;
+				ambiguous += observation.lineage.status
+					== RouteLineageStatus::kAmbiguous;
+				duplicate += observation.lineage.status
+					== RouteLineageStatus::kDuplicate;
+				mismatches += observation.lineage.status
+					== RouteLineageStatus::kRouteMismatch;
+				inputChanges +=
+					!observation.stockAuthority
+						.originalInputUnchanged;
+				resolverInvocations +=
+					observation.stockAuthority.resolverInvoked;
+				nonStock +=
+					observation.facts.creationSucceeded
+					&& observation.facts
+						.creationOutputNonNull
+					&& observation.stockAuthority
+						.finalObjectStock
+					&& !*observation.stockAuthority
+						.finalObjectStock;
+				const bool usable =
+					observation.facts.creationSucceeded
+					&& observation.facts
+						.creationOutputNonNull
+					&& observation.stockAuthority
+						.finalObjectStock
+					&& *observation.stockAuthority
+						.finalObjectStock;
+				incompleteBinds += usable
+					&& observation.lineage.status
+						!= RouteLineageStatus::kLinked;
+			}
+			inputChanges += _impl->excludedInputChanges.load(
+				std::memory_order_relaxed);
+			resolverInvocations +=
+				_impl->excludedResolverInvocations.load(
+					std::memory_order_relaxed);
+			nonStock +=
+				_impl->excludedNonStockFinalObjects.load(
+					std::memory_order_relaxed);
+			const auto committedCount =
+				static_cast<std::uint64_t>(
+					committedSequences.size());
+			const auto uncommitted =
+				allocatedSequences >= committedCount
+					? allocatedSequences - committedCount
+					: allocatedSequences;
+			const bool filterValid =
+				observerCallbacks
+					== includedCallbacks + excludedCallbacks
+				&& excludedCallbacks
+					== excludedMissing
+						+ excludedAmbiguous
+						+ excludedSubclass
+						+ excludedStage
+				&& createAttempts == includedCallbacks;
+			const bool countersValid =
+				queueAttempts == createAttempts
+				&& queueSuccesses + queueFailures
+					== queueAttempts
+				&& persistenceAttempts == queueSuccesses
+				&& persistenceSuccesses + persistenceFailures
+					== persistenceAttempts
+				&& persistenceSuccesses == _impl->rows.size();
+
+			std::vector<std::string> reasons;
+			if (!_impl->scope.enabled)
+				reasons.emplace_back("scope-disabled");
+			std::string scopeDigest;
+			if (!RouteScopeValid(
+					_impl->run, _impl->scope, scopeDigest)
+				|| scopeDigest
+					!= _impl->scope.configurationSha256)
+				reasons.emplace_back(
+					"scope-configuration-mismatch");
+			if (!filterValid)
+				reasons.emplace_back(
+					"filter-accounting-mismatch");
+			if (_impl->globalStockOnlyViolation)
+				reasons.emplace_back("stock-only-violation");
+			if (queueFailures != 0)
+				reasons.emplace_back("queue-loss");
+			if (persistenceFailures != 0)
+				reasons.emplace_back("persistence-loss");
+			if (uncommitted != 0)
+				reasons.emplace_back("sequence-loss");
+			if (!countersValid)
+				reasons.emplace_back("counter-mismatch");
+			if (_impl->excludedCompletionLosses.load(
+					std::memory_order_relaxed) != 0)
+				reasons.emplace_back("counter-mismatch");
+			if (identityDuplicate)
+				reasons.emplace_back("identity-duplicate");
+			if (!hookCoverageReady && reasons.empty())
+				reasons.emplace_back("producer-declined");
+			reasons =
+				SortUniqueRouteReasons(std::move(reasons));
+			const bool authoritative = reasons.empty();
+
+			std::ostringstream json;
+			json.imbue(std::locale::classic());
+			json << "{\"authority_reasons\":";
+			AppendRouteStringArray(json, reasons);
+			json << ",\"capture_authoritative\":";
+			JsonBool(json, authoritative);
+			json << ",\"capture_scope\":{\"configuration_sha256\":";
+			JsonString(
+				json, _impl->scope.configurationSha256);
+			json << ",\"eligibility_rules\":";
+			AppendRouteStringArray(
+				json, _impl->scope.eligibilityRules);
+			json << ",\"enabled\":";
+			JsonBool(json, _impl->scope.enabled);
+			json << ",\"included_stages\":";
+			AppendRouteStringArray(
+				json, _impl->scope.includedStages);
+			json << ",\"included_subclasses\":";
+			AppendRouteStringArray(
+				json, _impl->scope.includedSubclasses);
+			json << "},\"diagnostics\":{"
+				"\"ambiguous_pointer_lineages\":" << ambiguous
+				<< ",\"bind_route_context_mismatches\":"
+				<< mismatches
+				<< ",\"create_attempts\":" << createAttempts
+				<< ",\"duplicate_pointer_lineages\":"
+				<< duplicate
+				<< ",\"failed_creates\":" << failedCreates
+				<< ",\"incomplete_binds\":" << incompleteBinds
+				<< ",\"non_stock_final_objects\":" << nonStock
+				<< ",\"null_create_outputs\":" << nullOutputs
+				<< ",\"original_input_changes\":" << inputChanges
+				<< ",\"persistence_attempts\":"
+				<< persistenceAttempts
+				<< ",\"persistence_failures\":"
+				<< persistenceFailures
+				<< ",\"persistence_successes\":"
+				<< persistenceSuccesses
+				<< ",\"queue_enqueue_attempts\":"
+				<< queueAttempts
+				<< ",\"queue_enqueue_failures\":"
+				<< queueFailures
+				<< ",\"queue_enqueue_successes\":"
+				<< queueSuccesses
+				<< ",\"resolver_invocations\":"
+				<< resolverInvocations
+				<< "},\"filter_outcomes\":{"
+				"\"excluded_ambiguous_route_context\":"
+				<< excludedAmbiguous
+				<< ",\"excluded_callbacks\":"
+				<< excludedCallbacks
+				<< ",\"excluded_missing_route_context\":"
+				<< excludedMissing
+				<< ",\"excluded_stage\":" << excludedStage
+				<< ",\"excluded_subclass\":"
+				<< excludedSubclass
+				<< ",\"included_callbacks\":"
+				<< includedCallbacks
+				<< ",\"observer_callbacks\":"
+				<< observerCallbacks
+				<< "},\"observations\":[";
+			for (std::size_t index = 0;
+				 index < _impl->rows.size();
+				 ++index) {
+				if (index != 0)
+					json << ',';
+				const auto& row = _impl->rows[index];
+				json << "{\"bind_event_id\":";
+				JsonOptionalString(json, row.bindEventId);
+				json << ",\"bind_sequence\":";
+				if (row.bindSequence)
+					json << *row.bindSequence;
+				else
+					json << "null";
+				json << ",\"capture_authoritative\":";
+				JsonBool(json, row.captureAuthoritative);
+				json << ",\"observation_byte_length\":"
+					<< row.observationByteLength
+					<< ",\"observation_sha256\":";
+				JsonString(json, row.observationSha256);
+				json << ",\"record_id\":";
+				JsonString(json, row.recordId);
+				json << ",\"record_sequence\":"
+					<< row.recordSequence
+					<< ",\"stock_create_event_id\":";
+				JsonString(json, row.stockCreateEventId);
+				json << ",\"stock_create_sequence\":"
+					<< row.stockCreateSequence << '}';
+			}
+			json << "],\"producer\":";
+			AppendRouteProducer(json, _impl->producer);
+			json << ",\"run\":";
+			AppendRouteRun(json, _impl->run);
+			json << ",\"runtime\":";
+			AppendRouteRuntime(json, _impl->runtime);
+			json << ",\"schema\":"
+				"\"fo4cs.stock-runtime-route-run-manifest\","
+				"\"schema_version\":1,"
+				"\"sequence_accounting\":{"
+				"\"allocated_sequences\":"
+				<< allocatedSequences
+				<< ",\"committed_sequences\":"
+				<< committedCount
+				<< ",\"first_sequence\":";
+			if (allocatedSequences != 0)
+				json << 1;
+			else
+				json << "null";
+			json << ",\"last_sequence\":";
+			if (allocatedSequences != 0)
+				json << allocatedSequences;
+			else
+				json << "null";
+			json << ",\"uncommitted_sequences\":"
+				<< uncommitted
+				<< "},\"stock_only_evidence\":{"
+				"\"resolver_registry_empty_close\":";
+			JsonBool(json, _impl->registryClose.empty);
+			json << ",\"resolver_registry_empty_open\":";
+			JsonBool(
+				json, _impl->scope.resolverRegistryOpen.empty);
+			json << ",\"resolver_registry_generation_close\":"
+				<< _impl->registryClose.generation
+				<< ",\"resolver_registry_generation_open\":"
+				<< _impl->scope.resolverRegistryOpen.generation
+				<< ",\"resolver_registry_sha256_close\":";
+			JsonString(json, _impl->registryClose.sha256);
+			json << ",\"resolver_registry_sha256_open\":";
+			JsonString(
+				json,
+				_impl->scope.resolverRegistryOpen.sha256);
+			json << "}}\n";
+			return _impl->PublishDocument(
+				"manifests", json.str());
+		} catch (...) {
+			failure.error = RoutePublicationError::kIoFailed;
+			return failure;
+		}
+	}
 
 	std::string BuildCanonicalManifest(ManifestDocument a_document)
 	{

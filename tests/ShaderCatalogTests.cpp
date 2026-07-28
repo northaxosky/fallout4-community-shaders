@@ -2474,6 +2474,768 @@ namespace
 			"injected blob path reached a contract manifest");
 	}
 
+	constexpr std::string_view kEmptyRouteRegistrySha256 =
+		"f145a5ce82643093352f6c02a3d4a177"
+		"06697e07538f7a47529081cb4997bdf0";
+
+	RouteResolverRegistrySnapshot g_routeRegistrySnapshot{
+		true,
+		0,
+		true,
+		std::string(kEmptyRouteRegistrySha256)
+	};
+	bool g_routeHooksReady = true;
+
+	RouteResolverRegistrySnapshot RouteRegistrySnapshotForTesting() noexcept
+	{
+		return g_routeRegistrySnapshot;
+	}
+
+	bool RouteHooksReadyForTesting() noexcept
+	{
+		return g_routeHooksReady;
+	}
+
+	RouteCodeIdentity TestRouteCodeIdentity(
+		std::string a_symbol,
+		std::uint32_t a_rva,
+		char a_digest)
+	{
+		return {
+			"FO4CommunityShaders.dll",
+			std::move(a_symbol),
+			a_rva,
+			{ a_rva, 16 },
+			std::string(64, a_digest)
+		};
+	}
+
+	RouteCaptureScope TestRouteCaptureScope()
+	{
+		RouteCaptureScope scope;
+		scope.createHook = TestRouteCodeIdentity(
+			"PixelShaderSwapBroker::CreatePixelShaderHook::thunk",
+			0x1000,
+			'b');
+		scope.bindHook = TestRouteCodeIdentity(
+			"ShaderCatalog::PSSetShaderHook::thunk",
+			0x1100,
+			'c');
+		scope.pluginRuntimeResolver = {
+			"ShaderVariantRuntimeResolver",
+			"1",
+			"fo4cs.pixel-shader-runtime-route.v1",
+			std::string(64, 'd'),
+			{
+				{
+					{ "formula" },
+					"ResolvePixelShaderVariantFormula",
+					0x1200,
+					{ 0x1200, 16 },
+					std::string(64, 'e')
+				},
+				{
+					{ "runtime-gate", "tiled-state" },
+					"ResolvePixelShaderRuntimeRoute",
+					0x1300,
+					{ 0x1300, 16 },
+					std::string(64, 'f')
+				}
+			}
+		};
+		scope.resolverRegistryOpen = g_routeRegistrySnapshot;
+		scope.resolverRegistrySnapshot =
+			&RouteRegistrySnapshotForTesting;
+		scope.hookCoverageReady = &RouteHooksReadyForTesting;
+		return scope;
+	}
+
+	std::unique_ptr<StockRuntimeRoutePublisher> OpenTestRoutePublisher(
+		const std::filesystem::path& a_root,
+		RoutePublicationError& a_error)
+	{
+		return StockRuntimeRoutePublisher::Open(
+			a_root,
+			{
+				"FO4CommunityShaders",
+				"1.2.3",
+				std::string(64, '1')
+			},
+			{
+				"AE",
+				"1.11.221",
+				std::string(64, '2')
+			},
+			{
+				"11111111-2222-4333-8444-555555555555"
+			},
+			TestRouteCaptureScope(),
+			a_error);
+	}
+
+	RouteCreateInput TestRouteCreateInput(bool a_linkage = false)
+	{
+		return {
+			.routePresent = true,
+			.subclass = "BSDFLightShader",
+			.stage = "ps",
+			.rawTechnique = 0x01200202,
+			.pluginResolvedPsid = 0x01200202,
+			.tiledLighting = std::nullopt,
+			.classLinkagePresent = a_linkage
+		};
+	}
+
+	RouteCreateOutcome TestRouteCreateOutcome()
+	{
+		return {
+			.byteLength = 24416,
+			.sha1 = std::string(40, '3'),
+			.sha256 = std::string(64, '4'),
+			.hresult = 0,
+			.creationSucceeded = true,
+			.outputNonNull = true,
+			.originalInputUnchanged = true,
+			.finalObjectStock = true,
+			.resolverInvoked = false
+		};
+	}
+
+	std::string ReadTextFile(const std::filesystem::path& a_path)
+	{
+		std::ifstream input(a_path, std::ios::binary);
+		Check(input.is_open(), "unable to read route receipt file");
+		return {
+			std::istreambuf_iterator<char>(input),
+			std::istreambuf_iterator<char>()
+		};
+	}
+
+	void TestRouteReceiptPublication()
+	{
+		TempTree tree("route-receipt");
+		g_routeRegistrySnapshot = {
+			true, 0, true, std::string(kEmptyRouteRegistrySha256)
+		};
+		g_routeHooksReady = true;
+		RoutePublicationError error = RoutePublicationError::kNone;
+		auto publisher = OpenTestRoutePublisher(tree.path, error);
+		Check(
+			publisher && error == RoutePublicationError::kNone,
+			"route publisher did not open");
+		auto admission =
+			publisher->BeginCreate(TestRouteCreateInput(true));
+		Check(
+			static_cast<bool>(admission),
+			"route create admission failed");
+		auto created = publisher->CompleteCreate(
+			std::move(admission), TestRouteCreateOutcome());
+		Check(
+			created.enqueued
+				&& created.usableStockObject
+				&& created.record,
+			"route create was not queued");
+		{
+			std::scoped_lock lock(created.record->mutex);
+			created.record->bindReserved = true;
+		}
+		auto bindAdmission = publisher->BeginBind();
+		Check(
+			static_cast<bool>(bindAdmission),
+			"route bind admission failed");
+		Check(
+			publisher->RecordBind(
+				std::move(bindAdmission),
+				created.record,
+				RouteBindSnapshot{
+					"BSDFLightShader",
+					"ps",
+					0x01200202,
+					std::nullopt
+				}),
+			"route bind was not recorded");
+
+		FrozenRouteSnapshot snapshot;
+		Check(
+			publisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error)
+				&& snapshot.records.size() == 1,
+			"route capture did not freeze");
+		const auto canonicalA =
+			BuildCanonicalRouteObservation(
+				snapshot.records.front().observation);
+		const auto canonicalB =
+			BuildCanonicalRouteObservation(
+				snapshot.records.front().observation);
+		Check(
+			canonicalA == canonicalB
+				&& canonicalA.starts_with(
+					"{\"authority_reasons\":[]")
+				&& canonicalA.ends_with('\n'),
+			"route observation is not deterministic canonical JSON");
+		Check(
+			canonicalA.find("\"observed_lookup_psid\":null")
+					!= std::string::npos
+				&& canonicalA.find(
+					"\"engine_lookup_observed\":false")
+					!= std::string::npos
+				&& canonicalA.find(
+					"\"plugin_resolved_psid\":18874882")
+					!= std::string::npos
+				&& canonicalA.find(
+					"\"gpu_execution_observed\":false")
+					!= std::string::npos
+				&& canonicalA.find(
+					"\"class_linkage_state\":\"present\"")
+					!= std::string::npos,
+			"route observation lost domain-separated provenance");
+		Check(
+			canonicalA.find("fxp") == std::string::npos
+				&& canonicalA.find("archive") == std::string::npos
+				&& canonicalA.find("admission") == std::string::npos
+				&& canonicalA.find("fidelity") == std::string::npos,
+			"route observation leaked a forbidden claim");
+
+		const auto observation =
+			publisher->PublishObservation(snapshot.records.front());
+		Check(
+			observation.success
+				&& std::filesystem::exists(
+					observation.document.path),
+			"route observation publication failed");
+		const auto manifest = publisher->FinalizeRun();
+		Check(
+			manifest.success
+				&& std::filesystem::exists(manifest.document.path),
+			"route manifest publication failed");
+		const auto observationJson =
+			ReadTextFile(observation.document.path);
+		const auto manifestJson =
+			ReadTextFile(manifest.document.path);
+		Check(
+			observationJson == canonicalA,
+			"published route observation bytes changed");
+		Check(
+			manifestJson.find("\"capture_authoritative\":true")
+					!= std::string::npos
+				&& manifestJson.find(
+					"\"scenario_id\":\"stock-pixel-shader-routes-v1\"")
+					!= std::string::npos
+				&& manifestJson.find("\"create_attempts\":1")
+					!= std::string::npos
+				&& manifestJson.find(
+					"\"uncommitted_sequences\":0")
+					!= std::string::npos,
+			"route manifest omitted authority or accounting");
+	}
+
+	void TestRouteCaptureDisabledByDefault()
+	{
+		TempTree tree("route-disabled");
+		const auto database = tree.path / "catalog.sqlite";
+		const auto artifacts = tree.path / "artifacts";
+		std::filesystem::create_directory(artifacts);
+		auto& catalog = CatalogDB::Get();
+		Check(
+			StartReady(catalog, TestConfig(database, artifacts)),
+			"disabled route capture run did not start");
+		const auto stats = catalog.GetStats();
+		Check(
+			!stats.routeCaptureRequested
+				&& !stats.routeCaptureActive,
+			"route capture was active by default");
+		Check(catalog.Stop(), "disabled route capture run did not stop");
+		Check(
+			!std::filesystem::exists(artifacts / "observations")
+				&& !std::filesystem::exists(artifacts / "manifests"),
+			"disabled route capture published route documents");
+	}
+
+	void TestRouteCaptureLossAndRegistryViolation()
+	{
+		TempTree tree("route-loss");
+		g_routeRegistrySnapshot = {
+			true, 0, true, std::string(kEmptyRouteRegistrySha256)
+		};
+		g_routeHooksReady = true;
+		RoutePublicationError error = RoutePublicationError::kNone;
+		auto publisher = OpenTestRoutePublisher(tree.path, error);
+		Check(
+			static_cast<bool>(publisher),
+			"route loss publisher did not open");
+		auto admission =
+			publisher->BeginCreate(TestRouteCreateInput());
+		auto invalid = TestRouteCreateOutcome();
+		invalid.sha1.clear();
+		Check(
+			!publisher->CompleteCreate(
+				std::move(admission), invalid).enqueued,
+			"invalid route create was queued");
+		FrozenRouteSnapshot snapshot;
+		Check(
+			publisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error)
+				&& snapshot.records.empty(),
+			"lossy route capture did not freeze");
+		const auto manifest = publisher->FinalizeRun();
+		Check(manifest.success, "lossy route manifest was not published");
+		const auto manifestJson =
+			ReadTextFile(manifest.document.path);
+		Check(
+			manifestJson.find("\"capture_authoritative\":false")
+					!= std::string::npos
+				&& manifestJson.find("\"queue-loss\"")
+					!= std::string::npos
+				&& manifestJson.find("\"sequence-loss\"")
+					!= std::string::npos,
+			"route queue/sequence loss was not fail-closed");
+
+		TempTree registryTree("route-registry");
+		g_routeRegistrySnapshot = {
+			true, 0, true, std::string(kEmptyRouteRegistrySha256)
+		};
+		auto registryPublisher =
+			OpenTestRoutePublisher(registryTree.path, error);
+		auto registryAdmission =
+			registryPublisher->BeginCreate(TestRouteCreateInput());
+		auto created = registryPublisher->CompleteCreate(
+			std::move(registryAdmission), TestRouteCreateOutcome());
+		{
+			std::scoped_lock lock(created.record->mutex);
+			created.record->bindReserved = true;
+		}
+		auto registryBind = registryPublisher->BeginBind();
+		Check(
+			registryPublisher->RecordBind(
+				std::move(registryBind),
+				created.record,
+				RouteBindSnapshot{
+					"BSDFLightShader",
+					"ps",
+					0x01200202,
+					std::nullopt
+				}),
+			"registry fixture bind failed");
+		g_routeRegistrySnapshot = {
+			true, 1, false, std::string(64, 'b')
+		};
+		Check(
+			registryPublisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error),
+			"registry-violation capture did not freeze");
+		const auto recordJson =
+			BuildCanonicalRouteObservation(
+				snapshot.records.front().observation);
+		Check(
+			recordJson.find("\"run-stock-only-violation\"")
+					!= std::string::npos
+				&& recordJson.find(
+					"\"capture_authoritative\":false")
+					!= std::string::npos,
+			"resolver registry change did not invalidate record");
+		Check(
+			registryPublisher->PublishObservation(
+				snapshot.records.front()).success,
+			"registry-violation observation did not publish");
+		const auto registryManifest =
+			registryPublisher->FinalizeRun();
+		Check(
+			registryManifest.success
+				&& ReadTextFile(registryManifest.document.path)
+					.find("\"stock-only-violation\"")
+					!= std::string::npos,
+			"resolver registry change did not invalidate run");
+		g_routeRegistrySnapshot = {
+			true, 0, true, std::string(kEmptyRouteRegistrySha256)
+		};
+
+		TempTree mutationTree("route-input-change");
+		auto mutationPublisher =
+			OpenTestRoutePublisher(mutationTree.path, error);
+		auto mutationAdmission =
+			mutationPublisher->BeginCreate(TestRouteCreateInput());
+		auto mutation = TestRouteCreateOutcome();
+		mutation.originalInputUnchanged = false;
+		auto mutationRecord = mutationPublisher->CompleteCreate(
+			std::move(mutationAdmission), mutation);
+		Check(
+			mutationRecord.enqueued,
+			"changed-input diagnostic was not queued");
+		Check(
+			mutationPublisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error),
+			"changed-input capture did not freeze");
+		const auto mutationJson =
+			BuildCanonicalRouteObservation(
+				snapshot.records.front().observation);
+		Check(
+			mutationJson.find("\"original-input-changed\"")
+					!= std::string::npos
+				&& mutationJson.find(
+					"\"capture_authoritative\":false")
+					!= std::string::npos,
+			"changed original input remained authoritative");
+
+		TempTree excludedTree("route-excluded-input");
+		auto excludedPublisher =
+			OpenTestRoutePublisher(excludedTree.path, error);
+		auto excludedInput = TestRouteCreateInput();
+		excludedInput.routePresent = false;
+		auto excludedAdmission =
+			excludedPublisher->BeginCreate(excludedInput);
+		Check(
+			static_cast<bool>(excludedAdmission),
+			"excluded callback did not retain its capture lease");
+		auto excludedOutcome = TestRouteCreateOutcome();
+		excludedOutcome.originalInputUnchanged = false;
+		Check(
+			!excludedPublisher->CompleteCreate(
+				std::move(excludedAdmission),
+				excludedOutcome).enqueued,
+			"excluded callback produced an observation");
+		Check(
+			excludedPublisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error)
+				&& snapshot.records.empty(),
+			"excluded callback capture did not freeze");
+		const auto excludedManifest =
+			excludedPublisher->FinalizeRun();
+		const auto excludedJson =
+			ReadTextFile(excludedManifest.document.path);
+		Check(
+			excludedManifest.success,
+			"excluded input manifest did not publish");
+		Check(
+			excludedJson.find(
+				"\"excluded_missing_route_context\":1")
+				!= std::string::npos,
+			"excluded callback was not counted");
+		Check(
+			excludedJson.find(
+				"\"original_input_changes\":1")
+				!= std::string::npos,
+			"excluded input mutation was not counted");
+		Check(
+			excludedJson.find("\"stock-only-violation\"")
+				!= std::string::npos,
+			"excluded input mutation did not invalidate stock-only run");
+
+		TempTree hookTree("route-hook-coverage");
+		auto hookPublisher =
+			OpenTestRoutePublisher(hookTree.path, error);
+		g_routeHooksReady = false;
+		Check(
+			hookPublisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error),
+			"hook-coverage capture did not freeze");
+		const auto hookManifest = hookPublisher->FinalizeRun();
+		const auto hookJson =
+			ReadTextFile(hookManifest.document.path);
+		Check(
+			hookManifest.success
+				&& hookJson.find(
+					"\"capture_authoritative\":false")
+					!= std::string::npos
+				&& hookJson.find("\"producer-declined\"")
+					!= std::string::npos,
+			"missing hook coverage produced authoritative manifest");
+		g_routeHooksReady = true;
+
+		TempTree excludedLossTree("route-excluded-loss");
+		auto excludedLossPublisher =
+			OpenTestRoutePublisher(excludedLossTree.path, error);
+		auto excludedLossInput = TestRouteCreateInput();
+		excludedLossInput.routePresent = false;
+		{
+			auto abandoned =
+				excludedLossPublisher->BeginCreate(excludedLossInput);
+			Check(
+				static_cast<bool>(abandoned),
+				"excluded admission was not retained");
+		}
+		Check(
+			excludedLossPublisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, error),
+			"abandoned excluded capture did not freeze");
+		const auto excludedLossManifest =
+			excludedLossPublisher->FinalizeRun();
+		const auto excludedLossJson =
+			ReadTextFile(excludedLossManifest.document.path);
+		Check(
+			excludedLossManifest.success
+				&& excludedLossJson.find("\"counter-mismatch\"")
+					!= std::string::npos
+				&& excludedLossJson.find(
+					"\"capture_authoritative\":false")
+					!= std::string::npos,
+			"abandoned excluded admission remained authoritative");
+
+		TempTree registryDigestTree("route-empty-registry-digest");
+		auto invalidScope = TestRouteCaptureScope();
+		invalidScope.resolverRegistryOpen.sha256 =
+			std::string(64, 'a');
+		auto invalidRegistryPublisher =
+			StockRuntimeRoutePublisher::Open(
+				registryDigestTree.path,
+				{
+					"FO4CommunityShaders",
+					"1.2.3",
+					std::string(64, '1')
+				},
+				{
+					"AE",
+					"1.11.221",
+					std::string(64, '2')
+				},
+				{
+					"11111111-2222-4333-8444-555555555555"
+				},
+				invalidScope,
+				error);
+		Check(
+			!invalidRegistryPublisher
+				&& error
+					== RoutePublicationError::kStockOnlyViolation,
+			"arbitrary empty registry digest was accepted");
+	}
+
+	void TestRouteCaptureLeaseRace()
+	{
+		using namespace std::chrono_literals;
+		TempTree tree("route-lease");
+		g_routeRegistrySnapshot = {
+			true, 0, true, std::string(kEmptyRouteRegistrySha256)
+		};
+		RoutePublicationError error = RoutePublicationError::kNone;
+		auto publisher = OpenTestRoutePublisher(tree.path, error);
+		auto admission =
+			publisher->BeginCreate(TestRouteCreateInput());
+		Check(
+			static_cast<bool>(admission),
+			"route lease was not acquired");
+		FrozenRouteSnapshot snapshot;
+		auto frozen = std::async(std::launch::async, [&] {
+			RoutePublicationError freezeError =
+				RoutePublicationError::kNone;
+			return publisher->CloseCaptureAdmissionAndFreeze(
+				snapshot, freezeError);
+		});
+		std::this_thread::sleep_for(50ms);
+		Check(
+			frozen.wait_for(0ms) != std::future_status::ready,
+			"route capture froze with an active lease");
+		admission = {};
+		Check(
+			frozen.wait_for(2s) == std::future_status::ready
+				&& frozen.get(),
+			"route capture did not resume after lease release");
+	}
+
+	void TestRouteLineageConflictAndStaleOutput()
+	{
+		FakePixelShader shader;
+		const auto bytes = SyntheticDxbc();
+		ContentDigest digest{};
+		Check(
+			ComputeDigests(bytes.data(), bytes.size(), digest),
+			"route lineage digest failed");
+		Sha1Result sha{};
+		sha.bytes = digest.sha1;
+		auto first =
+			std::make_shared<RouteCaptureRecordState>();
+		auto second =
+			std::make_shared<RouteCaptureRecordState>();
+		first->observation.lineage.status =
+			RouteLineageStatus::kPendingBind;
+		second->observation.lineage.status =
+			RouteLineageStatus::kPendingBind;
+		shader_tracker::SetEnabled(true);
+		Check(
+			shader_tracker::TrackRouteLineage(
+				&shader, sha, first)
+				== shader_tracker::RouteTrackResult::kTracked,
+			"route lineage was not tracked");
+		Check(
+			shader_tracker::TryReserveRouteBind(&shader) == first
+				&& !shader_tracker::TryReserveRouteBind(&shader),
+			"route bind reservation was not unique");
+		{
+			std::scoped_lock lock(first->mutex);
+			first->bindReserved = false;
+		}
+		RouteBindEvent priorBind{
+			.eventId = "prior-bind",
+			.sequence = 3,
+			.threadId = 7
+		};
+		first->observation.bind = priorBind;
+		first->observation.facts.bindObserved = true;
+		first->observation.lineage.pointerLineageEventId =
+			"prior-bind";
+		first->observation.lineage.bindRouteContextMatch = true;
+		Check(
+			shader_tracker::TrackRouteLineage(
+				&shader, sha, second)
+				== shader_tracker::RouteTrackResult::kDuplicate,
+			"late duplicate route lineage was not rejected");
+		Check(
+			!shader_tracker::TryReserveRouteBind(&shader),
+			"duplicate route lineage remained bindable");
+		{
+			std::scoped_lock firstLock(first->mutex);
+			std::scoped_lock secondLock(second->mutex);
+			Check(
+				first->observation.lineage.status
+						== RouteLineageStatus::kDuplicate
+					&& second->observation.lineage.status
+						== RouteLineageStatus::kDuplicate
+					&& first->observation.bind
+					&& first->observation.bind->eventId
+						== "prior-bind",
+				"duplicate status was not applied to both records");
+		}
+		shader_tracker::SetEnabled(false);
+		Check(
+			shader.references.load(std::memory_order_relaxed) == 1,
+			"route tracker leaked a shader reference");
+
+		TempTree tree("route-stale");
+		g_routeRegistrySnapshot = {
+			true, 0, true, std::string(kEmptyRouteRegistrySha256)
+		};
+		RoutePublicationError error = RoutePublicationError::kNone;
+		auto publisher = OpenTestRoutePublisher(tree.path, error);
+		auto admission =
+			publisher->BeginCreate(TestRouteCreateInput());
+		auto stale = TestRouteCreateOutcome();
+		stale.creationSucceeded = false;
+		stale.outputNonNull = true;
+		stale.finalObjectStock.reset();
+		const auto created = publisher->CompleteCreate(
+			std::move(admission), stale);
+		Check(
+			created.enqueued
+				&& !created.usableStockObject
+				&& !created.record->observation.lineage.shaderObjectId
+				&& created.record->observation.lineage.status
+					== RouteLineageStatus::kNotCreated,
+			"failed stale output received route object identity");
+	}
+
+	void WriteSyntheticRoutePe(
+		const std::filesystem::path& a_path,
+		bool a_duplicateRuntimeFunction)
+	{
+		std::vector<std::byte> bytes(0x700);
+		IMAGE_DOS_HEADER dos{};
+		dos.e_magic = IMAGE_DOS_SIGNATURE;
+		dos.e_lfanew = 0x80;
+		std::memcpy(bytes.data(), &dos, sizeof(dos));
+		const DWORD signature = IMAGE_NT_SIGNATURE;
+		std::memcpy(bytes.data() + 0x80, &signature, sizeof(signature));
+		IMAGE_FILE_HEADER file{};
+		file.Machine = IMAGE_FILE_MACHINE_AMD64;
+		file.NumberOfSections = 2;
+		file.SizeOfOptionalHeader = sizeof(IMAGE_OPTIONAL_HEADER64);
+		std::memcpy(
+			bytes.data() + 0x84, &file, sizeof(file));
+		IMAGE_OPTIONAL_HEADER64 optional{};
+		optional.Magic = IMAGE_NT_OPTIONAL_HDR64_MAGIC;
+		optional.NumberOfRvaAndSizes = IMAGE_NUMBEROF_DIRECTORY_ENTRIES;
+		optional.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION] = {
+			0x3000,
+			static_cast<DWORD>(
+				sizeof(RUNTIME_FUNCTION)
+				* (a_duplicateRuntimeFunction ? 2 : 1))
+		};
+		std::memcpy(
+			bytes.data() + 0x84 + sizeof(file),
+			&optional,
+			sizeof(optional));
+		const auto sectionOffset =
+			0x84 + sizeof(file) + sizeof(optional);
+		IMAGE_SECTION_HEADER text{};
+		text.VirtualAddress = 0x1000;
+		text.SizeOfRawData = 0x100;
+		text.PointerToRawData = 0x400;
+		IMAGE_SECTION_HEADER pdata{};
+		pdata.VirtualAddress = 0x3000;
+		pdata.SizeOfRawData = 0x100;
+		pdata.PointerToRawData = 0x500;
+		std::memcpy(
+			bytes.data() + sectionOffset, &text, sizeof(text));
+		std::memcpy(
+			bytes.data() + sectionOffset + sizeof(text),
+			&pdata,
+			sizeof(pdata));
+		for (std::size_t index = 0; index < 16; ++index)
+			bytes[0x400 + index] = static_cast<std::byte>(index);
+		const RUNTIME_FUNCTION function{
+			0x1000,
+			0x1010,
+			0
+		};
+		std::memcpy(
+			bytes.data() + 0x500,
+			&function,
+			sizeof(function));
+		if (a_duplicateRuntimeFunction) {
+			std::memcpy(
+				bytes.data() + 0x500 + sizeof(function),
+				&function,
+				sizeof(function));
+		}
+		std::ofstream output(a_path, std::ios::binary);
+		output.write(
+			reinterpret_cast<const char*>(bytes.data()),
+			static_cast<std::streamsize>(bytes.size()));
+		Check(static_cast<bool>(output), "synthetic PE write failed");
+	}
+
+	void TestRoutePeCodeIdentity()
+	{
+		TempTree tree("route-pe");
+		const auto valid = tree.path / "valid.dll";
+		WriteSyntheticRoutePe(valid, false);
+		RouteCodeIdentity identity;
+		std::string error;
+		Check(
+			ResolveRouteCodeIdentity(
+				valid,
+				0x10000000,
+				0x10001000,
+				"SyntheticHook",
+				identity,
+				error),
+			"valid synthetic PE identity rejected: " + error);
+		Check(
+			identity.rva == 0x1000
+				&& identity.codeRange.startRva == 0x1000
+				&& identity.codeRange.byteLength == 16
+				&& IsLowerHexDigest(identity.codeSha256, 64),
+			"synthetic PE identity fields are wrong");
+		const auto duplicate = tree.path / "duplicate.dll";
+		WriteSyntheticRoutePe(duplicate, true);
+		Check(
+			!ResolveRouteCodeIdentity(
+				duplicate,
+				0x20000000,
+				0x20001000,
+				"SyntheticHook",
+				identity,
+				error),
+			"duplicate unwind range was accepted");
+		Check(
+			!ResolveRouteCodeIdentity(
+				valid,
+				0x10000000,
+				0x10002000,
+				"SyntheticHook",
+				identity,
+				error),
+			"missing unwind range was accepted");
+	}
+
 	void TestCanonicalUtf8()
 	{
 		auto document = SampleManifest();
@@ -2566,6 +3328,21 @@ int main()
 	Run("pixel tracker alias lookup", &TestPixelTrackerAliasLookup, failures);
 	Run("per-run blob associations", &TestPerRunBlobAssociations, failures);
 	Run("injected blob path rejected", &TestInjectedBlobPathRejected, failures);
+	Run("route receipt publication", &TestRouteReceiptPublication, failures);
+	Run(
+		"route capture disabled by default",
+		&TestRouteCaptureDisabledByDefault,
+		failures);
+	Run(
+		"route capture loss and registry violation",
+		&TestRouteCaptureLossAndRegistryViolation,
+		failures);
+	Run("route capture lease race", &TestRouteCaptureLeaseRace, failures);
+	Run(
+		"route lineage conflict and stale output",
+		&TestRouteLineageConflictAndStaleOutput,
+		failures);
+	Run("route PE code identity", &TestRoutePeCodeIdentity, failures);
 	Run("canonical UTF-8", &TestCanonicalUtf8, failures);
 	return failures == 0 ? 0 : 1;
 }

@@ -3,6 +3,8 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/ShaderSubclassContext.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
+#include "Utils/CSSha256.h"
 
 #include <atomic>
 #include <algorithm>
@@ -26,6 +28,7 @@ namespace cs::engine
 
 		std::atomic<std::shared_ptr<const ResolverList>> g_resolvers;
 		std::mutex g_resolverRegistrationMutex;
+		PixelShaderResolverRegistryModel g_resolverRegistry;
 		std::atomic<std::shared_ptr<const ObserverList>> g_observers;
 		std::mutex g_observerRegistrationMutex;
 
@@ -43,6 +46,23 @@ namespace cs::engine
 				ID3D11ClassLinkage* a_linkage,
 				ID3D11PixelShader** a_out)
 			{
+				std::optional<PixelShaderRuntimeRoute> route;
+				std::optional<ShaderVariantKeyView> variant;
+				const auto context = shader_context::Current();
+				if (context.active
+					&& context.techniqueKnown
+					&& context.subclassName) {
+					route = ResolvePixelShaderRuntimeRoute(
+						context.subclassName,
+						context.techniqueBits);
+					if (route && route->pluginResolvedPsid) {
+						variant = ShaderVariantKeyView{
+							route->subclass,
+							route->stage,
+							*route->pluginResolvedPsid
+						};
+					}
+				}
 				const auto observers = g_observers.load(std::memory_order_acquire);
 				const auto resolvers = g_resolvers.load(std::memory_order_acquire);
 				const std::span<const PixelShaderSwapObserver> observerSpan =
@@ -59,13 +79,14 @@ namespace cs::engine
 					func,
 					observerSpan,
 					resolverSpan,
-					shader_context::CurrentVariant(),
+					variant,
 					PixelShaderBrokerBypassActive(),
 					a_this,
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
-					a_out);
+					a_out,
+					route);
 			}
 
 			static inline CreatePixelShaderFunction func = nullptr;
@@ -145,6 +166,8 @@ namespace cs::engine
 					return a_left.priority < a_right.priority;
 				});
 			resolverCount = updated->size();
+			(void)g_resolverRegistry.Register(
+				a_registration.priority);
 			g_resolvers.store(std::move(updated), std::memory_order_release);
 		}
 
@@ -162,12 +185,18 @@ namespace cs::engine
 
 	bool RegisterPixelShaderSwapObserver(PixelShaderSwapObserver a_observer)
 	{
-		if (!a_observer.prepare && !a_observer.observeOriginal && !a_observer.complete)
+		if (!a_observer.prepare
+			&& !a_observer.prepareDetailed
+			&& !a_observer.observeOriginal
+			&& !a_observer.complete)
 			return false;
 		if (static_cast<bool>(a_observer.beginAdmission)
 			!= static_cast<bool>(a_observer.endAdmission))
 			return false;
-		if (a_observer.prepare && !a_observer.complete)
+		if (a_observer.prepare && a_observer.prepareDetailed)
+			return false;
+		if ((a_observer.prepare || a_observer.prepareDetailed)
+			&& !a_observer.complete)
 			return false;
 
 		{
@@ -179,7 +208,9 @@ namespace cs::engine
 						&& observer.endAdmission == a_observer.endAdmission
 						&& observer.prepare == a_observer.prepare
 						&& observer.observeOriginal == a_observer.observeOriginal
-						&& observer.complete == a_observer.complete)
+						&& observer.complete == a_observer.complete
+						&& observer.prepareDetailed
+							== a_observer.prepareDetailed)
 						return false;
 				}
 				if (current->size() >= kMaxObservers)
@@ -195,6 +226,35 @@ namespace cs::engine
 
 		RequestHookInstall();
 		return true;
+	}
+
+	PixelShaderResolverRegistrySnapshot
+		GetPixelShaderResolverRegistrySnapshot() noexcept
+	{
+		try {
+			std::scoped_lock lock(g_resolverRegistrationMutex);
+			const auto descriptor =
+				BuildPixelShaderResolverRegistryDescriptor(
+					g_resolverRegistry.Identities());
+			const auto digest = sha256::Sha256Compute(
+				descriptor.data(), descriptor.size());
+			if (sha256::Sha256IsZero(digest))
+				return {};
+			return {
+				.valid = true,
+				.generation = g_resolverRegistry.Generation(),
+				.empty = g_resolverRegistry.Identities().empty(),
+				.sha256 = sha256::Sha256ToHex(digest)
+			};
+		} catch (...) {
+			return {};
+		}
+	}
+
+	std::uintptr_t PixelShaderSwapBrokerCreateHookAddress() noexcept
+	{
+		return reinterpret_cast<std::uintptr_t>(
+			&CreatePixelShaderHook::thunk);
 	}
 
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept

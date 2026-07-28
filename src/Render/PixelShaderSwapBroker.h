@@ -14,6 +14,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace cs::engine
 {
@@ -121,6 +122,23 @@ namespace cs::engine
 		ID3D11PixelShader** output = nullptr;
 	};
 
+	struct PixelShaderRuntimeRoute
+	{
+		std::string_view subclass;
+		ShaderStage stage = ShaderStage::kPixel;
+		std::uint32_t rawTechnique = 0;
+		std::optional<ShaderVariantId> pluginResolvedPsid;
+		std::optional<bool> tiledLighting;
+	};
+
+	struct PixelShaderCreationDescriptor
+	{
+		const void* bytecode = nullptr;
+		std::size_t bytecodeLength = 0;
+		bool classLinkagePresent = false;
+		std::optional<PixelShaderRuntimeRoute> route;
+	};
+
 	enum class PixelShaderSwapResolverResult : std::uint8_t
 	{
 		kNoMatch,
@@ -145,6 +163,7 @@ namespace cs::engine
 		std::int32_t originalResult = 0;
 		bool outputRequested = false;
 		ID3D11PixelShader* stockOutput = nullptr;
+		bool originalInputUnchanged = false;
 		bool resolverInvoked = false;
 		bool resolverReportedReplacement = false;
 		ID3D11PixelShader* finalOutput = nullptr;
@@ -155,6 +174,8 @@ namespace cs::engine
 
 	using PreparePixelShaderObserver = void* (*)(
 		const void* a_bytecode, std::size_t a_bytecodeLength) noexcept;
+	using PreparePixelShaderObserverDetailed = void* (*)(
+		const PixelShaderCreationDescriptor& a_descriptor) noexcept;
 	using BeginPixelShaderObserverAdmission = bool (*)() noexcept;
 	using EndPixelShaderObserverAdmission = void (*)() noexcept;
 	using OriginalPixelShaderObserver = void (*)(
@@ -170,6 +191,7 @@ namespace cs::engine
 		PreparePixelShaderObserver prepare = nullptr;
 		OriginalPixelShaderObserver observeOriginal = nullptr;
 		CompletePixelShaderObserver complete = nullptr;
+		PreparePixelShaderObserverDetailed prepareDetailed = nullptr;
 	};
 
 	struct PixelShaderSwapObserverInvocation
@@ -184,6 +206,9 @@ namespace cs::engine
 		PixelShaderSwapObserver a_observer,
 		const void* a_bytecode,
 		std::size_t a_bytecodeLength) noexcept;
+	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
+		PixelShaderSwapObserver a_observer,
+		const PixelShaderCreationDescriptor& a_descriptor) noexcept;
 	void CompletePixelShaderSwapObserver(
 		PixelShaderSwapObserverInvocation& a_invocation,
 		const PixelShaderSwapCompletion& a_completion) noexcept;
@@ -213,13 +238,50 @@ namespace cs::engine
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output) noexcept;
+		ID3D11PixelShader** a_output,
+		std::optional<PixelShaderRuntimeRoute> a_route = std::nullopt) noexcept;
+
+	struct PixelShaderResolverRegistryIdentity
+	{
+		std::uint64_t registrationGeneration = 0;
+		int priority = 0;
+
+		auto operator<=>(const PixelShaderResolverRegistryIdentity&) const = default;
+	};
+
+	class PixelShaderResolverRegistryModel
+	{
+	public:
+		std::uint64_t Register(int a_priority);
+		bool Unregister(std::uint64_t a_registrationGeneration) noexcept;
+		[[nodiscard]] std::uint64_t Generation() const noexcept;
+		[[nodiscard]] std::span<const PixelShaderResolverRegistryIdentity>
+			Identities() const noexcept;
+
+	private:
+		std::uint64_t _generation = 0;
+		std::vector<PixelShaderResolverRegistryIdentity> _identities;
+	};
+
+	std::string BuildPixelShaderResolverRegistryDescriptor(
+		std::span<const PixelShaderResolverRegistryIdentity> a_identities);
+
+	struct PixelShaderResolverRegistrySnapshot
+	{
+		bool valid = false;
+		std::uint64_t generation = 0;
+		bool empty = true;
+		std::string sha256;
+	};
 
 	void SetPixelShaderSwapBrokerDevice(ID3D11Device* a_device);
 	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver a_resolver);
 	bool RegisterPixelShaderSwapResolver(
 		PixelShaderSwapResolverRegistration a_registration);
 	bool RegisterPixelShaderSwapObserver(PixelShaderSwapObserver a_observer);
+	PixelShaderResolverRegistrySnapshot
+		GetPixelShaderResolverRegistrySnapshot() noexcept;
+	std::uintptr_t PixelShaderSwapBrokerCreateHookAddress() noexcept;
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept;
 	bool PixelShaderBrokerBypassActive() noexcept;
 

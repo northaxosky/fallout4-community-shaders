@@ -50,14 +50,28 @@ namespace
 		cs::engine::PixelShaderSwapResolverResult firstResolverResult =
 			cs::engine::PixelShaderSwapResolverResult::kNoMatch;
 		bool lowerResolverCalled = false;
+		bool mutateInput = false;
 	};
 
 	PipelineFixture* g_pipelineFixture = nullptr;
 
+	struct DetailedObserverFixture
+	{
+		bool called = false;
+		std::size_t bytecodeLength = 0;
+		bool classLinkagePresent = false;
+		std::string subclass;
+		std::uint32_t rawTechnique = 0;
+		std::optional<std::uint32_t> pluginResolvedPsid;
+		std::optional<bool> tiledLighting;
+	};
+
+	DetailedObserverFixture* g_detailedObserverFixture = nullptr;
+
 	HRESULT STDMETHODCALLTYPE PipelineOriginal(
 		ID3D11Device* a_device,
-		const void*,
-		SIZE_T,
+		const void* a_bytecode,
+		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
 		ID3D11PixelShader** a_output)
 	{
@@ -67,6 +81,11 @@ namespace
 			a_device == fixture.expectedDevice
 				&& a_linkage == fixture.expectedLinkage,
 			"original CreatePS did not receive broker device/linkage");
+		if (fixture.mutateInput && a_bytecode && a_bytecodeLength != 0) {
+			auto* bytes = const_cast<std::byte*>(
+				static_cast<const std::byte*>(a_bytecode));
+			bytes[0] ^= std::byte{ 0xff };
+		}
 		if (a_output)
 			*a_output = fixture.stock;
 		return fixture.originalResult;
@@ -78,6 +97,30 @@ namespace
 	{
 		g_pipelineFixture->order.push_back(1);
 		return g_pipelineFixture;
+	}
+
+	void* PrepareDetailedObserver(
+		const cs::engine::PixelShaderCreationDescriptor&
+			a_descriptor) noexcept
+	{
+		auto& fixture = *g_detailedObserverFixture;
+		fixture.called = true;
+		fixture.bytecodeLength = a_descriptor.bytecodeLength;
+		fixture.classLinkagePresent =
+			a_descriptor.classLinkagePresent;
+		if (a_descriptor.route) {
+			fixture.subclass = a_descriptor.route->subclass;
+			fixture.rawTechnique =
+				a_descriptor.route->rawTechnique;
+			if (a_descriptor.route->pluginResolvedPsid) {
+				fixture.pluginResolvedPsid =
+					a_descriptor.route
+						->pluginResolvedPsid->Value();
+			}
+			fixture.tiledLighting =
+				a_descriptor.route->tiledLighting;
+		}
+		return &fixture;
 	}
 
 	void ObservePipelineOriginal(
@@ -710,6 +753,130 @@ namespace
 				&& fixture.lowerResolverCalled,
 			"unmatched patch route did not reach lower HLSL resolver");
 	}
+
+	void TestDetailedObserverIsSelectionNeutral()
+	{
+		using namespace cs::engine;
+		std::byte deviceToken{};
+		std::byte linkageToken{};
+		std::byte stockToken{};
+		PipelineFixture pipeline{
+			.expectedDevice =
+				reinterpret_cast<ID3D11Device*>(&deviceToken),
+			.expectedLinkage =
+				reinterpret_cast<ID3D11ClassLinkage*>(&linkageToken),
+			.stock =
+				reinterpret_cast<ID3D11PixelShader*>(&stockToken)
+		};
+		g_pipelineFixture = &pipeline;
+		DetailedObserverFixture detailed;
+		g_detailedObserverFixture = &detailed;
+		const std::array observers{
+			PixelShaderSwapObserver{
+				.complete = &CompletePipelineObserver,
+				.prepareDetailed = &PrepareDetailedObserver
+			}
+		};
+		const std::array<std::byte, 3> bytecode{
+			std::byte{ 1 },
+			std::byte{ 2 },
+			std::byte{ 3 }
+		};
+		ID3D11PixelShader* output = nullptr;
+		const auto result = ExecutePixelShaderSwapPipeline(
+			&PipelineOriginal,
+			observers,
+			{},
+			ShaderVariantKeyView{
+				"BSDFCompositeShader",
+				ShaderStage::kPixel,
+				ShaderVariantId{ 0x10B60 }
+			},
+			false,
+			pipeline.expectedDevice,
+			bytecode.data(),
+			bytecode.size(),
+			pipeline.expectedLinkage,
+			&output,
+			PixelShaderRuntimeRoute{
+				"BSDFCompositeShader",
+				ShaderStage::kPixel,
+				0xB60,
+				ShaderVariantId{ 0x10B60 },
+				true
+			});
+		Check(result == S_OK && output == pipeline.stock,
+			"detailed observer changed stock result");
+		Check(
+			detailed.called
+				&& detailed.bytecodeLength == bytecode.size()
+				&& detailed.classLinkagePresent
+				&& detailed.subclass == "BSDFCompositeShader"
+				&& detailed.rawTechnique == 0xB60
+				&& detailed.pluginResolvedPsid
+					== static_cast<std::uint32_t>(0x10B60)
+				&& detailed.tiledLighting == true,
+			"detailed observer lost creation provenance");
+		Check(
+			pipeline.completion.finalIsStock
+				&& pipeline.completion.originalInputUnchanged
+				&& !pipeline.completion.resolverInvoked,
+			"detailed observer changed completion classification");
+
+		pipeline.order.clear();
+		pipeline.mutateInput = true;
+		output = nullptr;
+		auto mutableBytecode = bytecode;
+		Check(
+			ExecutePixelShaderSwapPipeline(
+				&PipelineOriginal,
+				observers,
+				{},
+				std::nullopt,
+				false,
+				pipeline.expectedDevice,
+				mutableBytecode.data(),
+				mutableBytecode.size(),
+				pipeline.expectedLinkage,
+				&output)
+				== S_OK
+				&& output == pipeline.stock
+				&& !pipeline.completion.originalInputUnchanged,
+			"broker did not detect changed original input");
+	}
+
+	void TestResolverRegistryGeneration()
+	{
+		using namespace cs::engine;
+		PixelShaderResolverRegistryModel registry;
+		Check(
+			registry.Generation() == 0
+				&& registry.Identities().empty(),
+			"resolver registry did not start empty");
+		const auto first = registry.Register(-100);
+		const auto second = registry.Register(0);
+		Check(
+			first == 1
+				&& second == 2
+				&& registry.Generation() == 2
+				&& registry.Identities().size() == 2,
+			"resolver registration generation is wrong");
+		Check(
+			BuildPixelShaderResolverRegistryDescriptor(
+				registry.Identities())
+				== "{\"resolvers\":[{\"priority\":-100,"
+				   "\"registration_generation\":1},{\"priority\":0,"
+				   "\"registration_generation\":2}],"
+				   "\"schema\":\"fo4cs.broker-resolver-registry\","
+				   "\"schema_version\":1}\n",
+			"resolver registry descriptor is not canonical");
+		Check(
+			registry.Unregister(first)
+				&& registry.Generation() == 3
+				&& registry.Identities().size() == 1
+				&& !registry.Unregister(first),
+			"resolver unregistration generation is wrong");
+	}
 }
 
 int main()
@@ -733,7 +900,9 @@ int main()
 		{ "Light resolver masks technique", &TestBsdfLightResolverMasksTechnique },
 		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock },
 		{ "broker pipeline ordering and forwarding", &TestBrokerPipelineOrderingAndForwarding },
-		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority }
+		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority },
+		{ "detailed observer is selection neutral", &TestDetailedObserverIsSelectionNeutral },
+		{ "resolver registry generation", &TestResolverRegistryGeneration }
 	};
 
 	unsigned failures = 0;

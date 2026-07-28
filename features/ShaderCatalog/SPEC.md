@@ -264,3 +264,55 @@ presented as a binding of the stock object itself. SetupTechnique probing is a
 contexts use `submission_no_object`. A reused replacement pointer associated with more than
 one stock SHA-1 is ambiguous: singular origin is omitted and durable quality prevents
 authority rather than selecting an arbitrary stock identity.
+
+## Stock runtime route receipts
+
+Route receipt capture is a separate, disabled-by-default producer. It starts only when
+`settings.route_receipt_capture=true` and `settings.route_receipt_output_root` names an
+explicit absolute, existing, non-reparse directory. There is no environment, current-directory,
+temporary-directory, or repository fallback.
+
+The wire contract is `fo4cs.stock-runtime-route-observation` v1 plus
+`fo4cs.stock-runtime-route-run-manifest` v1. Canonical files use sorted-key compact JSON with
+one final LF and publish without replacement at:
+
+```text
+<root>/observations/<document-sha256>.json
+<root>/manifests/<document-sha256>.json
+```
+
+The fixed scenario is `stock-pixel-shader-routes-v1`: pixel-stage broker callbacks from every
+subclass with one scoped `SetupTechnique` context. Every callback is included or counted under one
+closed exclusion reason before allocation. Capture leases close atomically and drain before the
+tracker snapshot. Observation publication then uses a separate admission gate.
+
+Each observation binds:
+
+- Exact plugin binary and Fallout 4 executable SHA-256 identity
+- On-disk plugin hook and diagnostic-resolver x64 unwind ranges, with ASLR-safe RVAs
+- Scoped subclass and raw technique
+- Nullable direct tiled-lighting state
+- Diagnostic `plugin_resolved_psid` and its plugin resolver identity
+- Literal null `observed_lookup_psid` and `engine_lookup_observed=false`
+- Exact pre-original stock byte length, SHA-1, and SHA-256
+- Original creation, class-linkage, final-stock, and resolver-invocation facts
+- One run-local non-pointer object ID and one later matching `PSSetShader` bind
+
+The broker snapshot used for observer evidence is the same snapshot used for resolver dispatch.
+This does not make the diagnostic PSID an observed engine return. Fallout4-re derives
+`engine_lookup_psid` only from separate native evidence.
+
+Stock-only authority requires an empty resolver registry at open and close with unchanged monotonic
+generation and canonical registry digest. Resolver invocation, changed original input, or a
+successful non-stock final object makes the run non-authoritative. Failed, null-output, unbound,
+ambiguous, duplicate, and route-mismatched records remain visible but only make their own record
+non-authoritative when run accounting is otherwise complete.
+
+The plugin retains only successful, non-null final stock objects for route lineage. Failed stale
+pointers, replacements, null shaders, untracked binds, and repeated terminal binds receive no route
+event. Bind observation proves API binding only. It does not prove draw submission, GPU execution,
+presentation, or fidelity.
+
+Plugin route documents are archive-blind. Their typed API has no archive, FXP, shader-key, ordinal,
+offset, occurrence, corpus, participant, recipe, policy, admission, verdict, draw, or fidelity field.
+Archive occurrence selection and route-join verdicts remain fallout4-re responsibilities.

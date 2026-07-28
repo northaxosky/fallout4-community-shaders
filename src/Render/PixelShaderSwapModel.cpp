@@ -128,6 +128,18 @@ namespace cs::engine
 		const void* a_bytecode,
 		std::size_t a_bytecodeLength) noexcept
 	{
+		return BeginPixelShaderSwapObserver(
+			a_observer,
+			PixelShaderCreationDescriptor{
+				.bytecode = a_bytecode,
+				.bytecodeLength = a_bytecodeLength
+			});
+	}
+
+	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
+		PixelShaderSwapObserver a_observer,
+		const PixelShaderCreationDescriptor& a_descriptor) noexcept
+	{
 		PixelShaderSwapObserverInvocation invocation;
 		invocation.observer = a_observer;
 		if (a_observer.beginAdmission) {
@@ -136,9 +148,14 @@ namespace cs::engine
 				return invocation;
 		}
 		invocation.active = true;
-		if (a_observer.prepare) {
+		if (a_observer.prepareDetailed) {
 			invocation.token =
-				a_observer.prepare(a_bytecode, a_bytecodeLength);
+				a_observer.prepareDetailed(a_descriptor);
+		} else if (a_observer.prepare) {
+			invocation.token =
+				a_observer.prepare(
+					a_descriptor.bytecode,
+					a_descriptor.bytecodeLength);
 		}
 		return invocation;
 	}
@@ -196,7 +213,8 @@ namespace cs::engine
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output) noexcept
+		ID3D11PixelShader** a_output,
+		std::optional<PixelShaderRuntimeRoute> a_route) noexcept
 	{
 		if (!a_original)
 			return E_POINTER;
@@ -216,8 +234,20 @@ namespace cs::engine
 		for (std::size_t index = 0; index < observerCount; ++index) {
 			invocations[index] = BeginPixelShaderSwapObserver(
 				a_observers[index],
-				a_bytecode,
-				a_bytecodeLength);
+				PixelShaderCreationDescriptor{
+					.bytecode = a_bytecode,
+					.bytecodeLength =
+						static_cast<std::size_t>(a_bytecodeLength),
+					.classLinkagePresent = a_linkage != nullptr,
+					.route = a_route
+				});
+		}
+		sha1::Sha1Result preInputSha1{};
+		const bool inputHashable =
+			a_bytecode != nullptr && a_bytecodeLength != 0;
+		if (inputHashable) {
+			preInputSha1 =
+				sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
 		}
 
 		const HRESULT result = a_original(
@@ -226,6 +256,11 @@ namespace cs::engine
 			a_bytecodeLength,
 			a_linkage,
 			a_output);
+		sha1::Sha1Result postInputSha1{};
+		if (inputHashable) {
+			postInputSha1 =
+				sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
+		}
 		ID3D11PixelShader* stockOutput = a_output ? *a_output : nullptr;
 		const bool canResolve = SUCCEEDED(result)
 			&& stockOutput
@@ -234,8 +269,7 @@ namespace cs::engine
 		bool resolverInvoked = false;
 		bool resolverReportedReplacement = false;
 		if (canResolve) {
-			const auto stockSha1 =
-				sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
+			const auto& stockSha1 = postInputSha1;
 			for (std::size_t index = 0; index < observerCount; ++index) {
 				const auto& observer = a_observers[index];
 				if (invocations[index].active
@@ -245,6 +279,7 @@ namespace cs::engine
 						stockSha1,
 						stockOutput);
 				}
+
 			}
 
 			const PixelShaderSwapRequest request{
@@ -274,15 +309,77 @@ namespace cs::engine
 			}
 		}
 
-		const auto completion = ClassifyPixelShaderSwapCompletion(
+		auto completion = ClassifyPixelShaderSwapCompletion(
 			static_cast<std::int32_t>(result),
 			a_output != nullptr,
 			stockOutput,
 			resolverInvoked,
 			resolverReportedReplacement,
 			a_output ? *a_output : nullptr);
+		completion.originalInputUnchanged =
+			inputHashable
+			&& !sha1::Sha1IsZero(preInputSha1)
+			&& !sha1::Sha1IsZero(postInputSha1)
+			&& preInputSha1.bytes == postInputSha1.bytes;
 		for (std::size_t index = 0; index < observerCount; ++index)
 			CompletePixelShaderSwapObserver(invocations[index], completion);
+		return result;
+	}
+
+	std::uint64_t PixelShaderResolverRegistryModel::Register(
+		int a_priority)
+	{
+		const auto generation = _generation + 1;
+		_identities.push_back({
+			.registrationGeneration = generation,
+			.priority = a_priority
+		});
+		_generation = generation;
+		return generation;
+	}
+
+	bool PixelShaderResolverRegistryModel::Unregister(
+		std::uint64_t a_registrationGeneration) noexcept
+	{
+		const auto found = std::ranges::find(
+			_identities,
+			a_registrationGeneration,
+			&PixelShaderResolverRegistryIdentity::registrationGeneration);
+		if (found == _identities.end())
+			return false;
+		_identities.erase(found);
+		++_generation;
+		return true;
+	}
+
+	std::uint64_t PixelShaderResolverRegistryModel::Generation() const noexcept
+	{
+		return _generation;
+	}
+
+	std::span<const PixelShaderResolverRegistryIdentity>
+		PixelShaderResolverRegistryModel::Identities() const noexcept
+	{
+		return _identities;
+	}
+
+	std::string BuildPixelShaderResolverRegistryDescriptor(
+		std::span<const PixelShaderResolverRegistryIdentity> a_identities)
+	{
+		std::string result = "{\"resolvers\":[";
+		for (std::size_t index = 0; index < a_identities.size(); ++index) {
+			if (index != 0)
+				result.push_back(',');
+			result += "{\"priority\":"
+				+ std::to_string(a_identities[index].priority)
+				+ ",\"registration_generation\":"
+				+ std::to_string(
+					a_identities[index].registrationGeneration)
+				+ '}';
+		}
+		result +=
+			"],\"schema\":\"fo4cs.broker-resolver-registry\","
+			"\"schema_version\":1}\n";
 		return result;
 	}
 
