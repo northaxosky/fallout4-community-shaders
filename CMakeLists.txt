@@ -298,6 +298,104 @@ target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
 add_test(NAME LogThrottle COMMAND LogThrottleTests)
 set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
+# Host-only offline consumer for the producer-published strict-v2 Composite ambient artifact.
+# It is deliberately outside every FO4CS_HOST_TESTS_ONLY branch and never links into the plugin.
+set(FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES
+	offline/BsdfCompositeAmbientDxbcPatch/Artifact.cpp
+	offline/BsdfCompositeAmbientDxbcPatch/Artifact.h
+	offline/BsdfCompositeAmbientDxbcPatch/ArtifactInternal.h
+	offline/BsdfCompositeAmbientDxbcPatch/CanonicalJson.cpp
+	offline/BsdfCompositeAmbientDxbcPatch/CanonicalJson.h
+	offline/BsdfCompositeAmbientDxbcPatch/ContractPins.h
+	offline/BsdfCompositeAmbientDxbcPatch/SemanticValidation.cpp
+	src/Utils/CSSha256.cpp
+	src/Utils/CSSha256.h
+)
+add_library(BsdfCompositeAmbientDxbcPatchOffline STATIC
+	${FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES}
+)
+configure_host_test(BsdfCompositeAmbientDxbcPatchOffline)
+target_include_directories(BsdfCompositeAmbientDxbcPatchOffline PUBLIC
+	"${CMAKE_SOURCE_DIR}/offline/BsdfCompositeAmbientDxbcPatch"
+)
+target_link_libraries(BsdfCompositeAmbientDxbcPatchOffline PRIVATE bcrypt.lib)
+
+add_executable(BsdfCompositeAmbientDxbcPatchTests
+	tests/BsdfCompositeAmbientDxbcPatchTests.cpp
+)
+configure_host_test(BsdfCompositeAmbientDxbcPatchTests)
+target_link_libraries(BsdfCompositeAmbientDxbcPatchTests PRIVATE
+	BsdfCompositeAmbientDxbcPatchOffline
+)
+
+add_test(
+	NAME BsdfCompositeAmbientDxbcPatch
+	COMMAND BsdfCompositeAmbientDxbcPatchTests
+		"${CMAKE_SOURCE_DIR}/scripts/shaders/offline/bsdf-composite-ambient-dxbc-patch-plans.json"
+)
+set_tests_properties(BsdfCompositeAmbientDxbcPatch PROPERTIES
+	LABELS "shader;offline;unit"
+	TIMEOUT 300
+)
+
+# Hard configure-time isolation: no offline source, link, or target may reach the plugin.
+function(fo4cs_relative_sources OUTPUT TARGET_NAME)
+	get_target_property(_source_dir ${TARGET_NAME} SOURCE_DIR)
+	get_target_property(_sources ${TARGET_NAME} SOURCES)
+	set(_relative "")
+	foreach(_source IN LISTS _sources)
+		if(NOT IS_ABSOLUTE "${_source}")
+			set(_source "${_source_dir}/${_source}")
+		endif()
+		file(RELATIVE_PATH _source "${CMAKE_SOURCE_DIR}" "${_source}")
+		string(REPLACE "\\" "/" _source "${_source}")
+		list(APPEND _relative "${_source}")
+	endforeach()
+	list(SORT _relative)
+	set(${OUTPUT} "${_relative}" PARENT_SCOPE)
+endfunction()
+
+get_target_property(_offline_type BsdfCompositeAmbientDxbcPatchOffline TYPE)
+if(NOT _offline_type STREQUAL "STATIC_LIBRARY")
+	message(FATAL_ERROR "BsdfCompositeAmbientDxbcPatchOffline must stay a host-only static library")
+endif()
+
+fo4cs_relative_sources(_offline_sources BsdfCompositeAmbientDxbcPatchOffline)
+set(_offline_allowed ${FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES})
+list(SORT _offline_allowed)
+if(NOT _offline_sources STREQUAL _offline_allowed)
+	message(FATAL_ERROR
+		"BsdfCompositeAmbientDxbcPatchOffline sources left the allow-list: ${_offline_sources}")
+endif()
+
+get_target_property(_offline_links BsdfCompositeAmbientDxbcPatchOffline LINK_LIBRARIES)
+if(NOT _offline_links STREQUAL "bcrypt.lib")
+	message(FATAL_ERROR
+		"BsdfCompositeAmbientDxbcPatchOffline links left the allow-list: ${_offline_links}")
+endif()
+
+get_target_property(_offline_test_links BsdfCompositeAmbientDxbcPatchTests LINK_LIBRARIES)
+if(NOT _offline_test_links STREQUAL "BsdfCompositeAmbientDxbcPatchOffline")
+	message(FATAL_ERROR
+		"BsdfCompositeAmbientDxbcPatchTests links left the allow-list: ${_offline_test_links}")
+endif()
+
+if(TARGET FO4CommunityShaders)
+	get_target_property(_plugin_sources FO4CommunityShaders SOURCES)
+	foreach(_source IN LISTS _plugin_sources)
+		string(REPLACE "\\" "/" _source "${_source}")
+		if(_source MATCHES "offline/BsdfCompositeAmbientDxbcPatch")
+			message(FATAL_ERROR "FO4CommunityShaders must not compile an offline consumer source")
+		endif()
+	endforeach()
+	get_target_property(_plugin_links FO4CommunityShaders LINK_LIBRARIES)
+	foreach(_link IN LISTS _plugin_links)
+		if(_link MATCHES "BsdfCompositeAmbientDxbcPatch")
+			message(FATAL_ERROR "FO4CommunityShaders must not link the offline consumer")
+		endif()
+	endforeach()
+endif()
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ProjectionMathTests
 		tests/ProjectionMathTests.cpp

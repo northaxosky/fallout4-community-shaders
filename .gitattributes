@@ -3,4 +3,5 @@
 
 # Producer-published artifacts must stay byte-identical to fallout4-re.
 scripts/shaders/shader-fidelity-conformance.json -text
+scripts/shaders/offline/bsdf-composite-ambient-dxbc-patch-plans.json -text
 package/F4SE/Plugins/FO4CommunityShaders/ScreenSpaceShadows/sss-dxbc-patch-plans.json -text
