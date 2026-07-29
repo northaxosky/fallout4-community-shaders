@@ -20,7 +20,9 @@ namespace fo4cs::offline
 		kNotCanonical,
 		kSchemaViolation,
 		kCommitmentMismatch,
-		kContractPinMismatch
+		kContractPinMismatch,
+		kResourceExhausted,
+		kHashUnavailable
 	};
 
 	struct LoadFailure

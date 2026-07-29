@@ -308,13 +308,14 @@ set(FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES
 	offline/BsdfCompositeAmbientDxbcPatch/CanonicalJson.h
 	offline/BsdfCompositeAmbientDxbcPatch/ContractPins.h
 	offline/BsdfCompositeAmbientDxbcPatch/SemanticValidation.cpp
-	src/Utils/CSSha256.cpp
-	src/Utils/CSSha256.h
+	offline/BsdfCompositeAmbientDxbcPatch/Sha256.cpp
+	offline/BsdfCompositeAmbientDxbcPatch/Sha256.h
 )
 add_library(BsdfCompositeAmbientDxbcPatchOffline STATIC
 	${FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES}
 )
 configure_host_test(BsdfCompositeAmbientDxbcPatchOffline)
+set_property(TARGET BsdfCompositeAmbientDxbcPatchOffline PROPERTY INCLUDE_DIRECTORIES "")
 target_include_directories(BsdfCompositeAmbientDxbcPatchOffline PUBLIC
 	"${CMAKE_SOURCE_DIR}/offline/BsdfCompositeAmbientDxbcPatch"
 )
@@ -366,6 +367,16 @@ list(SORT _offline_allowed)
 if(NOT _offline_sources STREQUAL _offline_allowed)
 	message(FATAL_ERROR
 		"BsdfCompositeAmbientDxbcPatchOffline sources left the allow-list: ${_offline_sources}")
+endif()
+
+get_target_property(_offline_includes BsdfCompositeAmbientDxbcPatchOffline INCLUDE_DIRECTORIES)
+list(FILTER _offline_includes EXCLUDE REGEX "^$")
+set(_offline_includes_allowed
+	"${CMAKE_SOURCE_DIR}/offline/BsdfCompositeAmbientDxbcPatch"
+)
+if(NOT _offline_includes STREQUAL _offline_includes_allowed)
+	message(FATAL_ERROR
+		"BsdfCompositeAmbientDxbcPatchOffline includes left the allow-list: ${_offline_includes}")
 endif()
 
 get_target_property(_offline_links BsdfCompositeAmbientDxbcPatchOffline LINK_LIBRARIES)

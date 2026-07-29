@@ -1,6 +1,7 @@
 #include "Artifact.h"
 #include "ArtifactInternal.h"
 #include "CanonicalJson.h"
+#include "Sha256.h"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <new>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -17,6 +19,7 @@
 
 namespace
 {
+	using fo4cs::offline::DescribeFailure;
 	using fo4cs::offline::LoadFailureCode;
 	using fo4cs::offline::LoadPinnedSnapshot;
 	using fo4cs::offline::canonical::CompactNode;
@@ -26,8 +29,12 @@ namespace
 	using fo4cs::offline::canonical::ParseCanonical;
 	using fo4cs::offline::canonical::Value;
 	using fo4cs::offline::canonical::ValueKind;
+	using fo4cs::offline::hash::Sha256FaultPoint;
+	using fo4cs::offline::internal::LoadFaultPoint;
+	using fo4cs::offline::internal::LoadPinnedWithFault;
+	using fo4cs::offline::internal::LoadPinnedWithFaultUnguarded;
 	using fo4cs::offline::internal::LoadUnpinnedBytes;
-	using fo4cs::offline::internal::Sha256Hex;
+	using fo4cs::offline::internal::RequireSha256Hex;
 
 	constexpr std::uint64_t kArtifactLength = 871524;
 	constexpr std::string_view kArtifactSha256 =
@@ -212,7 +219,7 @@ namespace
 			preimage += members[index];
 		}
 		preimage.push_back('}');
-		return Sha256Hex(preimage);
+		return RequireSha256Hex(preimage);
 	}
 
 	std::string StaticMutationReceipt(const Value& a_row)
@@ -228,7 +235,7 @@ namespace
 			preimage += Compact(member.key, member.value);
 		}
 		preimage.push_back('}');
-		return Sha256Hex(preimage);
+		return RequireSha256Hex(preimage);
 	}
 
 	// A forger who also repairs the whole-document claims commitment still faces the reviewed pins.
@@ -261,7 +268,7 @@ namespace
 			preimage += receipts;
 		}
 		preimage.push_back('}');
-		return Sha256Hex(preimage);
+		return RequireSha256Hex(preimage);
 	}
 
 	std::string NativeProofReceipt(const Value& a_native)
@@ -276,7 +283,7 @@ namespace
 		preimage += CompactString("schema_version");
 		preimage += ":2";
 		preimage.push_back('}');
-		return Sha256Hex(preimage);
+		return RequireSha256Hex(preimage);
 	}
 
 	void ExpectFailure(const Value& a_root, std::string_view a_label, LoadFailureCode a_expected)
@@ -319,7 +326,7 @@ namespace
 	void TestPinnedLoad(const std::filesystem::path& a_path, const std::string& a_bytes)
 	{
 		Check(a_bytes.size() == kArtifactLength, "artifact length is not the pinned length");
-		Check(Sha256Hex(a_bytes) == kArtifactSha256, "artifact digest is not the pinned digest");
+		Check(RequireSha256Hex(a_bytes) == kArtifactSha256, "artifact digest is not the pinned digest");
 
 		const auto snapshot = LoadPinnedSnapshot(a_path);
 		Check(snapshot.has_value(), "the pinned publication was rejected");
@@ -367,6 +374,75 @@ namespace
 			"participant set order is wrong");
 		for (const auto& plan : model.plans)
 			Check(plan.proofStatus == "PASS", "a published plan is not PASS");
+
+		// Every allocating stage is fail-closed: the seam runs the exact production pipeline.
+		for (const auto fault : { LoadFaultPoint::kBeforeCanonicalParse,
+				 LoadFaultPoint::kBeforeSnapshotAllocation,
+				 LoadFaultPoint::kArtifactHashObjectAllocation }) {
+			bool escaped = false;
+			try {
+				(void)LoadPinnedWithFaultUnguarded(a_path, fault);
+			} catch (const std::bad_alloc&) {
+				escaped = true;
+			}
+			Check(escaped, "an unguarded fault point did not raise a real allocation failure");
+
+			const auto guarded = LoadPinnedWithFault(a_path, fault);
+			Check(!guarded.has_value(), "an allocation failure produced a snapshot");
+			Check(
+				guarded.error().code == LoadFailureCode::kResourceExhausted,
+				"an allocation failure did not map to the dedicated failure code");
+			Check(
+				DescribeFailure(guarded.error().code) == "resource-exhausted",
+				"the resource-exhausted description is not stable");
+			Check(
+				guarded.error().detail.empty(),
+				"the resource-exhausted failure allocated diagnostic detail");
+		}
+
+		// A crypto failure is an explicit status result from the host helper, never an exception.
+		const auto direct = fo4cs::offline::hash::Sha256Hex(a_bytes, Sha256FaultPoint::kCryptoFailure);
+		Check(!direct.has_value(), "the faulted host hash returned a digest");
+		Check(
+			direct.error().stage != nullptr && *direct.error().stage != '\0',
+			"the host hash failure carries no stage");
+		Check(direct.error().status != 0, "the host hash failure carries no provider status");
+		const auto healthy = fo4cs::offline::hash::Sha256Hex(a_bytes);
+		Check(healthy.has_value(), "the host hash rejected the publication bytes");
+		Check(*healthy == kArtifactSha256, "the host hash does not reproduce the pinned digest");
+
+		// A hash provider failure is never a digest mismatch and never publishes a zero digest.
+		const auto unguarded =
+			LoadPinnedWithFaultUnguarded(a_path, LoadFaultPoint::kArtifactHashCryptoFailure);
+		Check(!unguarded.has_value(), "the unguarded crypto seam produced a snapshot");
+		Check(
+			unguarded.error().code == LoadFailureCode::kHashUnavailable,
+			"the unguarded crypto seam did not return the dedicated failure code");
+		Check(
+			unguarded.error().detail.empty(),
+			"the unguarded crypto seam allocated diagnostic detail");
+
+		const auto unavailable =
+			LoadPinnedWithFault(a_path, LoadFaultPoint::kArtifactHashCryptoFailure);
+		Check(!unavailable.has_value(), "a hash provider failure produced a snapshot");
+		Check(
+			unavailable.error().code == LoadFailureCode::kHashUnavailable,
+			"a hash provider failure did not map to the dedicated failure code");
+		Check(
+			unavailable.error().code != LoadFailureCode::kDigestMismatch,
+			"a hash provider failure was misclassified as a digest mismatch");
+		Check(
+			DescribeFailure(unavailable.error().code) == "hash-unavailable",
+			"the hash-unavailable description is not stable");
+		Check(
+			unavailable.error().detail.empty(),
+			"the hash-unavailable failure allocated diagnostic detail");
+
+		const auto recovered = LoadPinnedSnapshot(a_path);
+		Check(recovered.has_value(), "the loader did not recover after an injected fault");
+		Check(
+			(*recovered)->inventory.fileSha256 == kArtifactSha256,
+			"the recovered inventory digest is not the exact pin");
 	}
 
 	void TestWholeBytePin(const std::string& a_bytes)
@@ -1047,7 +1123,7 @@ namespace
 			payload.push_back('\n');
 		}
 		Check(
-			Sha256Hex(payload) == build.Find("receipt_sha256")->text,
+			RequireSha256Hex(payload) == build.Find("receipt_sha256")->text,
 			"the reviewed 22-line build receipt preimage does not reproduce the published receipt");
 	}
 
@@ -1104,10 +1180,11 @@ namespace
 		const auto offline = a_repoRoot / "offline" / "BsdfCompositeAmbientDxbcPatch";
 		Check(std::filesystem::is_directory(offline), "the offline consumer directory is missing");
 		static constexpr std::array<std::string_view, 5> allowedLocalIncludes{
-			"Artifact.h", "ArtifactInternal.h", "CanonicalJson.h", "ContractPins.h", "Utils/CSSha256.h"
+			"Artifact.h", "ArtifactInternal.h", "CanonicalJson.h", "ContractPins.h", "Sha256.h"
 		};
-		static constexpr std::array<std::string_view, 9> forbiddenSystemIncludes{
-			"d3d", "dxgi", "windows.h", "f4se", "spdlog", "nlohmann", "imgui", "detours", "rel/"
+		// Windows.h and bcrypt.h are the mandated host hash provider; nothing else may appear.
+		static constexpr std::array<std::string_view, 8> forbiddenSystemIncludes{
+			"d3d", "dxgi", "f4se", "spdlog", "nlohmann", "imgui", "detours", "rel/"
 		};
 		static constexpr std::array<std::string_view, 4> forbiddenTokens{
 			"PixelShaderSwap", "ShaderInjection", "serializer_receipt", "PowerShell"
@@ -1150,7 +1227,7 @@ namespace
 				}
 			}
 		}
-		Check(inspected == 7, "the offline consumer file inventory changed");
+		Check(inspected == 9, "the offline consumer file inventory changed");
 	}
 
 	void TestV1Independence(const std::filesystem::path& a_repoRoot)
@@ -1158,7 +1235,7 @@ namespace
 		const auto v1 = a_repoRoot / "package" / "F4SE" / "Plugins" / "FO4CommunityShaders" /
 		                "ScreenSpaceShadows" / "sss-dxbc-patch-plans.json";
 		Check(std::filesystem::is_regular_file(v1), "the v1 SSS publication is missing");
-		Check(Sha256Hex(ReadFile(v1)) == kSssArtifactSha256, "the v1 SSS publication changed");
+		Check(RequireSha256Hex(ReadFile(v1)) == kSssArtifactSha256, "the v1 SSS publication changed");
 	}
 }
 

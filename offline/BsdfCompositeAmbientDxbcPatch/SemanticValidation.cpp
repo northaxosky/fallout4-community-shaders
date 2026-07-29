@@ -198,7 +198,7 @@ namespace fo4cs::offline::internal
 
 		std::string Rcpt(const std::string& a_preimage)
 		{
-			return Sha256Hex(a_preimage);
+			return RequireSha256Hex(a_preimage);
 		}
 
 		std::vector<std::string> TextArray(const Value& a_array, std::string_view a_label)
@@ -789,7 +789,7 @@ namespace fo4cs::offline::internal
 				"artifact.byte_proof.native_proof.harness_source_sha256");
 			RequireCommitment(
 				StringAt(build, "receipt_sha256", "artifact.byte_proof.native_proof.harness_build"),
-				Sha256Hex(BuildReceiptPayload(build)),
+				RequireSha256Hex(BuildReceiptPayload(build)),
 				"artifact.byte_proof.native_proof.harness_build.receipt_sha256");
 
 			std::map<std::string, std::size_t> classCounts;
