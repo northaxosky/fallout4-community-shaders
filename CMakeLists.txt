@@ -480,6 +480,8 @@ set_tests_properties(ShaderCatalog PROPERTIES LABELS "shader;catalog;unit" TIMEO
 
 add_executable(PixelShaderSwapTests
 	tests/PixelShaderSwapTests.cpp
+	src/Render/EnginePixelShaderLookup.cpp
+	src/Render/EnginePixelShaderLookup.h
 	src/Render/PixelShaderSwapModel.cpp
 	src/Render/PixelShaderSwapBroker.h
 	src/Render/ShaderVariantResolver.cpp
@@ -488,6 +490,8 @@ add_executable(PixelShaderSwapTests
 	src/Utils/CSSha1.h
 )
 configure_host_test(PixelShaderSwapTests)
+target_compile_definitions(
+	PixelShaderSwapTests PRIVATE FO4CS_ENGINE_LOOKUP_TESTING=1)
 target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
@@ -559,6 +563,7 @@ if(FO4CS_HOST_TESTS_ONLY)
 		features/ShaderCatalog/src/RouteCaptureCoordinator.cpp
 		features/ShaderCatalog/src/ShaderCatalog.cpp
 		features/ShaderCatalog/src/SubclassAttribution.cpp
+		src/Render/EnginePixelShaderLookup.cpp
 		src/Render/PixelShaderSwapBroker.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Render/ShaderSubclassContext.cpp

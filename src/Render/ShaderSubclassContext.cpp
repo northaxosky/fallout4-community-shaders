@@ -47,10 +47,12 @@ namespace cs::engine::shader_context
 	}
 
 	Scope::Scope(
+		void* a_shader,
 		const char* a_name,
 		std::optional<std::uint32_t> a_techniqueBits) noexcept :
 		_previous(g_current)
 	{
+		g_current.shader = a_shader;
 		g_current.subclassName = a_name;
 		g_current.techniqueBits = a_techniqueBits.value_or(0);
 		g_current.active = a_name != nullptr;

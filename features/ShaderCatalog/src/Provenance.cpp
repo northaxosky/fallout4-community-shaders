@@ -1627,9 +1627,15 @@ namespace cs::features::catalog
 
 		void AppendRouteProducer(
 			std::ostringstream& a_json,
-			const RouteProducerIdentity& a_producer)
+			const RouteProducerIdentity& a_producer,
+			int a_schemaVersion)
 		{
-			a_json << "{\"binary_sha256\":";
+			a_json << '{';
+			if (a_schemaVersion >= 2) {
+				a_json << "\"binary_byte_length\":"
+					<< a_producer.binaryByteLength << ',';
+			}
+			a_json << "\"binary_sha256\":";
 			JsonString(a_json, a_producer.binarySha256);
 			a_json << ",\"name\":";
 			JsonString(a_json, a_producer.name);
@@ -1640,14 +1646,27 @@ namespace cs::features::catalog
 
 		void AppendRouteRuntime(
 			std::ostringstream& a_json,
-			const RouteRuntimeIdentity& a_runtime)
+			const RouteRuntimeIdentity& a_runtime,
+			int a_schemaVersion)
 		{
-			a_json << "{\"executable_sha256\":";
+			a_json << '{';
+			if (a_schemaVersion >= 2) {
+				a_json << "\"executable_byte_length\":"
+					<< a_runtime.executableByteLength << ',';
+			}
+			a_json << "\"executable_sha256\":";
 			JsonString(a_json, a_runtime.executableSha256);
-			a_json << ",\"name\":";
-			JsonString(a_json, a_runtime.name);
-			a_json << ",\"version\":";
-			JsonString(a_json, a_runtime.version);
+			if (a_schemaVersion >= 2) {
+				a_json << ",\"executable_version\":";
+				JsonString(a_json, a_runtime.version);
+				a_json << ",\"release\":";
+				JsonString(a_json, a_runtime.name);
+			} else {
+				a_json << ",\"name\":";
+				JsonString(a_json, a_runtime.name);
+				a_json << ",\"version\":";
+				JsonString(a_json, a_runtime.version);
+			}
 			a_json << '}';
 		}
 
@@ -1655,7 +1674,13 @@ namespace cs::features::catalog
 			std::ostringstream& a_json,
 			const RouteRunIdentity& a_run)
 		{
-			a_json << "{\"run_id\":";
+			a_json << '{';
+			if (a_run.schemaVersion >= 2) {
+				a_json << "\"external_run_id\":";
+				JsonOptionalString(a_json, a_run.externalRunId);
+				a_json << ',';
+			}
+			a_json << "\"run_id\":";
 			JsonString(a_json, a_run.runId);
 			a_json << ",\"scenario_id\":";
 			JsonString(a_json, a_run.scenarioId);
@@ -1664,15 +1689,88 @@ namespace cs::features::catalog
 			a_json << '}';
 		}
 
+		void AppendRouteCodeIdentity(
+			std::ostringstream& a_json,
+			const RouteCodeIdentity& a_identity)
+		{
+			a_json << "{\"code_range\":";
+			AppendRouteCodeRange(a_json, a_identity.codeRange);
+			a_json << ",\"code_sha256\":";
+			JsonString(a_json, a_identity.codeSha256);
+			a_json << ",\"module\":";
+			JsonString(a_json, a_identity.module);
+			a_json << ",\"rva\":" << a_identity.rva
+				<< ",\"symbol\":";
+			JsonString(a_json, a_identity.symbol);
+			a_json << '}';
+		}
+
+		void AppendRouteEngineLookupTarget(
+			std::ostringstream& a_json,
+			const RouteEngineLookupTargetIdentity& a_target)
+		{
+			a_json << "{\"engine_code_range\":";
+			AppendRouteCodeRange(a_json, a_target.engineCodeRange);
+			a_json << ",\"engine_module\":";
+			JsonString(a_json, a_target.engineModule);
+			a_json << ",\"engine_rva\":" << a_target.engineRva
+				<< ",\"engine_symbol\":";
+			JsonString(a_json, a_target.engineSymbol);
+			a_json << ",\"observer_hook\":";
+			AppendRouteCodeIdentity(a_json, a_target.observerHook);
+			a_json << ",\"runtime_release\":";
+			JsonString(a_json, a_target.runtimeRelease);
+			a_json << ",\"runtime_version\":";
+			JsonString(a_json, a_target.runtimeVersion);
+			a_json << ",\"stage\":";
+			JsonString(a_json, a_target.stage);
+			a_json << ",\"subclass\":";
+			JsonString(a_json, a_target.subclass);
+			a_json << ",\"target_id\":";
+			JsonString(a_json, a_target.targetId);
+			a_json << '}';
+		}
+
+		void AppendRouteEngineLookupEvent(
+			std::ostringstream& a_json,
+			const RouteEngineLookupEvent& a_event)
+		{
+			a_json << "{\"call_sequence\":"
+				<< a_event.callSequence
+				<< ",\"function_input\":"
+				<< a_event.functionInput
+				<< ",\"target\":";
+			AppendRouteEngineLookupTarget(a_json, a_event.target);
+			a_json << ",\"thread_id\":" << a_event.threadId << '}';
+		}
+
 		void AppendRouteSnapshot(
 			std::ostringstream& a_json,
-			const RouteSnapshot& a_route)
+			const RouteSnapshot& a_route,
+			int a_schemaVersion)
 		{
-			a_json << "{\"observed_lookup_psid\":";
-			if (a_route.observedLookupPsid)
-				a_json << *a_route.observedLookupPsid;
-			else
-				a_json << "null";
+			a_json << '{';
+			if (a_schemaVersion >= 2) {
+				a_json << "\"engine_lookup_event\":";
+				if (a_route.engineLookup)
+					AppendRouteEngineLookupEvent(
+						a_json, *a_route.engineLookup);
+				else
+					a_json << "null";
+				a_json << ",\"engine_lookup_psid\":";
+				if (a_route.engineLookup) {
+					a_json << a_route.engineLookup
+						->returnedPsid.Value();
+				} else {
+					a_json << "null";
+				}
+			} else {
+				a_json << "\"observed_lookup_psid\":";
+				if (a_route.observedLookupPsid)
+					a_json << *a_route.observedLookupPsid;
+				else
+					a_json << "null";
+			}
 			a_json << ",\"plugin_resolved_psid\":";
 			if (a_route.pluginResolvedPsid)
 				a_json << *a_route.pluginResolvedPsid;
@@ -1730,7 +1828,7 @@ namespace cs::features::catalog
 			const RouteRuntimeIdentity& a_runtime,
 			const RouteRunIdentity& a_run) noexcept
 		{
-			return RouteAscii(a_producer.name)
+			const bool common = RouteAscii(a_producer.name)
 				&& RouteAscii(a_producer.version)
 				&& IsLowerHexDigest(a_producer.binarySha256, 64)
 				&& RouteAscii(a_runtime.name)
@@ -1738,9 +1836,20 @@ namespace cs::features::catalog
 				&& IsLowerHexDigest(a_runtime.executableSha256, 64)
 				&& ValidIdentifier(
 					std::optional<std::string>(a_run.runId))
-				&& a_run.scenarioId
-					== "stock-pixel-shader-routes-v1"
 				&& a_run.stockOnly;
+			if (!common)
+				return false;
+			if (a_run.schemaVersion == 1) {
+				return a_run.scenarioId
+					== "stock-pixel-shader-routes-v1";
+			}
+			return a_run.schemaVersion == 2
+				&& a_run.scenarioId
+					== "stock-pixel-shader-routes-v2"
+				&& a_run.externalRunId.has_value()
+				&& ValidIdentifier(a_run.externalRunId)
+				&& a_producer.binaryByteLength != 0
+				&& a_runtime.executableByteLength != 0;
 		}
 
 		std::vector<std::string> SortUniqueRouteReasons(
@@ -1814,7 +1923,10 @@ namespace cs::features::catalog
 				&& a_observation.facts.bindObserved
 				&& !a_observation.facts.gpuExecutionObserved
 				&& a_observation.facts.engineLookupObserved
-					== a_observation.route.observedLookupPsid.has_value()
+					== (a_observation.run.schemaVersion >= 2
+						? a_observation.route.engineLookup.has_value()
+						: a_observation.route.observedLookupPsid
+							.has_value())
 				&& a_observation.lineage.queueEnqueueSucceeded
 				&& a_observation.lineage.queueEnqueueSequence
 				&& a_observation.stockCreate.sequence
@@ -2150,6 +2262,12 @@ namespace cs::features::catalog
 		JsonString(json, a_observation.sha256);
 		json << "},\"capture_authoritative\":";
 		JsonBool(json, a_observation.captureAuthoritative);
+		if (a_observation.run.schemaVersion >= 2) {
+			json << ",\"engine_lookup_authority_reasons\":";
+			AppendRouteStringArray(
+				json,
+				a_observation.engineLookupAuthorityReasons);
+		}
 		json << ",\"facts\":{\"bind_observed\":";
 		JsonBool(json, a_observation.facts.bindObserved);
 		json << ",\"creation_observed\":";
@@ -2158,6 +2276,12 @@ namespace cs::features::catalog
 		JsonBool(json, a_observation.facts.creationOutputNonNull);
 		json << ",\"creation_succeeded\":";
 		JsonBool(json, a_observation.facts.creationSucceeded);
+		if (a_observation.run.schemaVersion >= 2) {
+			json << ",\"engine_lookup_authoritative\":";
+			JsonBool(
+				json,
+				a_observation.facts.engineLookupAuthoritative);
+		}
 		json << ",\"engine_lookup_observed\":";
 		JsonBool(json, a_observation.facts.engineLookupObserved);
 		json << ",\"gpu_execution_observed\":";
@@ -2191,20 +2315,31 @@ namespace cs::features::catalog
 			json,
 			RouteLineageStatusName(a_observation.lineage.status));
 		json << "},\"producer\":";
-		AppendRouteProducer(json, a_observation.producer);
+		AppendRouteProducer(
+			json,
+			a_observation.producer,
+			a_observation.run.schemaVersion);
 		json << ",\"record\":{\"record_id\":";
 		JsonString(json, a_observation.recordId);
 		json << ",\"sequence\":"
 			<< a_observation.recordSequence
 			<< "},\"route\":";
-		AppendRouteSnapshot(json, a_observation.route);
+		AppendRouteSnapshot(
+			json,
+			a_observation.route,
+			a_observation.run.schemaVersion);
 		json << ",\"run\":";
 		AppendRouteRun(json, a_observation.run);
 		json << ",\"runtime\":";
-		AppendRouteRuntime(json, a_observation.runtime);
+		AppendRouteRuntime(
+			json,
+			a_observation.runtime,
+			a_observation.run.schemaVersion);
 		json << ",\"schema\":"
 			"\"fo4cs.stock-runtime-route-observation\","
-			"\"schema_version\":1,\"stock_authority\":"
+			"\"schema_version\":"
+			<< a_observation.run.schemaVersion
+			<< ",\"stock_authority\":"
 			"{\"final_object_stock\":";
 		if (a_observation.stockAuthority.finalObjectStock)
 			JsonBool(
@@ -2427,6 +2562,154 @@ namespace cs::features::catalog
 				&& IsLowerHexDigest(a_identity.codeSha256, 64);
 		}
 
+		bool RouteRangeWithinFile(
+			const RouteCodeRange& a_range,
+			std::uint64_t a_fileLength) noexcept
+		{
+			const auto start =
+				static_cast<std::uint64_t>(a_range.startRva);
+			return a_fileLength != 0
+				&& a_range.byteLength != 0
+				&& start < a_fileLength
+				&& a_range.byteLength
+					<= a_fileLength - start;
+		}
+
+		bool RouteEngineLookupTargetValid(
+			const RouteEngineLookupTargetIdentity& a_target,
+			const RouteProducerIdentity& a_producer,
+			const RouteRuntimeIdentity& a_runtime) noexcept
+		{
+			return a_target.targetId
+					== "bsdf-light-pixel-shader-id"
+				&& a_target.subclass == "BSDFLightShader"
+				&& a_target.stage == "ps"
+				&& a_target.engineModule == "Fallout4.exe"
+				&& a_target.engineSymbol
+					== "BSDFLightShaderMacros::GetPixelShaderID"
+				&& a_target.engineRva != 0
+				&& a_target.engineRva
+					== a_target.engineCodeRange.startRva
+				&& RouteRangeWithinFile(
+					a_target.engineCodeRange,
+					a_runtime.executableByteLength)
+				&& a_target.runtimeRelease == a_runtime.name
+				&& a_target.runtimeVersion == a_runtime.version
+				&& RouteCodeIdentityValid(a_target.observerHook)
+				&& a_target.observerHook.symbol
+					== "EnginePixelShaderLookup::thunk"
+				&& RouteRangeWithinFile(
+					a_target.observerHook.codeRange,
+					a_producer.binaryByteLength);
+		}
+
+		bool RouteEngineLookupCaptureValid(
+			const RouteEngineLookupCaptureIdentity& a_capture,
+			const RouteProducerIdentity& a_producer,
+			const RouteRuntimeIdentity& a_runtime) noexcept
+		{
+			if (a_capture.targets.size() != 1
+				|| !std::ranges::all_of(
+					a_capture.targets,
+					[&](const auto& a_target) {
+						return RouteEngineLookupTargetValid(
+							a_target,
+							a_producer,
+							a_runtime);
+					})
+				|| !std::is_sorted(
+					a_capture.targets.begin(),
+					a_capture.targets.end(),
+					[](const auto& a_left, const auto& a_right) {
+						return a_left.targetId < a_right.targetId;
+					})) {
+				return false;
+			}
+			return std::adjacent_find(
+				a_capture.targets.begin(),
+				a_capture.targets.end(),
+				[](const auto& a_left, const auto& a_right) {
+					return a_left.targetId == a_right.targetId;
+				}) == a_capture.targets.end();
+		}
+
+		const RouteEngineLookupTargetIdentity*
+			FindRouteEngineLookupTarget(
+				const RouteCaptureScope& a_scope,
+				std::string_view a_targetId) noexcept
+		{
+			if (!a_scope.engineLookupCapture)
+				return nullptr;
+			const auto& targets =
+				a_scope.engineLookupCapture->targets;
+			const auto found = std::lower_bound(
+				targets.begin(),
+				targets.end(),
+				a_targetId,
+				[](const auto& a_target, std::string_view a_id) {
+					return a_target.targetId < a_id;
+				});
+			return found != targets.end()
+					&& found->targetId == a_targetId
+				? &*found
+				: nullptr;
+		}
+
+		std::vector<std::string>
+			DeriveRouteEngineLookupAuthorityReasons(
+				const StockRuntimeRouteObservation& a_observation,
+				const RouteEngineLookupCaptureIdentity*
+					a_expectedTargets)
+		{
+			std::vector<std::string> reasons;
+			if (a_observation.run.schemaVersion < 2)
+				return reasons;
+			if (!a_observation.route.engineLookup) {
+				reasons.emplace_back("engine-lookup-missing");
+				return reasons;
+			}
+			const auto& event = *a_observation.route.engineLookup;
+			if (!a_expectedTargets) {
+				reasons.emplace_back(
+					"engine-lookup-expected-set-missing");
+				return reasons;
+			}
+			const auto expected = std::lower_bound(
+				a_expectedTargets->targets.begin(),
+				a_expectedTargets->targets.end(),
+				event.target.targetId,
+				[](const auto& a_target, std::string_view a_id) {
+					return a_target.targetId < a_id;
+				});
+			if (expected == a_expectedTargets->targets.end()
+				|| expected->targetId != event.target.targetId) {
+				reasons.emplace_back(
+					"engine-lookup-target-unknown");
+			} else if (event.target != *expected) {
+				reasons.emplace_back(
+					"engine-lookup-target-mismatch");
+			}
+			if (!RouteEngineLookupTargetValid(
+					event.target,
+					a_observation.producer,
+					a_observation.runtime)) {
+				reasons.emplace_back("engine-lookup-provenance-invalid");
+			}
+			if (event.target.subclass != a_observation.route.subclass
+				|| event.target.stage != a_observation.route.stage
+				|| event.functionInput
+					!= a_observation.route.rawTechnique) {
+				reasons.emplace_back("engine-lookup-route-mismatch");
+			}
+			if (event.callSequence == 0
+				|| event.threadId == 0
+				|| event.threadId
+					!= a_observation.stockCreate.threadId) {
+				reasons.emplace_back("engine-lookup-event-invalid");
+			}
+			return SortUniqueRouteReasons(std::move(reasons));
+		}
+
 		bool RouteResolverIdentityValid(
 			const RoutePluginRuntimeResolverIdentity& a_identity) noexcept
 		{
@@ -2486,6 +2769,24 @@ namespace cs::features::catalog
 			AppendRouteStringArray(json, a_scope.eligibilityRules);
 			json << ",\"enabled\":";
 			JsonBool(json, a_scope.enabled);
+			if (a_run.schemaVersion >= 2) {
+				json << ",\"engine_lookup_targets\":[";
+				if (a_scope.engineLookupCapture) {
+					for (std::size_t index = 0;
+						 index
+							< a_scope.engineLookupCapture
+								->targets.size();
+						 ++index) {
+						if (index != 0)
+							json << ',';
+						AppendRouteEngineLookupTarget(
+							json,
+							a_scope.engineLookupCapture
+								->targets[index]);
+					}
+				}
+				json << ']';
+			}
 			json << ",\"included_stages\":";
 			AppendRouteStringArray(json, a_scope.includedStages);
 			json << ",\"included_subclasses\":";
@@ -2494,13 +2795,18 @@ namespace cs::features::catalog
 			JsonString(json, a_run.scenarioId);
 			json << ",\"schema\":"
 				"\"fo4cs.stock-runtime-route-capture-scope\","
-				"\"schema_version\":1}\n";
+				"\"schema_version\":" << a_run.schemaVersion
+				<< "}\n";
 			return json.str();
 		}
 
 		bool RouteScopeValid(
 			const RouteRunIdentity& a_run,
 			const RouteCaptureScope& a_scope,
+			const RouteProducerIdentity& a_producer,
+			const RouteRuntimeIdentity& a_runtime,
+			const RouteEngineLookupExpectedTargetsSnapshot*
+				a_expectedTargets,
 			std::string& a_digest)
 		{
 			const std::vector<std::string> expectedRules{
@@ -2515,6 +2821,28 @@ namespace cs::features::catalog
 					!= std::vector<std::string>{ "ps" }
 				|| a_scope.eligibilityRules != expectedRules)
 				return false;
+			if (a_run.schemaVersion >= 2) {
+				if (!a_scope.engineLookupCapture
+					|| !a_scope.engineLookupExpectedTargets
+					|| !a_expectedTargets
+					|| !a_expectedTargets->ready
+					|| !RouteEngineLookupCaptureValid(
+						*a_scope.engineLookupCapture,
+						a_producer,
+						a_runtime)
+					|| !RouteEngineLookupCaptureValid(
+						a_expectedTargets->capture,
+						a_producer,
+						a_runtime)
+					|| *a_scope.engineLookupCapture
+						!= a_expectedTargets->capture) {
+					return false;
+				}
+			} else if (a_scope.engineLookupCapture
+				|| a_scope.engineLookupExpectedTargets
+				|| a_expectedTargets) {
+				return false;
+			}
 			const auto descriptor =
 				BuildRouteScopeDescriptor(a_run, a_scope);
 			ContentDigest digest{};
@@ -2557,6 +2885,7 @@ namespace cs::features::catalog
 			std::optional<std::uint64_t> bindSequence;
 			std::uint64_t enqueueSequence = 0;
 			bool captureAuthoritative = false;
+			bool engineLookupAuthoritative = false;
 			StockRuntimeRouteObservation observation;
 		};
 
@@ -2565,6 +2894,9 @@ namespace cs::features::catalog
 		RouteRuntimeIdentity runtime;
 		RouteRunIdentity run;
 		RouteCaptureScope scope;
+		std::shared_ptr<
+			const RouteEngineLookupExpectedTargetsSnapshot>
+				expectedEngineLookupTargets;
 		RouteResolverRegistrySnapshot registryClose;
 
 		std::atomic<std::uint64_t> captureAdmission{ 0 };
@@ -2697,6 +3029,7 @@ namespace cs::features::catalog
 			result.document.path =
 				std::filesystem::absolute(root)
 				/ published.relativePath;
+			result.document.schemaVersion = run.schemaVersion;
 			return result;
 		}
 	};
@@ -2799,8 +3132,20 @@ namespace cs::features::catalog
 					RoutePublicationError::kInvalidIdentity;
 				return nullptr;
 			}
+			std::shared_ptr<
+				const RouteEngineLookupExpectedTargetsSnapshot>
+					expectedTargets;
+			if (a_scope.engineLookupExpectedTargets)
+				expectedTargets =
+					a_scope.engineLookupExpectedTargets();
 			std::string scopeDigest;
-			if (!RouteScopeValid(a_run, a_scope, scopeDigest)
+			if (!RouteScopeValid(
+					a_run,
+					a_scope,
+					a_producer,
+					a_runtime,
+					expectedTargets.get(),
+					scopeDigest)
 				|| !RouteCodeIdentityValid(a_scope.createHook)
 				|| !RouteCodeIdentityValid(a_scope.bindHook)
 				|| !RouteResolverIdentityValid(
@@ -2851,6 +3196,8 @@ namespace cs::features::catalog
 			impl->runtime = a_runtime;
 			impl->run = a_run;
 			impl->scope = a_scope;
+			impl->expectedEngineLookupTargets =
+				std::move(expectedTargets);
 			impl->scope.configurationSha256 =
 				std::move(scopeDigest);
 			impl->records.reserve(kRouteQueueCapacity);
@@ -2926,6 +3273,30 @@ namespace cs::features::catalog
 				a_input.rawTechnique;
 			admission._route.pluginResolvedPsid =
 				a_input.pluginResolvedPsid;
+			if (a_input.engineLookup) {
+				if (const auto* target =
+						FindRouteEngineLookupTarget(
+							_impl->scope,
+							a_input.engineLookup->targetId)) {
+					admission._route.engineLookup =
+						RouteEngineLookupEvent{
+							.target = *target,
+							.functionInput =
+								a_input.engineLookup
+									->functionInput,
+							.returnedPsid =
+								RouteEngineLookupPsid{
+									a_input.engineLookup
+										->returnedPsid },
+							.callSequence =
+								a_input.engineLookup
+									->callSequence,
+							.threadId =
+								a_input.engineLookup
+									->threadId
+						};
+				}
+			}
 			admission._route.tiledLighting =
 				a_input.tiledLighting;
 			if (a_input.pluginResolvedPsid) {
@@ -3019,6 +3390,8 @@ namespace cs::features::catalog
 				a_outcome.creationSucceeded;
 			observation.facts.creationOutputNonNull =
 				a_outcome.outputNonNull;
+			observation.facts.engineLookupObserved =
+				observation.route.engineLookup.has_value();
 			observation.stockAuthority.originalInputUnchanged =
 				a_outcome.originalInputUnchanged;
 			observation.stockAuthority.finalObjectStock =
@@ -3277,14 +3650,44 @@ namespace cs::features::catalog
 				StockRuntimeRouteObservation observation;
 				{
 					std::scoped_lock lock(record->mutex);
+					record->observation
+						.engineLookupAuthorityReasons =
+							DeriveRouteEngineLookupAuthorityReasons(
+								record->observation,
+								_impl->expectedEngineLookupTargets
+									? &_impl
+										->expectedEngineLookupTargets
+										->capture
+									: nullptr);
+					record->observation.facts
+						.engineLookupAuthoritative =
+							record->observation.run.schemaVersion >= 2
+							&& record->observation
+								.engineLookupAuthorityReasons.empty();
 					record->observation.authorityReasons =
 						DeriveRouteObservationReasons(
 							record->observation,
 							_impl->globalStockOnlyViolation);
+					if (record->observation.run.schemaVersion >= 2) {
+						record->observation.authorityReasons.insert(
+							record->observation.authorityReasons.end(),
+							record->observation
+								.engineLookupAuthorityReasons.begin(),
+							record->observation
+								.engineLookupAuthorityReasons.end());
+						record->observation.authorityReasons =
+							SortUniqueRouteReasons(
+								std::move(
+									record->observation
+										.authorityReasons));
+					}
 					record->observation.captureAuthoritative =
 						record->observation.authorityReasons.empty()
 						&& RouteObservationAuthorityConditionsHold(
-							record->observation);
+							record->observation)
+						&& (record->observation.run.schemaVersion < 2
+							|| record->observation.facts
+								.engineLookupAuthoritative);
 					if (!record->observation.captureAuthoritative
 						&& record->observation
 							.authorityReasons.empty()) {
@@ -3391,6 +3794,9 @@ namespace cs::features::catalog
 						.queueEnqueueSequence,
 				.captureAuthoritative =
 					a_record.observation.captureAuthoritative,
+				.engineLookupAuthoritative =
+					a_record.observation.facts
+						.engineLookupAuthoritative,
 				.observation = a_record.observation
 			});
 			return result;
@@ -3492,6 +3898,8 @@ namespace cs::features::catalog
 			std::unordered_set<std::string> digests;
 			std::unordered_set<std::string> eventIds;
 			std::unordered_set<std::uint64_t> eventSequences;
+			std::unordered_set<std::uint64_t>
+				engineLookupSequences;
 			bool identityDuplicate = false;
 			std::uint64_t failedCreates = 0;
 			std::uint64_t nullOutputs = 0;
@@ -3502,6 +3910,8 @@ namespace cs::features::catalog
 			std::uint64_t resolverInvocations = 0;
 			std::uint64_t nonStock = 0;
 			std::uint64_t incompleteBinds = 0;
+			std::uint64_t engineLookupAuthoritative = 0;
+			std::uint64_t engineLookupMissing = 0;
 			for (const auto& row : _impl->rows) {
 				identityDuplicate =
 					identityDuplicate
@@ -3523,6 +3933,13 @@ namespace cs::features::catalog
 							*row.bindEventId).second
 						|| !eventSequences.emplace(
 							*row.bindSequence).second;
+				}
+				if (row.observation.route.engineLookup) {
+					identityDuplicate =
+						identityDuplicate
+						|| !engineLookupSequences.emplace(
+							row.observation.route.engineLookup
+								->callSequence).second;
 				}
 				committedSequences.emplace(
 					row.stockCreateSequence);
@@ -3566,6 +3983,12 @@ namespace cs::features::catalog
 				incompleteBinds += usable
 					&& observation.lineage.status
 						!= RouteLineageStatus::kLinked;
+				engineLookupAuthoritative +=
+					observation.facts
+						.engineLookupAuthoritative;
+				engineLookupMissing +=
+					_impl->run.schemaVersion >= 2
+					&& !observation.route.engineLookup;
 			}
 			inputChanges += _impl->excludedInputChanges.load(
 				std::memory_order_relaxed);
@@ -3605,7 +4028,12 @@ namespace cs::features::catalog
 				reasons.emplace_back("scope-disabled");
 			std::string scopeDigest;
 			if (!RouteScopeValid(
-					_impl->run, _impl->scope, scopeDigest)
+					_impl->run,
+					_impl->scope,
+					_impl->producer,
+					_impl->runtime,
+					_impl->expectedEngineLookupTargets.get(),
+					scopeDigest)
 				|| scopeDigest
 					!= _impl->scope.configurationSha256)
 				reasons.emplace_back(
@@ -3650,6 +4078,21 @@ namespace cs::features::catalog
 				json, _impl->scope.eligibilityRules);
 			json << ",\"enabled\":";
 			JsonBool(json, _impl->scope.enabled);
+			if (_impl->run.schemaVersion >= 2) {
+				json << ",\"engine_lookup_targets\":[";
+				for (std::size_t index = 0;
+					 index < _impl->scope.engineLookupCapture
+						->targets.size();
+					 ++index) {
+					if (index != 0)
+						json << ',';
+					AppendRouteEngineLookupTarget(
+						json,
+						_impl->scope.engineLookupCapture
+							->targets[index]);
+				}
+				json << ']';
+			}
 			json << ",\"included_stages\":";
 			AppendRouteStringArray(
 				json, _impl->scope.includedStages);
@@ -3662,8 +4105,14 @@ namespace cs::features::catalog
 				<< mismatches
 				<< ",\"create_attempts\":" << createAttempts
 				<< ",\"duplicate_pointer_lineages\":"
-				<< duplicate
-				<< ",\"failed_creates\":" << failedCreates
+				<< duplicate;
+			if (_impl->run.schemaVersion >= 2) {
+				json << ",\"engine_lookup_authoritative_rows\":"
+					<< engineLookupAuthoritative
+					<< ",\"engine_lookup_missing_rows\":"
+					<< engineLookupMissing;
+			}
+			json << ",\"failed_creates\":" << failedCreates
 				<< ",\"incomplete_binds\":" << incompleteBinds
 				<< ",\"non_stock_final_objects\":" << nonStock
 				<< ",\"null_create_outputs\":" << nullOutputs
@@ -3712,6 +4161,12 @@ namespace cs::features::catalog
 					json << "null";
 				json << ",\"capture_authoritative\":";
 				JsonBool(json, row.captureAuthoritative);
+				if (_impl->run.schemaVersion >= 2) {
+					json << ",\"engine_lookup_authoritative\":";
+					JsonBool(
+						json,
+						row.engineLookupAuthoritative);
+				}
 				json << ",\"observation_byte_length\":"
 					<< row.observationByteLength
 					<< ",\"observation_sha256\":";
@@ -3726,15 +4181,21 @@ namespace cs::features::catalog
 					<< row.stockCreateSequence << '}';
 			}
 			json << "],\"producer\":";
-			AppendRouteProducer(json, _impl->producer);
+			AppendRouteProducer(
+				json,
+				_impl->producer,
+				_impl->run.schemaVersion);
 			json << ",\"run\":";
 			AppendRouteRun(json, _impl->run);
 			json << ",\"runtime\":";
-			AppendRouteRuntime(json, _impl->runtime);
+			AppendRouteRuntime(
+				json,
+				_impl->runtime,
+				_impl->run.schemaVersion);
 			json << ",\"schema\":"
 				"\"fo4cs.stock-runtime-route-run-manifest\","
-				"\"schema_version\":1,"
-				"\"sequence_accounting\":{"
+				"\"schema_version\":" << _impl->run.schemaVersion
+				<< ",\"sequence_accounting\":{"
 				"\"allocated_sequences\":"
 				<< allocatedSequences
 				<< ",\"committed_sequences\":"
@@ -3768,8 +4229,11 @@ namespace cs::features::catalog
 				json,
 				_impl->scope.resolverRegistryOpen.sha256);
 			json << "}}\n";
-			return _impl->PublishDocument(
+			auto result = _impl->PublishDocument(
 				"manifests", json.str());
+			result.document.captureAuthoritative =
+				authoritative;
+			return result;
 		} catch (...) {
 			failure.error = RoutePublicationError::kIoFailed;
 			return failure;
@@ -3886,7 +4350,25 @@ namespace cs::features::catalog
 			 << ",\"unique_observations\":" << a_document.counters.uniqueObservations
 			 << ",\"unique_contents\":" << a_document.counters.uniqueContents
 			 << ",\"attribution_events\":" << a_document.counters.attributionEvents
-			 << "},\"blobs\":[";
+			 << "},\"route_capture\":";
+		if (a_document.routeCapture) {
+			const auto& route = *a_document.routeCapture;
+			json << "{\"byte_length\":" << route.byteLength
+				<< ",\"capture_authoritative\":";
+			JsonBool(json, route.captureAuthoritative);
+			json << ",\"external_run_id\":";
+			JsonOptionalString(json, route.externalRunId);
+			json << ",\"generated_run_id\":";
+			JsonString(json, route.generatedRunId);
+			json << ",\"schema_version\":"
+				<< route.schemaVersion
+				<< ",\"sha256\":";
+			JsonString(json, route.sha256);
+			json << '}';
+		} else {
+			json << "null";
+		}
+		json << ",\"blobs\":[";
 
 		for (std::size_t i = 0; i < a_document.blobs.size(); ++i) {
 			if (i != 0)

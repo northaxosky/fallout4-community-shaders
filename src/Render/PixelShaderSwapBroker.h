@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/EnginePixelShaderLookup.h"
 #include "Utils/CSSha1.h"
 
 #ifndef NOMINMAX
@@ -128,6 +129,7 @@ namespace cs::engine
 		ShaderStage stage = ShaderStage::kPixel;
 		std::uint32_t rawTechnique = 0;
 		std::optional<ShaderVariantId> pluginResolvedPsid;
+		std::optional<EnginePixelShaderLookupObservation> engineLookup;
 		std::optional<bool> tiledLighting;
 	};
 

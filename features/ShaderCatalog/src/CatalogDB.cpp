@@ -847,6 +847,13 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			RouteRunIdentity routeRun{
 				.runId = _generatedRunId
 			};
+			if (_config.routeCapture.scope.engineLookupCapture) {
+				routeRun.scenarioId =
+					"stock-pixel-shader-routes-v2";
+				routeRun.externalRunId =
+					_policy.externalRunId;
+				routeRun.schemaVersion = 2;
+			}
 			_routePublisher = StockRuntimeRoutePublisher::Open(
 				_config.routeCapture.outputRoot,
 				_config.routeCapture.producer,
@@ -1173,6 +1180,8 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 		}
 #endif
 
+		std::optional<ManifestRouteCaptureCommitment>
+			routeCommitment;
 		if (_routePublisher) {
 			bool routePublished = routeFrozen;
 #ifdef FO4CS_SHADER_CATALOG_TESTING
@@ -1188,6 +1197,24 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			}
 			const auto routeManifest =
 				_routePublisher->FinalizeRun(routeVeto);
+			if (routeManifest.success) {
+				routeCommitment = ManifestRouteCaptureCommitment{
+					.schemaVersion =
+						routeManifest.document.schemaVersion,
+					.byteLength =
+						routeManifest.document.byteLength,
+					.sha256 = HexLower(
+						routeManifest.document.sha256.data(),
+						routeManifest.document.sha256.size()),
+					.generatedRunId = _generatedRunId,
+					.externalRunId = _policy.externalRunId,
+					.captureAuthoritative =
+						routePublished
+						&& routeManifest.document
+							.captureAuthoritative
+						&& !finalizationTimedOut
+				};
+			}
 			if (auto logger = Logger(); logger) {
 				if (routePublished
 					&& routeManifest.success
@@ -1240,6 +1267,7 @@ CREATE INDEX IF NOT EXISTS idx_catalog_run_blobs_content ON catalog_run_blobs(ge
 			document.orderlyFinalizerReady = context.orderlyFinalizerReady;
 			document.quality = context.quality;
 			document.authoritative = authoritative;
+			document.routeCapture = routeCommitment;
 		}
 
 		StagedManifestPublication staged;

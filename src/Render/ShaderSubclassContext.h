@@ -9,6 +9,7 @@ namespace cs::engine::shader_context
 {
 	struct Context
 	{
+		void* shader = nullptr;
 		const char* subclassName = nullptr;
 		std::uint32_t techniqueBits = 0;
 		bool active = false;
@@ -26,6 +27,7 @@ namespace cs::engine::shader_context
 	{
 	public:
 		Scope(
+			void* a_shader,
 			const char* a_name,
 			std::optional<std::uint32_t> a_techniqueBits) noexcept;
 		~Scope() noexcept;

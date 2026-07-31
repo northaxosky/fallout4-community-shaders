@@ -97,6 +97,23 @@ namespace cs::features::catalog::hooks
 						a_descriptor.route
 							->pluginResolvedPsid->Value();
 				}
+				if (a_descriptor.route->engineLookup) {
+					const auto& engineLookup =
+						*a_descriptor.route->engineLookup;
+					routeInput.engineLookup =
+						RouteEngineLookupInputEvent{
+							.targetId = cs::engine::
+								EnginePixelShaderLookupTargetName(
+									engineLookup.target),
+							.functionInput =
+								engineLookup.functionInput,
+							.returnedPsid =
+								engineLookup.returnedPsid.Value(),
+							.callSequence =
+								engineLookup.callSequence,
+							.threadId = engineLookup.threadId
+						};
+				}
 				routeInput.tiledLighting =
 					a_descriptor.route->tiledLighting;
 			}

@@ -2,6 +2,7 @@
 
 #include "Log.h"
 #include "PCH.h"
+#include "Render/EnginePixelShaderLookup.h"
 #include "Render/ShaderSubclassContext.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 
@@ -111,7 +112,8 @@ namespace cs::engine
 
 			static void thunk(void* a_self, bool a_clear)
 			{
-				shader_context::Scope scope(Tag::Name(), std::nullopt);
+				shader_context::Scope scope(
+					a_self, Tag::Name(), std::nullopt);
 				func(a_self, a_clear);
 			}
 
@@ -130,7 +132,9 @@ namespace cs::engine
 				g_setupCalls.fetch_add(1, std::memory_order_relaxed);
 				shader_context::SetSticky(Tag::Name(), a_techniqueBits);
 				shader_context::Scope scope(
-					Tag::Name(), a_techniqueBits);
+					a_self, Tag::Name(), a_techniqueBits);
+				EnginePixelShaderLookupScope lookupScope(
+					a_self, Tag::Name(), a_techniqueBits);
 				const bool result = func(a_self, a_techniqueBits);
 				if (!result) {
 					shader_context::ClearSticky();

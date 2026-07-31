@@ -6,6 +6,8 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace
@@ -63,6 +65,8 @@ namespace
 		std::string subclass;
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> pluginResolvedPsid;
+		std::optional<std::uint32_t> engineLookupPsid;
+		std::optional<std::uint64_t> engineLookupSequence;
 		std::optional<bool> tiledLighting;
 	};
 
@@ -116,6 +120,14 @@ namespace
 				fixture.pluginResolvedPsid =
 					a_descriptor.route
 						->pluginResolvedPsid->Value();
+			}
+			if (a_descriptor.route->engineLookup) {
+				fixture.engineLookupPsid =
+					a_descriptor.route->engineLookup
+						->returnedPsid.Value();
+				fixture.engineLookupSequence =
+					a_descriptor.route->engineLookup
+						->callSequence;
 			}
 			fixture.tiledLighting =
 				a_descriptor.route->tiledLighting;
@@ -799,11 +811,23 @@ namespace
 			pipeline.expectedLinkage,
 			&output,
 			PixelShaderRuntimeRoute{
-				"BSDFCompositeShader",
-				ShaderStage::kPixel,
-				0xB60,
-				ShaderVariantId{ 0x10B60 },
-				true
+				.subclass = "BSDFCompositeShader",
+				.stage = ShaderStage::kPixel,
+				.rawTechnique = 0xB60,
+				.pluginResolvedPsid =
+					ShaderVariantId{ 0x10B60 },
+				.engineLookup =
+					EnginePixelShaderLookupObservation{
+						.target =
+							EnginePixelShaderLookupTarget::
+								kBsdfLight,
+						.functionInput = 0xB60,
+						.returnedPsid =
+							EngineLookupPsid{ 0x10B61 },
+						.callSequence = 7,
+						.threadId = 11
+					},
+				.tiledLighting = true
 			});
 		Check(result == S_OK && output == pipeline.stock,
 			"detailed observer changed stock result");
@@ -815,6 +839,9 @@ namespace
 				&& detailed.rawTechnique == 0xB60
 				&& detailed.pluginResolvedPsid
 					== static_cast<std::uint32_t>(0x10B60)
+				&& detailed.engineLookupPsid
+					== static_cast<std::uint32_t>(0x10B61)
+				&& detailed.engineLookupSequence == 7
 				&& detailed.tiledLighting == true,
 			"detailed observer lost creation provenance");
 		Check(
@@ -843,6 +870,156 @@ namespace
 				&& output == pipeline.stock
 				&& !pipeline.completion.originalInputUnchanged,
 			"broker did not detect changed original input");
+	}
+
+	void TestEngineLookupClaimIsIndependentAndOneShot()
+	{
+		using namespace cs::engine;
+		static_assert(
+			!std::is_convertible_v<EngineLookupPsid, ShaderVariantId>);
+		ResetEnginePixelShaderLookupForTesting();
+		std::byte shaderToken{};
+		{
+			EnginePixelShaderLookupScope scope(
+				&shaderToken, "BSDFLightShader", 0x281);
+			RecordEnginePixelShaderLookupReturn(
+				EnginePixelShaderLookupTarget::kBsdfLight,
+				0x281,
+				0x201);
+			const auto observation =
+				ConsumeEnginePixelShaderLookup(
+					&shaderToken, "BSDFLightShader", 0x281);
+			Check(
+				observation
+					&& observation->functionInput == 0x281
+					&& observation->returnedPsid.Value() == 0x201
+					&& observation->callSequence == 1
+					&& observation->threadId == GetCurrentThreadId(),
+				"engine lookup claim lost its direct return");
+			Check(
+				!ConsumeEnginePixelShaderLookup(
+					&shaderToken, "BSDFLightShader", 0x281),
+				"engine lookup claim was consumed twice");
+		}
+
+		const auto testEngineLookupProductionInstallIsBlocked = [] {
+			using namespace cs::engine;
+			InstallEnginePixelShaderLookupHooks();
+			const auto stats =
+				GetEnginePixelShaderLookupInstallStats();
+			Check(
+				GetEnginePixelShaderLookupTargetDescriptors().empty()
+					&& stats.attempted == 0
+					&& stats.succeeded == 0
+					&& stats.failed == 0
+					&& !stats.Ready(),
+				"production engine lookup hook was enabled without proof");
+		};
+		testEngineLookupProductionInstallIsBlocked();
+		const auto telemetry =
+			SnapshotEnginePixelShaderLookupTelemetry();
+		Check(
+			telemetry.returnsSeen == 1
+				&& telemetry.returnsScoped == 1
+				&& telemetry.returnsCaptured == 1
+				&& telemetry.returnsConsumed == 1
+				&& EnginePixelShaderLookupRelationshipsHold(
+					telemetry),
+			"engine lookup claim telemetry is incoherent");
+	}
+
+	void TestEngineLookupClaimFailsClosed()
+	{
+		using namespace cs::engine;
+		ResetEnginePixelShaderLookupForTesting();
+		std::byte shaderToken{};
+		RecordEnginePixelShaderLookupReturn(
+			EnginePixelShaderLookupTarget::kBsdfLight,
+			0x281,
+			0x201);
+		{
+			EnginePixelShaderLookupScope scope(
+				&shaderToken, "BSDFCompositeShader", 0x281);
+			RecordEnginePixelShaderLookupReturn(
+				EnginePixelShaderLookupTarget::kBsdfLight,
+				0x281,
+				0x201);
+		}
+		{
+			EnginePixelShaderLookupScope scope(
+				&shaderToken, "BSDFLightShader", 0x281);
+			RecordEnginePixelShaderLookupReturn(
+				EnginePixelShaderLookupTarget::kBsdfLight,
+				0x201,
+				0x201);
+		}
+		{
+			EnginePixelShaderLookupScope scope(
+				&shaderToken, "BSDFLightShader", 0x281);
+			RecordEnginePixelShaderLookupReturn(
+				EnginePixelShaderLookupTarget::kBsdfLight,
+				0x281,
+				0x201);
+			RecordEnginePixelShaderLookupReturn(
+				EnginePixelShaderLookupTarget::kBsdfLight,
+				0x281,
+				0x201);
+			Check(
+				!ConsumeEnginePixelShaderLookup(
+					&shaderToken, "BSDFLightShader", 0x281),
+				"duplicate engine lookup return remained authoritative");
+		}
+		const auto telemetry =
+			SnapshotEnginePixelShaderLookupTelemetry();
+		Check(
+			telemetry.discardedOutOfScope == 1
+				&& telemetry.discardedSubclassMismatch == 1
+				&& telemetry.discardedTechniqueMismatch == 1
+				&& telemetry.discardedDuplicate == 1
+				&& EnginePixelShaderLookupRelationshipsHold(
+					telemetry),
+			"engine lookup reject controls were not accounted");
+	}
+
+	void TestEngineLookupClaimIsNestedAndThreadLocal()
+	{
+		using namespace cs::engine;
+		ResetEnginePixelShaderLookupForTesting();
+		std::byte outerShader{};
+		std::byte innerShader{};
+		EnginePixelShaderLookupScope outer(
+			&outerShader, "BSDFLightShader", 0x281);
+		RecordEnginePixelShaderLookupReturn(
+			EnginePixelShaderLookupTarget::kBsdfLight,
+			0x281,
+			0x201);
+		{
+			EnginePixelShaderLookupScope inner(
+				&innerShader, "BSDFLightShader", 0x104);
+			RecordEnginePixelShaderLookupReturn(
+				EnginePixelShaderLookupTarget::kBsdfLight,
+				0x104,
+				0x104);
+			Check(
+				ConsumeEnginePixelShaderLookup(
+					&innerShader, "BSDFLightShader", 0x104)
+					.has_value(),
+				"nested engine lookup claim was not isolated");
+		}
+		bool foreignThreadObserved = false;
+		std::thread other([&] {
+			foreignThreadObserved =
+				ConsumeEnginePixelShaderLookup(
+					&outerShader, "BSDFLightShader", 0x281)
+					.has_value();
+		});
+		other.join();
+		Check(
+			!foreignThreadObserved
+				&& ConsumeEnginePixelShaderLookup(
+					&outerShader, "BSDFLightShader", 0x281)
+					.has_value(),
+			"engine lookup claim crossed thread or nested scope");
 	}
 
 	void TestResolverRegistryGeneration()
@@ -902,6 +1079,9 @@ int main()
 		{ "broker pipeline ordering and forwarding", &TestBrokerPipelineOrderingAndForwarding },
 		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority },
 		{ "detailed observer is selection neutral", &TestDetailedObserverIsSelectionNeutral },
+		{ "engine lookup claim is independent", &TestEngineLookupClaimIsIndependentAndOneShot },
+		{ "engine lookup claim fails closed", &TestEngineLookupClaimFailsClosed },
+		{ "engine lookup claim is thread local", &TestEngineLookupClaimIsNestedAndThreadLocal },
 		{ "resolver registry generation", &TestResolverRegistryGeneration }
 	};
 

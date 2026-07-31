@@ -13,14 +13,15 @@ The producer exposes these constants in `Provenance.h`:
 
 - Live SQLite schema: `kCatalogSchemaVersion = 3`
 - Manifest schema: `fo4cs.shader-catalog-run`
-- Manifest schema version: `kManifestSchemaVersion = 2`
+- Manifest schema version: `kManifestSchemaVersion = 3`
 
 An importer must reject a different manifest name, an unsupported manifest version, or a
 newer live schema version. ShaderCatalog rejects a newer or malformed database without
 resetting it.
 
-Manifest-schema-v2 producers emit only schema-v2 documents. Consumers must accept immutable
-manifest schema v1 and v2; v1 has no writer-cadence or subclass-attribution fields. The
+Manifest-schema-v3 producers emit only schema-v3 documents. Consumers must accept immutable
+manifest schema v1, v2, and v3; v1 has no writer-cadence or subclass-attribution fields, and
+v1/v2 have no route-manifest commitment. The
 publication path remains `runs/<generated-run-id>/manifest.v1.json` for all manifest schema
 versions; its `v1` names the publication layout, while document `schema_version` names the
 manifest schema.
@@ -356,9 +357,23 @@ publisher is open. At the deadline the coordinator closes and finalizes the run 
 the game keeps running; the UI button requests that same one-way close earlier. Capture never
 depends on observing process exit.
 
-The wire contract is `fo4cs.stock-runtime-route-observation` v1 plus
-`fo4cs.stock-runtime-route-run-manifest` v1. Canonical files use sorted-key compact JSON with
-one final LF and publish without replacement at:
+The production wire stays `fo4cs.stock-runtime-route-observation` v1 plus
+`fo4cs.stock-runtime-route-run-manifest` v1 while no reviewed engine target descriptor exists.
+V1 keeps `observed_lookup_psid` null and `engine_lookup_observed=false`.
+
+The proof-independent v2 writer activates only when startup supplies a complete, installed
+engine-target descriptor set. It emits the same schema names at version 2 with scenario
+`stock-pixel-shader-routes-v2`. A v2 run also requires a validated `external_run_id`. No target
+descriptor is installed until the OG, NG, and AE Address Library tuple, ABI, call path, and detour
+contract have separate review.
+
+The serialized scope is not its own authority root. V2 open also requires an immutable expected
+target snapshot from compiled process state. The snapshot must be ready, nonempty, and exactly
+equal to the closed BSDF Light target set in the scope. Missing, extra, duplicate, unknown, or
+changed targets reject v2. Production exposes an empty target span until the reviewed hook lands,
+so it can only open v1.
+
+Both versions use sorted-key compact JSON with one final LF and publish without replacement at:
 
 ```text
 <root>/observations/<document-sha256>.json
@@ -370,7 +385,7 @@ subclass with one scoped `SetupTechnique` context. Every callback is included or
 closed exclusion reason before allocation. Capture leases close atomically and drain before the
 tracker snapshot. Observation publication then uses a separate admission gate.
 
-Each observation binds:
+Each v1 observation binds:
 
 - Exact plugin binary and Fallout 4 executable SHA-256 identity
 - On-disk plugin hook and diagnostic-resolver x64 unwind ranges, with ASLR-safe RVAs
@@ -383,8 +398,28 @@ Each observation binds:
 - One run-local non-pointer object ID and one later matching `PSSetShader` bind
 
 The broker snapshot used for observer evidence is the same snapshot used for resolver dispatch.
-This does not make the diagnostic PSID an observed engine return. Fallout4-re derives
-`engine_lookup_psid` only from separate native evidence.
+This does not make the diagnostic PSID an observed engine return.
+
+Each v2 observation additionally binds:
+
+- Exact plugin and executable byte lengths beside their SHA-256 identities
+- The validated external run ID
+- A direct `GetPixelShaderID` return captured in the strict SetupTechnique thread-local frame
+- The function input, one-shot call sequence, and thread ID
+- The exact `Fallout4.exe` target symbol/RVA and the plugin observer code identity
+- Exact engine and observer code ranges bounded by the executable and plugin byte lengths
+- Exact target runtime release and four-part executable file version
+- A separate `engine_lookup_authoritative` verdict and closed reason set
+
+The direct value and `plugin_resolved_psid` use different types and different producer paths.
+Equal values are valid. Different values are valid. Neither value can fill or attest the other.
+The strict claim expires if the same frame does not consume it in CreatePixelShader. Sticky state,
+a later bind, an object ID, and numeric equality cannot backfill it.
+
+Each event copies one expected descriptor and must still match that frozen descriptor byte-for-byte
+at close. Range validation uses checked subtraction: start must be below the exact file length,
+length must be nonzero, and length must not exceed `file_length - start`. Zero, out-of-file, and
+overflowing ranges deny engine authority and therefore v2 capture authority.
 
 Stock-only authority requires an empty resolver registry at open and close with unchanged monotonic
 generation and canonical registry digest. Resolver invocation, changed original input, or a
@@ -423,6 +458,11 @@ promotion  = membership AND authoritative enclosing catalog context, exact run/b
 That promotion gate belongs to fallout4-re. Community Shaders publishes route-local facts and
 never asserts catalog authority from a route document. A false route manifest may still contain
 true rows, and no row is promotable on route facts alone.
+
+Manifest schema v3 adds an optional `route_capture` commitment with the frozen route-manifest
+schema version, byte length, SHA-256, generated/external run IDs, and route authority. This
+commitment does not make the route and catalog roots atomic. It makes a route-only leftover
+detectably orphaned.
 
 A structurally valid route artifact left behind by process death or by a failed catalog
 finalization is an orphan, never a final accepted handoff. Route documents publish before

@@ -23,7 +23,7 @@
 namespace cs::features::catalog
 {
 	inline constexpr int kCatalogSchemaVersion = 3;
-	inline constexpr int kManifestSchemaVersion = 2;
+	inline constexpr int kManifestSchemaVersion = 3;
 	inline constexpr std::string_view kManifestSchema = "fo4cs.shader-catalog-run";
 	inline constexpr std::size_t kMaxShaderBytecodeBytes = 16u * 1024u * 1024u;
 	inline constexpr std::size_t kMaxCatalogIdentifierBytes = 128;
@@ -174,6 +174,8 @@ namespace cs::features::catalog
 	{
 		std::uint32_t startRva = 0;
 		std::uint64_t byteLength = 0;
+
+		auto operator<=>(const RouteCodeRange&) const = default;
 	};
 
 	struct RouteCodeIdentity
@@ -183,6 +185,8 @@ namespace cs::features::catalog
 		std::uint32_t rva = 0;
 		RouteCodeRange codeRange;
 		std::string codeSha256;
+
+		auto operator<=>(const RouteCodeIdentity&) const = default;
 	};
 
 	struct RouteResolverCodeRange
@@ -208,6 +212,7 @@ namespace cs::features::catalog
 		std::string name = "FO4CommunityShaders";
 		std::string version;
 		std::string binarySha256;
+		std::uint64_t binaryByteLength = 0;
 	};
 
 	struct RouteRuntimeIdentity
@@ -215,6 +220,7 @@ namespace cs::features::catalog
 		std::string name;
 		std::string version;
 		std::string executableSha256;
+		std::uint64_t executableByteLength = 0;
 	};
 
 	struct RouteRunIdentity
@@ -222,6 +228,81 @@ namespace cs::features::catalog
 		std::string runId;
 		std::string scenarioId = "stock-pixel-shader-routes-v1";
 		bool stockOnly = true;
+		std::optional<std::string> externalRunId;
+		int schemaVersion = 1;
+	};
+
+	class RouteEngineLookupPsid
+	{
+	public:
+		constexpr RouteEngineLookupPsid() noexcept = default;
+		explicit constexpr RouteEngineLookupPsid(
+			std::uint32_t a_value) noexcept :
+			_value(a_value)
+		{}
+
+		[[nodiscard]] constexpr std::uint32_t Value() const noexcept
+		{
+			return _value;
+		}
+
+		auto operator<=>(const RouteEngineLookupPsid&) const = default;
+
+	private:
+		std::uint32_t _value = 0;
+	};
+
+	struct RouteEngineLookupTargetIdentity
+	{
+		std::string targetId;
+		std::string subclass;
+		std::string stage = "ps";
+		std::string engineModule = "Fallout4.exe";
+		std::string engineSymbol;
+		std::uint32_t engineRva = 0;
+		RouteCodeRange engineCodeRange;
+		std::string runtimeRelease;
+		std::string runtimeVersion;
+		RouteCodeIdentity observerHook;
+
+		auto operator<=>(const RouteEngineLookupTargetIdentity&) const =
+			default;
+	};
+
+	struct RouteEngineLookupCaptureIdentity
+	{
+		std::vector<RouteEngineLookupTargetIdentity> targets;
+
+		auto operator<=>(const RouteEngineLookupCaptureIdentity&) const =
+			default;
+	};
+
+	struct RouteEngineLookupExpectedTargetsSnapshot
+	{
+		bool ready = false;
+		RouteEngineLookupCaptureIdentity capture;
+	};
+
+	using RouteEngineLookupExpectedTargetsProvider =
+		std::shared_ptr<
+			const RouteEngineLookupExpectedTargetsSnapshot> (*)() noexcept;
+
+	struct RouteEngineLookupInputEvent
+	{
+		std::string_view targetId;
+		std::uint32_t functionInput = 0;
+		std::uint32_t returnedPsid = 0;
+		std::uint64_t callSequence = 0;
+		std::uint32_t threadId = 0;
+	};
+
+	struct RouteEngineLookupEvent
+	{
+		RouteEngineLookupTargetIdentity target;
+		std::uint32_t functionInput = 0;
+		RouteEngineLookupPsid returnedPsid;
+		std::uint64_t callSequence = 0;
+		std::uint32_t threadId = 0;
 	};
 
 	struct RouteResolverRegistrySnapshot
@@ -251,6 +332,10 @@ namespace cs::features::catalog
 		RouteCodeIdentity createHook;
 		RouteCodeIdentity bindHook;
 		RoutePluginRuntimeResolverIdentity pluginRuntimeResolver;
+		std::optional<RouteEngineLookupCaptureIdentity>
+			engineLookupCapture;
+		RouteEngineLookupExpectedTargetsProvider
+			engineLookupExpectedTargets = nullptr;
 		RouteResolverRegistrySnapshot resolverRegistryOpen;
 		RouteResolverRegistrySnapshotProvider resolverRegistrySnapshot = nullptr;
 		RouteHookCoverageProvider hookCoverageReady = nullptr;
@@ -263,6 +348,7 @@ namespace cs::features::catalog
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> observedLookupPsid;
 		std::optional<std::uint32_t> pluginResolvedPsid;
+		std::optional<RouteEngineLookupEvent> engineLookup;
 		std::optional<RoutePluginRuntimeResolverIdentity>
 			pluginRuntimeResolver;
 		std::optional<bool> tiledLighting;
@@ -320,6 +406,7 @@ namespace cs::features::catalog
 	{
 		bool routeContextObserved = true;
 		bool engineLookupObserved = false;
+		bool engineLookupAuthoritative = false;
 		bool creationObserved = true;
 		bool creationSucceeded = false;
 		bool creationOutputNonNull = false;
@@ -352,6 +439,7 @@ namespace cs::features::catalog
 		RouteStockAuthority stockAuthority;
 		bool captureAuthoritative = false;
 		std::vector<std::string> authorityReasons;
+		std::vector<std::string> engineLookupAuthorityReasons;
 	};
 
 	struct RouteCaptureRecordState
@@ -369,6 +457,7 @@ namespace cs::features::catalog
 		std::string_view stage = "ps";
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> pluginResolvedPsid;
+		std::optional<RouteEngineLookupInputEvent> engineLookup;
 		std::optional<bool> tiledLighting;
 		bool classLinkagePresent = false;
 	};
@@ -488,6 +577,8 @@ namespace cs::features::catalog
 		std::array<std::uint8_t, 32> sha256{};
 		std::uint64_t byteLength = 0;
 		std::filesystem::path path;
+		int schemaVersion = 0;
+		bool captureAuthoritative = false;
 	};
 
 	// External authority veto decided outside the publisher; the wire keeps its closed reason set.
@@ -670,6 +761,16 @@ namespace cs::features::catalog
 		std::uint64_t attributionEvents = 0;
 	};
 
+	struct ManifestRouteCaptureCommitment
+	{
+		int schemaVersion = 0;
+		std::uint64_t byteLength = 0;
+		std::string sha256;
+		std::string generatedRunId;
+		std::optional<std::string> externalRunId;
+		bool captureAuthoritative = false;
+	};
+
 	struct ManifestDocument
 	{
 		std::string producerVersion;
@@ -704,6 +805,7 @@ namespace cs::features::catalog
 		bool authoritative = false;
 		QualityCounters quality;
 		ManifestCounters counters;
+		std::optional<ManifestRouteCaptureCommitment> routeCapture;
 		std::vector<ManifestBlob> blobs;
 		std::vector<ManifestObservation> observations;
 		std::vector<ManifestAttribution> attributions;

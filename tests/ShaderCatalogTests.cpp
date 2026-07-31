@@ -20,6 +20,7 @@
 #include <fstream>
 #include <future>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <stdexcept>
@@ -616,8 +617,12 @@ namespace
 		Check(firstJson.ends_with('\n'), "manifest has no final LF");
 		Check(
 			firstJson.starts_with(
-				"{\"schema\":\"fo4cs.shader-catalog-run\",\"schema_version\":2"),
+				"{\"schema\":\"fo4cs.shader-catalog-run\",\"schema_version\":3"),
 			"manifest key order or schema is wrong");
+		Check(
+			firstJson.find("\"route_capture\":null")
+				!= std::string::npos,
+			"manifest without route capture omitted its null commitment");
 		Check(
 			firstJson.find(
 				"\"writer_flush_interval_ms\":1234,"
@@ -2564,6 +2569,9 @@ namespace
 		std::string(kEmptyRouteRegistrySha256)
 	};
 	bool g_routeHooksReady = true;
+	std::shared_ptr<
+		const RouteEngineLookupExpectedTargetsSnapshot>
+			g_expectedEngineLookupTargets;
 
 	RouteResolverRegistrySnapshot RouteRegistrySnapshotForTesting() noexcept
 	{
@@ -2573,6 +2581,26 @@ namespace
 	bool RouteHooksReadyForTesting() noexcept
 	{
 		return g_routeHooksReady;
+	}
+
+	std::shared_ptr<
+		const RouteEngineLookupExpectedTargetsSnapshot>
+		ExpectedEngineLookupTargetsForTesting() noexcept
+	{
+		return g_expectedEngineLookupTargets;
+	}
+
+	void SetExpectedEngineLookupTargetsForTesting(
+		const RouteEngineLookupCaptureIdentity& a_capture,
+		bool a_ready = true)
+	{
+		g_expectedEngineLookupTargets =
+			std::make_shared<
+				RouteEngineLookupExpectedTargetsSnapshot>(
+				RouteEngineLookupExpectedTargetsSnapshot{
+					.ready = a_ready,
+					.capture = a_capture
+				});
 	}
 
 	// Restores the route registry and hook-readiness seams even when a Check throws.
@@ -2600,6 +2628,7 @@ namespace
 				true, 0, true, std::string(kEmptyRouteRegistrySha256)
 			};
 			g_routeHooksReady = true;
+			g_expectedEngineLookupTargets.reset();
 		}
 	};
 
@@ -2657,6 +2686,41 @@ namespace
 		return scope;
 	}
 
+	RouteCaptureScope TestRouteCaptureScopeV2()
+	{
+		auto scope = TestRouteCaptureScope();
+		scope.engineLookupCapture =
+			RouteEngineLookupCaptureIdentity{
+				.targets = {
+					{
+						.targetId =
+							"bsdf-light-pixel-shader-id",
+						.subclass = "BSDFLightShader",
+						.stage = "ps",
+						.engineModule = "Fallout4.exe",
+						.engineSymbol =
+							"BSDFLightShaderMacros::GetPixelShaderID",
+						.engineRva = 0x223456,
+						.engineCodeRange = {
+							0x223456,
+							32
+						},
+						.runtimeRelease = "AE",
+						.runtimeVersion = "1.11.221.0",
+						.observerHook = TestRouteCodeIdentity(
+							"EnginePixelShaderLookup::thunk",
+							0x1400,
+							'a')
+					}
+				}
+			};
+		SetExpectedEngineLookupTargetsForTesting(
+			*scope.engineLookupCapture);
+		scope.engineLookupExpectedTargets =
+			&ExpectedEngineLookupTargetsForTesting;
+		return scope;
+	}
+
 	std::unique_ptr<StockRuntimeRoutePublisher> OpenTestRoutePublisher(
 		const std::filesystem::path& a_root,
 		RoutePublicationError& a_error)
@@ -2680,6 +2744,38 @@ namespace
 			a_error);
 	}
 
+	std::unique_ptr<StockRuntimeRoutePublisher>
+		OpenTestRoutePublisherV2(
+			const std::filesystem::path& a_root,
+			RoutePublicationError& a_error)
+	{
+		return StockRuntimeRoutePublisher::Open(
+			a_root,
+			{
+				.name = "FO4CommunityShaders",
+				.version = "1.2.3",
+				.binarySha256 = std::string(64, '1'),
+				.binaryByteLength = 123456
+			},
+			{
+				.name = "AE",
+				.version = "1.11.221.0",
+				.executableSha256 = std::string(64, '2'),
+				.executableByteLength = 55293864
+			},
+			{
+				.runId =
+					"11111111-2222-4333-8444-555555555555",
+				.scenarioId =
+					"stock-pixel-shader-routes-v2",
+				.stockOnly = true,
+				.externalRunId = "sss-route-capture-ae",
+				.schemaVersion = 2
+			},
+			TestRouteCaptureScopeV2(),
+			a_error);
+	}
+
 	RouteCreateInput TestRouteCreateInput(bool a_linkage = false)
 	{
 		return {
@@ -2691,6 +2787,20 @@ namespace
 			.tiledLighting = std::nullopt,
 			.classLinkagePresent = a_linkage
 		};
+	}
+
+	RouteCreateInput TestRouteCreateInputV2(
+		std::uint32_t a_enginePsid = 0x01200201)
+	{
+		auto input = TestRouteCreateInput(true);
+		input.engineLookup = RouteEngineLookupInputEvent{
+			.targetId = "bsdf-light-pixel-shader-id",
+			.functionInput = input.rawTechnique,
+			.returnedPsid = a_enginePsid,
+			.callSequence = 91,
+			.threadId = GetCurrentThreadId()
+		};
+		return input;
 	}
 
 	RouteCreateOutcome TestRouteCreateOutcome()
@@ -2759,8 +2869,291 @@ namespace
 		};
 	}
 
+	void TestRouteReceiptV2IdentityGuards()
+	{
+		TempTree tree("route-receipt-v2-identity");
+		auto error = RoutePublicationError::kNone;
+		const RouteProducerIdentity producer{
+			.name = "FO4CommunityShaders",
+			.version = "1.2.3",
+			.binarySha256 = std::string(64, '1'),
+			.binaryByteLength = 123456
+		};
+		const RouteRuntimeIdentity runtime{
+			.name = "AE",
+			.version = "1.11.221.0",
+			.executableSha256 = std::string(64, '2'),
+			.executableByteLength = 55293864
+		};
+		RouteRunIdentity run{
+			.runId =
+				"11111111-2222-4333-8444-555555555555",
+			.scenarioId = "stock-pixel-shader-routes-v2",
+			.stockOnly = true,
+			.schemaVersion = 2
+		};
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				TestRouteCaptureScopeV2(),
+				error)
+				&& error
+					== RoutePublicationError::kInvalidIdentity,
+			"route v2 accepted a missing external run ID");
+
+		run.externalRunId = "sss-route-capture-ae";
+		auto zeroLengthProducer = producer;
+		zeroLengthProducer.binaryByteLength = 0;
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				zeroLengthProducer,
+				runtime,
+				run,
+				TestRouteCaptureScopeV2(),
+				error)
+				&& error
+					== RoutePublicationError::kInvalidIdentity,
+			"route v2 accepted a zero plugin length");
+
+		auto invalidScope = TestRouteCaptureScopeV2();
+		invalidScope.engineLookupCapture->targets.front()
+			.engineModule = "FO4CommunityShaders.dll";
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				invalidScope,
+				error)
+				&& error
+					== RoutePublicationError::kInvalidScope,
+			"route v2 accepted plugin-derived engine provenance");
+
+		const auto expectMalformedTarget = [&](
+			std::string_view a_label,
+			auto&& a_mutate) {
+			auto scope = TestRouteCaptureScopeV2();
+			a_mutate(
+				scope.engineLookupCapture->targets.front());
+			SetExpectedEngineLookupTargetsForTesting(
+				*scope.engineLookupCapture);
+			error = RoutePublicationError::kNone;
+			Check(
+				!StockRuntimeRoutePublisher::Open(
+					tree.path,
+					producer,
+					runtime,
+					run,
+					scope,
+					error)
+					&& error
+						== RoutePublicationError::kInvalidScope,
+				std::string(
+					"route v2 accepted malformed target: ")
+					+ std::string(a_label));
+		};
+		expectMalformedTarget(
+			"printable tag",
+			[](auto& a_target) {
+				a_target.targetId = "other-printable-target";
+			});
+		expectMalformedTarget(
+			"printable symbol",
+			[](auto& a_target) {
+				a_target.engineSymbol =
+					"OtherShaderMacros::GetPixelShaderID";
+			});
+		expectMalformedTarget(
+			"engine module",
+			[](auto& a_target) {
+				a_target.engineModule = "Other.exe";
+			});
+		expectMalformedTarget(
+			"runtime release",
+			[](auto& a_target) {
+				a_target.runtimeRelease = "NG";
+			});
+		expectMalformedTarget(
+			"runtime version",
+			[](auto& a_target) {
+				a_target.runtimeVersion = "1.11.191.0";
+			});
+		expectMalformedTarget(
+			"RVA mismatch",
+			[](auto& a_target) {
+				++a_target.engineRva;
+			});
+		expectMalformedTarget(
+			"RVA at executable length",
+			[&](auto& a_target) {
+				a_target.engineRva = static_cast<std::uint32_t>(
+					runtime.executableByteLength);
+				a_target.engineCodeRange = {
+					a_target.engineRva,
+					1
+				};
+			});
+		expectMalformedTarget(
+			"RVA past executable length",
+			[&](auto& a_target) {
+				a_target.engineRva = static_cast<std::uint32_t>(
+					runtime.executableByteLength + 1);
+				a_target.engineCodeRange = {
+					a_target.engineRva,
+					1
+				};
+			});
+		expectMalformedTarget(
+			"zero engine range",
+			[](auto& a_target) {
+				a_target.engineCodeRange.byteLength = 0;
+			});
+		expectMalformedTarget(
+			"overflow engine range",
+			[](auto& a_target) {
+				a_target.engineCodeRange.byteLength =
+					std::numeric_limits<std::uint64_t>::max();
+			});
+		expectMalformedTarget(
+			"observer module",
+			[](auto& a_target) {
+				a_target.observerHook.module = "Fallout4.exe";
+			});
+		expectMalformedTarget(
+			"observer symbol",
+			[](auto& a_target) {
+				a_target.observerHook.symbol =
+					"OtherObserver::thunk";
+			});
+		expectMalformedTarget(
+			"observer outside plugin",
+			[&](auto& a_target) {
+				a_target.observerHook.rva =
+					static_cast<std::uint32_t>(
+						producer.binaryByteLength);
+				a_target.observerHook.codeRange = {
+					a_target.observerHook.rva,
+					1
+				};
+			});
+		expectMalformedTarget(
+			"zero observer range",
+			[](auto& a_target) {
+				a_target.observerHook.codeRange.byteLength = 0;
+			});
+		expectMalformedTarget(
+			"overflow observer range",
+			[](auto& a_target) {
+				a_target.observerHook.codeRange.byteLength =
+					std::numeric_limits<std::uint64_t>::max();
+			});
+
+		auto missingScope = TestRouteCaptureScopeV2();
+		missingScope.engineLookupCapture->targets.clear();
+		SetExpectedEngineLookupTargetsForTesting(
+			*missingScope.engineLookupCapture);
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				missingScope,
+				error)
+				&& error == RoutePublicationError::kInvalidScope,
+			"route v2 accepted an empty expected target set");
+
+		auto duplicateScope = TestRouteCaptureScopeV2();
+		duplicateScope.engineLookupCapture->targets.push_back(
+			duplicateScope.engineLookupCapture->targets.front());
+		SetExpectedEngineLookupTargetsForTesting(
+			*duplicateScope.engineLookupCapture);
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				duplicateScope,
+				error)
+				&& error == RoutePublicationError::kInvalidScope,
+			"route v2 accepted duplicate expected targets");
+
+		auto extraScope = TestRouteCaptureScopeV2();
+		auto extraTarget =
+			extraScope.engineLookupCapture->targets.front();
+		extraTarget.targetId = "extra-target";
+		extraScope.engineLookupCapture->targets.push_back(
+			std::move(extraTarget));
+		SetExpectedEngineLookupTargetsForTesting(
+			*extraScope.engineLookupCapture);
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				extraScope,
+				error)
+				&& error == RoutePublicationError::kInvalidScope,
+			"route v2 accepted an extra expected target");
+
+		auto missingProvider = TestRouteCaptureScopeV2();
+		missingProvider.engineLookupExpectedTargets = nullptr;
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				missingProvider,
+				error)
+				&& error == RoutePublicationError::kInvalidScope,
+			"route v2 accepted a missing expected-target provider");
+
+		auto emptyProvider = TestRouteCaptureScopeV2();
+		g_expectedEngineLookupTargets.reset();
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				emptyProvider,
+				error)
+				&& error == RoutePublicationError::kInvalidScope,
+			"route v2 accepted an empty compiled target span");
+
+		auto notReadyScope = TestRouteCaptureScopeV2();
+		SetExpectedEngineLookupTargetsForTesting(
+			*notReadyScope.engineLookupCapture,
+			false);
+		Check(
+			!StockRuntimeRoutePublisher::Open(
+				tree.path,
+				producer,
+				runtime,
+				run,
+				notReadyScope,
+				error)
+				&& error == RoutePublicationError::kInvalidScope,
+			"route v2 accepted Ready=false");
+
+		error = RoutePublicationError::kNone;
+		Check(
+			OpenTestRoutePublisherV2(tree.path, error) != nullptr
+				&& error == RoutePublicationError::kNone,
+			"route v2 rejected the exact synthetic target set");
+	}
+
 	void TestRouteReceiptPublication()
 	{
+		TestRouteReceiptV2IdentityGuards();
 		TempTree tree("route-receipt");
 		g_routeRegistrySnapshot = {
 			true, 0, true, std::string(kEmptyRouteRegistrySha256)
@@ -2787,6 +3180,449 @@ namespace
 			std::scoped_lock lock(created.record->mutex);
 			created.record->bindReserved = true;
 		}
+
+		const auto testRouteReceiptV2EngineLookupPublication = [] {
+			TempTree tree("route-receipt-v2");
+			g_routeRegistrySnapshot = {
+				true, 0, true, std::string(kEmptyRouteRegistrySha256)
+			};
+			g_routeHooksReady = true;
+			RoutePublicationError error = RoutePublicationError::kNone;
+			auto publisher = OpenTestRoutePublisherV2(tree.path, error);
+			Check(
+				publisher && error == RoutePublicationError::kNone,
+				"route v2 publisher did not open");
+			auto admission =
+				publisher->BeginCreate(TestRouteCreateInputV2());
+			auto created = publisher->CompleteCreate(
+				std::move(admission), TestRouteCreateOutcome());
+			Check(
+				created.enqueued && created.record,
+				"route v2 create was not queued");
+			{
+				std::scoped_lock lock(created.record->mutex);
+				created.record->bindReserved = true;
+			}
+			auto bind = publisher->BeginBind();
+			Check(
+				publisher->RecordBind(
+					std::move(bind),
+					created.record,
+					RouteBindSnapshot{
+						"BSDFLightShader",
+						"ps",
+						0x01200202,
+						std::nullopt
+					}),
+				"route v2 bind was not recorded");
+			FrozenRouteSnapshot snapshot;
+			Check(
+				publisher->CloseCaptureAdmissionAndFreeze(
+					snapshot, true, error)
+					&& snapshot.records.size() == 1,
+				"route v2 capture did not freeze");
+			const auto& frozen = snapshot.records.front().observation;
+			Check(
+				frozen.captureAuthoritative
+					&& frozen.facts.engineLookupObserved
+					&& frozen.facts.engineLookupAuthoritative
+					&& frozen.engineLookupAuthorityReasons.empty(),
+				"route v2 direct engine fact was not authoritative");
+			const auto canonical =
+				BuildCanonicalRouteObservation(frozen);
+			Check(
+				canonical.find("\"schema_version\":2")
+						!= std::string::npos
+					&& canonical.find(
+						"\"engine_lookup_psid\":18874881")
+						!= std::string::npos
+					&& canonical.find(
+						"\"plugin_resolved_psid\":18874882")
+						!= std::string::npos
+					&& canonical.find(
+						"\"engine_lookup_authoritative\":true")
+						!= std::string::npos
+					&& canonical.find(
+						"\"engine_module\":\"Fallout4.exe\"")
+						!= std::string::npos
+					&& canonical.find(
+						"\"external_run_id\":\"sss-route-capture-ae\"")
+						!= std::string::npos
+					&& canonical.find(
+						"\"binary_byte_length\":123456")
+						!= std::string::npos
+					&& canonical.find(
+						"\"executable_byte_length\":55293864")
+						!= std::string::npos
+					&& canonical.find("observed_lookup_psid")
+						== std::string::npos
+					&& canonical.find("fxp_key")
+						== std::string::npos,
+				"route v2 lost direct engine identity");
+			const auto observation =
+				publisher->PublishObservation(
+					snapshot.records.front());
+			const auto manifest = publisher->FinalizeRun();
+			Check(
+				observation.success
+					&& manifest.success
+					&& manifest.document.schemaVersion == 2
+					&& manifest.document.captureAuthoritative,
+				"route v2 documents did not publish authoritatively");
+			const auto manifestJson =
+				ReadTextFile(manifest.document.path);
+			Check(
+				manifestJson.find(
+					"\"engine_lookup_authoritative_rows\":1")
+						!= std::string::npos
+					&& manifestJson.find(
+						"\"engine_lookup_missing_rows\":0")
+						!= std::string::npos,
+				"route v2 manifest lost engine lookup accounting");
+			Check(
+				manifestJson.find(
+						"\"enabled\":true,\"engine_lookup_targets\":[")
+							!= std::string::npos
+						&& manifestJson.find(
+							"}],\"included_stages\":[\"ps\"],"
+							"\"included_subclasses\":[\"*\"]")
+							!= std::string::npos,
+				"route v2 scope keys are not canonical");
+
+			TempTree duplicateTree(
+				"route-receipt-v2-duplicate-event");
+			auto duplicatePublisher =
+				OpenTestRoutePublisherV2(
+					duplicateTree.path, error);
+			for (int index = 0; index < 2; ++index) {
+				auto duplicateAdmission =
+					duplicatePublisher->BeginCreate(
+						TestRouteCreateInputV2());
+				auto duplicateCreated =
+					duplicatePublisher->CompleteCreate(
+						std::move(duplicateAdmission),
+						TestRouteCreateOutcome());
+				{
+					std::scoped_lock lock(
+						duplicateCreated.record->mutex);
+					duplicateCreated.record->bindReserved = true;
+				}
+				Check(
+					duplicatePublisher->RecordBind(
+						duplicatePublisher->BeginBind(),
+						duplicateCreated.record,
+						RouteBindSnapshot{
+							"BSDFLightShader",
+							"ps",
+							0x01200202,
+							std::nullopt
+						}),
+					"duplicate engine event bind failed");
+			}
+			FrozenRouteSnapshot duplicateSnapshot;
+			Check(
+				duplicatePublisher
+					->CloseCaptureAdmissionAndFreeze(
+						duplicateSnapshot, true, error)
+					&& duplicateSnapshot.records.size() == 2,
+				"duplicate engine event rows did not freeze");
+			for (const auto& row : duplicateSnapshot.records) {
+				Check(
+					duplicatePublisher
+						->PublishObservation(row).success,
+					"duplicate engine event row did not publish");
+			}
+			const auto duplicateManifest =
+				duplicatePublisher->FinalizeRun();
+			Check(
+				duplicateManifest.success
+					&& !duplicateManifest.document
+						.captureAuthoritative
+					&& ReadTextFile(
+						duplicateManifest.document.path)
+						.find("\"identity-duplicate\"")
+						!= std::string::npos,
+				"duplicate engine event rows remained authoritative");
+		};
+
+		const auto testRouteReceiptV2NeverDerivesEngineLookup = [] {
+			TempTree tree("route-receipt-v2-negative");
+			RoutePublicationError error = RoutePublicationError::kNone;
+			auto publisher = OpenTestRoutePublisherV2(tree.path, error);
+			Check(publisher != nullptr, "route v2 negative publisher failed");
+			auto admission =
+				publisher->BeginCreate(TestRouteCreateInput(true));
+			auto created = publisher->CompleteCreate(
+				std::move(admission), TestRouteCreateOutcome());
+			Check(created.record != nullptr, "route v2 missing row failed");
+			{
+				std::scoped_lock lock(created.record->mutex);
+				created.record->bindReserved = true;
+			}
+			Check(
+				publisher->RecordBind(
+					publisher->BeginBind(),
+					created.record,
+					RouteBindSnapshot{
+						"BSDFLightShader",
+						"ps",
+						0x01200202,
+						std::nullopt
+					}),
+				"route v2 missing row bind failed");
+			FrozenRouteSnapshot snapshot;
+			Check(
+				publisher->CloseCaptureAdmissionAndFreeze(
+					snapshot, true, error),
+				"route v2 missing row did not freeze");
+			const auto& observation =
+				snapshot.records.front().observation;
+			Check(
+				!observation.captureAuthoritative
+					&& !observation.facts.engineLookupObserved
+					&& !observation.facts.engineLookupAuthoritative
+					&& observation.engineLookupAuthorityReasons
+						== std::vector<std::string>{
+							"engine-lookup-missing" }
+					&& observation.authorityReasons
+						== std::vector<std::string>{
+							"engine-lookup-missing" },
+				"plugin diagnostic auto-attested an engine return");
+
+			TempTree unknownTree(
+				"route-receipt-v2-unknown-event");
+			auto unknownPublisher =
+				OpenTestRoutePublisherV2(
+					unknownTree.path, error);
+			auto unknownInput = TestRouteCreateInputV2();
+			unknownInput.engineLookup->targetId =
+				"unknown-printable-target";
+			auto unknownAdmission =
+				unknownPublisher->BeginCreate(unknownInput);
+			auto unknownCreated =
+				unknownPublisher->CompleteCreate(
+					std::move(unknownAdmission),
+					TestRouteCreateOutcome());
+			{
+				std::scoped_lock lock(
+					unknownCreated.record->mutex);
+				unknownCreated.record->bindReserved = true;
+			}
+			Check(
+				unknownPublisher->RecordBind(
+					unknownPublisher->BeginBind(),
+					unknownCreated.record,
+					RouteBindSnapshot{
+						"BSDFLightShader",
+						"ps",
+						0x01200202,
+						std::nullopt
+					}),
+				"unknown engine event bind failed");
+			FrozenRouteSnapshot unknownSnapshot;
+			Check(
+				unknownPublisher
+					->CloseCaptureAdmissionAndFreeze(
+						unknownSnapshot, true, error)
+					&& !unknownSnapshot.records.front()
+						.observation.captureAuthoritative
+					&& unknownSnapshot.records.front()
+						.observation
+						.engineLookupAuthorityReasons
+						== std::vector<std::string>{
+							"engine-lookup-missing" },
+				"unknown engine event became authoritative");
+
+			TempTree equalTree("route-receipt-v2-equal");
+			auto equalPublisher =
+				OpenTestRoutePublisherV2(equalTree.path, error);
+			auto equalAdmission = equalPublisher->BeginCreate(
+				TestRouteCreateInputV2(0x01200202));
+			auto equalCreated = equalPublisher->CompleteCreate(
+				std::move(equalAdmission), TestRouteCreateOutcome());
+			{
+				std::scoped_lock lock(equalCreated.record->mutex);
+				equalCreated.record->bindReserved = true;
+			}
+			Check(
+				equalPublisher->RecordBind(
+					equalPublisher->BeginBind(),
+					equalCreated.record,
+					RouteBindSnapshot{
+						"BSDFLightShader",
+						"ps",
+						0x01200202,
+						std::nullopt
+					}),
+				"equal route v2 bind failed");
+			FrozenRouteSnapshot equalSnapshot;
+			Check(
+				equalPublisher->CloseCaptureAdmissionAndFreeze(
+					equalSnapshot, true, error)
+					&& equalSnapshot.records.front()
+						.observation.facts
+						.engineLookupAuthoritative,
+				"equal direct and diagnostic values were rejected");
+
+			TempTree zeroTree("route-receipt-v2-zero");
+			auto zeroPublisher =
+				OpenTestRoutePublisherV2(zeroTree.path, error);
+			auto zeroAdmission = zeroPublisher->BeginCreate(
+				TestRouteCreateInputV2(0));
+			auto zeroCreated = zeroPublisher->CompleteCreate(
+				std::move(zeroAdmission), TestRouteCreateOutcome());
+			{
+				std::scoped_lock lock(zeroCreated.record->mutex);
+				zeroCreated.record->bindReserved = true;
+			}
+			Check(
+				zeroPublisher->RecordBind(
+					zeroPublisher->BeginBind(),
+					zeroCreated.record,
+					RouteBindSnapshot{
+						"BSDFLightShader",
+						"ps",
+						0x01200202,
+						std::nullopt
+					}),
+				"zero route v2 bind failed");
+			FrozenRouteSnapshot zeroSnapshot;
+			Check(
+				zeroPublisher->CloseCaptureAdmissionAndFreeze(
+					zeroSnapshot, true, error)
+					&& zeroSnapshot.records.front()
+						.observation.facts
+						.engineLookupAuthoritative,
+				"zero engine PSID was treated as a sentinel");
+
+			TempTree mismatchTree("route-receipt-v2-mismatch");
+			auto mismatchPublisher =
+				OpenTestRoutePublisherV2(
+					mismatchTree.path, error);
+			auto mismatchInput = TestRouteCreateInputV2();
+			mismatchInput.engineLookup->functionInput ^= 1;
+			auto mismatchAdmission =
+				mismatchPublisher->BeginCreate(mismatchInput);
+			auto mismatchCreated =
+				mismatchPublisher->CompleteCreate(
+					std::move(mismatchAdmission),
+					TestRouteCreateOutcome());
+			{
+				std::scoped_lock lock(
+					mismatchCreated.record->mutex);
+				mismatchCreated.record->bindReserved = true;
+			}
+			Check(
+				mismatchPublisher->RecordBind(
+					mismatchPublisher->BeginBind(),
+					mismatchCreated.record,
+					RouteBindSnapshot{
+						"BSDFLightShader",
+						"ps",
+						0x01200202,
+						std::nullopt
+					}),
+				"mismatched route v2 bind failed");
+			FrozenRouteSnapshot mismatchSnapshot;
+			Check(
+				mismatchPublisher
+					->CloseCaptureAdmissionAndFreeze(
+						mismatchSnapshot, true, error)
+					&& !mismatchSnapshot.records.front()
+						.observation.facts
+						.engineLookupAuthoritative
+					&& mismatchSnapshot.records.front()
+						.observation
+						.engineLookupAuthorityReasons
+						== std::vector<std::string>{
+							"engine-lookup-route-mismatch" },
+				"route v2 accepted a mismatched engine event");
+
+			const auto expectEventTamper = [&](
+				std::string_view a_name,
+				auto&& a_mutate) {
+				TempTree tamperTree(
+					"route-event-tamper-"
+					+ std::string(a_name));
+				auto tamperPublisher =
+					OpenTestRoutePublisherV2(
+						tamperTree.path, error);
+				auto tamperAdmission =
+					tamperPublisher->BeginCreate(
+						TestRouteCreateInputV2());
+				auto tamperCreated =
+					tamperPublisher->CompleteCreate(
+						std::move(tamperAdmission),
+						TestRouteCreateOutcome());
+				{
+					std::scoped_lock lock(
+						tamperCreated.record->mutex);
+					a_mutate(
+						tamperCreated.record->observation
+							.route.engineLookup->target);
+					tamperCreated.record->bindReserved = true;
+				}
+				Check(
+					tamperPublisher->RecordBind(
+						tamperPublisher->BeginBind(),
+						tamperCreated.record,
+						RouteBindSnapshot{
+							"BSDFLightShader",
+							"ps",
+							0x01200202,
+							std::nullopt
+						}),
+					"tampered route v2 bind failed");
+				FrozenRouteSnapshot tamperSnapshot;
+				Check(
+					tamperPublisher
+						->CloseCaptureAdmissionAndFreeze(
+							tamperSnapshot, true, error),
+					"tampered route v2 did not freeze");
+				const auto& tampered =
+					tamperSnapshot.records.front()
+						.observation;
+				Check(
+					!tampered.captureAuthoritative
+						&& !tampered.facts
+							.engineLookupAuthoritative
+						&& std::ranges::find(
+							tampered
+								.engineLookupAuthorityReasons,
+							"engine-lookup-target-mismatch")
+							!= tampered
+								.engineLookupAuthorityReasons.end()
+						&& std::ranges::find(
+							tampered
+								.engineLookupAuthorityReasons,
+							"engine-lookup-provenance-invalid")
+							!= tampered
+								.engineLookupAuthorityReasons.end(),
+					"tampered engine descriptor remained authoritative");
+			};
+			expectEventTamper(
+				"symbol",
+				[](auto& a_target) {
+					a_target.engineSymbol =
+						"OtherShaderMacros::GetPixelShaderID";
+				});
+			expectEventTamper(
+				"engine-range",
+				[](auto& a_target) {
+					a_target.engineCodeRange.byteLength =
+						std::numeric_limits<
+							std::uint64_t>::max();
+				});
+			expectEventTamper(
+				"observer-range",
+				[](auto& a_target) {
+					a_target.observerHook.codeRange.byteLength =
+						std::numeric_limits<
+							std::uint64_t>::max();
+				});
+		};
+		testRouteReceiptV2EngineLookupPublication();
+		testRouteReceiptV2NeverDerivesEngineLookup();
 		auto bindAdmission = publisher->BeginBind();
 		Check(
 			static_cast<bool>(bindAdmission),
@@ -3469,6 +4305,30 @@ namespace
 		return config;
 	}
 
+	DbConfig RouteCaptureRunConfigV2(
+		const std::filesystem::path& a_database,
+		const std::filesystem::path& a_artifacts,
+		const std::filesystem::path& a_routeRoot)
+	{
+		auto config = RouteCaptureRunConfig(
+			a_database, a_artifacts, a_routeRoot);
+		config.routeCapture.producer.binaryByteLength = 123456;
+		config.routeCapture.runtime.version = "1.11.221.0";
+		config.routeCapture.runtime.executableByteLength =
+			55293864;
+		config.routeCapture.scope = TestRouteCaptureScopeV2();
+		RunPolicy policy;
+		policy.externalRunId = "sss-route-capture-ae";
+		config.policyOverride = std::move(policy);
+		return config;
+	}
+
+	std::filesystem::path RouteManifestPath(
+		const std::filesystem::path& a_root);
+	std::string ReadRunManifest(
+		const std::filesystem::path& a_artifacts,
+		const std::string& a_runId);
+
 	void RecordRouteEvidence(CatalogDB& a_catalog)
 	{
 		auto admission =
@@ -3500,6 +4360,74 @@ namespace
 			"route bind was not recorded");
 	}
 
+	void RecordRouteEvidenceV2(CatalogDB& a_catalog)
+	{
+		auto admission =
+			a_catalog.BeginRouteCreate(TestRouteCreateInputV2());
+		Check(
+			static_cast<bool>(admission),
+			"route v2 create admission failed");
+		auto created = a_catalog.CompleteRouteCreate(
+			std::move(admission), TestRouteCreateOutcome());
+		Check(
+			created.enqueued && created.record,
+			"route v2 create was not queued");
+		{
+			std::scoped_lock lock(created.record->mutex);
+			created.record->bindReserved = true;
+		}
+		Check(
+			a_catalog.RecordRouteBind(
+				a_catalog.BeginRouteBind(),
+				created.record,
+				RouteBindSnapshot{
+					"BSDFLightShader",
+					"ps",
+					0x01200202,
+					std::nullopt
+				}),
+			"route v2 bind was not recorded");
+	}
+
+	void TestCatalogRouteV2Commitment()
+	{
+		RouteCaptureSeamScope seams;
+		TempTree tree("catalog-route-v2-commitment");
+		const auto database = tree.path / "catalog.sqlite";
+		const auto artifacts = tree.path / "artifacts";
+		const auto routeRoot = tree.path / "route";
+		std::filesystem::create_directory(artifacts);
+		std::filesystem::create_directory(routeRoot);
+		auto& catalog = CatalogDB::Get();
+		Check(
+			StartReady(
+				catalog,
+				RouteCaptureRunConfigV2(
+					database, artifacts, routeRoot)),
+			"catalog route v2 run did not start");
+		const auto runId = catalog.GetStats().generatedRunId;
+		RecordRouteEvidenceV2(catalog);
+		Check(catalog.Stop(), "catalog route v2 run did not stop");
+		const auto routePath = RouteManifestPath(routeRoot);
+		const auto routeSha = routePath.stem().string();
+		const auto routeJson = ReadTextFile(routePath);
+		const auto runJson = ReadRunManifest(artifacts, runId);
+		Check(
+			routeJson.find("\"schema_version\":2")
+					!= std::string::npos
+				&& routeJson.find(
+					"\"external_run_id\":\"sss-route-capture-ae\"")
+					!= std::string::npos
+				&& runJson.find(
+					"\"schema_version\":2,\"sha256\":\""
+					+ routeSha + "\"")
+					!= std::string::npos
+				&& runJson.find(
+					"\"external_run_id\":\"sss-route-capture-ae\"")
+					!= std::string::npos,
+			"catalog manifest lost its route v2 commitment");
+	}
+
 	std::map<std::filesystem::path, std::string> ReadRouteDocuments(
 		const std::filesystem::path& a_root)
 	{
@@ -3526,6 +4454,20 @@ namespace
 		for (const auto& entry :
 				std::filesystem::directory_iterator(directory))
 			return ReadTextFile(entry.path());
+		throw Failure("route manifest directory is empty");
+	}
+
+	std::filesystem::path RouteManifestPath(
+		const std::filesystem::path& a_root)
+	{
+		const auto directory = a_root / "manifests";
+		Check(
+			std::filesystem::exists(directory),
+			"route manifest was not published");
+		for (const auto& entry :
+				std::filesystem::directory_iterator(directory)) {
+			return entry.path();
+		}
 		throw Failure("route manifest directory is empty");
 	}
 
@@ -5450,6 +6392,27 @@ namespace
 			const auto runId = catalog.GetStats().generatedRunId;
 			RecordRouteEvidence(catalog);
 			Check(catalog.Stop(), "route publish baseline did not finalize");
+			const auto routeManifestPath =
+				RouteManifestPath(routeRoot);
+			const auto routeManifestSha =
+				routeManifestPath.stem().string();
+			const auto runManifest =
+				ReadRunManifest(artifacts, runId);
+			Check(
+				runManifest.find(
+					"\"route_capture\":{\"byte_length\":"
+					+ std::to_string(
+						std::filesystem::file_size(
+							routeManifestPath)))
+						!= std::string::npos
+					&& runManifest.find(
+						"\"capture_authoritative\":true")
+						!= std::string::npos
+					&& runManifest.find(
+						"\"sha256\":\""
+						+ routeManifestSha + "\"")
+						!= std::string::npos,
+				"catalog manifest did not commit route manifest bytes");
 			baselineAuthority = SqlInt(
 				database,
 				("SELECT authoritative FROM catalog_runs"
@@ -7202,6 +8165,10 @@ int main()
 	Run("per-run blob associations", &TestPerRunBlobAssociations, failures);
 	Run("injected blob path rejected", &TestInjectedBlobPathRejected, failures);
 	Run("route receipt publication", &TestRouteReceiptPublication, failures);
+	Run(
+		"catalog route v2 commitment",
+		&TestCatalogRouteV2Commitment,
+		failures);
 	Run(
 		"route finalize run veto",
 		&TestRouteFinalizeRunVeto,

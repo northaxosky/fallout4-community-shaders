@@ -6,11 +6,14 @@
 #include <imgui.h>
 #include <toml++/toml.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 
@@ -20,6 +23,7 @@
 #include "OrderlyExit.h"
 #include "PixelShaderTracker.h"
 #include "Plugin.h"
+#include "Render/EnginePixelShaderLookup.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
@@ -37,15 +41,28 @@ namespace cs::features
 
 	namespace
 	{
+		std::atomic<std::shared_ptr<
+			const catalog::RouteEngineLookupExpectedTargetsSnapshot>>
+				g_expectedEngineLookupTargets;
+
+		std::shared_ptr<
+			const catalog::RouteEngineLookupExpectedTargetsSnapshot>
+			ReadExpectedEngineLookupTargets() noexcept
+		{
+			return g_expectedEngineLookupTargets.load(
+				std::memory_order_acquire);
+		}
+
 		struct RuntimeVersion
 		{
 			std::uint16_t major = 0;
 			std::uint16_t minor = 0;
 			std::uint16_t build = 0;
+			std::uint16_t revision = 0;
 			bool          valid = false;
 		};
 
-		// Running Fallout4.exe file version (major.minor.build).
+		// Running Fallout4.exe file version.
 		RuntimeVersion GetRuntimeVersion()
 		{
 			RuntimeVersion v;
@@ -65,6 +82,7 @@ namespace cs::features
 			v.major = HIWORD(fi->dwFileVersionMS);
 			v.minor = LOWORD(fi->dwFileVersionMS);
 			v.build = HIWORD(fi->dwFileVersionLS);
+			v.revision = LOWORD(fi->dwFileVersionLS);
 			v.valid = true;
 			return v;
 		}
@@ -83,12 +101,19 @@ namespace cs::features
 			return "unknown";
 		}
 
-		// Exact "major.minor.build" for the catalog's engine_build_hash column; empty if unreadable.
+		// Exact four-part file version; empty if unreadable.
 		std::string RuntimeBuildString(const RuntimeVersion& v)
 		{
 			if (!v.valid) return {};
-			char buf[24];
-			std::snprintf(buf, sizeof(buf), "%u.%u.%u", v.major, v.minor, v.build);
+			char buf[32];
+			std::snprintf(
+				buf,
+				sizeof(buf),
+				"%u.%u.%u.%u",
+				v.major,
+				v.minor,
+				v.build,
+				v.revision);
 			return std::string(buf);
 		}
 
@@ -117,11 +142,19 @@ namespace cs::features
 		{
 			const auto setupHooks =
 				cs::engine::GetSetupTechniqueHookInstallStats();
+			const auto engineTargets =
+				cs::engine::
+					GetEnginePixelShaderLookupTargetDescriptors();
+			const auto engineHooks =
+				cs::engine::
+					GetEnginePixelShaderLookupInstallStats();
 			return catalog::CatalogDB::Get()
 					.GetStats().hookCoverageReady
 				&& setupHooks.attempted != 0
 				&& setupHooks.succeeded == setupHooks.attempted
-				&& setupHooks.failed == 0;
+				&& setupHooks.failed == 0
+				&& (engineTargets.empty()
+					|| engineHooks.Ready());
 		}
 
 		bool GetModulePath(
@@ -162,6 +195,8 @@ namespace cs::features
 			std::string& a_error)
 		{
 			a_config = {};
+			g_expectedEngineLookupTargets.store(
+				nullptr, std::memory_order_release);
 			a_config.requested =
 				a_settings.routeReceiptCapture;
 			if (!a_settings.routeReceiptCapture)
@@ -282,17 +317,106 @@ namespace cs::features
 			a_config.producer = {
 				"FO4CommunityShaders",
 				PluginVersionString(),
-				std::move(pluginSha256)
+				std::move(pluginSha256),
+				pluginLength
 			};
 			a_config.runtime = {
 				RuntimeLabel(a_runtimeVersion),
 				RuntimeBuildString(a_runtimeVersion),
-				std::move(executableSha256)
+				std::move(executableSha256),
+				executableLength
 			};
 			a_config.scope.createHook = std::move(createHook);
 			a_config.scope.bindHook = std::move(bindHook);
 			a_config.scope.pluginRuntimeResolver =
 				std::move(resolver);
+			const auto engineDescriptors =
+				cs::engine::
+					GetEnginePixelShaderLookupTargetDescriptors();
+			if (!engineDescriptors.empty()) {
+				catalog::RouteEngineLookupCaptureIdentity
+					engineLookup;
+				for (const auto& descriptor :
+					 engineDescriptors) {
+					const auto executableBase =
+						reinterpret_cast<std::uintptr_t>(
+							executable);
+					if (!descriptor.installed
+						|| descriptor.engineCodeByteLength == 0
+						|| descriptor.engineTargetAddress
+							< executableBase
+						|| descriptor.engineTargetAddress
+							- executableBase
+							> std::numeric_limits<
+								std::uint32_t>::max()) {
+						a_error =
+							"engine lookup target identity is invalid";
+						return false;
+					}
+					catalog::RouteCodeIdentity observer;
+					if (!catalog::ResolveRouteCodeIdentity(
+							pluginPath,
+							reinterpret_cast<std::uintptr_t>(
+								pluginModule),
+							descriptor.observerAddress,
+							"EnginePixelShaderLookup::thunk",
+							observer,
+							a_error)) {
+						return false;
+					}
+					engineLookup.targets.push_back({
+						.targetId = std::string(
+							cs::engine::
+								EnginePixelShaderLookupTargetName(
+									descriptor.target)),
+						.subclass =
+							std::string(descriptor.subclass),
+						.stage = "ps",
+						.engineModule = "Fallout4.exe",
+						.engineSymbol = std::string(
+							descriptor.engineSymbol),
+						.engineRva =
+							static_cast<std::uint32_t>(
+								descriptor.engineTargetAddress
+								- executableBase),
+						.engineCodeRange = {
+							static_cast<std::uint32_t>(
+								descriptor.engineTargetAddress
+								- executableBase),
+							descriptor.engineCodeByteLength
+						},
+						.runtimeRelease =
+							RuntimeLabel(a_runtimeVersion),
+						.runtimeVersion =
+							RuntimeBuildString(
+								a_runtimeVersion),
+						.observerHook = std::move(observer)
+					});
+				}
+				std::sort(
+					engineLookup.targets.begin(),
+					engineLookup.targets.end(),
+					[](const auto& a_left,
+					   const auto& a_right) {
+						return a_left.targetId
+							< a_right.targetId;
+					});
+				a_config.scope.engineLookupCapture =
+					engineLookup;
+				auto expected = std::make_shared<
+					catalog::
+						RouteEngineLookupExpectedTargetsSnapshot>();
+				expected->ready =
+					cs::engine::
+						GetEnginePixelShaderLookupInstallStats()
+							.Ready();
+				expected->capture = std::move(engineLookup);
+				g_expectedEngineLookupTargets.store(
+					std::move(expected),
+					std::memory_order_release);
+				a_config.scope.engineLookupExpectedTargets =
+					&ReadExpectedEngineLookupTargets;
+			}
 			a_config.scope.resolverRegistryOpen =
 				ReadRouteResolverRegistry();
 			a_config.scope.resolverRegistrySnapshot =
@@ -709,6 +833,11 @@ namespace cs::features
 		const auto capture =
 			catalog::route_capture::Coordinator::Get()
 				.TelemetrySnapshot();
+		const auto engineHooks =
+			cs::engine::GetEnginePixelShaderLookupInstallStats();
+		const auto engineLookup =
+			cs::engine::
+				SnapshotEnginePixelShaderLookupTelemetry();
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("hooks", HooksInstalled())
@@ -735,6 +864,64 @@ namespace cs::features
 			.Field("raw_export_complete", stats.rawExportComplete)
 			.Field("writer_drained", stats.writerDrained)
 			.Field("hook_coverage_ready", stats.hookCoverageReady)
+			.Field(
+				"engine_lookup_hook_ready",
+				engineHooks.Ready())
+			.Field(
+				"engine_lookup_hook_targets_attempted",
+				static_cast<std::int64_t>(
+					engineHooks.attempted))
+			.Field(
+				"engine_lookup_hook_targets_succeeded",
+				static_cast<std::int64_t>(
+					engineHooks.succeeded))
+			.Field(
+				"engine_lookup_hook_targets_failed",
+				static_cast<std::int64_t>(
+					engineHooks.failed))
+			.Field(
+				"engine_lookup_returns_seen",
+				static_cast<std::int64_t>(
+					engineLookup.returnsSeen))
+			.Field(
+				"engine_lookup_returns_scoped",
+				static_cast<std::int64_t>(
+					engineLookup.returnsScoped))
+			.Field(
+				"engine_lookup_returns_captured",
+				static_cast<std::int64_t>(
+					engineLookup.returnsCaptured))
+			.Field(
+				"engine_lookup_returns_consumed",
+				static_cast<std::int64_t>(
+					engineLookup.returnsConsumed))
+			.Field(
+				"engine_lookup_discarded_out_of_scope",
+				static_cast<std::int64_t>(
+					engineLookup.discardedOutOfScope))
+			.Field(
+				"engine_lookup_discarded_subclass_mismatch",
+				static_cast<std::int64_t>(
+					engineLookup
+						.discardedSubclassMismatch))
+			.Field(
+				"engine_lookup_discarded_technique_mismatch",
+				static_cast<std::int64_t>(
+					engineLookup
+						.discardedTechniqueMismatch))
+			.Field(
+				"engine_lookup_discarded_duplicate",
+				static_cast<std::int64_t>(
+					engineLookup.discardedDuplicate))
+			.Field(
+				"engine_lookup_discarded_without_create",
+				static_cast<std::int64_t>(
+					engineLookup.discardedWithoutCreate))
+			.Field(
+				"engine_lookup_relationships_ok",
+				cs::engine::
+					EnginePixelShaderLookupRelationshipsHold(
+						engineLookup))
 			.Field(
 				"orderly_finalizer_ready",
 				stats.orderlyFinalizerReady)
