@@ -6,23 +6,10 @@
 
 namespace cs
 {
-	enum class FeatureCapability
-	{
-		kPixelShaderSwapBroker
-	};
-
 	enum class EnbPolicy
 	{
 		kRunAnyway,
 		kDeactivate
-	};
-
-	struct FeatureRequirement
-	{
-		std::string_view provider;
-		FeatureCapability capability;
-
-		bool operator==(const FeatureRequirement&) const = default;
 	};
 
 	enum class FeatureRuntimeState

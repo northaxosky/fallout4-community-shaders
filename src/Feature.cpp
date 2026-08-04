@@ -9,185 +9,15 @@
 
 #include <algorithm>
 #include <cctype>
-#include <cstddef>
 #include <exception>
-#include <functional>
-#include <limits>
-#include <queue>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
 namespace
 {
 	auto* L = cs::log::Get("cs");
-	constexpr auto kUnvisited = std::numeric_limits<std::size_t>::max();
-
-	std::string ToString(std::string_view a_value)
-	{
-		return { a_value.data(), a_value.size() };
-	}
-
-	std::string_view CapabilityName(cs::FeatureCapability a_capability)
-	{
-		switch (a_capability) {
-		case cs::FeatureCapability::kPixelShaderSwapBroker:
-			return "pixel-shader swap broker";
-		}
-		return "unknown capability";
-	}
-
-	void LogCycle(const std::vector<std::size_t>& a_component, const std::vector<cs::Feature*>& a_features)
-	{
-		std::string names;
-		for (const auto featureIdx : a_component) {
-			if (!names.empty()) {
-				names += ", ";
-			}
-			const auto name = a_features[featureIdx]->GetName();
-			names.append(name.data(), name.size());
-		}
-		L->error("Feature requirement cycle detected involving: {}", names);
-	}
-
-	void ReportRequirementCycles(
-		const std::vector<std::vector<std::size_t>>& a_adjacency,
-		const std::vector<cs::Feature*>& a_features)
-	{
-		const auto count = a_features.size();
-		std::vector<std::size_t> index(count, kUnvisited);
-		std::vector<std::size_t> lowlink(count, 0);
-		std::vector<std::size_t> stack;
-		std::vector<bool> onStack(count, false);
-		std::size_t nextIndex = 0;
-
-		auto strongConnect = [&](auto&& a_self, std::size_t a_node) -> void {
-			index[a_node] = nextIndex;
-			lowlink[a_node] = nextIndex;
-			++nextIndex;
-			stack.push_back(a_node);
-			onStack[a_node] = true;
-
-			for (const auto dependent : a_adjacency[a_node]) {
-				if (index[dependent] == kUnvisited) {
-					a_self(a_self, dependent);
-					lowlink[a_node] = std::min(lowlink[a_node], lowlink[dependent]);
-				} else if (onStack[dependent]) {
-					lowlink[a_node] = std::min(lowlink[a_node], index[dependent]);
-				}
-			}
-
-			if (lowlink[a_node] != index[a_node]) {
-				return;
-			}
-
-			std::vector<std::size_t> component;
-			while (!stack.empty()) {
-				const auto member = stack.back();
-				stack.pop_back();
-				onStack[member] = false;
-				component.push_back(member);
-				if (member == a_node) {
-					break;
-				}
-			}
-
-			bool cyclic = component.size() > 1;
-			if (!cyclic) {
-				const auto node = component.front();
-				cyclic = std::find(a_adjacency[node].begin(), a_adjacency[node].end(), node) != a_adjacency[node].end();
-			}
-			if (cyclic) {
-				std::sort(component.begin(), component.end());
-				LogCycle(component, a_features);
-			}
-		};
-
-		for (std::size_t i = 0; i < count; ++i) {
-			if (index[i] == kUnvisited) {
-				strongConnect(strongConnect, i);
-			}
-		}
-	}
-
-	std::vector<cs::Feature*> SortFeaturesByRequirements(const std::vector<cs::Feature*>& a_features)
-	{
-		const auto count = a_features.size();
-		std::unordered_map<std::string_view, std::size_t> indexByName;
-		indexByName.reserve(count);
-		for (std::size_t i = 0; i < count; ++i) {
-			const auto [it, inserted] = indexByName.emplace(a_features[i]->GetName(), i);
-			if (!inserted) {
-				L->warn("Feature {} is registered more than once; requirement order may be unstable", it->first);
-			}
-		}
-
-		std::vector<std::vector<std::size_t>> adjacency(count);
-		std::vector<std::size_t> indegree(count, 0);
-		for (std::size_t featureIdx = 0; featureIdx < count; ++featureIdx) {
-			std::unordered_set<std::size_t> seenProviders;
-			std::unordered_set<std::string_view> seenMissingProviders;
-			for (const auto& requirement : a_features[featureIdx]->GetRequirements()) {
-				const auto providerIt = indexByName.find(requirement.provider);
-				if (providerIt == indexByName.end()) {
-					if (seenMissingProviders.insert(requirement.provider).second) {
-						L->warn(
-							"Feature {} requires capability '{}' from unregistered provider {}; activation order may be incomplete",
-							a_features[featureIdx]->GetName(),
-							CapabilityName(requirement.capability),
-							requirement.provider);
-					}
-					continue;
-				}
-
-				const auto providerIdx = providerIt->second;
-				if (!seenProviders.insert(providerIdx).second) {
-					continue;
-				}
-				adjacency[providerIdx].push_back(featureIdx);
-				++indegree[featureIdx];
-			}
-		}
-
-		std::priority_queue<std::size_t, std::vector<std::size_t>, std::greater<std::size_t>> ready;
-		for (std::size_t i = 0; i < count; ++i) {
-			if (indegree[i] == 0) {
-				ready.push(i);
-			}
-		}
-
-		std::vector<cs::Feature*> sorted;
-		sorted.reserve(count);
-		while (!ready.empty()) {
-			const auto featureIdx = ready.top();
-			ready.pop();
-			sorted.push_back(a_features[featureIdx]);
-
-			for (const auto dependent : adjacency[featureIdx]) {
-				--indegree[dependent];
-				if (indegree[dependent] == 0) {
-					ready.push(dependent);
-				}
-			}
-		}
-
-		if (sorted.size() != count) {
-			ReportRequirementCycles(adjacency, a_features);
-			// Return only features with a safe requirement order.
-			std::unordered_set<const cs::Feature*> orderable(sorted.begin(), sorted.end());
-			for (auto* feature : a_features) {
-				if (orderable.find(feature) == orderable.end()) {
-					L->error("Feature {} excluded from activation: part of or downstream of a requirement cycle",
-						feature->GetName());
-				}
-			}
-			return sorted;
-		}
-
-		return sorted;
-	}
 
 	template <class Callback>
 	void DispatchRuntimeCallbacks(
@@ -281,52 +111,9 @@ namespace cs
 		_registeredFeatures.push_back(a_feature);
 	}
 
-	std::optional<std::string> FeatureManager::FindRequirementFailure(const Feature& a_feature) const
+	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view /*a_phase*/) noexcept
 	{
-		for (const auto& requirement : a_feature.GetRequirements()) {
-			const auto providerIt = std::find_if(
-				_registeredFeatures.begin(),
-				_registeredFeatures.end(),
-				[provider = requirement.provider](const Feature* a_provider) {
-					return a_provider->GetName() == provider;
-				});
-			const auto capability = CapabilityName(requirement.capability);
-			if (providerIt == _registeredFeatures.end()) {
-				return "Required provider '" + ToString(requirement.provider)
-					+ "' for capability '" + ToString(capability) + "' is not registered";
-			}
-
-			const auto* provider = *providerIt;
-			if (!provider->IsHealthy()) {
-				return "Required provider '" + ToString(requirement.provider)
-					+ "' is not healthy-active for capability '" + ToString(capability) + "'";
-			}
-			if (!provider->HasCapability(requirement.capability)) {
-				return "Required provider '" + ToString(requirement.provider)
-					+ "' does not provide capability '" + ToString(capability) + "'";
-			}
-		}
-		return std::nullopt;
-	}
-
-	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept
-	{
-		if (!a_feature.IsHealthy()) {
-			return false;
-		}
-
-		try {
-			if (auto failure = FindRequirementFailure(a_feature)) {
-				QuarantineRuntimeCallback(a_feature, a_phase, *failure);
-				return false;
-			}
-			return true;
-		} catch (const std::exception& e) {
-			QuarantineRuntimeCallback(a_feature, a_phase, e.what());
-		} catch (...) {
-			QuarantineRuntimeCallback(a_feature, a_phase, "requirement validation threw a non-standard exception");
-		}
-		return false;
+		return a_feature.IsHealthy();
 	}
 
 	bool FeatureManager::PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept
@@ -335,7 +122,6 @@ namespace cs
 		if (!state.installed) {
 			return false;
 		}
-		// Active features get the full requirement revalidation (and may be quarantined).
 		if (a_feature.IsHealthy()) {
 			return PrepareRuntimeCallback(a_feature, a_phase);
 		}
@@ -396,13 +182,9 @@ namespace cs
 	void FeatureManager::PrepareAll()
 	{
 		_loadedFeatures.clear();
-		_activationOrder.clear();
 		for (auto* feature : _registeredFeatures) {
 			feature->SetState({});
 		}
-
-		_activationOrder = SortFeaturesByRequirements(_registeredFeatures);
-		const std::unordered_set<const Feature*> orderedSet(_activationOrder.begin(), _activationOrder.end());
 
 		const auto configRoot = feature_config::GetMergedRoot();
 		const auto* features = configRoot["features"].as_table();
@@ -493,39 +275,13 @@ namespace cs
 			}
 		}
 
-		for (auto* feature : _registeredFeatures) {
-			if (orderedSet.contains(feature)
-				|| feature->GetState().runtimeState == FeatureRuntimeState::kFailed
-				|| !feature->GetState().desiredActive) {
-				continue;
-			}
-
-			feature->SetRuntimeState(FeatureRuntimeState::kFailed, "Feature requirement order could not be resolved");
-		}
 	}
 
 	void FeatureManager::ActivateAll()
 	{
 		_loadedFeatures.clear();
 
-		const auto failPendingRequirementValidation = [](Feature& a_feature, std::string_view a_reason) noexcept {
-			a_feature.SetRuntimeStateOnly(FeatureRuntimeState::kFailed);
-			try {
-				const auto reason = a_reason.empty() ? std::string_view("standard exception") : a_reason.substr(0, 256);
-				std::string detail = "ActivateAll requirement validation threw: ";
-				detail.append(reason);
-				a_feature.SetRuntimeState(FeatureRuntimeState::kFailed, std::move(detail));
-			} catch (...) {
-				try {
-					a_feature.SetRuntimeState(
-						FeatureRuntimeState::kFailed,
-						"ActivateAll requirement validation failed");
-				} catch (...) {
-				}
-			}
-		};
-
-		for (auto* feature : _activationOrder) {
+		for (auto* feature : _registeredFeatures) {
 			const auto& state = feature->GetState();
 			if (state.runtimeState == FeatureRuntimeState::kFailed
 				|| state.runtimeState == FeatureRuntimeState::kDegraded) {
@@ -542,37 +298,6 @@ namespace cs
 			const bool wasActive = state.runtimeState == FeatureRuntimeState::kActive;
 			if (!state.desiredActive
 				|| (!wasActive && state.runtimeState != FeatureRuntimeState::kPending)) {
-				continue;
-			}
-
-			std::optional<std::string> requirementFailure;
-			try {
-				requirementFailure = FindRequirementFailure(*feature);
-			} catch (const std::exception& e) {
-				if (wasActive) {
-					QuarantineRuntimeCallback(*feature, "ActivateAll requirement validation", e.what());
-				} else {
-					failPendingRequirementValidation(*feature, e.what());
-				}
-				continue;
-			} catch (...) {
-				if (wasActive) {
-					QuarantineRuntimeCallback(
-						*feature,
-						"ActivateAll requirement validation",
-						"non-standard exception");
-				} else {
-					failPendingRequirementValidation(*feature, "non-standard exception");
-				}
-				continue;
-			}
-			if (requirementFailure) {
-				if (wasActive) {
-					QuarantineRuntimeCallback(*feature, "ActivateAll", *requirementFailure);
-				} else {
-					L->error("Feature {} requirement failed: {}; skipping", feature->GetName(), *requirementFailure);
-					feature->SetRuntimeState(FeatureRuntimeState::kFailed, *requirementFailure);
-				}
 				continue;
 			}
 

@@ -54,21 +54,10 @@ hooking the DirectX renderer directly.
 | **Frame Generation** | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop. |
 | **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
+| **Wetness Effects** | Injects wetness shading into the deferred lighting pipeline. |
 | **Imagespace** | Tonemapping, exposure, bloom, 32³ LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles. |
 | **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
 | **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |
-
-<details>
-<summary><b>Developer tools</b></summary>
-
-<br>
-
-| Feature | Implementation |
-|---|---|
-| **Shader Catalog** | Records per-run D3D11 shader creation provenance to SQLite and a canonical importer manifest. Creation is not execution evidence. |
-| **Shader Replacement** | Replaces selected pixel shaders with reconstructed HLSL for validation. |
-
-</details>
 
 ---
 
@@ -137,8 +126,7 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 
 - **Frame generation** requires a D3D12 feature-level 12.0 device and the runtime files for the
   selected backend; backend availability depends on the device and SDK. Changing the FG backend
-  or multiplier requires a restart. RenderDoc, Shader Catalog, and Shader Replacement also
-  initialize at startup.
+  or multiplier requires a restart. RenderDoc also initializes at startup.
 - **ENB** handling is feature-specific: Imagespace yields to ENB unless explicitly forced,
   Upscaling is limited to Native AA, DLSS-G is not used under ENB, and frame generation may fall
   back to FSR3-FG when that runtime is available.
@@ -147,13 +135,6 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   DLSS-G for that session.
 - A successful build or launch does **not** prove a rendering path is visually correct - in-game
   validation is still required.
-- Shader Catalog creation success does **not** prove shader binding or execution. RenderDoc is
-  still required for executed-event evidence. Optional raw DXBC export requires an absolute,
-  caller-owned `FO4_SHADER_CORPUS_ROOT`; an empty value is invalid. Authoritative runs also
-  require complete D3D11 hook coverage, a validated orderly `ExitProcess` finalizer, and
-  lossless final publication. Crashes and forced termination are recovered as abandoned. See
-  `features/ShaderCatalog/SPEC.md`.
-
 ---
 
 ## License

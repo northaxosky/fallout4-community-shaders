@@ -1,10 +1,10 @@
 # `shaders/lighting/`
 
-Reconstructed HLSL reference for FO4's deferred lighting pipeline.
+Reconstructed HLSL for FO4's deferred lighting pipeline.
 
-This directory is a **reference**, not a runtime asset. Files here are
-readable reconstructions of Bethesda's precompiled `.fxp` shaders
-intended to inform feature implementations elsewhere in the repo.
+This directory is **live product content**. `src/Render/ShaderInjection.cpp`
+compiles these readable reconstructions of Bethesda's precompiled `.fxp`
+shaders and injects registered permutations at runtime.
 
 ## Status
 
@@ -111,38 +111,42 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 ## Workflow
 
 Game-bytecode extraction, reconstruction evidence, and executable comparison
-live in `northaxosky/fallout4-re`. This repository consumes the published
-`scripts/shaders/shader-fidelity-conformance.json` artifact and does not carry
-the corpus or RE tools.
+live in `northaxosky/fallout4-re`. This repository retains a consumer-local
+pinned `scripts/shaders/shader-fidelity-conformance.json` from the last valid
+attestation and does not carry the corpus or RE tools.
 
-`ShaderRoundtrip` validates the eight producer-proven variants against that
-manifest. `ShaderCompile` also compiles the three shipping permutations without
+`ShaderRoundtrip` validates the eight pinned variants against that manifest.
+`ShaderCompile` also compiles the three shipping permutations without
 native fidelity evidence: deferred composite and the two Screen Space Shadows
 directional variants. Replacing three machine-specific exec-diff tests with
 these clean-clone gates strengthens the suite: conformance is no longer
-self-rebaselinable, while every shipping lighting permutation still receives
-compile coverage.
+self-rebaselinable, while those registered variants still receive compile
+coverage.
 
-The manifest is producer output and must never be hand-edited. After an
-intentional shader change, leave `ShaderRoundtrip` failing until
-`fallout4-re` reruns conformance and republishes the artifact:
+The consumer-local manifest must never be hand-edited. The producer deleted
+its conformance artifact in `fallout4-re` commit `fdddc41a`, and publication
+of conformance, `native-shader-targets.json`, and
+`shader-exec-contracts.json` is suspended until a new authoritative
+all-target execution proof passes. `ShaderRoundtrip` therefore remains a
+pinned-hash regression gate: it proves that shipping HLSL still compiles to
+the bytes produced when the attestation was last valid, not current
+producer-attested fidelity.
 
-```powershell
-Set-Location <fallout4-re-checkout>
-python -m harness.shader_corpus fidelity publish-conformance `
-  --manifest .shader-cache/exec-diff-run/shader-exec-diff-run.json `
-  --contracts harness/shaders/shader-exec-contracts.json `
-  --native-manifest harness/shaders/native-shader-targets.json `
-  --archive "<Fallout 4 Data>/Fallout4 - Shaders.ba2" `
-  --corpus-dir .shader-cache/corpus `
-  --source-root <fallout4-community-shaders-checkout> `
-  --output harness/shaders/shader-fidelity-conformance.json
-Copy-Item harness/shaders/shader-fidelity-conformance.json `
-  <fallout4-community-shaders-checkout>/scripts/shaders/shader-fidelity-conformance.json
-```
+## Permutation coverage
 
-Copy the generated JSON byte-for-byte, review its source and evidence hashes,
-then rerun `ShaderRoundtrip`.
+FO4's Light raw-technique rules span about 20 macro axes, including `SHADOW`,
+`SPECULAR`, `ATTENUATION_ONLY`, `OVERDRAW`, `GOBOPROJECTION`, `HALFOMNI`,
+`IGNOREROUGHNESS`, `IGNORERIM`, `AMBIENT`, `SHADOW_ONLY`, `BLENDSPLIT`,
+`CHARACTER_LIGHT`, the exclusive PCF1→PCF9→POISSON→PCSS→PCSSPOISSON filter
+chain, and three-way `DIRSPLITS`. They produce 166 distinct Light blobs and 78
+Composite blobs on AE. The reconstructed
+`bsdf_light_deferred.hlsl` currently models only `LIGHT_TYPE` and
+`AMBIENT_IBL_IN_LIGHT`; `src/Render/ShaderInjection.cpp` registers only
+`LIGHT_TYPE=1`, `LIGHT_TYPE=2`, and `LIGHT_TYPE=1` with
+`AMBIENT_IBL_IN_LIGHT=1`, while `LIGHT_TYPE_SPOT` remains a stub. An injected
+wetness, SSGI, or SSS effect therefore appears only when the engine draws
+through a built permutation; stock shaders run on every other permutation,
+and the injected effect silently disappears.
 
 ## Why these shaders
 

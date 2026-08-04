@@ -18,7 +18,6 @@
       "name": "spdlog",
       "features": [ "wchar" ]
     },
-    "sqlite3",
     "tomlplusplus",
     {
       "name": "tracy",
@@ -51,10 +50,6 @@
     {
       "name": "spdlog",
       "version-semver": "1.17.0"
-    },
-    {
-      "name": "sqlite3",
-      "version": "3.52.0"
     },
     {
       "name": "tomlplusplus",

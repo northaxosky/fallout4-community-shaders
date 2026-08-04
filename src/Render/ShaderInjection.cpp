@@ -199,7 +199,7 @@ namespace cs::engine
 		constexpr auto kDefaultShaderRoot =
 			L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders";
 		constexpr std::string_view kDeveloperForceOnContributor =
-			"ShaderReplacement.DeveloperForceOn";
+			"ShaderInjection.DeveloperForceOn";
 
 		auto* L = cs::log::Get("cs.render.shaderinjection");
 

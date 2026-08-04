@@ -240,7 +240,7 @@ int main()
 			&& developerExclusivePreview.suppressedContributors == 1
 			&& developerExclusivePreview.suppressedContributorNames
 				== std::vector<std::string>{
-					"ShaderReplacement.DeveloperForceOn" },
+					"ShaderInjection.DeveloperForceOn" },
 		"exclusive DXBC patch did not retain the developer force-on suppression");
 	std::byte shaderToken{};
 	std::byte contextToken{};
@@ -269,7 +269,7 @@ int main()
 		developerSuppressedSnapshot.suppressedContributors == 1
 			&& developerSuppressedSnapshot.suppressedContributorNames
 				== std::vector<std::string>{
-					"ShaderReplacement.DeveloperForceOn" }
+					"ShaderInjection.DeveloperForceOn" }
 			&& developerSuppressedSummary.suppressedContributors == 1,
 		"developer force-on suppression was absent from status or summary");
 	ok &= Check(

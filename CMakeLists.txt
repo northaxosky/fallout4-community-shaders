@@ -17,10 +17,6 @@ set(Boost_USE_STATIC_RUNTIME ON)
 
 option(TRACY_SUPPORT "Enable Tracy profiler instrumentation" OFF)
 option(FO4CS_HOST_TESTS_ONLY "Configure host tests without the plugin target" OFF)
-set_source_files_properties(
-	features/ShaderCatalog/src/OrderlyExit.cpp
-	PROPERTIES SKIP_PRECOMPILE_HEADERS ON
-)
 
 file(STRINGS "${CMAKE_SOURCE_DIR}/version.txt" FO4CS_VERSION LIMIT_COUNT 1)
 string(STRIP "${FO4CS_VERSION}" FO4CS_VERSION)
@@ -72,7 +68,6 @@ find_package(directx-headers CONFIG REQUIRED)
 find_package(directxmath CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
-find_package(unofficial-sqlite3 CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
 set(FO4CS_NLOHMANN_JSON_INCLUDE_DIR
@@ -146,7 +141,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	endif()
 
 	# Features attach their own sources to FO4CommunityShaders via target_sources.
-	# Lifecycle dependencies are declared through cs::Feature::GetDependencies().
+	# Registration order is lifecycle order.
 	register_feature(MotionVectorFixes)
 	register_feature(Upscaling)
 	register_feature(FrameGeneration)
@@ -156,8 +151,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(ScreenSpaceShadows)
 	register_feature(ScreenSpaceGI)
 	register_feature(WetnessEffects)
-	register_feature(ShaderCatalog)
-	register_feature(ShaderReplacement)
 endif()
 
 enable_testing()
@@ -298,115 +291,6 @@ target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
 add_test(NAME LogThrottle COMMAND LogThrottleTests)
 set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
-# Host-only offline consumer for the producer-published strict-v2 Composite ambient artifact.
-# It is deliberately outside every FO4CS_HOST_TESTS_ONLY branch and never links into the plugin.
-set(FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES
-	offline/BsdfCompositeAmbientDxbcPatch/Artifact.cpp
-	offline/BsdfCompositeAmbientDxbcPatch/Artifact.h
-	offline/BsdfCompositeAmbientDxbcPatch/ArtifactInternal.h
-	offline/BsdfCompositeAmbientDxbcPatch/CanonicalJson.cpp
-	offline/BsdfCompositeAmbientDxbcPatch/CanonicalJson.h
-	offline/BsdfCompositeAmbientDxbcPatch/ContractPins.h
-	offline/BsdfCompositeAmbientDxbcPatch/SemanticValidation.cpp
-	offline/BsdfCompositeAmbientDxbcPatch/Sha256.cpp
-	offline/BsdfCompositeAmbientDxbcPatch/Sha256.h
-)
-add_library(BsdfCompositeAmbientDxbcPatchOffline STATIC
-	${FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES}
-)
-configure_host_test(BsdfCompositeAmbientDxbcPatchOffline)
-set_property(TARGET BsdfCompositeAmbientDxbcPatchOffline PROPERTY INCLUDE_DIRECTORIES "")
-target_include_directories(BsdfCompositeAmbientDxbcPatchOffline PUBLIC
-	"${CMAKE_SOURCE_DIR}/offline/BsdfCompositeAmbientDxbcPatch"
-)
-target_link_libraries(BsdfCompositeAmbientDxbcPatchOffline PRIVATE bcrypt.lib)
-
-add_executable(BsdfCompositeAmbientDxbcPatchTests
-	tests/BsdfCompositeAmbientDxbcPatchTests.cpp
-)
-configure_host_test(BsdfCompositeAmbientDxbcPatchTests)
-target_link_libraries(BsdfCompositeAmbientDxbcPatchTests PRIVATE
-	BsdfCompositeAmbientDxbcPatchOffline
-)
-
-add_test(
-	NAME BsdfCompositeAmbientDxbcPatch
-	COMMAND BsdfCompositeAmbientDxbcPatchTests
-		"${CMAKE_SOURCE_DIR}/scripts/shaders/offline/bsdf-composite-ambient-dxbc-patch-plans.json"
-)
-set_tests_properties(BsdfCompositeAmbientDxbcPatch PROPERTIES
-	LABELS "shader;offline;unit"
-	TIMEOUT 300
-)
-
-# Hard configure-time isolation: no offline source, link, or target may reach the plugin.
-function(fo4cs_relative_sources OUTPUT TARGET_NAME)
-	get_target_property(_source_dir ${TARGET_NAME} SOURCE_DIR)
-	get_target_property(_sources ${TARGET_NAME} SOURCES)
-	set(_relative "")
-	foreach(_source IN LISTS _sources)
-		if(NOT IS_ABSOLUTE "${_source}")
-			set(_source "${_source_dir}/${_source}")
-		endif()
-		file(RELATIVE_PATH _source "${CMAKE_SOURCE_DIR}" "${_source}")
-		string(REPLACE "\\" "/" _source "${_source}")
-		list(APPEND _relative "${_source}")
-	endforeach()
-	list(SORT _relative)
-	set(${OUTPUT} "${_relative}" PARENT_SCOPE)
-endfunction()
-
-get_target_property(_offline_type BsdfCompositeAmbientDxbcPatchOffline TYPE)
-if(NOT _offline_type STREQUAL "STATIC_LIBRARY")
-	message(FATAL_ERROR "BsdfCompositeAmbientDxbcPatchOffline must stay a host-only static library")
-endif()
-
-fo4cs_relative_sources(_offline_sources BsdfCompositeAmbientDxbcPatchOffline)
-set(_offline_allowed ${FO4CS_BSDF_COMPOSITE_OFFLINE_SOURCES})
-list(SORT _offline_allowed)
-if(NOT _offline_sources STREQUAL _offline_allowed)
-	message(FATAL_ERROR
-		"BsdfCompositeAmbientDxbcPatchOffline sources left the allow-list: ${_offline_sources}")
-endif()
-
-get_target_property(_offline_includes BsdfCompositeAmbientDxbcPatchOffline INCLUDE_DIRECTORIES)
-list(FILTER _offline_includes EXCLUDE REGEX "^$")
-set(_offline_includes_allowed
-	"${CMAKE_SOURCE_DIR}/offline/BsdfCompositeAmbientDxbcPatch"
-)
-if(NOT _offline_includes STREQUAL _offline_includes_allowed)
-	message(FATAL_ERROR
-		"BsdfCompositeAmbientDxbcPatchOffline includes left the allow-list: ${_offline_includes}")
-endif()
-
-get_target_property(_offline_links BsdfCompositeAmbientDxbcPatchOffline LINK_LIBRARIES)
-if(NOT _offline_links STREQUAL "bcrypt.lib")
-	message(FATAL_ERROR
-		"BsdfCompositeAmbientDxbcPatchOffline links left the allow-list: ${_offline_links}")
-endif()
-
-get_target_property(_offline_test_links BsdfCompositeAmbientDxbcPatchTests LINK_LIBRARIES)
-if(NOT _offline_test_links STREQUAL "BsdfCompositeAmbientDxbcPatchOffline")
-	message(FATAL_ERROR
-		"BsdfCompositeAmbientDxbcPatchTests links left the allow-list: ${_offline_test_links}")
-endif()
-
-if(TARGET FO4CommunityShaders)
-	get_target_property(_plugin_sources FO4CommunityShaders SOURCES)
-	foreach(_source IN LISTS _plugin_sources)
-		string(REPLACE "\\" "/" _source "${_source}")
-		if(_source MATCHES "offline/BsdfCompositeAmbientDxbcPatch")
-			message(FATAL_ERROR "FO4CommunityShaders must not compile an offline consumer source")
-		endif()
-	endforeach()
-	get_target_property(_plugin_links FO4CommunityShaders LINK_LIBRARIES)
-	foreach(_link IN LISTS _plugin_links)
-		if(_link MATCHES "BsdfCompositeAmbientDxbcPatch")
-			message(FATAL_ERROR "FO4CommunityShaders must not link the offline consumer")
-		endif()
-	endforeach()
-endif()
-
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ProjectionMathTests
 		tests/ProjectionMathTests.cpp
@@ -443,40 +327,6 @@ add_test(
 		"${CMAKE_SOURCE_DIR}/shaders/lighting"
 )
 set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
-
-add_executable(ShaderCatalogTests
-	tests/ShaderCatalogTests.cpp
-	features/ShaderCatalog/src/CatalogDB.cpp
-	features/ShaderCatalog/src/CatalogDB.h
-	features/ShaderCatalog/src/Provenance.cpp
-	features/ShaderCatalog/src/Provenance.h
-	features/ShaderCatalog/src/PixelShaderTracker.cpp
-	features/ShaderCatalog/src/PixelShaderTracker.h
-	features/ShaderCatalog/src/RouteCaptureCoordinator.cpp
-	features/ShaderCatalog/src/RouteCaptureCoordinator.h
-	features/ShaderCatalog/src/ShaderShape.cpp
-	features/ShaderCatalog/src/ShaderShape.h
-	src/Render/PixelShaderSwapModel.cpp
-	src/Render/PixelShaderSwapBroker.h
-	src/Utils/CSSha1.cpp
-	src/Utils/CSSha1.h
-)
-configure_host_test(ShaderCatalogTests)
-target_include_directories(ShaderCatalogTests PRIVATE
-	"${CMAKE_SOURCE_DIR}/include"
-	"${CMAKE_SOURCE_DIR}/features/ShaderCatalog/src"
-)
-target_compile_definitions(
-	ShaderCatalogTests PRIVATE FO4CS_SHADER_CATALOG_TESTING=1)
-target_link_libraries(ShaderCatalogTests PRIVATE
-	unofficial::sqlite3::sqlite3
-	spdlog::spdlog
-	bcrypt.lib
-	d3dcompiler.lib
-)
-
-add_test(NAME ShaderCatalog COMMAND ShaderCatalogTests)
-set_tests_properties(ShaderCatalog PROPERTIES LABELS "shader;catalog;unit" TIMEOUT 120)
 
 add_executable(PixelShaderSwapTests
 	tests/PixelShaderSwapTests.cpp
@@ -542,100 +392,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	set_tests_properties(ShaderInjectionRegistration PROPERTIES
 		LABELS "render;shader;unit"
-	)
-endif()
-
-if(FO4CS_HOST_TESTS_ONLY)
-	find_package(xbyak CONFIG REQUIRED)
-	set(PROJECT_VERSION_MAJOR "${FO4CS_VERSION_MAJOR}")
-	set(PROJECT_VERSION_MINOR "${FO4CS_VERSION_MINOR}")
-	set(PROJECT_VERSION_PATCH "${FO4CS_VERSION_PATCH}")
-	set(PROJECT_NAME "FO4CommunityShaders")
-	configure_file(
-		"${CMAKE_SOURCE_DIR}/cmake/Plugin.h.in"
-		"${CMAKE_BINARY_DIR}/FO4CommunityShaders/Plugin.h"
-		@ONLY
-	)
-	add_library(ShaderCatalogCompileChecks OBJECT
-		features/ShaderCatalog/src/Hooks.cpp
-		features/ShaderCatalog/src/OrderlyExit.cpp
-		features/ShaderCatalog/src/PixelShaderTracker.cpp
-		features/ShaderCatalog/src/RouteCaptureCoordinator.cpp
-		features/ShaderCatalog/src/ShaderCatalog.cpp
-		features/ShaderCatalog/src/SubclassAttribution.cpp
-		src/Render/EnginePixelShaderLookup.cpp
-		src/Render/PixelShaderSwapBroker.cpp
-		src/Render/PixelShaderSwapModel.cpp
-		src/Render/ShaderSubclassContext.cpp
-		src/Render/ShaderSubclassHooks.cpp
-		src/Render/ShaderVariantResolver.cpp
-		src/Render/ShaderVariantRuntimeResolver.cpp
-	)
-	configure_host_test(ShaderCatalogCompileChecks)
-	target_precompile_headers(ShaderCatalogCompileChecks PRIVATE
-		"${CMAKE_SOURCE_DIR}/include/PCH.h"
-	)
-	target_compile_definitions(ShaderCatalogCompileChecks PRIVATE
-		_WINDOWS
-		_AMD64_
-		_UNICODE
-		COMMONLIB_RUNTIMECOUNT=3
-	)
-	target_compile_options(ShaderCatalogCompileChecks PRIVATE
-		/wd4200
-		/wd4201
-		/wd4324
-	)
-	target_include_directories(ShaderCatalogCompileChecks BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
-		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
-		"${CMAKE_SOURCE_DIR}/include"
-		"${CMAKE_SOURCE_DIR}/src"
-		"${CMAKE_SOURCE_DIR}/features/ShaderCatalog/src"
-		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
-		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
-	)
-	target_link_libraries(ShaderCatalogCompileChecks PRIVATE
-		debug ${MICROSOFT_DETOURS_LIBRARY_DEBUG}
-		optimized ${MICROSOFT_DETOURS_LIBRARY_RELEASE}
-		Microsoft::DirectXTK
-		Microsoft::DirectX-Headers
-		imgui::imgui
-		magic_enum::magic_enum
-		spdlog::spdlog
-		tomlplusplus::tomlplusplus
-		xbyak::xbyak
-	)
-
-	add_executable(ShaderCatalogOrderlyExitTests
-		tests/ShaderCatalogOrderlyExitTests.cpp
-		features/ShaderCatalog/src/OrderlyExit.cpp
-	)
-	configure_host_test(ShaderCatalogOrderlyExitTests)
-	target_compile_definitions(ShaderCatalogOrderlyExitTests PRIVATE
-		_WINDOWS
-		_AMD64_
-		_UNICODE
-		COMMONLIB_RUNTIMECOUNT=3
-		FO4CS_SHADER_CATALOG_TESTING
-	)
-	target_include_directories(ShaderCatalogOrderlyExitTests BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
-		"${CMAKE_SOURCE_DIR}/include"
-		"${CMAKE_SOURCE_DIR}/features/ShaderCatalog/src"
-	)
-	target_link_libraries(ShaderCatalogOrderlyExitTests PRIVATE
-		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
-		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
-		debug ${MICROSOFT_DETOURS_LIBRARY_DEBUG}
-		optimized ${MICROSOFT_DETOURS_LIBRARY_RELEASE}
-	)
-	add_test(
-		NAME ShaderCatalogOrderlyExit
-		COMMAND ShaderCatalogOrderlyExitTests
-	)
-	set_tests_properties(ShaderCatalogOrderlyExit PROPERTIES
-		LABELS "catalog;shader;unit"
 	)
 endif()
 

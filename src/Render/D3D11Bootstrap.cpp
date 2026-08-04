@@ -56,7 +56,7 @@ namespace cs::d3d11
 			&& *a_immediateContext;
 		bool expected = false;
 		if (complete && ready.compare_exchange_strong(expected, true)) {
-			// Load-bearing order: FeatureManager::OnD3D11ReadyAll (ShaderCatalog registers observer) must precede FreezeAndCompileShaderInjections (registers resolver) so the broker's slot-15 thunk sees observers before the first resolver dispatch. SetPixelShaderSwapBrokerDevice may run at any point relative to the two registrations - both Register* paths latch g_installRequested and the hook installs whenever the device is also known.
+			// Features register shader injections before the registry freezes and compiles them.
 			InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
 				engine::SetPixelShaderSwapBrokerDevice(*a_device);
 			});

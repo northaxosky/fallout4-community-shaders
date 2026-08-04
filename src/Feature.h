@@ -30,8 +30,6 @@ namespace cs
 		virtual std::string_view GetName() const = 0;
 		virtual std::string GetConfigKey() const { return std::string(GetName()); }
 		spdlog::logger* Log() const;
-		virtual std::vector<FeatureRequirement> GetRequirements() const { return {}; }
-		virtual bool HasCapability(FeatureCapability /*a_capability*/) const noexcept { return false; }
 		virtual EnbPolicy GetEnbPolicy() const { return EnbPolicy::kRunAnyway; }
 		virtual bool IsInstalled() const;
 
@@ -50,7 +48,7 @@ namespace cs
 		// Runs after all features' Load(). Defer here to wrap hooks installed in another feature's Load().
 		virtual void OnPostPostLoad() {}
 
-		// FailLoad() marks a recoverable Load() failure so the manager skips the feature and its dependents.
+		// FailLoad() marks a recoverable Load() failure so the manager skips the feature.
 		void FailLoad(std::string a_reason) noexcept
 		{
 			_loadFailed = true;
@@ -171,9 +169,9 @@ namespace cs
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
 
-		// Runtime callback boundaries revalidate, quarantine, and compact without unloading.
+		// Runtime callback boundaries quarantine and compact without unloading.
 		bool PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept;
-		// Let installed non-failed inactive/degraded features draw settings before activation; fully revalidate active features.
+		// Let installed non-failed inactive features draw settings before activation.
 		bool PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept;
 		void QuarantineRuntimeCallback(
 			Feature& a_feature,
@@ -189,9 +187,7 @@ namespace cs
 
 	private:
 		FeatureManager() = default;
-		std::optional<std::string> FindRequirementFailure(const Feature& a_feature) const;
 		std::vector<Feature*> _registeredFeatures;
-		std::vector<Feature*> _activationOrder;
 		std::vector<Feature*> _loadedFeatures;
 		bool                  _d3d11ReadyDone = false;
 	};
