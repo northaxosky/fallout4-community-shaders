@@ -217,20 +217,29 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   `scripts/shaders/verify-native-abi-admission.ps1` (CTest
   `DirSplits2DirectionalAdmission`) re-measures all 29 against
-  `dirsplits2-native-abi.json` and fails closed. The pinned declarations come
-  from the game bytecode, so the gate cannot bless this repository's output. It
-  also asserts that 16 malformed or out-of-scope macro sets still refuse to
-  compile - `FILTER_PCSSPOISSON`, `DIRSPLITS` of 1/3/4/absent, two `FILTER_*` at
-  once, `SHADOW_ONLY`, a missing `SHADOW`/`SPECULAR`/`RGBSPEC`/`DIRECTIONAL`,
-  and `DIRECTIONAL` crossed with `POINTOMNI`/`POINTSPOT`/`SPOT`/`HALFOMNI` - and
-  that the 11 axis combinations that are legal natively but happen to have no
-  archive blob still compile, so the guards cannot over-reach.
+  `dirsplits2-native-abi.json` and fails closed. Each entry pins two things
+  taken from the game bytecode - the blob's declaration set and the set of
+  constant-buffer registers its body actually reads - so the gate cannot bless
+  this repository's output. The read-set is the finer of the two and separates
+  macro sets the declarations cannot: a `BLENDSPLIT` blob reads `cb2[6..8]` and
+  never `cb2[9]`, while its plain counterpart reads `cb2[9]` as
+  `SplitDistances`. Pinning it makes a dropped or invented constant read a gate
+  failure rather than an unnoticed divergence.
 
-  This is an ABI claim, not SHEX equality. The declarations are measured; the
-  BRDF core is a structural reconstruction, and execution proof stays with the
-  producer oracle. The verifier is family-agnostic and driven entirely from its
-  manifest, so the `DIRSPLITS=3` layer needs an evidence file and a test
-  registration rather than a third copy of the script.
+  The gate also asserts that 16 malformed or out-of-scope macro sets still
+  refuse to compile - `FILTER_PCSSPOISSON`, `DIRSPLITS` of 1/3/4/absent, two
+  `FILTER_*` at once, `SHADOW_ONLY`, a missing
+  `SHADOW`/`SPECULAR`/`RGBSPEC`/`DIRECTIONAL`, and `DIRECTIONAL` crossed with
+  `POINTOMNI`/`POINTSPOT`/`SPOT`/`HALFOMNI` - and that the 11 axis combinations
+  that are legal natively but happen to have no archive blob still compile, so
+  the guards cannot over-reach.
+
+  This is an ABI claim, not SHEX equality. The declarations and constant
+  read-sets are measured; the BRDF core is a structural reconstruction, and
+  execution proof stays with the producer oracle. The verifier is
+  family-agnostic and driven entirely from its manifest, so the `DIRSPLITS=3`
+  layer needs an evidence file and a test registration rather than a third copy
+  of the script.
 
 ## Workflow
 

@@ -6,8 +6,8 @@
     "runtime": "AE 1.11.221 archive blob set",
     "report_label": "DIRSPLITS=2 DIRECTIONAL",
     "compile_only_label": "independent-axis macro sets",
-    "note": "Consumer-local admission gate. Each entry pins the declaration set of a native archive blob, measured from the corpus, and the check passes only when the reconstruction compiled from that blob's own macro set declares the same thing. The pinned values come from the game bytecode, never from this repo's output. This is an ABI claim only: the full BRDF core is structurally reconstructed rather than solved to byte-identical SHEX, IGNOREROUGHNESS is admitted but unreconstructed, and execution proof stays with the producer oracle. dcl_temps is excluded because it is register allocation, not ABI; it is 10 for every filter here except FILTER_POISSON, which is 11.",
-    "evidence": "Declarations were measured by disassembling each blob with fxc /dumpbin. The 29 blobs collapse to exactly three declaration groups, and the group is a function of the FILTER axis alone: AMBIENT, BLENDSPLIT and IGNOREROUGHNESS move the instruction stream but not the contract."
+    "note": "Consumer-local admission gate. Each entry pins the declaration set and the constant-buffer read-set of a native archive blob, measured from the corpus, and the check passes only when the reconstruction compiled from that blob's own macro set declares and reads the same thing. The pinned values come from the game bytecode, never from this repo's output. This is an ABI claim only: the full BRDF core is structurally reconstructed rather than solved to byte-identical SHEX, IGNOREROUGHNESS is admitted but unreconstructed, and execution proof stays with the producer oracle. dcl_temps is excluded because it is register allocation, not ABI; it is 10 for every filter here except FILTER_POISSON, which is 11.",
+    "evidence": "Declarations and read-sets were measured by disassembling each blob with fxc /dumpbin. The 29 blobs collapse to exactly three declaration groups, and the group is a function of the FILTER axis alone: AMBIENT, BLENDSPLIT and IGNOREROUGHNESS move the instruction stream but not the contract. The read-set is finer than the declaration set and does separate them - BLENDSPLIT drops the cb2[9] SplitDistances read, because it replaces the split gate with the smoothstep cascade blend and lets DirectionalAmbient extend over cb2[6..9]. Pinning the read-set is what makes a silently dropped or invented constant read a gate failure rather than an unnoticed divergence."
   },
   "compiler": {
     "name": "fxc",
@@ -131,7 +131,36 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_s4"
+      "abi_group": "raw_t4_s4",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "f40250516b3aa42d3644cf07a0d97c40f0af0762",
@@ -146,7 +175,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_s4"
+      "abi_group": "raw_t4_s4",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "b21b8eb34c0ef5c307d268ee450e92eba7ea588f",
@@ -162,7 +223,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_s4"
+      "abi_group": "raw_t4_s4",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "c1099fef518fe9a1d5a5b26afc4a72aa27d6ff7c",
@@ -178,7 +271,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "3d1bcaf539fd34620773ae30fc7a3002f19fb426",
@@ -193,7 +318,36 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "1d64f145176575f18fab7c7c9c4f09e11274845b",
@@ -210,7 +364,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "c5145c962a2c189e3778352b2aa027f6368b992b",
@@ -227,7 +413,38 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "7dbeaf79423a8e0c526f6d60ae01af0dc347d87b",
@@ -243,7 +460,36 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "aaec045678aacc0349b1599289dce144e0f1f571",
@@ -259,7 +505,35 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "6816c3885f7e99ee072ec107a52a49a35780731b",
@@ -274,7 +548,37 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "afb65b699e5a18204afc3c37457f5afcd54d5734",
@@ -291,7 +595,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "dd1ff1577fef2ac3d6233924fd9a64dd90cef13c",
@@ -307,7 +643,40 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "84e5c748d45be8eeb3cc39844aeb44bd1ed7c7e6",
@@ -324,7 +693,40 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "e283ea89bad28ce4310ad19a26774c2519506e34",
@@ -340,7 +742,36 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "f4a8c9d256f1cd8d209379053a41c9dcd6350175",
@@ -357,7 +788,36 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "0af02fad1e862e517ade458d0a2fa4916db45e9d",
@@ -375,7 +835,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "626fabfa6cb838e7eaff0495b8bad0bf2376778f",
@@ -391,7 +883,38 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_cmp_t5"
+      "abi_group": "raw_t4_cmp_t5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "d13839fca17e56c395a5b3d371bf93128b097309",
@@ -407,7 +930,41 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_cmp_t5"
+      "abi_group": "raw_t4_cmp_t5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "be0ba5322102a0771d4575394d34fe5e0c8be1f3",
@@ -424,7 +981,41 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_cmp_t5"
+      "abi_group": "raw_t4_cmp_t5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "23234de9cff52ae49d0a14ca131e33e8b2338f0c",
@@ -439,7 +1030,38 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_cmp_t5"
+      "abi_group": "raw_t4_cmp_t5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "cea19eb5dcf4f7316171f245720d24248e894498",
@@ -456,7 +1078,40 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_cmp_t5"
+      "abi_group": "raw_t4_cmp_t5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "dae1235b15fb8b9266bd3166ded958c19f9192d3",
@@ -472,7 +1127,37 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "raw_t4_cmp_t5"
+      "abi_group": "raw_t4_cmp_t5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "0c319651badcd58e3987596d9ebeb562f9387ad9",
@@ -488,7 +1173,42 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "50e2618e8d1a8c3400c2bdb0129e510fe395d19a",
@@ -504,7 +1224,38 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "7300db73a915e0b73974d50ed72f5a5090a58a3e",
@@ -522,7 +1273,41 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "1cb2449c07870b64a05c696199a0dcf2108f73f0",
@@ -539,7 +1324,38 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "7d2f0902eea714faff38b932402d96c368d76794",
@@ -556,7 +1372,42 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "f4ece8123e2a49a2777079fd1284732cfbfa9a14",
@@ -571,7 +1422,39 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     },
     {
       "native_blob_sha1": "94f8385edd1b4eb232b1de269e1ad7b21122a293",
@@ -588,7 +1471,41 @@
         "SHADOW",
         "SPECULAR"
       ],
-      "abi_group": "cmp_t5_s5"
+      "abi_group": "cmp_t5_s5",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          20,
+          21,
+          22,
+          24
+        ]
+      }
     }
   ],
   "rejected": [

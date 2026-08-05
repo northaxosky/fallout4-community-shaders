@@ -29,11 +29,13 @@
 // not on its instruction stream. `scripts/shaders/verify-native-abi-admission.ps1`
 // re-measures, for all 29 native macro sets, that the reconstruction declares
 // the same constant buffers, SRVs, samplers and signature as the blob the macro
-// set came from. That is a contract claim only. Unlike the DIRSPLITS=1
+// set came from, and that it reads the same set of constant-buffer registers.
+// That is a contract claim only. Unlike the DIRSPLITS=1
 // SHADOW_ONLY family, whose small body is solved to byte-identical SHEX, the
 // full BRDF core here is structurally reconstructed and its instruction stream
-// is expected to diverge. Execution proof stays with the producer oracle in the
-// sibling `fallout4-re`; this repo cannot bless its own output.
+// is expected to diverge - native unrolls the PCSS blocker search where this
+// keeps it rolled, for one. Execution proof stays with the producer oracle in
+// the sibling `fallout4-re`; this repo cannot bless its own output.
 //
 // What the ABI gate buys: the archive's DIRSPLITS=2 candidates were previously
 // blocked because every candidate declared only the comparison shadow resource

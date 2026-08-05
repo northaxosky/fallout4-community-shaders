@@ -11,6 +11,11 @@
     sampler slots and modes, and the input/output signature. `dcl_temps` is
     excluded on purpose - it is register allocation, not ABI.
 
+    Where an entry pins `cb_reads`, it also compares which constant-buffer
+    registers the compiled body actually reads. That is finer than the
+    declaration set and catches a dropped or invented constant read that
+    identical declarations would otherwise hide.
+
     It also asserts that the macro sets in the `rejected` list still fail to
     compile, so the admission cannot silently widen, and that the `compile_only`
     list still compiles, so the fail-closed guards cannot over-reach and lock
@@ -108,6 +113,36 @@ function ConvertTo-ExpectedContract($Group) {
     }
 }
 
+# Which constant-buffer registers the body actually reads. This is finer than
+# the declaration set: two macro sets can declare the same CB and still read a
+# different span of it, so pinning this catches a dropped or invented constant
+# read that the declarations alone would hide.
+function Get-ConstantReadSet([string[]]$Listing) {
+    $reads = @{}
+    foreach ($line in $Listing) {
+        $text = $line.Trim()
+        if (-not $text -or $text.StartsWith('dcl_') -or $text.StartsWith('//')) { continue }
+        foreach ($match in [regex]::Matches($text, '\bcb(\d+)\[(\d+)\]')) {
+            $key = "cb$($match.Groups[1].Value)"
+            if (-not $reads.ContainsKey($key)) {
+                $reads[$key] = [Collections.Generic.HashSet[int]]::new()
+            }
+            [void]$reads[$key].Add([int]$match.Groups[2].Value)
+        }
+    }
+    $parts = foreach ($key in ($reads.Keys | Sort-Object)) {
+        "$key=[" + ((@($reads[$key]) | Sort-Object) -join ',') + ']'
+    }
+    return ($parts -join ' ')
+}
+
+function ConvertTo-ExpectedReadSet($CbReads) {
+    $parts = foreach ($property in ($CbReads.PSObject.Properties | Sort-Object Name)) {
+        "$($property.Name)=[" + ((@($property.Value) | Sort-Object) -join ',') + ']'
+    }
+    return ($parts -join ' ')
+}
+
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     Exit-WithError "evidence file not found: $ManifestPath" 2
 }
@@ -196,6 +231,16 @@ try {
                     "`n    ours  : $($actual.$field)")
             }
         }
+        $pinnedReads = Get-OptionalMember $entry 'cb_reads'
+        if ($pinnedReads) {
+            $actualReads = Get-ConstantReadSet (Get-Content -LiteralPath $result.Listing)
+            $expectedReads = ConvertTo-ExpectedReadSet $pinnedReads
+            if ($actualReads -cne $expectedReads) {
+                $failures += ("$tag`: constant read-set differs from the native blob" +
+                    "`n    native: $expectedReads" +
+                    "`n    ours  : $actualReads")
+            }
+        }
     }
 
     $index = 0
@@ -240,7 +285,8 @@ if ($failures.Count -gt 0) {
     Exit-WithError "$($failures.Count) $reportLabel admission check(s) failed"
 }
 
-Write-Host ("PASS: $checked / $checked $reportLabel permutations match the native ABI; " +
+Write-Host ("PASS: $checked / $checked $reportLabel permutations match the native ABI " +
+    "and constant read-set; " +
     "$rejectedChecked / $rejectedChecked rejected macro sets still refuse to compile; " +
     "$compileOnlyChecked / $compileOnlyChecked $compileOnlyLabel still compile.")
 exit 0
