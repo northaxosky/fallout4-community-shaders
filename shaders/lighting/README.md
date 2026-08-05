@@ -16,6 +16,7 @@ shaders and injects registered permutations at runtime.
 | `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **reconstructed-roundtrip-1.25pct** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
+| `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -107,6 +108,39 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   Spot stub at the end of the file documents the expected math sketch;
   reconstruction awaits a canonical spot-light capture.
+* **`bsdf_light_deferred_shadow_only.hlsl`** - **native SHEX identical, 6/6**.
+  The native `DIRECTIONAL` + `SHADOW_ONLY` family, and the only place in the
+  archive where the `FILTER_*` axis appears as a controlled minimal pair: six
+  blobs sharing `DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY +
+  SPECULAR` and differing only in the filter macro. It is a sibling of
+  `bsdf_light_deferred.hlsl` rather than another `#ifdef` inside it, because
+  that file's bytes are pinned by `source_sha256` in the producer conformance
+  manifest, which only the producer may republish.
+
+  All six permutations compile to a DXBC whose SHEX chunk - the instruction
+  stream plus the immediate constant buffer - is byte-identical to the archive
+  blob's, so the reconstruction is not merely equivalent but the same program:
+
+  | Filter | Archive blob sha1 | Blob bytes | SHEX bytes |
+  |---|---|---|---|
+  | (none)               | `964e9b82cde7aece` | 2328  | 2112  |
+  | `FILTER_PCF1`        | `0bff5e0ecdf73249` | 2304  | 2088  |
+  | `FILTER_PCF9`        | `ba94fedf2ed412c7` | 2720  | 2504  |
+  | `FILTER_PCSS`        | `53e2fcf10e89547e` | 4068  | 3852  |
+  | `FILTER_POISSON`     | `99a112e7bc7fc4fb` | 19016 | 18800 |
+  | `FILTER_PCSSPOISSON` | `e5ef2e946298f7ee` | 20016 | 19800 |
+
+  `scripts/shaders/verify-filter-axis.ps1` (CTest `FilterAxisNativeShex`)
+  re-measures this and fails closed. Its pinned hashes are taken from the game
+  bytecode, so the gate cannot bless the repository's own output. The exact
+  1000-entry Poisson kernel the last two permutations declare lives in
+  `shadow_poisson_kernel.hlsli`, transcribed from the SHEX CUSTOM_DATA token at
+  full float32 precision.
+
+  Scope: AE 1.11.221 archive blob set, `DIRSPLITS=1` only. The two other
+  complete six-variant filter families in the archive
+  (`BLENDSPLIT + DIRSPLITS=3` with and without `AMBIENT`) carry the full BRDF
+  and are not reconstructed here.
 
 ## Workflow
 

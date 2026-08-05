@@ -419,3 +419,15 @@ set_tests_properties(ShaderRoundtrip PROPERTIES
 	LABELS "shader;parity"
 	TIMEOUT 300
 )
+
+set(_filter_axis_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-filter-axis.ps1")
+add_test(
+	NAME FilterAxisNativeShex
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_filter_axis_script}' -FxcPath $env:FXC_PATH } else { & '${_filter_axis_script}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(FilterAxisNativeShex PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 300
+)

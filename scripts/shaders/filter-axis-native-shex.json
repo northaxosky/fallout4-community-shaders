@@ -1,0 +1,82 @@
+{
+  "schema": "fo4cs.native-shex-equality",
+  "schema_version": 1,
+  "scope": {
+    "family": "DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR",
+    "axis": "FILTER",
+    "runtime": "AE 1.11.221 archive blob set",
+    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob; the reconstruction passes only when its own SHEX chunk hashes to the same value, so the pinned values come from the game bytecode and never from this repo's output."
+  },
+  "compiler": {
+    "name": "fxc",
+    "entry_point": "main",
+    "flags": [ "/nologo", "/O3" ],
+    "include_root": "source-directory"
+  },
+  "common_defines": [
+    "DIRECTIONAL=1",
+    "DIRSPLITS=1",
+    "RGBSPEC=1",
+    "SHADOW=1",
+    "SHADOW_ONLY=1",
+    "SPECULAR=1"
+  ],
+  "source": "shaders/lighting/bsdf_light_deferred_shadow_only.hlsl",
+  "profile": "ps_5_0",
+  "entries": [
+    {
+      "target": "filter_none",
+      "defines": [],
+      "native_blob_sha1": "964e9b82cde7aecea38bc999d1c925127da0bc01",
+      "native_blob_sha256": "3b6c5d8a1c3256efb4008d24187b88721b15d1d237ff4d808ba3cb7b9938fab6",
+      "native_blob_bytes": 2328,
+      "native_shex_bytes": 2112,
+      "native_shex_sha256": "b3629f2d7edcd114f811c8d8204b95330d10775ed2283c102b71a9542fb2b744"
+    },
+    {
+      "target": "filter_pcf1",
+      "defines": [ "FILTER_PCF1=1" ],
+      "native_blob_sha1": "0bff5e0ecdf732495be001a37160d8aa11a9660c",
+      "native_blob_sha256": "df0b76bdca5d6fcd453cedc9f770188f11226ef0394dd7197396824d00284311",
+      "native_blob_bytes": 2304,
+      "native_shex_bytes": 2088,
+      "native_shex_sha256": "0823cee5726f1c59e27447394823d91dc631f59ce57674807dd1c0b5066eab58"
+    },
+    {
+      "target": "filter_pcf9",
+      "defines": [ "FILTER_PCF9=1" ],
+      "native_blob_sha1": "ba94fedf2ed412c7dd0f770a990f735c92768b44",
+      "native_blob_sha256": "a6f7990eae173619b969b5af37a467b57ea69cf3064edfebc90729400ff66071",
+      "native_blob_bytes": 2720,
+      "native_shex_bytes": 2504,
+      "native_shex_sha256": "ce4d361e68fe998e1273113ef7be0d420432654c9bf6d278b4636824ebad1084"
+    },
+    {
+      "target": "filter_pcss",
+      "defines": [ "FILTER_PCSS=1" ],
+      "native_blob_sha1": "53e2fcf10e89547e9d02969173839a2768b22e22",
+      "native_blob_sha256": "a728d264d045368d13b01d1009139dc311d0786243c6d6e69e94b68bf0c68255",
+      "native_blob_bytes": 4068,
+      "native_shex_bytes": 3852,
+      "native_shex_sha256": "0e7b9eb7d207c8481f3418556cf7ce9eb08cf7d5f822a2ea546c991e04bf2a01"
+    },
+    {
+      "target": "filter_poisson",
+      "defines": [ "FILTER_POISSON=1" ],
+      "native_blob_sha1": "99a112e7bc7fc4fbcefac716864d6e6a9cdcac68",
+      "native_blob_sha256": "ec88c6c4e3546ef7043c71ce7f444471889909d5312b56b7b6efea187badd653",
+      "native_blob_bytes": 19016,
+      "native_shex_bytes": 18800,
+      "native_shex_sha256": "e16235b86b141ddbf38a210c837ea4c4167fb1e61e3a0dd4c2d304c49e48b4e1"
+    },
+    {
+      "target": "filter_pcsspoisson",
+      "defines": [ "FILTER_PCSSPOISSON=1" ],
+      "native_blob_sha1": "e5ef2e946298f7eea6702473dbeef4202c7ca821",
+      "native_blob_sha256": "435b28159e93f6c978fbc3824ea76d142a74213884c5575e1012fb3cc90fcf15",
+      "native_blob_bytes": 20016,
+      "native_shex_bytes": 19800,
+      "native_shex_sha256": "8d20b5e306d2f3034ae5099328ea96cf02f33fb026d688e71975dc8e2930f6f9"
+    }
+  ]
+}
