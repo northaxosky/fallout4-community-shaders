@@ -17,6 +17,7 @@ shaders and injects registered permutations at runtime.
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
+| `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -173,6 +174,63 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   complete six-variant filter families in the archive
   (`BLENDSPLIT + DIRSPLITS=3` with and without `AMBIENT`) carry the full BRDF
   and are not reconstructed here.
+* **`bsdf_light_deferred_dirsplits2.hlsl`** - **native ABI equal, 29/29**.
+  The native full-BRDF `DIRECTIONAL` + `SHADOW` family at `DIRSPLITS=2`: the
+  layer above `SHADOW_ONLY`, where the solved filter bodies meet the complete
+  lighting core. Twenty-nine archive blobs share
+  `DIRECTIONAL + DIRSPLITS=2 + RGBSPEC + SHADOW + SPECULAR` and vary over four
+  independent axes - `FILTER_*` (none / PCF1 / PCF9 / PCSS / POISSON) crossed
+  with `AMBIENT`, `BLENDSPLIT` and `IGNOREROUGHNESS`. It is a sibling file for
+  the same reason as `bsdf_light_deferred_shadow_only.hlsl`: the consolidated
+  file's bytes are pinned by `source_sha256` in the producer conformance
+  manifest.
+
+  The 29 blobs collapse to exactly three declaration groups, and the group is a
+  function of the filter alone - `AMBIENT`, `BLENDSPLIT` and `IGNOREROUGHNESS`
+  move the instruction stream but not the contract. Every group declares
+  `CB12[31]` + `CB2[25]` immediateIndexed, `t0..t3` with `s0..s3` mode_default,
+  and the two-MRT signature:
+
+  | Filter | Blobs | Shadow map declarations |
+  |---|---|---|
+  | (none)           | 3 | `t4`/`s4` mode_default (raw tap, compare in the shader) |
+  | `FILTER_PCF1`    | 6 | `t5`/`s5` mode_comparison |
+  | `FILTER_PCF9`    | 6 | `t5`/`s5` mode_comparison |
+  | `FILTER_POISSON` | 8 | `t5`/`s5` mode_comparison |
+  | `FILTER_PCSS`    | 6 | `t4`/`s4` mode_default **and** `t5`/`s5` mode_comparison |
+
+  `BLENDSPLIT` is one coupled axis, not two independent edits: it removes the
+  `cb2[9].w` split-distance gate *and* adds the smoothstep band blend between
+  the cascades, and the two always occur together. Without it the band term is
+  a literal `1.0` and `cb2[9]` carries `SplitDistances`; with it
+  `DirectionalAmbient` extends over `cb2[6..9]` and `cb2[9]` is never read as a
+  distance. `DIRSPLITS=2` also differs from the `SHADOW_ONLY` family in what it
+  omits: no slope-scaled depth bias and no `0.999999` reference clamp. Only
+  `FILTER_POISSON` biases at all, per cascade (0.275 then 1.0).
+
+  `FILTER_PCSSPOISSON` fails closed here: the archive has no `DIRSPLITS=2` blob
+  carrying it, only one at `DIRSPLITS=1` and two at `DIRSPLITS=3`. Fabricating
+  it would be a fidelity claim with no evidence behind it. `IGNOREROUGHNESS`
+  follows the `HALFOMNI` precedent - 11 of the 29 carry it and it does not move
+  the contract, but it does change the ambient-specular exponent path, so it is
+  admitted and left unreconstructed rather than erased or rejected.
+
+  `scripts/shaders/verify-native-abi-admission.ps1` (CTest
+  `DirSplits2DirectionalAdmission`) re-measures all 29 against
+  `dirsplits2-native-abi.json` and fails closed. The pinned declarations come
+  from the game bytecode, so the gate cannot bless this repository's output. It
+  also asserts that 16 malformed or out-of-scope macro sets still refuse to
+  compile - `FILTER_PCSSPOISSON`, `DIRSPLITS` of 1/3/4/absent, two `FILTER_*` at
+  once, `SHADOW_ONLY`, a missing `SHADOW`/`SPECULAR`/`RGBSPEC`/`DIRECTIONAL`,
+  and `DIRECTIONAL` crossed with `POINTOMNI`/`POINTSPOT`/`SPOT`/`HALFOMNI` - and
+  that the 11 axis combinations that are legal natively but happen to have no
+  archive blob still compile, so the guards cannot over-reach.
+
+  This is an ABI claim, not SHEX equality. The declarations are measured; the
+  BRDF core is a structural reconstruction, and execution proof stays with the
+  producer oracle. The verifier is family-agnostic and driven entirely from its
+  manifest, so the `DIRSPLITS=3` layer needs an evidence file and a test
+  registration rather than a third copy of the script.
 
 ## Workflow
 

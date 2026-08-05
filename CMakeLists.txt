@@ -443,3 +443,16 @@ set_tests_properties(PointOmniShadowAdmission PROPERTIES
 	LABELS "shader;parity"
 	TIMEOUT 600
 )
+
+set(_native_abi_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-native-abi-admission.ps1")
+set(_dirsplits2_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/dirsplits2-native-abi.json")
+add_test(
+	NAME DirSplits2DirectionalAdmission
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_dirsplits2_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_dirsplits2_manifest}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(DirSplits2DirectionalAdmission PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 600
+)
