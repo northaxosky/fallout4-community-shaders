@@ -224,10 +224,10 @@ static const float3 SSSS_RING_WEIGHTS[10] =
     float3(0.004717, 0.000185, 0.000051),  // -2.0
     float3(0.019283, 0.002820, 0.000842),  // -1.28
     float3(0.036390, 0.013100, 0.006437),  // -0.72
-    float3(0.077180, 0.113491, 0.079380),  // -0.32
-    float3(0.082190, 0.035861, 0.020926),  // -0.08
-    float3(0.082190, 0.035861, 0.020926),  // +0.08
-    float3(0.077180, 0.113491, 0.079380),  // +0.32
+    float3(0.082190, 0.035861, 0.020926),  // -0.32
+    float3(0.077180, 0.113491, 0.079380),  // -0.08
+    float3(0.077180, 0.113491, 0.079380),  // +0.08
+    float3(0.082190, 0.035861, 0.020926),  // +0.32
     float3(0.036390, 0.013100, 0.006437),  // +0.72
     float3(0.019283, 0.002820, 0.000842),  // +1.28
     float3(0.004717, 0.000185, 0.000051),  // +2.0
@@ -390,11 +390,9 @@ PS_OUTPUT main(PS_INPUT input)
     {
         // Insn 80-84: skin block setup.
         //   r4 = t4.Sample(uv).xyz
-        //   r0.w = (r0.w & 0x3f800000) which masks to 1.0 if r0.w was 1.0;
-        //          effectively r0.w = depth>=0.01 ? 1.0 : 0.0, then
-        //          r0.w = r0.w * cb0[0].z + 1.0
+        // Insns 81-82 reuse the inclusive near-path mask before applying CB0[0].z.
         float3 skinAux = g_tSkinAuxColor.Sample(g_sSkinAuxColor, uv).xyz;
-        float  depthMaskF = (depth >= 0.01) ? 1.0 : 0.0;
+        float  depthMaskF = isNearPath ? 1.0 : 0.0;
         float  blurDepthScale = depthMaskF * cb0_idx0_screen_scale_and_blur_tolerance.z + 1.0;
 
         float  refDepth = g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, uv, 0).y;

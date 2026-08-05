@@ -105,10 +105,10 @@ static const float3 SSSS_RING_WEIGHTS[10] =
     float3(0.004717, 0.000185, 0.000051),
     float3(0.019283, 0.002820, 0.000842),
     float3(0.036390, 0.013100, 0.006437),
-    float3(0.077180, 0.113491, 0.079380),
-    float3(0.082190, 0.035861, 0.020926),
     float3(0.082190, 0.035861, 0.020926),
     float3(0.077180, 0.113491, 0.079380),
+    float3(0.077180, 0.113491, 0.079380),
+    float3(0.082190, 0.035861, 0.020926),
     float3(0.036390, 0.013100, 0.006437),
     float3(0.019283, 0.002820, 0.000842),
     float3(0.004717, 0.000185, 0.000051),
@@ -210,8 +210,9 @@ PS_OUTPUT main(PS_INPUT input)
         reflectionWorld.x = dot(ViewToWorld_row0.xyz, reflectionView);
         reflectionWorld.y = dot(ViewToWorld_row1.xyz, reflectionView);
         reflectionWorld.z = dot(ViewToWorld_row2.xyz, reflectionView);
+        // Native insn 48 uses reconstructed positionView.z, not linearized depth.
         float mipLevel =
-            (1.0 - shadingData.x) * 6.0 + linearizedDepth * 0.001953;
+            (1.0 - shadingData.x) * 6.0 + positionView.z * 0.001953125;
         float arraySlice = floor(material.y * 255.0 - 1.0);
         float3 cubeSample = g_tIblProbeCube.SampleLevel(
             g_sIblProbeCube, float4(reflectionWorld, arraySlice), mipLevel).xyz;
@@ -245,7 +246,7 @@ PS_OUTPUT main(PS_INPUT input)
         float3 skinAux =
             g_tSkinAuxColor.Sample(g_sSkinAuxColor, uv).xyz;
         float blurDepthScale =
-            (depth >= 0.01 ? 1.0 : 0.0) * ScreenBlurParameters.z + 1.0;
+            (isNearPath ? 1.0 : 0.0) * ScreenBlurParameters.z + 1.0;
         float centerRef =
             blurDepthScale *
             g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, uv, 0).y;
