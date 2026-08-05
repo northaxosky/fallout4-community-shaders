@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // Consolidated FO4 BSDFLightShader deferred PS: directional, point, and spot light permutations selected by LIGHT_TYPE.
 // Directional mapping: Shaders011.fxp #3295 (corpus 50e2618e8d1a..., runtime 8c615844e6443..., eid 44513); host DrawWorld::AccumulateSunShadowLightImpl REL::ID {OG=259940, NG=2318296, AE=2318296}.
-// Directional status: reference asm transcription; point is reconstructed from FO4_frame9483 eid 46771; spot is a guarded stub.
+// Directional status: reference asm transcription; point is reconstructed from FO4_frame9483 eid 46771; spot is reconstructed from the AE 1.11.221 archive blob set.
 // Directional flow: sample depth/gbuffer, select Far/Near reproj, run two cascade PCF blocks, blend/fade shadows, branch skin-vs-default BRDF, write diffuse/specular MRTs.
 // Point flow: reconstruct position, compute radial attenuation, sample octahedral light cookie, reuse BSDF BRDF, write diffuse/specular MRTs.
+// Spot flow: LIGHT_TYPE=3 covers two disjoint native ABIs - SPOT (cone term, no shadow) and POINTSPOT (projected shadow, no cone term). See the block below LIGHT_TYPE_POINT.
 // Limits: CB semantics remain partial; 999-entry Poisson ICB is represented by the consumed subset; non-skin BRDF is structurally condensed.
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -20,8 +21,35 @@
 #  error "LIGHT_TYPE must be DIRECTIONAL (1), POINT (2), or SPOT (3)"
 #endif
 
+// LIGHT_TYPE=3 covers two disjoint native families. They share the gbuffer
+// decode, BRDF and epilogue but not the constant-buffer layout, the resource
+// set or the light term, so exactly one native macro must select the ABI.
+// Raw-technique bit 0x400 emits SPOT (cone, no shadow map); bit 0x20 emits
+// POINTSPOT, which always implies SHADOW. No archive blob carries both, no
+// SPOT blob carries SHADOW, and no POINTSPOT blob allocates SpotData.
 #if LIGHT_TYPE == LIGHT_TYPE_SPOT
-#  error "LIGHT_TYPE_SPOT is a stub; reconstruct from FO4_frame9483 first"
+#  if defined(SPOT) && defined(POINTSPOT)
+#    error "LIGHT_TYPE=3 takes exactly one of SPOT or POINTSPOT, never both"
+#  endif
+#  if !defined(SPOT) && !defined(POINTSPOT)
+#    error "LIGHT_TYPE=3 requires the native macro SPOT=1 or POINTSPOT=1"
+#  endif
+#  if defined(SPOT) && defined(SHADOW)
+#    error "no native SPOT blob carries SHADOW"
+#  endif
+#  if defined(POINTSPOT) && !defined(SHADOW)
+#    error "POINTSPOT implies SHADOW=1 in every native blob"
+#  endif
+#  if defined(SPOT) && defined(ATTENUATION_ONLY)
+#    error "no native SPOT blob carries ATTENUATION_ONLY"
+#  endif
+#  if (defined(FILTER_PCF1) + defined(FILTER_PCF9) + defined(FILTER_POISSON)) > 1
+#    error "FILTER_* macros are mutually exclusive"
+#  endif
+#  if defined(SPOT) \
+      && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))
+#    error "no native SPOT blob carries a FILTER_* macro"
+#  endif
 #endif
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the 5
@@ -1104,27 +1132,598 @@ PS_OUTPUT main(PS_INPUT input)
 //     5th shader to use this pattern).
 //   * Diffuse / 3 normalization to match directional.
 
-// LIGHT_TYPE_SPOT stub - reconstruction TODO
-// Awaits canonical capture from FO4_frame9483.rdc (interior cell with
-// spot lights active).
-// Expected math sketch:
-//   1. Same gbuffer decode + view-space position reconstruction as
-//      directional.
-//   2. toLight = lightPos - posView (CB1[0].xyz).
-//   3. d = length(toLight); lightDir = toLight / d.
-//   4. coneFactor = saturate((dot(lightConeAxis, -lightDir) - cosOuter)
-//                            / (cosInner - cosOuter))
-//      where lightConeAxis (CB1[2].xyz), cosOuter (CB1[2].w), cosInner
-//      (CB1[3].x). Pre-multiplied with the same range attenuation as
-//      point lights.
-//   5. Single-frustum shadow PCF: sample t5 (Texture2D, not array, not
-//      cubemap) with the spot light's projection matrix from CB1[4..7].
-//      Use the same stratified Poisson kernel as directional cascade-0.
-//   6. NdotL + BRDF identical to directional.
-//   7. Final composition writes the MRT pair.
-// Per-light CB1 schema (TODO confirm):
-//   CB1[0]: .xyz = view-space light position, .w = range
-//   CB1[1]: .xyz = light color, .w = intensity
-//   CB1[2]: .xyz = view-space cone axis, .w = cos(outer cone half-angle)
-//   CB1[3]: .x   = cos(inner cone half-angle), .yzw = shadow params
-//   CB1[4..7]: spot-light projection matrix
+// LIGHT_TYPE_SPOT branch: the two native spot ABIs.
+//
+// Evidence scope: AE 1.11.221 only. Archive
+// `Fallout4 - Shaders.ba2` sha256 4ac98b8fe723..., member
+// `shadersfx/shaders011.fxp` sha256 f3254023504c..., 36 decoded blobs
+// (9 SPOT + 27 POINTSPOT). Register allocation below is package-table
+// recovered and closure-gated (every DXBC read has an allocated constant,
+// every allocation is read, top register + 1 = 21 = the declared CB2 size).
+//
+// SPOT (raw-technique bit 0x400, 9 blobs, CB2 layout A/B):
+//   c0 VPOSOffset, c1 LightVector, c2 LightColor, c3 LightAttenuation,
+//   c5 SpotData, c20 ShadowLightParam; c11/c12/c14 ShadowMapProj only under
+//   GOBOPROJECTION (row 2 / c13 is never read - a planar cookie needs no z).
+//   Resources t0..t3 + s0..s3, plus t7/s7 under GOBOPROJECTION. No shadow
+//   map, no comparison sampler.
+//   Baseline blob sha1 ed0dd942f9cb6b227cff74ca15503572b7577bfb (key
+//   0x00000400); gobo baseline 934eccbe8072ec6cea5bab45a7b3c49e9ff8eecc.
+//
+// POINTSPOT (raw-technique bit 0x20, 27 blobs, CB2 layout C):
+//   c0 VPOSOffset, c1 LightVector, c2 LightColor, c3 LightAttenuation,
+//   c11..c14 ShadowMapProj, c15 ShadowSampleParam, c19 ShadowFadeParam,
+//   c20 ShadowLightParam. SpotData is ABSENT - POINTSPOT has no cone term;
+//   its "spot" shape is the projected shadow frustum plus the c20 edge fade.
+//   Resources t0..t3 + s0..s3; the shadow map is t4/s4 (default sampler,
+//   manual compare) with no FILTER macro, or t5/s5 (mode_comparison) under
+//   FILTER_PCF1 / FILTER_PCF9 / FILTER_POISSON; t7/s7 under GOBOPROJECTION.
+//   Baseline blob sha1 388c13087069397fcc3f4b2a8e3f96e59c003d34 (key
+//   0x00000020).
+//
+// ShadowLightParam (c20) is the one constant whose meaning differs between
+// the families: SPOT reads only .x (cone falloff exponent), POINTSPOT reads
+// .xyz (projection edge-fade exponent / centre / scale).
+
+#if LIGHT_TYPE == LIGHT_TYPE_SPOT
+
+// Constant buffer layouts (spot variants).
+
+cbuffer PerFrame_CB12 : register(b12)
+{
+    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+
+#ifndef ATTENUATION_ONLY
+    // [28]: hair specular scales and powers. Same role and same legacy
+    //       misnomer as the directional and point paths.
+    float4 cb12_idx28_sss_params;
+
+    // [29]: hair specular tangent shifts. Same legacy misnomer.
+    float4 cb12_idx29_sss_angles;
+    // ATTENUATION_ONLY blobs declare CB12[28] because they run no BRDF and
+    // therefore never reach cb12[28..29].
+#endif
+};
+
+cbuffer PerCall_CB2 : register(b2)
+{
+    // [0]: constant ID 0 `VPOSOffset`. .xy/.zw scale SV_POSITION into the two
+    //      UV pairs, exactly as in the directional and point paths.
+    float4 ScreenSize;
+
+    // [1]: constant ID 1 `LightVector`. .xyz = view-space light position,
+    //      .w = light radius (the distance normaliser).
+    float4 LightPos_and_Radius;
+
+    // [2]: constant ID 2 `LightColor`. .xyz only; .w is never read.
+    float4 LightColor_HDR;
+
+    // [3]: constant ID 3 `LightAttenuation`. .x = falloff bias,
+    //      .y = falloff scale, .z = falloff exponent. Identical curve to the
+    //      point path.
+    float4 cb2_idx3_attenuation_curve;
+
+#ifdef SPOT
+    // [4]: constant ID 4 `ProjectedLightVector` is ABSENT from every SPOT
+    //      blob; this register has no allocation.
+    float4 cb2_pad_4;
+
+    // [5]: constant ID 5 `SpotData`, allocated at c5. .xyz = the view-space
+    //      cone axis, .w = cosine of the outer cone half-angle (the cutoff).
+    //      Read by every SPOT blob and by no POINTSPOT blob.
+    float4 SpotData;
+
+    // [6..10]: unallocated. Constant IDs 6 `DirectionalAmbient`,
+    //          7 `SplitDistances` and 8 `FadeDistances` are ABSENT here.
+    float4 cb2_pad_6_10[5];
+
+#  ifdef GOBOPROJECTION
+    // [11..14]: constant ID 9 `ShadowMapProj`, allocated at c11 and four
+    //           registers wide for a non-directional light. SPOT uses it
+    //           purely as a cookie projection: rows 0, 1 and 3 are read and
+    //           row 2 (c13) is not, because the planar projection needs no z.
+    float4 cb2_gobo_row0;
+    float4 cb2_gobo_row1;
+    float4 cb2_gobo_row2_unread;
+    float4 cb2_gobo_row3;
+#  else
+    // [11..14]: `ShadowMapProj` is ABSENT from the non-gobo SPOT blobs.
+    float4 cb2_pad_11_14[4];
+#  endif
+
+    // [15..19]: unallocated in every SPOT blob. Constant IDs 10
+    //           `ShadowSampleParam`, 11 `ShadowWorldScale` and 12
+    //           `ShadowFadeParam` are ABSENT - SPOT casts no shadow.
+    float4 cb2_pad_15_19[5];
+#endif  // SPOT
+
+#ifdef POINTSPOT
+    // [4..10]: unallocated. Constant IDs 4 `ProjectedLightVector`,
+    //          5 `SpotData`, 6 `DirectionalAmbient`, 7 `SplitDistances` and
+    //          8 `FadeDistances` are all ABSENT from every POINTSPOT blob.
+    //          SpotData in particular: POINTSPOT has no cone term at all.
+    float4 cb2_pad_4_10[7];
+
+    // [11..14]: constant ID 9 `ShadowMapProj`, allocated at c11, four
+    //           registers for a non-directional light. dp4 against
+    //           (posView, 1) then a perspective divide yields the light-space
+    //           projection used for both the shadow lookup and, under
+    //           GOBOPROJECTION, the cookie.
+    float4 cb2_shadowproj_row0;
+    float4 cb2_shadowproj_row1;
+    float4 cb2_shadowproj_row2;
+    float4 cb2_shadowproj_row3;
+
+    // [15]: constant ID 10 `ShadowSampleParam`, allocated at c15.
+    //       .x = the depth-compare bias subtracted from projected z.
+    //       .zw = the shadow-map texel step used by the PCF9 and Poisson
+    //       kernels. .y is allocated but never read.
+    float4 cb2_idx15_shadow_sample_param;
+
+    // [16..18]: unallocated. Constant ID 11 `ShadowWorldScale` is ABSENT.
+    float4 cb2_pad_16_18[3];
+
+    // [19]: constant ID 12 `ShadowFadeParam`, allocated at c19. .x is a
+    //       squared world distance; the native POINTSPOT path multiplies the
+    //       shadow factor by 1 - t^8, where t = saturate(|posView|^2 / .x).
+    float4 cb2_idx19_shadow_fade;
+#endif  // POINTSPOT
+
+    // [20]: constant ID 13 `ShadowLightParam`, allocated at c20 in both
+    //       families but read differently.
+    //       SPOT reads .x only: the cone falloff exponent.
+    //       POINTSPOT reads .xyz: .x = the projection edge-fade exponent,
+    //       .y = the fade centre, .z = the fade scale.
+    float4 ShadowLightParam;
+};
+
+// Resource bindings (spot variants).
+
+#ifndef ATTENUATION_ONLY
+// t0: RT26 kTAAAccumulation; .w supplies the skin alpha mix.
+Texture2D<float4> g_tGbufferAlbedo : register(t0);
+
+// t1: RT27 kTAAAccumulationSwap (octahedral 2-channel normal).
+Texture2D<float4> g_tGbufferNormal : register(t1);
+
+// t2: RT30 unnamed G-buffer auxiliary.
+Texture2D<float4> g_tGbufferMaterial : register(t2);
+#endif
+
+// t3: main depth, sampled with explicit gradients.
+Texture2D<float4> g_tMainDepth : register(t3);
+
+#ifdef POINTSPOT
+#  if defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON)
+// t5/s5: spot shadow map, sampled through hardware comparison PCF. The native
+//        blobs bind a Texture2DArray and always address slice 0.
+Texture2DArray<float4> g_tSpotShadowAtlas : register(t5);
+SamplerComparisonState g_sSpotShadowCmp : register(s5);  // mode_comparison
+#  else
+// t4/s4: the unfiltered POINTSPOT permutation binds the shadow map to a plain
+//        sampler and performs the depth compare in the shader.
+Texture2DArray<float4> g_tSpotShadowAtlas : register(t4);
+SamplerState g_sSpotShadow : register(s4);
+#  endif
+#endif
+
+#ifdef GOBOPROJECTION
+// t7: light cookie / gobo, sampled with a plain projective UV.
+Texture2D<float4> g_tLightCookie : register(t7);
+SamplerState g_sLightCookie : register(s7);
+#endif
+
+#ifndef ATTENUATION_ONLY
+SamplerState g_sGbufferAlbedo   : register(s0);
+SamplerState g_sGbufferNormal   : register(s1);
+SamplerState g_sGbufferMaterial : register(s2);
+#endif
+SamplerState g_sMainDepth       : register(s3);
+
+#ifdef FILTER_POISSON
+// Stratified Poisson kernel. The native dcl_immediateConstantBuffer holds
+// 1000 float4 entries whose .xy are consumed; the raw DWORD payload is
+// byte-identical across every POISSON blob in the archive, including the
+// directional one. The loop reads icb[0..15] only, so the 16 consumed entries
+// are inlined here at full float32 precision (extracted from the SHEX
+// CUSTOM_DATA token, not from disassembly text).
+//   tap = ((icb[k] - 0.5) * (ShadowSampleParam.z * 3.0)) * 2.0 + baseUV
+static const float2 SPOT_SHADOW_POISSON[16] =
+{
+    float2(0.4933930039405823,   0.3942689895629883),
+    float2(0.7985470294952393,   0.8859220147132874),
+    float2(0.2473219931125641,   0.9264500141143799),
+    float2(0.051454201340675354, 0.14078199863433838),
+    float2(0.8318430185317993,   0.009552289731800556),
+    float2(0.428631991147995,    0.017151400446891785),
+    float2(0.01565600000321865,  0.7497789859771729),
+    float2(0.7583850026130676,   0.4961700141429901),
+    float2(0.2234870046377182,   0.5621510148048401),
+    float2(0.011627599596977234, 0.4069949984550476),
+    float2(0.24146200716495514,  0.30463600158691406),
+    float2(0.430310994386673,    0.7272260189056396),
+    float2(0.981810986995697,    0.27835899591445923),
+    float2(0.4070560038089752,   0.5005339980125427),
+    float2(0.123478002846241,    0.4635460078716278),
+    float2(0.8095340132713318,   0.6822720170021057),
+};
+#endif
+
+// Helpers (spot variants).
+
+#ifndef ATTENUATION_ONLY
+// Octahedral normal decode (same helper as the directional and point paths).
+float3 DecodeOctahedralNormal(float2 enc01)
+{
+    float2 enc = enc01 * 4.0 - 2.0;
+    float  encLenSq = dot(enc, enc);
+    float  z = -(1.0 - encLenSq * 0.5);
+    float  recon = 1.0 - encLenSq * 0.25;
+    float  scale = sqrt(recon);
+    return float3(enc * scale, z);
+}
+#endif
+
+// Entry point (spot variants).
+
+struct PS_INPUT
+{
+    float4 position : SV_POSITION;
+    float4 posUnused : POSITION14;
+};
+
+struct PS_OUTPUT
+{
+    float4 diffuse  : SV_Target0;
+    float4 specular : SV_Target1;
+};
+
+PS_OUTPUT main(PS_INPUT input)
+{
+    PS_OUTPUT output;
+
+    // Screen UV and reconstruction coordinates.
+    float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
+    float2 uv = uv4.xy;
+
+    // Depth sample with derivative-based gradient.
+    float ddx_ = ddx_coarse(uv.x);
+    float ddy_ = ddy_coarse(uv.y);
+    float depth = g_tMainDepth.SampleGrad(g_sMainDepth, uv,
+                                           ddx_.xx, ddy_.xx).x;
+
+    // Depth-based reproject matrix select. The native near test is inclusive
+    // at exactly 0.01, matching directional and point.
+    bool isNearPath = (depth <= 0.01);
+    float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
+    float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
+    float4 reprojRow1 = isNearPath ? NearReproj_row1 : FarReproj_row1;
+    float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
+    float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
+
+    // Reconstruct view-space position.
+    float2 uvNDC = uv4.zw * float2(2.0, -2.0) + float2(-1.0, 1.0);
+    float4 pos4  = float4(uvNDC, linearizedDepth, 1.0);
+    float4 posViewH;
+    posViewH.x = dot(reprojRow0, pos4);
+    posViewH.y = dot(reprojRow1, pos4);
+    posViewH.z = dot(reprojRow2, pos4);
+    posViewH.w = dot(reprojRow3, pos4);
+    float3 posView = posViewH.xyz / posViewH.www;
+
+    // Radial attenuation curve, identical to the point path.
+    float3 toLight      = LightPos_and_Radius.xyz - posView;
+    float  toLightLenSq = dot(toLight, toLight);
+    float  d            = sqrt(toLightLenSq);
+    float  dNorm        = saturate(d / LightPos_and_Radius.w);
+    float  dPowZ        = exp2(log2(dNorm) * cb2_idx3_attenuation_curve.z);
+    float  falloffLin   = saturate(cb2_idx3_attenuation_curve.y * dPowZ
+                                   + cb2_idx3_attenuation_curve.x);
+    float  attenuation  = exp2(log2(1.0 - falloffLin) * 2.2);
+
+#ifdef SPOT
+    // SPOT cone falloff. The native code normalises the light vector before
+    // the early-out because the cone test consumes it.
+    float3 lightDir = toLight * rsqrt(toLightLenSq);
+
+    //   cosA  = saturate(dot(-lightDir, SpotData.xyz))
+    //   coneT = (1 - cosA) / (1 - SpotData.w)
+    //   cone  = min(pow(saturate(1 - coneT), ShadowLightParam.x), 1)
+    // The dot product is saturated, and the trailing min against 1 is present
+    // in the native code; neither may be folded away.
+    float coneCos   = saturate(dot(-lightDir, SpotData.xyz));
+    float coneDenom = 1.0 - SpotData.w;
+    float coneT     = (1.0 - coneCos) / coneDenom;
+    float coneEdge  = saturate(1.0 - coneT);
+    float coneFall  = exp2(log2(coneEdge) * ShadowLightParam.x);
+    coneFall = min(coneFall, 1.0);
+
+    attenuation = coneFall * attenuation;
+#endif
+
+    bool nearZero = (attenuation <= 0.001);
+
+    if (nearZero)
+    {
+        output.diffuse = float4(0, 0, 0, 0);
+        output.specular = float4(0, 0, 0, 0);
+        return output;
+    }
+
+#ifdef POINTSPOT
+    // POINTSPOT normalises the light vector after the early-out; there is no
+    // cone term to consume it beforehand.
+    float3 lightDir = toLight * rsqrt(toLightLenSq);
+#endif
+
+#ifndef ATTENUATION_ONLY
+    // Sample G-buffer material and normal.
+    float4 matSample = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
+    float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
+
+    float3 normalView = DecodeOctahedralNormal(normalEnc);
+
+    float roughness01 = 1.0 - matSample.x;
+#endif
+
+    // Surface-to-camera direction.
+    float posViewLenInv = rsqrt(dot(posView, posView));
+    float3 viewDirNeg = -posView * posViewLenInv.xxx;
+
+#ifdef POINTSPOT
+    // Projected shadow. dp4 through ShadowMapProj then a perspective divide;
+    // the xy half becomes the shadow UV and z the comparison reference.
+    float4 posViewHomog = float4(posView, 1.0);
+    float3 shadowProj;
+    shadowProj.x = dot(cb2_shadowproj_row0, posViewHomog);
+    shadowProj.y = dot(cb2_shadowproj_row1, posViewHomog);
+    shadowProj.z = dot(cb2_shadowproj_row2, posViewHomog);
+    float shadowProjW = dot(cb2_shadowproj_row3, posViewHomog);
+    shadowProj = shadowProj / shadowProjW.xxx;
+
+    float2 shadowUV = shadowProj.xy * 0.5 + 0.5;
+    float  shadowRef = shadowProj.z - cb2_idx15_shadow_sample_param.x;
+
+    float shadowFactor;
+#  if defined(FILTER_POISSON)
+    // 8 iterations, 2 taps each, 16 taps averaged by 1/16.
+    float poissonScale = cb2_idx15_shadow_sample_param.z * 3.0;
+    float poissonSum = 0.0;
+    for (int p = 0; p < 8; ++p)
+    {
+        float2 tap0 = (SPOT_SHADOW_POISSON[p * 2 + 0] - 0.5) * poissonScale;
+        float2 tap1 = (SPOT_SHADOW_POISSON[p * 2 + 1] - 0.5) * poissonScale;
+        poissonSum += g_tSpotShadowAtlas.SampleCmpLevelZero(
+            g_sSpotShadowCmp, float3(tap0 * 2.0 + shadowUV, 0.0), shadowRef);
+        poissonSum += g_tSpotShadowAtlas.SampleCmpLevelZero(
+            g_sSpotShadowCmp, float3(tap1 * 2.0 + shadowUV, 0.0), shadowRef);
+    }
+    shadowFactor = poissonSum / 16.0;
+#  elif defined(FILTER_PCF9)
+    // 3x3 kernel stepped by the shadow-map texel size, averaged by 1/9.
+    float pcfSum = 0.0;
+    for (int i = 0; i < 3; ++i)
+    {
+        for (int j = 0; j < 3; ++j)
+        {
+            float2 tapOffset = float2(i - 1, j - 1)
+                             * cb2_idx15_shadow_sample_param.zw;
+            pcfSum += g_tSpotShadowAtlas.SampleCmpLevelZero(
+                g_sSpotShadowCmp, float3(tapOffset + shadowUV, 0.0), shadowRef);
+        }
+    }
+    shadowFactor = pcfSum / 9.0;
+#  elif defined(FILTER_PCF1)
+    shadowFactor = g_tSpotShadowAtlas.SampleCmpLevelZero(
+        g_sSpotShadowCmp, float3(shadowUV, 0.0), shadowRef);
+#  else
+    // Unfiltered: plain sample plus an explicit compare, yielding 1.0 or 0.0.
+    float shadowDepth = g_tSpotShadowAtlas.Sample(
+        g_sSpotShadow, float3(shadowUV, 0.0)).x;
+    shadowFactor = (shadowDepth >= shadowRef) ? 1.0 : 0.0;
+#  endif
+
+    // Projection edge fade. The v axis is flipped before the fade is measured,
+    // and the same vector feeds the gobo lookup below.
+    float2 projFade = (float2(shadowUV.x, 1.0 - shadowUV.y) - ShadowLightParam.y)
+                    / ShadowLightParam.z;
+    float  projDist = sqrt(dot(projFade, projFade));
+    float  edgeFall = exp2(log2(projDist) * ShadowLightParam.x);
+    edgeFall = min(edgeFall, 1.0);
+    shadowFactor *= (1.0 - edgeFall);
+
+    // Native POINTSPOT distance factor: 1 - t^8, applied as a plain multiply.
+    float shadowDistNorm = saturate(dot(posView, posView)
+                                    / cb2_idx19_shadow_fade.x);
+    float shadowDist2 = shadowDistNorm * shadowDistNorm;
+    float shadowDist4 = shadowDist2 * shadowDist2;
+    shadowFactor *= (1.0 - shadowDist4 * shadowDist4);
+
+    attenuation = attenuation * shadowFactor;
+#endif  // POINTSPOT
+
+#ifndef ATTENUATION_ONLY
+    float NdotL_raw     = dot(normalView, lightDir);
+    float NdotL_sat     = max(NdotL_raw, 0.0);
+    float NdotL_clamped = saturate(NdotL_sat);
+
+    bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
+
+    // Material-code-1 (hair-specular) / default material BRDF. Both branches
+    // are the same code the point permutation already carries.
+    float3 brdfSpecular = float3(0, 0, 0);
+    float  brdfShadowMix = 0.0;
+    if (isMaterial1)
+    {
+        float albedoW = g_tGbufferAlbedo.Sample(g_sGbufferAlbedo, uv).w;
+        float skinNdotL = dot(matSample.xyz, lightDir);
+        float skinNdotV = dot(matSample.xyz, viewDirNeg);
+        float sinScaleL = sqrt(1.0 - min(skinNdotL * skinNdotL, 1.0));
+        float sinScaleV = sqrt(1.0 - min(skinNdotV * skinNdotV, 1.0));
+
+        float sinA1, cosA1;
+        sincos(cb12_idx29_sss_angles.y, sinA1, cosA1);
+        float rot1 = -skinNdotL * cosA1 - sinScaleL * sinA1;
+        float rot1Perp = sqrt(1.0 - rot1 * rot1);
+        float vis1 = max(rot1 * skinNdotV + sinScaleV * rot1Perp, 0.0);
+        float pow1 = exp2(log2(vis1) * cb12_idx28_sss_params.w);
+        float sssIntensity =
+            saturate(cb12_idx28_sss_params.z * pow1 + NdotL_sat);
+        brdfShadowMix = min(albedoW, sssIntensity);
+
+#  ifdef SPECULAR
+        float sinA2, cosA2;
+        sincos(cb12_idx29_sss_angles.x, sinA2, cosA2);
+        float rot2 = -skinNdotL * cosA2 - sinScaleL * sinA2;
+        float rot2Perp = sqrt(1.0 - rot2 * rot2);
+        float vis2 = max(rot2 * skinNdotV + sinScaleV * rot2Perp, 0.0);
+        float pow2 =
+            exp2(log2(vis2) * cb12_idx28_sss_params.y) *
+            cb12_idx28_sss_params.x;
+
+        brdfSpecular = NdotL_clamped * (pow2 * LightColor_HDR.xyz);
+#  endif
+    }
+    else
+    {
+#  ifdef IGNOREROUGHNESS
+        // IGNOREROUGHNESS collapses the default branch to plain N.L.
+        brdfShadowMix = max(dot(lightDir, normalView), 0.0);
+#  else
+        float NdotV_raw = dot(viewDirNeg, normalView);
+        float3 tangentV = viewDirNeg - normalView * NdotV_raw;
+        float3 tangentL = lightDir - normalView * NdotL_raw;
+        float tangentVL = max(dot(tangentV, tangentL), 0.0);
+
+        float roughSq = roughness01 * roughness01;
+        float visA = roughSq / (roughSq + 0.57);
+        float visB = roughSq / (roughSq + 0.09);
+        visB *= 0.45;
+        visA = 1.0 - 0.5 * visA;
+
+        float tangentDenom = max(NdotL_raw, NdotV_raw);
+        float tangentSin = sqrt(saturate((1.0 - NdotV_raw * NdotV_raw)
+                                         * (1.0 - NdotL_raw * NdotL_raw)));
+        float visibilityGeom = tangentVL * visB;
+        visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
+        brdfShadowMix = NdotL_sat * visibilityGeom;
+#  endif
+
+#  ifdef SPECULAR
+        float specExp = exp2(matSample.x * 10.0 + 1.0);
+        float NdotV_spec = dot(viewDirNeg, normalView);
+
+        float3 halfVec = lightDir + viewDirNeg;
+        halfVec *= rsqrt(dot(halfVec, halfVec));
+
+        float NdotV_sat = saturate(NdotV_spec);
+        float VdotH = saturate(dot(viewDirNeg, halfVec));
+        float NdotH = saturate(dot(halfVec, normalView));
+
+        float distributionNorm = (specExp + 2.0) * 0.159155;
+        float distribution = exp2(log2(NdotH) * specExp);
+        distributionNorm *= distribution;
+
+        float VdotH_nonneg = max(VdotH, 0.0);
+        float minN = min(NdotL_clamped, NdotV_sat);
+        float twoNdotH = NdotH + NdotH;
+        bool usePeakRatio = (VdotH_nonneg >= twoNdotH * minN);
+        bool useUnityRatio = (NdotV_sat == minN);
+        float ratioNLNV = NdotL_clamped / NdotV_sat;
+        float ratio = useUnityRatio ? 1.0 : ratioNLNV;
+        float visibility = (twoNdotH * ratio) / VdotH_nonneg;
+        float fallbackVisibility = 1.0 / NdotV_sat;
+        visibility = usePeakRatio ? visibility : fallbackVisibility;
+
+        float oneMinusVdotH = 1.0 - VdotH;
+        float oneMinusVdotH2 = oneMinusVdotH * oneMinusVdotH;
+        float oneMinusVdotH4 = oneMinusVdotH2 * oneMinusVdotH2;
+        float oneMinusVdotH5 = oneMinusVdotH * oneMinusVdotH4;
+        float fresnelTerm =
+            (1.0 - oneMinusVdotH5) * 0.2 + oneMinusVdotH5;
+        fresnelTerm = min(fresnelTerm, 1.0);
+
+        float specMag = visibility * fresnelTerm;
+        specMag = distributionNorm * specMag;
+        specMag *= 0.25;
+        specMag = min(specMag, 15.0);
+        specMag *= matSample.y;
+        specMag *= 3.141593;
+
+        brdfSpecular = NdotL_clamped * (specMag * LightColor_HDR.xyz);
+#  endif
+    }
+
+    float3 diffuseAccum = LightColor_HDR.xyz * brdfShadowMix;
+
+#  if !defined(IGNORERIM) && !defined(IGNOREROUGHNESS)
+    // Rim / backscatter tail. Both IGNORERIM and IGNOREROUGHNESS remove it:
+    // the term is scaled by the smoothness that IGNOREROUGHNESS deletes.
+    float NdotV_view = saturate(dot(normalView, viewDirNeg));
+    float edge = exp2(log2(1.0 - NdotV_view) * 0.01);
+    float toLightDotView = saturate(dot(viewDirNeg, -lightDir));
+    float ambientTerm = toLightDotView * edge * NdotL_clamped * roughness01;
+    diffuseAccum = LightColor_HDR.xyz * ambientTerm + diffuseAccum;
+#  endif
+#else   // ATTENUATION_ONLY
+    // ATTENUATION_ONLY runs no BRDF at all: the light colour is modulated by
+    // the attenuation and shadow terms and nothing else.
+    float3 diffuseAccum = LightColor_HDR.xyz;
+    float3 brdfSpecular = float3(0, 0, 0);
+#endif
+
+#ifdef GOBOPROJECTION
+#  ifdef SPOT
+    // SPOT gobo: a plain planar projective cookie. Row 2 of ShadowMapProj is
+    // deliberately not read. This is NOT the point path's dual-paraboloid
+    // fold - no SPOT blob evaluates a hemisphere sign.
+    float4 goboHomog = float4(posView, 1.0);
+    float2 goboProj;
+    goboProj.x = dot(cb2_gobo_row0, goboHomog);
+    goboProj.y = dot(cb2_gobo_row1, goboHomog);
+    float goboW = dot(cb2_gobo_row3, goboHomog);
+    float2 goboUV = (goboProj / goboW.xx) * 0.5 + 0.5;
+#  else
+    // POINTSPOT gobo: reuses the shadow projection through the same
+    // ShadowLightParam remap that drives the edge fade, with the v axis
+    // negated.
+    float2 goboUV = float2(projFade.x, -projFade.y) * 0.5 + 0.5;
+#  endif
+    float3 cookieRGB = g_tLightCookie.Sample(g_sLightCookie, goboUV).xyz;
+
+    diffuseAccum *= cookieRGB;
+    brdfSpecular *= cookieRGB;
+#endif
+
+    output.specular.xyz = attenuation * brdfSpecular;
+    output.specular.w   = 1.0;
+    output.diffuse.xyz  = (attenuation * diffuseAccum) / 3.0;
+    output.diffuse.w    = 0.0;
+
+    return output;
+}
+
+#endif // LIGHT_TYPE == LIGHT_TYPE_SPOT
+
+// Spot reconstruction status.
+// Evidence: archive-only. `light-blob-enumeration.json` (schema
+// fo4re.light-blob-enumeration v1, runtime profile AE-1.11.221) decodes 9
+// SPOT and 27 POINTSPOT blobs out of the 166-blob BSDFLightShader set, with a
+// 166/166 constant-table closure PASS. Every route in that table carries
+// opaque_psid_status "not-observed" and raw_technique_status
+// "hypothesis-matched", so this is archive evidence, not an observed engine
+// route - the same standing as the already-shipped point permutation.
+// NOT proven: `shader_exec_diff` harness v4 cannot measure any of the 36
+// blobs. Its point-lighting-live contract requires CB2 to be exactly 15
+// float4, exactly five Texture2D at t0..t3/t7 and no comparison sampler,
+// whereas every spot blob declares CB2[21] and POINTSPOT additionally binds a
+// Texture2DArray and (under FILTER_*) a mode_comparison sampler. Profile
+// detection therefore returns Unshaped and the run stops before any pixel
+// comparison. The producer must add spot input profiles, constant shaping and
+// bucket predicates, and must split LIGHT_TYPE=3 into per-family defines,
+// before a conformance entry can exist for either permutation.
+// Consequently `scripts/shaders/shader-fidelity-conformance.json` carries no
+// spot target and, by that manifest's own rule, absence is a fidelity claim
+// of "none" for both permutations here.
+// Runtime scope: AE 1.11.221 only. OG and NG archives were never enumerated.
