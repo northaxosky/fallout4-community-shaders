@@ -21,6 +21,26 @@
 #  error "LIGHT_TYPE must be DIRECTIONAL (1), POINT (2), or SPOT (3)"
 #endif
 
+// Cross-LIGHT_TYPE macro validation. Both facts are measured over the 151
+// decoded blobs, not assumed.
+//
+// HALFOMNI appears in 12 blobs and every one of them is POINTOMNI+SHADOW; it
+// never appears on a directional, point, spot or pointspot blob. Reaching any
+// path with HALFOMNI but no POINTOMNI therefore means the macro set was
+// mis-assembled, and silently ignoring it would hide that.
+#if defined(HALFOMNI) && !defined(POINTOMNI)
+#  error "HALFOMNI only ever occurs with POINTOMNI; this macro set is malformed"
+#endif
+
+// POINTOMNI+SHADOW is the projected-shadow ABI and belongs on LIGHT_TYPE=3.
+// Routing it to the legacy point path is the exact misroute this reconstruction
+// exists to correct, so it fails closed instead of compiling something whose
+// declarations do not match any blob. POINTOMNI *without* SHADOW is a genuine
+// LIGHT_TYPE=2 macro set and stays admitted.
+#if LIGHT_TYPE == LIGHT_TYPE_POINT && defined(POINTOMNI) && defined(SHADOW)
+#  error "POINTOMNI with SHADOW is the LIGHT_TYPE=3 projected-shadow ABI, not LIGHT_TYPE=2"
+#endif
+
 // LIGHT_TYPE=3 covers three disjoint native families. They share the gbuffer
 // decode, BRDF and epilogue but not the constant-buffer layout, the resource
 // set or the light term, so the native macros must select the ABI.
@@ -68,11 +88,13 @@
 #  if defined(POINTOMNI) && defined(ATTENUATION_ONLY)
 #    error "no native POINTOMNI blob carries ATTENUATION_ONLY"
 #  endif
-#  if (defined(FILTER_PCF1) + defined(FILTER_PCF9) + defined(FILTER_POISSON)) > 1
+#  if (defined(FILTER_PCF1) + defined(FILTER_PCF9) + defined(FILTER_PCSS) \
+        + defined(FILTER_POISSON) + defined(FILTER_PCSSPOISSON)) > 1
 #    error "FILTER_* macros are mutually exclusive"
 #  endif
 #  if defined(SPOT) \
-      && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))
+      && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_PCSS) \
+          || defined(FILTER_POISSON) || defined(FILTER_PCSSPOISSON))
 #    error "no native SPOT blob carries a FILTER_* macro"
 #  endif
 
@@ -82,6 +104,16 @@
 // and no define is fabricated on either side.
 #  if defined(POINTSPOT) || (defined(POINTOMNI) && defined(SHADOW))
 #    define FO4_PROJECTED_SHADOW_FAMILY 1
+#  endif
+
+// The projected-shadow family filters at PCF1, PCF9 or POISSON only. Across the
+// 151 decoded blobs, all 15 FILTER_PCSS and all 3 FILTER_PCSSPOISSON records are
+// DIRECTIONAL; none is SPOT, POINTSPOT or POINTOMNI. There is nothing to
+// reconstruct here, so the two macros fail closed rather than silently
+// selecting the wrong kernel.
+#  if defined(FO4_PROJECTED_SHADOW_FAMILY) \
+      && (defined(FILTER_PCSS) || defined(FILTER_PCSSPOISSON))
+#    error "no native POINTSPOT or POINTOMNI blob carries FILTER_PCSS or FILTER_PCSSPOISSON"
 #  endif
 
 // HALFOMNI is carried by 12 of the 30 POINTOMNI+SHADOW records and by no other

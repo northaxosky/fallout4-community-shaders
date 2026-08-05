@@ -97,7 +97,7 @@ jobs:
           }
           cmake -S . --preset=ci
 
-      - name: Verify shader roundtrip baselines
+      - name: Verify shader parity gates
         shell: pwsh
         run: |
           $kitsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
@@ -111,7 +111,9 @@ jobs:
           }
 
           $env:FXC_PATH = $fxc.FullName
-          ctest --test-dir build -C Release -R ShaderRoundtrip --output-on-failure --no-tests=error
+          # The `parity` label is exactly the fxc-driven, build-independent
+          # gates: ShaderRoundtrip, FilterAxisNativeShex, PointOmniShadowAdmission.
+          ctest --test-dir build -C Release -L parity --output-on-failure --no-tests=error
 
       - name: Build
         run: cmake --build build --config Release --parallel
@@ -119,4 +121,4 @@ jobs:
       - name: Run unit + shader-compile tests
         shell: pwsh
         run: |
-          ctest --test-dir build -C Release -E ShaderRoundtrip --output-on-failure --no-tests=error
+          ctest --test-dir build -C Release -LE parity --output-on-failure --no-tests=error

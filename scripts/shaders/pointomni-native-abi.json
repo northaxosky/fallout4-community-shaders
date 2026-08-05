@@ -562,6 +562,7 @@
     {
       "reason": "POINTOMNI without SHADOW is a LIGHT_TYPE=2 ABI",
       "defines": [
+        "LIGHT_TYPE=3",
         "POINTOMNI=1",
         "DIRSPLITS=2",
         "RGBSPEC=1"
@@ -570,6 +571,7 @@
     {
       "reason": "no native blob carries POINTOMNI with POINTSPOT",
       "defines": [
+        "LIGHT_TYPE=3",
         "POINTOMNI=1",
         "SHADOW=1",
         "POINTSPOT=1"
@@ -578,6 +580,7 @@
     {
       "reason": "no native blob carries POINTOMNI with SPOT",
       "defines": [
+        "LIGHT_TYPE=3",
         "POINTOMNI=1",
         "SHADOW=1",
         "SPOT=1"
@@ -586,9 +589,210 @@
     {
       "reason": "no native POINTOMNI blob carries ATTENUATION_ONLY",
       "defines": [
+        "LIGHT_TYPE=3",
         "POINTOMNI=1",
         "SHADOW=1",
         "ATTENUATION_ONLY=1"
+      ]
+    },
+    {
+      "reason": "FILTER_* macros are mutually exclusive (PCF1 + PCF9)",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTOMNI=1",
+        "SHADOW=1",
+        "FILTER_PCF1=1",
+        "FILTER_PCF9=1"
+      ]
+    },
+    {
+      "reason": "mutual exclusion must cover FILTER_PCSS (PCF1 + PCSS)",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTOMNI=1",
+        "SHADOW=1",
+        "FILTER_PCF1=1",
+        "FILTER_PCSS=1"
+      ]
+    },
+    {
+      "reason": "mutual exclusion must cover FILTER_PCSSPOISSON (POISSON + PCSSPOISSON)",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTOMNI=1",
+        "SHADOW=1",
+        "FILTER_POISSON=1",
+        "FILTER_PCSSPOISSON=1"
+      ]
+    },
+    {
+      "reason": "no native POINTOMNI blob carries FILTER_PCSS",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTOMNI=1",
+        "SHADOW=1",
+        "FILTER_PCSS=1"
+      ]
+    },
+    {
+      "reason": "no native POINTOMNI blob carries FILTER_PCSSPOISSON",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTOMNI=1",
+        "SHADOW=1",
+        "FILTER_PCSSPOISSON=1"
+      ]
+    },
+    {
+      "reason": "no native POINTSPOT blob carries FILTER_PCSS",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTSPOT=1",
+        "SHADOW=1",
+        "FILTER_PCSS=1"
+      ]
+    },
+    {
+      "reason": "no native POINTSPOT blob carries FILTER_PCSSPOISSON",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTSPOT=1",
+        "SHADOW=1",
+        "FILTER_PCSSPOISSON=1"
+      ]
+    },
+    {
+      "reason": "no native SPOT blob carries FILTER_PCSS",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "SPOT=1",
+        "FILTER_PCSS=1"
+      ]
+    },
+    {
+      "reason": "HALFOMNI only ever occurs with POINTOMNI",
+      "defines": [
+        "LIGHT_TYPE=3",
+        "POINTSPOT=1",
+        "SHADOW=1",
+        "HALFOMNI=1"
+      ]
+    },
+    {
+      "reason": "HALFOMNI without POINTOMNI is malformed on the point path too",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "HALFOMNI=1"
+      ]
+    },
+    {
+      "reason": "POINTOMNI with SHADOW must not route to the legacy point path",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "POINTOMNI=1",
+        "SHADOW=1",
+        "DIRSPLITS=2",
+        "RGBSPEC=1"
+      ]
+    }
+  ],
+  "rejected_note": "Each case carries its own complete define list, LIGHT_TYPE included, because some of them are rejections of a LIGHT_TYPE=2 misroute. common_defines is not applied here.",
+  "compile_only_note": "Compile-only regression, NOT an ABI claim. These are the 9 native POINTOMNI macro sets without SHADOW; they must keep compiling on the legacy point path, which is what the LIGHT_TYPE=2 + POINTOMNI + SHADOW rejection could otherwise break.",
+  "compile_only": [
+    {
+      "native_blob_sha1": "12d92cd37efa9722bd27657f54fcddf1879170cd",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "native_blob_sha1": "9969e800683c8a7c8afc25f41582415d79cbe47e",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "native_blob_sha1": "9f44ba67a6ec8e3b9bf8b979e79bc563249fd0d7",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "native_blob_sha1": "a65b5952a6484b6a3adc9b4a14bea3d2eeff5059",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "native_blob_sha1": "b4337a894d9335e2d96487eb0c4faeffebdf8c3d",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "native_blob_sha1": "d3331d19dfc93b63d3e078d5fa1db51689a206aa",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "native_blob_sha1": "f33e32f9c8022c1739991fdc8d543f0d94a7c4a0",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "native_blob_sha1": "fa6948bafbdfb46c8af31caff6690ac2161ce8d5",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "native_blob_sha1": "fcabd74908d7044bf0cbf0303679775501a0f235",
+      "defines": [
+        "LIGHT_TYPE=2",
+        "DIRSPLITS=2",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
       ]
     }
   ]

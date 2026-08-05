@@ -132,9 +132,14 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   `LIGHT_TYPE=3` guards reject it explicitly.
 
   `scripts/shaders/verify-pointomni-admission.ps1` (CTest
-  `PointOmniShadowAdmission`) re-measures all 30 and fails closed, and also
-  asserts that the four rejected macro sets still refuse to compile so the
-  admission cannot widen silently.
+  `PointOmniShadowAdmission`) re-measures all 30 and fails closed. It also
+  asserts that 15 malformed macro sets still refuse to compile — POINTOMNI
+  without `SHADOW`, POINTOMNI with `SPOT`/`POINTSPOT`/`ATTENUATION_ONLY`, two
+  `FILTER_*` at once, `FILTER_PCSS`/`FILTER_PCSSPOISSON` anywhere on this path
+  (all 15 PCSS and all 3 PCSSPOISSON blobs in the archive are DIRECTIONAL),
+  `HALFOMNI` without POINTOMNI, and POINTOMNI+SHADOW misrouted to
+  `LIGHT_TYPE=2` — and that the 9 native POINTOMNI-without-SHADOW macro sets
+  still compile on `LIGHT_TYPE=2`, so the guards cannot over-reach.
 * **`bsdf_light_deferred_shadow_only.hlsl`** - **native SHEX identical, 6/6**.
   The native `DIRECTIONAL` + `SHADOW_ONLY` family, and the only place in the
   archive where the `FILTER_*` axis appears as a controlled minimal pair: six

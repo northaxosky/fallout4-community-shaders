@@ -13,7 +13,9 @@
     excluded on purpose - it is register allocation, not ABI.
 
     It also asserts that the macro sets in the `rejected` list still fail to
-    compile, so the admission cannot silently widen.
+    compile, so the admission cannot silently widen, and that the `compile_only`
+    list still compiles, so the fail-closed guards cannot over-reach and lock
+    out a legitimate macro set.
 
     The pinned values come from the game bytecode, so this cannot bless its own
     output. It is an ABI claim only: the body is the POINTSPOT reconstruction
@@ -128,6 +130,7 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("fo4cs-pointomni-" + [Guid]::N
 $failures = @()
 $checked = 0
 $rejectedChecked = 0
+$compileOnlyChecked = 0
 try {
     New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
 
@@ -184,9 +187,22 @@ try {
     foreach ($case in $manifest.rejected) {
         ++$index
         ++$rejectedChecked
-        $result = Invoke-Fxc (@($manifest.common_defines) + @($case.defines)) "rejected$index"
+        # Rejected cases are self-contained: they carry their own LIGHT_TYPE
+        # because some of them reject a LIGHT_TYPE=2 misroute.
+        $result = Invoke-Fxc @($case.defines) "rejected$index"
         if ($result.ExitCode -eq 0) {
             $failures += "rejected case compiled but must not: $($case.reason)"
+        }
+    }
+
+    $index = 0
+    foreach ($case in $manifest.compile_only) {
+        ++$index
+        ++$compileOnlyChecked
+        $result = Invoke-Fxc @($case.defines) "compileonly$index"
+        if ($result.ExitCode -ne 0) {
+            $failures += ("compile-only case must still compile: " +
+                "$($case.native_blob_sha1.Substring(0, 8))`n$($result.Output)")
         }
     }
 } finally {
@@ -199,11 +215,15 @@ if ($checked -ne $manifest.entries.Count -or $checked -eq 0) {
 if ($rejectedChecked -ne $manifest.rejected.Count) {
     Exit-WithError "checked $rejectedChecked of $($manifest.rejected.Count) rejected cases"
 }
+if ($compileOnlyChecked -ne $manifest.compile_only.Count) {
+    Exit-WithError "checked $compileOnlyChecked of $($manifest.compile_only.Count) compile-only cases"
+}
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Host "ERROR: $failure" }
     Exit-WithError "$($failures.Count) POINTOMNI+SHADOW admission check(s) failed"
 }
 
 Write-Host ("PASS: $checked / $checked POINTOMNI+SHADOW permutations match the native ABI; " +
-    "$rejectedChecked / $rejectedChecked rejected macro sets still refuse to compile.")
+    "$rejectedChecked / $rejectedChecked rejected macro sets still refuse to compile; " +
+    "$compileOnlyChecked / $compileOnlyChecked LIGHT_TYPE=2 macro sets still compile.")
 exit 0
