@@ -29,8 +29,9 @@
 // not on its instruction stream. `scripts/shaders/verify-native-abi-admission.ps1`
 // re-measures, for all 29 native macro sets, that the reconstruction declares
 // the same constant buffers, SRVs, samplers and signature as the blob the macro
-// set came from, and that it reads the same set of constant-buffer registers.
-// That is a contract claim only. Unlike the DIRSPLITS=1
+// set came from, that it reads the same set of constant-buffer registers, and -
+// on the 18 whose bodies are reconstructed - that it reads each of them the same
+// number of times. That is a contract claim only. Unlike the DIRSPLITS=1
 // SHADOW_ONLY family, whose small body is solved to byte-identical SHEX, the
 // full BRDF core here is structurally reconstructed and its instruction stream
 // is expected to diverge - native unrolls the PCSS blocker search where this
@@ -718,6 +719,15 @@ PS_OUTPUT main(PS_INPUT input)
 //   + IGNOREROUGHNESS                                               6652 B
 // differ in the ambient-specular exponent path, not merely in register
 // allocation. Reconstructing that is a separate solve.
+//
+// That gap is measured, not just asserted. The admission gate pins native
+// per-register constant read-counts, and the 11 macro sets whose counts diverge
+// from this reconstruction are exactly the 11 that carry IGNOREROUGHNESS, with
+// nothing on either side of the difference - always the same two registers,
+// cb2[1] and cb2[2], which the missing exponent path would have read again. The
+// manifest therefore names IGNOREROUGHNESS as its one count-exemption axis and
+// the verifier re-derives the exemption from each entry's own macro set, so it
+// cannot be widened to cover an unrelated divergence.
 //
 // The macro is therefore left defined and unhandled rather than #undef'd or
 // treated as a no-op, exactly as HALFOMNI is in the POINTOMNI+SHADOW family:

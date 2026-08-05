@@ -16,6 +16,13 @@
     declaration set and catches a dropped or invented constant read that
     identical declarations would otherwise hide.
 
+    Where an entry pins `cb_read_counts` and is marked `body_reconstructed`, it
+    compares how many times each of those registers is read, which is finer
+    still. An entry may opt out of that last check only by carrying the single
+    macro named in `scope.count_exemption_axis` and giving a reason, so an
+    unreconstructed axis stays visible and countable instead of becoming a
+    free-form exemption list.
+
     It also asserts that the macro sets in the `rejected` list still fail to
     compile, so the admission cannot silently widen, and that the `compile_only`
     list still compiles, so the fail-closed guards cannot over-reach and lock
@@ -143,6 +150,32 @@ function ConvertTo-ExpectedReadSet($CbReads) {
     return ($parts -join ' ')
 }
 
+# How many times the body reads each constant register. This is the finest of
+# the three pins. It is sensitive to whether a body is reconstructed at all,
+# so an entry may only
+# opt out of it along the single named axis the manifest declares.
+function Get-ConstantReadCounts([string[]]$Listing) {
+    $counts = [Collections.Specialized.OrderedDictionary]::new()
+    foreach ($line in $Listing) {
+        $text = $line.Trim()
+        if (-not $text -or $text.StartsWith('dcl_') -or $text.StartsWith('//')) { continue }
+        foreach ($match in [regex]::Matches($text, '\bcb(\d+)\[(\d+)\]')) {
+            $key = "cb$($match.Groups[1].Value)[$($match.Groups[2].Value)]"
+            if ($counts.Contains($key)) { $counts[$key] = [int]$counts[$key] + 1 }
+            else { $counts[$key] = 1 }
+        }
+    }
+    $parts = foreach ($key in ($counts.Keys | Sort-Object)) { "$key=$($counts[$key])" }
+    return ($parts -join ' ')
+}
+
+function ConvertTo-ExpectedReadCounts($CbReadCounts) {
+    $parts = foreach ($property in ($CbReadCounts.PSObject.Properties | Sort-Object Name)) {
+        "$($property.Name)=$($property.Value)"
+    }
+    return ($parts -join ' ')
+}
+
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     Exit-WithError "evidence file not found: $ManifestPath" 2
 }
@@ -159,6 +192,7 @@ $reportLabel = Get-OptionalMember $manifest.scope 'report_label'
 if (-not $reportLabel) { $reportLabel = $manifest.scope.family }
 $compileOnlyLabel = Get-OptionalMember $manifest.scope 'compile_only_label'
 if (-not $compileOnlyLabel) { $compileOnlyLabel = 'compile-only' }
+$countExemptionAxis = Get-OptionalMember $manifest.scope 'count_exemption_axis'
 
 $fxcCommand = $null
 if (Test-Path -LiteralPath $FxcPath -PathType Leaf) {
@@ -179,6 +213,8 @@ $includePath = Split-Path -Parent $sourcePath
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("fo4cs-abi-" + [Guid]::NewGuid().ToString('n'))
 $failures = @()
 $checked = 0
+$countChecked = 0
+$countExempt = 0
 $rejectedChecked = 0
 $compileOnlyChecked = 0
 try {
@@ -241,6 +277,33 @@ try {
                     "`n    ours  : $actualReads")
             }
         }
+        $pinnedCounts = Get-OptionalMember $entry 'cb_read_counts'
+        $reconstructed = Get-OptionalMember $entry 'body_reconstructed'
+        if ($null -eq $reconstructed) { $reconstructed = $true }
+        if ($pinnedCounts -and $reconstructed) {
+            ++$countChecked
+            $actualCounts = Get-ConstantReadCounts (Get-Content -LiteralPath $result.Listing)
+            $expectedCounts = ConvertTo-ExpectedReadCounts $pinnedCounts
+            if ($actualCounts -cne $expectedCounts) {
+                $failures += ("$tag`: constant read-counts differ from the native blob" +
+                    "`n    native: $expectedCounts" +
+                    "`n    ours  : $actualCounts")
+            }
+        } elseif ($pinnedCounts) {
+            # An entry may only skip the read-count check by carrying the one
+            # axis the manifest names as unreconstructed. Without this, the
+            # exemption would be a free-form list anyone could quietly widen.
+            ++$countExempt
+            if (-not $countExemptionAxis) {
+                $failures += "$tag`: body_reconstructed is false but the manifest declares no count_exemption_axis"
+            } elseif (@($entry.defines) -notcontains $countExemptionAxis -and
+                      @($entry.defines) -notcontains "$countExemptionAxis=1") {
+                $failures += ("$tag`: exempt from the read-count check without carrying " +
+                    "$countExemptionAxis`n    defines: $(@($entry.defines) -join ' ')")
+            } elseif (-not (Get-OptionalMember $entry 'count_exempt_reason')) {
+                $failures += "$tag`: exempt from the read-count check with no count_exempt_reason"
+            }
+        }
     }
 
     $index = 0
@@ -280,13 +343,20 @@ if ($rejectedChecked -ne $manifest.rejected.Count) {
 if ($compileOnlyChecked -ne $manifest.compile_only.Count) {
     Exit-WithError "checked $compileOnlyChecked of $($manifest.compile_only.Count) compile-only cases"
 }
+if (($countChecked + $countExempt) -ne $checked) {
+    Exit-WithError ("read-count pin missing: $($countChecked + $countExempt) of $checked entries carry cb_read_counts")
+}
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Host "ERROR: $failure" }
     Exit-WithError "$($failures.Count) $reportLabel admission check(s) failed"
 }
 
+$countNote = "$countChecked / $checked also match its read-counts"
+if ($countExempt -gt 0) {
+    $countNote += " ($countExempt exempt: $countExemptionAxis is unreconstructed)"
+}
 Write-Host ("PASS: $checked / $checked $reportLabel permutations match the native ABI " +
-    "and constant read-set; " +
+    "and constant read-set, $countNote; " +
     "$rejectedChecked / $rejectedChecked rejected macro sets still refuse to compile; " +
     "$compileOnlyChecked / $compileOnlyChecked $compileOnlyLabel still compile.")
 exit 0

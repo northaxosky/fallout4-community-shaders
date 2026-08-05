@@ -6,8 +6,9 @@
     "runtime": "AE 1.11.221 archive blob set",
     "report_label": "DIRSPLITS=2 DIRECTIONAL",
     "compile_only_label": "independent-axis macro sets",
-    "note": "Consumer-local admission gate. Each entry pins the declaration set and the constant-buffer read-set of a native archive blob, measured from the corpus, and the check passes only when the reconstruction compiled from that blob's own macro set declares and reads the same thing. The pinned values come from the game bytecode, never from this repo's output. This is an ABI claim only: the full BRDF core is structurally reconstructed rather than solved to byte-identical SHEX, IGNOREROUGHNESS is admitted but unreconstructed, and execution proof stays with the producer oracle. dcl_temps is excluded because it is register allocation, not ABI; it is 10 for every filter here except FILTER_POISSON, which is 11.",
-    "evidence": "Declarations and read-sets were measured by disassembling each blob with fxc /dumpbin. The 29 blobs collapse to exactly three declaration groups, and the group is a function of the FILTER axis alone: AMBIENT, BLENDSPLIT and IGNOREROUGHNESS move the instruction stream but not the contract. The read-set is finer than the declaration set and does separate them - BLENDSPLIT drops the cb2[9] SplitDistances read, because it replaces the split gate with the smoothstep cascade blend and lets DirectionalAmbient extend over cb2[6..9]. Pinning the read-set is what makes a silently dropped or invented constant read a gate failure rather than an unnoticed divergence."
+    "count_exemption_axis": "IGNOREROUGHNESS",
+    "note": "Consumer-local admission gate. Each entry pins three things measured from a native archive blob - its declaration set, the set of constant-buffer registers its body reads, and how many times it reads each - and the check passes only when the reconstruction compiled from that blob's own macro set agrees. The pinned values come from the game bytecode, never from this repo's output. This is an ABI claim only: the full BRDF core is structurally reconstructed rather than solved to byte-identical SHEX, and execution proof stays with the producer oracle. dcl_temps is excluded because it is register allocation, not ABI; it is 10 for every filter here except FILTER_POISSON, which is 11.",
+    "evidence": "Declarations, read-sets and read-counts were measured by disassembling each blob with fxc /dumpbin. The 29 blobs collapse to exactly three declaration groups, and the group is a function of the FILTER axis alone: AMBIENT, BLENDSPLIT and IGNOREROUGHNESS move the instruction stream but not the contract. The read-set is finer and does separate them - BLENDSPLIT drops the cb2[9] SplitDistances read, because it replaces the split gate with the smoothstep cascade blend and lets DirectionalAmbient extend over cb2[6..9]. The read-count is finer still: it is exact on all 18 entries whose bodies are reconstructed, and diverges on exactly the 11 IGNOREROUGHNESS entries, whose ambient-specular exponent path is deliberately unreconstructed. That the divergent set and the IGNOREROUGHNESS set are identical, with nothing on either side, is why the exemption is expressed as one named axis the verifier re-derives rather than as a hand-maintained list."
   },
   "compiler": {
     "name": "fxc",
@@ -132,6 +133,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_s4",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -160,6 +163,31 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -176,6 +204,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_s4",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -207,6 +237,34 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -224,6 +282,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_s4",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -255,6 +315,34 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -272,6 +360,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -303,6 +393,34 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -319,6 +437,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -347,6 +467,31 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -365,6 +510,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -396,6 +543,34 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -414,6 +589,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -444,6 +621,33 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -461,6 +665,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -489,6 +695,31 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -506,6 +737,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -533,6 +766,30 @@
           16,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -549,6 +806,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -578,6 +837,32 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -596,6 +881,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -627,6 +914,34 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -644,6 +959,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -676,6 +993,35 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -694,6 +1040,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -726,6 +1074,35 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -743,6 +1120,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -771,6 +1150,31 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -789,6 +1193,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -817,6 +1223,31 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -836,6 +1267,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -867,6 +1300,34 @@
           20,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -884,6 +1345,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -914,6 +1377,33 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[21]": 6,
+        "cb2[22]": 6,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -931,6 +1421,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -964,6 +1456,36 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[21]": 6,
+        "cb2[22]": 6,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -982,6 +1504,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -1015,6 +1539,36 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[21]": 6,
+        "cb2[22]": 6,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1031,6 +1585,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1061,6 +1617,33 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[21]": 6,
+        "cb2[22]": 6,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1079,6 +1662,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1111,6 +1696,35 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[21]": 6,
+        "cb2[22]": 6,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1128,6 +1742,8 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1157,6 +1773,32 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[21]": 6,
+        "cb2[22]": 6,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1174,6 +1816,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1208,6 +1852,37 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1225,6 +1900,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1255,6 +1932,33 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1274,6 +1978,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -1307,6 +2013,36 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1325,6 +2061,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -1355,6 +2093,33 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1373,6 +2138,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": false,
+      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
       "cb_reads": {
         "cb12": [
           20,
@@ -1407,6 +2174,37 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 3,
+        "cb2[2]": 5,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1423,6 +2221,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1454,6 +2254,34 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[9]": 1,
+        "cb2[10]": 2,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     },
     {
@@ -1472,6 +2300,8 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
       "cb_reads": {
         "cb12": [
           20,
@@ -1505,6 +2335,36 @@
           22,
           24
         ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[10]": 5,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb2[15]": 1,
+        "cb2[16]": 1,
+        "cb2[20]": 2,
+        "cb2[21]": 2,
+        "cb2[22]": 2,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1
       }
     }
   ],

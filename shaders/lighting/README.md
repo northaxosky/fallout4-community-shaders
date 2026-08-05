@@ -195,8 +195,8 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   |---|---|---|
   | (none)           | 3 | `t4`/`s4` mode_default (raw tap, compare in the shader) |
   | `FILTER_PCF1`    | 6 | `t5`/`s5` mode_comparison |
-  | `FILTER_PCF9`    | 6 | `t5`/`s5` mode_comparison |
-  | `FILTER_POISSON` | 8 | `t5`/`s5` mode_comparison |
+  | `FILTER_PCF9`    | 7 | `t5`/`s5` mode_comparison |
+  | `FILTER_POISSON` | 7 | `t5`/`s5` mode_comparison |
   | `FILTER_PCSS`    | 6 | `t4`/`s4` mode_default **and** `t5`/`s5` mode_comparison |
 
   `BLENDSPLIT` is one coupled axis, not two independent edits: it removes the
@@ -217,14 +217,25 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   `scripts/shaders/verify-native-abi-admission.ps1` (CTest
   `DirSplits2DirectionalAdmission`) re-measures all 29 against
-  `dirsplits2-native-abi.json` and fails closed. Each entry pins two things
-  taken from the game bytecode - the blob's declaration set and the set of
-  constant-buffer registers its body actually reads - so the gate cannot bless
-  this repository's output. The read-set is the finer of the two and separates
-  macro sets the declarations cannot: a `BLENDSPLIT` blob reads `cb2[6..8]` and
-  never `cb2[9]`, while its plain counterpart reads `cb2[9]` as
-  `SplitDistances`. Pinning it makes a dropped or invented constant read a gate
-  failure rather than an unnoticed divergence.
+  `dirsplits2-native-abi.json` and fails closed. Each entry pins three things
+  taken from the game bytecode - the blob's declaration set, the set of
+  constant-buffer registers its body reads, and how many times it reads each -
+  so the gate cannot bless this repository's output.
+
+  Those three pins are progressively finer. The read-set separates macro sets
+  the declarations cannot: a `BLENDSPLIT` blob reads `cb2[6..8]` and never
+  `cb2[9]`, while its plain counterpart reads `cb2[9]` as `SplitDistances`. The
+  read-count is finer still, and is where the `IGNOREROUGHNESS` gap becomes
+  measurable rather than merely stated: counts are exact on all 18 entries whose
+  bodies are reconstructed, and differ on exactly the 11 `IGNOREROUGHNESS`
+  entries - always the same two registers, `cb2[1]` and `cb2[2]`, which the
+  unreconstructed ambient-specular exponent path would have read again. The
+  divergent set and the `IGNOREROUGHNESS` set are identical with nothing on
+  either side, which is why the exemption is declared as one named axis in
+  `scope.count_exemption_axis` and re-derived by the verifier: an entry may skip
+  the count check only by carrying that macro and giving a reason, so the
+  exemption cannot be quietly widened to hide a real divergence.
+
 
   The gate also asserts that 16 malformed or out-of-scope macro sets still
   refuse to compile - `FILTER_PCSSPOISSON`, `DIRSPLITS` of 1/3/4/absent, two
@@ -234,12 +245,12 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   that are legal natively but happen to have no archive blob still compile, so
   the guards cannot over-reach.
 
-  This is an ABI claim, not SHEX equality. The declarations and constant
-  read-sets are measured; the BRDF core is a structural reconstruction, and
-  execution proof stays with the producer oracle. The verifier is
-  family-agnostic and driven entirely from its manifest, so the `DIRSPLITS=3`
-  layer needs an evidence file and a test registration rather than a third copy
-  of the script.
+  This is an ABI claim, not SHEX equality. The declarations, constant read-sets
+  and - on the 18 reconstructed bodies - constant read-counts are measured; the
+  BRDF core is a structural reconstruction, and execution proof stays with the
+  producer oracle. The verifier is family-agnostic and driven entirely from its
+  manifest, so the `DIRSPLITS=3` layer needs an evidence file and a test
+  registration rather than a third copy of the script.
 
 ## Workflow
 
