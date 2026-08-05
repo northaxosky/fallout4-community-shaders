@@ -2,6 +2,7 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Render/EnginePixelShaderLookup.h"
+#include "Render/ShaderMacroDiagnostics.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SwapChainHook.h"
 #include "Settings/FeatureConfig.h"
@@ -76,6 +77,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 
 	cs::engine::InstallShaderSubclassHooks();
 	cs::engine::InstallEnginePixelShaderLookupHooks();
+	cs::engine::InstallShaderMacroDiagnostics();
 
 	auto& featureManager = cs::FeatureManager::Get();
 	featureManager.PrepareAll();
