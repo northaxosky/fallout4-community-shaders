@@ -431,3 +431,15 @@ set_tests_properties(FilterAxisNativeShex PROPERTIES
 	LABELS "shader;parity"
 	TIMEOUT 300
 )
+
+set(_pointomni_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-pointomni-admission.ps1")
+add_test(
+	NAME PointOmniShadowAdmission
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_pointomni_script}' -FxcPath $env:FXC_PATH } else { & '${_pointomni_script}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(PointOmniShadowAdmission PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 600
+)

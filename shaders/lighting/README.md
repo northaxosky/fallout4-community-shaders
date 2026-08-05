@@ -130,6 +130,11 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   defined and unreconstructed rather than rejected or erased. POINTOMNI
   *without* `SHADOW` is a different ABI and stays on `LIGHT_TYPE=2`; the
   `LIGHT_TYPE=3` guards reject it explicitly.
+
+  `scripts/shaders/verify-pointomni-admission.ps1` (CTest
+  `PointOmniShadowAdmission`) re-measures all 30 and fails closed, and also
+  asserts that the four rejected macro sets still refuse to compile so the
+  admission cannot widen silently.
 * **`bsdf_light_deferred_shadow_only.hlsl`** - **native SHEX identical, 6/6**.
   The native `DIRECTIONAL` + `SHADOW_ONLY` family, and the only place in the
   archive where the `FILTER_*` axis appears as a controlled minimal pair: six
