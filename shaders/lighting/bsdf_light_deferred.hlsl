@@ -41,24 +41,25 @@ cbuffer PerFrame_CB12 : register(b12)
     //          for the full per-slot schema.
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
-    // [28]: .x, .y, .z, .w used in the material-1 (skin) BRDF block at
-    //       insns 158-173 as: SSS log-multiplier (28.y, 28.w), SSS
-    //       intensity (28.x), SSS clamp (28.z). Likely SubsurfaceParams.
-    //       Runtime evidence at [28] reads (0.02, 125, 1.2, 160) which
-    //       in the ambient/IBL context looks like (near, far, fog_density,
-    //       fog_far). Cross-shader reuse - this slot carries different
-    //       per-scene semantics depending on which technique reads it.
+    // [28]: hair specular parameters, NOT subsurface scattering. The engine
+    //       writer names these
+    //       (fHairPrimSpecScale, fHairPrimSpecPow,
+    //        fHairSecSpecScale,  fHairSecSpecPow).
+    //       Runtime evidence (0.02, 125, 1.2, 160) agrees.
+    //       The `sss_params` identifier is a legacy misnomer. Do not rename
+    //       it yet: cbuffer member names are in the DXBC reflection chunk,
+    //       so a rename changes the attested bytecode hash.
     float4 cb12_idx28_sss_params;
 
-    // [29]: .x, .y used as sincos arguments (insns 149, 162) - two
-    //       angle parameters for the SSS / fresnel rotation pattern.
-    //       Runtime evidence at [29] reads (0.36, -0.4, 0, 0) - small
-    //       constants consistent with rotation angles.
+    // [29]: hair specular tangent shifts. The engine writer names these
+    //       (fHairPrimSpecShift, fHairSecSpecShift, 0, 0).
+    //       Runtime evidence (0.36, -0.4, 0, 0) agrees.
+    //       The `sss_angles` identifier is the same legacy misnomer.
     float4 cb12_idx29_sss_angles;
 
     // [30]: .y used as 1.0 - x raise-to-4th roughness term at insn 132.
+    //       The writer puts unnamed TESForm+0x2F8 / +0x2FC floats in .xy.
     //       Runtime evidence reads zeros in captured frame (inconclusive).
-    //       TODO: identify (likely roughness/sss desaturation factor).
     float4 cb12_idx30;
 };
 
@@ -86,26 +87,48 @@ cbuffer PerCall_CB2 : register(b2)
     //      before dispatch). .w = 0 here.
     float4 SunColor_HDR;
 
+// CB2 register placement below is package-table recovered, not inferred.
+// The FXP record carries a per-shader table at `PixelShader+0x58+constantID`
+// (u8[32], `register = byte/4`, 0xFF = absent). Blob 3295 reads
+// `00 04 08 ff ff ff ff ff 28 2c 50 54 60 ff ff ff ff`; blob 3232 is
+// identical except constant ID 6 is 0x18. Closure check: every DXBC read has
+// an allocated constant, no read lacks one, and top register + 1 = 25 = the
+// declared CB2 size.
 #ifdef AMBIENT_IBL_IN_LIGHT
-    // [3..5], [9]: TODO: identify
+    // [3..5]: unallocated padding. Constant IDs 3 `LightAttenuation`,
+    //         4 `ProjectedLightVector` and 5 `SpotData` are ABSENT (0xFF)
+    //         from this blob. They are not merely unread - they have no
+    //         register at all.
     float4 cb2_pad_3_5[3];
 
-    // [6..8]: directional ambient-gradient rows for diffuse/specular IBL.
+    // [6..9]: constant ID 6 `DirectionalAmbient`, allocated at c6 (byte 0x18)
+    //         and occupying four vectors. [6..8] are the ambient-gradient
+    //         rows for diffuse/specular IBL.
     float4 cb2_ambient_gradient_row0;
     float4 cb2_ambient_gradient_row1;
     float4 cb2_ambient_gradient_row2;
 
+    // [9]: fourth `DirectionalAmbient` vector. Allocated but never read by
+    //      this blob.
     float4 cb2_pad_9;
 #else
-    // [3..9]: TODO: identify
+    // [3..9]: unallocated padding in this blob. Constant IDs 3, 4 and 5 are
+    //         ABSENT, and ID 6 `DirectionalAmbient` is also ABSENT here - it
+    //         is allocated only in the AMBIENT_IBL_IN_LIGHT permutation.
     float4 cb2_pad_3_9[7];
 #endif
 
-    // [10]: .x = cascade-1 active threshold (insn 74); .y = cascade-0
-    //       active threshold (insn 39); .xy = cascade blend range
-    //       (insn 109). Likely (FarCascadeNearZ, NearCascadeFarZ).
+    // [10]: constant ID 8 `FadeDistances`, allocated at c10 (byte 0x28).
+    //       Writer output is projected/NDC depth; capture reads
+    //       (0.981292, 0.988609).
+    //       .x = cascade-1 active threshold (insn 74); .y = cascade-0 active
+    //       threshold (insn 39); .xy = cascade blend range (insn 109).
+    //       It is NOT SplitDistances: constant ID 7 of that name writes
+    //       cascade indices and is ABSENT from this blob entirely.
     float4 cb2_idx10_cascade_range;
 
+    // [11..16]: constant ID 9 `ShadowMapProj`, allocated at c11 (byte 0x2c),
+    //           six vectors read as two 3-row transforms.
     // [11..13]: cascade-0 view-space-to-light-space rows (3 x float4).
     //           dp4 against (posView, 1) yields cascade-0 (x, y, z).
     float4 cb2_cascade0_row0;
@@ -117,24 +140,37 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_cascade1_row1;
     float4 cb2_cascade1_row2;
 
-    // [17..19]: TODO: identify
+    // [17..19]: unallocated holes. No constant ID maps to these registers in
+    //           either blob. They are not third-cascade rows and not trailing
+    //           ShadowMapProj values; both readings are conclusively closed
+    //           by the package table.
     float4 cb2_pad_17_19[3];
 
-    // [20]: .z = PCF kernel-size scale (insns 45, 80, multiplied by 3.0
-    //       in both shadow blocks).
+    // [20]: constant ID 10 `ShadowSampleParam`, allocated at c20 (byte 0x50).
+    //       .zw are inverse shadow-map dimensions (capture: 1/2048, 1/2048).
+    //       .xy are path-dependent bias terms.
+    //       .z is used as the PCF kernel-size scale (insns 45, 80, each
+    //       multiplied by 3.0 in the two shadow blocks).
     float4 cb2_idx20_pcf_kernel_scale;
 
-    // [21]: .z, .w = cascade-0 depth range (insn 46, used to compute
-    //       1.0 / (w - z) at insn 47). Likely (Cascade0NearZ, Cascade0FarZ).
+    // [21..22]: constant ID 11 `ShadowWorldScale`, allocated at c21
+    //           (byte 0x54). Each writer vector is
+    //           (right-left, top-bottom, near, far) taken from a cascade
+    //           NiFrustum, in world units. The shader reads only .zw and
+    //           forms 1.0 / (w - z).
     float4 cb2_idx21_cascade0_depth_range;
 
-    // [22]: .z, .w = cascade-1 depth range (same pattern).
+    // [22]: cascade-1 counterpart of the above.
     float4 cb2_idx22_cascade1_depth_range;
 
-    // [23]: TODO: identify
+    // [23]: unallocated hole. No constant ID maps here.
     float4 cb2_pad_23;
 
-    // [24]: .x = distance-fade limit (insn 122 div_sat). TODO: identify.
+    // [24]: constant ID 12 `ShadowFadeParam`, allocated at c24 (byte 0x60).
+    //       The writer stores a squared world distance; capture reads
+    //       37,748,736 = 6144^2. .x is the distance-fade limit at insn 122
+    //       (div_sat). It is NOT DynamicResolutionParam: constant ID 15 of
+    //       that name is ABSENT from this blob.
     float4 cb2_idx24_distance_fade;
 };
 
@@ -459,8 +495,14 @@ PS_OUTPUT main(PS_INPUT input)
     float  brdfShadowMix = 0.0;
     if (isMaterial1)
     {
-        // Insn 140-176: material-1 skin branch.
-        // Skin dots the t2 sample's xyz (a distinct normal in that gbuffer
+        // Insn 140-176: material-code-1 branch. It runs a two-lobe
+        // anisotropic hair-specular model, using the engine's
+        // fHairPrimSpec* / fHairSecSpec* values (see CB12[28] and CB12[29]).
+        // The shading model is proven. Whether material code 1 is
+        // exclusively hair is NOT proven: the prepass material-code writer
+        // has not been traced. Do not assume this is a skin path and attach
+        // subsurface scattering to it.
+        // It dots the t2 sample's xyz (a distinct normal in that gbuffer
         // slot), not the octahedral normal the other paths decode from t1.
         float skinNdotL = dot(matSample.xyz, SunDirection_and_padding.xyz);
         float skinNdotV = dot(matSample.xyz, viewDirNeg);
@@ -750,11 +792,11 @@ cbuffer PerFrame_CB12 : register(b12)
     // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
-    // [28]: SSS / fresnel parameters (skin-material BRDF). Same role as
-    //       in the directional path.
+    // [28]: hair specular scales and powers. Same role as in the directional
+    //       path. Identifier is a legacy misnomer; see the CB12 block above.
     float4 cb12_idx28_sss_params;
 
-    // [29]: SSS rotation angles (skin-material BRDF).
+    // [29]: hair specular tangent shifts. Same legacy misnomer.
     float4 cb12_idx29_sss_angles;
 };
 
@@ -922,7 +964,8 @@ PS_OUTPUT main(PS_INPUT input)
 
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
 
-    // Point permutation's skin/default material BRDF.
+    // Point permutation's material-code-1 (hair-specular) / default
+    // material BRDF.
     float3 brdfSpecular = float3(0, 0, 0);
     float  brdfShadowMix = 0.0;
     if (isMaterial1)
