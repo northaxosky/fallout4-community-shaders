@@ -122,8 +122,9 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   signature all match: `CB12[30]` + `CB2[21]` immediateIndexed, `t0..t3` with
   `s0..s3` mode_default, the shadow map at `t5`/`s5` mode_comparison under
   `FILTER_PCF1` (9) / `FILTER_PCF9` (10) / `FILTER_POISSON` (8) or at `t4`/`s4`
-  mode_default in the 3 unfiltered records, plus `t7`/`s7` in the 10
-  `GOBOPROJECTION` records.
+  mode_default in the 3 unfiltered records - 9 + 10 + 8 + 3 = 30, this family's
+  own count, not to be read against the `DIRSPLITS=2` figures below - plus
+  `t7`/`s7` in the 10 `GOBOPROJECTION` records.
 
   This is an ABI claim only. The body is the POINTSPOT reconstruction, so
   execution is expected to diverge for an omni light, and `HALFOMNI` — carried
@@ -189,15 +190,18 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   function of the filter alone - `AMBIENT`, `BLENDSPLIT` and `IGNOREROUGHNESS`
   move the instruction stream but not the contract. Every group declares
   `CB12[31]` + `CB2[25]` immediateIndexed, `t0..t3` with `s0..s3` mode_default,
-  and the two-MRT signature:
+  and the two-MRT signature. Rows are in the same filter order the axis is
+  listed in above, so the blob column reads 3 / 6 / 7 / 6 / 7:
 
   | Filter | Blobs | Shadow map declarations |
   |---|---|---|
   | (none)           | 3 | `t4`/`s4` mode_default (raw tap, compare in the shader) |
   | `FILTER_PCF1`    | 6 | `t5`/`s5` mode_comparison |
   | `FILTER_PCF9`    | 7 | `t5`/`s5` mode_comparison |
-  | `FILTER_POISSON` | 7 | `t5`/`s5` mode_comparison |
   | `FILTER_PCSS`    | 6 | `t4`/`s4` mode_default **and** `t5`/`s5` mode_comparison |
+  | `FILTER_POISSON` | 7 | `t5`/`s5` mode_comparison |
+
+  That is 3 in `raw_t4_s4`, 20 in `cmp_t5_s5` and 6 in `raw_t4_cmp_t5`.
 
   `BLENDSPLIT` is one coupled axis, not two independent edits: it removes the
   `cb2[9].w` split-distance gate *and* adds the smoothstep band blend between
