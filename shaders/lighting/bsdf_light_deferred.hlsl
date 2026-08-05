@@ -4,7 +4,7 @@
 // Directional status: reference asm transcription; point is reconstructed from FO4_frame9483 eid 46771; spot is reconstructed from the AE 1.11.221 archive blob set.
 // Directional flow: sample depth/gbuffer, select Far/Near reproj, run two cascade PCF blocks, blend/fade shadows, branch skin-vs-default BRDF, write diffuse/specular MRTs.
 // Point flow: reconstruct position, compute radial attenuation, sample octahedral light cookie, reuse BSDF BRDF, write diffuse/specular MRTs.
-// Spot flow: LIGHT_TYPE=3 covers two disjoint native ABIs - SPOT (cone term, no shadow) and POINTSPOT (projected shadow, no cone term). See the block below LIGHT_TYPE_POINT.
+// Spot flow: LIGHT_TYPE=3 covers three disjoint native ABIs - SPOT (cone term, no shadow), POINTSPOT (projected shadow, no cone term), and POINTOMNI+SHADOW, which shares POINTSPOT's exact ABI. See the block below LIGHT_TYPE_POINT.
 // Limits: CB semantics remain partial; 999-entry Poisson ICB is represented by the consumed subset; non-skin BRDF is structurally condensed.
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -21,18 +21,40 @@
 #  error "LIGHT_TYPE must be DIRECTIONAL (1), POINT (2), or SPOT (3)"
 #endif
 
-// LIGHT_TYPE=3 covers two disjoint native families. They share the gbuffer
+// LIGHT_TYPE=3 covers three disjoint native families. They share the gbuffer
 // decode, BRDF and epilogue but not the constant-buffer layout, the resource
-// set or the light term, so exactly one native macro must select the ABI.
+// set or the light term, so the native macros must select the ABI.
 // Raw-technique bit 0x400 emits SPOT (cone, no shadow map); bit 0x20 emits
 // POINTSPOT, which always implies SHADOW. No archive blob carries both, no
 // SPOT blob carries SHADOW, and no POINTSPOT blob allocates SpotData.
+//
+// POINTOMNI reaches this path only when it carries SHADOW. A producer audit
+// recompiled all 30 POINTOMNI+SHADOW records and reimplemented harness
+// reflection against them: their declared ABI and their FXP constant tables are
+// identical to the already-proven POINTSPOT profiles. Measured over the 30
+// corpus blobs that is CB12[30] + CB2[21], both immediateIndexed, `t0..t3`
+// Texture2D with `s0..s3` mode_default, and the shadow map as a Texture2DArray
+// at `t5` with a `s5` mode_comparison sampler under a FILTER_* macro (27
+// records) or at `t4` with an `s4` mode_default sampler without one (3
+// records), plus `t7`/`s7` under GOBOPROJECTION (10 records). That is exactly
+// what the projected-shadow branch below declares, so the two families select
+// it together. Admission is an ABI claim only: the body is the POINTSPOT
+// reconstruction, and execution may diverge for an omni light.
+//
+// POINTOMNI *without* SHADOW is a different ABI and stays on LIGHT_TYPE=2; the
+// 9 such blobs are unaffected by anything here.
 #if LIGHT_TYPE == LIGHT_TYPE_SPOT
 #  if defined(SPOT) && defined(POINTSPOT)
 #    error "LIGHT_TYPE=3 takes exactly one of SPOT or POINTSPOT, never both"
 #  endif
-#  if !defined(SPOT) && !defined(POINTSPOT)
-#    error "LIGHT_TYPE=3 requires the native macro SPOT=1 or POINTSPOT=1"
+#  if defined(POINTOMNI) && (defined(SPOT) || defined(POINTSPOT))
+#    error "no native blob carries POINTOMNI together with SPOT or POINTSPOT"
+#  endif
+#  if defined(POINTOMNI) && !defined(SHADOW)
+#    error "POINTOMNI without SHADOW is a LIGHT_TYPE=2 ABI; do not route it here"
+#  endif
+#  if !defined(SPOT) && !defined(POINTSPOT) && !defined(POINTOMNI)
+#    error "LIGHT_TYPE=3 requires SPOT=1, POINTSPOT=1, or POINTOMNI=1 with SHADOW=1"
 #  endif
 #  if defined(SPOT) && defined(SHADOW)
 #    error "no native SPOT blob carries SHADOW"
@@ -43,6 +65,9 @@
 #  if defined(SPOT) && defined(ATTENUATION_ONLY)
 #    error "no native SPOT blob carries ATTENUATION_ONLY"
 #  endif
+#  if defined(POINTOMNI) && defined(ATTENUATION_ONLY)
+#    error "no native POINTOMNI blob carries ATTENUATION_ONLY"
+#  endif
 #  if (defined(FILTER_PCF1) + defined(FILTER_PCF9) + defined(FILTER_POISSON)) > 1
 #    error "FILTER_* macros are mutually exclusive"
 #  endif
@@ -50,6 +75,22 @@
       && (defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON))
 #    error "no native SPOT blob carries a FILTER_* macro"
 #  endif
+
+// Internal selector for the projected-shadow ABI (CB2 layout C plus a shadow
+// map at t4 or t5). It exists so POINTOMNI+SHADOW can reach that branch without
+// being rewritten into POINTSPOT: each family keeps its own native macro set,
+// and no define is fabricated on either side.
+#  if defined(POINTSPOT) || (defined(POINTOMNI) && defined(SHADOW))
+#    define FO4_PROJECTED_SHADOW_FAMILY 1
+#  endif
+
+// HALFOMNI is carried by 12 of the 30 POINTOMNI+SHADOW records and by no other
+// blob in the 166-blob set. It does not move the ABI - those 12 declare exactly
+// the same buffers, resources and samplers as their non-HALFOMNI siblings - but
+// its math is NOT reconstructed here. It is deliberately left defined and
+// unhandled rather than rejected or quietly erased: a HALFOMNI permutation is
+// admitted with an exact contract and a knowingly divergent body, and whoever
+// reconstructs the hemisphere term later must key off this macro.
 #endif
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the 5
@@ -1137,7 +1178,8 @@ PS_OUTPUT main(PS_INPUT input)
 // Evidence scope: AE 1.11.221 only. Archive
 // `Fallout4 - Shaders.ba2` sha256 4ac98b8fe723..., member
 // `shadersfx/shaders011.fxp` sha256 f3254023504c..., 36 decoded blobs
-// (9 SPOT + 27 POINTSPOT). Register allocation below is package-table
+// (9 SPOT + 27 POINTSPOT), plus the 30 POINTOMNI+SHADOW blobs admitted to the
+// projected-shadow ABI below. Register allocation is package-table
 // recovered and closure-gated (every DXBC read has an allocated constant,
 // every allocation is read, top register + 1 = 21 = the declared CB2 size).
 //
@@ -1164,6 +1206,15 @@ PS_OUTPUT main(PS_INPUT input)
 // ShadowLightParam (c20) is the one constant whose meaning differs between
 // the families: SPOT reads only .x (cone falloff exponent), POINTSPOT reads
 // .xyz (projection edge-fade exponent / centre / scale).
+//
+// POINTOMNI+SHADOW (30 blobs) declares the POINTSPOT layout register for
+// register. Its contract is CB12[30] + CB2[21] immediateIndexed, t0..t3 +
+// s0..s3, the shadow map at t5/s5 mode_comparison under FILTER_PCF1 (9),
+// FILTER_PCF9 (10) or FILTER_POISSON (8) and at t4/s4 mode_default in the 3
+// unfiltered records, plus t7/s7 in the 10 GOBOPROJECTION records. All 30
+// carry DIRSPLITS=2, which this path does not read - it is a cascade count and
+// only the directional families consume it. 12 additionally carry HALFOMNI,
+// which is unreconstructed here; see the header note.
 
 #if LIGHT_TYPE == LIGHT_TYPE_SPOT
 
@@ -1238,11 +1289,12 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_pad_15_19[5];
 #endif  // SPOT
 
-#ifdef POINTSPOT
+#ifdef FO4_PROJECTED_SHADOW_FAMILY
     // [4..10]: unallocated. Constant IDs 4 `ProjectedLightVector`,
     //          5 `SpotData`, 6 `DirectionalAmbient`, 7 `SplitDistances` and
-    //          8 `FadeDistances` are all ABSENT from every POINTSPOT blob.
-    //          SpotData in particular: POINTSPOT has no cone term at all.
+    //          8 `FadeDistances` are all ABSENT from every blob in this family,
+    //          POINTSPOT and POINTOMNI+SHADOW alike. SpotData in particular:
+    //          neither carries a cone term.
     float4 cb2_pad_4_10[7];
 
     // [11..14]: constant ID 9 `ShadowMapProj`, allocated at c11, four
@@ -1268,7 +1320,7 @@ cbuffer PerCall_CB2 : register(b2)
     //       squared world distance; the native POINTSPOT path multiplies the
     //       shadow factor by 1 - t^8, where t = saturate(|posView|^2 / .x).
     float4 cb2_idx19_shadow_fade;
-#endif  // POINTSPOT
+#endif  // FO4_PROJECTED_SHADOW_FAMILY
 
     // [20]: constant ID 13 `ShadowLightParam`, allocated at c20 in both
     //       families but read differently.
@@ -1294,15 +1346,15 @@ Texture2D<float4> g_tGbufferMaterial : register(t2);
 // t3: main depth, sampled with explicit gradients.
 Texture2D<float4> g_tMainDepth : register(t3);
 
-#ifdef POINTSPOT
+#ifdef FO4_PROJECTED_SHADOW_FAMILY
 #  if defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_POISSON)
-// t5/s5: spot shadow map, sampled through hardware comparison PCF. The native
-//        blobs bind a Texture2DArray and always address slice 0.
+// t5/s5: projected shadow map, sampled through hardware comparison PCF. The
+//        native blobs bind a Texture2DArray and always address slice 0.
 Texture2DArray<float4> g_tSpotShadowAtlas : register(t5);
 SamplerComparisonState g_sSpotShadowCmp : register(s5);  // mode_comparison
 #  else
-// t4/s4: the unfiltered POINTSPOT permutation binds the shadow map to a plain
-//        sampler and performs the depth compare in the shader.
+// t4/s4: the unfiltered permutations of this family bind the shadow map to a
+//        plain sampler and perform the depth compare in the shader.
 Texture2DArray<float4> g_tSpotShadowAtlas : register(t4);
 SamplerState g_sSpotShadow : register(s4);
 #  endif
@@ -1451,9 +1503,10 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 
-#ifdef POINTSPOT
+#ifdef FO4_PROJECTED_SHADOW_FAMILY
     // POINTSPOT normalises the light vector after the early-out; there is no
-    // cone term to consume it beforehand.
+    // cone term to consume it beforehand. POINTOMNI+SHADOW shares the code path
+    // but not necessarily the intent - see the HALFOMNI note in the header.
     float3 lightDir = toLight * rsqrt(toLightLenSq);
 #endif
 
@@ -1471,7 +1524,7 @@ PS_OUTPUT main(PS_INPUT input)
     float posViewLenInv = rsqrt(dot(posView, posView));
     float3 viewDirNeg = -posView * posViewLenInv.xxx;
 
-#ifdef POINTSPOT
+#ifdef FO4_PROJECTED_SHADOW_FAMILY
     // Projected shadow. dp4 through ShadowMapProj then a perspective divide;
     // the xy half becomes the shadow UV and z the comparison reference.
     float4 posViewHomog = float4(posView, 1.0);
@@ -1541,7 +1594,7 @@ PS_OUTPUT main(PS_INPUT input)
     shadowFactor *= (1.0 - shadowDist4 * shadowDist4);
 
     attenuation = attenuation * shadowFactor;
-#endif  // POINTSPOT
+#endif  // FO4_PROJECTED_SHADOW_FAMILY
 
 #ifndef ATTENUATION_ONLY
     float NdotL_raw     = dot(normalView, lightDir);
@@ -1710,7 +1763,15 @@ PS_OUTPUT main(PS_INPUT input)
 // Evidence: archive-only. `light-blob-enumeration.json` (schema
 // fo4re.light-blob-enumeration v1, runtime profile AE-1.11.221) decodes 9
 // SPOT and 27 POINTSPOT blobs out of the 166-blob BSDFLightShader set, with a
-// 166/166 constant-table closure PASS. Every route in that table carries
+// 166/166 constant-table closure PASS. A later producer audit recompiled all
+// 73 execution-unproven blobs and reimplemented harness reflection, finding 30
+// POINTOMNI+SHADOW blobs whose ABI and FXP constant tables match the POINTSPOT
+// profiles; they are admitted to the projected-shadow branch above, and all 30
+// are contract-equal to their corpus blob (CB sizes and indexing mode, SRV
+// slots and types, sampler slots and modes, IO signature). Admission is an ABI
+// claim only - the body is the POINTSPOT reconstruction, HALFOMNI is
+// unreconstructed, and execution is expected to diverge for an omni light.
+// Every route in that table carries
 // opaque_psid_status "not-observed" and raw_technique_status
 // "hypothesis-matched", so this is archive evidence, not an observed engine
 // route - the same standing as the already-shipped point permutation.
