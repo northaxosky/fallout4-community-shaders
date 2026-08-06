@@ -182,11 +182,22 @@
 
 // Constant buffer layouts.
 //
-// fxc sizes a declared constant buffer from the highest register the body
-// actually reads, plus one. Every size below is therefore produced by the
-// reads, not asserted here: CB12 is [30] unless the gloss term above is read,
-// and CB2 is [3] for directional, [4] once LightAttenuation is read, and [9]
-// once the ambient gradient rows are read.
+// A permutation must match the native size in BOTH places fxc records it, and
+// the two are driven by different things:
+//
+//   * the SHEX `dcl_constantbuffer CBn[size]` is sized from the highest
+//     register the body actually READS, plus one, so unread trailing members
+//     leave it alone;
+//   * the RDEF reflection block is sized from what the source DECLARES, so an
+//     unread trailing member still widens it and is merely marked [unused].
+//
+// So a member that is declared unconditionally but read only by some
+// permutations is invisible in the instruction stream and still wrong in
+// reflection. Every trailing member below is therefore declared under the same
+// condition that reads it, which makes both sizes fall out together: CB12 is
+// [30] unless the gloss term above is read, and CB2 is [3] for directional,
+// [4] once LightAttenuation is read, and [9] once the ambient gradient rows
+// are read.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -201,10 +212,13 @@ cbuffer PerFrame_CB12 : register(b12)
     //       fHairSecSpecShift, 0, 0).
     float4 cb12_idx29_hair_spec_shifts;
 
+#ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
     // [30]: .y is the 1 - x raised-to-fourth gloss term in the Schlick-shaped
-    //       fresnel scale. Declared always, read only by the specular
-    //       DIRECTIONAL body, which is what makes CB12[31] specific to it.
+    //       fresnel scale. Declared only where it is read, because declaring
+    //       it everywhere would leave the base directional and every POINTOMNI
+    //       permutation reflecting CB12 as 31 registers against a native 30.
     float4 cb12_idx30;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)

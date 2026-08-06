@@ -104,6 +104,35 @@ function Get-DeclaredContract([string[]]$Listing) {
     }
 }
 
+# Reflected constant-buffer sizes, read from the RDEF block of the same listing.
+#
+# This is deliberately a SECOND opinion on a size the declaration check already
+# compares, because fxc derives the two independently: the SHEX
+# `dcl_constantbuffer` size comes from the highest register the body READS,
+# while the RDEF size comes from what the source DECLARES. A trailing member
+# that is declared unconditionally but read by only some permutations is
+# therefore invisible in the instruction stream and still oversizes the buffer
+# a host reflects. Native blobs are stripped, so their expected size is the one
+# the manifest already pins from SHEX - and that is exactly what makes checking
+# it against RDEF meaningful rather than circular.
+function Get-ReflectedCbSizes([string[]]$Listing) {
+    $sizes = @{}
+    $current = $null
+    foreach ($line in $Listing) {
+        if ($line -match '^//\s+cbuffer\s+\S*CB(\d+)\s*$') {
+            $current = "b$($Matches[1])"
+        } elseif ($line -match '^//\s*\}\s*$') {
+            $current = $null
+        } elseif ($current -and $line -match 'Offset:\s+(\d+)\s+Size:\s+(\d+)') {
+            $end = ([int]$Matches[1] + [int]$Matches[2]) / 16
+            if (-not $sizes.ContainsKey($current) -or $end -gt $sizes[$current]) {
+                $sizes[$current] = $end
+            }
+        }
+    }
+    return $sizes
+}
+
 # Flatten a JSON abi_groups member into the same comparable shape.
 function ConvertTo-ExpectedContract($Group) {
     $cb = $Group.cb.PSObject.Properties | Sort-Object Name |
@@ -267,6 +296,20 @@ try {
                     "`n    ours  : $($actual.$field)")
             }
         }
+
+        # Same sizes again, from reflection rather than the instruction stream.
+        $reflected = Get-ReflectedCbSizes (Get-Content -LiteralPath $result.Listing)
+        foreach ($cbProperty in $group.Value.cb.PSObject.Properties) {
+            $wantSize = [int]$cbProperty.Value[0]
+            $gotSize = 0
+            if ($reflected.ContainsKey($cbProperty.Name)) { $gotSize = [int]$reflected[$cbProperty.Name] }
+            if ($gotSize -ne $wantSize) {
+                $failures += ("$tag`: reflected $($cbProperty.Name) size differs from the native blob" +
+                    "`n    native   : $wantSize" +
+                    "`n    reflected: $gotSize")
+            }
+        }
+
         $pinnedReads = Get-OptionalMember $entry 'cb_reads'
         if ($pinnedReads) {
             $actualReads = Get-ConstantReadSet (Get-Content -LiteralPath $result.Listing)

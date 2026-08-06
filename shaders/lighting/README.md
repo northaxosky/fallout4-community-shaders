@@ -225,7 +225,10 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   `dirsplits2-native-abi.json` and fails closed. Each entry pins three things
   taken from the game bytecode - the blob's declaration set, the set of
   constant-buffer registers its body reads, and how many times it reads each -
-  so the gate cannot bless this repository's output.
+  so the gate cannot bless this repository's output. The declaration set is
+  checked in both places `fxc` records a constant-buffer size, SHEX and RDEF,
+  because those are derived independently and only their agreement pins the
+  buffer a host actually sees.
 
   Those three pins are progressively finer. The read-set separates macro sets
   the declarations cannot: a `BLENDSPLIT` blob reads `cb2[6..8]` and never
@@ -286,11 +289,24 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   The shadowed siblings are materially different and cannot host these: the shadowed
   `DIRSPLITS=2` directional declares `CB2[25]` plus `t5`/`s5`, and the shadowed point
-  family declares `CB2[15]` plus `t7`/`s7`. Sizes are not authored directly - `fxc`
-  sets a declared constant-buffer size to the highest register the body reads plus
-  one, so each size above falls out of which registers that permutation actually
-  touches. `dir_spec_ambient` leaves registers 3, 4 and 5 unread, so its `CB2` has a
+  family declares `CB2[15]` plus `t7`/`s7`. Sizes are not authored directly, and
+  `fxc` records each one twice from different inputs: the SHEX
+  `dcl_constantbuffer` size comes from the highest register the body **reads**,
+  plus one, while the RDEF reflection size comes from what the source
+  **declares**. Both must match the native blob, so every trailing constant is
+  declared under the same condition that reads it and the two sizes fall out
+  together. `dir_spec_ambient` leaves registers 3, 4 and 5 unread, so its `CB2` has a
   hole.
+
+  Checking only the instruction stream is not sufficient, and this was a real
+  defect rather than a hypothetical one. A trailing member declared
+  unconditionally but read by only some permutations leaves the SHEX size
+  untouched and still widens the reflected size, where it appears merely as
+  `[unused]`. That is invisible to a `dcl_`-only check: the base directional and
+  all four `POINTOMNI` permutations reflected `CB12` as 31 registers against a
+  native 30, which a host reading reflection rejects as a contract mismatch. The
+  admission gate therefore compares the reflected size as a second, independent
+  opinion on the size the manifest already pins from SHEX.
 
   That read-set table also settles what `DIRSPLITS=2` means here, and it is worth
   stating plainly because the name invites the wrong reading: for these nine it is the
@@ -377,6 +393,17 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   one fewer `cb2[2]` read. Both are reconstructed, so
   `scope.count_exemption_axis` is `null` in both manifests and every one of the nine
   entries is held to exact per-register read-counts.
+
+  The `CB12` size is the one pin this layer originally got wrong, which is worth
+  recording because the failure was silent. `cb12[30]` was declared for every
+  permutation and read only by the specular directional bodies, so the SHEX
+  `dcl_constantbuffer` size stayed correct at 30 while reflection reported 31
+  with the member marked `[unused]`. The base directional blob and all four
+  `POINTOMNI` blobs were therefore rejected by the producer harness as a
+  constant-buffer contract mismatch even though the gate here was green. The
+  member is now declared under the same condition that reads it, and the gate
+  compares reflected sizes as well as declared ones, so this class of defect
+  cannot pass again.
 
   `scripts/shaders/verify-native-abi-admission.ps1` re-measures the layer against two
   evidence manifests - `unshadowed-directional-native-abi.json` (CTest
