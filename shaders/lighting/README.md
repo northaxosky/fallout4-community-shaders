@@ -308,8 +308,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   layer owns is unshadowed lighting, not a cascade count and not a shadow selection.
 
   `DIRECTIONAL` and `POINTOMNI` are separately reconstructed bodies in one file, even
-  though their resource contracts match, because the disassembly differs in three
-  ways. `DIRECTIONAL` + `SPECULAR` reads `cb12[30].y` as a Schlick gloss term and uses
+  though their resource contracts match, because the disassembly differs in three  ways. `DIRECTIONAL` + `SPECULAR` reads `cb12[30].y` as a Schlick gloss term and uses
   it twice, to scale the specular exponent and to scale the specular output; that
   single read is what raises those blobs to `CB12[31]`. `POINTOMNI` + `SPECULAR` does
   none of it and stays at `CB12[30]`. `POINTOMNI` reads `cb2[3]` `LightAttenuation`
@@ -318,6 +317,28 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   it falls below `0.001`; no directional blob reads `cb2[3]` at all. Directional
   composition adds a premultiplied-albedo backface wrap, a depth-scaled forward blend
   and an albedo tint, for which the point blobs have no instructions.
+
+  Because "these blocks look the same" is not evidence, the reuse question was settled
+  by comparing native ASM against the shadowed `DIRSPLITS=2` family on two controlled
+  pairs that differ only by `SHADOW` and its filter - 039c8935 against 0fd35e4a (180 vs
+  222 instructions) and 9f44ba67 against 2fe442f1 (179 vs 240). Three grades came out
+  of it, and only the first is an identity claim:
+
+  | grade | directional pair | point pair | what it covers |
+  |---|---|---|---|
+  | identical, verified on instruction text | leading 26 | leading 38 | VPOS offset, depth fetch, view-position reconstruction |
+  | equal only after renaming registers | next 10 | next 18 | G-buffer samples and normal decode |
+  | different | remainder | remainder | everything from the shadow entry onward |
+
+  The middle grade is the one worth being strict about. Those instructions match
+  opcode-for-opcode but allocate different registers (`r2`/`r3` against `r3`/`r4`), so
+  they are similar, not identical, and no identity or reuse is claimed for them. The
+  bodies diverge for real immediately after: the shadowed directional enters cascade
+  selection at `lt ..., cb2[9].w` where this family goes straight to lighting, and the
+  shadowed point builds a shadow projection with `dp4` against `cb2[11]`/`cb2[12]`
+  where this family has no such matrix at all. So the BRDF, normal-decode and lighting
+  bodies here are independently reconstructed, and nothing is factored into a shared
+  `.hlsli` on similarity alone.
 
   Both risk axes are adjudicated from controlled, semantically active pairs inside
   this layer, so neither is exempted, and both are pinned per register rather than

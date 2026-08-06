@@ -30,6 +30,29 @@
 // transferred by analogy from the ten passing no-SHADOW SPOT blobs, which are a
 // structural reference only and stay with the legacy adapter.
 //
+// Cross-family native ASM comparison, so the reuse question is answered by
+// measurement rather than by eye. Two controlled pairs were compared against the
+// shadowed DIRSPLITS=2 family, each differing only by SHADOW and its filter:
+//
+//   039c8935 (DIRECTIONAL SPECULAR) vs shadowed 0fd35e4a  180 vs 222 instrs
+//   9f44ba67 (POINTOMNI SPECULAR)   vs shadowed 2fe442f1  179 vs 240 instrs
+//
+//   IDENTICAL, verified byte-for-byte on the instruction text: the leading 26
+//   and 38 instructions respectively - VPOS offset, depth fetch and view-space
+//   position reconstruction.
+//   NOT identical, equal only after renaming registers: the next 10 and 18 -
+//   the G-buffer samples and the normal decode. Register allocation differs
+//   (r2/r3 against r3/r4), so this is a similarity, not an identity, and it is
+//   deliberately not upgraded into a shared include.
+//   DIFFERENT: everything after that. The shadowed directional enters cascade
+//   selection at `lt ..., cb2[9].w` where this family goes straight to lighting,
+//   and the shadowed point builds a shadow projection with dp4 against
+//   cb2[11]/cb2[12] where this family has no such matrix at all.
+//
+// So identity is claimed only for the prologue, and the BRDF, normal-decode and
+// lighting bodies here are independently reconstructed with no cross-family
+// reuse claim. Nothing is refactored into a shared .hlsli on similarity alone.
+//
 //   sha1      macros beyond DIRSPLITS=2 RGBSPEC              CB2  CB12  instrs
 //   a9435eca  DIRECTIONAL                                    [3]  [30]     133
 //   039c8935  DIRECTIONAL SPECULAR                           [3]  [31]     196
