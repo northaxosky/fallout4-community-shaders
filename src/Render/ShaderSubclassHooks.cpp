@@ -131,18 +131,42 @@ namespace cs::engine
 			{
 				g_setupCalls.fetch_add(1, std::memory_order_relaxed);
 				shader_context::SetSticky(Tag::Name(), a_techniqueBits);
-				shader_context::Scope scope(
-					a_self, Tag::Name(), a_techniqueBits);
-				EnginePixelShaderLookupScope lookupScope(
-					a_self, Tag::Name(), a_techniqueBits);
-				const bool result = func(a_self, a_techniqueBits);
+				bool result = false;
+				std::optional<EnginePixelShaderLookupCorrelationResult>
+					engineCorrelation;
+				{
+					shader_context::Scope scope(
+						a_self, Tag::Name(), a_techniqueBits);
+					EnginePixelShaderLookupScope lookupScope(
+						a_self, Tag::Name(), a_techniqueBits);
+					result = func(a_self, a_techniqueBits);
+					if (result) {
+						engineCorrelation = lookupScope.Snapshot(
+							a_self, Tag::Name(), a_techniqueBits);
+					}
+				}
 				if (!result) {
 					shader_context::ClearSticky();
 					return false;
 				}
+				std::optional<ShaderVariantId> pluginResolvedPsid;
+				std::optional<bool> tiledLighting;
+				if (const auto route = ResolvePixelShaderRuntimeRoute(
+						Tag::Name(), a_techniqueBits)) {
+					pluginResolvedPsid = route->pluginResolvedPsid;
+					tiledLighting = route->tiledLighting;
+				}
 				if (const auto observer =
 						g_setupObserver.load(std::memory_order_acquire)) {
-					observer(a_self, Tag::Name(), a_techniqueBits);
+					const ShaderSubclassSetupObservation observation{
+						.shader = a_self,
+						.subclass = Tag::Name(),
+						.rawTechnique = a_techniqueBits,
+						.engineLookupCorrelation = *engineCorrelation,
+						.pluginResolvedPsid = pluginResolvedPsid,
+						.tiledLighting = tiledLighting
+					};
+					observer(observation);
 				}
 				return true;
 			}

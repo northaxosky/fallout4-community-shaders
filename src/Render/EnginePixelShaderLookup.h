@@ -46,6 +46,39 @@ namespace cs::engine
 			default;
 	};
 
+	enum class EnginePixelShaderLookupCorrelationStatus : std::uint8_t
+	{
+		kMatched,
+		kUnavailable,
+		kAmbiguous,
+		kRejected
+	};
+
+	enum class EnginePixelShaderLookupCorrelationReason : std::uint8_t
+	{
+		kNone,
+		kNoLookupObservation,
+		kProductionLookupHookUnavailable,
+		kNoValidatedTarget,
+		kMultipleMatchingReturns,
+		kOutOfScope,
+		kShaderMismatch,
+		kSubclassMismatch,
+		kRawTechniqueMismatch
+	};
+
+	struct EnginePixelShaderLookupCorrelationResult
+	{
+		EnginePixelShaderLookupCorrelationStatus status =
+			EnginePixelShaderLookupCorrelationStatus::kUnavailable;
+		EnginePixelShaderLookupCorrelationReason reason =
+			EnginePixelShaderLookupCorrelationReason::kNoLookupObservation;
+		std::optional<EnginePixelShaderLookupObservation> observation;
+
+		auto operator<=>(const EnginePixelShaderLookupCorrelationResult&) const =
+			default;
+	};
+
 	struct EnginePixelShaderLookupTargetDescriptor
 	{
 		EnginePixelShaderLookupTarget target =
@@ -93,6 +126,10 @@ namespace cs::engine
 		EnginePixelShaderLookupTarget a_target) noexcept;
 	[[nodiscard]] std::string_view EnginePixelShaderLookupTargetSymbol(
 		EnginePixelShaderLookupTarget a_target) noexcept;
+	[[nodiscard]] std::string_view EnginePixelShaderLookupCorrelationStatusName(
+		EnginePixelShaderLookupCorrelationStatus a_status) noexcept;
+	[[nodiscard]] std::string_view EnginePixelShaderLookupCorrelationReasonName(
+		EnginePixelShaderLookupCorrelationReason a_reason) noexcept;
 
 	class EnginePixelShaderLookupScope
 	{
@@ -103,6 +140,7 @@ namespace cs::engine
 			std::string_view subclass;
 			std::uint32_t rawTechnique = 0;
 			std::optional<EnginePixelShaderLookupObservation> observation;
+			const EnginePixelShaderLookupScope* owner = nullptr;
 			bool active = false;
 			bool ambiguous = false;
 			bool consumed = false;
@@ -122,6 +160,11 @@ namespace cs::engine
 			const EnginePixelShaderLookupScope&) = delete;
 		EnginePixelShaderLookupScope& operator=(
 			EnginePixelShaderLookupScope&&) = delete;
+
+		[[nodiscard]] EnginePixelShaderLookupCorrelationResult Snapshot(
+			void* a_shader,
+			std::string_view a_subclass,
+			std::uint32_t a_rawTechnique) const noexcept;
 
 	private:
 		State _previous;

@@ -900,6 +900,15 @@ namespace
 				!ConsumeEnginePixelShaderLookup(
 					&shaderToken, "BSDFLightShader", 0x281),
 				"engine lookup claim was consumed twice");
+			const auto correlation = scope.Snapshot(
+				&shaderToken, "BSDFLightShader", 0x281);
+			Check(
+				correlation.status
+						== EnginePixelShaderLookupCorrelationStatus::kMatched
+					&& correlation.reason
+						== EnginePixelShaderLookupCorrelationReason::kNone
+					&& correlation.observation == observation,
+				"lookup snapshot lost a consumed observation");
 		}
 
 		const auto testEngineLookupProductionInstallIsBlocked = [] {
@@ -964,9 +973,17 @@ namespace
 				EnginePixelShaderLookupTarget::kBsdfLight,
 				0x281,
 				0x201);
+			const auto correlation = scope.Snapshot(
+				&shaderToken, "BSDFLightShader", 0x281);
 			Check(
 				!ConsumeEnginePixelShaderLookup(
-					&shaderToken, "BSDFLightShader", 0x281),
+					&shaderToken, "BSDFLightShader", 0x281)
+					&& correlation.status
+						== EnginePixelShaderLookupCorrelationStatus::kAmbiguous
+					&& correlation.reason
+						== EnginePixelShaderLookupCorrelationReason::
+							kMultipleMatchingReturns
+					&& !correlation.observation,
 				"duplicate engine lookup return remained authoritative");
 		}
 		const auto telemetry =
@@ -981,7 +998,57 @@ namespace
 			"engine lookup reject controls were not accounted");
 	}
 
-	void TestEngineLookupClaimIsNestedAndThreadLocal()
+	void TestEngineLookupSnapshotUnavailableAndMismatched()
+	{
+		using namespace cs::engine;
+		ResetEnginePixelShaderLookupForTesting();
+		std::byte shaderToken{};
+		{
+			EnginePixelShaderLookupScope scope(
+				&shaderToken, "BSDFLightShader", 0x281);
+			const auto missing = scope.Snapshot(
+				&shaderToken, "BSDFLightShader", 0x281);
+			const auto subclassMismatch = scope.Snapshot(
+				&shaderToken, "BSDFCompositeShader", 0x281);
+			const auto techniqueMismatch = scope.Snapshot(
+				&shaderToken, "BSDFLightShader", 0x282);
+			Check(
+				missing.status
+						== EnginePixelShaderLookupCorrelationStatus::kUnavailable
+					&& missing.reason
+						== EnginePixelShaderLookupCorrelationReason::
+							kProductionLookupHookUnavailable
+					&& !missing.observation,
+				"unavailable production lookup hook was not explicit");
+			Check(
+				subclassMismatch.status
+						== EnginePixelShaderLookupCorrelationStatus::kRejected
+					&& subclassMismatch.reason
+						== EnginePixelShaderLookupCorrelationReason::
+							kSubclassMismatch
+					&& techniqueMismatch.status
+						== EnginePixelShaderLookupCorrelationStatus::kRejected
+					&& techniqueMismatch.reason
+						== EnginePixelShaderLookupCorrelationReason::
+							kRawTechniqueMismatch,
+				"lookup snapshot accepted a mismatched setup identity");
+		}
+		{
+			EnginePixelShaderLookupScope scope(
+				&shaderToken, "BSDFCompositeShader", 0x281);
+			const auto unsupported = scope.Snapshot(
+				&shaderToken, "BSDFCompositeShader", 0x281);
+			Check(
+				unsupported.status
+						== EnginePixelShaderLookupCorrelationStatus::kUnavailable
+					&& unsupported.reason
+						== EnginePixelShaderLookupCorrelationReason::
+							kNoValidatedTarget,
+				"unsupported lookup target was not explicit");
+		}
+	}
+
+	void TestEngineLookupSnapshotIsNestedAndThreadLocal()
 	{
 		using namespace cs::engine;
 		ResetEnginePixelShaderLookupForTesting();
@@ -1000,26 +1067,40 @@ namespace
 				EnginePixelShaderLookupTarget::kBsdfLight,
 				0x104,
 				0x104);
+			const auto outerDuringInner = outer.Snapshot(
+				&outerShader, "BSDFLightShader", 0x281);
+			const auto innerCorrelation = inner.Snapshot(
+				&innerShader, "BSDFLightShader", 0x104);
 			Check(
-				ConsumeEnginePixelShaderLookup(
-					&innerShader, "BSDFLightShader", 0x104)
-					.has_value(),
-				"nested engine lookup claim was not isolated");
+				outerDuringInner.status
+						== EnginePixelShaderLookupCorrelationStatus::kRejected
+					&& outerDuringInner.reason
+						== EnginePixelShaderLookupCorrelationReason::kOutOfScope
+					&& innerCorrelation.status
+						== EnginePixelShaderLookupCorrelationStatus::kMatched
+					&& innerCorrelation.observation
+					&& innerCorrelation.observation->returnedPsid.Value()
+						== 0x104,
+				"nested lookup snapshot did not enforce exact ownership");
 		}
-		bool foreignThreadObserved = false;
+		EnginePixelShaderLookupCorrelationResult foreignThreadCorrelation;
 		std::thread other([&] {
-			foreignThreadObserved =
-				ConsumeEnginePixelShaderLookup(
-					&outerShader, "BSDFLightShader", 0x281)
-					.has_value();
+			foreignThreadCorrelation = outer.Snapshot(
+				&outerShader, "BSDFLightShader", 0x281);
 		});
 		other.join();
+		const auto restored = outer.Snapshot(
+			&outerShader, "BSDFLightShader", 0x281);
 		Check(
-			!foreignThreadObserved
-				&& ConsumeEnginePixelShaderLookup(
-					&outerShader, "BSDFLightShader", 0x281)
-					.has_value(),
-			"engine lookup claim crossed thread or nested scope");
+			foreignThreadCorrelation.status
+					== EnginePixelShaderLookupCorrelationStatus::kRejected
+				&& foreignThreadCorrelation.reason
+					== EnginePixelShaderLookupCorrelationReason::kOutOfScope
+				&& restored.status
+					== EnginePixelShaderLookupCorrelationStatus::kMatched
+				&& restored.observation
+				&& restored.observation->returnedPsid.Value() == 0x201,
+			"lookup snapshot crossed a thread or lost nested restoration");
 	}
 
 	void TestResolverRegistryGeneration()
@@ -1081,7 +1162,8 @@ int main()
 		{ "detailed observer is selection neutral", &TestDetailedObserverIsSelectionNeutral },
 		{ "engine lookup claim is independent", &TestEngineLookupClaimIsIndependentAndOneShot },
 		{ "engine lookup claim fails closed", &TestEngineLookupClaimFailsClosed },
-		{ "engine lookup claim is thread local", &TestEngineLookupClaimIsNestedAndThreadLocal },
+		{ "engine lookup snapshot unavailable", &TestEngineLookupSnapshotUnavailableAndMismatched },
+		{ "engine lookup snapshot is thread local", &TestEngineLookupSnapshotIsNestedAndThreadLocal },
 		{ "resolver registry generation", &TestResolverRegistryGeneration }
 	};
 

@@ -347,6 +347,23 @@ target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
 set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
 
+add_executable(ShaderMacroDiagnosticsTests
+	tests/ShaderMacroDiagnosticsTests.cpp
+	src/Render/EnginePixelShaderLookup.cpp
+	src/Render/EnginePixelShaderLookup.h
+	src/Render/ShaderMacroDiagnosticsModel.cpp
+	src/Render/ShaderMacroDiagnosticsModel.h
+)
+configure_host_test(ShaderMacroDiagnosticsTests)
+target_include_directories(ShaderMacroDiagnosticsTests SYSTEM PRIVATE
+	"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
+)
+
+add_test(NAME ShaderMacroDiagnostics COMMAND ShaderMacroDiagnosticsTests)
+set_tests_properties(ShaderMacroDiagnostics PROPERTIES
+	LABELS "render;shader;unit"
+)
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp

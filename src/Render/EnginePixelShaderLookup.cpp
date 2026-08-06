@@ -118,6 +118,49 @@ namespace cs::engine
 		return {};
 	}
 
+	std::string_view EnginePixelShaderLookupCorrelationStatusName(
+		EnginePixelShaderLookupCorrelationStatus a_status) noexcept
+	{
+		switch (a_status) {
+		case EnginePixelShaderLookupCorrelationStatus::kMatched:
+			return "matched";
+		case EnginePixelShaderLookupCorrelationStatus::kUnavailable:
+			return "unavailable";
+		case EnginePixelShaderLookupCorrelationStatus::kAmbiguous:
+			return "ambiguous";
+		case EnginePixelShaderLookupCorrelationStatus::kRejected:
+			return "rejected";
+		}
+		return "rejected";
+	}
+
+	std::string_view EnginePixelShaderLookupCorrelationReasonName(
+		EnginePixelShaderLookupCorrelationReason a_reason) noexcept
+	{
+		switch (a_reason) {
+		case EnginePixelShaderLookupCorrelationReason::kNone:
+			return {};
+		case EnginePixelShaderLookupCorrelationReason::kNoLookupObservation:
+			return "no_lookup_observation";
+		case EnginePixelShaderLookupCorrelationReason::
+			kProductionLookupHookUnavailable:
+			return "production_lookup_hook_unavailable";
+		case EnginePixelShaderLookupCorrelationReason::kNoValidatedTarget:
+			return "no_validated_target";
+		case EnginePixelShaderLookupCorrelationReason::kMultipleMatchingReturns:
+			return "multiple_matching_returns";
+		case EnginePixelShaderLookupCorrelationReason::kOutOfScope:
+			return "out_of_scope";
+		case EnginePixelShaderLookupCorrelationReason::kShaderMismatch:
+			return "shader_mismatch";
+		case EnginePixelShaderLookupCorrelationReason::kSubclassMismatch:
+			return "subclass_mismatch";
+		case EnginePixelShaderLookupCorrelationReason::kRawTechniqueMismatch:
+			return "raw_technique_mismatch";
+		}
+		return "out_of_scope";
+	}
+
 	EnginePixelShaderLookupScope::EnginePixelShaderLookupScope(
 		void* a_shader,
 		std::string_view a_subclass,
@@ -128,12 +171,15 @@ namespace cs::engine
 			.shader = a_shader,
 			.subclass = a_subclass,
 			.rawTechnique = a_rawTechnique,
+			.owner = this,
 			.active = a_shader != nullptr && !a_subclass.empty()
 		};
 	}
 
 	EnginePixelShaderLookupScope::~EnginePixelShaderLookupScope() noexcept
 	{
+		if (g_current.owner != this)
+			return;
 		if (g_current.active
 			&& g_current.observation
 			&& !g_current.consumed) {
@@ -142,6 +188,90 @@ namespace cs::engine
 			});
 		}
 		g_current = _previous;
+	}
+
+	EnginePixelShaderLookupCorrelationResult
+		EnginePixelShaderLookupScope::Snapshot(
+			void* a_shader,
+			std::string_view a_subclass,
+			std::uint32_t a_rawTechnique) const noexcept
+	{
+		if (!g_current.active || g_current.owner != this) {
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kRejected,
+				.reason =
+					EnginePixelShaderLookupCorrelationReason::kOutOfScope
+			};
+		}
+		if (g_current.shader != a_shader) {
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kRejected,
+				.reason =
+					EnginePixelShaderLookupCorrelationReason::kShaderMismatch
+			};
+		}
+		if (g_current.subclass != a_subclass) {
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kRejected,
+				.reason =
+					EnginePixelShaderLookupCorrelationReason::kSubclassMismatch
+			};
+		}
+		if (g_current.rawTechnique != a_rawTechnique) {
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kRejected,
+				.reason = EnginePixelShaderLookupCorrelationReason::
+					kRawTechniqueMismatch
+			};
+		}
+		if (a_subclass
+			!= EnginePixelShaderLookupTargetSubclass(
+				EnginePixelShaderLookupTarget::kBsdfLight)) {
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kUnavailable,
+				.reason = EnginePixelShaderLookupCorrelationReason::
+					kNoValidatedTarget
+			};
+		}
+		if (g_current.ambiguous) {
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kAmbiguous,
+				.reason = EnginePixelShaderLookupCorrelationReason::
+					kMultipleMatchingReturns
+			};
+		}
+		if (!g_current.observation) {
+			bool productionTargetInstalled = false;
+			for (const auto& descriptor :
+				GetEnginePixelShaderLookupTargetDescriptors()) {
+				if (descriptor.target
+						== EnginePixelShaderLookupTarget::kBsdfLight
+					&& descriptor.installed) {
+					productionTargetInstalled = true;
+					break;
+				}
+			}
+			return {
+				.status =
+					EnginePixelShaderLookupCorrelationStatus::kUnavailable,
+				.reason = productionTargetInstalled
+					? EnginePixelShaderLookupCorrelationReason::
+						kNoLookupObservation
+					: EnginePixelShaderLookupCorrelationReason::
+						kProductionLookupHookUnavailable
+			};
+		}
+		return {
+			.status = EnginePixelShaderLookupCorrelationStatus::kMatched,
+			.reason = EnginePixelShaderLookupCorrelationReason::kNone,
+			.observation = g_current.observation
+		};
 	}
 
 	void RecordEnginePixelShaderLookupReturn(

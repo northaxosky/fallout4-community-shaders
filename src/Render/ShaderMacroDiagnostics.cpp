@@ -4,12 +4,13 @@
 #include "LogThrottle.h"
 #include "PCH.h"
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderMacroDiagnosticsModel.h"
 #include "Render/ShaderSubclassHooks.h"
 
 #include <array>
-#include <algorithm>
 #include <atomic>
 #include <cstring>
+#include <exception>
 #include <mutex>
 #include <string_view>
 
@@ -64,10 +65,16 @@ namespace cs::engine
 		std::atomic<std::uint64_t> g_setupCount{ 0 };
 		std::atomic<std::uint64_t> g_compositeSetupCount{ 0 };
 		std::atomic<std::size_t> g_compositeDistinctCount{ 0 };
-		std::array<std::uint32_t, 256> g_compositeTechniques{};
-		std::size_t g_compositeTechniqueCount = 0;
 		std::atomic<std::size_t> g_distinctCount{ 0 };
 		std::atomic<std::size_t> g_distinctMacroSetCount{ 0 };
+		std::atomic<std::size_t> g_setupDistinctCount{ 0 };
+		std::atomic<std::size_t> g_setupDistinctMacroSetCount{ 0 };
+		std::mutex g_setupMutex;
+		LightSetupTupleStore g_lightSetupTuples;
+		CompositeSetupTupleStore g_compositeSetupTuples;
+		std::atomic_flag g_lightSetupOverflowLogged = ATOMIC_FLAG_INIT;
+		std::atomic_flag g_compositeSetupOverflowLogged = ATOMIC_FLAG_INIT;
+		std::atomic_flag g_setupFailureLogged = ATOMIC_FLAG_INIT;
 
 		bool AppendText(
 			std::array<char, kMacroTextCapacity>& a_output,
@@ -120,6 +127,65 @@ namespace cs::engine
 				}
 			}
 			return false;
+		}
+
+		bool CaptureMacroViews(
+			const std::array<EngineShaderMacro, kMacroCapacity>& a_macros,
+			std::array<ShaderMacroDefinitionView, kMacroCapacity>& a_output,
+			std::size_t& a_count) noexcept
+		{
+			for (std::size_t index = 0; index < a_macros.size(); ++index) {
+				const auto& macro = a_macros[index];
+				if (!macro.name) {
+					a_count = index;
+					return true;
+				}
+				a_output[index] = {
+					.name = macro.name,
+					.value = macro.value ? macro.value : ""
+				};
+			}
+			return false;
+		}
+
+		std::optional<std::uint32_t> EnginePsid(
+			const EnginePixelShaderLookupCorrelationResult&
+				a_correlation) noexcept
+		{
+			if (!a_correlation.observation)
+				return std::nullopt;
+			return a_correlation.observation->returnedPsid.Value();
+		}
+
+		std::optional<std::uint32_t> PluginPsid(
+			const ShaderSubclassSetupObservation& a_observation) noexcept
+		{
+			if (!a_observation.pluginResolvedPsid)
+				return std::nullopt;
+			return a_observation.pluginResolvedPsid->Value();
+		}
+
+		void LogSetupOverflow(
+			std::atomic_flag& a_logged,
+			std::string_view a_family,
+			std::size_t a_capacity) noexcept
+		{
+			if (!a_logged.test_and_set(std::memory_order_relaxed)) {
+				L->error(
+					"{} setup diagnostic exceeded {} distinct tuples.",
+					a_family,
+					a_capacity);
+			}
+		}
+
+		void LogSetupFailure(std::string_view a_reason) noexcept
+		{
+			if (!g_setupFailureLogged.test_and_set(
+					std::memory_order_relaxed)) {
+				L->error(
+					"Setup diagnostic could not retain or format a tuple: {}",
+					a_reason);
+			}
 		}
 
 		DistinctRecordResult RecordDistinct(
@@ -278,47 +344,50 @@ namespace cs::engine
 						std::memory_order_acquire));
 			}
 		}
-		// The composite macro emitter is not lifted (engine-facts puts it at
-		// AE 0x226C510 with unvalidated rules), so count raw techniques only.
 		void ObserveCompositeTechniqueSetup(
-			std::uint32_t a_techniqueBits) noexcept
+			const ShaderSubclassSetupObservation& a_observation) noexcept
 		{
 			const auto setupCount =
 				g_compositeSetupCount.fetch_add(
 					1, std::memory_order_relaxed) + 1;
-
-			bool isNew = false;
-			std::size_t index = 0;
-			{
-				std::scoped_lock lock(g_permutationMutex);
-				const auto seen = std::find(
-					g_compositeTechniques.begin(),
-					g_compositeTechniques.begin()
-						+ static_cast<std::ptrdiff_t>(
-							g_compositeTechniqueCount),
-					a_techniqueBits);
-				if (seen
-					== g_compositeTechniques.begin()
-						+ static_cast<std::ptrdiff_t>(
-							g_compositeTechniqueCount)) {
-					if (g_compositeTechniqueCount
-						< g_compositeTechniques.size()) {
-						g_compositeTechniques[g_compositeTechniqueCount++] =
-							a_techniqueBits;
-						index = g_compositeTechniqueCount;
-						isNew = true;
+			const CompositeSetupTupleKeyView key{
+				.subclass = a_observation.subclass,
+				.rawTechnique = a_observation.rawTechnique,
+				.engineLookupPsid =
+					EnginePsid(a_observation.engineLookupCorrelation),
+				.pluginResolvedPsid = PluginPsid(a_observation),
+				.correlationStatus =
+					a_observation.engineLookupCorrelation.status,
+				.correlationReason =
+					a_observation.engineLookupCorrelation.reason,
+				.tiledLighting = a_observation.tiledLighting,
+				.rgbspecGlobalByte = std::nullopt
+			};
+			try {
+				ShaderMacroDiagnosticsInsert inserted;
+				{
+					std::scoped_lock lock(g_setupMutex);
+					inserted = g_compositeSetupTuples.Insert(key);
+					if (inserted.result
+						== ShaderMacroDiagnosticsInsertResult::kFirstSight) {
 						g_compositeDistinctCount.store(
-							g_compositeTechniqueCount,
+							g_compositeSetupTuples.Size(),
 							std::memory_order_release);
 					}
 				}
-			}
-
-			if (isNew) {
-				L->info(
-					"Composite setup permutation #{}: raw=0x{:08X}",
-					index,
-					a_techniqueBits);
+				if (inserted.result
+					== ShaderMacroDiagnosticsInsertResult::kFirstSight) {
+					L->info("{}", FormatCompositeRuntimeHalfLine(key));
+				} else if (inserted.result
+					== ShaderMacroDiagnosticsInsertResult::
+						kCapacityExceeded) {
+					LogSetupOverflow(
+						g_compositeSetupOverflowLogged,
+						"Composite",
+						kCompositeSetupTupleCapacity);
+				}
+			} catch (const std::exception& e) {
+				LogSetupFailure(e.what());
 			}
 
 			if (L->should_log(spdlog::level::info)) {
@@ -327,37 +396,25 @@ namespace cs::engine
 					5000,
 					spdlog::level::info,
 					"Composite setup diagnostic: setups={}, "
-					"distinct_techniques={}",
+					"distinct_routes={}",
 					setupCount,
 					g_compositeDistinctCount.load(
 						std::memory_order_acquire));
 			}
 		}
 
-		// Draw-time vantage: CreatePixelShader never sees most permutations
-		// because the engine creates and caches them outside a technique-known
-		// SetupTechnique scope. Every drawn permutation passes through here.
 		void ObserveLightTechniqueSetup(
-			void* /*a_shader*/,
-			const char* a_subclassName,
-			std::uint32_t a_techniqueBits) noexcept
+			const ShaderSubclassSetupObservation& a_observation) noexcept
 		{
-			if (!a_subclassName)
-				return;
-			const std::string_view subclass(a_subclassName);
-			if (subclass == "BSDFCompositeShader") {
-				ObserveCompositeTechniqueSetup(a_techniqueBits);
+			if (a_observation.subclass == "BSDFCompositeShader") {
+				ObserveCompositeTechniqueSetup(a_observation);
 				return;
 			}
-			if (subclass != "BSDFLightShader")
+			if (a_observation.subclass != "BSDFLightShader")
 				return;
 
 			const auto setupCount =
 				g_setupCount.fetch_add(1, std::memory_order_relaxed) + 1;
-
-			thread_local PendingObservation observation;
-			observation = PendingObservation{};
-			observation.rawTechnique = a_techniqueBits;
 
 			std::array<EngineShaderMacro, kMacroCapacity> macros{};
 			static REL::Relocation<
@@ -367,7 +424,8 @@ namespace cs::engine
 				getLightMacros{
 					REL::ID({ 825685, 2319657, 2319657 })
 				};
-			if (getLightMacros(a_techniqueBits, macros.data())
+			if (getLightMacros(
+					a_observation.rawTechnique, macros.data())
 				!= macros.data()) {
 				CS_LOG_ONCE(
 					L,
@@ -376,7 +434,9 @@ namespace cs::engine
 					"at setup.");
 				return;
 			}
-			if (!FormatMacroTable(macros, observation)) {
+			std::array<ShaderMacroDefinitionView, kMacroCapacity> macroViews{};
+			std::size_t macroCount = 0;
+			if (!CaptureMacroViews(macros, macroViews, macroCount)) {
 				CS_LOG_ONCE(
 					L,
 					spdlog::level::err,
@@ -385,23 +445,47 @@ namespace cs::engine
 				return;
 			}
 
-			const auto distinct = RecordDistinct(observation);
-			if (distinct.capacityExceeded) {
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Light macro diagnostic exceeded {} distinct "
-					"permutations.",
-					g_permutations.size());
-			} else if (distinct.routeIndex != 0) {
-				L->info(
-					"Light setup permutation #{} (macro_set #{}): "
-					"raw=0x{:08X}, macro_count={}, macros=[{}]",
-					distinct.routeIndex,
-					distinct.macroSetIndex,
-					observation.rawTechnique,
-					observation.macroCount,
-					observation.macroText.data());
+			const LightSetupTupleKeyView key{
+				.subclass = a_observation.subclass,
+				.rawTechnique = a_observation.rawTechnique,
+				.engineLookupPsid =
+					EnginePsid(a_observation.engineLookupCorrelation),
+				.pluginResolvedPsid = PluginPsid(a_observation),
+				.correlationStatus =
+					a_observation.engineLookupCorrelation.status,
+				.correlationReason =
+					a_observation.engineLookupCorrelation.reason,
+				.macros = std::span(
+					macroViews.data(), macroCount)
+			};
+			try {
+				ShaderMacroDiagnosticsInsert inserted;
+				{
+					std::scoped_lock lock(g_setupMutex);
+					inserted = g_lightSetupTuples.Insert(key);
+					if (inserted.result
+						== ShaderMacroDiagnosticsInsertResult::kFirstSight) {
+						g_setupDistinctCount.store(
+							g_lightSetupTuples.Size(),
+							std::memory_order_release);
+						g_setupDistinctMacroSetCount.store(
+							g_lightSetupTuples.MacroSetCount(),
+							std::memory_order_release);
+					}
+				}
+				if (inserted.result
+					== ShaderMacroDiagnosticsInsertResult::kFirstSight) {
+					L->info("{}", FormatLightRuntimeHalfLine(key));
+				} else if (inserted.result
+					== ShaderMacroDiagnosticsInsertResult::
+						kCapacityExceeded) {
+					LogSetupOverflow(
+						g_lightSetupOverflowLogged,
+						"Light",
+						kLightSetupTupleCapacity);
+				}
+			} catch (const std::exception& e) {
+				LogSetupFailure(e.what());
 			}
 
 			if (L->should_log(spdlog::level::info)) {
@@ -412,8 +496,8 @@ namespace cs::engine
 					"Light setup diagnostic: setups={}, distinct_routes={}, "
 					"distinct_macro_sets={}",
 					setupCount,
-					g_distinctCount.load(std::memory_order_acquire),
-					g_distinctMacroSetCount.load(
+					g_setupDistinctCount.load(std::memory_order_acquire),
+					g_setupDistinctMacroSetCount.load(
 						std::memory_order_acquire));
 			}
 		}

@@ -1,10 +1,25 @@
 #pragma once
 
+#include "Render/EnginePixelShaderLookup.h"
+#include "Render/PixelShaderSwapBroker.h"
+
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <string_view>
 
 namespace cs::engine
 {
+	struct ShaderSubclassSetupObservation
+	{
+		void* shader = nullptr;
+		std::string_view subclass;
+		std::uint32_t rawTechnique = 0;
+		EnginePixelShaderLookupCorrelationResult engineLookupCorrelation;
+		std::optional<ShaderVariantId> pluginResolvedPsid;
+		std::optional<bool> tiledLighting;
+	};
+
 	struct ShaderSubclassHookInstallStats
 	{
 		unsigned attempted = 0;
@@ -24,9 +39,7 @@ namespace cs::engine
 	};
 
 	using ShaderSubclassSetupObserver = void (*)(
-		void* a_shader,
-		const char* a_subclassName,
-		std::uint32_t a_techniqueBits) noexcept;
+		const ShaderSubclassSetupObservation& a_observation) noexcept;
 
 	void InstallShaderSubclassHooks();
 	bool RegisterShaderSubclassSetupObserver(
