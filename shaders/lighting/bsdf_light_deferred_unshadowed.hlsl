@@ -212,11 +212,17 @@ cbuffer PerFrame_CB12 : register(b12)
     //       fHairSecSpecShift, 0, 0).
     float4 cb12_idx29_hair_spec_shifts;
 
-#ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
     // [30]: .y is the 1 - x raised-to-fourth gloss term in the Schlick-shaped
-    //       fresnel scale. Declared only where it is read, because declaring
-    //       it everywhere would leave the base directional and every POINTOMNI
-    //       permutation reflecting CB12 as 31 registers against a native 30.
+    //       fresnel scale. Declared only for specular DIRECTIONAL, the one
+    //       family that reads it. Declaring it everywhere left the base
+    //       directional and every POINTOMNI permutation reflecting CB12 as 31
+    //       registers - 496 bytes - against a native 30, or 480.
+    //
+    //       The condition is spelled out rather than reusing
+    //       FO4_UNSHADOWED_USES_GLOSS_FRESNEL, which is defined as exactly the
+    //       same pair, so the resource contract can be read here without
+    //       resolving a macro. Keep the two in step.
+#if defined(DIRECTIONAL) && defined(SPECULAR)
     float4 cb12_idx30;
 #endif
 };
