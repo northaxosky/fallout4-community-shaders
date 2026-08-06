@@ -1,3 +1,5 @@
+#include "Render/EngineCurrentPixelShader.h"
+#include "Render/EnginePixelShaderIdentity.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderVariantResolver.h"
 
@@ -1083,26 +1085,239 @@ namespace
 						== 0x104,
 				"nested lookup snapshot did not enforce exact ownership");
 		}
-		EnginePixelShaderLookupCorrelationResult foreignThreadCorrelation;
-		std::thread other([&] {
-			foreignThreadCorrelation = outer.Snapshot(
+			EnginePixelShaderLookupCorrelationResult foreignThreadCorrelation;
+			std::thread other([&] {
+				foreignThreadCorrelation = outer.Snapshot(
+					&outerShader, "BSDFLightShader", 0x281);
+			});
+			other.join();
+			const auto restored = outer.Snapshot(
 				&outerShader, "BSDFLightShader", 0x281);
-		});
-		other.join();
-		const auto restored = outer.Snapshot(
-			&outerShader, "BSDFLightShader", 0x281);
-		Check(
-			foreignThreadCorrelation.status
-					== EnginePixelShaderLookupCorrelationStatus::kRejected
-				&& foreignThreadCorrelation.reason
-					== EnginePixelShaderLookupCorrelationReason::kOutOfScope
-				&& restored.status
-					== EnginePixelShaderLookupCorrelationStatus::kMatched
-				&& restored.observation
-				&& restored.observation->returnedPsid.Value() == 0x201,
-			"lookup snapshot crossed a thread or lost nested restoration");
-	}
+			Check(
+				foreignThreadCorrelation.status
+						== EnginePixelShaderLookupCorrelationStatus::kRejected
+					&& foreignThreadCorrelation.reason
+						== EnginePixelShaderLookupCorrelationReason::kOutOfScope
+					&& restored.status
+						== EnginePixelShaderLookupCorrelationStatus::kMatched
+					&& restored.observation
+					&& restored.observation->returnedPsid.Value() == 0x201,
+				"lookup snapshot crossed a thread or lost nested restoration");
+		}
 
+		struct CurrentPixelShaderFixture
+		{
+			std::optional<cs::engine::EngineCurrentPixelShaderSnapshot> snapshot;
+			unsigned reads = 0;
+		};
+
+		std::optional<cs::engine::EngineCurrentPixelShaderSnapshot>
+			ReadCurrentPixelShaderFixture(void* a_context) noexcept
+		{
+			auto& fixture =
+				*static_cast<CurrentPixelShaderFixture*>(a_context);
+			++fixture.reads;
+			return fixture.snapshot;
+		}
+
+		void TestCurrentPixelShaderObservationStatuses()
+		{
+			using namespace cs::engine;
+			CurrentPixelShaderFixture nextGen{
+				.snapshot = EngineCurrentPixelShaderSnapshot{
+					.psid = EngineLookupPsid{ 0x301 },
+					.d3dShaderPresent = true
+				}
+			};
+			CurrentPixelShaderFixture anniversary{
+				.snapshot = EngineCurrentPixelShaderSnapshot{
+					.psid = EngineLookupPsid{ 0x302 },
+					.d3dShaderPresent = true
+				}
+			};
+			const auto nextGenResult = ObserveEngineCurrentPixelShader(
+				true, &ReadCurrentPixelShaderFixture, &nextGen);
+			const auto anniversaryResult = ObserveEngineCurrentPixelShader(
+				true, &ReadCurrentPixelShaderFixture, &anniversary);
+			Check(
+				nextGenResult.status
+						== EngineCurrentPixelShaderStatus::kKnown
+					&& nextGenResult.psid
+					&& nextGenResult.psid->Value() == 0x301
+					&& nextGen.reads == 1
+					&& anniversaryResult.status
+						== EngineCurrentPixelShaderStatus::kKnown
+					&& anniversaryResult.psid
+					&& anniversaryResult.psid->Value() == 0x302
+					&& anniversary.reads == 1,
+				"NG or AE current wrapper did not produce a known PSID");
+
+			const auto originalReads = anniversary.reads;
+			const auto originalGameResult = ObserveEngineCurrentPixelShader(
+				false, &ReadCurrentPixelShaderFixture, &anniversary);
+			Check(
+				originalGameResult.status
+						== EngineCurrentPixelShaderStatus::
+							kUnavailableOnRuntime
+					&& !originalGameResult.psid
+					&& anniversary.reads == originalReads,
+				"OG current wrapper attempted to use its unresolved relocation");
+
+			CurrentPixelShaderFixture noWrapper;
+			const auto noWrapperResult = ObserveEngineCurrentPixelShader(
+				true, &ReadCurrentPixelShaderFixture, &noWrapper);
+			Check(
+				noWrapperResult.status
+						== EngineCurrentPixelShaderStatus::kNoCurrentPixelShader
+					&& !noWrapperResult.psid
+					&& noWrapper.reads == 1,
+				"null current wrapper was not explicit");
+
+			CurrentPixelShaderFixture noD3DShader{
+				.snapshot = EngineCurrentPixelShaderSnapshot{
+					.psid = EngineLookupPsid{ 0x303 },
+					.d3dShaderPresent = false
+				}
+			};
+			const auto noD3DResult = ObserveEngineCurrentPixelShader(
+				true, &ReadCurrentPixelShaderFixture, &noD3DShader);
+			Check(
+				noD3DResult.status
+						== EngineCurrentPixelShaderStatus::kNoD3DShader
+					&& noD3DResult.psid
+					&& noD3DResult.psid->Value() == 0x303,
+				"null D3D shader lost the independently valid wrapper PSID");
+		}
+
+		void TestEnginePixelShaderIdentityReconciliation()
+		{
+			using namespace cs::engine;
+			const EnginePixelShaderLookupObservation lookupObservation{
+				.target = EnginePixelShaderLookupTarget::kBsdfLight,
+				.functionInput = 0x281,
+				.returnedPsid = EngineLookupPsid{ 0x201 },
+				.callSequence = 1,
+				.threadId = 2
+			};
+			const EnginePixelShaderLookupCorrelationResult matched{
+				.status = EnginePixelShaderLookupCorrelationStatus::kMatched,
+				.reason = EnginePixelShaderLookupCorrelationReason::kNone,
+				.observation = lookupObservation
+			};
+			const EngineCurrentPixelShaderObservation sameWrapper{
+				.status = EngineCurrentPixelShaderStatus::kKnown,
+				.psid = EngineLookupPsid{ 0x201 }
+			};
+			const auto same = ReconcileEnginePixelShaderId(
+				matched, sameWrapper);
+			Check(
+				same.status == EnginePixelShaderIdentityStatus::kMatched
+					&& same.source
+						== EnginePixelShaderIdentitySource::
+							kLookupReturnAndCurrentWrapper
+					&& same.reason == EnginePixelShaderIdentityReason::kNone
+					&& same.psid
+					&& same.psid->Value() == 0x201,
+				"matching lookup and wrapper evidence did not reconcile");
+
+			auto differentWrapper = sameWrapper;
+			differentWrapper.psid = EngineLookupPsid{ 0x202 };
+			const auto mismatched = ReconcileEnginePixelShaderId(
+				matched, differentWrapper);
+			Check(
+				mismatched.status
+						== EnginePixelShaderIdentityStatus::kRejected
+					&& mismatched.source
+						== EnginePixelShaderIdentitySource::
+							kLookupReturnAndCurrentWrapper
+					&& mismatched.reason
+						== EnginePixelShaderIdentityReason::
+							kLookupCurrentWrapperMismatch
+					&& !mismatched.psid,
+				"lookup and wrapper disagreement selected a PSID");
+
+			const EnginePixelShaderLookupCorrelationResult ambiguous{
+				.status = EnginePixelShaderLookupCorrelationStatus::kAmbiguous,
+				.reason = EnginePixelShaderLookupCorrelationReason::
+					kMultipleMatchingReturns
+			};
+			const auto unresolved = ReconcileEnginePixelShaderId(
+				ambiguous, sameWrapper);
+			Check(
+				unresolved.status
+						== EnginePixelShaderIdentityStatus::kAmbiguous
+					&& unresolved.source
+						== EnginePixelShaderIdentitySource::
+							kLookupReturnAndCurrentWrapper
+					&& unresolved.reason
+						== EnginePixelShaderIdentityReason::
+							kMultipleMatchingReturns
+					&& !unresolved.psid,
+				"known wrapper weakened ambiguous lookup behavior");
+
+			const EnginePixelShaderLookupCorrelationResult unavailable{
+				.status = EnginePixelShaderLookupCorrelationStatus::kUnavailable,
+				.reason = EnginePixelShaderLookupCorrelationReason::
+					kProductionLookupHookUnavailable
+			};
+			const auto wrapperOnly = ReconcileEnginePixelShaderId(
+				unavailable, sameWrapper);
+			Check(
+				wrapperOnly.status == EnginePixelShaderIdentityStatus::kKnown
+					&& wrapperOnly.source
+						== EnginePixelShaderIdentitySource::kCurrentWrapper
+					&& wrapperOnly.reason
+						== EnginePixelShaderIdentityReason::kNone
+					&& wrapperOnly.psid
+					&& wrapperOnly.psid->Value() == 0x201,
+				"current wrapper did not replace an unavailable lookup source");
+
+			const EngineCurrentPixelShaderObservation noD3DShader{
+				.status = EngineCurrentPixelShaderStatus::kNoD3DShader,
+				.psid = EngineLookupPsid{ 0x203 }
+			};
+			const auto wrapperWithoutD3D = ReconcileEnginePixelShaderId(
+				unavailable, noD3DShader);
+			Check(
+				wrapperWithoutD3D.status
+						== EnginePixelShaderIdentityStatus::kKnown
+					&& wrapperWithoutD3D.source
+						== EnginePixelShaderIdentitySource::kCurrentWrapper
+					&& wrapperWithoutD3D.reason
+						== EnginePixelShaderIdentityReason::kNoD3DShader
+					&& wrapperWithoutD3D.psid
+					&& wrapperWithoutD3D.psid->Value() == 0x203,
+				"wrapper PSID incorrectly depended on its D3D shader");
+
+			const EngineCurrentPixelShaderObservation originalGame{
+				.status =
+					EngineCurrentPixelShaderStatus::kUnavailableOnRuntime
+			};
+			const auto originalGameResult = ReconcileEnginePixelShaderId(
+				unavailable, originalGame);
+			const EngineCurrentPixelShaderObservation noWrapper{
+				.status =
+					EngineCurrentPixelShaderStatus::kNoCurrentPixelShader
+			};
+			const auto noWrapperResult = ReconcileEnginePixelShaderId(
+				unavailable, noWrapper);
+			Check(
+				originalGameResult.status
+						== EnginePixelShaderIdentityStatus::kUnavailable
+					&& originalGameResult.source
+						== EnginePixelShaderIdentitySource::kNone
+					&& originalGameResult.reason
+						== EnginePixelShaderIdentityReason::
+							kUnavailableOnRuntime
+					&& !originalGameResult.psid
+					&& noWrapperResult.status
+						== EnginePixelShaderIdentityStatus::kUnavailable
+					&& noWrapperResult.reason
+						== EnginePixelShaderIdentityReason::
+							kNoCurrentPixelShader
+					&& !noWrapperResult.psid,
+				"unavailable current wrapper state was not explicit");
+		}
 	void TestResolverRegistryGeneration()
 	{
 		using namespace cs::engine;
@@ -1164,6 +1379,8 @@ int main()
 		{ "engine lookup claim fails closed", &TestEngineLookupClaimFailsClosed },
 		{ "engine lookup snapshot unavailable", &TestEngineLookupSnapshotUnavailableAndMismatched },
 		{ "engine lookup snapshot is thread local", &TestEngineLookupSnapshotIsNestedAndThreadLocal },
+		{ "current wrapper statuses", &TestCurrentPixelShaderObservationStatuses },
+		{ "engine PSID reconciliation", &TestEnginePixelShaderIdentityReconciliation },
 		{ "resolver registry generation", &TestResolverRegistryGeneration }
 	};
 

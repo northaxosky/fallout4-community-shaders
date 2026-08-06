@@ -50,10 +50,13 @@ namespace
 			.rawTechnique = 641,
 			.engineLookupPsid = 513,
 			.pluginResolvedPsid = 514,
+			.engineLookupSource =
+				EnginePixelShaderIdentitySource::
+					kLookupReturnAndCurrentWrapper,
 			.correlationStatus =
-				EnginePixelShaderLookupCorrelationStatus::kMatched,
+				EnginePixelShaderIdentityStatus::kMatched,
 			.correlationReason =
-				EnginePixelShaderLookupCorrelationReason::kNone,
+				EnginePixelShaderIdentityReason::kNone,
 			.macros = macros
 		};
 		const auto knownLine = FormatLightRuntimeHalfLine(known);
@@ -67,6 +70,8 @@ namespace
 				   "\"subclass\":\"BSDFLightShader\","
 				   "\"raw_technique\":641,"
 				   "\"engine_lookup_psid\":513,"
+				   "\"engine_lookup_source\":"
+				   "\"lookup_return_and_current_wrapper\","
 				   "\"plugin_resolved_psid\":514,"
 				   "\"correlation_status\":\"matched\","
 				   "\"correlation_reason\":null,"
@@ -82,10 +87,12 @@ namespace
 		auto unknown = known;
 		unknown.engineLookupPsid = std::nullopt;
 		unknown.pluginResolvedPsid = std::nullopt;
+		unknown.engineLookupSource =
+			EnginePixelShaderIdentitySource::kNone;
 		unknown.correlationStatus =
-			EnginePixelShaderLookupCorrelationStatus::kUnavailable;
+			EnginePixelShaderIdentityStatus::kUnavailable;
 		unknown.correlationReason =
-			EnginePixelShaderLookupCorrelationReason::
+			EnginePixelShaderIdentityReason::
 				kProductionLookupHookUnavailable;
 		const auto unknownLine = FormatLightRuntimeHalfLine(unknown);
 		Check(
@@ -98,6 +105,7 @@ namespace
 				   "\"subclass\":\"BSDFLightShader\","
 				   "\"raw_technique\":641,"
 				   "\"engine_lookup_psid\":null,"
+				   "\"engine_lookup_source\":\"none\","
 				   "\"plugin_resolved_psid\":null,"
 				   "\"correlation_status\":\"unavailable\","
 				   "\"correlation_reason\":"
@@ -120,10 +128,12 @@ namespace
 			.rawTechnique = 123,
 			.engineLookupPsid = std::nullopt,
 			.pluginResolvedPsid = 45,
+			.engineLookupSource =
+				EnginePixelShaderIdentitySource::kNone,
 			.correlationStatus =
-				EnginePixelShaderLookupCorrelationStatus::kUnavailable,
+				EnginePixelShaderIdentityStatus::kUnavailable,
 			.correlationReason =
-				EnginePixelShaderLookupCorrelationReason::kNoValidatedTarget,
+				EnginePixelShaderIdentityReason::kNoValidatedTarget,
 			.tiledLighting = true,
 			.rgbspecGlobalByte = std::nullopt
 		};
@@ -139,6 +149,7 @@ namespace
 				   "\"subclass\":\"BSDFCompositeShader\","
 				   "\"raw_technique\":123,"
 				   "\"engine_lookup_psid\":null,"
+				   "\"engine_lookup_source\":\"none\","
 				   "\"plugin_resolved_psid\":45,"
 				   "\"correlation_status\":\"unavailable\","
 				   "\"correlation_reason\":\"no_validated_target\","
@@ -162,6 +173,7 @@ namespace
 				   "\"subclass\":\"BSDFCompositeShader\","
 				   "\"raw_technique\":123,"
 				   "\"engine_lookup_psid\":null,"
+				   "\"engine_lookup_source\":\"none\","
 				   "\"plugin_resolved_psid\":45,"
 				   "\"correlation_status\":\"unavailable\","
 				   "\"correlation_reason\":\"no_validated_target\","
@@ -188,23 +200,29 @@ namespace
 			.rawTechnique = 7,
 			.engineLookupPsid = 11,
 			.pluginResolvedPsid = 12,
+			.engineLookupSource =
+				EnginePixelShaderIdentitySource::kLookupReturn,
 			.correlationStatus =
-				EnginePixelShaderLookupCorrelationStatus::kMatched,
+				EnginePixelShaderIdentityStatus::kMatched,
 			.correlationReason =
-				EnginePixelShaderLookupCorrelationReason::kNone,
+				EnginePixelShaderIdentityReason::kNone,
 			.macros = macros
 		};
-		LightSetupTupleStore store(4);
+		LightSetupTupleStore store(5);
 		const auto first = store.Insert(key);
 		const auto duplicate = store.Insert(key);
 		key.pluginResolvedPsid = 13;
 		const auto changedPsid = store.Insert(key);
 		key.macros = changedMacros;
 		const auto changedMacroTable = store.Insert(key);
+		key.engineLookupSource =
+			EnginePixelShaderIdentitySource::
+				kLookupReturnAndCurrentWrapper;
+		const auto changedSource = store.Insert(key);
 		key.correlationStatus =
-			EnginePixelShaderLookupCorrelationStatus::kAmbiguous;
+			EnginePixelShaderIdentityStatus::kAmbiguous;
 		key.correlationReason =
-			EnginePixelShaderLookupCorrelationReason::kMultipleMatchingReturns;
+			EnginePixelShaderIdentityReason::kMultipleMatchingReturns;
 		const auto changedCorrelation = store.Insert(key);
 		Check(
 			first.result
@@ -215,9 +233,11 @@ namespace
 					== ShaderMacroDiagnosticsInsertResult::kFirstSight
 				&& changedMacroTable.result
 					== ShaderMacroDiagnosticsInsertResult::kFirstSight
+				&& changedSource.result
+					== ShaderMacroDiagnosticsInsertResult::kFirstSight
 				&& changedCorrelation.result
 					== ShaderMacroDiagnosticsInsertResult::kFirstSight
-				&& store.Size() == 4
+				&& store.Size() == 5
 				&& store.MacroSetCount() == 2,
 			"Light setup tuple key omitted a route field");
 	}
@@ -230,10 +250,12 @@ namespace
 			.rawTechnique = 19,
 			.engineLookupPsid = std::nullopt,
 			.pluginResolvedPsid = 21,
+			.engineLookupSource =
+				EnginePixelShaderIdentitySource::kNone,
 			.correlationStatus =
-				EnginePixelShaderLookupCorrelationStatus::kUnavailable,
+				EnginePixelShaderIdentityStatus::kUnavailable,
 			.correlationReason =
-				EnginePixelShaderLookupCorrelationReason::kNoValidatedTarget,
+				EnginePixelShaderIdentityReason::kNoValidatedTarget,
 			.tiledLighting = true,
 			.rgbspecGlobalByte = std::nullopt
 		};

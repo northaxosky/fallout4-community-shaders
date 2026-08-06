@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Render/EnginePixelShaderLookup.h"
+#include "Render/EnginePixelShaderIdentity.h"
 #include "Render/PixelShaderSwapBroker.h"
 
 #include <cstddef>
@@ -15,7 +15,7 @@ namespace cs::engine
 		void* shader = nullptr;
 		std::string_view subclass;
 		std::uint32_t rawTechnique = 0;
-		EnginePixelShaderLookupCorrelationResult engineLookupCorrelation;
+		EnginePixelShaderIdentityResult enginePixelShader;
 		std::optional<ShaderVariantId> pluginResolvedPsid;
 		std::optional<bool> tiledLighting;
 	};

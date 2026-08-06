@@ -28,6 +28,7 @@ namespace cs::engine
 				.rawTechnique = a_key.rawTechnique,
 				.engineLookupPsid = a_key.engineLookupPsid,
 				.pluginResolvedPsid = a_key.pluginResolvedPsid,
+				.engineLookupSource = a_key.engineLookupSource,
 				.correlationStatus = a_key.correlationStatus,
 				.correlationReason = a_key.correlationReason
 			};
@@ -49,6 +50,7 @@ namespace cs::engine
 				.rawTechnique = a_key.rawTechnique,
 				.engineLookupPsid = a_key.engineLookupPsid,
 				.pluginResolvedPsid = a_key.pluginResolvedPsid,
+				.engineLookupSource = a_key.engineLookupSource,
 				.correlationStatus = a_key.correlationStatus,
 				.correlationReason = a_key.correlationReason,
 				.tiledLighting = a_key.tiledLighting,
@@ -128,8 +130,9 @@ namespace cs::engine
 			std::uint32_t a_rawTechnique,
 			std::optional<std::uint32_t> a_engineLookupPsid,
 			std::optional<std::uint32_t> a_pluginResolvedPsid,
-			EnginePixelShaderLookupCorrelationStatus a_correlationStatus,
-			EnginePixelShaderLookupCorrelationReason a_correlationReason)
+			EnginePixelShaderIdentitySource a_engineLookupSource,
+			EnginePixelShaderIdentityStatus a_correlationStatus,
+			EnginePixelShaderIdentityReason a_correlationReason)
 		{
 			std::string result;
 			result.reserve(512);
@@ -145,21 +148,26 @@ namespace cs::engine
 			AppendInteger(result, a_rawTechnique);
 			result += ",\"engine_lookup_psid\":";
 			AppendOptionalInteger(result, a_engineLookupPsid);
+			result += ",\"engine_lookup_source\":";
+			AppendJsonString(
+				result,
+				EnginePixelShaderIdentitySourceName(
+					a_engineLookupSource));
 			result += ",\"plugin_resolved_psid\":";
 			AppendOptionalInteger(result, a_pluginResolvedPsid);
 			result += ",\"correlation_status\":";
 			AppendJsonString(
 				result,
-				EnginePixelShaderLookupCorrelationStatusName(
+				EnginePixelShaderIdentityStatusName(
 					a_correlationStatus));
 			result += ",\"correlation_reason\":";
 			if (a_correlationReason
-				== EnginePixelShaderLookupCorrelationReason::kNone) {
+				== EnginePixelShaderIdentityReason::kNone) {
 				result += "null";
 			} else {
 				AppendJsonString(
 					result,
-					EnginePixelShaderLookupCorrelationReasonName(
+					EnginePixelShaderIdentityReasonName(
 						a_correlationReason));
 			}
 			return result;
@@ -173,6 +181,7 @@ namespace cs::engine
 			&& rawTechnique == a_other.rawTechnique
 			&& engineLookupPsid == a_other.engineLookupPsid
 			&& pluginResolvedPsid == a_other.pluginResolvedPsid
+			&& engineLookupSource == a_other.engineLookupSource
 			&& correlationStatus == a_other.correlationStatus
 			&& correlationReason == a_other.correlationReason
 			&& MacroTablesMatch(macros, a_other.macros);
@@ -185,6 +194,7 @@ namespace cs::engine
 			&& rawTechnique == a_other.rawTechnique
 			&& engineLookupPsid == a_other.engineLookupPsid
 			&& pluginResolvedPsid == a_other.pluginResolvedPsid
+			&& engineLookupSource == a_other.engineLookupSource
 			&& correlationStatus == a_other.correlationStatus
 			&& correlationReason == a_other.correlationReason
 			&& tiledLighting == a_other.tiledLighting
@@ -293,6 +303,7 @@ namespace cs::engine
 			a_key.rawTechnique,
 			a_key.engineLookupPsid,
 			a_key.pluginResolvedPsid,
+			a_key.engineLookupSource,
 			a_key.correlationStatus,
 			a_key.correlationReason);
 		result += ",\"macros\":[";
@@ -320,6 +331,7 @@ namespace cs::engine
 			a_key.rawTechnique,
 			a_key.engineLookupPsid,
 			a_key.pluginResolvedPsid,
+			a_key.engineLookupSource,
 			a_key.correlationStatus,
 			a_key.correlationReason);
 		result += ",\"macros\":null,\"tiled_lighting\":";

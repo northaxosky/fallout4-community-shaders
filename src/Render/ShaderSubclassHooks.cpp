@@ -2,7 +2,9 @@
 
 #include "Log.h"
 #include "PCH.h"
+#include "Render/EngineCurrentPixelShader.h"
 #include "Render/EnginePixelShaderLookup.h"
+#include "Render/EnginePixelShaderIdentity.h"
 #include "Render/ShaderSubclassContext.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 
@@ -132,8 +134,8 @@ namespace cs::engine
 				g_setupCalls.fetch_add(1, std::memory_order_relaxed);
 				shader_context::SetSticky(Tag::Name(), a_techniqueBits);
 				bool result = false;
-				std::optional<EnginePixelShaderLookupCorrelationResult>
-					engineCorrelation;
+				std::optional<EnginePixelShaderIdentityResult>
+					enginePixelShader;
 				{
 					shader_context::Scope scope(
 						a_self, Tag::Name(), a_techniqueBits);
@@ -141,8 +143,10 @@ namespace cs::engine
 						a_self, Tag::Name(), a_techniqueBits);
 					result = func(a_self, a_techniqueBits);
 					if (result) {
-						engineCorrelation = lookupScope.Snapshot(
+						const auto lookup = lookupScope.Snapshot(
 							a_self, Tag::Name(), a_techniqueBits);
+						enginePixelShader = ReconcileEnginePixelShaderId(
+							lookup, ReadEngineCurrentPixelShader());
 					}
 				}
 				if (!result) {
@@ -162,7 +166,7 @@ namespace cs::engine
 						.shader = a_self,
 						.subclass = Tag::Name(),
 						.rawTechnique = a_techniqueBits,
-						.engineLookupCorrelation = *engineCorrelation,
+						.enginePixelShader = *enginePixelShader,
 						.pluginResolvedPsid = pluginResolvedPsid,
 						.tiledLighting = tiledLighting
 					};

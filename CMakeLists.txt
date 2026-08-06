@@ -330,8 +330,12 @@ set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
 add_executable(PixelShaderSwapTests
 	tests/PixelShaderSwapTests.cpp
+	src/Render/EngineCurrentPixelShader.cpp
+	src/Render/EngineCurrentPixelShader.h
 	src/Render/EnginePixelShaderLookup.cpp
 	src/Render/EnginePixelShaderLookup.h
+	src/Render/EnginePixelShaderIdentity.cpp
+	src/Render/EnginePixelShaderIdentity.h
 	src/Render/PixelShaderSwapModel.cpp
 	src/Render/PixelShaderSwapBroker.h
 	src/Render/ShaderVariantResolver.cpp
@@ -341,7 +345,10 @@ add_executable(PixelShaderSwapTests
 )
 configure_host_test(PixelShaderSwapTests)
 target_compile_definitions(
-	PixelShaderSwapTests PRIVATE FO4CS_ENGINE_LOOKUP_TESTING=1)
+	PixelShaderSwapTests PRIVATE
+		FO4CS_CURRENT_PIXEL_SHADER_TESTING=1
+		FO4CS_ENGINE_LOOKUP_TESTING=1
+)
 target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
@@ -349,8 +356,11 @@ set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
 
 add_executable(ShaderMacroDiagnosticsTests
 	tests/ShaderMacroDiagnosticsTests.cpp
+	src/Render/EngineCurrentPixelShader.h
 	src/Render/EnginePixelShaderLookup.cpp
 	src/Render/EnginePixelShaderLookup.h
+	src/Render/EnginePixelShaderIdentity.cpp
+	src/Render/EnginePixelShaderIdentity.h
 	src/Render/ShaderMacroDiagnosticsModel.cpp
 	src/Render/ShaderMacroDiagnosticsModel.h
 )

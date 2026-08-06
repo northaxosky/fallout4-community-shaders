@@ -149,12 +149,11 @@ namespace cs::engine
 		}
 
 		std::optional<std::uint32_t> EnginePsid(
-			const EnginePixelShaderLookupCorrelationResult&
-				a_correlation) noexcept
+			const EnginePixelShaderIdentityResult& a_identity) noexcept
 		{
-			if (!a_correlation.observation)
+			if (!a_identity.psid)
 				return std::nullopt;
-			return a_correlation.observation->returnedPsid.Value();
+			return a_identity.psid->Value();
 		}
 
 		std::optional<std::uint32_t> PluginPsid(
@@ -354,12 +353,14 @@ namespace cs::engine
 				.subclass = a_observation.subclass,
 				.rawTechnique = a_observation.rawTechnique,
 				.engineLookupPsid =
-					EnginePsid(a_observation.engineLookupCorrelation),
+					EnginePsid(a_observation.enginePixelShader),
 				.pluginResolvedPsid = PluginPsid(a_observation),
+				.engineLookupSource =
+					a_observation.enginePixelShader.source,
 				.correlationStatus =
-					a_observation.engineLookupCorrelation.status,
+					a_observation.enginePixelShader.status,
 				.correlationReason =
-					a_observation.engineLookupCorrelation.reason,
+					a_observation.enginePixelShader.reason,
 				.tiledLighting = a_observation.tiledLighting,
 				.rgbspecGlobalByte = std::nullopt
 			};
@@ -449,12 +450,14 @@ namespace cs::engine
 				.subclass = a_observation.subclass,
 				.rawTechnique = a_observation.rawTechnique,
 				.engineLookupPsid =
-					EnginePsid(a_observation.engineLookupCorrelation),
+					EnginePsid(a_observation.enginePixelShader),
 				.pluginResolvedPsid = PluginPsid(a_observation),
+				.engineLookupSource =
+					a_observation.enginePixelShader.source,
 				.correlationStatus =
-					a_observation.engineLookupCorrelation.status,
+					a_observation.enginePixelShader.status,
 				.correlationReason =
-					a_observation.engineLookupCorrelation.reason,
+					a_observation.enginePixelShader.reason,
 				.macros = std::span(
 					macroViews.data(), macroCount)
 			};

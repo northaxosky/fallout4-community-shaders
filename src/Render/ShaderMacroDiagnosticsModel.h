@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Render/EnginePixelShaderLookup.h"
+#include "Render/EnginePixelShaderIdentity.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -33,10 +33,12 @@ namespace cs::engine
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> engineLookupPsid;
 		std::optional<std::uint32_t> pluginResolvedPsid;
-		EnginePixelShaderLookupCorrelationStatus correlationStatus =
-			EnginePixelShaderLookupCorrelationStatus::kUnavailable;
-		EnginePixelShaderLookupCorrelationReason correlationReason =
-			EnginePixelShaderLookupCorrelationReason::kNoLookupObservation;
+		EnginePixelShaderIdentitySource engineLookupSource =
+			EnginePixelShaderIdentitySource::kNone;
+		EnginePixelShaderIdentityStatus correlationStatus =
+			EnginePixelShaderIdentityStatus::kUnavailable;
+		EnginePixelShaderIdentityReason correlationReason =
+			EnginePixelShaderIdentityReason::kNoLookupObservation;
 		std::span<const ShaderMacroDefinitionView> macros;
 	};
 
@@ -46,10 +48,12 @@ namespace cs::engine
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> engineLookupPsid;
 		std::optional<std::uint32_t> pluginResolvedPsid;
-		EnginePixelShaderLookupCorrelationStatus correlationStatus =
-			EnginePixelShaderLookupCorrelationStatus::kUnavailable;
-		EnginePixelShaderLookupCorrelationReason correlationReason =
-			EnginePixelShaderLookupCorrelationReason::kNoLookupObservation;
+		EnginePixelShaderIdentitySource engineLookupSource =
+			EnginePixelShaderIdentitySource::kNone;
+		EnginePixelShaderIdentityStatus correlationStatus =
+			EnginePixelShaderIdentityStatus::kUnavailable;
+		EnginePixelShaderIdentityReason correlationReason =
+			EnginePixelShaderIdentityReason::kNoLookupObservation;
 		std::vector<ShaderMacroDefinition> macros;
 
 		[[nodiscard]] bool Matches(
@@ -62,10 +66,12 @@ namespace cs::engine
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> engineLookupPsid;
 		std::optional<std::uint32_t> pluginResolvedPsid;
-		EnginePixelShaderLookupCorrelationStatus correlationStatus =
-			EnginePixelShaderLookupCorrelationStatus::kUnavailable;
-		EnginePixelShaderLookupCorrelationReason correlationReason =
-			EnginePixelShaderLookupCorrelationReason::kNoValidatedTarget;
+		EnginePixelShaderIdentitySource engineLookupSource =
+			EnginePixelShaderIdentitySource::kNone;
+		EnginePixelShaderIdentityStatus correlationStatus =
+			EnginePixelShaderIdentityStatus::kUnavailable;
+		EnginePixelShaderIdentityReason correlationReason =
+			EnginePixelShaderIdentityReason::kNoValidatedTarget;
 		std::optional<bool> tiledLighting;
 		std::optional<std::uint8_t> rgbspecGlobalByte;
 	};
@@ -76,10 +82,12 @@ namespace cs::engine
 		std::uint32_t rawTechnique = 0;
 		std::optional<std::uint32_t> engineLookupPsid;
 		std::optional<std::uint32_t> pluginResolvedPsid;
-		EnginePixelShaderLookupCorrelationStatus correlationStatus =
-			EnginePixelShaderLookupCorrelationStatus::kUnavailable;
-		EnginePixelShaderLookupCorrelationReason correlationReason =
-			EnginePixelShaderLookupCorrelationReason::kNoValidatedTarget;
+		EnginePixelShaderIdentitySource engineLookupSource =
+			EnginePixelShaderIdentitySource::kNone;
+		EnginePixelShaderIdentityStatus correlationStatus =
+			EnginePixelShaderIdentityStatus::kUnavailable;
+		EnginePixelShaderIdentityReason correlationReason =
+			EnginePixelShaderIdentityReason::kNoValidatedTarget;
 		std::optional<bool> tiledLighting;
 		std::optional<std::uint8_t> rgbspecGlobalByte;
 
