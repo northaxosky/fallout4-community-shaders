@@ -18,7 +18,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29** |
-| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** `DIRSPLITS=2` families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact, no axis exempt)** |
+| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact, no axis exempt)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -259,16 +259,17 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
 * **`bsdf_light_deferred_unshadowed.hlsl`** - **native ABI equal, 9/9, read-counts
   exact on every entry**.
-  The native **unshadowed** `DIRSPLITS=2` layer. Nine archive blobs carry
-  `DIRSPLITS=2` and no `SHADOW` macro, so their contract has no shadow texture and
-  no shadow sampler: five `DIRECTIONAL` and four `POINTOMNI`. State this carefully,
-  because the framing is itself an evidence claim: absence of `SHADOW` is **not** a
-  third value on the shadow-resource axis. `SHADOW` is simply inactive here, so the
-  axis does not exist for these nine and nothing may be grouped or compared along
-  it. The `FILTER_*` axis selects among raw `t4`/`s4`, comparison `t5`/`s5`, or both
-  only once `SHADOW` is proven active; with `SHADOW` absent there is no shadow
-  resource to select, which is why every `FILTER_*` is rejected outright here rather
-  than mapped to a "no filter" case.
+  The native **unshadowed** light layer. Nine archive blobs have no `SHADOW` macro,
+  so their contract has no shadow texture and no shadow sampler: five `DIRECTIONAL`
+  and four `POINTOMNI`. What this source owns is unshadowed lighting - not a shadow
+  selection, and not a cascade count. State that carefully, because the framing is
+  itself an evidence claim: absence of `SHADOW` is **not** a third value on the
+  shadow-resource axis. `SHADOW` is simply inactive here, so the axis does not exist
+  for these nine and nothing may be grouped or compared along it. The `FILTER_*` axis
+  selects among raw `t4`/`s4`, comparison `t5`/`s5`, or both only once `SHADOW` is
+  proven active; with `SHADOW` absent there is no shadow resource to select, which is
+  why every `FILTER_*` is rejected outright here rather than mapped to a "no filter"
+  case.
 
   All nine declare `t0..t3` as `texture2d` with `s0..s3` mode_default, the same two
   input semantics and the same two MRT outputs, and all read `CB12[20..29]`. They are
@@ -303,8 +304,8 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   a distinction worth checking rather than assuming, since slot 7 in the full constant
   layout is named `SplitDistances` and the per-blob table is compacted. The macro is
   still carried and still guarded, because it is a native axis that is never assumed,
-  but `DIRSPLITS=2` in these file and gate names is a decoder tag rather than a
-  semantic claim.
+  but it is deliberately absent from the source, manifest and gate names: what this
+  layer owns is unshadowed lighting, not a cascade count and not a shadow selection.
 
   `DIRECTIONAL` and `POINTOMNI` are separately reconstructed bodies in one file, even
   though their resource contracts match, because the disassembly differs in three
@@ -357,9 +358,9 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   entries is held to exact per-register read-counts.
 
   `scripts/shaders/verify-native-abi-admission.ps1` re-measures the layer against two
-  evidence manifests - `unshadowed-ds2-directional-native-abi.json` (CTest
-  `UnshadowedDs2DirectionalAdmission`) and
-  `unshadowed-ds2-pointomni-native-abi.json` (CTest `UnshadowedDs2PointOmniAdmission`).
+  evidence manifests - `unshadowed-directional-native-abi.json` (CTest
+  `UnshadowedDirectionalAdmission`) and
+  `unshadowed-pointomni-native-abi.json` (CTest `UnshadowedPointOmniAdmission`).
   Two manifests rather than one, because the verifier supports a single
   `count_exemption_axis` per manifest and the two families carry different risk axes.
   Between them the gates assert that 27 malformed or out-of-scope macro sets still

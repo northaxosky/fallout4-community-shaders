@@ -457,26 +457,26 @@ set_tests_properties(DirSplits2DirectionalAdmission PROPERTIES
 	TIMEOUT 600
 )
 
-set(_unshadowed_ds2_dir_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/unshadowed-ds2-directional-native-abi.json")
+set(_unshadowed_dir_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/unshadowed-directional-native-abi.json")
 add_test(
-	NAME UnshadowedDs2DirectionalAdmission
+	NAME UnshadowedDirectionalAdmission
 	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
-		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_unshadowed_ds2_dir_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_unshadowed_ds2_dir_manifest}' }"
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_unshadowed_dir_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_unshadowed_dir_manifest}' }"
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
-set_tests_properties(UnshadowedDs2DirectionalAdmission PROPERTIES
+set_tests_properties(UnshadowedDirectionalAdmission PROPERTIES
 	LABELS "shader;parity"
 	TIMEOUT 600
 )
 
-set(_unshadowed_ds2_omni_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/unshadowed-ds2-pointomni-native-abi.json")
+set(_unshadowed_omni_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/unshadowed-pointomni-native-abi.json")
 add_test(
-	NAME UnshadowedDs2PointOmniAdmission
+	NAME UnshadowedPointOmniAdmission
 	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
-		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_unshadowed_ds2_omni_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_unshadowed_ds2_omni_manifest}' }"
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_unshadowed_omni_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_unshadowed_omni_manifest}' }"
 	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
 )
-set_tests_properties(UnshadowedDs2PointOmniAdmission PROPERTIES
+set_tests_properties(UnshadowedPointOmniAdmission PROPERTIES
 	LABELS "shader;parity"
 	TIMEOUT 600
 )

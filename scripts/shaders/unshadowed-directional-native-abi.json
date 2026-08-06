@@ -4,7 +4,7 @@
   "scope": {
     "family": "DIRECTIONAL without SHADOW, DIRSPLITS=2 as decoder baseline",
     "runtime": "AE 1.11.221 archive blob set",
-    "report_label": "unshadowed DIRSPLITS=2 DIRECTIONAL",
+    "report_label": "unshadowed DIRECTIONAL",
     "compile_only_label": "sibling-family over-reach checks",
     "count_exemption_axis": null,
     "note": "Consumer-local admission gate. Each entry pins three things measured from a native archive blob - its declaration set, the set of constant-buffer registers its body reads, and how many times it reads each - and the check passes only when the reconstruction compiled from that blob's own macro set agrees. The pinned values come from the game bytecode, never from this repo's output. This is an ABI and constant-read claim only, not an execution-equivalence claim; execution proof stays with the producer oracle in the sibling fallout4-re. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. dcl_temps is excluded because it is register allocation, not ABI.",

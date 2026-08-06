@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// FO4 BSDFLightShader deferred PS, native unshadowed family at DIRSPLITS=2:
-// the nine archive blobs that carry DIRSPLITS=2, do not carry SHADOW, and
-// declare exactly t0..t3 with s0..s3 and no other resource. That last clause is
-// load-bearing: 24 decoded blobs satisfy "DIRSPLITS=2 and no SHADOW", but the
-// GOBOPROJECTION ones keep a t7 light cookie and the SPOT ones have their own
-// contract, so this file is a resource-contract family, not the whole predicate.
+// FO4 BSDFLightShader deferred PS, native unshadowed light family: the nine
+// archive blobs that carry no SHADOW and declare exactly t0..t3 with s0..s3 and
+// no other resource. What this source owns is unshadowed lighting - not a shadow
+// selection, and not a cascade count. The resource clause is load-bearing: 24
+// decoded blobs carry DIRSPLITS=2 with no SHADOW, but the GOBOPROJECTION ones
+// keep a t7 light cookie and the SPOT ones have their own contract, so this file
+// is a resource-contract family, not that whole predicate.
 //
 // This is a sibling of `bsdf_light_deferred.hlsl`, not a replacement, in the
 // same arrangement as `bsdf_light_deferred_dirsplits2.hlsl` (the shadowed
