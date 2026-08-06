@@ -331,8 +331,30 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   This is an ABI claim, not SHEX equality and not execution equivalence. SHEX identity
   was attempted and not reached; the residual instruction deltas run from -1 to +3.
-  Execution proof stays with the producer oracle, which must still route these nine
-  away from the consolidated source before they can be measured.
+  Execution proof stays with the producer oracle.
+
+  The producer has since routed to this file, and the two sides agree without either
+  having been derived from the other. Its target contracts map exactly these nine
+  blobs to `bsdf_light_deferred_unshadowed.hlsl`, emitting precisely the nine macro
+  sets pinned above and no `LIGHT_TYPE` - the consolidated file's adapter macro, which
+  the guards here reject. All nine compile from this source under the producer's own
+  flags (`/T ps_5_0 /O3 /E main`). Their strict execution profiles are
+  `directional-unshadowed` for the five directional rows and `pointomni-unshadowed`
+  for the four point rows; neither profile's predicates read a constant register
+  outside these `CB2` sizes, and `pointomni-unshadowed` additionally requires the
+  `atten <= 0.001` cull and distinct `cb12[20..27]` reprojection banks to be
+  exercised, which are the early-out and the near/far partition reconstructed here.
+
+  The layer is nine and not fourteen because of one boundary worth stating. Five more
+  archive blobs are unshadowed `POINTOMNI` at `DIRSPLITS=2` but also carry
+  `GOBOPROJECTION` (`a65b5952`, `9969e800`, `fa6948ba`, `f33e32f9`, `d3331d19`). They
+  keep the distinct `t7` light-cookie ABI, so they are a different contract and stay
+  on the consolidated source; this file's guards reject that combination. Being
+  unshadowed is not on its own sufficient to belong here - the whole resource
+  contract has to match.
+
+  Routing does not add execution proof. It makes these nine *measurable*, which is the
+  point; whether they then pass is a separate question the oracle answers.
 
 ## Workflow
 
