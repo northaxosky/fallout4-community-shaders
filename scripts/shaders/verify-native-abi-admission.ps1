@@ -23,6 +23,13 @@
     unreconstructed axis stays visible and countable instead of becoming a
     free-form exemption list.
 
+    Where entries pin `immediate_constant_vectors`, it also compares how many
+    float4 rows the compiled body declares in its immediate constant buffer.
+    That pin is all-or-none across a manifest: a family either measured it for
+    every entry or for none, so it cannot be dropped from the one entry it would
+    have caught. A manifest written before the pin existed simply omits it and
+    behaves exactly as it did.
+
     It also asserts that the macro sets in the `rejected` list still fail to
     compile, so the admission cannot silently widen, and that the `compile_only`
     list still compiles, so the fail-closed guards cannot over-reach and lock
@@ -205,6 +212,25 @@ function ConvertTo-ExpectedReadCounts($CbReadCounts) {
     return ($parts -join ' ')
 }
 
+# How many float4 rows the body declares as its immediate constant buffer. The
+# block starts on the `dcl_immediateConstantBuffer` line itself - fxc puts the
+# first row there - and runs until the next declaration, so the scan is bounded
+# by `dcl_` rather than by a row count the listing never states.
+function Get-ImmediateConstantVectorCount([string[]]$Listing) {
+    $count = 0
+    $inBlock = $false
+    foreach ($line in $Listing) {
+        $text = $line.Trim()
+        if (-not $inBlock) {
+            if ($text -match '^dcl_immediateConstantBuffer') { $inBlock = $true } else { continue }
+        } elseif ($text -match '^dcl_') {
+            break
+        }
+        $count += [regex]::Matches($text, '\{\s*[-+]?(?:\d|\.\d)').Count
+    }
+    return $count
+}
+
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
     Exit-WithError "evidence file not found: $ManifestPath" 2
 }
@@ -222,6 +248,15 @@ if (-not $reportLabel) { $reportLabel = $manifest.scope.family }
 $compileOnlyLabel = Get-OptionalMember $manifest.scope 'compile_only_label'
 if (-not $compileOnlyLabel) { $compileOnlyLabel = 'compile-only' }
 $countExemptionAxis = Get-OptionalMember $manifest.scope 'count_exemption_axis'
+
+# The immediate-constant-vector pin is all-or-none, so a family that measured it
+# cannot quietly drop it from the one entry whose ICB would have differed.
+$icbPinned = @($manifest.entries |
+    Where-Object { $null -ne (Get-OptionalMember $_ 'immediate_constant_vectors') }).Count
+if ($icbPinned -gt 0 -and $icbPinned -ne $manifest.entries.Count) {
+    Exit-WithError ("immediate_constant_vectors is pinned on $icbPinned of " +
+        "$($manifest.entries.Count) entries; it is all-or-none") 2
+}
 
 $fxcCommand = $null
 if (Test-Path -LiteralPath $FxcPath -PathType Leaf) {
@@ -244,6 +279,7 @@ $failures = @()
 $checked = 0
 $countChecked = 0
 $countExempt = 0
+$icbChecked = 0
 $rejectedChecked = 0
 $compileOnlyChecked = 0
 try {
@@ -323,6 +359,16 @@ try {
         $pinnedCounts = Get-OptionalMember $entry 'cb_read_counts'
         $reconstructed = Get-OptionalMember $entry 'body_reconstructed'
         if ($null -eq $reconstructed) { $reconstructed = $true }
+        $pinnedIcb = Get-OptionalMember $entry 'immediate_constant_vectors'
+        if ($null -ne $pinnedIcb) {
+            ++$icbChecked
+            $actualIcb = Get-ImmediateConstantVectorCount (Get-Content -LiteralPath $result.Listing)
+            if ($actualIcb -ne [int]$pinnedIcb) {
+                $failures += ("$tag`: immediate constant-buffer vector count differs from the native blob" +
+                    "`n    native: $([int]$pinnedIcb)" +
+                    "`n    ours  : $actualIcb")
+            }
+        }
         if ($pinnedCounts -and $reconstructed) {
             ++$countChecked
             $actualCounts = Get-ConstantReadCounts (Get-Content -LiteralPath $result.Listing)
@@ -389,6 +435,9 @@ if ($compileOnlyChecked -ne $manifest.compile_only.Count) {
 if (($countChecked + $countExempt) -ne $checked) {
     Exit-WithError ("read-count pin missing: $($countChecked + $countExempt) of $checked entries carry cb_read_counts")
 }
+if ($icbPinned -gt 0 -and $icbChecked -ne $checked) {
+    Exit-WithError ("immediate-constant-vector pin missing: $icbChecked of $checked entries were checked")
+}
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Host "ERROR: $failure" }
     Exit-WithError "$($failures.Count) $reportLabel admission check(s) failed"
@@ -397,6 +446,9 @@ if ($failures.Count -gt 0) {
 $countNote = "$countChecked / $checked also match its read-counts"
 if ($countExempt -gt 0) {
     $countNote += " ($countExempt exempt: $countExemptionAxis is unreconstructed)"
+}
+if ($icbPinned -gt 0) {
+    $countNote += " and $icbChecked / $checked its immediate constant-buffer vector count"
 }
 Write-Host ("PASS: $checked / $checked $reportLabel permutations match the native ABI " +
     "and constant read-set, $countNote; " +

@@ -18,6 +18,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29** |
+| `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact, no axis exempt)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
@@ -175,7 +176,8 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   Scope: AE 1.11.221 archive blob set, `DIRSPLITS=1` only. The two other
   complete six-variant filter families in the archive
   (`BLENDSPLIT + DIRSPLITS=3` with and without `AMBIENT`) carry the full BRDF
-  and are not reconstructed here.
+  and are not reconstructed here; they belong to
+  `bsdf_light_deferred_dirsplits3.hlsl`.
 * **`bsdf_light_deferred_dirsplits2.hlsl`** - **native ABI equal, 29/29**.
   The native full-BRDF `DIRECTIONAL` + `SHADOW` family at `DIRSPLITS=2`: the
   layer above `SHADOW_ONLY`, where the solved filter bodies meet the complete
@@ -257,8 +259,8 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   and - on the 18 reconstructed bodies - constant read-counts are measured; the
   BRDF core is a structural reconstruction, and execution proof stays with the
   producer oracle. The verifier is family-agnostic and driven entirely from its
-  manifest, so the `DIRSPLITS=3` layer needs an evidence file and a test
-  registration rather than a third copy of the script.
+  manifest, which is how the `DIRSPLITS=3` layer landed: an evidence file and a
+  test registration, not a third copy of the script.
 
 * **`bsdf_light_deferred_unshadowed.hlsl`** - **native ABI equal, 9/9, read-counts
   exact on every entry**.
@@ -465,6 +467,123 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   Routing does not add execution proof. It makes these nine *measurable*, which is the
   point; whether they then pass is a separate question the oracle answers.
+
+* **`bsdf_light_deferred_dirsplits3.hlsl`** - **native ABI equal, 27/27,
+  read-counts exact on every entry**.
+  The native full-BRDF `DIRECTIONAL` + `SHADOW` family at `DIRSPLITS=3`, the
+  three-cascade sibling of the `DIRSPLITS=2` layer. The denominator is fixed and
+  closed: the AE 1.11.221 archive carries exactly 27 blobs with
+  `DIRECTIONAL + DIRSPLITS=3 + RGBSPEC + SHADOW + SPECULAR`, and all 27 are
+  admitted, so the ratio cannot be improved by picking a friendlier subset. They
+  vary over the same four axes - `FILTER_*` crossed with `AMBIENT` (14),
+  `BLENDSPLIT` (16) and `IGNOREROUGHNESS` (6). `IGNORERIM` occurs zero times and
+  is rejected rather than admitted-and-ignored.
+
+  The split count is not a parameter of the `DIRSPLITS=2` source, it is a
+  different constant buffer, which is why this is a sibling file: nine
+  projection rows fill `CB2[11..19]` where two cascades leave `[17..19]` as
+  holes, and `ShadowWorldScale` is three vectors at `CB2[21..23]` where two
+  cascades have two and a hole. `CB2[25]` and `CB12[31]`, both immediateIndexed,
+  hold across all 27 - every cascade call passes literal rows, a literal slice
+  and a literal world-scale register, so nothing indexes `CB2` at runtime.
+
+  The filter axis moves the resource contract and nothing else does:
+
+  | Filter | Blobs | Shadow map declarations |
+  |---|---|---|
+  | (none)                | 3 | `t4`/`s4` mode_default (raw tap, compare in the shader) |
+  | `FILTER_PCF1`         | 4 | `t5`/`s5` mode_comparison |
+  | `FILTER_PCF9`         | 6 | `t5`/`s5` mode_comparison |
+  | `FILTER_PCSS`         | 6 | `t4`/`s4` mode_default **and** `t5`/`s5` mode_comparison |
+  | `FILTER_PCSSPOISSON`  | 2 | `t4`/`s4` mode_default **and** `t5`/`s5` mode_comparison |
+  | `FILTER_POISSON`      | 6 | `t5`/`s5` mode_comparison |
+
+  That is 3 in `raw_t4_s4`, 16 in `cmp_t5_s5` and 8 in `raw_t4_cmp_t5`.
+
+  `FILTER_PCSSPOISSON` is the branch `DIRSPLITS=2` does not have, and it is not
+  PCSS with a Poisson tail bolted on: the 5x5 raw blocker search and the
+  world-range remap are PCSS's, but the kernel radius is `penumbra * searchStep.x`
+  rather than `CB2[20]`, there is no centre-lit seed and no depth bias, and the
+  16 comparison taps are averaged over a fixed 1/16. It therefore reads
+  `CB2[20]` zero times while reading each world-scale register six times, the
+  same six as PCSS.
+
+  Per-cascade constant reads are what the gate actually pins, and they are
+  per-cascade on purpose - nothing is hoisted out of the three calls. `CB2[20]`
+  `ShadowSampleParam` is read three times under `FILTER_PCF9` and
+  `FILTER_POISSON` and not at all otherwise; each of `CB2[21..23]` is read twice
+  per cascade under `FILTER_POISSON` (the reciprocal world range for the bias)
+  and six times per cascade under `FILTER_PCSS` and `FILTER_PCSSPOISSON` (texel
+  step, world range, receiver, blocker, and the near-plane test). `CB2[23]`
+  exists only on the `POISSON`/`PCSS`/`PCSSPOISSON` rows and on all of them.
+  Each of `CB2[17..19]`, the third cascade's projection rows, is read exactly
+  once on every one of the 27. `FILTER_POISSON`'s bias scale is per cascade:
+  0.275, 1.0, 1.0.
+
+  `CB2[10]` `FadeDistances` carries two transition pairs at three splits, `.x`/`.y`
+  for cascade 0 to 1 and `.z`/`.w` for cascade 1 to 2. Cascade 0 is active below
+  `.y`, cascade 1 between `.x` and `.w`, cascade 2 above `.z`. Under `BLENDSPLIT`
+  the two smoothsteps run `.x -> .y` and `.z -> .w`, giving the five-region
+  partition s0, blend01, s1, blend12, s2, and the register is read 5 times.
+  Without `BLENDSPLIT` it is read twice, `CB2[9]` `SplitDistances.w` appears as
+  the single outer gate wrapping all cascade selection *and* the distance fade,
+  the lower overlap `[.x, .y)` resolves to unshadowed exactly as it does at two
+  splits, and the upper overlap `[.z, .w)` belongs to cascade 2. Those two
+  read-counts are the whole `BLENDSPLIT` signature, and they only come out right
+  because the comparisons are written so `fxc` packs them into the two vector
+  compares native emits.
+
+  `IGNOREROUGHNESS` is reconstructed here, and that is the difference from the
+  `DIRSPLITS=2` layer, which names it as its one `count_exemption_axis`. The
+  unblocking evidence is not in this family at all: it is the later
+  `bsdf_light_deferred_unshadowed.hlsl` layer, whose controlled `AMBIENT`-free
+  pair localises the macro to two deletions and nothing else - the
+  roughness-driven visibility geometry in the default branch, and the rim term.
+  Each of the six `IGNOREROUGHNESS` blobs here differs from its twin by exactly
+  `cb2[1]` -2 and `cb2[2]` -1, which is what those two deletions cost, so the
+  same body reproduces them. `scope.count_exemption_axis` is `null` and all 27
+  entries are held to exact per-register read-counts. The `DIRSPLITS=2` source
+  and its manifest are deliberately untouched: that family is pinned as it
+  stands, its exemption is a statement about what was measured there, and
+  re-opening it is a separate change with its own evidence.
+
+  The gate carries a fourth pin this layer needed and the earlier ones did not.
+  Eight of the 27 - the `POISSON` and `PCSSPOISSON` rows - declare a 1000-row
+  immediate constant buffer, and the other 19 declare none, so
+  `immediate_constant_vectors` is pinned per entry and the verifier counts the
+  `float4` rows in the listing's `dcl_immediateConstantBuffer` block. The pin is
+  all-or-none across a manifest: a family that measured it cannot drop it from
+  the one entry it would have caught. It is a *declaration* count only - it says
+  the kernel table is present at the native size, not that the 16 consumed
+  entries are the native values, which is what
+  `shadow_poisson_kernel.hlsli` records separately. Manifests written before the
+  pin existed simply omit it and behave exactly as before.
+
+  `scripts/shaders/verify-native-abi-admission.ps1` (CTest
+  `DirSplits3DirectionalAdmission`) re-measures all 27 against
+  `dirsplits3-native-abi.json` and fails closed. The pinned values were measured
+  from the game bytecode with `fxc /nologo /dumpbin` and were not revised against
+  this repository's output. The gate also asserts that 17 single-mutation macro
+  sets still refuse to compile - `DIRSPLITS` of 1/2/4/absent, three `FILTER_*`
+  overlaps including one with `FILTER_PCSSPOISSON`, `SHADOW_ONLY`, a missing
+  `DIRECTIONAL`/`SHADOW`/`SPECULAR`/`RGBSPEC`, `DIRECTIONAL` crossed with
+  `POINTOMNI`/`POINTSPOT`/`SPOT`/`HALFOMNI`, and `IGNORERIM` - each of which is
+  otherwise a valid `DIRSPLITS=3` set, so every guard is shown to fire for its
+  own reason rather than incidentally. The 21 remaining cells of the
+  6 x `AMBIENT` x `BLENDSPLIT` x `IGNOREROUGHNESS` grid have no archive blob and
+  are checked for compilation only, so the guards cannot over-reach.
+
+  What this claims: these 27 macro sets compile, and what they compile to
+  declares the same ABI, performs the same static constant reads with the same
+  counts, and declares the same immediate constant-buffer size as the blob each
+  came from, over a fixed 27-blob denominator. What it does not claim: nothing
+  here is a claim about execution, about visual fidelity, or about SHEX/DXBC
+  identity - the BRDF core is a structural reconstruction and its instruction
+  stream is expected to differ. No shader in this family is created or used at
+  runtime by this repository. The archive is one runtime's, so this is neither an
+  OG nor an NG claim. Producer execution status is carried per entry and is 16
+  `execution_failed` and 11 `execution_unproven`, with zero PASS; execution proof
+  stays with the producer oracle in the sibling `fallout4-re`.
 
 ## Workflow
 

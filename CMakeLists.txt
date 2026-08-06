@@ -480,3 +480,15 @@ set_tests_properties(UnshadowedPointOmniAdmission PROPERTIES
 	LABELS "shader;parity"
 	TIMEOUT 600
 )
+
+set(_dirsplits3_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/dirsplits3-native-abi.json")
+add_test(
+	NAME DirSplits3DirectionalAdmission
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_dirsplits3_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_dirsplits3_manifest}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(DirSplits3DirectionalAdmission PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 900
+)
