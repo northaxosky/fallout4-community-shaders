@@ -601,13 +601,13 @@ self-rebaselinable, while those registered variants still receive compile
 coverage.
 
 The consumer-local manifest must never be hand-edited. The producer deleted
-its conformance artifact in `fallout4-re` commit `fdddc41a`, and publication
-of conformance, `native-shader-targets.json`, and
-`shader-exec-contracts.json` is suspended until a new authoritative
-all-target execution proof passes. `ShaderRoundtrip` therefore remains a
-pinned-hash regression gate: it proves that shipping HLSL still compiles to
-the bytes produced when the attestation was last valid, not current
-producer-attested fidelity.
+its conformance artifact in `fallout4-re` commit `be8126d4`, then restored it
+in `e8a81748` and has republished it on every subsequent wave from a full
+authoritative WARP execution-diff PASS across all eight targets.
+`ShaderRoundtrip` is therefore a live conformance gate again: a pass means the
+shipping HLSL still compiles to bytecode proven numerically equal to the
+game's own shader. Refresh it only by copying the producer artifact
+byte-for-byte after a new authoritative PASS.
 
 ## Permutation coverage
 
