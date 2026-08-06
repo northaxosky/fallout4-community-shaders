@@ -40,6 +40,18 @@
 //   b4337a89  POINTOMNI IGNORERIM                            [4]  [30]     130
 //   fcabd749  POINTOMNI SPECULAR IGNORERIM                   [4]  [30]     187
 //
+// DIRSPLITS=2 is the decoder baseline for these nine, not an active cascade
+// axis, and this file must not be read as owning two-cascade behaviour. The
+// CB2 read-sets prove it: DIRECTIONAL reads exactly {0,1,2} or {0,1,2,6,7,8},
+// POINTOMNI reads exactly {0,1,2,3}, and the declared CB2 sizes are 3, 9 and 4.
+// Nothing reads a split-distance, cascade-projection or shadow world-scale or
+// filter register, and those constants are not merely unread - SplitDistances,
+// FadeDistances, ShadowMapProj and the rest are `absent` from all nine constant
+// tables, so no register is allocated to them at all. The AMBIENT rows at
+// cb2[6..8] are one DirectionalAmbient gradient occupying three registers, not
+// a split/fade pair. The macro is carried because it is a native axis that is
+// never assumed, not because a cascade is selected here.
+//
 // DIRECTIONAL and POINTOMNI keep separate light bodies even though their
 // resource contracts are identical, because the disassembly differs and the
 // difference is load-bearing:
@@ -99,7 +111,7 @@
 #  error "define exactly one of DIRECTIONAL or POINTOMNI; the archive also carries a no-light-kind AMBIENT blob at DIRSPLITS=2 that this source does not reconstruct"
 #endif
 #if !defined(DIRSPLITS)
-#  error "define DIRSPLITS; the split count is a native axis and is never assumed"
+#  error "define DIRSPLITS; it is a native axis and is never assumed, even though these nine only carry it as a decoder baseline"
 #endif
 #if DIRSPLITS != 2
 #  error "this source reconstructs DIRSPLITS=2 only; DIRSPLITS=1 and DIRSPLITS=3 are separate native families"

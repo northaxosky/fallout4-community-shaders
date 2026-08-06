@@ -291,6 +291,21 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   touches. `dir_spec_ambient` leaves registers 3, 4 and 5 unread, so its `CB2` has a
   hole.
 
+  That read-set table also settles what `DIRSPLITS=2` means here, and it is worth
+  stating plainly because the name invites the wrong reading: for these nine it is the
+  **decoder baseline, not an active cascade axis**, and this layer does not own
+  two-cascade behaviour. The highest `CB2` register any of the nine reads is 8. None
+  reads a split-distance, cascade-projection, or shadow world-scale or filter register,
+  and those constants are not merely unread - `SplitDistances`, `FadeDistances`,
+  `ShadowMapProj` and the rest are `absent` from all nine constant tables, so no
+  register is allocated to them at all. The `dir_spec_ambient` rows at `cb2[6..8]` are
+  a single `DirectionalAmbient` constant of `register_count` 3, not a split/fade pair -
+  a distinction worth checking rather than assuming, since slot 7 in the full constant
+  layout is named `SplitDistances` and the per-blob table is compacted. The macro is
+  still carried and still guarded, because it is a native axis that is never assumed,
+  but `DIRSPLITS=2` in these file and gate names is a decoder tag rather than a
+  semantic claim.
+
   `DIRECTIONAL` and `POINTOMNI` are separately reconstructed bodies in one file, even
   though their resource contracts match, because the disassembly differs in three
   ways. `DIRECTIONAL` + `SPECULAR` reads `cb12[30].y` as a Schlick gloss term and uses
