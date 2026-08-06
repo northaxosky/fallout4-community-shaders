@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // FO4 BSDFLightShader deferred PS, native unshadowed family at DIRSPLITS=2:
-// the nine archive blobs that carry DIRSPLITS=2 and do not carry SHADOW.
+// the nine archive blobs that carry DIRSPLITS=2, do not carry SHADOW, and
+// declare exactly t0..t3 with s0..s3 and no other resource. That last clause is
+// load-bearing: 24 decoded blobs satisfy "DIRSPLITS=2 and no SHADOW", but the
+// GOBOPROJECTION ones keep a t7 light cookie and the SPOT ones have their own
+// contract, so this file is a resource-contract family, not the whole predicate.
 //
 // This is a sibling of `bsdf_light_deferred.hlsl`, not a replacement, in the
 // same arrangement as `bsdf_light_deferred_dirsplits2.hlsl` (the shadowed
@@ -110,6 +114,9 @@
 #  endif
 #  if defined(AMBIENT) && !defined(SPECULAR)
 #    error "the two AMBIENT directional blobs both carry SPECULAR; AMBIENT alone is not a native set here"
+#  endif
+#  if defined(IGNOREROUGHNESS) && !defined(SPECULAR)
+#    error "all 19 decoded DIRECTIONAL+IGNOREROUGHNESS blobs carry SPECULAR; the 11 archive blobs that drop SPECULAR are POINTOMNI/POINTSPOT/SPOT, never DIRECTIONAL"
 #  endif
 #endif
 

@@ -347,12 +347,18 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   `unshadowed-ds2-pointomni-native-abi.json` (CTest `UnshadowedDs2PointOmniAdmission`).
   Two manifests rather than one, because the verifier supports a single
   `count_exemption_axis` per manifest and the two families carry different risk axes.
-  Between them the gates assert that 26 malformed or out-of-scope macro sets still
+  Between them the gates assert that 27 malformed or out-of-scope macro sets still
   refuse to compile - any `FILTER_*` without `SHADOW`, `SHADOW` or `SHADOW_ONLY`
   present, `HALFOMNI`, `GOBOPROJECTION`, `SPOT`/`POINTSPOT`, mixed or missing light
   kind, `DIRSPLITS` absent or not 2, missing `RGBSPEC`, `DIRECTIONAL`+`IGNORERIM`,
-  `DIRECTIONAL`+`AMBIENT` without `SPECULAR`, and `POINTOMNI` crossed with `AMBIENT`
-  or `IGNOREROUGHNESS`. The reject set is derived from the full 166-blob enumeration
+  `DIRECTIONAL`+`AMBIENT` without `SPECULAR`, `DIRECTIONAL`+`IGNOREROUGHNESS` without
+  `SPECULAR`, and `POINTOMNI` crossed with `AMBIENT` or `IGNOREROUGHNESS`. The last of
+  those is the sharpest case for deriving rejects from the whole corpus rather than from
+  the nine: `IGNOREROUGHNESS` without `SPECULAR` *is* native - 11 blobs carry it - but
+  every one of them is `POINTOMNI`, `POINTSPOT` or `SPOT`, while all 19 decoded
+  `DIRECTIONAL`+`IGNOREROUGHNESS` blobs carry `SPECULAR`. A guard written from the nine
+  alone would have missed it, and a guard written from the macro name alone would have
+  wrongly rejected the 11. The reject set is derived from the full 166-blob enumeration
   rather than from the nine, so the guards neither over-reach nor under-reach; where a
   rejected set does exist natively but belongs to another layer, the manifest says so
   instead of calling it malformed. Each manifest's `compile_only` list holds the
@@ -375,13 +381,23 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   `atten <= 0.001` cull and distinct `cb12[20..27]` reprojection banks to be
   exercised, which are the early-out and the near/far partition reconstructed here.
 
-  The layer is nine and not fourteen because of one boundary worth stating. Five more
-  archive blobs are unshadowed `POINTOMNI` at `DIRSPLITS=2` but also carry
-  `GOBOPROJECTION` (`a65b5952`, `9969e800`, `fa6948ba`, `f33e32f9`, `d3331d19`). They
-  keep the distinct `t7` light-cookie ABI, so they are a different contract and stay
-  on the consolidated source; this file's guards reject that combination. Being
-  unshadowed is not on its own sufficient to belong here - the whole resource
-  contract has to match.
+  The layer is nine, but the macro predicate "`DIRSPLITS=2` and no `SHADOW`" is much
+  wider than nine, and conflating the two would overstate the coverage. Across the
+  166-blob enumeration, 24 *decoded* blobs satisfy that predicate: these five
+  `DIRECTIONAL` and four `POINTOMNI`, plus five `POINTOMNI`+`GOBOPROJECTION`
+  (`a65b5952`, `9969e800`, `fa6948ba`, `f33e32f9`, `d3331d19`), five `SPOT`, four
+  `SPOT`+`GOBOPROJECTION`, and one blob with no light kind at all
+  (`f6578f4e`, `AMBIENT RGBSPEC DIRSPLITS=2`). A further 15 blobs are `unresolved`,
+  and at least one of them has every candidate inside the predicate, so the predicate's
+  true membership is not even decidable from decoded records - it is 24 or more.
+
+  What *is* exactly nine is the routing family: the blobs whose whole resource contract
+  is `t0..t3` with `s0..s3` and nothing else. The `GOBOPROJECTION` blobs keep the
+  distinct `t7` light-cookie ABI, and `SPOT` carries its own contract; both stay on the
+  consolidated source, and this file's guards reject both combinations. Being
+  unshadowed is not on its own sufficient to belong here - the whole resource contract
+  has to match, which is exactly why the reject lists are derived from all 166 blobs
+  rather than from these nine.
 
   Routing does not add execution proof. It makes these nine *measurable*, which is the
   point; whether they then pass is a separate question the oracle answers.

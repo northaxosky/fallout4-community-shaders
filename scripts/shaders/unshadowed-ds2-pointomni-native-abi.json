@@ -2,7 +2,7 @@
   "schema": "fo4cs.native-abi-admission",
   "schema_version": 1,
   "scope": {
-    "family": "POINTOMNI without SHADOW at DIRSPLITS=2",
+    "family": "POINTOMNI without SHADOW and without GOBOPROJECTION at DIRSPLITS=2",
     "runtime": "AE 1.11.221 archive blob set",
     "report_label": "unshadowed DIRSPLITS=2 POINTOMNI",
     "compile_only_label": "sibling-family over-reach checks",

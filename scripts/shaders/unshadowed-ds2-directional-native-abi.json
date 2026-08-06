@@ -494,6 +494,15 @@
       ]
     },
     {
+      "reason": "all 19 decoded DIRECTIONAL+IGNOREROUGHNESS blobs carry SPECULAR; the 11 archive blobs that carry IGNOREROUGHNESS without SPECULAR are POINTOMNI, POINTSPOT or SPOT, never DIRECTIONAL",
+      "defines": [
+        "DIRECTIONAL",
+        "DIRSPLITS=2",
+        "IGNOREROUGHNESS",
+        "RGBSPEC"
+      ]
+    },
+    {
       "reason": "GOBOPROJECTION blobs declare t7/s7 and are a different resource contract",
       "defines": [
         "DIRECTIONAL",
