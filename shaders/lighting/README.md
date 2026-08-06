@@ -261,9 +261,14 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   exact on every entry**.
   The native **unshadowed** `DIRSPLITS=2` layer. Nine archive blobs carry
   `DIRSPLITS=2` and no `SHADOW` macro, so their contract has no shadow texture and
-  no shadow sampler: five `DIRECTIONAL` and four `POINTOMNI`. `SHADOW` is the outer
-  ABI selector here. When it is absent there is no shadow resource; only when it is
-  present does `FILTER_*` choose raw `t4`/`s4`, comparison `t5`/`s5`, or both.
+  no shadow sampler: five `DIRECTIONAL` and four `POINTOMNI`. State this carefully,
+  because the framing is itself an evidence claim: absence of `SHADOW` is **not** a
+  third value on the shadow-resource axis. `SHADOW` is simply inactive here, so the
+  axis does not exist for these nine and nothing may be grouped or compared along
+  it. The `FILTER_*` axis selects among raw `t4`/`s4`, comparison `t5`/`s5`, or both
+  only once `SHADOW` is proven active; with `SHADOW` absent there is no shadow
+  resource to select, which is why every `FILTER_*` is rejected outright here rather
+  than mapped to a "no filter" case.
 
   All nine declare `t0..t3` as `texture2d` with `s0..s3` mode_default, the same two
   input semantics and the same two MRT outputs, and all read `CB12[20..29]`. They are
@@ -299,13 +304,38 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   and an albedo tint, for which the point blobs have no instructions.
 
   Both risk axes are adjudicated from controlled, semantically active pairs inside
-  this layer, so neither is exempted. `IGNOREROUGHNESS` is measured on two pairs
-  (039c8935/28858d7b at 196/166 native instructions, and 477c3e1e/987c4e79 at
-  223/194): it removes the roughness visibility geometry, collapsing the default
-  branch's diffuse to a plain N·L, **and** it removes the whole rim/ambient term. That
-  is the first `IGNOREROUGHNESS` pair with no `AMBIENT` present, and it explains the
-  shadowed `DIRSPLITS=2` family's previously unexplained deltas exactly - two fewer
-  `cb2[1]` reads and one fewer `cb2[2]` read. `IGNORERIM` is measured on
+  this layer, so neither is exempted, and both are pinned per register rather than
+  treated as a scalar toggle. `IGNOREROUGHNESS` is measured on two pairs -
+  039c8935/28858d7b with no `AMBIENT`, and 477c3e1e/987c4e79 with it. Counting
+  instructions only (excluding the 15 `dcl_` lines) the pairs run 181 -> 151 and
+  208 -> 179, so the macro removes ~30 instructions either way, independently of
+  `AMBIENT`.
+
+  What moves, and what does not, is the whole point:
+
+  | register | 039c8935 -> 28858d7b | 477c3e1e -> 987c4e79 |
+  |---|---|---|
+  | `cb2[1]`  | 5 -> 3 | 5 -> 3 |
+  | `cb2[2]`  | 6 -> 5 | 6 -> 5 |
+  | `cb12[28]` | 4 -> 4 | 4 -> 4 |
+  | `cb12[29]` | 2 -> 2 | 2 -> 2 |
+  | `cb12[30]` | 1 -> 1 | 1 -> 1 |
+  | `cb2[6..8]` | n/a | 2 -> 2 each |
+
+  So `IGNOREROUGHNESS` removes the roughness visibility geometry, collapsing the
+  default branch's diffuse to a plain N·L, **and** the rim term. It does **not**
+  touch the material-code-1 hair specular path: `cb12[28]` `HairSpecParams` and
+  `cb12[29]` `HairSpecShift` hold at 4 and 2 across both pairs, and the two
+  Kajiya-Kay `sincos` shifted-tangent lobes survive in both members of both pairs.
+  Nor does it touch the ambient gradient: `cb2[6..8]` hold at 2 reads each across
+  the `AMBIENT` pair. The ~30 removed instructions are spread across
+  `add`/`div`/`dp3`/`mad`/`mul`/`max` with exactly one `log`+`exp` pair (the rim's
+  `pow`) and one `sqrt` - arithmetic on already-loaded values, which is why only two
+  constant registers move at all.
+
+  This is the first `IGNOREROUGHNESS` pair with no `AMBIENT` present, and it explains
+  the shadowed `DIRSPLITS=2` family's previously unexplained deltas exactly - two
+  fewer `cb2[1]` reads and one fewer `cb2[2]` read. `IGNORERIM` is measured on
   12d92cd3/b4337a89 and 9f44ba67/fcabd749: it removes only the rim term, for exactly
   one fewer `cb2[2]` read. Both are reconstructed, so
   `scope.count_exemption_axis` is `null` in both manifests and every one of the nine

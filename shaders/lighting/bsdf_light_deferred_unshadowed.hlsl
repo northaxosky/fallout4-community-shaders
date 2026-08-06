@@ -9,13 +9,16 @@
 // by the producer conformance manifest, so a new native macro family goes in
 // its own source rather than growing the pinned one.
 //
-// The ownership boundary is SHADOW as an outer ABI selector. When SHADOW is
-// absent the native shader declares no shadow texture and no shadow sampler at
-// all: exactly t0..t3 as texture2d, exactly s0..s3 as mode_default, and a much
-// smaller CB2. There is therefore no filter axis here - FILTER_* selects a
+// The ownership boundary is the absence of SHADOW, and that absence is not a
+// selector value. SHADOW is simply inactive for these nine, so the shadow-
+// resource axis does not exist for them and nothing may be grouped or compared
+// along it. The native shader declares no shadow texture and no shadow sampler
+// at all: exactly t0..t3 as texture2d, exactly s0..s3 as mode_default, and a
+// much smaller CB2. There is therefore no filter axis here - FILTER_* selects a
 // shadow tap, and there is no shadow to tap. The guards below reject every
 // FILTER_* macro rather than reinterpreting a missing SHADOW as an unfiltered
-// shadowed shader.
+// shadowed shader, and rather than admitting "no shadow" as a third tap mode
+// alongside raw t4/s4 and comparison t5/s5.
 //
 // Reconstructed from these nine archive blobs, each disassembled on its own and
 // read against its own constant table. No register role and no body logic is
@@ -586,3 +589,14 @@ PS_OUTPUT main(PS_INPUT input)
 //
 // Both macros are therefore handled, not #undef'd and not mapped onto another
 // axis, and neither manifest declares a count-exemption axis.
+//
+// What IGNOREROUGHNESS does NOT remove is pinned just as deliberately, because
+// "it drops a whole lobe" is the obvious wrong hypothesis. Measured across both
+// pairs, the material-code-1 hair specular path is untouched: cb12[28]
+// HairSpecParams holds at 4 reads, cb12[29] HairSpecShift at 2, cb12[30] at 1,
+// and both Kajiya-Kay shifted-tangent sincos lobes survive in every member of
+// both pairs. The ambient gradient is untouched too - cb2[6..8] hold at 2 reads
+// each across the AMBIENT pair. Only cb2[1] (5 -> 3) and cb2[2] (6 -> 5) move.
+// The ~30 removed instructions are arithmetic on already-loaded values, with
+// exactly one log+exp pair (the rim's pow) and one sqrt, which is why so much
+// instruction count can vanish while only two constant registers change.
