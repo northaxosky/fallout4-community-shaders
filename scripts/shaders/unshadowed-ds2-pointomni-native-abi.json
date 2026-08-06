@@ -1,0 +1,388 @@
+{
+  "schema": "fo4cs.native-abi-admission",
+  "schema_version": 1,
+  "scope": {
+    "family": "POINTOMNI without SHADOW at DIRSPLITS=2",
+    "runtime": "AE 1.11.221 archive blob set",
+    "report_label": "unshadowed DIRSPLITS=2 POINTOMNI",
+    "compile_only_label": "sibling-family over-reach checks",
+    "count_exemption_axis": null,
+    "note": "Consumer-local admission gate, the punctual half of the unshadowed DIRSPLITS=2 layer. Each entry pins the declaration set, the constant-register read-set and the per-register read-counts measured from a native archive blob, and the check passes only when the reconstruction compiled from that blob's own macro set agrees. This is an ABI and constant-read claim only, not an execution-equivalence claim. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. dcl_temps is excluded because it is register allocation, not ABI.",
+    "evidence": "All four blobs were disassembled with fxc /dumpbin and read against their own constant tables. They share one declaration group - CB12[30], CB2[4], t0..t3 texture2d, s0..s3 mode_default - and it is the same resource shape as the unshadowed directional groups, which is why the two families share one source. The bodies are still reconstructed separately, on direct evidence: POINTOMNI reads cb2[3] LightAttenuation and treats cb2[1] as a light position with a radius in .w, and POINTOMNI under SPECULAR never reads the cb12[30] gloss term, so its specular exponent has no Schlick scale and its declared CB12 stays 30 where the specular directional blobs declare 31. It also has no legacy attenuation texture path: the four blobs declare no SRV beyond the four g-buffer reads. IGNORERIM is reconstructed, not exempted - it removes the rim term, which is exactly the one cb2[2] read it drops."
+  },
+  "compiler": {
+    "name": "fxc",
+    "entry_point": "main",
+    "flags": [
+      "/nologo",
+      "/O3"
+    ],
+    "include_root": "source-directory"
+  },
+  "source": "shaders/lighting/bsdf_light_deferred_unshadowed.hlsl",
+  "profile": "ps_5_0",
+  "common_defines": [],
+  "abi_groups": {
+    "omni": {
+      "cb": {
+        "b12": [
+          30,
+          "immediateIndexed"
+        ],
+        "b2": [
+          4,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t0": "texture2d",
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d"
+      },
+      "sampler": {
+        "s0": "mode_default",
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
+    }
+  },
+  "entries": [
+    {
+      "native_blob_sha1": "12d92cd37efa9722bd27657f54fcddf1879170cd",
+      "native_blob_sha256": "d4b30d95c778bb223cb771ccc13b512dd3a21cdbc2fcc8a0f975cb44de545192",
+      "native_blob_bytes": 4052,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC"
+      ],
+      "abi_group": "omni",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 2,
+        "cb2[3]": 3,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 2,
+        "cb12[29]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "9f44ba67a6ec8e3b9bf8b979e79bc563249fd0d7",
+      "native_blob_sha256": "7751cc3b42e3630c7afac8243fea37961c630b73eb22b4317bc96bae0c6a1201",
+      "native_blob_bytes": 5624,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ],
+      "abi_group": "omni",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 4,
+        "cb2[3]": 3,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2
+      }
+    },
+    {
+      "native_blob_sha1": "b4337a894d9335e2d96487eb0c4faeffebdf8c3d",
+      "native_blob_sha256": "238c2e4632d27bc13ce238c08a04f191e4d8373101a4b82d05aa4b8d1936ad5e",
+      "native_blob_bytes": 3724,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "DIRSPLITS=2",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC"
+      ],
+      "abi_group": "omni",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 1,
+        "cb2[3]": 3,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 2,
+        "cb12[29]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "fcabd74908d7044bf0cbf0303679775501a0f235",
+      "native_blob_sha256": "9a9fc60d7b23062947c5a5e0dd1e9776660493953226453a1878251b45b75235",
+      "native_blob_bytes": 5360,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "DIRSPLITS=2",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ],
+      "abi_group": "omni",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 3,
+        "cb2[3]": 3,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "reason": "POINTOMNI with SHADOW is the POINTSPOT-ABI family handled by bsdf_light_deferred.hlsl at LIGHT_TYPE=3",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SHADOW",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "FILTER_* selects a shadow tap and requires SHADOW",
+      "defines": [
+        "DIRSPLITS=2",
+        "FILTER_PCF1",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "HALFOMNI occurs only with POINTOMNI and SHADOW and is not part of this layer",
+      "defines": [
+        "DIRSPLITS=2",
+        "HALFOMNI",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "the five GOBOPROJECTION POINTOMNI blobs declare t7/s7 and are a different resource contract",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "no POINTOMNI blob carries AMBIENT; its CB2[4] has no DirectionalAmbient rows",
+      "defines": [
+        "AMBIENT",
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "POINTOMNI carries IGNOREROUGHNESS only together with GOBOPROJECTION, which this source rejects",
+      "defines": [
+        "DIRSPLITS=2",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "mixed light kinds; POINTOMNI and SPOT are exclusive",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR",
+        "SPOT"
+      ]
+    },
+    {
+      "reason": "DIRSPLITS is a native axis and is never assumed when absent",
+      "defines": [
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "DIRSPLITS=3 is a separate native family and is not reconstructed here",
+      "defines": [
+        "DIRSPLITS=3",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "every native no-SHADOW DIRSPLITS=2 blob carries RGBSPEC",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "SPECULAR"
+      ]
+    },
+    {
+      "reason": "SHADOW_ONLY is the DIRSPLITS=1 directional family",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SHADOW_ONLY"
+      ]
+    }
+  ],
+  "compile_only": [
+    {
+      "reason": "the sibling DIRECTIONAL family must still compile from this source; the punctual guards must not over-reach",
+      "defines": [
+        "DIRECTIONAL",
+        "DIRSPLITS=2",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "the sibling DIRECTIONAL family under AMBIENT and SPECULAR must still compile from this source",
+      "defines": [
+        "AMBIENT",
+        "DIRECTIONAL",
+        "DIRSPLITS=2",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    }
+  ]
+}

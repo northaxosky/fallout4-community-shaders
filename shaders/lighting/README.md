@@ -18,6 +18,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29** |
+| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** `DIRSPLITS=2` families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact, no axis exempt)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -255,6 +256,83 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   producer oracle. The verifier is family-agnostic and driven entirely from its
   manifest, so the `DIRSPLITS=3` layer needs an evidence file and a test
   registration rather than a third copy of the script.
+
+* **`bsdf_light_deferred_unshadowed.hlsl`** - **native ABI equal, 9/9, read-counts
+  exact on every entry**.
+  The native **unshadowed** `DIRSPLITS=2` layer. Nine archive blobs carry
+  `DIRSPLITS=2` and no `SHADOW` macro, so their contract has no shadow texture and
+  no shadow sampler: five `DIRECTIONAL` and four `POINTOMNI`. `SHADOW` is the outer
+  ABI selector here. When it is absent there is no shadow resource; only when it is
+  present does `FILTER_*` choose raw `t4`/`s4`, comparison `t5`/`s5`, or both.
+
+  All nine declare `t0..t3` as `texture2d` with `s0..s3` mode_default, the same two
+  input semantics and the same two MRT outputs, and all read `CB12[20..29]`. They are
+  **not** one contract, though - the constant-buffer sizes split them into four
+  groups, which is why removing the shadow declarations from a shadowed sibling would
+  not have been enough:
+
+  | Group | Blobs | `CB2` | `CB12` | `CB2` registers read |
+  |---|---|---|---|---|
+  | `dir_base`         | a9435eca | `[3]` | `[30]` | 0,1,2 |
+  | `dir_spec`         | 039c8935, 28858d7b | `[3]` | `[31]` | 0,1,2 |
+  | `dir_spec_ambient` | 477c3e1e, 987c4e79 | `[9]` | `[31]` | 0,1,2,6,7,8 |
+  | `omni`             | 12d92cd3, 9f44ba67, b4337a89, fcabd749 | `[4]` | `[30]` | 0,1,2,3 |
+
+  The shadowed siblings are materially different and cannot host these: the shadowed
+  `DIRSPLITS=2` directional declares `CB2[25]` plus `t5`/`s5`, and the shadowed point
+  family declares `CB2[15]` plus `t7`/`s7`. Sizes are not authored directly - `fxc`
+  sets a declared constant-buffer size to the highest register the body reads plus
+  one, so each size above falls out of which registers that permutation actually
+  touches. `dir_spec_ambient` leaves registers 3, 4 and 5 unread, so its `CB2` has a
+  hole.
+
+  `DIRECTIONAL` and `POINTOMNI` are separately reconstructed bodies in one file, even
+  though their resource contracts match, because the disassembly differs in three
+  ways. `DIRECTIONAL` + `SPECULAR` reads `cb12[30].y` as a Schlick gloss term and uses
+  it twice, to scale the specular exponent and to scale the specular output; that
+  single read is what raises those blobs to `CB12[31]`. `POINTOMNI` + `SPECULAR` does
+  none of it and stays at `CB12[30]`. `POINTOMNI` reads `cb2[3]` `LightAttenuation`
+  and treats `cb2[1].xyz` as a light position with its radius in `.w`, computing
+  attenuation before any G-buffer sample and returning two zeroed targets early when
+  it falls below `0.001`; no directional blob reads `cb2[3]` at all. Directional
+  composition adds a premultiplied-albedo backface wrap, a depth-scaled forward blend
+  and an albedo tint, for which the point blobs have no instructions.
+
+  Both risk axes are adjudicated from controlled, semantically active pairs inside
+  this layer, so neither is exempted. `IGNOREROUGHNESS` is measured on two pairs
+  (039c8935/28858d7b at 196/166 native instructions, and 477c3e1e/987c4e79 at
+  223/194): it removes the roughness visibility geometry, collapsing the default
+  branch's diffuse to a plain N·L, **and** it removes the whole rim/ambient term. That
+  is the first `IGNOREROUGHNESS` pair with no `AMBIENT` present, and it explains the
+  shadowed `DIRSPLITS=2` family's previously unexplained deltas exactly - two fewer
+  `cb2[1]` reads and one fewer `cb2[2]` read. `IGNORERIM` is measured on
+  12d92cd3/b4337a89 and 9f44ba67/fcabd749: it removes only the rim term, for exactly
+  one fewer `cb2[2]` read. Both are reconstructed, so
+  `scope.count_exemption_axis` is `null` in both manifests and every one of the nine
+  entries is held to exact per-register read-counts.
+
+  `scripts/shaders/verify-native-abi-admission.ps1` re-measures the layer against two
+  evidence manifests - `unshadowed-ds2-directional-native-abi.json` (CTest
+  `UnshadowedDs2DirectionalAdmission`) and
+  `unshadowed-ds2-pointomni-native-abi.json` (CTest `UnshadowedDs2PointOmniAdmission`).
+  Two manifests rather than one, because the verifier supports a single
+  `count_exemption_axis` per manifest and the two families carry different risk axes.
+  Between them the gates assert that 26 malformed or out-of-scope macro sets still
+  refuse to compile - any `FILTER_*` without `SHADOW`, `SHADOW` or `SHADOW_ONLY`
+  present, `HALFOMNI`, `GOBOPROJECTION`, `SPOT`/`POINTSPOT`, mixed or missing light
+  kind, `DIRSPLITS` absent or not 2, missing `RGBSPEC`, `DIRECTIONAL`+`IGNORERIM`,
+  `DIRECTIONAL`+`AMBIENT` without `SPECULAR`, and `POINTOMNI` crossed with `AMBIENT`
+  or `IGNOREROUGHNESS`. The reject set is derived from the full 166-blob enumeration
+  rather than from the nine, so the guards neither over-reach nor under-reach; where a
+  rejected set does exist natively but belongs to another layer, the manifest says so
+  instead of calling it malformed. Each manifest's `compile_only` list holds the
+  *sibling* family's native macro sets, proving the guards lock out the other family
+  without locking out anything legal.
+
+  This is an ABI claim, not SHEX equality and not execution equivalence. SHEX identity
+  was attempted and not reached; the residual instruction deltas run from -1 to +3.
+  Execution proof stays with the producer oracle, which must still route these nine
+  away from the consolidated source before they can be measured.
 
 ## Workflow
 
