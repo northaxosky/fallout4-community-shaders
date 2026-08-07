@@ -112,37 +112,48 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   Spot stub at the end of the file documents the expected math sketch;
   reconstruction awaits a canonical spot-light capture.
 
-  **POINTOMNI+SHADOW admission** (`-D LIGHT_TYPE=3 -D POINTOMNI=1 -D SHADOW=1`).
-  A producer audit of the 73 execution-unproven blobs found 30 native
-  POINTOMNI+SHADOW records whose declared ABI and FXP constant tables are
-  identical to the already-proven POINTSPOT profiles. An internal selector,
+  **POINTOMNI+SHADOW reconstruction** (`-D LIGHT_TYPE=3 -D POINTOMNI=1 -D SHADOW=1`).
+  A producer audit found 31 native POINTOMNI+SHADOW records whose declared ABI
+  and FXP constant tables are identical to the already-proven POINTSPOT
+  profiles. An internal selector,
   `FO4_PROJECTED_SHADOW_FAMILY`, admits both families into the same block, so
   POINTOMNI is admitted without being rewritten into POINTSPOT and without
   either family's native macro set being touched.
-  All 30 compile and are contract-equal to their corpus blob — CB sizes and
+  All 31 compile and are contract-equal to their corpus blob — CB sizes and
   indexing mode, SRV slots and types, sampler slots and modes, and the IO
   signature all match: `CB12[30]` + `CB2[21]` immediateIndexed, `t0..t3` with
   `s0..s3` mode_default, the shadow map at `t5`/`s5` mode_comparison under
-  `FILTER_PCF1` (9) / `FILTER_PCF9` (10) / `FILTER_POISSON` (8) or at `t4`/`s4`
-  mode_default in the 3 unfiltered records - 9 + 10 + 8 + 3 = 30, this family's
+  `FILTER_PCF1` (9) / `FILTER_PCF9` (11) / `FILTER_POISSON` (8) or at `t4`/`s4`
+  mode_default in the 3 unfiltered records - 9 + 11 + 8 + 3 = 31, this family's
   own count, not to be read against the `DIRSPLITS=2` figures below - plus
   `t7`/`s7` in the 10 `GOBOPROJECTION` records.
 
   Identical ABI is not identical lookup. POINTSPOT projects planar and always
-  samples slice 0; native POINTOMNI is dual paraboloid. The base omni lookup is
-  reconstructed from the native disassembly — hemisphere from the *pre-divide*
+  samples slice 0; native POINTOMNI is dual paraboloid, and all three of its
+  lookups are reconstructed from the native disassembly.
+
+  *Base projection* — hemisphere from the *pre-divide*
   biased `dot(c13,p) * 0.5 + 0.5 < 0`, which puts the boundary at raw `-1` and
   not `0`; array slice `back ? 1 : 0`; atlas Y
   `1 - (back ? uv.y : 1 - uv.y) * scale`; reference `length(q) / radius`; and no
-  zero guard on the paraboloid divide, matching native. `HALFOMNI` — carried by
-  12 of the 30 and by no other blob in the set — and the 10 `GOBOPROJECTION`
-  records still ride the prior path and stay deliberately unreconstructed rather
-  than rejected or erased. Execution parity for the reconstructed base is not
-  yet measured. POINTOMNI *without* `SHADOW` is a different ABI and stays on
+  zero guard on the paraboloid divide, matching native.
+
+  *`HALFOMNI`* (12 of the 31) keeps the `+Z` pole and slice 0 and returns
+  unconditional zero on the rejected half — same `dp4 c13` → `mad *0.5+0.5`
+  sequence, but `ge ... 0` to reject rather than select.
+
+  *`GOBOPROJECTION`* (10 of the 31) derives its cookie from the same omni
+  intermediate. Full omni packs the front hemisphere low and the mirrored back
+  hemisphere high, `float2(uv.x, back ? 1 - 0.5*uv.y : 0.5*uv.y)`; HALFOMNI
+  samples the fixed `+Z` UV directly with no packing. Two distinct mappings, not
+  one.
+
+  **All 31 pass the producer's WARP execution-diff oracle at zero divergent
+  pixels.** POINTOMNI *without* `SHADOW` is a different ABI and stays on
   `LIGHT_TYPE=2`; the `LIGHT_TYPE=3` guards reject it explicitly.
 
   `scripts/shaders/verify-pointomni-admission.ps1` (CTest
-  `PointOmniShadowAdmission`) re-measures all 30 and fails closed. It also
+  `PointOmniShadowAdmission`) re-measures all 31 and fails closed. It also
   asserts that 15 malformed macro sets still refuse to compile — POINTOMNI
   without `SHADOW`, POINTOMNI with `SPOT`/`POINTSPOT`/`ATTENUATION_ONLY`, two
   `FILTER_*` at once, `FILTER_PCSS`/`FILTER_PCSSPOISSON` anywhere on this path
@@ -621,15 +632,39 @@ FO4's Light raw-technique rules span about 20 macro axes, including `SHADOW`,
 `SPECULAR`, `ATTENUATION_ONLY`, `OVERDRAW`, `GOBOPROJECTION`, `HALFOMNI`,
 `IGNOREROUGHNESS`, `IGNORERIM`, `AMBIENT`, `SHADOW_ONLY`, `BLENDSPLIT`,
 `CHARACTER_LIGHT`, the exclusive PCF1→PCF9→POISSON→PCSS→PCSSPOISSON filter
-chain, and three-way `DIRSPLITS`. They produce 166 distinct Light blobs and 78
-Composite blobs on AE. The reconstructed
-`bsdf_light_deferred.hlsl` currently models only `LIGHT_TYPE` and
-`AMBIENT_IBL_IN_LIGHT`; `src/Render/ShaderInjection.cpp` registers only
-`LIGHT_TYPE=1`, `LIGHT_TYPE=2`, and `LIGHT_TYPE=1` with
-`AMBIENT_IBL_IN_LIGHT=1`, while `LIGHT_TYPE_SPOT` remains a stub. An injected
-wetness, SSGI, or SSS effect therefore appears only when the engine draws
-through a built permutation; stock shaders run on every other permutation,
-and the injected effect silently disappears.
+chain, and three-way `DIRSPLITS`. They produce 166 distinct Light blobs (306
+route occurrences) and 78 Composite blobs (180 occurrences) on AE. Those censuses
+are fixed denominators and must never shrink to make a report greener.
+
+**Strategy: reconstruct every archive permutation, not only the ones we inject
+into.** A permutation that exists in the archive gets reconstructed whether or
+not the game is ever observed using it; unused `#ifdef` branches cost nothing at
+runtime because permutations compile on demand. Runtime observation is
+validation and prioritisation, never an input to reconstruction.
+
+Measured by the producer's WARP execution-diff oracle:
+
+| Family | Census | Numerically proven |
+|---|---|---|
+| `BSDFLightShader` | 166 blobs / 306 routes | **125** |
+| `BSDFCompositeShader` | 78 blobs / 180 routes | 0 (workstream in progress) |
+
+`bsdf_light_deferred.hlsl` models `LIGHT_TYPE`, `AMBIENT_IBL_IN_LIGHT`,
+`POINTOMNI`+`SHADOW`, `HALFOMNI`, `GOBOPROJECTION` and the `FILTER_*` axis;
+sibling files carry the `DIRSPLITS=2`, `DIRSPLITS=3`, `SHADOW_ONLY` and
+unshadowed families. Remaining light work, largest cluster first: 17 blobs
+carrying `IGNOREROUGHNESS`, 6 `DIRSPLITS=1` directional shadowed, 3 unshadowed
+`POINTOMNI`+`GOBOPROJECTION`, plus 11 execution-unproven, 3 compile failures and
+1 unresolved blob.
+
+**Reconstruction is not delivery.** `src/Render/ShaderInjection.cpp` registers
+only `LIGHT_TYPE=1`, `LIGHT_TYPE=2`, and `LIGHT_TYPE=1` with
+`AMBIENT_IBL_IN_LIGHT=1`, so an injected wetness, SSGI, or SSS effect appears
+only when the engine draws through a registered permutation; stock shaders run
+on every other one and the injected effect silently disappears. Numerical
+fidelity and in-game execution are independent — a correct-but-never-invoked
+shader looks identical on screen to a correct-and-running one, because the stock
+shader was also fine. Only non-zero replacement counters distinguish them.
 
 ## Why these shaders
 
@@ -644,9 +679,12 @@ SSGI feature can integrate at the right boundary instead of post-
 modulating `kDiffuseBuffer` (which darkens direct light along with
 ambient).
 
-Spot lights, fog, shadowed-point-light permutations, and per-material
-prepass permutation axes remain unmapped; they are queued as follow-up
-work.
+Shadowed point lights are reconstructed and numerically proven — all 31
+`POINTOMNI`+`SHADOW` blobs, including the `HALFOMNI` and `GOBOPROJECTION`
+variants. Spot lights, fog, the `IGNOREROUGHNESS` axis and per-material prepass
+permutation axes remain unmapped; they are queued as follow-up work. The
+`BSDFCompositeShader` family (78 blobs) is a separate active workstream with no
+fidelity evidence yet.
 
 ## License
 

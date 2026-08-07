@@ -9,6 +9,11 @@ A Fallout 4 port of the ideas in
 [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders),
 hooking the DirectX renderer directly.
 
+Like upstream, it **owns the game's deferred shaders** rather than patching them: every native
+permutation is reconstructed as HLSL from the shipped shader archive, compiled at runtime, and
+injected. Each reconstruction is proven numerically equal to the game's own bytecode by an
+execution-diff oracle before it ships.
+
 <br>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/northaxosky/fallout4-community-shaders/pr.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/northaxosky/fallout4-community-shaders/actions/workflows/pr.yml)

@@ -1,5 +1,10 @@
 # ScreenSpaceShadows deployment contract
 
+> **Legacy path.** The schema-v1 DXBC recipe artifact belongs to the superseded bytecode-patching
+> strategy. It still deploys because the consumer still parses it and its regression tests pin the
+> exact bytes, but no new work should extend it — the directional family is being reconstructed as
+> HLSL instead. This file documents the deployment contract as it stands, not a forward direction.
+
 The schema-v1 DXBC recipe artifact is a required `-IncludeConfig` evidence asset:
 
 `Data\F4SE\Plugins\FO4CommunityShaders\ScreenSpaceShadows\sss-dxbc-patch-plans.json`
