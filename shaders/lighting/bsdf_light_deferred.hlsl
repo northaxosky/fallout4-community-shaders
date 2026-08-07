@@ -59,7 +59,8 @@
 // records), plus `t7`/`s7` under GOBOPROJECTION (10 records). That is exactly
 // what the projected-shadow branch below declares, so the two families select
 // it together. Admission is an ABI claim only. The base POINTOMNI shadow lookup
-// is reconstructed below; HALFOMNI and omni-cookie semantics remain divergent.
+// and the HALFOMNI hemisphere term are reconstructed below; omni-cookie
+// semantics remain divergent.
 //
 // POINTOMNI *without* SHADOW is a different ABI and stays on LIGHT_TYPE=2; the
 // 9 such blobs are unaffected by anything here.
@@ -118,11 +119,10 @@
 
 // HALFOMNI is carried by 12 of the 31 POINTOMNI+SHADOW records and by no other
 // blob in the 166-blob set. It does not move the ABI - those 12 declare exactly
-// the same buffers, resources and samplers as their non-HALFOMNI siblings - but
-// its math is NOT reconstructed here. It is deliberately left defined and
-// unhandled rather than rejected or quietly erased: a HALFOMNI permutation is
-// admitted with an exact contract and a knowingly divergent body, and whoever
-// reconstructs the hemisphere term later must key off this macro.
+// the same buffers, resources and samplers as their non-HALFOMNI siblings - it
+// changes the hemisphere term only. The native blobs hold the +Z pole and slice
+// zero and give unconditional zero on the opposite half; that is reconstructed
+// in the projected-shadow branch below and keys off this macro.
 #endif
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the 5
@@ -1246,7 +1246,7 @@ PS_OUTPUT main(PS_INPUT input)
 // unfiltered records, plus t7/s7 in the 10 GOBOPROJECTION records. All 31
 // carry DIRSPLITS=2, which this path does not read - it is a cascade count and
 // only the directional families consume it. 12 additionally carry HALFOMNI,
-// which is unreconstructed here; see the header note.
+// whose hemisphere term is reconstructed below; see the header note.
 
 #if LIGHT_TYPE == LIGHT_TYPE_SPOT
 
@@ -1575,7 +1575,13 @@ PS_OUTPUT main(PS_INPUT input)
 #    endif
 
     float radial = length(shadowProj);
+#    ifdef HALFOMNI
+    // HALFOMNI keeps the +Z pole and rejects the opposite half.
+    bool halfAccepted = (zHalf >= 0.0);
+    bool backHemisphere = false;
+#    else
     bool backHemisphere = (zHalf < 0.0);
+#    endif
     float3 pole = backHemisphere ? float3(0.0, 0.0, -1.0)
                                  : float3(0.0, 0.0, 1.0);
     float3 paraboloid = normalize(normalize(shadowProj) + pole);
@@ -1638,6 +1644,10 @@ PS_OUTPUT main(PS_INPUT input)
     float shadowDepth = g_tSpotShadowAtlas.Sample(
         g_sSpotShadow, float3(shadowUV, shadowSlice)).x;
     shadowFactor = (shadowDepth >= shadowRef) ? 1.0 : 0.0;
+#  endif
+
+#  if defined(POINTOMNI) && defined(SHADOW) && defined(HALFOMNI)
+    shadowFactor = halfAccepted ? shadowFactor : 0.0;
 #  endif
 
     // Keep the legacy POINTSPOT cookie coordinates until the omni-cookie wave.
@@ -1840,8 +1850,8 @@ PS_OUTPUT main(PS_INPUT input)
 // profiles; they are admitted to the projected-shadow branch above, and all 31
 // are contract-equal to their corpus blob (CB sizes and indexing mode, SRV
 // slots and types, sampler slots and modes, IO signature). Admission is an ABI
-// claim only. The base omni projection is reconstructed; HALFOMNI and
-// omni-cookie semantics remain unreconstructed and may still diverge.
+// claim only. The base omni projection and the HALFOMNI hemisphere term are
+// reconstructed; omni-cookie semantics remain unreconstructed and may diverge.
 // Every route in that table carries
 // opaque_psid_status "not-observed" and raw_technique_status
 // "hypothesis-matched", so this is archive evidence, not an observed engine
