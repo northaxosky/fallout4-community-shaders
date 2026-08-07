@@ -58,9 +58,9 @@
 // records) or at `t4` with an `s4` mode_default sampler without one (3
 // records), plus `t7`/`s7` under GOBOPROJECTION (10 records). That is exactly
 // what the projected-shadow branch below declares, so the two families select
-// it together. Admission is an ABI claim only. The base POINTOMNI shadow lookup
-// and the HALFOMNI hemisphere term are reconstructed below; omni-cookie
-// semantics remain divergent.
+// it together. Admission is an ABI claim only. The base POINTOMNI shadow lookup,
+// the HALFOMNI hemisphere term and the omni cookie coordinates are
+// reconstructed below.
 //
 // POINTOMNI *without* SHADOW is a different ABI and stays on LIGHT_TYPE=2; the
 // 9 such blobs are unaffected by anything here.
@@ -1570,9 +1570,6 @@ PS_OUTPUT main(PS_INPUT input)
     float zHalf = shadowProj.z * 0.5 + 0.5;
     float shadowProjW = dot(cb2_shadowproj_row3, posViewHomog);
     shadowProj /= shadowProjW.xxx;
-#    ifdef GOBOPROJECTION
-    float2 legacyGoboShadowUV = shadowProj.xy * 0.5 + 0.5;
-#    endif
 
     float radial = length(shadowProj);
 #    ifdef HALFOMNI
@@ -1650,14 +1647,7 @@ PS_OUTPUT main(PS_INPUT input)
     shadowFactor = halfAccepted ? shadowFactor : 0.0;
 #  endif
 
-    // Keep the legacy POINTSPOT cookie coordinates until the omni-cookie wave.
-#  if defined(POINTOMNI) && defined(SHADOW)
-#    ifdef GOBOPROJECTION
-    float2 projFade = (float2(legacyGoboShadowUV.x, 1.0 - legacyGoboShadowUV.y)
-                       - ShadowLightParam.y)
-                    / ShadowLightParam.z;
-#    endif
-#  else
+#  if !(defined(POINTOMNI) && defined(SHADOW))
     // POINTSPOT projection edge fade. The same vector feeds its gobo lookup.
     float2 projFade = (float2(shadowUV.x, 1.0 - shadowUV.y) - ShadowLightParam.y)
                     / ShadowLightParam.z;
@@ -1818,6 +1808,17 @@ PS_OUTPUT main(PS_INPUT input)
     goboProj.y = dot(cb2_gobo_row1, goboHomog);
     float goboW = dot(cb2_gobo_row3, goboHomog);
     float2 goboUV = (goboProj / goboW.xx) * 0.5 + 0.5;
+#  elif defined(POINTOMNI) && defined(SHADOW)
+#    ifdef HALFOMNI
+    // The fixed +Z paraboloid UV is the whole cookie; no half packing.
+    float2 goboUV = omniUV;
+#    else
+    // v packs the front hemisphere into the lower half and mirrors the back
+    // hemisphere above it. Not radial, and no ShadowLightParam atlas remap.
+    float2 goboUV = float2(omniUV.x,
+                           backHemisphere ? 1.0 - 0.5 * omniUV.y
+                                          : 0.5 * omniUV.y);
+#    endif
 #  else
     // POINTSPOT gobo: reuses the shadow projection through the same
     // ShadowLightParam remap that drives the edge fade, with the v axis
@@ -1850,8 +1851,8 @@ PS_OUTPUT main(PS_INPUT input)
 // profiles; they are admitted to the projected-shadow branch above, and all 31
 // are contract-equal to their corpus blob (CB sizes and indexing mode, SRV
 // slots and types, sampler slots and modes, IO signature). Admission is an ABI
-// claim only. The base omni projection and the HALFOMNI hemisphere term are
-// reconstructed; omni-cookie semantics remain unreconstructed and may diverge.
+// claim only. The base omni projection, the HALFOMNI hemisphere term and the
+// omni cookie coordinates are reconstructed.
 // Every route in that table carries
 // opaque_psid_status "not-observed" and raw_technique_status
 // "hypothesis-matched", so this is archive evidence, not an observed engine
