@@ -49,17 +49,17 @@
 // SPOT blob carries SHADOW, and no POINTSPOT blob allocates SpotData.
 //
 // POINTOMNI reaches this path only when it carries SHADOW. A producer audit
-// recompiled all 30 POINTOMNI+SHADOW records and reimplemented harness
+// recompiled all 31 POINTOMNI+SHADOW records and reimplemented harness
 // reflection against them: their declared ABI and their FXP constant tables are
-// identical to the already-proven POINTSPOT profiles. Measured over the 30
+// identical to the already-proven POINTSPOT profiles. Measured over the 31
 // corpus blobs that is CB12[30] + CB2[21], both immediateIndexed, `t0..t3`
 // Texture2D with `s0..s3` mode_default, and the shadow map as a Texture2DArray
-// at `t5` with a `s5` mode_comparison sampler under a FILTER_* macro (27
+// at `t5` with a `s5` mode_comparison sampler under a FILTER_* macro (28
 // records) or at `t4` with an `s4` mode_default sampler without one (3
 // records), plus `t7`/`s7` under GOBOPROJECTION (10 records). That is exactly
 // what the projected-shadow branch below declares, so the two families select
-// it together. Admission is an ABI claim only: the body is the POINTSPOT
-// reconstruction, and execution may diverge for an omni light.
+// it together. Admission is an ABI claim only. The base POINTOMNI shadow lookup
+// is reconstructed below; HALFOMNI and omni-cookie semantics remain divergent.
 //
 // POINTOMNI *without* SHADOW is a different ABI and stays on LIGHT_TYPE=2; the
 // 9 such blobs are unaffected by anything here.
@@ -116,7 +116,7 @@
 #    error "no native POINTSPOT or POINTOMNI blob carries FILTER_PCSS or FILTER_PCSSPOISSON"
 #  endif
 
-// HALFOMNI is carried by 12 of the 30 POINTOMNI+SHADOW records and by no other
+// HALFOMNI is carried by 12 of the 31 POINTOMNI+SHADOW records and by no other
 // blob in the 166-blob set. It does not move the ABI - those 12 declare exactly
 // the same buffers, resources and samplers as their non-HALFOMNI siblings - but
 // its math is NOT reconstructed here. It is deliberately left defined and
@@ -1210,7 +1210,7 @@ PS_OUTPUT main(PS_INPUT input)
 // Evidence scope: AE 1.11.221 only. Archive
 // `Fallout4 - Shaders.ba2` sha256 4ac98b8fe723..., member
 // `shadersfx/shaders011.fxp` sha256 f3254023504c..., 36 decoded blobs
-// (9 SPOT + 27 POINTSPOT), plus the 30 POINTOMNI+SHADOW blobs admitted to the
+// (9 SPOT + 27 POINTSPOT), plus the 31 POINTOMNI+SHADOW blobs admitted to the
 // projected-shadow ABI below. Register allocation is package-table
 // recovered and closure-gated (every DXBC read has an allocated constant,
 // every allocation is read, top register + 1 = 21 = the declared CB2 size).
@@ -1239,11 +1239,11 @@ PS_OUTPUT main(PS_INPUT input)
 // the families: SPOT reads only .x (cone falloff exponent), POINTSPOT reads
 // .xyz (projection edge-fade exponent / centre / scale).
 //
-// POINTOMNI+SHADOW (30 blobs) declares the POINTSPOT layout register for
+// POINTOMNI+SHADOW (31 blobs) declares the POINTSPOT layout register for
 // register. Its contract is CB12[30] + CB2[21] immediateIndexed, t0..t3 +
 // s0..s3, the shadow map at t5/s5 mode_comparison under FILTER_PCF1 (9),
-// FILTER_PCF9 (10) or FILTER_POISSON (8) and at t4/s4 mode_default in the 3
-// unfiltered records, plus t7/s7 in the 10 GOBOPROJECTION records. All 30
+// FILTER_PCF9 (11) or FILTER_POISSON (8) and at t4/s4 mode_default in the 3
+// unfiltered records, plus t7/s7 in the 10 GOBOPROJECTION records. All 31
 // carry DIRSPLITS=2, which this path does not read - it is a cascade count and
 // only the directional families consume it. 12 additionally carry HALFOMNI,
 // which is unreconstructed here; see the header note.
@@ -1557,18 +1557,49 @@ PS_OUTPUT main(PS_INPUT input)
     float3 viewDirNeg = -posView * posViewLenInv.xxx;
 
 #ifdef FO4_PROJECTED_SHADOW_FAMILY
-    // Projected shadow. dp4 through ShadowMapProj then a perspective divide;
-    // the xy half becomes the shadow UV and z the comparison reference.
     float4 posViewHomog = float4(posView, 1.0);
+    float2 shadowUV;
+    float shadowRef;
+    float shadowSlice;
+
+#  if defined(POINTOMNI) && defined(SHADOW)
+    float3 shadowProj;
+    shadowProj.x = dot(cb2_shadowproj_row0, posViewHomog);
+    shadowProj.y = dot(cb2_shadowproj_row1, posViewHomog);
+    shadowProj.z = dot(cb2_shadowproj_row2, posViewHomog);
+    float zHalf = shadowProj.z * 0.5 + 0.5;
+    float shadowProjW = dot(cb2_shadowproj_row3, posViewHomog);
+    shadowProj /= shadowProjW.xxx;
+#    ifdef GOBOPROJECTION
+    float2 legacyGoboShadowUV = shadowProj.xy * 0.5 + 0.5;
+#    endif
+
+    float radial = length(shadowProj);
+    bool backHemisphere = (zHalf < 0.0);
+    float3 pole = backHemisphere ? float3(0.0, 0.0, -1.0)
+                                 : float3(0.0, 0.0, 1.0);
+    float3 paraboloid = normalize(normalize(shadowProj) + pole);
+    float2 omniUV = (paraboloid.xy / paraboloid.zz) * 0.5 + 0.5;
+    float selectedY = backHemisphere ? omniUV.y : (1.0 - omniUV.y);
+
+    shadowUV.x = omniUV.x * ShadowLightParam.z;
+    shadowUV.y = 1.0 - selectedY * ShadowLightParam.z;
+    shadowSlice = backHemisphere ? 1.0 : 0.0;
+    shadowRef = saturate(radial / LightPos_and_Radius.w)
+              - cb2_idx15_shadow_sample_param.x;
+#  else
+    // POINTSPOT uses a planar projection and always samples slice zero.
     float3 shadowProj;
     shadowProj.x = dot(cb2_shadowproj_row0, posViewHomog);
     shadowProj.y = dot(cb2_shadowproj_row1, posViewHomog);
     shadowProj.z = dot(cb2_shadowproj_row2, posViewHomog);
     float shadowProjW = dot(cb2_shadowproj_row3, posViewHomog);
-    shadowProj = shadowProj / shadowProjW.xxx;
+    shadowProj /= shadowProjW.xxx;
 
-    float2 shadowUV = shadowProj.xy * 0.5 + 0.5;
-    float  shadowRef = shadowProj.z - cb2_idx15_shadow_sample_param.x;
+    shadowUV = shadowProj.xy * 0.5 + 0.5;
+    shadowSlice = 0.0;
+    shadowRef = shadowProj.z - cb2_idx15_shadow_sample_param.x;
+#  endif
 
     float shadowFactor;
 #  if defined(FILTER_POISSON)
@@ -1580,9 +1611,9 @@ PS_OUTPUT main(PS_INPUT input)
         float2 tap0 = (SPOT_SHADOW_POISSON[p * 2 + 0] - 0.5) * poissonScale;
         float2 tap1 = (SPOT_SHADOW_POISSON[p * 2 + 1] - 0.5) * poissonScale;
         poissonSum += g_tSpotShadowAtlas.SampleCmpLevelZero(
-            g_sSpotShadowCmp, float3(tap0 * 2.0 + shadowUV, 0.0), shadowRef);
+            g_sSpotShadowCmp, float3(tap0 * 2.0 + shadowUV, shadowSlice), shadowRef);
         poissonSum += g_tSpotShadowAtlas.SampleCmpLevelZero(
-            g_sSpotShadowCmp, float3(tap1 * 2.0 + shadowUV, 0.0), shadowRef);
+            g_sSpotShadowCmp, float3(tap1 * 2.0 + shadowUV, shadowSlice), shadowRef);
     }
     shadowFactor = poissonSum / 16.0;
 #  elif defined(FILTER_PCF9)
@@ -1595,28 +1626,36 @@ PS_OUTPUT main(PS_INPUT input)
             float2 tapOffset = float2(i - 1, j - 1)
                              * cb2_idx15_shadow_sample_param.zw;
             pcfSum += g_tSpotShadowAtlas.SampleCmpLevelZero(
-                g_sSpotShadowCmp, float3(tapOffset + shadowUV, 0.0), shadowRef);
+                g_sSpotShadowCmp, float3(tapOffset + shadowUV, shadowSlice), shadowRef);
         }
     }
     shadowFactor = pcfSum / 9.0;
 #  elif defined(FILTER_PCF1)
     shadowFactor = g_tSpotShadowAtlas.SampleCmpLevelZero(
-        g_sSpotShadowCmp, float3(shadowUV, 0.0), shadowRef);
+        g_sSpotShadowCmp, float3(shadowUV, shadowSlice), shadowRef);
 #  else
     // Unfiltered: plain sample plus an explicit compare, yielding 1.0 or 0.0.
     float shadowDepth = g_tSpotShadowAtlas.Sample(
-        g_sSpotShadow, float3(shadowUV, 0.0)).x;
+        g_sSpotShadow, float3(shadowUV, shadowSlice)).x;
     shadowFactor = (shadowDepth >= shadowRef) ? 1.0 : 0.0;
 #  endif
 
-    // Projection edge fade. The v axis is flipped before the fade is measured,
-    // and the same vector feeds the gobo lookup below.
+    // Keep the legacy POINTSPOT cookie coordinates until the omni-cookie wave.
+#  if defined(POINTOMNI) && defined(SHADOW)
+#    ifdef GOBOPROJECTION
+    float2 projFade = (float2(legacyGoboShadowUV.x, 1.0 - legacyGoboShadowUV.y)
+                       - ShadowLightParam.y)
+                    / ShadowLightParam.z;
+#    endif
+#  else
+    // POINTSPOT projection edge fade. The same vector feeds its gobo lookup.
     float2 projFade = (float2(shadowUV.x, 1.0 - shadowUV.y) - ShadowLightParam.y)
                     / ShadowLightParam.z;
     float  projDist = sqrt(dot(projFade, projFade));
     float  edgeFall = exp2(log2(projDist) * ShadowLightParam.x);
     edgeFall = min(edgeFall, 1.0);
     shadowFactor *= (1.0 - edgeFall);
+#  endif
 
     // Native POINTSPOT distance factor: 1 - t^8, applied as a plain multiply.
     float shadowDistNorm = saturate(dot(posView, posView)
@@ -1796,13 +1835,13 @@ PS_OUTPUT main(PS_INPUT input)
 // fo4re.light-blob-enumeration v1, runtime profile AE-1.11.221) decodes 9
 // SPOT and 27 POINTSPOT blobs out of the 166-blob BSDFLightShader set, with a
 // 166/166 constant-table closure PASS. A later producer audit recompiled all
-// 73 execution-unproven blobs and reimplemented harness reflection, finding 30
+// 73 execution-unproven blobs and reimplemented harness reflection, finding 31
 // POINTOMNI+SHADOW blobs whose ABI and FXP constant tables match the POINTSPOT
-// profiles; they are admitted to the projected-shadow branch above, and all 30
+// profiles; they are admitted to the projected-shadow branch above, and all 31
 // are contract-equal to their corpus blob (CB sizes and indexing mode, SRV
 // slots and types, sampler slots and modes, IO signature). Admission is an ABI
-// claim only - the body is the POINTSPOT reconstruction, HALFOMNI is
-// unreconstructed, and execution is expected to diverge for an omni light.
+// claim only. The base omni projection is reconstructed; HALFOMNI and
+// omni-cookie semantics remain unreconstructed and may still diverge.
 // Every route in that table carries
 // opaque_psid_status "not-observed" and raw_technique_status
 // "hypothesis-matched", so this is archive evidence, not an observed engine
