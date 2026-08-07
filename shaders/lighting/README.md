@@ -116,9 +116,9 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   A producer audit of the 73 execution-unproven blobs found 30 native
   POINTOMNI+SHADOW records whose declared ABI and FXP constant tables are
   identical to the already-proven POINTSPOT profiles. An internal selector,
-  `FO4_PROJECTED_SHADOW_FAMILY`, routes both families to the same
-  projected-shadow branch, so POINTOMNI is admitted without being rewritten
-  into POINTSPOT and without either family's native macro set being touched.
+  `FO4_PROJECTED_SHADOW_FAMILY`, admits both families into the same block, so
+  POINTOMNI is admitted without being rewritten into POINTSPOT and without
+  either family's native macro set being touched.
   All 30 compile and are contract-equal to their corpus blob — CB sizes and
   indexing mode, SRV slots and types, sampler slots and modes, and the IO
   signature all match: `CB12[30]` + `CB2[21]` immediateIndexed, `t0..t3` with
@@ -128,12 +128,18 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   own count, not to be read against the `DIRSPLITS=2` figures below - plus
   `t7`/`s7` in the 10 `GOBOPROJECTION` records.
 
-  This is an ABI claim only. The body is the POINTSPOT reconstruction, so
-  execution is expected to diverge for an omni light, and `HALFOMNI` — carried
-  by 12 of the 30 and by no other blob in the set — is deliberately left
-  defined and unreconstructed rather than rejected or erased. POINTOMNI
-  *without* `SHADOW` is a different ABI and stays on `LIGHT_TYPE=2`; the
-  `LIGHT_TYPE=3` guards reject it explicitly.
+  Identical ABI is not identical lookup. POINTSPOT projects planar and always
+  samples slice 0; native POINTOMNI is dual paraboloid. The base omni lookup is
+  reconstructed from the native disassembly — hemisphere from the *pre-divide*
+  biased `dot(c13,p) * 0.5 + 0.5 < 0`, which puts the boundary at raw `-1` and
+  not `0`; array slice `back ? 1 : 0`; atlas Y
+  `1 - (back ? uv.y : 1 - uv.y) * scale`; reference `length(q) / radius`; and no
+  zero guard on the paraboloid divide, matching native. `HALFOMNI` — carried by
+  12 of the 30 and by no other blob in the set — and the 10 `GOBOPROJECTION`
+  records still ride the prior path and stay deliberately unreconstructed rather
+  than rejected or erased. Execution parity for the reconstructed base is not
+  yet measured. POINTOMNI *without* `SHADOW` is a different ABI and stays on
+  `LIGHT_TYPE=2`; the `LIGHT_TYPE=3` guards reject it explicitly.
 
   `scripts/shaders/verify-pointomni-admission.ps1` (CTest
   `PointOmniShadowAdmission`) re-measures all 30 and fails closed. It also
