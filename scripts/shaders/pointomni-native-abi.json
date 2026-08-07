@@ -5,7 +5,7 @@
     "family": "POINTOMNI + SHADOW",
     "light_type": 3,
     "runtime": "AE 1.11.221 archive blob set",
-    "note": "Consumer-local admission gate. Each entry pins the declaration set of a native archive blob, measured from the corpus, and the check passes only when the reconstruction compiled from that blob's own macro set declares the same thing. The pinned values come from the game bytecode, never from this repo's output. This is an ABI claim only: the body is the POINTSPOT reconstruction, HALFOMNI is unreconstructed, and execution is expected to diverge for an omni light. dcl_temps is excluded because it is register allocation, not ABI."
+    "note": "Consumer-local admission gate covering all 31 native POINTOMNI+SHADOW archive blobs. Each entry pins the declaration set of a native archive blob, measured from the corpus, and the check passes only when the reconstruction compiled from that blob's own macro set declares the same thing. The pinned values come from the game bytecode, never from this repo's output. This remains an ABI claim only. The base omni projection, the HALFOMNI hemisphere term and the omni cookie coordinates now have reconstructed source paths, but numerical fidelity is measured separately by the producer and is not asserted here; nothing about a runtime route or observed execution is claimed. dcl_temps is excluded because it is register allocation, not ABI."
   },
   "compiler": {
     "name": "fxc",
@@ -173,6 +173,20 @@
         "SHADOW"
       ],
       "abi_group": "raw_t4_s4"
+    },
+    {
+      "native_blob_sha1": "2018f7d9fd227bb90520585e7c2f8d451f135738",
+      "native_blob_sha256": "e8c5ef375980f2d4404f60b88322e9e9b25f286dd7c624f060707f0f6aabefc2",
+      "native_blob_bytes": 4720,
+      "defines": [
+        "DIRSPLITS=2",
+        "FILTER_PCF9",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SHADOW"
+      ],
+      "abi_group": "cmp_t5_s5"
     },
     {
       "native_blob_sha1": "236ca6a0bd709759b4dd946935809a5f466ea375",

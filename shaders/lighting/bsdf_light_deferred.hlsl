@@ -1813,8 +1813,7 @@ PS_OUTPUT main(PS_INPUT input)
     // The fixed +Z paraboloid UV is the whole cookie; no half packing.
     float2 goboUV = omniUV;
 #    else
-    // v packs the front hemisphere into the lower half and mirrors the back
-    // hemisphere above it. Not radial, and no ShadowLightParam atlas remap.
+    // Pack front low and mirrored back high; no shadow-atlas remap.
     float2 goboUV = float2(omniUV.x,
                            backHemisphere ? 1.0 - 0.5 * omniUV.y
                                           : 0.5 * omniUV.y);
@@ -1857,16 +1856,7 @@ PS_OUTPUT main(PS_INPUT input)
 // opaque_psid_status "not-observed" and raw_technique_status
 // "hypothesis-matched", so this is archive evidence, not an observed engine
 // route - the same standing as the already-shipped point permutation.
-// NOT proven: `shader_exec_diff` harness v4 cannot measure any of the 36
-// blobs. Its point-lighting-live contract requires CB2 to be exactly 15
-// float4, exactly five Texture2D at t0..t3/t7 and no comparison sampler,
-// whereas every spot blob declares CB2[21] and POINTSPOT additionally binds a
-// Texture2DArray and (under FILTER_*) a mode_comparison sampler. Profile
-// detection therefore returns Unshaped and the run stops before any pixel
-// comparison. The producer must add spot input profiles, constant shaping and
-// bucket predicates, and must split LIGHT_TYPE=3 into per-family defines,
-// before a conformance entry can exist for either permutation.
-// Consequently `scripts/shaders/shader-fidelity-conformance.json` carries no
-// spot target and, by that manifest's own rule, absence is a fidelity claim
-// of "none" for both permutations here.
+// Producer semantic POINTOMNI profiles measure all 31 archive bodies offline;
+// numerical status is recorded in fallout4-re light-coverage.json.
+// This is not runtime-route, replacement, or in-game execution proof.
 // Runtime scope: AE 1.11.221 only. OG and NG archives were never enumerated.
