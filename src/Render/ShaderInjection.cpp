@@ -34,6 +34,10 @@ namespace cs::engine
 			{ "AMBIENT_IBL_IN_LIGHT", "1" },
 			{ "LIGHT_TYPE", "1" }
 		} };
+		// Family 2 is the attested Composite source for the runtime ambient/IBL pass.
+		constexpr std::array<ShaderInjectionDefineMetadata, 1> kAmbientIblDefines{ {
+			{ "BSDF_COMPOSITE_FAMILY", "2" }
+		} };
 
 		constexpr std::array<ShaderInjectionTargetMetadata,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> kTargets{ {
@@ -64,10 +68,10 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kAmbientIblPass,
 				"ambient_ibl_pass",
-				L"lighting/ambient_ibl_pass_runtime.hlsl",
+				L"lighting/BSDFComposite.hlsl",
 				"main",
 				"ps_5_0",
-				kNoDefines
+				kAmbientIblDefines
 			},
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectional,

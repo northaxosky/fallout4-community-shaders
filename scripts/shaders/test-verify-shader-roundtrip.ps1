@@ -5,6 +5,20 @@ param()
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $verifier = Join-Path $scriptDir 'verify-shader-roundtrip.ps1'
+$publishedManifest = Get-Content -LiteralPath (
+    Join-Path $scriptDir 'shader-fidelity-conformance.json') -Raw | ConvertFrom-Json
+# The fixture derives entry shape from the published artifact, so pin its identity
+# independently; otherwise a coordinated manifest+floor edit would define its own oracle.
+$publishedIdentity = (@($publishedManifest.entries | ForEach-Object {
+    '{0}|{1}|{2}|{3}' -f $_.target, $_.source, ((@($_.defines)) -join ','), $_.profile
+}) -join "`n")
+$publishedIdentitySha = ([BitConverter]::ToString(
+    [Security.Cryptography.SHA256]::Create().ComputeHash(
+        [Text.Encoding]::UTF8.GetBytes($publishedIdentity)))).Replace('-', '').ToLowerInvariant()
+if ($publishedIdentitySha -cne '0efb35131d8b8444d478d6ebc10a729e52f6b859ce539c05261580e0fbe53bc3') {
+    throw ("published manifest entry identity changed; expected 0efb3513..., got " +
+        $publishedIdentitySha)
+}
 $fixtureRoot = Join-Path ([IO.Path]::GetTempPath()) ('shader-roundtrip-tests-' + [Guid]::NewGuid().ToString('N'))
 $repoRoot = Join-Path $fixtureRoot 'repo'
 $manifestDir = Join-Path $fixtureRoot 'manifests'
@@ -46,14 +60,9 @@ function New-Entry {
 
 function New-ValidManifest {
     $entries = @(
-        (New-Entry 'ambient_ibl_pass' 'shaders/lighting/ambient_ibl_pass.hlsl' @()),
-        (New-Entry 'ambient_ibl_pass_runtime_no_tilelight' 'shaders/lighting/ambient_ibl_pass_runtime.hlsl' @()),
-        (New-Entry 'ambient_ibl_pass_runtime' 'shaders/lighting/ambient_ibl_pass_runtime.hlsl' @('TILELIGHT=1')),
-        (New-Entry 'bsdf_light_deferred_directional_ibl' 'shaders/lighting/bsdf_light_deferred.hlsl' @('AMBIENT_IBL_IN_LIGHT=1', 'LIGHT_TYPE=1')),
-        (New-Entry 'bsdf_light_deferred_directional' 'shaders/lighting/bsdf_light_deferred.hlsl' @('LIGHT_TYPE=1')),
-        (New-Entry 'bsdf_light_deferred_point' 'shaders/lighting/bsdf_light_deferred.hlsl' @('LIGHT_TYPE=2')),
-        (New-Entry 'deferred_prepass' 'shaders/lighting/deferred_prepass.hlsl' @()),
-        (New-Entry 'vls_slice_scatter' 'shaders/lighting/vls_slice_scatter.hlsl' @())
+        foreach ($entry in @($publishedManifest.entries)) {
+            New-Entry -Target $entry.target -Source $entry.source -Defines @($entry.defines)
+        }
     )
     return [pscustomobject][ordered]@{
         schema = 'fo4re.shader-fidelity-conformance'
@@ -74,6 +83,16 @@ function New-ValidManifest {
         }
         entries = $entries
     }
+}
+
+function Get-ManifestEntry {
+    param([object]$Manifest, [string]$Target)
+
+    $entry = $Manifest.entries |
+        Where-Object { $_.target -ceq $Target } |
+        Select-Object -First 1
+    if ($null -eq $entry) { throw "fixture target not found: $Target" }
+    return $entry
 }
 
 function Write-Manifest {
@@ -148,8 +167,7 @@ try {
     New-Item -ItemType Directory -Path (Join-Path $repoRoot 'shaders\lighting') -Force | Out-Null
     New-Item -ItemType Directory -Path $manifestDir -Force | Out-Null
     $sources = @(
-        'ambient_ibl_pass.hlsl',
-        'ambient_ibl_pass_runtime.hlsl',
+        'BSDFComposite.hlsl',
         'bsdf_light_deferred.hlsl',
         'deferred_prepass.hlsl',
         'vls_slice_scatter.hlsl',
@@ -188,15 +206,24 @@ exit /b 0
     Invoke-Test 'valid pass' {
         Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
         $result = Invoke-Verifier (Write-Manifest (New-ValidManifest) 'valid')
-        Assert-Result $result 0 'PASS: 8 / 8'
+        Assert-Result $result 0 'PASS: 83 / 83'
         $calls = @(Get-Content -LiteralPath $marker)
-        if ($calls.Count -ne 8) { throw 'fxc was not invoked 8 times' }
+        if ($calls.Count -ne 83) { throw 'fxc was not invoked 83 times' }
         $includePath = [regex]::Escape(
             [IO.Path]::GetFullPath((Join-Path $repoRoot 'shaders\lighting')))
+        $prepassCall = $calls |
+            Where-Object { $_ -match 'deferred_prepass\.dxbc' } |
+            Select-Object -First 1
+        $ambientRuntimeCall = $calls |
+            Where-Object { $_ -match 'ambient_ibl_pass_runtime\.dxbc' } |
+            Select-Object -First 1
+        $directionalIblCall = $calls |
+            Where-Object { $_ -match 'bsdf_light_deferred_directional_ibl\.dxbc' } |
+            Select-Object -First 1
         if (@($calls | Where-Object { $_ -notmatch "/I `"?$includePath`"? (?:/D|/Fo) " }).Count -ne 0 -or
-            $calls[0] -notmatch '^/T ps_5_0 /E main /nologo /O3 /I .+ /Fo ' -or
-            $calls[2] -notmatch '/D TILELIGHT=1 /Fo ' -or
-            $calls[3] -notmatch '/D AMBIENT_IBL_IN_LIGHT=1 /D LIGHT_TYPE=1 /Fo ') {
+            $prepassCall -notmatch '^/T ps_5_0 /E main /nologo /O3 /I .+ /Fo ' -or
+            $ambientRuntimeCall -notmatch '/D BSDF_COMPOSITE_FAMILY=2 /D TILELIGHT=1 /Fo ' -or
+            $directionalIblCall -notmatch '/D AMBIENT_IBL_IN_LIGHT=1 /D LIGHT_TYPE=1 /Fo ') {
             throw 'fxc arguments did not match the manifest contract'
         }
     }
@@ -402,13 +429,15 @@ exit /b 0
 
     Invoke-Test 'unsorted defines' {
         $manifest = New-ValidManifest
-        $manifest.entries[3].defines = @('LIGHT_TYPE=1', 'AMBIENT_IBL_IN_LIGHT=1')
+        $entry = Get-ManifestEntry $manifest 'bsdf_light_deferred_directional_ibl'
+        $entry.defines = @('LIGHT_TYPE=1', 'AMBIENT_IBL_IN_LIGHT=1')
         Assert-Result (Invoke-Verifier (Write-Manifest $manifest 'defines-unsorted')) 1 'defines must be sorted'
     }
 
     Invoke-Test 'duplicate defines' {
         $manifest = New-ValidManifest
-        $manifest.entries[4].defines = @('LIGHT_TYPE=1', 'LIGHT_TYPE=1')
+        $entry = Get-ManifestEntry $manifest 'bsdf_light_deferred_directional'
+        $entry.defines = @('LIGHT_TYPE=1', 'LIGHT_TYPE=1')
         Assert-Result (Invoke-Verifier (Write-Manifest $manifest 'defines-duplicate')) 1 'duplicate define'
     }
 
@@ -416,6 +445,16 @@ exit /b 0
         $manifest = New-ValidManifest
         $manifest.entries = @($manifest.entries | Where-Object { $_.target -cne 'deferred_prepass' })
         Assert-Result (Invoke-Verifier (Write-Manifest $manifest 'target-missing')) 1 'missing required target deferred_prepass'
+    }
+
+    Invoke-Test 'missing composite target' {
+        $manifest = New-ValidManifest
+        $manifest.entries = @(
+            $manifest.entries |
+                Where-Object { $_.target -cne 'composite_no_srv_position' })
+        Assert-Result (
+            Invoke-Verifier (Write-Manifest $manifest 'composite-target-missing')) 1 `
+            'missing required target composite_no_srv_position'
     }
 
     Invoke-Test 'extra target' {
@@ -426,7 +465,10 @@ exit /b 0
 
     Invoke-Test 'wrong canonical key' {
         $manifest = New-ValidManifest
-        $manifest.entries[0] = New-Entry 'ambient_ibl_pass' 'shaders/lighting/alternate.hlsl' @()
+        $entry = Get-ManifestEntry $manifest 'ambient_ibl_pass'
+        $index = [Array]::IndexOf($manifest.entries, $entry)
+        $manifest.entries[$index] = New-Entry `
+            'ambient_ibl_pass' 'shaders/lighting/alternate.hlsl' @()
         Assert-Result (Invoke-Verifier (Write-Manifest $manifest 'canonical-key')) 1 'wrong canonical key|unexpected canonical key'
     }
 
@@ -438,8 +480,8 @@ exit /b 0
     Invoke-Test 'compiler failure aggregation' {
         Remove-Item -LiteralPath $marker -Force -ErrorAction SilentlyContinue
         $result = Invoke-Verifier (Write-Manifest (New-ValidManifest) 'compiler-failure') -CompilerFails
-        Assert-Result $result 1 'FAIL: 8 / 8 shader round-trips failed'
-        if (@(Get-Content -LiteralPath $marker).Count -ne 8) { throw 'compiler failures were not aggregated' }
+        Assert-Result $result 1 'FAIL: 83 / 83 shader round-trips failed'
+        if (@(Get-Content -LiteralPath $marker).Count -ne 83) { throw 'compiler failures were not aggregated' }
     }
 
     Invoke-Test 'DXBC SHA mismatch' {

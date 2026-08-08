@@ -501,16 +501,111 @@ if ($manifest.entries -isnot [System.Array]) {
 }
 
 # Deliberate independent coverage friction: do not derive this set from the manifest.
-$requiredEntries = @(
-    [pscustomobject]@{ target = 'ambient_ibl_pass'; source = 'shaders/lighting/ambient_ibl_pass.hlsl'; defines = @(); profile = 'ps_5_0' },
-    [pscustomobject]@{ target = 'ambient_ibl_pass_runtime'; source = 'shaders/lighting/ambient_ibl_pass_runtime.hlsl'; defines = @('TILELIGHT=1'); profile = 'ps_5_0' },
-    [pscustomobject]@{ target = 'ambient_ibl_pass_runtime_no_tilelight'; source = 'shaders/lighting/ambient_ibl_pass_runtime.hlsl'; defines = @(); profile = 'ps_5_0' },
-    [pscustomobject]@{ target = 'bsdf_light_deferred_directional'; source = 'shaders/lighting/bsdf_light_deferred.hlsl'; defines = @('LIGHT_TYPE=1'); profile = 'ps_5_0' },
+$requiredCompositeEntrySpecs = @(
+    'composite_cube_no_t0_cb31_unused_texcoord_set_a|AMBIENT_DIFFUSE_SET_B=0,AMBIENT_SSAO=0,AMBIENT_SUBSURFACE_BLUR=0,AMBIENT_UNUSED_TEXCOORD=1,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_no_skin_blur_no_ssao_set_a|AMBIENT_DIFFUSE_SET_B=0,AMBIENT_SSAO=0,AMBIENT_SUBSURFACE_BLUR=0,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_no_ssao_set_a|AMBIENT_DIFFUSE_SET_B=0,AMBIENT_SSAO=0,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_no_skin_blur_set_a|AMBIENT_DIFFUSE_SET_B=0,AMBIENT_SUBSURFACE_BLUR=0,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_set_a|AMBIENT_DIFFUSE_SET_B=0,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_unused_texcoord|AMBIENT_SSAO=0,AMBIENT_SUBSURFACE_BLUR=0,AMBIENT_UNUSED_TEXCOORD=1,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_no_skin_blur_no_ssao|AMBIENT_SSAO=0,AMBIENT_SUBSURFACE_BLUR=0,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_no_ssao|AMBIENT_SSAO=0,BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_no_t0_cb31_no_skin_blur|AMBIENT_SUBSURFACE_BLUR=0,BSDF_COMPOSITE_FAMILY=1'
+    'ambient_ibl_pass|BSDF_COMPOSITE_FAMILY=1'
+    'composite_cube_ibl_cb2_6|BSDF_COMPOSITE_FAMILY=10'
+    'composite_cube_ibl_cb2_3_alpha_one|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_ALPHA_ONE=1,COMPOSITE_CB2_COUNT=3,COMPOSITE_MODULATION=0'
+    'composite_cube_ibl_cb2_3_alpha_one_extended|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_ALPHA_ONE=1,COMPOSITE_CB2_COUNT=3,COMPOSITE_MODULATION=0,TILED_LIGHTS=1'
+    'composite_cube_ibl_cb2_1|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB12_COUNT=31,COMPOSITE_CB2_COUNT=1,COMPOSITE_FOG_STACK=0,COMPOSITE_MATERIAL_EXCLUSION=0,COMPOSITE_MODULATION=0'
+    'composite_cube_ibl_cb2_1_texcoord|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB12_COUNT=31,COMPOSITE_CB2_COUNT=1,COMPOSITE_FOG_STACK=0,COMPOSITE_MATERIAL_EXCLUSION=0,COMPOSITE_MODULATION=0,COMPOSITE_UNUSED_TEXCOORD=1'
+    'composite_cube_ibl_cb2_1_texcoord_extended|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB12_COUNT=31,COMPOSITE_CB2_COUNT=1,COMPOSITE_FOG_STACK=0,COMPOSITE_MATERIAL_EXCLUSION=0,COMPOSITE_MODULATION=0,COMPOSITE_UNUSED_TEXCOORD=1,TILED_LIGHTS=1'
+    'composite_cube_ibl_cb2_1_extended|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB12_COUNT=31,COMPOSITE_CB2_COUNT=1,COMPOSITE_FOG_STACK=0,COMPOSITE_MATERIAL_EXCLUSION=0,COMPOSITE_MODULATION=0,TILED_LIGHTS=1'
+    'composite_cube_ibl_cb2_6_no_fog|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB12_COUNT=31,COMPOSITE_FOG_STACK=0,COMPOSITE_MATERIAL_EXCLUSION=0'
+    'composite_cube_ibl_cb2_6_no_fog_extended|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB12_COUNT=31,COMPOSITE_FOG_STACK=0,COMPOSITE_MATERIAL_EXCLUSION=0,TILED_LIGHTS=1'
+    'composite_cube_ibl_cb2_3|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB2_COUNT=3,COMPOSITE_MODULATION=0'
+    'composite_cube_ibl_cb2_3_extended|BSDF_COMPOSITE_FAMILY=10,COMPOSITE_CB2_COUNT=3,COMPOSITE_MODULATION=0,TILED_LIGHTS=1'
+    'composite_cube_ibl_cb2_6_extended|BSDF_COMPOSITE_FAMILY=10,TILED_LIGHTS=1'
+    'wave5a_no_t0_accumulator_modulated_tiled|BSDF_COMPOSITE_FAMILY=11,WAVE5A_ACCUMULATOR_SHAPE=1'
+    'wave5a_no_t0_accumulator_material|BSDF_COMPOSITE_FAMILY=11,WAVE5A_ACCUMULATOR_SHAPE=2'
+    'wave5a_no_t0_accumulator_material_tiled|BSDF_COMPOSITE_FAMILY=11,WAVE5A_ACCUMULATOR_SHAPE=3'
+    'wave5a_no_t0_accumulator_modulated|BSDF_COMPOSITE_FAMILY=11,WAVE5A_ACCUMULATOR_SHAPE=4'
+    'wave5a_no_t0_fog_base|BSDF_COMPOSITE_FAMILY=12,WAVE5A_FOG_SHAPE=1'
+    'wave5a_no_t0_fog_material5|BSDF_COMPOSITE_FAMILY=12,WAVE5A_FOG_SHAPE=2'
+    'wave5a_no_t0_fog_modulated|BSDF_COMPOSITE_FAMILY=12,WAVE5A_FOG_SHAPE=3'
+    'wave5a_no_t0_fog_tiled|BSDF_COMPOSITE_FAMILY=12,WAVE5A_FOG_SHAPE=4'
+    'wave5a_no_t0_fog_material5_tiled|BSDF_COMPOSITE_FAMILY=12,WAVE5A_FOG_SHAPE=5'
+    'wave5a_no_t0_fog_modulated_tiled|BSDF_COMPOSITE_FAMILY=12,WAVE5A_FOG_SHAPE=6'
+    'composite_sss_mrt_record_cb28_cb2_4|BSDF_COMPOSITE_FAMILY=15,WAVE5B_SSS_RECORD_NORMAL_SHAPE=1'
+    'composite_sss_mrt_record_cb31_cb2_7|BSDF_COMPOSITE_FAMILY=15,WAVE5B_SSS_RECORD_NORMAL_SHAPE=2'
+    'composite_sss_mrt_record_cb28_cb2_7_march|BSDF_COMPOSITE_FAMILY=15,WAVE5B_SSS_RECORD_NORMAL_SHAPE=3'
+    'composite_sss_mrt_record_cb31_cb2_8_march|BSDF_COMPOSITE_FAMILY=15,WAVE5B_SSS_RECORD_NORMAL_SHAPE=4'
+    'composite_sss_mrt_surface_cb28_cb2_4|BSDF_COMPOSITE_FAMILY=16,WAVE5B_SSS_SURFACE_CONTACT_SHAPE=1'
+    'composite_sss_mrt_surface_cb31_cb2_7|BSDF_COMPOSITE_FAMILY=16,WAVE5B_SSS_SURFACE_CONTACT_SHAPE=2'
+    'composite_sss_mrt_contact_cb28_cb2_7_march|BSDF_COMPOSITE_FAMILY=16,WAVE5B_SSS_SURFACE_CONTACT_SHAPE=3'
+    'composite_sss_mrt_contact_cb31_cb2_8_march|BSDF_COMPOSITE_FAMILY=16,WAVE5B_SSS_SURFACE_CONTACT_SHAPE=4'
+    'ambient_ibl_pass_runtime_no_tilelight|BSDF_COMPOSITE_FAMILY=2'
+    'composite_cube_no_t0_cb47_no_ao|BSDF_COMPOSITE_FAMILY=2,FO4_AMBIENT_OCCLUSION=0'
+    'composite_cube_no_t0_cb47_no_skin_blur_no_ao|BSDF_COMPOSITE_FAMILY=2,FO4_AMBIENT_OCCLUSION=0,FO4_SKIN_BLUR=0'
+    'composite_cube_no_t0_cb47_no_skin_blur_no_ao_tile|BSDF_COMPOSITE_FAMILY=2,FO4_AMBIENT_OCCLUSION=0,FO4_SKIN_BLUR=0,TILELIGHT=1'
+    'composite_cube_no_t0_cb47_no_ao_tile|BSDF_COMPOSITE_FAMILY=2,FO4_AMBIENT_OCCLUSION=0,TILELIGHT=1'
+    'composite_cube_no_t0_cb47_no_skin_blur|BSDF_COMPOSITE_FAMILY=2,FO4_SKIN_BLUR=0'
+    'composite_cube_no_t0_cb47_no_skin_blur_tile|BSDF_COMPOSITE_FAMILY=2,FO4_SKIN_BLUR=0,TILELIGHT=1'
+    'ambient_ibl_pass_runtime|BSDF_COMPOSITE_FAMILY=2,TILELIGHT=1'
+    'composite_cube_no_t0_compact|BSDF_COMPOSITE_FAMILY=3'
+    'composite_cube_no_t0_compact_fog|BSDF_COMPOSITE_FAMILY=3,FOGSTACK=1'
+    'composite_cube_no_t0_compact_fog_mask|BSDF_COMPOSITE_FAMILY=3,FOGSTACK=1,OUTPUTMASK=1'
+    'composite_cube_no_t0_compact_fog_mask_tile|BSDF_COMPOSITE_FAMILY=3,FOGSTACK=1,OUTPUTMASK=1,TILELIGHT=1'
+    'composite_cube_no_t0_compact_fog_tile|BSDF_COMPOSITE_FAMILY=3,FOGSTACK=1,TILELIGHT=1'
+    'composite_cube_no_t0_compact_mask|BSDF_COMPOSITE_FAMILY=3,OUTPUTMASK=1'
+    'composite_cube_no_t0_compact_mask_tile|BSDF_COMPOSITE_FAMILY=3,OUTPUTMASK=1,TILELIGHT=1'
+    'composite_cube_no_t0_compact_tile|BSDF_COMPOSITE_FAMILY=3,TILELIGHT=1'
+    'composite_cube_no_t0_minimal|BSDF_COMPOSITE_FAMILY=4'
+    'composite_cube_no_t0_minimal_mask|BSDF_COMPOSITE_FAMILY=4,OUTPUTMASK=1'
+    'composite_2d_accumulator|BSDF_COMPOSITE_FAMILY=6,COMPOSITE_CB2_COUNT=1'
+    'composite_2d_accumulator_material|BSDF_COMPOSITE_FAMILY=6,COMPOSITE_CB2_COUNT=1,COMPOSITE_MATERIAL_5=1'
+    'composite_2d_accumulator_material_extended|BSDF_COMPOSITE_FAMILY=6,COMPOSITE_CB2_COUNT=1,COMPOSITE_MATERIAL_5=1,TILED_LIGHTS=1'
+    'composite_2d_accumulator_extended|BSDF_COMPOSITE_FAMILY=6,COMPOSITE_CB2_COUNT=1,TILED_LIGHTS=1'
+    'composite_2d_accumulator_modulation|BSDF_COMPOSITE_FAMILY=6,COMPOSITE_CB2_COUNT=6,COMPOSITE_MODULATION=1'
+    'composite_2d_accumulator_modulation_extended|BSDF_COMPOSITE_FAMILY=6,COMPOSITE_CB2_COUNT=6,COMPOSITE_MODULATION=1,TILED_LIGHTS=1'
+    'composite_2d_fog_light_alpha_one|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_ALPHA_ONE=1,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1'
+    'composite_2d_fog_light_alpha_one_extended|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_ALPHA_ONE=1,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1,TILED_LIGHTS=1'
+    'composite_2d_fog|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3'
+    'composite_2d_fog_material5|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_5=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1'
+    'composite_2d_fog_material5_extended|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_5=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1,TILED_LIGHTS=1'
+    'composite_2d_fog_light|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1'
+    'composite_2d_fog_light_extended|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1,TILED_LIGHTS=1'
+    'composite_2d_fog_material|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1'
+    'composite_2d_fog_material_extended|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,TILED_LIGHTS=1'
+    'composite_2d_fog_extended|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=3,TILED_LIGHTS=1'
+    'composite_2d_fog_light_modulation|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=6,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_MODULATION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1'
+    'composite_2d_fog_light_modulation_extended|BSDF_COMPOSITE_FAMILY=7,COMPOSITE_CB2_COUNT=6,COMPOSITE_HAS_LIGHT=1,COMPOSITE_HAS_TYPE=1,COMPOSITE_MATERIAL_EXCLUSION=1,COMPOSITE_MODULATION=1,COMPOSITE_SCENE_BLEND=1,COMPOSITE_TILE_AMBIENT=1,TILED_LIGHTS=1'
+    'composite_no_srv_position_texcoord|BSDF_COMPOSITE_FAMILY=8'
+    'composite_no_srv_position|BSDF_COMPOSITE_FAMILY=9'
+)
+$requiredCompositeEntries = @(
+    $requiredCompositeEntrySpecs | ForEach-Object {
+        $parts = $_ -split '\|', 2
+        $specDefines = @($parts[1] -split ',')
+        if (@($specDefines | Where-Object { $_ -cnotmatch '^[A-Za-z_][A-Za-z0-9_]*=[^,|]+$' }).Count -ne 0) {
+            throw "composite spec encoding cannot express the defines for $($parts[0]); change the spec encoding, not the manifest"
+        }
+        [pscustomobject]@{
+            target = $parts[0]
+            source = 'shaders/lighting/BSDFComposite.hlsl'
+            defines = $specDefines
+            profile = 'ps_5_0'
+        }
+    }
+)
+$requiredEntries = $requiredCompositeEntries + @(
     [pscustomobject]@{ target = 'bsdf_light_deferred_directional_ibl'; source = 'shaders/lighting/bsdf_light_deferred.hlsl'; defines = @('AMBIENT_IBL_IN_LIGHT=1', 'LIGHT_TYPE=1'); profile = 'ps_5_0' },
+    [pscustomobject]@{ target = 'bsdf_light_deferred_directional'; source = 'shaders/lighting/bsdf_light_deferred.hlsl'; defines = @('LIGHT_TYPE=1'); profile = 'ps_5_0' },
     [pscustomobject]@{ target = 'bsdf_light_deferred_point'; source = 'shaders/lighting/bsdf_light_deferred.hlsl'; defines = @('LIGHT_TYPE=2'); profile = 'ps_5_0' },
     [pscustomobject]@{ target = 'deferred_prepass'; source = 'shaders/lighting/deferred_prepass.hlsl'; defines = @(); profile = 'ps_5_0' },
     [pscustomobject]@{ target = 'vls_slice_scatter'; source = 'shaders/lighting/vls_slice_scatter.hlsl'; defines = @(); profile = 'ps_5_0' }
 )
+if ($requiredCompositeEntries.Count -ne 78 -or $requiredEntries.Count -ne 83) {
+    throw 'required entry floor must contain 78 composite and 83 total entries'
+}
 
 $targets = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
 $keys = New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::Ordinal)
@@ -608,8 +703,8 @@ foreach ($entry in $entries) {
         Add-ValidationError $errors "unexpected canonical key for target $($entry.target)"
     }
 }
-if ($entries.Count -ne 8) {
-    Add-ValidationError $errors "entries must contain exactly 8 items; found $($entries.Count)"
+if ($entries.Count -ne $requiredEntries.Count) {
+    Add-ValidationError $errors "entries must contain exactly $($requiredEntries.Count) items; found $($entries.Count)"
 }
 
 $repoFullPath = [IO.Path]::GetFullPath($RepoRoot).TrimEnd('\', '/') + [IO.Path]::DirectorySeparatorChar

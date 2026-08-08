@@ -10,10 +10,11 @@ shaders and injects registered permutations at runtime.
 
 | File | Role | Source binding (RT in/out) | REL::ID OG/NG/AE | Status |
 |---|---|---|---|---|
-| `ambient_ibl_pass.hlsl`     | interior/reference ambient + IBL, blob 3559 | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **exec-diff-zero** |
-| `ambient_ibl_pass_runtime.hlsl` | exterior/runtime BSDFComposite family, PSIDs `0x10B60` and `0xB60` | Tilelight adds t11 ambient diffuse B and t12 blurred SSLR | same | **both live-mapped; exec-diff-zero** |
+| `BSDFComposite.hlsl` | selector for all 78 Composite archive blobs | selects 13 family modules; bindings vary by family | runtime delivery not wired | **producer-attested 78/78** |
+| `ambient_ibl_pass.hlsl`     | retained standalone interior/reference reconstruction, blob 3559 | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **historical exec-diff-zero; not a current manifest source** |
+| `ambient_ibl_pass_runtime.hlsl` | retained historical reconstruction of exterior Composite PSIDs `0x10B60` and `0xB60` | Tilelight adds t11 ambient diffuse B and t12 blurred SSLR | same | **historical; unreferenced and ungated — the runtime now injects `BSDFComposite.hlsl` at `BSDF_COMPOSITE_FAMILY=2`** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
-| `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **reconstructed-roundtrip-1.25pct** |
+| `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **producer-attested byte-identical DXBC** |
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
@@ -40,6 +41,13 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   CB12[47] and the same post-AO fog/color stack. `TILELIGHT` adds t11 ambient
   diffuse B and t12 blurred SSLR; the hardened oracle validates each build
   against its own blob and rejects the no-Tilelight build against blob 3560.
+* **`BSDFComposite.hlsl`** selects 13 family modules across the complete
+  78-blob Composite census. The producer-published manifest attests all 78
+  target/define rows, including the three migrated `ambient_ibl_pass*` targets.
+  `ShaderInjection.cpp` injects it at `BSDF_COMPOSITE_FAMILY=2` for the ambient
+  pass, so the shipped runtime source is the attested one; the legacy
+  `ambient_ibl_pass*.hlsl` files are retained for reference only and carry no
+  gate. The family-2 build is bytecode-identical to the file it replaced.
 * **`deferred_composite.hlsl`** - **reconstructed, round-trip WIP**
   (canonical blob 3539). Canonical blob: `Shaders011.fxp` blob 3539
   (sha1 `861504f6dcbe`), identified by mnemonic-stream equivalence
@@ -65,19 +73,19 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   pattern at eids 45401-45623 is N slices × M shadow-lights for VLS
   accumulation into `kMain`. Round-trip from the prior reconstruction
   is unchanged (+33.9% insns vs original; structural fidelity verified).
-* **`deferred_prepass.hlsl`** - **reconstructed, round-trip -1.25%**.
-  Standard-opaque G-buffer prepass PS for FO4's deferred pipeline.
-  Canonical runtime sha1: `c493970c042c...` (eid 13220 in
-  `FO4_frame9483.rdc`). 80-instruction PS that fills 6 MRT outputs:
-  albedo (`kGbufferAlbedo`), 2-channel octahedral normal
-  (`kGbufferNormal`), packed material data (`kGbufferMaterial`), two
-  auxiliary G-buffer slots (scroll UVs + specular tint), and the
-  screen-space motion vector via current-frame vs previous-frame
-  world-to-clip dp4 + perspective-divide. Resource bindings (3 SRVs
-  `t0/t1/t2` + 3 default samplers + CB12[41] / CB2[6]) and signature
-  exact-match. Round-trip via fxc /T ps_5_0 /O3: 79 vs 80 insns
-  (-1.25%), 3/3 samples. Hosted by `DrawWorld::DeferredPrePass`
-  (REL::IDs `{OG=56596, NG=2318301, AE=2318301}`). 7 other prepass
+* **`deferred_prepass.hlsl`** - **producer-attested byte-identical DXBC**.
+  This standard-opaque G-buffer prepass fills six MRT outputs: albedo,
+  octahedral normal, packed material data, two auxiliary G-buffer slots and
+  the screen-space motion vector. Identity is exact but flag-dependent:
+  compiled with the producer's `/Qstrip_reflect` this source reproduces the
+  native archive blob bit for bit (SHA-1 `c493970c042ccd90363c57596ff53f6fdd22ce5f`,
+  3212 bytes), which is also the stock guard hash in `ShaderInjection.cpp`.
+  The manifest instead pins the unstripped consumer build,
+  `52794c393c687b7ff82494c7a4d5a8231553502a` (5100 bytes); the two differ only
+  by the `RDEF`/`STAT` reflection chunks. It uses three SRVs,
+  three default samplers, CB12[41] and CB2[6], and is hosted by
+  `DrawWorld::DeferredPrePass` (REL::IDs
+  `{OG=56596, NG=2318301, AE=2318301}`). Seven other prepass
   permutations (skin / hair / decal / projected / two-sided /
   alpha-test) captured at eids 13241 / 13259 / 13507 / 13546 / 31244 /
   38343 / 39205 are documented but NOT reconstructed; they share
@@ -696,7 +704,8 @@ live in `northaxosky/fallout4-re`. This repository retains a consumer-local
 pinned `scripts/shaders/shader-fidelity-conformance.json` from the last valid
 attestation and does not carry the corpus or RE tools.
 
-`ShaderRoundtrip` validates the eight pinned variants against that manifest.
+`ShaderRoundtrip` validates 83 pinned variants against that manifest: all 78
+Composite blobs plus three Light permutations, deferred prepass and VLS.
 `ShaderCompile` also compiles the three shipping permutations without
 native fidelity evidence: deferred composite and the two Screen Space Shadows
 directional variants. Replacing three machine-specific exec-diff tests with
@@ -706,8 +715,9 @@ coverage.
 
 The consumer-local manifest must never be hand-edited. The producer deleted
 its conformance artifact in `fallout4-re` commit `be8126d4`, then restored it
-in `e8a81748` and has republished it on every subsequent wave from a full
-authoritative WARP execution-diff PASS across all eight targets.
+in `e8a81748` and has republished it on every subsequent wave from
+authoritative WARP execution-diff results. The current publication covers all
+83 targets.
 `ShaderRoundtrip` is therefore a live conformance gate again: a pass means the
 shipping HLSL still compiles to bytecode proven numerically equal to the
 game's own shader. Refresh it only by copying the producer artifact
@@ -733,16 +743,14 @@ Measured by the producer's WARP execution-diff oracle:
 
 | Family | Census | Numerically proven |
 |---|---|---|
-| `BSDFLightShader` | 166 blobs / 306 routes | **125** |
-| `BSDFCompositeShader` | 78 blobs / 180 routes | 0 (workstream in progress) |
+| `BSDFLightShader` | 166 blobs / 306 routes | **142** |
+| `BSDFCompositeShader` | 78 blobs / 180 routes | **78** |
 
 `bsdf_light_deferred.hlsl` models `LIGHT_TYPE`, `AMBIENT_IBL_IN_LIGHT`,
 `POINTOMNI`+`SHADOW`, `HALFOMNI`, `GOBOPROJECTION` and the `FILTER_*` axis;
 sibling files carry the `DIRSPLITS=2`, `DIRSPLITS=3`, `SHADOW_ONLY` and
-unshadowed families. Remaining light work, largest cluster first: 17 blobs
-carrying `IGNOREROUGHNESS`, 6 `DIRSPLITS=1` directional shadowed, 3 unshadowed
-`POINTOMNI`+`GOBOPROJECTION`, plus 11 execution-unproven, 3 compile failures and
-1 unresolved blob.
+unshadowed families. The producer's `light-coverage.json` owns the remaining
+Light status; this consumer does not duplicate its moving bucket counts.
 
 **Reconstruction is not delivery.** `src/Render/ShaderInjection.cpp` registers
 only `LIGHT_TYPE=1`, `LIGHT_TYPE=2`, and `LIGHT_TYPE=1` with
@@ -768,10 +776,9 @@ ambient).
 
 Shadowed point lights are reconstructed and numerically proven — all 31
 `POINTOMNI`+`SHADOW` blobs, including the `HALFOMNI` and `GOBOPROJECTION`
-variants. Spot lights, fog, the `IGNOREROUGHNESS` axis and per-material prepass
-permutation axes remain unmapped; they are queued as follow-up work. The
-`BSDFCompositeShader` family (78 blobs) is a separate active workstream with no
-fidelity evidence yet.
+variants. The `BSDFCompositeShader` family is fully reconstructed and
+producer-attested across all 78 blobs. That proof does not imply runtime
+delivery; the Composite selector and owned-shader registry are not wired yet.
 
 ## License
 
