@@ -19,7 +19,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
-| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact; 987c4e79 fixed-square reconstructed)** |
+| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and full-BRDF `POINTOMNI` (6 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 11/11 (read-counts exact; new point rows execution-unproven)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -275,21 +275,21 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   manifest, which is how the `DIRSPLITS=3` layer landed: an evidence file and a
   test registration, not a third copy of the script.
 
-* **`bsdf_light_deferred_unshadowed.hlsl`** - **native ABI equal, 9/9, read-counts
+* **`bsdf_light_deferred_unshadowed.hlsl`** - **native ABI equal, 11/11, read-counts
   exact on every entry; 987c4e79 fixed-square reconstructed**.
-  The native **unshadowed** light layer. Nine archive blobs have no `SHADOW` macro,
+  The native **unshadowed** light layer. Eleven archive blobs have no `SHADOW` macro,
   so their contract has no shadow texture and no shadow sampler: five `DIRECTIONAL`
-  and four `POINTOMNI`. What this source owns is unshadowed lighting - not a shadow
+  and six full-BRDF `POINTOMNI`. What this source owns is unshadowed lighting - not a shadow
   selection, and not a cascade count. State that carefully, because the framing is
   itself an evidence claim: absence of `SHADOW` is **not** a third value on the
   shadow-resource axis. `SHADOW` is simply inactive here, so the axis does not exist
-  for these nine and nothing may be grouped or compared along it. The `FILTER_*` axis
+  for these eleven and nothing may be grouped or compared along it. The `FILTER_*` axis
   selects among raw `t4`/`s4`, comparison `t5`/`s5`, or both only once `SHADOW` is
   proven active; with `SHADOW` absent there is no shadow resource to select, which is
   why every `FILTER_*` is rejected outright here rather than mapped to a "no filter"
   case.
 
-  All nine declare `t0..t3` as `texture2d` with `s0..s3` mode_default, the same two
+  All eleven declare `t0..t3` as `texture2d` with `s0..s3` mode_default, the same two
   input semantics and the same two MRT outputs, and all read `CB12[20..29]`. They are
   **not** one contract, though - the constant-buffer sizes split them into four
   groups, which is why removing the shadow declarations from a shadowed sibling would
@@ -300,7 +300,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   | `dir_base`         | a9435eca | `[3]` | `[30]` | 0,1,2 |
   | `dir_spec`         | 039c8935, 28858d7b | `[3]` | `[31]` | 0,1,2 |
   | `dir_spec_ambient` | 477c3e1e, 987c4e79 | `[9]` | `[31]` | 0,1,2,6,7,8 |
-  | `omni`             | 12d92cd3, 9f44ba67, b4337a89, fcabd749 | `[4]` | `[30]` | 0,1,2,3 |
+  | `omni`             | 12d92cd3, 9f44ba67, ea2537f5, 8765cebe, b4337a89, fcabd749 | `[4]` | `[30]` | 0,1,2,3 |
 
   The shadowed siblings are materially different and cannot host these: the shadowed
   `DIRSPLITS=2` directional declares `CB2[25]` plus `t5`/`s5`, and the shadowed point
@@ -318,18 +318,18 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   unconditionally but read by only some permutations leaves the SHEX size
   untouched and still widens the reflected size, where it appears merely as
   `[unused]`. That is invisible to a `dcl_`-only check: the base directional and
-  all four `POINTOMNI` permutations reflected `CB12` as 31 registers against a
+  all six `POINTOMNI` permutations reflected `CB12` as 31 registers against a
   native 30, which a host reading reflection rejects as a contract mismatch. The
   admission gate therefore compares the reflected size as a second, independent
   opinion on the size the manifest already pins from SHEX.
 
   That read-set table also settles what `DIRSPLITS=2` means here, and it is worth
-  stating plainly because the name invites the wrong reading: for these nine it is the
+  stating plainly because the name invites the wrong reading: for these eleven it is the
   **decoder baseline, not an active cascade axis**, and this layer does not own
-  two-cascade behaviour. The highest `CB2` register any of the nine reads is 8. None
+  two-cascade behaviour. The highest `CB2` register any of the eleven reads is 8. None
   reads a split-distance, cascade-projection, or shadow world-scale or filter register,
   and those constants are not merely unread - `SplitDistances`, `FadeDistances`,
-  `ShadowMapProj` and the rest are `absent` from all nine constant tables, so no
+  `ShadowMapProj` and the rest are `absent` from all eleven constant tables, so no
   register is allocated to them at all. The `dir_spec_ambient` rows at `cb2[6..8]` are
   a single `DirectionalAmbient` constant of `register_count` 3, not a split/fade pair -
   a distinction worth checking rather than assuming, since slot 7 in the full constant
@@ -391,6 +391,13 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   | `cb12[30]` | 1 -> 1 | 1 -> 1 |
   | `cb2[6..8]` | n/a | 2 -> 2 each |
 
+  The point body supplies two further native pairs without changing its math:
+  12d92cd3/ea2537f5 runs 142 -> 107 instructions and
+  9f44ba67/8765cebe runs 196 -> 167. `IGNOREROUGHNESS` leaves `cb2[0]`, `cb2[1]`,
+  `cb2[3]` and every `cb12[20..29]` read unchanged; only `cb2[2]` drops 2 -> 1
+  or 4 -> 3. Those counts equal the corresponding `IGNORERIM` rows, while the
+  lower native instruction counts also include the roughness-visibility deletion.
+
   `IGNOREROUGHNESS` removes the roughness visibility geometry, collapsing the
   default branch's diffuse to a plain N·L, and the rim term. The AMBIENT target
   also replaces its roughness-dependent exponent with the fixed square. It does
@@ -412,13 +419,13 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   12d92cd3/b4337a89 and 9f44ba67/fcabd749: it removes only the rim term, for exactly
   one fewer `cb2[2]` read. Both axes retain exact read-count coverage:
   `scope.count_exemption_axis` is `null` in both manifests and every one of the
-  nine entries is held to exact per-register read-counts.
+  eleven entries is held to exact per-register read-counts.
 
   The `CB12` size is the one pin this layer originally got wrong, which is worth
   recording because the failure was silent. `cb12[30]` was declared for every
   permutation and read only by the specular directional bodies, so the SHEX
   `dcl_constantbuffer` size stayed correct at 30 while reflection reported 31
-  with the member marked `[unused]`. The base directional blob and all four
+  with the member marked `[unused]`. The base directional blob and all six
   `POINTOMNI` blobs were therefore rejected by the producer harness as a
   constant-buffer contract mismatch even though the gate here was green. The
   member is now declared under the same condition that reads it, and the gate
@@ -436,16 +443,16 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   present, `HALFOMNI`, `GOBOPROJECTION`, `SPOT`/`POINTSPOT`, mixed or missing light
   kind, `DIRSPLITS` absent or not 2, missing `RGBSPEC`, `DIRECTIONAL`+`IGNORERIM`,
   `DIRECTIONAL`+`AMBIENT` without `SPECULAR`, `DIRECTIONAL`+`IGNOREROUGHNESS` without
-  `SPECULAR`, and `POINTOMNI` crossed with `AMBIENT` or `IGNOREROUGHNESS`. The last of
-  those is the sharpest case for deriving rejects from the whole corpus rather than from
-  the nine: `IGNOREROUGHNESS` without `SPECULAR` *is* native - 11 blobs carry it - but
-  every one of them is `POINTOMNI`, `POINTSPOT` or `SPOT`, while all 19 decoded
-  `DIRECTIONAL`+`IGNOREROUGHNESS` blobs carry `SPECULAR`. A guard written from the nine
-  alone would have missed it, and a guard written from the macro name alone would have
-  wrongly rejected the 11. The reject set is derived from the full 166-blob enumeration
-  rather than from the nine, so the guards neither over-reach nor under-reach; where a
-  rejected set does exist natively but belongs to another layer, the manifest says so
-  instead of calling it malformed. Each manifest's `compile_only` list holds the
+  `SPECULAR`, `POINTOMNI` crossed with `AMBIENT`, and the non-native
+  `POINTOMNI+IGNOREROUGHNESS+IGNORERIM` overlap. The point admission denominator moves
+  from 4/4 to 6/6: the ten unrelated prior reject controls are unchanged, and the
+  reclassified target control is replaced by the overlap guard, so the reject list
+  remains 11/11. `POINTOMNI+IGNOREROUGHNESS` without GOBOPROJECTION is native in exactly
+  the two newly admitted macro sets; GOBOPROJECTION still selects the distinct t7/s7
+  family and remains rejected before the point-specific guards. The reject set is
+  derived from the full 166-blob enumeration, so a native set belonging to another
+  layer is named as such instead of being called malformed. Each manifest's
+  `compile_only` list holds the
   *sibling* family's native macro sets, proving the guards lock out the other family
   without locking out anything legal.
 
@@ -453,38 +460,17 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   was attempted and not reached; the residual instruction deltas run from -1 to +2.
   Execution proof stays with the producer oracle.
 
-  The producer has since routed to this file, and the two sides agree without either
-  having been derived from the other. Its target contracts map exactly these nine
-  blobs to `bsdf_light_deferred_unshadowed.hlsl`, emitting precisely the nine macro
-  sets pinned above and no `LIGHT_TYPE` - the consolidated file's adapter macro, which
-  the guards here reject. All nine compile from this source under the producer's own
-  flags (`/T ps_5_0 /O3 /E main`). Their strict execution profiles are
-  `directional-unshadowed` for the five directional rows and `pointomni-unshadowed`
-  for the four point rows; neither profile's predicates read a constant register
-  outside these `CB2` sizes, and `pointomni-unshadowed` additionally requires the
-  `atten <= 0.001` cull and distinct `cb12[20..27]` reprojection banks to be
-  exercised, which are the early-out and the near/far partition reconstructed here.
+  The producer currently routes the original nine rows to this file. This consumer
+  admission adds ea2537f5 and 8765cebe without changing their bodies; both remain
+  `execution_unproven` until the producer target map uses this source and reruns the
+  existing `pointomni-unshadowed` profile. All eleven compile here under
+  `/T ps_5_0 /O3 /E main`, but compilation and ABI equality add no execution proof.
 
-  The layer is nine, but the macro predicate "`DIRSPLITS=2` and no `SHADOW`" is much
-  wider than nine, and conflating the two would overstate the coverage. Across the
-  166-blob enumeration, 24 *decoded* blobs satisfy that predicate: these five
-  `DIRECTIONAL` and four `POINTOMNI`, plus five `POINTOMNI`+`GOBOPROJECTION`
-  (`a65b5952`, `9969e800`, `fa6948ba`, `f33e32f9`, `d3331d19`), five `SPOT`, four
-  `SPOT`+`GOBOPROJECTION`, and one blob with no light kind at all
-  (`f6578f4e`, `AMBIENT RGBSPEC DIRSPLITS=2`). A further 15 blobs are `unresolved`,
-  and at least one of them has every candidate inside the predicate, so the predicate's
-  true membership is not even decidable from decoded records - it is 24 or more.
-
-  What *is* exactly nine is the routing family: the blobs whose whole resource contract
-  is `t0..t3` with `s0..s3` and nothing else. The `GOBOPROJECTION` blobs keep the
-  distinct `t7` light-cookie ABI, and `SPOT` carries its own contract; both stay on the
-  consolidated source, and this file's guards reject both combinations. Being
-  unshadowed is not on its own sufficient to belong here - the whole resource contract
-  has to match, which is exactly why the reject lists are derived from all 166 blobs
-  rather than from these nine.
-
-  Routing does not add execution proof. It makes these nine *measurable*, which is the
-  point; whether they then pass is a separate question the oracle answers.
+  The routing family is exactly eleven, but the broader predicate
+  "`DIRSPLITS=2` and no `SHADOW`" also includes GOBOPROJECTION, ATTENUATION_ONLY,
+  SPOT and no-light-kind contracts. Those keep their distinct declarations and are
+  not admitted by this manifest. The producer enumeration owns that wider
+  denominator; this consumer scope is the exact `t0..t3`/`s0..s3` resource family.
 
 * **`bsdf_light_deferred_dirsplits3.hlsl`** - **native ABI equal, 27/27,
   read-counts exact on every entry**.

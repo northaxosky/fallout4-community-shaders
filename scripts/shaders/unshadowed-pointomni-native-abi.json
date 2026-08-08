@@ -8,7 +8,7 @@
     "compile_only_label": "sibling-family over-reach checks",
     "count_exemption_axis": null,
     "note": "Consumer-local admission gate, the punctual half of the unshadowed light layer. Each entry pins the declaration set, the constant-register read-set and the per-register read-counts measured from a native archive blob, and the check passes only when the reconstruction compiled from that blob's own macro set agrees. This is an ABI and constant-read claim only, not an execution-equivalence claim. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. dcl_temps is excluded because it is register allocation, not ABI.",
-    "evidence": "All four blobs were disassembled with fxc /dumpbin and read against their own constant tables. They share one declaration group - CB12[30], CB2[4], t0..t3 texture2d, s0..s3 mode_default - and it is the same resource shape as the unshadowed directional groups, which is why the two families share one source. DIRSPLITS=2 is the decoder baseline for these entries and no two-cascade behaviour is claimed: the CB2 read-set is exactly {0,1,2,3}, and SplitDistances, FadeDistances and every Shadow* constant are absent from all four constant tables, so no split-distance, cascade-projection or shadow filter register is allocated, let alone read. The bodies are still reconstructed separately, on direct evidence: POINTOMNI reads cb2[3] LightAttenuation and treats cb2[1] as a light position with a radius in .w, and POINTOMNI under SPECULAR never reads the cb12[30] gloss term, so its specular exponent has no Schlick scale and its declared CB12 stays 30 where the specular directional blobs declare 31. It also has no legacy attenuation texture path: the four blobs declare no SRV beyond the four g-buffer reads. IGNORERIM is reconstructed, not exempted - it removes the rim term, which is exactly the one cb2[2] read it drops."
+    "evidence": "All six blobs were disassembled with fxc /dumpbin and read against their own constant tables. They share one declaration group - CB12[30], CB2[4], t0..t3 texture2d, s0..s3 mode_default - and it is the same resource shape as the unshadowed directional groups, which is why the two families share one source. DIRSPLITS=2 is the decoder baseline for these entries and no two-cascade behaviour is claimed: the CB2 read-set is exactly {0,1,2,3}, and SplitDistances, FadeDistances and every Shadow* constant are absent from all six constant tables, so no split-distance, cascade-projection or shadow filter register is allocated, let alone read. The bodies are still reconstructed separately, on direct evidence: POINTOMNI reads cb2[3] LightAttenuation and treats cb2[1] as a light position with a radius in .w, and POINTOMNI under SPECULAR never reads the cb12[30] gloss term, so its specular exponent has no Schlick scale and its declared CB12 stays 30 where the specular directional blobs declare 31. It also has no legacy attenuation texture path: the six blobs declare no SRV beyond the four g-buffer reads. The two newly admitted IGNOREROUGHNESS blobs account for five archive occurrences and reuse the already-reconstructed point bodies unchanged. Their exact read counts match the corresponding IGNORERIM rows: cb2[2] drops from 2 to 1 without SPECULAR and from 4 to 3 with it, while every other constant read holds. This is routing and ABI evidence only; both rows remain execution_unproven until the producer oracle runs the existing pointomni-unshadowed profile."
   },
   "compiler": {
     "name": "fxc",
@@ -142,6 +142,109 @@
         "cb2[0]": 1,
         "cb2[1]": 2,
         "cb2[2]": 4,
+        "cb2[3]": 3,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2
+      }
+    },
+    {
+      "native_blob_sha1": "ea2537f5040162605525c6c31621901a25d91a07",
+      "native_blob_sha256": "443ca53cfeef73d4e4f5a55f6c7cd8906fc6ded83415fa0b51194b190e15bc93",
+      "native_blob_bytes": 3012,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "DIRSPLITS=2",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC"
+      ],
+      "abi_group": "omni",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 1,
+        "cb2[3]": 3,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 2,
+        "cb12[29]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "8765cebef76b887728d46489e6c3ffa852c2cdcb",
+      "native_blob_sha256": "7ae575a1e63e344bf3ab9f8fb4028c3ce0418021f1aa531fcec8cd217b35056d",
+      "native_blob_bytes": 4724,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "DIRSPLITS=2",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ],
+      "abi_group": "omni",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          3
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 3,
         "cb2[3]": 3,
         "cb12[20]": 1,
         "cb12[21]": 1,
@@ -311,9 +414,10 @@
       ]
     },
     {
-      "reason": "POINTOMNI carries IGNOREROUGHNESS only together with GOBOPROJECTION, which this source rejects",
+      "reason": "no POINTOMNI blob carries both IGNOREROUGHNESS and IGNORERIM; the overlap is not a native macro set",
       "defines": [
         "DIRSPLITS=2",
+        "IGNORERIM",
         "IGNOREROUGHNESS",
         "POINTOMNI",
         "RGBSPEC",

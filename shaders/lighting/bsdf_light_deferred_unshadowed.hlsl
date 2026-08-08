@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// FO4 BSDFLightShader deferred PS, native unshadowed light family: the nine
+// FO4 BSDFLightShader deferred PS, native unshadowed light family: the eleven
 // archive blobs that carry no SHADOW and declare exactly t0..t3 with s0..s3 and
 // no other resource. What this source owns is unshadowed lighting - not a shadow
-// selection, and not a cascade count. The resource clause is load-bearing: 24
-// decoded blobs carry DIRSPLITS=2 with no SHADOW, but the GOBOPROJECTION ones
-// keep a t7 light cookie and the SPOT ones have their own contract, so this file
-// is a resource-contract family, not that whole predicate.
+// selection, and not a cascade count. The resource clause is load-bearing: the
+// broader no-SHADOW predicate also includes GOBOPROJECTION, SPOT and
+// ATTENUATION_ONLY contracts, so this file owns an exact resource family rather
+// than that whole predicate.
 //
 // This is a sibling of `bsdf_light_deferred.hlsl`, not a replacement, in the
 // same arrangement as `bsdf_light_deferred_dirsplits2.hlsl` (the shadowed
@@ -15,7 +15,7 @@
 // its own source rather than growing the pinned one.
 //
 // The ownership boundary is the absence of SHADOW, and that absence is not a
-// selector value. SHADOW is simply inactive for these nine, so the shadow-
+// selector value. SHADOW is simply inactive for these eleven, so the shadow-
 // resource axis does not exist for them and nothing may be grouped or compared
 // along it. The native shader declares no shadow texture and no shadow sampler
 // at all: exactly t0..t3 as texture2d, exactly s0..s3 as mode_default, and a
@@ -25,10 +25,11 @@
 // shadowed shader, and rather than admitting "no shadow" as a third tap mode
 // alongside raw t4/s4 and comparison t5/s5.
 //
-// Reconstructed from these nine archive blobs, each disassembled on its own and
-// read against its own constant table. No register role and no body logic is
-// transferred by analogy from the ten passing no-SHADOW SPOT blobs, which are a
-// structural reference only and stay with the legacy adapter.
+// The bodies were reconstructed from the original nine archive blobs, each
+// disassembled on its own and read against its own constant table. Two further
+// POINTOMNI+IGNOREROUGHNESS blobs measure the same ABI and read behaviour and
+// route through those existing bodies unchanged. No role or logic is transferred
+// from the no-SHADOW SPOT blobs, which stay with the legacy adapter.
 //
 // Cross-family native ASM comparison, so the reuse question is answered by
 // measurement rather than by eye. Two controlled pairs were compared against the
@@ -61,16 +62,18 @@
 //   987c4e79  DIRECTIONAL SPECULAR AMBIENT IGNOREROUGHNESS   [9]  [31]     194
 //   12d92cd3  POINTOMNI                                      [4]  [30]     142
 //   9f44ba67  POINTOMNI SPECULAR                             [4]  [30]     196
+//   ea2537f5  POINTOMNI IGNOREROUGHNESS                       [4]  [30]     107
+//   8765cebe  POINTOMNI SPECULAR IGNOREROUGHNESS              [4]  [30]     167
 //   b4337a89  POINTOMNI IGNORERIM                            [4]  [30]     130
 //   fcabd749  POINTOMNI SPECULAR IGNORERIM                   [4]  [30]     187
 //
-// DIRSPLITS=2 is the decoder baseline for these nine, not an active cascade
+// DIRSPLITS=2 is the decoder baseline for these eleven, not an active cascade
 // axis, and this file must not be read as owning two-cascade behaviour. The
 // CB2 read-sets prove it: DIRECTIONAL reads exactly {0,1,2} or {0,1,2,6,7,8},
 // POINTOMNI reads exactly {0,1,2,3}, and the declared CB2 sizes are 3, 9 and 4.
 // Nothing reads a split-distance, cascade-projection or shadow world-scale or
 // filter register, and those constants are not merely unread - SplitDistances,
-// FadeDistances, ShadowMapProj and the rest are `absent` from all nine constant
+// FadeDistances, ShadowMapProj and the rest are `absent` from all eleven constant
 // tables, so no register is allocated to them at all. The AMBIENT rows at
 // cb2[6..8] are one DirectionalAmbient gradient occupying three registers, not
 // a split/fade pair. The macro is carried because it is a native axis that is
@@ -98,7 +101,7 @@
 //
 // Equality level, stated plainly: this family is admitted on its declared ABI
 // and its constant read behaviour, not on its instruction stream.
-// `scripts/shaders/verify-native-abi-admission.ps1` re-measures, for all nine
+// `scripts/shaders/verify-native-abi-admission.ps1` re-measures, for all eleven
 // native macro sets, that the reconstruction declares the same constant
 // buffers, SRVs, samplers and signature as the blob the macro set came from,
 // that it reads the same set of constant-buffer registers, and that it reads
@@ -135,7 +138,7 @@
 #  error "define exactly one of DIRECTIONAL or POINTOMNI; the archive also carries a no-light-kind AMBIENT blob at DIRSPLITS=2 that this source does not reconstruct"
 #endif
 #if !defined(DIRSPLITS)
-#  error "define DIRSPLITS; it is a native axis and is never assumed, even though these nine only carry it as a decoder baseline"
+#  error "define DIRSPLITS; it is a native axis and is never assumed, even though these eleven only carry it as a decoder baseline"
 #endif
 #if DIRSPLITS != 2
 #  error "this source reconstructs DIRSPLITS=2 only; DIRSPLITS=1 and DIRSPLITS=3 are separate native families"
@@ -160,8 +163,8 @@
 #  ifdef AMBIENT
 #    error "no POINTOMNI blob carries AMBIENT; its CB2[4] has no DirectionalAmbient rows"
 #  endif
-#  ifdef IGNOREROUGHNESS
-#    error "POINTOMNI carries IGNOREROUGHNESS only together with GOBOPROJECTION, which this source rejects"
+#  if defined(IGNOREROUGHNESS) && defined(IGNORERIM)
+#    error "no POINTOMNI blob carries both IGNOREROUGHNESS and IGNORERIM"
 #  endif
 #endif
 
@@ -265,7 +268,7 @@ cbuffer PerCall_CB2 : register(b2)
 #endif
 };
 
-// Resource bindings. All nine blobs declare exactly these, and nothing else:
+// Resource bindings. All eleven blobs declare exactly these, and nothing else:
 // four g-buffer texture2d reads and four mode_default samplers. There is no
 // shadow array, no comparison sampler, and no gobo projector.
 
@@ -644,6 +647,8 @@ PS_OUTPUT main(PS_INPUT input)
 //
 //   IGNOREROUGHNESS, no AMBIENT    039c8935 196 -> 28858d7b 166 instrs
 //   IGNOREROUGHNESS, with AMBIENT  477c3e1e 223 -> 987c4e79 194 instrs
+//   IGNOREROUGHNESS, point base    12d92cd3 142 -> ea2537f5 107 instrs
+//   IGNOREROUGHNESS, point spec    9f44ba67 196 -> 8765cebe 167 instrs
 //   IGNORERIM, no SPECULAR         12d92cd3 142 -> b4337a89 130 instrs
 //   IGNORERIM, with SPECULAR       9f44ba67 196 -> fcabd749 187 instrs
 //
@@ -659,12 +664,13 @@ PS_OUTPUT main(PS_INPUT input)
 // neither manifest exempts read counts, and execution proof remains producer-owned.
 //
 // What IGNOREROUGHNESS does NOT remove is pinned just as deliberately, because
-// "it drops a whole lobe" is the obvious wrong hypothesis. Measured across both
-// pairs, the material-code-1 hair specular path is untouched: cb12[28]
+// "it drops a whole lobe" is the obvious wrong hypothesis. Across both
+// directional pairs, the material-code-1 hair specular path is untouched: cb12[28]
 // HairSpecParams holds at 4 reads, cb12[29] HairSpecShift at 2, cb12[30] at 1,
 // and both Kajiya-Kay shifted-tangent sincos lobes survive in every member of
-// both pairs. The ambient gradient is untouched too - cb2[6..8] hold at 2 reads
-// each across the AMBIENT pair. Only cb2[1] (5 -> 3) and cb2[2] (6 -> 5) move.
+// those pairs. The ambient gradient is untouched too - cb2[6..8] hold at 2 reads
+// each across the AMBIENT pair. The point pairs likewise retain cb12[20..29],
+// while cb2[2] alone drops from 2 to 1 or 4 to 3.
 // The fixed-square substitution is texture-derived, so the read-count gate
 // cannot distinguish it. Native removes one log and two exps across the ambient
 // exponent and rim, plus one sqrt, while only those two constant registers move.
