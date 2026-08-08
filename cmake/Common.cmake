@@ -14,6 +14,23 @@ function(configure_xse_plugin TARGET_NAME MAJOR MINOR PATCH)
 		@ONLY
 	)
 
+	# Re-derive the git identity per build; configure-time capture goes stale on every commit.
+	add_custom_target(${TARGET_NAME}_git_version
+		COMMAND ${CMAKE_COMMAND}
+			-D "SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+			-D "IN_FILE=${CMAKE_SOURCE_DIR}/cmake/Plugin.h.in"
+			-D "OUT_FILE=${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}/Plugin.h"
+			-D "PROJECT_NAME=${PROJECT_NAME}"
+			-D "PROJECT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}"
+			-D "PROJECT_VERSION_MINOR=${PROJECT_VERSION_MINOR}"
+			-D "PROJECT_VERSION_PATCH=${PROJECT_VERSION_PATCH}"
+			-P ${CMAKE_SOURCE_DIR}/cmake/GitVersion.cmake
+		BYPRODUCTS ${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}/Plugin.h
+		COMMENT "Refreshing ${TARGET_NAME} git identity"
+		VERBATIM
+	)
+	add_dependencies(${TARGET_NAME} ${TARGET_NAME}_git_version)
+
 	configure_file(
 		${CMAKE_SOURCE_DIR}/cmake/Version.rc.in
 		${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}/version.rc
