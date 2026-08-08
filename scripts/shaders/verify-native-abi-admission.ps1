@@ -25,10 +25,11 @@
 
     Where entries pin `immediate_constant_vectors`, it also compares how many
     float4 rows the compiled body declares in its immediate constant buffer.
-    That pin is all-or-none across a manifest: a family either measured it for
-    every entry or for none, so it cannot be dropped from the one entry it would
-    have caught. A manifest written before the pin existed simply omits it and
-    behaves exactly as it did.
+    An optional `immediate_constant_vectors_sha256` additionally pins the exact
+    normalized row sequence. Both pins are all-or-none across a manifest, so
+    neither can be dropped from the one entry it would have caught. A manifest
+    written before either pin existed simply omits it and behaves exactly as it
+    did.
 
     It also asserts that the macro sets in the `rejected` list still fail to
     compile, so the admission cannot silently widen, and that the `compile_only`
@@ -216,8 +217,8 @@ function ConvertTo-ExpectedReadCounts($CbReadCounts) {
 # block starts on the `dcl_immediateConstantBuffer` line itself - fxc puts the
 # first row there - and runs until the next declaration, so the scan is bounded
 # by `dcl_` rather than by a row count the listing never states.
-function Get-ImmediateConstantVectorCount([string[]]$Listing) {
-    $count = 0
+function Get-ImmediateConstantVectors([string[]]$Listing) {
+    $vectors = @()
     $inBlock = $false
     foreach ($line in $Listing) {
         $text = $line.Trim()
@@ -226,9 +227,26 @@ function Get-ImmediateConstantVectorCount([string[]]$Listing) {
         } elseif ($text -match '^dcl_') {
             break
         }
-        $count += [regex]::Matches($text, '\{\s*[-+]?(?:\d|\.\d)').Count
+        foreach ($match in [regex]::Matches($text, '\{\s*([^{}]+?)\s*\}')) {
+            $vector = ($match.Groups[1].Value -replace '\s+', ' ').Trim()
+            if ($vector -match '^[-+]?(?:\d|\.\d)') { $vectors += $vector }
+        }
     }
-    return $count
+    return $vectors
+}
+
+function Get-ImmediateConstantVectorCount([string[]]$Listing) {
+    return @(Get-ImmediateConstantVectors $Listing).Count
+}
+
+function Get-ImmediateConstantVectorsSha256([string[]]$Vectors) {
+    $bytes = [Text.Encoding]::UTF8.GetBytes(($Vectors -join "`n"))
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try {
+        return ([BitConverter]::ToString($sha.ComputeHash($bytes)) -replace '-', '').ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
 }
 
 if (-not (Test-Path -LiteralPath $ManifestPath -PathType Leaf)) {
@@ -257,6 +275,23 @@ if ($icbPinned -gt 0 -and $icbPinned -ne $manifest.entries.Count) {
     Exit-WithError ("immediate_constant_vectors is pinned on $icbPinned of " +
         "$($manifest.entries.Count) entries; it is all-or-none") 2
 }
+$icbHashPinned = @($manifest.entries |
+    Where-Object { $null -ne (Get-OptionalMember $_ 'immediate_constant_vectors_sha256') }).Count
+if ($icbHashPinned -gt 0 -and $icbHashPinned -ne $manifest.entries.Count) {
+    Exit-WithError ("immediate_constant_vectors_sha256 is pinned on $icbHashPinned of " +
+        "$($manifest.entries.Count) entries; it is all-or-none") 2
+}
+if ($icbHashPinned -gt 0 -and $icbPinned -ne $manifest.entries.Count) {
+    Exit-WithError 'immediate_constant_vectors_sha256 requires immediate_constant_vectors on every entry' 2
+}
+foreach ($entry in $manifest.entries) {
+    $expectedIcbSha256 = Get-OptionalMember $entry 'immediate_constant_vectors_sha256'
+    if ($null -ne $expectedIcbSha256 -and
+        ($expectedIcbSha256 -isnot [string] -or
+         $expectedIcbSha256 -cnotmatch '^[0-9a-f]{64}$')) {
+        Exit-WithError 'immediate_constant_vectors_sha256 must be lowercase 64-hex' 2
+    }
+}
 
 $fxcCommand = $null
 if (Test-Path -LiteralPath $FxcPath -PathType Leaf) {
@@ -266,6 +301,20 @@ if (Test-Path -LiteralPath $FxcPath -PathType Leaf) {
     if ($command) { $fxcCommand = $command.Source }
 }
 if (-not $fxcCommand) { Exit-WithError "fxc not found: $FxcPath" 2 }
+$expectedCompilerSha256 = Get-OptionalMember $manifest.compiler 'binary_sha256'
+if ($null -ne $expectedCompilerSha256) {
+    if ($expectedCompilerSha256 -isnot [string] -or
+        $expectedCompilerSha256 -cnotmatch '^[0-9a-f]{64}$') {
+        Exit-WithError 'compiler.binary_sha256 must be lowercase 64-hex' 2
+    }
+    $actualCompilerSha256 =
+        (Get-FileHash -LiteralPath $fxcCommand -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualCompilerSha256 -cne $expectedCompilerSha256) {
+        Exit-WithError ("fxc SHA-256 differs`n" +
+            "    expected: $expectedCompilerSha256`n" +
+            "    actual  : $actualCompilerSha256")
+    }
+}
 
 $sourcePath = [IO.Path]::GetFullPath(
     (Join-Path $RepoRoot ($manifest.source.Replace('/', [IO.Path]::DirectorySeparatorChar))))
@@ -307,6 +356,7 @@ $checked = 0
 $countChecked = 0
 $countExempt = 0
 $icbChecked = 0
+$icbHashChecked = 0
 $rejectedChecked = 0
 $compileOnlyChecked = 0
 try {
@@ -350,7 +400,8 @@ try {
             $failures += "$tag`: compile failed`n$($result.Output)"
             continue
         }
-        $actual = Get-DeclaredContract (Get-Content -LiteralPath $result.Listing)
+        $listing = Get-Content -LiteralPath $result.Listing
+        $actual = Get-DeclaredContract $listing
         $expected = ConvertTo-ExpectedContract $group.Value
         foreach ($field in 'cb', 'srv', 'sampler', 'sig') {
             if ($actual.$field -cne $expected.$field) {
@@ -361,7 +412,7 @@ try {
         }
 
         # Same sizes again, from reflection rather than the instruction stream.
-        $reflected = Get-ReflectedCbSizes (Get-Content -LiteralPath $result.Listing)
+        $reflected = Get-ReflectedCbSizes $listing
         foreach ($cbProperty in $group.Value.cb.PSObject.Properties) {
             $wantSize = [int]$cbProperty.Value[0]
             $gotSize = 0
@@ -375,7 +426,7 @@ try {
 
         $pinnedReads = Get-OptionalMember $entry 'cb_reads'
         if ($pinnedReads) {
-            $actualReads = Get-ConstantReadSet (Get-Content -LiteralPath $result.Listing)
+            $actualReads = Get-ConstantReadSet $listing
             $expectedReads = ConvertTo-ExpectedReadSet $pinnedReads
             if ($actualReads -cne $expectedReads) {
                 $failures += ("$tag`: constant read-set differs from the native blob" +
@@ -387,18 +438,32 @@ try {
         $reconstructed = Get-OptionalMember $entry 'body_reconstructed'
         if ($null -eq $reconstructed) { $reconstructed = $true }
         $pinnedIcb = Get-OptionalMember $entry 'immediate_constant_vectors'
+        $pinnedIcbSha256 = Get-OptionalMember $entry 'immediate_constant_vectors_sha256'
+        $actualIcbVectors = @()
+        if ($null -ne $pinnedIcb -or $null -ne $pinnedIcbSha256) {
+            $actualIcbVectors = @(Get-ImmediateConstantVectors $listing)
+        }
         if ($null -ne $pinnedIcb) {
             ++$icbChecked
-            $actualIcb = Get-ImmediateConstantVectorCount (Get-Content -LiteralPath $result.Listing)
+            $actualIcb = $actualIcbVectors.Count
             if ($actualIcb -ne [int]$pinnedIcb) {
                 $failures += ("$tag`: immediate constant-buffer vector count differs from the native blob" +
                     "`n    native: $([int]$pinnedIcb)" +
                     "`n    ours  : $actualIcb")
             }
         }
+        if ($null -ne $pinnedIcbSha256) {
+            ++$icbHashChecked
+            $actualIcbSha256 = Get-ImmediateConstantVectorsSha256 $actualIcbVectors
+            if ($actualIcbSha256 -cne $pinnedIcbSha256) {
+                $failures += ("$tag`: immediate constant-buffer vectors differ from the native blob" +
+                    "`n    native: $pinnedIcbSha256" +
+                    "`n    ours  : $actualIcbSha256")
+            }
+        }
         if ($pinnedCounts -and $reconstructed) {
             ++$countChecked
-            $actualCounts = Get-ConstantReadCounts (Get-Content -LiteralPath $result.Listing)
+            $actualCounts = Get-ConstantReadCounts $listing
             $expectedCounts = ConvertTo-ExpectedReadCounts $pinnedCounts
             if ($actualCounts -cne $expectedCounts) {
                 $failures += ("$tag`: constant read-counts differ from the native blob" +
@@ -465,6 +530,10 @@ if (($countChecked + $countExempt) -ne $checked) {
 if ($icbPinned -gt 0 -and $icbChecked -ne $checked) {
     Exit-WithError ("immediate-constant-vector pin missing: $icbChecked of $checked entries were checked")
 }
+if ($icbHashPinned -gt 0 -and $icbHashChecked -ne $checked) {
+    Exit-WithError ("immediate-constant-vector hash pin missing: " +
+        "$icbHashChecked of $checked entries were checked")
+}
 if ($failures.Count -gt 0) {
     foreach ($failure in $failures) { Write-Host "ERROR: $failure" }
     Exit-WithError "$($failures.Count) $reportLabel admission check(s) failed"
@@ -476,6 +545,9 @@ if ($countExempt -gt 0) {
 }
 if ($icbPinned -gt 0) {
     $countNote += " and $icbChecked / $checked its immediate constant-buffer vector count"
+}
+if ($icbHashPinned -gt 0) {
+    $countNote += " and $icbHashChecked / $checked its exact immediate constant-buffer vector sequence"
 }
 Write-Host ("PASS: $checked / $checked $reportLabel permutations match the native ABI " +
     "and constant read-set, $countNote; " +

@@ -469,6 +469,18 @@ set_tests_properties(DirSplits3DirectionalAdmission PROPERTIES
 	TIMEOUT 900
 )
 
+set(_dirsplits1_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/dirsplits1-native-abi.json")
+add_test(
+	NAME DirSplits1DirectionalAdmission
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_dirsplits1_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_dirsplits1_manifest}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(DirSplits1DirectionalAdmission PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 600
+)
+
 set(_ds1_blendsplit_abi_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/ds1-blendsplit-native-abi.json")
 add_test(
 	NAME DirSplits1BlendSplitAdmission
