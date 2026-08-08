@@ -166,7 +166,8 @@ function Get-ConstantReadSet([string[]]$Listing) {
     foreach ($line in $Listing) {
         $text = $line.Trim()
         if (-not $text -or $text.StartsWith('dcl_') -or $text.StartsWith('//')) { continue }
-        foreach ($match in [regex]::Matches($text, '\bcb(\d+)\[(\d+)\]')) {
+        # Dynamic forms like cb2[r5.w + 21] carry the base index after the operand.
+        foreach ($match in [regex]::Matches($text, '\bcb(\d+)\[(?:[^\]]*?\+\s*)?(\d+)\]')) {
             $key = "cb$($match.Groups[1].Value)"
             if (-not $reads.ContainsKey($key)) {
                 $reads[$key] = [Collections.Generic.HashSet[int]]::new()
@@ -196,7 +197,7 @@ function Get-ConstantReadCounts([string[]]$Listing) {
     foreach ($line in $Listing) {
         $text = $line.Trim()
         if (-not $text -or $text.StartsWith('dcl_') -or $text.StartsWith('//')) { continue }
-        foreach ($match in [regex]::Matches($text, '\bcb(\d+)\[(\d+)\]')) {
+        foreach ($match in [regex]::Matches($text, '\bcb(\d+)\[(?:[^\]]*?\+\s*)?(\d+)\]')) {
             $key = "cb$($match.Groups[1].Value)[$($match.Groups[2].Value)]"
             if ($counts.Contains($key)) { $counts[$key] = [int]$counts[$key] + 1 }
             else { $counts[$key] = 1 }
