@@ -373,6 +373,17 @@ set_tests_properties(ShaderRoundtrip PROPERTIES
 )
 
 set(_filter_axis_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-filter-axis.ps1")
+set(_filter_axis_test_script "${CMAKE_SOURCE_DIR}/scripts/shaders/test-verify-filter-axis.ps1")
+add_test(
+	NAME FilterAxisManifestUnit
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass
+		-File "${_filter_axis_test_script}"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(FilterAxisManifestUnit PROPERTIES
+	LABELS "shader;unit"
+	TIMEOUT 120
+)
 add_test(
 	NAME FilterAxisNativeShex
 	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
