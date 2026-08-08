@@ -1,0 +1,59 @@
+{
+  "schema": "fo4cs.native-shex-equality",
+  "schema_version": 1,
+  "scope": {
+    "family": "DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR + BLENDSPLIT, without AMBIENT",
+    "axis": "FILTER",
+    "runtime": "AE 1.11.221 archive blob set",
+    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob; the reconstruction passes only when its own SHEX chunk hashes to the same value, so the pinned values come from the game bytecode and never from this repo's output. For these three the whole DXBC container is byte-identical to the blob, not only the SHEX chunk. The family's three AMBIENT blobs - 2b04bed67a5641536ecedceebedf8916d3130a97, e3b027b8c5549dc429abf8356c0a1e300616027d and c56b2b7862b68c7a7753e9c543a48378cb0c607a - are deliberately absent rather than excluded to make this pass: they compile to the same instruction multiset, operands, register allocation, literals and SHEX byte length as their blobs and differ only in the scheduled position of one dependency-free `mov o1.w, l(1.0)`, which fxc 10.0.26100 emits three slots later at every optimisation level and codegen flag. Absence here is a SHEX-equality claim of none, and all six rows including those three are gated on declarations, constant read-sets, read-counts and immediate-constant rows by ds1-blendsplit-native-abi.json."
+  },
+  "compiler": {
+    "name": "fxc",
+    "entry_point": "main",
+    "flags": [
+      "/nologo",
+      "/O3"
+    ],
+    "include_root": "source-directory"
+  },
+  "common_defines": [
+    "BLENDSPLIT=1",
+    "DIRECTIONAL=1",
+    "DIRSPLITS=1",
+    "RGBSPEC=1",
+    "SHADOW=1",
+    "SHADOW_ONLY=1",
+    "SPECULAR=1"
+  ],
+  "source": "shaders/lighting/bsdf_light_deferred_shadow_only_blendsplit.hlsl",
+  "profile": "ps_5_0",
+  "entries": [
+    {
+      "target": "blendsplit_pcf1",
+      "defines": [ "FILTER_PCF1=1" ],
+      "native_blob_sha1": "4e89dd81f40121cadb5f4b322a7323331576f05c",
+      "native_blob_sha256": "464d85745e1f1ac84618d9e5e19946d5c5d84128aa1197c832fd586854d5882d",
+      "native_blob_bytes": 1596,
+      "native_shex_bytes": 1380,
+      "native_shex_sha256": "c50ae8df8599f972fc63dc4f596265450cd6b488ea7f97c7bea8b6100004f836"
+    },
+    {
+      "target": "blendsplit_pcf9",
+      "defines": [ "FILTER_PCF9=1" ],
+      "native_blob_sha1": "1eb732dd3f746afb73b3c3f785eb6ec5af93f1a7",
+      "native_blob_sha256": "221b8c4a7d91c54e9c80e843d23f55103b0ddb46d565226099225f0e0e69c883",
+      "native_blob_bytes": 2012,
+      "native_shex_bytes": 1796,
+      "native_shex_sha256": "7779fface56e29cb2964556ca6aee09f39b90a8b970bce1067a6a4a549487da7"
+    },
+    {
+      "target": "blendsplit_poisson",
+      "defines": [ "FILTER_POISSON=1" ],
+      "native_blob_sha1": "e928ab5f44eede452d26262c9cd09ad0ca3839b7",
+      "native_blob_sha256": "cdc716ad33d40ea93a266514986efa0fe845f74557b2627c0842a04b5ebf3a71",
+      "native_blob_bytes": 18348,
+      "native_shex_bytes": 18132,
+      "native_shex_sha256": "6fc97aa7396ba9916269c43f1e647beb3d1327bb6bd9cdbf46e62c4f787fb603"
+    }
+  ]
+}

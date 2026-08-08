@@ -17,6 +17,7 @@ shaders and injects registered permutations at runtime.
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
+| `bsdf_light_deferred_shadow_only_blendsplit.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY`+`BLENDSPLIT` family at `DIRSPLITS=1`; a three-wide `FILTER_*` axis (PCF1 / PCF9 / POISSON) crossed with `AMBIENT` | reads main depth `t3` and the cascade shadow Texture2DArray at `t5` (comparison only), plus `t1=RT27` and `t2=RT30` under `AMBIENT`; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical 3/3 without `AMBIENT`; native-abi-equal 6/6 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and full-BRDF `POINTOMNI` (6 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 11/11 (read-counts exact; new point rows execution-unproven)** |
@@ -215,7 +216,53 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   complete six-variant filter families in the archive
   (`BLENDSPLIT + DIRSPLITS=3` with and without `AMBIENT`) carry the full BRDF
   and are not reconstructed here; they belong to
-  `bsdf_light_deferred_dirsplits3.hlsl`.
+  `bsdf_light_deferred_dirsplits3.hlsl`. The `DIRSPLITS=1` blobs that do carry
+  `BLENDSPLIT` are a separate three-wide filter family and live in
+  `bsdf_light_deferred_shadow_only_blendsplit.hlsl`.
+* **`bsdf_light_deferred_shadow_only_blendsplit.hlsl`** - **native SHEX
+  identical, 3/3 without `AMBIENT`; native ABI equal, 6/6**. The native
+  `DIRECTIONAL` + `SHADOW_ONLY` + `BLENDSPLIT` family at `DIRSPLITS=1`: six
+  blobs, 18 archive route occurrences, sharing
+  `DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR +
+  BLENDSPLIT` over a three-wide filter axis crossed with `AMBIENT`. A sibling of
+  `bsdf_light_deferred_shadow_only.hlsl` rather than a macro inside it, because
+  that file's bytes are pinned by `FilterAxisNativeShex` and because
+  `BLENDSPLIT` changes the body rather than the epilogue.
+
+  `BLENDSPLIT` removes the material-1 slope bias entirely: `FILTER_PCF1` and
+  `FILTER_PCF9` compare the projected z unbiased, and `FILTER_POISSON` uses the
+  fixed 0.275 scaled by the reciprocal cascade world depth range with no
+  per-material branch. Without `AMBIENT` the split shadow goes to both MRTs and
+  the shader declares only `t3/s3` and the comparison tap `t5/s5`. With
+  `AMBIENT` it adds `t1/s1` and `t2/s2`, evaluates the `cb2[6..8]`
+  DirectionalAmbient rows twice - once against the decoded normal, once against
+  the reflection vector - and suppresses the reflected term outright on material
+  code 1. There is no unfiltered, `FILTER_PCSS` or `FILTER_PCSSPOISSON` blob in
+  this family and no raw `t4/s4` tap in any of its declaration sets, so all
+  three are rejected rather than reconstructed.
+
+  | Filter | `AMBIENT` | Archive blob sha1 | Blob bytes | SHEX bytes |
+  |---|---|---|---|---|
+  | `FILTER_PCF1`    | no  | `4e89dd81f40121ca` | 1596  | 1380  |
+  | `FILTER_PCF9`    | no  | `1eb732dd3f746afb` | 2012  | 1796  |
+  | `FILTER_POISSON` | no  | `e928ab5f44eede45` | 18348 | 18132 |
+  | `FILTER_PCF1`    | yes | `2b04bed67a564153` | 3076  | 2860  |
+  | `FILTER_PCF9`    | yes | `e3b027b8c5549dc4` | 3500  | 3284  |
+  | `FILTER_POISSON` | yes | `c56b2b7862b68c7a` | 19828 | 19612 |
+
+  The three rows without `AMBIENT` compile to a DXBC container that is
+  byte-identical to the archive blob, pinned by
+  `scripts/shaders/ds1-blendsplit-native-shex.json` (CTest
+  `DirSplits1BlendSplitNativeShex`). The three `AMBIENT` rows are absent from
+  that manifest, which is a SHEX-equality claim of none for them: they compile to
+  the same instruction multiset, operands, register allocation, literals and SHEX
+  byte length as their blobs and differ only in where one dependency-free
+  `mov o1.w, l(1.0)` is scheduled, which fxc 10.0.26100 emits three slots later
+  at every optimisation level and codegen flag tried. All six are gated on
+  declarations, constant read-sets, read-counts and immediate-constant rows by
+  `scripts/shaders/ds1-blendsplit-native-abi.json` (CTest
+  `DirSplits1BlendSplitAdmission`), whose 17 rejected macro sets keep the
+  admission from widening.
 * **`bsdf_light_deferred_dirsplits2.hlsl`** - **native ABI equal, 29/29**.
   The native full-BRDF `DIRECTIONAL` + `SHADOW` family at `DIRSPLITS=2`: the
   layer above `SHADOW_ONLY`, where the solved filter bodies meet the complete

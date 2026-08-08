@@ -1,0 +1,690 @@
+{
+  "schema": "fo4cs.native-abi-admission",
+  "schema_version": 1,
+  "scope": {
+    "family": "DIRECTIONAL + SHADOW + SHADOW_ONLY + BLENDSPLIT + SPECULAR + RGBSPEC, DIRSPLITS=1",
+    "runtime": "AE 1.11.221 archive blob set",
+    "report_label": "DIRSPLITS=1 SHADOW_ONLY + BLENDSPLIT",
+    "compile_only_label": "over-reach checks",
+    "count_exemption_axis": null,
+    "note": "Consumer-local admission gate over the whole six-blob family, which is 18 archive route occurrences. Each entry pins four things measured from a native archive blob - its declaration set, the set of constant-buffer registers its body reads, how many times it reads each, and its immediate constant-buffer row count - and passes only when the reconstruction compiled from that blob's own macro set agrees. The pinned values come from the game bytecode, never from this repo's output. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. This is an ABI and constant-read claim only, not an execution-equivalence claim; execution proof stays with the producer oracle in the sibling fallout4-re, which has published nothing for these six blobs. dcl_temps is excluded because it is register allocation, not ABI.",
+    "evidence": "Declarations, read-sets, read-counts and ICB row counts were measured by disassembling each of the six blobs, each read against its own constant table. The family splits into two resource contracts, not one: without AMBIENT it declares only the depth texture at t3/s3 and the cascade atlas at t5/s5 as a comparison sampler, and with AMBIENT it adds the g-buffer normal at t1/s1 and the auxiliary material target at t2/s2. CB2 is 25 registers and CB12 28 in all six. CB2 indexing is the filter axis rather than the AMBIENT axis: FILTER_POISSON indexes the cascade world-scale table by the runtime slice and promotes CB2 to dynamicIndexed, which is also why cb2[9] is read three times there and once elsewhere. BLENDSPLIT removes the material-1 slope bias that the plain SHADOW_ONLY family carries: FILTER_PCF1 and FILTER_PCF9 compare the projected z unbiased, and FILTER_POISSON uses the fixed 0.275 scaled by the reciprocal cascade world depth range with no per-material branch, so no blob here reads a normal or material channel for biasing. Under AMBIENT the three DirectionalAmbient rows cb2[6..8] are each read exactly twice, once against the decoded normal and once against the reflection vector, and material code 1 suppresses the reflected term outright. No BLENDSPLIT blob in the archive carries FILTER_PCSS, FILTER_PCSSPOISSON or no filter at all, and none declares the raw t4/s4 tap those would need, so all three are rejected rather than reconstructed. The three no-AMBIENT rows additionally compile to a DXBC container that is byte-identical to the archive blob; that is pinned separately by ds1-blendsplit-native-shex.json. The three AMBIENT rows compile to the same instruction multiset, operands, register allocation, literals and SHEX byte length as their blobs, differing only in the scheduled position of one dependency-free `mov o1.w, l(1.0)`, which the shipped blob emits three slots earlier; that placement is invariant across /O1, /O2, /O3 and every fxc codegen flag tried, so it is not reachable from HLSL with this compiler."
+  },
+  "compiler": {
+    "name": "fxc",
+    "entry_point": "main",
+    "flags": [
+      "/nologo",
+      "/O3"
+    ],
+    "include_root": "source-directory"
+  },
+  "source": "shaders/lighting/bsdf_light_deferred_shadow_only_blendsplit.hlsl",
+  "profile": "ps_5_0",
+  "common_defines": [
+    "BLENDSPLIT",
+    "DIRECTIONAL",
+    "DIRSPLITS=1",
+    "RGBSPEC",
+    "SHADOW",
+    "SHADOW_ONLY",
+    "SPECULAR"
+  ],
+  "abi_groups": {
+    "blendsplit_immediate": {
+      "cb": {
+        "b2": [
+          25,
+          "immediateIndexed"
+        ],
+        "b12": [
+          28,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t3": "texture2d",
+        "t5": "texture2darray"
+      },
+      "sampler": {
+        "s3": "mode_default",
+        "s5": "mode_comparison"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
+    },
+    "blendsplit_dynamic": {
+      "cb": {
+        "b2": [
+          25,
+          "dynamicIndexed"
+        ],
+        "b12": [
+          28,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t3": "texture2d",
+        "t5": "texture2darray"
+      },
+      "sampler": {
+        "s3": "mode_default",
+        "s5": "mode_comparison"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
+    },
+    "blendsplit_ambient_immediate": {
+      "cb": {
+        "b2": [
+          25,
+          "immediateIndexed"
+        ],
+        "b12": [
+          28,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d",
+        "t5": "texture2darray"
+      },
+      "sampler": {
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default",
+        "s5": "mode_comparison"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
+    },
+    "blendsplit_ambient_dynamic": {
+      "cb": {
+        "b2": [
+          25,
+          "dynamicIndexed"
+        ],
+        "b12": [
+          28,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d",
+        "t5": "texture2darray"
+      },
+      "sampler": {
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default",
+        "s5": "mode_comparison"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
+    }
+  },
+  "entries": [
+    {
+      "native_blob_sha1": "1eb732dd3f746afb73b3c3f785eb6ec5af93f1a7",
+      "native_blob_sha256": "221b8c4a7d91c54e9c80e843d23f55103b0ddb46d565226099225f0e0e69c883",
+      "native_blob_bytes": 2012,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "FILTER_PCF9"
+      ],
+      "abi_group": "blendsplit_immediate",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 0,
+      "cb_reads": {
+        "cb2": [
+          0,
+          9,
+          11,
+          12,
+          13,
+          20,
+          24
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[9]": 1,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[20]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "2b04bed67a5641536ecedceebedf8916d3130a97",
+      "native_blob_sha256": "efc800544287e2f0278ce750515bdc196d45c34f8076eee9c75435bb35db8bc7",
+      "native_blob_bytes": 3076,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "AMBIENT",
+        "FILTER_PCF1"
+      ],
+      "abi_group": "blendsplit_ambient_immediate",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 0,
+      "cb_reads": {
+        "cb2": [
+          0,
+          6,
+          7,
+          8,
+          9,
+          11,
+          12,
+          13,
+          24
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "4e89dd81f40121cadb5f4b322a7323331576f05c",
+      "native_blob_sha256": "464d85745e1f1ac84618d9e5e19946d5c5d84128aa1197c832fd586854d5882d",
+      "native_blob_bytes": 1596,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "FILTER_PCF1"
+      ],
+      "abi_group": "blendsplit_immediate",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 0,
+      "cb_reads": {
+        "cb2": [
+          0,
+          9,
+          11,
+          12,
+          13,
+          24
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[9]": 1,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "c56b2b7862b68c7a7753e9c543a48378cb0c607a",
+      "native_blob_sha256": "04de8bc586badbc657f3e360dd34306f60c9efc327e73768e485f109a5b24ab2",
+      "native_blob_bytes": 19828,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "AMBIENT",
+        "FILTER_POISSON"
+      ],
+      "abi_group": "blendsplit_ambient_dynamic",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 1000,
+      "cb_reads": {
+        "cb2": [
+          0,
+          6,
+          7,
+          8,
+          9,
+          11,
+          12,
+          13,
+          20,
+          24
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[20]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "e3b027b8c5549dc429abf8356c0a1e300616027d",
+      "native_blob_sha256": "b9a735c215248c3fe45c41db21e245f4b7db5b562b40e451ca4ea31836437b54",
+      "native_blob_bytes": 3500,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "AMBIENT",
+        "FILTER_PCF9"
+      ],
+      "abi_group": "blendsplit_ambient_immediate",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 0,
+      "cb_reads": {
+        "cb2": [
+          0,
+          6,
+          7,
+          8,
+          9,
+          11,
+          12,
+          13,
+          20,
+          24
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 1,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[20]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "e928ab5f44eede452d26262c9cd09ad0ca3839b7",
+      "native_blob_sha256": "cdc716ad33d40ea93a266514986efa0fe845f74557b2627c0842a04b5ebf3a71",
+      "native_blob_bytes": 18348,
+      "producer_status": "execution_unproven",
+      "defines": [
+        "FILTER_POISSON"
+      ],
+      "abi_group": "blendsplit_dynamic",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 1000,
+      "cb_reads": {
+        "cb2": [
+          0,
+          9,
+          11,
+          12,
+          13,
+          20,
+          24
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[9]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[20]": 1,
+        "cb2[24]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "defines": [
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "no BLENDSPLIT: that is the plain SHADOW_ONLY family in bsdf_light_deferred_shadow_only.hlsl, which carries the material-1 slope bias this source does not"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SPECULAR"
+      ],
+      "reason": "BLENDSPLIT without SHADOW_ONLY is a full-lighting permutation with a different output contract"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "the native BLENDSPLIT filter axis is exactly three wide; no blob carries an unfiltered tap, and the raw t4/s4 resource it would need is absent from all six declaration sets"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCSS",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "FILTER_PCSS needs a raw blocker-search tap at t4/s4 that no BLENDSPLIT blob declares"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCSSPOISSON",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "same missing blocker-search tap as FILTER_PCSS"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "FILTER_PCF9",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "FILTER_* macros are mutually exclusive; a blob carries exactly one"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=2",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "DIRSPLITS=2 is a separate native family and is not reconstructed here"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=3",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "DIRSPLITS=3 is a separate native family and is not reconstructed here"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "DIRSPLITS is a native axis and is never assumed when absent"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "every native SHADOW_ONLY + BLENDSPLIT blob carries SHADOW; a shadow-only shader without SHADOW is not a native set"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY"
+      ],
+      "reason": "all six blobs carry SPECULAR; without it the second MRT write is a different contract"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "all six blobs carry RGBSPEC"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "mixed light kinds; DIRECTIONAL and POINTOMNI are exclusive"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "HALFOMNI",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "HALFOMNI occurs only with POINTOMNI and SHADOW and is not part of this family"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR",
+        "SPOT"
+      ],
+      "reason": "SPOT is a different light kind with a different projection and resource contract"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "GOBOPROJECTION",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "GOBOPROJECTION blobs declare t7/s7 and are a different resource contract"
+    },
+    {
+      "defines": [
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "LIGHT_TYPE=1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "LIGHT_TYPE is the legacy adapter axis in bsdf_light_deferred.hlsl and is never a native macro"
+    }
+  ],
+  "compile_only": []
+}
