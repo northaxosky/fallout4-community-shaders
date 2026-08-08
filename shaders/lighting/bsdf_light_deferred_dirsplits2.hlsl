@@ -25,13 +25,13 @@
 //   FILTER_PCSS    sha1 23234de9cff52ae49d0a14ca131e33e8b2338f0c, 20200 B
 //   FILTER_POISSON sha1 f4ece8123e2a49a2777079fd1284732cfbfa9a14, 24164 B
 //
-// Equality level, stated plainly: this family is admitted on its declared ABI,
-// not on its instruction stream. `scripts/shaders/verify-native-abi-admission.ps1`
-// re-measures, for all 29 native macro sets, that the reconstruction declares
-// the same constant buffers, SRVs, samplers and signature as the blob the macro
-// set came from, that it reads the same set of constant-buffer registers, and -
-// on the 18 whose bodies are reconstructed - that it reads each of them the same
-// number of times. That is a contract claim only. Unlike the DIRSPLITS=1
+// Equality level, stated plainly: this family is admitted on its declared ABI
+// and constant read behaviour, not on its instruction stream.
+// `scripts/shaders/verify-native-abi-admission.ps1` re-measures, for all 29
+// native macro sets, that the reconstruction declares the same constant
+// buffers, SRVs, samplers and signature as the blob the macro set came from,
+// and that it reads the same constant-buffer registers the same number of
+// times. That is a contract claim only. Unlike the DIRSPLITS=1
 // SHADOW_ONLY family, whose small body is solved to byte-identical SHEX, the
 // full BRDF core here is structurally reconstructed and its instruction stream
 // is expected to diverge - native unrolls the PCSS blocker search where this
@@ -478,7 +478,9 @@ PS_OUTPUT main(PS_INPUT input)
     float3 ambientSpecular = 0.0;
 #endif
 
+#ifndef IGNOREROUGHNESS
     float roughness01   = 1.0 - matSample.x;
+#endif
     float posViewLenSq  = dot(-posView, -posView);
     float posViewLen    = rsqrt(posViewLenSq);
     float3 viewDirNeg   = -posView * posViewLen;
@@ -613,11 +615,20 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef AMBIENT
         float3 reflectionDir = 2.0 * NdotV_raw * normalView - viewDirNeg;
         float  oneMinusNdotV = 1.0 - saturate(NdotV_raw);
+#ifdef IGNOREROUGHNESS
+        float  ambientSpecularFactor =
+            oneMinusNdotV * oneMinusNdotV * 0.25;
+#else
         float  ambientSpecularFactor =
             exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
+#endif
         ambientSpecular = matSample.y * ambientSpecularFactor *
             EvaluateAmbientGradient(reflectionDir);
 #endif
+#ifdef IGNOREROUGHNESS
+        // Native drops the roughness geometry but keeps material sampling.
+        brdfShadowMix = NdotL_pos;
+#else
         float3 tangentV  = viewDirNeg - normalView * NdotV_raw;
         float3 tangentL  = SunDirection.xyz - normalView * NdotL_raw;
         float  tangentVL = max(dot(tangentV, tangentL), 0.0);
@@ -634,6 +645,7 @@ PS_OUTPUT main(PS_INPUT input)
         float visibilityGeom = tangentVL * visB;
         visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
         brdfShadowMix  = NdotL_pos * visibilityGeom;
+#endif
 
         float3 halfVec = SunDirection.xyz - posView * posViewLen;
         halfVec *= rsqrt(dot(halfVec, halfVec));
@@ -676,6 +688,8 @@ PS_OUTPUT main(PS_INPUT input)
     }
 
     // Final composition.
+    float3 finalDiffuse = SunColor_HDR.xyz * brdfShadowMix;
+#ifndef IGNOREROUGHNESS
     float NdotV_view  = saturate(dot(normalView, viewDirNeg));
     float ambientFres = 1.0 - NdotV_view;
     ambientFres = exp2(log2(ambientFres) * 0.01);
@@ -683,8 +697,8 @@ PS_OUTPUT main(PS_INPUT input)
     float fresEdge    = saturate(dot(viewDirNeg, -SunDirection.xyz));
     float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 
-    float3 finalDiffuse = SunColor_HDR.xyz * ambientTerm;
-    finalDiffuse += SunColor_HDR.xyz * brdfShadowMix;
+    finalDiffuse += SunColor_HDR.xyz * ambientTerm;
+#endif
 
     float backfaceWrap = saturate(-NdotL_raw);
     finalDiffuse += SunColor_HDR.xyz * (albedoPremult * backfaceWrap);
@@ -710,26 +724,9 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// IGNOREROUGHNESS is deliberately admitted and deliberately unreconstructed.
-// Eleven of the 29 native macro sets carry it, and it does not move the
-// declared contract - the blob's constant buffers, resources, samplers and
-// signature are identical to its twin without the macro. It does move the
-// instruction stream: the archive pair
-//   DIRECTIONAL SHADOW SPECULAR AMBIENT RGBSPEC DIRSPLITS=2         7552 B
-//   + IGNOREROUGHNESS                                               6652 B
-// differ in the ambient-specular exponent path, not merely in register
-// allocation. Reconstructing that is a separate solve.
-//
-// That gap is measured, not just asserted. The admission gate pins native
-// per-register constant read-counts, and the 11 macro sets whose counts diverge
-// from this reconstruction are exactly the 11 that carry IGNOREROUGHNESS, with
-// nothing on either side of the difference - always the same two registers,
-// cb2[1] and cb2[2], which the missing exponent path would have read again. The
-// manifest therefore names IGNOREROUGHNESS as its one count-exemption axis and
-// the verifier re-derives the exemption from each entry's own macro set, so it
-// cannot be widened to cover an unrelated divergence.
-//
-// The macro is therefore left defined and unhandled rather than #undef'd or
-// treated as a no-op, exactly as HALFOMNI is in the POINTOMNI+SHADOW family:
-// admission here is an ABI claim, and execution under this macro is expected to
-// diverge. Do not "fix" this by mapping it onto another axis.
+// IGNOREROUGHNESS is reconstructed for all 11 native macro sets. Material
+// sampling remains live for the specular exponent and material-code-1 hair
+// path, while the default branch uses Lambert visibility and omits the
+// roughness-scaled rim term. AMBIENT variants replace the roughness-dependent
+// exponent with the native fixed square. The admission gate therefore holds
+// every entry to its native per-register constant read-counts.

@@ -6,9 +6,8 @@
     "runtime": "AE 1.11.221 archive blob set",
     "report_label": "DIRSPLITS=2 DIRECTIONAL",
     "compile_only_label": "independent-axis macro sets",
-    "count_exemption_axis": "IGNOREROUGHNESS",
-    "note": "Consumer-local admission gate. Each entry pins three things measured from a native archive blob - its declaration set, the set of constant-buffer registers its body reads, and how many times it reads each - and the check passes only when the reconstruction compiled from that blob's own macro set agrees. The pinned values come from the game bytecode, never from this repo's output. This is an ABI claim only: the full BRDF core is structurally reconstructed rather than solved to byte-identical SHEX, and execution proof stays with the producer oracle. dcl_temps is excluded because it is register allocation, not ABI; it is 10 for every filter here except FILTER_POISSON, which is 11.",
-    "evidence": "Declarations, read-sets and read-counts were measured by disassembling each blob with fxc /dumpbin. The 29 blobs collapse to exactly three declaration groups, and the group is a function of the FILTER axis alone: AMBIENT, BLENDSPLIT and IGNOREROUGHNESS move the instruction stream but not the contract. The read-set is finer and does separate them - BLENDSPLIT drops the cb2[9] SplitDistances read, because it replaces the split gate with the smoothstep cascade blend and lets DirectionalAmbient extend over cb2[6..9]. The read-count is finer still: it is exact on all 18 entries whose bodies are reconstructed, and diverges on exactly the 11 IGNOREROUGHNESS entries, whose ambient-specular exponent path is deliberately unreconstructed. That the divergent set and the IGNOREROUGHNESS set are identical, with nothing on either side, is why the exemption is expressed as one named axis the verifier re-derives rather than as a hand-maintained list."
+    "note": "Consumer-local admission gate. Each entry pins three things measured from a native archive blob - its declaration set, the set of constant-buffer registers its body reads, and how many times it reads each - and the check passes only when the reconstruction compiled from that blob's own macro set agrees. The pinned values come from the game bytecode, never from this repo's output. All 29 bodies are reconstructed and held to exact read-counts, so the manifest declares no count_exemption_axis. This is an ABI claim only: the full BRDF core is structurally reconstructed rather than solved to byte-identical SHEX, and execution proof stays with the producer oracle. dcl_temps is excluded because it is register allocation, not ABI; it is 10 for every filter here except FILTER_POISSON, which is 11.",
+    "evidence": "Declarations, read-sets and read-counts were measured by disassembling each blob with fxc /dumpbin. The 29 blobs collapse to exactly three declaration groups, and the group is a function of the FILTER axis alone: AMBIENT, BLENDSPLIT and IGNOREROUGHNESS move the instruction stream but not the contract. The read-set is finer and does separate them - BLENDSPLIT drops the cb2[9] SplitDistances read, because it replaces the split gate with the smoothstep cascade blend and lets DirectionalAmbient extend over cb2[6..9]. The read-count is exact on all 29 entries. Each of the 11 IGNOREROUGHNESS blobs drops cb2[1] from 5 reads to 3 and cb2[2] from 6 reads to 5 against its twin, matching the reconstructed Lambert visibility and deleted rim term; AMBIENT variants also use the native fixed-square exponent while retaining the DirectionalAmbient gradient and material.y paths."
   },
   "compiler": {
     "name": "fxc",
@@ -282,8 +281,7 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_s4",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -510,8 +508,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -665,8 +662,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -1040,8 +1036,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -1193,8 +1188,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -1267,8 +1261,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -1345,8 +1338,7 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -1504,8 +1496,7 @@
         "SPECULAR"
       ],
       "abi_group": "raw_t4_cmp_t5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -1978,8 +1969,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -2061,8 +2051,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,
@@ -2138,8 +2127,7 @@
         "SPECULAR"
       ],
       "abi_group": "cmp_t5_s5",
-      "body_reconstructed": false,
-      "count_exempt_reason": "IGNOREROUGHNESS is admitted on ABI only; its ambient-specular exponent path is unreconstructed, which adds two cb2[1] and one cb2[2] reference relative to native",
+      "body_reconstructed": true,
       "cb_reads": {
         "cb12": [
           20,

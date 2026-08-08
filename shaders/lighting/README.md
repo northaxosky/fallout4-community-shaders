@@ -17,7 +17,7 @@ shaders and injects registered permutations at runtime.
 | `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
-| `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29** |
+| `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact, no axis exempt)** |
 
@@ -234,10 +234,11 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   `FILTER_PCSSPOISSON` fails closed here: the archive has no `DIRSPLITS=2` blob
   carrying it, only one at `DIRSPLITS=1` and two at `DIRSPLITS=3`. Fabricating
-  it would be a fidelity claim with no evidence behind it. `IGNOREROUGHNESS`
-  follows the `HALFOMNI` precedent - 11 of the 29 carry it and it does not move
-  the contract, but it does change the ambient-specular exponent path, so it is
-  admitted and left unreconstructed rather than erased or rejected.
+  it would be a fidelity claim with no evidence behind it. Eleven of the 29
+  carry `IGNOREROUGHNESS`. Material sampling remains live for the specular
+  exponent and material-code-1 hair path, while the default branch uses Lambert
+  visibility and omits the roughness-scaled rim term. `AMBIENT` variants replace
+  the roughness-dependent exponent with the native fixed square.
 
   `scripts/shaders/verify-native-abi-admission.ps1` (CTest
   `DirSplits2DirectionalAdmission`) re-measures all 29 against
@@ -252,16 +253,11 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   Those three pins are progressively finer. The read-set separates macro sets
   the declarations cannot: a `BLENDSPLIT` blob reads `cb2[6..8]` and never
   `cb2[9]`, while its plain counterpart reads `cb2[9]` as `SplitDistances`. The
-  read-count is finer still, and is where the `IGNOREROUGHNESS` gap becomes
-  measurable rather than merely stated: counts are exact on all 18 entries whose
-  bodies are reconstructed, and differ on exactly the 11 `IGNOREROUGHNESS`
-  entries - always the same two registers, `cb2[1]` and `cb2[2]`, which the
-  unreconstructed ambient-specular exponent path would have read again. The
-  divergent set and the `IGNOREROUGHNESS` set are identical with nothing on
-  either side, which is why the exemption is declared as one named axis in
-  `scope.count_exemption_axis` and re-derived by the verifier: an entry may skip
-  the count check only by carrying that macro and giving a reason, so the
-  exemption cannot be quietly widened to hide a real divergence.
+  read-count is finer still and exact on all 29 entries. Each of the 11
+  `IGNOREROUGHNESS` blobs drops `cb2[1]` from 5 reads to 3 and `cb2[2]` from 6
+  reads to 5 against its twin, matching the Lambert visibility and deleted rim
+  term. The manifest declares no `scope.count_exemption_axis`, so every entry is
+  held to its native per-register counts.
 
 
   The gate also asserts that 16 malformed or out-of-scope macro sets still
@@ -273,8 +269,8 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   the guards cannot over-reach.
 
   This is an ABI claim, not SHEX equality. The declarations, constant read-sets
-  and - on the 18 reconstructed bodies - constant read-counts are measured; the
-  BRDF core is a structural reconstruction, and execution proof stays with the
+  and constant read-counts on all 29 bodies are measured; the BRDF core is a
+  structural reconstruction, and execution proof stays with the
   producer oracle. The verifier is family-agnostic and driven entirely from its
   manifest, which is how the `DIRSPLITS=3` layer landed: an evidence file and a
   test registration, not a third copy of the script.
@@ -550,19 +546,15 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   because the comparisons are written so `fxc` packs them into the two vector
   compares native emits.
 
-  `IGNOREROUGHNESS` is reconstructed here, and that is the difference from the
-  `DIRSPLITS=2` layer, which names it as its one `count_exemption_axis`. The
-  unblocking evidence is not in this family at all: it is the later
-  `bsdf_light_deferred_unshadowed.hlsl` layer, whose controlled `AMBIENT`-free
-  pair localises the macro to two deletions and nothing else - the
-  roughness-driven visibility geometry in the default branch, and the rim term.
-  Each of the six `IGNOREROUGHNESS` blobs here differs from its twin by exactly
-  `cb2[1]` -2 and `cb2[2]` -1, which is what those two deletions cost, so the
-  same body reproduces them. `scope.count_exemption_axis` is `null` and all 27
-  entries are held to exact per-register read-counts. The `DIRSPLITS=2` source
-  and its manifest are deliberately untouched: that family is pinned as it
-  stands, its exemption is a statement about what was measured there, and
-  re-opening it is a separate change with its own evidence.
+  `IGNOREROUGHNESS` is reconstructed in both shadowed directional layers. The
+  controlled `AMBIENT`-free pair in `bsdf_light_deferred_unshadowed.hlsl`
+  localises the roughness-driven visibility geometry and rim deletions.
+  Shadowed `AMBIENT` disassembly adds one more delta: the roughness-dependent
+  exponent becomes an exact fixed square while the gradient and material.y
+  paths remain. Each of the six `DIRSPLITS=3` blobs differs from its twin by
+  exactly `cb2[1]` -2 and `cb2[2]` -1. Both shadowed manifests omit
+  `scope.count_exemption_axis` and hold every entry to exact per-register
+  read-counts.
 
   The gate carries a fourth pin this layer needed and the earlier ones did not.
   Eight of the 27 - the `POISSON` and `PCSSPOISSON` rows - declare a 1000-row

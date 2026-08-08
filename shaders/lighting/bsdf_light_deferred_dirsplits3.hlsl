@@ -43,14 +43,14 @@
 // stream is expected to diverge. Execution proof stays with the producer oracle
 // in the sibling `fallout4-re`; this repo cannot bless its own output.
 //
-// IGNOREROUGHNESS is reconstructed here, unlike in the DIRSPLITS=2 family which
-// names it as a count-exemption axis. What unblocked it is the later
-// `bsdf_light_deferred_unshadowed.hlsl` layer, whose controlled AMBIENT-free
-// pair localises the macro to two deletions and nothing else: the
-// roughness-driven visibility geometry in the default branch, and the rim term.
-// The six IGNOREROUGHNESS blobs here move exactly cb2[1] 5 -> 3 and cb2[2] 6 ->
-// 5 against their twins, which is what those two deletions cost, so the same
-// body reproduces them without an exemption.
+// IGNOREROUGHNESS is reconstructed here. The controlled AMBIENT-free pair in
+// `bsdf_light_deferred_unshadowed.hlsl` localises the roughness-driven
+// visibility geometry and rim deletions. Shadowed AMBIENT disassembly adds one
+// more delta: its roughness-dependent exponent becomes an exact fixed square.
+// Across the six IGNOREROUGHNESS blobs, cb2[1] moves 5 -> 3 and cb2[2] moves
+// 6 -> 5 against their twins, matching the removed geometry and rim reads;
+// AMBIENT variants retain the gradient and material.y paths without reading
+// matSample.x for that exponent.
 
 #if !defined(DIRECTIONAL)
 #  error "this source is the native DIRECTIONAL family; define DIRECTIONAL"
@@ -709,8 +709,13 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef AMBIENT
         float3 reflectionDir = 2.0 * NdotV_raw * normalView - viewDirNeg;
         float  oneMinusNdotV = 1.0 - saturate(NdotV_raw);
+#ifdef IGNOREROUGHNESS
+        float  ambientSpecularFactor =
+            oneMinusNdotV * oneMinusNdotV * 0.25;
+#else
         float  ambientSpecularFactor =
             exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
+#endif
         ambientSpecular = matSample.y * ambientSpecularFactor *
             EvaluateAmbientGradient(reflectionDir);
 #endif
