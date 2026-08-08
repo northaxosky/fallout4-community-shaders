@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string_view>
 
@@ -10,6 +11,30 @@ namespace cs::features
 		kStock,
 		kHlslReconstruction
 	};
+
+	struct SssInjectionModeOption
+	{
+		SssInjectionMode mode;
+		std::string_view name;
+		const char*      label;
+	};
+
+	inline constexpr std::array<SssInjectionModeOption, 2>
+		kSssInjectionModeOptions{ {
+			{
+				SssInjectionMode::kStock,
+				"stock",
+				"Stock (no substitution)"
+			},
+			{
+				SssInjectionMode::kHlslReconstruction,
+				"hlsl_reconstruction",
+				"HLSL reconstruction (developer validation)"
+			}
+		} };
+
+	inline constexpr std::string_view kRetiredSssInjectionModeName =
+		"dxbc_patch";
 
 	struct SssStartupDecision
 	{
@@ -34,11 +59,9 @@ namespace cs::features
 	inline constexpr std::string_view SssInjectionModeName(
 		SssInjectionMode a_mode) noexcept
 	{
-		switch (a_mode) {
-		case SssInjectionMode::kStock:
-			return "stock";
-		case SssInjectionMode::kHlslReconstruction:
-			return "hlsl_reconstruction";
+		for (const auto& option : kSssInjectionModeOptions) {
+			if (option.mode == a_mode)
+				return option.name;
 		}
 		return "stock";
 	}
@@ -46,10 +69,30 @@ namespace cs::features
 	inline constexpr std::optional<SssInjectionMode> ParseSssInjectionMode(
 		std::string_view a_value) noexcept
 	{
-		if (a_value == "stock")
-			return SssInjectionMode::kStock;
-		if (a_value == "hlsl_reconstruction")
-			return SssInjectionMode::kHlslReconstruction;
+		for (const auto& option : kSssInjectionModeOptions) {
+			if (option.name == a_value)
+				return option.mode;
+		}
 		return std::nullopt;
+	}
+
+	struct SssInjectionModeSettingParseResult
+	{
+		std::optional<SssInjectionMode> mode;
+		bool migratedRetiredMode = false;
+	};
+
+	inline constexpr SssInjectionModeSettingParseResult
+		ParseSssInjectionModeSetting(std::string_view a_value) noexcept
+	{
+		if (const auto mode = ParseSssInjectionMode(a_value))
+			return { .mode = mode };
+		if (a_value == kRetiredSssInjectionModeName) {
+			return {
+				.mode = SssInjectionMode::kStock,
+				.migratedRetiredMode = true
+			};
+		}
+		return {};
 	}
 }

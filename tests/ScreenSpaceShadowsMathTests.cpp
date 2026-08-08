@@ -2,7 +2,6 @@
 #include "SssInjectionMode.h"
 
 #include <iostream>
-#include <string>
 #include <string_view>
 
 namespace
@@ -44,10 +43,19 @@ namespace
 	void TestInjectionModes()
 	{
 		using cs::features::DecideSssStartup;
+		using cs::features::kRetiredSssInjectionModeName;
+		using cs::features::kSssInjectionModeOptions;
 		using cs::features::ParseSssInjectionMode;
+		using cs::features::ParseSssInjectionModeSetting;
 		using cs::features::SssInjectionMode;
 		using cs::features::SssInjectionModeName;
 
+		CHECK(kSssInjectionModeOptions.size() == 2);
+		for (const auto& option : kSssInjectionModeOptions) {
+			CHECK(option.name != kRetiredSssInjectionModeName);
+			CHECK(SssInjectionModeName(option.mode) == option.name);
+			CHECK(option.label != nullptr);
+		}
 		CHECK(SssInjectionModeName(SssInjectionMode::kStock) == "stock");
 		CHECK(
 			SssInjectionModeName(SssInjectionMode::kHlslReconstruction)
@@ -56,10 +64,18 @@ namespace
 		CHECK(
 			ParseSssInjectionMode("hlsl_reconstruction")
 			== SssInjectionMode::kHlslReconstruction);
-		std::string removedMode = "dxbc";
-		removedMode += "_patch";
-		CHECK(!ParseSssInjectionMode(removedMode));
+		CHECK(!ParseSssInjectionMode(kRetiredSssInjectionModeName));
 		CHECK(!ParseSssInjectionMode("beta"));
+
+		const auto retiredMode =
+			ParseSssInjectionModeSetting(
+				kRetiredSssInjectionModeName);
+		CHECK(retiredMode.mode == SssInjectionMode::kStock);
+		CHECK(retiredMode.migratedRetiredMode);
+		const auto unknownMode =
+			ParseSssInjectionModeSetting("beta");
+		CHECK(!unknownMode.mode);
+		CHECK(!unknownMode.migratedRetiredMode);
 
 		const auto stock =
 			DecideSssStartup(SssInjectionMode::kStock, false);

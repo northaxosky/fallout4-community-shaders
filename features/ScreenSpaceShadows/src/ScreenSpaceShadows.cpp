@@ -109,14 +109,22 @@ namespace cs::features
 			}
 			if (injectionModeStatus
 				== feature_config::ScalarReadStatus::kValid) {
-				const auto parsedMode = ParseSssInjectionMode(injectionMode);
-				if (!parsedMode) {
+				const auto parsedMode =
+					ParseSssInjectionModeSetting(injectionMode);
+				if (!parsedMode.mode) {
 					a_error = SettingError(
 						"injection_mode",
 						"expected stock or hlsl_reconstruction");
 					return false;
 				}
-				a_candidate.injectionMode = *parsedMode;
+				a_candidate.injectionMode = *parsedMode.mode;
+				if (parsedMode.migratedRetiredMode) {
+					L->info(
+						"Mapped retired injection_mode={} to {}; save settings to persist the canonical key.",
+						kRetiredSssInjectionModeName,
+						SssInjectionModeName(
+							a_candidate.injectionMode));
+				}
 			}
 
 			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
@@ -976,19 +984,38 @@ namespace cs::features
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
-		static constexpr const char* kInjectionModes[]{
-			"Stock (no substitution)",
-			"HLSL reconstruction (developer validation)"
-		};
-		auto injectionMode = static_cast<int>(_settings.injectionMode);
+		static constexpr auto kInjectionModeLabels = [] {
+			std::array<
+				const char*,
+				kSssInjectionModeOptions.size()> labels{};
+			for (std::size_t index = 0;
+				index < kSssInjectionModeOptions.size();
+				++index) {
+				labels[index] =
+					kSssInjectionModeOptions[index].label;
+			}
+			return labels;
+		}();
+		int injectionMode = 0;
+		for (std::size_t index = 0;
+			index < kSssInjectionModeOptions.size();
+			++index) {
+			if (kSssInjectionModeOptions[index].mode
+				== _settings.injectionMode) {
+				injectionMode = static_cast<int>(index);
+				break;
+			}
+		}
 		bool changed = ImGui::Combo(
 			"Injection mode",
 			&injectionMode,
-			kInjectionModes,
-			static_cast<int>(std::size(kInjectionModes)));
+			kInjectionModeLabels.data(),
+			static_cast<int>(kInjectionModeLabels.size()));
 		if (changed) {
 			_settings.injectionMode =
-				static_cast<SssInjectionMode>(injectionMode);
+				kSssInjectionModeOptions[
+					static_cast<std::size_t>(injectionMode)]
+					.mode;
 		}
 		ImGui::TextDisabled(
 			"Restart required.");
