@@ -8,7 +8,6 @@ namespace cs::features
 	enum class SssInjectionMode
 	{
 		kStock,
-		kDxbcPatch,
 		kHlslReconstruction
 	};
 
@@ -38,8 +37,6 @@ namespace cs::features
 		switch (a_mode) {
 		case SssInjectionMode::kStock:
 			return "stock";
-		case SssInjectionMode::kDxbcPatch:
-			return "dxbc_patch";
 		case SssInjectionMode::kHlslReconstruction:
 			return "hlsl_reconstruction";
 		}
@@ -51,21 +48,8 @@ namespace cs::features
 	{
 		if (a_value == "stock")
 			return SssInjectionMode::kStock;
-		if (a_value == "dxbc_patch")
-			return SssInjectionMode::kDxbcPatch;
 		if (a_value == "hlsl_reconstruction")
 			return SssInjectionMode::kHlslReconstruction;
 		return std::nullopt;
-	}
-
-	inline constexpr std::string_view SssPatchStatusName(
-		bool a_artifactLoaded,
-		bool a_routeIdentityExact) noexcept
-	{
-		if (!a_artifactLoaded)
-			return "unavailable";
-		return a_routeIdentityExact
-			? "route_identity_exact"
-			: "route_identity_unproven";
 	}
 }

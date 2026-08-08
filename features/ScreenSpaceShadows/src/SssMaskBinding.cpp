@@ -4,6 +4,13 @@ namespace cs::features::sss_mask_binding
 {
 	namespace
 	{
+		enum class ExistingBinding : std::uint8_t
+		{
+			kNone,
+			kOwned,
+			kForeign
+		};
+
 		bool SetAndVerify(
 			const Api& a_api,
 			std::uint32_t a_slot,
@@ -17,26 +24,34 @@ namespace cs::features::sss_mask_binding
 				verified->Release();
 			return valid;
 		}
-	}
 
-	ExistingBinding Probe(
-		const Api& a_api,
-		std::uint32_t a_slot,
-		ID3D11ShaderResourceView* a_realMask,
-		ID3D11ShaderResourceView* a_whiteFallback) noexcept
-	{
-		if (!a_api.context || !a_api.get)
-			return ExistingBinding::kNone;
-		ID3D11ShaderResourceView* current = nullptr;
-		a_api.get(a_api.context, a_slot, &current);
-		if (!current)
-			return ExistingBinding::kNone;
-		const bool owned =
-			current == a_realMask || current == a_whiteFallback;
-		current->Release();
-		return owned
-			? ExistingBinding::kOwned
-			: ExistingBinding::kForeign;
+		ExistingBinding Probe(
+			const Api& a_api,
+			std::uint32_t a_slot,
+			ID3D11ShaderResourceView* a_realMask,
+			ID3D11ShaderResourceView* a_whiteFallback) noexcept
+		{
+			if (!a_api.context || !a_api.get)
+				return ExistingBinding::kNone;
+			ID3D11ShaderResourceView* current = nullptr;
+			a_api.get(a_api.context, a_slot, &current);
+			if (!current)
+				return ExistingBinding::kNone;
+			const bool owned =
+				current == a_realMask || current == a_whiteFallback;
+			current->Release();
+			return owned
+				? ExistingBinding::kOwned
+				: ExistingBinding::kForeign;
+		}
+
+		void RestoreNull(
+			const Api& a_api,
+			std::uint32_t a_slot) noexcept
+		{
+			if (a_api.context && a_api.set)
+				a_api.set(a_api.context, a_slot, nullptr);
+		}
 	}
 
 	Result Bind(
@@ -58,15 +73,14 @@ namespace cs::features::sss_mask_binding
 			return result;
 		}
 
-		result.foreignBindingDetected =
-			Probe(
+		if (Probe(
 				a_api,
 				a_slot,
 				a_realMask,
 				a_whiteFallback)
-			== ExistingBinding::kForeign;
-		if (result.foreignBindingDetected)
+			== ExistingBinding::kForeign) {
 			return result;
+		}
 
 		auto* selected =
 			a_realMaskReady
@@ -100,14 +114,6 @@ namespace cs::features::sss_mask_binding
 				SetAndVerify(a_api, a_slot, a_whiteFallback);
 		}
 		return result;
-	}
-
-	void RestoreNull(
-		const Api& a_api,
-		std::uint32_t a_slot) noexcept
-	{
-		if (a_api.context && a_api.set)
-			a_api.set(a_api.context, a_slot, nullptr);
 	}
 
 	bool RestoreNullIfOwned(

@@ -659,32 +659,10 @@ namespace cs::features
 
 	void WetnessEffects::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		std::size_t directionalSuppressedTargets = 0;
-		for (const auto target : {
-				cs::engine::ShaderInjectionTarget::
-					kBsdfLightDeferredDirectional,
-				cs::engine::ShaderInjectionTarget::
-					kBsdfLightDeferredDirectionalIbl }) {
-			const auto snapshot =
-				cs::engine::GetShaderInjectionTargetSnapshot(target);
-			if (std::ranges::find(
-					snapshot.suppressedContributorNames,
-					"WetnessEffects")
-				!= snapshot.suppressedContributorNames.end()) {
-				++directionalSuppressedTargets;
-			}
-		}
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("inject_ambient_pass", _settings.injectAmbientPass)
 			.Field("ambient_pass_registered", _ambientPassRegistered)
-			.Field(
-				"directional_injection_suppressed",
-				directionalSuppressedTargets != 0)
-			.Field(
-				"directional_suppressed_targets",
-				static_cast<std::int64_t>(
-					directionalSuppressedTargets))
 			.Field("is_exterior", _isExterior.load(std::memory_order_relaxed))
 			.Field(
 				"rain_intensity",

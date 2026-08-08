@@ -1,23 +1,16 @@
 #include "Log.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
-#include "SssDxbcPatchResolver.h"
 
-#include <array>
 #include <cstddef>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <vector>
 
 namespace
 {
 	std::uint32_t g_preDrawInstallRequests = 0;
-	ID3D11PixelShader* g_patchedShader = nullptr;
-	bool g_patchMatcherActive = false;
-	std::uint32_t g_sssBinds = 0;
-	std::uint32_t g_wetnessBinds = 0;
 }
 
 namespace cs::log
@@ -56,20 +49,6 @@ namespace
 {
 	using namespace cs::engine;
 
-	bool MatchPatchedShader(
-		ShaderInjectionTarget a_target,
-		ID3D11PixelShader* a_shader) noexcept
-	{
-		return g_patchMatcherActive
-			&& (a_target
-					== ShaderInjectionTarget::
-						kBsdfLightDeferredDirectional
-				|| a_target
-					== ShaderInjectionTarget::
-						kBsdfLightDeferredDirectionalIbl)
-			&& a_shader == g_patchedShader;
-	}
-
 	ShaderReplacementVariantRegistration MakeRegistration(
 		std::string a_name,
 		std::uint32_t a_key,
@@ -104,42 +83,11 @@ namespace
 
 int main()
 {
-	constexpr auto v1Registration =
-		cs::features::sss_dxbc_patch::
-			EvaluateRuntimePatchRegistration(
-				true,
-				cs::features::sss_dxbc_patch::
-					kSchemaV1RouteIdentityExact,
-				true);
-	bool ok = Check(
-		!v1Registration.registerResolver
-			&& !v1Registration.registerPatchedDispatch,
-		"schema-v1 route identity enabled runtime registration");
-	ok &= Check(
-		SetDeveloperShaderOverride(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			DeveloperShaderOverride::kForceOn),
-		"directional HLSL contributor setup was rejected");
-	const auto blockedV1Preview = PreviewShaderInjectionFreeze(
-		ShaderInjectionTarget::kBsdfLightDeferredDirectional);
-	ok &= Check(
-		blockedV1Preview.published
-			&& !blockedV1Preview.bytecodePatchExclusive
-			&& blockedV1Preview.variants != 0
-			&& blockedV1Preview.patchedMatchers == 0
-			&& blockedV1Preview.suppressedContributors == 0,
-		"blocked schema-v1 route suppressed a valid HLSL contributor");
-	ok &= Check(
-		SetDeveloperShaderOverride(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			DeveloperShaderOverride::kAuto),
-		"directional HLSL contributor reset was rejected");
-
 	ShaderReplacementRegistration disabledWetnessAmbient;
 	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
 	disabledWetnessAmbient.contributor = "WetnessEffects";
 	disabledWetnessAmbient.bind = [](ID3D11DeviceContext*) {};
-	ok &= Check(
+	bool ok = Check(
 		RegisterReplacementIfEnabled(
 			false,
 			std::move(disabledWetnessAmbient)),
@@ -178,211 +126,6 @@ int main()
 	ok &= Check(
 		g_preDrawInstallRequests == 1,
 		"registration with a bind did not install the pre-draw hook");
-
-	ShaderPatchedDispatchRegistration patchedRegistration;
-	patchedRegistration.targetId =
-		ShaderInjectionTarget::kBsdfLightDeferredDirectional;
-	patchedRegistration.contributor =
-		"ScreenSpaceShadows.DxbcPatch";
-	patchedRegistration.matches = &MatchPatchedShader;
-	patchedRegistration.bind = [](ID3D11DeviceContext*) {
-		++g_sssBinds;
-	};
-	patchedRegistration.slotClaims.push_back({
-		.stage = ShaderStage::kPixel,
-		.resourceType = ShaderResourceType::kShaderResource,
-		.slot = 6
-	});
-	ok &= Check(
-		RegisterPatchedShaderDispatch(patchedRegistration),
-		"separate patched dispatch registration was rejected");
-	auto patchedIblRegistration = patchedRegistration;
-	patchedIblRegistration.targetId =
-		ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl;
-	ok &= Check(
-		RegisterPatchedShaderDispatch(
-			std::move(patchedIblRegistration)),
-		"second exclusive directional claim was rejected");
-	ok &= Check(
-		g_preDrawInstallRequests == 3,
-		"both patched dispatch claims did not install the pre-draw hook");
-	ok &= Check(
-		!RegisterPatchedShaderDispatch(std::move(patchedRegistration)),
-		"duplicate patched dispatch was accepted");
-	const std::array patchTargets{
-		ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-		ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
-	};
-	ok &= Check(
-		!ArePatchedShaderDispatchesPublished(patchTargets),
-		"patched dispatch reported ready before freeze publication");
-	ok &= Check(
-		SetShaderInjectionEnabled(false)
-			&& !PublishShaderInjectionFreezePreview()
-			&& !ArePatchedShaderDispatchesPublished(patchTargets),
-		"disabled shader injection published patched dispatch targets");
-	ok &= Check(
-		SetShaderInjectionEnabled(true),
-		"shader injection could not be re-enabled after kill-switch test");
-
-	ok &= Check(
-		SetDeveloperShaderOverride(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			DeveloperShaderOverride::kForceOn),
-		"directional developer force-on setup was rejected");
-	const auto developerExclusivePreview = PreviewShaderInjectionFreeze(
-		ShaderInjectionTarget::kBsdfLightDeferredDirectional);
-	ok &= Check(
-		developerExclusivePreview.published
-			&& developerExclusivePreview.bytecodePatchExclusive
-			&& !developerExclusivePreview.hlslRequested
-			&& developerExclusivePreview.variants == 0
-			&& developerExclusivePreview.suppressedContributors == 1
-			&& developerExclusivePreview.suppressedContributorNames
-				== std::vector<std::string>{
-					"ShaderInjection.DeveloperForceOn" },
-		"exclusive DXBC patch did not retain the developer force-on suppression");
-	std::byte shaderToken{};
-	std::byte contextToken{};
-	g_patchedShader =
-		reinterpret_cast<ID3D11PixelShader*>(&shaderToken);
-	ok &= Check(
-		PublishShaderInjectionFreezePreview()
-			&& ArePatchedShaderDispatchesPublished(patchTargets),
-		"developer force-on exclusive preview was not published");
-	ok &= Check(
-		!IsInjectedPixelShader(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			g_patchedShader)
-			&& !DispatchShaderInjectionForTesting(
-				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-				g_patchedShader,
-				reinterpret_cast<ID3D11DeviceContext*>(&contextToken))
-			&& g_sssBinds == 0
-			&& g_wetnessBinds == 0,
-		"suppressed developer force-on retained HLSL match or bind ownership");
-	const auto developerSuppressedSnapshot =
-		GetShaderInjectionTargetSnapshot(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional);
-	const auto developerSuppressedSummary = GetShaderInjectionSummary();
-	ok &= Check(
-		developerSuppressedSnapshot.suppressedContributors == 1
-			&& developerSuppressedSnapshot.suppressedContributorNames
-				== std::vector<std::string>{
-					"ShaderInjection.DeveloperForceOn" }
-			&& developerSuppressedSummary.suppressedContributors == 1,
-		"developer force-on suppression was absent from status or summary");
-	ok &= Check(
-		SetDeveloperShaderOverride(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			DeveloperShaderOverride::kAuto),
-		"directional developer override reset was rejected");
-
-	ShaderReplacementRegistration conflictingHlsl;
-	conflictingHlsl.targetId =
-		ShaderInjectionTarget::kBsdfLightDeferredDirectional;
-	conflictingHlsl.contributor = "WetnessEffects";
-	conflictingHlsl.defines = { { "WETNESS_EFFECTS", "1" } };
-	conflictingHlsl.bind = [](ID3D11DeviceContext*) {
-		++g_wetnessBinds;
-	};
-	conflictingHlsl.slotClaims.push_back({
-		.stage = ShaderStage::kPixel,
-		.resourceType = ShaderResourceType::kShaderResource,
-		.slot = 6
-	});
-	auto conflictingHlslIbl = conflictingHlsl;
-	conflictingHlslIbl.targetId =
-		ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl;
-	ok &= Check(
-		RegisterReplacement(std::move(conflictingHlsl)),
-		"conflicting HLSL registration setup was rejected");
-	ok &= Check(
-		RegisterReplacement(std::move(conflictingHlslIbl)),
-		"second conflicting HLSL registration setup was rejected");
-	const auto exclusivePreview = PreviewShaderInjectionFreeze(
-		ShaderInjectionTarget::kBsdfLightDeferredDirectional);
-	const auto exclusiveIblPreview = PreviewShaderInjectionFreeze(
-		ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl);
-	ok &= Check(
-		exclusivePreview.published
-			&& exclusivePreview.bytecodePatchExclusive
-			&& !exclusivePreview.hlslRequested
-			&& !exclusivePreview.slotCollision
-			&& exclusivePreview.variants == 0
-			&& exclusivePreview.binds == 1
-			&& exclusivePreview.patchedMatchers == 1
-			&& exclusivePreview.suppressedContributors == 1
-			&& exclusivePreview.suppressedContributorNames
-				== std::vector<std::string>{ "WetnessEffects" },
-		"exclusive DXBC patch did not suppress conflicting HLSL routing");
-	ok &= Check(
-		exclusiveIblPreview.published
-			&& exclusiveIblPreview.bytecodePatchExclusive
-			&& !exclusiveIblPreview.hlslRequested
-			&& exclusiveIblPreview.variants == 0
-			&& exclusiveIblPreview.binds == 1
-			&& exclusiveIblPreview.patchedMatchers == 1
-			&& exclusiveIblPreview.suppressedContributors == 1
-			&& exclusiveIblPreview.suppressedContributorNames
-				== std::vector<std::string>{ "WetnessEffects" },
-		"second exclusive DXBC claim did not suppress Wetness");
-	ok &= Check(
-		PublishShaderInjectionFreezePreview(),
-		"explicit generic patch claims were not published");
-	ok &= Check(
-		!IsInjectedPixelShader(
-			ShaderInjectionTarget::
-				kBsdfLightDeferredDirectional,
-			g_patchedShader)
-			&& !IsPatchedDispatchPixelShader(
-				ShaderInjectionTarget::
-					kBsdfLightDeferredDirectional,
-				g_patchedShader)
-			&& !DispatchShaderInjectionForTesting(
-				ShaderInjectionTarget::
-					kBsdfLightDeferredDirectional,
-				g_patchedShader,
-				reinterpret_cast<ID3D11DeviceContext*>(
-					&contextToken))
-			&& g_sssBinds == 0
-			&& g_wetnessBinds == 0,
-		"inactive generic matcher did not preserve registered stock routing");
-	g_patchMatcherActive = true;
-	ok &= Check(
-		PublishShaderInjectionFreezePreview(),
-		"active patched freeze preview was not published");
-	ok &= Check(
-		!IsInjectedPixelShader(
-			ShaderInjectionTarget::
-				kBsdfLightDeferredDirectional,
-			g_patchedShader),
-		"Wetness ownership matched the SSS-patched shader");
-	ok &= Check(
-		IsPatchedDispatchPixelShader(
-			ShaderInjectionTarget::
-				kBsdfLightDeferredDirectional,
-			g_patchedShader),
-		"central patched-dispatch predicate missed the SSS shader");
-	ok &= Check(
-		DispatchShaderInjectionForTesting(
-			ShaderInjectionTarget::
-				kBsdfLightDeferredDirectional,
-			g_patchedShader,
-			reinterpret_cast<ID3D11DeviceContext*>(
-				&contextToken))
-			&& g_sssBinds == 1
-			&& g_wetnessBinds == 0,
-		"exclusive dispatch did not run only the SSS bind once");
-	const auto suppressedSnapshot =
-		GetShaderInjectionTargetSnapshot(
-			ShaderInjectionTarget::
-				kBsdfLightDeferredDirectional);
-	ok &= Check(
-		suppressedSnapshot.suppressedContributors == 1
-			&& suppressedSnapshot.suppressedContributorNames
-				== std::vector<std::string>{ "WetnessEffects" },
-		"suppressed Wetness contributor was not retained in telemetry");
 
 	constexpr auto baseSha =
 		"1111111111111111111111111111111111111111";

@@ -51,9 +51,6 @@ namespace cs::engine
 	using ShaderInjectionDefines = std::map<std::string, std::string, std::less<>>;
 	using ShaderInjectionReadyPredicate = std::function<bool()>;
 	using ShaderInjectionBindCallback = std::function<void(ID3D11DeviceContext*)>;
-	using ShaderPatchedPixelShaderMatcher = bool (*)(
-		ShaderInjectionTarget,
-		ID3D11PixelShader*) noexcept;
 
 	struct ShaderReplacementRegistration
 	{
@@ -63,15 +60,6 @@ namespace cs::engine
 		ShaderInjectionReadyPredicate isReady;
 		ShaderInjectionBindCallback   bind;
 		std::vector<ShaderSlotClaim>  slotClaims;
-	};
-
-	struct ShaderPatchedDispatchRegistration
-	{
-		ShaderInjectionTarget targetId = ShaderInjectionTarget::kCount;
-		std::string contributor;
-		ShaderPatchedPixelShaderMatcher matches = nullptr;
-		ShaderInjectionBindCallback bind;
-		std::vector<ShaderSlotClaim> slotClaims;
 	};
 
 	struct ShaderVariantCompilationDescriptor
@@ -126,8 +114,6 @@ namespace cs::engine
 		bool                   slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
 		std::size_t            contributors = 0;
-		std::size_t            suppressedContributors = 0;
-		std::vector<std::string> suppressedContributorNames;
 		ShaderInjectionDefines defines;
 		std::string            compiledSha1;
 		std::string            compileError;
@@ -140,7 +126,6 @@ namespace cs::engine
 	{
 		std::size_t   requested = 0;
 		std::size_t   compiled = 0;
-		std::size_t   suppressedContributors = 0;
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
 		std::uint64_t dispatches = 0;
@@ -156,8 +141,6 @@ namespace cs::engine
 		ShaderReplacementRegistration a_registration);
 	bool RegisterReplacementVariant(
 		ShaderReplacementVariantRegistration a_registration);
-	bool RegisterPatchedShaderDispatch(
-		ShaderPatchedDispatchRegistration a_registration);
 
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled);
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
@@ -175,34 +158,6 @@ namespace cs::engine
 	bool IsInjectedPixelShader(
 		ShaderInjectionTarget a_target,
 		ID3D11PixelShader* a_shader) noexcept;
-	bool IsPatchedDispatchPixelShader(
-		ShaderInjectionTarget a_target,
-		ID3D11PixelShader* a_shader) noexcept;
-	bool ArePatchedShaderDispatchesPublished(
-		std::span<const ShaderInjectionTarget> a_targets) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
-
-#ifdef FO4CS_SHADER_INJECTION_TESTING
-	struct ShaderInjectionFreezePreview
-	{
-		bool published = false;
-		bool hlslRequested = false;
-		bool bytecodePatchExclusive = false;
-		bool slotCollision = false;
-		std::size_t variants = 0;
-		std::size_t binds = 0;
-		std::size_t patchedMatchers = 0;
-		std::size_t suppressedContributors = 0;
-		std::vector<std::string> suppressedContributorNames;
-	};
-
-	ShaderInjectionFreezePreview PreviewShaderInjectionFreeze(
-		ShaderInjectionTarget a_target);
-	bool PublishShaderInjectionFreezePreview();
-	bool DispatchShaderInjectionForTesting(
-		ShaderInjectionTarget a_target,
-		ID3D11PixelShader* a_shader,
-		ID3D11DeviceContext* a_context);
-#endif
 }

@@ -27,34 +27,6 @@ namespace cs::features::sss_mask_binding
 			&& a_available.height >= a_required.height;
 	}
 
-	inline constexpr bool LoadInBounds(
-		Extent a_available,
-		std::uint32_t a_x,
-		std::uint32_t a_y) noexcept
-	{
-		return a_x < a_available.width && a_y < a_available.height;
-	}
-
-	inline constexpr bool TelemetryBindingCountsHold(
-		std::uint64_t a_matchedDraws,
-		std::uint64_t a_realMaskBinds,
-		std::uint64_t a_whiteFallbackBinds,
-		std::uint64_t a_invariantViolations,
-		std::uint64_t a_stockFallbacks,
-		std::uint64_t a_stockFallbackFailures) noexcept
-	{
-		const auto maskBinds =
-			a_realMaskBinds + a_whiteFallbackBinds;
-		const auto stockOutcomes =
-			a_stockFallbacks + a_stockFallbackFailures;
-		return maskBinds <= a_matchedDraws
-			&& stockOutcomes <= a_matchedDraws
-			&& a_matchedDraws
-				<= maskBinds
-					+ a_invariantViolations
-					+ stockOutcomes;
-	}
-
 	struct ExtentState
 	{
 		Extent allocated;
@@ -149,25 +121,11 @@ namespace cs::features::sss_mask_binding
 		kWhiteFallback
 	};
 
-	enum class ExistingBinding : std::uint8_t
-	{
-		kNone,
-		kOwned,
-		kForeign
-	};
-
 	struct Result
 	{
 		Source source = Source::kNone;
-		bool foreignBindingDetected = false;
 		bool validBinding = false;
 	};
-
-	ExistingBinding Probe(
-		const Api& a_api,
-		std::uint32_t a_slot,
-		ID3D11ShaderResourceView* a_realMask,
-		ID3D11ShaderResourceView* a_whiteFallback) noexcept;
 
 	Result Bind(
 		const Api& a_api,
@@ -178,9 +136,6 @@ namespace cs::features::sss_mask_binding
 		ID3D11ShaderResourceView* a_whiteFallback,
 		Extent a_whiteFallbackExtent,
 		Extent a_requiredExtent) noexcept;
-	void RestoreNull(
-		const Api& a_api,
-		std::uint32_t a_slot) noexcept;
 	bool RestoreNullIfOwned(
 		const Api& a_api,
 		std::uint32_t a_slot,

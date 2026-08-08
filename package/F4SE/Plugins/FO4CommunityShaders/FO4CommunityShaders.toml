@@ -67,8 +67,7 @@ inject_ambient_pass = false
 load = false
 
 [features.ScreenSpaceShadows.settings]
-# Explicit restart-time selection: stock, dxbc_patch, or hlsl_reconstruction.
-# DXBC v1 has 2/64 recipe evidence, but route identity is unproven and runtime admission is blocked.
+# Explicit restart-time selection: stock or hlsl_reconstruction.
 injection_mode = "stock"
 
 [features.Imagespace]

@@ -27,7 +27,6 @@
 #include "Render/ShaderInjection.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
-#include "SssDxbcPatchConsumer.h"
 #include "SssMaskBinding.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -45,7 +44,6 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows");
 
 		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
-		constexpr const wchar_t* kDxbcPatchArtifactPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\sss-dxbc-patch-plans.json";
 
 		// FO4 uses standard non-linear depth, near=0/far=1.
 		constexpr float kFarDepthValue = 1.0f;
@@ -115,7 +113,7 @@ namespace cs::features
 				if (!parsedMode) {
 					a_error = SettingError(
 						"injection_mode",
-						"expected stock, dxbc_patch, or hlsl_reconstruction");
+						"expected stock or hlsl_reconstruction");
 					return false;
 				}
 				a_candidate.injectionMode = *parsedMode;
@@ -239,7 +237,7 @@ namespace cs::features
 						return IsShadowMaskReady();
 					},
 					.bind = [this](ID3D11DeviceContext* a_context) {
-						BindShadowMask(a_context, false);
+						BindShadowMask(a_context);
 					},
 					.slotClaims = {
 						{
@@ -265,85 +263,6 @@ namespace cs::features
 				directionalRegistered && directionalIblRegistered;
 			if (!injectionReady)
 				L->error("Failed to register reconstructed directional shaders.");
-		} else if (_activeInjectionMode
-			== SssInjectionMode::kDxbcPatch) {
-			std::string error;
-			const bool artifactPrepared =
-				sss_dxbc_patch::Prepare(
-					kDxbcPatchArtifactPath,
-					error);
-			if (!artifactPrepared) {
-				L->error(
-					"SSS DXBC v1 recipe artifact is unavailable; runtime admission remains stock: {}.",
-					error);
-			}
-			const auto registration =
-				sss_dxbc_patch::GetRuntimePatchRegistrationDecision();
-			if (artifactPrepared
-				&& !registration.routeIdentityExact) {
-				L->error(
-					"SSS DXBC v1 route identity is UNPROVEN; resolver and patched-dispatch registration are blocked, and stock routing remains active.");
-			} else if (artifactPrepared
-				&& !registration.runtimeExact) {
-				L->error(
-					"SSS DXBC runtime identity is unavailable; resolver and patched-dispatch registration are blocked.");
-			} else if (registration.registerPatchedDispatch) {
-				const auto registerPatchedDispatch =
-					[this](
-						cs::engine::ShaderInjectionTarget a_target) {
-						return cs::engine::
-							RegisterPatchedShaderDispatch({
-								.targetId = a_target,
-								.contributor =
-									"ScreenSpaceShadows.DxbcPatch",
-								.matches =
-									&sss_dxbc_patch::
-										MatchesPatchedShader,
-								.bind =
-									[this](
-										ID3D11DeviceContext*
-											a_context) {
-										BindShadowMask(
-											a_context,
-											true);
-									},
-								.slotClaims = {
-									{
-										.stage =
-											cs::engine::
-												ShaderStage::kPixel,
-										.resourceType =
-											cs::engine::
-												ShaderResourceType::
-													kShaderResource,
-										.slot = kMaskPSSlot
-									}
-								}
-							});
-					};
-				const bool directionalRegistered =
-					registerPatchedDispatch(
-						cs::engine::ShaderInjectionTarget::
-							kBsdfLightDeferredDirectional);
-				const bool directionalIblRegistered =
-					registerPatchedDispatch(
-						cs::engine::ShaderInjectionTarget::
-							kBsdfLightDeferredDirectionalIbl);
-				const bool claimsRegistered =
-					directionalRegistered
-					&& directionalIblRegistered;
-				injectionReady =
-					claimsRegistered
-					&& registration.registerResolver
-					&& sss_dxbc_patch::ActivateResolver();
-				if (!claimsRegistered) {
-					L->error(
-						"SSS DXBC patched-dispatch registration failed; runtime admission remains stock.");
-				} else if (!injectionReady) {
-					L->error(
-						"SSS DXBC resolver activation failed; runtime admission remains stock.");
-				}
-			}
 		} else {
 			L->info(
 				"Injection mode is stock; SSS shader substitution is disabled.");
@@ -621,12 +540,12 @@ namespace cs::features
 		}
 		sss_mask_binding::Extent required;
 		sss_mask_binding::Extent allocation;
-		const bool fallbackReady =
-			TryGetMaskExtents(required, allocation)
-			&& EnsureWhiteFallback(
+		if (TryGetMaskExtents(required, allocation)) {
+			(void)EnsureWhiteFallback(
 				a_device,
 				required,
 				allocation);
+		}
 		_requiredMaskExtent = required;
 		_requiredMaskWidthTelemetry.store(
 			required.width,
@@ -634,8 +553,6 @@ namespace cs::features
 		_requiredMaskHeightTelemetry.store(
 			required.height,
 			std::memory_order_relaxed);
-		if (_activeInjectionMode == SssInjectionMode::kDxbcPatch)
-			sss_dxbc_patch::SetBindingReady(fallbackReady);
 		(void)EnsureResources();
 	}
 
@@ -782,14 +699,12 @@ namespace cs::features
 		_requiredMaskHeightTelemetry.store(
 			required.height,
 			std::memory_order_relaxed);
-		const bool fallbackReady =
-			extentsValid
-			&& EnsureWhiteFallback(
+		if (extentsValid) {
+			(void)EnsureWhiteFallback(
 				device,
 				required,
 				allocation);
-		if (_activeInjectionMode == SssInjectionMode::kDxbcPatch)
-			sss_dxbc_patch::SetBindingReady(fallbackReady);
+		}
 		if (!extentsValid)
 			return;
 		if (!EnsureResources()) {
@@ -944,8 +859,7 @@ namespace cs::features
 	}
 
 	void ScreenSpaceShadows::BindShadowMask(
-		ID3D11DeviceContext* a_context,
-		bool a_patchedDraw)
+		ID3D11DeviceContext* a_context)
 	{
 		const sss_mask_binding::Api api{
 			.context = a_context,
@@ -956,22 +870,6 @@ namespace cs::features
 			_maskTexture && _maskTexture->srv
 			? _maskTexture->srv.get()
 			: nullptr;
-		if (a_patchedDraw
-			&& sss_dxbc_patch::BindingInvariantBroken()) {
-			(void)sss_mask_binding::RestoreNullIfOwned(
-				api,
-				kMaskPSSlot,
-				realMask,
-				_whiteFallbackSRV.get());
-			_maskBound.store(false, std::memory_order_relaxed);
-			const bool stockRestored =
-				sss_dxbc_patch::RestoreStockShader(a_context);
-			sss_dxbc_patch::RecordPatchedDraw({
-				.stockShaderFallback = stockRestored,
-				.stockShaderFallbackFailed = !stockRestored
-			});
-			return;
-		}
 		const auto result = sss_mask_binding::Bind(
 			api,
 			kMaskPSSlot,
@@ -981,58 +879,6 @@ namespace cs::features
 			_whiteFallbackSRV.get(),
 			_whiteFallbackExtent.allocated,
 			_requiredMaskExtent);
-		if (a_patchedDraw) {
-			const bool realMaskBound =
-				result.source
-				== sss_mask_binding::Source::kRealMask
-				&& result.validBinding;
-			const bool whiteFallbackBound =
-				result.source
-					== sss_mask_binding::Source::kWhiteFallback
-				&& result.validBinding;
-			const bool invariantViolated =
-				result.foreignBindingDetected
-				|| !result.validBinding;
-			bool stockFallbackAttempted = false;
-			bool stockRestored = false;
-			if (invariantViolated) {
-				sss_dxbc_patch::BreakBindingInvariant();
-				if (!result.validBinding) {
-					_maskBound.store(
-						false,
-						std::memory_order_relaxed);
-					if (!result.foreignBindingDetected) {
-						sss_mask_binding::RestoreNull(
-							api,
-							kMaskPSSlot);
-					}
-					stockFallbackAttempted = true;
-					stockRestored =
-						sss_dxbc_patch::RestoreStockShader(a_context);
-				}
-			}
-			sss_dxbc_patch::RecordPatchedDraw({
-				.realMaskBound = realMaskBound,
-				.whiteFallbackBound = whiteFallbackBound,
-				.invariantViolated = invariantViolated,
-				.stockShaderFallback =
-					stockFallbackAttempted && stockRestored,
-				.stockShaderFallbackFailed =
-					stockFallbackAttempted && !stockRestored
-			});
-			if (invariantViolated) {
-				if (L->should_log(spdlog::level::err)) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::err,
-						"Patched SSS draw t6 invariant failed (foreign={}, valid_extent_binding={}, stock_restored={}); further patch admission disabled.",
-						result.foreignBindingDetected,
-						result.validBinding,
-						stockRestored);
-				}
-			}
-		}
 		if (result.validBinding) {
 			_maskBound.store(true, std::memory_order_relaxed);
 			_maskBoundLastFrame.store(true, std::memory_order_relaxed);
@@ -1071,58 +917,11 @@ namespace cs::features
 
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		const auto patchTelemetry = sss_dxbc_patch::GetTelemetry();
-		const auto realMaskBinds = patchTelemetry.realMaskBinds;
-		const auto whiteFallbackBinds =
-			patchTelemetry.whiteFallbackBinds;
-		const auto invariantViolations =
-			patchTelemetry.invariantViolations;
 		const bool startupInjectionReady =
 			_injectionReady.load(std::memory_order_acquire);
-		const bool patchMode =
-			_activeInjectionMode == SssInjectionMode::kDxbcPatch;
-		const bool effectivePatchAdmission =
-			patchMode
-			&& startupInjectionReady
-			&& patchTelemetry.admissionReady
-			&& invariantViolations == 0;
-		const bool effectiveInjectionReady =
-			patchMode
-			? effectivePatchAdmission
-			: startupInjectionReady;
 		const bool effectiveStockFallback =
 			_started.load(std::memory_order_acquire)
-			&& !effectiveInjectionReady;
-		const bool patchInvariantBroken =
-			patchTelemetry.invariantBroken || invariantViolations != 0;
-		const bool bindingRelationshipsHold =
-			sss_mask_binding::TelemetryBindingCountsHold(
-				patchTelemetry.patchedDrawMatched,
-				realMaskBinds,
-				whiteFallbackBinds,
-				invariantViolations,
-				patchTelemetry.stockShaderFallback,
-				patchTelemetry.stockShaderFallbackFailed);
-		std::size_t suppressedHlslContributors = 0;
-		std::string suppressedHlslNames;
-		for (const auto target : {
-				cs::engine::ShaderInjectionTarget::
-					kBsdfLightDeferredDirectional,
-				cs::engine::ShaderInjectionTarget::
-					kBsdfLightDeferredDirectionalIbl }) {
-			const auto snapshot =
-				cs::engine::GetShaderInjectionTargetSnapshot(target);
-			suppressedHlslContributors +=
-				snapshot.suppressedContributors;
-			for (const auto& contributor :
-				snapshot.suppressedContributorNames) {
-				if (!suppressedHlslNames.empty())
-					suppressedHlslNames += ",";
-				suppressedHlslNames += snapshot.name;
-				suppressedHlslNames += ":";
-				suppressedHlslNames += contributor;
-			}
-		}
+			&& !startupInjectionReady;
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field(
@@ -1130,7 +929,7 @@ namespace cs::features
 				SssInjectionModeName(_activeInjectionMode))
 			.Field(
 				"injection_ready",
-				effectiveInjectionReady)
+				startupInjectionReady)
 			.Field(
 				"injection_stock_fallback",
 				effectiveStockFallback)
@@ -1160,11 +959,11 @@ namespace cs::features
 			.Field("dispatches", static_cast<std::int64_t>(_dispatchedLastFrame.load(std::memory_order_relaxed)))
 			.Dimensions("mask", _allocWidth, _allocHeight)
 			.Dimensions(
-				"patch_required_extent",
+				"required_extent",
 				_requiredMaskWidthTelemetry.load(std::memory_order_relaxed),
 				_requiredMaskHeightTelemetry.load(std::memory_order_relaxed))
 			.Dimensions(
-				"patch_white_fallback",
+				"white_fallback",
 				_whiteFallbackWidthTelemetry.load(std::memory_order_relaxed),
 				_whiteFallbackHeightTelemetry.load(std::memory_order_relaxed))
 			.Field("sun_x", static_cast<double>(_sunX.load(std::memory_order_relaxed)))
@@ -1172,69 +971,13 @@ namespace cs::features
 			.Field("sun_z", static_cast<double>(_sunZ.load(std::memory_order_relaxed)))
 			.Field("light_x", static_cast<double>(_lightX.load(std::memory_order_relaxed)))
 			.Field("light_y", static_cast<double>(_lightY.load(std::memory_order_relaxed)))
-			.Field("clip_w", static_cast<double>(_clipW.load(std::memory_order_relaxed)))
-			.Field("patch_artifact_loaded", patchTelemetry.artifactLoaded)
-			.Field(
-				"patch_route_identity_exact",
-				patchTelemetry.routeIdentityExact)
-			.Field("patch_runtime_exact", patchTelemetry.runtimeExact)
-			.Field("patch_resolver_active", patchTelemetry.resolverActive)
-			.Field(
-				"patch_broker_hook_installed",
-				patchTelemetry.brokerHookInstalled)
-			.Field(
-				"patch_dispatch_published",
-				patchTelemetry.dispatchPublished)
-			.Field(
-				"patch_extent_binding_ready",
-				patchTelemetry.bindingReady)
-			.Field("patch_binding_ready", effectivePatchAdmission)
-			.Field("patch_admission_ready", effectivePatchAdmission)
-			.Field(
-				"patch_stock_fallback",
-				patchMode && !effectivePatchAdmission)
-			.Field("patch_invariant_broken", patchInvariantBroken)
-			.Field(
-				"patch_suppressed_hlsl_contributors",
-				static_cast<std::int64_t>(
-					suppressedHlslContributors))
-			.Field(
-				"patch_suppressed_hlsl_names",
-				suppressedHlslNames)
-			.Field(
-				"patch_status",
-				SssPatchStatusName(
-					patchTelemetry.artifactLoaded,
-					patchTelemetry.routeIdentityExact))
-			.Field("patch_coverage_pass", static_cast<std::int64_t>(patchTelemetry.coveragePass))
-			.Field("patch_coverage_candidates", static_cast<std::int64_t>(patchTelemetry.coverageCandidates))
-			.Field("patch_candidate_seen", static_cast<std::int64_t>(patchTelemetry.candidateSeen))
-			.Field("patch_exact_route_admitted", static_cast<std::int64_t>(patchTelemetry.exactRouteAdmitted))
-			.Field("patch_hash_mismatch", static_cast<std::int64_t>(patchTelemetry.hashMismatch))
-			.Field("patch_preimage_mismatch", static_cast<std::int64_t>(patchTelemetry.preimageMismatch))
-			.Field("patch_built", static_cast<std::int64_t>(patchTelemetry.patchBuilt))
-			.Field("patch_checksum_hash_mismatch", static_cast<std::int64_t>(patchTelemetry.checksumHashMismatch))
-			.Field("patch_create_ps_accepted", static_cast<std::int64_t>(patchTelemetry.createPsAccepted))
-			.Field("patch_create_ps_rejected", static_cast<std::int64_t>(patchTelemetry.createPsRejected))
-			.Field("patch_identity_published", static_cast<std::int64_t>(patchTelemetry.identityPublished))
-			.Field("patch_draw_matched", static_cast<std::int64_t>(patchTelemetry.patchedDrawMatched))
-			.Field("patch_stock_shader_fallback", static_cast<std::int64_t>(patchTelemetry.stockShaderFallback))
-			.Field("patch_stock_shader_fallback_failed", static_cast<std::int64_t>(patchTelemetry.stockShaderFallbackFailed))
-			.Field("patch_real_mask_bind", static_cast<std::int64_t>(realMaskBinds))
-			.Field("patch_white_fallback_bind", static_cast<std::int64_t>(whiteFallbackBinds))
-			.Field("patch_invariant_violation", static_cast<std::int64_t>(invariantViolations))
-			.Field("patch_unknown_stock_fallback", static_cast<std::int64_t>(patchTelemetry.unknownStockFallback))
-			.Field(
-				"patch_telemetry_relationships_ok",
-				sss_dxbc_patch::TelemetryRelationshipsHold(patchTelemetry)
-					&& bindingRelationshipsHold);
+			.Field("clip_w", static_cast<double>(_clipW.load(std::memory_order_relaxed)));
 	}
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		static constexpr const char* kInjectionModes[]{
 			"Stock (no substitution)",
-			"DXBC v1 recipe evidence (runtime blocked)",
 			"HLSL reconstruction (developer validation)"
 		};
 		auto injectionMode = static_cast<int>(_settings.injectionMode);
@@ -1248,7 +991,7 @@ namespace cs::features
 				static_cast<SssInjectionMode>(injectionMode);
 		}
 		ImGui::TextDisabled(
-			"Restart required. DXBC v1 route identity is unproven; runtime admission remains stock.");
+			"Restart required.");
 		changed |= ImGui::Checkbox("Enabled", &_settings.enabled);
 		changed |= ImGui::SliderFloat("Surface thickness", &_settings.surfaceThickness, 0.005f, 0.05f);
 		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);
@@ -1267,17 +1010,6 @@ namespace cs::features
 			"Resources: %s | wave dispatches last frame: %u",
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));
-		const auto patchTelemetry = sss_dxbc_patch::GetTelemetry();
-		if (_activeInjectionMode == SssInjectionMode::kDxbcPatch) {
-			ImGui::TextDisabled(
-				"DXBC patch coverage: %zu/%zu (%s)",
-				patchTelemetry.coveragePass,
-				patchTelemetry.coverageCandidates,
-				patchTelemetry.runtimeExact
-					? "exact AE runtime"
-					: "runtime mismatch; stock");
-		}
-
 		// Debug mask preview: raw R8 coverage/placement in-game, bright=lit/dark=shadowed, no RenderDoc needed.
 		static bool s_showMaskPreview = false;
 		ImGui::Checkbox("Show shadow-mask preview (debug)", &s_showMaskPreview);

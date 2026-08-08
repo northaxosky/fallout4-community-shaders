@@ -1,6 +1,8 @@
 #include "ScreenSpaceShadowsMath.h"
+#include "SssInjectionMode.h"
 
 #include <iostream>
+#include <string>
 #include <string_view>
 
 namespace
@@ -38,12 +40,47 @@ namespace
 		CHECK(MigrateLegacyShadowLengthPercent(10.0f) == 2);
 		CHECK(MigrateLegacyShadowLengthPercent(15.0f) == 3);
 	}
+
+	void TestInjectionModes()
+	{
+		using cs::features::DecideSssStartup;
+		using cs::features::ParseSssInjectionMode;
+		using cs::features::SssInjectionMode;
+		using cs::features::SssInjectionModeName;
+
+		CHECK(SssInjectionModeName(SssInjectionMode::kStock) == "stock");
+		CHECK(
+			SssInjectionModeName(SssInjectionMode::kHlslReconstruction)
+			== "hlsl_reconstruction");
+		CHECK(ParseSssInjectionMode("stock") == SssInjectionMode::kStock);
+		CHECK(
+			ParseSssInjectionMode("hlsl_reconstruction")
+			== SssInjectionMode::kHlslReconstruction);
+		std::string removedMode = "dxbc";
+		removedMode += "_patch";
+		CHECK(!ParseSssInjectionMode(removedMode));
+		CHECK(!ParseSssInjectionMode("beta"));
+
+		const auto stock =
+			DecideSssStartup(SssInjectionMode::kStock, false);
+		CHECK(!stock.runLifecycle);
+		CHECK(!stock.injectionReady);
+		CHECK(!stock.routeFallsBackToStock);
+
+		const auto unavailable = DecideSssStartup(
+			SssInjectionMode::kHlslReconstruction,
+			false);
+		CHECK(unavailable.runLifecycle);
+		CHECK(!unavailable.injectionReady);
+		CHECK(unavailable.routeFallsBackToStock);
+	}
 }
 
 int main()
 {
 	TestResolutionScaling();
 	TestLegacyMigration();
+	TestInjectionModes();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

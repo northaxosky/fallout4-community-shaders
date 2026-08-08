@@ -65,9 +65,7 @@ namespace cs::features
 
 		void SaveSettings();
 		void OnPreDeferredLights();
-		void BindShadowMask(
-			ID3D11DeviceContext* a_context,
-			bool a_patchedDraw);
+		void BindShadowMask(ID3D11DeviceContext* a_context);
 		void OnPostDeferredLights();
 		bool EnsureResources();
 		bool TryGetMaskExtents(

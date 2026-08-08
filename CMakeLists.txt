@@ -198,6 +198,7 @@ set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
 add_executable(ScreenSpaceShadowsMathTests
 	tests/ScreenSpaceShadowsMathTests.cpp
 	features/ScreenSpaceShadows/src/ScreenSpaceShadowsMath.h
+	features/ScreenSpaceShadows/src/SssInjectionMode.h
 )
 configure_host_test(ScreenSpaceShadowsMathTests)
 target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
@@ -206,79 +207,6 @@ target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
 
 add_test(NAME ScreenSpaceShadowsMath COMMAND ScreenSpaceShadowsMathTests)
 set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
-
-add_executable(SssDxbcPatchTests
-	tests/SssDxbcPatchTests.cpp
-	src/Render/DxbcPatchArtifact.cpp
-	src/Render/DxbcPatchArtifact.h
-	src/Render/PixelShaderSwapModel.cpp
-	src/Render/PixelShaderSwapBroker.h
-	src/Utils/CSSha1.cpp
-	src/Utils/CSSha1.h
-	src/Utils/CSSha256.cpp
-	src/Utils/CSSha256.h
-	features/ScreenSpaceShadows/src/SssDxbcPatchConsumer.h
-	features/ScreenSpaceShadows/src/SssDxbcPatchRuntime.cpp
-	features/ScreenSpaceShadows/src/SssDxbcPatchRuntime.h
-	features/ScreenSpaceShadows/src/SssDxbcPatchResolver.cpp
-	features/ScreenSpaceShadows/src/SssDxbcPatchResolver.h
-	features/ScreenSpaceShadows/src/SssInjectionMode.h
-	features/ScreenSpaceShadows/src/SssMaskBinding.cpp
-	features/ScreenSpaceShadows/src/SssMaskBinding.h
-)
-configure_host_test(SssDxbcPatchTests)
-target_compile_definitions(SssDxbcPatchTests PRIVATE
-	FO4CS_SSS_DXBC_PATCH_TESTING=1
-)
-target_include_directories(SssDxbcPatchTests PRIVATE
-	"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/src"
-)
-target_include_directories(SssDxbcPatchTests SYSTEM PRIVATE
-	"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
-)
-target_link_libraries(SssDxbcPatchTests PRIVATE bcrypt.lib)
-
-set(_sss_patch_artifact
-	"${CMAKE_SOURCE_DIR}/package/F4SE/Plugins/FO4CommunityShaders/ScreenSpaceShadows/sss-dxbc-patch-plans.json")
-set(_sss_default_config
-	"${CMAKE_SOURCE_DIR}/package/F4SE/Plugins/FO4CommunityShaders/FO4CommunityShaders.toml")
-add_test(
-	NAME SssDxbcPatch
-	COMMAND SssDxbcPatchTests
-		"${_sss_patch_artifact}"
-		"${_sss_default_config}"
-)
-set_tests_properties(SssDxbcPatch PROPERTIES
-	LABELS "render;shader;unit"
-)
-add_test(
-	NAME SssDxbcPatchPackage
-	COMMAND SssDxbcPatchTests --package
-		"${_sss_patch_artifact}"
-		"${_sss_default_config}"
-)
-set_tests_properties(SssDxbcPatchPackage PROPERTIES
-	LABELS "shader;package"
-)
-if(DEFINED ENV{DEVKIT_DIR})
-	set(_sss_devkit_project
-		"$ENV{DEVKIT_DIR}/config/projects/community-shaders.psd1")
-else()
-	set(_sss_devkit_project
-		"${CMAKE_SOURCE_DIR}/../devkit/config/projects/community-shaders.psd1")
-endif()
-if(EXISTS "${_sss_devkit_project}")
-	add_test(
-		NAME SssDxbcPatchDeployContract
-		COMMAND pwsh -NoProfile -ExecutionPolicy Bypass
-			-File "${CMAKE_SOURCE_DIR}/scripts/shaders/test-sss-dxbc-deploy-contract.ps1"
-			-RepoRoot "${CMAKE_SOURCE_DIR}"
-			-ProjectConfig "${_sss_devkit_project}"
-	)
-	set_tests_properties(SssDxbcPatchDeployContract PROPERTIES
-		LABELS "shader;package;deploy"
-	)
-endif()
 
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
@@ -377,7 +305,6 @@ set_tests_properties(ShaderMacroDiagnostics PROPERTIES
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
-		features/ScreenSpaceShadows/src/SssDxbcPatchResolver.h
 		src/Render/ShaderInjection.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
@@ -391,14 +318,12 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		_AMD64_
 		_UNICODE
 		COMMONLIB_RUNTIMECOUNT=3
-		FO4CS_SHADER_INJECTION_TESTING=1
 	)
 	target_include_directories(ShaderInjectionRegistrationTests BEFORE PRIVATE
 		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/include"
 		"${CMAKE_SOURCE_DIR}/src"
-		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/src"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)
