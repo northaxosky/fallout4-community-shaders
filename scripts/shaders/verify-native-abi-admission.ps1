@@ -272,6 +272,33 @@ $sourcePath = [IO.Path]::GetFullPath(
 if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
     Exit-WithError "shader source not found: $sourcePath" 2
 }
+
+# Optional provenance pins the source a sibling was extracted from. Unlike the
+# entry evidence, it records copy provenance only and is not a fidelity claim.
+$sourceProvenance = Get-OptionalMember $manifest 'source_provenance'
+if ($null -ne $sourceProvenance) {
+    $provenanceSource = Get-OptionalMember $sourceProvenance 'source'
+    $provenanceSha256 = Get-OptionalMember $sourceProvenance 'sha256'
+    if ($provenanceSource -isnot [string] -or -not $provenanceSource) {
+        Exit-WithError 'source_provenance.source must be a non-empty path' 2
+    }
+    if ($provenanceSha256 -isnot [string] -or
+        $provenanceSha256 -cnotmatch '^[0-9a-f]{64}$') {
+        Exit-WithError 'source_provenance.sha256 must be lowercase 64-hex' 2
+    }
+    $provenancePath = [IO.Path]::GetFullPath(
+        (Join-Path $RepoRoot ($provenanceSource.Replace('/', [IO.Path]::DirectorySeparatorChar))))
+    if (-not (Test-Path -LiteralPath $provenancePath -PathType Leaf)) {
+        Exit-WithError "source provenance file not found: $provenancePath" 2
+    }
+    $actualProvenanceSha256 =
+        (Get-FileHash -LiteralPath $provenancePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualProvenanceSha256 -cne $provenanceSha256) {
+        Exit-WithError ("source provenance SHA-256 differs`n" +
+            "    expected: $provenanceSha256`n" +
+            "    actual  : $actualProvenanceSha256")
+    }
+}
 $includePath = Split-Path -Parent $sourcePath
 
 $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("fo4cs-abi-" + [Guid]::NewGuid().ToString('n'))

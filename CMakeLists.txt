@@ -433,6 +433,18 @@ set_tests_properties(UnshadowedPointOmniAdmission PROPERTIES
 	TIMEOUT 600
 )
 
+set(_unshadowed_omni_gobo_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/unshadowed-pointomni-gobo-native-abi.json")
+add_test(
+	NAME UnshadowedPointOmniGoboAdmission
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_unshadowed_omni_gobo_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_unshadowed_omni_gobo_manifest}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(UnshadowedPointOmniGoboAdmission PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 600
+)
+
 set(_dirsplits3_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/dirsplits3-native-abi.json")
 add_test(
 	NAME DirSplits3DirectionalAdmission

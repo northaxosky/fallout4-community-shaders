@@ -1,0 +1,487 @@
+{
+  "schema": "fo4cs.native-abi-admission",
+  "schema_version": 1,
+  "scope": {
+    "family": "unshadowed POINTOMNI + GOBOPROJECTION, DIRSPLITS=2 as decoder baseline",
+    "runtime": "AE 1.11.221 archive blob set",
+    "report_label": "unshadowed POINTOMNI gobo Wave 1",
+    "compile_only_label": "IGNOREROUGHNESS controls",
+    "count_exemption_axis": null,
+    "note": "Consumer-local admission gate for the t7/s7 unshadowed POINTOMNI cookie contract. Wave 1 admits exactly the four SPECULAR x IGNORERIM cells and pins each entry's native declarations, constant read-set and exact per-register read-counts. The two native IGNOREROUGHNESS cells compile only: their distinct visibility and rim body is intentionally not reconstructed in this wave. This is an ABI and constant-read claim only, not an execution-equivalence or fidelity claim. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. dcl_temps is excluded because it is register allocation, not ABI.",
+    "evidence": "The four admitted blobs and two compile-only controls were measured from the AE 1.11.221 archive by the producer. All declare CB12[30] and CB2[15] immediateIndexed, five texture2d SRVs at t0/t1/t2/t3/t7, five mode_default samplers at s0/s1/s2/s3/s7, and the same POSITION14 input plus two MRT outputs. The common reads are CB2 {0:1,1:2,3:3,11:1,12:1,13:1,14:1} and CB12[20..27]:1. SPECULAR adds the second hair lobe and specular paths; IGNORERIM removes only the rim contribution. The source provenance below protects the exact pinned legacy extraction basis and is not an attestation of this sibling's numerical fidelity."
+  },
+  "compiler": {
+    "name": "fxc",
+    "entry_point": "main",
+    "flags": [
+      "/nologo",
+      "/O3"
+    ],
+    "include_root": "source-directory"
+  },
+  "source": "shaders/lighting/bsdf_light_deferred_gobo.hlsl",
+  "source_provenance": {
+    "source": "shaders/lighting/bsdf_light_deferred.hlsl",
+    "sha256": "c35208e60a454667ca26ad1831127b0645bb4137eadd63f6d2ec8dc2270929f6",
+    "note": "Extraction-time SHA-256 of the conformance-pinned legacy source; provenance only, not fidelity."
+  },
+  "profile": "ps_5_0",
+  "common_defines": [],
+  "abi_groups": {
+    "omni_gobo": {
+      "cb": {
+        "b12": [
+          30,
+          "immediateIndexed"
+        ],
+        "b2": [
+          15,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t0": "texture2d",
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d",
+        "t7": "texture2d"
+      },
+      "sampler": {
+        "s0": "mode_default",
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default",
+        "s7": "mode_default"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
+    }
+  },
+  "entries": [
+    {
+      "native_blob_sha1": "9969e800683c8a7c8afc25f41582415d79cbe47e",
+      "native_blob_sha256": "4b5516ce61c2d227acab446005b11d19430887ed169c99f6be5c3c773fc54ce9",
+      "native_blob_bytes": 6432,
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ],
+      "abi_group": "omni_gobo",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb2": [
+          0,
+          1,
+          2,
+          3,
+          11,
+          12,
+          13,
+          14
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 4,
+        "cb2[3]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2
+      }
+    },
+    {
+      "native_blob_sha1": "fa6948bafbdfb46c8af31caff6690ac2161ce8d5",
+      "native_blob_sha256": "5dcfc440b3d839e6b1ee4639dcefd7f31093bcf1cea9480a68b6eb7148f3cbfb",
+      "native_blob_bytes": 4812,
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ],
+      "abi_group": "omni_gobo",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb2": [
+          0,
+          1,
+          2,
+          3,
+          11,
+          12,
+          13,
+          14
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 2,
+        "cb2[3]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 2,
+        "cb12[29]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "d3331d19dfc93b63d3e078d5fa1db51689a206aa",
+      "native_blob_sha256": "efe5ff6eb9c286e8f5c6588b22e02c6325638d96f9ab3a86da99ca04ba3b349d",
+      "native_blob_bytes": 4504,
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC"
+      ],
+      "abi_group": "omni_gobo",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb2": [
+          0,
+          1,
+          2,
+          3,
+          11,
+          12,
+          13,
+          14
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 1,
+        "cb2[3]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 2,
+        "cb12[29]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "f33e32f9c8022c1739991fdc8d543f0d94a7c4a0",
+      "native_blob_sha256": "a1c81125f92b640139488b9e81f5f69a5667f60c63c8e35608009e20dd680de5",
+      "native_blob_bytes": 6148,
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNORERIM",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ],
+      "abi_group": "omni_gobo",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb2": [
+          0,
+          1,
+          2,
+          3,
+          11,
+          12,
+          13,
+          14
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 3,
+        "cb2[3]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "reason": "POINTOMNI is required",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "GOBOPROJECTION is required for the t7/s7 resource contract",
+      "defines": [
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "every native unshadowed POINTOMNI gobo blob carries RGBSPEC",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI"
+      ]
+    },
+    {
+      "reason": "DIRSPLITS is never assumed when absent",
+      "defines": [
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "SHADOW selects the distinct shadow-map ABI",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SHADOW"
+      ]
+    },
+    {
+      "reason": "DIRECTIONAL is a foreign light family",
+      "defines": [
+        "DIRECTIONAL",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "POINTSPOT is a foreign projected-light family",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "POINTSPOT",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "SPOT is a foreign projected-light family",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPOT"
+      ]
+    },
+    {
+      "reason": "FILTER_* selects a shadow tap and is invalid without SHADOW",
+      "defines": [
+        "DIRSPLITS=2",
+        "FILTER_PCF1",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "SHADOW_ONLY is the directional DIRSPLITS=1 family",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SHADOW_ONLY"
+      ]
+    },
+    {
+      "reason": "AMBIENT is absent from the POINTOMNI gobo constant tables",
+      "defines": [
+        "AMBIENT",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "ATTENUATION_ONLY is not a native POINTOMNI gobo permutation",
+      "defines": [
+        "ATTENUATION_ONLY",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "HALFOMNI belongs to the shadowed POINTOMNI family",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "HALFOMNI",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "BLENDSPLIT is a directional cascade axis",
+      "defines": [
+        "BLENDSPLIT",
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "the non-specular IGNORERIM plus IGNOREROUGHNESS cell is outside Wave 1",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNORERIM",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "reason": "the specular IGNORERIM plus IGNOREROUGHNESS cell is outside Wave 1",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNORERIM",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    }
+  ],
+  "compile_only": [
+    {
+      "native_blob_sha1": "09c2bd0951da6b3ce9ccf877c90b092a4b9f7a21",
+      "native_blob_sha256": "268e08c5d65016dbb9540a17ef88ea495c4a3273997168771ce290c21ec14292",
+      "native_blob_bytes": 3876,
+      "reason": "native non-specular IGNOREROUGHNESS control; Wave 1 intentionally does not claim its body",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
+      "native_blob_sha1": "a65b5952a6484b6a3adc9b4a14bea3d2eeff5059",
+      "native_blob_sha256": "068abf895caba71b0c475a47a9b37c76368d160ec86a7c2505dde0abe3c8b994",
+      "native_blob_bytes": 5532,
+      "reason": "native specular IGNOREROUGHNESS control; Wave 1 intentionally does not claim its body",
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ]
+    }
+  ]
+}
