@@ -19,7 +19,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
-| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact, no axis exempt)** |
+| `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and `POINTOMNI` (4 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 9/9 (read-counts exact; 987c4e79 fixed-square reconstructed)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -276,7 +276,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   test registration, not a third copy of the script.
 
 * **`bsdf_light_deferred_unshadowed.hlsl`** - **native ABI equal, 9/9, read-counts
-  exact on every entry**.
+  exact on every entry; 987c4e79 fixed-square reconstructed**.
   The native **unshadowed** light layer. Nine archive blobs have no `SHADOW` macro,
   so their contract has no shadow texture and no shadow sampler: five `DIRECTIONAL`
   and four `POINTOMNI`. What this source owns is unshadowed lighting - not a shadow
@@ -403,12 +403,12 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   constant read count.
 
   The no-`AMBIENT` pair explains the shadowed family's two fewer `cb2[1]` reads
-  and one fewer `cb2[2]` read, not its complete math. The current unshadowed
-  source has exact constant read counts but still retains the exponent for
-  987c4e79, so that path remains numerically outstanding. Direct same-fixture
-  WARP measured zero divergence for the fixed-square candidate and
-  10,747/4,109 divergent pixels for the retained-exponent candidate. Shadowed
-  DS2 and DS3 use the fixed square and are producer-proven. `IGNORERIM` is measured on
+  and one fewer `cb2[2]` read, not its complete math. The unshadowed source now
+  reconstructs the AMBIENT distinction directly: 477c3e1e retains the exponent,
+  while only its IGNOREROUGHNESS target 987c4e79 uses the fixed square. Direct
+  same-fixture producer WARP evidence measured zero divergence for the fixed-square
+  candidate and 10,747/4,109 divergent pixels for the retained-exponent candidate.
+  Shadowed DS2 and DS3 use the fixed square and are producer-proven. `IGNORERIM` is measured on
   12d92cd3/b4337a89 and 9f44ba67/fcabd749: it removes only the rim term, for exactly
   one fewer `cb2[2]` read. Both axes retain exact read-count coverage:
   `scope.count_exemption_axis` is `null` in both manifests and every one of the

@@ -108,9 +108,9 @@
 // `fallout4-re`.
 //
 // All ABI/read-count pins here and in shadowed DIRSPLITS=2 are exact, with no
-// exemption. IGNOREROUGHNESS visibility/rim and IGNORERIM are reconstructed,
-// but the native 987c4e79 AMBIENT fixed-square path remains numerically
-// incomplete here for a later one-row wave.
+// exemption. IGNOREROUGHNESS visibility/rim, its native 987c4e79 AMBIENT
+// fixed-square path, and IGNORERIM are reconstructed. Numerical execution
+// proof remains with the producer oracle in the sibling `fallout4-re`.
 
 #if defined(SHADOW)
 #  error "this source is the no-SHADOW family; the shadowed DIRSPLITS=2 blobs are bsdf_light_deferred_dirsplits2.hlsl"
@@ -483,8 +483,13 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef AMBIENT
         float3 reflectionDir = 2.0 * NdotV_raw * normalView - viewDirNeg;
         float  oneMinusNdotV = 1.0 - saturate(NdotV_raw);
+#ifdef IGNOREROUGHNESS
+        float  ambientSpecularFactor =
+            oneMinusNdotV * oneMinusNdotV * 0.25;
+#else
         float  ambientSpecularFactor =
             exp2(log2(oneMinusNdotV) * (3.0 - matSample.x)) * 0.25;
+#endif
         ambientSpecular = matSample.y * ambientSpecularFactor *
             EvaluateAmbientGradient(reflectionDir);
 #endif
@@ -629,8 +634,8 @@ PS_OUTPUT main(PS_INPUT input)
 }
 
 // IGNOREROUGHNESS and IGNORERIM are held to exact constant read-counts here,
-// not exempted. Numerical proof later found one texture-derived AMBIENT path
-// that those pins cannot see.
+// not exempted. The fixed-square path is texture-derived and leaves those pins
+// unchanged.
 //
 // This layer supplies the controlled no-AMBIENT pair that localises the
 // cb2[1]/cb2[2] read-count deltas. Producer oracle evidence later completed the
@@ -644,14 +649,14 @@ PS_OUTPUT main(PS_INPUT input)
 //
 // Native 987c4e79 replaces the roughness-dependent ambient exponent retained by
 // 477c3e1e with the fixed square, in addition to removing the roughness-driven
-// visibility geometry and rim term. This source still retains that exponent
-// under IGNOREROUGHNESS, so the 987c4e79 semantic path remains for a later wave.
+// visibility geometry and rim term. This source selects that square only under
+// IGNOREROUGHNESS, while the absent-macro 477c3e1e retains the exponent.
 // The deleted `tangentL` and `fresEdge` account for the two lost cb2[1] reads,
 // and the deleted rim product for the one lost cb2[2] read. IGNORERIM removes
 // the rim term only, costing one cb2[2] read and no cb2[1].
 //
-// Both macro axes remain explicit, not #undef'd or mapped onto another axis,
-// and neither manifest declares a count-exemption axis.
+// Both macro axes remain explicit, not #undef'd or mapped onto another axis;
+// neither manifest exempts read counts, and execution proof remains producer-owned.
 //
 // What IGNOREROUGHNESS does NOT remove is pinned just as deliberately, because
 // "it drops a whole lobe" is the obvious wrong hypothesis. Measured across both
