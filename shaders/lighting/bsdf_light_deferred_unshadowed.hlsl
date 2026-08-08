@@ -107,10 +107,10 @@
 // output: execution proof stays with the producer oracle in the sibling
 // `fallout4-re`.
 //
-// No axis here or in the shadowed DIRSPLITS=2 family is exempted from the
-// read-count pin. IGNOREROUGHNESS and IGNORERIM are both reconstructed; the
-// controlled pairs below pin this layer, while producer oracle evidence
-// completed the shadowed reconstruction.
+// All ABI/read-count pins here and in shadowed DIRSPLITS=2 are exact, with no
+// exemption. IGNOREROUGHNESS visibility/rim and IGNORERIM are reconstructed,
+// but the native 987c4e79 AMBIENT fixed-square path remains numerically
+// incomplete here for a later one-row wave.
 
 #if defined(SHADOW)
 #  error "this source is the no-SHADOW family; the shadowed DIRSPLITS=2 blobs are bsdf_light_deferred_dirsplits2.hlsl"
