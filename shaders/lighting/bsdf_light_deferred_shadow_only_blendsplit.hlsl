@@ -23,24 +23,14 @@
 //     FILTER_POISSON  sha1 c56b2b7862b68c7a7753e9c543a48378cb0c607a, 19828 B
 //
 // All six compile to a DXBC container that is byte-identical to the archive
-// blob. `scripts/shaders/verify-filter-axis.ps1` re-measures the SHEX chunk of
-// each on every test run.
+// blob, re-measured by `scripts/shaders/ds1-blendsplit-native-shex.json`, and
+// are pinned on declarations, constant read-sets, read-counts and
+// immediate-constant rows by `scripts/shaders/ds1-blendsplit-native-abi.json`.
 //
 // The native filter axis here is exactly three wide. No BLENDSPLIT blob in the
 // archive carries FILTER_PCSS, FILTER_PCSSPOISSON or no filter at all, so this
 // source refuses those macro sets rather than inventing a branch for them - the
 // raw t4/s4 tap those three would need is absent from all six declaration sets.
-//
-// The three no-AMBIENT permutations compile to a DXBC container that is
-// byte-identical to the archive blob, re-measured by
-// `scripts/shaders/ds1-blendsplit-native-shex.json`. The three AMBIENT ones
-// reach the same instruction multiset, operands, register allocation, literals
-// and SHEX byte length, and differ only in where fxc schedules one
-// dependency-free `mov o1.w, l(1.0)` - the shipped blobs emit it three slots
-// earlier, and that placement did not move under any optimisation level or
-// codegen flag. All six are pinned on declarations, constant read-sets,
-// read-counts and immediate-constant rows by
-// `scripts/shaders/ds1-blendsplit-native-abi.json`.
 
 #if !defined(DIRECTIONAL) || !defined(SHADOW_ONLY) || !defined(BLENDSPLIT)
 #  error "this source is the native DIRECTIONAL + SHADOW_ONLY + BLENDSPLIT family; define all three"
