@@ -743,7 +743,7 @@ Measured by the producer's WARP execution-diff oracle:
 
 | Family | Census | Numerically proven |
 |---|---|---|
-| `BSDFLightShader` | 166 blobs / 306 routes | **162** (299 routes) |
+| `BSDFLightShader` | 166 blobs / 306 routes | **164** (302 routes) |
 | `BSDFCompositeShader` | 78 blobs / 180 routes | **78** |
 
 `bsdf_light_deferred.hlsl` models `LIGHT_TYPE`, `AMBIENT_IBL_IN_LIGHT`,
