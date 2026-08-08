@@ -5,8 +5,8 @@
 // source is extracted from the conformance-pinned legacy point path rather
 // than extending it: that file's source SHA is producer-owned.
 //
-// Wave 1 reconstructs the SPECULAR x IGNORERIM cells. IGNOREROUGHNESS remains
-// a compile-only control until its distinct body is reconstructed.
+// Wave 2 reconstructs the SPECULAR x IGNORERIM cells and the two
+// IGNOREROUGHNESS controls.
 //
 // The native ABI is CB12[30], CB2[15], t0/t1/t2/t3/t7 texture2d and
 // s0/s1/s2/s3/s7 mode_default. It has no shadow resource or comparison
@@ -18,25 +18,24 @@
 // c35208e60a454667ca26ad1831127b0645bb4137eadd63f6d2ec8dc2270929f6.
 // This provenance pin guards the copy boundary; it is not a fidelity claim.
 //
-// Native Wave 1 matrix:
+// Native Wave 2 matrix:
 //   sha1      SPECULAR  IGNORERIM  IGNOREROUGHNESS  disposition
 //   9969e800  yes       no         no               control
 //   fa6948ba  no        no         no               admitted
 //   d3331d19  no        yes        no               admitted
 //   f33e32f9  yes       yes        no               admitted
-//   09c2bd09  no        no         yes              compile-only
-//   a65b5952  yes       no         yes              compile-only
+//   09c2bd09  no        no         yes              admitted
+//   a65b5952  yes       no         yes              admitted
 //
-// The four admitted cells hold the macro deltas visible in native constant
+// The six admitted cells hold the macro deltas visible in native constant
 // reads. SPECULAR adds cb12[28] reads x/y and cb12[29].x for the second
 // hair lobe, then adds two LightColor reads in the specular paths. IGNORERIM
 // removes only the roughness-scaled edge contribution and its LightColor read.
 //
-// IGNOREROUGHNESS is deliberately different. The two native controls prove it
-// is a real axis, but this wave does not claim that the legacy visibility and
-// rim body is its reconstruction. It therefore remains compilable without
-// becoming an admitted ABI/read-count row. Combining it with IGNORERIM would
-// silently manufacture two unsupported cells, so that pair fails closed.
+// IGNOREROUGHNESS bypasses the default-material roughness visibility geometry
+// and rim tail, leaving Lambert diffuse while preserving the SPECULAR gate.
+// Combining it with IGNORERIM would silently manufacture two unsupported
+// cells, so that pair fails closed.
 //
 // The dual-paraboloid cookie math stays local to this sibling. It starts from
 // the unprojected light-space z for the hemisphere decision, normalizes the
@@ -279,7 +278,9 @@ PS_OUTPUT main(PS_INPUT input)
     float4 matSample = g_tGbufferMaterial.Sample(g_sGbufferMaterial, uv);
     float2 normalEnc = g_tGbufferNormal.Sample(g_sGbufferNormal, uv).xy;
     float3 normalView = DecodeOctahedralNormal(normalEnc);
+#ifndef IGNOREROUGHNESS
     float roughness01 = 1.0 - matSample.x;
+#endif
     float posViewLenInv = rsqrt(dot(posView, posView));
     float3 viewDirNeg = -posView * posViewLenInv.xxx;
 
@@ -325,12 +326,19 @@ PS_OUTPUT main(PS_INPUT input)
     }
     else
     {
+#if !defined(IGNOREROUGHNESS) || defined(SPECULAR)
         float NdotV_raw = dot(viewDirNeg, normalView);
+#endif
 #ifndef SPECULAR
         float NdotL_raw = dot(lightDir, normalView);
         float NdotL_sat = max(NdotL_raw, 0.0);
         float NdotL_clamped = saturate(NdotL_sat);
 #endif
+#ifdef IGNOREROUGHNESS
+        // Native ignores only default-material visibility geometry.
+        // Hair and the separately gated specular branch remain intact.
+        brdfShadowMix = NdotL_sat;
+#else
         float3 tangentV = viewDirNeg - normalView * NdotV_raw;
         float3 tangentL = lightDir - normalView * NdotL_raw;
         float tangentVL = max(dot(tangentV, tangentL), 0.0);
@@ -346,6 +354,7 @@ PS_OUTPUT main(PS_INPUT input)
         float visibilityGeom = tangentVL * visB;
         visibilityGeom = visibilityGeom * (tangentSin / tangentDenom) + visA;
         brdfShadowMix = NdotL_sat * visibilityGeom;
+#endif
 
 #ifdef SPECULAR
         float specExp = exp2(matSample.x * 10.0 + 1.0);
@@ -385,9 +394,13 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifndef SPECULAR
     float NdotL_raw = dot(normalView, lightDir);
+#ifndef IGNOREROUGHNESS
     float NdotL_clamped = saturate(NdotL_raw);
 #endif
-#ifndef IGNORERIM
+#endif
+#ifdef IGNOREROUGHNESS
+    float ambientTerm = 0.0;
+#elif !defined(IGNORERIM)
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
     float edge = exp2(log2(1.0 - NdotV_view) * 0.01);
     float toLightDotView = saturate(dot(viewDirNeg, -lightDir));
@@ -420,10 +433,9 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// Wave 1 C1 holds the bare, SPECULAR, IGNORERIM and SPECULAR+IGNORERIM
-// cookie rows to their native declaration and constant-read contracts.
-// IGNOREROUGHNESS compiles as a control but intentionally retains the base
-// visibility and rim body until the follow-up reconstruction wave.
+// Wave 2 holds all six native cookie rows to their declaration and
+// constant-read contracts, including the IGNOREROUGHNESS visibility and rim
+// behavior.
 //
 // Reconstructed invariants:
 //   * Resource declarations (5 SRVs + 5 default samplers + 2 CBs) at

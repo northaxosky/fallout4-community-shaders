@@ -22,7 +22,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred_dirsplits2.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=2`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 29/29 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and full-BRDF `POINTOMNI` (6 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 11/11 (read-counts exact; new point rows execution-unproven)** |
-| `bsdf_light_deferred_gobo.hlsl` | BSDFLightShader deferred PS, unshadowed `POINTOMNI`+`GOBOPROJECTION` at `DIRSPLITS=2`; Wave 1 covers `SPECULAR` × `IGNORERIM` | reads `t0..t3` plus light cookie `t7`, all Texture2D with `s0..s3,s7` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | point dispatch within `DeferredLightsImpl` | **native-abi admission, Wave 1 C1: 4 rows; 2 IGNOREROUGHNESS controls compile-only** |
+| `bsdf_light_deferred_gobo.hlsl` | BSDFLightShader deferred PS, unshadowed `POINTOMNI`+`GOBOPROJECTION` at `DIRSPLITS=2`; Wave 2 covers `SPECULAR` × `IGNORERIM` plus both `IGNOREROUGHNESS` cells | reads `t0..t3` plus light cookie `t7`, all Texture2D with `s0..s3,s7` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | point dispatch within `DeferredLightsImpl` | **native-abi admission, Wave 2: 6/6 rows, read-counts exact** |
 | `bsdf_light_deferred_attenuation_only.hlsl` | BSDFLightShader deferred PS, native `POINTOMNI`+`ATTENUATION_ONLY` family at `DIRSPLITS=2` (one blob, four routes) | reads main depth `t3` only with `s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | point-light dispatch within `DeferredLightsImpl` | **native-abi-equal, 1/1 (read-counts exact)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
@@ -565,13 +565,13 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   not admitted by this manifest. The producer enumeration owns that wider
   denominator; this consumer scope is the exact `t0..t3`/`s0..s3` resource family.
 
-* **`bsdf_light_deferred_gobo.hlsl`** - **native ABI admission, Wave 1 C1**.
-  The five unshadowed `POINTOMNI` cookie blobs are a separate resource-contract
+* **`bsdf_light_deferred_gobo.hlsl`** - **native ABI admission, Wave 2**.
+  The six unshadowed `POINTOMNI` cookie blobs are a separate resource-contract
   family: in addition to the four G-buffer resources they declare `t7`/`s7` for
-  the dual-paraboloid light cookie, with `CB12[30]` and `CB2[15]`. Wave 1 admits
-  the four `SPECULAR` × `IGNORERIM` cells and keeps the two
-  `IGNOREROUGHNESS` cells compile-only until their different visibility/rim body
-  is reconstructed. `UnshadowedPointOmniGoboAdmission` pins the native ABI and
+  the dual-paraboloid light cookie, with `CB12[30]` and `CB2[15]`. Wave 2 admits
+  all six native cells: `IGNOREROUGHNESS` bypasses roughness visibility geometry
+  and the rim tail, leaving Lambert diffuse without changing its separate
+  `SPECULAR` gate. `UnshadowedPointOmniGoboAdmission` pins the native ABI and
   constant reads, rejects the shadowed, foreign-light, filter, ambient,
   attenuation, half-omni and blend-split neighbors, and records the SHA-256 of
   the pinned source it was extracted from as provenance rather than fidelity.

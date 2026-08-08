@@ -4,11 +4,11 @@
   "scope": {
     "family": "unshadowed POINTOMNI + GOBOPROJECTION, DIRSPLITS=2 as decoder baseline",
     "runtime": "AE 1.11.221 archive blob set",
-    "report_label": "unshadowed POINTOMNI gobo Wave 1",
-    "compile_only_label": "IGNOREROUGHNESS controls",
+    "report_label": "unshadowed POINTOMNI gobo Wave 2",
+    "compile_only_label": "compile-only controls",
     "count_exemption_axis": null,
-    "note": "Consumer-local admission gate for the t7/s7 unshadowed POINTOMNI cookie contract. Wave 1 admits exactly the four SPECULAR x IGNORERIM cells and pins each entry's native declarations, constant read-set and exact per-register read-counts. The two native IGNOREROUGHNESS cells compile only: their distinct visibility and rim body is intentionally not reconstructed in this wave. This is an ABI and constant-read claim only, not an execution-equivalence or fidelity claim. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. dcl_temps is excluded because it is register allocation, not ABI.",
-    "evidence": "The four admitted blobs and two compile-only controls were measured from the AE 1.11.221 archive by the producer. All declare CB12[30] and CB2[15] immediateIndexed, five texture2d SRVs at t0/t1/t2/t3/t7, five mode_default samplers at s0/s1/s2/s3/s7, and the same POSITION14 input plus two MRT outputs. The common reads are CB2 {0:1,1:2,3:3,11:1,12:1,13:1,14:1} and CB12[20..27]:1. SPECULAR adds the second hair lobe and specular paths; IGNORERIM removes only the rim contribution. The source provenance below protects the exact pinned legacy extraction basis and is not an attestation of this sibling's numerical fidelity."
+    "note": "Consumer-local admission gate for the t7/s7 unshadowed POINTOMNI cookie contract. Wave 2 admits exactly six native cells and pins each entry's native declarations, constant read-set and exact per-register read-counts. IGNOREROUGHNESS removes the default-material roughness visibility geometry and rim tail while retaining the separate SPECULAR gate. This is an ABI and constant-read claim only, not an execution-equivalence or fidelity claim. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. dcl_temps is excluded because it is register allocation, not ABI.",
+    "evidence": "The six admitted blobs were measured from the AE 1.11.221 archive by the producer. All declare CB12[30] and CB2[15] immediateIndexed, five texture2d SRVs at t0/t1/t2/t3/t7, five mode_default samplers at s0/s1/s2/s3/s7, and the same POSITION14 input plus two MRT outputs. The common reads are CB2 {0:1,1:2,3:3,11:1,12:1,13:1,14:1} and CB12[20..27]:1. SPECULAR adds the second hair lobe and specular paths; IGNORERIM removes only the rim contribution; IGNOREROUGHNESS removes roughness visibility geometry and the rim tail. The source provenance below protects the exact pinned legacy extraction basis and is not an attestation of this sibling's numerical fidelity."
   },
   "compiler": {
     "name": "fxc",
@@ -296,6 +296,125 @@
         "cb12[28]": 4,
         "cb12[29]": 2
       }
+    },
+    {
+      "native_blob_sha1": "09c2bd0951da6b3ce9ccf877c90b092a4b9f7a21",
+      "native_blob_sha256": "268e08c5d65016dbb9540a17ef88ea495c4a3273997168771ce290c21ec14292",
+      "native_blob_bytes": 3876,
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC"
+      ],
+      "abi_group": "omni_gobo",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb2": [
+          0,
+          1,
+          2,
+          3,
+          11,
+          12,
+          13,
+          14
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 1,
+        "cb2[3]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 2,
+        "cb12[29]": 1
+      }
+    },
+    {
+      "native_blob_sha1": "a65b5952a6484b6a3adc9b4a14bea3d2eeff5059",
+      "native_blob_sha256": "068abf895caba71b0c475a47a9b37c76368d160ec86a7c2505dde0abe3c8b994",
+      "native_blob_bytes": 5532,
+      "defines": [
+        "DIRSPLITS=2",
+        "GOBOPROJECTION",
+        "IGNOREROUGHNESS",
+        "POINTOMNI",
+        "RGBSPEC",
+        "SPECULAR"
+      ],
+      "abi_group": "omni_gobo",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb2": [
+          0,
+          1,
+          2,
+          3,
+          11,
+          12,
+          13,
+          14
+        ],
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29
+        ]
+      },
+      "cb_read_counts": {
+        "cb2[0]": 1,
+        "cb2[1]": 2,
+        "cb2[2]": 3,
+        "cb2[3]": 3,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[14]": 1,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2
+      }
     }
   ],
   "rejected": [
@@ -455,33 +574,5 @@
       ]
     }
   ],
-  "compile_only": [
-    {
-      "native_blob_sha1": "09c2bd0951da6b3ce9ccf877c90b092a4b9f7a21",
-      "native_blob_sha256": "268e08c5d65016dbb9540a17ef88ea495c4a3273997168771ce290c21ec14292",
-      "native_blob_bytes": 3876,
-      "reason": "native non-specular IGNOREROUGHNESS control; Wave 1 intentionally does not claim its body",
-      "defines": [
-        "DIRSPLITS=2",
-        "GOBOPROJECTION",
-        "IGNOREROUGHNESS",
-        "POINTOMNI",
-        "RGBSPEC"
-      ]
-    },
-    {
-      "native_blob_sha1": "a65b5952a6484b6a3adc9b4a14bea3d2eeff5059",
-      "native_blob_sha256": "068abf895caba71b0c475a47a9b37c76368d160ec86a7c2505dde0abe3c8b994",
-      "native_blob_bytes": 5532,
-      "reason": "native specular IGNOREROUGHNESS control; Wave 1 intentionally does not claim its body",
-      "defines": [
-        "DIRSPLITS=2",
-        "GOBOPROJECTION",
-        "IGNOREROUGHNESS",
-        "POINTOMNI",
-        "RGBSPEC",
-        "SPECULAR"
-      ]
-    }
-  ]
+  "compile_only": []
 }
