@@ -5,12 +5,13 @@
     "family": "DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR",
     "axis": "FILTER",
     "runtime": "AE 1.11.221 archive blob set",
-    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob; the reconstruction passes only when its own SHEX chunk hashes to the same value, so the pinned values come from the game bytecode and never from this repo's output."
+    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob and, under container_identity, the size and SHA-256 of the whole blob; the reconstruction passes only when its own SHEX chunk and its whole DXBC container hash to the same values, so the pinned values come from the game bytecode and never from this repo's output. All six permutations are container-identical, not merely instruction-stream identical: the ISGN and OSGN chunks match the blob too. That was true when this family landed but went unasserted until the container pin existed, so enabling it strengthened the claim without moving a byte of shader source."
   },
+  "container_identity": { "enabled": true },
   "compiler": {
     "name": "fxc",
     "entry_point": "main",
-    "flags": [ "/nologo", "/O3" ],
+    "flags": [ "/nologo", "/O3", "/Qstrip_reflect" ],
     "include_root": "source-directory"
   },
   "common_defines": [

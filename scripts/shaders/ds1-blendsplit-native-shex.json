@@ -5,14 +5,16 @@
     "family": "DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR + BLENDSPLIT, with and without AMBIENT",
     "axis": "FILTER x AMBIENT",
     "runtime": "AE 1.11.221 archive blob set",
-    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob; the reconstruction passes only when its own SHEX chunk hashes to the same value, so the pinned values come from the game bytecode and never from this repo's output. For all six the whole DXBC container is byte-identical to the blob, not only the SHEX chunk. The family is complete here: all six macro sets the source admits are pinned, so there is no row on which this manifest makes a claim of none. Declarations, constant read-sets, read-counts and immediate-constant rows are gated separately by ds1-blendsplit-native-abi.json."
+    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob and, under container_identity, the size and SHA-256 of the whole blob; the reconstruction passes only when its own SHEX chunk and its whole DXBC container hash to the same values, so the pinned values come from the game bytecode and never from this repo's output. For all six the whole DXBC container is byte-identical to the blob, not only the SHEX chunk, and the container pin now asserts that rather than leaving it as prose. The family is complete here: all six macro sets the source admits are pinned, so there is no row on which this manifest makes a claim of none. Declarations, constant read-sets, read-counts and immediate-constant rows are gated separately by ds1-blendsplit-native-abi.json."
   },
+  "container_identity": { "enabled": true },
   "compiler": {
     "name": "fxc",
     "entry_point": "main",
     "flags": [
       "/nologo",
-      "/O3"
+      "/O3",
+      "/Qstrip_reflect"
     ],
     "include_root": "source-directory"
   },
