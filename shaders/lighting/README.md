@@ -450,7 +450,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   without locking out anything legal.
 
   This is an ABI claim, not SHEX equality and not execution equivalence. SHEX identity
-  was attempted and not reached; the residual instruction deltas run from -1 to +3.
+  was attempted and not reached; the residual instruction deltas run from -1 to +2.
   Execution proof stays with the producer oracle.
 
   The producer has since routed to this file, and the two sides agree without either
