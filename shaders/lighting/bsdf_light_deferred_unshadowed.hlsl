@@ -131,6 +131,9 @@
 #ifdef GOBOPROJECTION
 #  error "GOBOPROJECTION blobs declare t7/s7 and are a different resource contract"
 #endif
+#ifdef ATTENUATION_ONLY
+#  error "ATTENUATION_ONLY is the t3-only family in bsdf_light_deferred_attenuation_only.hlsl"
+#endif
 #if defined(SPOT) || defined(POINTSPOT)
 #  error "the no-SHADOW SPOT blobs stay with the legacy adapter in bsdf_light_deferred.hlsl"
 #endif

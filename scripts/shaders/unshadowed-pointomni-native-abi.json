@@ -364,6 +364,15 @@
   ],
   "rejected": [
     {
+      "reason": "ATTENUATION_ONLY is the t3-only family handled by bsdf_light_deferred_attenuation_only.hlsl",
+      "defines": [
+        "ATTENUATION_ONLY",
+        "DIRSPLITS=2",
+        "POINTOMNI",
+        "RGBSPEC"
+      ]
+    },
+    {
       "reason": "POINTOMNI with SHADOW is the POINTSPOT-ABI family handled by bsdf_light_deferred.hlsl at LIGHT_TYPE=3",
       "defines": [
         "DIRSPLITS=2",

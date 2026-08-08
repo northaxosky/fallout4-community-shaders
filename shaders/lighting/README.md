@@ -21,6 +21,7 @@ shaders and injects registered permutations at runtime.
 | `bsdf_light_deferred_dirsplits3.hlsl` | BSDFLightShader deferred PS, native full-BRDF `DIRECTIONAL`+`SHADOW` family at `DIRSPLITS=3`; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / PCSSPOISSON / POISSON) crossed with `AMBIENT` × `BLENDSPLIT` × `IGNOREROUGHNESS` | reads `t0..t3` (G-buffer aliases + main depth), cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-abi-equal, 27/27 (read-counts exact, no axis exempt)** |
 | `bsdf_light_deferred_unshadowed.hlsl` | BSDFLightShader deferred PS, the native **unshadowed** light families - `DIRECTIONAL` (5 blobs) and full-BRDF `POINTOMNI` (6 blobs), no `SHADOW` macro, so no shadow resource at all | reads `t0..t3` only (G-buffer aliases + main depth) with `s0..s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same hosts as the directional and point paths above | **native-abi-equal, 11/11 (read-counts exact; new point rows execution-unproven)** |
 | `bsdf_light_deferred_gobo.hlsl` | BSDFLightShader deferred PS, unshadowed `POINTOMNI`+`GOBOPROJECTION` at `DIRSPLITS=2`; Wave 1 covers `SPECULAR` × `IGNORERIM` | reads `t0..t3` plus light cookie `t7`, all Texture2D with `s0..s3,s7` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | point dispatch within `DeferredLightsImpl` | **native-abi admission, Wave 1 C1: 4 rows; 2 IGNOREROUGHNESS controls compile-only** |
+| `bsdf_light_deferred_attenuation_only.hlsl` | BSDFLightShader deferred PS, native `POINTOMNI`+`ATTENUATION_ONLY` family at `DIRSPLITS=2` (one blob, four routes) | reads main depth `t3` only with `s3` mode_default; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | point-light dispatch within `DeferredLightsImpl` | **native-abi-equal, 1/1 (read-counts exact)** |
 
 The `lighting-shader-id-map.json` companion file maps each reconstructed
 HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
@@ -155,13 +156,32 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
 
   `scripts/shaders/verify-pointomni-admission.ps1` (CTest
   `PointOmniShadowAdmission`) re-measures all 31 and fails closed. It also
-  asserts that 15 malformed macro sets still refuse to compile — POINTOMNI
-  without `SHADOW`, POINTOMNI with `SPOT`/`POINTSPOT`/`ATTENUATION_ONLY`, two
-  `FILTER_*` at once, `FILTER_PCSS`/`FILTER_PCSSPOISSON` anywhere on this path
+  asserts that 16 malformed macro sets still refuse to compile — POINTOMNI
+  without `SHADOW`, POINTOMNI with `SPOT`/`POINTSPOT`, both
+  `ATTENUATION_ONLY` misroutes, two `FILTER_*` at once,
+  `FILTER_PCSS`/`FILTER_PCSSPOISSON` anywhere on this path
   (all 15 PCSS and all 3 PCSSPOISSON blobs in the archive are DIRECTIONAL),
   `HALFOMNI` without POINTOMNI, and POINTOMNI+SHADOW misrouted to
   `LIGHT_TYPE=2` — and that the 9 native POINTOMNI-without-SHADOW macro sets
   still compile on `LIGHT_TYPE=2`, so the guards cannot over-reach.
+* **`bsdf_light_deferred_attenuation_only.hlsl`** - **native ABI equal, 1/1**.
+  This source exclusively owns
+  `POINTOMNI + ATTENUATION_ONLY + RGBSPEC + DIRSPLITS=2`, represented by
+  native blob `aa5cd5f492d921546a2b9cf66d34eae9baedf63f` at four archive routes.
+  Its contract is `CB12[28]`, `CB2[4]`, main depth `t3` with `s3`
+  mode_default, unused `POSITION14`, and the two-MRT output signature. It runs
+  only depth reconstruction and radial attenuation: no G-buffer BRDF inputs,
+  cookie, shadow map or filter axis are declared.
+
+  `scripts/shaders/attenuation-only-native-abi.json` and CTest
+  `PointOmniAttenuationOnlyAdmission` pin the declaration set plus every
+  constant-register read count and reject every other known Light macro. The
+  legacy adapter and unshadowed full-BRDF source reject this family explicitly,
+  so it cannot compile through a broader source by accident.
+
+  This is a consumer-owned ABI and static read-count claim only. Full-DXBC
+  equality and numerical execution proof remain producer-owned and pending.
+
 * **`bsdf_light_deferred_shadow_only.hlsl`** - **native SHEX identical, 6/6**.
   The native `DIRECTIONAL` + `SHADOW_ONLY` family, and the only place in the
   archive where the `FILTER_*` axis appears as a controlled minimal pair: six

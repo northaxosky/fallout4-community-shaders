@@ -445,6 +445,18 @@ set_tests_properties(UnshadowedPointOmniGoboAdmission PROPERTIES
 	TIMEOUT 600
 )
 
+set(_attenuation_only_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/attenuation-only-native-abi.json")
+add_test(
+	NAME PointOmniAttenuationOnlyAdmission
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_native_abi_script}' -ManifestPath '${_attenuation_only_manifest}' -FxcPath $env:FXC_PATH } else { & '${_native_abi_script}' -ManifestPath '${_attenuation_only_manifest}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(PointOmniAttenuationOnlyAdmission PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 300
+)
+
 set(_dirsplits3_manifest "${CMAKE_SOURCE_DIR}/scripts/shaders/dirsplits3-native-abi.json")
 add_test(
 	NAME DirSplits3DirectionalAdmission
