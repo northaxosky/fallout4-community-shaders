@@ -688,8 +688,9 @@ PS_OUTPUT main(PS_INPUT input)
     }
 
     // Final composition.
+#ifdef IGNOREROUGHNESS
     float3 finalDiffuse = SunColor_HDR.xyz * brdfShadowMix;
-#ifndef IGNOREROUGHNESS
+#else
     float NdotV_view  = saturate(dot(normalView, viewDirNeg));
     float ambientFres = 1.0 - NdotV_view;
     ambientFres = exp2(log2(ambientFres) * 0.01);
@@ -697,7 +698,8 @@ PS_OUTPUT main(PS_INPUT input)
     float fresEdge    = saturate(dot(viewDirNeg, -SunDirection.xyz));
     float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 
-    finalDiffuse += SunColor_HDR.xyz * ambientTerm;
+    float3 finalDiffuse = SunColor_HDR.xyz * ambientTerm;
+    finalDiffuse += SunColor_HDR.xyz * brdfShadowMix;
 #endif
 
     float backfaceWrap = saturate(-NdotL_raw);

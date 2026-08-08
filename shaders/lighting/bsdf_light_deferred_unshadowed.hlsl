@@ -107,10 +107,10 @@
 // output: execution proof stays with the producer oracle in the sibling
 // `fallout4-re`.
 //
-// Unlike the shadowed DIRSPLITS=2 family, no axis here is exempted from the
-// read-count pin. IGNOREROUGHNESS and IGNORERIM are both reconstructed, and
-// both were adjudicated from controlled pairs inside this layer that differ in
-// nothing but the macro - see the note at the end of this file.
+// No axis here or in the shadowed DIRSPLITS=2 family is exempted from the
+// read-count pin. IGNOREROUGHNESS and IGNORERIM are both reconstructed; the
+// controlled pairs below pin this layer, while producer oracle evidence
+// completed the shadowed reconstruction.
 
 #if defined(SHADOW)
 #  error "this source is the no-SHADOW family; the shadowed DIRSPLITS=2 blobs are bsdf_light_deferred_dirsplits2.hlsl"
@@ -630,25 +630,21 @@ PS_OUTPUT main(PS_INPUT input)
 
 // IGNOREROUGHNESS and IGNORERIM are both reconstructed here, not exempted.
 //
-// The shadowed DIRSPLITS=2 family names IGNOREROUGHNESS as its one
-// count-exemption axis because every pair it could compare also carried
-// AMBIENT, so the divergence could not be localised past "the ambient-specular
-// exponent path", and it showed up only as two unexplained reads of cb2[1] and
-// cb2[2]. This layer supplies the controlled pair that family lacked - one with
-// no AMBIENT anywhere in it - and the pairs resolve the macros completely:
+// This layer supplies the controlled no-AMBIENT pair that localises the
+// cb2[1]/cb2[2] read-count deltas. Producer oracle evidence later completed the
+// shadowed DIRSPLITS=2 reconstruction, including its distinct AMBIENT path, so
+// both layers now enforce exact read counts:
 //
 //   IGNOREROUGHNESS, no AMBIENT    039c8935 196 -> 28858d7b 166 instrs
 //   IGNOREROUGHNESS, with AMBIENT  477c3e1e 223 -> 987c4e79 194 instrs
 //   IGNORERIM, no SPECULAR         12d92cd3 142 -> b4337a89 130 instrs
 //   IGNORERIM, with SPECULAR       9f44ba67 196 -> fcabd749 187 instrs
 //
-// IGNOREROUGHNESS removes two things and nothing else: the roughness-driven
-// visibility geometry in the default branch, so the diffuse mix collapses to
-// plain N.L, and the rim term. That accounts for the shadowed family's two
-// unexplained registers exactly - the deleted `tangentL` and the deleted
-// `fresEdge` are the two lost cb2[1] reads, and the deleted rim product is the
-// one lost cb2[2] read. IGNORERIM removes the rim term only, which is why it
-// costs one cb2[2] read and no cb2[1] read.
+// In this unshadowed layer IGNOREROUGHNESS removes the roughness-driven
+// visibility geometry and rim term while retaining the roughness-dependent
+// ambient exponent. The deleted `tangentL` and `fresEdge` account for the two
+// lost cb2[1] reads, and the deleted rim product for the one lost cb2[2] read.
+// IGNORERIM removes the rim term only, costing one cb2[2] read and no cb2[1].
 //
 // Both macros are therefore handled, not #undef'd and not mapped onto another
 // axis, and neither manifest declares a count-exemption axis.

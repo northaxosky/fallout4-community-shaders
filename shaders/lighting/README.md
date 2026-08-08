@@ -402,8 +402,11 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   constant registers move at all.
 
   This is the first `IGNOREROUGHNESS` pair with no `AMBIENT` present, and it explains
-  the shadowed `DIRSPLITS=2` family's previously unexplained deltas exactly - two
-  fewer `cb2[1]` reads and one fewer `cb2[2]` read. `IGNORERIM` is measured on
+  the shadowed `DIRSPLITS=2` family's read-count deltas - two fewer `cb2[1]`
+  reads and one fewer `cb2[2]` read - but not its complete math. The unshadowed
+  `AMBIENT` path retains the roughness-dependent exponent; producer execution
+  proof shows the shadowed `AMBIENT` path instead uses the fixed square.
+  `IGNORERIM` is measured on
   12d92cd3/b4337a89 and 9f44ba67/fcabd749: it removes only the rim term, for exactly
   one fewer `cb2[2]` read. Both are reconstructed, so
   `scope.count_exemption_axis` is `null` in both manifests and every one of the nine
