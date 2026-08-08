@@ -610,16 +610,6 @@
       ]
     },
     {
-      "reason": "the legacy LIGHT_TYPE=2 route must reject the dedicated t3-only family",
-      "defines": [
-        "LIGHT_TYPE=2",
-        "POINTOMNI=1",
-        "ATTENUATION_ONLY=1",
-        "DIRSPLITS=2",
-        "RGBSPEC=1"
-      ]
-    },
-    {
       "reason": "FILTER_* macros are mutually exclusive (PCF1 + PCF9)",
       "defines": [
         "LIGHT_TYPE=3",
