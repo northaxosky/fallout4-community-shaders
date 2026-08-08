@@ -2,10 +2,10 @@
   "schema": "fo4cs.native-shex-equality",
   "schema_version": 1,
   "scope": {
-    "family": "DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR + BLENDSPLIT, without AMBIENT",
-    "axis": "FILTER",
+    "family": "DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR + BLENDSPLIT, with and without AMBIENT",
+    "axis": "FILTER x AMBIENT",
     "runtime": "AE 1.11.221 archive blob set",
-    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob; the reconstruction passes only when its own SHEX chunk hashes to the same value, so the pinned values come from the game bytecode and never from this repo's output. For these three the whole DXBC container is byte-identical to the blob, not only the SHEX chunk. The family's three AMBIENT blobs - 2b04bed67a5641536ecedceebedf8916d3130a97, e3b027b8c5549dc429abf8356c0a1e300616027d and c56b2b7862b68c7a7753e9c543a48378cb0c607a - are deliberately absent rather than excluded to make this pass: they compile to the same instruction multiset, operands, register allocation, literals and SHEX byte length as their blobs and differ only in the scheduled position of one dependency-free `mov o1.w, l(1.0)`, which fxc 10.0.26100 emits three slots later at every optimisation level and codegen flag. Absence here is a SHEX-equality claim of none, and all six rows including those three are gated on declarations, constant read-sets, read-counts and immediate-constant rows by ds1-blendsplit-native-abi.json."
+    "note": "Consumer-local re-measurement, not a producer fidelity attestation. Each entry records the SHA-256 of the SHEX chunk of an archive blob; the reconstruction passes only when its own SHEX chunk hashes to the same value, so the pinned values come from the game bytecode and never from this repo's output. For all six the whole DXBC container is byte-identical to the blob, not only the SHEX chunk. The family is complete here: all six macro sets the source admits are pinned, so there is no row on which this manifest makes a claim of none. Declarations, constant read-sets, read-counts and immediate-constant rows are gated separately by ds1-blendsplit-native-abi.json."
   },
   "compiler": {
     "name": "fxc",
@@ -54,6 +54,33 @@
       "native_blob_bytes": 18348,
       "native_shex_bytes": 18132,
       "native_shex_sha256": "6fc97aa7396ba9916269c43f1e647beb3d1327bb6bd9cdbf46e62c4f787fb603"
+    },
+    {
+      "target": "blendsplit_ambient_pcf1",
+      "defines": [ "AMBIENT=1", "FILTER_PCF1=1" ],
+      "native_blob_sha1": "2b04bed67a5641536ecedceebedf8916d3130a97",
+      "native_blob_sha256": "efc800544287e2f0278ce750515bdc196d45c34f8076eee9c75435bb35db8bc7",
+      "native_blob_bytes": 3076,
+      "native_shex_bytes": 2860,
+      "native_shex_sha256": "bdc5113d3f518573ab5240dbc853b703785bd03a2f92b67c5beaeba12fa383f9"
+    },
+    {
+      "target": "blendsplit_ambient_pcf9",
+      "defines": [ "AMBIENT=1", "FILTER_PCF9=1" ],
+      "native_blob_sha1": "e3b027b8c5549dc429abf8356c0a1e300616027d",
+      "native_blob_sha256": "b9a735c215248c3fe45c41db21e245f4b7db5b562b40e451ca4ea31836437b54",
+      "native_blob_bytes": 3500,
+      "native_shex_bytes": 3284,
+      "native_shex_sha256": "c971058db22575fbf4591bac4b78aefbcb8b4ce0e7e76a3adf7ab294421d6eb1"
+    },
+    {
+      "target": "blendsplit_ambient_poisson",
+      "defines": [ "AMBIENT=1", "FILTER_POISSON=1" ],
+      "native_blob_sha1": "c56b2b7862b68c7a7753e9c543a48378cb0c607a",
+      "native_blob_sha256": "04de8bc586badbc657f3e360dd34306f60c9efc327e73768e485f109a5b24ab2",
+      "native_blob_bytes": 19828,
+      "native_shex_bytes": 19612,
+      "native_shex_sha256": "23757862de8a86a46184347ce503c1e89c12aa106728267b709c9f293f051892"
     }
   ]
 }

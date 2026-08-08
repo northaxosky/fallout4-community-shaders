@@ -8,7 +8,7 @@
     "compile_only_label": "over-reach checks",
     "count_exemption_axis": null,
     "note": "Consumer-local admission gate over the whole six-blob family, which is 18 archive route occurrences. Each entry pins four things measured from a native archive blob - its declaration set, the set of constant-buffer registers its body reads, how many times it reads each, and its immediate constant-buffer row count - and passes only when the reconstruction compiled from that blob's own macro set agrees. The pinned values come from the game bytecode, never from this repo's output. No entry is exempt from the read-count check, so the manifest declares no count_exemption_axis. This is an ABI and constant-read claim only, not an execution-equivalence claim; execution proof stays with the producer oracle in the sibling fallout4-re, which has published nothing for these six blobs. dcl_temps is excluded because it is register allocation, not ABI.",
-    "evidence": "Declarations, read-sets, read-counts and ICB row counts were measured by disassembling each of the six blobs, each read against its own constant table. The family splits into two resource contracts, not one: without AMBIENT it declares only the depth texture at t3/s3 and the cascade atlas at t5/s5 as a comparison sampler, and with AMBIENT it adds the g-buffer normal at t1/s1 and the auxiliary material target at t2/s2. CB2 is 25 registers and CB12 28 in all six. CB2 indexing is the filter axis rather than the AMBIENT axis: FILTER_POISSON indexes the cascade world-scale table by the runtime slice and promotes CB2 to dynamicIndexed, which is also why cb2[9] is read three times there and once elsewhere. BLENDSPLIT removes the material-1 slope bias that the plain SHADOW_ONLY family carries: FILTER_PCF1 and FILTER_PCF9 compare the projected z unbiased, and FILTER_POISSON uses the fixed 0.275 scaled by the reciprocal cascade world depth range with no per-material branch, so no blob here reads a normal or material channel for biasing. Under AMBIENT the three DirectionalAmbient rows cb2[6..8] are each read exactly twice, once against the decoded normal and once against the reflection vector, and material code 1 suppresses the reflected term outright. No BLENDSPLIT blob in the archive carries FILTER_PCSS, FILTER_PCSSPOISSON or no filter at all, and none declares the raw t4/s4 tap those would need, so all three are rejected rather than reconstructed. The three no-AMBIENT rows additionally compile to a DXBC container that is byte-identical to the archive blob; that is pinned separately by ds1-blendsplit-native-shex.json. The three AMBIENT rows compile to the same instruction multiset, operands, register allocation, literals and SHEX byte length as their blobs, differing only in the scheduled position of one dependency-free `mov o1.w, l(1.0)`, which the shipped blob emits three slots earlier; that placement is invariant across /O1, /O2, /O3 and every fxc codegen flag tried, so it is not reachable from HLSL with this compiler."
+    "evidence": "Declarations, read-sets, read-counts and ICB row counts were measured by disassembling each of the six blobs, each read against its own constant table. The family splits into two resource contracts, not one: without AMBIENT it declares only the depth texture at t3/s3 and the cascade atlas at t5/s5 as a comparison sampler, and with AMBIENT it adds the g-buffer normal at t1/s1 and the auxiliary material target at t2/s2. CB2 is 25 registers and CB12 28 in all six. CB2 indexing is the filter axis rather than the AMBIENT axis: FILTER_POISSON indexes the cascade world-scale table by the runtime slice and promotes CB2 to dynamicIndexed, which is also why cb2[9] is read three times there and once elsewhere. BLENDSPLIT removes the material-1 slope bias that the plain SHADOW_ONLY family carries: FILTER_PCF1 and FILTER_PCF9 compare the projected z unbiased, and FILTER_POISSON uses the fixed 0.275 scaled by the reciprocal cascade world depth range with no per-material branch, so no blob here reads a normal or material channel for biasing. Under AMBIENT the three DirectionalAmbient rows cb2[6..8] are each read exactly twice, once against the decoded normal and once against the reflection vector, and material code 1 suppresses the reflected term outright. No BLENDSPLIT blob in the archive carries FILTER_PCSS, FILTER_PCSSPOISSON or no filter at all, and none declares the raw t4/s4 tap those would need, so all three are rejected rather than reconstructed. The three no-AMBIENT rows additionally compile to a DXBC container that is byte-identical to the archive blob; that is pinned separately by ds1-blendsplit-native-shex.json. The three AMBIENT rows are container-identical too, and are pinned there as well: the family's o1 alpha reaches its native slot only when both MRTs are written as one four-wide add, because a bare component write of the literal 1.0 sinks past the o0 block."
   },
   "compiler": {
     "name": "fxc",
@@ -684,6 +684,21 @@
         "SPECULAR"
       ],
       "reason": "LIGHT_TYPE is the legacy adapter axis in bsdf_light_deferred.hlsl and is never a native macro"
+    },
+    {
+      "defines": [
+        "AMBIENT",
+        "AMBIENT_IBL_IN_LIGHT",
+        "BLENDSPLIT",
+        "DIRECTIONAL",
+        "DIRSPLITS=1",
+        "FILTER_PCF1",
+        "RGBSPEC",
+        "SHADOW",
+        "SHADOW_ONLY",
+        "SPECULAR"
+      ],
+      "reason": "AMBIENT_IBL_IN_LIGHT is the other legacy adapter axis in bsdf_light_deferred.hlsl; the native AMBIENT rows carry no such macro and admitting it would let an adapter macro set claim this family"
     }
   ],
   "compile_only": []

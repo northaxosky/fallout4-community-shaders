@@ -22,6 +22,10 @@
 //     FILTER_PCF9     sha1 e3b027b8c5549dc429abf8356c0a1e300616027d,  3500 B
 //     FILTER_POISSON  sha1 c56b2b7862b68c7a7753e9c543a48378cb0c607a, 19828 B
 //
+// All six compile to a DXBC container that is byte-identical to the archive
+// blob. `scripts/shaders/verify-filter-axis.ps1` re-measures the SHEX chunk of
+// each on every test run.
+//
 // The native filter axis here is exactly three wide. No BLENDSPLIT blob in the
 // archive carries FILTER_PCSS, FILTER_PCSSPOISSON or no filter at all, so this
 // source refuses those macro sets rather than inventing a branch for them - the
@@ -52,6 +56,9 @@
 #endif
 #if defined(LIGHT_TYPE)
 #  error "LIGHT_TYPE is the legacy adapter axis in bsdf_light_deferred.hlsl, not a native macro"
+#endif
+#if defined(AMBIENT_IBL_IN_LIGHT)
+#  error "AMBIENT_IBL_IN_LIGHT is a legacy adapter axis in bsdf_light_deferred.hlsl, not a native macro"
 #endif
 #if defined(GOBOPROJECTION)
 #  error "GOBOPROJECTION declares t7/s7 and is a different resource contract"
@@ -335,8 +342,10 @@ PS_OUTPUT main(PS_INPUT input)
         ambientSpecular = (fresnel * pow(ambientReflected, 2.2)) * material.y;
     }
 
-    output.specular.xyz = splitShadow + ambientSpecular;
-    output.specular.w = 1.0;
+    // Both MRTs are a split-shadow float4 plus an ambient float4. Writing o1 as
+    // one four-wide add rather than an .xyz/.w pair is what keeps the alpha in
+    // its native slot: a bare `output.specular.w = 1.0` sinks past the o0 block.
+    output.specular = float4(splitShadow.xxx, 1.0) + float4(ambientSpecular, 0.0);
     output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow.xxx, shadowBlend);
 #endif
     return output;
