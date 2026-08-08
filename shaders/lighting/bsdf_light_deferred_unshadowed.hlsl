@@ -628,7 +628,9 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// IGNOREROUGHNESS and IGNORERIM are both reconstructed here, not exempted.
+// IGNOREROUGHNESS and IGNORERIM are held to exact constant read-counts here,
+// not exempted. Numerical proof later found one texture-derived AMBIENT path
+// that those pins cannot see.
 //
 // This layer supplies the controlled no-AMBIENT pair that localises the
 // cb2[1]/cb2[2] read-count deltas. Producer oracle evidence later completed the
@@ -640,14 +642,16 @@ PS_OUTPUT main(PS_INPUT input)
 //   IGNORERIM, no SPECULAR         12d92cd3 142 -> b4337a89 130 instrs
 //   IGNORERIM, with SPECULAR       9f44ba67 196 -> fcabd749 187 instrs
 //
-// In this unshadowed layer IGNOREROUGHNESS removes the roughness-driven
-// visibility geometry and rim term while retaining the roughness-dependent
-// ambient exponent. The deleted `tangentL` and `fresEdge` account for the two
-// lost cb2[1] reads, and the deleted rim product for the one lost cb2[2] read.
-// IGNORERIM removes the rim term only, costing one cb2[2] read and no cb2[1].
+// Native 987c4e79 replaces the roughness-dependent ambient exponent retained by
+// 477c3e1e with the fixed square, in addition to removing the roughness-driven
+// visibility geometry and rim term. This source still retains that exponent
+// under IGNOREROUGHNESS, so the 987c4e79 semantic path remains for a later wave.
+// The deleted `tangentL` and `fresEdge` account for the two lost cb2[1] reads,
+// and the deleted rim product for the one lost cb2[2] read. IGNORERIM removes
+// the rim term only, costing one cb2[2] read and no cb2[1].
 //
-// Both macros are therefore handled, not #undef'd and not mapped onto another
-// axis, and neither manifest declares a count-exemption axis.
+// Both macro axes remain explicit, not #undef'd or mapped onto another axis,
+// and neither manifest declares a count-exemption axis.
 //
 // What IGNOREROUGHNESS does NOT remove is pinned just as deliberately, because
 // "it drops a whole lobe" is the obvious wrong hypothesis. Measured across both
@@ -656,6 +660,6 @@ PS_OUTPUT main(PS_INPUT input)
 // and both Kajiya-Kay shifted-tangent sincos lobes survive in every member of
 // both pairs. The ambient gradient is untouched too - cb2[6..8] hold at 2 reads
 // each across the AMBIENT pair. Only cb2[1] (5 -> 3) and cb2[2] (6 -> 5) move.
-// The ~30 removed instructions are arithmetic on already-loaded values, with
-// exactly one log+exp pair (the rim's pow) and one sqrt, which is why so much
-// instruction count can vanish while only two constant registers change.
+// The fixed-square substitution is texture-derived, so the read-count gate
+// cannot distinguish it. Native removes one log and two exps across the ambient
+// exponent and rim, plus one sqrt, while only those two constant registers move.

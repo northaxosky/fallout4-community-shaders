@@ -371,13 +371,14 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   bodies here are independently reconstructed, and nothing is factored into a shared
   `.hlsli` on similarity alone.
 
-  Both risk axes are adjudicated from controlled, semantically active pairs inside
-  this layer, so neither is exempted, and both are pinned per register rather than
-  treated as a scalar toggle. `IGNOREROUGHNESS` is measured on two pairs -
-  039c8935/28858d7b with no `AMBIENT`, and 477c3e1e/987c4e79 with it. Counting
-  instructions only (excluding the 15 `dcl_` lines) the pairs run 181 -> 151 and
-  208 -> 179, so the macro removes ~30 instructions either way, independently of
-  `AMBIENT`.
+  Both risk axes have exact constant read-count pins rather than exemptions.
+  `IGNOREROUGHNESS` is measured on two pairs - 039c8935/28858d7b with no
+  `AMBIENT`, and 477c3e1e/987c4e79 with it. Counting instructions only
+  (excluding the 15 `dcl_` lines), the pairs run 181 -> 151 and 208 -> 179.
+  Native 477c3e1e retains `(3 - matSample.x)`, while its IGNOREROUGHNESS target
+  987c4e79 uses the fixed square. The AMBIENT pair's exact -900 B /
+  -29-instruction reduction therefore covers visibility and rim removal plus
+  that fixed-square substitution.
 
   What moves, and what does not, is the whole point:
 
@@ -390,27 +391,28 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   | `cb12[30]` | 1 -> 1 | 1 -> 1 |
   | `cb2[6..8]` | n/a | 2 -> 2 each |
 
-  So `IGNOREROUGHNESS` removes the roughness visibility geometry, collapsing the
-  default branch's diffuse to a plain N·L, **and** the rim term. It does **not**
-  touch the material-code-1 hair specular path: `cb12[28]` `HairSpecParams` and
-  `cb12[29]` `HairSpecShift` hold at 4 and 2 across both pairs, and the two
-  Kajiya-Kay `sincos` shifted-tangent lobes survive in both members of both pairs.
-  Nor does it touch the ambient gradient: `cb2[6..8]` hold at 2 reads each across
-  the `AMBIENT` pair. The ~30 removed instructions are spread across
-  `add`/`div`/`dp3`/`mad`/`mul`/`max` with exactly one `log`+`exp` pair (the rim's
-  `pow`) and one `sqrt` - arithmetic on already-loaded values, which is why only two
-  constant registers move at all.
+  `IGNOREROUGHNESS` removes the roughness visibility geometry, collapsing the
+  default branch's diffuse to a plain N·L, and the rim term. The AMBIENT target
+  also replaces its roughness-dependent exponent with the fixed square. It does
+  **not** touch the material-code-1 hair specular path: `cb12[28]`
+  `HairSpecParams` and `cb12[29]` `HairSpecShift` hold at 4 and 2 across both
+  pairs, and both Kajiya-Kay `sincos` lobes survive. Nor does it touch the
+  ambient gradient: `cb2[6..8]` hold at 2 reads each. Native removes one `log`
+  and two `exp` instructions across the ambient exponent and rim, plus one
+  `sqrt`; the fixed-square substitution is texture-derived and changes no
+  constant read count.
 
-  This is the first `IGNOREROUGHNESS` pair with no `AMBIENT` present, and it explains
-  the shadowed `DIRSPLITS=2` family's read-count deltas - two fewer `cb2[1]`
-  reads and one fewer `cb2[2]` read - but not its complete math. The unshadowed
-  `AMBIENT` path retains the roughness-dependent exponent; producer execution
-  proof shows the shadowed `AMBIENT` path instead uses the fixed square.
-  `IGNORERIM` is measured on
+  The no-`AMBIENT` pair explains the shadowed family's two fewer `cb2[1]` reads
+  and one fewer `cb2[2]` read, not its complete math. The current unshadowed
+  source has exact constant read counts but still retains the exponent for
+  987c4e79, so that path remains numerically outstanding. Direct same-fixture
+  WARP measured zero divergence for the fixed-square candidate and
+  10,747/4,109 divergent pixels for the retained-exponent candidate. Shadowed
+  DS2 and DS3 use the fixed square and are producer-proven. `IGNORERIM` is measured on
   12d92cd3/b4337a89 and 9f44ba67/fcabd749: it removes only the rim term, for exactly
-  one fewer `cb2[2]` read. Both are reconstructed, so
-  `scope.count_exemption_axis` is `null` in both manifests and every one of the nine
-  entries is held to exact per-register read-counts.
+  one fewer `cb2[2]` read. Both axes retain exact read-count coverage:
+  `scope.count_exemption_axis` is `null` in both manifests and every one of the
+  nine entries is held to exact per-register read-counts.
 
   The `CB12` size is the one pin this layer originally got wrong, which is worth
   recording because the failure was silent. `cb12[30]` was declared for every
