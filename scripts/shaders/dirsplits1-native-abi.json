@@ -24,9 +24,9 @@
   "source": "shaders/lighting/bsdf_light_deferred_dirsplits1.hlsl",
   "source_provenance": {
     "source": "shaders/lighting/bsdf_light_deferred_dirsplits1.hlsl",
-    "sha256": "6ac7815128340a80db1283e274cc9998c911410c97c15b2b7922a9a2f68fd986",
+    "sha256": "cff282ed18e8e7d51af3dff8e9bcbdac1b3e9aa46137863ea467c55d125d2c16",
     "producer_repository": "northaxosky/fallout4-re",
-    "producer_commit": "5b08e2a8f667faebd6bf9fd333192c56e5f3fe57",
+    "producer_commit": "d6acdf28bad06310588ef44fd2529a0f4a92f994",
     "producer_source": "shaders/src/light/bsdf_light_directional_ds1.hlsl",
     "note": "Exact working-tree byte identity of the producer-preserved source; provenance and source binding, not a SHEX claim."
   },
@@ -108,9 +108,203 @@
         "dcl_output o0.xyzw",
         "dcl_output o1.xyzw"
       ]
+    },
+    "pcss_dynamic": {
+      "cb": {
+        "b12": [
+          31,
+          "immediateIndexed"
+        ],
+        "b2": [
+          25,
+          "dynamicIndexed"
+        ]
+      },
+      "srv": {
+        "t0": "texture2d",
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d",
+        "t4": "texture2darray",
+        "t5": "texture2darray"
+      },
+      "sampler": {
+        "s0": "mode_default",
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default",
+        "s4": "mode_default",
+        "s5": "mode_comparison"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw",
+        "dcl_output o1.xyzw"
+      ]
     }
   },
   "entries": [
+    {
+      "native_blob_sha1": "42b270dd2f5aa8f9238314a376a1f0ceec580d5d",
+      "native_blob_sha256": "a9df4ec8b2d421486f858db74f54c1781da40f3878deee1f3b8e0f15eabc8d2a",
+      "native_blob_bytes": 8024,
+      "producer_status": "pass",
+      "defines": [
+        "FILTER_PCSS"
+      ],
+      "abi_group": "pcss_dynamic",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 0,
+      "immediate_constant_vectors_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          9,
+          11,
+          12,
+          13,
+          21,
+          24
+        ]
+      },
+      "cb_read_counts": {
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1,
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[9]": 4,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[21]": 6,
+        "cb2[24]": 1
+      },
+      "candidate_blob_sha256": "25f4e429691df3cfae35af0bbcbcb65145fa4bf1116f6245b1197f681186c8e8",
+      "candidate_blob_bytes": 10588,
+      "shex_diagnostic": {
+        "identity": false,
+        "native": {
+          "fourcc": "SHEX",
+          "bytes": 7808,
+          "sha256": "e32f517ebc4ed86ea0c2ed123019a831f030bedd626df557aefc2adc989a0abb"
+        },
+        "candidate": {
+          "fourcc": "SHEX",
+          "bytes": 7728,
+          "sha256": "e7c7bb85832c7883b46966ec3ef22ea3baf98a6b87f55274ca06ea3d34e292ae"
+        }
+      }
+    },
+    {
+      "native_blob_sha1": "8ccc1b02d0efde734ae4d0d5f58cbe986c5e8b0c",
+      "native_blob_sha256": "4185adc28b7b15dc55749aa74a52435010acb830403faccb5a5cb4692cab4be5",
+      "native_blob_bytes": 8748,
+      "producer_status": "pass",
+      "defines": [
+        "AMBIENT",
+        "FILTER_PCSS"
+      ],
+      "abi_group": "pcss_dynamic",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "immediate_constant_vectors": 0,
+      "immediate_constant_vectors_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "cb_reads": {
+        "cb12": [
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          28,
+          29,
+          30
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          6,
+          7,
+          8,
+          9,
+          11,
+          12,
+          13,
+          21,
+          24
+        ]
+      },
+      "cb_read_counts": {
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[28]": 4,
+        "cb12[29]": 2,
+        "cb12[30]": 1,
+        "cb2[0]": 1,
+        "cb2[1]": 5,
+        "cb2[2]": 6,
+        "cb2[6]": 2,
+        "cb2[7]": 2,
+        "cb2[8]": 2,
+        "cb2[9]": 4,
+        "cb2[11]": 1,
+        "cb2[12]": 1,
+        "cb2[13]": 1,
+        "cb2[21]": 6,
+        "cb2[24]": 1
+      },
+      "candidate_blob_sha256": "86c3f2a23d7a7e2e29c52a24544becee1a196bd4431d2d77281df4a018c37ec8",
+      "candidate_blob_bytes": 11588,
+      "shex_diagnostic": {
+        "identity": false,
+        "native": {
+          "fourcc": "SHEX",
+          "bytes": 8532,
+          "sha256": "6c4b972b104ac8775fe0fcc1ce8ac8414f24587a8be9ca25e20c5530ea2ba2d2"
+        },
+        "candidate": {
+          "fourcc": "SHEX",
+          "bytes": 8532,
+          "sha256": "79007dbd92e65069909e1798241d6119c8a3bddd1fac5207f5061ac77d34c6e9"
+        }
+      }
+    },
     {
       "native_blob_sha1": "9fc11553c6068eaccff5a603cf038a9b4cc65546",
       "native_blob_sha256": "116d40dcca2a2f33effc52ad9050a53a7badeee5132f68e9eddf1cddbcf54750",
@@ -760,17 +954,6 @@
         "DIRSPLITS=1",
         "FILTER_PCF1",
         "FILTER_PCF9",
-        "RGBSPEC",
-        "SHADOW",
-        "SPECULAR"
-      ]
-    },
-    {
-      "reason": "the DIRSPLITS=1 PCSS row is producer-unproven and remains excluded",
-      "defines": [
-        "DIRECTIONAL",
-        "DIRSPLITS=1",
-        "FILTER_PCSS",
         "RGBSPEC",
         "SHADOW",
         "SPECULAR"

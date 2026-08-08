@@ -11,19 +11,17 @@
 // DIRSPLITS=1 has three projection rows at CB2[11..13] and no FadeDistances
 // read at all, where DIRSPLITS=2 has six rows plus CB2[10].
 //
-// Fixed packet scope: the six archive blobs carrying
+// Fixed packet scope: the eight archive blobs carrying
 // DIRECTIONAL + SHADOW + SPECULAR + RGBSPEC + DIRSPLITS=1 with a comparison
 // filter, crossed with AMBIENT.
 //   FILTER_PCF1              sha1 9fc11553c6068eaccff5a603cf038a9b4cc65546,  6260 B
 //   FILTER_PCF1    + AMBIENT sha1 cf3f9141478b244932e875909255d1ebde3373e5,  6984 B
 //   FILTER_PCF9              sha1 aa721295cd3b1ff82646b52dded82d88566224cd,  6676 B
 //   FILTER_PCF9    + AMBIENT sha1 b732fcfa4b24e58f1876af206d794876d1cb962a,  7408 B
+//   FILTER_PCSS              sha1 42b270dd2f5aa8f9238314a376a1f0ceec580d5d,  8024 B
+//   FILTER_PCSS    + AMBIENT sha1 8ccc1b02d0efde734ae4d0d5f58cbe986c5e8b0c,  8748 B
 //   FILTER_POISSON           sha1 02427236dcf3dc126e41ad38aaf2c07aedd43b5f, 23012 B
 //   FILTER_POISSON + AMBIENT sha1 a1d88864cd30485d84f98e36eaf281d15bd15c47, 23736 B
-//
-// FILTER_PCSS is deliberately out of scope and rejected below. The archive has
-// a DIRSPLITS=1 PCSS pair (42b270dd, 8ccc1b02) whose declarations add the raw
-// t4/s4 blocker resource; it stays unproven until its own packet.
 //
 // Shadow subroot is bsdf_light_deferred_shadow_only.hlsl's DIRSPLITS=1
 // arrangement - the cascade slice and world-scale vector arrive from
@@ -64,10 +62,11 @@
       + defined(FILTER_PCSSPOISSON) + defined(FILTER_POISSON)) > 1
 #  error "FILTER_* macros are mutually exclusive"
 #endif
-#if defined(FILTER_PCSS) || defined(FILTER_PCSSPOISSON)
-#  error "the DIRSPLITS=1 PCSS pair declares the raw t4 blocker resource and is out of this packet's scope"
+#ifdef FILTER_PCSSPOISSON
+#  error "FILTER_PCSSPOISSON is not a DIRSPLITS=1 full-BRDF permutation"
 #endif
-#if !defined(FILTER_PCF1) && !defined(FILTER_PCF9) && !defined(FILTER_POISSON)
+#if !defined(FILTER_PCF1) && !defined(FILTER_PCF9) && !defined(FILTER_PCSS) \
+    && !defined(FILTER_POISSON)
 #  error "the archive has no unfiltered DIRSPLITS=1 full-BRDF blob; define one comparison FILTER_*"
 #endif
 
@@ -80,10 +79,9 @@
 // Internal selectors.
 
 // CB2[21..23] `ShadowWorldScale` is read only where the cascade's world-space
-// near/far pair is needed; at DIRSPLITS=1 that is the Poisson depth bias, and
-// the read is indexed by the runtime slice, which is what promotes the CB2
-// declaration to dynamicIndexed.
-#ifdef FILTER_POISSON
+// near/far pair is needed: the PCSS penumbra remap or Poisson depth bias. The
+// runtime slice promotes the CB2 declaration to dynamicIndexed.
+#if defined(FILTER_PCSS) || defined(FILTER_POISSON)
 #  define FO4_DS1_USES_WORLD_SCALE 1
 #endif
 
@@ -162,14 +160,16 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_idx24_distance_fade;
 };
 
-// Resource bindings. Every blob in this packet declares the comparison tap
-// only; the raw t4/s4 blocker resource belongs to the out-of-scope PCSS pair.
+// Resource bindings. PCSS alone adds the raw blocker atlas at t4/s4.
 
 Texture2D<float4> g_tGbufferAlbedo   : register(t0);
 Texture2D<float4> g_tGbufferNormal   : register(t1);
 Texture2D<float4> g_tGbufferMaterial : register(t2);
 Texture2D<float4> g_tMainDepth       : register(t3);
 
+#ifdef FILTER_PCSS
+Texture2DArray<float4> g_tCascadeShadowRaw : register(t4);
+#endif
 Texture2DArray<float4> g_tCascadeShadowCmp : register(t5);
 
 SamplerState g_sGbufferAlbedo   : register(s0);
@@ -177,6 +177,9 @@ SamplerState g_sGbufferNormal   : register(s1);
 SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth       : register(s3);
 
+#ifdef FILTER_PCSS
+SamplerState g_sCascadeShadowRaw : register(s4);
+#endif
 SamplerComparisonState g_sCascadeShadowCmp : register(s5);
 
 // Helpers.
@@ -245,6 +248,56 @@ float ComputeCascadeShadow(float3 posView, float slice
         }
     }
     return sum * (1.0 / 9.0);
+
+#elif defined(FILTER_PCSS)
+    float2 searchStep = 1.0 / cascadeScale.xy;
+    float2 blocker = 0.0;
+    [loop]
+    for (int bx = 0; bx < 5; ++bx)
+    {
+        float offsetX = float(bx - 2);
+        [loop]
+        for (int by = 0; by < 5; ++by)
+        {
+            float offsetY = float(by - 2);
+            float2 tapUV = float2(offsetX, offsetY) * searchStep + shadowUV;
+            float tapDepth = g_tCascadeShadowRaw.Sample(
+                g_sCascadeShadowRaw, float3(tapUV, slice)).x;
+            float2 accumulated = float2(blocker.x + tapDepth, blocker.y + 1.0);
+            blocker = tapDepth < shadowZ ? accumulated : blocker;
+        }
+    }
+
+    if (blocker.y == 0.0)
+        return 1.0;
+
+    float centerDepth = g_tCascadeShadowRaw.Sample(
+        g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
+    float sum = centerDepth >= shadowZ ? 1.0 : 0.0;
+
+    float averageBlocker = blocker.x / blocker.y;
+    float worldRange = cascadeScale.w - cascadeScale.z;
+    float receiverWorld = worldRange * shadowZ + cascadeScale.z;
+    float blockerWorld = worldRange * averageBlocker + cascadeScale.z;
+    float separation = saturate((receiverWorld - blockerWorld) * (1.0 / 128.0));
+    float penumbra = blockerWorld < cascadeScale.z + 0.001
+        ? 1.9
+        : separation * 1.8 + 0.1;
+
+    [loop]
+    for (int fx = 0; fx < 5; ++fx)
+    {
+        float offsetX = penumbra * (float(fx) - 2.0);
+        [loop]
+        for (int fy = 0; fy < 5; ++fy)
+        {
+            float offsetY = penumbra * (float(fy) - 2.0);
+            float2 tapUV = searchStep * float2(offsetX, offsetY) * 0.5 + shadowUV;
+            sum += g_tCascadeShadowCmp.SampleCmpLevelZero(
+                g_sCascadeShadowCmp, float3(tapUV, slice), shadowZ);
+        }
+    }
+    return sum * 0.04;
 
 #else  // FILTER_POISSON
     // Eight loop iterations, two taps each, over the leading 16 entries of the
