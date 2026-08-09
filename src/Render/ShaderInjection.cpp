@@ -99,6 +99,16 @@ namespace cs::engine
 			}
 		} };
 
+		// Composite lacks native proof; composite and VLS also lack selectable stock SHA-1 guards.
+		constexpr std::array<ShaderInjectionTarget, 5>
+			kBaselineOwnableTargets{
+				ShaderInjectionTarget::kDeferredPrepass,
+				ShaderInjectionTarget::kBsdfLightDeferredPoint,
+				ShaderInjectionTarget::kAmbientIblPass,
+				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+			};
+
 		ShaderReplacementVariantRegistration
 			MakeDefaultVariantRegistration(
 				ShaderInjectionTarget a_target,
@@ -218,6 +228,7 @@ namespace cs::engine
 			std::atomic<bool>          compileOk{ false };
 			std::atomic<bool>          swappable{ false };
 			std::atomic<bool>          slotCollision{ false };
+			std::atomic<std::uint8_t>  requestReasons{ 0 };
 			std::atomic<std::size_t>   contributors{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
@@ -280,6 +291,8 @@ namespace cs::engine
 			bool enabled = true;
 			bool developerForceOffEnabled = false;
 			std::wstring developerSourceRoot;
+			std::array<bool,
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> baselineOwnership{};
 			std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
@@ -288,6 +301,7 @@ namespace cs::engine
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
+			std::atomic_flag swapCountersLock = ATOMIC_FLAG_INIT;
 			bool resolverRegistered = false;
 		};
 
@@ -297,6 +311,29 @@ namespace cs::engine
 			return service;
 		}
 
+		class SwapCountersGuard
+		{
+		public:
+			explicit SwapCountersGuard(Service& a_service) noexcept :
+				_service(a_service)
+			{
+				while (_service.swapCountersLock.test_and_set(
+					std::memory_order_acquire)) {
+				}
+			}
+
+			~SwapCountersGuard()
+			{
+				_service.swapCountersLock.clear(std::memory_order_release);
+			}
+
+			SwapCountersGuard(const SwapCountersGuard&) = delete;
+			SwapCountersGuard& operator=(const SwapCountersGuard&) = delete;
+
+		private:
+			Service& _service;
+		};
+
 		constexpr std::size_t ToIndex(ShaderInjectionTarget a_target)
 		{
 			return static_cast<std::size_t>(a_target);
@@ -305,6 +342,67 @@ namespace cs::engine
 		bool IsValidTarget(ShaderInjectionTarget a_target)
 		{
 			return ToIndex(a_target) < kTargets.size();
+		}
+
+		bool IsBaselineOwnableTarget(ShaderInjectionTarget a_target)
+		{
+			return std::ranges::find(kBaselineOwnableTargets, a_target)
+				!= kBaselineOwnableTargets.end();
+		}
+
+		enum class MatchedShaderOutcome : std::uint8_t
+		{
+			kKeptStock,
+			kCompileFailed,
+			kNotReady,
+			kDisabled,
+			kReplaced
+		};
+
+		struct RecordedSwapCounts
+		{
+			std::uint64_t targetSubstitutions = 0;
+			std::uint64_t totalSubstitutions = 0;
+		};
+
+		RecordedSwapCounts RecordMatchedShaderOutcome(
+			ShaderInjectionTarget a_target,
+			MatchedShaderOutcome a_outcome) noexcept
+		{
+			auto& service = GetService();
+			SwapCountersGuard guard(service);
+			auto& runtime = service.runtime[ToIndex(a_target)];
+			runtime.matches.fetch_add(1, std::memory_order_relaxed);
+			switch (a_outcome) {
+			case MatchedShaderOutcome::kCompileFailed:
+				runtime.passthroughCompileFail.fetch_add(
+					1, std::memory_order_relaxed);
+				break;
+			case MatchedShaderOutcome::kNotReady:
+				runtime.passthroughNotReady.fetch_add(
+					1, std::memory_order_relaxed);
+				break;
+			case MatchedShaderOutcome::kDisabled:
+				runtime.passthroughDisabled.fetch_add(
+					1, std::memory_order_relaxed);
+				break;
+			case MatchedShaderOutcome::kReplaced:
+				runtime.substitutions.fetch_add(
+					1, std::memory_order_relaxed);
+				break;
+			case MatchedShaderOutcome::kKeptStock:
+				break;
+			}
+
+			RecordedSwapCounts counts;
+			counts.targetSubstitutions =
+				runtime.substitutions.load(std::memory_order_relaxed);
+			for (const auto& targetRuntime : service.runtime) {
+				counts.totalSubstitutions +=
+					targetRuntime.substitutions.load(
+						std::memory_order_relaxed);
+			}
+			return counts;
 		}
 
 		std::string_view ContributorName(
@@ -390,6 +488,9 @@ namespace cs::engine
 			const std::vector<ShaderReplacementVariantRegistration>&
 				a_variantRegistrations,
 			bool a_developerForceOffEnabled,
+			const std::array<bool,
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>&
+				a_baselineOwnership,
 			const std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>& a_developerOverrides)
 		{
@@ -407,7 +508,15 @@ namespace cs::engine
 				if (developerOverride == DeveloperShaderOverride::kForceOff
 					&& !a_developerForceOffEnabled)
 					developerOverride = DeveloperShaderOverride::kAuto;
-				bool requested = developerOverride == DeveloperShaderOverride::kForceOn;
+				auto requestReasons = ShaderInjectionRequestReason::kNone;
+				if (a_baselineOwnership[targetIndex]) {
+					requestReasons |=
+						ShaderInjectionRequestReason::kBaselineOwnership;
+				}
+				if (developerOverride == DeveloperShaderOverride::kForceOn) {
+					requestReasons |=
+						ShaderInjectionRequestReason::kDeveloperForceOn;
+				}
 				std::vector<ShaderSlotClaim> claimedSlots;
 
 				for (std::size_t registrationIndex = 0;
@@ -453,7 +562,8 @@ namespace cs::engine
 						break;
 					}
 
-					requested = true;
+					requestReasons |=
+						ShaderInjectionRequestReason::kFeatureContributor;
 					++target.contributors;
 					target.defines.insert(registration.defines.begin(), registration.defines.end());
 					claimedSlots.insert(
@@ -464,8 +574,11 @@ namespace cs::engine
 						target.binds.push_back(registration.bind);
 				}
 
-				if (developerOverride == DeveloperShaderOverride::kForceOff)
-					requested = false;
+				if (developerOverride == DeveloperShaderOverride::kForceOff) {
+					requestReasons = ShaderInjectionRequestReason::kNone;
+				}
+				const bool requested =
+					requestReasons != ShaderInjectionRequestReason::kNone;
 
 				for (const auto& variant : a_variantRegistrations) {
 					if (variant.targetId == metadata.id)
@@ -475,6 +588,9 @@ namespace cs::engine
 				auto& runtime = GetService().runtime[targetIndex];
 				runtime.requested.store(requested, std::memory_order_relaxed);
 				runtime.slotCollision.store(target.slotCollision, std::memory_order_relaxed);
+				runtime.requestReasons.store(
+					static_cast<std::uint8_t>(requestReasons),
+					std::memory_order_relaxed);
 				runtime.contributors.store(target.contributors, std::memory_order_relaxed);
 				runtime.developerOverride = developerOverride;
 				runtime.defines = target.defines;
@@ -738,9 +854,10 @@ namespace cs::engine
 					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 
-				runtime.matches.fetch_add(1, std::memory_order_relaxed);
 				if (!runtime.requested.load(std::memory_order_relaxed)) {
-					runtime.passthroughDisabled.fetch_add(1, std::memory_order_relaxed);
+					RecordMatchedShaderOutcome(
+						variant.targetId,
+						MatchedShaderOutcome::kDisabled);
 					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 				auto replacement = variant.compilation
@@ -752,25 +869,42 @@ namespace cs::engine
 					const auto state = variant.compilation
 						? variant.compilation->GetState()
 						: ShaderVariantCompilationState::kFailed;
-					auto& counter =
+					RecordMatchedShaderOutcome(
+						variant.targetId,
 						state == ShaderVariantCompilationState::kFailed
-						? runtime.passthroughCompileFail
-						: runtime.passthroughNotReady;
-					counter.fetch_add(1, std::memory_order_relaxed);
+							? MatchedShaderOutcome::kCompileFailed
+							: MatchedShaderOutcome::kNotReady);
 					return PixelShaderSwapResolverResult::kKeepStock;
 				}
 
-				if (!a_request.output || !*a_request.output)
+				if (!a_request.output || !*a_request.output) {
+					RecordMatchedShaderOutcome(
+						variant.targetId,
+						MatchedShaderOutcome::kKeptStock);
 					return PixelShaderSwapResolverResult::kKeepStock;
+				}
 				(*a_request.output)->Release();
 				*a_request.output = replacement.detach();
-				const auto previous = runtime.substitutions.fetch_add(1, std::memory_order_relaxed);
-				if (previous == 0) {
+				const auto counts = RecordMatchedShaderOutcome(
+					variant.targetId,
+					MatchedShaderOutcome::kReplaced);
+				if (counts.targetSubstitutions == 1) {
 					L->info(
-						"Replaced PS sha={} -> {}/{}",
+						"Replaced PS sha={} -> {}/{} (target_replacements=1, total_replacements={})",
 						sha1::Sha1ToHex(a_sha),
 						kTargets[ToIndex(variant.targetId)].name,
-						variant.name);
+						variant.name,
+						counts.totalSubstitutions);
+				} else if (L->should_log(spdlog::level::debug)) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::debug,
+						"Pixel-shader replacements: target={}/{} target_total={} total={}.",
+						kTargets[ToIndex(variant.targetId)].name,
+						variant.name,
+						counts.targetSubstitutions,
+						counts.totalSubstitutions);
 				}
 				return PixelShaderSwapResolverResult::kReplaced;
 			} catch (const std::exception& e) {
@@ -1008,6 +1142,26 @@ namespace cs::engine
 		return true;
 	}
 
+	bool SetBaselineShaderOwnership(
+		ShaderInjectionTarget a_target,
+		bool a_enabled)
+	{
+		if (!IsValidTarget(a_target) || !IsBaselineOwnableTarget(a_target)) {
+			L->error(
+				"Baseline shader ownership rejected: target is not ownable.");
+			return false;
+		}
+
+		auto& service = GetService();
+		std::scoped_lock lock(service.mutex);
+		if (service.lifecycle != Lifecycle::kCollecting) {
+			LogLateMutation("Baseline shader ownership");
+			return false;
+		}
+		service.baselineOwnership[ToIndex(a_target)] = a_enabled;
+		return true;
+	}
+
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled)
 	{
 		auto& service = GetService();
@@ -1069,6 +1223,8 @@ namespace cs::engine
 			variantRegistrations;
 		std::array<DeveloperShaderOverride,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
+		std::array<bool,
+			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> baselineOwnership{};
 		std::wstring developerSourceRoot;
 		bool developerForceOffEnabled = false;
 		bool enabled = false;
@@ -1080,6 +1236,7 @@ namespace cs::engine
 			service.lifecycle = Lifecycle::kFrozen;
 			enabled = service.enabled;
 			developerForceOffEnabled = service.developerForceOffEnabled;
+			baselineOwnership = service.baselineOwnership;
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
 			registrations = service.registrations;
@@ -1092,17 +1249,22 @@ namespace cs::engine
 			CreateEagerShaderVariantCompilationPolicy();
 		std::size_t compileRequested = 0;
 		std::size_t compileSucceeded = 0;
+		std::size_t swappableVariants = 0;
+		std::vector<FrozenTarget> frozenTargets;
+		if (enabled) {
+			frozenTargets = FreezeTargets(
+				registrations,
+				variantRegistrations,
+				developerForceOffEnabled,
+				baselineOwnership,
+				developerOverrides);
+		}
 
 		if (!enabled) {
 			L->warn("Shader injection disabled by core kill switch.");
 		} else if (!a_device) {
 			L->error("Shader injection freeze failed: no D3D11 device.");
 		} else {
-			auto frozenTargets = FreezeTargets(
-				registrations,
-				variantRegistrations,
-				developerForceOffEnabled,
-				developerOverrides);
 			plan->targets.reserve(frozenTargets.size());
 			plan->variants.reserve(variantRegistrations.size());
 			std::size_t routeCount = 0;
@@ -1152,14 +1314,18 @@ namespace cs::engine
 						++targetReady;
 						onlyCompiledSha1 = prepared->compiledSha1;
 					}
-					targetSwappable = targetSwappable
-						|| std::ranges::any_of(
+					const bool variantSwappable =
+						std::ranges::any_of(
 							prepared->keys,
 							[](const auto& a_key) {
 								return a_key.variant.has_value()
 									|| a_key.expectedStockSha1
 										.has_value();
 							});
+					targetSwappable =
+						targetSwappable || variantSwappable;
+					if (variantSwappable)
+						++swappableVariants;
 					const auto replacementIndex =
 						plan->variants.size();
 					for (auto& key : prepared->keys) {
@@ -1227,9 +1393,20 @@ namespace cs::engine
 			L->warn(
 				"{} injection contributor(s) registered but no target was baked; all shaders remain stock.",
 				registrations.size());
-		} else {
-			L->info("Compiled {}/{} replacements", compileSucceeded, compileRequested);
 		}
+		const auto summary = GetShaderInjectionSummary();
+		L->info(
+			"Shader injection freeze: targets requested={} compile_attempted={} compiled_ok={} swappable={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); replacement_variants attempted={} compiled_ok={} swappable={}.",
+			summary.requested,
+			summary.compileAttempted,
+			summary.compiled,
+			summary.swappable,
+			summary.requestedByFeatureContributor,
+			summary.requestedByBaselineOwnership,
+			summary.requestedByDeveloperForceOn,
+			compileRequested,
+			compileSucceeded,
+			swappableVariants);
 	}
 
 	void DispatchShaderInjections(
@@ -1355,12 +1532,28 @@ namespace cs::engine
 		snapshot.swappable = runtime.swappable.load(std::memory_order_relaxed);
 		snapshot.slotCollision = runtime.slotCollision.load(std::memory_order_relaxed);
 		snapshot.developerOverride = runtime.developerOverride;
+		snapshot.requestReasons =
+			static_cast<ShaderInjectionRequestReason>(
+				runtime.requestReasons.load(std::memory_order_relaxed));
 		snapshot.contributors = runtime.contributors.load(std::memory_order_relaxed);
 		snapshot.defines = runtime.defines;
 		snapshot.compiledSha1 = runtime.compiledSha1;
 		snapshot.compileError = runtime.compileError;
-		snapshot.matches = runtime.matches.load(std::memory_order_relaxed);
-		snapshot.substitutions = runtime.substitutions.load(std::memory_order_relaxed);
+		{
+			SwapCountersGuard counterGuard(service);
+			snapshot.matches = runtime.matches.load(std::memory_order_relaxed);
+			snapshot.substitutions =
+				runtime.substitutions.load(std::memory_order_relaxed);
+			snapshot.passthroughCompileFail =
+				runtime.passthroughCompileFail.load(
+					std::memory_order_relaxed);
+			snapshot.passthroughNotReady =
+				runtime.passthroughNotReady.load(
+					std::memory_order_relaxed);
+			snapshot.passthroughDisabled =
+				runtime.passthroughDisabled.load(
+					std::memory_order_relaxed);
+		}
 		snapshot.dispatches = runtime.dispatches.load(std::memory_order_relaxed);
 		return snapshot;
 	}
@@ -1368,13 +1561,50 @@ namespace cs::engine
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept
 	{
 		ShaderInjectionSummary summary;
-		for (const auto& runtime : GetService().runtime) {
+		auto& service = GetService();
+		SwapCountersGuard counterGuard(service);
+		for (const auto& runtime : service.runtime) {
 			if (runtime.requested.load(std::memory_order_relaxed))
 				++summary.requested;
+			if (runtime.compileAttempted.load(std::memory_order_relaxed))
+				++summary.compileAttempted;
 			if (runtime.compileOk.load(std::memory_order_relaxed))
 				++summary.compiled;
+			if (runtime.swappable.load(std::memory_order_relaxed))
+				++summary.swappable;
+			const auto requestReasons =
+				static_cast<ShaderInjectionRequestReason>(
+					runtime.requestReasons.load(
+						std::memory_order_relaxed));
+			if (HasShaderInjectionRequestReason(
+					requestReasons,
+					ShaderInjectionRequestReason::
+						kFeatureContributor)) {
+				++summary.requestedByFeatureContributor;
+			}
+			if (HasShaderInjectionRequestReason(
+					requestReasons,
+					ShaderInjectionRequestReason::
+						kBaselineOwnership)) {
+				++summary.requestedByBaselineOwnership;
+			}
+			if (HasShaderInjectionRequestReason(
+					requestReasons,
+					ShaderInjectionRequestReason::
+						kDeveloperForceOn)) {
+				++summary.requestedByDeveloperForceOn;
+			}
 			summary.matches += runtime.matches.load(std::memory_order_relaxed);
 			summary.substitutions += runtime.substitutions.load(std::memory_order_relaxed);
+			summary.passthroughCompileFail +=
+				runtime.passthroughCompileFail.load(
+					std::memory_order_relaxed);
+			summary.passthroughNotReady +=
+				runtime.passthroughNotReady.load(
+					std::memory_order_relaxed);
+			summary.passthroughDisabled +=
+				runtime.passthroughDisabled.load(
+					std::memory_order_relaxed);
 			summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 		}
 		return summary;

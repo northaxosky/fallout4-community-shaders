@@ -2,6 +2,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
 
+#include <array>
 #include <cstddef>
 #include <iostream>
 #include <memory>
@@ -79,10 +80,88 @@ namespace
 		std::cerr << "FAIL: " << a_failure << '\n';
 		return false;
 	}
+
+	int TestBaselineOwnershipWithoutContributors()
+	{
+		constexpr std::array ownableTargets{
+			ShaderInjectionTarget::kDeferredPrepass,
+			ShaderInjectionTarget::kBsdfLightDeferredPoint,
+			ShaderInjectionTarget::kAmbientIblPass,
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+		};
+
+		bool ok = true;
+		for (const auto target : ownableTargets) {
+			ok &= Check(
+				SetBaselineShaderOwnership(target, true),
+				"ownable baseline target was rejected");
+		}
+		ok &= Check(
+			!SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kDeferredComposite,
+				true),
+			"deferred composite was accepted for baseline ownership");
+		ok &= Check(
+			!SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kVlsSliceScatter,
+				true),
+			"VLS slice scatter was accepted for baseline ownership");
+
+		FreezeAndCompileShaderInjections(nullptr);
+		for (const auto target : ownableTargets) {
+			const auto snapshot =
+				GetShaderInjectionTargetSnapshot(target);
+			ok &= Check(
+				snapshot.requested,
+				"baseline ownership did not request target");
+			ok &= Check(
+				snapshot.contributors == 0,
+				"baseline-only target gained a feature contributor");
+			ok &= Check(
+				snapshot.requestReasons
+					== ShaderInjectionRequestReason::
+						kBaselineOwnership,
+				"baseline-only target has the wrong request reason");
+			ok &= Check(
+				!snapshot.compileAttempted,
+				"null-device freeze attempted compilation");
+		}
+
+		const auto summary = GetShaderInjectionSummary();
+		ok &= Check(
+			summary.requested == ownableTargets.size(),
+			"baseline request count mismatch");
+		ok &= Check(
+			summary.requestedByBaselineOwnership
+				== ownableTargets.size(),
+			"baseline request attribution count mismatch");
+		ok &= Check(
+			summary.requestedByFeatureContributor == 0,
+			"baseline-only freeze reported feature requests");
+		ok &= Check(
+			summary.requestedByDeveloperForceOn == 0,
+			"baseline-only freeze reported developer requests");
+		if (!ok)
+			return 1;
+		std::cout
+			<< "PASS: baseline shader ownership requests targets without contributors\n";
+		return 0;
+	}
 }
 
-int main()
+int main(int a_argc, char* a_argv[])
 {
+	if (a_argc == 2
+		&& std::string_view(a_argv[1])
+			== "--baseline-ownership") {
+		return TestBaselineOwnershipWithoutContributors();
+	}
+	if (a_argc != 1) {
+		std::cerr << "FAIL: invalid arguments\n";
+		return 1;
+	}
+
 	ShaderReplacementRegistration disabledWetnessAmbient;
 	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
 	disabledWetnessAmbient.contributor = "WetnessEffects";

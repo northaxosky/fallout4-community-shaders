@@ -2,13 +2,43 @@
 #include "Feature.h"
 #include "Log.h"
 #include "Render/EnginePixelShaderLookup.h"
+#include "Render/ShaderInjection.h"
 #include "Render/ShaderMacroDiagnostics.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SwapChainHook.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
-namespace { auto* L = cs::log::Get("cs"); }
+namespace
+{
+	auto* L = cs::log::Get("cs");
+
+	bool ApplyShaderOwnershipConfig(
+		const cs::feature_config::ShaderOwnershipConfig& a_config)
+	{
+		using cs::engine::ShaderInjectionTarget;
+
+		bool applied = true;
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kDeferredPrepass,
+			a_config.enabled && a_config.targets.deferredPrepass);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kBsdfLightDeferredPoint,
+			a_config.enabled && a_config.targets.bsdfLightDeferredPoint);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kAmbientIblPass,
+			a_config.enabled && a_config.targets.ambientIblPass);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
+			a_config.enabled
+				&& a_config.targets.bsdfLightDeferredDirectional);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
+			a_config.enabled
+				&& a_config.targets.bsdfLightDeferredDirectionalIbl);
+		return applied;
+	}
+}
 
 extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Query(const F4SE::QueryInterface*, F4SE::PluginInfo* a_info)
 {
@@ -57,7 +87,9 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	cs::log::AttachToDefaultLogger();
 	const auto config = cs::feature_config::Reload();
 	if (!config.defaultLoaded) {
-		L->error("Unified default configuration unavailable; all features disabled: {}", config.defaultError);
+		L->error(
+			"Unified default configuration unavailable; all features and baseline shader ownership disabled: {}",
+			config.defaultError);
 	}
 	if (!config.userWarning.empty()) {
 		L->warn("Ignoring unified user configuration: {}", config.userWarning);
@@ -69,6 +101,19 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 		L->warn("Unified config [logging] must be a table; using logging defaults");
 	}
 	cs::log::ApplyConfigFromToml(loggingConfig);
+	const auto shaderOwnership =
+		cs::feature_config::ParseShaderOwnership(config.root);
+	if (!shaderOwnership.present) {
+		L->warn(
+			"Unified config [shader_ownership] is missing; baseline shader ownership disabled");
+	} else if (!shaderOwnership.valid) {
+		L->error(
+			"Invalid [shader_ownership] configuration; baseline shader ownership disabled: {}",
+			shaderOwnership.error);
+	} else if (!ApplyShaderOwnershipConfig(shaderOwnership.config)) {
+		L->error(
+			"Baseline shader ownership configuration was rejected; all unclaimed targets remain stock");
+	}
 	cs::env::DetectENB();
 
 	L->info("FO4CommunityShaders v{}.{}.{} loaded",

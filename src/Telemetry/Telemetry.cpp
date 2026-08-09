@@ -6,6 +6,7 @@
 #include "LogThrottle.h"
 #include "Plugin.h"
 #include "Render/RenderHooks.h"
+#include "Render/ShaderInjection.h"
 
 #include <atomic>
 #include <charconv>
@@ -87,6 +88,52 @@ namespace cs::telemetry
 			constexpr auto max = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
 			return static_cast<std::int64_t>(a_value > max ? max : a_value);
 		}
+
+		void CollectShaderInjection(Sink& a_sink)
+		{
+			const auto summary =
+				cs::engine::GetShaderInjectionSummary();
+			a_sink
+				.Field(
+					"requested",
+					static_cast<std::int64_t>(summary.requested))
+				.Field(
+					"compile_attempted",
+					static_cast<std::int64_t>(
+						summary.compileAttempted))
+				.Field(
+					"compiled_ok",
+					static_cast<std::int64_t>(summary.compiled))
+				.Field(
+					"swappable",
+					static_cast<std::int64_t>(summary.swappable))
+				.Field(
+					"requested_by_feature_contributor",
+					static_cast<std::int64_t>(
+						summary.requestedByFeatureContributor))
+				.Field(
+					"requested_by_baseline_ownership",
+					static_cast<std::int64_t>(
+						summary.requestedByBaselineOwnership))
+				.Field(
+					"requested_by_developer_force_on",
+					static_cast<std::int64_t>(
+						summary.requestedByDeveloperForceOn))
+				.Field("stock_matches", TomlInteger(summary.matches))
+				.Field(
+					"replacements",
+					TomlInteger(summary.substitutions))
+				.Field(
+					"passthrough_compile_failed",
+					TomlInteger(summary.passthroughCompileFail))
+				.Field(
+					"passthrough_not_ready",
+					TomlInteger(summary.passthroughNotReady))
+				.Field(
+					"passthrough_disabled",
+					TomlInteger(summary.passthroughDisabled))
+				.Field("dispatches", TomlInteger(summary.dispatches));
+		}
 	}
 
 	Sink& Sink::Field(std::string_view a_key, std::string_view a_value)
@@ -165,6 +212,25 @@ namespace cs::telemetry
 				return;
 
 			auto* logger = cs::log::Get("cs.telemetry");
+			try {
+				Sink sink;
+				CollectShaderInjection(sink);
+				logger->info(
+					"frame={} component=shader_injection {}",
+					frame,
+					sink.ToLine());
+			} catch (const std::exception& e) {
+				CS_LOG_ONCE(
+					logger,
+					spdlog::level::warn,
+					"Telemetry collection failed for shader_injection: {}",
+					e.what());
+			} catch (...) {
+				CS_LOG_ONCE(
+					logger,
+					spdlog::level::warn,
+					"Telemetry collection failed for shader_injection: non-standard exception");
+			}
 			for (const auto* feature : FeatureManager::Get().GetAll()) {
 				try {
 					if (!feature->ProducesTelemetry())
@@ -195,6 +261,12 @@ namespace cs::telemetry
 				root.insert_or_assign("build", CS_BUILD_DESCRIBE);
 				root.insert_or_assign("frame", TomlInteger(CurrentFrame()));
 				root.insert_or_assign("logging", cs::log::ConfigAsToml());
+
+				Sink shaderInjection;
+				CollectShaderInjection(shaderInjection);
+				root.insert_or_assign(
+					"shader_injection",
+					shaderInjection.AsTable());
 
 				toml::table features;
 				for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {

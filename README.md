@@ -86,6 +86,11 @@ A feature loads only when its `[features.<Name>].load` value is `true`. A malfor
 disables all features; a malformed User file is ignored. Presets configure only features that
 are already activated - they cannot activate Imagespace or any other feature.
 
+Baseline shader ownership is separately opt-in and does not load a feature. Set `enabled = true`
+under `[shader_ownership]` in the User TOML to replace the proven deferred targets with their
+stock-equivalent HLSL; the per-target switches in the shipped Default remain available for bring-up
+opt-outs. Restart after changing ownership.
+
 ---
 
 ## Controls

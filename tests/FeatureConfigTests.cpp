@@ -139,12 +139,91 @@ namespace
 		CHECK(wrongLoadType.present);
 	}
 
+	void TestShaderOwnershipParsing()
+	{
+		using cs::feature_config::ParseShaderOwnership;
+
+		const auto disabled = ParseShaderOwnership(Parse(
+			"[shader_ownership]\n"
+			"enabled = false\n"
+			"[shader_ownership.targets]\n"
+			"deferred_prepass = true\n"
+			"bsdf_light_deferred_point = true\n"
+			"ambient_ibl_pass = true\n"
+			"bsdf_light_deferred_directional = true\n"
+			"bsdf_light_deferred_directional_ibl = true\n"));
+		CHECK(disabled.present);
+		CHECK(disabled.valid);
+		CHECK(!disabled.config.enabled);
+		CHECK(disabled.config.targets.deferredPrepass);
+		CHECK(disabled.config.targets.bsdfLightDeferredPoint);
+		CHECK(disabled.config.targets.ambientIblPass);
+		CHECK(disabled.config.targets.bsdfLightDeferredDirectional);
+		CHECK(disabled.config.targets.bsdfLightDeferredDirectionalIbl);
+
+		const auto optedOut = ParseShaderOwnership(Parse(
+			"[shader_ownership]\n"
+			"enabled = true\n"
+			"[shader_ownership.targets]\n"
+			"deferred_prepass = true\n"
+			"bsdf_light_deferred_point = false\n"
+			"ambient_ibl_pass = true\n"
+			"bsdf_light_deferred_directional = true\n"
+			"bsdf_light_deferred_directional_ibl = true\n"));
+		CHECK(optedOut.present);
+		CHECK(optedOut.valid);
+		CHECK(optedOut.config.enabled);
+		CHECK(!optedOut.config.targets.bsdfLightDeferredPoint);
+
+		const auto missing = ParseShaderOwnership(Parse(""));
+		CHECK(!missing.present);
+		CHECK(missing.valid);
+		CHECK(!missing.config.enabled);
+
+		const auto wrongEnabled = ParseShaderOwnership(Parse(
+			"[shader_ownership]\n"
+			"enabled = \"yes\"\n"));
+		CHECK(wrongEnabled.present);
+		CHECK(!wrongEnabled.valid);
+		CHECK(!wrongEnabled.config.enabled);
+
+		const auto missingTarget = ParseShaderOwnership(Parse(
+			"[shader_ownership]\n"
+			"enabled = true\n"
+			"[shader_ownership.targets]\n"
+			"deferred_prepass = true\n"
+			"bsdf_light_deferred_point = true\n"
+			"ambient_ibl_pass = true\n"
+			"bsdf_light_deferred_directional = true\n"));
+		CHECK(missingTarget.present);
+		CHECK(!missingTarget.valid);
+		CHECK(!missingTarget.config.enabled);
+
+		const auto unsupportedTarget = ParseShaderOwnership(Parse(
+			"[shader_ownership]\n"
+			"enabled = true\n"
+			"[shader_ownership.targets]\n"
+			"deferred_prepass = true\n"
+			"bsdf_light_deferred_point = true\n"
+			"ambient_ibl_pass = true\n"
+			"bsdf_light_deferred_directional = true\n"
+			"bsdf_light_deferred_directional_ibl = true\n"
+			"deferred_composite = true\n"));
+		CHECK(unsupportedTarget.present);
+		CHECK(!unsupportedTarget.valid);
+		CHECK(!unsupportedTarget.config.enabled);
+	}
+
 	void TestDeepMerge()
 	{
 		auto base = Parse(
 			"[logging]\n"
 			"level = \"info\"\n"
 			"telemetry = false\n"
+			"[shader_ownership]\n"
+			"enabled = false\n"
+			"[shader_ownership.targets]\n"
+			"ambient_ibl_pass = true\n"
 			"[features.One]\n"
 			"load = false\n"
 			"[features.One.settings]\n"
@@ -155,12 +234,18 @@ namespace
 		const auto user = Parse(
 			"[logging]\n"
 			"telemetry = true\n"
+			"[shader_ownership]\n"
+			"enabled = true\n"
+			"[shader_ownership.targets]\n"
+			"ambient_ibl_pass = false\n"
 			"[features.One.settings]\n"
 			"enabled = true\n");
 
 		cs::feature_config::DeepMerge(base, user);
 		CHECK(base["logging"]["level"].value<std::string>() == std::optional<std::string>{ "info" });
 		CHECK(base["logging"]["telemetry"].value<bool>() == std::optional<bool>{ true });
+		CHECK(base["shader_ownership"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(base["shader_ownership"]["targets"]["ambient_ibl_pass"].value<bool>() == std::optional<bool>{ false });
 		CHECK(base["features"]["One"]["load"].value<bool>() == std::optional<bool>{ false });
 		CHECK(base["features"]["One"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
 		CHECK(base["features"]["One"]["settings"]["quality"].value<std::int64_t>() == std::optional<std::int64_t>{ 2 });
@@ -352,6 +437,17 @@ namespace
 		}
 		CHECK(actual == expected);
 
+		const auto ownership =
+			cs::feature_config::ParseShaderOwnership(loadResult.table);
+		CHECK(ownership.present);
+		CHECK(ownership.valid);
+		CHECK(!ownership.config.enabled);
+		CHECK(ownership.config.targets.deferredPrepass);
+		CHECK(ownership.config.targets.bsdfLightDeferredPoint);
+		CHECK(ownership.config.targets.ambientIblPass);
+		CHECK(ownership.config.targets.bsdfLightDeferredDirectional);
+		CHECK(ownership.config.targets.bsdfLightDeferredDirectionalIbl);
+
 		for (const std::string_view key : { "ScreenSpaceGI", "WetnessEffects" }) {
 			const auto* settings =
 				(*features)[key]["settings"].as_table();
@@ -381,6 +477,7 @@ int main(int a_argc, char* a_argv[])
 			const TestDirectory directory(executableDirectory);
 			TestFileLoading(directory.path);
 			TestActivationParsing();
+			TestShaderOwnershipParsing();
 			TestDeepMerge();
 			TestMergedLoadFailureModes(directory.path);
 			TestAtomicWriteRoundTrip(directory.path);

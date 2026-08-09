@@ -50,6 +50,31 @@ namespace cs::feature_config
 	toml::table GetMergedRoot();
 	std::optional<toml::table> GetFeature(std::string_view a_key);
 
+	struct ShaderOwnershipTargets
+	{
+		bool deferredPrepass{ false };
+		bool bsdfLightDeferredPoint{ false };
+		bool ambientIblPass{ false };
+		bool bsdfLightDeferredDirectional{ false };
+		bool bsdfLightDeferredDirectionalIbl{ false };
+	};
+
+	struct ShaderOwnershipConfig
+	{
+		bool enabled{ false };
+		ShaderOwnershipTargets targets;
+	};
+
+	struct ShaderOwnershipParseResult
+	{
+		ShaderOwnershipConfig config;
+		bool present{ false };
+		bool valid{ true };
+		std::string error;
+	};
+
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root);
+
 	struct WriteResult
 	{
 		bool success{ false };

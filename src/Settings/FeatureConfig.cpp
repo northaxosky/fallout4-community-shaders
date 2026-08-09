@@ -1,5 +1,6 @@
 #include "Settings/FeatureConfig.h"
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -157,6 +158,24 @@ namespace cs::feature_config
 			}
 			return AtomicWrite(a_path, user);
 		}
+
+		bool ReadRequiredOwnershipBool(
+			const toml::table& a_table,
+			std::string_view a_key,
+			std::string_view a_path,
+			bool& a_value,
+			std::string& a_error)
+		{
+			const auto status = ReadBool(a_table, a_key, a_value);
+			if (status == ScalarReadStatus::kValid)
+				return true;
+
+			a_error = std::string(a_path) + "." + std::string(a_key)
+				+ (status == ScalarReadStatus::kMissing
+						? " is required"
+						: " must be a boolean");
+			return false;
+		}
 	}
 
 	FileLoadResult LoadFile(const std::filesystem::path& a_path)
@@ -292,6 +311,88 @@ namespace cs::feature_config
 			return std::nullopt;
 		}
 		return *feature->as_table();
+	}
+
+	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)
+	{
+		ShaderOwnershipParseResult result;
+		const auto* ownershipNode = a_root.get("shader_ownership");
+		if (!ownershipNode)
+			return result;
+
+		result.present = true;
+		const auto* ownership = ownershipNode->as_table();
+		if (!ownership) {
+			result.valid = false;
+			result.error = "shader_ownership must be a table";
+			return result;
+		}
+
+		if (!ReadRequiredOwnershipBool(
+				*ownership,
+				"enabled",
+				"shader_ownership",
+				result.config.enabled,
+				result.error)) {
+			result.valid = false;
+			result.config = {};
+			return result;
+		}
+
+		const auto* targetsNode = ownership->get("targets");
+		const auto* targets = targetsNode ? targetsNode->as_table() : nullptr;
+		if (!targets) {
+			result.valid = false;
+			result.config = {};
+			result.error = targetsNode
+				? "shader_ownership.targets must be a table"
+				: "shader_ownership.targets is required";
+			return result;
+		}
+
+		constexpr std::array<std::string_view, 5> targetKeys{
+			"deferred_prepass",
+			"bsdf_light_deferred_point",
+			"ambient_ibl_pass",
+			"bsdf_light_deferred_directional",
+			"bsdf_light_deferred_directional_ibl"
+		};
+		for (const auto& [key, node] : *targets) {
+			(void)node;
+			if (std::ranges::find(targetKeys, key.str()) == targetKeys.end()) {
+				result.valid = false;
+				result.config = {};
+				result.error = "shader_ownership.targets contains unknown target '"
+					+ std::string(key.str()) + "'";
+				return result;
+			}
+		}
+
+		const auto readTarget = [&](std::string_view a_key, bool& a_value) {
+			return ReadRequiredOwnershipBool(
+				*targets,
+				a_key,
+				"shader_ownership.targets",
+				a_value,
+				result.error);
+		};
+		if (!readTarget("deferred_prepass", result.config.targets.deferredPrepass)
+			|| !readTarget(
+				"bsdf_light_deferred_point",
+				result.config.targets.bsdfLightDeferredPoint)
+			|| !readTarget(
+				"ambient_ibl_pass",
+				result.config.targets.ambientIblPass)
+			|| !readTarget(
+				"bsdf_light_deferred_directional",
+				result.config.targets.bsdfLightDeferredDirectional)
+			|| !readTarget(
+				"bsdf_light_deferred_directional_ibl",
+				result.config.targets.bsdfLightDeferredDirectionalIbl)) {
+			result.valid = false;
+			result.config = {};
+		}
+		return result;
 	}
 
 	WriteResult UpdateUserTableAt(

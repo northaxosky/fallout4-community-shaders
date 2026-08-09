@@ -359,7 +359,14 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		NAME ShaderInjectionRegistration
 		COMMAND ShaderInjectionRegistrationTests
 	)
+	add_test(
+		NAME ShaderInjectionBaselineOwnership
+		COMMAND ShaderInjectionRegistrationTests --baseline-ownership
+	)
 	set_tests_properties(ShaderInjectionRegistration PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionBaselineOwnership PROPERTIES
 		LABELS "render;shader;unit"
 	)
 endif()

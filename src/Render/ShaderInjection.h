@@ -87,6 +87,41 @@ namespace cs::engine
 		kForceOff
 	};
 
+	enum class ShaderInjectionRequestReason : std::uint8_t
+	{
+		kNone = 0,
+		kFeatureContributor = 1U << 0,
+		kBaselineOwnership = 1U << 1,
+		kDeveloperForceOn = 1U << 2
+	};
+
+	constexpr ShaderInjectionRequestReason operator|(
+		ShaderInjectionRequestReason a_left,
+		ShaderInjectionRequestReason a_right) noexcept
+	{
+		return static_cast<ShaderInjectionRequestReason>(
+			static_cast<std::uint8_t>(a_left)
+			| static_cast<std::uint8_t>(a_right));
+	}
+
+	constexpr ShaderInjectionRequestReason& operator|=(
+		ShaderInjectionRequestReason& a_left,
+		ShaderInjectionRequestReason a_right) noexcept
+	{
+		a_left = a_left | a_right;
+		return a_left;
+	}
+
+	constexpr bool HasShaderInjectionRequestReason(
+		ShaderInjectionRequestReason a_reasons,
+		ShaderInjectionRequestReason a_reason) noexcept
+	{
+		return (
+			static_cast<std::uint8_t>(a_reasons)
+			& static_cast<std::uint8_t>(a_reason))
+			!= 0;
+	}
+
 	struct ShaderInjectionDefineMetadata
 	{
 		std::string_view name;
@@ -113,21 +148,34 @@ namespace cs::engine
 		bool                   swappable = false;
 		bool                   slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
+		ShaderInjectionRequestReason requestReasons =
+			ShaderInjectionRequestReason::kNone;
 		std::size_t            contributors = 0;
 		ShaderInjectionDefines defines;
 		std::string            compiledSha1;
 		std::string            compileError;
 		std::uint64_t          matches = 0;
 		std::uint64_t          substitutions = 0;
+		std::uint64_t          passthroughCompileFail = 0;
+		std::uint64_t          passthroughNotReady = 0;
+		std::uint64_t          passthroughDisabled = 0;
 		std::uint64_t          dispatches = 0;
 	};
 
 	struct ShaderInjectionSummary
 	{
-		std::size_t   requested = 0;
-		std::size_t   compiled = 0;
+		std::size_t requested = 0;
+		std::size_t compileAttempted = 0;
+		std::size_t compiled = 0;
+		std::size_t swappable = 0;
+		std::size_t requestedByFeatureContributor = 0;
+		std::size_t requestedByBaselineOwnership = 0;
+		std::size_t requestedByDeveloperForceOn = 0;
 		std::uint64_t matches = 0;
 		std::uint64_t substitutions = 0;
+		std::uint64_t passthroughCompileFail = 0;
+		std::uint64_t passthroughNotReady = 0;
+		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
 	};
 
@@ -142,6 +190,9 @@ namespace cs::engine
 	bool RegisterReplacementVariant(
 		ShaderReplacementVariantRegistration a_registration);
 
+	bool SetBaselineShaderOwnership(
+		ShaderInjectionTarget a_target,
+		bool a_enabled);
 	bool SetDeveloperShaderForceOffEnabled(bool a_enabled);
 	bool SetDeveloperShaderOverride(ShaderInjectionTarget a_target, DeveloperShaderOverride a_override);
 	bool SetDeveloperShaderSourceRoot(std::wstring a_sourceRoot);
