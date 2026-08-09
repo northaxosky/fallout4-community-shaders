@@ -434,6 +434,18 @@ set_tests_properties(FilterAxisNativeShex PROPERTIES
 	TIMEOUT 300
 )
 
+set(_strictness_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-strictness-invariance.ps1")
+add_test(
+	NAME ShaderStrictnessInvariance
+	COMMAND pwsh -NoProfile -ExecutionPolicy Bypass -Command
+		"if ($env:FXC_PATH) { & '${_strictness_script}' -FxcPath $env:FXC_PATH } else { & '${_strictness_script}' }"
+	WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+)
+set_tests_properties(ShaderStrictnessInvariance PROPERTIES
+	LABELS "shader;parity"
+	TIMEOUT 600
+)
+
 set(_pointomni_script "${CMAKE_SOURCE_DIR}/scripts/shaders/verify-pointomni-admission.ps1")
 add_test(
 	NAME PointOmniShadowAdmission
