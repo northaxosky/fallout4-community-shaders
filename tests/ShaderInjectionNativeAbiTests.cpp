@@ -62,18 +62,6 @@ namespace cs::tests
 				"c493970c042ccd90363c57596ff53f6fdd22ce5f",
 				"PrePass has no consumer admission manifest"
 			},
-			KnownRoute{
-				"ambient_ibl_pass",
-				"tilelight",
-				"2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
-				"Composite has no consumer admission manifest"
-			},
-			KnownRoute{
-				"ambient_ibl_pass",
-				"no-tilelight",
-				"6d726d0fe6b6c474da30edbffcecfa067c795873",
-				"Composite has no consumer admission manifest"
-			}
 		};
 
 		constexpr std::array kUnselectableRoutes{

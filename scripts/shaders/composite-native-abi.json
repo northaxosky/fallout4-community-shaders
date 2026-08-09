@@ -1,0 +1,314 @@
+{
+  "schema": "fo4cs.native-abi-admission",
+  "schema_version": 1,
+  "scope": {
+    "family": "BSDFComposite runtime ambient/IBL",
+    "runtime": "AE 1.11.221 archive blob set",
+    "report_label": "BSDFComposite ambient/IBL",
+    "compile_only_label": "independent-axis macro sets",
+    "count_exemption_axis": null,
+    "note": "Consumer admission for the two runtime ambient/IBL routes. Each entry binds one exact native archive blob to the selector and define set whose body has producer PASS fidelity evidence. The declaration ABI, constant-buffer read set, and exact read counts are measured from native SHEX and must match a fresh consumer compile. The SHEX diagnostic records both bodies without claiming byte identity.",
+    "evidence": "Native identities and route occurrences come from Fallout4 - Shaders.ba2 SHA-256 4ac98b8fe72385f0cd13053bf5e81203fdaabe101377011e152457b705060659, member shadersfx/shaders011.fxp SHA-256 f3254023504c4bab250162284a28efe2ed79fbf7a9b81e26d0fa9f22660d1d1f, ordinals 3495 and 3560. Declarations, read sets, read counts, and SHEX identities were measured by disassembling those blobs. Candidates were compiled from fallout4-community-shaders commit 02a236374ff9019d9f952f880c4af0ebc4586fd1 with fxc /T ps_5_0 /E main /nologo /O3."
+  },
+  "compiler": {
+    "name": "fxc",
+    "entry_point": "main",
+    "flags": [
+      "/nologo",
+      "/O3"
+    ],
+    "include_root": "source-directory"
+  },
+  "source": "shaders/lighting/BSDFComposite.hlsl",
+  "source_provenance": {
+    "source": "shaders/lighting/BSDFComposite.hlsl",
+    "sha256": "570a4a826f8ad5ac5a4ffca9f87b6b294a1ce89c8777061a85b87424a2cad759",
+    "note": "Exact CRLF working-tree bytes at fallout4-community-shaders commit 02a236374ff9019d9f952f880c4af0ebc4586fd1; provenance pin, while producer fidelity evidence remains the body claim."
+  },
+  "profile": "ps_5_0",
+  "common_defines": [
+    "BSDF_COMPOSITE_FAMILY=2"
+  ],
+  "abi_groups": {
+    "cb47": {
+      "cb": {
+        "b0": [
+          3,
+          "immediateIndexed"
+        ],
+        "b2": [
+          6,
+          "immediateIndexed"
+        ],
+        "b12": [
+          47,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d",
+        "t4": "texture2d",
+        "t5": "texture2d",
+        "t6": "texture2d",
+        "t7": "texture2d",
+        "t8": "texturecubearray",
+        "t9": "texture2d",
+        "t10": "texture2d",
+        "t14": "texture2d",
+        "t15": "texture2d"
+      },
+      "sampler": {
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default",
+        "s4": "mode_default",
+        "s5": "mode_default",
+        "s6": "mode_default",
+        "s7": "mode_default",
+        "s8": "mode_default",
+        "s9": "mode_default",
+        "s10": "mode_default",
+        "s14": "mode_default",
+        "s15": "mode_default"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw"
+      ]
+    },
+    "cb47_tilelight": {
+      "cb": {
+        "b0": [
+          3,
+          "immediateIndexed"
+        ],
+        "b2": [
+          6,
+          "immediateIndexed"
+        ],
+        "b12": [
+          47,
+          "immediateIndexed"
+        ]
+      },
+      "srv": {
+        "t1": "texture2d",
+        "t2": "texture2d",
+        "t3": "texture2d",
+        "t4": "texture2d",
+        "t5": "texture2d",
+        "t6": "texture2d",
+        "t7": "texture2d",
+        "t8": "texturecubearray",
+        "t9": "texture2d",
+        "t10": "texture2d",
+        "t11": "texture2d",
+        "t12": "texture2d",
+        "t14": "texture2d",
+        "t15": "texture2d"
+      },
+      "sampler": {
+        "s1": "mode_default",
+        "s2": "mode_default",
+        "s3": "mode_default",
+        "s4": "mode_default",
+        "s5": "mode_default",
+        "s6": "mode_default",
+        "s7": "mode_default",
+        "s8": "mode_default",
+        "s9": "mode_default",
+        "s10": "mode_default",
+        "s11": "mode_default",
+        "s12": "mode_default",
+        "s14": "mode_default",
+        "s15": "mode_default"
+      },
+      "sig": [
+        "dcl_input_ps_siv linear noperspective v0.xy, position",
+        "dcl_output o0.xyzw"
+      ]
+    }
+  },
+  "entries": [
+    {
+      "native_blob_sha1": "6d726d0fe6b6c474da30edbffcecfa067c795873",
+      "native_blob_sha256": "bb66b923c180b08452607ccea7a6f1122b5787ba85fbd0cb7e4e7c2c1f62949c",
+      "native_blob_bytes": 10756,
+      "producer_status": "pass",
+      "defines": [],
+      "abi_group": "cb47",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb0": [
+          0,
+          1,
+          2
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          5
+        ],
+        "cb12": [
+          12,
+          13,
+          14,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          30,
+          35,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46
+        ]
+      },
+      "cb_read_counts": {
+        "cb0[0]": 12,
+        "cb0[1]": 1,
+        "cb0[2]": 1,
+        "cb2[0]": 3,
+        "cb2[1]": 2,
+        "cb2[2]": 2,
+        "cb2[5]": 1,
+        "cb12[12]": 1,
+        "cb12[13]": 1,
+        "cb12[14]": 2,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[30]": 1,
+        "cb12[35]": 1,
+        "cb12[41]": 2,
+        "cb12[42]": 3,
+        "cb12[43]": 6,
+        "cb12[44]": 2,
+        "cb12[45]": 1,
+        "cb12[46]": 2
+      },
+      "candidate_blob_sha256": "ffa46bc53bbed28400f0e7511103f24c99511622a79fec5e14a03e8d241c5acc",
+      "candidate_blob_bytes": 14420,
+      "shex_diagnostic": {
+        "identity": false,
+        "native": {
+          "fourcc": "SHEX",
+          "bytes": 10600,
+          "sha256": "334b24d939772e139102d8b84f24c17b64df4804b09f616c1916666b864fb272"
+        },
+        "candidate": {
+          "fourcc": "SHEX",
+          "bytes": 10548,
+          "sha256": "e6ce0c68a6a88dacb286e9af627793b81e68c53fa6b757dcf9f4f0a941ebaba6"
+        }
+      }
+    },
+    {
+      "native_blob_sha1": "2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
+      "native_blob_sha256": "c36d04cc8e593d4840607ff3abe1f48cd2ee2db302a16101070f657a608094cd",
+      "native_blob_bytes": 10972,
+      "producer_status": "pass",
+      "defines": [
+        "TILELIGHT=1"
+      ],
+      "abi_group": "cb47_tilelight",
+      "body_reconstructed": true,
+      "count_exempt_reason": null,
+      "cb_reads": {
+        "cb0": [
+          0,
+          1,
+          2
+        ],
+        "cb2": [
+          0,
+          1,
+          2,
+          5
+        ],
+        "cb12": [
+          12,
+          13,
+          14,
+          20,
+          21,
+          22,
+          23,
+          24,
+          25,
+          26,
+          27,
+          30,
+          35,
+          41,
+          42,
+          43,
+          44,
+          45,
+          46
+        ]
+      },
+      "cb_read_counts": {
+        "cb0[0]": 12,
+        "cb0[1]": 1,
+        "cb0[2]": 1,
+        "cb2[0]": 3,
+        "cb2[1]": 2,
+        "cb2[2]": 2,
+        "cb2[5]": 1,
+        "cb12[12]": 1,
+        "cb12[13]": 1,
+        "cb12[14]": 2,
+        "cb12[20]": 1,
+        "cb12[21]": 1,
+        "cb12[22]": 1,
+        "cb12[23]": 1,
+        "cb12[24]": 1,
+        "cb12[25]": 1,
+        "cb12[26]": 1,
+        "cb12[27]": 1,
+        "cb12[30]": 1,
+        "cb12[35]": 1,
+        "cb12[41]": 2,
+        "cb12[42]": 3,
+        "cb12[43]": 6,
+        "cb12[44]": 2,
+        "cb12[45]": 1,
+        "cb12[46]": 2
+      },
+      "candidate_blob_sha256": "090cc97845a0ef19f948c4c03fa3f2ac63f469d2d9829fee466079eb186fd8f0",
+      "candidate_blob_bytes": 14832,
+      "shex_diagnostic": {
+        "identity": false,
+        "native": {
+          "fourcc": "SHEX",
+          "bytes": 10816,
+          "sha256": "26a5767997a8b63db9a06c315069feed696920b648eba8f91bc66104911ec6ac"
+        },
+        "candidate": {
+          "fourcc": "SHEX",
+          "bytes": 10764,
+          "sha256": "e69b682efc031b752da3c134ab4719dbcb80a10f9c1bca5a6fa1a89ff35b4091"
+        }
+      }
+    }
+  ],
+  "rejected": [],
+  "compile_only": []
+}
