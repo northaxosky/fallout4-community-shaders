@@ -168,7 +168,7 @@ PS_OUTPUT main(PS_INPUT input)
 
     float3 shadingData =
         g_tGbufferShadingData.SampleLevel(g_sGbufferShadingData, uv, 0).xyw;
-    float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).y;
+    float depth = g_tMainDepth.SampleLevel(g_sMainDepth, uv, 0).x;
     bool isNearPath = depth <= 0.01;
     float linearizedDepth =
         isNearPath ? depth * 100.0 : depth * 1.01 - 0.01;
@@ -283,7 +283,7 @@ PS_OUTPUT main(PS_INPUT input)
             (isNearPath ? 1.0 : 0.0) * ScreenBlurParameters.z + 1.0;
         float centerRef =
             blurDepthScale *
-            g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, uv, 0).y;
+            g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, uv, 0).x;
         float2 tapBase =
             ScreenBlurParameters.xx * float2(0.078125, 0.138890) / centerRef;
         float3 blurAccum = float3(0.0, 0.0, 0.0);
@@ -299,7 +299,7 @@ PS_OUTPUT main(PS_INPUT input)
                 float3 sampledColor =
                     g_tBlurSource.SampleLevel(g_sBlurSource, tapUv, 0).xyz;
                 float tapDepth =
-                    g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, tapUv, 0).y;
+                    g_tBlurDepthRef.SampleLevel(g_sBlurDepthRef, tapUv, 0).x;
                 float depthWeight = min(
                     abs(-tapDepth * blurDepthScale + centerRef) *
                         ScreenBlurParameters.y * 0.1,
