@@ -24,15 +24,33 @@ namespace cs::engine
 	{
 		constexpr std::array<ShaderInjectionDefineMetadata, 0> kNoDefines{};
 
-		constexpr std::array<ShaderInjectionDefineMetadata, 1> kBsdfPointDefines{ {
-			{ "LIGHT_TYPE", "2" }
+		// Macro sets and sources come from the consumer admission manifests that
+		// bind each stock blob; a route must reconstruct the blob it displaces.
+		constexpr std::array<ShaderInjectionDefineMetadata, 5> kBsdfPointDefines{ {
+			{ "DIRSPLITS", "2" },
+			{ "GOBOPROJECTION", "1" },
+			{ "POINTOMNI", "1" },
+			{ "RGBSPEC", "1" },
+			{ "SPECULAR", "1" }
 		} };
-		constexpr std::array<ShaderInjectionDefineMetadata, 1> kBsdfDirectionalDefines{ {
-			{ "LIGHT_TYPE", "1" }
+		constexpr std::array<ShaderInjectionDefineMetadata, 7> kBsdfDirectionalDefines{ {
+			{ "BLENDSPLIT", "1" },
+			{ "DIRECTIONAL", "1" },
+			{ "DIRSPLITS", "2" },
+			{ "FILTER_POISSON", "1" },
+			{ "RGBSPEC", "1" },
+			{ "SHADOW", "1" },
+			{ "SPECULAR", "1" }
 		} };
-		constexpr std::array<ShaderInjectionDefineMetadata, 2> kBsdfDirectionalIblDefines{ {
-			{ "AMBIENT_IBL_IN_LIGHT", "1" },
-			{ "LIGHT_TYPE", "1" }
+		constexpr std::array<ShaderInjectionDefineMetadata, 8> kBsdfDirectionalIblDefines{ {
+			{ "AMBIENT", "1" },
+			{ "BLENDSPLIT", "1" },
+			{ "DIRECTIONAL", "1" },
+			{ "DIRSPLITS", "2" },
+			{ "FILTER_POISSON", "1" },
+			{ "RGBSPEC", "1" },
+			{ "SHADOW", "1" },
+			{ "SPECULAR", "1" }
 		} };
 		// Family 2 is the attested Composite source for the runtime ambient/IBL pass.
 		constexpr std::array<ShaderInjectionDefineMetadata, 1> kAmbientIblDefines{ {
@@ -60,7 +78,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredPoint,
 				"bsdf_light_deferred_point",
-				L"lighting/bsdf_light_deferred.hlsl",
+				L"lighting/bsdf_light_deferred_gobo.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfPointDefines
@@ -76,7 +94,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
 				"bsdf_light_deferred_directional",
-				L"lighting/bsdf_light_deferred.hlsl",
+				L"lighting/bsdf_light_deferred_dirsplits2.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfDirectionalDefines
@@ -84,7 +102,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 				"bsdf_light_deferred_directional_ibl",
-				L"lighting/bsdf_light_deferred.hlsl",
+				L"lighting/bsdf_light_deferred_dirsplits2.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfDirectionalIblDefines
@@ -148,7 +166,7 @@ namespace cs::engine
 		}
 
 		std::vector<ShaderReplacementVariantRegistration>
-		DefaultVariantRegistrations()
+		MakeDefaultShaderReplacementVariants()
 		{
 			using Target = ShaderInjectionTarget;
 			return {
@@ -297,7 +315,8 @@ namespace cs::engine
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
 			std::vector<ShaderReplacementVariantRegistration>
-				variantRegistrations = DefaultVariantRegistrations();
+				variantRegistrations =
+					GetDefaultShaderReplacementVariants();
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
@@ -942,6 +961,12 @@ namespace cs::engine
 	{
 		const auto target = std::ranges::find(kTargets, a_name, &ShaderInjectionTargetMetadata::name);
 		return target == kTargets.end() ? nullptr : &*target;
+	}
+
+	std::vector<ShaderReplacementVariantRegistration>
+		GetDefaultShaderReplacementVariants()
+	{
+		return MakeDefaultShaderReplacementVariants();
 	}
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration)

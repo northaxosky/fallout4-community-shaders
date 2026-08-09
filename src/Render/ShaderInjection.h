@@ -182,6 +182,7 @@ namespace cs::engine
 	std::span<const ShaderInjectionTargetMetadata> GetShaderInjectionTargets() noexcept;
 	const ShaderInjectionTargetMetadata* GetShaderInjectionTarget(ShaderInjectionTarget a_target) noexcept;
 	const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(std::string_view a_name) noexcept;
+	std::vector<ShaderReplacementVariantRegistration> GetDefaultShaderReplacementVariants();
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration);
 	bool RegisterReplacementIfEnabled(

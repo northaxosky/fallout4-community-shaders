@@ -322,6 +322,8 @@ set_tests_properties(OwnedShaderRegistry PROPERTIES
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
+		tests/ShaderInjectionNativeAbiTests.cpp
+		tests/ShaderInjectionNativeAbiTests.h
 		src/Render/ShaderInjection.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
@@ -341,8 +343,12 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/include"
 		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/tests"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+	)
+	target_include_directories(ShaderInjectionRegistrationTests SYSTEM PRIVATE
+		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
 	)
 	target_link_libraries(ShaderInjectionRegistrationTests PRIVATE
 		CommonLibF4::CommonLibF4
@@ -363,10 +369,19 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		NAME ShaderInjectionBaselineOwnership
 		COMMAND ShaderInjectionRegistrationTests --baseline-ownership
 	)
+	add_test(
+		NAME ShaderInjectionNativeAbi
+		COMMAND ShaderInjectionRegistrationTests
+			--native-abi-routes
+			"${CMAKE_SOURCE_DIR}/scripts/shaders"
+	)
 	set_tests_properties(ShaderInjectionRegistration PROPERTIES
 		LABELS "render;shader;unit"
 	)
 	set_tests_properties(ShaderInjectionBaselineOwnership PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionNativeAbi PROPERTIES
 		LABELS "render;shader;unit"
 	)
 endif()
