@@ -47,7 +47,7 @@ $scanDirs = @(
     (Join-Path $repoRoot 'features'),
     (Join-Path $repoRoot 'package\F4SE\Plugins\Upscaling'),
     (Join-Path $repoRoot 'package\F4SE\Plugins\FrameGeneration'),
-    (Join-Path $repoRoot 'package\F4SE\Plugins\FO4CommunityShaders\Shaders')
+    (Join-Path $repoRoot 'package\Shaders')
 )
 foreach ($d in $scanDirs) {
     if (-not (Test-Path $d)) { Exit-WithError "required shader scan directory not found: $d" 2 }
@@ -57,12 +57,12 @@ $scanRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('shaderscan-' + [System
 try {
     New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'features') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package\F4SE\Plugins') | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package\F4SE\Plugins\FO4CommunityShaders') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package') | Out-Null
 
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'features\*')  -Destination (Join-Path $scanRoot 'features')
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\Upscaling')      -Destination (Join-Path $scanRoot 'package\F4SE\Plugins')
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\FrameGeneration') -Destination (Join-Path $scanRoot 'package\F4SE\Plugins')
-    Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\FO4CommunityShaders\Shaders') -Destination (Join-Path $scanRoot 'package\F4SE\Plugins\FO4CommunityShaders')
+    Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\Shaders') -Destination (Join-Path $scanRoot 'package')
 
     Push-Location $scanRoot
     try {

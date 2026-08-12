@@ -252,7 +252,7 @@ add_test(
 	NAME ShaderCompile
 	COMMAND ShaderCompileTests
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
-		"${CMAKE_SOURCE_DIR}/package/F4SE/Plugins/FO4CommunityShaders/Shaders"
+		"${CMAKE_SOURCE_DIR}/package/Shaders"
 )
 set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 

@@ -84,7 +84,7 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 `ShaderCompile` compiles every shipping permutation of the reconstructed deferred shaders under
-`package\F4SE\Plugins\FO4CommunityShaders\Shaders\` through `D3DCompile`, the same compiler the
+`package\Shaders\` through `D3DCompile`, the same compiler the
 plugin uses at runtime. Editing those shaders must keep it green.
 
 ## Stage runtime SDKs
@@ -104,11 +104,15 @@ under `package\F4SE\Plugins\`. Pass `-Force` to refresh files already present.
 ## Install or deploy
 
 The repository does not have a CMake install target or package-generation target. For
-a manual source installation, mirror `package\F4SE\Plugins\` into the mod's
-`Data\F4SE\Plugins\`, then add the build output and feature shaders:
+a manual source installation, mirror `package\` into the mod's `Data\`, then add the
+build output and feature shaders:
 
 - `build\Release\FO4CommunityShaders.dll` (and `.pdb`) -> `Data\F4SE\Plugins\`
 - `features\Imagespace\Shaders\*.hlsl*` -> `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`
+
+`package\` mirrors the mod's `Data\` directly: `package\Shaders\` holds the reconstructed
+deferred shaders and `package\F4SE\` holds plugin configuration, presets, LUTs, and staged
+runtime SDK DLLs.
 
 Launch the result through MO2/F4SE. Building and deploying does not perform any
 visual comparison; rendering behavior must be checked in game.

@@ -230,8 +230,7 @@ namespace cs::engine
 			};
 		}
 
-		constexpr auto kDefaultShaderRoot =
-			L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Shaders";
+		constexpr auto kDefaultShaderRoot = L"Data\\Shaders";
 		auto* L = cs::log::Get("cs.render.shaderinjection");
 
 		enum class Lifecycle : std::uint8_t
