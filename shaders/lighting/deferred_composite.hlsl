@@ -4,7 +4,7 @@
 // Host: DrawWorld::DeferredComposite REL::ID { OG=728427, NG=2318313, AE=2318313 }; setup BSDFCompositeShader::SetupGeometry.
 // Flow: sample material/depth; select Far/Near reproj; skip skin/hair; combine albedo*(diffuse+specular), secondary color, sun lighting, and distance/height fog into kMain.
 // Output: RT 172 kMain (R11G11B10_FLOAT), RGB mask, SrcAlpha/InvSrcAlpha blend, depth Greater read-only.
-// Sources: corpus disassembly (blob 3539) cross-read against the sibling fallout4-re workspace.
+// Source: corpus blob 3539 disassembly.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
@@ -186,15 +186,14 @@ Texture2D<float4> g_tDirectDiffuse : register(t5);
 //     Wrapper binds via SetTextureDepth(slot 7, depth_arg 1), NOT
 //     SetTextureStencil; the shader samples source `.x` (depth channel)
 //     directly. The earlier `.y` reconstruction was a transcription
-//     error fixed at the 2026-05-20 re-baseline.
+//     error; native samples `.x`.
 Texture2D<float4> g_tLinearDepth : register(t7);
 
 // t11: direct-light HDR scratch B; inferred to be the specular-light
 //      accumulation companion to t5. Per rdoc slot 5 = runtime RT 395,
 //      R11G11B10_FLOAT, unnamed RT 35 at setup. Bind active on the bit
 //      `0x10000` permutation path (always-on for the main composite
-//      fullscreen draw). Producer writer RVA UNRESOLVED (low confidence
-//      for the producer field). The "specular" name
+//      fullscreen draw). Writer RVA unresolved. The "specular" name
 //      reflects format + symmetric pairing with t5 and the composite
 //      math `baseColor * (t5 + t11)` matching the standard deferred
 //      diffuse + specular combine; treat as inference until a future
@@ -437,28 +436,10 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// Round-trip notes (for the reviewer + future maintainer)
-// One-pass asm-to-HLSL transcription of corpus blob 3539 (sha1
-// 861504f6dcbe...), progressively hardened. Corpus-diff status (after the
-// `<` -> `<=` near/far threshold fix in commit `e1e6e72`):
-//   * Resource bindings:  EXACT MATCH (6/6, t0..t11; cb12 + cb2).
-//   * Sample call count:  EXACT MATCH (6/6).
-//   * Signature:          EXACT MATCH (SV_POSITION input -> SV_Target0).
-//   * Declarations:       EXACT MATCH (decl_count_delta = 0).
-//   * Instruction count:  84 vs corpus 90 (-6 / -6.7%); current fxc output
-//                         is leaner than the corpus.
-// The literal/cb "divergences" flagged by the older by-index diff were
-// alignment artifacts, not semantic misses: every flagged literal
-// (`4.0` at corpus i=48, `1.0` at corpus i=60) and cb reference
-// (`cb12[14]`, `cb12[35].z`, `cb12[44].w`, `cb2[1].w`, `cb2[2].w`) is
-// present at the logically-matching site (see the side-comments near
-// lines ~405 and ~417-419). The `<=` fix in commit `e1e6e72` resolved the
-// original semantic miss (corpus `ge l(0.010000)` at i=3 maps to depth
-// `<= 0.01`; the pre-fix reconstruction used `<`). The sequence-aligned
-// producer evidence supersedes that by-index tool. Deferred composite remains
-// compile-checked locally but is excluded from the native-fidelity manifest
-// until fallout4-re publishes proven conformance evidence for it.
-// What is faithfully reconstructed:
+// Reconstruction facts for corpus blob 3539, SHA-1 861504f6dcbe...:
+//   * Resource bindings, sample count, signature, and declarations match.
+//   * The current fxc output has 84 instructions; native has 90.
+//   * Native `ge l(0.010000)` maps to the source depth test `<= 0.01`.
 //   * Resource declarations (6 SRVs, 6 samplers, 2 CBs) at exact slot
 //     indices.
 //   * Control flow (depth-based matrix select, material-id-based skin/
@@ -467,14 +448,12 @@ PS_OUTPUT main(PS_INPUT input)
 //   * All 6 texture sample calls with their LOD modes (5 SampleLevel(0),
 //     1 Sample).
 //   * The dp4 / dp3 / rsq / pow / lerp math is asm-faithful per insn.
-// Open items (do not gate shipping):
+// Open reconstruction details:
 //   * Public engine-name string for `rt_arg 26` (logical t0). The numeric
 //     RTM cache key is authoritative; the BSDFLight surface also binds
 //     rt_arg 26 with a similar shader-role-vs-stale-enum tension.
-//   * Producer writer RVA for t11 (logical `g_tDirectSpecular`). Current
-//     naming is the strongest inference from format + symmetric pairing
-//     with t5 and the composite math; producer field is `confidence=low`
-//     in the RE handoff catalog.
+//   * Writer RVA for t11 (logical `g_tDirectSpecular`); the name is inferred
+//     from its format, pairing with t5, and the composite math.
 //   * Friendly C++ symbol names for the FogState writer functions. The
 //     source struct (BSGraphics::State::fogState) and offsets are
 //     resolved; only PDB-level function names remain a doc gap.

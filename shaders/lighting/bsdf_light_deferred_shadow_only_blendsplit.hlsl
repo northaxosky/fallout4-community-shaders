@@ -2,30 +2,22 @@
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL + SHADOW_ONLY +
 // BLENDSPLIT family: the FILTER_* axis, with and without AMBIENT.
 //
-// A sibling of `bsdf_light_deferred_shadow_only.hlsl`, not a variant of it. That
-// file holds the plain DIRECTIONAL + SHADOW_ONLY family and is pinned
-// byte-for-byte by `FilterAxisNativeShex`; adding BLENDSPLIT there would move
-// its bytes. BLENDSPLIT is a separate native selector and it changes the body,
-// not just the epilogue: the material-1 slope bias disappears entirely, and
-// AMBIENT turns the permutation into a two-resource-group family that decodes
-// the g-buffer normal and adds an ambient gradient term to both MRTs.
+// BLENDSPLIT removes the material-1 slope bias. AMBIENT adds t1/s1 and t2/s2,
+// decodes the g-buffer normal, and adds an ambient gradient to both MRTs.
 //
 // Reconstructed from six archive blobs - DIRECTIONAL + DIRSPLITS=1 + RGBSPEC +
 // SHADOW + SHADOW_ONLY + SPECULAR + BLENDSPLIT, one filter each, AMBIENT on the
 // second group only:
-//   abi-001, no AMBIENT   CB2[25], CB12[28], t3/s3 + t5/s5 comparison
+//   no AMBIENT            CB2[25], CB12[28], t3/s3 + t5/s5 comparison
 //     FILTER_PCF1     sha1 4e89dd81f40121cadb5f4b322a7323331576f05c,  1596 B
 //     FILTER_PCF9     sha1 1eb732dd3f746afb73b3c3f785eb6ec5af93f1a7,  2012 B
 //     FILTER_POISSON  sha1 e928ab5f44eede452d26262c9cd09ad0ca3839b7, 18348 B
-//   abi-002, with AMBIENT CB2[25], CB12[28], t1/s1 + t2/s2 + t3/s3 + t5/s5
+//   with AMBIENT          CB2[25], CB12[28], t1/s1 + t2/s2 + t3/s3 + t5/s5
 //     FILTER_PCF1     sha1 2b04bed67a5641536ecedceebedf8916d3130a97,  3076 B
 //     FILTER_PCF9     sha1 e3b027b8c5549dc429abf8356c0a1e300616027d,  3500 B
 //     FILTER_POISSON  sha1 c56b2b7862b68c7a7753e9c543a48378cb0c607a, 19828 B
 //
-// All six compile to a DXBC container that is byte-identical to the archive
-// blob, re-measured by `scripts/shaders/ds1-blendsplit-native-shex.json`, and
-// are pinned on declarations, constant read-sets, read-counts and
-// immediate-constant rows by `scripts/shaders/ds1-blendsplit-native-abi.json`.
+// Each source permutation reproduces its archive DXBC container byte-for-byte.
 //
 // The native filter axis here is exactly three wide. No BLENDSPLIT blob in the
 // archive carries FILTER_PCSS, FILTER_PCSSPOISSON or no filter at all, so this

@@ -36,7 +36,7 @@
 // Routing it to the legacy point path is the exact misroute this reconstruction
 // exists to correct, so it fails closed instead of compiling something whose
 // declarations do not match any blob. POINTOMNI *without* SHADOW is a genuine
-// LIGHT_TYPE=2 macro set and stays admitted.
+// LIGHT_TYPE=2 macro set and stays on the point path.
 #if LIGHT_TYPE == LIGHT_TYPE_POINT && defined(POINTOMNI) && defined(SHADOW)
 #  error "POINTOMNI with SHADOW is the LIGHT_TYPE=3 projected-shadow ABI, not LIGHT_TYPE=2"
 #endif
@@ -48,19 +48,15 @@
 // POINTSPOT, which always implies SHADOW. No archive blob carries both, no
 // SPOT blob carries SHADOW, and no POINTSPOT blob allocates SpotData.
 //
-// POINTOMNI reaches this path only when it carries SHADOW. A producer audit
-// recompiled all 31 POINTOMNI+SHADOW records and reimplemented harness
-// reflection against them: their declared ABI and their FXP constant tables are
-// identical to the already-proven POINTSPOT profiles. Measured over the 31
-// corpus blobs that is CB12[30] + CB2[21], both immediateIndexed, `t0..t3`
+// POINTOMNI reaches this path only when it carries SHADOW. Its native ABI matches
+// POINTSPOT: CB12[30] + CB2[21], both immediateIndexed, `t0..t3`
 // Texture2D with `s0..s3` mode_default, and the shadow map as a Texture2DArray
 // at `t5` with a `s5` mode_comparison sampler under a FILTER_* macro (28
 // records) or at `t4` with an `s4` mode_default sampler without one (3
 // records), plus `t7`/`s7` under GOBOPROJECTION (10 records). That is exactly
 // what the projected-shadow branch below declares, so the two families select
-// it together. Admission is an ABI claim only. The base POINTOMNI shadow lookup,
-// the HALFOMNI hemisphere term and the omni cookie coordinates are
-// reconstructed below.
+// it together. The base POINTOMNI shadow lookup, HALFOMNI hemisphere term, and
+// omni cookie coordinates are reconstructed below.
 //
 // POINTOMNI *without* SHADOW is a different ABI and stays on LIGHT_TYPE=2; the
 // 9 such blobs are unaffected by anything here.
@@ -149,7 +145,7 @@ cbuffer PerFrame_CB12 : register(b12)
     //       Runtime evidence (0.02, 125, 1.2, 160) agrees.
     //       The `sss_params` identifier is a legacy misnomer. Do not rename
     //       it yet: cbuffer member names are in the DXBC reflection chunk,
-    //       so a rename changes the attested bytecode hash.
+    //     so a rename changes the compiled bytecode.
     float4 cb12_idx28_sss_params;
 
     // [29]: hair specular tangent shifts. The engine writer names these
@@ -277,7 +273,7 @@ cbuffer PerCall_CB2 : register(b2)
 
 // Resource bindings.
 // Slot indices match the corpus blob 3295 declarations exactly.
-// Semantic names cross-read from the BSDFLight setup in the sibling fallout4-re workspace.
+// Semantic names cross-read from the producer's BSDFLight setup.
 
 // t0: RT26 kTAAAccumulation, used by BSDFLight as albedo/base color.
 //     Sampled at insn 27. .xyz = color, .w = some scalar (used at insn
@@ -350,10 +346,7 @@ static const float2 SUN_SHADOW_POISSON[32] =
     float2(0.164464, 0.787591), float2(0.003845, 0.938841),
     float2(0.522752, 0.146275), float2(0.987518, 0.938994),
     float2(0.770104, 0.315531), float2(0.044832, 0.268838),
-    // ... 967 more entries in the original ICB (corpus blob 3295);
-    // recover the full table with scripts/shaders/fetch-shader-corpus.ps1 then
-    // fxc /dumpbin. TODO: inline the rest for byte-equivalent
-    // round-trip; not blocking since the loop only consumes 16.
+    // The native ICB has 999 entries; this loop consumes only the first 16.
 };
 
 // Helpers
@@ -806,10 +799,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #endif // LIGHT_TYPE == LIGHT_TYPE_DIRECTIONAL
 
-// Round-trip notes (for the reviewer + future maintainer)
-// fxc round-trip status: see local roundtrip notes for the
-// compile output + insn-count delta against the original.
-// What is faithfully reconstructed (structurally):
+// Directional reconstruction facts:
 //   * Resource declarations (5 SRVs + 5 samplers + 2 CBs) at exact slot
 //     indices.
 //   * Input + output signatures (SV_POSITION + POSITION:14*unused;
@@ -822,23 +812,18 @@ PS_OUTPUT main(PS_INPUT input)
 //   * SampleCmpLevelZero hardware PCF via the mode_comparison sampler.
 //   * Stratified Poisson PCF kernel structure (8-iter loop, 2 taps per
 //     iter, 16 total taps per cascade, 0.0625 = 1/16 average weight).
-// What is approximated rather than asm-exact:
+// Known source differences from native assembly:
 //   * The Poisson kernel only has 32 entries inlined here vs 999 in
 //     the original asm. The loop only accesses 16 entries so the
-//     rendered output should match for any single dispatch, but the
-//     bytecode-level icb array size differs.
+//     rendered output is unchanged because the loop reads only 16 entries.
 //   * BRDF branches (insns 139-242) are rebuilt to the corpus math;
 //     remaining drift is mostly compiler scheduling/SSA shape differences.
-//   * Round-trip target: keep instruction delta in single digits while
-//     preserving bindings/signatures and sample/load parity.
-// What needs cross-read to finalize:
+// Open reconstruction details:
 //   * CB12[28..30] field semantics. The skin BRDF uses cb12[28..29] for
 //     SSS-style rotated absorption math; the field names are placeholders.
 //   * CB2[3..9] + CB2[17..19] + CB2[23] are unused-by-this-shader CB
 //     entries; they exist in CB2[25] but the dispatch site C++ should
 //     populate them.
-//   * 5-peer-cluster disambiguation: locking 3295 vs 3234/3250/3268/3182.
-//   * Full 999-entry Poisson ICB inlining for byte-equivalent round-trip.
 //   * Cascade-PCF zRef bias terms (insns 48, 83) - the exact -0.275 *
 //     range_rcp scaling is preserved structurally but field semantics
 //     would benefit from IDA Hex-Rays cross-read.
@@ -1191,10 +1176,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 #endif // LIGHT_TYPE == LIGHT_TYPE_POINT
 
-// Live point proof: FO4_frame24669 sha1 9969e800683c8a7c8afc25f41582415d79cbe47e.
-// shader_corpus_diff.py reports CONTRACT PASS, 15/15 declarations, 5/5
-// samples, and 205 corpus vs 198 reconstructed executable instructions.
-// Reconstructed invariants:
+// Native point shader: FO4_frame24669, SHA-1 9969e800683c8a7c8afc25f41582415d79cbe47e.
+// Native has 205 executable instructions; this reconstruction has 198.
+// Point reconstruction facts:
 //   * Resource declarations (5 SRVs + 5 default samplers + 2 CBs) at
 //     exact slot indices (t0/t1/t2/t3/t7, s0/s1/s2/s3/s7).
 //   * CB12[30], CB2[15], SV_POSITION + unused POSITION14, MRT o0 + o1.
@@ -1207,13 +1191,9 @@ PS_OUTPUT main(PS_INPUT input)
 
 // LIGHT_TYPE_SPOT branch: the two native spot ABIs.
 //
-// Evidence scope: AE 1.11.221 only. Archive
-// `Fallout4 - Shaders.ba2` sha256 4ac98b8fe723..., member
-// `shadersfx/shaders011.fxp` sha256 f3254023504c..., 36 decoded blobs
-// (9 SPOT + 27 POINTSPOT), plus the 31 POINTOMNI+SHADOW blobs admitted to the
-// projected-shadow ABI below. Register allocation is package-table
-// recovered and closure-gated (every DXBC read has an allocated constant,
-// every allocation is read, top register + 1 = 21 = the declared CB2 size).
+// AE 1.11.221 `Fallout4 - Shaders.ba2`, member `shadersfx/shaders011.fxp`:
+// 9 SPOT, 27 POINTSPOT, and 31 POINTOMNI+SHADOW blobs.
+// Every DXBC constant read has an allocated register; CB2 ends at register 21.
 //
 // SPOT (raw-technique bit 0x400, 9 blobs, CB2 layout A/B):
 //   c0 VPOSOffset, c1 LightVector, c2 LightColor, c3 LightAttenuation,
@@ -1221,7 +1201,7 @@ PS_OUTPUT main(PS_INPUT input)
 //   GOBOPROJECTION (row 2 / c13 is never read - a planar cookie needs no z).
 //   Resources t0..t3 + s0..s3, plus t7/s7 under GOBOPROJECTION. No shadow
 //   map, no comparison sampler.
-//   Baseline blob sha1 ed0dd942f9cb6b227cff74ca15503572b7577bfb (key
+//   Representative blob SHA-1 ed0dd942f9cb6b227cff74ca15503572b7577bfb (key
 //   0x00000400); gobo baseline 934eccbe8072ec6cea5bab45a7b3c49e9ff8eecc.
 //
 // POINTSPOT (raw-technique bit 0x20, 27 blobs, CB2 layout C):
@@ -1232,7 +1212,7 @@ PS_OUTPUT main(PS_INPUT input)
 //   Resources t0..t3 + s0..s3; the shadow map is t4/s4 (default sampler,
 //   manual compare) with no FILTER macro, or t5/s5 (mode_comparison) under
 //   FILTER_PCF1 / FILTER_PCF9 / FILTER_POISSON; t7/s7 under GOBOPROJECTION.
-//   Baseline blob sha1 388c13087069397fcc3f4b2a8e3f96e59c003d34 (key
+//   Representative blob SHA-1 388c13087069397fcc3f4b2a8e3f96e59c003d34 (key
 //   0x00000020).
 //
 // ShadowLightParam (c20) is the one constant whose meaning differs between
@@ -1840,23 +1820,5 @@ PS_OUTPUT main(PS_INPUT input)
 
 #endif // LIGHT_TYPE == LIGHT_TYPE_SPOT
 
-// Spot reconstruction status.
-// Evidence: archive-only. `light-blob-enumeration.json` (schema
-// fo4re.light-blob-enumeration v1, runtime profile AE-1.11.221) decodes 9
-// SPOT and 27 POINTSPOT blobs out of the 166-blob BSDFLightShader set, with a
-// 166/166 constant-table closure PASS. A later producer audit recompiled all
-// 73 execution-unproven blobs and reimplemented harness reflection, finding 31
-// POINTOMNI+SHADOW blobs whose ABI and FXP constant tables match the POINTSPOT
-// profiles; they are admitted to the projected-shadow branch above, and all 31
-// are contract-equal to their corpus blob (CB sizes and indexing mode, SRV
-// slots and types, sampler slots and modes, IO signature). Admission is an ABI
-// claim only. The base omni projection, the HALFOMNI hemisphere term and the
-// omni cookie coordinates are reconstructed.
-// Every route in that table carries
-// opaque_psid_status "not-observed" and raw_technique_status
-// "hypothesis-matched", so this is archive evidence, not an observed engine
-// route - the same standing as the already-shipped point permutation.
-// Producer semantic POINTOMNI profiles measure all 31 archive bodies offline;
-// numerical status is recorded in fallout4-re light-coverage.json.
-// This is not runtime-route, replacement, or in-game execution proof.
-// Runtime scope: AE 1.11.221 only. OG and NG archives were never enumerated.
+// AE 1.11.221 archive scope: 9 SPOT, 27 POINTSPOT, and 31 POINTOMNI+SHADOW
+// blobs. OG and NG archives were not enumerated.

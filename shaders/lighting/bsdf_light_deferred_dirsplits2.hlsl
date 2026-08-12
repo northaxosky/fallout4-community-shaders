@@ -2,12 +2,6 @@
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL full-BRDF family at
 // DIRSPLITS=2: the FILTER_* macro axis over two shadow cascades.
 //
-// This is a sibling of `bsdf_light_deferred.hlsl`, not a replacement. That file
-// holds the legacy LIGHT_TYPE adapter and is pinned byte-for-byte by the
-// producer conformance manifest, so a new native macro family goes in its own
-// source rather than growing the pinned one. `bsdf_light_deferred_shadow_only.hlsl`
-// is the same arrangement for the DIRSPLITS=1 SHADOW_ONLY family.
-//
 // Scope is exactly DIRSPLITS=2. The archive also carries DIRSPLITS=1 and
 // DIRSPLITS=3 full-BRDF directional blobs; neither is reconstructed here, and
 // the guards below reject them rather than silently reinterpreting a split
@@ -25,24 +19,9 @@
 //   FILTER_PCSS    sha1 23234de9cff52ae49d0a14ca131e33e8b2338f0c, 20200 B
 //   FILTER_POISSON sha1 f4ece8123e2a49a2777079fd1284732cfbfa9a14, 24164 B
 //
-// Equality level, stated plainly: this family is admitted on its declared ABI
-// and constant read behaviour, not on its instruction stream.
-// `scripts/shaders/verify-native-abi-admission.ps1` re-measures, for all 29
-// native macro sets, that the reconstruction declares the same constant
-// buffers, SRVs, samplers and signature as the blob the macro set came from,
-// and that it reads the same constant-buffer registers the same number of
-// times. That is a contract claim only. Unlike the DIRSPLITS=1
-// SHADOW_ONLY family, whose small body is solved to byte-identical SHEX, the
-// full BRDF core here is structurally reconstructed and its instruction stream
-// is expected to diverge - native unrolls the PCSS blocker search where this
-// keeps it rolled, for one. Execution proof stays with the producer oracle in
-// the sibling `fallout4-re`; this repo cannot bless its own output.
-//
-// What the ABI gate buys: the archive's DIRSPLITS=2 candidates were previously
-// blocked because every candidate declared only the comparison shadow resource
-// at t5/s5, while the unfiltered and PCSS natives declare a raw
-// mode_default read at t4/s4. Declaring the raw tap on exactly those two
-// branches is what makes the contract match.
+// Native PCSS unrolls its blocker search; this source keeps the search rolled.
+// Unfiltered and PCSS use a raw mode_default tap at t4/s4. Other filtered
+// branches use the comparison resource at t5/s5.
 
 #if !defined(DIRECTIONAL)
 #  error "this source is the native DIRECTIONAL family; define DIRECTIONAL"
@@ -730,5 +709,4 @@ PS_OUTPUT main(PS_INPUT input)
 // sampling remains live for the specular exponent and material-code-1 hair
 // path, while the default branch uses Lambert visibility and omits the
 // roughness-scaled rim term. AMBIENT variants replace the roughness-dependent
-// exponent with the native fixed square. The admission gate therefore holds
-// every entry to its native per-register constant read-counts.
+// exponent with the native fixed square.

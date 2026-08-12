@@ -223,13 +223,7 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// Round-trip notes (for the reviewer + future maintainer)
-// This file was authored as a one-pass asm-to-HLSL transcription of corpus
-// blob 2147 (sha1 8fb709c2fdf0...) against the disassembly at
-// Shaders011.2147.8fb709c2fdf0.dxbc.asm.
-// dxc round-trip status: see local roundtrip notes for the
-// fxc compile output + insn-count delta against the original.
-// What is faithfully reconstructed:
+// Reconstruction facts for Shaders011.fxp blob 2147, SHA-1 8fb709c2fdf0...:
 //   * Resource declarations (1 SRV, 1 sampler, 4 CBs) at exact slot indices.
 //   * Input signature (SV_POSITION + TEXCOORD0 used; POSITION + TEXCOORD4
 //     declared-but-unused per the original).
@@ -238,24 +232,9 @@ PS_OUTPUT main(PS_INPUT input)
 //   * Single texture sample with .x channel selector preserved.
 //   * Both smoothstep computations (one inverse-smoothstep^0.33 for alpha
 //     fade, one direct smoothstep for color lerp).
-// What needs cross-read to finalize:
-//   * The ROLE of this shader. The original "sun-shadow" label does
-//     not match the asm. Best-guess role from math: god-rays / volumetric
-//     scattering / atmospheric sky-color sampling. IDA Hex-Rays on the
-//     dispatch site C++ should resolve which BSShader subclass owns it.
+// Open reconstruction details:
+//   * The exact BSShader subclass for this VLS slice-scatter pass.
 //   * CB0[0].zw, CB1[0..1], CB1[10].w, CB1[12], CB1[13], CB2[4] field
 //     semantic names (currently `cb<N>_idx<M>_*` placeholders).
-// What is intentionally NOT done in this revision (separate work):
-//   * Permutation diff against a second RenderDoc capture. The captured
-//     runtime PS at eid 45401 fires 22 times in the deferred chain; if
-//     each dispatch reads a different cb1/cb2 state (per-light parameters)
-//     then a 2nd capture would surface the per-light variation.
-//   * Cross-validation against FO4's known GodRays subsystem (the
-//     `GFSDK_GodraysLib.x64.dll` NVIDIA library is shipped in the FO4
-//     install but NOT used at runtime - per the 2026-05-18 install hunt
-//     it just sits unused). FO4 may have its own god-rays path that
-//     this PS belongs to.
-//   * Renaming the file from `directional_sun_light.hlsl` to a more
-//     accurate label (e.g. `god_rays_sky_sampling.hlsl`). Filename
-//     change deferred until role is confirmed; existing references in
-//     README + analysis docs would all need updating.
+// The captured shader fires 22 times in the deferred chain; CB1/CB2 may vary
+// per light. FO4's shipped GFSDK Godrays library is not used at runtime.

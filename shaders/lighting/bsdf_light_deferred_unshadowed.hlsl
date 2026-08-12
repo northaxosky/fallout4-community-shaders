@@ -7,13 +7,6 @@
 // ATTENUATION_ONLY contracts, so this file owns an exact resource family rather
 // than that whole predicate.
 //
-// This is a sibling of `bsdf_light_deferred.hlsl`, not a replacement, in the
-// same arrangement as `bsdf_light_deferred_dirsplits2.hlsl` (the shadowed
-// DIRSPLITS=2 FILTER family) and `bsdf_light_deferred_shadow_only.hlsl` (the
-// DIRSPLITS=1 SHADOW_ONLY family). The legacy adapter is pinned byte-for-byte
-// by the producer conformance manifest, so a new native macro family goes in
-// its own source rather than growing the pinned one.
-//
 // The ownership boundary is the absence of SHADOW, and that absence is not a
 // selector value. SHADOW is simply inactive for these eleven, so the shadow-
 // resource axis does not exist for them and nothing may be grouped or compared
@@ -22,37 +15,24 @@
 // much smaller CB2. There is therefore no filter axis here - FILTER_* selects a
 // shadow tap, and there is no shadow to tap. The guards below reject every
 // FILTER_* macro rather than reinterpreting a missing SHADOW as an unfiltered
-// shadowed shader, and rather than admitting "no shadow" as a third tap mode
+// shadowed shader or treating "no shadow" as a third tap mode
 // alongside raw t4/s4 and comparison t5/s5.
 //
-// The bodies were reconstructed from the original nine archive blobs, each
-// disassembled on its own and read against its own constant table. Two further
-// POINTOMNI+IGNOREROUGHNESS blobs measure the same ABI and read behaviour and
-// route through those existing bodies unchanged. No role or logic is transferred
-// from the no-SHADOW SPOT blobs, which stay with the legacy adapter.
+// Reconstructed from eleven archive blobs. No role or logic is transferred from
+// the no-SHADOW SPOT blobs, which use the legacy adapter.
 //
-// Cross-family native ASM comparison, so the reuse question is answered by
-// measurement rather than by eye. Two controlled pairs were compared against the
-// shadowed DIRSPLITS=2 family, each differing only by SHADOW and its filter:
+// Two native pairs isolate the effect of SHADOW and its filter:
 //
 //   039c8935 (DIRECTIONAL SPECULAR) vs shadowed 0fd35e4a  180 vs 222 instrs
 //   9f44ba67 (POINTOMNI SPECULAR)   vs shadowed 2fe442f1  179 vs 240 instrs
 //
-//   IDENTICAL, verified byte-for-byte on the instruction text: the leading 26
-//   and 38 instructions respectively - VPOS offset, depth fetch and view-space
-//   position reconstruction.
-//   NOT identical, equal only after renaming registers: the next 10 and 18 -
-//   the G-buffer samples and the normal decode. Register allocation differs
-//   (r2/r3 against r3/r4), so this is a similarity, not an identity, and it is
-//   deliberately not upgraded into a shared include.
-//   DIFFERENT: everything after that. The shadowed directional enters cascade
+// Their leading 26 and 38 instructions are identical: VPOS offset, depth fetch,
+// and view-space reconstruction. G-buffer sampling and normal decode differ only
+// after register renaming, so they remain separate implementations.
+// The shadowed directional enters cascade
 //   selection at `lt ..., cb2[9].w` where this family goes straight to lighting,
 //   and the shadowed point builds a shadow projection with dp4 against
 //   cb2[11]/cb2[12] where this family has no such matrix at all.
-//
-// So identity is claimed only for the prologue, and the BRDF, normal-decode and
-// lighting bodies here are independently reconstructed with no cross-family
-// reuse claim. Nothing is refactored into a shared .hlsli on similarity alone.
 //
 //   sha1      macros beyond DIRSPLITS=2 RGBSPEC              CB2  CB12  instrs
 //   a9435eca  DIRECTIONAL                                    [3]  [30]     133
@@ -99,21 +79,8 @@
 //      depth-scaled forward blend, and the albedo tint. Bare POINTOMNI samples
 //      t0 only inside the hair branch, and only its .w channel.
 //
-// Equality level, stated plainly: this family is admitted on its declared ABI
-// and its constant read behaviour, not on its instruction stream.
-// `scripts/shaders/verify-native-abi-admission.ps1` re-measures, for all eleven
-// native macro sets, that the reconstruction declares the same constant
-// buffers, SRVs, samplers and signature as the blob the macro set came from,
-// that it reads the same set of constant-buffer registers, and that it reads
-// each of them the same number of times. That is a contract claim only. It is
-// not an execution-equivalence claim, and this repo cannot bless its own
-// output: execution proof stays with the producer oracle in the sibling
-// `fallout4-re`.
-//
-// All ABI/read-count pins here and in shadowed DIRSPLITS=2 are exact, with no
-// exemption. IGNOREROUGHNESS visibility/rim, its native 987c4e79 AMBIENT
-// fixed-square path, and IGNORERIM are reconstructed. Numerical execution
-// proof remains with the producer oracle in the sibling `fallout4-re`.
+// IGNOREROUGHNESS removes roughness visibility and rim terms. Native 987c4e79
+// uses a fixed square for the AMBIENT exponent. IGNORERIM removes only the rim.
 
 #if defined(SHADOW)
 #  error "this source is the no-SHADOW family; the shadowed DIRSPLITS=2 blobs are bsdf_light_deferred_dirsplits2.hlsl"
@@ -171,9 +138,7 @@
 #  endif
 #endif
 
-// Shared CB12[0..27] per-frame schema (single source of truth across the
-// deferred-pipeline PS reconstructions). Included unchanged: the conformance
-// manifest pins the shaders that also include it.
+// Shared CB12[0..27] per-frame schema.
 #include "deferred_contracts.hlsli"
 
 // Internal selector. This names what the native declarations move together; it
@@ -639,14 +604,7 @@ PS_OUTPUT main(PS_INPUT input)
     return output;
 }
 
-// IGNOREROUGHNESS and IGNORERIM are held to exact constant read-counts here,
-// not exempted. The fixed-square path is texture-derived and leaves those pins
-// unchanged.
-//
-// This layer supplies the controlled no-AMBIENT pair that localises the
-// cb2[1]/cb2[2] read-count deltas. Producer oracle evidence later completed the
-// shadowed DIRSPLITS=2 reconstruction, including its distinct AMBIENT path, so
-// both layers now enforce exact read counts:
+// Native macro deltas:
 //
 //   IGNOREROUGHNESS, no AMBIENT    039c8935 196 -> 28858d7b 166 instrs
 //   IGNOREROUGHNESS, with AMBIENT  477c3e1e 223 -> 987c4e79 194 instrs
@@ -663,17 +621,13 @@ PS_OUTPUT main(PS_INPUT input)
 // and the deleted rim product for the one lost cb2[2] read. IGNORERIM removes
 // the rim term only, costing one cb2[2] read and no cb2[1].
 //
-// Both macro axes remain explicit, not #undef'd or mapped onto another axis;
-// neither manifest exempts read counts, and execution proof remains producer-owned.
-//
-// What IGNOREROUGHNESS does NOT remove is pinned just as deliberately, because
-// "it drops a whole lobe" is the obvious wrong hypothesis. Across both
+// Both macro axes remain explicit. IGNOREROUGHNESS does not remove a full lobe.
+// Across both
 // directional pairs, the material-code-1 hair specular path is untouched: cb12[28]
 // HairSpecParams holds at 4 reads, cb12[29] HairSpecShift at 2, cb12[30] at 1,
 // and both Kajiya-Kay shifted-tangent sincos lobes survive in every member of
 // those pairs. The ambient gradient is untouched too - cb2[6..8] hold at 2 reads
 // each across the AMBIENT pair. The point pairs likewise retain cb12[20..29],
 // while cb2[2] alone drops from 2 to 1 or 4 to 3.
-// The fixed-square substitution is texture-derived, so the read-count gate
-// cannot distinguish it. Native removes one log and two exps across the ambient
-// exponent and rim, plus one sqrt, while only those two constant registers move.
+// Native removes one log and two exps across the ambient exponent and rim, plus
+// one sqrt, while only those two constant registers move.

@@ -1,36 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // FO4 BSDFLightShader deferred PS, unshadowed POINTOMNI cookie family.
 //
-// This sibling owns exactly POINTOMNI + GOBOPROJECTION at DIRSPLITS=2. The
-// source is extracted from the conformance-pinned legacy point path rather
-// than extending it: that file's source SHA is producer-owned.
-//
-// Wave 2 reconstructs the SPECULAR x IGNORERIM cells and the two
-// IGNOREROUGHNESS controls.
+// Reconstructs POINTOMNI + GOBOPROJECTION at DIRSPLITS=2.
 //
 // The native ABI is CB12[30], CB2[15], t0/t1/t2/t3/t7 texture2d and
 // s0/s1/s2/s3/s7 mode_default. It has no shadow resource or comparison
 // sampler. The cookie is a dual-paraboloid atlas projection, not the
 // POINTOMNI+SHADOW cube-array projection.
 //
-// Extraction basis: bsdf_light_deferred.hlsl lines 846-885, 891-1190 and
-// 1194-1207 at SHA-256
-// c35208e60a454667ca26ad1831127b0645bb4137eadd63f6d2ec8dc2270929f6.
-// This provenance pin guards the copy boundary; it is not a fidelity claim.
+// Native permutation matrix:
+//   sha1      SPECULAR  IGNORERIM  IGNOREROUGHNESS
+//   9969e800  yes       no         no
+//   fa6948ba  no        no         no
+//   d3331d19  no        yes        no
+//   f33e32f9  yes       yes        no
+//   09c2bd09  no        no         yes
+//   a65b5952  yes       no         yes
 //
-// Native Wave 2 matrix:
-//   sha1      SPECULAR  IGNORERIM  IGNOREROUGHNESS  disposition
-//   9969e800  yes       no         no               control
-//   fa6948ba  no        no         no               admitted
-//   d3331d19  no        yes        no               admitted
-//   f33e32f9  yes       yes        no               admitted
-//   09c2bd09  no        no         yes              admitted
-//   a65b5952  yes       no         yes              admitted
-//
-// The six admitted cells hold the macro deltas visible in native constant
-// reads. SPECULAR adds cb12[28] reads x/y and cb12[29].x for the second
-// hair lobe, then adds two LightColor reads in the specular paths. IGNORERIM
-// removes only the roughness-scaled edge contribution and its LightColor read.
+// SPECULAR adds cb12[28].xy and cb12[29].x for the second hair lobe, plus two
+// LightColor reads. IGNORERIM removes the roughness-scaled edge contribution.
 //
 // IGNOREROUGHNESS bypasses the default-material roughness visibility geometry
 // and rim tail, leaving Lambert diffuse while preserving the SPECULAR gate.
@@ -43,24 +31,15 @@
 // it into the upper half of the t7 atlas. It is not shared with the shadowed
 // POINTOMNI path, whose cookie coordinates derive from its shadow projection.
 //
-// No shader-fidelity manifest entry accompanies this source. Its admission
-// manifest pins archive-side declarations and body read behavior only; native
-// numerical fidelity remains producer-owned. The legacy source's conformance
-// SHA and its compiled point target remain unchanged by this additive file.
-//
 // Each rejection below excludes a structural neighbor that would otherwise
 // compile with this contract while meaning something different:
 // shadow resources, another light kind, a shadow filter, an ambient block,
 // attenuation-only routing, the half-omni hemisphere, or a cascade blend.
 // These are source-family boundaries, not engine-provided selector defaults.
 //
-// The admitted ABI pin includes reflected buffer sizes as well as instruction
-// declarations, so an unused trailing constant cannot widen RDEF silently.
 // The cookie rows are intentionally a separate resource-contract family from
 // unshadowed POINTOMNI: t7/s7 is a required declaration, not an optional use.
 // DIRSPLITS=2 is the decoder baseline only; no cascade selection occurs here.
-// The verifier checks the extraction provenance before invoking fxc.
-// Manifests without this optional pin retain their existing behavior.
 
 #if !defined(POINTOMNI)
 #  error "this source is the native POINTOMNI gobo family; define POINTOMNI"

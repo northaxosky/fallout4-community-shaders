@@ -1,6 +1,3 @@
-// SCRATCH PROBE - not for commit. Mirrors what
-// shaders/lighting/bsdf_light_deferred_dirsplits1.hlsl would be.
-//
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL full-BRDF family at
 // DIRSPLITS=1: the comparison FILTER_* macro axis over a single shadow cascade,
 // crossed with AMBIENT.
@@ -11,7 +8,7 @@
 // DIRSPLITS=1 has three projection rows at CB2[11..13] and no FadeDistances
 // read at all, where DIRSPLITS=2 has six rows plus CB2[10].
 //
-// Fixed packet scope: the eight archive blobs carrying
+// Reconstructs the eight archive blobs carrying
 // DIRECTIONAL + SHADOW + SPECULAR + RGBSPEC + DIRSPLITS=1 with a comparison
 // filter, crossed with AMBIENT.
 //   FILTER_PCF1              sha1 9fc11553c6068eaccff5a603cf038a9b4cc65546,  6260 B

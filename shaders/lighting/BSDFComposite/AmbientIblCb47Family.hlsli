@@ -2,7 +2,7 @@
 // BSDFComposite exterior ambient/IBL family source for PSIDs 0xB60 and 0x10B60.
 
 // Native permutation axes for the CB0[3]/CB2[6]/CB12[47] cube-t8 family.
-// Defaults reproduce attested DXBC ed5c1d15 for native blob 6d726d0f.
+// Defaults reproduce DXBC ed5c1d15 for native blob 6d726d0f.
 #ifndef FO4_AMBIENT_OCCLUSION
 #define FO4_AMBIENT_OCCLUSION 1
 #endif

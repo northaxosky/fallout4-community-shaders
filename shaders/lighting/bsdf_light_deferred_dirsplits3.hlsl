@@ -2,12 +2,6 @@
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL full-BRDF family at
 // DIRSPLITS=3: the FILTER_* macro axis over three shadow cascades.
 //
-// This is a sibling of `bsdf_light_deferred_dirsplits2.hlsl`, not a successor.
-// That file is the DIRSPLITS=2 family and is pinned by its own admission
-// manifest, so the split count that moves the CB2 layout gets its own source
-// rather than a runtime-selected one. `bsdf_light_deferred_shadow_only.hlsl` is
-// the same arrangement for DIRSPLITS=1 SHADOW_ONLY.
-//
 // Scope is exactly DIRSPLITS=3. The three-cascade layout is not a superset of
 // the two-cascade one: nine projection rows fill CB2[11..19] where DIRSPLITS=2
 // leaves [17..19] as holes, and the world-scale block is three vectors at
@@ -29,19 +23,6 @@
 // blocker search feeding a Poisson comparison kernel, and it is the reason this
 // family needs its own filter body rather than a third cascade bolted onto the
 // DIRSPLITS=2 one.
-//
-// Equality level, stated plainly: this family is admitted on its declared ABI
-// and its constant read behaviour, not on its instruction stream.
-// `scripts/shaders/verify-native-abi-admission.ps1` re-measures, for all 27
-// native macro sets, that the reconstruction declares the same constant
-// buffers, SRVs, samplers and signature as the blob the macro set came from,
-// that it reads the same set of constant-buffer registers, that it reads each
-// of them the same number of times, and that it declares the same number of
-// immediate constant-buffer vectors. All 27 are exact on read-counts; this
-// family declares no count-exemption axis. That is still a contract claim
-// only - the full BRDF core is structurally reconstructed and its instruction
-// stream is expected to diverge. Execution proof stays with the producer oracle
-// in the sibling `fallout4-re`; this repo cannot bless its own output.
 //
 // IGNOREROUGHNESS is reconstructed here. The controlled AMBIENT-free pair in
 // `bsdf_light_deferred_unshadowed.hlsl` localises the roughness-driven

@@ -695,12 +695,12 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   runtime by this repository. The archive is one runtime's, so this is neither an
   OG nor an NG claim. Producer execution status is carried per entry and is 16
   `execution_failed` and 11 `execution_unproven`, with zero PASS; execution proof
-  stays with the producer oracle in the sibling `fallout4-re`.
+  stays with the producer oracle.
 
 ## Workflow
 
 Game-bytecode extraction, reconstruction evidence, and executable comparison
-live in `northaxosky/fallout4-re`. This repository retains a consumer-local
+live with the producer. This repository retains a consumer-local
 pinned `scripts/shaders/shader-fidelity-conformance.json` from the last valid
 attestation and does not carry the corpus or RE tools.
 

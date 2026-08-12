@@ -2,14 +2,8 @@
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL + SHADOW_ONLY family:
 // the FILTER_* macro axis.
 //
-// This is a sibling of `bsdf_light_deferred.hlsl`, not a replacement. That file
-// holds the legacy LIGHT_TYPE adapter (full directional lighting, point, spot)
-// and is pinned byte-for-byte by the producer conformance manifest. The native
-// macro space has no LIGHT_TYPE: it selects a light family with DIRECTIONAL /
-// POINTOMNI / SPOT / POINTSPOT and then narrows it with additive selectors, and
-// SHADOW_ONLY narrows DIRECTIONAL to a permutation that writes only the shadow
-// term. Keeping that family here leaves the pinned file untouched while the
-// FILTER_* branches below stay expressed in the native macro names.
+// Native macros select DIRECTIONAL, POINTOMNI, SPOT, or POINTSPOT.
+// SHADOW_ONLY narrows DIRECTIONAL to a permutation that writes only shadow.
 //
 // Reconstructed from the six archive blobs that form a controlled minimal pair
 // set - DIRECTIONAL + DIRSPLITS=1 + RGBSPEC + SHADOW + SHADOW_ONLY + SPECULAR,
@@ -21,9 +15,7 @@
 //   FILTER_POISSON     sha1 99a112e7bc7fc4fbcefac716864d6e6a9cdcac68, 19016 B
 //   FILTER_PCSSPOISSON sha1 e5ef2e946298f7eea6702473dbeef4202c7ca821, 20016 B
 //
-// All six compile to a bytecode whose SHEX chunk - the instruction stream plus
-// the immediate constant buffer - is byte-identical to the archive blob's.
-// `scripts/shaders/verify-filter-axis.ps1` re-measures that on every test run.
+// Each source permutation reproduces the archive blob's SHEX chunk.
 //
 // The whole family shares one prologue (depth sample, Far/Near reproject
 // select, view-space reconstruct, g-buffer decode, slope bias) and one epilogue
@@ -484,4 +476,3 @@ PS_OUTPUT main(PS_INPUT input)
     output.specular = float4(result.xyz, 1.0);
     return output;
 }
-
