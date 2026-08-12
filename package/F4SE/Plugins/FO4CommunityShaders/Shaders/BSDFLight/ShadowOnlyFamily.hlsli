@@ -43,10 +43,10 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the
 // deferred-pipeline PS reconstructions).
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 #if defined(FILTER_POISSON) || defined(FILTER_PCSSPOISSON)
-#  include "../shadow_poisson_kernel.hlsli"
+#  include "../Common/ShadowPoissonKernel.hlsli"
 #endif
 
 // A raw (mode_default) shadow read at t4/s4 appears in exactly the three

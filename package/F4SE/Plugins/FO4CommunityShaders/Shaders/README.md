@@ -1,4 +1,4 @@
-# `shaders/lighting/`
+# `package/F4SE/Plugins/FO4CommunityShaders/Shaders/`
 
 Reconstructed HLSL for FO4's deferred lighting pipeline.
 
@@ -13,9 +13,9 @@ shaders and injects registered permutations at runtime.
 | `BSDFComposite.hlsl` | selector for all 78 Composite archive blobs | selects 13 family modules; bindings vary by family | delivered for the ambient family via `kAmbientIblPass` | **producer-attested 78/78** |
 | `ambient_ibl_pass.hlsl`     | retained standalone interior/reference reconstruction, blob 3559 | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **historical exec-diff-zero; not a current manifest source** |
 | `ambient_ibl_pass_runtime.hlsl` | retained historical reconstruction of exterior Composite PSIDs `0x10B60` and `0xB60` | Tilelight adds t11 ambient diffuse B and t12 blurred SSLR | same | **historical; unreferenced and ungated — the runtime now injects `BSDFComposite.hlsl` at `BSDF_COMPOSITE_FAMILY=2`** |
-| `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
-| `deferred_prepass.hlsl`     | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **producer-attested byte-identical DXBC** |
-| `vls_slice_scatter.hlsl`    | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
+| `DeferredComposite.hlsl`    | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
+| `BSDFPrePass.hlsl`          | geometry pass filling G-buffer (standard opaque permutation) | writes `kGbufferNormal=20`, `kGbufferAlbedo=22`, `kGbufferMaterial=24`, motion vector + aux RTs | `DrawWorld::DeferredPrePass` `56596 / 2318301 / 2318301` | **producer-attested byte-identical DXBC** |
+| `VolumetricLighting.hlsl`   | per-slice scatter PS in FO4's VLS (Volumetric Light Scattering) subsystem | reads main depth (t7); writes `kMain=3` (RT 172 in capture) | inside `ImageSpaceEffectVLSLight::Render` (AE RVA `0x022562D0`) / `NVGodrays::RenderVolume` (AE RVA `0x02211740`) | **reconstructed-role-confirmed** |
 | `bsdf_light_deferred.hlsl`  | consolidated BSDFLightShader deferred PS (directional + point/spot permutations via `LIGHT_TYPE` #ifdef) | reads BSDFLight G-buffer aliases `t0=RT26`, `t1=RT27`, `t2=RT30` + main depth + (directional) cascade shadow Texture2DArray / (point) light cookie t7; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` (R11G11B10F HDR pair; RT 389/392 in RenderDoc captures are runtime resource IDs for those slots, not stable engine enum values) | `DrawWorld::AccumulateSunShadowLightImpl` (REL::IDs `{OG=259940, NG=2318296, AE=2318296}`, AE RVA `0x021eb4f0`) for directional; point dispatched within `DeferredLightsImpl`; spot stub awaits canonical capture | **directional-reconstructed-roundtrip-8.8pct; point-live-exec-diff-zero; spot STUB** |
 | `bsdf_light_deferred_shadow_only.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY` family; carries the `FILTER_*` axis (none / PCF1 / PCF9 / PCSS / POISSON / PCSSPOISSON) | reads `t1=RT27`, `t2=RT30`, main depth `t3`, cascade shadow Texture2DArray at `t4` (raw) and/or `t5` (comparison); writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical, 6/6** |
 | `bsdf_light_deferred_shadow_only_blendsplit.hlsl` | BSDFLightShader deferred PS, native `DIRECTIONAL`+`SHADOW_ONLY`+`BLENDSPLIT` family at `DIRSPLITS=1`; a three-wide `FILTER_*` axis (PCF1 / PCF9 / POISSON) crossed with `AMBIENT` | reads main depth `t3` and the cascade shadow Texture2DArray at `t5` (comparison only), plus `t1=RT27` and `t2=RT30` under `AMBIENT`; writes `kDiffuseBuffer=58` + `kSpecularBuffer=59` | same host as the directional path above | **native-shex-identical 6/6; native-abi-equal 6/6 (read-counts exact, no axis exempt)** |
@@ -48,7 +48,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   pass, so the shipped runtime source is the attested one; the legacy
   `ambient_ibl_pass*.hlsl` files are retained for reference only and carry no
   gate. The family-2 build is bytecode-identical to the file it replaced.
-* **`deferred_composite.hlsl`** - **reconstructed, round-trip WIP**
+* **`DeferredComposite.hlsl`** - **reconstructed, round-trip WIP**
   (canonical blob 3539). Canonical blob: `Shaders011.fxp` blob 3539
   (sha1 `861504f6dcbe`), identified by mnemonic-stream equivalence
   against the captured runtime PS at eid 45368 (sha1 `813c9acec23b`) -
@@ -60,7 +60,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   semantics and texture RT-index mapping are placeholder names
   (`cb12_idx<N>_*` and inferred role names); finalizing requires IDA
   Hex-Rays cross-read of `DrawWorld::DeferredComposite`.
-* **`vls_slice_scatter.hlsl`** - **reconstructed, role confirmed**
+* **`VolumetricLighting.hlsl`** - **reconstructed, role confirmed**
   (renamed from `directional_sun_light.hlsl` after the captured PS at
   eid 45401 (sha `46b911cb8053`) was confirmed to be a per-slice
   scatter PS in FO4's Volumetric Light Scattering (VLS) subsystem, not
@@ -73,7 +73,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   pattern at eids 45401-45623 is N slices × M shadow-lights for VLS
   accumulation into `kMain`. Round-trip from the prior reconstruction
   is unchanged (+33.9% insns vs original; structural fidelity verified).
-* **`deferred_prepass.hlsl`** - **producer-attested byte-identical DXBC**.
+* **`BSDFPrePass.hlsl`** - **producer-attested byte-identical DXBC**.
   This standard-opaque G-buffer prepass fills six MRT outputs: albedo,
   octahedral normal, packed material data, two auxiliary G-buffer slots and
   the screen-space motion vector. Identity is exact but flag-dependent:
@@ -218,7 +218,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   re-measures this and fails closed. Its pinned hashes are taken from the game
   bytecode, so the gate cannot bless the repository's own output. The exact
   1000-entry Poisson kernel the last two permutations declare lives in
-  `shadow_poisson_kernel.hlsli`, transcribed from the SHEX CUSTOM_DATA token at
+  `Common/ShadowPoissonKernel.hlsli`, transcribed from the SHEX CUSTOM_DATA token at
   full float32 precision.
 
   Scope: AE 1.11.221 archive blob set, `DIRSPLITS=1` only. The two other
@@ -668,7 +668,7 @@ HLSL to its host REL::ID, OG/NG/AE RVAs, and render-target bindings.
   the one entry it would have caught. It is a *declaration* count only - it says
   the kernel table is present at the native size, not that the 16 consumed
   entries are the native values, which is what
-  `shadow_poisson_kernel.hlsli` records separately. Manifests written before the
+  `Common/ShadowPoissonKernel.hlsli` records separately. Manifests written before the
   pin existed simply omit it and behave exactly as before.
 
   `scripts/shaders/verify-native-abi-admission.ps1` (CTest

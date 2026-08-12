@@ -54,10 +54,10 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the
 // deferred-pipeline PS reconstructions).
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 #ifdef FILTER_POISSON
-#  include "../shadow_poisson_kernel.hlsli"
+#  include "../Common/ShadowPoissonKernel.hlsli"
 #endif
 
 // Constant buffer layouts (native directional shadow-only blendsplit).

@@ -6,7 +6,7 @@
 // Not: no SampleCmp/PCF, no deferred BRDF, no tonemap composite.
 // Limits: CB names are placeholders; exact VLS subclass and t7 producer need dispatch-site cross-read.
 
-#include "deferred_contracts.hlsli"
+#include "Common/DeferredContracts.hlsli"
 
 cbuffer PerCall_CB0 : register(b0)
 {
@@ -72,7 +72,7 @@ cbuffer PerCall_CB2 : register(b2)
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    // [0..27]: shared per-frame block (see `Common/DeferredContracts.hlsli`).
     //          This PS reads only the Far/Near reproject matrix pair at
     //          [20..27]; the upper-CB12 slots used by composite (fog +
     //          color stack) and ambient (IBL desaturation) are not bound.

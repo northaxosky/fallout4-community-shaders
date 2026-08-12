@@ -123,7 +123,7 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the 5
 // deferred-pipeline PS reconstructions). See header for documentation.
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 // LIGHT_TYPE_DIRECTIONAL branch (the sun-light path).
 #if LIGHT_TYPE == LIGHT_TYPE_DIRECTIONAL
@@ -134,7 +134,7 @@ cbuffer PerFrame_CB12 : register(b12)
 {
     // [0..27]: shared per-frame block (ViewRotation / Projection /
     //          PrevFrame_ViewProj / ViewToWorld / WorldToView / depth recip /
-    //          Far+Near reproject matrices). See `deferred_contracts.hlsli`
+    //          Far+Near reproject matrices). See `Common/DeferredContracts.hlsli`
     //          for the full per-slot schema.
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
@@ -875,7 +875,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    // [0..27]: shared per-frame block (see `Common/DeferredContracts.hlsli`).
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: hair specular scales and powers. Same role as in the directional
@@ -1234,7 +1234,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    // [0..27]: shared per-frame block (see `Common/DeferredContracts.hlsli`).
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
 #ifndef ATTENUATION_ONLY

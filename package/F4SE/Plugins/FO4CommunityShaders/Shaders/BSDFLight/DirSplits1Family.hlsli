@@ -68,10 +68,10 @@
 #  error "the archive has no unfiltered DIRSPLITS=1 full-BRDF blob; define one comparison FILTER_*"
 #endif
 
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 #ifdef FILTER_POISSON
-#  include "../shadow_poisson_kernel.hlsli"
+#  include "../Common/ShadowPoissonKernel.hlsli"
 #endif
 
 // Internal selectors.
@@ -87,7 +87,7 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block. See `deferred_contracts.hlsli`.
+    // [0..27]: shared per-frame block. See `Common/DeferredContracts.hlsli`.
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: hair specular parameters (fHairPrimSpecScale, fHairPrimSpecPow,

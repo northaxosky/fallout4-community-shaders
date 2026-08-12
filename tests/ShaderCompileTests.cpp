@@ -58,9 +58,9 @@ namespace
 	void CompileLighting(const std::filesystem::path& a_root)
 	{
 		const std::array<ShaderCase, 16> cases{ {
-			{ "deferred_composite.hlsl", {}, "ps_5_0" },
-			{ "deferred_prepass.hlsl", {}, "ps_5_0" },
-			{ "vls_slice_scatter.hlsl", {}, "ps_5_0" },
+			{ "DeferredComposite.hlsl", {}, "ps_5_0" },
+			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
+			{ "VolumetricLighting.hlsl", {}, "ps_5_0" },
 			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" } }, "ps_5_0" },
 			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" }, { "TILELIGHT", "1" } }, "ps_5_0" },
 			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "1" } }, "ps_5_0" },

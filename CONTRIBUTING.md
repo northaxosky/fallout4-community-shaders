@@ -84,7 +84,7 @@ ctest --test-dir build -C Release --output-on-failure
 ```
 
 `ShaderRoundtrip` recompiles the reconstructed deferred shaders under
-`shaders\lighting\` and checks each DXBC hash against
+`package\F4SE\Plugins\FO4CommunityShaders\Shaders\` and checks each DXBC hash against
 `scripts\shaders\shader-fidelity-conformance.json`, a **producer-published
 attestation** copied byte-for-byte from the producer. It is
 fail-closed and there is no `-UpdateBaselines`: **the consumer may never
@@ -114,12 +114,10 @@ under `package\F4SE\Plugins\`. Pass `-Force` to refresh files already present.
 
 The repository does not have a CMake install target or package-generation target. For
 a manual source installation, mirror `package\F4SE\Plugins\` into the mod's
-`Data\F4SE\Plugins\`, then add the build output and the two shader trees that live
-outside `package\`:
+`Data\F4SE\Plugins\`, then add the build output and feature shaders:
 
 - `build\Release\FO4CommunityShaders.dll` (and `.pdb`) -> `Data\F4SE\Plugins\`
 - `features\Imagespace\Shaders\*.hlsl*` -> `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`
-- `shaders\` (recursive) -> `Data\F4SE\Plugins\FO4CommunityShaders\Shaders\`
 
 Launch the result through MO2/F4SE. Building and deploying does not perform any
 visual comparison; rendering behavior must be checked in game.
@@ -129,7 +127,7 @@ visual comparison; rendering behavior must be checked in game.
 ```text
 src\                Core feature framework, renderer hooks, menu, and presets
 features\<Name>\    Feature source and optional runtime-compiled shaders
-shaders\lighting\   Reconstructed deferred shaders, pinned by producer attestation
+package\...\Shaders\ Reconstructed deferred shaders, pinned by producer attestation
 cmake\              Build integration for CommonLibF4 and graphics SDKs
 extern\             Recursive source submodules
 package\            Static mod assets and staged runtime SDK files

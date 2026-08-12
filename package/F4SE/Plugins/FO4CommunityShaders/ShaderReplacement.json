@@ -4,7 +4,7 @@
   "replacements": [
     {
       "name": "deferred_composite",
-      "comment": "HELD/unmapped. Live 1.11.221 composite runtime sha is 7cdee7be (BSDFCompositeShader tech=616, .fxp blob 3531: 139 insns, t0-t9 incl. a texturecubearray@t8, CB2[6] - the rich cubemap-array IBL variant). Our deferred_composite.hlsl reconstructs blob 3539 (90 insns, t0/t3/t4/t5/t7/t11, CB2[3] - simpler variant) whose SRV/sampler contract is INCOMPATIBLE with 3531 (declares t11/s11 the runtime lacks; missing t6/t8-cubearray/t9) -> would hazard, not just mis-shade. Needs a reconstruction of blob 3531 before mapping. Prior 813c9ace was a pre-next-gen sha (never matches on 1.11.221).",
+      "comment": "HELD/unmapped. Live 1.11.221 composite runtime sha is 7cdee7be (BSDFCompositeShader tech=616, .fxp blob 3531: 139 insns, t0-t9 incl. a texturecubearray@t8, CB2[6] - the rich cubemap-array IBL variant). Our DeferredComposite.hlsl reconstructs blob 3539 (90 insns, t0/t3/t4/t5/t7/t11, CB2[3] - simpler variant) whose SRV/sampler contract is INCOMPATIBLE with 3531 (declares t11/s11 the runtime lacks; missing t6/t8-cubearray/t9) -> would hazard, not just mis-shade. Needs a reconstruction of blob 3531 before mapping. Prior 813c9ace was a pre-next-gen sha (never matches on 1.11.221).",
       "default_enabled": false
     },
     {

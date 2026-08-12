@@ -12,7 +12,7 @@
       "notes": [
         "REL::ID array ordering matches Fallout4RE convention: { OG, NG, AE }.",
         "When integrating: stl::detour_thunk<...>(REL::ID(rel_id_array_OG_NG_AE).",
-        "Reconstructed HLSL: shaders/lighting/deferred_prepass.hlsl (standard-opaque permutation, eid 13220, sha c493970c042c, fxc /O3 round-trip -1.25%)."
+        "Reconstructed HLSL: package/F4SE/Plugins/FO4CommunityShaders/Shaders/BSDFPrePass.hlsl (standard-opaque permutation, eid 13220, sha c493970c042c, fxc /O3 round-trip -1.25%)."
       ],
       "rel_id_array_OG_NG_AE": [
         56596,
@@ -28,7 +28,7 @@
       ],
       "role": "deferred-prepass",
       "role_description": "Geometry pass that fills the G-buffer (normals, albedo, material, depth). Hook here to inject SSAO compute that consumes the freshly-written G-buffer.",
-      "reconstruction_hlsl": "shaders/lighting/deferred_prepass.hlsl",
+      "reconstruction_hlsl": "package/F4SE/Plugins/FO4CommunityShaders/Shaders/BSDFPrePass.hlsl",
       "rva_OG_NG_AE": [
         "0x02850cb0",
         "0x02096710",
@@ -72,7 +72,7 @@
       ],
       "role": "deferred-lights",
       "role_description": "Deferred lighting accumulation: directional sun + point/spot lights write the diffuse and specular accumulation buffers from the G-buffer. The ambient/IBL pass that consumes kSSAO lives inside this dispatch group.",
-      "reconstruction_hlsl": "shaders/lighting/BSDFLight.hlsl (BSDF_LIGHT_FAMILY=9; LIGHT_TYPE_DIRECTIONAL via blob 3295 sha 50e2618e8d1a; live canonical LIGHT_TYPE_POINT via blobs 3287/3316 and FO4_frame24669 sha 9969e800683c, historical frame9483 sha 3f1f708c0175 is a different permutation; LIGHT_TYPE_SPOT stub).",
+      "reconstruction_hlsl": "package/F4SE/Plugins/FO4CommunityShaders/Shaders/BSDFLight.hlsl (BSDF_LIGHT_FAMILY=9; LIGHT_TYPE_DIRECTIONAL via blob 3295 sha 50e2618e8d1a; live canonical LIGHT_TYPE_POINT via blobs 3287/3316 and FO4_frame24669 sha 9969e800683c, historical frame9483 sha 3f1f708c0175 is a different permutation; LIGHT_TYPE_SPOT stub).",
       "rva_OG_NG_AE": [
         "0x028529b0",
         "0x02097e30",
@@ -113,7 +113,7 @@
       ],
       "role": "deferred-composite",
       "role_description": "Final deferred composite: combines diffuse and specular accumulation with albedo into the main HDR scene buffer. Hook here to insert apply-passes that need the diffuse/specular buffers separated from direct light.",
-      "reconstruction_hlsl": "shaders/lighting/deferred_composite.hlsl (blob 3539, sha 861504f6dcbe).",
+      "reconstruction_hlsl": "package/F4SE/Plugins/FO4CommunityShaders/Shaders/DeferredComposite.hlsl (blob 3539, sha 861504f6dcbe).",
       "rva_OG_NG_AE": [
         "0x02855e60",
         "0x0209b100",

@@ -1,27 +1,37 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL full-BRDF family at
-// DIRSPLITS=2: the FILTER_* macro axis over two shadow cascades.
+// DIRSPLITS=3: the FILTER_* macro axis over three shadow cascades.
 //
-// Scope is exactly DIRSPLITS=2. The archive also carries DIRSPLITS=1 and
-// DIRSPLITS=3 full-BRDF directional blobs; neither is reconstructed here, and
-// the guards below reject them rather than silently reinterpreting a split
-// count. The five DIRSPLITS=2 blobs that omit SHADOW declare a different
-// constant buffer (CB2[3], CB12[30]) with no shadow resources at all and no
-// filter axis, so they are rejected too.
+// Scope is exactly DIRSPLITS=3. The three-cascade layout is not a superset of
+// the two-cascade one: nine projection rows fill CB2[11..19] where DIRSPLITS=2
+// leaves [17..19] as holes, and the world-scale block is three vectors at
+// CB2[21..23] where DIRSPLITS=2 has two and a hole. A wrong split count is
+// therefore a different constant buffer, and the guards below reject it.
 //
-// Reconstructed from the 29 archive blobs carrying
-// DIRECTIONAL + DIRSPLITS=2 + RGBSPEC + SHADOW + SPECULAR, which span four
+// Reconstructed from the 27 archive blobs carrying
+// DIRECTIONAL + DIRSPLITS=3 + RGBSPEC + SHADOW + SPECULAR, which span four
 // independent additive axes - AMBIENT, BLENDSPLIT, IGNOREROUGHNESS and
-// FILTER_*. The five filter representatives of the otherwise bare set are:
-//   FILTER (none)  sha1 0fd35e4a13c9ce8197188b6e4883e51f734745f1,  6828 B
-//   FILTER_PCF1    sha1 3d1bcaf539fd34620773ae30fc7a3002f19fb426,  6732 B
-//   FILTER_PCF9    sha1 6816c3885f7e99ee072ec107a52a49a35780731b,  7620 B
-//   FILTER_PCSS    sha1 23234de9cff52ae49d0a14ca131e33e8b2338f0c, 20200 B
-//   FILTER_POISSON sha1 f4ece8123e2a49a2777079fd1284732cfbfa9a14, 24164 B
+// FILTER_*. One representative per filter branch:
+//   FILTER (none)      sha1 5681c96c44b1f0f6d64de2b374ce59e5542795c4,  7568 B
+//   FILTER_PCF1        sha1 815117736d04057d09c827a9663d0298ab9ed113,  6988 B
+//   FILTER_PCF9        sha1 67dd9b9c145fc4297c316c1da8536bcd2c87146a,  8320 B
+//   FILTER_PCSS        sha1 d32da64922f862a7916957551f343c640ac59652, 27180 B
+//   FILTER_POISSON     sha1 423798e1b7099cba22ff0588ec80fb81338c9679, 25140 B
+//   FILTER_PCSSPOISSON sha1 98d5291ab3059f9e6427ee6f5b8d11331f7017ad, 43620 B
 //
-// Native PCSS unrolls its blocker search; this source keeps the search rolled.
-// Unfiltered and PCSS use a raw mode_default tap at t4/s4. Other filtered
-// branches use the comparison resource at t5/s5.
+// FILTER_PCSSPOISSON is the branch DIRSPLITS=2 does not have. It is a PCSS
+// blocker search feeding a Poisson comparison kernel, and it is the reason this
+// family needs its own filter body rather than a third cascade bolted onto the
+// DIRSPLITS=2 one.
+//
+// IGNOREROUGHNESS is reconstructed here. The controlled AMBIENT-free pair in
+// `UnshadowedFamily.hlsli` localises the roughness-driven
+// visibility geometry and rim deletions. Shadowed AMBIENT disassembly adds one
+// more delta: its roughness-dependent exponent becomes an exact fixed square.
+// Across the six IGNOREROUGHNESS blobs, cb2[1] moves 5 -> 3 and cb2[2] moves
+// 6 -> 5 against their twins, matching the removed geometry and rim reads;
+// AMBIENT variants retain the gradient and material.y paths without reading
+// matSample.x for that exponent.
 
 #if !defined(DIRECTIONAL)
 #  error "this source is the native DIRECTIONAL family; define DIRECTIONAL"
@@ -33,31 +43,31 @@
 #  error "SHADOW_ONLY is the DIRSPLITS=1 family in ShadowOnlyFamily.hlsli"
 #endif
 #ifndef SHADOW
-#  error "the reconstructed DIRSPLITS=2 family is SHADOW only; the five no-SHADOW blobs declare a different CB2 and have no filter axis"
+#  error "the reconstructed DIRSPLITS=3 family is SHADOW only; every blob in it declares the cascade block"
 #endif
 #if !defined(DIRSPLITS)
 #  error "define DIRSPLITS; the split count is a native axis and is never assumed"
 #endif
-#if DIRSPLITS != 2
-#  error "this source reconstructs DIRSPLITS=2 only; DIRSPLITS=1 and DIRSPLITS=3 are separate native families and are not implemented here"
+#if DIRSPLITS != 3
+#  error "this source reconstructs DIRSPLITS=3 only; DIRSPLITS=1 and DIRSPLITS=2 are separate native families with a different CB2 layout"
 #endif
 #if !defined(SPECULAR) || !defined(RGBSPEC)
-#  error "every native DIRSPLITS=2 SHADOW blob carries both SPECULAR and RGBSPEC"
+#  error "every native DIRSPLITS=3 SHADOW blob carries both SPECULAR and RGBSPEC"
 #endif
-#ifdef FILTER_PCSSPOISSON
-#  error "no DIRSPLITS=2 blob carries FILTER_PCSSPOISSON; the archive has it only at DIRSPLITS=1 SHADOW_ONLY and DIRSPLITS=3"
+#ifdef IGNORERIM
+#  error "no DIRSPLITS=3 blob carries IGNORERIM; the archive puts it on POINTOMNI and SPOT only"
 #endif
 #if (defined(FILTER_PCF1) + defined(FILTER_PCF9) + defined(FILTER_PCSS) \
-      + defined(FILTER_POISSON)) > 1
+      + defined(FILTER_PCSSPOISSON) + defined(FILTER_POISSON)) > 1
 #  error "FILTER_* macros are mutually exclusive"
 #endif
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the
 // deferred-pipeline PS reconstructions).
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
-#ifdef FILTER_POISSON
-#  include "../shadow_poisson_kernel.hlsli"
+#if defined(FILTER_POISSON) || defined(FILTER_PCSSPOISSON)
+#  include "../Common/ShadowPoissonKernel.hlsli"
 #endif
 
 // Internal selectors. These name what the native declarations move together;
@@ -65,36 +75,38 @@
 // them.
 
 // A raw (mode_default) read at t4/s4 recovers a stored depth rather than a
-// comparison result. Native declares it in exactly two branches: the unfiltered
-// lookup, and the PCSS blocker search.
+// comparison result. Native declares it in exactly three branches: the
+// unfiltered lookup and the two blocker searches.
 #if !defined(FILTER_PCF1) && !defined(FILTER_PCF9) && !defined(FILTER_POISSON)
-#  define FO4_DS2_SHADOW_RAW_TAP 1
+#  define FO4_DS3_SHADOW_RAW_TAP 1
 #endif
 
 // A comparison (mode_comparison) read at t5/s5 appears in every branch except
 // the unfiltered one.
 #if defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_PCSS) \
-    || defined(FILTER_POISSON)
-#  define FO4_DS2_SHADOW_CMP_TAP 1
+    || defined(FILTER_PCSSPOISSON) || defined(FILTER_POISSON)
+#  define FO4_DS3_SHADOW_CMP_TAP 1
 #endif
 
-// CB2[21..22] `ShadowWorldScale` is read only where a cascade's world-space
-// near/far pair is needed: the PCSS penumbra remap and the Poisson depth bias.
-#if defined(FILTER_PCSS) || defined(FILTER_POISSON)
-#  define FO4_DS2_USES_WORLD_SCALE 1
+// CB2[21..23] `ShadowWorldScale` is read only where a cascade's world-space
+// near/far pair is needed: the two penumbra remaps and the Poisson depth bias.
+#if defined(FILTER_PCSS) || defined(FILTER_PCSSPOISSON) || defined(FILTER_POISSON)
+#  define FO4_DS3_USES_WORLD_SCALE 1
 #endif
 
 // CB2[20] `ShadowSampleParam` is read only by the two kernels that step the tap
-// pattern across the shadow map.
+// pattern across the shadow map. FILTER_PCSSPOISSON is not one of them: its
+// kernel radius comes from the penumbra estimate and the texel step, so it
+// never reads this register.
 #if defined(FILTER_PCF9) || defined(FILTER_POISSON)
-#  define FO4_DS2_USES_SAMPLE_PARAM 1
+#  define FO4_DS3_USES_SAMPLE_PARAM 1
 #endif
 
 // Constant buffer layouts.
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block. See `deferred_contracts.hlsli`.
+    // [0..27]: shared per-frame block. See `Common/DeferredContracts.hlsli`.
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: hair specular parameters (fHairPrimSpecScale, fHairPrimSpecPow,
@@ -117,8 +129,7 @@ cbuffer PerCall_CB2 : register(b2)
     float4 ScreenSize;
 
     // [1]: constant ID 1 `LightVector`. .xyz is the sun direction in view
-    //      space. Present because this is the full-BRDF family; the
-    //      SHADOW_ONLY sibling leaves it unread.
+    //      space.
     float4 SunDirection;
 
     // [2]: constant ID 2 `LightColor`. .xyz in the BSDFLightShader HDR-scale
@@ -142,48 +153,46 @@ cbuffer PerCall_CB2 : register(b2)
     float4 cb2_pad_3_8[6];
 #endif
 
-    // [9]: constant ID 7 `SplitDistances`. .w gates the whole cascade block:
-    //      beyond it the pixel is unshadowed. The register is absent under
-    //      BLENDSPLIT, where `DirectionalAmbient` extends to a fourth vector
-    //      that the shader never reads - so the slot is declared either way and
-    //      read only where native reads it.
+    // [9]: constant ID 7 `SplitDistances`. .w is the single outer gate over the
+    //      whole cascade block: beyond it the pixel is unshadowed and the
+    //      distance fade is not evaluated either. The register is unread under
+    //      BLENDSPLIT, where the cross-fade replaces the gate.
     float4 cb2_idx9_split_distances;
 
-    // [10]: constant ID 8 `FadeDistances`. .x is the cascade-1 activation
-    //       threshold, .y the cascade-0 one; together they are the overlap
-    //       band. Values are projected depth, compared against the same
-    //       linearised depth the view-space reconstruct consumes.
+    // [10]: constant ID 8 `FadeDistances`. All four components are live at
+    //       three splits: .x/.y are the cascade-0 to cascade-1 transition pair
+    //       and .z/.w the cascade-1 to cascade-2 one. Values are projected
+    //       depth, compared against the same linearised depth the view-space
+    //       reconstruct consumes.
     float4 cb2_idx10_fade_distances;
 
-    // [11..16]: constant ID 9 `ShadowMapProj`, six vectors read as two 3-row
-    //           view-space-to-light-space transforms, one per cascade. The
-    //           register count is 3 * DIRSPLITS, which is what makes this
-    //           layout specific to DIRSPLITS=2.
+    // [11..19]: constant ID 9 `ShadowMapProj`, nine vectors read as three
+    //           3-row view-space-to-light-space transforms, one per cascade.
+    //           The register count is 3 * DIRSPLITS, which is what makes this
+    //           layout specific to DIRSPLITS=3 - the two-cascade family leaves
+    //           [17..19] unallocated.
     float4 cb2_cascade0_row0;
     float4 cb2_cascade0_row1;
     float4 cb2_cascade0_row2;
     float4 cb2_cascade1_row0;
     float4 cb2_cascade1_row1;
     float4 cb2_cascade1_row2;
-
-    // [17..19]: unallocated holes. No constant ID maps here; they are not a
-    //           third cascade.
-    float4 cb2_pad_17_19[3];
+    float4 cb2_cascade2_row0;
+    float4 cb2_cascade2_row1;
+    float4 cb2_cascade2_row2;
 
     // [20]: constant ID 10 `ShadowSampleParam`. .zw are inverse shadow-map
     //       dimensions, .z doubles as the Poisson kernel scale.
     float4 cb2_idx20_shadow_sample_param;
 
-    // [21..22]: constant ID 11 `ShadowWorldScale`, one vector per cascade,
+    // [21..23]: constant ID 11 `ShadowWorldScale`, one vector per cascade,
     //           each (right-left, top-bottom, near, far) from that cascade's
-    //           NiFrustum in world units. PCSS reads .xy as a texel step and
-    //           .zw as the depth remap; Poisson reads only .zw. The register
-    //           count is DIRSPLITS.
+    //           NiFrustum in world units. The blocker searches read .xy as a
+    //           texel step and .zw as the depth remap; Poisson reads only .zw.
+    //           The register count is DIRSPLITS.
     float4 cb2_idx21_cascade0_world_scale;
     float4 cb2_idx22_cascade1_world_scale;
-
-    // [23]: unallocated hole.
-    float4 cb2_pad_23;
+    float4 cb2_idx23_cascade2_world_scale;
 
     // [24]: constant ID 12 `ShadowFadeParam`. .x is a squared world distance
     //       limit; reading it is what forces the declared CB2 size to 25.
@@ -198,12 +207,12 @@ Texture2D<float4> g_tGbufferNormal   : register(t1);
 Texture2D<float4> g_tGbufferMaterial : register(t2);
 Texture2D<float4> g_tMainDepth       : register(t3);
 
-#ifdef FO4_DS2_SHADOW_RAW_TAP
+#ifdef FO4_DS3_SHADOW_RAW_TAP
 // t4/s4: cascade shadow atlas read as stored depth, sampler mode_default.
 Texture2DArray<float4> g_tCascadeShadowRaw : register(t4);
 #endif
 
-#ifdef FO4_DS2_SHADOW_CMP_TAP
+#ifdef FO4_DS3_SHADOW_CMP_TAP
 // t5/s5: cascade shadow atlas read through the comparison sampler.
 Texture2DArray<float4> g_tCascadeShadowCmp : register(t5);
 #endif
@@ -213,11 +222,11 @@ SamplerState g_sGbufferNormal   : register(s1);
 SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth       : register(s3);
 
-#ifdef FO4_DS2_SHADOW_RAW_TAP
+#ifdef FO4_DS3_SHADOW_RAW_TAP
 SamplerState g_sCascadeShadowRaw : register(s4);
 #endif
 
-#ifdef FO4_DS2_SHADOW_CMP_TAP
+#ifdef FO4_DS3_SHADOW_CMP_TAP
 SamplerComparisonState g_sCascadeShadowCmp : register(s5);
 #endif
 
@@ -246,21 +255,20 @@ float3 EvaluateAmbientGradient(float3 direction)
 }
 #endif
 
-// One cascade's shadow factor. Native unrolls the two cascades into separate
+// One cascade's shadow factor. Native unrolls all three cascades into separate
 // branches with literal constant-buffer registers and a literal array slice, so
 // the rows, the slice and the world-scale vector arrive as arguments rather
-// than through a runtime index. That is the DIRSPLITS=1 -> DIRSPLITS=2
-// difference that keeps CB2 immediateIndexed here: the SHADOW_ONLY family
-// indexes CB2 by the runtime cascade and is declared dynamicIndexed.
+// than through a runtime index. That is what keeps CB2 immediateIndexed here:
+// the SHADOW_ONLY family indexes CB2 by the runtime cascade and is declared
+// dynamicIndexed instead.
 //
 // The reference depth is the raw projected z. This family applies no
-// slope-scaled bias and no 0.999999 clamp - both belong to the SHADOW_ONLY
-// permutations and neither appears in any DIRSPLITS=2 listing. The only depth
-// offset is Poisson's, below.
+// slope-scaled bias and no 0.999999 clamp; the only depth offset is Poisson's,
+// below.
 float ComputeCascadeShadow(float3 posView,
                            float4 row0, float4 row1, float4 row2,
                            float slice
-#ifdef FO4_DS2_USES_WORLD_SCALE
+#ifdef FO4_DS3_USES_WORLD_SCALE
                            , float4 cascadeScale
 #endif
 #ifdef FILTER_POISSON
@@ -303,8 +311,7 @@ float ComputeCascadeShadow(float3 posView,
 #elif defined(FILTER_PCSS)
     // Percentage-closer soft shadows. A 5x5 raw blocker search over t4/s4 sets
     // a penumbra width, then a 5x5 comparison filter over t5/s5 uses it. This
-    // is the only branch that needs both resources, which is why its declared
-    // contract is neither of the other two.
+    // is one of the two branches that need both resources.
     float2 searchStep = 1.0 / cascadeScale.xy;
 
     // .x accumulates blocker depth, .y counts blockers; native commits both
@@ -336,9 +343,7 @@ float ComputeCascadeShadow(float3 posView,
 
     // The centre tap is read raw and compared in the shader, then seeds the
     // accumulator the 25 comparison taps add to. The divisor stays 1/25, so it
-    // is an extra term rather than a 26th sample. Native shows 25 raw taps per
-    // cascade, not 26, because this read common-subexpression-folds with the
-    // (0,0) blocker tap.
+    // is an extra term rather than a 26th sample.
     float centreDepth = g_tCascadeShadowRaw.Sample(
         g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
     float centreLit = (centreDepth >= shadowZ) ? 1.0 : 0.0;
@@ -368,6 +373,63 @@ float ComputeCascadeShadow(float3 posView,
     }
     return sum * 0.04;
 
+#elif defined(FILTER_PCSSPOISSON)
+    // The DIRSPLITS=3 filter with no DIRSPLITS=2 counterpart: the PCSS blocker
+    // search sizes a penumbra, and the 16 Poisson taps spend it. It is the same
+    // 5x5 raw search over t4/s4 and the same world-range remap as PCSS, so it
+    // reads this cascade's world scale the same six times.
+    float2 searchStep = 1.0 / cascadeScale.xy;
+
+    float2 blocker = float2(0.0, 0.0);
+    [loop]
+    for (int bi = 0; bi < 5; ++bi)
+    {
+        float offsetX = float(bi - 2);
+        [loop]
+        for (int bj = 0; bj < 5; ++bj)
+        {
+            float offsetY = float(bj - 2);
+            float2 tapUV = float2(offsetX, offsetY) * searchStep + shadowUV;
+            float  tapDepth = g_tCascadeShadowRaw.Sample(
+                g_sCascadeShadowRaw, float3(tapUV, slice)).x;
+            bool   isBlocker = tapDepth < shadowZ;
+            float2 accumulated = float2(blocker.x + tapDepth, blocker.y + 1.0);
+            blocker = isBlocker ? accumulated : blocker;
+        }
+    }
+
+    if (blocker.y == 0.0)
+    {
+        return 1.0;
+    }
+
+    float averageBlocker = blocker.x / blocker.y;
+    float worldRange     = cascadeScale.w - cascadeScale.z;
+    float receiverWorld  = worldRange * shadowZ + cascadeScale.z;
+    float blockerWorld   = worldRange * averageBlocker + cascadeScale.z;
+    float separation     = saturate((receiverWorld - blockerWorld) * (1.0 / 128.0));
+    float penumbra       = (blockerWorld < cascadeScale.z + 0.001)
+        ? 1.9
+        : (separation * 1.8 + 0.1);
+
+    // The penumbra scales the texel step directly, so this branch never reads
+    // CB2[20], and there is no centre-lit seed and no depth bias to go with it.
+    float kernelScale = penumbra * searchStep.x;
+
+    float sum = 0.0;
+    [loop]
+    for (int k = 0; k < 8; ++k)
+    {
+        float2 tap0 = (SHADOW_POISSON_KERNEL[k * 2] - 0.5) * kernelScale;
+        float2 tap1 = (SHADOW_POISSON_KERNEL[k * 2 + 1] - 0.5) * kernelScale;
+        float4 tapUV = float4(tap0, tap1) * 2.0 + shadowUV.xyxy;
+        float partial = sum + g_tCascadeShadowCmp.SampleCmpLevelZero(
+            g_sCascadeShadowCmp, float3(tapUV.xy, slice), shadowZ);
+        sum = partial + g_tCascadeShadowCmp.SampleCmpLevelZero(
+            g_sCascadeShadowCmp, float3(tapUV.zw, slice), shadowZ);
+    }
+    return sum * 0.0625;
+
 #elif defined(FILTER_POISSON)
     // Eight loop iterations, two taps each, over the leading 16 entries of the
     // 1000-entry immediate kernel. The kernel and the tap count do not change
@@ -376,7 +438,7 @@ float ComputeCascadeShadow(float3 posView,
     //
     // This is the only branch with a depth bias, and it is per-cascade: native
     // scales the reciprocal world range by 0.275 in cascade 0 and takes it
-    // whole in cascade 1. The caller passes that scale.
+    // whole in cascades 1 and 2. The caller passes that scale.
     float rcpWorldRange = 1.0 / (cascadeScale.w - cascadeScale.z);
     float zRef = shadowZ - rcpWorldRange * poissonBiasScale;
     float kernelScale = cb2_idx20_shadow_sample_param.z * 3.0;
@@ -402,6 +464,108 @@ float ComputeCascadeShadow(float3 posView,
         g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
     return (tapDepth >= shadowZ) ? 1.0 : 0.0;
 #endif
+}
+
+// Cascade selection, cross-fade and distance fade for one pixel.
+//
+// Without BLENDSPLIT, SplitDistances.w is a single outer gate: native evaluates
+// no cascade and no distance fade past it, which is why cb2[24] survives as one
+// read inside the branch rather than an unconditional one.
+float ComputeDirectionalShadow(float3 posView, float linearizedDepth)
+{
+#ifndef BLENDSPLIT
+    if (!(linearizedDepth < cb2_idx9_split_distances.w))
+    {
+        return 1.0;
+    }
+#endif
+
+    // Every cascade body runs under its own activation test. The three tests
+    // are expressed only as (depth < FadeDistances.c) or the reverse so the
+    // whole set packs into the two vector compares native emits, and the
+    // regions each cascade owns alone need no further comparison.
+    bool cascade0Active = (linearizedDepth < cb2_idx10_fade_distances.y);
+    bool cascade1Active = (cb2_idx10_fade_distances.x < linearizedDepth)
+        && (linearizedDepth < cb2_idx10_fade_distances.w);
+    bool cascade2Active = (cb2_idx10_fade_distances.z < linearizedDepth);
+
+    float cascade0Shadow = 1.0;
+    if (cascade0Active)
+    {
+        cascade0Shadow = ComputeCascadeShadow(
+            posView, cb2_cascade0_row0, cb2_cascade0_row1, cb2_cascade0_row2,
+            0.0
+#ifdef FO4_DS3_USES_WORLD_SCALE
+            , cb2_idx21_cascade0_world_scale
+#endif
+#ifdef FILTER_POISSON
+            , 0.275
+#endif
+            );
+    }
+
+    float cascade1Shadow = 1.0;
+    if (cascade1Active)
+    {
+        cascade1Shadow = ComputeCascadeShadow(
+            posView, cb2_cascade1_row0, cb2_cascade1_row1, cb2_cascade1_row2,
+            1.0
+#ifdef FO4_DS3_USES_WORLD_SCALE
+            , cb2_idx22_cascade1_world_scale
+#endif
+#ifdef FILTER_POISSON
+            , 1.0
+#endif
+            );
+    }
+
+    float cascade2Shadow = 1.0;
+    if (cascade2Active)
+    {
+        cascade2Shadow = ComputeCascadeShadow(
+            posView, cb2_cascade2_row0, cb2_cascade2_row1, cb2_cascade2_row2,
+            2.0
+#ifdef FO4_DS3_USES_WORLD_SCALE
+            , cb2_idx23_cascade2_world_scale
+#endif
+#ifdef FILTER_POISSON
+            , 1.0
+#endif
+            );
+    }
+
+#ifdef BLENDSPLIT
+    // Two smooth transitions over the two overlap bands, .x -> .y and
+    // .z -> .w. Each cross-fade saturates outside its own band, so the lower
+    // one already resolves to cascade 0 below .x and to cascade 1 above .y, and
+    // one select between them is the whole partition: s0, blend01, s1, blend12,
+    // s2.
+    float range01 = cb2_idx10_fade_distances.y - cb2_idx10_fade_distances.x;
+    float range12 = cb2_idx10_fade_distances.w - cb2_idx10_fade_distances.z;
+    float t01 = saturate((linearizedDepth - cb2_idx10_fade_distances.x) / range01);
+    float t12 = saturate((linearizedDepth - cb2_idx10_fade_distances.z) / range12);
+    float w01 = min(t01 * t01 * (3.0 - 2.0 * t01), 1.0);
+    float w12 = min(t12 * t12 * (3.0 - 2.0 * t12), 1.0);
+
+    float lowerShadow = lerp(cascade0Shadow, cascade1Shadow, w01);
+    float upperShadow = lerp(cascade1Shadow, cascade2Shadow, w12);
+    float shadow = cascade2Active ? upperShadow : lowerShadow;
+#else
+    // Without BLENDSPLIT the lower overlap band resolves to unshadowed, exactly
+    // as it does at two splits; the upper one is owned by cascade 2. Both
+    // remaining boundaries reuse the activation tests rather than comparing
+    // again.
+    float shadow = cascade2Active ? cascade2Shadow : cascade1Shadow;
+    shadow = cascade0Active ? 1.0 : shadow;
+    shadow = (cb2_idx10_fade_distances.x < linearizedDepth) ? shadow : cascade0Shadow;
+#endif
+
+    // Distance fade toward unshadowed at the far range: fade = 1 - D^8.
+    float distNorm   = saturate(dot(posView, posView) / cb2_idx24_distance_fade.x);
+    float dist2      = distNorm * distNorm;
+    float dist4      = dist2 * dist2;
+    float fadeFactor = 1.0 - dist4 * dist4;
+    return fadeFactor * (shadow - 1.0) + 1.0;
 }
 
 // Entry point.
@@ -458,82 +622,13 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifndef IGNOREROUGHNESS
-    float roughness01   = 1.0 - matSample.x;
+    float roughness01 = 1.0 - matSample.x;
 #endif
     float posViewLenSq  = dot(-posView, -posView);
     float posViewLen    = rsqrt(posViewLenSq);
     float3 viewDirNeg   = -posView * posViewLen;
 
-    // Cascade selection. Both cascade bodies are evaluated under their own
-    // activation test and the two results are then selected between; native
-    // computes them in this order and never blends outside the overlap band.
-    bool cascade0Active = (linearizedDepth < cb2_idx10_fade_distances.y);
-    bool beforeCascade1 = (linearizedDepth < cb2_idx10_fade_distances.x);
-    bool cascade1Active = (cb2_idx10_fade_distances.x < linearizedDepth);
-    bool beyondCascade0 = (cb2_idx10_fade_distances.y < linearizedDepth);
-
-    float cascade0Shadow = 1.0;
-    if (cascade0Active)
-    {
-        cascade0Shadow = ComputeCascadeShadow(
-            posView, cb2_cascade0_row0, cb2_cascade0_row1, cb2_cascade0_row2,
-            0.0
-#ifdef FO4_DS2_USES_WORLD_SCALE
-            , cb2_idx21_cascade0_world_scale
-#endif
-#ifdef FILTER_POISSON
-            , 0.275
-#endif
-            );
-    }
-
-    float cascade1Shadow = 1.0;
-    if (cascade1Active)
-    {
-        cascade1Shadow = ComputeCascadeShadow(
-            posView, cb2_cascade1_row0, cb2_cascade1_row1, cb2_cascade1_row2,
-            1.0
-#ifdef FO4_DS2_USES_WORLD_SCALE
-            , cb2_idx22_cascade1_world_scale
-#endif
-#ifdef FILTER_POISSON
-            , 1.0
-#endif
-            );
-    }
-
-#ifdef BLENDSPLIT
-    // BLENDSPLIT is the axis that cross-fades the two cascades across the
-    // overlap band. It is also the axis that removes the SplitDistances gate
-    // below: the two changes always appear together in the archive.
-    float blendRange = cb2_idx10_fade_distances.y - cb2_idx10_fade_distances.x;
-    float t = saturate((linearizedDepth - cb2_idx10_fade_distances.x) / blendRange);
-    float blendW = min(t * t * (3.0 - 2.0 * t), 1.0);
-    float bandShadow = lerp(cascade0Shadow, cascade1Shadow, blendW);
-#else
-    // Without BLENDSPLIT the band resolves to unshadowed; native emits the
-    // literal 1.0 as the else operand of the first select.
-    float bandShadow = 1.0;
-#endif
-
-    float shadow = beyondCascade0 ? cascade1Shadow : bandShadow;
-    shadow = beforeCascade1 ? cascade0Shadow : shadow;
-
-    // Distance fade toward unshadowed at the far range: fade = 1 - D^8.
-    float distNorm   = saturate(dot(posView, posView) / cb2_idx24_distance_fade.x);
-    float dist2      = distNorm * distNorm;
-    float dist4      = dist2 * dist2;
-    float fadeFactor = 1.0 - dist4 * dist4;
-    shadow = fadeFactor * (shadow - 1.0) + 1.0;
-
-#ifndef BLENDSPLIT
-    // SplitDistances.w gates the whole cascade block. Beyond it the pixel is
-    // unshadowed, and the gate is absent under BLENDSPLIT.
-    if (!(linearizedDepth < cb2_idx9_split_distances.w))
-    {
-        shadow = 1.0;
-    }
-#endif
+    float shadow = ComputeDirectionalShadow(posView, linearizedDepth);
 
     // Sun-direction lighting setup.
     float3 albedoPremult  = albedoSample.w * albedoSample.xyz;
@@ -557,6 +652,7 @@ PS_OUTPUT main(PS_INPUT input)
         // Two-lobe anisotropic hair specular driven by the engine's
         // fHairPrimSpec* / fHairSecSpec* values. It dots the t2 sample's xyz,
         // a distinct normal in that g-buffer slot, not the octahedral normal.
+        // IGNOREROUGHNESS does not touch this branch.
         float skinNdotL  = dot(matSample.xyz, SunDirection.xyz);
         float skinNdotV  = dot(matSample.xyz, viewDirNeg);
         float sinScaleL  = sqrt(1.0 - min(skinNdotL * skinNdotL, 1.0));
@@ -604,8 +700,12 @@ PS_OUTPUT main(PS_INPUT input)
         ambientSpecular = matSample.y * ambientSpecularFactor *
             EvaluateAmbientGradient(reflectionDir);
 #endif
+
 #ifdef IGNOREROUGHNESS
-        // Native drops the roughness geometry but keeps material sampling.
+        // The roughness-driven visibility geometry is the whole of what
+        // IGNOREROUGHNESS removes from this branch; the diffuse mix collapses
+        // to the unmodified clamped N.L. The deleted `tangentL` is one of the
+        // two cb2[1] reads the macro costs.
         brdfShadowMix = NdotL_pos;
 #else
         float3 tangentV  = viewDirNeg - normalView * NdotV_raw;
@@ -667,18 +767,18 @@ PS_OUTPUT main(PS_INPUT input)
     }
 
     // Final composition.
-#ifdef IGNOREROUGHNESS
     float3 finalDiffuse = SunColor_HDR.xyz * brdfShadowMix;
-#else
-    float NdotV_view  = saturate(dot(normalView, viewDirNeg));
-    float ambientFres = 1.0 - NdotV_view;
-    ambientFres = exp2(log2(ambientFres) * 0.01);
 
+#ifndef IGNOREROUGHNESS
+    // Rim / backscatter tail, scaled by the smoothness. IGNOREROUGHNESS deletes
+    // that smoothness and with it this whole block - the second cb2[1] read and
+    // the one cb2[2] read the macro costs.
+    float NdotV_view  = saturate(dot(normalView, viewDirNeg));
+    float ambientFres = exp2(log2(1.0 - NdotV_view) * 0.01);
     float fresEdge    = saturate(dot(viewDirNeg, -SunDirection.xyz));
     float ambientTerm = fresEdge * ambientFres * NdotL_clamped * roughness01;
 
-    float3 finalDiffuse = SunColor_HDR.xyz * ambientTerm;
-    finalDiffuse += SunColor_HDR.xyz * brdfShadowMix;
+    finalDiffuse += SunColor_HDR.xyz * ambientTerm;
 #endif
 
     float backfaceWrap = saturate(-NdotL_raw);
@@ -704,9 +804,3 @@ PS_OUTPUT main(PS_INPUT input)
 
     return output;
 }
-
-// IGNOREROUGHNESS is reconstructed for all 11 native macro sets. Material
-// sampling remains live for the specular exponent and material-code-1 hair
-// path, while the default branch uses Lambert visibility and omits the
-// roughness-scaled rim term. AMBIENT variants replace the roughness-dependent
-// exponent with the native fixed square.

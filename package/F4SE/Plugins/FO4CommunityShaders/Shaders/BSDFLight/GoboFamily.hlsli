@@ -85,7 +85,7 @@
 #  error "the combined IGNORERIM and IGNOREROUGHNESS cells are not admitted in Wave 1"
 #endif
 
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 // LIGHT_TYPE_POINT branch (the unshadowed point-light path).
 // Canonical mapping:
@@ -119,7 +119,7 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block (see `deferred_contracts.hlsli`).
+    // [0..27]: shared per-frame block (see `Common/DeferredContracts.hlsli`).
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: hair specular scales and powers. Same role as in the directional

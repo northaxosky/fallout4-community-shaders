@@ -64,7 +64,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kDeferredComposite,
 				"deferred_composite",
-				L"lighting/deferred_composite.hlsl",
+				L"DeferredComposite.hlsl",
 				"main",
 				"ps_5_0",
 				kNoDefines
@@ -72,7 +72,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kDeferredPrepass,
 				"deferred_prepass",
-				L"lighting/deferred_prepass.hlsl",
+				L"BSDFPrePass.hlsl",
 				"main",
 				"ps_5_0",
 				kNoDefines
@@ -80,7 +80,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredPoint,
 				"bsdf_light_deferred_point",
-				L"lighting/BSDFLight.hlsl",
+				L"BSDFLight.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfPointDefines
@@ -88,7 +88,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kAmbientIblPass,
 				"ambient_ibl_pass",
-				L"lighting/BSDFComposite.hlsl",
+				L"BSDFComposite.hlsl",
 				"main",
 				"ps_5_0",
 				kAmbientIblDefines
@@ -96,7 +96,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
 				"bsdf_light_deferred_directional",
-				L"lighting/BSDFLight.hlsl",
+				L"BSDFLight.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfDirectionalDefines
@@ -104,7 +104,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 				"bsdf_light_deferred_directional_ibl",
-				L"lighting/BSDFLight.hlsl",
+				L"BSDFLight.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfDirectionalIblDefines
@@ -112,7 +112,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kVlsSliceScatter,
 				"vls_slice_scatter",
-				L"lighting/vls_slice_scatter.hlsl",
+				L"VolumetricLighting.hlsl",
 				"main",
 				"ps_5_0",
 				kNoDefines

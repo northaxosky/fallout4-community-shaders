@@ -139,7 +139,7 @@
 #endif
 
 // Shared CB12[0..27] per-frame schema.
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 // Internal selector. This names what the native declarations move together; it
 // is not a macro the engine defines, and nothing outside this file sets it.
@@ -172,7 +172,7 @@
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block. See `deferred_contracts.hlsli`.
+    // [0..27]: shared per-frame block. See `Common/DeferredContracts.hlsli`.
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
     // [28]: hair specular parameters (fHairPrimSpecScale, fHairPrimSpecPow,

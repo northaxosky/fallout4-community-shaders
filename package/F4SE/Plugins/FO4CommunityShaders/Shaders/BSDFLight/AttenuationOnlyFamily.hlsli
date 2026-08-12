@@ -29,7 +29,7 @@
 #  error "unsupported macro for the POINTOMNI attenuation-only family"
 #endif
 
-#include "../deferred_contracts.hlsli"
+#include "../Common/DeferredContracts.hlsli"
 
 cbuffer PerFrame_CB12 : register(b12)
 {

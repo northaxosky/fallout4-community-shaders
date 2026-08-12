@@ -7,7 +7,7 @@
 
 .DESCRIPTION
     Copies the feature shaders, the committed Upscaling/FrameGeneration HLSL, and the
-    reconstructed shaders\ tree into a throwaway scan root, runs the scanner there, and
+    reconstructed package shader tree into a throwaway scan root, runs the scanner there, and
     writes its report to docs\shader-buffers.md (a generated, gitignored doc).
 
     Install the scanner with:
@@ -47,7 +47,7 @@ $scanDirs = @(
     (Join-Path $repoRoot 'features'),
     (Join-Path $repoRoot 'package\F4SE\Plugins\Upscaling'),
     (Join-Path $repoRoot 'package\F4SE\Plugins\FrameGeneration'),
-    (Join-Path $repoRoot 'shaders')
+    (Join-Path $repoRoot 'package\F4SE\Plugins\FO4CommunityShaders\Shaders')
 )
 foreach ($d in $scanDirs) {
     if (-not (Test-Path $d)) { Exit-WithError "required shader scan directory not found: $d" 2 }
@@ -57,12 +57,12 @@ $scanRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('shaderscan-' + [System
 try {
     New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'features') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package\F4SE\Plugins') | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'shaders') | Out-Null
+    New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package\F4SE\Plugins\FO4CommunityShaders') | Out-Null
 
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'features\*')  -Destination (Join-Path $scanRoot 'features')
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\Upscaling')      -Destination (Join-Path $scanRoot 'package\F4SE\Plugins')
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\FrameGeneration') -Destination (Join-Path $scanRoot 'package\F4SE\Plugins')
-    Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'shaders\*') -Destination (Join-Path $scanRoot 'shaders')
+    Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\FO4CommunityShaders\Shaders') -Destination (Join-Path $scanRoot 'package\F4SE\Plugins\FO4CommunityShaders')
 
     Push-Location $scanRoot
     try {
