@@ -31,14 +31,14 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenspacegi");
 
-		constexpr const wchar_t* kResolvePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\ResolveCS.hlsl";
-		constexpr const wchar_t* kDecodePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\decode.cs.hlsl";
-		constexpr const wchar_t* kPrefilterPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\prefilterDepths.cs.hlsl";
-		constexpr const wchar_t* kAOPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\gi.cs.hlsl";
-		constexpr const wchar_t* kDenoisePath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\XeGTAO\\denoise.cs.hlsl";
-		constexpr const wchar_t* kAOIntegrationPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\AOIntegrationCS.hlsl";
-		constexpr const wchar_t* kBounceTelemetryPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\BounceTelemetryCS.hlsl";
-		constexpr const wchar_t* kBounceIntegrationPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceGI\\Shaders\\BounceIntegrationPS.hlsl";
+		constexpr const wchar_t* kResolvePath = L"Data\\Shaders\\ScreenSpaceGI\\ResolveCS.hlsl";
+		constexpr const wchar_t* kDecodePath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\decode.cs.hlsl";
+		constexpr const wchar_t* kPrefilterPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\prefilterDepths.cs.hlsl";
+		constexpr const wchar_t* kAOPath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\gi.cs.hlsl";
+		constexpr const wchar_t* kDenoisePath = L"Data\\Shaders\\ScreenSpaceGI\\XeGTAO\\denoise.cs.hlsl";
+		constexpr const wchar_t* kAOIntegrationPath = L"Data\\Shaders\\ScreenSpaceGI\\AOIntegrationCS.hlsl";
+		constexpr const wchar_t* kBounceTelemetryPath = L"Data\\Shaders\\ScreenSpaceGI\\BounceTelemetryCS.hlsl";
+		constexpr const wchar_t* kBounceIntegrationPath = L"Data\\Shaders\\ScreenSpaceGI\\BounceIntegrationPS.hlsl";
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{

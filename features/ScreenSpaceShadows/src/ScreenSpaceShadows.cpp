@@ -43,7 +43,7 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.screenspaceshadows");
 
-		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
+		constexpr const wchar_t* kRaymarchPath = L"Data\\Shaders\\ScreenSpaceShadows\\RaymarchCS.hlsl";
 
 		// Engine depth uses near=0, far=1.
 		constexpr float kFarDepthValue = 1.0f;

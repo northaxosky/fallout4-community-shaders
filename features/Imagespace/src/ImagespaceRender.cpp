@@ -553,10 +553,10 @@ namespace cs::features
 		if (!EnsureDOFResources(a_width, a_height)) return;
 		if (!compositeScratch) return;
 
-		auto* depthCoCCS = GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\DepthCoCCS.hlsl",   dofDepthCoCCS,  "DepthCoCCS");
-		auto* dilateCS   = GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\DilateCoCCS.hlsl",  dofDilateCS,    "DilateCoCCS");
-		auto* blurCS     = GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\DOFBlurCoCCS.hlsl", dofBlurCS,      "DOFBlurCoCCS");
-		auto* compCS     = GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\DOFCompositeCS.hlsl", dofCompositeCS, "DOFCompositeCS");
+		auto* depthCoCCS = GetCS(L"Data\\Shaders\\Imagespace\\DepthCoCCS.hlsl",   dofDepthCoCCS,  "DepthCoCCS");
+		auto* dilateCS   = GetCS(L"Data\\Shaders\\Imagespace\\DilateCoCCS.hlsl",  dofDilateCS,    "DilateCoCCS");
+		auto* blurCS     = GetCS(L"Data\\Shaders\\Imagespace\\DOFBlurCoCCS.hlsl", dofBlurCS,      "DOFBlurCoCCS");
+		auto* compCS     = GetCS(L"Data\\Shaders\\Imagespace\\DOFCompositeCS.hlsl", dofCompositeCS, "DOFCompositeCS");
 		if (!depthCoCCS || !dilateCS || !blurCS || !compCS) return;
 
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
@@ -792,13 +792,13 @@ namespace cs::features
 		if (wantBloom && !EnsureBloomResources(W, H, settings.bloomMips))
 			return;
 
-		auto* lumCS     = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\LumPyramidGenCS.hlsl",  lumPyramidCS,     "LumPyramidGenCS") : nullptr;
-		auto* lumTailCS = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\LumPyramidTailCS.hlsl", lumPyramidTailCS, "LumPyramidTailCS") : nullptr;
-		auto* expoCS    = wantAdaptive ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\ExposureAdaptCS.hlsl",   exposureCS,       "ExposureAdaptCS") : nullptr;
-		auto* threshCS  = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomThresholdCS.hlsl", bloomThresholdCS, "BloomThresholdCS") : nullptr;
-		auto* downCS   = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomDownCS.hlsl",      bloomDownCS,      "BloomDownCS") : nullptr;
-		auto* upCS     = wantBloom    ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\BloomUpCS.hlsl",        bloomUpCS,        "BloomUpCS") : nullptr;
-		auto* compCS   = wantComposite ? GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\CompositeCS.hlsl",     compositeCS,      "CompositeCS") : nullptr;
+		auto* lumCS     = wantAdaptive ? GetCS(L"Data\\Shaders\\Imagespace\\LumPyramidGenCS.hlsl",  lumPyramidCS,     "LumPyramidGenCS") : nullptr;
+		auto* lumTailCS = wantAdaptive ? GetCS(L"Data\\Shaders\\Imagespace\\LumPyramidTailCS.hlsl", lumPyramidTailCS, "LumPyramidTailCS") : nullptr;
+		auto* expoCS    = wantAdaptive ? GetCS(L"Data\\Shaders\\Imagespace\\ExposureAdaptCS.hlsl",   exposureCS,       "ExposureAdaptCS") : nullptr;
+		auto* threshCS  = wantBloom    ? GetCS(L"Data\\Shaders\\Imagespace\\BloomThresholdCS.hlsl", bloomThresholdCS, "BloomThresholdCS") : nullptr;
+		auto* downCS   = wantBloom    ? GetCS(L"Data\\Shaders\\Imagespace\\BloomDownCS.hlsl",      bloomDownCS,      "BloomDownCS") : nullptr;
+		auto* upCS     = wantBloom    ? GetCS(L"Data\\Shaders\\Imagespace\\BloomUpCS.hlsl",        bloomUpCS,        "BloomUpCS") : nullptr;
+		auto* compCS   = wantComposite ? GetCS(L"Data\\Shaders\\Imagespace\\CompositeCS.hlsl",     compositeCS,      "CompositeCS") : nullptr;
 
 		if (wantAdaptive && (!lumCS || !lumTailCS || !expoCS)) return;
 		if (wantBloom && (!threshCS || !downCS || !upCS)) return;

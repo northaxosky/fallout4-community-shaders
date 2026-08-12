@@ -32,9 +32,9 @@ namespace cs::features
 		auto* L = cs::log::Get("cs.feature.wetnesseffects");
 
 		constexpr const wchar_t* kWetnessPath =
-			L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\WetnessEffects\\Shaders\\WetnessMaskCS.hlsl";
+			L"Data\\Shaders\\WetnessEffects\\WetnessMaskCS.hlsl";
 		constexpr const wchar_t* kTelemetryPath =
-			L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\WetnessEffects\\Shaders\\WetnessTelemetryCS.hlsl";
+			L"Data\\Shaders\\WetnessEffects\\WetnessTelemetryCS.hlsl";
 
 		bool ParseSettingsTable(
 			const toml::table& a_config,

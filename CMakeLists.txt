@@ -251,7 +251,7 @@ target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
 add_test(
 	NAME ShaderCompile
 	COMMAND ShaderCompileTests
-		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
+		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI"
 		"${CMAKE_SOURCE_DIR}/package/Shaders"
 )
 set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")

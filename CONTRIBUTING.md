@@ -108,7 +108,7 @@ a manual source installation, mirror `package\` into the mod's `Data\`, then add
 build output and feature shaders:
 
 - `build\Release\FO4CommunityShaders.dll` (and `.pdb`) -> `Data\F4SE\Plugins\`
-- `features\Imagespace\Shaders\*.hlsl*` -> `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`
+- `features\<Name>\Shaders\<Name>\` -> `Data\Shaders\<Name>\`
 
 `package\` mirrors the mod's `Data\` directly: `package\Shaders\` holds the reconstructed
 deferred shaders and `package\F4SE\` holds plugin configuration, presets, LUTs, and staged
