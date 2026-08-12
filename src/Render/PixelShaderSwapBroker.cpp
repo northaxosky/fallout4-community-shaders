@@ -55,13 +55,6 @@ namespace cs::engine
 					route = ResolvePixelShaderRuntimeRoute(
 						context.subclassName,
 						context.techniqueBits);
-					const auto engineLookup =
-						ConsumeEnginePixelShaderLookup(
-							context.shader,
-							context.subclassName,
-							context.techniqueBits);
-					if (route && engineLookup)
-						route->engineLookup = *engineLookup;
 					if (route && route->pluginResolvedPsid) {
 						variant = ShaderVariantKeyView{
 							route->subclass,

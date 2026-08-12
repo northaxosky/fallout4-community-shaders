@@ -258,12 +258,6 @@ set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
 add_executable(PixelShaderSwapTests
 	tests/PixelShaderSwapTests.cpp
-	src/Render/EngineCurrentPixelShader.cpp
-	src/Render/EngineCurrentPixelShader.h
-	src/Render/EnginePixelShaderLookup.cpp
-	src/Render/EnginePixelShaderLookup.h
-	src/Render/EnginePixelShaderIdentity.cpp
-	src/Render/EnginePixelShaderIdentity.h
 	src/Render/PixelShaderSwapModel.cpp
 	src/Render/PixelShaderSwapBroker.h
 	src/Render/ShaderVariantResolver.cpp

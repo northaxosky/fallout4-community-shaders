@@ -2,15 +2,11 @@
 
 #include "Log.h"
 #include "PCH.h"
-#include "Render/EngineCurrentPixelShader.h"
-#include "Render/EnginePixelShaderLookup.h"
-#include "Render/EnginePixelShaderIdentity.h"
 #include "Render/ShaderSubclassContext.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 
 #include <Windows.h>
 
-#include <atomic>
 #include <exception>
 #include <mutex>
 #include <optional>
@@ -37,8 +33,6 @@ namespace cs::engine
 	{
 		auto* L = cs::log::Get("cs.render.shadersubclass");
 
-		std::atomic<std::uint64_t> g_setupCalls{ 0 };
-		std::atomic<ShaderSubclassSetupObserver> g_setupObserver{ nullptr };
 		ShaderSubclassHookInstallStats g_reloadStats{};
 		ShaderSubclassHookInstallStats g_setupStats{};
 		ShaderSubclassRuntimeLayout g_runtimeLayout{};
@@ -131,46 +125,16 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				std::uint32_t a_techniqueBits)
 			{
-				g_setupCalls.fetch_add(1, std::memory_order_relaxed);
 				shader_context::SetSticky(Tag::Name(), a_techniqueBits);
 				bool result = false;
-				std::optional<EnginePixelShaderIdentityResult>
-					enginePixelShader;
 				{
 					shader_context::Scope scope(
 						a_self, Tag::Name(), a_techniqueBits);
-					EnginePixelShaderLookupScope lookupScope(
-						a_self, Tag::Name(), a_techniqueBits);
 					result = func(a_self, a_techniqueBits);
-					if (result) {
-						const auto lookup = lookupScope.Snapshot(
-							a_self, Tag::Name(), a_techniqueBits);
-						enginePixelShader = ReconcileEnginePixelShaderId(
-							lookup, ReadEngineCurrentPixelShader());
-					}
 				}
 				if (!result) {
 					shader_context::ClearSticky();
 					return false;
-				}
-				std::optional<ShaderVariantId> pluginResolvedPsid;
-				std::optional<bool> tiledLighting;
-				if (const auto route = ResolvePixelShaderRuntimeRoute(
-						Tag::Name(), a_techniqueBits)) {
-					pluginResolvedPsid = route->pluginResolvedPsid;
-					tiledLighting = route->tiledLighting;
-				}
-				if (const auto observer =
-						g_setupObserver.load(std::memory_order_acquire)) {
-					const ShaderSubclassSetupObservation observation{
-						.shader = a_self,
-						.subclass = Tag::Name(),
-						.rawTechnique = a_techniqueBits,
-						.enginePixelShader = *enginePixelShader,
-						.pluginResolvedPsid = pluginResolvedPsid,
-						.tiledLighting = tiledLighting
-					};
-					observer(observation);
 				}
 				return true;
 			}
@@ -278,19 +242,6 @@ namespace cs::engine
 		});
 	}
 
-	bool RegisterShaderSubclassSetupObserver(
-		ShaderSubclassSetupObserver a_observer) noexcept
-	{
-		if (!a_observer)
-			return false;
-		ShaderSubclassSetupObserver expected = nullptr;
-		return g_setupObserver.compare_exchange_strong(
-			expected,
-			a_observer,
-			std::memory_order_release,
-			std::memory_order_acquire);
-	}
-
 	ShaderSubclassRuntimeLayout GetShaderSubclassRuntimeLayout() noexcept
 	{
 		std::call_once(g_layoutOnce, [] {
@@ -306,23 +257,4 @@ namespace cs::engine
 		return g_runtimeLayout;
 	}
 
-	ShaderSubclassHookInstallStats
-	GetReloadShaderHookInstallStats() noexcept
-	{
-		return g_reloadStats;
-	}
-
-	ShaderSubclassHookInstallStats
-	GetSetupTechniqueHookInstallStats() noexcept
-	{
-		return g_setupStats;
-	}
-
-	ShaderSubclassHookRuntimeStats
-	GetShaderSubclassHookRuntimeStats() noexcept
-	{
-		return {
-			g_setupCalls.load(std::memory_order_relaxed)
-		};
-	}
 }
