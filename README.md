@@ -9,10 +9,9 @@ A Fallout 4 port of the ideas in
 [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders),
 hooking the DirectX renderer directly.
 
-Like upstream, it **owns the game's deferred shaders** rather than patching them: every native
-permutation is reconstructed as HLSL from the shipped shader archive, compiled at runtime, and
-injected. Each reconstruction is proven numerically equal to the game's own bytecode by an
-execution-diff oracle before it ships.
+Like upstream, it **owns the game's deferred shaders** rather than patching them: the deferred
+lighting and composite permutations are reconstructed as readable HLSL, compiled at runtime, and
+injected in place of the stock shaders.
 
 <br>
 
@@ -87,7 +86,7 @@ disables all features; a malformed User file is ignored. Presets configure only 
 are already activated - they cannot activate Imagespace or any other feature.
 
 Baseline shader ownership is separately opt-in and does not load a feature. Set `enabled = true`
-under `[shader_ownership]` in the User TOML to replace the proven deferred targets with their
+under `[shader_ownership]` in the User TOML to replace the deferred targets with their
 stock-equivalent HLSL; the per-target switches in the shipped Default remain available for bring-up
 opt-outs. Restart after changing ownership.
 

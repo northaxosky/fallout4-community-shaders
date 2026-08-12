@@ -83,18 +83,9 @@ Run the registered CTest suite against the Release build:
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-`ShaderRoundtrip` recompiles the reconstructed deferred shaders under
-`package\F4SE\Plugins\FO4CommunityShaders\Shaders\` and checks each DXBC hash against
-`scripts\shaders\shader-fidelity-conformance.json`, a **producer-published
-attestation** copied byte-for-byte from the producer. It is
-fail-closed and there is no `-UpdateBaselines`: **the consumer may never
-re-baseline it, and the manifest must never be hand-edited.** Refreshing it
-requires an authoritative producer PASS, its `fidelity
-publish-conformance` step, and copying the artifact here unchanged.
-
-Editing a pinned shader invalidates that entry's `source_sha256` and turns the
-gate red before it compiles anything. That is by design, not drift — the fix is
-a producer republication, never a local edit.
+`ShaderCompile` compiles every shipping permutation of the reconstructed deferred shaders under
+`package\F4SE\Plugins\FO4CommunityShaders\Shaders\` through `D3DCompile`, the same compiler the
+plugin uses at runtime. Editing those shaders must keep it green.
 
 ## Stage runtime SDKs
 
@@ -127,11 +118,11 @@ visual comparison; rendering behavior must be checked in game.
 ```text
 src\                Core feature framework, renderer hooks, menu, and presets
 features\<Name>\    Feature source and optional runtime-compiled shaders
-package\...\Shaders\ Reconstructed deferred shaders, pinned by producer attestation
 cmake\              Build integration for CommonLibF4 and graphics SDKs
 extern\             Recursive source submodules
-package\            Static mod assets and staged runtime SDK files
-scripts\            SDK, deployment, and shader-validation tooling
+package\            Mod assets: config, presets, reconstructed shaders, staged SDK files
+scripts\            SDK staging and developer tooling
+tests\              Host and shader tests run by CTest
 ```
 
 Before submitting a change, build the affected configuration, run CTest, and perform
