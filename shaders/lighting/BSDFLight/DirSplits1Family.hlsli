@@ -1,9 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
 // FO4 BSDFLightShader deferred PS, native DIRECTIONAL full-BRDF family at
 // DIRSPLITS=1: the comparison FILTER_* macro axis over a single shadow cascade,
 // crossed with AMBIENT.
 //
-// Sibling of bsdf_light_deferred_dirsplits2.hlsl / _dirsplits3.hlsl, and the
-// full-BRDF counterpart of bsdf_light_deferred_shadow_only.hlsl. The split count
+// Sibling of DirSplits2Family.hlsli / DirSplits3Family.hlsli, and the full-BRDF
+// counterpart of ShadowOnlyFamily.hlsli. The split count
 // moves the CB2 layout, so it gets its own source rather than a runtime switch:
 // DIRSPLITS=1 has three projection rows at CB2[11..13] and no FadeDistances
 // read at all, where DIRSPLITS=2 has six rows plus CB2[10].
@@ -20,10 +21,10 @@
 //   FILTER_POISSON           sha1 02427236dcf3dc126e41ad38aaf2c07aedd43b5f, 23012 B
 //   FILTER_POISSON + AMBIENT sha1 a1d88864cd30485d84f98e36eaf281d15bd15c47, 23736 B
 //
-// Shadow subroot is bsdf_light_deferred_shadow_only.hlsl's DIRSPLITS=1
+// Shadow subroot is ShadowOnlyFamily.hlsli's DIRSPLITS=1
 // arrangement - the cascade slice and world-scale vector arrive from
 // CB2[9].y rather than from literals - and the BRDF tail is
-// bsdf_light_deferred_dirsplits2.hlsl's verbatim. Native carries neither the
+// DirSplits2Family.hlsli's verbatim. Native carries neither the
 // slope-scaled depth bias nor the 0.999999 reference clamp here; those belong
 // to SHADOW_ONLY. FILTER_POISSON's bias is the literal 0.275 with no material
 // branch.
@@ -35,7 +36,7 @@
 #  error "DIRECTIONAL is exclusive with the punctual light families"
 #endif
 #ifdef SHADOW_ONLY
-#  error "SHADOW_ONLY is the shadow-term family in bsdf_light_deferred_shadow_only.hlsl"
+#  error "SHADOW_ONLY is the shadow-term family in ShadowOnlyFamily.hlsli"
 #endif
 #ifndef SHADOW
 #  error "the reconstructed DIRSPLITS=1 full-BRDF family is SHADOW only"
@@ -67,10 +68,10 @@
 #  error "the archive has no unfiltered DIRSPLITS=1 full-BRDF blob; define one comparison FILTER_*"
 #endif
 
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 #ifdef FILTER_POISSON
-#  include "shadow_poisson_kernel.hlsli"
+#  include "../shadow_poisson_kernel.hlsli"
 #endif
 
 // Internal selectors.

@@ -25,7 +25,7 @@
 // DIRSPLITS=2 one.
 //
 // IGNOREROUGHNESS is reconstructed here. The controlled AMBIENT-free pair in
-// `bsdf_light_deferred_unshadowed.hlsl` localises the roughness-driven
+// `UnshadowedFamily.hlsli` localises the roughness-driven
 // visibility geometry and rim deletions. Shadowed AMBIENT disassembly adds one
 // more delta: its roughness-dependent exponent becomes an exact fixed square.
 // Across the six IGNOREROUGHNESS blobs, cb2[1] moves 5 -> 3 and cb2[2] moves
@@ -37,10 +37,10 @@
 #  error "this source is the native DIRECTIONAL family; define DIRECTIONAL"
 #endif
 #if defined(POINTOMNI) || defined(POINTSPOT) || defined(SPOT) || defined(HALFOMNI)
-#  error "DIRECTIONAL is exclusive with the punctual light families; those live in bsdf_light_deferred.hlsl"
+#  error "DIRECTIONAL is exclusive with the punctual light families; those live in DeferredFamily.hlsli"
 #endif
 #ifdef SHADOW_ONLY
-#  error "SHADOW_ONLY is the DIRSPLITS=1 family in bsdf_light_deferred_shadow_only.hlsl"
+#  error "SHADOW_ONLY is the DIRSPLITS=1 family in ShadowOnlyFamily.hlsli"
 #endif
 #ifndef SHADOW
 #  error "the reconstructed DIRSPLITS=3 family is SHADOW only; every blob in it declares the cascade block"
@@ -64,10 +64,10 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the
 // deferred-pipeline PS reconstructions).
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 #if defined(FILTER_POISSON) || defined(FILTER_PCSSPOISSON)
-#  include "shadow_poisson_kernel.hlsli"
+#  include "../shadow_poisson_kernel.hlsli"
 #endif
 
 // Internal selectors. These name what the native declarations move together;

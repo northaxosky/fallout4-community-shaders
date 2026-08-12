@@ -83,10 +83,10 @@
 // uses a fixed square for the AMBIENT exponent. IGNORERIM removes only the rim.
 
 #if defined(SHADOW)
-#  error "this source is the no-SHADOW family; the shadowed DIRSPLITS=2 blobs are bsdf_light_deferred_dirsplits2.hlsl"
+#  error "this source is the no-SHADOW family; the shadowed DIRSPLITS=2 blobs are in DirSplits2Family.hlsli"
 #endif
 #ifdef SHADOW_ONLY
-#  error "SHADOW_ONLY is the DIRSPLITS=1 family in bsdf_light_deferred_shadow_only.hlsl"
+#  error "SHADOW_ONLY is the DIRSPLITS=1 family in ShadowOnlyFamily.hlsli"
 #endif
 #if defined(FILTER_PCF1) || defined(FILTER_PCF9) || defined(FILTER_PCSS) \
     || defined(FILTER_POISSON) || defined(FILTER_PCSSPOISSON)
@@ -99,10 +99,10 @@
 #  error "GOBOPROJECTION blobs declare t7/s7 and are a different resource contract"
 #endif
 #ifdef ATTENUATION_ONLY
-#  error "ATTENUATION_ONLY is the t3-only family in bsdf_light_deferred_attenuation_only.hlsl"
+#  error "ATTENUATION_ONLY is the t3-only family in AttenuationOnlyFamily.hlsli"
 #endif
 #if defined(SPOT) || defined(POINTSPOT)
-#  error "the no-SHADOW SPOT blobs stay with the legacy adapter in bsdf_light_deferred.hlsl"
+#  error "the no-SHADOW SPOT blobs stay with the legacy adapter in DeferredFamily.hlsli"
 #endif
 #if (defined(DIRECTIONAL) + defined(POINTOMNI)) != 1
 #  error "define exactly one of DIRECTIONAL or POINTOMNI; the archive also carries a no-light-kind AMBIENT blob at DIRSPLITS=2 that this source does not reconstruct"
@@ -139,7 +139,7 @@
 #endif
 
 // Shared CB12[0..27] per-frame schema.
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 // Internal selector. This names what the native declarations move together; it
 // is not a macro the engine defines, and nothing outside this file sets it.

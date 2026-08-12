@@ -37,10 +37,10 @@
 #  error "mixed light kinds; this family is DIRECTIONAL"
 #endif
 #if defined(LIGHT_TYPE)
-#  error "LIGHT_TYPE is the legacy adapter axis in bsdf_light_deferred.hlsl, not a native macro"
+#  error "LIGHT_TYPE is the legacy adapter axis in DeferredFamily.hlsli, not a native macro"
 #endif
 #if defined(AMBIENT_IBL_IN_LIGHT)
-#  error "AMBIENT_IBL_IN_LIGHT is a legacy adapter axis in bsdf_light_deferred.hlsl, not a native macro"
+#  error "AMBIENT_IBL_IN_LIGHT is a legacy adapter axis in DeferredFamily.hlsli, not a native macro"
 #endif
 #if defined(GOBOPROJECTION)
 #  error "GOBOPROJECTION declares t7/s7 and is a different resource contract"
@@ -54,10 +54,10 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the
 // deferred-pipeline PS reconstructions).
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 #ifdef FILTER_POISSON
-#  include "shadow_poisson_kernel.hlsli"
+#  include "../shadow_poisson_kernel.hlsli"
 #endif
 
 // Constant buffer layouts (native directional shadow-only blendsplit).

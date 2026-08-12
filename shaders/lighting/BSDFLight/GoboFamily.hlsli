@@ -85,7 +85,7 @@
 #  error "the combined IGNORERIM and IGNOREROUGHNESS cells are not admitted in Wave 1"
 #endif
 
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 // LIGHT_TYPE_POINT branch (the unshadowed point-light path).
 // Canonical mapping:

@@ -27,10 +27,10 @@
 #  error "this source is the native DIRECTIONAL family; define DIRECTIONAL"
 #endif
 #if defined(POINTOMNI) || defined(POINTSPOT) || defined(SPOT) || defined(HALFOMNI)
-#  error "DIRECTIONAL is exclusive with the punctual light families; those live in bsdf_light_deferred.hlsl"
+#  error "DIRECTIONAL is exclusive with the punctual light families; those live in DeferredFamily.hlsli"
 #endif
 #ifdef SHADOW_ONLY
-#  error "SHADOW_ONLY is the DIRSPLITS=1 family in bsdf_light_deferred_shadow_only.hlsl"
+#  error "SHADOW_ONLY is the DIRSPLITS=1 family in ShadowOnlyFamily.hlsli"
 #endif
 #ifndef SHADOW
 #  error "the reconstructed DIRSPLITS=2 family is SHADOW only; the five no-SHADOW blobs declare a different CB2 and have no filter axis"
@@ -54,10 +54,10 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the
 // deferred-pipeline PS reconstructions).
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 #ifdef FILTER_POISSON
-#  include "shadow_poisson_kernel.hlsli"
+#  include "../shadow_poisson_kernel.hlsli"
 #endif
 
 // Internal selectors. These name what the native declarations move together;

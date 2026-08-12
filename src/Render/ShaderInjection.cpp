@@ -25,14 +25,16 @@ namespace cs::engine
 		constexpr std::array<ShaderInjectionDefineMetadata, 0> kNoDefines{};
 
 		// Routes must reconstruct the stock blob they replace.
-		constexpr std::array<ShaderInjectionDefineMetadata, 5> kBsdfPointDefines{ {
+		constexpr std::array<ShaderInjectionDefineMetadata, 6> kBsdfPointDefines{ {
+			{ "BSDF_LIGHT_FAMILY", "7" },
 			{ "DIRSPLITS", "2" },
 			{ "GOBOPROJECTION", "1" },
 			{ "POINTOMNI", "1" },
 			{ "RGBSPEC", "1" },
 			{ "SPECULAR", "1" }
 		} };
-		constexpr std::array<ShaderInjectionDefineMetadata, 7> kBsdfDirectionalDefines{ {
+		constexpr std::array<ShaderInjectionDefineMetadata, 8> kBsdfDirectionalDefines{ {
+			{ "BSDF_LIGHT_FAMILY", "2" },
 			{ "BLENDSPLIT", "1" },
 			{ "DIRECTIONAL", "1" },
 			{ "DIRSPLITS", "2" },
@@ -41,7 +43,8 @@ namespace cs::engine
 			{ "SHADOW", "1" },
 			{ "SPECULAR", "1" }
 		} };
-		constexpr std::array<ShaderInjectionDefineMetadata, 8> kBsdfDirectionalIblDefines{ {
+		constexpr std::array<ShaderInjectionDefineMetadata, 9> kBsdfDirectionalIblDefines{ {
+			{ "BSDF_LIGHT_FAMILY", "2" },
 			{ "AMBIENT", "1" },
 			{ "BLENDSPLIT", "1" },
 			{ "DIRECTIONAL", "1" },
@@ -77,7 +80,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredPoint,
 				"bsdf_light_deferred_point",
-				L"lighting/bsdf_light_deferred_gobo.hlsl",
+				L"lighting/BSDFLight.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfPointDefines
@@ -93,7 +96,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
 				"bsdf_light_deferred_directional",
-				L"lighting/bsdf_light_deferred_dirsplits2.hlsl",
+				L"lighting/BSDFLight.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfDirectionalDefines
@@ -101,7 +104,7 @@ namespace cs::engine
 			{
 				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 				"bsdf_light_deferred_directional_ibl",
-				L"lighting/bsdf_light_deferred_dirsplits2.hlsl",
+				L"lighting/BSDFLight.hlsl",
 				"main",
 				"ps_5_0",
 				kBsdfDirectionalIblDefines

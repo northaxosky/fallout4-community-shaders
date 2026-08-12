@@ -123,7 +123,7 @@
 
 // Shared CB12[0..27] per-frame schema (single source of truth across the 5
 // deferred-pipeline PS reconstructions). See header for documentation.
-#include "deferred_contracts.hlsli"
+#include "../deferred_contracts.hlsli"
 
 // LIGHT_TYPE_DIRECTIONAL branch (the sun-light path).
 #if LIGHT_TYPE == LIGHT_TYPE_DIRECTIONAL
