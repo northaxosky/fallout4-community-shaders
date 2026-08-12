@@ -97,28 +97,10 @@ jobs:
           }
           cmake -S . --preset=ci
 
-      - name: Verify shader parity gates
-        shell: pwsh
-        run: |
-          $kitsRoot = Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin'
-          $fxc = Get-ChildItem -Path $kitsRoot -Filter fxc.exe -Recurse |
-            Where-Object { $_.FullName -like '*\x64\fxc.exe' } |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-
-          if (-not $fxc) {
-            throw "Could not find x64 fxc.exe under $kitsRoot"
-          }
-
-          $env:FXC_PATH = $fxc.FullName
-          # The `parity` label is exactly the fxc-driven, build-independent
-          # gates: ShaderRoundtrip, FilterAxisNativeShex, PointOmniShadowAdmission.
-          ctest --test-dir build -C Release -L parity --output-on-failure --no-tests=error
-
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Run unit + shader-compile tests
+      - name: Run tests
         shell: pwsh
         run: |
-          ctest --test-dir build -C Release -LE parity --output-on-failure --no-tests=error
+          ctest --test-dir build -C Release --output-on-failure --no-tests=error
