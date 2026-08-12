@@ -127,6 +127,7 @@ extern\             Recursive source submodules
 package\            Mod assets: config, presets, reconstructed shaders, staged SDK files
 scripts\            SDK staging and developer tooling
 tests\              Host and shader tests run by CTest
+docs\               Developer documentation
 ```
 
 Before submitting a change, build the affected configuration, run CTest, and perform

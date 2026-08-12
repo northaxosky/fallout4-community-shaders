@@ -1,6 +1,6 @@
 # Deferred shader reconstructions
 
-This directory contains reconstructed HLSL for Fallout 4's deferred renderer.
+`package/Shaders/` holds reconstructed HLSL for Fallout 4's deferred renderer.
 `src/Render/ShaderInjection.cpp` compiles registered permutations at runtime and
 injects them in place of the corresponding stock shaders.
 
@@ -16,8 +16,9 @@ same name:
 - `BSDFLight.hlsl` selects modules from `BSDFLight/`.
 - `BSDFComposite.hlsl` selects modules from `BSDFComposite/`.
 - `Common/` contains helpers shared by more than one entry point or family.
-- `lighting-shader-id-map.json` records the principal deferred hosts and their
-  named render-target bindings.
+
+Feature shaders live in `features/<Name>/Shaders/<Name>/` and deploy alongside
+these into `Data/Shaders/<Name>/`.
 
 The two modular entry points require an explicit selector:
 
