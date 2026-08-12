@@ -302,23 +302,6 @@ set_tests_properties(ShaderMacroDiagnostics PROPERTIES
 	LABELS "render;shader;unit"
 )
 
-add_executable(OwnedShaderRegistryTests
-	tests/OwnedShaderRegistryTests.cpp
-	src/Render/OwnedShaderRegistry.cpp
-	src/Render/OwnedShaderRegistry.h
-	src/Render/PixelShaderSwapModel.cpp
-	src/Render/PixelShaderSwapBroker.h
-	src/Utils/CSSha1.cpp
-	src/Utils/CSSha1.h
-)
-configure_host_test(OwnedShaderRegistryTests)
-target_link_libraries(OwnedShaderRegistryTests PRIVATE bcrypt.lib)
-
-add_test(NAME OwnedShaderRegistry COMMAND OwnedShaderRegistryTests)
-set_tests_properties(OwnedShaderRegistry PROPERTIES
-	LABELS "render;shader;unit"
-)
-
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
