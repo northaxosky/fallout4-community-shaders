@@ -131,14 +131,6 @@ namespace cs::engine
 		std::optional<bool> tiledLighting;
 	};
 
-	struct PixelShaderCreationDescriptor
-	{
-		const void* bytecode = nullptr;
-		std::size_t bytecodeLength = 0;
-		bool classLinkagePresent = false;
-		std::optional<PixelShaderRuntimeRoute> route;
-	};
-
 	enum class PixelShaderSwapResolverResult : std::uint8_t
 	{
 		kNoMatch,
@@ -158,69 +150,6 @@ namespace cs::engine
 	inline constexpr int kEarlyResolverPriority = -100;
 	inline constexpr int kHlslReplacementResolverPriority = 0;
 
-	struct PixelShaderSwapCompletion
-	{
-		std::int32_t originalResult = 0;
-		bool outputRequested = false;
-		ID3D11PixelShader* stockOutput = nullptr;
-		bool originalInputUnchanged = false;
-		bool resolverInvoked = false;
-		bool resolverReportedReplacement = false;
-		ID3D11PixelShader* finalOutput = nullptr;
-		bool finalIsStock = false;
-		bool finalIsReplacement = false;
-		bool finalIsNull = true;
-	};
-
-	using PreparePixelShaderObserver = void* (*)(
-		const void* a_bytecode, std::size_t a_bytecodeLength) noexcept;
-	using PreparePixelShaderObserverDetailed = void* (*)(
-		const PixelShaderCreationDescriptor& a_descriptor) noexcept;
-	using BeginPixelShaderObserverAdmission = bool (*)() noexcept;
-	using EndPixelShaderObserverAdmission = void (*)() noexcept;
-	using OriginalPixelShaderObserver = void (*)(
-		void* a_token, const sha1::Sha1Result& a_sha,
-		ID3D11PixelShader* a_shader) noexcept;
-	using CompletePixelShaderObserver = void (*)(
-		void* a_token, const PixelShaderSwapCompletion& a_completion) noexcept;
-
-	struct PixelShaderSwapObserver
-	{
-		BeginPixelShaderObserverAdmission beginAdmission = nullptr;
-		EndPixelShaderObserverAdmission endAdmission = nullptr;
-		PreparePixelShaderObserver prepare = nullptr;
-		OriginalPixelShaderObserver observeOriginal = nullptr;
-		CompletePixelShaderObserver complete = nullptr;
-		PreparePixelShaderObserverDetailed prepareDetailed = nullptr;
-	};
-
-	struct PixelShaderSwapObserverInvocation
-	{
-		PixelShaderSwapObserver observer{};
-		void* token = nullptr;
-		bool active = false;
-		bool admitted = false;
-	};
-
-	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
-		PixelShaderSwapObserver a_observer,
-		const void* a_bytecode,
-		std::size_t a_bytecodeLength) noexcept;
-	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
-		PixelShaderSwapObserver a_observer,
-		const PixelShaderCreationDescriptor& a_descriptor) noexcept;
-	void CompletePixelShaderSwapObserver(
-		PixelShaderSwapObserverInvocation& a_invocation,
-		const PixelShaderSwapCompletion& a_completion) noexcept;
-
-	PixelShaderSwapCompletion ClassifyPixelShaderSwapCompletion(
-		std::int32_t a_originalResult,
-		bool a_outputRequested,
-		ID3D11PixelShader* a_stockOutput,
-		bool a_resolverInvoked,
-		bool a_resolverReportedReplacement,
-		ID3D11PixelShader* a_finalOutput) noexcept;
-
 	using CreatePixelShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
 		ID3D11Device*,
 		const void*,
@@ -230,7 +159,6 @@ namespace cs::engine
 
 	HRESULT ExecutePixelShaderSwapPipeline(
 		CreatePixelShaderFunction a_original,
-		std::span<const PixelShaderSwapObserver> a_observers,
 		std::span<const PixelShaderSwapResolverRegistration> a_resolvers,
 		std::optional<ShaderVariantKeyView> a_variant,
 		bool a_bypass,
@@ -238,8 +166,7 @@ namespace cs::engine
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output,
-		std::optional<PixelShaderRuntimeRoute> a_route = std::nullopt) noexcept;
+		ID3D11PixelShader** a_output) noexcept;
 
 	struct PixelShaderResolverRegistryIdentity
 	{
@@ -266,21 +193,10 @@ namespace cs::engine
 	std::string BuildPixelShaderResolverRegistryDescriptor(
 		std::span<const PixelShaderResolverRegistryIdentity> a_identities);
 
-	struct PixelShaderResolverRegistrySnapshot
-	{
-		bool valid = false;
-		std::uint64_t generation = 0;
-		bool empty = true;
-		std::string sha256;
-	};
-
 	void SetPixelShaderSwapBrokerDevice(ID3D11Device* a_device);
 	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver a_resolver);
 	bool RegisterPixelShaderSwapResolver(
 		PixelShaderSwapResolverRegistration a_registration);
-	bool RegisterPixelShaderSwapObserver(PixelShaderSwapObserver a_observer);
-	PixelShaderResolverRegistrySnapshot
-		GetPixelShaderResolverRegistrySnapshot() noexcept;
 	std::uintptr_t PixelShaderSwapBrokerCreateHookAddress() noexcept;
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept;
 	bool PixelShaderBrokerBypassActive() noexcept;

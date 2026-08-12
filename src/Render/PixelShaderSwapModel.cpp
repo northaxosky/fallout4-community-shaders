@@ -1,13 +1,11 @@
 #include "Render/PixelShaderSwapBroker.h"
 
 #include <algorithm>
-#include <array>
 
 namespace cs::engine
 {
 	namespace
 	{
-		constexpr std::size_t kMaxObserverInvocations = 8;
 		thread_local unsigned g_bypassDepth = 0;
 
 		bool Sha1Equals(
@@ -123,89 +121,8 @@ namespace cs::engine
 			&& a_replacementReady;
 	}
 
-	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
-		PixelShaderSwapObserver a_observer,
-		const void* a_bytecode,
-		std::size_t a_bytecodeLength) noexcept
-	{
-		return BeginPixelShaderSwapObserver(
-			a_observer,
-			PixelShaderCreationDescriptor{
-				.bytecode = a_bytecode,
-				.bytecodeLength = a_bytecodeLength
-			});
-	}
-
-	PixelShaderSwapObserverInvocation BeginPixelShaderSwapObserver(
-		PixelShaderSwapObserver a_observer,
-		const PixelShaderCreationDescriptor& a_descriptor) noexcept
-	{
-		PixelShaderSwapObserverInvocation invocation;
-		invocation.observer = a_observer;
-		if (a_observer.beginAdmission) {
-			invocation.admitted = a_observer.beginAdmission();
-			if (!invocation.admitted)
-				return invocation;
-		}
-		invocation.active = true;
-		if (a_observer.prepareDetailed) {
-			invocation.token =
-				a_observer.prepareDetailed(a_descriptor);
-		} else if (a_observer.prepare) {
-			invocation.token =
-				a_observer.prepare(
-					a_descriptor.bytecode,
-					a_descriptor.bytecodeLength);
-		}
-		return invocation;
-	}
-
-	void CompletePixelShaderSwapObserver(
-		PixelShaderSwapObserverInvocation& a_invocation,
-		const PixelShaderSwapCompletion& a_completion) noexcept
-	{
-		if (a_invocation.active && a_invocation.observer.complete) {
-			a_invocation.observer.complete(
-				a_invocation.token, a_completion);
-		}
-		if (a_invocation.admitted
-			&& a_invocation.observer.endAdmission) {
-			a_invocation.observer.endAdmission();
-		}
-		a_invocation = {};
-	}
-
-	PixelShaderSwapCompletion ClassifyPixelShaderSwapCompletion(
-		std::int32_t a_originalResult,
-		bool a_outputRequested,
-		ID3D11PixelShader* a_stockOutput,
-		bool a_resolverInvoked,
-		bool a_resolverReportedReplacement,
-		ID3D11PixelShader* a_finalOutput) noexcept
-	{
-		PixelShaderSwapCompletion result;
-		result.originalResult = a_originalResult;
-		result.outputRequested = a_outputRequested;
-		result.stockOutput = a_stockOutput;
-		result.resolverInvoked = a_resolverInvoked;
-		result.resolverReportedReplacement = a_resolverReportedReplacement;
-		result.finalOutput = a_finalOutput;
-		const bool originalSucceeded = a_originalResult >= 0;
-		const bool usableFinal = originalSucceeded
-			&& a_outputRequested
-			&& a_finalOutput != nullptr;
-		result.finalIsNull = a_outputRequested && a_finalOutput == nullptr;
-		result.finalIsStock = usableFinal
-			&& a_finalOutput == a_stockOutput;
-		result.finalIsReplacement = usableFinal
-			&& a_stockOutput != nullptr
-			&& a_finalOutput != a_stockOutput;
-		return result;
-	}
-
 	HRESULT ExecutePixelShaderSwapPipeline(
 		CreatePixelShaderFunction a_original,
-		std::span<const PixelShaderSwapObserver> a_observers,
 		std::span<const PixelShaderSwapResolverRegistration> a_resolvers,
 		std::optional<ShaderVariantKeyView> a_variant,
 		bool a_bypass,
@@ -213,8 +130,7 @@ namespace cs::engine
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output,
-		std::optional<PixelShaderRuntimeRoute> a_route) noexcept
+		ID3D11PixelShader** a_output) noexcept
 	{
 		if (!a_original)
 			return E_POINTER;
@@ -227,28 +143,8 @@ namespace cs::engine
 				a_output);
 		}
 
-		std::array<PixelShaderSwapObserverInvocation,
-			kMaxObserverInvocations> invocations{};
-		const auto observerCount =
-			std::min(a_observers.size(), invocations.size());
-		for (std::size_t index = 0; index < observerCount; ++index) {
-			invocations[index] = BeginPixelShaderSwapObserver(
-				a_observers[index],
-				PixelShaderCreationDescriptor{
-					.bytecode = a_bytecode,
-					.bytecodeLength =
-						static_cast<std::size_t>(a_bytecodeLength),
-					.classLinkagePresent = a_linkage != nullptr,
-					.route = a_route
-				});
-		}
-		sha1::Sha1Result preInputSha1{};
 		const bool inputHashable =
 			a_bytecode != nullptr && a_bytecodeLength != 0;
-		if (inputHashable) {
-			preInputSha1 =
-				sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
-		}
 
 		const HRESULT result = a_original(
 			a_device,
@@ -266,22 +162,8 @@ namespace cs::engine
 			&& stockOutput
 			&& a_bytecode
 			&& a_bytecodeLength != 0;
-		bool resolverInvoked = false;
-		bool resolverReportedReplacement = false;
 		if (canResolve) {
 			const auto& stockSha1 = postInputSha1;
-			for (std::size_t index = 0; index < observerCount; ++index) {
-				const auto& observer = a_observers[index];
-				if (invocations[index].active
-					&& observer.observeOriginal) {
-					observer.observeOriginal(
-						invocations[index].token,
-						stockSha1,
-						stockOutput);
-				}
-
-			}
-
 			const PixelShaderSwapRequest request{
 				.device = a_device,
 				.linkage = a_linkage,
@@ -295,11 +177,9 @@ namespace cs::engine
 			for (const auto& registration : a_resolvers) {
 				if (!registration.resolver)
 					continue;
-				resolverInvoked = true;
 				const auto resolution = registration.resolver(request);
 				if (resolution
 					== PixelShaderSwapResolverResult::kReplaced) {
-					resolverReportedReplacement = true;
 					break;
 				}
 				if (resolution
@@ -309,20 +189,6 @@ namespace cs::engine
 			}
 		}
 
-		auto completion = ClassifyPixelShaderSwapCompletion(
-			static_cast<std::int32_t>(result),
-			a_output != nullptr,
-			stockOutput,
-			resolverInvoked,
-			resolverReportedReplacement,
-			a_output ? *a_output : nullptr);
-		completion.originalInputUnchanged =
-			inputHashable
-			&& !sha1::Sha1IsZero(preInputSha1)
-			&& !sha1::Sha1IsZero(postInputSha1)
-			&& preInputSha1.bytes == postInputSha1.bytes;
-		for (std::size_t index = 0; index < observerCount; ++index)
-			CompletePixelShaderSwapObserver(invocations[index], completion);
 		return result;
 	}
 

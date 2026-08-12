@@ -4,11 +4,9 @@
 #include "PCH.h"
 #include "Render/ShaderSubclassContext.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
-#include "Utils/CSSha256.h"
 
 #include <atomic>
 #include <algorithm>
-#include <array>
 #include <d3d11.h>
 #include <memory>
 #include <mutex>
@@ -18,10 +16,8 @@ namespace cs::engine
 {
 	namespace
 	{
-		using ObserverList = std::vector<PixelShaderSwapObserver>;
 		using ResolverList =
 			std::vector<PixelShaderSwapResolverRegistration>;
-		constexpr std::size_t kMaxObservers = 8;
 		constexpr std::size_t kMaxResolvers = 8;
 
 		auto* L = cs::log::Get("cs.render.pixelshaderswap");
@@ -29,8 +25,6 @@ namespace cs::engine
 		std::atomic<std::shared_ptr<const ResolverList>> g_resolvers;
 		std::mutex g_resolverRegistrationMutex;
 		PixelShaderResolverRegistryModel g_resolverRegistry;
-		std::atomic<std::shared_ptr<const ObserverList>> g_observers;
-		std::mutex g_observerRegistrationMutex;
 
 		std::mutex g_installMutex;
 		ID3D11Device* g_device = nullptr;
@@ -63,11 +57,7 @@ namespace cs::engine
 						};
 					}
 				}
-				const auto observers = g_observers.load(std::memory_order_acquire);
 				const auto resolvers = g_resolvers.load(std::memory_order_acquire);
-				const std::span<const PixelShaderSwapObserver> observerSpan =
-					observers ? std::span<const PixelShaderSwapObserver>(*observers)
-						: std::span<const PixelShaderSwapObserver>{};
 				const std::span<const PixelShaderSwapResolverRegistration>
 					resolverSpan =
 						resolvers
@@ -77,7 +67,6 @@ namespace cs::engine
 							const PixelShaderSwapResolverRegistration>{};
 				return ExecutePixelShaderSwapPipeline(
 					func,
-					observerSpan,
 					resolverSpan,
 					variant,
 					PixelShaderBrokerBypassActive(),
@@ -85,8 +74,7 @@ namespace cs::engine
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
-					a_out,
-					route);
+					a_out);
 			}
 
 			static inline CreatePixelShaderFunction func = nullptr;
@@ -171,84 +159,13 @@ namespace cs::engine
 			g_resolvers.store(std::move(updated), std::memory_order_release);
 		}
 
-		const auto observers = g_observers.load(std::memory_order_acquire);
-		const auto observerCount = observers ? observers->size() : 0;
 		L->info(
-			"Resolver registered (priority={}, resolvers={}, observers_at_register={}).",
+			"Resolver registered (priority={}, resolvers={}).",
 			a_registration.priority,
-			resolverCount,
-			observerCount);
+			resolverCount);
 
 		RequestHookInstall();
 		return true;
-	}
-
-	bool RegisterPixelShaderSwapObserver(PixelShaderSwapObserver a_observer)
-	{
-		if (!a_observer.prepare
-			&& !a_observer.prepareDetailed
-			&& !a_observer.observeOriginal
-			&& !a_observer.complete)
-			return false;
-		if (static_cast<bool>(a_observer.beginAdmission)
-			!= static_cast<bool>(a_observer.endAdmission))
-			return false;
-		if (a_observer.prepare && a_observer.prepareDetailed)
-			return false;
-		if ((a_observer.prepare || a_observer.prepareDetailed)
-			&& !a_observer.complete)
-			return false;
-
-		{
-			std::scoped_lock lock(g_observerRegistrationMutex);
-			const auto current = g_observers.load(std::memory_order_acquire);
-			if (current) {
-				for (const auto& observer : *current) {
-					if (observer.beginAdmission == a_observer.beginAdmission
-						&& observer.endAdmission == a_observer.endAdmission
-						&& observer.prepare == a_observer.prepare
-						&& observer.observeOriginal == a_observer.observeOriginal
-						&& observer.complete == a_observer.complete
-						&& observer.prepareDetailed
-							== a_observer.prepareDetailed)
-						return false;
-				}
-				if (current->size() >= kMaxObservers)
-					return false;
-			}
-
-			auto updated = current
-				? std::make_shared<ObserverList>(*current)
-				: std::make_shared<ObserverList>();
-			updated->push_back(a_observer);
-			g_observers.store(std::move(updated), std::memory_order_release);
-		}
-
-		RequestHookInstall();
-		return true;
-	}
-
-	PixelShaderResolverRegistrySnapshot
-		GetPixelShaderResolverRegistrySnapshot() noexcept
-	{
-		try {
-			std::scoped_lock lock(g_resolverRegistrationMutex);
-			const auto descriptor =
-				BuildPixelShaderResolverRegistryDescriptor(
-					g_resolverRegistry.Identities());
-			const auto digest = sha256::Sha256Compute(
-				descriptor.data(), descriptor.size());
-			if (sha256::Sha256IsZero(digest))
-				return {};
-			return {
-				.valid = true,
-				.generation = g_resolverRegistry.Generation(),
-				.empty = g_resolverRegistry.Identities().empty(),
-				.sha256 = sha256::Sha256ToHex(digest)
-			};
-		} catch (...) {
-			return {};
-		}
 	}
 
 	std::uintptr_t PixelShaderSwapBrokerCreateHookAddress() noexcept
