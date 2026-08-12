@@ -480,9 +480,9 @@ void FrameGeneration::CreateFrameGenerationResources()
 		}
 	}
 
-	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", {}, "cs_5_0");
-	generateSharedBuffersCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", {}, "cs_5_0");
-	uiAlphaMaskCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\F4SE\\Plugins\\FrameGeneration\\UIAlphaMaskCS.hlsl", {}, "cs_5_0");
+	copyDepthToSharedBufferCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\Shaders\\FrameGeneration\\CopyDepthToSharedBufferCS.hlsl", {}, "cs_5_0");
+	generateSharedBuffersCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\Shaders\\FrameGeneration\\GenerateSharedBuffersCS.hlsl", {}, "cs_5_0");
+	uiAlphaMaskCS = (ID3D11ComputeShader*)cs::util::CompileShader(L"Data\\Shaders\\FrameGeneration\\UIAlphaMaskCS.hlsl", {}, "cs_5_0");
 
 	L->info("Frame generation resources created (HUDLess + Depth + MVec + UIAlpha)");
 }

@@ -45,8 +45,6 @@ if (-not (Get-Command hlslkit-buffer-scan -ErrorAction SilentlyContinue)) {
 
 $scanDirs = @(
     (Join-Path $repoRoot 'features'),
-    (Join-Path $repoRoot 'package\F4SE\Plugins\Upscaling'),
-    (Join-Path $repoRoot 'package\F4SE\Plugins\FrameGeneration'),
     (Join-Path $repoRoot 'package\Shaders')
 )
 foreach ($d in $scanDirs) {
@@ -56,12 +54,9 @@ foreach ($d in $scanDirs) {
 $scanRoot = Join-Path ([System.IO.Path]::GetTempPath()) ('shaderscan-' + [System.Guid]::NewGuid().ToString('N'))
 try {
     New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'features') | Out-Null
-    New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package\F4SE\Plugins') | Out-Null
     New-Item -ItemType Directory -Force -Path (Join-Path $scanRoot 'package') | Out-Null
 
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'features\*')  -Destination (Join-Path $scanRoot 'features')
-    Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\Upscaling')      -Destination (Join-Path $scanRoot 'package\F4SE\Plugins')
-    Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\F4SE\Plugins\FrameGeneration') -Destination (Join-Path $scanRoot 'package\F4SE\Plugins')
     Copy-Item -Recurse -Force -Path (Join-Path $repoRoot 'package\Shaders') -Destination (Join-Path $scanRoot 'package')
 
     Push-Location $scanRoot

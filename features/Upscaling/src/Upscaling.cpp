@@ -1230,7 +1230,7 @@ ID3D11ComputeShader* Upscaling::GetDilateMotionVectorCS()
 {
 	if (!dilateMotionVectorCS) {
 		L->debug("Compiling DilateMotionVectorCS.hlsl");
-		dilateMotionVectorCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/DilateMotionVectorCS.hlsl", {}, "cs_5_0"));
+		dilateMotionVectorCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/Shaders/Upscaling/DilateMotionVectorCS.hlsl", {}, "cs_5_0"));
 	}
 	return dilateMotionVectorCS.get();
 }
@@ -1239,7 +1239,7 @@ ID3D11ComputeShader* Upscaling::GetOverrideLinearDepthCS()
 {
 	if (!overrideLinearDepthCS) {
 		L->debug("Compiling OverrideLinearDepthCS.hlsl");
-		overrideLinearDepthCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/OverrideLinearDepthCS.hlsl", {}, "cs_5_0"));
+		overrideLinearDepthCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/Shaders/Upscaling/OverrideLinearDepthCS.hlsl", {}, "cs_5_0"));
 	}
 	return overrideLinearDepthCS.get();
 }
@@ -1248,7 +1248,7 @@ ID3D11ComputeShader* Upscaling::GetOverrideDepthCS()
 {
 	if (!overrideDepthCS) {
 		L->debug("Compiling OverrideDepthCS.hlsl");
-		overrideDepthCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/OverrideDepthCS.hlsl", {}, "cs_5_0"));
+		overrideDepthCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/Shaders/Upscaling/OverrideDepthCS.hlsl", {}, "cs_5_0"));
 	}
 	return overrideDepthCS.get();
 }
@@ -1257,7 +1257,7 @@ ID3D11ComputeShader* Upscaling::GetEncodeReactiveMaskCS()
 {
 	if (!encodeReactiveMaskCS) {
 		L->debug("Compiling EncodeReactiveMaskCS.hlsl (reactive+transparency)");
-		encodeReactiveMaskCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/EncodeReactiveMaskCS.hlsl", {}, "cs_5_0"));
+		encodeReactiveMaskCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/Shaders/Upscaling/EncodeReactiveMaskCS.hlsl", {}, "cs_5_0"));
 	}
 	return encodeReactiveMaskCS.get();
 }
@@ -1266,7 +1266,7 @@ ID3D11ComputeShader* Upscaling::GetEncodeTransparencyMaskCS()
 {
 	if (!encodeTransparencyMaskCS) {
 		L->debug("Compiling EncodeReactiveMaskCS.hlsl (transparency-only)");
-		encodeTransparencyMaskCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/EncodeReactiveMaskCS.hlsl", { { "TRANSPARENCY_ONLY", "1" } }, "cs_5_0"));
+		encodeTransparencyMaskCS.attach((ID3D11ComputeShader*)cs::util::CompileShader(L"Data/Shaders/Upscaling/EncodeReactiveMaskCS.hlsl", { { "TRANSPARENCY_ONLY", "1" } }, "cs_5_0"));
 	}
 	return encodeTransparencyMaskCS.get();
 }
@@ -1275,7 +1275,7 @@ ID3D11PixelShader* Upscaling::GetBSImagespaceShaderSSLRRaytracing()
 {
 	if (!BSImagespaceShaderSSLRRaytracing) {
 		L->debug("Compiling BSImagespaceShaderSSLRRaytracing.hlsl");
-		BSImagespaceShaderSSLRRaytracing.attach((ID3D11PixelShader*)cs::util::CompileShader(L"Data/F4SE/Plugins/Upscaling/BSImagespaceShaderSSLRRaytracing.hlsl", {}, "ps_5_0"));
+		BSImagespaceShaderSSLRRaytracing.attach((ID3D11PixelShader*)cs::util::CompileShader(L"Data/Shaders/Upscaling/BSImagespaceShaderSSLRRaytracing.hlsl", {}, "ps_5_0"));
 	}
 	return BSImagespaceShaderSSLRRaytracing.get();
 }
