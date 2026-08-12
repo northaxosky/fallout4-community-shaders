@@ -2,6 +2,6 @@
 
 namespace cs::features::detail
 {
-	// Defined in Imagespace.cpp; asserts all Imagespace shared-state access is on the render thread.
+	// Imagespace shared state is render-thread-only.
 	void AssertRenderThread(const char* a_where) noexcept;
 }

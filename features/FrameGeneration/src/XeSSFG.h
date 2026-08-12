@@ -38,7 +38,7 @@ public:
 		bool a_reset);
 	void SetEnabled(uint32_t a_enabled);
 
-	// Returns the per-call XeSS-FG frames-presented delta, or 0 when telemetry is unavailable.
+	// Returns newly presented frames, or zero without telemetry.
 	uint32_t ConsumeFramesPresented();
 
 	bool initialized = false;
@@ -51,14 +51,12 @@ private:
 	~XeSSFG();
 	void Shutdown();
 
-	// XeLL function pointers (resolved via GetProcAddress)
 	decltype(&xellD3D12CreateContext) pfn_xellD3D12CreateContext = nullptr;
 	decltype(&xellDestroyContext) pfn_xellDestroyContext = nullptr;
 	decltype(&xellSetSleepMode) pfn_xellSetSleepMode = nullptr;
 	decltype(&xellAddMarkerData) pfn_xellAddMarkerData = nullptr;
 	decltype(&xellSetLoggingCallback) pfn_xellSetLoggingCallback = nullptr;
 
-	// XeSS-FG function pointers (resolved via GetProcAddress)
 	decltype(&xefgSwapChainD3D12CreateContext) pfn_xefgSwapChainD3D12CreateContext = nullptr;
 	decltype(&xefgSwapChainSetLatencyReduction) pfn_xefgSwapChainSetLatencyReduction = nullptr;
 	decltype(&xefgSwapChainSetLoggingCallback) pfn_xefgSwapChainSetLoggingCallback = nullptr;

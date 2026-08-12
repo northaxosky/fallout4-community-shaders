@@ -15,7 +15,7 @@ namespace cs::features
 {
 	namespace { auto* L = cs::log::Get("cs.feature.motionvectorfixes"); }
 
-	// Local mirror until Dear-Modding-FO4/commonlibf4 exposes BSShaderProperty::flags.
+	// Remove after CommonLib exposes BSShaderProperty::flags.
 	struct __declspec(novtable) BSShaderProperty : public RE::NiShadeProperty
 	{
 	private:
@@ -62,7 +62,7 @@ namespace cs::features
 		static_cast<std::uint64_t>(BSShaderProperty::EShaderPropertyFlag::kLODLandBlend) |
 		static_cast<std::uint64_t>(BSShaderProperty::EShaderPropertyFlag::kMultiTextureLandscape);
 
-	// UI event thread updates this flag; render hooks only need a best-effort loading-menu gate.
+	// Render hooks tolerate stale loading-menu state.
 	static std::atomic_bool g_isLoadingMenuOpen{ false };
 
 	class MenuOpenCloseHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
@@ -175,10 +175,10 @@ namespace cs::features
 
 	void MotionVectorFixes::Load()
 	{
-		// Preserve weapon-model previousWorld across player idle updates.
+		// Preserve previousWorld during player idle updates.
 		stl::detour_thunk<OnIdle_UpdatePlayer>(REL::ID({ 1318162, 2228929, 2228929 }));
 
-		// Fallout4RE cs-mvf-setsequenceposition-call.json, 2026-05-23: OG/NG/AE +0x1D7 is the direct E8 NiAVObject::Update call; opcode check skips stale offsets.
+		// All runtimes use the verified +0x1D7 Update call.
 		{
 			constexpr std::ptrdiff_t offsets[] = { 0x1D7, 0x1D7, 0x1D7 };
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
@@ -192,7 +192,7 @@ namespace cs::features
 			}
 		}
 
-		// Keep previousWorld current while menus or frozen time stop vanilla motion-vector updates.
+		// Menus and frozen time stop vanilla motion-vector updates.
 		stl::write_vfunc<43, BSLightingShaderProperty_GetRenderPasses>(RE::VTABLE::BSLightingShaderProperty[0]);
 
 		L->info("Installed hooks");

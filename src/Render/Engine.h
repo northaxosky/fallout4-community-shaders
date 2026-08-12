@@ -8,7 +8,6 @@
 
 namespace cs::engine
 {
-	// Engine singleton accessors - canonical home for cross-feature renderer-state lookups.
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
 	{
 		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };
@@ -21,7 +20,7 @@ namespace cs::engine
 		return singleton.get();
 	}
 
-	// DrawWorld near/far globals from Fallout4RE cs-camera-near-far-globals.json @ 2b79e7c; prefer NiCamera::viewFrustum except when mirroring engine frame setup.
+	// Prefer viewFrustum; setup mirrors use these globals.
 	[[nodiscard]] inline float GetCameraNear()
 	{
 		static REL::Relocation<float*> near_{ REL::ID({ 57985, 2712882, 2712882 }) };
@@ -34,7 +33,7 @@ namespace cs::engine
 		return *far_.get();
 	}
 
-	// Vertical FOV (radians) from projMat[1][1] = cot(fovY/2) (jitter doesn't affect it); 0 if unavailable.
+	// Returns vertical FOV radians, or zero when unavailable.
 	[[nodiscard]] inline float GetVerticalFOV()
 	{
 		auto* state = GetGraphicsState();
@@ -73,8 +72,7 @@ namespace cs::engine
 		const auto invProj = DirectX::XMMatrixInverse(nullptr, proj);
 		const auto invViewProj = DirectX::XMMatrixInverse(nullptr, viewProj);
 
-		// NDC->view ray reconstruction: FO4 standard depth is near->0, far->1 (RE: deferred_composite depth<=0.01 near path; DOF Linearize maps 0->near); Streamline depthInverted=eTrue is a DLSS/FSR contract flag, not reversed-Z.
-		// Divide-by-z makes mul/add independent of NDC z, so z=1 yields the same camera ray.
+		// near=0, far=1; not reversed-Z.
 		const auto viewTopLeft = DirectX::XMVector4Transform(DirectX::XMVectorSet(-1.0f, 1.0f, 1.0f, 1.0f), invProj);
 		const auto viewBottomRight = DirectX::XMVector4Transform(DirectX::XMVectorSet(1.0f, -1.0f, 1.0f, 1.0f), invProj);
 		const float topLeftZ = DirectX::XMVectorGetZ(viewTopLeft);
@@ -112,7 +110,7 @@ namespace cs::engine
 			return false;
 		}
 
-		// viewFrustum retains the world projection after the first-person pass overwrites projMat.
+		// viewFrustum survives first-person projection overrides.
 		const auto& frustum = sceneCamera->viewFrustum;
 		return RE::BuildPerspectiveFromFrustum(
 			frustum,
@@ -122,7 +120,6 @@ namespace cs::engine
 			a_outNdcToViewAdd);
 	}
 
-	// FO4's render-target indices; canonical source for cross-feature engine-RE constants.
 	enum class RenderTarget
 	{
 		kFrameBuffer = 0,
@@ -150,9 +147,9 @@ namespace cs::engine
 		kGbufferNormalSwap = 21,
 		kGbufferAlbedo = 22,
 		kGbufferEmissive = 23,
-		kGbufferMaterial = 24,  // Glossiness, Specular, Backlighting, SSS
+		kGbufferMaterial = 24,  // Glossiness, specular, backlighting, SSS.
 
-		// SAO/AO-final the deferred ambient composite samples. Confirmed OG·NG·AE (fallout4-re BSShaderRenderTargets::Create, REL::ID 2318909).
+		// Deferred ambient composite samples this AO target.
 		kSSAOFinal = 25,
 
 		kTAAAccumulation = 26,
@@ -166,7 +163,7 @@ namespace cs::engine
 		kUIDownscaledComposite = 37,
 
 		kMainDepthMips = 39,
-		kSSLRRaytracing = 40,  // Fallout4RE cs-engine-h-rt-enum-extension.json @ 2d73ccf.
+		kSSLRRaytracing = 40,
 
 		kSSAOTemp = 48,
 		kSSAOTemp2 = 49,
@@ -197,7 +194,7 @@ namespace cs::engine
 		kMainCopyCopy = 4,
 
 		kShadowMap = 8,
-		kGodraysDepth = 10,  // Fallout4RE cs-engine-h-rt-enum-extension.json @ 2d73ccf.
+		kGodraysDepth = 10,
 
 		kCount = 13
 	};

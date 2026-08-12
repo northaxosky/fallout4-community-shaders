@@ -9,7 +9,6 @@
 
 namespace cs::util
 {
-	// Device-free shader compilation with runtime include resolution.
 	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
 		const wchar_t* a_filePath,
 		const std::vector<std::pair<const char*, const char*>>& a_defines,

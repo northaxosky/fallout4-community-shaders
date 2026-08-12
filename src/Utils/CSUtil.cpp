@@ -27,7 +27,7 @@ namespace cs::util
 		FILE* f = nullptr;
 		if (fopen_s(&f, a_path, "rb") != 0 || !f)
 			return false;
-		// Skip UTF-8 BOM if present (PowerShell `Out-File -Encoding utf8` and Notepad both write it).
+		// Accept UTF-8 BOMs from common Windows editors.
 		unsigned char buf[4] = {};
 		size_t        read   = fread(buf, 1, 4, f);
 		size_t        cursor = 0;
@@ -39,7 +39,7 @@ namespace cs::util
 			ok    = true;
 		}
 		fclose(f);
-		// Delete successful smoke markers so stale files cannot override later runs.
+		// Delete consumed smoke markers to prevent stale overrides.
 		if (ok)
 			std::remove(a_path);
 		return ok;

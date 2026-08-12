@@ -716,7 +716,7 @@ namespace cs::features
 				throw std::runtime_error("graphics state has no screen dimensions");
 			}
 
-			// Full-resolution allocation avoids churn as dynamic resolution changes.
+			// Full-resolution allocation avoids dynamic-resolution churn.
 			const std::uint32_t width = state->screenWidth;
 			const std::uint32_t height = state->screenHeight;
 
@@ -1069,7 +1069,7 @@ namespace cs::features
 					xegtaoCB.EffectRadius = _settings.effectRadius;
 					xegtaoCB.Thickness = 32.0f;
 					xegtaoCB.AOPower = _settings.aoPower;
-					// FO4 view depth uses world units; metric-scale fades suppress nearly all AO.
+					// Metric-scale fades suppress almost all AO.
 					xegtaoCB.DepthFadeRange[0] = _settings.depthFadeStart;
 					xegtaoCB.DepthFadeRange[1] = _settings.depthFadeEnd;
 					const float depthFadeSpan = _settings.depthFadeEnd - _settings.depthFadeStart;
@@ -1554,7 +1554,7 @@ namespace cs::features
 					return;
 				}
 
-				// Avoid binding the engine AO as both SRV and UAV.
+				// Avoid binding engine AO as both SRV and UAV.
 				if (!_aoIntegrationScratch ||
 					_aoIntegrationScratchW != targetDesc.Width ||
 					_aoIntegrationScratchH != targetDesc.Height ||
@@ -1939,7 +1939,7 @@ namespace cs::features
 			"Bake: %s (%ux%u) | Runtime: %s (%ux%u) | generation: %u",
 			bakeStatus, _bounceAllocW, _bounceAllocH, status, _allocW, _allocH, _generation);
 
-		// A correct buffer is world-locked: it holds its value as the camera rotates over fixed geometry.
+		// World-locked values survive camera rotation.
 		static bool s_showPreview = false;
 		static int s_previewSource = 0;
 		ImGui::Checkbox("Show GI buffer preview (debug)", &s_showPreview);

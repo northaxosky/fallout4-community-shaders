@@ -111,7 +111,7 @@ namespace cs
 		_registeredFeatures.push_back(a_feature);
 	}
 
-	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view /*a_phase*/) noexcept
+	bool FeatureManager::PrepareRuntimeCallback(Feature& a_feature, std::string_view ) noexcept
 	{
 		return a_feature.IsHealthy();
 	}
@@ -125,7 +125,6 @@ namespace cs
 		if (a_feature.IsHealthy()) {
 			return PrepareRuntimeCallback(a_feature, a_phase);
 		}
-		// Only installed kInactive features draw settings before enabling; degraded, failed, pending, and uninstalled features do not.
 		return state.runtimeState == FeatureRuntimeState::kInactive;
 	}
 

@@ -7,18 +7,16 @@
 
 namespace cs::features::imagespace
 {
-	// Parses [settings]; missing/unknown keys leave out_settings unchanged.
+	// Missing or unknown settings preserve current values.
 	void ParseSettings(const toml::table& a_root, Imagespace::Settings& a_outSettings);
 
-	// Parses [weather]; a_dropOverrides skips user formID mappings for builtin presets.
+	// Built-ins ignore user weather overrides.
 	void ParseWeather(const toml::table& a_root, WeatherProfiles& a_outProfiles, bool a_dropOverrides = false);
 
 	bool ParseSettingsStrict(const toml::table& a_root, Imagespace::Settings& a_outSettings, std::string& a_error);
 	bool ParseWeatherStrict(const toml::table& a_root, WeatherProfiles& a_outProfiles, std::string& a_error);
 
-	// Emits [settings] into a_root.
 	void EmitSettings(toml::table& a_root, const Imagespace::Settings& a_settings);
 
-	// Emits [weather]; overrides are omitted for builtin presets.
 	void EmitWeather(toml::table& a_root, const WeatherProfiles& a_profiles, bool a_includeOverrides);
 }

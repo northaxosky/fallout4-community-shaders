@@ -46,7 +46,6 @@ namespace cs::features
 
 	namespace
 	{
-		// Extracts the overlayable settings subset.
 		imagespace::ResolveBase MakeResolveBase(const Imagespace::Settings& a_s)
 		{
 			imagespace::ResolveBase b;
@@ -327,7 +326,7 @@ namespace cs::features
 
 		const bool dimChanged = (a_width != pyramidWidth || a_height != pyramidHeight);
 		if (dimChanged || !lumPyramid) {
-			// Mip 0 is half-res so D3D's mip layout matches our 2x dispatch chain.
+			// Half-resolution mip zero preserves the dispatch chain.
 			const uint32_t baseW  = std::max(1u, a_width  / 2);
 			const uint32_t baseH  = std::max(1u, a_height / 2);
 			const uint32_t maxDim = std::max(baseW, baseH);
@@ -352,7 +351,7 @@ namespace cs::features
 			srvd.Texture2D.MipLevels = pyramidMipCount;
 			lumPyramid->CreateSRV(srvd);
 
-			// Per-mip views keep pyramid SRV/UAV binds on disjoint subresources.
+			// Per-mip views prevent overlapping SRV/UAV bindings.
 			lumPyramidMipSRVs.clear();
 			lumPyramidMipSRVs.resize(pyramidMipCount);
 			lumPyramidUAVs.clear();
@@ -374,7 +373,6 @@ namespace cs::features
 					lumPyramid->resource.get(), &ud, lumPyramidUAVs[i].put()));
 			}
 
-			// Ping-pong exposure scalars: 1x1 R32F SRV+UAV.
 			for (auto& ep : expoPingPong) {
 				D3D11_TEXTURE2D_DESC etd{};
 				etd.Width = 1;
@@ -483,7 +481,6 @@ namespace cs::features
 			td.Usage = D3D11_USAGE_DEFAULT;
 			td.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 
-			// Half-res signed CoC: negative foreground, positive background.
 			td.Width = halfW; td.Height = halfH;
 			td.Format = DXGI_FORMAT_R16_FLOAT;
 			dofCoCTex = std::make_unique<imagespace::Texture2D>(td);
@@ -497,7 +494,6 @@ namespace cs::features
 			ud.Format = DXGI_FORMAT_R16_FLOAT;
 			dofCoCTex->CreateUAV(ud);
 
-			// 16x tile min/max CoC for blur early-out.
 			const uint32_t tileW = std::max(1u, (halfW + 15) / 16);
 			const uint32_t tileH = std::max(1u, (halfH + 15) / 16);
 			td.Width = tileW; td.Height = tileH;
@@ -508,7 +504,6 @@ namespace cs::features
 			ud.Format = DXGI_FORMAT_R16G16_FLOAT;
 			dofTileTex->CreateUAV(ud);
 
-			// Half-res color plus separated near/far blur outputs.
 			td.Width = halfW; td.Height = halfH;
 			td.Format = DXGI_FORMAT_R11G11B10_FLOAT;
 			dofHalfColor   = std::make_unique<imagespace::Texture2D>(td);
@@ -547,7 +542,6 @@ namespace cs::features
 		auto rendererData = RE::BSGraphics::GetRendererData();
 		if (!rendererData) return;
 
-		// Full-res color SRV plus main depth SRV.
 		auto& fb = rendererData->renderTargets[kRT_FrameBuffer];
 		auto* fbSRV = reinterpret_cast<ID3D11ShaderResourceView*>(fb.srView);
 		if (!fbSRV) return;
@@ -557,7 +551,7 @@ namespace cs::features
 		if (!depthSRV) return;
 
 		if (!EnsureDOFResources(a_width, a_height)) return;
-		if (!compositeScratch) return;  // we reuse this as final output
+		if (!compositeScratch) return;
 
 		auto* depthCoCCS = GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\DepthCoCCS.hlsl",   dofDepthCoCCS,  "DepthCoCCS");
 		auto* dilateCS   = GetCS(L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Imagespace\\Shaders\\DilateCoCCS.hlsl",  dofDilateCS,    "DilateCoCCS");
@@ -572,7 +566,7 @@ namespace cs::features
 		const float nearP = cs::engine::GetCameraNear();
 		const float farP  = cs::engine::GetCameraFar();
 
-		// Thin-lens CoC in pixels; pre-bake per-pixel coc = CocScale*z + CocBias.
+		// CoC pixels follow CocScale*z + CocBias.
 		const float cocLimitPx = settings.cocLimitFactor * static_cast<float>(dofHeight);
 		const float aperture   = settings.aperture;
 		const float focalLen   = settings.focalLength;
@@ -601,7 +595,6 @@ namespace cs::features
 		context->CSSetSamplers(0, 1, samplers);
 		context->CSSetConstantBuffers(0, 1, dofCBs);
 
-		// Pass 1: depth to half-res CoC, color to halfColor.
 		{
 			ID3D11ShaderResourceView* srvs[2] = { depthSRV, fbSRV };
 			context->CSSetShaderResources(0, 2, srvs);
@@ -617,7 +610,6 @@ namespace cs::features
 			context->CSSetShaderResources(0, 2, clearSRV);
 		}
 
-		// Pass 2: CoC to 16x min/max tiles.
 		{
 			ID3D11ShaderResourceView* srvs[1] = { dofCoCTex->srv.get() };
 			context->CSSetShaderResources(0, 1, srvs);
@@ -635,7 +627,6 @@ namespace cs::features
 			context->CSSetShaderResources(0, 1, clearSRV);
 		}
 
-		// Pass 3: CoC-weighted half-res blur into near/far outputs.
 		{
 			ID3D11ShaderResourceView* srvs[3] = { dofHalfColor->srv.get(), dofCoCTex->srv.get(), dofTileTex->srv.get() };
 			context->CSSetShaderResources(0, 3, srvs);
@@ -651,7 +642,6 @@ namespace cs::features
 			context->CSSetShaderResources(0, 3, clearSRV);
 		}
 
-		// Pass 4: far blur over sharp, then near blur on top.
 		{
 			ID3D11ShaderResourceView* srvs[4] = { fbSRV, dofNearBlurred->srv.get(), dofFarBlurred->srv.get(), dofCoCTex->srv.get() };
 			context->CSSetShaderResources(0, 4, srvs);
@@ -698,7 +688,7 @@ namespace cs::features
 		}
 		auto loaded = imagespace::LoadLUTFromFile(a_filename);
 		if (loaded.status != imagespace::LUTLoadStatus::Ok) {
-			// Keep the previous LUT live; DeviceNotReady retries in OnD3D11Ready.
+			// Keep the current LUT until the device is ready.
 			return false;
 		}
 		lutSRV        = std::move(loaded.srv);
@@ -714,7 +704,6 @@ namespace cs::features
 		if (settings.lutEnable && !settings.lutPath.empty()) {
 			LoadLUTFromDisk(settings.lutPath);
 		} else {
-			// Drop stale base LUT SRVs when disabled or empty.
 			lutSRV = nullptr;
 			lutLoadedPath.clear();
 		}
@@ -769,7 +758,7 @@ namespace cs::features
 		if (!EnsureCompositeResources(W, H, fbDesc.Format))
 			return;
 
-		// Render-thread resolve; forcedWeatherCategory bypasses Sky.
+		// Forced weather bypasses Sky.
 		const auto resolveBase   = MakeResolveBase(settings);
 		const auto resolved      = forcedWeatherCategory.has_value()
 			? imagespace::ResolveForced(resolveBase, lutSRV.get(), weatherProfiles,
@@ -818,7 +807,6 @@ namespace cs::features
 		auto* context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 		cs::engine::ComputeOMScope scope(context);
 
-		// 1. Luminance pyramid: half-res log-luma, then 2x2 reductions.
 		if (wantAdaptive) {
 			auto mipWidth = [W](uint32_t a_mip) { return std::max(1u, W >> (a_mip + 1)); };
 			auto mipHeight = [H](uint32_t a_mip) { return std::max(1u, H >> (a_mip + 1)); };
@@ -888,11 +876,10 @@ namespace cs::features
 			}
 		}
 
-		// 2. Adaptive exposure.
 		if (wantAdaptive) {
 			ExposureCB ecb{};
 			auto* timer = RE::BSTimer::GetSingleton();
-			// Clamp dt to avoid alt-tab flashes and high-FPS divide-by-zero edge cases.
+			// Clamp dt to prevent pause flashes and division by zero.
 			ecb.DeltaTime = timer ? std::clamp(timer->realTimeDelta, 1.0f / 240.0f, 0.1f) : (1.0f / 60.0f);
 			ecb.TauUp     = settings.adaptationSpeedUp;
 			ecb.TauDown   = settings.adaptationSpeedDown;
@@ -919,7 +906,6 @@ namespace cs::features
 			expoFrameIdx = next;
 		}
 
-		// 3. Bloom threshold: kFrameBuffer to bloomChain[0].
 		if (wantBloom) {
 			BloomThresholdCB bcb{};
 			bcb.Threshold = resolved.bloomThreshold;
@@ -946,7 +932,6 @@ namespace cs::features
 			context->CSSetUnorderedAccessViews(0, 1, nullUAV, nullptr);
 		}
 
-		// 4. Bloom downsample chain.
 		if (wantBloom) {
 			ID3D11SamplerState* samplers[1] = { lutSampler.get() };
 			context->CSSetSamplers(0, 1, samplers);
@@ -980,7 +965,6 @@ namespace cs::features
 			}
 		}
 
-		// 5. Bloom upsample: additive accumulate into bloomScratch.
 		if (wantBloom) {
 			float mipWeightSum = 0.0f;
 			for (int k = 0; k < settings.bloomMips - 1; ++k)
@@ -1016,7 +1000,6 @@ namespace cs::features
 			}
 		}
 
-		// 6. Composite.
 		if (wantComposite) {
 			CompositeCB ccb{};
 			const bool wantDirt = resolved.dirtEnable && dirtTexture && dirtTexture->srv;
@@ -1039,18 +1022,18 @@ namespace cs::features
 			ccb.OutputDimensions[0]    = W;
 			ccb.OutputDimensions[1]    = H;
 
-			// Sun NDC [-1,1] when visible; 2.0 sentinel means unavailable/off-screen/behind.
+			// Sun NDC uses 2.0 when unavailable.
 			float sunUVx = 2.0f, sunUVy = 2.0f;
 			float sunWSx = 0, sunWSy = 0, sunWSz = 0;
 			if (cs::engine::TryGetSunDirectionWS(sunWSx, sunWSy, sunWSz)) {
 				auto* sceneCamera = RE::Main::WorldRootCamera();
 				if (sceneCamera) {
-					// Persistent scene camera world->clip (column-vector, transpose); per-pass camViewData is a degenerate placeholder here.
+					// Use WorldRootCamera; camViewData is invalid here.
 					DirectX::XMVECTOR sunDir = DirectX::XMVectorSet(-sunWSx, -sunWSy, -sunWSz, 0.0f);
 					DirectX::XMMATRIX vpMat  = DirectX::XMLoadFloat4x4(reinterpret_cast<const DirectX::XMFLOAT4X4*>(&sceneCamera->worldToCam));
 					DirectX::XMVECTOR clip   = DirectX::XMVector4Transform(sunDir, DirectX::XMMatrixTranspose(vpMat));
 					const float wClip = DirectX::XMVectorGetW(clip);
-					// w<=0 is behind camera; abs<5 rejects divide garbage.
+					// Reject behind-camera and unstable divisions.
 					if (wClip > 0.0f) {
 						const float u = DirectX::XMVectorGetX(clip) / wClip;
 						const float v = DirectX::XMVectorGetY(clip) / wClip;
@@ -1105,7 +1088,6 @@ namespace cs::features
 			cs::engine::CopyResourcePreservingOM(context, fbTex2.get(), compositeScratch->resource.get());
 		}
 
-		// DOF runs after grading and reuses compositeScratch.
 		RunDOF(W, H, fbTex2.get());
 		telemetryHasRun = true;
 		telemetryLastRunFrame = cs::telemetry::CurrentFrame();

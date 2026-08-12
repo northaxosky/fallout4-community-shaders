@@ -43,7 +43,7 @@ static HRESULT RunUpscalingPostCreate(
 	auto* core = cs::Streamline::GetSingleton();
 	core->Initialize();
 	if (core->IsInitialized()) {
-		// Structural ENB-Streamline interaction: ENB owns the swap chain when loaded; Streamline can't wrap it again.
+		// ENB owns its swap chain; Streamline cannot wrap it.
 		if (!cs::env::IsENBLoaded() && core->slUpgradeInterface) {
 			kSL->info("Upgrading swap chain interface (no ENB)");
 			core->slUpgradeInterface((void**)&(*a_context.swapChain));

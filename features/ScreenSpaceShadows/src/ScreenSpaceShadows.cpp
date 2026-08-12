@@ -45,7 +45,7 @@ namespace cs::features
 
 		constexpr const wchar_t* kRaymarchPath = L"Data\\F4SE\\Plugins\\FO4CommunityShaders\\ScreenSpaceShadows\\Shaders\\RaymarchCS.hlsl";
 
-		// FO4 uses standard non-linear depth, near=0/far=1.
+		// Engine depth uses near=0, far=1.
 		constexpr float kFarDepthValue = 1.0f;
 		constexpr float kNearDepthValue = 0.0f;
 
@@ -784,7 +784,7 @@ namespace cs::features
 					if (viewportSize[0] > 0 && viewportSize[1] > 0) {
 						cs::engine::ComputeOMScope scope(context);
 
-						// Sun projection: negate TryGetSunDirectionWS travel dir; use WorldRootCamera::worldToCam, not degenerate per-pass camViewData; column-vector matrix, so transpose for XMVector4Transform.
+						// Negate sunlight; transpose WorldRootCamera, not camViewData.
 						auto* sceneCamera = RE::Main::WorldRootCamera();
 						if (!sceneCamera) {
 							return;
@@ -804,7 +804,6 @@ namespace cs::features
 						int maxBounds[2] = { viewportSize[0], viewportSize[1] };
 						auto dispatchList = Bend::BuildDispatchList(lightProj, viewportSize, minBounds, maxBounds);
 
-						// Telemetry cache: LightCoordinate_Shader[0..1]=screen-space sun; lightProj[3]=clip.w=dot(toward-sun, view-forward); pump/Ctrl+F12 reads atomics.
 						_sunX.store(sx, std::memory_order_relaxed);
 						_sunY.store(sy, std::memory_order_relaxed);
 						_sunZ.store(sz, std::memory_order_relaxed);
@@ -812,7 +811,7 @@ namespace cs::features
 						_lightY.store(dispatchList.LightCoordinate_Shader[1], std::memory_order_relaxed);
 						_clipW.store(lightProj[3], std::memory_order_relaxed);
 
-						// Dispatch all sun orientations: upstream has no behind-camera gate and trusts Bend w=+/-1 front/behind march; white-clear keeps degenerate frames "no shadow".
+						// Bend handles both sun directions; degenerate frames stay lit.
 						{
 							ID3D11ShaderResourceView* srvs[1] = { depthSRV };
 							ID3D11UnorderedAccessView* uavs[1] = { _maskTexture->uav.get() };
@@ -895,7 +894,7 @@ namespace cs::features
 
 	void ScreenSpaceShadows::OnPostDeferredLights()
 	{
-		// Restore only plugin-owned t6 to the engine's expected NULL.
+		// Restore plugin-owned t6 to null.
 		if (!_maskBound.exchange(false, std::memory_order_relaxed)) {
 			return;
 		}
@@ -1037,7 +1036,6 @@ namespace cs::features
 			"Resources: %s | wave dispatches last frame: %u",
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));
-		// Debug mask preview: raw R8 coverage/placement in-game, bright=lit/dark=shadowed, no RenderDoc needed.
 		static bool s_showMaskPreview = false;
 		ImGui::Checkbox("Show shadow-mask preview (debug)", &s_showMaskPreview);
 		if (s_showMaskPreview) {

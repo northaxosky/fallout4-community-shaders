@@ -165,7 +165,7 @@ void StreamlineFG::Present(
 
 		sl::Extent fullExtent = { 0, 0, (uint32_t)a_screenSize.x, (uint32_t)a_screenSize.y };
 
-		// UIAlpha (single-channel) drives recomposition; DLSS-G prefers it over UIColorAndAlpha when both are tagged.
+		// DLSS-G prefers UIAlpha over UIColorAndAlpha.
 		sl::Resource uiColorRes = { sl::ResourceType::eTex2d, a_uiColorAlpha, 0 };
 		sl::Resource uiAlphaRes = { sl::ResourceType::eTex2d, a_uiAlpha,      0 };
 

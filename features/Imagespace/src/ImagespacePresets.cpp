@@ -115,7 +115,6 @@ namespace cs::features
 
 	void Imagespace::ApplySmokeMarkers()
 	{
-		// Smoke-harness one-shot markers.
 		char op_c = 0, lut_c = 0, adapt_c = 0, bloom_c = 0, vig_c = 0, ca_c = 0, sharp_c = 0, dof_c = 0, style_c = 0;
 		const bool opP     = cs::util::ReadMarker(kOpMarker,      op_c);
 		const bool lutP    = cs::util::ReadMarker(kLutMarker,     lut_c);
@@ -127,7 +126,7 @@ namespace cs::features
 		const bool dofP    = cs::util::ReadMarker(kDofMarker,     dof_c);
 		const bool styleP  = cs::util::ReadMarker(kStyleMarker,   style_c);
 
-		// Weather-category marker bypasses Sky and forces enum digit 0..7 at pct=1.0.
+		// Weather smoke tests force one full-strength category.
 		forcedWeatherCategory.reset();
 		forcedWeatherFormID.reset();
 		char wcat_c = 0;
@@ -136,7 +135,7 @@ namespace cs::features
 			weatherProfiles.enablePerWeatherProfiles = true;
 			L->info("Forced weather category: {}", imagespace::CategoryName(*forcedWeatherCategory));
 		}
-		// FormID marker is parsed separately for OnDataLoaded; delete after parse to avoid leakage.
+		// Remove parsed FormID markers to prevent leakage.
 		try {
 			std::ifstream f(kWeatherFormIDMarker, std::ios::binary);
 			if (f.is_open()) {
@@ -170,7 +169,6 @@ namespace cs::features
 		testModeActive = opP || lutP || adaptP || bloomP || vigP || caP || sharpP || dofP || styleP;
 
 		if (testModeActive) {
-			// Deterministic smoke baseline.
 			settings.enabled            = true;
 			settings.tonemapOperator    = opP && (op_c >= '0' && op_c <= '3') ? (op_c - '0') : 0;
 			settings.exposure           = 1.0f;
@@ -200,7 +198,7 @@ namespace cs::features
 				settings.focalLength   = 50.0f;
 				settings.dofQuality    = 2;
 			}
-			// Style smoke: 0 = passthrough; 1..4 force toggles so intensities are visible.
+			// Smoke levels 1-4 force visible effects.
 			if (styleP && style_c >= '1' && style_c <= '4') {
 				ApplyStyle(static_cast<Style>(style_c - '0'));
 				settings.bloomEnable     = true;
@@ -225,7 +223,7 @@ namespace cs::features
 
 		toml::table feature;
 		imagespace::EmitSettings(feature, settings);
-		imagespace::EmitWeather(feature, weatherProfiles, /*a_includeOverrides=*/true);
+		imagespace::EmitWeather(feature, weatherProfiles, true);
 
 		if (const auto result = feature_config::UpdateFeature(GetConfigKey(), feature); !result) {
 			L->error("Failed to save settings: {}", result.error);
@@ -237,9 +235,9 @@ namespace cs::features
 		stagedSettings        = Settings{};
 		stagedWeatherProfiles = imagespace::WeatherProfiles{};
 		imagespace::ParseSettings(a_subtable, stagedSettings);
-		imagespace::ParseWeather(a_subtable, stagedWeatherProfiles, /*a_dropOverrides=*/a_ctx.isBuiltin);
+		imagespace::ParseWeather(a_subtable, stagedWeatherProfiles, a_ctx.isBuiltin);
 
-		// Builtin presets must not overwrite the user's formID -> category overrides.
+		// Built-ins must preserve user weather overrides.
 		if (a_ctx.isBuiltin) {
 			stagedWeatherProfiles.userOverrides = weatherProfiles.userOverrides;
 		}
@@ -269,7 +267,7 @@ namespace cs::features
 	void Imagespace::ExportToPreset(toml::table& a_subtable)
 	{
 		imagespace::EmitSettings(a_subtable, settings);
-		imagespace::EmitWeather(a_subtable, weatherProfiles, /*a_includeOverrides=*/true);
+		imagespace::EmitWeather(a_subtable, weatherProfiles, true);
 	}
 
 }

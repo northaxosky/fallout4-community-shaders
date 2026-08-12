@@ -23,5 +23,4 @@ Frame generation integration for FSR3, DLSS-G, and XeSS-FG, with shared-buffer g
 
 ## Smoke gates
 
-- Use `pwsh ../devkit/devkit.ps1 cycle -Project community-shaders -Launch -Tail` for launch validation after changing hooks or shared-buffer generation.
-- Cross-mode smoke coverage is tracked in `.agents/todo.md` until dedicated public smoke wrappers exist.
+- Rebuild, redeploy, and launch through MO2/F4SE for validation after changing hooks or shared-buffer generation.

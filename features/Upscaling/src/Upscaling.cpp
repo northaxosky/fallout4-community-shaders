@@ -24,7 +24,6 @@ namespace cs::features
 	using namespace upscaling;
 	namespace { auto* L = cs::log::Get("cs.feature.upscaling"); }
 
-	// Engine RT-pool slots rescaled/copied for dynamic-resolution upscaling.
 	constexpr uint renderTargetsPatch[] = { 20, 57, 24, 25, 23, 58, 59, 28, 3, 9, 60, 61, 4, 29, 1, 36, 37, 22, 10, 11, 7, 8, 64, 14, 16 };
 
 	namespace
@@ -193,7 +192,6 @@ namespace cs::features
 	}
 
 
-// Updates jitter, dynamic resolution, and resources.
 struct BSGraphics_State_UpdateDynamicResolution
 {
 	static void thunk(RE::BSGraphics::RenderTargetManager* This,
@@ -208,7 +206,6 @@ struct BSGraphics_State_UpdateDynamicResolution
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Disables TAA while an alternate upscaler is active.
 struct ImageSpaceEffectTemporalAA_IsActive
 {
 	static bool thunk(struct ImageSpaceEffectTemporalAA* This)
@@ -221,7 +218,6 @@ struct ImageSpaceEffectTemporalAA_IsActive
 float originalDynamicHeightRatio = 1.0f;
 float originalDynamicWidthRatio = 1.0f;
 
-// Fixes outline thickness in the VATS shader.
 struct ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant
 {
 	static void thunk(struct ImageSpaceShaderParam* This, int row, float x, float y, float z, float w)
@@ -231,7 +227,6 @@ struct ImageSpaceEffectVatsTarget_UpdateParams_SetPixelConstant
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Fixes dynamic-resolution state and jitter in post-processing shaders.
 struct DrawWorld_Imagespace_RenderEffectRange
 {
 	static void thunk(RE::BSGraphics::RenderTargetManager* This, uint a2, uint a3, uint a4, uint a5)
@@ -272,7 +267,6 @@ struct DrawWorld_Imagespace_RenderEffectRange
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Inserts the alternate upscaler after dynamic-resolution viewport setup.
 struct DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport
 {
 	static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_true)
@@ -292,7 +286,6 @@ struct DrawWorld_Imagespace_SetUseDynamicResolutionViewportAsDefaultViewport
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Applies sampler LOD bias during the deferred pre-pass.
 struct DrawWorld_Render_PreUI_DeferredPrePass
 {
 	static void thunk(struct DrawWorld* This)
@@ -305,7 +298,6 @@ struct DrawWorld_Render_PreUI_DeferredPrePass
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Applies sampler LOD bias during forward rendering and builds the upscaler reactive/transparency masks.
 struct DrawWorld_Render_PreUI_Forward
 {
 	static void thunk(struct DrawWorld* This)
@@ -324,7 +316,6 @@ struct DrawWorld_Render_PreUI_Forward
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Fixes HBAO dynamic-resolution inputs.
 struct DrawWorld_Render_PreUI_NVHBAO
 {
 	static void thunk(struct DrawWorld* This)
@@ -355,7 +346,6 @@ struct DrawWorld_Render_PreUI_NVHBAO
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Runs BSDFComposite against scaled render targets and depth.
 struct DrawWorld_DeferredComposite_RenderPassImmediately
 {
 	static void thunk(RE::BSRenderPass* This, uint a2, bool a3)
@@ -386,7 +376,6 @@ struct DrawWorld_DeferredComposite_RenderPassImmediately
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Gives lens flare the scaled depth override.
 struct BSImagespaceShaderLensFlare_RenderLensFlare
 {
 	static void thunk(RE::NiCamera* a_camera)
@@ -407,7 +396,6 @@ struct BSImagespaceShaderLensFlare_RenderLensFlare
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Replaces BSImagespaceShaderSSLRRaytracing via REL::ID({779077,2317302,2317302})+0x1C (all runtimes) for scaled RTs.
 struct BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique
 {
 	static void thunk(RE::BSShader* This, uint a2, uint a3, uint a4, uint a5)
@@ -418,7 +406,6 @@ struct BSImagespaceShaderSSLRRaytracing_SetupTechnique_BeginTechnique
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Captures opaque color before forward alpha for the upscaler encode masks (both backends).
 struct ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth
 {
 	static void thunk(RE::BSShaderAccumulator* This)
@@ -432,7 +419,6 @@ struct ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Resets LoadingMenu jitter scale to native resolution.
 struct LoadingMenu_Render_UpdateTemporalData
 {
 	static void thunk(RE::BSGraphics::State* This)
@@ -445,7 +431,6 @@ struct LoadingMenu_Render_UpdateTemporalData
 	static inline REL::Relocation<decltype(thunk)> func;
 };
 
-// Restores dynamic-resolution settings after imagespace.
 struct DrawWorld_Imagespace
 {
 	static void thunk(struct DrawWorld* This)
@@ -467,7 +452,7 @@ void Upscaling::InstallHooks()
 
 	auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 	L->info("Runtime index: {}", runtimeIdx);
-	// All offsets[] arrays below are 3-wide (OG/NG/AE). A 4th runtime would index past the end and silently overwrite a random byte.
+	// Offset tables contain exactly OG, NG, and AE.
 	assert(runtimeIdx < 3);
 
 	L->info("Installing BSGraphics_State_UpdateDynamicResolution hook");
@@ -500,7 +485,7 @@ void Upscaling::InstallHooks()
 		stl::write_thunk_call<ForwardAlphaImpl_FinishAccumulating_Standard_PostResolveDepth>(REL::ID({ 338205, 2318315, 2318315 }).address() + offsets[runtimeIdx]);
 	}
 
-	// Install even under ENB: render-target swaps propagate through ENB's wrapper.
+	// ENB wrappers propagate render-target swaps.
 	L->info("Installing 7 dynamic resolution hooks");
 
 	{
@@ -696,7 +681,7 @@ void Upscaling::UpdateRenderTarget(int index, float a_currentWidthRatio, float a
 	auto& originalRenderTarget = originalRenderTargets[index];
 	auto& proxyRenderTarget = proxyRenderTargets[index];
 
-	// Manually release proxy COM refs stored in engine structs.
+	// Engine structs own these proxy COM references.
 	if (proxyRenderTarget.uaView)
 		proxyRenderTarget.uaView->Release();
 	proxyRenderTarget.uaView = nullptr;
@@ -846,7 +831,7 @@ void Upscaling::UpdateRenderTargets(float a_currentWidthRatio, float a_currentHe
 	for (int i = 0; i < ARRAYSIZE(renderTargetsPatch); i++)
 		UpdateRenderTarget(renderTargetsPatch[i], a_currentWidthRatio, a_currentHeightRatio);
 
-	// Force intermediate texture recreation with the new dimensions.
+	// Dimension changes require intermediate texture recreation.
 	upscalingTexture = nullptr;
 	depthOverrideTexture = nullptr;
 
@@ -913,7 +898,7 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 
 	static auto renderTargetManager = cs::engine::GetRenderTargetManager();
 
-	// Keep engine RT metadata in scaled resolution for dimension queries.
+	// Engine dimension queries read RT metadata.
 	for (int i = 0; i < 100; i++) {
 		originalRenderTargetData[i] = renderTargetManager->renderTargetData[i];
 		renderTargetManager->renderTargetData[i].width = static_cast<uint>(static_cast<float>(renderTargetManager->renderTargetData[i].width) * renderTargetManager->GetDynamicWidthRatio());
@@ -923,7 +908,7 @@ void Upscaling::OverrideRenderTargets(const std::vector<int>& a_indicesToCopy)
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// PSGetShaderResources AddRefs each non-null SRV; release below.
+	// PSGetShaderResources adds references; release them below.
 	ID3D11ShaderResourceView* boundSRVs[16] = {};
 	context->PSGetShaderResources(0, 16, boundSRVs);
 
@@ -974,7 +959,7 @@ void Upscaling::ResetRenderTargets(const std::vector<int>& a_indicesToCopy)
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// PSGetShaderResources AddRefs each non-null SRV; release below.
+	// PSGetShaderResources adds references; release them below.
 	ID3D11ShaderResourceView* boundSRVs[16] = {};
 	context->PSGetShaderResources(0, 16, boundSRVs);
 
@@ -1009,7 +994,6 @@ void Upscaling::OverrideDepth(bool a_doCopy)
 	if (a_doCopy) {
 		static auto gameViewport = cs::engine::GetGraphicsState();
 
-		// Copy depth once per frame at most.
 		static decltype(gameViewport->frameCount) previousFrame = UINT_MAX;
 		if (previousFrame != gameViewport->frameCount)
 			CopyDepth();
@@ -1047,7 +1031,7 @@ void Upscaling::UpdateSamplerStates(float a_currentMipBias)
 
 	const float clampedMipBias = std::clamp(a_currentMipBias, -15.99f, 15.99f);
 
-	// Rebuild sampler states with negative LOD bias for sub-native rendering.
+	// Sub-native rendering needs negative sampler LOD bias.
 	for (int a = 0; a < 320; a++) {
 		if (biasedSamplerStates[a]){
 			biasedSamplerStates[a]->Release();
@@ -1092,7 +1076,6 @@ void Upscaling::CopyDepth()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Unbind + restore engine OM around the depth compute/copy; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	static auto gameViewport = cs::engine::GetGraphicsState();
@@ -1113,7 +1096,7 @@ void Upscaling::CopyDepth()
 
 	auto depthUAV = depthOverrideTexture->uav.get();
 
-	// Keep linearized depth in sync for other effects.
+	// Other effects consume synchronized linear depth.
 	auto linearDepthUAV = reinterpret_cast<ID3D11UnorderedAccessView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainDepthMips].uaView);
 
 	{
@@ -1147,7 +1130,7 @@ void Upscaling::CopyDepth()
 			context->Dispatch(dispatchX, dispatchY, 1);
 		}
 
-		// Clear compute bindings to avoid SRV/UAV hazards.
+		// Prevent SRV/UAV hazards.
 		ID3D11ShaderResourceView* views[1] = { nullptr };
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
@@ -1177,7 +1160,7 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 {
 	static auto ui = RE::UI::GetSingleton();
 
-	// Disable upscaling in menus that render at incompatible scales.
+	// Menu render scales are incompatible with upscaling.
 	if (a_checkMenu){
 		if (ui->GetMenuOpen("ExamineMenu")
 			|| ui->GetMenuOpen("PipboyMenu")
@@ -1212,7 +1195,7 @@ Upscaling::UpscaleMethod Upscaling::GetUpscaleMethod(bool a_checkMenu)
 
 uint Upscaling::GetEffectiveQualityMode()
 {
-	// ENB clamp avoids viewport compounding until proxy/UI isolation work lands.
+	// ENB otherwise compounds viewport scaling.
 	if (cs::env::IsENBLoaded() && settings.qualityMode != 0) {
 		return 0;
 	}
@@ -1343,7 +1326,7 @@ void Upscaling::UpdateGameSettings()
 
 void Upscaling::UpdateUpscaling()
 {
-	// Reset per-frame mask validity at the earliest guaranteed point before encode and Upscale; only this frame's encode validates masks, so no stale/wrong-res mask survives.
+	// Only current-frame masks are valid.
 	masksValidThisFrame = false;
 
 	static bool firstCall = true;
@@ -1358,7 +1341,7 @@ void Upscaling::UpdateUpscaling()
 	upscaleMethodNoMenu = GetUpscaleMethod(false);
 	upscaleMethod = GetUpscaleMethod(true);
 
-	// Convert quality mode to render scale, e.g. Quality ~1.5x -> 0.67.
+	// Quality mode maps to render scale.
 	auto effectiveQuality = GetEffectiveQualityMode();
 	telemetryQualityMode = effectiveQuality;
 	float resolutionScale = upscaleMethodNoMenu == UpscaleMethod::kDisabled ? 1.0f : 1.0f / ffxFsr3GetUpscaleRatioFromQualityMode((FfxFsr3QualityMode)effectiveQuality);
@@ -1372,7 +1355,7 @@ void Upscaling::UpdateUpscaling()
 		}
 	}
 
-	// Negative mip bias compensates for sub-native render scale.
+	// Negative mip bias offsets sub-native rendering.
 	float currentMipBias = 0.0f;
 	if ((upscaleMethodNoMenu == UpscaleMethod::kDLSS || upscaleMethodNoMenu == UpscaleMethod::kFSR) && resolutionScale < 1.0f)
 		currentMipBias = std::log2f(resolutionScale) - 1.0f;
@@ -1384,7 +1367,6 @@ void Upscaling::UpdateUpscaling()
 		resolutionScale = 1.0f;
 	}
 
-	// Apply sub-pixel TAA jitter for temporal upscalers.
 	if (upscaleMethod != UpscaleMethod::kDisabled) {
 		auto screenWidth = gameViewport->screenWidth;
 		auto screenHeight = gameViewport->screenHeight;
@@ -1400,7 +1382,7 @@ void Upscaling::UpdateUpscaling()
 			loggedFirstJitter = true;
 		}
 
-		// Convert to NDC; DirectX needs X negated.
+		// DirectX NDC negates X.
 		gameViewport->offsetX = 2.0f * -jitter.x / static_cast<float>(screenWidth);
 		gameViewport->offsetY = 2.0f * jitter.y / static_cast<float>(screenHeight);
 	}
@@ -1422,7 +1404,6 @@ void Upscaling::Upscale()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Unbind + restore engine OM around sampling/copying the frame buffer; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	auto frameBufferSRV = reinterpret_cast<ID3D11ShaderResourceView*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kFrameBuffer].srView);
@@ -1440,7 +1421,6 @@ void Upscaling::Upscale()
 	telemetryOutputWidth = static_cast<std::uint32_t>(screenSize.x);
 	telemetryOutputHeight = static_cast<std::uint32_t>(screenSize.y);
 
-	// Copy frame buffer into the DLSS/FSR input texture.
 	context->CopyResource(upscalingTexture->resource.get(), frameBufferResource.get());
 
 	static bool loggedOnce = false;
@@ -1458,7 +1438,6 @@ void Upscaling::Upscale()
 		loggedOnce = true;
 	}
 
-	// Dilate DLSS motion vectors for temporal stability.
 	if (auto* backend = GetActiveBackend(); backend && backend->NeedsDilatedMotionVectors()){
 		{
 			UpdateAndBindUpscalingCB(context, screenSize, renderSize);
@@ -1484,7 +1463,7 @@ void Upscaling::Upscale()
 			context->Dispatch(dispatchX, dispatchY, 1);
 		}
 
-		// Clear DLSS compute bindings to avoid SRV/UAV hazards.
+		// Prevent SRV/UAV hazards.
 		ID3D11Buffer* nullBuffer = nullptr;
 		context->CSSetConstantBuffers(0, 1, &nullBuffer);
 
@@ -1508,7 +1487,6 @@ void Upscaling::Upscale()
 		}
 	}
 
-	// Copy upscaled output back into the frame buffer.
 	cs::engine::CopyResourcePreservingOM(context, frameBufferResource.get(), upscalingTexture->resource.get());
 
 	static bool copyLogged = false;
@@ -1542,7 +1520,6 @@ void Upscaling::CreateUpscalingResources()
 {
 	auto renderer = RE::BSGraphics::GetRendererData();
 
-	// DLSS-only dilated motion vectors.
 	if (cs::Streamline::GetSingleton()->featureDLSS) {
 		auto& main = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMain];
 
@@ -1561,13 +1538,12 @@ void Upscaling::CreateUpscalingResources()
 		dilatedMotionVectorTexture->CreateUAV(uavDesc);
 	}
 
-	// Encode-mask resources (both backends; they are mutually exclusive so one set suffices).
 	auto& mainTemp = renderer->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp];
 	D3D11_TEXTURE2D_DESC maskDesc{};
 	reinterpret_cast<ID3D11Texture2D*>(mainTemp.texture)->GetDesc(&maskDesc);
 	maskDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
 
-	// Opaque copy clones kMainTemp so CopyResource matches; sampled by the encode pass and FFX.
+	// Match kMainTemp so CopyResource succeeds.
 	{
 		colorOpaqueOnlyTexture = std::make_unique<Texture2D>(maskDesc);
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {
@@ -1578,7 +1554,6 @@ void Upscaling::CreateUpscalingResources()
 		colorOpaqueOnlyTexture->CreateSRV(srvDesc);
 	}
 
-	// Single-channel reactive + transparency masks (SRV + UAV).
 	{
 		D3D11_TEXTURE2D_DESC r8Desc = maskDesc;
 		r8Desc.Format = DXGI_FORMAT_R8_UNORM;
@@ -1653,7 +1628,7 @@ void Upscaling::EncodeUpscaleMasks()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Final color SRV; fall back to a self-created SRV if the engine RT exposes none at this hook.
+	// Create an SRV when the engine provides none.
 	auto& mainTemp = rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp];
 	auto* finalSRV = reinterpret_cast<ID3D11ShaderResourceView*>(mainTemp.srView);
 	if (!finalSRV) {
@@ -1683,7 +1658,6 @@ void Upscaling::EncodeUpscaleMasks()
 	auto screenSize = float2(float(gameViewport->screenWidth), float(gameViewport->screenHeight));
 	auto renderSize = float2(screenSize.x * renderTargetManager->GetDynamicWidthRatio(), screenSize.y * renderTargetManager->GetDynamicHeightRatio());
 
-	// Unbind + restore engine OM around the encode dispatch; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	UpdateAndBindUpscalingCB(context, screenSize, renderSize);
@@ -1692,7 +1666,7 @@ void Upscaling::EncodeUpscaleMasks()
 	context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
 	if (isFSR) {
-		// Transparency-only permutation writes u1 only; never bind/touch u0 (FFX owns FSR reactive).
+		// FSR reactive belongs exclusively to FFX.
 		ID3D11UnorderedAccessView* uav = transparencyMaskTexture->uav.get();
 		context->CSSetUnorderedAccessViews(1, 1, &uav, nullptr);
 	} else {
@@ -1709,11 +1683,11 @@ void Upscaling::EncodeUpscaleMasks()
 	masksValidThisFrame = true;
 }
 
-void Upscaling::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
+void Upscaling::OnD3D11Ready(IDXGIAdapter* , ID3D11Device* )
 {
 	Streamline::GetSingleton()->CacheDLSSFunctions();
 
-	// Pre-compile both encode-mask permutations so a compile failure surfaces at startup, not mid-frame.
+	// Compile failures must surface at startup.
 	if (!GetEncodeReactiveMaskCS())
 		L->error("Failed to compile EncodeReactiveMaskCS.hlsl (reactive+transparency)");
 	if (!GetEncodeTransparencyMaskCS())
@@ -1725,7 +1699,6 @@ void Upscaling::PatchSSRShader()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Replace SSR pixel shader with the scaled-render-target variant.
 	context->PSSetShader(GetBSImagespaceShaderSSLRRaytracing(), nullptr, 0);
 }
 

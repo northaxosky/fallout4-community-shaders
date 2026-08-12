@@ -18,7 +18,7 @@ namespace cs::features::framegeneration
 
 void FidelityFX::LoadFFX()
 {
-	// The SDK resolves the frame-gen DLL lazily by base name, so its directory must stay on the search path.
+	// Lazy SDK loading needs this directory on PATH.
 	wchar_t exePath[MAX_PATH]{};
 	const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
 	if (len == 0 || len >= MAX_PATH) {

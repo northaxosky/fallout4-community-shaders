@@ -34,7 +34,7 @@ namespace cs
 		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
 		IDXGIAdapter3* GetDXGIAdapter3();
 
-		// Thread-safe top-center toast; newest message wins and callers never touch ImGui off-thread.
+		// Callers never touch ImGui off-thread.
 		static void ShowToast(std::string a_text, double a_durationSec = 3.0);
 
 	private:
@@ -139,7 +139,7 @@ namespace cs
 		using PFN_Present = HRESULT(WINAPI*)(IDXGISwapChain*, UINT, UINT);
 		PFN_Present _origPresent = nullptr;
 
-		// Single toast slot; _toastSeq prevents expiry cleanup from clearing a just-posted toast.
+		// Sequence prevents expiry from clearing a newer toast.
 		std::mutex                            _toastMutex;
 		std::string                           _toastText;
 		std::chrono::steady_clock::time_point _toastShown{};

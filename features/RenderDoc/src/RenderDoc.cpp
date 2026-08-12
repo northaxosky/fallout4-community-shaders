@@ -40,7 +40,7 @@ namespace cs::features
 
 	namespace
 	{
-		// RenderDoc's D3D/DXGI detours conflict with Streamline's interposer, blacking the present under capture.
+		// RenderDoc conflicts with Streamline's interposer.
 		bool DLSSGRequested()
 		{
 			const auto* frameGeneration = FrameGeneration::GetSingleton();
@@ -260,7 +260,7 @@ namespace cs::features
 			FailLoad(std::string(reason));
 			return;
 		}
-		// Load before any D3D device exists; loading post-D3D-init is unreliable.
+		// Load before D3D initialization.
 		if (!TryLoadRuntime()) {
 			FailLoad("RenderDoc runtime load failed for settings.dll_path '" + _settings.dllPath
 				+ "'; verify the path and RenderDoc 1.7 API compatibility");
@@ -312,7 +312,7 @@ namespace cs::features
 			return false;
 		_attemptedLoad = true;
 
-		// Loading renderdoc.dll after D3D devices exist can crash; call before D3D init only.
+		// Post-D3D loading can crash.
 		_module = LoadLibraryA(_settings.dllPath.c_str());
 		if (!_module) {
 			L->warn("LoadLibrary({}) failed: {:#x}", _settings.dllPath, GetLastError());
@@ -417,7 +417,7 @@ namespace cs::features
 			L->warn("TriggerCapture called while feature disabled");
 			return;
 		}
-		// Never LoadLibrary after D3D init; if startup load failed, a restart is required.
+		// Failed startup loads require a restart.
 		if (!_api) {
 			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
 			return;
@@ -461,7 +461,7 @@ namespace cs::features
 	{
 		auto* self = GetSingleton();
 
-		// Consume paired key-up before gates so menu/disable cannot strand state/eat later key-ups; SC_KEYMENU guard is uniform across chords.
+		// Consume key-up early to prevent stuck input and F10 beeps.
 		if (self->_captureReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
 			&& a_wparam == self->_captureReleaseVk) {
 			self->_captureReleaseVk = 0;
@@ -470,11 +470,11 @@ namespace cs::features
 
 		if (!self->_settings.enabled)
 			return false;
-		// Menu open: let ImGui own the keyboard instead of firing captures.
+		// Open menus leave keyboard input to ImGui.
 		if (cs::Menu::Get().IsOpen())
 			return false;
 
-		// Multi first so a shared chord resolves to multi-frame capture.
+		// Multi-frame capture wins shared chords.
 		if (self->_multiCaptureHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
 			self->TriggerMultiFrameCapture();
 			self->_captureReleaseVk = self->_multiCaptureHotkey.vk;

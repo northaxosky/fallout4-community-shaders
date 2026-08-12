@@ -24,8 +24,7 @@ namespace cs::engine
 	{
 		constexpr std::array<ShaderInjectionDefineMetadata, 0> kNoDefines{};
 
-		// Macro sets and sources come from the consumer admission manifests that
-		// bind each stock blob; a route must reconstruct the blob it displaces.
+		// Routes must reconstruct the stock blob they replace.
 		constexpr std::array<ShaderInjectionDefineMetadata, 5> kBsdfPointDefines{ {
 			{ "DIRSPLITS", "2" },
 			{ "GOBOPROJECTION", "1" },
@@ -52,7 +51,7 @@ namespace cs::engine
 			{ "SHADOW", "1" },
 			{ "SPECULAR", "1" }
 		} };
-		// Family 2 is the attested Composite source for the runtime ambient/IBL pass.
+		// Family 2 matches the runtime ambient pass.
 		constexpr std::array<ShaderInjectionDefineMetadata, 1> kAmbientIblDefines{ {
 			{ "BSDF_COMPOSITE_FAMILY", "2" }
 		} };
@@ -117,7 +116,7 @@ namespace cs::engine
 			}
 		} };
 
-		// Composite lacks native proof; composite and VLS also lack selectable stock SHA-1 guards.
+		// Composite and VLS lack stock hash guards.
 		constexpr std::array<ShaderInjectionTarget, 5>
 			kBaselineOwnableTargets{
 				ShaderInjectionTarget::kDeferredPrepass,

@@ -243,8 +243,7 @@ namespace cs::features
 		if (!_telemetryCS) {
 			L->warn("Failed to compile wetness telemetry shader.");
 		}
-		// Allocate regardless of the runtime toggle: injection readiness is frozen
-		// once at startup, so gating here permanently drops the shader replacement.
+		// Startup freezes injection readiness, so always allocate.
 		EnsureResources();
 	}
 
@@ -358,7 +357,7 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		// Clear before the enabled gate: the define is baked at startup, so a runtime disable must still read 0.
+		// Runtime disabling still requires a zero value.
 		const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		context->ClearUnorderedAccessViewFloat(_wetnessMask->uav.get(), zero);
 		if (!_settings.enabled || !resourcesReady) {
@@ -504,7 +503,7 @@ namespace cs::features
 			return;
 		}
 
-		// Force-bind: t4/t13 retain stale SRVs, so skipping an occupied slot would read garbage as wetness.
+		// t4/t13 keep stale SRVs, so always bind.
 		auto* srv = _wetnessMask->srv.get();
 		a_context->PSSetShaderResources(a_slot, 1, &srv);
 		_maskBinds.fetch_add(1, std::memory_order_relaxed);
@@ -724,7 +723,7 @@ namespace cs::features
 			_wetnessMean.load(std::memory_order_relaxed),
 			_wetnessCoverage.load(std::memory_order_relaxed));
 
-		// A correct mask is world-locked: it holds its value as the camera rotates over fixed ground.
+		// World-locked values survive camera rotation.
 		static bool s_showMaskPreview = false;
 		ImGui::Checkbox("Show wetness-mask preview (debug)", &s_showMaskPreview);
 		if (s_showMaskPreview) {

@@ -11,13 +11,13 @@ namespace RE::BSGraphics
 
 namespace cs::engine
 {
-	// Reads the engine's main Context global matching TLS+0xB20 fallback on observed render paths; substitute for null RendererData::shadowState, allocated too early during renderer init, so null-check.
+	// May be null during renderer initialization.
 	RE::BSGraphics::Context* GetActiveContext() noexcept;
 
-	// Copy into possibly-bound RTVs without leaving the engine's next draw targeting a NULL OM slot.
+	// Preserve bound RTVs across copies.
 	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept;
 
-	// Save+unbind OM while compute samples engine RTV/DSV resources; otherwise D3D11 nulls the SRV and reads black. Construct OMScope BEFORE ComputeScope so CS clears first on exit, then OM restores safely.
+	// Unbind OM before compute sampling; restore it last.
 	class OMScope
 	{
 	public:
@@ -35,7 +35,7 @@ namespace cs::engine
 		ID3D11DepthStencilView* _savedDSV;
 	};
 
-	// Combined guard unbinds OM first and clears CS before restoring OM; prefer it unless CS bindings must survive nesting.
+	// Prefer unless nested CS bindings must survive.
 	class ComputeOMScope
 	{
 	public:
@@ -49,7 +49,7 @@ namespace cs::engine
 		ComputeOMScope& operator=(ComputeOMScope&&)      = delete;
 
 	private:
-		OMScope          _om;  // declared first: ctor save+unbind OM, dtor restores OM (runs 2nd)
-		cs::ComputeScope _cs;  // declared second: ctor no-op, dtor clears CS slots (runs 1st)
+		OMScope          _om;  // Declared first so OM restores last.
+		cs::ComputeScope _cs;  // Declared second so CS clears first.
 	};
 }

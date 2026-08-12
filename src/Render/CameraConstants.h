@@ -8,7 +8,7 @@
 
 namespace cs::engine
 {
-	// Engine camera snapshot for the Streamline derivation; matrices/vectors are borrowed pointers, pos is a value.
+	// Matrix pointers are borrowed; position is copied.
 	struct CameraConstants
 	{
 		const __m128* viewMat;
@@ -39,7 +39,7 @@ namespace cs::engine
 		return sl::float3(vals[0], vals[1], vals[2]);
 	}
 
-	// Shared DLSS/DLSS-G/FSR unjittered-matrix derivation for Upscaling + FrameGeneration, so they can't drift (e.g. the FOV=1.0 bug).
+	// Shared derivation prevents upscaling and frame-generation drift.
 	inline sl::Constants BuildSLConstants(const CameraConstants& a_cam, uint a_width, uint a_height,
 		float a_nearZ, float a_farZ, float a_jitterX, float a_jitterY, sl::Boolean a_reset)
 	{

@@ -129,7 +129,6 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 	}
 	L->info("Context created");
 
-	// Wire XeLL into XeSS-FG for latency reduction.
 	if (pfn_xefgSwapChainSetLatencyReduction) {
 		xefgResult = pfn_xefgSwapChainSetLatencyReduction(xefgCtx, xellCtx);
 		if (xefgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
@@ -155,7 +154,6 @@ bool XeSSFG::CreateContexts(ID3D12Device* a_device)
 		}
 	}
 
-	// Enable XeLL low-latency mode.
 	if (pfn_xellSetSleepMode) {
 		xell_sleep_params_t sleepParams{};
 		sleepParams.bLowLatencyMode = 1;
@@ -219,7 +217,7 @@ void XeSSFG::BeginFrame(uint32_t a_frameId)
 {
 	if (!xellCtx) return;
 
-	// Skip XeLL sleep: cross-vendor mode caps NVIDIA at 60fps; DXGI latency handles pacing.
+	// XeLL caps cross-vendor NVIDIA rendering at 60 FPS.
 	if (pfn_xellAddMarkerData)
 		pfn_xellAddMarkerData(xellCtx, a_frameId, XELL_SIMULATION_START);
 }
@@ -242,7 +240,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 {
 	if (!xefgCtx || !pfn_xefgSwapChainD3D12TagFrameResource) return;
 
-	// HUDLess color improves interpolation quality.
+	// HUD-less color improves interpolation.
 	if (a_hudlessColor) {
 		xefg_swapchain_d3d12_resource_data_t colorData{};
 		colorData.type = XEFG_SWAPCHAIN_RES_HUDLESS_COLOR;
@@ -254,7 +252,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, nullptr, a_frameId, &colorData);
 	}
 
-	// Motion vectors are only valid now, so tag through the command list.
+	// Tag motion vectors while they remain valid.
 	if (a_motionVectors) {
 		xefg_swapchain_d3d12_resource_data_t mvData{};
 		mvData.type = XEFG_SWAPCHAIN_RES_MOTION_VECTOR;
@@ -266,7 +264,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &mvData);
 	}
 
-	// Depth is only valid now, so tag through the command list.
+	// Tag depth while it remains valid.
 	if (a_depth) {
 		xefg_swapchain_d3d12_resource_data_t depthData{};
 		depthData.type = XEFG_SWAPCHAIN_RES_DEPTH;
@@ -278,7 +276,7 @@ void XeSSFG::TagResources(uint32_t a_frameId,
 		pfn_xefgSwapChainD3D12TagFrameResource(xefgCtx, a_cmdList, a_frameId, &depthData);
 	}
 
-	// MV scale stays 1.0 per XeSS-FG sample; MVs are normalized pixel-space.
+	// XeSS-FG expects normalized pixel-space motion vectors.
 	if (pfn_xefgSwapChainTagFrameConstants) {
 		xefg_swapchain_frame_constant_data_t constants{};
 

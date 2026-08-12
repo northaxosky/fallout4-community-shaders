@@ -56,7 +56,7 @@ namespace cs::d3d11
 			&& *a_immediateContext;
 		bool expected = false;
 		if (complete && ready.compare_exchange_strong(expected, true)) {
-			// Features register shader injections before the registry freezes and compiles them.
+			// Register injections before the registry freezes.
 			InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
 				engine::SetPixelShaderSwapBrokerDevice(*a_device);
 			});

@@ -19,7 +19,7 @@ namespace cs
 
 	Streamline::~Streamline()
 	{
-		// Only free the interposer if we loaded it; a GetModuleHandleW handle is borrowed.
+		// Free only interposers loaded here.
 		if (interposer && _interposerOwned) {
 			FreeLibrary(interposer);
 			interposer = nullptr;
@@ -59,7 +59,7 @@ namespace cs
 			return;
 		}
 
-		// Borrow any interposer handle loaded first by another plugin (e.g. an ENB shim); do not free it.
+		// Borrow interposers loaded by other plugins.
 		interposer = GetModuleHandleW(L"sl.interposer.dll");
 		if (!interposer) {
 			interposer = LoadLibraryW(L"Data/F4SE/Plugins/Streamline/sl.interposer.dll");
@@ -110,7 +110,7 @@ namespace cs
 		pref.engineVersion = "1.0.0";
 		pref.projectId = "abcdef0123456789abcdef0123456789";
 
-		// Frame-based tagging is required for FG but breaks Upscaling tags, so gate it on DLSS-G.
+		// Frame tagging breaks Upscaling tags unless DLSS-G runs.
 		pref.flags = sl::PreferenceFlags::eUseManualHooking;
 		const bool wantsFrameTagging = std::any_of(_requestedFeatures.begin(), _requestedFeatures.end(),
 			[](sl::Feature f) { return f == sl::kFeatureDLSS_G; });
@@ -118,7 +118,7 @@ namespace cs
 			pref.flags = pref.flags | sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 		pref.renderAPI = sl::RenderAPI::eD3D12;
 
-		// Resolve real path where sl.interposer.dll lives (MO2 USVFS may virtualize it).
+		// MO2 may virtualize the interposer path.
 		static wchar_t interposerDir[MAX_PATH];
 		GetModuleFileNameW(interposer, interposerDir, MAX_PATH);
 		if (wchar_t* slash = wcsrchr(interposerDir, L'\\')) *slash = L'\0';
@@ -129,7 +129,7 @@ namespace cs
 		pref.featuresToLoad = _requestedFeatures.data();
 		pref.numFeaturesToLoad = static_cast<uint32_t>(_requestedFeatures.size());
 
-		// Pre-load the final feature set so MO2's USVFS cannot hide plugins from slInit.
+		// Preload features before MO2 hides them from slInit.
 		LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.common.dll");
 		for (auto f : _requestedFeatures) {
 			if (f == sl::kFeatureDLSS_G)  LoadLibraryW(L"Data\\F4SE\\Plugins\\Streamline\\sl.dlss_g.dll");

@@ -239,10 +239,10 @@ namespace cs
 	void PresetManager::Refresh()
 	{
 		_entries.clear();
-		ScanDir(std::filesystem::path(kPresetsBuiltin), /*a_builtin=*/true,  _entries);
-		ScanDir(std::filesystem::path(kPresetsRoot),    /*a_builtin=*/false, _entries);
+		ScanDir(std::filesystem::path(kPresetsBuiltin), true,  _entries);
+		ScanDir(std::filesystem::path(kPresetsRoot),    false, _entries);
 
-		// Defensive de-dupe by identity (file shadowing edge cases).
+		// Deduplicate file-shadowing edge cases.
 		std::vector<PresetMeta> deduped;
 		deduped.reserve(_entries.size());
 		for (auto& e : _entries) {
@@ -257,7 +257,7 @@ namespace cs
 		}
 		_entries = std::move(deduped);
 
-		// Cross-scope same-name presets both survive; bare-name lookups prefer the user copy.
+		// Bare names prefer user presets.
 		for (std::size_t i = 0; i < _entries.size(); ++i) {
 			for (std::size_t j = i + 1; j < _entries.size(); ++j) {
 				if (_entries[i].builtin != _entries[j].builtin &&
@@ -316,7 +316,7 @@ namespace cs
 			return false;
 		}
 
-		// Unknown schema versions can still carry settings this build understands.
+		// Newer schemas may still contain supported settings.
 		if (const auto* metaTbl = table["meta"].as_table()) {
 			if (const auto schemaNode = (*metaTbl)["schema_version"].value<std::int64_t>()) {
 				if (*schemaNode != 1) {
@@ -340,7 +340,7 @@ namespace cs
 			return false;
 		}
 
-		// Phase 1: stage matching participants; skip test mode so smoke overrides survive.
+		// Skip test mode to preserve smoke overrides.
 		struct StageEntry
 		{
 			Feature*           feature;
@@ -422,12 +422,12 @@ namespace cs
 			}
 		}
 
-		// Phase 2a: no-throw/no-I/O swap all staged scratch into live state before any finalize can fail.
+		// Swap all staged state before finalization.
 		for (const auto& entry : staged) {
 			entry.feature->CommitStagedSwap();
 		}
 
-		// Phase 2b: persist and rebuild derived resources; failures log, do NOT abort other features, and leave live state consistent but on-disk snapshots stale.
+		// Finalization failures leave disk stale but memory consistent.
 		std::vector<std::string> finalizeErrors;
 		for (const auto& entry : staged) {
 			if (!featureManager.PrepareRuntimeCallback(
@@ -471,7 +471,7 @@ namespace cs
 			L->warn("Applied preset: {} ({}, {} feature(s)) with {} finalize error(s); "
 			        "active preset on disk left unchanged so next boot reapplies the previous state",
 				a_meta.name, a_meta.builtin ? "builtin" : "user", staged.size(), finalizeErrors.size());
-			// Disk is stale for at least one feature; skip SaveCoreConfig so relaunch restores known-good.
+			// Skip saving when any feature leaves disk stale.
 			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
 				std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted", 5.0);
 			return false;
@@ -566,7 +566,7 @@ namespace cs
 		std::error_code ec;
 		std::filesystem::create_directories(a_path.parent_path(), ec);
 
-		// TOCTOU re-check: refuse if the file appeared after caller validation.
+		// Reject files created after validation.
 		if (!a_allowOverwrite && std::filesystem::exists(a_path)) {
 			std::ostringstream oss;
 			oss << "preset file appeared between validation and write at " << a_path.string();
@@ -648,7 +648,7 @@ namespace cs
 			}
 		}
 
-		// Marker wins over auto-load; invalid marker clears activeIdentity for deterministic smoke runs.
+		// Smoke markers override auto-load.
 		std::string markerPayload;
 		if (ReadTextMarker(std::filesystem::path(kBootMarker), markerPayload)) {
 			const PresetMeta* meta = nullptr;
@@ -658,7 +658,7 @@ namespace cs
 			{
 				meta = FindByIdentity(markerPayload);
 			} else {
-				meta = FindByName(markerPayload, /*a_preferUser=*/true);
+				meta = FindByName(markerPayload, true);
 			}
 			if (meta) {
 				std::string err;
@@ -681,7 +681,7 @@ namespace cs
 		if (autoLoadOnBoot && !activeIdentity.empty()) {
 			const PresetMeta* meta = FindByIdentity(activeIdentity);
 			if (!meta && !activeName.empty()) {
-				meta = FindByName(activeName, /*a_preferUser=*/true);
+				meta = FindByName(activeName, true);
 			}
 			if (meta) {
 				std::string err;

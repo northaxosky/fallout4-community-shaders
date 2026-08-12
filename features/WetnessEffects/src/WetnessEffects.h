@@ -93,7 +93,7 @@ namespace cs::features
 		std::atomic_bool _directionalMaskBound{ false };
 		std::atomic_bool _ambientMaskBound{ false };
 
-		// Per-frame sun-hook trace: separates "never fired" from "never matched".
+		// Distinguishes missing hooks from unmatched draws.
 		std::atomic_uint32_t _sunHookCalls{ 0 };
 		std::atomic_uint32_t _sunHookNoShader{ 0 };
 		std::atomic_uint32_t _sunHookMatched{ 0 };

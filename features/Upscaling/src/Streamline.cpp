@@ -12,7 +12,7 @@ namespace cs::features::upscaling
 
 	namespace
 	{
-		// Curated DLSS model presets; K/L/M are the current transformer-based defaults.
+		// K/L/M are current transformer presets.
 		sl::DLSSPreset MapDLSSPreset(uint a_idx)
 		{
 			switch (a_idx) {
@@ -70,7 +70,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 		dlssOptions.mode = dlssMode;
 		dlssOptions.outputWidth = gameViewport->screenWidth;
 		dlssOptions.outputHeight = gameViewport->screenHeight;
-		// FO4's post-upscale color buffer is a float HDR format; detect it rather than assume SDR.
+		// Detect HDR format instead of assuming SDR.
 		D3D11_TEXTURE2D_DESC colorDesc{};
 		a_upscaleTexture->resource->GetDesc(&colorDesc);
 		const bool colorHDR =
@@ -105,7 +105,7 @@ void Streamline::Upscale(Texture2D* a_upscaleTexture, Texture2D* a_dilatedMotion
 		sl::ResourceTag depthTag    = sl::ResourceTag{ &depth,    sl::kBufferTypeDepth,              sl::ResourceLifecycle::eValidUntilPresent,&lowResExtent };
 		sl::ResourceTag mvecTag     = sl::ResourceTag{ &mvec,     sl::kBufferTypeMotionVectors,      sl::ResourceLifecycle::eValidUntilPresent,&lowResExtent };
 
-		// Reactive (BiasCurrentColor) + transparency hints only when the encode pass produced valid masks this frame.
+		// Submit hints only from this frame's masks.
 		const bool masksValid = Upscaling::GetSingleton()->masksValidThisFrame && a_reactiveMask && a_transparencyMask;
 		if (masksValid) {
 			sl::Resource reactive     = { sl::ResourceType::eTex2d, a_reactiveMask->resource.get(), 0 };
@@ -166,7 +166,7 @@ void Streamline::UpdateConstants(float2 a_jitter)
 	cam.posY = camState.posAdjust.y;
 	cam.posZ = camState.posAdjust.z;
 
-	// First dispatch has undefined temporal history; reset once to avoid a startup ghost.
+	// Reset once to avoid startup ghosting.
 	static bool firstConstantsFrame = true;
 	const sl::Boolean resetHistory = firstConstantsFrame ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 	firstConstantsFrame = false;

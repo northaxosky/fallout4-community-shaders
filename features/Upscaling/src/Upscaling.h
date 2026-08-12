@@ -15,7 +15,6 @@
 namespace cs::features
 {
 
-// Main upscaling manager: FSR3 + DLSS dispatch, dynamic RT scaling, mip-bias, depth swap.
 class Upscaling : public cs::Feature, public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 {
 public:
@@ -38,14 +37,13 @@ public:
 	bool ProducesTelemetry() const override { return true; }
 	void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 
-	// Patches render pipeline, TAA shaders, dynamic resolution, and other game systems.
 	static void InstallHooks();
 
 	enum class UpscaleMethod
 	{
-		kDisabled,  // No upscaling, native TAA
-		kFSR,       // AMD FidelityFX Super Resolution 3
-		kDLSS       // NVIDIA Deep Learning Super Sampling
+		kDisabled,
+		kFSR,
+		kDLSS
 	};
 
 	upscaling::IUpscalerBackend* GetBackend(UpscaleMethod a_method);
@@ -54,56 +52,51 @@ public:
 	struct Settings
 	{
 		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS;
-		// Upscaler quality: 0=Native AA, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
+		// 0=Native, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
 		uint qualityMode = 1;
-		// FSR3 RCAS sharpening strength, 0 (off) to 1. DLSS sharpening is deprecated by Streamline; use Imagespace CAS.
+		// FSR3 RCAS strength; DLSS uses Imagespace CAS.
 		float sharpnessFSR = 0.0f;
-		// DLSS model preset: 0=Default, 1=J, 2=K (transformer), 3=L, 4=M.
+		// 0=Default, 1=J, 2=K, 3=L, 4=M.
 		uint presetDLSS = 0;
-		// Encode-mask reactive scale (DLSS BiasCurrentColorHint). 0..4; tune live for smear-vs-shimmer.
+		// DLSS reactive scale from 0 to 4.
 		float reactiveScale = 1.0f;
-		// Encode-mask transparency/composition scale (both backends). 0..4; tune live for smear-vs-shimmer.
+		// Transparency scale from 0 to 4.
 		float transparencyScale = 1.0f;
 	};
 
 	Settings settings;
 
-	// Reads Data/F4SE/Plugins/FO4CommunityShaders/Upscaling.toml.
+	// Reads the Upscaling TOML.
 	void LoadSettings();
 	void SaveSettings();
 
-	// Returns active method; falls back to FSR if DLSS unavailable but preferred.
+	// Unavailable DLSS falls back to FSR.
 	UpscaleMethod GetUpscaleMethod(bool a_checkMenu);
 
-	// 0 (Native AA) under ENB to avoid viewport compounding through ENB's D3D11 wrapper.
+	// ENB uses native AA to prevent compounded scaling.
 	uint GetEffectiveQualityMode();
 
-	// Reloads settings when pause menu is closed.
 	RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent& a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*);
 
-	// Per-frame jitter, sampler/RT updates, resource lifecycle for the active method.
 	void UpdateUpscaling();
 
-	// Dispatches the active upscaler (FSR3 or DLSS) render->display.
 	void Upscale();
 
-	// Creates/destroys upscaler resources when the active method changes.
 	void CheckResources();
 
 	float2 jitter = { 0, 0 };
 	UpscaleMethod upscaleMethodNoMenu = UpscaleMethod::kDisabled;
 	UpscaleMethod upscaleMethod = UpscaleMethod::kDisabled;
 
-	// True after this frame's encode captures opaque input and dispatches valid masks; backends use it to submit reactive/transparency hints.
+	// True only when current-frame masks are valid.
 	bool masksValidThisFrame = false;
 
-	// Render target management.
 	void UpdateRenderTargets(float a_currentWidthRatio, float a_currentHeightRatio);
-	// a_indicesToCopy: RT indices that require an expensive copy. Empty = copy all.
+	// Empty copies every render target.
 	void OverrideRenderTargets(const std::vector<int>& a_indicesToCopy = {});
 	void ResetRenderTargets(const std::vector<int>& a_indicesToCopy = {});
 	void UpdateRenderTarget(int index, float a_currentWidthRatio, float a_currentHeightRatio);
-	// a_doCopy: true performs full texture copy; false only swaps pointers.
+	// False swaps pointers without copying textures.
 	void OverrideRenderTarget(int index, bool a_doCopy = true);
 	void ResetRenderTarget(int index, bool a_doCopy = true);
 
@@ -111,7 +104,7 @@ public:
 	RE::BSGraphics::RenderTarget proxyRenderTargets[101];
 	RE::BSGraphics::RenderTargetProperties originalRenderTargetData[101];
 
-	// Sampler state management: negative LOD bias compensates for lower render resolution.
+	// Negative LOD bias offsets lower render resolution.
 	void UpdateSamplerStates(float a_currentMipBias);
 	void OverrideSamplerStates();
 	void ResetSamplerStates();
@@ -119,7 +112,7 @@ public:
 	std::array<ID3D11SamplerState*, 320> originalSamplerStates;
 	std::array<ID3D11SamplerState*, 320> biasedSamplerStates;
 
-	// Depth: swap in full-res depth SRV for post effects, then restore.
+	// Post-effects require full-resolution depth.
 	void OverrideDepth(bool a_doCopy = true);
 	void ResetDepth();
 	void CopyDepth();
@@ -127,42 +120,34 @@ public:
 	ID3D11ShaderResourceView* originalDepthView;
 	std::unique_ptr<upscaling::Texture2D> depthOverrideTexture;
 
-	// Replaces game SSR pixel shader with one that handles scaled render targets.
 	void PatchSSRShader();
 
-	// Compute shaders: dilates motion vectors for DLSS, upscales/copies depth.
 	ID3D11ComputeShader* GetDilateMotionVectorCS();
 	ID3D11ComputeShader* GetOverrideLinearDepthCS();
 	ID3D11ComputeShader* GetOverrideDepthCS();
 
-	// Encode-mask permutations: reactive+transparency (DLSS) and transparency-only (FSR).
 	ID3D11ComputeShader* GetEncodeReactiveMaskCS();
 	ID3D11ComputeShader* GetEncodeTransparencyMaskCS();
 
-	// Custom SSR raytracing pixel shader for scaled render targets.
 	ID3D11PixelShader* GetBSImagespaceShaderSSLRRaytracing();
 
-	// Constant buffer holding screen size, render size, and camera data.
 	upscaling::ConstantBuffer* GetUpscalingCB();
 
-	// Fills + binds the upscaling CB to CS slot 0 (camera params pulled from engine).
+	// Binds camera constants to CS slot 0.
 	void UpdateAndBindUpscalingCB(ID3D11DeviceContext* a_context, float2 a_screenSize, float2 a_renderSize);
 
 	void UpdateGameSettings();
 
-	// Upscaler resource management (DLSS dilated motion vectors etc).
 	void CreateUpscalingResources();
 	void DestroyUpscalingResources();
 
-	// Copies kMainTemp (pre-alpha) into colorOpaqueOnlyTexture; runs for any active method.
 	void CaptureOpaqueColor();
-	// Encodes reactive/transparency masks from opaque-vs-final color for the active backend.
 	void EncodeUpscaleMasks();
 
 	std::unique_ptr<upscaling::Texture2D> upscalingTexture;
 	std::unique_ptr<upscaling::Texture2D> dilatedMotionVectorTexture;
 
-	// Mask resources shared by both (mutually exclusive) backends. Opaque capture feeds the encode pass.
+	// Mutually exclusive backends share mask resources.
 	std::unique_ptr<upscaling::Texture2D> colorOpaqueOnlyTexture;
 	std::unique_ptr<upscaling::Texture2D> reactiveMaskTexture;
 	std::unique_ptr<upscaling::Texture2D> transparencyMaskTexture;
@@ -185,7 +170,7 @@ private:
 	winrt::com_ptr<ID3D11ComputeShader> encodeTransparencyMaskCS;
 	winrt::com_ptr<ID3D11PixelShader> BSImagespaceShaderSSLRRaytracing;
 
-	// Fallback SRV over kMainTemp used when the engine RT exposes no srView at the encode hook.
+	// Used when kMainTemp lacks an SRV.
 	winrt::com_ptr<ID3D11ShaderResourceView> mainTempFinalSRV;
 	ID3D11Resource* mainTempFinalSRVResource = nullptr;
 

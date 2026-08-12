@@ -12,7 +12,7 @@ namespace cs::engine
 		std::optional<EngineCurrentPixelShaderSnapshot>
 			ReadPublishedPixelShader(void*) noexcept
 		{
-			// BeginTechnique publishes the wrapper before SetupTechnique returns.
+			// BeginTechnique publishes the wrapper before setup completes.
 			static REL::Relocation<RE::BSGraphics::PixelShader**>
 				currentPixelShader{
 					REL::ID({ 0, 2713197, 2713197 })

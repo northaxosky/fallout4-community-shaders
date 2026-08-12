@@ -28,11 +28,11 @@ namespace cs::engine
 				return std::nullopt;
 			}
 
-			// This ID is shared by NG/AE; OG is intentionally unresolved.
+			// NG and AE share this ID; OG remains unresolved.
 			static REL::Relocation<bool()> tileLightingGetter{
 				REL::ID(2318371)
 			};
-			// Tilelight is frame-dependent, so read it for each creation.
+			// Tilelight changes per frame.
 			return tileLightingGetter();
 		}
 	}

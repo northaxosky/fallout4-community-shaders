@@ -14,7 +14,7 @@ namespace cs
 			return;
 		}
 
-		// Clear only 8 CS slots; full D3D11-width clears stomp engine high-slot bindings and cause dark boxes.
+		// Clearing more than eight slots breaks engine bindings.
 		constexpr UINT kClearWidth = 8;
 
 		ID3D11ShaderResourceView*  nullSRVs[kClearWidth]     = {};

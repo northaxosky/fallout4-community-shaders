@@ -10,7 +10,7 @@ namespace cs::features::upscaling
 
 FfxResource ffxGetResource(ID3D11Resource* dx11Resource,
 	[[maybe_unused]] wchar_t const* ffxResName,
-	FfxResourceStates state /*=FFX_RESOURCE_STATE_COMPUTE_READ*/)
+	FfxResourceStates state )
 {
 	FfxResource resource = {};
 	resource.resource = reinterpret_cast<void*>(const_cast<ID3D11Resource*>(dx11Resource));
@@ -93,7 +93,6 @@ void FidelityFX::GenerateReactiveMask()
 	static auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Unbind + restore engine OM around the reactive-mask dispatch; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	auto mainTexture = reinterpret_cast<ID3D11Texture2D*>(rendererData->renderTargets[(uint)cs::engine::RenderTarget::kMainTemp].texture);
@@ -164,11 +163,11 @@ void FidelityFX::Upscale(Texture2D* a_color, Texture2D* a_reactiveMask, Texture2
 		dispatchParameters.motionVectors = ffxGetResource(reinterpret_cast<ID3D11Texture2D*>(motionVectorTexture.texture), L"FSR3_InputMotionVectors", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchParameters.exposure = ffxGetResource(nullptr, L"FSR3_InputExposure", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
 		dispatchParameters.upscaleOutput = dispatchParameters.color;
-		// FFX-generated reactive mask stays the FSR reactive channel; keep it independent of the encode pass.
+		// FFX exclusively owns the FSR reactive channel.
 		dispatchParameters.reactive = a_reactiveMask
 			? ffxGetResource(a_reactiveMask->resource.get(), L"FSR3_InputReactiveMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)
 			: ffxGetResource(nullptr, L"FSR3_InputReactiveMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ);
-		// Encode-pass transparency mask only when valid this frame; otherwise submit null (no hint).
+		// Invalid frame masks submit no hint.
 		const bool transparencyValid = Upscaling::GetSingleton()->masksValidThisFrame && a_transparencyMask;
 		dispatchParameters.transparencyAndComposition = transparencyValid
 			? ffxGetResource(a_transparencyMask->resource.get(), L"FSR3_TransparencyAndCompositionMap", FFX_RESOURCE_STATE_PIXEL_COMPUTE_READ)

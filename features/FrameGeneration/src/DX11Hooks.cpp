@@ -24,7 +24,7 @@ namespace cs::features::framegeneration
 decltype(&IDXGIFactory::CreateSwapChain) ptrCreateSwapChain;
 decltype(&CreateDXGIFactory1) ptrCreateDXGIFactory1;
 
-// Boot-time gate against double-install. Both call sites run on the main thread during init.
+// Both install paths run during startup.
 static std::atomic<bool> slot10Installed{ false };
 
 HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain);
@@ -39,14 +39,14 @@ static bool InstallSlot10Once(IDXGIFactory* a_factory)
 	return true;
 }
 
-// Catches factories created outside the engine path (ReShade, overlays, ENB late-init).
+// Catch factories created by overlays and wrappers.
 static HRESULT WINAPI hk_CreateDXGIFactory1(REFIID riid, void** ppFactory)
 {
 	HRESULT hr = ptrCreateDXGIFactory1(riid, ppFactory);
 	if (!SUCCEEDED(hr) || !ppFactory || !*ppFactory)
 		return hr;
 
-	// Only known IDXGIFactory* IIDs share slot-10 = CreateSwapChain. Bail otherwise.
+	// Only known factory interfaces share CreateSwapChain's slot.
 	const bool isFactoryIid =
 		riid == __uuidof(IDXGIFactory) || riid == __uuidof(IDXGIFactory1) ||
 		riid == __uuidof(IDXGIFactory2) || riid == __uuidof(IDXGIFactory3) ||
@@ -64,7 +64,7 @@ static HRESULT WINAPI hk_CreateDXGIFactory1(REFIID riid, void** ppFactory)
 
 HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11Device* a_device, _In_ DXGI_SWAP_CHAIN_DESC* pDesc, _COM_Outptr_ IDXGISwapChain** ppSwapChain)
 {
-	// ENB path: ENB's wrapped factory calls CreateSwapChain - we intercept to insert our D3D12 proxy
+	// Intercept ENB's factory to insert the D3D12 proxy.
 	auto frameGen = FrameGeneration::GetSingleton();
 
 	if (!pDesc->Windowed) {
@@ -90,7 +90,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	proxy->SetD3D11DeviceContext(context);
 	context->Release();
 
-	// For DLSS-G: init Streamline BEFORE D3D12 device
+	// Streamline must initialize before the D3D12 device.
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		cs::Streamline::GetSingleton()->Initialize();
 	}
@@ -98,7 +98,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 	proxy->CreateD3D12Device(adapter);
 	adapter->Release();
 
-	// XeSS-FG: create contexts after D3D12 device
+	// XeSS-FG contexts require the D3D12 device.
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (!xess->CreateContexts(proxy->d3d12Device.get())) {
@@ -107,7 +107,7 @@ HRESULT WINAPI hk_IDXGIFactory_CreateSwapChain(IDXGIFactory2* This, _In_ ID3D11D
 		}
 	}
 
-	// DLSS-G: upgrade device+factory via Streamline (selection already routed DLSS-G away from ENB).
+	// DLSS-G cannot upgrade ENB's factory.
 	IDXGIFactory5* factory = (IDXGIFactory5*)This;
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto* core = cs::Streamline::GetSingleton();
@@ -173,13 +173,13 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 
 		auto fidelityFX = FidelityFX::GetSingleton();
 
-		// User-disabled FG keeps FO4 on native D3D11 for clean captures.
+		// Disabled FG stays on D3D11 for clean captures.
 		const bool frameGenerationRequested = frameGen->settings.frameGenerationMode;
 		bool userEnabled = frameGenerationRequested;
 		if (!frameGenerationRequested)
 			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kUserDisabled);
 
-		// RenderDoc needs the real D3D11 chain; FSR3/XeSS-FG proxy captures are empty.
+		// RenderDoc cannot capture proxy swap chains.
 		if (userEnabled && cs::env::IsRenderDocActive()) {
 			frameGen->SetFrameGenSkipReason(FrameGeneration::FrameGenSkipReason::kRenderDoc);
 			CS_LOG_ONCE(L, spdlog::level::warn, "Frame generation requested but skipped: reason=renderdoc");
@@ -193,10 +193,9 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 			L->info("Frame Generation requested; evaluating D3D12 proxy backend");
 		}
 
-		// For DLSS-G, tentatively enable - actual init after D3D12 device creation
 		if (userEnabled && frameGen->settings.frameGenType == 1) {
 			if (cs::env::IsENBLoaded()) {
-				// ENB owns the swap chain (no DLSS-G upgrade); use FSR3-FG if its runtime loaded, else disable FG.
+				// ENB requires the FSR3 fallback.
 				if (fidelityFX->module) {
 					L->warn("DLSS-G unavailable under ENB; using FSR3 frame generation instead");
 					frameGen->activeFrameGenType = FrameGeneration::FrameGenType::kFSR3;
@@ -243,7 +242,7 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 
 			a_context.ForceFeatureLevel11_1();
 
-			// Slot-10 install on the engine's adapter-parent factory. Atomic-once across both install sites.
+			// Both install paths share this atomic gate.
 			InstallSlot10Once(dxgiFactory);
 			if (!cs::env::IsENBLoaded()) {
 				return { true, dxgiFactory };
@@ -256,7 +255,7 @@ static cs::render::FrameGenerationCreateRoute EvaluateFrameGenerationCreate(
 		}
 	} else {
 		if (frameGen->settings.frameGenType == static_cast<int>(FrameGeneration::FrameGenType::kDLSSG)) {
-			// Keep shared Streamline initialization DLSS-only when FG cannot run.
+			// Initialize shared Streamline only when DLSS can run.
 			auto* core = cs::Streamline::GetSingleton();
 			core->RemoveRequestedFeature(sl::kFeatureDLSS_G);
 			core->RemoveRequestedFeature(sl::kFeatureReflex);
@@ -308,7 +307,7 @@ static HRESULT RunFrameGenerationInlineCreate(
 	proxy->SetD3D11DeviceContext(context);
 	context->Release();
 
-	// For DLSS-G: init Streamline BEFORE D3D12 device so plugins see the device
+	// Streamline must initialize before the D3D12 device.
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		cs::Streamline::GetSingleton()->Initialize();
 	}
@@ -316,7 +315,7 @@ static HRESULT RunFrameGenerationInlineCreate(
 	proxy->CreateD3D12Device(adapter);
 	adapter->Release();
 
-	// XeSS-FG: create contexts after D3D12 device, no device/factory upgrade needed
+	// XeSS-FG contexts require the D3D12 device.
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (!xess->CreateContexts(proxy->d3d12Device.get())) {
@@ -325,7 +324,7 @@ static HRESULT RunFrameGenerationInlineCreate(
 		}
 	}
 
-	// DLSS-G: upgrade device/factory, then slSetD3DDevice before proxy hooks fire.
+	// Bind Streamline before proxy hooks fire.
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto* core = cs::Streamline::GetSingleton();
 
@@ -387,7 +386,7 @@ void DX11Hooks::Install()
 		&EvaluateFrameGenerationCreate,
 		&RunFrameGenerationInlineCreate);
 
-	// Hook factory creation only when an FG backend can use the proxy; under ENB DLSS-G needs the FSR3 module (fallback), so require it.
+	// ENB needs FSR3 as DLSS-G's fallback.
 	if (fidelityFX->module ||
 		(frameGen->settings.frameGenType == 1 && cs::Streamline::GetSingleton()->interposer && !cs::env::IsENBLoaded()) ||
 		(frameGen->settings.frameGenType == 2 && XeSSFG::GetSingleton()->fgModule)) {

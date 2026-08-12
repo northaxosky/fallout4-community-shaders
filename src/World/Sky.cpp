@@ -14,11 +14,11 @@ namespace cs::engine
 		if (!sky || !sky->sun || !sky->sun->light)
 			return false;
 
-		// NiDirectionalLight is forward-declared; cast through NiAVObject for world transform.
+		// Cast through NiAVObject because NiDirectionalLight is incomplete.
 		auto* lightObj = reinterpret_cast<RE::NiAVObject*>(sky->sun->light.get());
 		auto& rot = lightObj->world.rotate;
 
-		// FO4 stores world-space sun direction in row 0; rows 1/2 are identity placeholders.
+		// Sun direction is world matrix row zero.
 		float x = rot.entry[0].x;
 		float y = rot.entry[0].y;
 		float z = rot.entry[0].z;

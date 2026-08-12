@@ -27,20 +27,20 @@ namespace cs::features::imagespace
 		LUTLoadStatus                            status = LUTLoadStatus::Ok;
 	};
 
-	// Shared LUT loader; DeviceNotReady is non-terminal and must not be negative-cached.
+	// Device-not-ready misses stay retryable.
 	[[nodiscard]] LUTLoadResult LoadLUTFromFile(std::string_view a_filename);
 
-	// Maps LUT base names to 32x32x32 Texture3D SRVs; render thread uses TryGet only.
+	// Render thread performs lookup only.
 	class LUTCache
 	{
 	public:
-		// CONFIG-APPLY THREAD ONLY. Synchronously loads misses; DeviceNotReady misses are retryable.
+		// Config thread only; device misses remain retryable.
 		ID3D11ShaderResourceView* GetOrLoad(const std::string& a_filename);
 
-		// CONFIG-APPLY THREAD ONLY. Loads each filename and ignores failures.
+		// Config thread only.
 		void Preload(const std::vector<std::string>& a_filenames);
 
-		// Render-thread-safe under Imagespace's single-thread invariant; pure lookup, never loads.
+		// Render thread only; never loads.
 		[[nodiscard]] ID3D11ShaderResourceView* TryGet(const std::string& a_filename) const;
 
 		void Clear() { entries.clear(); }

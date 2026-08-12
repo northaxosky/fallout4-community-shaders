@@ -40,7 +40,7 @@ namespace cs::features
 
 	namespace detail
 	{
-		// Tripwire: shared state is lock-free only because RunFrame + DrawSettings/preset commits are serialized on the render thread; catch any off-thread access.
+		// Render-thread serialization keeps shared state lock-free.
 		void AssertRenderThread(const char* a_where) noexcept
 		{
 			static std::atomic<std::thread::id> established{};
@@ -112,7 +112,7 @@ namespace cs::features
 		});
 		L->info("Registered Imagespace post-upscale callback on cs::engine broker");
 
-		// IsActive (vfunc 8) replacement; engine DOF resumes when bDOFEnable is false.
+		// Engine DOF resumes when bDOFEnable is false.
 		stl::write_vfunc<0x8, ImageSpaceEffectDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectDepthOfField[0]);
 		stl::write_vfunc<0x8, ImageSpaceEffectBokehDepthOfField_IsActive>(RE::VTABLE::ImageSpaceEffectBokehDepthOfField[0]);
 		stl::write_vfunc<0x8, ImageSpaceEffectFullScreenBlur_IsActive>(RE::VTABLE::ImageSpaceEffectFullScreenBlur[0]);
@@ -121,7 +121,7 @@ namespace cs::features
 
 	void Imagespace::OnDataLoaded()
 	{
-		// Smoke mode: force the requested engine weather once after data load.
+		// Smoke tests force weather once after data load.
 		if (!forcedWeatherFormID.has_value()) return;
 		auto* sky = RE::Sky::GetSingleton();
 		if (!sky) return;
@@ -135,7 +135,7 @@ namespace cs::features
 		L->info("Sky::ForceWeather invoked for 0x{:08X}", *forcedWeatherFormID);
 	}
 
-	void Imagespace::OnD3D11Ready(IDXGIAdapter* /*a_adapter*/, ID3D11Device* /*a_device*/)
+	void Imagespace::OnD3D11Ready(IDXGIAdapter* , ID3D11Device* )
 	{
 		ApplyLUTState();
 	}

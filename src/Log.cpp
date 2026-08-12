@@ -16,7 +16,7 @@ namespace cs::log
 {
 	namespace
 	{
-		// Override of F4SE's default pattern; %n surfaces the logger name per line.
+		// %n includes the logger name.
 		constexpr const char* kPattern = "[%T.%e] [%=5t] [%L] [%n] %v";
 		struct ConfigState
 		{

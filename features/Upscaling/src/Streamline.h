@@ -15,7 +15,7 @@
 namespace cs::features::upscaling
 {
 
-// DLSS dispatch helper. SDK plumbing lives in cs::Streamline; this owns the DLSS entry points and dispatch path.
+// Shared Streamline owns SDK plumbing.
 class Streamline : public IUpscalerBackend
 {
 public:
@@ -30,7 +30,6 @@ public:
 	void DestroyResources() override { DestroyDLSSResources(); }
 	bool NeedsDilatedMotionVectors() const override { return true; }
 
-	// Called from Upscaling::OnD3D11Ready via cs::Streamline's feature fan-out.
 	void CacheDLSSFunctions();
 
 	void Upscale(Texture2D* a_color, Texture2D* a_dilatedMotionVectorTexture, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask, float2 a_jitter, float2 a_renderSize, uint a_qualityMode) override;

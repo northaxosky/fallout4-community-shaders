@@ -48,7 +48,7 @@ public:
 	{
 		bool frameGenerationMode = true;
 		bool frameLimitMode = true;
-		bool disableInMenus = true;  ///< Disable frame generation in menus to avoid interpolation artifacts
+		bool disableInMenus = true;  ///< Menus disable interpolation to prevent artifacts.
 		bool debugLogging = false;
 		int frameGenType = 0;    // 0=FSR3, 1=DLSS-G, 2=XeSS-FG
 		int frameGenFrames = 1;  // 1=2x, 2=3x, 3=4x (MFG, RTX 50+ only)

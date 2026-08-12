@@ -8,7 +8,7 @@
 
 namespace cs::input
 {
-	// Parsed keyboard chord: one key plus optional Shift/Ctrl/Alt. vk == 0 means unbound.
+	// vk=0 means unbound.
 	struct Hotkey
 	{
 		std::uint32_t vk    = 0;
@@ -16,18 +16,18 @@ namespace cs::input
 		bool          ctrl  = false;
 		bool          alt   = false;
 
-		// Parse "Shift+F11", "F10", or "Ctrl+F9"; "none"/"" deliberately unbinds, and a_ok distinguishes valid chords/unbinds from malformed specs.
+		// a_ok distinguishes unbound from malformed input.
 		static Hotkey Parse(std::string_view a_spec, bool* a_ok = nullptr);
 
 		bool IsBound() const noexcept { return vk != 0; }
 
-		// Exact modifier match, ignores auto-repeat. F10 is a system key (WM_SYSKEYDOWN), hence both downs.
+		// Match exact modifiers and both key-down message types.
 		bool MatchesDown(UINT a_msg, WPARAM a_wparam, LPARAM a_lparam) const noexcept;
 
-		// Pairs the key-up with a consumed press; matches vk only since modifiers may already be released.
+		// Match key-up by key because modifiers may release first.
 		bool MatchesUp(UINT a_msg, WPARAM a_wparam) const noexcept;
 
-		// Canonical form ("Shift+F11", "None") for logging and round-trip.
+		// Canonical form supports logging and round trips.
 		std::string ToString() const;
 	};
 }

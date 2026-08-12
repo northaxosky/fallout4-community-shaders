@@ -92,11 +92,11 @@ namespace cs::features::imagespace
 		}
 		auto loaded = LoadLUTFromFile(a_filename);
 		if (loaded.status == LUTLoadStatus::DeviceNotReady) {
-			// D3D was not ready; keep this miss retryable.
+			// Keep device-not-ready misses retryable.
 			return nullptr;
 		}
 		auto* raw = loaded.srv.get();
-		// Negative-cache hard failures; Clear() lets Reload retry.
+		// Cache hard failures until Clear().
 		entries.emplace(a_filename, std::move(loaded.srv));
 		return raw;
 	}

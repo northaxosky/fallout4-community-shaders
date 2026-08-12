@@ -74,7 +74,6 @@ void DX12SwapChain::CreateSwapChain(IDXGIFactory5* a_dxgiFactory, DXGI_SWAP_CHAI
 		CreateSwapChainFSR3(a_dxgiFactory, a_swapChainDesc);
 	}
 
-	// Backbuffer acquisition lives in RecreateWrappedBuffers, called from CreateInterop and on resize.
 	swapChainProxy = new DXGISwapChainProxy(swapChain);
 }
 
@@ -145,7 +144,7 @@ void DX12SwapChain::CreateInterop()
 
 void DX12SwapChain::OnPreResize()
 {
-	// DXGI requires no outstanding refs on the back buffers before ResizeBuffers.
+	// ResizeBuffers requires all back-buffer references released.
 	swapChainBuffers[0] = nullptr;
 	swapChainBuffers[1] = nullptr;
 }
@@ -166,13 +165,11 @@ void DX12SwapChain::WaitForGPU()
 
 void DX12SwapChain::RecreateWrappedBuffers()
 {
-	// Drain outstanding GPU work so the wrapped-resource deletes below don't race a still-in-flight frame.
+	// Wait for GPU use before deleting wrapped resources.
 	WaitForGPU();
 
-	// Refresh swapChainDesc from the current chain so wrapped buffers match the live size.
 	DX::ThrowIfFailed(swapChain->GetDesc1(&swapChainDesc));
 
-	// Idempotent release before re-acquire; safe whether buffers are populated or empty.
 	OnPreResize();
 	DX::ThrowIfFailed(swapChain->GetBuffer(0, IID_PPV_ARGS(&swapChainBuffers[0])));
 	DX::ThrowIfFailed(swapChain->GetBuffer(1, IID_PPV_ARGS(&swapChainBuffers[1])));
@@ -191,7 +188,6 @@ void DX12SwapChain::RecreateWrappedBuffers()
 	texDesc11.CPUAccessFlags = 0;
 	texDesc11.MiscFlags = 0;
 
-	// Drop any prior wrapped resources before re-allocation.
 	delete swapChainBufferProxy;
 	swapChainBufferProxy = nullptr;
 	delete swapChainBufferWrapped[0];
@@ -225,20 +221,20 @@ HRESULT DX12SwapChain::GetBuffer(REFIID riid, void** ppSurface)
 		*ppSurface = nullptr;
 		return DXGI_ERROR_INVALID_CALL;
 	}
-	// QueryInterface returns the owning ref required by IDXGISwapChain::GetBuffer.
+	// QueryInterface returns the reference GetBuffer requires.
 	return swapChainBufferProxy->resource11->QueryInterface(riid, ppSurface);
 }
 
 void DX12SwapChain::PrepareAndCopyBackbuffer()
 {
-	// DLSS-G recomposition needs a single-channel UI alpha tag; derive it before the cross-API fence.
+	// DLSS-G needs UI alpha before the cross-API fence.
 	if (FrameGeneration::GetSingleton()->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG)
 		FrameGeneration::GetSingleton()->GenerateUIAlphaMask();
 
-	// Present full proxy backbuffer (scene + UI); DLSS-G/FFX warp it as one image.
+	// Present scene and UI together for frame generation.
 	d3d11Context->CopyResource(swapChainBufferWrapped[frameIndex]->resource11, swapChainBufferProxy->resource11);
 
-	// Fence D3D11 work before D3D12 reads the shared texture.
+	// D3D12 must wait for D3D11's shared-texture writes.
 	DX::ThrowIfFailed(d3d11Context->Signal(d3d11Fence.get(), fenceValue));
 	DX::ThrowIfFailed(commandQueue->Wait(d3d12Fence.get(), fenceValue));
 	fenceValue++;
@@ -246,7 +242,6 @@ void DX12SwapChain::PrepareAndCopyBackbuffer()
 	DX::ThrowIfFailed(commandAllocators[frameIndex]->Reset());
 	DX::ThrowIfFailed(commandLists[frameIndex]->Reset(commandAllocators[frameIndex].get(), nullptr));
 
-	// Copy the shared D3D11 texture into the D3D12 swap-chain backbuffer.
 	{
 		auto srcResource = swapChainBufferWrapped[frameIndex]->resource.get();
 		auto dstResource = swapChainBuffers[frameIndex].get();
@@ -289,7 +284,7 @@ void DX12SwapChain::PublishFrameStatistics(bool a_useFrameGen)
 {
 	auto frameGen = FrameGeneration::GetSingleton();
 
-	// Publish displayed-FPS multiplier; use the active backend after init fallback.
+	// Report the backend selected after fallback.
 	int multiplier = 1;
 	if (a_useFrameGen) {
 		switch (frameGen->activeFrameGenType) {
@@ -303,7 +298,7 @@ void DX12SwapChain::PublishFrameStatistics(bool a_useFrameGen)
 	}
 	cs::env::SetDisplayedFrameMultiplier(multiplier);
 
-	// Accumulate actual presented frames; FSR3 falls back to multiplier to avoid hijacking presentCallback.
+	// FSR3 lacks presented-frame counts, so use its multiplier.
 	uint32_t actualFrames = 0;
 	if (a_useFrameGen) {
 		switch (frameGen->activeFrameGenType) {
@@ -331,14 +326,13 @@ void DX12SwapChain::DispatchFrameGeneration(bool a_useFrameGen, bool& a_isDLSSGF
 	if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kDLSSG) {
 		auto dlssg = StreamlineFG::GetSingleton();
 
-		// Toggle DLSS-G only on state changes, matching XeSS.
 		static bool dlssgWasEnabled = false;
 		if (a_useFrameGen != dlssgWasEnabled) {
 			dlssg->SetEnabled(a_useFrameGen);
 			dlssgWasEnabled = a_useFrameGen;
 		}
 
-		// NVIDIA order: token -> sleep -> sim markers -> constants/tags -> render markers -> present markers.
+		// NVIDIA requires this marker order.
 		dlssg->AcquireFrameToken();
 
 		if (dlssg->slReflexSleep && dlssg->frameToken)
@@ -373,7 +367,7 @@ void DX12SwapChain::DispatchFrameGeneration(bool a_useFrameGen, bool& a_isDLSSGF
 		camera.posY = camState.posAdjust.y;
 		camera.posZ = camState.posAdjust.z;
 
-		// Full composite on swap chain; UI alpha mask drives DLSS-G recomposition for sharp UI on interpolated frames.
+		// UI alpha keeps interpolated UI sharp.
 		dlssg->Present(
 			commandLists[frameIndex].get(),
 			frameGen->depthBufferShared12[frameIndex].get(),
@@ -388,7 +382,6 @@ void DX12SwapChain::DispatchFrameGeneration(bool a_useFrameGen, bool& a_isDLSSGF
 	} else if (frameGen->activeFrameGenType == FrameGeneration::FrameGenType::kXeSSFG) {
 		auto xess = XeSSFG::GetSingleton();
 		if (xess->initialized) {
-			// Toggle XeSS-FG only on state changes.
 			static bool xessFGWasEnabled = false;
 			if (a_useFrameGen != xessFGWasEnabled) {
 				xess->SetEnabled(a_useFrameGen ? 1 : 0);
@@ -408,13 +401,13 @@ void DX12SwapChain::DispatchFrameGeneration(bool a_useFrameGen, bool& a_isDLSSGF
 
 void DX12SwapChain::TagXeSSResourcesIfNeeded(bool a_useFrameGen, bool a_isXeSSFrame)
 {
-	// XeSS-FG tags resources after the main list, using the other command-list slot before Present.
+	// XeSS-FG uses the spare command-list slot before Present.
 	if (a_isXeSSFrame && a_useFrameGen) {
 		auto frameGen = FrameGeneration::GetSingleton();
 		auto xess = XeSSFG::GetSingleton();
 		int tagListIdx = (frameIndex + 1) % 2;
 
-		// Safe without an explicit fence: Present sync retires last frame's tag list before reuse.
+		// Present retires the previous frame's tag list.
 		DX::ThrowIfFailed(commandAllocators[tagListIdx]->Reset());
 		DX::ThrowIfFailed(commandLists[tagListIdx]->Reset(commandAllocators[tagListIdx].get(), nullptr));
 
@@ -474,7 +467,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 
 	DX::ThrowIfFailed(commandLists[frameIndex]->Close());
 
-	// Bracket GPU submission with render markers.
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::eRenderSubmitStart);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_RENDERSUBMIT_START, xessFrameId - 1);
 
@@ -491,7 +483,6 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (!frameGen->highFPSPhysicsFixLoaded && SyncInterval > 0)
 		SyncInterval = 1;
 
-	// Bracket Present with latency markers.
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentStart);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_START, xessFrameId - 1);
 
@@ -500,7 +491,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (isDLSSGFrame) StreamlineFG::GetSingleton()->SetPCLMarker(sl::PCLMarker::ePresentEnd);
 	if (isXeSSFrame) XeSSFG::GetSingleton()->SetMarker(XELL_PRESENT_END, xessFrameId - 1);
 
-	// Null when wrapped swap chains manage latency internally.
+	// Wrapped swap chains manage latency internally.
 	auto frameLatencyWaitableObject = swapChain->GetFrameLatencyWaitableObject();
 	if (frameLatencyWaitableObject)
 		WaitForSingleObjectEx(frameLatencyWaitableObject, INFINITE, TRUE);
@@ -512,7 +503,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 	if (!frameGen->highFPSPhysicsFixLoaded)
 		frameGen->GameFrameLimiter();
 
-	// Use our limiter only when VSync and HighFPSPhysicsFix pacing are both absent.
+	// Pace only without VSync or HighFPSPhysicsFix.
 	if (SyncInterval == 0 && !frameGen->highFPSPhysicsFixLoaded)
 		frameGen->FrameLimiter(useFrameGenerationThisFrame);
 
@@ -522,7 +513,7 @@ HRESULT DX12SwapChain::Present(UINT SyncInterval, UINT Flags)
 HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
 {
 	if (uuid == __uuidof(ID3D11Device) || uuid == __uuidof(ID3D11Device1) || uuid == __uuidof(ID3D11Device2) || uuid == __uuidof(ID3D11Device3) || uuid == __uuidof(ID3D11Device4) || uuid == __uuidof(ID3D11Device5)) {
-		// QueryInterface AddRefs; IDXGIDeviceSubObject::GetDevice transfers an owning reference.
+		// GetDevice returns an owning reference.
 		return d3d11Device->QueryInterface(uuid, ppDevice);
 	}
 
@@ -531,11 +522,11 @@ HRESULT DX12SwapChain::GetDevice(REFIID uuid, void** ppDevice)
 
 WrappedResource::WrappedResource(D3D11_TEXTURE2D_DESC a_texDesc, ID3D11Device5* a_d3d11Device, ID3D12Device* a_d3d12Device)
 {
-	// Share D3D11-created textures with D3D12; wrapping D3D12 resources broke interop.
+	// D3D11-created shared textures preserve cross-API interop.
 	a_texDesc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 	DX::ThrowIfFailed(a_d3d11Device->CreateTexture2D(&a_texDesc, nullptr, &resource11));
 
-	// CreateSharedHandle transfers cross-API access; close the HANDLE after OpenSharedHandle.
+	// Close the shared handle after OpenSharedHandle.
 	winrt::com_ptr<IDXGIResource1> dxgiResource;
 	DX::ThrowIfFailed(resource11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 	HANDLE sharedHandle = nullptr;
@@ -596,13 +587,12 @@ DXGISwapChainProxy::DXGISwapChainProxy(IDXGISwapChain4* a_swapChain)
 	swapChain = a_swapChain;
 }
 
-/****IUknown****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void** ppvObj)
 {
 	if (!ppvObj)
 		return E_INVALIDARG;
 
-	// Most-derived first so a request for IDXGISwapChain4 returns the v4 vtable, not a v0 stub.
+	// Query most-derived interfaces first.
 	if (riid == __uuidof(IDXGISwapChain4)) {
 		*ppvObj = static_cast<IDXGISwapChain4*>(this);
 		AddRef();
@@ -644,7 +634,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID riid, void**
 		return S_OK;
 	}
 
-	// Unknown GUID (driver/ENB/overlay private interface): forward so it reaches the real chain.
+	// Forward private interfaces to the real chain.
 	return swapChain->QueryInterface(riid, ppvObj);
 }
 
@@ -657,14 +647,13 @@ ULONG STDMETHODCALLTYPE DXGISwapChainProxy::Release()
 {
 	const ULONG ref = refCount.fetch_sub(1, std::memory_order_acq_rel) - 1;
 	if (ref == 0) {
-		// The inner chain is owned by DX12SwapChain, not the proxy; only free the proxy node.
+		// The proxy borrows the inner chain.
 		DX12SwapChain::GetSingleton()->swapChainProxy = nullptr;
 		delete this;
 	}
 	return ref;
 }
 
-/****IDXGIObject****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetPrivateData(_In_ REFGUID Name, UINT DataSize, _In_reads_bytes_(DataSize) const void* pData)
 {
 	return swapChain->SetPrivateData(Name, DataSize, pData);
@@ -685,13 +674,11 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetParent(_In_ REFIID riid, _COM_O
 	return swapChain->GetParent(riid, ppParent);
 }
 
-/****IDXGIDeviceSubObject****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDevice(_In_ REFIID riid, _COM_Outptr_ void** ppDevice)
 {
 	return DX12SwapChain::GetSingleton()->GetDevice(riid, ppDevice);
 }
 
-/****IDXGISwapChain****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::Present(UINT SyncInterval, UINT Flags)
 {
 	return DX12SwapChain::GetSingleton()->Present(SyncInterval, Flags);
@@ -724,7 +711,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(UINT BufferCount, UI
 	HRESULT hr = swapChain->ResizeBuffers(BufferCount, Width, Height, NewFormat, SwapChainFlags);
 	if (SUCCEEDED(hr)) {
 		dx12.RecreateWrappedBuffers();
-		// Reflex state is swap-chain-bound; rebuilds can drop it, so re-push cheaply.
+		// Swap-chain rebuilds discard Reflex state.
 		StreamlineFG::GetSingleton()->ReapplyReflexOptions();
 	}
 	return hr;
@@ -750,7 +737,6 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetLastPresentCount(_Out_ UINT* pL
 	return swapChain->GetLastPresentCount(pLastPresentCount);
 }
 
-/****IDXGISwapChain1****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDesc1(_Out_ DXGI_SWAP_CHAIN_DESC1* pDesc) { return swapChain->GetDesc1(pDesc); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFullscreenDesc(_Out_ DXGI_SWAP_CHAIN_FULLSCREEN_DESC* pDesc) { return swapChain->GetFullscreenDesc(pDesc); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetHwnd(_Out_ HWND* pHwnd) { return swapChain->GetHwnd(pHwnd); }
@@ -763,7 +749,6 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBackgroundColor(_Out_ DXGI_RGBA
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetRotation(DXGI_MODE_ROTATION Rotation) { return swapChain->SetRotation(Rotation); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetRotation(_Out_ DXGI_MODE_ROTATION* pRotation) { return swapChain->GetRotation(pRotation); }
 
-/****IDXGISwapChain2****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetSourceSize(UINT Width, UINT Height) { return swapChain->SetSourceSize(Width, Height); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetSourceSize(_Out_ UINT* pWidth, _Out_ UINT* pHeight) { return swapChain->GetSourceSize(pWidth, pHeight); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetMaximumFrameLatency(UINT MaxLatency) { return swapChain->SetMaximumFrameLatency(MaxLatency); }
@@ -772,7 +757,6 @@ HANDLE STDMETHODCALLTYPE DXGISwapChainProxy::GetFrameLatencyWaitableObject() { r
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetMatrixTransform(const DXGI_MATRIX_3X2_F* pMatrix) { return swapChain->SetMatrixTransform(pMatrix); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetMatrixTransform(_Out_ DXGI_MATRIX_3X2_F* pMatrix) { return swapChain->GetMatrixTransform(pMatrix); }
 
-/****IDXGISwapChain3****/
 UINT STDMETHODCALLTYPE DXGISwapChainProxy::GetCurrentBackBufferIndex() { return swapChain->GetCurrentBackBufferIndex(); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::CheckColorSpaceSupport(DXGI_COLOR_SPACE_TYPE ColorSpace, _Out_ UINT* pColorSpaceSupport) { return swapChain->CheckColorSpaceSupport(ColorSpace, pColorSpaceSupport); }
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetColorSpace1(DXGI_COLOR_SPACE_TYPE ColorSpace) { return swapChain->SetColorSpace1(ColorSpace); }
@@ -783,13 +767,12 @@ HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers1(UINT BufferCount, U
 	HRESULT hr = swapChain->ResizeBuffers1(BufferCount, Width, Height, Format, SwapChainFlags, pCreationNodeMask, ppPresentQueue);
 	if (SUCCEEDED(hr)) {
 		dx12.RecreateWrappedBuffers();
-		// See ResizeBuffers: Reflex options need re-pushing after swap rebuild.
+		// Swap-chain rebuilds discard Reflex state.
 		StreamlineFG::GetSingleton()->ReapplyReflexOptions();
 	}
 	return hr;
 }
 
-/****IDXGISwapChain4****/
 HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetHDRMetaData(DXGI_HDR_METADATA_TYPE Type, UINT Size, _In_reads_opt_(Size) void* pMetaData) { return swapChain->SetHDRMetaData(Type, Size, pMetaData); }
 
 }

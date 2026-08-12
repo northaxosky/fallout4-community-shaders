@@ -24,7 +24,6 @@ Set `FXC_PATH` to use a compiler outside the default Windows SDK location.
 Optional tooling:
 
 - Windows PowerShell 5.1 or PowerShell 7 (`pwsh`), plus `curl` (bundled with Windows 10 1803+), for runtime SDK staging (`scripts/fetch-sdks.ps1`)
-- The shared devkit workbench for deploy, launch, and log-tail workflows
 
 ## Clone
 
@@ -87,10 +86,10 @@ ctest --test-dir build -C Release --output-on-failure
 `ShaderRoundtrip` recompiles the reconstructed deferred shaders under
 `shaders\lighting\` and checks each DXBC hash against
 `scripts\shaders\shader-fidelity-conformance.json`, a **producer-published
-attestation** copied byte-for-byte from the sibling `fallout4-re`. It is
+attestation** copied byte-for-byte from the producer. It is
 fail-closed and there is no `-UpdateBaselines`: **the consumer may never
 re-baseline it, and the manifest must never be hand-edited.** Refreshing it
-requires an authoritative PASS in `fallout4-re`, its `fidelity
+requires an authoritative producer PASS, its `fidelity
 publish-conformance` step, and copying the artifact here unchanged.
 
 Editing a pinned shader invalidates that entry's `source_sha256` and turns the
@@ -122,40 +121,8 @@ outside `package\`:
 - `features\Imagespace\Shaders\*.hlsl*` -> `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`
 - `shaders\` (recursive) -> `Data\F4SE\Plugins\FO4CommunityShaders\Shaders\`
 
-The shared devkit's `projects/community-shaders.toml` `[deploy]` block encodes this
-same mapping for automated deployment.
-
-The optional shared devkit automates this workflow. Place it at `..\devkit\` (or set
-`DEVKIT_DIR`) and build it once:
-
-```powershell
-cd ..\devkit && go build -o bin\devkit.exe .\cmd\devkit
-```
-
-A first deployment should include configuration, shaders, presets, LUTs, and runtime
-SDK files:
-
-```powershell
-..\devkit\bin\devkit.exe deploy -project community-shaders -include-config
-```
-
-Common iterative workflows:
-
-```powershell
-..\devkit\bin\devkit.exe cycle  -project community-shaders   # build + deploy
-..\devkit\bin\devkit.exe deploy -project community-shaders   # deploy only
-..\devkit\bin\devkit.exe test   -project community-shaders   # build, deploy, launch, collect
-```
-
-The last command builds, deploys, launches Fallout 4 through MO2/F4SE, and collects the
-plugin log. It does not perform automated visual comparison; rendering behavior must
-be checked in game.
-
-To diagnose a devkit setup directly:
-
-```powershell
-..\devkit\bin\devkit.exe doctor -project community-shaders
-```
+Launch the result through MO2/F4SE. Building and deploying does not perform any
+visual comparison; rendering behavior must be checked in game.
 
 ## Project layout
 

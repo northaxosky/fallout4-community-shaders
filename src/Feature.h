@@ -39,16 +39,16 @@ namespace cs
 		bool IsHealthy() const noexcept { return _state.IsHealthy(); }
 		bool IsLoaded() const noexcept { return IsHealthy(); }
 
-		// Configure must not install hooks, load providers, or register callbacks.
-		virtual bool Configure(const toml::table& /*a_config*/, std::string& /*a_error*/) { return true; }
+		// Configure must remain side-effect-free.
+		virtual bool Configure(const toml::table& , std::string& ) { return true; }
 		virtual void Load() {}
 		virtual ActivationResult Activate();
 		virtual void OnDataLoaded() {}
 
-		// Runs after all features' Load(). Defer here to wrap hooks installed in another feature's Load().
+		// Defer wrappers until every feature loads.
 		virtual void OnPostPostLoad() {}
 
-		// FailLoad() marks a recoverable Load() failure so the manager skips the feature.
+		// Failed loads skip the feature.
 		void FailLoad(std::string a_reason) noexcept
 		{
 			_loadFailed = true;
@@ -58,64 +58,56 @@ namespace cs
 		virtual void DrawSettings() {}
 
 		virtual bool ProducesTelemetry() const { return false; }
-		// Telemetry collection must only read cheap cached or atomic state.
-		virtual void CollectTelemetry(telemetry::Sink& /*a_sink*/) const {}
+		// Telemetry must read only cached or atomic state.
+		virtual void CollectTelemetry(telemetry::Sink& ) const {}
 
-		// Reset persisted settings and derived caches; opt in via HasResettableSettings().
 		virtual void RestoreDefaultSettings() {}
 
-		// Opt-in to the shared Reset button; non-user-tunable features stay clean by default.
 		virtual bool HasResettableSettings() const { return false; }
 
-		// Always-on overlay rendered on top of the game even when the settings menu is closed.
+		// Overlays render even while settings are closed.
 		virtual void DrawOverlay() {}
 
-		// Fired once by FeatureManager::OnD3D11ReadyAll after the D3D11 device exists.
-		virtual void OnD3D11Ready(IDXGIAdapter* /*adapter*/, ID3D11Device* /*device*/) {}
+		// Fires after D3D11 device creation.
+		virtual void OnD3D11Ready(IDXGIAdapter* , ID3D11Device* ) {}
 
-		// Discovery/menu defaults mirror Skyrim CS; features opt in by overriding.
 
-		// One-line description shown in the menu under the feature name.
 		virtual std::string GetFeatureSummary() const { return {}; }
 
-		// External docs / mod-page link surfaced in the menu when present.
 		virtual std::optional<std::string> GetFeatureModLink() const { return {}; }
 
-		// Core features cannot be disabled by the user; the menu hides their enabled toggle.
 		virtual bool IsCore() const { return false; }
 
-		// Category label used for menu grouping (e.g. "Lighting", "Post-process", "Diagnostics").
 		virtual std::string GetCategory() const { return FeatureCategories::kMisc; }
 
-		// Hide a feature from the menu entirely (e.g. developer-only tooling).
 		virtual bool IsInMenu() const { return true; }
 
-		// Drawn for registered features that are not active; menu wiring is deferred.
+		// Inactive features defer menu wiring.
 		virtual void DrawUnloadedUI() {}
 
-		// Drawn when a feature failed to load, so the user sees why instead of a silent skip.
+		// Show load failures instead of silently skipping.
 		virtual void DrawFailLoadMessage() {}
 
-		// Preset defaults are opt-out; features set this true to join the global library.
+		// Features join presets by default.
 		virtual bool ParticipatesInPresets() const { return false; }
 
-		// Presets skip test-mode features so smoke marker overrides are not silently clobbered.
+		// Presets skip test-mode features.
 		virtual bool IsInTestMode() const { return false; }
 
-		// Snake_case key for [features.<key>]; multi-word features should override for clarity.
+		// Multi-word features should override the snake_case key.
 		virtual std::string GetPresetKey() const;
 
-		// Phase 1: parse into scratch only; do NOT mutate live state before the caller commits.
-		virtual bool StageFromPreset(const toml::table& /*a_subtable*/,
-									 const PresetApplyContext& /*a_ctx*/,
-									 std::string& /*a_err*/) { return true; }
+		// Staging must not mutate live state.
+		virtual bool StageFromPreset(const toml::table& ,
+									 const PresetApplyContext& ,
+									 std::string& ) { return true; }
 
-		// Phase 2a no-throw swaps all staged state before phase 2b persists TOML and rebuilds resources; log failures per feature.
+		// Swap all staged state before finalization.
 		virtual void CommitStagedSwap() noexcept {}
 		virtual void CommitStagedFinalize() {}
 
-		// Emit live state into [features.<key>]; leave empty to opt out of the current save.
-		virtual void ExportToPreset(toml::table& /*a_subtable*/) {}
+		// Empty output opts out of saving.
+		virtual void ExportToPreset(toml::table& ) {}
 
 	private:
 		friend class FeatureManager;
@@ -169,9 +161,8 @@ namespace cs
 		void OnDataLoadedAll();
 		void OnPostPostLoadAll();
 
-		// Runtime callback boundaries quarantine and compact without unloading.
+		// Callback failures quarantine features without unloading them.
 		bool PrepareRuntimeCallback(Feature& a_feature, std::string_view a_phase) noexcept;
-		// Let installed non-failed inactive features draw settings before activation.
 		bool PrepareMenuCallback(Feature& a_feature, std::string_view a_phase) noexcept;
 		void QuarantineRuntimeCallback(
 			Feature& a_feature,
@@ -179,7 +170,7 @@ namespace cs
 			std::string_view a_reason) noexcept;
 		void FinishRuntimeCallbackPass() noexcept;
 
-		// Fan out OnD3D11Ready once per loaded feature on first D3D11 device creation, independent of Streamline initialization.
+		// Notify each feature on first D3D11 device creation.
 		void OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
 
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }

@@ -46,7 +46,6 @@ namespace cs::features
 
 		void RunFrame();
 
-		// Axis: stylistic look (not quality).
 		enum class Style : int
 		{
 			kCustom    = 0,
@@ -61,14 +60,12 @@ namespace cs::features
 			bool        enabled            = true;
 			int         style              = static_cast<int>(Style::kStandard);
 
-			// Tonemap + LUT.
 			int         tonemapOperator    = 1;
 			float       exposure           = 1.0f;
 			bool        lutEnable          = false;
 			std::string lutPath            = "";
 			float       lutStrength        = 1.0f;
 
-			// Adaptive exposure.
 			bool        adaptiveExposure   = true;
 			float       adaptationSpeedUp  = 0.5f;
 			float       adaptationSpeedDown = 2.0f;
@@ -76,14 +73,12 @@ namespace cs::features
 			float       exposureMin        = 0.05f;
 			float       exposureMax        = 4.0f;
 
-			// Bloom.
 			bool        bloomEnable        = true;
 			float       bloomThreshold     = 0.85f;
 			float       bloomIntensity     = 0.05f;
 			int         bloomMips          = 5;
 			float       bloomMipWeights[6] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
 
-			// Lens.
 			bool        vignetteEnable     = true;
 			float       vignetteIntensity  = 0.3f;
 			bool        caEnable           = true;
@@ -91,14 +86,12 @@ namespace cs::features
 			bool        sharpenEnable      = true;
 			float       sharpness          = 0.4f;
 
-			// Sun + lens.
 			bool        lensFlareEnable    = false;
 			float       lensFlareIntensity = 0.8f;
 			int         lensFlareGhosts    = 5;
 			bool        dirtEnable         = false;
 			float       dirtIntensity      = 0.5f;
 
-			// Bokeh DOF.
 			bool        dofEnable          = false;
 			float       aperture           = 0.05f;
 			float       focusDistance      = 1500.0f;
@@ -110,11 +103,11 @@ namespace cs::features
 			float       anamorphRatio      = 1.0f;
 		};
 
-		// Render-thread-owned (RunFrame reads, DrawSettings/presets write, serialized); lock-free by that invariant - see AssertRenderThread.
+		// Render-thread serialization keeps shared state lock-free.
 		Settings settings;
 		imagespace::WeatherProfiles weatherProfiles;
 		imagespace::LUTCache        lutCache;
-		// Smoke-harness override: when set, RunFrame uses ResolveForced(category) instead of Sky.
+		// Smoke tests bypass Sky with a forced category.
 		std::optional<imagespace::WeatherCategory> forcedWeatherCategory;
 		std::optional<std::uint32_t>               forcedWeatherFormID;
 
@@ -136,10 +129,9 @@ namespace cs::features
 		void RunDOF(uint32_t a_width, uint32_t a_height, ID3D11Texture2D* a_fbTex);
 		ID3D11ComputeShader* GetCS(const wchar_t* a_path, winrt::com_ptr<ID3D11ComputeShader>& a_slot, const char* a_name);
 		bool LoadLUTFromDisk(const std::string& a_filename);
-		// Applies base/overlay LUT state after settings changes or D3D11 init; no-op pre-device.
+		// Reapply LUTs after settings or device changes.
 		void ApplyLUTState();
 
-		// Composite (tonemap + LUT + bloom-add + lens).
 		std::unique_ptr<imagespace::Texture2D>      compositeScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> compositeCB;
 		winrt::com_ptr<ID3D11ComputeShader>         compositeCS;
@@ -148,8 +140,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11SamplerState>          lutSampler;
 		std::string                                 lutLoadedPath;
 
-		// Adaptive exposure: log-luma pyramid + ping-pong scalar.
-		std::unique_ptr<imagespace::Texture2D>      lumPyramid;                 // single Texture2D, multi-mip
+		std::unique_ptr<imagespace::Texture2D>      lumPyramid;
 		std::vector<winrt::com_ptr<ID3D11ShaderResourceView>> lumPyramidMipSRVs;
 		std::vector<winrt::com_ptr<ID3D11UnorderedAccessView>> lumPyramidUAVs;
 		std::unique_ptr<imagespace::ConstantBuffer> pyramidCB;
@@ -161,7 +152,6 @@ namespace cs::features
 		uint32_t                                    pyramidMipCount  = 0;
 		int                                         expoFrameIdx     = 0;
 
-		// Bloom chain + scratch.
 		std::array<std::unique_ptr<imagespace::Texture2D>, 6> bloomChain;
 		std::array<std::unique_ptr<imagespace::Texture2D>, 6> bloomScratch;
 		std::unique_ptr<imagespace::ConstantBuffer> bloomCB;
@@ -171,12 +161,11 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader>         bloomUpCS;
 		int                                         bloomMipsAlloc   = 0;
 
-		// Bokeh DOF.
-		std::unique_ptr<imagespace::Texture2D>      dofCoCTex;             // half-res R16F signed CoC
-		std::unique_ptr<imagespace::Texture2D>      dofTileTex;            // /16 R16G16F {minCoC, maxCoC} for blur early-out
-		std::unique_ptr<imagespace::Texture2D>      dofHalfColor;          // half-res R11G11B10F downsampled scene
-		std::unique_ptr<imagespace::Texture2D>      dofNearBlurred;        // half-res R11G11B10F foreground blur output
-		std::unique_ptr<imagespace::Texture2D>      dofFarBlurred;         // half-res R11G11B10F background blur output
+		std::unique_ptr<imagespace::Texture2D>      dofCoCTex;
+		std::unique_ptr<imagespace::Texture2D>      dofTileTex;
+		std::unique_ptr<imagespace::Texture2D>      dofHalfColor;
+		std::unique_ptr<imagespace::Texture2D>      dofNearBlurred;
+		std::unique_ptr<imagespace::Texture2D>      dofFarBlurred;
 		std::unique_ptr<imagespace::ConstantBuffer> dofCB;
 		winrt::com_ptr<ID3D11ComputeShader>         dofDepthCoCCS;
 		winrt::com_ptr<ID3D11ComputeShader>         dofDilateCS;
@@ -186,7 +175,6 @@ namespace cs::features
 		uint32_t                                    dofWidth         = 0;
 		uint32_t                                    dofHeight        = 0;
 
-		// Cached for dim-change reallocation.
 		uint32_t                                    scratchWidth  = 0;
 		uint32_t                                    scratchHeight = 0;
 		uint32_t                                    scratchFormat = 0;
@@ -201,7 +189,7 @@ namespace cs::features
 		std::uint64_t                               telemetryLastRunFrame = 0;
 		bool                                        testModeActive  = false;
 
-		// Preset staging scratch; Stage fills it, Commit swaps it into live state.
+		// Stage writes scratch; Commit swaps it live.
 		Settings                    stagedSettings;
 		imagespace::WeatherProfiles stagedWeatherProfiles;
 		bool                        stagedValid = false;

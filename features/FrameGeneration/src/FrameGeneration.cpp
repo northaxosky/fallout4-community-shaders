@@ -351,7 +351,7 @@ void FrameGeneration::CreateFrameGenerationResources()
 
 		texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 
-		// Force RGBA8 for shared buffer - FSR3 requires it
+		// FSR3 shared buffers require RGBA8.
 		texDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		srvDesc.Format = texDesc.Format;
 		rtvDesc.Format = texDesc.Format;
@@ -386,7 +386,7 @@ void FrameGeneration::CreateFrameGenerationResources()
 		motionVectorBufferShared[index]->CreateRTV(rtvDesc);
 		motionVectorBufferShared[index]->CreateUAV(uavDesc);
 
-		// Single-channel R8 alpha mask drives DLSS-G's kBufferTypeUIAlpha recomposition path.
+		// DLSS-G recomposition uses a single-channel alpha mask.
 		texDesc.Format = DXGI_FORMAT_R8_UNORM;
 		srvDesc.Format = texDesc.Format;
 		rtvDesc.Format = texDesc.Format;
@@ -517,7 +517,6 @@ void FrameGeneration::PostAlpha()
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 
-	// Unbind + restore engine OM around the capture dispatch; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	{
@@ -555,7 +554,7 @@ void FrameGeneration::PostAlpha()
 			}
 		}
 
-		// Clear all SRVs we bound; leaving depth in slot 3 risks OM/CS nulling or poisoned dispatches.
+		// Clear bound SRVs to prevent OM/CS hazards.
 		ID3D11ShaderResourceView* views[4] = { nullptr, nullptr, nullptr, nullptr };
 		context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 
@@ -580,7 +579,6 @@ void FrameGeneration::CopyBuffersToSharedResources()
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 	auto dx12SwapChain = DX12SwapChain::GetSingleton();
 	
-	// Unbind + restore engine OM around the depth copy/dispatch; clears CS slots on exit.
 	cs::engine::ComputeOMScope omcs(context);
 
 	auto& motionVector = rendererData->renderTargets[(uint)RenderTarget::kMotionVectors];
@@ -699,7 +697,7 @@ double FrameGeneration::GetRefreshRate(HWND a_window)
 	MONITORINFOEXW info;
 	info.cbSize = sizeof(info);
 	if (GetMonitorInfoW(monitor, &info) != 0) {
-		// Use CCD to find the active display path for this window.
+		// CCD identifies the window's active display path.
 		UINT32 requiredPaths, requiredModes;
 		if (GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &requiredPaths, &requiredModes) == ERROR_SUCCESS) {
 			std::vector<DISPLAYCONFIG_PATH_INFO> paths(requiredPaths);
@@ -712,7 +710,7 @@ double FrameGeneration::GetRefreshRate(HWND a_window)
 					sourceName.header.adapterId = p.sourceInfo.adapterId;
 					sourceName.header.id = p.sourceInfo.id;
 					if (DisplayConfigGetDeviceInfo(&sourceName.header) == ERROR_SUCCESS) {
-						// Duplicated displays can share a source with multiple targets; either match is valid.
+						// Mirrored displays can share one source.
 						if (wcscmp(info.szDevice, sourceName.viewGdiDeviceName) == 0) {
 							UINT numerator = p.targetInfo.refreshRate.Numerator;
 							UINT denominator = p.targetInfo.refreshRate.Denominator;
@@ -764,7 +762,7 @@ void FrameGeneration::GenerateUIAlphaMask()
 	if (!d3d12Interop || !setupBuffers || !uiAlphaMaskCS)
 		return;
 
-	// Match DX12SwapChain::Present menu gating to skip unused UI-alpha dispatches.
+	// Skip UI-alpha work when menus disable frame generation.
 	if (settings.disableInMenus) {
 		if (auto* main = RE::Main::GetSingleton(); main && main->inMenuMode)
 			return;
@@ -778,7 +776,7 @@ void FrameGeneration::GenerateUIAlphaMask()
 	auto rendererData = RE::BSGraphics::GetRendererData();
 	auto context = reinterpret_cast<ID3D11DeviceContext*>(rendererData->context);
 
-	// Proxy backbuffer may still be bound as RTV from game rendering; D3D11 returns zeros if read while bound.
+	// Bound proxy RTVs return zero when sampled.
 	cs::engine::ComputeOMScope omcs(context);
 
 	uint32_t dispatchX = (uint32_t)std::ceil(float(dx12SwapChain->swapChainDesc.Width) / 8.0f);
@@ -830,7 +828,7 @@ void FrameGeneration::Reset()
 
 struct WindowSizeChanged
 {
-	// Deliberately empty: swallows the engine's spurious second WindowSizeChanged during init (inherited from FO4Upscaling).
+	// Ignore the engine's duplicate initialization resize.
 	static void thunk(RE::BSGraphics::Renderer*, unsigned int)
 	{
 	}
@@ -873,14 +871,13 @@ void FrameGeneration::InstallHooks()
 	// Swallow FO4's duplicate init resize event.
 	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));
 
-	// Shared post-upscale broker keeps Imagespace post-FX before HUDLess capture, avoiding 60Hz judder.
+	// Post-FX must precede HUD-less capture.
 	cs::engine::RegisterPostDynResViewport_FGCapture([](bool a_setting) {
 		if (!a_setting) {
 			FrameGeneration::GetSingleton()->PostDisplay();
 		}
 	});
 
-	// Capture motion vectors/depth after reticle handling.
 	stl::detour_thunk<DrawWorld_Forward>(REL::ID({ 656535, 2318315, 2318315 }));
 
 	constexpr std::ptrdiff_t reticleOffsets[] = { 0x253, 0x53D, 0x53D };
@@ -892,7 +889,7 @@ void FrameGeneration::InstallHooks()
 
 	void FrameGeneration::Load()
 	{
-		// Gated: requesting DLSS-G triggers eUseFrameBasedResourceTagging on slInit, which breaks Upscaling's regular slSetTag path.
+		// DLSS-G tagging breaks Upscaling's slSetTag path.
 		if (settings.frameGenType == 1) {
 			auto* core = cs::Streamline::GetSingleton();
 			core->RequestFeature(sl::kFeatureDLSS_G);

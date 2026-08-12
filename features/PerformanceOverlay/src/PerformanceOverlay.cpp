@@ -193,17 +193,16 @@ namespace cs::features
 	{
 		auto* self = GetSingleton();
 
-		// Consume paired key-up before gates so menus cannot strand state/eat later key-ups; never pass F10 WM_SYSKEYUP to DefWindowProc, avoiding SC_KEYMENU beep.
+		// Consume key-up early to prevent stuck input and F10 beeps.
 		if (self->_toggleReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
 			&& a_wparam == self->_toggleReleaseVk) {
 			self->_toggleReleaseVk = 0;
 			return true;
 		}
 
-		// Menu open: let ImGui own the keyboard so typing/navigation is not hijacked.
+		// Open menus leave keyboard input to ImGui.
 		if (cs::Menu::Get().IsOpen())
 			return false;
-		// Nothing to toggle unless the overlay is actually eligible to draw (matches DrawOverlay).
 		if (!self->settings.enabled || self->settings.preset == static_cast<int>(Preset::Off))
 			return false;
 
@@ -290,7 +289,7 @@ namespace cs::features
 	{
 		if (_refreshKnown)
 			return;
-		// EnumDisplaySettings gives a cheap, accurate-enough refresh rate.
+		// Display settings provide an adequate refresh estimate.
 		DEVMODEW devMode{};
 		devMode.dmSize = sizeof(devMode);
 		if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &devMode)) {
@@ -312,11 +311,11 @@ namespace cs::features
 
 		if (_lastFrameQpc > 0.0) {
 			const float dtMs = static_cast<float>((nowSec - _lastFrameQpc) * 1000.0);
-			// Drop multi-second samples from pauses/hidden overlay so stats stay sane.
+			// Ignore pause-length samples.
 			if (dtMs > 0.0f && dtMs < 1000.0f) {
 				_curFrameMs = dtMs;
 				_frameTimesMs[_frameTimesHead] = dtMs;
-				// Estimated post-FG frame time is not a measured post-present timestamp.
+				// Post-FG frame time is estimated, not measured.
 				_postFgFrameTimesMs[_frameTimesHead] = dtMs / static_cast<float>(displayedFrameMultiplier);
 				_frameTimesHead = (_frameTimesHead + 1) % settings.historySize;
 				if (_frameTimesCount < settings.historySize)
@@ -325,13 +324,13 @@ namespace cs::features
 		}
 		_lastFrameQpc = nowSec;
 
-		// Recompute readouts at the user cadence to avoid per-frame flicker.
+		// Cadenced updates prevent per-frame flicker.
 		if (nowSec - _lastDisplayUpdate >= settings.updateInterval) {
 			_displayedFrameMs = _curFrameMs;
 			_displayedFps = _curFrameMs > 0.0f ? 1000.0f / _curFrameMs : 0.0f;
 			_displayedFrameMultiplier = displayedFrameMultiplier;
 
-			// Prefer backend frame-counter deltas; fall back to engine FPS * multiplier.
+			// Prefer backend counts; otherwise estimate from engine FPS.
 			const uint64_t totalNow = cs::env::GetDisplayedFrameTotal();
 			const double windowSec = nowSec - _lastDisplayedSampleSec;
 			if (_lastDisplayedSampleSec > 0.0 && windowSec > 0.0 && totalNow >= _lastDisplayedFrameTotal) {
@@ -372,7 +371,7 @@ namespace cs::features
 		}
 		_stddevMs = static_cast<float>(std::sqrt(sqDiff / sorted.size()));
 
-		// Lows report the slow-frame tail.
+		// Lows represent the slow-frame tail.
 		const auto idx99   = static_cast<size_t>(sorted.size() * 99 / 100);
 		const auto idx999  = static_cast<size_t>(sorted.size() * 999 / 1000);
 		_onePctLowMs       = sorted[std::min(idx99,  sorted.size() - 1)];
@@ -419,7 +418,7 @@ namespace cs::features
 		ImGuiIO& io = ImGui::GetIO();
 		const ImVec2 viewport = io.DisplaySize;
 
-		// Corner snap by default; free-drag opt-in.
+		// Snap by default; dragging is optional.
 		ImGuiCond posCond = ImGuiCond_Always;
 		ImVec2 pos{ 10.0f, 10.0f };
 		ImVec2 pivot{ 0.0f, 0.0f };
@@ -447,7 +446,7 @@ namespace cs::features
 		else
 			flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize;
 
-		// Pinned width keeps rows uniform regardless of which sections are enabled.
+		// Fixed width keeps optional rows aligned.
 		const float kContentWidth = 440.0f * settings.fontScale;
 		ImGui::SetNextWindowPos(pos, posCond, pivot);
 		ImGui::SetNextWindowBgAlpha(settings.opacity);
@@ -563,7 +562,7 @@ namespace cs::features
 			}
 
 			if (settings.showGraph && _frameTimesCount > 1) {
-				// PlotLines needs a linear array, so reorder the ring buffer into temp storage.
+				// PlotLines requires contiguous samples.
 				static std::array<float, kHistoryCapacity> linear{};
 				static std::array<float, kHistoryCapacity> linearPostFg{};
 				for (int i = 0; i < _frameTimesCount; ++i) {
@@ -574,13 +573,13 @@ namespace cs::features
 				}
 				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
 				const float maxReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
-				// Y-max uses avg + 3 sigma plus floors so one outlier does not dominate.
+				// Limit outlier influence with average plus three sigma.
 				const float ymaxTarget = std::max({
 					refreshMs * 2.0f,
 					_avgMs + 3.0f * _stddevMs,
 					maxReferenceMs * 1.05f,
 				});
-				// Smooth Y-max over ~6 recomputes so real shifts track while hitches fade.
+				// Smooth scaling so hitches fade.
 				if (_graphYMaxSmoothed <= 0.0f) {
 					_graphYMaxSmoothed = ymaxTarget;
 				} else {
@@ -589,7 +588,6 @@ namespace cs::features
 				const float ymax = _graphYMaxSmoothed;
 				ImGui::TextUnformatted("Frame Time");
 				if (settings.showEstimatedPostFGFrameTime) {
-					// Compact legend; tooltip carries the detail.
 					ImGui::SameLine();
 					const float lineH = ImGui::GetTextLineHeight();
 					const float chipW = lineH * 0.6f;
@@ -612,7 +610,6 @@ namespace cs::features
 			}
 
 			if (settings.showStats) {
-				// Stack stats to fit the pinned width.
 				ImGui::Text("avg     %5.2f ms", _avgMs);
 				ImGui::Text("1%% low  %5.2f ms", _onePctLowMs);
 				ImGui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
@@ -638,7 +635,7 @@ namespace cs::features
 				}
 			}
 		}
-		// Reset font scale even when Begin() returns false; End() still pairs with Begin().
+		// End must pair with Begin even when hidden.
 		ImGui::SetWindowFontScale(1.0f);
 		ImGui::End();
 	}
@@ -660,7 +657,7 @@ namespace cs::features
 
 		ImGui::Separator();
 
-		// Save sliders on commit only; per-tick TOML rewrites would hit the render thread.
+		// Save sliders only on commit to avoid render-thread writes.
 		auto sliderCommit = [] { return ImGui::IsItemDeactivatedAfterEdit(); };
 
 		static const char* presetLabels[] = { "Off", "Minimal", "Standard", "Verbose" };
@@ -742,7 +739,7 @@ namespace cs::features
 				settings.historySize    = std::clamp(settings.historySize, 30, kHistoryCapacity);
 				settings.graphHeightPx  = std::clamp(settings.graphHeightPx, 40.0f, 160.0f);
 				if (historyCommitted) {
-					// Reset after history-size changes instead of reinterpreting stale samples.
+					// History-size changes invalidate existing samples.
 					_frameTimesHead = 0;
 					_frameTimesCount = 0;
 				}

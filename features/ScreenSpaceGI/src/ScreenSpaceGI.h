@@ -103,7 +103,7 @@ namespace cs::features
 		// Must match Shaders/XeGTAO/decode.cs.hlsl.
 		struct alignas(16) DecodeCB
 		{
-			DirectX::XMFLOAT4X4 InvProj;  // row-major, untransposed
+			DirectX::XMFLOAT4X4 InvProj;  // Row-major and untransposed.
 			float               RcpFrameDim[2];
 			float               FrameDim[2];
 		};

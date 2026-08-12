@@ -43,7 +43,7 @@ namespace cs::engine
 			}
 			if ((a_techniqueBits & kBsdfLightKeyFeatureMask) != 0)
 				return ShaderVariantId{ a_techniqueBits };
-			// CPU setup may still consume bits omitted from the PSID.
+			// CPU setup may consume bits absent from PSID.
 			return ShaderVariantId{
 				a_techniqueBits
 					& kBsdfLightFallbackPixelShaderMask

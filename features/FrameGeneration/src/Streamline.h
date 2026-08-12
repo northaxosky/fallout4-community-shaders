@@ -20,7 +20,7 @@
 namespace cs::features::framegeneration
 {
 
-// DLSS-G / Reflex / PCL dispatch helper. SDK plumbing lives in cs::Streamline.
+// Shared Streamline owns SDK plumbing.
 class StreamlineFG
 {
 public:
@@ -30,16 +30,15 @@ public:
 		return &singleton;
 	}
 
-	// Binds the D3D12 proxy device for DLSS-G dispatch.
 	void SetD3DDevice(ID3D12Device* a_device);
 
 	bool CheckAndEnableDLSSG();
 	void SetEnabled(bool a_enabled);
 
-	// Re-pushes Reflex after init or swap-chain rebuilds, which can invalidate Reflex state.
+	// Swap-chain rebuilds can invalidate Reflex state.
 	void ReapplyReflexOptions();
 
-	// Returns DLSSGState::numFramesActuallyPresented; call once per engine tick to avoid losing counts.
+	// Call once per tick to preserve frame counts.
 	uint32_t ConsumeFramesPresented();
 
 	void AcquireFrameToken();
@@ -59,7 +58,7 @@ public:
 		float a_cameraNear, float a_cameraFar,
 		const CameraData& a_camera);
 
-	// Active for this session, distinct from cs::Streamline::featureDLSSG (loaded + supported).
+	// This tracks session activation, not SDK support.
 	bool sessionActive = false;
 	uint32_t configuredFrameCount = 1;
 	ID3D12Device* d3d12Device = nullptr;

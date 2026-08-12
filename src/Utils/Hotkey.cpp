@@ -27,7 +27,7 @@ namespace cs::input
 			return out;
 		}
 
-		// Token -> Win32 VK for the supported set (F1..F12, A..Z, 0..9); 0 if unrecognised.
+		// Maps supported key names to Win32 virtual keys.
 		std::uint32_t KeyTokenToVk(std::string_view a_token)
 		{
 			if (a_token.empty())
@@ -68,7 +68,7 @@ namespace cs::input
 
 		const std::string      lowered = ToLower(a_spec);
 		const std::string_view spec = Trim(lowered);
-		// Empty or "none" is a deliberate unbind, not an error.
+		// Empty and "none" deliberately unbind.
 		if (spec.empty() || spec == "none") {
 			report(true);
 			return {};
@@ -102,7 +102,7 @@ namespace cs::input
 				result.vk = vk;
 				haveKey = true;
 			} else {
-				report(false);  // more than one key token
+				report(false);  // Reject multiple key tokens.
 				return {};
 			}
 
@@ -111,7 +111,7 @@ namespace cs::input
 			start = plus + 1;
 		}
 
-		if (!haveKey) {  // modifiers only, no key
+		if (!haveKey) {  // Reject chords without a key.
 			report(false);
 			return {};
 		}

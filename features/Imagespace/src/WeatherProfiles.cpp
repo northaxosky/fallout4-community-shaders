@@ -16,7 +16,7 @@ namespace cs::features::imagespace
 			WeatherCategory category;
 		};
 
-		// Fallout4RE export formIDs; excluded/unknown categories fall through to kFlags.
+		// Unknown categories fall back to weather flags.
 		constexpr VanillaEntry kVanillaWeathers[] = {
 			{ 0x0000116Bu, WeatherCategory::kInterior  },  // FXDiamondSunlightBounce
 			{ 0x0000116Du, WeatherCategory::kInterior  },  // DiamondWeather
@@ -26,7 +26,7 @@ namespace cs::features::imagespace
 			{ 0x0010D573u, WeatherCategory::kInterior  },  // FXInstituteDayNightCycleKey
 			{ 0x0010F781u, WeatherCategory::kOvercast  },  // TCommonwealthMarshOvercast
 			{ 0x00108640u, WeatherCategory::kInterior  },  // FXInstituteDayNightCycle
-			{ 0x0010E3D4u, WeatherCategory::kInterior  },  // EditorCloudPreview (treated as interior; usually unused at runtime)
+			{ 0x0010E3D4u, WeatherCategory::kInterior  },  // EditorCloudPreview
 			{ 0x00115C64u, WeatherCategory::kInterior  },  // GoodneighborWeatherBase
 			{ 0x001209AFu, WeatherCategory::kOvercast  },  // NeutralOvercast
 			{ 0x001256FBu, WeatherCategory::kRadstorm  },  // FXNukeWeather
@@ -74,7 +74,7 @@ namespace cs::features::imagespace
 		};
 		constexpr std::size_t kVanillaCount = sizeof(kVanillaWeathers) / sizeof(kVanillaWeathers[0]);
 
-		// Source stays editorID-ordered for review; Classify uses this sorted copy.
+		// Sort at runtime; keep source order reviewable.
 		const std::array<VanillaEntry, kVanillaCount>& GetSortedTable() noexcept
 		{
 			static const std::array<VanillaEntry, kVanillaCount> kSorted = [] {
@@ -114,7 +114,7 @@ namespace cs::features::imagespace
 		if (a_name == "snow")     return WeatherCategory::kSnow;
 		if (a_name == "interior") return WeatherCategory::kInterior;
 		if (a_name == "unknown")  return WeatherCategory::kUnknown;
-		// Tolerate export-vocabulary spellings.
+		// Accept export-vocabulary aliases.
 		if (a_name == "interior_or_location") return WeatherCategory::kInterior;
 		if (a_name == "cloudy")  return WeatherCategory::kOvercast;
 		if (a_name == "foggy")   return WeatherCategory::kFog;
@@ -151,7 +151,7 @@ namespace cs::features::imagespace
 		if (!sky) return s;
 		s.current       = sky->currentWeather;
 		s.previous      = sky->lastWeather;
-		// torn float read tolerance: clamp keeps blend math in [0,1].
+		// Clamp torn reads to [0,1].
 		s.transitionPct = std::clamp(sky->currentWeatherPct, 0.0f, 1.0f);
 		s.modeIsFull    = sky->mode.any(RE::Sky::Mode::kFull);
 		return s;
@@ -162,13 +162,12 @@ namespace cs::features::imagespace
 	{
 		if (!a_weather) return WeatherCategory::kUnknown;
 
-		// User overrides take precedence over the static table.
+		// User overrides win.
 		const std::uint32_t formID = a_weather->GetFormID();
 		if (auto it = a_userOverrides.find(formID); it != a_userOverrides.end()) {
 			return it->second;
 		}
 
-		// Static lookup via binary search on the sorted vanilla table.
 		const auto& sorted = GetSortedTable();
 		auto it = std::lower_bound(sorted.begin(), sorted.end(), formID,
 			[](const VanillaEntry& e, std::uint32_t key) { return e.formID < key; });
@@ -176,14 +175,14 @@ namespace cs::features::imagespace
 			return it->category;
 		}
 
-		// Fallback: read kFlags byte (weatherData[11], signed in CommonLib; promote to unsigned).
+		// CommonLib exposes signed flags; promote before testing.
 		const auto flags = static_cast<std::uint8_t>(
 			a_weather->weatherData[static_cast<std::size_t>(RE::TESWeather::WeatherData::kFlags)]);
 		using F = RE::TESWeather::WeatherDataFlags;
 		if (flags & static_cast<std::uint8_t>(F::kSnow))   return WeatherCategory::kSnow;
 		if (flags & static_cast<std::uint8_t>(F::kRainy))  return WeatherCategory::kRain;
 		if (flags & static_cast<std::uint8_t>(F::kCloudy)) return WeatherCategory::kOvercast;
-		// Pleasant/no bits are clear; kRainOcclusion alone is too weak to mean fog.
+		// Rain occlusion alone does not imply fog.
 		return WeatherCategory::kClear;
 	}
 
@@ -209,7 +208,6 @@ namespace cs::features::imagespace
 {
 	namespace
 	{
-		// One category endpoint after overlaying base settings; keeps lutPath for SRV lookup.
 		struct Endpoint
 		{
 			float                exposure;
@@ -300,7 +298,7 @@ namespace cs::features::imagespace
 			r.dirtEnable         = Snap(a.dirtEnable, b.dirtEnable, t);
 			r.dirtIntensity      = Lerp(a.dirtIntensity, b.dirtIntensity, t);
 
-			// LUTs snap at pct=0.5; TryGet only, falling back to base on cache miss.
+			// LUTs switch at halfway; cache misses use base.
 			const std::string& chosen = (t >= 0.5f) ? b.lutPath : a.lutPath;
 			if (chosen == a_base.lutPath) {
 				r.lutSRV = a_baseLutSRV;
@@ -347,7 +345,6 @@ namespace cs::features::imagespace
 		const SkySample&           a_sample,
 		const LUTCache&            a_lutCache) noexcept
 	{
-		// Fallback paths: feature disabled, or Sky in interior/sky-dome-only mode, or no weather.
 		if (!a_profiles.enablePerWeatherProfiles || !a_sample.modeIsFull || !a_sample.current) {
 			auto r = BaseRuntime(a_base, a_baseLutSRV);
 			r.currentCategory  = a_sample.current  ? Classify(a_sample.current,  a_profiles.userOverrides) : WeatherCategory::kUnknown;
@@ -360,7 +357,7 @@ namespace cs::features::imagespace
 		const WeatherCategory prevCat = a_sample.previous
 			? Classify(a_sample.previous, a_profiles.userOverrides)
 			: curCat;
-		// No lastWeather means transition complete, avoiding endpoint snap artifacts.
+		// Missing previous weather means transition complete.
 		const float t = a_sample.previous ? std::clamp(a_sample.transitionPct, 0.0f, 1.0f) : 1.0f;
 
 		const Endpoint epPrev = BuildEndpoint(a_base, a_profiles.overlays[static_cast<std::size_t>(prevCat)]);

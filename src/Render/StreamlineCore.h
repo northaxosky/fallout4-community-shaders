@@ -28,7 +28,6 @@ namespace cs
 	using PFun_slSetTagForFrame2 = sl::Result(const sl::FrameToken& frame, const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
 	using PFun_slSetTag2 = sl::Result(const sl::ViewportHandle& viewport, const sl::ResourceTag* tags, uint32_t numTags, sl::CommandBuffer* cmdBuffer);
 
-	// Owns the Streamline SDK plumbing shared by Upscaling (DLSS) and FrameGeneration (DLSS-G/Reflex/PCL).
 	class Streamline
 	{
 	public:
@@ -41,22 +40,22 @@ namespace cs
 
 		static Streamline* GetSingleton();
 
-		// Add to featuresToLoad. Must run before Initialize(). Deduplicated; safe to call repeatedly.
+		// Must precede Initialize(); duplicates are ignored.
 		void RequestFeature(sl::Feature feature);
 
-		// Remove from featuresToLoad before Initialize(). Returns false if absent or initialization already started.
+		// Removal fails after initialization starts.
 		bool RemoveRequestedFeature(sl::Feature feature);
 
-		// Idempotent. Loads sl.interposer.dll when any feature has been requested.
+		// Idempotent; loads only when features were requested.
 		void LoadInterposer();
 
-		// Idempotent. Invokes slInit with the aggregated featuresToLoad on first call.
+		// Idempotent; initializes all requested features once.
 		bool Initialize();
 
-		// Broadcasts each call so FG can re-trigger after D3D12 binding.
+		// Broadcast so frame generation can re-trigger after D3D12 binding.
 		void OnD3D11Ready(IDXGIAdapter* adapter, ID3D11Device* device);
 
-		// FG sets this after binding D3D12 so a later D3D11 OnD3D11Ready doesn't overwrite the D3D12 binding.
+		// Preserve D3D12 binding during later D3D11 readiness.
 		void MarkD3DDeviceRegistered(DeviceAPI a_api);
 
 		bool IsInitialized() const noexcept { return _initialized; }
@@ -70,7 +69,7 @@ namespace cs
 		HMODULE interposer = nullptr;
 
 		PFun_slInit*                 slInit{};
-		// Resolve but never call slShutdown; teardown order with NVAPI/Present is unsafe, loader unload is safer.
+		// Skip slShutdown because teardown order is unsafe.
 		PFun_slShutdown*             slShutdown{};
 		PFun_slIsFeatureSupported*   slIsFeatureSupported{};
 		PFun_slIsFeatureLoaded*      slIsFeatureLoaded{};

@@ -11,7 +11,6 @@
 namespace cs::features::upscaling
 {
 
-// FSR3 upscaling manager with reactive-mask support.
 class FidelityFX : public IUpscalerBackend
 {
 public:
@@ -31,23 +30,19 @@ public:
 		Upscale(a_color, a_reactiveMask, a_transparencyMask, a_jitter, a_renderSize);
 	}
 
-	// Creates the FSR3 context and scratch buffer (mask/opaque textures are Upscaling-owned).
 	void CreateFSRResources();
 
-	// Destroys the FSR3 context and releases all FSR-owned resources.
 	void DestroyFSRResources();
 
-	// Builds the FSR3 reactive mask (into Upscaling's reactiveMaskTexture) after transparency.
 	void GenerateReactiveMask();
 
-	// Runs FSR3 temporal upscaling from render to display resolution.
 	void Upscale(Texture2D* a_color, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask,
 		float2 a_jitter, float2 a_renderSize);
 
-	FfxFsr3Context fsrContext;  ///< FSR3 context handle
+	FfxFsr3Context fsrContext;
 
 private:
-	void* fsrScratchBuffer = nullptr;  ///< FSR3 backend scratch memory (freed in DestroyFSRResources)
+	void* fsrScratchBuffer = nullptr;
 };
 
 }

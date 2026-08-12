@@ -8,7 +8,7 @@
 
 namespace cs::toml_util
 {
-	// Read scalar TOML with silent defaults, wrong-type warnings, numeric clamping, and a_logCtx labels such as "imagespace.tonemap".
+	// Invalid TOML uses defaults, warnings, and numeric clamping.
 	bool ReadBool(const toml::table& a_table, std::string_view a_key, bool a_default, std::string_view a_logCtx);
 
 	int ReadInt(const toml::table& a_table, std::string_view a_key, int a_default, int a_min, int a_max, std::string_view a_logCtx);

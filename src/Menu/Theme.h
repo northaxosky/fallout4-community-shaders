@@ -4,7 +4,6 @@
 
 namespace cs::theme
 {
-	// Dark Pip-Boy theme; windows are slightly transparent, popups/modals/toasts stay opaque.
 	void ApplyDarkTheme(ImGuiStyle& a_style);
 
 	struct Fonts
@@ -17,10 +16,10 @@ namespace cs::theme
 
 	const Fonts& GetFonts() noexcept;
 
-	// Loads bundled role fonts once per ImGui context; false means at least one ProggyClean fallback.
+	// Returns false when any font falls back.
 	bool LoadFonts(ImGuiIO& a_io, float a_bodyPointSize = 18.0f);
 
-	// Shared Pip-Boy and status palette; use these instead of hard-coded ImVec4 literals.
+	// Use shared palette values instead of literals.
 	namespace colors
 	{
 		inline const ImVec4 kAccent       { 0.000f, 0.933f, 0.000f, 1.00f };

@@ -36,13 +36,13 @@ namespace cs::engine
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
 		bool g_preSunLightDrawInstalled    = false;
-		// Owner ("Upscaling", etc.) that patched REL::ID(587723)+0xE1 before the broker; empty means no pre-thunk chained in. Startup-thread-only via RegistrationAllowed, so unguarded.
+		// Empty means no earlier viewport thunk owner.
 		std::string g_postDynResViewportPreThunkOwner;
 		bool        g_postDynResViewportPreThunkClaimed = false;
-		// DeferredLightsImpl_Hook wraps the engine call with g_insideDeferredLightsImpl; PreSunLightDraw uses it because generic DrawTriShape fires thousands of times per frame.
+		// Phase-gate generic draws to DeferredLightsImpl.
 		bool g_insideDeferredLightsImpl    = false;
 
-		// Registration must run on the startup thread before any render hook; first thunk closes registration, so late/off-thread Register* logs and never mutates vectors during Dispatch.
+		// Registration closes when the first render hook runs.
 		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
 		std::atomic_bool g_registrationClosed{ false };
 
@@ -105,11 +105,11 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// write_thunk_call targets generic DrawTriShape `call BSGraphics::SetDirtyStates(bool,bool)` at REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}, AE-verified; after func(), PS SRVs are flushed, t6 is NULL for sun, and dispatch lands before DrawIndexed.
-		// R8D/R9D hold startIndex/primitiveCount: prologue mov r15d,r9d does not clobber r9 and nothing writes r8/r9 before the call; primitiveCount==2 selects fullscreen DrawIndexed(6), restricted by the DeferredLightsImpl phase flag.
+		// Hook after SetDirtyStates and before DrawIndexed.
+		// primitiveCount==2 identifies fullscreen draws within DeferredLightsImpl.
 		struct PreSunLightDraw_Hook
 		{
-			static void thunk(bool a_force, bool a_clear, std::uint32_t /*a_startIndex*/, std::uint32_t a_primitiveCount)
+			static void thunk(bool a_force, bool a_clear, std::uint32_t , std::uint32_t a_primitiveCount)
 			{
 				func(a_force, a_clear);
 				if (g_insideDeferredLightsImpl && a_primitiveCount == 2) {
@@ -134,7 +134,7 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Post-upscale viewport reset: engine first, then Imagespace post-FX, then FG captures post-FX pixels.
+		// Post-FX must precede frame-generation capture.
 		struct PostDynResViewport_Hook
 		{
 			static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_setting)
@@ -151,13 +151,12 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// REL::ID 587723/2318322/2318322 + {0xE1,0xC5,0xC5}: shared viewport re-arm E8 after upscaling; source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 		void EnsurePostDynResViewportInstalled()
 		{
 			if (g_postDynResViewportInstalled) {
 				return;
 			}
-			// Chain contract: pre-thunk owner (Upscaling) must patch first, so its body wraps engine and the broker wraps IT to fire Imagespace/FGCapture after. Log the claim state at broker-install time to make an inverted wrap fail loud.
+			// Earlier viewport thunks must install before the broker.
 			if (g_postDynResViewportPreThunkClaimed) {
 				L->info("Broker chaining PostDynResViewport after pre-thunk '{}'.", g_postDynResViewportPreThunkOwner);
 			} else {
@@ -181,13 +180,11 @@ namespace cs::engine
 			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 		}
 
-		// REL::ID 763320/2276846/2276846 + {0x9C,0x9A,0x9A}: SetDirtyStates call inside DrawTriShape; source: Fallout4RE AE (1.11.221) disasm + version.bin, cross-checked against NG.
 		void InstallPreSunLightDrawHook()
 		{
 			if (g_preSunLightDrawInstalled) {
 				return;
 			}
-			// The thunk's phase gate needs DeferredLightsImpl's enter/exit flag.
 			EnsureDeferredLightsImplInstalled();
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 			constexpr std::ptrdiff_t offsets[] = { 0x9C, 0x9A, 0x9A };
@@ -229,7 +226,6 @@ namespace cs::engine
 		EnsureDeferredLightsImplInstalled();
 	}
 
-	// REL::ID 728427/2318313/2318313 from DrawWorld::Render_PreUI anchor walk, with matching NG/AE bodies; source: Fallout4RE exports/cs-render-subsystem-ids.json @ 20e5fa7.
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PostDeferredComposite")) return;

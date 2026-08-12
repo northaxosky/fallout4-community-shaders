@@ -50,13 +50,13 @@ namespace cs::features
 		float lensFlareIntensity;
 	};
 
-	// Style recipes are intensity-only; master toggles remain user-controlled.
+	// Style presets change intensity, not feature toggles.
 	static constexpr StyleValues kStyles[5] = {
-		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f },                                 // Custom
-		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.50f },                               // Subtle: lighter touches across the board.
-		{ 1, 0.18f, 0.05f, 0.30f, 0.50f, 0.40f, 0.80f },                               // Standard: current ship defaults.
-		{ 3, 0.20f, 0.10f, 0.40f, 0.80f, 0.50f, 1.00f },                               // Vivid: Lottes operator, heavier grade.
-		{ 1, 0.16f, 0.08f, 0.50f, 0.40f, 0.30f, 0.80f },                               // Cinematic: low key, soft bloom, strong vignette.
+		{ 0, 0.00f, 0.00f, 0.00f, 0.00f, 0.0f, 0.0f },
+		{ 1, 0.18f, 0.03f, 0.20f, 0.30f, 0.30f, 0.50f },
+		{ 1, 0.18f, 0.05f, 0.30f, 0.50f, 0.40f, 0.80f },
+		{ 3, 0.20f, 0.10f, 0.40f, 0.80f, 0.50f, 1.00f },
+		{ 1, 0.16f, 0.08f, 0.50f, 0.40f, 0.30f, 0.80f },
 	};
 
 	void Imagespace::ApplyStyle(Style style)
@@ -279,7 +279,6 @@ namespace cs::features
 		commitDirty();
 		ImGui::EndDisabled();
 
-		// Per-weather profiles.
 		ImGui::Separator();
 		if (ImGui::CollapsingHeader("Per-weather profiles")) {
 			dirty |= ImGui::Checkbox("Enable per-weather profiles", &weatherProfiles.enablePerWeatherProfiles);

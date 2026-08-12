@@ -38,7 +38,7 @@ namespace
 {
 	auto* L = cs::log::Get("cs.menu");
 
-	// Features whose DrawSettings threw once; suppresses re-invocation + log spam until restart.
+	// Suppress settings after their first exception.
 	std::unordered_set<const cs::Feature*> g_menuSettingsFailed;
 
 	constexpr const char* kFrostShaderSource = R"(
@@ -74,8 +74,7 @@ float4 PSMain(VSOutput input) : SV_Target
 		SourceTexture.Sample(LinearClamp, input.UV + float2( radius.x, -radius.y)) +
 		SourceTexture.Sample(LinearClamp, input.UV + float2(-radius.x,  radius.y)) +
 		SourceTexture.Sample(LinearClamp, input.UV + float2( radius.x,  radius.y))) * 0.25;
-	// Force opaque alpha: the game backbuffer alpha is ~0, and the ImGui composite
-	// alpha-blends the frost image, so passing it through renders fully transparent.
+	// ImGui blending requires opaque alpha.
 	return float4(blurred.rgb, 1.0);
 }
 )";
@@ -721,7 +720,7 @@ namespace cs
 
 	Menu::~Menu()
 	{
-		// Restore the window proc first so no further input reaches our soon-invalid hook.
+		// Restore WndProc before invalidating the hook.
 		if (_wndProcHooked && _hwnd && _origWndProc) {
 			SetWindowLongPtrW(_hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(_origWndProc));
 			_wndProcHooked = false;
@@ -827,7 +826,7 @@ namespace cs
 		if (elapsed >= duration) {
 			std::lock_guard lock(_toastMutex);
 			if (_toastSeq == seq) {
-				// Only clear the same toast; a raced-in replacement advances _toastSeq.
+				// Sequence prevents clearing a newer toast.
 				_toastText.clear();
 			}
 			return;
@@ -891,7 +890,6 @@ namespace cs
 		ImGui::CreateContext();
 		ImGuiIO& io = ImGui::GetIO();
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-		// Persist window sizes/positions across sessions; sits beside our other plugin INIs.
 		static const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\imgui.ini";
 		io.IniFilename = kIniPath;
 
@@ -1308,7 +1306,6 @@ namespace cs
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-		// Always-on overlays render even when the settings menu is closed.
 		if (_overlayVisible) {
 			auto& featureManager = FeatureManager::Get();
 			for (auto* feat : featureManager.GetAll()) {
@@ -1439,7 +1436,7 @@ namespace cs
 
 	void Menu::RefreshFeatureLoadCache()
 	{
-		// Reload first so reopening the menu sees load writes made after startup.
+		// Reload before reopening to include external writes.
 		feature_config::Reload();
 		const auto root = feature_config::GetMergedRoot();
 		const auto* features = root["features"].as_table();
@@ -1967,10 +1964,10 @@ namespace cs
 		ImGui::BeginDisabled(!canSave);
 		if (ImGui::Button("Save")) {
 			std::string err;
-			if (pm.Save(active->path, active->name, err, /*a_allowOverwrite=*/true)) {
+			if (pm.Save(active->path, active->name, err, true)) {
 				const std::string savedName = active->name;
 				pm.Refresh();
-				if (const auto* re = pm.FindByName(savedName, /*a_preferUser=*/true)) {
+				if (const auto* re = pm.FindByName(savedName, true)) {
 					pm.activeIdentity       = re->identity;
 					pm.activeName           = re->name;
 					pm.pendingComboIdentity = re->identity;
@@ -2023,7 +2020,7 @@ namespace cs
 						(name + ".toml");
 					if (pm.Save(dst, name, err)) {
 						pm.Refresh();
-						if (const auto* re = pm.FindByName(name, /*a_preferUser=*/true)) {
+						if (const auto* re = pm.FindByName(name, true)) {
 							pm.activeIdentity       = re->identity;
 							pm.activeName           = re->name;
 							pm.pendingComboIdentity = re->identity;
@@ -2073,8 +2070,7 @@ namespace cs
 	{
 		_open = !_open;
 		if (_open) {
-			// Refresh happens on the render thread in DrawOverviewPage; Toggle runs on the
-			// WndProc/input thread, so only flip the flag here (never touch the cache/config off-thread).
+			// Input thread only sets the render-thread refresh flag.
 			_featureLoadDirty = true;
 		}
 		ImGui::GetIO().ClearInputKeys();
@@ -2107,7 +2103,7 @@ namespace cs
 			return 0;
 		}
 
-		// Toggle key, eaten regardless of menu state so the game never sees END.
+		// Always consume END so the game never sees it.
 		if (a_msg == WM_KEYDOWN && a_wparam == VK_END && (HIWORD(a_lparam) & KF_REPEAT) == 0) {
 			m.Toggle();
 			return 0;
@@ -2136,11 +2132,11 @@ namespace cs
 		}
 		featureManager.FinishRuntimeCallbackPass();
 
-		// Always feed input to ImGui so widgets respond when hovered/focused.
+		// ImGui needs input while widgets are active.
 		if (m._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
-		// With the menu open, swallow keyboard/mouse input after ImGui and hotkeys; pass non-input messages through.
+		// Open menus consume input after hotkeys and ImGui.
 		if (m._open && m._imguiInited) {
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||

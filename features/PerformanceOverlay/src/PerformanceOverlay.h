@@ -58,7 +58,6 @@ namespace cs::features
 			bool   showVram       = false;
 			bool   showStats      = false;
 
-			// Corner snap by default; free-drag opt-in.
 			int    corner         = static_cast<int>(Corner::TopLeft);
 			bool   freeDrag       = false;
 			float  dragPosX       = 10.0f;
@@ -69,7 +68,7 @@ namespace cs::features
 			float  fontScale      = 1.0f;
 			bool   highContrast   = false;
 
-			// FPS thresholds auto-seed from monitor refresh when enabled.
+			// Auto thresholds follow monitor refresh.
 			bool   autoThresholds = true;
 			float  fpsGood        = 60.0f;
 			float  fpsWarn        = 30.0f;
@@ -77,10 +76,10 @@ namespace cs::features
 			float  updateInterval = 0.5f;
 			int    historySize    = 120;
 
-			// Graph height at fontScale=1.0; scales with fontScale.
+			// Height at fontScale=1.0.
 			float  graphHeightPx  = 80.0f;
 
-			// In-game overlay toggle chord; parsed via cs::input::Hotkey. "none"/"" unbinds it.
+			// "none" unbinds the overlay hotkey.
 			std::string toggleHotkey = "F10";
 		};
 
@@ -111,7 +110,7 @@ namespace cs::features
 		float  _displayedFps      = 0.0f;
 		float  _displayedFrameMs  = 0.0f;
 		int    _displayedFrameMultiplier = 1;
-		// Backend-reported displayed FPS from env-counter deltas; equals _displayedFps when FG is off.
+		// Displayed FPS uses backend frame-count deltas.
 		float    _measuredDisplayedFps = 0.0f;
 		uint64_t _lastDisplayedFrameTotal = 0;
 		double   _lastDisplayedSampleSec  = 0.0;
@@ -129,6 +128,6 @@ namespace cs::features
 		uint64_t _vramBudgetBytes = 0;
 
 		cs::input::Hotkey _toggleHotkey;
-		std::uint32_t     _toggleReleaseVk = 0;  // VK of a consumed toggle press whose key-up is still pending
+		std::uint32_t     _toggleReleaseVk = 0;  // Consumed press awaiting key-up.
 	};
 }
