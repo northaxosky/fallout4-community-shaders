@@ -10,7 +10,7 @@ shaders and injects registered permutations at runtime.
 
 | File | Role | Source binding (RT in/out) | REL::ID OG/NG/AE | Status |
 |---|---|---|---|---|
-| `BSDFComposite.hlsl` | selector for all 78 Composite archive blobs | selects 13 family modules; bindings vary by family | runtime delivery not wired | **producer-attested 78/78** |
+| `BSDFComposite.hlsl` | selector for all 78 Composite archive blobs | selects 13 family modules; bindings vary by family | delivered for the ambient family via `kAmbientIblPass` | **producer-attested 78/78** |
 | `ambient_ibl_pass.hlsl`     | retained standalone interior/reference reconstruction, blob 3559 | reads `kSSAO=28`, `kGbuffer*`; writes `kDiffuseBuffer=58` | (inside `DeferredLightsImpl` `1108521 / 2318312 / 2318312`) | **historical exec-diff-zero; not a current manifest source** |
 | `ambient_ibl_pass_runtime.hlsl` | retained historical reconstruction of exterior Composite PSIDs `0x10B60` and `0xB60` | Tilelight adds t11 ambient diffuse B and t12 blurred SSLR | same | **historical; unreferenced and ungated — the runtime now injects `BSDFComposite.hlsl` at `BSDF_COMPOSITE_FAMILY=2`** |
 | `deferred_composite.hlsl`   | combine diffuse + specular + albedo | reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, `kSpecularBuffer=59`; writes `kMain=3` | `DrawWorld::DeferredComposite` `728427 / 2318313 / 2318313` | **reconstructed-roundtrip-wip** |
@@ -708,17 +708,13 @@ attestation and does not carry the corpus or RE tools.
 Composite blobs plus three Light permutations, deferred prepass and VLS.
 `ShaderCompile` also compiles the three shipping permutations without
 native fidelity evidence: deferred composite and the two Screen Space Shadows
-directional variants. Replacing three machine-specific exec-diff tests with
-these clean-clone gates strengthens the suite: conformance is no longer
-self-rebaselinable, while those registered variants still receive compile
-coverage.
+directional variants. Both gates run from a clean clone, so conformance is not
+self-rebaselinable.
 
-The consumer-local manifest must never be hand-edited. The producer deleted
-its conformance artifact in `fallout4-re` commit `be8126d4`, then restored it
-in `e8a81748` and has republished it on every subsequent wave from
-authoritative WARP execution-diff results. The current publication covers all
-83 targets.
-`ShaderRoundtrip` is therefore a live conformance gate again: a pass means the
+The consumer-local manifest must never be hand-edited; the producer republishes
+it from authoritative WARP execution-diff results, and the current publication
+covers all 83 targets.
+`ShaderRoundtrip` is therefore a live conformance gate: a pass means the
 shipping HLSL still compiles to bytecode proven numerically equal to the
 game's own shader. Refresh it only by copying the producer artifact
 byte-for-byte after a new authoritative PASS.
@@ -753,10 +749,10 @@ unshadowed families. The producer's `light-coverage.json` owns the remaining
 Light status; this consumer does not duplicate its moving bucket counts.
 
 **Reconstruction is not delivery.** `src/Render/ShaderInjection.cpp` registers
-only `LIGHT_TYPE=1`, `LIGHT_TYPE=2`, and `LIGHT_TYPE=1` with
-`AMBIENT_IBL_IN_LIGHT=1`, so an injected wetness, SSGI, or SSS effect appears
-only when the engine draws through a registered permutation; stock shaders run
-on every other one and the injected effect silently disappears. Numerical
+seven targets, of which `[shader_ownership]` enables five by default, so an
+injected wetness, SSGI, or SSS effect appears only when the engine draws through
+a registered permutation; stock shaders run on every other one and the injected
+effect silently disappears. Numerical
 fidelity and in-game execution are independent — a correct-but-never-invoked
 shader looks identical on screen to a correct-and-running one, because the stock
 shader was also fine. Only non-zero replacement counters distinguish them.
@@ -777,8 +773,9 @@ ambient).
 Shadowed point lights are reconstructed and numerically proven — all 31
 `POINTOMNI`+`SHADOW` blobs, including the `HALFOMNI` and `GOBOPROJECTION`
 variants. The `BSDFCompositeShader` family is fully reconstructed and
-producer-attested across all 78 blobs. That proof does not imply runtime
-delivery; the Composite selector and owned-shader registry are not wired yet.
+producer-attested across all 78 blobs. Delivery is narrower than proof: opting
+into `[shader_ownership]` replaces five of the seven registered targets, so the
+Composite selector ships only its two ambient family builds.
 
 ## License
 

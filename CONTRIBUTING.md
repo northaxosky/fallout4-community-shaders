@@ -122,33 +122,39 @@ outside `package\`:
 - `features\Imagespace\Shaders\*.hlsl*` -> `Data\F4SE\Plugins\FO4CommunityShaders\Imagespace\Shaders\`
 - `shaders\` (recursive) -> `Data\F4SE\Plugins\FO4CommunityShaders\Shaders\`
 
-The shared devkit's `community-shaders.psd1` `Deploy` block encodes this same mapping
-for automated deployment.
+The shared devkit's `projects/community-shaders.toml` `[deploy]` block encodes this
+same mapping for automated deployment.
 
 The optional shared devkit automates this workflow. Place it at `..\devkit\` (or set
-`DEVKIT_DIR`) and drive it with PowerShell. A first deployment should include
-configuration, shaders, presets, LUTs, and runtime SDK files:
+`DEVKIT_DIR`) and build it once:
 
 ```powershell
-pwsh ..\devkit\devkit.ps1 deploy -Project community-shaders -IncludeConfig
+cd ..\devkit && go build -o bin\devkit.exe .\cmd\devkit
+```
+
+A first deployment should include configuration, shaders, presets, LUTs, and runtime
+SDK files:
+
+```powershell
+..\devkit\bin\devkit.exe deploy -project community-shaders -include-config
 ```
 
 Common iterative workflows:
 
 ```powershell
-pwsh ..\devkit\devkit.ps1 cycle  -Project community-shaders                # build + deploy
-pwsh ..\devkit\devkit.ps1 deploy -Project community-shaders                # deploy only
-pwsh ..\devkit\devkit.ps1 cycle  -Project community-shaders -Launch -Tail  # build, deploy, launch, tail
+..\devkit\bin\devkit.exe cycle  -project community-shaders   # build + deploy
+..\devkit\bin\devkit.exe deploy -project community-shaders   # deploy only
+..\devkit\bin\devkit.exe test   -project community-shaders   # build, deploy, launch, collect
 ```
 
-The last command builds, deploys, launches Fallout 4 through MO2/F4SE, and tails the
+The last command builds, deploys, launches Fallout 4 through MO2/F4SE, and collects the
 plugin log. It does not perform automated visual comparison; rendering behavior must
 be checked in game.
 
 To diagnose a devkit setup directly:
 
 ```powershell
-pwsh ..\devkit\devkit.ps1 doctor -Project community-shaders
+..\devkit\bin\devkit.exe doctor -project community-shaders
 ```
 
 ## Project layout
@@ -160,7 +166,7 @@ shaders\lighting\   Reconstructed deferred shaders, pinned by producer attestati
 cmake\              Build integration for CommonLibF4 and graphics SDKs
 extern\             Recursive source submodules
 package\            Static mod assets and staged runtime SDK files
-scripts\             SDK, deployment, and shader-validation tooling
+scripts\            SDK, deployment, and shader-validation tooling
 ```
 
 Before submitting a change, build the affected configuration, run CTest, and perform
