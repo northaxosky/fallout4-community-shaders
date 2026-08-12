@@ -358,10 +358,7 @@ namespace cs::features
 		if (!context) {
 			return;
 		}
-		// Clear the mask to 0 (dry) EVERY frame, BEFORE the enabled gate. The
-		// WETNESS_EFFECTS define is baked at startup and the bind force-binds, so a
-		// runtime disable must leave the mask reading 0 (else the shader samples a
-		// frozen stale mask -> the "leftover mask stuck on screen" artifact).
+		// Clear before the enabled gate: the define is baked at startup, so a runtime disable must still read 0.
 		const float zero[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
 		context->ClearUnorderedAccessViewFloat(_wetnessMask->uav.get(), zero);
 		if (!_settings.enabled || !resourcesReady) {
@@ -507,12 +504,7 @@ namespace cs::features
 			return;
 		}
 
-		// Force-bind (mirror SGGI's OnAmbientPassInjection). The old SSS-style
-		// "skip if slot occupied" guard was WRONG here: t4/t13 retain stale SRVs
-		// from prior draws, so skipping made the injected shader read that stale
-		// texture as `wetness` (garbage != 0), breaking the wet=0 no-op. Our
-		// dispatch is already pass-discriminated, so unconditionally binding our
-		// mask is correct and keeps dry == stock.
+		// Force-bind: t4/t13 retain stale SRVs, so skipping an occupied slot would read garbage as wetness.
 		auto* srv = _wetnessMask->srv.get();
 		a_context->PSSetShaderResources(a_slot, 1, &srv);
 		_maskBinds.fetch_add(1, std::memory_order_relaxed);
@@ -732,11 +724,7 @@ namespace cs::features
 			_wetnessMean.load(std::memory_order_relaxed),
 			_wetnessCoverage.load(std::memory_order_relaxed));
 
-		// Debug mask preview: raw R8 wetness in-game, bright = wet, dark = dry, no
-		// RenderDoc needed. Mirrors ScreenSpaceShadows' mask preview. Watch this
-		// thumbnail while rotating the camera over fixed ground: a correct mask is
-		// world-locked (a given surface holds its value); a camera-dependent mask
-		// visibly shifts with view angle.
+		// A correct mask is world-locked: it holds its value as the camera rotates over fixed ground.
 		static bool s_showMaskPreview = false;
 		ImGui::Checkbox("Show wetness-mask preview (debug)", &s_showMaskPreview);
 		if (s_showMaskPreview) {

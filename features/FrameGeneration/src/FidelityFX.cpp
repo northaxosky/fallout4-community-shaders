@@ -18,9 +18,7 @@ namespace cs::features::framegeneration
 
 void FidelityFX::LoadFFX()
 {
-	// SDK 2.0's loader resolves the frame-generation effect DLL lazily (at ffx context creation) by
-	// base name, so its directory must stay on the process search path past this call. AddDllDirectory
-	// is additive; SetDefaultDllDirectories makes a plain LoadLibrary honor it (SetDllDirectory drops cwd).
+	// The SDK resolves the frame-gen DLL lazily by base name, so its directory must stay on the search path.
 	wchar_t exePath[MAX_PATH]{};
 	const DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
 	if (len == 0 || len >= MAX_PATH) {

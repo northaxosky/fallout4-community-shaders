@@ -40,9 +40,7 @@ namespace cs::features
 
 	namespace
 	{
-		// RenderDoc's early D3D/DXGI detours conflict with Streamline's interposer, which backs BOTH
-		// DLSS-G (FrameGeneration) and DLSS-SR (Upscaling=DLSS); either one blacks the present under a
-		// capture. FSR/XeSS don't use Streamline, so they're fine. Refuse to load when DLSS is requested.
+		// RenderDoc's D3D/DXGI detours conflict with Streamline's interposer, blacking the present under capture.
 		bool DLSSGRequested()
 		{
 			const auto* frameGeneration = FrameGeneration::GetSingleton();

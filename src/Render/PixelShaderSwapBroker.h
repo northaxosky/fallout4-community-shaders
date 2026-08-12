@@ -157,7 +157,7 @@ namespace cs::engine
 		int priority = 0;
 	};
 
-	inline constexpr int kBytecodePatchResolverPriority = -100;
+	inline constexpr int kEarlyResolverPriority = -100;
 	inline constexpr int kHlslReplacementResolverPriority = 0;
 
 	struct PixelShaderSwapCompletion

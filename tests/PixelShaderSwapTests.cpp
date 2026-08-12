@@ -720,7 +720,7 @@ namespace
 		const std::array resolvers{
 			PixelShaderSwapResolverRegistration{
 				.resolver = &FirstPipelineResolver,
-				.priority = kBytecodePatchResolverPriority
+				.priority = kEarlyResolverPriority
 			},
 			PixelShaderSwapResolverRegistration{
 				.resolver = &LowerPipelineResolver,

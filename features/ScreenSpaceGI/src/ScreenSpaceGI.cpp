@@ -1939,9 +1939,7 @@ namespace cs::features
 			"Bake: %s (%ux%u) | Runtime: %s (%ux%u) | generation: %u",
 			bakeStatus, _bounceAllocW, _bounceAllocH, status, _allocW, _allocH, _generation);
 
-		// Debug preview: raw AO / bounce buffer in-game, no RenderDoc needed.
-		// Mirrors ScreenSpaceShadows' mask preview. Watch while rotating over fixed
-		// geometry: a correct buffer is world-locked (a surface holds its value).
+		// A correct buffer is world-locked: it holds its value as the camera rotates over fixed geometry.
 		static bool s_showPreview = false;
 		static int s_previewSource = 0;
 		ImGui::Checkbox("Show GI buffer preview (debug)", &s_showPreview);
