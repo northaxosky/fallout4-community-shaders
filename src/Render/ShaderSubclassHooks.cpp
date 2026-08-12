@@ -125,18 +125,9 @@ namespace cs::engine
 				RE::BSShader* a_self,
 				std::uint32_t a_techniqueBits)
 			{
-				shader_context::SetSticky(Tag::Name(), a_techniqueBits);
-				bool result = false;
-				{
-					shader_context::Scope scope(
-						a_self, Tag::Name(), a_techniqueBits);
-					result = func(a_self, a_techniqueBits);
-				}
-				if (!result) {
-					shader_context::ClearSticky();
-					return false;
-				}
-				return true;
+				shader_context::Scope scope(
+					a_self, Tag::Name(), a_techniqueBits);
+				return func(a_self, a_techniqueBits);
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
