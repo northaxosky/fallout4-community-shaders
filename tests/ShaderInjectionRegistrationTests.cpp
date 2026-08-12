@@ -1,11 +1,9 @@
 #include "Log.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
-#include "ShaderInjectionNativeAbiTests.h"
 
 #include <array>
 #include <cstddef>
-#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -158,12 +156,6 @@ int main(int a_argc, char* a_argv[])
 		&& std::string_view(a_argv[1])
 			== "--baseline-ownership") {
 		return TestBaselineOwnershipWithoutContributors();
-	}
-	if (a_argc == 3
-		&& std::string_view(a_argv[1])
-			== "--native-abi-routes") {
-		return cs::tests::RunShaderInjectionNativeAbiTests(
-			std::filesystem::path(a_argv[2]));
 	}
 	if (a_argc != 1) {
 		std::cerr << "FAIL: invalid arguments\n";

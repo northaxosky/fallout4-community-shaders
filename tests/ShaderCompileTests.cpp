@@ -57,15 +57,17 @@ namespace
 
 	void CompileLighting(const std::filesystem::path& a_root)
 	{
-		// Deliberate independent coverage friction: keep this compile-only gap explicit.
-		const std::array<ShaderCase, 3> cases{ {
+		const std::array<ShaderCase, 16> cases{ {
 			{ "deferred_composite.hlsl", {}, "ps_5_0" },
+			{ "deferred_prepass.hlsl", {}, "ps_5_0" },
+			{ "vls_slice_scatter.hlsl", {}, "ps_5_0" },
+			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" } }, "ps_5_0" },
+			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" }, { "TILELIGHT", "1" } }, "ps_5_0" },
+			{ "bsdf_light_deferred.hlsl", { { "LIGHT_TYPE", "1" } }, "ps_5_0" },
+			{ "bsdf_light_deferred.hlsl", { { "LIGHT_TYPE", "2" } }, "ps_5_0" },
 			{
 				"bsdf_light_deferred.hlsl",
-				{
-					{ "LIGHT_TYPE", "1" },
-					{ "SCREEN_SPACE_SHADOWS", "1" }
-				},
+				{ { "LIGHT_TYPE", "1" }, { "SCREEN_SPACE_SHADOWS", "1" } },
 				"ps_5_0"
 			},
 			{
@@ -76,9 +78,37 @@ namespace
 					{ "SCREEN_SPACE_SHADOWS", "1" }
 				},
 				"ps_5_0"
-			}
+			},
+			{ "bsdf_light_deferred_dirsplits1.hlsl",
+				{ { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
+					{ "RGBSPEC", "1" }, { "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
+				"ps_5_0" },
+			{ "bsdf_light_deferred_dirsplits2.hlsl",
+				{ { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
+					{ "RGBSPEC", "1" }, { "DIRSPLITS", "2" }, { "FILTER_PCF1", "1" } },
+				"ps_5_0" },
+			{ "bsdf_light_deferred_dirsplits3.hlsl",
+				{ { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
+					{ "RGBSPEC", "1" }, { "DIRSPLITS", "3" }, { "FILTER_PCF1", "1" } },
+				"ps_5_0" },
+			{ "bsdf_light_deferred_shadow_only.hlsl",
+				{ { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" },
+					{ "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
+				"ps_5_0" },
+			{ "bsdf_light_deferred_shadow_only_blendsplit.hlsl",
+				{ { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" },
+					{ "BLENDSPLIT", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
+					{ "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
+				"ps_5_0" },
+			{ "bsdf_light_deferred_unshadowed.hlsl",
+				{ { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
+					{ "DIRSPLITS", "2" } },
+				"ps_5_0" },
+			{ "bsdf_light_deferred_gobo.hlsl",
+				{ { "POINTOMNI", "1" }, { "GOBOPROJECTION", "1" }, { "RGBSPEC", "1" },
+					{ "DIRSPLITS", "2" } },
+				"ps_5_0" }
 		} };
-		static_assert(cases.size() == 3);
 
 		for (const auto& shader : cases) {
 			Compile(
@@ -87,7 +117,7 @@ namespace
 				shader.profile,
 				shader.entryPoint);
 		}
-		std::printf("ShaderCompile checked %zu compile-only lighting permutations\n", cases.size());
+		std::printf("ShaderCompile checked %zu lighting permutations\n", cases.size());
 	}
 }
 
