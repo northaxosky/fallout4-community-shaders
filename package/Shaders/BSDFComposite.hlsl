@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// Family IDs are append-only and shared with the C++ catalog.
-
 #ifndef BSDF_COMPOSITE_FAMILY
 #  error "define BSDF_COMPOSITE_FAMILY; no composite source family is assumed"
 #endif

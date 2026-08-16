@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// Exact AE 1.11.221 standard opaque PrePass pixel shader.
-
 cbuffer PerFrame_CB12 : register(b12)
 {
     float4 cb12_pad_0_29[30];

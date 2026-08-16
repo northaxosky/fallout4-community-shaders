@@ -1,46 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// FO4 BSDFLightShader deferred PS, unshadowed POINTOMNI cookie family.
-//
-// Reconstructs POINTOMNI + GOBOPROJECTION at DIRSPLITS=2.
-//
-// The native ABI is CB12[30], CB2[15], t0/t1/t2/t3/t7 texture2d and
-// s0/s1/s2/s3/s7 mode_default. It has no shadow resource or comparison
-// sampler. The cookie is a dual-paraboloid atlas projection, not the
-// POINTOMNI+SHADOW cube-array projection.
-//
-// Native permutation matrix:
-//   sha1      SPECULAR  IGNORERIM  IGNOREROUGHNESS
-//   9969e800  yes       no         no
-//   fa6948ba  no        no         no
-//   d3331d19  no        yes        no
-//   f33e32f9  yes       yes        no
-//   09c2bd09  no        no         yes
-//   a65b5952  yes       no         yes
-//
-// SPECULAR adds cb12[28].xy and cb12[29].x for the second hair lobe, plus two
-// LightColor reads. IGNORERIM removes the roughness-scaled edge contribution.
-//
-// IGNOREROUGHNESS bypasses the default-material roughness visibility geometry
-// and rim tail, leaving Lambert diffuse while preserving the SPECULAR gate.
-// Combining it with IGNORERIM would silently manufacture two unsupported
-// cells, so that pair fails closed.
-//
-// The dual-paraboloid cookie math stays local to this sibling. It starts from
-// the unprojected light-space z for the hemisphere decision, normalizes the
-// selected paraboloid vector twice, mirrors the negative hemisphere, and packs
-// it into the upper half of the t7 atlas. It is not shared with the shadowed
-// POINTOMNI path, whose cookie coordinates derive from its shadow projection.
-//
-// Each rejection below excludes a structural neighbor that would otherwise
-// compile with this contract while meaning something different:
-// shadow resources, another light kind, a shadow filter, an ambient block,
-// attenuation-only routing, the half-omni hemisphere, or a cascade blend.
-// These are source-family boundaries, not engine-provided selector defaults.
-//
-// The cookie rows are intentionally a separate resource-contract family from
-// unshadowed POINTOMNI: t7/s7 is a required declaration, not an optional use.
-// DIRSPLITS=2 is the decoder baseline only; no cascade selection occurs here.
-
 #if !defined(POINTOMNI)
 #  error "this source is the native POINTOMNI gobo family; define POINTOMNI"
 #endif
@@ -87,85 +45,37 @@
 
 #include "../Common/DeferredContracts.hlsli"
 
-// LIGHT_TYPE_POINT branch (the unshadowed point-light path).
-// Canonical mapping:
-//   * Runtime sha1:  9969e800683c... (FO4_frame24669, QASmoke + Pip-Boy light)
-//   * Shape:         ps_5_0, 215 instructions, 5 samples, 5 SRVs
-//                    (t0/t1/t2/t3/t7 texture2d), 5 default samplers
-//                    (s0/s1/s2/s3/s7 - NO comparison sampler), 2 CBs
-//                    (CB12[30], CB2[15]), SV_POSITION plus unused POSITION14,
-//                    2 MRT outputs (o0.xyzw + o1.xyzw).
-// "unshadowed" classification: this PS has no SampleCmp instructions and
-// no cascade/cube-shadow texture array. It is dispatched for point lights that
-// bake their per-pixel attenuation into a 2D light-cookie texture (t7). The
-// tail transforms view-space position through cb2[11..14], perspective-divides,
-// and applies the bytecode's dual-paraboloid projection before sampling t7.
-//
-// What the point branch does (interpreted from asm):
-//   1. Reconstruct view-space position from screen UV + depth via the
-//      same Far/Near reproject matrix pair as directional (cb12[20..27]).
-//   2. toLight = cb2[1].xyz - posView; d = length(toLight).
-//   3. radial attenuation = pow(saturate(1 - saturate(d/cb2[1].w)^z), 2.2)
-//      where the exponent z = cb2[3].z and the linear scale/bias come
-//      from cb2[3].y / cb2[3].x. cb2[1].w is the light radius.
-//   4. Light-cookie sample: project posView through cb2[11..14],
-//      perspective-divide, dual-paraboloid-project, sample t7. The cookie
-//      result (.xyz) modulates both diffuse and specular at the end.
-//   5. Early-out: if attenuation <= 0.001, write zeros and return.
-//   6. Gbuffer decode + octahedral normal decode identical to directional.
-//   7. Material-id branched BRDF uses toLight_normalized instead of sun direction.
-//   8. MRT: o0 = diffuse * cookie * attenuation / 3, o1 = spec * cookie *
-//      attenuation; o1.w = 1.
-
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block (see `Common/DeferredContracts.hlsli`).
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
-    // [28]: hair specular scales and powers. Same role as in the directional
-    //       path. Identifier is a legacy misnomer; see the CB12 block above.
     float4 cb12_idx28_sss_params;
 
-    // [29]: hair specular tangent shifts. Same legacy misnomer.
     float4 cb12_idx29_sss_angles;
 };
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0]: .xy = RcpFrameDim (screen-size invariant for UV computation).
     float4 ScreenSize;
 
-    // [1]: .xyz = view-space light position, .w = light radius.
-    //      `cb2[1].xyz - posView = toLight`; .w normalizes distance.
     float4 LightPos_and_Radius;
 
-    // [2]: .xyz = light color HDR.
     float4 LightColor_HDR;
 
-    // [3]: .x = falloff bias; .y = falloff scale;
-    //      .z = falloff exponent for the normalized-distance curve.
     float4 cb2_idx3_attenuation_curve;
 
-    // [4..10]: not read by this PS.
     float4 cb2_pad_4_10[7];
 
-    // [11..14]: 4x4 light-space transform matrix. A dp4 against
-    //           (posView, 1) yields the projected vector for t7.
     float4 cb2_lightspace_row0;
     float4 cb2_lightspace_row1;
     float4 cb2_lightspace_row2;
     float4 cb2_lightspace_row3;
 };
 
-// t0: RT26 kTAAAccumulation; .w supplies the skin alpha mix.
 Texture2D<float4> g_tGbufferAlbedo : register(t0);
-// t1: RT27 kTAAAccumulationSwap (octahedral 2-channel normal).
 Texture2D<float4> g_tGbufferNormal : register(t1);
-// t2: RT30 unnamed G-buffer auxiliary.
 Texture2D<float4> g_tGbufferMaterial : register(t2);
-// t3: main depth, sampled with explicit gradients.
 Texture2D<float4> g_tMainDepth : register(t3);
-// t7: light cookie / projected texture, addressed via dual paraboloid.
 Texture2D<float4> g_tLightCookie : register(t7);
 
 SamplerState g_sGbufferAlbedo   : register(s0);
@@ -184,7 +94,6 @@ float3 DecodeOctahedralNormal(float2 enc01)
     return float3(enc * scale, z);
 }
 
-// Dual-paraboloid cookie projection from the transformed light-space vector.
 float2 ProjectCookieUV(float3 dirLightSpace, float unprojectedZ)
 {
     float3 d = normalize(dirLightSpace);
@@ -314,8 +223,6 @@ PS_OUTPUT main(PS_INPUT input)
         float NdotL_clamped = saturate(NdotL_sat);
 #endif
 #ifdef IGNOREROUGHNESS
-        // Native ignores only default-material visibility geometry.
-        // Hair and the separately gated specular branch remain intact.
         brdfShadowMix = NdotL_sat;
 #else
         float3 tangentV = viewDirNeg - normalView * NdotV_raw;
@@ -411,15 +318,3 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse.w = 0.0;
     return output;
 }
-
-// Wave 2 holds all six native cookie rows to their declaration and
-// constant-read contracts, including the IGNOREROUGHNESS visibility and rim
-// behavior.
-//
-// Reconstructed invariants:
-//   * Resource declarations (5 SRVs + 5 default samplers + 2 CBs) at
-//     exact slot indices (t0/t1/t2/t3/t7, s0/s1/s2/s3/s7).
-//   * CB12[30], CB2[15], SV_POSITION + unused POSITION14, MRT o0 + o1.
-//   * Major control flow: depth-based reprojection select, radial attenuation,
-//     early-out, material-id BRDF branch, dual-paraboloid cookie sample, and
-//     final cookie-modulated composition.

@@ -1,5 +1,3 @@
-// AE 1.11.221 Composite all-2D accumulator family reconstruction.
-
 cbuffer ScreenData : register(b2)
 {
     float4 screenData[COMPOSITE_CB2_COUNT];

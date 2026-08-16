@@ -1,6 +1,3 @@
-// AE 1.11.221 no-t0 fog shapes reconstructed from native declarations.
-// Select one instruction-derived shape through WAVE5A_FOG_SHAPE.
-
 #if !defined(WAVE5A_FOG_SHAPE)
 #error WAVE5A_FOG_SHAPE is required
 #endif

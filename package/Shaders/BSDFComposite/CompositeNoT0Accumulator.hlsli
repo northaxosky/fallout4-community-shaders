@@ -1,12 +1,8 @@
-// AE 1.11.221 no-t0 accumulator shapes reconstructed from native declarations.
-// Select one instruction-derived shape through WAVE5A_ACCUMULATOR_SHAPE.
-
 #if !defined(WAVE5A_ACCUMULATOR_SHAPE)
 #error WAVE5A_ACCUMULATOR_SHAPE is required
 #endif
 
 #if WAVE5A_ACCUMULATOR_SHAPE == 1
-// Native SHA-1 df89353bebcfa292277146c1dad752ba3309426e.
 cbuffer PerCall_CB2 : register(b2)
 {
     float4 cb2[6];
@@ -46,7 +42,6 @@ float4 main(PS_INPUT input) : SV_Target0
 }
 
 #elif WAVE5A_ACCUMULATOR_SHAPE == 2
-// Native SHA-1 1f3e25fe78b759d1278ca3608c0f0d30eb46434d.
 cbuffer PerCall_CB2 : register(b2)
 {
     float4 cb2[1];
@@ -84,7 +79,6 @@ float4 main(PS_INPUT input) : SV_Target0
 }
 
 #elif WAVE5A_ACCUMULATOR_SHAPE == 3
-// Native SHA-1 b77db624fe08bc9167e30f3888f99d212fab2882.
 cbuffer PerCall_CB2 : register(b2)
 {
     float4 cb2[1];
@@ -128,7 +122,6 @@ float4 main(PS_INPUT input) : SV_Target0
 }
 
 #elif WAVE5A_ACCUMULATOR_SHAPE == 4
-// Native SHA-1 1a6e42e6f2cbd101536af7dd12df80e01492eadd.
 cbuffer PerCall_CB2 : register(b2)
 {
     float4 cb2[6];

@@ -1,14 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// Native stratified Poisson kernel for the FO4 deferred directional shadow filters.
-//
-// Transcribed at full float32 precision from the SHEX CUSTOM_DATA token of the
-// archive FILTER_POISSON blob (sha1 99a112e7bc7fc4fbcefac716864d6e6a9cdcac68) and
-// asserted byte-equal against the FILTER_PCSSPOISSON blob
-// (sha1 e5ef2e946298f7eea6702473dbeef4202c7ca821). The native
-// dcl_immediateConstantBuffer declares 1000 float4 rows whose .zw lanes are zero;
-// the full table is reproduced so the reconstructed ICB matches the native one.
-// Machine-transcribed data - do not hand-edit.
-
 #ifndef SHADOW_POISSON_KERNEL_HLSLI_INCLUDED
 #define SHADOW_POISSON_KERNEL_HLSLI_INCLUDED
 
@@ -518,4 +508,4 @@ static const float2 SHADOW_POISSON_KERNEL[SHADOW_POISSON_KERNEL_SIZE] =
     float2(0.4429759979248047, 0.3716540038585663), float2(0.4494459927082062, 0.8466749787330627),
 };
 
-#endif  // SHADOW_POISSON_KERNEL_HLSLI_INCLUDED
+#endif

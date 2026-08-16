@@ -1,20 +1,3 @@
-// AE 1.11.221 - ambient/composite cube-t8 family without t0 and without the
-// local-probe (t14) path. Three orthogonal axes cover eight native blobs:
-//
-//   TILELIGHT   t11/t12          fxp key bit 0x10000
-//   FOGSTACK    CB12[47] fog +   fxp key bit 0x40
-//               type 2/3 exclusion
-//   OUTPUTMASK  t9 + cb2[5]      fxp key bit 0x200
-//
-//   8fbcce64  0x00000120   -                     -            -
-//   79ea9877  0x00010120   TILELIGHT             -            -
-//   3c459639  0x00000160   -                     FOGSTACK     -
-//   39637a98  0x00010160   TILELIGHT             FOGSTACK     -
-//   97335e28  0x00000320   -                     -            OUTPUTMASK
-//   3cf8ea09  0x00010320   TILELIGHT             -            OUTPUTMASK
-//   ad139695  0x00000360   -                     FOGSTACK     OUTPUTMASK
-//   da65c284  0x00010360   TILELIGHT             FOGSTACK     OUTPUTMASK
-
 #ifndef TILELIGHT
 #define TILELIGHT 0
 #endif
@@ -153,7 +136,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float2 coordinate = position.xy * screenSetup[0].xy;
     float3 surface = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).xyw;
 #if !FOGSTACK
-    // The non-fog blobs hoist the lighting/gloss terms above the depth branch.
     float3 directLighting = sampleDirectLighting(coordinate);
 #endif
 
@@ -183,8 +165,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     }
 
 #if FOGSTACK
-    // The fog stack consumes viewPosition unconditionally, so the FOGSTACK
-    // blobs hoist the reconstruction out of the probe branch.
     float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
 #endif
 
@@ -203,7 +183,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     if (material.x > 0.0019607844296842813)
     {
 #if !FOGSTACK
-        // The non-fog blobs decode the normal before reconstructing the position.
         float2 encodedNormal = normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy * 4.0 - 2.0;
         float normalLengthSquared = dot(encodedNormal, encodedNormal);
         float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
@@ -252,7 +231,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float4 tapCoordinates = coordinate.xyxy + tapStep.xyxy * float4(-2.0, -2.0, -1.28, -1.28);
         float3 firstTap = sampleSkinTap(tapCoordinates.xy, depthScale, centerDepth, centerColor);
         float3 blurred = firstTap * float3(0.00471690995618701, 0.0001847709936555475, 0.00005075660010334104);
-        // Bitcast barrier: preserves FXC's native mul-then-mad association without changing bits.
         blurred = centerColor * float3(0.560479, 0.669086, 0.784728) + asfloat(asuint(blurred));
         blurred += sampleSkinTap(tapCoordinates.zw, depthScale, centerDepth, centerColor)
             * float3(0.019283099099993706, 0.002820180030539632, 0.000842139997985214);

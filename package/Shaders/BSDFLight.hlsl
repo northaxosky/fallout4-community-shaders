@@ -1,6 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// FO4 BSDFLightShader pixel shader families.
-
 #ifndef BSDF_LIGHT_FAMILY
 #  error "define BSDF_LIGHT_FAMILY; no BSDFLightShader source family is assumed"
 #endif

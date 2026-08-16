@@ -1,6 +1,3 @@
-// AE 1.11.221 SSS MRT record-normal family: decoded t1.xy G-buffer normal, shading normal read from the t8+160 record field.
-// Select one instruction-derived shape through WAVE5B_SSS_RECORD_NORMAL_SHAPE.
-
 #if defined(WAVE5B_SSS_SURFACE_CONTACT_SHAPE)
 #error WAVE5B_SSS_SURFACE_CONTACT_SHAPE selects the surface/contact root, not this one
 #endif

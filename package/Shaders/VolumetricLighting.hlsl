@@ -1,131 +1,67 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// Reconstruction of FO4 VLS slice-scatter PS, Shaders011.fxp #2147 (corpus 8fb709c2fdf0..., runtime 46b911cb8053..., eid 45401).
-// Status: reference asm transcription; role confirmed as Volumetric Light Scattering, not directional sun-shadow.
-// Context: likely BSImagespaceShaderVLSSliceScatterInterp / ImageSpaceEffectVLSLight; 22 dispatches = slices x shadow lights.
-// Flow: normalize slice ray, sample depth, select shared Far/Near reproj, back-project view ray, apply two VLS smoothstep fades, output sky-color lerp + alpha bias.
-// Not: no SampleCmp/PCF, no deferred BRDF, no tonemap composite.
-// Limits: CB names are placeholders; exact VLS subclass and t7 producer need dispatch-site cross-read.
-
 #include "Common/DeferredContracts.hlsli"
 
 cbuffer PerCall_CB0 : register(b0)
 {
-    // [0]: per runtime capture (eid 45401 CB0 slot): .xy = RcpFrameDim
-    //      (1/3840, 1/2160 in
-    //      captured frame), .zw appear as (1, 1) here. The VLS slice
-    //      PS reads .xy for screen-UV scale and .zw for view-space UV
-    //      remap (the .zw=(1,1) here suggests an alternate per-call
-    //      convention; same shape as composite + ambient/IBL + sun-light
-    //      CB2[0] but bound at CB0 here).
     float4 ScreenSize;
 };
 
 cbuffer PerLight_CB1 : register(b1)
 {
-    // [0]: .xyz = color "A" endpoint of the sky / scattering lerp.
-    //      TODO: identify; likely sun-direction color (lerp target when
-    //      the view-ray-vs-sun fade factor is 1).
     float4 cb1_idx0_color_a;
 
-    // [1]: .xyz = color "B" endpoint of the sky / scattering lerp.
-    //      TODO: identify; likely sky-ambient color (default value when
-    //      fade factor is 0).
     float4 cb1_idx1_color_b;
 
-    // [2..9]: unused by this PS (declared CB1[14] but only [0,1,10..13]
-    //         referenced).
     float4 cb1_pad_2_9[8];
 
-    // [10]: .w used as denominator in two distance / dot-product
-    //       normalizations (insns 37, 39). TODO: identify; possibly
-    //       far-clip distance or a god-rays falloff scale.
     float4 cb1_idx10;
 
-    // [11]: unused
     float4 cb1_pad_11;
 
-    // [12]: .x and .y form the first-smoothstep range start/end;
-    //       .z and .w are the output-alpha endpoints (insn 51).
-    //       TODO: identify; likely god-rays / volumetric scattering
-    //       fade range + intensity.
     float4 cb1_idx12_fade_range_a;
 
-    // [13]: .x and .y form the second-smoothstep range start/end.
-    //       TODO: identify; likely a secondary fade range.
     float4 cb1_idx13_fade_range_b;
 };
 
 cbuffer PerCall_CB2 : register(b2)
 {
-    // [0..3]: unused by this PS (declared CB2[5] but only [4] read).
     float4 cb2_pad_0_3[4];
 
-    // [4]: per runtime evidence (eid 45401 CB2 slot (0, 0, 1, 8639.2)):
-    //      .xyz = (0, 0, 1) - this is the world-up axis (Z-axis up
-    //      convention), NOT a sun direction as the prior HLSL inference
-    //      suggested. .w = 8639.2 - a large scalar, likely a scatter-
-    //      distance or volume-thickness parameter for GodRays atmospheric
-    //      math. The dot(backRay, [4].xyz) measures the vertical
-    //      component of the back-projected view ray.
     float4 cb2_idx4_scatter_axis_and_scale;
 };
 
 cbuffer PerFrame_CB12 : register(b12)
 {
-    // [0..27]: shared per-frame block (see `Common/DeferredContracts.hlsli`).
-    //          This PS reads only the Far/Near reproject matrix pair at
-    //          [20..27]; the upper-CB12 slots used by composite (fog +
-    //          color stack) and ambient (IBL desaturation) are not bound.
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 };
 
-// Resource bindings. Single SRV + sampler.
-
-// t7: main depth, R24G8_TYPELESS with an R24_UNORM_X8_TYPELESS SRV.
 Texture2D<float4> g_tLinearDepth : register(t7);
 
-// s7: mode_default sampler (NOT mode_comparison; this is NOT a hardware
-//     shadow PCF sampler).
 SamplerState g_sDepth : register(s7);
-
-// Entry point.
 
 struct PS_INPUT
 {
-    float4 position : SV_POSITION;     // v0; .xy used
-    float4 rayDir   : TEXCOORD0;       // v1; per-vertex 3D direction
-                                       // (probably world/view-space ray
-                                       // from camera origin through the
-                                       // light volume's vertex).
-    float4 posUnused      : POSITION;  // v2; declared but unused (vertex
-                                       // layout passthrough).
-    float4 texCoord4Unused : TEXCOORD4; // v3; declared but unused.
+    float4 position : SV_POSITION;
+    float4 rayDir   : TEXCOORD0;
+    float4 posUnused      : POSITION;
+    float4 texCoord4Unused : TEXCOORD4;
 };
 
 struct PS_OUTPUT
 {
-    float4 color : SV_Target0;         // .xyz = sky/scatter color lerp,
-                                       // .w   = fade factor + bias
+    float4 color : SV_Target0;
 };
 
 PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
 
-    // Insn 0-2: r0.xyz = normalize(input.rayDir)
     float3 rayUnit = normalize(input.rayDir.xyz);
 
-    // Insn 3: r1.xy = uv = SV_POSITION.xy * cb0[0].xy
     float2 uv = input.position.xy * ScreenSize.xy;
 
-    // Insn 4: r0.w = main depth = t7.Sample(s7, uv).x
     float depth = g_tLinearDepth.Sample(g_sDepth, uv).x;
 
-    // Insn 5-18: depth-threshold matrix select - SHARED with composite
-    //   if (depth <= 0.01)  -> near matrix CB12[24..27], depth *= 100
-    //   else                -> far  matrix CB12[20..23], depth *= 1.01 - 0.01
-    // Per-row ternary matches corpus shape closer than `float4x4` ?:.
-    // Native near select is inclusive (exec-diff verified at exactly 0.01).
     bool isNearPath = (depth <= 0.01);
     float linearizedDepth = isNearPath ? (depth * 100.0) : (depth * 1.01 - 0.01);
     float4 reprojRow0 = isNearPath ? NearReproj_row0 : FarReproj_row0;
@@ -133,11 +69,6 @@ PS_OUTPUT main(PS_INPUT input)
     float4 reprojRow2 = isNearPath ? NearReproj_row2 : FarReproj_row2;
     float4 reprojRow3 = isNearPath ? NearReproj_row3 : FarReproj_row3;
 
-    // Insn 19-27: reconstruct view-space position
-    //   uvNDC.x = uv.x * cb0[0].z  remapped to [-1, +1]
-    //   uvNDC.y = (-uv.y * cb0[0].w + 1)  remapped to [-1, +1]
-    //   pos4    = (uvNDC, linearizedDepth, 1)
-    //   posView = (matrix * pos4).xyz / (matrix * pos4).w
     float3 uvRemapped;
     uvRemapped.x = uv.x * ScreenSize.z;
     uvRemapped.z = -uv.y * ScreenSize.w + 1.0;
@@ -151,90 +82,43 @@ PS_OUTPUT main(PS_INPUT input)
     posViewH.w = dot(reprojRow3, pos4);
     float3 posView = posViewH.xyz / posViewH.www;
 
-    // Insn 28-29: r0.w = length(posView)
     float posViewLen = length(posView);
 
-    // Insn 30: r0.xyz = -posViewLen * rayUnit
-    //   = back-projected ray direction scaled to the surface depth.
     float3 backRay = -posViewLen * rayUnit;
 
-    // Insn 31: r0.w = dot(backRay, cb2[4].xyz)
-    //   The "sun direction dot product" if cb2[4].xyz is the sun direction.
     float sunDot = dot(backRay, cb2_idx4_scatter_axis_and_scale.xyz);
 
-    // Insn 32-33: r0.x = length(backRay) (same magnitude as posViewLen)
     float backRayLen = length(backRay);
 
-    // Insn 34-36: ratio = cb2[4].w / sunDot; inv = 1 - ratio;
-    //             r0.x = backRayLen * inv
     float ratio = cb2_idx4_scatter_axis_and_scale.w / sunDot;
     float inv   = 1.0 - ratio;
     float distScaled = backRayLen * inv;
 
-    // Insn 37: r0.x = distScaled / cb1[10].w
     float distNorm = distScaled / cb1_idx10.w;
 
-    // Insn 38-39: r0.y = abs(sunDot) * inv;  r0.y /= cb1[10].w
     float dotScaled = abs(sunDot) * inv;
     float dotNorm   = dotScaled / cb1_idx10.w;
 
-    // Insn 40: r0.xy = saturate(1.0 - r0.xy)
     float fadePrimary   = saturate(1.0 - distNorm);
     float fadeSecondary = saturate(1.0 - dotNorm);
 
-    // First smoothstep using cb1[12] range.
-    // Insn 41-44: linear remap fadePrimary into [cb1[12].y, cb1[12].x]
-    //   rangeA = cb1[12].xw - cb1[12].yz   (vector form of (start, end))
-    //   x      = fadePrimary - cb1[12].y
-    //   x      = saturate(x / rangeA.x)
     float rangeA = cb1_idx12_fade_range_a.x - cb1_idx12_fade_range_a.y;
     float t0     = saturate((fadePrimary - cb1_idx12_fade_range_a.y) / rangeA);
 
-    // Insn 45-50: smoothstep(t)^0.33
-    //   r0.z = 3 - 2*t                       (smoothstep coef)
-    //   r0.x = t*t
-    //   r0.x = 1 - (3-2t)*t² = 1 - smoothstep(t)  // inverse-smoothstep
-    //   r0.x = pow(r0.x, 0.33)
     float invSmoothA = 1.0 - (3.0 - 2.0 * t0) * (t0 * t0);
     float fadeA      = pow(invSmoothA, 0.33);
 
-    // Insn 51: o0.w interpolates cb1[12].z..w by fadeA.
     output.color.w = fadeA *
         (cb1_idx12_fade_range_a.w - cb1_idx12_fade_range_a.z) +
         cb1_idx12_fade_range_a.z;
 
-    // Second smoothstep using cb1[13] range.
-    // Insn 52-55: linear remap fadeSecondary into [cb1[13].y, cb1[13].x]
     float rangeB = cb1_idx13_fade_range_b.x - cb1_idx13_fade_range_b.y;
     float t1     = saturate((fadeSecondary - cb1_idx13_fade_range_b.y) / rangeB);
 
-    // Insn 56-58: smoothstep(t)
-    //   r0.y = 3 - 2*t
-    //   r0.x = t*t
-    //   r0.x = (3-2t)*t² = smoothstep(t)
     float smoothB = (3.0 - 2.0 * t1) * (t1 * t1);
 
-    // Insn 59-60: o0.xyz = lerp(cb1[1].xyz, cb1[0].xyz, smoothB)
-    //   r0.yzw = cb1[0].xyz - cb1[1].xyz
-    //   o0.xyz = smoothB * r0.yzw + cb1[1].xyz
     float3 colorDelta = cb1_idx0_color_a.xyz - cb1_idx1_color_b.xyz;
     output.color.xyz  = smoothB * colorDelta + cb1_idx1_color_b.xyz;
 
     return output;
 }
-
-// Reconstruction facts for Shaders011.fxp blob 2147, SHA-1 8fb709c2fdf0...:
-//   * Resource declarations (1 SRV, 1 sampler, 4 CBs) at exact slot indices.
-//   * Input signature (SV_POSITION + TEXCOORD0 used; POSITION + TEXCOORD4
-//     declared-but-unused per the original).
-//   * Output signature (1 SV_Target).
-//   * Control flow (depth-based matrix select, then linear math).
-//   * Single texture sample with .x channel selector preserved.
-//   * Both smoothstep computations (one inverse-smoothstep^0.33 for alpha
-//     fade, one direct smoothstep for color lerp).
-// Open reconstruction details:
-//   * The exact BSShader subclass for this VLS slice-scatter pass.
-//   * CB0[0].zw, CB1[0..1], CB1[10].w, CB1[12], CB1[13], CB2[4] field
-//     semantic names (currently `cb<N>_idx<M>_*` placeholders).
-// The captured shader fires 22 times in the deferred chain; CB1/CB2 may vary
-// per light. FO4's shipped GFSDK Godrays library is not used at runtime.

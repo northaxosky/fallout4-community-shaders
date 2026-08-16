@@ -1,28 +1,21 @@
-// Generalized source for the CB0-absent / cube-t8 / no-t0 deferred-composite family.
-//
-//   b3730e0e : (no defines)         CB2[3], CB12[47], t1-t7 + t8 cubearray, s1-s8
-//   fbdcf44d : OUTPUTMASK=1        CB2[6], CB12[47], t1-t7 + t8 cubearray + t9, s1-s9
-//
-// OUTPUTMASK widens CB2 from three to six registers and adds t9/s9.
-
 #ifndef OUTPUTMASK
 #define OUTPUTMASK 0
 #endif
 
 cbuffer PerFrame : register(b12)
 {
-    float4 g_PF[47];      // cb12[0..46]
+    float4 g_PF[47];
 };
 
 cbuffer PerPass : register(b2)
 {
-    float4 g_PixelToUV;   // cb2[0]  .xy pixel->uv   .zw uv->[0,1]
-    float4 g_DirAndScale; // cb2[1]  .xyz direction  .w scale
-    float4 g_TintAndExp;  // cb2[2]  .xyz tint       .w exponent
+    float4 g_PixelToUV;
+    float4 g_DirAndScale;
+    float4 g_TintAndExp;
 #if OUTPUTMASK
-    float4 g_Unused3;     // cb2[3]  (never read)
-    float4 g_Unused4;     // cb2[4]  (never read)
-    float4 g_UVClamp;     // cb2[5]  .xy  read only when OUTPUTMASK
+    float4 g_Unused3;
+    float4 g_Unused4;
+    float4 g_UVClamp;
 #endif
 };
 
@@ -80,7 +73,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
     float2 prm = TexParam.SampleLevel(SampParam, uv, 0).yz;
 
     float3 cube = 0.0;
-    if (prm.x > 0.5 / 255.0)                     // 0x3B008081; NOT the printed 0.001961
+    if (prm.x > 0.5 / 255.0)
     {
         float4 nn;
         nn.xy = TexNormal.SampleLevel(SampNormal, uv, 0).xy * 4.0 - 2.0;
@@ -99,7 +92,7 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
                            dot(g_PF[14].xyz, r));
 
         float lod = (1.0 - surf.x) * 6.0;
-        lod = pos.z * 0.001953125 + lod;         // 0x3B000000 = 2^-9; NOT the printed 0.001953
+        lod = pos.z * 0.001953125 + lod;
         float idx = floor(prm.x * 255.0 - 1.0);
 
         cube = TexCube.SampleLevel(SampCube, float4(rw, idx), lod).xyz;
@@ -158,7 +151,6 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
         if (amt < g_PF[43].w)
         {
-            // 0x3EAAAAAB; NOT the printed 0.333333
             float lum2 = dot(col, float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0));
             fogC = lerp(fogC, lum2.xxx, lum2);
         }

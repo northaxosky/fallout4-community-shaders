@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// BSDFComposite exterior ambient/IBL family source for PSIDs 0xB60 and 0x10B60.
-
-// Native permutation axes for the CB0[3]/CB2[6]/CB12[47] cube-t8 family.
-// Defaults reproduce DXBC ed5c1d15 for native blob 6d726d0f.
 #ifndef FO4_AMBIENT_OCCLUSION
 #define FO4_AMBIENT_OCCLUSION 1
 #endif
@@ -241,7 +237,6 @@ PS_OUTPUT main(PS_INPUT input)
         reflectionWorld.x = dot(ViewToWorld_row0.xyz, reflectionView);
         reflectionWorld.y = dot(ViewToWorld_row1.xyz, reflectionView);
         reflectionWorld.z = dot(ViewToWorld_row2.xyz, reflectionView);
-        // Native insn 48 uses reconstructed positionView.z, not linearized depth.
         float mipLevel =
             (1.0 - shadingData.x) * 6.0 + positionView.z * 0.001953125;
         float arraySlice = floor(material.y * 255.0 - 1.0);
@@ -344,7 +339,6 @@ PS_OUTPUT main(PS_INPUT input)
     float3 iblLitBlend = lerp(
         iblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
 #ifdef WETNESS_EFFECTS
-    // FO4 uses prefiltered IBL here because the deferred pass has no light or half vector.
     float3 wetFilmIblLitBlend = lerp(
         wetFilmIblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
     float3 modulated =
@@ -429,5 +423,3 @@ PS_OUTPUT main(PS_INPUT input)
     output.color.w = 1.0;
     return output;
 }
-
-// TILELIGHT: 33 declarations, 44 samples. No TILELIGHT: 29 declarations, 42 samples.

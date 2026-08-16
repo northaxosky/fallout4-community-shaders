@@ -1,5 +1,3 @@
-// AE 1.11.221 Composite cube-array family reconstruction.
-
 #ifndef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 47
 #endif

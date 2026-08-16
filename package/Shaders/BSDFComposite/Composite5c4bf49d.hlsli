@@ -1,8 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// AE 1.11.221 Shaders011.fxp offset 11570680.
-// Native DXBC: SHA-1 5c4bf49dced74855109669b344bfeb208ff4b2b4, 320 bytes, ps_5_0.
-// fxc 10.0.26100.0 /T ps_5_0 /E main /O3 /Qstrip_reflect reproduces it byte-for-byte.
-
 struct PS_INPUT
 {
     float4 position : SV_POSITION;

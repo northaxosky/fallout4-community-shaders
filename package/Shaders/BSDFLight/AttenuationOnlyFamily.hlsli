@@ -1,7 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-// Native BSDFLightShader POINTOMNI attenuation-only family.
-// AE 1.11.221 blob aa5cd5f492d921546a2b9cf66d34eae9baedf63f.
-
 #if !defined(POINTOMNI) || POINTOMNI != 1
 #  error "define POINTOMNI=1 for this source"
 #endif
