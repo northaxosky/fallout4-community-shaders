@@ -57,6 +57,9 @@ namespace cs::feature_config
 		bool ambientIblPass{ false };
 		bool bsdfLightDeferredDirectional{ false };
 		bool bsdfLightDeferredDirectionalIbl{ false };
+		bool bsSky{ false };
+		bool bsWater{ false };
+		bool bsLighting{ false };
 	};
 
 	struct ShaderOwnershipConfig

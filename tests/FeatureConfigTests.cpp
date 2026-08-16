@@ -151,7 +151,10 @@ namespace
 			"bsdf_light_deferred_point = true\n"
 			"ambient_ibl_pass = true\n"
 			"bsdf_light_deferred_directional = true\n"
-			"bsdf_light_deferred_directional_ibl = true\n"));
+			"bsdf_light_deferred_directional_ibl = true\n"
+			"bssky = true\n"
+			"bswater = true\n"
+			"bslighting = true\n"));
 		CHECK(disabled.present);
 		CHECK(disabled.valid);
 		CHECK(!disabled.config.enabled);
@@ -160,6 +163,9 @@ namespace
 		CHECK(disabled.config.targets.ambientIblPass);
 		CHECK(disabled.config.targets.bsdfLightDeferredDirectional);
 		CHECK(disabled.config.targets.bsdfLightDeferredDirectionalIbl);
+		CHECK(disabled.config.targets.bsSky);
+		CHECK(disabled.config.targets.bsWater);
+		CHECK(disabled.config.targets.bsLighting);
 
 		const auto optedOut = ParseShaderOwnership(Parse(
 			"[shader_ownership]\n"
@@ -169,11 +175,15 @@ namespace
 			"bsdf_light_deferred_point = false\n"
 			"ambient_ibl_pass = true\n"
 			"bsdf_light_deferred_directional = true\n"
-			"bsdf_light_deferred_directional_ibl = true\n"));
+			"bsdf_light_deferred_directional_ibl = true\n"
+			"bssky = false\n"
+			"bswater = true\n"
+			"bslighting = true\n"));
 		CHECK(optedOut.present);
 		CHECK(optedOut.valid);
 		CHECK(optedOut.config.enabled);
 		CHECK(!optedOut.config.targets.bsdfLightDeferredPoint);
+		CHECK(!optedOut.config.targets.bsSky);
 
 		const auto missing = ParseShaderOwnership(Parse(""));
 		CHECK(!missing.present);
@@ -194,7 +204,10 @@ namespace
 			"deferred_prepass = true\n"
 			"bsdf_light_deferred_point = true\n"
 			"ambient_ibl_pass = true\n"
-			"bsdf_light_deferred_directional = true\n"));
+			"bsdf_light_deferred_directional = true\n"
+			"bsdf_light_deferred_directional_ibl = true\n"
+			"bssky = true\n"
+			"bswater = true\n"));
 		CHECK(missingTarget.present);
 		CHECK(!missingTarget.valid);
 		CHECK(!missingTarget.config.enabled);
@@ -208,6 +221,9 @@ namespace
 			"ambient_ibl_pass = true\n"
 			"bsdf_light_deferred_directional = true\n"
 			"bsdf_light_deferred_directional_ibl = true\n"
+			"bssky = true\n"
+			"bswater = true\n"
+			"bslighting = true\n"
 			"deferred_composite = true\n"));
 		CHECK(unsupportedTarget.present);
 		CHECK(!unsupportedTarget.valid);

@@ -15,6 +15,8 @@ same name:
 
 - `BSDFLight.hlsl` selects modules from `BSDFLight/`.
 - `BSDFComposite.hlsl` selects modules from `BSDFComposite/`.
+- `BSSkyShader.hlsl`, `BSWaterShader.hlsl`, and `BSLightingShader.hlsl` remain
+  single files per engine class.
 - `Common/` contains helpers shared by more than one entry point or family.
 
 Feature shaders live in `features/<Name>/Shaders/<Name>/` and deploy alongside
@@ -42,6 +44,9 @@ checks reject a family selector paired with the wrong native macro set.
 | `BSDFPrePass.hlsl` | G-buffer fill hosted by `DrawWorld::DeferredPrePass` | Writes six MRT outputs: albedo, octahedral normal, material data, two auxiliary buffers, and motion vectors. |
 | `DeferredComposite.hlsl` | Final combine hosted by `DrawWorld::DeferredComposite` | Reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, and `kSpecularBuffer=59`; writes `kMain=3`. |
 | `VolumetricLighting.hlsl` | VLS slice-scatter pass hosted by `ImageSpaceEffectVLSLight::Render` | Reads linear depth at `t7`; writes one slice-accumulation target through `SV_Target0`. |
+| `BSSkyShader.hlsl` | `BSSkyShader` pixel permutations | Nine stock-container routes selected by exact SHA-1. |
+| `BSWaterShader.hlsl` | `BSWaterShader` pixel permutations | Thirty-eight stock-container routes selected by exact SHA-1. |
+| `BSLightingShader.hlsl` | `BSLightingShader` pixel permutations | Twelve stock-container routes selected by exact SHA-1. |
 
 ## Permutations
 
@@ -72,3 +77,6 @@ opt-in: `[shader_ownership]` is disabled by default in
 `package/F4SE/Plugins/FO4CommunityShaders/FO4CommunityShaders.toml`.
 
 A shader can therefore compile and ship without being exercised at runtime.
+
+Only the pixel stages of BSSky, BSWater, and BSLighting are registered; the
+plugin has no vertex-shader replacement path.

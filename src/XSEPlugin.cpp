@@ -34,6 +34,15 @@ namespace
 			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 			a_config.enabled
 				&& a_config.targets.bsdfLightDeferredDirectionalIbl);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kBsSky,
+			a_config.enabled && a_config.targets.bsSky);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kBsWater,
+			a_config.enabled && a_config.targets.bsWater);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kBsLighting,
+			a_config.enabled && a_config.targets.bsLighting);
 		return applied;
 	}
 }

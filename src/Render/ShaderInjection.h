@@ -28,6 +28,9 @@ namespace cs::engine
 		kBsdfLightDeferredDirectional,
 		kBsdfLightDeferredDirectionalIbl,
 		kVlsSliceScatter,
+		kBsSky,
+		kBsWater,
+		kBsLighting,
 		kCount
 	};
 

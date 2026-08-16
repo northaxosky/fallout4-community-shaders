@@ -18,6 +18,9 @@ bsdf_light_deferred_point = true
 ambient_ibl_pass = true
 bsdf_light_deferred_directional = true
 bsdf_light_deferred_directional_ibl = true
+bssky = true
+bswater = true
+bslighting = true
 # Deferred composite lacks native proof; it and VLS lack selectable stock SHA-1 guards.
 
 [menu]

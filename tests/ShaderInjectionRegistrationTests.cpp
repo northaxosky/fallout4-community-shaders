@@ -2,12 +2,16 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantCompilation.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace
 {
@@ -88,7 +92,10 @@ namespace
 			ShaderInjectionTarget::kBsdfLightDeferredPoint,
 			ShaderInjectionTarget::kAmbientIblPass,
 			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
+			ShaderInjectionTarget::kBsSky,
+			ShaderInjectionTarget::kBsWater,
+			ShaderInjectionTarget::kBsLighting
 		};
 
 		bool ok = true;
@@ -148,6 +155,16 @@ namespace
 			<< "PASS: baseline shader ownership requests targets without contributors\n";
 		return 0;
 	}
+
+	bool IsLowerHexSha1(std::string_view a_value)
+	{
+		return a_value.size() == 40
+			&& std::ranges::all_of(a_value, [](char a_character) {
+				return (a_character >= '0' && a_character <= '9')
+					|| (a_character >= 'a' && a_character <= 'f');
+			});
+	}
+
 }
 
 int main(int a_argc, char* a_argv[])
@@ -176,6 +193,61 @@ int main(int a_argc, char* a_argv[])
 	disabledSsgiAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
 	disabledSsgiAmbient.contributor = "ScreenSpaceGI";
 	disabledSsgiAmbient.bind = [](ID3D11DeviceContext*) {};
+	const auto staticFamilies = GetDefaultShaderReplacementVariants();
+	std::map<ShaderInjectionTarget, std::size_t, std::less<>> familyCounts;
+	std::set<std::string, std::less<>> stockHashes;
+	for (const auto& registration : staticFamilies) {
+		if (!registration.expectedStockSha1.empty()) {
+			ok &= Check(
+				IsLowerHexSha1(registration.expectedStockSha1),
+				"stock hash is not lowercase 40-hex");
+			ok &= Check(
+				stockHashes.insert(registration.expectedStockSha1).second,
+				"stock hash is claimed by more than one registration");
+		}
+		switch (registration.targetId) {
+		case ShaderInjectionTarget::kBsSky:
+		case ShaderInjectionTarget::kBsWater:
+		case ShaderInjectionTarget::kBsLighting:
+			++familyCounts[registration.targetId];
+			break;
+		default:
+			break;
+		}
+	}
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kBsSky] == 9,
+		"BSSky registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kBsWater] == 38,
+		"BSWater registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kBsLighting] == 12,
+		"BSLighting registration count mismatch");
+
+	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 3>
+		kStaticFamilySources{ {
+			{ ShaderInjectionTarget::kBsSky, L"BSSkyShader.hlsl" },
+			{ ShaderInjectionTarget::kBsWater, L"BSWaterShader.hlsl" },
+			{ ShaderInjectionTarget::kBsLighting, L"BSLightingShader.hlsl" }
+		} };
+	for (const auto& [target, sourcePath] : kStaticFamilySources) {
+		const auto* metadata = GetShaderInjectionTarget(target);
+		ok &= Check(
+			metadata != nullptr,
+			"static family target metadata is missing");
+		if (metadata == nullptr)
+			continue;
+		ok &= Check(
+			metadata->sourcePath == sourcePath,
+			"static family source path mismatch");
+		ok &= Check(
+			metadata->entryPoint == "main",
+			"static family entry point mismatch");
+		ok &= Check(
+			metadata->profile == "ps_5_0",
+			"static family profile mismatch");
+	}
 	ok &= Check(
 		RegisterReplacementIfEnabled(
 			false,

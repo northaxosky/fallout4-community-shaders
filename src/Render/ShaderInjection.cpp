@@ -116,17 +116,44 @@ namespace cs::engine
 				"main",
 				"ps_5_0",
 				kNoDefines
+			},
+			{
+				ShaderInjectionTarget::kBsSky,
+				"bssky",
+				L"BSSkyShader.hlsl",
+				"main",
+				"ps_5_0",
+				kNoDefines
+			},
+			{
+				ShaderInjectionTarget::kBsWater,
+				"bswater",
+				L"BSWaterShader.hlsl",
+				"main",
+				"ps_5_0",
+				kNoDefines
+			},
+			{
+				ShaderInjectionTarget::kBsLighting,
+				"bslighting",
+				L"BSLightingShader.hlsl",
+				"main",
+				"ps_5_0",
+				kNoDefines
 			}
 		} };
 
 		// Composite and VLS lack stock hash guards.
-		constexpr std::array<ShaderInjectionTarget, 5>
+		constexpr std::array<ShaderInjectionTarget, 8>
 			kBaselineOwnableTargets{
 				ShaderInjectionTarget::kDeferredPrepass,
 				ShaderInjectionTarget::kBsdfLightDeferredPoint,
 				ShaderInjectionTarget::kAmbientIblPass,
 				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
+				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
+				ShaderInjectionTarget::kBsSky,
+				ShaderInjectionTarget::kBsWater,
+				ShaderInjectionTarget::kBsLighting
 			};
 
 		ShaderReplacementVariantRegistration
@@ -171,7 +198,8 @@ namespace cs::engine
 		MakeDefaultShaderReplacementVariants()
 		{
 			using Target = ShaderInjectionTarget;
-			return {
+			auto variants =
+				std::vector<ShaderReplacementVariantRegistration>{
 				MakeDefaultVariantRegistration(
 					Target::kDeferredComposite,
 					"default",
@@ -226,8 +254,701 @@ namespace cs::engine
 					Target::kVlsSliceScatter,
 					"default",
 					{},
-					{})
+					{}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps0",
+					{},
+					"9c9294c0054ea1c2188c19c72e4d45c5c55502ec",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "OCCLUSION", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps1",
+					{},
+					"1a8d5c7556d94e326f0e995f88cbc68f1286a707",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "DITHER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps2",
+					{},
+					"9474f8572bd1fe8d8389c549045893bbf01c0d07",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "MOONMASK", "1" },
+						{ "TEX", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps3",
+					{},
+					"dc269e0c24dace5bd1b7957ea82e97ce263bb66a",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "HORIZFADE", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps4",
+					{},
+					"6daddf712b1a43e22cadb461e3668e53495e1583",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "TEX", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps5",
+					{},
+					"d7f81b74d0050df28ef5f341b7847a98387cab39",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "CLOUDS", "1" },
+						{ "TEX", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps6",
+					{},
+					"8eef0648908859f9e92e77d7673b8eeb9837b752",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "CLOUDS", "1" },
+						{ "TEX", "1" },
+						{ "TEXLERP", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps7",
+					{},
+					"bd651f35e92cb70710fb7e2b0b2620b3b91b457b",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "CLOUDS", "1" },
+						{ "TEX", "1" },
+						{ "TEXFADE", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsSky,
+					"bssky_ps8",
+					{},
+					"8235653ec77705a1dc6e30663ae0f05d32851026",
+					{
+						{ "BSSKY_PIXEL_SHADER", "1" },
+						{ "DITHER", "1" },
+						{ "TEX", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_094",
+					{},
+					"b84ac758940de3c7899d47a04afd86a1b073015b",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_095",
+					{},
+					"c715ff5df2e83a3ff1fd9ca2f4dbfe56a599f45c",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "FOG", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_097",
+					{},
+					"a13a5ed701316931dd5d04c0db761563bed258da",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "1" },
+						{ "SPECULAR", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_098",
+					{},
+					"7f0b811a59d635ff4f2c7924db044ac168000b3a",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "INTERIOR", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_099",
+					{},
+					"08180d51b565fd6b8957cdb5b6f8920e414e4e88",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "SSLR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_100",
+					{},
+					"5fd2071e6ed0632f3cd53cb5c3b9482c7b1c791e",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_101",
+					{},
+					"98fce8305d47024ef5ca26604d5c0d97d7c84790",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "2" },
+						{ "SPECULAR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_102",
+					{},
+					"25393b52accd9ea7ff2f04d746408852b1cded05",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "VC", "1" },
+						{ "VERTEX_ALPHA_DEPTH", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_105",
+					{},
+					"4f908098a2fb4a4f6c1a64e62e3861aa808d8667",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "INTERIOR", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "VC", "1" },
+						{ "VERTEX_ALPHA_DEPTH", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_106",
+					{},
+					"91242c42dfade7fd3d6c7e544d7bd9f457ee7fb2",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "LOD", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_107",
+					{},
+					"98111cd850dc2443e54bb28a029c9cd214430265",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "3" },
+						{ "SPECULAR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_109",
+					{},
+					"3e0d2d14ec52647f072b2da8409cf51b87ef7701",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_110",
+					{},
+					"39ea3de9ea068d3d081f6b60909052ac52b45f2d",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_111",
+					{},
+					"ad635a35dcb81004cdb0a1e358ec0dbb9bfa1831",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_114",
+					{},
+					"d7c34dfcf68f006d2bbd72b2e30570493c48bf82",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "4" },
+						{ "SPECULAR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_117",
+					{},
+					"e79e5133d5f31fdd55b2ca15c44764a5b32a7481",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "4" },
+						{ "SPECULAR", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_119",
+					{},
+					"52fab812592f192560e66aa2b8bd9e10f98f3700",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "4" },
+						{ "SPECULAR", "1" },
+						{ "SSLR", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_123",
+					{},
+					"c5cc94711237be1f30fd77dfdd08dcd7e4e93409",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "5" },
+						{ "SPECULAR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_126",
+					{},
+					"936f862a168918721e3e0331fd838a3a8d105313",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_128",
+					{},
+					"da3044bdc84d955bba8495e4ab227fc7fc92fff1",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_129",
+					{},
+					"960f82516f39d336463437b698249adfb4c73294",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "UNDERWATER", "1" },
+						{ "VC", "1" },
+						{ "VERTEX_ALPHA_DEPTH", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_130",
+					{},
+					"1c10b58423f6ca350906fbe6182bfe7642eed622",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_132",
+					{},
+					"01188986c865edb37a78e08241950cc2fd040265",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "UNDERWATER", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_134",
+					{},
+					"5b53fd2206673f5a02191478aeda596a3152ee23",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "6" },
+						{ "SPECULAR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_139",
+					{},
+					"8b1c0ba36111db9f999adfde6faf6651a794f3e4",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "INTERIOR", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_141",
+					{},
+					"301e0a3647fcd59934fbf50b4a8fc002ab0c607d",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "SSLR", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_143",
+					{},
+					"629d2e93bd3b2f35686548c7cc3cdff88f3e43d1",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "INTERIOR", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_151",
+					{},
+					"3e2042fff5f9dddbdd07980c258ec61b3bb94f50",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "INTERIOR", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_154",
+					{},
+					"a71444f72a6d31b1b6973aa5b9ba613336f841c6",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "LOD", "1" },
+						{ "SSLR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_155",
+					{},
+					"af996dd590c21197668ecfc81d72566dabffe3e4",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "LOD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_163",
+					{},
+					"a1f1ca45884f64d6189a76b3dd3b8b17a3b341b5",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "VC", "1" },
+						{ "VERTEX_ALPHA_DEPTH", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_166",
+					{},
+					"6dbbf4169406bdda5eb6cf8e7534052793df817f",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "UNDERWATER", "1" },
+						{ "VC", "1" },
+						{ "VERTEX_ALPHA_DEPTH", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_167",
+					{},
+					"227960e8a60470df04f0004b2585824bb9f83416",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "INTERIOR", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "SSLR", "1" },
+						{ "VC", "1" },
+						{ "VERTEX_ALPHA_DEPTH", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_168",
+					{},
+					"7ba8a9a8e310f7c6781eae25901c8c73895c2e55",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "STENCIL", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_171",
+					{},
+					"8df4b614785e87cbd43bb2c3b9d06b0d979ae032",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "STENCIL_DISPLACEMENT", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_172",
+					{},
+					"33189008aec4990b9cde45822da94134b6baabed",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "NUM_SPECULAR_LIGHTS", "1" },
+						{ "SPECULAR", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_177",
+					{},
+					"96e8f1336ee9dca53c9a020da1da966fae492434",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "NORMAL_TEXCOORD", "1" },
+						{ "REFLECTIONS", "1" },
+						{ "REFRACTIONS", "1" },
+						{ "WADING", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsWater,
+					"bswater_class_178",
+					{},
+					"8fb709c2fdf00a201227a0e7af60212dcdff9acf",
+					{
+						{ "BSWATER_PIXEL_SHADER", "1" },
+						{ "DEPTH", "1" },
+						{ "FOG", "1" },
+						{ "WATER", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_base_blend",
+					{},
+					"8a2de7e879545312b51d1e11065bef0fe3b3372a",
+					{
+						{ "BSLIGHTING_PS_COLOR", "1" },
+						{ "BSL_BASE_BLEND", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_base_blend_tint",
+					{},
+					"f3244d07fb05d6d7aa94c14088b41a0b095d9b4f",
+					{
+						{ "BSLIGHTING_PS_COLOR", "1" },
+						{ "BSL_BASE_BLEND", "1" },
+						{ "BSL_BASE_BLEND_TINT", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_base_lut",
+					{},
+					"c8ec26d129ea262b6dff08250285c5764d360d54",
+					{
+						{ "BSLIGHTING_PS_RESOURCE", "1" },
+						{ "BSL_BASE_LUT", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_base_lut_envmap",
+					{},
+					"372ad544f67c278ce4fc9fa9f9cb1b24a073d8c2",
+					{
+						{ "BSLIGHTING_PS_RESOURCE", "1" },
+						{ "BSL_BASE_LUT", "1" },
+						{ "BSL_ENVMAP", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_base_lut_vertex_tint",
+					{},
+					"0ea53bdad616e92ac640fa5ce0dc7396ddeffa27",
+					{
+						{ "BSLIGHTING_PS_RESOURCE", "1" },
+						{ "BSL_BASE_LUT", "1" },
+						{ "BSL_VERTEX_TINT", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_core",
+					{},
+					"38522aef4096c3cff6750dc647c353131f971476",
+					{
+						{ "BSLIGHTING_PS_CORE", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_envmap",
+					{},
+					"4a489628dee57a39d26121fe4c0e35b1aedf264e",
+					{
+						{ "BSLIGHTING_PS_CORE", "1" },
+						{ "BSL_ENVMAP", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_glowmap",
+					{},
+					"901735922f434ea44b419f7220ee70310d6486d7",
+					{
+						{ "BSLIGHTING_PS_CORE", "1" },
+						{ "BSL_GLOWMAP", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_no_vertex_alpha",
+					{},
+					"7052cce16a667b2e06a7cc1927877de3c98c59ad",
+					{
+						{ "BSLIGHTING_PS_COLOR", "1" },
+						{ "BSL_NO_VERTEX_ALPHA", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_overlay",
+					{},
+					"d4e4d47ab5967fdc2bf21c45a22c25bce084841a",
+					{
+						{ "BSLIGHTING_PS_RESOURCE", "1" },
+						{ "BSL_OVERLAY", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_reduced_normal",
+					{},
+					"ccbb8cf858e4f4c38d8982289b16d4ab92d4728d",
+					{
+						{ "BSLIGHTING_PS_CORE", "1" },
+						{ "BSL_REDUCED_NORMAL", "1" }
+					}),
+				MakeDefaultVariantRegistration(
+					Target::kBsLighting,
+					"bslighting_ps_vertex_tint",
+					{},
+					"1d79bd6f67bbd4336ba1f88280c1027c225cac5a",
+					{
+						{ "BSLIGHTING_PS_COLOR", "1" },
+						{ "BSL_VERTEX_TINT", "1" }
+					})
 			};
+			return variants;
 		}
 
 		constexpr auto kDefaultShaderRoot = L"Data\\Shaders";
