@@ -15,7 +15,9 @@ namespace cs::engine
 		{
 		public:
 			explicit EagerShaderVariantCompilationHandle(
-				winrt::com_ptr<ID3D11PixelShader> a_shader) noexcept :
+				ShaderStage a_stage,
+				winrt::com_ptr<ID3D11DeviceChild> a_shader) noexcept :
+				_stage(a_stage),
 				_shader(std::move(a_shader))
 			{}
 
@@ -24,19 +26,25 @@ namespace cs::engine
 				return ShaderVariantCompilationState::kReady;
 			}
 
-			winrt::com_ptr<ID3D11PixelShader>
+			winrt::com_ptr<ID3D11DeviceChild>
 				AcquireOrRequest() noexcept override
 			{
 				return _shader;
 			}
 
-			ID3D11PixelShader* PeekPixelShader() const noexcept override
+			ID3D11DeviceChild* PeekShader() const noexcept override
 			{
 				return _shader.get();
 			}
 
+			ShaderStage GetStage() const noexcept override
+			{
+				return _stage;
+			}
+
 		private:
-			winrt::com_ptr<ID3D11PixelShader> _shader;
+			ShaderStage _stage;
+			winrt::com_ptr<ID3D11DeviceChild> _shader;
 		};
 
 		class EagerShaderVariantCompilationPolicy final :
@@ -71,22 +79,47 @@ namespace cs::engine
 					return result;
 				}
 
-				winrt::com_ptr<ID3D11PixelShader> shader;
+				winrt::com_ptr<ID3D11DeviceChild> shader;
 				HRESULT createResult = E_FAIL;
+				const char* createStage = nullptr;
+				static_assert(
+					static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
 				{
 					ScopedPixelShaderBrokerBypass bypassBroker;
-					createResult = a_request.device->CreatePixelShader(
-						blob->GetBufferPointer(),
-						blob->GetBufferSize(),
-						nullptr,
-						shader.put());
+					switch (a_request.stage) {
+					case ShaderStage::kVertex: {
+						createStage = "Vertex";
+						winrt::com_ptr<ID3D11VertexShader> vertexShader;
+						createResult = a_request.device->CreateVertexShader(
+							blob->GetBufferPointer(),
+							blob->GetBufferSize(),
+							nullptr,
+							vertexShader.put());
+						if (vertexShader)
+							shader.attach(vertexShader.detach());
+						break;
+					}
+					case ShaderStage::kPixel: {
+						createStage = "Pixel";
+						winrt::com_ptr<ID3D11PixelShader> pixelShader;
+						createResult = a_request.device->CreatePixelShader(
+							blob->GetBufferPointer(),
+							blob->GetBufferSize(),
+							nullptr,
+							pixelShader.put());
+						if (pixelShader)
+							shader.attach(pixelShader.detach());
+						break;
+					}
+					}
 				}
 				if (FAILED(createResult) || !shader) {
 					char buffer[64]{};
 					std::snprintf(
 						buffer,
 						sizeof(buffer),
-						"CreatePixelShader hr=0x%08x",
+						"Create%sShader hr=0x%08x",
+						createStage,
 						static_cast<unsigned>(createResult));
 					result.error = buffer;
 					return result;
@@ -100,6 +133,7 @@ namespace cs::engine
 					blob->GetBufferSize()));
 				result.handle =
 					std::make_shared<EagerShaderVariantCompilationHandle>(
+						a_request.stage,
 						std::move(shader));
 				return result;
 			}

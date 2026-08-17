@@ -4,6 +4,8 @@
 #include "LogThrottle.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
+#include "Render/ShaderInjectionStaticFamilyRegistrations.h"
+#include "Render/ShaderInjectionVariantFactory.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/ShaderVariantResolver.h"
 #include "Utils/CSSha1.h"
@@ -156,31 +158,31 @@ namespace cs::engine
 				ShaderInjectionTarget::kBsLighting
 			};
 
-		ShaderReplacementVariantRegistration
-			MakeDefaultVariantRegistration(
-				ShaderInjectionTarget a_target,
-				std::string a_name,
-				std::vector<ShaderVariantKey> a_variantKeys,
-				std::string a_expectedStockSha1,
-				ShaderInjectionDefines a_defines = {})
+		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
 		{
-			const auto& metadata =
-				kTargets[static_cast<std::size_t>(a_target)];
-			ShaderReplacementVariantRegistration registration;
-			registration.targetId = a_target;
-			registration.name = std::move(a_name);
-			registration.variantKeys = std::move(a_variantKeys);
-			registration.expectedStockSha1 =
-				std::move(a_expectedStockSha1);
-			registration.compilation.sourcePath =
-				std::wstring(metadata.sourcePath);
-			registration.compilation.entryPoint =
-				std::string(metadata.entryPoint);
-			registration.compilation.profile =
-				std::string(metadata.profile);
-			registration.compilation.defines =
-				std::move(a_defines);
-			return registration;
+			static_assert(
+				static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+			switch (a_stage) {
+			case ShaderStage::kVertex:
+				return "vertex";
+			case ShaderStage::kPixel:
+				return "pixel";
+			}
+			std::unreachable();
+		}
+
+		constexpr std::string_view StageAbbreviation(
+			ShaderStage a_stage) noexcept
+		{
+			static_assert(
+				static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+			switch (a_stage) {
+			case ShaderStage::kVertex:
+				return "vs";
+			case ShaderStage::kPixel:
+				return "ps";
+			}
+			std::unreachable();
 		}
 
 		template <std::size_t Size>
@@ -254,700 +256,9 @@ namespace cs::engine
 					Target::kVlsSliceScatter,
 					"default",
 					{},
-					{}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps0",
-					{},
-					"9c9294c0054ea1c2188c19c72e4d45c5c55502ec",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "OCCLUSION", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps1",
-					{},
-					"1a8d5c7556d94e326f0e995f88cbc68f1286a707",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "DITHER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps2",
-					{},
-					"9474f8572bd1fe8d8389c549045893bbf01c0d07",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "MOONMASK", "1" },
-						{ "TEX", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps3",
-					{},
-					"dc269e0c24dace5bd1b7957ea82e97ce263bb66a",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "HORIZFADE", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps4",
-					{},
-					"6daddf712b1a43e22cadb461e3668e53495e1583",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "TEX", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps5",
-					{},
-					"d7f81b74d0050df28ef5f341b7847a98387cab39",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "CLOUDS", "1" },
-						{ "TEX", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps6",
-					{},
-					"8eef0648908859f9e92e77d7673b8eeb9837b752",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "CLOUDS", "1" },
-						{ "TEX", "1" },
-						{ "TEXLERP", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps7",
-					{},
-					"bd651f35e92cb70710fb7e2b0b2620b3b91b457b",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "CLOUDS", "1" },
-						{ "TEX", "1" },
-						{ "TEXFADE", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsSky,
-					"bssky_ps8",
-					{},
-					"8235653ec77705a1dc6e30663ae0f05d32851026",
-					{
-						{ "BSSKY_PIXEL_SHADER", "1" },
-						{ "DITHER", "1" },
-						{ "TEX", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_094",
-					{},
-					"b84ac758940de3c7899d47a04afd86a1b073015b",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_095",
-					{},
-					"c715ff5df2e83a3ff1fd9ca2f4dbfe56a599f45c",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "FOG", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_097",
-					{},
-					"a13a5ed701316931dd5d04c0db761563bed258da",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "1" },
-						{ "SPECULAR", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_098",
-					{},
-					"7f0b811a59d635ff4f2c7924db044ac168000b3a",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "INTERIOR", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_099",
-					{},
-					"08180d51b565fd6b8957cdb5b6f8920e414e4e88",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "SSLR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_100",
-					{},
-					"5fd2071e6ed0632f3cd53cb5c3b9482c7b1c791e",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_101",
-					{},
-					"98fce8305d47024ef5ca26604d5c0d97d7c84790",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "2" },
-						{ "SPECULAR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_102",
-					{},
-					"25393b52accd9ea7ff2f04d746408852b1cded05",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "VC", "1" },
-						{ "VERTEX_ALPHA_DEPTH", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_105",
-					{},
-					"4f908098a2fb4a4f6c1a64e62e3861aa808d8667",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "INTERIOR", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "VC", "1" },
-						{ "VERTEX_ALPHA_DEPTH", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_106",
-					{},
-					"91242c42dfade7fd3d6c7e544d7bd9f457ee7fb2",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "LOD", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_107",
-					{},
-					"98111cd850dc2443e54bb28a029c9cd214430265",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "3" },
-						{ "SPECULAR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_109",
-					{},
-					"3e0d2d14ec52647f072b2da8409cf51b87ef7701",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_110",
-					{},
-					"39ea3de9ea068d3d081f6b60909052ac52b45f2d",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_111",
-					{},
-					"ad635a35dcb81004cdb0a1e358ec0dbb9bfa1831",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_114",
-					{},
-					"d7c34dfcf68f006d2bbd72b2e30570493c48bf82",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "4" },
-						{ "SPECULAR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_117",
-					{},
-					"e79e5133d5f31fdd55b2ca15c44764a5b32a7481",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "4" },
-						{ "SPECULAR", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_119",
-					{},
-					"52fab812592f192560e66aa2b8bd9e10f98f3700",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "4" },
-						{ "SPECULAR", "1" },
-						{ "SSLR", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_123",
-					{},
-					"c5cc94711237be1f30fd77dfdd08dcd7e4e93409",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "5" },
-						{ "SPECULAR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_126",
-					{},
-					"936f862a168918721e3e0331fd838a3a8d105313",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_128",
-					{},
-					"da3044bdc84d955bba8495e4ab227fc7fc92fff1",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_129",
-					{},
-					"960f82516f39d336463437b698249adfb4c73294",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "UNDERWATER", "1" },
-						{ "VC", "1" },
-						{ "VERTEX_ALPHA_DEPTH", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_130",
-					{},
-					"1c10b58423f6ca350906fbe6182bfe7642eed622",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_132",
-					{},
-					"01188986c865edb37a78e08241950cc2fd040265",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "UNDERWATER", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_134",
-					{},
-					"5b53fd2206673f5a02191478aeda596a3152ee23",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "6" },
-						{ "SPECULAR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_139",
-					{},
-					"8b1c0ba36111db9f999adfde6faf6651a794f3e4",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "INTERIOR", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_141",
-					{},
-					"301e0a3647fcd59934fbf50b4a8fc002ab0c607d",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "SSLR", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_143",
-					{},
-					"629d2e93bd3b2f35686548c7cc3cdff88f3e43d1",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "INTERIOR", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_151",
-					{},
-					"3e2042fff5f9dddbdd07980c258ec61b3bb94f50",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "INTERIOR", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_154",
-					{},
-					"a71444f72a6d31b1b6973aa5b9ba613336f841c6",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "LOD", "1" },
-						{ "SSLR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_155",
-					{},
-					"af996dd590c21197668ecfc81d72566dabffe3e4",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "LOD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_163",
-					{},
-					"a1f1ca45884f64d6189a76b3dd3b8b17a3b341b5",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "VC", "1" },
-						{ "VERTEX_ALPHA_DEPTH", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_166",
-					{},
-					"6dbbf4169406bdda5eb6cf8e7534052793df817f",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "UNDERWATER", "1" },
-						{ "VC", "1" },
-						{ "VERTEX_ALPHA_DEPTH", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_167",
-					{},
-					"227960e8a60470df04f0004b2585824bb9f83416",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "INTERIOR", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "SSLR", "1" },
-						{ "VC", "1" },
-						{ "VERTEX_ALPHA_DEPTH", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_168",
-					{},
-					"7ba8a9a8e310f7c6781eae25901c8c73895c2e55",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "STENCIL", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_171",
-					{},
-					"8df4b614785e87cbd43bb2c3b9d06b0d979ae032",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "STENCIL_DISPLACEMENT", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_172",
-					{},
-					"33189008aec4990b9cde45822da94134b6baabed",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "NUM_SPECULAR_LIGHTS", "1" },
-						{ "SPECULAR", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_177",
-					{},
-					"96e8f1336ee9dca53c9a020da1da966fae492434",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "NORMAL_TEXCOORD", "1" },
-						{ "REFLECTIONS", "1" },
-						{ "REFRACTIONS", "1" },
-						{ "WADING", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsWater,
-					"bswater_class_178",
-					{},
-					"8fb709c2fdf00a201227a0e7af60212dcdff9acf",
-					{
-						{ "BSWATER_PIXEL_SHADER", "1" },
-						{ "DEPTH", "1" },
-						{ "FOG", "1" },
-						{ "WATER", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_base_blend",
-					{},
-					"8a2de7e879545312b51d1e11065bef0fe3b3372a",
-					{
-						{ "BSLIGHTING_PS_COLOR", "1" },
-						{ "BSL_BASE_BLEND", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_base_blend_tint",
-					{},
-					"f3244d07fb05d6d7aa94c14088b41a0b095d9b4f",
-					{
-						{ "BSLIGHTING_PS_COLOR", "1" },
-						{ "BSL_BASE_BLEND", "1" },
-						{ "BSL_BASE_BLEND_TINT", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_base_lut",
-					{},
-					"c8ec26d129ea262b6dff08250285c5764d360d54",
-					{
-						{ "BSLIGHTING_PS_RESOURCE", "1" },
-						{ "BSL_BASE_LUT", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_base_lut_envmap",
-					{},
-					"372ad544f67c278ce4fc9fa9f9cb1b24a073d8c2",
-					{
-						{ "BSLIGHTING_PS_RESOURCE", "1" },
-						{ "BSL_BASE_LUT", "1" },
-						{ "BSL_ENVMAP", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_base_lut_vertex_tint",
-					{},
-					"0ea53bdad616e92ac640fa5ce0dc7396ddeffa27",
-					{
-						{ "BSLIGHTING_PS_RESOURCE", "1" },
-						{ "BSL_BASE_LUT", "1" },
-						{ "BSL_VERTEX_TINT", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_core",
-					{},
-					"38522aef4096c3cff6750dc647c353131f971476",
-					{
-						{ "BSLIGHTING_PS_CORE", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_envmap",
-					{},
-					"4a489628dee57a39d26121fe4c0e35b1aedf264e",
-					{
-						{ "BSLIGHTING_PS_CORE", "1" },
-						{ "BSL_ENVMAP", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_glowmap",
-					{},
-					"901735922f434ea44b419f7220ee70310d6486d7",
-					{
-						{ "BSLIGHTING_PS_CORE", "1" },
-						{ "BSL_GLOWMAP", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_no_vertex_alpha",
-					{},
-					"7052cce16a667b2e06a7cc1927877de3c98c59ad",
-					{
-						{ "BSLIGHTING_PS_COLOR", "1" },
-						{ "BSL_NO_VERTEX_ALPHA", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_overlay",
-					{},
-					"d4e4d47ab5967fdc2bf21c45a22c25bce084841a",
-					{
-						{ "BSLIGHTING_PS_RESOURCE", "1" },
-						{ "BSL_OVERLAY", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_reduced_normal",
-					{},
-					"ccbb8cf858e4f4c38d8982289b16d4ab92d4728d",
-					{
-						{ "BSLIGHTING_PS_CORE", "1" },
-						{ "BSL_REDUCED_NORMAL", "1" }
-					}),
-				MakeDefaultVariantRegistration(
-					Target::kBsLighting,
-					"bslighting_ps_vertex_tint",
-					{},
-					"1d79bd6f67bbd4336ba1f88280c1027c225cac5a",
-					{
-						{ "BSLIGHTING_PS_COLOR", "1" },
-						{ "BSL_VERTEX_TINT", "1" }
-					})
+					{})
 			};
+			AppendStaticFamilyShaderReplacementVariants(variants);
 			return variants;
 		}
 
@@ -1379,7 +690,8 @@ namespace cs::engine
 				keys.push_back({
 					.variant = std::nullopt,
 					.expectedStockSha1 = expected,
-					.routeGroup = ToIndex(a_variant.targetId)
+					.routeGroup = ToIndex(a_variant.targetId),
+					.stage = a_variant.stage
 				});
 				return keys;
 			}
@@ -1387,7 +699,8 @@ namespace cs::engine
 				keys.push_back({
 					.variant = variantKey,
 					.expectedStockSha1 = expected,
-					.routeGroup = ToIndex(a_variant.targetId)
+					.routeGroup = ToIndex(a_variant.targetId),
+					.stage = a_variant.stage
 				});
 			}
 			return keys;
@@ -1441,6 +754,7 @@ namespace cs::engine
 			request.sourcePath = sourcePath;
 			request.entryPoint = a_variant.compilation.entryPoint;
 			request.profile = a_variant.compilation.profile;
+			request.stage = a_variant.stage;
 			request.defines.reserve(mergedDefines.size());
 			for (const auto& define : mergedDefines)
 				request.defines.push_back(define);
@@ -1507,13 +821,15 @@ namespace cs::engine
 				[a_target, a_shader](const PublishedVariant& a_variant) {
 					return a_variant.targetId == a_target
 						&& a_variant.compilation
-						&& a_variant.compilation->PeekPixelShader()
-							== a_shader;
+						&& a_variant.compilation->GetStage()
+							== ShaderStage::kPixel
+						&& a_variant.compilation->PeekShader()
+							== static_cast<ID3D11DeviceChild*>(a_shader);
 				});
 		}
 
-		PixelShaderSwapResolverResult ResolveInjectedPixelShader(
-			const PixelShaderSwapRequest& a_request) noexcept
+		ShaderSwapResolverResult ResolveInjectedShader(
+			const ShaderSwapRequest& a_request) noexcept
 		{
 			try {
 				const auto& a_resolvedVariant = a_request.variant;
@@ -1521,15 +837,16 @@ namespace cs::engine
 				const auto plan =
 					GetService().published.load(std::memory_order_acquire);
 				if (!plan)
-					return PixelShaderSwapResolverResult::kNoMatch;
+					return ShaderSwapResolverResult::kNoMatch;
 
 				const auto selection = SelectPixelShaderSwapVariant(
 					plan->variantKeys,
 					a_resolvedVariant,
-					a_sha);
+					a_sha,
+					a_request.stage);
 				if (selection.kind
 					== PixelShaderSwapSelectionKind::kNoMatch) {
-					return PixelShaderSwapResolverResult::kNoMatch;
+					return ShaderSwapResolverResult::kNoMatch;
 				}
 				if (selection.kind
 					== PixelShaderSwapSelectionKind::kUnmappedVariant) {
@@ -1537,27 +854,27 @@ namespace cs::engine
 						L,
 						2000,
 						spdlog::level::warn,
-						"Kept stock PS sha={}: no replacement registered "
+						"Kept stock {} shader sha={}: no replacement registered "
 						"for variant {}:{}+0x{:X}.",
+						StageName(a_request.stage),
 						sha1::Sha1ToHex(a_sha),
 						a_resolvedVariant
 							? a_resolvedVariant->subclass
 							: "<none>",
 						a_resolvedVariant
-							&& a_resolvedVariant->stage
-								== ShaderStage::kPixel
-							? "ps"
-							: "vs",
+							? StageAbbreviation(
+								a_resolvedVariant->stage)
+							: "--",
 						a_resolvedVariant
 							? a_resolvedVariant->id.Value()
 							: 0);
-					return PixelShaderSwapResolverResult::kKeepStock;
+					return ShaderSwapResolverResult::kKeepStock;
 				}
 				if (selection.routeIndex
 					>= plan->variantKeys.size()
 					|| selection.replacementIndex
 						>= plan->variants.size()) {
-					return PixelShaderSwapResolverResult::kKeepStock;
+					return ShaderSwapResolverResult::kKeepStock;
 				}
 
 				const auto& variant =
@@ -1575,35 +892,42 @@ namespace cs::engine
 						L,
 						2000,
 						spdlog::level::err,
-						"Refused PS replacement '{}/{}': "
+						"Refused {} shader replacement '{}/{}': "
 						"variant {}:{}+0x{:X} expected sha={} but received {}.",
+						StageName(a_request.stage),
 						kTargets[ToIndex(variant.targetId)].name,
 						variant.name,
 						a_resolvedVariant
 							? a_resolvedVariant->subclass
 							: "<none>",
 						a_resolvedVariant
-							&& a_resolvedVariant->stage
-								== ShaderStage::kPixel
-							? "ps"
-							: "vs",
+							? StageAbbreviation(
+								a_resolvedVariant->stage)
+							: "--",
 						a_resolvedVariant
 							? a_resolvedVariant->id.Value()
 							: 0,
 						expected,
 						sha1::Sha1ToHex(a_sha));
-					return PixelShaderSwapResolverResult::kKeepStock;
+					return ShaderSwapResolverResult::kKeepStock;
 				}
 
 				if (!runtime.requested.load(std::memory_order_relaxed)) {
 					RecordMatchedShaderOutcome(
 						variant.targetId,
 						MatchedShaderOutcome::kDisabled);
-					return PixelShaderSwapResolverResult::kKeepStock;
+					return ShaderSwapResolverResult::kKeepStock;
+				}
+				if (!variant.compilation
+					|| variant.compilation->GetStage()
+						!= a_request.stage) {
+					RecordMatchedShaderOutcome(
+						variant.targetId,
+						MatchedShaderOutcome::kKeptStock);
+					return ShaderSwapResolverResult::kKeepStock;
 				}
 				auto replacement = variant.compilation
-					? variant.compilation->AcquireOrRequest()
-					: winrt::com_ptr<ID3D11PixelShader>{};
+					->AcquireOrRequest();
 				if (!ShouldSubstitutePixelShader(
 						selection.kind,
 						static_cast<bool>(replacement))) {
@@ -1615,14 +939,14 @@ namespace cs::engine
 						state == ShaderVariantCompilationState::kFailed
 							? MatchedShaderOutcome::kCompileFailed
 							: MatchedShaderOutcome::kNotReady);
-					return PixelShaderSwapResolverResult::kKeepStock;
+					return ShaderSwapResolverResult::kKeepStock;
 				}
 
 				if (!a_request.output || !*a_request.output) {
 					RecordMatchedShaderOutcome(
 						variant.targetId,
 						MatchedShaderOutcome::kKeptStock);
-					return PixelShaderSwapResolverResult::kKeepStock;
+					return ShaderSwapResolverResult::kKeepStock;
 				}
 				(*a_request.output)->Release();
 				*a_request.output = replacement.detach();
@@ -1631,7 +955,8 @@ namespace cs::engine
 					MatchedShaderOutcome::kReplaced);
 				if (counts.targetSubstitutions == 1) {
 					L->info(
-						"Replaced PS sha={} -> {}/{} (target_replacements=1, total_replacements={})",
+						"Replaced {} shader sha={} -> {}/{} (target_replacements=1, total_replacements={})",
+						StageName(a_request.stage),
 						sha1::Sha1ToHex(a_sha),
 						kTargets[ToIndex(variant.targetId)].name,
 						variant.name,
@@ -1641,28 +966,29 @@ namespace cs::engine
 						L,
 						2000,
 						spdlog::level::debug,
-						"Pixel-shader replacements: target={}/{} target_total={} total={}.",
+						"Shader replacements: stage={} target={}/{} target_total={} total={}.",
+						StageName(a_request.stage),
 						kTargets[ToIndex(variant.targetId)].name,
 						variant.name,
 						counts.targetSubstitutions,
 						counts.totalSubstitutions);
 				}
-				return PixelShaderSwapResolverResult::kReplaced;
+				return ShaderSwapResolverResult::kReplaced;
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
 					spdlog::level::err,
-					"Pixel-shader replacement resolution failed: {}.",
+					"Shader replacement resolution failed: {}.",
 					e.what());
-				return PixelShaderSwapResolverResult::kKeepStock;
+				return ShaderSwapResolverResult::kKeepStock;
 			} catch (...) {
 				CS_LOG_EVERY_MS(
 					L,
 					2000,
 					spdlog::level::err,
-					"Pixel-shader replacement resolution failed.");
-				return PixelShaderSwapResolverResult::kKeepStock;
+					"Shader replacement resolution failed.");
+				return ShaderSwapResolverResult::kKeepStock;
 			}
 		}
 	}
@@ -1750,11 +1076,28 @@ namespace cs::engine
 				kTargets[ToIndex(a_registration.targetId)].name);
 			return false;
 		}
+		if (a_registration.stage != ShaderStage::kPixel
+			&& !a_registration.variantKeys.empty()) {
+			L->error(
+				"Replacement variant '{}/{}' rejected: "
+				"non-pixel variant keys require a runtime variant resolver.",
+				kTargets[ToIndex(a_registration.targetId)].name,
+				a_registration.name);
+			return false;
+		}
 		for (const auto& key : a_registration.variantKeys) {
 			if (key.subclass.empty()) {
 				L->error(
 					"Replacement variant '{}/{}' rejected: "
 					"empty shader subclass.",
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.name);
+				return false;
+			}
+			if (key.stage != a_registration.stage) {
+				L->error(
+					"Replacement variant '{}/{}' rejected: "
+					"variant key stage does not match compilation stage.",
 					kTargets[ToIndex(a_registration.targetId)].name,
 					a_registration.name);
 				return false;
@@ -1785,10 +1128,11 @@ namespace cs::engine
 				a_registration.name);
 			return false;
 		}
-		if (a_registration.compilation.profile.empty()) {
+		if (a_registration.compilation.profile
+			!= ProfileForStage(a_registration.stage)) {
 			L->error(
 				"Replacement variant '{}/{}' rejected: "
-				"empty shader profile.",
+				"shader profile does not match its stage.",
 				kTargets[ToIndex(a_registration.targetId)].name,
 				a_registration.name);
 			return false;
@@ -1829,9 +1173,7 @@ namespace cs::engine
 					kTargets[ToIndex(a_registration.targetId)].name,
 					a_registration.name,
 					duplicate.subclass,
-					duplicate.stage == ShaderStage::kPixel
-						? "ps"
-						: "vs",
+					StageAbbreviation(duplicate.stage),
 					duplicate.id.Value());
 				return false;
 			}
@@ -1862,9 +1204,7 @@ namespace cs::engine
 							a_registration.targetId)].name,
 						a_registration.name,
 						newKey.subclass,
-						newKey.stage == ShaderStage::kPixel
-							? "ps"
-							: "vs",
+						StageAbbreviation(newKey.stage),
 						newKey.id.Value());
 					return false;
 				}
@@ -1997,6 +1337,7 @@ namespace cs::engine
 		std::size_t compileRequested = 0;
 		std::size_t compileSucceeded = 0;
 		std::size_t swappableVariants = 0;
+		ShaderStageMask swappableStages = 0;
 		std::vector<FrozenTarget> frozenTargets;
 		if (enabled) {
 			frozenTargets = FreezeTargets(
@@ -2073,6 +1414,10 @@ namespace cs::engine
 						targetSwappable || variantSwappable;
 					if (variantSwappable)
 						++swappableVariants;
+					if (variantSwappable) {
+						for (const auto& key : prepared->keys)
+							swappableStages |= ShaderStageBit(key.stage);
+					}
 					const auto replacementIndex =
 						plan->variants.size();
 					for (auto& key : prepared->keys) {
@@ -2117,22 +1462,20 @@ namespace cs::engine
 		{
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
-			const bool hasSwappableTarget = std::ranges::any_of(
-				plan->variantKeys,
-				[](const PixelShaderSwapVariantKey& a_key) {
-					return a_key.variant.has_value()
-						|| a_key.expectedStockSha1.has_value();
-				});
-			if (hasSwappableTarget && !service.resolverRegistered) {
+			if (swappableStages != 0 && !service.resolverRegistered) {
 				service.resolverRegistered =
-					RegisterPixelShaderSwapResolver(&ResolveInjectedPixelShader);
+					RegisterPixelShaderSwapResolver({
+						.resolver = &ResolveInjectedShader,
+						.priority = kHlslReplacementResolverPriority,
+						.stages = swappableStages
+					});
 				if (service.resolverRegistered) {
 					L->info(
-						"Registered HLSL pixel-shader swap resolver (broker hook={}).",
+						"Registered HLSL shader swap resolver (broker hooks={}).",
 						PixelShaderSwapBrokerHooksInstalled() ? "present" : "absent");
 				} else {
 					L->error(
-						"Pixel-shader swap resolver registration failed; all targets remain stock.");
+						"Shader swap resolver registration failed; all targets remain stock.");
 				}
 			}
 		}
@@ -2236,11 +1579,11 @@ namespace cs::engine
 			current != plan->variants.end()
 				&& current->targetId == a_target;
 			++current) {
-			if (current->compilation) {
-				if (auto* shader =
-						current->compilation->PeekPixelShader()) {
-					return shader;
-				}
+			if (current->compilation
+				&& current->compilation->GetStage()
+					== ShaderStage::kPixel) {
+				return static_cast<ID3D11PixelShader*>(
+					current->compilation->PeekShader());
 			}
 		}
 		return nullptr;

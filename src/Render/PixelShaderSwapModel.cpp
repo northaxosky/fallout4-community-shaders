@@ -19,12 +19,14 @@ namespace cs::engine
 	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
 		std::span<const PixelShaderSwapVariantKey> a_variants,
 		std::optional<ShaderVariantKeyView> a_variant,
-		const sha1::Sha1Result& a_stockSha1) noexcept
+		const sha1::Sha1Result& a_stockSha1,
+		ShaderStage a_stage) noexcept
 	{
 		if (a_variant) {
 			for (std::size_t i = 0; i < a_variants.size(); ++i) {
 				const auto& variant = a_variants[i];
-				if (!variant.variant
+				if (variant.stage != a_stage
+					|| !variant.variant
 					|| !ShaderVariantKeysConflict(
 						ViewShaderVariantKey(*variant.variant),
 						*a_variant)) {
@@ -52,7 +54,8 @@ namespace cs::engine
 
 			for (std::size_t i = 0; i < a_variants.size(); ++i) {
 				const auto& variant = a_variants[i];
-				if (variant.variant
+				if (variant.stage != a_stage
+					|| variant.variant
 					|| !variant.expectedStockSha1
 					|| !Sha1Equals(
 						*variant.expectedStockSha1,
@@ -63,10 +66,11 @@ namespace cs::engine
 				const bool groupHasVariantRoutes =
 					std::ranges::any_of(
 						a_variants,
-						[&variant, &a_variant](
+						[&variant, &a_variant, a_stage](
 							const PixelShaderSwapVariantKey& a_candidate) {
 							return a_candidate.routeGroup
 									== variant.routeGroup
+								&& a_candidate.stage == a_stage
 								&& a_candidate.variant
 								&& a_candidate.variant->subclass
 									== a_variant->subclass
@@ -90,6 +94,8 @@ namespace cs::engine
 		}
 
 		for (std::size_t i = 0; i < a_variants.size(); ++i) {
+			if (a_variants[i].stage != a_stage)
+				continue;
 			const auto& expected = a_variants[i].expectedStockSha1;
 			if (expected && Sha1Equals(*expected, a_stockSha1)) {
 				return {
@@ -121,16 +127,17 @@ namespace cs::engine
 			&& a_replacementReady;
 	}
 
-	HRESULT ExecutePixelShaderSwapPipeline(
-		CreatePixelShaderFunction a_original,
+	HRESULT ExecuteShaderSwapPipeline(
+		CreateShaderFunction a_original,
 		std::span<const PixelShaderSwapResolverRegistration> a_resolvers,
 		std::optional<ShaderVariantKeyView> a_variant,
 		bool a_bypass,
+		ShaderStage a_stage,
 		ID3D11Device* a_device,
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output) noexcept
+		ID3D11DeviceChild** a_output) noexcept
 	{
 		if (!a_original)
 			return E_POINTER;
@@ -157,33 +164,36 @@ namespace cs::engine
 			postInputSha1 =
 				sha1::Sha1Compute(a_bytecode, a_bytecodeLength);
 		}
-		ID3D11PixelShader* stockOutput = a_output ? *a_output : nullptr;
+		ID3D11DeviceChild* stockOutput = a_output ? *a_output : nullptr;
 		const bool canResolve = SUCCEEDED(result)
 			&& stockOutput
 			&& a_bytecode
 			&& a_bytecodeLength != 0;
 		if (canResolve) {
 			const auto& stockSha1 = postInputSha1;
-			const PixelShaderSwapRequest request{
+			const ShaderSwapRequest request{
 				.device = a_device,
 				.linkage = a_linkage,
 				.bytecode = a_bytecode,
 				.bytecodeLength = a_bytecodeLength,
+				.stage = a_stage,
 				.variant = a_variant,
 				.stockSha1 = stockSha1,
 				.stockOutput = stockOutput,
 				.output = a_output
 			};
 			for (const auto& registration : a_resolvers) {
-				if (!registration.resolver)
+				if (!registration.resolver
+					|| (registration.stages & ShaderStageBit(a_stage)) == 0) {
 					continue;
+				}
 				const auto resolution = registration.resolver(request);
 				if (resolution
-					== PixelShaderSwapResolverResult::kReplaced) {
+					== ShaderSwapResolverResult::kReplaced) {
 					break;
 				}
 				if (resolution
-					== PixelShaderSwapResolverResult::kKeepStock) {
+					== ShaderSwapResolverResult::kKeepStock) {
 					break;
 				}
 			}

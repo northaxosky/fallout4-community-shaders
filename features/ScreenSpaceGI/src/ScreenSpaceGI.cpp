@@ -21,6 +21,7 @@
 #include "Render/RenderHooks.h"
 #include "Settings/FeatureConfig.h"
 #include "Render/ShaderInjection.h"
+#include "Render/ShaderInjectionDefines.h"
 #include "ScreenSpaceGILifecycle.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
@@ -427,7 +428,13 @@ namespace cs::features
 				{
 					.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
 					.contributor = "ScreenSpaceGI",
-					.defines = { { "SSGI", "1" } },
+					.defines = {
+						{
+							cs::engine::shader_injection_defines::
+								kScreenSpaceGi,
+							"1"
+						}
+					},
 					.isReady = [this] {
 						return IsReady();
 					},

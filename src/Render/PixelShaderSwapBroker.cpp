@@ -28,11 +28,75 @@ namespace cs::engine
 
 		std::mutex g_installMutex;
 		ID3D11Device* g_device = nullptr;
-		bool g_installRequested = false;
-		std::atomic<bool> g_hookInstalled{ false };
+		ShaderStageMask g_installRequestedStages = 0;
+		std::atomic<ShaderStageMask> g_hookInstalledStages{ 0 };
+
+		using CreatePixelShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+			ID3D11Device*,
+			const void*,
+			SIZE_T,
+			ID3D11ClassLinkage*,
+			ID3D11PixelShader**);
+		using CreateVertexShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+			ID3D11Device*,
+			const void*,
+			SIZE_T,
+			ID3D11ClassLinkage*,
+			ID3D11VertexShader**);
+
+		std::optional<ShaderVariantKeyView> ResolveRuntimeVariant(
+			ShaderStage a_stage)
+		{
+			if (a_stage != ShaderStage::kPixel)
+				return std::nullopt;
+
+			const auto context = shader_context::Current();
+			if (!context.active
+				|| !context.techniqueKnown
+				|| !context.subclassName) {
+				return std::nullopt;
+			}
+			const auto route = ResolvePixelShaderRuntimeRoute(
+				context.subclassName,
+				context.techniqueBits);
+			if (!route || !route->pluginResolvedPsid)
+				return std::nullopt;
+			return ShaderVariantKeyView{
+				route->subclass,
+				route->stage,
+				*route->pluginResolvedPsid
+			};
+		}
+
+		std::span<const PixelShaderSwapResolverRegistration>
+			GetResolverSpan(
+				const std::shared_ptr<const ResolverList>& a_resolvers)
+		{
+			return a_resolvers
+				? std::span<const PixelShaderSwapResolverRegistration>(
+					*a_resolvers)
+				: std::span<const PixelShaderSwapResolverRegistration>{};
+		}
 
 		struct CreatePixelShaderHook
 		{
+			static HRESULT STDMETHODCALLTYPE CallOriginal(
+				ID3D11Device* a_this,
+				const void* a_bytecode,
+				SIZE_T a_bytecodeLength,
+				ID3D11ClassLinkage* a_linkage,
+				ID3D11DeviceChild** a_out)
+			{
+				if (!func)
+					return E_POINTER;
+				return func(
+					a_this,
+					a_bytecode,
+					a_bytecodeLength,
+					a_linkage,
+					reinterpret_cast<ID3D11PixelShader**>(a_out));
+			}
+
 			static HRESULT STDMETHODCALLTYPE thunk(
 				ID3D11Device* a_this,
 				const void* a_bytecode,
@@ -40,65 +104,106 @@ namespace cs::engine
 				ID3D11ClassLinkage* a_linkage,
 				ID3D11PixelShader** a_out)
 			{
-				std::optional<PixelShaderRuntimeRoute> route;
-				std::optional<ShaderVariantKeyView> variant;
-				const auto context = shader_context::Current();
-				if (context.active
-					&& context.techniqueKnown
-					&& context.subclassName) {
-					route = ResolvePixelShaderRuntimeRoute(
-						context.subclassName,
-						context.techniqueBits);
-					if (route && route->pluginResolvedPsid) {
-						variant = ShaderVariantKeyView{
-							route->subclass,
-							route->stage,
-							*route->pluginResolvedPsid
-						};
-					}
-				}
 				const auto resolvers = g_resolvers.load(std::memory_order_acquire);
-				const std::span<const PixelShaderSwapResolverRegistration>
-					resolverSpan =
-						resolvers
-						? std::span<const PixelShaderSwapResolverRegistration>(
-							*resolvers)
-						: std::span<
-							const PixelShaderSwapResolverRegistration>{};
-				return ExecutePixelShaderSwapPipeline(
-					func,
-					resolverSpan,
-					variant,
+				return ExecuteShaderSwapPipeline(
+					&CallOriginal,
+					GetResolverSpan(resolvers),
+					ResolveRuntimeVariant(ShaderStage::kPixel),
 					PixelShaderBrokerBypassActive(),
+					ShaderStage::kPixel,
 					a_this,
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
-					a_out);
+					reinterpret_cast<ID3D11DeviceChild**>(a_out));
 			}
 
 			static inline CreatePixelShaderFunction func = nullptr;
 		};
 
+		struct CreateVertexShaderHook
+		{
+			static HRESULT STDMETHODCALLTYPE CallOriginal(
+				ID3D11Device* a_this,
+				const void* a_bytecode,
+				SIZE_T a_bytecodeLength,
+				ID3D11ClassLinkage* a_linkage,
+				ID3D11DeviceChild** a_out)
+			{
+				if (!func)
+					return E_POINTER;
+				return func(
+					a_this,
+					a_bytecode,
+					a_bytecodeLength,
+					a_linkage,
+					reinterpret_cast<ID3D11VertexShader**>(a_out));
+			}
+
+			static HRESULT STDMETHODCALLTYPE thunk(
+				ID3D11Device* a_this,
+				const void* a_bytecode,
+				SIZE_T a_bytecodeLength,
+				ID3D11ClassLinkage* a_linkage,
+				ID3D11VertexShader** a_out)
+			{
+				const auto resolvers = g_resolvers.load(std::memory_order_acquire);
+				return ExecuteShaderSwapPipeline(
+					&CallOriginal,
+					GetResolverSpan(resolvers),
+					ResolveRuntimeVariant(ShaderStage::kVertex),
+					PixelShaderBrokerBypassActive(),
+					ShaderStage::kVertex,
+					a_this,
+					a_bytecode,
+					a_bytecodeLength,
+					a_linkage,
+					reinterpret_cast<ID3D11DeviceChild**>(a_out));
+			}
+
+			static inline CreateVertexShaderFunction func = nullptr;
+		};
+
 		void InstallHookIfReady()
 		{
-			if (!g_installRequested || !g_device || g_hookInstalled.load(std::memory_order_acquire))
+			if (!g_device)
 				return;
 
-			stl::detour_vfunc<15, CreatePixelShaderHook>(g_device);
-			const bool installed = CreatePixelShaderHook::func != nullptr;
-			g_hookInstalled.store(installed, std::memory_order_release);
-			if (installed)
-				L->info("Device-vtable hook installed (slot 15).");
-			else
-				L->error("Device-vtable hook slot 15 has no original.");
+			auto installedStages =
+				g_hookInstalledStages.load(std::memory_order_acquire);
+			const auto pixelBit = ShaderStageBit(ShaderStage::kPixel);
+			if ((g_installRequestedStages & pixelBit) != 0
+				&& (installedStages & pixelBit) == 0) {
+				stl::detour_vfunc<15, CreatePixelShaderHook>(g_device);
+				if (CreatePixelShaderHook::func) {
+					installedStages |= pixelBit;
+					L->info("Device-vtable hook installed (slot 15).");
+				} else {
+					L->error("Device-vtable hook slot 15 has no original.");
+				}
+			}
+
+			const auto vertexBit = ShaderStageBit(ShaderStage::kVertex);
+			if ((g_installRequestedStages & vertexBit) != 0
+				&& (installedStages & vertexBit) == 0) {
+				stl::detour_vfunc<12, CreateVertexShaderHook>(g_device);
+				if (CreateVertexShaderHook::func) {
+					installedStages |= vertexBit;
+					L->info("Device-vtable hook installed (slot 12).");
+				} else {
+					L->error("Device-vtable hook slot 12 has no original.");
+				}
+			}
+			g_hookInstalledStages.store(
+				installedStages,
+				std::memory_order_release);
 		}
 
-		void RequestHookInstall()
+		void RequestHookInstall(ShaderStageMask a_stages)
 		{
 			sha1::Sha1InitOnce();
 			std::scoped_lock lock(g_installMutex);
-			g_installRequested = true;
+			g_installRequestedStages |= a_stages;
 			InstallHookIfReady();
 		}
 	}
@@ -114,7 +219,7 @@ namespace cs::engine
 		InstallHookIfReady();
 	}
 
-	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver a_resolver)
+	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver a_resolver)
 	{
 		return RegisterPixelShaderSwapResolver({
 			.resolver = a_resolver,
@@ -164,7 +269,7 @@ namespace cs::engine
 			a_registration.priority,
 			resolverCount);
 
-		RequestHookInstall();
+		RequestHookInstall(a_registration.stages);
 		return true;
 	}
 
@@ -178,7 +283,11 @@ namespace cs::engine
 	{
 		std::scoped_lock lock(g_installMutex);
 		InstallHookIfReady();
-		return g_hookInstalled.load(std::memory_order_acquire);
+		return g_installRequestedStages != 0
+			&& (
+			g_hookInstalledStages.load(std::memory_order_acquire)
+			& g_installRequestedStages)
+			== g_installRequestedStages;
 	}
 
 }

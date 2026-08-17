@@ -240,21 +240,63 @@ target_include_directories(FrustumEmbedTests PRIVATE "${CMAKE_SOURCE_DIR}/featur
 add_test(NAME FrustumEmbed COMMAND FrustumEmbedTests)
 set_tests_properties(FrustumEmbed PROPERTIES LABELS "render;unit")
 
-add_executable(ShaderCompileTests
-	tests/ShaderCompileTests.cpp
-	src/Utils/ShaderCompile.cpp
-	src/Utils/ShaderCompile.h
-)
-configure_host_test(ShaderCompileTests)
-target_link_libraries(ShaderCompileTests PRIVATE d3dcompiler.lib)
+if(NOT FO4CS_HOST_TESTS_ONLY)
+	add_executable(ShaderCompileTests
+		tests/ShaderCompileTests.cpp
+		tests/generated/VertexShaderCompilePermutations.cpp
+		tests/generated/VertexShaderCompilePermutations.h
+		src/Render/ShaderInjection.cpp
+		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
+		src/Render/ShaderInjectionStaticFamilyRegistrations.h
+		src/Render/ShaderInjectionVariantFactory.cpp
+		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/PixelShaderSwapModel.cpp
+		src/Utils/CSSha1.cpp
+		src/Utils/ShaderCompile.cpp
+		src/Utils/ShaderCompile.h
+	)
+	configure_host_test(ShaderCompileTests)
+	target_precompile_headers(ShaderCompileTests PRIVATE
+		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+	)
+	target_compile_definitions(ShaderCompileTests PRIVATE
+		_WINDOWS
+		_AMD64_
+		_UNICODE
+		COMMONLIB_RUNTIMECOUNT=3
+	)
+	target_include_directories(ShaderCompileTests BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
+		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/tests"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+	)
+	target_include_directories(ShaderCompileTests SYSTEM PRIVATE
+		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
+	)
+	target_link_libraries(ShaderCompileTests PRIVATE
+		CommonLibF4::CommonLibF4
+		Microsoft::DirectXTK
+		Microsoft::DirectX-Headers
+		bcrypt.lib
+		d3dcompiler.lib
+		imgui::imgui
+		magic_enum::magic_enum
+		spdlog::spdlog
+		tomlplusplus::tomlplusplus
+	)
 
-add_test(
-	NAME ShaderCompile
-	COMMAND ShaderCompileTests
-		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI"
-		"${CMAKE_SOURCE_DIR}/package/Shaders"
-)
-set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
+	add_test(
+		NAME ShaderCompile
+		COMMAND ShaderCompileTests
+			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI"
+			"${CMAKE_SOURCE_DIR}/package/Shaders"
+	)
+	set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
+endif()
 
 add_executable(PixelShaderSwapTests
 	tests/PixelShaderSwapTests.cpp
@@ -280,6 +322,10 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
 		src/Render/ShaderInjection.cpp
+		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
+		src/Render/ShaderInjectionStaticFamilyRegistrations.h
+		src/Render/ShaderInjectionVariantFactory.cpp
+		src/Render/ShaderInjectionVariantFactory.h
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
 	)

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Render/PixelShaderSwapBroker.h"
+
 #include <d3d11.h>
 #include <winrt/base.h>
 
@@ -26,6 +28,7 @@ namespace cs::engine
 		std::filesystem::path sourcePath;
 		std::string entryPoint;
 		std::string profile;
+		ShaderStage stage = ShaderStage::kPixel;
 		std::vector<std::pair<std::string, std::string>> defines;
 	};
 
@@ -35,9 +38,10 @@ namespace cs::engine
 		virtual ~ShaderVariantCompilationHandle() = default;
 
 		virtual ShaderVariantCompilationState GetState() const noexcept = 0;
-		virtual winrt::com_ptr<ID3D11PixelShader>
+		virtual winrt::com_ptr<ID3D11DeviceChild>
 			AcquireOrRequest() noexcept = 0;
-		virtual ID3D11PixelShader* PeekPixelShader() const noexcept = 0;
+		virtual ID3D11DeviceChild* PeekShader() const noexcept = 0;
+		virtual ShaderStage GetStage() const noexcept = 0;
 	};
 
 	struct ShaderVariantCompilationResult

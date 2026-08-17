@@ -41,13 +41,15 @@ namespace
 	{
 		ID3D11Device* expectedDevice = nullptr;
 		ID3D11ClassLinkage* expectedLinkage = nullptr;
-		ID3D11PixelShader* stock = nullptr;
-		ID3D11PixelShader* replacement = nullptr;
+		ID3D11DeviceChild* stock = nullptr;
+		ID3D11DeviceChild* replacement = nullptr;
+		cs::engine::ShaderStage expectedStage =
+			cs::engine::ShaderStage::kPixel;
 		HRESULT originalResult = S_OK;
 		std::vector<int> order;
 		bool resolverForwarded = false;
-		cs::engine::PixelShaderSwapResolverResult firstResolverResult =
-			cs::engine::PixelShaderSwapResolverResult::kNoMatch;
+		cs::engine::ShaderSwapResolverResult firstResolverResult =
+			cs::engine::ShaderSwapResolverResult::kNoMatch;
 		bool lowerResolverCalled = false;
 	};
 
@@ -58,7 +60,7 @@ namespace
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output)
+		ID3D11DeviceChild** a_output)
 	{
 		auto& fixture = *g_pipelineFixture;
 		fixture.order.push_back(2);
@@ -73,8 +75,8 @@ namespace
 		return fixture.originalResult;
 	}
 
-	cs::engine::PixelShaderSwapResolverResult PipelineResolver(
-		const cs::engine::PixelShaderSwapRequest& a_request) noexcept
+	cs::engine::ShaderSwapResolverResult PipelineResolver(
+		const cs::engine::ShaderSwapRequest& a_request) noexcept
 	{
 		auto& fixture = *g_pipelineFixture;
 		fixture.order.push_back(4);
@@ -84,28 +86,29 @@ namespace
 			&& a_request.stockOutput == fixture.stock
 			&& a_request.output
 			&& *a_request.output == fixture.stock
+			&& a_request.stage == fixture.expectedStage
 			&& a_request.stockSha1.bytes
 				== cs::sha1::Sha1Compute(
 					a_request.bytecode,
 					a_request.bytecodeLength).bytes;
 		if (a_request.output)
 			*a_request.output = fixture.replacement;
-		return cs::engine::PixelShaderSwapResolverResult::kReplaced;
+		return cs::engine::ShaderSwapResolverResult::kReplaced;
 	}
 
-	cs::engine::PixelShaderSwapResolverResult FirstPipelineResolver(
-		const cs::engine::PixelShaderSwapRequest&) noexcept
+	cs::engine::ShaderSwapResolverResult FirstPipelineResolver(
+		const cs::engine::ShaderSwapRequest&) noexcept
 	{
 		return g_pipelineFixture->firstResolverResult;
 	}
 
-	cs::engine::PixelShaderSwapResolverResult LowerPipelineResolver(
-		const cs::engine::PixelShaderSwapRequest& a_request) noexcept
+	cs::engine::ShaderSwapResolverResult LowerPipelineResolver(
+		const cs::engine::ShaderSwapRequest& a_request) noexcept
 	{
 		g_pipelineFixture->lowerResolverCalled = true;
 		if (a_request.output)
 			*a_request.output = g_pipelineFixture->replacement;
-		return cs::engine::PixelShaderSwapResolverResult::kReplaced;
+		return cs::engine::ShaderSwapResolverResult::kReplaced;
 	}
 
 	void TestVariantKeySelectsVariant()
@@ -322,6 +325,37 @@ namespace
 			"unresolved variant did not fall back to exact hash");
 	}
 
+	void TestHashFallbackIsStageScoped()
+	{
+		using namespace cs::engine;
+		const auto stock = Sha(0x41);
+		const std::vector variants{
+			PixelShaderSwapVariantKey{
+				.variant = std::nullopt,
+				.expectedStockSha1 = stock,
+				.replacementIndex = 1,
+				.stage = ShaderStage::kPixel
+			},
+			PixelShaderSwapVariantKey{
+				.variant = std::nullopt,
+				.expectedStockSha1 = stock,
+				.replacementIndex = 2,
+				.stage = ShaderStage::kVertex
+			}
+		};
+
+		const auto selection = SelectPixelShaderSwapVariant(
+			variants,
+			std::nullopt,
+			stock,
+			ShaderStage::kVertex);
+		Check(
+			selection.kind == PixelShaderSwapSelectionKind::kSelected
+				&& selection.routeIndex == 1
+				&& selection.replacementIndex == 2,
+			"hash fallback crossed shader stages");
+	}
+
 	void TestVariantKeyScopeIncludesStage()
 	{
 		using namespace cs::engine;
@@ -353,9 +387,10 @@ namespace
 		const auto stock = Sha(0x51);
 		const std::vector variants{
 			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(vertex),
-				stock,
-				7
+				.variant = OwnShaderVariantKey(vertex),
+				.expectedStockSha1 = stock,
+				.routeGroup = 7,
+				.stage = ShaderStage::kVertex
 			},
 			PixelShaderSwapVariantKey{
 				std::nullopt,
@@ -509,9 +544,9 @@ namespace
 			.expectedLinkage =
 				reinterpret_cast<ID3D11ClassLinkage*>(&linkageToken),
 			.stock =
-				reinterpret_cast<ID3D11PixelShader*>(&stockToken),
+				reinterpret_cast<ID3D11DeviceChild*>(&stockToken),
 			.replacement =
-				reinterpret_cast<ID3D11PixelShader*>(&replacementToken)
+				reinterpret_cast<ID3D11DeviceChild*>(&replacementToken)
 		};
 		g_pipelineFixture = &fixture;
 		const std::array resolvers{
@@ -525,9 +560,9 @@ namespace
 			std::byte{ 3 },
 			std::byte{ 4 }
 		};
-		ID3D11PixelShader* output = nullptr;
+		ID3D11DeviceChild* output = nullptr;
 		cs::sha1::Sha1InitOnce();
-		const auto result = ExecutePixelShaderSwapPipeline(
+		const auto result = ExecuteShaderSwapPipeline(
 			&PipelineOriginal,
 			resolvers,
 			ShaderVariantKeyView{
@@ -536,6 +571,7 @@ namespace
 				ShaderVariantId{ 0x1234 }
 			},
 			false,
+			ShaderStage::kPixel,
 			fixture.expectedDevice,
 			bytecode.data(),
 			bytecode.size(),
@@ -557,11 +593,12 @@ namespace
 		{
 			ScopedPixelShaderBrokerBypass bypass;
 			Check(
-				ExecutePixelShaderSwapPipeline(
+				ExecuteShaderSwapPipeline(
 					&PipelineOriginal,
 					resolvers,
 					std::nullopt,
 					PixelShaderBrokerBypassActive(),
+					ShaderStage::kPixel,
 					fixture.expectedDevice,
 					bytecode.data(),
 					bytecode.size(),
@@ -579,11 +616,12 @@ namespace
 		fixture.originalResult = E_FAIL;
 		output = nullptr;
 		Check(
-			ExecutePixelShaderSwapPipeline(
+			ExecuteShaderSwapPipeline(
 				&PipelineOriginal,
 				resolvers,
 				std::nullopt,
 				false,
+				ShaderStage::kPixel,
 				fixture.expectedDevice,
 				bytecode.data(),
 				bytecode.size(),
@@ -609,11 +647,11 @@ namespace
 			.expectedLinkage =
 				reinterpret_cast<ID3D11ClassLinkage*>(&linkageToken),
 			.stock =
-				reinterpret_cast<ID3D11PixelShader*>(&stockToken),
+				reinterpret_cast<ID3D11DeviceChild*>(&stockToken),
 			.replacement =
-				reinterpret_cast<ID3D11PixelShader*>(&replacementToken),
+				reinterpret_cast<ID3D11DeviceChild*>(&replacementToken),
 			.firstResolverResult =
-				PixelShaderSwapResolverResult::kKeepStock
+				ShaderSwapResolverResult::kKeepStock
 		};
 		g_pipelineFixture = &fixture;
 		const std::array resolvers{
@@ -627,13 +665,14 @@ namespace
 			}
 		};
 		const std::array<std::byte, 1> bytecode{ std::byte{ 1 } };
-		ID3D11PixelShader* output = nullptr;
+		ID3D11DeviceChild* output = nullptr;
 		Check(
-			ExecutePixelShaderSwapPipeline(
+			ExecuteShaderSwapPipeline(
 				&PipelineOriginal,
 				resolvers,
 				std::nullopt,
 				false,
+				ShaderStage::kPixel,
 				fixture.expectedDevice,
 				bytecode.data(),
 				bytecode.size(),
@@ -645,15 +684,16 @@ namespace
 			"claimed stock route fell through to lower HLSL resolver");
 
 		fixture.firstResolverResult =
-			PixelShaderSwapResolverResult::kNoMatch;
+			ShaderSwapResolverResult::kNoMatch;
 		fixture.lowerResolverCalled = false;
 		output = nullptr;
 		Check(
-			ExecutePixelShaderSwapPipeline(
+			ExecuteShaderSwapPipeline(
 				&PipelineOriginal,
 				resolvers,
 				std::nullopt,
 				false,
+				ShaderStage::kPixel,
 				fixture.expectedDevice,
 				bytecode.data(),
 				bytecode.size(),
@@ -663,6 +703,54 @@ namespace
 				&& output == fixture.replacement
 				&& fixture.lowerResolverCalled,
 			"unmatched patch route did not reach lower HLSL resolver");
+	}
+
+	void TestResolverStageMask()
+	{
+		using namespace cs::engine;
+		std::byte deviceToken{};
+		std::byte linkageToken{};
+		std::byte stockToken{};
+		std::byte replacementToken{};
+		PipelineFixture fixture{
+			.expectedDevice =
+				reinterpret_cast<ID3D11Device*>(&deviceToken),
+			.expectedLinkage =
+				reinterpret_cast<ID3D11ClassLinkage*>(&linkageToken),
+			.stock =
+				reinterpret_cast<ID3D11DeviceChild*>(&stockToken),
+			.replacement =
+				reinterpret_cast<ID3D11DeviceChild*>(&replacementToken),
+			.expectedStage = ShaderStage::kVertex
+		};
+		g_pipelineFixture = &fixture;
+		const std::array resolvers{
+			PixelShaderSwapResolverRegistration{
+				.resolver = &PipelineResolver,
+				.stages = ShaderStageBit(ShaderStage::kPixel)
+			}
+		};
+		const std::array<std::byte, 1> bytecode{ std::byte{ 1 } };
+		ID3D11DeviceChild* output = nullptr;
+		Check(
+			ExecuteShaderSwapPipeline(
+				&PipelineOriginal,
+				resolvers,
+				std::nullopt,
+				false,
+				ShaderStage::kVertex,
+				fixture.expectedDevice,
+				bytecode.data(),
+				bytecode.size(),
+				fixture.expectedLinkage,
+				&output)
+				== S_OK,
+			"vertex pipeline changed the original result");
+		Check(
+			fixture.order == std::vector<int>{ 2 }
+				&& output == fixture.stock
+				&& !fixture.resolverForwarded,
+			"pixel resolver ran for a vertex shader");
 	}
 
 	void TestResolverRegistryGeneration()
@@ -714,6 +802,7 @@ int main()
 		{ "hashless variant refused", &TestHashlessVariantRefused },
 		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
 		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
+		{ "hash fallback is stage scoped", &TestHashFallbackIsStageScoped },
 		{ "variant key scope includes stage", &TestVariantKeyScopeIncludesStage },
 		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
 		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
@@ -721,6 +810,7 @@ int main()
 		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock },
 		{ "broker pipeline forwarding", &TestBrokerPipelineForwarding },
 		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority },
+		{ "resolver stage mask", &TestResolverStageMask },
 		{ "resolver registry generation", &TestResolverRegistryGeneration }
 	};
 

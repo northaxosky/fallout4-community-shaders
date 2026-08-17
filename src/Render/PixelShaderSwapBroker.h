@@ -21,8 +21,16 @@ namespace cs::engine
 	enum class ShaderStage : std::uint8_t
 	{
 		kVertex,
-		kPixel
+		kPixel,
+		kCount
 	};
+
+	using ShaderStageMask = std::uint32_t;
+
+	constexpr ShaderStageMask ShaderStageBit(ShaderStage a_stage) noexcept
+	{
+		return ShaderStageMask{ 1 } << static_cast<unsigned>(a_stage);
+	}
 
 	class ShaderVariantId
 	{
@@ -80,6 +88,7 @@ namespace cs::engine
 		std::optional<sha1::Sha1Result> expectedStockSha1;
 		std::size_t routeGroup = 0;
 		std::size_t replacementIndex = 0;
+		ShaderStage stage = ShaderStage::kPixel;
 	};
 
 	enum class PixelShaderSwapSelectionKind : std::uint8_t
@@ -102,7 +111,8 @@ namespace cs::engine
 	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
 		std::span<const PixelShaderSwapVariantKey> a_variants,
 		std::optional<ShaderVariantKeyView> a_variant,
-		const sha1::Sha1Result& a_stockSha1) noexcept;
+		const sha1::Sha1Result& a_stockSha1,
+		ShaderStage a_stage = ShaderStage::kPixel) noexcept;
 	bool ShaderVariantKeysConflict(
 		ShaderVariantKeyView a_left,
 		ShaderVariantKeyView a_right) noexcept;
@@ -110,16 +120,17 @@ namespace cs::engine
 		PixelShaderSwapSelectionKind a_selection,
 		bool a_replacementReady) noexcept;
 
-	struct PixelShaderSwapRequest
+	struct ShaderSwapRequest
 	{
 		ID3D11Device* device = nullptr;
 		ID3D11ClassLinkage* linkage = nullptr;
 		const void* bytecode = nullptr;
 		std::size_t bytecodeLength = 0;
+		ShaderStage stage = ShaderStage::kPixel;
 		std::optional<ShaderVariantKeyView> variant;
 		sha1::Sha1Result stockSha1;
-		ID3D11PixelShader* stockOutput = nullptr;
-		ID3D11PixelShader** output = nullptr;
+		ID3D11DeviceChild* stockOutput = nullptr;
+		ID3D11DeviceChild** output = nullptr;
 	};
 
 	struct PixelShaderRuntimeRoute
@@ -131,42 +142,44 @@ namespace cs::engine
 		std::optional<bool> tiledLighting;
 	};
 
-	enum class PixelShaderSwapResolverResult : std::uint8_t
+	enum class ShaderSwapResolverResult : std::uint8_t
 	{
 		kNoMatch,
 		kKeepStock,
 		kReplaced
 	};
 
-	using PixelShaderSwapResolver = PixelShaderSwapResolverResult (*)(
-		const PixelShaderSwapRequest& a_request) noexcept;
+	using ShaderSwapResolver = ShaderSwapResolverResult (*)(
+		const ShaderSwapRequest& a_request) noexcept;
 
 	struct PixelShaderSwapResolverRegistration
 	{
-		PixelShaderSwapResolver resolver = nullptr;
+		ShaderSwapResolver resolver = nullptr;
 		int priority = 0;
+		ShaderStageMask stages = ShaderStageBit(ShaderStage::kPixel);
 	};
 
 	inline constexpr int kEarlyResolverPriority = -100;
 	inline constexpr int kHlslReplacementResolverPriority = 0;
 
-	using CreatePixelShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+	using CreateShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
 		ID3D11Device*,
 		const void*,
 		SIZE_T,
 		ID3D11ClassLinkage*,
-		ID3D11PixelShader**);
+		ID3D11DeviceChild**);
 
-	HRESULT ExecutePixelShaderSwapPipeline(
-		CreatePixelShaderFunction a_original,
+	HRESULT ExecuteShaderSwapPipeline(
+		CreateShaderFunction a_original,
 		std::span<const PixelShaderSwapResolverRegistration> a_resolvers,
 		std::optional<ShaderVariantKeyView> a_variant,
 		bool a_bypass,
+		ShaderStage a_stage,
 		ID3D11Device* a_device,
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11PixelShader** a_output) noexcept;
+		ID3D11DeviceChild** a_output) noexcept;
 
 	struct PixelShaderResolverRegistryIdentity
 	{
@@ -194,7 +207,7 @@ namespace cs::engine
 		std::span<const PixelShaderResolverRegistryIdentity> a_identities);
 
 	void SetPixelShaderSwapBrokerDevice(ID3D11Device* a_device);
-	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver a_resolver);
+	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver a_resolver);
 	bool RegisterPixelShaderSwapResolver(
 		PixelShaderSwapResolverRegistration a_registration);
 	std::uintptr_t PixelShaderSwapBrokerCreateHookAddress() noexcept;

@@ -80,6 +80,7 @@ namespace cs::engine
 		std::string                          name;
 		std::vector<ShaderVariantKey>        variantKeys;
 		std::string                          expectedStockSha1;
+		ShaderStage                          stage = ShaderStage::kPixel;
 		ShaderVariantCompilationDescriptor   compilation;
 	};
 

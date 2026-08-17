@@ -34,7 +34,13 @@ namespace cs::engine
 		return {};
 	}
 
-	bool RegisterPixelShaderSwapResolver(PixelShaderSwapResolver)
+	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver)
+	{
+		return true;
+	}
+
+	bool RegisterPixelShaderSwapResolver(
+		PixelShaderSwapResolverRegistration)
 	{
 		return true;
 	}
@@ -165,6 +171,23 @@ namespace
 			});
 	}
 
+	bool RequiresStockHash(ShaderInjectionTarget a_target)
+	{
+		switch (a_target) {
+		case ShaderInjectionTarget::kDeferredPrepass:
+		case ShaderInjectionTarget::kBsdfLightDeferredPoint:
+		case ShaderInjectionTarget::kAmbientIblPass:
+		case ShaderInjectionTarget::kBsdfLightDeferredDirectional:
+		case ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl:
+		case ShaderInjectionTarget::kBsSky:
+		case ShaderInjectionTarget::kBsWater:
+		case ShaderInjectionTarget::kBsLighting:
+			return true;
+		default:
+			return false;
+		}
+	}
+
 }
 
 int main(int a_argc, char* a_argv[])
@@ -193,14 +216,59 @@ int main(int a_argc, char* a_argv[])
 	disabledSsgiAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
 	disabledSsgiAmbient.contributor = "ScreenSpaceGI";
 	disabledSsgiAmbient.bind = [](ID3D11DeviceContext*) {};
+	ShaderReplacementVariantRegistration mismatchedProfile;
+	mismatchedProfile.targetId = ShaderInjectionTarget::kDeferredComposite;
+	mismatchedProfile.name = "mismatched-profile";
+	mismatchedProfile.stage = ShaderStage::kVertex;
+	mismatchedProfile.compilation.sourcePath = L"registration-test.hlsl";
+	mismatchedProfile.compilation.entryPoint = "main";
+	mismatchedProfile.compilation.profile = "ps_5_0";
+	ok &= Check(
+		!RegisterReplacementVariant(std::move(mismatchedProfile)),
+		"vertex registration accepted a pixel profile");
+
+	auto vertexKeyRegistration = MakeRegistration(
+		"vertex-key-without-resolver",
+		1,
+		"1111111111111111111111111111111111111111");
+	vertexKeyRegistration.stage = ShaderStage::kVertex;
+	vertexKeyRegistration.variantKeys.front().stage =
+		ShaderStage::kVertex;
+	vertexKeyRegistration.compilation.profile = "vs_5_0";
+	ok &= Check(
+		!RegisterReplacementVariant(std::move(vertexKeyRegistration)),
+		"vertex registration accepted an inert variant key");
+
 	const auto staticFamilies = GetDefaultShaderReplacementVariants();
 	std::map<ShaderInjectionTarget, std::size_t, std::less<>> familyCounts;
+	std::map<ShaderInjectionTarget, std::size_t, std::less<>>
+		vertexFamilyCounts;
 	std::set<std::string, std::less<>> stockHashes;
 	for (const auto& registration : staticFamilies) {
-		if (!registration.expectedStockSha1.empty()) {
+		const auto expectedProfile =
+			registration.stage == ShaderStage::kVertex
+			? "vs_5_0"
+			: "ps_5_0";
+		ok &= Check(
+			registration.compilation.profile == expectedProfile,
+			"registration profile does not match its shader stage");
+		ok &= Check(
+			std::ranges::all_of(
+				registration.variantKeys,
+				[&registration](const ShaderVariantKey& a_key) {
+					return a_key.stage == registration.stage;
+				}),
+			"registration key does not match its shader stage");
+		if (RequiresStockHash(registration.targetId)) {
+			ok &= Check(
+				IsLowerHexSha1(registration.expectedStockSha1),
+				"baseline-ownable registration lacks a lowercase 40-hex stock hash");
+		} else if (!registration.expectedStockSha1.empty()) {
 			ok &= Check(
 				IsLowerHexSha1(registration.expectedStockSha1),
 				"stock hash is not lowercase 40-hex");
+		}
+		if (!registration.expectedStockSha1.empty()) {
 			ok &= Check(
 				stockHashes.insert(registration.expectedStockSha1).second,
 				"stock hash is claimed by more than one registration");
@@ -209,7 +277,10 @@ int main(int a_argc, char* a_argv[])
 		case ShaderInjectionTarget::kBsSky:
 		case ShaderInjectionTarget::kBsWater:
 		case ShaderInjectionTarget::kBsLighting:
-			++familyCounts[registration.targetId];
+			if (registration.stage == ShaderStage::kPixel)
+				++familyCounts[registration.targetId];
+			else
+				++vertexFamilyCounts[registration.targetId];
 			break;
 		default:
 			break;
@@ -224,6 +295,21 @@ int main(int a_argc, char* a_argv[])
 	ok &= Check(
 		familyCounts[ShaderInjectionTarget::kBsLighting] == 12,
 		"BSLighting registration count mismatch");
+	ok &= Check(
+		vertexFamilyCounts[ShaderInjectionTarget::kBsSky] == 7,
+		"BSSky vertex representative count mismatch");
+	ok &= Check(
+		vertexFamilyCounts[ShaderInjectionTarget::kBsWater] == 16,
+		"BSWater vertex representative count mismatch");
+	ok &= Check(
+		vertexFamilyCounts[ShaderInjectionTarget::kBsLighting] == 8,
+		"BSLighting vertex representative count mismatch");
+	ok &= Check(
+		staticFamilies.size() == 98,
+		"default shader replacement variant count mismatch");
+	ok &= Check(
+		stockHashes.size() == 96,
+		"default shader replacement variant non-empty stock hash count mismatch");
 
 	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 3>
 		kStaticFamilySources{ {

@@ -1,11 +1,53 @@
+#include "Log.h"
+#include "Render/ShaderInjection.h"
+#include "Render/ShaderInjectionDefines.h"
+#include "Render/ShaderVariantCompilation.h"
 #include "Utils/ShaderCompile.h"
+#include "generated/VertexShaderCompilePermutations.h"
 
 #include <array>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
+
+namespace cs::log
+{
+	spdlog::logger* Get(const char*)
+	{
+		return spdlog::default_logger_raw();
+	}
+}
+
+namespace cs::engine
+{
+	std::shared_ptr<ShaderVariantCompilationPolicy>
+		CreateEagerShaderVariantCompilationPolicy()
+	{
+		return {};
+	}
+
+	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver)
+	{
+		return true;
+	}
+
+	bool RegisterPixelShaderSwapResolver(
+		PixelShaderSwapResolverRegistration)
+	{
+		return true;
+	}
+
+	bool PixelShaderSwapBrokerHooksInstalled() noexcept
+	{
+		return true;
+	}
+
+	void EnsurePreSunLightDrawInstalled()
+	{}
+}
 
 namespace
 {
@@ -13,10 +55,10 @@ namespace
 
 	struct ShaderCase
 	{
-		const char*   path;
+		const char* path;
 		ShaderDefines defines;
-		const char*   profile{ "cs_5_0" };
-		const char*   entryPoint{ "main" };
+		const char* profile{ "cs_5_0" };
+		const char* entryPoint{ "main" };
 	};
 
 	int failures = 0;
@@ -55,19 +97,67 @@ namespace
 		Compile(a_root / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
 	}
 
+	void CompileRegistration(
+		const std::filesystem::path& a_root,
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
+		const ShaderDefines& a_contributorDefines)
+	{
+		cs::engine::ShaderInjectionDefines mergedDefines;
+		const auto* target =
+			cs::engine::GetShaderInjectionTarget(
+				a_registration.targetId);
+		if (!target) {
+			std::printf("FAIL: registration target metadata is missing\n");
+			++failures;
+			return;
+		}
+		for (const auto& define : target->baseDefines)
+			mergedDefines.emplace(define.name, define.value);
+		mergedDefines.insert(
+			a_registration.compilation.defines.begin(),
+			a_registration.compilation.defines.end());
+		for (const auto& [name, value] : a_contributorDefines)
+			mergedDefines.insert_or_assign(name, value);
+
+		ShaderDefines defines;
+		defines.reserve(mergedDefines.size());
+		for (const auto& [name, value] : mergedDefines)
+			defines.emplace_back(name.c_str(), value.c_str());
+		Compile(
+			a_root / a_registration.compilation.sourcePath,
+			defines,
+			a_registration.compilation.profile.c_str(),
+			a_registration.compilation.entryPoint.c_str());
+	}
+
 	void CompileLighting(const std::filesystem::path& a_root)
 	{
-		const std::array<ShaderCase, 16> cases{ {
-			{ "DeferredComposite.hlsl", {}, "ps_5_0" },
-			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
-			{ "VolumetricLighting.hlsl", {}, "ps_5_0" },
-			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" } }, "ps_5_0" },
-			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" }, { "TILELIGHT", "1" } }, "ps_5_0" },
-			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "1" } }, "ps_5_0" },
-			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "2" } }, "ps_5_0" },
+		const auto registrations =
+			cs::engine::GetDefaultShaderReplacementVariants();
+		for (const auto& registration : registrations)
+			CompileRegistration(a_root, registration, {});
+
+		const std::array<ShaderCase, 3> featureCompositionCases{ {
 			{
 				"BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "1" }, { "SCREEN_SPACE_SHADOWS", "1" } },
+				{
+					{ "BSDF_LIGHT_FAMILY", "9" },
+					{ "LIGHT_TYPE", "1" },
+					{
+						cs::engine::shader_injection_defines::
+							kScreenSpaceShadows,
+						"1"
+					}
+				},
+				"ps_5_0"
+			},
+			{
+				"BSDFLight.hlsl",
+				{
+					{ "AMBIENT_IBL_IN_LIGHT", "1" },
+					{ "BSDF_LIGHT_FAMILY", "9" },
+					{ "LIGHT_TYPE", "1" }
+				},
 				"ps_5_0"
 			},
 			{
@@ -76,10 +166,23 @@ namespace
 					{ "AMBIENT_IBL_IN_LIGHT", "1" },
 					{ "BSDF_LIGHT_FAMILY", "9" },
 					{ "LIGHT_TYPE", "1" },
-					{ "SCREEN_SPACE_SHADOWS", "1" }
+					{
+						cs::engine::shader_injection_defines::
+							kScreenSpaceShadows,
+						"1"
+					}
 				},
 				"ps_5_0"
-			},
+			}
+		} };
+		const std::array<ShaderCase, 14> explicitSourceCases{ {
+			{ "DeferredComposite.hlsl", {}, "ps_5_0" },
+			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
+			{ "VolumetricLighting.hlsl", {}, "ps_5_0" },
+			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" } }, "ps_5_0" },
+			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" }, { "TILELIGHT", "1" } }, "ps_5_0" },
+			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "1" } }, "ps_5_0" },
+			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "2" } }, "ps_5_0" },
 			{ "BSDFLight.hlsl",
 				{ { "BSDF_LIGHT_FAMILY", "1" }, { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
 					{ "RGBSPEC", "1" }, { "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
@@ -110,15 +213,97 @@ namespace
 					{ "DIRSPLITS", "2" } },
 				"ps_5_0" }
 		} };
+		const auto compileCases = [&a_root](const auto& a_cases) {
+			for (const auto& shader : a_cases) {
+				Compile(
+					a_root / shader.path,
+					shader.defines,
+					shader.profile,
+					shader.entryPoint);
+			}
+		};
+		compileCases(featureCompositionCases);
+		compileCases(explicitSourceCases);
 
-		for (const auto& shader : cases) {
-			Compile(
-				a_root / shader.path,
-				shader.defines,
-				shader.profile,
-				shader.entryPoint);
+		using namespace cs::engine::shader_injection_defines;
+		const std::array<ShaderDefines, 3> directionalCompositions{ {
+			{ { kScreenSpaceShadows, "1" } },
+			{ { kWetnessEffects, "1" } },
+			{
+				{ kScreenSpaceShadows, "1" },
+				{ kWetnessEffects, "1" }
+			}
+		} };
+		const std::array<ShaderDefines, 3> ambientCompositions{ {
+			{ { kScreenSpaceGi, "1" } },
+			{ { kWetnessEffects, "1" } },
+			{
+				{ kScreenSpaceGi, "1" },
+				{ kWetnessEffects, "1" }
+			}
+		} };
+		std::size_t contributorCompositionCount = 0;
+		for (const auto& registration : registrations) {
+			const auto* compositions =
+				registration.targetId
+						== cs::engine::ShaderInjectionTarget::
+							kBsdfLightDeferredDirectional
+					|| registration.targetId
+						== cs::engine::ShaderInjectionTarget::
+							kBsdfLightDeferredDirectionalIbl
+				? &directionalCompositions
+				: nullptr;
+			if (compositions) {
+				for (const auto& defines : *compositions) {
+					CompileRegistration(a_root, registration, defines);
+					++contributorCompositionCount;
+				}
+			}
+			if (registration.targetId
+				== cs::engine::ShaderInjectionTarget::kAmbientIblPass) {
+				for (const auto& defines : ambientCompositions) {
+					CompileRegistration(a_root, registration, defines);
+					++contributorCompositionCount;
+				}
+			}
 		}
-		std::printf("ShaderCompile checked %zu lighting permutations\n", cases.size());
+		std::printf(
+			"ShaderCompile checked %zu registration-derived and %zu explicit permutations\n",
+			registrations.size(),
+			featureCompositionCases.size() + explicitSourceCases.size()
+				+ contributorCompositionCount);
+	}
+
+	const char* SourceForVertexFamily(const char* a_family)
+	{
+		const std::string family(a_family);
+		if (family == "BSSky")
+			return "BSSkyShader.hlsl";
+		if (family == "BSWater")
+			return "BSWaterShader.hlsl";
+		if (family == "BSLighting")
+			return "BSLightingShader.hlsl";
+		return nullptr;
+	}
+
+	void CompileVertexPermutations(const std::filesystem::path& a_root)
+	{
+		const auto permutations =
+			cs::test::shader_compile::GetVertexShaderCompilePermutations();
+		for (const auto& permutation : permutations) {
+			const auto* source = SourceForVertexFamily(permutation.family);
+			if (!source) {
+				std::printf(
+					"FAIL: unknown vertex permutation family '%s'\n",
+					permutation.family);
+				++failures;
+				continue;
+			}
+			Compile(a_root / source, permutation.defines, "vs_5_0", "main");
+		}
+		std::printf(
+			"ShaderCompile checked %zu vertex permutations\n",
+			permutations.size());
 	}
 }
 
@@ -133,6 +318,7 @@ int main(int argc, char** argv)
 
 	CompileScreenSpaceGI(argv[1]);
 	CompileLighting(argv[2]);
+	CompileVertexPermutations(argv[2]);
 
 	if (failures == 0)
 		std::printf("ShaderCompile passed\n");

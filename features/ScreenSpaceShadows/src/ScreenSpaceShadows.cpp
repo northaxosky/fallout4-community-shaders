@@ -25,6 +25,7 @@
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
+#include "Render/ShaderInjectionDefines.h"
 #include "ScreenSpaceShadowsMath.h"
 #include "Settings/FeatureConfig.h"
 #include "SssMaskBinding.h"
@@ -240,7 +241,13 @@ namespace cs::features
 				return cs::engine::RegisterReplacement({
 					.targetId = a_target,
 					.contributor = "ScreenSpaceShadows",
-					.defines = { { "SCREEN_SPACE_SHADOWS", "1" } },
+					.defines = {
+						{
+							cs::engine::shader_injection_defines::
+								kScreenSpaceShadows,
+							"1"
+						}
+					},
 					.isReady = [this] {
 						return IsShadowMaskReady();
 					},

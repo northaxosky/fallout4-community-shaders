@@ -44,9 +44,9 @@ checks reject a family selector paired with the wrong native macro set.
 | `BSDFPrePass.hlsl` | G-buffer fill hosted by `DrawWorld::DeferredPrePass` | Writes six MRT outputs: albedo, octahedral normal, material data, two auxiliary buffers, and motion vectors. |
 | `DeferredComposite.hlsl` | Final combine hosted by `DrawWorld::DeferredComposite` | Reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, and `kSpecularBuffer=59`; writes `kMain=3`. |
 | `VolumetricLighting.hlsl` | VLS slice-scatter pass hosted by `ImageSpaceEffectVLSLight::Render` | Reads linear depth at `t7`; writes one slice-accumulation target through `SV_Target0`. |
-| `BSSkyShader.hlsl` | `BSSkyShader` pixel permutations | Nine stock-container routes selected by exact SHA-1. |
-| `BSWaterShader.hlsl` | `BSWaterShader` pixel permutations | Thirty-eight stock-container routes selected by exact SHA-1. |
-| `BSLightingShader.hlsl` | `BSLightingShader` pixel permutations | Twelve stock-container routes selected by exact SHA-1. |
+| `BSSkyShader.hlsl` | `BSSkyShader` pixel and vertex permutations | Nine pixel and seven vertex routes selected by exact SHA-1. |
+| `BSWaterShader.hlsl` | `BSWaterShader` pixel and vertex permutations | Thirty-eight pixel and sixteen vertex routes selected by exact SHA-1. |
+| `BSLightingShader.hlsl` | `BSLightingShader` pixel and vertex permutations | Twelve pixel and eight vertex routes selected by exact SHA-1. |
 
 ## Permutations
 
@@ -65,9 +65,9 @@ From the repository root, run:
 ctest --test-dir build -C Release -R ShaderCompile
 ```
 
-`ShaderCompile` compiles all 16 shipping lighting permutations through
-`D3DCompile`, the same compiler used by runtime shader compilation. Keep this
-test green when editing any file in this directory.
+`ShaderCompile` compiles every registered shipping permutation plus explicit
+feature-composition, source-family, and all 111 vertex permutations through
+`D3DCompile`. Keep this test green when editing any file in this directory.
 
 ## Delivery caveat
 
@@ -78,5 +78,5 @@ opt-in: `[shader_ownership]` is disabled by default in
 
 A shader can therefore compile and ship without being exercised at runtime.
 
-Only the pixel stages of BSSky, BSWater, and BSLighting are registered; the
-plugin has no vertex-shader replacement path.
+The replacement broker supports pixel and vertex stages. Vertex routes are
+hash-only, and each device hook installs only when its stage is requested.
