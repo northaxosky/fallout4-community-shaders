@@ -65,9 +65,9 @@ extern "C" DLLEXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 	data.UsesSigScanning(false);
 	data.IsLayoutDependent(true);
 	data.HasNoStructUse(false);
-	// Audit the REL::ID(...).address() + offsets[runtimeIdx] sites before widening this.
-	// GetRuntimeIndex never refuses an unknown build; it resolves to AE, so stale
-	// intra-function offsets would be patched into a newer binary with no error.
+	// Audit the 12 REL::ID(...).address() + offsets[runtimeIdx] sites before widening this
+	// (Upscaling 9, RenderHooks 2, MotionVectorFixes 1). GetRuntimeIndex never refuses an
+	// unknown build — it resolves to AE, so stale offsets patch a newer binary silently.
 	data.CompatibleVersions({ F4SE::RUNTIME_LATEST });
 
 	return data;
