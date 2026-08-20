@@ -13,6 +13,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -310,6 +311,15 @@ namespace
 				registration,
 				{},
 				&uniqueRegistrationInputs);
+		if (uniqueRegistrationInputs.size() != registrations.size()) {
+			AddPreparationFailure(
+				a_jobs,
+				"base registration compile inputs",
+				"Expected " + std::to_string(registrations.size())
+					+ " unique inputs, found "
+					+ std::to_string(
+						uniqueRegistrationInputs.size()));
+		}
 
 		const std::array<ShaderCase, 3> featureCompositionCases{ {
 			{
@@ -425,16 +435,28 @@ namespace
 		};
 	}
 
-	const char* SourceForVertexFamily(const char* a_family)
+	struct VertexFamilySource
 	{
-		const std::string family(a_family);
-		if (family == "BSSky")
-			return "BSSkyShader.hlsl";
-		if (family == "BSWater")
-			return "BSWaterShader.hlsl";
-		if (family == "BSLighting")
-			return "BSLightingShader.hlsl";
-		return nullptr;
+		std::string_view family;
+		const char* source;
+	};
+
+	constexpr std::array kVertexFamilySources{
+		VertexFamilySource{ "BSSky", "BSSkyShader.hlsl" },
+		VertexFamilySource{ "BSWater", "BSWaterShader.hlsl" },
+		VertexFamilySource{ "BSLighting", "BSLightingShader.hlsl" }
+	};
+
+	const VertexFamilySource* SourceForVertexFamily(
+		std::string_view a_family)
+	{
+		const auto family = std::ranges::find(
+			kVertexFamilySources,
+			a_family,
+			&VertexFamilySource::family);
+		return family == kVertexFamilySources.end() ?
+			nullptr :
+			&*family;
 	}
 
 	std::size_t AddVertexPermutations(
@@ -449,9 +471,11 @@ namespace
 				"vertex shader permutations",
 				"No vertex shader permutations were discovered");
 		}
+		std::array<bool, kVertexFamilySources.size()> represented{};
 		for (const auto& permutation : permutations) {
-			const auto* source = SourceForVertexFamily(permutation.family);
-			if (!source) {
+			const auto* family =
+				SourceForVertexFamily(permutation.family);
+			if (!family) {
 				AddPreparationFailure(
 					a_jobs,
 					"vertex " + std::string(permutation.label),
@@ -459,18 +483,32 @@ namespace
 						+ std::string(permutation.family) + "'");
 				continue;
 			}
+			const auto familyIndex = static_cast<std::size_t>(
+				family - kVertexFamilySources.data());
+			represented[familyIndex] = true;
 			ShaderDefines defines;
 			defines.reserve(permutation.defines.size());
 			for (const auto& [name, value] : permutation.defines)
 				defines.emplace_back(name, value);
 			AddCompile(
 				a_jobs,
-				a_root / source,
+				a_root / family->source,
 				std::move(defines),
 				"vs_5_0",
 				"main",
 				"vertex " + std::string(permutation.family)
 					+ "/" + permutation.label);
+		}
+		for (std::size_t index = 0;
+			index < kVertexFamilySources.size();
+			++index) {
+			if (represented[index])
+				continue;
+			AddPreparationFailure(
+				a_jobs,
+				"vertex family "
+					+ std::string(kVertexFamilySources[index].family),
+				"No vertex shader permutations were discovered for this family");
 		}
 		return permutations.size();
 	}
