@@ -65,14 +65,14 @@ Texture2D<float4> g_tAmbientProbeB : register(t12);
 #endif
 #endif
 #ifdef WETNESS_EFFECTS
-Texture2D<float> g_tWetnessMask : register(t17);
+Texture2D<float> g_tWetnessMask : register(t25);
 #endif
 Texture2D<float4> g_tLitScene : register(t14);
 #if AMBIENT_SUBSURFACE_BLUR
 Texture2D<float4> g_tBlurDepthRef : register(t15);
 #endif
 #ifdef SSGI
-Texture2D<float4> g_tSSGIBounce : register(t18);
+Texture2D<float4> g_tSSGIBounce : register(t26);
 #endif
 SamplerState g_sGbufferNormal      : register(s1);
 SamplerState g_sGbufferMaterial    : register(s2);
@@ -381,7 +381,7 @@ Texture2D<float4> g_tBlurredSslr         : register(t12);
 #endif
 #endif
 #ifdef WETNESS_EFFECTS
-Texture2D<float> g_tWetnessMask : register(t17);
+Texture2D<float> g_tWetnessMask : register(t25);
 #endif
 Texture2D<float4> g_tLitScene            : register(t14);
 #if FO4_SKIN_BLUR
@@ -389,7 +389,7 @@ Texture2D<float4> g_tBlurDepthRef        : register(t15);
 #endif
 
 #ifdef SSGI
-Texture2D<float4> g_tSSGIBounce : register(t18);
+Texture2D<float4> g_tSSGIBounce : register(t26);
 #endif
 
 SamplerState g_sGbufferNormal      : register(s1);

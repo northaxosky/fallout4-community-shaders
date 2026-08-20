@@ -664,11 +664,11 @@ SamplerComparisonState g_sCascadeShadowCmp : register(s5);
 
 #ifdef SCREEN_SPACE_SHADOWS
 
-Texture2D<float> g_tScreenSpaceShadow : register(t16);
+Texture2D<float> g_tScreenSpaceShadow : register(t24);
 #endif
 
 #ifdef WETNESS_EFFECTS
-Texture2D<float> g_tWetnessMask : register(t17);
+Texture2D<float> g_tWetnessMask : register(t25);
 #endif
 
 static const float2 SUN_SHADOW_POISSON[32] =

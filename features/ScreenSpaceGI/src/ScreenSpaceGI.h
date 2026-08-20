@@ -152,7 +152,7 @@ namespace cs::features
 			std::uint32_t a_sourceHeight,
 			std::uint32_t a_frameIndex);
 
-		static constexpr std::uint32_t kBouncePSSlot = 18;
+		static constexpr std::uint32_t kBouncePSSlot = 26;
 		static constexpr std::uint32_t kBounceTelemetryWidth = 64;
 		static constexpr std::uint32_t kBounceTelemetryHeight = 36;
 		static constexpr std::uint32_t kBounceTelemetryIntervalFrames = 30;

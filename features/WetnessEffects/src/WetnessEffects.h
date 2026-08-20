@@ -78,7 +78,7 @@ namespace cs::features
 			std::uint32_t a_sourceHeight,
 			std::uint32_t a_frameIndex);
 
-		static constexpr std::uint32_t kMaskPSSlot = 17;
+		static constexpr std::uint32_t kMaskPSSlot = 25;
 		static constexpr std::uint32_t kTelemetryWidth = 64;
 		static constexpr std::uint32_t kTelemetryHeight = 36;
 		static constexpr std::uint32_t kTelemetryIntervalFrames = 30;
