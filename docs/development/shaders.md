@@ -87,6 +87,57 @@ shared substrate in active and inactive modes through `D3DCompile`.
 gate and its exact b5/b6-only resource footprint. Keep both green when editing
 any file in this directory.
 
+## Disk shader cache
+
+Injected shaders compile through the caching policy, which keeps validated DXBC
+under `Data/ShaderCache/FO4CommunityShaders/content-v1/<stage>/<xx>/<digest>.fxc`.
+Nothing else in `Data/ShaderCache` is ever touched or removed.
+
+A record is only reused when the whole compile still matches:
+
+- The filename is the SHA-256 of the logical recipe — source locator, ordered
+  include roots, ordered defines, entry point, profile, stage, compile flags and
+  the SHA-256 of the loaded `d3dcompiler` module. Changing any of them addresses
+  a different record, and the record repeats those digests so a swapped or
+  hand-copied file is rejected rather than trusted.
+- Each record carries the resolution trace of the compile that produced it: the
+  root source digest, and for every `#include` each candidate path tried in
+  order with its outcome. On lookup every entry is replayed. An edited source or
+  header, an unreadable dependency, or a **new file appearing at a
+  higher-priority candidate path** is a miss, so a shadowing header cannot be
+  silently ignored.
+- Corrupt, truncated, over-large or future-version records fall through to a
+  normal compile. Failed compiles are never written.
+
+Records are published by writing a uniquely named temp file next to the target
+and renaming it over it, so a concurrent reader or a second game process never
+sees a partial record. A publication failure only costs the next run a recompile;
+it never changes the shader that was just compiled.
+
+Each startup revalidates against one snapshot. The caching policy owns a
+revalidation context for the duration of a freeze batch, so every unique source
+and include path is read and hashed exactly once no matter how many recipes name
+it, and every record in that batch is judged against the same observation.
+Freshness is decided by content SHA-256 alone — never by timestamp or by size on
+its own — and a length only ever travels with the digest it belongs to. Code that
+passes no context keeps reading each dependency afresh on every lookup.
+
+### Stale entries
+
+There is no startup sweep in v1, by choice. A record for a currently disabled
+feature is still a valid record: turning the feature back on should hit the cache
+rather than pay for a recompile, and a sweep would delete exactly those entries.
+Entries are content-addressed, so an orphan left behind by an edited shader costs
+disk space and nothing else — it can never be mistaken for a live record. Users
+who want that space back may delete `Data\ShaderCache\FO4CommunityShaders`, and
+only that directory; everything in it is rebuilt on the next run.
+
+Editing HLSL therefore needs no cache cleaning. `ctest -R ShaderCache` covers the
+behaviour above. `ShaderCacheBenchmarkTests` is a separate executable, run by
+`ctest -R ShaderCacheBenchmark`: it compiles every shipping registration with the
+plain `CompileShaderToBlob` oracle, then cold, then warm, and requires all three
+to be byte-identical before reporting the wall time each path took.
+
 ## Delivery caveat
 
 Reconstruction is not delivery. A shader executes only when the engine draws

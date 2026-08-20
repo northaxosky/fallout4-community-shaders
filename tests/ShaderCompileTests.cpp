@@ -34,7 +34,7 @@ namespace cs::log
 namespace cs::engine
 {
 	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateEagerShaderVariantCompilationPolicy()
+		CreateCachingShaderVariantCompilationPolicy()
 	{
 		return {};
 	}

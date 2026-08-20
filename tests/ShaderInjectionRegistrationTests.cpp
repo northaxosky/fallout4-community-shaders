@@ -48,7 +48,7 @@ namespace cs::render
 namespace cs::engine
 {
 	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateEagerShaderVariantCompilationPolicy()
+		CreateCachingShaderVariantCompilationPolicy()
 	{
 		return {};
 	}

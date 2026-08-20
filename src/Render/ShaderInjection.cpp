@@ -750,11 +750,12 @@ namespace cs::engine
 
 			if (result.state == ShaderVariantCompilationState::kReady) {
 				L->info(
-					"Compile '{}/{}' ok: {} bytes, dxbc-sha1={}",
+					"Compile '{}/{}' ok: {} bytes, dxbc-sha1={}, source={}",
 					a_target.metadata->name,
 					a_variant.name,
 					result.bytecodeSize,
-					result.compiledSha1);
+					result.compiledSha1,
+					result.servedFromCache ? "cache" : "compiler");
 			} else {
 				L->info(
 					"Compile '{}/{}' pending.",
@@ -1318,7 +1319,7 @@ namespace cs::engine
 		sha1::Sha1InitOnce();
 		auto plan = std::make_shared<PublishedPlan>();
 		plan->compilationPolicy =
-			CreateEagerShaderVariantCompilationPolicy();
+			CreateCachingShaderVariantCompilationPolicy();
 		std::size_t compileRequested = 0;
 		std::size_t compileSucceeded = 0;
 		std::size_t swappableVariants = 0;

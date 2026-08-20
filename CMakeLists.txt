@@ -164,6 +164,27 @@ function(configure_host_test TARGET_NAME)
 	endif()
 endfunction()
 
+# Device-independent shader cache; shared by the plugin glob and the host tests.
+set(FO4CS_SHADER_CACHE_SOURCES
+	src/Utils/ShaderCache/ByteCodec.h
+	src/Utils/ShaderCache/CacheRecord.cpp
+	src/Utils/ShaderCache/CacheRecord.h
+	src/Utils/ShaderCache/CacheStorage.cpp
+	src/Utils/ShaderCache/CacheStorage.h
+	src/Utils/ShaderCache/CompilerIdentity.cpp
+	src/Utils/ShaderCache/CompilerIdentity.h
+	src/Utils/ShaderCache/DependencyTrace.cpp
+	src/Utils/ShaderCache/DependencyTrace.h
+	src/Utils/ShaderCache/RevalidationContext.cpp
+	src/Utils/ShaderCache/RevalidationContext.h
+	src/Utils/ShaderCache/ShaderCache.cpp
+	src/Utils/ShaderCache/ShaderCache.h
+	src/Utils/ShaderCache/ShaderRecipe.cpp
+	src/Utils/ShaderCache/ShaderRecipe.h
+	src/Utils/ShaderCache/SourceCompile.cpp
+	src/Utils/ShaderCache/SourceCompile.h
+)
+
 add_executable(FeatureConfigTests
 	tests/FeatureConfigTests.cpp
 	src/Settings/FeatureConfig.cpp
@@ -309,6 +330,62 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/tests/shaders"
 	)
 	set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
+
+	add_executable(ShaderCacheBenchmarkTests
+		tests/ShaderCacheBenchmarkTests.cpp
+		src/Render/ShaderInjection.cpp
+		src/Render/ShaderInjectionCompileRequest.cpp
+		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
+		src/Render/ShaderInjectionStaticFamilyRegistrations.h
+		src/Render/ShaderInjectionVariantFactory.cpp
+		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/PixelShaderSwapModel.cpp
+		src/Utils/CSSha1.cpp
+		src/Utils/CSSha256.cpp
+		src/Utils/CSSha256.h
+		src/Utils/ShaderCompile.cpp
+		src/Utils/ShaderCompile.h
+		${FO4CS_SHADER_CACHE_SOURCES}
+	)
+	configure_host_test(ShaderCacheBenchmarkTests)
+	target_precompile_headers(ShaderCacheBenchmarkTests PRIVATE
+		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+	)
+	target_compile_definitions(ShaderCacheBenchmarkTests PRIVATE
+		_WINDOWS
+		_AMD64_
+		_UNICODE
+		COMMONLIB_RUNTIMECOUNT=3
+	)
+	target_include_directories(ShaderCacheBenchmarkTests BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
+		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/tests"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+	)
+	target_include_directories(ShaderCacheBenchmarkTests SYSTEM PRIVATE
+		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
+	)
+	target_link_libraries(ShaderCacheBenchmarkTests PRIVATE
+		CommonLibF4::CommonLibF4
+		Microsoft::DirectXTK
+		Microsoft::DirectX-Headers
+		bcrypt.lib
+		d3dcompiler.lib
+		imgui::imgui
+		magic_enum::magic_enum
+		spdlog::spdlog
+		tomlplusplus::tomlplusplus
+	)
+
+	add_test(
+		NAME ShaderCacheBenchmark
+		COMMAND ShaderCacheBenchmarkTests "${CMAKE_SOURCE_DIR}/package/Shaders"
+	)
+	set_tests_properties(ShaderCacheBenchmark PROPERTIES LABELS "shader;cache;benchmark")
 endif()
 
 add_executable(PixelShaderSwapTests
@@ -330,6 +407,20 @@ target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
 set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
+
+add_executable(ShaderCacheTests
+	tests/ShaderCacheTests.cpp
+	src/Utils/CSSha256.cpp
+	src/Utils/CSSha256.h
+	src/Utils/ShaderCompile.cpp
+	src/Utils/ShaderCompile.h
+	${FO4CS_SHADER_CACHE_SOURCES}
+)
+configure_host_test(ShaderCacheTests)
+target_link_libraries(ShaderCacheTests PRIVATE bcrypt.lib d3dcompiler.lib)
+
+add_test(NAME ShaderCache COMMAND ShaderCacheTests)
+set_tests_properties(ShaderCache PROPERTIES LABELS "shader;cache;unit")
 
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests

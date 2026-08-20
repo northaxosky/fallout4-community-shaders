@@ -51,6 +51,7 @@ namespace cs::engine
 		std::shared_ptr<ShaderVariantCompilationHandle> handle;
 		std::size_t bytecodeSize = 0;
 		std::string compiledSha1;
+		bool servedFromCache = false;
 		std::string error;
 	};
 
@@ -65,4 +66,8 @@ namespace cs::engine
 
 	std::shared_ptr<ShaderVariantCompilationPolicy>
 		CreateEagerShaderVariantCompilationPolicy();
+
+	// Reuses validated disk-cached bytecode when the recorded inputs still match.
+	std::shared_ptr<ShaderVariantCompilationPolicy>
+		CreateCachingShaderVariantCompilationPolicy();
 }
