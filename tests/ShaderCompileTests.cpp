@@ -10,9 +10,13 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <d3d11shader.h>
+#include <d3dcompiler.h>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <set>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -82,6 +86,13 @@ namespace
 		const char* entryPoint{ "main" };
 	};
 
+	enum class SubstrateExpectation
+	{
+		kNone,
+		kAbsent,
+		kPresent
+	};
+
 	struct ShaderCompileJob
 	{
 		std::filesystem::path path;
@@ -90,6 +101,8 @@ namespace
 		std::string           entryPoint;
 		std::string           description;
 		std::string           preparationError;
+		SubstrateExpectation  substrateExpectation =
+			SubstrateExpectation::kNone;
 	};
 
 	struct ShaderCompileResult
@@ -116,7 +129,9 @@ namespace
 		ShaderDefines a_defines,
 		const char* a_profile = "cs_5_0",
 		const char* a_entryPoint = "main",
-		std::string a_context = {})
+		std::string a_context = {},
+		SubstrateExpectation a_substrateExpectation =
+			SubstrateExpectation::kNone)
 	{
 		std::string description = a_context.empty() ?
 			a_path.string() :
@@ -134,7 +149,8 @@ namespace
 			.defines = std::move(a_defines),
 			.profile = a_profile,
 			.entryPoint = a_entryPoint,
-			.description = std::move(description)
+			.description = std::move(description),
+			.substrateExpectation = a_substrateExpectation
 		});
 	}
 
@@ -147,6 +163,132 @@ namespace
 			.description = std::move(a_description),
 			.preparationError = std::move(a_error)
 		});
+	}
+
+	struct ExpectedVariable
+	{
+		const char* name;
+		UINT        offset;
+		UINT        size;
+	};
+
+	std::string ValidateConstantBuffer(
+		ID3D11ShaderReflection* a_reflection,
+		const char* a_name,
+		UINT a_bindPoint,
+		UINT a_size,
+		std::span<const ExpectedVariable> a_variables)
+	{
+		D3D11_SHADER_DESC shaderDesc{};
+		if (FAILED(a_reflection->GetDesc(&shaderDesc)))
+			return "shared substrate reflection description failed";
+
+		std::optional<D3D11_SHADER_INPUT_BIND_DESC> binding;
+		for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
+			D3D11_SHADER_INPUT_BIND_DESC candidate{};
+			if (SUCCEEDED(a_reflection->GetResourceBindingDesc(
+					index,
+					&candidate))
+				&& candidate.Type == D3D_SIT_CBUFFER
+				&& candidate.BindPoint == a_bindPoint) {
+				binding = candidate;
+				break;
+			}
+		}
+		if (!binding)
+			return std::string("missing reflected binding b")
+				+ std::to_string(a_bindPoint);
+		if (binding->BindCount != 1) {
+			return std::string("unexpected binding for ") + a_name;
+		}
+
+		auto* buffer = a_reflection->GetConstantBufferByName(binding->Name);
+		D3D11_SHADER_BUFFER_DESC bufferDesc{};
+		if (!buffer || FAILED(buffer->GetDesc(&bufferDesc)))
+			return std::string("missing reflected cbuffer ") + a_name;
+		if (bufferDesc.Size != a_size
+			|| bufferDesc.Variables != a_variables.size()) {
+			return std::string("unexpected reflected layout for ") + a_name;
+		}
+
+		for (std::size_t index = 0; index < a_variables.size(); ++index) {
+			const auto& expected = a_variables[index];
+			auto* variable = buffer->GetVariableByIndex(
+				static_cast<UINT>(index));
+			D3D11_SHADER_VARIABLE_DESC variableDesc{};
+			if (!variable || FAILED(variable->GetDesc(&variableDesc))) {
+				return std::string("missing reflected variable ")
+					+ a_name + "." + expected.name;
+			}
+			if (variableDesc.StartOffset != expected.offset
+				|| variableDesc.Size != expected.size) {
+				return std::string("unexpected reflected variable layout ")
+					+ a_name + "." + expected.name;
+			}
+		}
+		return {};
+	}
+
+	std::string ValidateSubstrateReflection(
+		ID3DBlob* a_blob,
+		SubstrateExpectation a_expectation)
+	{
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(
+				a_blob->GetBufferPointer(),
+				a_blob->GetBufferSize(),
+				__uuidof(ID3D11ShaderReflection),
+				reinterpret_cast<void**>(reflection.GetAddressOf())))) {
+			return "D3DReflect failed for the shared substrate probe";
+		}
+
+		D3D11_SHADER_DESC shaderDesc{};
+		if (FAILED(reflection->GetDesc(&shaderDesc)))
+			return "shared substrate reflection description failed";
+		if (a_expectation == SubstrateExpectation::kAbsent) {
+			if (shaderDesc.ConstantBuffers != 0
+				|| shaderDesc.BoundResources != 0) {
+				return "inactive shared substrate probe emitted resources";
+			}
+			return {};
+		}
+
+		constexpr std::array sharedVariables{
+			ExpectedVariable{ "CameraData", 0, 16 },
+			ExpectedVariable{ "BufferDim", 16, 16 },
+			ExpectedVariable{ "DynamicResolution", 32, 16 },
+			ExpectedVariable{ "NDCToViewMul", 48, 16 },
+			ExpectedVariable{ "NDCToViewAdd", 64, 16 },
+			ExpectedVariable{ "SunDirection", 80, 16 },
+			ExpectedVariable{ "Timer", 96, 4 },
+			ExpectedVariable{ "DeltaTime", 100, 4 },
+			ExpectedVariable{ "FrameCount", 104, 4 },
+			ExpectedVariable{ "InInterior", 108, 4 }
+		};
+		constexpr std::array featureVariables{
+			ExpectedVariable{ "screenSpaceShadowsSettings", 0, 16 },
+			ExpectedVariable{ "screenSpaceGISettings", 16, 16 },
+			ExpectedVariable{ "wetnessEffectsSettings", 32, 16 }
+		};
+		if (shaderDesc.ConstantBuffers != 2
+			|| shaderDesc.BoundResources != 2) {
+			return "active shared substrate probe emitted the wrong resource count";
+		}
+		if (auto error = ValidateConstantBuffer(
+				reflection.Get(),
+				"SharedData",
+				5,
+				112,
+				sharedVariables);
+			!error.empty()) {
+			return error;
+		}
+		return ValidateConstantBuffer(
+			reflection.Get(),
+			"FeatureData",
+			6,
+			48,
+			featureVariables);
 	}
 
 	ShaderCompileResult Compile(const ShaderCompileJob& a_job)
@@ -167,7 +309,16 @@ namespace
 			a_job.profile.c_str(),
 			a_job.entryPoint.c_str(),
 			&error);
-		return { blob ? std::string{} : std::move(error) };
+		if (!blob)
+			return { std::move(error) };
+		if (a_job.substrateExpectation != SubstrateExpectation::kNone) {
+			return {
+				ValidateSubstrateReflection(
+					blob.Get(),
+					a_job.substrateExpectation)
+			};
+		}
+		return {};
 	}
 
 	int CompileAll(const std::vector<ShaderCompileJob>& a_jobs)
@@ -213,6 +364,30 @@ namespace
 			++failures;
 		}
 		return failures;
+	}
+
+	std::size_t AddSharedDataProbes(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
+	{
+		const auto probe = a_root / "SharedDataProbe.hlsl";
+		AddCompile(
+			a_jobs,
+			probe,
+			{},
+			"ps_5_0",
+			"main",
+			"shared substrate inactive",
+			SubstrateExpectation::kAbsent);
+		AddCompile(
+			a_jobs,
+			probe,
+			{ { "FO4CS_SUBSTRATE", "1" } },
+			"ps_5_0",
+			"main",
+			"shared substrate active",
+			SubstrateExpectation::kPresent);
+		return 2;
 	}
 
 	std::size_t AddScreenSpaceGI(
@@ -531,18 +706,22 @@ namespace
 
 int main(int argc, char** argv)
 {
-	if (argc != 3) {
+	if (argc != 4) {
 		std::fprintf(
 			stderr,
-			"Usage: ShaderCompileTests <ScreenSpaceGI shader directory> <lighting shader directory>\n");
+			"Usage: ShaderCompileTests <ScreenSpaceGI shader directory> <lighting shader directory> <test shader directory>\n");
 		return 2;
 	}
 
 	std::vector<ShaderCompileJob> jobs;
+	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[3]);
 	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
 	const auto lightingCounts = AddLighting(jobs, argv[2]);
 	const auto vertexCount = AddVertexPermutations(jobs, argv[2]);
 
+	std::printf(
+		"ShaderCompile checked %zu shared substrate probes\n",
+		sharedDataCount);
 	std::printf(
 		"ShaderCompile checked %zu ScreenSpaceGI permutations\n",
 		screenSpaceGiCount);

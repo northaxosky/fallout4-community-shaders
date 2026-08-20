@@ -306,6 +306,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		COMMAND ShaderCompileTests
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI"
 			"${CMAKE_SOURCE_DIR}/package/Shaders"
+			"${CMAKE_SOURCE_DIR}/tests/shaders"
 	)
 	set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 endif()

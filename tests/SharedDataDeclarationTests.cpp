@@ -350,6 +350,12 @@ namespace
 					"sampler s" + std::to_string(use.slot)
 						+ " is declared; the shared substrate must declare no samplers");
 				break;
+			case 'u':
+				FailAt(
+					use.number,
+					"unordered-access resource u" + std::to_string(use.slot)
+						+ " is outside the shared substrate budget");
+				break;
 			default:
 				break;
 			}

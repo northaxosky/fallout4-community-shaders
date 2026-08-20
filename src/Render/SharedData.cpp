@@ -9,6 +9,7 @@
 #include "World/Sky.h"
 
 #include <DirectXMath.h>
+#include <array>
 #include <atomic>
 #include <cstring>
 #include <d3d11.h>
@@ -45,10 +46,13 @@ namespace cs::render
 			winrt::com_ptr<ID3D11Buffer> featureDataCB;
 			std::atomic_bool             ready{ false };
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
+			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
+				savedPixelBuffers;
 			// Render thread only.
 			float                        timer = 0.0f;
 			bool                         updateInstalled = false;
 			bool                         updateInstallFailed = false;
+			bool                         pixelBindingsSaved = false;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -145,6 +149,48 @@ namespace cs::render
 			return true;
 		}
 
+		ID3D11DeviceContext* GetImmediateContext() noexcept
+		{
+			auto* rendererData = RE::BSGraphics::GetRendererData();
+			return rendererData ?
+				reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
+				nullptr;
+		}
+
+		void SavePixelBindings() noexcept
+		{
+			auto& state = GetSubstrateState();
+			auto* context = GetImmediateContext();
+			if (!context || !IsSharedDataReady())
+				return;
+
+			for (auto& buffer : state.savedPixelBuffers)
+				buffer = nullptr;
+			ID3D11Buffer* buffers[2]{};
+			context->PSGetConstantBuffers(kSharedDataSlot, 2, buffers);
+			for (std::size_t index = 0; index < state.savedPixelBuffers.size(); ++index)
+				state.savedPixelBuffers[index].attach(buffers[index]);
+			state.pixelBindingsSaved = true;
+		}
+
+		void RestorePixelBindings() noexcept
+		{
+			auto& state = GetSubstrateState();
+			if (!state.pixelBindingsSaved)
+				return;
+
+			if (auto* context = GetImmediateContext()) {
+				ID3D11Buffer* buffers[2] = {
+					state.savedPixelBuffers[0].get(),
+					state.savedPixelBuffers[1].get()
+				};
+				context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			}
+			for (auto& buffer : state.savedPixelBuffers)
+				buffer = nullptr;
+			state.pixelBindingsSaved = false;
+		}
+
 		void UpdateSharedData() noexcept
 		{
 			auto& state = GetSubstrateState();
@@ -187,7 +233,6 @@ namespace cs::render
 				}
 				state.timer = nextTimer;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
-				BindSharedData(context);
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,
@@ -212,14 +257,14 @@ namespace cs::render
 		auto& state = GetSubstrateState();
 		if (state.ready.load(std::memory_order_acquire))
 			return;
+		if (state.updateInstallFailed)
+			throw std::runtime_error("Shared substrate update hook installation failed.");
 		if (!state.updateInstalled)
 			return;
 		if (!a_device || !a_context) {
 			L->error("Shared substrate initialization skipped: no D3D11 device.");
 			return;
 		}
-		if (state.updateInstallFailed)
-			throw std::runtime_error("Shared substrate update hook installation failed.");
 
 		const auto sharedDesc = cs::buffer::ConstantBufferDesc<SharedDataCB>();
 		const auto featureDesc = cs::buffer::ConstantBufferDesc<FeatureDataCB>();
@@ -246,7 +291,6 @@ namespace cs::render
 			throw std::runtime_error("Shared substrate constant-buffer seeding failed.");
 		}
 		state.ready.store(true, std::memory_order_release);
-		BindSharedData(a_context);
 		L->info(
 			"Shared substrate ready: b{} shared_data={} bytes, b{} feature_data={} bytes.",
 			kSharedDataSlot,
@@ -276,8 +320,14 @@ namespace cs::render
 			L->error("Shared substrate per-frame update registration failed.");
 			return;
 		}
+		engine::RegisterPreDeferredLightsImpl(
+			[] { SavePixelBindings(); },
+			engine::HookPriority::Early);
+		engine::RegisterPostDeferredLightsImpl(
+			[] { RestorePixelBindings(); },
+			engine::HookPriority::Late);
 		state.updateInstalled = true;
-		L->info("Shared substrate per-frame update registered on DeferredPrePass.");
+		L->info("Shared substrate update and deferred-light binding scope registered.");
 	}
 
 	void BindSharedData(ID3D11DeviceContext* a_context) noexcept
@@ -291,7 +341,5 @@ namespace cs::render
 			state.featureDataCB.get()
 		};
 		a_context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
-		a_context->VSSetConstantBuffers(kSharedDataSlot, 2, buffers);
-		a_context->CSSetConstantBuffers(kSharedDataSlot, 2, buffers);
 	}
 }

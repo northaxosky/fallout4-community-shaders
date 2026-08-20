@@ -19,6 +19,6 @@ namespace cs::render
 	// Installs the per-frame update; startup thread only.
 	void EnsureSharedDataUpdateInstalled();
 
-	// Binds b5/b6 without mapping; safe from per-draw dispatch.
+	// Binds b5/b6 to the pixel stage without mapping.
 	void BindSharedData(ID3D11DeviceContext* a_context) noexcept;
 }

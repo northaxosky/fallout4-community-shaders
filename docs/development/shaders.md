@@ -40,12 +40,14 @@ Baseline ownership and developer force-on do not define it.
 not its feature loaded, and `src/FeatureBuffer.cpp` zeroes the block of any
 feature that is unloaded, unhealthy or not ready. `src/Render/SharedData.cpp`
 owns both buffers, creates them during D3D11 bootstrap, refreshes them once per
-engine frame at the post-prepass anchor, and binds b5/b6 on the vertex, pixel and
-compute stages. Features never bind them.
+engine frame at the post-prepass anchor, and binds b5/b6 only for injected pixel
+draws. The previous pixel bindings are saved at deferred-lights entry and
+restored at deferred-lights exit.
 
-Fallout 4's own shaders leave only `b3`-`b8` and `b11`, textures from `t16`, and
-no sampler slots for the plugin. `b5` and `b6` are reserved: a contributor that
-claims either as a constant buffer quarantines its target.
+The declaration-derived census of the six reconstructed engine shader families
+leaves only `b3`-`b8` and `b11`, textures from `t16`, and no sampler slots for
+the plugin. `b5` and `b6` are reserved: a contributor that claims either as a
+constant buffer quarantines its target.
 
 ## Entry points
 
@@ -77,11 +79,12 @@ From the repository root, run:
 ctest --test-dir build -C Release -R "ShaderCompile|SharedDataDeclaration"
 ```
 
-`ShaderCompile` compiles every registered shipping permutation plus explicit
-feature-composition, standalone-source, and all 111 vertex permutations through
-`D3DCompile`. `SharedDataDeclaration` parses `Common/SharedData.hlsli` and
-enforces the outer gate and the Fallout 4 register budget. Keep both green when
-editing any file in this directory.
+`ShaderCompile` compiles every registered shipping permutation, explicit
+feature-composition, standalone-source, all 111 vertex permutations, and the
+shared substrate in active and inactive modes through `D3DCompile`.
+`SharedDataDeclaration` parses `Common/SharedData.hlsli` and enforces the outer
+gate and the declared Fallout 4 register budget. Keep both green when editing
+any file in this directory.
 
 ## Delivery caveat
 
