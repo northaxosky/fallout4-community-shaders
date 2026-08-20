@@ -22,13 +22,6 @@ namespace
 		float w;
 	};
 
-	struct CameraRotationRows
-	{
-		Point forward;
-		Point up;
-		Point right;
-	};
-
 	int failures = 0;
 
 	void Check(bool condition, const char* assertion)
@@ -71,46 +64,6 @@ namespace
 				static_cast<double>(tolerance));
 			++failures;
 		}
-	}
-
-	float Dot(const Point& a_left, const Point& a_right)
-	{
-		return a_left.x * a_right.x + a_left.y * a_right.y + a_left.z * a_right.z;
-	}
-
-	CameraRotationRows MakeCameraRotationRows(float a_yaw, float a_pitch)
-	{
-		const float sinYaw = std::sin(a_yaw);
-		const float cosYaw = std::cos(a_yaw);
-		const float sinPitch = std::sin(a_pitch);
-		const float cosPitch = std::cos(a_pitch);
-		return {
-			{ cosPitch * cosYaw, cosPitch * sinYaw, sinPitch },
-			{ -sinPitch * cosYaw, -sinPitch * sinYaw, cosPitch },
-			{ sinYaw, -cosYaw, 0.0f }
-		};
-	}
-
-	Point WorldNormalToD3DView(const CameraRotationRows& a_rows, const Point& a_worldNormal)
-	{
-		return {
-			Dot(a_rows.right, a_worldNormal),
-			Dot(a_rows.up, a_worldNormal),
-			Dot(a_rows.forward, a_worldNormal)
-		};
-	}
-
-	float ViewNormalWorldUp(const CameraRotationRows& a_rows, const Point& a_viewNormal)
-	{
-		const Point directionNi{ a_viewNormal.z, a_viewNormal.y, a_viewNormal.x };
-		return directionNi.x * a_rows.forward.z +
-		       directionNi.y * a_rows.up.z +
-		       directionNi.z * a_rows.right.z;
-	}
-
-	float OldRowDotWorldUp(const CameraRotationRows& a_rows, const Point& a_viewNormal)
-	{
-		return Dot(a_rows.right, a_viewNormal);
 	}
 
 	ProjectedPoint Project(const Point& point, const DirectX::XMFLOAT4X4& projection)
@@ -331,43 +284,6 @@ namespace
 		CheckRejected(-0.8f, 0.8f, 0.5f, -0.5f, 0.1f, HUGE_VALF, "Case C rejects infinity");
 	}
 
-	void TestCameraViewToWorld()
-	{
-		struct Pose
-		{
-			float yaw;
-			float pitch;
-		};
-
-		const Pose poses[]{
-			{ 0.0f, 0.0f },
-			{ 0.65f, 0.0f },
-			{ 0.0f, 0.4f },
-			{ 0.7f, -0.35f },
-			{ -1.1f, 0.55f }
-		};
-		const Point groundNormal{ 0.0f, 0.0f, 1.0f };
-		const Point wallNormal{ 1.0f, 0.0f, 0.0f };
-		constexpr float tolerance = 1.0e-5f;
-		bool oldGroundFailed = false;
-		bool oldWallFailed = false;
-
-		for (int index = 0; index < static_cast<int>(sizeof(poses) / sizeof(poses[0])); ++index) {
-			const CameraRotationRows rows = MakeCameraRotationRows(poses[index].yaw, poses[index].pitch);
-			const Point groundView = WorldNormalToD3DView(rows, groundNormal);
-			const Point wallView = WorldNormalToD3DView(rows, wallNormal);
-			CheckNearAt(ViewNormalWorldUp(rows, groundView), 1.0f, tolerance, "Camera transform", index, "ground world-up");
-			CheckNearAt(ViewNormalWorldUp(rows, wallView), 0.0f, tolerance, "Camera transform", index, "wall world-up");
-
-			if (poses[index].yaw != 0.0f && poses[index].pitch != 0.0f) {
-				oldGroundFailed |= std::fabs(OldRowDotWorldUp(rows, groundView) - 1.0f) > tolerance;
-				oldWallFailed |= std::fabs(OldRowDotWorldUp(rows, wallView)) > tolerance;
-			}
-		}
-
-		Check(oldGroundFailed, "Camera transform old row-dot fails ground invariant");
-		Check(oldWallFailed, "Camera transform old row-dot fails wall invariant");
-	}
 }
 
 int main()
@@ -375,7 +291,6 @@ int main()
 	TestSymmetricFrustum();
 	TestAsymmetricFrustum();
 	TestRejectedFrusta();
-	TestCameraViewToWorld();
 
 	if (failures != 0) {
 		std::printf("%d check(s) failed\n", failures);

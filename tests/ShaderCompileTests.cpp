@@ -153,6 +153,10 @@ namespace
 	{
 		const auto registrations =
 			cs::engine::GetDefaultShaderReplacementVariants();
+		if (registrations.empty()) {
+			std::printf("FAIL: no shader replacement registrations were discovered\n");
+			++failures;
+		}
 		for (const auto& registration : registrations)
 			CompileRegistration(a_root, registration, {});
 
@@ -272,6 +276,10 @@ namespace
 	{
 		const auto permutations =
 			cs::test::shader_compile::GetVertexShaderCompilePermutations();
+		if (permutations.empty()) {
+			std::printf("FAIL: no vertex shader permutations were discovered\n");
+			++failures;
+		}
 		for (const auto& permutation : permutations) {
 			const auto* source = SourceForVertexFamily(permutation.family);
 			if (!source) {

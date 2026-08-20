@@ -89,6 +89,13 @@ namespace
 		CHECK(unavailable.runLifecycle);
 		CHECK(!unavailable.injectionReady);
 		CHECK(unavailable.routeFallsBackToStock);
+
+		const auto available = DecideSssStartup(
+			SssInjectionMode::kHlslReconstruction,
+			true);
+		CHECK(available.runLifecycle);
+		CHECK(available.injectionReady);
+		CHECK(!available.routeFallsBackToStock);
 	}
 }
 
