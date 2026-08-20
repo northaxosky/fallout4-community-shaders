@@ -83,7 +83,7 @@ namespace cs::shader_cache
 			try {
 				std::vector<std::uint8_t> manifestBytes;
 				if (!SerializeDependencyManifest(a_compiled.manifest, manifestBytes)) {
-					a_outcome.cacheNote = "manifest exceeds record limits";
+					a_outcome.cacheNote = "manifest cannot be serialized";
 					return;
 				}
 

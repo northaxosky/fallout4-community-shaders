@@ -1,5 +1,6 @@
 #include "Log.h"
 #include "Render/ShaderInjection.h"
+#include "Render/SharedData.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Utils/ShaderCache/RevalidationContext.h"
 #include "Utils/ShaderCache/ShaderCache.h"
@@ -48,6 +49,20 @@ namespace cs::engine
 	}
 
 	void EnsurePreSunLightDrawInstalled()
+	{}
+}
+
+namespace cs::render
+{
+	void EnsureSharedDataUpdateInstalled()
+	{}
+
+	bool IsSharedDataReady() noexcept
+	{
+		return true;
+	}
+
+	void BindSharedData(ID3D11DeviceContext*) noexcept
 	{}
 }
 

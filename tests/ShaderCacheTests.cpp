@@ -582,6 +582,36 @@ float4 main() : SV_Target
 			"shadowed recompile matches CompileShaderToBlob");
 	}
 
+	void TestDirectoryProbeFallback()
+	{
+		Workspace workspace("directory-probe");
+		workspace.WriteDefaultTree();
+		std::filesystem::create_directory(workspace.Sources() / "Sub" / "Shared.hlsli");
+		const auto recipe = workspace.Recipe();
+		const auto primed = PrimeCache(workspace, recipe);
+		Check(
+			primed.cold.bytecode == CompileWithPlainCompiler(recipe),
+			"a directory candidate falls back exactly like CompileShaderToBlob");
+
+		ShaderCacheRecord record;
+		CheckRecordStatus(
+			ParseShaderCacheRecord(primed.recordBytes, record),
+			RecordStatus::kOk,
+			"directory-probe record parses");
+		bool recordedDirectoryAsMissing = false;
+		for (const auto& include : record.manifest.includes) {
+			if (include.requestedName == "Shared.hlsli"
+				&& include.probes.size() == 2) {
+				recordedDirectoryAsMissing =
+					include.probes.front().status == ProbeStatus::kMissing
+					&& include.probes.back().status == ProbeStatus::kSuccess;
+			}
+		}
+		Check(
+			recordedDirectoryAsMissing,
+			"a directory candidate is recorded before the root fallback");
+	}
+
 	void TestCorruptMagic()
 	{
 		Workspace workspace("corrupt-magic");
@@ -1128,6 +1158,7 @@ float4 main() : SV_Target
 		{ "root-source-invalidation", &TestRootSourceInvalidation },
 		{ "transitive-include-invalidation", &TestTransitiveIncludeInvalidation },
 		{ "include-shadowing", &TestIncludeShadowing },
+		{ "directory-probe-fallback", &TestDirectoryProbeFallback },
 		{ "memoized-revalidation", &TestMemoizedRevalidation },
 		{ "memoized-revalidation-concurrency", &TestMemoizedRevalidationIsConcurrent },
 		{ "non-ascii-include-name", &TestNonAsciiIncludeName },

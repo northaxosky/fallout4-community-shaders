@@ -45,7 +45,9 @@ namespace cs::shader_cache
 			HANDLE _handle;
 		};
 
-		FileReadStatus ClassifyOpenFailure(DWORD a_error) noexcept
+		FileReadStatus ClassifyOpenFailure(
+			const std::filesystem::path& a_path,
+			DWORD                        a_error) noexcept
 		{
 			switch (a_error) {
 			case ERROR_FILE_NOT_FOUND:
@@ -55,6 +57,13 @@ namespace cs::shader_cache
 			case ERROR_BAD_NETPATH:
 			case ERROR_DIRECTORY:
 				return FileReadStatus::kMissing;
+			case ERROR_ACCESS_DENIED: {
+				const DWORD attributes = GetFileAttributesW(a_path.c_str());
+				return attributes != INVALID_FILE_ATTRIBUTES
+						&& (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
+					? FileReadStatus::kMissing
+					: FileReadStatus::kReadFailed;
+			}
 			default:
 				return FileReadStatus::kReadFailed;
 			}
@@ -123,7 +132,7 @@ namespace cs::shader_cache
 				FILE_ATTRIBUTE_NORMAL,
 				nullptr));
 			if (!file.Valid())
-				return ClassifyOpenFailure(GetLastError());
+				return ClassifyOpenFailure(a_path, GetLastError());
 
 			LARGE_INTEGER size{};
 			if (!GetFileSizeEx(file.Get(), &size) || size.QuadPart < 0)
