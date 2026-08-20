@@ -265,6 +265,18 @@ namespace cs::features
 			_resourcesReady.load(std::memory_order_acquire);
 	}
 
+	cs::WetnessEffectsFeatureData WetnessEffects::GetCommonBufferData() const
+	{
+		if (!IsWetnessMaskReady()) {
+			return {};
+		}
+		return {
+			.EnableWetnessEffects = _settings.enabled ? 1u : 0u,
+			.EnableAmbientPass = _ambientPassRegistered ? 1u : 0u,
+			.Wetness = _rainIntensity.load(std::memory_order_relaxed)
+		};
+	}
+
 	bool WetnessEffects::EnsureResources()
 	{
 		if (_resourceInitFailed.load(std::memory_order_acquire) || !cs::util::GetD3DDevice()) {

@@ -9,6 +9,7 @@
 #include "Menu/Menu.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
+#include "Render/SharedData.h"
 
 namespace cs::d3d11
 {
@@ -62,6 +63,10 @@ namespace cs::d3d11
 			});
 			InvokeOwner("FeatureManager D3D11 readiness", [&] {
 				FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);
+			});
+			// The substrate must exist before any injected shader compiles against it.
+			InvokeOwner("SharedData D3D11 initialization", [&] {
+				render::InitializeSharedData(*a_device, *a_immediateContext);
 			});
 			InvokeOwner("ShaderInjection freeze and compile", [&] {
 				engine::FreezeAndCompileShaderInjections(*a_device);

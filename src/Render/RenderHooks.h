@@ -15,7 +15,7 @@ namespace cs::engine
 	};
 
 	// Register only during Load or OnPostPostLoad.
-	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);

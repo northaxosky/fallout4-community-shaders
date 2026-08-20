@@ -620,6 +620,19 @@ namespace cs::features
 			_settings.bounceDelivery);
 	}
 
+	cs::ScreenSpaceGIFeatureData ScreenSpaceGI::GetCommonBufferData()
+	{
+		if (!_settings.enabled || !IsReady()) {
+			return {};
+		}
+		return {
+			.EnableScreenSpaceGI = 1,
+			.EnableAmbientPass = _ambientPassRegistered ? 1u : 0u,
+			.AoPower = _settings.aoPower,
+			.BounceStrength = _settings.bounceStrength
+		};
+	}
+
 	bool ScreenSpaceGI::EnsureBakeResources()
 	{
 		if (_bakeResourceInitFailed.load(std::memory_order_acquire)) {

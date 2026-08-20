@@ -1,6 +1,8 @@
 #include "Log.h"
 #include "Render/ShaderInjection.h"
+#include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderVariantCompilation.h"
+#include "Render/SharedData.h"
 
 #include <algorithm>
 #include <array>
@@ -16,6 +18,7 @@
 namespace
 {
 	std::uint32_t g_preDrawInstallRequests = 0;
+	std::uint32_t g_sharedDataInstallRequests = 0;
 }
 
 namespace cs::log
@@ -24,6 +27,22 @@ namespace cs::log
 	{
 		return spdlog::default_logger_raw();
 	}
+}
+
+namespace cs::render
+{
+	void EnsureSharedDataUpdateInstalled()
+	{
+		++g_sharedDataInstallRequests;
+	}
+
+	bool IsSharedDataReady() noexcept
+	{
+		return true;
+	}
+
+	void BindSharedData(ID3D11DeviceContext*) noexcept
+	{}
 }
 
 namespace cs::engine
@@ -172,6 +191,134 @@ namespace
 			pixelRequest->defines.contains("PIXEL_DEFAULT")
 				&& pixelRequest->defines.contains("PIXEL_SECOND"),
 			"pixel-stage contributors did not union");
+		return ok;
+	}
+
+	ShaderReplacementVariantRegistration MakeStageVariant(
+		ShaderInjectionTarget a_target,
+		ShaderStage a_stage)
+	{
+		ShaderReplacementVariantRegistration variant;
+		variant.targetId = a_target;
+		variant.stage = a_stage;
+		variant.compilation.sourcePath = L"substrate-define.hlsl";
+		variant.compilation.entryPoint = "main";
+		variant.compilation.profile =
+			a_stage == ShaderStage::kVertex ? "vs_5_0" : "ps_5_0";
+		return variant;
+	}
+
+	// Returns the FO4CS_SUBSTRATE value, or nullopt when the define is absent.
+	std::optional<std::string> SubstrateDefine(
+		const ShaderInjectionTargetMetadata& a_target,
+		const ShaderReplacementVariantRegistration& a_variant,
+		std::span<const ShaderReplacementRegistration> a_contributions)
+	{
+		const auto request = BuildEffectiveShaderCompileRequest(
+			a_target,
+			a_variant,
+			a_contributions);
+		if (!request)
+			return std::nullopt;
+		const auto define = request->defines.find(
+			shader_injection_defines::kSubstrate);
+		if (define == request->defines.end())
+			return std::nullopt;
+		return define->second;
+	}
+
+	bool TestAutomaticSubstrateDefine()
+	{
+		const auto* target = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kBsdfComposite);
+		if (!Check(
+				target != nullptr,
+				"substrate-define target metadata is missing")) {
+			return false;
+		}
+
+		const auto pixelVariant =
+			MakeStageVariant(target->id, ShaderStage::kPixel);
+		const auto vertexVariant =
+			MakeStageVariant(target->id, ShaderStage::kVertex);
+
+		bool ok = Check(
+			!SubstrateDefine(*target, pixelVariant, {}).has_value(),
+			"substrate define appeared without a feature contribution");
+
+		const std::array vertexOnly{
+			ShaderReplacementRegistration{
+				.targetId = target->id,
+				.stages = ShaderStageBit(ShaderStage::kVertex),
+				.contributor = "vertex-only",
+				.defines = { { "VERTEX_ONLY", "1" } }
+			}
+		};
+		ok &= Check(
+			!SubstrateDefine(*target, pixelVariant, vertexOnly).has_value(),
+			"substrate define appeared for a non-matching stage");
+		ok &= Check(
+			SubstrateDefine(*target, vertexVariant, vertexOnly) == "1",
+			"substrate define is missing from the contributed vertex stage");
+
+		std::array bindOnly{
+			ShaderReplacementRegistration{
+				.targetId = target->id,
+				.contributor = "bind-only"
+			}
+		};
+		bindOnly.front().bind = [](ID3D11DeviceContext*) {};
+		ok &= Check(
+			SubstrateDefine(*target, pixelVariant, bindOnly) == "1",
+			"bind-only contribution did not request the substrate");
+
+		const std::array pixelContribution{
+			ShaderReplacementRegistration{
+				.targetId = target->id,
+				.contributor = "pixel-contribution",
+				.defines = { { "PIXEL_CONTRIBUTION", "1" } }
+			}
+		};
+		ok &= Check(
+			SubstrateDefine(*target, pixelVariant, pixelContribution) == "1",
+			"normal contribution did not request the substrate");
+		ok &= Check(
+			!SubstrateDefine(*target, vertexVariant, pixelContribution)
+				.has_value(),
+			"pixel contribution leaked the substrate into the vertex stage");
+
+		const std::array otherTarget{
+			ShaderReplacementRegistration{
+				.targetId = ShaderInjectionTarget::kBsdfLight,
+				.contributor = "other-target",
+				.defines = { { "OTHER_TARGET", "1" } }
+			}
+		};
+		ok &= Check(
+			!SubstrateDefine(*target, pixelVariant, otherTarget).has_value(),
+			"substrate define leaked across targets");
+
+		const std::array conflicting{
+			ShaderReplacementRegistration{
+				.targetId = target->id,
+				.contributor = "substrate-conflict",
+				.defines = {
+					{ shader_injection_defines::kSubstrate, "0" }
+				}
+			}
+		};
+		std::string conflictError;
+		ok &= Check(
+			!BuildEffectiveShaderCompileRequest(
+				 *target,
+				 pixelVariant,
+				 conflicting,
+				 &conflictError)
+				 .has_value()
+				&& conflictError.find(
+					   shader_injection_defines::kSubstrate)
+					!= std::string::npos,
+			"conflicting substrate define was not diagnosed");
 		return ok;
 	}
 
@@ -408,6 +555,7 @@ int main(int a_argc, char* a_argv[])
 
 	bool ok = TestStageScopedContributions();
 	ok &= TestVertexCompileClassPartition();
+	ok &= TestAutomaticSubstrateDefine();
 
 	ShaderReplacementRegistration emptyStageMask;
 	emptyStageMask.targetId =
@@ -588,6 +736,9 @@ int main(int a_argc, char* a_argv[])
 	ok &= Check(
 		g_preDrawInstallRequests == 0,
 		"disabled ambient registrations installed the pre-draw hook");
+	ok &= Check(
+		g_sharedDataInstallRequests == 0,
+		"rejected registrations installed the substrate update");
 
 	ShaderReplacementRegistration noBindRegistration;
 	noBindRegistration.targetId = ShaderInjectionTarget::kDeferredPrepass;
@@ -598,6 +749,9 @@ int main(int a_argc, char* a_argv[])
 	ok &= Check(
 		g_preDrawInstallRequests == 0,
 		"registration without a bind installed the pre-draw hook");
+	ok &= Check(
+		g_sharedDataInstallRequests == 1,
+		"accepted registration did not install the substrate update");
 
 	ShaderReplacementRegistration bindRegistration;
 	bindRegistration.targetId = ShaderInjectionTarget::kBsdfComposite;

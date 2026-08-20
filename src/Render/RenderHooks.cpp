@@ -201,15 +201,16 @@ namespace cs::engine
 		InstallPreSunLightDrawHook();
 	}
 
-	void RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
+	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PostDeferredPrePass")) return;
+		if (!RegistrationAllowed("PostDeferredPrePass")) return false;
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
 		if (!g_prePassInstalled) {
 			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
 			g_prePassInstalled = true;
 			L->info("Hook installed on DrawWorld::DeferredPrePass");
 		}
+		return true;
 	}
 
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority)

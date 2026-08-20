@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
 #include "Utils/CSBuffer.h"
@@ -36,6 +37,8 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+
+		cs::ScreenSpaceGIFeatureData GetCommonBufferData();
 
 		struct Settings
 		{

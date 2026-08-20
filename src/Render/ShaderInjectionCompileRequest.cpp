@@ -1,5 +1,7 @@
 #include "Render/ShaderInjection.h"
 
+#include "Render/ShaderInjectionDefines.h"
+
 namespace cs::engine
 {
 	namespace
@@ -38,17 +40,27 @@ namespace cs::engine
 			request.defines.emplace(define.name, define.value);
 
 		const auto stage = ShaderStageBit(a_variant.stage);
+		bool substrateActive = false;
 		for (const auto& contribution : a_contributions) {
 			if (contribution.targetId != a_target.id
 				|| (contribution.stages & stage) == 0) {
 				continue;
 			}
+			// A bind-only contribution still puts the substrate in this shader.
+			substrateActive = true;
 			if (!MergeDefines(
 					request.defines,
 					contribution.defines,
 					a_error)) {
 				return std::nullopt;
 			}
+		}
+		if (substrateActive
+			&& !MergeDefines(
+				request.defines,
+				{ { shader_injection_defines::kSubstrate, "1" } },
+				a_error)) {
+			return std::nullopt;
 		}
 		if (!MergeDefines(
 				request.defines,

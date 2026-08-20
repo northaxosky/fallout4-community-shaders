@@ -591,6 +591,24 @@ namespace cs::features
 		return fallbackReady;
 	}
 
+	cs::ScreenSpaceShadowsFeatureData ScreenSpaceShadows::GetCommonBufferData() const
+	{
+		// Side-effect free: IsShadowMaskReady allocates, so read cached readiness instead.
+		if (!_started.load(std::memory_order_acquire)
+			|| !_resourcesReady.load(std::memory_order_acquire)) {
+			return {};
+		}
+		return {
+			.EnableScreenSpaceShadows =
+				_settings.enabled
+				&& _activeInjectionMode == SssInjectionMode::kHlslReconstruction
+				&& _injectionReady.load(std::memory_order_acquire) ?
+				1u :
+				0u,
+			.ShadowContrast = _settings.shadowContrast
+		};
+	}
+
 	bool ScreenSpaceShadows::EnsureResources()
 	{
 		if (_resourcesReady.load(std::memory_order_acquire)) {

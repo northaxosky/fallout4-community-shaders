@@ -7,6 +7,7 @@
 #include "Render/ShaderInjectionStaticFamilyRegistrations.h"
 #include "Render/ShaderInjectionVariantFactory.h"
 #include "Render/ShaderVariantCompilation.h"
+#include "Render/SharedData.h"
 #include "Utils/CSSha1.h"
 
 #include <algorithm>
@@ -454,6 +455,22 @@ namespace cs::engine
 			return std::nullopt;
 		}
 
+		// Accepting a contribution puts the substrate on its stages, so b5/b6 are reserved there.
+		std::optional<ShaderSlotClaim> FindSubstrateReservation(
+			std::span<const ShaderSlotClaim> a_claims)
+		{
+			for (const auto& claim : a_claims) {
+				if (claim.resourceType != ShaderResourceType::kConstantBuffer)
+					continue;
+				if (claim.slot != render::kSharedDataSlot
+					&& claim.slot != render::kFeatureDataSlot) {
+					continue;
+				}
+				return claim;
+			}
+			return std::nullopt;
+		}
+
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
 			const std::vector<ShaderReplacementVariantRegistration>&
@@ -496,6 +513,13 @@ namespace cs::engine
 					const auto& registration = a_registrations[registrationIndex];
 					if (registration.targetId != metadata.id)
 						continue;
+					if (!render::IsSharedDataReady()) {
+						L->error(
+							"Contributor '{}' for '{}' dropped because the shared substrate is unavailable.",
+							ContributorName(registration, registrationIndex),
+							metadata.name);
+						continue;
+					}
 					if (!IsReady(registration, registrationIndex)) {
 						L->warn(
 							"Contributor '{}' was not ready at freeze; '{}' will run stock for this session (injection readiness is frozen once at startup).",
@@ -520,6 +544,20 @@ namespace cs::engine
 							existingValue,
 							registration.defines.find(conflictingName)->second);
 						continue;
+					}
+
+					if (const auto reserved = FindSubstrateReservation(
+							registration.slotClaims)) {
+						L->error(
+							"Substrate slot collision on '{}' (stage={}, constant buffer b{}) from '{}'; b{} and b{} are reserved for the shared substrate; target quarantined.",
+							metadata.name,
+							static_cast<unsigned>(reserved->stage),
+							reserved->slot,
+							ContributorName(registration, registrationIndex),
+							render::kSharedDataSlot,
+							render::kFeatureDataSlot);
+						target.slotCollision = true;
+						break;
 					}
 
 					if (const auto collision = FindSlotCollision(registration, claimedSlots)) {
@@ -987,6 +1025,8 @@ namespace cs::engine
 			service.registrations.push_back(std::move(a_registration));
 		}
 
+		// Any contribution puts the substrate in its shaders, so keep b5/b6 current.
+		render::EnsureSharedDataUpdateInstalled();
 		if (installsPreDrawHook)
 			EnsurePreSunLightDrawInstalled();
 		return true;
@@ -1456,6 +1496,9 @@ namespace cs::engine
 		if (!target)
 			return;
 
+		// Engine state changes between draws, so restore b5/b6 before feature binds.
+		render::BindSharedData(a_context);
+
 		auto& runtime = GetService().runtime[ToIndex(a_target)];
 		for (const auto& bind : target->binds) {
 			try {
@@ -1496,8 +1539,6 @@ namespace cs::engine
 			return;
 
 		for (const auto& target : plan->targets) {
-			if (target.binds.empty())
-				continue;
 			if (MatchesHlslInjectedPixelShader(
 					*plan,
 					target.id,

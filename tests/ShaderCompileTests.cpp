@@ -2,6 +2,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderVariantCompilation.h"
+#include "Render/SharedData.h"
 #include "Utils/ShaderCompile.h"
 #include "generated/VertexShaderCompilePermutations.h"
 
@@ -51,6 +52,20 @@ namespace cs::engine
 	}
 
 	void EnsurePreSunLightDrawInstalled()
+	{}
+}
+
+namespace cs::render
+{
+	void EnsureSharedDataUpdateInstalled()
+	{}
+
+	bool IsSharedDataReady() noexcept
+	{
+		return true;
+	}
+
+	void BindSharedData(ID3D11DeviceContext*) noexcept
 	{}
 }
 

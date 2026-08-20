@@ -240,6 +240,17 @@ target_include_directories(FrustumEmbedTests PRIVATE "${CMAKE_SOURCE_DIR}/featur
 add_test(NAME FrustumEmbed COMMAND FrustumEmbedTests)
 set_tests_properties(FrustumEmbed PROPERTIES LABELS "render;unit")
 
+add_executable(SharedDataDeclarationTests
+	tests/SharedDataDeclarationTests.cpp
+)
+configure_host_test(SharedDataDeclarationTests)
+
+add_test(
+	NAME SharedDataDeclaration
+	COMMAND SharedDataDeclarationTests "${CMAKE_SOURCE_DIR}/package/Shaders"
+)
+set_tests_properties(SharedDataDeclaration PROPERTIES LABELS "render;shader;unit")
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderCompileTests
 		tests/ShaderCompileTests.cpp

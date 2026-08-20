@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Feature.h"
+#include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "SssMaskBinding.h"
 #include "SssInjectionMode.h"
@@ -34,6 +35,8 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+
+		cs::ScreenSpaceShadowsFeatureData GetCommonBufferData() const;
 
 		struct Settings
 		{

@@ -24,6 +24,29 @@ Each BSDF source uses one named `BSDFLIGHT_*` or `BSDFCOMPOSITE_*` block
 selector per registered permutation. Native feature macros specialize the
 selected block.
 
+## Shared substrate
+
+`Common/SharedData.hlsli` declares the per-frame data every injected shader can
+read: `cbuffer SharedData : register(b5)` and `cbuffer FeatureData : register(b6)`.
+
+`#ifdef FO4CS_SUBSTRATE` is the outermost gate, outside the include guard, so a
+shader that includes the header without the define sees zero declarations.
+`src/Render/ShaderInjectionCompileRequest.cpp` injects `FO4CS_SUBSTRATE=1`
+automatically whenever a stage-matching `ShaderReplacementRegistration` exists
+for the compiled target — including a contribution that only binds a resource.
+Baseline ownership and developer force-on do not define it.
+
+`FeatureData` is a static typed layout: every contributor field exists whether or
+not its feature loaded, and `src/FeatureBuffer.cpp` zeroes the block of any
+feature that is unloaded, unhealthy or not ready. `src/Render/SharedData.cpp`
+owns both buffers, creates them during D3D11 bootstrap, refreshes them once per
+engine frame at the post-prepass anchor, and binds b5/b6 on the vertex, pixel and
+compute stages. Features never bind them.
+
+Fallout 4's own shaders leave only `b3`-`b8` and `b11`, textures from `t16`, and
+no sampler slots for the plugin. `b5` and `b6` are reserved: a contributor that
+claims either as a constant buffer quarantines its target.
+
 ## Entry points
 
 | Entry point | Engine shader or pass | Principal bindings |
@@ -51,12 +74,14 @@ so unused permutation branches add no runtime shader cost.
 From the repository root, run:
 
 ```powershell
-ctest --test-dir build -C Release -R ShaderCompile
+ctest --test-dir build -C Release -R "ShaderCompile|SharedDataDeclaration"
 ```
 
 `ShaderCompile` compiles every registered shipping permutation plus explicit
 feature-composition, standalone-source, and all 111 vertex permutations through
-`D3DCompile`. Keep this test green when editing any file in this directory.
+`D3DCompile`. `SharedDataDeclaration` parses `Common/SharedData.hlsli` and
+enforces the outer gate and the Fallout 4 register budget. Keep both green when
+editing any file in this directory.
 
 ## Delivery caveat
 
