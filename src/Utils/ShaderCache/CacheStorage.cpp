@@ -45,30 +45,6 @@ namespace cs::shader_cache
 			HANDLE _handle;
 		};
 
-		FileReadStatus ClassifyOpenFailure(
-			const std::filesystem::path& a_path,
-			DWORD                        a_error) noexcept
-		{
-			switch (a_error) {
-			case ERROR_FILE_NOT_FOUND:
-			case ERROR_PATH_NOT_FOUND:
-			case ERROR_INVALID_NAME:
-			case ERROR_BAD_PATHNAME:
-			case ERROR_BAD_NETPATH:
-			case ERROR_DIRECTORY:
-				return FileReadStatus::kMissing;
-			case ERROR_ACCESS_DENIED: {
-				const DWORD attributes = GetFileAttributesW(a_path.c_str());
-				return attributes != INVALID_FILE_ATTRIBUTES
-						&& (attributes & FILE_ATTRIBUTE_DIRECTORY) != 0
-					? FileReadStatus::kMissing
-					: FileReadStatus::kReadFailed;
-			}
-			default:
-				return FileReadStatus::kReadFailed;
-			}
-		}
-
 		std::string FormatWin32Error(const char* a_stage, DWORD a_error)
 		{
 			char buffer[128]{};
@@ -131,8 +107,9 @@ namespace cs::shader_cache
 				OPEN_EXISTING,
 				FILE_ATTRIBUTE_NORMAL,
 				nullptr));
+			// Match FXC include fallback; only failures after opening are fatal.
 			if (!file.Valid())
-				return ClassifyOpenFailure(a_path, GetLastError());
+				return FileReadStatus::kMissing;
 
 			LARGE_INTEGER size{};
 			if (!GetFileSizeEx(file.Get(), &size) || size.QuadPart < 0)

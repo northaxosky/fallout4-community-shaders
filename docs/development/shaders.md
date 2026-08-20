@@ -105,7 +105,8 @@ A record is only reused when the whole compile still matches:
   order with its outcome. On lookup every entry is replayed. An edited source or
   header, an unreadable dependency, or a **new file appearing at a
   higher-priority candidate path** is a miss, so a shadowing header cannot be
-  silently ignored.
+  silently ignored. Recorded candidate paths are canonical, so this replay
+  assumes the filesystem mapping remains stable.
 - Corrupt, truncated, over-large or future-version records fall through to a
   normal compile. Failed compiles are never written.
 

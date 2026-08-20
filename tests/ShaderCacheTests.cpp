@@ -31,6 +31,38 @@ namespace
 	int         g_failures = 0;
 	const char* g_currentTest = "";
 
+	class ScopedHandle
+	{
+	public:
+		explicit ScopedHandle(HANDLE a_handle) noexcept :
+			_handle(a_handle)
+		{}
+
+		~ScopedHandle()
+		{
+			Reset();
+		}
+
+		ScopedHandle(const ScopedHandle&) = delete;
+		ScopedHandle& operator=(const ScopedHandle&) = delete;
+
+		[[nodiscard]] bool Valid() const noexcept
+		{
+			return _handle != INVALID_HANDLE_VALUE;
+		}
+
+		void Reset() noexcept
+		{
+			if (_handle != INVALID_HANDLE_VALUE) {
+				CloseHandle(_handle);
+				_handle = INVALID_HANDLE_VALUE;
+			}
+		}
+
+	private:
+		HANDLE _handle;
+	};
+
 	void Fail(std::string_view a_what)
 	{
 		std::printf("FAIL [%s]: %.*s\n",
@@ -612,6 +644,69 @@ float4 main() : SV_Target
 			"a directory candidate is recorded before the root fallback");
 	}
 
+	void TestOpenFailureProbeFallback()
+	{
+		Workspace workspace("open-failure-probe");
+		workspace.WriteDefaultTree();
+		workspace.Write("Sub/Shared.hlsli", R"(float4 SharedValue()
+{
+	return float4(0.0, 1.0, 0.0, 1.0);
+}
+)");
+		const auto recipe = workspace.Recipe();
+		ScopedHandle lock(CreateFileW(
+			(workspace.Sources() / "Sub" / "Shared.hlsli").c_str(),
+			GENERIC_READ,
+			0,
+			nullptr,
+			OPEN_EXISTING,
+			FILE_ATTRIBUTE_NORMAL,
+			nullptr));
+		if (!lock.Valid()) {
+			Fail("exclusive include lock opens");
+			return;
+		}
+
+		const auto oracle = CompileWithPlainCompiler(recipe);
+		const auto cold = LoadOrCompileShader(recipe, workspace.Options());
+		if (!cold.succeeded) {
+			Fail("an unopenable candidate falls through");
+			return;
+		}
+		Check(
+			cold.bytecode == oracle,
+			"open-failure fallback is byte-identical to CompileShaderToBlob");
+
+		ShaderCacheRecord record;
+		CheckRecordStatus(
+			ParseShaderCacheRecord(ReadAll(cold.recordPath), record),
+			RecordStatus::kOk,
+			"open-failure record parses");
+		bool recordedOpenFailureAsMissing = false;
+		for (const auto& include : record.manifest.includes) {
+			if (include.requestedName == "Shared.hlsli"
+				&& include.probes.size() == 2) {
+				recordedOpenFailureAsMissing =
+					include.probes.front().status == ProbeStatus::kMissing
+					&& include.probes.back().status == ProbeStatus::kSuccess;
+			}
+		}
+		Check(
+			recordedOpenFailureAsMissing,
+			"an open failure is recorded before the root fallback");
+
+		lock.Reset();
+		const auto shadowed = LoadOrCompileShader(recipe, workspace.Options());
+		CheckDisposition(
+			shadowed,
+			CacheDisposition::kStale,
+			"a newly readable candidate invalidates the fallback record");
+		Check(!(shadowed.bytecode == cold.bytecode), "the readable candidate changes bytecode");
+		Check(
+			shadowed.bytecode == CompileWithPlainCompiler(recipe),
+			"the readable candidate matches CompileShaderToBlob");
+	}
+
 	void TestCorruptMagic()
 	{
 		Workspace workspace("corrupt-magic");
@@ -1159,6 +1254,7 @@ float4 main() : SV_Target
 		{ "transitive-include-invalidation", &TestTransitiveIncludeInvalidation },
 		{ "include-shadowing", &TestIncludeShadowing },
 		{ "directory-probe-fallback", &TestDirectoryProbeFallback },
+		{ "open-failure-probe-fallback", &TestOpenFailureProbeFallback },
 		{ "memoized-revalidation", &TestMemoizedRevalidation },
 		{ "memoized-revalidation-concurrency", &TestMemoizedRevalidationIsConcurrent },
 		{ "non-ascii-include-name", &TestNonAsciiIncludeName },

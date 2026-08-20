@@ -23,7 +23,7 @@ namespace cs::shader_cache
 
 	FileObservation ObserveFile(const std::string& a_locator);
 
-	// Freezes the dependency tree for one batch of lookups: each unique path is read once.
+	// One freeze batch owns this memo, so observations cannot outlive that startup compile.
 	class RevalidationContext
 	{
 	public:
