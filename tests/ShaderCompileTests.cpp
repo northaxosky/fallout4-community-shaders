@@ -158,9 +158,9 @@ namespace
 
 		const std::array<ShaderCase, 3> featureCompositionCases{ {
 			{
-				"BSDFLight.hlsl",
+				"BSDFLightShader.hlsl",
 				{
-					{ "BSDF_LIGHT_FAMILY", "9" },
+					{ "BSDFLIGHT_PS_DEFERRED", "1" },
 					{ "LIGHT_TYPE", "1" },
 					{
 						cs::engine::shader_injection_defines::
@@ -171,19 +171,19 @@ namespace
 				"ps_5_0"
 			},
 			{
-				"BSDFLight.hlsl",
+				"BSDFLightShader.hlsl",
 				{
 					{ "AMBIENT_IBL_IN_LIGHT", "1" },
-					{ "BSDF_LIGHT_FAMILY", "9" },
+					{ "BSDFLIGHT_PS_DEFERRED", "1" },
 					{ "LIGHT_TYPE", "1" }
 				},
 				"ps_5_0"
 			},
 			{
-				"BSDFLight.hlsl",
+				"BSDFLightShader.hlsl",
 				{
 					{ "AMBIENT_IBL_IN_LIGHT", "1" },
-					{ "BSDF_LIGHT_FAMILY", "9" },
+					{ "BSDFLIGHT_PS_DEFERRED", "1" },
 					{ "LIGHT_TYPE", "1" },
 					{
 						cs::engine::shader_injection_defines::
@@ -194,43 +194,10 @@ namespace
 				"ps_5_0"
 			}
 		} };
-		const std::array<ShaderCase, 14> explicitSourceCases{ {
+		const std::array<ShaderCase, 3> explicitSourceCases{ {
 			{ "DeferredComposite.hlsl", {}, "ps_5_0" },
 			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
-			{ "VolumetricLighting.hlsl", {}, "ps_5_0" },
-			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" } }, "ps_5_0" },
-			{ "BSDFComposite.hlsl", { { "BSDF_COMPOSITE_FAMILY", "2" }, { "TILELIGHT", "1" } }, "ps_5_0" },
-			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "1" } }, "ps_5_0" },
-			{ "BSDFLight.hlsl", { { "BSDF_LIGHT_FAMILY", "9" }, { "LIGHT_TYPE", "2" } }, "ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "1" }, { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
-					{ "RGBSPEC", "1" }, { "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
-				"ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "2" }, { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
-					{ "RGBSPEC", "1" }, { "DIRSPLITS", "2" }, { "FILTER_PCF1", "1" } },
-				"ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "3" }, { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SPECULAR", "1" },
-					{ "RGBSPEC", "1" }, { "DIRSPLITS", "3" }, { "FILTER_PCF1", "1" } },
-				"ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "4" }, { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" },
-					{ "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
-				"ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "5" }, { "DIRECTIONAL", "1" }, { "SHADOW", "1" }, { "SHADOW_ONLY", "1" },
-					{ "BLENDSPLIT", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
-					{ "DIRSPLITS", "1" }, { "FILTER_PCF1", "1" } },
-				"ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "6" }, { "DIRECTIONAL", "1" }, { "SPECULAR", "1" }, { "RGBSPEC", "1" },
-					{ "DIRSPLITS", "2" } },
-				"ps_5_0" },
-			{ "BSDFLight.hlsl",
-				{ { "BSDF_LIGHT_FAMILY", "7" }, { "POINTOMNI", "1" }, { "GOBOPROJECTION", "1" }, { "RGBSPEC", "1" },
-					{ "DIRSPLITS", "2" } },
-				"ps_5_0" }
+			{ "VolumetricLighting.hlsl", {}, "ps_5_0" }
 		} };
 		const auto compileCases = [&a_root](const auto& a_cases) {
 			for (const auto& shader : a_cases) {
@@ -265,11 +232,7 @@ namespace
 		for (const auto& registration : registrations) {
 			const auto* compositions =
 				registration.targetId
-						== cs::engine::ShaderInjectionTarget::
-							kBsdfLightDeferredDirectional
-					|| registration.targetId
-						== cs::engine::ShaderInjectionTarget::
-							kBsdfLightDeferredDirectionalIbl
+						== cs::engine::ShaderInjectionTarget::kBsdfLight
 				? &directionalCompositions
 				: nullptr;
 			if (compositions) {
@@ -279,7 +242,7 @@ namespace
 				}
 			}
 			if (registration.targetId
-				== cs::engine::ShaderInjectionTarget::kAmbientIblPass) {
+				== cs::engine::ShaderInjectionTarget::kBsdfComposite) {
 				for (const auto& defines : ambientCompositions) {
 					CompileRegistration(a_root, registration, defines);
 					++contributorCompositionCount;

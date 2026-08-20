@@ -269,13 +269,8 @@ namespace cs::features
 			const bool directionalRegistered =
 				registerDirectionalReplacement(
 					cs::engine::ShaderInjectionTarget::
-						kBsdfLightDeferredDirectional);
-			const bool directionalIblRegistered =
-				registerDirectionalReplacement(
-					cs::engine::ShaderInjectionTarget::
-						kBsdfLightDeferredDirectionalIbl);
-			injectionReady =
-				directionalRegistered && directionalIblRegistered;
+						kBsdfLight);
+			injectionReady = directionalRegistered;
 			if (!injectionReady)
 				L->error("Failed to register reconstructed directional shaders.");
 		} else {

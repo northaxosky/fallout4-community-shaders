@@ -7,7 +7,6 @@
 #include "Render/ShaderInjectionStaticFamilyRegistrations.h"
 #include "Render/ShaderInjectionVariantFactory.h"
 #include "Render/ShaderVariantCompilation.h"
-#include "Render/ShaderVariantResolver.h"
 #include "Utils/CSSha1.h"
 
 #include <algorithm>
@@ -22,44 +21,11 @@
 
 namespace cs::engine
 {
+#include "Render/BsdfShaderReplacementVariants.generated.inl"
+
 	namespace
 	{
 		constexpr std::array<ShaderInjectionDefineMetadata, 0> kNoDefines{};
-
-		// Routes must reconstruct the stock blob they replace.
-		constexpr std::array<ShaderInjectionDefineMetadata, 6> kBsdfPointDefines{ {
-			{ "BSDF_LIGHT_FAMILY", "7" },
-			{ "DIRSPLITS", "2" },
-			{ "GOBOPROJECTION", "1" },
-			{ "POINTOMNI", "1" },
-			{ "RGBSPEC", "1" },
-			{ "SPECULAR", "1" }
-		} };
-		constexpr std::array<ShaderInjectionDefineMetadata, 8> kBsdfDirectionalDefines{ {
-			{ "BSDF_LIGHT_FAMILY", "2" },
-			{ "BLENDSPLIT", "1" },
-			{ "DIRECTIONAL", "1" },
-			{ "DIRSPLITS", "2" },
-			{ "FILTER_POISSON", "1" },
-			{ "RGBSPEC", "1" },
-			{ "SHADOW", "1" },
-			{ "SPECULAR", "1" }
-		} };
-		constexpr std::array<ShaderInjectionDefineMetadata, 9> kBsdfDirectionalIblDefines{ {
-			{ "BSDF_LIGHT_FAMILY", "2" },
-			{ "AMBIENT", "1" },
-			{ "BLENDSPLIT", "1" },
-			{ "DIRECTIONAL", "1" },
-			{ "DIRSPLITS", "2" },
-			{ "FILTER_POISSON", "1" },
-			{ "RGBSPEC", "1" },
-			{ "SHADOW", "1" },
-			{ "SPECULAR", "1" }
-		} };
-		// Family 2 matches the runtime ambient pass.
-		constexpr std::array<ShaderInjectionDefineMetadata, 1> kAmbientIblDefines{ {
-			{ "BSDF_COMPOSITE_FAMILY", "2" }
-		} };
 
 		constexpr std::array<ShaderInjectionTargetMetadata,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> kTargets{ {
@@ -78,38 +44,6 @@ namespace cs::engine
 				"main",
 				"ps_5_0",
 				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kBsdfLightDeferredPoint,
-				"bsdf_light_deferred_point",
-				L"BSDFLight.hlsl",
-				"main",
-				"ps_5_0",
-				kBsdfPointDefines
-			},
-			{
-				ShaderInjectionTarget::kAmbientIblPass,
-				"ambient_ibl_pass",
-				L"BSDFComposite.hlsl",
-				"main",
-				"ps_5_0",
-				kAmbientIblDefines
-			},
-			{
-				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-				"bsdf_light_deferred_directional",
-				L"BSDFLight.hlsl",
-				"main",
-				"ps_5_0",
-				kBsdfDirectionalDefines
-			},
-			{
-				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
-				"bsdf_light_deferred_directional_ibl",
-				L"BSDFLight.hlsl",
-				"main",
-				"ps_5_0",
-				kBsdfDirectionalIblDefines
 			},
 			{
 				ShaderInjectionTarget::kVlsSliceScatter,
@@ -142,20 +76,34 @@ namespace cs::engine
 				"main",
 				"ps_5_0",
 				kNoDefines
+			},
+			{
+				ShaderInjectionTarget::kBsdfLight,
+				"bsdf_light",
+				L"BSDFLightShader.hlsl",
+				"main",
+				"ps_5_0",
+				kNoDefines
+			},
+			{
+				ShaderInjectionTarget::kBsdfComposite,
+				"bsdf_composite",
+				L"BSDFCompositeShader.hlsl",
+				"main",
+				"ps_5_0",
+				kNoDefines
 			}
 		} };
 
 		// Composite and VLS lack stock hash guards.
-		constexpr std::array<ShaderInjectionTarget, 8>
+		constexpr std::array<ShaderInjectionTarget, 6>
 			kBaselineOwnableTargets{
 				ShaderInjectionTarget::kDeferredPrepass,
-				ShaderInjectionTarget::kBsdfLightDeferredPoint,
-				ShaderInjectionTarget::kAmbientIblPass,
-				ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-				ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 				ShaderInjectionTarget::kBsSky,
 				ShaderInjectionTarget::kBsWater,
-				ShaderInjectionTarget::kBsLighting
+				ShaderInjectionTarget::kBsLighting,
+				ShaderInjectionTarget::kBsdfLight,
+				ShaderInjectionTarget::kBsdfComposite
 			};
 
 		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
@@ -189,17 +137,6 @@ namespace cs::engine
 			ShaderStageBit(ShaderStage::kVertex)
 			| ShaderStageBit(ShaderStage::kPixel);
 
-		template <std::size_t Size>
-		std::vector<ShaderVariantKey> OwnVariantKeys(
-			const std::array<ShaderVariantKeyView, Size>& a_keys)
-		{
-			std::vector<ShaderVariantKey> keys;
-			keys.reserve(a_keys.size());
-			for (const auto key : a_keys)
-				keys.push_back(OwnShaderVariantKey(key));
-			return keys;
-		}
-
 		std::vector<ShaderReplacementVariantRegistration>
 		MakeDefaultShaderReplacementVariants()
 		{
@@ -217,52 +154,13 @@ namespace cs::engine
 					{},
 					"c493970c042ccd90363c57596ff53f6fdd22ce5f"),
 				MakeDefaultVariantRegistration(
-					Target::kBsdfLightDeferredPoint,
-					"default",
-					OwnVariantKeys(
-						shader_variants::
-							kBsdfLightDeferredPoint),
-					"9969e800683c8a7c8afc25f41582415d79cbe47e"),
-				MakeDefaultVariantRegistration(
-					Target::kAmbientIblPass,
-					"tilelight",
-					{
-						OwnShaderVariantKey(
-							shader_variants::
-								kBsdfCompositeAmbientIblTilelight)
-					},
-					"2b6e36c08aca7ff0a3bd10da326e00b3b0367383",
-					{ { "TILELIGHT", "1" } }),
-				MakeDefaultVariantRegistration(
-					Target::kAmbientIblPass,
-					"no-tilelight",
-					{
-						OwnShaderVariantKey(
-							shader_variants::
-								kBsdfCompositeAmbientIbl)
-					},
-					"6d726d0fe6b6c474da30edbffcecfa067c795873"),
-				MakeDefaultVariantRegistration(
-					Target::kBsdfLightDeferredDirectional,
-					"default",
-					OwnVariantKeys(
-						shader_variants::
-							kBsdfLightDeferredDirectional),
-					"50e2618e8d1a8c3400c2bdb0129e510fe395d19a"),
-				MakeDefaultVariantRegistration(
-					Target::kBsdfLightDeferredDirectionalIbl,
-					"default",
-					OwnVariantKeys(
-						shader_variants::
-							kBsdfLightDeferredDirectionalIbl),
-					"94f8385edd1b4eb232b1de269e1ad7b21122a293"),
-				MakeDefaultVariantRegistration(
 					Target::kVlsSliceScatter,
 					"default",
 					{},
 					{})
 			};
 			AppendStaticFamilyShaderReplacementVariants(variants);
+			AppendBsdfFamilyShaderReplacementVariants(variants);
 			return variants;
 		}
 

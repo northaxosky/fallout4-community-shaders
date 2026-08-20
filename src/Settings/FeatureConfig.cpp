@@ -350,15 +350,13 @@ namespace cs::feature_config
 			return result;
 		}
 
-		constexpr std::array<std::string_view, 8> targetKeys{
+		constexpr std::array<std::string_view, 6> targetKeys{
 			"deferred_prepass",
-			"bsdf_light_deferred_point",
-			"ambient_ibl_pass",
-			"bsdf_light_deferred_directional",
-			"bsdf_light_deferred_directional_ibl",
 			"bssky",
 			"bswater",
-			"bslighting"
+			"bslighting",
+			"bsdf_light",
+			"bsdf_composite"
 		};
 		for (const auto& [key, node] : *targets) {
 			(void)node;
@@ -380,21 +378,11 @@ namespace cs::feature_config
 				result.error);
 		};
 		if (!readTarget("deferred_prepass", result.config.targets.deferredPrepass)
-			|| !readTarget(
-				"bsdf_light_deferred_point",
-				result.config.targets.bsdfLightDeferredPoint)
-			|| !readTarget(
-				"ambient_ibl_pass",
-				result.config.targets.ambientIblPass)
-			|| !readTarget(
-				"bsdf_light_deferred_directional",
-				result.config.targets.bsdfLightDeferredDirectional)
-			|| !readTarget(
-				"bsdf_light_deferred_directional_ibl",
-				result.config.targets.bsdfLightDeferredDirectionalIbl)
 			|| !readTarget("bssky", result.config.targets.bsSky)
 			|| !readTarget("bswater", result.config.targets.bsWater)
-			|| !readTarget("bslighting", result.config.targets.bsLighting)) {
+			|| !readTarget("bslighting", result.config.targets.bsLighting)
+			|| !readTarget("bsdf_light", result.config.targets.bsdfLight)
+			|| !readTarget("bsdf_composite", result.config.targets.bsdfComposite)) {
 			result.valid = false;
 			result.config = {};
 		}

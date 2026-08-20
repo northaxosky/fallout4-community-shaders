@@ -23,14 +23,12 @@ namespace cs::engine
 	{
 		kDeferredComposite,
 		kDeferredPrepass,
-		kBsdfLightDeferredPoint,
-		kAmbientIblPass,
-		kBsdfLightDeferredDirectional,
-		kBsdfLightDeferredDirectionalIbl,
 		kVlsSliceScatter,
 		kBsSky,
 		kBsWater,
 		kBsLighting,
+		kBsdfLight,
+		kBsdfComposite,
 		kCount
 	};
 

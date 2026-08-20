@@ -53,13 +53,11 @@ namespace cs::feature_config
 	struct ShaderOwnershipTargets
 	{
 		bool deferredPrepass{ false };
-		bool bsdfLightDeferredPoint{ false };
-		bool ambientIblPass{ false };
-		bool bsdfLightDeferredDirectional{ false };
-		bool bsdfLightDeferredDirectionalIbl{ false };
 		bool bsSky{ false };
 		bool bsWater{ false };
 		bool bsLighting{ false };
+		bool bsdfLight{ false };
+		bool bsdfComposite{ false };
 	};
 
 	struct ShaderOwnershipConfig

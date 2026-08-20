@@ -21,19 +21,11 @@ namespace
 			ShaderInjectionTarget::kDeferredPrepass,
 			a_config.enabled && a_config.targets.deferredPrepass);
 		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsdfLightDeferredPoint,
-			a_config.enabled && a_config.targets.bsdfLightDeferredPoint);
+			ShaderInjectionTarget::kBsdfLight,
+			a_config.enabled && a_config.targets.bsdfLight);
 		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kAmbientIblPass,
-			a_config.enabled && a_config.targets.ambientIblPass);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			a_config.enabled
-				&& a_config.targets.bsdfLightDeferredDirectional);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
-			a_config.enabled
-				&& a_config.targets.bsdfLightDeferredDirectionalIbl);
+			ShaderInjectionTarget::kBsdfComposite,
+			a_config.enabled && a_config.targets.bsdfComposite);
 		applied &= cs::engine::SetBaselineShaderOwnership(
 			ShaderInjectionTarget::kBsSky,
 			a_config.enabled && a_config.targets.bsSky);

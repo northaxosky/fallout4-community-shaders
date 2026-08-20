@@ -94,7 +94,7 @@ namespace
 	bool TestStageScopedContributions()
 	{
 		const auto* target = GetShaderInjectionTarget(
-			ShaderInjectionTarget::kAmbientIblPass);
+			ShaderInjectionTarget::kBsdfComposite);
 		if (!Check(target != nullptr, "stage-scope target metadata is missing"))
 			return false;
 
@@ -303,13 +303,11 @@ namespace
 	{
 		constexpr std::array ownableTargets{
 			ShaderInjectionTarget::kDeferredPrepass,
-			ShaderInjectionTarget::kBsdfLightDeferredPoint,
-			ShaderInjectionTarget::kAmbientIblPass,
-			ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
 			ShaderInjectionTarget::kBsSky,
 			ShaderInjectionTarget::kBsWater,
-			ShaderInjectionTarget::kBsLighting
+			ShaderInjectionTarget::kBsLighting,
+			ShaderInjectionTarget::kBsdfLight,
+			ShaderInjectionTarget::kBsdfComposite
 		};
 
 		bool ok = true;
@@ -383,13 +381,11 @@ namespace
 	{
 		switch (a_target) {
 		case ShaderInjectionTarget::kDeferredPrepass:
-		case ShaderInjectionTarget::kBsdfLightDeferredPoint:
-		case ShaderInjectionTarget::kAmbientIblPass:
-		case ShaderInjectionTarget::kBsdfLightDeferredDirectional:
-		case ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl:
 		case ShaderInjectionTarget::kBsSky:
 		case ShaderInjectionTarget::kBsWater:
 		case ShaderInjectionTarget::kBsLighting:
+		case ShaderInjectionTarget::kBsdfLight:
+		case ShaderInjectionTarget::kBsdfComposite:
 			return true;
 		default:
 			return false;
@@ -437,7 +433,7 @@ int main(int a_argc, char* a_argv[])
 		"out-of-range contribution stage mask was accepted");
 
 	ShaderReplacementRegistration disabledWetnessAmbient;
-	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
+	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kBsdfComposite;
 	disabledWetnessAmbient.contributor = "WetnessEffects";
 	disabledWetnessAmbient.bind = [](ID3D11DeviceContext*) {};
 	ok &= Check(
@@ -447,7 +443,7 @@ int main(int a_argc, char* a_argv[])
 		"disabled WetnessEffects ambient registration failed");
 
 	ShaderReplacementRegistration disabledSsgiAmbient;
-	disabledSsgiAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
+	disabledSsgiAmbient.targetId = ShaderInjectionTarget::kBsdfComposite;
 	disabledSsgiAmbient.contributor = "ScreenSpaceGI";
 	disabledSsgiAmbient.bind = [](ID3D11DeviceContext*) {};
 	ShaderReplacementVariantRegistration mismatchedProfile;
@@ -511,6 +507,8 @@ int main(int a_argc, char* a_argv[])
 		case ShaderInjectionTarget::kBsSky:
 		case ShaderInjectionTarget::kBsWater:
 		case ShaderInjectionTarget::kBsLighting:
+		case ShaderInjectionTarget::kBsdfLight:
+		case ShaderInjectionTarget::kBsdfComposite:
 			if (registration.stage == ShaderStage::kPixel)
 				++familyCounts[registration.targetId];
 			else
@@ -530,6 +528,12 @@ int main(int a_argc, char* a_argv[])
 		familyCounts[ShaderInjectionTarget::kBsLighting] == 12,
 		"BSLighting registration count mismatch");
 	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kBsdfLight] == 166,
+		"BSDFLight pixel registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kBsdfComposite] == 70,
+		"BSDFComposite pixel registration count mismatch");
+	ok &= Check(
 		vertexFamilyCounts[ShaderInjectionTarget::kBsSky] == 7,
 		"BSSky vertex representative count mismatch");
 	ok &= Check(
@@ -539,19 +543,27 @@ int main(int a_argc, char* a_argv[])
 		vertexFamilyCounts[ShaderInjectionTarget::kBsLighting] == 8,
 		"BSLighting vertex representative count mismatch");
 	ok &= Check(
-		staticFamilies.size() == 98,
+		vertexFamilyCounts[ShaderInjectionTarget::kBsdfLight] == 1,
+		"BSDFLight vertex representative count mismatch");
+	ok &= Check(
+		vertexFamilyCounts[ShaderInjectionTarget::kBsdfComposite] == 4,
+		"BSDFComposite vertex representative count mismatch");
+	ok &= Check(
+		staticFamilies.size() == 334,
 		"default shader replacement variant count mismatch");
 	ok &= Check(
-		stockHashes.size() == 96,
+		stockHashes.size() == 332,
 		"default shader replacement variant non-empty stock hash count mismatch");
 
-	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 3>
-		kStaticFamilySources{ {
+	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 5>
+		kFamilySources{ {
 			{ ShaderInjectionTarget::kBsSky, L"BSSkyShader.hlsl" },
 			{ ShaderInjectionTarget::kBsWater, L"BSWaterShader.hlsl" },
-			{ ShaderInjectionTarget::kBsLighting, L"BSLightingShader.hlsl" }
+			{ ShaderInjectionTarget::kBsLighting, L"BSLightingShader.hlsl" },
+			{ ShaderInjectionTarget::kBsdfLight, L"BSDFLightShader.hlsl" },
+			{ ShaderInjectionTarget::kBsdfComposite, L"BSDFCompositeShader.hlsl" }
 		} };
-	for (const auto& [target, sourcePath] : kStaticFamilySources) {
+	for (const auto& [target, sourcePath] : kFamilySources) {
 		const auto* metadata = GetShaderInjectionTarget(target);
 		ok &= Check(
 			metadata != nullptr,
@@ -588,7 +600,7 @@ int main(int a_argc, char* a_argv[])
 		"registration without a bind installed the pre-draw hook");
 
 	ShaderReplacementRegistration bindRegistration;
-	bindRegistration.targetId = ShaderInjectionTarget::kAmbientIblPass;
+	bindRegistration.targetId = ShaderInjectionTarget::kBsdfComposite;
 	bindRegistration.contributor = "registration-with-bind";
 	bindRegistration.bind = [](ID3D11DeviceContext*) {};
 	ok &= Check(

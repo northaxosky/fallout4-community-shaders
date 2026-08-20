@@ -426,7 +426,7 @@ namespace cs::features
 			cs::engine::RegisterReplacementIfEnabled(
 				_settings.injectAmbientPass,
 				{
-					.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+					.targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
 					.contributor = "ScreenSpaceGI",
 					.defines = {
 						{
@@ -1774,7 +1774,7 @@ namespace cs::features
 		context->PSGetShader(boundShader.put(), nullptr, nullptr);
 		if (!boundShader ||
 			!cs::engine::IsInjectedPixelShader(
-				cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+				cs::engine::ShaderInjectionTarget::kBsdfComposite,
 				boundShader.get())) {
 			return;
 		}

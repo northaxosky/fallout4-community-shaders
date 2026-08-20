@@ -148,41 +148,35 @@ namespace
 			"enabled = false\n"
 			"[shader_ownership.targets]\n"
 			"deferred_prepass = true\n"
-			"bsdf_light_deferred_point = true\n"
-			"ambient_ibl_pass = true\n"
-			"bsdf_light_deferred_directional = true\n"
-			"bsdf_light_deferred_directional_ibl = true\n"
 			"bssky = true\n"
 			"bswater = true\n"
-			"bslighting = true\n"));
+			"bslighting = true\n"
+			"bsdf_light = true\n"
+			"bsdf_composite = true\n"));
 		CHECK(disabled.present);
 		CHECK(disabled.valid);
 		CHECK(!disabled.config.enabled);
 		CHECK(disabled.config.targets.deferredPrepass);
-		CHECK(disabled.config.targets.bsdfLightDeferredPoint);
-		CHECK(disabled.config.targets.ambientIblPass);
-		CHECK(disabled.config.targets.bsdfLightDeferredDirectional);
-		CHECK(disabled.config.targets.bsdfLightDeferredDirectionalIbl);
 		CHECK(disabled.config.targets.bsSky);
 		CHECK(disabled.config.targets.bsWater);
 		CHECK(disabled.config.targets.bsLighting);
+		CHECK(disabled.config.targets.bsdfLight);
+		CHECK(disabled.config.targets.bsdfComposite);
 
 		const auto optedOut = ParseShaderOwnership(Parse(
 			"[shader_ownership]\n"
 			"enabled = true\n"
 			"[shader_ownership.targets]\n"
 			"deferred_prepass = true\n"
-			"bsdf_light_deferred_point = false\n"
-			"ambient_ibl_pass = true\n"
-			"bsdf_light_deferred_directional = true\n"
-			"bsdf_light_deferred_directional_ibl = true\n"
 			"bssky = false\n"
 			"bswater = true\n"
-			"bslighting = true\n"));
+			"bslighting = true\n"
+			"bsdf_light = false\n"
+			"bsdf_composite = true\n"));
 		CHECK(optedOut.present);
 		CHECK(optedOut.valid);
 		CHECK(optedOut.config.enabled);
-		CHECK(!optedOut.config.targets.bsdfLightDeferredPoint);
+		CHECK(!optedOut.config.targets.bsdfLight);
 		CHECK(!optedOut.config.targets.bsSky);
 
 		const auto missing = ParseShaderOwnership(Parse(""));
@@ -202,12 +196,10 @@ namespace
 			"enabled = true\n"
 			"[shader_ownership.targets]\n"
 			"deferred_prepass = true\n"
-			"bsdf_light_deferred_point = true\n"
-			"ambient_ibl_pass = true\n"
-			"bsdf_light_deferred_directional = true\n"
-			"bsdf_light_deferred_directional_ibl = true\n"
 			"bssky = true\n"
-			"bswater = true\n"));
+			"bswater = true\n"
+			"bslighting = true\n"
+			"bsdf_light = true\n"));
 		CHECK(missingTarget.present);
 		CHECK(!missingTarget.valid);
 		CHECK(!missingTarget.config.enabled);
@@ -217,13 +209,11 @@ namespace
 			"enabled = true\n"
 			"[shader_ownership.targets]\n"
 			"deferred_prepass = true\n"
-			"bsdf_light_deferred_point = true\n"
-			"ambient_ibl_pass = true\n"
-			"bsdf_light_deferred_directional = true\n"
-			"bsdf_light_deferred_directional_ibl = true\n"
 			"bssky = true\n"
 			"bswater = true\n"
 			"bslighting = true\n"
+			"bsdf_light = true\n"
+			"bsdf_composite = true\n"
 			"deferred_composite = true\n"));
 		CHECK(unsupportedTarget.present);
 		CHECK(!unsupportedTarget.valid);
@@ -239,7 +229,7 @@ namespace
 			"[shader_ownership]\n"
 			"enabled = false\n"
 			"[shader_ownership.targets]\n"
-			"ambient_ibl_pass = true\n"
+			"bsdf_composite = true\n"
 			"[features.One]\n"
 			"load = false\n"
 			"[features.One.settings]\n"
@@ -253,7 +243,7 @@ namespace
 			"[shader_ownership]\n"
 			"enabled = true\n"
 			"[shader_ownership.targets]\n"
-			"ambient_ibl_pass = false\n"
+			"bsdf_composite = false\n"
 			"[features.One.settings]\n"
 			"enabled = true\n");
 
@@ -261,7 +251,7 @@ namespace
 		CHECK(base["logging"]["level"].value<std::string>() == std::optional<std::string>{ "info" });
 		CHECK(base["logging"]["telemetry"].value<bool>() == std::optional<bool>{ true });
 		CHECK(base["shader_ownership"]["enabled"].value<bool>() == std::optional<bool>{ true });
-		CHECK(base["shader_ownership"]["targets"]["ambient_ibl_pass"].value<bool>() == std::optional<bool>{ false });
+		CHECK(base["shader_ownership"]["targets"]["bsdf_composite"].value<bool>() == std::optional<bool>{ false });
 		CHECK(base["features"]["One"]["load"].value<bool>() == std::optional<bool>{ false });
 		CHECK(base["features"]["One"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
 		CHECK(base["features"]["One"]["settings"]["quality"].value<std::int64_t>() == std::optional<std::int64_t>{ 2 });
@@ -459,10 +449,11 @@ namespace
 		CHECK(ownership.valid);
 		CHECK(!ownership.config.enabled);
 		CHECK(ownership.config.targets.deferredPrepass);
-		CHECK(ownership.config.targets.bsdfLightDeferredPoint);
-		CHECK(ownership.config.targets.ambientIblPass);
-		CHECK(ownership.config.targets.bsdfLightDeferredDirectional);
-		CHECK(ownership.config.targets.bsdfLightDeferredDirectionalIbl);
+		CHECK(ownership.config.targets.bsSky);
+		CHECK(ownership.config.targets.bsWater);
+		CHECK(ownership.config.targets.bsLighting);
+		CHECK(ownership.config.targets.bsdfLight);
+		CHECK(ownership.config.targets.bsdfComposite);
 
 		for (const std::string_view key : { "ScreenSpaceGI", "WetnessEffects" }) {
 			const auto* settings =

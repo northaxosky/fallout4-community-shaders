@@ -148,7 +148,7 @@ namespace cs::features
 	void WetnessEffects::Load()
 	{
 		const auto registerWetnessReplacement =
-			[this](cs::engine::ShaderInjectionTarget a_target, std::uint32_t a_slot) {
+			[this](cs::engine::ShaderInjectionTarget a_target, MaskPass a_pass) {
 				return cs::engine::RegisterReplacement({
 					.targetId = a_target,
 					.contributor = "WetnessEffects",
@@ -162,29 +162,26 @@ namespace cs::features
 					.isReady = [this] {
 						return IsWetnessMaskReady();
 					},
-					.bind = [this, a_slot](ID3D11DeviceContext* a_context) {
-						BindWetnessMask(a_context, a_slot);
+					.bind = [this, a_pass](ID3D11DeviceContext* a_context) {
+						BindWetnessMask(a_context, a_pass);
 					},
 					.slotClaims = {
 						{
 							.stage = cs::engine::ShaderStage::kPixel,
 							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-							.slot = a_slot
+							.slot = kMaskPSSlot
 						}
 					}
 				});
 			};
 		const bool directionalRegistered = registerWetnessReplacement(
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			kMaskPSSlotDirectional);
-		const bool directionalIblRegistered = registerWetnessReplacement(
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl,
-			kMaskPSSlotDirectional);
+			cs::engine::ShaderInjectionTarget::kBsdfLight,
+			MaskPass::kDirectional);
 		const bool ambientRegistrationSucceeded =
 			cs::engine::RegisterReplacementIfEnabled(
 				_settings.injectAmbientPass,
 				{
-					.targetId = cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+					.targetId = cs::engine::ShaderInjectionTarget::kBsdfComposite,
 					.contributor = "WetnessEffects",
 					.defines = {
 						{
@@ -197,19 +194,19 @@ namespace cs::features
 						return IsWetnessMaskReady();
 					},
 					.bind = [this](ID3D11DeviceContext* a_context) {
-						BindWetnessMask(a_context, kMaskPSSlotAmbient);
+						BindWetnessMask(a_context, MaskPass::kAmbient);
 					},
 					.slotClaims = {
 						{
 							.stage = cs::engine::ShaderStage::kPixel,
 							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-							.slot = kMaskPSSlotAmbient
+							.slot = kMaskPSSlot
 						}
 					}
 				});
 		_ambientPassRegistered =
 			_settings.injectAmbientPass && ambientRegistrationSucceeded;
-		if (!directionalRegistered || !directionalIblRegistered ||
+		if (!directionalRegistered ||
 			(_settings.injectAmbientPass && !ambientRegistrationSucceeded)) {
 			L->error("Failed to register wetness shader replacements.");
 		}
@@ -480,20 +477,15 @@ namespace cs::features
 			return;
 		}
 
-		constexpr std::array directionalTargets{
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectional,
-			cs::engine::ShaderInjectionTarget::kBsdfLightDeferredDirectionalIbl
-		};
-		for (const auto target : directionalTargets) {
-			if (cs::engine::IsInjectedPixelShader(
-					target, boundShader.get())) {
-				_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
-				return;
-			}
+		if (cs::engine::IsInjectedPixelShader(
+				cs::engine::ShaderInjectionTarget::kBsdfLight,
+				boundShader.get())) {
+			_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
+			return;
 		}
 		if (_ambientPassRegistered &&
 			cs::engine::IsInjectedPixelShader(
-				cs::engine::ShaderInjectionTarget::kAmbientIblPass,
+				cs::engine::ShaderInjectionTarget::kBsdfComposite,
 				boundShader.get())) {
 			_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
 			_ambientPreDrawMatches.fetch_add(1, std::memory_order_relaxed);
@@ -508,7 +500,7 @@ namespace cs::features
 
 	void WetnessEffects::BindWetnessMask(
 		ID3D11DeviceContext* a_context,
-		std::uint32_t a_slot)
+		MaskPass a_pass)
 	{
 		if (!a_context ||
 			!_resourcesReady.load(std::memory_order_acquire) ||
@@ -516,15 +508,18 @@ namespace cs::features
 			return;
 		}
 
-		// t4/t13 keep stale SRVs, so always bind.
+		// The shared slot may retain a stale SRV, so always bind.
 		auto* srv = _wetnessMask->srv.get();
-		a_context->PSSetShaderResources(a_slot, 1, &srv);
+		a_context->PSSetShaderResources(kMaskPSSlot, 1, &srv);
 		_maskBinds.fetch_add(1, std::memory_order_relaxed);
-		if (a_slot == kMaskPSSlotDirectional) {
+		switch (a_pass) {
+		case MaskPass::kDirectional:
 			_directionalMaskBound.store(true, std::memory_order_relaxed);
-		} else if (a_slot == kMaskPSSlotAmbient) {
+			break;
+		case MaskPass::kAmbient:
 			_ambientMaskBinds.fetch_add(1, std::memory_order_relaxed);
 			_ambientMaskBound.store(true, std::memory_order_relaxed);
+			break;
 		}
 	}
 
@@ -548,12 +543,7 @@ namespace cs::features
 		}
 
 		ID3D11ShaderResourceView* nullSRV = nullptr;
-		if (restoreDirectional) {
-			context->PSSetShaderResources(kMaskPSSlotDirectional, 1, &nullSRV);
-		}
-		if (restoreAmbient) {
-			context->PSSetShaderResources(kMaskPSSlotAmbient, 1, &nullSRV);
-		}
+		context->PSSetShaderResources(kMaskPSSlot, 1, &nullSRV);
 	}
 
 	void WetnessEffects::PollTelemetry(ID3D11DeviceContext* a_context)

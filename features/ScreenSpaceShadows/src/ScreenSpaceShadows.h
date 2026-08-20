@@ -82,7 +82,7 @@ namespace cs::features
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
 
-		static constexpr uint kMaskPSSlot = 6;
+		static constexpr uint kMaskPSSlot = 16;
 
 		Settings _settings;
 		SssInjectionMode _activeInjectionMode = SssInjectionMode::kStock;

@@ -56,13 +56,19 @@ namespace cs::features
 		};
 		static_assert(sizeof(TelemetryCB) == 16);
 
+		enum class MaskPass : std::uint8_t
+		{
+			kDirectional,
+			kAmbient
+		};
+
 		WetnessEffects() = default;
 
 		void SaveSettings();
 		void OnComputeWetness();
 		void OnPreSunLightDraw();
 		void RestoreWetnessMaskBindings();
-		void BindWetnessMask(ID3D11DeviceContext* a_context, std::uint32_t a_slot);
+		void BindWetnessMask(ID3D11DeviceContext* a_context, MaskPass a_pass);
 		bool IsWetnessMaskReady() const;
 		bool EnsureResources();
 		void PollTelemetry(ID3D11DeviceContext* a_context);
@@ -72,8 +78,7 @@ namespace cs::features
 			std::uint32_t a_sourceHeight,
 			std::uint32_t a_frameIndex);
 
-		static constexpr std::uint32_t kMaskPSSlotDirectional = 4;
-		static constexpr std::uint32_t kMaskPSSlotAmbient = 13;
+		static constexpr std::uint32_t kMaskPSSlot = 17;
 		static constexpr std::uint32_t kTelemetryWidth = 64;
 		static constexpr std::uint32_t kTelemetryHeight = 36;
 		static constexpr std::uint32_t kTelemetryIntervalFrames = 30;
