@@ -5,11 +5,15 @@
 #include "Utils/ShaderCompile.h"
 #include "generated/VertexShaderCompilePermutations.h"
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdio>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -51,7 +55,8 @@ namespace cs::engine
 
 namespace
 {
-	using ShaderDefines = std::vector<std::pair<const char*, const char*>>;
+	using ShaderDefines =
+		std::vector<std::pair<std::string, std::string>>;
 
 	struct ShaderCase
 	{
@@ -61,53 +66,172 @@ namespace
 		const char* entryPoint{ "main" };
 	};
 
-	int failures = 0;
+	struct ShaderCompileJob
+	{
+		std::filesystem::path path;
+		ShaderDefines         defines;
+		std::string           profile;
+		std::string           entryPoint;
+		std::string           description;
+		std::string           preparationError;
+	};
 
-	void Compile(
+	struct ShaderCompileResult
+	{
+		std::string error;
+	};
+
+	std::string CompileInputKey(
 		const std::filesystem::path& a_path,
 		const ShaderDefines& a_defines,
 		const char* a_profile = "cs_5_0",
 		const char* a_entryPoint = "main")
 	{
-		const std::wstring widePath = a_path.wstring();
+		std::string key = a_path.string();
+		key.append("|").append(a_profile).append("|").append(a_entryPoint);
+		for (const auto& [name, value] : a_defines)
+			key.append("|").append(name).append("=").append(value);
+		return key;
+	}
+
+	void AddCompile(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_path,
+		ShaderDefines a_defines,
+		const char* a_profile = "cs_5_0",
+		const char* a_entryPoint = "main",
+		std::string a_context = {})
+	{
+		std::string description = a_context.empty() ?
+			a_path.string() :
+			std::move(a_context) + ": " + a_path.string();
+		description.append(" [")
+			.append(a_profile)
+			.append("/")
+			.append(a_entryPoint);
+		for (const auto& [name, value] : a_defines)
+			description.append(", ").append(name).append("=").append(value);
+		description.append("]");
+
+		a_jobs.push_back({
+			.path = a_path,
+			.defines = std::move(a_defines),
+			.profile = a_profile,
+			.entryPoint = a_entryPoint,
+			.description = std::move(description)
+		});
+	}
+
+	void AddPreparationFailure(
+		std::vector<ShaderCompileJob>& a_jobs,
+		std::string a_description,
+		std::string a_error)
+	{
+		a_jobs.push_back({
+			.description = std::move(a_description),
+			.preparationError = std::move(a_error)
+		});
+	}
+
+	ShaderCompileResult Compile(const ShaderCompileJob& a_job)
+	{
+		if (!a_job.preparationError.empty())
+			return { a_job.preparationError };
+
+		std::vector<std::pair<const char*, const char*>> defines;
+		defines.reserve(a_job.defines.size());
+		for (const auto& [name, value] : a_job.defines)
+			defines.emplace_back(name.c_str(), value.c_str());
+
+		const std::wstring widePath = a_job.path.wstring();
 		std::string error;
 		const auto blob = cs::util::CompileShaderToBlob(
 			widePath.c_str(),
-			a_defines,
-			a_profile,
-			a_entryPoint,
+			defines,
+			a_job.profile.c_str(),
+			a_job.entryPoint.c_str(),
 			&error);
-		if (!blob) {
-			std::printf("FAIL: %s\n%s\n", a_path.string().c_str(), error.c_str());
+		return { blob ? std::string{} : std::move(error) };
+	}
+
+	int CompileAll(const std::vector<ShaderCompileJob>& a_jobs)
+	{
+		if (a_jobs.empty())
+			return 0;
+
+		std::vector<ShaderCompileResult> results(a_jobs.size());
+		std::atomic_size_t nextJob{ 0 };
+		const auto hardwareThreads =
+			std::max(1u, std::thread::hardware_concurrency());
+		const auto workerCount = std::min({
+			a_jobs.size(),
+			static_cast<std::size_t>(hardwareThreads),
+			std::size_t{ 16 }
+		});
+		{
+			std::vector<std::jthread> workers;
+			workers.reserve(workerCount);
+			for (std::size_t worker = 0; worker < workerCount; ++worker) {
+				workers.emplace_back([&a_jobs, &results, &nextJob] {
+					for (;;) {
+						const auto index =
+							nextJob.fetch_add(
+								1,
+								std::memory_order_relaxed);
+						if (index >= a_jobs.size())
+							return;
+						results[index] = Compile(a_jobs[index]);
+					}
+				});
+			}
+		}
+
+		int failures = 0;
+		for (std::size_t index = 0; index < a_jobs.size(); ++index) {
+			if (results[index].error.empty())
+				continue;
+			std::printf(
+				"FAIL: %s\n%s\n",
+				a_jobs[index].description.c_str(),
+				results[index].error.c_str());
 			++failures;
 		}
+		return failures;
 	}
 
-	void CompileScreenSpaceGI(const std::filesystem::path& a_root)
+	std::size_t AddScreenSpaceGI(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
 	{
-		Compile(a_root / "XeGTAO" / "decode.cs.hlsl", {});
-		Compile(a_root / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
-		Compile(a_root / "XeGTAO" / "gi.cs.hlsl", {});
-		Compile(a_root / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-		Compile(a_root / "XeGTAO" / "denoise.cs.hlsl", {});
-		Compile(a_root / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-		Compile(a_root / "ResolveCS.hlsl", {});
-		Compile(a_root / "BounceTelemetryCS.hlsl", {});
-		Compile(a_root / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
-		Compile(a_root / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
+		const auto firstJob = a_jobs.size();
+		AddCompile(a_jobs, a_root / "XeGTAO" / "decode.cs.hlsl", {});
+		AddCompile(a_jobs, a_root / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
+		AddCompile(a_jobs, a_root / "XeGTAO" / "gi.cs.hlsl", {});
+		AddCompile(a_jobs, a_root / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
+		AddCompile(a_jobs, a_root / "XeGTAO" / "denoise.cs.hlsl", {});
+		AddCompile(a_jobs, a_root / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
+		AddCompile(a_jobs, a_root / "ResolveCS.hlsl", {});
+		AddCompile(a_jobs, a_root / "BounceTelemetryCS.hlsl", {});
+		AddCompile(a_jobs, a_root / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
+		AddCompile(a_jobs, a_root / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
+		return a_jobs.size() - firstJob;
 	}
 
-	void CompileRegistration(
+	void AddRegistration(
+		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root,
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
-		const ShaderDefines& a_contributorDefines)
+		const ShaderDefines& a_contributorDefines,
+		std::set<std::string>* a_uniqueInputs = nullptr)
 	{
 		const auto* target =
 			cs::engine::GetShaderInjectionTarget(
 				a_registration.targetId);
 		if (!target) {
-			std::printf("FAIL: registration target metadata is missing\n");
-			++failures;
+			AddPreparationFailure(
+				a_jobs,
+				"registration " + a_registration.name,
+				"Registration target metadata is missing");
 			return;
 		}
 
@@ -130,35 +254,62 @@ namespace
 				contributions,
 				&compileTestError);
 		if (!compileTestRequest) {
-			std::printf(
-				"FAIL: effective compile request for %s: %s\n",
-				a_registration.name.c_str(),
-				compileTestError.c_str());
-			++failures;
+			AddPreparationFailure(
+				a_jobs,
+				"registration " + a_registration.name,
+				"Effective compile request failed: "
+					+ compileTestError);
 			return;
 		}
 
 		ShaderDefines defines;
 		defines.reserve(compileTestRequest->defines.size());
 		for (const auto& [name, value] : compileTestRequest->defines)
-			defines.emplace_back(name.c_str(), value.c_str());
-		Compile(
-			a_root / compileTestRequest->sourcePath,
-			defines,
+			defines.emplace_back(name, value);
+		const auto path = a_root / compileTestRequest->sourcePath;
+		if (a_uniqueInputs) {
+			a_uniqueInputs->insert(CompileInputKey(
+				path,
+				defines,
+				compileTestRequest->profile.c_str(),
+				compileTestRequest->entryPoint.c_str()));
+		}
+		AddCompile(
+			a_jobs,
+			path,
+			std::move(defines),
 			compileTestRequest->profile.c_str(),
-			compileTestRequest->entryPoint.c_str());
+			compileTestRequest->entryPoint.c_str(),
+			"registration " + a_registration.name);
 	}
 
-	void CompileLighting(const std::filesystem::path& a_root)
+	struct LightingCounts
+	{
+		std::size_t registrationDerived = 0;
+		std::size_t uniqueRegistrationInputs = 0;
+		std::size_t explicitPermutations = 0;
+	};
+
+	LightingCounts AddLighting(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
 	{
 		const auto registrations =
 			cs::engine::GetDefaultShaderReplacementVariants();
 		if (registrations.empty()) {
-			std::printf("FAIL: no shader replacement registrations were discovered\n");
-			++failures;
+			AddPreparationFailure(
+				a_jobs,
+				"shader replacement registrations",
+				"No shader replacement registrations were discovered");
 		}
+		std::set<std::string> uniqueRegistrationInputs;
 		for (const auto& registration : registrations)
-			CompileRegistration(a_root, registration, {});
+			AddRegistration(
+				a_jobs,
+				a_root,
+				registration,
+				{},
+				&uniqueRegistrationInputs);
 
 		const std::array<ShaderCase, 3> featureCompositionCases{ {
 			{
@@ -203,9 +354,11 @@ namespace
 			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
 			{ "VolumetricLighting.hlsl", {}, "ps_5_0" }
 		} };
-		const auto compileCases = [&a_root](const auto& a_cases) {
+		const auto compileCases =
+			[&a_jobs, &a_root](const auto& a_cases) {
 			for (const auto& shader : a_cases) {
-				Compile(
+				AddCompile(
+					a_jobs,
 					a_root / shader.path,
 					shader.defines,
 					shader.profile,
@@ -241,23 +394,35 @@ namespace
 				: nullptr;
 			if (compositions) {
 				for (const auto& defines : *compositions) {
-					CompileRegistration(a_root, registration, defines);
+					AddRegistration(
+						a_jobs,
+						a_root,
+						registration,
+						defines);
 					++contributorCompositionCount;
 				}
 			}
 			if (registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfComposite) {
 				for (const auto& defines : ambientCompositions) {
-					CompileRegistration(a_root, registration, defines);
+					AddRegistration(
+						a_jobs,
+						a_root,
+						registration,
+						defines);
 					++contributorCompositionCount;
 				}
 			}
 		}
-		std::printf(
-			"ShaderCompile checked %zu registration-derived and %zu explicit permutations\n",
-			registrations.size(),
-			featureCompositionCases.size() + explicitSourceCases.size()
-				+ contributorCompositionCount);
+		return {
+			.registrationDerived = registrations.size(),
+			.uniqueRegistrationInputs =
+				uniqueRegistrationInputs.size(),
+			.explicitPermutations =
+				featureCompositionCases.size()
+				+ explicitSourceCases.size()
+				+ contributorCompositionCount
+		};
 	}
 
 	const char* SourceForVertexFamily(const char* a_family)
@@ -272,28 +437,42 @@ namespace
 		return nullptr;
 	}
 
-	void CompileVertexPermutations(const std::filesystem::path& a_root)
+	std::size_t AddVertexPermutations(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
 	{
 		const auto permutations =
 			cs::test::shader_compile::GetVertexShaderCompilePermutations();
 		if (permutations.empty()) {
-			std::printf("FAIL: no vertex shader permutations were discovered\n");
-			++failures;
+			AddPreparationFailure(
+				a_jobs,
+				"vertex shader permutations",
+				"No vertex shader permutations were discovered");
 		}
 		for (const auto& permutation : permutations) {
 			const auto* source = SourceForVertexFamily(permutation.family);
 			if (!source) {
-				std::printf(
-					"FAIL: unknown vertex permutation family '%s'\n",
-					permutation.family);
-				++failures;
+				AddPreparationFailure(
+					a_jobs,
+					"vertex " + std::string(permutation.label),
+					"Unknown vertex permutation family '"
+						+ std::string(permutation.family) + "'");
 				continue;
 			}
-			Compile(a_root / source, permutation.defines, "vs_5_0", "main");
+			ShaderDefines defines;
+			defines.reserve(permutation.defines.size());
+			for (const auto& [name, value] : permutation.defines)
+				defines.emplace_back(name, value);
+			AddCompile(
+				a_jobs,
+				a_root / source,
+				std::move(defines),
+				"vs_5_0",
+				"main",
+				"vertex " + std::string(permutation.family)
+					+ "/" + permutation.label);
 		}
-		std::printf(
-			"ShaderCompile checked %zu vertex permutations\n",
-			permutations.size());
+		return permutations.size();
 	}
 }
 
@@ -306,9 +485,24 @@ int main(int argc, char** argv)
 		return 2;
 	}
 
-	CompileScreenSpaceGI(argv[1]);
-	CompileLighting(argv[2]);
-	CompileVertexPermutations(argv[2]);
+	std::vector<ShaderCompileJob> jobs;
+	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
+	const auto lightingCounts = AddLighting(jobs, argv[2]);
+	const auto vertexCount = AddVertexPermutations(jobs, argv[2]);
+
+	std::printf(
+		"ShaderCompile checked %zu ScreenSpaceGI permutations\n",
+		screenSpaceGiCount);
+	std::printf(
+		"ShaderCompile checked %zu base registration permutations (%zu unique inputs) and %zu lighting explicit/composed permutations\n",
+		lightingCounts.registrationDerived,
+		lightingCounts.uniqueRegistrationInputs,
+		lightingCounts.explicitPermutations);
+	std::printf(
+		"ShaderCompile checked %zu vertex permutations\n",
+		vertexCount);
+
+	const int failures = CompileAll(jobs);
 
 	if (failures == 0)
 		std::printf("ShaderCompile passed\n");
