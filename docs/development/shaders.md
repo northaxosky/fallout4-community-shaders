@@ -44,10 +44,11 @@ engine frame at the post-prepass anchor, and binds b5/b6 only for injected pixel
 draws. The previous pixel bindings are saved at deferred-lights entry and
 restored at deferred-lights exit.
 
-The declaration-derived census of the six reconstructed engine shader families
-leaves only `b3`-`b8` and `b11`, textures from `t16`, and no sampler slots for
-the plugin. `b5` and `b6` are reserved: a contributor that claims either as a
-constant buffer quarantines its target.
+An archive-wide SHEX declaration census of the pinned shader archive leaves
+only `b3`-`b8`, textures from `t16`, and no sampler slots for the plugin; the
+archive has no RDEF chunks, and the result does not cover runtime-compiled
+shaders or other mods. `b5` and `b6` are reserved: a contributor that claims
+either as a constant buffer quarantines its target.
 
 ## Entry points
 

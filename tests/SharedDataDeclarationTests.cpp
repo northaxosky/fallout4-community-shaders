@@ -12,9 +12,9 @@
 
 namespace
 {
-	// Fallout 4 leaves these constant-buffer slots free for the plugin.
-	constexpr std::array<unsigned, 7> kAllowedConstantBufferSlots{
-		3, 4, 5, 6, 7, 8, 11
+	// The pinned shader archive leaves these constant-buffer slots free.
+	constexpr std::array<unsigned, 6> kAllowedConstantBufferSlots{
+		3, 4, 5, 6, 7, 8
 	};
 	constexpr unsigned kFirstPluginTextureSlot = 16;
 	constexpr std::string_view kSubstrateGate = "#ifdef FO4CS_SUBSTRATE";
@@ -329,7 +329,7 @@ namespace
 					FailAt(
 						use.number,
 						"constant buffer b" + std::to_string(use.slot)
-							+ " is outside the Fallout 4 budget (b3-b8, b11)");
+							+ " is outside the Fallout 4 budget (b3-b8)");
 				}
 				if (use.slot == 5)
 					++sharedDataSlots;

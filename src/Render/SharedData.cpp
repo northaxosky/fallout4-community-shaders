@@ -160,6 +160,8 @@ namespace cs::render
 		void SavePixelBindings() noexcept
 		{
 			auto& state = GetSubstrateState();
+			if (state.pixelBindingsSaved)
+				return;
 			auto* context = GetImmediateContext();
 			if (!context || !IsSharedDataReady())
 				return;
