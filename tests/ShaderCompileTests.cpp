@@ -102,7 +102,6 @@ namespace
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
 		const ShaderDefines& a_contributorDefines)
 	{
-		cs::engine::ShaderInjectionDefines mergedDefines;
 		const auto* target =
 			cs::engine::GetShaderInjectionTarget(
 				a_registration.targetId);
@@ -111,23 +110,43 @@ namespace
 			++failures;
 			return;
 		}
-		for (const auto& define : target->baseDefines)
-			mergedDefines.emplace(define.name, define.value);
-		mergedDefines.insert(
-			a_registration.compilation.defines.begin(),
-			a_registration.compilation.defines.end());
-		for (const auto& [name, value] : a_contributorDefines)
-			mergedDefines.insert_or_assign(name, value);
+
+		std::vector<cs::engine::ShaderReplacementRegistration>
+			contributions;
+		if (!a_contributorDefines.empty()) {
+			cs::engine::ShaderReplacementRegistration contribution;
+			contribution.targetId = a_registration.targetId;
+			contribution.contributor = "ShaderCompile";
+			for (const auto& [name, value] : a_contributorDefines)
+				contribution.defines.emplace(name, value);
+			contributions.push_back(std::move(contribution));
+		}
+
+		std::string compileTestError;
+		const auto compileTestRequest =
+			cs::engine::BuildEffectiveShaderCompileRequest(
+				*target,
+				a_registration,
+				contributions,
+				&compileTestError);
+		if (!compileTestRequest) {
+			std::printf(
+				"FAIL: effective compile request for %s: %s\n",
+				a_registration.name.c_str(),
+				compileTestError.c_str());
+			++failures;
+			return;
+		}
 
 		ShaderDefines defines;
-		defines.reserve(mergedDefines.size());
-		for (const auto& [name, value] : mergedDefines)
+		defines.reserve(compileTestRequest->defines.size());
+		for (const auto& [name, value] : compileTestRequest->defines)
 			defines.emplace_back(name.c_str(), value.c_str());
 		Compile(
-			a_root / a_registration.compilation.sourcePath,
+			a_root / compileTestRequest->sourcePath,
 			defines,
-			a_registration.compilation.profile.c_str(),
-			a_registration.compilation.entryPoint.c_str());
+			compileTestRequest->profile.c_str(),
+			compileTestRequest->entryPoint.c_str());
 	}
 
 	void CompileLighting(const std::filesystem::path& a_root)

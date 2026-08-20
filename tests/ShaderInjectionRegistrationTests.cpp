@@ -91,6 +91,214 @@ namespace
 		return false;
 	}
 
+	bool TestStageScopedContributions()
+	{
+		const auto* target = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kAmbientIblPass);
+		if (!Check(target != nullptr, "stage-scope target metadata is missing"))
+			return false;
+
+		std::vector<ShaderReplacementRegistration> contributions;
+		contributions.push_back({
+			.targetId = target->id,
+			.contributor = "pixel-default",
+			.defines = { { "PIXEL_DEFAULT", "1" } }
+		});
+		contributions.push_back({
+			.targetId = target->id,
+			.contributor = "pixel-second",
+			.defines = { { "PIXEL_SECOND", "1" } }
+		});
+		contributions.push_back({
+			.targetId = target->id,
+			.stages = ShaderStageBit(ShaderStage::kVertex),
+			.contributor = "vertex",
+			.defines = { { "VERTEX_ONLY", "1" } }
+		});
+		contributions.push_back({
+			.targetId = target->id,
+			.stages = ShaderStageBit(ShaderStage::kVertex)
+				| ShaderStageBit(ShaderStage::kPixel),
+			.contributor = "both",
+			.defines = { { "BOTH_STAGES", "1" } }
+		});
+
+		ShaderReplacementVariantRegistration pixelVariant;
+		pixelVariant.targetId = target->id;
+		pixelVariant.stage = ShaderStage::kPixel;
+		pixelVariant.compilation.sourcePath = L"stage-scope.hlsl";
+		pixelVariant.compilation.entryPoint = "main";
+		pixelVariant.compilation.profile = "ps_5_0";
+		ShaderReplacementVariantRegistration vertexVariant = pixelVariant;
+		vertexVariant.stage = ShaderStage::kVertex;
+		vertexVariant.compilation.profile = "vs_5_0";
+
+		const auto pixelRequest =
+			BuildEffectiveShaderCompileRequest(
+				*target,
+				pixelVariant,
+				contributions);
+		const auto vertexRequest =
+			BuildEffectiveShaderCompileRequest(
+				*target,
+				vertexVariant,
+				contributions);
+		bool ok = Check(
+			pixelRequest.has_value(),
+			"pixel effective compile request failed");
+		ok &= Check(
+			vertexRequest.has_value(),
+			"vertex effective compile request failed");
+		if (!pixelRequest || !vertexRequest)
+			return false;
+
+		ok &= Check(
+			!vertexRequest->defines.contains("PIXEL_DEFAULT"),
+			"pixel-scoped define leaked into vertex request");
+		ok &= Check(
+			!vertexRequest->defines.contains("PIXEL_SECOND"),
+			"second pixel-scoped define leaked into vertex request");
+		ok &= Check(
+			vertexRequest->defines.contains("VERTEX_ONLY"),
+			"vertex-scoped define is missing from vertex request");
+		ok &= Check(
+			!pixelRequest->defines.contains("VERTEX_ONLY"),
+			"vertex-scoped define leaked into pixel request");
+		ok &= Check(
+			vertexRequest->defines.contains("BOTH_STAGES")
+				&& pixelRequest->defines.contains("BOTH_STAGES"),
+			"both-stage define is missing from an effective request");
+		ok &= Check(
+			pixelRequest->defines.contains("PIXEL_DEFAULT")
+				&& pixelRequest->defines.contains("PIXEL_SECOND"),
+			"pixel-stage contributors did not union");
+		return ok;
+	}
+
+	struct EffectiveDefinePartition
+	{
+		std::vector<std::size_t> shape;
+		std::size_t variants = 0;
+		bool anySentinel = false;
+		bool allSentinel = true;
+	};
+
+	std::optional<EffectiveDefinePartition> BuildVertexDefinePartition(
+		const ShaderInjectionTargetMetadata& a_target,
+		std::span<const ShaderReplacementVariantRegistration> a_variants,
+		std::span<const ShaderReplacementRegistration> a_contributions,
+		std::string_view a_sentinel)
+	{
+		std::vector<std::pair<ShaderInjectionDefines, std::size_t>> groups;
+		EffectiveDefinePartition partition;
+		for (const auto& variant : a_variants) {
+			if (variant.targetId != a_target.id
+				|| variant.stage != ShaderStage::kVertex) {
+				continue;
+			}
+			const auto request = BuildEffectiveShaderCompileRequest(
+				a_target,
+				variant,
+				a_contributions);
+			if (!request)
+				return std::nullopt;
+
+			++partition.variants;
+			const bool hasSentinel =
+				request->defines.contains(a_sentinel);
+			partition.anySentinel =
+				partition.anySentinel || hasSentinel;
+			partition.allSentinel =
+				partition.allSentinel && hasSentinel;
+			auto group = std::ranges::find_if(
+				groups,
+				[&request](const auto& a_group) {
+					return a_group.first == request->defines;
+				});
+			if (group == groups.end()) {
+				groups.emplace_back(request->defines, 1);
+			} else {
+				++group->second;
+			}
+		}
+		partition.shape.reserve(groups.size());
+		for (const auto& group : groups)
+			partition.shape.push_back(group.second);
+		std::ranges::sort(partition.shape);
+		return partition;
+	}
+
+	bool TestVertexCompileClassPartition()
+	{
+		const auto* target = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kBsWater);
+		if (!Check(
+				target != nullptr,
+				"BSWater partition target metadata is missing")) {
+			return false;
+		}
+
+		const auto variants = GetDefaultShaderReplacementVariants();
+		const auto baseline = BuildVertexDefinePartition(
+			*target,
+			variants,
+			{},
+			"PIXEL_PARTITION_SENTINEL");
+		const std::array pixelContribution{
+			ShaderReplacementRegistration{
+				.targetId = target->id,
+				.contributor = "pixel-partition",
+				.defines = {
+					{ "PIXEL_PARTITION_SENTINEL", "1" },
+					{ "VC", "1" }
+				}
+			}
+		};
+		const auto pixelScoped = BuildVertexDefinePartition(
+			*target,
+			variants,
+			pixelContribution,
+			"PIXEL_PARTITION_SENTINEL");
+		auto vertexContribution = pixelContribution;
+		vertexContribution.front().stages =
+			ShaderStageBit(ShaderStage::kVertex);
+		const auto vertexScoped = BuildVertexDefinePartition(
+			*target,
+			variants,
+			vertexContribution,
+			"PIXEL_PARTITION_SENTINEL");
+
+		bool ok = Check(
+			baseline.has_value()
+				&& pixelScoped.has_value()
+				&& vertexScoped.has_value(),
+			"BSWater vertex partition could not be built");
+		if (!baseline || !pixelScoped || !vertexScoped)
+			return false;
+
+		auto expectedVertexShape =
+			std::vector<std::size_t>(14, 1);
+		expectedVertexShape.push_back(2);
+		ok &= Check(
+			baseline->variants == 16
+				&& baseline->shape
+					== std::vector<std::size_t>(16, 1),
+			"BSWater baseline vertex partition shape changed");
+		ok &= Check(
+			pixelScoped->shape == baseline->shape,
+			"pixel-scoped contribution changed BSWater vertex compile-class partition");
+		ok &= Check(
+			!pixelScoped->anySentinel,
+			"pixel partition sentinel leaked into a vertex request");
+		ok &= Check(
+			vertexScoped->shape == expectedVertexShape,
+			"vertex-scoped contribution produced the wrong BSWater vertex compile-class partition");
+		ok &= Check(
+			vertexScoped->allSentinel,
+			"vertex partition sentinel is missing from a vertex request");
+		return ok;
+	}
+
 	int TestBaselineOwnershipWithoutContributors()
 	{
 		constexpr std::array ownableTargets{
@@ -202,11 +410,37 @@ int main(int a_argc, char* a_argv[])
 		return 1;
 	}
 
+	bool ok = TestStageScopedContributions();
+	ok &= TestVertexCompileClassPartition();
+
+	ShaderReplacementRegistration emptyStageMask;
+	emptyStageMask.targetId =
+		ShaderInjectionTarget::kDeferredPrepass;
+	emptyStageMask.stages = 0;
+	emptyStageMask.contributor = "empty-stage-mask";
+	emptyStageMask.bind = [](ID3D11DeviceContext*) {};
+	ok &= Check(
+		!RegisterReplacement(std::move(emptyStageMask)),
+		"empty contribution stage mask was accepted");
+	ok &= Check(
+		g_preDrawInstallRequests == 0,
+		"empty contribution stage mask installed the pre-draw hook");
+
+	ShaderReplacementRegistration invalidStageMask;
+	invalidStageMask.targetId =
+		ShaderInjectionTarget::kDeferredPrepass;
+	invalidStageMask.stages =
+		ShaderStageBit(ShaderStage::kCount);
+	invalidStageMask.contributor = "invalid-stage-mask";
+	ok &= Check(
+		!RegisterReplacement(std::move(invalidStageMask)),
+		"out-of-range contribution stage mask was accepted");
+
 	ShaderReplacementRegistration disabledWetnessAmbient;
 	disabledWetnessAmbient.targetId = ShaderInjectionTarget::kAmbientIblPass;
 	disabledWetnessAmbient.contributor = "WetnessEffects";
 	disabledWetnessAmbient.bind = [](ID3D11DeviceContext*) {};
-	bool ok = Check(
+	ok &= Check(
 		RegisterReplacementIfEnabled(
 			false,
 			std::move(disabledWetnessAmbient)),

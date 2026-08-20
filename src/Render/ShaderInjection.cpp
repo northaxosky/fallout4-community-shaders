@@ -185,6 +185,10 @@ namespace cs::engine
 			std::unreachable();
 		}
 
+		constexpr ShaderStageMask kValidShaderStages =
+			ShaderStageBit(ShaderStage::kVertex)
+			| ShaderStageBit(ShaderStage::kPixel);
+
 		template <std::size_t Size>
 		std::vector<ShaderVariantKey> OwnVariantKeys(
 			const std::array<ShaderVariantKeyView, Size>& a_keys)
@@ -297,6 +301,7 @@ namespace cs::engine
 		{
 			const ShaderInjectionTargetMetadata* metadata = nullptr;
 			ShaderInjectionDefines               defines;
+			std::vector<ShaderReplacementRegistration> contributions;
 			std::vector<ShaderInjectionBindCallback> binds;
 			std::vector<ShaderReplacementVariantRegistration> variants;
 			std::size_t                          contributors = 0;
@@ -508,16 +513,32 @@ namespace cs::engine
 
 		bool HasDefineConflict(
 			const ShaderReplacementRegistration& a_registration,
-			const ShaderInjectionDefines& a_defines,
+			const ShaderInjectionTargetMetadata& a_target,
+			std::span<const ShaderReplacementRegistration> a_contributions,
 			std::string_view& a_conflictingName,
 			std::string_view& a_existingValue)
 		{
 			for (const auto& [name, value] : a_registration.defines) {
-				const auto existing = a_defines.find(name);
-				if (existing != a_defines.end() && existing->second != value) {
+				const auto baseDefine = std::ranges::find(
+					a_target.baseDefines,
+					name,
+					&ShaderInjectionDefineMetadata::name);
+				if (baseDefine != a_target.baseDefines.end()
+					&& baseDefine->value != value) {
 					a_conflictingName = name;
-					a_existingValue = existing->second;
+					a_existingValue = baseDefine->value;
 					return true;
+				}
+				for (const auto& contribution : a_contributions) {
+					if ((contribution.stages & a_registration.stages) == 0)
+						continue;
+					const auto existing = contribution.defines.find(name);
+					if (existing != contribution.defines.end()
+						&& existing->second != value) {
+						a_conflictingName = name;
+						a_existingValue = existing->second;
+						return true;
+					}
 				}
 			}
 			return false;
@@ -589,7 +610,8 @@ namespace cs::engine
 					std::string_view existingValue;
 					if (HasDefineConflict(
 							registration,
-							target.defines,
+							metadata,
+							target.contributions,
 							conflictingName,
 							existingValue)) {
 						L->error(
@@ -618,6 +640,7 @@ namespace cs::engine
 						ShaderInjectionRequestReason::kFeatureContributor;
 					++target.contributors;
 					target.defines.insert(registration.defines.begin(), registration.defines.end());
+					target.contributions.push_back(registration);
 					claimedSlots.insert(
 						claimedSlots.end(),
 						registration.slotClaims.begin(),
@@ -635,6 +658,24 @@ namespace cs::engine
 				for (const auto& variant : a_variantRegistrations) {
 					if (variant.targetId == metadata.id)
 						target.variants.push_back(variant);
+				}
+				for (const auto& contribution : target.contributions) {
+					const bool stageMatched = std::ranges::any_of(
+						target.variants,
+						[&contribution](const auto& a_variant) {
+							return (
+								contribution.stages
+								& ShaderStageBit(a_variant.stage))
+								!= 0;
+						});
+					if (!stageMatched) {
+						L->warn(
+							"Contributor '{}' for '{}' targets no registered shader stages; defines ignored.",
+							contribution.contributor.empty()
+								? "<unnamed>"
+								: contribution.contributor,
+							metadata.name);
+					}
 				}
 
 				auto& runtime = GetService().runtime[targetIndex];
@@ -727,36 +768,33 @@ namespace cs::engine
 				return std::nullopt;
 			}
 
+			auto effectiveRequest = BuildEffectiveShaderCompileRequest(
+				*a_target.metadata,
+				a_variant,
+				a_target.contributions,
+				&a_error);
+			if (!effectiveRequest) {
+				L->error(
+					"Compile '{}/{}' rejected: {}",
+					a_target.metadata->name,
+					a_variant.name,
+					a_error);
+				return std::nullopt;
+			}
+
 			const auto sourcePath = ResolveSourcePath(
-				a_variant.compilation.sourcePath,
+				effectiveRequest->sourcePath,
 				runtime.developerOverride,
 				a_developerSourceRoot);
-			auto mergedDefines = a_target.defines;
-			for (const auto& [name, value] :
-				a_variant.compilation.defines) {
-				const auto [it, inserted] =
-					mergedDefines.emplace(name, value);
-				if (!inserted && it->second != value) {
-					a_error =
-						"variant define conflicts with target define: "
-						+ name;
-					L->error(
-						"Compile '{}/{}' rejected: {}",
-						a_target.metadata->name,
-						a_variant.name,
-						a_error);
-					return std::nullopt;
-				}
-			}
 
 			ShaderVariantCompilationRequest request;
 			request.device.copy_from(a_device);
 			request.sourcePath = sourcePath;
-			request.entryPoint = a_variant.compilation.entryPoint;
-			request.profile = a_variant.compilation.profile;
+			request.entryPoint = std::move(effectiveRequest->entryPoint);
+			request.profile = std::move(effectiveRequest->profile);
 			request.stage = a_variant.stage;
-			request.defines.reserve(mergedDefines.size());
-			for (const auto& define : mergedDefines)
+			request.defines.reserve(effectiveRequest->defines.size());
+			for (auto& define : effectiveRequest->defines)
 				request.defines.push_back(define);
 
 			auto result = a_policy.Prepare(std::move(request));
@@ -1029,6 +1067,15 @@ namespace cs::engine
 			}
 			if (!IsValidTarget(a_registration.targetId)) {
 				L->error("Replacement registration rejected: unknown target.");
+				return false;
+			}
+			if (a_registration.stages == 0
+				|| (a_registration.stages & ~kValidShaderStages) != 0) {
+				L->error(
+					"Replacement registration '{}' for '{}' rejected: invalid shader stage mask 0x{:X}.",
+					a_registration.contributor,
+					kTargets[ToIndex(a_registration.targetId)].name,
+					a_registration.stages);
 				return false;
 			}
 			if (RegistrationHasDuplicateClaims(a_registration)) {

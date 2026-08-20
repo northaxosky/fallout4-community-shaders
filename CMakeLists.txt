@@ -246,6 +246,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		tests/generated/VertexShaderCompilePermutations.cpp
 		tests/generated/VertexShaderCompilePermutations.h
 		src/Render/ShaderInjection.cpp
+		src/Render/ShaderInjectionCompileRequest.cpp
 		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
 		src/Render/ShaderInjectionStaticFamilyRegistrations.h
 		src/Render/ShaderInjectionVariantFactory.cpp
@@ -322,6 +323,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
 		src/Render/ShaderInjection.cpp
+		src/Render/ShaderInjectionCompileRequest.cpp
 		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
 		src/Render/ShaderInjectionStaticFamilyRegistrations.h
 		src/Render/ShaderInjectionVariantFactory.cpp
