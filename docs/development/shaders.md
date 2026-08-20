@@ -84,7 +84,7 @@ ctest --test-dir build -C Release -R "ShaderCompile|SharedDataDeclaration"
 feature-composition, standalone-source, all 111 vertex permutations, and the
 shared substrate in active and inactive modes through `D3DCompile`.
 `SharedDataDeclaration` parses `Common/SharedData.hlsli` and enforces the outer
-gate and the declared Fallout 4 register budget. Keep both green when editing
+gate and its exact b5/b6-only resource footprint. Keep both green when editing
 any file in this directory.
 
 ## Delivery caveat

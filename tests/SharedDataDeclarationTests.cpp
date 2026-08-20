@@ -1,5 +1,4 @@
 #include <algorithm>
-#include <array>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -12,11 +11,6 @@
 
 namespace
 {
-	// The pinned shader archive leaves these constant-buffer slots free.
-	constexpr std::array<unsigned, 6> kAllowedConstantBufferSlots{
-		3, 4, 5, 6, 7, 8
-	};
-	constexpr unsigned kFirstPluginTextureSlot = 16;
 	constexpr std::string_view kSubstrateGate = "#ifdef FO4CS_SUBSTRATE";
 
 	int failures = 0;
@@ -317,32 +311,47 @@ namespace
 					line.number,
 					"the shared substrate must declare no samplers");
 			}
+			if (line.text.find("RWTexture") != std::string::npos
+				|| line.text.find("RWBuffer") != std::string::npos
+				|| line.text.find("RWStructuredBuffer")
+					!= std::string::npos
+				|| line.text.find("AppendStructuredBuffer")
+					!= std::string::npos
+				|| line.text.find("ConsumeStructuredBuffer")
+					!= std::string::npos) {
+				FailAt(
+					line.number,
+					"the shared substrate must declare no unordered-access resources");
+			} else if (line.text.find("Texture") != std::string::npos) {
+				FailAt(
+					line.number,
+					"the shared substrate must declare no textures");
+			}
 		}
 
+		// b5/b6 are proven free across the shipped shader archive; that archive is the scope.
 		std::size_t sharedDataSlots = 0;
 		std::size_t featureDataSlots = 0;
 		for (const auto& use : CollectRegisterUses(surviving)) {
 			switch (use.type) {
 			case 'b':
-				if (std::ranges::find(kAllowedConstantBufferSlots, use.slot)
-					== kAllowedConstantBufferSlots.end()) {
+				if (use.slot == 5) {
+					++sharedDataSlots;
+				} else if (use.slot == 6) {
+					++featureDataSlots;
+				} else {
 					FailAt(
 						use.number,
-						"constant buffer b" + std::to_string(use.slot)
-							+ " is outside the Fallout 4 budget (b3-b8)");
+						"unexpected constant buffer b"
+							+ std::to_string(use.slot)
+							+ "; the shared substrate may declare only b5 and b6");
 				}
-				if (use.slot == 5)
-					++sharedDataSlots;
-				if (use.slot == 6)
-					++featureDataSlots;
 				break;
 			case 't':
-				if (use.slot < kFirstPluginTextureSlot) {
-					FailAt(
-						use.number,
-						"texture t" + std::to_string(use.slot)
-							+ " is below the first plugin slot t16");
-				}
+				FailAt(
+					use.number,
+					"texture/resource t" + std::to_string(use.slot)
+						+ " is declared; the shared substrate must declare none");
 				break;
 			case 's':
 				FailAt(
@@ -354,7 +363,7 @@ namespace
 				FailAt(
 					use.number,
 					"unordered-access resource u" + std::to_string(use.slot)
-						+ " is outside the shared substrate budget");
+						+ " is declared; the shared substrate must declare none");
 				break;
 			default:
 				break;
@@ -395,6 +404,6 @@ int main(int a_argc, char* a_argv[])
 				  << " violation(s)\n";
 		return 1;
 	}
-	std::cout << "PASS: shared substrate declarations obey the Fallout 4 register budget\n";
+	std::cout << "PASS: shared substrate declarations match the exact resource footprint\n";
 	return 0;
 }

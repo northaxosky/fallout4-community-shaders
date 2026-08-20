@@ -325,6 +325,7 @@ namespace cs::render
 		engine::RegisterPreDeferredLightsImpl(
 			[] { SavePixelBindings(); },
 			engine::HookPriority::Early);
+		// FO4's pre-draw hook follows shadow-cached SetDirtyStates, so restore bindings it will not reissue.
 		engine::RegisterPostDeferredLightsImpl(
 			[] { RestorePixelBindings(); },
 			engine::HookPriority::Late);
