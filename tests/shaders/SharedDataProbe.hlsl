@@ -1,4 +1,4 @@
-#include "../../package/Shaders/Common/SharedData.hlsli"
+#include "Common/SharedData.hlsli"
 
 float BoolValue(bool value)
 {

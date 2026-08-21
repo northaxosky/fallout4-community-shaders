@@ -273,6 +273,22 @@ add_test(
 set_tests_properties(SharedDataDeclaration PROPERTIES LABELS "render;shader;unit")
 
 if(NOT FO4CS_HOST_TESTS_ONLY)
+	include(ShaderStage)
+	set(FO4CS_SHADER_STAGE_DIR "${CMAKE_BINARY_DIR}/ShaderStage/Shaders")
+	add_shader_stage(ShaderStage
+		DESTINATION "${FO4CS_SHADER_STAGE_DIR}"
+		DIRECTORIES
+			"${CMAKE_SOURCE_DIR}/package/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/FrameGeneration/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/Imagespace/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
+		FILES
+			"${CMAKE_SOURCE_DIR}/tests/shaders/SharedDataProbe.hlsl"
+	)
+
 	add_executable(ShaderCompileTests
 		tests/ShaderCompileTests.cpp
 		tests/generated/VertexShaderCompilePermutations.cpp
@@ -321,13 +337,12 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		spdlog::spdlog
 		tomlplusplus::tomlplusplus
 	)
+	add_dependencies(ShaderCompileTests ShaderStage)
 
 	add_test(
 		NAME ShaderCompile
 		COMMAND ShaderCompileTests
-			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI"
-			"${CMAKE_SOURCE_DIR}/package/Shaders"
-			"${CMAKE_SOURCE_DIR}/tests/shaders"
+			"${FO4CS_SHADER_STAGE_DIR}"
 	)
 	set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
@@ -380,10 +395,11 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		spdlog::spdlog
 		tomlplusplus::tomlplusplus
 	)
+	add_dependencies(ShaderCacheBenchmarkTests ShaderStage)
 
 	add_test(
 		NAME ShaderCacheBenchmark
-		COMMAND ShaderCacheBenchmarkTests "${CMAKE_SOURCE_DIR}/package/Shaders"
+		COMMAND ShaderCacheBenchmarkTests "${FO4CS_SHADER_STAGE_DIR}"
 	)
 	set_tests_properties(ShaderCacheBenchmark PROPERTIES LABELS "shader;cache;benchmark")
 endif()

@@ -395,16 +395,17 @@ namespace
 		const std::filesystem::path& a_root)
 	{
 		const auto firstJob = a_jobs.size();
-		AddCompile(a_jobs, a_root / "XeGTAO" / "decode.cs.hlsl", {});
-		AddCompile(a_jobs, a_root / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
-		AddCompile(a_jobs, a_root / "XeGTAO" / "gi.cs.hlsl", {});
-		AddCompile(a_jobs, a_root / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-		AddCompile(a_jobs, a_root / "XeGTAO" / "denoise.cs.hlsl", {});
-		AddCompile(a_jobs, a_root / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-		AddCompile(a_jobs, a_root / "ResolveCS.hlsl", {});
-		AddCompile(a_jobs, a_root / "BounceTelemetryCS.hlsl", {});
-		AddCompile(a_jobs, a_root / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
-		AddCompile(a_jobs, a_root / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
+		const auto screenSpaceGiRoot = a_root / "ScreenSpaceGI";
+		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "decode.cs.hlsl", {});
+		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
+		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "gi.cs.hlsl", {});
+		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
+		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "denoise.cs.hlsl", {});
+		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
+		AddCompile(a_jobs, screenSpaceGiRoot / "ResolveCS.hlsl", {});
+		AddCompile(a_jobs, screenSpaceGiRoot / "BounceTelemetryCS.hlsl", {});
+		AddCompile(a_jobs, screenSpaceGiRoot / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
+		AddCompile(a_jobs, screenSpaceGiRoot / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
 		return a_jobs.size() - firstJob;
 	}
 
@@ -706,18 +707,18 @@ namespace
 
 int main(int argc, char** argv)
 {
-	if (argc != 4) {
+	if (argc != 2) {
 		std::fprintf(
 			stderr,
-			"Usage: ShaderCompileTests <ScreenSpaceGI shader directory> <lighting shader directory> <test shader directory>\n");
+			"Usage: ShaderCompileTests <shader directory>\n");
 		return 2;
 	}
 
 	std::vector<ShaderCompileJob> jobs;
-	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[3]);
+	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[1]);
 	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
-	const auto lightingCounts = AddLighting(jobs, argv[2]);
-	const auto vertexCount = AddVertexPermutations(jobs, argv[2]);
+	const auto lightingCounts = AddLighting(jobs, argv[1]);
+	const auto vertexCount = AddVertexPermutations(jobs, argv[1]);
 
 	std::printf(
 		"ShaderCompile checked %zu shared substrate probes\n",
