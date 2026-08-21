@@ -4824,9 +4824,9 @@ float ComputeCascadeShadow(float3 posView,
         return 1.0;
     }
 
-    float centreDepth = g_tCascadeShadowRaw.Sample(
+    float centerDepth = g_tCascadeShadowRaw.Sample(
         g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
-    float centreLit = (centreDepth >= shadowZ) ? 1.0 : 0.0;
+    float centerLit = (centerDepth >= shadowZ) ? 1.0 : 0.0;
 
     float averageBlocker = blocker.x / blocker.y;
     float worldRange     = cascadeScale.w - cascadeScale.z;
@@ -4837,7 +4837,7 @@ float ComputeCascadeShadow(float3 posView,
         ? 1.9
         : (separation * 1.8 + 0.1);
 
-    float sum = centreLit;
+    float sum = centerLit;
     [loop]
     for (int fi = 0; fi < 5; ++fi)
     {
@@ -6244,9 +6244,9 @@ float ComputeCascadeShadow(float3 posView,
         return 1.0;
     }
 
-    float centreDepth = g_tCascadeShadowRaw.Sample(
+    float centerDepth = g_tCascadeShadowRaw.Sample(
         g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
-    float centreLit = (centreDepth >= shadowZ) ? 1.0 : 0.0;
+    float centerLit = (centerDepth >= shadowZ) ? 1.0 : 0.0;
 
     float averageBlocker = blocker.x / blocker.y;
     float worldRange     = cascadeScale.w - cascadeScale.z;
@@ -6257,7 +6257,7 @@ float ComputeCascadeShadow(float3 posView,
         ? 1.9
         : (separation * 1.8 + 0.1);
 
-    float sum = centreLit;
+    float sum = centerLit;
     [loop]
     for (int fi = 0; fi < 5; ++fi)
     {
@@ -8062,9 +8062,9 @@ PS_OUTPUT main(PS_INPUT input)
     if (blocker.y != 0.0)
     {
 
-        float centreDepth = g_tCascadeShadowRaw.Sample(
+        float centerDepth = g_tCascadeShadowRaw.Sample(
             g_sCascadeShadowRaw, float3(shadowUV, slice)).x;
-        float centreLit = (centreDepth >= zRef) ? 1.0 : 0.0;
+        float centerLit = (centerDepth >= zRef) ? 1.0 : 0.0;
 
         float averageBlocker = blocker.x / blocker.y;
         float worldRange = cascadeScale.w - cascadeScale.z;
@@ -8075,7 +8075,7 @@ PS_OUTPUT main(PS_INPUT input)
             ? 1.9
             : (separation * 1.8 + 0.1);
 
-        float sum = centreLit;
+        float sum = centerLit;
         [loop]
         for (int fi = 0; fi < 5; ++fi)
         {
