@@ -4,7 +4,6 @@
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "SssMaskBinding.h"
-#include "SssInjectionMode.h"
 #include "Utils/CSBuffer.h"
 
 #include <atomic>
@@ -40,8 +39,7 @@ namespace cs::features
 
 		struct Settings
 		{
-			bool          enabled = false;
-			SssInjectionMode injectionMode = SssInjectionMode::kStock;
+			bool          enabled = true;
 			float         surfaceThickness = 0.02f;
 			float         bilinearThreshold = 0.02f;
 			float         shadowContrast = 1.0f;
@@ -88,9 +86,7 @@ namespace cs::features
 		static constexpr uint kMaskPSSlot = 24;
 
 		Settings _settings;
-		SssInjectionMode _activeInjectionMode = SssInjectionMode::kStock;
 		std::atomic_bool _started{ false };
-		std::atomic_bool _injectionReady{ false };
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _whiteFallbackReady{ false };
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };

@@ -1,5 +1,4 @@
 #include "ScreenSpaceShadowsMath.h"
-#include "SssInjectionMode.h"
 
 #include <iostream>
 #include <string_view>
@@ -40,70 +39,12 @@ namespace
 		CHECK(MigrateLegacyShadowLengthPercent(15.0f) == 3);
 	}
 
-	void TestInjectionModes()
-	{
-		using cs::features::DecideSssStartup;
-		using cs::features::kRetiredSssInjectionModeName;
-		using cs::features::kSssInjectionModeOptions;
-		using cs::features::ParseSssInjectionMode;
-		using cs::features::ParseSssInjectionModeSetting;
-		using cs::features::SssInjectionMode;
-		using cs::features::SssInjectionModeName;
-
-		CHECK(kSssInjectionModeOptions.size() == 2);
-		for (const auto& option : kSssInjectionModeOptions) {
-			CHECK(option.name != kRetiredSssInjectionModeName);
-			CHECK(SssInjectionModeName(option.mode) == option.name);
-			CHECK(option.label != nullptr);
-		}
-		CHECK(SssInjectionModeName(SssInjectionMode::kStock) == "stock");
-		CHECK(
-			SssInjectionModeName(SssInjectionMode::kHlslReconstruction)
-			== "hlsl_reconstruction");
-		CHECK(ParseSssInjectionMode("stock") == SssInjectionMode::kStock);
-		CHECK(
-			ParseSssInjectionMode("hlsl_reconstruction")
-			== SssInjectionMode::kHlslReconstruction);
-		CHECK(!ParseSssInjectionMode(kRetiredSssInjectionModeName));
-		CHECK(!ParseSssInjectionMode("beta"));
-
-		const auto retiredMode =
-			ParseSssInjectionModeSetting(
-				kRetiredSssInjectionModeName);
-		CHECK(retiredMode.mode == SssInjectionMode::kStock);
-		CHECK(retiredMode.migratedRetiredMode);
-		const auto unknownMode =
-			ParseSssInjectionModeSetting("beta");
-		CHECK(!unknownMode.mode);
-		CHECK(!unknownMode.migratedRetiredMode);
-
-		const auto stock =
-			DecideSssStartup(SssInjectionMode::kStock, false);
-		CHECK(!stock.runLifecycle);
-		CHECK(!stock.injectionReady);
-		CHECK(!stock.routeFallsBackToStock);
-
-		const auto unavailable = DecideSssStartup(
-			SssInjectionMode::kHlslReconstruction,
-			false);
-		CHECK(unavailable.runLifecycle);
-		CHECK(!unavailable.injectionReady);
-		CHECK(unavailable.routeFallsBackToStock);
-
-		const auto available = DecideSssStartup(
-			SssInjectionMode::kHlslReconstruction,
-			true);
-		CHECK(available.runLifecycle);
-		CHECK(available.injectionReady);
-		CHECK(!available.routeFallsBackToStock);
-	}
 }
 
 int main()
 {
 	TestResolutionScaling();
 	TestLegacyMigration();
-	TestInjectionModes();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

@@ -219,7 +219,6 @@ set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
 add_executable(ScreenSpaceShadowsMathTests
 	tests/ScreenSpaceShadowsMathTests.cpp
 	features/ScreenSpaceShadows/src/ScreenSpaceShadowsMath.h
-	features/ScreenSpaceShadows/src/SssInjectionMode.h
 )
 configure_host_test(ScreenSpaceShadowsMathTests)
 target_include_directories(ScreenSpaceShadowsMathTests PRIVATE

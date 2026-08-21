@@ -79,8 +79,11 @@ inject_ambient_pass = false
 load = false
 
 [features.ScreenSpaceShadows.settings]
-# Explicit restart-time selection: stock or hlsl_reconstruction.
-injection_mode = "stock"
+enabled = true
+sample_count = 1
+surface_thickness = 0.02
+bilinear_threshold = 0.02
+shadow_contrast = 1.0
 
 [features.Imagespace]
 load = false

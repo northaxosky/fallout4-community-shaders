@@ -8,7 +8,6 @@
 #include <imgui.h>
 
 #include <algorithm>
-#include <array>
 #include <cmath>
 #include <cfloat>
 #include <limits>
@@ -93,39 +92,6 @@ namespace cs::features
 			if (!settingsTable) {
 				a_error = "settings: expected table";
 				return false;
-			}
-
-			auto injectionMode =
-				std::string(SssInjectionModeName(a_candidate.injectionMode));
-			const auto injectionModeStatus = feature_config::ReadString(
-				*settingsTable,
-				"injection_mode",
-				injectionMode);
-			if (!AcceptSetting(
-					injectionModeStatus,
-					"injection_mode",
-					"string",
-					a_error)) {
-				return false;
-			}
-			if (injectionModeStatus
-				== feature_config::ScalarReadStatus::kValid) {
-				const auto parsedMode =
-					ParseSssInjectionModeSetting(injectionMode);
-				if (!parsedMode.mode) {
-					a_error = SettingError(
-						"injection_mode",
-						"expected stock or hlsl_reconstruction");
-					return false;
-				}
-				a_candidate.injectionMode = *parsedMode.mode;
-				if (parsedMode.migratedRetiredMode) {
-					L->info(
-						"Mapped retired injection_mode={} to {}; save settings to persist the canonical key.",
-						kRetiredSssInjectionModeName,
-						SssInjectionModeName(
-							a_candidate.injectionMode));
-				}
 			}
 
 			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
@@ -219,9 +185,6 @@ namespace cs::features
 	{
 		toml::table settings;
 		settings.insert_or_assign("enabled", _settings.enabled);
-		settings.insert_or_assign(
-			"injection_mode",
-			SssInjectionModeName(_settings.injectionMode));
 		settings.insert_or_assign("surface_thickness", _settings.surfaceThickness);
 		settings.insert_or_assign("bilinear_threshold", _settings.bilinearThreshold);
 		settings.insert_or_assign("shadow_contrast", _settings.shadowContrast);
@@ -234,58 +197,36 @@ namespace cs::features
 
 	void ScreenSpaceShadows::Load()
 	{
-		_activeInjectionMode = _settings.injectionMode;
-		bool injectionReady = false;
-		const auto registerDirectionalReplacement =
-			[this](cs::engine::ShaderInjectionTarget a_target) {
-				return cs::engine::RegisterReplacement({
-					.targetId = a_target,
-					.contributor = "ScreenSpaceShadows",
-					.defines = {
-						{
-							cs::engine::shader_injection_defines::
-								kScreenSpaceShadows,
-							"1"
-						}
-					},
-					.isReady = [this] {
-						return IsShadowMaskReady();
-					},
-					.bind = [this](ID3D11DeviceContext* a_context) {
-						BindShadowMask(a_context);
-					},
-					.slotClaims = {
-						{
-							.stage = cs::engine::ShaderStage::kPixel,
-							.resourceType = cs::engine::ShaderResourceType::kShaderResource,
-							.slot = kMaskPSSlot
-						}
+		const bool replacementRegistered =
+			cs::engine::RegisterReplacement({
+				.targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
+				.contributor = "ScreenSpaceShadows",
+				.defines = {
+					{
+						cs::engine::shader_injection_defines::
+							kScreenSpaceShadows,
+						"1"
 					}
-				});
-			};
-
-		if (_activeInjectionMode
-			== SssInjectionMode::kHlslReconstruction) {
-			const bool directionalRegistered =
-				registerDirectionalReplacement(
-					cs::engine::ShaderInjectionTarget::
-						kBsdfLight);
-			injectionReady = directionalRegistered;
-			if (!injectionReady)
-				L->error("Failed to register reconstructed directional shaders.");
-		} else {
-			L->info(
-				"Injection mode is stock; SSS shader substitution is disabled.");
+				},
+				.isReady = [this] {
+					return IsShadowMaskReady();
+				},
+				.bind = [this](ID3D11DeviceContext* a_context) {
+					BindShadowMask(a_context);
+				},
+				.slotClaims = {
+					{
+						.stage = cs::engine::ShaderStage::kPixel,
+						.resourceType = cs::engine::ShaderResourceType::kShaderResource,
+						.slot = kMaskPSSlot
+					}
+				}
+			});
+		if (!replacementRegistered) {
+			FailLoad("Failed to register the ScreenSpaceShadows BSDF light shader replacement");
+			return;
 		}
 
-		const auto startup = DecideSssStartup(
-			_activeInjectionMode,
-			injectionReady);
-		_injectionReady.store(
-			startup.injectionReady,
-			std::memory_order_release);
-		if (!startup.runLifecycle)
-			return;
 		cs::engine::RegisterPreDeferredLightsImpl([] {
 			ScreenSpaceShadows::GetSingleton()->OnPreDeferredLights();
 		});
@@ -293,15 +234,9 @@ namespace cs::features
 			ScreenSpaceShadows::GetSingleton()->OnPostDeferredLights();
 		});
 		_started.store(true, std::memory_order_release);
-		if (startup.routeFallsBackToStock) {
-			L->warn(
-				"SSS injection is unavailable; Bend mask lifecycle remains active while shader routing stays stock.");
-		}
 		L->info(
-			"Registered deferred-lights callbacks (enabled={}, injection_mode={}, injection_ready={}).",
-			_settings.enabled,
-			SssInjectionModeName(_activeInjectionMode),
-			startup.injectionReady);
+			"Registered deferred-lights callbacks (enabled={}).",
+			_settings.enabled);
 	}
 
 	void ScreenSpaceShadows::CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height)
@@ -600,9 +535,7 @@ namespace cs::features
 		}
 		return {
 			.EnableScreenSpaceShadows =
-				_settings.enabled
-				&& _activeInjectionMode == SssInjectionMode::kHlslReconstruction
-				&& _injectionReady.load(std::memory_order_acquire) ?
+				_settings.enabled ?
 				1u :
 				0u,
 			.ShadowContrast = _settings.shadowContrast
@@ -944,22 +877,8 @@ namespace cs::features
 
 	void ScreenSpaceShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		const bool startupInjectionReady =
-			_injectionReady.load(std::memory_order_acquire);
-		const bool effectiveStockFallback =
-			_started.load(std::memory_order_acquire)
-			&& !startupInjectionReady;
 		a_sink
 			.Field("enabled", _settings.enabled)
-			.Field(
-				"injection_mode",
-				SssInjectionModeName(_activeInjectionMode))
-			.Field(
-				"injection_ready",
-				startupInjectionReady)
-			.Field(
-				"injection_stock_fallback",
-				effectiveStockFallback)
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
 			.Field("white_fallback_ready", _whiteFallbackReady.load(std::memory_order_acquire))
 			.Field(
@@ -1003,42 +922,7 @@ namespace cs::features
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
-		static constexpr auto kInjectionModeLabels = [] {
-			std::array<
-				const char*,
-				kSssInjectionModeOptions.size()> labels{};
-			for (std::size_t index = 0;
-				index < kSssInjectionModeOptions.size();
-				++index) {
-				labels[index] =
-					kSssInjectionModeOptions[index].label;
-			}
-			return labels;
-		}();
-		int injectionMode = 0;
-		for (std::size_t index = 0;
-			index < kSssInjectionModeOptions.size();
-			++index) {
-			if (kSssInjectionModeOptions[index].mode
-				== _settings.injectionMode) {
-				injectionMode = static_cast<int>(index);
-				break;
-			}
-		}
-		bool changed = ImGui::Combo(
-			"Injection mode",
-			&injectionMode,
-			kInjectionModeLabels.data(),
-			static_cast<int>(kInjectionModeLabels.size()));
-		if (changed) {
-			_settings.injectionMode =
-				kSssInjectionModeOptions[
-					static_cast<std::size_t>(injectionMode)]
-					.mode;
-		}
-		ImGui::TextDisabled(
-			"Restart required.");
-		changed |= ImGui::Checkbox("Enabled", &_settings.enabled);
+		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 		changed |= ImGui::SliderFloat("Surface thickness", &_settings.surfaceThickness, 0.005f, 0.05f);
 		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);
 		changed |= ImGui::SliderFloat("Shadow contrast", &_settings.shadowContrast, 0.0f, 4.0f);

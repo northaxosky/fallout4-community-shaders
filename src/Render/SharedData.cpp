@@ -275,9 +275,9 @@ namespace cs::render
 		DX::ThrowIfFailed(
 			a_device->CreateBuffer(&featureDesc, nullptr, state.featureDataCB.put()));
 
-		// seed before the first injected draw
-		const auto sharedData = BuildSharedData(0.0f, 0.0f);
-		const auto featureData = GetFeatureBufferData();
+		// engine state is unavailable during D3D bootstrap
+		const SharedDataCB sharedData{};
+		const FeatureDataCB featureData{};
 		if (!WriteConstantBuffer(
 				a_context,
 				state.sharedDataCB.get(),
