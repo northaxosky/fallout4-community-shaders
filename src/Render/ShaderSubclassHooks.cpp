@@ -10,7 +10,6 @@
 #include <exception>
 #include <mutex>
 #include <optional>
-#include <vector>
 
 #include "RE/B/BSBloodSplatterShader.h"
 #include "RE/B/BSDFCompositeShader.h"
@@ -25,8 +24,6 @@
 #include "RE/B/BSUtilityShader.h"
 #include "RE/B/BSWaterShader.h"
 
-#pragma comment(lib, "version.lib")
-
 namespace cs::engine
 {
 	namespace
@@ -35,71 +32,7 @@ namespace cs::engine
 
 		ShaderSubclassHookInstallStats g_reloadStats{};
 		ShaderSubclassHookInstallStats g_setupStats{};
-		ShaderSubclassRuntimeLayout g_runtimeLayout{};
 		std::once_flag g_installOnce;
-		std::once_flag g_layoutOnce;
-
-		struct RuntimeVersion
-		{
-			std::uint16_t major = 0;
-			std::uint16_t minor = 0;
-			std::uint16_t build = 0;
-			bool valid = false;
-		};
-
-		RuntimeVersion GetRuntimeVersion()
-		{
-			RuntimeVersion version;
-			const HMODULE module = ::GetModuleHandleW(L"Fallout4.exe");
-			if (!module)
-				return version;
-
-			wchar_t path[MAX_PATH]{};
-			if (!::GetModuleFileNameW(module, path, MAX_PATH))
-				return version;
-
-			DWORD unused = 0;
-			const DWORD size = ::GetFileVersionInfoSizeW(path, &unused);
-			if (!size)
-				return version;
-
-			std::vector<unsigned char> buffer(size);
-			if (!::GetFileVersionInfoW(path, 0, size, buffer.data()))
-				return version;
-
-			VS_FIXEDFILEINFO* info = nullptr;
-			UINT infoLength = 0;
-			if (!::VerQueryValueW(
-					buffer.data(),
-					L"\\",
-					reinterpret_cast<LPVOID*>(&info),
-					&infoLength)
-				|| !info) {
-				return version;
-			}
-
-			version.major = HIWORD(info->dwFileVersionMS);
-			version.minor = LOWORD(info->dwFileVersionMS);
-			version.build = HIWORD(info->dwFileVersionLS);
-			version.valid = true;
-			return version;
-		}
-
-		ShaderSubclassRuntimeLayout DetectRuntimeLayout()
-		{
-			const auto version = GetRuntimeVersion();
-			if (!version.valid || version.major != 1)
-				return {};
-			if (version.minor == 10
-				&& (version.build == 163
-					|| version.build == 980
-					|| version.build == 984)) {
-				return { true, 0xB0 };
-			}
-			if (version.minor == 11 && version.build == 221)
-				return { true, 0x128 };
-			return {};
-		}
 
 		template <class Tag>
 		struct ReloadHook
@@ -186,14 +119,6 @@ namespace cs::engine
 	void InstallShaderSubclassHooks()
 	{
 		std::call_once(g_installOnce, [] {
-			g_runtimeLayout = GetShaderSubclassRuntimeLayout();
-			if (!g_runtimeLayout.verified) {
-				L->warn(
-					"Shader injection dispatch mode: exact-hash fallback "
-					"(unverified BSShader layout).");
-				return;
-			}
-
 			CS_HOOK_SHADER_SUBCLASS(BSBloodSplatterShader);
 			CS_HOOK_SHADER_SUBCLASS(BSDFCompositeShader);
 			CS_HOOK_SHADER_SUBCLASS(BSDFLightShader);
@@ -232,20 +157,4 @@ namespace cs::engine
 			}
 		});
 	}
-
-	ShaderSubclassRuntimeLayout GetShaderSubclassRuntimeLayout() noexcept
-	{
-		std::call_once(g_layoutOnce, [] {
-			try {
-				g_runtimeLayout = DetectRuntimeLayout();
-			} catch (...) {
-				g_runtimeLayout = {};
-				L->error(
-					"BSShader runtime layout detection failed; "
-					"using exact-hash fallback.");
-			}
-		});
-		return g_runtimeLayout;
-	}
-
 }

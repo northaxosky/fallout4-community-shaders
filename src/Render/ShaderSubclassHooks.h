@@ -11,12 +11,5 @@ namespace cs::engine
 		unsigned failed = 0;
 	};
 
-	struct ShaderSubclassRuntimeLayout
-	{
-		bool verified = false;
-		std::size_t pixelShadersOffset = 0;
-	};
-
 	void InstallShaderSubclassHooks();
-	ShaderSubclassRuntimeLayout GetShaderSubclassRuntimeLayout() noexcept;
 }
