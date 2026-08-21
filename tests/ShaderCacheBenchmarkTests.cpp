@@ -121,7 +121,6 @@ namespace
 		return registrations;
 	}
 
-	// The independent oracle: the same compiler entry point the plugin used before the cache existed.
 	Bytes CompileWithOracle(const Registration& a_registration)
 	{
 		std::vector<std::pair<const char*, const char*>> defines;
@@ -255,7 +254,7 @@ int main(int argc, char** argv)
 	std::error_code cleanupError;
 	std::filesystem::remove_all(cold.cacheRoot, cleanupError);
 
-	// One snapshot for the whole warm pass: every dependency path is read and digested once.
+	// one snapshot and one read per dependency for the warm pass
 	cs::shader_cache::RevalidationContext memo;
 	auto                                  warm = cold;
 	warm.revalidation                          = &memo;

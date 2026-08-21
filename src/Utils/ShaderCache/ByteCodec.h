@@ -12,7 +12,7 @@
 
 namespace cs::shader_cache
 {
-	// Every persisted field is written explicitly in little-endian order; no struct layout is trusted.
+	// explicit little-endian encoding; never persist struct layout
 	class ByteWriter
 	{
 	public:
@@ -60,7 +60,7 @@ namespace cs::shader_cache
 		std::vector<std::uint8_t>* _bytes;
 	};
 
-	// Bounds-checked counterpart; every read reports failure instead of trusting the file.
+	// bounds-check every persisted read
 	class ByteReader
 	{
 	public:
@@ -117,7 +117,6 @@ namespace cs::shader_cache
 			return true;
 		}
 
-		// The length is checked against a_limit before anything is allocated.
 		bool Text(std::string& a_text, std::size_t a_limit)
 		{
 			std::uint32_t length = 0;

@@ -164,7 +164,7 @@ function(configure_host_test TARGET_NAME)
 	endif()
 endfunction()
 
-# Device-independent shader cache; shared by the plugin glob and the host tests.
+# shared by the plugin and host tests
 set(FO4CS_SHADER_CACHE_SOURCES
 	src/Utils/ShaderCache/ByteCodec.h
 	src/Utils/ShaderCache/CacheRecord.cpp

@@ -103,7 +103,7 @@ namespace
 		}
 	}
 
-	// A disposable source tree plus its own cache root, so no test can touch Data\ShaderCache.
+	// isolated from Data\ShaderCache
 	class Workspace
 	{
 	public:
@@ -217,7 +217,6 @@ float4 Wrapped()
 		}
 	}
 
-	// The child's whole job: report the compiler module this fresh process actually loaded.
 	int EmitCompilerIdentity(const std::filesystem::path& a_output)
 	{
 		const auto& identity = GetD3DCompilerIdentity();
@@ -330,7 +329,7 @@ float4 Wrapped()
 		return count;
 	}
 
-	// Offsets of the fixed record header fields, derived from the documented layout.
+	// fixed-header offsets from the record layout
 	std::size_t PayloadLengthOffset(const std::string& a_profile)
 	{
 		return 8 + 4 + 32 * 3 + 1 + 4 + a_profile.size() + 8 + 4;
@@ -368,7 +367,6 @@ float4 Wrapped()
 		std::ranges::copy(a_digest.bytes, a_bytes.begin() + a_offset);
 	}
 
-	// Compiles once cold and once warm; returns the pristine record bytes for corruption tests.
 	struct PrimedCache
 	{
 		ShaderCacheOutcome        cold;
@@ -423,7 +421,7 @@ float4 Wrapped()
 		Check(!(genuine == altered), "compiler identity participates in the logical digest");
 	}
 
-	// Cache records outlive the process that wrote them, so the identity must survive a relaunch.
+	// persisted identity must survive process boundaries
 	void TestCompilerIdentityAcrossProcesses()
 	{
 		const auto executable = CurrentExecutablePath();
@@ -499,7 +497,7 @@ float4 Wrapped()
 		Check(plainWarm.bytecode == plainCold.bytecode, "plain hit returns its own payload");
 		Check(tintedWarm.bytecode == tintedCold.bytecode, "tinted hit returns its own payload");
 
-		// Define order is part of the identity; the same set in another order is a different recipe.
+		// define order participates in recipe identity
 		auto reordered = workspace.Recipe();
 		reordered.defines.emplace_back("SECOND", "2");
 		reordered.defines.emplace_back("FIRST", "1");
@@ -965,7 +963,6 @@ float4 main() : SV_Target
 		Check(CountTemporaryFiles(workspace.CacheRoot()) == 0, "no temporary file leaked");
 	}
 
-	// Occupying the record's destination with a file makes it unwritable as a directory.
 	void TestUnwritableDestinationKeepsResult()
 	{
 		Workspace workspace("unwritable-destination");
@@ -1146,7 +1143,7 @@ float4 main() : SV_Target
 		CheckDisposition(second, CacheDisposition::kHit, "the second memoized lookup hits");
 		Check(context.Reads() == reads, "a repeated lookup re-reads nothing");
 
-		// The batch is judged against one snapshot, so an edit mid-batch cannot half-invalidate it.
+		// mid-batch edits cannot split the snapshot
 		workspace.Write("Shared.hlsli", R"(float4 SharedValue()
 {
 	return float4(0.0, 1.0, 0.0, 1.0);
@@ -1203,7 +1200,7 @@ float4 main() : SV_Target
 		Workspace workspace("non-ascii");
 		workspace.WriteDefaultTree();
 
-		// FXC hands back the raw bytes of the directive, so the file must be named the same way.
+		// match the filename to FXC's raw directive bytes
 		const std::filesystem::path wideName = L"Gr\u00f6\u00dfe.hlsli";
 		std::string                 narrowName;
 		try {

@@ -7,18 +7,16 @@ struct ID3D11DeviceContext;
 
 namespace cs::render
 {
-	// Reserved for the shared substrate on every stage an injection contributor activates.
+	// reserved on every contributed stage
 	inline constexpr std::uint32_t kSharedDataSlot = 5;
 	inline constexpr std::uint32_t kFeatureDataSlot = 6;
 	static_assert(kFeatureDataSlot == kSharedDataSlot + 1);
 
-	// Creates and seeds b5/b6; call once during D3D11 bootstrap.
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
 	bool IsSharedDataReady() noexcept;
 
-	// Installs the per-frame update; startup thread only.
+	// startup thread only
 	void EnsureSharedDataUpdateInstalled();
 
-	// Binds b5/b6 to the pixel stage without mapping.
 	void BindSharedData(ID3D11DeviceContext* a_context) noexcept;
 }

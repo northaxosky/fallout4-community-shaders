@@ -53,7 +53,7 @@ namespace cs::shader_cache
 
 	const char* DescribeRecordStatus(RecordStatus a_status) noexcept;
 
-	// The canonical manifest encoding; its SHA-256 is the dependency digest.
+	// canonical encoding hashed as the dependency digest
 	bool SerializeDependencyManifest(
 		const DependencyManifest&  a_manifest,
 		std::vector<std::uint8_t>& a_bytes);

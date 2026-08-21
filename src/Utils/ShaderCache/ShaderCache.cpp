@@ -42,7 +42,7 @@ namespace cs::shader_cache
 			if (status != RecordStatus::kOk)
 				return Reject(CacheDisposition::kRejected, DescribeRecordStatus(status));
 
-			// A record found at the right path still has to claim this exact request.
+			// path match alone does not authenticate the request
 			if (record.logicalDigest != a_logicalDigest)
 				return Reject(CacheDisposition::kRejected, "logical digest mismatch");
 			if (record.stage != a_recipe.stage)
@@ -206,7 +206,7 @@ namespace cs::shader_cache
 			outcome.succeeded = true;
 			outcome.origin    = CompileOrigin::kFreshCompile;
 
-			// Failed compiles are never published, and publication cannot disturb this result.
+			// publication failure must not discard compiled bytecode
 			if (cacheAvailable) {
 				PublishRecord(
 					outcome.recordPath,

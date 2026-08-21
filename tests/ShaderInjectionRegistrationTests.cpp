@@ -208,7 +208,6 @@ namespace
 		return variant;
 	}
 
-	// Returns the FO4CS_SUBSTRATE value, or nullopt when the define is absent.
 	std::optional<std::string> SubstrateDefine(
 		const ShaderInjectionTargetMetadata& a_target,
 		const ShaderReplacementVariantRegistration& a_variant,

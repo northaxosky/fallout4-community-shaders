@@ -3,17 +3,17 @@
 // Radial darkening. centerPx = OutputDimensions / 2; intensity in [0,1].
 float ApplyVignette(float2 px, float2 dims, float intensity)
 {
-    const float2 centred = (px / dims) * 2.0 - 1.0;
-    const float  r2 = dot(centred, centred);
+    const float2 centered = (px / dims) * 2.0 - 1.0;
+    const float  r2 = dot(centered, centered);
     return 1.0 - intensity * smoothstep(0.4, 1.6, r2);
 }
 
 // Channel-shifted sampling: R toward center, B away; linear sampling smooths falloff.
 float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 dims, float intensity)
 {
-    const float2 centred = uv * 2.0 - 1.0;
-    const float2 toCenter = -centred;
-    const float  r2 = saturate(dot(centred, centred));
+    const float2 centered = uv * 2.0 - 1.0;
+    const float2 toCenter = -centered;
+    const float  r2 = saturate(dot(centered, centered));
     const float  mag = intensity * r2 * 0.01;
 
     const float2 uvR = uv + toCenter * mag;
@@ -25,14 +25,14 @@ float3 SampleWithCA(Texture2D<float4> tex, SamplerState samp, float2 uv, float2 
     return float3(r_ch, g_ch, b_ch);
 }
 
-// Up to 7 lens-flare ghosts along the sun-to-screen-centre line.
+// Up to 7 lens-flare ghosts along the sun-to-screen-center line.
 float3 ApplyLensFlare(float2 uv, float2 sunUVNDC, float intensity, uint ghostCount)
 {
     const float2 sunUV = float2(sunUVNDC.x * 0.5 + 0.5, 1.0 - (sunUVNDC.y * 0.5 + 0.5));
-    const float2 centre = float2(0.5, 0.5);
-    const float2 dir = centre - sunUV;
+    const float2 center = float2(0.5, 0.5);
+    const float2 dir = center - sunUV;
     const float  flareLen = length(dir);
-    if (flareLen < 1e-4) return float3(0, 0, 0);  // sun exactly on centre: no flare
+    if (flareLen < 1e-4) return float3(0, 0, 0);  // sun exactly on center: no flare
 
     static const float kPositions[7] = { 0.6, 1.4, 1.9, 2.4, 0.4, 0.9, 1.6 };
     static const float kScales[7]    = { 0.20, 0.60, 0.40, 0.30, 1.10, 0.25, 0.45 };

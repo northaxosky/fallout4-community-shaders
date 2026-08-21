@@ -264,7 +264,6 @@ namespace cs::shader_cache
 			return RecordStatus::kTruncated;
 		}
 
-		// Declared sizes are range checked before any of them is used to address or allocate.
 		if (manifestLength > kMaxManifestBytes
 			|| manifestCount > kMaxManifestEntries
 			|| payloadLength == 0

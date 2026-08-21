@@ -22,7 +22,6 @@ namespace cs::shader_cache
 		kReadFailed = 2
 	};
 
-	// One candidate path tried while resolving an include, in the order it was tried.
 	struct IncludeProbe
 	{
 		std::string          path;
@@ -39,7 +38,6 @@ namespace cs::shader_cache
 		std::vector<IncludeProbe> probes;
 	};
 
-	// Root content plus the complete ordered resolution trace behind one compile.
 	struct DependencyManifest
 	{
 		std::string                    rootLocator;
@@ -70,7 +68,7 @@ namespace cs::shader_cache
 
 	const char* DescribeRevalidation(RevalidationStatus a_status) noexcept;
 
-	// Replays every recorded probe decision; a context makes the batch share one filesystem snapshot.
+	// replay probes against one optional batch snapshot
 	RevalidationOutcome RevalidateDependencyManifest(
 		const DependencyManifest& a_manifest,
 		RevalidationContext*      a_context = nullptr);

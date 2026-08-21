@@ -17,6 +17,5 @@ namespace cs::shader_cache
 		std::string               error;
 	};
 
-	// Compiles from owned memory and records every include decision made along the way.
 	SourceCompileOutcome CompileSourceWithManifest(const ShaderRecipe& a_recipe);
 }

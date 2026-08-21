@@ -21,7 +21,7 @@ namespace cs::shader_cache
 		kReadFailed
 	};
 
-	// Single reader for sources, includes and records, so probe replay is byte-exact.
+	// one reader keeps probe replay byte-exact
 	FileReadStatus ReadFileBytes(
 		const std::filesystem::path& a_path,
 		std::uint64_t                a_maxBytes,
@@ -34,7 +34,6 @@ namespace cs::shader_cache
 		ShaderCacheStage             a_stage,
 		const sha256::Sha256Result&  a_logicalDigest);
 
-	// Writes a uniquely named temp file in the destination directory and renames it over the target.
 	bool WriteRecordAtomically(
 		const std::filesystem::path&       a_path,
 		std::span<const std::uint8_t>      a_bytes,

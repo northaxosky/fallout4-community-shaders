@@ -9,7 +9,7 @@
 #include <string>
 #include <system_error>
 
-// The IAT slot the loader filled with the real entry point; &D3DCompile would only name our own thunk.
+// IAT slot, not &D3DCompile; that names our own thunk
 extern "C" void* __imp_D3DCompile;
 
 namespace cs::shader_cache

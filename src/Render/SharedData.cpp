@@ -23,7 +23,7 @@ namespace cs::render
 	{
 		auto* L = cs::log::Get("cs.render.shareddata");
 
-		// Mirrors package/Shaders/Common/SharedData.hlsli cbuffer SharedData : register(b5).
+		// mirrors HLSL SharedData at b5
 		struct alignas(16) SharedDataCB
 		{
 			DirectX::XMFLOAT4 CameraData{};
@@ -101,7 +101,7 @@ namespace cs::render
 				DirectX::XMFLOAT4X4 inverseProjection;
 				DirectX::XMFLOAT4   ndcToViewMul;
 				DirectX::XMFLOAT4   ndcToViewAdd;
-				// Structured binding avoids the legacy near/far macros.
+				// structured binding avoids legacy near/far macros
 				const auto& [left, right, top, bottom, nearZ, farZ, ortho] =
 					sceneCamera->viewFrustum;
 				if (RE::BuildPerspectiveFromFrustum(
@@ -275,7 +275,7 @@ namespace cs::render
 		DX::ThrowIfFailed(
 			a_device->CreateBuffer(&featureDesc, nullptr, state.featureDataCB.put()));
 
-		// Seed immediately so the first injected draw never reads an uninitialized buffer.
+		// seed before the first injected draw
 		const auto sharedData = BuildSharedData(0.0f, 0.0f);
 		const auto featureData = GetFeatureBufferData();
 		if (!WriteConstantBuffer(
@@ -325,7 +325,7 @@ namespace cs::render
 		engine::RegisterPreDeferredLightsImpl(
 			[] { SavePixelBindings(); },
 			engine::HookPriority::Early);
-		// FO4's pre-draw hook follows shadow-cached SetDirtyStates, so restore bindings it will not reissue.
+		// FO4 shadow-caches state; it won't reissue what we clobber
 		engine::RegisterPostDeferredLightsImpl(
 			[] { RestorePixelBindings(); },
 			engine::HookPriority::Late);

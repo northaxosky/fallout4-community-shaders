@@ -19,10 +19,9 @@ namespace cs::shader_cache
 		kPixel  = 1
 	};
 
-	// D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3, asserted against the SDK headers.
+	// strict optimized flags; verified against SDK headers
 	inline constexpr std::uint32_t kStrictOptimizedFlags1 = 0x00008800u;
 
-	// The complete device-independent description of one compile.
 	struct ShaderRecipe
 	{
 		std::filesystem::path                           source;
@@ -38,9 +37,9 @@ namespace cs::shader_cache
 	const char* DescribeStage(ShaderCacheStage a_stage) noexcept;
 	bool        IsKnownStage(std::uint8_t a_stage) noexcept;
 
-	// Canonical UTF-8 spelling of a path, so the same file always hashes the same way.
+	// canonical UTF-8 keeps path hashes stable
 	std::string EncodeLocator(const std::filesystem::path& a_path);
-	// Rebuilds a path from a stored locator; std::string alone would be read as the ANSI code page.
+	// avoid interpreting UTF-8 through the ANSI code page
 	std::filesystem::path DecodeLocator(std::string_view a_locator);
 
 	std::vector<std::uint8_t> EncodeShaderRecipe(

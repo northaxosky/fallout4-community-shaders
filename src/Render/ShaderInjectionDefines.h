@@ -2,7 +2,7 @@
 
 namespace cs::engine::shader_injection_defines
 {
-	// System define; injected for any stage-matching contribution.
+	// injected for every contributed stage
 	inline constexpr auto kSubstrate = "FO4CS_SUBSTRATE";
 
 	inline constexpr auto kScreenSpaceShadows = "SCREEN_SPACE_SHADOWS";

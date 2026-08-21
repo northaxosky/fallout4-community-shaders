@@ -18,7 +18,7 @@ namespace cs::shader_cache
 	{
 		std::atomic<std::uint64_t> g_temporarySequence{ 0 };
 
-		// Sharing deletes matters: a reader without it blocks another process publishing a record.
+		// FILE_SHARE_DELETE: else a reader blocks publication
 		class ScopedHandle
 		{
 		public:
@@ -107,7 +107,7 @@ namespace cs::shader_cache
 				OPEN_EXISTING,
 				FILE_ATTRIBUTE_NORMAL,
 				nullptr));
-			// Match FXC include fallback; only failures after opening are fatal.
+			// match FXC fallback: only post-open failures are fatal
 			if (!file.Valid())
 				return FileReadStatus::kMissing;
 
@@ -214,7 +214,7 @@ namespace cs::shader_cache
 				return false;
 			}
 
-			// Racing renames onto one destination transiently deny access; the retry is bounded.
+			// bounded retry for racing publication
 			DWORD moveError = ERROR_SUCCESS;
 			for (unsigned attempt = 0; attempt < 4; ++attempt) {
 				if (MoveFileExW(

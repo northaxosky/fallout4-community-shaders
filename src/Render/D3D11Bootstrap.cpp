@@ -64,7 +64,7 @@ namespace cs::d3d11
 			InvokeOwner("FeatureManager D3D11 readiness", [&] {
 				FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);
 			});
-			// The substrate must exist before any injected shader compiles against it.
+			// substrate must precede injected shader compilation
 			InvokeOwner("SharedData D3D11 initialization", [&] {
 				render::InitializeSharedData(*a_device, *a_immediateContext);
 			});

@@ -13,7 +13,6 @@
 
 namespace cs::shader_cache
 {
-	// What one dependency path held when it was read, digested over exactly the bytes that were read.
 	struct FileObservation
 	{
 		FileReadStatus       status = FileReadStatus::kMissing;
@@ -23,7 +22,7 @@ namespace cs::shader_cache
 
 	FileObservation ObserveFile(const std::string& a_locator);
 
-	// One freeze batch owns this memo, so observations cannot outlive that startup compile.
+	// memo lifetime = one freeze batch
 	class RevalidationContext
 	{
 	public:

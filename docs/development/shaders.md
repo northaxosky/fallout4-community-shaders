@@ -33,7 +33,7 @@ read: `cbuffer SharedData : register(b5)` and `cbuffer FeatureData : register(b6
 shader that includes the header without the define sees zero declarations.
 `src/Render/ShaderInjectionCompileRequest.cpp` injects `FO4CS_SUBSTRATE=1`
 automatically whenever a stage-matching `ShaderReplacementRegistration` exists
-for the compiled target — including a contribution that only binds a resource.
+for the compiled target, including a contribution that only binds a resource.
 Baseline ownership and developer force-on do not define it.
 
 `FeatureData` is a static typed layout: every contributor field exists whether or
@@ -95,7 +95,7 @@ Nothing else in `Data/ShaderCache` is ever touched or removed.
 
 A record is only reused when the whole compile still matches:
 
-- The filename is the SHA-256 of the logical recipe — source locator, ordered
+- The filename is the SHA-256 of the logical recipe: source locator, ordered
   include roots, ordered defines, entry point, profile, stage, compile flags and
   the SHA-256 of the loaded `d3dcompiler` module. Changing any of them addresses
   a different record, and the record repeats those digests so a swapped or
@@ -119,8 +119,8 @@ Each startup revalidates against one snapshot. The caching policy owns a
 revalidation context for the duration of a freeze batch, so every unique source
 and include path is read and hashed exactly once no matter how many recipes name
 it, and every record in that batch is judged against the same observation.
-Freshness is decided by content SHA-256 alone — never by timestamp or by size on
-its own — and a length only ever travels with the digest it belongs to. Code that
+Freshness is decided by content SHA-256 alone, never by timestamp or by size on
+its own, and a length only ever travels with the digest it belongs to. Code that
 passes no context keeps reading each dependency afresh on every lookup.
 
 ### Stale entries
@@ -129,7 +129,7 @@ There is no startup sweep in v1, by choice. A record for a currently disabled
 feature is still a valid record: turning the feature back on should hit the cache
 rather than pay for a recompile, and a sweep would delete exactly those entries.
 Entries are content-addressed, so an orphan left behind by an edited shader costs
-disk space and nothing else — it can never be mistaken for a live record. Users
+disk space and nothing else; it can never be mistaken for a live record. Users
 who want that space back may delete `Data\ShaderCache\FO4CommunityShaders`, and
 only that directory; everything in it is rebuilt on the next run.
 

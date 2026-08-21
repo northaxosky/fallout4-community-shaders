@@ -30,7 +30,6 @@ namespace cs::shader_cache
 			return candidate;
 		}
 
-		// Resolves includes exactly as the plain compiler does, and records every candidate it tried.
 		class TracingIncludeHandler final : public ID3DInclude
 		{
 		public:
@@ -59,7 +58,7 @@ namespace cs::shader_cache
 				*a_data  = nullptr;
 				*a_bytes = 0;
 
-				// Nothing may unwind into d3dcompiler; every failure leaves as an HRESULT.
+				// never unwind through d3dcompiler
 				try {
 					IncludeResolution resolution;
 					resolution.kind = a_includeType == D3D_INCLUDE_SYSTEM
@@ -79,7 +78,7 @@ namespace cs::shader_cache
 						}
 					}
 
-					// Narrow include names keep the native encoding the plain compiler resolves with.
+					// preserve the compiler's native include encoding
 					const std::filesystem::path requested(resolution.requestedName);
 					return Resolve(includingDirectory, requested, resolution, a_data, a_bytes);
 				} catch (...) {
@@ -148,7 +147,7 @@ namespace cs::shader_cache
 						return E_FAIL;
 					}
 
-					// The digest covers exactly the buffer handed to the compiler.
+					// hash exactly what the compiler receives
 					probe.status        = ProbeStatus::kSuccess;
 					probe.contentDigest = sha256::Sha256Compute(bytes.data(), bytes.size());
 					probe.contentLength = bytes.size();

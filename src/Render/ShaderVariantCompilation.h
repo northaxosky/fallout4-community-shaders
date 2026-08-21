@@ -67,7 +67,6 @@ namespace cs::engine
 	std::shared_ptr<ShaderVariantCompilationPolicy>
 		CreateEagerShaderVariantCompilationPolicy();
 
-	// Reuses validated disk-cached bytecode when the recorded inputs still match.
 	std::shared_ptr<ShaderVariantCompilationPolicy>
 		CreateCachingShaderVariantCompilationPolicy();
 }

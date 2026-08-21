@@ -7,7 +7,6 @@
 
 namespace cs::shader_cache
 {
-	// Identity of the d3dcompiler module that will actually service D3DCompile in this process.
 	struct CompilerIdentity
 	{
 		bool                  established = false;

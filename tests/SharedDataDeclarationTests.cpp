@@ -51,7 +51,7 @@ namespace
 			&& a_text.compare(0, a_prefix.size(), a_prefix) == 0;
 	}
 
-	// HLSL headers carry no string literals, so comment stripping stays this simple.
+	// no string literals, so simple comment stripping is safe
 	std::vector<SourceLine> StripComments(const std::vector<SourceLine>& a_lines)
 	{
 		std::vector<SourceLine> stripped;
@@ -115,7 +115,6 @@ namespace
 		return Trim(a_line.substr(a_directive.size()));
 	}
 
-	// Preprocesses the subset of directives this header is allowed to use.
 	std::vector<SourceLine> Preprocess(
 		const std::vector<SourceLine>& a_lines,
 		bool a_substrateDefined)
@@ -329,7 +328,7 @@ namespace
 			}
 		}
 
-		// b5/b6 are proven free across the shipped shader archive; that archive is the scope.
+		// b5/b6 are free within the shipped shader archive
 		std::size_t sharedDataSlots = 0;
 		std::size_t featureDataSlots = 0;
 		for (const auto& use : CollectRegisterUses(surviving)) {

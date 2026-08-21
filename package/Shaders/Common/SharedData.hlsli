@@ -1,4 +1,4 @@
-// The substrate gate is outermost on purpose: without FO4CS_SUBSTRATE this file declares nothing.
+// gate outermost: inactive emits zero declarations
 #ifdef FO4CS_SUBSTRATE
 #ifndef __SHARED_DATA_DEPENDENCY_HLSL__
 #define __SHARED_DATA_DEPENDENCY_HLSL__
@@ -56,7 +56,7 @@ namespace SharedData
 		WetnessEffectsSettings wetnessEffectsSettings;
 	};
 
-	// Fallout 4 uses standard D3D depth, so near maps to 0 and far to 1.
+	// standard D3D depth: near = 0, far = 1
 	float GetScreenDepth(float depth)
 	{
 		return CameraData.w / (-depth * CameraData.z + CameraData.x);
@@ -67,7 +67,6 @@ namespace SharedData
 		return CameraData.w / (-depths * CameraData.z + CameraData.x);
 	}
 
-	// Remaps a full-resolution uv onto the region the engine actually rendered.
 	float2 GetDynamicResolutionAdjustedScreenPosition(float2 uv)
 	{
 		float2 adjusted = max(0.0, uv * DynamicResolution.xy);

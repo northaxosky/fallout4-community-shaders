@@ -208,7 +208,7 @@ namespace cs::features
 		ImGui::Separator();
 		ImGui::Text("Sun & lens");
 		dirty |= ImGui::Checkbox("Lens flare", &settings.lensFlareEnable);
-		ImGui::SetItemTooltip("Ghost reflections traversing from the sun toward the screen centre.");
+		ImGui::SetItemTooltip("Ghost reflections traversing from the sun toward the screen center.");
 		ImGui::BeginDisabled(!settings.lensFlareEnable);
 		ImGui::SliderFloat("Flare intensity", &settings.lensFlareIntensity, 0.0f, 2.0f, "%.2f");
 		markCustomIfEdited();

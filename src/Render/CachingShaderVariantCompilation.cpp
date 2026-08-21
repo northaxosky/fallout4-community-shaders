@@ -170,7 +170,7 @@ namespace cs::engine
 					shader,
 					createError);
 
-				// Retry cache-hit device rejection with bytecode freshly produced by FXC.
+				// heal rejected cache hits with fresh FXC bytecode
 				if (!created
 					&& outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
 					outcome = shader_cache::LoadOrCompileShader(
@@ -212,7 +212,7 @@ namespace cs::engine
 			}
 
 		private:
-			// One policy instance serves one freeze batch, so its snapshot lasts exactly that long.
+			// memo lifetime = one freeze batch
 			shader_cache::RevalidationContext _revalidation;
 			bool                              _reportedCacheFailure = false;
 		};

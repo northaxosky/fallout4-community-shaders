@@ -46,7 +46,7 @@ namespace cs::engine
 				|| (contribution.stages & stage) == 0) {
 				continue;
 			}
-			// A bind-only contribution still puts the substrate in this shader.
+			// bind-only contributions still activate the substrate
 			substrateActive = true;
 			if (!MergeDefines(
 					request.defines,

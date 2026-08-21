@@ -75,7 +75,7 @@ void main(uint3 dtid : SV_DispatchThreadID)
         c = lin;
     }
 
-    // LUT colour grading.
+    // LUT color grading.
     if (LUTEnable != 0) {
         const float scale  = 31.0 / 32.0;
         const float offset = 0.5  / 32.0;

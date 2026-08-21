@@ -14,7 +14,7 @@ namespace cs::shader_cache
 	enum class CacheMode : std::uint8_t
 	{
 		kReadWrite,
-		// Skips the lookup and republishes; used to heal a record whose bytecode the device rejected.
+		// bypass lookup to heal device-rejected bytecode
 		kRecompile
 	};
 
@@ -39,7 +39,7 @@ namespace cs::shader_cache
 	struct ShaderCacheOptions
 	{
 		std::filesystem::path cacheRoot;
-		// Non-owning: when set, the whole batch shares one snapshot of the dependency tree.
+		// optional batch-wide dependency snapshot
 		RevalidationContext* revalidation = nullptr;
 	};
 
@@ -55,7 +55,6 @@ namespace cs::shader_cache
 		std::string               cacheNote;
 	};
 
-	// Returns validated cached bytecode when every dependency still matches, otherwise compiles.
 	ShaderCacheOutcome LoadOrCompileShader(
 		const ShaderRecipe&       a_recipe,
 		const ShaderCacheOptions& a_options = {},

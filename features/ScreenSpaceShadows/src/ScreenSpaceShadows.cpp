@@ -593,7 +593,7 @@ namespace cs::features
 
 	cs::ScreenSpaceShadowsFeatureData ScreenSpaceShadows::GetCommonBufferData() const
 	{
-		// Side-effect free: IsShadowMaskReady allocates, so read cached readiness instead.
+		// cached readiness avoids IsShadowMaskReady allocation
 		if (!_started.load(std::memory_order_acquire)
 			|| !_resourcesReady.load(std::memory_order_acquire)) {
 			return {};

@@ -455,7 +455,7 @@ namespace cs::engine
 			return std::nullopt;
 		}
 
-		// Accepting a contribution puts the substrate on its stages, so b5/b6 are reserved there.
+		// substrate reserves b5/b6 on active stages
 		std::optional<ShaderSlotClaim> FindSubstrateReservation(
 			std::span<const ShaderSlotClaim> a_claims)
 		{
@@ -1026,7 +1026,7 @@ namespace cs::engine
 			service.registrations.push_back(std::move(a_registration));
 		}
 
-		// Any contribution puts the substrate in its shaders, so keep b5/b6 current.
+		// active substrate requires current b5/b6 data
 		render::EnsureSharedDataUpdateInstalled();
 		if (installsPreDrawHook)
 			EnsurePreSunLightDrawInstalled();
@@ -1497,7 +1497,7 @@ namespace cs::engine
 		if (!target)
 			return;
 
-		// Engine state changes between draws, so restore b5/b6 before feature binds.
+		// restore b5/b6 before feature binds
 		render::BindSharedData(a_context);
 
 		auto& runtime = GetService().runtime[ToIndex(a_target)];

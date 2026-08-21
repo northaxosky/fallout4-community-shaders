@@ -4,7 +4,7 @@
 
 namespace cs
 {
-	// Mirrors the HLSL cbuffer FeatureData : register(b6); every field exists whether or not its feature loaded.
+	// mirrors HLSL FeatureData at b6; blocks exist even when unloaded
 	struct alignas(16) ScreenSpaceShadowsFeatureData
 	{
 		std::uint32_t EnableScreenSpaceShadows = 0;
@@ -40,6 +40,6 @@ namespace cs
 	static_assert(sizeof(FeatureDataCB) == 48);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 
-	// Unloaded, unhealthy or unready contributors leave their block zeroed.
+	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();
 }

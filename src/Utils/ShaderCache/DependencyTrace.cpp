@@ -30,7 +30,7 @@ namespace cs::shader_cache
 				|| sha256::Sha256IsZero(a_digest)) {
 				return false;
 			}
-			// Length is only ever a companion to the digest; it never decides freshness on its own.
+			// length only corroborates the digest
 			return a_observation.contentLength == a_length
 				&& a_observation.contentDigest == a_digest;
 		}
@@ -88,7 +88,7 @@ namespace cs::shader_cache
 					}
 					break;
 				case ProbeStatus::kMissing:
-					// A candidate that used to be absent now resolving would shadow the recorded hit.
+					// newly resolved candidate would shadow the recorded hit
 					if (observation.status != FileReadStatus::kMissing) {
 						return Reject(
 							RevalidationStatus::kShadowAppeared,

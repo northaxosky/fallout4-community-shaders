@@ -37,7 +37,7 @@ namespace cs::shader_cache
 			entry = slot;
 		}
 
-		// Reading outside the lock keeps one slow path from serialising the whole batch.
+		// read outside the lock to avoid serializing the batch
 		std::call_once(entry->once, [this, &a_locator, &entry] {
 			entry->observation = ObserveFile(a_locator);
 			_reads.fetch_add(1, std::memory_order_relaxed);

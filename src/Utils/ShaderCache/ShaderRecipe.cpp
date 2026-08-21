@@ -47,7 +47,7 @@ namespace cs::shader_cache
 				resolved = a_path;
 		}
 
-		// An unencodable path yields an empty locator, which can only ever cost a cache miss.
+		// unencodable paths only cost a cache miss
 		try {
 			const auto  encoded = resolved.lexically_normal().u8string();
 			std::string result(encoded.size(), '\0');
