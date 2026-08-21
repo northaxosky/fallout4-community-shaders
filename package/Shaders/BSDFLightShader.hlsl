@@ -664,7 +664,7 @@ SamplerComparisonState g_sCascadeShadowCmp : register(s5);
 
 #ifdef SCREEN_SPACE_SHADOWS
 
-Texture2D<float> g_tScreenSpaceShadow : register(t24);
+#include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
 #endif
 
 #ifdef WETNESS_EFFECTS
@@ -850,7 +850,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef SCREEN_SPACE_SHADOWS
 
-    shadowPcf *= g_tScreenSpaceShadow.Load(int3(int2(input.position.xy), 0)).x;
+    shadowPcf *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 
     float3 albedoPremult = albedoSample.w * albedoSample.xyz;
