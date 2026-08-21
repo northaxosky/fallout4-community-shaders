@@ -20,21 +20,21 @@ namespace cs::engine
 				stableTechnique,
 				a_tiledLighting);
 		}
+	}
 
-		std::optional<bool> QueryNgAeTileLightingEnabled() noexcept
-		{
-			if (!REX::FModule::IsRuntimeNG()
-				&& !REX::FModule::IsRuntimeAE()) {
-				return std::nullopt;
-			}
-
-			// NG and AE share this ID; OG remains unresolved.
-			static REL::Relocation<bool()> tileLightingGetter{
-				REL::ID(2318371)
-			};
-			// Tilelight changes per frame.
-			return tileLightingGetter();
+	std::optional<bool> QueryTiledLightingEnabled() noexcept
+	{
+		if (!REX::FModule::IsRuntimeNG()
+			&& !REX::FModule::IsRuntimeAE()) {
+			return std::nullopt;
 		}
+
+		// NG and AE share this ID; OG remains unresolved.
+		static REL::Relocation<bool()> tileLightingGetter{
+			REL::ID(2318371)
+		};
+		// Tilelight changes per frame.
+		return tileLightingGetter();
 	}
 
 	bool IsPixelShaderVariantResolutionAvailable() noexcept
@@ -74,7 +74,7 @@ namespace cs::engine
 			return route;
 
 		if (a_subclass == "BSDFCompositeShader") {
-			route.tiledLighting = QueryNgAeTileLightingEnabled();
+			route.tiledLighting = QueryTiledLightingEnabled();
 		}
 
 		const auto variant =

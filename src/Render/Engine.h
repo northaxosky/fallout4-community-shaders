@@ -171,8 +171,11 @@ namespace cs::engine
 
 		kUnkMask = 57,
 
-		kDiffuseBuffer = 58,
-		kSpecularBuffer = 59,
+		// B slots are repointed from Pip-Boy allocations only while tiled lighting is active.
+		kDiffuseBufferA = 58,
+		kProbeBufferA = 59,
+		kDiffuseBufferB = 60,
+		kProbeBufferB = 61,
 
 		kDownscaledHDR = 64,
 		kDownscaledHDRLuminance2 = 65,

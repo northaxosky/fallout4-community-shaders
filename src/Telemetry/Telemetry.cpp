@@ -93,6 +93,9 @@ namespace cs::telemetry
 		{
 			const auto summary =
 				cs::engine::GetShaderInjectionSummary();
+			const auto bsdfComposite =
+				cs::engine::GetShaderInjectionTargetSnapshot(
+					cs::engine::ShaderInjectionTarget::kBsdfComposite);
 			a_sink
 				.Field(
 					"requested",
@@ -132,7 +135,16 @@ namespace cs::telemetry
 				.Field(
 					"passthrough_disabled",
 					TomlInteger(summary.passthroughDisabled))
-				.Field("dispatches", TomlInteger(summary.dispatches));
+				.Field("dispatches", TomlInteger(summary.dispatches))
+				.Field(
+					"bsdf_composite_stock_matches",
+					TomlInteger(bsdfComposite.matches))
+				.Field(
+					"bsdf_composite_replacements",
+					TomlInteger(bsdfComposite.substitutions))
+				.Field(
+					"bsdf_composite_dispatches",
+					TomlInteger(bsdfComposite.dispatches));
 		}
 	}
 

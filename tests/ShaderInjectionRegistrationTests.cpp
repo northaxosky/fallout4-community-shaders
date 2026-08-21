@@ -1,4 +1,5 @@
 #include "Log.h"
+#include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderVariantCompilation.h"
@@ -7,6 +8,9 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <d3d11.h>
+#include <d3dcompiler.h>
+#include <filesystem>
 #include <iostream>
 #include <map>
 #include <memory>
@@ -15,10 +19,166 @@
 #include <string_view>
 #include <utility>
 
+#include <winrt/base.h>
+
 namespace
 {
 	std::uint32_t g_preDrawInstallRequests = 0;
 	std::uint32_t g_sharedDataInstallRequests = 0;
+	std::uint32_t g_bsdfCompositeBindDispatches = 0;
+
+	class TestCompilationHandle final :
+		public cs::engine::ShaderVariantCompilationHandle
+	{
+	public:
+		TestCompilationHandle(
+			cs::engine::ShaderStage a_stage,
+			winrt::com_ptr<ID3D11DeviceChild> a_shader) :
+			_stage(a_stage),
+			_shader(std::move(a_shader))
+		{}
+
+		cs::engine::ShaderVariantCompilationState
+			GetState() const noexcept override
+		{
+			return cs::engine::ShaderVariantCompilationState::kReady;
+		}
+
+		winrt::com_ptr<ID3D11DeviceChild>
+			AcquireOrRequest() noexcept override
+		{
+			return _shader;
+		}
+
+		ID3D11DeviceChild* PeekShader() const noexcept override
+		{
+			return _shader.get();
+		}
+
+		cs::engine::ShaderStage GetStage() const noexcept override
+		{
+			return _stage;
+		}
+
+	private:
+		cs::engine::ShaderStage _stage;
+		winrt::com_ptr<ID3D11DeviceChild> _shader;
+	};
+
+	class TestCompilationPolicy final :
+		public cs::engine::ShaderVariantCompilationPolicy
+	{
+	public:
+		explicit TestCompilationPolicy(bool a_alternatePixel = false) :
+			_alternatePixel(a_alternatePixel)
+		{}
+
+		cs::engine::ShaderVariantCompilationResult Prepare(
+			cs::engine::ShaderVariantCompilationRequest a_request) override
+		{
+			using namespace cs::engine;
+
+			ShaderVariantCompilationResult result;
+			if (!a_request.device) {
+				result.error = "no D3D11 device";
+				return result;
+			}
+
+			auto& cached = _shaders[
+				{ a_request.sourcePath, a_request.stage }];
+			if (!cached.handle) {
+				constexpr std::string_view pixelSource =
+					"float4 main() : SV_Target { return 1.0; }";
+				constexpr std::string_view alternatePixelSource =
+					"float4 main() : SV_Target { return 0.25; }";
+				constexpr std::string_view vertexSource =
+					"float4 main(uint id : SV_VertexID) : SV_Position { "
+					"return float4(id == 2 ? 3.0 : -1.0, "
+					"id == 1 ? 3.0 : -1.0, 0.0, 1.0); }";
+				const auto source = a_request.stage == ShaderStage::kPixel ?
+					(_alternatePixel ? alternatePixelSource : pixelSource) :
+					vertexSource;
+				const auto profile = a_request.stage == ShaderStage::kPixel ?
+					"ps_5_0" :
+					"vs_5_0";
+
+				winrt::com_ptr<ID3DBlob> blob;
+				winrt::com_ptr<ID3DBlob> errors;
+				const HRESULT compileResult = D3DCompile(
+					source.data(),
+					source.size(),
+					nullptr,
+					nullptr,
+					nullptr,
+					"main",
+					profile,
+					0,
+					0,
+					blob.put(),
+					errors.put());
+				if (FAILED(compileResult) || !blob) {
+					result.error = errors ?
+						std::string(
+							static_cast<const char*>(errors->GetBufferPointer()),
+							errors->GetBufferSize()) :
+						"test shader compilation failed";
+					return result;
+				}
+
+				winrt::com_ptr<ID3D11DeviceChild> shader;
+				HRESULT createResult = E_FAIL;
+				if (a_request.stage == ShaderStage::kPixel) {
+					winrt::com_ptr<ID3D11PixelShader> pixelShader;
+					createResult = a_request.device->CreatePixelShader(
+						blob->GetBufferPointer(),
+						blob->GetBufferSize(),
+						nullptr,
+						pixelShader.put());
+					if (pixelShader)
+						shader.attach(pixelShader.detach());
+				} else {
+					winrt::com_ptr<ID3D11VertexShader> vertexShader;
+					createResult = a_request.device->CreateVertexShader(
+						blob->GetBufferPointer(),
+						blob->GetBufferSize(),
+						nullptr,
+						vertexShader.put());
+					if (vertexShader)
+						shader.attach(vertexShader.detach());
+				}
+				if (FAILED(createResult) || !shader) {
+					result.error = "test shader creation failed";
+					return result;
+				}
+
+				cached.bytecodeSize =
+					static_cast<std::size_t>(blob->GetBufferSize());
+				cached.handle = std::make_shared<TestCompilationHandle>(
+					a_request.stage,
+					std::move(shader));
+			}
+
+			result.state = ShaderVariantCompilationState::kReady;
+			result.handle = cached.handle;
+			result.bytecodeSize = cached.bytecodeSize;
+			result.compiledSha1 = std::string(
+				40,
+				a_request.stage == ShaderStage::kPixel ? '1' : '2');
+			return result;
+		}
+
+	private:
+		struct CachedShader
+		{
+			std::shared_ptr<TestCompilationHandle> handle;
+			std::size_t bytecodeSize = 0;
+		};
+
+		std::map<
+			std::pair<std::filesystem::path, cs::engine::ShaderStage>,
+			CachedShader> _shaders;
+		bool _alternatePixel = false;
+	};
 }
 
 namespace cs::log
@@ -50,7 +210,7 @@ namespace cs::engine
 	std::shared_ptr<ShaderVariantCompilationPolicy>
 		CreateCachingShaderVariantCompilationPolicy()
 	{
-		return {};
+		return std::make_shared<TestCompilationPolicy>();
 	}
 
 	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver)
@@ -538,6 +698,195 @@ namespace
 		}
 	}
 
+	bool CreateWarpDevice(
+		winrt::com_ptr<ID3D11Device>& a_device,
+		winrt::com_ptr<ID3D11DeviceContext>& a_context)
+	{
+		constexpr D3D_FEATURE_LEVEL featureLevels[]{
+			D3D_FEATURE_LEVEL_11_0
+		};
+		const HRESULT result = D3D11CreateDevice(
+			nullptr,
+			D3D_DRIVER_TYPE_WARP,
+			nullptr,
+			0,
+			featureLevels,
+			static_cast<UINT>(std::size(featureLevels)),
+			D3D11_SDK_VERSION,
+			a_device.put(),
+			nullptr,
+			a_context.put());
+		return Check(
+			SUCCEEDED(result) && a_device && a_context,
+			"could not create a D3D11 WARP device");
+	}
+
+	winrt::com_ptr<ID3D11ShaderResourceView> CreateTestSrv(
+		ID3D11Device* a_device)
+	{
+		D3D11_TEXTURE2D_DESC textureDesc{};
+		textureDesc.Width = 1;
+		textureDesc.Height = 1;
+		textureDesc.MipLevels = 1;
+		textureDesc.ArraySize = 1;
+		textureDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		textureDesc.SampleDesc.Count = 1;
+		textureDesc.Usage = D3D11_USAGE_DEFAULT;
+		textureDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		if (FAILED(a_device->CreateTexture2D(
+				&textureDesc,
+				nullptr,
+				texture.put()))) {
+			return {};
+		}
+
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		if (FAILED(a_device->CreateShaderResourceView(
+				texture.get(),
+				nullptr,
+				srv.put()))) {
+			return {};
+		}
+		return srv;
+	}
+
+	ULONG ReferenceCount(IUnknown* a_object)
+	{
+		a_object->AddRef();
+		return a_object->Release();
+	}
+
+	bool TestPixelShaderResourceSnapshot(
+		ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context)
+	{
+		constexpr std::uint32_t startSlot = 26;
+		auto first = CreateTestSrv(a_device);
+		auto second = CreateTestSrv(a_device);
+		bool ok = Check(
+			first && second && first.get() != second.get(),
+			"could not create distinct snapshot SRVs");
+		if (!ok)
+			return false;
+
+		ID3D11ShaderResourceView* initial[4]{
+			first.get(),
+			nullptr,
+			second.get(),
+			nullptr
+		};
+		a_context->PSSetShaderResources(startSlot, 4, initial);
+		const ULONG firstBaseline = ReferenceCount(first.get());
+		const ULONG secondBaseline = ReferenceCount(second.get());
+
+		cs::render::PixelShaderResourceSnapshot<4> snapshot;
+		ok &= Check(
+			snapshot.Save(a_context, startSlot),
+			"pixel SRV snapshot was not saved");
+		ok &= Check(
+			!snapshot.Save(a_context, startSlot),
+			"overlapping pixel SRV snapshot replaced active state");
+		ok &= Check(
+			ReferenceCount(first.get()) == firstBaseline + 1
+				&& ReferenceCount(second.get()) == secondBaseline + 1,
+			"pixel SRV snapshot did not own PSGet references");
+
+		ID3D11ShaderResourceView* cleared[4]{};
+		a_context->PSSetShaderResources(startSlot, 4, cleared);
+		const ULONG firstAfterClear = ReferenceCount(first.get());
+		const ULONG secondAfterClear = ReferenceCount(second.get());
+		ok &= Check(
+			snapshot.Restore(a_context) && snapshot.IsSaved(),
+			"nested pixel SRV restore consumed the outer snapshot");
+		ID3D11ShaderResourceView* nested[4]{};
+		a_context->PSGetShaderResources(startSlot, 4, nested);
+		ok &= Check(
+			std::ranges::all_of(
+				nested,
+				[](ID3D11ShaderResourceView* a_resource) {
+					return a_resource == nullptr;
+				}),
+			"nested pixel SRV restore wrote the outer state early");
+		ok &= Check(
+			ReferenceCount(first.get()) == firstAfterClear
+				&& ReferenceCount(second.get()) == secondAfterClear,
+			"nested pixel SRV restore released the outer snapshot");
+		ok &= Check(
+			snapshot.Restore(a_context) && !snapshot.IsSaved(),
+			"outer pixel SRV snapshot was not restored");
+
+		ID3D11ShaderResourceView* restored[4]{};
+		a_context->PSGetShaderResources(startSlot, 4, restored);
+		ok &= Check(
+			restored[0] == first.get()
+				&& restored[1] == nullptr
+				&& restored[2] == second.get()
+				&& restored[3] == nullptr,
+			"pixel SRV snapshot did not restore null and non-null slots");
+		for (auto* resource : restored) {
+			if (resource)
+				resource->Release();
+		}
+		ok &= Check(
+			ReferenceCount(first.get()) == firstBaseline
+				&& ReferenceCount(second.get()) == secondBaseline,
+			"pixel SRV snapshot leaked PSGet references");
+
+		a_context->PSSetShaderResources(startSlot, 4, cleared);
+		return ok;
+	}
+
+	bool TestBoundShaderInjectionDispatch(
+		ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context)
+	{
+		FreezeAndCompileShaderInjections(a_device);
+		auto* injected = GetInjectedPixelShader(
+			ShaderInjectionTarget::kBsdfComposite);
+		bool ok = Check(
+			injected != nullptr,
+			"BSDFComposite injected pixel shader was not published");
+		if (!injected)
+			return false;
+
+		a_context->PSSetShader(injected, nullptr, 0);
+		DispatchInjectionsForBoundPixelShader(a_context);
+		auto snapshot = GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kBsdfComposite);
+		ok &= Check(
+			g_bsdfCompositeBindDispatches == 1
+				&& snapshot.dispatches == 1,
+			"bound BSDFComposite shader did not dispatch its contributor");
+
+		TestCompilationPolicy independentPolicy(true);
+		ShaderVariantCompilationRequest request;
+		request.device.copy_from(a_device);
+		request.stage = ShaderStage::kPixel;
+		const auto independent = independentPolicy.Prepare(
+			std::move(request));
+		auto* otherShader = independent.handle ?
+			static_cast<ID3D11PixelShader*>(
+				independent.handle->PeekShader()) :
+			nullptr;
+		ok &= Check(
+			otherShader && otherShader != injected,
+			"non-injected pixel shader fixture was not distinct");
+		if (otherShader) {
+			a_context->PSSetShader(otherShader, nullptr, 0);
+			DispatchInjectionsForBoundPixelShader(a_context);
+		}
+		snapshot = GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kBsdfComposite);
+		ok &= Check(
+			g_bsdfCompositeBindDispatches == 1
+				&& snapshot.dispatches == 1,
+			"non-injected pixel shader dispatched a contributor");
+		a_context->PSSetShader(nullptr, nullptr, 0);
+		return ok;
+	}
+
 }
 
 int main(int a_argc, char* a_argv[])
@@ -755,7 +1104,9 @@ int main(int a_argc, char* a_argv[])
 	ShaderReplacementRegistration bindRegistration;
 	bindRegistration.targetId = ShaderInjectionTarget::kBsdfComposite;
 	bindRegistration.contributor = "registration-with-bind";
-	bindRegistration.bind = [](ID3D11DeviceContext*) {};
+	bindRegistration.bind = [](ID3D11DeviceContext*) {
+		++g_bsdfCompositeBindDispatches;
+	};
 	ok &= Check(
 		RegisterReplacement(std::move(bindRegistration)),
 		"registration with a bind was rejected");
@@ -787,8 +1138,22 @@ int main(int a_argc, char* a_argv[])
 		!RegisterReplacementVariant(
 			MakeRegistration("duplicate-sha", 0xABC003, baseSha)),
 		"duplicate expected stock SHA1 was accepted");
+	if (ok) {
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		ok &= CreateWarpDevice(device, context);
+		if (device && context) {
+			ok &= TestPixelShaderResourceSnapshot(
+				device.get(),
+				context.get());
+			ok &= TestBoundShaderInjectionDispatch(
+				device.get(),
+				context.get());
+		}
+	}
 	if (!ok)
 		return 1;
-	std::cout << "PASS: shader injection registration guards\n";
+	std::cout
+		<< "PASS: shader injection registration, binding, and dispatch guards\n";
 	return 0;
 }

@@ -108,8 +108,6 @@ namespace cs::features
 		std::atomic_uint32_t _sunHookUnmatched{ 0 };
 		std::atomic_uint32_t _maskBinds{ 0 };
 		std::atomic_uint32_t _ambientMaskBinds{ 0 };
-		std::atomic_uint32_t _ambientPreDrawMatches{ 0 };
-		std::atomic_uint32_t _ambientPreDrawMaskBinds{ 0 };
 		bool _ambientPassRegistered = false;
 
 		std::unique_ptr<cs::buffer::ConstantBuffer> _wetnessCB;

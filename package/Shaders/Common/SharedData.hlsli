@@ -36,7 +36,7 @@ namespace SharedData
 	struct ScreenSpaceGISettings
 	{
 		bool EnableScreenSpaceGI;
-		bool EnableAmbientPass;
+		uint pad0;
 		float AoPower;
 		float BounceStrength;
 	};

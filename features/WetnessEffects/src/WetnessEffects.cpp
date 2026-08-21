@@ -361,8 +361,6 @@ namespace cs::features
 		_sunHookUnmatched.store(0, std::memory_order_relaxed);
 		_maskBinds.store(0, std::memory_order_relaxed);
 		_ambientMaskBinds.store(0, std::memory_order_relaxed);
-		_ambientPreDrawMatches.store(0, std::memory_order_relaxed);
-		_ambientPreDrawMaskBinds.store(0, std::memory_order_relaxed);
 		_workingWidth.store(0, std::memory_order_relaxed);
 		_workingHeight.store(0, std::memory_order_relaxed);
 		if (!_started.load(std::memory_order_acquire)) {
@@ -493,18 +491,6 @@ namespace cs::features
 				cs::engine::ShaderInjectionTarget::kBsdfLight,
 				boundShader.get())) {
 			_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
-			return;
-		}
-		if (_ambientPassRegistered &&
-			cs::engine::IsInjectedPixelShader(
-				cs::engine::ShaderInjectionTarget::kBsdfComposite,
-				boundShader.get())) {
-			_sunHookMatched.fetch_add(1, std::memory_order_relaxed);
-			_ambientPreDrawMatches.fetch_add(1, std::memory_order_relaxed);
-			if (_ambientMaskBinds.load(std::memory_order_relaxed) >
-				_ambientPreDrawMaskBinds.load(std::memory_order_relaxed)) {
-				_ambientPreDrawMaskBinds.fetch_add(1, std::memory_order_relaxed);
-			}
 			return;
 		}
 		_sunHookUnmatched.fetch_add(1, std::memory_order_relaxed);
@@ -705,15 +691,7 @@ namespace cs::features
 			.Field(
 				"ambient_mask_binds",
 				static_cast<std::int64_t>(
-					_ambientMaskBinds.load(std::memory_order_relaxed)))
-			.Field(
-				"ambient_pre_draw_matches",
-				static_cast<std::int64_t>(
-					_ambientPreDrawMatches.load(std::memory_order_relaxed)))
-			.Field(
-				"ambient_pre_draw_mask_binds",
-				static_cast<std::int64_t>(
-					_ambientPreDrawMaskBinds.load(std::memory_order_relaxed)));
+					_ambientMaskBinds.load(std::memory_order_relaxed)));
 	}
 
 	void WetnessEffects::DrawSettings()

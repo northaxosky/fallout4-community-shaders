@@ -11,15 +11,21 @@
 
 Texture2D<float> srcWorkingDepth : register(t0);
 Texture2D<float3> srcNormal : register(t1);
-Texture2D<unorm float2> srcNoise : register(t2);
 #ifdef SSGI_BOUNCE
-Texture2D<float3> srcRadiance : register(t3);
+Texture2D<float3> srcRadiance : register(t2);
+#endif
+Texture2D<unorm float2> srcNoise : register(t3);
+#ifdef SSGI_BOUNCE
+Texture2D<unorm float> srcAccumFrames : register(t4);
+Texture2D<float4> srcPrevIlY : register(t5);
+Texture2D<float2> srcPrevIlCoCg : register(t6);
 #endif
 
 RWTexture2D<unorm float> outAo : register(u0);
 #ifdef SSGI_BOUNCE
 RWTexture2D<float4> outBounceSH : register(u1);
 RWTexture2D<float2> outBounceCoCg : register(u2);
+RWTexture2D<float3> outPrevGeo : register(u3);
 #endif
 
 float GetDepthFade(float depth)
@@ -131,14 +137,16 @@ void CalculateGI(
 				angleRange = smoothstep(0, 1, (angleRange + n) * Math::INV_PI + .5);
 
 				uint2 bitsRange = uint2(round(angleRange.x * 32u), round((angleRange.y - angleRange.x) * 32u));
-				uint maskedBits = s < AORadius ? ((1 << bitsRange.y) - 1) << bitsRange.x : 0;
+				uint sampleBits = ((1 << bitsRange.y) - 1) << bitsRange.x;
+				uint maskedBits = s < AORadius ? sampleBits : 0;
 
 #ifdef SSGI_BOUNCE
-				uint validBits = maskedBits & ~bitmaskGI;
-				bitmaskGI |= maskedBits;
+				uint giBits = s < GIRadius ? sampleBits : 0;
+				uint validBits = giBits & ~bitmaskGI;
+				bitmaskGI |= giBits;
 				if (validBits != 0) {
 					float3 sampleNormal = normalize(
-						srcNormal.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0));
+						srcNormal.SampleLevel(samplerPointClamp, sampleUV * frameScale, mipLevel));
 					if (dot(samplePos, sampleNormal) > 0)
 						sampleNormal = -sampleNormal;
 
@@ -148,7 +156,7 @@ void CalculateGI(
 						float3 sampleRadiance = max(
 							0,
 							srcRadiance.SampleLevel(
-								samplerPointClamp, sampleUV * RadianceScale, mipLevel));
+								samplerPointClamp, sampleUV * frameScale, mipLevel));
 						sampleRadiance *= frontBackMult * angularWeight;
 
 						float3 sampleYCoCg = Color::RGBToYCoCg(sampleRadiance);
@@ -175,18 +183,27 @@ void CalculateGI(
 	radianceY *= rcpNumSlices;
 	radianceCoCg *= rcpNumSlices;
 	o_bounceSH = lerp(radianceY, 0, depthFade);
-	o_bounceCoCg = lerp(radianceCoCg, 0, depthFade);
+	o_bounceCoCg = radianceCoCg;
 #endif
 }
 
 [numthreads(8, 8, 1)]
 void main(const uint2 dtid : SV_DispatchThreadID)
 {
+	if (any(dtid >= uint2(OUT_FRAME_DIM)))
+		return;
+
 	uint2 pxCoord = dtid;
 	float2 uv = (pxCoord + .5) * RCP_OUT_FRAME_DIM;
 
 	float viewspaceZ = READ_DEPTH(srcWorkingDepth, pxCoord);
 	float3 viewspaceNormal = srcNormal[pxCoord];
+
+#ifdef SSGI_BOUNCE
+	outPrevGeo[pxCoord] = float3(
+		clamp(viewspaceZ, 0.0, R11_MAX_DEPTH),
+		EncodeWorldNormal(ViewToWorldDirection(viewspaceNormal)));
+#endif
 
 	viewspaceZ *= 0.99920h;
 
@@ -204,6 +221,47 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 			, currBounceSH, currBounceCoCg
 #endif
 		);
+
+#ifdef SSGI_BOUNCE
+		if (TemporalEnabled()) {
+			// The reprojection pass floors accumulation at one, so this stays in range.
+			float lerpFactor = saturate(rcp(max(srcAccumFrames[pxCoord] * 255, 1.0)));
+
+			float4 prevY = srcPrevIlY[pxCoord];
+			float2 prevCoCg = srcPrevIlCoCg[pxCoord];
+
+			// Clamp history to its neighbourhood while the blend is still young.
+			[branch] if (lerpFactor >= 0.15)
+			{
+				const int2 maxCoord = int2(OUT_FRAME_DIM) - 1;
+				const int2 center = int2(pxCoord);
+				const int2 left = clamp(center + int2(-1, 0), int2(0, 0), maxCoord);
+				const int2 right = clamp(center + int2(1, 0), int2(0, 0), maxCoord);
+				const int2 up = clamp(center + int2(0, -1), int2(0, 0), maxCoord);
+				const int2 down = clamp(center + int2(0, 1), int2(0, 0), maxCoord);
+
+				float4 yL = srcPrevIlY[left];
+				float4 yR = srcPrevIlY[right];
+				float4 yU = srcPrevIlY[up];
+				float4 yD = srcPrevIlY[down];
+				float2 cL = srcPrevIlCoCg[left];
+				float2 cR = srcPrevIlCoCg[right];
+				float2 cU = srcPrevIlCoCg[up];
+				float2 cD = srcPrevIlCoCg[down];
+
+				float4 minY = min(min(min(yL, yR), min(yU, yD)), currBounceSH);
+				float4 maxY = max(max(max(yL, yR), max(yU, yD)), currBounceSH);
+				float2 minCoCg = min(min(min(cL, cR), min(cU, cD)), currBounceCoCg);
+				float2 maxCoCg = max(max(max(cL, cR), max(cU, cD)), currBounceCoCg);
+
+				prevY = clamp(prevY, minY, maxY);
+				prevCoCg = clamp(prevCoCg, minCoCg, maxCoCg);
+			}
+
+			currBounceSH = lerp(prevY, currBounceSH, lerpFactor);
+			currBounceCoCg = lerp(prevCoCg, currBounceCoCg, lerpFactor);
+		}
+#endif
 	}
 
 	// Output is occlusion: 0=open, 1=occluded.

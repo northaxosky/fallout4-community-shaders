@@ -18,6 +18,7 @@ namespace cs::engine
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	void RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
 	// Fixed slots keep post-FX before HUD-less capture.
@@ -27,7 +28,7 @@ namespace cs::engine
 	// Claim viewport thunks before broker registration.
 	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel);
 
-	// Bind only null PS slots before fullscreen deferred lights.
+	// Install the post-dirty-state deferred draw anchor.
 	void EnsurePreSunLightDrawInstalled();
 	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 }

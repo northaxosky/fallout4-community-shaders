@@ -50,14 +50,92 @@ archive has no RDEF chunks, and the result does not cover runtime-compiled
 shaders or other mods. `b5` and `b6` are reserved: a contributor that claims
 either as a constant buffer quarantines its target.
 
+Upstream Common shaders use `t17` and `t20`; `t18`-`t23` remain reserved
+headroom. Plugin feature textures begin at `t24`: ScreenSpaceShadows uses
+`t24`, WetnessEffects uses `t25`, and ScreenSpaceGI uses `t26`-`t29`.
+
+## Feature composition headers
+
+A feature that composes into a reconstruction owns the HLSL for it. The header
+lives beside the feature's own shaders and is included only inside the family
+blocks that consume it, never globally.
+
+`ScreenSpaceGI/ScreenSpaceGI.hlsli` is included by `BSDFCompositeShader.hlsl`
+under `SSGI` in the three ambient families that can isolate directional ambient:
+`CB31` (10 rows), `CB47` (8 rows) and `COMPACT` (8 rows). `MINIMAL` folds ambient
+into its base color and is excluded, as are the non-ambient families. The header
+declares one contiguous run of archive-free pixel slots, which the feature's
+injection contribution binds in a single call on every injected draw:
+
+| Slot | Contents |
+|---|---|
+| `t26` | occlusion, `R8_UNORM`, 0 open and 1 occluded |
+| `t27` | indirect SH-L1 luma, `R16G16B16A16_FLOAT` |
+| `t28` | indirect CoCg chroma, `R16G16_FLOAT` |
+| `t29` | `RenderTarget::kGbufferAlbedo` |
+
+`SharedData::screenSpaceGISettings.EnableScreenSpaceGI` gates the composition at
+runtime; at zero every targeted row keeps the stock engine ambient-occlusion
+path, so the injected variant is safe to leave installed.
+
+## Deferred radiance source
+
+ScreenSpaceGI generates at `PostDeferredLightsImpl`, which runs after
+`DrawWorld::DeferredLightsImpl` has written the deferred lighting buffers and
+before `DrawWorld::DeferredComposite` consumes them.
+
+A direct copy-probe in one live tiled-on RenderDoc capture pins the RT-pool
+slots to their engine resources:
+
+| Pool slot | Engine resource | Role |
+|---|---|---|
+| 58 (`kDiffuseBufferA`) | Resource759 | DiffuseA, final DirectDiffuse |
+| 59 (`kProbeBufferA`) | Resource762 | ProbeA |
+| 60 (`kDiffuseBufferB`) | Resource765 | DiffuseB, final DirectSpecular |
+| 61 (`kProbeBufferB`) | Resource769 | ProbeB |
+
+The tiled compute event writes Resource765 and Resource769 and republishes them
+through pool slots 60 and 61. **Those two slots are originally created as
+unrelated 876x700 Pip-Boy targets and are only repointed while tiled lighting is
+active**, so reading them unconditionally samples the Pip-Boy. The feature only
+retrieves the B SRV when the runtime tiled-lighting predicate
+(`cs::engine::QueryTiledLightingEnabled`) is present *and* true, and then only
+uses it when its descriptor matches A on width, height, `R11G11B10_FLOAT` and
+single-sample. The predicate is `std::nullopt` on OG, where the getter has no
+resolved address; that path is A-only. NG and AE use Address Library ID
+`2318371`; the official 1.11.240 database resolves it to RVA `0x21FA9A0`.
+
+The radiance the sweep gathers is therefore `RT58 * 3` with tiled lighting off
+and `(RT58 + RT60) * 3` with it on. RT59 and RT61 are excluded. The scalar is
+applied to the raw float values: no transfer-function conversion and no albedo
+multiplication happen at the source.
+
+Source contamination is bounded and documented rather than stripped: 16 of 167
+`BSDFLight` classes and 24 of 307 routes, all `DIRSPLITS2` rows carrying
+`AMBIENT_IBL_IN_LIGHT`, already fold ambient image-based lighting into RT58.
+Feature telemetry reports those counts alongside the live source count.
+
+Motion vectors come from `RenderTarget::kMotionVectors=29` (`R16G16_FLOAT`,
+full resolution, single sample). `BSDFPrePass` writes `(currNDC - prevNDC)`
+scaled by `(-0.5, +0.5)`, so reprojection is `previousUV = currentUV + motion`.
+MotionVectorFixes stays optional; it is not a resource dependency.
+
+The pass order is radiance capture and history reprojection, radiance mips,
+depth and normal mips, GI generation and temporal SH/CoCg blend, then spatial
+denoise and publication. AO stays spatial-only. History resets on allocation
+changes, source/input changes, re-enable, temporal-setting changes, loading
+screen close, missing motion or inputs, frame gaps, and camera discontinuities.
+Previous geometry uses its own projection and the renderer position adjustment,
+so world-origin rebases remain coherent.
+
 ## Entry points
 
 | Entry point | Engine shader or pass | Principal bindings |
 |---|---|---|
-| `BSDFLightShader.hlsl` | `BSDFLightShader` deferred lighting, hosted by `DrawWorld::DeferredLightsImpl` and the directional-light accumulation path | Reads the lighting G-buffer aliases and main depth; writes `kDiffuseBuffer=58` and `kSpecularBuffer=59`. |
+| `BSDFLightShader.hlsl` | `BSDFLightShader` deferred lighting, hosted by `DrawWorld::DeferredLightsImpl` and the directional-light accumulation path | Reads the lighting G-buffer aliases and main depth; writes `kDiffuseBufferA=58` and `kProbeBufferA=59`. |
 | `BSDFCompositeShader.hlsl` | `BSDFCompositeShader`; ambient, image-based lighting, and composite families | Bindings and outputs vary by selected family. |
 | `BSDFPrePass.hlsl` | G-buffer fill hosted by `DrawWorld::DeferredPrePass` | Writes six MRT outputs: albedo, octahedral normal, material data, two auxiliary buffers, and motion vectors. |
-| `DeferredComposite.hlsl` | Final combine hosted by `DrawWorld::DeferredComposite` | Reads `kGbufferAlbedo=22`, `kDiffuseBuffer=58`, and `kSpecularBuffer=59`; writes `kMain=3`. |
+| `DeferredComposite.hlsl` | Final combine hosted by `DrawWorld::DeferredComposite` | Reads `kGbufferAlbedo=22`, `kDiffuseBufferA=58`, and `kProbeBufferA=59`; writes `kMain=3`. |
 | `VolumetricLighting.hlsl` | VLS slice-scatter pass hosted by `ImageSpaceEffectVLSLight::Render` | Reads linear depth at `t7`; writes one slice-accumulation target through `SV_Target0`. |
 | `BSSkyShader.hlsl` | `BSSkyShader` pixel and vertex permutations | Nine pixel and seven vertex routes selected by exact SHA-1. |
 | `BSWaterShader.hlsl` | `BSWaterShader` pixel and vertex permutations | Thirty-eight pixel and sixteen vertex routes selected by exact SHA-1. |
@@ -82,7 +160,12 @@ ctest --test-dir build -C Release -R "ShaderCompile|SharedDataDeclaration"
 
 `ShaderCompile` compiles every registered shipping permutation, explicit
 feature-composition, standalone-source, all 111 vertex permutations, and the
-shared substrate in active and inactive modes through `D3DCompile`.
+shared substrate in active and inactive modes through `D3DCompile`. It also
+witnesses reflection: `t26`-`t29` must appear on all 26 composing
+`kBsdfComposite` pixel rows built with `SSGI` and on none of the other 44, and
+all eight ScreenSpaceGI permutations that use `XeGTAOCB` must reflect the same
+288-byte layout at the same offsets, so a conditional field cannot silently
+shift the buffer between the AO and bounce builds.
 `SharedDataDeclaration` parses `Common/SharedData.hlsli` and enforces the outer
 gate and its exact b5/b6-only resource footprint. Keep both green when editing
 any file in this directory.

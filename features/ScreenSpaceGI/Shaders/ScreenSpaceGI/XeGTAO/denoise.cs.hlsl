@@ -8,11 +8,13 @@ Texture2D<unorm float> srcAO : register(t2);
 #ifdef SSGI_BOUNCE
 Texture2D<float4> srcBounceSH : register(t3);
 Texture2D<float2> srcBounceCoCg : register(t4);
+Texture2D<unorm float> srcAccumFrames : register(t5);
 #endif
 RWTexture2D<unorm float> outAO : register(u0);
 #ifdef SSGI_BOUNCE
 RWTexture2D<float4> outBounceSH : register(u1);
 RWTexture2D<float2> outBounceCoCg : register(u2);
+RWTexture2D<unorm float> outAccumFrames : register(u3);
 #endif
 
 static const float3 g_Poisson8[8] = {
@@ -52,11 +54,15 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 
 	float depth = READ_DEPTH(srcWorkingDepth, dtid);
 	float centerAO = srcAO[dtid];
+#ifdef SSGI_BOUNCE
+	const float accumFrames = srcAccumFrames[dtid] * 255.0;
+#endif
 	if (!ValidDepth(depth)) {
 		outAO[dtid] = 0.0;
 #ifdef SSGI_BOUNCE
 		outBounceSH[dtid] = 0;
 		outBounceCoCg[dtid] = 0;
+		outAccumFrames[dtid] = srcAccumFrames[dtid];
 #endif
 		return;
 	}
@@ -64,18 +70,29 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 	float3 pos = ScreenToViewPosition(uv, depth);
 	float3 normal = normalize(srcNormal[dtid]);
 
+	float radius = BlurRadius;
+#ifdef SSGI_BOUNCE
+	// A saturated accumulation needs almost no spatial support.
+	radius = lerp(radius, 2.0, rcp(1.0 + accumFrames));
+#endif
+
 	const float2 pixelDirRBViewspaceSizeAtCenterZ = depth.xx * NDCToViewMul.xy * RCP_OUT_FRAME_DIM;
-	const float worldRadius = BlurRadius * pixelDirRBViewspaceSizeAtCenterZ.x;
+	const float worldRadius = radius * pixelDirRBViewspaceSizeAtCenterZ.x;
 	float3x3 basis = getBasis(normal);
 	float3 T = basis[0] * worldRadius;
 	float3 B = basis[1] * worldRadius;
-	const float halfAngle = Math::HALF_PI;
+	float halfAngle = Math::HALF_PI;
+#ifdef SSGI_BOUNCE
+	halfAngle *= 1.0 - lerp(
+		0.0, 0.8, sqrt(saturate(accumFrames / max(1.0, (float)MaxAccumFrames))));
+#endif
 
 	float aoSum = centerAO * CenterBeta;
 	float wSum = CenterBeta;
 #ifdef SSGI_BOUNCE
 	float4 bounceSHSum = srcBounceSH[dtid] * CenterBeta;
 	float2 bounceCoCgSum = srcBounceCoCg[dtid] * CenterBeta;
+	float accumSum = accumFrames * CenterBeta;
 #endif
 
 	[unroll] for (uint i = 0; i < 8; i++) {
@@ -100,6 +117,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 #ifdef SSGI_BOUNCE
 			bounceSHSum += srcBounceSH.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0) * w;
 			bounceCoCgSum += srcBounceCoCg.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0) * w;
+			accumSum += srcAccumFrames.SampleLevel(samplerPointClamp, sampleUV * frameScale, 0) * 255.0 * w;
 #endif
 			wSum += w;
 		}
@@ -109,5 +127,6 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 #ifdef SSGI_BOUNCE
 	outBounceSH[dtid] = bounceSHSum / max(wSum, 1e-6);
 	outBounceCoCg[dtid] = bounceCoCgSum / max(wSum, 1e-6);
+	outAccumFrames[dtid] = (accumSum / max(wSum, 1e-6)) / 255.0;
 #endif
 }

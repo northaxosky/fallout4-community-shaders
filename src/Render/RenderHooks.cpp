@@ -1,6 +1,7 @@
 #include "Render/RenderHooks.h"
 
 #include "Log.h"
+#include "Render/DeferredDrawAnchor.h"
 #include "Render/ShaderInjection.h"
 
 #include <algorithm>
@@ -10,6 +11,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace { auto* L = cs::log::Get("cs.hooks"); }
@@ -27,6 +29,7 @@ namespace cs::engine
 		std::vector<PrioritizedCallback>    g_postDeferredPrePass;
 		std::vector<PrioritizedCallback>    g_preDeferredLightsImpl;
 		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
+		std::vector<PrioritizedCallback>    g_preDeferredComposite;
 		std::vector<PrioritizedCallback>    g_postDeferredComposite;
 		std::vector<RenderHookCallback>     g_postDynResViewport_Imagespace;
 		std::vector<PostDynResViewportFGCb> g_postDynResViewport_FGCapture;
@@ -35,12 +38,12 @@ namespace cs::engine
 		bool g_lightsImplInstalled         = false;
 		bool g_compositeInstalled          = false;
 		bool g_postDynResViewportInstalled = false;
-		bool g_preSunLightDrawInstalled    = false;
+		bool g_deferredDrawAnchorInstalled = false;
 		// Empty means no earlier viewport thunk owner.
 		std::string g_postDynResViewportPreThunkOwner;
 		bool        g_postDynResViewportPreThunkClaimed = false;
-		// Phase-gate generic draws to DeferredLightsImpl.
 		bool g_insideDeferredLightsImpl    = false;
+		bool g_insideDeferredComposite     = false;
 
 		// Registration closes when the first render hook runs.
 		const DWORD      g_registrationThreadId = ::GetCurrentThreadId();
@@ -80,6 +83,27 @@ namespace cs::engine
 			}
 		}
 
+		class ScopedRenderPhase
+		{
+		public:
+			explicit ScopedRenderPhase(bool& a_phase) noexcept :
+				_phase(a_phase),
+				_previous(std::exchange(a_phase, true))
+			{}
+
+			~ScopedRenderPhase()
+			{
+				_phase = _previous;
+			}
+
+			ScopedRenderPhase(const ScopedRenderPhase&) = delete;
+			ScopedRenderPhase& operator=(const ScopedRenderPhase&) = delete;
+
+		private:
+			bool& _phase;
+			bool _previous;
+		};
+
 		struct DeferredPrePass_Hook
 		{
 			static void thunk()
@@ -97,26 +121,36 @@ namespace cs::engine
 			{
 				MarkRegistrationClosed();
 				Dispatch(g_preDeferredLightsImpl);
-				g_insideDeferredLightsImpl = true;
-				func();
-				g_insideDeferredLightsImpl = false;
+				{
+					ScopedRenderPhase phase(g_insideDeferredLightsImpl);
+					func();
+				}
 				Dispatch(g_postDeferredLightsImpl);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Hook after SetDirtyStates and before DrawIndexed.
-		// primitiveCount==2 identifies fullscreen draws within DeferredLightsImpl.
-		struct PreSunLightDraw_Hook
+		// The fourth argument is residual r9d state, not a call parameter.
+		struct DeferredDrawAnchor_Hook
 		{
-			static void thunk(bool a_force, bool a_clear, std::uint32_t , std::uint32_t a_primitiveCount)
+			static void thunk(
+				bool a_force,
+				bool a_clear,
+				std::uint32_t,
+				std::uint32_t a_residualR9d)
 			{
 				func(a_force, a_clear);
-				if (g_insideDeferredLightsImpl && a_primitiveCount == 2) {
+				const auto decision = SelectDeferredDrawAnchorDecision(
+					g_insideDeferredLightsImpl,
+					g_insideDeferredComposite,
+					a_residualR9d);
+				if (decision.dispatchInjections) {
 					auto* rendererData = RE::BSGraphics::GetRendererData();
 					DispatchInjectionsForBoundPixelShader(rendererData ?
 						reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 						nullptr);
+				}
+				if (decision.dispatchLegacySunCallbacks) {
 					Dispatch(g_preSunLightDraw);
 				}
 			}
@@ -128,7 +162,11 @@ namespace cs::engine
 			static void thunk()
 			{
 				MarkRegistrationClosed();
-				func();
+				Dispatch(g_preDeferredComposite);
+				{
+					ScopedRenderPhase phase(g_insideDeferredComposite);
+					func();
+				}
 				Dispatch(g_postDeferredComposite);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -180,25 +218,36 @@ namespace cs::engine
 			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 		}
 
-		void InstallPreSunLightDrawHook()
+		void EnsureDeferredCompositeInstalled()
 		{
-			if (g_preSunLightDrawInstalled) {
+			if (g_compositeInstalled) {
 				return;
 			}
+			stl::detour_thunk<DeferredComposite_Hook>(REL::ID({ 728427, 2318313, 2318313 }));
+			g_compositeInstalled = true;
+			L->info("Hook installed on DrawWorld::DeferredComposite");
+		}
+
+		void InstallDeferredDrawAnchor()
+		{
 			EnsureDeferredLightsImplInstalled();
+			EnsureDeferredCompositeInstalled();
+			if (g_deferredDrawAnchorInstalled) {
+				return;
+			}
 			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
 			constexpr std::ptrdiff_t offsets[] = { 0x9C, 0x9A, 0x9A };
-			stl::write_thunk_call<PreSunLightDraw_Hook>(
+			stl::write_thunk_call<DeferredDrawAnchor_Hook>(
 				REL::ID({ 763320, 2276846, 2276846 }).address() + offsets[runtimeIdx]);
-			g_preSunLightDrawInstalled = true;
-			L->info("Hook installed on DrawTriShape SetDirtyStates call (sun-light draw anchor)");
+			g_deferredDrawAnchorInstalled = true;
+			L->info("Hook installed on DrawTriShape SetDirtyStates call (deferred draw anchor)");
 		}
 	}
 
 	void EnsurePreSunLightDrawInstalled()
 	{
-		if (!RegistrationAllowed("PreSunLightDraw")) return;
-		InstallPreSunLightDrawHook();
+		if (!RegistrationAllowed("DeferredDrawAnchor")) return;
+		InstallDeferredDrawAnchor();
 	}
 
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
@@ -227,15 +276,18 @@ namespace cs::engine
 		EnsureDeferredLightsImplInstalled();
 	}
 
+	void RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority)
+	{
+		if (!RegistrationAllowed("PreDeferredComposite")) return;
+		InsertPrioritized(g_preDeferredComposite, std::move(callback), priority);
+		EnsureDeferredCompositeInstalled();
+	}
+
 	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PostDeferredComposite")) return;
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
-		if (!g_compositeInstalled) {
-			stl::detour_thunk<DeferredComposite_Hook>(REL::ID({ 728427, 2318313, 2318313 }));
-			g_compositeInstalled = true;
-			L->info("Hook installed on DrawWorld::DeferredComposite");
-		}
+		EnsureDeferredCompositeInstalled();
 	}
 
 	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback)
@@ -256,7 +308,7 @@ namespace cs::engine
 	{
 		if (!RegistrationAllowed("PreSunLightDraw")) return;
 		InsertPrioritized(g_preSunLightDraw, std::move(callback), priority);
-		InstallPreSunLightDrawHook();
+		InstallDeferredDrawAnchor();
 	}
 
 	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel)

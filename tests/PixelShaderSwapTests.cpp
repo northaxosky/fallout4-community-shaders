@@ -1,3 +1,4 @@
+#include "Render/DeferredDrawAnchor.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderVariantResolver.h"
 
@@ -35,6 +36,44 @@ namespace
 			cs::sha1::Sha1FromHex(std::string(a_hex), result),
 			"invalid SHA1 fixture");
 		return result;
+	}
+
+	void TestDeferredDrawAnchorTruthTable()
+	{
+		using cs::engine::DeferredDrawAnchorDecision;
+		using cs::engine::SelectDeferredDrawAnchorDecision;
+
+		struct TestCase
+		{
+			bool insideLights;
+			bool insideComposite;
+			std::uint32_t residualR9d;
+			DeferredDrawAnchorDecision expected;
+		};
+
+		constexpr std::array cases{
+			TestCase{ false, false, 0, {} },
+			TestCase{ false, false, 2, {} },
+			TestCase{ true, false, 0, {} },
+			TestCase{ true, false, 2, { true, true } },
+			TestCase{ false, true, 0, { true, false } },
+			TestCase{ false, true, 2, { true, false } },
+			TestCase{ true, true, 0, { true, false } },
+			TestCase{ true, true, 2, { true, false } }
+		};
+		for (const auto& testCase : cases) {
+			Check(
+				SelectDeferredDrawAnchorDecision(
+					testCase.insideLights,
+					testCase.insideComposite,
+					testCase.residualR9d)
+					== testCase.expected,
+				"deferred draw anchor decision truth table mismatch");
+		}
+		Check(
+			SelectDeferredDrawAnchorDecision(true, false, UINT32_MAX)
+				== DeferredDrawAnchorDecision{},
+			"lights phase accepted an unrelated residual r9d value");
 	}
 
 	struct PipelineFixture
@@ -795,6 +834,7 @@ int main()
 		void (*run)();
 	};
 	const Test tests[]{
+		{ "deferred draw anchor truth table", &TestDeferredDrawAnchorTruthTable },
 		{ "variant key selects variant", &TestVariantKeySelectsVariant },
 		{ "multiple keys share replacement", &TestMultipleKeysShareReplacement },
 		{ "variant hash mismatch refused", &TestVariantHashMismatchRefused },

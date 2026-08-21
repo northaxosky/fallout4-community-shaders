@@ -32,39 +32,32 @@ auto_load_on_boot = false
 load = false
 
 [features.ScreenSpaceGI.settings]
-# Master kill-switch. Ships disabled pending rollout.
-enabled = false
-
-# Experimental reconstructed ambient pass; known to regress distance fog. Restart required.
-inject_ambient_pass = false
+# Runtime toggle for the injected composition. The feature itself ships off above.
+enabled = true
 
 # XeGTAO quality.
 num_slices = 4
-num_steps = 16
-effect_radius = 256.0
-ao_power = 3.0
-bounce_strength = 2.0
-radiance_source_rt = 3
+num_steps = 8
 
-# Bounce delivery: 0 = telemetry only, 1 = shader injection, 2 = engine RT additive.
-bounce_delivery = 2
+# Sweep radii (game units). The larger radius drives the screen-space sweep.
+ao_radius = 256.0
+gi_radius = 256.0
+
+ao_power = 1.0
+bounce_strength = 1.0
 
 # Denoise.
 denoise_enabled = true
 denoise_radius = 2.0
 
+# Temporal reprojection of the indirect bounce.
+enable_temporal_denoiser = true
+depth_disocclusion = 0.1
+max_accum_frames = 16
+
 # Distance fade (game units).
 depth_fade_start = 40000.0
 depth_fade_end = 50000.0
-
-# AO integration mode: 1 = replace engine AO, 2 = min-blend with engine AO.
-mode = 2
-
-# Frozen blue-noise sequence for stable, flicker-free AO.
-noise_frozen = true
-
-# AO is integrated into engine render-target index 25. That index is confirmed only on
-# AE 1.11.221; OG 1.10.163 and NG 1.10.984 layouts must be validated before rollout.
 
 [features.WetnessEffects]
 load = false

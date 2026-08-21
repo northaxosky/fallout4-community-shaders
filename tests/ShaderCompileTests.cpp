@@ -103,6 +103,9 @@ namespace
 		std::string           preparationError;
 		SubstrateExpectation  substrateExpectation =
 			SubstrateExpectation::kNone;
+		bool                  validateXeGTAOCB = false;
+		std::vector<UINT>     requiredTextureSlots;
+		std::vector<UINT>     forbiddenTextureSlots;
 	};
 
 	struct ShaderCompileResult
@@ -123,7 +126,7 @@ namespace
 		return key;
 	}
 
-	void AddCompile(
+	ShaderCompileJob& AddCompile(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_path,
 		ShaderDefines a_defines,
@@ -152,6 +155,7 @@ namespace
 			.description = std::move(description),
 			.substrateExpectation = a_substrateExpectation
 		});
+		return a_jobs.back();
 	}
 
 	void AddPreparationFailure(
@@ -229,6 +233,104 @@ namespace
 		return {};
 	}
 
+	// Named lookup, so a permutation that drops an unused field still has to keep the layout.
+	std::string ValidateConstantBufferOffsets(
+		ID3D11ShaderReflection* a_reflection,
+		const char* a_name,
+		UINT a_bindPoint,
+		UINT a_size,
+		std::span<const ExpectedVariable> a_variables)
+	{
+		D3D11_SHADER_DESC shaderDesc{};
+		if (FAILED(a_reflection->GetDesc(&shaderDesc)))
+			return "constant buffer reflection description failed";
+
+		std::optional<D3D11_SHADER_INPUT_BIND_DESC> binding;
+		for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
+			D3D11_SHADER_INPUT_BIND_DESC candidate{};
+			if (SUCCEEDED(a_reflection->GetResourceBindingDesc(index, &candidate))
+				&& candidate.Type == D3D_SIT_CBUFFER
+				&& candidate.BindPoint == a_bindPoint) {
+				binding = candidate;
+				break;
+			}
+		}
+		if (!binding)
+			return std::string("missing reflected binding b")
+				+ std::to_string(a_bindPoint);
+
+		auto* buffer = a_reflection->GetConstantBufferByName(binding->Name);
+		D3D11_SHADER_BUFFER_DESC bufferDesc{};
+		if (!buffer || FAILED(buffer->GetDesc(&bufferDesc)))
+			return std::string("missing reflected cbuffer ") + a_name;
+		if (bufferDesc.Size != a_size) {
+			return std::string("unexpected reflected size ")
+				+ std::to_string(bufferDesc.Size) + " for " + a_name;
+		}
+
+		for (const auto& expected : a_variables) {
+			auto* variable = buffer->GetVariableByName(expected.name);
+			D3D11_SHADER_VARIABLE_DESC variableDesc{};
+			if (!variable || FAILED(variable->GetDesc(&variableDesc))) {
+				return std::string("missing reflected variable ")
+					+ a_name + "." + expected.name;
+			}
+			if (variableDesc.StartOffset != expected.offset
+				|| variableDesc.Size != expected.size) {
+				return std::string("unexpected reflected variable layout ")
+					+ a_name + "." + expected.name + " at "
+					+ std::to_string(variableDesc.StartOffset);
+			}
+		}
+		return {};
+	}
+
+	std::string ValidateXeGTAOConstantBuffer(ID3DBlob* a_blob)
+	{
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(
+				a_blob->GetBufferPointer(),
+				a_blob->GetBufferSize(),
+				__uuidof(ID3D11ShaderReflection),
+				reinterpret_cast<void**>(reflection.GetAddressOf())))) {
+			return "D3DReflect failed for the XeGTAO constant buffer witness";
+		}
+
+		constexpr std::array giVariables{
+			ExpectedVariable{ "NDCToViewMul", 0, 16 },
+			ExpectedVariable{ "NDCToViewAdd", 16, 16 },
+			ExpectedVariable{ "TexDim", 32, 8 },
+			ExpectedVariable{ "RcpTexDim", 40, 8 },
+			ExpectedVariable{ "FrameDim", 48, 8 },
+			ExpectedVariable{ "RcpFrameDim", 56, 8 },
+			ExpectedVariable{ "PrevFrameDim", 64, 8 },
+			ExpectedVariable{ "RcpPrevFrameDim", 72, 8 },
+			ExpectedVariable{ "FrameIndex", 80, 4 },
+			ExpectedVariable{ "NumSlices", 84, 4 },
+			ExpectedVariable{ "NumSteps", 88, 4 },
+			ExpectedVariable{ "MinScreenRadius", 92, 4 },
+			ExpectedVariable{ "AORadius", 96, 4 },
+			ExpectedVariable{ "EffectRadius", 100, 4 },
+			ExpectedVariable{ "Thickness", 104, 4 },
+			ExpectedVariable{ "GIRadius", 108, 4 },
+			ExpectedVariable{ "DepthFadeRange", 112, 8 },
+			ExpectedVariable{ "DepthFadeScaleConst", 120, 4 },
+			ExpectedVariable{ "BlurRadius", 124, 4 },
+			ExpectedVariable{ "DistanceNormalisation", 128, 4 },
+			ExpectedVariable{ "CenterBeta", 132, 4 },
+			ExpectedVariable{ "DepthDisocclusion", 136, 4 },
+			ExpectedVariable{ "MaxAccumFrames", 140, 4 },
+			ExpectedVariable{ "TemporalFlags", 144, 4 },
+			ExpectedVariable{ "RadianceScale", 160, 8 },
+			ExpectedVariable{ "PrevNDCToViewMul", 176, 8 },
+			ExpectedVariable{ "PrevNDCToViewAdd", 184, 8 },
+			ExpectedVariable{ "ViewToWorld", 192, 48 },
+			ExpectedVariable{ "PrevViewToWorld", 240, 48 }
+		};
+		return ValidateConstantBufferOffsets(
+			reflection.Get(), "XeGTAOCB", 0, 288, giVariables);
+	}
+
 	std::string ValidateSubstrateReflection(
 		ID3DBlob* a_blob,
 		SubstrateExpectation a_expectation)
@@ -291,6 +393,45 @@ namespace
 			featureVariables);
 	}
 
+	std::string ValidateTextureBindings(
+		ID3DBlob* a_blob,
+		const ShaderCompileJob& a_job)
+	{
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(
+				a_blob->GetBufferPointer(),
+				a_blob->GetBufferSize(),
+				__uuidof(ID3D11ShaderReflection),
+				reinterpret_cast<void**>(reflection.GetAddressOf())))) {
+			return "D3DReflect failed for the texture binding witness";
+		}
+
+		D3D11_SHADER_DESC shaderDesc{};
+		if (FAILED(reflection->GetDesc(&shaderDesc)))
+			return "texture binding reflection description failed";
+
+		std::set<UINT> boundTextures;
+		for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
+			D3D11_SHADER_INPUT_BIND_DESC binding{};
+			if (FAILED(reflection->GetResourceBindingDesc(index, &binding))
+				|| binding.Type != D3D_SIT_TEXTURE) {
+				continue;
+			}
+			for (UINT slot = 0; slot < std::max(binding.BindCount, 1u); ++slot)
+				boundTextures.insert(binding.BindPoint + slot);
+		}
+
+		for (const UINT slot : a_job.requiredTextureSlots) {
+			if (!boundTextures.contains(slot))
+				return "missing reflected texture t" + std::to_string(slot);
+		}
+		for (const UINT slot : a_job.forbiddenTextureSlots) {
+			if (boundTextures.contains(slot))
+				return "unexpected reflected texture t" + std::to_string(slot);
+		}
+		return {};
+	}
+
 	ShaderCompileResult Compile(const ShaderCompileJob& a_job)
 	{
 		if (!a_job.preparationError.empty())
@@ -317,6 +458,13 @@ namespace
 					blob.Get(),
 					a_job.substrateExpectation)
 			};
+		}
+		if (a_job.validateXeGTAOCB) {
+			return { ValidateXeGTAOConstantBuffer(blob.Get()) };
+		}
+		if (!a_job.requiredTextureSlots.empty()
+			|| !a_job.forbiddenTextureSlots.empty()) {
+			return { ValidateTextureBindings(blob.Get(), a_job) };
 		}
 		return {};
 	}
@@ -390,22 +538,34 @@ namespace
 		return 2;
 	}
 
+	constexpr std::size_t kScreenSpaceGIPermutations = 9;
+
 	std::size_t AddScreenSpaceGI(
 		std::vector<ShaderCompileJob>& a_jobs,
-		const std::filesystem::path& a_root)
-	{
+		const std::filesystem::path& a_root)	{
 		const auto firstJob = a_jobs.size();
-		const auto screenSpaceGiRoot = a_root / "ScreenSpaceGI";
-		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "decode.cs.hlsl", {});
-		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } });
-		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "gi.cs.hlsl", {});
-		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "denoise.cs.hlsl", {});
-		AddCompile(a_jobs, screenSpaceGiRoot / "XeGTAO" / "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } });
-		AddCompile(a_jobs, screenSpaceGiRoot / "ResolveCS.hlsl", {});
-		AddCompile(a_jobs, screenSpaceGiRoot / "BounceTelemetryCS.hlsl", {});
-		AddCompile(a_jobs, screenSpaceGiRoot / "BounceIntegrationPS.hlsl", {}, "vs_5_0", "VSMain");
-		AddCompile(a_jobs, screenSpaceGiRoot / "BounceIntegrationPS.hlsl", {}, "ps_5_0", "PSMain");
+		const auto screenSpaceGiRoot = a_root / "ScreenSpaceGI" / "XeGTAO";
+
+		// Decode owns DecodeCB; every other permutation must reflect one XeGTAOCB layout.
+		AddCompile(a_jobs, screenSpaceGiRoot / "decode.cs.hlsl", {});
+
+		const std::array<ShaderCase, 8> xegtaoCases{ {
+			{ "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } } },
+			{ "prefilterRadiance.cs.hlsl", {} },
+			{ "prefilterNormal.cs.hlsl", {} },
+			{ "radianceDisocc.cs.hlsl", {} },
+			{ "gi.cs.hlsl", {} },
+			{ "gi.cs.hlsl", { { "SSGI_BOUNCE", "1" } } },
+			{ "denoise.cs.hlsl", {} },
+			{ "denoise.cs.hlsl", { { "SSGI_BOUNCE", "1" } } }
+		} };
+		for (const auto& shaderCase : xegtaoCases) {
+			auto& job = AddCompile(
+				a_jobs,
+				screenSpaceGiRoot / shaderCase.path,
+				shaderCase.defines);
+			job.validateXeGTAOCB = true;
+		}
 		return a_jobs.size() - firstJob;
 	}
 
@@ -414,7 +574,9 @@ namespace
 		const std::filesystem::path& a_root,
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
 		const ShaderDefines& a_contributorDefines,
-		std::set<std::string>* a_uniqueInputs = nullptr)
+		std::set<std::string>* a_uniqueInputs = nullptr,
+		std::vector<UINT> a_requiredTextureSlots = {},
+		std::vector<UINT> a_forbiddenTextureSlots = {})
 	{
 		const auto* target =
 			cs::engine::GetShaderInjectionTarget(
@@ -466,13 +628,15 @@ namespace
 				compileTestRequest->profile.c_str(),
 				compileTestRequest->entryPoint.c_str()));
 		}
-		AddCompile(
+		auto& job = AddCompile(
 			a_jobs,
 			path,
 			std::move(defines),
 			compileTestRequest->profile.c_str(),
 			compileTestRequest->entryPoint.c_str(),
 			"registration " + a_registration.name);
+		job.requiredTextureSlots = std::move(a_requiredTextureSlots);
+		job.forbiddenTextureSlots = std::move(a_forbiddenTextureSlots);
 	}
 
 	struct LightingCounts
@@ -480,7 +644,47 @@ namespace
 		std::size_t registrationDerived = 0;
 		std::size_t uniqueRegistrationInputs = 0;
 		std::size_t explicitPermutations = 0;
+		std::size_t ambientCompositionRows = 0;
+		std::size_t ambientNonTargetRows = 0;
 	};
+
+	// The SSGI composition extends the existing plugin texture block.
+	constexpr std::array kCompositionTextureSlots{ 26u, 27u, 28u, 29u };
+	constexpr UINT kWetnessMaskTextureSlot = 25;
+
+	// only families that can isolate directional ambient carry the composition
+	constexpr std::array kAmbientCompositionFamilies{
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY"
+	};
+
+	// the wetness mask is declared by the two families that sample it
+	constexpr std::array kWetnessMaskFamilies{
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY"
+	};
+
+	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
+	constexpr std::size_t kExpectedAmbientNonTargetRows = 44;
+
+	bool DeclaresFamily(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
+		std::span<const char* const> a_families)
+	{
+		return std::ranges::any_of(
+			a_families,
+			[&a_registration](const char* a_family) {
+				return a_registration.compilation.defines.contains(a_family);
+			});
+	}
+
+	bool HasDefine(const ShaderDefines& a_defines, std::string_view a_name)
+	{
+		return std::ranges::any_of(
+			a_defines,
+			[a_name](const auto& a_define) { return a_define.first == a_name; });
+	}
 
 	LightingCounts AddLighting(
 		std::vector<ShaderCompileJob>& a_jobs,
@@ -587,6 +791,8 @@ namespace
 			}
 		} };
 		std::size_t contributorCompositionCount = 0;
+		std::size_t ambientCompositionRows = 0;
+		std::size_t ambientNonTargetRows = 0;
 		for (const auto& registration : registrations) {
 			const auto* compositions =
 				registration.targetId
@@ -604,16 +810,61 @@ namespace
 				}
 			}
 			if (registration.targetId
-				== cs::engine::ShaderInjectionTarget::kBsdfComposite) {
-				for (const auto& defines : ambientCompositions) {
-					AddRegistration(
-						a_jobs,
-						a_root,
-						registration,
-						defines);
-					++contributorCompositionCount;
-				}
+				!= cs::engine::ShaderInjectionTarget::kBsdfComposite) {
+				continue;
 			}
+
+			const bool pixelRow =
+				registration.stage == cs::engine::ShaderStage::kPixel;
+			const bool composesAmbient = pixelRow
+				&& DeclaresFamily(registration, kAmbientCompositionFamilies);
+			const bool declaresWetnessMask = pixelRow
+				&& DeclaresFamily(registration, kWetnessMaskFamilies);
+			if (pixelRow) {
+				if (composesAmbient)
+					++ambientCompositionRows;
+				else
+					++ambientNonTargetRows;
+			}
+
+			for (const auto& defines : ambientCompositions) {
+				const bool screenSpaceGi = HasDefine(defines, kScreenSpaceGi);
+				const bool wetnessEffects = HasDefine(defines, kWetnessEffects);
+				std::vector<UINT> required;
+				std::vector<UINT> forbidden;
+				if (pixelRow) {
+					auto& compositionSlots =
+						screenSpaceGi && composesAmbient ? required : forbidden;
+					compositionSlots.assign(
+						kCompositionTextureSlots.begin(),
+						kCompositionTextureSlots.end());
+					if (wetnessEffects && declaresWetnessMask)
+						required.push_back(kWetnessMaskTextureSlot);
+				}
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					defines,
+					nullptr,
+					std::move(required),
+					std::move(forbidden));
+				++contributorCompositionCount;
+			}
+		}
+		if (ambientCompositionRows != kExpectedAmbientCompositionRows
+			|| ambientNonTargetRows != kExpectedAmbientNonTargetRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfComposite ambient composition coverage",
+				"Expected "
+					+ std::to_string(kExpectedAmbientCompositionRows)
+					+ " composing and "
+					+ std::to_string(kExpectedAmbientNonTargetRows)
+					+ " non-target pixel rows, found "
+					+ std::to_string(ambientCompositionRows)
+					+ " and "
+					+ std::to_string(ambientNonTargetRows));
 		}
 		return {
 			.registrationDerived = registrations.size(),
@@ -622,7 +873,9 @@ namespace
 			.explicitPermutations =
 				featureCompositionCases.size()
 				+ explicitSourceCases.size()
-				+ contributorCompositionCount
+				+ contributorCompositionCount,
+			.ambientCompositionRows = ambientCompositionRows,
+			.ambientNonTargetRows = ambientNonTargetRows
 		};
 	}
 
@@ -717,6 +970,13 @@ int main(int argc, char** argv)
 	std::vector<ShaderCompileJob> jobs;
 	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[1]);
 	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
+	if (screenSpaceGiCount != kScreenSpaceGIPermutations) {
+		AddPreparationFailure(
+			jobs,
+			"ScreenSpaceGI permutation census",
+			"expected " + std::to_string(kScreenSpaceGIPermutations)
+				+ " permutations, prepared " + std::to_string(screenSpaceGiCount));
+	}
 	const auto lightingCounts = AddLighting(jobs, argv[1]);
 	const auto vertexCount = AddVertexPermutations(jobs, argv[1]);
 
@@ -731,6 +991,10 @@ int main(int argc, char** argv)
 		lightingCounts.registrationDerived,
 		lightingCounts.uniqueRegistrationInputs,
 		lightingCounts.explicitPermutations);
+	std::printf(
+		"ShaderCompile witnessed t26-t29 on %zu composing and %zu non-target kBsdfComposite pixel rows\n",
+		lightingCounts.ambientCompositionRows,
+		lightingCounts.ambientNonTargetRows);
 	std::printf(
 		"ShaderCompile checked %zu vertex permutations\n",
 		vertexCount);

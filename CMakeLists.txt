@@ -206,12 +206,8 @@ set_tests_properties(FeatureConfigSeeds PROPERTIES LABELS "configuration;package
 add_executable(FeatureStateTests
 	tests/FeatureStateTests.cpp
 	src/FeatureState.h
-	features/ScreenSpaceGI/src/ScreenSpaceGILifecycle.h
 )
 configure_host_test(FeatureStateTests)
-target_include_directories(FeatureStateTests PRIVATE
-	"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src"
-)
 
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
@@ -259,6 +255,16 @@ target_include_directories(FrustumEmbedTests PRIVATE "${CMAKE_SOURCE_DIR}/featur
 
 add_test(NAME FrustumEmbed COMMAND FrustumEmbedTests)
 set_tests_properties(FrustumEmbed PROPERTIES LABELS "render;unit")
+
+add_executable(ScreenSpaceGIHistoryTests
+	tests/ScreenSpaceGIHistoryTests.cpp
+	features/ScreenSpaceGI/src/ScreenSpaceGIHistory.h
+)
+configure_host_test(ScreenSpaceGIHistoryTests)
+target_include_directories(ScreenSpaceGIHistoryTests PRIVATE "${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src")
+
+add_test(NAME ScreenSpaceGIHistory COMMAND ScreenSpaceGIHistoryTests)
+set_tests_properties(ScreenSpaceGIHistory PROPERTIES LABELS "render;unit")
 
 add_executable(SharedDataDeclarationTests
 	tests/SharedDataDeclarationTests.cpp
@@ -476,6 +482,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		Microsoft::DirectXTK
 		Microsoft::DirectX-Headers
 		bcrypt.lib
+		d3d11.lib
+		d3dcompiler.lib
 		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog

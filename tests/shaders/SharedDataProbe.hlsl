@@ -28,8 +28,7 @@ float4 main() : SV_Target
 
 	value += BoolValue(
 		SharedData::screenSpaceGISettings.EnableScreenSpaceGI);
-	value += BoolValue(
-		SharedData::screenSpaceGISettings.EnableAmbientPass);
+	value += SharedData::screenSpaceGISettings.pad0;
 	value += SharedData::screenSpaceGISettings.AoPower;
 	value += SharedData::screenSpaceGISettings.BounceStrength;
 

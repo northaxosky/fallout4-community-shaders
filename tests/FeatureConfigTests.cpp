@@ -455,21 +455,76 @@ namespace
 		CHECK(ownership.config.targets.bsdfLight);
 		CHECK(ownership.config.targets.bsdfComposite);
 
-		for (const std::string_view key : { "ScreenSpaceGI", "WetnessEffects" }) {
-			const auto* settings =
-				(*features)[key]["settings"].as_table();
-			CHECK(settings != nullptr);
-			if (!settings) {
-				continue;
-			}
+		const auto* wetnessSettings =
+			(*features)["WetnessEffects"]["settings"].as_table();
+		CHECK(wetnessSettings != nullptr);
+		if (wetnessSettings) {
 			bool injectAmbientPass = true;
 			CHECK(
 				cs::feature_config::ReadBool(
-					*settings,
+					*wetnessSettings,
 					"inject_ambient_pass",
 					injectAmbientPass) ==
 				cs::feature_config::ScalarReadStatus::kValid);
 			CHECK(!injectAmbientPass);
+		}
+
+		const auto* giSettings =
+			(*features)["ScreenSpaceGI"]["settings"].as_table();
+		CHECK(giSettings != nullptr);
+		if (giSettings) {
+			bool giEnabled = false;
+			CHECK(
+				cs::feature_config::ReadBool(*giSettings, "enabled", giEnabled) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(giEnabled);
+
+			std::int64_t numSteps = 0;
+			CHECK(
+				cs::feature_config::ReadSignedInteger(
+					*giSettings, "num_steps", numSteps) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(numSteps == 8);
+
+			for (const std::string_view key : { "ao_radius", "gi_radius" }) {
+				float radius = 0.0F;
+				CHECK(
+					cs::feature_config::ReadFloat(*giSettings, key, radius) ==
+					cs::feature_config::ScalarReadStatus::kValid);
+				CHECK(radius == 256.0F);
+			}
+
+			bool temporalDenoiser = false;
+			CHECK(
+				cs::feature_config::ReadBool(
+					*giSettings, "enable_temporal_denoiser", temporalDenoiser) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(temporalDenoiser);
+
+			float depthDisocclusion = 0.0F;
+			CHECK(
+				cs::feature_config::ReadFloat(
+					*giSettings, "depth_disocclusion", depthDisocclusion, 0.0F, 0.2F) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(std::abs(depthDisocclusion - 0.1F) < 1e-6F);
+
+			std::int64_t maxAccumFrames = 0;
+			CHECK(
+				cs::feature_config::ReadSignedInteger(
+					*giSettings, "max_accum_frames", maxAccumFrames, 1, 255) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(maxAccumFrames == 16);
+
+			// legacy delivery keys must not linger in the shipped seed
+			for (const std::string_view key : {
+					 "inject_ambient_pass",
+					 "mode",
+					 "effect_radius",
+					 "radiance_source_rt",
+					 "bounce_delivery",
+					 "noise_frozen" }) {
+				CHECK(giSettings->get(key) == nullptr);
+			}
 		}
 	}
 }

@@ -16,7 +16,7 @@ namespace cs
 	struct alignas(16) ScreenSpaceGIFeatureData
 	{
 		std::uint32_t EnableScreenSpaceGI = 0;
-		std::uint32_t EnableAmbientPass = 0;
+		std::uint32_t pad0 = 0;
 		float         AoPower = 0.0f;
 		float         BounceStrength = 0.0f;
 	};

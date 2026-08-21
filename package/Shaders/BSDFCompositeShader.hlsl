@@ -1,5 +1,9 @@
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
 
+#ifdef SSGI
+#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
+#endif
+
 #ifndef AMBIENT_DIFFUSE_SET_B
 #define AMBIENT_DIFFUSE_SET_B 1
 #endif
@@ -70,9 +74,6 @@ Texture2D<float> g_tWetnessMask : register(t25);
 Texture2D<float4> g_tLitScene : register(t14);
 #if AMBIENT_SUBSURFACE_BLUR
 Texture2D<float4> g_tBlurDepthRef : register(t15);
-#endif
-#ifdef SSGI
-Texture2D<float4> g_tSSGIBounce : register(t26);
 #endif
 SamplerState g_sGbufferNormal      : register(s1);
 SamplerState g_sGbufferMaterial    : register(s2);
@@ -294,9 +295,15 @@ PS_OUTPUT main(PS_INPUT input)
     const float aoFactor = 1.0;
 #endif
 #ifdef SSGI
-    int3 ssgiPx = int3(int2(input.position.xy), 0);
-    float3 giBounce = g_tSSGIBounce.Load(ssgiPx).rgb;
-    output.color.xyz = modulated * aoFactor + giBounce;
+    float3 ssgiViewNormal = ScreenSpaceGI::DecodeViewNormal(
+        g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
+    output.color.xyz = ScreenSpaceGI::ComposeAmbient(
+        input.position.xy,
+        ssgiViewNormal,
+        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+        spec * ambientPairSum,
+        ambientAccum,
+        aoFactor);
 #else
     output.color.xyz = modulated * aoFactor;
 #endif
@@ -306,6 +313,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY
+
+#ifdef SSGI
+#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
+#endif
 
 #ifndef FO4_AMBIENT_OCCLUSION
 #define FO4_AMBIENT_OCCLUSION 1
@@ -386,10 +397,6 @@ Texture2D<float> g_tWetnessMask : register(t25);
 Texture2D<float4> g_tLitScene            : register(t14);
 #if FO4_SKIN_BLUR
 Texture2D<float4> g_tBlurDepthRef        : register(t15);
-#endif
-
-#ifdef SSGI
-Texture2D<float4> g_tSSGIBounce : register(t26);
 #endif
 
 SamplerState g_sGbufferNormal      : register(s1);
@@ -680,23 +687,50 @@ PS_OUTPUT main(PS_INPUT input)
 
     float3 wetFilmIblLitBlend = lerp(
         wetFilmIblColor, litScene.xyz * LitSceneWeight.x, litAlpha);
+#ifdef SSGI
+    float3 directComponent =
+        glossSquaredScaled * glossFactor * iblLitBlend * ambientPair *
+            (1.0 - wetnessF) +
+        wetnessF * wetFilmIblLitBlend * ambientPair;
+    float3 ambientComponent = ambientAccum * (1.0 - wetnessF);
+#else
     float3 modulated =
         (ambientAccum +
          glossSquaredScaled * glossFactor * iblLitBlend * ambientPair) *
             (1.0 - wetnessF) +
         wetnessF * wetFilmIblLitBlend * ambientPair;
+#endif
+#else
+#ifdef SSGI
+    float3 directComponent =
+        glossFactor * iblLitBlend * glossSquaredScaled * ambientPair;
+    float3 ambientComponent = ambientAccum;
 #else
     float3 modulated =
         ambientAccum + glossFactor * iblLitBlend * glossSquaredScaled * ambientPair;
 #endif
+#endif
 #if FO4_AMBIENT_OCCLUSION
     float ao = g_tSsao.Sample(g_sSsao, litSceneUv).x;
-    float3 aoColor = modulated * ao;
 #else
-    float3 aoColor = modulated;
+    const float ao = 1.0;
 #endif
 #ifdef SSGI
-    aoColor += g_tSSGIBounce.Load(int3(int2(input.position.xy), 0)).rgb;
+#ifdef WETNESS_EFFECTS
+    float3 ssgiViewNormal = normalView;
+#else
+    float3 ssgiViewNormal = ScreenSpaceGI::DecodeViewNormal(
+        g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
+#endif
+    float3 aoColor = ScreenSpaceGI::ComposeAmbient(
+        input.position.xy,
+        ssgiViewNormal,
+        float3x3(ViewToWorld_row0.xyz, ViewToWorld_row1.xyz, ViewToWorld_row2.xyz),
+        directComponent,
+        ambientComponent,
+        ao);
+#else
+    float3 aoColor = modulated * ao;
 #endif
 
     float fogPlaneDistance =
@@ -772,6 +806,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY
+
+#ifdef SSGI
+#include "ScreenSpaceGI/ScreenSpaceGI.hlsli"
+#endif
 
 #ifndef TILELIGHT
 #define TILELIGHT 0
@@ -895,11 +933,26 @@ float3 sampleDirectLighting(float2 coordinate)
 }
 
 float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFactor,
-                      float gloss, float3 environment, float3 centerColor)
+                      float gloss, float3 environment, float3 centerColor
+#ifdef SSGI
+                      , float2 screenPosition, float3 viewNormal
+#endif
+                      )
 {
+#ifdef SSGI
+    // this family carries no engine ambient-occlusion texture
+    float3 color = ScreenSpaceGI::ComposeAmbient(
+        screenPosition,
+        viewNormal,
+        float3x3(ambientFrame[12].xyz, ambientFrame[13].xyz, ambientFrame[14].xyz),
+        environment * glossFactor * gloss * directLighting,
+        centerColor,
+        1.0);
+#else
     float3 color = environment * glossFactor;
     color *= gloss;
     color = color * directLighting + centerColor;
+#endif
 #if OUTPUTMASK
     color *= outputMaskTexture.Sample(outputMaskSampler, min(coordinate, screenSetup[5].xy)).x;
 #endif
@@ -909,6 +962,11 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 float4 main(float4 position : SV_POSITION) : SV_Target0
 {
     float2 coordinate = position.xy * screenSetup[0].xy;
+#ifdef SSGI
+    // the composition needs the view normal outside the environment branch
+    float3 viewNormal = ScreenSpaceGI::DecodeViewNormal(
+        normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy);
+#endif
     float3 surface = surfaceTexture.SampleLevel(surfaceSampler, coordinate, 0.0).xyw;
 #if !FOGSTACK
 
@@ -959,19 +1017,17 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float3 environment = 0.0;
     if (material.x > 0.0019607844296842813)
     {
-#if !FOGSTACK
-
-        float2 encodedNormal = normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy * 4.0 - 2.0;
-        float normalLengthSquared = dot(encodedNormal, encodedNormal);
-        float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
-        float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
-
-        float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
+#ifdef SSGI
+        float3 normal = viewNormal;
 #else
         float2 encodedNormal = normalTexture.SampleLevel(normalSampler, coordinate, 0.0).xy * 4.0 - 2.0;
         float normalLengthSquared = dot(encodedNormal, encodedNormal);
         float2 normalFactors = 1.0 - normalLengthSquared * float2(0.25, 0.5);
         float3 normal = float3(encodedNormal * sqrt(normalFactors.x), -normalFactors.y);
+#endif
+#if !FOGSTACK
+
+        float3 viewPosition = reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
 #endif
 
         float3 reflected = reflect(normalize(-viewPosition), normal);
@@ -1048,7 +1104,11 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     }
 
 #if !FOGSTACK
-    return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor), 1.0);
+    return float4(composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
+#ifdef SSGI
+        , position.xy, viewNormal
+#endif
+        ), 1.0);
 #else
     float4 output;
     if (!(materialMatches.y || materialMatches.z))
@@ -1058,7 +1118,11 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float roughFactor = min(1.0 / rsqrt(saturate(surface.x - 0.3)), 1.0);
         glossFactor *= roughFactor;
         float gloss = material.y * material.y * 50.0;
-        float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor);
+        float3 color = composeAmbient(coordinate, directLighting, glossFactor, gloss, environment, centerColor
+#ifdef SSGI
+            , position.xy, viewNormal
+#endif
+            );
 
         float height = dot(ambientFrame[14], float4(viewPosition, 1.0)) + ambientFrame[35].z;
         float distanceSquared = dot(viewPosition, viewPosition);

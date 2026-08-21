@@ -52,7 +52,7 @@ namespace cs::render
 			float                        timer = 0.0f;
 			bool                         updateInstalled = false;
 			bool                         updateInstallFailed = false;
-			bool                         pixelBindingsSaved = false;
+			std::uint32_t                pixelBindingDepth = 0;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -160,8 +160,14 @@ namespace cs::render
 		void SavePixelBindings() noexcept
 		{
 			auto& state = GetSubstrateState();
-			if (state.pixelBindingsSaved)
+			if (state.pixelBindingDepth != 0) {
+				++state.pixelBindingDepth;
+				CS_LOG_ONCE(
+					L,
+					spdlog::level::err,
+					"Shared substrate pixel-binding scopes overlap; preserving the active snapshot.");
 				return;
+			}
 			auto* context = GetImmediateContext();
 			if (!context || !IsSharedDataReady())
 				return;
@@ -172,14 +178,18 @@ namespace cs::render
 			context->PSGetConstantBuffers(kSharedDataSlot, 2, buffers);
 			for (std::size_t index = 0; index < state.savedPixelBuffers.size(); ++index)
 				state.savedPixelBuffers[index].attach(buffers[index]);
-			state.pixelBindingsSaved = true;
+			state.pixelBindingDepth = 1;
 		}
 
 		void RestorePixelBindings() noexcept
 		{
 			auto& state = GetSubstrateState();
-			if (!state.pixelBindingsSaved)
+			if (state.pixelBindingDepth == 0)
 				return;
+			if (state.pixelBindingDepth > 1) {
+				--state.pixelBindingDepth;
+				return;
+			}
 
 			if (auto* context = GetImmediateContext()) {
 				ID3D11Buffer* buffers[2] = {
@@ -190,7 +200,7 @@ namespace cs::render
 			}
 			for (auto& buffer : state.savedPixelBuffers)
 				buffer = nullptr;
-			state.pixelBindingsSaved = false;
+			state.pixelBindingDepth = 0;
 		}
 
 		void UpdateSharedData() noexcept
@@ -325,12 +335,18 @@ namespace cs::render
 		engine::RegisterPreDeferredLightsImpl(
 			[] { SavePixelBindings(); },
 			engine::HookPriority::Early);
-		// FO4 shadow-caches state; it won't reissue what we clobber
 		engine::RegisterPostDeferredLightsImpl(
 			[] { RestorePixelBindings(); },
 			engine::HookPriority::Late);
+		engine::RegisterPreDeferredComposite(
+			[] { SavePixelBindings(); },
+			engine::HookPriority::Early);
+		// FO4 shadow-caches state; it won't reissue clobbered bindings.
+		engine::RegisterPostDeferredComposite(
+			[] { RestorePixelBindings(); },
+			engine::HookPriority::Late);
 		state.updateInstalled = true;
-		L->info("Shared substrate update and deferred-light binding scope registered.");
+		L->info("Shared substrate update and deferred binding scopes registered.");
 	}
 
 	void BindSharedData(ID3D11DeviceContext* a_context) noexcept
