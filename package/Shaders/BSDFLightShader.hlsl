@@ -1,3 +1,7 @@
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+#include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
+#endif
+
 #ifdef BSDFLIGHT_PS_DEFERRED
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -662,11 +666,6 @@ SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth      : register(s3);
 SamplerComparisonState g_sCascadeShadowCmp : register(s5);
 
-#ifdef SCREEN_SPACE_SHADOWS
-
-#include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
-#endif
-
 #ifdef WETNESS_EFFECTS
 Texture2D<float> g_tWetnessMask : register(t25);
 #endif
@@ -847,11 +846,6 @@ PS_OUTPUT main(PS_INPUT input)
     float dist4      = dist2 * dist2;
     float fadeFactor = 1.0 - dist4 * dist4;
     shadowPcf = fadeFactor * (shadowPcf - 1.0) + 1.0;
-
-#ifdef SCREEN_SPACE_SHADOWS
-
-    shadowPcf *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
-#endif
 
     float3 albedoPremult = albedoSample.w * albedoSample.xyz;
     float  NdotL_raw     = dot(normalView, SunDirection_and_padding.xyz);
@@ -3826,6 +3820,10 @@ PS_OUTPUT main(PS_INPUT input)
     float fadeFactor = 1.0 - dist4 * dist4;
     shadow = fadeFactor * (shadow - 1.0) + 1.0;
 
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+
     float3 albedoPremult  = albedoSample.xyz * albedoSample.w;
     float  NdotL_raw      = dot(normalView, SunDirection.xyz);
     float  NdotL_pos      = max(NdotL_raw, 0.0);
@@ -5088,6 +5086,11 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     float3 albedoPremult  = albedoSample.w * albedoSample.xyz;
 #endif
+
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+
     float  NdotL_raw      = dot(normalView, SunDirection.xyz);
     float  NdotL_pos      = max(NdotL_raw, 0.0);
     float  NdotL_clamped  = min(NdotL_pos, 1.0);
@@ -6578,6 +6581,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
     float shadow = ComputeDirectionalShadow(posView, linearizedDepth);
+
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+    shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
 
 #ifdef FO4_DS3_REASSOC_ORDER
     float3 albedoPremult  = albedoSample.xyz * albedoSample.w;
@@ -8187,6 +8194,10 @@ PS_OUTPUT main(PS_INPUT input)
 
     float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+    result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+
     output.diffuse = result.zzzz;
     output.specular = float4(result.xyz, 1.0);
     return output;
@@ -8944,11 +8955,19 @@ PS_OUTPUT main(PS_INPUT input)
 #ifndef AMBIENT
     float3 result = fadeFactor * (shadow - 1.0) + 1.0;
 
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+    result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+
     output.diffuse = result.zzzz;
     output.specular = float4(result.xyz, 1.0);
 #else
     float shadowBlend = fadeFactor * (shadow - 1.0);
     float splitShadow = shadowBlend + 1.0;
+
+#if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
+    splitShadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
 
     float3 ambientSpecular;
     [branch]
