@@ -378,4 +378,37 @@ namespace cs
 			a_feature.OnD3D11Ready(a_adapter, a_device);
 		});
 	}
+
+	void FeatureManager::ValidateShaderInjectionsAll()
+	{
+		for (auto* feature : _loadedFeatures) {
+			if (!feature
+				|| !PrepareRuntimeCallback(*feature, "ValidateShaderInjections")) {
+				continue;
+			}
+
+			std::string reason;
+			bool valid = false;
+			try {
+				valid = feature->ValidateShaderInjections(reason);
+			} catch (const std::exception& e) {
+				reason = e.what();
+			} catch (...) {
+				reason = "non-standard exception";
+			}
+			if (valid) {
+				continue;
+			}
+
+			if (reason.empty()) {
+				reason = "shader injection validation failed";
+			}
+			L->error(
+				"Feature {} failed shader-injection validation: {}",
+				feature->GetName(),
+				reason);
+			feature->SetRuntimeState(FeatureRuntimeState::kFailed, std::move(reason));
+		}
+		FinishRuntimeCallbackPass();
+	}
 }

@@ -54,6 +54,18 @@ Upstream Common shaders use `t17` and `t20`; `t18`-`t23` remain reserved
 headroom. Plugin feature textures begin at `t24`: ScreenSpaceShadows uses
 `t24`, WetnessEffects uses `t25`, and ScreenSpaceGI uses `t26`-`t29`.
 
+A slot claim is admitted once, at registration: the injection service keeps a
+per-target ledger of claimed slots and contributed define values, and
+`RegisterReplacement` rejects a substrate reservation, a second claim on the
+same slot, or a conflicting define before it commits the registration. First
+claimant wins in feature-registration order. The freeze pass repeats those
+checks only as an invariant screen; a contributor that trips one there is
+dropped and the target records a collision.
+
+A contribution that carries a bind callback also needs the deferred draw
+anchor. `RegisterReplacement` installs and verifies that anchor before it
+commits, so a rejected anchor leaves no registration and no claim behind.
+
 ## Feature composition headers
 
 A feature that composes into a reconstruction owns the HLSL for it. The header
@@ -77,6 +89,37 @@ injection contribution binds in a single call on every injected draw:
 `SharedData::screenSpaceGISettings.EnableScreenSpaceGI` gates the composition at
 runtime; at zero every targeted row keeps the stock engine ambient-occlusion
 path, so the injected variant is safe to leave installed.
+
+`WetnessEffects/WetnessEffects.hlsli` is included by `BSDFLightShader.hlsl` and
+`BSDFCompositeShader.hlsl` under `WETNESS_EFFECTS`. It owns the rain-facing
+wetness scalar, the wet-albedo transform, the per-light GGX water-film coat and
+the environment-BRDF film weight. `SharedData::wetnessEffectsSettings.Wetness`
+gates all of it: at zero every helper returns its input unchanged, so an
+injected variant is output-equivalent to the dry path at runtime.
+
+Only the composite consumer declares a resource. The seven composite families
+that participate define `WETNESS_COMPOSITE_CONSUMER` before the include, which
+declares `Texture2D<float4> GbufferNormal : register(t25)`; BSDFLight includes
+the same header without that define and binds no texture. The feature rebinds
+`RenderTarget::kGbufferNormal` at `t25` on every injected composite draw,
+because `kGbufferNormalSwap` can move the authoritative target, and binds null
+explicitly when it cannot resolve one. A null or otherwise out-of-domain load
+fails the encode-domain guard and yields wetness identity for that draw.
+
+Wetness routes by role, not by material ID:
+
+| Target rows | Wetness behavior |
+|---|---|
+| 146 analytical BSDFLight rows | per-light Fresnel attenuation plus one water-film GGX lobe |
+| 3 in-family `ATTENUATION_ONLY` rows | untouched; they carry transport, not shaded material |
+| 30 composite rows with a base multiply | wet albedo before the base multiply |
+| 40 composite rows with a native reflection lobe | `K * lerp(Ldry, Lwet, Fenv) * P` inside that lobe |
+| 26 SSGI composition rows | the same wet albedo on SSGI's own `t29` albedo |
+
+BSDFLight rows read world-up from `SharedData::WorldUpView` (b5, offset 112);
+every composite family uses its own native view-to-world row 2 instead. The
+feature's telemetry publishes the b5 value per frame as `world_up_view_*` so a
+capture can compare it against the native row for the same frame.
 
 ## Deferred radiance source
 

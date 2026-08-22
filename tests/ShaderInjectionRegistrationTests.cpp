@@ -24,6 +24,7 @@
 namespace
 {
 	std::uint32_t g_preDrawInstallRequests = 0;
+	bool g_preDrawInstallFails = false;
 	std::uint32_t g_sharedDataInstallRequests = 0;
 	std::uint32_t g_bsdfCompositeBindDispatches = 0;
 
@@ -229,9 +230,10 @@ namespace cs::engine
 		return true;
 	}
 
-	void EnsurePreSunLightDrawInstalled()
+	bool EnsurePreSunLightDrawInstalled()
 	{
 		++g_preDrawInstallRequests;
+		return !g_preDrawInstallFails;
 	}
 }
 
@@ -838,6 +840,100 @@ namespace
 		return ok;
 	}
 
+	// slot and define claims must be admitted or rejected at registration time
+	bool TestClaimLedger()
+	{
+		constexpr std::uint32_t kNormalSlot = 25;
+		const auto claim = [](std::uint32_t a_slot) {
+			return ShaderSlotClaim{
+				.stage = ShaderStage::kPixel,
+				.resourceType = ShaderResourceType::kShaderResource,
+				.slot = a_slot
+			};
+		};
+
+		ShaderReplacementRegistration notReadyClaimant;
+		notReadyClaimant.targetId = ShaderInjectionTarget::kBsdfComposite;
+		notReadyClaimant.contributor = "ledger-not-ready-claimant";
+		notReadyClaimant.defines = { { "LEDGER_TEST", "1" } };
+		notReadyClaimant.isReady = [] { return false; };
+		notReadyClaimant.slotClaims = { claim(kNormalSlot) };
+		bool ok = Check(
+			RegisterReplacement(std::move(notReadyClaimant)),
+			"first t25 claimant was rejected");
+
+		ShaderReplacementRegistration secondClaimant;
+		secondClaimant.targetId = ShaderInjectionTarget::kBsdfComposite;
+		secondClaimant.contributor = "ledger-second-claimant";
+		secondClaimant.slotClaims = { claim(kNormalSlot) };
+		ok &= Check(
+			!RegisterReplacement(std::move(secondClaimant)),
+			"a second t25 claim on kBsdfComposite was accepted");
+
+		ShaderReplacementRegistration otherTargetClaimant;
+		otherTargetClaimant.targetId = ShaderInjectionTarget::kBsdfLight;
+		otherTargetClaimant.contributor = "ledger-other-target-claimant";
+		otherTargetClaimant.slotClaims = { claim(kNormalSlot) };
+		ok &= Check(
+			RegisterReplacement(std::move(otherTargetClaimant)),
+			"the same slot on another target was rejected");
+
+		ShaderReplacementRegistration conflictingDefine;
+		conflictingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
+		conflictingDefine.contributor = "ledger-conflicting-define";
+		conflictingDefine.defines = { { "LEDGER_TEST", "2" } };
+		ok &= Check(
+			!RegisterReplacement(std::move(conflictingDefine)),
+			"a conflicting define value was accepted");
+
+		ShaderReplacementRegistration agreeingDefine;
+		agreeingDefine.targetId = ShaderInjectionTarget::kBsdfComposite;
+		agreeingDefine.contributor = "ledger-agreeing-define";
+		agreeingDefine.defines = { { "LEDGER_TEST", "1" } };
+		ok &= Check(
+			RegisterReplacement(std::move(agreeingDefine)),
+			"an agreeing define value was rejected");
+
+		for (const auto slot :
+			{ cs::render::kSharedDataSlot, cs::render::kFeatureDataSlot }) {
+			ShaderReplacementRegistration substrateClaimant;
+			substrateClaimant.targetId = ShaderInjectionTarget::kBsdfComposite;
+			substrateClaimant.contributor = "ledger-substrate-claimant";
+			substrateClaimant.slotClaims = { {
+				.stage = ShaderStage::kPixel,
+				.resourceType = ShaderResourceType::kConstantBuffer,
+				.slot = slot
+			} };
+			ok &= Check(
+				!RegisterReplacement(std::move(substrateClaimant)),
+				"a substrate constant-buffer claim was accepted");
+		}
+
+		// a rejected draw anchor must leave no registration, slot or define behind
+		constexpr std::uint32_t kAnchorSlot = 31;
+		g_preDrawInstallFails = true;
+		ShaderReplacementRegistration rejectedAnchor;
+		rejectedAnchor.targetId = ShaderInjectionTarget::kBsdfComposite;
+		rejectedAnchor.contributor = "ledger-rejected-anchor";
+		rejectedAnchor.defines = { { "LEDGER_ANCHOR", "1" } };
+		rejectedAnchor.bind = [](ID3D11DeviceContext*) {};
+		rejectedAnchor.slotClaims = { claim(kAnchorSlot) };
+		ok &= Check(
+			!RegisterReplacement(std::move(rejectedAnchor)),
+			"a registration whose draw anchor failed was accepted");
+		g_preDrawInstallFails = false;
+
+		ShaderReplacementRegistration anchorSlotReuse;
+		anchorSlotReuse.targetId = ShaderInjectionTarget::kBsdfComposite;
+		anchorSlotReuse.contributor = "ledger-anchor-slot-reuse";
+		anchorSlotReuse.defines = { { "LEDGER_ANCHOR", "2" } };
+		anchorSlotReuse.slotClaims = { claim(kAnchorSlot) };
+		ok &= Check(
+			RegisterReplacement(std::move(anchorSlotReuse)),
+			"a rejected anchor left its slot or define claim committed");
+		return ok;
+	}
+
 	bool TestBoundShaderInjectionDispatch(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context)
@@ -1113,6 +1209,8 @@ int main(int a_argc, char* a_argv[])
 	ok &= Check(
 		g_preDrawInstallRequests == 1,
 		"registration with a bind did not install the pre-draw hook");
+
+	ok &= TestClaimLedger();
 
 	constexpr auto baseSha =
 		"1111111111111111111111111111111111111111";

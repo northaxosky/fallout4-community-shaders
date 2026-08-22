@@ -459,14 +459,36 @@ namespace
 			(*features)["WetnessEffects"]["settings"].as_table();
 		CHECK(wetnessSettings != nullptr);
 		if (wetnessSettings) {
-			bool injectAmbientPass = true;
+			bool wetnessEnabled = false;
 			CHECK(
 				cs::feature_config::ReadBool(
-					*wetnessSettings,
-					"inject_ambient_pass",
-					injectAmbientPass) ==
+					*wetnessSettings, "enabled", wetnessEnabled) ==
 				cs::feature_config::ScalarReadStatus::kValid);
-			CHECK(!injectAmbientPass);
+			CHECK(wetnessEnabled);
+
+			float maxRainWetness = 0.0F;
+			CHECK(
+				cs::feature_config::ReadFloat(
+					*wetnessSettings,
+					"max_rain_wetness",
+					maxRainWetness,
+					0.0F,
+					2.5F) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(maxRainWetness == 1.0F);
+
+			float minRainWetness = 0.0F;
+			CHECK(
+				cs::feature_config::ReadFloat(
+					*wetnessSettings,
+					"min_rain_wetness",
+					minRainWetness,
+					0.0F,
+					0.9F) ==
+				cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(minRainWetness == 0.65F);
+
+			CHECK(wetnessSettings->size() == 3);
 		}
 
 		const auto* giSettings =

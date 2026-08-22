@@ -36,8 +36,9 @@ namespace cs::render
 			float             DeltaTime = 0.0f;
 			std::uint32_t     FrameCount = 0;
 			std::uint32_t     InInterior = 0;
+			DirectX::XMFLOAT4 WorldUpView{};
 		};
-		static_assert(sizeof(SharedDataCB) == 112);
+		static_assert(sizeof(SharedDataCB) == 128);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
 		struct SubstrateState
@@ -46,6 +47,7 @@ namespace cs::render
 			winrt::com_ptr<ID3D11Buffer> featureDataCB;
 			std::atomic_bool             ready{ false };
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
+			std::array<std::atomic<float>, 4> publishedWorldUpView{};
 			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
 				savedPixelBuffers;
 			// Render thread only.
@@ -72,7 +74,10 @@ namespace cs::render
 			return timer ? timer->realTimeDelta : 0.0f;
 		}
 
-		SharedDataCB BuildSharedData(float a_deltaTime, float a_timer)
+		SharedDataCB BuildSharedData(
+			float a_deltaTime,
+			float a_timer,
+			const RE::NiCamera* a_sceneCamera)
 		{
 			SharedDataCB data{};
 			data.DeltaTime = a_deltaTime;
@@ -96,16 +101,16 @@ namespace cs::render
 				};
 			}
 
-			if (auto* sceneCamera = RE::Main::WorldRootCamera()) {
+			if (a_sceneCamera) {
 				DirectX::XMFLOAT4X4 projection;
 				DirectX::XMFLOAT4X4 inverseProjection;
 				DirectX::XMFLOAT4   ndcToViewMul;
 				DirectX::XMFLOAT4   ndcToViewAdd;
 				// structured binding avoids legacy near/far macros
 				const auto& [left, right, top, bottom, nearZ, farZ, ortho] =
-					sceneCamera->viewFrustum;
+					a_sceneCamera->viewFrustum;
 				if (RE::BuildPerspectiveFromFrustum(
-						sceneCamera->viewFrustum,
+						a_sceneCamera->viewFrustum,
 						projection,
 						inverseProjection,
 						ndcToViewMul,
@@ -114,6 +119,14 @@ namespace cs::render
 					data.NDCToViewMul = ndcToViewMul;
 					data.NDCToViewAdd = ndcToViewAdd;
 				}
+				// third column of the camera rotation, absorbing the Ni-to-D3D swizzle
+				const auto& rotate = a_sceneCamera->world.rotate;
+				data.WorldUpView = {
+					rotate.entry[2].z,
+					rotate.entry[1].z,
+					rotate.entry[0].z,
+					1.0f
+				};
 			}
 
 			float sunX = 0.0f;
@@ -214,6 +227,7 @@ namespace cs::render
 			auto* context = rendererData
 				? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context)
 				: nullptr;
+			auto* sceneCamera = engine::GetWorldRootCamera();
 			if (!graphicsState || !context)
 				return;
 
@@ -224,7 +238,8 @@ namespace cs::render
 			try {
 				const auto delta = GetRealTimeDelta();
 				const auto nextTimer = state.timer + delta;
-				const auto sharedData = BuildSharedData(delta, nextTimer);
+				const auto sharedData =
+					BuildSharedData(delta, nextTimer, sceneCamera);
 				const auto featureData = GetFeatureBufferData();
 				if (!WriteConstantBuffer(
 						context,
@@ -245,6 +260,15 @@ namespace cs::render
 				}
 				state.timer = nextTimer;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
+				// published for drift checks against the native view-to-world row 2
+				state.publishedWorldUpView[0].store(
+					sharedData.WorldUpView.x, std::memory_order_relaxed);
+				state.publishedWorldUpView[1].store(
+					sharedData.WorldUpView.y, std::memory_order_relaxed);
+				state.publishedWorldUpView[2].store(
+					sharedData.WorldUpView.z, std::memory_order_relaxed);
+				state.publishedWorldUpView[3].store(
+					sharedData.WorldUpView.w, std::memory_order_relaxed);
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,
@@ -319,6 +343,17 @@ namespace cs::render
 			&& state.ready.load(std::memory_order_acquire);
 	}
 
+	std::array<float, 4> GetPublishedWorldUpView() noexcept
+	{
+		const auto& state = GetSubstrateState();
+		return {
+			state.publishedWorldUpView[0].load(std::memory_order_relaxed),
+			state.publishedWorldUpView[1].load(std::memory_order_relaxed),
+			state.publishedWorldUpView[2].load(std::memory_order_relaxed),
+			state.publishedWorldUpView[3].load(std::memory_order_relaxed)
+		};
+	}
+
 	void EnsureSharedDataUpdateInstalled()
 	{
 		auto& state = GetSubstrateState();
@@ -338,13 +373,20 @@ namespace cs::render
 		engine::RegisterPostDeferredLightsImpl(
 			[] { RestorePixelBindings(); },
 			engine::HookPriority::Late);
-		engine::RegisterPreDeferredComposite(
-			[] { SavePixelBindings(); },
-			engine::HookPriority::Early);
 		// FO4 shadow-caches state; it won't reissue clobbered bindings.
-		engine::RegisterPostDeferredComposite(
-			[] { RestorePixelBindings(); },
-			engine::HookPriority::Late);
+		const bool compositeScopeInstalled =
+			engine::RegisterPreDeferredComposite(
+				[] { SavePixelBindings(); },
+				engine::HookPriority::Early)
+			&& engine::RegisterPostDeferredComposite(
+				[] { RestorePixelBindings(); },
+				engine::HookPriority::Late);
+		if (!compositeScopeInstalled) {
+			state.updateInstallFailed = true;
+			state.ready.store(false, std::memory_order_release);
+			L->error("Shared substrate composite binding scope registration failed.");
+			return;
+		}
 		state.updateInstalled = true;
 		L->info("Shared substrate update and deferred binding scopes registered.");
 	}
@@ -354,6 +396,19 @@ namespace cs::render
 		auto& state = GetSubstrateState();
 		if (!a_context || !IsSharedDataReady())
 			return;
+
+		if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
+			UpdateSharedData();
+			if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
+				const auto* graphicsState = engine::GetGraphicsState();
+				const auto frame = graphicsState ? graphicsState->frameCount : UINT32_MAX;
+				CS_LOG_ONCE(
+					L,
+					spdlog::level::err,
+					"Shared substrate first bind has no published frame data at frame {}; binding the zero seed.",
+					frame);
+			}
+		}
 
 		ID3D11Buffer* buffers[2] = {
 			state.sharedDataCB.get(),

@@ -180,6 +180,7 @@ namespace cs::engine
 			std::atomic<bool>          requested{ false };
 			std::atomic<bool>          compileAttempted{ false };
 			std::atomic<bool>          compileOk{ false };
+			std::atomic<bool>          compileComplete{ false };
 			std::atomic<bool>          swappable{ false };
 			std::atomic<bool>          slotCollision{ false };
 			std::atomic<std::uint8_t>  requestReasons{ 0 };
@@ -239,6 +240,14 @@ namespace cs::engine
 			std::vector<PixelShaderSwapVariantKey> variantKeys;
 		};
 
+		// first claimant wins, in feature-registration order
+		struct TargetClaimLedger
+		{
+			std::vector<ShaderSlotClaim> slots;
+			std::array<ShaderInjectionDefines,
+				static_cast<std::size_t>(ShaderStage::kCount)> defines;
+		};
+
 		struct Service
 		{
 			std::mutex mutex;
@@ -251,6 +260,8 @@ namespace cs::engine
 			std::array<DeveloperShaderOverride,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 			std::vector<ShaderReplacementRegistration> registrations;
+			std::array<TargetClaimLedger,
+				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> ledgers;
 			std::vector<ShaderReplacementVariantRegistration>
 				variantRegistrations =
 					GetDefaultShaderReplacementVariants();
@@ -471,6 +482,106 @@ namespace cs::engine
 			return std::nullopt;
 		}
 
+		template <class Visitor>
+		void ForEachStage(ShaderStageMask a_stages, Visitor&& a_visitor)
+		{
+			for (std::size_t stage = 0;
+				stage < static_cast<std::size_t>(ShaderStage::kCount);
+				++stage) {
+				if ((a_stages & ShaderStageBit(static_cast<ShaderStage>(stage))) != 0)
+					a_visitor(stage);
+			}
+		}
+
+		// registration-time ledger admission; freeze only reasserts the invariant
+		bool ClaimsAvailable(
+			const TargetClaimLedger& a_ledger,
+			const ShaderReplacementRegistration& a_registration,
+			const ShaderInjectionTargetMetadata& a_target)
+		{
+			if (const auto reserved =
+					FindSubstrateReservation(a_registration.slotClaims)) {
+				L->error(
+					"Replacement registration '{}' for '{}' rejected: stage={} constant buffer b{} is reserved for the shared substrate (b{} and b{}).",
+					a_registration.contributor,
+					a_target.name,
+					static_cast<unsigned>(reserved->stage),
+					reserved->slot,
+					render::kSharedDataSlot,
+					render::kFeatureDataSlot);
+				return false;
+			}
+			if (const auto collision =
+					FindSlotCollision(a_registration, a_ledger.slots)) {
+				L->error(
+					"Replacement registration '{}' for '{}' rejected: stage={} type={} slot={} is already claimed.",
+					a_registration.contributor,
+					a_target.name,
+					static_cast<unsigned>(collision->stage),
+					static_cast<unsigned>(collision->resourceType),
+					collision->slot);
+				return false;
+			}
+			for (const auto& [name, value] : a_registration.defines) {
+				const auto baseDefine = std::ranges::find(
+					a_target.baseDefines,
+					name,
+					&ShaderInjectionDefineMetadata::name);
+				if (baseDefine != a_target.baseDefines.end()
+					&& baseDefine->value != value) {
+					L->error(
+						"Replacement registration '{}' for '{}' rejected: {}={} conflicts with the target base define {}.",
+						a_registration.contributor,
+						a_target.name,
+						name,
+						value,
+						baseDefine->value);
+					return false;
+				}
+				bool conflict = false;
+				std::string_view conflictingValue;
+				ForEachStage(
+					a_registration.stages,
+					[&](std::size_t a_stage) {
+						const auto existing =
+							a_ledger.defines[a_stage].find(name);
+						if (existing != a_ledger.defines[a_stage].end()
+							&& existing->second != value) {
+							conflict = true;
+							conflictingValue = existing->second;
+						}
+					});
+				if (conflict) {
+					L->error(
+						"Replacement registration '{}' for '{}' rejected: {}={} conflicts with the claimed value {}.",
+						a_registration.contributor,
+						a_target.name,
+						name,
+						value,
+						conflictingValue);
+					return false;
+				}
+			}
+			return true;
+		}
+
+		void CommitClaims(
+			TargetClaimLedger& a_ledger,
+			const ShaderReplacementRegistration& a_registration)
+		{
+			a_ledger.slots.insert(
+				a_ledger.slots.end(),
+				a_registration.slotClaims.begin(),
+				a_registration.slotClaims.end());
+			ForEachStage(
+				a_registration.stages,
+				[&](std::size_t a_stage) {
+					a_ledger.defines[a_stage].insert(
+						a_registration.defines.begin(),
+						a_registration.defines.end());
+				});
+		}
+
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
 			const std::vector<ShaderReplacementVariantRegistration>&
@@ -537,19 +648,21 @@ namespace cs::engine
 							conflictingName,
 							existingValue)) {
 						L->error(
-							"Contributor '{}' for '{}' conflicts on {}={} (requested {}); contributor dropped.",
+							"Contributor '{}' for '{}' conflicts on {}={} (requested {}) after registration admitted it; contributor dropped.",
 							ContributorName(registration, registrationIndex),
 							metadata.name,
 							conflictingName,
 							existingValue,
 							registration.defines.find(conflictingName)->second);
+						target.slotCollision = true;
 						continue;
 					}
 
+					// registration already rejected these; a hit here is a broker invariant break
 					if (const auto reserved = FindSubstrateReservation(
 							registration.slotClaims)) {
 						L->error(
-							"Substrate slot collision on '{}' (stage={}, constant buffer b{}) from '{}'; b{} and b{} are reserved for the shared substrate; target quarantined.",
+							"Substrate slot collision on '{}' (stage={}, constant buffer b{}) from '{}'; b{} and b{} are reserved for the shared substrate; contributor dropped.",
 							metadata.name,
 							static_cast<unsigned>(reserved->stage),
 							reserved->slot,
@@ -557,19 +670,19 @@ namespace cs::engine
 							render::kSharedDataSlot,
 							render::kFeatureDataSlot);
 						target.slotCollision = true;
-						break;
+						continue;
 					}
 
 					if (const auto collision = FindSlotCollision(registration, claimedSlots)) {
 						L->error(
-							"Slot collision on '{}' (stage={}, type={}, slot={}) from '{}'; target quarantined.",
+							"Slot collision on '{}' (stage={}, type={}, slot={}) from '{}'; contributor dropped.",
 							metadata.name,
 							static_cast<unsigned>(collision->stage),
 							static_cast<unsigned>(collision->resourceType),
 							collision->slot,
 							ContributorName(registration, registrationIndex));
 						target.slotCollision = true;
-						break;
+						continue;
 					}
 
 					requestReasons |=
@@ -996,40 +1109,63 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		const bool installsPreDrawHook = static_cast<bool>(a_registration.bind);
-		{
-			std::scoped_lock lock(service.mutex);
+		const auto admissible = [&service](
+			const ShaderReplacementRegistration& a_candidate) {
 			if (service.lifecycle != Lifecycle::kCollecting) {
 				LogLateMutation("Replacement registration");
 				return false;
 			}
-			if (!IsValidTarget(a_registration.targetId)) {
+			if (!IsValidTarget(a_candidate.targetId)) {
 				L->error("Replacement registration rejected: unknown target.");
 				return false;
 			}
-			if (a_registration.stages == 0
-				|| (a_registration.stages & ~kValidShaderStages) != 0) {
+			const auto& metadata = kTargets[ToIndex(a_candidate.targetId)];
+			if (a_candidate.stages == 0
+				|| (a_candidate.stages & ~kValidShaderStages) != 0) {
 				L->error(
 					"Replacement registration '{}' for '{}' rejected: invalid shader stage mask 0x{:X}.",
-					a_registration.contributor,
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.stages);
+					a_candidate.contributor,
+					metadata.name,
+					a_candidate.stages);
 				return false;
 			}
-			if (RegistrationHasDuplicateClaims(a_registration)) {
+			if (RegistrationHasDuplicateClaims(a_candidate)) {
 				L->error(
 					"Replacement registration '{}' for '{}' rejected: duplicate slot claim.",
-					a_registration.contributor,
-					kTargets[ToIndex(a_registration.targetId)].name);
+					a_candidate.contributor,
+					metadata.name);
 				return false;
 			}
+			return ClaimsAvailable(
+				service.ledgers[ToIndex(a_candidate.targetId)],
+				a_candidate,
+				metadata);
+		};
 
-			service.registrations.push_back(std::move(a_registration));
+		{
+			std::scoped_lock lock(service.mutex);
+			if (!admissible(a_registration))
+				return false;
 		}
 
 		// active substrate requires current b5/b6 data
 		render::EnsureSharedDataUpdateInstalled();
-		if (installsPreDrawHook)
-			EnsurePreSunLightDrawInstalled();
+		// a bind callback without its draw anchor would never run
+		if (installsPreDrawHook && !EnsurePreSunLightDrawInstalled()) {
+			L->error(
+				"Replacement registration '{}' for '{}' rejected: the deferred draw anchor is unavailable.",
+				a_registration.contributor,
+				kTargets[ToIndex(a_registration.targetId)].name);
+			return false;
+		}
+
+		std::scoped_lock lock(service.mutex);
+		if (!admissible(a_registration))
+			return false;
+		CommitClaims(
+			service.ledgers[ToIndex(a_registration.targetId)],
+			a_registration);
+		service.registrations.push_back(std::move(a_registration));
 		return true;
 	}
 
@@ -1350,9 +1486,6 @@ namespace cs::engine
 			}
 			plan->variantKeys.reserve(routeCount);
 			for (const auto& frozenTarget : frozenTargets) {
-				if (frozenTarget.slotCollision)
-					continue;
-
 				const auto targetIndex =
 					ToIndex(frozenTarget.metadata->id);
 				auto& runtime = service.runtime[targetIndex];
@@ -1419,6 +1552,10 @@ namespace cs::engine
 				runtime.compileOk.store(
 					targetReady > 0,
 					std::memory_order_release);
+				runtime.compileComplete.store(
+					!frozenTarget.variants.empty()
+						&& targetReady == frozenTarget.variants.size(),
+					std::memory_order_release);
 				runtime.swappable.store(
 					targetSwappable,
 					std::memory_order_release);
@@ -1460,6 +1597,9 @@ namespace cs::engine
 						"Registered HLSL shader swap resolver (broker hooks={}).",
 						PixelShaderSwapBrokerHooksInstalled() ? "present" : "absent");
 				} else {
+					// no resolver means no target can ever swap
+					for (auto& runtime : service.runtime)
+						runtime.swappable.store(false, std::memory_order_release);
 					L->error(
 						"Shader swap resolver registration failed; all targets remain stock.");
 				}
@@ -1472,10 +1612,11 @@ namespace cs::engine
 		}
 		const auto summary = GetShaderInjectionSummary();
 		L->info(
-			"Shader injection freeze: targets requested={} compile_attempted={} compiled_ok={} swappable={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); replacement_variants attempted={} compiled_ok={} swappable={}.",
+			"Shader injection freeze: targets requested={} compile_attempted={} compiled_ok={} compile_complete={} swappable={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); replacement_variants attempted={} compiled_ok={} swappable={}.",
 			summary.requested,
 			summary.compileAttempted,
 			summary.compiled,
+			summary.compileComplete,
 			summary.swappable,
 			summary.requestedByFeatureContributor,
 			summary.requestedByBaselineOwnership,
@@ -1606,6 +1747,8 @@ namespace cs::engine
 		snapshot.requested = runtime.requested.load(std::memory_order_relaxed);
 		snapshot.compileAttempted = runtime.compileAttempted.load(std::memory_order_relaxed);
 		snapshot.compileOk = runtime.compileOk.load(std::memory_order_relaxed);
+		snapshot.compileComplete =
+			runtime.compileComplete.load(std::memory_order_relaxed);
 		snapshot.swappable = runtime.swappable.load(std::memory_order_relaxed);
 		snapshot.slotCollision = runtime.slotCollision.load(std::memory_order_relaxed);
 		snapshot.developerOverride = runtime.developerOverride;
@@ -1647,6 +1790,8 @@ namespace cs::engine
 				++summary.compileAttempted;
 			if (runtime.compileOk.load(std::memory_order_relaxed))
 				++summary.compiled;
+			if (runtime.compileComplete.load(std::memory_order_relaxed))
+				++summary.compileComplete;
 			if (runtime.swappable.load(std::memory_order_relaxed))
 				++summary.swappable;
 			const auto requestReasons =

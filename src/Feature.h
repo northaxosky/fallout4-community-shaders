@@ -71,6 +71,9 @@ namespace cs
 		// Fires after D3D11 device creation.
 		virtual void OnD3D11Ready(IDXGIAdapter* , ID3D11Device* ) {}
 
+		// Fires once after shader injections freeze, before the first frame.
+		virtual bool ValidateShaderInjections(std::string& ) { return true; }
+
 
 		virtual std::string GetFeatureSummary() const { return {}; }
 
@@ -172,6 +175,9 @@ namespace cs
 
 		// Notify each feature on first D3D11 device creation.
 		void OnD3D11ReadyAll(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
+
+		// Runs after the injection freeze so features can reject a partial delivery path.
+		void ValidateShaderInjectionsAll();
 
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }

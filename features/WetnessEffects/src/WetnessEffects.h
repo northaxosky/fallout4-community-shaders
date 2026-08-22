@@ -3,13 +3,14 @@
 #include "Feature.h"
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
-#include "Utils/CSBuffer.h"
+#include "Render/PixelShaderResourceSnapshot.h"
+#include "WetnessMath.h"
 
 #include <atomic>
 #include <cstdint>
-#include <memory>
+#include <string>
 
-#include <winrt/base.h>
+struct ID3D11DeviceContext;
 
 namespace cs::features
 {
@@ -21,12 +22,12 @@ namespace cs::features
 		std::string_view GetName() const override { return "WetnessEffects"; }
 		std::string GetConfigKey() const override { return "WetnessEffects"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
-		std::string GetFeatureSummary() const override { return "Builds a precipitation-driven wetness mask for deferred effects."; }
+		std::string GetFeatureSummary() const override { return "Adds rain wetness to deferred lighting and composition."; }
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
-		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
+		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
@@ -36,90 +37,32 @@ namespace cs::features
 
 		cs::WetnessEffectsFeatureData GetCommonBufferData() const;
 
-		struct Settings
-		{
-			bool enabled = false;
-			bool injectAmbientPass = false;
-		};
+		using Settings = wetness_math::Settings;
 
 	private:
-		struct alignas(16) WetnessCB
-		{
-			std::uint32_t Extent[2];
-			float         WetnessScalar;
-			float         Padding;
-			float         ViewToWorld[12];
-		};
-		static_assert(sizeof(WetnessCB) == 64);
-
-		struct alignas(16) TelemetryCB
-		{
-			std::uint32_t SourceExtent[2];
-			std::uint32_t OutputExtent[2];
-		};
-		static_assert(sizeof(TelemetryCB) == 16);
-
-		enum class MaskPass : std::uint8_t
-		{
-			kDirectional,
-			kAmbient
-		};
-
 		WetnessEffects() = default;
 
 		void SaveSettings();
-		void OnComputeWetness();
-		void OnPreSunLightDraw();
-		void RestoreWetnessMaskBindings();
-		void BindWetnessMask(ID3D11DeviceContext* a_context, MaskPass a_pass);
-		bool IsWetnessMaskReady() const;
-		bool EnsureResources();
-		void PollTelemetry(ID3D11DeviceContext* a_context);
-		void QueueTelemetry(
-			ID3D11DeviceContext* a_context,
-			std::uint32_t a_sourceWidth,
-			std::uint32_t a_sourceHeight,
-			std::uint32_t a_frameIndex);
+		void BindGbufferNormal(ID3D11DeviceContext* a_context);
+		void SaveNormalBinding();
+		void RestoreNormalBinding();
 
-		static constexpr std::uint32_t kMaskPSSlot = 25;
-		static constexpr std::uint32_t kTelemetryWidth = 64;
-		static constexpr std::uint32_t kTelemetryHeight = 36;
-		static constexpr std::uint32_t kTelemetryIntervalFrames = 30;
+		static constexpr std::uint32_t kGbufferNormalPSSlot = 25;
 
 		Settings _settings;
-		std::atomic_bool _started{ false };
-		std::atomic_bool _resourcesReady{ false };
-		std::atomic_bool _resourceInitFailed{ false };
-		std::atomic_bool _isExterior{ false };
-		std::atomic<float> _rainIntensity{ 0.0f };
-		std::atomic<float> _wetnessMean{ 0.0f };
-		std::atomic<float> _wetnessCoverage{ 0.0f };
-		std::atomic_uint32_t _dispatchesLastFrame{ 0 };
-		std::atomic_uint32_t _workingWidth{ 0 };
-		std::atomic_uint32_t _workingHeight{ 0 };
-		std::atomic_bool _telemetryReady{ false };
-		std::atomic_bool _directionalMaskBound{ false };
-		std::atomic_bool _ambientMaskBound{ false };
+		// every contribution and hook of the pair must register before any of them runs
+		std::atomic_bool _registrationsReady{ false };
+		std::atomic_bool _injectionsOperational{ false };
+		std::string _validationDetail;
 
-		// Distinguishes missing hooks from unmatched draws.
-		std::atomic_uint32_t _sunHookCalls{ 0 };
-		std::atomic_uint32_t _sunHookNoShader{ 0 };
-		std::atomic_uint32_t _sunHookMatched{ 0 };
-		std::atomic_uint32_t _sunHookUnmatched{ 0 };
-		std::atomic_uint32_t _maskBinds{ 0 };
-		std::atomic_uint32_t _ambientMaskBinds{ 0 };
-		bool _ambientPassRegistered = false;
+		mutable std::atomic_bool _isExterior{ false };
+		// _wetness is the value published through b6; _weatherWetness is that value ungated
+		mutable std::atomic<float> _wetness{ 0.0f };
+		mutable std::atomic<float> _weatherWetness{ 0.0f };
+		std::atomic_uint32_t _normalBinds{ 0 };
+		std::atomic_uint32_t _normalBindsNull{ 0 };
 
-		std::unique_ptr<cs::buffer::ConstantBuffer> _wetnessCB;
-		std::unique_ptr<cs::buffer::ConstantBuffer> _telemetryCB;
-		std::unique_ptr<cs::buffer::Texture2D> _wetnessMask;
-		std::unique_ptr<cs::buffer::Texture2D> _telemetryStats;
-		winrt::com_ptr<ID3D11Texture2D> _telemetryReadback;
-		winrt::com_ptr<ID3D11ComputeShader> _wetnessCS;
-		winrt::com_ptr<ID3D11ComputeShader> _telemetryCS;
-		bool _telemetryPending = false;
-		std::uint32_t _telemetryLastQueuedFrame = 0;
-		std::uint32_t _allocWidth = 0;
-		std::uint32_t _allocHeight = 0;
+		// render thread only
+		cs::render::PixelShaderResourceSnapshot<1> _engineNormalBinding;
 	};
 }

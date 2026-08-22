@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 namespace cs
@@ -24,10 +25,10 @@ namespace cs
 
 	struct alignas(16) WetnessEffectsFeatureData
 	{
-		std::uint32_t EnableWetnessEffects = 0;
-		std::uint32_t EnableAmbientPass = 0;
-		float         Wetness = 0.0f;
-		float         pad0 = 0.0f;
+		float Wetness = 0.0f;
+		float MaxRainWetness = 0.0f;
+		float MinRainWetness = 0.0f;
+		float pad0 = 0.0f;
 	};
 	static_assert(sizeof(WetnessEffectsFeatureData) == 16);
 
@@ -39,6 +40,10 @@ namespace cs
 	};
 	static_assert(sizeof(FeatureDataCB) == 48);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
+	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
+	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
+	static_assert(offsetof(WetnessEffectsFeatureData, MaxRainWetness) == 4);
+	static_assert(offsetof(WetnessEffectsFeatureData, MinRainWetness) == 8);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

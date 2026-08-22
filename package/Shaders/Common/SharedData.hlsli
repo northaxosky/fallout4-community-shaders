@@ -24,6 +24,8 @@ namespace SharedData
 		float DeltaTime;
 		uint FrameCount;
 		bool InInterior;
+		// xyz: world up in view space, w: 1 when sourced from a valid world camera
+		float4 WorldUpView;
 	};
 
 	struct ScreenSpaceShadowsSettings
@@ -43,9 +45,9 @@ namespace SharedData
 
 	struct WetnessEffectsSettings
 	{
-		bool EnableWetnessEffects;
-		bool EnableAmbientPass;
 		float Wetness;
+		float MaxRainWetness;
+		float MinRainWetness;
 		float pad0;
 	};
 

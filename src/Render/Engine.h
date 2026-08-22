@@ -1,5 +1,7 @@
 #pragma once
 
+#include "RE/S/SceneGraph.h"
+
 #include <DirectXMath.h>
 #include <d3d11.h>
 
@@ -18,6 +20,12 @@ namespace cs::engine
 	{
 		static REL::Relocation<RE::BSGraphics::RenderTargetManager*> singleton{ REL::ID({ 1508457, 2666735, 2666735 }) };
 		return singleton.get();
+	}
+
+	[[nodiscard]] inline RE::NiCamera* GetWorldRootCamera()
+	{
+		auto* worldRoot = RE::Main::WorldRootNode();
+		return worldRoot ? worldRoot->camera.get() : nullptr;
 	}
 
 	// Prefer viewFrustum; setup mirrors use these globals.
@@ -105,7 +113,7 @@ namespace cs::engine
 		DirectX::XMFLOAT4&   a_outNdcToViewMul,
 		DirectX::XMFLOAT4&   a_outNdcToViewAdd)
 	{
-		auto* sceneCamera = RE::Main::WorldRootCamera();
+		auto* sceneCamera = GetWorldRootCamera();
 		if (!sceneCamera) {
 			return false;
 		}

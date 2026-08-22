@@ -29,8 +29,9 @@ injected in place of the stock shaders.
 
 > [!WARNING]
 > **`0.2.0` is active work in progress.** Features are incomplete, unstable, unavailable on
-> some systems, or require a restart after a settings change. There is no packaged release yet;
-> source builds are intended for development and testing.
+> some systems, or have startup-only options that require a restart. Ordinary enabled and settings
+> changes apply live unless a control says otherwise. There is no packaged release yet; source
+> builds are intended for development and testing.
 
 ---
 
@@ -58,7 +59,7 @@ injected in place of the stock shaders.
 | **Frame Generation** | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop. |
 | **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
-| **Wetness Effects** | Injects wetness shading into the deferred lighting pipeline. |
+| **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Imagespace** | Tonemapping, exposure, bloom, 32³ LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles. |
 | **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
 | **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |

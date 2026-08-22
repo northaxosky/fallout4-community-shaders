@@ -18,6 +18,7 @@ float4 main() : SV_Target
 	value += SharedData::Timer + SharedData::DeltaTime;
 	value += SharedData::FrameCount;
 	value += BoolValue(SharedData::InInterior);
+	value += dot(SharedData::WorldUpView, 1.0);
 
 	value += BoolValue(
 		SharedData::screenSpaceShadowsSettings.EnableScreenSpaceShadows);
@@ -32,11 +33,9 @@ float4 main() : SV_Target
 	value += SharedData::screenSpaceGISettings.AoPower;
 	value += SharedData::screenSpaceGISettings.BounceStrength;
 
-	value += BoolValue(
-		SharedData::wetnessEffectsSettings.EnableWetnessEffects);
-	value += BoolValue(
-		SharedData::wetnessEffectsSettings.EnableAmbientPass);
 	value += SharedData::wetnessEffectsSettings.Wetness;
+	value += SharedData::wetnessEffectsSettings.MaxRainWetness;
+	value += SharedData::wetnessEffectsSettings.MinRainWetness;
 	value += SharedData::wetnessEffectsSettings.pad0;
 	return value.xxxx;
 #else

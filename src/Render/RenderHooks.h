@@ -18,8 +18,8 @@ namespace cs::engine
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPreDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	void RegisterPostDeferredLightsImpl(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
-	void RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
-	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
 	// Fixed slots keep post-FX before HUD-less capture.
 	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback);
@@ -29,6 +29,6 @@ namespace cs::engine
 	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel);
 
 	// Install the post-dirty-state deferred draw anchor.
-	void EnsurePreSunLightDrawInstalled();
+	bool EnsurePreSunLightDrawInstalled();
 	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 }

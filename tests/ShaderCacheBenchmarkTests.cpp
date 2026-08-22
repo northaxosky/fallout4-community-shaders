@@ -48,8 +48,10 @@ namespace cs::engine
 		return true;
 	}
 
-	void EnsurePreSunLightDrawInstalled()
-	{}
+	bool EnsurePreSunLightDrawInstalled()
+	{
+		return true;
+	}
 }
 
 namespace cs::render

@@ -71,6 +71,10 @@ namespace cs::d3d11
 			InvokeOwner("ShaderInjection freeze and compile", [&] {
 				engine::FreezeAndCompileShaderInjections(*a_device);
 			});
+			// features must see the frozen delivery path before the first frame
+			InvokeOwner("FeatureManager shader-injection validation", [&] {
+				FeatureManager::Get().ValidateShaderInjectionsAll();
+			});
 			InvokeOwner("Menu D3D11 initialization", [&] {
 				Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
 			});

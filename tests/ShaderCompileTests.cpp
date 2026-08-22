@@ -10,9 +10,11 @@
 #include <array>
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <d3d11shader.h>
 #include <d3dcompiler.h>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <optional>
 #include <set>
@@ -55,8 +57,10 @@ namespace cs::engine
 		return true;
 	}
 
-	void EnsurePreSunLightDrawInstalled()
-	{}
+	bool EnsurePreSunLightDrawInstalled()
+	{
+		return true;
+	}
 }
 
 namespace cs::render
@@ -93,6 +97,13 @@ namespace
 		kPresent
 	};
 
+	struct FeatureOffIdentityExpectation
+	{
+		std::string key;
+		bool        shouldDiffer = false;
+		bool        wetnessVariant = false;
+	};
+
 	struct ShaderCompileJob
 	{
 		std::filesystem::path path;
@@ -106,11 +117,13 @@ namespace
 		bool                  validateXeGTAOCB = false;
 		std::vector<UINT>     requiredTextureSlots;
 		std::vector<UINT>     forbiddenTextureSlots;
+		std::optional<FeatureOffIdentityExpectation> featureOffIdentity;
 	};
 
 	struct ShaderCompileResult
 	{
 		std::string error;
+		Microsoft::WRL::ComPtr<ID3DBlob> blob;
 	};
 
 	std::string CompileInputKey(
@@ -365,7 +378,8 @@ namespace
 			ExpectedVariable{ "Timer", 96, 4 },
 			ExpectedVariable{ "DeltaTime", 100, 4 },
 			ExpectedVariable{ "FrameCount", 104, 4 },
-			ExpectedVariable{ "InInterior", 108, 4 }
+			ExpectedVariable{ "InInterior", 108, 4 },
+			ExpectedVariable{ "WorldUpView", 112, 16 }
 		};
 		constexpr std::array featureVariables{
 			ExpectedVariable{ "screenSpaceShadowsSettings", 0, 16 },
@@ -380,7 +394,7 @@ namespace
 				reflection.Get(),
 				"SharedData",
 				5,
-				112,
+				128,
 				sharedVariables);
 			!error.empty()) {
 			return error;
@@ -444,7 +458,7 @@ namespace
 
 		const std::wstring widePath = a_job.path.wstring();
 		std::string error;
-		const auto blob = cs::util::CompileShaderToBlob(
+		auto blob = cs::util::CompileShaderToBlob(
 			widePath.c_str(),
 			defines,
 			a_job.profile.c_str(),
@@ -453,20 +467,154 @@ namespace
 		if (!blob)
 			return { std::move(error) };
 		if (a_job.substrateExpectation != SubstrateExpectation::kNone) {
-			return {
-				ValidateSubstrateReflection(
+			if (auto validation = ValidateSubstrateReflection(
 					blob.Get(),
-					a_job.substrateExpectation)
-			};
+					a_job.substrateExpectation);
+				!validation.empty()) {
+				return { std::move(validation) };
+			}
 		}
 		if (a_job.validateXeGTAOCB) {
-			return { ValidateXeGTAOConstantBuffer(blob.Get()) };
+			if (auto validation = ValidateXeGTAOConstantBuffer(blob.Get());
+				!validation.empty()) {
+				return { std::move(validation) };
+			}
 		}
 		if (!a_job.requiredTextureSlots.empty()
 			|| !a_job.forbiddenTextureSlots.empty()) {
-			return { ValidateTextureBindings(blob.Get(), a_job) };
+			if (auto validation = ValidateTextureBindings(blob.Get(), a_job);
+				!validation.empty()) {
+				return { std::move(validation) };
+			}
 		}
-		return {};
+		if (!a_job.featureOffIdentity)
+			return {};
+		return { {}, std::move(blob) };
+	}
+
+	struct FeatureOffIdentityPair
+	{
+		const ShaderCompileJob* featureOffJob = nullptr;
+		const ShaderCompileResult* featureOffResult = nullptr;
+		const ShaderCompileJob* wetnessJob = nullptr;
+		const ShaderCompileResult* wetnessResult = nullptr;
+		bool shouldDiffer = false;
+		bool hasExpectation = false;
+	};
+
+	std::optional<bool> HaveEqualStrippedShaderBytes(
+		ID3DBlob* a_featureOff,
+		ID3DBlob* a_wetness,
+		std::string& a_error)
+	{
+		constexpr UINT stripFlags = D3DCOMPILER_STRIP_DEBUG_INFO
+			| D3DCOMPILER_STRIP_REFLECTION_DATA
+			| D3DCOMPILER_STRIP_TEST_BLOBS
+			| D3DCOMPILER_STRIP_PRIVATE_DATA;
+		Microsoft::WRL::ComPtr<ID3DBlob> featureOff;
+		if (FAILED(D3DStripShader(
+				a_featureOff->GetBufferPointer(),
+				a_featureOff->GetBufferSize(),
+				stripFlags,
+				featureOff.GetAddressOf()))) {
+			a_error = "D3DStripShader failed for the feature-off blob";
+			return std::nullopt;
+		}
+		Microsoft::WRL::ComPtr<ID3DBlob> wetness;
+		if (FAILED(D3DStripShader(
+				a_wetness->GetBufferPointer(),
+				a_wetness->GetBufferSize(),
+				stripFlags,
+				wetness.GetAddressOf()))) {
+			a_error = "D3DStripShader failed for the wetness blob";
+			return std::nullopt;
+		}
+		return featureOff->GetBufferSize() == wetness->GetBufferSize()
+			&& std::memcmp(
+				featureOff->GetBufferPointer(),
+				wetness->GetBufferPointer(),
+				featureOff->GetBufferSize())
+				== 0;
+	}
+
+	int ValidateFeatureOffIdentityPairs(
+		const std::vector<ShaderCompileJob>& a_jobs,
+		const std::vector<ShaderCompileResult>& a_results)
+	{
+		std::map<std::string, FeatureOffIdentityPair> pairs;
+		int failures = 0;
+		for (std::size_t index = 0; index < a_jobs.size(); ++index) {
+			const auto& job = a_jobs[index];
+			if (!job.featureOffIdentity)
+				continue;
+
+			const auto& identity = *job.featureOffIdentity;
+			auto& pair = pairs[identity.key];
+			if (pair.hasExpectation
+				&& pair.shouldDiffer != identity.shouldDiffer) {
+				std::printf(
+					"FAIL: feature-off identity %s has inconsistent expectations\n",
+					identity.key.c_str());
+				++failures;
+				continue;
+			}
+			pair.shouldDiffer = identity.shouldDiffer;
+			pair.hasExpectation = true;
+
+			const auto*& pairedJob = identity.wetnessVariant ?
+				pair.wetnessJob :
+				pair.featureOffJob;
+			const auto*& pairedResult = identity.wetnessVariant ?
+				pair.wetnessResult :
+				pair.featureOffResult;
+			if (pairedJob) {
+				std::printf(
+					"FAIL: feature-off identity %s has duplicate %s variants\n",
+					identity.key.c_str(),
+					identity.wetnessVariant ? "wetness" : "feature-off");
+				++failures;
+				continue;
+			}
+			pairedJob = &job;
+			pairedResult = &a_results[index];
+		}
+
+		for (const auto& [key, pair] : pairs) {
+			if (!pair.featureOffJob || !pair.wetnessJob) {
+				std::printf(
+					"FAIL: feature-off identity %s is missing a %s variant\n",
+					key.c_str(),
+					pair.featureOffJob ? "wetness" : "feature-off");
+				++failures;
+				continue;
+			}
+			if (!pair.featureOffResult->error.empty()
+				|| !pair.wetnessResult->error.empty()) {
+				continue;
+			}
+
+			std::string error;
+			const auto equal = HaveEqualStrippedShaderBytes(
+				pair.featureOffResult->blob.Get(),
+				pair.wetnessResult->blob.Get(),
+				error);
+			if (!equal) {
+				std::printf(
+					"FAIL: feature-off identity %s\n%s\n",
+					key.c_str(),
+					error.c_str());
+				++failures;
+				continue;
+			}
+			if (*equal == pair.shouldDiffer) {
+				std::printf(
+					"FAIL: feature-off identity %s expected stripped DXBC to %s\n",
+					key.c_str(),
+					pair.shouldDiffer ? "differ" : "match");
+				++failures;
+			}
+		}
+		return failures;
 	}
 
 	int CompileAll(const std::vector<ShaderCompileJob>& a_jobs)
@@ -511,6 +659,7 @@ namespace
 				results[index].error.c_str());
 			++failures;
 		}
+		failures += ValidateFeatureOffIdentityPairs(a_jobs, results);
 		return failures;
 	}
 
@@ -576,7 +725,8 @@ namespace
 		const ShaderDefines& a_contributorDefines,
 		std::set<std::string>* a_uniqueInputs = nullptr,
 		std::vector<UINT> a_requiredTextureSlots = {},
-		std::vector<UINT> a_forbiddenTextureSlots = {})
+		std::vector<UINT> a_forbiddenTextureSlots = {},
+		std::optional<FeatureOffIdentityExpectation> a_featureOffIdentity = {})
 	{
 		const auto* target =
 			cs::engine::GetShaderInjectionTarget(
@@ -637,6 +787,7 @@ namespace
 			"registration " + a_registration.name);
 		job.requiredTextureSlots = std::move(a_requiredTextureSlots);
 		job.forbiddenTextureSlots = std::move(a_forbiddenTextureSlots);
+		job.featureOffIdentity = std::move(a_featureOffIdentity);
 	}
 
 	struct LightingCounts
@@ -646,11 +797,16 @@ namespace
 		std::size_t explicitPermutations = 0;
 		std::size_t ambientCompositionRows = 0;
 		std::size_t ambientNonTargetRows = 0;
+		std::size_t wetnessDirectRows = 0;
+		std::size_t wetnessDirectInertRows = 0;
+		std::size_t wetnessCompositeRows = 0;
+		std::size_t wetnessCompositeNeutralRows = 0;
+		std::size_t wetnessCompositeVertexRows = 0;
 	};
 
 	// The SSGI composition extends the existing plugin texture block.
 	constexpr std::array kCompositionTextureSlots{ 26u, 27u, 28u, 29u };
-	constexpr UINT kWetnessMaskTextureSlot = 25;
+	constexpr UINT kGbufferNormalTextureSlot = 25;
 
 	// only families that can isolate directional ambient carry the composition
 	constexpr std::array kAmbientCompositionFamilies{
@@ -659,14 +815,34 @@ namespace
 		"BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY"
 	};
 
-	// the wetness mask is declared by the two families that sample it
-	constexpr std::array kWetnessMaskFamilies{
+	// the authoritative normal is declared by every family that darkens or coats
+	constexpr std::array kWetnessCompositeFamilies{
 		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY",
-		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY"
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY",
+		"BSDFCOMPOSITE_PS_2D_ACCUMULATOR",
+		"BSDFCOMPOSITE_PS_2D_FOG",
+		"BSDFCOMPOSITE_PS_CUBE_IBL"
+	};
+	constexpr std::array kWetnessDirectFamilies{
+		"BSDFLIGHT_PS_DEFERRED",
+		"BSDFLIGHT_PS_DIRSPLITS1",
+		"BSDFLIGHT_PS_DIRSPLITS2",
+		"BSDFLIGHT_PS_DIRSPLITS3",
+		"BSDFLIGHT_PS_GOBO",
+		"BSDFLIGHT_PS_UNSHADOWED"
 	};
 
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 44;
+	constexpr std::size_t kExpectedBsdfLightRows = 167;
+	constexpr std::size_t kExpectedWetnessDirectRows = 146;
+	constexpr std::size_t kExpectedWetnessDirectInertRows = 21;
+	constexpr std::size_t kExpectedCompositeRegistrationRows = 74;
+	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
+	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
+	constexpr std::size_t kExpectedWetnessCompositeVertexRows = 4;
 
 	bool DeclaresFamily(
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
@@ -686,6 +862,32 @@ namespace
 			[a_name](const auto& a_define) { return a_define.first == a_name; });
 	}
 
+	bool IsWetnessDirectConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfLight
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& DeclaresFamily(a_registration, kWetnessDirectFamilies)
+			&& !a_registration.compilation.defines.contains("ATTENUATION_ONLY");
+	}
+
+	bool IsWetnessCompositeConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfComposite
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& DeclaresFamily(a_registration, kWetnessCompositeFamilies);
+	}
+
+	bool IsWetnessConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return IsWetnessDirectConsumer(a_registration)
+			|| IsWetnessCompositeConsumer(a_registration);
+	}
+
 	LightingCounts AddLighting(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root)
@@ -699,13 +901,27 @@ namespace
 				"No shader replacement registrations were discovered");
 		}
 		std::set<std::string> uniqueRegistrationInputs;
-		for (const auto& registration : registrations)
+		for (const auto& registration : registrations) {
+			std::optional<FeatureOffIdentityExpectation> identity;
+			if (registration.targetId
+					== cs::engine::ShaderInjectionTarget::kBsdfLight
+				|| registration.targetId
+					== cs::engine::ShaderInjectionTarget::kBsdfComposite) {
+				identity = FeatureOffIdentityExpectation{
+					.key = registration.name,
+					.shouldDiffer = IsWetnessConsumer(registration)
+				};
+			}
 			AddRegistration(
 				a_jobs,
 				a_root,
 				registration,
 				{},
-				&uniqueRegistrationInputs);
+				&uniqueRegistrationInputs,
+				{},
+				{},
+				std::move(identity));
+		}
 		if (uniqueRegistrationInputs.size() != registrations.size()) {
 			AddPreparationFailure(
 				a_jobs,
@@ -793,7 +1009,20 @@ namespace
 		std::size_t contributorCompositionCount = 0;
 		std::size_t ambientCompositionRows = 0;
 		std::size_t ambientNonTargetRows = 0;
+		std::size_t wetnessDirectRows = 0;
+		std::size_t wetnessDirectInertRows = 0;
+		std::size_t wetnessCompositeRows = 0;
+		std::size_t wetnessCompositeNeutralRows = 0;
+		std::size_t wetnessCompositeVertexRows = 0;
 		for (const auto& registration : registrations) {
+			if (registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfLight) {
+				if (IsWetnessDirectConsumer(registration))
+					++wetnessDirectRows;
+				else
+					++wetnessDirectInertRows;
+			}
+
 			const auto* compositions =
 				registration.targetId
 						== cs::engine::ShaderInjectionTarget::kBsdfLight
@@ -801,11 +1030,28 @@ namespace
 				: nullptr;
 			if (compositions) {
 				for (const auto& defines : *compositions) {
+					// the authoritative normal belongs to composite rows only
+					std::optional<FeatureOffIdentityExpectation> identity;
+					if (defines.size() == 1
+						&& HasDefine(
+							defines,
+							cs::engine::shader_injection_defines::
+								kWetnessEffects)) {
+						identity = FeatureOffIdentityExpectation{
+							.key = registration.name,
+							.shouldDiffer = IsWetnessConsumer(registration),
+							.wetnessVariant = true
+						};
+					}
 					AddRegistration(
 						a_jobs,
 						a_root,
 						registration,
-						defines);
+						defines,
+						nullptr,
+						{},
+						{ kGbufferNormalTextureSlot },
+						std::move(identity));
 					++contributorCompositionCount;
 				}
 			}
@@ -818,13 +1064,25 @@ namespace
 				registration.stage == cs::engine::ShaderStage::kPixel;
 			const bool composesAmbient = pixelRow
 				&& DeclaresFamily(registration, kAmbientCompositionFamilies);
-			const bool declaresWetnessMask = pixelRow
-				&& DeclaresFamily(registration, kWetnessMaskFamilies);
+			const bool composesWetness = pixelRow
+				&& DeclaresFamily(registration, kWetnessCompositeFamilies);
 			if (pixelRow) {
 				if (composesAmbient)
 					++ambientCompositionRows;
 				else
 					++ambientNonTargetRows;
+				if (composesWetness)
+					++wetnessCompositeRows;
+				else
+					++wetnessCompositeNeutralRows;
+			} else if (registration.stage == cs::engine::ShaderStage::kVertex) {
+				++wetnessCompositeVertexRows;
+			} else {
+				AddPreparationFailure(
+					a_jobs,
+					"unexpected kBsdfComposite stage",
+					"Registration " + registration.name
+						+ " is neither pixel nor vertex");
 			}
 
 			for (const auto& defines : ambientCompositions) {
@@ -838,8 +1096,22 @@ namespace
 					compositionSlots.assign(
 						kCompositionTextureSlots.begin(),
 						kCompositionTextureSlots.end());
-					if (wetnessEffects && declaresWetnessMask)
-						required.push_back(kWetnessMaskTextureSlot);
+				}
+				auto& normalSlot =
+					wetnessEffects && composesWetness ? required : forbidden;
+				normalSlot.push_back(kGbufferNormalTextureSlot);
+				if (pixelRow
+					&& registration.compilation.defines.contains(
+						"BSDFCOMPOSITE_PS_2D_ACCUMULATOR")) {
+					forbidden.push_back(7);
+				}
+				std::optional<FeatureOffIdentityExpectation> identity;
+				if (defines.size() == 1 && wetnessEffects) {
+					identity = FeatureOffIdentityExpectation{
+						.key = registration.name,
+						.shouldDiffer = IsWetnessConsumer(registration),
+						.wetnessVariant = true
+					};
 				}
 				AddRegistration(
 					a_jobs,
@@ -848,7 +1120,8 @@ namespace
 					defines,
 					nullptr,
 					std::move(required),
-					std::move(forbidden));
+					std::move(forbidden),
+					std::move(identity));
 				++contributorCompositionCount;
 			}
 		}
@@ -866,6 +1139,59 @@ namespace
 					+ " and "
 					+ std::to_string(ambientNonTargetRows));
 		}
+		if (wetnessCompositeRows != kExpectedWetnessCompositeRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfComposite wetness coverage",
+				"Expected "
+					+ std::to_string(kExpectedWetnessCompositeRows)
+					+ " wetness pixel rows, found "
+					+ std::to_string(wetnessCompositeRows));
+		}
+		if (wetnessDirectRows != kExpectedWetnessDirectRows
+			|| wetnessDirectInertRows != kExpectedWetnessDirectInertRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfLight wetness coverage",
+				"Expected "
+					+ std::to_string(kExpectedWetnessDirectRows)
+					+ " wetness and "
+					+ std::to_string(kExpectedWetnessDirectInertRows)
+					+ " inert rows, found "
+					+ std::to_string(wetnessDirectRows)
+					+ " and "
+					+ std::to_string(wetnessDirectInertRows));
+		}
+		if (wetnessCompositeRows != kExpectedWetnessCompositeRows
+			|| wetnessCompositeNeutralRows
+				!= kExpectedWetnessCompositeNeutralRows
+			|| wetnessCompositeVertexRows
+				!= kExpectedWetnessCompositeVertexRows
+			|| wetnessCompositeRows + wetnessCompositeNeutralRows
+					+ wetnessCompositeVertexRows
+				!= kExpectedCompositeRegistrationRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfComposite wetness registration partition",
+				"Expected "
+					+ std::to_string(kExpectedWetnessCompositeRows)
+					+ " wetness, "
+					+ std::to_string(kExpectedWetnessCompositeNeutralRows)
+					+ " neutral pixel, and "
+					+ std::to_string(kExpectedWetnessCompositeVertexRows)
+					+ " vertex rows");
+		}
+		if (wetnessDirectRows + wetnessDirectInertRows
+			!= kExpectedBsdfLightRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfLight wetness registration partition",
+				"Expected "
+					+ std::to_string(kExpectedBsdfLightRows)
+					+ " total rows, found "
+					+ std::to_string(
+						wetnessDirectRows + wetnessDirectInertRows));
+		}
 		return {
 			.registrationDerived = registrations.size(),
 			.uniqueRegistrationInputs =
@@ -875,7 +1201,12 @@ namespace
 				+ explicitSourceCases.size()
 				+ contributorCompositionCount,
 			.ambientCompositionRows = ambientCompositionRows,
-			.ambientNonTargetRows = ambientNonTargetRows
+			.ambientNonTargetRows = ambientNonTargetRows,
+			.wetnessDirectRows = wetnessDirectRows,
+			.wetnessDirectInertRows = wetnessDirectInertRows,
+			.wetnessCompositeRows = wetnessCompositeRows,
+			.wetnessCompositeNeutralRows = wetnessCompositeNeutralRows,
+			.wetnessCompositeVertexRows = wetnessCompositeVertexRows
 		};
 	}
 

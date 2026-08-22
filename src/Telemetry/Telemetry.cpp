@@ -23,6 +23,8 @@ namespace cs::telemetry
 		std::atomic_bool          g_enabled{ false };
 		std::atomic<std::uint32_t> g_intervalFrames{ 60 };
 		bool g_installed = false;
+		// without the post-composite anchor the pump never ticks
+		std::atomic_bool g_compositeSamplingAvailable{ true };
 
 		void AppendSeparatorAndKey(std::string& a_line, std::string_view a_key)
 		{
@@ -319,7 +321,10 @@ namespace cs::telemetry
 
 		void SetEnabled(bool a_enabled)
 		{
-			g_enabled.store(a_enabled, std::memory_order_relaxed);
+			g_enabled.store(
+				a_enabled
+					&& g_compositeSamplingAvailable.load(std::memory_order_relaxed),
+				std::memory_order_relaxed);
 		}
 
 		void SetIntervalFrames(std::uint32_t a_interval)
@@ -343,8 +348,13 @@ namespace cs::telemetry
 		if (g_installed)
 			return;
 		g_installed = true;
-		cs::engine::RegisterPostDeferredComposite([] {
-			pump::Tick();
-		});
+		if (!cs::engine::RegisterPostDeferredComposite([] {
+				pump::Tick();
+			})) {
+			g_compositeSamplingAvailable.store(false, std::memory_order_relaxed);
+			pump::SetEnabled(false);
+			cs::log::Get("cs.telemetry")->error(
+				"Telemetry composite sampling disabled: post-composite hook registration failed.");
+		}
 	}
 }

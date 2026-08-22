@@ -63,10 +63,10 @@ depth_fade_end = 50000.0
 load = false
 
 [features.WetnessEffects.settings]
-enabled = false
-
-# Experimental reconstructed ambient pass; known to regress distance fog. Restart required.
-inject_ambient_pass = false
+# Runtime toggle for the published wetness. The feature itself ships off above.
+enabled = true
+max_rain_wetness = 1.0
+min_rain_wetness = 0.65
 
 [features.ScreenSpaceShadows]
 load = false

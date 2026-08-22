@@ -2,6 +2,10 @@
 #include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
 #endif
 
+#ifdef WETNESS_EFFECTS
+#include "WetnessEffects/WetnessEffects.hlsli"
+#endif
+
 #ifdef BSDFLIGHT_PS_DEFERRED
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -666,10 +670,6 @@ SamplerState g_sGbufferMaterial : register(s2);
 SamplerState g_sMainDepth      : register(s3);
 SamplerComparisonState g_sCascadeShadowCmp : register(s5);
 
-#ifdef WETNESS_EFFECTS
-Texture2D<float> g_tWetnessMask : register(t25);
-#endif
-
 static const float2 SUN_SHADOW_POISSON[32] =
 {
     float2(0.493393, 0.394269), float2(0.798547, 0.885922),
@@ -760,11 +760,6 @@ struct PS_OUTPUT
 PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
-
-#ifdef WETNESS_EFFECTS
-    float wetness = saturate(
-        g_tWetnessMask.Load(int3(int2(input.position.xy), 0)).x);
-#endif
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
     float2 uv = uv4.xy;
@@ -857,16 +852,6 @@ PS_OUTPUT main(PS_INPUT input)
     float  schlickFres   = 1.0 - oneMinusGloss * oneMinusGloss4;
 
     bool isMaterial1 = (abs(matSample.w * 255.0 - 1.0) < 0.25);
-
-#ifdef WETNESS_EFFECTS
-    float wetFilmRoughness = max(saturate(1.0 - wetness), 0.05);
-    float wetFilmStrength = saturate(1.0 - wetFilmRoughness);
-    float3 wetFilmNormal = isMaterial1 ? matSample.xyz : normalView;
-    wetFilmNormal *=
-        rsqrt(max(dot(wetFilmNormal, wetFilmNormal), 1.0e-8));
-    float3 wetFilmHalf = viewDirNeg + SunDirection_and_padding.xyz;
-    wetFilmHalf *= rsqrt(max(dot(wetFilmHalf, wetFilmHalf), 1.0e-8));
-#endif
 
     float3 brdfSpecular = float3(0, 0, 0);
     float  brdfModulator = 0.0;
@@ -973,54 +958,6 @@ PS_OUTPUT main(PS_INPUT input)
         brdfModulator = depthScale;
     }
 
-#ifdef WETNESS_EFFECTS
-    float wetNdotL = clamp(
-        dot(wetFilmNormal, SunDirection_and_padding.xyz), 1.0e-5, 1.0);
-    float wetNdotV =
-        saturate(abs(dot(wetFilmNormal, viewDirNeg)) + 1.0e-5);
-    float wetNdotH = saturate(dot(wetFilmNormal, wetFilmHalf));
-    float wetVdotH = saturate(dot(viewDirNeg, wetFilmHalf));
-    float wetOneMinusVdotH = 1.0 - wetVdotH;
-    float wetOneMinusVdotH2 = wetOneMinusVdotH * wetOneMinusVdotH;
-    float wetFresnel =
-        0.02 +
-        0.98 * wetOneMinusVdotH2 * wetOneMinusVdotH2 *
-            wetOneMinusVdotH;
-    float wetnessF = wetFilmStrength * wetFresnel;
-
-    float wetA = wetFilmRoughness * wetFilmRoughness;
-    float wetA2 = wetA * wetA;
-    float wetDdenom = wetNdotH * wetNdotH * (wetA2 - 1.0) + 1.0;
-    float wetD = wetA2 / (3.141593 * wetDdenom * wetDdenom);
-    float wetVisV =
-        wetNdotL * (wetNdotV * (1.0 + wetA) + wetA);
-    float wetVisL =
-        wetNdotV * (wetNdotL * (1.0 + wetA) + wetA);
-    float wetG = 0.5 / max(wetVisV + wetVisL, 1.0e-6);
-    float wetSpecMag =
-        min(wetD * wetG * wetFresnel * wetNdotL, 15.0) *
-        wetFilmStrength;
-    float3 wetFilmSpecular =
-        wetNdotL * wetSpecMag * SunColor_HDR.xyz *
-        FO4_DIRECTIONAL_SPECULAR_SCALE;
-#ifdef AMBIENT_IBL_IN_LIGHT
-    float wetAmbientNdotVRaw = dot(wetFilmNormal, viewDirNeg);
-    float wetAmbientOneMinusNdotV =
-        1.0 - saturate(wetAmbientNdotVRaw);
-    float wetAmbientOneMinusNdotV2 =
-        wetAmbientOneMinusNdotV * wetAmbientOneMinusNdotV;
-    float wetAmbientFresnel =
-        0.02 +
-        0.98 * wetAmbientOneMinusNdotV2 * wetAmbientOneMinusNdotV2 *
-            wetAmbientOneMinusNdotV;
-    float ambientWetnessF = wetFilmStrength * wetAmbientFresnel;
-    float3 wetAmbientReflection =
-        2.0 * wetAmbientNdotVRaw * wetFilmNormal - viewDirNeg;
-    float3 wetFilmAmbient =
-        EvaluateAmbientGradient(wetAmbientReflection);
-#endif
-#endif
-
     float NdotV_view = saturate(dot(normalView, viewDirNeg));
     float ambientFres = 1.0 - NdotV_view;
     ambientFres = exp2(log2(ambientFres) * 0.01);
@@ -1040,27 +977,12 @@ PS_OUTPUT main(PS_INPUT input)
 
     float specMix = (1.0 - schlickFres * 0.5);
     output.specular.xyz = shadowPcf * specMix * brdfSpecular;
-#ifdef WETNESS_EFFECTS
-    output.specular.xyz *= 1.0 - wetnessF;
-    output.specular.xyz += shadowPcf * wetFilmSpecular;
-#ifdef AMBIENT_IBL_IN_LIGHT
-    ambientSpecular =
-        ambientSpecular * (1.0 - ambientWetnessF) +
-        wetFilmAmbient * ambientWetnessF;
-#endif
-#endif
 #ifdef AMBIENT_IBL_IN_LIGHT
     output.specular.xyz += ambientSpecular;
 #endif
     output.specular.w   = 1.0;
 
     output.diffuse.xyz = shadowPcf * finalDiffuse;
-#ifdef WETNESS_EFFECTS
-    output.diffuse.xyz *= 1.0 - wetnessF;
-#ifdef AMBIENT_IBL_IN_LIGHT
-    ambientDiffuse *= 1.0 - ambientWetnessF;
-#endif
-#endif
 #ifdef AMBIENT_IBL_IN_LIGHT
     output.diffuse.xyz += ambientDiffuse;
 #endif
@@ -2767,6 +2689,28 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
     brdfSpecular *= cookieRGB;
 #endif
 
+#if defined(WETNESS_EFFECTS) && !defined(ATTENUATION_ONLY)
+    float wetness =
+        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
+    float3 wetLightColor = LightColor_HDR.xyz * attenuation;
+#  ifdef GOBOPROJECTION
+    wetLightColor *= cookieRGB;
+#  endif
+    float3 wetDiffuse = attenuation * diffuseAccum;
+    float3 wetSpecular = attenuation * brdfSpecular;
+    WetnessEffects::ApplyDirectCoat(
+        normalView,
+        wetViewDir,
+        lightDir,
+        wetLightColor,
+        wetness,
+        wetDiffuse,
+        wetSpecular);
+    output.specular = float4(wetSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse, 0.0);
+    output.diffuse /= 3.0;
+#else
     output.specular.xyz = attenuation * brdfSpecular;
     output.specular.w   = 1.0;
 #if (defined(ATTENUATION_ONLY) \
@@ -2783,6 +2727,7 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
     output.diffuse.xyz = attenuation * diffuseAccum;
     output.diffuse.w = 0.0;
     output.diffuse /= asfloat(0x40400000);
+#endif
 #endif
 
     return output;
@@ -3980,6 +3925,29 @@ PS_OUTPUT main(PS_INPUT input)
     finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
     float specMix = mad(schlickFres, -0.5, 1.0);
+#ifdef WETNESS_EFFECTS
+    float wetness =
+        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
+    float3 wetDiffuse = finalDiffuse * shadow;
+    float3 wetSpecular = (brdfSpecular * specMix) * shadow;
+    WetnessEffects::ApplyDirectCoat(
+        normalView,
+        wetViewDir,
+        SunDirection.xyz,
+        SunColor_HDR.xyz * shadow,
+        wetness,
+        wetDiffuse,
+        wetSpecular);
+#  ifdef AMBIENT
+    output.specular = float4(wetSpecular + ambientSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse + ambientDiffuse, 0.0);
+#  else
+    output.specular = float4(wetSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse, 0.0);
+#  endif
+    output.diffuse /= 3.0;
+#else
 #ifdef AMBIENT
     float3 scaledSpecular = brdfSpecular * specMix;
     output.specular = float4(0.0, 0.0, 0.0, 1.0);
@@ -3998,6 +3966,7 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse = float4(finalDiffuse, 0.0);
     output.diffuse *= shadow;
     output.diffuse /= 3.0;
+#endif
 #endif
 
     return output;
@@ -5349,6 +5318,29 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     float specMix = 1.0 - schlickFres * 0.5;
 #endif
+#ifdef WETNESS_EFFECTS
+    float wetness =
+        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
+    float3 wetDiffuse = finalDiffuse * shadow;
+    float3 wetSpecular = (brdfSpecular * specMix) * shadow;
+    WetnessEffects::ApplyDirectCoat(
+        normalView,
+        wetViewDir,
+        SunDirection.xyz,
+        SunColor_HDR.xyz * shadow,
+        wetness,
+        wetDiffuse,
+        wetSpecular);
+#  ifdef AMBIENT
+    output.specular = float4(wetSpecular + ambientSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse + ambientDiffuse, 0.0);
+#  else
+    output.specular = float4(wetSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse, 0.0);
+#  endif
+    output.diffuse /= 3.0;
+#else
 #ifdef AMBIENT
 #if defined(FO4_DS2_TIGHT_AMBIENT_IGNORE) || defined(FO4_DS2_TARGET_ORDER)
     float3 scaledSpecular = brdfSpecular * specMix;
@@ -5387,6 +5379,7 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse.xyz = shadow * finalDiffuse;
     output.diffuse.xyz /= 3.0;
     output.diffuse.w = 0.0;
+#endif
 #endif
 #endif
 
@@ -6863,6 +6856,29 @@ PS_OUTPUT main(PS_INPUT input)
     float specMix = 1.0 - schlickFres * 0.5;
 #endif
 
+#ifdef WETNESS_EFFECTS
+    float wetness =
+        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
+    float3 wetDiffuse = finalDiffuse * shadow;
+    float3 wetSpecular = (brdfSpecular * specMix) * shadow;
+    WetnessEffects::ApplyDirectCoat(
+        normalView,
+        wetViewDir,
+        SunDirection.xyz,
+        SunColor_HDR.xyz * shadow,
+        wetness,
+        wetDiffuse,
+        wetSpecular);
+#  ifdef AMBIENT
+    output.specular = float4(wetSpecular + ambientSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse + ambientDiffuse, 0.0);
+#  else
+    output.specular = float4(wetSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse, 0.0);
+#  endif
+    output.diffuse /= 3.0;
+#else
 #ifdef FO4_DS3_TIGHT_NONAMBIENT
     output.specular.xyz = (brdfSpecular * specMix) * shadow;
     output.specular.w = 1.0;
@@ -6894,6 +6910,7 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
     output.diffuse.xyz /= 3.0;
     output.diffuse.w = 0.0;
+#endif
 #endif
 
     return output;
@@ -7292,6 +7309,29 @@ PS_OUTPUT main(PS_INPUT input)
     float3 cookieRGB = g_tLightCookie.Sample(g_sLightCookie, cookieUV).xyz;
 
     diffuseAccum *= cookieRGB;
+#ifdef WETNESS_EFFECTS
+    float wetness =
+        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
+    float3 wetLightColor = (LightColor_HDR.xyz * cookieRGB) * attenuation;
+    float3 wetDiffuse = diffuseAccum * attenuation;
+#  ifdef SPECULAR
+    float3 wetSpecular = (brdfSpecular * cookieRGB) * attenuation;
+#  else
+    float3 wetSpecular = float3(0, 0, 0);
+#  endif
+    WetnessEffects::ApplyDirectCoat(
+        normalView,
+        wetViewDir,
+        lightDir,
+        wetLightColor,
+        wetness,
+        wetDiffuse,
+        wetSpecular);
+    output.specular = float4(wetSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse, 0.0);
+    output.diffuse /= 3.0;
+#else
 #ifdef SPECULAR
     output.specular.xyz = (brdfSpecular * cookieRGB) * attenuation;
 #else
@@ -7301,6 +7341,7 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse = float4(diffuseAccum, 0.0);
     output.diffuse *= attenuation;
     output.diffuse /= 3.0;
+#endif
     return output;
 }
 
@@ -9623,6 +9664,43 @@ PS_OUTPUT main(PS_INPUT input)
     finalDiffuse += (forwardBlend * LightColor_HDR.xyz) * albedoSample.xyz;
 #endif
 
+#ifdef WETNESS_EFFECTS
+    float wetness =
+        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
+#  ifdef POINTOMNI
+    float3 wetLightColor = LightColor_HDR.xyz * attenuation;
+    float3 wetDiffuse = finalDiffuse * attenuation;
+#  else
+    float3 wetLightColor = LightColor_HDR.xyz;
+    float3 wetDiffuse = finalDiffuse;
+#  endif
+#  ifdef SPECULAR
+#    ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
+    float3 wetSpecular = brdfSpecular * mad(schlickFres, -0.5, 1.0);
+#    else
+    float3 wetSpecular = attenuation * brdfSpecular;
+#    endif
+#  else
+    float3 wetSpecular = float3(0, 0, 0);
+#  endif
+    WetnessEffects::ApplyDirectCoat(
+        normalView,
+        wetViewDir,
+        lightDir,
+        wetLightColor,
+        wetness,
+        wetDiffuse,
+        wetSpecular);
+#  ifdef AMBIENT
+    output.specular = float4(wetSpecular + ambientSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse + ambientDiffuse, 0.0);
+#  else
+    output.specular = float4(wetSpecular, 1.0);
+    output.diffuse = float4(wetDiffuse, 0.0);
+#  endif
+    output.diffuse /= 3.0;
+#else
 #ifdef SPECULAR
 #  ifdef FO4_UNSHADOWED_USES_GLOSS_FRESNEL
 #    if defined(FO4_UNSHADOWED_AMBIENT_IGNORE_ROUGHNESS) \
@@ -9662,6 +9740,7 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse *= attenuation;
 #  endif
     output.diffuse /= 3.0;
+#endif
 #endif
 
     return output;

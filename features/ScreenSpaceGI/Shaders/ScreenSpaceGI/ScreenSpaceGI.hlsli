@@ -7,6 +7,10 @@
 #include "Common/Color.hlsli"
 #include "Common/SphericalHarmonics.hlsli"
 
+#ifdef WETNESS_EFFECTS
+#include "WetnessEffects/WetnessEffects.hlsli"
+#endif
+
 namespace ScreenSpaceGI
 {
 	// occlusion: 0 open, 1 occluded
@@ -31,7 +35,8 @@ namespace ScreenSpaceGI
 		float3x3 viewToWorld,
 		float3 directLighting,
 		float3 directionalAmbient,
-		float engineAmbientOcclusion)
+		float engineAmbientOcclusion,
+		float wetness = 0.0)
 	{
 		if (!SharedData::screenSpaceGISettings.EnableScreenSpaceGI)
 			return (directLighting + directionalAmbient) * engineAmbientOcclusion;
@@ -41,7 +46,12 @@ namespace ScreenSpaceGI
 			saturate(1.0 - OcclusionTexture.Load(texel)),
 			SharedData::screenSpaceGISettings.AoPower);
 
+#ifdef WETNESS_EFFECTS
+		float3 albedo = saturate(
+			WetnessEffects::WetAlbedo(AlbedoTexture.Load(texel).rgb, wetness));
+#else
 		float3 albedo = saturate(AlbedoTexture.Load(texel).rgb);
+#endif
 		float3 linearAlbedo =
 			Color::IrradianceToLinear(albedo / Color::PBRLightingScale);
 		float3 multiBounceAO = Shading::MultiBounceAO(linearAlbedo, visibility);

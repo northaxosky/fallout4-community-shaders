@@ -224,6 +224,25 @@ target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
 add_test(NAME ScreenSpaceShadowsMath COMMAND ScreenSpaceShadowsMathTests)
 set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
 
+add_executable(WetnessEffectsMathTests
+	tests/WetnessEffectsMathTests.cpp
+	features/WetnessEffects/src/WetnessMath.h
+	src/FeatureBuffer.h
+)
+configure_host_test(WetnessEffectsMathTests)
+target_include_directories(WetnessEffectsMathTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/WetnessEffects/src"
+	"${CMAKE_SOURCE_DIR}/src"
+)
+
+add_test(
+	NAME WetnessEffectsMath
+	COMMAND WetnessEffectsMathTests
+		"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
+		"${CMAKE_SOURCE_DIR}/features/WetnessEffects/src/WetnessEffects.cpp"
+)
+set_tests_properties(WetnessEffectsMath PROPERTIES LABELS "render;shader;unit")
+
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
 	include/LogThrottle.h

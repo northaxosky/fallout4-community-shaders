@@ -148,6 +148,8 @@ namespace cs::engine
 		bool                   requested = false;
 		bool                   compileAttempted = false;
 		bool                   compileOk = false;
+		// every registered variant for this target prepared and reached kReady
+		bool                   compileComplete = false;
 		bool                   swappable = false;
 		bool                   slotCollision = false;
 		DeveloperShaderOverride developerOverride = DeveloperShaderOverride::kAuto;
@@ -170,6 +172,7 @@ namespace cs::engine
 		std::size_t requested = 0;
 		std::size_t compileAttempted = 0;
 		std::size_t compiled = 0;
+		std::size_t compileComplete = 0;
 		std::size_t swappable = 0;
 		std::size_t requestedByFeatureContributor = 0;
 		std::size_t requestedByBaselineOwnership = 0;

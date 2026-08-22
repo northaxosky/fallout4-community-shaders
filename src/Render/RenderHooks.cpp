@@ -244,10 +244,11 @@ namespace cs::engine
 		}
 	}
 
-	void EnsurePreSunLightDrawInstalled()
+	bool EnsurePreSunLightDrawInstalled()
 	{
-		if (!RegistrationAllowed("DeferredDrawAnchor")) return;
+		if (!RegistrationAllowed("DeferredDrawAnchor")) return false;
 		InstallDeferredDrawAnchor();
+		return g_deferredDrawAnchorInstalled;
 	}
 
 	bool RegisterPostDeferredPrePass(RenderHookCallback callback, HookPriority priority)
@@ -276,18 +277,20 @@ namespace cs::engine
 		EnsureDeferredLightsImplInstalled();
 	}
 
-	void RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority)
+	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PreDeferredComposite")) return;
+		if (!RegistrationAllowed("PreDeferredComposite")) return false;
 		InsertPrioritized(g_preDeferredComposite, std::move(callback), priority);
 		EnsureDeferredCompositeInstalled();
+		return true;
 	}
 
-	void RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
+	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority)
 	{
-		if (!RegistrationAllowed("PostDeferredComposite")) return;
+		if (!RegistrationAllowed("PostDeferredComposite")) return false;
 		InsertPrioritized(g_postDeferredComposite, std::move(callback), priority);
 		EnsureDeferredCompositeInstalled();
+		return true;
 	}
 
 	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback)

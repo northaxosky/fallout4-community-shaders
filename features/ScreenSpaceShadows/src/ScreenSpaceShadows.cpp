@@ -738,7 +738,7 @@ namespace cs::features
 						cs::engine::ComputeOMScope scope(context);
 
 						// Negate sunlight; transpose WorldRootCamera, not camViewData.
-						auto* sceneCamera = RE::Main::WorldRootCamera();
+						auto* sceneCamera = cs::engine::GetWorldRootCamera();
 						if (!sceneCamera) {
 							return;
 						}

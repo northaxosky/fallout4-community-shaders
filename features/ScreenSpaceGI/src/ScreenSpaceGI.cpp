@@ -432,12 +432,19 @@ namespace cs::features
 		}
 
 		_injectionRegistered.store(true, std::memory_order_release);
-		cs::engine::RegisterPreDeferredComposite([] {
-			ScreenSpaceGI::GetSingleton()->SaveCompositionBindings();
-		}, cs::engine::HookPriority::Early);
-		cs::engine::RegisterPostDeferredComposite([] {
-			ScreenSpaceGI::GetSingleton()->RestoreCompositionBindings();
-		}, cs::engine::HookPriority::Late);
+		const bool compositionScopeRegistered =
+			cs::engine::RegisterPreDeferredComposite([] {
+				ScreenSpaceGI::GetSingleton()->SaveCompositionBindings();
+			}, cs::engine::HookPriority::Early)
+			&& cs::engine::RegisterPostDeferredComposite([] {
+				ScreenSpaceGI::GetSingleton()->RestoreCompositionBindings();
+			}, cs::engine::HookPriority::Late);
+		if (!compositionScopeRegistered) {
+			FailLoad(
+				"ScreenSpaceGI needs a paired composite save and restore to hand its "
+				"bindings back to the engine; registering that pair failed");
+			return;
+		}
 		// Deferred lighting has written the radiance source by this anchor.
 		cs::engine::RegisterPostDeferredLightsImpl([] {
 			ScreenSpaceGI::GetSingleton()->OnPostDeferredLights();
@@ -864,7 +871,7 @@ namespace cs::features
 		}
 
 		auto* rtm = cs::engine::GetRenderTargetManager();
-		auto* sceneCamera = RE::Main::WorldRootCamera();
+		auto* sceneCamera = cs::engine::GetWorldRootCamera();
 		DirectX::XMFLOAT4X4 worldProj{};
 		DirectX::XMFLOAT4X4 worldInvProj{};
 		DirectX::XMFLOAT4 worldNdcToViewMul{};
