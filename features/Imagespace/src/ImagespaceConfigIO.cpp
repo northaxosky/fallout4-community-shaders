@@ -343,7 +343,14 @@ namespace cs::features::imagespace
 			&& ReadFloatStrict(*settings, "focus_distance", "settings", 10.0f, 100000.0f, s.focusDistance, a_error)
 			&& ReadFloatStrict(*settings, "focal_length", "settings", 1.0f, 200.0f, s.focalLength, a_error)
 			&& ReadFloatStrict(*settings, "focus_range", "settings", 10.0f, 10000.0f, s.focusRange, a_error)
-			&& ReadIntStrict(*settings, "dof_quality", "settings", 0, 2, s.dofQuality, a_error)
+			&& ReadIntStrict(
+				*settings,
+				"dof_quality",
+				"settings",
+				kDofQualityMin,
+				kDofQualityMax,
+				s.dofQuality,
+				a_error)
 			&& ReadFloatStrict(*settings, "coc_limit_factor", "settings", 0.005f, 0.10f, s.cocLimitFactor, a_error)
 			&& ReadFloatStrict(*settings, "bokeh_intensity", "settings", 0.0f, 1.0f, s.bokehIntensity, a_error)
 			&& ReadFloatStrict(*settings, "anamorph_ratio", "settings", 0.25f, 4.0f, s.anamorphRatio, a_error);
@@ -500,7 +507,11 @@ namespace cs::features::imagespace
 		s.focusDistance  = readFloat("focus_distance", s.focusDistance, 10.0f, 100000.0f);
 		s.focalLength    = readFloat("focal_length", s.focalLength, 1.0f, 200.0f);
 		s.focusRange     = readFloat("focus_range", s.focusRange, 10.0f, 10000.0f);
-		s.dofQuality     = readInt("dof_quality", s.dofQuality, 0, 2);
+		s.dofQuality     = readInt(
+			"dof_quality",
+			s.dofQuality,
+			kDofQualityMin,
+			kDofQualityMax);
 		s.cocLimitFactor = readFloat("coc_limit_factor", s.cocLimitFactor, 0.005f, 0.10f);
 		s.bokehIntensity = readFloat("bokeh_intensity", s.bokehIntensity, 0.0f, 1.0f);
 		s.anamorphRatio  = readFloat("anamorph_ratio", s.anamorphRatio, 0.25f, 4.0f);

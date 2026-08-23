@@ -243,6 +243,18 @@ add_test(
 )
 set_tests_properties(WetnessEffectsMath PROPERTIES LABELS "render;shader;unit")
 
+add_executable(ImagespaceSettingsTests
+	tests/ImagespaceSettingsTests.cpp
+	features/Imagespace/src/ImagespaceSettings.h
+)
+configure_host_test(ImagespaceSettingsTests)
+target_include_directories(ImagespaceSettingsTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/Imagespace/src"
+)
+
+add_test(NAME ImagespaceSettings COMMAND ImagespaceSettingsTests)
+set_tests_properties(ImagespaceSettings PROPERTIES LABELS "configuration;unit")
+
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
 	include/LogThrottle.h

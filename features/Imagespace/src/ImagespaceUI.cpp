@@ -239,7 +239,7 @@ namespace cs::features
 		ImGui::SetItemTooltip("Width of the sharp zone around the focus plane.");
 		commitDirty();
 		const char* qualityNames[] = { "Performance (12 taps)", "Quality (24 taps)" };
-		int qualityIdx = std::clamp(settings.dofQuality, 0, 1);
+		int qualityIdx = imagespace::ClampDofQuality(settings.dofQuality);
 		if (ImGui::Combo("Quality", &qualityIdx, qualityNames, IM_ARRAYSIZE(qualityNames))) {
 			settings.dofQuality = qualityIdx;
 			dirty = true;

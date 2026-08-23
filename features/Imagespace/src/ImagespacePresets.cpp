@@ -191,12 +191,12 @@ namespace cs::features
 				settings.aperture      = 0.05f;
 				settings.focusDistance = 1500.0f;
 				settings.focalLength   = 50.0f;
-				settings.dofQuality    = 1;
+				settings.dofQuality    = imagespace::kDofQualityMax;
 			} else if (dof_c == '2') {
 				settings.aperture      = 0.30f;
 				settings.focusDistance = 500.0f;
 				settings.focalLength   = 50.0f;
-				settings.dofQuality    = 2;
+				settings.dofQuality    = imagespace::kDofQualityMax;
 			}
 			// Smoke levels 1-4 force visible effects.
 			if (styleP && style_c >= '1' && style_c <= '4') {

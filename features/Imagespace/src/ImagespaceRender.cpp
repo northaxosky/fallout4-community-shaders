@@ -583,7 +583,8 @@ namespace cs::features
 		cb.HalfDimensions[1] = dofHeight;
 		cb.FullDimensions[0] = a_width;
 		cb.FullDimensions[1] = a_height;
-		cb.QualityLevel   = static_cast<uint32_t>(std::clamp(settings.dofQuality, 0, 1));
+		cb.QualityLevel   =
+			static_cast<uint32_t>(imagespace::ClampDofQuality(settings.dofQuality));
 		cb.NearPlane      = nearP;
 		cb.FarPlane       = farP;
 		cb.BokehIntensity = settings.bokehIntensity;

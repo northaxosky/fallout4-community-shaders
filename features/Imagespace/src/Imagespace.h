@@ -3,6 +3,7 @@
 #include "Buffer.h"
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "ImagespaceSettings.h"
 #include "LUTCache.h"
 #include "WeatherProfiles.h"
 
@@ -97,7 +98,7 @@ namespace cs::features
 			float       focusDistance      = 1500.0f;
 			float       focalLength        = 50.0f;
 			float       focusRange         = 200.0f;
-			int         dofQuality         = 1;
+			int         dofQuality         = imagespace::kDofQualityMax;
 			float       cocLimitFactor     = 0.04f;
 			float       bokehIntensity     = 0.0f;
 			float       anamorphRatio      = 1.0f;
