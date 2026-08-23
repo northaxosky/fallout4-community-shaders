@@ -19,7 +19,7 @@ injected in place of the stock shaders.
 [![Version](https://img.shields.io/badge/version-0.2.0%20·%20WIP-orange?style=for-the-badge)](version.txt)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 
-[![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.221-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
+[![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.240-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](CMakeLists.txt)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
@@ -39,7 +39,7 @@ injected in place of the stock shaders.
 
 | | |
 |---|---|
-| **Game** | Fallout 4 runtime **1.11.221**. Older `1.10.x` code paths remain in the project but are not currently advertised or validated. |
+| **Game** | Fallout 4 runtime **1.11.240**. Older `1.10.x` code paths remain in the project but are not currently advertised or validated. |
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
