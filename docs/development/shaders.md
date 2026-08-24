@@ -161,7 +161,9 @@ Feature telemetry reports those counts alongside the live source count.
 Motion vectors come from `RenderTarget::kMotionVectors=29` (`R16G16_FLOAT`,
 full resolution, single sample). `BSDFPrePass` writes `(currNDC - prevNDC)`
 scaled by `(-0.5, +0.5)`, so reprojection is `previousUV = currentUV + motion`.
-MotionVectorFixes stays optional; it is not a resource dependency.
+RT29 is supplied by the native deferred-prepass route or the owned
+`BSDFPrePass` reconstruction when shader ownership is enabled; no compatibility
+feature is required.
 
 The pass order is radiance capture and history reprojection, radiance mips,
 depth and normal mips, GI generation and temporal SH/CoCg blend, then spatial

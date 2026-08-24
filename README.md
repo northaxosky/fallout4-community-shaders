@@ -54,7 +54,6 @@ injected in place of the stock shaders.
 
 | Feature | Implementation |
 |---|---|
-| **Motion Vector Fixes** | Repairs player, weapon, menu, animated-object, and LOD motion-vector paths. |
 | **Upscaling** | DLSS and FSR3 upscaling or native AA, with quality modes and sharpening controls. XeSS upscaling is not implemented. |
 | **Frame Generation** | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop. |
 | **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |

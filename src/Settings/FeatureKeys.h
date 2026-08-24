@@ -5,13 +5,12 @@
 
 namespace cs::feature_config
 {
-	inline constexpr std::array<std::string_view, 8> kAllFeatureKeys{
+	inline constexpr std::array<std::string_view, 7> kAllFeatureKeys{
 		"ScreenSpaceGI",
 		"WetnessEffects",
 		"ScreenSpaceShadows",
 		"Upscaling",
 		"FrameGeneration",
-		"MotionVectorFixes",
 		"PerformanceOverlay",
 		"RenderDoc"
 	};

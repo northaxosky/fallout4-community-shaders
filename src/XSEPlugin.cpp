@@ -57,7 +57,7 @@ extern "C" DLLEXPORT constinit auto F4SEPlugin_Version = []() noexcept {
 	data.UsesSigScanning(false);
 	data.IsLayoutDependent(true);
 	data.HasNoStructUse(false);
-	// new runtime checklist: all 14 write_thunk_call sites, including reticleOffsets + literal
+	// new runtime checklist: all 13 write_thunk_call sites, including reticleOffsets + literal
 	// unknown runtimes fall through to AE and silently apply stale offsets
 	data.CompatibleVersions({ F4SE::RUNTIME_LATEST });
 

@@ -264,25 +264,25 @@ namespace
 		const auto defaultPath = a_root / "Default.toml";
 		const auto userPath = a_root / "User.toml";
 
-		WriteFile(defaultPath, "[features.MotionVectorFixes]\nload = false\n");
-		WriteFile(userPath, "[features.MotionVectorFixes\nload = true\n");
+		WriteFile(defaultPath, "[features.ScreenSpaceShadows]\nload = false\n");
+		WriteFile(userPath, "[features.ScreenSpaceShadows\nload = true\n");
 		const auto malformedUser = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
 		CHECK(malformedUser.defaultLoaded);
 		CHECK(!malformedUser.userLoaded);
 		CHECK(!malformedUser.userWarning.empty());
-		CHECK(malformedUser.root["features"]["MotionVectorFixes"]["load"].value<bool>() == std::optional<bool>{ false });
+		CHECK(malformedUser.root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == std::optional<bool>{ false });
 
-		WriteFile(defaultPath, "[features.MotionVectorFixes\nload = false\n");
-		WriteFile(userPath, "[features.MotionVectorFixes]\nload = true\n");
+		WriteFile(defaultPath, "[features.ScreenSpaceShadows\nload = false\n");
+		WriteFile(userPath, "[features.ScreenSpaceShadows]\nload = true\n");
 		const auto malformedDefault = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
 		CHECK(!malformedDefault.defaultLoaded);
 		CHECK(!malformedDefault.defaultError.empty());
 		CHECK(malformedDefault.root.empty());
 
-		WriteFile(defaultPath, "[features.MotionVectorFixes]\nload = false\n");
+		WriteFile(defaultPath, "[features.ScreenSpaceShadows]\nload = false\n");
 		std::filesystem::remove(userPath);
-		const auto motionVectors = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
-		const auto* feature = motionVectors.root["features"]["MotionVectorFixes"].as_table();
+		const auto screenSpaceShadows = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		const auto* feature = screenSpaceShadows.root["features"]["ScreenSpaceShadows"].as_table();
 		CHECK(feature != nullptr);
 		CHECK(feature && !feature->contains("settings"));
 		const auto activation = feature ? cs::feature_config::ParseActivation(*feature) :
@@ -290,30 +290,35 @@ namespace
 		CHECK(activation.valid && activation.present && !activation.load);
 	}
 
-	// A retired feature key left behind in a user file must stay harmless.
+	// Retired feature keys left behind in a user file must stay harmless.
 	void TestUnknownFeatureTableIsHarmless(const std::filesystem::path& a_root)
 	{
 		const auto defaultPath = a_root / "Unknown.Default.toml";
 		const auto userPath = a_root / "Unknown.User.toml";
 
-		WriteFile(defaultPath, "[features.MotionVectorFixes]\nload = false\n");
+		WriteFile(defaultPath, "[features.ScreenSpaceShadows]\nload = false\n");
 		WriteFile(
 			userPath,
-			"[features.MotionVectorFixes]\n"
+			"[features.ScreenSpaceShadows]\n"
 			"load = true\n"
 			"[features.Imagespace]\n"
 			"load = true\n"
 			"[features.Imagespace.settings]\n"
-			"enabled = true\n");
+			"enabled = true\n"
+			"[features.MotionVectorFixes]\n"
+			"load = true\n");
 
 		const auto merged = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
 		CHECK(merged.defaultLoaded);
 		CHECK(merged.userLoaded);
 		CHECK(merged.defaultError.empty());
 		CHECK(merged.userWarning.empty());
-		CHECK(merged.root["features"]["MotionVectorFixes"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(merged.root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == std::optional<bool>{ true });
 		CHECK(merged.root["features"]["Imagespace"].as_table() != nullptr);
+		CHECK(merged.root["features"]["MotionVectorFixes"].as_table() != nullptr);
 		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "Imagespace") ==
+			cs::feature_config::kAllFeatureKeys.end());
+		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "MotionVectorFixes") ==
 			cs::feature_config::kAllFeatureKeys.end());
 	}
 

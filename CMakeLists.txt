@@ -142,7 +142,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 
 	# Features attach their own sources to FO4CommunityShaders via target_sources.
 	# Registration order is lifecycle order.
-	register_feature(MotionVectorFixes)
 	register_feature(Upscaling)
 	register_feature(FrameGeneration)
 	register_feature(RenderDoc)

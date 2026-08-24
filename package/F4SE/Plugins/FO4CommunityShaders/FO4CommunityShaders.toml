@@ -88,9 +88,6 @@ load = false
 
 [features.FrameGeneration.settings]
 
-[features.MotionVectorFixes]
-load = false
-
 [features.PerformanceOverlay]
 load = false
 
