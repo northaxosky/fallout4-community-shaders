@@ -2,8 +2,8 @@
 
 # FO4 Community Shaders
 
-**Modern rendering features for Fallout 4 - upscaling, frame generation, screen-space
-lighting, and post-processing - as an open [F4SE](https://f4se.silverlock.org/) plugin.**
+**Modern rendering features for Fallout 4 - upscaling, frame generation, and screen-space
+lighting - as an open [F4SE](https://f4se.silverlock.org/) plugin.**
 
 A Fallout 4 port of the ideas in
 [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders),
@@ -60,7 +60,6 @@ injected in place of the stock shaders.
 | **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
-| **Imagespace** | Tonemapping, exposure, bloom, 32³ LUT grading, vignette, chromatic aberration, sharpening, lens effects, depth of field, and weather profiles. |
 | **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
 | **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |
 
@@ -72,7 +71,7 @@ Every feature is opt-in. Add its exact key to
 `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml`:
 
 ```toml
-[features.Imagespace]
+[features.ScreenSpaceShadows]
 load = true
 ```
 
@@ -84,7 +83,7 @@ runtime state, but it does **not** hot-load or unload features.
 
 A feature loads only when its `[features.<Name>].load` value is `true`. A malformed Default file
 disables all features; a malformed User file is ignored. Presets configure only features that
-are already activated - they cannot activate Imagespace or any other feature.
+are already activated - they cannot activate any feature.
 
 Baseline shader ownership is separately opt-in and does not load a feature. Set `enabled = true`
 under `[shader_ownership]` in the User TOML to replace the deferred targets with their
@@ -105,7 +104,7 @@ opt-outs. Restart after changing ownership.
 Feature hotkeys are configurable in the unified TOML: `toggle_hotkey` for the overlay,
 `capture_hotkey` and `multi_capture_hotkey` for RenderDoc. Set a key to `"none"` to unbind it.
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
-assets (Imagespace LUTs, shaders, presets) live in subdirectories beneath it.
+assets (fonts, presets) live in subdirectories beneath it.
 
 ---
 
@@ -137,10 +136,9 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 - **Frame generation** requires a D3D12 feature-level 12.0 device and the runtime files for the
   selected backend; backend availability depends on the device and SDK. Changing the FG backend
   or multiplier requires a restart. RenderDoc also initializes at startup.
-- **ENB** handling is feature-specific: Imagespace yields to ENB unless explicitly forced,
-  Upscaling is limited to Native AA, DLSS-G is not used under ENB, and frame generation may fall
-  back to FSR3-FG when that runtime is available.
-- **Imagespace** does not run CAS sharpening while chromatic aberration is active.
+- **ENB** handling is feature-specific: Screen Space Shadows, Screen Space GI, and Wetness Effects
+  deactivate under ENB, Upscaling is limited to Native AA, DLSS-G is not used under ENB, and frame
+  generation may fall back to FSR3-FG when that runtime is available.
 - **RenderDoc** requires an external `renderdoc.dll` exposing API 1.7.0 and is incompatible with
   DLSS-G for that session.
 - A successful build or launch does **not** prove a rendering path is visually correct - in-game

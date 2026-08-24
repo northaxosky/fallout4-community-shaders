@@ -1,6 +1,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <filesystem>
@@ -289,6 +290,33 @@ namespace
 		CHECK(activation.valid && activation.present && !activation.load);
 	}
 
+	// A retired feature key left behind in a user file must stay harmless.
+	void TestUnknownFeatureTableIsHarmless(const std::filesystem::path& a_root)
+	{
+		const auto defaultPath = a_root / "Unknown.Default.toml";
+		const auto userPath = a_root / "Unknown.User.toml";
+
+		WriteFile(defaultPath, "[features.MotionVectorFixes]\nload = false\n");
+		WriteFile(
+			userPath,
+			"[features.MotionVectorFixes]\n"
+			"load = true\n"
+			"[features.Imagespace]\n"
+			"load = true\n"
+			"[features.Imagespace.settings]\n"
+			"enabled = true\n");
+
+		const auto merged = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		CHECK(merged.defaultLoaded);
+		CHECK(merged.userLoaded);
+		CHECK(merged.defaultError.empty());
+		CHECK(merged.userWarning.empty());
+		CHECK(merged.root["features"]["MotionVectorFixes"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(merged.root["features"]["Imagespace"].as_table() != nullptr);
+		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "Imagespace") ==
+			cs::feature_config::kAllFeatureKeys.end());
+	}
+
 	void TestAtomicWriteRoundTrip(const std::filesystem::path& a_root)
 	{
 		const auto userPath = a_root / "Atomic.User.toml";
@@ -564,6 +592,7 @@ int main(int a_argc, char* a_argv[])
 			TestShaderOwnershipParsing();
 			TestDeepMerge();
 			TestMergedLoadFailureModes(directory.path);
+			TestUnknownFeatureTableIsHarmless(directory.path);
 			TestAtomicWriteRoundTrip(directory.path);
 			TestScalarReaders();
 		} else {

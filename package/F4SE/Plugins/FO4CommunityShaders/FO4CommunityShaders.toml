@@ -78,11 +78,6 @@ surface_thickness = 0.02
 bilinear_threshold = 0.02
 shadow_contrast = 1.0
 
-[features.Imagespace]
-load = false
-
-[features.Imagespace.settings]
-
 [features.Upscaling]
 load = false
 

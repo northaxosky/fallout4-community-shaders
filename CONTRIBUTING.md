@@ -111,7 +111,7 @@ build output and feature shaders:
 - `features\<Name>\Shaders\<Name>\` -> `Data\Shaders\<Name>\`
 
 `package\` mirrors the mod's `Data\` directly: `package\Shaders\` holds the reconstructed
-deferred shaders and `package\F4SE\` holds plugin configuration, presets, LUTs, and staged
+deferred shaders and `package\F4SE\` holds plugin configuration, presets, and staged
 runtime SDK DLLs.
 
 Launch the result through MO2/F4SE. Building and deploying does not perform any

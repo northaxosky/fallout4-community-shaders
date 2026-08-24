@@ -147,7 +147,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(FrameGeneration)
 	register_feature(RenderDoc)
 	register_feature(PerformanceOverlay)
-	register_feature(Imagespace)
 	register_feature(ScreenSpaceShadows)
 	register_feature(ScreenSpaceGI)
 	register_feature(WetnessEffects)
@@ -243,18 +242,6 @@ add_test(
 )
 set_tests_properties(WetnessEffectsMath PROPERTIES LABELS "render;shader;unit")
 
-add_executable(ImagespaceSettingsTests
-	tests/ImagespaceSettingsTests.cpp
-	features/Imagespace/src/ImagespaceSettings.h
-)
-configure_host_test(ImagespaceSettingsTests)
-target_include_directories(ImagespaceSettingsTests PRIVATE
-	"${CMAKE_SOURCE_DIR}/features/Imagespace/src"
-)
-
-add_test(NAME ImagespaceSettings COMMAND ImagespaceSettingsTests)
-set_tests_properties(ImagespaceSettings PROPERTIES LABELS "configuration;unit")
-
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
 	include/LogThrottle.h
@@ -316,7 +303,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		DIRECTORIES
 			"${CMAKE_SOURCE_DIR}/package/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/FrameGeneration/Shaders"
-			"${CMAKE_SOURCE_DIR}/features/Imagespace/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"

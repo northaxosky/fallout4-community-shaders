@@ -627,7 +627,7 @@ void Upscaling::DrawSettings()
 			settings.presetDLSS = static_cast<uint>(std::clamp(preset, 0, 4));
 			SaveSettings();
 		}
-		ImGui::TextDisabled("DLSS sharpening moved to Imagespace -> Lens -> Sharpen (CAS).");
+		ImGui::TextDisabled("DLSS sharpening is unavailable; no sharpening pass runs.");
 	}
 
 	if (activeMethod == UpscaleMethod::kFSR) {

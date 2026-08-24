@@ -31,7 +31,6 @@ namespace cs::engine
 		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
 		std::vector<PrioritizedCallback>    g_preDeferredComposite;
 		std::vector<PrioritizedCallback>    g_postDeferredComposite;
-		std::vector<RenderHookCallback>     g_postDynResViewport_Imagespace;
 		std::vector<PostDynResViewportFGCb> g_postDynResViewport_FGCapture;
 		std::vector<PrioritizedCallback>    g_preSunLightDraw;
 		bool g_prePassInstalled            = false;
@@ -172,16 +171,13 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Post-FX must precede frame-generation capture.
+		// Capture must observe the post-upscale viewport.
 		struct PostDynResViewport_Hook
 		{
 			static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_setting)
 			{
 				MarkRegistrationClosed();
 				func(This, a_setting);
-				for (auto& cb : g_postDynResViewport_Imagespace) {
-					cb();
-				}
 				for (auto& cb : g_postDynResViewport_FGCapture) {
 					cb(a_setting);
 				}
@@ -293,13 +289,6 @@ namespace cs::engine
 		return true;
 	}
 
-	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback)
-	{
-		if (!RegistrationAllowed("PostDynResViewport_Imagespace")) return;
-		g_postDynResViewport_Imagespace.push_back(std::move(callback));
-		EnsurePostDynResViewportInstalled();
-	}
-
 	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback)
 	{
 		if (!RegistrationAllowed("PostDynResViewport_FGCapture")) return;
@@ -325,7 +314,7 @@ namespace cs::engine
 		g_postDynResViewportPreThunkOwner = std::string(a_ownerLabel);
 		g_postDynResViewportPreThunkClaimed = true;
 		if (g_postDynResViewportInstalled) {
-			L->error("PostDynResViewport pre-thunk '{}' installed AFTER the broker; wrap order is inverted. Imagespace post-FX and FGCapture will now run before the pre-thunk body (pre-upscale pixels).",
+			L->error("PostDynResViewport pre-thunk '{}' installed AFTER the broker; wrap order is inverted. FGCapture will now run before the pre-thunk body (pre-upscale pixels).",
 				a_ownerLabel);
 		} else {
 			L->info("PostDynResViewport pre-thunk '{}' claimed; broker will chain after it.", a_ownerLabel);

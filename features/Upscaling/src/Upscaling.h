@@ -54,7 +54,7 @@ public:
 		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS;
 		// 0=Native, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
 		uint qualityMode = 1;
-		// FSR3 RCAS strength; DLSS uses Imagespace CAS.
+		// FSR3 RCAS strength; DLSS currently has no sharpening pass.
 		float sharpnessFSR = 0.0f;
 		// 0=Default, 1=J, 2=K, 3=L, 4=M.
 		uint presetDLSS = 0;

@@ -871,7 +871,7 @@ void FrameGeneration::InstallHooks()
 	// Swallow FO4's duplicate init resize event.
 	stl::detour_thunk<WindowSizeChanged>(REL::ID({ 212827, 2276824, 2276824 }));
 
-	// Post-FX must precede HUD-less capture.
+	// Capture after native and optional upscale work.
 	cs::engine::RegisterPostDynResViewport_FGCapture([](bool a_setting) {
 		if (!a_setting) {
 			FrameGeneration::GetSingleton()->PostDisplay();

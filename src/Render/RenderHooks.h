@@ -21,8 +21,7 @@ namespace cs::engine
 	bool RegisterPreDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
-	// Fixed slots keep post-FX before HUD-less capture.
-	void RegisterPostDynResViewport_Imagespace(RenderHookCallback callback);
+	// Capture runs after the viewport swap, behind any pre-thunk.
 	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback);
 
 	// Claim viewport thunks before broker registration.
