@@ -136,12 +136,16 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 
 ## Compatibility notes
 
-- **ENB is unsupported.** Do not use it with this plugin.
+- **ENB is not supported.** Features whose effects overlap ENB - Screen Space Shadows, Screen
+  Space GI, Wetness Effects, and Upscaling - deactivate themselves when ENB is loaded. The
+  remaining features still run, but the combination is untested.
 - **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
   load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
   needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR
   `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is independent of the
   selected super-resolution method and defaults off in pause, main, loading, and Pip-Boy menus.
+- **Motion Vector Fixes** installs its player-transform hook on every runtime, but the
+  animation-sequence correction is unproven on OG (1.10.163) and is skipped there.
 - **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries
   render-resolution motion in the upper-left sub-rect while upscaling is active.
 - **RenderDoc** requires an external `renderdoc.dll` exposing API 1.7.0. It initializes at startup,
@@ -149,6 +153,7 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   disable capture before diagnosing FSR3 crashes.
 - A successful build or launch does **not** prove a rendering path is visually correct - in-game
   validation is still required.
+
 ---
 
 ## License
