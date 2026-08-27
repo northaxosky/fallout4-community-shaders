@@ -67,11 +67,18 @@ function Get-Archive {
 function Copy-StagedFile {
 	param([string]$ExtractRoot, [string]$FileName, [string]$Destination, [bool]$Required)
 
-	$match = Get-ChildItem -LiteralPath $ExtractRoot -Recurse -File -Filter $FileName |
-		Sort-Object FullName |
-		Select-Object -First 1
+	# Entries are archive-relative paths: SDK archives ship the same file name in several
+	# places, including watermarked development builds under bin/x64/development.
+	$leaf = Split-Path -Path $FileName -Leaf
+	$relative = ($FileName -replace '/', '\')
+	$rootPrefix = (Resolve-Path -LiteralPath $ExtractRoot).Path.TrimEnd('\') + '\'
 
-	if (-not $match) {
+	$found = @(Get-ChildItem -LiteralPath $ExtractRoot -Recurse -File -Filter $leaf |
+		Where-Object {
+			$_.FullName.Substring($rootPrefix.Length).Equals($relative, [System.StringComparison]::OrdinalIgnoreCase)
+		})
+
+	if ($found.Count -eq 0) {
 		if ($Required) {
 			throw "Required file '$FileName' was not found in the archive."
 		}
@@ -79,8 +86,8 @@ function Copy-StagedFile {
 		return
 	}
 
-	Copy-Item -LiteralPath $match.FullName -Destination (Join-Path $Destination $FileName) -Force
-	Write-Host "  staged $FileName"
+	Copy-Item -LiteralPath $found[0].FullName -Destination (Join-Path $Destination $leaf) -Force
+	Write-Host "  staged $leaf"
 }
 
 foreach ($package in $manifest.Packages) {

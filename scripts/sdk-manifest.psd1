@@ -8,16 +8,17 @@
 			Url         = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.12.0/streamline-sdk-v2.12.0.zip'
 			Sha256      = 'f5c0a3d870707dddc3570fb4bcd3655cf48a8a68c3a9d342910cfa21b77dcf48'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline'
-			# Located by file name anywhere inside the archive to reject silent layout substitutions.
+			# Pinned to the production binaries; the archive also ships watermarked
+			# development builds of all four under bin/x64/development.
 			Files       = @(
-				'sl.interposer.dll',
-				'sl.common.dll',
-				'sl.dlss.dll',
-				'nvngx_dlss.dll'
+				'bin/x64/sl.interposer.dll',
+				'bin/x64/sl.common.dll',
+				'bin/x64/sl.dlss.dll',
+				'bin/x64/nvngx_dlss.dll'
 			)
 			Licenses    = @(
 				'license.txt',
-				'nvngx_dlss.license.txt'
+				'bin/x64/nvngx_dlss.license.txt'
 			)
 		}
 		@{
@@ -27,11 +28,11 @@
 			Sha256      = '25ba44ea2f50ee8488a59b13636bd1bd5e31ca10f8ca4bce242a96534c9cc3e3'
 			Destination = 'features/Upscaling/Shaders/Upscaling/FidelityFX'
 			Files       = @(
-				'amd_fidelityfx_framegeneration_dx12.dll',
-				'amd_fidelityfx_loader_dx12.dll'
+				'Shaders/Upscaling/FidelityFX/amd_fidelityfx_framegeneration_dx12.dll',
+				'Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll'
 			)
 			Licenses    = @(
-				'license.md'
+				'Shaders/Upscaling/FidelityFX/license.md'
 			)
 		}
 	)
