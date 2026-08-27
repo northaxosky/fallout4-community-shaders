@@ -1,126 +1,109 @@
-#Requires -Version 5.1
 <#
 .SYNOPSIS
-    Stage proprietary third-party SDK runtime DLLs (NVIDIA Streamline, AMD FidelityFX,
-    Intel XeSS) into package\F4SE\Plugins.
+	Downloads and stages the proprietary runtime DLLs that are not vendored in this repository.
 
 .DESCRIPTION
-    These runtime binaries are not build outputs and are intentionally not committed.
-    Run once after cloning, or when SDK versions change. Archive-sourced SDKs are
-    downloaded, SHA256-verified, and cached under .sdk-cache\; the XeSS DLLs are copied
-    out of the extern\XeSS submodule. Versions, URLs, and checksums live in
-    scripts\sdk-manifest.psd1.
+	Reads scripts/sdk-manifest.psd1, downloads each pinned archive, verifies its SHA-256 against
+	the manifest, and stages the required files into the mod package tree. Re-running is cheap:
+	an archive whose digest already matches the cached copy is not downloaded again.
+
+.PARAMETER CacheDirectory
+	Where downloaded archives are kept. Defaults to <repo>/.sdk-cache.
 
 .PARAMETER Force
-    Re-download / re-copy even when the target DLLs are already present.
-
-.PARAMETER Manifest
-    Override the manifest path (defaults to scripts\sdk-manifest.psd1).
-
-.EXAMPLE
-    pwsh scripts\fetch-sdks.ps1
-
-.EXAMPLE
-    pwsh scripts\fetch-sdks.ps1 -Force
+	Re-download archives even when a verified cached copy exists.
 #>
 [CmdletBinding()]
 param(
-    [switch]$Force,
-    [string]$Manifest
+	[string]$CacheDirectory,
+	[switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
-# System.IO.Compression.FileSystem is loaded by default on PS 7 but not on 5.1.
-try { Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction Stop } catch { }
+Set-StrictMode -Version Latest
 
-$scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot   = Split-Path -Parent $scriptDir
-$packageDir = Join-Path $repoRoot 'package'
-$cacheDir   = Join-Path $repoRoot '.sdk-cache'
-if (-not $Manifest) { $Manifest = Join-Path $scriptDir 'sdk-manifest.psd1' }
+$repoRoot = Split-Path -Parent $PSScriptRoot
+$manifestPath = Join-Path $PSScriptRoot 'sdk-manifest.psd1'
+if (-not (Test-Path -LiteralPath $manifestPath)) {
+	throw "SDK manifest not found at $manifestPath"
+}
 
-if (-not (Test-Path $Manifest)) { throw "SDK manifest not found: $Manifest" }
-$sdk = Import-PowerShellDataFile -Path $Manifest
-New-Item -ItemType Directory -Force -Path $cacheDir | Out-Null
+if (-not $CacheDirectory) {
+	$CacheDirectory = Join-Path $repoRoot '.sdk-cache'
+}
+New-Item -ItemType Directory -Force -Path $CacheDirectory | Out-Null
 
-function Test-Sha256 {
-    param([string]$Path, [string]$Expected)
-    $actual = (Get-FileHash -Algorithm SHA256 -Path $Path).Hash.ToLowerInvariant()
-    if ($actual -ne $Expected.ToLowerInvariant()) {
-        Remove-Item -Force -Path $Path -ErrorAction SilentlyContinue
-        throw "SHA256 mismatch for $Path`n  expected: $($Expected.ToLowerInvariant())`n  actual:   $actual"
-    }
+$manifest = Import-PowerShellDataFile -LiteralPath $manifestPath
+
+function Test-Digest {
+	param([string]$Path, [string]$Expected)
+	if (-not (Test-Path -LiteralPath $Path)) { return $false }
+	$actual = (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
+	return $actual -ieq $Expected
 }
 
 function Get-Archive {
-    param([string]$Name, [string]$Url, [string]$Sha256, [string]$OutFile)
-    if (-not (Test-Path $OutFile)) {
-        Write-Host "  Downloading $Name..."
-        & curl.exe -fSL $Url -o $OutFile
-        if ($LASTEXITCODE -ne 0) { throw "Failed to download $Url" }
-    }
-    Test-Sha256 -Path $OutFile -Expected $Sha256
+	param([hashtable]$Package)
+
+	$archivePath = Join-Path $CacheDirectory ("{0}-{1}.zip" -f $Package.Name, $Package.Version)
+
+	if (-not $Force -and (Test-Digest -Path $archivePath -Expected $Package.Sha256)) {
+		Write-Host "[$($Package.Name)] cached archive digest matches; skipping download."
+		return $archivePath
+	}
+
+	Write-Host "[$($Package.Name)] downloading $($Package.Url)"
+	Invoke-WebRequest -Uri $Package.Url -OutFile $archivePath -UseBasicParsing
+
+	if (-not (Test-Digest -Path $archivePath -Expected $Package.Sha256)) {
+		$actual = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash
+		throw "[$($Package.Name)] SHA-256 mismatch. expected=$($Package.Sha256) actual=$actual"
+	}
+
+	Write-Host "[$($Package.Name)] digest verified."
+	return $archivePath
 }
 
-function Expand-ArchiveEntries {
-    param([string]$Zip, [string]$EntryDir, [string[]]$Dlls, [string]$Dest)
-    New-Item -ItemType Directory -Force -Path $Dest | Out-Null
-    $archive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
-    try {
-        foreach ($dll in $Dlls) {
-            $entryName = "$EntryDir/$dll"
-            $entry = $archive.GetEntry($entryName)
-            if (-not $entry) { Write-Warning "  $entryName not found in archive"; continue }
-            $target = Join-Path $Dest $dll
-            [System.IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
-        }
-    } finally {
-        $archive.Dispose()
-    }
+function Copy-StagedFile {
+	param([string]$ExtractRoot, [string]$FileName, [string]$Destination, [bool]$Required)
+
+	$match = Get-ChildItem -LiteralPath $ExtractRoot -Recurse -File -Filter $FileName |
+		Sort-Object FullName |
+		Select-Object -First 1
+
+	if (-not $match) {
+		if ($Required) {
+			throw "Required file '$FileName' was not found in the archive."
+		}
+		Write-Warning "Optional file '$FileName' was not found in the archive."
+		return
+	}
+
+	Copy-Item -LiteralPath $match.FullName -Destination (Join-Path $Destination $FileName) -Force
+	Write-Host "  staged $FileName"
 }
 
-function Test-AllPresent {
-    param([string]$Dest, [string[]]$Dlls)
-    foreach ($dll in $Dlls) {
-        if (-not (Test-Path (Join-Path $Dest $dll))) { return $false }
-    }
-    return $true
+foreach ($package in $manifest.Packages) {
+	$archivePath = Get-Archive -Package $package
+
+	$extractRoot = Join-Path $CacheDirectory ("{0}-{1}-extracted" -f $package.Name, $package.Version)
+	if (Test-Path -LiteralPath $extractRoot) {
+		Remove-Item -LiteralPath $extractRoot -Recurse -Force
+	}
+	Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
+
+	$destination = Join-Path $repoRoot $package.Destination
+	New-Item -ItemType Directory -Force -Path $destination | Out-Null
+
+	foreach ($file in $package.Files) {
+		Copy-StagedFile -ExtractRoot $extractRoot -FileName $file -Destination $destination -Required $true
+	}
+	foreach ($license in $package.Licenses) {
+		Copy-StagedFile -ExtractRoot $extractRoot -FileName $license -Destination $destination -Required $true
+	}
+
+	Remove-Item -LiteralPath $extractRoot -Recurse -Force
+	Write-Host "[$($package.Name)] staged into $($package.Destination)"
 }
 
-Write-Host '=== Fetching SDK runtime DLLs ==='
-
-foreach ($a in $sdk.Archives) {
-    $dest = Join-Path $packageDir $a.Dest
-    if ((Test-AllPresent -Dest $dest -Dlls $a.Dlls) -and (-not $Force)) {
-        Write-Host "  $($a.Name) DLLs already present, skipping (use -Force to re-download)"
-        continue
-    }
-    $zip = Join-Path $cacheDir $a.Archive
-    Get-Archive -Name "$($a.Name) SDK $($a.Version)" -Url $a.Url -Sha256 $a.Sha256 -OutFile $zip
-    Expand-ArchiveEntries -Zip $zip -EntryDir $a.EntryDir -Dlls $a.Dlls -Dest $dest
-    if (-not (Test-Path (Join-Path $dest $a.Sentinel))) {
-        throw "$($a.Sentinel) not found after extraction"
-    }
-    Write-Host "  $($a.Name) $($a.Version): $($a.Dlls.Count) DLLs staged"
-}
-
-foreach ($c in $sdk.Copies) {
-    $dest = Join-Path $packageDir $c.Dest
-    if ((Test-AllPresent -Dest $dest -Dlls $c.Dlls) -and (-not $Force)) {
-        Write-Host "  $($c.Name) DLLs already present, skipping (use -Force to re-copy)"
-        continue
-    }
-    $src = Join-Path $repoRoot $c.SourceDir
-    if (-not (Test-Path $src)) {
-        throw "$($c.Name) source not found: $src. Run: git submodule update --init $($c.Submodule)"
-    }
-    New-Item -ItemType Directory -Force -Path $dest | Out-Null
-    foreach ($dll in $c.Dlls) {
-        $from = Join-Path $src $dll
-        if (-not (Test-Path $from)) { throw "Missing $from" }
-        Copy-Item -Force -Path $from -Destination (Join-Path $dest $dll)
-    }
-    Write-Host "  $($c.Name): $($c.Dlls.Count) DLLs copied from submodule"
-}
-
-Write-Host '=== Done ==='
+Write-Host 'SDK staging complete.'

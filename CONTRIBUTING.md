@@ -23,11 +23,11 @@ Set `FXC_PATH` to use a compiler outside the default Windows SDK location.
 
 Optional tooling:
 
-- Windows PowerShell 5.1 or PowerShell 7 (`pwsh`), plus `curl` (bundled with Windows 10 1803+), for runtime SDK staging (`scripts/fetch-sdks.ps1`)
+- Windows PowerShell 5.1 or PowerShell 7 (`pwsh`) for the developer scripts under `scripts\`
 
 ## Clone
 
-Clone recursively because CommonLibF4, FidelityFX-SDK, Streamline, and XeSS are
+Clone recursively because CommonLibF4, FidelityFX-SDK, and Streamline are
 submodules, and CommonLibF4 has its own nested submodule.
 
 ```bash
@@ -45,11 +45,21 @@ shell, and resume from the repository root:
 git lfs install
 git submodule sync --recursive
 git submodule update --init --recursive --checkout
-git -C extern/Streamline lfs pull
 ```
 
-The Streamline submodule contains LFS-backed NGX libraries required at link time.
-CMake reports an actionable error if they are missing or remain as pointer files.
+## Stage the SDK runtime DLLs
+
+Streamline's interposer, DLSS plugin and `nvngx_dlss.dll` are proprietary and are not vendored.
+Run the staging script once after cloning, and again whenever `scripts\sdk-manifest.psd1` changes:
+
+```bash
+pwsh scripts/fetch-sdks.ps1
+```
+
+It downloads each pinned archive, verifies its SHA-256 against the manifest, and stages the
+required files into `features\Upscaling\Shaders\Upscaling\Streamline\`, which deploys to
+`Data\Shaders\Upscaling\Streamline\`. FidelityFX FSR 3 needs no staging: its DX11 backend builds
+from the `extern\FidelityFX-SDK` submodule.
 
 ## Configure and build
 
@@ -87,20 +97,6 @@ ctest --test-dir build -C Release --output-on-failure
 `package\Shaders\` through `D3DCompile`, the same compiler the
 plugin uses at runtime. Editing those shaders must keep it green.
 
-## Stage runtime SDKs
-
-The source submodules provide headers and link libraries. A complete mod installation
-also needs proprietary runtime DLLs, which are not build outputs:
-
-```powershell
-pwsh scripts\fetch-sdks.ps1
-```
-
-Run it with PowerShell 7 (`pwsh`) or Windows PowerShell 5.1
-(`powershell.exe -File scripts\fetch-sdks.ps1`). It verifies and caches the NVIDIA
-Streamline and AMD FidelityFX archives, then stages NVIDIA, AMD, and Intel runtime DLLs
-under `package\F4SE\Plugins\`. Pass `-Force` to refresh files already present.
-
 ## Install or deploy
 
 The repository does not have a CMake install target or package-generation target. For
@@ -111,8 +107,7 @@ build output and feature shaders:
 - `features\<Name>\Shaders\<Name>\` -> `Data\Shaders\<Name>\`
 
 `package\` mirrors the mod's `Data\` directly: `package\Shaders\` holds the reconstructed
-deferred shaders and `package\F4SE\` holds plugin configuration, presets, and staged
-runtime SDK DLLs.
+deferred shaders and `package\F4SE\` holds plugin configuration and presets.
 
 Launch the result through MO2/F4SE. Building and deploying does not perform any
 visual comparison; rendering behavior must be checked in game.
@@ -122,10 +117,10 @@ visual comparison; rendering behavior must be checked in game.
 ```text
 src\                Core feature framework, renderer hooks, menu, and presets
 features\<Name>\    Feature source and optional runtime-compiled shaders
-cmake\              Build integration for CommonLibF4 and graphics SDKs
+cmake\              Build integration for CommonLibF4
 extern\             Recursive source submodules
-package\            Mod assets: config, presets, reconstructed shaders, staged SDK files
-scripts\            SDK staging and developer tooling
+package\            Mod assets: config, presets, reconstructed shaders
+scripts\            Developer tooling
 tests\              Host and shader tests run by CTest
 docs\               Developer documentation
 ```

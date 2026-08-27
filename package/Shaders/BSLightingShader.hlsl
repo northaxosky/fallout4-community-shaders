@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "Common/MipBias.hlsli"
 #ifdef BSLIGHTING_PS_COLOR
 
 #ifdef BSL_BASE_BLEND_TINT
@@ -139,14 +140,14 @@ PSOutput main(PSInput input)
 {
     float3 viewDirection = normalize(input.eyeDirection);
 
-    float4 baseColor = diffuseTexture.Sample(diffuseSampler, input.texCoord);
+    float4 baseColor = diffuseTexture.SampleBias(diffuseSampler, input.texCoord, FO4CS_MIP_BIAS);
 
     float2 rawNormalXY =
-        normalTexture.Sample(normalSampler, input.texCoord).xy * 2.0 - 1.0;
+        normalTexture.SampleBias(normalSampler, input.texCoord, FO4CS_MIP_BIAS).xy * 2.0 - 1.0;
     float3 rawNormal =
         float3(rawNormalXY, sqrt(1.0 - min(dot(rawNormalXY, rawNormalXY), 1.0)));
 
-    float2 material = smoothnessTexture.Sample(smoothnessSampler, input.texCoord).xy;
+    float2 material = smoothnessTexture.SampleBias(smoothnessSampler, input.texCoord, FO4CS_MIP_BIAS).xy;
     float glossiness = material.y * geometryData[11].x;
     float specularMask = material.x * geometryData[11].y;
     float translucency =
@@ -466,19 +467,19 @@ PSOutput main(PSInput input)
 {
     float3 viewDirection = normalize(input.eyeDirection);
 
-    float4 baseColor = diffuseTexture.Sample(diffuseSampler, input.texCoord);
+    float4 baseColor = diffuseTexture.SampleBias(diffuseSampler, input.texCoord, FO4CS_MIP_BIAS);
 
 #ifdef BSL_REDUCED_NORMAL
     float3 rawNormal =
-        normalTexture.Sample(normalSampler, input.texCoord).xyz * 2.0 - 1.0;
+        normalTexture.SampleBias(normalSampler, input.texCoord, FO4CS_MIP_BIAS).xyz * 2.0 - 1.0;
 #else
     float2 rawNormalXY =
-        normalTexture.Sample(normalSampler, input.texCoord).xy * 2.0 - 1.0;
+        normalTexture.SampleBias(normalSampler, input.texCoord, FO4CS_MIP_BIAS).xy * 2.0 - 1.0;
     float3 rawNormal =
         float3(rawNormalXY, sqrt(1.0 - min(dot(rawNormalXY, rawNormalXY), 1.0)));
 #endif
 
-    float2 material = smoothnessTexture.Sample(smoothnessSampler, input.texCoord).xy;
+    float2 material = smoothnessTexture.SampleBias(smoothnessSampler, input.texCoord, FO4CS_MIP_BIAS).xy;
     float glossiness = material.y * geometryData[11].x;
     float specularMask = material.x * geometryData[11].y;
     float translucency =
@@ -630,7 +631,7 @@ PSOutput main(PSInput input)
 
 #ifdef BSL_GLOWMAP
     float3 emitColor =
-        geometryData[3].yzw * glowTexture.Sample(glowSampler, input.texCoord).xyz;
+        geometryData[3].yzw * glowTexture.SampleBias(glowSampler, input.texCoord, FO4CS_MIP_BIAS).xyz;
 #else
     float3 emitColor = geometryData[3].yzw;
 #endif
@@ -826,10 +827,10 @@ PSOutput main(PSInput input)
 {
     float3 viewDirection = normalize(input.eyeDirection);
 
-    float4 baseColor = diffuseTexture.Sample(diffuseSampler, input.texCoord);
+    float4 baseColor = diffuseTexture.SampleBias(diffuseSampler, input.texCoord, FO4CS_MIP_BIAS);
 
     float2 rawNormalXY =
-        normalTexture.Sample(normalSampler, input.texCoord).xy * 2.0 - 1.0;
+        normalTexture.SampleBias(normalSampler, input.texCoord, FO4CS_MIP_BIAS).xy * 2.0 - 1.0;
     float3 rawNormal =
         float3(rawNormalXY, sqrt(1.0 - min(dot(rawNormalXY, rawNormalXY), 1.0)));
 
@@ -843,7 +844,7 @@ PSOutput main(PSInput input)
     float3 baseTint = baseColor.xyz;
 #endif
 
-    float2 material = smoothnessTexture.Sample(smoothnessSampler, input.texCoord).xy;
+    float2 material = smoothnessTexture.SampleBias(smoothnessSampler, input.texCoord, FO4CS_MIP_BIAS).xy;
     float glossiness = material.y * geometryData[11].x;
     float specularMask = material.x * geometryData[11].y;
     float translucency =
@@ -1021,7 +1022,7 @@ PSOutput main(PSInput input)
     clip(baseColor.w * input.color.w - geometryData[3].x);
 
 #ifdef BSL_OVERLAY
-    float4 overlay = overlayTexture.Sample(overlaySampler, input.texCoord);
+    float4 overlay = overlayTexture.SampleBias(overlaySampler, input.texCoord, FO4CS_MIP_BIAS);
     float3 overlayColor = pow(overlay.xyz, 2.2) * overlay.w;
     float overlayBlend = 1.0 - overlay.w * frameData[0].x;
     psout.color.xyz = psout.color.xyz * overlayBlend + overlayColor;

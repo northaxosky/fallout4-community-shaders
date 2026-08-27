@@ -918,21 +918,32 @@ namespace cs
 			return;
 
 		DXGI_SWAP_CHAIN_DESC desc{};
-		_chain->GetDesc(&desc);
+		if (FAILED(_chain->GetDesc(&desc)))
+			return;
 		const UINT w = desc.BufferDesc.Width;
 		const UINT h = desc.BufferDesc.Height;
-
-		if (_backbufferRTV && w == _backbufferW && h == _backbufferH)
-			return;
-
-		ReleaseBackbufferRTV();
 
 		ID3D11Texture2D* backbuffer = nullptr;
 		if (FAILED(_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backbuffer))) || !backbuffer)
 			return;
 
-		_device->CreateRenderTargetView(backbuffer, nullptr, &_backbufferRTV);
+		if (_backbufferRTV && w == _backbufferW && h == _backbufferH) {
+			ID3D11Resource* cached = nullptr;
+			_backbufferRTV->GetResource(&cached);
+			const bool unchanged = cached == backbuffer;
+			if (cached)
+				cached->Release();
+			if (unchanged) {
+				backbuffer->Release();
+				return;
+			}
+		}
+
+		ReleaseBackbufferRTV();
+		const HRESULT result = _device->CreateRenderTargetView(backbuffer, nullptr, &_backbufferRTV);
 		backbuffer->Release();
+		if (FAILED(result))
+			return;
 		_backbufferW = w;
 		_backbufferH = h;
 	}
@@ -1666,7 +1677,7 @@ namespace cs
 			cs::log::SaveConfigToToml();
 
 		DrawSectionLabel("Developer");
-		DrawSubtext("Show capture, shader catalog, and shader replacement tools.");
+		DrawSubtext("Show developer tools such as RenderDoc.");
 		bool developerMode = _developerMode;
 		if (ImGui::Checkbox("Developer mode", &developerMode)) {
 			const bool previousMode = _developerMode;

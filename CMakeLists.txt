@@ -70,8 +70,6 @@ find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
-set(FO4CS_NLOHMANN_JSON_INCLUDE_DIR
-	"${CMAKE_SOURCE_DIR}/extern/Streamline/external/json/include")
 find_path(MICROSOFT_DETOURS_INCLUDE_DIR "detours/detours.h" REQUIRED)
 find_library(MICROSOFT_DETOURS_LIBRARY_RELEASE
 	NAMES detours
@@ -91,12 +89,7 @@ if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
 endif()
 
-# Lightweight INTERFACE targets. FidelityFX-SDK is heavier and is added by features that need it.
-add_subdirectory(cmake/Streamline)
-add_subdirectory(cmake/XeSS)
 if(NOT FO4CS_HOST_TESTS_ONLY)
-	include(Ngx)
-
 	# Single unified DLL target.
 	add_library(FO4CommunityShaders SHARED)
 
@@ -110,14 +103,10 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
 
 	include(Common)
-	include(FidelityFX)
 	configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
 
 	target_include_directories(FO4CommunityShaders BEFORE PRIVATE
 		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
-	)
-	target_include_directories(FO4CommunityShaders SYSTEM PRIVATE
-		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
 	)
 	target_link_libraries(FO4CommunityShaders PRIVATE
 		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
@@ -128,7 +117,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		Microsoft::DirectXTex
 		Microsoft::DirectX-Headers
 		bcrypt.lib
-		d3d12.lib
 		magic_enum::magic_enum
 		d3dcompiler.lib
 		imgui::imgui
@@ -142,13 +130,17 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 
 	# Features attach their own sources to FO4CommunityShaders via target_sources.
 	# Registration order is lifecycle order.
-	register_feature(Upscaling)
-	register_feature(FrameGeneration)
 	register_feature(RenderDoc)
 	register_feature(PerformanceOverlay)
+	register_feature(MotionVectorFixes)
+	register_feature(Upscaling)
 	register_feature(ScreenSpaceShadows)
 	register_feature(ScreenSpaceGI)
 	register_feature(WetnessEffects)
+
+	# Upscaling backends: Streamline headers are interface-only, FidelityFX builds from source.
+	add_subdirectory(cmake/Streamline)
+	include(FidelityFX-SDK)
 endif()
 
 enable_testing()
@@ -253,6 +245,47 @@ add_test(NAME LogThrottle COMMAND LogThrottleTests)
 set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
 if(NOT FO4CS_HOST_TESTS_ONLY)
+	add_executable(UpscalingPublicationTests
+		tests/UpscalingPublicationTests.cpp
+		features/Upscaling/src/UpscalingPublication.h
+		src/Render/RendererContext.cpp
+		src/Render/RendererContext.h
+	)
+	configure_host_test(UpscalingPublicationTests)
+	target_precompile_headers(UpscalingPublicationTests PRIVATE
+		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+	)
+	target_compile_definitions(UpscalingPublicationTests PRIVATE
+		_WINDOWS
+		_AMD64_
+		_UNICODE
+		COMMONLIB_RUNTIMECOUNT=3
+	)
+	target_include_directories(UpscalingPublicationTests BEFORE PRIVATE
+		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
+		"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
+		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+	)
+	target_link_libraries(UpscalingPublicationTests PRIVATE
+		CommonLibF4::CommonLibF4
+		Microsoft::DirectXTK
+		Microsoft::DirectX-Headers
+		bcrypt.lib
+		d3d11.lib
+		d3dcompiler.lib
+		imgui::imgui
+		magic_enum::magic_enum
+		spdlog::spdlog
+		tomlplusplus::tomlplusplus
+	)
+
+	add_test(NAME UpscalingPublication COMMAND UpscalingPublicationTests)
+	set_tests_properties(UpscalingPublication PROPERTIES LABELS "render;unit")
+
 	add_executable(ProjectionMathTests
 		tests/ProjectionMathTests.cpp
 	)
@@ -301,7 +334,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		DESTINATION "${FO4CS_SHADER_STAGE_DIR}"
 		DIRECTORIES
 			"${CMAKE_SOURCE_DIR}/package/Shaders"
-			"${CMAKE_SOURCE_DIR}/features/FrameGeneration/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
@@ -343,9 +375,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/tests"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
-	)
-	target_include_directories(ShaderCompileTests SYSTEM PRIVATE
-		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
 	)
 	target_link_libraries(ShaderCompileTests PRIVATE
 		CommonLibF4::CommonLibF4
@@ -401,9 +430,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/tests"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
-	)
-	target_include_directories(ShaderCacheBenchmarkTests SYSTEM PRIVATE
-		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
 	)
 	target_link_libraries(ShaderCacheBenchmarkTests PRIVATE
 		CommonLibF4::CommonLibF4
@@ -489,9 +515,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/tests"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
-	)
-	target_include_directories(ShaderInjectionRegistrationTests SYSTEM PRIVATE
-		"${FO4CS_NLOHMANN_JSON_INCLUDE_DIR}"
 	)
 	target_link_libraries(ShaderInjectionRegistrationTests PRIVATE
 		CommonLibF4::CommonLibF4

@@ -2,7 +2,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <exception>
 #include <mutex>
+#include <utility>
+#include <vector>
 
 #include "Log.h"
 #include "LogThrottle.h"
@@ -16,12 +19,22 @@ namespace cs::render
 		std::atomic<CreateDeviceAndSwapChain> nextCreateDeviceAndSwapChain{ nullptr };
 		std::mutex installMutex;
 		bool installAttempted = false;
-		IsCreateProviderActive isFrameGenerationActive = nullptr;
-		FrameGenerationEvaluate evaluateFrameGeneration = nullptr;
-		FrameGenerationInline runFrameGenerationInline = nullptr;
-		IsCreateProviderActive isUpscalingActive = nullptr;
-		UpscalingPreCreate runUpscalingPreCreate = nullptr;
-		UpscalingPostCreate runUpscalingPostCreate = nullptr;
+		std::vector<PreCreateDeviceCallback> preCreateCallbacks;
+		std::vector<PostCreateDeviceCallback> postCreateCallbacks;
+		ReplacementCreateDeviceCallback replacementCreateCallback;
+
+		// A throwing callback must never cross the game's import boundary.
+		template <class Fn>
+		void RunGuarded(const char* a_phase, Fn&& a_fn) noexcept
+		{
+			try {
+				a_fn();
+			} catch (const std::exception& e) {
+				L->error("SwapChainHook {} callback threw: {}", a_phase, e.what());
+			} catch (...) {
+				L->error("SwapChainHook {} callback threw", a_phase);
+			}
+		}
 
 		HRESULT WINAPI CreateDeviceAndSwapChainThunk(
 			IDXGIAdapter* a_adapter,
@@ -44,46 +57,73 @@ namespace cs::render
 				return E_FAIL;
 			}
 
-			SwapChainCreateContext context{
+			DXGI_SWAP_CHAIN_DESC swapChainDesc{};
+			const bool hasDesc = a_swapChainDesc != nullptr;
+			std::vector<D3D_FEATURE_LEVEL> featureLevels;
+			if (a_featureLevels && a_featureLevelCount) {
+				featureLevels.assign(a_featureLevels, a_featureLevels + a_featureLevelCount);
+			}
+			if (hasDesc) {
+				swapChainDesc = *a_swapChainDesc;
+				for (auto& callback : preCreateCallbacks) {
+					RunGuarded("pre-create", [&] { callback(&swapChainDesc, featureLevels); });
+				}
+			}
+
+			const auto* requestedFeatureLevels =
+				featureLevels.empty() ? a_featureLevels : featureLevels.data();
+			const auto requestedFeatureLevelCount =
+				featureLevels.empty() ? a_featureLevelCount : static_cast<UINT>(featureLevels.size());
+			CreateDeviceAndSwapChainContext context{
+				.realCreate = next,
 				.adapter = a_adapter,
 				.driverType = a_driverType,
 				.software = a_software,
 				.flags = a_flags,
-				.featureLevels = a_featureLevels,
-				.featureLevelCount = a_featureLevelCount,
+				.featureLevels = requestedFeatureLevels,
+				.featureLevelCount = requestedFeatureLevelCount,
 				.sdkVersion = a_sdkVersion,
-				.swapChainDesc = a_swapChainDesc,
+				.swapChainDesc = hasDesc ? &swapChainDesc : nullptr,
 				.swapChain = a_swapChain,
 				.device = a_device,
 				.featureLevel = a_featureLevel,
 				.immediateContext = a_immediateContext
 			};
 
-			FrameGenerationCreateRoute frameGenerationRoute{};
-			const bool frameGenerationActive = isFrameGenerationActive && isFrameGenerationActive();
-			if (frameGenerationActive) {
-				frameGenerationRoute = evaluateFrameGeneration(context);
+			std::optional<HRESULT> replacementResult;
+			if (replacementCreateCallback) {
+				RunGuarded("replacement-create", [&] {
+					replacementResult = replacementCreateCallback(context);
+				});
 			}
 
-			const bool upscalingActive = isUpscalingActive && isUpscalingActive();
-			if (upscalingActive) {
-				runUpscalingPreCreate(context);
-			}
+			const HRESULT result = replacementResult
+				? *replacementResult
+				: next(
+					a_adapter,
+					a_driverType,
+					a_software,
+					a_flags,
+					requestedFeatureLevels,
+					requestedFeatureLevelCount,
+					a_sdkVersion,
+					hasDesc ? &swapChainDesc : nullptr,
+					a_swapChain,
+					a_device,
+					a_featureLevel,
+					a_immediateContext);
 
-			HRESULT result;
-			if (frameGenerationRoute.inlineProxy) {
-				result = runFrameGenerationInline(context, frameGenerationRoute.factory);
-			} else {
-				result = context.Call(next);
-				if (upscalingActive) {
-					result = runUpscalingPostCreate(result, context);
+			if (SUCCEEDED(result)) {
+				// Callbacks run before the bootstrap so an interface upgrade is visible to it.
+				for (auto& callback : postCreateCallbacks) {
+					RunGuarded("post-create", [&] { callback(a_adapter, a_device, a_swapChain); });
 				}
 			}
 
 			cs::d3d11::RunBootstrapPostCreate(
 				result,
 				a_adapter,
-				a_swapChainDesc,
+				hasDesc ? &swapChainDesc : nullptr,
 				a_swapChain,
 				a_device,
 				a_immediateContext);
@@ -92,24 +132,27 @@ namespace cs::render
 		}
 	}
 
-	void RegisterFrameGenerationCreatePhases(
-		IsCreateProviderActive a_isActive,
-		FrameGenerationEvaluate a_evaluate,
-		FrameGenerationInline a_inline)
+	void RegisterPreCreateDeviceAndSwapChain(PreCreateDeviceCallback a_callback)
 	{
-		isFrameGenerationActive = a_isActive;
-		evaluateFrameGeneration = a_evaluate;
-		runFrameGenerationInline = a_inline;
+		if (a_callback) {
+			preCreateCallbacks.push_back(std::move(a_callback));
+		}
 	}
 
-	void RegisterUpscalingCreatePhases(
-		IsCreateProviderActive a_isActive,
-		UpscalingPreCreate a_preCreate,
-		UpscalingPostCreate a_postCreate)
+	void RegisterPostCreateDeviceAndSwapChain(PostCreateDeviceCallback a_callback)
 	{
-		isUpscalingActive = a_isActive;
-		runUpscalingPreCreate = a_preCreate;
-		runUpscalingPostCreate = a_postCreate;
+		if (a_callback) {
+			postCreateCallbacks.push_back(std::move(a_callback));
+		}
+	}
+
+	bool RegisterReplacementCreateDeviceAndSwapChain(ReplacementCreateDeviceCallback a_callback)
+	{
+		if (!a_callback || replacementCreateCallback) {
+			return false;
+		}
+		replacementCreateCallback = std::move(a_callback);
+		return true;
 	}
 
 	void InstallSwapChainHook()

@@ -39,8 +39,19 @@ namespace cs::engine
 	class ComputeOMScope
 	{
 	public:
-		explicit ComputeOMScope(ID3D11DeviceContext* a_ctx) noexcept :
-			_om(a_ctx), _cs(a_ctx)
+		explicit ComputeOMScope(
+			ID3D11DeviceContext* a_ctx,
+			UINT a_srvCount = 8,
+			UINT a_samplerCount = 8,
+			UINT a_uavCount = 8,
+			UINT a_constantBufferCount = 8) noexcept :
+			_om(a_ctx),
+			_cs(
+				a_ctx,
+				a_srvCount,
+				a_samplerCount,
+				a_uavCount,
+				a_constantBufferCount)
 		{}
 
 		ComputeOMScope(const ComputeOMScope&)            = delete;

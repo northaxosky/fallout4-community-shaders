@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstdint>
+
+#include <d3d11_4.h>
+
 #define NV_WINDOWS
 
 #pragma warning(push)
@@ -10,36 +14,68 @@
 #include <sl_matrix_helpers.h>
 #include <sl_version.h>
 #pragma warning(pop)
-#include "IUpscalerBackend.h"
 
-namespace cs::features::upscaling
+namespace cs::features
 {
-
-// Shared Streamline owns SDK plumbing.
-class Streamline : public IUpscalerBackend
-{
-public:
-	static Streamline* GetSingleton()
+	class Streamline
 	{
-		static Streamline singleton;
-		return &singleton;
-	}
+	public:
+		static constexpr const wchar_t* PluginDir = L"Data\\Shaders\\Upscaling\\Streamline";
 
-	bool IsAvailable() const override;
-	void CreateResources() override {}
-	void DestroyResources() override { DestroyDLSSResources(); }
-	bool NeedsDilatedMotionVectors() const override { return true; }
+		Streamline() = default;
 
-	void CacheDLSSFunctions();
+		bool initialized = false;
+		bool triedInitialization = false;
+		bool featureDLSS = false;
+		bool deviceRegistered = false;
 
-	void Upscale(Texture2D* a_color, Texture2D* a_dilatedMotionVectorTexture, Texture2D* a_reactiveMask, Texture2D* a_transparencyMask, float2 a_jitter, float2 a_renderSize, uint a_qualityMode) override;
-	void UpdateConstants(float2 a_jitter);
-	void DestroyDLSSResources();
+		sl::ViewportHandle viewport{ 0 };
+		HMODULE interposer = nullptr;
 
-	sl::ViewportHandle viewport{ 0 };
-	sl::FrameToken*    frameToken = nullptr;
+		PFun_slInit* slInit{};
+		PFun_slIsFeatureSupported* slIsFeatureSupported{};
+		PFun_slIsFeatureLoaded* slIsFeatureLoaded{};
+		PFun_slEvaluateFeature* slEvaluateFeature{};
+		PFun_slFreeResources* slFreeResources{};
+#pragma warning(push)
+#pragma warning(disable: 4996)
+		PFun_slSetTag* slSetTag{};
+#pragma warning(pop)
+		PFun_slGetFeatureRequirements* slGetFeatureRequirements{};
+		PFun_slUpgradeInterface* slUpgradeInterface{};
+		PFun_slSetConstants* slSetConstants{};
+		PFun_slGetFeatureFunction* slGetFeatureFunction{};
+		PFun_slGetNewFrameToken* slGetNewFrameToken{};
+		PFun_slSetD3DDevice* slSetD3DDevice{};
 
-	PFun_slDLSSSetOptions*         slDLSSSetOptions{};
-};
+		PFun_slDLSSSetOptions* slDLSSSetOptions{};
 
+		sl::FrameToken* frameToken = nullptr;
+
+		bool isRTXBelow40series = false;
+
+		void EvaluateDLSS(sl::ViewportHandle vp,
+			ID3D11Resource* colorIn, ID3D11Resource* colorOut, ID3D11Resource* depth,
+			ID3D11Resource* mvec, ID3D11Resource* reactiveMask, ID3D11Resource* transparencyMask,
+			const sl::Extent& extentIn, const sl::Extent& extentOut, std::uint32_t outputWidth);
+
+		void LoadInterposer();
+
+		void UpgradeInterfaces(ID3D11Device** a_device, IDXGISwapChain** a_swapChain);
+		bool SetDevice(ID3D11Device* a_device);
+
+		void CheckFeatures(IDXGIAdapter* a_adapter);
+		void PostDevice();
+		bool EnsureFrameToken();
+		bool CheckFrameConstants(sl::ViewportHandle p_viewport);
+		bool IsRTXAndBelow40Series(IDXGIAdapter* a_adapter);
+		bool SetDLSSOptions(sl::ViewportHandle p_viewport, std::uint32_t width);
+
+		bool Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors);
+		void DestroyDLSSResources();
+
+	private:
+		std::uint32_t _lastFrameToken = UINT32_MAX;
+		bool _evaluatedThisDispatch = false;
+	};
 }

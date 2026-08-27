@@ -6,6 +6,9 @@
 #include <d3d11.h>
 
 #include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <iterator>
 #include <xmmintrin.h>
 
 namespace cs::engine
@@ -26,6 +29,30 @@ namespace cs::engine
 	{
 		auto* worldRoot = RE::Main::WorldRootNode();
 		return worldRoot ? worldRoot->camera.get() : nullptr;
+	}
+
+	inline void SetDynamicResolutionRatios(float a_widthRatio, float a_heightRatio)
+	{
+		if (auto* renderTargetManager = GetRenderTargetManager()) {
+			renderTargetManager->SetDynamicResolutionState(
+				a_widthRatio,
+				a_heightRatio,
+				renderTargetManager->IsDynamicResolutionCurrentlyActivated());
+		}
+	}
+
+	inline void SetDynamicResolution(float a_widthRatio, float a_heightRatio, bool a_activated)
+	{
+		if (auto* renderTargetManager = GetRenderTargetManager()) {
+			renderTargetManager->SetDynamicResolutionState(a_widthRatio, a_heightRatio, a_activated);
+		}
+	}
+
+	// Master enable read by ImageSpaceEffectTemporalAA::IsActive; FO4 has no bUseTAA INI literal.
+	[[nodiscard]] inline std::uint32_t* GetTemporalAAEnableGlobal()
+	{
+		static REL::Relocation<std::uint32_t*> global{ REL::ID({ 0, 2704658, 2704658 }) };
+		return global.get();
 	}
 
 	// Prefer viewFrustum; setup mirrors use these globals.
@@ -165,6 +192,7 @@ namespace cs::engine
 
 		kSSAO = 28,
 
+		// RT29 is full-resolution R16G16_FLOAT motion; half-resolution RT32 contains none.
 		kMotionVectors = 29,
 
 		kUIDownscaled = 36,
@@ -177,7 +205,8 @@ namespace cs::engine
 		kSSAOTemp2 = 49,
 		kSSAOTemp3 = 50,
 
-		kUnkMask = 57,
+		// Scalable Ambient Obscurance working buffer, half-res R8G8B8A8; not a mask.
+		kSAOWorkBuffer = 57,
 
 		// B slots are repointed from Pip-Boy allocations only while tiled lighting is active.
 		kDiffuseBufferA = 58,
@@ -209,6 +238,18 @@ namespace cs::engine
 
 		kCount = 13
 	};
+
+	[[nodiscard]] inline ID3D11Device* GetDevice()
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		return rendererData ? reinterpret_cast<ID3D11Device*>(rendererData->device) : nullptr;
+	}
+
+	[[nodiscard]] inline ID3D11DeviceContext* GetImmediateContext()
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		return rendererData ? reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) : nullptr;
+	}
 
 	[[nodiscard]] inline ID3D11ShaderResourceView* GetSceneDepthSRV()
 	{
@@ -248,5 +289,75 @@ namespace cs::engine
 		}
 		return reinterpret_cast<ID3D11UnorderedAccessView*>(
 			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].uaView);
+	}
+
+	[[nodiscard]] inline ID3D11Texture2D* GetRenderTargetTexture(RenderTarget a_renderTarget)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11Texture2D*>(
+			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].texture);
+	}
+
+	[[nodiscard]] inline ID3D11Texture2D* GetRenderTargetCopyTexture(RenderTarget a_renderTarget)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11Texture2D*>(
+			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].copyTexture);
+	}
+
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetRenderTargetCopySRV(RenderTarget a_renderTarget)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11ShaderResourceView*>(
+			rendererData->renderTargets[static_cast<uint>(a_renderTarget)].copySRView);
+	}
+
+	[[nodiscard]] inline ID3D11Texture2D* GetDepthStencilTexture(DepthStencilTarget a_target)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11Texture2D*>(
+			rendererData->depthStencilTargets[static_cast<uint>(a_target)].texture);
+	}
+
+	[[nodiscard]] inline ID3D11DepthStencilView* GetDepthStencilDSV(DepthStencilTarget a_target)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11DepthStencilView*>(
+			rendererData->depthStencilTargets[static_cast<uint>(a_target)].dsView[0]);
+	}
+
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetDepthStencilDepthSRV(DepthStencilTarget a_target)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11ShaderResourceView*>(
+			rendererData->depthStencilTargets[static_cast<uint>(a_target)].srViewDepth);
+	}
+
+	[[nodiscard]] inline ID3D11ShaderResourceView* GetDepthStencilStencilSRV(DepthStencilTarget a_target)
+	{
+		auto* rendererData = RE::BSGraphics::GetRendererData();
+		if (!rendererData) {
+			return nullptr;
+		}
+		return reinterpret_cast<ID3D11ShaderResourceView*>(
+			rendererData->depthStencilTargets[static_cast<uint>(a_target)].srViewStencil);
 	}
 }

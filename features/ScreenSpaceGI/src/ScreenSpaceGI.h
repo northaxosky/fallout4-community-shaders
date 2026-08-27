@@ -170,6 +170,7 @@ namespace cs::features
 		static constexpr std::uint32_t kCompositionPSSlotCount = 4;
 		static constexpr auto kRadianceSourceA = cs::engine::RenderTarget::kDiffuseBufferA;
 		static constexpr auto kRadianceSourceB = cs::engine::RenderTarget::kDiffuseBufferB;
+		// Full-resolution R16G16_FLOAT motion written by the deferred prepass.
 		static constexpr auto kMotionSource = cs::engine::RenderTarget::kMotionVectors;
 		static constexpr std::uint32_t kMipCount = 5;
 

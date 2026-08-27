@@ -6,8 +6,8 @@
     is detected.
 
 .DESCRIPTION
-    Copies the feature shaders, the committed Upscaling/FrameGeneration HLSL, and the
-    reconstructed package shader tree into a throwaway scan root, runs the scanner there, and
+    Copies the feature shaders and the reconstructed package shader tree into a
+    throwaway scan root, runs the scanner there, and
     writes its report to docs\shader-buffers.md (a generated, gitignored doc).
 
     Install the scanner with:

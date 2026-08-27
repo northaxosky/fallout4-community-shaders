@@ -26,6 +26,8 @@ namespace SharedData
 		bool InInterior;
 		// xyz: world up in view space, w: 1 when sourced from a valid world camera
 		float4 WorldUpView;
+		// log2(render / display) texture LOD bias while upscaling; DLSS takes a further -1
+		float MipBias;
 	};
 
 	struct ScreenSpaceShadowsSettings
@@ -69,10 +71,17 @@ namespace SharedData
 		return CameraData.w / (-depths * CameraData.z + CameraData.x);
 	}
 
+	float2 ClampDynamicResolutionAdjustedScreenPosition(float2 screenPositionDR, float2 screenPosition)
+	{
+		float2 minValue = 0.0;
+		float2 maxValue = DynamicResolution.xy - 0.5 * BufferDim.zw;
+		return clamp(screenPositionDR, minValue, maxValue);
+	}
+
 	float2 GetDynamicResolutionAdjustedScreenPosition(float2 uv)
 	{
 		float2 adjusted = max(0.0, uv * DynamicResolution.xy);
-		return min(DynamicResolution.xy - 0.5 * BufferDim.zw, adjusted);
+		return ClampDynamicResolutionAdjustedScreenPosition(adjusted, uv);
 	}
 }
 #endif  // __SHARED_DATA_DEPENDENCY_HLSL__

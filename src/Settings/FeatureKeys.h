@@ -9,8 +9,8 @@ namespace cs::feature_config
 		"ScreenSpaceGI",
 		"WetnessEffects",
 		"ScreenSpaceShadows",
+		"MotionVectorFixes",
 		"Upscaling",
-		"FrameGeneration",
 		"PerformanceOverlay",
 		"RenderDoc"
 	};

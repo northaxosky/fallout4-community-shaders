@@ -18,7 +18,7 @@ namespace cs::features
 		static PerformanceOverlay* GetSingleton();
 
 		std::string_view GetName() const override { return "PerformanceOverlay"; }
-		std::string GetFeatureSummary() const override { return "On-screen FPS counter and frame-time graph with estimated post-FG values."; }
+		std::string GetFeatureSummary() const override { return "On-screen FPS counter and frame-time graph."; }
 		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
@@ -54,7 +54,6 @@ namespace cs::features
 			bool   showFps        = true;
 			bool   showFrameTime  = true;
 			bool   showGraph      = true;
-			bool   showEstimatedPostFGFrameTime = true;
 			bool   showVram       = false;
 			bool   showStats      = false;
 
@@ -98,7 +97,6 @@ namespace cs::features
 
 		static constexpr int kHistoryCapacity = 600;
 		std::array<float, kHistoryCapacity> _frameTimesMs{};
-		std::array<float, kHistoryCapacity> _postFgFrameTimesMs{};
 		int    _frameTimesHead    = 0;
 		int    _frameTimesCount   = 0;
 
@@ -109,11 +107,6 @@ namespace cs::features
 		float  _curFrameMs        = 0.0f;
 		float  _displayedFps      = 0.0f;
 		float  _displayedFrameMs  = 0.0f;
-		int    _displayedFrameMultiplier = 1;
-		// Displayed FPS uses backend frame-count deltas.
-		float    _measuredDisplayedFps = 0.0f;
-		uint64_t _lastDisplayedFrameTotal = 0;
-		double   _lastDisplayedSampleSec  = 0.0;
 		float  _avgMs             = 0.0f;
 		float  _stddevMs          = 0.0f;
 		float  _graphYMaxSmoothed = 0.0f;

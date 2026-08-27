@@ -78,19 +78,42 @@ surface_thickness = 0.02
 bilinear_threshold = 0.02
 shadow_contrast = 1.0
 
+[features.MotionVectorFixes]
+load = false
+
 [features.Upscaling]
 load = false
 
 [features.Upscaling.settings]
+# Runtime toggle for the resolve. The feature itself ships off above.
+enabled = true
 
-[features.FrameGeneration]
-load = false
+# 0 = None, 1 = TAA, 2 = FSR 3, 3 = DLSS. The second key is used when DLSS is unavailable.
+upscale_method = 3
+upscale_method_no_dlss = 2
 
-[features.FrameGeneration.settings]
+# 0 = Native AA, 1 = Quality, 2 = Balanced, 3 = Performance, 4 = Ultra Performance.
+quality_mode = 1
+
+# AMD FSR 3 frame generation uses a startup-only D3D12 proxy independently of the selected upscaler.
+frame_generation_mode = 1
+# Allow proxy startup below 120 Hz. Changing either startup setting requires a game restart.
+frame_generation_force_enable = 0
+# Generated frames are disabled in pause, main, loading, and Pip-Boy menus by default.
+frame_generation_allow_in_menus = false
+
+# 0 = Default, 1 = J, 2 = K, 3 = L, 4 = M.
+preset_dlss = 0
+
+sharpness_fsr = 0.0
+sharpness_enabled_dlss = false
+sharpness_dlss = 0.0
+
+# 0 = Off, 1 = Default, 2 = Verbose. Applied when Streamline initializes at start-up.
+streamline_log_level = 0
 
 [features.PerformanceOverlay]
 load = false
-
 [features.PerformanceOverlay.settings]
 # In-game overlay toggle chord (e.g. "F10", "Shift+F11", "Ctrl+F9"); "none" unbinds it.
 toggle_hotkey = "F10"

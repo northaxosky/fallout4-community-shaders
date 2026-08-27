@@ -115,6 +115,7 @@ namespace
 		SubstrateExpectation  substrateExpectation =
 			SubstrateExpectation::kNone;
 		bool                  validateXeGTAOCB = false;
+		bool                  validateMipBias = false;
 		std::vector<UINT>     requiredTextureSlots;
 		std::vector<UINT>     forbiddenTextureSlots;
 		std::optional<FeatureOffIdentityExpectation> featureOffIdentity;
@@ -379,7 +380,8 @@ namespace
 			ExpectedVariable{ "DeltaTime", 100, 4 },
 			ExpectedVariable{ "FrameCount", 104, 4 },
 			ExpectedVariable{ "InInterior", 108, 4 },
-			ExpectedVariable{ "WorldUpView", 112, 16 }
+			ExpectedVariable{ "WorldUpView", 112, 16 },
+			ExpectedVariable{ "MipBias", 128, 4 }
 		};
 		constexpr std::array featureVariables{
 			ExpectedVariable{ "screenSpaceShadowsSettings", 0, 16 },
@@ -394,7 +396,7 @@ namespace
 				reflection.Get(),
 				"SharedData",
 				5,
-				128,
+				144,
 				sharedVariables);
 			!error.empty()) {
 			return error;
@@ -446,6 +448,53 @@ namespace
 		return {};
 	}
 
+	// D18: proves production HLSL actually samples through the published b5 bias, so a route
+	// cannot silently drop back to unbiased Sample() while still claiming MipBias coverage.
+	std::string ValidateMipBiasConsumption(ID3DBlob* a_blob)
+	{
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(
+				a_blob->GetBufferPointer(),
+				a_blob->GetBufferSize(),
+				__uuidof(ID3D11ShaderReflection),
+				reinterpret_cast<void**>(reflection.GetAddressOf())))) {
+			return "D3DReflect failed for the MipBias witness";		}
+
+		D3D11_SHADER_DESC shaderDesc{};
+		if (FAILED(reflection->GetDesc(&shaderDesc)))
+			return "MipBias reflection description failed";
+
+		std::optional<D3D11_SHADER_INPUT_BIND_DESC> binding;
+		for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
+			D3D11_SHADER_INPUT_BIND_DESC candidate{};
+			if (SUCCEEDED(reflection->GetResourceBindingDesc(index, &candidate))
+				&& candidate.Type == D3D_SIT_CBUFFER
+				&& candidate.BindPoint == 5) {
+				binding = candidate;
+				break;
+			}
+		}
+		if (!binding)
+			return "MipBias consumer does not bind the shared substrate at b5";
+
+		auto* buffer = reflection->GetConstantBufferByName(binding->Name);
+		D3D11_SHADER_BUFFER_DESC bufferDesc{};
+		if (!buffer || FAILED(buffer->GetDesc(&bufferDesc)))
+			return "MipBias consumer has no reflected b5 cbuffer";
+
+		// Members of a cbuffer declared inside a namespace reflect under their qualified name.
+		auto* variable = buffer->GetVariableByName("SharedData::MipBias");
+		D3D11_SHADER_VARIABLE_DESC variableDesc{};
+		if (!variable || FAILED(variable->GetDesc(&variableDesc))) {
+			variable = buffer->GetVariableByName("MipBias");
+			if (!variable || FAILED(variable->GetDesc(&variableDesc)))
+				return "MipBias consumer does not declare SharedData::MipBias";
+		}
+		if ((variableDesc.uFlags & D3D_SVF_USED) == 0)
+			return "MipBias is declared but never sampled through on this route";
+		return {};
+	}
+
 	ShaderCompileResult Compile(const ShaderCompileJob& a_job)
 	{
 		if (!a_job.preparationError.empty())
@@ -476,6 +525,12 @@ namespace
 		}
 		if (a_job.validateXeGTAOCB) {
 			if (auto validation = ValidateXeGTAOConstantBuffer(blob.Get());
+				!validation.empty()) {
+				return { std::move(validation) };
+			}
+		}
+		if (a_job.validateMipBias) {
+			if (auto validation = ValidateMipBiasConsumption(blob.Get());
 				!validation.empty()) {
 				return { std::move(validation) };
 			}
@@ -718,6 +773,61 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
+	// Every shipping Upscaling permutation: the encode compute shader for each upscale method
+	// (including the null-t0 reactive-mask variants), plus the depth/refraction and fullscreen
+	// shaders that the depth upscale pass binds.
+	constexpr std::size_t kUpscalingPermutations = 7;
+
+	std::size_t AddUpscaling(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
+	{
+		const auto firstJob = a_jobs.size();
+		const auto upscalingRoot = a_root / "Upscaling";
+
+		const std::array<ShaderCase, 4> encodeCases{ {
+			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" } } },
+			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "DLSS", "" } } },
+			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "FSR", "" } } },
+			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "DEPTH_OUTPUT", "" } } }
+		} };
+		for (const auto& shaderCase : encodeCases) {
+			AddCompile(
+				a_jobs,
+				upscalingRoot / shaderCase.path,
+				shaderCase.defines,
+				"cs_5_0",
+				"main",
+				"upscaling encode");
+		}
+
+		AddCompile(
+			a_jobs,
+			upscalingRoot / "DepthRefractionUpscalePS.hlsl",
+			{ { "PSHADER", "" }, { "FO4CS_SUBSTRATE", "1" } },
+			"ps_5_0",
+			"main",
+			"upscaling depth");
+
+		AddCompile(
+			a_jobs,
+			upscalingRoot / "UpscaleVS.hlsl",
+			{ { "VSHADER", "" } },
+			"vs_5_0",
+			"main",
+			"upscaling fullscreen");
+
+		AddCompile(
+			a_jobs,
+			upscalingRoot / "RCAS" / "RCAS.hlsl",
+			{},
+			"cs_5_0",
+			"main",
+			"upscaling sharpening");
+
+		return a_jobs.size() - firstJob;
+	}
+
 	void AddRegistration(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root,
@@ -788,6 +898,46 @@ namespace
 		job.requiredTextureSlots = std::move(a_requiredTextureSlots);
 		job.forbiddenTextureSlots = std::move(a_forbiddenTextureSlots);
 		job.featureOffIdentity = std::move(a_featureOffIdentity);
+	}
+
+	// D18: every reconstructed route Upscaling contributes MipBias to must actually consume it.
+	constexpr std::size_t kMipBiasConsumerTargets = 3;
+
+	std::size_t AddMipBiasConsumers(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
+	{
+		const auto firstJob = a_jobs.size();
+		const std::array<cs::engine::ShaderInjectionTarget, kMipBiasConsumerTargets> targets{
+			cs::engine::ShaderInjectionTarget::kBsLighting,
+			cs::engine::ShaderInjectionTarget::kBsWater,
+			cs::engine::ShaderInjectionTarget::kDeferredPrepass
+		};
+		const ShaderDefines upscalingContribution{
+			{ cs::engine::shader_injection_defines::kUpscalingMipBias, "1" }
+		};
+
+		const auto variants = cs::engine::GetDefaultShaderReplacementVariants();
+		for (const auto target : targets) {
+			const auto variant = std::ranges::find(
+				variants,
+				target,
+				&cs::engine::ShaderReplacementVariantRegistration::targetId);
+			if (variant == variants.end()) {
+				AddPreparationFailure(
+					a_jobs,
+					"MipBias consumer census",
+					"no registered variant for a MipBias target");
+				continue;
+			}
+			const auto before = a_jobs.size();
+			AddRegistration(a_jobs, a_root, *variant, upscalingContribution);
+			for (auto index = before; index < a_jobs.size(); ++index) {
+				if (a_jobs[index].preparationError.empty())
+					a_jobs[index].validateMipBias = true;
+			}
+		}
+		return a_jobs.size() - firstJob;
 	}
 
 	struct LightingCounts
@@ -1310,6 +1460,22 @@ int main(int argc, char** argv)
 	}
 	const auto lightingCounts = AddLighting(jobs, argv[1]);
 	const auto vertexCount = AddVertexPermutations(jobs, argv[1]);
+	const auto mipBiasCount = AddMipBiasConsumers(jobs, argv[1]);
+	if (mipBiasCount != kMipBiasConsumerTargets) {
+		AddPreparationFailure(
+			jobs,
+			"MipBias consumer census",
+			"expected " + std::to_string(kMipBiasConsumerTargets)
+				+ " consumers, prepared " + std::to_string(mipBiasCount));
+	}
+	const auto upscalingCount = AddUpscaling(jobs, argv[1]);
+	if (upscalingCount != kUpscalingPermutations) {
+		AddPreparationFailure(
+			jobs,
+			"Upscaling permutation census",
+			"expected " + std::to_string(kUpscalingPermutations)
+				+ " permutations, prepared " + std::to_string(upscalingCount));
+	}
 
 	std::printf(
 		"ShaderCompile checked %zu shared substrate probes\n",
@@ -1329,6 +1495,12 @@ int main(int argc, char** argv)
 	std::printf(
 		"ShaderCompile checked %zu vertex permutations\n",
 		vertexCount);
+	std::printf(
+		"ShaderCompile checked %zu Upscaling permutations\n",
+		upscalingCount);
+	std::printf(
+		"ShaderCompile witnessed b5 MipBias consumption on %zu reconstructed routes\n",
+		mipBiasCount);
 
 	const int failures = CompileAll(jobs);
 

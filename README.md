@@ -2,8 +2,8 @@
 
 # FO4 Community Shaders
 
-**Modern rendering features for Fallout 4 - upscaling, frame generation, and screen-space
-lighting - as an open [F4SE](https://f4se.silverlock.org/) plugin.**
+**Modern rendering features for Fallout 4 - screen-space lighting - as an open
+[F4SE](https://f4se.silverlock.org/) plugin.**
 
 A Fallout 4 port of the ideas in
 [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders),
@@ -54,13 +54,16 @@ injected in place of the stock shaders.
 
 | Feature | Implementation |
 |---|---|
-| **Upscaling** | DLSS and FSR3 upscaling or native AA, with quality modes and sharpening controls. XeSS upscaling is not implemented. |
-| **Frame Generation** | FSR3-FG, DLSS-G, and XeSS-FG through D3D11/D3D12 interop. |
 | **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
+| **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
+| **Upscaling** | DLSS and FSR 3 super-resolution, TAA, and AMD FSR 3 frame generation through a D3D11-facing D3D12 proxy. |
 | **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
 | **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |
+
+Motion Vector Fixes does not synthesize first-person weapon motion; the FSR 3 frame-generation
+path separately conditions first-person alpha pixels.
 
 ---
 
@@ -84,10 +87,11 @@ A feature loads only when its `[features.<Name>].load` value is `true`. A malfor
 disables all features; a malformed User file is ignored. Presets configure only features that
 are already activated - they cannot activate any feature.
 
-Baseline shader ownership is separately opt-in and does not load a feature. Set `enabled = true`
-under `[shader_ownership]` in the User TOML to replace the deferred targets with their
-stock-equivalent HLSL; the per-target switches in the shipped Default remain available for bring-up
-opt-outs. Restart after changing ownership.
+Baseline shader ownership is separately opt-in and does not load a feature. Loaded features may
+request the reconstructed routes they need independently. Every replacement still requires the
+stock shader's SHA-1 match. Set `enabled = true` under `[shader_ownership]` in the User TOML to
+replace the remaining deferred targets with their stock-equivalent HLSL; the per-target switches in
+the shipped Default remain available for bring-up opt-outs. Restart after changing ownership.
 
 ---
 
@@ -113,11 +117,11 @@ assets (fonts, presets) live in subdirectories beneath it.
 with `VCPKG_ROOT` set, and Git.
 
 ```bash
-# Clone with submodules (CommonLibF4, FidelityFX, Streamline, XeSS)
+# Clone with submodules (CommonLibF4, FidelityFX-SDK, Streamline)
 git clone --recursive https://github.com/northaxosky/fallout4-community-shaders
 cd fallout4-community-shaders
 
-# Fetch the proprietary SDK runtime DLLs (not vendored in the repo)
+# Stage the pinned Streamline, DLSS, and FidelityFX frame-generation runtime DLLs
 pwsh scripts/fetch-sdks.ps1
 
 # Configure + build (Release)
@@ -132,14 +136,17 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 
 ## Compatibility notes
 
-- **Frame generation** requires a D3D12 feature-level 12.0 device and the runtime files for the
-  selected backend; backend availability depends on the device and SDK. Changing the FG backend
-  or multiplier requires a restart. RenderDoc also initializes at startup.
-- **ENB** handling is feature-specific: Screen Space Shadows, Screen Space GI, and Wetness Effects
-  deactivate under ENB, Upscaling is limited to Native AA, DLSS-G is not used under ENB, and frame
-  generation may fall back to FSR3-FG when that runtime is available.
-- **RenderDoc** requires an external `renderdoc.dll` exposing API 1.7.0 and is incompatible with
-  DLSS-G for that session.
+- **ENB is unsupported.** Do not use it with this plugin.
+- **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
+  load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
+  needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR
+  `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is independent of the
+  selected super-resolution method and defaults off in pause, main, loading, and Pip-Boy menus.
+- **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries
+  render-resolution motion in the upper-left sub-rect while upscaling is active.
+- **RenderDoc** requires an external `renderdoc.dll` exposing API 1.7.0. It initializes at startup,
+  so enabling it requires a restart. Capturing an FSR3 dispatch can destabilise that dispatch;
+  disable capture before diagnosing FSR3 crashes.
 - A successful build or launch does **not** prove a rendering path is visually correct - in-game
   validation is still required.
 ---

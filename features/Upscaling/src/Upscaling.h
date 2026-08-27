@@ -1,187 +1,372 @@
 #pragma once
-#include "Buffer.h"
-#include "FidelityFX.h"
-#include "IUpscalerBackend.h"
-#include "Streamline.h"
+
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "Render/SwapChainHook.h"
+#include "Utils/CSBuffer.h"
 
-#include <array>
+#include "FidelityFX.h"
+#include "DX12SwapChain.h"
+#include "DynamicResolution.h"
+#include "RCAS/RCAS.h"
+#include "Streamline.h"
+
+#include <atomic>
 #include <cstdint>
-#include <memory>
-#include <vector>
+#include <string>
+#include <string_view>
+#include <optional>
+#include <utility>
+
+#include <d3d11_4.h>
 #include <winrt/base.h>
 
 namespace cs::features
 {
-
-class Upscaling : public cs::Feature, public RE::BSTEventSink<RE::MenuOpenCloseEvent>
-{
-public:
-	static Upscaling* GetSingleton()
+	class Upscaling : public Feature
 	{
-		static Upscaling singleton;
-		return &singleton;
-	}
+	public:
+		static Upscaling* GetSingleton();
 
-	std::string_view GetName() const override { return "Upscaling"; }
-	std::string GetFeatureSummary() const override { return "DLSS and FSR3 spatial upscaling integrated with the engine's render pipeline, with native TAA fallback."; }
-	std::string GetCategory() const override { return FeatureCategories::kPerformance; }
-	bool Configure(const toml::table& a_config, std::string& a_error) override;
-	void Load() override;
-	void OnDataLoaded() override;
-	void DrawSettings() override;
-	void RestoreDefaultSettings() override;
-	bool HasResettableSettings() const override { return true; }
-	void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
-	bool ProducesTelemetry() const override { return true; }
-	void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		std::string_view GetName() const override { return "Upscaling"; }
+		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
+		std::string GetFeatureSummary() const override
+		{
+			return "DLSS and FSR3 super-resolution with AMD FSR3 frame generation.";
+		}
+		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
-	static void InstallHooks();
+		bool Configure(const toml::table& a_config, std::string& a_error) override;
+		void Load() override;
+		void OnPostPostLoad() override;
+		void OnDataLoaded() override;
+		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
+		void DrawSettings() override;
+		void RestoreDefaultSettings() override;
+		bool HasResettableSettings() const override { return true; }
 
-	enum class UpscaleMethod
-	{
-		kDisabled,
-		kFSR,
-		kDLSS
+		bool ProducesTelemetry() const override { return true; }
+		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+
+		float2 jitter = { 0, 0 };
+
+		enum class UpscaleMethod
+		{
+			kNONE,
+			kTAA,
+			kFSR,
+			kDLSS
+		};
+
+		struct Settings
+		{
+			bool enabled = true;
+			std::uint32_t upscaleMethod = (std::uint32_t)UpscaleMethod::kDLSS;
+			std::uint32_t upscaleMethodNoDLSS = (std::uint32_t)UpscaleMethod::kFSR;
+			std::uint32_t qualityMode = 1;  // 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance, 0=Native AA
+			std::uint32_t frameGenerationMode = 1;
+			std::uint32_t frameGenerationForceEnable = 0;
+			bool frameGenerationAllowInMenus = false;
+			std::uint32_t streamlineLogLevel = 0;
+			float sharpnessFSR = 0.0f;
+			bool sharpnessEnabledDLSS = false;
+			float sharpnessDLSS = 0.0f;
+			std::uint32_t presetDLSS = 0;  // 0=Default, 1=J, 2=K, 3=L, 4=M
+		};
+
+		Settings settings;
+
+		struct JitterCB
+		{
+			float2 jitter;
+			float2 pad0;
+		};
+
+		struct UpscalingDataCB
+		{
+			float2 trueSamplingDim;
+			float2 pad0;
+		};
+
+		cs::buffer::ConstantBuffer* jitterCB = nullptr;
+		cs::buffer::ConstantBuffer* upscalingDataCB = nullptr;
+
+		float2 resolutionScale = { 1.0f, 1.0f };
+
+		bool IsUpscalingActive() const;
+		bool IsFrameGenerationDx12PathActive() const noexcept;
+		bool IsFrameGenerationActive() const noexcept;
+		bool ShouldUseFrameGenerationThisFrame() const noexcept;
+		UpscaleMethod GetUpscaleMethod() const;
+		[[nodiscard]] std::pair<std::uint32_t, std::uint32_t> GetRenderSize() const noexcept;
+
+		float GetMipBias() const;
+
+		bool CheckResources(UpscaleMethod a_upscalemethod);
+		bool CreateUpscalingTextureResources(UpscaleMethod a_upscalemethod);
+		void DestroyUpscalingTextureResources(UpscaleMethod a_upscalemethod);
+		bool HasRequiredResources(UpscaleMethod a_upscalemethod) const noexcept;
+		winrt::com_ptr<ID3D11ComputeShader> encodeTexturesCS[4];
+		ID3D11ComputeShader* GetEncodeTexturesCS();
+
+		winrt::com_ptr<ID3D11PixelShader> depthRefractionUpscalePS;
+		ID3D11PixelShader* GetDepthRefractionUpscalePS();
+
+		winrt::com_ptr<ID3D11VertexShader> upscaleVS;
+		ID3D11VertexShader* GetUpscaleVS();
+
+		winrt::com_ptr<ID3D11PixelShader> sslrRaytracingPS;
+		bool _sslrCompileFailed = false;
+		ID3D11PixelShader* GetSSLRRaytracingPS();
+		void PatchSSRShader();
+
+		winrt::com_ptr<ID3D11DepthStencilState> upscaleDepthStencilState;
+		winrt::com_ptr<ID3D11BlendState> upscaleBlendState;
+		winrt::com_ptr<ID3D11RasterizerState> upscaleRasterizerState;
+		winrt::com_ptr<ID3D11SamplerState> linearSampler;
+
+		void ConfigureTAA();
+		void ConfigureUpscaling();
+
+		cs::buffer::Texture2D* reactiveMaskTexture = nullptr;
+		cs::buffer::Texture2D* transparencyCompositionMaskTexture = nullptr;
+		cs::buffer::Texture2D* motionVectorCopyTexture = nullptr;
+		cs::buffer::Texture2D* upscalingTexture = nullptr;
+		cs::buffer::Texture2D* sharpenerTexture = nullptr;
+
+		static inline Streamline streamline;
+		static inline FidelityFX fidelityFX;
+		static inline DX12SwapChain dx12SwapChain;
+		static inline RCAS rcas;
+
+		bool PerformUpscaling();
+		void UpscaleDepth();
+		bool Upscale();
+		bool ApplySharpening(ID3D11Texture2D* a_frameBuffer);
+
+		void OnPreCreateDeviceAndSwapChain(
+			DXGI_SWAP_CHAIN_DESC* a_swapChainDesc,
+			std::vector<D3D_FEATURE_LEVEL>& a_featureLevels);
+		void OnPostCreateDeviceAndSwapChain(
+			IDXGIAdapter* a_adapter,
+			ID3D11Device** a_device,
+			IDXGISwapChain** a_swapChain);
+
+		void LoadUpscalingSDKs();
+		void CaptureFrameGenerationInputs();
+		void CaptureHUDLessColor();
+		void ClearFrameGenerationCaptureState() noexcept;
+		void RecordFrameGenerationFailure() noexcept;
+
+		void InvalidateEngineDerivedResources();
+
+		void RestoreNativeFrameState();
+		void RestoreNativeFrameStateOnce();
+
+		void QuarantineAfterException(const char* a_where) noexcept;
+
+	private:
+		Upscaling() = default;
+
+		void SaveSettings();
+		void SetupResources();
+		void UpdateResolutionScale(RE::BSGraphics::State* a_state, UpscaleMethod a_method);
+		void PublishDynamicResolution();
+
+		DynamicResolution dynamicResolution;
+
+		bool IsDrivingFrameState() const noexcept;
+
+		struct DrawWorldBegin_SetDynamicViewport
+		{
+			static void thunk(RE::BSGraphics::RenderTargetManager* a_this, bool a_enabled);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct BSShaderRenderTargets_Create
+		{
+			static void thunk(void* a_this);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct Main_UpdateDynamicResolution
+		{
+			static void thunk(
+				RE::BSGraphics::RenderTargetManager* a_this,
+				RE::NiPoint3* a_2,
+				RE::NiPoint3* a_3,
+				RE::NiPoint3* a_4,
+				RE::NiPoint3* a_5);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct Main_UpdateJitter
+		{
+			static void thunk(RE::BSGraphics::State* a_state);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct Main_PostProcessing
+		{
+			static void thunk();
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DrawWorld_FirstPersonAlpha
+		{
+			static void thunk(RE::BSShaderAccumulator* a_accumulator);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DrawWorldImagespace_Upscale
+		{
+			static void thunk(RE::BSGraphics::RenderTargetManager* a_this, bool a_enabled);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DrawWorldImagespace_RenderEffectRange
+		{
+			static void thunk(
+				RE::BSGraphics::RenderTargetManager* a_this,
+				std::uint32_t a_first,
+				std::uint32_t a_last,
+				std::uint32_t a_4,
+				std::uint32_t a_5);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DrawWorldImagespace_RestoreRatios
+		{
+			static void thunk(void* a_this);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct DeferredComposite_RenderPass
+		{
+			static void thunk(void* a_pass, std::uint32_t a_2, bool a_3);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct LensFlare_RenderLensFlare
+		{
+			static void thunk(RE::NiCamera* a_camera);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct SSLRRaytracing_BeginTechnique
+		{
+			static void thunk(
+				void* a_shader,
+				std::uint32_t a_2,
+				std::uint32_t a_3,
+				std::uint32_t a_4,
+				std::uint32_t a_5);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct Vats_SetPixelConstant
+		{
+			static void thunk(void* a_param, int a_row, float a_x, float a_y, float a_z, float a_w);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct LoadingMenu_UpdateTemporalData
+		{
+			static void thunk(RE::BSGraphics::State* a_state);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct BSImageSpace_Init_FXAA
+		{
+			static void thunk(RE::ImageSpaceManager* a_this);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct Renderer_ResetWindow
+		{
+			static void thunk(RE::BSGraphics::Renderer* a_this, std::uint32_t a_arg);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		class MenuOpenCloseEventHandler : public RE::BSTEventSink<RE::MenuOpenCloseEvent>
+		{
+		public:
+			RE::BSEventNotifyControl ProcessEvent(
+				const RE::MenuOpenCloseEvent& a_event,
+				RE::BSTEventSource<RE::MenuOpenCloseEvent>*) override;
+			static bool Register();
+		};
+
+		std::atomic_bool _resourcesReady{ false };
+		std::atomic_bool _hooksInstalled{ false };
+		std::atomic_bool _quarantined{ false };
+		std::atomic<float> _mipBias{ 0.0f };
+		std::atomic_uint32_t _upscaleDispatches{ 0 };
+		std::atomic_uint32_t _providerFailures{ 0 };
+		std::atomic_bool _srPublishedToFramebuffer{ false };
+		std::atomic_uint32_t _frameGenerationDispatches{ 0 };
+		std::atomic_uint32_t _frameGenerationFailures{ 0 };
+		std::atomic_uint32_t _frameGenerationAlphaConditionedCaptures{ 0 };
+		std::atomic_uint32_t _frameGenerationRawCaptures{ 0 };
+		std::atomic_bool _frameGenerationAlphaConditioned{ false };
+		std::atomic_bool _frameGenerationResetPending{ false };
+
+		bool _resolutionScalePublished = false;
+		bool _upscaledThisFrame = false;
+		bool _imagespaceScope = false;
+		float _savedDynamicWidthRatio = 1.0f;
+		float _savedDynamicHeightRatio = 1.0f;
+		bool _imagespaceRatiosNeutralized = false;
+		bool _frameGenerationInputsCaptured = false;
+		bool _hudlessCapturePending = false;
+		winrt::com_ptr<ID3D11ComputeShader> _copyDepthForFrameGenerationCS;
+		cs::buffer::ConstantBuffer* _frameGenerationCopyCB = nullptr;
+
+		enum class FirstPersonAlphaStage
+		{
+			kNone,
+			kPrepared,
+			kConditioned
+		};
+
+		struct FirstPersonAlphaStamp
+		{
+			FirstPersonAlphaStage stage = FirstPersonAlphaStage::kNone;
+			std::uint64_t engineFrame = 0;
+			ID3D11Texture2D* preAlphaColor = nullptr;
+			ID3D11Texture2D* postAlphaColor = nullptr;
+			ID3D11Texture2D* nativeMotion = nullptr;
+			ID3D11Texture2D* nativeDepth = nullptr;
+			ID3D11Texture2D* sharedMotion = nullptr;
+			ID3D11Texture2D* sharedDepth = nullptr;
+		};
+
+		void PrepareFirstPersonAlphaInputs();
+		void FinishFirstPersonAlphaInputs();
+		void BeginFrameGenerationCaptureState() noexcept;
+		void InvalidateFirstPersonAlphaState() noexcept;
+		[[nodiscard]] bool ConsumeFirstPersonAlphaInputs(
+			std::uint64_t a_engineFrame,
+			ID3D11Texture2D* a_nativeMotion,
+			ID3D11Texture2D* a_nativeDepth,
+			ID3D11Texture2D* a_sharedMotion,
+			ID3D11Texture2D* a_sharedDepth) noexcept;
+
+		FirstPersonAlphaStamp _firstPersonAlphaStamp;
+
+		struct FrameGenerationCopyCB
+		{
+			std::uint32_t renderWidth;
+			std::uint32_t renderHeight;
+			std::uint32_t outputWidth;
+			std::uint32_t outputHeight;
+			std::uint32_t useAlphaConditioning;
+			std::uint32_t pad0;
+			std::uint32_t pad1;
+			std::uint32_t pad2;
+		};
+
+		std::optional<HRESULT> OnReplacementCreateDeviceAndSwapChain(
+			cs::render::CreateDeviceAndSwapChainContext& a_context);
 	};
-
-	upscaling::IUpscalerBackend* GetBackend(UpscaleMethod a_method);
-	upscaling::IUpscalerBackend* GetActiveBackend() { return GetBackend(upscaleMethod); }
-
-	struct Settings
-	{
-		uint upscaleMethodPreference = (uint)UpscaleMethod::kDLSS;
-		// 0=Native, 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance.
-		uint qualityMode = 1;
-		// FSR3 RCAS strength; DLSS currently has no sharpening pass.
-		float sharpnessFSR = 0.0f;
-		// 0=Default, 1=J, 2=K, 3=L, 4=M.
-		uint presetDLSS = 0;
-		// DLSS reactive scale from 0 to 4.
-		float reactiveScale = 1.0f;
-		// Transparency scale from 0 to 4.
-		float transparencyScale = 1.0f;
-	};
-
-	Settings settings;
-
-	// Reads the Upscaling TOML.
-	void LoadSettings();
-	void SaveSettings();
-
-	// Unavailable DLSS falls back to FSR.
-	UpscaleMethod GetUpscaleMethod(bool a_checkMenu);
-
-	// ENB uses native AA to prevent compounded scaling.
-	uint GetEffectiveQualityMode();
-
-	RE::BSEventNotifyControl ProcessEvent(const RE::MenuOpenCloseEvent& a_event, RE::BSTEventSource<RE::MenuOpenCloseEvent>*);
-
-	void UpdateUpscaling();
-
-	void Upscale();
-
-	void CheckResources();
-
-	float2 jitter = { 0, 0 };
-	UpscaleMethod upscaleMethodNoMenu = UpscaleMethod::kDisabled;
-	UpscaleMethod upscaleMethod = UpscaleMethod::kDisabled;
-
-	// True only when current-frame masks are valid.
-	bool masksValidThisFrame = false;
-
-	void UpdateRenderTargets(float a_currentWidthRatio, float a_currentHeightRatio);
-	// Empty copies every render target.
-	void OverrideRenderTargets(const std::vector<int>& a_indicesToCopy = {});
-	void ResetRenderTargets(const std::vector<int>& a_indicesToCopy = {});
-	void UpdateRenderTarget(int index, float a_currentWidthRatio, float a_currentHeightRatio);
-	// False swaps pointers without copying textures.
-	void OverrideRenderTarget(int index, bool a_doCopy = true);
-	void ResetRenderTarget(int index, bool a_doCopy = true);
-
-	RE::BSGraphics::RenderTarget originalRenderTargets[101];
-	RE::BSGraphics::RenderTarget proxyRenderTargets[101];
-	RE::BSGraphics::RenderTargetProperties originalRenderTargetData[101];
-
-	// Negative LOD bias offsets lower render resolution.
-	void UpdateSamplerStates(float a_currentMipBias);
-	void OverrideSamplerStates();
-	void ResetSamplerStates();
-
-	std::array<ID3D11SamplerState*, 320> originalSamplerStates;
-	std::array<ID3D11SamplerState*, 320> biasedSamplerStates;
-
-	// Post-effects require full-resolution depth.
-	void OverrideDepth(bool a_doCopy = true);
-	void ResetDepth();
-	void CopyDepth();
-
-	ID3D11ShaderResourceView* originalDepthView;
-	std::unique_ptr<upscaling::Texture2D> depthOverrideTexture;
-
-	void PatchSSRShader();
-
-	ID3D11ComputeShader* GetDilateMotionVectorCS();
-	ID3D11ComputeShader* GetOverrideLinearDepthCS();
-	ID3D11ComputeShader* GetOverrideDepthCS();
-
-	ID3D11ComputeShader* GetEncodeReactiveMaskCS();
-	ID3D11ComputeShader* GetEncodeTransparencyMaskCS();
-
-	ID3D11PixelShader* GetBSImagespaceShaderSSLRRaytracing();
-
-	upscaling::ConstantBuffer* GetUpscalingCB();
-
-	// Binds camera constants to CS slot 0.
-	void UpdateAndBindUpscalingCB(ID3D11DeviceContext* a_context, float2 a_screenSize, float2 a_renderSize);
-
-	void UpdateGameSettings();
-
-	void CreateUpscalingResources();
-	void DestroyUpscalingResources();
-
-	void CaptureOpaqueColor();
-	void EncodeUpscaleMasks();
-
-	std::unique_ptr<upscaling::Texture2D> upscalingTexture;
-	std::unique_ptr<upscaling::Texture2D> dilatedMotionVectorTexture;
-
-	// Mutually exclusive backends share mask resources.
-	std::unique_ptr<upscaling::Texture2D> colorOpaqueOnlyTexture;
-	std::unique_ptr<upscaling::Texture2D> reactiveMaskTexture;
-	std::unique_ptr<upscaling::Texture2D> transparencyMaskTexture;
-
-	struct UpscalingCB
-	{
-		uint ScreenSize[2];
-		uint RenderSize[2];
-		// Camera parameters: far, near, far-near, far*near.
-		float4 CameraData;
-		// x=reactiveScale, y=transparencyScale.
-		float4 MaskParams;
-	};
-
-private:
-	winrt::com_ptr<ID3D11ComputeShader> dilateMotionVectorCS;
-	winrt::com_ptr<ID3D11ComputeShader> overrideLinearDepthCS;
-	winrt::com_ptr<ID3D11ComputeShader> overrideDepthCS;
-	winrt::com_ptr<ID3D11ComputeShader> encodeReactiveMaskCS;
-	winrt::com_ptr<ID3D11ComputeShader> encodeTransparencyMaskCS;
-	winrt::com_ptr<ID3D11PixelShader> BSImagespaceShaderSSLRRaytracing;
-
-	// Used when kMainTemp lacks an SRV.
-	winrt::com_ptr<ID3D11ShaderResourceView> mainTempFinalSRV;
-	ID3D11Resource* mainTempFinalSRVResource = nullptr;
-
-	bool opaqueCapturedThisFrame = false;
-	bool telemetryHasEvaluated = false;
-	std::uint64_t telemetryLastEvaluatedFrame = 0;
-	std::uint32_t telemetryInputWidth = 0;
-	std::uint32_t telemetryInputHeight = 0;
-	std::uint32_t telemetryOutputWidth = 0;
-	std::uint32_t telemetryOutputHeight = 0;
-	uint telemetryQualityMode = 0;
-};
-
 }

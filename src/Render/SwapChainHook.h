@@ -1,14 +1,19 @@
 #pragma once
 
 #include <d3d11.h>
-#include <dxgi1_4.h>
+#include <dxgi.h>
+
+#include <functional>
+#include <optional>
+#include <vector>
 
 namespace cs::render
 {
 	using CreateDeviceAndSwapChain = decltype(&D3D11CreateDeviceAndSwapChain);
 
-	struct SwapChainCreateContext
+	struct CreateDeviceAndSwapChainContext
 	{
+		CreateDeviceAndSwapChain realCreate;
 		IDXGIAdapter* adapter;
 		D3D_DRIVER_TYPE driverType;
 		HMODULE software;
@@ -21,51 +26,23 @@ namespace cs::render
 		ID3D11Device** device;
 		D3D_FEATURE_LEVEL* featureLevel;
 		ID3D11DeviceContext** immediateContext;
-		D3D_FEATURE_LEVEL forcedFeatureLevel{ D3D_FEATURE_LEVEL_11_1 };
-
-		void ForceFeatureLevel11_1() noexcept
-		{
-			featureLevels = &forcedFeatureLevel;
-			featureLevelCount = 1;
-		}
-
-		HRESULT Call(CreateDeviceAndSwapChain a_create) const
-		{
-			return a_create(
-				adapter,
-				driverType,
-				software,
-				flags,
-				featureLevels,
-				featureLevelCount,
-				sdkVersion,
-				swapChainDesc,
-				swapChain,
-				device,
-				featureLevel,
-				immediateContext);
-		}
 	};
 
-	struct FrameGenerationCreateRoute
-	{
-		bool inlineProxy{ false };
-		IDXGIFactory4* factory{ nullptr };
-	};
+	// Runs before the real creation call; may adjust the descriptor and requested feature levels.
+	using PreCreateDeviceCallback =
+		std::function<void(DXGI_SWAP_CHAIN_DESC*, std::vector<D3D_FEATURE_LEVEL>&)>;
 
-	using IsCreateProviderActive = bool (*)() noexcept;
-	using FrameGenerationEvaluate = FrameGenerationCreateRoute (*)(SwapChainCreateContext&);
-	using FrameGenerationInline = HRESULT (*)(SwapChainCreateContext&, IDXGIFactory4*);
-	using UpscalingPreCreate = void (*)(SwapChainCreateContext&);
-	using UpscalingPostCreate = HRESULT (*)(HRESULT, SwapChainCreateContext&);
+	// Runs after a successful creation call and BEFORE the D3D bootstrap, so a callback may
+	// upgrade the device and swap-chain interfaces in place; the bootstrap sees the final pointers.
+	using PostCreateDeviceCallback =
+		std::function<void(IDXGIAdapter*, ID3D11Device**, IDXGISwapChain**)>;
+	using ReplacementCreateDeviceCallback =
+		std::function<std::optional<HRESULT>(CreateDeviceAndSwapChainContext&)>;
 
-	void RegisterFrameGenerationCreatePhases(
-		IsCreateProviderActive a_isActive,
-		FrameGenerationEvaluate a_evaluate,
-		FrameGenerationInline a_inline);
-	void RegisterUpscalingCreatePhases(
-		IsCreateProviderActive a_isActive,
-		UpscalingPreCreate a_preCreate,
-		UpscalingPostCreate a_postCreate);
+	// Register only on the startup thread, before the swap chain is created.
+	void RegisterPreCreateDeviceAndSwapChain(PreCreateDeviceCallback a_callback);
+	void RegisterPostCreateDeviceAndSwapChain(PostCreateDeviceCallback a_callback);
+	bool RegisterReplacementCreateDeviceAndSwapChain(ReplacementCreateDeviceCallback a_callback);
+
 	void InstallSwapChainHook();
 }

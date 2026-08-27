@@ -5,6 +5,7 @@
 #include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
+#include "Upscaling.h"
 #include "Utils/CSBuffer.h"
 #include "World/Sky.h"
 
@@ -37,8 +38,10 @@ namespace cs::render
 			std::uint32_t     FrameCount = 0;
 			std::uint32_t     InInterior = 0;
 			DirectX::XMFLOAT4 WorldUpView{};
+			float             MipBias = 0.0f;
+			float             pad0[3]{};
 		};
-		static_assert(sizeof(SharedDataCB) == 128);
+		static_assert(sizeof(SharedDataCB) == 144);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
 		struct SubstrateState
@@ -138,6 +141,9 @@ namespace cs::render
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			if (const auto* cell = player ? player->GetParentCell() : nullptr)
 				data.InInterior = cell->IsExterior() ? 0u : 1u;
+
+			auto* upscaling = features::Upscaling::GetSingleton();
+			data.MipBias = (upscaling && upscaling->IsLoaded()) ? upscaling->GetMipBias() : 0.0f;
 
 			return data;
 		}

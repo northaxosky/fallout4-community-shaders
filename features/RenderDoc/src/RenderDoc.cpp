@@ -13,8 +13,6 @@
 #include <memory>
 
 #include "F4SE/API.h"
-#include "FrameGeneration.h"
-#include "Upscaling.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "REX/CONVERT.h"
@@ -40,22 +38,6 @@ namespace cs::features
 
 	namespace
 	{
-		// RenderDoc conflicts with Streamline's interposer.
-		bool DLSSGRequested()
-		{
-			const auto* frameGeneration = FrameGeneration::GetSingleton();
-			return frameGeneration->IsActive()
-				&& frameGeneration->settings.frameGenerationMode
-				&& frameGeneration->settings.frameGenType == static_cast<int>(FrameGeneration::FrameGenType::kDLSSG);
-		}
-
-		bool DLSSUpscalingRequested()
-		{
-			const auto* upscaling = Upscaling::GetSingleton();
-			return upscaling->IsLoaded()
-				&& upscaling->settings.upscaleMethodPreference == static_cast<unsigned int>(Upscaling::UpscaleMethod::kDLSS);
-		}
-
 		int ClampMultiFrameCount(int64_t a_value)
 		{
 			return static_cast<int>(std::clamp(a_value,
@@ -251,15 +233,6 @@ namespace cs::features
 
 		if (!_settings.enabled)
 			return;
-		if (DLSSGRequested() || DLSSUpscalingRequested()) {
-			constexpr std::string_view reason =
-				"RenderDoc cannot start while DLSS is active (Streamline conflicts with RenderDoc's DXGI "
-				"hooks and blacks the present); disable FrameGeneration DLSS-G and set Upscaling to Native "
-				"or FSR, then restart";
-			L->warn("{}", reason);
-			FailLoad(std::string(reason));
-			return;
-		}
 		// Load before D3D initialization.
 		if (!TryLoadRuntime()) {
 			FailLoad("RenderDoc runtime load failed for settings.dll_path '" + _settings.dllPath
@@ -499,7 +472,7 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		ImGui::TextDisabled("Restart after enabling. DLSS is blocked (Streamline vs RenderDoc's DXGI hooks); disable FrameGeneration and set Upscaling to Native/FSR for clean D3D11 captures.");
+		ImGui::TextDisabled("Restart after enabling.");
 		ImGui::TextDisabled("%s captures one frame. %s captures the configured multi-frame count.",
 			_captureHotkey.ToString().c_str(), _multiCaptureHotkey.ToString().c_str());
 

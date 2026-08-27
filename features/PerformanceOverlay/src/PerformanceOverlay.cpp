@@ -12,8 +12,6 @@
 #include <Windows.h>
 #include <dxgi1_4.h>
 
-#include "Env.h"
-#include "FrameGeneration.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Settings/FeatureConfig.h"
@@ -24,8 +22,6 @@ namespace cs::features
 	namespace { auto* L = cs::log::Get("cs.feature.performanceoverlay"); }
 
 	constexpr std::array<float, 3> kFrameTimeReferenceFps{ 30.0f, 60.0f, 120.0f };
-	constexpr const char* kPostFgFrameTimeTooltip =
-		"Backend-reported when available (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus accumulate into a per-tick counter). FSR3 falls back to engine frame time divided by the configured multiplier.";
 
 	namespace
 	{
@@ -128,7 +124,6 @@ namespace cs::features
 				&& ReadBoolSetting(*settingsTable, "show_fps", a_candidate.showFps, a_error)
 				&& ReadBoolSetting(*settingsTable, "show_frame_time", a_candidate.showFrameTime, a_error)
 				&& ReadBoolSetting(*settingsTable, "show_graph", a_candidate.showGraph, a_error)
-				&& ReadBoolSetting(*settingsTable, "show_estimated_post_fg_frame_time", a_candidate.showEstimatedPostFGFrameTime, a_error)
 				&& ReadBoolSetting(*settingsTable, "show_vram", a_candidate.showVram, a_error)
 				&& ReadBoolSetting(*settingsTable, "show_stats", a_candidate.showStats, a_error)
 				&& ReadIntegerSetting(*settingsTable, "corner", 0, 3, "value must be in range 0..3", a_candidate.corner, a_error)
@@ -222,7 +217,6 @@ namespace cs::features
 		settingsTable.insert_or_assign("show_fps", settings.showFps);
 		settingsTable.insert_or_assign("show_frame_time", settings.showFrameTime);
 		settingsTable.insert_or_assign("show_graph", settings.showGraph);
-		settingsTable.insert_or_assign("show_estimated_post_fg_frame_time", settings.showEstimatedPostFGFrameTime);
 		settingsTable.insert_or_assign("show_vram", settings.showVram);
 		settingsTable.insert_or_assign("show_stats", settings.showStats);
 		settingsTable.insert_or_assign("corner", static_cast<int64_t>(settings.corner));
@@ -254,7 +248,6 @@ namespace cs::features
 				settings.showFps = false;
 				settings.showFrameTime = false;
 				settings.showGraph = false;
-				settings.showEstimatedPostFGFrameTime = false;
 				settings.showVram = false;
 				settings.showStats = false;
 				break;
@@ -262,7 +255,6 @@ namespace cs::features
 				settings.showFps = true;
 				settings.showFrameTime = false;
 				settings.showGraph = false;
-				settings.showEstimatedPostFGFrameTime = false;
 				settings.showVram = false;
 				settings.showStats = false;
 				break;
@@ -270,7 +262,6 @@ namespace cs::features
 				settings.showFps = true;
 				settings.showFrameTime = true;
 				settings.showGraph = true;
-				settings.showEstimatedPostFGFrameTime = true;
 				settings.showVram = false;
 				settings.showStats = false;
 				break;
@@ -278,7 +269,6 @@ namespace cs::features
 				settings.showFps = true;
 				settings.showFrameTime = true;
 				settings.showGraph = true;
-				settings.showEstimatedPostFGFrameTime = true;
 				settings.showVram = true;
 				settings.showStats = true;
 				break;
@@ -307,7 +297,6 @@ namespace cs::features
 		LARGE_INTEGER now;
 		QueryPerformanceCounter(&now);
 		const double nowSec = static_cast<double>(now.QuadPart) / _qpcFreq;
-		const int displayedFrameMultiplier = std::max(1, cs::env::GetDisplayedFrameMultiplier());
 
 		if (_lastFrameQpc > 0.0) {
 			const float dtMs = static_cast<float>((nowSec - _lastFrameQpc) * 1000.0);
@@ -315,8 +304,6 @@ namespace cs::features
 			if (dtMs > 0.0f && dtMs < 1000.0f) {
 				_curFrameMs = dtMs;
 				_frameTimesMs[_frameTimesHead] = dtMs;
-				// Post-FG frame time is estimated, not measured.
-				_postFgFrameTimesMs[_frameTimesHead] = dtMs / static_cast<float>(displayedFrameMultiplier);
 				_frameTimesHead = (_frameTimesHead + 1) % settings.historySize;
 				if (_frameTimesCount < settings.historySize)
 					_frameTimesCount++;
@@ -328,22 +315,6 @@ namespace cs::features
 		if (nowSec - _lastDisplayUpdate >= settings.updateInterval) {
 			_displayedFrameMs = _curFrameMs;
 			_displayedFps = _curFrameMs > 0.0f ? 1000.0f / _curFrameMs : 0.0f;
-			_displayedFrameMultiplier = displayedFrameMultiplier;
-
-			// Prefer backend counts; otherwise estimate from engine FPS.
-			const uint64_t totalNow = cs::env::GetDisplayedFrameTotal();
-			const double windowSec = nowSec - _lastDisplayedSampleSec;
-			if (_lastDisplayedSampleSec > 0.0 && windowSec > 0.0 && totalNow >= _lastDisplayedFrameTotal) {
-				const uint64_t delta = totalNow - _lastDisplayedFrameTotal;
-				if (delta > 0)
-					_measuredDisplayedFps = static_cast<float>(static_cast<double>(delta) / windowSec);
-				else
-					_measuredDisplayedFps = _displayedFps * static_cast<float>(displayedFrameMultiplier);
-			} else {
-				_measuredDisplayedFps = _displayedFps * static_cast<float>(displayedFrameMultiplier);
-			}
-			_lastDisplayedFrameTotal = totalNow;
-			_lastDisplayedSampleSec  = nowSec;
 
 			RecomputeStats();
 			_lastDisplayUpdate = nowSec;
@@ -397,7 +368,6 @@ namespace cs::features
 			.Field("avg_ms", static_cast<double>(_avgMs))
 			.Field("low_1pct_ms", static_cast<double>(_onePctLowMs))
 			.Field("refresh_hz", static_cast<double>(_refreshHz))
-			.Field("multiplier", static_cast<std::int64_t>(_displayedFrameMultiplier))
 			.Field("vram_used_mb", static_cast<std::int64_t>(_vramUsedBytes / (1024 * 1024)))
 			.Field("vram_budget_mb", static_cast<std::int64_t>(_vramBudgetBytes / (1024 * 1024)));
 	}
@@ -466,7 +436,6 @@ namespace cs::features
 			const ImVec4 colWarn  = ImVec4(1.00f, 0.85f, 0.20f, 1.00f);
 			const ImVec4 colBad   = ImVec4(1.00f, 0.30f, 0.30f, 1.00f);
 			const ImVec4 colHi    = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-			const ImVec4 colPostFg = ImVec4(0.20f, 0.85f, 1.00f, 0.90f);
 
 			auto fpsColor = [&](float fps) -> ImVec4 {
 				if (settings.highContrast) return colHi;
@@ -498,78 +467,22 @@ namespace cs::features
 				drawList->PopClipRect();
 			};
 
-			auto drawLineOverLastPlot = [](const float* values, int count, float ymin, float ymax, ImU32 color) {
-				if (count < 2)
-					return;
-
-				const ImVec2 itemMin = ImGui::GetItemRectMin();
-				const ImVec2 itemMax = ImGui::GetItemRectMax();
-				const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
-				const ImVec2 plotMin(itemMin.x + framePadding.x, itemMin.y + framePadding.y);
-				const ImVec2 plotMax(itemMax.x - framePadding.x, itemMax.y - framePadding.y);
-				if (plotMax.x <= plotMin.x || plotMax.y <= plotMin.y)
-					return;
-
-				const float range = std::max(ymax - ymin, 0.001f);
-				const float width = plotMax.x - plotMin.x;
-				const float height = plotMax.y - plotMin.y;
-				const float xStep = width / static_cast<float>(count - 1);
-				auto pointAt = [&](int idx) {
-					const float t = std::clamp((values[idx] - ymin) / range, 0.0f, 1.0f);
-					return ImVec2(plotMin.x + xStep * static_cast<float>(idx), plotMax.y - t * height);
-				};
-
-				ImDrawList* drawList = ImGui::GetWindowDrawList();
-				drawList->PushClipRect(plotMin, plotMax, true);
-				ImVec2 prev = pointAt(0);
-				for (int i = 1; i < count; ++i) {
-					const ImVec2 cur = pointAt(i);
-					drawList->AddLine(prev, cur, color, 1.5f);
-					prev = cur;
-				}
-				drawList->PopClipRect();
-			};
-
 			if (settings.showFps) {
-				const bool fgActive = _displayedFrameMultiplier > 1;
-				const auto fgType = FrameGeneration::GetSingleton()->activeFrameGenType;
-				const bool fsr3Fallback = fgActive && fgType == FrameGeneration::FrameGenType::kFSR3;
-				const float estimateFps = _displayedFps * static_cast<float>(_displayedFrameMultiplier);
-				const float outputFps = (fgActive && _measuredDisplayedFps > 0.0f) ? _measuredDisplayedFps : estimateFps;
-				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(outputFps));
-				if (fgActive) {
-					const char* fgLabel = "FG";
-					switch (fgType) {
-						case FrameGeneration::FrameGenType::kFSR3:   fgLabel = fsr3Fallback ? "FSR3 est" : "FSR3"; break;
-						case FrameGeneration::FrameGenType::kDLSSG:  fgLabel = "DLSS-G"; break;
-						case FrameGeneration::FrameGenType::kXeSSFG: fgLabel = "XeSS-FG"; break;
-					}
-					ImGui::Text("[%s] %.0f FPS  |  [Engine] %.0f FPS", fgLabel, outputFps, _displayedFps);
-				} else {
-					ImGui::Text("[Engine] %.0f FPS", _displayedFps);
-				}
+				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(_displayedFps));
+				ImGui::Text("[Engine] %.0f FPS", _displayedFps);
 				ImGui::PopStyleColor();
-				if (fgActive)
-					ImGui::SetItemTooltip("Displayed FPS comes from backend-reported frame counts (DLSS-G slDLSSGGetState, XeSS-FG xefgSwapChainGetLastPresentStatus). FSR3 falls back to engine FPS times multiplier (labeled \"FSR3 est\") since safe per-frame counting would require hijacking presentCallback.");
 			}
 			if (settings.showFrameTime) {
-				if (_displayedFrameMultiplier > 1)
-					ImGui::Text("%.2f ms / displayed %.2f ms",
-						_displayedFrameMs,
-						_displayedFrameMs / static_cast<float>(_displayedFrameMultiplier));
-				else
-					ImGui::Text("%.2f ms", _displayedFrameMs);
+				ImGui::Text("%.2f ms", _displayedFrameMs);
 			}
 
 			if (settings.showGraph && _frameTimesCount > 1) {
 				// PlotLines requires contiguous samples.
 				static std::array<float, kHistoryCapacity> linear{};
-				static std::array<float, kHistoryCapacity> linearPostFg{};
 				for (int i = 0; i < _frameTimesCount; ++i) {
 					int src = (_frameTimesHead - _frameTimesCount + i + settings.historySize) % settings.historySize;
 					if (src < 0) src += settings.historySize;
 					linear[i] = _frameTimesMs[src];
-					linearPostFg[i] = _postFgFrameTimesMs[src];
 				}
 				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
 				const float maxReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
@@ -587,26 +500,10 @@ namespace cs::features
 				}
 				const float ymax = _graphYMaxSmoothed;
 				ImGui::TextUnformatted("Frame Time");
-				if (settings.showEstimatedPostFGFrameTime) {
-					ImGui::SameLine();
-					const float lineH = ImGui::GetTextLineHeight();
-					const float chipW = lineH * 0.6f;
-					const ImVec2 chipPos = ImGui::GetCursorScreenPos();
-					ImGui::GetWindowDrawList()->AddRectFilled(
-						ImVec2(chipPos.x, chipPos.y + lineH * 0.25f),
-						ImVec2(chipPos.x + chipW, chipPos.y + lineH * 0.75f),
-						ImGui::GetColorU32(colPostFg));
-					ImGui::Dummy(ImVec2(chipW + 4.0f, lineH));
-					ImGui::SameLine();
-					ImGui::TextColored(colPostFg, "post-FG");
-					ImGui::SetItemTooltip(kPostFgFrameTimeTooltip);
-				}
 				const float graphHeight = std::clamp(settings.graphHeightPx, 40.0f, 160.0f) * settings.fontScale;
 				ImGui::PlotLines("##frametimegraph", linear.data(), _frameTimesCount, 0,
 					nullptr, 0.0f, ymax, ImVec2(-FLT_MIN, graphHeight));
 				drawReferenceLinesOverLastPlot(0.0f, ymax, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, settings.highContrast ? 0.35f : 0.18f)));
-				if (settings.showEstimatedPostFGFrameTime)
-					drawLineOverLastPlot(linearPostFg.data(), _frameTimesCount, 0.0f, ymax, ImGui::GetColorU32(colPostFg));
 			}
 
 			if (settings.showStats) {
@@ -672,8 +569,6 @@ namespace cs::features
 			changed |= ImGui::Checkbox("FPS", &settings.showFps);
 			changed |= ImGui::Checkbox("Frame time (ms)", &settings.showFrameTime);
 			changed |= ImGui::Checkbox("Frame time graph", &settings.showGraph);
-			changed |= ImGui::Checkbox("Estimated post-FG frame-time series", &settings.showEstimatedPostFGFrameTime);
-			ImGui::SetItemTooltip(kPostFgFrameTimeTooltip);
 			changed |= ImGui::Checkbox("VRAM", &settings.showVram);
 			changed |= ImGui::Checkbox("Frame stats (avg / 1%% low / 0.1%% low)", &settings.showStats);
 			if (changed) SaveSettings();

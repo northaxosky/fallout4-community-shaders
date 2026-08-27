@@ -20,6 +20,11 @@ __pycache__/
 # Shader validation scratch + corpus cache
 .shader-cache/
 
+# Downloaded SDK archives and the staged proprietary runtime DLLs
+.sdk-cache/
+features/Upscaling/Shaders/Upscaling/Streamline/
+features/Upscaling/Shaders/Upscaling/FidelityFX/
+
 # Vendored Detours static libs are NOT build output, track them.
 !include/detours/**/*.lib
 !include/detours/**/*.pdb
@@ -42,12 +47,6 @@ compile_commands.json
 .idea/
 .vscode/
 .cache/
-
-# SDK runtime DLL cache (per FO4Upscaling pattern)
-.sdk-cache/
-package/F4SE/Plugins/Streamline/
-package/F4SE/Plugins/FrameGeneration/FidelityFX/
-package/F4SE/Plugins/FrameGeneration/XeSS/
 
 # Test output
 test-results/

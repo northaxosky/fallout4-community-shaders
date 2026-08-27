@@ -31,16 +31,11 @@ namespace cs::engine
 		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
 		std::vector<PrioritizedCallback>    g_preDeferredComposite;
 		std::vector<PrioritizedCallback>    g_postDeferredComposite;
-		std::vector<PostDynResViewportFGCb> g_postDynResViewport_FGCapture;
 		std::vector<PrioritizedCallback>    g_preSunLightDraw;
 		bool g_prePassInstalled            = false;
 		bool g_lightsImplInstalled         = false;
 		bool g_compositeInstalled          = false;
-		bool g_postDynResViewportInstalled = false;
 		bool g_deferredDrawAnchorInstalled = false;
-		// Empty means no earlier viewport thunk owner.
-		std::string g_postDynResViewportPreThunkOwner;
-		bool        g_postDynResViewportPreThunkClaimed = false;
 		bool g_insideDeferredLightsImpl    = false;
 		bool g_insideDeferredComposite     = false;
 
@@ -171,39 +166,6 @@ namespace cs::engine
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 
-		// Capture must observe the post-upscale viewport.
-		struct PostDynResViewport_Hook
-		{
-			static void thunk(RE::BSGraphics::RenderTargetManager* This, bool a_setting)
-			{
-				MarkRegistrationClosed();
-				func(This, a_setting);
-				for (auto& cb : g_postDynResViewport_FGCapture) {
-					cb(a_setting);
-				}
-			}
-			static inline REL::Relocation<decltype(thunk)> func;
-		};
-
-		void EnsurePostDynResViewportInstalled()
-		{
-			if (g_postDynResViewportInstalled) {
-				return;
-			}
-			// Earlier viewport thunks must install before the broker.
-			if (g_postDynResViewportPreThunkClaimed) {
-				L->info("Broker chaining PostDynResViewport after pre-thunk '{}'.", g_postDynResViewportPreThunkOwner);
-			} else {
-				L->info("Broker installing PostDynResViewport without a pre-thunk (e.g. Upscaling disabled).");
-			}
-			const auto runtimeIdx = static_cast<std::uint8_t>(REX::FModule::GetRuntimeIndex());
-			constexpr std::ptrdiff_t offsets[] = { 0xE1, 0xC5, 0xC5 };
-			stl::write_thunk_call<PostDynResViewport_Hook>(
-				REL::ID({ 587723, 2318322, 2318322 }).address() + offsets[runtimeIdx]);
-			g_postDynResViewportInstalled = true;
-			L->info("Hook installed on SetUseDynamicResolutionViewportAsDefaultViewport (broker)");
-		}
-
 		void EnsureDeferredLightsImplInstalled()
 		{
 			if (g_lightsImplInstalled) {
@@ -289,35 +251,10 @@ namespace cs::engine
 		return true;
 	}
 
-	void RegisterPostDynResViewport_FGCapture(PostDynResViewportFGCb callback)
-	{
-		if (!RegistrationAllowed("PostDynResViewport_FGCapture")) return;
-		g_postDynResViewport_FGCapture.push_back(std::move(callback));
-		EnsurePostDynResViewportInstalled();
-	}
-
 	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority)
 	{
 		if (!RegistrationAllowed("PreSunLightDraw")) return;
 		InsertPrioritized(g_preSunLightDraw, std::move(callback), priority);
 		InstallDeferredDrawAnchor();
-	}
-
-	void MarkPostDynResViewportPreThunkInstalled(std::string_view a_ownerLabel)
-	{
-		if (!RegistrationAllowed("PostDynResViewport_PreThunk")) return;
-		if (g_postDynResViewportPreThunkClaimed) {
-			L->error("Duplicate PostDynResViewport pre-thunk claim: existing '{}', new '{}'. Two owners fighting for REL::ID(587723)+0xE1 will silently chain in load order.",
-				g_postDynResViewportPreThunkOwner, a_ownerLabel);
-			return;
-		}
-		g_postDynResViewportPreThunkOwner = std::string(a_ownerLabel);
-		g_postDynResViewportPreThunkClaimed = true;
-		if (g_postDynResViewportInstalled) {
-			L->error("PostDynResViewport pre-thunk '{}' installed AFTER the broker; wrap order is inverted. FGCapture will now run before the pre-thunk body (pre-upscale pixels).",
-				a_ownerLabel);
-		} else {
-			L->info("PostDynResViewport pre-thunk '{}' claimed; broker will chain after it.", a_ownerLabel);
-		}
 	}
 }

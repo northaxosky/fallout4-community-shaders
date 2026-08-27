@@ -8,7 +8,12 @@ namespace cs
 	class ComputeScope
 	{
 	public:
-		explicit ComputeScope(ID3D11DeviceContext* a_ctx) noexcept;
+		explicit ComputeScope(
+			ID3D11DeviceContext* a_ctx,
+			UINT a_srvCount = 8,
+			UINT a_samplerCount = 8,
+			UINT a_uavCount = 8,
+			UINT a_constantBufferCount = 8) noexcept;
 		~ComputeScope() noexcept;
 
 		ComputeScope(const ComputeScope&)            = delete;
@@ -18,5 +23,9 @@ namespace cs
 
 	private:
 		ID3D11DeviceContext* _ctx;
+		UINT _srvCount;
+		UINT _samplerCount;
+		UINT _uavCount;
+		UINT _constantBufferCount;
 	};
 }

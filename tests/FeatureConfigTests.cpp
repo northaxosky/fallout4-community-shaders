@@ -290,13 +290,18 @@ namespace
 		CHECK(activation.valid && activation.present && !activation.load);
 	}
 
-	// Retired feature keys left behind in a user file must stay harmless.
+	// Current and retired feature keys merge without filtering user tables.
 	void TestUnknownFeatureTableIsHarmless(const std::filesystem::path& a_root)
 	{
 		const auto defaultPath = a_root / "Unknown.Default.toml";
 		const auto userPath = a_root / "Unknown.User.toml";
 
-		WriteFile(defaultPath, "[features.ScreenSpaceShadows]\nload = false\n");
+		WriteFile(
+			defaultPath,
+			"[features.ScreenSpaceShadows]\n"
+			"load = false\n"
+			"[features.MotionVectorFixes]\n"
+			"load = false\n");
 		WriteFile(
 			userPath,
 			"[features.ScreenSpaceShadows]\n"
@@ -306,7 +311,15 @@ namespace
 			"[features.Imagespace.settings]\n"
 			"enabled = true\n"
 			"[features.MotionVectorFixes]\n"
-			"load = true\n");
+			"load = true\n"
+			"[features.FrameGeneration]\n"
+			"load = true\n"
+			"[features.FrameGeneration.settings]\n"
+			"frame_gen_type = 1\n"
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.Upscaling.settings]\n"
+			"upscale_method = 1\n");
 
 		const auto merged = cs::feature_config::LoadMergedFiles(defaultPath, userPath);
 		CHECK(merged.defaultLoaded);
@@ -314,11 +327,18 @@ namespace
 		CHECK(merged.defaultError.empty());
 		CHECK(merged.userWarning.empty());
 		CHECK(merged.root["features"]["ScreenSpaceShadows"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(merged.root["features"]["MotionVectorFixes"]["load"].value<bool>() == std::optional<bool>{ true });
 		CHECK(merged.root["features"]["Imagespace"].as_table() != nullptr);
 		CHECK(merged.root["features"]["MotionVectorFixes"].as_table() != nullptr);
+		CHECK(merged.root["features"]["FrameGeneration"].as_table() != nullptr);
+		CHECK(merged.root["features"]["Upscaling"].as_table() != nullptr);
 		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "Imagespace") ==
 			cs::feature_config::kAllFeatureKeys.end());
-		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "MotionVectorFixes") ==
+		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "MotionVectorFixes") !=
+			cs::feature_config::kAllFeatureKeys.end());
+		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "FrameGeneration") ==
+			cs::feature_config::kAllFeatureKeys.end());
+		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "Upscaling") !=
 			cs::feature_config::kAllFeatureKeys.end());
 	}
 

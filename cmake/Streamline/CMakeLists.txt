@@ -1,9 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
 
-if(TARGET Streamline)
-  return()
-endif()
-
 add_library(Streamline INTERFACE)
 
 target_include_directories(

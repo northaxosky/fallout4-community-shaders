@@ -7,6 +7,3 @@
 [submodule "extern/Streamline"]
 	path = extern/Streamline
 	url = https://github.com/NVIDIA-RTX/Streamline.git
-[submodule "extern/XeSS"]
-	path = extern/XeSS
-	url = https://github.com/intel/xess.git
