@@ -36,6 +36,18 @@ namespace cs::shader_cache
 
 	const char* DescribeDisposition(CacheDisposition a_disposition) noexcept;
 
+	struct ShaderCacheCounters
+	{
+		std::uint64_t hit = 0;
+		std::uint64_t absent = 0;
+		std::uint64_t stale = 0;
+		std::uint64_t rejected = 0;
+		std::uint64_t written = 0;
+	};
+
+	void ResetShaderCacheCounters() noexcept;
+	ShaderCacheCounters GetShaderCacheCounters() noexcept;
+
 	struct ShaderCacheOptions
 	{
 		std::filesystem::path cacheRoot;
@@ -54,6 +66,8 @@ namespace cs::shader_cache
 		std::string               error;
 		std::string               cacheNote;
 	};
+
+	std::string DescribeCacheOutcome(const ShaderCacheOutcome& a_outcome);
 
 	ShaderCacheOutcome LoadOrCompileShader(
 		const ShaderRecipe&       a_recipe,

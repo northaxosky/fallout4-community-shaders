@@ -194,7 +194,10 @@ float4 Wrapped()
 
 	std::string FormatCompilerIdentity(const CompilerIdentity& a_identity)
 	{
-		return EncodeLocator(a_identity.modulePath) + "|"
+		return std::string(DescribeCompilerIdentityMechanism(
+				   a_identity.mechanism))
+			+ "|" + DescribeCompilerIdentityValue(a_identity) + "|"
+			+ EncodeLocator(a_identity.modulePath) + "|"
 			+ std::to_string(a_identity.moduleLength) + "|"
 			+ cs::sha256::Sha256ToHex(a_identity.moduleDigest);
 	}
@@ -409,6 +412,10 @@ float4 Wrapped()
 			"identity names a d3dcompiler module, got " + name);
 		Check(identity.moduleLength > 0, "identity records the module length");
 		Check(!cs::sha256::Sha256IsZero(identity.moduleDigest), "identity records a module digest");
+		Check(identity.mechanism != CompilerIdentityMechanism::kUnavailable,
+			"identity records its mechanism");
+		Check(DescribeCompilerIdentityValue(identity) != "unavailable",
+			"identity records its value");
 
 		Workspace workspace("identity");
 		workspace.WriteDefaultTree();
@@ -420,6 +427,33 @@ float4 Wrapped()
 		const auto genuine = ComputeLogicalDigest(EncodeShaderRecipe(recipe, identity));
 		const auto altered = ComputeLogicalDigest(EncodeShaderRecipe(recipe, mutated));
 		Check(!(genuine == altered), "compiler identity participates in the logical digest");
+
+		const auto serviced9168 = MakeVersionCompilerIdentity(
+			identity.modulePath,
+			4'669'440,
+			{ 10, 0, 26'100, 9'168 });
+		const auto serviced9278 = MakeVersionCompilerIdentity(
+			identity.modulePath,
+			4'669'440,
+			{ 10, 0, 26'100, 9'278 });
+		Check(
+			DescribeCompilerIdentityValue(serviced9168)
+				== "10.0.26100.9168",
+			"version identity formats servicing build 9168");
+		Check(
+			DescribeCompilerIdentityValue(serviced9278)
+				== "10.0.26100.9278",
+			"version identity formats servicing build 9278");
+		Check(serviced9168.moduleLength == serviced9278.moduleLength,
+			"servicing identities retain the shared module length");
+		Check(!(serviced9168.moduleDigest == serviced9278.moduleDigest),
+			"servicing versions produce distinct identity digests");
+		const auto digest9168 =
+			ComputeLogicalDigest(EncodeShaderRecipe(recipe, serviced9168));
+		const auto digest9278 =
+			ComputeLogicalDigest(EncodeShaderRecipe(recipe, serviced9278));
+		Check(!(digest9168 == digest9278),
+			"servicing versions produce distinct logical digests");
 	}
 
 	// persisted identity must survive process boundaries
@@ -449,6 +483,218 @@ float4 Wrapped()
 				"the child processes agree with this process");
 		}
 		std::printf("  cross-process compiler identity: %s\n", first.c_str());
+	}
+
+	void TestCompilerIdentityReset()
+	{
+		Workspace workspace("identity-reset");
+		const auto cacheRoot = workspace.Root() / "CacheFamily";
+		std::filesystem::create_directories(cacheRoot);
+		const auto modulePath = workspace.Root() / "D3DCompiler_47.dll";
+		const auto oldIdentity = MakeVersionCompilerIdentity(
+			modulePath,
+			4'669'440,
+			{ 10, 0, 26'100, 9'168 });
+		const auto newIdentity = MakeVersionCompilerIdentity(
+			modulePath,
+			4'669'440,
+			{ 10, 0, 26'100, 9'278 });
+
+		const auto initialized =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				oldIdentity,
+				kRecordSchemaVersion);
+		Check(initialized.firstRun, "initial identity is a first run");
+		Check(!initialized.reset, "initial identity does not reset");
+		Check(initialized.error.empty(),
+			"initial identity sidecar is written: " + initialized.error);
+
+		const auto record = cacheRoot / "ps" / "record.fxc";
+		std::filesystem::create_directories(record.parent_path());
+		WriteAll(record, { 1, 2, 3, 4 });
+		const auto changed =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				newIdentity,
+				kRecordSchemaVersion);
+		Check(changed.reset, "changed identity resets the cache root");
+		Check(!std::filesystem::exists(record),
+			"changed identity removes old records");
+		Check(
+			changed.resetMessage
+				== "shader cache reset: compiler 10.0.26100.9168 -> 10.0.26100.9278",
+			"changed identity reports the servicing transition");
+		Check(changed.error.empty(),
+			"changed identity sidecar is written: " + changed.error);
+
+		const auto unchanged =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				newIdentity,
+				kRecordSchemaVersion);
+		Check(!unchanged.reset, "matching identity preserves the cache");
+		Check(unchanged.resetMessage.empty(),
+			"matching identity does not report a reset");
+
+		std::filesystem::create_directories(record.parent_path());
+		WriteAll(record, { 5, 6, 7, 8 });
+		constexpr auto nextRecordSchemaVersion =
+			kRecordSchemaVersion + 1;
+		const auto schemaChanged =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				newIdentity,
+				nextRecordSchemaVersion);
+		Check(schemaChanged.reset,
+			"changed record schema resets the cache root");
+		Check(!std::filesystem::exists(record),
+			"changed record schema removes old records");
+		Check(
+			schemaChanged.resetMessage
+				== "shader cache reset: record schema 1 -> 2",
+			"changed record schema reports the format transition");
+
+		std::filesystem::create_directories(record.parent_path());
+		WriteAll(record, { 5, 6, 7, 8 });
+		std::filesystem::remove(cacheRoot / "identity.txt");
+		const auto missing =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				newIdentity,
+				nextRecordSchemaVersion);
+		Check(missing.reset, "missing sidecar resets a populated cache");
+		Check(!std::filesystem::exists(record),
+			"missing sidecar removes untracked records");
+
+		std::filesystem::create_directories(record.parent_path());
+		WriteAll(record, { 9, 10, 11, 12 });
+		WriteAll(
+			cacheRoot / "identity.txt",
+			std::vector<std::uint8_t>{ 'c', 'o', 'r', 'r', 'u', 'p', 't' });
+		const auto corrupt =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				newIdentity,
+				nextRecordSchemaVersion);
+		Check(corrupt.reset, "corrupt sidecar resets a populated cache");
+		Check(!std::filesystem::exists(record),
+			"corrupt sidecar removes untrusted records");
+	}
+
+	void TestCompilerIdentityFirstRun()
+	{
+		Workspace workspace("identity-first-run");
+		const auto cacheRoot =
+			workspace.Root() / "CacheFamily";
+		std::filesystem::create_directories(cacheRoot);
+		const auto abandonedRecord =
+			cacheRoot / "abandoned-layout" / "record.fxc";
+		std::filesystem::create_directories(
+			abandonedRecord.parent_path());
+		WriteAll(abandonedRecord, { 1, 2, 3, 4 });
+		const auto identity = MakeVersionCompilerIdentity(
+			workspace.Root() / "D3DCompiler_47.dll",
+			4'669'440,
+			{ 10, 0, 26'100, 9'278 });
+
+		const auto result =
+			SynchronizeCacheIdentity(
+				cacheRoot,
+				identity,
+				kRecordSchemaVersion);
+		Check(result.firstRun, "missing sidecar and no records is a first run");
+		Check(!result.reset, "first run does not reset the cache root");
+		Check(result.resetMessage.empty(),
+			"first run does not report a spurious reset");
+		Check(std::filesystem::exists(abandonedRecord),
+			"first run leaves abandoned layouts untouched");
+		Check(result.error.empty(),
+			"first-run identity sidecar is written: " + result.error);
+		Check(std::filesystem::exists(
+				  cacheRoot / "identity.txt"),
+			"first run publishes the identity sidecar");
+
+		const auto sidecarBytes =
+			ReadAll(cacheRoot / "identity.txt");
+		const std::string sidecar(
+			sidecarBytes.begin(),
+			sidecarBytes.end());
+		Check(sidecar.starts_with(
+				  "FO4CS.compiler-identity.v1|record-schema=1|version-info|"
+				  "10.0.26100.9278|4669440|"),
+			"first run records the record and compiler schemas");
+	}
+
+	void TestCacheMissIsObservable()
+	{
+		Workspace workspace("observable-miss");
+		workspace.WriteDefaultTree();
+		ResetShaderCacheCounters();
+
+		const auto outcome =
+			LoadOrCompileShader(workspace.Recipe(), workspace.Options());
+		Check(outcome.succeeded, "observable miss compiles");
+		CheckDisposition(outcome, CacheDisposition::kAbsent,
+			"cold lookup reports absent");
+		Check(DescribeCacheOutcome(outcome) == "absent",
+			"cold lookup renders the absent disposition");
+
+		const auto counters = GetShaderCacheCounters();
+		Check(counters.hit == 0, "observable miss records no hit");
+		Check(counters.absent == 1, "observable miss increments absent");
+		Check(counters.stale == 0, "observable miss records no stale entry");
+		Check(counters.rejected == 0,
+			"observable miss records no rejected entry");
+		Check(counters.written == 1,
+			"observable miss increments written");
+	}
+
+	void TestCompilerIdentityHashFallback()
+	{
+		Workspace workspace("identity-hash-fallback");
+		const auto modulePath = workspace.Root() / "versionless.dll";
+		WriteAll(modulePath, { 'A', 'A', 'A', 'A' });
+
+		const auto first = ResolveCompilerIdentity(modulePath);
+		const auto second = ResolveCompilerIdentity(modulePath);
+		Check(first.established, "versionless file establishes an identity");
+		Check(
+			first.mechanism == CompilerIdentityMechanism::kContentHash,
+			"versionless file uses the content hash fallback");
+		Check(FormatCompilerIdentity(first) == FormatCompilerIdentity(second),
+			"content hash fallback is stable");
+		Check(first.moduleLength == 4,
+			"content hash fallback records the file size");
+
+		WriteAll(modulePath, { 'B', 'B', 'B', 'B' });
+		const auto changed = ResolveCompilerIdentity(modulePath);
+		Check(changed.established,
+			"changed versionless file establishes an identity");
+		Check(
+			changed.mechanism == CompilerIdentityMechanism::kContentHash,
+			"changed versionless file retains the hash fallback");
+		Check(changed.moduleLength == first.moduleLength,
+			"fallback comparison keeps file size fixed");
+		Check(!(changed.moduleDigest == first.moduleDigest),
+			"fallback content changes discriminate equal-size files");
+	}
+
+	void TestCacheRootPath()
+	{
+		const auto defaultRoot = DefaultCacheRoot();
+		Check(defaultRoot.is_absolute(), "default cache root is absolute");
+		Check(defaultRoot.filename() == L"ShaderCache",
+			"default cache root is the shared shader cache");
+		Check(defaultRoot.parent_path().filename() == L"Data",
+			"default cache root is under Data");
+		const auto executable = CurrentExecutablePath();
+		Check(
+			executable.empty()
+				|| defaultRoot
+					== (executable.parent_path() / "Data" / "ShaderCache")
+						.lexically_normal(),
+			"default cache root is executable-relative");
 	}
 
 	void TestHitMatchesFreshCompile()
@@ -1407,6 +1653,11 @@ float4 main() : SV_Target
 	constexpr TestCase kTests[]{
 		{ "compiler-identity", &TestCompilerIdentity },
 		{ "compiler-identity-across-processes", &TestCompilerIdentityAcrossProcesses },
+		{ "compiler-identity-reset", &TestCompilerIdentityReset },
+		{ "compiler-identity-first-run", &TestCompilerIdentityFirstRun },
+		{ "cache-miss-observable", &TestCacheMissIsObservable },
+		{ "compiler-identity-hash-fallback", &TestCompilerIdentityHashFallback },
+		{ "cache-root-path", &TestCacheRootPath },
 		{ "hit-matches-fresh-compile", &TestHitMatchesFreshCompile },
 		{ "compute-stage-encoding", &TestComputeStageEncoding },
 		{ "cross-directory-transitive-invalidation", &TestCrossDirectoryTransitiveInvalidation },
@@ -1440,7 +1691,15 @@ int main(int argc, char** argv)
 	if (argc == 3 && argv[1] == kEmitIdentityFlag)
 		return EmitCompilerIdentity(argv[2]);
 
+	const std::string_view selected =
+		argc == 3 && std::string_view(argv[1]) == "--test"
+		? std::string_view(argv[2])
+		: std::string_view{};
+	bool found = selected.empty();
 	for (const auto& test : kTests) {
+		if (!selected.empty() && selected != test.name)
+			continue;
+		found = true;
 		g_currentTest              = test.name;
 		const int  before          = g_failures;
 		const auto start           = std::chrono::steady_clock::now();
@@ -1454,6 +1713,12 @@ int main(int argc, char** argv)
 			static_cast<long long>(elapsed.count()));
 	}
 
+	if (!found) {
+		std::printf("Unknown shader cache test: %.*s\n",
+			static_cast<int>(selected.size()),
+			selected.data());
+		return 2;
+	}
 	if (g_failures == 0)
 		std::printf("ShaderCache passed\n");
 	else

@@ -868,7 +868,7 @@ namespace cs::engine
 					a_variant.name,
 					result.bytecodeSize,
 					result.compiledSha1,
-					result.servedFromCache ? "cache" : "compiler");
+					result.sourceDescription);
 			} else {
 				L->info(
 					"Compile '{}/{}' pending.",

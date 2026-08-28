@@ -4,6 +4,7 @@
 #include "Utils/ShaderCache/CompilerIdentity.h"
 #include "Utils/ShaderCache/SourceCompile.h"
 
+#include <atomic>
 #include <span>
 #include <utility>
 
@@ -11,6 +12,12 @@ namespace cs::shader_cache
 {
 	namespace
 	{
+		std::atomic<std::uint64_t> g_hit{ 0 };
+		std::atomic<std::uint64_t> g_absent{ 0 };
+		std::atomic<std::uint64_t> g_stale{ 0 };
+		std::atomic<std::uint64_t> g_rejected{ 0 };
+		std::atomic<std::uint64_t> g_written{ 0 };
+
 		struct LookupResult
 		{
 			CacheDisposition          disposition = CacheDisposition::kAbsent;
@@ -21,6 +28,26 @@ namespace cs::shader_cache
 		LookupResult Reject(CacheDisposition a_disposition, std::string a_note)
 		{
 			return { a_disposition, {}, std::move(a_note) };
+		}
+
+		void CountDisposition(CacheDisposition a_disposition) noexcept
+		{
+			switch (a_disposition) {
+			case CacheDisposition::kHit:
+				g_hit.fetch_add(1, std::memory_order_relaxed);
+				break;
+			case CacheDisposition::kAbsent:
+				g_absent.fetch_add(1, std::memory_order_relaxed);
+				break;
+			case CacheDisposition::kStale:
+				g_stale.fetch_add(1, std::memory_order_relaxed);
+				break;
+			case CacheDisposition::kRejected:
+				g_rejected.fetch_add(1, std::memory_order_relaxed);
+				break;
+			default:
+				break;
+			}
 		}
 
 		LookupResult LookUpRecord(
@@ -114,6 +141,8 @@ namespace cs::shader_cache
 					a_outcome.cacheNote = std::move(writeError);
 				else
 					a_outcome.recordWritten = true;
+				if (a_outcome.recordWritten)
+					g_written.fetch_add(1, std::memory_order_relaxed);
 			} catch (...) {
 				a_outcome.cacheNote = "record publication failed";
 			}
@@ -137,6 +166,35 @@ namespace cs::shader_cache
 			return "bypassed";
 		}
 		return "unknown";
+	}
+
+	void ResetShaderCacheCounters() noexcept
+	{
+		g_hit.store(0, std::memory_order_relaxed);
+		g_absent.store(0, std::memory_order_relaxed);
+		g_stale.store(0, std::memory_order_relaxed);
+		g_rejected.store(0, std::memory_order_relaxed);
+		g_written.store(0, std::memory_order_relaxed);
+	}
+
+	ShaderCacheCounters GetShaderCacheCounters() noexcept
+	{
+		return {
+			g_hit.load(std::memory_order_relaxed),
+			g_absent.load(std::memory_order_relaxed),
+			g_stale.load(std::memory_order_relaxed),
+			g_rejected.load(std::memory_order_relaxed),
+			g_written.load(std::memory_order_relaxed)
+		};
+	}
+
+	std::string DescribeCacheOutcome(const ShaderCacheOutcome& a_outcome)
+	{
+		std::string description =
+			DescribeDisposition(a_outcome.disposition);
+		if (!a_outcome.cacheNote.empty())
+			description += " (" + a_outcome.cacheNote + ")";
+		return description;
 	}
 
 	ShaderCacheOutcome LoadOrCompileShader(
@@ -186,6 +244,7 @@ namespace cs::shader_cache
 					}
 					outcome.disposition = lookup.disposition;
 					outcome.cacheNote   = std::move(lookup.note);
+					CountDisposition(outcome.disposition);
 					if (lookup.disposition == CacheDisposition::kHit) {
 						outcome.succeeded = true;
 						outcome.origin    = CompileOrigin::kCacheHit;

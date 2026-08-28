@@ -119,6 +119,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		bcrypt.lib
 		magic_enum::magic_enum
 		d3dcompiler.lib
+		version.lib
 		imgui::imgui
 		tomlplusplus::tomlplusplus
 		$<$<BOOL:${TRACY_SUPPORT}>:Tracy::TracyClient>
@@ -453,6 +454,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		Microsoft::DirectX-Headers
 		bcrypt.lib
 		d3dcompiler.lib
+		version.lib
 		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog
@@ -496,10 +498,36 @@ add_executable(ShaderCacheTests
 	${FO4CS_SHADER_CACHE_SOURCES}
 )
 configure_host_test(ShaderCacheTests)
-target_link_libraries(ShaderCacheTests PRIVATE bcrypt.lib d3dcompiler.lib)
+target_link_libraries(
+	ShaderCacheTests PRIVATE bcrypt.lib d3dcompiler.lib version.lib
+)
 
 add_test(NAME ShaderCache COMMAND ShaderCacheTests)
 set_tests_properties(ShaderCache PROPERTIES LABELS "shader;cache;unit")
+
+add_test(
+	NAME ShaderCacheIdentityReset
+	COMMAND ShaderCacheTests --test compiler-identity-reset
+)
+add_test(
+	NAME ShaderCacheIdentityFirstRun
+	COMMAND ShaderCacheTests --test compiler-identity-first-run
+)
+add_test(
+	NAME ShaderCacheMissObservable
+	COMMAND ShaderCacheTests --test cache-miss-observable
+)
+add_test(
+	NAME ShaderCacheIdentityHashFallback
+	COMMAND ShaderCacheTests --test compiler-identity-hash-fallback
+)
+set_tests_properties(
+	ShaderCacheIdentityReset
+	ShaderCacheIdentityFirstRun
+	ShaderCacheMissObservable
+	ShaderCacheIdentityHashFallback
+	PROPERTIES LABELS "shader;cache;unit"
+)
 
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <exception>
+#include <string>
 #include <string_view>
 
 #include "Feature.h"
@@ -10,12 +11,17 @@
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
+#include "Utils/CSUtil.h"
+#include "Utils/ShaderCache/CacheStorage.h"
+#include "Utils/ShaderCache/CompilerIdentity.h"
+#include "Utils/ShaderCache/ShaderCache.h"
 
 namespace cs::d3d11
 {
 	namespace
 	{
 		auto* L = cs::log::Get("cs.d3d11.bootstrap");
+		auto* CacheL = cs::log::Get("cs.shadercache");
 		std::atomic<bool> ready{ false };
 
 		template <class Callback>
@@ -34,6 +40,49 @@ namespace cs::d3d11
 				} catch (...) {
 				}
 			}
+		}
+
+		void InitializeShaderCache()
+		{
+			shader_cache::ResetShaderCacheCounters();
+			const auto root = shader_cache::DefaultCacheRoot();
+			const auto& identity =
+				shader_cache::GetD3DCompilerIdentity();
+			CacheL->info(
+				"shader cache compiler identity: {}, method={}, size={}, path={}",
+				shader_cache::DescribeCompilerIdentity(identity),
+				shader_cache::DescribeCompilerIdentityMechanism(
+					identity.mechanism),
+				identity.moduleLength,
+				identity.modulePath.string());
+
+			if (!identity.established)
+				return;
+			const auto synchronized =
+				shader_cache::SynchronizeCacheIdentity(
+					root,
+					identity,
+					shader_cache::kRecordSchemaVersion);
+			if (!synchronized.resetMessage.empty())
+				CacheL->info("{}", synchronized.resetMessage);
+			if (!synchronized.error.empty())
+				CacheL->warn("Shader cache: {}", synchronized.error);
+		}
+
+		void LogShaderCacheSummary()
+		{
+			const auto counters =
+				shader_cache::GetShaderCacheCounters();
+			CacheL->info(
+				"shader cache: {} hit / {} absent / {} stale / {} rejected, {} written, root={}, compiler={}",
+				counters.hit,
+				counters.absent,
+				counters.stale,
+				counters.rejected,
+				counters.written,
+				shader_cache::DefaultCacheRoot().string(),
+				shader_cache::DescribeCompilerIdentity(
+					shader_cache::GetD3DCompilerIdentity()));
 		}
 	}
 
@@ -57,6 +106,10 @@ namespace cs::d3d11
 			&& *a_immediateContext;
 		bool expected = false;
 		if (complete && ready.compare_exchange_strong(expected, true)) {
+			InvokeOwner("Shader cache initialization", [] {
+				InitializeShaderCache();
+			});
+			util::ShaderCompilationBatch shaderCompilationBatch;
 			// Register injections before the registry freezes.
 			InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
 				engine::SetPixelShaderSwapBrokerDevice(*a_device);
@@ -80,6 +133,9 @@ namespace cs::d3d11
 			});
 			InvokeOwner("Menu Present hook", [&] {
 				Menu::Get().HookPresentOn(*a_swapChain);
+			});
+			InvokeOwner("Shader cache startup summary", [] {
+				LogShaderCacheSummary();
 			});
 		}
 	}

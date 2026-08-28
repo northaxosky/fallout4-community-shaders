@@ -202,8 +202,8 @@ namespace cs::engine
 				result.compiledSha1 = sha1::Sha1ToHex(sha1::Sha1Compute(
 					outcome.bytecode.data(),
 					outcome.bytecode.size()));
-				result.servedFromCache =
-					outcome.origin == shader_cache::CompileOrigin::kCacheHit;
+				result.sourceDescription =
+					shader_cache::DescribeCacheOutcome(outcome);
 				result.handle =
 					std::make_shared<CachingShaderVariantCompilationHandle>(
 						a_request.stage,

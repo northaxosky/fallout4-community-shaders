@@ -51,7 +51,7 @@ namespace cs::engine
 		std::shared_ptr<ShaderVariantCompilationHandle> handle;
 		std::size_t bytecodeSize = 0;
 		std::string compiledSha1;
-		bool servedFromCache = false;
+		std::string sourceDescription = "compiler";
 		std::string error;
 	};
 

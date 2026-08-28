@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Utils/ShaderCache/RevalidationContext.h"
+
 #include <d3d11.h>
 
 #include <string>
@@ -8,6 +10,20 @@
 
 namespace cs::util
 {
+	class ShaderCompilationBatch
+	{
+	public:
+		ShaderCompilationBatch() noexcept;
+		~ShaderCompilationBatch() noexcept;
+
+		ShaderCompilationBatch(const ShaderCompilationBatch&) = delete;
+		ShaderCompilationBatch& operator=(const ShaderCompilationBatch&) = delete;
+
+	private:
+		shader_cache::RevalidationContext  _revalidation;
+		shader_cache::RevalidationContext* _previous = nullptr;
+	};
+
 	// Compiles HLSL and returns null on failure.
 	ID3D11DeviceChild* CompileShader(
 		const wchar_t* a_filePath,

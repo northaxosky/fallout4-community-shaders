@@ -17,6 +17,8 @@ namespace cs::util
 	namespace
 	{
 		auto* L = cs::log::Get("cs.util");
+		thread_local shader_cache::RevalidationContext*
+			g_activeRevalidation = nullptr;
 
 		enum class ShaderKind : std::uint8_t
 		{
@@ -150,6 +152,15 @@ namespace cs::util
 		}
 	}
 
+	ShaderCompilationBatch::ShaderCompilationBatch() noexcept :
+		_previous(std::exchange(g_activeRevalidation, &_revalidation))
+	{}
+
+	ShaderCompilationBatch::~ShaderCompilationBatch() noexcept
+	{
+		g_activeRevalidation = _previous;
+	}
+
 	ID3D11Device* GetD3DDevice()
 	{
 		auto* data = RE::BSGraphics::GetRendererData();
@@ -212,7 +223,10 @@ namespace cs::util
 		if (TryGetCacheStage(kind, cacheStage)) {
 			const auto recipe =
 				BuildShaderRecipe(a_filePath, a_defines, a_programType, a_program, cacheStage);
-			auto outcome = shader_cache::LoadOrCompileShader(recipe);
+			shader_cache::ShaderCacheOptions options;
+			options.revalidation = g_activeRevalidation;
+			auto outcome =
+				shader_cache::LoadOrCompileShader(recipe, options);
 			if (!outcome.succeeded) {
 				LogCompileFailure(narrow, outcome.error);
 				return nullptr;
@@ -230,7 +244,9 @@ namespace cs::util
 				&& outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
 				L->warn("Cached shader bytecode rejected by the device; recompiling {}", narrow);
 				outcome = shader_cache::LoadOrCompileShader(
-					recipe, {}, shader_cache::CacheMode::kRecompile);
+					recipe,
+					options,
+					shader_cache::CacheMode::kRecompile);
 				if (!outcome.succeeded) {
 					LogCompileFailure(narrow, outcome.error);
 					return nullptr;
@@ -243,9 +259,7 @@ namespace cs::util
 				"Compile '{}' ok: {} bytes, source={}",
 				narrow,
 				outcome.bytecode.size(),
-				outcome.origin == shader_cache::CompileOrigin::kCacheHit
-					? "cache"
-					: "compiler");
+				shader_cache::DescribeCacheOutcome(outcome));
 			return shader;
 		}
 

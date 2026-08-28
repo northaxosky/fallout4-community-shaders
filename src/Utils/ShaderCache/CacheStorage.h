@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Utils/CSSha256.h"
+#include "Utils/ShaderCache/CompilerIdentity.h"
 #include "Utils/ShaderCache/ShaderRecipe.h"
 
 #include <cstdint>
@@ -28,6 +29,19 @@ namespace cs::shader_cache
 		std::vector<std::uint8_t>&   a_bytes) noexcept;
 
 	std::filesystem::path DefaultCacheRoot();
+
+	struct CacheIdentitySyncResult
+	{
+		bool        firstRun = false;
+		bool        reset = false;
+		std::string resetMessage;
+		std::string error;
+	};
+
+	CacheIdentitySyncResult SynchronizeCacheIdentity(
+		const std::filesystem::path& a_cacheRoot,
+		const CompilerIdentity&      a_identity,
+		std::uint32_t                a_recordSchemaVersion) noexcept;
 
 	std::filesystem::path BuildRecordPath(
 		const std::filesystem::path& a_cacheRoot,
