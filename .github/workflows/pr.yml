@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - v*
   pull_request:
 
 permissions:
@@ -52,6 +54,10 @@ jobs:
   build:
     name: Windows Release
     runs-on: windows-2022
+    permissions:
+      contents: read
+    outputs:
+      package-name: ${{ steps.package-metadata.outputs.package-name }}
 
     steps:
       - name: Check out repository
@@ -89,6 +95,18 @@ jobs:
 
           "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Restore SDK archive cache
+        if: github.event_name == 'push'
+        uses: actions/cache@v4
+        with:
+          path: .sdk-cache
+          key: ${{ runner.os }}-sdk-${{ hashFiles('scripts/sdk-manifest.psd1') }}
+
+      - name: Fetch SDK runtimes
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: ./scripts/fetch-sdks.ps1
+
       - name: Configure
         shell: pwsh
         run: |
@@ -104,3 +122,108 @@ jobs:
         shell: pwsh
         run: |
           ctest --test-dir build -C Release --output-on-failure --no-tests=error
+
+      - name: Prepare package metadata
+        if: github.event_name == 'push'
+        id: package-metadata
+        shell: pwsh
+        run: |
+          $version = (Get-Content version.txt -Raw).Trim()
+          $identifier = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME
+          } else {
+            $env:GITHUB_SHA.Substring(0, 7)
+          }
+          $safeIdentifier = $identifier -replace '[^A-Za-z0-9._-]', '-'
+          "package-name=FO4CommunityShaders-$version-$safeIdentifier" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Assemble and verify release package
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          $identifier = if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $env:GITHUB_REF_NAME
+          } else {
+            $env:GITHUB_SHA.Substring(0, 7)
+          }
+          ./scripts/package-release.ps1 -Identifier $identifier
+
+      - name: Verify packaged SDK licenses
+        if: github.event_name == 'push'
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archives = @(Get-ChildItem build/dist -File -Filter '*.zip')
+          if ($archives.Count -ne 1) {
+            throw "Expected one release archive, found $($archives.Count)"
+          }
+
+          $archive = [System.IO.Compression.ZipFile]::OpenRead($archives[0].FullName)
+          try {
+            $entries = @($archive.Entries.FullName)
+            $licenses = @(
+              'Shaders/Upscaling/Streamline/license.txt',
+              'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
+              'Shaders/Upscaling/FidelityFX/license.md'
+            )
+            foreach ($license in $licenses) {
+              if ($license -notin $entries) {
+                throw "Required SDK license is missing from the archive: $license"
+              }
+            }
+          } finally {
+            $archive.Dispose()
+          }
+
+      - name: Upload release package
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package-metadata.outputs.package-name }}
+          path: build/dist/*.zip
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: GitHub Prerelease
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download release package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.package-name }}
+          path: dist
+
+      - name: Publish prerelease
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $archives = @(Get-ChildItem dist -File -Filter '*.zip')
+          if ($archives.Count -ne 1) {
+            throw "Expected one release archive, found $($archives.Count)"
+          }
+
+          $tag = $env:GITHUB_REF_NAME
+          $title = "FO4 Community Shaders $tag"
+          gh release view $tag 2>$null | Out-Null
+          $releaseExists = $LASTEXITCODE -eq 0
+          if ($releaseExists) {
+            gh release upload $tag $archives[0].FullName --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload release archive for $tag"
+            }
+            gh release edit $tag --prerelease --title $title
+          } else {
+            gh release create $tag $archives[0].FullName --verify-tag --prerelease --title $title --notes 'Prerelease playtest build.'
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish prerelease for $tag"
+          }
