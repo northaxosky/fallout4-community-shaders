@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 Texture2D<float4> t3 : register(t3);
 
 Texture2D<float4> t2 : register(t2);

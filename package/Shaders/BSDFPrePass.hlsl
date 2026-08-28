@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 cbuffer PerFrame_CB12 : register(b12)
 {
     float4 cb12_pad_0_29[30];

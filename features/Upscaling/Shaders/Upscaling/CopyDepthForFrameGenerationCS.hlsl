@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 Texture2D<float> InputDepth : register(t0);
 Texture2D<float2> InputMotion : register(t1);
 Texture2D<float4> InputPreAlphaColor : register(t2);

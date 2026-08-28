@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 #ifndef __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 #define __SCREEN_SPACE_GI_DEPENDENCY_HLSL__
 

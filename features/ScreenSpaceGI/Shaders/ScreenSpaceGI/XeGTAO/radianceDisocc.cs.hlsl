@@ -1,4 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) Skyrim Community Shaders contributors
+// Ported from Skyrim Community Shaders.
 // Gathers deferred radiance and reprojects the previous indirect result.
 
 #include "../Common/Math.hlsli"

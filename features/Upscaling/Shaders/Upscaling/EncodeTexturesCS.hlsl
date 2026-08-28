@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) Skyrim Community Shaders contributors
+// Ported from Skyrim Community Shaders.
+
 #include "../Common/SharedData.hlsli"
 
 cbuffer UpscalingData : register(b0)

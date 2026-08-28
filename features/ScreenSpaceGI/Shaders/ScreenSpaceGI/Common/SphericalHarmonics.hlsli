@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2018 SebH
 // SphericalHarmonics.hlsl from https://github.com/sebh/HLSL-Spherical-Harmonics
 // [4]  https://d3cw3dd2w32x2b.cloudfront.net/wp-content/uploads/2011/06/10-14.pdf
 

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 Texture2D<float> DepthInput : register(t0);
 
 RWTexture2D<float> LinearDepthOutput : register(u0);

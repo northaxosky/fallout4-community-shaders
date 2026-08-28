@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: MIT
+// Copyright (c) 2022 Ilya Perapechka
+// Ported from Skyrim Community Shaders.
+
 #ifndef __MATH_DEPENDENCY_HLSL__
 #define __MATH_DEPENDENCY_HLSL__
 

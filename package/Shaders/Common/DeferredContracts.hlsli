@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 #ifndef DEFERRED_CONTRACTS_HLSLI_INCLUDED
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 

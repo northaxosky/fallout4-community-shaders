@@ -1,3 +1,7 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (c) Skyrim Community Shaders contributors
+// Ported from Skyrim Community Shaders.
+
 #include "bend_sss_gpu.hlsli"
 
 Texture2D<unorm float> DepthTexture : register(t0);

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 #ifndef SHADOW_POISSON_KERNEL_HLSLI_INCLUDED
 #define SHADOW_POISSON_KERNEL_HLSLI_INCLUDED
 

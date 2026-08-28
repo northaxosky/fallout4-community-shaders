@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 // gate outermost: inactive emits zero declarations
 #ifdef FO4CS_SUBSTRATE
 #ifndef __SHARED_DATA_DEPENDENCY_HLSL__

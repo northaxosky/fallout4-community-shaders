@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-only
+// Copyright (c) 2026 northaxosky
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
 #include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
 #endif
