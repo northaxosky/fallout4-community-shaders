@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later WITH FO4-CS-Modding-Exception
-#include "Common/MipBias.hlsli"
 cbuffer PerFrame_CB12 : register(b12)
 {
     float4 cb12_pad_0_29[30];
@@ -69,12 +68,12 @@ PS_OUTPUT main(PS_INPUT input)
         : (1.0 - cb2_idx4_material_flags.w * cb12_idx30_global_fade.x);
 
     float2 uv = float2(input.curr_pos_u.w, input.prev_pos_v.w);
-    float4 albedoSample = g_tAlbedo.SampleBias(g_sAlbedo, uv, FO4CS_MIP_BIAS);
+    float4 albedoSample = g_tAlbedo.Sample(g_sAlbedo, uv);
     output.albedo.xyz = albedoSample.xyz * alphaFade;
 
     float3 nGeom = normalize(input.normal);
-    float4 normalMapSample = g_tNormalMap.SampleBias(g_sNormalMap, uv, FO4CS_MIP_BIAS);
-    float4 materialSample = g_tMaterial.SampleBias(g_sMaterial, uv, FO4CS_MIP_BIAS);
+    float4 normalMapSample = g_tNormalMap.Sample(g_sNormalMap, uv);
+    float4 materialSample = g_tMaterial.Sample(g_sMaterial, uv);
 
     float2 nts_xy = normalMapSample.xy * 2.0 - 1.0;
     float nts_xy_lenSq = saturate(dot(nts_xy, nts_xy));

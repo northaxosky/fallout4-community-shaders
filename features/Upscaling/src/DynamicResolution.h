@@ -13,8 +13,6 @@
 
 namespace cs::features
 {
-	// Physically render-resolution proxy render targets that keep the world and the HDR
-	// imagespace chain at render resolution until the upscaler resolves the frame.
 	class DynamicResolution
 	{
 	public:
@@ -25,18 +23,14 @@ namespace cs::features
 			float         CameraData[4];
 		};
 
-		// Rebuilds proxies and the depth-override texture whenever the scale changes.
 		void UpdateRenderTargets(float a_widthRatio, float a_heightRatio);
 
-		// Swaps the patched targets to render-resolution proxies; listed indices copy the sub-rect.
 		void OverrideRenderTargets(const std::vector<int>& a_indicesToCopy = {});
 		void ResetRenderTargets(const std::vector<int>& a_indicesToCopy = {});
 
-		// Swaps the main depth SRV to a compact render-resolution depth texture.
 		void OverrideDepth(bool a_doCopy = true);
 		void ResetDepth();
 
-		// Restores engine pointers and releases every proxy resource; call on device or target change.
 		void Release();
 
 		[[nodiscard]] bool HasProxies() const noexcept { return _hasProxies; }

@@ -275,47 +275,23 @@ namespace cs::features
 		if (!EnsureFrameToken())
 			return false;
 
-		auto* graphicsState = cs::engine::GetGraphicsState();
-		if (!graphicsState)
-			return false;
-
 		sl::Constants slConstants = {};
 
-		slConstants.cameraAspectRatio = (float)graphicsState->screenWidth / (float)graphicsState->screenHeight;
-
-		slConstants.cameraFOV = cs::engine::GetVerticalFOV();
-		slConstants.cameraNear = cs::engine::GetCameraNear();
-		slConstants.cameraFar = cs::engine::GetCameraFar();
-
-		cs::engine::CameraMatrices matrices{};
-		if (!cs::engine::TryGetCameraMatrices(matrices))
-			return false;
-
-		DirectX::XMFLOAT4X4 unjitteredProj{};
-		DirectX::XMFLOAT4X4 unjitteredInvProj{};
-		DirectX::XMFLOAT4 ndcToViewMul{};
-		DirectX::XMFLOAT4 ndcToViewAdd{};
-		if (!cs::engine::TryGetWorldSceneProjection(unjitteredProj, unjitteredInvProj, ndcToViewMul, ndcToViewAdd))
-			return false;
-
-		// Streamline expects transposed camera projection data.
-		const auto& viewToWorld = matrices.invView;
-		const auto cameraViewToClip =
-			DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&unjitteredProj));
-		DirectX::XMFLOAT4X4 cameraViewToClipStorage;
-		DirectX::XMStoreFloat4x4(&cameraViewToClipStorage, cameraViewToClip);
-
+		slConstants.cameraNear = 0.0f;
+		slConstants.cameraFar = 1.0f;
+		slConstants.cameraAspectRatio = 0.0f;
+		slConstants.cameraFOV = 0.0f;
 		slConstants.cameraMotionIncluded = sl::Boolean::eTrue;
 		slConstants.cameraPinholeOffset = { 0.f, 0.f };
-		slConstants.cameraRight = { viewToWorld._11, viewToWorld._12, viewToWorld._13 };
-		slConstants.cameraUp = { viewToWorld._21, viewToWorld._22, viewToWorld._23 };
-		slConstants.cameraFwd = { viewToWorld._31, viewToWorld._32, viewToWorld._33 };
-		const auto& posAdjust = graphicsState->cameraState.posAdjust;
-		slConstants.cameraPos = { posAdjust.x, posAdjust.y, posAdjust.z };
-		slConstants.cameraViewToClip = *(sl::float4x4*)&cameraViewToClipStorage;
+		slConstants.cameraPos = {};
+		slConstants.cameraRight = {};
+		slConstants.cameraUp = {};
+		slConstants.cameraFwd = {};
+		slConstants.cameraViewToClip = {};
+		slConstants.clipToCameraView = {};
+		slConstants.clipToPrevClip = {};
+		slConstants.prevClipToClip = {};
 		slConstants.depthInverted = sl::Boolean::eFalse;
-
-		recalculateCameraMatrices(slConstants);
 
 		auto jitter = Upscaling::GetSingleton()->jitter;
 		slConstants.jitterOffset = { -jitter.x, -jitter.y };
@@ -423,8 +399,8 @@ namespace cs::features
 		} else {
 			dlssOptions.dlaaPreset = sl::DLSSPreset::ePresetJ;
 			dlssOptions.ultraQualityPreset = sl::DLSSPreset::ePresetJ;
-			dlssOptions.qualityPreset = sl::DLSSPreset::ePresetM;
-			dlssOptions.balancedPreset = sl::DLSSPreset::ePresetM;
+			dlssOptions.qualityPreset = sl::DLSSPreset::ePresetK;
+			dlssOptions.balancedPreset = sl::DLSSPreset::ePresetK;
 			dlssOptions.performancePreset = sl::DLSSPreset::ePresetM;
 			dlssOptions.ultraPerformancePreset = sl::DLSSPreset::ePresetL;
 		}
@@ -508,7 +484,8 @@ namespace cs::features
 	{
 		auto* graphicsState = cs::engine::GetGraphicsState();
 		auto* depthTexture = cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
-		if (!graphicsState || !depthTexture)
+		if (!graphicsState || !depthTexture || !a_upscalingTexture || !a_reactiveMask ||
+			!a_transparencyCompositionMask || !a_motionVectors)
 			return false;
 
 		auto* upscaling = Upscaling::GetSingleton();
@@ -519,6 +496,8 @@ namespace cs::features
 		ID3D11Resource* colorOut = upscaling->sharpenerTexture->resource.get();
 
 		const auto [renderWidth, renderHeight] = upscaling->GetRenderSize();
+		if (renderWidth == 0 || renderHeight == 0)
+			return false;
 		sl::Extent extentIn{ 0, 0, renderWidth, renderHeight };
 		sl::Extent extentOut{ 0, 0, graphicsState->screenWidth, graphicsState->screenHeight };
 

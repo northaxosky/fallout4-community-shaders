@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "RE/I/ImageSpaceEffectTemporalAA.h"
 #include "Render/SwapChainHook.h"
 #include "Utils/CSBuffer.h"
 
@@ -9,6 +10,7 @@
 #include "DX12SwapChain.h"
 #include "DynamicResolution.h"
 #include "RCAS/RCAS.h"
+#include "SamplerBias.h"
 #include "Streamline.h"
 
 #include <atomic>
@@ -174,8 +176,15 @@ namespace cs::features
 		void PublishDynamicResolution();
 
 		DynamicResolution dynamicResolution;
+		SamplerBias samplerBias;
 
 		bool IsDrivingFrameState() const noexcept;
+
+		struct ImageSpaceEffectTemporalAA_IsActive
+		{
+			static bool thunk(RE::ImageSpaceEffectTemporalAA* a_this);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
 
 		struct DrawWorldBegin_SetDynamicViewport
 		{
@@ -273,6 +282,18 @@ namespace cs::features
 		struct LoadingMenu_UpdateTemporalData
 		{
 			static void thunk(RE::BSGraphics::State* a_state);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct RenderPreUI_DeferredPrePass
+		{
+			static void thunk(void* a_this);
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct RenderPreUI_Forward
+		{
+			static void thunk(void* a_this);
 			static inline REL::Relocation<decltype(thunk)> func;
 		};
 

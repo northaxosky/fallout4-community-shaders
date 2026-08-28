@@ -26,8 +26,6 @@ namespace SharedData
 		bool InInterior;
 		// xyz: world up in view space, w: 1 when sourced from a valid world camera
 		float4 WorldUpView;
-		// log2(render / display) texture LOD bias while upscaling; DLSS takes a further -1
-		float MipBias;
 	};
 
 	struct ScreenSpaceShadowsSettings

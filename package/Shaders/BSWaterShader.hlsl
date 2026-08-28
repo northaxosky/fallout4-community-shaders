@@ -1,5 +1,4 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "Common/MipBias.hlsli"
 cbuffer PerFrame : register(b12)
 {
 	float4 perFrame[48];
@@ -263,10 +262,10 @@ float3 unpackNormal(float2 texel)
 
 float3 blendedNormal(float2 uv0, float2 uv1, float2 uv2, float fade)
 {
-	float3 detail0 = unpackNormal(texture4.SampleBias(sampler4, uv0, FO4CS_MIP_BIAS).xy);
+	float3 detail0 = unpackNormal(texture4.Sample(sampler4, uv0).xy);
 	float3 normal = lerp(float3(0.0, 0.0, 1.0), detail0, perMaterial[9].x);
-	float3 detail1 = unpackNormal(texture5.SampleBias(sampler5, uv1, FO4CS_MIP_BIAS).xy);
-	float3 detail2 = unpackNormal(texture6.SampleBias(sampler6, uv2, FO4CS_MIP_BIAS).xy);
+	float3 detail1 = unpackNormal(texture5.Sample(sampler5, uv1).xy);
+	float3 detail2 = unpackNormal(texture6.Sample(sampler6, uv2).xy);
 	detail1 = detail1 * perMaterial[9].y;
 	detail2 = detail2 * perMaterial[9].z;
 	normal = detail1 * fade + normal;
@@ -386,7 +385,7 @@ float4 main(PS_INPUT input) : SV_Target0
 
 float4 main(PS_INPUT input) : SV_Target0
 {
-	float3 normal = unpackNormal(texture4.SampleBias(sampler4, input.normalUv01.xy, FO4CS_MIP_BIAS).xy);
+	float3 normal = unpackNormal(texture4.Sample(sampler4, input.normalUv01.xy).xy);
 	normal = lerp(float3(0.0, 0.0, 1.0), lerp(float3(0.0, 0.0, 1.0), normal, perMaterial[9].x), perMaterial[11].y);
 	normal = normalize(normal);
 
@@ -452,7 +451,7 @@ float4 main(PS_INPUT input) : SV_Target0
 float3 displacedNormal(float2 uv, float3 surface)
 {
 	float3 wave;
-	wave.xy = (texture2.SampleBias(sampler2, uv, FO4CS_MIP_BIAS).zw - 0.5) * perMaterial[9].w;
+	wave.xy = (texture2.Sample(sampler2, uv).zw - 0.5) * perMaterial[9].w;
 	wave.z = 0.04;
 	wave = normalize(wave);
 	return lerp(wave, surface, wave.z);
@@ -573,7 +572,7 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 start = startClip.xyz / startClip.w;
 	float3 startScreen = start * float3(0.5, -0.5, 1.0) + float3(0.5, 0.5, 0.0);
 
-	float3 normal = unpackNormal(texture4.SampleBias(sampler4, input.normalUv01.xy, FO4CS_MIP_BIAS).xy);
+	float3 normal = unpackNormal(texture4.Sample(sampler4, input.normalUv01.xy).xy);
 	normal = lerp(float3(0.0, 0.0, 1.0), lerp(float3(0.0, 0.0, 1.0), normal, perMaterial[9].x), 0.5 * perMaterial[11].y);
 	normal = normalize(normal);
 #elif defined(BSWATER_RAY_UNDERWATER)

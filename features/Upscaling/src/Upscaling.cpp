@@ -18,8 +18,6 @@
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
-#include "Render/ShaderInjection.h"
-#include "Render/ShaderInjectionDefines.h"
 #include "Render/SwapChainHook.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
@@ -40,7 +38,7 @@ namespace cs::features
 		constexpr const wchar_t* kCopyDepthForFrameGenerationPath =
 			L"Data\\Shaders\\Upscaling\\CopyDepthForFrameGenerationCS.hlsl";
 
-		// RT4 holds scene colour immediately before post-processing.
+		// RT4 supplies post-alpha color for first-person alpha conditioning.
 		constexpr auto kSceneColorTarget = cs::engine::RenderTarget::kMainTemp;
 		constexpr auto kPreAlphaColorTarget = cs::engine::RenderTarget::kMain;
 		// RT29 holds full-resolution R16G16_FLOAT motion.
@@ -208,7 +206,7 @@ namespace cs::features
 			Upscaling::GetSingleton()->QuarantineAfterException(a_where);
 		}
 
-		// Validate every call-site anchor before installing any hook.
+		// Validate all anchors first to avoid partial hook installation.
 		bool IsCallSiteTargeting(std::uintptr_t a_site, std::uintptr_t a_expectedTarget)
 		{
 			if (!a_site || !a_expectedTarget) {
@@ -412,28 +410,7 @@ namespace cs::features
 			return;
 		}
 
-		// MipBias applies only to reconstructed routes requested by this feature.
-		const cs::engine::ShaderInjectionTarget mipBiasTargets[] = {
-			cs::engine::ShaderInjectionTarget::kBsLighting,
-			cs::engine::ShaderInjectionTarget::kBsWater,
-			cs::engine::ShaderInjectionTarget::kDeferredPrepass
-		};
-		for (const auto target : mipBiasTargets) {
-			const bool registered = cs::engine::RegisterReplacement({
-				.targetId = target,
-				.contributor = "Upscaling",
-				.defines = {
-					{ cs::engine::shader_injection_defines::kUpscalingMipBias, "1" }
-				},
-				.isReady = [] { return true; }
-			});
-			if (!registered) {
-				FailLoad("Failed to register the Upscaling MipBias shader contribution");
-				return;
-			}
-		}
-
-		L->info("Registered swap-chain broker callbacks and MipBias shader contributions");
+		L->info("Registered swap-chain broker callbacks");
 	}
 
 	void Upscaling::OnPreCreateDeviceAndSwapChain(
@@ -568,6 +545,11 @@ namespace cs::features
 		const auto dynamicResolutionSite =
 			anchor(kRenderPreUI).address() + kRenderPreUIUpdateDynamicResolutionCall;
 		const auto dynamicResolutionTarget = anchor(kUpdateDynamicResolution).address();
+		const auto samplerStateTable = anchor(kSamplerStateTable).address();
+		if (!samplerBias.Initialize(samplerStateTable)) {
+			FailLoad("The sampler-state table address did not resolve");
+			return;
+		}
 		const auto runtimeIndex =
 			static_cast<std::size_t>(REX::FModule::GetRuntimeIndex());
 		const auto firstPersonAlphaSite =
@@ -623,14 +605,20 @@ namespace cs::features
 			anchor(kVatsUpdateParams).address() + kVatsSetPixelConstantCall;
 		const auto loadingMenuSite =
 			anchor(kLoadingMenuUpdateTemporalData).address() + kLoadingMenuUpdateTemporalDataCall;
+		const auto deferredPrePassSite =
+			anchor(kRenderPreUI).address() + kRenderPreUIDeferredPrePassCall;
+		const auto forwardSite =
+			anchor(kRenderPreUI).address() + kRenderPreUIForwardCall;
 
 		// No callee IDs to validate these sites; confirm each is a near call so a drifted offset fails closed.
 		if (!IsRelativeCallSite(renderEffectRangeSite) ||
 			!IsRelativeCallSite(deferredCompositeSite) ||
 			!IsRelativeCallSite(sslrSite) ||
 			!IsRelativeCallSite(vatsSite) ||
-			!IsRelativeCallSite(loadingMenuSite)) {
-			FailLoad("A dynamic-resolution fix call site was not a near-call instruction");
+			!IsRelativeCallSite(loadingMenuSite) ||
+			!IsRelativeCallSite(deferredPrePassSite) ||
+			!IsRelativeCallSite(forwardSite)) {
+			FailLoad("A dynamic-resolution or sampler-bias fix call site was not a near-call instruction");
 			return;
 		}
 
@@ -643,6 +631,9 @@ namespace cs::features
 		stl::write_thunk_call<Vats_SetPixelConstant>(vatsSite);
 		// LoadingMenu renders full-extent, so neutralize its jitter and ratios.
 		stl::write_thunk_call<LoadingMenu_UpdateTemporalData>(loadingMenuSite);
+		// Bias the global sampler table around the material passes to match the render resolution.
+		stl::write_thunk_call<RenderPreUI_DeferredPrePass>(deferredPrePassSite);
+		stl::write_thunk_call<RenderPreUI_Forward>(forwardSite);
 
 		stl::detour_thunk<LensFlare_RenderLensFlare>(anchor(kLensFlareRenderLensFlare));
 		stl::detour_thunk<BSImageSpace_Init_FXAA>(anchor(kImageSpaceInitEffects));
@@ -653,6 +644,8 @@ namespace cs::features
 		stl::detour_thunk<DrawWorldImagespace_RestoreRatios>(anchor(kDrawWorldImagespace));
 		// Publish the scale and refresh proxies after the native dynamic-resolution update.
 		stl::write_thunk_call<Main_UpdateDynamicResolution>(dynamicResolutionSite);
+		stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(
+			RE::VTABLE::ImageSpaceEffectTemporalAA[0]);
 		_hooksInstalled.store(true, std::memory_order_release);
 		L->info("Installed hooks");
 	}
@@ -1058,14 +1051,19 @@ namespace cs::features
 		}
 
 		// Ratios, jitter, and proxies are published after the native dynamic-resolution update.
-		_mipBias.store(
-			upscalerActive
-				? CalculateMipBias(
-					  static_cast<float>(renderWidth),
-					  screenSize.x,
-					  upscaleMethod == UpscaleMethod::kDLSS)
-				: 0.0f,
-			std::memory_order_relaxed);
+		const float mipBias = upscalerActive
+			? CalculateMipBias(
+				  static_cast<float>(renderWidth),
+				  screenSize.x,
+				  upscaleMethod == UpscaleMethod::kDLSS)
+			: 0.0f;
+		_mipBias.store(mipBias, std::memory_order_relaxed);
+		if (!samplerBias.Update(mipBias)) {
+			FailLoad("The sampler-state table did not contain valid D3D11 sampler states");
+			_resourcesReady.store(false, std::memory_order_release);
+			RestoreNativeFrameState();
+			L->critical("Sampler-state table validation failed; Upscaling returned control to the engine");
+		}
 	}
 
 	void Upscaling::PublishDynamicResolution()
@@ -1130,6 +1128,7 @@ namespace cs::features
 			upscalingDataCB =
 				new cs::buffer::ConstantBuffer(cs::buffer::ConstantBufferDesc<UpscalingDataCB>());
 		}
+
 		if (!_frameGenerationCopyCB) {
 			_frameGenerationCopyCB =
 				new cs::buffer::ConstantBuffer(cs::buffer::ConstantBufferDesc<FrameGenerationCopyCB>());
@@ -1195,6 +1194,7 @@ namespace cs::features
 	{
 		InvalidateFirstPersonAlphaState();
 		dynamicResolution.Release();
+		samplerBias.Release();
 		_imagespaceRatiosNeutralized = false;
 		// Restore native ratios/offsets and clear the latch so a later non-driving frame can't strand a sub-rect.
 		RestoreNativeFrameState();
@@ -1223,7 +1223,6 @@ namespace cs::features
 		} else if (method == UpscaleMethod::kFSR) {
 			fidelityFX.DestroyFSRResources();
 		}
-		// Rebuild provider resources for the current quality extent.
 		bool recreated = true;
 		if (method == UpscaleMethod::kFSR) {
 			recreated = fidelityFX.CreateFSRResources();
@@ -1647,6 +1646,10 @@ namespace cs::features
 			dynamicResolution.Release();
 		} catch (...) {
 		}
+		try {
+			samplerBias.Release();
+		} catch (...) {
+		}
 		_imagespaceRatiosNeutralized = false;
 		if (!alreadyQuarantined) {
 			try {
@@ -1671,6 +1674,19 @@ namespace cs::features
 			}
 			upscaling->SetupResources();
 		});
+	}
+
+	bool Upscaling::ImageSpaceEffectTemporalAA_IsActive::thunk(
+		RE::ImageSpaceEffectTemporalAA* a_this)
+	{
+		auto* upscaling = GetSingleton();
+		const auto method = upscaling->GetUpscaleMethod();
+		if (upscaling->IsDrivingFrameState() &&
+			upscaling->_srPublishedToFramebuffer.load(std::memory_order_acquire) &&
+			(method == UpscaleMethod::kFSR || method == UpscaleMethod::kDLSS)) {
+			return false;
+		}
+		return func(a_this);
 	}
 
 	void Upscaling::DrawWorldBegin_SetDynamicViewport::thunk(
@@ -1718,11 +1734,16 @@ namespace cs::features
 
 		auto* motionVectorTexture = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
 		auto* motionVectorSRV = cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
-		if (!motionVectorTexture || !motionVectorSRV) {
+		if (!motionVectorTexture || !motionVectorSRV ||
+			(upscaleMethod == UpscaleMethod::kDLSS && !motionVectorCopyTexture)) {
 			return false;
 		}
 
 		bool upscaled = false;
+		const auto [renderWidth, renderHeight] = GetRenderSize();
+		if (renderWidth == 0 || renderHeight == 0) {
+			return false;
+		}
 
 		{
 			// Keep OM unbound until provider reads complete.
@@ -1734,12 +1755,14 @@ namespace cs::features
 				// Null t0 and RT20's unused channel produce the accepted zero masks.
 				auto* normalsSRV = cs::engine::GetRenderTargetSRV(kNormalsTarget);
 				auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kMain);
-
-				const auto [renderWidth, renderHeight] = GetRenderSize();
+				auto* encodeShader = GetEncodeTexturesCS();
+				if (!depthSRV || !encodeShader) {
+					return false;
+				}
 
 				ID3D11ShaderResourceView* views[4] = { nullptr, normalsSRV, motionVectorSRV, depthSRV };
 				context->CSSetShaderResources(0, ARRAYSIZE(views), views);
-				context->CSSetShader(GetEncodeTexturesCS(), nullptr, 0);
+				context->CSSetShader(encodeShader, nullptr, 0);
 
 				UpscalingDataCB upscalingData;
 				upscalingData.trueSamplingDim = float2((float)renderWidth, (float)renderHeight);
@@ -1751,7 +1774,7 @@ namespace cs::features
 				ID3D11UnorderedAccessView* uavs[4] = {
 					reactiveMaskTexture->uav.get(),
 					transparencyCompositionMaskTexture->uav.get(),
-					(upscaleMethod == UpscaleMethod::kDLSS && motionVectorCopyTexture) ? motionVectorCopyTexture->uav.get() : nullptr,
+					(upscaleMethod == UpscaleMethod::kDLSS) ? motionVectorCopyTexture->uav.get() : nullptr,
 					nullptr
 				};
 				context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
@@ -1770,7 +1793,7 @@ namespace cs::features
 					upscalingTexture->resource.get(),
 					reactiveMaskTexture->resource.get(),
 					transparencyCompositionMaskTexture->resource.get(),
-					motionVectorCopyTexture ? motionVectorCopyTexture->resource.get() : motionVectorTexture);
+					motionVectorCopyTexture->resource.get());
 			} else if (upscaleMethod == UpscaleMethod::kFSR) {
 				upscaled = fidelityFX.Upscale(
 					upscalingTexture->resource.get(),
@@ -1793,7 +1816,12 @@ namespace cs::features
 	bool Upscaling::PerformUpscaling()
 	{
 		_upscaledThisFrame = false;
-		_srPublishedToFramebuffer.store(false, std::memory_order_release);
+		// Keep the last completed resolve result stable across vfunc queries within the frame.
+		const auto finish = [this](bool a_published) {
+			_upscaledThisFrame = a_published;
+			_srPublishedToFramebuffer.store(a_published, std::memory_order_release);
+			return a_published;
+		};
 
 		auto* context = cs::engine::GetImmediateContext();
 		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
@@ -1804,7 +1832,7 @@ namespace cs::features
 				upscalingTexture,
 				frameBufferDesc,
 				DXGI_FORMAT_R8G8B8A8_UNORM)) {
-			return false;
+			return finish(false);
 		}
 
 		cs::engine::CopyResourcePreservingOM(
@@ -1813,7 +1841,7 @@ namespace cs::features
 			frameBuffer.get());
 
 		if (!Upscale()) {
-			return false;
+			return finish(false);
 		}
 
 		UpscaleDepth();
@@ -1830,9 +1858,7 @@ namespace cs::features
 			published = ApplySharpening(frameBuffer.get());
 		}
 
-		_upscaledThisFrame = published;
-		_srPublishedToFramebuffer.store(published, std::memory_order_release);
-		return published;
+		return finish(published);
 	}
 
 	void Upscaling::UpscaleDepth()
@@ -1928,8 +1954,6 @@ namespace cs::features
 			context->PSSetShader(depthUpscalePS, nullptr, 0);
 			context->Draw(3, 0);
 		}
-
-		// Fallout 4 keeps the underwater mask in the geometry stencil.
 
 		ID3D11ShaderResourceView* nullPSResources[3] = { nullptr, nullptr, nullptr };
 		context->PSSetShaderResources(0, ARRAYSIZE(nullPSResources), nullPSResources);
@@ -2041,7 +2065,6 @@ namespace cs::features
 			if (upscaling->IsFrameGenerationDx12PathActive()) {
 				upscaling->CaptureFrameGenerationInputs();
 			}
-			upscaling->_srPublishedToFramebuffer.store(false, std::memory_order_release);
 			if (!upscaling->IsDrivingFrameState()) {
 				return;
 			}
@@ -2258,6 +2281,40 @@ namespace cs::features
 		GuardedThunkBody("Upscaling loading-menu reset", [] {
 			cs::engine::SetDynamicResolution(1.0f, 1.0f, false);
 		});
+	}
+
+	void Upscaling::RenderPreUI_DeferredPrePass::thunk(void* a_this)
+	{
+		auto* upscaling = GetSingleton();
+		if (!upscaling->IsDrivingFrameState()) {
+			func(a_this);
+			return;
+		}
+		try {
+			upscaling->samplerBias.Override();
+			func(a_this);
+			upscaling->samplerBias.Reset();
+		} catch (...) {
+			upscaling->samplerBias.Reset();
+			upscaling->QuarantineAfterException("Upscaling sampler override (deferred prepass)");
+		}
+	}
+
+	void Upscaling::RenderPreUI_Forward::thunk(void* a_this)
+	{
+		auto* upscaling = GetSingleton();
+		if (!upscaling->IsDrivingFrameState()) {
+			func(a_this);
+			return;
+		}
+		try {
+			upscaling->samplerBias.Override();
+			func(a_this);
+			upscaling->samplerBias.Reset();
+		} catch (...) {
+			upscaling->samplerBias.Reset();
+			upscaling->QuarantineAfterException("Upscaling sampler override (forward)");
+		}
 	}
 
 	void Upscaling::BSImageSpace_Init_FXAA::thunk(RE::ImageSpaceManager* a_this)

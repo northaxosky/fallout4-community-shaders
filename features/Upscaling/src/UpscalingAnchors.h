@@ -53,6 +53,10 @@ namespace cs::features::upscaling_anchors
 	inline constexpr std::uint64_t kRenderPreUI = 2318321;
 	inline constexpr std::ptrdiff_t kRenderPreUIUpdateDynamicResolutionCall = 0x29F;
 	inline constexpr std::uint64_t kUpdateDynamicResolution = 2277195;
+	// Deferred-prepass and forward passes sample materials; bracket them with the biased sampler table.
+	inline constexpr std::ptrdiff_t kRenderPreUIDeferredPrePassCall = 0x2E3;
+	inline constexpr std::ptrdiff_t kRenderPreUIForwardCall = 0x3A6;
+	inline constexpr std::uint64_t kSamplerStateTable = 2704455;
 
 	// Resource setup follows creation of RT4 and the remaining engine targets.
 	inline constexpr std::uint64_t kBSShaderRenderTargetsCreate = 2318909;

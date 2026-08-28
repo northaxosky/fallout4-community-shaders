@@ -32,8 +32,7 @@ namespace cs::render
 	using PreCreateDeviceCallback =
 		std::function<void(DXGI_SWAP_CHAIN_DESC*, std::vector<D3D_FEATURE_LEVEL>&)>;
 
-	// Runs after a successful creation call and BEFORE the D3D bootstrap, so a callback may
-	// upgrade the device and swap-chain interfaces in place; the bootstrap sees the final pointers.
+	// Runs before the D3D bootstrap so a callback may upgrade the device and swap chain in place.
 	using PostCreateDeviceCallback =
 		std::function<void(IDXGIAdapter*, ID3D11Device**, IDXGISwapChain**)>;
 	using ReplacementCreateDeviceCallback =
