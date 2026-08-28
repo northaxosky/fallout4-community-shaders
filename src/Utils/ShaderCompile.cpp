@@ -135,6 +135,25 @@ namespace cs::util
 		const char* a_program,
 		std::string* a_outError)
 	{
+		const std::uint32_t flags =
+			D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
+		return CompileShaderToBlob(
+			a_filePath,
+			a_defines,
+			a_programType,
+			a_program,
+			flags,
+			a_outError);
+	}
+
+	Microsoft::WRL::ComPtr<ID3DBlob> CompileShaderToBlob(
+		const wchar_t* a_filePath,
+		const std::vector<std::pair<const char*, const char*>>& a_defines,
+		const char* a_programType,
+		const char* a_program,
+		std::uint32_t a_flags,
+		std::string* a_outError)
+	{
 		if (a_outError)
 			a_outError->clear();
 
@@ -150,8 +169,6 @@ namespace cs::util
 			return {};
 		}
 
-		const uint32_t flags = D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-
 		Microsoft::WRL::ComPtr<ID3DBlob> shaderBlob;
 		Microsoft::WRL::ComPtr<ID3DBlob> shaderErrors;
 		ShaderIncludeHandler includeHandler{ std::filesystem::path{ a_filePath }.parent_path() };
@@ -161,7 +178,7 @@ namespace cs::util
 			&includeHandler,
 			a_program,
 			a_programType,
-			flags,
+			a_flags,
 			0,
 			shaderBlob.GetAddressOf(),
 			shaderErrors.GetAddressOf());

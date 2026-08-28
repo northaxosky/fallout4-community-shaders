@@ -136,6 +136,7 @@ namespace
 			defines,
 			a_registration.recipe.profile.c_str(),
 			a_registration.recipe.entryPoint.c_str(),
+			a_registration.recipe.flags1,
 			&error);
 		if (!blob) {
 			Fail("oracle compile of " + a_registration.name + ": " + error);

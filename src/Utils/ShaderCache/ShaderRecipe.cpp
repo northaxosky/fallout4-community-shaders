@@ -7,8 +7,9 @@
 #include <system_error>
 
 static_assert(
-	cs::shader_cache::kStrictOptimizedFlags1
-		== (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3),
+	cs::shader_cache::kCachedOptimizedFlags1
+		== (D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_OPTIMIZATION_LEVEL3
+			| D3DCOMPILE_SKIP_VALIDATION),
 	"cached bytecode is only interchangeable under the flags it was compiled with");
 
 namespace cs::shader_cache
@@ -27,6 +28,8 @@ namespace cs::shader_cache
 			return "vs";
 		case ShaderCacheStage::kPixel:
 			return "ps";
+		case ShaderCacheStage::kCompute:
+			return "cs";
 		}
 		return "??";
 	}
@@ -34,7 +37,8 @@ namespace cs::shader_cache
 	bool IsKnownStage(std::uint8_t a_stage) noexcept
 	{
 		return a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kVertex)
-			|| a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kPixel);
+			|| a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kPixel)
+			|| a_stage == static_cast<std::uint8_t>(ShaderCacheStage::kCompute);
 	}
 
 	std::string EncodeLocator(const std::filesystem::path& a_path)

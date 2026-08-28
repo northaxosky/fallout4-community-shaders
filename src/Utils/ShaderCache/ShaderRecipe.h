@@ -15,12 +15,13 @@ namespace cs::shader_cache
 {
 	enum class ShaderCacheStage : std::uint8_t
 	{
-		kVertex = 0,
-		kPixel  = 1
+		kVertex  = 0,
+		kPixel   = 1,
+		kCompute = 2
 	};
 
-	// strict optimized flags; verified against SDK headers
-	inline constexpr std::uint32_t kStrictOptimizedFlags1 = 0x00008800u;
+	// Cached shipped shaders do not need FXC's validation pass.
+	inline constexpr std::uint32_t kCachedOptimizedFlags1 = 0x00008802u;
 
 	struct ShaderRecipe
 	{
@@ -30,7 +31,7 @@ namespace cs::shader_cache
 		std::string                                     entryPoint;
 		std::string                                     profile;
 		ShaderCacheStage                                stage  = ShaderCacheStage::kPixel;
-		std::uint32_t                                   flags1 = kStrictOptimizedFlags1;
+		std::uint32_t                                   flags1 = kCachedOptimizedFlags1;
 		std::uint32_t                                   flags2 = 0;
 	};
 

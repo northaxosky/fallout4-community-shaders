@@ -308,6 +308,7 @@ float4 Wrapped()
             defines,
             a_recipe.profile.c_str(),
             a_recipe.entryPoint.c_str(),
+            a_recipe.flags1,
             &error);
 		if (!blob) {
 			Fail("plain compiler failed: " + error);
@@ -471,6 +472,167 @@ float4 Wrapped()
 		Check(record.profile == recipe.profile, "record carries the profile");
 		Check(record.stage == recipe.stage, "record carries the stage");
 		Check(record.manifest.includes.size() == 2, "manifest records both includes");
+	}
+
+	void TestComputeStageEncoding()
+	{
+		Check(std::string_view(DescribeStage(ShaderCacheStage::kCompute)) == "cs",
+			"compute stage has a stable path name");
+		Check(IsKnownStage(static_cast<std::uint8_t>(ShaderCacheStage::kCompute)),
+			"compute stage is recognized");
+		Check(!IsKnownStage(0xFF), "future stage values are rejected");
+
+		Workspace workspace("compute-stage");
+		workspace.Write("Compute.hlsl", R"(RWTexture2D<float4> Output : register(u0);
+
+[numthreads(1, 1, 1)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+	Output[id.xy] = float4(1.0, 0.0, 0.0, 1.0);
+}
+)");
+		auto recipe = workspace.Recipe();
+		recipe.source = workspace.Sources() / "Compute.hlsl";
+		recipe.profile = "cs_5_0";
+		recipe.stage = ShaderCacheStage::kCompute;
+
+		const auto primed = PrimeCache(workspace, recipe);
+		Check(primed.cold.recordPath.parent_path().parent_path().filename() == "cs",
+			"compute records use the compute stage directory");
+
+		ShaderCacheRecord record;
+		CheckRecordStatus(
+			ParseShaderCacheRecord(primed.recordBytes, record),
+			RecordStatus::kOk,
+			"compute record parses");
+		Check(record.stage == ShaderCacheStage::kCompute,
+			"compute record preserves its stage byte");
+
+		auto futureRecord = primed.recordBytes;
+		constexpr std::size_t stageOffset = 8 + 4 + 32 * 3;
+		futureRecord[stageOffset] = 0xFF;
+		CheckRecordStatus(
+			ParseShaderCacheRecord(futureRecord, record),
+			RecordStatus::kUnknownStage,
+			"unknown future stage is rejected without reinterpretation");
+	}
+
+	void TestCrossDirectoryTransitiveInvalidation()
+	{
+		Workspace workspace("cross-directory-transitive");
+		workspace.Write("Upscaling/EncodeTexturesCS.hlsl", R"(#include "../Common/Something.hlsli"
+
+RWTexture2D<float4> Output : register(u0);
+
+[numthreads(1, 1, 1)]
+void main(uint3 id : SV_DispatchThreadID)
+{
+	Output[id.xy] = Something();
+}
+)");
+		workspace.Write("Common/Something.hlsli", R"(#include "Nested/Value.hlsli"
+
+float4 Something()
+{
+	return IncludedValue();
+}
+)");
+		workspace.Write("Common/Nested/Value.hlsli", R"(float4 IncludedValue()
+{
+	return float4(0.25, 0.5, 0.75, 1.0);
+}
+)");
+
+		auto recipe = workspace.Recipe();
+		recipe.source = workspace.Sources() / "Upscaling" / "EncodeTexturesCS.hlsl";
+		recipe.includeRoots = { recipe.source.parent_path() };
+		recipe.profile = "cs_5_0";
+		recipe.stage = ShaderCacheStage::kCompute;
+
+		const auto primed = PrimeCache(workspace, recipe);
+		ShaderCacheRecord record;
+		CheckRecordStatus(
+			ParseShaderCacheRecord(primed.recordBytes, record),
+			RecordStatus::kOk,
+			"cross-directory compute record parses");
+		Check(record.manifest.includes.size() == 2,
+			"manifest records the parent-relative include and its transitive include");
+
+		workspace.Write("Common/Nested/Value.hlsli", R"(float4 IncludedValue()
+{
+	return float4(1.0, 0.75, 0.5, 0.25);
+}
+)");
+		const auto transitiveStale = LoadOrCompileShader(recipe, workspace.Options());
+		CheckDisposition(
+			transitiveStale,
+			CacheDisposition::kStale,
+			"changed transitive parent-boundary dependency is stale");
+		Check(transitiveStale.origin == CompileOrigin::kFreshCompile,
+			"changed transitive dependency recompiles");
+		Check(!(transitiveStale.bytecode == primed.cold.bytecode),
+			"transitive dependency change alters compute bytecode");
+
+		const auto transitiveWarm = LoadOrCompileShader(recipe, workspace.Options());
+		CheckDisposition(
+			transitiveWarm,
+			CacheDisposition::kHit,
+			"recompiled transitive dependency hits");
+
+		workspace.Write("Common/Something.hlsli", R"(#include "Nested/Value.hlsli"
+
+float4 Something()
+{
+	return IncludedValue().zyxw;
+}
+)");
+		const auto directStale = LoadOrCompileShader(recipe, workspace.Options());
+		CheckDisposition(
+			directStale,
+			CacheDisposition::kStale,
+			"changed parent-relative dependency is stale");
+		Check(directStale.origin == CompileOrigin::kFreshCompile,
+			"changed parent-relative dependency recompiles");
+		Check(!(directStale.bytecode == transitiveStale.bytecode),
+			"parent-relative dependency change alters compute bytecode");
+	}
+
+	void TestUnknownStageFailsClosed()
+	{
+		Workspace workspace("unknown-stage");
+		workspace.WriteDefaultTree();
+		const auto recipe = workspace.Recipe();
+		const auto primed = PrimeCache(workspace, recipe);
+
+		auto futureRecord = primed.recordBytes;
+		constexpr std::size_t stageOffset = 8 + 4 + 32 * 3;
+		futureRecord[stageOffset] = 0xFF;
+		WriteAll(primed.cold.recordPath, futureRecord);
+
+		ShaderCacheRecord record;
+		CheckRecordStatus(
+			ParseShaderCacheRecord(futureRecord, record),
+			RecordStatus::kUnknownStage,
+			"unknown stage record is rejected");
+
+		const auto outcome = LoadOrCompileShader(recipe, workspace.Options());
+		CheckDisposition(
+			outcome,
+			CacheDisposition::kRejected,
+			"unknown stage falls through instead of becoming a hit");
+		Check(outcome.succeeded && outcome.origin == CompileOrigin::kFreshCompile,
+			"unknown stage recompiles successfully");
+		Check(outcome.bytecode == primed.cold.bytecode,
+			"unknown stage fallback returns fresh expected bytecode");
+		Check(outcome.recordWritten, "unknown stage fallback republishes the record");
+
+		const auto repairedBytes = ReadAll(outcome.recordPath);
+		CheckRecordStatus(
+			ParseShaderCacheRecord(repairedBytes, record),
+			RecordStatus::kOk,
+			"unknown stage fallback writes a valid record");
+		Check(record.stage == recipe.stage,
+			"unknown stage fallback restores the requested stage");
 	}
 
 	void TestDefineInvalidation()
@@ -1246,6 +1408,9 @@ float4 main() : SV_Target
 		{ "compiler-identity", &TestCompilerIdentity },
 		{ "compiler-identity-across-processes", &TestCompilerIdentityAcrossProcesses },
 		{ "hit-matches-fresh-compile", &TestHitMatchesFreshCompile },
+		{ "compute-stage-encoding", &TestComputeStageEncoding },
+		{ "cross-directory-transitive-invalidation", &TestCrossDirectoryTransitiveInvalidation },
+		{ "unknown-stage-fails-closed", &TestUnknownStageFailsClosed },
 		{ "define-invalidation", &TestDefineInvalidation },
 		{ "root-source-invalidation", &TestRootSourceInvalidation },
 		{ "transitive-include-invalidation", &TestTransitiveIncludeInvalidation },
