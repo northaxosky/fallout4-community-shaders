@@ -73,7 +73,8 @@ namespace cs::features
 			ID3D11Resource* a_reactiveMask,
 			ID3D11Resource* a_transparencyCompositionMask,
 			ID3D11Resource* a_motionVectors,
-			float a_sharpness);
+			float a_sharpness,
+			bool a_resetHistory);
 
 		[[nodiscard]] bool IsReady() const noexcept { return contextCreated; }
 

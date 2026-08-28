@@ -57,7 +57,8 @@ namespace cs::features
 		void EvaluateDLSS(sl::ViewportHandle vp,
 			ID3D11Resource* colorIn, ID3D11Resource* colorOut, ID3D11Resource* depth,
 			ID3D11Resource* mvec, ID3D11Resource* reactiveMask, ID3D11Resource* transparencyMask,
-			const sl::Extent& extentIn, const sl::Extent& extentOut, std::uint32_t outputWidth);
+			const sl::Extent& extentIn, const sl::Extent& extentOut, std::uint32_t outputWidth,
+			bool a_resetHistory);
 
 		void LoadInterposer();
 
@@ -67,11 +68,16 @@ namespace cs::features
 		void CheckFeatures(IDXGIAdapter* a_adapter);
 		void PostDevice();
 		bool EnsureFrameToken();
-		bool CheckFrameConstants(sl::ViewportHandle p_viewport);
+		bool CheckFrameConstants(sl::ViewportHandle p_viewport, bool a_resetHistory);
 		bool IsRTXAndBelow40Series(IDXGIAdapter* a_adapter);
 		bool SetDLSSOptions(sl::ViewportHandle p_viewport, std::uint32_t width);
 
-		bool Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors);
+		bool Upscale(
+			ID3D11Resource* a_upscalingTexture,
+			ID3D11Resource* a_reactiveMask,
+			ID3D11Resource* a_transparencyCompositionMask,
+			ID3D11Resource* a_motionVectors,
+			bool a_resetHistory);
 		void DestroyDLSSResources();
 
 	private:

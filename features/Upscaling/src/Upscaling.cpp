@@ -926,6 +926,7 @@ namespace cs::features
 
 		previousUpscaleMode = a_upscalemethod;
 		previousQualityMode = settings.qualityMode;
+		_superResolutionResetPending.store(true, std::memory_order_release);
 		fidelityFX.RequestFrameGenerationReset();
 		return ok;
 	}
@@ -1247,6 +1248,7 @@ namespace cs::features
 		}
 		recreated = CreateUpscalingTextureResources(method) && recreated;
 		_resourcesReady.store(recreated, std::memory_order_release);
+		_superResolutionResetPending.store(true, std::memory_order_release);
 		fidelityFX.RequestFrameGenerationReset();
 	}
 
@@ -1742,6 +1744,9 @@ namespace cs::features
 	bool Upscaling::Upscale()
 	{
 		auto upscaleMethod = GetUpscaleMethod();
+		if (upscaleMethod != UpscaleMethod::kDLSS && upscaleMethod != UpscaleMethod::kFSR) {
+			return false;
+		}
 
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
@@ -1806,19 +1811,33 @@ namespace cs::features
 				context->CSSetConstantBuffers(0, 1, &nullBuffer);
 			}
 
+			const auto frameCount = state->frameCount;
+			if (_lastDispatchedFrame.has_value() &&
+				frameCount != _lastDispatchedFrame.value() + 1u) {
+				_superResolutionResetPending.store(true, std::memory_order_release);
+			}
+			const bool resetHistory =
+				_superResolutionResetPending.exchange(false, std::memory_order_acq_rel);
+
 			if (upscaleMethod == UpscaleMethod::kDLSS) {
 				upscaled = streamline.Upscale(
 					upscalingTexture->resource.get(),
 					reactiveMaskTexture->resource.get(),
 					transparencyCompositionMaskTexture->resource.get(),
-					motionVectorCopyTexture->resource.get());
+					motionVectorCopyTexture->resource.get(),
+					resetHistory);
 			} else if (upscaleMethod == UpscaleMethod::kFSR) {
 				upscaled = fidelityFX.Upscale(
 					upscalingTexture->resource.get(),
 					reactiveMaskTexture->resource.get(),
 					transparencyCompositionMaskTexture->resource.get(),
 					motionVectorTexture,
-					settings.sharpnessFSR);
+					settings.sharpnessFSR,
+					resetHistory);
+			}
+
+			if (upscaled) {
+				_lastDispatchedFrame = frameCount;
 			}
 		}
 
@@ -2369,6 +2388,7 @@ namespace cs::features
 	{
 		if (a_event.menuName == RE::LoadingMenu::MENU_NAME && !a_event.opening) {
 			auto* upscaling = GetSingleton();
+			upscaling->_superResolutionResetPending.store(true, std::memory_order_release);
 			upscaling->_frameGenerationResetPending.store(true, std::memory_order_release);
 		}
 		return RE::BSEventNotifyControl::kContinue;

@@ -334,10 +334,12 @@ namespace cs::features
 		std::atomic_uint32_t _frameGenerationAlphaConditionedCaptures{ 0 };
 		std::atomic_uint32_t _frameGenerationRawCaptures{ 0 };
 		std::atomic_bool _frameGenerationAlphaConditioned{ false };
+		std::atomic_bool _superResolutionResetPending{ false };
 		std::atomic_bool _frameGenerationResetPending{ false };
 
 		bool _resolutionScalePublished = false;
 		bool _upscaledThisFrame = false;
+		std::optional<std::uint32_t> _lastDispatchedFrame;
 		bool _imagespaceScope = false;
 		float _savedDynamicWidthRatio = 1.0f;
 		float _savedDynamicHeightRatio = 1.0f;

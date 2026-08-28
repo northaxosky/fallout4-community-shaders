@@ -506,7 +506,13 @@ namespace cs::features
 		fsrDispatchCrashLogged = false;
 	}
 
-	bool FidelityFX::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors, float a_sharpness)
+	bool FidelityFX::Upscale(
+		ID3D11Resource* a_upscalingTexture,
+		ID3D11Resource* a_reactiveMask,
+		ID3D11Resource* a_transparencyCompositionMask,
+		ID3D11Resource* a_motionVectors,
+		float a_sharpness,
+		bool a_resetHistory)
 	{
 		auto* context = cs::engine::GetImmediateContext();
 		auto* graphicsState = cs::engine::GetGraphicsState();
@@ -544,7 +550,7 @@ namespace cs::features
 		dispatchParameters.sharpness = a_sharpness;
 		dispatchParameters.cameraFovAngleVertical = cs::engine::GetVerticalFOV();
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
-		dispatchParameters.reset = false;
+		dispatchParameters.reset = a_resetHistory;
 		dispatchParameters.preExposure = 1.0f;
 		dispatchParameters.flags = 0;
 

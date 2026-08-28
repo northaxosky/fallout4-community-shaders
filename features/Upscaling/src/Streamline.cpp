@@ -267,7 +267,7 @@ namespace cs::features
 		return frameToken != nullptr;
 	}
 
-	bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport)
+	bool Streamline::CheckFrameConstants(sl::ViewportHandle p_viewport, bool a_resetHistory)
 	{
 		if (!initialized || !deviceRegistered || !slSetConstants)
 			return false;
@@ -295,7 +295,7 @@ namespace cs::features
 
 		auto jitter = Upscaling::GetSingleton()->jitter;
 		slConstants.jitterOffset = { -jitter.x, -jitter.y };
-		slConstants.reset = sl::Boolean::eFalse;
+		slConstants.reset = a_resetHistory ? sl::Boolean::eTrue : sl::Boolean::eFalse;
 
 		slConstants.mvecScale = { 1.0f, 1.0f };
 		slConstants.motionVectors3D = sl::Boolean::eFalse;
@@ -421,7 +421,8 @@ namespace cs::features
 	void Streamline::EvaluateDLSS(sl::ViewportHandle vp,
 		ID3D11Resource* colorIn, ID3D11Resource* colorOut, ID3D11Resource* depth,
 		ID3D11Resource* mvec, ID3D11Resource* reactiveMask, ID3D11Resource* transparencyMask,
-		const sl::Extent& extentIn, const sl::Extent& extentOut, std::uint32_t outputWidth)
+		const sl::Extent& extentIn, const sl::Extent& extentOut, std::uint32_t outputWidth,
+		bool a_resetHistory)
 	{
 		_evaluatedThisDispatch = false;
 
@@ -441,7 +442,7 @@ namespace cs::features
 		sl::Resource reactiveMaskRes = { sl::ResourceType::eTex2d, reactiveMask, 0 };
 		sl::Resource transparencyMaskRes = { sl::ResourceType::eTex2d, transparencyMask, 0 };
 
-		if (!CheckFrameConstants(vp))
+		if (!CheckFrameConstants(vp, a_resetHistory))
 			return;
 
 		if (!SetDLSSOptions(vp, outputWidth))
@@ -480,7 +481,12 @@ namespace cs::features
 		_evaluatedThisDispatch = true;
 	}
 
-	bool Streamline::Upscale(ID3D11Resource* a_upscalingTexture, ID3D11Resource* a_reactiveMask, ID3D11Resource* a_transparencyCompositionMask, ID3D11Resource* a_motionVectors)
+	bool Streamline::Upscale(
+		ID3D11Resource* a_upscalingTexture,
+		ID3D11Resource* a_reactiveMask,
+		ID3D11Resource* a_transparencyCompositionMask,
+		ID3D11Resource* a_motionVectors,
+		bool a_resetHistory)
 	{
 		auto* graphicsState = cs::engine::GetGraphicsState();
 		auto* depthTexture = cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
@@ -504,7 +510,7 @@ namespace cs::features
 		EvaluateDLSS(viewport,
 			a_upscalingTexture, colorOut,
 			depthTexture, a_motionVectors, a_reactiveMask, a_transparencyCompositionMask,
-			extentIn, extentOut, graphicsState->screenWidth);
+			extentIn, extentOut, graphicsState->screenWidth, a_resetHistory);
 
 		return _evaluatedThisDispatch;
 	}
