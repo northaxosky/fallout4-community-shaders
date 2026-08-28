@@ -17,6 +17,8 @@ namespace cs::engine
 	// Preserve bound RTVs across copies.
 	void CopyResourcePreservingOM(ID3D11DeviceContext* a_ctx, ID3D11Resource* a_dst, ID3D11Resource* a_src) noexcept;
 
+	bool WaitForGpuIdle(ID3D11DeviceContext* a_ctx) noexcept;
+
 	// Unbind OM before compute sampling; restore it last.
 	class OMScope
 	{

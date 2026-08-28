@@ -909,13 +909,13 @@ namespace cs::features
 			static_cast<int>(a_upscalemethod), magic_enum::enum_name(a_upscalemethod),
 			previousQualityMode, settings.qualityMode);
 
-		DestroyUpscalingTextureResources(a_upscalemethod);
-
 		if (previousUpscaleMode == UpscaleMethod::kDLSS) {
 			streamline.DestroyDLSSResources();
 		} else if (previousUpscaleMode == UpscaleMethod::kFSR) {
 			fidelityFX.DestroyFSRResources();
 		}
+
+		DestroyUpscalingTextureResources(a_upscalemethod);
 
 		bool ok = true;
 		if (a_upscalemethod == UpscaleMethod::kFSR) {
@@ -1226,6 +1226,13 @@ namespace cs::features
 			a_texture = nullptr;
 		};
 
+		const auto method = GetUpscaleMethod();
+		if (method == UpscaleMethod::kDLSS) {
+			streamline.DestroyDLSSResources();
+		} else if (method == UpscaleMethod::kFSR) {
+			fidelityFX.DestroyFSRResources();
+		}
+
 		destroy(reactiveMaskTexture);
 		destroy(transparencyCompositionMaskTexture);
 		destroy(motionVectorCopyTexture);
@@ -1234,12 +1241,6 @@ namespace cs::features
 		_upscaledThisFrame = false;
 		_srPublishedToFramebuffer.store(false, std::memory_order_release);
 
-		const auto method = GetUpscaleMethod();
-		if (method == UpscaleMethod::kDLSS) {
-			streamline.DestroyDLSSResources();
-		} else if (method == UpscaleMethod::kFSR) {
-			fidelityFX.DestroyFSRResources();
-		}
 		bool recreated = true;
 		if (method == UpscaleMethod::kFSR) {
 			recreated = fidelityFX.CreateFSRResources();

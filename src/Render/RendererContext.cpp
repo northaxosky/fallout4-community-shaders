@@ -32,6 +32,35 @@ namespace cs::engine
 		if (savedDSV) savedDSV->Release();
 	}
 
+	bool WaitForGpuIdle(ID3D11DeviceContext* a_ctx) noexcept
+	{
+		if (!a_ctx) return false;
+
+		ID3D11Device* device = nullptr;
+		a_ctx->GetDevice(&device);
+		if (!device) return false;
+
+		D3D11_QUERY_DESC queryDesc{};
+		queryDesc.Query = D3D11_QUERY_EVENT;
+
+		ID3D11Query* query = nullptr;
+		const HRESULT createResult = device->CreateQuery(&queryDesc, &query);
+		device->Release();
+		if (FAILED(createResult) || !query) return false;
+
+		a_ctx->End(query);
+		a_ctx->Flush();
+
+		HRESULT result = S_FALSE;
+		while (result == S_FALSE) {
+			result = a_ctx->GetData(query, nullptr, 0, D3D11_ASYNC_GETDATA_DONOTFLUSH);
+			if (result == S_FALSE) SwitchToThread();
+		}
+
+		query->Release();
+		return SUCCEEDED(result);
+	}
+
 	OMScope::OMScope(ID3D11DeviceContext* a_ctx) noexcept :
 		_ctx(a_ctx),
 		_savedRTVs{},

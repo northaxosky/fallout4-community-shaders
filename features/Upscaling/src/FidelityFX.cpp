@@ -9,6 +9,7 @@
 #include "DX12SwapChain.h"
 #include "Log.h"
 #include "Render/Engine.h"
+#include "Render/RendererContext.h"
 #include "Upscaling.h"
 
 ffxFunctions ffxModule{};
@@ -490,6 +491,8 @@ namespace cs::features
 
 	void FidelityFX::DestroyFSRResources()
 	{
+		cs::engine::WaitForGpuIdle(cs::engine::GetImmediateContext());
+
 		if (!fsrScratchBuffer)
 			return;
 

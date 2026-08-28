@@ -511,6 +511,28 @@ namespace cs::features
 
 	void Streamline::DestroyDLSSResources()
 	{
+		cs::engine::WaitForGpuIdle(cs::engine::GetImmediateContext());
+
+		if (slSetTag) {
+			sl::Resource nullResource = { sl::ResourceType::eTex2d, nullptr, 0 };
+			sl::ResourceTag resourceTags[] = {
+				{ &nullResource, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+				{ &nullResource, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+				{ &nullResource, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+				{ &nullResource, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+				{ &nullResource, sl::kBufferTypeBiasCurrentColorHint, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+				{ &nullResource, sl::kBufferTypeTransparencyHint, sl::ResourceLifecycle::eValidUntilPresent, nullptr }
+			};
+
+#pragma warning(push)
+#pragma warning(disable: 4996)
+			const sl::Result tagResult = slSetTag(viewport, resourceTags, _countof(resourceTags), nullptr);
+#pragma warning(pop)
+			if (tagResult != sl::Result::eOk) {
+				L->error("Could not clear DLSS resource tags");
+			}
+		}
+
 		if (!slDLSSSetOptions || !slFreeResources)
 			return;
 
