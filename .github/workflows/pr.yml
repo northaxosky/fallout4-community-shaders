@@ -134,8 +134,9 @@ jobs:
           } else {
             $env:GITHUB_SHA.Substring(0, 7)
           }
+          $safeVersion = $version -replace '[^A-Za-z0-9._-]', '-'
           $safeIdentifier = $identifier -replace '[^A-Za-z0-9._-]', '-'
-          "package-name=FO4CommunityShaders-$version-$safeIdentifier" |
+          "package-name=FO4CommunityShaders-$safeVersion-$safeIdentifier" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Assemble and verify release package
@@ -147,7 +148,7 @@ jobs:
           } else {
             $env:GITHUB_SHA.Substring(0, 7)
           }
-          ./scripts/package-release.ps1 -Identifier $identifier
+          ./scripts/package-release.ps1 -Identifier $identifier -KeepStaging
 
       - name: Verify packaged SDK licenses
         if: github.event_name == 'push'
@@ -176,11 +177,22 @@ jobs:
             $archive.Dispose()
           }
 
+      # Upload the staged tree, not the archive: upload-artifact always zips its input.
       - name: Upload release package
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package-metadata.outputs.package-name }}
+          path: build/dist/${{ steps.package-metadata.outputs.package-name }}/
+          if-no-files-found: error
+          retention-days: 14
+
+      # Releases ship the deterministic archive rather than a re-zipped tree.
+      - name: Upload release archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.package-metadata.outputs.package-name }}-archive
           path: build/dist/*.zip
           if-no-files-found: error
           retention-days: 14
@@ -197,7 +209,7 @@ jobs:
       - name: Download release package
         uses: actions/download-artifact@v4
         with:
-          name: ${{ needs.build.outputs.package-name }}
+          name: ${{ needs.build.outputs.package-name }}-archive
           path: dist
 
       - name: Publish prerelease
