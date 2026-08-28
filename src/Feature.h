@@ -2,6 +2,7 @@
 
 #include "FeatureCategories.h"
 #include "FeatureState.h"
+#include "Utils/RestartSettings.h"
 
 #include <optional>
 #include <string>
@@ -28,6 +29,7 @@ namespace cs
 		virtual ~Feature() = default;
 
 		virtual std::string_view GetName() const = 0;
+		virtual std::string_view GetDisplayName() const { return GetName(); }
 		virtual std::string GetConfigKey() const { return std::string(GetName()); }
 		spdlog::logger* Log() const;
 		virtual EnbPolicy GetEnbPolicy() const { return EnbPolicy::kRunAnyway; }
@@ -56,6 +58,7 @@ namespace cs
 		}
 
 		virtual void DrawSettings() {}
+		virtual settings::RestartSettingsView GetRestartSettings() const noexcept { return {}; }
 
 		virtual bool ProducesTelemetry() const { return false; }
 		// Telemetry must read only cached or atomic state.

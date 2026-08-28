@@ -28,6 +28,7 @@ namespace cs::features
 		static ScreenSpaceGI* GetSingleton();
 
 		std::string_view GetName() const override { return "ScreenSpaceGI"; }
+		std::string_view GetDisplayName() const override { return "Screen Space GI"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override { return "Screen-space ambient occlusion and indirect diffuse lighting."; }
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }

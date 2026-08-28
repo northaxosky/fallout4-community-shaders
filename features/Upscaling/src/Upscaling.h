@@ -31,6 +31,7 @@ namespace cs::features
 		static Upscaling* GetSingleton();
 
 		std::string_view GetName() const override { return "Upscaling"; }
+		std::string_view GetDisplayName() const override { return "Upscaling"; }
 		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 		std::string GetFeatureSummary() const override
 		{
@@ -44,6 +45,7 @@ namespace cs::features
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		void DrawSettings() override;
+		settings::RestartSettingsView GetRestartSettings() const noexcept override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
 
@@ -169,6 +171,8 @@ namespace cs::features
 
 	private:
 		Upscaling() = default;
+
+		Settings _bootSettings;
 
 		void SaveSettings();
 		void SetupResources();

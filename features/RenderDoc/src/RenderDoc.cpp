@@ -220,6 +220,7 @@ namespace cs::features
 		}
 
 		_settings = candidate;
+		_bootSettings = candidate;
 		RefreshHotkeys();
 		return true;
 	}
@@ -472,7 +473,6 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		ImGui::TextDisabled("Restart after enabling.");
 		ImGui::TextDisabled("%s captures one frame. %s captures the configured multi-frame count.",
 			_captureHotkey.ToString().c_str(), _multiCaptureHotkey.ToString().c_str());
 
@@ -517,6 +517,21 @@ namespace cs::features
 
 		if (!_api && _settings.enabled)
 			ImGui::TextDisabled("Runtime load failed - fix the DLL path then restart the game.");
+	}
+
+	cs::settings::RestartSettingsView RenderDoc::GetRestartSettings() const noexcept
+	{
+		static constexpr std::array fields{
+			CS_RESTART_ENABLE_FIELD(
+				Settings,
+				enabled,
+				"Enabled (loads renderdoc.dll)"),
+			CS_RESTART_FIELD(
+				Settings,
+				dllPath,
+				"DLL path")
+		};
+		return cs::settings::MakeRestartSettingsView(fields, _bootSettings, _settings);
 	}
 
 	void RenderDoc::RestoreDefaultSettings()

@@ -1,717 +1,244 @@
 #include "Menu/Menu.h"
 
-#include <imgui.h>
-#include <imgui_internal.h>
-#include <imgui_impl_dx11.h>
-#include <imgui_impl_win32.h>
-
-#include <d3dcompiler.h>
-#include <dxgi1_4.h>
-
-#include <algorithm>
-#include <array>
-#include <cctype>
-#include <cmath>
-#include <cstddef>
-#include <cstring>
-#include <exception>
-#include <filesystem>
-#include <map>
-#include <new>
-#include <optional>
-#include <string>
-#include <string_view>
-#include <unordered_set>
-#include <vector>
-
 #include "Feature.h"
 #include "FeatureCategories.h"
 #include "Log.h"
+#include "Menu/AdvancedSettingsRenderer.h"
+#include "Menu/BackgroundBlur.h"
+#include "Menu/CursorLoader.h"
+#include "Menu/FeatureListRenderer.h"
+#include "Menu/Fonts.h"
+#include "Menu/HomePageRenderer.h"
+#include "Menu/IconLoader.h"
+#include "Menu/MenuHeaderRenderer.h"
+#include "Menu/OverlayRenderer.h"
+#include "Menu/SettingsTabRenderer.h"
+#include "Menu/ThemeDelta.h"
+#include "Menu/ThemeManager.h"
 #include "Plugin.h"
-#include "Menu/Theme.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/Hotkey.h"
+#include "Utils/UI.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <exception>
+#include <filesystem>
+#include <format>
+#include <map>
+#include <optional>
+
+#include <dxgi1_4.h>
+#include <imgui_impl_dx11.h>
+#include <imgui_impl_win32.h>
+#include <imgui_internal.h>
+
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace
 {
-	auto* L = cs::log::Get("cs.menu");
+	auto* L = cs::log::Get("menu");
 
-	// Suppress settings after their first exception.
-	std::unordered_set<const cs::Feature*> g_menuSettingsFailed;
+	using namespace cs;
 
-	constexpr const char* kFrostShaderSource = R"(
-Texture2D SourceTexture : register(t0);
-SamplerState LinearClamp : register(s0);
+	constexpr std::uint32_t HOTKEY_KEY_MASK = 0xFFFF;
+	constexpr std::uint32_t HOTKEY_CTRL = 1u << 16;
+	constexpr std::uint32_t HOTKEY_SHIFT = 1u << 17;
+	constexpr std::uint32_t HOTKEY_ALT = 1u << 18;
+	constexpr std::uint32_t HOTKEY_VALID = 1u << 31;
 
-cbuffer FrostConstants : register(b0)
-{
-	float2 TexelSize;
-	float Offset;
-	float Intensity;
-};
-
-struct VSOutput
-{
-	float4 Position : SV_Position;
-	float2 UV : TEXCOORD0;
-};
-
-VSOutput VSMain(uint vertexID : SV_VertexID)
-{
-	VSOutput output;
-	output.UV = float2((vertexID << 1) & 2, vertexID & 2);
-	output.Position = float4(output.UV * float2(2.0, -2.0) + float2(-1.0, 1.0), 0.0, 1.0);
-	return output;
-}
-
-float4 PSMain(VSOutput input) : SV_Target
-{
-	const float2 radius = TexelSize * Offset * Intensity;
-	const float4 blurred = (
-		SourceTexture.Sample(LinearClamp, input.UV + float2(-radius.x, -radius.y)) +
-		SourceTexture.Sample(LinearClamp, input.UV + float2( radius.x, -radius.y)) +
-		SourceTexture.Sample(LinearClamp, input.UV + float2(-radius.x,  radius.y)) +
-		SourceTexture.Sample(LinearClamp, input.UV + float2( radius.x,  radius.y))) * 0.25;
-	// ImGui blending requires opaque alpha.
-	return float4(blurred.rgb, 1.0);
-}
-)";
-
-	struct alignas(16) FrostConstants
+	bool IsModifierKey(std::uint32_t a_key)
 	{
-		float texelSize[2];
-		float offset;
-		float intensity;
-	};
-	static_assert(sizeof(FrostConstants) == 16);
-
-	template <class T>
-	void ReleaseCom(T*& a_value) noexcept
-	{
-		if (a_value) {
-			a_value->Release();
-			a_value = nullptr;
-		}
+		return a_key == VK_CONTROL || a_key == VK_LCONTROL || a_key == VK_RCONTROL ||
+		       a_key == VK_SHIFT || a_key == VK_LSHIFT || a_key == VK_RSHIFT ||
+		       a_key == VK_MENU || a_key == VK_LMENU || a_key == VK_RMENU;
 	}
 
-	bool CompileFrostShader(const char* a_entry, const char* a_target, ID3DBlob** a_blob)
+	std::uint32_t PackKeyboardHotkey(const std::vector<InputCombo>& a_combo)
 	{
-		ID3DBlob* errors = nullptr;
-		constexpr UINT flags =
-			D3DCOMPILE_ENABLE_STRICTNESS | D3DCOMPILE_WARNINGS_ARE_ERRORS | D3DCOMPILE_OPTIMIZATION_LEVEL3;
-		const HRESULT hr = D3DCompile(
-			kFrostShaderSource,
-			std::strlen(kFrostShaderSource),
-			"MenuFrost",
-			nullptr,
-			nullptr,
-			a_entry,
-			a_target,
-			flags,
-			0,
-			a_blob,
-			&errors);
-		if (FAILED(hr)) {
-			if (errors && errors->GetBufferPointer()) {
-				const std::string_view message(
-					static_cast<const char*>(errors->GetBufferPointer()),
-					errors->GetBufferSize());
-				L->warn("Failed to compile menu frost shader {}: {}", a_entry, message);
-			} else {
-				L->warn(
-					"Failed to compile menu frost shader {} (hr={:#x})",
-					a_entry,
-					static_cast<unsigned>(hr));
+		if (a_combo.empty())
+			return 0;
+
+		const auto& terminal = a_combo.back();
+		if (terminal.GetDevice() != InputDeviceType::Keyboard || IsModifierKey(terminal.GetKey()))
+			return 0;
+
+		std::uint32_t packed = HOTKEY_VALID | (terminal.GetKey() & HOTKEY_KEY_MASK);
+		for (std::size_t i = 0; i + 1 < a_combo.size(); ++i) {
+			if (a_combo[i].GetDevice() != InputDeviceType::Keyboard)
+				return 0;
+
+			switch (a_combo[i].GetKey()) {
+			case VK_CONTROL:
+			case VK_LCONTROL:
+			case VK_RCONTROL:
+				packed |= HOTKEY_CTRL;
+				break;
+			case VK_SHIFT:
+			case VK_LSHIFT:
+			case VK_RSHIFT:
+				packed |= HOTKEY_SHIFT;
+				break;
+			case VK_MENU:
+			case VK_LMENU:
+			case VK_RMENU:
+				packed |= HOTKEY_ALT;
+				break;
+			default:
+				return 0;
 			}
 		}
-		ReleaseCom(errors);
-		return SUCCEEDED(hr) && *a_blob;
+		return packed;
 	}
 
-	class ScopedFrostState
+	std::uint32_t CaptureKeyboardHotkey(std::uint32_t a_key)
 	{
-	public:
-		explicit ScopedFrostState(ID3D11DeviceContext* a_context) :
-			_context(a_context)
-		{
-			_context->OMGetRenderTargets(
-				static_cast<UINT>(_renderTargets.size()),
-				_renderTargets.data(),
-				&_depthStencilView);
-			_viewportCount = static_cast<UINT>(_viewports.size());
-			_context->RSGetViewports(&_viewportCount, _viewports.data());
-
-			_vsInstanceCount = static_cast<UINT>(_vsInstances.size());
-			_context->VSGetShader(&_vertexShader, _vsInstances.data(), &_vsInstanceCount);
-			_psInstanceCount = static_cast<UINT>(_psInstances.size());
-			_context->PSGetShader(&_pixelShader, _psInstances.data(), &_psInstanceCount);
-			_gsInstanceCount = static_cast<UINT>(_gsInstances.size());
-			_context->GSGetShader(&_geometryShader, _gsInstances.data(), &_gsInstanceCount);
-			_hsInstanceCount = static_cast<UINT>(_hsInstances.size());
-			_context->HSGetShader(&_hullShader, _hsInstances.data(), &_hsInstanceCount);
-			_dsInstanceCount = static_cast<UINT>(_dsInstances.size());
-			_context->DSGetShader(&_domainShader, _dsInstances.data(), &_dsInstanceCount);
-
-			_context->IAGetInputLayout(&_inputLayout);
-			_context->IAGetPrimitiveTopology(&_topology);
-			_context->IAGetVertexBuffers(0, 1, &_vertexBuffer, &_vertexStride, &_vertexOffset);
-			_context->IAGetIndexBuffer(&_indexBuffer, &_indexFormat, &_indexOffset);
-
-			_context->PSGetShaderResources(0, 1, &_shaderResource);
-			_context->PSGetSamplers(0, 1, &_sampler);
-			_context->PSGetConstantBuffers(0, 1, &_constantBuffer);
-			_context->OMGetBlendState(&_blendState, _blendFactor.data(), &_sampleMask);
-			_context->OMGetDepthStencilState(&_depthState, &_stencilRef);
-			_context->RSGetState(&_rasterState);
-		}
-
-		~ScopedFrostState()
-		{
-			ID3D11ShaderResourceView* nullSRV = nullptr;
-			_context->PSSetShaderResources(0, 1, &nullSRV);
-			_context->OMSetRenderTargets(
-				static_cast<UINT>(_renderTargets.size()),
-				_renderTargets.data(),
-				_depthStencilView);
-			_context->RSSetViewports(_viewportCount, _viewports.data());
-
-			_context->VSSetShader(_vertexShader, _vsInstances.data(), _vsInstanceCount);
-			_context->PSSetShader(_pixelShader, _psInstances.data(), _psInstanceCount);
-			_context->GSSetShader(_geometryShader, _gsInstances.data(), _gsInstanceCount);
-			_context->HSSetShader(_hullShader, _hsInstances.data(), _hsInstanceCount);
-			_context->DSSetShader(_domainShader, _dsInstances.data(), _dsInstanceCount);
-
-			_context->IASetInputLayout(_inputLayout);
-			_context->IASetPrimitiveTopology(_topology);
-			_context->IASetVertexBuffers(0, 1, &_vertexBuffer, &_vertexStride, &_vertexOffset);
-			_context->IASetIndexBuffer(_indexBuffer, _indexFormat, _indexOffset);
-
-			_context->PSSetShaderResources(0, 1, &_shaderResource);
-			_context->PSSetSamplers(0, 1, &_sampler);
-			_context->PSSetConstantBuffers(0, 1, &_constantBuffer);
-			_context->OMSetBlendState(_blendState, _blendFactor.data(), _sampleMask);
-			_context->OMSetDepthStencilState(_depthState, _stencilRef);
-			_context->RSSetState(_rasterState);
-
-			for (auto*& renderTarget : _renderTargets)
-				ReleaseCom(renderTarget);
-			ReleaseCom(_depthStencilView);
-			ReleaseShader(_vertexShader, _vsInstances, _vsInstanceCount);
-			ReleaseShader(_pixelShader, _psInstances, _psInstanceCount);
-			ReleaseShader(_geometryShader, _gsInstances, _gsInstanceCount);
-			ReleaseShader(_hullShader, _hsInstances, _hsInstanceCount);
-			ReleaseShader(_domainShader, _dsInstances, _dsInstanceCount);
-			ReleaseCom(_inputLayout);
-			ReleaseCom(_vertexBuffer);
-			ReleaseCom(_indexBuffer);
-			ReleaseCom(_shaderResource);
-			ReleaseCom(_sampler);
-			ReleaseCom(_constantBuffer);
-			ReleaseCom(_blendState);
-			ReleaseCom(_depthState);
-			ReleaseCom(_rasterState);
-		}
-
-		ScopedFrostState(const ScopedFrostState&) = delete;
-		ScopedFrostState& operator=(const ScopedFrostState&) = delete;
-
-	private:
-		template <class T, std::size_t N>
-		static void ReleaseShader(
-			T*& a_shader,
-			std::array<ID3D11ClassInstance*, N>& a_instances,
-			UINT a_instanceCount) noexcept
-		{
-			ReleaseCom(a_shader);
-			for (UINT i = 0; i < a_instanceCount; ++i)
-				ReleaseCom(a_instances[i]);
-		}
-
-		ID3D11DeviceContext* _context;
-		std::array<ID3D11RenderTargetView*, D3D11_SIMULTANEOUS_RENDER_TARGET_COUNT> _renderTargets{};
-		ID3D11DepthStencilView* _depthStencilView = nullptr;
-		std::array<D3D11_VIEWPORT, D3D11_VIEWPORT_AND_SCISSORRECT_OBJECT_COUNT_PER_PIPELINE> _viewports{};
-		UINT _viewportCount = 0;
-
-		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _vsInstances{};
-		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _psInstances{};
-		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _gsInstances{};
-		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _hsInstances{};
-		std::array<ID3D11ClassInstance*, D3D11_SHADER_MAX_INTERFACES> _dsInstances{};
-		ID3D11VertexShader* _vertexShader = nullptr;
-		ID3D11PixelShader* _pixelShader = nullptr;
-		ID3D11GeometryShader* _geometryShader = nullptr;
-		ID3D11HullShader* _hullShader = nullptr;
-		ID3D11DomainShader* _domainShader = nullptr;
-		UINT _vsInstanceCount = 0;
-		UINT _psInstanceCount = 0;
-		UINT _gsInstanceCount = 0;
-		UINT _hsInstanceCount = 0;
-		UINT _dsInstanceCount = 0;
-
-		ID3D11InputLayout* _inputLayout = nullptr;
-		D3D11_PRIMITIVE_TOPOLOGY _topology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
-		ID3D11Buffer* _vertexBuffer = nullptr;
-		UINT _vertexStride = 0;
-		UINT _vertexOffset = 0;
-		ID3D11Buffer* _indexBuffer = nullptr;
-		DXGI_FORMAT _indexFormat = DXGI_FORMAT_UNKNOWN;
-		UINT _indexOffset = 0;
-
-		ID3D11ShaderResourceView* _shaderResource = nullptr;
-		ID3D11SamplerState* _sampler = nullptr;
-		ID3D11Buffer* _constantBuffer = nullptr;
-		ID3D11BlendState* _blendState = nullptr;
-		std::array<float, 4> _blendFactor{};
-		UINT _sampleMask = 0;
-		ID3D11DepthStencilState* _depthState = nullptr;
-		UINT _stencilRef = 0;
-		ID3D11RasterizerState* _rasterState = nullptr;
-	};
-
-	int FeatureCategoryRank(std::string_view a_category)
-	{
-		for (std::size_t i = 0; i < cs::FeatureCategories::kRenderOrder.size(); ++i) {
-			if (a_category == cs::FeatureCategories::kRenderOrder[i])
-				return static_cast<int>(i);
-		}
-
-		const int fallbackRank = static_cast<int>(cs::FeatureCategories::kRenderOrder.size());
-		return a_category == cs::FeatureCategories::kMisc ? fallbackRank + 1 : fallbackRank;
+		std::uint32_t packed = HOTKEY_VALID | (a_key & HOTKEY_KEY_MASK);
+		if ((GetAsyncKeyState(VK_CONTROL) & Menu::Constants::KEY_PRESSED_MASK) != 0)
+			packed |= HOTKEY_CTRL;
+		if ((GetAsyncKeyState(VK_SHIFT) & Menu::Constants::KEY_PRESSED_MASK) != 0)
+			packed |= HOTKEY_SHIFT;
+		if ((GetAsyncKeyState(VK_MENU) & Menu::Constants::KEY_PRESSED_MASK) != 0)
+			packed |= HOTKEY_ALT;
+		return packed;
 	}
 
-	bool FeatureCategoryLess(const std::string& a_lhs, const std::string& a_rhs)
+	std::vector<InputCombo> UnpackKeyboardHotkey(std::uint32_t a_packed)
 	{
-		const int lhsRank = FeatureCategoryRank(a_lhs);
-		const int rhsRank = FeatureCategoryRank(a_rhs);
-		if (lhsRank != rhsRank)
-			return lhsRank < rhsRank;
-		return a_lhs < a_rhs;
+		std::vector<InputCombo> combo;
+		if ((a_packed & HOTKEY_VALID) == 0)
+			return combo;
+
+		if ((a_packed & HOTKEY_CTRL) != 0)
+			combo.push_back(InputCombo::Keyboard(VK_CONTROL));
+		if ((a_packed & HOTKEY_SHIFT) != 0)
+			combo.push_back(InputCombo::Keyboard(VK_SHIFT));
+		if ((a_packed & HOTKEY_ALT) != 0)
+			combo.push_back(InputCombo::Keyboard(VK_MENU));
+		combo.push_back(InputCombo::Keyboard(a_packed & HOTKEY_KEY_MASK));
+		return combo;
 	}
 
-	class ScopedFont
+	bool MatchesKeyboardHotkey(std::uint32_t a_packed, std::uint32_t a_key)
 	{
-	public:
-		explicit ScopedFont(ImFont* a_font) :
-			_pushed(a_font != nullptr)
-		{
-			if (_pushed)
-				ImGui::PushFont(a_font);
-		}
-
-		~ScopedFont()
-		{
-			if (_pushed)
-				ImGui::PopFont();
-		}
-
-		ScopedFont(const ScopedFont&) = delete;
-		ScopedFont& operator=(const ScopedFont&) = delete;
-
-	private:
-		bool _pushed;
-	};
-
-	void DrawPanelTitle(std::string_view a_title)
-	{
-		ScopedFont titleFont(cs::theme::GetFonts().Title);
-		ImGui::TextUnformatted(a_title.data(), a_title.data() + a_title.size());
-	}
-
-	void DrawSectionLabel(const char* a_label)
-	{
-		ScopedFont headingFont(cs::theme::GetFonts().Heading);
-		ImGui::SeparatorText(a_label);
-	}
-
-	void DrawSubtext(std::string_view a_text)
-	{
-		ScopedFont subtextFont(cs::theme::GetFonts().Subtext);
-		ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kMuted);
-		ImGui::PushTextWrapPos();
-		ImGui::TextUnformatted(a_text.data(), a_text.data() + a_text.size());
-		ImGui::PopTextWrapPos();
-		ImGui::PopStyleColor();
-	}
-
-	bool MatchesSearch(std::string_view a_text, std::string_view a_search)
-	{
-		if (a_search.empty())
-			return true;
-
-		return std::search(
-			a_text.begin(),
-			a_text.end(),
-			a_search.begin(),
-			a_search.end(),
-			[](char a_lhs, char a_rhs) {
-				const auto lhs = static_cast<unsigned char>(a_lhs);
-				const auto rhs = static_cast<unsigned char>(a_rhs);
-				return std::tolower(lhs) == std::tolower(rhs);
-			}) != a_text.end();
-	}
-
-	struct FeatureStatusPresentation
-	{
-		std::string_view label;
-		ImVec4 color;
-	};
-
-	FeatureStatusPresentation GetFeatureStatusPresentation(const cs::Feature& a_feature)
-	{
-		const auto& state = a_feature.GetState();
-		if (!state.installed)
-			return { "Not installed", cs::theme::colors::kMuted };
-		if (a_feature.IsHealthy())
-			return { "Active", cs::theme::colors::kSuccess };
-		if (a_feature.IsDegraded())
-			return { "Degraded", cs::theme::colors::kWarning };
-		if (a_feature.IsActive())
-			return { "Loaded", cs::theme::colors::kInfo };
-
-		switch (state.runtimeState) {
-		case cs::FeatureRuntimeState::kFailed:
-			return { "Load failed", cs::theme::colors::kError };
-		case cs::FeatureRuntimeState::kPending:
-			return { "Loaded", cs::theme::colors::kInfo };
-		case cs::FeatureRuntimeState::kInactive:
-		default:
-			return { "Not loaded", cs::theme::colors::kMuted };
-		}
-	}
-
-	bool IsFeatureLoadedThisSession(const cs::Feature& a_feature) noexcept
-	{
-		switch (a_feature.GetState().runtimeState) {
-		case cs::FeatureRuntimeState::kPending:
-		case cs::FeatureRuntimeState::kActive:
-		case cs::FeatureRuntimeState::kDegraded:
-			return true;
-		case cs::FeatureRuntimeState::kInactive:
-		case cs::FeatureRuntimeState::kFailed:
+		if ((a_packed & HOTKEY_VALID) == 0 || (a_packed & HOTKEY_KEY_MASK) != a_key)
 			return false;
-		}
-		return false;
+
+		const bool ctrlHeld = (GetAsyncKeyState(VK_CONTROL) & Menu::Constants::KEY_PRESSED_MASK) != 0;
+		const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & Menu::Constants::KEY_PRESSED_MASK) != 0;
+		const bool altHeld = (GetAsyncKeyState(VK_MENU) & Menu::Constants::KEY_PRESSED_MASK) != 0;
+		return ctrlHeld == ((a_packed & HOTKEY_CTRL) != 0) &&
+		       shiftHeld == ((a_packed & HOTKEY_SHIFT) != 0) &&
+		       altHeld == ((a_packed & HOTKEY_ALT) != 0);
 	}
 
-	class FeatureImGuiRecoverySnapshot
+	void PushColorToToml(toml::table& a_table, std::string_view a_key, const ImVec4& a_color)
 	{
-	public:
-		static std::optional<FeatureImGuiRecoverySnapshot> Capture() noexcept
-		{
-			try {
-				auto* context = ImGui::GetCurrentContext();
-				if (!context)
-					return std::nullopt;
-				return FeatureImGuiRecoverySnapshot(*context);
-			} catch (...) {
-				return std::nullopt;
-			}
-		}
+		toml::array rgba{ a_color.x, a_color.y, a_color.z, a_color.w };
+		a_table.insert_or_assign(a_key, std::move(rgba));
+	}
 
-		FeatureImGuiRecoverySnapshot(FeatureImGuiRecoverySnapshot&& a_other) noexcept :
-			_context(a_other._context),
-			_stackState(a_other._stackState),
-			_nextWindowData(a_other._nextWindowData),
-			_nextItemData(a_other._nextItemData),
-			_openPopupData(a_other._openPopupData),
-			_openPopupSize(a_other._openPopupSize)
-		{
-			a_other._openPopupData = nullptr;
-			a_other._openPopupSize = 0;
-		}
-
-		~FeatureImGuiRecoverySnapshot()
-		{
-			if (_openPopupData)
-				ImGui::MemFree(_openPopupData);
-		}
-
-		void Recover()
-		{
-			ImGui::SetCurrentContext(_context);
-			ImGuiIO& io = ImGui::GetIO();
-			const bool assertEnabled = io.ConfigErrorRecoveryEnableAssert;
-			io.ConfigErrorRecoveryEnableAssert = false;
-			ImGui::ErrorRecoveryTryToRecoverState(&_stackState);
-			io.ConfigErrorRecoveryEnableAssert = assertEnabled;
-
-			_context->NextWindowData = _nextWindowData;
-			_context->NextItemData = _nextItemData;
-			if (_context->OpenPopupStack.Data)
-				ImGui::MemFree(_context->OpenPopupStack.Data);
-			_context->OpenPopupStack.Data = _openPopupData;
-			_context->OpenPopupStack.Size = _openPopupSize;
-			_context->OpenPopupStack.Capacity = _openPopupSize;
-			_openPopupData = nullptr;
-			_openPopupSize = 0;
-			if (!_context->OpenPopupStack.empty())
-				ImGui::ClosePopupToLevel(0, true);
-		}
-
-	private:
-		explicit FeatureImGuiRecoverySnapshot(ImGuiContext& a_context) :
-			_context(&a_context),
-			_nextWindowData(a_context.NextWindowData),
-			_nextItemData(a_context.NextItemData)
-		{
-			ImGui::ErrorRecoveryStoreState(&_stackState);
-			if (!a_context.OpenPopupStack.empty()) {
-				_openPopupSize = a_context.OpenPopupStack.Size;
-				_openPopupData = static_cast<ImGuiPopupData*>(
-					ImGui::MemAlloc(static_cast<std::size_t>(_openPopupSize) * sizeof(ImGuiPopupData)));
-				if (!_openPopupData)
-					throw std::bad_alloc();
-				std::memcpy(
-					_openPopupData,
-					a_context.OpenPopupStack.Data,
-					static_cast<std::size_t>(_openPopupSize) * sizeof(ImGuiPopupData));
-			}
-		}
-
-		ImGuiContext* _context;
-		ImGuiErrorRecoveryState _stackState{};
-		ImGuiNextWindowData _nextWindowData;
-		ImGuiNextItemData _nextItemData;
-		ImGuiPopupData* _openPopupData = nullptr;
-		int _openPopupSize = 0;
-	};
-
-	void DrawFeatureStatus(const cs::Feature& a_feature)
+	bool ReadColorFromToml(const toml::table& a_table, std::string_view a_key, ImVec4& a_color)
 	{
-		const auto& state = a_feature.GetState();
-		const auto detail = std::string_view(state.detail).substr(0, 512);
-		if (!state.installed) {
-			ImGui::TextDisabled("Not installed (missing from unified configuration).");
+		const auto* node = a_table.get(a_key);
+		if (!node)
+			return false;
+
+		const auto* array = node->as_array();
+		if (!array || array->size() < 4)
+			return false;
+
+		float channels[4]{};
+		for (std::size_t i = 0; i < 4; ++i) {
+			const auto value = array->get(i)->value<double>();
+			if (!value)
+				return false;
+			channels[i] = static_cast<float>(*value);
+		}
+
+		a_color = ImVec4(channels[0], channels[1], channels[2], channels[3]);
+		return true;
+	}
+
+	void PushVec2ToToml(toml::table& a_table, std::string_view a_key, const ImVec2& a_value)
+	{
+		toml::array xy{ a_value.x, a_value.y };
+		a_table.insert_or_assign(a_key, std::move(xy));
+	}
+
+	void ReadVec2FromToml(const toml::table& a_table, std::string_view a_key, ImVec2& a_value)
+	{
+		const auto* array = a_table[a_key].as_array();
+		if (!array || array->size() < 2)
 			return;
-		}
-		switch (state.runtimeState) {
-		case cs::FeatureRuntimeState::kInactive:
-			if (detail.empty())
-				ImGui::TextDisabled("Not loaded. Set [features.%s].load = true and restart.",
-					a_feature.GetConfigKey().c_str());
-			else
-				ImGui::TextDisabled("Disabled: %.*s", static_cast<int>(detail.size()), detail.data());
-			break;
-		case cs::FeatureRuntimeState::kFailed:
-			if (detail.empty()) {
-				ImGui::TextColored(cs::theme::colors::kError, "Failed to load (see log).");
-			} else {
-				ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kError);
-				ImGui::TextWrapped("Failed to load: %.*s", static_cast<int>(detail.size()), detail.data());
-				ImGui::PopStyleColor();
-			}
-			break;
-		case cs::FeatureRuntimeState::kDegraded:
-			if (detail.empty())
-				ImGui::TextColored(cs::theme::colors::kWarning, "Running with reduced functionality.");
-			else
-				ImGui::TextWrapped("Running with reduced functionality: %.*s",
-					static_cast<int>(detail.size()), detail.data());
-			break;
-		case cs::FeatureRuntimeState::kActive:
-		case cs::FeatureRuntimeState::kPending:
-		default:
-			break;
-		}
+
+		const auto x = array->get(0)->value<double>();
+		const auto y = array->get(1)->value<double>();
+		if (x && y)
+			a_value = ImVec2(static_cast<float>(*x), static_cast<float>(*y));
 	}
 
-	void DrawFeatureResetButton()
+	void ReadFloatFromToml(const toml::table& a_table, std::string_view a_key, float& a_value)
 	{
-		ImGui::PushID("__reset");
-
-		ImGui::PushStyleColor(ImGuiCol_Text, cs::theme::colors::kMuted);
-		const bool clicked = ImGui::SmallButton("Reset to defaults");
-		ImGui::PopStyleColor();
-
-		if (clicked)
-			ImGui::OpenPopup("Confirm reset");
-
-		ImGui::PopID();
+		if (const auto value = a_table[a_key].value<double>())
+			a_value = static_cast<float>(*value);
 	}
 
-	void QuarantineFeatureMetadata(
-		cs::Feature& a_feature,
-		cs::FeatureManager& a_manager,
-		std::string_view a_phase,
-		std::string_view a_reason) noexcept
+	void ReadBoolFromToml(const toml::table& a_table, std::string_view a_key, bool& a_value)
 	{
-		a_manager.QuarantineRuntimeCallback(a_feature, a_phase, a_reason);
+		if (const auto value = a_table[a_key].value<bool>())
+			a_value = *value;
 	}
 
-	bool FeatureSupportsReset(
-		cs::Feature& a_feature,
-		cs::FeatureManager& a_manager,
-		std::string_view a_phase)
+	void ReadStringFromToml(const toml::table& a_table, std::string_view a_key, std::string& a_value)
 	{
-		if (!a_manager.PrepareMenuCallback(a_feature, a_phase))
-			return false;
-
-		try {
-			return a_feature.HasResettableSettings();
-		} catch (const std::exception& e) {
-			QuarantineFeatureMetadata(a_feature, a_manager, a_phase, e.what());
-		} catch (...) {
-			QuarantineFeatureMetadata(a_feature, a_manager, a_phase, "non-standard exception");
-		}
-		return false;
+		if (const auto value = a_table[a_key].value<std::string>())
+			a_value = *value;
 	}
 
-	void ServiceFeatureResetPopup(
-		cs::Feature& a_feature,
-		cs::FeatureManager& a_manager,
-		bool a_menuOpen)
+	std::optional<toml::table> BuildEffectiveDefaultTheme(std::string& a_error)
 	{
-		ImGui::PushID(a_feature.GetName().data());
-		ImGui::PushID("__reset");
+		toml::table baseline;
+		Menu::ThemeToToml(Menu::ThemeSettings{}, baseline);
 
-		if (ImGui::IsPopupOpen("Confirm reset")) {
-			const bool resetAllowed = a_menuOpen
-				&& FeatureSupportsReset(a_feature, a_manager, "Menu::HasResettableSettings");
-
-			const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-			ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-			if (ImGui::BeginPopupModal("Confirm reset", nullptr,
-					ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
-				if (!resetAllowed) {
-					ImGui::CloseCurrentPopup();
-				} else {
-					ImGui::Text("Reset %.*s to defaults?",
-						static_cast<int>(a_feature.GetName().size()),
-						a_feature.GetName().data());
-					ImGui::Spacing();
-					ImGui::TextDisabled("This restores in-code defaults and saves immediately.");
-					ImGui::Spacing();
-					ImGui::Separator();
-					ImGui::Spacing();
-
-					if (ImGui::Button("Reset", ImVec2(120, 0))) {
-						ImGui::CloseCurrentPopup();
-						if (a_manager.PrepareMenuCallback(a_feature, "Menu::RestoreDefaultSettings")) {
-							auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
-							if (!recoveryState) {
-								a_manager.QuarantineRuntimeCallback(
-									a_feature,
-									"Menu::RestoreDefaultSettings",
-									"ImGui recovery snapshot unavailable");
-							} else {
-								try {
-									a_feature.RestoreDefaultSettings();
-								} catch (const std::exception& e) {
-									recoveryState->Recover();
-									a_manager.QuarantineRuntimeCallback(
-										a_feature,
-										"Menu::RestoreDefaultSettings",
-										e.what());
-								} catch (...) {
-									recoveryState->Recover();
-									a_manager.QuarantineRuntimeCallback(
-										a_feature,
-										"Menu::RestoreDefaultSettings",
-										"non-standard exception");
-								}
-							}
-						}
-					}
-					ImGui::SameLine();
-					if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-						ImGui::CloseCurrentPopup();
-					}
-				}
-				ImGui::EndPopup();
-			}
+		const auto shipped = feature_config::LoadFile(feature_config::kDefaultConfigPath);
+		if (shipped.status != feature_config::FileLoadStatus::kParsed) {
+			a_error = shipped.error;
+			return std::nullopt;
 		}
 
-		ImGui::PopID();
-		ImGui::PopID();
-	}
+		const auto* menuNode = shipped.table.get("menu");
+		if (!menuNode)
+			return baseline;
 
-	void DrawFeaturePanel(cs::Feature& a_feature, cs::FeatureManager& a_manager)
-	{
-		ImGui::PushID(a_feature.GetName().data());
-		DrawPanelTitle(a_feature.GetName());
-		ImGui::Spacing();
-		DrawFeatureStatus(a_feature);
-
-		bool resetAllowed = false;
-		if (a_manager.PrepareMenuCallback(a_feature, "Menu::GetFeatureSummary")) {
-			std::string summary;
-			bool summaryCompleted = false;
-			try {
-				summary = a_feature.GetFeatureSummary();
-				summaryCompleted = true;
-			} catch (const std::exception& e) {
-				QuarantineFeatureMetadata(a_feature, a_manager, "Menu::GetFeatureSummary", e.what());
-			} catch (...) {
-				QuarantineFeatureMetadata(
-					a_feature,
-					a_manager,
-					"Menu::GetFeatureSummary",
-					"non-standard exception");
-			}
-
-			if (summaryCompleted) {
-				if (!summary.empty()) {
-					DrawSubtext(summary);
-					ImGui::Separator();
-				}
-
-				bool settingsCompleted = false;
-				if (g_menuSettingsFailed.contains(&a_feature)) {
-					ImGui::TextDisabled("Settings unavailable (a previous error was logged).");
-				} else if (a_manager.PrepareMenuCallback(a_feature, "Menu::DrawSettings")) {
-					CS_FEATURE_ZONE(&a_feature, "DrawSettings");
-					auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
-					if (!recoveryState) {
-						a_manager.QuarantineRuntimeCallback(
-							a_feature,
-							"Menu::DrawSettings",
-							"ImGui recovery snapshot unavailable");
-					} else {
-						try {
-							a_feature.DrawSettings();
-							settingsCompleted = true;
-						} catch (const std::exception& e) {
-							recoveryState->Recover();
-							a_manager.QuarantineRuntimeCallback(a_feature, "Menu::DrawSettings", e.what());
-							if (g_menuSettingsFailed.insert(&a_feature).second)
-								L->warn("Feature {} DrawSettings threw ({}); suppressing its settings UI until restart",
-									a_feature.GetName(), e.what());
-						} catch (...) {
-							recoveryState->Recover();
-							a_manager.QuarantineRuntimeCallback(
-								a_feature,
-								"Menu::DrawSettings",
-								"non-standard exception");
-							if (g_menuSettingsFailed.insert(&a_feature).second)
-								L->warn("Feature {} DrawSettings threw a non-standard exception; suppressing its settings UI until restart",
-									a_feature.GetName());
-						}
-					}
-				}
-
-				if (settingsCompleted)
-					resetAllowed = FeatureSupportsReset(
-						a_feature,
-						a_manager,
-						"Menu::HasResettableSettings");
-			}
-			if (resetAllowed) {
-				ImGui::Spacing();
-				ImGui::Separator();
-				DrawFeatureResetButton();
-			}
+		const auto* menu = menuNode->as_table();
+		if (!menu) {
+			a_error = "shipped [menu] is not a table";
+			return std::nullopt;
 		}
-		ImGui::PopID();
+
+		const auto* themeNode = menu->get("theme");
+		if (!themeNode)
+			return baseline;
+
+		const auto* theme = themeNode->as_table();
+		if (!theme) {
+			a_error = "shipped [menu.theme] is not a table";
+			return std::nullopt;
+		}
+
+		feature_config::DeepMerge(baseline, *theme);
+		return baseline;
 	}
 }
-
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
 namespace cs
 {
+	std::unordered_map<std::string, int> Menu::categoryCounts;
+
 	Menu& Menu::Get()
 	{
 		static Menu instance;
@@ -731,8 +258,9 @@ namespace cs
 			_tracyD3D11Ctx = nullptr;
 		}
 		if (_imguiInited) {
+			CursorLoader::Shutdown();
+			BackgroundBlur::Cleanup();
 			ReleaseBackbufferRTV();
-			ReleaseFrostResources();
 			ImGui_ImplDX11_Shutdown();
 			ImGui_ImplWin32_Shutdown();
 			ImGui::DestroyContext();
@@ -742,6 +270,26 @@ namespace cs
 			_dxgiAdapter3->Release();
 			_dxgiAdapter3 = nullptr;
 		}
+	}
+
+	std::optional<Menu::FontRole> Menu::ResolveFontRole(std::string_view a_key)
+	{
+		for (std::size_t i = 0; i < FontRoleDescriptors.size(); ++i) {
+			if (FontRoleDescriptors[i].key == a_key)
+				return static_cast<FontRole>(i);
+		}
+		return std::nullopt;
+	}
+
+	const Menu::ThemeSettings::FontRoleSettings& Menu::GetDefaultFontRole(FontRole a_role)
+	{
+		static const ThemeSettings defaults{};
+		return defaults.FontRoles[static_cast<std::size_t>(a_role)];
+	}
+
+	std::string Menu::BuildFontSignature(float a_baseFontSize) const
+	{
+		return MenuFonts::BuildFontSignature(settings.Theme, a_baseFontSize);
 	}
 
 	IDXGIAdapter3* Menu::GetDXGIAdapter3()
@@ -772,14 +320,35 @@ namespace cs
 		hr = adapter->QueryInterface(__uuidof(IDXGIAdapter3), reinterpret_cast<void**>(&adapter3));
 		adapter->Release();
 		if (FAILED(hr) || !adapter3) {
-			if (adapter3)
-				adapter3->Release();
 			L->warn("DXGI adapter does not expose IDXGIAdapter3 for VRAM stats (hr={:#x})", static_cast<unsigned>(hr));
 			return nullptr;
 		}
 
 		_dxgiAdapter3 = adapter3;
 		return _dxgiAdapter3;
+	}
+
+	void Menu::CaptureAdapterDescription()
+	{
+		_adapterDescription = "Unknown";
+
+		auto* adapter = GetDXGIAdapter3();
+		if (!adapter)
+			return;
+
+		DXGI_ADAPTER_DESC desc{};
+		if (FAILED(adapter->GetDesc(&desc)))
+			return;
+
+		const int required = WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, nullptr, 0, nullptr, nullptr);
+		if (required <= 1)
+			return;
+
+		std::string converted(static_cast<std::size_t>(required), '\0');
+		if (WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1, converted.data(), required, nullptr, nullptr) <= 0)
+			return;
+		converted.pop_back();
+		_adapterDescription = std::move(converted);
 	}
 
 	void Menu::RegisterWndProcCallback(Feature& a_owner, WndProcCallback a_callback)
@@ -793,53 +362,51 @@ namespace cs
 				return a_entry.owner == &a_owner && a_entry.callback == a_callback;
 			});
 		if (duplicate == _wndProcCallbacks.end())
-			_wndProcCallbacks.push_back({ &a_owner, a_callback });
+			_wndProcCallbacks.emplace_back(&a_owner, a_callback);
 	}
 
 	void Menu::ShowToast(std::string a_text, double a_durationSec)
 	{
-		auto& m = Get();
-		std::lock_guard lock(m._toastMutex);
-		m._toastText     = std::move(a_text);
-		m._toastShown    = std::chrono::steady_clock::now();
-		m._toastDuration = std::chrono::duration<double>(a_durationSec > 0.0 ? a_durationSec : 3.0);
-		++m._toastSeq;
+		auto& menu = Get();
+		std::lock_guard lock(menu._toastMutex);
+		menu._toastText = std::move(a_text);
+		menu._toastShown = std::chrono::steady_clock::now();
+		menu._toastDuration = std::chrono::duration<double>(a_durationSec > 0.0 ? a_durationSec : 3.0);
+		++menu._toastSeq;
 	}
 
 	void Menu::DrawToast()
 	{
-		std::string                           text;
+		std::string text;
 		std::chrono::steady_clock::time_point shown{};
-		std::chrono::duration<double>         duration{0};
-		uint64_t                              seq = 0;
+		std::chrono::duration<double> duration{ 0 };
+		std::uint64_t seq = 0;
 		{
 			std::lock_guard lock(_toastMutex);
-			if (_toastText.empty()) return;
-			text     = _toastText;
-			shown    = _toastShown;
+			if (_toastText.empty())
+				return;
+			text = _toastText;
+			shown = _toastShown;
 			duration = _toastDuration;
-			seq      = _toastSeq;
+			seq = _toastSeq;
 		}
 
-		const auto now     = std::chrono::steady_clock::now();
+		const auto now = std::chrono::steady_clock::now();
 		const auto elapsed = std::chrono::duration<double>(now - shown);
 		if (elapsed >= duration) {
 			std::lock_guard lock(_toastMutex);
-			if (_toastSeq == seq) {
-				// Sequence prevents clearing a newer toast.
+			if (_toastSeq == seq)
 				_toastText.clear();
-			}
 			return;
 		}
 
-		const double remainingSec  = (duration - elapsed).count();
-		const double durationSec   = duration.count();
+		const double remainingSec = (duration - elapsed).count();
+		const double durationSec = duration.count();
 		const double fadeWindowSec = durationSec < 2.0 ? durationSec * 0.25 : 0.5;
-		const float  alpha         = remainingSec >= fadeWindowSec ? 1.0f
-		                                                          : static_cast<float>(remainingSec / fadeWindowSec);
+		const float alpha = remainingSec >= fadeWindowSec ? 1.0f : static_cast<float>(remainingSec / fadeWindowSec);
 
 		ImGuiIO& io = ImGui::GetIO();
-		const float pad = 24.0f;
+		constexpr float pad = 24.0f;
 		ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, pad), ImGuiCond_Always, ImVec2(0.5f, 0.0f));
 		ImGui::SetNextWindowBgAlpha(0.85f * alpha);
 		ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha);
@@ -847,9 +414,8 @@ namespace cs
 			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
 			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
 			ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
-		if (ImGui::Begin("##cs_toast", nullptr, flags)) {
+		if (ImGui::Begin("##cs_toast", nullptr, flags))
 			ImGui::TextUnformatted(text.c_str());
-		}
 		ImGui::End();
 		ImGui::PopStyleVar();
 	}
@@ -859,15 +425,17 @@ namespace cs
 		if (_imguiInited)
 			return;
 
-		_device  = a_device;
+		_device = a_device;
 		_context = a_context;
-		_hwnd    = a_hwnd;
+		_hwnd = a_hwnd;
 
-		InitImGui();
+		Init();
+		if (!_imguiInited)
+			return;
 		HookWndProc();
 		_tracyD3D11Ctx = TracyD3D11Context(a_device, a_context);
 
-		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<uintptr_t>(a_hwnd));
+		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<std::uintptr_t>(a_hwnd));
 	}
 
 	void Menu::HookPresentOn(IDXGISwapChain* a_chain)
@@ -878,29 +446,78 @@ namespace cs
 		_chain = a_chain;
 		ReleaseBackbufferRTV();
 
-		*reinterpret_cast<uintptr_t*>(&_origPresent) =
-			Detours::X64::DetourClassVTable(*reinterpret_cast<uintptr_t*>(a_chain), &Menu::hkPresent, 8);
+		*reinterpret_cast<std::uintptr_t*>(&_origPresent) =
+			Detours::X64::DetourClassVTable(*reinterpret_cast<std::uintptr_t*>(a_chain), &Menu::hkPresent, 8);
 
-		L->info("Present hooked on swap chain {:#x}", reinterpret_cast<uintptr_t>(a_chain));
+		L->info("Present hooked on swap chain {:#x}", reinterpret_cast<std::uintptr_t>(a_chain));
 	}
 
-	void Menu::InitImGui()
+	void Menu::Init()
 	{
 		IMGUI_CHECKVERSION();
 		ImGui::CreateContext();
-		ImGuiIO& io = ImGui::GetIO();
-		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-		static const char* kIniPath = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\imgui.ini";
-		io.IniFilename = kIniPath;
 
-		LoadSettings();
-		cs::theme::LoadFonts(io);
-		cs::theme::ApplyDarkTheme(ImGui::GetStyle());
+		Load();
+		RefreshHotkeySnapshots();
 
-		ImGui_ImplWin32_Init(_hwnd);
-		ImGui_ImplDX11_Init(_device, _context);
+		auto& io = ImGui::GetIO();
+		io.ConfigFlags = ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad | ImGuiConfigFlags_DockingEnable;
+		// Trickle mode would replay frame-batched input late.
+		io.ConfigInputTrickleEventQueue = false;
+		io.ConfigDockingWithShift = settings.RequireShiftToDock;
+		io.BackendFlags = ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_RendererHasVtxOffset | ImGuiBackendFlags_HasGamepad;
 
+		_cachedIniPath = ui::paths::GetImGuiIniPath().string();
+		io.IniFilename = _cachedIniPath.c_str();
+
+		// Resolution changes invalidate saved layout positions.
+		ImGuiSettingsHandler handler{};
+		handler.TypeName = "CommunityShaders";
+		handler.TypeHash = ImHashStr("CommunityShaders");
+		handler.UserData = &lastDisplaySize;
+		handler.ReadOpenFn = [](ImGuiContext*, ImGuiSettingsHandler*, const char*) -> void* { return reinterpret_cast<void*>(1); };
+		handler.ReadLineFn = [](ImGuiContext*, ImGuiSettingsHandler* a_handler, void*, const char* a_line) {
+			float width = 0.0f;
+			float height = 0.0f;
+			if (sscanf_s(a_line, "DisplaySize=%f,%f", &width, &height) == 2)
+				*static_cast<ImVec2*>(a_handler->UserData) = ImVec2(width, height);
+		};
+		handler.WriteAllFn = [](ImGuiContext*, ImGuiSettingsHandler* a_handler, ImGuiTextBuffer* a_buf) {
+			const auto& displaySize = ImGui::GetIO().DisplaySize;
+			a_buf->appendf("[%s][Data]\nDisplaySize=%g,%g\n\n", a_handler->TypeName, displaySize.x, displaySize.y);
+		};
+		ImGui::GetCurrentContext()->SettingsHandlers.push_back(handler);
+
+		if (!ImGui_ImplWin32_Init(_hwnd)) {
+			L->error("Failed to initialize the ImGui Win32 backend");
+			ImGui::DestroyContext();
+			return;
+		}
+		if (!ImGui_ImplDX11_Init(_device, _context)) {
+			L->error("Failed to initialize the ImGui D3D11 backend");
+			ImGui_ImplWin32_Shutdown();
+			ImGui::DestroyContext();
+			return;
+		}
 		_imguiInited = true;
+
+		fontStateValid = ThemeManager::ReloadFont(*this, cachedFontSize);
+		pendingFontReload = !fontStateValid;
+
+		CaptureAdapterDescription();
+
+		if (!IconLoader::InitializeMenuIcons(this))
+			L->info("Menu icons unavailable; falling back to text buttons");
+
+		CursorLoader::Reload(this);
+
+		if (!BackgroundBlur::Initialize())
+			L->warn("Background blur unavailable");
+		BackgroundBlur::SetEnabled(settings.Theme.BackgroundBlurEnabled);
+
+		BuildCategoryCounts();
+
+		initialized = true;
 	}
 
 	void Menu::HookWndProc()
@@ -920,14 +537,14 @@ namespace cs
 		DXGI_SWAP_CHAIN_DESC desc{};
 		if (FAILED(_chain->GetDesc(&desc)))
 			return;
-		const UINT w = desc.BufferDesc.Width;
-		const UINT h = desc.BufferDesc.Height;
+		const UINT width = desc.BufferDesc.Width;
+		const UINT height = desc.BufferDesc.Height;
 
 		ID3D11Texture2D* backbuffer = nullptr;
 		if (FAILED(_chain->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backbuffer))) || !backbuffer)
 			return;
 
-		if (_backbufferRTV && w == _backbufferW && h == _backbufferH) {
+		if (_backbufferRTV && width == _backbufferW && height == _backbufferH) {
 			ID3D11Resource* cached = nullptr;
 			_backbufferRTV->GetResource(&cached);
 			const bool unchanged = cached == backbuffer;
@@ -944,13 +561,12 @@ namespace cs
 		backbuffer->Release();
 		if (FAILED(result))
 			return;
-		_backbufferW = w;
-		_backbufferH = h;
+		_backbufferW = width;
+		_backbufferH = height;
 	}
 
 	void Menu::ReleaseBackbufferRTV()
 	{
-		ReleaseFrostTextures();
 		if (_backbufferRTV) {
 			_backbufferRTV->Release();
 			_backbufferRTV = nullptr;
@@ -959,340 +575,139 @@ namespace cs
 		_backbufferH = 0;
 	}
 
-	bool Menu::EnsureFrostPipeline()
+	void Menu::OnFocusChanged()
 	{
-		if (_frostVS && _frostPS && _frostConstants && _frostSampler &&
-			_frostBlendState && _frostRasterState && _frostDepthState)
-			return true;
-		if (_frostPipelineTried || !_device)
-			return false;
+		ImGui::GetIO().ClearInputKeys();
+		settingToggleKey.store(false, std::memory_order_release);
+		settingOverlayToggleKey.store(false, std::memory_order_release);
+	}
 
-		_frostPipelineTried = true;
-		ID3DBlob* vertexBlob = nullptr;
-		ID3DBlob* pixelBlob = nullptr;
-		if (!CompileFrostShader("VSMain", "vs_5_0", &vertexBlob) ||
-			!CompileFrostShader("PSMain", "ps_5_0", &pixelBlob)) {
-			ReleaseCom(vertexBlob);
-			ReleaseCom(pixelBlob);
+	void Menu::SelectFeatureMenu(const std::string& a_featureName)
+	{
+		pendingFeatureSelection = a_featureName;
+	}
+
+	void Menu::BuildCategoryCounts()
+	{
+		categoryCounts.clear();
+		_featureLoadDesired.clear();
+		const auto root = feature_config::GetMergedRoot();
+		const auto* features = root["features"].as_table();
+
+		for (const Feature* feature : FeatureManager::Get().GetRegisteredFeatures()) {
+			if (!feature)
+				continue;
+			if (feature->IsInMenu())
+				++categoryCounts[feature->GetCategory()];
+
+			bool desiredLoad = false;
+			if (features) {
+				if (const auto* entry = features->get(feature->GetConfigKey()); entry && entry->is_table())
+					desiredLoad = feature_config::ParseActivation(*entry->as_table()).load;
+			}
+			_featureLoadDesired.insert_or_assign(std::string(feature->GetConfigKey()), desiredLoad);
+		}
+	}
+
+	bool Menu::IsFeatureDisabledAtBoot(const Feature& a_feature) const
+	{
+		const auto it = _featureLoadDesired.find(std::string(a_feature.GetConfigKey()));
+		return it == _featureLoadDesired.end() || !it->second;
+	}
+
+	bool Menu::SetFeatureLoadAtBoot(const Feature& a_feature, bool a_load)
+	{
+		const auto result = feature_config::UpdateFeatureLoad(a_feature.GetConfigKey(), a_load);
+		if (!result) {
+			L->warn("Failed to persist boot state for {}: {}", a_feature.GetName(), result.error);
 			return false;
 		}
 
-		const auto fail = [this](const char* a_stage, HRESULT a_hr) {
-			L->warn(
-				"Failed to create menu frost {} (hr={:#x}); backdrop blur disabled",
-				a_stage,
-				static_cast<unsigned>(a_hr));
-			ReleaseFrostResources();
-		};
-
-		HRESULT hr = _device->CreateVertexShader(
-			vertexBlob->GetBufferPointer(),
-			vertexBlob->GetBufferSize(),
-			nullptr,
-			&_frostVS);
-		if (FAILED(hr)) {
-			ReleaseCom(vertexBlob);
-			ReleaseCom(pixelBlob);
-			fail("vertex shader", hr);
-			return false;
-		}
-		hr = _device->CreatePixelShader(
-			pixelBlob->GetBufferPointer(),
-			pixelBlob->GetBufferSize(),
-			nullptr,
-			&_frostPS);
-		ReleaseCom(vertexBlob);
-		ReleaseCom(pixelBlob);
-		if (FAILED(hr)) {
-			fail("pixel shader", hr);
-			return false;
-		}
-
-		D3D11_BUFFER_DESC constantDesc{};
-		constantDesc.ByteWidth = static_cast<UINT>(sizeof(FrostConstants));
-		constantDesc.Usage = D3D11_USAGE_DEFAULT;
-		constantDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-		hr = _device->CreateBuffer(&constantDesc, nullptr, &_frostConstants);
-		if (FAILED(hr)) {
-			fail("constant buffer", hr);
-			return false;
-		}
-
-		D3D11_SAMPLER_DESC samplerDesc{};
-		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
-		samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
-		samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
-		samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
-		samplerDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
-		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
-		hr = _device->CreateSamplerState(&samplerDesc, &_frostSampler);
-		if (FAILED(hr)) {
-			fail("sampler", hr);
-			return false;
-		}
-
-		D3D11_BLEND_DESC blendDesc{};
-		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-		hr = _device->CreateBlendState(&blendDesc, &_frostBlendState);
-		if (FAILED(hr)) {
-			fail("blend state", hr);
-			return false;
-		}
-
-		D3D11_RASTERIZER_DESC rasterDesc{};
-		rasterDesc.FillMode = D3D11_FILL_SOLID;
-		rasterDesc.CullMode = D3D11_CULL_NONE;
-		rasterDesc.DepthClipEnable = TRUE;
-		hr = _device->CreateRasterizerState(&rasterDesc, &_frostRasterState);
-		if (FAILED(hr)) {
-			fail("rasterizer state", hr);
-			return false;
-		}
-
-		D3D11_DEPTH_STENCIL_DESC depthDesc{};
-		depthDesc.DepthEnable = FALSE;
-		depthDesc.StencilEnable = FALSE;
-		hr = _device->CreateDepthStencilState(&depthDesc, &_frostDepthState);
-		if (FAILED(hr)) {
-			fail("depth-stencil state", hr);
-			return false;
-		}
-
+		feature_config::Reload();
+		BuildCategoryCounts();
 		return true;
 	}
 
-	void Menu::EnsureFrostResources()
+	void Menu::RefreshFontsIfNeeded()
 	{
-		if (_frostResourcesFailed || !EnsureFrostPipeline() || !_chain || !_device)
+		if (pendingFontReload || fontEditActive)
 			return;
 
-		ID3D11Texture2D* backbuffer = nullptr;
-		const HRESULT bufferHR = _chain->GetBuffer(
-			0,
-			__uuidof(ID3D11Texture2D),
-			reinterpret_cast<void**>(&backbuffer));
-		if (FAILED(bufferHR) || !backbuffer) {
-			if (backbuffer)
-				backbuffer->Release();
-			L->warn(
-				"Failed to get the backbuffer for menu frost resources (hr={:#x}); backdrop blur disabled",
-				static_cast<unsigned>(bufferHR));
-			_frostResourcesFailed = true;
+		if (buildFontPreviewAtlas != _previewAtlasLoaded) {
+			pendingFontReload = true;
 			return;
 		}
 
-		D3D11_TEXTURE2D_DESC backbufferDesc{};
-		backbuffer->GetDesc(&backbufferDesc);
-		backbuffer->Release();
-		if (_frostCopy && _frostA && _frostB &&
-			_frostW == backbufferDesc.Width &&
-			_frostH == backbufferDesc.Height &&
-			_frostFormat == backbufferDesc.Format)
-			return;
-
-		ReleaseFrostTextures();
-		if (backbufferDesc.Width == 0 || backbufferDesc.Height == 0 ||
-			backbufferDesc.SampleDesc.Count != 1) {
-			L->warn(
-				"Unsupported menu frost backbuffer {}x{}, samples={}; backdrop blur disabled",
-				backbufferDesc.Width,
-				backbufferDesc.Height,
-				backbufferDesc.SampleDesc.Count);
-			_frostResourcesFailed = true;
-			return;
-		}
-
-		const auto fail = [this](const char* a_stage, HRESULT a_hr) {
-			L->warn(
-				"Failed to create menu frost {} (hr={:#x}); backdrop blur disabled",
-				a_stage,
-				static_cast<unsigned>(a_hr));
-			ReleaseFrostTextures();
-			_frostResourcesFailed = true;
-		};
-
-		D3D11_TEXTURE2D_DESC copyDesc = backbufferDesc;
-		copyDesc.Usage = D3D11_USAGE_DEFAULT;
-		copyDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-		copyDesc.CPUAccessFlags = 0;
-		copyDesc.MiscFlags = 0;
-		HRESULT hr = _device->CreateTexture2D(&copyDesc, nullptr, &_frostCopy);
-		if (FAILED(hr)) {
-			fail("backbuffer copy", hr);
-			return;
-		}
-		hr = _device->CreateShaderResourceView(_frostCopy, nullptr, &_frostCopySRV);
-		if (FAILED(hr)) {
-			fail("backbuffer copy SRV", hr);
-			return;
-		}
-
-		D3D11_TEXTURE2D_DESC blurDesc{};
-		blurDesc.Width = std::max(1u, backbufferDesc.Width / 4);
-		blurDesc.Height = std::max(1u, backbufferDesc.Height / 4);
-		blurDesc.MipLevels = 1;
-		blurDesc.ArraySize = 1;
-		blurDesc.Format = backbufferDesc.Format;
-		blurDesc.SampleDesc.Count = 1;
-		blurDesc.Usage = D3D11_USAGE_DEFAULT;
-		blurDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET;
-
-		hr = _device->CreateTexture2D(&blurDesc, nullptr, &_frostA);
-		if (FAILED(hr)) {
-			fail("ping texture A", hr);
-			return;
-		}
-		hr = _device->CreateShaderResourceView(_frostA, nullptr, &_frostASRV);
-		if (FAILED(hr)) {
-			fail("ping texture A SRV", hr);
-			return;
-		}
-		hr = _device->CreateRenderTargetView(_frostA, nullptr, &_frostARTV);
-		if (FAILED(hr)) {
-			fail("ping texture A RTV", hr);
-			return;
-		}
-
-		hr = _device->CreateTexture2D(&blurDesc, nullptr, &_frostB);
-		if (FAILED(hr)) {
-			fail("pong texture B", hr);
-			return;
-		}
-		hr = _device->CreateShaderResourceView(_frostB, nullptr, &_frostBSRV);
-		if (FAILED(hr)) {
-			fail("pong texture B SRV", hr);
-			return;
-		}
-		hr = _device->CreateRenderTargetView(_frostB, nullptr, &_frostBRTV);
-		if (FAILED(hr)) {
-			fail("pong texture B RTV", hr);
-			return;
-		}
-
-		_frostW = backbufferDesc.Width;
-		_frostH = backbufferDesc.Height;
-		_frostFormat = backbufferDesc.Format;
+		// The signature also catches resolution-driven raster size changes.
+		if (BuildFontSignature(ThemeManager::ResolveFontSize(*this)) != cachedFontSignature)
+			pendingFontReload = true;
 	}
 
-	void Menu::RenderFrostBackdrop()
+	void Menu::RefreshHotkeySnapshots() noexcept
 	{
-		_frostSRV = nullptr;
-		if (!_context || !_chain || !_frostCopy || !_frostCopySRV ||
-			!_frostA || !_frostASRV || !_frostARTV ||
-			!_frostB || !_frostBSRV || !_frostBRTV)
-			return;
-
-		ID3D11Texture2D* backbuffer = nullptr;
-		const HRESULT hr = _chain->GetBuffer(
-			0,
-			__uuidof(ID3D11Texture2D),
-			reinterpret_cast<void**>(&backbuffer));
-		if (FAILED(hr) || !backbuffer) {
-			if (backbuffer)
-				backbuffer->Release();
-			return;
-		}
-
-		ScopedFrostState savedState(_context);
-		_context->OMSetRenderTargets(0, nullptr, nullptr);
-		_context->CopyResource(_frostCopy, backbuffer);
-		backbuffer->Release();
-
-		ID3D11Buffer* nullVertexBuffer = nullptr;
-		UINT zero = 0;
-		_context->IASetInputLayout(nullptr);
-		_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-		_context->IASetVertexBuffers(0, 1, &nullVertexBuffer, &zero, &zero);
-		_context->IASetIndexBuffer(nullptr, DXGI_FORMAT_R16_UINT, 0);
-		_context->VSSetShader(_frostVS, nullptr, 0);
-		_context->PSSetShader(_frostPS, nullptr, 0);
-		_context->GSSetShader(nullptr, nullptr, 0);
-		_context->HSSetShader(nullptr, nullptr, 0);
-		_context->DSSetShader(nullptr, nullptr, 0);
-		_context->PSSetSamplers(0, 1, &_frostSampler);
-		_context->PSSetConstantBuffers(0, 1, &_frostConstants);
-		constexpr std::array<float, 4> blendFactor{};
-		_context->OMSetBlendState(_frostBlendState, blendFactor.data(), UINT_MAX);
-		_context->OMSetDepthStencilState(_frostDepthState, 0);
-		_context->RSSetState(_frostRasterState);
-
-		const UINT blurW = std::max(1u, _frostW / 4);
-		const UINT blurH = std::max(1u, _frostH / 4);
-		const D3D11_VIEWPORT viewport{
-			0.0f,
-			0.0f,
-			static_cast<float>(blurW),
-			static_cast<float>(blurH),
-			0.0f,
-			1.0f
-		};
-		_context->RSSetViewports(1, &viewport);
-
-		const auto drawPass = [this](
-								  ID3D11ShaderResourceView* a_source,
-								  ID3D11RenderTargetView* a_target,
-								  UINT a_sourceW,
-								  UINT a_sourceH,
-								  float a_offset) {
-			const FrostConstants constants{
-				{ 1.0f / static_cast<float>(a_sourceW), 1.0f / static_cast<float>(a_sourceH) },
-				a_offset,
-				_frostIntensity
-			};
-			_context->UpdateSubresource(_frostConstants, 0, nullptr, &constants, 0, 0);
-			_context->OMSetRenderTargets(1, &a_target, nullptr);
-			_context->PSSetShaderResources(0, 1, &a_source);
-			_context->Draw(3, 0);
-			ID3D11ShaderResourceView* nullSRV = nullptr;
-			_context->PSSetShaderResources(0, 1, &nullSRV);
-		};
-
-		drawPass(_frostCopySRV, _frostARTV, _frostW, _frostH, 0.5f);
-
-		ID3D11ShaderResourceView* currentSRV = _frostASRV;
-		bool currentIsA = true;
-		const int blurPassCount = std::clamp(
-			static_cast<int>(std::lround(2.0f + 2.0f * _frostIntensity)),
-			2,
-			6);
-		for (int pass = 0; pass < blurPassCount; ++pass) {
-			ID3D11RenderTargetView* const targetRTV = currentIsA ? _frostBRTV : _frostARTV;
-			ID3D11ShaderResourceView* const targetSRV = currentIsA ? _frostBSRV : _frostASRV;
-			const float offset = 0.75f + 0.5f * static_cast<float>(pass);
-			drawPass(currentSRV, targetRTV, blurW, blurH, offset);
-			currentSRV = targetSRV;
-			currentIsA = !currentIsA;
-		}
-		_frostSRV = currentSRV;
+		auto toggleHotkey = PackKeyboardHotkey(settings.ToggleKey);
+		if (toggleHotkey == 0)
+			toggleHotkey = HOTKEY_VALID | VK_END;
+		_toggleHotkey.store(toggleHotkey, std::memory_order_release);
+		_overlayHotkey.store(PackKeyboardHotkey(settings.OverlayToggleKey), std::memory_order_release);
 	}
 
-	void Menu::ReleaseFrostTextures()
+	void Menu::ApplyPendingKeyBinding()
 	{
-		_frostSRV = nullptr;
-		ReleaseCom(_frostCopySRV);
-		ReleaseCom(_frostCopy);
-		ReleaseCom(_frostASRV);
-		ReleaseCom(_frostARTV);
-		ReleaseCom(_frostA);
-		ReleaseCom(_frostBSRV);
-		ReleaseCom(_frostBRTV);
-		ReleaseCom(_frostB);
-		_frostW = 0;
-		_frostH = 0;
-		_frostFormat = DXGI_FORMAT_UNKNOWN;
-		_frostResourcesFailed = false;
+		const auto target = _pendingKeyBindingTarget.exchange(KeyBindingTarget::None, std::memory_order_acq_rel);
+		if (target == KeyBindingTarget::None)
+			return;
+
+		auto combo = UnpackKeyboardHotkey(_pendingKeyBinding.load(std::memory_order_acquire));
+		if (target == KeyBindingTarget::ToggleMenu)
+			settings.ToggleKey = std::move(combo);
+		else
+			settings.OverlayToggleKey = std::move(combo);
+
+		Save();
 	}
 
-	void Menu::ReleaseFrostResources()
+	void Menu::ApplyPendingInputActions()
 	{
-		ReleaseFrostTextures();
-		ReleaseCom(_frostVS);
-		ReleaseCom(_frostPS);
-		ReleaseCom(_frostConstants);
-		ReleaseCom(_frostSampler);
-		ReleaseCom(_frostBlendState);
-		ReleaseCom(_frostRasterState);
-		ReleaseCom(_frostDepthState);
+		if (const auto requested = _pendingMenuOpen.exchange(-1, std::memory_order_acq_rel); requested >= 0) {
+			IsEnabled = requested != 0;
+			if (IsEnabled)
+				_featureLoadDirty.store(true, std::memory_order_release);
+			ImGui::GetIO().ClearInputKeys();
+		}
+
+		if (const auto requested = _pendingOverlayVisible.exchange(-1, std::memory_order_acq_rel); requested >= 0)
+			_overlayVisible = requested != 0;
+
+		if (focusChanged.exchange(false, std::memory_order_acq_rel))
+			OnFocusChanged();
+		if (!IsEnabled) {
+			settingToggleKey.store(false, std::memory_order_release);
+			settingOverlayToggleKey.store(false, std::memory_order_release);
+		}
+	}
+
+	void Menu::FinishPendingWndProcFailures()
+	{
+		auto& featureManager = FeatureManager::Get();
+		bool quarantined = false;
+		for (auto& entry : _wndProcCallbacks) {
+			const auto failure = entry.pendingFailure.exchange(
+				WndProcCallbackEntry::FailureKind::None,
+				std::memory_order_acq_rel);
+			if (entry.owner && failure != WndProcCallbackEntry::FailureKind::None) {
+				const auto reason = failure == WndProcCallbackEntry::FailureKind::StandardException ?
+				                        "standard exception" :
+				                        "non-standard exception";
+				featureManager.QuarantineRuntimeCallback(*entry.owner, "Menu::WndProc", reason);
+				quarantined = true;
+			}
+
+			if (entry.owner && !entry.owner->IsHealthy())
+				entry.disabled.store(true, std::memory_order_release);
+		}
+		if (quarantined)
+			featureManager.FinishRuntimeCallbackPass();
 	}
 
 	void Menu::Render()
@@ -1300,57 +715,68 @@ namespace cs
 		if (!_imguiInited || !_chain || !_context)
 			return;
 
+		ApplyPendingInputActions();
+		ApplyPendingKeyBinding();
+		FinishPendingWndProcFailures();
+		if (_featureLoadDirty.exchange(false, std::memory_order_acq_rel)) {
+			feature_config::Reload();
+			BuildCategoryCounts();
+		}
+
 		EnsureBackbufferRTV();
 		if (!_backbufferRTV)
 			return;
 
-		_frostSRV = nullptr;
-		if (_open && _frostEnabled) {
-			EnsureFrostResources();
-			RenderFrostBackdrop();
+		keybindingWidgetsActive.store(false, std::memory_order_release);
+		buildFontPreviewAtlas = wantsFontPreviewAtlas;
+		wantsFontPreviewAtlas = false;
+
+		// Atlas and texture reloads must happen between frames.
+		RefreshFontsIfNeeded();
+		if (pendingFontReload) {
+			if (ThemeManager::ReloadFont(*this, cachedFontSize)) {
+				pendingFontReload = false;
+				fontStateValid = true;
+				_previewAtlasLoaded = buildFontPreviewAtlas;
+			} else {
+				fontStateValid = false;
+				return;
+			}
+		}
+		if (!fontStateValid)
+			return;
+		if (pendingIconReload) {
+			pendingIconReload = false;
+			IconLoader::InitializeMenuIcons(this);
+		}
+		if (pendingCursorReload) {
+			pendingCursorReload = false;
+			CursorLoader::Reload(this);
 		}
 
-		ImGui::GetIO().FontGlobalScale = _fontScale;
-		ImGui::GetIO().MouseDrawCursor = _open;
+		ImGui::GetIO().MouseDrawCursor = IsEnabled;
 
 		ImGui_ImplDX11_NewFrame();
 		ImGui_ImplWin32_NewFrame();
 		ImGui::NewFrame();
 
-		if (_overlayVisible) {
-			auto& featureManager = FeatureManager::Get();
-			for (auto* feat : featureManager.GetAll()) {
-				if (!feat || !featureManager.PrepareRuntimeCallback(*feat, "Menu::DrawOverlay")) {
-					continue;
-				}
-				CS_FEATURE_ZONE(feat, "DrawOverlay");
-				auto recoveryState = FeatureImGuiRecoverySnapshot::Capture();
-				if (!recoveryState) {
-					featureManager.QuarantineRuntimeCallback(
-						*feat,
-						"Menu::DrawOverlay",
-						"ImGui recovery snapshot unavailable");
-					continue;
-				}
-				try {
-					feat->DrawOverlay();
-				} catch (const std::exception& e) {
-					recoveryState->Recover();
-					featureManager.QuarantineRuntimeCallback(*feat, "Menu::DrawOverlay", e.what());
-				} catch (...) {
-					recoveryState->Recover();
-					featureManager.QuarantineRuntimeCallback(
-						*feat,
-						"Menu::DrawOverlay",
-						"non-standard exception");
-				}
-			}
-			featureManager.FinishRuntimeCallbackPass();
-		}
+		if (_overlayVisible)
+			OverlayRenderer::RenderOverlay();
 
-		DrawDefaultUI();
+		if (IsEnabled)
+			DrawSettings();
+
+		if (!keybindingWidgetsActive.load(std::memory_order_acquire) || !IsEnabled) {
+			settingToggleKey.store(false, std::memory_order_release);
+			settingOverlayToggleKey.store(false, std::memory_order_release);
+		}
+		if (_pendingMenuOpen.load(std::memory_order_acquire) < 0)
+			_isOpenSnapshot.store(IsEnabled, std::memory_order_release);
 
 		DrawToast();
+
+		if (IsEnabled)
+			CursorLoader::DrawCustomCursor(*this);
 
 		ImGui::Render();
 
@@ -1363,8 +789,14 @@ namespace cs
 		_context->RSGetViewports(&prevVPCount, &prevVP);
 
 		_context->OMSetRenderTargets(1, &_backbufferRTV, nullptr);
-		D3D11_VIEWPORT vp{ 0.0f, 0.0f, static_cast<float>(_backbufferW), static_cast<float>(_backbufferH), 0.0f, 1.0f };
-		_context->RSSetViewports(1, &vp);
+		D3D11_VIEWPORT viewport{ 0.0f, 0.0f, static_cast<float>(_backbufferW), static_cast<float>(_backbufferH), 0.0f, 1.0f };
+		_context->RSSetViewports(1, &viewport);
+
+		if (IsEnabled)
+			BackgroundBlur::RenderBackgroundBlur();
+
+		_context->OMSetRenderTargets(1, &_backbufferRTV, nullptr);
+		_context->RSSetViewports(1, &viewport);
 
 		ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
@@ -1378,713 +810,152 @@ namespace cs
 			prevDSV->Release();
 	}
 
-	void Menu::LoadSettings()
+	void Menu::DrawSettings()
 	{
-		_developerMode = false;
-		_frostEnabled = true;
-		_frostIntensity = 1.0f;
-		const auto root = feature_config::GetMergedRoot();
-		const auto* menuNode = root.get("menu");
-		if (!menuNode)
-			return;
+		fontEditActive = false;
 
-		const auto* menu = menuNode->as_table();
-		if (!menu) {
-			L->warn("Unified config [menu] must be a table; using menu defaults");
-			return;
+		if (focusChanged) {
+			OnFocusChanged();
+			focusChanged = false;
 		}
 
-		bool developerMode = false;
-		switch (feature_config::ReadBool(*menu, "developer_mode", developerMode)) {
-		case feature_config::ScalarReadStatus::kValid:
-			_developerMode = developerMode;
-			break;
-		case feature_config::ScalarReadStatus::kMissing:
-			break;
-		default:
-			L->warn("menu.developer_mode must be a boolean; using false");
-			break;
-		}
+		ThemeManager::SetupImGuiStyle(*this);
 
-		bool frostEnabled = true;
-		switch (feature_config::ReadBool(*menu, "background_blur", frostEnabled)) {
-		case feature_config::ScalarReadStatus::kValid:
-			_frostEnabled = frostEnabled;
-			break;
-		case feature_config::ScalarReadStatus::kMissing:
-			break;
-		default:
-			L->warn("menu.background_blur must be a boolean; using true");
-			break;
-		}
+		ImGui::DockSpaceOverViewport(0, nullptr, ImGuiDockNodeFlags_PassthruCentralNode);
 
-		float frostIntensity = 1.0f;
-		switch (feature_config::ReadFloat(*menu, "blur_intensity", frostIntensity, 0.25f, 2.0f)) {
-		case feature_config::ScalarReadStatus::kValid:
-			_frostIntensity = frostIntensity;
-			break;
-		case feature_config::ScalarReadStatus::kMissing:
-			break;
-		default:
-			L->warn("menu.blur_intensity must be a number from 0.25 to 2.0; using 1.0");
-			break;
-		}
-	}
+		const auto layoutCond = resetLayout ? ImGuiCond_Always : ImGuiCond_FirstUseEver;
+		ImGui::SetNextWindowPos(ui::GetNativeViewportSizeScaled(0.5f), layoutCond, ImVec2(0.5f, 0.5f));
+		ImGui::SetNextWindowSize(ui::GetNativeViewportSizeScaled(0.8f), layoutCond);
+		resetLayout = false;
 
-	bool Menu::SaveSettings() const
-	{
-		toml::table menu;
-		menu.insert_or_assign("developer_mode", _developerMode);
-		menu.insert_or_assign("background_blur", _frostEnabled);
-		menu.insert_or_assign("blur_intensity", _frostIntensity);
-		const auto result = feature_config::UpdateTopLevelSection("menu", menu);
-		if (!result) {
-			L->warn("Failed to save menu configuration: {}", result.error);
-			return false;
-		}
-		return true;
-	}
+		const auto displayTitle = ui::GetMenuDisplayTitle();
+		// A stable window ID preserves docking across build strings.
+		const auto title = std::format("{}###CommunityShaders", displayTitle);
 
-	void Menu::RefreshFeatureLoadCache()
-	{
-		// Reload before reopening to include external writes.
-		feature_config::Reload();
-		const auto root = feature_config::GetMergedRoot();
-		const auto* features = root["features"].as_table();
-		const auto& registeredFeatures = FeatureManager::Get().GetRegisteredFeatures();
+		ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar;
+		static bool wasDocked = false;
+		if (!wasDocked)
+			windowFlags |= ImGuiWindowFlags_NoTitleBar;
 
-		_featureLoadDesired.clear();
-		_featureLoadDesired.reserve(registeredFeatures.size());
-		for (const auto* feature : registeredFeatures) {
-			if (!feature)
-				continue;
+		ui::BeginWithRoundedClose(title.c_str(), &IsEnabled, windowFlags);
+		{
+			const bool isDocked = ImGui::IsWindowDocked();
+			wasDocked = isDocked;
 
-			const std::string key = feature->GetConfigKey();
-			bool desiredLoad = false;
-			if (features) {
-				const auto* featureNode = features->get(key);
-				if (featureNode && featureNode->is_table()) {
-					desiredLoad = feature_config::ParseActivation(*featureNode->as_table()).load;
-				}
-			}
-			_featureLoadDesired.insert_or_assign(key, desiredLoad);
-		}
-		_featureLoadDirty = false;
-	}
+			float globalScale = settings.Theme.GlobalScale;
+			if (std::abs(globalScale - ThemeManager::Constants::DEFAULT_GLOBAL_SCALE) < 0.001f)
+				globalScale = ThemeManager::Constants::DEFAULT_GLOBAL_SCALE;
 
-	void Menu::DrawOverviewPage(const std::vector<FeatureListEntry>& a_features)
-	{
-		if (_featureLoadDirty)
-			RefreshFeatureLoadCache();
+			const float uiScale = std::exp2(globalScale);
+			const bool canShowIcons = settings.Theme.ShowActionIcons && uiIcons.clearCache.texture != nullptr;
 
-		DrawPanelTitle("Overview");
-		ImGui::Spacing();
-		ImGui::Text("FO4 Community Shaders v%u.%u.%u",
-			Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
+			MenuHeaderRenderer::RenderHeader(isDocked, canShowIcons, uiScale, uiIcons);
 
-		const float fps = ImGui::GetIO().Framerate;
-		ImGui::Text("%.1f FPS  /  %.2f ms", fps, fps > 0.0f ? 1000.0f / fps : 0.0f);
-		ImGui::Spacing();
+			const float footerHeight = settings.Theme.ShowFooter ?
+			                               (ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 3) :
+			                               0.0f;
 
-		DrawSectionLabel("Feature status");
-		DrawSubtext("Load settings are applied at startup. Changes require a game restart.");
+			static std::size_t selectedMenu = 0;
+			static std::map<std::string, bool> categoryExpansionStates;
 
-		const auto setVisibleFeatureLoads = [this, &a_features](bool a_load) {
-			std::size_t attempted = 0;
-			std::size_t failures = 0;
-			for (const auto& entry : a_features) {
-				if (!_developerMode && entry.category == FeatureCategories::kDevTools)
-					continue;
+			FeatureListRenderer::RenderFeatureList(
+				footerHeight,
+				selectedMenu,
+				featureSearch,
+				pendingFeatureSelection,
+				categoryExpansionStates,
+				[this]() { DrawGeneralSettings(); },
+				[this]() { DrawAdvancedSettings(); },
+				[this]() { DrawPresets(); });
 
-				++attempted;
-				const std::string key = entry.feature->GetConfigKey();
-				const auto result = feature_config::UpdateFeatureLoad(key, a_load);
-				if (result) {
-					_featureLoadDesired.insert_or_assign(key, a_load);
-				} else {
-					++failures;
-					L->warn("Failed to update feature load for {}: {}", key, result.error);
-				}
+			if (settings.Theme.ShowFooter) {
+				ImGui::Spacing();
+				ImGui::SeparatorEx(ImGuiSeparatorFlags_Horizontal, ThemeManager::Constants::SEPARATOR_THICKNESS);
+				ImGui::Spacing();
+				DrawFooter();
 			}
 
-			if (failures == 0) {
-				ShowToast(a_load
-					? "All visible features will load on next restart."
-					: "All visible features will not load on next restart.");
-			} else {
-				ShowToast(
-					std::to_string(failures) + " of " + std::to_string(attempted) +
-					" feature load settings failed to update.");
-			}
-		};
-
-		ImGui::Spacing();
-		if (ImGui::Button("Load all"))
-			setVisibleFeatureLoads(true);
-		ImGui::SameLine();
-		if (ImGui::Button("Unload all"))
-			setVisibleFeatureLoads(false);
-		ImGui::Spacing();
-
-		const ImGuiTableFlags tableFlags =
-			ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_BordersInnerV |
-			ImGuiTableFlags_Resizable | ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp;
-		if (ImGui::BeginTable("##feature_status", 4, tableFlags)) {
-			ImGui::TableSetupColumn(
-				"Load",
-				ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHide,
-				70.0f * _fontScale);
-			ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch, 0.30f);
-			ImGui::TableSetupColumn("Category", ImGuiTableColumnFlags_WidthStretch, 0.25f);
-			ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthStretch, 0.45f);
-			ImGui::TableHeadersRow();
-
-			for (const auto& entry : a_features) {
-				if (!_developerMode && entry.category == FeatureCategories::kDevTools)
-					continue;
-
-				auto& feature = *entry.feature;
-				const auto name = feature.GetName();
-				const std::string key = feature.GetConfigKey();
-				const auto status = GetFeatureStatusPresentation(feature);
-				const auto desiredIt = _featureLoadDesired.find(key);
-				const bool previousDesired = desiredIt != _featureLoadDesired.end() && desiredIt->second;
-				bool desired = previousDesired;
-
-				ImGui::TableNextRow();
-				ImGui::TableSetColumnIndex(0);
-				ImGui::PushID(key.c_str());
-				if (ImGui::Checkbox("##load", &desired)) {
-					const auto result = feature_config::UpdateFeatureLoad(key, desired);
-					if (result) {
-						_featureLoadDesired.insert_or_assign(key, desired);
-						ShowToast(std::string(name) + (desired
-							? " will load on next restart."
-							: " will not load on next restart."));
-					} else {
-						desired = previousDesired;
-						_featureLoadDesired.insert_or_assign(key, previousDesired);
-						ShowToast("Failed to update load setting.");
-						L->warn("Failed to update feature load for {}: {}", key, result.error);
-					}
-				}
-				ImGui::PopID();
-				ImGui::TableSetColumnIndex(1);
-				ImGui::TextUnformatted(name.data(), name.data() + name.size());
-				ImGui::TableSetColumnIndex(2);
-				ImGui::TextUnformatted(entry.category.c_str());
-				ImGui::TableSetColumnIndex(3);
-				ImGui::TextColored(status.color, "%.*s",
-					static_cast<int>(status.label.size()), status.label.data());
-
-				const auto& detail = feature.GetState().detail;
-				if (!detail.empty() && ImGui::IsItemHovered(ImGuiHoveredFlags_DelayNormal)) {
-					ImGui::SetTooltip("%.*s",
-						static_cast<int>(std::min<std::size_t>(detail.size(), 512)), detail.data());
-				}
-				if (desired != IsFeatureLoadedThisSession(feature)) {
-					ImGui::SameLine();
-					ImGui::TextColored(cs::theme::colors::kWarning, "(restart to apply)");
-				}
-			}
-			ImGui::EndTable();
+			MenuHeaderRenderer::DrawGlobalPopups();
+			HomePageRenderer::RenderFirstTimeSetupDialog();
 		}
-	}
-
-	void Menu::DrawSettingsPage()
-	{
-		DrawPanelTitle("Settings");
-		ImGui::Spacing();
-		DrawSectionLabel("Interface");
-		ImGui::SliderFloat("Font scale", &_fontScale, 0.5f, 3.0f, "%.2fx");
-		if (ImGui::Button("Reset to 1.0x"))
-			_fontScale = 1.0f;
-		ImGui::SameLine();
-		if (ImGui::Button("Reset to 1.5x"))
-			_fontScale = 1.5f;
-
-		ImGui::Spacing();
-		DrawSectionLabel("Backdrop");
-		bool frostEnabled = _frostEnabled;
-		if (ImGui::Checkbox("Background blur", &frostEnabled)) {
-			const bool previous = _frostEnabled;
-			_frostEnabled = frostEnabled;
-			if (!SaveSettings()) {
-				_frostEnabled = previous;
-				ShowToast("Background blur setting could not be saved.");
-			}
-		}
-		ImGui::BeginDisabled(!_frostEnabled);
-		float frostIntensity = _frostIntensity;
-		if (ImGui::SliderFloat("Blur intensity", &frostIntensity, 0.25f, 2.0f, "%.2fx")) {
-			const float previous = _frostIntensity;
-			_frostIntensity = frostIntensity;
-			if (!SaveSettings()) {
-				_frostIntensity = previous;
-				ShowToast("Blur intensity could not be saved.");
-			}
-		}
-		ImGui::EndDisabled();
-	}
-
-	void Menu::DrawAdvancedPage()
-	{
-		DrawPanelTitle("Advanced");
-		ImGui::Spacing();
-
-		DrawSectionLabel("Logging");
-		static const char* kLevelNames[] = { "Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off" };
-		static const spdlog::level::level_enum kLevels[] = {
-			spdlog::level::trace, spdlog::level::debug, spdlog::level::info,
-			spdlog::level::warn, spdlog::level::err, spdlog::level::critical, spdlog::level::off
-		};
-		if (_loggingLevelIdx < 0)
-			_loggingLevelIdx = static_cast<int>(cs::log::GlobalLevel());
-		bool loggingChanged = false;
-		if (ImGui::Combo("Global level", &_loggingLevelIdx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
-			cs::log::SetGlobalLevel(kLevels[_loggingLevelIdx]);
-			loggingChanged = true;
-		}
-		if (ImGui::TreeNode("Per-logger overrides")) {
-			_cachedLoggers = cs::log::ListLoggers();
-			for (const auto& name : _cachedLoggers) {
-				ImGui::PushID(name.c_str());
-				auto logger = spdlog::get(name);
-				int idx = logger ? static_cast<int>(logger->level()) : _loggingLevelIdx;
-				if (ImGui::Combo(name.c_str(), &idx, kLevelNames, IM_ARRAYSIZE(kLevelNames))) {
-					cs::log::SetLevel(name.c_str(), kLevels[idx]);
-					loggingChanged = true;
-				}
-				ImGui::PopID();
-			}
-			ImGui::TreePop();
-		}
-
-		DrawSectionLabel("Telemetry");
-		bool telemetryEnabled = cs::telemetry::pump::Enabled();
-		if (ImGui::Checkbox("Telemetry heartbeat", &telemetryEnabled)) {
-			cs::telemetry::pump::SetEnabled(telemetryEnabled);
-			loggingChanged = true;
-		}
-		int telemetryInterval = static_cast<int>(cs::telemetry::pump::IntervalFrames());
-		if (ImGui::SliderInt("Telemetry interval (frames)", &telemetryInterval, 1, 600)) {
-			cs::telemetry::pump::SetIntervalFrames(static_cast<std::uint32_t>(telemetryInterval));
-			loggingChanged = true;
-		}
-		if (ImGui::Button("Dump state now"))
-			cs::telemetry::pump::DumpAll();
-		if (loggingChanged)
-			cs::log::SaveConfigToToml();
-
-		DrawSectionLabel("Developer");
-		DrawSubtext("Show developer tools such as RenderDoc.");
-		bool developerMode = _developerMode;
-		if (ImGui::Checkbox("Developer mode", &developerMode)) {
-			const bool previousMode = _developerMode;
-			_developerMode = developerMode;
-			if (!SaveSettings()) {
-				_developerMode = previousMode;
-				ShowToast("Developer mode could not be saved.");
-			}
-		}
-	}
-
-	void Menu::DrawDefaultUI()
-	{
-		char title[64];
-		std::snprintf(title, sizeof(title), "FO4 Community Shaders v%u.%u.%u",
-			Plugin::VERSION[0], Plugin::VERSION[1], Plugin::VERSION[2]);
-		if (!_open) {
-			auto* context = ImGui::GetCurrentContext();
-			if (context && !context->OpenPopupStack.empty())
-				ImGui::ClosePopupToLevel(0, true);
-		}
-		const ImGuiWindowFlags hostFlags = _open ? ImGuiWindowFlags_None :
-			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
-			ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoFocusOnAppearing |
-			ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoNav |
-			ImGuiWindowFlags_NoDocking;
-		const bool windowVisible = ImGui::Begin(title, nullptr, hostFlags);
-		if (_open && _frostEnabled && _frostSRV && _backbufferW > 0 && _backbufferH > 0) {
-			const ImVec2 wpos = ImGui::GetWindowPos();
-			const ImVec2 wsize = ImGui::GetWindowSize();
-			const ImVec2 wmax(wpos.x + wsize.x, wpos.y + wsize.y);
-			const float backbufferW = static_cast<float>(_backbufferW);
-			const float backbufferH = static_cast<float>(_backbufferH);
-			const ImVec2 uv0(wpos.x / backbufferW, wpos.y / backbufferH);
-			const ImVec2 uv1(wmax.x / backbufferW, wmax.y / backbufferH);
-			ImGui::GetBackgroundDrawList()->AddImageRounded(
-				reinterpret_cast<ImTextureID>(_frostSRV),
-				wpos,
-				wmax,
-				uv0,
-				uv1,
-				IM_COL32_WHITE,
-				ImGui::GetStyle().WindowRounding);
-		}
-		const bool drawContents = windowVisible && _open;
-		auto& featureManager = FeatureManager::Get();
-		if (drawContents) {
-			std::map<std::string, std::vector<Feature*>> featuresByCategory;
-			std::vector<FeatureListEntry> features;
-			for (auto* feat : featureManager.GetRegisteredFeatures()) {
-				if (!feat)
-					continue;
-
-				bool includeFeature = true;
-				try {
-					includeFeature = feat->IsInMenu();
-				} catch (const std::exception& e) {
-					featureManager.QuarantineRuntimeCallback(*feat, "Menu::IsInMenu", e.what());
-				} catch (...) {
-					featureManager.QuarantineRuntimeCallback(
-						*feat,
-						"Menu::IsInMenu",
-						"non-standard exception");
-				}
-				if (!includeFeature)
-					continue;
-
-				std::string category = FeatureCategories::kMisc;
-				try {
-					auto reported = feat->GetCategory();
-					if (!reported.empty())
-						category = std::move(reported);
-				} catch (const std::exception& e) {
-					featureManager.QuarantineRuntimeCallback(*feat, "Menu::GetCategory", e.what());
-				} catch (...) {
-					featureManager.QuarantineRuntimeCallback(
-						*feat,
-						"Menu::GetCategory",
-						"non-standard exception");
-				}
-				featuresByCategory[category].push_back(feat);
-				features.push_back({ feat, std::move(category) });
-			}
-
-			std::vector<std::string> categories;
-			categories.reserve(featuresByCategory.size());
-			for (const auto& entry : featuresByCategory)
-				categories.push_back(entry.first);
-			std::sort(categories.begin(), categories.end(), FeatureCategoryLess);
-
-			const bool selectedFeatureVisible = _selectedFeature == nullptr ||
-				std::ranges::any_of(features, [this](const auto& entry) {
-					return entry.feature == _selectedFeature &&
-						(_developerMode || entry.category != FeatureCategories::kDevTools);
-				});
-			if (!selectedFeatureVisible) {
-				_selectedFeature = nullptr;
-				_selectedPage = BuiltInPage::kOverview;
-			}
-
-			const ImGuiTableFlags layoutFlags =
-				ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_Resizable |
-				ImGuiTableFlags_SizingStretchProp;
-			if (ImGui::BeginTable(
-					"##menu_layout",
-					2,
-					layoutFlags,
-					ImVec2(0.0f, ImGui::GetContentRegionAvail().y))) {
-				ImGui::TableSetupColumn(
-					"Navigation",
-					ImGuiTableColumnFlags_WidthFixed | ImGuiTableColumnFlags_NoHide,
-					200.0f * _fontScale);
-				ImGui::TableSetupColumn(
-					"Details",
-					ImGuiTableColumnFlags_WidthStretch | ImGuiTableColumnFlags_NoHide);
-				ImGui::TableNextRow();
-
-				ImGui::TableSetColumnIndex(0);
-				const bool drawSidebar = ImGui::BeginChild("##menu_sidebar");
-				if (drawSidebar) {
-					const auto drawPageLink = [this](const char* a_label, BuiltInPage a_page) {
-						const bool selected = _selectedFeature == nullptr && _selectedPage == a_page;
-						if (ImGui::Selectable(a_label, selected)) {
-							_selectedPage = a_page;
-							_selectedFeature = nullptr;
-						}
-					};
-
-					drawPageLink("Overview", BuiltInPage::kOverview);
-					drawPageLink("Settings", BuiltInPage::kSettings);
-					drawPageLink("Advanced", BuiltInPage::kAdvanced);
-					ImGui::Separator();
-					drawPageLink("Presets", BuiltInPage::kPresets);
-					ImGui::Separator();
-
-					{
-						ScopedFont headingFont(theme::GetFonts().Heading);
-						ImGui::TextUnformatted("Features");
-					}
-					ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-					ImGui::InputTextWithHint(
-						"##feature_search",
-						"Search features...",
-						_featureSearch.data(),
-						_featureSearch.size());
-
-					const std::string_view search(_featureSearch.data());
-					for (const auto& category : categories) {
-						if (!_developerMode && category == FeatureCategories::kDevTools)
-							continue;
-
-						const auto& categoryFeatures = featuresByCategory.at(category);
-						const bool hasMatch = std::ranges::any_of(categoryFeatures, [search](const Feature* a_feature) {
-							return MatchesSearch(a_feature->GetName(), search);
-						});
-						if (!hasMatch)
-							continue;
-
-						ImGui::PushID(category.c_str());
-						bool categoryOpen = false;
-						{
-							ScopedFont headingFont(theme::GetFonts().Heading);
-							categoryOpen = ImGui::TreeNodeEx(
-								"##category",
-								ImGuiTreeNodeFlags_SpanAvailWidth,
-								"%s",
-								category.c_str());
-						}
-						if (categoryOpen) {
-							for (auto* feature : categoryFeatures) {
-								const auto name = feature->GetName();
-								if (!MatchesSearch(name, search))
-									continue;
-
-								const std::string label(name);
-								ImGui::PushID(feature);
-								const bool selected = _selectedFeature == feature;
-								if (ImGui::Selectable(label.c_str(), selected)) {
-									_selectedFeature = feature;
-								}
-								ImGui::PopID();
-							}
-							ImGui::TreePop();
-						}
-						ImGui::PopID();
-					}
-				}
-				ImGui::EndChild();
-
-				ImGui::TableSetColumnIndex(1);
-				const bool drawDetails = ImGui::BeginChild("##menu_details");
-				if (drawDetails) {
-					if (_selectedFeature) {
-						DrawFeaturePanel(*_selectedFeature, featureManager);
-					} else {
-						switch (_selectedPage) {
-						case BuiltInPage::kOverview:
-							DrawOverviewPage(features);
-							break;
-						case BuiltInPage::kSettings:
-							DrawSettingsPage();
-							break;
-						case BuiltInPage::kAdvanced:
-							DrawAdvancedPage();
-							break;
-						case BuiltInPage::kPresets:
-							DrawPanelTitle("Presets");
-							ImGui::Spacing();
-							DrawPresetsUI();
-							break;
-						}
-					}
-				}
-				for (auto* feat : featureManager.GetRegisteredFeatures()) {
-					if (feat)
-						ServiceFeatureResetPopup(*feat, featureManager, _open);
-				}
-				ImGui::EndChild();
-				ImGui::EndTable();
-			}
-		}
-
-		featureManager.FinishRuntimeCallbackPass();
 		ImGui::End();
 	}
 
-	void Menu::DrawPresetsUI()
+	void Menu::DrawGeneralSettings()
 	{
-		auto& pm = PresetManager::Get();
-		const auto& presets = pm.List();
+		SettingsTabRenderer::SettingsState state{
+			.settingToggleKey = settingToggleKey,
+			.settingOverlayToggleKey = settingOverlayToggleKey,
+			.keybindingWidgetsActive = keybindingWidgetsActive
+		};
 
-		if (pm.activeIdentity.empty()) {
-			ImGui::TextDisabled("Active: (none)");
-		} else {
-			const bool  builtin = pm.activeIdentity[0] == 'b';
-			const auto* active  = pm.FindByIdentity(pm.activeIdentity);
-			if (active) {
-				ImGui::Text("Active: %s (%s)", pm.activeName.c_str(), builtin ? "builtin" : "user");
-			} else {
-				ImGui::TextColored(ImVec4(1, 0.7f, 0.4f, 1), "Active: %s (missing)",
-					pm.activeName.empty() ? pm.activeIdentity.c_str() : pm.activeName.c_str());
+		SettingsTabRenderer::RenderGeneralSettings(state);
+	}
+
+	void Menu::DrawAdvancedSettings()
+	{
+		AdvancedSettingsRenderer::RenderAdvancedSettings([this]() { DrawDisableAtBootSettings(); });
+	}
+
+	void Menu::DrawDisableAtBootSettings()
+	{
+		auto featureList = FeatureManager::Get().GetRegisteredFeatures();
+		std::sort(featureList.begin(), featureList.end(), [](const Feature* a_lhs, const Feature* a_rhs) {
+			return a_lhs->GetDisplayName() < a_rhs->GetDisplayName();
+		});
+
+		if (!ImGui::CollapsingHeader("Features", ImGuiTreeNodeFlags_DefaultOpen))
+			return;
+
+		for (Feature* feature : featureList) {
+			if (!feature || !feature->IsInMenu())
+				continue;
+
+			bool disabled = IsFeatureDisabledAtBoot(*feature);
+			if (ImGui::Checkbox(std::string(feature->GetDisplayName()).c_str(), &disabled)) {
+				SetFeatureLoadAtBoot(*feature, !disabled);
 			}
 		}
-		if (!pm.lastError.empty()) {
-			ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", pm.lastError.c_str());
-		}
+	}
 
-		std::string pendingLabel;
-		if (pm.pendingComboIdentity.empty() && !presets.empty()) {
-			pm.pendingComboIdentity = presets.front().identity;
-		}
-		if (const auto* sel = pm.FindByIdentity(pm.pendingComboIdentity)) {
-			pendingLabel.assign(sel->builtin ? "B: " : "U: ");
-			pendingLabel.append(sel->name);
-		} else if (!presets.empty()) {
-			pm.pendingComboIdentity = presets.front().identity;
-			pendingLabel.assign(presets.front().builtin ? "B: " : "U: ");
-			pendingLabel.append(presets.front().name);
-		} else {
-			pendingLabel = "(no presets found)";
-		}
-
-		ImGui::BeginDisabled(presets.empty());
-		if (ImGui::BeginCombo("Preset", pendingLabel.c_str())) {
-			for (const auto& meta : presets) {
-				std::string label = meta.builtin ? "B: " : "U: ";
-				label.append(meta.name);
-				const bool selected = (meta.identity == pm.pendingComboIdentity);
-				if (ImGui::Selectable(label.c_str(), selected)) {
-					pm.pendingComboIdentity = meta.identity;
-				}
-				if (selected) ImGui::SetItemDefaultFocus();
-			}
-			ImGui::EndCombo();
-		}
-		ImGui::EndDisabled();
-
-		const auto* pending = pm.FindByIdentity(pm.pendingComboIdentity);
-		const auto* active  = pm.FindByIdentity(pm.activeIdentity);
-		const bool  canSave = active && !active->builtin;
-		const bool  canDel  = active && !active->builtin;
-
-		ImGui::BeginDisabled(!pending);
-		if (ImGui::Button("Load")) {
-			std::string err;
-			if (!pm.Apply(*pending, err)) {
-				pm.lastError = "Load failed: " + err;
-			} else {
-				pm.lastError.clear();
-			}
-		}
-		ImGui::EndDisabled();
-
+	void Menu::DrawFooter()
+	{
+		ImGui::BulletText("Plugin: %s", ui::GetFormattedVersion().c_str());
 		ImGui::SameLine();
-		ImGui::BeginDisabled(!canSave);
-		if (ImGui::Button("Save")) {
-			std::string err;
-			if (pm.Save(active->path, active->name, err, true)) {
-				const std::string savedName = active->name;
-				pm.Refresh();
-				if (const auto* re = pm.FindByName(savedName, true)) {
-					pm.activeIdentity       = re->identity;
-					pm.activeName           = re->name;
-					pm.pendingComboIdentity = re->identity;
-				}
-				pm.lastError.clear();
-			} else {
-				pm.lastError = "Save failed: " + err;
-			}
-		}
-		ImGui::EndDisabled();
-
+		ImGui::BulletText("Build: %s", CS_BUILD_DESCRIBE);
 		ImGui::SameLine();
-		if (ImGui::Button("Save As...")) {
-			pm.saveAsBuf[0] = '\0';
-			ImGui::OpenPopup("Save As Preset");
-		}
+		ImGui::BulletText("GPU: %s", _adapterDescription.c_str());
+	}
 
-		ImGui::SameLine();
-		ImGui::BeginDisabled(!canDel);
-		if (ImGui::Button("Delete")) {
-			ImGui::OpenPopup("Delete Preset?");
-		}
-		ImGui::EndDisabled();
-
-		ImGui::SameLine();
-		if (ImGui::Button("Refresh")) {
-			pm.Refresh();
-			if (!pm.FindByIdentity(pm.pendingComboIdentity)) {
-				pm.pendingComboIdentity.clear();
-			}
-			pm.lastError.clear();
-		}
-
-		if (ImGui::Checkbox("Auto-load this preset on boot", &pm.autoLoadOnBoot)) {
-			pm.SaveCoreConfig();
-		}
-		ImGui::SetItemTooltip("On next plugin load, the active preset is reapplied across every participating feature. Overridden by the .cs_force_preset marker.");
-
-		if (ImGui::BeginPopupModal("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::InputText("Name", pm.saveAsBuf, sizeof(pm.saveAsBuf));
-			ImGui::TextDisabled("Letters, digits, underscore, hyphen. 1-64 chars.");
-			if (ImGui::Button("Save", ImVec2(120, 0))) {
-				std::string err;
-				std::string name(pm.saveAsBuf);
-				if (!ValidatePresetName(name, pm.List(), err)) {
-					pm.lastError = "Invalid name: " + err;
-				} else {
-					const std::filesystem::path dst =
-						std::filesystem::path("Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets") /
-						(name + ".toml");
-					if (pm.Save(dst, name, err)) {
-						pm.Refresh();
-						if (const auto* re = pm.FindByName(name, true)) {
-							pm.activeIdentity       = re->identity;
-							pm.activeName           = re->name;
-							pm.pendingComboIdentity = re->identity;
-							pm.SaveCoreConfig();
-						}
-						pm.lastError.clear();
-						ImGui::CloseCurrentPopup();
-					} else {
-						pm.lastError = "Save failed: " + err;
-					}
-				}
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
-
-		if (ImGui::BeginPopupModal("Delete Preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-			ImGui::Text("Delete preset '%s'?", active ? active->name.c_str() : "");
-			ImGui::TextDisabled("File is removed from disk. This cannot be undone.");
-			if (ImGui::Button("Delete", ImVec2(120, 0))) {
-				std::string err;
-				if (active && pm.Delete(*active, err)) {
-					pm.Refresh();
-					pm.activeIdentity.clear();
-					pm.activeName.clear();
-					pm.pendingComboIdentity.clear();
-					pm.autoLoadOnBoot = false;
-					pm.SaveCoreConfig();
-					pm.lastError.clear();
-				} else {
-					pm.lastError = "Delete failed: " + err;
-				}
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::SameLine();
-			if (ImGui::Button("Cancel", ImVec2(120, 0))) {
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::EndPopup();
-		}
+	void Menu::DrawOverlay()
+	{
+		OverlayRenderer::RenderOverlay();
 	}
 
 	void Menu::Toggle()
 	{
-		_open = !_open;
-		if (_open) {
-			// Input thread only sets the render-thread refresh flag.
-			_featureLoadDirty = true;
+		bool current = _isOpenSnapshot.load(std::memory_order_acquire);
+		while (!_isOpenSnapshot.compare_exchange_weak(
+			current,
+			!current,
+			std::memory_order_acq_rel,
+			std::memory_order_acquire)) {
 		}
-		ImGui::GetIO().ClearInputKeys();
+		const bool requested = !current;
+		_pendingMenuOpen.store(requested ? 1 : 0, std::memory_order_release);
+	}
+
+	void Menu::ToggleOverlay() noexcept
+	{
+		bool current = _overlayVisibleSnapshot.load(std::memory_order_acquire);
+		while (!_overlayVisibleSnapshot.compare_exchange_weak(
+			current,
+			!current,
+			std::memory_order_acq_rel,
+			std::memory_order_acquire)) {
+		}
+		const bool requested = !current;
+		_pendingOverlayVisible.store(requested ? 1 : 0, std::memory_order_release);
 	}
 
 	HRESULT WINAPI Menu::hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags)
@@ -2099,7 +970,7 @@ namespace cs
 
 	LRESULT CALLBACK Menu::hkWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
 	{
-		auto& m = Menu::Get();
+		auto& menu = Menu::Get();
 		static cs::input::Hotkey consumedDumpHotkey;
 
 		if (consumedDumpHotkey.MatchesUp(a_msg, a_wparam)) {
@@ -2114,41 +985,76 @@ namespace cs
 			return 0;
 		}
 
-		// Always consume END so the game never sees it.
-		if (a_msg == WM_KEYDOWN && a_wparam == VK_END && (HIWORD(a_lparam) & KF_REPEAT) == 0) {
-			m.Toggle();
+		if (a_msg == WM_SETFOCUS || a_msg == WM_KILLFOCUS)
+			menu.focusChanged = true;
+
+		const bool captureActive =
+			menu.IsOpen() && menu.keybindingWidgetsActive.load(std::memory_order_acquire);
+		const bool recordingToggle =
+			captureActive && menu.settingToggleKey.load(std::memory_order_acquire);
+		const bool recordingOverlay =
+			captureActive && menu.settingOverlayToggleKey.load(std::memory_order_acquire);
+		if ((recordingToggle || recordingOverlay) && (a_msg == WM_KEYDOWN || a_msg == WM_SYSKEYDOWN)) {
+			if ((HIWORD(a_lparam) & KF_REPEAT) != 0)
+				return 0;
+
+			const auto key = static_cast<std::uint32_t>(a_wparam);
+			if (key == VK_ESCAPE) {
+				menu.settingToggleKey.store(false, std::memory_order_release);
+				menu.settingOverlayToggleKey.store(false, std::memory_order_release);
+				return 0;
+			}
+			if (IsModifierKey(key))
+				return 0;
+
+			const auto target = recordingToggle ? KeyBindingTarget::ToggleMenu : KeyBindingTarget::ToggleOverlay;
+			menu.settingToggleKey.store(false, std::memory_order_release);
+			menu.settingOverlayToggleKey.store(false, std::memory_order_release);
+			menu._pendingKeyBinding.store(CaptureKeyboardHotkey(key), std::memory_order_release);
+			menu._pendingKeyBindingTarget.store(target, std::memory_order_release);
 			return 0;
 		}
 
-		auto& featureManager = FeatureManager::Get();
-		for (const auto& entry : m._wndProcCallbacks) {
-			if (!entry.owner || !entry.callback
-				|| !featureManager.PrepareRuntimeCallback(*entry.owner, "Menu::WndProc")) {
+		// The menu toggle is always consumed so the game never sees it.
+		if ((a_msg == WM_KEYDOWN || a_msg == WM_SYSKEYDOWN) && (HIWORD(a_lparam) & KF_REPEAT) == 0 &&
+			MatchesKeyboardHotkey(menu._toggleHotkey.load(std::memory_order_acquire), static_cast<std::uint32_t>(a_wparam))) {
+			menu.Toggle();
+			return 0;
+		}
+
+		for (auto& entry : menu._wndProcCallbacks) {
+			if (!entry.owner || !entry.callback || entry.disabled.load(std::memory_order_acquire))
 				continue;
-			}
 
 			try {
-				if (entry.callback(a_hwnd, a_msg, a_wparam, a_lparam)) {
-					featureManager.FinishRuntimeCallbackPass();
+				if (entry.callback(a_hwnd, a_msg, a_wparam, a_lparam))
 					return 0;
-				}
-			} catch (const std::exception& e) {
-				featureManager.QuarantineRuntimeCallback(*entry.owner, "Menu::WndProc", e.what());
+			} catch (const std::exception&) {
+				entry.disabled.store(true, std::memory_order_release);
+				entry.pendingFailure.store(
+					WndProcCallbackEntry::FailureKind::StandardException,
+					std::memory_order_release);
 			} catch (...) {
-				featureManager.QuarantineRuntimeCallback(
-					*entry.owner,
-					"Menu::WndProc",
-					"non-standard exception");
+				entry.disabled.store(true, std::memory_order_release);
+				entry.pendingFailure.store(
+					WndProcCallbackEntry::FailureKind::UnknownException,
+					std::memory_order_release);
 			}
 		}
-		featureManager.FinishRuntimeCallbackPass();
+
+		// Features may own the overlay hotkey instead.
+		if ((a_msg == WM_KEYDOWN || a_msg == WM_SYSKEYDOWN) && (HIWORD(a_lparam) & KF_REPEAT) == 0 &&
+			MatchesKeyboardHotkey(menu._overlayHotkey.load(std::memory_order_acquire), static_cast<std::uint32_t>(a_wparam))) {
+			menu.ToggleOverlay();
+			return 0;
+		}
 
 		// ImGui needs input while widgets are active.
-		if (m._imguiInited)
+		if (menu._imguiInited)
 			ImGui_ImplWin32_WndProcHandler(a_hwnd, a_msg, a_wparam, a_lparam);
 
 		// Open menus consume input after hotkeys and ImGui.
-		if (m._open && m._imguiInited) {
+		if (menu.IsOpen() && menu._imguiInited) {
 			const bool isMouse =
 				a_msg == WM_MOUSEMOVE || a_msg == WM_LBUTTONDOWN || a_msg == WM_LBUTTONUP ||
 				a_msg == WM_RBUTTONDOWN || a_msg == WM_RBUTTONUP ||
@@ -2164,6 +1070,520 @@ namespace cs
 				return 0;
 		}
 
-		return CallWindowProcW(m._origWndProc, a_hwnd, a_msg, a_wparam, a_lparam);
+		return CallWindowProcW(menu._origWndProc, a_hwnd, a_msg, a_wparam, a_lparam);
+	}
+
+	void Menu::PaletteToToml(toml::table& a_theme, const std::array<ImVec4, ImGuiCol_COUNT>& a_palette)
+	{
+		toml::table colors;
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
+			const char* name = ImGui::GetStyleColorName(i);
+			if (!name)
+				continue;
+			PushColorToToml(colors, name, a_palette[static_cast<std::size_t>(i)]);
+		}
+		a_theme.insert_or_assign("colors", std::move(colors));
+	}
+
+	void Menu::PaletteFromToml(const toml::table& a_theme, std::array<ImVec4, ImGuiCol_COUNT>& a_palette)
+	{
+		const auto* colors = a_theme["colors"].as_table();
+		if (!colors)
+			return;
+
+		for (int i = 0; i < ImGuiCol_COUNT; ++i) {
+			const char* name = ImGui::GetStyleColorName(i);
+			if (!name)
+				continue;
+			ReadColorFromToml(*colors, name, a_palette[static_cast<std::size_t>(i)]);
+		}
+	}
+
+	void Menu::CursorToToml(toml::table& a_cursor, const ThemeSettings::CursorSettings& a_settings)
+	{
+		a_cursor.insert_or_assign("scale", a_settings.Scale);
+
+		// Serialize every cursor type so defaults can be cleared.
+		toml::table types;
+		for (int i = 0; i < ImGuiMouseCursor_COUNT; ++i) {
+			const auto& image = a_settings.Types[static_cast<std::size_t>(i)];
+
+			toml::table entry;
+			entry.insert_or_assign("file", image.File);
+			entry.insert_or_assign("hotspot_x", image.HotspotX);
+			entry.insert_or_assign("hotspot_y", image.HotspotY);
+			types.insert_or_assign(std::to_string(i), std::move(entry));
+		}
+		a_cursor.insert_or_assign("types", std::move(types));
+	}
+
+	void Menu::CursorFromToml(const toml::table& a_cursor, ThemeSettings::CursorSettings& a_settings)
+	{
+		ReadFloatFromToml(a_cursor, "scale", a_settings.Scale);
+
+		const auto* types = a_cursor["types"].as_table();
+		if (!types)
+			return;
+
+		for (int i = 0; i < ImGuiMouseCursor_COUNT; ++i) {
+			const auto* entry = types->get(std::to_string(i));
+			if (!entry || !entry->is_table())
+				continue;
+
+			auto& image = a_settings.Types[static_cast<std::size_t>(i)];
+			const auto& table = *entry->as_table();
+			ReadStringFromToml(table, "file", image.File);
+			ReadFloatFromToml(table, "hotspot_x", image.HotspotX);
+			ReadFloatFromToml(table, "hotspot_y", image.HotspotY);
+		}
+	}
+
+	void Menu::ThemeToToml(const ThemeSettings& a_settings, toml::table& a_out)
+	{
+		a_out.insert_or_assign("font_size", a_settings.FontSize);
+		a_out.insert_or_assign("font_name", a_settings.FontName);
+		a_out.insert_or_assign("global_scale", a_settings.GlobalScale);
+		a_out.insert_or_assign("show_action_icons", a_settings.ShowActionIcons);
+		a_out.insert_or_assign("use_monochrome_icons", a_settings.UseMonochromeIcons);
+		a_out.insert_or_assign("show_footer", a_settings.ShowFooter);
+		a_out.insert_or_assign("center_header", a_settings.CenterHeader);
+		a_out.insert_or_assign("tooltip_hover_delay", a_settings.TooltipHoverDelay);
+		a_out.insert_or_assign("background_blur_enabled", a_settings.BackgroundBlurEnabled);
+		a_out.insert_or_assign("use_custom_cursor", a_settings.UseCustomCursor);
+
+		toml::table fontRoles;
+		for (std::size_t i = 0; i < static_cast<std::size_t>(FontRole::Count); ++i) {
+			const auto& role = a_settings.FontRoles[i];
+			toml::table entry;
+			entry.insert_or_assign("family", role.Family);
+			entry.insert_or_assign("style", role.Style);
+			entry.insert_or_assign("file", role.File);
+			entry.insert_or_assign("size_scale", role.SizeScale);
+			fontRoles.insert_or_assign(GetFontRoleKey(static_cast<FontRole>(i)), std::move(entry));
+		}
+		a_out.insert_or_assign("font_roles", std::move(fontRoles));
+
+		toml::table cursor;
+		CursorToToml(cursor, a_settings.Cursor);
+		a_out.insert_or_assign("cursor", std::move(cursor));
+
+		toml::table scrollbar;
+		scrollbar.insert_or_assign("background", a_settings.ScrollbarOpacity.Background);
+		scrollbar.insert_or_assign("thumb", a_settings.ScrollbarOpacity.Thumb);
+		scrollbar.insert_or_assign("thumb_hovered", a_settings.ScrollbarOpacity.ThumbHovered);
+		scrollbar.insert_or_assign("thumb_active", a_settings.ScrollbarOpacity.ThumbActive);
+		a_out.insert_or_assign("scrollbar_opacity", std::move(scrollbar));
+
+		toml::table statusPalette;
+		PushColorToToml(statusPalette, "disable", a_settings.StatusPalette.Disable);
+		PushColorToToml(statusPalette, "error", a_settings.StatusPalette.Error);
+		PushColorToToml(statusPalette, "warning", a_settings.StatusPalette.Warning);
+		PushColorToToml(statusPalette, "restart_needed", a_settings.StatusPalette.RestartNeeded);
+		PushColorToToml(statusPalette, "current_hotkey", a_settings.StatusPalette.CurrentHotkey);
+		PushColorToToml(statusPalette, "success", a_settings.StatusPalette.SuccessColor);
+		PushColorToToml(statusPalette, "info", a_settings.StatusPalette.InfoColor);
+		a_out.insert_or_assign("status_palette", std::move(statusPalette));
+
+		toml::table featureHeading;
+		PushColorToToml(featureHeading, "color_default", a_settings.FeatureHeading.ColorDefault);
+		PushColorToToml(featureHeading, "color_hovered", a_settings.FeatureHeading.ColorHovered);
+		featureHeading.insert_or_assign("minimized_factor", a_settings.FeatureHeading.MinimizedFactor);
+		featureHeading.insert_or_assign("feature_title_scale", a_settings.FeatureHeading.FeatureTitleScale);
+		a_out.insert_or_assign("feature_heading", std::move(featureHeading));
+
+		toml::table style;
+		PushVec2ToToml(style, "window_padding", a_settings.Style.WindowPadding);
+		PushVec2ToToml(style, "frame_padding", a_settings.Style.FramePadding);
+		PushVec2ToToml(style, "item_spacing", a_settings.Style.ItemSpacing);
+		PushVec2ToToml(style, "cell_padding", a_settings.Style.CellPadding);
+		style.insert_or_assign("window_rounding", a_settings.Style.WindowRounding);
+		style.insert_or_assign("window_border_size", a_settings.Style.WindowBorderSize);
+		style.insert_or_assign("child_border_size", a_settings.Style.ChildBorderSize);
+		style.insert_or_assign("popup_border_size", a_settings.Style.PopupBorderSize);
+		style.insert_or_assign("frame_border_size", a_settings.Style.FrameBorderSize);
+		style.insert_or_assign("frame_rounding", a_settings.Style.FrameRounding);
+		style.insert_or_assign("tab_rounding", a_settings.Style.TabRounding);
+		style.insert_or_assign("scrollbar_rounding", a_settings.Style.ScrollbarRounding);
+		style.insert_or_assign("scrollbar_size", a_settings.Style.ScrollbarSize);
+		style.insert_or_assign("grab_rounding", a_settings.Style.GrabRounding);
+		style.insert_or_assign("grab_min_size", a_settings.Style.GrabMinSize);
+		style.insert_or_assign("indent_spacing", a_settings.Style.IndentSpacing);
+		a_out.insert_or_assign("style", std::move(style));
+
+		PaletteToToml(a_out, a_settings.FullPalette);
+	}
+
+	void Menu::ThemeFromToml(const toml::table& a_in, ThemeSettings& a_out)
+	{
+		ReadFloatFromToml(a_in, "font_size", a_out.FontSize);
+		ReadStringFromToml(a_in, "font_name", a_out.FontName);
+		ReadFloatFromToml(a_in, "global_scale", a_out.GlobalScale);
+		ReadBoolFromToml(a_in, "show_action_icons", a_out.ShowActionIcons);
+		ReadBoolFromToml(a_in, "use_monochrome_icons", a_out.UseMonochromeIcons);
+		ReadBoolFromToml(a_in, "show_footer", a_out.ShowFooter);
+		ReadBoolFromToml(a_in, "center_header", a_out.CenterHeader);
+		ReadFloatFromToml(a_in, "tooltip_hover_delay", a_out.TooltipHoverDelay);
+		ReadBoolFromToml(a_in, "background_blur_enabled", a_out.BackgroundBlurEnabled);
+		ReadBoolFromToml(a_in, "use_custom_cursor", a_out.UseCustomCursor);
+
+		const bool hasFontRoles = a_in["font_roles"].is_table();
+		if (hasFontRoles) {
+			const auto& fontRoles = *a_in["font_roles"].as_table();
+			for (std::size_t i = 0; i < static_cast<std::size_t>(FontRole::Count); ++i) {
+				const auto* entry = fontRoles.get(GetFontRoleKey(static_cast<FontRole>(i)));
+				if (!entry || !entry->is_table())
+					continue;
+
+				auto& role = a_out.FontRoles[i];
+				const auto& table = *entry->as_table();
+				ReadStringFromToml(table, "family", role.Family);
+				ReadStringFromToml(table, "style", role.Style);
+				ReadStringFromToml(table, "file", role.File);
+				ReadFloatFromToml(table, "size_scale", role.SizeScale);
+			}
+		}
+
+		if (const auto* cursor = a_in["cursor"].as_table())
+			CursorFromToml(*cursor, a_out.Cursor);
+
+		if (const auto* scrollbar = a_in["scrollbar_opacity"].as_table()) {
+			ReadFloatFromToml(*scrollbar, "background", a_out.ScrollbarOpacity.Background);
+			ReadFloatFromToml(*scrollbar, "thumb", a_out.ScrollbarOpacity.Thumb);
+			ReadFloatFromToml(*scrollbar, "thumb_hovered", a_out.ScrollbarOpacity.ThumbHovered);
+			ReadFloatFromToml(*scrollbar, "thumb_active", a_out.ScrollbarOpacity.ThumbActive);
+		}
+
+		if (const auto* statusPalette = a_in["status_palette"].as_table()) {
+			ReadColorFromToml(*statusPalette, "disable", a_out.StatusPalette.Disable);
+			ReadColorFromToml(*statusPalette, "error", a_out.StatusPalette.Error);
+			ReadColorFromToml(*statusPalette, "warning", a_out.StatusPalette.Warning);
+			ReadColorFromToml(*statusPalette, "restart_needed", a_out.StatusPalette.RestartNeeded);
+			ReadColorFromToml(*statusPalette, "current_hotkey", a_out.StatusPalette.CurrentHotkey);
+			ReadColorFromToml(*statusPalette, "success", a_out.StatusPalette.SuccessColor);
+			ReadColorFromToml(*statusPalette, "info", a_out.StatusPalette.InfoColor);
+		}
+
+		if (const auto* featureHeading = a_in["feature_heading"].as_table()) {
+			ReadColorFromToml(*featureHeading, "color_default", a_out.FeatureHeading.ColorDefault);
+			ReadColorFromToml(*featureHeading, "color_hovered", a_out.FeatureHeading.ColorHovered);
+			ReadFloatFromToml(*featureHeading, "minimized_factor", a_out.FeatureHeading.MinimizedFactor);
+			ReadFloatFromToml(*featureHeading, "feature_title_scale", a_out.FeatureHeading.FeatureTitleScale);
+		}
+
+		if (const auto* style = a_in["style"].as_table()) {
+			ReadVec2FromToml(*style, "window_padding", a_out.Style.WindowPadding);
+			ReadVec2FromToml(*style, "frame_padding", a_out.Style.FramePadding);
+			ReadVec2FromToml(*style, "item_spacing", a_out.Style.ItemSpacing);
+			ReadVec2FromToml(*style, "cell_padding", a_out.Style.CellPadding);
+			ReadFloatFromToml(*style, "window_rounding", a_out.Style.WindowRounding);
+			ReadFloatFromToml(*style, "window_border_size", a_out.Style.WindowBorderSize);
+			ReadFloatFromToml(*style, "child_border_size", a_out.Style.ChildBorderSize);
+			ReadFloatFromToml(*style, "popup_border_size", a_out.Style.PopupBorderSize);
+			ReadFloatFromToml(*style, "frame_border_size", a_out.Style.FrameBorderSize);
+			ReadFloatFromToml(*style, "frame_rounding", a_out.Style.FrameRounding);
+			ReadFloatFromToml(*style, "tab_rounding", a_out.Style.TabRounding);
+			ReadFloatFromToml(*style, "scrollbar_rounding", a_out.Style.ScrollbarRounding);
+			ReadFloatFromToml(*style, "scrollbar_size", a_out.Style.ScrollbarSize);
+			ReadFloatFromToml(*style, "grab_rounding", a_out.Style.GrabRounding);
+			ReadFloatFromToml(*style, "grab_min_size", a_out.Style.GrabMinSize);
+			ReadFloatFromToml(*style, "indent_spacing", a_out.Style.IndentSpacing);
+		}
+
+		PaletteFromToml(a_in, a_out.FullPalette);
+
+		MenuFonts::NormalizeFontRoles(a_out, hasFontRoles);
+
+		auto& bodyRole = a_out.FontRoles[static_cast<std::size_t>(FontRole::Body)];
+		if (!fonts::ValidateFont(bodyRole.File)) {
+			const auto& defaults = GetDefaultFontRole(FontRole::Body);
+			L->warn("Font '{}' not found, falling back to '{}'", bodyRole.File, defaults.File);
+			bodyRole = defaults;
+			a_out.FontName = defaults.File;
+		}
+	}
+
+	void Menu::LoadTheme(const toml::table& a_theme)
+	{
+		ThemeFromToml(a_theme, settings.Theme);
+		BackgroundBlur::SetEnabled(settings.Theme.BackgroundBlurEnabled);
+	}
+
+	void Menu::SaveTheme(toml::table& a_theme) const
+	{
+		ThemeToToml(settings.Theme, a_theme);
+	}
+
+	std::vector<std::string> Menu::DiscoverThemes()
+	{
+		auto& themeManager = ThemeManager::Get();
+		if (!themeManager.IsDiscovered())
+			themeManager.DiscoverThemes();
+		return themeManager.GetThemeNames();
+	}
+
+	bool Menu::LoadThemePreset(const std::string& a_themeName)
+	{
+		toml::table preset;
+		if (!ThemeManager::Get().LoadTheme(a_themeName, preset))
+			return false;
+
+		// Presets inherit omissions from defaults, not live edits.
+		std::string baselineError;
+		if (const auto baseline = BuildEffectiveDefaultTheme(baselineError)) {
+			LoadTheme(theme_delta::Overlay(*baseline, preset));
+		} else {
+			L->warn("Cannot read the shipped default theme ({}); applying preset '{}' over the current theme", baselineError, a_themeName);
+			LoadTheme(preset);
+		}
+
+		pendingFontReload = true;
+		pendingIconReload = true;
+		pendingCursorReload = true;
+		return true;
+	}
+
+	void Menu::CreateDefaultThemes()
+	{
+		ThemeManager::Get().CreateDefaultThemeFiles();
+	}
+
+	void Menu::Load()
+	{
+		const auto root = feature_config::GetMergedRoot();
+		const auto* menuNode = root.get("menu");
+		if (!menuNode)
+			return;
+
+		const auto* menu = menuNode->as_table();
+		if (!menu) {
+			L->warn("Unified config [menu] must be a table; using menu defaults");
+			return;
+		}
+
+		ReadBoolFromToml(*menu, "developer_mode", settings.DeveloperMode);
+		ReadBoolFromToml(*menu, "first_time_setup_completed", settings.FirstTimeSetupCompleted);
+		ReadBoolFromToml(*menu, "auto_hide_feature_list", settings.AutoHideFeatureList);
+		ReadBoolFromToml(*menu, "require_shift_to_dock", settings.RequireShiftToDock);
+		ReadBoolFromToml(*menu, "use_resolution_font", settings.UseResolutionFont);
+		ReadStringFromToml(*menu, "selected_theme_preset", settings.SelectedThemePreset);
+
+		InputCombo::ComboList::Read(*menu, "toggle_key", settings.ToggleKey);
+		InputCombo::ComboList::Read(*menu, "overlay_toggle_key", settings.OverlayToggleKey);
+
+		CreateDefaultThemes();
+
+		if (const auto* theme = (*menu)["theme"].as_table())
+			LoadTheme(*theme);
+	}
+
+	bool Menu::Save()
+	{
+		RefreshHotkeySnapshots();
+
+		toml::table theme;
+		SaveTheme(theme);
+
+		std::string baselineError;
+		const auto baseline = BuildEffectiveDefaultTheme(baselineError);
+		if (!baseline)
+			L->warn("Cannot read the shipped default theme ({}); writing a full theme snapshot", baselineError);
+
+		auto saved = baseline ?
+		                 theme_delta::BuildSavedTheme(theme, *baseline) :
+		                 theme_delta::SavedTheme{ std::move(theme), true };
+
+		// A preset that pins nothing carries no provenance worth keeping.
+		if (!saved.PinsPreset)
+			settings.SelectedThemePreset.clear();
+
+		toml::table menu;
+		menu.insert_or_assign("developer_mode", settings.DeveloperMode);
+		menu.insert_or_assign("first_time_setup_completed", settings.FirstTimeSetupCompleted);
+		menu.insert_or_assign("auto_hide_feature_list", settings.AutoHideFeatureList);
+		menu.insert_or_assign("require_shift_to_dock", settings.RequireShiftToDock);
+		menu.insert_or_assign("use_resolution_font", settings.UseResolutionFont);
+		menu.insert_or_assign("selected_theme_preset", settings.SelectedThemePreset);
+
+		InputCombo::ComboList::Append(menu, "toggle_key", settings.ToggleKey);
+		InputCombo::ComboList::Append(menu, "overlay_toggle_key", settings.OverlayToggleKey);
+
+		if (!saved.Delta.empty())
+			menu.insert_or_assign("theme", std::move(saved.Delta));
+
+		const auto result = feature_config::UpdateTopLevelSection("menu", menu);
+		if (!result) {
+			L->warn("Failed to save menu configuration: {}", result.error);
+			return false;
+		}
+		return true;
+	}
+
+	void Menu::DrawPresets()
+	{
+		auto& pm = PresetManager::Get();
+		const auto& presets = pm.List();
+
+		if (pm.activeIdentity.empty()) {
+			ImGui::TextDisabled("Active: (none)");
+		} else {
+			const bool builtin = pm.activeIdentity[0] == 'b';
+			const auto* active = pm.FindByIdentity(pm.activeIdentity);
+			if (active) {
+				ImGui::Text("Active: %s (%s)", pm.activeName.c_str(), builtin ? "builtin" : "user");
+			} else {
+				ImGui::TextColored(settings.Theme.StatusPalette.Warning, "Active: %s (missing)",
+					pm.activeName.empty() ? pm.activeIdentity.c_str() : pm.activeName.c_str());
+			}
+		}
+		if (!pm.lastError.empty())
+			ImGui::TextColored(settings.Theme.StatusPalette.Error, "%s", pm.lastError.c_str());
+
+		std::string pendingLabel;
+		if (pm.pendingComboIdentity.empty() && !presets.empty())
+			pm.pendingComboIdentity = presets.front().identity;
+
+		if (const auto* selected = pm.FindByIdentity(pm.pendingComboIdentity)) {
+			pendingLabel.assign(selected->builtin ? "B: " : "U: ");
+			pendingLabel.append(selected->name);
+		} else if (!presets.empty()) {
+			pm.pendingComboIdentity = presets.front().identity;
+			pendingLabel.assign(presets.front().builtin ? "B: " : "U: ");
+			pendingLabel.append(presets.front().name);
+		} else {
+			pendingLabel = "(no presets found)";
+		}
+
+		ImGui::BeginDisabled(presets.empty());
+		if (ImGui::BeginCombo("Preset", pendingLabel.c_str())) {
+			for (const auto& meta : presets) {
+				std::string label = meta.builtin ? "B: " : "U: ";
+				label.append(meta.name);
+				const bool selected = (meta.identity == pm.pendingComboIdentity);
+				if (ImGui::Selectable(label.c_str(), selected))
+					pm.pendingComboIdentity = meta.identity;
+				if (selected)
+					ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::EndDisabled();
+
+		const auto* pending = pm.FindByIdentity(pm.pendingComboIdentity);
+		const auto* active = pm.FindByIdentity(pm.activeIdentity);
+		const bool canSave = active && !active->builtin;
+		const bool canDelete = active && !active->builtin;
+
+		ImGui::BeginDisabled(!pending);
+		if (ui::ButtonWithFlash("Load")) {
+			std::string err;
+			if (!pm.Apply(*pending, err))
+				pm.lastError = "Load failed: " + err;
+			else
+				pm.lastError.clear();
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!canSave);
+		if (ImGui::Button("Save")) {
+			std::string err;
+			if (pm.Save(active->path, active->name, err, true)) {
+				const std::string savedName = active->name;
+				pm.Refresh();
+				if (const auto* refreshed = pm.FindByName(savedName, true)) {
+					pm.activeIdentity = refreshed->identity;
+					pm.activeName = refreshed->name;
+					pm.pendingComboIdentity = refreshed->identity;
+				}
+				pm.lastError.clear();
+			} else {
+				pm.lastError = "Save failed: " + err;
+			}
+		}
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::Button("Save As...")) {
+			pm.saveAsBuf[0] = '\0';
+			ImGui::OpenPopup("Save As Preset");
+		}
+
+		ImGui::SameLine();
+		ImGui::BeginDisabled(!canDelete);
+		if (ui::ErrorButton("Delete"))
+			ImGui::OpenPopup("Delete Preset?");
+		ImGui::EndDisabled();
+
+		ImGui::SameLine();
+		if (ImGui::Button("Refresh")) {
+			pm.Refresh();
+			if (!pm.FindByIdentity(pm.pendingComboIdentity))
+				pm.pendingComboIdentity.clear();
+			pm.lastError.clear();
+		}
+
+		if (ImGui::Checkbox("Auto-load this preset on boot", &pm.autoLoadOnBoot))
+			pm.SaveCoreConfig();
+		if (auto tooltip = ui::HoverTooltipWrapper()) {
+			ImGui::Text("%s",
+				"On next plugin load, the active preset is reapplied across every participating feature. "
+				"Overridden by the .cs_force_preset marker.");
+		}
+
+		if (ui::BeginPopupModalWithRoundedClose("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::InputText("Name", pm.saveAsBuf, sizeof(pm.saveAsBuf));
+			ImGui::TextDisabled("Letters, digits, underscore, hyphen. 1-64 chars.");
+			if (ImGui::Button("Save", ImVec2(120, 0))) {
+				std::string err;
+				const std::string name(pm.saveAsBuf);
+				if (!ValidatePresetName(name, pm.List(), err)) {
+					pm.lastError = "Invalid name: " + err;
+				} else {
+					const std::filesystem::path destination =
+						ui::paths::GetPluginPath() / "Presets" / (name + ".toml");
+					if (pm.Save(destination, name, err)) {
+						pm.Refresh();
+						if (const auto* refreshed = pm.FindByName(name, true)) {
+							pm.activeIdentity = refreshed->identity;
+							pm.activeName = refreshed->name;
+							pm.pendingComboIdentity = refreshed->identity;
+							pm.SaveCoreConfig();
+						}
+						pm.lastError.clear();
+						ImGui::CloseCurrentPopup();
+					} else {
+						pm.lastError = "Save failed: " + err;
+					}
+				}
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 0)))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
+
+		if (ui::BeginPopupModalWithRoundedClose("Delete Preset?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+			ImGui::Text("Delete preset '%s'?", active ? active->name.c_str() : "");
+			ImGui::TextDisabled("File is removed from disk. This cannot be undone.");
+			if (ui::ErrorButton("Delete", ImVec2(120, 0))) {
+				std::string err;
+				if (active && pm.Delete(*active, err)) {
+					pm.Refresh();
+					pm.activeIdentity.clear();
+					pm.activeName.clear();
+					pm.pendingComboIdentity.clear();
+					pm.autoLoadOnBoot = false;
+					pm.SaveCoreConfig();
+					pm.lastError.clear();
+				} else {
+					pm.lastError = "Delete failed: " + err;
+				}
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel", ImVec2(120, 0)))
+				ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
 	}
 }

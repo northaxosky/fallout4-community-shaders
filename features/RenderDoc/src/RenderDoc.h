@@ -22,6 +22,7 @@ namespace cs::features
 		static RenderDoc* GetSingleton();
 
 		std::string_view GetName() const override { return "RenderDoc"; }
+		std::string_view GetDisplayName() const override { return "RenderDoc"; }
 		std::string GetFeatureSummary() const override { return "Loads the RenderDoc capture library and bridges F4SE input to its capture hotkey."; }
 		std::string GetCategory() const override { return FeatureCategories::kDevTools; }
 		bool HasResettableSettings() const override { return true; }
@@ -29,6 +30,7 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
+		settings::RestartSettingsView GetRestartSettings() const noexcept override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -61,6 +63,7 @@ namespace cs::features
 		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 
 		Settings              _settings;
+		Settings              _bootSettings;
 		std::filesystem::path _resolvedCaptureFolder;
 		std::string           _resolvedCaptureFolderUtf8;
 		HMODULE              _module = nullptr;

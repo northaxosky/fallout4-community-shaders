@@ -20,6 +20,7 @@ namespace cs::features
 		static WetnessEffects* GetSingleton();
 
 		std::string_view GetName() const override { return "WetnessEffects"; }
+		std::string_view GetDisplayName() const override { return "Wetness Effects"; }
 		std::string GetConfigKey() const override { return "WetnessEffects"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override { return "Adds rain wetness to deferred lighting and composition."; }

@@ -202,6 +202,22 @@ configure_host_test(FeatureStateTests)
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
 
+add_executable(ThemeDeltaTests
+	tests/ThemeDeltaTests.cpp
+	src/Menu/ThemeDelta.cpp
+	src/Menu/ThemeDelta.h
+	src/Settings/FeatureConfig.cpp
+	src/Settings/FeatureConfig.h
+)
+configure_host_test(ThemeDeltaTests)
+target_link_libraries(ThemeDeltaTests PRIVATE imgui::imgui tomlplusplus::tomlplusplus)
+
+add_test(
+	NAME ThemeDelta
+	COMMAND ThemeDeltaTests "${CMAKE_SOURCE_DIR}/package/F4SE/Plugins/FO4CommunityShaders/FO4CommunityShaders.toml"
+)
+set_tests_properties(ThemeDelta PROPERTIES LABELS "configuration;menu;unit")
+
 add_executable(ScreenSpaceShadowsMathTests
 	tests/ScreenSpaceShadowsMathTests.cpp
 	features/ScreenSpaceShadows/src/ScreenSpaceShadowsMath.h

@@ -1,6 +1,7 @@
 #include "Upscaling.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -335,6 +336,7 @@ namespace cs::features
 		}
 
 		settings = candidate;
+		_bootSettings = candidate;
 		return true;
 	}
 
@@ -2382,6 +2384,25 @@ namespace cs::features
 		return true;
 	}
 
+	cs::settings::RestartSettingsView Upscaling::GetRestartSettings() const noexcept
+	{
+		static constexpr std::array fields{
+			CS_RESTART_ENABLE_FIELD(
+				Settings,
+				frameGenerationMode,
+				"FSR 3 frame generation"),
+			CS_RESTART_FIELD(
+				Settings,
+				frameGenerationForceEnable,
+				"Force frame generation below 120 Hz"),
+			CS_RESTART_FIELD(
+				Settings,
+				streamlineLogLevel,
+				"Streamline log level")
+		};
+		return cs::settings::MakeRestartSettingsView(fields, _bootSettings, settings);
+	}
+
 	void Upscaling::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		a_sink
@@ -2452,7 +2473,6 @@ namespace cs::features
 		changed |= ImGui::Checkbox(
 			"Allow frame generation in menus",
 			&settings.frameGenerationAllowInMenus);
-		ImGui::TextDisabled("Frame-generation startup and force changes require a game restart.");
 		ImGui::TextDisabled("Frame generation requires windowed or borderless SDR output.");
 
 		static const char* presets[] = { "Default", "J", "K", "L", "M" };
@@ -2468,8 +2488,6 @@ namespace cs::features
 			settings.streamlineLogLevel = static_cast<std::uint32_t>(logLevel);
 			changed = true;
 		}
-		ImGui::TextDisabled("Streamline log level applies on the next game start.");
-
 		if (changed) {
 			SaveSettings();
 		}

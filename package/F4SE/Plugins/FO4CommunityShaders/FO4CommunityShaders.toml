@@ -23,6 +23,14 @@ bsdf_composite = true
 
 [menu]
 developer_mode = false
+first_time_setup_completed = false
+auto_hide_feature_list = false
+require_shift_to_dock = true
+use_resolution_font = true
+selected_theme_preset = ""
+# Virtual-key codes; an array records a modifier combination.
+toggle_key = 35
+overlay_toggle_key = 121
 
 [preset]
 active = ""

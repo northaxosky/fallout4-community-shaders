@@ -20,6 +20,7 @@ namespace cs::features
 		static ScreenSpaceShadows* GetSingleton();
 
 		std::string_view GetName() const override { return "ScreenSpaceShadows"; }
+		std::string_view GetDisplayName() const override { return "Screen Space Shadows"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override { return "Sun/moon screen-space contact shadows via Bend Studio's ray-marched depth technique."; }
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }

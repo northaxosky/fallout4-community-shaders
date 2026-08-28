@@ -106,8 +106,18 @@ the shipped Default remain available for bring-up opt-outs. Restart after changi
 
 Feature hotkeys are configurable in the unified TOML: `toggle_hotkey` for the overlay,
 `capture_hotkey` and `multi_capture_hotkey` for RenderDoc. Set a key to `"none"` to unbind it.
+The menu's own keys live under `[menu]` as `toggle_key` and `overlay_toggle_key` and are
+rebindable from the menu's Keybindings tab.
+
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
-assets (fonts, presets) live in subdirectories beneath it.
+assets live in subdirectories beneath it:
+
+| Directory | Contents |
+|---|---|
+| `Fonts\<Family>\` | Menu fonts, one folder per family; selectable per typography role |
+| `Themes\` | Importable menu theme presets as `<Name>.toml`; the unified User TOML records only your edits to the shipped theme |
+| `Icons\` | Optional action and category icons from [Phosphor](https://github.com/phosphor-icons/core), MIT; see [Icons/LICENSE](package/F4SE/Plugins/FO4CommunityShaders/Icons/LICENSE) |
+| `Presets\` | Cross-feature setting presets |
 
 ---
 

@@ -11,6 +11,7 @@ namespace cs::features
 		static MotionVectorFixes* GetSingleton();
 
 		std::string_view GetName() const override { return "MotionVectorFixes"; }
+		std::string_view GetDisplayName() const override { return "Motion Vector Fixes"; }
 		std::string GetCategory() const override { return FeatureCategories::kCompatibility; }
 		std::string GetFeatureSummary() const override
 		{
