@@ -24,7 +24,7 @@ namespace cs::features
 	private:
 		static constexpr std::size_t kSamplerCount = 320;
 
-		bool ValidateTable() noexcept;
+		bool CacheOriginalsIfTableLive() noexcept;
 
 		ID3D11SamplerState** _samplerTable = nullptr;
 		std::array<ID3D11SamplerState*, kSamplerCount>                _originalSamplers{};
@@ -35,6 +35,5 @@ namespace cs::features
 		bool  _originalsCached = false;
 		bool  _hasBiased = false;
 		bool  _overridden = false;
-		bool  _tableValidated = false;
 	};
 }

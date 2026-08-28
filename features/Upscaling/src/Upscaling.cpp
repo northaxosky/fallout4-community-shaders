@@ -222,15 +222,6 @@ namespace cs::features
 			return target == a_expectedTarget;
 		}
 
-		// Weaker gate for sites whose call target ID is not known: confirm the byte is a near call.
-		bool IsRelativeCallSite(std::uintptr_t a_site)
-		{
-			if (!a_site) {
-				return false;
-			}
-			return *reinterpret_cast<const std::uint8_t*>(a_site) == 0xE8;
-		}
-
 		bool ViewReferencesTexture(
 			ID3D11ShaderResourceView* a_view,
 			ID3D11Texture2D* a_texture) noexcept
@@ -533,6 +524,9 @@ namespace cs::features
 		const auto anchor = [](std::uint64_t a_id) {
 			return REL::ID({ kUnprovenOnOG, a_id, a_id });
 		};
+		const auto tupleTarget = [](const std::uint64_t (&a_ids)[3]) {
+			return REL::ID({ a_ids[0], a_ids[1], a_ids[2] }).address();
+		};
 
 		const auto viewportSite =
 			anchor(kDrawWorldBegin).address() + kDrawWorldBeginSetDynamicViewportCall;
@@ -566,6 +560,20 @@ namespace cs::features
 				  kRenderAlphaGeometry[2] })
 				  .address()
 			: 0;
+		const auto renderEffectRangeSite =
+			imagespaceTarget + kDrawWorldImagespaceRenderEffectRangeCall;
+		const auto deferredCompositeSite =
+			anchor(kDeferredComposite).address() + kDeferredCompositeRenderPassCall;
+		const auto sslrSite =
+			anchor(kSSLRRaytracingSetupTechnique).address() + kSSLRRaytracingBeginTechniqueCall;
+		const auto vatsSite =
+			anchor(kVatsUpdateParams).address() + kVatsSetPixelConstantCall;
+		const auto loadingMenuSite =
+			anchor(kLoadingMenuUpdateTemporalData).address() + kLoadingMenuUpdateTemporalDataCall;
+		const auto deferredPrePassSite =
+			anchor(kRenderPreUI).address() + kRenderPreUIDeferredPrePassCall;
+		const auto forwardSite =
+			anchor(kRenderPreUI).address() + kRenderPreUIForwardCall;
 		if (!IsCallSiteTargeting(viewportSite, viewportTarget)) {
 			FailLoad("World viewport selection site did not contain the expected call");
 			return;
@@ -587,41 +595,50 @@ namespace cs::features
 			FailLoad("First-person alpha site did not contain the expected RenderAlphaGeometry call");
 			return;
 		}
+		if (!IsCallSiteTargeting(
+				renderEffectRangeSite,
+				tupleTarget(kImageSpaceManagerRenderEffectRange))) {
+			FailLoad("Imagespace effect-range site did not contain the expected RenderEffectRange call");
+			return;
+		}
+		if (!IsCallSiteTargeting(
+				deferredCompositeSite,
+				tupleTarget(kBSBatchRendererRenderPassImmediately))) {
+			FailLoad("Deferred composite site did not contain the expected RenderPassImmediately call");
+			return;
+		}
+		if (!IsCallSiteTargeting(sslrSite, tupleTarget(kBSShaderBeginTechnique))) {
+			FailLoad("SSLR raytracing site did not contain the expected BeginTechnique call");
+			return;
+		}
+		if (!IsCallSiteTargeting(vatsSite, tupleTarget(kImageSpaceShaderParamSetPixelConstant))) {
+			FailLoad("VATS parameter site did not contain the expected SetPixelConstant call");
+			return;
+		}
+		if (!IsCallSiteTargeting(
+				loadingMenuSite,
+				tupleTarget(kBSGraphicsStateUpdateTemporalData))) {
+			FailLoad("Loading-menu site did not contain the expected UpdateTemporalData call");
+			return;
+		}
+		if (!IsCallSiteTargeting(
+				deferredPrePassSite,
+				tupleTarget(kDrawWorldDeferredPrePass))) {
+			FailLoad("Render_PreUI site did not contain the expected DeferredPrePass call");
+			return;
+		}
+		if (!IsCallSiteTargeting(forwardSite, tupleTarget(kRenderPreUIForwardTarget))) {
+			FailLoad("Render_PreUI site did not contain the expected Forward call");
+			return;
+		}
+
 		stl::write_thunk_call<DrawWorldBegin_SetDynamicViewport>(viewportSite);
 		stl::write_thunk_call<Main_UpdateJitter>(
 			anchor(kDrawWorldBegin).address() + kDrawWorldBeginUpdateTemporalDataCall);
 		stl::write_thunk_call<Main_PostProcessing>(imagespaceCallSite);
 		stl::write_thunk_call<DrawWorld_FirstPersonAlpha>(firstPersonAlphaSite);
 		stl::write_thunk_call<DrawWorldImagespace_Upscale>(imagespaceUpscaleSite);
-
 		// Split the imagespace effect chain so HDR effects stay at render resolution.
-		const auto renderEffectRangeSite =
-			imagespaceTarget + kDrawWorldImagespaceRenderEffectRangeCall;
-		const auto deferredCompositeSite =
-			anchor(kDeferredComposite).address() + kDeferredCompositeRenderPassCall;
-		const auto sslrSite =
-			anchor(kSSLRRaytracingSetupTechnique).address() + kSSLRRaytracingBeginTechniqueCall;
-		const auto vatsSite =
-			anchor(kVatsUpdateParams).address() + kVatsSetPixelConstantCall;
-		const auto loadingMenuSite =
-			anchor(kLoadingMenuUpdateTemporalData).address() + kLoadingMenuUpdateTemporalDataCall;
-		const auto deferredPrePassSite =
-			anchor(kRenderPreUI).address() + kRenderPreUIDeferredPrePassCall;
-		const auto forwardSite =
-			anchor(kRenderPreUI).address() + kRenderPreUIForwardCall;
-
-		// No callee IDs to validate these sites; confirm each is a near call so a drifted offset fails closed.
-		if (!IsRelativeCallSite(renderEffectRangeSite) ||
-			!IsRelativeCallSite(deferredCompositeSite) ||
-			!IsRelativeCallSite(sslrSite) ||
-			!IsRelativeCallSite(vatsSite) ||
-			!IsRelativeCallSite(loadingMenuSite) ||
-			!IsRelativeCallSite(deferredPrePassSite) ||
-			!IsRelativeCallSite(forwardSite)) {
-			FailLoad("A dynamic-resolution or sampler-bias fix call site was not a near-call instruction");
-			return;
-		}
-
 		stl::write_thunk_call<DrawWorldImagespace_RenderEffectRange>(renderEffectRangeSite);
 		// Keep dynamic-resolution G-buffers valid through the deferred lighting composite.
 		stl::write_thunk_call<DeferredComposite_RenderPass>(deferredCompositeSite);
@@ -1059,10 +1076,8 @@ namespace cs::features
 			: 0.0f;
 		_mipBias.store(mipBias, std::memory_order_relaxed);
 		if (!samplerBias.Update(mipBias)) {
-			FailLoad("The sampler-state table did not contain valid D3D11 sampler states");
-			_resourcesReady.store(false, std::memory_order_release);
-			RestoreNativeFrameState();
-			L->critical("Sampler-state table validation failed; Upscaling returned control to the engine");
+			// Retry until the engine has populated every sampler slot.
+			return;
 		}
 	}
 
