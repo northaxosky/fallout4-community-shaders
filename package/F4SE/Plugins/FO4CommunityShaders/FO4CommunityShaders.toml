@@ -30,6 +30,7 @@ use_resolution_font = true
 selected_theme_preset = ""
 debug_view_feature = ""
 debug_view = ""
+debug_view_previews = {}
 # Virtual-key codes; an array records a modifier combination.
 toggle_key = 35
 overlay_toggle_key = 121

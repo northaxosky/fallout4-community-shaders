@@ -1436,18 +1436,38 @@ namespace cs
 		ReadBoolFromToml(*menu, "require_shift_to_dock", settings.RequireShiftToDock);
 		ReadBoolFromToml(*menu, "use_resolution_font", settings.UseResolutionFont);
 		ReadStringFromToml(*menu, "selected_theme_preset", settings.SelectedThemePreset);
-		ReadStringFromToml(*menu, "debug_view_feature", settings.DebugViewFeature);
-		ReadStringFromToml(*menu, "debug_view", settings.DebugView);
+
+		settings.DebugViews.Clear();
+		std::string fullscreenFeature;
+		std::string fullscreenView;
+		ReadStringFromToml(*menu, "debug_view_feature", fullscreenFeature);
+		ReadStringFromToml(*menu, "debug_view", fullscreenView);
+		if (const auto* previews = (*menu)["debug_view_previews"].as_table()) {
+			for (const auto& [feature, node] : *previews) {
+				const auto view = node.value<std::string>();
+				if (!view) {
+					L->warn(
+						"menu.debug_view_previews.{} must be a string; ignoring",
+						feature.str());
+					continue;
+				}
+				settings.DebugViews.Select(
+					std::string(feature.str()),
+					*view,
+					FeatureDebugViewKind::kTexturePreview);
+			}
+		}
+		if (!fullscreenFeature.empty() && !fullscreenView.empty()) {
+			settings.DebugViews.Select(
+				std::move(fullscreenFeature),
+				std::move(fullscreenView),
+				FeatureDebugViewKind::kFullscreen);
+		}
 
 		InputCombo::ComboList::Read(*menu, "toggle_key", settings.ToggleKey);
 		InputCombo::ComboList::Read(*menu, "overlay_toggle_key", settings.OverlayToggleKey);
 
-		if (!FeatureManager::Get().SelectDebugView(
-				settings.DebugViewFeature, settings.DebugView)) {
-			settings.DebugViewFeature.clear();
-			settings.DebugView.clear();
-			FeatureManager::Get().SelectDebugView({}, {});
-		}
+		ApplyDebugViewSelections();
 
 		CreateDefaultThemes();
 
@@ -1482,8 +1502,13 @@ namespace cs
 		menu.insert_or_assign("require_shift_to_dock", settings.RequireShiftToDock);
 		menu.insert_or_assign("use_resolution_font", settings.UseResolutionFont);
 		menu.insert_or_assign("selected_theme_preset", settings.SelectedThemePreset);
-		menu.insert_or_assign("debug_view_feature", settings.DebugViewFeature);
-		menu.insert_or_assign("debug_view", settings.DebugView);
+		const auto& fullscreen = settings.DebugViews.Fullscreen();
+		menu.insert_or_assign("debug_view_feature", fullscreen.feature);
+		menu.insert_or_assign("debug_view", fullscreen.view);
+		toml::table previews;
+		for (const auto& [feature, view] : settings.DebugViews.Previews())
+			previews.insert_or_assign(feature, view);
+		menu.insert_or_assign("debug_view_previews", std::move(previews));
 
 		InputCombo::ComboList::Append(menu, "toggle_key", settings.ToggleKey);
 		InputCombo::ComboList::Append(menu, "overlay_toggle_key", settings.OverlayToggleKey);
@@ -1499,15 +1524,84 @@ namespace cs
 		return true;
 	}
 
-	void Menu::SetDebugViewSelection(std::string a_feature, std::string a_view)
+	void Menu::ApplyDebugViewSelections()
 	{
-		if (!FeatureManager::Get().SelectDebugView(a_feature, a_view)) {
-			a_feature.clear();
-			a_view.clear();
-			FeatureManager::Get().SelectDebugView({}, {});
+		const auto resolve = [](std::string_view a_feature, std::string_view a_view) {
+			for (const auto* feature : FeatureManager::Get().GetAll()) {
+				if (!feature || feature->GetName() != a_feature)
+					continue;
+				const auto views = feature->GetDebugViews();
+				const auto view = std::ranges::find(
+					views, a_view, &FeatureDebugView::id);
+				return view == views.end() ? nullptr : &*view;
+			}
+			return static_cast<const FeatureDebugView*>(nullptr);
+		};
+
+		debug_view::SelectionState valid;
+		const auto& fullscreen = settings.DebugViews.Fullscreen();
+		if (!fullscreen.Empty()) {
+			const auto* view = resolve(fullscreen.feature, fullscreen.view);
+			if (view && view->kind == FeatureDebugViewKind::kFullscreen) {
+				valid.Select(
+					fullscreen.feature,
+					fullscreen.view,
+					FeatureDebugViewKind::kFullscreen);
+			}
 		}
-		settings.DebugViewFeature = std::move(a_feature);
-		settings.DebugView = std::move(a_view);
+		for (const auto& [feature, viewId] : settings.DebugViews.Previews()) {
+			if (feature == valid.Fullscreen().feature)
+				continue;
+			const auto* view = resolve(feature, viewId);
+			if (view && view->kind == FeatureDebugViewKind::kTexturePreview) {
+				valid.Select(
+					feature,
+					viewId,
+					FeatureDebugViewKind::kTexturePreview);
+			}
+		}
+
+		settings.DebugViews = std::move(valid);
+		std::vector<FeatureDebugSelection> selections;
+		const auto& activeFullscreen = settings.DebugViews.Fullscreen();
+		if (!activeFullscreen.Empty()) {
+			selections.push_back({
+				.feature = activeFullscreen.feature,
+				.view = activeFullscreen.view
+			});
+		}
+		for (const auto& [feature, view] : settings.DebugViews.Previews()) {
+			selections.push_back({
+				.feature = feature,
+				.view = view
+			});
+		}
+		if (!FeatureManager::Get().ApplyDebugViews(selections)) {
+			L->warn("Invalid debug-view selection state; disabling debug views");
+			settings.DebugViews.Clear();
+			FeatureManager::Get().ApplyDebugViews(
+				std::span<const FeatureDebugSelection>{});
+		}
+	}
+
+	void Menu::SetDebugViewSelection(
+		const Feature& a_feature,
+		std::string_view a_view)
+	{
+		if (a_view.empty()) {
+			settings.DebugViews.ClearFeature(a_feature.GetName());
+		} else {
+			const auto views = a_feature.GetDebugViews();
+			const auto selected = std::ranges::find(
+				views, a_view, &FeatureDebugView::id);
+			if (selected == views.end())
+				return;
+			settings.DebugViews.Select(
+				std::string(a_feature.GetName()),
+				std::string(a_view),
+				selected->kind);
+		}
+		ApplyDebugViewSelections();
 		Save();
 	}
 
@@ -1517,31 +1611,51 @@ namespace cs
 		if (views.empty())
 			return;
 
-		const bool featureSelected =
-			settings.DebugViewFeature == a_feature.GetName();
-		const auto selected = featureSelected ?
-			std::ranges::find(
-				views, settings.DebugView, &FeatureDebugView::id) :
-			views.end();
+		const auto selectedId =
+			settings.DebugViews.SelectedView(a_feature.GetName());
+		const auto selected = std::ranges::find(
+			views, selectedId, &FeatureDebugView::id);
 		const std::string preview =
 			selected == views.end() ? "Off" : std::string(selected->label);
 		if (ImGui::BeginCombo("Debug visualization", preview.c_str())) {
-			if (ImGui::Selectable("Off", !featureSelected))
-				SetDebugViewSelection({}, {});
+			if (ImGui::Selectable("Off", selected == views.end()))
+				SetDebugViewSelection(a_feature, {});
 			for (const auto& view : views) {
-				const bool active =
-					featureSelected && settings.DebugView == view.id;
+				const bool active = selectedId == view.id;
 				const std::string label(view.label);
-				if (ImGui::Selectable(label.c_str(), active)) {
-					SetDebugViewSelection(
-						std::string(a_feature.GetName()),
-						std::string(view.id));
-				}
+				if (ImGui::Selectable(label.c_str(), active))
+					SetDebugViewSelection(a_feature, view.id);
 			}
 			ImGui::EndCombo();
 		}
 		if (auto tooltip = ui::HoverTooltipWrapper())
-			ImGui::Text("%s", "Selecting a view disables any other feature's view.");
+			ImGui::Text(
+				"%s",
+				"Fullscreen views are exclusive. Texture previews are independent.");
+
+		if (selected == views.end()
+			|| selected->kind != FeatureDebugViewKind::kTexturePreview
+			|| !selected->textureProvider) {
+			return;
+		}
+
+		const auto texture = selected->textureProvider(a_feature);
+		if (!texture.texture || texture.width == 0 || texture.height == 0) {
+			ImGui::TextDisabled(
+				"%.*s",
+				static_cast<int>(texture.unavailableText.size()),
+				texture.unavailableText.data());
+			return;
+		}
+		if (!texture.caption.empty())
+			ImGui::TextDisabled("%s", texture.caption.c_str());
+		constexpr float previewWidth = 480.0f;
+		const float aspect =
+			static_cast<float>(texture.width)
+			/ static_cast<float>(texture.height);
+		ImGui::Image(
+			reinterpret_cast<ImTextureID>(texture.texture),
+			ImVec2(previewWidth, previewWidth / aspect));
 	}
 
 	void Menu::DrawPresets()

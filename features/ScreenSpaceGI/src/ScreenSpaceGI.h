@@ -43,6 +43,8 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view a_view) noexcept override;
 
 		RE::BSEventNotifyControl ProcessEvent(
 			const RE::MenuOpenCloseEvent& a_event,
@@ -165,6 +167,7 @@ namespace cs::features
 		void ClearBounceOutputs(ID3D11DeviceContext* a_context);
 		void ClearTemporalHistory(ID3D11DeviceContext* a_context);
 		void ResetHistory(ssgi::HistoryResetReason a_reason);
+		FeatureDebugTexture GetOcclusionDebugTexture() const;
 
 		// Contiguous plugin slots: occlusion, SH luma, CoCg, albedo.
 		static constexpr std::uint32_t kCompositionPSSlot = 26;
@@ -195,6 +198,7 @@ namespace cs::features
 		std::atomic_bool _tiledPredicateAvailable{ false };
 		std::atomic_bool _tiledLightingActive{ false };
 		std::atomic_bool _tiledBAvailable{ false };
+		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic_bool _queuedHistoryReset{ false };
 		std::atomic_uint32_t _compositionBindsLastFrame{ 0 };
 		std::atomic_uint32_t _temporalDispatchesLastFrame{ 0 };

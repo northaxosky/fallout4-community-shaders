@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DebugView.h"
 #include "FeatureCategories.h"
 #include "FeatureState.h"
 #include "Utils/RestartSettings.h"
@@ -15,7 +16,6 @@
 
 struct IDXGIAdapter;
 struct ID3D11Device;
-
 namespace cs
 {
 	struct PresetApplyContext;
@@ -23,12 +23,6 @@ namespace cs
 	{
 		class Sink;
 	}
-
-	struct FeatureDebugView
-	{
-		std::string_view id;
-		std::string_view label;
-	};
 
 	class Feature
 	{
@@ -197,7 +191,7 @@ namespace cs
 
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
-		bool SelectDebugView(std::string_view a_feature, std::string_view a_view);
+		bool ApplyDebugViews(std::span<const FeatureDebugSelection> a_selections);
 
 	private:
 		FeatureManager() = default;

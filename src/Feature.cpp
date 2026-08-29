@@ -178,29 +178,39 @@ namespace cs
 			_loadedFeatures.end());
 	}
 
-	bool FeatureManager::SelectDebugView(
-		std::string_view a_feature,
-		std::string_view a_view)
+	bool FeatureManager::ApplyDebugViews(
+		std::span<const FeatureDebugSelection> a_selections)
 	{
-		Feature* selected = nullptr;
-		if (!a_feature.empty() || !a_view.empty()) {
-			if (a_feature.empty() || a_view.empty())
+		std::unordered_map<Feature*, std::string_view> selected;
+		Feature* fullscreen = nullptr;
+		for (const auto& selection : a_selections) {
+			if (selection.feature.empty() || selection.view.empty())
 				return false;
 			const auto featureIt = std::ranges::find(
-				_loadedFeatures, a_feature, &Feature::GetName);
+				_loadedFeatures, selection.feature, &Feature::GetName);
 			if (featureIt == _loadedFeatures.end())
 				return false;
 			const auto views = (*featureIt)->GetDebugViews();
-			if (std::ranges::find(views, a_view, &FeatureDebugView::id)
-				== views.end()) {
+			const auto viewIt = std::ranges::find(
+				views, selection.view, &FeatureDebugView::id);
+			if (viewIt == views.end() || selected.contains(*featureIt))
 				return false;
+			if (viewIt->kind == FeatureDebugViewKind::kFullscreen) {
+				if (fullscreen)
+					return false;
+				fullscreen = *featureIt;
 			}
-			selected = *featureIt;
+			selected.emplace(*featureIt, selection.view);
 		}
 
 		for (auto* feature : _registeredFeatures) {
-			if (feature)
-				feature->SetDebugView(feature == selected ? a_view : "");
+			if (!feature)
+				continue;
+			const auto selection = selected.find(feature);
+			feature->SetDebugView(
+				selection == selected.end() ?
+					std::string_view{} :
+					selection->second);
 		}
 		return true;
 	}

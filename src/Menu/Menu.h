@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Menu/DebugViewSelection.h"
 #include "Menu/ThemeManager.h"
 #include "Utils/Input.h"
 
@@ -291,15 +292,16 @@ namespace cs
 			bool UseResolutionFont = true;
 			ThemeSettings Theme;
 			std::string SelectedThemePreset = "";
-			std::string DebugViewFeature;
-			std::string DebugView;
+			debug_view::SelectionState DebugViews;
 		};
 
 		const Settings& GetSettings() const noexcept { return settings; }
 		Settings& GetSettings() noexcept { return settings; }
 		const ThemeSettings& GetTheme() const noexcept { return settings.Theme; }
 		ThemeSettings& GetTheme() noexcept { return settings.Theme; }
-		void SetDebugViewSelection(std::string a_feature, std::string a_view);
+		void SetDebugViewSelection(
+			const Feature& a_feature,
+			std::string_view a_view);
 		void DrawDebugViewSelector(const Feature& a_feature);
 		ThemeSettings::FontRoleSettings& GetFontRoleSettings(FontRole a_role) noexcept
 		{
@@ -361,6 +363,7 @@ namespace cs
 
 		static const std::unordered_map<std::string, int>& GetCategoryCounts() { return categoryCounts; }
 		void BuildCategoryCounts();
+		void ApplyDebugViewSelections();
 		bool IsFeatureDisabledAtBoot(const Feature& a_feature) const;
 		bool SetFeatureLoadAtBoot(const Feature& a_feature, bool a_load);
 

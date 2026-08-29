@@ -8,8 +8,10 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cfloat>
+#include <format>
 #include <limits>
 #include <stdexcept>
 #include <string>
@@ -20,6 +22,7 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Menu/Menu.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
@@ -168,6 +171,53 @@ namespace cs::features
 	{
 		static ScreenSpaceShadows instance;
 		return &instance;
+	}
+
+	std::span<const FeatureDebugView>
+		ScreenSpaceShadows::GetDebugViews() const noexcept
+	{
+		static constexpr std::array views{
+			FeatureDebugView{
+				.id = "shadow_mask",
+				.label = "Shadow-mask preview",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const ScreenSpaceShadows&>(a_feature)
+						.GetShadowMaskDebugTexture();
+				}
+			}
+		};
+		return views;
+	}
+
+	void ScreenSpaceShadows::SetDebugView(std::string_view a_view) noexcept
+	{
+		_debugPreviewEnabled.store(
+			a_view == "shadow_mask",
+			std::memory_order_release);
+	}
+
+	FeatureDebugTexture
+		ScreenSpaceShadows::GetShadowMaskDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "Mask not allocated."
+		};
+		if (!_debugPreviewEnabled.load(std::memory_order_acquire)
+			|| !_maskTexture
+			|| !_maskTexture->srv
+			|| _allocWidth == 0
+			|| _allocHeight == 0) {
+			return texture;
+		}
+		texture.texture = _maskTexture->srv.get();
+		texture.width = _allocWidth;
+		texture.height = _allocHeight;
+		texture.caption = std::format(
+			"Mask {}x{} (bright = lit, dark = shadowed)",
+			_allocWidth,
+			_allocHeight);
+		return texture;
 	}
 
 	bool ScreenSpaceShadows::Configure(const toml::table& a_config, std::string& a_error)
@@ -940,20 +990,7 @@ namespace cs::features
 			"Resources: %s | wave dispatches last frame: %u",
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));
-		static bool s_showMaskPreview = false;
-		ImGui::Checkbox("Show shadow-mask preview (debug)", &s_showMaskPreview);
-		if (s_showMaskPreview) {
-			if (_maskTexture && _maskTexture->srv && _allocWidth > 0 && _allocHeight > 0) {
-				const float aspect = static_cast<float>(_allocWidth) / static_cast<float>(_allocHeight);
-				const float previewWidth = 480.0f;
-				const float previewHeight = previewWidth / aspect;
-				ImGui::TextDisabled("Mask %ux%u (bright = lit, dark = shadowed)", _allocWidth, _allocHeight);
-				ImGui::Image(reinterpret_cast<ImTextureID>(_maskTexture->srv.get()),
-					ImVec2(previewWidth, previewHeight));
-			} else {
-				ImGui::TextDisabled("Mask not allocated.");
-			}
-		}
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void ScreenSpaceShadows::RestoreDefaultSettings()

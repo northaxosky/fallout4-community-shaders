@@ -3,6 +3,7 @@
 #include "Host/IntegrationState.h"
 #include "Host/OverlayDemandModel.h"
 #include "Host/SwapChainHandoff.h"
+#include "Menu/DebugViewSelection.h"
 
 #include <algorithm>
 #include <cstring>
@@ -122,6 +123,57 @@ namespace
 		CHECK(machine.ChooseStandalone());
 		CHECK(!machine.IsHosted());
 		CHECK(DecideBootstrap(machine.Get()) == BootstrapAction::kStandaloneNow);
+	}
+
+	void TestDebugViewSelectionKinds()
+	{
+		cs::debug_view::SelectionState state;
+		state.Select(
+			"ScreenSpaceShadows",
+			"shadow_mask",
+			cs::FeatureDebugViewKind::kTexturePreview);
+		state.Select(
+			"ScreenSpaceGI",
+			"occlusion",
+			cs::FeatureDebugViewKind::kTexturePreview);
+		CHECK(state.Previews().size() == 2);
+		CHECK(state.Fullscreen().Empty());
+
+		state.Select(
+			"TerrainShadows",
+			"shadow_term",
+			cs::FeatureDebugViewKind::kFullscreen);
+		CHECK(state.Fullscreen().feature == "TerrainShadows");
+		CHECK(state.Previews().size() == 2);
+
+		state.Select(
+			"TerrainShadows",
+			"heightmap",
+			cs::FeatureDebugViewKind::kFullscreen);
+		CHECK(state.Fullscreen().view == "heightmap");
+		CHECK(state.Previews().size() == 2);
+
+		state.Select(
+			"WetnessEffects",
+			"wetness",
+			cs::FeatureDebugViewKind::kFullscreen);
+		CHECK(state.Fullscreen().feature == "WetnessEffects");
+		CHECK(state.Previews().size() == 2);
+
+		state.Select(
+			"WetnessEffects",
+			"water_film",
+			cs::FeatureDebugViewKind::kTexturePreview);
+		CHECK(state.Fullscreen().Empty());
+		CHECK(state.Previews().size() == 3);
+
+		state.ClearFeature("ScreenSpaceGI");
+		CHECK(state.Previews().size() == 2);
+		CHECK(
+			state.SelectedView("ScreenSpaceShadows")
+			== "shadow_mask");
+		CHECK(state.SelectedView("TerrainShadows").empty());
+		CHECK(state.SelectedView("WetnessEffects") == "water_film");
 	}
 
 	void TestCandidateSelectionIsDeterministic()
@@ -469,6 +521,7 @@ namespace
 int main()
 {
 	TestAbsentHost();
+	TestDebugViewSelectionKinds();
 	TestCandidateSelectionIsDeterministic();
 	TestIncompatibleHosts();
 	TestSwapChainHandoff();

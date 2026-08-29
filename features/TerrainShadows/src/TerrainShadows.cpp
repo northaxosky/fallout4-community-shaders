@@ -46,8 +46,16 @@ namespace cs::features
 
 		constexpr std::uint32_t kMissingMapLogIntervalMs = 30000;
 		constexpr std::array<FeatureDebugView, 2> kDebugViews{ {
-			{ "shadow_term", "Shadow term" },
-			{ "heightmap", "Raw heightmap sample" }
+			{
+				"shadow_term",
+				"Shadow term",
+				FeatureDebugViewKind::kFullscreen
+			},
+			{
+				"heightmap",
+				"Raw heightmap sample",
+				FeatureDebugViewKind::kFullscreen
+			}
 		} };
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)

@@ -114,8 +114,9 @@ When a shared mod menu hosts the settings (see [shared menu](#shared-mod-menu)),
 host's key, not this plugin's: the host owns opening and closing the common menu, its own binding,
 and the theme and fonts it draws with. The overlay and RenderDoc hotkeys above are unaffected.
 
-Feature settings can expose one debug visualization at a time. Terrain Shadows provides
-grayscale views of its sampled shadow term and raw heightmap.
+Feature settings can expose persisted texture previews and fullscreen debug views. Texture
+previews are independent; one fullscreen view can replace the scene at a time. Terrain Shadows
+provides fullscreen grayscale views of its sampled shadow term and raw heightmap.
 
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:

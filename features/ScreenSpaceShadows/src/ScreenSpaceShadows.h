@@ -35,6 +35,8 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view a_view) noexcept override;
 
 		cs::ScreenSpaceShadowsFeatureData GetCommonBufferData() const;
 
@@ -83,6 +85,7 @@ namespace cs::features
 		void CreateMaskTexture(std::uint32_t a_width, std::uint32_t a_height);
 		std::uint32_t GetScaledSampleCount() const;
 		ID3D11ComputeShader* GetComputeRaymarch();
+		FeatureDebugTexture GetShadowMaskDebugTexture() const;
 
 		static constexpr uint kMaskPSSlot = 24;
 
@@ -93,6 +96,7 @@ namespace cs::features
 		std::atomic_uint32_t _dispatchedLastFrame{ 0 };
 		std::atomic_bool _maskBound{ false };
 		std::atomic_bool _maskBoundLastFrame{ false };
+		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic<float> _sunX{ 0.0f };
 		std::atomic<float> _sunY{ 0.0f };
 		std::atomic<float> _sunZ{ 0.0f };

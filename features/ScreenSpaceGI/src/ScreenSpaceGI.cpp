@@ -7,6 +7,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstring>
+#include <format>
 #include <memory>
 #include <optional>
 #include <span>
@@ -19,6 +20,7 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Menu/Menu.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
@@ -362,6 +364,55 @@ namespace cs::features
 	{
 		static ScreenSpaceGI instance;
 		return &instance;
+	}
+
+	std::span<const FeatureDebugView> ScreenSpaceGI::GetDebugViews() const noexcept
+	{
+		static constexpr std::array views{
+			FeatureDebugView{
+				.id = "occlusion",
+				.label = "Occlusion preview",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const ScreenSpaceGI&>(a_feature)
+						.GetOcclusionDebugTexture();
+				}
+			}
+		};
+		return views;
+	}
+
+	void ScreenSpaceGI::SetDebugView(std::string_view a_view) noexcept
+	{
+		_debugPreviewEnabled.store(
+			a_view == "occlusion",
+			std::memory_order_release);
+	}
+
+	FeatureDebugTexture ScreenSpaceGI::GetOcclusionDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "Buffer not allocated."
+		};
+		const auto& source =
+			_aoDenoisedLastFrame.load(std::memory_order_relaxed) ?
+				_aoDenoisedTex :
+				_aoRawTex;
+		if (!_debugPreviewEnabled.load(std::memory_order_acquire)
+			|| !source
+			|| !source->srv
+			|| _allocW == 0
+			|| _allocH == 0) {
+			return texture;
+		}
+		texture.texture = source->srv.get();
+		texture.width = _allocW;
+		texture.height = _allocH;
+		texture.caption = std::format(
+			"Occlusion (bright = occluded) {}x{}",
+			_allocW,
+			_allocH);
+		return texture;
 	}
 
 	bool ScreenSpaceGI::Configure(const toml::table& a_config, std::string& a_error)
@@ -1467,23 +1518,7 @@ namespace cs::features
 			ssgi::HistoryResetReasonName(
 				static_cast<ssgi::HistoryResetReason>(
 					_lastResetReason.load(std::memory_order_relaxed))));
-
-		static bool s_showPreview = false;
-		ImGui::Checkbox("Show occlusion preview (debug)", &s_showPreview);
-		if (s_showPreview) {
-			const auto& texture =
-				_aoDenoisedLastFrame.load(std::memory_order_relaxed) ? _aoDenoisedTex : _aoRawTex;
-			if (texture && texture->srv && _allocW > 0 && _allocH > 0) {
-				const float aspect = static_cast<float>(_allocW) / static_cast<float>(_allocH);
-				const float previewWidth = 480.0f;
-				ImGui::TextDisabled("Occlusion (bright = occluded) %ux%u", _allocW, _allocH);
-				ImGui::Image(
-					reinterpret_cast<ImTextureID>(texture->srv.get()),
-					ImVec2(previewWidth, previewWidth / aspect));
-			} else {
-				ImGui::TextDisabled("Buffer not allocated.");
-			}
-		}
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void ScreenSpaceGI::RestoreDefaultSettings()
