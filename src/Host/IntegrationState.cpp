@@ -78,4 +78,30 @@ namespace cs::host
 			return FallbackAction::kNone;
 		return a_bootstrapSeen ? FallbackAction::kStandaloneFromSavedResources : FallbackAction::kNone;
 	}
+
+	BootstrapAction FallbackCoordination::ObserveBootstrap(IntegrationState a_state) noexcept
+	{
+		_bootstrapSeen = true;
+		const auto action = DecideBootstrap(a_state);
+		if (action == BootstrapAction::kStandaloneNow)
+			_standaloneStarted = true;
+		return action;
+	}
+
+	FallbackAction FallbackCoordination::OnStandaloneTransition() noexcept
+	{
+		if (!_bootstrapSeen || !_resourcesSaved || _standaloneStarted)
+			return FallbackAction::kNone;
+		_resourcesSaved = false;
+		_standaloneStarted = true;
+		return FallbackAction::kStandaloneFromSavedResources;
+	}
+
+	bool FallbackCoordination::ConsumeSavedResources() noexcept
+	{
+		if (!_resourcesSaved)
+			return false;
+		_resourcesSaved = false;
+		return true;
+	}
 }

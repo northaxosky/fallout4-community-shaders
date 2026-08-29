@@ -56,6 +56,19 @@ namespace cs::host
 			DMUI_PageHandle handle{ DMUI_INVALID_PAGE_HANDLE };
 		};
 
+		struct FallbackResources
+		{
+			ID3D11Device* device{ nullptr };
+			ID3D11DeviceContext* context{ nullptr };
+			IDXGISwapChain* swapChain{ nullptr };
+			HWND window{ nullptr };
+
+			bool IsValid() const noexcept
+			{
+				return device && context && swapChain && window;
+			}
+		};
+
 		bool Register(const DMUI_HostAPI& a_api, const std::string& a_modulePath) noexcept;
 		bool RegisterPages() noexcept;
 		void FallBackToStandalone(std::string_view a_reason) noexcept;
@@ -64,19 +77,23 @@ namespace cs::host
 		void OnHostUnavailable(DMUI_UnavailableReason a_reason) noexcept;
 		void GoUnavailable(DMUI_UnavailableReason a_reason, bool a_allowFallback) noexcept;
 		void DrawPage(Page& a_page) noexcept;
+		void AttachFinalSwapChain(IDXGISwapChain* a_swapChain) noexcept;
+		void RetryPendingSwapChain() noexcept;
+		void RetainPendingSwapChainLocked(IDXGISwapChain* a_swapChain) noexcept;
+		void ReleasePendingSwapChainLocked() noexcept;
 
 		static void DMUI_CALL ReadyCallback(const DMUI_HostReadyInfo* a_info, void* a_userData) noexcept;
 		static void DMUI_CALL UnavailableCallback(DMUI_UnavailableReason a_reason, void* a_userData) noexcept;
 		static void DMUI_CALL DrawCallback(void* a_userData) noexcept;
 
-		void SaveFallbackResources(
+		bool SaveFallbackResources(
 			ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context,
 			IDXGISwapChain* a_swapChain,
 			HWND a_window) noexcept;
-		void ReleaseFallbackResourcesLocked() noexcept;
-		void ReleaseFallbackResources() noexcept;
-		void StartStandaloneFallback() noexcept;
+		FallbackResources TakeFallbackResourcesLocked() noexcept;
+		static void ReleaseFallbackResources(FallbackResources& a_resources) noexcept;
+		void StartStandaloneFallback(FallbackResources a_resources) noexcept;
 		bool OverlayWanted() const noexcept;
 
 		IntegrationStateMachine _state;
@@ -98,7 +115,7 @@ namespace cs::host
 		ID3D11DeviceContext* _fallbackContext{ nullptr };
 		IDXGISwapChain* _fallbackSwapChain{ nullptr };
 		HWND _fallbackWindow{ nullptr };
-		bool _bootstrapSeen{ false };
-		bool _standaloneStarted{ false };
+		IDXGISwapChain* _pendingHostSwapChain{ nullptr };
+		FallbackCoordination _fallbackCoordination;
 	};
 }

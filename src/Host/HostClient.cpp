@@ -3,6 +3,7 @@
 #include "Feature.h"
 #include "Host/HostDiscovery.h"
 #include "Host/HostFingerprint.h"
+#include "Host/SwapChainHandoff.h"
 #include "Log.h"
 #include "Menu/FeatureListRenderer.h"
 #include "Menu/HomePageRenderer.h"
@@ -56,6 +57,12 @@ namespace cs::host
 				return "host backend failed";
 			case DMUI_RESULT_RESOURCE_EXHAUSTED:
 				return "resource exhausted";
+			case DMUI_RESULT_CLIENT_CAPABILITY_REQUIRED:
+				return "renderer replacement capability required";
+			case DMUI_RESULT_SWAPCHAIN_REJECTED:
+				return "swapchain rejected";
+			case DMUI_RESULT_RENDERER_BUSY:
+				return "host renderer busy";
 			default:
 				return "unknown error";
 			}
@@ -140,7 +147,8 @@ namespace cs::host
 				&ClientFingerprint(),
 				&HostClient::ReadyCallback,
 				&HostClient::UnavailableCallback,
-				this
+				this,
+				DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
 			};
 
 			if (!_state.ChooseRegistered()) {
@@ -213,9 +221,29 @@ namespace cs::host
 
 	void HostClient::FallBackToStandalone(std::string_view a_reason) noexcept
 	{
-		// DMUI v1 cannot unregister an accepted client.
-		if (_state.ChooseStandalone() || _state.ChooseStandaloneFromRegistered())
+		FallbackResources resources;
+		bool changed = false;
+		bool bootstrapSeen = false;
+		bool startFallback = false;
+		{
+			const std::scoped_lock lock{ _fallbackMutex };
+			// DMUI v1 cannot unregister an accepted client.
+			changed = _state.ChooseStandalone() || _state.ChooseStandaloneFromRegistered();
+			bootstrapSeen = _fallbackCoordination.BootstrapSeen();
+			if (changed &&
+				_fallbackCoordination.OnStandaloneTransition() ==
+					FallbackAction::kStandaloneFromSavedResources) {
+				resources = TakeFallbackResourcesLocked();
+				startFallback = true;
+			}
+			ReleasePendingSwapChainLocked();
+		}
+		if (changed)
 			L->info("Community Shaders owns its menu: {}", a_reason);
+		if (startFallback)
+			StartStandaloneFallback(resources);
+		else if (changed && bootstrapSeen)
+			L->error("No saved renderer resources; the standalone menu cannot start");
 	}
 
 	void DMUI_CALL HostClient::ReadyCallback(const DMUI_HostReadyInfo* a_info, void* a_userData) noexcept
@@ -239,8 +267,6 @@ namespace cs::host
 	void HostClient::OnHostReady(const DMUI_HostReadyInfo* a_info) noexcept
 	{
 		try {
-			if (_state.Get() != IntegrationState::kRegisteredWaiting)
-				return;
 			if (!ReadyInfoIsUsable(a_info)) {
 				// Never contest a host that claimed ImGui ownership.
 				L->error("The Dear-Modding UI host published unusable ready information");
@@ -248,15 +274,23 @@ namespace cs::host
 				return;
 			}
 
-			ImGui::SetCurrentContext(static_cast<ImGuiContext*>(a_info->imguiContext));
-			ImGui::SetAllocatorFunctions(
-				a_info->imguiAlloc, a_info->imguiFree, a_info->imguiAllocatorUserData);
+			FallbackResources resources;
+			{
+				const std::scoped_lock lock{ _fallbackMutex };
+				if (_state.Get() != IntegrationState::kRegisteredWaiting)
+					return;
 
-			if (!_state.MarkReady())
-				return;
-
-			ReleaseFallbackResources();
+				ImGui::SetCurrentContext(static_cast<ImGuiContext*>(a_info->imguiContext));
+				ImGui::SetAllocatorFunctions(
+					a_info->imguiAlloc, a_info->imguiFree, a_info->imguiAllocatorUserData);
+				if (!_state.MarkReady())
+					return;
+				if (_fallbackCoordination.ConsumeSavedResources())
+					resources = TakeFallbackResourcesLocked();
+			}
+			ReleaseFallbackResources(resources);
 			L->info("Dear-Modding UI host is ready; Community Shaders is hosted for this session");
+			RetryPendingSwapChain();
 			SyncOverlayDemand();
 		} catch (...) {
 			L->error("The host ready callback failed; Community Shaders has no menu this session");
@@ -271,25 +305,41 @@ namespace cs::host
 	void HostClient::GoUnavailable(DMUI_UnavailableReason a_reason, bool a_allowFallback) noexcept
 	{
 		try {
+			FallbackResources resources;
+			bool changed = false;
 			bool bootstrapSeen = false;
+			bool startFallback = false;
 			{
 				const std::scoped_lock lock{ _fallbackMutex };
-				bootstrapSeen = _bootstrapSeen;
+				bootstrapSeen = _fallbackCoordination.BootstrapSeen();
+				changed = a_allowFallback && !bootstrapSeen ?
+				              _state.ChooseStandaloneFromRegistered() :
+				              _state.MarkUnavailable();
+				if (!changed)
+					return;
+
+				if (a_allowFallback &&
+					_fallbackCoordination.OnStandaloneTransition() ==
+						FallbackAction::kStandaloneFromSavedResources) {
+					resources = TakeFallbackResourcesLocked();
+					startFallback = true;
+				} else if (!a_allowFallback && _fallbackCoordination.ConsumeSavedResources()) {
+					resources = TakeFallbackResourcesLocked();
+				}
+				ReleasePendingSwapChainLocked();
 			}
-			const bool changed = a_allowFallback && !bootstrapSeen ?
-			                         _state.ChooseStandaloneFromRegistered() :
-			                         _state.MarkUnavailable();
-			if (!changed)
-				return;
 
 			L->warn("Dear-Modding UI host unavailable ({})", DescribeUnavailable(a_reason));
 			if (!a_allowFallback) {
+				ReleaseFallbackResources(resources);
 				L->error("Community Shaders has no menu this session; the host still owns Dear ImGui");
 				return;
 			}
 
-			if (DecideFallback(_state.Get(), bootstrapSeen) == FallbackAction::kStandaloneFromSavedResources)
-				StartStandaloneFallback();
+			if (startFallback)
+				StartStandaloneFallback(resources);
+			else if (bootstrapSeen)
+				L->error("No saved renderer resources; the standalone menu cannot start");
 		} catch (...) {
 			L->error("The host unavailable callback failed");
 		}
@@ -345,17 +395,19 @@ namespace cs::host
 		IDXGISwapChain* a_swapChain,
 		HWND a_window) noexcept
 	{
+		AttachFinalSwapChain(a_swapChain);
+
 		const std::scoped_lock lock{ _fallbackMutex };
-		_bootstrapSeen = true;
 		const auto state = _state.Get();
-		if (DecideBootstrap(state) == BootstrapAction::kStandaloneNow) {
+		if (_fallbackCoordination.ObserveBootstrap(state) == BootstrapAction::kStandaloneNow) {
 			_state.ChooseStandalone();
-			_standaloneStarted = true;
 			return true;
 		}
 
-		if (state == IntegrationState::kRegisteredWaiting)
-			SaveFallbackResources(a_device, a_context, a_swapChain, a_window);
+		if (state == IntegrationState::kRegisteredWaiting) {
+			if (SaveFallbackResources(a_device, a_context, a_swapChain, a_window))
+				_fallbackCoordination.MarkResourcesSaved();
+		}
 		try {
 			Menu::Get().AttachHostedResources(a_device, a_context, a_window);
 		} catch (...) {
@@ -364,16 +416,17 @@ namespace cs::host
 		return false;
 	}
 
-	void HostClient::SaveFallbackResources(
+	bool HostClient::SaveFallbackResources(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context,
 		IDXGISwapChain* a_swapChain,
 		HWND a_window) noexcept
 	{
 		if (!a_device || !a_context || !a_swapChain || !a_window)
-			return;
+			return false;
 
-		ReleaseFallbackResourcesLocked();
+		auto previous = TakeFallbackResourcesLocked();
+		ReleaseFallbackResources(previous);
 		a_device->AddRef();
 		a_context->AddRef();
 		a_swapChain->AddRef();
@@ -381,62 +434,130 @@ namespace cs::host
 		_fallbackContext = a_context;
 		_fallbackSwapChain = a_swapChain;
 		_fallbackWindow = a_window;
+		return true;
 	}
 
-	void HostClient::ReleaseFallbackResourcesLocked() noexcept
+	HostClient::FallbackResources HostClient::TakeFallbackResourcesLocked() noexcept
 	{
-		if (_fallbackDevice) {
-			_fallbackDevice->Release();
-			_fallbackDevice = nullptr;
-		}
-		if (_fallbackContext) {
-			_fallbackContext->Release();
-			_fallbackContext = nullptr;
-		}
-		if (_fallbackSwapChain) {
-			_fallbackSwapChain->Release();
-			_fallbackSwapChain = nullptr;
-		}
+		FallbackResources resources{
+			.device = _fallbackDevice,
+			.context = _fallbackContext,
+			.swapChain = _fallbackSwapChain,
+			.window = _fallbackWindow
+		};
+		_fallbackDevice = nullptr;
+		_fallbackContext = nullptr;
+		_fallbackSwapChain = nullptr;
 		_fallbackWindow = nullptr;
+		return resources;
 	}
 
-	void HostClient::ReleaseFallbackResources() noexcept
+	void HostClient::ReleaseFallbackResources(FallbackResources& a_resources) noexcept
 	{
-		const std::scoped_lock lock{ _fallbackMutex };
-		ReleaseFallbackResourcesLocked();
+		if (a_resources.device) {
+			a_resources.device->Release();
+			a_resources.device = nullptr;
+		}
+		if (a_resources.context) {
+			a_resources.context->Release();
+			a_resources.context = nullptr;
+		}
+		if (a_resources.swapChain) {
+			a_resources.swapChain->Release();
+			a_resources.swapChain = nullptr;
+		}
+		a_resources.window = nullptr;
 	}
 
-	void HostClient::StartStandaloneFallback() noexcept
+	void HostClient::StartStandaloneFallback(FallbackResources a_resources) noexcept
 	{
-		ID3D11Device* device = nullptr;
-		ID3D11DeviceContext* context = nullptr;
-		IDXGISwapChain* swapChain = nullptr;
-		HWND window = nullptr;
-		{
-			const std::scoped_lock lock{ _fallbackMutex };
-			if (_standaloneStarted || !_bootstrapSeen)
-				return;
-			if (!_fallbackDevice || !_fallbackContext || !_fallbackSwapChain || !_fallbackWindow) {
-				L->error("No saved renderer resources; the standalone menu cannot start");
-				return;
-			}
-			_standaloneStarted = true;
-			device = _fallbackDevice;
-			context = _fallbackContext;
-			swapChain = _fallbackSwapChain;
-			window = _fallbackWindow;
+		if (!a_resources.IsValid()) {
+			L->error("No saved renderer resources; the standalone menu cannot start");
+			ReleaseFallbackResources(a_resources);
+			return;
 		}
 
 		try {
 			auto& menu = Menu::Get();
-			menu.OnD3D11Ready(device, context, window);
+			menu.OnD3D11Ready(a_resources.device, a_resources.context, a_resources.window);
 			// Chain the host's existing Present detour.
-			menu.HookPresentOn(swapChain);
+			menu.HookPresentOn(a_resources.swapChain);
 			L->info("Standalone menu started from the saved renderer resources");
 		} catch (...) {
 			L->error("The standalone menu fallback failed to start");
 		}
-		ReleaseFallbackResources();
+		ReleaseFallbackResources(a_resources);
+	}
+
+	void HostClient::AttachFinalSwapChain(IDXGISwapChain* a_swapChain) noexcept
+	{
+		if (!a_swapChain)
+			return;
+
+		SwapChainHandoffAttempt attempt;
+		{
+			const std::scoped_lock lock{ _fallbackMutex };
+			const auto state = _state.Get();
+			if (state != IntegrationState::kRegisteredWaiting &&
+				state != IntegrationState::kHostedReady)
+				return;
+
+			attempt = AttemptSwapChainHandoff(_api, _client, a_swapChain, state);
+			if (attempt.action == SwapChainHandoffAction::kRetry)
+				RetainPendingSwapChainLocked(a_swapChain);
+			else
+				ReleasePendingSwapChainLocked();
+		}
+
+		switch (attempt.action) {
+		case SwapChainHandoffAction::kAccepted:
+			L->info("Attached final swapchain to the Dear-Modding UI host");
+			break;
+		case SwapChainHandoffAction::kRetry:
+			L->warn("Dear-Modding UI swapchain handoff deferred: {}",
+				DescribeResult(attempt.result));
+			break;
+		case SwapChainHandoffAction::kFallback:
+			FallBackToStandalone(DescribeResult(attempt.result));
+			break;
+		case SwapChainHandoffAction::kRejectAfterReady:
+			L->error("Dear-Modding UI swapchain handoff failed after readiness: {}",
+				DescribeResult(attempt.result));
+			break;
+		}
+	}
+
+	void HostClient::RetryPendingSwapChain() noexcept
+	{
+		IDXGISwapChain* pending = nullptr;
+		{
+			const std::scoped_lock lock{ _fallbackMutex };
+			pending = _pendingHostSwapChain;
+			if (pending)
+				pending->AddRef();
+		}
+		if (!pending)
+			return;
+
+		AttachFinalSwapChain(pending);
+		pending->Release();
+	}
+
+	void HostClient::RetainPendingSwapChainLocked(IDXGISwapChain* a_swapChain) noexcept
+	{
+		if (_pendingHostSwapChain == a_swapChain)
+			return;
+		ReleasePendingSwapChainLocked();
+		a_swapChain->AddRef();
+		_pendingHostSwapChain = a_swapChain;
+	}
+
+	void HostClient::ReleasePendingSwapChainLocked() noexcept
+	{
+		if (_pendingHostSwapChain) {
+			_pendingHostSwapChain->Release();
+			_pendingHostSwapChain = nullptr;
+		}
 	}
 
 	bool HostClient::IsHostMenuVisible() const noexcept

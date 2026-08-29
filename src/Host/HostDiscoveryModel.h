@@ -37,6 +37,7 @@ namespace cs::host
 		bool hasReleaseFrame{ false };
 		bool hasIsMenuVisible{ false };
 		bool hasSelectPage{ false };
+		bool hasAttachSwapChain{ false };
 	};
 
 	HostCompatibility EvaluateHost(

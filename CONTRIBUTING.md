@@ -82,9 +82,9 @@ link-time optimization and treat compiler and linker warnings as errors.
 
 Dear ImGui comes from the overlay vcpkg port in `vcpkg\ports\imgui`, pinned to an exact upstream
 commit rather than a version tag, and `vcpkg-configuration.json` points vcpkg at it. The optional
-shared-menu host contract compares that commit byte for byte, so re-syncing the port and
-re-vendoring `include\DearModdingUI\API.h` go together; both directories carry a README with the
-procedure, and `src\Host\HostFingerprint.h` fails the build if they drift apart.
+shared-menu host contract compares the compiled layout, so re-syncing the port and re-vendoring
+`include\DearModdingUI\API.h` plus `ImGuiFingerprint.h` go together. Both directories carry the
+sync procedure, and `src\Host\HostFingerprint.h` fails the build if they drift apart.
 
 The packaged unified TOML sets every `[features.<Name>].load = false` and baseline shader ownership
 to disabled. Override only the feature being tested, or `enabled` under `[shader_ownership]` for an

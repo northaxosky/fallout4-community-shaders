@@ -49,6 +49,9 @@ namespace cs::host
 				a_view.hasReleaseFrame = a_api->releaseFrame != nullptr;
 				a_view.hasIsMenuVisible = a_api->isMenuVisible != nullptr;
 				a_view.hasSelectPage = a_api->selectPage != nullptr;
+				a_view.hasAttachSwapChain =
+					a_api->structSize >= DMUI_HOST_API_ATTACH_SWAP_CHAIN_SIZE &&
+					a_api->attachSwapChain != nullptr;
 				if (a_api->imguiFingerprint &&
 					a_api->imguiFingerprint->structSize >= sizeof(DMUI_ImGuiFingerprint)) {
 					a_view.hasFingerprint = true;

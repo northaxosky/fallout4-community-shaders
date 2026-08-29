@@ -52,4 +52,22 @@ namespace cs::host
 	};
 
 	FallbackAction DecideFallback(IntegrationState a_state, bool a_bootstrapSeen) noexcept;
+
+	class FallbackCoordination
+	{
+	public:
+		BootstrapAction ObserveBootstrap(IntegrationState a_state) noexcept;
+		void MarkResourcesSaved() noexcept { _resourcesSaved = true; }
+		FallbackAction OnStandaloneTransition() noexcept;
+		bool ConsumeSavedResources() noexcept;
+
+		bool BootstrapSeen() const noexcept { return _bootstrapSeen; }
+		bool ResourcesSaved() const noexcept { return _resourcesSaved; }
+		bool StandaloneStarted() const noexcept { return _standaloneStarted; }
+
+	private:
+		bool _bootstrapSeen{ false };
+		bool _resourcesSaved{ false };
+		bool _standaloneStarted{ false };
+	};
 }

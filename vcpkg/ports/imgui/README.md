@@ -11,11 +11,11 @@ released version tag.
 
 ## Why it is pinned this way
 
-The optional DearModdingUI host contract (`include/DearModdingUI/API.h`) refuses a client whose
-Dear ImGui build does not match the host byte for byte. It compares the upstream commit string,
-`IMGUI_VERSION_NUM`, the docking flag, and six `IMGUI_CHECKVERSION` type sizes. A version-only or
-floating pin can silently drift onto a different docking-branch snapshot with the same version
-number, so the port names the commit and its archive `SHA512` directly.
+The optional DearModdingUI host contract refuses a client whose Dear ImGui build does not match the
+host. It compares the upstream commit, compile flags, public and internal type layouts, draw-vertex
+offsets, and a deterministic layout signature. A version-only or floating pin can silently drift
+onto a different docking-branch snapshot with the same version number, so the port names the commit
+and its archive `SHA512` directly.
 
 `src/Host/HostFingerprint.h` asserts the same commit and version at compile time, so a mismatch
 between this port and the vendored header fails the build rather than a registration at runtime.

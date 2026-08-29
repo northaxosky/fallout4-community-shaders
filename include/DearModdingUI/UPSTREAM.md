@@ -1,16 +1,16 @@
-# DearModdingUI client API (vendored)
+# DearModdingUI client contract (vendored)
 
-`API.h` is a byte-exact copy of the DearModdingUI client contract. It is a standalone C ABI header:
-it pulls in `stddef.h` and `stdint.h` only, and it is never edited here. Any change must come from
-re-vendoring upstream.
+`API.h` and `ImGuiFingerprint.h` are byte-exact copies of the public DearModdingUI client contract.
+They are never edited here; changes come from re-vendoring upstream.
 
-| | |
+| File | SHA-256 |
 |---|---|
-| Upstream file | `Addictol/Include/DearModdingUI/API.h` |
-| Upstream project | [Addictol](https://www.nexusmods.com/fallout4/mods/84214) by Dear-Modding-FO4 |
-| Vendored from | branch `feat/evil-addictol`, commit `12aaf1cf6` |
-| SHA-256 | `e62516ddc32804286c0085703b4931aef9bde459b9dd11ccd5aaadfe0ae2df8b` |
-| API version | `DMUI_API_VERSION_1_0` |
+| `API.h` | `353373247094d39ef7952107d8d4bd5dee746da03859b418fdad733db1be0fcb` |
+| `ImGuiFingerprint.h` | `0376a5a03cd97ff4fe3ff9096b167b4db8c40f7010834bac36c0b7fe0f19105f` |
+
+Vendored from [Addictol](https://www.nexusmods.com/fallout4/mods/84214) by Dear-Modding-FO4,
+branch `feat/evil-addictol`, commit `9386f6cbd1d93738e2fc9d9b2c1722fd47ae2a49`. The API version is
+`DMUI_API_VERSION_1_0`.
 
 ## What this is not
 
@@ -20,11 +20,11 @@ loaded module, and any module implementing this ABI can host its pages. When no 
 present, Community Shaders runs its own standalone menu exactly as before. See
 `src/Host/README.md` for the integration and fallback rules.
 
-The header pins the Dear ImGui build both sides must share
-(`DMUI_IMGUI_UPSTREAM_COMMIT`, `DMUI_IMGUI_VERSION_NUM`, the docking flag). `vcpkg/ports/imgui`
-pins the same commit for this plugin, and `src/Host/HostFingerprint.h` static-asserts the two agree.
+The contract pins the Dear ImGui build both sides must share. `vcpkg/ports/imgui` pins the same
+commit, and `src/Host/HostFingerprint.h` builds the fingerprint from Community Shaders' compiled
+public and internal ImGui layouts.
 
 ## Re-vendoring
 
-Copy the upstream `API.h` over this one without modification, update the commit and SHA-256 above,
-then rebuild: the fingerprint asserts will fail if the pinned Dear ImGui commit also moved.
+Copy both upstream headers without modification, update the commit and SHA-256 values above, then
+rebuild. The fingerprint assertions fail if the pinned Dear ImGui commit also moved.

@@ -1,10 +1,10 @@
 # Shared UI host integration
 
 Community Shaders can draw its settings inside a shared Dear-Modding mod menu instead of its own
-window. The integration is host-neutral: it targets a small C ABI
-(`include/DearModdingUI/API.h`), discovers a host by export at runtime, and never references,
-includes, or links any particular host mod. Addictol implements this contract today, but nothing
-here depends on it and no host is required.
+window. The integration is host-neutral: it targets the vendored public contract under
+`include/DearModdingUI`, discovers a host by export at runtime, and never references, includes, or
+links any particular host mod. Addictol implements this contract today, but nothing here depends on
+it and no host is required.
 
 When no compatible host is loaded — the normal case — Community Shaders runs its own standalone
 menu, unchanged.
@@ -29,8 +29,8 @@ standalone (terminal)              unavailable ──► standalone bootstrap
   wins. Multiple exporters or multiple compatible hosts are a warning, never a double
   registration.
 - **Compatibility** means the API struct size, ABI version, required functions, and the full Dear
-  ImGui fingerprint all match. The fingerprint is built from this plugin's own compiled ImGui, and
-  the pinned commit is asserted at compile time in `src/Host/HostFingerprint.h`.
+  ImGui fingerprint all match. The fingerprint is built from this plugin's compiled `imgui.h` and
+  `imgui_internal.h` layouts by the vendored public builder.
 - **Readiness is never inferred.** An export, a successful registration, or a host state query
   proves nothing; only the host's ready callback flips this plugin into hosted mode.
 - Anything that goes wrong before the callback — no host, a null or short API, missing functions, a
@@ -48,6 +48,12 @@ standalone (terminal)              unavailable ──► standalone bootstrap
 - **Hosted or waiting**: none of that. The device, context, swap chain, and window are retained
   (`AddRef`) for a possible fallback, and the menu only loads its settings, category state, and
   adapter description for the hosted pages.
+
+The registered client declares renderer-replacement capability and hands the host the actual final
+swapchain at this seam. The ordinary D3D11 path publishes the returned swapchain; FidelityFX frame
+generation publishes its completed D3D11-facing proxy. A busy host is retried on readiness.
+Rejected pre-ready handoffs use the same standalone fallback transition; failures after readiness
+are logged without creating a competing ImGui context.
 
 If the host reports itself unavailable *before* the device exists, the bootstrap simply takes the
 standalone path. If it reports unavailable *after*, the client starts the standalone menu once on
@@ -87,8 +93,8 @@ standalone one.
 ## Tests
 
 `tests/HostIntegrationTests.cpp` covers the pure models: candidate ordering and selection, the
-absent host, incompatible ABIs and fingerprints, registration-failure policy, unavailable before
-and after the device, ready-once and no-fallback-after-ready, bootstrap decisions, page catalog
-generation and ordering including inactive features, and overlay frame-demand balancing. It builds
-without CommonLibF4, ImGui, or the plugin; run it with `ctest --test-dir build -C Release -R
-HostIntegration`.
+absent host, incompatible ABIs and fingerprints, capability and swapchain handoff negotiation,
+registration-failure policy, both fallback interleavings, one-time resource release, ready-once,
+no-fallback-after-ready, page ordering, and overlay demand balancing. It builds without CommonLibF4,
+ImGui, or the plugin; run it with
+`ctest --test-dir build -C Release -R HostIntegration`.

@@ -270,6 +270,8 @@ add_executable(HostIntegrationTests
 	src/Host/IntegrationState.cpp
 	src/Host/IntegrationState.h
 	src/Host/OverlayDemandModel.h
+	src/Host/SwapChainHandoff.cpp
+	src/Host/SwapChainHandoff.h
 )
 configure_host_test(HostIntegrationTests)
 target_include_directories(HostIntegrationTests PRIVATE "${CMAKE_SOURCE_DIR}/include")

@@ -2,6 +2,7 @@
 #include "Host/HostPageCatalog.h"
 #include "Host/IntegrationState.h"
 #include "Host/OverlayDemandModel.h"
+#include "Host/SwapChainHandoff.h"
 
 #include <algorithm>
 #include <cstring>
@@ -27,6 +28,17 @@ namespace
 
 	using namespace cs::host;
 
+	DMUI_Result handoffResult = DMUI_RESULT_OK;
+	DMUI_ClientHandle handoffClient = DMUI_INVALID_CLIENT_HANDLE;
+	void* handoffSwapChain = nullptr;
+
+	DMUI_Result DMUI_CALL AttachSwapChain(DMUI_ClientHandle a_client, void* a_swapChain) noexcept
+	{
+		handoffClient = a_client;
+		handoffSwapChain = a_swapChain;
+		return handoffResult;
+	}
+
 	DMUI_ImGuiFingerprint MakeFingerprint()
 	{
 		DMUI_ImGuiFingerprint fingerprint{};
@@ -43,6 +55,10 @@ namespace
 		fingerprint.sizeOfImVec4 = 16;
 		fingerprint.sizeOfImDrawVert = 20;
 		fingerprint.sizeOfImDrawIdx = 2;
+		fingerprint.alignOfImGuiIO = 8;
+		fingerprint.sizeOfImTextureID = 8;
+		fingerprint.offsetOfImDrawVertUv = 8;
+		fingerprint.layoutSignature = 0x123456789ABCDEF0ull;
 		return fingerprint;
 	}
 
@@ -61,7 +77,17 @@ namespace
 		view.hasReleaseFrame = true;
 		view.hasIsMenuVisible = true;
 		view.hasSelectPage = true;
+		view.hasAttachSwapChain = true;
 		return view;
+	}
+
+	DMUI_HostAPI MakeHandoffApi()
+	{
+		DMUI_HostAPI api{};
+		api.structSize = sizeof(api);
+		api.apiVersion = DMUI_API_VERSION_CURRENT;
+		api.attachSwapChain = &AttachSwapChain;
+		return api;
 	}
 
 	std::vector<FeaturePageInput> MakeFeatures()
@@ -130,7 +156,7 @@ namespace
 		CHECK(EvaluateHost(HostApiView{}, expected) == HostCompatibility::kNoApi);
 
 		auto tooSmall = MakeApiView(expected);
-		tooSmall.structSize = sizeof(DMUI_HostAPI) - 1;
+		tooSmall.structSize = DMUI_HOST_API_ATTACH_SWAP_CHAIN_SIZE - 1;
 		CHECK(EvaluateHost(tooSmall, expected) == HostCompatibility::kStructTooSmall);
 
 		auto wrongVersion = MakeApiView(expected);
@@ -140,6 +166,10 @@ namespace
 		auto missingFunctions = MakeApiView(expected);
 		missingFunctions.hasSelectPage = false;
 		CHECK(EvaluateHost(missingFunctions, expected) == HostCompatibility::kMissingFunctions);
+
+		auto missingAttach = MakeApiView(expected);
+		missingAttach.hasAttachSwapChain = false;
+		CHECK(EvaluateHost(missingAttach, expected) == HostCompatibility::kMissingFunctions);
 
 		auto noFingerprint = MakeApiView(expected);
 		noFingerprint.hasFingerprint = false;
@@ -165,7 +195,74 @@ namespace
 		otherLayout.fingerprint.sizeOfImGuiIO += 8;
 		CHECK(EvaluateHost(otherLayout, expected) == HostCompatibility::kFingerprintMismatch);
 
+		auto otherTextureId = MakeApiView(expected);
+		++otherTextureId.fingerprint.sizeOfImTextureID;
+		CHECK(EvaluateHost(otherTextureId, expected) == HostCompatibility::kFingerprintMismatch);
+
+		auto otherDrawLayout = MakeApiView(expected);
+		++otherDrawLayout.fingerprint.offsetOfImDrawVertUv;
+		CHECK(EvaluateHost(otherDrawLayout, expected) == HostCompatibility::kFingerprintMismatch);
+
+		auto otherSignature = MakeApiView(expected);
+		otherSignature.fingerprint.layoutSignature ^= 1;
+		CHECK(EvaluateHost(otherSignature, expected) == HostCompatibility::kFingerprintMismatch);
+
 		CHECK(EvaluateHost(MakeApiView(expected), expected) == HostCompatibility::kCompatible);
+	}
+
+	void TestSwapChainHandoff()
+	{
+		auto api = MakeHandoffApi();
+		constexpr DMUI_ClientHandle client = 7;
+		auto* ordinary = reinterpret_cast<void*>(0x1000);
+		auto* proxy = reinterpret_cast<void*>(0x2000);
+
+		handoffResult = DMUI_RESULT_OK;
+		handoffClient = DMUI_INVALID_CLIENT_HANDLE;
+		handoffSwapChain = nullptr;
+		auto attempt = AttemptSwapChainHandoff(
+			&api, client, ordinary, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.action == SwapChainHandoffAction::kAccepted);
+		CHECK(handoffClient == client);
+		CHECK(handoffSwapChain == ordinary);
+
+		attempt = AttemptSwapChainHandoff(
+			&api, client, proxy, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.action == SwapChainHandoffAction::kAccepted);
+		CHECK(handoffSwapChain == proxy);
+
+		handoffResult = DMUI_RESULT_RENDERER_BUSY;
+		attempt = AttemptSwapChainHandoff(
+			&api, client, proxy, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.action == SwapChainHandoffAction::kRetry);
+
+		handoffResult = DMUI_RESULT_CLIENT_CAPABILITY_REQUIRED;
+		attempt = AttemptSwapChainHandoff(
+			&api, client, proxy, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.action == SwapChainHandoffAction::kFallback);
+
+		handoffResult = DMUI_RESULT_SWAPCHAIN_REJECTED;
+		attempt = AttemptSwapChainHandoff(
+			&api, client, proxy, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.action == SwapChainHandoffAction::kFallback);
+		attempt = AttemptSwapChainHandoff(
+			&api, client, proxy, IntegrationState::kHostedReady);
+		CHECK(attempt.action == SwapChainHandoffAction::kRejectAfterReady);
+
+		handoffSwapChain = nullptr;
+		api.structSize = DMUI_HOST_API_ATTACH_SWAP_CHAIN_SIZE - 1;
+		attempt = AttemptSwapChainHandoff(
+			&api, client, ordinary, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.result == DMUI_RESULT_STRUCT_TOO_SMALL);
+		CHECK(attempt.action == SwapChainHandoffAction::kFallback);
+		CHECK(handoffSwapChain == nullptr);
+
+		api.structSize = sizeof(api);
+		api.attachSwapChain = nullptr;
+		attempt = AttemptSwapChainHandoff(
+			&api, client, ordinary, IntegrationState::kRegisteredWaiting);
+		CHECK(attempt.result == DMUI_RESULT_INVALID_DESCRIPTOR);
+		CHECK(attempt.action == SwapChainHandoffAction::kFallback);
 	}
 
 	void TestRegistrationFailurePolicy()
@@ -197,6 +294,46 @@ namespace
 		IntegrationStateMachine waiting;
 		CHECK(waiting.ChooseRegistered());
 		CHECK(DecideFallback(waiting.Get(), true) == FallbackAction::kNone);
+	}
+
+	void TestFallbackInterleavings()
+	{
+		FallbackCoordination bootstrapFirst;
+		CHECK(bootstrapFirst.ObserveBootstrap(IntegrationState::kRegisteredWaiting) ==
+			BootstrapAction::kDeferForHost);
+		bootstrapFirst.MarkResourcesSaved();
+		CHECK(bootstrapFirst.BootstrapSeen());
+		CHECK(bootstrapFirst.ResourcesSaved());
+		CHECK(bootstrapFirst.OnStandaloneTransition() ==
+			FallbackAction::kStandaloneFromSavedResources);
+		CHECK(bootstrapFirst.StandaloneStarted());
+		CHECK(!bootstrapFirst.ResourcesSaved());
+		CHECK(bootstrapFirst.OnStandaloneTransition() == FallbackAction::kNone);
+
+		FallbackCoordination fallbackFirst;
+		CHECK(fallbackFirst.OnStandaloneTransition() == FallbackAction::kNone);
+		CHECK(fallbackFirst.ObserveBootstrap(IntegrationState::kStandalone) ==
+			BootstrapAction::kStandaloneNow);
+		CHECK(fallbackFirst.BootstrapSeen());
+		CHECK(fallbackFirst.StandaloneStarted());
+		CHECK(!fallbackFirst.ResourcesSaved());
+	}
+
+	void TestSavedResourcesReleaseOnce()
+	{
+		FallbackCoordination ready;
+		CHECK(ready.ObserveBootstrap(IntegrationState::kRegisteredWaiting) ==
+			BootstrapAction::kDeferForHost);
+		ready.MarkResourcesSaved();
+
+		int releases = 0;
+		if (ready.ConsumeSavedResources())
+			++releases;
+		if (ready.ConsumeSavedResources())
+			++releases;
+		CHECK(releases == 1);
+		CHECK(!ready.ResourcesSaved());
+		CHECK(ready.OnStandaloneTransition() == FallbackAction::kNone);
 	}
 
 	void TestReadyIsOnceAndTerminal()
@@ -334,8 +471,11 @@ int main()
 	TestAbsentHost();
 	TestCandidateSelectionIsDeterministic();
 	TestIncompatibleHosts();
+	TestSwapChainHandoff();
 	TestRegistrationFailurePolicy();
 	TestUnavailableBeforeAndAfterD3D();
+	TestFallbackInterleavings();
+	TestSavedResourcesReleaseOnce();
 	TestReadyIsOnceAndTerminal();
 	TestBootstrapDecisions();
 	TestPageCatalog();

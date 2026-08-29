@@ -1,10 +1,11 @@
 #pragma once
 
-#include <cstring>
 #include <string_view>
 
-#include <DearModdingUI/API.h>
 #include <imgui.h>
+#include <imgui_internal.h>
+
+#include <DearModdingUI/ImGuiFingerprint.h>
 
 #ifndef IMGUI_HAS_DOCK
 #error "The DearModdingUI contract requires the pinned Dear ImGui docking build"
@@ -20,23 +21,7 @@ namespace cs::host
 {
 	inline const DMUI_ImGuiFingerprint& ClientFingerprint() noexcept
 	{
-		static const DMUI_ImGuiFingerprint fingerprint = [] {
-			DMUI_ImGuiFingerprint result{};
-			result.structSize = sizeof(result);
-			std::memcpy(
-				result.upstreamCommit,
-				DMUI_IMGUI_UPSTREAM_COMMIT,
-				sizeof(result.upstreamCommit));
-			result.imguiVersionNum = IMGUI_VERSION_NUM;
-			result.flags = DMUI_IMGUI_FINGERPRINT_DOCKING;
-			result.sizeOfImGuiIO = sizeof(ImGuiIO);
-			result.sizeOfImGuiStyle = sizeof(ImGuiStyle);
-			result.sizeOfImVec2 = sizeof(ImVec2);
-			result.sizeOfImVec4 = sizeof(ImVec4);
-			result.sizeOfImDrawVert = sizeof(ImDrawVert);
-			result.sizeOfImDrawIdx = sizeof(ImDrawIdx);
-			return result;
-		}();
+		static const DMUI_ImGuiFingerprint fingerprint = DMUI_MakeImGuiFingerprint();
 		return fingerprint;
 	}
 }
