@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
+#ifdef TERRAIN_SHADOWS
+#include "TerrainShadows/TerrainShadows.hlsli"
+#endif
+
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
 
 #ifdef WETNESS_EFFECTS
@@ -1732,6 +1736,28 @@ PS_OUTPUT main(PS_INPUT input)
         reprojRow3 = FarReproj_row3;
     }
 
+#ifdef TERRAIN_SHADOWS
+    float2 terrainUv = float2(
+        uv.x * ScreenSize.z,
+        1.0 - uv.y * ScreenSize.w);
+    float4 terrainProjected =
+        float4(terrainUv * 2.0 - 1.0, linearizedDepth, 1.0);
+    float4 terrainPosition = float4(
+        dot(reprojRow0, terrainProjected),
+        dot(reprojRow1, terrainProjected),
+        dot(reprojRow2, terrainProjected),
+        dot(reprojRow3, terrainProjected));
+    float4 terrainDebugColor;
+    if (TerrainShadows::TryGetDebugColor(
+            terrainPosition.xyz / terrainPosition.w,
+            TerrainShadows::TerrainShadowsSampler,
+            terrainDebugColor))
+    {
+        output.color = terrainDebugColor;
+        return output;
+    }
+#endif
+
 #if COMPOSITE_MATERIAL_5
     float3 ambientWeighted = litColor * 3.0;
     if (abs(matIdByte - 5.0) >= 0.25)
@@ -2089,6 +2115,27 @@ float4 main(PSInput input) : SV_Target0
         row2 = scene[22];
         row3 = scene[23];
     }
+
+#ifdef TERRAIN_SHADOWS
+    float2 terrainUv = float2(
+        uv.x * screenData[0].z,
+        1.0 - uv.y * screenData[0].w);
+    float4 terrainProjected =
+        float4(terrainUv * 2.0 - 1.0, linearDepth, 1.0);
+    float4 terrainPosition = float4(
+        dot(row0, terrainProjected),
+        dot(row1, terrainProjected),
+        dot(row2, terrainProjected),
+        dot(row3, terrainProjected));
+    float4 terrainDebugColor;
+    if (TerrainShadows::TryGetDebugColor(
+            terrainPosition.xyz / terrainPosition.w,
+            TerrainShadows::TerrainShadowsSampler,
+            terrainDebugColor))
+    {
+        return terrainDebugColor;
+    }
+#endif
 
 #if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK
     float2 projectedXY = float2(
@@ -2641,6 +2688,27 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         row2 = scene[22];
         row3 = scene[23];
     }
+
+#ifdef TERRAIN_SHADOWS
+    float2 terrainUv = float2(
+        uv.x * screenData[0].z,
+        1.0 - uv.y * screenData[0].w);
+    float4 terrainProjected =
+        float4(terrainUv * 2.0 - 1.0, projectedDepth, 1.0);
+    float4 terrainPosition = float4(
+        dot(row0, terrainProjected),
+        dot(row1, terrainProjected),
+        dot(row2, terrainProjected),
+        dot(row3, terrainProjected));
+    float4 terrainDebugColor;
+    if (TerrainShadows::TryGetDebugColor(
+            terrainPosition.xyz / terrainPosition.w,
+            TerrainShadows::TerrainShadowsSampler,
+            terrainDebugColor))
+    {
+        return terrainDebugColor;
+    }
+#endif
 
 #if WAVE5A_FOG_MATERIAL5
     float3 composite = direct * 1.5;

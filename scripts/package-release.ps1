@@ -100,6 +100,7 @@ $requiredShaderDirectories = @(
 	'Shaders/Common',
 	'Shaders/ScreenSpaceGI',
 	'Shaders/ScreenSpaceShadows',
+	'Shaders/TerrainShadows',
 	'Shaders/Upscaling',
 	'Shaders/WetnessEffects'
 )

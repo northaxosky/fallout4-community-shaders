@@ -19,6 +19,12 @@ float4 main() : SV_Target
 	value += SharedData::FrameCount;
 	value += BoolValue(SharedData::InInterior);
 	value += dot(SharedData::WorldUpView, 1.0);
+	value += dot(
+		SharedData::ViewToCameraRelativeWorld(float3(1.0, 2.0, 3.0)),
+		1.0);
+	value += dot(
+		SharedData::ViewToWorldPosition(float3(3.0, 2.0, 1.0)),
+		1.0);
 
 	value += BoolValue(
 		SharedData::screenSpaceShadowsSettings.EnableScreenSpaceShadows);
@@ -37,6 +43,14 @@ float4 main() : SV_Target
 	value += SharedData::wetnessEffectsSettings.MaxRainWetness;
 	value += SharedData::wetnessEffectsSettings.MinRainWetness;
 	value += SharedData::wetnessEffectsSettings.pad0;
+
+	value += BoolValue(
+		SharedData::terrainShadowsSettings.TerrainShadowMode != 0);
+	value += dot(SharedData::terrainShadowsSettings.Scale, 1.0);
+	value += dot(SharedData::terrainShadowsSettings.ZRange, 1.0);
+	value += dot(SharedData::terrainShadowsSettings.Offset, 1.0);
+	value += dot(SharedData::terrainShadowsSettings.HeightRange, 1.0);
+	value += dot(SharedData::terrainShadowsSettings.Padding, 1.0);
 	return value.xxxx;
 #else
 	return 0.0;

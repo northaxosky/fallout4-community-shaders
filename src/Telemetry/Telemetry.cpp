@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <charconv>
+#include <chrono>
 #include <exception>
 #include <limits>
 #include <sstream>
@@ -21,7 +22,8 @@ namespace cs::telemetry
 	{
 		std::atomic<std::uint64_t> g_frame{ 0 };
 		std::atomic_bool          g_enabled{ false };
-		std::atomic<std::uint32_t> g_intervalFrames{ 60 };
+		std::atomic<std::uint32_t> g_intervalSeconds{ 5 };
+		std::atomic<std::uint64_t> g_lastEmitMilliseconds{ 0 };
 		bool g_installed = false;
 		// without the post-composite anchor the pump never ticks
 		std::atomic_bool g_compositeSamplingAvailable{ true };
@@ -221,9 +223,25 @@ namespace cs::telemetry
 			if (!g_enabled.load(std::memory_order_relaxed))
 				return;
 
-			const auto interval = g_intervalFrames.load(std::memory_order_relaxed);
-			if (frame % interval != 0)
+			const auto now = static_cast<std::uint64_t>(
+				std::chrono::duration_cast<std::chrono::milliseconds>(
+					std::chrono::steady_clock::now().time_since_epoch())
+					.count());
+			auto lastEmit = g_lastEmitMilliseconds.load(std::memory_order_relaxed);
+			if (lastEmit == 0) {
+				g_lastEmitMilliseconds.compare_exchange_strong(
+					lastEmit, now, std::memory_order_relaxed);
 				return;
+			}
+			const auto intervalMilliseconds =
+				static_cast<std::uint64_t>(
+					g_intervalSeconds.load(std::memory_order_relaxed))
+				* 1000;
+			if (now - lastEmit < intervalMilliseconds
+				|| !g_lastEmitMilliseconds.compare_exchange_strong(
+					lastEmit, now, std::memory_order_relaxed)) {
+				return;
+			}
 
 			auto* logger = cs::log::Get("cs.telemetry");
 			try {
@@ -321,15 +339,16 @@ namespace cs::telemetry
 
 		void SetEnabled(bool a_enabled)
 		{
-			g_enabled.store(
+			const bool enabled =
 				a_enabled
-					&& g_compositeSamplingAvailable.load(std::memory_order_relaxed),
-				std::memory_order_relaxed);
+				&& g_compositeSamplingAvailable.load(std::memory_order_relaxed);
+			if (g_enabled.exchange(enabled, std::memory_order_relaxed) != enabled)
+				g_lastEmitMilliseconds.store(0, std::memory_order_relaxed);
 		}
 
-		void SetIntervalFrames(std::uint32_t a_interval)
+		void SetIntervalSeconds(std::uint32_t a_interval)
 		{
-			g_intervalFrames.store(a_interval == 0 ? 1 : a_interval, std::memory_order_relaxed);
+			g_intervalSeconds.store(a_interval == 0 ? 1 : a_interval, std::memory_order_relaxed);
 		}
 
 		bool Enabled() noexcept
@@ -337,9 +356,9 @@ namespace cs::telemetry
 			return g_enabled.load(std::memory_order_relaxed);
 		}
 
-		std::uint32_t IntervalFrames() noexcept
+		std::uint32_t IntervalSeconds() noexcept
 		{
-			return g_intervalFrames.load(std::memory_order_relaxed);
+			return g_intervalSeconds.load(std::memory_order_relaxed);
 		}
 	}
 

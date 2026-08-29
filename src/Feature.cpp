@@ -178,6 +178,33 @@ namespace cs
 			_loadedFeatures.end());
 	}
 
+	bool FeatureManager::SelectDebugView(
+		std::string_view a_feature,
+		std::string_view a_view)
+	{
+		Feature* selected = nullptr;
+		if (!a_feature.empty() || !a_view.empty()) {
+			if (a_feature.empty() || a_view.empty())
+				return false;
+			const auto featureIt = std::ranges::find(
+				_loadedFeatures, a_feature, &Feature::GetName);
+			if (featureIt == _loadedFeatures.end())
+				return false;
+			const auto views = (*featureIt)->GetDebugViews();
+			if (std::ranges::find(views, a_view, &FeatureDebugView::id)
+				== views.end()) {
+				return false;
+			}
+			selected = *featureIt;
+		}
+
+		for (auto* feature : _registeredFeatures) {
+			if (feature)
+				feature->SetDebugView(feature == selected ? a_view : "");
+		}
+		return true;
+	}
+
 	void FeatureManager::PrepareAll()
 	{
 		_loadedFeatures.clear();

@@ -18,17 +18,17 @@
     Exits 3 if the doc is stale.
 
 .EXAMPLE
-    pwsh scripts\shaders\scan-shader-buffers.ps1
+    pwsh scripts\scan-shader-buffers.ps1
 
 .EXAMPLE
-    pwsh scripts\shaders\scan-shader-buffers.ps1 -Check
+    pwsh scripts\scan-shader-buffers.ps1 -Check
 #>
 [CmdletBinding()]
 param([switch]$Check)
 
 $ErrorActionPreference = 'Stop'
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$repoRoot  = Split-Path -Parent (Split-Path -Parent $scriptDir)
+$repoRoot  = Split-Path -Parent $scriptDir
 $doc       = Join-Path $repoRoot 'docs\shader-buffers.md'
 
 # Controlled exit with a preserved code. Write-Error would throw under
@@ -79,7 +79,7 @@ try {
         if (($null -ne $current) -and ($current -eq $report)) {
             Write-Host 'shader-buffers.md is current.'
         } else {
-            Exit-WithError 'docs/shader-buffers.md is stale; run scripts/shaders/scan-shader-buffers.ps1 to refresh.' 3
+            Exit-WithError 'docs/shader-buffers.md is stale; run scripts/scan-shader-buffers.ps1 to refresh.' 3
         }
     } else {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $doc) | Out-Null

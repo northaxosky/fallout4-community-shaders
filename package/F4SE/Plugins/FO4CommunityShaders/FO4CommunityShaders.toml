@@ -4,7 +4,7 @@ schema_version = 1
 [logging]
 level = "info"
 telemetry = false
-telemetry_interval_frames = 60
+telemetry_interval_seconds = 5
 dump_hotkey = "Ctrl+F12"
 
 [logging.channels]
@@ -28,6 +28,8 @@ auto_hide_feature_list = false
 require_shift_to_dock = true
 use_resolution_font = true
 selected_theme_preset = ""
+debug_view_feature = ""
+debug_view = ""
 # Virtual-key codes; an array records a modifier combination.
 toggle_key = 35
 overlay_toggle_key = 121
@@ -85,6 +87,16 @@ sample_count = 1
 surface_thickness = 0.02
 bilinear_threshold = 0.02
 shadow_contrast = 1.0
+
+[features.TerrainShadows]
+load = false
+
+[features.TerrainShadows.settings]
+# Runtime toggle for the published terrain shadow. The feature itself ships off above.
+enabled = true
+
+# Heightmap resolution divisor applied after the DDS loads. 1, 2, or 4.
+downsample_factor = 1
 
 [features.MotionVectorFixes]
 load = false

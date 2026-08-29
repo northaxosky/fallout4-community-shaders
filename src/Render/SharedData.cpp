@@ -37,8 +37,10 @@ namespace cs::render
 			std::uint32_t     FrameCount = 0;
 			std::uint32_t     InInterior = 0;
 			DirectX::XMFLOAT4 WorldUpView{};
+			DirectX::XMFLOAT4 ViewToWorld[3]{};
+			DirectX::XMFLOAT4 CameraPositionWS{};
 		};
-		static_assert(sizeof(SharedDataCB) == 128);
+		static_assert(sizeof(SharedDataCB) == 192);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
 		struct SubstrateState
@@ -125,6 +127,32 @@ namespace cs::render
 					rotate.entry[2].z,
 					rotate.entry[1].z,
 					rotate.entry[0].z,
+					1.0f
+				};
+				// Match the established Ni view-to-world convention.
+				data.ViewToWorld[0] = {
+					rotate.entry[0].x,
+					rotate.entry[0].y,
+					rotate.entry[0].z,
+					0.0f
+				};
+				data.ViewToWorld[1] = {
+					rotate.entry[1].x,
+					rotate.entry[1].y,
+					rotate.entry[1].z,
+					0.0f
+				};
+				data.ViewToWorld[2] = {
+					rotate.entry[2].x,
+					rotate.entry[2].y,
+					rotate.entry[2].z,
+					0.0f
+				};
+				const auto& translate = a_sceneCamera->world.translate;
+				data.CameraPositionWS = {
+					translate.x,
+					translate.y,
+					translate.z,
 					1.0f
 				};
 			}

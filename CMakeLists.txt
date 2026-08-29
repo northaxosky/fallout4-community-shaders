@@ -136,6 +136,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(MotionVectorFixes)
 	register_feature(Upscaling)
 	register_feature(ScreenSpaceShadows)
+	register_feature(TerrainShadows)
 	register_feature(ScreenSpaceGI)
 	register_feature(WetnessEffects)
 
@@ -230,6 +231,29 @@ target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
 
 add_test(NAME ScreenSpaceShadowsMath COMMAND ScreenSpaceShadowsMathTests)
 set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
+
+add_executable(TerrainShadowsMathTests
+	tests/TerrainShadowsMathTests.cpp
+	features/TerrainShadows/src/TerrainShadowsMath.h
+	src/FeatureBuffer.h
+)
+configure_host_test(TerrainShadowsMathTests)
+target_include_directories(TerrainShadowsMathTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/TerrainShadows/src"
+	"${CMAKE_SOURCE_DIR}/src"
+)
+
+add_test(
+	NAME TerrainShadowsMath
+	COMMAND TerrainShadowsMathTests
+		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
+		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders/TerrainShadows/TerrainShadows.hlsli"
+		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders/TerrainShadows/ShadowUpdate.cs.hlsl"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFCompositeShader.hlsl"
+		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/src/TerrainShadows.cpp"
+)
+set_tests_properties(TerrainShadowsMath PROPERTIES LABELS "render;shader;unit")
 
 add_executable(WetnessEffectsMathTests
 	tests/WetnessEffectsMathTests.cpp
@@ -371,6 +395,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/package/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
 		FILES

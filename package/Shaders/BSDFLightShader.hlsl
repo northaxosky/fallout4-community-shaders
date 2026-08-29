@@ -4,6 +4,10 @@
 #include "ScreenSpaceShadows/ScreenSpaceShadows.hlsli"
 #endif
 
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+#include "TerrainShadows/TerrainShadows.hlsli"
+#endif
+
 #ifdef WETNESS_EFFECTS
 #include "WetnessEffects/WetnessEffects.hlsli"
 #endif
@@ -3770,6 +3774,11 @@ PS_OUTPUT main(PS_INPUT input)
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
     shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    shadow *= TerrainShadows::GetTerrainShadowMult(
+        SharedData::ViewToWorldPosition(posView),
+        TerrainShadows::TerrainShadowsSampler);
+#endif
 
     float3 albedoPremult  = albedoSample.xyz * albedoSample.w;
     float  NdotL_raw      = dot(normalView, SunDirection.xyz);
@@ -5060,6 +5069,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
     shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    shadow *= TerrainShadows::GetTerrainShadowMult(
+        SharedData::ViewToWorldPosition(posView),
+        TerrainShadows::TerrainShadowsSampler);
 #endif
 
     float  NdotL_raw      = dot(normalView, SunDirection.xyz);
@@ -6579,6 +6593,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
     shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    shadow *= TerrainShadows::GetTerrainShadowMult(
+        SharedData::ViewToWorldPosition(posView),
+        TerrainShadows::TerrainShadowsSampler);
 #endif
 
 #ifdef FO4_DS3_REASSOC_ORDER
@@ -8240,6 +8259,11 @@ PS_OUTPUT main(PS_INPUT input)
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
     result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    result *= TerrainShadows::GetTerrainShadowMult(
+        SharedData::ViewToWorldPosition(posView),
+        TerrainShadows::TerrainShadowsSampler);
+#endif
 
     output.diffuse = result.zzzz;
     output.specular = float4(result.xyz, 1.0);
@@ -9001,6 +9025,11 @@ PS_OUTPUT main(PS_INPUT input)
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
     result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    result *= TerrainShadows::GetTerrainShadowMult(
+        SharedData::ViewToWorldPosition(posView),
+        TerrainShadows::TerrainShadowsSampler);
+#endif
 
     output.diffuse = result.zzzz;
     output.specular = float4(result.xyz, 1.0);
@@ -9010,6 +9039,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if defined(DIRECTIONAL) && defined(SCREEN_SPACE_SHADOWS)
     splitShadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
+#endif
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    splitShadow *= TerrainShadows::GetTerrainShadowMult(
+        SharedData::ViewToWorldPosition(posView),
+        TerrainShadows::TerrainShadowsSampler);
 #endif
 
     float3 ambientSpecular;

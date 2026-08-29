@@ -2,6 +2,7 @@
 
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
+#include "TerrainShadows.h"
 #include "WetnessEffects.h"
 
 namespace cs
@@ -28,7 +29,10 @@ namespace cs
 					features::ScreenSpaceGI::GetSingleton()),
 			.wetnessEffectsSettings =
 				CollectFeatureData<WetnessEffectsFeatureData>(
-					features::WetnessEffects::GetSingleton())
+					features::WetnessEffects::GetSingleton()),
+			.terrainShadowsSettings =
+				CollectFeatureData<TerrainShadowsFeatureData>(
+					features::TerrainShadows::GetSingleton())
 		};
 	}
 }

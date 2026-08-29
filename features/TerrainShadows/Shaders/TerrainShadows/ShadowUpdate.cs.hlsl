@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: GPL-3.0-only
+Texture2D<float> TexHeight : register(t0);
+RWTexture2D<float2> RWTexShadowHeights : register(u0);
+
+cbuffer ShadowUpdateCB : register(b0)
+{
+	float2 LightPxDir : packoffset(c0.x);   // direction light descends, one pixel to the next via dda
+	float2 LightDeltaZ : packoffset(c0.z);  // per LightPxDir step, [upper, lower] penumbra, negative
+	uint StartPxCoord : packoffset(c1.x);
+	float2 PxSize : packoffset(c1.y);
+	float BlendWeight : packoffset(c1.w);
+	float2 PosRange : packoffset(c2.x);
+	float2 ZRange : packoffset(c2.z);
+}
+
+float GetInterpolatedHeight(float2 pxCoord, bool isVertical)
+{
+	uint2 dims;
+	TexHeight.GetDimensions(dims.x, dims.y);
+
+	int2 lerpPxCoordA = int2(pxCoord - .5 * float2(isVertical, !isVertical));
+	int2 lerpPxCoordB = int2(pxCoord + .5 * float2(isVertical, !isVertical));
+	float heightA = TexHeight[lerpPxCoordA];
+	float heightB = TexHeight[lerpPxCoordB];
+
+	heightA = lerp(PosRange.x, PosRange.y, heightA);
+	heightB = lerp(PosRange.x, PosRange.y, heightB);
+	heightA = (heightA - ZRange.x) / (ZRange.y - ZRange.x);
+	heightB = (heightB - ZRange.x) / (ZRange.y - ZRange.x);
+
+	bool inBoundA = all(lerpPxCoordA >= 0);
+	bool inBoundB = all(lerpPxCoordB < int2(dims));
+	if (inBoundA && inBoundB)
+		return lerp(heightA, heightB, frac((isVertical ? pxCoord.x : pxCoord.y) - .5));
+	else if (!inBoundA)
+		return heightB;
+	else
+		return heightA;
+}
+
+float2 GetInterpolatedHeightRW(float2 pxCoord, bool isVertical)
+{
+	uint2 dims;
+	RWTexShadowHeights.GetDimensions(dims.x, dims.y);
+
+	int2 lerpPxCoordA = int2(pxCoord - .5 * float2(isVertical, !isVertical));
+	int2 lerpPxCoordB = int2(pxCoord + .5 * float2(isVertical, !isVertical));
+	float2 heightA = RWTexShadowHeights[lerpPxCoordA];
+	float2 heightB = RWTexShadowHeights[lerpPxCoordB];
+
+	bool inBoundA = all(lerpPxCoordA >= 0);
+	bool inBoundB = all(lerpPxCoordB < int2(dims));
+	if (inBoundA && inBoundB)
+		return lerp(heightA, heightB, frac((isVertical ? pxCoord.x : pxCoord.y) - .5));
+	else if (!inBoundA)
+		return heightB;
+	else
+		return heightA;
+}
+
+#define NTHREADS 128
+groupshared float2 g_shadowHeight[NTHREADS];
+
+// Modulo handles offsets wider than small heightmaps.
+uint GetWrappedCoord(int coord, uint dimension)
+{
+	uint magnitude = uint(abs(coord)) % dimension;
+	return coord < 0 ? (dimension - magnitude) % dimension : magnitude;
+}
+
+[numthreads(NTHREADS, 1, 1)] void main(const uint gtid : SV_GroupThreadID, const uint gid : SV_GroupID) {
+	uint2 dims;
+	TexHeight.GetDimensions(dims.x, dims.y);
+
+	bool isVertical = abs(LightPxDir.y) > abs(LightPxDir.x);
+	float2 lightUVDir = LightPxDir * PxSize;
+
+	uint2 rayStartPxCoord = isVertical ? uint2(gid, StartPxCoord) : uint2(StartPxCoord, gid);
+	float2 rayStartUV = (rayStartPxCoord + .5) * PxSize;
+	float2 rawThreadUV = rayStartUV + gtid * lightUVDir;
+
+	bool2 isUVinRange = (rawThreadUV > 0) && (rawThreadUV < 1);
+	bool isValid = isVertical ? isUVinRange.y : isUVinRange.x;
+
+	float2 threadUV = rawThreadUV - floor(rawThreadUV);
+	float2 threadPxCoord = threadUV * dims;
+
+	// Pixel coordinates prevent cross-group writes at UV boundaries.
+	int majorStep = (isVertical ? LightPxDir.y : LightPxDir.x) > 0.0 ? 1 : -1;
+	uint majorPxCoord = GetWrappedCoord(int(StartPxCoord) + int(gtid) * majorStep, isVertical ? dims.y : dims.x);
+	float minorOffset = 0.5 + gtid * (isVertical ? LightPxDir.x : LightPxDir.y);
+	uint minorPxCoord = GetWrappedCoord(int(gid) + int(floor(minorOffset)), isVertical ? dims.x : dims.y);
+	uint2 outputPxCoord = isVertical ? uint2(minorPxCoord, majorPxCoord) : uint2(majorPxCoord, minorPxCoord);
+
+	float2 pastHeights = 0.0;
+	if (isValid) {
+		pastHeights = RWTexShadowHeights[outputPxCoord];
+
+		float2 heights = GetInterpolatedHeight(threadPxCoord, isVertical).xx;
+
+		if (gtid == 0 && all(floor(rawThreadUV - lightUVDir) == floor(rawThreadUV))) {
+			float2 sampleHeights = GetInterpolatedHeightRW(threadPxCoord - LightPxDir, isVertical) + LightDeltaZ;
+			heights = heights.x > sampleHeights.x ? heights : sampleHeights;
+		}
+
+		g_shadowHeight[gtid] = heights;
+	}
+
+	GroupMemoryBarrierWithGroupSync();
+
+	[unroll] for (uint offset = 1; offset < NTHREADS; offset <<= 1)
+	{
+		bool combineHeights = false;
+		float2 currentHeights = 0.0;
+		float2 sampleHeights = 0.0;
+		if (isValid && gtid >= offset) {
+			if (all(floor(rawThreadUV - lightUVDir * offset) == floor(rawThreadUV)))
+			{
+				combineHeights = true;
+				currentHeights = g_shadowHeight[gtid];
+				sampleHeights = g_shadowHeight[gtid - offset] + LightDeltaZ * offset;
+			}
+		}
+		GroupMemoryBarrierWithGroupSync();
+		if (combineHeights) {
+			g_shadowHeight[gtid] = currentHeights.x > sampleHeights.x ? currentHeights : sampleHeights;
+		}
+		GroupMemoryBarrierWithGroupSync();
+	}
+
+	if (isValid) {
+		RWTexShadowHeights[outputPxCoord] = lerp(pastHeights, g_shadowHeight[gtid], BlendWeight);
+	}
+}

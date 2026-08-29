@@ -97,11 +97,20 @@ namespace
 		kPresent
 	};
 
+	enum class FeatureIdentityVariant : std::uint8_t
+	{
+		kBase,
+		kWetness,
+		kTerrainShadows
+	};
+
 	struct FeatureOffIdentityExpectation
 	{
-		std::string key;
-		bool        shouldDiffer = false;
-		bool        wetnessVariant = false;
+		std::string            key;
+		FeatureIdentityVariant variant = FeatureIdentityVariant::kBase;
+		bool                   wetnessShouldDiffer = false;
+		bool                   terrainShouldDiffer = false;
+		bool                   expectTerrainVariant = false;
 	};
 
 	struct ShaderCompileJob
@@ -117,6 +126,8 @@ namespace
 		bool                  validateXeGTAOCB = false;
 		std::vector<UINT>     requiredTextureSlots;
 		std::vector<UINT>     forbiddenTextureSlots;
+		std::vector<UINT>     requiredSamplerSlots;
+		std::vector<UINT>     forbiddenSamplerSlots;
 		std::optional<FeatureOffIdentityExpectation> featureOffIdentity;
 	};
 
@@ -379,12 +390,15 @@ namespace
 			ExpectedVariable{ "DeltaTime", 100, 4 },
 			ExpectedVariable{ "FrameCount", 104, 4 },
 			ExpectedVariable{ "InInterior", 108, 4 },
-			ExpectedVariable{ "WorldUpView", 112, 16 }
+			ExpectedVariable{ "WorldUpView", 112, 16 },
+			ExpectedVariable{ "ViewToWorld", 128, 48 },
+			ExpectedVariable{ "CameraPositionWS", 176, 16 }
 		};
 		constexpr std::array featureVariables{
 			ExpectedVariable{ "screenSpaceShadowsSettings", 0, 16 },
 			ExpectedVariable{ "screenSpaceGISettings", 16, 16 },
-			ExpectedVariable{ "wetnessEffectsSettings", 32, 16 }
+			ExpectedVariable{ "wetnessEffectsSettings", 32, 16 },
+			ExpectedVariable{ "terrainShadowsSettings", 48, 48 }
 		};
 		if (shaderDesc.ConstantBuffers != 2
 			|| shaderDesc.BoundResources != 2) {
@@ -394,7 +408,7 @@ namespace
 				reflection.Get(),
 				"SharedData",
 				5,
-				128,
+				192,
 				sharedVariables);
 			!error.empty()) {
 			return error;
@@ -403,7 +417,7 @@ namespace
 			reflection.Get(),
 			"FeatureData",
 			6,
-			48,
+			96,
 			featureVariables);
 	}
 
@@ -425,14 +439,18 @@ namespace
 			return "texture binding reflection description failed";
 
 		std::set<UINT> boundTextures;
+		std::set<UINT> boundSamplers;
 		for (UINT index = 0; index < shaderDesc.BoundResources; ++index) {
 			D3D11_SHADER_INPUT_BIND_DESC binding{};
-			if (FAILED(reflection->GetResourceBindingDesc(index, &binding))
-				|| binding.Type != D3D_SIT_TEXTURE) {
+			if (FAILED(reflection->GetResourceBindingDesc(index, &binding))) {
 				continue;
 			}
-			for (UINT slot = 0; slot < std::max(binding.BindCount, 1u); ++slot)
-				boundTextures.insert(binding.BindPoint + slot);
+			for (UINT slot = 0; slot < std::max(binding.BindCount, 1u); ++slot) {
+				if (binding.Type == D3D_SIT_TEXTURE)
+					boundTextures.insert(binding.BindPoint + slot);
+				else if (binding.Type == D3D_SIT_SAMPLER)
+					boundSamplers.insert(binding.BindPoint + slot);
+			}
 		}
 
 		for (const UINT slot : a_job.requiredTextureSlots) {
@@ -442,6 +460,14 @@ namespace
 		for (const UINT slot : a_job.forbiddenTextureSlots) {
 			if (boundTextures.contains(slot))
 				return "unexpected reflected texture t" + std::to_string(slot);
+		}
+		for (const UINT slot : a_job.requiredSamplerSlots) {
+			if (!boundSamplers.contains(slot))
+				return "missing reflected sampler s" + std::to_string(slot);
+		}
+		for (const UINT slot : a_job.forbiddenSamplerSlots) {
+			if (boundSamplers.contains(slot))
+				return "unexpected reflected sampler s" + std::to_string(slot);
 		}
 		return {};
 	}
@@ -481,7 +507,9 @@ namespace
 			}
 		}
 		if (!a_job.requiredTextureSlots.empty()
-			|| !a_job.forbiddenTextureSlots.empty()) {
+			|| !a_job.forbiddenTextureSlots.empty()
+			|| !a_job.requiredSamplerSlots.empty()
+			|| !a_job.forbiddenSamplerSlots.empty()) {
 			if (auto validation = ValidateTextureBindings(blob.Get(), a_job);
 				!validation.empty()) {
 				return { std::move(validation) };
@@ -498,13 +526,17 @@ namespace
 		const ShaderCompileResult* featureOffResult = nullptr;
 		const ShaderCompileJob* wetnessJob = nullptr;
 		const ShaderCompileResult* wetnessResult = nullptr;
-		bool shouldDiffer = false;
+		const ShaderCompileJob* terrainJob = nullptr;
+		const ShaderCompileResult* terrainResult = nullptr;
+		bool wetnessShouldDiffer = false;
+		bool terrainShouldDiffer = false;
+		bool expectTerrainVariant = false;
 		bool hasExpectation = false;
 	};
 
 	std::optional<bool> HaveEqualStrippedShaderBytes(
 		ID3DBlob* a_featureOff,
-		ID3DBlob* a_wetness,
+		ID3DBlob* a_featureOn,
 		std::string& a_error)
 	{
 		constexpr UINT stripFlags = D3DCOMPILER_STRIP_DEBUG_INFO
@@ -520,19 +552,19 @@ namespace
 			a_error = "D3DStripShader failed for the feature-off blob";
 			return std::nullopt;
 		}
-		Microsoft::WRL::ComPtr<ID3DBlob> wetness;
+		Microsoft::WRL::ComPtr<ID3DBlob> featureOn;
 		if (FAILED(D3DStripShader(
-				a_wetness->GetBufferPointer(),
-				a_wetness->GetBufferSize(),
+				a_featureOn->GetBufferPointer(),
+				a_featureOn->GetBufferSize(),
 				stripFlags,
-				wetness.GetAddressOf()))) {
-			a_error = "D3DStripShader failed for the wetness blob";
+				featureOn.GetAddressOf()))) {
+			a_error = "D3DStripShader failed for the feature-on blob";
 			return std::nullopt;
 		}
-		return featureOff->GetBufferSize() == wetness->GetBufferSize()
+		return featureOff->GetBufferSize() == featureOn->GetBufferSize()
 			&& std::memcmp(
 				featureOff->GetBufferPointer(),
-				wetness->GetBufferPointer(),
+				featureOn->GetBufferPointer(),
 				featureOff->GetBufferSize())
 				== 0;
 	}
@@ -550,67 +582,114 @@ namespace
 
 			const auto& identity = *job.featureOffIdentity;
 			auto& pair = pairs[identity.key];
-			if (pair.hasExpectation
-				&& pair.shouldDiffer != identity.shouldDiffer) {
-				std::printf(
-					"FAIL: feature-off identity %s has inconsistent expectations\n",
-					identity.key.c_str());
-				++failures;
-				continue;
+			if (identity.variant == FeatureIdentityVariant::kBase) {
+				pair.wetnessShouldDiffer = identity.wetnessShouldDiffer;
+				pair.terrainShouldDiffer = identity.terrainShouldDiffer;
+				pair.expectTerrainVariant = identity.expectTerrainVariant;
+				pair.hasExpectation = true;
 			}
-			pair.shouldDiffer = identity.shouldDiffer;
-			pair.hasExpectation = true;
 
-			const auto*& pairedJob = identity.wetnessVariant ?
-				pair.wetnessJob :
-				pair.featureOffJob;
-			const auto*& pairedResult = identity.wetnessVariant ?
-				pair.wetnessResult :
-				pair.featureOffResult;
-			if (pairedJob) {
+			const ShaderCompileJob** pairedJob = nullptr;
+			const ShaderCompileResult** pairedResult = nullptr;
+			const char* variantName = "feature-off";
+			switch (identity.variant) {
+			case FeatureIdentityVariant::kBase:
+				pairedJob = &pair.featureOffJob;
+				pairedResult = &pair.featureOffResult;
+				break;
+			case FeatureIdentityVariant::kWetness:
+				pairedJob = &pair.wetnessJob;
+				pairedResult = &pair.wetnessResult;
+				variantName = "wetness";
+				break;
+			case FeatureIdentityVariant::kTerrainShadows:
+				pairedJob = &pair.terrainJob;
+				pairedResult = &pair.terrainResult;
+				variantName = "terrain-shadows";
+				break;
+			}
+			if (*pairedJob) {
 				std::printf(
 					"FAIL: feature-off identity %s has duplicate %s variants\n",
 					identity.key.c_str(),
-					identity.wetnessVariant ? "wetness" : "feature-off");
+					variantName);
 				++failures;
 				continue;
 			}
-			pairedJob = &job;
-			pairedResult = &a_results[index];
+			*pairedJob = &job;
+			*pairedResult = &a_results[index];
 		}
 
-		for (const auto& [key, pair] : pairs) {
-			if (!pair.featureOffJob || !pair.wetnessJob) {
+		const auto compareVariant = [&failures](
+			const std::string& a_key,
+			const char* a_variantName,
+			const FeatureOffIdentityPair& a_pair,
+			const ShaderCompileJob* a_variantJob,
+			const ShaderCompileResult* a_variantResult,
+			bool a_shouldDiffer) {
+			if (!a_variantJob) {
 				std::printf(
 					"FAIL: feature-off identity %s is missing a %s variant\n",
-					key.c_str(),
-					pair.featureOffJob ? "wetness" : "feature-off");
+					a_key.c_str(),
+					a_variantName);
 				++failures;
-				continue;
+				return;
 			}
-			if (!pair.featureOffResult->error.empty()
-				|| !pair.wetnessResult->error.empty()) {
-				continue;
+			if (!a_pair.featureOffResult->error.empty()
+				|| !a_variantResult->error.empty()) {
+				return;
 			}
-
 			std::string error;
 			const auto equal = HaveEqualStrippedShaderBytes(
-				pair.featureOffResult->blob.Get(),
-				pair.wetnessResult->blob.Get(),
+				a_pair.featureOffResult->blob.Get(),
+				a_variantResult->blob.Get(),
 				error);
 			if (!equal) {
 				std::printf(
-					"FAIL: feature-off identity %s\n%s\n",
-					key.c_str(),
+					"FAIL: feature-off identity %s (%s)\n%s\n",
+					a_key.c_str(),
+					a_variantName,
 					error.c_str());
+				++failures;
+				return;
+			}
+			if (*equal == a_shouldDiffer) {
+				std::printf(
+					"FAIL: feature-off identity %s (%s) expected stripped DXBC to %s\n",
+					a_key.c_str(),
+					a_variantName,
+					a_shouldDiffer ? "differ" : "match");
+				++failures;
+			}
+		};
+
+		for (const auto& [key, pair] : pairs) {
+			if (!pair.hasExpectation || !pair.featureOffJob) {
+				std::printf(
+					"FAIL: feature-off identity %s is missing a feature-off variant\n",
+					key.c_str());
 				++failures;
 				continue;
 			}
-			if (*equal == pair.shouldDiffer) {
+			compareVariant(
+				key,
+				"wetness",
+				pair,
+				pair.wetnessJob,
+				pair.wetnessResult,
+				pair.wetnessShouldDiffer);
+			if (pair.expectTerrainVariant) {
+				compareVariant(
+					key,
+					"terrain-shadows",
+					pair,
+					pair.terrainJob,
+					pair.terrainResult,
+					pair.terrainShouldDiffer);
+			} else if (pair.terrainJob) {
 				std::printf(
-					"FAIL: feature-off identity %s expected stripped DXBC to %s\n",
-					key.c_str(),
-					pair.shouldDiffer ? "differ" : "match");
+					"FAIL: feature-off identity %s carries an unexpected terrain-shadows variant\n",
+					key.c_str());
 				++failures;
 			}
 		}
@@ -783,14 +862,38 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
+	constexpr std::size_t kTerrainShadowsPermutations = 1;
+
+	std::size_t AddTerrainShadows(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
+	{
+		const auto firstJob = a_jobs.size();
+		AddCompile(
+			a_jobs,
+			a_root / "TerrainShadows" / "ShadowUpdate.cs.hlsl",
+			{},
+			"cs_5_0",
+			"main",
+			"terrain shadow update");
+		return a_jobs.size() - firstJob;
+	}
+
+	struct SlotExpectations
+	{
+		std::vector<UINT> requiredTextures;
+		std::vector<UINT> forbiddenTextures;
+		std::vector<UINT> requiredSamplers;
+		std::vector<UINT> forbiddenSamplers;
+	};
+
 	void AddRegistration(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root,
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
 		const ShaderDefines& a_contributorDefines,
 		std::set<std::string>* a_uniqueInputs = nullptr,
-		std::vector<UINT> a_requiredTextureSlots = {},
-		std::vector<UINT> a_forbiddenTextureSlots = {},
+		SlotExpectations a_slots = {},
 		std::optional<FeatureOffIdentityExpectation> a_featureOffIdentity = {})
 	{
 		const auto* target =
@@ -850,8 +953,10 @@ namespace
 			compileTestRequest->profile.c_str(),
 			compileTestRequest->entryPoint.c_str(),
 			"registration " + a_registration.name);
-		job.requiredTextureSlots = std::move(a_requiredTextureSlots);
-		job.forbiddenTextureSlots = std::move(a_forbiddenTextureSlots);
+		job.requiredTextureSlots = std::move(a_slots.requiredTextures);
+		job.forbiddenTextureSlots = std::move(a_slots.forbiddenTextures);
+		job.requiredSamplerSlots = std::move(a_slots.requiredSamplers);
+		job.forbiddenSamplerSlots = std::move(a_slots.forbiddenSamplers);
 		job.featureOffIdentity = std::move(a_featureOffIdentity);
 	}
 
@@ -864,6 +969,11 @@ namespace
 		std::size_t ambientNonTargetRows = 0;
 		std::size_t wetnessDirectRows = 0;
 		std::size_t wetnessDirectInertRows = 0;
+		std::size_t terrainDirectRows = 0;
+		std::size_t terrainDirectInertRows = 0;
+		std::size_t terrainCompositeRows = 0;
+		std::size_t terrainCompositeInertRows = 0;
+		std::size_t terrainCompositeVertexRows = 0;
 		std::size_t wetnessCompositeRows = 0;
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
@@ -899,11 +1009,30 @@ namespace
 		"BSDFLIGHT_PS_UNSHADOWED"
 	};
 
+	constexpr std::array kTerrainShadowFamilies{
+		"BSDFLIGHT_PS_DIRSPLITS1",
+		"BSDFLIGHT_PS_DIRSPLITS2",
+		"BSDFLIGHT_PS_DIRSPLITS3",
+		"BSDFLIGHT_PS_SHADOW_ONLY",
+		"BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT"
+	};
+	constexpr std::array kTerrainDebugCompositeFamilies{
+		"BSDFCOMPOSITE_PS_2D_FOG",
+		"BSDFCOMPOSITE_PS_CUBE_IBL",
+		"BSDFCOMPOSITE_PS_NO_T0_FOG"
+	};
+	constexpr UINT kTerrainShadowTextureSlot = 30;
+	constexpr UINT kTerrainShadowSamplerSlot = 13;
+
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 44;
 	constexpr std::size_t kExpectedBsdfLightRows = 167;
 	constexpr std::size_t kExpectedWetnessDirectRows = 146;
 	constexpr std::size_t kExpectedWetnessDirectInertRows = 21;
+	constexpr std::size_t kExpectedTerrainDirectRows = 76;
+	constexpr std::size_t kExpectedTerrainDirectInertRows = 91;
+	constexpr std::size_t kExpectedTerrainCompositeRows = 30;
+	constexpr std::size_t kExpectedTerrainCompositeInertRows = 40;
 	constexpr std::size_t kExpectedCompositeRegistrationRows = 74;
 	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
 	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
@@ -953,6 +1082,24 @@ namespace
 			|| IsWetnessCompositeConsumer(a_registration);
 	}
 
+	bool IsTerrainShadowConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfLight
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& DeclaresFamily(a_registration, kTerrainShadowFamilies);
+	}
+
+	bool IsTerrainDebugCompositeConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfComposite
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& DeclaresFamily(a_registration, kTerrainDebugCompositeFamilies);
+	}
+
 	LightingCounts AddLighting(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root)
@@ -968,13 +1115,19 @@ namespace
 		std::set<std::string> uniqueRegistrationInputs;
 		for (const auto& registration : registrations) {
 			std::optional<FeatureOffIdentityExpectation> identity;
-			if (registration.targetId
-					== cs::engine::ShaderInjectionTarget::kBsdfLight
+			const bool directRow = registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfLight;
+			if (directRow
 				|| registration.targetId
 					== cs::engine::ShaderInjectionTarget::kBsdfComposite) {
 				identity = FeatureOffIdentityExpectation{
 					.key = registration.name,
-					.shouldDiffer = IsWetnessConsumer(registration)
+					.variant = FeatureIdentityVariant::kBase,
+					.wetnessShouldDiffer = IsWetnessConsumer(registration),
+					.terrainShouldDiffer =
+						IsTerrainShadowConsumer(registration)
+						|| IsTerrainDebugCompositeConsumer(registration),
+					.expectTerrainVariant = true
 				};
 			}
 			AddRegistration(
@@ -983,7 +1136,6 @@ namespace
 				registration,
 				{},
 				&uniqueRegistrationInputs,
-				{},
 				{},
 				std::move(identity));
 		}
@@ -1055,11 +1207,21 @@ namespace
 		compileCases(explicitSourceCases);
 
 		using namespace cs::engine::shader_injection_defines;
-		const std::array<ShaderDefines, 3> directionalCompositions{ {
+		const std::array<ShaderDefines, 6> directionalCompositions{ {
 			{ { kScreenSpaceShadows, "1" } },
+			{ { kTerrainShadows, "1" } },
 			{ { kWetnessEffects, "1" } },
 			{
 				{ kScreenSpaceShadows, "1" },
+				{ kTerrainShadows, "1" }
+			},
+			{
+				{ kScreenSpaceShadows, "1" },
+				{ kWetnessEffects, "1" }
+			},
+			{
+				{ kScreenSpaceShadows, "1" },
+				{ kTerrainShadows, "1" },
 				{ kWetnessEffects, "1" }
 			}
 		} };
@@ -1076,6 +1238,11 @@ namespace
 		std::size_t ambientNonTargetRows = 0;
 		std::size_t wetnessDirectRows = 0;
 		std::size_t wetnessDirectInertRows = 0;
+		std::size_t terrainDirectRows = 0;
+		std::size_t terrainDirectInertRows = 0;
+		std::size_t terrainCompositeRows = 0;
+		std::size_t terrainCompositeInertRows = 0;
+		std::size_t terrainCompositeVertexRows = 0;
 		std::size_t wetnessCompositeRows = 0;
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
@@ -1086,6 +1253,10 @@ namespace
 					++wetnessDirectRows;
 				else
 					++wetnessDirectInertRows;
+				if (IsTerrainShadowConsumer(registration))
+					++terrainDirectRows;
+				else
+					++terrainDirectInertRows;
 			}
 
 			const auto* compositions =
@@ -1094,28 +1265,41 @@ namespace
 				? &directionalCompositions
 				: nullptr;
 			if (compositions) {
+				const bool consumesTerrain = IsTerrainShadowConsumer(registration);
 				for (const auto& defines : *compositions) {
 					// the authoritative normal belongs to composite rows only
 					std::optional<FeatureOffIdentityExpectation> identity;
-					if (defines.size() == 1
-						&& HasDefine(
-							defines,
-							cs::engine::shader_injection_defines::
-								kWetnessEffects)) {
-						identity = FeatureOffIdentityExpectation{
-							.key = registration.name,
-							.shouldDiffer = IsWetnessConsumer(registration),
-							.wetnessVariant = true
-						};
+					if (defines.size() == 1) {
+						if (HasDefine(defines, kWetnessEffects)) {
+							identity = FeatureOffIdentityExpectation{
+								.key = registration.name,
+								.variant = FeatureIdentityVariant::kWetness
+							};
+						} else if (HasDefine(defines, kTerrainShadows)) {
+							identity = FeatureOffIdentityExpectation{
+								.key = registration.name,
+								.variant = FeatureIdentityVariant::kTerrainShadows
+							};
+						}
 					}
+					SlotExpectations slots;
+					slots.forbiddenTextures.push_back(kGbufferNormalTextureSlot);
+					const bool terrainOn = HasDefine(defines, kTerrainShadows);
+					auto& terrainTextures = terrainOn && consumesTerrain ?
+						slots.requiredTextures :
+						slots.forbiddenTextures;
+					terrainTextures.push_back(kTerrainShadowTextureSlot);
+					auto& terrainSamplers = terrainOn && consumesTerrain ?
+						slots.requiredSamplers :
+						slots.forbiddenSamplers;
+					terrainSamplers.push_back(kTerrainShadowSamplerSlot);
 					AddRegistration(
 						a_jobs,
 						a_root,
 						registration,
 						defines,
 						nullptr,
-						{},
-						{ kGbufferNormalTextureSlot },
+						std::move(slots),
 						std::move(identity));
 					++contributorCompositionCount;
 				}
@@ -1131,6 +1315,8 @@ namespace
 				&& DeclaresFamily(registration, kAmbientCompositionFamilies);
 			const bool composesWetness = pixelRow
 				&& DeclaresFamily(registration, kWetnessCompositeFamilies);
+			const bool consumesTerrainDebug =
+				IsTerrainDebugCompositeConsumer(registration);
 			if (pixelRow) {
 				if (composesAmbient)
 					++ambientCompositionRows;
@@ -1140,8 +1326,13 @@ namespace
 					++wetnessCompositeRows;
 				else
 					++wetnessCompositeNeutralRows;
+				if (consumesTerrainDebug)
+					++terrainCompositeRows;
+				else
+					++terrainCompositeInertRows;
 			} else if (registration.stage == cs::engine::ShaderStage::kVertex) {
 				++wetnessCompositeVertexRows;
+				++terrainCompositeVertexRows;
 			} else {
 				AddPreparationFailure(
 					a_jobs,
@@ -1153,29 +1344,29 @@ namespace
 			for (const auto& defines : ambientCompositions) {
 				const bool screenSpaceGi = HasDefine(defines, kScreenSpaceGi);
 				const bool wetnessEffects = HasDefine(defines, kWetnessEffects);
-				std::vector<UINT> required;
-				std::vector<UINT> forbidden;
+				SlotExpectations slots;
 				if (pixelRow) {
-					auto& compositionSlots =
-						screenSpaceGi && composesAmbient ? required : forbidden;
+					auto& compositionSlots = screenSpaceGi && composesAmbient ?
+						slots.requiredTextures :
+						slots.forbiddenTextures;
 					compositionSlots.assign(
 						kCompositionTextureSlots.begin(),
 						kCompositionTextureSlots.end());
 				}
-				auto& normalSlot =
-					wetnessEffects && composesWetness ? required : forbidden;
+				auto& normalSlot = wetnessEffects && composesWetness ?
+					slots.requiredTextures :
+					slots.forbiddenTextures;
 				normalSlot.push_back(kGbufferNormalTextureSlot);
 				if (pixelRow
 					&& registration.compilation.defines.contains(
 						"BSDFCOMPOSITE_PS_2D_ACCUMULATOR")) {
-					forbidden.push_back(7);
+					slots.forbiddenTextures.push_back(7);
 				}
 				std::optional<FeatureOffIdentityExpectation> identity;
 				if (defines.size() == 1 && wetnessEffects) {
 					identity = FeatureOffIdentityExpectation{
 						.key = registration.name,
-						.shouldDiffer = IsWetnessConsumer(registration),
-						.wetnessVariant = true
+						.variant = FeatureIdentityVariant::kWetness
 					};
 				}
 				AddRegistration(
@@ -1184,11 +1375,32 @@ namespace
 					registration,
 					defines,
 					nullptr,
-					std::move(required),
-					std::move(forbidden),
+					std::move(slots),
 					std::move(identity));
 				++contributorCompositionCount;
 			}
+
+			SlotExpectations terrainSlots;
+			auto& terrainTextures = consumesTerrainDebug ?
+				terrainSlots.requiredTextures :
+				terrainSlots.forbiddenTextures;
+			terrainTextures.push_back(kTerrainShadowTextureSlot);
+			if (consumesTerrainDebug) {
+				terrainSlots.requiredSamplers.push_back(
+					kTerrainShadowSamplerSlot);
+			}
+			AddRegistration(
+				a_jobs,
+				a_root,
+				registration,
+				{ { kTerrainShadows, "1" } },
+				nullptr,
+				std::move(terrainSlots),
+				FeatureOffIdentityExpectation{
+					.key = registration.name,
+					.variant = FeatureIdentityVariant::kTerrainShadows
+				});
+			++contributorCompositionCount;
 		}
 		if (ambientCompositionRows != kExpectedAmbientCompositionRows
 			|| ambientNonTargetRows != kExpectedAmbientNonTargetRows) {
@@ -1257,6 +1469,38 @@ namespace
 					+ std::to_string(
 						wetnessDirectRows + wetnessDirectInertRows));
 		}
+		if (terrainDirectRows != kExpectedTerrainDirectRows
+			|| terrainDirectInertRows != kExpectedTerrainDirectInertRows
+			|| terrainDirectRows + terrainDirectInertRows
+				!= kExpectedBsdfLightRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfLight terrain shadow coverage",
+				"Expected "
+					+ std::to_string(kExpectedTerrainDirectRows)
+					+ " terrain and "
+					+ std::to_string(kExpectedTerrainDirectInertRows)
+					+ " inert rows, found "
+					+ std::to_string(terrainDirectRows)
+					+ " and "
+					+ std::to_string(terrainDirectInertRows));
+		}
+		if (terrainCompositeRows != kExpectedTerrainCompositeRows
+			|| terrainCompositeInertRows
+				!= kExpectedTerrainCompositeInertRows
+			|| terrainCompositeVertexRows
+				!= kExpectedWetnessCompositeVertexRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfComposite terrain debug coverage",
+				"Expected "
+					+ std::to_string(kExpectedTerrainCompositeRows)
+					+ " terrain debug, "
+					+ std::to_string(kExpectedTerrainCompositeInertRows)
+					+ " inert pixel, and "
+					+ std::to_string(kExpectedWetnessCompositeVertexRows)
+					+ " vertex rows");
+		}
 		return {
 			.registrationDerived = registrations.size(),
 			.uniqueRegistrationInputs =
@@ -1269,6 +1513,11 @@ namespace
 			.ambientNonTargetRows = ambientNonTargetRows,
 			.wetnessDirectRows = wetnessDirectRows,
 			.wetnessDirectInertRows = wetnessDirectInertRows,
+			.terrainDirectRows = terrainDirectRows,
+			.terrainDirectInertRows = terrainDirectInertRows,
+			.terrainCompositeRows = terrainCompositeRows,
+			.terrainCompositeInertRows = terrainCompositeInertRows,
+			.terrainCompositeVertexRows = terrainCompositeVertexRows,
 			.wetnessCompositeRows = wetnessCompositeRows,
 			.wetnessCompositeNeutralRows = wetnessCompositeNeutralRows,
 			.wetnessCompositeVertexRows = wetnessCompositeVertexRows
@@ -1375,6 +1624,15 @@ int main(int argc, char** argv)
 				+ " permutations, prepared " + std::to_string(screenSpaceGiCount));
 	}
 	const auto lightingCounts = AddLighting(jobs, argv[1]);
+	const auto terrainShadowsCount = AddTerrainShadows(jobs, argv[1]);
+	if (terrainShadowsCount != kTerrainShadowsPermutations) {
+		AddPreparationFailure(
+			jobs,
+			"TerrainShadows permutation census",
+			"expected " + std::to_string(kTerrainShadowsPermutations)
+				+ " permutations, prepared "
+				+ std::to_string(terrainShadowsCount));
+	}
 	const auto vertexCount = AddVertexPermutations(jobs, argv[1]);
 	const auto upscalingCount = AddUpscaling(jobs, argv[1]);
 	if (upscalingCount != kUpscalingPermutations) {
@@ -1403,6 +1661,13 @@ int main(int argc, char** argv)
 		"ShaderCompile witnessed t26-t29 on %zu composing and %zu non-target kBsdfComposite pixel rows\n",
 		lightingCounts.ambientCompositionRows,
 		lightingCounts.ambientNonTargetRows);
+	std::printf(
+		"ShaderCompile witnessed t30/s13 on %zu terrain shadow and %zu inert kBsdfLight rows\n",
+		lightingCounts.terrainDirectRows,
+		lightingCounts.terrainDirectInertRows);
+	std::printf(
+		"ShaderCompile checked %zu TerrainShadows permutations\n",
+		terrainShadowsCount);
 	std::printf(
 		"ShaderCompile checked %zu vertex permutations\n",
 		vertexCount);

@@ -55,6 +55,7 @@ injected in place of the stock shaders.
 | Feature | Implementation |
 |---|---|
 | **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |
+| **Terrain Shadows** | Long-range worldspace terrain shadowing from an xLODGen heightmap, marched into a shadow-height map and multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
@@ -112,6 +113,9 @@ rebindable from the menu's Keybindings tab.
 When a shared mod menu hosts the settings (see [shared menu](#shared-mod-menu)), **End** is that
 host's key, not this plugin's: the host owns opening and closing the common menu, its own binding,
 and the theme and fonts it draws with. The overlay and RenderDoc hotkeys above are unaffected.
+
+Feature settings can expose one debug visualization at a time. Terrain Shadows provides
+grayscale views of its sampled shadow term and raw heightmap.
 
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:
@@ -171,9 +175,9 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 
 ## Compatibility notes
 
-- **ENB is not supported.** Features whose effects overlap ENB - Screen Space Shadows, Screen
-  Space GI, Wetness Effects, and Upscaling - deactivate themselves when ENB is loaded. The
-  remaining features still run, but the combination is untested.
+- **ENB is not supported.** Features whose effects overlap ENB - Screen Space Shadows, Terrain
+  Shadows, Screen Space GI, Wetness Effects, and Upscaling - deactivate themselves when ENB is
+  loaded. The remaining features still run, but the combination is untested.
 - **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
   load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
   needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR
@@ -183,6 +187,12 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   animation-sequence correction is unproven on OG (1.10.163) and is skipped there.
 - **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries
   render-resolution motion in the upper-left sub-rect while upscaling is active.
+- **Terrain Shadows** needs a worldspace heightmap on disk; the plugin generates none. Drop an
+  FO4 xLODGen beta 132 export at
+  `Data\Textures\Terrain\<Worldspace>\<Worldspace>.Terrain.HeightMap.<W>.<S>.<E>.<N>.<minZ>.<maxZ>.dds`,
+  or an upstream-style custom map at
+  `Data\Textures\HeightMaps\<Worldspace>.HeightMap.<W>.<S>.<E>.<N>.<zBlack>.<zWhite>.<minZ>.<maxZ>.dds`,
+  which takes precedence. Worldspaces without a map render unchanged.
 - **RenderDoc** requires an external `renderdoc.dll` exposing API 1.7.0. It initializes at startup,
   so enabling it requires a restart. Capturing an FSR3 dispatch can destabilise that dispatch;
   disable capture before diagnosing FSR3 crashes.

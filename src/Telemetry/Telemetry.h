@@ -33,8 +33,8 @@ namespace cs::telemetry
 		void Tick();
 		void DumpAll();
 		void SetEnabled(bool a_enabled);
-		void SetIntervalFrames(std::uint32_t a_interval);
+		void SetIntervalSeconds(std::uint32_t a_interval);
 		bool Enabled() noexcept;
-		std::uint32_t IntervalFrames() noexcept;
+		std::uint32_t IntervalSeconds() noexcept;
 	}
 }

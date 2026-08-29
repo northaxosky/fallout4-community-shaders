@@ -32,18 +32,36 @@ namespace cs
 	};
 	static_assert(sizeof(WetnessEffectsFeatureData) == 16);
 
+	struct alignas(16) TerrainShadowsFeatureData
+	{
+		std::uint32_t TerrainShadowMode = 0;
+		float         Scale[3]{};
+		float         ZRange[2]{};
+		float         Offset[2]{};
+		float         HeightRange[2]{};
+		float         Padding[2]{};
+	};
+	static_assert(sizeof(TerrainShadowsFeatureData) == 48);
+
 	struct alignas(16) FeatureDataCB
 	{
 		ScreenSpaceShadowsFeatureData screenSpaceShadowsSettings;
 		ScreenSpaceGIFeatureData      screenSpaceGISettings;
 		WetnessEffectsFeatureData     wetnessEffectsSettings;
+		TerrainShadowsFeatureData     terrainShadowsSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 48);
+	static_assert(sizeof(FeatureDataCB) == 96);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
 	static_assert(offsetof(WetnessEffectsFeatureData, MaxRainWetness) == 4);
 	static_assert(offsetof(WetnessEffectsFeatureData, MinRainWetness) == 8);
+	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 48);
+	static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
+	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
+	static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
+	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
+	static_assert(offsetof(TerrainShadowsFeatureData, HeightRange) == 32);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

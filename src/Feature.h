@@ -5,6 +5,7 @@
 #include "Utils/RestartSettings.h"
 
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -22,6 +23,12 @@ namespace cs
 	{
 		class Sink;
 	}
+
+	struct FeatureDebugView
+	{
+		std::string_view id;
+		std::string_view label;
+	};
 
 	class Feature
 	{
@@ -63,6 +70,9 @@ namespace cs
 		virtual bool ProducesTelemetry() const { return false; }
 		// Telemetry must read only cached or atomic state.
 		virtual void CollectTelemetry(telemetry::Sink& ) const {}
+
+		virtual std::span<const FeatureDebugView> GetDebugViews() const noexcept { return {}; }
+		virtual void SetDebugView(std::string_view ) noexcept {}
 
 		virtual void RestoreDefaultSettings() {}
 
@@ -187,6 +197,7 @@ namespace cs
 
 		const std::vector<Feature*>& GetAll() const noexcept { return _loadedFeatures; }
 		const std::vector<Feature*>& GetRegisteredFeatures() const noexcept { return _registeredFeatures; }
+		bool SelectDebugView(std::string_view a_feature, std::string_view a_view);
 
 	private:
 		FeatureManager() = default;

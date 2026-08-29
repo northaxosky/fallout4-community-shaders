@@ -28,6 +28,10 @@ namespace SharedData
 		bool InInterior;
 		// xyz: world up in view space, w: 1 when sourced from a valid world camera
 		float4 WorldUpView;
+		// Camera rotation rows.
+		float4 ViewToWorld[3];
+		// xyz: camera world position, w: validity
+		float4 CameraPositionWS;
 	};
 
 	struct ScreenSpaceShadowsSettings
@@ -53,11 +57,22 @@ namespace SharedData
 		float pad0;
 	};
 
+	struct TerrainShadowsSettings
+	{
+		uint TerrainShadowMode;
+		float3 Scale;
+		float2 ZRange;
+		float2 Offset;
+		float2 HeightRange;
+		float2 Padding;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
 		ScreenSpaceGISettings screenSpaceGISettings;
 		WetnessEffectsSettings wetnessEffectsSettings;
+		TerrainShadowsSettings terrainShadowsSettings;
 	};
 
 	// standard D3D depth: near = 0, far = 1
@@ -82,6 +97,19 @@ namespace SharedData
 	{
 		float2 adjusted = max(0.0, uv * DynamicResolution.xy);
 		return ClampDynamicResolutionAdjustedScreenPosition(adjusted, uv);
+	}
+
+	float3 ViewToCameraRelativeWorld(float3 viewPosition)
+	{
+		float3 positionNi = viewPosition.zyx;
+		return positionNi.x * ViewToWorld[0].xyz +
+			positionNi.y * ViewToWorld[1].xyz +
+			positionNi.z * ViewToWorld[2].xyz;
+	}
+
+	float3 ViewToWorldPosition(float3 viewPosition)
+	{
+		return ViewToCameraRelativeWorld(viewPosition) + CameraPositionWS.xyz;
 	}
 }
 #endif  // __SHARED_DATA_DEPENDENCY_HLSL__

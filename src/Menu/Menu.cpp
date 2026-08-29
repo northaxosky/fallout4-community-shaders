@@ -1436,9 +1436,18 @@ namespace cs
 		ReadBoolFromToml(*menu, "require_shift_to_dock", settings.RequireShiftToDock);
 		ReadBoolFromToml(*menu, "use_resolution_font", settings.UseResolutionFont);
 		ReadStringFromToml(*menu, "selected_theme_preset", settings.SelectedThemePreset);
+		ReadStringFromToml(*menu, "debug_view_feature", settings.DebugViewFeature);
+		ReadStringFromToml(*menu, "debug_view", settings.DebugView);
 
 		InputCombo::ComboList::Read(*menu, "toggle_key", settings.ToggleKey);
 		InputCombo::ComboList::Read(*menu, "overlay_toggle_key", settings.OverlayToggleKey);
+
+		if (!FeatureManager::Get().SelectDebugView(
+				settings.DebugViewFeature, settings.DebugView)) {
+			settings.DebugViewFeature.clear();
+			settings.DebugView.clear();
+			FeatureManager::Get().SelectDebugView({}, {});
+		}
 
 		CreateDefaultThemes();
 
@@ -1473,6 +1482,8 @@ namespace cs
 		menu.insert_or_assign("require_shift_to_dock", settings.RequireShiftToDock);
 		menu.insert_or_assign("use_resolution_font", settings.UseResolutionFont);
 		menu.insert_or_assign("selected_theme_preset", settings.SelectedThemePreset);
+		menu.insert_or_assign("debug_view_feature", settings.DebugViewFeature);
+		menu.insert_or_assign("debug_view", settings.DebugView);
 
 		InputCombo::ComboList::Append(menu, "toggle_key", settings.ToggleKey);
 		InputCombo::ComboList::Append(menu, "overlay_toggle_key", settings.OverlayToggleKey);
@@ -1486,6 +1497,51 @@ namespace cs
 			return false;
 		}
 		return true;
+	}
+
+	void Menu::SetDebugViewSelection(std::string a_feature, std::string a_view)
+	{
+		if (!FeatureManager::Get().SelectDebugView(a_feature, a_view)) {
+			a_feature.clear();
+			a_view.clear();
+			FeatureManager::Get().SelectDebugView({}, {});
+		}
+		settings.DebugViewFeature = std::move(a_feature);
+		settings.DebugView = std::move(a_view);
+		Save();
+	}
+
+	void Menu::DrawDebugViewSelector(const Feature& a_feature)
+	{
+		const auto views = a_feature.GetDebugViews();
+		if (views.empty())
+			return;
+
+		const bool featureSelected =
+			settings.DebugViewFeature == a_feature.GetName();
+		const auto selected = featureSelected ?
+			std::ranges::find(
+				views, settings.DebugView, &FeatureDebugView::id) :
+			views.end();
+		const std::string preview =
+			selected == views.end() ? "Off" : std::string(selected->label);
+		if (ImGui::BeginCombo("Debug visualization", preview.c_str())) {
+			if (ImGui::Selectable("Off", !featureSelected))
+				SetDebugViewSelection({}, {});
+			for (const auto& view : views) {
+				const bool active =
+					featureSelected && settings.DebugView == view.id;
+				const std::string label(view.label);
+				if (ImGui::Selectable(label.c_str(), active)) {
+					SetDebugViewSelection(
+						std::string(a_feature.GetName()),
+						std::string(view.id));
+				}
+			}
+			ImGui::EndCombo();
+		}
+		if (auto tooltip = ui::HoverTooltipWrapper())
+			ImGui::Text("%s", "Selecting a view disables any other feature's view.");
 	}
 
 	void Menu::DrawPresets()

@@ -5,6 +5,7 @@
 #include "Utils/Hotkey.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <limits>
@@ -183,6 +184,19 @@ namespace cs::log
 	void ApplyConfigFromToml(const toml::table& a_logging)
 	{
 		auto* logger = Get("cs.log");
+		constexpr std::array<std::string_view, 5> knownKeys{
+			"level",
+			"channels",
+			"telemetry",
+			"telemetry_interval_seconds",
+			"dump_hotkey"
+		};
+		for (const auto& [key, value] : a_logging) {
+			(void)value;
+			if (std::ranges::find(knownKeys, key.str()) == knownKeys.end())
+				logger->warn("Unknown logging key '{}'; ignoring", key.str());
+		}
+
 		auto& config = Config();
 		{
 			std::scoped_lock lock(config.mutex);
@@ -191,7 +205,7 @@ namespace cs::log
 		}
 		SetGlobalLevel(spdlog::level::info);
 		cs::telemetry::pump::SetEnabled(false);
-		cs::telemetry::pump::SetIntervalFrames(60);
+		cs::telemetry::pump::SetIntervalSeconds(5);
 
 		if (const auto* levelNode = a_logging.get("level")) {
 			if (const auto value = levelNode->value<std::string>()) {
@@ -232,13 +246,13 @@ namespace cs::log
 				logger->warn("logging.telemetry must be a boolean");
 		}
 
-		if (const auto* intervalNode = a_logging.get("telemetry_interval_frames")) {
+		if (const auto* intervalNode = a_logging.get("telemetry_interval_seconds")) {
 			if (const auto interval = intervalNode->value<std::int64_t>();
 				interval && *interval >= 1
 				&& *interval <= static_cast<std::int64_t>(std::numeric_limits<std::uint32_t>::max())) {
-				cs::telemetry::pump::SetIntervalFrames(static_cast<std::uint32_t>(*interval));
+				cs::telemetry::pump::SetIntervalSeconds(static_cast<std::uint32_t>(*interval));
 			} else {
-				logger->warn("logging.telemetry_interval_frames must be an integer of at least 1");
+				logger->warn("logging.telemetry_interval_seconds must be an integer of at least 1");
 			}
 		}
 
@@ -264,8 +278,8 @@ namespace cs::log
 		logging.insert_or_assign("level", std::string(LevelToString(GlobalLevel())));
 		logging.insert_or_assign("telemetry", cs::telemetry::pump::Enabled());
 		logging.insert_or_assign(
-			"telemetry_interval_frames",
-			static_cast<std::int64_t>(cs::telemetry::pump::IntervalFrames()));
+			"telemetry_interval_seconds",
+			static_cast<std::int64_t>(cs::telemetry::pump::IntervalSeconds()));
 
 		std::vector<std::pair<std::string, spdlog::level::level_enum>> overrides;
 		std::string hotkey;

@@ -291,12 +291,16 @@ namespace cs
 			bool UseResolutionFont = true;
 			ThemeSettings Theme;
 			std::string SelectedThemePreset = "";
+			std::string DebugViewFeature;
+			std::string DebugView;
 		};
 
 		const Settings& GetSettings() const noexcept { return settings; }
 		Settings& GetSettings() noexcept { return settings; }
 		const ThemeSettings& GetTheme() const noexcept { return settings.Theme; }
 		ThemeSettings& GetTheme() noexcept { return settings.Theme; }
+		void SetDebugViewSelection(std::string a_feature, std::string a_view);
+		void DrawDebugViewSelector(const Feature& a_feature);
 		ThemeSettings::FontRoleSettings& GetFontRoleSettings(FontRole a_role) noexcept
 		{
 			return settings.Theme.FontRoles[static_cast<std::size_t>(a_role)];

@@ -931,6 +931,44 @@ namespace
 		ok &= Check(
 			RegisterReplacement(std::move(anchorSlotReuse)),
 			"a rejected anchor left its slot or define claim committed");
+
+		constexpr std::uint32_t kTerrainTextureSlot = 30;
+		constexpr std::uint32_t kTerrainSamplerSlot = 13;
+		const auto samplerClaim = [](std::uint32_t a_slot) {
+			return ShaderSlotClaim{
+				.stage = ShaderStage::kPixel,
+				.resourceType = ShaderResourceType::kSampler,
+				.slot = a_slot
+			};
+		};
+
+		ShaderReplacementRegistration terrainClaimant;
+		terrainClaimant.targetId = ShaderInjectionTarget::kBsdfLight;
+		terrainClaimant.contributor = "TerrainShadows";
+		terrainClaimant.defines = { { "TERRAIN_SHADOWS", "1" } };
+		terrainClaimant.slotClaims = {
+			claim(kTerrainTextureSlot),
+			samplerClaim(kTerrainSamplerSlot)
+		};
+		ok &= Check(
+			RegisterReplacement(std::move(terrainClaimant)),
+			"the terrain shadow t30/s13 claim pair was rejected");
+
+		ShaderReplacementRegistration samplerIndexAsTexture;
+		samplerIndexAsTexture.targetId = ShaderInjectionTarget::kBsdfLight;
+		samplerIndexAsTexture.contributor = "ledger-sampler-index-as-texture";
+		samplerIndexAsTexture.slotClaims = { claim(kTerrainSamplerSlot) };
+		ok &= Check(
+			RegisterReplacement(std::move(samplerIndexAsTexture)),
+			"t13 was rejected because s13 is claimed");
+
+		ShaderReplacementRegistration duplicateSampler;
+		duplicateSampler.targetId = ShaderInjectionTarget::kBsdfLight;
+		duplicateSampler.contributor = "ledger-duplicate-sampler";
+		duplicateSampler.slotClaims = { samplerClaim(kTerrainSamplerSlot) };
+		ok &= Check(
+			!RegisterReplacement(std::move(duplicateSampler)),
+			"a second s13 claim on kBsdfLight was accepted");
 		return ok;
 	}
 
