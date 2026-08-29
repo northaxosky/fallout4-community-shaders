@@ -71,7 +71,7 @@ namespace cs
 		// Overlays render even while settings are closed.
 		virtual void DrawOverlay() {}
 
-		// Whether DrawOverlay currently needs frames.
+		// True while DrawOverlay needs frames.
 		virtual bool IsOverlayActive() const { return false; }
 
 		// Fires after D3D11 device creation.

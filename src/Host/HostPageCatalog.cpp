@@ -86,7 +86,7 @@ namespace cs::host
 		for (const std::size_t index : order) {
 			const auto& feature = a_features[index];
 			std::string id = "feature-" + MakeAsciiId(feature.name);
-			// Two features can normalize onto the same ASCII ID; the host rejects duplicates.
+			// Normalized feature IDs can collide.
 			if (usedIds.contains(id)) {
 				std::string candidate;
 				for (std::size_t suffix = 2;; ++suffix) {

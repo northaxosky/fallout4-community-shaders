@@ -10,7 +10,6 @@
 #error "The DearModdingUI contract requires the pinned Dear ImGui docking build"
 #endif
 
-// Fail the build before a fingerprint mismatch can reach runtime.
 static_assert(IMGUI_VERSION_NUM == DMUI_IMGUI_VERSION_NUM,
 	"vcpkg/ports/imgui is out of sync with the vendored DearModdingUI API");
 static_assert(sizeof(DMUI_IMGUI_UPSTREAM_COMMIT) == 41);

@@ -204,7 +204,6 @@ namespace cs
 				return style;
 			}();
 
-			// ImGuiCol_ order.
 			static_assert(ImGuiCol_COUNT == 63,
 				"Dear ImGui changed its style colors; re-check the FullPalette order below");
 			std::array<ImVec4, ImGuiCol_COUNT> FullPalette = {

@@ -442,7 +442,7 @@ namespace cs
 
 	void Menu::AttachHostedResources(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd)
 	{
-		// The adapter retains the fallback COM references.
+		// HostClient owns these fallback COM references.
 		_device = a_device;
 		_context = a_context;
 		_hwnd = a_hwnd;
