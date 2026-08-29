@@ -457,18 +457,22 @@ namespace cs
 
 	void FeatureListRenderer::DrawMenuVisitor::operator()(Feature* a_feature)
 	{
-		const bool isDisabled = IsDisabledAtBoot(*a_feature);
-		const bool isActive = a_feature->IsActive();
-
-		if (ImGui::BeginChild("##FeatureConfigFrame", { 0, 0 }, true)) {
-			RenderFeatureHeader(a_feature, isDisabled);
-			RenderFeatureSettings(a_feature, isDisabled, isActive);
-			RenderRestoreDefaultsButton(a_feature, isDisabled, isActive);
-		}
+		if (ImGui::BeginChild("##FeatureConfigFrame", { 0, 0 }, true))
+			RenderFeatureContent(*a_feature);
 		ImGui::EndChild();
 	}
 
-	void FeatureListRenderer::DrawMenuVisitor::RenderFeatureHeader(Feature* a_feature, bool a_isDisabled)
+	void FeatureListRenderer::RenderFeatureContent(Feature& a_feature)
+	{
+		const bool isDisabled = IsDisabledAtBoot(a_feature);
+		const bool isActive = a_feature.IsActive();
+
+		RenderFeatureHeader(&a_feature, isDisabled);
+		RenderFeatureSettings(&a_feature, isDisabled, isActive);
+		RenderRestoreDefaultsButton(&a_feature, isDisabled, isActive);
+	}
+
+	void FeatureListRenderer::RenderFeatureHeader(Feature* a_feature, bool a_isDisabled)
 	{
 		const auto& themeSettings = Menu::Get().GetTheme();
 
@@ -512,7 +516,7 @@ namespace cs
 		ImGui::SetCursorScreenPos(cursorPosAfterHeader);
 	}
 
-	void FeatureListRenderer::DrawMenuVisitor::RenderFeatureSettings(Feature* a_feature, bool a_isDisabled, bool a_isActive)
+	void FeatureListRenderer::RenderFeatureSettings(Feature* a_feature, bool a_isDisabled, bool a_isActive)
 	{
 		const auto& themeSettings = Menu::Get().GetTheme();
 
@@ -576,7 +580,7 @@ namespace cs
 		}
 	}
 
-	void FeatureListRenderer::DrawMenuVisitor::RenderRestartSettings(Feature* a_feature)
+	void FeatureListRenderer::RenderRestartSettings(Feature* a_feature)
 	{
 		settings::RestartSettingsView restartSettings;
 		if (!InvokeFeatureCallback(*a_feature, "Menu::GetRestartSettings", true, [&]() {
@@ -601,7 +605,7 @@ namespace cs
 		}
 	}
 
-	void FeatureListRenderer::DrawMenuVisitor::RenderRestoreDefaultsButton(Feature* a_feature, bool a_isDisabled, bool a_isActive)
+	void FeatureListRenderer::RenderRestoreDefaultsButton(Feature* a_feature, bool a_isDisabled, bool a_isActive)
 	{
 		bool hasResettableSettings = false;
 		if (a_isDisabled || !a_isActive ||

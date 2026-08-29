@@ -23,7 +23,7 @@ injected in place of the stock shaders.
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](CMakeLists.txt)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
-<sub>[Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
+<sub>[Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [Shared menu](#shared-mod-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
 
 </div>
 
@@ -109,6 +109,10 @@ Feature hotkeys are configurable in the unified TOML: `toggle_hotkey` for the ov
 The menu's own keys live under `[menu]` as `toggle_key` and `overlay_toggle_key` and are
 rebindable from the menu's Keybindings tab.
 
+When a shared mod menu hosts the settings (see [shared menu](#shared-mod-menu)), **End** is that
+host's key, not this plugin's: the host owns opening and closing the common menu, its own binding,
+and the theme and fonts it draws with. The overlay and RenderDoc hotkeys above are unaffected.
+
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:
 
@@ -118,6 +122,27 @@ assets live in subdirectories beneath it:
 | `Themes\` | Importable menu theme presets as `<Name>.toml`; the unified User TOML records only your edits to the shipped theme |
 | `Icons\` | Optional action and category icons from [Phosphor](https://github.com/phosphor-icons/core), MIT; see [Icons/LICENSE](package/F4SE/Plugins/FO4CommunityShaders/Icons/LICENSE) |
 | `Presets\` | Cross-feature setting presets |
+
+---
+
+## Shared mod menu
+
+Community Shaders can draw its settings inside a shared Dear-Modding mod menu instead of its own
+window. This is entirely optional and needs no configuration: at startup the plugin looks for any
+loaded module exposing the neutral `DearModdingUI` client ABI, and joins the first compatible one.
+[Addictol](https://www.nexusmods.com/fallout4/mods/84214) implements that ABI, but no host is
+required and none is depended on.
+
+When a host takes over, the home, general, advanced, presets, and per-feature pages appear in the
+common menu under **Community Shaders**, and that menu's own key opens and closes it. The host owns
+the window, theme, and fonts, so this plugin's own interface and menu-key settings do not apply
+while hosted. Feature hotkeys, the performance overlay, and RenderDoc capture keep working exactly
+as they do standalone.
+
+With no compatible host loaded - or if registration or backend initialization fails before
+readiness - Community Shaders opens its own menu with **End**, unchanged. Both sides must be built
+against the same pinned Dear ImGui; a mismatch is refused and the standalone menu is used.
+Developer details live in [`src/Host/README.md`](src/Host/README.md).
 
 ---
 

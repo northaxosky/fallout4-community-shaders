@@ -36,6 +36,7 @@ CMakeUserPresets.json
 cmake_install.cmake
 Makefile
 *.cmake.in
+!vcpkg/ports/**/*.cmake.in
 compile_commands.json
 
 # Visual Studio

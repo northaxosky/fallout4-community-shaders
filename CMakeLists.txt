@@ -261,6 +261,22 @@ target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
 add_test(NAME LogThrottle COMMAND LogThrottleTests)
 set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
+add_executable(HostIntegrationTests
+	tests/HostIntegrationTests.cpp
+	src/Host/HostDiscoveryModel.cpp
+	src/Host/HostDiscoveryModel.h
+	src/Host/HostPageCatalog.cpp
+	src/Host/HostPageCatalog.h
+	src/Host/IntegrationState.cpp
+	src/Host/IntegrationState.h
+	src/Host/OverlayDemandModel.h
+)
+configure_host_test(HostIntegrationTests)
+target_include_directories(HostIntegrationTests PRIVATE "${CMAKE_SOURCE_DIR}/include")
+
+add_test(NAME HostIntegration COMMAND HostIntegrationTests)
+set_tests_properties(HostIntegration PROPERTIES LABELS "menu;host;unit")
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(UpscalingPublicationTests
 		tests/UpscalingPublicationTests.cpp

@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include "Feature.h"
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Render/PixelShaderSwapBroker.h"
@@ -128,12 +129,23 @@ namespace cs::d3d11
 			InvokeOwner("FeatureManager shader-injection validation", [&] {
 				FeatureManager::Get().ValidateShaderInjectionsAll();
 			});
-			InvokeOwner("Menu D3D11 initialization", [&] {
-				Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
+			// Defer menu ownership to a registered host.
+			bool standalone = true;
+			InvokeOwner("Dear-Modding UI bootstrap", [&] {
+				standalone = host::HostClient::Get().OnD3D11Bootstrap(
+					*a_device,
+					*a_immediateContext,
+					*a_swapChain,
+					a_swapChainDesc->OutputWindow);
 			});
-			InvokeOwner("Menu Present hook", [&] {
-				Menu::Get().HookPresentOn(*a_swapChain);
-			});
+			if (standalone) {
+				InvokeOwner("Menu D3D11 initialization", [&] {
+					Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
+				});
+				InvokeOwner("Menu Present hook", [&] {
+					Menu::Get().HookPresentOn(*a_swapChain);
+				});
+			}
 			InvokeOwner("Shader cache startup summary", [] {
 				LogShaderCacheSummary();
 			});

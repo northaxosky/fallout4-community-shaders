@@ -39,10 +39,6 @@
       "version-date": "2025-10-27"
     },
     {
-      "name": "imgui",
-      "version": "1.92.6"
-    },
-    {
       "name": "magic-enum",
       "version": "0.9.7",
       "port-version": 1

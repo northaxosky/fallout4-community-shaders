@@ -2,6 +2,7 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/AdvancedSettingsRenderer.h"
 #include "Menu/BackgroundBlur.h"
@@ -433,9 +434,43 @@ namespace cs
 		if (!_imguiInited)
 			return;
 		HookWndProc();
+		_inputMode.store(InputMode::Standalone, std::memory_order_release);
 		_tracyD3D11Ctx = TracyD3D11Context(a_device, a_context);
 
 		L->info("ImGui initialized on HWND {:#x}", reinterpret_cast<std::uintptr_t>(a_hwnd));
+	}
+
+	void Menu::AttachHostedResources(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd)
+	{
+		// The adapter retains the fallback COM references.
+		_device = a_device;
+		_context = a_context;
+		_hwnd = a_hwnd;
+		_inputMode.store(InputMode::Hosted, std::memory_order_release);
+
+		Load();
+		RefreshHotkeySnapshots();
+		CaptureAdapterDescription();
+		BuildCategoryCounts();
+		HookWndProc();
+
+		L->info("Hosted menu state attached on HWND {:#x}", reinterpret_cast<std::uintptr_t>(a_hwnd));
+	}
+
+	void Menu::PumpHostedMaintenance()
+	{
+		FinishPendingWndProcFailures();
+		if (_featureLoadDirty.exchange(false, std::memory_order_acq_rel)) {
+			feature_config::Reload();
+			BuildCategoryCounts();
+		}
+	}
+
+	bool Menu::IsOpen() const noexcept
+	{
+		if (_inputMode.load(std::memory_order_acquire) == InputMode::Hosted)
+			return host::HostClient::Get().IsHostMenuVisible();
+		return _isOpenSnapshot.load(std::memory_order_acquire);
 	}
 
 	void Menu::HookPresentOn(IDXGISwapChain* a_chain)
@@ -710,6 +745,39 @@ namespace cs
 			featureManager.FinishRuntimeCallbackPass();
 	}
 
+	bool Menu::DispatchFeatureWndProcCallbacks(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
+	{
+		for (auto& entry : _wndProcCallbacks) {
+			if (!entry.owner || !entry.callback || entry.disabled.load(std::memory_order_acquire))
+				continue;
+
+			try {
+				if (entry.callback(a_hwnd, a_msg, a_wparam, a_lparam))
+					return true;
+			} catch (const std::exception&) {
+				entry.disabled.store(true, std::memory_order_release);
+				entry.pendingFailure.store(
+					WndProcCallbackEntry::FailureKind::StandardException,
+					std::memory_order_release);
+			} catch (...) {
+				entry.disabled.store(true, std::memory_order_release);
+				entry.pendingFailure.store(
+					WndProcCallbackEntry::FailureKind::UnknownException,
+					std::memory_order_release);
+			}
+		}
+		return false;
+	}
+
+	bool Menu::MatchesOverlayHotkey(UINT a_msg, WPARAM a_wparam, LPARAM a_lparam) const noexcept
+	{
+		return (a_msg == WM_KEYDOWN || a_msg == WM_SYSKEYDOWN) &&
+		       (HIWORD(a_lparam) & KF_REPEAT) == 0 &&
+		       MatchesKeyboardHotkey(
+		           _overlayHotkey.load(std::memory_order_acquire),
+		           static_cast<std::uint32_t>(a_wparam));
+	}
+
 	void Menu::Render()
 	{
 		if (!_imguiInited || !_chain || !_context)
@@ -851,8 +919,10 @@ namespace cs
 
 			MenuHeaderRenderer::RenderHeader(isDocked, canShowIcons, uiScale, uiIcons);
 
+			// Separators consume layout height in ImGui 1.92.7+.
 			const float footerHeight = settings.Theme.ShowFooter ?
-			                               (ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 3) :
+			                               (ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y * 3 +
+			                                   ThemeManager::Constants::SEPARATOR_THICKNESS) :
 			                               0.0f;
 
 			static std::size_t selectedMenu = 0;
@@ -890,6 +960,11 @@ namespace cs
 		};
 
 		SettingsTabRenderer::RenderGeneralSettings(state);
+	}
+
+	void Menu::DrawHostedGeneralSettings()
+	{
+		SettingsTabRenderer::RenderHostedGeneralSettings();
 	}
 
 	void Menu::DrawAdvancedSettings()
@@ -956,6 +1031,8 @@ namespace cs
 		}
 		const bool requested = !current;
 		_pendingOverlayVisible.store(requested ? 1 : 0, std::memory_order_release);
+		if (_inputMode.load(std::memory_order_acquire) == InputMode::Hosted)
+			host::HostClient::Get().SyncOverlayDemand();
 	}
 
 	HRESULT WINAPI Menu::hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags)
@@ -983,6 +1060,17 @@ namespace cs
 			consumedDumpHotkey = dumpHotkey;
 			cs::telemetry::pump::DumpAll();
 			return 0;
+		}
+
+		if (menu._inputMode.load(std::memory_order_acquire) == InputMode::Hosted) {
+			// Keep only host-independent hotkeys.
+			if (menu.DispatchFeatureWndProcCallbacks(a_hwnd, a_msg, a_wparam, a_lparam))
+				return 0;
+			if (menu.MatchesOverlayHotkey(a_msg, a_wparam, a_lparam)) {
+				menu.ToggleOverlay();
+				return 0;
+			}
+			return CallWindowProcW(menu._origWndProc, a_hwnd, a_msg, a_wparam, a_lparam);
 		}
 
 		if (a_msg == WM_SETFOCUS || a_msg == WM_KILLFOCUS)
@@ -1022,29 +1110,11 @@ namespace cs
 			return 0;
 		}
 
-		for (auto& entry : menu._wndProcCallbacks) {
-			if (!entry.owner || !entry.callback || entry.disabled.load(std::memory_order_acquire))
-				continue;
-
-			try {
-				if (entry.callback(a_hwnd, a_msg, a_wparam, a_lparam))
-					return 0;
-			} catch (const std::exception&) {
-				entry.disabled.store(true, std::memory_order_release);
-				entry.pendingFailure.store(
-					WndProcCallbackEntry::FailureKind::StandardException,
-					std::memory_order_release);
-			} catch (...) {
-				entry.disabled.store(true, std::memory_order_release);
-				entry.pendingFailure.store(
-					WndProcCallbackEntry::FailureKind::UnknownException,
-					std::memory_order_release);
-			}
-		}
+		if (menu.DispatchFeatureWndProcCallbacks(a_hwnd, a_msg, a_wparam, a_lparam))
+			return 0;
 
 		// Features may own the overlay hotkey instead.
-		if ((a_msg == WM_KEYDOWN || a_msg == WM_SYSKEYDOWN) && (HIWORD(a_lparam) & KF_REPEAT) == 0 &&
-			MatchesKeyboardHotkey(menu._overlayHotkey.load(std::memory_order_acquire), static_cast<std::uint32_t>(a_wparam))) {
+		if (menu.MatchesOverlayHotkey(a_msg, a_wparam, a_lparam)) {
 			menu.ToggleOverlay();
 			return 0;
 		}

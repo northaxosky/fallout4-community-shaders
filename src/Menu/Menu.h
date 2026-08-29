@@ -204,7 +204,9 @@ namespace cs
 				return style;
 			}();
 
-			// Ordered to match the imgui 1.92 ImGuiCol_ enum.
+			// ImGuiCol_ order.
+			static_assert(ImGuiCol_COUNT == 63,
+				"Dear ImGui changed its style colors; re-check the FullPalette order below");
 			std::array<ImVec4, ImGuiCol_COUNT> FullPalette = {
 				ImVec4(1.0f, 1.0f, 1.0f, 1.0f),      // Text
 				ImVec4(1.0f, 1.0f, 1.0f, 0.3f),      // TextDisabled
@@ -225,6 +227,7 @@ namespace cs
 				ImVec4(0.42f, 0.42f, 0.42f, 1.0f),   // ScrollbarGrabHovered
 				ImVec4(0.56f, 0.56f, 0.56f, 1.0f),   // ScrollbarGrabActive
 				ImVec4(1.0f, 1.0f, 1.0f, 1.0f),      // CheckMark
+				ImVec4(0.31f, 0.31f, 0.31f, 0.5f),   // CheckboxSelectedBg
 				ImVec4(0.26f, 0.98f, 0.3752f, 1.0f), // SliderGrab
 				ImVec4(0.45f, 1.0f, 0.55f, 1.0f),    // SliderGrabActive
 				ImVec4(0.26f, 0.98f, 0.3752f, 0.39f),// Button
@@ -307,10 +310,13 @@ namespace cs
 		void OnD3D11Ready(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd);
 		void HookPresentOn(IDXGISwapChain* a_chain);
 
+		void AttachHostedResources(ID3D11Device* a_device, ID3D11DeviceContext* a_context, HWND a_hwnd);
+		void PumpHostedMaintenance();
+
 		using WndProcCallback = bool (*)(HWND, UINT, WPARAM, LPARAM);
 		void RegisterWndProcCallback(Feature& a_owner, WndProcCallback a_callback);
 
-		bool IsOpen() const noexcept { return _isOpenSnapshot.load(std::memory_order_acquire); }
+		bool IsOpen() const noexcept;
 		bool IsOverlayVisible() const noexcept { return _overlayVisibleSnapshot.load(std::memory_order_acquire); }
 		void ToggleOverlay() noexcept;
 		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
@@ -339,6 +345,10 @@ namespace cs
 		void Init();
 		void DrawSettings();
 		void DrawOverlay();
+
+		void DrawHostedGeneralSettings();
+		void DrawAdvancedSettings();
+		void DrawPresets();
 
 		std::string featureSearch;
 		std::string pendingFeatureSelection;
@@ -395,6 +405,12 @@ namespace cs
 	private:
 		Menu() = default;
 
+		enum class InputMode : std::uint8_t
+		{
+			Standalone,
+			Hosted
+		};
+
 		static HRESULT WINAPI hkPresent(IDXGISwapChain* a_chain, UINT a_sync, UINT a_flags);
 		static LRESULT CALLBACK hkWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam);
 
@@ -403,11 +419,11 @@ namespace cs
 		void ApplyPendingInputActions();
 		void ApplyPendingKeyBinding();
 		void FinishPendingWndProcFailures();
+		bool DispatchFeatureWndProcCallbacks(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam);
+		bool MatchesOverlayHotkey(UINT a_msg, WPARAM a_wparam, LPARAM a_lparam) const noexcept;
 		void RefreshFontsIfNeeded();
 		void RefreshHotkeySnapshots() noexcept;
 		void DrawGeneralSettings();
-		void DrawAdvancedSettings();
-		void DrawPresets();
 		void DrawDisableAtBootSettings();
 		void DrawFooter();
 		void DrawToast();
@@ -438,6 +454,7 @@ namespace cs
 		std::atomic<bool> _featureLoadDirty = false;
 		std::atomic<bool> _isOpenSnapshot = false;
 		std::atomic<bool> _overlayVisibleSnapshot = true;
+		std::atomic<InputMode> _inputMode = InputMode::Standalone;
 		std::atomic<std::int8_t> _pendingMenuOpen = -1;
 		std::atomic<std::int8_t> _pendingOverlayVisible = -1;
 

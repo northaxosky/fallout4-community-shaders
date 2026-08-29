@@ -1,5 +1,6 @@
 #include "Env.h"
 #include "Feature.h"
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -69,6 +70,7 @@ static void OnMessage(F4SE::MessagingInterface::Message* a_msg)
 	switch (a_msg->type) {
 	case F4SE::MessagingInterface::kPostPostLoad:
 		cs::FeatureManager::Get().OnPostPostLoadAll();
+		cs::host::HostClient::Get().DiscoverAndRegister();
 		break;
 	case F4SE::MessagingInterface::kGameDataReady:
 		cs::FeatureManager::Get().OnDataLoadedAll();

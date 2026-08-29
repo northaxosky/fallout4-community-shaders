@@ -37,6 +37,9 @@ namespace cs
 			const std::function<void()>& a_drawAdvancedSettings,
 			const std::function<void()>& a_drawPresets);
 
+		// Feature content without menu chrome.
+		static void RenderFeatureContent(Feature& a_feature);
+
 	private:
 		struct ListMenuVisitor
 		{
@@ -62,12 +65,12 @@ namespace cs
 
 		private:
 			std::string& pendingFeatureSelection;
-
-			void RenderFeatureHeader(Feature* a_feature, bool a_isDisabled);
-			void RenderFeatureSettings(Feature* a_feature, bool a_isDisabled, bool a_isActive);
-			void RenderRestartSettings(Feature* a_feature);
-			static void RenderRestoreDefaultsButton(Feature* a_feature, bool a_isDisabled, bool a_isActive);
 		};
+
+		static void RenderFeatureHeader(Feature* a_feature, bool a_isDisabled);
+		static void RenderFeatureSettings(Feature* a_feature, bool a_isDisabled, bool a_isActive);
+		static void RenderRestartSettings(Feature* a_feature);
+		static void RenderRestoreDefaultsButton(Feature* a_feature, bool a_isDisabled, bool a_isActive);
 
 		static std::vector<MenuFuncInfo> BuildMenuList(
 			const std::string& a_featureSearch,

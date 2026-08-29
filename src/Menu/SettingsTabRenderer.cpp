@@ -73,6 +73,38 @@ namespace cs
 		ImGui::EndTabBar();
 	}
 
+	void SettingsTabRenderer::RenderHostedGeneralSettings()
+	{
+		MenuFonts::TabBarPaddingGuard tabGuard(Menu::FontRole::Subheading);
+
+		if (!ImGui::BeginTabBar("##HostedGeneralSettingsTabs"))
+			return;
+
+		if (MenuFonts::BeginTabItemWithFont("Shaders", Menu::FontRole::Subheading)) {
+			RenderShadersTab();
+			ImGui::EndTabItem();
+		}
+
+		if (MenuFonts::BeginTabItemWithFont("Keybindings", Menu::FontRole::Subheading)) {
+			ImGui::Spacing();
+			ImGui::TextWrapped("%s",
+				"The shared mod menu owns its open and close key. Feature hotkeys stay editable on "
+				"each feature's own page and in the unified TOML.");
+			ImGui::EndTabItem();
+		}
+
+		if (MenuFonts::BeginTabItemWithFont("Interface", Menu::FontRole::Subheading)) {
+			ImGui::Spacing();
+			ImGui::TextWrapped("%s",
+				"The shared mod menu owns the theme, fonts, cursor, and background blur for every "
+				"hosted mod. Community Shaders leaves them alone here; its own interface settings "
+				"apply when it runs its standalone menu.");
+			ImGui::EndTabItem();
+		}
+
+		ImGui::EndTabBar();
+	}
+
 	void SettingsTabRenderer::RenderShadersTab()
 	{
 		ImGui::Spacing();

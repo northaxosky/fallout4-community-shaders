@@ -18,6 +18,8 @@ namespace cs
 
 		static void RenderGeneralSettings(SettingsState& a_state);
 
+		static void RenderHostedGeneralSettings();
+
 	private:
 		static void RenderShadersTab();
 		static void RenderKeybindingsTab(SettingsState& a_state);

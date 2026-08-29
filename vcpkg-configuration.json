@@ -1,0 +1,6 @@
+{
+  "$comment": "Dear ImGui is pinned to an exact upstream commit by the overlay port; see vcpkg/ports/imgui/README.md.",
+  "overlay-ports": [
+    "./vcpkg/ports"
+  ]
+}

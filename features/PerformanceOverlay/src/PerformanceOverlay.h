@@ -26,6 +26,10 @@ namespace cs::features
 		void Load() override;
 		void DrawSettings() override;
 		void DrawOverlay() override;
+		bool IsOverlayActive() const override
+		{
+			return settings.enabled && settings.preset != static_cast<int>(Preset::Off);
+		}
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
