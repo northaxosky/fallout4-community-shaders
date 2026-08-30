@@ -70,6 +70,18 @@ max_accum_frames = 16
 depth_fade_start = 40000.0
 depth_fade_end = 50000.0
 
+[features.InverseSquareLighting]
+load = false
+
+[features.InverseSquareLighting.settings]
+# Runtime toggle for the deferred punctual-light attenuation blend.
+enabled = true
+exterior_strength = 1.0
+# Untested starting point, not a validated recommendation.
+interior_strength = 0.35
+# Softening radius in game units; sqrt(3920) caps source attenuation at 1.0.
+near_field_distance = 62.6099052
+
 [features.WetnessEffects]
 load = false
 

@@ -61,12 +61,21 @@ namespace SharedData
 		float2 DebugHeightRange;
 	};
 
+	struct InverseSquareLightingSettings
+	{
+		uint Mode;
+		float ExteriorStrength;
+		float InteriorStrength;
+		float NearFieldDistance;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
 		ScreenSpaceGISettings screenSpaceGISettings;
 		WetnessEffectsSettings wetnessEffectsSettings;
 		TerrainShadowsSettings terrainShadowsSettings;
+		InverseSquareLightingSettings inverseSquareLightingSettings;
 	};
 
 	// standard D3D depth: near = 0, far = 1

@@ -101,7 +101,8 @@ namespace
 	{
 		kBase,
 		kWetness,
-		kTerrainShadows
+		kTerrainShadows,
+		kInverseSquareLighting
 	};
 
 	struct FeatureOffIdentityExpectation
@@ -110,7 +111,9 @@ namespace
 		FeatureIdentityVariant variant = FeatureIdentityVariant::kBase;
 		bool                   wetnessShouldDiffer = false;
 		bool                   terrainShouldDiffer = false;
+		bool                   inverseSquareShouldDiffer = false;
 		bool                   expectTerrainVariant = false;
+		bool                   expectInverseSquareVariant = false;
 	};
 
 	struct ShaderCompileJob
@@ -397,7 +400,9 @@ namespace
 			ExpectedVariable{ "screenSpaceShadowsSettings", 0, 16 },
 			ExpectedVariable{ "screenSpaceGISettings", 16, 16 },
 			ExpectedVariable{ "wetnessEffectsSettings", 32, 16 },
-			ExpectedVariable{ "terrainShadowsSettings", 48, 48 }
+			ExpectedVariable{ "terrainShadowsSettings", 48, 48 },
+			ExpectedVariable{
+				"inverseSquareLightingSettings", 96, 16 }
 		};
 		if (shaderDesc.ConstantBuffers != 2
 			|| shaderDesc.BoundResources != 2) {
@@ -416,7 +421,7 @@ namespace
 			reflection.Get(),
 			"FeatureData",
 			6,
-			96,
+			112,
 			featureVariables);
 	}
 
@@ -527,9 +532,13 @@ namespace
 		const ShaderCompileResult* wetnessResult = nullptr;
 		const ShaderCompileJob* terrainJob = nullptr;
 		const ShaderCompileResult* terrainResult = nullptr;
+		const ShaderCompileJob* inverseSquareJob = nullptr;
+		const ShaderCompileResult* inverseSquareResult = nullptr;
 		bool wetnessShouldDiffer = false;
 		bool terrainShouldDiffer = false;
+		bool inverseSquareShouldDiffer = false;
 		bool expectTerrainVariant = false;
+		bool expectInverseSquareVariant = false;
 		bool hasExpectation = false;
 	};
 
@@ -584,7 +593,11 @@ namespace
 			if (identity.variant == FeatureIdentityVariant::kBase) {
 				pair.wetnessShouldDiffer = identity.wetnessShouldDiffer;
 				pair.terrainShouldDiffer = identity.terrainShouldDiffer;
+				pair.inverseSquareShouldDiffer =
+					identity.inverseSquareShouldDiffer;
 				pair.expectTerrainVariant = identity.expectTerrainVariant;
+				pair.expectInverseSquareVariant =
+					identity.expectInverseSquareVariant;
 				pair.hasExpectation = true;
 			}
 
@@ -605,6 +618,11 @@ namespace
 				pairedJob = &pair.terrainJob;
 				pairedResult = &pair.terrainResult;
 				variantName = "terrain-shadows";
+				break;
+			case FeatureIdentityVariant::kInverseSquareLighting:
+				pairedJob = &pair.inverseSquareJob;
+				pairedResult = &pair.inverseSquareResult;
+				variantName = "inverse-square-lighting";
 				break;
 			}
 			if (*pairedJob) {
@@ -688,6 +706,20 @@ namespace
 			} else if (pair.terrainJob) {
 				std::printf(
 					"FAIL: feature-off identity %s carries an unexpected terrain-shadows variant\n",
+					key.c_str());
+				++failures;
+			}
+			if (pair.expectInverseSquareVariant) {
+				compareVariant(
+					key,
+					"inverse-square-lighting",
+					pair,
+					pair.inverseSquareJob,
+					pair.inverseSquareResult,
+					pair.inverseSquareShouldDiffer);
+			} else if (pair.inverseSquareJob) {
+				std::printf(
+					"FAIL: feature-off identity %s carries an unexpected inverse-square variant\n",
 					key.c_str());
 				++failures;
 			}
@@ -986,6 +1018,8 @@ namespace
 		std::size_t wetnessCompositeRows = 0;
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
+		std::size_t inverseSquareRows = 0;
+		std::size_t inverseSquareInertRows = 0;
 	};
 
 	// The SSGI composition extends the existing plugin texture block.
@@ -1024,6 +1058,28 @@ namespace
 		"BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR"
 	};
 
+	bool IsInverseSquareConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration&
+			a_registration)
+	{
+		if (a_registration.targetId
+				!= cs::engine::ShaderInjectionTarget::kBsdfLight
+			|| a_registration.stage != cs::engine::ShaderStage::kPixel) {
+			return false;
+		}
+		const auto& defines = a_registration.compilation.defines;
+		if (defines.contains("BSDFLIGHT_PS_ATTENUATION_ONLY"))
+			return true;
+		if (defines.contains("BSDFLIGHT_PS_GOBO"))
+			return defines.contains("POINTOMNI");
+		if (defines.contains("BSDFLIGHT_PS_UNSHADOWED"))
+			return defines.contains("POINTOMNI");
+		if (!defines.contains("BSDFLIGHT_PS_DEFERRED"))
+			return false;
+		const auto lightType = defines.find("LIGHT_TYPE");
+		return lightType != defines.end() && lightType->second != "1";
+	}
+
 	constexpr UINT kTerrainShadowTextureSlot = 30;
 	constexpr UINT kTerrainSceneDepthTextureSlot = 31;
 	constexpr UINT kTerrainShadowSamplerSlot = 13;
@@ -1035,6 +1091,8 @@ namespace
 	constexpr std::size_t kExpectedWetnessDirectInertRows = 21;
 	constexpr std::size_t kExpectedTerrainDirectRows = 81;
 	constexpr std::size_t kExpectedTerrainDirectInertRows = 86;
+	constexpr std::size_t kExpectedInverseSquareRows = 81;
+	constexpr std::size_t kExpectedInverseSquareInertRows = 86;
 	constexpr std::size_t kExpectedTerrainCompositeRows = 70;
 	constexpr std::size_t kExpectedTerrainCompositeInertRows = 0;
 	constexpr std::size_t kExpectedWetnessDebugCompositeRows = 70;
@@ -1149,7 +1207,10 @@ namespace
 					.terrainShouldDiffer =
 						IsTerrainShadowConsumer(registration)
 						|| IsTerrainDebugCompositeConsumer(registration),
-					.expectTerrainVariant = true
+					.inverseSquareShouldDiffer =
+						IsInverseSquareConsumer(registration),
+					.expectTerrainVariant = true,
+					.expectInverseSquareVariant = directRow
 				};
 			}
 			AddRegistration(
@@ -1326,6 +1387,15 @@ namespace
 				{ kWetnessEffects, "1" }
 			}
 		} };
+		const std::array<ShaderDefines, 2> inverseSquareCompositions{ {
+			{ { kInverseSquareLighting, "1" } },
+			{
+				{ kInverseSquareLighting, "1" },
+				{ kScreenSpaceShadows, "1" },
+				{ kTerrainShadows, "1" },
+				{ kWetnessEffects, "1" }
+			}
+		} };
 		std::size_t contributorCompositionCount = 0;
 		std::size_t ambientCompositionRows = 0;
 		std::size_t ambientNonTargetRows = 0;
@@ -1342,6 +1412,8 @@ namespace
 		std::size_t wetnessCompositeRows = 0;
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
+		std::size_t inverseSquareRows = 0;
+		std::size_t inverseSquareInertRows = 0;
 		for (const auto& registration : registrations) {
 			if (registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight) {
@@ -1353,6 +1425,53 @@ namespace
 					++terrainDirectRows;
 				else
 					++terrainDirectInertRows;
+				if (IsInverseSquareConsumer(registration))
+					++inverseSquareRows;
+				else
+					++inverseSquareInertRows;
+
+				for (const auto& defines :
+					inverseSquareCompositions) {
+					const bool consumesTerrain =
+						IsTerrainShadowConsumer(registration);
+					SlotExpectations slots;
+					slots.forbiddenTextures.push_back(
+						kGbufferNormalTextureSlot);
+					const bool terrainOn =
+						HasDefine(defines, kTerrainShadows);
+					auto& terrainTextures =
+						terrainOn && consumesTerrain ?
+							slots.requiredTextures :
+							slots.forbiddenTextures;
+					terrainTextures.push_back(
+						kTerrainShadowTextureSlot);
+					slots.forbiddenTextures.push_back(
+						kTerrainSceneDepthTextureSlot);
+					auto& terrainSamplers =
+						terrainOn && consumesTerrain ?
+							slots.requiredSamplers :
+							slots.forbiddenSamplers;
+					terrainSamplers.push_back(
+						kTerrainShadowSamplerSlot);
+					std::optional<FeatureOffIdentityExpectation>
+						identity;
+					if (defines.size() == 1) {
+						identity = FeatureOffIdentityExpectation{
+							.key = registration.name,
+							.variant = FeatureIdentityVariant::
+								kInverseSquareLighting
+						};
+					}
+					AddRegistration(
+						a_jobs,
+						a_root,
+						registration,
+						defines,
+						nullptr,
+						std::move(slots),
+						std::move(identity));
+					++contributorCompositionCount;
+				}
 			}
 
 			const auto* compositions =
@@ -1619,6 +1738,23 @@ namespace
 					+ " and "
 					+ std::to_string(terrainDirectInertRows));
 		}
+		if (inverseSquareRows != kExpectedInverseSquareRows
+			|| inverseSquareInertRows
+				!= kExpectedInverseSquareInertRows
+			|| inverseSquareRows + inverseSquareInertRows
+				!= kExpectedBsdfLightRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfLight inverse-square coverage",
+				"Expected "
+					+ std::to_string(kExpectedInverseSquareRows)
+					+ " punctual and "
+					+ std::to_string(kExpectedInverseSquareInertRows)
+					+ " inert rows, found "
+					+ std::to_string(inverseSquareRows)
+					+ " and "
+					+ std::to_string(inverseSquareInertRows));
+		}
 		if (terrainCompositeRows != kExpectedTerrainCompositeRows
 			|| terrainCompositeInertRows
 				!= kExpectedTerrainCompositeInertRows
@@ -1674,7 +1810,9 @@ namespace
 				wetnessDebugCompositeVertexRows,
 			.wetnessCompositeRows = wetnessCompositeRows,
 			.wetnessCompositeNeutralRows = wetnessCompositeNeutralRows,
-			.wetnessCompositeVertexRows = wetnessCompositeVertexRows
+			.wetnessCompositeVertexRows = wetnessCompositeVertexRows,
+			.inverseSquareRows = inverseSquareRows,
+			.inverseSquareInertRows = inverseSquareInertRows
 		};
 	}
 
@@ -1819,6 +1957,10 @@ int main(int argc, char** argv)
 		"ShaderCompile witnessed t30+t31/s13 on %zu terrain shadow and %zu inert kBsdfLight rows\n",
 		lightingCounts.terrainDirectRows,
 		lightingCounts.terrainDirectInertRows);
+	std::printf(
+		"ShaderCompile checked inverse-square on %zu punctual and %zu inert kBsdfLight rows\n",
+		lightingCounts.inverseSquareRows,
+		lightingCounts.inverseSquareInertRows);
 	std::printf(
 		"ShaderCompile checked %zu TerrainShadows permutations\n",
 		terrainShadowsCount);

@@ -544,6 +544,54 @@ namespace
 			CHECK(wetnessSettings->size() == 3);
 		}
 
+		const auto* inverseSquareSettings =
+			(*features)["InverseSquareLighting"]["settings"].as_table();
+		CHECK(inverseSquareSettings != nullptr);
+		if (inverseSquareSettings) {
+			bool enabled = false;
+			CHECK(
+				cs::feature_config::ReadBool(
+					*inverseSquareSettings, "enabled", enabled)
+				== cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(enabled);
+
+			float exteriorStrength = 0.0F;
+			CHECK(
+				cs::feature_config::ReadFloat(
+					*inverseSquareSettings,
+					"exterior_strength",
+					exteriorStrength,
+					0.0F,
+					1.0F)
+				== cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(exteriorStrength == 1.0F);
+
+			float interiorStrength = 0.0F;
+			CHECK(
+				cs::feature_config::ReadFloat(
+					*inverseSquareSettings,
+					"interior_strength",
+					interiorStrength,
+					0.0F,
+					1.0F)
+				== cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(interiorStrength == 0.35F);
+
+			float nearFieldDistance = 0.0F;
+			CHECK(
+				cs::feature_config::ReadFloat(
+					*inverseSquareSettings,
+					"near_field_distance",
+					nearFieldDistance,
+					0.4F,
+					2214.0F)
+				== cs::feature_config::ScalarReadStatus::kValid);
+			CHECK(std::abs(
+					  nearFieldDistance - std::sqrt(3920.0F))
+				< 1.0e-5F);
+			CHECK(inverseSquareSettings->size() == 4);
+		}
+
 		const auto* giSettings =
 			(*features)["ScreenSpaceGI"]["settings"].as_table();
 		CHECK(giSettings != nullptr);

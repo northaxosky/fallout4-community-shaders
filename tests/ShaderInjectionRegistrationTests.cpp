@@ -486,6 +486,60 @@ namespace
 		return ok;
 	}
 
+	bool TestInverseSquareLightingDefine()
+	{
+		const auto* target = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kBsdfLight);
+		if (!Check(
+				target != nullptr,
+				"inverse-square target metadata is missing")) {
+			return false;
+		}
+
+		const std::array contribution{
+			ShaderReplacementRegistration{
+				.targetId = target->id,
+				.contributor = "InverseSquareLighting",
+				.defines = {
+					{
+						shader_injection_defines::
+							kInverseSquareLighting,
+						"1"
+					}
+				}
+			}
+		};
+		const auto pixelRequest = BuildEffectiveShaderCompileRequest(
+			*target,
+			MakeStageVariant(target->id, ShaderStage::kPixel),
+			contribution);
+		const auto vertexRequest = BuildEffectiveShaderCompileRequest(
+			*target,
+			MakeStageVariant(target->id, ShaderStage::kVertex),
+			contribution);
+		bool ok = Check(
+			pixelRequest.has_value(),
+			"inverse-square pixel request failed");
+		ok &= Check(
+			vertexRequest.has_value(),
+			"inverse-square vertex request failed");
+		if (!pixelRequest || !vertexRequest)
+			return false;
+		ok &= Check(
+			pixelRequest->defines.contains(
+				shader_injection_defines::kInverseSquareLighting),
+			"inverse-square define is missing from the pixel request");
+		ok &= Check(
+			pixelRequest->defines.contains(
+				shader_injection_defines::kSubstrate),
+			"inverse-square pixel request did not activate the substrate");
+		ok &= Check(
+			!vertexRequest->defines.contains(
+				shader_injection_defines::kInverseSquareLighting),
+			"inverse-square define leaked into the vertex request");
+		return ok;
+	}
+
 	struct EffectiveDefinePartition
 	{
 		std::vector<std::size_t> shape;
@@ -1062,6 +1116,7 @@ int main(int a_argc, char* a_argv[])
 	bool ok = TestStageScopedContributions();
 	ok &= TestVertexCompileClassPartition();
 	ok &= TestAutomaticSubstrateDefine();
+	ok &= TestInverseSquareLightingDefine();
 
 	ShaderReplacementRegistration emptyStageMask;
 	emptyStageMask.targetId =

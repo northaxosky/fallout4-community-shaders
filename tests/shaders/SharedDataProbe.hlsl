@@ -44,6 +44,11 @@ float4 main() : SV_Target
 	value += dot(SharedData::terrainShadowsSettings.Offset, 1.0);
 	value += dot(SharedData::terrainShadowsSettings.HeightRange, 1.0);
 	value += dot(SharedData::terrainShadowsSettings.DebugHeightRange, 1.0);
+
+	value += SharedData::inverseSquareLightingSettings.Mode;
+	value += SharedData::inverseSquareLightingSettings.ExteriorStrength;
+	value += SharedData::inverseSquareLightingSettings.InteriorStrength;
+	value += SharedData::inverseSquareLightingSettings.NearFieldDistance;
 	return value.xxxx;
 #else
 	return 0.0;

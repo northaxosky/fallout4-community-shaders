@@ -1,0 +1,533 @@
+#include "InverseSquareLighting.h"
+
+#include <d3d11.h>
+#include <imgui.h>
+
+#include <array>
+#include <string>
+#include <string_view>
+
+#include <toml++/toml.hpp>
+
+#include "Log.h"
+#include "Render/ShaderInjection.h"
+#include "Render/ShaderInjectionDefines.h"
+#include "Render/SharedData.h"
+#include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
+#include "Utils/UI.h"
+
+namespace cs::features
+{
+	namespace isl = cs::features::inverse_square_lighting;
+
+	namespace
+	{
+		auto* L = cs::log::Get("cs.feature.inversesquarelighting");
+
+		constexpr std::uint32_t kEnabledFlag = 1U << 0;
+		constexpr std::uint32_t kComparisonDebugFlag = 1U << 1;
+		constexpr std::array<FeatureDebugView, 1> kDebugViews{ {
+			{
+				"inverse_square_comparison",
+				"Vanilla | configured inverse-square",
+				FeatureDebugViewKind::kFullscreen
+			}
+		} };
+
+		std::string SettingError(
+			std::string_view a_key,
+			std::string_view a_reason)
+		{
+			return "settings." + std::string(a_key) + ": "
+				+ std::string(a_reason);
+		}
+
+		bool AcceptSetting(
+			feature_config::ScalarReadStatus a_status,
+			std::string_view a_key,
+			std::string_view a_expected,
+			std::string& a_error)
+		{
+			switch (a_status) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error =
+					SettingError(a_key, "expected " + std::string(a_expected));
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = SettingError(a_key, "invalid value");
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = SettingError(a_key, "value is out of range");
+				break;
+			}
+			return false;
+		}
+
+		bool ParseSettingsTable(
+			const toml::table& a_config,
+			InverseSquareLighting::Settings& a_candidate,
+			std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode)
+				return true;
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+
+			const auto readFloat = [&](
+				std::string_view a_key,
+				float& a_value,
+				float a_min,
+				float a_max) {
+				return AcceptSetting(
+					feature_config::ReadFloat(
+						*settingsTable, a_key, a_value, a_min, a_max),
+					a_key,
+					"float",
+					a_error);
+			};
+
+			return AcceptSetting(
+					feature_config::ReadBool(
+						*settingsTable, "enabled", a_candidate.enabled),
+					"enabled",
+					"boolean",
+					a_error)
+				&& readFloat(
+					"exterior_strength",
+					a_candidate.exteriorStrength,
+					isl::kStrengthMin,
+					isl::kStrengthMax)
+				&& readFloat(
+					"interior_strength",
+					a_candidate.interiorStrength,
+					isl::kStrengthMin,
+					isl::kStrengthMax)
+				&& readFloat(
+					"near_field_distance",
+					a_candidate.nearFieldDistance,
+					isl::kNearFieldDistanceMin,
+					isl::kNearFieldDistanceMax);
+		}
+
+		bool IsPunctualDeferred(
+			const cs::engine::ShaderInjectionDefines& a_defines)
+		{
+			if (!a_defines.contains("BSDFLIGHT_PS_DEFERRED"))
+				return false;
+			const auto lightType = a_defines.find("LIGHT_TYPE");
+			return lightType != a_defines.end() && lightType->second != "1";
+		}
+
+		std::string_view DebugVisualizationName(
+			InverseSquareLighting::DebugVisualization a_visualization) noexcept
+		{
+			return a_visualization
+					== InverseSquareLighting::DebugVisualization::kComparison
+				? "inverse_square_comparison"
+				: "off";
+		}
+	}
+
+	InverseSquareLighting* InverseSquareLighting::GetSingleton()
+	{
+		static InverseSquareLighting instance;
+		return &instance;
+	}
+
+	std::span<const FeatureDebugView>
+		InverseSquareLighting::GetDebugViews() const noexcept
+	{
+		return kDebugViews;
+	}
+
+	void InverseSquareLighting::SetDebugView(
+		std::string_view a_view) noexcept
+	{
+		_debugVisualization.store(
+			a_view == "inverse_square_comparison" ?
+				DebugVisualization::kComparison :
+				DebugVisualization::kOff,
+			std::memory_order_release);
+	}
+
+	bool InverseSquareLighting::Configure(
+		const toml::table& a_config,
+		std::string& a_error)
+	{
+		auto candidate = _settings;
+		if (!ParseSettingsTable(a_config, candidate, a_error))
+			return false;
+		_settings = isl::Clamp(candidate);
+		return true;
+	}
+
+	void InverseSquareLighting::PublishSettings() noexcept
+	{
+		const auto settings = isl::Clamp(_settings);
+		_enabled.store(settings.enabled, std::memory_order_release);
+		_exteriorStrength.store(
+			settings.exteriorStrength, std::memory_order_release);
+		_interiorStrength.store(
+			settings.interiorStrength, std::memory_order_release);
+		_nearFieldDistance.store(
+			settings.nearFieldDistance, std::memory_order_release);
+	}
+
+	void InverseSquareLighting::SaveSettings()
+	{
+		toml::table settings;
+		settings.insert_or_assign("enabled", _settings.enabled);
+		settings.insert_or_assign(
+			"exterior_strength", _settings.exteriorStrength);
+		settings.insert_or_assign(
+			"interior_strength", _settings.interiorStrength);
+		settings.insert_or_assign(
+			"near_field_distance", _settings.nearFieldDistance);
+		if (const auto result =
+				feature_config::UpdateFeatureSettings(GetConfigKey(), settings);
+			!result) {
+			L->error("Failed to save settings: {}", result.error);
+		}
+	}
+
+	void InverseSquareLighting::Load()
+	{
+		PublishSettings();
+		const bool registered = cs::engine::RegisterReplacement({
+			.targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
+			.contributor = "InverseSquareLighting",
+			.defines = {
+				{
+					cs::engine::shader_injection_defines::
+						kInverseSquareLighting,
+					"1"
+				}
+			},
+			.isReady = [this] {
+				return _registrationsReady.load(std::memory_order_acquire)
+					&& cs::render::IsSharedDataReady();
+			},
+			.bind = [this](ID3D11DeviceContext* a_context) {
+				RecordActiveVariant(a_context);
+			}
+		});
+		if (!registered) {
+			FailLoad(
+				"Inverse-square lighting requires the reconstructed BSDFLight "
+				"shader; registering that replacement failed");
+			return;
+		}
+
+		_registrationsReady.store(true, std::memory_order_release);
+		L->info(
+			"Registered inverse-square BSDF light contribution "
+			"(enabled={}, exterior_strength={:.2f}, interior_strength={:.2f}, "
+			"near_field_distance={:.2f}).",
+			_settings.enabled,
+			_settings.exteriorStrength,
+			_settings.interiorStrength,
+			_settings.nearFieldDistance);
+	}
+
+	void InverseSquareLighting::SetValidationDetail(std::string a_detail)
+	{
+		const std::lock_guard lock(_validationMutex);
+		_validationDetail = std::move(a_detail);
+	}
+
+	std::string InverseSquareLighting::GetValidationDetail() const
+	{
+		const std::lock_guard lock(_validationMutex);
+		return _validationDetail;
+	}
+
+	bool InverseSquareLighting::ValidateShaderInjections(
+		std::string& a_error)
+	{
+		_injectionsOperational.store(false, std::memory_order_release);
+		if (!_registrationsReady.load(std::memory_order_acquire)) {
+			a_error = "the shader contribution did not register";
+			SetValidationDetail(a_error);
+			return false;
+		}
+		if (!cs::render::IsSharedDataReady()) {
+			a_error =
+				"the shared substrate is unavailable, so b5 and b6 carry no "
+				"inverse-square controls";
+			SetValidationDetail(a_error);
+			return false;
+		}
+
+		const auto snapshot = cs::engine::GetShaderInjectionTargetSnapshot(
+			cs::engine::ShaderInjectionTarget::kBsdfLight);
+		const auto define = snapshot.defines.find(
+			cs::engine::shader_injection_defines::kInverseSquareLighting);
+		const bool contributed =
+			define != snapshot.defines.end() && define->second == "1";
+		if (!snapshot.requested
+			|| !snapshot.compileComplete
+			|| !snapshot.swappable
+			|| snapshot.slotCollision
+			|| !contributed) {
+			a_error = "'" + snapshot.name
+				+ "' cannot deliver inverse-square lighting (requested="
+				+ std::to_string(snapshot.requested)
+				+ " compile_complete="
+				+ std::to_string(snapshot.compileComplete)
+				+ " swappable=" + std::to_string(snapshot.swappable)
+				+ " slot_collision=" + std::to_string(snapshot.slotCollision)
+				+ " contributed=" + std::to_string(contributed) + ")";
+			SetValidationDetail(a_error);
+			return false;
+		}
+
+		SetValidationDetail({});
+		_injectionsOperational.store(true, std::memory_order_release);
+		return true;
+	}
+
+	void InverseSquareLighting::RecordActiveVariant(
+		ID3D11DeviceContext*) noexcept
+	{
+		if (!cs::telemetry::pump::Enabled())
+			return;
+		const auto* defines =
+			cs::engine::GetActiveShaderInjectionVariantDefines(
+				cs::engine::ShaderInjectionTarget::kBsdfLight);
+		if (!defines) {
+			_inertBinds.fetch_add(1, std::memory_order_relaxed);
+			return;
+		}
+		if (IsPunctualDeferred(*defines)) {
+			_deferredBinds.fetch_add(1, std::memory_order_relaxed);
+		} else if (defines->contains("BSDFLIGHT_PS_ATTENUATION_ONLY")) {
+			_attenuationOnlyBinds.fetch_add(1, std::memory_order_relaxed);
+		} else if (
+			defines->contains("BSDFLIGHT_PS_GOBO")
+			&& defines->contains("POINTOMNI")) {
+			_goboBinds.fetch_add(1, std::memory_order_relaxed);
+		} else if (
+			defines->contains("BSDFLIGHT_PS_UNSHADOWED")
+			&& defines->contains("POINTOMNI")) {
+			_unshadowedBinds.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			_inertBinds.fetch_add(1, std::memory_order_relaxed);
+		}
+	}
+
+	cs::InverseSquareLightingFeatureData
+		InverseSquareLighting::GetCommonBufferData() const
+	{
+		auto* player = RE::PlayerCharacter::GetSingleton();
+		const auto* cell = player ? player->GetParentCell() : nullptr;
+		const bool inInterior = cell && !cell->IsExterior();
+		_inInterior.store(inInterior, std::memory_order_relaxed);
+
+		const bool operational =
+			_injectionsOperational.load(std::memory_order_acquire);
+		const bool enabled = _enabled.load(std::memory_order_acquire);
+		const float exteriorStrength =
+			_exteriorStrength.load(std::memory_order_acquire);
+		const float interiorStrength =
+			_interiorStrength.load(std::memory_order_acquire);
+		const float activeStrength = operational && enabled ?
+			(inInterior ? interiorStrength : exteriorStrength) :
+			0.0f;
+		_activeStrength.store(activeStrength, std::memory_order_relaxed);
+		if (!operational)
+			return {};
+
+		std::uint32_t mode = enabled ? kEnabledFlag : 0;
+		if (_debugVisualization.load(std::memory_order_acquire)
+			== DebugVisualization::kComparison) {
+			mode |= kComparisonDebugFlag;
+		}
+		return {
+			.Mode = mode,
+			.ExteriorStrength = exteriorStrength,
+			.InteriorStrength = interiorStrength,
+			.NearFieldDistance =
+				_nearFieldDistance.load(std::memory_order_acquire)
+		};
+	}
+
+	void InverseSquareLighting::CollectTelemetry(
+		cs::telemetry::Sink& a_sink) const
+	{
+		const auto snapshot = cs::engine::GetShaderInjectionTargetSnapshot(
+			cs::engine::ShaderInjectionTarget::kBsdfLight);
+		const auto detail = GetValidationDetail();
+		a_sink
+			.Field(
+				"configured_enabled",
+				_enabled.load(std::memory_order_relaxed))
+			.Field(
+				"exterior_strength",
+				static_cast<double>(
+					_exteriorStrength.load(std::memory_order_relaxed)))
+			.Field(
+				"interior_strength",
+				static_cast<double>(
+					_interiorStrength.load(std::memory_order_relaxed)))
+			.Field(
+				"near_field_distance",
+				static_cast<double>(
+					_nearFieldDistance.load(std::memory_order_relaxed)))
+			.Field(
+				"in_interior",
+				_inInterior.load(std::memory_order_relaxed))
+			.Field(
+				"active_strength",
+				static_cast<double>(
+					_activeStrength.load(std::memory_order_relaxed)))
+			.Field(
+				"debug_mode",
+				DebugVisualizationName(
+					_debugVisualization.load(std::memory_order_relaxed)))
+			.Field(
+				"registrations_ready",
+				_registrationsReady.load(std::memory_order_relaxed))
+			.Field("shared_data_ready", cs::render::IsSharedDataReady())
+			.Field(
+				"injection_operational",
+				_injectionsOperational.load(std::memory_order_relaxed))
+			.Field("injection_requested", snapshot.requested)
+			.Field("injection_compile_attempted", snapshot.compileAttempted)
+			.Field("injection_compile_ok", snapshot.compileOk)
+			.Field("injection_compile_complete", snapshot.compileComplete)
+			.Field(
+				"injection_compile_error",
+				snapshot.compileError.empty() ?
+					"none" :
+					snapshot.compileError)
+			.Field("injection_swappable", snapshot.swappable)
+			.Field("injection_slot_collision", snapshot.slotCollision)
+			.Field(
+				"injection_matches",
+				static_cast<std::int64_t>(snapshot.matches))
+			.Field(
+				"injection_substitutions",
+				static_cast<std::int64_t>(snapshot.substitutions))
+			.Field(
+				"injection_dispatches",
+				static_cast<std::int64_t>(snapshot.dispatches))
+			.Field(
+				"injection_passthrough_compile_fail",
+				static_cast<std::int64_t>(snapshot.passthroughCompileFail))
+			.Field(
+				"injection_passthrough_not_ready",
+				static_cast<std::int64_t>(snapshot.passthroughNotReady))
+			.Field(
+				"injection_passthrough_disabled",
+				static_cast<std::int64_t>(snapshot.passthroughDisabled))
+			.Field(
+				"validation_detail",
+				detail.empty() ? "operational" : detail)
+			.Field(
+				"deferred_variant_binds",
+				static_cast<std::int64_t>(
+					_deferredBinds.load(std::memory_order_relaxed)))
+			.Field(
+				"attenuation_only_variant_binds",
+				static_cast<std::int64_t>(
+					_attenuationOnlyBinds.load(std::memory_order_relaxed)))
+			.Field(
+				"gobo_variant_binds",
+				static_cast<std::int64_t>(
+					_goboBinds.load(std::memory_order_relaxed)))
+			.Field(
+				"unshadowed_variant_binds",
+				static_cast<std::int64_t>(
+					_unshadowedBinds.load(std::memory_order_relaxed)))
+			.Field(
+				"inert_variant_binds",
+				static_cast<std::int64_t>(
+					_inertBinds.load(std::memory_order_relaxed)));
+	}
+
+	void InverseSquareLighting::DrawSettings()
+	{
+		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+		ImGui::TextDisabled(
+			"Off preserves the exact stock attenuation curve.");
+		changed |= ImGui::SliderFloat(
+			"Exterior strength",
+			&_settings.exteriorStrength,
+			isl::kStrengthMin,
+			isl::kStrengthMax,
+			"%.2f");
+		changed |= ImGui::SliderFloat(
+			"Interior strength",
+			&_settings.interiorStrength,
+			isl::kStrengthMin,
+			isl::kStrengthMax,
+			"%.2f");
+		if (auto tooltip = ui::HoverTooltipWrapper()) {
+			ImGui::Text(
+				"%s",
+				"0.35 is an untested starting point, not a validated "
+				"recommendation.");
+		}
+		changed |= ImGui::SliderFloat(
+			"Near-field distance (game units)",
+			&_settings.nearFieldDistance,
+			isl::kNearFieldDistanceMin,
+			isl::kNearFieldDistanceMax,
+			"%.1f",
+			ImGuiSliderFlags_Logarithmic);
+		ImGui::TextDisabled(
+			"Softens the near-source peak; the default caps it at 1.0.");
+		if (changed) {
+			_settings = isl::Clamp(_settings);
+			PublishSettings();
+			SaveSettings();
+		}
+
+		const bool operational =
+			_injectionsOperational.load(std::memory_order_relaxed);
+		if (operational) {
+			ImGui::TextDisabled(
+				"Current location: %s | active strength: %.2f",
+				_inInterior.load(std::memory_order_relaxed) ?
+					"interior" :
+					"exterior",
+				_activeStrength.load(std::memory_order_relaxed));
+		} else {
+			const auto detail = GetValidationDetail();
+			ImGui::TextDisabled(
+				"Inactive: %s",
+				detail.empty() ?
+					"shader delivery path unavailable" :
+					detail.c_str());
+		}
+	}
+
+	void InverseSquareLighting::RestoreDefaultSettings()
+	{
+		_settings = Settings{};
+		PublishSettings();
+		SaveSettings();
+	}
+
+	namespace
+	{
+		struct AutoRegister
+		{
+			AutoRegister()
+			{
+				cs::FeatureManager::Get().Register(
+					InverseSquareLighting::GetSingleton());
+			}
+		};
+		static AutoRegister _autoRegister;
+	}
+}

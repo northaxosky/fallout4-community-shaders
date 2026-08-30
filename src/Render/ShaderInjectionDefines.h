@@ -9,6 +9,7 @@ namespace cs::engine::shader_injection_defines
 	inline constexpr auto kWetnessEffects = "WETNESS_EFFECTS";
 	inline constexpr auto kWetnessEffectsFullscreenDebug =
 		"WETNESS_EFFECTS_FULLSCREEN_DEBUG";
+	inline constexpr auto kInverseSquareLighting = "INVERSE_SQUARE_LIGHTING";
 	inline constexpr auto kTerrainShadows = "TERRAIN_SHADOWS";
 	inline constexpr auto kTerrainShadowsFullscreenDebug =
 		"TERRAIN_SHADOWS_FULLSCREEN_DEBUG";

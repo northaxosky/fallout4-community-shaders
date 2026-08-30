@@ -12,6 +12,10 @@
 #include "WetnessEffects/WetnessEffects.hlsli"
 #endif
 
+#ifdef INVERSE_SQUARE_LIGHTING
+#include "InverseSquareLighting/InverseSquareLighting.hlsli"
+#endif
+
 #ifdef BSDFLIGHT_PS_DEFERRED
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -1122,6 +1126,10 @@ PS_OUTPUT main(PS_INPUT input)
     float  falloffLin  = saturate(cb2_idx3_attenuation_curve.y * dPowZ
                                   + cb2_idx3_attenuation_curve.x);
     float  attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
+#ifdef INVERSE_SQUARE_LIGHTING
+    attenuation = InverseSquareLighting::GetAttenuation(
+        attenuation, d, LightPos_and_Radius.w, input.position.x);
+#endif
 
     bool nearZero = (attenuation <= 0.001);
 
@@ -1978,6 +1986,10 @@ PS_OUTPUT main(PS_INPUT input)
     float  falloffLin   = saturate(cb2_idx3_attenuation_curve.y * dPowZ
                                    + cb2_idx3_attenuation_curve.x);
     float  attenuation  = exp2(log2(1.0 - falloffLin) * 2.2);
+#ifdef INVERSE_SQUARE_LIGHTING
+    attenuation = InverseSquareLighting::GetAttenuation(
+        attenuation, d, LightPos_and_Radius.w, input.position.x);
+#endif
 
 #ifdef SPOT
 
@@ -2885,6 +2897,10 @@ PS_OUTPUT main(PS_INPUT input)
     float attenuation = pow(
         asfloat(0x3f800000) - biased,
         asfloat(0x400ccccd));
+#ifdef INVERSE_SQUARE_LIGHTING
+    attenuation = InverseSquareLighting::GetAttenuation(
+        attenuation, distance, LightPos_and_Radius.w, input.position.x);
+#endif
 
     if (attenuation <= asfloat(0x3a83126f))
     {
@@ -7198,6 +7214,10 @@ PS_OUTPUT main(PS_INPUT input)
     float falloffLin = saturate(cb2_idx3_attenuation_curve.y * dPowZ
                                 + cb2_idx3_attenuation_curve.x);
     float attenuation = exp2(log2(1.0 - falloffLin) * 2.2);
+#ifdef INVERSE_SQUARE_LIGHTING
+    attenuation = InverseSquareLighting::GetAttenuation(
+        attenuation, d, LightPos_and_Radius.w, input.position.x);
+#endif
 
     if (attenuation <= 0.001)
     {
@@ -9406,6 +9426,10 @@ PS_OUTPUT main(PS_INPUT input)
     float  falloff   = exp2(log2(distNorm) * LightAttenuation.z);
     float  attenBase = saturate(LightAttenuation.y * falloff + LightAttenuation.x);
     float  attenuation = exp2(log2(1.0 - attenBase) * 2.2);
+#ifdef INVERSE_SQUARE_LIGHTING
+    attenuation = InverseSquareLighting::GetAttenuation(
+        attenuation, sqrt(distSq), LightVector.w, input.position.x);
+#endif
 
     if (attenuation <= 0.001)
     {

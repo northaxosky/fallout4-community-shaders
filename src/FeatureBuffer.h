@@ -43,14 +43,24 @@ namespace cs
 	};
 	static_assert(sizeof(TerrainShadowsFeatureData) == 48);
 
+	struct alignas(16) InverseSquareLightingFeatureData
+	{
+		std::uint32_t Mode = 0;
+		float         ExteriorStrength = 0.0f;
+		float         InteriorStrength = 0.0f;
+		float         NearFieldDistance = 0.0f;
+	};
+	static_assert(sizeof(InverseSquareLightingFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
-		ScreenSpaceShadowsFeatureData screenSpaceShadowsSettings;
-		ScreenSpaceGIFeatureData      screenSpaceGISettings;
-		WetnessEffectsFeatureData     wetnessEffectsSettings;
-		TerrainShadowsFeatureData     terrainShadowsSettings;
+		ScreenSpaceShadowsFeatureData     screenSpaceShadowsSettings;
+		ScreenSpaceGIFeatureData          screenSpaceGISettings;
+		WetnessEffectsFeatureData         wetnessEffectsSettings;
+		TerrainShadowsFeatureData         terrainShadowsSettings;
+		InverseSquareLightingFeatureData inverseSquareLightingSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 96);
+	static_assert(sizeof(FeatureDataCB) == 112);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -64,6 +74,11 @@ namespace cs
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
 	static_assert(offsetof(TerrainShadowsFeatureData, HeightRange) == 32);
 	static_assert(offsetof(TerrainShadowsFeatureData, DebugHeightRange) == 40);
+	static_assert(offsetof(FeatureDataCB, inverseSquareLightingSettings) == 96);
+	static_assert(offsetof(InverseSquareLightingFeatureData, Mode) == 0);
+	static_assert(offsetof(InverseSquareLightingFeatureData, ExteriorStrength) == 4);
+	static_assert(offsetof(InverseSquareLightingFeatureData, InteriorStrength) == 8);
+	static_assert(offsetof(InverseSquareLightingFeatureData, NearFieldDistance) == 12);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

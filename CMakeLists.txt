@@ -138,6 +138,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(ScreenSpaceShadows)
 	register_feature(TerrainShadows)
 	register_feature(ScreenSpaceGI)
+	register_feature(InverseSquareLighting)
 	register_feature(WetnessEffects)
 
 	# Upscaling backends: Streamline headers are interface-only, FidelityFX builds from source.
@@ -288,6 +289,30 @@ add_test(
 		"${CMAKE_SOURCE_DIR}/features/WetnessEffects/src/WetnessEffects.cpp"
 )
 set_tests_properties(WetnessEffectsMath PROPERTIES LABELS "render;shader;unit")
+
+add_executable(InverseSquareLightingMathTests
+	tests/InverseSquareLightingMathTests.cpp
+	features/InverseSquareLighting/src/InverseSquareLightingMath.h
+	src/FeatureBuffer.h
+)
+configure_host_test(InverseSquareLightingMathTests)
+target_include_directories(InverseSquareLightingMathTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/src"
+	"${CMAKE_SOURCE_DIR}/src"
+)
+
+add_test(
+	NAME InverseSquareLightingMath
+	COMMAND InverseSquareLightingMathTests
+		"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
+		"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/src/InverseSquareLighting.cpp"
+)
+set_tests_properties(
+	InverseSquareLightingMath
+	PROPERTIES LABELS "render;shader;unit"
+)
 
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
@@ -449,6 +474,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
 		FILES
 			"${CMAKE_SOURCE_DIR}/tests/shaders/SharedDataProbe.hlsl"

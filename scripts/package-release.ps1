@@ -102,6 +102,7 @@ $requiredShaderDirectories = @(
 	'Shaders/ScreenSpaceShadows',
 	'Shaders/TerrainShadows',
 	'Shaders/Upscaling',
+	'Shaders/InverseSquareLighting',
 	'Shaders/WetnessEffects'
 )
 foreach ($relativePath in $requiredShaderDirectories) {

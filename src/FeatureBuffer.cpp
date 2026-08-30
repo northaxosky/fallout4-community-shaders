@@ -1,5 +1,6 @@
 #include "FeatureBuffer.h"
 
+#include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
 #include "TerrainShadows.h"
@@ -32,7 +33,10 @@ namespace cs
 					features::WetnessEffects::GetSingleton()),
 			.terrainShadowsSettings =
 				CollectFeatureData<TerrainShadowsFeatureData>(
-					features::TerrainShadows::GetSingleton())
+					features::TerrainShadows::GetSingleton()),
+			.inverseSquareLightingSettings =
+				CollectFeatureData<InverseSquareLightingFeatureData>(
+					features::InverseSquareLighting::GetSingleton())
 		};
 	}
 }
