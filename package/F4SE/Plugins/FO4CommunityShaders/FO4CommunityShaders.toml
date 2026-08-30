@@ -81,7 +81,7 @@ exterior_strength = 1.0
 # The location split ships neutral; lower this only if authored interiors read too hot.
 interior_strength = 1.0
 # Upstream's default size sqrt(2) maps to sqrt(3920) game units.
-near_field_distance = 62.6099052
+near_field_distance = 62.6099034
 
 [features.WetnessEffects]
 load = false

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
@@ -13,6 +14,13 @@
 namespace
 {
 	int failures = 0;
+	constexpr std::array<std::string_view, 5> kExpectedCatalogs{
+		"ScreenSpaceShadows",
+		"TerrainShadows",
+		"ScreenSpaceGI",
+		"InverseSquareLighting",
+		"WetnessEffects"
+	};
 
 	struct SourceFile
 	{
@@ -59,6 +67,32 @@ namespace
 			const char character = a_source[index];
 			switch (state) {
 			case State::kCode:
+				if (character == 'R' && index + 1 < a_source.size()
+					&& a_source[index + 1] == '"') {
+					const auto open = a_source.find('(', index + 2);
+					if (open != std::string_view::npos
+						&& open - index - 2 <= 16) {
+						const auto delimiter =
+							a_source.substr(index + 2, open - index - 2);
+						const bool validDelimiter =
+							std::ranges::all_of(delimiter, [](char a_value) {
+								const auto value =
+									static_cast<unsigned char>(a_value);
+								return std::isspace(value) == 0
+									&& a_value != '(' && a_value != ')'
+									&& a_value != '\\';
+							});
+						if (validDelimiter) {
+							const std::string close =
+								")" + std::string(delimiter) + '"';
+							const auto end = a_source.find(close, open + 1);
+							if (end != std::string_view::npos) {
+								index = end + close.size() - 1;
+								continue;
+							}
+						}
+					}
+				}
 				if (character == '/' && index + 1 < a_source.size()) {
 					if (a_source[index + 1] == '/') {
 						state = State::kLineComment;
@@ -74,7 +108,16 @@ namespace
 				if (character == '"') {
 					state = State::kString;
 				} else if (character == '\'') {
-					state = State::kCharacter;
+					const bool digitSeparator =
+						index != 0 && index + 1 < a_source.size()
+						&& std::isalnum(static_cast<unsigned char>(
+							   a_source[index - 1]))
+							!= 0
+						&& std::isalnum(static_cast<unsigned char>(
+							   a_source[index + 1]))
+							!= 0;
+					if (!digitSeparator)
+						state = State::kCharacter;
 				} else if (
 					std::isspace(static_cast<unsigned char>(character)) == 0) {
 					code.push_back(character);
@@ -198,38 +241,86 @@ namespace
 		return std::nullopt;
 	}
 
+	std::optional<FeatureCatalog> FindQualifiedClass(
+		const SourceFile& a_source,
+		std::size_t a_method)
+	{
+		if (a_method < 3 || a_source.code.substr(a_method - 2, 2) != "::")
+			return std::nullopt;
+		const std::size_t nameEnd = a_method - 2;
+		std::size_t nameStart = nameEnd;
+		while (nameStart != 0
+			&& IsIdentifierCharacter(a_source.code[nameStart - 1])) {
+			--nameStart;
+		}
+		if (nameStart == nameEnd)
+			return std::nullopt;
+		return FeatureCatalog{
+			.className = a_source.code.substr(nameStart, nameEnd - nameStart),
+			.declarationPath = a_source.path,
+			.classBody = {}
+		};
+	}
+
+	void AddCatalog(
+		std::vector<FeatureCatalog>& a_catalogs,
+		FeatureCatalog a_catalog)
+	{
+		const auto existing = std::ranges::find(
+			a_catalogs, a_catalog.className, &FeatureCatalog::className);
+		if (existing == a_catalogs.end()) {
+			a_catalogs.push_back(std::move(a_catalog));
+		} else if (
+			existing->classBody.empty() && !a_catalog.classBody.empty()) {
+			*existing = std::move(a_catalog);
+		}
+	}
+
 	std::vector<FeatureCatalog> FindFeatureCatalogs(
 		const std::vector<SourceFile>& a_sources)
 	{
-		constexpr std::string_view signature =
-			"GetDebugViews()constnoexcept";
+		constexpr std::array signatures{
+			std::string_view("GetDebugViews()constnoexcept"),
+			std::string_view("GetDebugViews(void)constnoexcept")
+		};
 		std::vector<FeatureCatalog> catalogs;
 		for (const auto& source : a_sources) {
-			if (source.path.extension() == ".cpp")
-				continue;
-			std::size_t search = 0;
-			while ((search = source.code.find(signature, search))
-				!= std::string::npos) {
-				std::size_t suffix = search + signature.size();
-				if (source.code.compare(suffix, 6, "(true)") == 0)
-					suffix += 6;
-				if (source.code.compare(suffix, 8, "override") != 0) {
-					search = suffix;
-					continue;
+			for (const auto signature : signatures) {
+				std::size_t search = 0;
+				while ((search = source.code.find(signature, search))
+					!= std::string::npos) {
+					auto catalog = FindQualifiedClass(source, search);
+					if (!catalog)
+						catalog = FindEnclosingClass(source, search);
+					if (catalog)
+						AddCatalog(catalogs, std::move(*catalog));
+					search += signature.size();
 				}
-				auto catalog = FindEnclosingClass(source, search);
-				if (catalog
-					&& std::ranges::find(
-						   catalogs,
-						   catalog->className,
-						   &FeatureCatalog::className)
-						== catalogs.end()) {
-					catalogs.push_back(std::move(*catalog));
-				}
-				search = suffix + 8;
 			}
 		}
 		return catalogs;
+	}
+
+	void CheckCatalogRoster(const std::vector<FeatureCatalog>& a_catalogs)
+	{
+		for (const auto expected : kExpectedCatalogs) {
+			if (std::ranges::find(
+					a_catalogs, expected, &FeatureCatalog::className)
+				== a_catalogs.end()) {
+				std::cerr << "FAIL: expected debug-view catalog " << expected
+						  << " was not discovered\n";
+				++failures;
+			}
+		}
+		for (const auto& catalog : a_catalogs) {
+			if (std::ranges::find(kExpectedCatalogs, catalog.className)
+				== kExpectedCatalogs.end()) {
+				std::cerr << "FAIL: discovered debug-view catalog "
+						  << catalog.className
+						  << " is missing from the expected roster\n";
+				++failures;
+			}
+		}
 	}
 
 	std::optional<std::string_view> FindMethodBody(
@@ -268,11 +359,18 @@ namespace
 		const FeatureCatalog& a_catalog,
 		std::size_t& a_catalogCount)
 	{
-		const auto catalogBody = FindMethodBody(
+		auto catalogBody = FindMethodBody(
 			a_sources,
 			a_catalog,
 			"GetDebugViews()constnoexcept",
 			"GetDebugViews()constnoexcept");
+		if (!catalogBody) {
+			catalogBody = FindMethodBody(
+				a_sources,
+				a_catalog,
+				"GetDebugViews(void)constnoexcept",
+				"GetDebugViews(void)constnoexcept");
+		}
 		if (!catalogBody) {
 			std::cerr << "FAIL: " << a_catalog.declarationPath.string()
 					  << ": cannot locate " << a_catalog.className
@@ -280,15 +378,27 @@ namespace
 			++failures;
 			return;
 		}
-		if (!HasNonEmptyReturn(*catalogBody))
+		if (!HasNonEmptyReturn(*catalogBody)) {
+			std::cerr << "FAIL: " << a_catalog.declarationPath.string()
+					  << ": expected catalog " << a_catalog.className
+					  << " is empty\n";
+			++failures;
 			return;
+		}
 		++a_catalogCount;
 
-		const auto settingsBody = FindMethodBody(
+		auto settingsBody = FindMethodBody(
 			a_sources,
 			a_catalog,
 			"DrawSettings()",
-			"DrawSettings()override");
+			"DrawSettings()");
+		if (!settingsBody) {
+			settingsBody = FindMethodBody(
+				a_sources,
+				a_catalog,
+				"DrawSettings(void)",
+				"DrawSettings(void)");
+		}
 		if (!settingsBody) {
 			std::cerr << "FAIL: " << a_catalog.declarationPath.string()
 					  << ": cannot locate " << a_catalog.className
@@ -304,6 +414,24 @@ namespace
 			++failures;
 		}
 	}
+
+	void TestCompaction()
+	{
+		const auto code = CompactCode(R"cpp(
+			auto count = 100'000;
+			auto text = R"tag(
+				Menu::Get().DrawDebugViewSelector(*this);
+			)tag";
+			void AfterSeparator();
+		)cpp");
+		if (!code.contains("autocount=100000;")
+			|| !code.contains("voidAfterSeparator();")
+			|| code.contains("DrawDebugViewSelector")) {
+			std::cerr << "FAIL: source compaction mishandles raw strings or "
+						 "digit separators\n";
+			++failures;
+		}
+	}
 }
 
 int main(int a_argc, char* a_argv[])
@@ -312,6 +440,7 @@ int main(int a_argc, char* a_argv[])
 		std::cerr << "FAIL: usage: DebugViewContractTests <features>\n";
 		return 1;
 	}
+	TestCompaction();
 
 	std::vector<std::filesystem::path> paths;
 	std::error_code error;
@@ -348,12 +477,14 @@ int main(int a_argc, char* a_argv[])
 	}
 
 	const auto catalogs = FindFeatureCatalogs(sources);
+	CheckCatalogRoster(catalogs);
 	std::size_t catalogCount = 0;
 	for (const auto& catalog : catalogs)
 		CheckCatalog(sources, catalog, catalogCount);
-	if (catalogCount == 0) {
-		std::cerr << "FAIL: no non-empty feature debug-view catalogs found\n";
-		return 1;
+	if (catalogCount != kExpectedCatalogs.size()) {
+		std::cerr << "FAIL: expected " << kExpectedCatalogs.size()
+				  << " non-empty catalogs, found " << catalogCount << '\n';
+		++failures;
 	}
 
 	if (failures != 0) {
