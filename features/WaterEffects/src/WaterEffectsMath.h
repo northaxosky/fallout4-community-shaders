@@ -26,7 +26,7 @@ namespace cs::features::water_effects
 	inline constexpr float kSecondLayerTiling = -0.5f;
 	inline constexpr float kLowLayerUvScale = 0.5f;
 
-	// Published far below any playable geometry so a stale read stays inert.
+	// Far below any playable geometry so a stale read stays inert.
 	inline constexpr float kNoWaterHeight = -1.0e9f;
 
 	constexpr float Saturate(float a_value) noexcept
@@ -79,8 +79,6 @@ namespace cs::features::water_effects
 		};
 	}
 
-	// dispersed.y is the untouched center tap, which is the channel FO4's scalar
-	// directional shadow terms consume.
 	inline std::array<float, 3> Dispersion(
 		float a_minus,
 		float a_center,
@@ -121,8 +119,30 @@ namespace cs::features::water_effects
 		return Lerp(top, bottom, wy);
 	}
 
-	// Scalar port of upstream ComputeCaustics. The light path consumes the
-	// undispersed center channel because FO4's directional terms are scalars.
+	// Reconstruction contract from the engine-camera-transforms skill: three
+	// ViewToWorld rows plus the origin, added exactly once.
+	inline std::array<float, 3> ViewToWorldPosition(
+		std::array<float, 3> a_viewPosition,
+		const std::array<float, 4>& a_row0,
+		const std::array<float, 4>& a_row1,
+		const std::array<float, 4>& a_row2,
+		const std::array<float, 3>& a_cameraPosAdjust) noexcept
+	{
+		const std::array<float, 4> view{
+			a_viewPosition[0], a_viewPosition[1], a_viewPosition[2], 1.0f
+		};
+		const auto dot4 = [&](const std::array<float, 4>& a_row) {
+			return a_row[0] * view[0] + a_row[1] * view[1]
+			     + a_row[2] * view[2] + a_row[3] * view[3];
+		};
+		return {
+			dot4(a_row0) + a_cameraPosAdjust[0],
+			dot4(a_row1) + a_cameraPosAdjust[1],
+			dot4(a_row2) + a_cameraPosAdjust[2]
+		};
+	}
+
+	// Scalar port of upstream ComputeCaustics.
 	template <class Sampler>
 	float ComputeCausticsMult(
 		float a_waterHeight,

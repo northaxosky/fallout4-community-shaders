@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -105,7 +106,7 @@ namespace
 		CHECK(Near(full[0], 0.6f * 0.025f));
 		CHECK(Near(full[1], 0.8f * 0.025f));
 
-		// The centre channel is the untouched tap; that is what the scalar
+		// The center channel is the untouched tap; that is what the scalar
 		// light path consumes, so debug and production cannot disagree.
 		const auto spread = Dispersion(0.2f, 0.7f, 0.9f);
 		CHECK(Near(spread[1], 0.7f));
@@ -134,7 +135,7 @@ namespace
 			return static_cast<float>(a_x + a_y);
 		};
 
-		// Texel centres reproduce the stored value exactly.
+		// Texel centers reproduce the stored value exactly.
 		CHECK(Near(BilinearWrap(load, { 1.5f / width, 2.5f / height }, width, height), 3.0f));
 		// Midway between two texels is their average.
 		CHECK(Near(BilinearWrap(load, { 2.0f / width, 2.5f / height }, width, height), 3.5f));
@@ -170,23 +171,79 @@ namespace
 
 	void TestWorldLock()
 	{
-		// The same world position must produce the same UV regardless of where
-		// the camera is: the port folds the origin in once, upstream twice.
-		std::array<std::array<float, 2>, 2> seen{};
-		std::size_t index = 0;
-		const auto record = [&](std::array<float, 2> a_uv) {
-			if (index < seen.size())
-				seen[index++] = a_uv;
-			return 0.25f;
-		};
-		ComputeCausticsMult(0.0f, { 1000.0f, 2000.0f, -500.0f }, 0.0f, record);
-		const auto first = seen[0];
+		// Two cameras observing the same world point must produce the same UV.
+		// Upstream re-adds the origin here; if that line were ported verbatim
+		// the UVs would diverge by the camera delta and caustics would swim.
+		const std::array<float, 3> world{ 1000.0f, 2000.0f, -500.0f };
+		const std::array<float, 4> row0{ 1.0f, 0.0f, 0.0f, 0.0f };
+		const std::array<float, 4> row1{ 0.0f, 1.0f, 0.0f, 0.0f };
+		const std::array<float, 4> row2{ 0.0f, 0.0f, 1.0f, 0.0f };
 
-		index = 0;
-		seen = {};
-		ComputeCausticsMult(0.0f, { 1000.0f, 2000.0f, -500.0f }, 0.0f, record);
-		CHECK(Near(seen[0][0], first[0]));
-		CHECK(Near(seen[0][1], first[1]));
+		const auto uvSeenFrom = [&](std::array<float, 3> a_camera) {
+			const std::array<float, 3> view{
+				world[0] - a_camera[0],
+				world[1] - a_camera[1],
+				world[2] - a_camera[2]
+			};
+			const auto reconstructed =
+				ViewToWorldPosition(view, row0, row1, row2, a_camera);
+			CHECK(Near(reconstructed[0], world[0], 1.0e-2f));
+			CHECK(Near(reconstructed[1], world[1], 1.0e-2f));
+
+			std::array<float, 2> uv{};
+			bool captured = false;
+			const auto record = [&](std::array<float, 2> a_uv) {
+				if (!captured) {
+					uv = a_uv;
+					captured = true;
+				}
+				return 0.25f;
+			};
+			ComputeCausticsMult(0.0f, reconstructed, 0.0f, record);
+			CHECK(captured);
+			return uv;
+		};
+
+		const auto near = uvSeenFrom({ 900.0f, 1900.0f, 100.0f });
+		const auto far = uvSeenFrom({ -40000.0f, 65000.0f, 3000.0f });
+		CHECK(Near(near[0], far[0], 1.0e-3f));
+		CHECK(Near(near[1], far[1], 1.0e-3f));
+	}
+
+	// A debug mode published while the texture is unbound would sample zero and
+	// multiply sunlight to black, so both guards must be present.
+	void TestDisabledCannotBlacken(
+		const std::filesystem::path& a_hlsliPath,
+		const std::filesystem::path& a_featurePath)
+	{
+		const auto unbound = [](std::array<float, 2>) { return 0.0f; };
+		const float blackened =
+			ComputeCausticsMult(0.0f, { 0.0f, 0.0f, -512.0f }, 0.0f, unbound);
+		CHECK(Near(blackened, 0.0f, 1.0e-4f));
+
+		const auto hlsli = ReadFile(a_hlsliPath);
+		if (!hlsli.empty()) {
+			CHECK(hlsli.find("bool CausticsTextureReady()") != std::string::npos);
+			const auto mult = hlsli.find("float GetCausticsMult(");
+			CHECK(mult != std::string::npos);
+			const auto guard = hlsli.find("!CausticsTextureReady()", mult);
+			const auto body = hlsli.find("ComputeCaustics(", mult);
+			CHECK(guard != std::string::npos);
+			CHECK(body != std::string::npos);
+			CHECK(guard < body);
+		}
+
+		const auto feature = ReadFile(a_featurePath);
+		if (feature.empty())
+			return;
+
+		const auto publish = feature.find("WaterEffects::GetCommonBufferData");
+		CHECK(publish != std::string::npos);
+		const auto gate = feature.find("if (!CanBind())", publish);
+		const auto debugOverride = feature.find("kModeCaustics", publish);
+		CHECK(gate != std::string::npos);
+		CHECK(debugOverride != std::string::npos);
+		CHECK(gate < debugOverride);
 	}
 
 	void TestFeatureBlockLayout()
@@ -262,12 +319,8 @@ namespace
 		CHECK(bsdfLight.find(
 				  "#include \"WaterEffects/WaterCausticsSampler.hlsli\"")
 			!= std::string::npos);
-		// Caustics modulate the sun term before directional shadowing, which is
-		// upstream's ordering.
-		const auto firstCaustics =
-			bsdfLight.find("WaterEffects::GetCausticsMultFromViewPosition");
-		const auto firstShadow = bsdfLight.find("GetWorldShadow");
-		CHECK(firstShadow == std::string::npos || firstCaustics < firstShadow);
+		// Ordering against directional shadowing is not asserted here: the term
+		// is a scalar multiply, so it commutes.
 		CHECK(bsdfLight.find("WaterEffects::TryGetDebugColor")
 			== std::string::npos);
 
@@ -342,6 +395,7 @@ int main(int a_argc, char* a_argv[])
 	if (a_argc == 6) {
 		TestShaderContract(a_argv[1], a_argv[2], a_argv[3], a_argv[4]);
 		TestLiveSettingsContract(a_argv[5]);
+		TestDisabledCannotBlacken(a_argv[1], a_argv[5]);
 	} else {
 		std::cerr << "FAIL: expected caustics hlsli, BSDF light, BSDF "
 					 "composite, shared data, and source paths\n";

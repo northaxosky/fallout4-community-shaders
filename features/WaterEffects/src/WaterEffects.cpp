@@ -481,11 +481,12 @@ namespace cs::features
 		_hasWater.store(hasWater, std::memory_order_relaxed);
 		_waterHeight.store(waterHeight, std::memory_order_relaxed);
 
-		if (!_injectionsOperational.load(std::memory_order_acquire))
+		// Same predicate as the bind path: publishing a live mode while the
+		// texture stays unbound would multiply sunlight by zero.
+		if (!CanBind())
 			return {};
 
-		std::uint32_t mode =
-			_enabled.load(std::memory_order_acquire) ? kModeNormal : kModeDisabled;
+		std::uint32_t mode = kModeNormal;
 		switch (_debugVisualization.load(std::memory_order_acquire)) {
 		case DebugVisualization::kCaustics:
 			mode = kModeCaustics;

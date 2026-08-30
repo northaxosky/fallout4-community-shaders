@@ -111,12 +111,22 @@ namespace WaterEffects
 		return result;
 	}
 
+	// An unbound t32 samples as 0, which would darken rather than no-op. Fail
+	// to identity instead.
+	bool CausticsTextureReady()
+	{
+		uint2 causticsDims;
+		WaterCaustics.GetDimensions(causticsDims.x, causticsDims.y);
+		return !any(causticsDims == 0);
+	}
+
 	// FO4's directional terms are scalars, so consume the undispersed centre
 	// channel. Dead dispersion taps fold away.
 	float GetCausticsMult(float3 worldPosition)
 	{
 		if (SharedData::waterEffectsSettings.Mode == MODE_DISABLED ||
-			SharedData::waterEffectsSettings.HasWater == 0) {
+			SharedData::waterEffectsSettings.HasWater == 0 ||
+			!CausticsTextureReady()) {
 			return 1.0;
 		}
 		return ComputeCaustics(
