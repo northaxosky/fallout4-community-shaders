@@ -92,6 +92,13 @@ enabled = true
 max_rain_wetness = 1.0
 min_rain_wetness = 0.65
 
+[features.WaterEffects]
+load = false
+
+[features.WaterEffects.settings]
+# Runtime toggle for the caustics multiply. Upstream ships no other tunables.
+enabled = true
+
 [features.ScreenSpaceShadows]
 load = false
 

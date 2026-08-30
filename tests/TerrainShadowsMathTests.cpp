@@ -321,7 +321,7 @@ namespace
 
 		static_assert(sizeof(TerrainShadowsFeatureData) == 48);
 		static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 48);
-		static_assert(sizeof(FeatureDataCB) == 112);
+		static_assert(sizeof(FeatureDataCB) == 128);
 		static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
 		static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
 		static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
@@ -632,9 +632,20 @@ namespace
 					|| block.contains(
 						"WetnessEffects::TryGetDebugColorFromScreenPosition"),
 				std::string(family) + " exposes wetness debug output");
+			Check(
+				block.contains(
+					"WaterEffects::TryGetDebugColorFromViewPosition")
+					|| block.contains(
+						"WaterEffects::TryGetDebugColorFromScreenPosition"),
+				std::string(family) + " exposes water caustics debug output");
 		}
 		constexpr std::string_view familyMarker =
 			"#ifdef BSDFCOMPOSITE_PS_";
+		constexpr std::array debugHelpers{
+			"WetnessEffects::TryGetDebugColor",
+			"TerrainShadows::TryGetDebugColor",
+			"WaterEffects::TryGetDebugColor"
+		};
 		std::size_t multiDebugFamilies = 0;
 		for (auto begin = bsdfComposite.find(familyMarker);
 			begin != std::string::npos;
@@ -649,26 +660,42 @@ namespace
 				begin,
 				end == std::string::npos ? std::string::npos : end - begin);
 			const auto compact = RemoveWhitespace(block);
-			const auto wetness =
-				compact.find("WetnessEffects::TryGetDebugColor");
-			const auto terrain =
-				compact.find("TerrainShadows::TryGetDebugColor");
-			if (wetness == std::string::npos
-				|| terrain == std::string::npos) {
-				continue;
+			// Every helper contributing to this family, in emission order.
+			std::vector<std::size_t> sites;
+			for (const auto* helper : debugHelpers) {
+				for (auto cursor = compact.find(helper);
+					cursor != std::string::npos;
+					cursor = compact.find(helper, cursor + 1)) {
+					sites.push_back(cursor);
+				}
 			}
+			if (sites.size() < 2)
+				continue;
 
+			std::sort(sites.begin(), sites.end());
 			++multiDebugFamilies;
-			const auto first = std::min(wetness, terrain);
-			const auto second = std::max(wetness, terrain);
-			const auto between = compact.substr(first, second - first);
 			const auto family = nameEnd == std::string::npos ?
 				std::string_view{} :
 				std::string_view(bsdfComposite).substr(
 					nameStart, nameEnd - nameStart);
+			bool ordered = true;
+			for (std::size_t index = 0; index < sites.size(); ++index) {
+				const auto site = sites[index];
+				if (site < 3 || compact.substr(site - 3, 3) != "if(") {
+					ordered = false;
+					break;
+				}
+				if (index + 1 == sites.size())
+					continue;
+				const auto between = compact.substr(
+					site, sites[index + 1] - site);
+				if (!between.contains("return")) {
+					ordered = false;
+					break;
+				}
+			}
 			Check(
-				first >= 3 && compact.substr(first - 3, 3) == "if("
-					&& between.contains("return"),
+				ordered,
 				std::string(family)
 					+ " returns successful fullscreen debug output "
 					  "before invoking the next helper");

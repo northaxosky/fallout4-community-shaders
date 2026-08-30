@@ -103,7 +103,8 @@ $requiredShaderDirectories = @(
 	'Shaders/TerrainShadows',
 	'Shaders/Upscaling',
 	'Shaders/InverseSquareLighting',
-	'Shaders/WetnessEffects'
+	'Shaders/WetnessEffects',
+	'Shaders/WaterEffects'
 )
 foreach ($relativePath in $requiredShaderDirectories) {
 	$path = Join-Path $stagingRoot $relativePath

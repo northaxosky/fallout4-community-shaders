@@ -140,6 +140,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(ScreenSpaceGI)
 	register_feature(InverseSquareLighting)
 	register_feature(WetnessEffects)
+	register_feature(WaterEffects)
 
 	# Upscaling backends: Streamline headers are interface-only, FidelityFX builds from source.
 	add_subdirectory(cmake/Streamline)
@@ -311,6 +312,31 @@ add_test(
 )
 set_tests_properties(
 	InverseSquareLightingMath
+	PROPERTIES LABELS "render;shader;unit"
+)
+
+add_executable(WaterEffectsMathTests
+	tests/WaterEffectsMathTests.cpp
+	features/WaterEffects/src/WaterEffectsMath.h
+	src/FeatureBuffer.h
+)
+configure_host_test(WaterEffectsMathTests)
+target_include_directories(WaterEffectsMathTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/WaterEffects/src"
+	"${CMAKE_SOURCE_DIR}/src"
+)
+
+add_test(
+	NAME WaterEffectsMath
+	COMMAND WaterEffectsMathTests
+		"${CMAKE_SOURCE_DIR}/features/WaterEffects/Shaders/WaterEffects/WaterCaustics.hlsli"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFCompositeShader.hlsl"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
+		"${CMAKE_SOURCE_DIR}/features/WaterEffects/src/WaterEffects.cpp"
+)
+set_tests_properties(
+	WaterEffectsMath
 	PROPERTIES LABELS "render;shader;unit"
 )
 
@@ -487,6 +513,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/WaterEffects/Shaders"
 		FILES
 			"${CMAKE_SOURCE_DIR}/tests/shaders/SharedDataProbe.hlsl"
 	)

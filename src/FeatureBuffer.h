@@ -52,6 +52,16 @@ namespace cs
 	};
 	static_assert(sizeof(InverseSquareLightingFeatureData) == 16);
 
+	struct alignas(16) WaterEffectsFeatureData
+	{
+		std::uint32_t Mode = 0;
+		std::uint32_t HasWater = 0;
+		// absolute world Z of the player cell's water plane
+		float         WaterHeight = 0.0f;
+		float         pad0 = 0.0f;
+	};
+	static_assert(sizeof(WaterEffectsFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
 		ScreenSpaceShadowsFeatureData     screenSpaceShadowsSettings;
@@ -59,8 +69,9 @@ namespace cs
 		WetnessEffectsFeatureData         wetnessEffectsSettings;
 		TerrainShadowsFeatureData         terrainShadowsSettings;
 		InverseSquareLightingFeatureData inverseSquareLightingSettings;
+		WaterEffectsFeatureData           waterEffectsSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 112);
+	static_assert(sizeof(FeatureDataCB) == 128);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -79,6 +90,11 @@ namespace cs
 	static_assert(offsetof(InverseSquareLightingFeatureData, ExteriorStrength) == 4);
 	static_assert(offsetof(InverseSquareLightingFeatureData, InteriorStrength) == 8);
 	static_assert(offsetof(InverseSquareLightingFeatureData, NearFieldDistance) == 12);
+	static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 112);
+	static_assert(offsetof(WaterEffectsFeatureData, Mode) == 0);
+	static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
+	static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
+	static_assert(offsetof(WaterEffectsFeatureData, pad0) == 12);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

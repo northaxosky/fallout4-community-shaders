@@ -3,6 +3,9 @@
 #ifdef TERRAIN_SHADOWS
 #include "TerrainShadows/TerrainShadows.hlsli"
 #endif
+#ifdef WATER_EFFECTS
+#include "WaterEffects/WaterCaustics.hlsli"
+#endif
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
 #define WETNESS_COMPOSITE_CONSUMER 1
 #include "WetnessEffects/WetnessEffects.hlsli"
@@ -37,7 +40,7 @@ cbuffer PerFrame_CB12 : register(b12)
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
     float4 cb12_pad_28_29[2];
     float4 cb12_idx30_ibl_desaturation;
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -194,7 +197,7 @@ PS_OUTPUT main(PS_INPUT input)
         reprojRow2 = FarReproj_row2;
         reprojRow3 = FarReproj_row3;
     }
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float2 terrainScreen = float2(
         uv.x * ScreenSize.z,
         1.0 - uv.y * ScreenSize.w);
@@ -218,6 +221,20 @@ PS_OUTPUT main(PS_INPUT input)
             terrainDebugColor))
     {
         output.color = terrainDebugColor;
+        return output;
+    }
+#endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            positionView,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
         return output;
     }
 #endif
@@ -608,6 +625,20 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 #endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            positionView,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
+        return output;
+    }
+#endif
 
 #if FO4_SKIN_BLUR
     float3 blurSourceCenter =
@@ -889,7 +920,7 @@ PS_OUTPUT main(PS_INPUT input)
 #define OUTPUTMASK 0
 #endif
 
-#if FOGSTACK || defined(TERRAIN_SHADOWS)
+#if FOGSTACK || defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
 #define AMBIENT_FRAME_COUNT 47
 #else
 #define AMBIENT_FRAME_COUNT 31
@@ -1097,9 +1128,10 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         row3 = ambientFrame[23];
     }
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float3 terrainViewPosition =
         reconstructViewPosition(coordinate, linearizedDepth, row0, row1, row2, row3);
+#ifdef TERRAIN_SHADOWS
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromViewPosition(
             terrainViewPosition,
@@ -1112,6 +1144,20 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     {
         return terrainDebugColor;
     }
+#endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            terrainViewPosition,
+            ambientFrame[12],
+            ambientFrame[13],
+            ambientFrame[14],
+            ambientFrame[35],
+            waterDebugColor))
+    {
+        return waterDebugColor;
+    }
+#endif
 #endif
 
 #if FOGSTACK
@@ -1420,6 +1466,19 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         return terrainDebugColor;
     }
 #endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            pos.xyz,
+            g_PF[12],
+            g_PF[13],
+            g_PF[14],
+            g_PF[35],
+            waterDebugColor))
+    {
+        return waterDebugColor;
+    }
+#endif
 
     float2 prm = TexParam.SampleLevel(SampParam, uv, 0).yz;
 
@@ -1539,11 +1598,11 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 
 #ifdef BSDFCOMPOSITE_PS_2D_ACCUMULATOR
 
-#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS)
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -1623,6 +1682,27 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
             terrainDebugColor))
     {
         return terrainDebugColor;
+    }
+#endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        return waterDebugColor;
     }
 #endif
     float2 uv = position.xy * screenData[0].xy;
@@ -1868,7 +1948,7 @@ PS_OUTPUT main(PS_INPUT input)
         reprojRow3 = FarReproj_row3;
     }
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 terrainUvRemapped =
         float4(uv.x, 0.0, -uv.y, 0.0)
         * float4(ScreenSize.z, 0.0, ScreenSize.w, 0.0);
@@ -1882,6 +1962,7 @@ PS_OUTPUT main(PS_INPUT input)
         dot(reprojRow3, terrainPosition));
     float3 terrainViewPosition =
         terrainPositionViewH.xyz / terrainPositionViewH.w;
+#ifdef TERRAIN_SHADOWS
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromViewPosition(
             terrainViewPosition,
@@ -1895,6 +1976,21 @@ PS_OUTPUT main(PS_INPUT input)
         output.color = terrainDebugColor;
         return output;
     }
+#endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            terrainViewPosition,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust_for_fog_height,
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
+        return output;
+    }
+#endif
 #endif
 
 #if COMPOSITE_MATERIAL_5
@@ -2085,11 +2181,11 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_NO_SRV_POSITION_TEXCOORD
 
-#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -2147,17 +2243,39 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 #endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
+        return output;
+    }
+#endif
     return output;
 }
 #endif
 
 #ifdef BSDFCOMPOSITE_PS_NO_SRV_POSITION
 
-#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -2214,6 +2332,28 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 #endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
+        return output;
+    }
+#endif
     return output;
 }
 #endif
@@ -2228,7 +2368,7 @@ PS_OUTPUT main(PS_INPUT input)
 #ifndef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 47
 #endif
-#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) && COMPOSITE_CB12_COUNT < 36
+#if (defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)) && COMPOSITE_CB12_COUNT < 36
 #undef COMPOSITE_CB12_COUNT
 #define COMPOSITE_CB12_COUNT 36
 #endif
@@ -2356,7 +2496,7 @@ float4 main(PSInput input) : SV_Target0
         row3 = scene[23];
     }
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float2 terrainProjectedXY = float2(
         uv.x * screenData[0].z,
         1.0 - uv.y * screenData[0].w) * 2.0 - 1.0;
@@ -2369,6 +2509,7 @@ float4 main(PSInput input) : SV_Target0
         dot(row3, terrainProjected));
     float3 terrainViewPosition =
         terrainPositionViewH.xyz / terrainPositionViewH.w;
+#ifdef TERRAIN_SHADOWS
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromViewPosition(
             terrainViewPosition,
@@ -2381,6 +2522,20 @@ float4 main(PSInput input) : SV_Target0
     {
         return terrainDebugColor;
     }
+#endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            terrainViewPosition,
+            scene[12],
+            scene[13],
+            scene[14],
+            scene[35],
+            waterDebugColor))
+    {
+        return waterDebugColor;
+    }
+#endif
 #endif
 
 #if COMPOSITE_MATERIAL_EXCLUSION || COMPOSITE_FOG_STACK
@@ -2659,11 +2814,11 @@ float4 main(PSInput input) : SV_Target0
 
 #ifdef BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR
 
-#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -2734,6 +2889,27 @@ float4 main(PS_INPUT input) : SV_Target0
         return terrainDebugColor;
     }
 #endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        return waterDebugColor;
+    }
+#endif
     float2 screenUv = input.position.xy * cb2[0].xy;
     float3 ambient = g_tAmbientPrimary.SampleLevel(g_sAmbientPrimary, screenUv, 0).xyz;
     ambient += g_tAmbientSecondary.SampleLevel(g_sAmbientSecondary, screenUv, 0).xyz;
@@ -2800,6 +2976,27 @@ float4 main(PS_INPUT input) : SV_Target0
             terrainDebugColor))
     {
         return terrainDebugColor;
+    }
+#endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        return waterDebugColor;
     }
 #endif
     float2 screenUv = input.position.xy * cb2[0].xy;
@@ -2876,6 +3073,27 @@ float4 main(PS_INPUT input) : SV_Target0
         return terrainDebugColor;
     }
 #endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        return waterDebugColor;
+    }
+#endif
     float2 screenUv = input.position.xy * cb2[0].xy;
     float material = g_tShading.SampleLevel(g_sShading, screenUv, 0).w;
     float3 color = g_tColorPrimary.SampleLevel(g_sColorPrimary, screenUv, 0).xyz;
@@ -2946,6 +3164,27 @@ float4 main(PS_INPUT input) : SV_Target0
             terrainDebugColor))
     {
         return terrainDebugColor;
+    }
+#endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            waterDebugColor))
+    {
+        return waterDebugColor;
     }
 #endif
     float2 screenUv = input.position.xy * cb2[0].xy;
@@ -3084,7 +3323,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         row3 = scene[23];
     }
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float2 terrainProjectedUv = float2(
         uv.x * screenData[0].z,
         1.0 - uv.y * screenData[0].w);
@@ -3096,6 +3335,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         dot(row2, terrainProjected),
         dot(row3, terrainProjected));
     terrainReconstructed.xyz /= terrainReconstructed.w;
+#ifdef TERRAIN_SHADOWS
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromViewPosition(
             terrainReconstructed.xyz,
@@ -3108,6 +3348,20 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     {
         return terrainDebugColor;
     }
+#endif
+#ifdef WATER_EFFECTS
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            terrainReconstructed.xyz,
+            scene[12],
+            scene[13],
+            scene[14],
+            scene[35],
+            waterDebugColor))
+    {
+        return waterDebugColor;
+    }
+#endif
 #endif
 
 #if WAVE5A_FOG_MATERIAL5
@@ -3241,7 +3495,7 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 #error Unsupported SSS MRT record-normal shape
 #endif
 
-#ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
+#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)
 #undef WAVE5B_RECORD_NORMAL_CB12_COUNT
 #define WAVE5B_RECORD_NORMAL_CB12_COUNT 36
 #endif
@@ -3398,6 +3652,23 @@ PS_OUTPUT main(PS_INPUT input)
         return output;
     }
 #endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            reconstructedPosition.xyz,
+            cb12[12],
+            cb12[13],
+            cb12[14],
+            cb12[35],
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
+        output.normal = 0.0;
+        output.material = 0.0;
+        output.auxiliary = 0.0;
+        return output;
+    }
+#endif
     float3 viewDirection = normalize(-reconstructedPosition.xyz);
 
 #if WAVE5B_RECORD_NORMAL_HAS_WETNESS
@@ -3542,7 +3813,7 @@ PS_OUTPUT main(PS_INPUT input)
 #error Unsupported SSS MRT surface/contact shape
 #endif
 
-#ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
+#if defined(TERRAIN_SHADOWS_FULLSCREEN_DEBUG) || defined(WATER_EFFECTS_FULLSCREEN_DEBUG)
 #undef WAVE5B_SURFACE_CONTACT_CB12_COUNT
 #define WAVE5B_SURFACE_CONTACT_CB12_COUNT 36
 #endif
@@ -3698,6 +3969,23 @@ PS_OUTPUT main(PS_INPUT input)
             terrainDebugColor))
     {
         output.color = terrainDebugColor;
+        output.normal = 0.0;
+        output.material = 0.0;
+        output.auxiliary = 0.0;
+        return output;
+    }
+#endif
+#ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
+    float4 waterDebugColor;
+    if (WaterEffects::TryGetDebugColorFromViewPosition(
+            reconstructedPosition.xyz,
+            cb12[12],
+            cb12[13],
+            cb12[14],
+            cb12[35],
+            waterDebugColor))
+    {
+        output.color = waterDebugColor;
         output.normal = 0.0;
         output.material = 0.0;
         output.auxiliary = 0.0;

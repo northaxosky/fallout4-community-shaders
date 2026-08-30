@@ -16,6 +16,11 @@
 #include "InverseSquareLighting/InverseSquareLighting.hlsli"
 #endif
 
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+#include "WaterEffects/WaterCausticsSampler.hlsli"
+#include "WaterEffects/WaterCaustics.hlsli"
+#endif
+
 #ifdef BSDFLIGHT_PS_DEFERRED
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -3519,7 +3524,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx30;
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -3812,6 +3817,14 @@ PS_OUTPUT main(PS_INPUT input)
     shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
         posView,
         TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+#endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
         ViewToWorld_row0,
         ViewToWorld_row1,
         ViewToWorld_row2,
@@ -4676,7 +4689,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx30;
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -5122,6 +5135,14 @@ PS_OUTPUT main(PS_INPUT input)
     shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
         posView,
         TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+#endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
         ViewToWorld_row0,
         ViewToWorld_row1,
         ViewToWorld_row2,
@@ -6144,7 +6165,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 cb12_idx30;
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -6660,6 +6681,14 @@ PS_OUTPUT main(PS_INPUT input)
     shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
         posView,
         TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+#endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    shadow *= WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
         ViewToWorld_row0,
         ViewToWorld_row1,
         ViewToWorld_row2,
@@ -8020,7 +8049,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -8348,6 +8377,14 @@ PS_OUTPUT main(PS_INPUT input)
     result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
         posView,
         TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+#endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    result *= WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
         ViewToWorld_row0,
         ViewToWorld_row1,
         ViewToWorld_row2,
@@ -8935,7 +8972,7 @@ cbuffer PerFrame_CB12 : register(b12)
 
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS)
     float4 cb12_pad_28_34[7];
     float4 CameraPosAdjust;
 #endif
@@ -9132,6 +9169,14 @@ PS_OUTPUT main(PS_INPUT input)
         ViewToWorld_row2,
         CameraPosAdjust);
 #endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    result *= WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+#endif
 
     output.diffuse = result.zzzz;
     output.specular = float4(result.xyz, 1.0);
@@ -9146,6 +9191,14 @@ PS_OUTPUT main(PS_INPUT input)
     splitShadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
         posView,
         TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+#endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    splitShadow *= WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
         ViewToWorld_row0,
         ViewToWorld_row1,
         ViewToWorld_row2,
@@ -9281,11 +9334,11 @@ cbuffer PerFrame_CB12 : register(b12)
 
 #if defined(DIRECTIONAL) && defined(SPECULAR)
     float4 cb12_idx30;
-#elif defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+#elif defined(DIRECTIONAL) && (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS))
     float4 cb12_idx30_terrain_pad;
 #endif
 
-#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+#if defined(DIRECTIONAL) && (defined(TERRAIN_SHADOWS) || defined(WATER_EFFECTS))
     float4 cb12_pad_31_34[4];
     float4 CameraPosAdjust;
 #endif
@@ -9831,6 +9884,16 @@ PS_OUTPUT main(PS_INPUT input)
         CameraPosAdjust);
     finalDiffuse *= terrainShadowMult;
     brdfSpecular *= terrainShadowMult;
+#endif
+#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    float causticsMult = WaterEffects::GetCausticsMultFromViewPosition(
+        posView,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+    finalDiffuse *= causticsMult;
+    brdfSpecular *= causticsMult;
 #endif
 
 #ifdef WETNESS_EFFECTS

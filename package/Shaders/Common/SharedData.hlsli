@@ -69,6 +69,14 @@ namespace SharedData
 		float NearFieldDistance;
 	};
 
+	struct WaterEffectsSettings
+	{
+		uint Mode;
+		uint HasWater;
+		float WaterHeight;
+		float pad0;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
@@ -76,6 +84,7 @@ namespace SharedData
 		WetnessEffectsSettings wetnessEffectsSettings;
 		TerrainShadowsSettings terrainShadowsSettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
+		WaterEffectsSettings waterEffectsSettings;
 	};
 
 	// standard D3D depth: near = 0, far = 1

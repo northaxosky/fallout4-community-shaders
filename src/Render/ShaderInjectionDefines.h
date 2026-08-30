@@ -13,4 +13,7 @@ namespace cs::engine::shader_injection_defines
 	inline constexpr auto kTerrainShadows = "TERRAIN_SHADOWS";
 	inline constexpr auto kTerrainShadowsFullscreenDebug =
 		"TERRAIN_SHADOWS_FULLSCREEN_DEBUG";
+	inline constexpr auto kWaterEffects = "WATER_EFFECTS";
+	inline constexpr auto kWaterEffectsFullscreenDebug =
+		"WATER_EFFECTS_FULLSCREEN_DEBUG";
 }

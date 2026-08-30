@@ -92,7 +92,7 @@ namespace
 		using cs::FeatureDataCB;
 		using cs::WetnessEffectsFeatureData;
 
-		CHECK(sizeof(FeatureDataCB) == 112);
+		CHECK(sizeof(FeatureDataCB) == 128);
 		CHECK(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 		CHECK(sizeof(WetnessEffectsFeatureData) == 16);
 		CHECK(offsetof(WetnessEffectsFeatureData, Wetness) == 0);

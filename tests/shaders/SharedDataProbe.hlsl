@@ -49,6 +49,11 @@ float4 main() : SV_Target
 	value += SharedData::inverseSquareLightingSettings.ExteriorStrength;
 	value += SharedData::inverseSquareLightingSettings.InteriorStrength;
 	value += SharedData::inverseSquareLightingSettings.NearFieldDistance;
+
+	value += SharedData::waterEffectsSettings.Mode;
+	value += SharedData::waterEffectsSettings.HasWater;
+	value += SharedData::waterEffectsSettings.WaterHeight;
+	value += SharedData::waterEffectsSettings.pad0;
 	return value.xxxx;
 #else
 	return 0.0;

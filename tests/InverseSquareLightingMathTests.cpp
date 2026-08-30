@@ -253,7 +253,7 @@ namespace
 		using cs::FeatureDataCB;
 		using cs::InverseSquareLightingFeatureData;
 
-		CHECK(sizeof(FeatureDataCB) == 112);
+		CHECK(sizeof(FeatureDataCB) == 128);
 		CHECK(
 			offsetof(FeatureDataCB, inverseSquareLightingSettings) == 96);
 		CHECK(sizeof(InverseSquareLightingFeatureData) == 16);

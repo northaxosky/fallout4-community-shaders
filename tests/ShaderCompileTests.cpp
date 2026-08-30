@@ -402,7 +402,8 @@ namespace
 			ExpectedVariable{ "wetnessEffectsSettings", 32, 16 },
 			ExpectedVariable{ "terrainShadowsSettings", 48, 48 },
 			ExpectedVariable{
-				"inverseSquareLightingSettings", 96, 16 }
+				"inverseSquareLightingSettings", 96, 16 },
+			ExpectedVariable{ "waterEffectsSettings", 112, 16 }
 		};
 		if (shaderDesc.ConstantBuffers != 2
 			|| shaderDesc.BoundResources != 2) {
@@ -421,7 +422,7 @@ namespace
 			reflection.Get(),
 			"FeatureData",
 			6,
-			112,
+			128,
 			featureVariables);
 	}
 
@@ -1084,6 +1085,10 @@ namespace
 	constexpr UINT kTerrainSceneDepthTextureSlot = 31;
 	constexpr UINT kTerrainShadowSamplerSlot = 13;
 
+	constexpr UINT kWaterCausticsTextureSlot = 32;
+	constexpr UINT kWaterSceneDepthTextureSlot = 33;
+	constexpr UINT kWaterCausticsSamplerSlot = 14;
+
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
 	constexpr std::size_t kExpectedAmbientNonTargetRows = 44;
 	constexpr std::size_t kExpectedBsdfLightRows = 167;
@@ -1361,10 +1366,11 @@ namespace
 		}
 
 		using namespace cs::engine::shader_injection_defines;
-		const std::array<ShaderDefines, 6> directionalCompositions{ {
+		const std::array<ShaderDefines, 8> directionalCompositions{ {
 			{ { kScreenSpaceShadows, "1" } },
 			{ { kTerrainShadows, "1" } },
 			{ { kWetnessEffects, "1" } },
+			{ { kWaterEffects, "1" } },
 			{
 				{ kScreenSpaceShadows, "1" },
 				{ kTerrainShadows, "1" }
@@ -1374,9 +1380,14 @@ namespace
 				{ kWetnessEffects, "1" }
 			},
 			{
+				{ kTerrainShadows, "1" },
+				{ kWaterEffects, "1" }
+			},
+			{
 				{ kScreenSpaceShadows, "1" },
 				{ kTerrainShadows, "1" },
-				{ kWetnessEffects, "1" }
+				{ kWetnessEffects, "1" },
+				{ kWaterEffects, "1" }
 			}
 		} };
 		const std::array<ShaderDefines, 3> ambientCompositions{ {
@@ -1510,6 +1521,17 @@ namespace
 						slots.requiredSamplers :
 						slots.forbiddenSamplers;
 					terrainSamplers.push_back(kTerrainShadowSamplerSlot);
+					const bool waterOn = HasDefine(defines, kWaterEffects);
+					auto& waterTextures = waterOn && consumesTerrain ?
+						slots.requiredTextures :
+						slots.forbiddenTextures;
+					waterTextures.push_back(kWaterCausticsTextureSlot);
+					slots.forbiddenTextures.push_back(
+						kWaterSceneDepthTextureSlot);
+					auto& waterSamplers = waterOn && consumesTerrain ?
+						slots.requiredSamplers :
+						slots.forbiddenSamplers;
+					waterSamplers.push_back(kWaterCausticsSamplerSlot);
 					AddRegistration(
 						a_jobs,
 						a_root,
@@ -1653,6 +1675,29 @@ namespace
 					.key = registration.name,
 					.variant = FeatureIdentityVariant::kTerrainShadows
 				});
+			++contributorCompositionCount;
+
+			SlotExpectations waterSlots;
+			auto& waterTextures = consumesTerrainDebug ?
+				waterSlots.requiredTextures :
+				waterSlots.forbiddenTextures;
+			waterTextures.push_back(kWaterCausticsTextureSlot);
+			auto& waterDepthTextures =
+				consumesTerrainDebug
+					&& UsesTerrainDebugDepthFallback(registration) ?
+				waterSlots.requiredTextures :
+				waterSlots.forbiddenTextures;
+			waterDepthTextures.push_back(kWaterSceneDepthTextureSlot);
+			AddRegistration(
+				a_jobs,
+				a_root,
+				registration,
+				{
+					{ kWaterEffects, "1" },
+					{ kWaterEffectsFullscreenDebug, "1" }
+				},
+				nullptr,
+				std::move(waterSlots));
 			++contributorCompositionCount;
 		}
 		if (ambientCompositionRows != kExpectedAmbientCompositionRows
