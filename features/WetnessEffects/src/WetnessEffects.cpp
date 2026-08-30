@@ -11,6 +11,7 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Menu/Menu.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
@@ -441,6 +442,8 @@ namespace cs::features
 					"shader delivery path unavailable" :
 					_validationDetail.c_str());
 		}
+
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void WetnessEffects::RestoreDefaultSettings()

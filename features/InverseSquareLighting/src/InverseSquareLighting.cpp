@@ -10,6 +10,7 @@
 #include <toml++/toml.hpp>
 
 #include "Log.h"
+#include "Menu/Menu.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
@@ -509,6 +510,8 @@ namespace cs::features
 					"shader delivery path unavailable" :
 					detail.c_str());
 		}
+
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	void InverseSquareLighting::RestoreDefaultSettings()
