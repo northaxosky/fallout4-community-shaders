@@ -473,8 +473,13 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		ImGui::TextDisabled("%s captures one frame. %s captures the configured multi-frame count.",
-			_captureHotkey.ToString().c_str(), _multiCaptureHotkey.ToString().c_str());
+		const auto single = _captureHotkey.IsBound() ?
+			std::format("{} captures one frame.", _captureHotkey.ToString()) :
+			std::string{ "Single-frame capture is unbound." };
+		const auto multi = _multiCaptureHotkey.IsBound() ?
+			std::format("{} captures the configured multi-frame count.", _multiCaptureHotkey.ToString()) :
+			std::string{ "Multi-frame capture is unbound." };
+		ImGui::TextDisabled("%s %s", single.c_str(), multi.c_str());
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
