@@ -246,6 +246,19 @@ namespace
 		CHECK(gate < debugOverride);
 	}
 
+	// Worldspace-inherited cells store a sentinel, not a usable plane.
+	void TestWaterHeightSanitization()
+	{
+		CHECK(IsUsableWaterHeight(0.0f));
+		CHECK(IsUsableWaterHeight(-4096.0f));
+		CHECK(!IsUsableWaterHeight(kNoWaterHeight));
+		CHECK(!IsUsableWaterHeight(-3.4e38f));
+		CHECK(!IsUsableWaterHeight(
+			std::numeric_limits<float>::quiet_NaN()));
+		CHECK(!IsUsableWaterHeight(
+			std::numeric_limits<float>::infinity()));
+	}
+
 	void TestFeatureBlockLayout()
 	{
 		using cs::FeatureDataCB;
@@ -391,6 +404,7 @@ int main(int a_argc, char* a_argv[])
 	TestBilinearWrap();
 	TestCausticsMultiplier();
 	TestWorldLock();
+	TestWaterHeightSanitization();
 	TestFeatureBlockLayout();
 	if (a_argc == 6) {
 		TestShaderContract(a_argv[1], a_argv[2], a_argv[3], a_argv[4]);

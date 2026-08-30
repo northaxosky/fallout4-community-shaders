@@ -475,9 +475,14 @@ namespace cs::features
 	{
 		auto* player = RE::PlayerCharacter::GetSingleton();
 		const auto* cell = player ? player->GetParentCell() : nullptr;
-		const bool hasWater = cell && cell->HasWater();
-		const float waterHeight =
-			hasWater ? cell->waterHeight : we::kNoWaterHeight;
+		bool hasWater = cell && cell->HasWater();
+		// Cells that inherit water height from the worldspace store a sentinel
+		// in waterHeight; the engine's own accessor resolves the inheritance.
+		float waterHeight = hasWater ? player->GetRelevantWaterHeight() : we::kNoWaterHeight;
+		if (hasWater && !we::IsUsableWaterHeight(waterHeight)) {
+			hasWater = false;
+			waterHeight = we::kNoWaterHeight;
+		}
 		_hasWater.store(hasWater, std::memory_order_relaxed);
 		_waterHeight.store(waterHeight, std::memory_order_relaxed);
 

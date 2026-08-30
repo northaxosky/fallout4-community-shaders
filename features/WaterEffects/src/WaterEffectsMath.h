@@ -29,6 +29,15 @@ namespace cs::features::water_effects
 	// Far below any playable geometry so a stale read stays inert.
 	inline constexpr float kNoWaterHeight = -1.0e9f;
 
+	// Worldspace-inherited cells park waterHeight at a float sentinel.
+	inline constexpr float kMaxUsableWaterHeight = 1.0e7f;
+
+	inline bool IsUsableWaterHeight(float a_height) noexcept
+	{
+		return std::isfinite(a_height)
+		    && std::abs(a_height) < kMaxUsableWaterHeight;
+	}
+
 	constexpr float Saturate(float a_value) noexcept
 	{
 		return a_value < 0.0f ? 0.0f : (a_value > 1.0f ? 1.0f : a_value);
