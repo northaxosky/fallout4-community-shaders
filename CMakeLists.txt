@@ -343,6 +343,17 @@ target_include_directories(HostIntegrationTests PRIVATE "${CMAKE_SOURCE_DIR}/inc
 add_test(NAME HostIntegration COMMAND HostIntegrationTests)
 set_tests_properties(HostIntegration PROPERTIES LABELS "menu;host;unit")
 
+add_executable(DebugViewContractTests
+	tests/DebugViewContractTests.cpp
+)
+configure_host_test(DebugViewContractTests)
+
+add_test(
+	NAME DebugViewContract
+	COMMAND DebugViewContractTests "${CMAKE_SOURCE_DIR}/features"
+)
+set_tests_properties(DebugViewContract PROPERTIES LABELS "menu;unit")
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(UpscalingPublicationTests
 		tests/UpscalingPublicationTests.cpp
