@@ -15,18 +15,21 @@ namespace cs::features::inverse_square_lighting
 	inline constexpr float kStrengthMax = 1.0f;
 	inline constexpr float kSourceSizeMin = 0.01f;
 	inline constexpr float kSourceSizeMax = 50.0f;
+	// upstream uses size sqrt(2) for the common default case
+	inline constexpr float kDefaultSourceSizeSquared = 2.0f;
 	inline const float kNearFieldDistanceMin = std::sqrt(
 		kInverseSquareScale * kSourceSizeMin * kSourceSizeMin * 0.5f);
 	inline const float kNearFieldDistanceMax = std::sqrt(
 		kInverseSquareScale * kSourceSizeMax * kSourceSizeMax * 0.5f);
 	inline const float kDefaultNearFieldDistance =
-		std::sqrt(kInverseSquareScale);
+		std::sqrt(
+			kInverseSquareScale * kDefaultSourceSizeSquared * 0.5f);
 
 	struct Settings
 	{
 		bool enabled = true;
 		float exteriorStrength = 1.0f;
-		float interiorStrength = 0.35f;
+		float interiorStrength = 1.0f;
 		float nearFieldDistance = kDefaultNearFieldDistance;
 	};
 
@@ -90,6 +93,11 @@ namespace cs::features::inverse_square_lighting
 			&& a_nearFieldDistance <= 1.0e19f;
 	}
 
+	inline float CutoffFadeWidth(float a_radius) noexcept
+	{
+		return std::min(a_radius, kFadeBase);
+	}
+
 	inline float PhysicalAttenuation(
 		float a_distance,
 		float a_radius,
@@ -108,7 +116,7 @@ namespace cs::features::inverse_square_lighting
 		if (!std::isfinite(denominator) || denominator <= 0.0f)
 			return 0.0f;
 
-		const float fadeWidth = std::min(a_radius, kFadeBase);
+		const float fadeWidth = CutoffFadeWidth(a_radius);
 		const float t = std::clamp(
 			(a_radius - a_distance) / fadeWidth, 0.0f, 1.0f);
 		const float cutoff = t * t * (3.0f - 2.0f * t);

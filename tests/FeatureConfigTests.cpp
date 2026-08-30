@@ -575,7 +575,7 @@ namespace
 					0.0F,
 					1.0F)
 				== cs::feature_config::ScalarReadStatus::kValid);
-			CHECK(interiorStrength == 0.35F);
+			CHECK(interiorStrength == 1.0F);
 
 			float nearFieldDistance = 0.0F;
 			CHECK(

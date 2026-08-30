@@ -466,6 +466,12 @@ namespace cs::features
 			isl::kStrengthMin,
 			isl::kStrengthMax,
 			"%.2f");
+		if (auto tooltip = ui::HoverTooltipWrapper()) {
+			ImGui::Text(
+				"%s",
+				"1.0 matches upstream's full effect; lower values blend "
+				"exterior punctual lights toward vanilla.");
+		}
 		changed |= ImGui::SliderFloat(
 			"Interior strength",
 			&_settings.interiorStrength,
@@ -475,8 +481,12 @@ namespace cs::features
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text(
 				"%s",
-				"0.35 is an untested starting point, not a validated "
-				"recommendation.");
+				"1.0 matches upstream's full effect; it remains a starting "
+				"point pending extended interior playtesting.");
+			ImGui::Text(
+				"%s",
+				"Lower values damp interior punctual lights if authored "
+				"lighting reads too hot.");
 		}
 		changed |= ImGui::SliderFloat(
 			"Near-field distance (game units)",
@@ -486,7 +496,7 @@ namespace cs::features
 			"%.1f",
 			ImGuiSliderFlags_Logarithmic);
 		ImGui::TextDisabled(
-			"Softens the near-source peak; the default caps it at 1.0.");
+			"Matches upstream's default size sqrt(2); peak attenuation is 1.0.");
 		if (changed) {
 			_settings = isl::Clamp(_settings);
 			PublishSettings();

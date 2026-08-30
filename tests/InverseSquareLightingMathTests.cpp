@@ -67,18 +67,30 @@ namespace
 		using namespace cs::features::inverse_square_lighting;
 
 		const Settings defaults;
+		CHECK(
+			kInverseSquareScale
+			== kScale * kUnitsPerMeter * kUnitsPerMeter);
 		CHECK(kInverseSquareScale == 3920.0f);
+		CHECK(kDefaultSourceSizeSquared == 2.0f);
+		CHECK(kFadeBase == 4.5f * (kScale * kUnitsPerMeter));
 		CHECK(Near(kFadeBase, 252.0f));
 		CHECK(defaults.enabled);
 		CHECK(defaults.exteriorStrength == 1.0f);
-		CHECK(defaults.interiorStrength == 0.35f);
+		CHECK(defaults.interiorStrength == 1.0f);
 		CHECK(Near(
-			defaults.nearFieldDistance,
-			std::sqrt(kInverseSquareScale)));
+			defaults.nearFieldDistance * defaults.nearFieldDistance,
+			kInverseSquareScale * kDefaultSourceSizeSquared * 0.5f,
+			1.0e-3f));
+		CHECK(Near(
+			defaults.nearFieldDistance * defaults.nearFieldDistance,
+			kInverseSquareScale,
+			1.0e-3f));
 		CHECK(Near(
 			PhysicalAttenuation(
 				0.0f, 1000.0f, defaults.nearFieldDistance),
 			1.0f));
+		CHECK(CutoffFadeWidth(100.0f) == 100.0f);
+		CHECK(CutoffFadeWidth(1000.0f) == 252.0f);
 	}
 
 	void TestSettingsClamp()
@@ -331,11 +343,21 @@ namespace
 			!= std::string::npos);
 		CHECK(source.find("\"Exterior strength\"")
 			!= std::string::npos);
+		CHECK(source.find(
+				  "1.0 matches upstream's full effect; lower values blend ")
+			!= std::string::npos);
 		CHECK(source.find("\"Interior strength\"")
 			!= std::string::npos);
 		CHECK(source.find("\"Near-field distance (game units)\"")
 			!= std::string::npos);
-		CHECK(source.find("0.35 is an untested starting point")
+		CHECK(source.find(
+				  "1.0 matches upstream's full effect; it remains a starting ")
+			!= std::string::npos);
+		CHECK(source.find(
+				  "Lower values damp interior punctual lights if authored ")
+			!= std::string::npos);
+		CHECK(source.find(
+				  "Matches upstream's default size sqrt(2); peak attenuation is 1.0.")
 			!= std::string::npos);
 		const auto changed = source.find("if (changed) {");
 		CHECK(changed != std::string::npos);

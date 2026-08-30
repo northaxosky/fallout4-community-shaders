@@ -63,7 +63,7 @@ namespace cs::features
 		Settings _settings;
 		std::atomic_bool _enabled{ true };
 		std::atomic<float> _exteriorStrength{ 1.0f };
-		std::atomic<float> _interiorStrength{ 0.35f };
+		std::atomic<float> _interiorStrength{ 1.0f };
 		std::atomic<float> _nearFieldDistance{
 			inverse_square_lighting::kDefaultNearFieldDistance
 		};

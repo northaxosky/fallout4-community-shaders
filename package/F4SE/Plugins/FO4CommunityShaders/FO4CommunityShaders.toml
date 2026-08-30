@@ -76,10 +76,11 @@ load = false
 [features.InverseSquareLighting.settings]
 # Runtime toggle for the deferred punctual-light attenuation blend.
 enabled = true
+# Upstream applies its full effect to every opted-in light.
 exterior_strength = 1.0
-# Untested starting point, not a validated recommendation.
-interior_strength = 0.35
-# Softening radius in game units; sqrt(3920) caps source attenuation at 1.0.
+# The location split ships neutral; lower this only if authored interiors read too hot.
+interior_strength = 1.0
+# Upstream's default size sqrt(2) maps to sqrt(3920) game units.
 near_field_distance = 62.6099052
 
 [features.WetnessEffects]
