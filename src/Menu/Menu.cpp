@@ -451,6 +451,9 @@ namespace cs
 		Load();
 		RefreshHotkeySnapshots();
 		CaptureAdapterDescription();
+		// Host owns the shell, but CS still draws its own page content.
+		if (!IconLoader::InitializeMenuIcons(this))
+			L->info("Menu icons unavailable; falling back to text buttons");
 		BuildCategoryCounts();
 		HookWndProc();
 
