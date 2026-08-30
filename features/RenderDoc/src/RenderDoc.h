@@ -30,6 +30,8 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
+		void DrawOverlay() override;
+		void OnD3D11Ready(IDXGIAdapter*, ID3D11Device*) override;
 		settings::RestartSettingsView GetRestartSettings() const noexcept override;
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
@@ -59,6 +61,8 @@ namespace cs::features
 		bool TryLoadRuntime();
 		void ApplyCapturePath();
 		bool CheckCaptureDiskSpace() const;
+		void BindCaptureTarget();
+		void QueuePendingComments(std::uint32_t a_expectedCaptures);
 		void ApplyPendingComments();
 		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 
@@ -70,6 +74,14 @@ namespace cs::features
 		RENDERDOC_API_1_7_0* _api    = nullptr;
 		bool _attemptedLoad = false;
 		std::atomic<std::uint32_t> _captureCount{ 0 };
+
+		ID3D11Device*      _device = nullptr;
+		std::atomic<HWND>  _window{ nullptr };
+
+		// Comments apply to a completed capture, so they wait for the file to appear.
+		std::string   _pendingComments;
+		std::uint32_t _pendingCaptures = 0;
+		std::uint32_t _lastCaptureCount = 0;
 
 		cs::input::Hotkey _captureHotkey;
 		cs::input::Hotkey _multiCaptureHotkey;

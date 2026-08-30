@@ -318,6 +318,7 @@ namespace cs::features
 			L->warn("renderdoc.dll rejected NvAPI passthrough; captures may remove the device");
 
 		ApplyCapturePath();
+		_lastCaptureCount = _api->GetNumCaptures();
 		L->info("RenderDoc runtime loaded");
 		return true;
 	}
@@ -370,13 +371,47 @@ namespace cs::features
 		return true;
 	}
 
-	void RenderDoc::ApplyPendingComments()
+	void RenderDoc::BindCaptureTarget()
 	{
-		if (!_api || !_commentsBuf[0])
+		// Frame generation presents through a D3D12 swapchain on the same window, so an
+		// unscoped trigger can capture that instead of the game's D3D11 draws.
+		auto* window = _window.load(std::memory_order_relaxed);
+		if (_api && _api->SetActiveWindow && _device && window)
+			_api->SetActiveWindow(_device, window);
+	}
+
+	void RenderDoc::QueuePendingComments(std::uint32_t a_expectedCaptures)
+	{
+		if (!_commentsBuf[0])
 			return;
 
-		_api->SetCaptureFileComments("", _commentsBuf.data());
+		_pendingComments = _commentsBuf.data();
+		_pendingCaptures = a_expectedCaptures;
 		_commentsBuf[0] = 0;
+	}
+
+	void RenderDoc::ApplyPendingComments()
+	{
+		if (!_api)
+			return;
+
+		const auto count = _api->GetNumCaptures();
+		if (count == _lastCaptureCount)
+			return;
+
+		for (auto i = _lastCaptureCount; i < count && _pendingCaptures > 0; ++i, --_pendingCaptures) {
+			std::uint32_t length = 0;
+			if (!_api->GetCapture(i, nullptr, &length, nullptr) || length == 0)
+				continue;
+
+			std::string path(length, '\0');
+			if (_api->GetCapture(i, path.data(), &length, nullptr))
+				_api->SetCaptureFileComments(path.c_str(), _pendingComments.c_str());
+		}
+
+		if (_pendingCaptures == 0)
+			_pendingComments.clear();
+		_lastCaptureCount = count;
 	}
 
 	void RenderDoc::CollectTelemetry(cs::telemetry::Sink& a_sink) const
@@ -404,8 +439,9 @@ namespace cs::features
 		if (!CheckCaptureDiskSpace())
 			return;
 
+		BindCaptureTarget();
 		_api->TriggerCapture();
-		ApplyPendingComments();
+		QueuePendingComments(1);
 		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
 		L->info("Single-frame capture triggered");
@@ -429,16 +465,33 @@ namespace cs::features
 		}
 
 		const auto frameCount = static_cast<uint32_t>(ClampMultiFrameCount(_settings.multiFrameCount));
+		BindCaptureTarget();
 		_api->TriggerMultiFrameCapture(frameCount);
-		ApplyPendingComments();
+		QueuePendingComments(frameCount);
 		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
 		L->info("Multi-frame capture triggered: {} frames", frameCount);
 	}
 
-	bool RenderDoc::HandleWndProc(HWND, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
+	void RenderDoc::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
+	{
+		_device = a_device;
+		BindCaptureTarget();
+	}
+
+	void RenderDoc::DrawOverlay()
+	{
+		ApplyPendingComments();
+	}
+
+	bool RenderDoc::HandleWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
 	{
 		auto* self = GetSingleton();
+
+		if (a_hwnd && self->_window.load(std::memory_order_relaxed) != a_hwnd) {
+			self->_window.store(a_hwnd, std::memory_order_relaxed);
+			self->BindCaptureTarget();
+		}
 
 		// Consume key-up early to prevent stuck input and F10 beeps.
 		if (self->_captureReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
