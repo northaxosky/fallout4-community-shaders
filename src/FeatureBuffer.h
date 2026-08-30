@@ -28,7 +28,7 @@ namespace cs
 		float Wetness = 0.0f;
 		float MaxRainWetness = 0.0f;
 		float MinRainWetness = 0.0f;
-		float pad0 = 0.0f;
+		std::uint32_t DebugVisualization = 0;
 	};
 	static_assert(sizeof(WetnessEffectsFeatureData) == 16);
 
@@ -56,6 +56,7 @@ namespace cs
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
 	static_assert(offsetof(WetnessEffectsFeatureData, MaxRainWetness) == 4);
 	static_assert(offsetof(WetnessEffectsFeatureData, MinRainWetness) == 8);
+	static_assert(offsetof(WetnessEffectsFeatureData, DebugVisualization) == 12);
 	static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 48);
 	static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
 	static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);

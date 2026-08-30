@@ -3,6 +3,10 @@
 #ifdef TERRAIN_SHADOWS
 #include "TerrainShadows/TerrainShadows.hlsli"
 #endif
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+#define WETNESS_COMPOSITE_CONSUMER 1
+#include "WetnessEffects/WetnessEffects.hlsli"
+#endif
 #include "Common/DeferredContracts.hlsli"
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
@@ -146,9 +150,18 @@ PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
         input.position.xy,
-        float4(ViewToWorld_row2.xyz, 1.0));
+        ViewToWorld_row2);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        return output;
+    }
+#endif
     float3 wetIblColor = float3(0, 0, 0);
     float wetFilmWeight = 0.0;
 #endif
@@ -523,9 +536,18 @@ PS_OUTPUT main(PS_INPUT input)
 {
     PS_OUTPUT output;
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
         input.position.xy,
-        float4(ViewToWorld_row2.xyz, 1.0));
+        ViewToWorld_row2);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        return output;
+    }
+#endif
     float3 wetIblColor = float3(0.0, 0.0, 0.0);
     float wetFilmWeight = 0.0;
 #endif
@@ -1027,9 +1049,15 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
 {
     float2 coordinate = position.xy * screenSetup[0].xy;
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
         position.xy,
-        float4(ambientFrame[14].xyz, 1.0));
+        ambientFrame[14]);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+        return wetnessDebugColor;
+#endif
     float3 wetEnvironment = 0.0;
     float wetFilmWeight = 0.0;
 #endif
@@ -1341,9 +1369,15 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 {
     float2 uv = svpos.xy * g_PixelToUV.xy;
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
         svpos.xy,
-        float4(g_PF[14].xyz, 1.0));
+        g_PF[14]);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+        return wetnessDebugColor;
+#endif
     float3 wetCube = 0.0;
     float wetFilmWeight = 0.0;
 #endif
@@ -1558,6 +1592,17 @@ SamplerState tileAmbientSampler : register(s12);
 
 float4 main(float4 position : SV_POSITION) : SV_Target0
 {
+#ifdef WETNESS_EFFECTS
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
+        position.xy,
+        ViewToWorld_row2);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+        return wetnessDebugColor;
+#endif
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -1583,9 +1628,6 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
     float2 uv = position.xy * screenData[0].xy;
     float4 base = baseTexture.SampleLevel(baseSampler, uv, 0.0);
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
-        position.xy,
-        float4(ViewToWorld_row2.xyz, 1.0));
     base.xyz = WetnessEffects::WetAlbedo(base.xyz, wetSurface.wetness);
 #endif
 #if COMPOSITE_MATERIAL_5
@@ -1756,9 +1798,18 @@ PS_OUTPUT main(PS_INPUT input)
     float2 uv = input.position.xy * ScreenSize.xy;
 
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
         input.position.xy,
-        float4(ViewToWorld_row2.xyz, 1.0));
+        ViewToWorld_row2);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        return output;
+    }
+#endif
 #endif
 
 #if !COMPOSITE_HAS_TYPE || COMPOSITE_MATERIAL_5
@@ -2034,12 +2085,14 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_NO_SRV_POSITION_TEXCOORD
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+#ifdef TERRAIN_SHADOWS
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
+#endif
 };
 #endif
 
@@ -2060,6 +2113,12 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
     output.color = 0.0;
     output.secondary = 0.0;
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    WetnessEffects::TryGetDebugColorFromScreenPosition(
+        input.position.xy,
+        ViewToWorld_row2,
+        output.color);
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     TerrainShadows::TryGetDebugColorFromScreenPosition(
         input.position.xy,
@@ -2084,12 +2143,14 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef BSDFCOMPOSITE_PS_NO_SRV_POSITION
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+#ifdef TERRAIN_SHADOWS
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
+#endif
 };
 #endif
 
@@ -2109,6 +2170,12 @@ PS_OUTPUT main(PS_INPUT input)
     PS_OUTPUT output;
     output.color = 0.0;
     output.secondary = 0.0;
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    WetnessEffects::TryGetDebugColorFromScreenPosition(
+        input.position.xy,
+        ViewToWorld_row2,
+        output.color);
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     TerrainShadows::TryGetDebugColorFromScreenPosition(
         input.position.xy,
@@ -2215,9 +2282,15 @@ float4 main(PSInput input) : SV_Target0
     float4 result;
     float2 uv = input.position.xy * screenData[0].xy;
 #ifdef WETNESS_EFFECTS
-    WetnessEffects::Surface wetSurface = WetnessEffects::GetSurface(
+    WetnessEffects::Surface wetSurface =
+        WetnessEffects::GetSurfaceFromViewToWorldRow2(
         input.position.xy,
-        float4(scene[14].xyz, 1.0));
+        scene[14]);
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColor(wetSurface, wetnessDebugColor))
+        return wetnessDebugColor;
+#endif
     float3 wetProbeColor = 0.0;
     float wetFilmWeight = 0.0;
 #endif
@@ -2566,12 +2639,14 @@ float4 main(PSInput input) : SV_Target0
 
 #ifdef BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR
 
-#ifdef TERRAIN_SHADOWS
+#if defined(TERRAIN_SHADOWS) || defined(WETNESS_EFFECTS_FULLSCREEN_DEBUG)
 cbuffer PerFrame_CB12 : register(b12)
 {
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+#ifdef TERRAIN_SHADOWS
     float4 terrain_cb12_pad_28_34[7];
     float4 CameraPosAdjust;
+#endif
 };
 #endif
 
@@ -2607,6 +2682,16 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row2,
+            wetnessDebugColor))
+    {
+        return wetnessDebugColor;
+    }
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2665,6 +2750,16 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row2,
+            wetnessDebugColor))
+    {
+        return wetnessDebugColor;
+    }
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2729,6 +2824,16 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row2,
+            wetnessDebugColor))
+    {
+        return wetnessDebugColor;
+    }
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2791,6 +2896,16 @@ struct PS_INPUT
 
 float4 main(PS_INPUT input) : SV_Target0
 {
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row2,
+            wetnessDebugColor))
+    {
+        return wetnessDebugColor;
+    }
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromScreenPosition(
@@ -2906,6 +3021,16 @@ SamplerState ambientSecondarySampler : register(s12);
 
 float4 main(float4 position : SV_POSITION) : SV_Target0
 {
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            position.xy,
+            scene[14],
+            wetnessDebugColor))
+    {
+        return wetnessDebugColor;
+    }
+#endif
     float2 uv = position.xy * screenData[0].xy;
     float material = typeTexture.SampleLevel(typeSampler, uv, 0.0).w;
 
@@ -3221,6 +3346,20 @@ PS_OUTPUT main(PS_INPUT input)
         dot(inverseRow2, homogeneousPosition),
         dot(inverseRow3, homogeneousPosition));
     reconstructedPosition.xyz /= reconstructedPosition.w;
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            cb12[14],
+            wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        output.normal = 0.0;
+        output.material = 0.0;
+        output.auxiliary = 0.0;
+        return output;
+    }
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromViewPosition(
@@ -3513,6 +3652,20 @@ PS_OUTPUT main(PS_INPUT input)
         dot(inverseRow2, homogeneousPosition),
         dot(inverseRow3, homogeneousPosition));
     reconstructedPosition.xyz /= reconstructedPosition.w;
+#ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            cb12[14],
+            wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        output.normal = 0.0;
+        output.material = 0.0;
+        output.auxiliary = 0.0;
+        return output;
+    }
+#endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
     float4 terrainDebugColor;
     if (TerrainShadows::TryGetDebugColorFromViewPosition(

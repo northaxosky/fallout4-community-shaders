@@ -980,6 +980,9 @@ namespace
 		std::size_t terrainCompositeRows = 0;
 		std::size_t terrainCompositeInertRows = 0;
 		std::size_t terrainCompositeVertexRows = 0;
+		std::size_t wetnessDebugCompositeRows = 0;
+		std::size_t wetnessDebugCompositeInertRows = 0;
+		std::size_t wetnessDebugCompositeVertexRows = 0;
 		std::size_t wetnessCompositeRows = 0;
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
@@ -1034,6 +1037,8 @@ namespace
 	constexpr std::size_t kExpectedTerrainDirectInertRows = 86;
 	constexpr std::size_t kExpectedTerrainCompositeRows = 70;
 	constexpr std::size_t kExpectedTerrainCompositeInertRows = 0;
+	constexpr std::size_t kExpectedWetnessDebugCompositeRows = 70;
+	constexpr std::size_t kExpectedWetnessDebugCompositeInertRows = 0;
 	constexpr std::size_t kExpectedCompositeRegistrationRows = 74;
 	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
 	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
@@ -1093,6 +1098,14 @@ namespace
 	}
 
 	bool IsTerrainDebugCompositeConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfComposite
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel;
+	}
+
+	bool IsWetnessDebugCompositeConsumer(
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
 	{
 		return a_registration.targetId
@@ -1202,6 +1215,7 @@ namespace
 			{ "VolumetricLighting.hlsl", {}, "ps_5_0" }
 		} };
 		std::array<ShaderCase, 8> terrainSssDebugCases;
+		std::array<ShaderCase, 8> wetnessSssDebugCases;
 		for (std::size_t index = 0; index < 4; ++index) {
 			const auto shape = std::to_string(index + 1);
 			terrainSssDebugCases[index * 2] = {
@@ -1221,6 +1235,28 @@ namespace
 					{ "FO4CS_SUBSTRATE", "1" },
 					{ "TERRAIN_SHADOWS", "1" },
 					{ "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", "1" },
+					{ "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "1" },
+					{ "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", shape }
+				},
+				"ps_5_0"
+			};
+			wetnessSssDebugCases[index * 2] = {
+				"BSDFCompositeShader.hlsl",
+				{
+					{ "FO4CS_SUBSTRATE", "1" },
+					{ "WETNESS_EFFECTS", "1" },
+					{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" },
+					{ "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL", "1" },
+					{ "WAVE5B_SSS_RECORD_NORMAL_SHAPE", shape }
+				},
+				"ps_5_0"
+			};
+			wetnessSssDebugCases[index * 2 + 1] = {
+				"BSDFCompositeShader.hlsl",
+				{
+					{ "FO4CS_SUBSTRATE", "1" },
+					{ "WETNESS_EFFECTS", "1" },
+					{ "WETNESS_EFFECTS_FULLSCREEN_DEBUG", "1" },
 					{ "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "1" },
 					{ "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", shape }
 				},
@@ -1252,6 +1288,15 @@ namespace
 			};
 			job.forbiddenTextureSlots = { kTerrainSceneDepthTextureSlot };
 			job.requiredSamplerSlots = { kTerrainShadowSamplerSlot };
+		}
+		for (const auto& shader : wetnessSssDebugCases) {
+			auto& job = AddCompile(
+				a_jobs,
+				a_root / shader.path,
+				shader.defines,
+				shader.profile,
+				shader.entryPoint);
+			job.requiredTextureSlots = { kGbufferNormalTextureSlot };
 		}
 
 		using namespace cs::engine::shader_injection_defines;
@@ -1291,6 +1336,9 @@ namespace
 		std::size_t terrainCompositeRows = 0;
 		std::size_t terrainCompositeInertRows = 0;
 		std::size_t terrainCompositeVertexRows = 0;
+		std::size_t wetnessDebugCompositeRows = 0;
+		std::size_t wetnessDebugCompositeInertRows = 0;
+		std::size_t wetnessDebugCompositeVertexRows = 0;
 		std::size_t wetnessCompositeRows = 0;
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
@@ -1367,6 +1415,8 @@ namespace
 				&& DeclaresFamily(registration, kWetnessCompositeFamilies);
 			const bool consumesTerrainDebug =
 				IsTerrainDebugCompositeConsumer(registration);
+			const bool consumesWetnessDebug =
+				IsWetnessDebugCompositeConsumer(registration);
 			if (pixelRow) {
 				if (composesAmbient)
 					++ambientCompositionRows;
@@ -1380,9 +1430,14 @@ namespace
 					++terrainCompositeRows;
 				else
 					++terrainCompositeInertRows;
+				if (consumesWetnessDebug)
+					++wetnessDebugCompositeRows;
+				else
+					++wetnessDebugCompositeInertRows;
 			} else if (registration.stage == cs::engine::ShaderStage::kVertex) {
 				++wetnessCompositeVertexRows;
 				++terrainCompositeVertexRows;
+				++wetnessDebugCompositeVertexRows;
 			} else {
 				AddPreparationFailure(
 					a_jobs,
@@ -1429,6 +1484,23 @@ namespace
 					std::move(identity));
 				++contributorCompositionCount;
 			}
+
+			SlotExpectations wetnessDebugSlots;
+			auto& wetnessDebugTextures = consumesWetnessDebug ?
+				wetnessDebugSlots.requiredTextures :
+				wetnessDebugSlots.forbiddenTextures;
+			wetnessDebugTextures.push_back(kGbufferNormalTextureSlot);
+			AddRegistration(
+				a_jobs,
+				a_root,
+				registration,
+				{
+					{ kWetnessEffects, "1" },
+					{ kWetnessEffectsFullscreenDebug, "1" }
+				},
+				nullptr,
+				std::move(wetnessDebugSlots));
+			++contributorCompositionCount;
 
 			SlotExpectations terrainSlots;
 			auto& terrainTextures = consumesTerrainDebug ?
@@ -1563,6 +1635,22 @@ namespace
 					+ std::to_string(kExpectedWetnessCompositeVertexRows)
 					+ " vertex rows");
 		}
+		if (wetnessDebugCompositeRows != kExpectedWetnessDebugCompositeRows
+			|| wetnessDebugCompositeInertRows
+				!= kExpectedWetnessDebugCompositeInertRows
+			|| wetnessDebugCompositeVertexRows
+				!= kExpectedWetnessCompositeVertexRows) {
+			AddPreparationFailure(
+				a_jobs,
+				"kBsdfComposite wetness debug coverage",
+				"Expected "
+					+ std::to_string(kExpectedWetnessDebugCompositeRows)
+					+ " wetness debug, "
+					+ std::to_string(kExpectedWetnessDebugCompositeInertRows)
+					+ " inert pixel, and "
+					+ std::to_string(kExpectedWetnessCompositeVertexRows)
+					+ " vertex rows");
+		}
 		return {
 			.registrationDerived = registrations.size(),
 			.uniqueRegistrationInputs =
@@ -1580,6 +1668,10 @@ namespace
 			.terrainCompositeRows = terrainCompositeRows,
 			.terrainCompositeInertRows = terrainCompositeInertRows,
 			.terrainCompositeVertexRows = terrainCompositeVertexRows,
+			.wetnessDebugCompositeRows = wetnessDebugCompositeRows,
+			.wetnessDebugCompositeInertRows = wetnessDebugCompositeInertRows,
+			.wetnessDebugCompositeVertexRows =
+				wetnessDebugCompositeVertexRows,
 			.wetnessCompositeRows = wetnessCompositeRows,
 			.wetnessCompositeNeutralRows = wetnessCompositeNeutralRows,
 			.wetnessCompositeVertexRows = wetnessCompositeVertexRows

@@ -35,7 +35,7 @@ float4 main() : SV_Target
 	value += SharedData::wetnessEffectsSettings.Wetness;
 	value += SharedData::wetnessEffectsSettings.MaxRainWetness;
 	value += SharedData::wetnessEffectsSettings.MinRainWetness;
-	value += SharedData::wetnessEffectsSettings.pad0;
+	value += SharedData::wetnessEffectsSettings.DebugVisualization;
 
 	value += BoolValue(
 		SharedData::terrainShadowsSettings.TerrainShadowMode != 0);

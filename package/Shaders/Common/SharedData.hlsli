@@ -48,7 +48,7 @@ namespace SharedData
 		float Wetness;
 		float MaxRainWetness;
 		float MinRainWetness;
-		float pad0;
+		uint DebugVisualization;
 	};
 
 	struct TerrainShadowsSettings

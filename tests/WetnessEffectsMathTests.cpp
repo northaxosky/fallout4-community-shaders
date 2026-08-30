@@ -98,12 +98,13 @@ namespace
 		CHECK(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
 		CHECK(offsetof(WetnessEffectsFeatureData, MaxRainWetness) == 4);
 		CHECK(offsetof(WetnessEffectsFeatureData, MinRainWetness) == 8);
-		CHECK(offsetof(WetnessEffectsFeatureData, pad0) == 12);
+		CHECK(offsetof(WetnessEffectsFeatureData, DebugVisualization) == 12);
 
 		const WetnessEffectsFeatureData zeroed;
 		CHECK(zeroed.Wetness == 0.0f);
 		CHECK(zeroed.MaxRainWetness == 0.0f);
 		CHECK(zeroed.MinRainWetness == 0.0f);
+		CHECK(zeroed.DebugVisualization == 0);
 	}
 
 	constexpr float kFilmF0 = 0.02f;
@@ -213,6 +214,13 @@ namespace
 		CHECK(Contains(source, "Texture2D<float4> GbufferNormal : register(t25);"));
 		CHECK(!Contains(source, "Texture2D<float>"));
 		CHECK(!Contains(source, "EnableWetness"));
+		CHECK(Contains(
+			source,
+			"surface.worldUp = GetWorldUp(surface.normalView, worldUpView);"));
+		CHECK(Contains(
+			source,
+			"surface.wetness = GetWetness(surface.worldUp, worldUpView.w);"));
+		CHECK(Contains(source, "bool TryGetDebugColor(Surface surface, out float4 color)"));
 
 		// encode-domain guard, written so NaN fails it too
 		CHECK(Contains(source, "[branch] if (encodedLengthSquared <= 4.0) {"));

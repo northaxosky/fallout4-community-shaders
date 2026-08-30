@@ -614,6 +614,11 @@ namespace
 					|| block.contains(
 						"TerrainShadows::TryGetDebugColorFromScreenPosition"),
 				std::string(family) + " exposes terrain debug output");
+			Check(
+				block.contains("WetnessEffects::TryGetDebugColor(")
+					|| block.contains(
+						"WetnessEffects::TryGetDebugColorFromScreenPosition"),
+				std::string(family) + " exposes wetness debug output");
 		}
 		Check(
 			bsdfComposite.contains("output.color = terrainDebugColor;")
@@ -660,11 +665,8 @@ namespace
 			!bsdfComposite.contains("SharedData::WorldUpView")
 				&& CountOccurrences(
 					bsdfComposite,
-					"float4(ViewToWorld_row2.xyz, 1.0)")
-					== 4
-				&& bsdfComposite.contains("float4(ambientFrame[14].xyz, 1.0)")
-				&& bsdfComposite.contains("float4(g_PF[14].xyz, 1.0)")
-				&& bsdfComposite.contains("float4(scene[14].xyz, 1.0)")
+					"WetnessEffects::GetSurfaceFromViewToWorldRow2(")
+					== 7
 				&& !bsdfComposite.contains(
 					"float4(ViewToWorld_row0.z, ViewToWorld_row1.z, ViewToWorld_row2.z, 1.0)")
 				&& !bsdfComposite.contains(

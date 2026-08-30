@@ -17,6 +17,13 @@ namespace cs::features
 	class WetnessEffects : public Feature
 	{
 	public:
+		enum class DebugVisualization : std::uint32_t
+		{
+			kOff,
+			kWetnessTerm,
+			kWorldUp
+		};
+
 		static WetnessEffects* GetSingleton();
 
 		std::string_view GetName() const override { return "WetnessEffects"; }
@@ -35,6 +42,8 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view a_view) noexcept override;
 
 		cs::WetnessEffectsFeatureData GetCommonBufferData() const;
 
@@ -54,6 +63,9 @@ namespace cs::features
 		// every contribution and hook of the pair must register before any of them runs
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
+		std::atomic<DebugVisualization> _debugVisualization{
+			DebugVisualization::kOff
+		};
 		std::string _validationDetail;
 
 		mutable std::atomic_bool _isExterior{ false };

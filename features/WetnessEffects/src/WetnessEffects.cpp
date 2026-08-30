@@ -30,6 +30,18 @@ namespace cs::features
 			cs::engine::ShaderInjectionTarget::kBsdfLight,
 			cs::engine::ShaderInjectionTarget::kBsdfComposite
 		};
+		constexpr std::array<FeatureDebugView, 2> kDebugViews{ {
+			{
+				"wetness_term",
+				"Wetness term",
+				FeatureDebugViewKind::kFullscreen
+			},
+			{
+				"world_up",
+				"World-up response",
+				FeatureDebugViewKind::kFullscreen
+			}
+		} };
 
 		std::string SettingError(std::string_view a_key, std::string_view a_reason)
 		{
@@ -122,6 +134,21 @@ namespace cs::features
 		return &instance;
 	}
 
+	std::span<const FeatureDebugView> WetnessEffects::GetDebugViews() const noexcept
+	{
+		return kDebugViews;
+	}
+
+	void WetnessEffects::SetDebugView(std::string_view a_view) noexcept
+	{
+		DebugVisualization visualization = DebugVisualization::kOff;
+		if (a_view == "wetness_term")
+			visualization = DebugVisualization::kWetnessTerm;
+		else if (a_view == "world_up")
+			visualization = DebugVisualization::kWorldUp;
+		_debugVisualization.store(visualization, std::memory_order_release);
+	}
+
 	bool WetnessEffects::Configure(const toml::table& a_config, std::string& a_error)
 	{
 		auto candidate = _settings;
@@ -159,6 +186,10 @@ namespace cs::features
 				}
 			};
 			if (a_bindsNormal) {
+				registration.defines.emplace(
+					cs::engine::shader_injection_defines::
+						kWetnessEffectsFullscreenDebug,
+					"1");
 				registration.bind = [this](ID3D11DeviceContext* a_context) {
 					BindGbufferNormal(a_context);
 				};
@@ -231,18 +262,28 @@ namespace cs::features
 				cs::engine::shader_injection_defines::kWetnessEffects);
 			const bool contributed = define != snapshot.defines.end()
 				&& define->second == "1";
+			const auto debugDefine = snapshot.defines.find(
+				cs::engine::shader_injection_defines::
+					kWetnessEffectsFullscreenDebug);
+			const bool debugContributed =
+				target != cs::engine::ShaderInjectionTarget::kBsdfComposite
+				|| (debugDefine != snapshot.defines.end()
+					&& debugDefine->second == "1");
 			if (!snapshot.requested
 				|| !snapshot.compileComplete
 				|| !snapshot.swappable
 				|| snapshot.slotCollision
-				|| !contributed) {
+				|| !contributed
+				|| !debugContributed) {
 				a_error = "'" + snapshot.name
 					+ "' cannot deliver wetness (requested="
 					+ std::to_string(snapshot.requested)
 					+ " compile_complete=" + std::to_string(snapshot.compileComplete)
 					+ " swappable=" + std::to_string(snapshot.swappable)
 					+ " slot_collision=" + std::to_string(snapshot.slotCollision)
-					+ " contributed=" + std::to_string(contributed) + ")";
+					+ " contributed=" + std::to_string(contributed)
+					+ " debug_contributed="
+					+ std::to_string(debugContributed) + ")";
 				_validationDetail = a_error;
 				return false;
 			}
@@ -277,7 +318,9 @@ namespace cs::features
 		return {
 			.Wetness = wetness,
 			.MaxRainWetness = _settings.maxRainWetness,
-			.MinRainWetness = _settings.minRainWetness
+			.MinRainWetness = _settings.minRainWetness,
+			.DebugVisualization = static_cast<std::uint32_t>(
+				_debugVisualization.load(std::memory_order_acquire))
 		};
 	}
 

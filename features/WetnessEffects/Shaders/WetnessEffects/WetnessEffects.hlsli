@@ -19,20 +19,33 @@ namespace WetnessEffects
 	static const float FilmSpecularScale = 3.1415927;
 	static const float DotClampEpsilon = 1e-5;
 	static const float LengthSquaredEpsilon = 1e-8;
+	static const uint DebugModeWetnessTerm = 1;
+	static const uint DebugModeWorldUp = 2;
 
-	// view-space rain-facing wetness; zero disables every wetness term downstream
-	float GetWetness(float3 normalView, float4 worldUpView)
+	float GetWorldUp(float3 normalView, float4 worldUpView)
+	{
+		return dot(normalView, worldUpView.xyz);
+	}
+
+	float GetWetness(float worldUp, float worldUpValid)
 	{
 		float wetness = 0.0;
 		[branch] if (SharedData::wetnessEffectsSettings.Wetness > 0.0
-			&& worldUpView.w == 1.0) {
-			float worldUp = dot(normalView, worldUpView.xyz);
+			&& worldUpValid == 1.0) {
 			float rainFacing = saturate(
 				max(SharedData::wetnessEffectsSettings.MinRainWetness, worldUp));
 			wetness = SharedData::wetnessEffectsSettings.Wetness * rainFacing *
 				SharedData::wetnessEffectsSettings.MaxRainWetness;
 		}
 		return wetness;
+	}
+
+	// view-space rain-facing wetness; zero disables every wetness term downstream
+	float GetWetness(float3 normalView, float4 worldUpView)
+	{
+		return GetWetness(
+			GetWorldUp(normalView, worldUpView),
+			worldUpView.w);
 	}
 
 	float FilmRoughness(float wetness)
@@ -50,6 +63,7 @@ namespace WetnessEffects
 	{
 		float3 normalView;
 		float wetness;
+		float worldUp;
 	};
 
 	// t25 outside the prepass encode domain (including an explicit null bind) is identity
@@ -58,6 +72,7 @@ namespace WetnessEffects
 		Surface surface;
 		surface.normalView = float3(0.0, 0.0, -1.0);
 		surface.wetness = 0.0;
+		surface.worldUp = 0.0;
 
 		float2 encoded =
 			GbufferNormal.Load(int3(int2(screenPosition), 0)).xy * 4.0 - 2.0;
@@ -67,9 +82,44 @@ namespace WetnessEffects
 			surface.normalView = float3(
 				encoded * sqrt(1.0 - encodedLengthSquared * 0.25),
 				-(1.0 - encodedLengthSquared * 0.5));
-			surface.wetness = GetWetness(surface.normalView, worldUpView);
+			surface.worldUp = GetWorldUp(surface.normalView, worldUpView);
+			surface.wetness = GetWetness(surface.worldUp, worldUpView.w);
 		}
 		return surface;
+	}
+
+	Surface GetSurfaceFromViewToWorldRow2(
+		float2 screenPosition,
+		float4 viewToWorldRow2)
+	{
+		return GetSurface(
+			screenPosition,
+			float4(viewToWorldRow2.xyz, 1.0));
+	}
+
+	bool TryGetDebugColor(Surface surface, out float4 color)
+	{
+		color = 0.0;
+		uint mode = SharedData::wetnessEffectsSettings.DebugVisualization;
+		if (mode == DebugModeWetnessTerm) {
+			color = float4(surface.wetness.xxx, 1.0);
+			return true;
+		}
+		if (mode == DebugModeWorldUp) {
+			color = float4(saturate(surface.worldUp).xxx, 1.0);
+			return true;
+		}
+		return false;
+	}
+
+	bool TryGetDebugColorFromScreenPosition(
+		float2 screenPosition,
+		float4 viewToWorldRow2,
+		out float4 color)
+	{
+		return TryGetDebugColor(
+			GetSurfaceFromViewToWorldRow2(screenPosition, viewToWorldRow2),
+			color);
 	}
 #endif
 
