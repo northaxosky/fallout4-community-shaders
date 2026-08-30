@@ -2114,28 +2114,38 @@ PS_OUTPUT main(PS_INPUT input)
     output.color = 0.0;
     output.secondary = 0.0;
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-    WetnessEffects::TryGetDebugColorFromScreenPosition(
-        input.position.xy,
-        ViewToWorld_row2,
-        output.color);
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row2,
+            wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        return output;
+    }
 #endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
-    TerrainShadows::TryGetDebugColorFromScreenPosition(
-        input.position.xy,
-        TerrainShadows::TerrainShadowsSampler,
-        ViewToWorld_row0,
-        ViewToWorld_row1,
-        ViewToWorld_row2,
-        CameraPosAdjust,
-        FarReproj_row0,
-        FarReproj_row1,
-        FarReproj_row2,
-        FarReproj_row3,
-        NearReproj_row0,
-        NearReproj_row1,
-        NearReproj_row2,
-        NearReproj_row3,
-        output.color);
+    float4 terrainDebugColor;
+    if (TerrainShadows::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            TerrainShadows::TerrainShadowsSampler,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            terrainDebugColor))
+    {
+        output.color = terrainDebugColor;
+        return output;
+    }
 #endif
     return output;
 }
@@ -2171,28 +2181,38 @@ PS_OUTPUT main(PS_INPUT input)
     output.color = 0.0;
     output.secondary = 0.0;
 #ifdef WETNESS_EFFECTS_FULLSCREEN_DEBUG
-    WetnessEffects::TryGetDebugColorFromScreenPosition(
-        input.position.xy,
-        ViewToWorld_row2,
-        output.color);
+    float4 wetnessDebugColor;
+    if (WetnessEffects::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            ViewToWorld_row2,
+            wetnessDebugColor))
+    {
+        output.color = wetnessDebugColor;
+        return output;
+    }
 #endif
 #ifdef TERRAIN_SHADOWS_FULLSCREEN_DEBUG
-    TerrainShadows::TryGetDebugColorFromScreenPosition(
-        input.position.xy,
-        TerrainShadows::TerrainShadowsSampler,
-        ViewToWorld_row0,
-        ViewToWorld_row1,
-        ViewToWorld_row2,
-        CameraPosAdjust,
-        FarReproj_row0,
-        FarReproj_row1,
-        FarReproj_row2,
-        FarReproj_row3,
-        NearReproj_row0,
-        NearReproj_row1,
-        NearReproj_row2,
-        NearReproj_row3,
-        output.color);
+    float4 terrainDebugColor;
+    if (TerrainShadows::TryGetDebugColorFromScreenPosition(
+            input.position.xy,
+            TerrainShadows::TerrainShadowsSampler,
+            ViewToWorld_row0,
+            ViewToWorld_row1,
+            ViewToWorld_row2,
+            CameraPosAdjust,
+            FarReproj_row0,
+            FarReproj_row1,
+            FarReproj_row2,
+            FarReproj_row3,
+            NearReproj_row0,
+            NearReproj_row1,
+            NearReproj_row2,
+            NearReproj_row3,
+            terrainDebugColor))
+    {
+        output.color = terrainDebugColor;
+        return output;
+    }
 #endif
     return output;
 }

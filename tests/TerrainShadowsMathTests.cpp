@@ -1,7 +1,9 @@
 #include "FeatureBuffer.h"
 #include "TerrainShadowsMath.h"
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -68,6 +70,17 @@ namespace
 			++count;
 		}
 		return count;
+	}
+
+	std::string RemoveWhitespace(std::string_view a_text)
+	{
+		std::string compact;
+		compact.reserve(a_text.size());
+		for (const char character : a_text) {
+			if (std::isspace(static_cast<unsigned char>(character)) == 0)
+				compact.push_back(character);
+		}
+		return compact;
 	}
 
 	void TestXLodGenParsing()
@@ -620,6 +633,49 @@ namespace
 						"WetnessEffects::TryGetDebugColorFromScreenPosition"),
 				std::string(family) + " exposes wetness debug output");
 		}
+		constexpr std::string_view familyMarker =
+			"#ifdef BSDFCOMPOSITE_PS_";
+		std::size_t multiDebugFamilies = 0;
+		for (auto begin = bsdfComposite.find(familyMarker);
+			begin != std::string::npos;
+			begin = bsdfComposite.find(familyMarker, begin + familyMarker.size())) {
+			const auto nameStart = begin + std::string_view("#ifdef ").size();
+			const auto nameEnd =
+				bsdfComposite.find_first_of(" \t\r\n", nameStart);
+			const auto end = bsdfComposite.find(
+				"\n#ifdef BSDFCOMPOSITE_PS_",
+				nameEnd == std::string::npos ? begin + 1 : nameEnd);
+			const auto block = std::string_view(bsdfComposite).substr(
+				begin,
+				end == std::string::npos ? std::string::npos : end - begin);
+			const auto compact = RemoveWhitespace(block);
+			const auto wetness =
+				compact.find("WetnessEffects::TryGetDebugColor");
+			const auto terrain =
+				compact.find("TerrainShadows::TryGetDebugColor");
+			if (wetness == std::string::npos
+				|| terrain == std::string::npos) {
+				continue;
+			}
+
+			++multiDebugFamilies;
+			const auto first = std::min(wetness, terrain);
+			const auto second = std::max(wetness, terrain);
+			const auto between = compact.substr(first, second - first);
+			const auto family = nameEnd == std::string::npos ?
+				std::string_view{} :
+				std::string_view(bsdfComposite).substr(
+					nameStart, nameEnd - nameStart);
+			Check(
+				first >= 3 && compact.substr(first - 3, 3) == "if("
+					&& between.contains("return"),
+				std::string(family)
+					+ " returns successful fullscreen debug output "
+					  "before invoking the next helper");
+		}
+		Check(
+			multiDebugFamilies == compositeFamilies.size(),
+			"all thirteen composite debug families enforce helper ordering");
 		Check(
 			bsdfComposite.contains("output.color = terrainDebugColor;")
 				&& bsdfComposite.contains("return terrainDebugColor;"),
