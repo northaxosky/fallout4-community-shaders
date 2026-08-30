@@ -332,6 +332,12 @@ namespace
 		CHECK(bsdfLight.find(
 				  "#include \"WaterEffects/WaterCausticsSampler.hlsli\"")
 			!= std::string::npos);
+		// The coat's sun lobe is built from the raw light color, so it needs the
+		// multiplier too; the shadowed paths get it via `shadow`.
+		CHECK(bsdfLight.find("wetLightColor *= causticsMult;")
+			!= std::string::npos);
+		CHECK(Count(bsdfLight, "SunColor_HDR.xyz * shadow") == 3);
+
 		// Ordering against directional shadowing is not asserted here: the term
 		// is a scalar multiply, so it commutes.
 		CHECK(bsdfLight.find("WaterEffects::TryGetDebugColor")

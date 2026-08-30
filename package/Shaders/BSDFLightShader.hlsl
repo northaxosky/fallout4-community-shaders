@@ -9906,6 +9906,11 @@ PS_OUTPUT main(PS_INPUT input)
     float3 wetDiffuse = finalDiffuse * attenuation;
 #  else
     float3 wetLightColor = LightColor_HDR.xyz;
+#    if defined(DIRECTIONAL) && defined(WATER_EFFECTS)
+    // finalDiffuse and brdfSpecular already carry caustics; the coat's own sun
+    // lobe is built from the raw light color, so modulate it too.
+    wetLightColor *= causticsMult;
+#    endif
     float3 wetDiffuse = finalDiffuse;
 #  endif
 #  ifdef SPECULAR
