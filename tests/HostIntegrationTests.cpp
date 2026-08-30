@@ -155,9 +155,31 @@ namespace
 
 		state.Select(
 			"WetnessEffects",
-			"wetness",
+			"wetness_term",
 			cs::FeatureDebugViewKind::kFullscreen);
 		CHECK(state.Fullscreen().feature == "WetnessEffects");
+		CHECK(state.Fullscreen().view == "wetness_term");
+		CHECK(state.Previews().size() == 2);
+
+		state.Select(
+			"InverseSquareLighting",
+			"inverse_square_comparison",
+			cs::FeatureDebugViewKind::kFullscreen);
+		CHECK(state.Fullscreen().feature == "InverseSquareLighting");
+		CHECK(state.Fullscreen().view == "inverse_square_comparison");
+		CHECK(state.SelectedView("WetnessEffects").empty());
+		CHECK(
+			state.SelectedView("InverseSquareLighting")
+			== "inverse_square_comparison");
+		CHECK(state.Previews().size() == 2);
+
+		state.Select(
+			"WetnessEffects",
+			"world_up",
+			cs::FeatureDebugViewKind::kFullscreen);
+		CHECK(state.Fullscreen().feature == "WetnessEffects");
+		CHECK(state.Fullscreen().view == "world_up");
+		CHECK(state.SelectedView("InverseSquareLighting").empty());
 		CHECK(state.Previews().size() == 2);
 
 		state.Select(
