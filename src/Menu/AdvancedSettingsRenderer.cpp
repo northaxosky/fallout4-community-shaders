@@ -139,7 +139,7 @@ namespace cs
 		}
 		ImGui::SameLine();
 		if (ImGui::Button("Dump now"))
-			telemetry::pump::DumpAll();
+			telemetry::pump::RequestDump();
 
 		ImGui::Spacing();
 		ui::DrawSectionHeader("Channels", true, false);

@@ -160,7 +160,7 @@ void CalculateGI(
 						sampleRadiance *= frontBackMult * angularWeight;
 
 						float3 sampleYCoCg = Color::RGBToYCoCg(sampleRadiance);
-						float3 horizonVecWS = ViewToWorldDirection(sampleHorizonVec);
+						float3 horizonVecWS = ViewToWorldDirection(sampleHorizonVec, ViewToWorld);
 						radianceY += sampleYCoCg.x * SphericalHarmonics::Evaluate(horizonVecWS);
 						radianceCoCg += sampleYCoCg.yz;
 					}
@@ -202,7 +202,7 @@ void main(const uint2 dtid : SV_DispatchThreadID)
 #ifdef SSGI_BOUNCE
 	outPrevGeo[pxCoord] = float3(
 		clamp(viewspaceZ, 0.0, R11_MAX_DEPTH),
-		EncodeWorldNormal(ViewToWorldDirection(viewspaceNormal)));
+		EncodeWorldNormal(ViewToWorldDirection(viewspaceNormal, ViewToWorld)));
 #endif
 
 	viewspaceZ *= 0.99920h;

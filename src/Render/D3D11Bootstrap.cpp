@@ -9,6 +9,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/FrameBuffer.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -111,6 +112,10 @@ namespace cs::d3d11
 				InitializeShaderCache();
 			});
 			util::ShaderCompilationBatch shaderCompilationBatch;
+			// The engine b12 snapshot must be live before any feature reads a camera.
+			InvokeOwner("FrameBuffer snapshot hooks", [&] {
+				engine::OnFrameBufferD3D11Ready(*a_immediateContext);
+			});
 			// Register injections before the registry freezes.
 			InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
 				engine::SetPixelShaderSwapBrokerDevice(*a_device);

@@ -10,7 +10,8 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 PrevFrame_WorldToClip_row2;
     float4 PrevFrame_WorldToClip_row3;
 
-    float4 cb12_pad_35_36[2];
+    float4 CameraPosAdjust;
+    float4 CameraPreviousPosAdjust;
 
     float4 CurrFrame_WorldToClip_row0;
     float4 CurrFrame_WorldToClip_row1;

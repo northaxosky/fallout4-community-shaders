@@ -22,7 +22,8 @@ cbuffer PerFrame_CB12 : register(b12)
 
     float4 CameraPosAdjust_for_fog_height;
 
-    float4 cb12_pad_36_40[5];
+    float4 CameraPreviousPosAdjust;
+    float4 cb12_pad_37_40[4];
 
     float4 FogDistanceRamp_and_lowHeightRamp;
 

@@ -48,7 +48,7 @@ namespace cs::engine
 		return true;
 	}
 
-	bool EnsurePreSunLightDrawInstalled()
+	bool EnsureDeferredDrawAnchorInstalled()
 	{
 		return true;
 	}

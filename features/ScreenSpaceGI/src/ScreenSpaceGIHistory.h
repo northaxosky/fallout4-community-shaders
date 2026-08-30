@@ -83,6 +83,29 @@ namespace cs::features::ssgi
 		return "unknown";
 	}
 
+	enum class CameraDiscontinuityCause : std::uint32_t
+	{
+		kNone = 0,
+		kTranslation,
+		kRotation,
+		kProjection
+	};
+
+	[[nodiscard]] constexpr const char* CameraDiscontinuityCauseName(
+		CameraDiscontinuityCause a_cause) noexcept
+	{
+		switch (a_cause) {
+		case CameraDiscontinuityCause::kTranslation:
+			return "translation";
+		case CameraDiscontinuityCause::kRotation:
+			return "rotation";
+		case CameraDiscontinuityCause::kProjection:
+			return "projection";
+		default:
+			return "none";
+		}
+	}
+
 	// Ping-pong bookkeeping for the temporal history pair. Render-thread owned, no D3D.
 	class HistoryState
 	{

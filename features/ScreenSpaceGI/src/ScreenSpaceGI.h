@@ -4,6 +4,7 @@
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 #include "Render/Engine.h"
+#include "Render/FrameBuffer.h"
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "ScreenSpaceGIHistory.h"
 #include "Utils/CSBuffer.h"
@@ -105,8 +106,10 @@ namespace cs::features
 			float         PrevNDCToViewAdd[2];
 			float         ViewToWorld[12];
 			float         PrevViewToWorld[12];
+			float         CameraOrigin[4];
+			float         PrevCameraOrigin[4];
 		};
-		static_assert(sizeof(XeGTAOCB) == 288);
+		static_assert(sizeof(XeGTAOCB) == 320);
 		static_assert(offsetof(XeGTAOCB, PrevFrameDim) == 64);
 		static_assert(offsetof(XeGTAOCB, FrameIndex) == 80);
 		static_assert(offsetof(XeGTAOCB, DepthDisocclusion) == 136);
@@ -116,6 +119,8 @@ namespace cs::features
 		static_assert(offsetof(XeGTAOCB, PrevNDCToViewMul) == 176);
 		static_assert(offsetof(XeGTAOCB, ViewToWorld) == 192);
 		static_assert(offsetof(XeGTAOCB, PrevViewToWorld) == 240);
+		static_assert(offsetof(XeGTAOCB, CameraOrigin) == 288);
+		static_assert(offsetof(XeGTAOCB, PrevCameraOrigin) == 304);
 
 		// Must match Shaders/XeGTAO/decode.cs.hlsl.
 		struct alignas(16) DecodeCB
@@ -126,7 +131,7 @@ namespace cs::features
 		};
 		static_assert(sizeof(DecodeCB) % 16 == 0);
 
-		// Ni camera rows with the adjusted camera origin in w.
+		// Rotation rows and projection terms retained for the next temporal frame.
 		struct CameraTransform
 		{
 			float rows[12]{};
@@ -204,6 +209,17 @@ namespace cs::features
 		std::atomic_uint32_t _temporalDispatchesLastFrame{ 0 };
 		std::atomic_uint32_t _radianceSourceCount{ 0 };
 		std::atomic_uint32_t _repeatCallbacks{ 0 };
+		std::atomic_bool _cameraReadyLastFrame{ false };
+		std::atomic<float> _cameraTranslationLastFrame{ 0.0f };
+		std::atomic<float> _cameraOriginXLastFrame{ 0.0f };
+		std::atomic<float> _cameraOriginYLastFrame{ 0.0f };
+		std::atomic<float> _cameraOriginZLastFrame{ 0.0f };
+		std::atomic<float> _cameraPreviousOriginXLastFrame{ 0.0f };
+		std::atomic<float> _cameraPreviousOriginYLastFrame{ 0.0f };
+		std::atomic<float> _cameraPreviousOriginZLastFrame{ 0.0f };
+		std::atomic_uint32_t _cameraDiscontinuityCause{
+			static_cast<std::uint32_t>(ssgi::CameraDiscontinuityCause::kNone)
+		};
 		std::atomic_uint32_t _historyResetCount{ 0 };
 		std::atomic_uint32_t _lastResetReason{
 			static_cast<std::uint32_t>(ssgi::HistoryResetReason::kFirstFrame)

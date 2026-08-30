@@ -21,6 +21,8 @@ namespace cs::engine
 	bool RegisterPostDeferredComposite(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
 
 	// Install the post-dirty-state deferred draw anchor.
-	bool EnsurePreSunLightDrawInstalled();
-	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority = HookPriority::Default);
+	bool EnsureDeferredDrawAnchorInstalled();
+	void RegisterPreFullscreenDeferredLightDraw(
+		RenderHookCallback callback,
+		HookPriority priority = HookPriority::Default);
 }

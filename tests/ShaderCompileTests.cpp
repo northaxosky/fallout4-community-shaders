@@ -57,7 +57,7 @@ namespace cs::engine
 		return true;
 	}
 
-	bool EnsurePreSunLightDrawInstalled()
+	bool EnsureDeferredDrawAnchorInstalled()
 	{
 		return true;
 	}
@@ -349,10 +349,12 @@ namespace
 			ExpectedVariable{ "PrevNDCToViewMul", 176, 8 },
 			ExpectedVariable{ "PrevNDCToViewAdd", 184, 8 },
 			ExpectedVariable{ "ViewToWorld", 192, 48 },
-			ExpectedVariable{ "PrevViewToWorld", 240, 48 }
+			ExpectedVariable{ "PrevViewToWorld", 240, 48 },
+			ExpectedVariable{ "CameraOrigin", 288, 16 },
+			ExpectedVariable{ "PrevCameraOrigin", 304, 16 }
 		};
 		return ValidateConstantBufferOffsets(
-			reflection.Get(), "XeGTAOCB", 0, 288, giVariables);
+			reflection.Get(), "XeGTAOCB", 0, 320, giVariables);
 	}
 
 	std::string ValidateSubstrateReflection(

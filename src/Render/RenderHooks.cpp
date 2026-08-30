@@ -31,7 +31,7 @@ namespace cs::engine
 		std::vector<PrioritizedCallback>    g_postDeferredLightsImpl;
 		std::vector<PrioritizedCallback>    g_preDeferredComposite;
 		std::vector<PrioritizedCallback>    g_postDeferredComposite;
-		std::vector<PrioritizedCallback>    g_preSunLightDraw;
+		std::vector<PrioritizedCallback>    g_preFullscreenDeferredLightDraw;
 		bool g_prePassInstalled            = false;
 		bool g_lightsImplInstalled         = false;
 		bool g_compositeInstalled          = false;
@@ -144,8 +144,8 @@ namespace cs::engine
 						reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 						nullptr);
 				}
-				if (decision.dispatchLegacySunCallbacks) {
-					Dispatch(g_preSunLightDraw);
+				if (decision.dispatchFullscreenLightCallbacks) {
+					Dispatch(g_preFullscreenDeferredLightDraw);
 				}
 			}
 			static inline REL::Relocation<void(bool, bool)> func;
@@ -176,6 +176,16 @@ namespace cs::engine
 			L->info("Hook installed on DrawWorld::DeferredLightsImpl");
 		}
 
+		void EnsureDeferredPrePassInstalled()
+		{
+			if (g_prePassInstalled) {
+				return;
+			}
+			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
+			g_prePassInstalled = true;
+			L->info("Hook installed on DrawWorld::DeferredPrePass");
+		}
+
 		void EnsureDeferredCompositeInstalled()
 		{
 			if (g_compositeInstalled) {
@@ -202,7 +212,7 @@ namespace cs::engine
 		}
 	}
 
-	bool EnsurePreSunLightDrawInstalled()
+	bool EnsureDeferredDrawAnchorInstalled()
 	{
 		if (!RegistrationAllowed("DeferredDrawAnchor")) return false;
 		InstallDeferredDrawAnchor();
@@ -213,11 +223,7 @@ namespace cs::engine
 	{
 		if (!RegistrationAllowed("PostDeferredPrePass")) return false;
 		InsertPrioritized(g_postDeferredPrePass, std::move(callback), priority);
-		if (!g_prePassInstalled) {
-			stl::detour_thunk<DeferredPrePass_Hook>(REL::ID({ 56596, 2318301, 2318301 }));
-			g_prePassInstalled = true;
-			L->info("Hook installed on DrawWorld::DeferredPrePass");
-		}
+		EnsureDeferredPrePassInstalled();
 		return true;
 	}
 
@@ -251,10 +257,12 @@ namespace cs::engine
 		return true;
 	}
 
-	void RegisterPreSunLightDraw(RenderHookCallback callback, HookPriority priority)
+	void RegisterPreFullscreenDeferredLightDraw(
+		RenderHookCallback callback,
+		HookPriority priority)
 	{
-		if (!RegistrationAllowed("PreSunLightDraw")) return;
-		InsertPrioritized(g_preSunLightDraw, std::move(callback), priority);
+		if (!RegistrationAllowed("PreFullscreenDeferredLightDraw")) return;
+		InsertPrioritized(g_preFullscreenDeferredLightDraw, std::move(callback), priority);
 		InstallDeferredDrawAnchor();
 	}
 }

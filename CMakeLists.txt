@@ -370,6 +370,23 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	set_tests_properties(ProjectionMath PROPERTIES LABELS "render;unit")
 endif()
 
+add_executable(FrameBufferTests
+	tests/FrameBufferTests.cpp
+	src/Render/FrameBufferMath.h
+)
+configure_host_test(FrameBufferTests)
+target_link_libraries(FrameBufferTests PRIVATE Microsoft::DirectXMath)
+
+add_test(
+	NAME FrameBuffer
+	COMMAND FrameBufferTests
+		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/common.hlsli"
+		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/radianceDisocc.cs.hlsl"
+		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src/ScreenSpaceGI.cpp"
+		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/DeferredContracts.hlsli"
+)
+set_tests_properties(FrameBuffer PROPERTIES LABELS "render;shader;unit")
+
 add_executable(FrustumEmbedTests
 	tests/FrustumEmbedTests.cpp
 	features/ScreenSpaceGI/src/OracleProjectionEmbed.h

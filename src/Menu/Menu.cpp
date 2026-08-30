@@ -1058,7 +1058,7 @@ namespace cs
 		const auto dumpHotkey = cs::log::GetDumpHotkey();
 		if (dumpHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
 			consumedDumpHotkey = dumpHotkey;
-			cs::telemetry::pump::DumpAll();
+			cs::telemetry::pump::RequestDump();
 			return 0;
 		}
 

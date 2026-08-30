@@ -31,7 +31,7 @@ namespace cs::telemetry
 	namespace pump
 	{
 		void Tick();
-		void DumpAll();
+		void RequestDump() noexcept;
 		void SetEnabled(bool a_enabled);
 		void SetIntervalSeconds(std::uint32_t a_interval);
 		bool Enabled() noexcept;

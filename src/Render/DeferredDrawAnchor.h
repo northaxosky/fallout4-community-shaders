@@ -7,7 +7,7 @@ namespace cs::engine
 	struct DeferredDrawAnchorDecision
 	{
 		bool dispatchInjections = false;
-		bool dispatchLegacySunCallbacks = false;
+		bool dispatchFullscreenLightCallbacks = false;
 
 		bool operator==(const DeferredDrawAnchorDecision&) const = default;
 	};

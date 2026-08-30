@@ -898,6 +898,17 @@ namespace cs::features
 		_compositionBindsLastFrame.store(0, std::memory_order_relaxed);
 		_temporalDispatchesLastFrame.store(0, std::memory_order_relaxed);
 		_radianceSourceCount.store(0, std::memory_order_relaxed);
+		_cameraReadyLastFrame.store(false, std::memory_order_relaxed);
+		_cameraTranslationLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraOriginXLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraOriginYLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraOriginZLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraPreviousOriginXLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraPreviousOriginYLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraPreviousOriginZLastFrame.store(0.0f, std::memory_order_relaxed);
+		_cameraDiscontinuityCause.store(
+			static_cast<std::uint32_t>(ssgi::CameraDiscontinuityCause::kNone),
+			std::memory_order_relaxed);
 
 		if (_queuedHistoryReset.exchange(false, std::memory_order_acq_rel)) {
 			ResetHistory(ssgi::HistoryResetReason::kLoadingScreenClosed);
@@ -922,14 +933,17 @@ namespace cs::features
 		}
 
 		auto* rtm = cs::engine::GetRenderTargetManager();
-		auto* sceneCamera = cs::engine::GetWorldRootCamera();
+		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		const bool cameraReady =
+			frameBuffer.valid && cs::engine::HasUsableWorldCamera(frameBuffer.data);
+		_cameraReadyLastFrame.store(cameraReady, std::memory_order_relaxed);
 		DirectX::XMFLOAT4X4 worldProj{};
 		DirectX::XMFLOAT4X4 worldInvProj{};
 		DirectX::XMFLOAT4 worldNdcToViewMul{};
 		DirectX::XMFLOAT4 worldNdcToViewAdd{};
 		auto* depthSRV = cs::engine::GetSceneDepthSRV();
 		auto* normalSRV = cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kGbufferNormal);
-		if (!state || !rtm || !sceneCamera || !IsGeneratorReady() || !depthSRV || !normalSRV ||
+		if (!state || !rtm || !cameraReady || !IsGeneratorReady() || !depthSRV || !normalSRV ||
 			!cs::engine::TryGetWorldSceneProjection(
 				worldProj, worldInvProj, worldNdcToViewMul, worldNdcToViewAdd)) {
 			if (_history.Valid()) {
@@ -992,14 +1006,27 @@ namespace cs::features
 
 		CameraTransform camera{};
 		for (std::size_t row = 0; row < 3; ++row) {
-			const auto& entry = sceneCamera->world.rotate.entry[row];
+			const auto& entry = frameBuffer.data.ViewToWorld[row];
 			camera.rows[row * 4 + 0] = entry.x;
 			camera.rows[row * 4 + 1] = entry.y;
 			camera.rows[row * 4 + 2] = entry.z;
+			camera.rows[row * 4 + 3] = 0.0f;
 		}
-		camera.rows[3] = state->cameraState.posAdjust.x;
-		camera.rows[7] = state->cameraState.posAdjust.y;
-		camera.rows[11] = state->cameraState.posAdjust.z;
+		const auto cameraOrigin = cs::engine::CameraWorldOrigin(frameBuffer.data);
+		_cameraOriginXLastFrame.store(cameraOrigin.x, std::memory_order_relaxed);
+		_cameraOriginYLastFrame.store(cameraOrigin.y, std::memory_order_relaxed);
+		_cameraOriginZLastFrame.store(cameraOrigin.z, std::memory_order_relaxed);
+		const auto previousCameraOrigin =
+			cs::engine::CameraPreviousWorldOrigin(frameBuffer.data);
+		_cameraPreviousOriginXLastFrame.store(
+			previousCameraOrigin.x,
+			std::memory_order_relaxed);
+		_cameraPreviousOriginYLastFrame.store(
+			previousCameraOrigin.y,
+			std::memory_order_relaxed);
+		_cameraPreviousOriginZLastFrame.store(
+			previousCameraOrigin.z,
+			std::memory_order_relaxed);
 		camera.ndcToViewMul[0] = worldNdcToViewMul.x;
 		camera.ndcToViewMul[1] = worldNdcToViewMul.y;
 		camera.ndcToViewAdd[0] = worldNdcToViewAdd.x;
@@ -1033,21 +1060,32 @@ namespace cs::features
 			ResetHistory(ssgi::HistoryResetReason::kMissingMotion);
 		}
 		if (_prevCameraValid && _history.Valid()) {
-			const float deltaX = camera.rows[3] - _prevCamera.rows[3];
-			const float deltaY = camera.rows[7] - _prevCamera.rows[7];
-			const float deltaZ = camera.rows[11] - _prevCamera.rows[11];
-			bool discontinuous =
-				(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ) >
-					kTeleportDistance * kTeleportDistance;
-			for (std::size_t row = 0; !discontinuous && row < 3; ++row) {
+			const float deltaX = cameraOrigin.x - previousCameraOrigin.x;
+			const float deltaY = cameraOrigin.y - previousCameraOrigin.y;
+			const float deltaZ = cameraOrigin.z - previousCameraOrigin.z;
+			const float translationSquared =
+				deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+			_cameraTranslationLastFrame.store(
+				std::sqrt(translationSquared), std::memory_order_relaxed);
+			auto discontinuityCause = translationSquared >
+					kTeleportDistance * kTeleportDistance ?
+				ssgi::CameraDiscontinuityCause::kTranslation :
+				ssgi::CameraDiscontinuityCause::kNone;
+			for (std::size_t row = 0;
+				discontinuityCause == ssgi::CameraDiscontinuityCause::kNone && row < 3;
+				++row) {
 				const std::size_t offset = row * 4;
 				const float axisDot =
 					_prevCamera.rows[offset + 0] * camera.rows[offset + 0] +
 					_prevCamera.rows[offset + 1] * camera.rows[offset + 1] +
 					_prevCamera.rows[offset + 2] * camera.rows[offset + 2];
-				discontinuous = axisDot < kMinFrameAxisDot;
+				if (axisDot < kMinFrameAxisDot) {
+					discontinuityCause = ssgi::CameraDiscontinuityCause::kRotation;
+				}
 			}
-			for (std::size_t axis = 0; !discontinuous && axis < 2; ++axis) {
+			for (std::size_t axis = 0;
+				discontinuityCause == ssgi::CameraDiscontinuityCause::kNone && axis < 2;
+				++axis) {
 				const float currentMul = camera.ndcToViewMul[axis];
 				const float previousMul = _prevCamera.ndcToViewMul[axis];
 				const float currentAdd = camera.ndcToViewAdd[axis];
@@ -1056,11 +1094,16 @@ namespace cs::features
 					{ std::abs(currentMul), std::abs(previousMul), 1e-6f });
 				const float addScale = std::max(
 					{ std::abs(currentAdd), std::abs(previousAdd), 1.0f });
-				discontinuous =
-					std::abs(currentMul - previousMul) > kProjectionTolerance * mulScale ||
-					std::abs(currentAdd - previousAdd) > kProjectionTolerance * addScale;
+				if (std::abs(currentMul - previousMul) > kProjectionTolerance * mulScale
+					|| std::abs(currentAdd - previousAdd) >
+						kProjectionTolerance * addScale) {
+					discontinuityCause = ssgi::CameraDiscontinuityCause::kProjection;
+				}
 			}
-			if (discontinuous) {
+			_cameraDiscontinuityCause.store(
+				static_cast<std::uint32_t>(discontinuityCause),
+				std::memory_order_relaxed);
+			if (discontinuityCause != ssgi::CameraDiscontinuityCause::kNone) {
 				ResetHistory(ssgi::HistoryResetReason::kCameraDiscontinuity);
 			}
 		}
@@ -1149,6 +1192,8 @@ namespace cs::features
 				xegtaoCB.RadianceScale[1] = frameHeight / static_cast<float>(radianceDesc.Height);
 			}
 			const CameraTransform& previousCamera = useHistory ? _prevCamera : camera;
+			const DirectX::XMFLOAT3 temporalPreviousOrigin =
+				useHistory ? previousCameraOrigin : cameraOrigin;
 			std::memcpy(
 				xegtaoCB.PrevNDCToViewMul,
 				previousCamera.ndcToViewMul,
@@ -1162,6 +1207,12 @@ namespace cs::features
 				xegtaoCB.PrevViewToWorld,
 				previousCamera.rows,
 				sizeof(previousCamera.rows));
+			xegtaoCB.CameraOrigin[0] = cameraOrigin.x;
+			xegtaoCB.CameraOrigin[1] = cameraOrigin.y;
+			xegtaoCB.CameraOrigin[2] = cameraOrigin.z;
+			xegtaoCB.PrevCameraOrigin[0] = temporalPreviousOrigin.x;
+			xegtaoCB.PrevCameraOrigin[1] = temporalPreviousOrigin.y;
+			xegtaoCB.PrevCameraOrigin[2] = temporalPreviousOrigin.z;
 			_xegtaoCB->Update(xegtaoCB);
 
 			ComputePass pass(context);
@@ -1431,6 +1482,8 @@ namespace cs::features
 	{
 		const auto resetReason = static_cast<ssgi::HistoryResetReason>(
 			_lastResetReason.load(std::memory_order_relaxed));
+		const auto discontinuityCause = static_cast<ssgi::CameraDiscontinuityCause>(
+			_cameraDiscontinuityCause.load(std::memory_order_relaxed));
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("injection_registered", _injectionRegistered.load(std::memory_order_acquire))
@@ -1463,6 +1516,28 @@ namespace cs::features
 				static_cast<std::int64_t>(_repeatCallbacks.load(std::memory_order_relaxed)))
 			.Field("contaminated_light_classes", kContaminatedLightClasses)
 			.Field("contaminated_routes", kContaminatedRoutes)
+			.Field("camera_ready", _cameraReadyLastFrame.load(std::memory_order_relaxed))
+			.Field(
+				"camera_translation",
+				static_cast<double>(
+					_cameraTranslationLastFrame.load(std::memory_order_relaxed)))
+			.Field(
+				"camera_origin",
+				std::format(
+					"{} {} {}",
+					_cameraOriginXLastFrame.load(std::memory_order_relaxed),
+					_cameraOriginYLastFrame.load(std::memory_order_relaxed),
+					_cameraOriginZLastFrame.load(std::memory_order_relaxed)))
+			.Field(
+				"camera_previous_origin",
+				std::format(
+					"{} {} {}",
+					_cameraPreviousOriginXLastFrame.load(std::memory_order_relaxed),
+					_cameraPreviousOriginYLastFrame.load(std::memory_order_relaxed),
+					_cameraPreviousOriginZLastFrame.load(std::memory_order_relaxed)))
+			.Field(
+				"camera_discontinuity_cause",
+				std::string_view(ssgi::CameraDiscontinuityCauseName(discontinuityCause)))
 			.Field(
 				"composition_binds",
 				static_cast<std::int64_t>(

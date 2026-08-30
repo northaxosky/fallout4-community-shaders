@@ -5,12 +5,16 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Plugin.h"
+#include "Render/Engine.h"
+#include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cmath>
+#include <cstdio>
 #include <exception>
 #include <limits>
 #include <sstream>
@@ -24,6 +28,7 @@ namespace cs::telemetry
 		std::atomic_bool          g_enabled{ false };
 		std::atomic<std::uint32_t> g_intervalSeconds{ 5 };
 		std::atomic<std::uint64_t> g_lastEmitMilliseconds{ 0 };
+		std::atomic_bool          g_dumpRequested{ false };
 		bool g_installed = false;
 		// without the post-composite anchor the pump never ticks
 		std::atomic_bool g_compositeSamplingAvailable{ true };
@@ -93,6 +98,18 @@ namespace cs::telemetry
 			return static_cast<std::int64_t>(a_value > max ? max : a_value);
 		}
 
+		std::string FormatHex64(std::uint64_t a_value)
+		{
+			char buffer[16]{};
+			const auto result =
+				std::to_chars(std::begin(buffer), std::end(buffer), a_value, 16);
+			std::string output = "0x";
+			if (result.ec == std::errc{}) {
+				output.append(buffer, result.ptr);
+			}
+			return output;
+		}
+
 		void CollectShaderInjection(Sink& a_sink)
 		{
 			const auto summary =
@@ -149,6 +166,191 @@ namespace cs::telemetry
 				.Field(
 					"bsdf_composite_dispatches",
 					TomlInteger(bsdfComposite.dispatches));
+		}
+
+		[[nodiscard]] std::string FormatVector3(float a_x, float a_y, float a_z)
+		{
+			std::string result;
+			AppendDouble(result, a_x);
+			result.push_back(' ');
+			AppendDouble(result, a_y);
+			result.push_back(' ');
+			AppendDouble(result, a_z);
+			return result;
+		}
+
+		[[nodiscard]] std::string FormatFloat4(const DirectX::XMFLOAT4& a_value)
+		{
+			std::string result = FormatVector3(a_value.x, a_value.y, a_value.z);
+			result.push_back(' ');
+			AppendDouble(result, a_value.w);
+			return result;
+		}
+
+		[[nodiscard]] bool IsIdentity(const __m128 (&a_matrix)[4]) noexcept
+		{
+			alignas(16) float rows[4][4]{};
+			for (std::size_t row = 0; row < 4; ++row) {
+				_mm_store_ps(rows[row], a_matrix[row]);
+			}
+			for (std::size_t row = 0; row < 4; ++row) {
+				for (std::size_t column = 0; column < 4; ++column) {
+					const float expected = row == column ? 1.0f : 0.0f;
+					if (std::abs(rows[row][column] - expected) > 1e-5f) {
+						return false;
+					}
+				}
+			}
+			return true;
+		}
+
+		void CollectFrameBuffer(Sink& a_sink)
+		{
+			const auto status = cs::engine::GetFrameBufferStatus();
+			const auto& published = cs::engine::GetFrameBuffer();
+			const auto& latest = cs::engine::GetLatestFrameBuffer();
+			const auto publishedOrigin =
+				cs::engine::CameraWorldOrigin(published.data);
+			const auto fullscreenLightOrigin =
+				cs::engine::CameraWorldOrigin(status.fullscreenLight.data);
+			a_sink
+				.Field("hook_installed", status.hookInstalled)
+				.Field("hooked_context_is_current", status.hookedContextIsCurrent)
+				.Field("identified", status.identified)
+				.Field("identity_source", std::string_view(status.identitySource))
+				.Field("context_matches_slot12", status.contextMatchesSlot12)
+				.Field("byte_width", static_cast<std::int64_t>(status.byteWidth))
+				.Field("usage", static_cast<std::int64_t>(status.usage))
+				.Field("cpu_access_flags", static_cast<std::int64_t>(status.cpuAccessFlags))
+				.Field("bind_flags", static_cast<std::int64_t>(status.bindFlags))
+				.Field("snapshots", TomlInteger(status.snapshots))
+				.Field("maps_last_frame", static_cast<std::int64_t>(status.mapsLastFrame))
+				.Field("maps_max_per_frame", static_cast<std::int64_t>(status.maxMapsPerFrame))
+				.Field("latest_valid", status.latestSnapshotValid)
+				.Field("latest_sequence", TomlInteger(status.latestSequence))
+				.Field("latest_frame", static_cast<std::int64_t>(status.latestFrameCount))
+				.Field(
+					"latest_is_perspective",
+					cs::engine::IsPerspectiveProjection(latest.data.CurrFrameWorldToClip[3]))
+				.Field("latest_camera_pos_adjust", FormatFloat4(latest.data.CameraPosAdjust))
+				.Field("latest_view_to_world_row0", FormatFloat4(latest.data.ViewToWorld[0]))
+				.Field("latest_view_to_world_row1", FormatFloat4(latest.data.ViewToWorld[1]))
+				.Field("latest_view_to_world_row2", FormatFloat4(latest.data.ViewToWorld[2]))
+				.Field("published_valid", status.publishedSnapshotValid)
+				.Field("published_this_frame", status.publishedThisFrame)
+				.Field("published_sequence", TomlInteger(status.publishedSequence))
+				.Field(
+					"published_frame",
+					static_cast<std::int64_t>(status.publishedFrameCount))
+				.Field(
+					"publish_source",
+					std::string_view(
+						cs::engine::FrameBufferPublishSourceName(status.publishSource)))
+				.Field(
+					"last_reject_reason",
+					std::string_view(
+						cs::engine::FrameBufferRejectReasonName(status.lastRejectReason)))
+				.Field(
+					"fullscreen_light_anchors",
+					static_cast<std::int64_t>(status.fullscreenLightAnchorsThisFrame))
+				.Field(
+					"publications",
+					static_cast<std::int64_t>(status.publicationsThisFrame))
+				.Field(
+					"rejections",
+					static_cast<std::int64_t>(status.rejectionsThisFrame))
+				.Field(
+					"distinct_cameras",
+					static_cast<std::int64_t>(status.distinctCamerasThisFrame))
+				.Field(
+					"minimum_origin_magnitude",
+					static_cast<double>(status.minimumOriginMagnitude))
+				.Field(
+					"published_camera_hash",
+					FormatHex64(status.publishedCameraHash))
+				.Field("completed_frames", TomlInteger(status.completedFrames))
+				.Field("publication_frames", TomlInteger(status.publicationFrames))
+				.Field("no_publication_frames", TomlInteger(status.noPublicationFrames))
+				.Field(
+					"near_zero_origin_rejections",
+					TomlInteger(status.nearZeroOriginRejections))
+				.Field(
+					"published_is_perspective",
+					cs::engine::IsPerspectiveProjection(
+						published.data.CurrFrameWorldToClip[3]))
+				.Field(
+					"published_camera_origin",
+					FormatVector3(
+						publishedOrigin.x,
+						publishedOrigin.y,
+						publishedOrigin.z))
+				.Field(
+					"published_camera_pos_adjust",
+					FormatFloat4(published.data.CameraPosAdjust))
+				.Field(
+					"published_view_to_world_row0",
+					FormatFloat4(published.data.ViewToWorld[0]))
+				.Field(
+					"published_view_to_world_row1",
+					FormatFloat4(published.data.ViewToWorld[1]))
+				.Field(
+					"published_view_to_world_row2",
+					FormatFloat4(published.data.ViewToWorld[2]))
+				.Field("fullscreen_light_valid", status.fullscreenLight.valid)
+				.Field(
+					"fullscreen_light_sequence",
+					TomlInteger(status.fullscreenLight.sequence))
+				.Field(
+					"fullscreen_light_origin",
+					FormatVector3(
+						fullscreenLightOrigin.x,
+						fullscreenLightOrigin.y,
+						fullscreenLightOrigin.z))
+				.Field(
+					"fullscreen_light_row0",
+					FormatFloat4(status.fullscreenLight.data.ViewToWorld[0]))
+				.Field(
+					"fullscreen_light_row1",
+					FormatFloat4(status.fullscreenLight.data.ViewToWorld[1]))
+				.Field(
+					"fullscreen_light_row2",
+					FormatFloat4(status.fullscreenLight.data.ViewToWorld[2]));
+
+			// The engine-struct reads exist only to be compared against the snapshot.
+			auto* state = cs::engine::GetGraphicsState();
+			if (!state) {
+				return;
+			}
+			const auto& cameraState = state->cameraState;
+			a_sink
+				.Field(
+					"state_pos_adjust",
+					FormatVector3(
+						cameraState.posAdjust.x,
+						cameraState.posAdjust.y,
+						cameraState.posAdjust.z))
+				.Field(
+					"state_prev_pos_adjust",
+					FormatVector3(
+						cameraState.previousPosAdjust.x,
+						cameraState.previousPosAdjust.y,
+						cameraState.previousPosAdjust.z))
+				.Field("state_view_mat_identity", IsIdentity(cameraState.camViewData.viewMat));
+		}
+
+		void CollectFrameBufferRegisters(Sink& a_sink)
+		{
+			const auto& snapshot = cs::engine::GetFrameBuffer();
+			for (std::size_t index = 0; index < cs::engine::kFrameBufferRegisters; ++index) {
+				char key[16]{};
+				const auto written = std::snprintf(key, sizeof(key), "b12_%02zu", index);
+				if (written <= 0) {
+					continue;
+				}
+				a_sink.Field(
+					std::string_view(key, static_cast<std::size_t>(written)),
+					FormatFloat4(cs::engine::FrameBufferRegister(snapshot.data, index)));
+			}
 		}
 	}
 
@@ -217,9 +419,14 @@ namespace cs::telemetry
 
 	namespace pump
 	{
+		static void DumpAll();
+
 		void Tick()
 		{
 			const auto frame = g_frame.fetch_add(1, std::memory_order_relaxed) + 1;
+			if (g_dumpRequested.exchange(false, std::memory_order_acq_rel)) {
+				DumpAll();
+			}
 			if (!g_enabled.load(std::memory_order_relaxed))
 				return;
 
@@ -244,6 +451,22 @@ namespace cs::telemetry
 			}
 
 			auto* logger = cs::log::Get("cs.telemetry");
+			try {
+				Sink sink;
+				CollectFrameBuffer(sink);
+				logger->info("frame={} component=frame_buffer {}", frame, sink.ToLine());
+			} catch (const std::exception& e) {
+				CS_LOG_ONCE(
+					logger,
+					spdlog::level::warn,
+					"Telemetry collection failed for frame_buffer: {}",
+					e.what());
+			} catch (...) {
+				CS_LOG_ONCE(
+					logger,
+					spdlog::level::warn,
+					"Telemetry collection failed for frame_buffer: non-standard exception");
+			}
 			try {
 				Sink sink;
 				CollectShaderInjection(sink);
@@ -285,7 +508,7 @@ namespace cs::telemetry
 			}
 		}
 
-		void DumpAll()
+		static void DumpAll()
 		{
 			auto* logger = cs::log::Get("cs.telemetry");
 			try {
@@ -299,6 +522,11 @@ namespace cs::telemetry
 				root.insert_or_assign(
 					"shader_injection",
 					shaderInjection.AsTable());
+
+				Sink frameBuffer;
+				CollectFrameBuffer(frameBuffer);
+				CollectFrameBufferRegisters(frameBuffer);
+				root.insert_or_assign("frame_buffer", frameBuffer.AsTable());
 
 				toml::table features;
 				for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
@@ -335,6 +563,11 @@ namespace cs::telemetry
 			} catch (...) {
 				logger->warn("Telemetry dump failed: non-standard exception");
 			}
+		}
+
+		void RequestDump() noexcept
+		{
+			g_dumpRequested.store(true, std::memory_order_release);
 		}
 
 		void SetEnabled(bool a_enabled)

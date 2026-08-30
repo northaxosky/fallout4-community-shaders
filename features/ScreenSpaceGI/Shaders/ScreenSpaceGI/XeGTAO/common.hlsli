@@ -47,9 +47,11 @@ cbuffer XeGTAOCB : register(b0)
 	float2 PrevNDCToViewMul;
 	float2 PrevNDCToViewAdd;
 
-	// Rows hold the raw Ni camera axes; w holds the renderer position adjustment.
+	// Engine b12 view-to-world rows; w carries the row's translation term.
 	float4 ViewToWorld[3];
 	float4 PrevViewToWorld[3];
+	float4 CameraOrigin;
+	float4 PrevCameraOrigin;
 };
 
 SamplerState samplerPointClamp : register(s0);
@@ -94,27 +96,19 @@ float2 ViewToUV(const float3 viewPos)
 	return ((viewPos.xy / viewPos.z) - NDCToViewAdd.xy) / NDCToViewMul.xy;
 }
 
-float3 ViewToWorldDirection(float3 direction)
+// Absolute world position, matching the deferred reconstruction in BSDFCompositeShader.
+float3 ViewToWorldPosition(float3 viewPos, float4 rows[3], float3 origin)
 {
-	float3 directionNi = direction.zyx;
-	return normalize(
-		directionNi.x * ViewToWorld[0].xyz +
-		directionNi.y * ViewToWorld[1].xyz +
-		directionNi.z * ViewToWorld[2].xyz);
+	float4 pos = float4(viewPos, 1.0);
+	return float3(dot(rows[0], pos), dot(rows[1], pos), dot(rows[2], pos)) + origin;
 }
 
-// World offset from the camera the rows belong to, not absolute world space.
-float3 ViewToCameraRelativeWorld(float3 viewPos, float4 rows[3])
+float3 ViewToWorldDirection(float3 direction, float4 rows[3])
 {
-	float3 posNi = viewPos.zyx;
-	return posNi.x * rows[0].xyz +
-		posNi.y * rows[1].xyz +
-		posNi.z * rows[2].xyz;
-}
-
-float3 CameraOrigin(float4 rows[3])
-{
-	return float3(rows[0].w, rows[1].w, rows[2].w);
+	return normalize(float3(
+		dot(rows[0].xyz, direction),
+		dot(rows[1].xyz, direction),
+		dot(rows[2].xyz, direction)));
 }
 
 // Octahedral, so world normals in the lower hemisphere survive the round trip.

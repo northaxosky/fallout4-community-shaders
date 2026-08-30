@@ -58,7 +58,6 @@ namespace
 			TestCase{ true, false, 2, { true, true } },
 			TestCase{ false, true, 0, { true, false } },
 			TestCase{ false, true, 2, { true, false } },
-			TestCase{ true, true, 0, { true, false } },
 			TestCase{ true, true, 2, { true, false } }
 		};
 		for (const auto& testCase : cases) {

@@ -1182,7 +1182,7 @@ namespace cs::engine
 		// active substrate requires current b5/b6 data
 		render::EnsureSharedDataUpdateInstalled();
 		// a bind callback without its draw anchor would never run
-		if (installsPreDrawHook && !EnsurePreSunLightDrawInstalled()) {
+		if (installsPreDrawHook && !EnsureDeferredDrawAnchorInstalled()) {
 			L->error(
 				"Replacement registration '{}' for '{}' rejected: the deferred draw anchor is unavailable.",
 				a_registration.contributor,

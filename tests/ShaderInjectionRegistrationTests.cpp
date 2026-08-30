@@ -233,7 +233,7 @@ namespace cs::engine
 		return true;
 	}
 
-	bool EnsurePreSunLightDrawInstalled()
+	bool EnsureDeferredDrawAnchorInstalled()
 	{
 		++g_preDrawInstallRequests;
 		return !g_preDrawInstallFails;

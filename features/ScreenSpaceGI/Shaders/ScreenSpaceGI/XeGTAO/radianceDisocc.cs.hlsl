@@ -37,8 +37,8 @@ void ReadHistory(
 
 	const float2 prevUV = (pixCoord + 0.5) * RcpPrevFrameDim;
 	const float3 prevView = PreviousScreenToViewPosition(prevUV, prevDepth);
-	const float3 prevPos = ViewToCameraRelativeWorld(prevView, PrevViewToWorld) +
-		(CameraOrigin(PrevViewToWorld) - CameraOrigin(ViewToWorld));
+	const float3 prevPos =
+		ViewToWorldPosition(prevView, PrevViewToWorld, PrevCameraOrigin.xyz);
 
 	const float3 deltaPos = currPos - prevPos;
 	const float movementThreshold = currDepth * DepthDisocclusion;
@@ -87,8 +87,8 @@ void main(const uint2 pixCoord : SV_DispatchThreadID)
 		motion = srcMotionVec[pixCoord];
 		const float2 prevUV = uv + motion;
 		if (!(any(prevUV < 0) || any(prevUV > 1))) {
-			const float3 currPos =
-				ViewToCameraRelativeWorld(ScreenToViewPosition(uv, currDepth), ViewToWorld);
+			const float3 currPos = ViewToWorldPosition(
+				ScreenToViewPosition(uv, currDepth), ViewToWorld, CameraOrigin.xyz);
 
 			const float2 prevPxCoord = prevUV * PrevFrameDim;
 			const int2 prevPxLU = int2(floor(prevPxCoord - 0.5));
