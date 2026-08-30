@@ -256,6 +256,20 @@ add_test(
 )
 set_tests_properties(TerrainShadowsMath PROPERTIES LABELS "render;shader;unit")
 
+add_executable(TerrainShadowsResizeTests
+	tests/TerrainShadowsResizeTests.cpp
+	features/TerrainShadows/src/HeightMapResize.cpp
+	features/TerrainShadows/src/HeightMapResize.h
+)
+configure_host_test(TerrainShadowsResizeTests)
+target_include_directories(TerrainShadowsResizeTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/TerrainShadows/src"
+)
+target_link_libraries(TerrainShadowsResizeTests PRIVATE Microsoft::DirectXTex)
+
+add_test(NAME TerrainShadowsResize COMMAND TerrainShadowsResizeTests)
+set_tests_properties(TerrainShadowsResize PROPERTIES LABELS "render;unit")
+
 add_executable(WetnessEffectsMathTests
 	tests/WetnessEffectsMathTests.cpp
 	features/WetnessEffects/src/WetnessMath.h

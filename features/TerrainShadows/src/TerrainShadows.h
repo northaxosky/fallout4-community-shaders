@@ -99,6 +99,12 @@ namespace cs::features
 			std::filesystem::path              path;
 		};
 
+		enum class StatusSeverity
+		{
+			kInfo,
+			kFailure
+		};
+
 		TerrainShadows() = default;
 
 		void SaveSettings();
@@ -138,7 +144,8 @@ namespace cs::features
 
 		void PublishStatus(
 			const std::string& a_worldspace,
-			std::string_view a_detail);
+			std::string_view a_detail,
+			StatusSeverity a_severity = StatusSeverity::kInfo);
 
 		static std::string ResolveWorldspaceEditorId();
 
@@ -200,6 +207,7 @@ namespace cs::features
 		mutable std::mutex _statusMutex;
 		std::string _statusWorldspace;
 		std::string _statusDetail;
+		bool _statusFailed = false;
 		std::string _validationDetail;
 
 		// Render thread only.
@@ -208,6 +216,7 @@ namespace cs::features
 		terrain_shadows::DdaPlan _plan;
 		std::string _loadedWorldspace;
 		std::string _failedWorldspace;
+		std::string _failedDetail;
 		std::uint32_t _failedFactor = 0;
 		std::uint32_t _appliedFactor = 1;
 		std::uint32_t _shadowUpdateIndex = 0;

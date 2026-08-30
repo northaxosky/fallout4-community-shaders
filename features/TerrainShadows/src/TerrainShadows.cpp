@@ -19,6 +19,7 @@
 
 #include <toml++/toml.hpp>
 
+#include "HeightMapResize.h"
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
@@ -31,6 +32,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
+#include "Utils/UI.h"
 #include "World/Sky.h"
 
 namespace cs::features
@@ -813,21 +815,22 @@ namespace cs::features
 		}
 
 		DirectX::ScratchImage resized;
+		ts::HeightMapDownsample downsample{};
 		if (effectiveWidth != sourceWidth || effectiveHeight != sourceHeight) {
-			if (FAILED(DirectX::Resize(
-					*mip0,
+			downsample = ts::DownsampleHeightMap(
+				*mip0, effectiveWidth, effectiveHeight, resized);
+			if (FAILED(downsample.hr) || !downsample.image) {
+				a_error = std::format(
+					"the heightmap could not be downsampled {}x{} -> {}x{} "
+					"(HRESULT 0x{:08X})",
+					sourceWidth,
+					sourceHeight,
 					effectiveWidth,
 					effectiveHeight,
-					DirectX::TEX_FILTER_FANT,
-					resized))) {
-				a_error = "the heightmap could not be downsampled";
+					static_cast<std::uint32_t>(downsample.hr));
 				return false;
 			}
-			mip0 = resized.GetImage(0, 0, 0);
-			if (!mip0) {
-				a_error = "the resized image is unavailable";
-				return false;
-			}
+			mip0 = downsample.image;
 		}
 
 		DirectX::TexMetadata single = metadata;
@@ -846,9 +849,12 @@ namespace cs::features
 			a_record.metadata.pos1[2]);
 
 		winrt::com_ptr<ID3D11Resource> resource;
-		if (FAILED(DirectX::CreateTexture(
-				a_device, mip0, 1, single, resource.put()))) {
-			a_error = "the heightmap texture could not be created";
+		const auto createResult = DirectX::CreateTexture(
+			a_device, mip0, 1, single, resource.put());
+		if (FAILED(createResult)) {
+			a_error = std::format(
+				"the heightmap texture could not be created (HRESULT 0x{:08X})",
+				static_cast<std::uint32_t>(createResult));
 			return false;
 		}
 		winrt::com_ptr<ID3D11Texture2D> heightTexture;
@@ -924,7 +930,8 @@ namespace cs::features
 
 		L->info(
 			"Loaded {} heightmap for '{}': source={}x{}, effective={}x{}, "
-			"downsample_factor={}, height={:.2f} MiB, shadow={:.2f} MiB, total={:.2f} MiB.",
+			"downsample_factor={}, filter={} ({} halvings), height={:.2f} MiB, "
+			"shadow={:.2f} MiB, total={:.2f} MiB.",
 			ts::SourceName(a_record.metadata.source),
 			a_record.metadata.worldspace,
 			sourceWidth,
@@ -932,6 +939,8 @@ namespace cs::features
 			effectiveWidth,
 			effectiveHeight,
 			a_factor,
+			ts::DescribeDownsampleFilter(downsample),
+			downsample.halvings,
 			ts::BytesToMiB(cost.heightBytes),
 			ts::BytesToMiB(cost.shadowBytes),
 			ts::BytesToMiB(cost.totalBytes));
@@ -977,7 +986,7 @@ namespace cs::features
 		}
 		// Do not retry the same failed DDS every frame.
 		if (_failedWorldspace == worldspace && _failedFactor == factor) {
-			PublishStatus(worldspace, "heightmap load failed");
+			PublishStatus(worldspace, _failedDetail, StatusSeverity::kFailure);
 			return;
 		}
 
@@ -994,19 +1003,24 @@ namespace cs::features
 		if (!built) {
 			_failedWorldspace = worldspace;
 			_failedFactor = factor;
-			PublishStatus(worldspace, "heightmap load failed: " + error);
+			_failedDetail = std::format(
+				"'{}' at downsample factor {} failed: {}",
+				record->second.path.filename().string(),
+				factor,
+				error);
+			PublishStatus(worldspace, _failedDetail, StatusSeverity::kFailure);
 			CS_LOG_EVERY_MS(
 				L,
 				kMissingMapLogIntervalMs,
 				spdlog::level::err,
-				"Terrain heightmap '{}' for worldspace '{}' could not be loaded: {}.",
-				record->second.path.filename().string(),
-				worldspace,
-				error);
+				"Terrain heightmap {} for worldspace '{}'; terrain shadows are inactive there.",
+				_failedDetail,
+				worldspace);
 			ReleaseLiveResources(a_context);
 			return;
 		}
 		_failedWorldspace.clear();
+		_failedDetail.clear();
 		PublishStatus(worldspace, "loaded");
 	}
 
@@ -1442,7 +1456,8 @@ namespace cs::features
 
 	void TerrainShadows::PublishStatus(
 		const std::string& a_worldspace,
-		std::string_view a_detail)
+		std::string_view a_detail,
+		StatusSeverity a_severity)
 	{
 		_worldspaceResolved.store(!a_worldspace.empty(), std::memory_order_release);
 		const std::lock_guard<std::mutex> guard(_statusMutex);
@@ -1450,22 +1465,26 @@ namespace cs::features
 			_statusWorldspace = a_worldspace;
 		if (_statusDetail != a_detail)
 			_statusDetail.assign(a_detail);
+		_statusFailed = a_severity == StatusSeverity::kFailure;
 	}
 
 	void TerrainShadows::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		std::string worldspace;
 		std::string detail;
+		bool failed = false;
 		{
 			const std::lock_guard<std::mutex> guard(_statusMutex);
 			worldspace = _statusWorldspace;
 			detail = _statusDetail;
+			failed = _statusFailed;
 		}
 		a_sink
 			.Field("enabled", _enabled.load(std::memory_order_relaxed))
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
 			.Field("worldspace", worldspace.empty() ? "none" : worldspace)
 			.Field("status", detail.empty() ? "unknown" : detail)
+			.Field("map_load_failed", failed)
 			.Field("map_loaded", _mapLoaded.load(std::memory_order_relaxed))
 			.Field("shadow_populated", _shadowPopulated.load(std::memory_order_relaxed))
 			.Field(
@@ -1610,16 +1629,26 @@ namespace cs::features
 
 		std::string worldspace;
 		std::string detail;
+		bool failed = false;
 		{
 			const std::lock_guard<std::mutex> guard(_statusMutex);
 			worldspace = _statusWorldspace;
 			detail = _statusDetail;
+			failed = _statusFailed;
 		}
 		ImGui::Separator();
-		ImGui::TextDisabled(
-			"Worldspace: %s | map: %s",
-			worldspace.empty() ? "none" : worldspace.c_str(),
-			detail.empty() ? "unknown" : detail.c_str());
+		if (failed) {
+			ui::Text::WrappedWarning(
+				"Heightmap unavailable for '%s': %s. Terrain shadows are doing "
+				"nothing; try another downsample factor or regenerate the map.",
+				worldspace.empty() ? "none" : worldspace.c_str(),
+				detail.empty() ? "unknown failure" : detail.c_str());
+		} else {
+			ImGui::TextDisabled(
+				"Worldspace: %s | map: %s",
+				worldspace.empty() ? "none" : worldspace.c_str(),
+				detail.empty() ? "unknown" : detail.c_str());
+		}
 		const auto sourceWidth = _sourceWidth.load(std::memory_order_relaxed);
 		const auto sourceHeight = _sourceHeight.load(std::memory_order_relaxed);
 		const auto effectiveWidth = _effectiveWidth.load(std::memory_order_relaxed);
