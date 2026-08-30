@@ -312,6 +312,11 @@ namespace cs::features
 		_api->MaskOverlayBits(eRENDERDOC_Overlay_None, eRENDERDOC_Overlay_None);
 		_api->SetCaptureKeys(nullptr, 0);
 
+		// Without NvAPI passthrough the driver removes the device at the first Present.
+		if (_api->SetCaptureOptionU32(
+				eRENDERDOC_Option_AllowUnsupportedVendorExtensions, 0x10DE) != 1)
+			L->warn("renderdoc.dll rejected NvAPI passthrough; captures may remove the device");
+
 		ApplyCapturePath();
 		L->info("RenderDoc runtime loaded");
 		return true;
