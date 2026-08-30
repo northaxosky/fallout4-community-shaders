@@ -7,6 +7,7 @@
 #include <exception>
 #include <limits>
 #include <memory>
+#include <numbers>
 #include <string>
 #include <vector>
 
@@ -1429,6 +1430,7 @@ namespace cs::features
 		_frameGenerationInputsCaptured = false;
 		_hudlessCapturePending = false;
 		_frameGenerationAlphaConditioned.store(false, std::memory_order_relaxed);
+		fidelityFX.ResetFrameGenerationCameraData();
 		dx12SwapChain.SetFrameGenerationInputsReady(false);
 	}
 
@@ -2426,6 +2428,20 @@ namespace cs::features
 
 	void Upscaling::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
+		const auto& camera = fidelityFX.GetFrameGenerationCameraSnapshot();
+		const auto degrees = [](float a_radians) {
+			return static_cast<double>(a_radians) *
+				180.0 / std::numbers::pi_v<double>;
+		};
+		std::int64_t cameraFrameDelta = 0;
+		if (camera.valid) {
+			if (const auto* state = cs::engine::GetGraphicsState()) {
+				cameraFrameDelta =
+					static_cast<std::int64_t>(state->frameCount) -
+					static_cast<std::int64_t>(camera.frameCount);
+			}
+		}
+
 		a_sink
 			.Field("enabled", settings.enabled)
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
@@ -2443,6 +2459,13 @@ namespace cs::features
 			.Field("fg_raw_captures", static_cast<std::int64_t>(_frameGenerationRawCaptures.load(std::memory_order_relaxed)))
 			.Field("fg_dispatches", static_cast<std::int64_t>(_frameGenerationDispatches.load(std::memory_order_relaxed)))
 			.Field("fg_failures", static_cast<std::int64_t>(_frameGenerationFailures.load(std::memory_order_relaxed)))
+			.Field("fg_camera_valid", camera.valid)
+			.Field("fg_camera_snapshot_frame_delta", cameraFrameDelta)
+			.Field("fg_camera_fov_deg", degrees(camera.verticalFov))
+			.Field("fg_camera_frustum_available", camera.frustumAvailable)
+			.Field("fg_camera_frustum_fov_deg", degrees(camera.frustumVerticalFov))
+			.Field("fg_camera_frustum_ortho", camera.frustumOrthographic)
+			.Field("fg_camera_frustum_offset", static_cast<double>(camera.frustumCameraOffset))
 			.Field("scale_published", _resolutionScalePublished)
 			.Field("provider_failures", static_cast<std::int64_t>(_providerFailures.load(std::memory_order_relaxed)))
 			.Field("sr_published_to_framebuffer", _srPublishedToFramebuffer.load(std::memory_order_acquire))

@@ -1,14 +1,14 @@
 #include "FidelityFX.h"
 
 #include <algorithm>
-#include <cmath>
 #include <cstdlib>
 #include <filesystem>
-#include <numbers>
 
 #include "DX12SwapChain.h"
 #include "Log.h"
+#include "LogThrottle.h"
 #include "Render/Engine.h"
+#include "Render/FrameBuffer.h"
 #include "Render/RendererContext.h"
 #include "Upscaling.h"
 
@@ -189,41 +189,33 @@ namespace cs::features
 	bool FidelityFX::CacheFrameGenerationCameraData() noexcept
 	{
 		frameGenerationCameraData = {};
-		auto* state = cs::engine::GetGraphicsState();
-		auto* camera = cs::engine::GetWorldRootCamera();
-		if (!state || !camera) {
+		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		float verticalFov = 0.0f;
+		// Generated frames can be omitted safely; never reuse stale camera data.
+		if (!cs::engine::HasUsableWorldCamera(frameBuffer.data) ||
+			!TryGetPublishedVerticalFov(frameBuffer, verticalFov)) {
 			return false;
 		}
-		const auto& frustum = camera->viewFrustum;
-		const float verticalFov = std::atan(frustum.top) - std::atan(frustum.bottom);
-		if (!std::isfinite(verticalFov) || verticalFov <= 0.0f ||
-			verticalFov >= std::numbers::pi_v<float>) {
-			return false;
-		}
-
-		cs::engine::CameraMatrices matrices{};
-		if (!cs::engine::TryGetCameraMatrices(matrices)) {
-			return false;
-		}
-		const auto& inverseView = matrices.invView;
 
 		FrameGenerationCameraSnapshot data{};
-		data.right[0] = inverseView._11;
-		data.right[1] = inverseView._12;
-		data.right[2] = inverseView._13;
-		data.up[0] = inverseView._21;
-		data.up[1] = inverseView._22;
-		data.up[2] = inverseView._23;
-		data.forward[0] = inverseView._31;
-		data.forward[1] = inverseView._32;
-		data.forward[2] = inverseView._33;
-		const auto& position = state->cameraState.posAdjust;
+		const auto basis = cs::engine::GetCameraWorldBasis(frameBuffer.data);
+		const auto position = cs::engine::CameraWorldOrigin(frameBuffer.data);
+		data.right[0] = basis.right.x;
+		data.right[1] = basis.right.y;
+		data.right[2] = basis.right.z;
+		data.up[0] = basis.up.x;
+		data.up[1] = basis.up.y;
+		data.up[2] = basis.up.z;
+		data.forward[0] = basis.forward.x;
+		data.forward[1] = basis.forward.y;
+		data.forward[2] = basis.forward.z;
 		data.position[0] = position.x;
 		data.position[1] = position.y;
 		data.position[2] = position.z;
 		data.nearPlane = cs::engine::GetCameraNear();
 		data.farPlane = cs::engine::GetCameraFar();
 		data.verticalFov = verticalFov;
+		data.frameCount = frameBuffer.frameCount;
 		if (auto* timer = RE::BSTimer::GetSingleton()) {
 			data.frameTimeDelta = timer->realTimeDelta * 1000.0f;
 		}
@@ -244,6 +236,21 @@ namespace cs::features
 			[&](const float (&a_left)[3], const float (&a_right)[3]) {
 				return std::abs(dot(a_left, a_right)) <= 0.05f;
 			};
+		if (auto* camera = cs::engine::GetWorldRootCamera()) {
+			const auto& frustum = camera->viewFrustum;
+			data.frustumAvailable = true;
+			data.frustumOrthographic = frustum.ortho;
+			const float frustumFov = std::atan(frustum.top) - std::atan(frustum.bottom);
+			if (std::isfinite(frustumFov)) {
+				data.frustumVerticalFov = frustumFov;
+			}
+			const auto& frustumPosition = camera->GetWorldTranslate();
+			const float deltaX = frustumPosition.x - position.x;
+			const float deltaY = frustumPosition.y - position.y;
+			const float deltaZ = frustumPosition.z - position.z;
+			data.frustumCameraOffset =
+				std::sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
+		}
 		data.valid = finiteVector(data.right) &&
 			finiteVector(data.up) &&
 			finiteVector(data.forward) &&
@@ -266,6 +273,11 @@ namespace cs::features
 		}
 		frameGenerationCameraData = data;
 		return true;
+	}
+
+	void FidelityFX::ResetFrameGenerationCameraData() noexcept
+	{
+		frameGenerationCameraData = {};
 	}
 
 	bool FidelityFX::WaitForPresents() noexcept
@@ -515,10 +527,28 @@ namespace cs::features
 		bool a_resetHistory)
 	{
 		auto* context = cs::engine::GetImmediateContext();
-		auto* graphicsState = cs::engine::GetGraphicsState();
 		auto* depthTexture = cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
-		if (!context || !graphicsState || !depthTexture || !contextCreated)
+		if (!context || !depthTexture || !contextCreated)
 			return false;
+
+		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		float verticalFov = 0.0f;
+		// Native TAA may already be suppressed, so a transient miss must not decline the resolve.
+		const auto fovSource = superResolutionFovCache.Resolve(frameBuffer, verticalFov);
+		if (fovSource == SuperResolutionFovSource::kUnavailable) {
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"FSR3 super-resolution skipped: no current or cached camera projection is available.");
+			return false;
+		}
+		if (fovSource == SuperResolutionFovSource::kCached) {
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::warn,
+				"FSR3 super-resolution is using the last valid camera FOV.");
+		}
 
 		auto* upscaling = Upscaling::GetSingleton();
 		const auto [renderWidth, renderHeight] = upscaling->GetRenderSize();
@@ -548,7 +578,7 @@ namespace cs::features
 		dispatchParameters.cameraNear = cs::engine::GetCameraNear();
 		dispatchParameters.enableSharpening = true;
 		dispatchParameters.sharpness = a_sharpness;
-		dispatchParameters.cameraFovAngleVertical = cs::engine::GetVerticalFOV();
+		dispatchParameters.cameraFovAngleVertical = verticalFov;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
 		dispatchParameters.reset = a_resetHistory;
 		dispatchParameters.preExposure = 1.0f;

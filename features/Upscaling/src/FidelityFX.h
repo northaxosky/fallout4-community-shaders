@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <atomic>
+#include <cstdint>
 #include <string>
 
 #include <d3d11_4.h>
@@ -16,6 +16,8 @@
 #include <FidelityFX/api/include/ffx_api_loader.h>
 #include <FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp>
 #include <FidelityFX/framegeneration/include/ffx_framegeneration.hpp>
+
+#include "SuperResolutionFov.h"
 
 namespace cs::features
 {
@@ -33,7 +35,12 @@ namespace cs::features
 			float nearPlane = 0.0f;
 			float farPlane = 0.0f;
 			float verticalFov = 0.0f;
+			float frustumVerticalFov = 0.0f;
+			float frustumCameraOffset = 0.0f;
 			float frameTimeDelta = 0.0f;
+			std::uint32_t frameCount = 0;
+			bool frustumAvailable = false;
+			bool frustumOrthographic = false;
 			bool valid = false;
 		};
 
@@ -60,10 +67,16 @@ namespace cs::features
 			std::uint32_t a_renderWidth,
 			std::uint32_t a_renderHeight);
 		bool CacheFrameGenerationCameraData() noexcept;
+		void ResetFrameGenerationCameraData() noexcept;
 		void RequestFrameGenerationReset() noexcept;
 		[[nodiscard]] bool IsFrameGenerationModuleReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationContextReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationActive() const noexcept;
+		[[nodiscard]] const FrameGenerationCameraSnapshot&
+			GetFrameGenerationCameraSnapshot() const noexcept
+		{
+			return frameGenerationCameraData;
+		}
 
 		bool CreateFSRResources();
 		void DestroyFSRResources();
@@ -91,5 +104,6 @@ namespace cs::features
 		bool frameGenerationActive = false;
 		bool fsrDispatchCrashLogged = false;
 		FrameGenerationCameraSnapshot frameGenerationCameraData{};
+		SuperResolutionFovCache superResolutionFovCache;
 	};
 }

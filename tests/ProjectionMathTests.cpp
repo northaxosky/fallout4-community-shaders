@@ -1,4 +1,5 @@
 #include "RE/N/NiFrustum.h"
+#include "Render/FrameBufferMath.h"
 
 #include <DirectXMath.h>
 
@@ -147,6 +148,28 @@ namespace
 		       std::isfinite(value.w);
 	}
 
+	void CheckFrameBufferFov(
+		const DirectX::XMFLOAT4X4& a_projection,
+		float a_expected,
+		const char* a_assertion)
+	{
+		DirectX::XMFLOAT4X4 columnProjection{};
+		DirectX::XMStoreFloat4x4(
+			&columnProjection,
+			DirectX::XMMatrixTranspose(DirectX::XMLoadFloat4x4(&a_projection)));
+		const DirectX::XMFLOAT4 rows[]{
+			{ columnProjection._11, columnProjection._12, columnProjection._13, columnProjection._14 },
+			{ columnProjection._21, columnProjection._22, columnProjection._23, columnProjection._24 },
+			{ columnProjection._31, columnProjection._32, columnProjection._33, columnProjection._34 },
+			{ columnProjection._41, columnProjection._42, columnProjection._43, columnProjection._44 }
+		};
+		CheckNear(
+			cs::engine::VerticalFieldOfViewFromWorldToClip(rows),
+			a_expected,
+			1.0e-4f,
+			a_assertion);
+	}
+
 	void CheckRejected(
 		float left,
 		float right,
@@ -210,6 +233,10 @@ namespace
 		CheckNear(Project({ 2.0f * nearZ * right, 0.0f, 2.0f * nearZ }, projection).x, 1.0f, 1.0e-4f, "Case A farther right edge remains +1 NDC x");
 		CheckNear(projection._11, 1.0f / right, 1.0e-4f, "Case A row-major _11 is 1/right");
 		CheckNear(projection._22, 1.0f / top, 1.0e-4f, "Case A row-major _22 is 1/top");
+		CheckFrameBufferFov(
+			projection,
+			std::atan(top) - std::atan(bottom),
+			"Case A b12 vertical FOV matches the frustum");
 
 		const Point points[]{
 			{ 0.0f, 0.0f, 0.2f },
@@ -256,6 +283,10 @@ namespace
 		CheckNear(Project({ nearZ * left, 0.0f, nearZ }, projection).x, -1.0f, 1.0e-4f, "Case B left edge maps to -1 NDC x");
 		CheckNear(Project({ 0.0f, nearZ * top, nearZ }, projection).y, 1.0f, 1.0e-4f, "Case B top edge maps to +1 NDC y");
 		CheckNear(Project({ 0.0f, nearZ * bottom, nearZ }, projection).y, -1.0f, 1.0e-4f, "Case B bottom edge maps to -1 NDC y");
+		CheckFrameBufferFov(
+			projection,
+			std::atan(top) - std::atan(bottom),
+			"Case B b12 vertical FOV matches the asymmetric frustum");
 
 		const Point points[]{
 			{ 0.02f, 0.01f, 0.1f },

@@ -387,6 +387,26 @@ add_test(
 )
 set_tests_properties(FrameBuffer PROPERTIES LABELS "render;shader;unit")
 
+add_executable(FrameGenerationCameraTests
+	tests/FrameGenerationCameraTests.cpp
+	features/Upscaling/src/SuperResolutionFov.h
+	src/Render/FrameBufferMath.h
+)
+configure_host_test(FrameGenerationCameraTests)
+target_include_directories(FrameGenerationCameraTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
+)
+target_link_libraries(FrameGenerationCameraTests PRIVATE Microsoft::DirectXMath)
+
+add_test(
+	NAME FrameGenerationCamera
+	COMMAND FrameGenerationCameraTests
+		"${CMAKE_SOURCE_DIR}/features/Upscaling/src/FidelityFX.cpp"
+		"${CMAKE_SOURCE_DIR}/src/Render/Engine.h"
+		"${CMAKE_SOURCE_DIR}/features/Upscaling/src/Upscaling.cpp"
+)
+set_tests_properties(FrameGenerationCamera PROPERTIES LABELS "render;unit")
+
 add_executable(FrustumEmbedTests
 	tests/FrustumEmbedTests.cpp
 	features/ScreenSpaceGI/src/OracleProjectionEmbed.h

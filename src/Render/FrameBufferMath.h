@@ -130,6 +130,68 @@ namespace cs::engine
 		return std::isfinite(magnitude) && magnitude > 1e-6f;
 	}
 
+	struct CameraWorldBasis
+	{
+		DirectX::XMFLOAT3 right{};
+		DirectX::XMFLOAT3 up{};
+		DirectX::XMFLOAT3 forward{};
+	};
+
+	// world = R * view, so camera axes are R's columns.
+	[[nodiscard]] inline CameraWorldBasis GetCameraWorldBasis(
+		const FrameBuffer& a_frameBuffer) noexcept
+	{
+		const auto* rows = a_frameBuffer.ViewToWorld;
+		return {
+			{ rows[0].x, rows[1].x, rows[2].x },
+			{ rows[0].y, rows[1].y, rows[2].y },
+			{ rows[0].z, rows[1].z, rows[2].z }
+		};
+	}
+
+	// Recovers asymmetric vertical FOV from row-major M = P * V.
+	[[nodiscard]] inline float VerticalFieldOfViewFromWorldToClip(
+		const DirectX::XMFLOAT4* a_rows) noexcept
+	{
+		const auto& row1 = a_rows[1];
+		const auto& row3 = a_rows[3];
+		const float forwardLength = std::sqrt(
+			row3.x * row3.x + row3.y * row3.y + row3.z * row3.z);
+		if (!std::isfinite(forwardLength) || !(forwardLength > 1e-8f)) {
+			return 0.0f;
+		}
+
+		const DirectX::XMFLOAT3 forward{
+			row3.x / forwardLength,
+			row3.y / forwardLength,
+			row3.z / forwardLength
+		};
+		const DirectX::XMFLOAT3 scaledUp{
+			row1.x / forwardLength,
+			row1.y / forwardLength,
+			row1.z / forwardLength
+		};
+		const float centerOffset =
+			scaledUp.x * forward.x + scaledUp.y * forward.y + scaledUp.z * forward.z;
+		const DirectX::XMFLOAT3 upComponent{
+			scaledUp.x - centerOffset * forward.x,
+			scaledUp.y - centerOffset * forward.y,
+			scaledUp.z - centerOffset * forward.z
+		};
+		const float scale = std::sqrt(
+			upComponent.x * upComponent.x
+			+ upComponent.y * upComponent.y
+			+ upComponent.z * upComponent.z);
+		if (!std::isfinite(scale) || !(scale > 1e-8f)) {
+			return 0.0f;
+		}
+
+		const float top = (1.0f - centerOffset) / scale;
+		const float bottom = (-1.0f - centerOffset) / scale;
+		const float fieldOfView = std::atan(top) - std::atan(bottom);
+		return std::isfinite(fieldOfView) ? fieldOfView : 0.0f;
+	}
+
 	[[nodiscard]] inline bool HasUsableCameraBasis(const FrameBuffer& a_frameBuffer) noexcept
 	{
 		for (const auto& row : a_frameBuffer.ViewToWorld) {
