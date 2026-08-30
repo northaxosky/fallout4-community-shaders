@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <set>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -641,11 +642,9 @@ namespace
 		}
 		constexpr std::string_view familyMarker =
 			"#ifdef BSDFCOMPOSITE_PS_";
-		constexpr std::array debugHelpers{
-			"WetnessEffects::TryGetDebugColor",
-			"TerrainShadows::TryGetDebugColor",
-			"WaterEffects::TryGetDebugColor"
-		};
+		// Discovered by call shape, not by a roster: a fourth contributor must
+		// be caught without anyone remembering to list it here.
+		constexpr std::string_view helperMarker = "::TryGetDebugColor";
 		std::size_t multiDebugFamilies = 0;
 		for (auto begin = bsdfComposite.find(familyMarker);
 			begin != std::string::npos;
@@ -662,12 +661,19 @@ namespace
 			const auto compact = RemoveWhitespace(block);
 			// Every helper contributing to this family, in emission order.
 			std::vector<std::size_t> sites;
-			for (const auto* helper : debugHelpers) {
-				for (auto cursor = compact.find(helper);
-					cursor != std::string::npos;
-					cursor = compact.find(helper, cursor + 1)) {
-					sites.push_back(cursor);
+			std::set<std::string> contributors;
+			for (auto cursor = compact.find(helperMarker);
+				cursor != std::string::npos;
+				cursor = compact.find(helperMarker, cursor + 1)) {
+				auto nameBegin = cursor;
+				while (nameBegin > 0
+					&& (std::isalnum(static_cast<unsigned char>(
+							compact[nameBegin - 1]))
+						|| compact[nameBegin - 1] == '_')) {
+					--nameBegin;
 				}
+				contributors.insert(compact.substr(nameBegin, cursor - nameBegin));
+				sites.push_back(nameBegin);
 			}
 			if (sites.size() < 2)
 				continue;
@@ -699,6 +705,9 @@ namespace
 				std::string(family)
 					+ " returns successful fullscreen debug output "
 					  "before invoking the next helper");
+			Check(
+				contributors.size() >= 3,
+				std::string(family) + " discovers every debug helper");
 		}
 		Check(
 			multiDebugFamilies == compositeFamilies.size(),

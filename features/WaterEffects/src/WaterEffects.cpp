@@ -168,8 +168,7 @@ namespace cs::features
 					cs::engine::shader_injection_defines::kWaterEffectsFullscreenDebug,
 					"1");
 			} else {
-				// s14 is g_sLitScene in BSDFComposite, so only the light program
-				// declares a caustics sampler.
+				// See WaterCausticsSampler.hlsli.
 				slotClaims.push_back({
 					.stage = cs::engine::ShaderStage::kPixel,
 					.resourceType = cs::engine::ShaderResourceType::kSampler,

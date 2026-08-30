@@ -23,8 +23,7 @@ namespace WaterEffects
 	}
 
 #ifdef WATER_EFFECTS_FULLSCREEN_DEBUG
-	// The composite has no free sampler slot, so fetch manually. Safe because
-	// PanCausticsUV already wraps its own UVs.
+	// No free sampler slot in the composite; PanCausticsUV already wraps.
 	float SampleCaustics(float2 uv)
 	{
 		uint2 dims;
@@ -47,8 +46,7 @@ namespace WaterEffects
 			lerp(s00, s10, weight.x), lerp(s01, s11, weight.x), weight.y);
 	}
 #else
-	// WaterCausticsSampler comes from WaterCausticsSampler.hlsli, which only
-	// the light path includes.
+	// WaterCausticsSampler: see WaterCausticsSampler.hlsli.
 	float SampleCaustics(float2 uv)
 	{
 		return WaterCaustics.Sample(WaterCausticsSampler, uv).x;
@@ -65,8 +63,7 @@ namespace WaterEffects
 		return lerp(center.xxx, dispersed, 0.5);
 	}
 
-	// Upstream's ComputeCaustics. worldPosition is absolute here, so unlike
-	// upstream the UV does not re-add CameraPosAdjust.
+	// Upstream's ComputeCaustics; worldPosition is absolute, so no CameraPosAdjust.
 	float3 ComputeCaustics(float waterHeight, float3 worldPosition)
 	{
 		float3 result = 1.0.xxx;
@@ -111,8 +108,7 @@ namespace WaterEffects
 		return result;
 	}
 
-	// An unbound t32 samples as 0, which would darken rather than no-op. Fail
-	// to identity instead.
+	// An unbound t32 samples as 0, which would darken instead of no-op.
 	bool CausticsTextureReady()
 	{
 		uint2 causticsDims;
@@ -120,8 +116,7 @@ namespace WaterEffects
 		return !any(causticsDims == 0);
 	}
 
-	// FO4's directional terms are scalars, so consume the undispersed centre
-	// channel. Dead dispersion taps fold away.
+	// FO4's directional terms are scalars, so take the undispersed center tap.
 	float GetCausticsMult(float3 worldPosition)
 	{
 		if (SharedData::waterEffectsSettings.Mode == MODE_DISABLED ||
@@ -220,8 +215,7 @@ namespace WaterEffects
 		return true;
 	}
 
-	// Debug shows exactly what the light path consumes: the same scalar
-	// multiplier, so the two views cannot disagree.
+	// Same scalar the light path consumes, so the views cannot disagree.
 	bool TryGetDebugValue(float3 worldPosition, out float value)
 	{
 		value = 0.0;
