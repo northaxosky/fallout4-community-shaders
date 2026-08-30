@@ -587,7 +587,11 @@
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -2696,8 +2700,9 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
 #endif
 
 #if defined(WETNESS_EFFECTS) && !defined(ATTENUATION_ONLY)
-    float wetness =
-        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float wetness = WetnessEffects::GetWetness(
+        normalView,
+        float4(ViewToWorld_row2.xyz, 1.0));
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetLightColor = LightColor_HDR.xyz * attenuation;
 #  ifdef GOBOPROJECTION
@@ -2777,7 +2782,11 @@ shadowRef -= cb2_idx15_shadow_sample_param.x;
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -2939,7 +2948,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -3489,6 +3502,11 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 cb12_idx29_hair_spec_shifts;
 
     float4 cb12_idx30;
+
+#ifdef TERRAIN_SHADOWS
+    float4 cb12_pad_31_34[4];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -3775,9 +3793,13 @@ PS_OUTPUT main(PS_INPUT input)
     shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-    shadow *= TerrainShadows::GetTerrainShadowMult(
-        SharedData::ViewToWorldPosition(posView),
-        TerrainShadows::TerrainShadowsSampler);
+    shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
 #endif
 
     float3 albedoPremult  = albedoSample.xyz * albedoSample.w;
@@ -3937,8 +3959,9 @@ PS_OUTPUT main(PS_INPUT input)
 
     float specMix = mad(schlickFres, -0.5, 1.0);
 #ifdef WETNESS_EFFECTS
-    float wetness =
-        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float wetness = WetnessEffects::GetWetness(
+        normalView,
+        float4(ViewToWorld_row2.xyz, 1.0));
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetDiffuse = finalDiffuse * shadow;
     float3 wetSpecular = (brdfSpecular * specMix) * shadow;
@@ -4021,7 +4044,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -4632,6 +4659,11 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 cb12_idx29_hair_spec_shifts;
 
     float4 cb12_idx30;
+
+#ifdef TERRAIN_SHADOWS
+    float4 cb12_pad_31_34[4];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -5071,9 +5103,13 @@ PS_OUTPUT main(PS_INPUT input)
     shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-    shadow *= TerrainShadows::GetTerrainShadowMult(
-        SharedData::ViewToWorldPosition(posView),
-        TerrainShadows::TerrainShadowsSampler);
+    shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
 #endif
 
     float  NdotL_raw      = dot(normalView, SunDirection.xyz);
@@ -5335,8 +5371,9 @@ PS_OUTPUT main(PS_INPUT input)
     float specMix = 1.0 - schlickFres * 0.5;
 #endif
 #ifdef WETNESS_EFFECTS
-    float wetness =
-        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float wetness = WetnessEffects::GetWetness(
+        normalView,
+        float4(ViewToWorld_row2.xyz, 1.0));
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetDiffuse = finalDiffuse * shadow;
     float3 wetSpecular = (brdfSpecular * specMix) * shadow;
@@ -5441,7 +5478,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -6086,6 +6127,11 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 cb12_idx29_hair_spec_shifts;
 
     float4 cb12_idx30;
+
+#ifdef TERRAIN_SHADOWS
+    float4 cb12_pad_31_34[4];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -6595,9 +6641,13 @@ PS_OUTPUT main(PS_INPUT input)
     shadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-    shadow *= TerrainShadows::GetTerrainShadowMult(
-        SharedData::ViewToWorldPosition(posView),
-        TerrainShadows::TerrainShadowsSampler);
+    shadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
 #endif
 
 #ifdef FO4_DS3_REASSOC_ORDER
@@ -6878,8 +6928,9 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 
 #ifdef WETNESS_EFFECTS
-    float wetness =
-        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float wetness = WetnessEffects::GetWetness(
+        normalView,
+        float4(ViewToWorld_row2.xyz, 1.0));
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetDiffuse = finalDiffuse * shadow;
     float3 wetSpecular = (brdfSpecular * specMix) * shadow;
@@ -6990,7 +7041,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -7331,8 +7386,9 @@ PS_OUTPUT main(PS_INPUT input)
 
     diffuseAccum *= cookieRGB;
 #ifdef WETNESS_EFFECTS
-    float wetness =
-        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float wetness = WetnessEffects::GetWetness(
+        normalView,
+        float4(ViewToWorld_row2.xyz, 1.0));
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
     float3 wetLightColor = (LightColor_HDR.xyz * cookieRGB) * attenuation;
     float3 wetDiffuse = diffuseAccum * attenuation;
@@ -7393,7 +7449,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -7939,6 +7999,11 @@ cbuffer PerFrame_CB12 : register(b12)
 {
 
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+
+#ifdef TERRAIN_SHADOWS
+    float4 cb12_pad_28_34[7];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -8260,9 +8325,13 @@ PS_OUTPUT main(PS_INPUT input)
     result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-    result *= TerrainShadows::GetTerrainShadowMult(
-        SharedData::ViewToWorldPosition(posView),
-        TerrainShadows::TerrainShadowsSampler);
+    result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
 #endif
 
     output.diffuse = result.zzzz;
@@ -8308,7 +8377,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -8841,6 +8914,11 @@ cbuffer PerFrame_CB12 : register(b12)
 {
 
     DEFERRED_PERFRAME_CB12_SHARED_BLOCK;
+
+#ifdef TERRAIN_SHADOWS
+    float4 cb12_pad_28_34[7];
+    float4 CameraPosAdjust;
+#endif
 };
 
 cbuffer PerCall_CB2 : register(b2)
@@ -9026,9 +9104,13 @@ PS_OUTPUT main(PS_INPUT input)
     result *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-    result *= TerrainShadows::GetTerrainShadowMult(
-        SharedData::ViewToWorldPosition(posView),
-        TerrainShadows::TerrainShadowsSampler);
+    result *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
 #endif
 
     output.diffuse = result.zzzz;
@@ -9041,9 +9123,13 @@ PS_OUTPUT main(PS_INPUT input)
     splitShadow *= ScreenSpaceShadows::GetScreenSpaceShadow(input.position.xy);
 #endif
 #if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
-    splitShadow *= TerrainShadows::GetTerrainShadowMult(
-        SharedData::ViewToWorldPosition(posView),
-        TerrainShadows::TerrainShadowsSampler);
+    splitShadow *= TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
 #endif
 
     float3 ambientSpecular;
@@ -9137,7 +9223,11 @@ PS_OUTPUT main(PS_INPUT input)
 #define DEFERRED_CONTRACTS_HLSLI_INCLUDED
 
 #define DEFERRED_PERFRAME_CB12_SHARED_BLOCK \
-    float4 cb12_pad_0_19[20]; \
+    float4 cb12_pad_0_11[12]; \
+    float4 ViewToWorld_row0; \
+    float4 ViewToWorld_row1; \
+    float4 ViewToWorld_row2; \
+    float4 cb12_pad_15_19[5]; \
     float4 FarReproj_row0; \
     float4 FarReproj_row1; \
     float4 FarReproj_row2; \
@@ -9171,6 +9261,13 @@ cbuffer PerFrame_CB12 : register(b12)
 
 #if defined(DIRECTIONAL) && defined(SPECULAR)
     float4 cb12_idx30;
+#elif defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    float4 cb12_idx30_terrain_pad;
+#endif
+
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    float4 cb12_pad_31_34[4];
+    float4 CameraPosAdjust;
 #endif
 };
 
@@ -9700,9 +9797,22 @@ PS_OUTPUT main(PS_INPUT input)
     finalDiffuse += (forwardBlend * LightColor_HDR.xyz) * albedoSample.xyz;
 #endif
 
+#if defined(DIRECTIONAL) && defined(TERRAIN_SHADOWS)
+    float terrainShadowMult = TerrainShadows::GetTerrainShadowMultFromViewPosition(
+        posView,
+        TerrainShadows::TerrainShadowsSampler,
+        ViewToWorld_row0,
+        ViewToWorld_row1,
+        ViewToWorld_row2,
+        CameraPosAdjust);
+    finalDiffuse *= terrainShadowMult;
+    brdfSpecular *= terrainShadowMult;
+#endif
+
 #ifdef WETNESS_EFFECTS
-    float wetness =
-        WetnessEffects::GetWetness(normalView, SharedData::WorldUpView);
+    float wetness = WetnessEffects::GetWetness(
+        normalView,
+        float4(ViewToWorld_row2.xyz, 1.0));
     float3 wetViewDir = -posView * rsqrt(dot(posView, posView));
 #  ifdef POINTOMNI
     float3 wetLightColor = LightColor_HDR.xyz * attenuation;

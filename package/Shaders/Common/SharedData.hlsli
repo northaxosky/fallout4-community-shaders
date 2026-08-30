@@ -26,12 +26,6 @@ namespace SharedData
 		float DeltaTime;
 		uint FrameCount;
 		bool InInterior;
-		// xyz: world up in view space, w: 1 when sourced from a valid world camera
-		float4 WorldUpView;
-		// Camera rotation rows.
-		float4 ViewToWorld[3];
-		// xyz: camera world position, w: validity
-		float4 CameraPositionWS;
 	};
 
 	struct ScreenSpaceShadowsSettings
@@ -64,7 +58,7 @@ namespace SharedData
 		float2 ZRange;
 		float2 Offset;
 		float2 HeightRange;
-		float2 Padding;
+		float2 DebugHeightRange;
 	};
 
 	cbuffer FeatureData : register(b6)
@@ -99,18 +93,6 @@ namespace SharedData
 		return ClampDynamicResolutionAdjustedScreenPosition(adjusted, uv);
 	}
 
-	float3 ViewToCameraRelativeWorld(float3 viewPosition)
-	{
-		float3 positionNi = viewPosition.zyx;
-		return positionNi.x * ViewToWorld[0].xyz +
-			positionNi.y * ViewToWorld[1].xyz +
-			positionNi.z * ViewToWorld[2].xyz;
-	}
-
-	float3 ViewToWorldPosition(float3 viewPosition)
-	{
-		return ViewToCameraRelativeWorld(viewPosition) + CameraPositionWS.xyz;
-	}
 }
 #endif  // __SHARED_DATA_DEPENDENCY_HLSL__
 #endif  // FO4CS_SUBSTRATE

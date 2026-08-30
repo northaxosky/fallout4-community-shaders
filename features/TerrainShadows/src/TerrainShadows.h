@@ -8,7 +8,9 @@
 #include "TerrainShadowsMath.h"
 #include "Utils/CSBuffer.h"
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
@@ -25,6 +27,7 @@ namespace cs::features
 	{
 	public:
 		static constexpr std::uint32_t kShadowHeightPSSlot = 30;
+		static constexpr std::uint32_t kSceneDepthPSSlot = 31;
 		static constexpr std::uint32_t kShadowHeightSamplerPSSlot = 13;
 
 		enum class DebugVisualization : std::uint32_t
@@ -64,7 +67,8 @@ namespace cs::features
 		struct Settings
 		{
 			bool          enabled = true;
-			std::uint32_t downsampleFactor = 1;
+			std::uint32_t downsampleFactor =
+				terrain_shadows::kDefaultDownsampleFactor;
 		};
 
 	private:
@@ -80,6 +84,14 @@ namespace cs::features
 		};
 		static_assert(sizeof(ShadowUpdateCB) == 48);
 		STATIC_ASSERT_ALIGNAS_16(ShadowUpdateCB);
+
+		struct alignas(16) ShadowStatisticsCB
+		{
+			float PosRange[2];
+			float ZRange[2];
+		};
+		static_assert(sizeof(ShadowStatisticsCB) == 16);
+		STATIC_ASSERT_ALIGNAS_16(ShadowStatisticsCB);
 
 		struct HeightMapRecord
 		{
@@ -115,6 +127,7 @@ namespace cs::features
 			std::string& a_error);
 		bool UpdateShadow(ID3D11DeviceContext* a_context, bool a_refreshImmediately);
 		void ReleaseLiveResources(ID3D11DeviceContext* a_context);
+		void UpdateShadowStatistics(ID3D11DeviceContext* a_context);
 
 		void SaveEngineBindings();
 		void BindShadowHeights(ID3D11DeviceContext* a_context);
@@ -131,7 +144,9 @@ namespace cs::features
 
 		Settings _settings;
 		std::atomic_bool _enabled{ true };
-		std::atomic_uint32_t _requestedDownsampleFactor{ 1 };
+		std::atomic_uint32_t _requestedDownsampleFactor{
+			terrain_shadows::kDefaultDownsampleFactor
+		};
 		std::atomic<DebugVisualization> _debugVisualization{
 			DebugVisualization::kOff
 		};
@@ -163,6 +178,25 @@ namespace cs::features
 		std::atomic_uint64_t _prepassRuns{ 0 };
 		std::atomic_size_t _discoveredMaps{ 0 };
 
+		std::atomic_uint64_t _lightDirectionalBinds{ 0 };
+		std::atomic_uint64_t _lightInertBinds{ 0 };
+		std::atomic_uint64_t _compositeDebugFamilyBinds{ 0 };
+		std::atomic_uint64_t _compositeInertFamilyBinds{ 0 };
+		std::array<std::atomic_uint64_t, 13> _lightFamilyBinds{};
+		std::array<std::atomic_uint64_t, 13> _compositeFamilyBinds{};
+		std::atomic_uint64_t _consumerDepthMissing{ 0 };
+		std::atomic_uint64_t _debugDepthMissing{ 0 };
+
+		std::atomic_uint64_t _shadowStatSamples{ 0 };
+		std::atomic<double> _shadowStatBelow99Pct{ 0.0 };
+		std::atomic<double> _shadowStatBelow95Pct{ 0.0 };
+		std::atomic<double> _shadowStatBelow75Pct{ 0.0 };
+		std::atomic<double> _shadowStatBelow50Pct{ 0.0 };
+		std::atomic<double> _shadowStatMean{ 0.0 };
+		std::atomic<double> _shadowStatMin{ 0.0 };
+		std::atomic<double> _shadowStatMax{ 0.0 };
+		std::atomic<double> _sunElevationDegrees{ 0.0 };
+
 		mutable std::mutex _statusMutex;
 		std::string _statusWorldspace;
 		std::string _statusDetail;
@@ -179,9 +213,13 @@ namespace cs::features
 		std::uint32_t _shadowUpdateIndex = 0;
 		std::uint32_t _slicesSinceRebuild = 0;
 		bool _pendingFullRefresh = false;
+		bool _wasEnabledLastFrame = false;
 		bool _gameHourSeeded = false;
 		float _lastGameHour = 0.0f;
 		bool _resourceInitFailed = false;
+		std::array<float, 2> _debugHeightRange{};
+		bool _shadowStatsPending = false;
+		std::chrono::steady_clock::time_point _shadowStatsLastDispatch{};
 
 		std::unique_ptr<cs::buffer::Texture2D> _heightTexture;
 		std::unique_ptr<cs::buffer::Texture2D> _shadowTexture;
@@ -189,10 +227,15 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Buffer> _shadowUpdateCB;
 		winrt::com_ptr<ID3D11ComputeShader> _shadowUpdateCS;
 		winrt::com_ptr<ID3D11SamplerState> _linearClampSampler;
+		winrt::com_ptr<ID3D11ComputeShader> _shadowStatsCS;
+		winrt::com_ptr<ID3D11Buffer> _shadowStatsCB;
+		winrt::com_ptr<ID3D11Buffer> _shadowStatsBuffer;
+		winrt::com_ptr<ID3D11UnorderedAccessView> _shadowStatsUav;
+		winrt::com_ptr<ID3D11Buffer> _shadowStatsStaging;
 
-		cs::render::PixelShaderResourceSnapshot<1> _engineShadowBinding;
+		cs::render::PixelShaderResourceSnapshot<2> _engineShadowBinding;
 		cs::render::PixelShaderSamplerSnapshot<1> _engineSamplerBinding;
-		cs::render::PixelShaderResourceSnapshot<1> _debugShadowBinding;
+		cs::render::PixelShaderResourceSnapshot<2> _debugShadowBinding;
 		cs::render::PixelShaderSamplerSnapshot<1> _debugSamplerBinding;
 	};
 }

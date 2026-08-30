@@ -36,11 +36,8 @@ namespace cs::render
 			float             DeltaTime = 0.0f;
 			std::uint32_t     FrameCount = 0;
 			std::uint32_t     InInterior = 0;
-			DirectX::XMFLOAT4 WorldUpView{};
-			DirectX::XMFLOAT4 ViewToWorld[3]{};
-			DirectX::XMFLOAT4 CameraPositionWS{};
 		};
-		static_assert(sizeof(SharedDataCB) == 192);
+		static_assert(sizeof(SharedDataCB) == 112);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
 		struct SubstrateState
@@ -49,7 +46,6 @@ namespace cs::render
 			winrt::com_ptr<ID3D11Buffer> featureDataCB;
 			std::atomic_bool             ready{ false };
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
-			std::array<std::atomic<float>, 4> publishedWorldUpView{};
 			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
 				savedPixelBuffers;
 			// Render thread only.
@@ -85,7 +81,8 @@ namespace cs::render
 			data.DeltaTime = a_deltaTime;
 			data.Timer = a_timer;
 
-			if (auto* graphicsState = engine::GetGraphicsState()) {
+			auto* graphicsState = engine::GetGraphicsState();
+			if (graphicsState) {
 				const auto width = static_cast<float>(graphicsState->screenWidth);
 				const auto height = static_cast<float>(graphicsState->screenHeight);
 				data.BufferDim = { width, height, Reciprocal(width), Reciprocal(height) };
@@ -121,40 +118,6 @@ namespace cs::render
 					data.NDCToViewMul = ndcToViewMul;
 					data.NDCToViewAdd = ndcToViewAdd;
 				}
-				// third column of the camera rotation, absorbing the Ni-to-D3D swizzle
-				const auto& rotate = a_sceneCamera->world.rotate;
-				data.WorldUpView = {
-					rotate.entry[2].z,
-					rotate.entry[1].z,
-					rotate.entry[0].z,
-					1.0f
-				};
-				// Match the established Ni view-to-world convention.
-				data.ViewToWorld[0] = {
-					rotate.entry[0].x,
-					rotate.entry[0].y,
-					rotate.entry[0].z,
-					0.0f
-				};
-				data.ViewToWorld[1] = {
-					rotate.entry[1].x,
-					rotate.entry[1].y,
-					rotate.entry[1].z,
-					0.0f
-				};
-				data.ViewToWorld[2] = {
-					rotate.entry[2].x,
-					rotate.entry[2].y,
-					rotate.entry[2].z,
-					0.0f
-				};
-				const auto& translate = a_sceneCamera->world.translate;
-				data.CameraPositionWS = {
-					translate.x,
-					translate.y,
-					translate.z,
-					1.0f
-				};
 			}
 
 			float sunX = 0.0f;
@@ -288,15 +251,6 @@ namespace cs::render
 				}
 				state.timer = nextTimer;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
-				// published for drift checks against the native view-to-world row 2
-				state.publishedWorldUpView[0].store(
-					sharedData.WorldUpView.x, std::memory_order_relaxed);
-				state.publishedWorldUpView[1].store(
-					sharedData.WorldUpView.y, std::memory_order_relaxed);
-				state.publishedWorldUpView[2].store(
-					sharedData.WorldUpView.z, std::memory_order_relaxed);
-				state.publishedWorldUpView[3].store(
-					sharedData.WorldUpView.w, std::memory_order_relaxed);
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
 					L,
@@ -369,17 +323,6 @@ namespace cs::render
 		return state.updateInstalled
 			&& !state.updateInstallFailed
 			&& state.ready.load(std::memory_order_acquire);
-	}
-
-	std::array<float, 4> GetPublishedWorldUpView() noexcept
-	{
-		const auto& state = GetSubstrateState();
-		return {
-			state.publishedWorldUpView[0].load(std::memory_order_relaxed),
-			state.publishedWorldUpView[1].load(std::memory_order_relaxed),
-			state.publishedWorldUpView[2].load(std::memory_order_relaxed),
-			state.publishedWorldUpView[3].load(std::memory_order_relaxed)
-		};
 	}
 
 	void EnsureSharedDataUpdateInstalled()

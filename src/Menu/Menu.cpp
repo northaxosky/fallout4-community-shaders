@@ -1649,13 +1649,15 @@ namespace cs
 		}
 		if (!texture.caption.empty())
 			ImGui::TextDisabled("%s", texture.caption.c_str());
-		constexpr float previewWidth = 480.0f;
+		const float previewWidth = std::max(1.0f, ImGui::GetContentRegionAvail().x);
 		const float aspect =
 			static_cast<float>(texture.width)
 			/ static_cast<float>(texture.height);
-		ImGui::Image(
-			reinterpret_cast<ImTextureID>(texture.texture),
-			ImVec2(previewWidth, previewWidth / aspect));
+		if (aspect > 0.0f) {
+			ImGui::Image(
+				reinterpret_cast<ImTextureID>(texture.texture),
+				ImVec2(previewWidth, previewWidth / aspect));
+		}
 	}
 
 	void Menu::DrawPresets()

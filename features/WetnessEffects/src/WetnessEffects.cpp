@@ -321,8 +321,6 @@ namespace cs::features
 			cs::engine::ShaderInjectionTarget::kBsdfLight);
 		const auto compositeSnapshot = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfComposite);
-		// compare against the captured native view-to-world row 2 for the same frame
-		const auto worldUpView = cs::render::GetPublishedWorldUpView();
 		a_sink
 			.Field("enabled", _settings.enabled)
 			.Field("operational", _injectionsOperational.load(std::memory_order_relaxed))
@@ -339,10 +337,6 @@ namespace cs::features
 			.Field(
 				"min_rain_wetness",
 				static_cast<double>(_settings.minRainWetness))
-			.Field("world_up_view_x", static_cast<double>(worldUpView[0]))
-			.Field("world_up_view_y", static_cast<double>(worldUpView[1]))
-			.Field("world_up_view_z", static_cast<double>(worldUpView[2]))
-			.Field("world_up_view_w", static_cast<double>(worldUpView[3]))
 			.Field(
 				"normal_binds",
 				static_cast<std::int64_t>(_normalBinds.load(std::memory_order_relaxed)))

@@ -96,8 +96,8 @@ load = false
 # Runtime toggle for the published terrain shadow. The feature itself ships off above.
 enabled = true
 
-# Heightmap resolution divisor applied after the DDS loads. 1, 2, or 4.
-downsample_factor = 1
+# Heightmap resolution divisor. Factor 4 uses one-sixteenth the factor 1 VRAM.
+downsample_factor = 4
 
 [features.MotionVectorFixes]
 load = false

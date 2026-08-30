@@ -389,10 +389,7 @@ namespace
 			ExpectedVariable{ "Timer", 96, 4 },
 			ExpectedVariable{ "DeltaTime", 100, 4 },
 			ExpectedVariable{ "FrameCount", 104, 4 },
-			ExpectedVariable{ "InInterior", 108, 4 },
-			ExpectedVariable{ "WorldUpView", 112, 16 },
-			ExpectedVariable{ "ViewToWorld", 128, 48 },
-			ExpectedVariable{ "CameraPositionWS", 176, 16 }
+			ExpectedVariable{ "InInterior", 108, 4 }
 		};
 		constexpr std::array featureVariables{
 			ExpectedVariable{ "screenSpaceShadowsSettings", 0, 16 },
@@ -408,7 +405,7 @@ namespace
 				reflection.Get(),
 				"SharedData",
 				5,
-				192,
+				112,
 				sharedVariables);
 			!error.empty()) {
 			return error;
@@ -862,7 +859,7 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
-	constexpr std::size_t kTerrainShadowsPermutations = 1;
+	constexpr std::size_t kTerrainShadowsPermutations = 2;
 
 	std::size_t AddTerrainShadows(
 		std::vector<ShaderCompileJob>& a_jobs,
@@ -876,6 +873,13 @@ namespace
 			"cs_5_0",
 			"main",
 			"terrain shadow update");
+		AddCompile(
+			a_jobs,
+			a_root / "TerrainShadows" / "ShadowStatistics.cs.hlsl",
+			{},
+			"cs_5_0",
+			"main",
+			"terrain shadow statistics");
 		return a_jobs.size() - firstJob;
 	}
 
@@ -1008,20 +1012,15 @@ namespace
 		"BSDFLIGHT_PS_GOBO",
 		"BSDFLIGHT_PS_UNSHADOWED"
 	};
+	constexpr std::array kTerrainDebugDepthFallbackFamilies{
+		"BSDFCOMPOSITE_PS_2D_ACCUMULATOR",
+		"BSDFCOMPOSITE_PS_NO_SRV_POSITION_TEXCOORD",
+		"BSDFCOMPOSITE_PS_NO_SRV_POSITION",
+		"BSDFCOMPOSITE_PS_NO_T0_ACCUMULATOR"
+	};
 
-	constexpr std::array kTerrainShadowFamilies{
-		"BSDFLIGHT_PS_DIRSPLITS1",
-		"BSDFLIGHT_PS_DIRSPLITS2",
-		"BSDFLIGHT_PS_DIRSPLITS3",
-		"BSDFLIGHT_PS_SHADOW_ONLY",
-		"BSDFLIGHT_PS_SHADOW_ONLY_BLEND_SPLIT"
-	};
-	constexpr std::array kTerrainDebugCompositeFamilies{
-		"BSDFCOMPOSITE_PS_2D_FOG",
-		"BSDFCOMPOSITE_PS_CUBE_IBL",
-		"BSDFCOMPOSITE_PS_NO_T0_FOG"
-	};
 	constexpr UINT kTerrainShadowTextureSlot = 30;
+	constexpr UINT kTerrainSceneDepthTextureSlot = 31;
 	constexpr UINT kTerrainShadowSamplerSlot = 13;
 
 	constexpr std::size_t kExpectedAmbientCompositionRows = 26;
@@ -1029,10 +1028,10 @@ namespace
 	constexpr std::size_t kExpectedBsdfLightRows = 167;
 	constexpr std::size_t kExpectedWetnessDirectRows = 146;
 	constexpr std::size_t kExpectedWetnessDirectInertRows = 21;
-	constexpr std::size_t kExpectedTerrainDirectRows = 76;
-	constexpr std::size_t kExpectedTerrainDirectInertRows = 91;
-	constexpr std::size_t kExpectedTerrainCompositeRows = 30;
-	constexpr std::size_t kExpectedTerrainCompositeInertRows = 40;
+	constexpr std::size_t kExpectedTerrainDirectRows = 81;
+	constexpr std::size_t kExpectedTerrainDirectInertRows = 86;
+	constexpr std::size_t kExpectedTerrainCompositeRows = 70;
+	constexpr std::size_t kExpectedTerrainCompositeInertRows = 0;
 	constexpr std::size_t kExpectedCompositeRegistrationRows = 74;
 	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
 	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
@@ -1088,7 +1087,7 @@ namespace
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight
 			&& a_registration.stage == cs::engine::ShaderStage::kPixel
-			&& DeclaresFamily(a_registration, kTerrainShadowFamilies);
+			&& a_registration.compilation.defines.contains("DIRECTIONAL");
 	}
 
 	bool IsTerrainDebugCompositeConsumer(
@@ -1096,8 +1095,16 @@ namespace
 	{
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfComposite
-			&& a_registration.stage == cs::engine::ShaderStage::kPixel
-			&& DeclaresFamily(a_registration, kTerrainDebugCompositeFamilies);
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel;
+	}
+
+	bool UsesTerrainDebugDepthFallback(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+	{
+		return IsTerrainDebugCompositeConsumer(a_registration)
+			&& DeclaresFamily(
+				a_registration,
+				kTerrainDebugDepthFallbackFamilies);
 	}
 
 	LightingCounts AddLighting(
@@ -1192,6 +1199,32 @@ namespace
 			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
 			{ "VolumetricLighting.hlsl", {}, "ps_5_0" }
 		} };
+		std::array<ShaderCase, 8> terrainSssDebugCases;
+		for (std::size_t index = 0; index < 4; ++index) {
+			const auto shape = std::to_string(index + 1);
+			terrainSssDebugCases[index * 2] = {
+				"BSDFCompositeShader.hlsl",
+				{
+					{ "FO4CS_SUBSTRATE", "1" },
+					{ "TERRAIN_SHADOWS", "1" },
+					{ "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", "1" },
+					{ "BSDFCOMPOSITE_PS_SSS_MRT_RECORD_NORMAL", "1" },
+					{ "WAVE5B_SSS_RECORD_NORMAL_SHAPE", shape }
+				},
+				"ps_5_0"
+			};
+			terrainSssDebugCases[index * 2 + 1] = {
+				"BSDFCompositeShader.hlsl",
+				{
+					{ "FO4CS_SUBSTRATE", "1" },
+					{ "TERRAIN_SHADOWS", "1" },
+					{ "TERRAIN_SHADOWS_FULLSCREEN_DEBUG", "1" },
+					{ "BSDFCOMPOSITE_PS_SSS_MRT_SURFACE_CONTACT", "1" },
+					{ "WAVE5B_SSS_SURFACE_CONTACT_SHAPE", shape }
+				},
+				"ps_5_0"
+			};
+		}
 		const auto compileCases =
 			[&a_jobs, &a_root](const auto& a_cases) {
 			for (const auto& shader : a_cases) {
@@ -1205,6 +1238,19 @@ namespace
 		};
 		compileCases(featureCompositionCases);
 		compileCases(explicitSourceCases);
+		for (const auto& shader : terrainSssDebugCases) {
+			auto& job = AddCompile(
+				a_jobs,
+				a_root / shader.path,
+				shader.defines,
+				shader.profile,
+				shader.entryPoint);
+			job.requiredTextureSlots = {
+				kTerrainShadowTextureSlot
+			};
+			job.forbiddenTextureSlots = { kTerrainSceneDepthTextureSlot };
+			job.requiredSamplerSlots = { kTerrainShadowSamplerSlot };
+		}
 
 		using namespace cs::engine::shader_injection_defines;
 		const std::array<ShaderDefines, 6> directionalCompositions{ {
@@ -1289,6 +1335,8 @@ namespace
 						slots.requiredTextures :
 						slots.forbiddenTextures;
 					terrainTextures.push_back(kTerrainShadowTextureSlot);
+					slots.forbiddenTextures.push_back(
+						kTerrainSceneDepthTextureSlot);
 					auto& terrainSamplers = terrainOn && consumesTerrain ?
 						slots.requiredSamplers :
 						slots.forbiddenSamplers;
@@ -1386,14 +1434,26 @@ namespace
 				terrainSlots.forbiddenTextures;
 			terrainTextures.push_back(kTerrainShadowTextureSlot);
 			if (consumesTerrainDebug) {
+				auto& terrainDepthTextures =
+					UsesTerrainDebugDepthFallback(registration) ?
+					terrainSlots.requiredTextures :
+					terrainSlots.forbiddenTextures;
+				terrainDepthTextures.push_back(
+					kTerrainSceneDepthTextureSlot);
 				terrainSlots.requiredSamplers.push_back(
 					kTerrainShadowSamplerSlot);
+			} else {
+				terrainSlots.forbiddenTextures.push_back(
+					kTerrainSceneDepthTextureSlot);
 			}
 			AddRegistration(
 				a_jobs,
 				a_root,
 				registration,
-				{ { kTerrainShadows, "1" } },
+				{
+					{ kTerrainShadows, "1" },
+					{ kTerrainShadowsFullscreenDebug, "1" }
+				},
 				nullptr,
 				std::move(terrainSlots),
 				FeatureOffIdentityExpectation{
@@ -1662,7 +1722,7 @@ int main(int argc, char** argv)
 		lightingCounts.ambientCompositionRows,
 		lightingCounts.ambientNonTargetRows);
 	std::printf(
-		"ShaderCompile witnessed t30/s13 on %zu terrain shadow and %zu inert kBsdfLight rows\n",
+		"ShaderCompile witnessed t30+t31/s13 on %zu terrain shadow and %zu inert kBsdfLight rows\n",
 		lightingCounts.terrainDirectRows,
 		lightingCounts.terrainDirectInertRows);
 	std::printf(

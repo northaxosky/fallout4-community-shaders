@@ -222,6 +222,11 @@ namespace cs::engine
 	bool IsInjectedPixelShader(
 		ShaderInjectionTarget a_target,
 		ID3D11PixelShader* a_shader) noexcept;
+	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
+		ShaderInjectionTarget a_target) noexcept;
+	bool ActiveShaderInjectionVariantHasDefine(
+		ShaderInjectionTarget a_target,
+		std::string_view a_define) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
 }

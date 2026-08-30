@@ -214,6 +214,7 @@ namespace cs::engine
 				ShaderInjectionTarget::kCount;
 			std::string                      name;
 			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
+			ShaderInjectionDefines           effectiveDefines;
 		};
 
 		struct PreparedVariant
@@ -880,6 +881,7 @@ namespace cs::engine
 			prepared.variant.targetId = a_target.metadata->id;
 			prepared.variant.name = a_variant.name;
 			prepared.variant.compilation = std::move(result.handle);
+			prepared.variant.effectiveDefines = std::move(effectiveRequest->defines);
 			prepared.keys = std::move(*keys);
 			prepared.compilationState = result.state;
 			prepared.compiledSha1 = std::move(result.compiledSha1);
@@ -897,14 +899,14 @@ namespace cs::engine
 			return target == a_plan.targets.end() ? nullptr : &*target;
 		}
 
-		bool MatchesHlslInjectedPixelShader(
+		const PublishedVariant* FindMatchingPublishedVariant(
 			const PublishedPlan& a_plan,
 			ShaderInjectionTarget a_target,
 			ID3D11PixelShader* a_shader) noexcept
 		{
 			if (!a_shader)
-				return false;
-			return std::ranges::any_of(
+				return nullptr;
+			const auto match = std::ranges::find_if(
 				a_plan.variants,
 				[a_target, a_shader](const PublishedVariant& a_variant) {
 					return a_variant.targetId == a_target
@@ -914,7 +916,36 @@ namespace cs::engine
 						&& a_variant.compilation->PeekShader()
 							== static_cast<ID3D11DeviceChild*>(a_shader);
 				});
+			return match == a_plan.variants.end() ? nullptr : &*match;
 		}
+
+		bool MatchesHlslInjectedPixelShader(
+			const PublishedPlan& a_plan,
+			ShaderInjectionTarget a_target,
+			ID3D11PixelShader* a_shader) noexcept
+		{
+			return FindMatchingPublishedVariant(a_plan, a_target, a_shader)
+				!= nullptr;
+		}
+
+		thread_local const PublishedVariant* t_activeVariant = nullptr;
+
+		class ActiveVariantScope
+		{
+		public:
+			explicit ActiveVariantScope(const PublishedVariant* a_variant) noexcept :
+				_previous(t_activeVariant)
+			{
+				t_activeVariant = a_variant;
+			}
+			~ActiveVariantScope() noexcept { t_activeVariant = _previous; }
+
+			ActiveVariantScope(const ActiveVariantScope&) = delete;
+			ActiveVariantScope& operator=(const ActiveVariantScope&) = delete;
+
+		private:
+			const PublishedVariant* _previous;
+		};
 
 		ShaderSwapResolverResult ResolveInjectedShader(
 			const ShaderSwapRequest& a_request) noexcept
@@ -1681,10 +1712,11 @@ namespace cs::engine
 			return;
 
 		for (const auto& target : plan->targets) {
-			if (MatchesHlslInjectedPixelShader(
+			if (const auto* variant = FindMatchingPublishedVariant(
 					*plan,
 					target.id,
 					boundShader)) {
+				const ActiveVariantScope scope(variant);
 				DispatchShaderInjections(target.id, a_context);
 				break;
 			}
@@ -1729,6 +1761,23 @@ namespace cs::engine
 			*plan,
 			a_target,
 			a_shader);
+	}
+
+	bool ActiveShaderInjectionVariantHasDefine(
+		ShaderInjectionTarget a_target,
+		std::string_view a_define) noexcept
+	{
+		const auto* defines = GetActiveShaderInjectionVariantDefines(a_target);
+		return defines && defines->contains(a_define);
+	}
+
+	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
+		ShaderInjectionTarget a_target) noexcept
+	{
+		const auto* variant = t_activeVariant;
+		return variant && variant->targetId == a_target ?
+			&variant->effectiveDefines :
+			nullptr;
 	}
 
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(

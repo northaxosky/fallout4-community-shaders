@@ -8,4 +8,6 @@ namespace cs::engine::shader_injection_defines
 	inline constexpr auto kScreenSpaceGi = "SSGI";
 	inline constexpr auto kWetnessEffects = "WETNESS_EFFECTS";
 	inline constexpr auto kTerrainShadows = "TERRAIN_SHADOWS";
+	inline constexpr auto kTerrainShadowsFullscreenDebug =
+		"TERRAIN_SHADOWS_FULLSCREEN_DEBUG";
 }

@@ -247,6 +247,7 @@ add_test(
 	NAME TerrainShadowsMath
 	COMMAND TerrainShadowsMathTests
 		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
+		"${CMAKE_SOURCE_DIR}/src/Render/SharedData.cpp"
 		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders/TerrainShadows/TerrainShadows.hlsli"
 		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders/TerrainShadows/ShadowUpdate.cs.hlsl"
 		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"

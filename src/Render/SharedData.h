@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 
 struct ID3D11Device;
@@ -15,9 +14,6 @@ namespace cs::render
 
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
 	bool IsSharedDataReady() noexcept;
-
-	// last published b5 world-up, for comparison against a captured native row 2
-	std::array<float, 4> GetPublishedWorldUpView() noexcept;
 
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();

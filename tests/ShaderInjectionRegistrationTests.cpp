@@ -14,6 +14,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -27,6 +28,8 @@ namespace
 	bool g_preDrawInstallFails = false;
 	std::uint32_t g_sharedDataInstallRequests = 0;
 	std::uint32_t g_bsdfCompositeBindDispatches = 0;
+	std::optional<bool> g_activeVariantHasOwnFamily;
+	std::optional<bool> g_activeVariantHasUnrelatedDefine;
 
 	class TestCompilationHandle final :
 		public cs::engine::ShaderVariantCompilationHandle
@@ -993,6 +996,18 @@ namespace
 			g_bsdfCompositeBindDispatches == 1
 				&& snapshot.dispatches == 1,
 			"bound BSDFComposite shader did not dispatch its contributor");
+		ok &= Check(
+			g_activeVariantHasOwnFamily.has_value()
+				&& *g_activeVariantHasOwnFamily,
+			"the active variant did not expose its own family define");
+		ok &= Check(
+			g_activeVariantHasUnrelatedDefine.has_value()
+				&& !*g_activeVariantHasUnrelatedDefine,
+			"the active variant falsely reported an unrelated define");
+		ok &= Check(
+			!ActiveShaderInjectionVariantHasDefine(
+				ShaderInjectionTarget::kBsdfLight, "BSDFCOMPOSITE_PS_CUBE_IBL"),
+			"the active variant leaked across an unrelated target");
 
 		TestCompilationPolicy independentPolicy(true);
 		ShaderVariantCompilationRequest request;
@@ -1018,6 +1033,15 @@ namespace
 				&& snapshot.dispatches == 1,
 			"non-injected pixel shader dispatched a contributor");
 		a_context->PSSetShader(nullptr, nullptr, 0);
+
+		g_activeVariantHasOwnFamily.reset();
+		DispatchShaderInjections(
+			ShaderInjectionTarget::kBsdfComposite, a_context);
+		ok &= Check(
+			g_activeVariantHasOwnFamily.has_value()
+				&& !*g_activeVariantHasOwnFamily,
+			"a direct dispatch without a selected variant reported a define");
+
 		return ok;
 	}
 
@@ -1240,6 +1264,10 @@ int main(int a_argc, char* a_argv[])
 	bindRegistration.contributor = "registration-with-bind";
 	bindRegistration.bind = [](ID3D11DeviceContext*) {
 		++g_bsdfCompositeBindDispatches;
+		g_activeVariantHasOwnFamily = ActiveShaderInjectionVariantHasDefine(
+			ShaderInjectionTarget::kBsdfComposite, "BSDFCOMPOSITE_PS_CUBE_IBL");
+		g_activeVariantHasUnrelatedDefine = ActiveShaderInjectionVariantHasDefine(
+			ShaderInjectionTarget::kBsdfComposite, "NOT_A_REAL_DEFINE");
 	};
 	ok &= Check(
 		RegisterReplacement(std::move(bindRegistration)),

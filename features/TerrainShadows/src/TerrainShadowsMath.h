@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -23,6 +24,7 @@ namespace cs::features::terrain_shadows
 	inline constexpr float kGameHourJumpThreshold = 0.25f;
 
 	inline constexpr std::array<std::uint32_t, 3> kDownsampleFactors{ 1u, 2u, 4u };
+	inline constexpr std::uint32_t kDefaultDownsampleFactor = 4u;
 
 	enum class HeightMapSource : std::uint8_t
 	{
@@ -220,6 +222,70 @@ namespace cs::features::terrain_shadows
 	[[nodiscard]] inline double BytesToMiB(std::uint64_t a_bytes) noexcept
 	{
 		return static_cast<double>(a_bytes) / (1024.0 * 1024.0);
+	}
+
+	inline constexpr std::size_t kHeightHistogramBins = 65536;
+
+	struct HeightPercentileRange
+	{
+		float p01 = 0.0f;
+		float p99 = 0.0f;
+	};
+
+	[[nodiscard]] inline HeightPercentileRange ComputeHeightPercentileRange(
+		const std::uint8_t* a_pixels,
+		std::size_t a_rowPitch,
+		std::uint32_t a_width,
+		std::uint32_t a_height,
+		float a_decodeMin,
+		float a_decodeMax)
+	{
+		if (!a_pixels || a_width == 0 || a_height == 0
+			|| a_rowPitch < static_cast<std::size_t>(a_width) * sizeof(std::uint16_t)) {
+			return { a_decodeMin, a_decodeMax };
+		}
+
+		std::vector<std::uint32_t> bins(kHeightHistogramBins, 0u);
+		std::uint64_t total = 0;
+		for (std::uint32_t y = 0; y < a_height; ++y) {
+			const auto* row = a_pixels + static_cast<std::size_t>(y) * a_rowPitch;
+			for (std::uint32_t x = 0; x < a_width; ++x) {
+				std::uint16_t sample = 0;
+				std::memcpy(
+					&sample,
+					row + static_cast<std::size_t>(x) * sizeof(sample),
+					sizeof(sample));
+				++bins[sample];
+				++total;
+			}
+		}
+		if (total == 0)
+			return { a_decodeMin, a_decodeMax };
+
+		const auto decode = [&](std::size_t a_bin) noexcept {
+			const float t = static_cast<float>(a_bin)
+				/ static_cast<float>(kHeightHistogramBins - 1);
+			return a_decodeMin + (a_decodeMax - a_decodeMin) * t;
+		};
+		const auto findPercentile = [&](double a_fraction) noexcept {
+			const auto rank = std::clamp<std::uint64_t>(
+				static_cast<std::uint64_t>(
+					std::ceil(static_cast<double>(total) * a_fraction)),
+				1,
+				total);
+			std::uint64_t cumulative = 0;
+			for (std::size_t bin = 0; bin < kHeightHistogramBins; ++bin) {
+				cumulative += bins[bin];
+				if (cumulative >= rank)
+					return bin;
+			}
+			return kHeightHistogramBins - 1;
+		};
+
+		HeightPercentileRange range;
+		range.p01 = decode(findPercentile(0.01));
+		range.p99 = std::max(decode(findPercentile(0.99)), range.p01);
+		return range;
 	}
 
 	struct FeatureBlock

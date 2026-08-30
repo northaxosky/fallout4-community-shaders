@@ -39,7 +39,7 @@ namespace cs
 		float         ZRange[2]{};
 		float         Offset[2]{};
 		float         HeightRange[2]{};
-		float         Padding[2]{};
+		float         DebugHeightRange[2]{};
 	};
 	static_assert(sizeof(TerrainShadowsFeatureData) == 48);
 
@@ -62,6 +62,7 @@ namespace cs
 	static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);
 	static_assert(offsetof(TerrainShadowsFeatureData, Offset) == 24);
 	static_assert(offsetof(TerrainShadowsFeatureData, HeightRange) == 32);
+	static_assert(offsetof(TerrainShadowsFeatureData, DebugHeightRange) == 40);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();
