@@ -120,7 +120,7 @@ namespace cs::features::extended_translucency
 			&& std::ranges::any_of(
 				a_materialNames,
 				[&candidate](const std::string& a_name) {
-					return candidate == NormalizeMaterialName(a_name);
+					return candidate == a_name;
 				});
 	}
 

@@ -63,7 +63,7 @@ namespace
 
 	void TestDefaultsAndMaterialSurvey()
 	{
-		const Settings defaults;
+		const Settings defaults = Clamp(Settings{});
 		CHECK(defaults.materialModel == MaterialModel::kAnisotropicFabric);
 		CHECK(Near(defaults.alphaReduction, 0.15f));
 		CHECK(Near(defaults.alphaSoftness, 0.0f));
@@ -120,7 +120,7 @@ namespace
 
 	void TestClassificationPrecedence()
 	{
-		const auto materials = DefaultFallbackMaterialNames();
+		const auto materials = Clamp(Settings{}).fallbackMaterialNames;
 		const auto active = Classify(
 			{
 				.alphaBlended = true,

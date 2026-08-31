@@ -387,15 +387,18 @@ namespace cs::render
 		if (!a_context || !IsSharedDataReady())
 			return;
 
-		UpdateSharedData();
 		if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
-			const auto* graphicsState = engine::GetGraphicsState();
-			const auto frame = graphicsState ? graphicsState->frameCount : UINT32_MAX;
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::err,
-				"Shared substrate first bind has no published frame data at frame {}; binding the zero seed.",
-				frame);
+			UpdateSharedData();
+			if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
+				const auto* graphicsState = engine::GetGraphicsState();
+				const auto frame =
+					graphicsState ? graphicsState->frameCount : UINT32_MAX;
+				CS_LOG_ONCE(
+					L,
+					spdlog::level::err,
+					"Shared substrate first bind has no published frame data at frame {}; binding the zero seed.",
+					frame);
+			}
 		}
 
 		ID3D11Buffer* buffers[2] = {
