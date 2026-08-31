@@ -68,14 +68,17 @@ namespace cs::render::annotation
 		ID3D12GraphicsCommandList* a_commandList,
 		std::string_view a_name) noexcept
 	{
-		if (!a_commandList || a_name.empty())
+		if (!annotation || !annotation->GetStatus() ||
+			!a_commandList || a_name.empty())
+			return;
+		std::array<wchar_t, kWideNameCapacity> wideName{};
+		const auto name = ToWide(a_name, wideName);
+		if (name.empty())
 			return;
 		a_commandList->BeginEvent(
 			0,
-			a_name.data(),
-			static_cast<UINT>(std::min<std::size_t>(
-				a_name.size(),
-				(std::numeric_limits<UINT>::max)())));
+			name.data(),
+			static_cast<UINT>(name.size() * sizeof(wchar_t)));
 		_d3d12 = a_commandList;
 	}
 
@@ -101,14 +104,17 @@ namespace cs::render::annotation
 		ID3D12GraphicsCommandList* a_commandList,
 		std::string_view a_name) noexcept
 	{
-		if (!a_commandList || a_name.empty())
+		if (!annotation || !annotation->GetStatus() ||
+			!a_commandList || a_name.empty())
+			return;
+		std::array<wchar_t, kWideNameCapacity> wideName{};
+		const auto name = ToWide(a_name, wideName);
+		if (name.empty())
 			return;
 		a_commandList->SetMarker(
 			0,
-			a_name.data(),
-			static_cast<UINT>(std::min<std::size_t>(
-				a_name.size(),
-				(std::numeric_limits<UINT>::max)())));
+			name.data(),
+			static_cast<UINT>(name.size() * sizeof(wchar_t)));
 	}
 
 	void SetName(ID3D11DeviceChild* a_object, std::string_view a_name) noexcept
