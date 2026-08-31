@@ -331,7 +331,7 @@ PSOutput main(PSInput input)
         geometryData[2].z,
         viewDirection,
         normal,
-        float3x3(input.tangentX, input.tangentY, input.tangentZ));
+        transpose(float3x3(input.tangentX, input.tangentY, input.tangentZ)));
 #endif
 #else
     psout.color.w = geometryData[2].z;
@@ -691,7 +691,7 @@ PSOutput main(PSInput input)
         geometryData[2].z,
         viewDirection,
         normal,
-        float3x3(input.tangentX, input.tangentY, input.tangentZ));
+        transpose(float3x3(input.tangentX, input.tangentY, input.tangentZ)));
 #endif
 #else
     psout.color.w = geometryData[2].z;
@@ -1079,7 +1079,7 @@ PSOutput main(PSInput input)
         geometryData[2].z,
         viewDirection,
         normal,
-        float3x3(input.tangentX, input.tangentY, input.tangentZ));
+        transpose(float3x3(input.tangentX, input.tangentY, input.tangentZ)));
 #endif
 #else
     psout.color.w = geometryData[2].z;

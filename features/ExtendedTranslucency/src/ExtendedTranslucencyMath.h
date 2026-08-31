@@ -43,6 +43,7 @@ namespace cs::features::extended_translucency
 	inline constexpr std::uint32_t kSourceShift = 6;
 	inline constexpr std::uint32_t kDebugFlag = 1U << 8;
 	inline constexpr float kMinimumAlpha = 0.0156862754f;
+	using TangentBasis = std::array<std::array<float, 3>, 3>;
 
 	inline constexpr std::array<std::string_view, 5>
 		kDefaultFallbackMaterialNames{
@@ -291,15 +292,16 @@ namespace cs::features::extended_translucency
 	inline float ViewDependentAlphaFabric2D(
 		float a_alpha,
 		const std::array<float, 3>& a_view,
-		const std::array<float, 3>& a_tangent,
-		const std::array<float, 3>& a_bitangent,
-		const std::array<float, 3>& a_normal) noexcept
+		const TangentBasis& a_tangentBasis) noexcept
 	{
+		const auto& tangent = a_tangentBasis[0];
+		const auto& bitangent = a_tangentBasis[1];
+		const auto& normal = a_tangentBasis[2];
 		const float alpha0 = 1.0f - std::sqrt(1.0f - a_alpha);
 		return alpha0
-				* (Length(Cross(a_view, a_tangent))
-				   + Length(Cross(a_view, a_bitangent)))
-				/ (std::abs(Dot(a_view, a_normal)) + 0.001f)
+				* (Length(Cross(a_view, tangent))
+				   + Length(Cross(a_view, bitangent)))
+				/ (std::abs(Dot(a_view, normal)) + 0.001f)
 			- alpha0 * alpha0;
 	}
 
@@ -307,8 +309,7 @@ namespace cs::features::extended_translucency
 		float a_alpha,
 		const std::array<float, 3>& a_view,
 		const std::array<float, 3>& a_normal,
-		const std::array<float, 3>& a_tangent,
-		const std::array<float, 3>& a_bitangent,
+		const TangentBasis& a_tangentBasis,
 		const Settings& a_settings,
 		const DrawClassification& a_classification) noexcept
 	{
@@ -339,7 +340,7 @@ namespace cs::features::extended_translucency
 		switch (static_cast<MaterialModel>(material)) {
 		case MaterialModel::kAnisotropicFabric:
 			a_alpha = ViewDependentAlphaFabric2D(
-				a_alpha, a_view, a_tangent, a_bitangent, a_normal);
+				a_alpha, a_view, a_tangentBasis);
 			break;
 		case MaterialModel::kIsotropicFabric:
 			a_alpha = ViewDependentAlphaFabric1D(

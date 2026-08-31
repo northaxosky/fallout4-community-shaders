@@ -212,8 +212,11 @@ namespace
 	{
 		constexpr std::array view{ 0.0f, 0.6f, 0.8f };
 		constexpr std::array normal{ 0.0f, 0.0f, 1.0f };
-		constexpr std::array tangent{ 1.0f, 0.0f, 0.0f };
-		constexpr std::array bitangent{ 0.0f, 1.0f, 0.0f };
+		constexpr TangentBasis tangentBasis{ {
+			{ 1.0f, 0.0f, 0.0f },
+			{ 0.0f, 1.0f, 0.0f },
+			{ 0.0f, 0.0f, 1.0f }
+		} };
 		Settings settings;
 		const DrawClassification fallback{
 			.descriptor = kDescriptorUseDefault,
@@ -232,8 +235,7 @@ namespace
 			0.5f,
 			view,
 			normal,
-			tangent,
-			bitangent,
+			tangentBasis,
 			settings,
 			fallback);
 		Settings neutral = settings;
@@ -244,16 +246,14 @@ namespace
 			0.5f,
 			view,
 			normal,
-			tangent,
-			bitangent,
+			tangentBasis,
 			settings,
 			explicitModel);
 		const float explicitNeutralAlpha = ApplyAlpha(
 			0.5f,
 			view,
 			normal,
-			tangent,
-			bitangent,
+			tangentBasis,
 			neutral,
 			explicitModel);
 		CHECK(!Near(fallbackAlpha, explicitAlpha));
@@ -265,8 +265,7 @@ namespace
 				0.5f,
 				view,
 				normal,
-				tangent,
-				bitangent,
+				tangentBasis,
 				settings,
 				fallback),
 			0.5f));
@@ -275,11 +274,34 @@ namespace
 				kMinimumAlpha * 0.5f,
 				view,
 				normal,
-				tangent,
-				bitangent,
+				tangentBasis,
 				settings,
 				fallback),
 			kMinimumAlpha * 0.5f));
+	}
+
+	void TestTangentBasisOrientation()
+	{
+		constexpr float diagonal = 0.7071067812f;
+		constexpr TangentBasis tangentBasisRows{ {
+			{ diagonal, 0.0f, -diagonal },
+			{ 0.0f, 1.0f, 0.0f },
+			{ diagonal, 0.0f, diagonal }
+		} };
+		constexpr TangentBasis untransposedColumns{ {
+			{ diagonal, 0.0f, diagonal },
+			{ 0.0f, 1.0f, 0.0f },
+			{ -diagonal, 0.0f, diagonal }
+		} };
+		constexpr std::array view{ diagonal, 0.0f, diagonal };
+
+		const float expected =
+			ViewDependentAlphaFabric2D(0.5f, view, tangentBasisRows);
+		const float wrong =
+			ViewDependentAlphaFabric2D(0.5f, view, untransposedColumns);
+		CHECK(Near(Dot(view, tangentBasisRows[2]), 1.0f));
+		CHECK(Near(Dot(view, untransposedColumns[2]), 0.0f));
+		CHECK(!Near(expected, wrong, 0.1f));
 	}
 
 	void TestFeatureBufferPatch()
@@ -334,6 +356,7 @@ namespace
 				lighting,
 				"ExtendedTranslucency::ApplyToColor(")
 			== 3);
+		CHECK(Count(lighting, "transpose(float3x3(") == 3);
 		CHECK(
 			shared.find("ExtendedTranslucencySettings "
 						"extendedTranslucencySettings;")
@@ -353,6 +376,7 @@ int main(int a_argc, char* a_argv[])
 	TestClassificationPrecedence();
 	TestPacking();
 	TestAlphaMath();
+	TestTangentBasisOrientation();
 	TestFeatureBufferPatch();
 	TestShaderContracts(a_argv[1], a_argv[2], a_argv[3]);
 
