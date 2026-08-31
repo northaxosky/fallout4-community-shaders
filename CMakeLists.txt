@@ -389,7 +389,7 @@ add_test(
 	NAME AnnotationContract
 	COMMAND AnnotationContractTests
 		"${CMAKE_SOURCE_DIR}/features"
-		"${CMAKE_SOURCE_DIR}/src/Render"
+		"${CMAKE_SOURCE_DIR}/src"
 )
 set_tests_properties(AnnotationContract PROPERTIES LABELS "render;contract")
 

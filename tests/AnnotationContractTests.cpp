@@ -8,13 +8,18 @@
 #include <iterator>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace
 {
-	constexpr std::size_t kExpectedCreationBaseline = 68;
+	constexpr std::size_t kExpectedCreationBaseline = 85;
+	constexpr std::array kAuditedFactoryExclusions{
+		std::string_view("src/Utils/CSBuffer.h"),
+		std::string_view("src/Utils/CSUtil.cpp")
+	};
 	constexpr std::array kExpectedCreationRoster{
 		std::string_view("CreateBuffer"),
 		std::string_view("CreateTexture2D"),
@@ -428,7 +433,10 @@ namespace
 			   (a_tokens[a_end - 4].text == "." ||
 				a_tokens[a_end - 4].text == "->") &&
 			   (a_tokens[a_end - 3].text == "get" ||
-				a_tokens[a_end - 3].text == "put") &&
+				a_tokens[a_end - 3].text == "put" ||
+				a_tokens[a_end - 3].text == "Get" ||
+				a_tokens[a_end - 3].text == "GetAddressOf" ||
+				a_tokens[a_end - 3].text == "ReleaseAndGetAddressOf") &&
 			   a_tokens[a_end - 2].text == "(" &&
 			   a_tokens[a_end - 1].text == ")") {
 			a_end -= 4;
@@ -645,12 +653,26 @@ namespace
 		std::vector<std::vector<Creation>> creationsByCallable(callables.size());
 		std::vector<std::map<std::string, std::size_t, std::less<>>>
 			namesByCallable(callables.size());
+		ScanResult result;
 
 		for (std::size_t index = 0; index < tokens.size(); ++index) {
+			auto creation = FindCreation(tokens, matches, index);
 			const auto owner = OwningCallable(callables, index);
+			if (creation && !owner) {
+				++result.creations;
+				++result.roster[creation->kind];
+				++result.violations;
+				if (a_report) {
+					std::cerr << "FAIL: " << a_path.string() << ':'
+							  << LineAt(a_source, creation->offset) << ": "
+							  << creation->kind
+							  << " is not inside a recognized callable\n";
+				}
+				continue;
+			}
 			if (!owner)
 				continue;
-			if (auto creation = FindCreation(tokens, matches, index)) {
+			if (creation) {
 				creationsByCallable[*owner].push_back(std::move(*creation));
 			}
 			if (auto output = FindNamingOutput(tokens, matches, index);
@@ -659,7 +681,6 @@ namespace
 			}
 		}
 
-		ScanResult result;
 		for (std::size_t callable = 0; callable < callables.size(); ++callable) {
 			auto availableNames = namesByCallable[callable];
 			for (const auto& creation : creationsByCallable[callable]) {
@@ -716,18 +737,34 @@ namespace
 				query->SetName("query");
 			})cpp",
 			false);
+		const auto unowned = ScanSource(
+			"unowned.cpp",
+			R"cpp(auto created = device->CreateQuery(x, &query);)cpp",
+			false);
 		return healthy.creations == 1 && healthy.violations == 0 &&
 			repeatedUnrelated.creations == 2 &&
 			repeatedUnrelated.violations == 1 &&
 			trailing.creations == 1 && trailing.violations == 0 &&
-			scrubbed.creations == 1 && scrubbed.violations == 0;
+			scrubbed.creations == 1 && scrubbed.violations == 0 &&
+			unowned.creations == 1 && unowned.violations == 1;
+	}
+
+	std::optional<std::string_view> AuditedFactoryExclusion(
+		const std::filesystem::path& a_path)
+	{
+		const auto normalized = a_path.lexically_normal().generic_string();
+		for (const auto exclusion : kAuditedFactoryExclusions) {
+			if (normalized.ends_with(exclusion))
+				return exclusion;
+		}
+		return std::nullopt;
 	}
 }
 
 int main(int a_argc, char* a_argv[])
 {
 	if (a_argc != 3) {
-		std::cerr << "FAIL: usage: AnnotationContractTests <features> <src/Render>\n";
+		std::cerr << "FAIL: usage: AnnotationContractTests <features> <src>\n";
 		return 1;
 	}
 	if (!RunSelfTests()) {
@@ -736,6 +773,7 @@ int main(int a_argc, char* a_argv[])
 	}
 
 	ScanResult total;
+	std::set<std::string, std::less<>> foundExclusions;
 	for (int root = 1; root < a_argc; ++root) {
 		std::error_code error;
 		for (std::filesystem::recursive_directory_iterator iterator(a_argv[root], error), end;
@@ -746,6 +784,11 @@ int main(int a_argc, char* a_argv[])
 			const auto extension = iterator->path().extension();
 			if (!iterator->is_regular_file() ||
 				(extension != ".cpp" && extension != ".h" && extension != ".hpp")) {
+				continue;
+			}
+			if (const auto exclusion =
+					AuditedFactoryExclusion(iterator->path())) {
+				foundExclusions.emplace(*exclusion);
 				continue;
 			}
 			const auto scan = ScanSource(
@@ -761,6 +804,13 @@ int main(int a_argc, char* a_argv[])
 			std::cerr << "FAIL: cannot scan " << a_argv[root] << ": "
 					  << error.message() << '\n';
 			return 1;
+		}
+	}
+	for (const auto exclusion : kAuditedFactoryExclusions) {
+		if (!foundExclusions.contains(exclusion)) {
+			std::cerr << "FAIL: audited factory exclusion " << exclusion
+					  << " was not discovered\n";
+			++total.violations;
 		}
 	}
 	if (total.creations < kExpectedCreationBaseline) {

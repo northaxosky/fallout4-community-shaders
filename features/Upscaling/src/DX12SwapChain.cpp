@@ -772,12 +772,10 @@ namespace cs::features
 		DX::ThrowIfFailed(commandList->Close());
 		ID3D12CommandList* lists[] = { commandList };
 		_queue->ExecuteCommandLists(1, lists);
-		HRESULT presentResult = E_FAIL;
-		{
-			cs::render::annotation::ScopedEvent presentScope(
-				"Upscaling/FrameGeneration/Present");
-			presentResult = _swapChain->Present(a_syncInterval, a_flags);
-		}
+		cs::render::annotation::SetMarker(
+			"Upscaling/FrameGeneration/Present");
+		const HRESULT presentResult =
+			_swapChain->Present(a_syncInterval, a_flags);
 
 		const UINT64 d3d12Done = _nextFenceValue++;
 		const HRESULT signalResult = _queue->Signal(_fence12.get(), d3d12Done);

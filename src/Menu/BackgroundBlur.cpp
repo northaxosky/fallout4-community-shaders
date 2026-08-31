@@ -4,11 +4,13 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Utils/CSUtil.h"
 
 #include <algorithm>
 #include <array>
 #include <mutex>
+#include <string>
 #include <string_view>
 
 #include <d3d11.h>
@@ -194,14 +196,22 @@ namespace
 			L->error("BackgroundBlur: failed to create {} texture", a_name);
 			return false;
 		}
+		const std::string baseName =
+			"Menu/BackgroundBlur/" + std::string(a_name);
+		cs::render::annotation::SetName(
+			a_texture.Get(), baseName + ".Texture");
 		if (FAILED(a_device->CreateRenderTargetView(a_texture.Get(), nullptr, a_rtv.ReleaseAndGetAddressOf()))) {
 			L->error("BackgroundBlur: failed to create {} RTV", a_name);
 			return false;
 		}
+		cs::render::annotation::SetName(
+			a_rtv.Get(), baseName + ".RTV");
 		if (FAILED(a_device->CreateShaderResourceView(a_texture.Get(), nullptr, a_srv.ReleaseAndGetAddressOf()))) {
 			L->error("BackgroundBlur: failed to create {} SRV", a_name);
 			return false;
 		}
+		cs::render::annotation::SetName(
+			a_srv.Get(), baseName + ".SRV");
 		return true;
 	}
 
@@ -229,9 +239,9 @@ namespace
 		texDesc.Usage = D3D11_USAGE_DEFAULT;
 		texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
 
-		if (!CreateTextureSet(device, texDesc, downsampleTexture, downsampleRTV, downsampleSRV, "downsample") ||
-			!CreateTextureSet(device, texDesc, blurTexture1, blurRTV1, blurSRV1, "blur 1") ||
-			!CreateTextureSet(device, texDesc, blurTexture2, blurRTV2, blurSRV2, "blur 2")) {
+		if (!CreateTextureSet(device, texDesc, downsampleTexture, downsampleRTV, downsampleSRV, "Downsample") ||
+			!CreateTextureSet(device, texDesc, blurTexture1, blurRTV1, blurSRV1, "BlurHorizontal") ||
+			!CreateTextureSet(device, texDesc, blurTexture2, blurRTV2, blurSRV2, "BlurVertical")) {
 			ReleaseBlurTextures();
 			return;
 		}
@@ -384,14 +394,15 @@ namespace cs::BackgroundBlur
 				return false;
 			}
 			a_shader.Attach(static_cast<std::remove_reference_t<decltype(*a_shader.Get())>*>(compiled));
+			cs::render::annotation::SetName(compiled, a_name);
 			return true;
 		};
 
-		if (!compileShader(vertexShader, L"Data\\Shaders\\Menu\\BackgroundBlurDownsample.hlsl", "vs_5_0", "VS_Main", "blur vertex shader") ||
-			!compileShader(downsamplePixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurDownsample.hlsl", "ps_5_0", "PS_Main", "downsample pixel shader") ||
-			!compileShader(horizontalPixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurHorizontal.hlsl", "ps_5_0", "PS_Main", "horizontal blur pixel shader") ||
-			!compileShader(verticalPixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurVertical.hlsl", "ps_5_0", "PS_Main", "vertical blur pixel shader") ||
-			!compileShader(compositePixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurComposite.hlsl", "ps_5_0", "PS_Main", "composite blur pixel shader"))
+		if (!compileShader(vertexShader, L"Data\\Shaders\\Menu\\BackgroundBlurDownsample.hlsl", "vs_5_0", "VS_Main", "Menu/BackgroundBlur/Fullscreen.VS") ||
+			!compileShader(downsamplePixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurDownsample.hlsl", "ps_5_0", "PS_Main", "Menu/BackgroundBlur/Downsample.PS") ||
+			!compileShader(horizontalPixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurHorizontal.hlsl", "ps_5_0", "PS_Main", "Menu/BackgroundBlur/Horizontal.PS") ||
+			!compileShader(verticalPixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurVertical.hlsl", "ps_5_0", "PS_Main", "Menu/BackgroundBlur/Vertical.PS") ||
+			!compileShader(compositePixelShader, L"Data\\Shaders\\Menu\\BackgroundBlurComposite.hlsl", "ps_5_0", "PS_Main", "Menu/BackgroundBlur/Composite.PS"))
 			return false;
 
 		auto checkCreate = [&](HRESULT a_hr, const char* a_name) -> bool {
@@ -410,10 +421,14 @@ namespace cs::BackgroundBlur
 		cbDesc.ByteWidth = sizeof(BlurConstants);
 		if (!checkCreate(device->CreateBuffer(&cbDesc, nullptr, constantBuffer.GetAddressOf()), "blur constant buffer"))
 			return false;
+		cs::render::annotation::SetName(
+			constantBuffer.Get(), "Menu/BackgroundBlur/BlurConstants.Buffer");
 
 		cbDesc.ByteWidth = sizeof(WindowConstants);
 		if (!checkCreate(device->CreateBuffer(&cbDesc, nullptr, windowConstantBuffer.GetAddressOf()), "window constant buffer"))
 			return false;
+		cs::render::annotation::SetName(
+			windowConstantBuffer.Get(), "Menu/BackgroundBlur/WindowConstants.Buffer");
 
 		D3D11_SAMPLER_DESC samplerDesc{};
 		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -425,6 +440,8 @@ namespace cs::BackgroundBlur
 		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
 		if (!checkCreate(device->CreateSamplerState(&samplerDesc, samplerState.GetAddressOf()), "blur sampler state"))
 			return false;
+		cs::render::annotation::SetName(
+			samplerState.Get(), "Menu/BackgroundBlur/LinearClamp.Sampler");
 
 		D3D11_BLEND_DESC blendDesc{};
 		blendDesc.RenderTarget[0].BlendEnable = TRUE;
@@ -437,6 +454,8 @@ namespace cs::BackgroundBlur
 		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 		if (!checkCreate(device->CreateBlendState(&blendDesc, blendState.GetAddressOf()), "blur blend state"))
 			return false;
+		cs::render::annotation::SetName(
+			blendState.Get(), "Menu/BackgroundBlur/Composite.BlendState");
 
 		D3D11_DEPTH_STENCIL_DESC depthDesc{};
 		depthDesc.DepthEnable = FALSE;
@@ -444,6 +463,8 @@ namespace cs::BackgroundBlur
 		depthDesc.DepthFunc = D3D11_COMPARISON_ALWAYS;
 		if (!checkCreate(device->CreateDepthStencilState(&depthDesc, depthStencilState.GetAddressOf()), "blur depth state"))
 			return false;
+		cs::render::annotation::SetName(
+			depthStencilState.Get(), "Menu/BackgroundBlur/Disabled.DepthStencilState");
 
 		D3D11_RASTERIZER_DESC rsDesc{};
 		rsDesc.FillMode = D3D11_FILL_SOLID;
@@ -453,6 +474,8 @@ namespace cs::BackgroundBlur
 		rsDesc.ScissorEnable = TRUE;
 		if (!checkCreate(device->CreateRasterizerState(&rsDesc, scissorRasterizerState.GetAddressOf()), "scissor rasterizer state"))
 			return false;
+		cs::render::annotation::SetName(
+			scissorRasterizerState.Get(), "Menu/BackgroundBlur/Scissor.RasterizerState");
 
 		initialized = true;
 		return true;
@@ -502,11 +525,15 @@ namespace cs::BackgroundBlur
 				initializationFailed = true;
 				return;
 			}
+			cs::render::annotation::SetName(
+				sourceCopyTexture.Get(), "Menu/BackgroundBlur/SourceCopy.Texture");
 			if (FAILED(device->CreateShaderResourceView(sourceCopyTexture.Get(), nullptr, cachedSourceSRV.GetAddressOf()))) {
 				L->error("BackgroundBlur: failed to create the backbuffer copy SRV");
 				initializationFailed = true;
 				return;
 			}
+			cs::render::annotation::SetName(
+				cachedSourceSRV.Get(), "Menu/BackgroundBlur/SourceCopy.SRV");
 
 			CreateBlurTextures(targetDesc.Width, targetDesc.Height, targetDesc.Format);
 			cachedSourceTexture = targetTexture.Get();

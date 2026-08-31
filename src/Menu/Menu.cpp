@@ -17,6 +17,7 @@
 #include "Menu/ThemeDelta.h"
 #include "Menu/ThemeManager.h"
 #include "Plugin.h"
+#include "Render/Annotation.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
@@ -599,6 +600,8 @@ namespace cs
 		backbuffer->Release();
 		if (FAILED(result))
 			return;
+		cs::render::annotation::SetName(
+			_backbufferRTV, "Menu/Backbuffer.RTV");
 		_backbufferW = width;
 		_backbufferH = height;
 	}

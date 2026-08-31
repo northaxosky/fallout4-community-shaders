@@ -4,6 +4,7 @@
 #include "Menu/BackgroundBlur.h"
 #include "Menu/Fonts.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Settings/TomlUtil.h"
 #include "Utils/UI.h"
 
@@ -295,6 +296,8 @@ namespace cs
 		Microsoft::WRL::ComPtr<ID3D11Query> eventQuery;
 		D3D11_QUERY_DESC queryDesc{ D3D11_QUERY_EVENT, 0 };
 		if (SUCCEEDED(device->CreateQuery(&queryDesc, eventQuery.GetAddressOf()))) {
+			cs::render::annotation::SetName(
+				eventQuery.Get(), "Menu/FontAtlasDrain.Query");
 			context->End(eventQuery.Get());
 			BOOL queryData = FALSE;
 			for (int i = 0; i < 1000 && context->GetData(eventQuery.Get(), &queryData, sizeof(BOOL), 0) != S_OK; ++i)
