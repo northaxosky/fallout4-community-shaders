@@ -141,7 +141,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(InverseSquareLighting)
 	register_feature(WetnessEffects)
 	register_feature(WaterEffects)
-	register_feature(ExtendedTranslucency)
 
 	# Upscaling backends: Streamline headers are interface-only, FidelityFX builds from source.
 	add_subdirectory(cmake/Streamline)
@@ -341,29 +340,6 @@ set_tests_properties(
 	PROPERTIES LABELS "render;shader;unit"
 )
 
-add_executable(ExtendedTranslucencyMathTests
-	tests/ExtendedTranslucencyMathTests.cpp
-	features/ExtendedTranslucency/src/ExtendedTranslucencyMath.h
-	src/FeatureBuffer.h
-)
-configure_host_test(ExtendedTranslucencyMathTests)
-target_include_directories(ExtendedTranslucencyMathTests PRIVATE
-	"${CMAKE_SOURCE_DIR}/features/ExtendedTranslucency/src"
-	"${CMAKE_SOURCE_DIR}/src"
-)
-
-add_test(
-	NAME ExtendedTranslucencyMath
-	COMMAND ExtendedTranslucencyMathTests
-		"${CMAKE_SOURCE_DIR}/features/ExtendedTranslucency/Shaders/ExtendedTranslucency/ExtendedTranslucency.hlsli"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSLightingShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
-)
-set_tests_properties(
-	ExtendedTranslucencyMath
-	PROPERTIES LABELS "render;shader;unit"
-)
-
 add_executable(LogThrottleTests
 	tests/LogThrottleTests.cpp
 	include/LogThrottle.h
@@ -554,7 +530,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WaterEffects/Shaders"
-			"${CMAKE_SOURCE_DIR}/features/ExtendedTranslucency/Shaders"
 		FILES
 			"${CMAKE_SOURCE_DIR}/tests/shaders/SharedDataProbe.hlsl"
 	)

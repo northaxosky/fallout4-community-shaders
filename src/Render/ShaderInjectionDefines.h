@@ -16,5 +16,4 @@ namespace cs::engine::shader_injection_defines
 	inline constexpr auto kWaterEffects = "WATER_EFFECTS";
 	inline constexpr auto kWaterEffectsFullscreenDebug =
 		"WATER_EFFECTS_FULLSCREEN_DEBUG";
-	inline constexpr auto kExtendedTranslucency = "EXTENDED_TRANSLUCENCY";
 }

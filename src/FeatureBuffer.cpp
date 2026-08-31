@@ -1,6 +1,5 @@
 #include "FeatureBuffer.h"
 
-#include "ExtendedTranslucency.h"
 #include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
@@ -41,10 +40,7 @@ namespace cs
 					features::InverseSquareLighting::GetSingleton()),
 			.waterEffectsSettings =
 				CollectFeatureData<WaterEffectsFeatureData>(
-					features::WaterEffects::GetSingleton()),
-			.extendedTranslucencySettings =
-				CollectFeatureData<ExtendedTranslucencyFeatureData>(
-					features::ExtendedTranslucency::GetSingleton())
+					features::WaterEffects::GetSingleton())
 		};
 	}
 }

@@ -403,9 +403,7 @@ namespace
 			ExpectedVariable{ "terrainShadowsSettings", 48, 48 },
 			ExpectedVariable{
 				"inverseSquareLightingSettings", 96, 16 },
-			ExpectedVariable{ "waterEffectsSettings", 112, 16 },
-			ExpectedVariable{
-				"extendedTranslucencySettings", 128, 16 }
+			ExpectedVariable{ "waterEffectsSettings", 112, 16 }
 		};
 		if (shaderDesc.ConstantBuffers != 2
 			|| shaderDesc.BoundResources != 2) {
@@ -424,7 +422,7 @@ namespace
 			reflection.Get(),
 			"FeatureData",
 			6,
-			144,
+			128,
 			featureVariables);
 	}
 
@@ -1023,7 +1021,6 @@ namespace
 		std::size_t wetnessCompositeVertexRows = 0;
 		std::size_t inverseSquareRows = 0;
 		std::size_t inverseSquareInertRows = 0;
-		std::size_t extendedTranslucencyRows = 0;
 	};
 
 	// The SSGI composition extends the existing plugin texture block.
@@ -1109,7 +1106,6 @@ namespace
 	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
 	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
 	constexpr std::size_t kExpectedWetnessCompositeVertexRows = 4;
-	constexpr std::size_t kExpectedExtendedTranslucencyRows = 12;
 
 	bool DeclaresFamily(
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
@@ -1202,7 +1198,6 @@ namespace
 				"No shader replacement registrations were discovered");
 		}
 		std::set<std::string> uniqueRegistrationInputs;
-		std::size_t extendedTranslucencyRows = 0;
 		for (const auto& registration : registrations) {
 			std::optional<FeatureOffIdentityExpectation> identity;
 			const bool directRow = registration.targetId
@@ -1231,23 +1226,6 @@ namespace
 				&uniqueRegistrationInputs,
 				{},
 				std::move(identity));
-			if (registration.targetId
-					== cs::engine::ShaderInjectionTarget::kBsLighting
-				&& registration.stage
-					== cs::engine::ShaderStage::kPixel) {
-				AddRegistration(
-					a_jobs,
-					a_root,
-					registration,
-					{
-						{
-							cs::engine::shader_injection_defines::
-								kExtendedTranslucency,
-							"1"
-						}
-					});
-				++extendedTranslucencyRows;
-			}
 		}
 		if (uniqueRegistrationInputs.size() != registrations.size()) {
 			AddPreparationFailure(
@@ -1854,16 +1832,6 @@ namespace
 					+ std::to_string(kExpectedWetnessCompositeVertexRows)
 					+ " vertex rows");
 		}
-		if (extendedTranslucencyRows
-			!= kExpectedExtendedTranslucencyRows) {
-			AddPreparationFailure(
-				a_jobs,
-				"kBsLighting extended translucency coverage",
-				"Expected "
-					+ std::to_string(kExpectedExtendedTranslucencyRows)
-					+ " pixel rows, found "
-					+ std::to_string(extendedTranslucencyRows));
-		}
 		return {
 			.registrationDerived = registrations.size(),
 			.uniqueRegistrationInputs =
@@ -1889,8 +1857,7 @@ namespace
 			.wetnessCompositeNeutralRows = wetnessCompositeNeutralRows,
 			.wetnessCompositeVertexRows = wetnessCompositeVertexRows,
 			.inverseSquareRows = inverseSquareRows,
-			.inverseSquareInertRows = inverseSquareInertRows,
-			.extendedTranslucencyRows = extendedTranslucencyRows
+			.inverseSquareInertRows = inverseSquareInertRows
 		};
 	}
 
@@ -2039,9 +2006,6 @@ int main(int argc, char** argv)
 		"ShaderCompile checked inverse-square on %zu punctual and %zu inert kBsdfLight rows\n",
 		lightingCounts.inverseSquareRows,
 		lightingCounts.inverseSquareInertRows);
-	std::printf(
-		"ShaderCompile checked extended translucency on %zu kBsLighting rows\n",
-		lightingCounts.extendedTranslucencyRows);
 	std::printf(
 		"ShaderCompile checked %zu TerrainShadows permutations\n",
 		terrainShadowsCount);

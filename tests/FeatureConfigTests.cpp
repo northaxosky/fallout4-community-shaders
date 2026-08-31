@@ -544,43 +544,6 @@ namespace
 			CHECK(wetnessSettings->size() == 3);
 		}
 
-		const auto* translucencySettings =
-			(*features)["ExtendedTranslucency"]["settings"].as_table();
-		CHECK(translucencySettings != nullptr);
-		if (translucencySettings) {
-			CHECK(
-				(*translucencySettings)["alpha_mode"].value<std::int64_t>()
-				== std::optional<std::int64_t>{ 3 });
-			CHECK(
-				(*translucencySettings)["alpha_reduction"].value<double>()
-				== std::optional<double>{ 0.15 });
-			CHECK(
-				(*translucencySettings)["alpha_softness"].value<double>()
-				== std::optional<double>{ 0.0 });
-			CHECK(
-				(*translucencySettings)["alpha_strength"].value<double>()
-				== std::optional<double>{ 0.0 });
-			const auto* materials =
-				(*translucencySettings)["fallback_material_names"].as_array();
-			CHECK(materials != nullptr);
-			if (materials) {
-				std::set<std::string> actualMaterials;
-				for (const auto& material : *materials) {
-					if (const auto value = material.value<std::string>())
-						actualMaterials.insert(*value);
-				}
-				const std::set<std::string> expectedMaterials{
-					"ClothFlag01Alpha.BGSM",
-					"DiamondCloth02Alpha.BGSM",
-					"DiamondClothPlain02Alpha.BGSM",
-					"FlagMinutemen01Backlit.BGSM",
-					"PrewarFlag01.BGSM"
-				};
-				CHECK(actualMaterials == expectedMaterials);
-			}
-			CHECK(translucencySettings->size() == 5);
-		}
-
 		const auto* inverseSquareSettings =
 			(*features)["InverseSquareLighting"]["settings"].as_table();
 		CHECK(inverseSquareSettings != nullptr);

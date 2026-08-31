@@ -322,7 +322,7 @@ namespace
 
 		static_assert(sizeof(TerrainShadowsFeatureData) == 48);
 		static_assert(offsetof(FeatureDataCB, terrainShadowsSettings) == 48);
-		static_assert(sizeof(FeatureDataCB) == 144);
+		static_assert(sizeof(FeatureDataCB) == 128);
 		static_assert(offsetof(TerrainShadowsFeatureData, TerrainShadowMode) == 0);
 		static_assert(offsetof(TerrainShadowsFeatureData, Scale) == 4);
 		static_assert(offsetof(TerrainShadowsFeatureData, ZRange) == 16);

@@ -54,11 +54,6 @@ float4 main() : SV_Target
 	value += SharedData::waterEffectsSettings.HasWater;
 	value += SharedData::waterEffectsSettings.WaterHeight;
 	value += SharedData::waterEffectsSettings.pad0;
-
-	value += SharedData::extendedTranslucencySettings.PackedMode;
-	value += SharedData::extendedTranslucencySettings.AlphaReduction;
-	value += SharedData::extendedTranslucencySettings.AlphaSoftness;
-	value += SharedData::extendedTranslucencySettings.AlphaStrength;
 	return value.xxxx;
 #else
 	return 0.0;

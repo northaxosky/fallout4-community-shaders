@@ -1,9 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
-#ifdef EXTENDED_TRANSLUCENCY
-#include "ExtendedTranslucency/ExtendedTranslucency.hlsli"
-#endif
-
 #ifdef BSLIGHTING_PS_COLOR
 
 #ifdef BSL_BASE_BLEND_TINT
@@ -318,24 +314,7 @@ PSOutput main(PSInput input)
     clip(baseColor.w * input.color.w - geometryData[3].x);
 #endif
 
-#ifdef EXTENDED_TRANSLUCENCY
-#ifdef BSL_REDUCED_NORMAL
-    psout.color = ExtendedTranslucency::ApplyToColorWithoutTangent(
-        psout.color,
-        geometryData[2].z,
-        viewDirection,
-        normal);
-#else
-    psout.color = ExtendedTranslucency::ApplyToColor(
-        psout.color,
-        geometryData[2].z,
-        viewDirection,
-        normal,
-        transpose(float3x3(input.tangentX, input.tangentY, input.tangentZ)));
-#endif
-#else
     psout.color.w = geometryData[2].z;
-#endif
     return psout;
 }
 #endif
@@ -678,24 +657,7 @@ PSOutput main(PSInput input)
 
     clip(baseColor.w * input.color.w - geometryData[3].x);
 
-#ifdef EXTENDED_TRANSLUCENCY
-#ifdef BSL_REDUCED_NORMAL
-    psout.color = ExtendedTranslucency::ApplyToColorWithoutTangent(
-        psout.color,
-        geometryData[2].z,
-        viewDirection,
-        normal);
-#else
-    psout.color = ExtendedTranslucency::ApplyToColor(
-        psout.color,
-        geometryData[2].z,
-        viewDirection,
-        normal,
-        transpose(float3x3(input.tangentX, input.tangentY, input.tangentZ)));
-#endif
-#else
     psout.color.w = geometryData[2].z;
-#endif
     return psout;
 }
 #endif
@@ -1066,24 +1028,7 @@ PSOutput main(PSInput input)
     psout.color.xyz = psout.color.xyz * overlayBlend + overlayColor;
 #endif
 
-#ifdef EXTENDED_TRANSLUCENCY
-#ifdef BSL_REDUCED_NORMAL
-    psout.color = ExtendedTranslucency::ApplyToColorWithoutTangent(
-        psout.color,
-        geometryData[2].z,
-        viewDirection,
-        normal);
-#else
-    psout.color = ExtendedTranslucency::ApplyToColor(
-        psout.color,
-        geometryData[2].z,
-        viewDirection,
-        normal,
-        transpose(float3x3(input.tangentX, input.tangentY, input.tangentZ)));
-#endif
-#else
     psout.color.w = geometryData[2].z;
-#endif
     return psout;
 }
 #endif

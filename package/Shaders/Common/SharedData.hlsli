@@ -77,14 +77,6 @@ namespace SharedData
 		float pad0;
 	};
 
-	struct ExtendedTranslucencySettings
-	{
-		uint PackedMode;
-		float AlphaReduction;
-		float AlphaSoftness;
-		float AlphaStrength;
-	};
-
 	cbuffer FeatureData : register(b6)
 	{
 		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
@@ -93,7 +85,6 @@ namespace SharedData
 		TerrainShadowsSettings terrainShadowsSettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		WaterEffectsSettings waterEffectsSettings;
-		ExtendedTranslucencySettings extendedTranslucencySettings;
 	};
 
 	// standard D3D depth: near = 0, far = 1
