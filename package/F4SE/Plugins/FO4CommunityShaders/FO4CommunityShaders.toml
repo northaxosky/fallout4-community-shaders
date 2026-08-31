@@ -99,6 +99,25 @@ load = false
 # Runtime toggle for the caustics multiply. Upstream ships no other tunables.
 enabled = true
 
+[features.ExtendedTranslucency]
+load = false
+
+[features.ExtendedTranslucency.settings]
+# 0 = disabled, 1 = rim edge, 2 = isotropic fabric, 3 = anisotropic fabric.
+alpha_mode = 3
+alpha_reduction = 0.15
+alpha_softness = 0.0
+# 0.0 is the full effect; 1.0 preserves the original alpha.
+alpha_strength = 0.0
+# Exact, case-insensitive BGSM basenames. A user array replaces this list.
+fallback_material_names = [
+	"DiamondCloth02Alpha.BGSM",
+	"DiamondClothPlain02Alpha.BGSM",
+	"ClothFlag01Alpha.BGSM",
+	"FlagMinutemen01Backlit.BGSM",
+	"PrewarFlag01.BGSM",
+]
+
 [features.ScreenSpaceShadows]
 load = false
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "FeatureBuffer.h"
+
 #include <cstdint>
 
 struct ID3D11Device;
@@ -19,4 +21,15 @@ namespace cs::render
 	void EnsureSharedDataUpdateInstalled();
 
 	void BindSharedData(ID3D11DeviceContext* a_context) noexcept;
+
+	enum class FeatureDataOverrideResult
+	{
+		kUnchanged,
+		kWritten,
+		kFailed
+	};
+
+	FeatureDataOverrideResult BindExtendedTranslucencyFeatureData(
+		ID3D11DeviceContext* a_context,
+		const ExtendedTranslucencyFeatureData& a_data) noexcept;
 }

@@ -269,7 +269,7 @@ namespace
 		static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
 		static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
 		static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 112);
-		static_assert(sizeof(FeatureDataCB) == 128);
+		static_assert(sizeof(FeatureDataCB) == 144);
 
 		const WaterEffectsFeatureData data{};
 		CHECK(data.Mode == 0);
@@ -376,8 +376,12 @@ namespace
 		const auto member =
 			sharedData.find("waterEffectsSettings;", cbuffer);
 		CHECK(member != std::string::npos);
-		// The block must stay last so the b6 offsets above remain pinned.
-		CHECK(sharedData.find("Settings ", member) == std::string::npos);
+		const auto translucencyMember =
+			sharedData.find("extendedTranslucencySettings;", member);
+		CHECK(translucencyMember != std::string::npos);
+		CHECK(
+			sharedData.find("Settings ", translucencyMember)
+			== std::string::npos);
 	}
 
 	void TestLiveSettingsContract(const std::filesystem::path& a_sourcePath)

@@ -62,6 +62,15 @@ namespace cs
 	};
 	static_assert(sizeof(WaterEffectsFeatureData) == 16);
 
+	struct alignas(16) ExtendedTranslucencyFeatureData
+	{
+		std::uint32_t PackedMode = 0;
+		float         AlphaReduction = 0.0f;
+		float         AlphaSoftness = 0.0f;
+		float         AlphaStrength = 0.0f;
+	};
+	static_assert(sizeof(ExtendedTranslucencyFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
 		ScreenSpaceShadowsFeatureData     screenSpaceShadowsSettings;
@@ -70,8 +79,9 @@ namespace cs
 		TerrainShadowsFeatureData         terrainShadowsSettings;
 		InverseSquareLightingFeatureData inverseSquareLightingSettings;
 		WaterEffectsFeatureData           waterEffectsSettings;
+		ExtendedTranslucencyFeatureData    extendedTranslucencySettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 128);
+	static_assert(sizeof(FeatureDataCB) == 144);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -95,6 +105,20 @@ namespace cs
 	static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
 	static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
 	static_assert(offsetof(WaterEffectsFeatureData, pad0) == 12);
+	static_assert(offsetof(FeatureDataCB, extendedTranslucencySettings) == 128);
+	static_assert(offsetof(ExtendedTranslucencyFeatureData, PackedMode) == 0);
+	static_assert(offsetof(ExtendedTranslucencyFeatureData, AlphaReduction) == 4);
+	static_assert(offsetof(ExtendedTranslucencyFeatureData, AlphaSoftness) == 8);
+	static_assert(offsetof(ExtendedTranslucencyFeatureData, AlphaStrength) == 12);
+
+	[[nodiscard]] inline FeatureDataCB PatchExtendedTranslucencyFeatureData(
+		const FeatureDataCB& a_source,
+		const ExtendedTranslucencyFeatureData& a_patch) noexcept
+	{
+		auto result = a_source;
+		result.extendedTranslucencySettings = a_patch;
+		return result;
+	}
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

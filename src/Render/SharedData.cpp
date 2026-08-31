@@ -51,6 +51,8 @@ namespace cs::render
 				savedPixelBuffers;
 			// Render thread only.
 			float                        timer = 0.0f;
+			FeatureDataCB                featureDataSnapshot{};
+			FeatureDataCB                publishedFeatureData{};
 			bool                         updateInstalled = false;
 			bool                         updateInstallFailed = false;
 			std::uint32_t                pixelBindingDepth = 0;
@@ -251,6 +253,8 @@ namespace cs::render
 					return;
 				}
 				state.timer = nextTimer;
+				state.featureDataSnapshot = featureData;
+				state.publishedFeatureData = featureData;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
@@ -371,17 +375,15 @@ namespace cs::render
 		if (!a_context || !IsSharedDataReady())
 			return;
 
+		UpdateSharedData();
 		if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
-			UpdateSharedData();
-			if (state.lastFrame.load(std::memory_order_relaxed) == UINT32_MAX) {
-				const auto* graphicsState = engine::GetGraphicsState();
-				const auto frame = graphicsState ? graphicsState->frameCount : UINT32_MAX;
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Shared substrate first bind has no published frame data at frame {}; binding the zero seed.",
-					frame);
-			}
+			const auto* graphicsState = engine::GetGraphicsState();
+			const auto frame = graphicsState ? graphicsState->frameCount : UINT32_MAX;
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::err,
+				"Shared substrate first bind has no published frame data at frame {}; binding the zero seed.",
+				frame);
 		}
 
 		ID3D11Buffer* buffers[2] = {
@@ -389,5 +391,44 @@ namespace cs::render
 			state.featureDataCB.get()
 		};
 		a_context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+	}
+
+	FeatureDataOverrideResult BindExtendedTranslucencyFeatureData(
+		ID3D11DeviceContext* a_context,
+		const ExtendedTranslucencyFeatureData& a_data) noexcept
+	{
+		auto& state = GetSubstrateState();
+		if (!a_context || !IsSharedDataReady())
+			return FeatureDataOverrideResult::kFailed;
+
+		BindSharedData(a_context);
+		const auto patched = PatchExtendedTranslucencyFeatureData(
+			state.featureDataSnapshot, a_data);
+		if (std::memcmp(
+				&patched,
+				&state.publishedFeatureData,
+				sizeof(patched))
+			== 0) {
+			return FeatureDataOverrideResult::kUnchanged;
+		}
+		if (!WriteConstantBuffer(
+				a_context,
+				state.featureDataCB.get(),
+				&patched,
+				sizeof(patched))) {
+			ID3D11Buffer* nullBuffer = nullptr;
+			a_context->PSSetConstantBuffers(
+				kFeatureDataSlot, 1, &nullBuffer);
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::err,
+				"Shared substrate feature-data override map failed.");
+			return FeatureDataOverrideResult::kFailed;
+		}
+		state.publishedFeatureData = patched;
+		ID3D11Buffer* buffer = state.featureDataCB.get();
+		a_context->PSSetConstantBuffers(kFeatureDataSlot, 1, &buffer);
+		return FeatureDataOverrideResult::kWritten;
 	}
 }

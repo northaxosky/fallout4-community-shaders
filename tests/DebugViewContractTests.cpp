@@ -14,13 +14,14 @@
 namespace
 {
 	int failures = 0;
-	constexpr std::array<std::string_view, 6> kExpectedCatalogs{
+	constexpr std::array<std::string_view, 7> kExpectedCatalogs{
 		"ScreenSpaceShadows",
 		"TerrainShadows",
 		"ScreenSpaceGI",
 		"InverseSquareLighting",
 		"WetnessEffects",
-		"WaterEffects"
+		"WaterEffects",
+		"ExtendedTranslucency"
 	};
 
 	struct SourceFile
