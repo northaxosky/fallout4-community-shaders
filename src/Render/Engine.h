@@ -26,7 +26,7 @@ namespace cs::engine
 
 	[[nodiscard]] inline RE::NiCamera* GetWorldRootCamera()
 	{
-		auto* worldRoot = RE::Main::WorldRootNode();
+		auto* worldRoot = RE::Main::GetWorldRootNode();
 		return worldRoot ? worldRoot->camera.get() : nullptr;
 	}
 
