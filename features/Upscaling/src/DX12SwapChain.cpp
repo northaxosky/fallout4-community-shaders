@@ -4,13 +4,14 @@
 #include <algorithm>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <string>
 #include <vector>
 
 #include <REX/TScopeExit.h>
 #include "FidelityFX.h"
-#include "FidelityFX.h"
 #include "Log.h"
+#include "Render/Annotation.h"
 #include "Upscaling.h"
 
 namespace cs::features
@@ -33,29 +34,13 @@ namespace cs::features
 			return barrier;
 		}
 
-		void MarkD3D11(ID3D11DeviceContext4* a_context, const wchar_t* a_name) noexcept
-		{
-			if (!a_context) {
-				return;
-			}
-			winrt::com_ptr<ID3DUserDefinedAnnotation> annotation;
-			if (SUCCEEDED(a_context->QueryInterface(IID_PPV_ARGS(annotation.put())))) {
-				annotation->SetMarker(a_name);
-			}
-		}
-
-		void MarkD3D12(ID3D12GraphicsCommandList* a_list, const char* a_name) noexcept
-		{
-			if (a_list && a_name) {
-				a_list->SetMarker(0, a_name, static_cast<UINT>(std::strlen(a_name)));
-			}
-		}
 	}
 
 	std::unique_ptr<SharedD3D11D3D12Texture> SharedD3D11D3D12Texture::Create(
 		ID3D11Device5* a_device11,
 		ID3D12Device* a_device12,
-		const D3D11_TEXTURE2D_DESC& a_desc)
+		const D3D11_TEXTURE2D_DESC& a_desc,
+		std::string_view a_name)
 	{
 		if (!a_device11 || !a_device12 || !a_desc.Width || !a_desc.Height) {
 			return nullptr;
@@ -91,6 +76,16 @@ namespace cs::features
 			DX::ThrowIfFailed(
 				a_device11->CreateRenderTargetView(result->texture11.get(), nullptr, result->rtv11.put()));
 		}
+		cs::render::annotation::SetName(
+			result->texture11.get(), std::string(a_name) + ".Texture11");
+		cs::render::annotation::SetName(
+			result->srv11.get(), std::string(a_name) + ".SRV");
+		cs::render::annotation::SetName(
+			result->uav11.get(), std::string(a_name) + ".UAV");
+		cs::render::annotation::SetName(
+			result->rtv11.get(), std::string(a_name) + ".RTV");
+		cs::render::annotation::SetName(
+			result->resource12.get(), std::string(a_name) + ".Resource12");
 		return result;
 	}
 
@@ -353,10 +348,14 @@ namespace cs::features
 			actualAdapter.get(),
 			D3D_FEATURE_LEVEL_12_0,
 			IID_PPV_ARGS(_device12.put())));
+		cs::render::annotation::SetName(
+			_device12.get(), "Upscaling/FrameGeneration.Device");
 
 		D3D12_COMMAND_QUEUE_DESC queueDesc{};
 		queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
 		DX::ThrowIfFailed(_device12->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(_queue.put())));
+		cs::render::annotation::SetName(
+			_queue.get(), "Upscaling/FrameGeneration.CommandQueue");
 		for (UINT index = 0; index < 2; ++index) {
 			DX::ThrowIfFailed(_device12->CreateCommandAllocator(
 				D3D12_COMMAND_LIST_TYPE_DIRECT,
@@ -368,6 +367,16 @@ namespace cs::features
 				nullptr,
 				IID_PPV_ARGS(_commandLists[index].put())));
 			DX::ThrowIfFailed(_commandLists[index]->Close());
+			cs::render::annotation::SetName(
+				_allocators[index].get(),
+				std::format(
+					"Upscaling/FrameGenerationAllocator[{}].CommandAllocator",
+					index));
+			cs::render::annotation::SetName(
+				_commandLists[index].get(),
+				std::format(
+					"Upscaling/FrameGenerationCommandList[{}].CommandList",
+					index));
 		}
 		return S_OK;
 	}
@@ -430,6 +439,8 @@ namespace cs::features
 			0,
 			D3D12_FENCE_FLAG_SHARED,
 			IID_PPV_ARGS(_fence12.put())));
+		cs::render::annotation::SetName(
+			_fence12.get(), "Upscaling/FrameGeneration.Fence12");
 		HANDLE sharedHandle = nullptr;
 		DX::ThrowIfFailed(_device12->CreateSharedHandle(
 			_fence12.get(),
@@ -441,6 +452,8 @@ namespace cs::features
 			_device11->OpenSharedFence(sharedHandle, IID_PPV_ARGS(_fence11.put()));
 		CloseHandle(sharedHandle);
 		DX::ThrowIfFailed(openResult);
+		cs::render::annotation::SetName(
+			_fence11.get(), "Upscaling/FrameGeneration.Fence11");
 		_fenceEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
 		return _fenceEvent ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 	}
@@ -460,10 +473,13 @@ namespace cs::features
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
-		auto proxy = SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc);
+		auto proxy = SharedD3D11D3D12Texture::Create(
+			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationProxy");
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless{
-			SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc),
-			SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc)
+			SharedD3D11D3D12Texture::Create(
+				_device11.get(), _device12.get(), desc, "Upscaling/HUDLess[0]"),
+			SharedD3D11D3D12Texture::Create(
+				_device11.get(), _device12.get(), desc, "Upscaling/HUDLess[1]")
 		};
 		if (!proxy || !hudless[0] || !hudless[1]) {
 			return E_OUTOFMEMORY;
@@ -501,9 +517,11 @@ namespace cs::features
 			D3D11_BIND_RENDER_TARGET;
 
 		desc.Format = DXGI_FORMAT_R32_FLOAT;
-		auto depth = SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc);
+		auto depth = SharedD3D11D3D12Texture::Create(
+			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationDepth");
 		desc.Format = DXGI_FORMAT_R16G16_FLOAT;
-		auto motion = SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc);
+		auto motion = SharedD3D11D3D12Texture::Create(
+			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationMotion");
 		if (!depth || !motion ||
 			!_fidelityFX->CreateFrameGenerationContext(
 				_device12.get(),
@@ -708,7 +726,7 @@ namespace cs::features
 		}
 
 		auto* upscaling = Upscaling::GetSingleton();
-		MarkD3D11(_context11.get(), L"FG_D3D11ProductionComplete");
+		cs::render::annotation::SetMarker("FG_D3D11ProductionComplete");
 		const UINT64 d3d11Ready = _nextFenceValue++;
 		DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
 		DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Ready));
@@ -719,36 +737,47 @@ namespace cs::features
 			nullptr));
 
 		auto* commandList = _commandLists[_frameIndex].get();
-		MarkD3D12(commandList, "FG_CopyRealFrame");
-		const std::array barriersBefore{
-			Transition(_proxyBuffer->resource12.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
-			Transition(_backBuffers[_frameIndex].get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
-		};
-		commandList->ResourceBarrier(static_cast<UINT>(barriersBefore.size()), barriersBefore.data());
-		commandList->CopyResource(_backBuffers[_frameIndex].get(), _proxyBuffer->resource12.get());
-		const std::array barriersAfter{
-			Transition(_proxyBuffer->resource12.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
-			Transition(_backBuffers[_frameIndex].get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT)
-		};
-		commandList->ResourceBarrier(static_cast<UINT>(barriersAfter.size()), barriersAfter.data());
+		{
+			cs::render::annotation::ScopedEvent copyScope(
+				commandList, "FG_CopyRealFrame");
+			const std::array barriersBefore{
+				Transition(_proxyBuffer->resource12.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
+				Transition(_backBuffers[_frameIndex].get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
+			};
+			commandList->ResourceBarrier(static_cast<UINT>(barriersBefore.size()), barriersBefore.data());
+			commandList->CopyResource(_backBuffers[_frameIndex].get(), _proxyBuffer->resource12.get());
+			const std::array barriersAfter{
+				Transition(_proxyBuffer->resource12.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
+				Transition(_backBuffers[_frameIndex].get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT)
+			};
+			commandList->ResourceBarrier(static_cast<UINT>(barriersAfter.size()), barriersAfter.data());
+		}
 
 		const auto [renderWidth, renderHeight] = upscaling->GetRenderSize();
 		const bool requested =
 			_frameGenerationInputsReady && !_frameGenerationDisabled &&
 			upscaling->ShouldUseFrameGenerationThisFrame();
-		MarkD3D12(commandList, "FG_ConfigurePrepare");
-		if (!_fidelityFX->PresentFrameGeneration(
-				*this,
-				requested,
-				renderWidth,
-				renderHeight) && requested) {
-			DisableFrameGeneration("FidelityFX configure or prepare failed");
+		{
+			cs::render::annotation::ScopedEvent prepareScope(
+				commandList, "FG_ConfigurePrepare");
+			if (!_fidelityFX->PresentFrameGeneration(
+					*this,
+					requested,
+					renderWidth,
+					renderHeight) && requested) {
+				DisableFrameGeneration("FidelityFX configure or prepare failed");
+			}
 		}
 
 		DX::ThrowIfFailed(commandList->Close());
 		ID3D12CommandList* lists[] = { commandList };
 		_queue->ExecuteCommandLists(1, lists);
-		const HRESULT presentResult = _swapChain->Present(a_syncInterval, a_flags);
+		HRESULT presentResult = E_FAIL;
+		{
+			cs::render::annotation::ScopedEvent presentScope(
+				"Upscaling/FrameGeneration/Present");
+			presentResult = _swapChain->Present(a_syncInterval, a_flags);
+		}
 
 		const UINT64 d3d12Done = _nextFenceValue++;
 		const HRESULT signalResult = _queue->Signal(_fence12.get(), d3d12Done);
@@ -780,6 +809,8 @@ namespace cs::features
 			return;
 		}
 		const float clear[4]{};
+		cs::render::annotation::ScopedEvent annotationScope(
+			"Upscaling/FrameGeneration/ClearSharedBuffers");
 		if (_proxyBuffer && _proxyBuffer->rtv11) {
 			_context11->ClearRenderTargetView(_proxyBuffer->rtv11.get(), clear);
 		}

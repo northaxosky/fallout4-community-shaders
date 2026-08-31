@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <string_view>
 
 #include <d3d11_4.h>
 #include <d3d12.h>
@@ -25,7 +26,8 @@ namespace cs::features
 		static std::unique_ptr<SharedD3D11D3D12Texture> Create(
 			ID3D11Device5* a_device11,
 			ID3D12Device* a_device12,
-			const D3D11_TEXTURE2D_DESC& a_desc);
+			const D3D11_TEXTURE2D_DESC& a_desc,
+			std::string_view a_name);
 	};
 
 	class DX12SwapChain;

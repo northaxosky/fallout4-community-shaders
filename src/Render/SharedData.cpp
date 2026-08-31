@@ -3,6 +3,7 @@
 #include "FeatureBuffer.h"
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
 #include "Utils/CSBuffer.h"
@@ -290,6 +291,8 @@ namespace cs::render
 			a_device->CreateBuffer(&sharedDesc, nullptr, state.sharedDataCB.put()));
 		DX::ThrowIfFailed(
 			a_device->CreateBuffer(&featureDesc, nullptr, state.featureDataCB.put()));
+		annotation::SetName(state.sharedDataCB.get(), "Render/SharedData.Buffer");
+		annotation::SetName(state.featureDataCB.get(), "Render/FeatureData.Buffer");
 
 		// engine state is unavailable during D3D bootstrap
 		const SharedDataCB sharedData{};

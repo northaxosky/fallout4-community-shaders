@@ -380,10 +380,25 @@ add_test(
 )
 set_tests_properties(DebugViewContract PROPERTIES LABELS "menu;unit")
 
+add_executable(AnnotationContractTests
+	tests/AnnotationContractTests.cpp
+)
+configure_host_test(AnnotationContractTests)
+
+add_test(
+	NAME AnnotationContract
+	COMMAND AnnotationContractTests
+		"${CMAKE_SOURCE_DIR}/features"
+		"${CMAKE_SOURCE_DIR}/src/Render"
+)
+set_tests_properties(AnnotationContract PROPERTIES LABELS "render;contract")
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(UpscalingPublicationTests
 		tests/UpscalingPublicationTests.cpp
 		features/Upscaling/src/UpscalingPublication.h
+		src/Render/Annotation.cpp
+		src/Render/Annotation.h
 		src/Render/RendererContext.cpp
 		src/Render/RendererContext.h
 	)
@@ -413,6 +428,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		bcrypt.lib
 		d3d11.lib
 		d3dcompiler.lib
+		dxguid.lib
 		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog

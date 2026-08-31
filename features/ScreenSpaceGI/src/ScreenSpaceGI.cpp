@@ -21,6 +21,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
@@ -234,6 +235,7 @@ namespace cs::features
 			std::uint32_t a_width,
 			std::uint32_t a_height,
 			DXGI_FORMAT a_format,
+			std::string_view a_name,
 			std::uint32_t a_mipLevels = 1,
 			bool a_createMipZeroUAV = true)
 		{
@@ -263,6 +265,10 @@ namespace cs::features
 				uavDesc.Texture2D.MipSlice = 0;
 				texture->CreateUAV(uavDesc);
 			}
+			texture->SetName(
+				std::format("{}.Texture", a_name),
+				std::format("{}.SRV", a_name),
+				std::format("{}.UAV", a_name));
 
 			return texture;
 		}
@@ -271,7 +277,8 @@ namespace cs::features
 			ID3D11Device* a_device,
 			const cs::buffer::Texture2D& a_texture,
 			DXGI_FORMAT a_format,
-			std::span<winrt::com_ptr<ID3D11UnorderedAccessView>> a_out)
+			std::span<winrt::com_ptr<ID3D11UnorderedAccessView>> a_out,
+			std::string_view a_name)
 		{
 			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
 			uavDesc.Format = a_format;
@@ -280,6 +287,9 @@ namespace cs::features
 				uavDesc.Texture2D.MipSlice = static_cast<UINT>(mip);
 				DX::ThrowIfFailed(a_device->CreateUnorderedAccessView(
 					a_texture.resource.get(), &uavDesc, a_out[mip].put()));
+				cs::render::annotation::SetName(
+					a_out[mip].get(),
+					std::format("{}[{}].UAV", a_name, mip));
 			}
 		}
 
@@ -333,8 +343,10 @@ namespace cs::features
 				ID3D11Buffer* a_constants,
 				ID3D11SamplerState* a_sampler,
 				std::uint32_t a_groupsX,
-				std::uint32_t a_groupsY)
+				std::uint32_t a_groupsY,
+				std::string_view a_name)
 			{
+				cs::render::annotation::ScopedEvent annotationScope(a_name);
 				const auto srvCount = static_cast<UINT>(a_srvs.size());
 				const auto uavCount = static_cast<UINT>(a_uavs.size());
 				_context->CSSetShaderResources(0, srvCount, a_srvs.data());
@@ -536,23 +548,26 @@ namespace cs::features
 			winrt::com_ptr<ID3D11ComputeShader>& a_target,
 			const wchar_t* a_path,
 			const std::vector<std::pair<const char*, const char*>>& a_defines,
-			const char* a_label) {
+			const char* a_label,
+			std::string_view a_name) {
 			a_target.attach(reinterpret_cast<ID3D11ComputeShader*>(
 				cs::util::CompileShader(a_path, a_defines, "cs_5_0")));
 			if (!a_target) {
 				L->warn("Failed to compile XeGTAO {} shader.", a_label);
+			} else {
+				cs::render::annotation::SetName(a_target.get(), a_name);
 			}
 		};
 
-		compile(_decodeCS, kDecodePath, {}, "decode");
-		compile(_prefilterCS, kPrefilterPath, { { "LINEAR_FILTER", "1" } }, "depth prefilter");
-		compile(_prefilterRadianceCS, kPrefilterRadiancePath, {}, "radiance prefilter");
-		compile(_prefilterNormalCS, kPrefilterNormalPath, {}, "normal prefilter");
-		compile(_radianceDisoccCS, kRadianceDisoccPath, {}, "radiance disocclusion");
-		compile(_aoCS, kAOPath, {}, "AO");
-		compile(_bounceCS, kAOPath, { { "SSGI_BOUNCE", "1" } }, "bounce");
-		compile(_denoiseCS, kDenoisePath, {}, "denoise");
-		compile(_bounceDenoiseCS, kDenoisePath, { { "SSGI_BOUNCE", "1" } }, "bounce denoise");
+		compile(_decodeCS, kDecodePath, {}, "decode", "ScreenSpaceGI/Decode.CS");
+		compile(_prefilterCS, kPrefilterPath, { { "LINEAR_FILTER", "1" } }, "depth prefilter", "ScreenSpaceGI/PrefilterDepth.CS");
+		compile(_prefilterRadianceCS, kPrefilterRadiancePath, {}, "radiance prefilter", "ScreenSpaceGI/PrefilterRadiance.CS");
+		compile(_prefilterNormalCS, kPrefilterNormalPath, {}, "normal prefilter", "ScreenSpaceGI/PrefilterNormal.CS");
+		compile(_radianceDisoccCS, kRadianceDisoccPath, {}, "radiance disocclusion", "ScreenSpaceGI/RadianceDisocclusion.CS");
+		compile(_aoCS, kAOPath, {}, "AO", "ScreenSpaceGI/AO.CS");
+		compile(_bounceCS, kAOPath, { { "SSGI_BOUNCE", "1" } }, "bounce", "ScreenSpaceGI/Bounce.CS");
+		compile(_denoiseCS, kDenoisePath, {}, "denoise", "ScreenSpaceGI/DenoiseAO.CS");
+		compile(_bounceDenoiseCS, kDenoisePath, { { "SSGI_BOUNCE", "1" } }, "bounce denoise", "ScreenSpaceGI/DenoiseBounce.CS");
 
 		if (!_pointClampSampler) {
 			D3D11_SAMPLER_DESC samplerDesc{};
@@ -564,6 +579,8 @@ namespace cs::features
 			samplerDesc.MinLOD = 0.0f;
 			samplerDesc.MaxLOD = FLT_MAX;
 			DX::ThrowIfFailed(cs::util::GetD3DDevice()->CreateSamplerState(&samplerDesc, _pointClampSampler.put()));
+			cs::render::annotation::SetName(
+				_pointClampSampler.get(), "ScreenSpaceGI/PointClamp.Sampler");
 		}
 
 		// the injected variant is runtime-toggled, so allocate regardless of the setting
@@ -649,37 +666,39 @@ namespace cs::features
 
 			auto* device = cs::util::GetD3DDevice();
 
-			auto linearDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT);
-			auto workingDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT, kMipCount, false);
-			auto viewNormalTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, kMipCount, false);
-			auto radianceTempTex = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT);
-			auto radianceTex = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, kMipCount, false);
-			auto aoRawTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
-			auto aoDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
-			auto bounceSHRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
-			auto bounceCoCgRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT);
-			auto accumBlurTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
+			auto linearDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT, "ScreenSpaceGI/LinearDepth");
+			auto workingDepthTex = CreateTexture(width, height, DXGI_FORMAT_R32_FLOAT, "ScreenSpaceGI/WorkingDepth", kMipCount, false);
+			auto viewNormalTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, "ScreenSpaceGI/ViewNormal", kMipCount, false);
+			auto radianceTempTex = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "ScreenSpaceGI/RadianceTemp");
+			auto radianceTex = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, "ScreenSpaceGI/Radiance", kMipCount, false);
+			auto aoRawTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AORaw");
+			auto aoDenoisedTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AODenoised");
+			auto bounceSHRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, "ScreenSpaceGI/BounceSHRaw");
+			auto bounceCoCgRawTex = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT, "ScreenSpaceGI/BounceCoCgRaw");
+			auto accumBlurTex = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, "ScreenSpaceGI/AccumulationBlur");
 			std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> bounceSHTex;
 			std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> bounceCoCgTex;
 			std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> accumTex;
 			std::array<std::unique_ptr<cs::buffer::Texture2D>, 2> prevGeoTex;
 			for (std::size_t index = 0; index < 2; ++index) {
-				bounceSHTex[index] = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT);
-				bounceCoCgTex[index] = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT);
-				accumTex[index] = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM);
-				prevGeoTex[index] = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT);
+				bounceSHTex[index] = CreateTexture(width, height, DXGI_FORMAT_R16G16B16A16_FLOAT, std::format("ScreenSpaceGI/BounceSH[{}]", index));
+				bounceCoCgTex[index] = CreateTexture(width, height, DXGI_FORMAT_R16G16_FLOAT, std::format("ScreenSpaceGI/BounceCoCg[{}]", index));
+				accumTex[index] = CreateTexture(width, height, DXGI_FORMAT_R8_UNORM, std::format("ScreenSpaceGI/Accumulation[{}]", index));
+				prevGeoTex[index] = CreateTexture(width, height, DXGI_FORMAT_R11G11B10_FLOAT, std::format("ScreenSpaceGI/PreviousGeometry[{}]", index));
 			}
 			auto xegtaoCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<XeGTAOCB>());
 			auto decodeCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<DecodeCB>());
+			xegtaoCB->SetName("ScreenSpaceGI/Constants.Buffer");
+			decodeCB->SetName("ScreenSpaceGI/DecodeConstants.Buffer");
 
 			std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> workingDepthMipUAVs;
 			std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> viewNormalMipUAVs;
 			std::array<winrt::com_ptr<ID3D11UnorderedAccessView>, kMipCount> radianceMipUAVs;
-			CreateMipUAVs(device, *workingDepthTex, DXGI_FORMAT_R32_FLOAT, workingDepthMipUAVs);
-			CreateMipUAVs(device, *viewNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT, viewNormalMipUAVs);
-			CreateMipUAVs(device, *radianceTex, DXGI_FORMAT_R11G11B10_FLOAT, radianceMipUAVs);
+			CreateMipUAVs(device, *workingDepthTex, DXGI_FORMAT_R32_FLOAT, workingDepthMipUAVs, "ScreenSpaceGI/WorkingDepth");
+			CreateMipUAVs(device, *viewNormalTex, DXGI_FORMAT_R16G16B16A16_FLOAT, viewNormalMipUAVs, "ScreenSpaceGI/ViewNormal");
+			CreateMipUAVs(device, *radianceTex, DXGI_FORMAT_R11G11B10_FLOAT, radianceMipUAVs, "ScreenSpaceGI/Radiance");
 
 			// Mip 0 alone, so the prefilter never aliases its own output subresources.
 			winrt::com_ptr<ID3D11ShaderResourceView> viewNormalMip0SRV;
@@ -690,6 +709,8 @@ namespace cs::features
 			mip0SRVDesc.Texture2D.MipLevels = 1;
 			DX::ThrowIfFailed(device->CreateShaderResourceView(
 				viewNormalTex->resource.get(), &mip0SRVDesc, viewNormalMip0SRV.put()));
+			cs::render::annotation::SetName(
+				viewNormalMip0SRV.get(), "ScreenSpaceGI/ViewNormalMip0.SRV");
 
 			winrt::com_ptr<ID3D11Texture2D> noiseTex;
 			winrt::com_ptr<ID3D11ShaderResourceView> noiseSRV;
@@ -752,6 +773,10 @@ namespace cs::features
 				noiseSRVDesc.Texture2D.MostDetailedMip = 0;
 				noiseSRVDesc.Texture2D.MipLevels = 1;
 				DX::ThrowIfFailed(device->CreateShaderResourceView(noiseTex.get(), &noiseSRVDesc, noiseSRV.put()));
+				cs::render::annotation::SetName(
+					noiseTex.get(), "ScreenSpaceGI/Noise.Texture");
+				cs::render::annotation::SetName(
+					noiseSRV.get(), "ScreenSpaceGI/Noise.SRV");
 			}
 
 			_resourcesReady.store(false, std::memory_order_release);
@@ -828,6 +853,8 @@ namespace cs::features
 		if (!_occlusionOutputsDirty || !a_context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"ScreenSpaceGI/ClearOcclusionOutputs");
 		ClearToIdentity(a_context, _aoRawTex);
 		ClearToIdentity(a_context, _aoDenoisedTex);
 		_occlusionOutputsDirty = false;
@@ -838,6 +865,8 @@ namespace cs::features
 		if (!_bounceOutputsDirty || !a_context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"ScreenSpaceGI/ClearBounceOutputs");
 		ClearToIdentity(a_context, _bounceSHRawTex);
 		ClearToIdentity(a_context, _bounceCoCgRawTex);
 		for (std::size_t index = 0; index < 2; ++index) {
@@ -852,6 +881,8 @@ namespace cs::features
 		if (!a_context) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"ScreenSpaceGI/ClearTemporalHistory");
 		for (std::size_t index = 0; index < 2; ++index) {
 			ClearToIdentity(a_context, _bounceSHTex[index]);
 			ClearToIdentity(a_context, _bounceCoCgTex[index]);
@@ -1123,6 +1154,8 @@ namespace cs::features
 				ClearTemporalHistory(context);
 			}
 
+			cs::render::annotation::ScopedEvent annotationScope(
+				"ScreenSpaceGI/Generate");
 			const float texWidth = static_cast<float>(_allocW);
 			const float texHeight = static_cast<float>(_allocH);
 			const float frameWidth = static_cast<float>(frameW);
@@ -1233,7 +1266,7 @@ namespace cs::features
 			};
 			pass.Dispatch(
 				_decodeCS.get(), decodeSRVs, decodeUAVs, _decodeCB->CB(), sampler,
-				groups8X, groups8Y);
+				groups8X, groups8Y, "ScreenSpaceGI/Decode");
 
 			if (radianceAvailable) {
 				ID3D11ShaderResourceView* disoccSRVs[]{
@@ -1254,7 +1287,7 @@ namespace cs::features
 				};
 				pass.Dispatch(
 					_radianceDisoccCS.get(), disoccSRVs, disoccUAVs, constants, sampler,
-					groups8X, groups8Y);
+					groups8X, groups8Y, "ScreenSpaceGI/RadianceDisocclusion");
 				if (temporalEnabled) {
 					++temporalDispatches;
 				}
@@ -1269,7 +1302,7 @@ namespace cs::features
 				};
 				pass.Dispatch(
 					_prefilterRadianceCS.get(), radianceSRVs, radianceUAVs, constants, sampler,
-					groups16X, groups16Y);
+					groups16X, groups16Y, "ScreenSpaceGI/PrefilterRadiance");
 			}
 
 			ID3D11ShaderResourceView* depthPrefilterSRVs[]{ _linearDepthTex->srv.get() };
@@ -1282,7 +1315,7 @@ namespace cs::features
 			};
 			pass.Dispatch(
 				_prefilterCS.get(), depthPrefilterSRVs, depthPrefilterUAVs, constants, sampler,
-				groups16X, groups16Y);
+				groups16X, groups16Y, "ScreenSpaceGI/PrefilterDepth");
 
 			if (_prefilterNormalCS) {
 				ID3D11ShaderResourceView* normalPrefilterSRVs[]{ _viewNormalMip0SRV.get() };
@@ -1294,7 +1327,7 @@ namespace cs::features
 				};
 				pass.Dispatch(
 					_prefilterNormalCS.get(), normalPrefilterSRVs, normalPrefilterUAVs,
-					constants, sampler, groups16X, groups16Y);
+					constants, sampler, groups16X, groups16Y, "ScreenSpaceGI/PrefilterNormal");
 			}
 
 			if (radianceAvailable) {
@@ -1314,7 +1347,8 @@ namespace cs::features
 					_prevGeoTex[writeIndex]->uav.get()
 				};
 				pass.Dispatch(
-					_bounceCS.get(), giSRVs, giUAVs, constants, sampler, groups8X, groups8Y);
+					_bounceCS.get(), giSRVs, giUAVs, constants, sampler, groups8X, groups8Y,
+					"ScreenSpaceGI/Bounce");
 				if (temporalEnabled) {
 					++temporalDispatches;
 				}
@@ -1329,7 +1363,8 @@ namespace cs::features
 				};
 				ID3D11UnorderedAccessView* aoUAVs[]{ _aoRawTex->uav.get() };
 				pass.Dispatch(
-					_aoCS.get(), aoSRVs, aoUAVs, constants, sampler, groups8X, groups8Y);
+					_aoCS.get(), aoSRVs, aoUAVs, constants, sampler, groups8X, groups8Y,
+					"ScreenSpaceGI/AO");
 			}
 			_occlusionOutputsDirty = true;
 			_aoProducedLastFrame.store(true, std::memory_order_relaxed);
@@ -1353,12 +1388,16 @@ namespace cs::features
 				};
 				pass.Dispatch(
 					_bounceDenoiseCS.get(), denoiseSRVs, denoiseUAVs, constants, sampler,
-					groups8X, groups8Y);
+					groups8X, groups8Y, "ScreenSpaceGI/DenoiseBounce");
 				if (temporalEnabled) {
 					++temporalDispatches;
 				}
-				context->CopyResource(
-					_accumTex[writeIndex]->resource.get(), _accumBlurTex->resource.get());
+				{
+					cs::render::annotation::ScopedEvent historyScope(
+						"ScreenSpaceGI/CopyAccumulationHistory");
+					context->CopyResource(
+						_accumTex[writeIndex]->resource.get(), _accumBlurTex->resource.get());
+				}
 				_aoDenoisedLastFrame.store(true, std::memory_order_relaxed);
 				_bounceDenoisedLastFrame.store(true, std::memory_order_relaxed);
 			} else {
@@ -1371,10 +1410,12 @@ namespace cs::features
 					ID3D11UnorderedAccessView* denoiseUAVs[]{ _aoDenoisedTex->uav.get() };
 					pass.Dispatch(
 						_denoiseCS.get(), denoiseSRVs, denoiseUAVs, constants, sampler,
-						groups8X, groups8Y);
+						groups8X, groups8Y, "ScreenSpaceGI/DenoiseAO");
 					_aoDenoisedLastFrame.store(true, std::memory_order_relaxed);
 				}
 				if (radianceAvailable) {
+					cs::render::annotation::ScopedEvent historyScope(
+						"ScreenSpaceGI/CopyBounceHistory");
 					context->CopyResource(
 						_bounceSHTex[writeIndex]->resource.get(), _bounceSHRawTex->resource.get());
 					context->CopyResource(

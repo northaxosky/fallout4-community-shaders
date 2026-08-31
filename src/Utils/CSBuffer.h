@@ -5,7 +5,10 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string_view>
 #include <winrt/base.h>
+
+#include "Render/Annotation.h"
 
 namespace cs::buffer
 {
@@ -41,6 +44,10 @@ namespace cs::buffer
 		}
 
 		ID3D11Buffer* CB() const { return resource.get(); }
+		void SetName(std::string_view a_name) const
+		{
+			cs::render::annotation::SetName(resource.get(), a_name);
+		}
 
 		void Update(void const* a_srcData, size_t a_dataSize)
 		{
@@ -103,6 +110,18 @@ namespace cs::buffer
 			uav = nullptr;
 			srv = nullptr;
 			resource = nullptr;
+		}
+
+		void SetName(
+			std::string_view a_texture,
+			std::string_view a_srv,
+			std::string_view a_uav = {},
+			std::string_view a_rtv = {}) const
+		{
+			cs::render::annotation::SetName(resource.get(), a_texture);
+			cs::render::annotation::SetName(srv.get(), a_srv);
+			cs::render::annotation::SetName(uav.get(), a_uav);
+			cs::render::annotation::SetName(rtv.get(), a_rtv);
 		}
 
 		D3D11_TEXTURE2D_DESC desc;

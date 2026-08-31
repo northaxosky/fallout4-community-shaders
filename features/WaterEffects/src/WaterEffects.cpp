@@ -14,6 +14,7 @@
 
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
@@ -245,6 +246,7 @@ namespace cs::features
 		std::string& a_error)
 	{
 		a_error.clear();
+		_causticsTexture = nullptr;
 		if (!a_device) {
 			a_error = "no D3D11 device";
 			return false;
@@ -280,6 +282,18 @@ namespace cs::features
 				static_cast<std::uint32_t>(viewResult));
 			return false;
 		}
+		winrt::com_ptr<ID3D11Resource> causticsResource;
+		_causticsSrv->GetResource(causticsResource.put());
+		if (!causticsResource ||
+			FAILED(causticsResource->QueryInterface(
+				IID_PPV_ARGS(_causticsTexture.put())))) {
+			a_error = "caustics shader resource view has no texture";
+			return false;
+		}
+		cs::render::annotation::SetName(
+			_causticsTexture.get(), "WaterEffects/Caustics.Texture");
+		cs::render::annotation::SetName(
+			_causticsSrv.get(), "WaterEffects/Caustics.SRV");
 
 		D3D11_SAMPLER_DESC samplerDesc{};
 		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -297,6 +311,8 @@ namespace cs::features
 				static_cast<std::uint32_t>(samplerResult));
 			return false;
 		}
+		cs::render::annotation::SetName(
+			_causticsSampler.get(), "WaterEffects/Caustics.Sampler");
 		return true;
 	}
 
@@ -312,6 +328,7 @@ namespace cs::features
 			error = "unknown failure";
 		}
 		if (!built) {
+			_causticsTexture = nullptr;
 			_causticsSrv = nullptr;
 			_causticsSampler = nullptr;
 			SetValidationDetail(error);

@@ -23,6 +23,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
@@ -541,6 +542,8 @@ namespace cs::features
 				cs::buffer::ConstantBufferDesc<ShadowUpdateCB>();
 			DX::ThrowIfFailed(a_device->CreateBuffer(
 				&bufferDesc, nullptr, _shadowUpdateCB.put()));
+			cs::render::annotation::SetName(
+				_shadowUpdateCB.get(), "TerrainShadows/UpdateConstants.Buffer");
 			_constantBufferReady.store(true, std::memory_order_release);
 
 			D3D11_SAMPLER_DESC samplerDesc{};
@@ -553,6 +556,8 @@ namespace cs::features
 			samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
 			DX::ThrowIfFailed(a_device->CreateSamplerState(
 				&samplerDesc, _linearClampSampler.put()));
+			cs::render::annotation::SetName(
+				_linearClampSampler.get(), "TerrainShadows/LinearClamp.Sampler");
 			_samplerReady.store(true, std::memory_order_release);
 		} catch (const std::exception& e) {
 			_resourceInitFailed = true;
@@ -573,6 +578,8 @@ namespace cs::features
 				"cannot produce shadow heights.");
 			return;
 		}
+		cs::render::annotation::SetName(
+			_shadowUpdateCS.get(), "TerrainShadows/Update.CS");
 		_computeShaderReady.store(true, std::memory_order_release);
 
 		// Statistics are optional.
@@ -587,6 +594,8 @@ namespace cs::features
 			}();
 			DX::ThrowIfFailed(a_device->CreateBuffer(
 				&statsBufferDesc, nullptr, _shadowStatsBuffer.put()));
+			cs::render::annotation::SetName(
+				_shadowStatsBuffer.get(), "TerrainShadows/Statistics.Buffer");
 
 			D3D11_UNORDERED_ACCESS_VIEW_DESC statsUavDesc{};
 			statsUavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
@@ -595,6 +604,8 @@ namespace cs::features
 			statsUavDesc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
 			DX::ThrowIfFailed(a_device->CreateUnorderedAccessView(
 				_shadowStatsBuffer.get(), &statsUavDesc, _shadowStatsUav.put()));
+			cs::render::annotation::SetName(
+				_shadowStatsUav.get(), "TerrainShadows/Statistics.UAV");
 
 			const auto statsStagingDesc = []() {
 				D3D11_BUFFER_DESC desc{};
@@ -605,11 +616,15 @@ namespace cs::features
 			}();
 			DX::ThrowIfFailed(a_device->CreateBuffer(
 				&statsStagingDesc, nullptr, _shadowStatsStaging.put()));
+			cs::render::annotation::SetName(
+				_shadowStatsStaging.get(), "TerrainShadows/StatisticsReadback.Buffer");
 
 			const auto statsCBDesc =
 				cs::buffer::ConstantBufferDesc<ShadowStatisticsCB>();
 			DX::ThrowIfFailed(a_device->CreateBuffer(
 				&statsCBDesc, nullptr, _shadowStatsCB.put()));
+			cs::render::annotation::SetName(
+				_shadowStatsCB.get(), "TerrainShadows/StatisticsConstants.Buffer");
 
 			_shadowStatsCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 				cs::util::CompileShader(kShadowStatisticsPath, {}, "cs_5_0")));
@@ -617,6 +632,9 @@ namespace cs::features
 				L->warn(
 					"Terrain shadow statistics compute shader failed to compile; "
 					"telemetry will report no shadow field statistics.");
+			} else {
+				cs::render::annotation::SetName(
+					_shadowStatsCS.get(), "TerrainShadows/Statistics.CS");
 			}
 		} catch (const std::exception& e) {
 			L->warn("Terrain shadow statistics resources failed: {}", e.what());
@@ -857,6 +875,8 @@ namespace cs::features
 				static_cast<std::uint32_t>(createResult));
 			return false;
 		}
+		cs::render::annotation::SetName(
+			resource.get(), "TerrainShadows/HeightMap.Texture");
 		winrt::com_ptr<ID3D11Texture2D> heightTexture;
 		{
 			ID3D11Texture2D* raw = nullptr;
@@ -878,6 +898,9 @@ namespace cs::features
 		heightSrv.Texture2D.MostDetailedMip = 0;
 		heightSrv.Texture2D.MipLevels = 1;
 		height->CreateSRV(heightSrv);
+		height->SetName(
+			"TerrainShadows/HeightMap.Texture",
+			"TerrainShadows/HeightMap.SRV");
 
 		D3D11_TEXTURE2D_DESC shadowDesc{};
 		shadowDesc.Width = effectiveWidth;
@@ -901,8 +924,14 @@ namespace cs::features
 		shadowUav.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 		shadowUav.Texture2D.MipSlice = 0;
 		shadow->CreateUAV(shadowUav);
+		shadow->SetName(
+			"TerrainShadows/ShadowField.Texture",
+			"TerrainShadows/ShadowField.SRV",
+			"TerrainShadows/ShadowField.UAV");
 		// D3D leaves UAV contents undefined.
 		if (a_context && shadow->uav) {
+			cs::render::annotation::ScopedEvent annotationScope(
+				"TerrainShadows/ClearShadowField");
 			const float clear[4]{ 0.0f, 0.0f, 0.0f, 0.0f };
 			a_context->ClearUnorderedAccessViewFloat(shadow->uav.get(), clear);
 		}
@@ -1086,6 +1115,8 @@ namespace cs::features
 
 		const std::uint32_t updateCount =
 			a_refreshImmediately ? _plan.maxUpdates : 1u;
+		cs::render::annotation::ScopedEvent annotationScope(
+			"TerrainShadows/Update");
 		cs::engine::ComputeOMScope scope(a_context, 1, 0, 1, 1);
 		ID3D11ShaderResourceView* srvs[1] = { _heightTexture->srv.get() };
 		ID3D11UnorderedAccessView* uavs[1] = { _shadowTexture->uav.get() };
@@ -1140,6 +1171,8 @@ namespace cs::features
 		}
 
 		if (_shadowStatsPending) {
+			cs::render::annotation::ScopedEvent annotationScope(
+				"TerrainShadows/StatisticsReadback");
 			D3D11_MAPPED_SUBRESOURCE mapped{};
 			const HRESULT hr = a_context->Map(
 				_shadowStatsStaging.get(),
@@ -1228,6 +1261,8 @@ namespace cs::features
 			_shadowStatsBuffer.get(), 0, nullptr, initialStats.data(), 0, 0);
 
 		{
+			cs::render::annotation::ScopedEvent annotationScope(
+				"TerrainShadows/Statistics");
 			cs::ComputeScope scope(a_context, 2, 0, 1, 1);
 			ID3D11ShaderResourceView* srvs[2] = {
 				_heightTexture->srv.get(), _shadowTexture->srv.get()
@@ -1242,8 +1277,12 @@ namespace cs::features
 				kShadowStatsGridSize / 16, kShadowStatsGridSize / 16, 1);
 		}
 
-		a_context->CopyResource(
-			_shadowStatsStaging.get(), _shadowStatsBuffer.get());
+		{
+			cs::render::annotation::ScopedEvent annotationScope(
+				"TerrainShadows/CopyStatisticsReadback");
+			a_context->CopyResource(
+				_shadowStatsStaging.get(), _shadowStatsBuffer.get());
+		}
 		_shadowStatsPending = true;
 	}
 

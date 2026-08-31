@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <limits>
 #include <memory>
 #include <numbers>
@@ -17,6 +18,7 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
@@ -771,7 +773,9 @@ namespace cs::features
 		colorDesc.CPUAccessFlags = 0;
 		colorDesc.MiscFlags = 0;
 
-		const auto createTexture = [](const D3D11_TEXTURE2D_DESC& a_desc) {
+		const auto createTexture = [](
+			const D3D11_TEXTURE2D_DESC& a_desc,
+			std::string_view a_name) {
 			auto texture = std::make_unique<cs::buffer::Texture2D>(a_desc);
 
 			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
@@ -786,20 +790,27 @@ namespace cs::features
 			uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 			uavDesc.Texture2D.MipSlice = 0;
 			texture->CreateUAV(uavDesc);
+			texture->SetName(
+				std::string(a_name) + ".Texture",
+				std::string(a_name) + ".SRV",
+				std::string(a_name) + ".UAV");
 			return texture.release();
 		};
 
 		if (!upscalingTexture) {
-			upscalingTexture = createTexture(colorDesc);
+			upscalingTexture = createTexture(
+				colorDesc, "Upscaling/InputColor");
 		}
 
 		auto maskDesc = colorDesc;
 		maskDesc.Format = DXGI_FORMAT_R8_UNORM;
 		if (!reactiveMaskTexture) {
-			reactiveMaskTexture = createTexture(maskDesc);
+			reactiveMaskTexture = createTexture(
+				maskDesc, "Upscaling/ReactiveMask");
 		}
 		if (!transparencyCompositionMaskTexture) {
-			transparencyCompositionMaskTexture = createTexture(maskDesc);
+			transparencyCompositionMaskTexture = createTexture(
+				maskDesc, "Upscaling/TransparencyCompositionMask");
 		}
 
 		if (a_upscalemethod == UpscaleMethod::kDLSS) {
@@ -824,11 +835,16 @@ namespace cs::features
 					motionVectorCopyTexture = new cs::buffer::Texture2D(motionTexDesc);
 					motionVectorCopyTexture->CreateSRV(srvDesc);
 					motionVectorCopyTexture->CreateUAV(uavDesc);
+					motionVectorCopyTexture->SetName(
+						"Upscaling/MotionVectorCopy.Texture",
+						"Upscaling/MotionVectorCopy.SRV",
+						"Upscaling/MotionVectorCopy.UAV");
 				}
 			}
 
 			if (!sharpenerTexture) {
-				sharpenerTexture = createTexture(colorDesc);
+				sharpenerTexture = createTexture(
+					colorDesc, "Upscaling/ProviderOutput");
 			}
 		}
 
@@ -955,6 +971,9 @@ namespace cs::features
 
 			encodeTexturesCS[methodIndex].attach(
 				(ID3D11ComputeShader*)cs::util::CompileShader(kEncodeTexturesPath, defines, "cs_5_0"));
+			cs::render::annotation::SetName(
+				encodeTexturesCS[methodIndex].get(),
+				std::format("Upscaling/EncodeTextures[{}].CS", methodIndex));
 		}
 		return encodeTexturesCS[methodIndex].get();
 	}
@@ -969,6 +988,9 @@ namespace cs::features
 			};
 			depthRefractionUpscalePS.attach(
 				(ID3D11PixelShader*)cs::util::CompileShader(kDepthRefractionUpscalePath, defines, "ps_5_0"));
+			cs::render::annotation::SetName(
+				depthRefractionUpscalePS.get(),
+				"Upscaling/DepthRefractionUpscale.PS");
 		}
 
 		return depthRefractionUpscalePS.get();
@@ -980,6 +1002,8 @@ namespace cs::features
 			L->debug("Compiling UpscaleVS.hlsl");
 			upscaleVS.attach(
 				(ID3D11VertexShader*)cs::util::CompileShader(kUpscaleVSPath, { { "VSHADER", "" } }, "vs_5_0"));
+			cs::render::annotation::SetName(
+				upscaleVS.get(), "Upscaling/Fullscreen.VS");
 		}
 
 		return upscaleVS.get();
@@ -991,6 +1015,8 @@ namespace cs::features
 			L->debug("Compiling BSImagespaceShaderSSLRRaytracing.hlsl");
 			sslrRaytracingPS.attach((ID3D11PixelShader*)cs::util::CompileShader(
 				kSSLRRaytracingPath, {}, "ps_5_0"));
+			cs::render::annotation::SetName(
+				sslrRaytracingPS.get(), "Upscaling/SSLRRaytracing.PS");
 			if (!sslrRaytracingPS) {
 				_sslrCompileFailed = true;
 				L->error("BSImagespaceShaderSSLRRaytracing.hlsl failed to compile; SSR runs unpatched");
@@ -1138,19 +1164,25 @@ namespace cs::features
 		depthStencilDesc.StencilEnable = false;
 
 		DX::ThrowIfFailed(device->CreateDepthStencilState(&depthStencilDesc, upscaleDepthStencilState.put()));
+		cs::render::annotation::SetName(
+			upscaleDepthStencilState.get(), "Upscaling/DepthUpscale.DepthStencilState");
 
 		if (!jitterCB) {
 			jitterCB = new cs::buffer::ConstantBuffer(cs::buffer::ConstantBufferDesc<JitterCB>());
+			jitterCB->SetName("Upscaling/JitterConstants.Buffer");
 		}
 
 		if (!upscalingDataCB) {
 			upscalingDataCB =
 				new cs::buffer::ConstantBuffer(cs::buffer::ConstantBufferDesc<UpscalingDataCB>());
+			upscalingDataCB->SetName("Upscaling/Constants.Buffer");
 		}
 
 		if (!_frameGenerationCopyCB) {
 			_frameGenerationCopyCB =
 				new cs::buffer::ConstantBuffer(cs::buffer::ConstantBufferDesc<FrameGenerationCopyCB>());
+			_frameGenerationCopyCB->SetName(
+				"Upscaling/FrameGenerationCopyConstants.Buffer");
 		}
 
 		D3D11_BLEND_DESC blendDesc = {};
@@ -1159,6 +1191,8 @@ namespace cs::features
 		blendDesc.RenderTarget[0].BlendEnable = false;
 		blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
 		DX::ThrowIfFailed(device->CreateBlendState(&blendDesc, upscaleBlendState.put()));
+		cs::render::annotation::SetName(
+			upscaleBlendState.get(), "Upscaling/DepthUpscale.BlendState");
 
 		D3D11_RASTERIZER_DESC rasterizerDesc = {};
 		rasterizerDesc.FillMode = D3D11_FILL_SOLID;
@@ -1172,6 +1206,8 @@ namespace cs::features
 		rasterizerDesc.MultisampleEnable = false;
 		rasterizerDesc.AntialiasedLineEnable = false;
 		DX::ThrowIfFailed(device->CreateRasterizerState(&rasterizerDesc, upscaleRasterizerState.put()));
+		cs::render::annotation::SetName(
+			upscaleRasterizerState.get(), "Upscaling/DepthUpscale.RasterizerState");
 
 		D3D11_SAMPLER_DESC samplerDesc = {};
 		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
@@ -1180,6 +1216,8 @@ namespace cs::features
 		samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
 		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
 		DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, linearSampler.put()));
+		cs::render::annotation::SetName(
+			linearSampler.get(), "Upscaling/LinearClamp.Sampler");
 
 		const auto method = GetUpscaleMethod();
 		UpdateResolutionScale(cs::engine::GetGraphicsState(), method);
@@ -1195,6 +1233,10 @@ namespace cs::features
 					"cs_5_0")));
 			if (!_copyDepthForFrameGenerationCS) {
 				dx12SwapChain.DisableFrameGeneration("depth capture shader compilation failed");
+			} else {
+				cs::render::annotation::SetName(
+					_copyDepthForFrameGenerationCS.get(),
+					"Upscaling/CopyDepthForFrameGeneration.CS");
 			}
 		}
 
@@ -1320,7 +1362,12 @@ namespace cs::features
 			return;
 		}
 
-		cs::engine::CopyResourcePreservingOM(context, preAlphaColor, postAlphaColor);
+		{
+			cs::render::annotation::ScopedEvent annotationScope(
+				"Upscaling/FrameGeneration/CapturePreAlphaColor");
+			cs::engine::CopyResourcePreservingOM(
+				context, preAlphaColor, postAlphaColor);
+		}
 		_firstPersonAlphaStamp = {
 			.stage = FirstPersonAlphaStage::kPrepared,
 			.engineFrame = GetEngineFrame(),
@@ -1390,11 +1437,8 @@ namespace cs::features
 			return;
 		}
 
-		winrt::com_ptr<ID3DUserDefinedAnnotation> annotation;
-		context->QueryInterface(IID_PPV_ARGS(annotation.put()));
-		if (annotation) {
-			annotation->SetMarker(L"FG_CaptureDepthMotion");
-		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"FG_CaptureDepthMotion");
 		cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
 		_frameGenerationCopyCB->Update(dimensions);
 		ID3D11Buffer* constantBuffer = _frameGenerationCopyCB->CB();
@@ -1511,11 +1555,8 @@ namespace cs::features
 			sharedMotion->texture11.get(),
 			sharedDepth->texture11.get());
 		if (!alphaConditioned) {
-			winrt::com_ptr<ID3DUserDefinedAnnotation> annotation;
-			context->QueryInterface(IID_PPV_ARGS(annotation.put()));
-			if (annotation) {
-				annotation->SetMarker(L"FG_CaptureDepthMotion");
-			}
+			cs::render::annotation::ScopedEvent annotationScope(
+				"FG_CaptureDepthMotion");
 			cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
 			const FrameGenerationCopyCB dimensions{
 				renderWidth,
@@ -1593,11 +1634,8 @@ namespace cs::features
 			return;
 		}
 
-		winrt::com_ptr<ID3DUserDefinedAnnotation> annotation;
-		context->QueryInterface(IID_PPV_ARGS(annotation.put()));
-		if (annotation) {
-			annotation->SetMarker(L"FG_CaptureHUDLess_RT0_PostImagespace");
-		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"FG_CaptureHUDLess_RT0_PostImagespace");
 		cs::engine::CopyResourcePreservingOM(
 			context,
 			hudless->texture11.get(),
@@ -1769,12 +1807,13 @@ namespace cs::features
 		if (renderWidth == 0 || renderHeight == 0) {
 			return false;
 		}
-
 		{
 			// Keep OM unbound until provider reads complete.
 			cs::engine::OMScope omScope(context);
 
 			{
+				cs::render::annotation::ScopedEvent encodeScope(
+					"Upscaling/EncodeTextures");
 				cs::ComputeScope computeScope(context);
 
 				// Null t0 and RT20's unused channel produce the accepted zero masks.
@@ -1822,6 +1861,8 @@ namespace cs::features
 				_superResolutionResetPending.exchange(false, std::memory_order_acq_rel);
 
 			if (upscaleMethod == UpscaleMethod::kDLSS) {
+				cs::render::annotation::ScopedEvent providerScope(
+					"Upscaling/DLSS");
 				upscaled = streamline.Upscale(
 					upscalingTexture->resource.get(),
 					reactiveMaskTexture->resource.get(),
@@ -1829,6 +1870,8 @@ namespace cs::features
 					motionVectorCopyTexture->resource.get(),
 					resetHistory);
 			} else if (upscaleMethod == UpscaleMethod::kFSR) {
+				cs::render::annotation::ScopedEvent providerScope(
+					"Upscaling/FSR");
 				upscaled = fidelityFX.Upscale(
 					upscalingTexture->resource.get(),
 					reactiveMaskTexture->resource.get(),
@@ -1854,6 +1897,8 @@ namespace cs::features
 
 	bool Upscaling::PerformUpscaling()
 	{
+		cs::render::annotation::ScopedEvent upscaleScope(
+			"Upscaling/SuperResolution");
 		_upscaledThisFrame = false;
 		// Keep the last completed resolve result stable across vfunc queries within the frame.
 		const auto finish = [this](bool a_published) {
@@ -1874,10 +1919,14 @@ namespace cs::features
 			return finish(false);
 		}
 
-		cs::engine::CopyResourcePreservingOM(
-			context,
-			upscalingTexture->resource.get(),
-			frameBuffer.get());
+		{
+			cs::render::annotation::ScopedEvent inputScope(
+				"Upscaling/CaptureInputColor");
+			cs::engine::CopyResourcePreservingOM(
+				context,
+				upscalingTexture->resource.get(),
+				frameBuffer.get());
+		}
 
 		if (!Upscale()) {
 			return finish(false);
@@ -1938,6 +1987,8 @@ namespace cs::features
 		if (!fullscreenVS || !depthUpscalePS) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"Upscaling/UpscaleDepth");
 
 		// Restore the engine's exact OM bindings after the depth pass.
 		cs::engine::OMScope omScope(context);

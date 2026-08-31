@@ -1,5 +1,7 @@
 #include "Render/RendererContext.h"
 
+#include "Render/Annotation.h"
+
 namespace cs::engine
 {
 	RE::BSGraphics::Context* GetActiveContext() noexcept
@@ -47,6 +49,7 @@ namespace cs::engine
 		const HRESULT createResult = device->CreateQuery(&queryDesc, &query);
 		device->Release();
 		if (FAILED(createResult) || !query) return false;
+		cs::render::annotation::SetName(query, "Render/GpuIdle.Query");
 
 		a_ctx->End(query);
 		a_ctx->Flush();

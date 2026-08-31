@@ -1,6 +1,7 @@
 #include "Render/ShaderVariantCompilation.h"
 
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/Annotation.h"
 #include "Utils/CSSha1.h"
 #include "Utils/ShaderCompile.h"
 
@@ -95,6 +96,8 @@ namespace cs::engine
 							blob->GetBufferSize(),
 							nullptr,
 							vertexShader.put());
+						render::annotation::SetName(
+							vertexShader.get(), "Render/Injected/VertexShader.VS");
 						if (vertexShader)
 							shader.attach(vertexShader.detach());
 						break;
@@ -107,6 +110,8 @@ namespace cs::engine
 							blob->GetBufferSize(),
 							nullptr,
 							pixelShader.put());
+						render::annotation::SetName(
+							pixelShader.get(), "Render/Injected/PixelShader.PS");
 						if (pixelShader)
 							shader.attach(pixelShader.detach());
 						break;
@@ -124,6 +129,10 @@ namespace cs::engine
 					result.error = buffer;
 					return result;
 				}
+				const std::string shaderName =
+					"Render/Injected/" + a_request.sourcePath.stem().string()
+					+ (a_request.stage == ShaderStage::kVertex ? ".VS" : ".PS");
+				render::annotation::SetName(shader.get(), shaderName);
 
 				result.state = ShaderVariantCompilationState::kReady;
 				result.bytecodeSize =

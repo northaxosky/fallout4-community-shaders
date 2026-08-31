@@ -1,6 +1,7 @@
 #include "RCAS.h"
 
 #include "Log.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Utils/CSUtil.h"
 
@@ -33,6 +34,9 @@ namespace cs::features
 		rcasComputeShader.attach((ID3D11ComputeShader*)cs::util::CompileShader(
 			L"Data\\Shaders\\Upscaling\\RCAS\\RCAS.hlsl", defines, "cs_5_0"));
 		rcasConfigCB = new cs::buffer::ConstantBuffer(cs::buffer::ConstantBufferDesc<RCASConfig>());
+		cs::render::annotation::SetName(
+			rcasComputeShader.get(), "Upscaling/RCAS.CS");
+		rcasConfigCB->SetName("Upscaling/RCASConstants.Buffer");
 	}
 
 	bool RCAS::ApplySharpen(ID3D11ShaderResourceView* inputSRV, ID3D11UnorderedAccessView* outputUAV, float sharpness)
@@ -46,6 +50,7 @@ namespace cs::features
 			L->warn("Compute shader not compiled");
 			return false;
 		}
+		cs::render::annotation::ScopedEvent annotationScope("Upscaling/RCAS");
 
 		uint32_t screenWidth = graphicsState->screenWidth;
 		uint32_t screenHeight = graphicsState->screenHeight;

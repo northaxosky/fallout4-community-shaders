@@ -1,5 +1,9 @@
 #include "SamplerBias.h"
 
+#include <format>
+
+#include "Render/Annotation.h"
+
 namespace cs::features
 {
 	bool SamplerBias::Initialize(std::uintptr_t a_tableAddress) noexcept
@@ -59,6 +63,9 @@ namespace cs::features
 				desc.MipLODBias = a_mipBias;
 			}
 			DX::ThrowIfFailed(device->CreateSamplerState(&desc, _biasedSamplers[i].put()));
+			cs::render::annotation::SetName(
+				_biasedSamplers[i].get(),
+				std::format("Upscaling/BiasedSampler[{}].Sampler", i));
 		}
 		_hasBiased = true;
 		return true;

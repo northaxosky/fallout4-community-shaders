@@ -23,6 +23,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
@@ -315,6 +316,10 @@ namespace cs::features
 		uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
 		uavDesc.Texture2D.MipSlice = 0;
 		texture->CreateUAV(uavDesc);
+		texture->SetName(
+			"ScreenSpaceShadows/Mask.Texture",
+			"ScreenSpaceShadows/Mask.SRV",
+			"ScreenSpaceShadows/Mask.UAV");
 
 		_maskTexture = std::move(texture);
 		_allocWidth = a_width;
@@ -457,6 +462,10 @@ namespace cs::features
 			}
 			return false;
 		}
+		cs::render::annotation::SetName(
+			texture.get(), "ScreenSpaceShadows/WhiteFallback.Texture");
+		cs::render::annotation::SetName(
+			srv.get(), "ScreenSpaceShadows/WhiteFallback.SRV");
 		_whiteFallbackSRV = std::move(srv);
 		(void)_whiteFallbackExtent.CompleteAllocation(
 			a_allocation,
@@ -609,6 +618,7 @@ namespace cs::features
 		try {
 			_raymarchCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<RaymarchCB>());
+			_raymarchCB->SetName("ScreenSpaceShadows/RaymarchConstants.Buffer");
 
 			D3D11_SAMPLER_DESC samplerDesc{};
 			samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
@@ -623,6 +633,8 @@ namespace cs::features
 			samplerDesc.MinLOD = 0.0f;
 			samplerDesc.MaxLOD = FLT_MAX;
 			DX::ThrowIfFailed(device->CreateSamplerState(&samplerDesc, _pointBorderSampler.put()));
+			cs::render::annotation::SetName(
+				_pointBorderSampler.get(), "ScreenSpaceShadows/PointBorder.Sampler");
 
 			sss_mask_binding::Extent required;
 			sss_mask_binding::Extent allocation;
@@ -683,6 +695,8 @@ namespace cs::features
 			_raymarchCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
 				cs::util::CompileShader(kRaymarchPath, defines, "cs_5_0")));
 			if (_raymarchCS) {
+				cs::render::annotation::SetName(
+					_raymarchCS.get(), "ScreenSpaceShadows/Raymarch.CS");
 				L->info("Compiled raymarch shader with {} samples.", scaledSampleCount);
 			}
 		}
@@ -755,6 +769,8 @@ namespace cs::features
 		if (_maskTexture
 			&& _maskTexture->uav
 			&& sss_mask_binding::Covers(realExtent, required)) {
+			cs::render::annotation::ScopedEvent annotationScope(
+				"ScreenSpaceShadows/ClearMask");
 			context->ClearUnorderedAccessViewFloat(
 				_maskTexture->uav.get(),
 				white);
@@ -785,6 +801,8 @@ namespace cs::features
 					};
 
 					if (viewportSize[0] > 0 && viewportSize[1] > 0) {
+						cs::render::annotation::ScopedEvent annotationScope(
+							"ScreenSpaceShadows/Raymarch");
 						cs::engine::ComputeOMScope scope(context);
 
 						// Negate sunlight; transpose WorldRootCamera, not camViewData.

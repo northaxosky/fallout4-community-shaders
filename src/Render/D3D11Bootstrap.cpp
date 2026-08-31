@@ -9,6 +9,7 @@
 #include "Host/HostClient.h"
 #include "Log.h"
 #include "Menu/Menu.h"
+#include "Render/Annotation.h"
 #include "Render/FrameBuffer.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
@@ -108,6 +109,7 @@ namespace cs::d3d11
 			&& *a_immediateContext;
 		bool expected = false;
 		if (complete && ready.compare_exchange_strong(expected, true)) {
+			render::annotation::Initialize(*a_immediateContext);
 			InvokeOwner("Shader cache initialization", [] {
 				InitializeShaderCache();
 			});

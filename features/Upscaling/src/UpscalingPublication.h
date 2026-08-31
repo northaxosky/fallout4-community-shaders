@@ -2,6 +2,7 @@
 
 #include <d3d11.h>
 
+#include "Render/Annotation.h"
 #include "Render/RendererContext.h"
 
 namespace cs::features
@@ -17,6 +18,8 @@ namespace cs::features
 			return false;
 		}
 
+		cs::render::annotation::ScopedEvent annotationScope(
+			"Upscaling/PublishOutput");
 		cs::engine::CopyResourcePreservingOM(a_context, a_frameBuffer, a_providerOutput);
 		return true;
 	}

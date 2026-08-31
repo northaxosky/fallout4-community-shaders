@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cmath>
+#include <format>
 
 #include "Log.h"
+#include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
@@ -101,19 +103,32 @@ namespace cs::features
 
 		DX::ThrowIfFailed(device->CreateTexture2D(
 			&textureDesc, nullptr, reinterpret_cast<ID3D11Texture2D**>(&proxy.texture)));
+		const auto baseName = std::format("Upscaling/DynamicResolutionProxy[{}]", a_index);
+		cs::render::annotation::SetName(
+			reinterpret_cast<ID3D11Texture2D*>(proxy.texture),
+			baseName + ".Texture");
 
 		auto* proxyTexture = reinterpret_cast<ID3D11Texture2D*>(proxy.texture);
 		if (original.rtView) {
 			DX::ThrowIfFailed(device->CreateRenderTargetView(
 				proxyTexture, &rtViewDesc, reinterpret_cast<ID3D11RenderTargetView**>(&proxy.rtView)));
+			cs::render::annotation::SetName(
+				reinterpret_cast<ID3D11RenderTargetView*>(proxy.rtView),
+				baseName + ".RTV");
 		}
 		if (original.srView) {
 			DX::ThrowIfFailed(device->CreateShaderResourceView(
 				proxyTexture, &srViewDesc, reinterpret_cast<ID3D11ShaderResourceView**>(&proxy.srView)));
+			cs::render::annotation::SetName(
+				reinterpret_cast<ID3D11ShaderResourceView*>(proxy.srView),
+				baseName + ".SRV");
 		}
 		if (original.uaView) {
 			DX::ThrowIfFailed(device->CreateUnorderedAccessView(
 				proxyTexture, &uaViewDesc, reinterpret_cast<ID3D11UnorderedAccessView**>(&proxy.uaView)));
+			cs::render::annotation::SetName(
+				reinterpret_cast<ID3D11UnorderedAccessView*>(proxy.uaView),
+				baseName + ".UAV");
 		}
 	}
 
@@ -177,6 +192,10 @@ namespace cs::features
 		_depthOverrideTexture = std::make_unique<cs::buffer::Texture2D>(texDesc);
 		_depthOverrideTexture->CreateSRV(srvDesc);
 		_depthOverrideTexture->CreateUAV(uavDesc);
+		_depthOverrideTexture->SetName(
+			"Upscaling/DepthOverride.Texture",
+			"Upscaling/DepthOverride.SRV",
+			"Upscaling/DepthOverride.UAV");
 	}
 
 	void DynamicResolution::OverrideRenderTarget(int a_index, bool a_doCopy)
@@ -231,6 +250,8 @@ namespace cs::features
 		if (!_hasProxies) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"Upscaling/DynamicResolution/CopyToProxies");
 
 		for (const int index : renderTargetsPatch) {
 			const bool shouldCopy =
@@ -285,6 +306,8 @@ namespace cs::features
 		if (!_renderTargetsOverridden) {
 			return;
 		}
+		cs::render::annotation::ScopedEvent annotationScope(
+			"Upscaling/DynamicResolution/CopyFromProxies");
 
 		for (const int index : renderTargetsPatch) {
 			const bool shouldCopy = a_indicesToCopy.empty() ||
@@ -405,6 +428,8 @@ namespace cs::features
 		UpdateAndBindUpscalingCB(context, screenSize, renderSize);
 
 		{
+			cs::render::annotation::ScopedEvent annotationScope(
+				"Upscaling/DynamicResolution/LinearizeDepth");
 			ID3D11ShaderResourceView* views[] = { depthSRV };
 			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 			ID3D11UnorderedAccessView* uavs[] = { linearDepthUAV };
@@ -417,6 +442,8 @@ namespace cs::features
 		}
 
 		{
+			cs::render::annotation::ScopedEvent annotationScope(
+				"Upscaling/DynamicResolution/OverrideDepth");
 			ID3D11ShaderResourceView* views[] = { depthSRV };
 			context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 			ID3D11UnorderedAccessView* uavs[] = { depthUAV };
@@ -485,6 +512,9 @@ namespace cs::features
 			if (!_overrideDepthCS) {
 				_overrideDepthCSFailed = true;
 				L->error("OverrideDepthCS.hlsl failed to compile; depth override is disabled");
+			} else {
+				cs::render::annotation::SetName(
+					_overrideDepthCS.get(), "Upscaling/OverrideDepth.CS");
 			}
 		}
 		return _overrideDepthCS.get();
@@ -499,6 +529,9 @@ namespace cs::features
 			if (!_overrideLinearDepthCS) {
 				_overrideLinearDepthCSFailed = true;
 				L->error("OverrideLinearDepthCS.hlsl failed to compile; depth override is disabled");
+			} else {
+				cs::render::annotation::SetName(
+					_overrideLinearDepthCS.get(), "Upscaling/OverrideLinearDepth.CS");
 			}
 		}
 		return _overrideLinearDepthCS.get();
@@ -509,6 +542,8 @@ namespace cs::features
 		if (!_upscalingCB) {
 			_upscalingCB = std::make_unique<cs::buffer::ConstantBuffer>(
 				cs::buffer::ConstantBufferDesc<UpscalingCB>());
+			_upscalingCB->SetName(
+				"Upscaling/DynamicResolutionConstants.Buffer");
 		}
 		return _upscalingCB.get();
 	}
