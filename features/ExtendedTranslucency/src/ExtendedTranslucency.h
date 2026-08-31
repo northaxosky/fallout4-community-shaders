@@ -126,6 +126,7 @@ namespace cs::features
 		std::atomic_uint64_t _ownedLightingDraws{ 0 };
 		std::atomic_uint64_t _classifiedOwnedDraws{ 0 };
 		std::atomic_uint64_t _featureBufferWrites{ 0 };
+		std::atomic_uint64_t _featureBufferOverrideSkips{ 0 };
 		std::atomic_uint64_t _featureBufferWriteFailures{ 0 };
 		std::uint32_t _telemetryFrame = UINT32_MAX;
 		std::uint64_t _frameClassifiedDraws = 0;

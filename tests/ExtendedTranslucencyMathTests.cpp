@@ -1,5 +1,6 @@
 #include "ExtendedTranslucencyMath.h"
 #include "FeatureBuffer.h"
+#include "Render/SharedData.h"
 
 #include <algorithm>
 #include <array>
@@ -331,12 +332,22 @@ namespace
 			if (index < 128 || index >= 128 + sizeof(patch))
 				CHECK(resultBytes[index] == sourceBytes[index]);
 		}
+
 		CHECK(
 			std::memcmp(
 				resultBytes + 128,
 				&patch,
 				sizeof(patch))
 			== 0);
+	}
+
+	void TestFeatureBufferSnapshotFreshness()
+	{
+		using cs::render::HasCurrentFeatureDataSnapshot;
+		CHECK(!HasCurrentFeatureDataSnapshot(UINT32_MAX, 1));
+		CHECK(!HasCurrentFeatureDataSnapshot(1, UINT32_MAX));
+		CHECK(!HasCurrentFeatureDataSnapshot(41, 42));
+		CHECK(HasCurrentFeatureDataSnapshot(42, 42));
 	}
 
 	void TestShaderContracts(
@@ -378,6 +389,7 @@ int main(int a_argc, char* a_argv[])
 	TestAlphaMath();
 	TestTangentBasisOrientation();
 	TestFeatureBufferPatch();
+	TestFeatureBufferSnapshotFreshness();
 	TestShaderContracts(a_argv[1], a_argv[2], a_argv[3]);
 
 	if (failures == 0)

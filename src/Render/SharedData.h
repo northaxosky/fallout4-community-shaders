@@ -26,8 +26,18 @@ namespace cs::render
 	{
 		kUnchanged,
 		kWritten,
+		kSkipped,
 		kFailed
 	};
+
+	constexpr bool HasCurrentFeatureDataSnapshot(
+		std::uint32_t a_snapshotFrame,
+		std::uint32_t a_currentFrame) noexcept
+	{
+		return a_snapshotFrame != UINT32_MAX
+			&& a_currentFrame != UINT32_MAX
+			&& a_snapshotFrame == a_currentFrame;
+	}
 
 	FeatureDataOverrideResult BindExtendedTranslucencyFeatureData(
 		ID3D11DeviceContext* a_context,

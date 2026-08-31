@@ -45,6 +45,7 @@ namespace cs::render
 		{
 			winrt::com_ptr<ID3D11Buffer> sharedDataCB;
 			winrt::com_ptr<ID3D11Buffer> featureDataCB;
+			winrt::com_ptr<ID3D11Buffer> featureDataOverrideCB;
 			std::atomic_bool             ready{ false };
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
 			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
@@ -52,7 +53,7 @@ namespace cs::render
 			// Render thread only.
 			float                        timer = 0.0f;
 			FeatureDataCB                featureDataSnapshot{};
-			FeatureDataCB                publishedFeatureData{};
+			FeatureDataCB                publishedFeatureDataOverride{};
 			bool                         updateInstalled = false;
 			bool                         updateInstallFailed = false;
 			std::uint32_t                pixelBindingDepth = 0;
@@ -254,7 +255,6 @@ namespace cs::render
 				}
 				state.timer = nextTimer;
 				state.featureDataSnapshot = featureData;
-				state.publishedFeatureData = featureData;
 				state.lastFrame.store(frame, std::memory_order_relaxed);
 			} catch (const std::exception& e) {
 				CS_LOG_EVERY_MS(
@@ -295,8 +295,14 @@ namespace cs::render
 			a_device->CreateBuffer(&sharedDesc, nullptr, state.sharedDataCB.put()));
 		DX::ThrowIfFailed(
 			a_device->CreateBuffer(&featureDesc, nullptr, state.featureDataCB.put()));
+		DX::ThrowIfFailed(
+			a_device->CreateBuffer(
+				&featureDesc, nullptr, state.featureDataOverrideCB.put()));
 		annotation::SetName(state.sharedDataCB.get(), "Render/SharedData.Buffer");
 		annotation::SetName(state.featureDataCB.get(), "Render/FeatureData.Buffer");
+		annotation::SetName(
+			state.featureDataOverrideCB.get(),
+			"Render/FeatureDataOverride.Buffer");
 
 		// engine state is unavailable during D3D bootstrap
 		const SharedDataCB sharedData{};
@@ -310,9 +316,15 @@ namespace cs::render
 				a_context,
 				state.featureDataCB.get(),
 				&featureData,
+				sizeof(featureData))
+			|| !WriteConstantBuffer(
+				a_context,
+				state.featureDataOverrideCB.get(),
+				&featureData,
 				sizeof(featureData))) {
 			state.sharedDataCB = nullptr;
 			state.featureDataCB = nullptr;
+			state.featureDataOverrideCB = nullptr;
 			throw std::runtime_error("Shared substrate constant-buffer seeding failed.");
 		}
 		state.ready.store(true, std::memory_order_release);
@@ -402,23 +414,31 @@ namespace cs::render
 			return FeatureDataOverrideResult::kFailed;
 
 		BindSharedData(a_context);
+		const auto* graphicsState = engine::GetGraphicsState();
+		const auto currentFrame =
+			graphicsState ? graphicsState->frameCount : UINT32_MAX;
+		if (!HasCurrentFeatureDataSnapshot(
+				state.lastFrame.load(std::memory_order_relaxed),
+				currentFrame)) {
+			return FeatureDataOverrideResult::kSkipped;
+		}
+
 		const auto patched = PatchExtendedTranslucencyFeatureData(
 			state.featureDataSnapshot, a_data);
 		if (std::memcmp(
 				&patched,
-				&state.publishedFeatureData,
+				&state.publishedFeatureDataOverride,
 				sizeof(patched))
 			== 0) {
+			ID3D11Buffer* buffer = state.featureDataOverrideCB.get();
+			a_context->PSSetConstantBuffers(kFeatureDataSlot, 1, &buffer);
 			return FeatureDataOverrideResult::kUnchanged;
 		}
 		if (!WriteConstantBuffer(
 				a_context,
-				state.featureDataCB.get(),
+				state.featureDataOverrideCB.get(),
 				&patched,
 				sizeof(patched))) {
-			ID3D11Buffer* nullBuffer = nullptr;
-			a_context->PSSetConstantBuffers(
-				kFeatureDataSlot, 1, &nullBuffer);
 			CS_LOG_EVERY_MS(
 				L,
 				2000,
@@ -426,8 +446,8 @@ namespace cs::render
 				"Shared substrate feature-data override map failed.");
 			return FeatureDataOverrideResult::kFailed;
 		}
-		state.publishedFeatureData = patched;
-		ID3D11Buffer* buffer = state.featureDataCB.get();
+		state.publishedFeatureDataOverride = patched;
+		ID3D11Buffer* buffer = state.featureDataOverrideCB.get();
 		a_context->PSSetConstantBuffers(kFeatureDataSlot, 1, &buffer);
 		return FeatureDataOverrideResult::kWritten;
 	}

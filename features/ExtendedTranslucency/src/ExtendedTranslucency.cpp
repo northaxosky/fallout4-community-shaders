@@ -490,10 +490,13 @@ namespace cs::features
 			result == cs::render::FeatureDataOverrideResult::kWritten;
 		if (written) {
 			_featureBufferWrites.fetch_add(1, std::memory_order_relaxed);
-		} else if (
-			result == cs::render::FeatureDataOverrideResult::kFailed) {
-			_featureBufferWriteFailures.fetch_add(
+		} else if (result != cs::render::FeatureDataOverrideResult::kUnchanged) {
+			_featureBufferOverrideSkips.fetch_add(
 				1, std::memory_order_relaxed);
+			if (result == cs::render::FeatureDataOverrideResult::kFailed) {
+				_featureBufferWriteFailures.fetch_add(
+					1, std::memory_order_relaxed);
+			}
 		}
 
 		const auto* graphicsState = cs::engine::GetGraphicsState();
@@ -737,6 +740,11 @@ namespace cs::features
 				"feature_buffer_writes",
 				static_cast<std::int64_t>(
 					_featureBufferWrites.load(std::memory_order_relaxed)))
+			.Field(
+				"feature_buffer_override_skips",
+				static_cast<std::int64_t>(
+					_featureBufferOverrideSkips.load(
+						std::memory_order_relaxed)))
 			.Field(
 				"feature_buffer_write_failures",
 				static_cast<std::int64_t>(
