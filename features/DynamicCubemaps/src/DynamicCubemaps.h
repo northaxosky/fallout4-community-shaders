@@ -38,7 +38,7 @@ namespace cs::features
 		enum class DebugVisualization : std::uint32_t
 		{
 			kOff,
-			kRawCapture,
+			kCaptureInput,
 			kFilteredReflections,
 			kReflectionContribution
 		};

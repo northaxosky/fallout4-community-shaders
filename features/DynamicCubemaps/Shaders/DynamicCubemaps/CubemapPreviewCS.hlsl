@@ -19,7 +19,7 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float cosLatitude = cos(latitude);
 	float3 direction = float3(
 		cosLatitude * cos(longitude),
-		cosLatitude * sin(longitude),
+		-cosLatitude * sin(longitude),
 		sin(latitude));
 	float3 color = max(InputCubemap.SampleLevel(
 		LinearSampler, direction, 0.0), 0.0);

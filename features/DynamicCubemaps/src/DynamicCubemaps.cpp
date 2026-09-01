@@ -69,8 +69,8 @@ namespace cs::features
 			DynamicCubemaps::DebugVisualization a_visualization)
 		{
 			switch (a_visualization) {
-			case DynamicCubemaps::DebugVisualization::kRawCapture:
-				return "raw_capture";
+			case DynamicCubemaps::DebugVisualization::kCaptureInput:
+				return "capture_input";
 			case DynamicCubemaps::DebugVisualization::kFilteredReflections:
 				return "filtered_reflections";
 			case DynamicCubemaps::DebugVisualization::kReflectionContribution:
@@ -130,16 +130,6 @@ namespace cs::features
 			return true;
 		}
 
-		bool IsCubeSRV(ID3D11ShaderResourceView* a_srv)
-		{
-			if (!a_srv) {
-				return false;
-			}
-			D3D11_SHADER_RESOURCE_VIEW_DESC desc{};
-			a_srv->GetDesc(&desc);
-			return desc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURECUBE;
-		}
-
 		void UnbindCompute(ID3D11DeviceContext* a_context)
 		{
 			constexpr std::array<ID3D11ShaderResourceView*, 3> nullSrvs{};
@@ -189,8 +179,8 @@ namespace cs::features
 	{
 		static constexpr std::array views{
 			FeatureDebugView{
-				.id = "raw_capture",
-				.label = "Raw capture",
+				.id = "capture_input",
+				.label = "Capture input",
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const DynamicCubemaps&>(a_feature)
@@ -218,8 +208,8 @@ namespace cs::features
 	void DynamicCubemaps::SetDebugView(std::string_view a_view) noexcept
 	{
 		DebugVisualization visualization = DebugVisualization::kOff;
-		if (a_view == "raw_capture") {
-			visualization = DebugVisualization::kRawCapture;
+		if (a_view == "capture_input") {
+			visualization = DebugVisualization::kCaptureInput;
 		} else if (a_view == "filtered_reflections") {
 			visualization = DebugVisualization::kFilteredReflections;
 		} else if (a_view == "reflection_contribution") {
@@ -239,7 +229,7 @@ namespace cs::features
 		};
 		const auto visualization =
 			_debugVisualization.load(std::memory_order_acquire);
-		if ((visualization != DebugVisualization::kRawCapture &&
+		if ((visualization != DebugVisualization::kCaptureInput &&
 			 visualization != DebugVisualization::kFilteredReflections) ||
 			!_resourcesReady.load(std::memory_order_acquire) ||
 			!_previewPopulated.load(std::memory_order_acquire) ||
@@ -250,9 +240,9 @@ namespace cs::features
 		texture.width = kPreviewWidth;
 		texture.height = kPreviewHeight;
 		texture.caption = std::format(
-			"{} mip 0, equirectangular +X center/+Z up, Reinhard display; polar stretching is expected",
-			visualization == DebugVisualization::kRawCapture ?
-				"Raw reflections capture" :
+			"{} mip 0, equirectangular +X center/+Z up; screen-right is -Y; Reinhard display; polar stretching is expected",
+			visualization == DebugVisualization::kCaptureInput ?
+				"Distance-validated inference input" :
 				"Filtered reflections");
 		return texture;
 	}
@@ -1026,25 +1016,14 @@ namespace cs::features
 		auto& stream = Stream(a_reflections);
 		context->GenerateMips(stream.color.srv.get());
 
-		ID3D11ShaderResourceView* engineReflection = nullptr;
-		if (auto* rendererData = RE::BSGraphics::GetRendererData()) {
-			auto* candidate =
-				reinterpret_cast<ID3D11ShaderResourceView*>(
-					rendererData->cubeMapRenderTargets[0].srView);
-			if (IsCubeSRV(candidate)) {
-				engineReflection = candidate;
-			}
-		}
-		_usedEngineReflectionFallback.store(
-			engineReflection != nullptr, std::memory_order_relaxed);
+		// FO4 exposes no proven global-reflections cube equivalent to Skyrim's named target.
+		auto* reflectionFallback = _defaultCubemap.get();
+		_usedEngineReflectionFallback.store(false, std::memory_order_relaxed);
 		_reflectionFallbackResolved.store(true, std::memory_order_relaxed);
-		if (!engineReflection) {
-			engineReflection = _defaultCubemap.get();
-		}
 
 		std::array<ID3D11ShaderResourceView*, 3> srvs{
 			stream.color.srv.get(),
-			engineReflection,
+			reflectionFallback,
 			_defaultCubemap.get()
 		};
 		ID3D11UnorderedAccessView* uav = _inferred.mip0Uav.get();
@@ -1131,7 +1110,7 @@ namespace cs::features
 	{
 		const auto visualization =
 			_debugVisualization.load(std::memory_order_acquire);
-		if (visualization != DebugVisualization::kRawCapture &&
+		if (visualization != DebugVisualization::kCaptureInput &&
 			visualization != DebugVisualization::kFilteredReflections) {
 			return;
 		}
@@ -1141,8 +1120,8 @@ namespace cs::features
 		}
 
 		ID3D11ShaderResourceView* source =
-			visualization == DebugVisualization::kRawCapture ?
-				_reflectionsStream.raw.srv.get() :
+			visualization == DebugVisualization::kCaptureInput ?
+				_reflectionsStream.color.srv.get() :
 				_reflections.srv.get();
 		if (!source) {
 			return;
