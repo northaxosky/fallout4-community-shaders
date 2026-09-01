@@ -7,7 +7,7 @@ cbuffer PerFrame : register(b12)
 
 #ifdef BSWATER_VERTEX_SHADER
 
-#define DirectionalAmbient (float3x4(perFrame[0], perFrame[1], perFrame[2]))
+#define WorldToView (float3x4(perFrame[0], perFrame[1], perFrame[2]))
 #define PosAdjust (perFrame[35])
 
 #if defined(NORMAL_TEXCOORD) || defined(WADING)
@@ -135,7 +135,7 @@ VS_OUTPUT main(VS_INPUT input)
 #endif
 
 #ifdef HAS_SURFACE
-	vsout.TexCoord5 = mul(DirectionalAmbient, float4(worldPosition, 1.0));
+	vsout.TexCoord5 = mul(WorldToView, float4(worldPosition, 1.0));
 #endif
 
 #ifdef CLIP_VOLUME
@@ -390,13 +390,13 @@ float4 main(PS_INPUT input) : SV_Target0
 	normal = lerp(float3(0.0, 0.0, 1.0), lerp(float3(0.0, 0.0, 1.0), normal, perMaterial[9].x), perMaterial[11].y);
 	normal = normalize(normal);
 
-	float3 worldNormal;
-	worldNormal.x = dot(perFrame[0], float4(normal, 1.0));
-	worldNormal.y = dot(perFrame[1], float4(normal, 1.0));
-	worldNormal.z = dot(perFrame[2], float4(normal, 1.0));
+	float3 viewNormal;
+	viewNormal.x = dot(perFrame[0], float4(normal, 1.0));
+	viewNormal.y = dot(perFrame[1], float4(normal, 1.0));
+	viewNormal.z = dot(perFrame[2], float4(normal, 1.0));
 
 	float3 viewDirection = normalize(-input.eyeToPosition);
-	float3 reflected = reflect(-viewDirection, worldNormal);
+	float3 reflected = reflect(-viewDirection, viewNormal);
 	float sunGlare = pow(max(dot(-viewDirection, perGeometry[2].xyz), 0.0), perGeometry[3].w) * perGeometry[2].w;
 
 	float3 lightColor = perGeometry[2].w * perGeometry[3].xyz;
@@ -600,12 +600,12 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 #ifdef BSWATER_RAY_SURFACE
 	float3 viewDirection = normalize(-input.eyeToPosition);
 
-	float3 worldNormal;
-	worldNormal.x = dot(perFrame[0], float4(normal, 1.0));
-	worldNormal.y = dot(perFrame[1], float4(normal, 1.0));
-	worldNormal.z = dot(perFrame[2], float4(normal, 1.0));
+	float3 viewNormal;
+	viewNormal.x = dot(perFrame[0], float4(normal, 1.0));
+	viewNormal.y = dot(perFrame[1], float4(normal, 1.0));
+	viewNormal.z = dot(perFrame[2], float4(normal, 1.0));
 
-	float3 reflected = reflect(-viewDirection, worldNormal);
+	float3 reflected = reflect(-viewDirection, viewNormal);
 
 	float4 startClip = toClip(input.eyeToPosition);
 	float3 start = startClip.xyz / startClip.w;
@@ -621,13 +621,13 @@ PS_OUTPUT_SSLR main(PS_INPUT input)
 	float3 delta = endScreen - startScreen;
 	float2 rayUv = -end.z * (delta.xy * (1.0 / delta.z)) + endUv;
 #else
-	float3 worldNormal;
-	worldNormal.x = dot(perFrame[0], float4(normal, 1.0));
-	worldNormal.y = dot(perFrame[1], float4(normal, 1.0));
-	worldNormal.z = dot(perFrame[2], float4(normal, 1.0));
+	float3 viewNormal;
+	viewNormal.x = dot(perFrame[0], float4(normal, 1.0));
+	viewNormal.y = dot(perFrame[1], float4(normal, 1.0));
+	viewNormal.z = dot(perFrame[2], float4(normal, 1.0));
 
 	float3 viewDirection = normalize(-input.eyeToPosition);
-	float3 reflected = reflect(-viewDirection, worldNormal);
+	float3 reflected = reflect(-viewDirection, viewNormal);
 	float3 far = reflected * 1000.0 + input.eyeToPosition;
 	bool visible = perGeometry[7].y < reflected.z;
 
@@ -713,11 +713,11 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 ambient = pow(saturate(dot(normal, float3(-0.099, -0.099, 0.990))), perMaterial[0].w) * lightColor;
 	ambient = ambient * perMaterial[10].z;
 
-	float3 worldNormal;
-	worldNormal.x = dot(perFrame[0], float4(normal, 1.0));
-	worldNormal.y = dot(perFrame[1], float4(normal, 1.0));
-	worldNormal.z = dot(perFrame[2], float4(normal, 1.0));
-	float3 reflected = reflect(-viewDirection, worldNormal);
+	float3 viewNormal;
+	viewNormal.x = dot(perFrame[0], float4(normal, 1.0));
+	viewNormal.y = dot(perFrame[1], float4(normal, 1.0));
+	viewNormal.z = dot(perFrame[2], float4(normal, 1.0));
+	float3 reflected = reflect(-viewDirection, viewNormal);
 	float3 specular = pow(saturate(dot(reflected, perGeometry[2].xyz)), perMaterial[8].x) * lightColor;
 	float3 lighting = specular * perMaterial[1].w + ambient;
 #endif
