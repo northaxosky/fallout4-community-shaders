@@ -39,15 +39,54 @@ namespace DynamicCubemaps
 			cubeSampler, float4(direction, nativeSlice), lod).rgb;
 		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
 			return nativeSample;
-		float3 dynamicSample =
+
+		float3 environmentSample =
+			EnvironmentTexture.SampleLevel(cubeSampler, direction, lod);
+		float3 reflectionsSample =
 			ReflectionsTexture.SampleLevel(cubeSampler, direction, lod);
-		float3 dynamicCoarse =
-			ReflectionsTexture.SampleLevel(cubeSampler, direction, 8.0);
-		float coarseLuminance = Luminance(ToLinear(dynamicCoarse));
+		float3 environmentCoarse =
+			EnvironmentTexture.SampleLevel(cubeSampler, direction, 8.0);
 		float nativeDirectionalAmbient = Luminance(ToLinear(nativeSample));
-		float3 normalized =
-			ToLinear(dynamicSample) / max(coarseLuminance, 0.001);
-		return ToGamma(normalized * nativeDirectionalAmbient);
+		float environmentLuminance = Luminance(ToLinear(environmentCoarse));
+		float3 environmentSpecular =
+			ToLinear(environmentSample) /
+			max(environmentLuminance, 0.001) *
+			nativeDirectionalAmbient;
+		float3 skySpecular = SharedData::InInterior != 0 ?
+			0.0 :
+			ToLinear(max(0.0, reflectionsSample - environmentSample));
+		return ToGamma(environmentSpecular + skySpecular);
+	}
+
+	float3 SampleDynamicEnvironment(
+		SamplerState cubeSampler,
+		float3 direction,
+		float lod)
+	{
+		float3 environmentSample =
+			EnvironmentTexture.SampleLevel(cubeSampler, direction, lod);
+		float3 reflectionsSample =
+			ReflectionsTexture.SampleLevel(cubeSampler, direction, lod);
+		float3 skySample = SharedData::InInterior != 0 ?
+			0.0 :
+			max(0.0, reflectionsSample - environmentSample);
+		return ToGamma(ToLinear(environmentSample) + ToLinear(skySample));
+	}
+
+	bool IsForwardSentinel(
+		TextureCube<float4> nativeTexture,
+		SamplerState cubeSampler)
+	{
+		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
+			return false;
+		uint width;
+		uint height;
+		nativeTexture.GetDimensions(width, height);
+		if (width != 1 || height != 1)
+			return false;
+		float3 sentinel = nativeTexture.SampleLevel(
+			cubeSampler, float3(0.0, 1.0, 0.0), 15.0).rgb;
+		return all(sentinel == 0.0);
 	}
 
 	float3 ApplyFullscreenDebug(float3 color, float3 contribution)

@@ -889,7 +889,7 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
-	constexpr std::size_t kDynamicCubemapPermutations = 6;
+	constexpr std::size_t kDynamicCubemapPermutations = 7;
 
 	std::size_t AddDynamicCubemaps(
 		std::vector<ShaderCompileJob>& a_jobs,
@@ -908,6 +908,7 @@ namespace
 			root / "InferCubemapCS.hlsl",
 			{ { "REFLECTIONS", "1" } });
 		AddCompile(a_jobs, root / "SpecularIrradianceCS.hlsl", {});
+		AddCompile(a_jobs, root / "BC6HEncodeCS.hlsl", {});
 		AddCompile(a_jobs, root / "CubemapPreviewCS.hlsl", {});
 		return a_jobs.size() - firstJob;
 	}
@@ -1096,7 +1097,7 @@ namespace
 	// The SSGI composition extends the existing plugin texture block.
 	constexpr std::array kCompositionTextureSlots{ 26u, 27u, 28u, 29u };
 	constexpr UINT kGbufferNormalTextureSlot = 25;
-	constexpr std::array kDynamicCubemapTextureSlots{ 17u };
+	constexpr std::array kDynamicCubemapTextureSlots{ 16u, 17u };
 
 	// only families that can isolate directional ambient carry the composition
 	constexpr std::array kAmbientCompositionFamilies{
@@ -1231,6 +1232,31 @@ namespace
 			&& a_registration.stage == cs::engine::ShaderStage::kPixel
 			&& DeclaresFamily(
 				a_registration, kDynamicCubemapCompositeFamilies);
+	}
+
+	bool IsDynamicCubemapForwardConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration&
+			a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsLighting
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& a_registration.compilation.defines.contains("BSL_ENVMAP");
+	}
+
+	bool IsDynamicCubemapWaterConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration&
+			a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsWater
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& a_registration.compilation.defines.contains("REFLECTIONS")
+			&& !a_registration.compilation.defines.contains("FOG")
+			&& !a_registration.compilation.defines.contains("SPECULAR")
+			&& !a_registration.compilation.defines.contains("STENCIL")
+			&& !a_registration.compilation.defines.contains(
+				"STENCIL_DISPLACEMENT");
 	}
 
 	bool IsWetnessConsumer(
@@ -1567,6 +1593,31 @@ namespace
 		std::size_t inverseSquareRows = 0;
 		std::size_t inverseSquareInertRows = 0;
 		for (const auto& registration : registrations) {
+			if (registration.stage == cs::engine::ShaderStage::kPixel &&
+				(registration.targetId
+						== cs::engine::ShaderInjectionTarget::kBsLighting ||
+				 registration.targetId
+						== cs::engine::ShaderInjectionTarget::kBsWater)) {
+				SlotExpectations slots;
+				const bool consumesDynamicCubemaps =
+					IsDynamicCubemapForwardConsumer(registration) ||
+					IsDynamicCubemapWaterConsumer(registration);
+				auto& cubemapSlots = consumesDynamicCubemaps ?
+					slots.requiredTextures :
+					slots.forbiddenTextures;
+				cubemapSlots.assign(
+					kDynamicCubemapTextureSlots.begin(),
+					kDynamicCubemapTextureSlots.end());
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					{ { kDynamicCubemaps, "1" } },
+					nullptr,
+					std::move(slots));
+				++contributorCompositionCount;
+			}
+
 			if (registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight) {
 				if (IsWetnessDirectConsumer(registration))

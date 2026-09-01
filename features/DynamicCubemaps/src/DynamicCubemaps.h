@@ -82,6 +82,7 @@ namespace cs::features
 	private:
 		static constexpr std::uint32_t kCubemapSize = 256;
 		static constexpr std::uint32_t kMipLevels = 9;
+		static constexpr std::uint32_t kBc6hMipLevels = 7;
 		static constexpr std::uint32_t kPreviewWidth = 512;
 		static constexpr std::uint32_t kPreviewHeight = 256;
 		static constexpr std::uint32_t kDynamicCubemapPSSlot = 16;
@@ -104,6 +105,12 @@ namespace cs::features
 			bool reset = true;
 		};
 
+		struct CompressedCube
+		{
+			winrt::com_ptr<ID3D11Texture2D> texture;
+			winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		};
+
 		struct alignas(16) UpdateCubemapCB
 		{
 			DirectX::XMFLOAT4 ViewToWorld[3];
@@ -121,14 +128,22 @@ namespace cs::features
 			float pad[3]{};
 		};
 
+		struct alignas(16) BC6HEncodeCB
+		{
+			std::uint32_t textureSizeInBlocksX = 0;
+			std::uint32_t textureSizeInBlocksY = 0;
+			std::uint32_t mipLevel = 0;
+			std::uint32_t pad = 0;
+		};
+
 		enum class NextTask : std::uint32_t
 		{
 			kCaptureInferAndIrradianceA,
 			kIrradianceBA,
-			kIrradianceBB,
+			kIrradianceBBAndBC6H,
 			kCaptureInferAndIrradianceA2,
 			kIrradianceBA2,
-			kIrradianceBB2
+			kIrradianceBBAndBC6H2
 		};
 
 		DynamicCubemaps() = default;
@@ -136,7 +151,8 @@ namespace cs::features
 		void SaveSettings();
 		void PublishSettings() noexcept;
 		void SaveBindings();
-		void RestoreBindings();
+		void RestoreAndPublishBindings();
+		void BindDeferredCubemaps(ID3D11DeviceContext* a_context);
 		void BindCubemaps(ID3D11DeviceContext* a_context);
 		void UpdateCubemap();
 		void UpdateCubemapCapture(bool a_reflections);
@@ -146,10 +162,12 @@ namespace cs::features
 			std::uint32_t a_startLevel,
 			std::uint32_t a_endLevel,
 			bool a_doSetup);
+		void CompressToBC6H(bool a_reflections);
 		void RenderCubemapPreview();
 		FeatureDebugTexture GetCubemapDebugTexture() const;
 		bool CreateResources(ID3D11Device* a_device);
 		void ResetCapture();
+		ID3D11ShaderResourceView* ResolveReflectionFallback() const noexcept;
 
 		CaptureStream& Stream(bool a_reflections);
 		CubeTexture& Filtered(bool a_reflections);
@@ -167,6 +185,7 @@ namespace cs::features
 		std::atomic_uint32_t _captureSourceHeight{ 0 };
 		std::atomic_uint32_t _captureSourceFormat{ 0 };
 		std::atomic_uint64_t _dispatchCount{ 0 };
+		std::atomic_uint64_t _compressionDispatchCount{ 0 };
 		std::atomic_uint64_t _previewDispatchCount{ 0 };
 		std::atomic_uint64_t _repeatCallbacks{ 0 };
 		std::atomic<DebugVisualization> _debugVisualization{
@@ -179,6 +198,15 @@ namespace cs::features
 		CubeTexture _inferred;
 		CubeTexture _environment;
 		CubeTexture _reflections;
+		CompressedCube _environmentBC6H;
+		CompressedCube _reflectionsBC6H;
+		winrt::com_ptr<ID3D11ShaderResourceView> _environmentArraySRV;
+		winrt::com_ptr<ID3D11ShaderResourceView> _reflectionsArraySRV;
+		winrt::com_ptr<ID3D11Texture2D> _bc6hScratchTexture;
+		std::array<
+			winrt::com_ptr<ID3D11UnorderedAccessView>,
+			kBc6hMipLevels>
+			_bc6hScratchUAVs;
 		winrt::com_ptr<ID3D11Texture2D> _previewTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _previewSRV;
 		winrt::com_ptr<ID3D11UnorderedAccessView> _previewUAV;
@@ -188,18 +216,20 @@ namespace cs::features
 		winrt::com_ptr<ID3D11SamplerState> _computeSampler;
 		winrt::com_ptr<ID3D11Buffer> _updateBuffer;
 		winrt::com_ptr<ID3D11Buffer> _filterBuffer;
+		winrt::com_ptr<ID3D11Buffer> _bc6hBuffer;
 		winrt::com_ptr<ID3D11ComputeShader> _updateCS;
 		winrt::com_ptr<ID3D11ComputeShader> _updateReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _irradianceCS;
+		winrt::com_ptr<ID3D11ComputeShader> _bc6hEncodeCS;
 		winrt::com_ptr<ID3D11ComputeShader> _previewCS;
 
 		cs::render::PixelShaderResourceSnapshot<kDynamicCubemapPSSlotCount>
 			_engineBindings;
 
 		std::atomic<NextTask> _nextTask{
-			NextTask::kCaptureInferAndIrradianceA2
+			NextTask::kCaptureInferAndIrradianceA
 		};
 		float _previousHoursPassed = 0.0f;
 		std::uint32_t _lastCallbackFrame = 0;

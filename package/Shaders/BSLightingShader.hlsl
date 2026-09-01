@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 // Copyright (c) 2026 northaxosky
+#if defined(DYNAMIC_CUBEMAPS)
+#include "DynamicCubemaps/DynamicCubemaps.hlsli"
+#endif
+
 #ifdef BSLIGHTING_PS_COLOR
 
 #ifdef BSL_BASE_BLEND_TINT
@@ -642,8 +646,19 @@ PSOutput main(PSInput input)
     float envStrength =
         envMask * min(1.0 / rsqrt(saturate(material.y - 0.3)), 1.0) * geometryData[11].y;
     float3 envReflect = -(2.0 * NdotV * normal - viewDirection);
+#ifdef DYNAMIC_CUBEMAPS
+    bool dynamicCubemap = DynamicCubemaps::IsForwardSentinel(
+        environmentTexture, environmentSampler);
+    float3 envSample = dynamicCubemap ?
+        DynamicCubemaps::SampleDynamicEnvironment(
+            environmentSampler, envReflect, envLod) :
+        environmentTexture.SampleLevel(
+            environmentSampler, envReflect, envLod).xyz;
+    float3 envColor = envSample * envStrength * materialData[2].x;
+#else
     float3 envColor = environmentTexture.SampleLevel(
         environmentSampler, envReflect, envLod).xyz * envStrength * materialData[2].x;
+#endif
 #endif
 
     float3 accumulated = lightsDiffuse + emitColor;
@@ -997,8 +1012,19 @@ PSOutput main(PSInput input)
     float envStrength =
         envMask * min(1.0 / rsqrt(saturate(material.y - 0.3)), 1.0) * geometryData[11].y;
     float3 envReflect = -(2.0 * NdotV * normal - viewDirection);
+#ifdef DYNAMIC_CUBEMAPS
+    bool dynamicCubemap = DynamicCubemaps::IsForwardSentinel(
+        environmentTexture, environmentSampler);
+    float3 envSample = dynamicCubemap ?
+        DynamicCubemaps::SampleDynamicEnvironment(
+            environmentSampler, envReflect, envLod) :
+        environmentTexture.SampleLevel(
+            environmentSampler, envReflect, envLod).xyz;
+    float3 envColor = envSample * envStrength * materialData[2].x;
+#else
     float3 envColor = environmentTexture.SampleLevel(
         environmentSampler, envReflect, envLod).xyz * envStrength * materialData[2].x;
+#endif
 #endif
 
     float3 accumulated = lightsDiffuse + emitColor;

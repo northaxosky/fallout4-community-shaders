@@ -148,6 +148,10 @@ VS_OUTPUT main(VS_INPUT input)
 
 #ifdef BSWATER_PIXEL_SHADER
 
+#ifdef DYNAMIC_CUBEMAPS
+#include "DynamicCubemaps/DynamicCubemaps.hlsli"
+#endif
+
 cbuffer PerGeometry : register(b0)
 {
 	float4 perGeometry[8];
@@ -302,14 +306,28 @@ float3 refractedScene(float2 screenPosition, float3 normal, out float3 unclipped
 
 #endif
 
-float3 surfaceColor(float slope, float2 screenUv)
+float3 surfaceColor(
+	float slope,
+	float2 screenUv,
+	float3 reflectionDirection,
+	float cameraDistance)
 {
 	float3 color = lerp(perMaterial[3].xyz, perMaterial[4].xyz, saturate(slope + 0.75));
 	color = lerp(color, perMaterial[5].xyz, saturate(slope * 1.9 + 0.35));
-#if defined(SSLR) && defined(REFLECTIONS)
+#if defined(REFLECTIONS)
+#ifdef DYNAMIC_CUBEMAPS
+	if (SharedData::dynamicCubemapsSettings.Enabled != 0) {
+		float3 dynamicCubemap = DynamicCubemaps::SampleDynamicEnvironment(
+			sampler4, reflectionDirection, 0.0);
+		float nativeAmount = saturate(cameraDistance / 1024.0);
+		color = lerp(dynamicCubemap, color, nativeAmount);
+	}
+#endif
+#ifdef SSLR
 	float2 clamped = min(screenUv, perGeometry[1].xy);
 	float4 reflection = lerp(texture9.SampleLevel(sampler9, clamped, 0.0), texture10.SampleLevel(sampler10, clamped, 0.0), perGeometry[7].x);
 	color = lerp(color, reflection.xyz, reflection.w);
+#endif
 #endif
 	return color;
 }
@@ -406,8 +424,13 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 lighting = specular * perMaterial[1].w + ambient;
 
 	float3 eyeDirection = normalize(input.eyeVector.xyz);
-	float slope = reflect(eyeDirection, normal).z;
-	float3 color = lerp(perMaterial[2].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy), perMaterial[2].w) + lighting;
+	float3 reflectionDirection = reflect(eyeDirection, normal);
+	float slope = reflectionDirection.z;
+	float3 color = lerp(perMaterial[2].xyz, surfaceColor(
+		slope,
+		input.screenPosition.xy * perGeometry[0].xy,
+		reflectionDirection,
+		input.eyeVector.w), perMaterial[2].w) + lighting;
 	float fogAlpha;
 	float3 fog = atmosphere(input.eyeToPosition, fogAlpha);
 	fog = lerp(fog, perGeometry[3].xyz, sunGlare);
@@ -477,9 +500,14 @@ float4 main(PS_INPUT input) : SV_Target0
 	float3 unclipped;
 	float3 refraction = refractedScene(input.screenPosition.xy, normal, unclipped);
 	float3 eyeDirection = normalize(input.eyeVector.xyz);
-	float slope = reflect(eyeDirection, normal).z;
+	float3 reflectionDirection = reflect(eyeDirection, normal);
+	float slope = reflectionDirection.z;
 	float grazing = 1.0 - saturate(dot(-eyeDirection, -normal));
-	float3 water = lerp(perMaterial[0].xyz, surfaceColor(slope, input.screenPosition.xy * perGeometry[0].xy), 0.5);
+	float3 water = lerp(perMaterial[0].xyz, surfaceColor(
+		slope,
+		input.screenPosition.xy * perGeometry[0].xy,
+		reflectionDirection,
+		input.eyeVector.w), 0.5);
 	return float4(lerp(water, refraction, 1.0 - fresnelTerm(grazing)), 0.0);
 }
 
@@ -692,8 +720,13 @@ float4 main(PS_INPUT input) : SV_Target0
 
 	float grazing = 1.0 - saturate(dot(-eyeDirection, normal));
 	float fresnel = fresnelTerm(grazing);
-	float slope = reflect(eyeDirection, normal).z;
-	float3 water = surfaceColor(slope, screenUv);
+	float3 reflectionDirection = reflect(eyeDirection, normal);
+	float slope = reflectionDirection.z;
+	float3 water = surfaceColor(
+		slope,
+		screenUv,
+		reflectionDirection,
+		input.eyeVector.w);
 	float3 tinted = lerp(perMaterial[2].xyz, water, perMaterial[2].w);
 
 	float3 unclipped;

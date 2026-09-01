@@ -58,7 +58,7 @@ injected in place of the stock shaders.
 | **Terrain Shadows** | Long-range worldspace terrain shadowing from an xLODGen heightmap, marched into a shadow-height map and multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
 | **Inverse Square Lighting** | Configurable interior/exterior inverse-square attenuation for owned deferred opaque punctual lights, with a softened near field. |
-| **Dynamic Cubemaps** | Scene capture and GGX-prefiltered environment reflections for the deferred composite's native IBL materials. |
+| **Dynamic Cubemaps** | Scene capture and GGX-prefiltered environment reflections for native deferred IBL, opted-in forward materials, and water. |
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
 | **Upscaling** | DLSS and FSR 3 super-resolution, TAA, and AMD FSR 3 frame generation through a D3D11-facing D3D12 proxy. |
