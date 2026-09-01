@@ -151,8 +151,7 @@ namespace cs::features
 		void SaveSettings();
 		void PublishSettings() noexcept;
 		void SaveBindings();
-		void RestoreAndPublishBindings();
-		void BindDeferredCubemaps(ID3D11DeviceContext* a_context);
+		void RestoreBindings();
 		void BindCubemaps(ID3D11DeviceContext* a_context);
 		void UpdateCubemap();
 		void UpdateCubemapCapture(bool a_reflections);

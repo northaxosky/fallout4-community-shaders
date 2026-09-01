@@ -319,8 +319,10 @@ float3 surfaceColor(
 	if (SharedData::dynamicCubemapsSettings.Enabled != 0) {
 		float3 dynamicCubemap = DynamicCubemaps::SampleDynamicEnvironment(
 			sampler4, reflectionDirection, 0.0);
-		float nativeAmount = saturate(cameraDistance / 1024.0);
-		color = lerp(dynamicCubemap, color, nativeAmount);
+		if (any(dynamicCubemap > 0.0)) {
+			float nativeAmount = saturate(cameraDistance / 1024.0);
+			color = lerp(dynamicCubemap, color, nativeAmount);
+		}
 	}
 #endif
 #ifdef SSLR

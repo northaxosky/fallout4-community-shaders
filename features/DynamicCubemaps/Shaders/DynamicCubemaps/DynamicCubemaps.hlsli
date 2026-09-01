@@ -44,8 +44,9 @@ namespace DynamicCubemaps
 			EnvironmentTexture.SampleLevel(cubeSampler, direction, lod);
 		float3 reflectionsSample =
 			ReflectionsTexture.SampleLevel(cubeSampler, direction, lod);
+		// An intentionally out-of-range LOD clamps to the coarsest published mip.
 		float3 environmentCoarse =
-			EnvironmentTexture.SampleLevel(cubeSampler, direction, 8.0);
+			EnvironmentTexture.SampleLevel(cubeSampler, direction, 15.0);
 		float nativeDirectionalAmbient = Luminance(ToLinear(nativeSample));
 		float environmentLuminance = Luminance(ToLinear(environmentCoarse));
 		float3 environmentSpecular =

@@ -319,13 +319,8 @@ namespace cs::features
 					return _registrationsReady.load(
 						std::memory_order_acquire);
 				},
-				.bind = [this, a_target](ID3D11DeviceContext* a_context) {
-					if (a_target ==
-						cs::engine::ShaderInjectionTarget::kBsdfComposite) {
-						BindDeferredCubemaps(a_context);
-					} else {
-						BindCubemaps(a_context);
-					}
+				.bind = [this](ID3D11DeviceContext* a_context) {
+					BindCubemaps(a_context);
 				},
 				.slotClaims = std::move(slotClaims)
 			});
@@ -374,7 +369,7 @@ namespace cs::features
 		if (!cs::engine::RegisterPostDeferredComposite(
 				[] {
 					DynamicCubemaps::GetSingleton()->
-						RestoreAndPublishBindings();
+						RestoreBindings();
 				},
 				cs::engine::HookPriority::Late)) {
 			FailLoad(
@@ -862,14 +857,10 @@ namespace cs::features
 		}
 	}
 
-	void DynamicCubemaps::RestoreAndPublishBindings()
+	void DynamicCubemaps::RestoreBindings()
 	{
 		auto* context = cs::engine::GetImmediateContext();
 		_engineBindings.Restore(context);
-		if (_injectionsOperational.load(std::memory_order_acquire) &&
-			_resourcesReady.load(std::memory_order_acquire)) {
-			BindCubemaps(context);
-		}
 	}
 
 	void DynamicCubemaps::BindCubemaps(ID3D11DeviceContext* a_context)
@@ -883,26 +874,6 @@ namespace cs::features
 			views = {
 				_environmentBC6H.srv.get(),
 				_reflectionsBC6H.srv.get()
-			};
-		}
-		a_context->PSSetShaderResources(
-			kDynamicCubemapPSSlot,
-			static_cast<UINT>(views.size()),
-			views.data());
-	}
-
-	void DynamicCubemaps::BindDeferredCubemaps(
-		ID3D11DeviceContext* a_context)
-	{
-		if (!a_context) {
-			return;
-		}
-		std::array<ID3D11ShaderResourceView*, 2> views{};
-		if (_injectionsOperational.load(std::memory_order_acquire) &&
-			_resourcesReady.load(std::memory_order_acquire)) {
-			views = {
-				_environment.srv.get(),
-				_reflections.srv.get()
 			};
 		}
 		a_context->PSSetShaderResources(
@@ -926,7 +897,7 @@ namespace cs::features
 	ID3D11ShaderResourceView*
 		DynamicCubemaps::ResolveReflectionFallback() const noexcept
 	{
-		// FO4 has no proven global-reflections cube equivalent to Skyrim's named target.
+		// FO4 has no global reflection cube, so inference uses the bundled fallback.
 		return _defaultCubemap.get();
 	}
 
