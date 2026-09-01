@@ -344,11 +344,27 @@ namespace
 
 	void TestAtomicWriteRoundTrip(const std::filesystem::path& a_root)
 	{
+		const auto defaultPath = a_root / "Atomic.Default.toml";
 		const auto userPath = a_root / "Atomic.User.toml";
+		WriteFile(
+			defaultPath,
+			"[logging]\n"
+			"telemetry = false\n"
+			"[shader_ownership]\n"
+			"enabled = false\n"
+			"[features.RenderDoc]\n"
+			"load = false\n");
 		WriteFile(
 			userPath,
 			"[logging]\n"
 			"level = \"debug\"\n"
+			"telemetry = true\n"
+			"[shader_ownership]\n"
+			"enabled = true\n"
+			"[features.RenderDoc]\n"
+			"load = true\n"
+			"[features.RenderDoc.settings]\n"
+			"dll_path = 'C:\\Program Files\\RenderDoc\\renderdoc.dll'\n"
 			"[features.One]\n"
 			"load = true\n"
 			"[features.One.settings]\n"
@@ -361,6 +377,11 @@ namespace
 			std::string_view("One"),
 			std::string_view("settings")
 		};
+		const auto loaded =
+			cs::feature_config::ReloadFromFiles(defaultPath, userPath);
+		CHECK(loaded.defaultLoaded);
+		CHECK(loaded.userLoaded);
+		CHECK(std::filesystem::remove(userPath));
 		const auto result = cs::feature_config::UpdateUserTableAt(
 			userPath, path, Parse("enabled = true\nquality = 3\n"));
 		CHECK(result.success);
@@ -369,10 +390,26 @@ namespace
 		const auto written = cs::feature_config::LoadFile(userPath);
 		CHECK(written.status == cs::feature_config::FileLoadStatus::kParsed);
 		CHECK(written.table["logging"]["level"].value<std::string>() == std::optional<std::string>{ "debug" });
+		CHECK(written.table["logging"]["telemetry"].value<bool>() == std::optional<bool>{ true });
+		CHECK(written.table["shader_ownership"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(written.table["features"]["RenderDoc"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(
+			written.table["features"]["RenderDoc"]["settings"]["dll_path"].value<std::string>() ==
+			std::optional<std::string>{ "C:\\Program Files\\RenderDoc\\renderdoc.dll" });
 		CHECK(written.table["features"]["One"]["load"].value<bool>() == std::optional<bool>{ true });
 		CHECK(written.table["features"]["One"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
 		CHECK(written.table["features"]["One"]["settings"]["quality"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
 		CHECK(written.table["features"]["Two"]["load"].value<bool>() == std::optional<bool>{ false });
+
+		const auto reloaded =
+			cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		CHECK(reloaded.defaultLoaded);
+		CHECK(reloaded.userLoaded);
+		CHECK(reloaded.root["logging"]["telemetry"].value<bool>() == std::optional<bool>{ true });
+		CHECK(reloaded.root["shader_ownership"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(
+			reloaded.root["features"]["RenderDoc"]["settings"]["dll_path"].value<std::string>() ==
+			std::optional<std::string>{ "C:\\Program Files\\RenderDoc\\renderdoc.dll" });
 	}
 
 	void TestScalarReaders()

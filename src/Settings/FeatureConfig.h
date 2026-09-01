@@ -36,6 +36,8 @@ namespace cs::feature_config
 	struct UnifiedLoadResult
 	{
 		toml::table root;
+		toml::table userRoot;
+		FileLoadStatus userStatus{ FileLoadStatus::kMissing };
 		bool defaultLoaded{ false };
 		bool userLoaded{ false };
 		std::string defaultError;
@@ -44,6 +46,9 @@ namespace cs::feature_config
 
 	void DeepMerge(toml::table& a_base, const toml::table& a_override);
 	UnifiedLoadResult LoadMergedFiles(
+		const std::filesystem::path& a_defaultPath,
+		const std::filesystem::path& a_userPath);
+	UnifiedLoadResult ReloadFromFiles(
 		const std::filesystem::path& a_defaultPath,
 		const std::filesystem::path& a_userPath);
 	UnifiedLoadResult Reload();

@@ -34,6 +34,30 @@ namespace cs::feature_config
 			return loaded;
 		}
 
+		std::filesystem::path& CachedUserPath()
+		{
+			static std::filesystem::path path;
+			return path;
+		}
+
+		toml::table& CachedUserRoot()
+		{
+			static toml::table root;
+			return root;
+		}
+
+		FileLoadStatus& CachedUserStatus()
+		{
+			static FileLoadStatus status = FileLoadStatus::kMissing;
+			return status;
+		}
+
+		std::string& CachedUserError()
+		{
+			static std::string error;
+			return error;
+		}
+
 		std::string PathText(const std::filesystem::path& a_path)
 		{
 			return a_path.string();
@@ -140,23 +164,60 @@ namespace cs::feature_config
 			std::scoped_lock lock(ConfigMutex());
 
 			toml::table user;
-			auto load = LoadFile(a_path);
-			switch (load.status) {
-			case FileLoadStatus::kMissing:
-				break;
-			case FileLoadStatus::kParsed:
-				user = std::move(load.table);
-				break;
-			case FileLoadStatus::kParseError:
-			case FileLoadStatus::kIoError:
-				return WriteError(a_path, load.error);
+			const bool useCachedUser =
+				CachedDefaultLoaded() && a_path == CachedUserPath();
+			if (useCachedUser) {
+				// The loaded delta is authoritative when virtualized reads and writes resolve differently.
+				switch (CachedUserStatus()) {
+				case FileLoadStatus::kMissing:
+					break;
+				case FileLoadStatus::kParsed:
+					user = CachedUserRoot();
+					break;
+				case FileLoadStatus::kParseError:
+				case FileLoadStatus::kIoError:
+					return WriteError(a_path, CachedUserError());
+				}
+			} else {
+				auto load = LoadFile(a_path);
+				switch (load.status) {
+				case FileLoadStatus::kMissing:
+					break;
+				case FileLoadStatus::kParsed:
+					user = std::move(load.table);
+					break;
+				case FileLoadStatus::kParseError:
+				case FileLoadStatus::kIoError:
+					return WriteError(a_path, load.error);
+				}
 			}
 
 			std::string error;
 			if (!a_mutator(user, error)) {
 				return WriteError(a_path, error);
 			}
-			return AtomicWrite(a_path, user);
+			const auto write = AtomicWrite(a_path, user);
+			if (!write) {
+				return write;
+			}
+			if (useCachedUser) {
+				CachedUserRoot() = user;
+				CachedUserStatus() = FileLoadStatus::kParsed;
+				CachedUserError().clear();
+			}
+
+			const auto verification = LoadFile(a_path);
+			if (verification.status != FileLoadStatus::kParsed) {
+				return WriteError(
+					a_path,
+					"write verification failed: " + verification.error);
+			}
+			if (verification.table != user) {
+				return WriteError(
+					a_path,
+					"written configuration did not read back as expected");
+			}
+			return { .success = true };
 		}
 
 		bool ReadRequiredOwnershipBool(
@@ -267,11 +328,13 @@ namespace cs::feature_config
 		result.defaultLoaded = true;
 
 		auto userLoad = LoadFile(a_userPath);
+		result.userStatus = userLoad.status;
 		switch (userLoad.status) {
 		case FileLoadStatus::kMissing:
 			break;
 		case FileLoadStatus::kParsed:
-			DeepMerge(result.root, userLoad.table);
+			result.userRoot = std::move(userLoad.table);
+			DeepMerge(result.root, result.userRoot);
 			result.userLoaded = true;
 			break;
 		case FileLoadStatus::kParseError:
@@ -284,11 +347,22 @@ namespace cs::feature_config
 
 	UnifiedLoadResult Reload()
 	{
-		auto result = LoadMergedFiles(kDefaultConfigPath, kUserConfigPath);
+		return ReloadFromFiles(kDefaultConfigPath, kUserConfigPath);
+	}
+
+	UnifiedLoadResult ReloadFromFiles(
+		const std::filesystem::path& a_defaultPath,
+		const std::filesystem::path& a_userPath)
+	{
+		auto result = LoadMergedFiles(a_defaultPath, a_userPath);
 		{
 			std::scoped_lock lock(ConfigMutex());
 			CachedRoot() = result.root;
 			CachedDefaultLoaded() = result.defaultLoaded;
+			CachedUserPath() = a_userPath;
+			CachedUserRoot() = result.userRoot;
+			CachedUserStatus() = result.userStatus;
+			CachedUserError() = result.userWarning;
 		}
 		return result;
 	}
