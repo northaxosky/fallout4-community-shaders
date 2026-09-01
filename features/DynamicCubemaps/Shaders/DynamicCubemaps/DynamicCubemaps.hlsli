@@ -1,9 +1,7 @@
 #ifndef DYNAMIC_CUBEMAPS_HLSLI
 #define DYNAMIC_CUBEMAPS_HLSLI
 
-#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
 #include "Common/SharedData.hlsli"
-#endif
 
 namespace DynamicCubemaps
 {
@@ -39,6 +37,8 @@ namespace DynamicCubemaps
 
 		float3 nativeSample = nativeTexture.SampleLevel(
 			cubeSampler, float4(direction, nativeSlice), lod).rgb;
+		if (SharedData::dynamicCubemapsSettings.Enabled == 0)
+			return nativeSample;
 		float3 dynamicSample =
 			ReflectionsTexture.SampleLevel(cubeSampler, direction, lod);
 		float3 dynamicCoarse =
@@ -55,7 +55,9 @@ namespace DynamicCubemaps
 #ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
 		if (SharedData::dynamicCubemapsSettings.DebugVisualization ==
 			DebugModeReflectionContribution)
-			return max(contribution, 0.0);
+			return SharedData::dynamicCubemapsSettings.Enabled != 0 ?
+				max(contribution, 0.0) :
+				0.0;
 #endif
 		return color;
 	}

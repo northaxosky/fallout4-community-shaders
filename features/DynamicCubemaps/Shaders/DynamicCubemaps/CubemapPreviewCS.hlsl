@@ -24,5 +24,6 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 	float3 color = max(InputCubemap.SampleLevel(
 		LinearSampler, direction, 0.0), 0.0);
 	color = color / (1.0 + color);
+	color = pow(color, 1.0 / 1.6);
 	OutputTexture[dispatchThreadId.xy] = float4(color, 1.0);
 }

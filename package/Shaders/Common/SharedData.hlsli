@@ -79,8 +79,9 @@ namespace SharedData
 
 	struct DynamicCubemapsSettings
 	{
+		uint Enabled;
 		uint DebugVisualization;
-		uint3 pad0;
+		uint2 pad0;
 	};
 
 	cbuffer FeatureData : register(b6)

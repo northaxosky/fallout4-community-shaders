@@ -86,6 +86,10 @@ near_field_distance = 62.6099034
 [features.DynamicCubemaps]
 load = false
 
+[features.DynamicCubemaps.settings]
+# Runtime toggle for capture and deferred-composite consumption.
+enabled = true
+
 [features.WetnessEffects]
 load = false
 

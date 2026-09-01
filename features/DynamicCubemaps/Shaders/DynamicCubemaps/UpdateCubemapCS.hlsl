@@ -76,7 +76,7 @@ float SmoothBumpStep(float edge0, float edge1, float value)
 [numthreads(8, 8, 1)]
 void main(uint3 threadID : SV_DispatchThreadID)
 {
-	float3 captureDirection = -GetSamplingVector(threadID);
+	float3 captureDirection = GetSamplingVector(threadID);
 	float3 viewDirection = WorldToViewDirection(captureDirection);
 	float2 logicalUV = ViewToUV(viewDirection);
 	bool inFrame = all(logicalUV >= 0.0) && all(logicalUV <= 1.0);

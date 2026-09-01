@@ -2,6 +2,7 @@
 
 #include <DDSTextureLoader.h>
 #include <d3d11.h>
+#include <imgui.h>
 
 #include <algorithm>
 #include <array>
@@ -25,6 +26,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/SharedData.h"
+#include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
@@ -76,6 +78,39 @@ namespace cs::features
 			default:
 				return "off";
 			}
+		}
+
+		bool ParseSettingsTable(
+			const toml::table& a_config,
+			DynamicCubemaps::Settings& a_candidate,
+			std::string& a_error)
+		{
+			a_error.clear();
+			const auto* settingsNode = a_config.get("settings");
+			if (!settingsNode) {
+				return true;
+			}
+			const auto* settingsTable = settingsNode->as_table();
+			if (!settingsTable) {
+				a_error = "settings: expected table";
+				return false;
+			}
+			switch (feature_config::ReadBool(
+				*settingsTable, "enabled", a_candidate.enabled)) {
+			case feature_config::ScalarReadStatus::kMissing:
+			case feature_config::ScalarReadStatus::kValid:
+				return true;
+			case feature_config::ScalarReadStatus::kWrongType:
+				a_error = "settings.enabled: expected boolean";
+				break;
+			case feature_config::ScalarReadStatus::kInvalidValue:
+				a_error = "settings.enabled: invalid value";
+				break;
+			case feature_config::ScalarReadStatus::kOutOfRange:
+				a_error = "settings.enabled: value is out of range";
+				break;
+			}
+			return false;
 		}
 
 		bool DescribeTexture(
@@ -215,15 +250,48 @@ namespace cs::features
 		texture.width = kPreviewWidth;
 		texture.height = kPreviewHeight;
 		texture.caption = std::format(
-			"{} mip 0, equirectangular +X center/+Z up, tone-mapped",
+			"{} mip 0, equirectangular +X center/+Z up, Reinhard display; polar stretching is expected",
 			visualization == DebugVisualization::kRawCapture ?
 				"Raw reflections capture" :
 				"Filtered reflections");
 		return texture;
 	}
 
+	bool DynamicCubemaps::Configure(
+		const toml::table& a_config,
+		std::string& a_error)
+	{
+		auto candidate = _settings;
+		if (!ParseSettingsTable(a_config, candidate, a_error)) {
+			return false;
+		}
+		_settings = candidate;
+		return true;
+	}
+
+	void DynamicCubemaps::PublishSettings() noexcept
+	{
+		const bool wasEnabled = _enabled.exchange(
+			_settings.enabled, std::memory_order_acq_rel);
+		if (!wasEnabled && _settings.enabled) {
+			_queuedReset.store(true, std::memory_order_release);
+		}
+	}
+
+	void DynamicCubemaps::SaveSettings()
+	{
+		toml::table settings;
+		settings.insert_or_assign("enabled", _settings.enabled);
+		if (const auto result = feature_config::UpdateFeatureSettings(
+				GetConfigKey(), settings);
+			!result) {
+			L->error("Failed to save settings: {}", result.error);
+		}
+	}
+
 	void DynamicCubemaps::Load()
 	{
+		PublishSettings();
 		std::vector<cs::engine::ShaderSlotClaim> slotClaims;
 		slotClaims.reserve(kDynamicCubemapPSSlotCount);
 		for (std::uint32_t offset = 0;
@@ -700,7 +768,8 @@ namespace cs::features
 	void DynamicCubemaps::UpdateCubemap()
 	{
 		if (!_injectionsOperational.load(std::memory_order_acquire) ||
-			!_resourcesReady.load(std::memory_order_acquire)) {
+			!_resourcesReady.load(std::memory_order_acquire) ||
+			!_enabled.load(std::memory_order_acquire)) {
 			return;
 		}
 
@@ -1073,7 +1142,7 @@ namespace cs::features
 
 		ID3D11ShaderResourceView* source =
 			visualization == DebugVisualization::kRawCapture ?
-				_reflectionsStream.color.srv.get() :
+				_reflectionsStream.raw.srv.get() :
 				_reflections.srv.get();
 		if (!source) {
 			return;
@@ -1122,6 +1191,9 @@ namespace cs::features
 			.Field(
 				"operational",
 				_injectionsOperational.load(std::memory_order_relaxed))
+			.Field(
+				"configured_enabled",
+				_enabled.load(std::memory_order_relaxed))
 			.Field(
 				"resources_ready",
 				_resourcesReady.load(std::memory_order_relaxed))
@@ -1180,6 +1252,8 @@ namespace cs::features
 	{
 		cs::DynamicCubemapsFeatureData data{};
 		if (_injectionsOperational.load(std::memory_order_acquire)) {
+			data.Enabled =
+				_enabled.load(std::memory_order_acquire) ? 1u : 0u;
 			data.DebugVisualization = static_cast<std::uint32_t>(
 				_debugVisualization.load(std::memory_order_acquire));
 		}
@@ -1188,6 +1262,20 @@ namespace cs::features
 
 	void DynamicCubemaps::DrawSettings()
 	{
+		const bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+		ImGui::TextDisabled(
+			"Off restores native probe reflections and pauses capture.");
+		if (changed) {
+			PublishSettings();
+			SaveSettings();
+		}
 		Menu::Get().DrawDebugViewSelector(*this);
+	}
+
+	void DynamicCubemaps::RestoreDefaultSettings()
+	{
+		_settings = Settings{};
+		PublishSettings();
+		SaveSettings();
 	}
 }

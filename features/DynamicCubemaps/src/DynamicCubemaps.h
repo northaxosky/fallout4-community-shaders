@@ -43,6 +43,11 @@ namespace cs::features
 			kReflectionContribution
 		};
 
+		struct Settings
+		{
+			bool enabled = true;
+		};
+
 		static DynamicCubemaps* GetSingleton();
 
 		std::string_view GetName() const override { return "DynamicCubemaps"; }
@@ -54,11 +59,14 @@ namespace cs::features
 		}
 		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
+		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
 		void DrawSettings() override;
+		void RestoreDefaultSettings() override;
+		bool HasResettableSettings() const override { return true; }
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
@@ -125,6 +133,8 @@ namespace cs::features
 
 		DynamicCubemaps() = default;
 
+		void SaveSettings();
+		void PublishSettings() noexcept;
 		void SaveBindings();
 		void RestoreBindings();
 		void BindCubemaps(ID3D11DeviceContext* a_context);
@@ -147,6 +157,7 @@ namespace cs::features
 		std::atomic_bool _registrationsReady{ false };
 		std::atomic_bool _injectionsOperational{ false };
 		std::atomic_bool _resourcesReady{ false };
+		std::atomic_bool _enabled{ true };
 		std::atomic_bool _queuedReset{ false };
 		std::atomic_bool _usedEngineReflectionFallback{ false };
 		std::atomic_bool _reflectionFallbackResolved{ false };
@@ -161,6 +172,7 @@ namespace cs::features
 		std::atomic<DebugVisualization> _debugVisualization{
 			DebugVisualization::kOff
 		};
+		Settings _settings;
 
 		CaptureStream _baseStream;
 		CaptureStream _reflectionsStream;
