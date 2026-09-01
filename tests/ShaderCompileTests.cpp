@@ -131,6 +131,7 @@ namespace
 		std::vector<UINT>     forbiddenTextureSlots;
 		std::vector<UINT>     requiredSamplerSlots;
 		std::vector<UINT>     forbiddenSamplerSlots;
+		std::vector<BYTE>     expectedOutputMasks;
 		std::optional<FeatureOffIdentityExpectation> featureOffIdentity;
 	};
 
@@ -403,7 +404,8 @@ namespace
 			ExpectedVariable{ "terrainShadowsSettings", 48, 48 },
 			ExpectedVariable{
 				"inverseSquareLightingSettings", 96, 16 },
-			ExpectedVariable{ "waterEffectsSettings", 112, 16 }
+			ExpectedVariable{ "waterEffectsSettings", 112, 16 },
+			ExpectedVariable{ "dynamicCubemapsSettings", 128, 16 }
 		};
 		if (shaderDesc.ConstantBuffers != 2
 			|| shaderDesc.BoundResources != 2) {
@@ -422,7 +424,7 @@ namespace
 			reflection.Get(),
 			"FeatureData",
 			6,
-			128,
+			144,
 			featureVariables);
 	}
 
@@ -477,6 +479,43 @@ namespace
 		return {};
 	}
 
+	std::string ValidateOutputSignature(
+		ID3DBlob* a_blob,
+		std::span<const BYTE> a_expectedMasks)
+	{
+		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(
+				a_blob->GetBufferPointer(),
+				a_blob->GetBufferSize(),
+				__uuidof(ID3D11ShaderReflection),
+				reinterpret_cast<void**>(reflection.GetAddressOf())))) {
+			return "D3DReflect failed for the output signature witness";
+		}
+
+		D3D11_SHADER_DESC shaderDesc{};
+		if (FAILED(reflection->GetDesc(&shaderDesc)))
+			return "output signature reflection description failed";
+		if (shaderDesc.OutputParameters != a_expectedMasks.size()) {
+			return "unexpected output parameter count "
+				+ std::to_string(shaderDesc.OutputParameters);
+		}
+
+		for (UINT index = 0; index < shaderDesc.OutputParameters; ++index) {
+			D3D11_SIGNATURE_PARAMETER_DESC parameter{};
+			if (FAILED(reflection->GetOutputParameterDesc(index, &parameter))) {
+				return "missing reflected output parameter "
+					+ std::to_string(index);
+			}
+			if (parameter.SystemValueType != D3D_NAME_TARGET
+				|| parameter.SemanticIndex != index
+				|| parameter.Mask != a_expectedMasks[index]) {
+				return "unexpected reflected output parameter "
+					+ std::to_string(index);
+			}
+		}
+		return {};
+	}
+
 	ShaderCompileResult Compile(const ShaderCompileJob& a_job)
 	{
 		if (!a_job.preparationError.empty())
@@ -516,6 +555,14 @@ namespace
 			|| !a_job.requiredSamplerSlots.empty()
 			|| !a_job.forbiddenSamplerSlots.empty()) {
 			if (auto validation = ValidateTextureBindings(blob.Get(), a_job);
+				!validation.empty()) {
+				return { std::move(validation) };
+			}
+		}
+		if (!a_job.expectedOutputMasks.empty()) {
+			if (auto validation = ValidateOutputSignature(
+					blob.Get(),
+					a_job.expectedOutputMasks);
 				!validation.empty()) {
 				return { std::move(validation) };
 			}
@@ -842,7 +889,7 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
-	constexpr std::size_t kDynamicCubemapPermutations = 5;
+	constexpr std::size_t kDynamicCubemapPermutations = 6;
 
 	std::size_t AddDynamicCubemaps(
 		std::vector<ShaderCompileJob>& a_jobs,
@@ -861,6 +908,7 @@ namespace
 			root / "InferCubemapCS.hlsl",
 			{ { "REFLECTIONS", "1" } });
 		AddCompile(a_jobs, root / "SpecularIrradianceCS.hlsl", {});
+		AddCompile(a_jobs, root / "CubemapPreviewCS.hlsl", {});
 		return a_jobs.size() - firstJob;
 	}
 
@@ -1239,6 +1287,7 @@ namespace
 				"No shader replacement registrations were discovered");
 		}
 		std::set<std::string> uniqueRegistrationInputs;
+		std::size_t lodLandscapeObjectOverlapCases = 0;
 		for (const auto& registration : registrations) {
 			std::optional<FeatureOffIdentityExpectation> identity;
 			const bool directRow = registration.targetId
@@ -1259,6 +1308,7 @@ namespace
 					.expectInverseSquareVariant = directRow
 				};
 			}
+			const auto previousJobCount = a_jobs.size();
 			AddRegistration(
 				a_jobs,
 				a_root,
@@ -1267,6 +1317,45 @@ namespace
 				&uniqueRegistrationInputs,
 				{},
 				std::move(identity));
+			if (a_jobs.size() == previousJobCount + 1
+				&& registration.stage
+					== cs::engine::ShaderStage::kPixel
+				&& registration.name.starts_with(
+					"bsdfprepass_lod_landscape_")) {
+				const auto blend =
+					registration.compilation.defines.find("BLEND");
+				a_jobs.back().expectedOutputMasks =
+					blend != registration.compilation.defines.end()
+						&& blend->second == "1"
+					? std::vector<BYTE>{ 0xF, 0xF, 0xF, 0xF, 0xF }
+					: std::vector<BYTE>{ 0xF, 0x3, 0xF, 0xF, 0x7, 0x3 };
+			} else if (a_jobs.size() == previousJobCount + 1
+				&& registration.stage
+					== cs::engine::ShaderStage::kPixel
+				&& registration.name.starts_with(
+					"bsdfprepass_land_lod_blend_")) {
+				a_jobs.back().expectedOutputMasks =
+					{ 0xF, 0x3, 0xF, 0xF, 0x7, 0x3 };
+			}
+
+			const auto lodLandscape =
+				registration.compilation.defines.find("LOD_LANDSCAPE");
+			if (registration.name.starts_with(
+					"bsdfprepass_lod_object_")
+				&& lodLandscape
+					!= registration.compilation.defines.end()
+				&& lodLandscape->second == "1") {
+				auto landscapeSource = registration;
+				landscapeSource.name += "_landscape_source";
+				landscapeSource.compilation.sourcePath =
+					L"BSDFPrePass\\LodLandscapeVertex.hlsli";
+				AddRegistration(
+					a_jobs,
+					a_root,
+					landscapeSource,
+					{});
+				++lodLandscapeObjectOverlapCases;
+			}
 		}
 		if (uniqueRegistrationInputs.size() != registrations.size()) {
 			AddPreparationFailure(
@@ -1440,9 +1529,13 @@ namespace
 			}
 		} };
 		const std::array<ShaderDefines, 2> dynamicCubemapCompositions{ {
-			{ { kDynamicCubemaps, "1" } },
 			{
 				{ kDynamicCubemaps, "1" },
+				{ kDynamicCubemapsFullscreenDebug, "1" }
+			},
+			{
+				{ kDynamicCubemaps, "1" },
+				{ kDynamicCubemapsFullscreenDebug, "1" },
 				{ kWetnessEffects, "1" }
 			}
 		} };
@@ -1916,6 +2009,7 @@ namespace
 			.explicitPermutations =
 				featureCompositionCases.size()
 				+ explicitSourceCases.size()
+				+ lodLandscapeObjectOverlapCases
 				+ contributorCompositionCount,
 			.ambientCompositionRows = ambientCompositionRows,
 			.ambientNonTargetRows = ambientNonTargetRows,

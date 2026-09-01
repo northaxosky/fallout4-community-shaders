@@ -757,6 +757,287 @@ namespace
 		}
 	}
 
+	template <std::size_t N>
+	bool ContainsHash(
+		const std::array<std::string_view, N>& a_hashes,
+		std::string_view a_hash)
+	{
+		return std::ranges::find(a_hashes, a_hash) != a_hashes.end();
+	}
+
+	bool TestPrepassLodRegistrations(
+		std::span<const ShaderReplacementVariantRegistration> a_registrations)
+	{
+		constexpr std::array<std::string_view, 14>
+			kLodLandscapePixelHashes{
+				"47bbe0535307a6a4beff5ab62050b25494bd9cd8",
+				"50ff21d4e407b11b80453d3c5705ab5f7502b61b",
+				"5d7c23fe276a3d182bf0985cfcbc2bf9a02d8278",
+				"6220551a5773b6a11bda8e32b88ed266b43f4efd",
+				"65918f5834edafabb6199d073625d1a6f5e4468e",
+				"6d031b8b738440db218bc25621799aeaeb459ccc",
+				"84063fc0865832aed8ad1a5d7a12a876a41b2b7b",
+				"8cf781a7370c67efb8c44a17a05a5a8b5423faaa",
+				"a7ec9a783e5608fc40d391573be5316b059e92b7",
+				"b6b0b5b52a2d6c70e2915abe3a28ae39b54e96c5",
+				"bc3c8f53a049ec00c778852e8984210730e71c26",
+				"c30bde346dfc1520b9c6c2635c3d9c85d46f2028",
+				"c5578ced20e3b2909bd7089ab420103813e1bd13",
+				"e99f1c5af81889ebcfec308efb95400c452cce4e"
+			};
+		constexpr std::array<std::string_view, 2>
+			kLandLodBlendPixelHashes{
+				"1dcf7cfc9509e2990127abfb5a665f57b0217b84",
+				"e3c03ae9c5ca1f6855215cee706b582e261b258f"
+			};
+		constexpr std::array<std::string_view, 12>
+			kLodLandscapeVertexHashes{
+				"1266a115a561eaa03756b043f872c9f93f86679a",
+				"196aa6ba9a03c455a48f8605def35d262f40889d",
+				"49394e22917211b03b34fefaf17f5ea6f3aeac5e",
+				"55bf7c83fe8bf602d018a8bd7e8528cea628b391",
+				"565ee87d074fe45128bb39057b6f5453fd691f5a",
+				"58eb23f666413a729c669e03400aef29317681b4",
+				"5df0a3f156bcc40fcf663814acff0583c60d0b9a",
+				"68afc38cbcf0e8328e9a6e152d658288f38e8c85",
+				"76441d60498272cc31e995a68a1a06d26d5addc0",
+				"7edfdd378b047f14974f878337945cb3241a3771",
+				"a41e1a51335574860b2434e43141bcff78cdb46b",
+				"d31123109ae985acb91ab15e012d53ee0e62fac3"
+			};
+		constexpr std::array<std::string_view, 3>
+			kLodObjectVertexHashes{
+				"934c836603ddbf954bc00cc079bb1b10cb2aba47",
+				"58a5f6bed118be652be960dd27b6b5d891d0b11c",
+				"5400fb402aec5cd384948b38629d8f2981f9f3fa"
+			};
+
+		auto hasDefine = [](const auto& a_registration,
+							 std::string_view a_name,
+							 std::string_view a_value) {
+			const auto found =
+				a_registration.compilation.defines.find(a_name);
+			return found != a_registration.compilation.defines.end()
+				&& found->second == a_value;
+		};
+
+		bool ok = true;
+		std::size_t lodLandscapePixels = 0;
+		std::size_t blendPixels = 0;
+		std::size_t opaquePixels = 0;
+		std::size_t landLodBlendPixels = 0;
+		std::size_t lodLandscapeVertices = 0;
+		std::size_t lodObjectVertices = 0;
+		std::size_t lodObjectLandscapeVertices = 0;
+		std::vector<PixelShaderSwapVariantKey> keys;
+
+		for (const auto& registration : a_registrations) {
+			const bool lodLandscape =
+				registration.name.starts_with(
+					"bsdfprepass_lod_landscape_");
+			const bool landLodBlend =
+				registration.name.starts_with(
+					"bsdfprepass_land_lod_blend_");
+			const bool lodObject =
+				registration.name.starts_with(
+					"bsdfprepass_lod_object_");
+			if (!lodLandscape && !landLodBlend && !lodObject)
+				continue;
+
+			ok &= Check(
+				registration.targetId
+					== ShaderInjectionTarget::kDeferredPrepass,
+				"LOD prepass registration targets the wrong shader");
+			ok &= Check(
+				registration.variantKeys.empty(),
+				"LOD prepass registration inferred an opaque route key");
+
+			cs::sha1::Sha1Result expectedHash{};
+			ok &= Check(
+				cs::sha1::Sha1FromHex(
+					registration.expectedStockSha1,
+					expectedHash),
+				"LOD prepass registration has an invalid stock hash");
+			keys.push_back({
+				.expectedStockSha1 = expectedHash,
+				.routeGroup = 1,
+				.replacementIndex = keys.size(),
+				.stage = registration.stage
+			});
+
+			if (lodLandscape
+				&& registration.stage == ShaderStage::kPixel) {
+				++lodLandscapePixels;
+				ok &= Check(
+					ContainsHash(
+						kLodLandscapePixelHashes,
+						registration.expectedStockSha1),
+					"unexpected LOD landscape pixel hash");
+				ok &= Check(
+					registration.compilation.sourcePath
+							== L"BSDFPrePass.hlsl"
+						&& hasDefine(
+							registration,
+							"LOD_LANDSCAPE",
+							"1")
+						&& hasDefine(registration, "TEXTURE", "1"),
+					"LOD landscape pixel compile vector changed");
+				if (hasDefine(registration, "BLEND", "1"))
+					++blendPixels;
+				else
+					++opaquePixels;
+			} else if (landLodBlend) {
+				++landLodBlendPixels;
+				ok &= Check(
+					registration.stage == ShaderStage::kPixel
+						&& ContainsHash(
+							kLandLodBlendPixelHashes,
+							registration.expectedStockSha1),
+					"unexpected land LOD blend pixel route");
+				ok &= Check(
+					registration.compilation.sourcePath
+							== L"BSDFPrePass.hlsl"
+						&& hasDefine(registration, "LANDSCAPE", "1")
+						&& hasDefine(
+							registration,
+							"LAND_LOD_BLEND",
+							"1")
+						&& hasDefine(
+							registration,
+							"LOD_LANDSCAPE",
+							"0"),
+					"land LOD blend compile vector changed");
+			} else if (lodLandscape) {
+				++lodLandscapeVertices;
+				ok &= Check(
+					registration.stage == ShaderStage::kVertex
+						&& ContainsHash(
+							kLodLandscapeVertexHashes,
+							registration.expectedStockSha1),
+					"unexpected LOD landscape vertex route");
+				ok &= Check(
+					registration.compilation.sourcePath
+							== L"BSDFPrePass\\LodLandscapeVertex.hlsli"
+						&& hasDefine(
+							registration,
+							"LOD_LANDSCAPE",
+							"1"),
+					"LOD landscape vertex compile vector changed");
+			} else {
+				++lodObjectVertices;
+				ok &= Check(
+					registration.stage == ShaderStage::kVertex
+						&& ContainsHash(
+							kLodObjectVertexHashes,
+							registration.expectedStockSha1),
+					"unexpected LOD object vertex route");
+				ok &= Check(
+					registration.compilation.sourcePath
+							== L"BSDFPrePass\\LodObjectInstancedVS.hlsli"
+						&& hasDefine(
+							registration,
+							"LOD_OBJECT_INSTANCED",
+							"1"),
+					"LOD object vertex compile vector changed");
+				if (hasDefine(registration, "LOD_LANDSCAPE", "1"))
+					++lodObjectLandscapeVertices;
+			}
+		}
+
+		ok &= Check(
+			lodLandscapePixels == 14
+				&& blendPixels == 2
+				&& opaquePixels == 12,
+			"LOD landscape pixel registration partition changed");
+		ok &= Check(
+			landLodBlendPixels == 2,
+			"land LOD blend pixel registration count changed");
+		ok &= Check(
+			lodLandscapeVertices == 12
+				&& lodObjectVertices == 3
+				&& lodObjectLandscapeVertices == 2,
+			"LOD vertex registration partition changed");
+		ok &= Check(
+			keys.size() == 31,
+			"LOD prepass registration count changed");
+
+		cs::sha1::Sha1Result blendHash{};
+		cs::sha1::Sha1Result objectHash{};
+		cs::sha1::Sha1Result unknownHash{};
+		(void)cs::sha1::Sha1FromHex(
+			std::string(kLodLandscapePixelHashes[6]), blendHash);
+		(void)cs::sha1::Sha1FromHex(
+			std::string(kLodObjectVertexHashes[0]), objectHash);
+		const auto blendSelection = SelectPixelShaderSwapVariant(
+			keys,
+			std::nullopt,
+			blendHash,
+			ShaderStage::kPixel);
+		const auto objectSelection = SelectPixelShaderSwapVariant(
+			keys,
+			std::nullopt,
+			objectHash,
+			ShaderStage::kVertex);
+		ok &= Check(
+			blendSelection.kind
+					== PixelShaderSwapSelectionKind::kSelected
+				&& blendSelection.usedHashFallback,
+			"exact BLEND stock hash did not select its pixel route");
+		ok &= Check(
+			objectSelection.kind
+					== PixelShaderSwapSelectionKind::kSelected
+				&& objectSelection.usedHashFallback,
+			"exact LOD object stock hash did not select its vertex route");
+		ok &= Check(
+			SelectPixelShaderSwapVariant(
+				keys,
+				std::nullopt,
+				objectHash,
+				ShaderStage::kPixel)
+					.kind == PixelShaderSwapSelectionKind::kNoMatch,
+			"LOD object vertex hash leaked into the pixel stage");
+		ok &= Check(
+			SelectPixelShaderSwapVariant(
+				keys,
+				std::nullopt,
+				unknownHash,
+				ShaderStage::kPixel)
+					.kind == PixelShaderSwapSelectionKind::kNoMatch,
+			"unknown prepass hash selected a fallback route");
+
+		const auto objectRegistration = std::ranges::find_if(
+			a_registrations,
+			[](const auto& a_registration) {
+				return a_registration.name
+					== "bsdfprepass_lod_object_vs2266";
+			});
+		const auto* target = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kDeferredPrepass);
+		std::vector<ShaderReplacementRegistration> pixelContributions{
+			{
+				.targetId = ShaderInjectionTarget::kDeferredPrepass,
+				.stages = ShaderStageBit(ShaderStage::kPixel),
+				.contributor = "pixel-only",
+				.defines = { { "PIXEL_ONLY_SENTINEL", "1" } }
+			}
+		};
+		std::string compileError;
+		const auto objectRequest =
+			objectRegistration != a_registrations.end() && target
+			? BuildEffectiveShaderCompileRequest(
+				*target,
+				*objectRegistration,
+				pixelContributions,
+				&compileError)
+			: std::nullopt;
+		ok &= Check(
+			objectRequest
+				&& objectRequest->defines
+					== objectRegistration->compilation.defines,
+			"pixel-only prepass defines perturbed the LOD object vertex ABI");
+		return ok;
+	}
+
 	bool CreateWarpDevice(
 		winrt::com_ptr<ID3D11Device>& a_device,
 		winrt::com_ptr<ID3D11DeviceContext>& a_context)
@@ -1213,6 +1494,7 @@ int main(int a_argc, char* a_argv[])
 				"stock hash is claimed by more than one registration");
 		}
 		switch (registration.targetId) {
+		case ShaderInjectionTarget::kDeferredPrepass:
 		case ShaderInjectionTarget::kBsSky:
 		case ShaderInjectionTarget::kBsWater:
 		case ShaderInjectionTarget::kBsLighting:
@@ -1227,6 +1509,13 @@ int main(int a_argc, char* a_argv[])
 			break;
 		}
 	}
+	ok &= TestPrepassLodRegistrations(staticFamilies);
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kDeferredPrepass] == 17,
+		"BSDFPrePass pixel registration count mismatch");
+	ok &= Check(
+		vertexFamilyCounts[ShaderInjectionTarget::kDeferredPrepass] == 15,
+		"BSDFPrePass vertex registration count mismatch");
 	ok &= Check(
 		familyCounts[ShaderInjectionTarget::kBsSky] == 9,
 		"BSSky registration count mismatch");
@@ -1258,14 +1547,15 @@ int main(int a_argc, char* a_argv[])
 		vertexFamilyCounts[ShaderInjectionTarget::kBsdfComposite] == 4,
 		"BSDFComposite vertex representative count mismatch");
 	ok &= Check(
-		staticFamilies.size() == 334,
+		staticFamilies.size() == 365,
 		"default shader replacement variant count mismatch");
 	ok &= Check(
-		stockHashes.size() == 332,
+		stockHashes.size() == 363,
 		"default shader replacement variant non-empty stock hash count mismatch");
 
-	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 5>
+	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 6>
 		kFamilySources{ {
+			{ ShaderInjectionTarget::kDeferredPrepass, L"BSDFPrePass.hlsl" },
 			{ ShaderInjectionTarget::kBsSky, L"BSSkyShader.hlsl" },
 			{ ShaderInjectionTarget::kBsWater, L"BSWaterShader.hlsl" },
 			{ ShaderInjectionTarget::kBsLighting, L"BSLightingShader.hlsl" },

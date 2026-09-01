@@ -19,10 +19,12 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <utility>
 
 namespace cs::engine
 {
 #include "Render/BsdfShaderReplacementVariants.generated.inl"
+#include "Render/ShaderInjectionPrepassLodVariants.inl"
 
 	namespace
 	{
@@ -160,6 +162,7 @@ namespace cs::engine
 					{},
 					{})
 			};
+			AppendPrepassLodShaderReplacementVariants(variants);
 			AppendStaticFamilyShaderReplacementVariants(variants);
 			AppendBsdfFamilyShaderReplacementVariants(variants);
 			return variants;
