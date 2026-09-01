@@ -10,6 +10,14 @@
 #define WETNESS_COMPOSITE_CONSUMER 1
 #include "WetnessEffects/WetnessEffects.hlsli"
 #endif
+#ifdef DYNAMIC_CUBEMAPS
+#include "DynamicCubemaps/DynamicCubemaps.hlsli"
+#define FO4_SAMPLE_ENVIRONMENT(texture, sampler, direction, lod, hasProbe, slice) \
+    DynamicCubemaps::SampleEnvironment(texture, sampler, direction, lod, hasProbe, slice)
+#else
+#define FO4_SAMPLE_ENVIRONMENT(texture, sampler, direction, lod, hasProbe, slice) \
+    texture.SampleLevel(sampler, float4(direction, slice), lod).xyz
+#endif
 #include "Common/DeferredContracts.hlsli"
 
 #ifdef BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY
@@ -274,9 +282,13 @@ PS_OUTPUT main(PS_INPUT input)
         float mipLevel = (1.0 - shadingData.x) * 6.0;
         mipLevel = pos.z * 0.001953125 + mipLevel;
         float arraySlice = floor(matSliceFloat * 255.0 - 1.0);
-        float3 cubeSample = g_tIBLProbeCube.SampleLevel(g_sIBLProbeCube,
-                                                        float4(reflWorld, arraySlice),
-                                                        mipLevel).xyz;
+        float3 cubeSample = FO4_SAMPLE_ENVIRONMENT(
+            g_tIBLProbeCube,
+            g_sIBLProbeCube,
+            reflWorld,
+            mipLevel,
+            hasIBL,
+            arraySlice);
         float  luma   = dot(cubeSample, float3(0.299, 0.587, 0.114));
         float  desatW = cb12_idx30_ibl_desaturation.y * 0.9;
         iblColor      = lerp(cubeSample, luma.xxx, desatW);
@@ -290,9 +302,13 @@ PS_OUTPUT main(PS_INPUT input)
         float wetMipLevel = WetnessEffects::GetFilmMipRoughness(
             1.0 - shadingData.x, wetSurface.wetness) * 6.0;
         wetMipLevel = pos.z * 0.001953125 + wetMipLevel;
-        float3 wetCubeSample = g_tIBLProbeCube.SampleLevel(g_sIBLProbeCube,
-                                                          float4(wetReflWorld, arraySlice),
-                                                          wetMipLevel).xyz;
+        float3 wetCubeSample = FO4_SAMPLE_ENVIRONMENT(
+            g_tIBLProbeCube,
+            g_sIBLProbeCube,
+            wetReflWorld,
+            wetMipLevel,
+            hasIBL,
+            arraySlice);
         float  wetLuma = dot(wetCubeSample, float3(0.299, 0.587, 0.114));
         wetIblColor = lerp(wetCubeSample, wetLuma.xxx, desatW);
         wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
@@ -673,8 +689,13 @@ PS_OUTPUT main(PS_INPUT input)
         float mipLevel = (1.0 - shadingData.x) * 6.0;
         mipLevel = positionView.z * 0.001953125 + mipLevel;
         float arraySlice = floor(material.y * 255.0 - 1.0);
-        float3 cubeSample = g_tIblProbeCube.SampleLevel(
-            g_sIblProbeCube, float4(reflectionWorld, arraySlice), mipLevel).xyz;
+        float3 cubeSample = FO4_SAMPLE_ENVIRONMENT(
+            g_tIblProbeCube,
+            g_sIblProbeCube,
+            reflectionWorld,
+            mipLevel,
+            hasIbl,
+            arraySlice);
         float luminance = dot(cubeSample, float3(0.299, 0.587, 0.114));
         iblColor = lerp(
             cubeSample, luminance.xxx, IblDesaturation.y * 0.9);
@@ -688,10 +709,13 @@ PS_OUTPUT main(PS_INPUT input)
         float wetMipLevel = WetnessEffects::GetFilmMipRoughness(
             1.0 - shadingData.x, wetSurface.wetness) * 6.0;
         wetMipLevel = positionView.z * 0.001953125 + wetMipLevel;
-        float3 wetCubeSample = g_tIblProbeCube.SampleLevel(
+        float3 wetCubeSample = FO4_SAMPLE_ENVIRONMENT(
+            g_tIblProbeCube,
             g_sIblProbeCube,
-            float4(wetReflectionWorld, arraySlice),
-            wetMipLevel).xyz;
+            wetReflectionWorld,
+            wetMipLevel,
+            hasIbl,
+            arraySlice);
         float wetLuminance = dot(wetCubeSample, float3(0.299, 0.587, 0.114));
         wetIblColor = lerp(
             wetCubeSample, wetLuminance.xxx, IblDesaturation.y * 0.9);
@@ -1201,11 +1225,13 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float mipLevel = (1.0 - surface.x) * 6.0;
         mipLevel = viewPosition.z * 0.001953125 + mipLevel;
         float arraySlice = floor(material.x * 255.0 - 1.0);
-        environment = environmentTexture.SampleLevel(
+        environment = FO4_SAMPLE_ENVIRONMENT(
+            environmentTexture,
             environmentSampler,
-            float4(environmentCoordinate, arraySlice),
-            mipLevel
-        ).xyz;
+            environmentCoordinate,
+            mipLevel,
+            true,
+            arraySlice);
         float luminance = dot(environment, float3(0.299, 0.587, 0.114));
         environment = lerp(environment, luminance.xxx, ambientFrame[30].y * 0.9);
 #ifdef WETNESS_EFFECTS
@@ -1220,11 +1246,13 @@ float4 main(float4 position : SV_POSITION) : SV_Target0
         float wetMipLevel = WetnessEffects::GetFilmMipRoughness(
             1.0 - surface.x, wetSurface.wetness) * 6.0;
         wetMipLevel = viewPosition.z * 0.001953125 + wetMipLevel;
-        wetEnvironment = environmentTexture.SampleLevel(
+        wetEnvironment = FO4_SAMPLE_ENVIRONMENT(
+            environmentTexture,
             environmentSampler,
-            float4(wetEnvironmentCoordinate, arraySlice),
-            wetMipLevel
-        ).xyz;
+            wetEnvironmentCoordinate,
+            wetMipLevel,
+            true,
+            arraySlice);
         float wetLuminance = dot(wetEnvironment, float3(0.299, 0.587, 0.114));
         wetEnvironment = lerp(
             wetEnvironment, wetLuminance.xxx, ambientFrame[30].y * 0.9);
@@ -1505,7 +1533,8 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         lod = pos.z * 0.001953125 + lod;
         float idx = floor(prm.x * 255.0 - 1.0);
 
-        cube = TexCube.SampleLevel(SampCube, float4(rw, idx), lod).xyz;
+        cube = FO4_SAMPLE_ENVIRONMENT(
+            TexCube, SampCube, rw, lod, true, idx);
         float lum = dot(cube, float3(0.299, 0.587, 0.114));
         cube = lerp(cube, lum.xxx, g_PF[30].y * 0.9);
 #ifdef WETNESS_EFFECTS
@@ -1517,7 +1546,8 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         float wetLod = WetnessEffects::GetFilmMipRoughness(
             1.0 - surf.x, wetSurface.wetness) * 6.0;
         wetLod = pos.z * 0.001953125 + wetLod;
-        wetCube = TexCube.SampleLevel(SampCube, float4(wetRw, idx), wetLod).xyz;
+        wetCube = FO4_SAMPLE_ENVIRONMENT(
+            TexCube, SampCube, wetRw, wetLod, true, idx);
         float wetLum = dot(wetCube, float3(0.299, 0.587, 0.114));
         wetCube = lerp(wetCube, wetLum.xxx, g_PF[30].y * 0.9);
         wetFilmWeight = WetnessEffects::GetEnvironmentFilmWeight(
@@ -2576,10 +2606,13 @@ float4 main(PSInput input) : SV_Target0
             6.0,
             worldPosition.z * 0.001953125);
         float probeSlice = floor(material.x * 255.0 - 1.0);
-        probeColor = probeTexture.SampleLevel(
+        probeColor = FO4_SAMPLE_ENVIRONMENT(
+            probeTexture,
             probeSampler,
-            float4(probeDirection, probeSlice),
-            probeLod).xyz;
+            probeDirection,
+            probeLod,
+            true,
+            probeSlice);
         float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
         probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
 #ifdef WETNESS_EFFECTS
@@ -2595,10 +2628,13 @@ float4 main(PSInput input) : SV_Target0
                 1.0 - typeData.x, wetSurface.wetness),
             6.0,
             worldPosition.z * 0.001953125);
-        wetProbeColor = probeTexture.SampleLevel(
+        wetProbeColor = FO4_SAMPLE_ENVIRONMENT(
+            probeTexture,
             probeSampler,
-            float4(wetProbeDirection, probeSlice),
-            wetProbeLod).xyz;
+            wetProbeDirection,
+            wetProbeLod,
+            true,
+            probeSlice);
         float wetProbeLuma = dot(wetProbeColor, float3(0.299, 0.587, 0.114));
         wetProbeColor = lerp(
             wetProbeColor, wetProbeLuma.xxx, scene[30].y * 0.9);
@@ -2696,10 +2732,13 @@ float4 main(PSInput input) : SV_Target0
             6.0,
             worldPosition.z * 0.001953125);
         float probeSlice = floor(material.x * 255.0 - 1.0);
-        probeColor = probeTexture.SampleLevel(
+        probeColor = FO4_SAMPLE_ENVIRONMENT(
+            probeTexture,
             probeSampler,
-            float4(probeDirection, probeSlice),
-            probeLod).xyz;
+            probeDirection,
+            probeLod,
+            true,
+            probeSlice);
         float probeLuma = dot(probeColor, float3(0.299, 0.587, 0.114));
         probeColor = lerp(probeColor, probeLuma.xxx, scene[30].y * 0.9);
 #ifdef WETNESS_EFFECTS
@@ -2715,10 +2754,13 @@ float4 main(PSInput input) : SV_Target0
                 1.0 - typeData.x, wetSurface.wetness),
             6.0,
             worldPosition.z * 0.001953125);
-        wetProbeColor = probeTexture.SampleLevel(
+        wetProbeColor = FO4_SAMPLE_ENVIRONMENT(
+            probeTexture,
             probeSampler,
-            float4(wetProbeDirection, probeSlice),
-            wetProbeLod).xyz;
+            wetProbeDirection,
+            wetProbeLod,
+            true,
+            probeSlice);
         float wetProbeLuma = dot(wetProbeColor, float3(0.299, 0.587, 0.114));
         wetProbeColor = lerp(
             wetProbeColor, wetProbeLuma.xxx, scene[30].y * 0.9);

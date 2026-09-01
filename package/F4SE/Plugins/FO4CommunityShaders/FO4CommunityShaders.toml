@@ -83,6 +83,9 @@ interior_strength = 1.0
 # Upstream's default size sqrt(2) maps to sqrt(3920) game units.
 near_field_distance = 62.6099034
 
+[features.DynamicCubemaps]
+load = false
+
 [features.WetnessEffects]
 load = false
 

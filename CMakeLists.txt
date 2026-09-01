@@ -139,6 +139,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(TerrainShadows)
 	register_feature(ScreenSpaceGI)
 	register_feature(InverseSquareLighting)
+	register_feature(DynamicCubemaps)
 	register_feature(WetnessEffects)
 	register_feature(WaterEffects)
 
@@ -528,6 +529,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/DynamicCubemaps/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WaterEffects/Shaders"
 		FILES

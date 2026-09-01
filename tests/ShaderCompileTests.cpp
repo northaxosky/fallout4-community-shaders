@@ -842,6 +842,28 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
+	constexpr std::size_t kDynamicCubemapPermutations = 5;
+
+	std::size_t AddDynamicCubemaps(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
+	{
+		const auto firstJob = a_jobs.size();
+		const auto root = a_root / "DynamicCubemaps";
+		AddCompile(a_jobs, root / "UpdateCubemapCS.hlsl", {});
+		AddCompile(
+			a_jobs,
+			root / "UpdateCubemapCS.hlsl",
+			{ { "REFLECTIONS", "1" } });
+		AddCompile(a_jobs, root / "InferCubemapCS.hlsl", {});
+		AddCompile(
+			a_jobs,
+			root / "InferCubemapCS.hlsl",
+			{ { "REFLECTIONS", "1" } });
+		AddCompile(a_jobs, root / "SpecularIrradianceCS.hlsl", {});
+		return a_jobs.size() - firstJob;
+	}
+
 	constexpr std::size_t kUpscalingPermutations = 7;
 
 	std::size_t AddUpscaling(
@@ -1026,6 +1048,7 @@ namespace
 	// The SSGI composition extends the existing plugin texture block.
 	constexpr std::array kCompositionTextureSlots{ 26u, 27u, 28u, 29u };
 	constexpr UINT kGbufferNormalTextureSlot = 25;
+	constexpr std::array kDynamicCubemapTextureSlots{ 17u };
 
 	// only families that can isolate directional ambient carry the composition
 	constexpr std::array kAmbientCompositionFamilies{
@@ -1042,6 +1065,13 @@ namespace
 		"BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY",
 		"BSDFCOMPOSITE_PS_2D_ACCUMULATOR",
 		"BSDFCOMPOSITE_PS_2D_FOG",
+		"BSDFCOMPOSITE_PS_CUBE_IBL"
+	};
+	constexpr std::array kDynamicCubemapCompositeFamilies{
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB31_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_CB47_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_COMPACT_FAMILY",
+		"BSDFCOMPOSITE_PS_AMBIENT_IBL_MINIMAL_FAMILY",
 		"BSDFCOMPOSITE_PS_CUBE_IBL"
 	};
 	constexpr std::array kWetnessDirectFamilies{
@@ -1142,6 +1172,17 @@ namespace
 				== cs::engine::ShaderInjectionTarget::kBsdfComposite
 			&& a_registration.stage == cs::engine::ShaderStage::kPixel
 			&& DeclaresFamily(a_registration, kWetnessCompositeFamilies);
+	}
+
+	bool IsDynamicCubemapCompositeConsumer(
+		const cs::engine::ShaderReplacementVariantRegistration&
+			a_registration)
+	{
+		return a_registration.targetId
+				== cs::engine::ShaderInjectionTarget::kBsdfComposite
+			&& a_registration.stage == cs::engine::ShaderStage::kPixel
+			&& DeclaresFamily(
+				a_registration, kDynamicCubemapCompositeFamilies);
 	}
 
 	bool IsWetnessConsumer(
@@ -1398,6 +1439,13 @@ namespace
 				{ kWetnessEffects, "1" }
 			}
 		} };
+		const std::array<ShaderDefines, 2> dynamicCubemapCompositions{ {
+			{ { kDynamicCubemaps, "1" } },
+			{
+				{ kDynamicCubemaps, "1" },
+				{ kWetnessEffects, "1" }
+			}
+		} };
 		const std::array<ShaderDefines, 2> inverseSquareCompositions{ {
 			{ { kInverseSquareLighting, "1" } },
 			{
@@ -1554,6 +1602,8 @@ namespace
 				&& DeclaresFamily(registration, kAmbientCompositionFamilies);
 			const bool composesWetness = pixelRow
 				&& DeclaresFamily(registration, kWetnessCompositeFamilies);
+			const bool composesDynamicCubemaps =
+				IsDynamicCubemapCompositeConsumer(registration);
 			const bool consumesTerrainDebug =
 				IsTerrainDebugCompositeConsumer(registration);
 			const bool consumesWetnessDebug =
@@ -1623,6 +1673,33 @@ namespace
 					nullptr,
 					std::move(slots),
 					std::move(identity));
+				++contributorCompositionCount;
+
+			}
+
+			for (const auto& defines : dynamicCubemapCompositions) {
+				const bool wetnessEffects =
+					HasDefine(defines, kWetnessEffects);
+				SlotExpectations slots;
+				auto& cubemapSlots =
+					composesDynamicCubemaps ?
+						slots.requiredTextures :
+						slots.forbiddenTextures;
+				cubemapSlots.assign(
+					kDynamicCubemapTextureSlots.begin(),
+					kDynamicCubemapTextureSlots.end());
+				auto& normalSlot =
+					wetnessEffects && composesWetness ?
+						slots.requiredTextures :
+						slots.forbiddenTextures;
+				normalSlot.push_back(kGbufferNormalTextureSlot);
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					defines,
+					nullptr,
+					std::move(slots));
 				++contributorCompositionCount;
 			}
 
@@ -1959,6 +2036,15 @@ int main(int argc, char** argv)
 			"ScreenSpaceGI permutation census",
 			"expected " + std::to_string(kScreenSpaceGIPermutations)
 				+ " permutations, prepared " + std::to_string(screenSpaceGiCount));
+	}
+	const auto dynamicCubemapCount = AddDynamicCubemaps(jobs, argv[1]);
+	if (dynamicCubemapCount != kDynamicCubemapPermutations) {
+		AddPreparationFailure(
+			jobs,
+			"DynamicCubemaps permutation census",
+			"expected " + std::to_string(kDynamicCubemapPermutations)
+				+ " permutations, prepared "
+				+ std::to_string(dynamicCubemapCount));
 	}
 	const auto lightingCounts = AddLighting(jobs, argv[1]);
 	const auto terrainShadowsCount = AddTerrainShadows(jobs, argv[1]);

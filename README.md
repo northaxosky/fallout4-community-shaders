@@ -58,6 +58,7 @@ injected in place of the stock shaders.
 | **Terrain Shadows** | Long-range worldspace terrain shadowing from an xLODGen heightmap, marched into a shadow-height map and multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
 | **Inverse Square Lighting** | Configurable interior/exterior inverse-square attenuation for owned deferred opaque punctual lights, with a softened near field. |
+| **Dynamic Cubemaps** | Scene capture and GGX-prefiltered environment reflections for the deferred composite's native IBL materials. |
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
 | **Upscaling** | DLSS and FSR 3 super-resolution, TAA, and AMD FSR 3 frame generation through a D3D11-facing D3D12 proxy. |
@@ -179,8 +180,9 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 ## Compatibility notes
 
 - **ENB is not supported.** Features whose effects overlap ENB - Screen Space Shadows, Terrain
-  Shadows, Screen Space GI, Inverse Square Lighting, Wetness Effects, and Upscaling - deactivate
-  themselves when ENB is loaded. The remaining features still run, but the combination is untested.
+  Shadows, Screen Space GI, Inverse Square Lighting, Dynamic Cubemaps, Wetness Effects, and
+  Upscaling - deactivate themselves when ENB is loaded. The remaining features still run, but the
+  combination is untested.
 - **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
   load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
   needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR
@@ -190,6 +192,12 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   animation-sequence correction is unproven on OG (1.10.163) and is skipped there.
 - **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries
   render-resolution motion in the upper-left sub-rect while upscaling is active.
+- **Dynamic Cubemaps** currently consumes only through the deferred composite. Its pre-composite
+  RT 3 capture source and reflection-cube fallback still require in-game validation. This
+  milestone schedules only the reflections stream because its upstream non-IBL fallback reads only
+  that cube. Restoring the base stream belongs with the later
+  `envSpecular + (fullSample - envSpecular)` environment/sky decomposition for forward lighting
+  and water.
 - **Terrain Shadows** needs a worldspace heightmap on disk; the plugin generates none. Drop an
   FO4 xLODGen beta 132 export at
   `Data\Textures\Terrain\<Worldspace>\<Worldspace>.Terrain.HeightMap.<W>.<S>.<E>.<N>.<minZ>.<maxZ>.dds`,
