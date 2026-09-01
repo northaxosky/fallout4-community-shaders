@@ -1,5 +1,6 @@
 #include "FeatureBuffer.h"
 
+#include "DynamicCubemaps.h"
 #include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
@@ -40,7 +41,10 @@ namespace cs
 					features::InverseSquareLighting::GetSingleton()),
 			.waterEffectsSettings =
 				CollectFeatureData<WaterEffectsFeatureData>(
-					features::WaterEffects::GetSingleton())
+					features::WaterEffects::GetSingleton()),
+			.dynamicCubemapsSettings =
+				CollectFeatureData<DynamicCubemapsFeatureData>(
+					features::DynamicCubemaps::GetSingleton())
 		};
 	}
 }

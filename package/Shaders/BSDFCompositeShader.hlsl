@@ -395,6 +395,16 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     const float aoFactor = 1.0;
 #endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+#ifdef WETNESS_EFFECTS
+    float3 dynamicSpec = lerp(iblColor, wetIblColor, wetFilmWeight);
+#else
+    float3 dynamicSpec = iblColor;
+#endif
+    float3 dynamicReflectionContribution =
+        dynamicSpec * (1.0 - litAlpha) * glossFactor *
+        glossSquaredScaled * ambientPairSum * aoFactor;
+#endif
 #ifdef SSGI
     float3 ssgiViewNormal = ScreenSpaceGI::DecodeViewNormal(
         g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
@@ -411,6 +421,10 @@ PS_OUTPUT main(PS_INPUT input)
         );
 #else
     output.color.xyz = modulated * aoFactor;
+#endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+    output.color.xyz = DynamicCubemaps::ApplyFullscreenDebug(
+        output.color.xyz, dynamicReflectionContribution);
 #endif
     output.color.w = 1.0;
     return output;
@@ -833,6 +847,17 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     const float ao = 1.0;
 #endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+#ifdef WETNESS_EFFECTS
+    float3 dynamicReflectionBlend =
+        lerp(iblColor, wetIblColor, wetFilmWeight);
+#else
+    float3 dynamicReflectionBlend = iblColor;
+#endif
+    float3 dynamicReflectionContribution =
+        dynamicReflectionBlend * (1.0 - litAlpha) * glossFactor *
+        glossSquaredScaled * ambientPair * ao;
+#endif
 #ifdef SSGI
     float3 ssgiViewNormal = ScreenSpaceGI::DecodeViewNormal(
         g_tGbufferNormal.SampleLevel(g_sGbufferNormal, uv, 0).xy);
@@ -849,6 +874,10 @@ PS_OUTPUT main(PS_INPUT input)
         );
 #else
     float3 aoColor = modulated * ao;
+#endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+    aoColor = DynamicCubemaps::ApplyFullscreenDebug(
+        aoColor, dynamicReflectionContribution);
 #endif
 
     float fogPlaneDistance =
@@ -1068,6 +1097,15 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
 #ifdef WETNESS_EFFECTS
     float3 reflectionBlend = lerp(environment, wetEnvironment, wetFilmWeight);
 #endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+#ifdef WETNESS_EFFECTS
+    float3 dynamicReflectionContribution =
+        reflectionBlend * glossFactor * gloss * directLighting;
+#else
+    float3 dynamicReflectionContribution =
+        environment * glossFactor * gloss * directLighting;
+#endif
+#endif
 #ifdef SSGI
     // this family carries no engine ambient-occlusion texture
     float3 color = ScreenSpaceGI::ComposeAmbient(
@@ -1095,7 +1133,17 @@ float3 composeAmbient(float2 coordinate, float3 directLighting, float glossFacto
     color = color * directLighting + centerColor;
 #endif
 #if OUTPUTMASK
-    color *= outputMaskTexture.Sample(outputMaskSampler, min(coordinate, screenSetup[5].xy)).x;
+    float outputMask =
+        outputMaskTexture.Sample(
+            outputMaskSampler, min(coordinate, screenSetup[5].xy)).x;
+    color *= outputMask;
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+    dynamicReflectionContribution *= outputMask;
+#endif
+#endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+    color = DynamicCubemaps::ApplyFullscreenDebug(
+        color, dynamicReflectionContribution);
 #endif
     return color;
 }
@@ -1572,6 +1620,14 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         float s  = min(1.0 / rsqrt(saturate(surf.x - 0.3)), 1.0);
         k = k * s;
         float g2 = (prm.y * prm.y) * 50.0;
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+#ifdef WETNESS_EFFECTS
+        float3 dynamicReflectionContribution =
+            lerp(cube, wetCube, wetFilmWeight) * k * g2 * b3;
+#else
+        float3 dynamicReflectionContribution = cube * k * g2 * b3;
+#endif
+#endif
 #ifdef WETNESS_EFFECTS
         col = ((lerp(cube, wetCube, wetFilmWeight) * k) * g2) * b3 + col;
 #else
@@ -1581,6 +1637,9 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
 #if OUTPUTMASK
         float mask = TexMask.Sample(SampMask, min(uv, g_UVClamp.xy)).x;
         col = col * mask;
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+        dynamicReflectionContribution *= mask;
+#endif
 #endif
 
         pos.w = 1.0;
@@ -1616,6 +1675,10 @@ float4 main(float4 svpos : SV_POSITION) : SV_Target
         }
 
         result = float4(lerp(col, fogC, amt), 0.5);
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+        result.xyz = DynamicCubemaps::ApplyFullscreenDebug(
+            result.xyz, dynamicReflectionContribution);
+#endif
     }
     else
     {
@@ -2770,12 +2833,19 @@ float4 main(PSInput input) : SV_Target0
     }
 #endif
 #ifdef WETNESS_EFFECTS
+    float3 reflectionColor =
+        lerp(probeColor, wetProbeColor, wetFilmWeight);
     color = mad(
-        lerp(probeColor, wetProbeColor, wetFilmWeight) * gloss * specularScale,
+        reflectionColor * gloss * specularScale,
         diffuse,
         color);
 #else
-    color = mad(probeColor * gloss * specularScale, diffuse, color);
+    float3 reflectionColor = probeColor;
+    color = mad(reflectionColor * gloss * specularScale, diffuse, color);
+#endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+    float3 dynamicReflectionContribution =
+        reflectionColor * gloss * specularScale * diffuse;
 #endif
 
 #if COMPOSITE_MODULATION
@@ -2783,6 +2853,9 @@ float4 main(PSInput input) : SV_Target0
     float modulation =
         modulationTexture.Sample(modulationSampler, modulationUV).x;
     color *= modulation;
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+    dynamicReflectionContribution *= modulation;
+#endif
 #endif
 
 #if COMPOSITE_FOG_STACK
@@ -2838,6 +2911,10 @@ float4 main(PSInput input) : SV_Target0
         result = float4(color, 1.0);
 #else
         result = float4(color, base.w);
+#endif
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+        result.xyz = DynamicCubemaps::ApplyFullscreenDebug(
+            result.xyz, dynamicReflectionContribution);
 #endif
 #if COMPOSITE_MATERIAL_EXCLUSION
     }

@@ -192,12 +192,6 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   animation-sequence correction is unproven on OG (1.10.163) and is skipped there.
 - **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries
   render-resolution motion in the upper-left sub-rect while upscaling is active.
-- **Dynamic Cubemaps** currently consumes only through the deferred composite. Its pre-composite
-  RT 3 capture source and reflection-cube fallback still require in-game validation. This
-  milestone schedules only the reflections stream because its upstream non-IBL fallback reads only
-  that cube. Restoring the base stream belongs with the later
-  `envSpecular + (fullSample - envSpecular)` environment/sky decomposition for forward lighting
-  and water.
 - **Terrain Shadows** needs a worldspace heightmap on disk; the plugin generates none. Drop an
   FO4 xLODGen beta 132 export at
   `Data\Textures\Terrain\<Worldspace>\<Worldspace>.Terrain.HeightMap.<W>.<S>.<E>.<N>.<minZ>.<maxZ>.dds`,

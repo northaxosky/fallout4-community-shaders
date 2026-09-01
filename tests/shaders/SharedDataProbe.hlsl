@@ -54,6 +54,8 @@ float4 main() : SV_Target
 	value += SharedData::waterEffectsSettings.HasWater;
 	value += SharedData::waterEffectsSettings.WaterHeight;
 	value += SharedData::waterEffectsSettings.pad0;
+	value += SharedData::dynamicCubemapsSettings.DebugVisualization;
+	value += dot(SharedData::dynamicCubemapsSettings.pad0, 1.0);
 	return value.xxxx;
 #else
 	return 0.0;

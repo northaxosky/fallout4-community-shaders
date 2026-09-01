@@ -23,6 +23,11 @@ struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
 struct ID3D11UnorderedAccessView;
 
+namespace cs
+{
+	struct DynamicCubemapsFeatureData;
+}
+
 namespace cs::features
 {
 	class DynamicCubemaps :
@@ -30,6 +35,14 @@ namespace cs::features
 		public RE::BSTEventSink<RE::MenuOpenCloseEvent>
 	{
 	public:
+		enum class DebugVisualization : std::uint32_t
+		{
+			kOff,
+			kRawCapture,
+			kFilteredReflections,
+			kReflectionContribution
+		};
+
 		static DynamicCubemaps* GetSingleton();
 
 		std::string_view GetName() const override { return "DynamicCubemaps"; }
@@ -45,9 +58,14 @@ namespace cs::features
 		void OnDataLoaded() override;
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device) override;
 		bool ValidateShaderInjections(std::string& a_error) override;
+		void DrawSettings() override;
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view a_view) noexcept override;
+
+		cs::DynamicCubemapsFeatureData GetCommonBufferData() const;
 
 		RE::BSEventNotifyControl ProcessEvent(
 			const RE::MenuOpenCloseEvent& a_event,
@@ -56,6 +74,8 @@ namespace cs::features
 	private:
 		static constexpr std::uint32_t kCubemapSize = 256;
 		static constexpr std::uint32_t kMipLevels = 9;
+		static constexpr std::uint32_t kPreviewWidth = 512;
+		static constexpr std::uint32_t kPreviewHeight = 256;
 		static constexpr std::uint32_t kDynamicCubemapPSSlot = 16;
 		static constexpr std::uint32_t kDynamicCubemapPSSlotCount = 2;
 
@@ -116,6 +136,8 @@ namespace cs::features
 			std::uint32_t a_startLevel,
 			std::uint32_t a_endLevel,
 			bool a_doSetup);
+		void RenderCubemapPreview();
+		FeatureDebugTexture GetCubemapDebugTexture() const;
 		bool CreateResources(ID3D11Device* a_device);
 		void ResetCapture();
 
@@ -127,18 +149,27 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _queuedReset{ false };
 		std::atomic_bool _usedEngineReflectionFallback{ false };
+		std::atomic_bool _reflectionFallbackResolved{ false };
 		std::atomic_bool _cameraReadyLastFrame{ false };
+		std::atomic_bool _previewPopulated{ false };
 		std::atomic_uint32_t _captureSourceWidth{ 0 };
 		std::atomic_uint32_t _captureSourceHeight{ 0 };
 		std::atomic_uint32_t _captureSourceFormat{ 0 };
 		std::atomic_uint64_t _dispatchCount{ 0 };
+		std::atomic_uint64_t _previewDispatchCount{ 0 };
 		std::atomic_uint64_t _repeatCallbacks{ 0 };
+		std::atomic<DebugVisualization> _debugVisualization{
+			DebugVisualization::kOff
+		};
 
 		CaptureStream _baseStream;
 		CaptureStream _reflectionsStream;
 		CubeTexture _inferred;
 		CubeTexture _environment;
 		CubeTexture _reflections;
+		winrt::com_ptr<ID3D11Texture2D> _previewTexture;
+		winrt::com_ptr<ID3D11ShaderResourceView> _previewSRV;
+		winrt::com_ptr<ID3D11UnorderedAccessView> _previewUAV;
 
 		winrt::com_ptr<ID3D11Resource> _defaultCubemapResource;
 		winrt::com_ptr<ID3D11ShaderResourceView> _defaultCubemap;
@@ -150,6 +181,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ComputeShader> _inferCS;
 		winrt::com_ptr<ID3D11ComputeShader> _inferReflectionsCS;
 		winrt::com_ptr<ID3D11ComputeShader> _irradianceCS;
+		winrt::com_ptr<ID3D11ComputeShader> _previewCS;
 
 		cs::render::PixelShaderResourceSnapshot<kDynamicCubemapPSSlotCount>
 			_engineBindings;

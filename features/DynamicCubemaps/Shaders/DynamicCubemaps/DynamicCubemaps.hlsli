@@ -1,10 +1,15 @@
 #ifndef DYNAMIC_CUBEMAPS_HLSLI
 #define DYNAMIC_CUBEMAPS_HLSLI
 
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+#include "Common/SharedData.hlsli"
+#endif
+
 namespace DynamicCubemaps
 {
 	TextureCube<float3> EnvironmentTexture : register(t16);
 	TextureCube<float3> ReflectionsTexture : register(t17);
+	static const uint DebugModeReflectionContribution = 3;
 
 	float Luminance(float3 color)
 	{
@@ -43,6 +48,16 @@ namespace DynamicCubemaps
 		float3 normalized =
 			ToLinear(dynamicSample) / max(coarseLuminance, 0.001);
 		return ToGamma(normalized * nativeDirectionalAmbient);
+	}
+
+	float3 ApplyFullscreenDebug(float3 color, float3 contribution)
+	{
+#ifdef DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG
+		if (SharedData::dynamicCubemapsSettings.DebugVisualization ==
+			DebugModeReflectionContribution)
+			return max(contribution, 0.0);
+#endif
+		return color;
 	}
 }
 

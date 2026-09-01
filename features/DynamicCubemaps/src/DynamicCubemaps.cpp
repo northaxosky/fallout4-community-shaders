@@ -14,6 +14,8 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "FeatureBuffer.h"
+#include "Menu/Menu.h"
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
@@ -22,6 +24,7 @@
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
+#include "Render/SharedData.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSBuffer.h"
 #include "Utils/CSUtil.h"
@@ -38,6 +41,8 @@ namespace cs::features
 			L"Data\\Shaders\\DynamicCubemaps\\InferCubemapCS.hlsl";
 		constexpr const wchar_t* kIrradiancePath =
 			L"Data\\Shaders\\DynamicCubemaps\\SpecularIrradianceCS.hlsl";
+		constexpr const wchar_t* kPreviewPath =
+			L"Data\\Shaders\\DynamicCubemaps\\CubemapPreviewCS.hlsl";
 		constexpr const wchar_t* kDefaultCubemapPath =
 			L"Data\\Shaders\\DynamicCubemaps\\defaultcubemap.dds";
 
@@ -51,10 +56,26 @@ namespace cs::features
 			if (!std::isfinite(a_ratio) || a_ratio <= 0.0f) {
 				return 0;
 			}
+
 			return std::min(
 				a_extent,
 				static_cast<std::uint32_t>(
 					static_cast<double>(a_extent) * a_ratio));
+		}
+
+		std::string_view DebugVisualizationName(
+			DynamicCubemaps::DebugVisualization a_visualization)
+		{
+			switch (a_visualization) {
+			case DynamicCubemaps::DebugVisualization::kRawCapture:
+				return "raw_capture";
+			case DynamicCubemaps::DebugVisualization::kFilteredReflections:
+				return "filtered_reflections";
+			case DynamicCubemaps::DebugVisualization::kReflectionContribution:
+				return "reflection_contribution";
+			default:
+				return "off";
+			}
 		}
 
 		bool DescribeTexture(
@@ -128,6 +149,79 @@ namespace cs::features
 		return &instance;
 	}
 
+	std::span<const FeatureDebugView>
+		DynamicCubemaps::GetDebugViews() const noexcept
+	{
+		static constexpr std::array views{
+			FeatureDebugView{
+				.id = "raw_capture",
+				.label = "Raw capture",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const DynamicCubemaps&>(a_feature)
+						.GetCubemapDebugTexture();
+				}
+			},
+			FeatureDebugView{
+				.id = "filtered_reflections",
+				.label = "Filtered reflections",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const DynamicCubemaps&>(a_feature)
+						.GetCubemapDebugTexture();
+				}
+			},
+			FeatureDebugView{
+				.id = "reflection_contribution",
+				.label = "Dynamic reflection contribution",
+				.kind = FeatureDebugViewKind::kFullscreen
+			}
+		};
+		return views;
+	}
+
+	void DynamicCubemaps::SetDebugView(std::string_view a_view) noexcept
+	{
+		DebugVisualization visualization = DebugVisualization::kOff;
+		if (a_view == "raw_capture") {
+			visualization = DebugVisualization::kRawCapture;
+		} else if (a_view == "filtered_reflections") {
+			visualization = DebugVisualization::kFilteredReflections;
+		} else if (a_view == "reflection_contribution") {
+			visualization = DebugVisualization::kReflectionContribution;
+		}
+		const auto previous = _debugVisualization.exchange(
+			visualization, std::memory_order_acq_rel);
+		if (previous != visualization) {
+			_previewPopulated.store(false, std::memory_order_release);
+		}
+	}
+
+	FeatureDebugTexture DynamicCubemaps::GetCubemapDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "Cubemap preview not populated."
+		};
+		const auto visualization =
+			_debugVisualization.load(std::memory_order_acquire);
+		if ((visualization != DebugVisualization::kRawCapture &&
+			 visualization != DebugVisualization::kFilteredReflections) ||
+			!_resourcesReady.load(std::memory_order_acquire) ||
+			!_previewPopulated.load(std::memory_order_acquire) ||
+			!_previewSRV) {
+			return texture;
+		}
+		texture.texture = _previewSRV.get();
+		texture.width = kPreviewWidth;
+		texture.height = kPreviewHeight;
+		texture.caption = std::format(
+			"{} mip 0, equirectangular +X center/+Z up, tone-mapped",
+			visualization == DebugVisualization::kRawCapture ?
+				"Raw reflections capture" :
+				"Filtered reflections");
+		return texture;
+	}
+
 	void DynamicCubemaps::Load()
 	{
 		std::vector<cs::engine::ShaderSlotClaim> slotClaims;
@@ -151,6 +245,11 @@ namespace cs::features
 					{
 						cs::engine::shader_injection_defines::
 							kDynamicCubemaps,
+						"1"
+					},
+					{
+						cs::engine::shader_injection_defines::
+							kDynamicCubemapsFullscreenDebug,
 						"1"
 					}
 				},
@@ -271,6 +370,11 @@ namespace cs::features
 				kIrradiancePath,
 				{},
 				"DynamicCubemaps/SpecularIrradiance.CS");
+			compile(
+				_previewCS,
+				kPreviewPath,
+				{},
+				"DynamicCubemaps/CubemapPreview.CS");
 
 			if (!CreateResources(a_device)) {
 				throw std::runtime_error("resource creation failed");
@@ -405,6 +509,29 @@ namespace cs::features
 			true,
 			"DynamicCubemaps/Reflections");
 
+		D3D11_TEXTURE2D_DESC previewDesc{};
+		previewDesc.Width = kPreviewWidth;
+		previewDesc.Height = kPreviewHeight;
+		previewDesc.MipLevels = 1;
+		previewDesc.ArraySize = 1;
+		previewDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		previewDesc.SampleDesc.Count = 1;
+		previewDesc.Usage = D3D11_USAGE_DEFAULT;
+		previewDesc.BindFlags =
+			D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+		DX::ThrowIfFailed(a_device->CreateTexture2D(
+			&previewDesc, nullptr, _previewTexture.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			_previewTexture.get(), nullptr, _previewSRV.put()));
+		DX::ThrowIfFailed(a_device->CreateUnorderedAccessView(
+			_previewTexture.get(), nullptr, _previewUAV.put()));
+		cs::render::annotation::SetName(
+			_previewTexture.get(), "DynamicCubemaps/Preview.Texture");
+		cs::render::annotation::SetName(
+			_previewSRV.get(), "DynamicCubemaps/Preview.SRV");
+		cs::render::annotation::SetName(
+			_previewUAV.get(), "DynamicCubemaps/Preview.UAV");
+
 		if (auto* context = cs::engine::GetImmediateContext()) {
 			constexpr std::array<float, 4> clear{};
 			for (auto* cube : { &_inferred, &_environment, &_reflections }) {
@@ -471,6 +598,11 @@ namespace cs::features
 			_validationDetail = a_error;
 			return false;
 		}
+		if (!cs::render::IsSharedDataReady()) {
+			a_error = "the shared substrate is unavailable for fullscreen debug";
+			_validationDetail = a_error;
+			return false;
+		}
 
 		const auto snapshot = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfComposite);
@@ -478,11 +610,18 @@ namespace cs::features
 			cs::engine::shader_injection_defines::kDynamicCubemaps);
 		const bool contributed =
 			define != snapshot.defines.end() && define->second == "1";
+		const auto debugDefine = snapshot.defines.find(
+			cs::engine::shader_injection_defines::
+				kDynamicCubemapsFullscreenDebug);
+		const bool debugContributed =
+			debugDefine != snapshot.defines.end() &&
+			debugDefine->second == "1";
 		if (!snapshot.requested ||
 			!snapshot.compileComplete ||
 			!snapshot.swappable ||
 			snapshot.slotCollision ||
-			!contributed) {
+			!contributed ||
+			!debugContributed) {
 			a_error =
 				"'" + snapshot.name +
 				"' cannot deliver dynamic cubemaps (requested=" +
@@ -492,7 +631,9 @@ namespace cs::features
 				" swappable=" + std::to_string(snapshot.swappable) +
 				" slot_collision=" +
 				std::to_string(snapshot.slotCollision) +
-				" contributed=" + std::to_string(contributed) + ")";
+				" contributed=" + std::to_string(contributed) +
+				" debug_contributed=" +
+				std::to_string(debugContributed) + ")";
 			_validationDetail = a_error;
 			return false;
 		}
@@ -693,6 +834,7 @@ namespace cs::features
 				std::memory_order_relaxed);
 			break;
 		}
+		RenderCubemapPreview();
 		_dispatchCount.fetch_add(1, std::memory_order_relaxed);
 	}
 
@@ -826,6 +968,7 @@ namespace cs::features
 		}
 		_usedEngineReflectionFallback.store(
 			engineReflection != nullptr, std::memory_order_relaxed);
+		_reflectionFallbackResolved.store(true, std::memory_order_relaxed);
 		if (!engineReflection) {
 			engineReflection = _defaultCubemap.get();
 		}
@@ -915,9 +1058,66 @@ namespace cs::features
 		UnbindCompute(context);
 	}
 
+	void DynamicCubemaps::RenderCubemapPreview()
+	{
+		const auto visualization =
+			_debugVisualization.load(std::memory_order_acquire);
+		if (visualization != DebugVisualization::kRawCapture &&
+			visualization != DebugVisualization::kFilteredReflections) {
+			return;
+		}
+		auto* context = cs::engine::GetImmediateContext();
+		if (!context || !_previewCS || !_previewUAV) {
+			return;
+		}
+
+		ID3D11ShaderResourceView* source =
+			visualization == DebugVisualization::kRawCapture ?
+				_reflectionsStream.color.srv.get() :
+				_reflections.srv.get();
+		if (!source) {
+			return;
+		}
+		context->CSSetShaderResources(0, 1, &source);
+		ID3D11UnorderedAccessView* output = _previewUAV.get();
+		context->CSSetUnorderedAccessViews(0, 1, &output, nullptr);
+		ID3D11SamplerState* sampler = _computeSampler.get();
+		context->CSSetSamplers(0, 1, &sampler);
+		context->CSSetShader(_previewCS.get(), nullptr, 0);
+		context->Dispatch(
+			DispatchGroups(kPreviewWidth),
+			DispatchGroups(kPreviewHeight),
+			1);
+		UnbindCompute(context);
+		_previewDispatchCount.fetch_add(1, std::memory_order_relaxed);
+		_previewPopulated.store(true, std::memory_order_release);
+	}
+
 	void DynamicCubemaps::CollectTelemetry(
 		cs::telemetry::Sink& a_sink) const
 	{
+		const auto task = _nextTask.load(std::memory_order_relaxed);
+		const auto taskName = [task]() -> std::string_view {
+			switch (task) {
+			case NextTask::kCaptureInferAndIrradianceA:
+				return "base_capture_infer_mip_1";
+			case NextTask::kIrradianceBA:
+				return "base_mips_2_7";
+			case NextTask::kIrradianceBB:
+				return "base_mip_8";
+			case NextTask::kCaptureInferAndIrradianceA2:
+				return "reflections_capture_infer_mip_1";
+			case NextTask::kIrradianceBA2:
+				return "reflections_mips_2_7";
+			case NextTask::kIrradianceBB2:
+				return "reflections_mip_8";
+			}
+			return "unknown";
+		}();
+		const bool fallbackResolved =
+			_reflectionFallbackResolved.load(std::memory_order_relaxed);
+		const bool engineFallback =
+			_usedEngineReflectionFallback.load(std::memory_order_relaxed);
 		a_sink
 			.Field(
 				"operational",
@@ -943,19 +1143,51 @@ namespace cs::features
 					_captureSourceFormat.load(std::memory_order_relaxed)))
 			.Field(
 				"engine_reflection_fallback",
-				_usedEngineReflectionFallback.load(
-					std::memory_order_relaxed))
+				engineFallback)
+			.Field(
+				"reflection_fallback_source",
+				fallbackResolved ?
+					(engineFallback ? "engine_cube_0" : "bundled_default") :
+					"unresolved")
 			.Field(
 				"next_task",
-				static_cast<std::int64_t>(
-					_nextTask.load(std::memory_order_relaxed)))
+				static_cast<std::int64_t>(task))
+			.Field("task_state", taskName)
 			.Field(
 				"pipeline_advances",
 				static_cast<std::int64_t>(
 					_dispatchCount.load(std::memory_order_relaxed)))
 			.Field(
+				"task_dispatches",
+				static_cast<std::int64_t>(
+					_dispatchCount.load(std::memory_order_relaxed)))
+			.Field(
+				"preview_dispatches",
+				static_cast<std::int64_t>(
+					_previewDispatchCount.load(std::memory_order_relaxed)))
+			.Field(
+				"debug_visualization",
+				DebugVisualizationName(
+					_debugVisualization.load(std::memory_order_relaxed)))
+			.Field(
 				"repeat_callbacks",
 				static_cast<std::int64_t>(
 					_repeatCallbacks.load(std::memory_order_relaxed)));
+	}
+
+	cs::DynamicCubemapsFeatureData
+		DynamicCubemaps::GetCommonBufferData() const
+	{
+		cs::DynamicCubemapsFeatureData data{};
+		if (_injectionsOperational.load(std::memory_order_acquire)) {
+			data.DebugVisualization = static_cast<std::uint32_t>(
+				_debugVisualization.load(std::memory_order_acquire));
+		}
+		return data;
+	}
+
+	void DynamicCubemaps::DrawSettings()
+	{
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 }

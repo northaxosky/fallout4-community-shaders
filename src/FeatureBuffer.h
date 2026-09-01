@@ -62,6 +62,13 @@ namespace cs
 	};
 	static_assert(sizeof(WaterEffectsFeatureData) == 16);
 
+	struct alignas(16) DynamicCubemapsFeatureData
+	{
+		std::uint32_t DebugVisualization = 0;
+		std::uint32_t pad0[3]{};
+	};
+	static_assert(sizeof(DynamicCubemapsFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
 		ScreenSpaceShadowsFeatureData     screenSpaceShadowsSettings;
@@ -70,8 +77,9 @@ namespace cs
 		TerrainShadowsFeatureData         terrainShadowsSettings;
 		InverseSquareLightingFeatureData inverseSquareLightingSettings;
 		WaterEffectsFeatureData           waterEffectsSettings;
+		DynamicCubemapsFeatureData        dynamicCubemapsSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 128);
+	static_assert(sizeof(FeatureDataCB) == 144);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -95,6 +103,8 @@ namespace cs
 	static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
 	static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
 	static_assert(offsetof(WaterEffectsFeatureData, pad0) == 12);
+	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 128);
+	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 0);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

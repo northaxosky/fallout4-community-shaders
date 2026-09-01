@@ -77,6 +77,12 @@ namespace SharedData
 		float pad0;
 	};
 
+	struct DynamicCubemapsSettings
+	{
+		uint DebugVisualization;
+		uint3 pad0;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
@@ -85,6 +91,7 @@ namespace SharedData
 		TerrainShadowsSettings terrainShadowsSettings;
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		WaterEffectsSettings waterEffectsSettings;
+		DynamicCubemapsSettings dynamicCubemapsSettings;
 	};
 
 	// standard D3D depth: near = 0, far = 1
