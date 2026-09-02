@@ -6,8 +6,6 @@ level = "info"
 telemetry = false
 telemetry_interval_seconds = 5
 dump_hotkey = "Ctrl+F12"
-# Requires restart; set the cs.render.prepass channel to debug for per-draw output.
-prepass_technique_instrumentation = false
 
 [logging.channels]
 

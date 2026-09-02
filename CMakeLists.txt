@@ -668,15 +668,6 @@ target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
 set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
 
-add_executable(PrepassInstrumentationTests
-	tests/PrepassInstrumentationTests.cpp
-	src/Render/PrepassInstrumentationModel.h
-)
-configure_host_test(PrepassInstrumentationTests)
-
-add_test(NAME PrepassInstrumentation COMMAND PrepassInstrumentationTests)
-set_tests_properties(PrepassInstrumentation PROPERTIES LABELS "render;unit")
-
 add_executable(ShaderCacheTests
 	tests/ShaderCacheTests.cpp
 	src/Utils/CSSha256.cpp

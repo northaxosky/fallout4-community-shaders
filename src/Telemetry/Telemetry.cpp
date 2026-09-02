@@ -7,7 +7,6 @@
 #include "Plugin.h"
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
-#include "Render/PrepassInstrumentation.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 
@@ -167,58 +166,6 @@ namespace cs::telemetry
 				.Field(
 					"bsdf_composite_dispatches",
 					TomlInteger(bsdfComposite.dispatches));
-		}
-
-		void CollectPrepassTechnique(Sink& a_sink)
-		{
-			const auto snapshot =
-				cs::engine::prepass_instrumentation::GetSnapshot();
-			a_sink
-				.Field("enabled", snapshot.enabled)
-				.Field("hooks_installed", snapshot.hooksInstalled)
-				.Field(
-					"shader_tracking_installed",
-					snapshot.shaderTrackingInstalled)
-				.Field(
-					"setup_techniques",
-					TomlInteger(snapshot.setupTechniques))
-				.Field(
-					"completed_techniques",
-					TomlInteger(snapshot.completedTechniques))
-				.Field(
-					"zero_draw_techniques",
-					TomlInteger(snapshot.zeroDrawTechniques))
-				.Field(
-					"multi_draw_techniques",
-					TomlInteger(snapshot.multiDrawTechniques))
-				.Field("draws", TomlInteger(snapshot.draws))
-				.Field(
-					"object_lod_draws",
-					TomlInteger(snapshot.objectLodDraws))
-				.Field(
-					"bit_clear_draws",
-					TomlInteger(snapshot.bitClearDraws))
-				.Field(
-					"setup_reentries",
-					TomlInteger(snapshot.setupReentries))
-				.Field(
-					"missing_technique_draws",
-					TomlInteger(snapshot.missingTechniqueDraws))
-				.Field(
-					"missing_vertex_identities",
-					TomlInteger(snapshot.missingVertexIdentities))
-				.Field(
-					"missing_pixel_identities",
-					TomlInteger(snapshot.missingPixelIdentities))
-				.Field(
-					"ambiguous_shader_identities",
-					TomlInteger(snapshot.ambiguousShaderIdentities))
-				.Field(
-					"max_draws_per_technique",
-					TomlInteger(snapshot.maxDrawsPerTechnique))
-				.Field(
-					"last_object_lod_frame",
-					TomlInteger(snapshot.lastObjectLodFrame));
 		}
 
 		[[nodiscard]] std::string FormatVector3(float a_x, float a_y, float a_z)
@@ -601,25 +548,6 @@ namespace cs::telemetry
 					spdlog::level::warn,
 					"Telemetry collection failed for shader_injection: non-standard exception");
 			}
-			try {
-				Sink sink;
-				CollectPrepassTechnique(sink);
-				logger->info(
-					"frame={} component=prepass_technique {}",
-					frame,
-					sink.ToLine());
-			} catch (const std::exception& e) {
-				CS_LOG_ONCE(
-					logger,
-					spdlog::level::warn,
-					"Telemetry collection failed for prepass_technique: {}",
-					e.what());
-			} catch (...) {
-				CS_LOG_ONCE(
-					logger,
-					spdlog::level::warn,
-					"Telemetry collection failed for prepass_technique: non-standard exception");
-			}
 			for (const auto* feature : FeatureManager::Get().GetAll()) {
 				try {
 					if (!feature->ProducesTelemetry())
@@ -657,12 +585,6 @@ namespace cs::telemetry
 				root.insert_or_assign(
 					"shader_injection",
 					shaderInjection.AsTable());
-
-				Sink prepassTechnique;
-				CollectPrepassTechnique(prepassTechnique);
-				root.insert_or_assign(
-					"prepass_technique",
-					prepassTechnique.AsTable());
 
 				Sink frameBuffer;
 				CollectFrameBuffer(frameBuffer);

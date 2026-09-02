@@ -86,8 +86,6 @@ namespace
 		HRESULT originalResult = S_OK;
 		std::vector<int> order;
 		bool resolverForwarded = false;
-		bool observerCalled = false;
-		bool observerForwarded = false;
 		cs::engine::ShaderSwapResolverResult firstResolverResult =
 			cs::engine::ShaderSwapResolverResult::kNoMatch;
 		bool lowerResolverCalled = false;
@@ -134,26 +132,6 @@ namespace
 		if (a_request.output)
 			*a_request.output = fixture.replacement;
 		return cs::engine::ShaderSwapResolverResult::kReplaced;
-	}
-
-	void PipelineObserver(
-		cs::engine::ShaderStage a_stage,
-		const cs::sha1::Sha1Result& a_stockSha1,
-		ID3D11DeviceChild* a_finalOutput) noexcept
-	{
-		auto& fixture = *g_pipelineFixture;
-		fixture.observerCalled = true;
-		fixture.observerForwarded =
-			a_stage == fixture.expectedStage
-			&& a_finalOutput == fixture.replacement
-			&& a_stockSha1.bytes == cs::sha1::Sha1Compute(
-				std::array<std::byte, 4>{
-					std::byte{ 1 },
-					std::byte{ 2 },
-					std::byte{ 3 },
-					std::byte{ 4 }
-				}.data(),
-				4).bytes;
 	}
 
 	cs::engine::ShaderSwapResolverResult FirstPipelineResolver(
@@ -660,8 +638,7 @@ namespace
 			bytecode.data(),
 			bytecode.size(),
 			fixture.expectedLinkage,
-			&output,
-			&PipelineObserver);
+			&output);
 		Check(result == S_OK, "broker did not preserve original HRESULT");
 		Check(
 			output == fixture.replacement,
@@ -672,9 +649,6 @@ namespace
 		Check(
 			fixture.resolverForwarded,
 			"broker did not forward stock/device/linkage to resolver");
-		Check(
-			fixture.observerCalled && fixture.observerForwarded,
-			"broker observer did not receive final output and stock identity");
 
 		fixture.order.clear();
 		output = nullptr;
