@@ -114,9 +114,6 @@ namespace cs::telemetry
 		{
 			const auto summary =
 				cs::engine::GetShaderInjectionSummary();
-			const auto bsdfComposite =
-				cs::engine::GetShaderInjectionTargetSnapshot(
-					cs::engine::ShaderInjectionTarget::kBsdfComposite);
 			a_sink
 				.Field(
 					"requested",
@@ -156,16 +153,31 @@ namespace cs::telemetry
 				.Field(
 					"passthrough_disabled",
 					TomlInteger(summary.passthroughDisabled))
-				.Field("dispatches", TomlInteger(summary.dispatches))
-				.Field(
-					"bsdf_composite_stock_matches",
-					TomlInteger(bsdfComposite.matches))
-				.Field(
-					"bsdf_composite_replacements",
-					TomlInteger(bsdfComposite.substitutions))
-				.Field(
-					"bsdf_composite_dispatches",
-					TomlInteger(bsdfComposite.dispatches));
+				.Field("dispatches", TomlInteger(summary.dispatches));
+
+			for (std::uint8_t index = 0;
+				index <
+				static_cast<std::uint8_t>(
+					cs::engine::ShaderInjectionTarget::kCount);
+				++index) {
+				const auto target =
+					cs::engine::GetShaderInjectionTargetSnapshot(
+						static_cast<cs::engine::ShaderInjectionTarget>(
+							index));
+				if (!target.requested || target.name.empty()) {
+					continue;
+				}
+				a_sink
+					.Field(
+						target.name + "_stock_matches",
+						TomlInteger(target.matches))
+					.Field(
+						target.name + "_replacements",
+						TomlInteger(target.substitutions))
+					.Field(
+						target.name + "_dispatches",
+						TomlInteger(target.dispatches));
+			}
 		}
 
 		[[nodiscard]] std::string FormatVector3(float a_x, float a_y, float a_z)
