@@ -5,10 +5,10 @@ diagnosis. It defaults to the newest capture in the plugin's capture directory a
 results and image artifacts to a temporary directory.
 
 The wrapper runs `qrenderdoc.exe --python scripts/rdoc/analyze.py`. RenderDoc 1.46 embeds Python
-3.8; RenderDoc 1.45 used Python 3.6. The analyzer remains syntax-compatible with both versions.
-The embedded interpreter does not provide command arguments through `sys.argv`, and
+3.8. The embedded interpreter does not provide command arguments through `sys.argv`, and
 `qrenderdoc.exe` is a GUI-subsystem executable whose stdout is unavailable. The wrapper therefore
-passes one JSON job path through `RDOC_JOB`, then reads `result.json` after the analyzer exits.
+passes one JSON job path through `RDOC_JOB`, then reads `result.json` after the analyzer exits,
+and starts the process hidden so no window appears.
 
 ```powershell
 pwsh scripts/rdoc-analyze.ps1 -List

@@ -186,6 +186,9 @@ $startInfo.FileName = $qrenderdoc
 $startInfo.Arguments = '--python "' + $analyzer + '"'
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
+# qrenderdoc is a GUI subsystem app, so CreateNoWindow alone leaves a visible Qt window
+# while --python runs; SW_HIDE via STARTUPINFO suppresses it.
+$startInfo.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
 $startInfo.EnvironmentVariables['RDOC_JOB'] = $jobPath
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
