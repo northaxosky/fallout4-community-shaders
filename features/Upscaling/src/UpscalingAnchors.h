@@ -14,8 +14,10 @@ namespace cs::features::upscaling_anchors
 	inline constexpr std::ptrdiff_t kDrawWorldBeginUpdateTemporalDataCall = 0x38C;
 	inline constexpr std::uint64_t kSetDynamicViewportAsDefault = 2277194;
 
-	// DrawWorld::Forward brackets normal first-person alpha around RenderAlphaGeometry.
-	inline constexpr std::uint64_t kDrawWorldForward[] = { 656535, 2318315, 2318315 };
+	// The first-person alpha call site around RenderAlphaGeometry. OG factors this work into
+	// DrawWorld::ForwardAlphaImpl, which NG/AE inlined into DrawWorld::Forward; shared landmarks sit
+	// at a constant +0x2EA displacement, so the offset is common and only the anchor differs.
+	inline constexpr std::uint64_t kFirstPersonAlphaAnchor[] = { 338205, 2318315, 2318315 };
 	inline constexpr std::ptrdiff_t kFirstPersonAlphaCall[] = { 0x253, 0x53D, 0x53D };
 	inline constexpr std::uint64_t kRenderAlphaGeometry[] = { 0, 2317903, 2317903 };
 

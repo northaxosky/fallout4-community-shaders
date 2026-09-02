@@ -874,9 +874,9 @@ namespace cs::features
 			static_cast<std::size_t>(REX::FModule::GetRuntimeIndex());
 		const auto firstPersonAlphaSite =
 			REL::ID({
-				kDrawWorldForward[0],
-				kDrawWorldForward[1],
-				kDrawWorldForward[2] })
+				kFirstPersonAlphaAnchor[0],
+				kFirstPersonAlphaAnchor[1],
+				kFirstPersonAlphaAnchor[2] })
 				.address() +
 			kFirstPersonAlphaCall[runtimeIndex];
 		const auto firstPersonAlphaTarget = kRenderAlphaGeometry[runtimeIndex]
