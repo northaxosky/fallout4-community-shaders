@@ -1,0 +1,1120 @@
+# Stock shader routes measured from Fallout 4 bytecode and embedded by CMake.
+format_version = 1
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps0"
+stock_sha1 = "9c9294c0054ea1c2188c19c72e4d45c5c55502ec"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["OCCLUSION", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps1"
+stock_sha1 = "1a8d5c7556d94e326f0e995f88cbc68f1286a707"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["DITHER", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps2"
+stock_sha1 = "9474f8572bd1fe8d8389c549045893bbf01c0d07"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["MOONMASK", "1"],
+    ["TEX", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps3"
+stock_sha1 = "dc269e0c24dace5bd1b7957ea82e97ce263bb66a"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["HORIZFADE", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps4"
+stock_sha1 = "6daddf712b1a43e22cadb461e3668e53495e1583"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["TEX", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps5"
+stock_sha1 = "d7f81b74d0050df28ef5f341b7847a98387cab39"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["CLOUDS", "1"],
+    ["TEX", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps6"
+stock_sha1 = "8eef0648908859f9e92e77d7673b8eeb9837b752"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["CLOUDS", "1"],
+    ["TEX", "1"],
+    ["TEXLERP", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps7"
+stock_sha1 = "bd651f35e92cb70710fb7e2b0b2620b3b91b457b"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["CLOUDS", "1"],
+    ["TEX", "1"],
+    ["TEXFADE", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_ps8"
+stock_sha1 = "8235653ec77705a1dc6e30663ae0f05d32851026"
+stage = "pixel"
+defines = [
+    ["BSSKY_PIXEL_SHADER", "1"],
+    ["DITHER", "1"],
+    ["TEX", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_094"
+stock_sha1 = "b84ac758940de3c7899d47a04afd86a1b073015b"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_095"
+stock_sha1 = "c715ff5df2e83a3ff1fd9ca2f4dbfe56a599f45c"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["FOG", "1"],
+    ["UNDERWATER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_097"
+stock_sha1 = "a13a5ed701316931dd5d04c0db761563bed258da"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["NUM_SPECULAR_LIGHTS", "1"],
+    ["SPECULAR", "1"],
+    ["UNDERWATER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_098"
+stock_sha1 = "7f0b811a59d635ff4f2c7924db044ac168000b3a"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["INTERIOR", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_099"
+stock_sha1 = "08180d51b565fd6b8957cdb5b6f8920e414e4e88"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["SSLR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_100"
+stock_sha1 = "5fd2071e6ed0632f3cd53cb5c3b9482c7b1c791e"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["REFLECTIONS", "1"],
+    ["SSLR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_101"
+stock_sha1 = "98fce8305d47024ef5ca26604d5c0d97d7c84790"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NUM_SPECULAR_LIGHTS", "2"],
+    ["SPECULAR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_102"
+stock_sha1 = "25393b52accd9ea7ff2f04d746408852b1cded05"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["VC", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_105"
+stock_sha1 = "4f908098a2fb4a4f6c1a64e62e3861aa808d8667"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["INTERIOR", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["VC", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_106"
+stock_sha1 = "91242c42dfade7fd3d6c7e544d7bd9f457ee7fb2"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["LOD", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_107"
+stock_sha1 = "98111cd850dc2443e54bb28a029c9cd214430265"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["NUM_SPECULAR_LIGHTS", "3"],
+    ["SPECULAR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_109"
+stock_sha1 = "3e0d2d14ec52647f072b2da8409cf51b87ef7701"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_110"
+stock_sha1 = "39ea3de9ea068d3d081f6b60909052ac52b45f2d"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_111"
+stock_sha1 = "ad635a35dcb81004cdb0a1e358ec0dbb9bfa1831"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_114"
+stock_sha1 = "d7c34dfcf68f006d2bbd72b2e30570493c48bf82"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["NUM_SPECULAR_LIGHTS", "4"],
+    ["SPECULAR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_117"
+stock_sha1 = "e79e5133d5f31fdd55b2ca15c44764a5b32a7481"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NUM_SPECULAR_LIGHTS", "4"],
+    ["SPECULAR", "1"],
+    ["UNDERWATER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_119"
+stock_sha1 = "52fab812592f192560e66aa2b8bd9e10f98f3700"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NUM_SPECULAR_LIGHTS", "4"],
+    ["SPECULAR", "1"],
+    ["SSLR", "1"],
+    ["UNDERWATER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_123"
+stock_sha1 = "c5cc94711237be1f30fd77dfdd08dcd7e4e93409"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["NUM_SPECULAR_LIGHTS", "5"],
+    ["SPECULAR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_126"
+stock_sha1 = "936f862a168918721e3e0331fd838a3a8d105313"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["UNDERWATER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_128"
+stock_sha1 = "da3044bdc84d955bba8495e4ab227fc7fc92fff1"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["UNDERWATER", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_129"
+stock_sha1 = "960f82516f39d336463437b698249adfb4c73294"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["UNDERWATER", "1"],
+    ["VC", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_130"
+stock_sha1 = "1c10b58423f6ca350906fbe6182bfe7642eed622"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["UNDERWATER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_132"
+stock_sha1 = "01188986c865edb37a78e08241950cc2fd040265"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["UNDERWATER", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_134"
+stock_sha1 = "5b53fd2206673f5a02191478aeda596a3152ee23"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["NUM_SPECULAR_LIGHTS", "6"],
+    ["SPECULAR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_139"
+stock_sha1 = "8b1c0ba36111db9f999adfde6faf6651a794f3e4"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["INTERIOR", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_141"
+stock_sha1 = "301e0a3647fcd59934fbf50b4a8fc002ab0c607d"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["SSLR", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_143"
+stock_sha1 = "629d2e93bd3b2f35686548c7cc3cdff88f3e43d1"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["INTERIOR", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_151"
+stock_sha1 = "3e2042fff5f9dddbdd07980c258ec61b3bb94f50"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["INTERIOR", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_154"
+stock_sha1 = "a71444f72a6d31b1b6973aa5b9ba613336f841c6"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["LOD", "1"],
+    ["SSLR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_155"
+stock_sha1 = "af996dd590c21197668ecfc81d72566dabffe3e4"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["LOD", "1"],
+    ["REFLECTIONS", "1"],
+    ["SSLR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_163"
+stock_sha1 = "a1f1ca45884f64d6189a76b3dd3b8b17a3b341b5"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["VC", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_166"
+stock_sha1 = "6dbbf4169406bdda5eb6cf8e7534052793df817f"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["UNDERWATER", "1"],
+    ["VC", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_167"
+stock_sha1 = "227960e8a60470df04f0004b2585824bb9f83416"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["INTERIOR", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["SSLR", "1"],
+    ["VC", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_168"
+stock_sha1 = "7ba8a9a8e310f7c6781eae25901c8c73895c2e55"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["STENCIL", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_171"
+stock_sha1 = "8df4b614785e87cbd43bb2c3b9d06b0d979ae032"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["STENCIL_DISPLACEMENT", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_172"
+stock_sha1 = "33189008aec4990b9cde45822da94134b6baabed"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["NUM_SPECULAR_LIGHTS", "1"],
+    ["SPECULAR", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_177"
+stock_sha1 = "96e8f1336ee9dca53c9a020da1da966fae492434"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["WADING", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_178"
+stock_sha1 = "8fb709c2fdf00a201227a0e7af60212dcdff9acf"
+stage = "pixel"
+defines = [
+    ["BSWATER_PIXEL_SHADER", "1"],
+    ["DEPTH", "1"],
+    ["FOG", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_base_blend"
+stock_sha1 = "8a2de7e879545312b51d1e11065bef0fe3b3372a"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_COLOR", "1"],
+    ["BSL_BASE_BLEND", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_base_blend_tint"
+stock_sha1 = "f3244d07fb05d6d7aa94c14088b41a0b095d9b4f"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_COLOR", "1"],
+    ["BSL_BASE_BLEND", "1"],
+    ["BSL_BASE_BLEND_TINT", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_base_lut"
+stock_sha1 = "c8ec26d129ea262b6dff08250285c5764d360d54"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_RESOURCE", "1"],
+    ["BSL_BASE_LUT", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_base_lut_envmap"
+stock_sha1 = "372ad544f67c278ce4fc9fa9f9cb1b24a073d8c2"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_RESOURCE", "1"],
+    ["BSL_BASE_LUT", "1"],
+    ["BSL_ENVMAP", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_base_lut_vertex_tint"
+stock_sha1 = "0ea53bdad616e92ac640fa5ce0dc7396ddeffa27"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_RESOURCE", "1"],
+    ["BSL_BASE_LUT", "1"],
+    ["BSL_VERTEX_TINT", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_core"
+stock_sha1 = "38522aef4096c3cff6750dc647c353131f971476"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_CORE", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_envmap"
+stock_sha1 = "4a489628dee57a39d26121fe4c0e35b1aedf264e"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_CORE", "1"],
+    ["BSL_ENVMAP", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_glowmap"
+stock_sha1 = "901735922f434ea44b419f7220ee70310d6486d7"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_CORE", "1"],
+    ["BSL_GLOWMAP", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_no_vertex_alpha"
+stock_sha1 = "7052cce16a667b2e06a7cc1927877de3c98c59ad"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_COLOR", "1"],
+    ["BSL_NO_VERTEX_ALPHA", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_overlay"
+stock_sha1 = "d4e4d47ab5967fdc2bf21c45a22c25bce084841a"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_RESOURCE", "1"],
+    ["BSL_OVERLAY", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_reduced_normal"
+stock_sha1 = "ccbb8cf858e4f4c38d8982289b16d4ab92d4728d"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_CORE", "1"],
+    ["BSL_REDUCED_NORMAL", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_ps_vertex_tint"
+stock_sha1 = "1d79bd6f67bbd4336ba1f88280c1027c225cac5a"
+stage = "pixel"
+defines = [
+    ["BSLIGHTING_PS_COLOR", "1"],
+    ["BSL_VERTEX_TINT", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs0"
+stock_sha1 = "d48ed3b27c1cb97b9e836e2374d7cbfbbeae7a1d"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["OCCLUSION", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs1"
+stock_sha1 = "37b6e1f4c87107c4548bfad0151bc153f8beff03"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["DITHER", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs2"
+stock_sha1 = "aa718926964b3ae96edd5734117163316bf9c96a"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["TEX", "1"],
+    ["MOONMASK", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs3"
+stock_sha1 = "5174ad2c76fc2e635ec4a052aab0ba7a3be03d6f"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["HORIZFADE", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs4"
+stock_sha1 = "fc2f413d936ad3d2326aeab0c72265c0c71085d0"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["TEX", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs5"
+stock_sha1 = "c7b1dd4f539952b6e713c5df671c18392d22108f"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["TEX", "1"],
+    ["CLOUDS", "1"],
+]
+
+[[variants]]
+target = "bssky"
+name = "bssky_vs6"
+stock_sha1 = "e34f939e2cfe0c2b185de032fba93dae872dca12"
+stage = "vertex"
+defines = [
+    ["BSSKY_VERTEX_SHADER", "1"],
+    ["TEX", "1"],
+    ["CLOUDS", "1"],
+    ["TEXLERP", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_000"
+stock_sha1 = "55b5c7f6408a34cd8a77e13c71610fed1cb620db"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_001"
+stock_sha1 = "619a97e0f8e243a1d031204fb22c4c7ca05d5523"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["DEPTH", "1"],
+    ["UNDERWATER", "1"],
+    ["FOG", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_002"
+stock_sha1 = "13bae4f2df1d9f3fc1d184d8a397f44f64093cb3"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["VC", "1"],
+    ["DEPTH", "1"],
+    ["UNDERWATER", "1"],
+    ["FOG", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_003"
+stock_sha1 = "4484b8b250a1cc708d51a519ab47833fb55c28c9"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["UNDERWATER", "1"],
+    ["SPECULAR", "1"],
+    ["NUM_SPECULAR_LIGHTS", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_004"
+stock_sha1 = "9123f0955862aef245155c693d1df00975739f2a"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["DEPTH", "1"],
+    ["WADING", "1"],
+    ["INTERIOR", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_008"
+stock_sha1 = "eecc9a17072568d6e4b1b1ca5b6d27dd85a61c8f"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["SPECULAR", "1"],
+    ["NUM_SPECULAR_LIGHTS", "2"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_010"
+stock_sha1 = "9bd8a96e860768423de5350d8910c9086cdc8b41"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["VC", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["DEPTH", "1"],
+    ["VERTEX_ALPHA_DEPTH", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_012"
+stock_sha1 = "bc2fce8f2a682df81ce0ac4939f469f5a9337470"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["VC", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["SPECULAR", "1"],
+    ["NUM_SPECULAR_LIGHTS", "2"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_013"
+stock_sha1 = "16246d4372decad110fe99477f95460f55cc0026"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["DEPTH", "1"],
+    ["WADING", "1"],
+    ["SPECULAR", "1"],
+    ["NUM_SPECULAR_LIGHTS", "4"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_015"
+stock_sha1 = "142f6f2138a90df3fcdd73cdc6f524290e02bfb6"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["DEPTH", "1"],
+    ["LOD", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_018"
+stock_sha1 = "109f21931d072a67d29067b08a0c13500fba5ac5"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["DEPTH", "1"],
+    ["SSLR", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_022"
+stock_sha1 = "625bec5c431148cba1e3d4e4dbd0a46d13c32827"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["VC", "1"],
+    ["NORMAL_TEXCOORD", "1"],
+    ["REFLECTIONS", "1"],
+    ["REFRACTIONS", "1"],
+    ["DEPTH", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_030"
+stock_sha1 = "83deb79481d64a1f2d79ee38a5c90c0d44d26549"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["REFLECTIONS", "1"],
+    ["CLIP_VOLUME", "1"],
+    ["UNDERWATER", "1"],
+    ["SPECULAR", "1"],
+    ["NUM_SPECULAR_LIGHTS", "4"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_034"
+stock_sha1 = "6b81d5a058fb6c466985752a7502fa713968dfdb"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["VC", "1"],
+    ["DEPTH", "1"],
+    ["SPECULAR", "1"],
+    ["NUM_SPECULAR_LIGHTS", "5"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_066"
+stock_sha1 = "00dc063b4c7eac5dc0295da7933333515801ee04"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["CLIP_VOLUME", "1"],
+    ["LOD", "1"],
+]
+
+[[variants]]
+target = "bswater"
+name = "bswater_class_081"
+stock_sha1 = "2a5f3ee6ea6940f1ccb4a341c22a36429c32fa9d"
+stage = "vertex"
+defines = [
+    ["BSWATER_VERTEX_SHADER", "1"],
+    ["WATER", "1"],
+    ["WADING", "1"],
+    ["STENCIL", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_displaced"
+stock_sha1 = "c4ce36549207f1aec4d763a12b19a3b7f5a34085"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_DISPLACED", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_reduced"
+stock_sha1 = "c9e1f19e288e4a5b72b9349fcf3e1496e91ce14d"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_REDUCED", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_skinned"
+stock_sha1 = "cc8c5b605dd14542f9637aa871bc96c4f040d80c"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_SKINNED", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_skinned_vertex_color"
+stock_sha1 = "8c3175918314dcd0304ab63f6292523e12c4aa03"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_SKINNED", "1"],
+    ["BSL_VERTEX_COLOR", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_static_base"
+stock_sha1 = "50f4e196ccc7b65c5f5cfd5b5960183cbee2b032"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_STATIC", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_static_vertex_color"
+stock_sha1 = "1979a6e466d9cd5face12279028c12f7efd77794"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_STATIC", "1"],
+    ["BSL_VERTEX_COLOR", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_world"
+stock_sha1 = "adc5956c5cbb0b88833290a7a4d7f0429120acbe"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_WORLD", "1"],
+]
+
+[[variants]]
+target = "bslighting"
+name = "bslighting_vs_world_vertex_color"
+stock_sha1 = "4d59524d47728ff9d3a51b8148ba04f86d131972"
+stage = "vertex"
+defines = [
+    ["BSLIGHTING_VS_WORLD", "1"],
+    ["BSL_VERTEX_COLOR", "1"],
+]

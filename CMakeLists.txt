@@ -74,6 +74,43 @@ if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
 endif()
 
+set(FO4CS_GENERATED_SHADER_VARIANT_DIR
+	"${CMAKE_BINARY_DIR}/generated/Render"
+)
+file(MAKE_DIRECTORY "${FO4CS_GENERATED_SHADER_VARIANT_DIR}")
+
+function(embed_shader_variant_data OUTPUT_VAR SYMBOL DATA_FILE)
+	set_property(DIRECTORY APPEND PROPERTY
+		CMAKE_CONFIGURE_DEPENDS "${DATA_FILE}"
+	)
+	file(READ "${DATA_FILE}" EMBEDDED_SHADER_VARIANT_DATA)
+	set(EMBEDDED_SHADER_VARIANT_SYMBOL "${SYMBOL}")
+	set(GENERATED_SOURCE
+		"${FO4CS_GENERATED_SHADER_VARIANT_DIR}/${SYMBOL}.cpp"
+	)
+	configure_file(
+		"${CMAKE_SOURCE_DIR}/cmake/EmbeddedShaderVariantData.cpp.in"
+		"${GENERATED_SOURCE}"
+		@ONLY
+	)
+	set(${OUTPUT_VAR} "${GENERATED_SOURCE}" PARENT_SCOPE)
+endfunction()
+
+embed_shader_variant_data(
+	FO4CS_BSDF_SHADER_VARIANT_SOURCE
+	BsdfShaderReplacementVariants
+	"${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/bsdf.toml"
+)
+embed_shader_variant_data(
+	FO4CS_STATIC_FAMILY_SHADER_VARIANT_SOURCE
+	StaticFamilyShaderReplacementVariants
+	"${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/static_families.toml"
+)
+set(FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES
+	"${FO4CS_BSDF_SHADER_VARIANT_SOURCE}"
+	"${FO4CS_STATIC_FAMILY_SHADER_VARIANT_SOURCE}"
+)
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	# Single unified DLL target.
 	add_library(FO4CommunityShaders SHARED)
@@ -85,7 +122,10 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/src/*.cpp"
 		"${CMAKE_SOURCE_DIR}/src/*.h"
 	)
-	target_sources(FO4CommunityShaders PRIVATE ${CORE_SOURCES})
+	target_sources(FO4CommunityShaders PRIVATE
+		${CORE_SOURCES}
+		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
+	)
 
 	include(Common)
 	configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
@@ -521,8 +561,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		tests/generated/VertexShaderCompilePermutations.h
 		src/Render/ShaderInjection.cpp
 		src/Render/ShaderInjectionCompileRequest.cpp
-		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
-		src/Render/ShaderInjectionStaticFamilyRegistrations.h
+		src/Render/ShaderInjectionVariantData.cpp
+		src/Render/ShaderInjectionVariantData.h
 		src/Render/ShaderInjectionVariantFactory.cpp
 		src/Render/ShaderInjectionVariantFactory.h
 		src/Render/PixelShaderSwapModel.cpp
@@ -531,6 +571,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		src/Utils/CSSha256.h
 		src/Utils/ShaderCompile.cpp
 		src/Utils/ShaderCompile.h
+		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
 	)
 	configure_host_test(ShaderCompileTests)
 	target_precompile_headers(ShaderCompileTests PRIVATE
@@ -574,8 +615,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		tests/ShaderCacheBenchmarkTests.cpp
 		src/Render/ShaderInjection.cpp
 		src/Render/ShaderInjectionCompileRequest.cpp
-		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
-		src/Render/ShaderInjectionStaticFamilyRegistrations.h
+		src/Render/ShaderInjectionVariantData.cpp
+		src/Render/ShaderInjectionVariantData.h
 		src/Render/ShaderInjectionVariantFactory.cpp
 		src/Render/ShaderInjectionVariantFactory.h
 		src/Render/PixelShaderSwapModel.cpp
@@ -585,6 +626,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		src/Utils/ShaderCompile.cpp
 		src/Utils/ShaderCompile.h
 		${FO4CS_SHADER_CACHE_SOURCES}
+		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
 	)
 	configure_host_test(ShaderCacheBenchmarkTests)
 	target_precompile_headers(ShaderCacheBenchmarkTests PRIVATE
@@ -690,12 +732,15 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		tests/ShaderInjectionRegistrationTests.cpp
 		src/Render/ShaderInjection.cpp
 		src/Render/ShaderInjectionCompileRequest.cpp
-		src/Render/ShaderInjectionStaticFamilyRegistrations.cpp
-		src/Render/ShaderInjectionStaticFamilyRegistrations.h
+		src/Render/ShaderInjectionVariantData.cpp
+		src/Render/ShaderInjectionVariantData.h
 		src/Render/ShaderInjectionVariantFactory.cpp
 		src/Render/ShaderInjectionVariantFactory.h
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
+		src/Utils/CSSha256.cpp
+		src/Utils/CSSha256.h
+		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
 	)
 	configure_host_test(ShaderInjectionRegistrationTests)
 	target_precompile_headers(ShaderInjectionRegistrationTests PRIVATE

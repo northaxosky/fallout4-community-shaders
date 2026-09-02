@@ -4,6 +4,7 @@
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
+#include "Utils/CSSha256.h"
 
 #include <algorithm>
 #include <array>
@@ -275,6 +276,55 @@ namespace
 			return true;
 		std::cerr << "FAIL: " << a_failure << '\n';
 		return false;
+	}
+
+	std::pair<std::size_t, std::string> ShaderRouteTableDigest(
+		bool a_bsdfFamilies)
+	{
+		const auto variants = GetDefaultShaderReplacementVariants();
+		std::vector<const ShaderReplacementVariantRegistration*> routes;
+		for (const auto& variant : variants) {
+			const bool isBsdf =
+				variant.targetId == ShaderInjectionTarget::kBsdfLight
+				|| variant.targetId == ShaderInjectionTarget::kBsdfComposite;
+			const bool isStatic =
+				variant.targetId == ShaderInjectionTarget::kBsSky
+				|| variant.targetId == ShaderInjectionTarget::kBsWater
+				|| variant.targetId == ShaderInjectionTarget::kBsLighting;
+			if ((a_bsdfFamilies && isBsdf)
+				|| (!a_bsdfFamilies && isStatic)) {
+				routes.push_back(&variant);
+			}
+		}
+		std::ranges::sort(
+			routes,
+			[](const auto* a_left, const auto* a_right) {
+				return std::pair{ a_left->targetId, a_left->name }
+					< std::pair{ a_right->targetId, a_right->name };
+			});
+
+		std::string canonical;
+		const auto appendField = [&canonical](std::string_view a_value) {
+			canonical += std::to_string(a_value.size());
+			canonical += ':';
+			canonical += a_value;
+		};
+		for (const auto* route : routes) {
+			const auto* target = GetShaderInjectionTarget(route->targetId);
+			appendField(target ? target->name : std::string_view{});
+			appendField(route->name);
+			appendField(route->expectedStockSha1);
+			appendField(std::to_string(route->compilation.defines.size()));
+			for (const auto& [name, value] : route->compilation.defines) {
+				appendField(name);
+				appendField(value);
+			}
+		}
+
+		const auto digest = cs::sha256::Sha256Compute(
+			canonical.data(),
+			canonical.size());
+		return { routes.size(), cs::sha256::Sha256ToHex(digest) };
 	}
 
 	bool TestStageScopedContributions()
@@ -1621,6 +1671,21 @@ int main(int a_argc, char* a_argv[])
 			== "--baseline-ownership") {
 		return TestBaselineOwnershipWithoutContributors();
 	}
+	if (a_argc == 2
+		&& std::string_view(a_argv[1])
+			== "--variant-table-digest") {
+		const auto [bsdfCount, bsdfDigest] =
+			ShaderRouteTableDigest(true);
+		const auto [staticCount, staticDigest] =
+			ShaderRouteTableDigest(false);
+		std::cout
+			<< "bsdf_routes=" << bsdfCount
+			<< " bsdf_sha256=" << bsdfDigest
+			<< " static_routes=" << staticCount
+			<< " static_sha256=" << staticDigest
+			<< '\n';
+		return 0;
+	}
 	if (a_argc != 1) {
 		std::cerr << "FAIL: invalid arguments\n";
 		return 1;
@@ -1692,6 +1757,24 @@ int main(int a_argc, char* a_argv[])
 		"vertex registration accepted an inert variant key");
 
 	const auto staticFamilies = GetDefaultShaderReplacementVariants();
+	const auto [bsdfRouteCount, bsdfRouteDigest] =
+		ShaderRouteTableDigest(true);
+	ok &= Check(
+		bsdfRouteCount == 241,
+		"BSDF shader route count mismatch");
+	ok &= Check(
+		bsdfRouteDigest
+			== "9ce97a7e91ed3a59a17788ff0d269891a06f69f74e59ed7c60eded78544c1587",
+		"BSDF shader route table digest mismatch");
+	const auto [staticRouteCount, staticRouteDigest] =
+		ShaderRouteTableDigest(false);
+	ok &= Check(
+		staticRouteCount == 90,
+		"static shader route count mismatch");
+	ok &= Check(
+		staticRouteDigest
+			== "988e78aa8b127402ea13e7e9c71f8c5d754a5535d86702fd379c5e272b792c91",
+		"static shader route table digest mismatch");
 	std::map<ShaderInjectionTarget, std::size_t, std::less<>> familyCounts;
 	std::map<ShaderInjectionTarget, std::size_t, std::less<>>
 		vertexFamilyCounts;

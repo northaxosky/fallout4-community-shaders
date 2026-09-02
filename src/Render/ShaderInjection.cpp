@@ -4,7 +4,7 @@
 #include "LogThrottle.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
-#include "Render/ShaderInjectionStaticFamilyRegistrations.h"
+#include "Render/ShaderInjectionVariantData.h"
 #include "Render/ShaderInjectionVariantFactory.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
@@ -23,7 +23,6 @@
 
 namespace cs::engine
 {
-#include "Render/BsdfShaderReplacementVariants.generated.inl"
 #include "Render/ShaderInjectionPrepassLodVariants.inl"
 
 	namespace

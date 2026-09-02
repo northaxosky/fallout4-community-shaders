@@ -1,0 +1,10 @@
+#include "Render/ShaderInjectionEmbeddedData.h"
+
+namespace cs::engine::embedded
+{
+	std::string_view @EMBEDDED_SHADER_VARIANT_SYMBOL@() noexcept
+	{
+		static constexpr char kData[] = R"FO4CS_TOML(@EMBEDDED_SHADER_VARIANT_DATA@)FO4CS_TOML";
+		return { kData, sizeof(kData) - 1 };
+	}
+}
