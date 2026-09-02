@@ -4,7 +4,12 @@ namespace cs::engine::embedded
 {
 	std::string_view @EMBEDDED_SHADER_VARIANT_SYMBOL@() noexcept
 	{
-		static constexpr char kData[] = R"FO4CS_TOML(@EMBEDDED_SHADER_VARIANT_DATA@)FO4CS_TOML";
-		return { kData, sizeof(kData) - 1 };
+		static constexpr unsigned char kData[] = {
+@EMBEDDED_SHADER_VARIANT_DATA@			0x00
+		};
+		return {
+			reinterpret_cast<const char*>(kData),
+			sizeof(kData) - 1
+		};
 	}
 }

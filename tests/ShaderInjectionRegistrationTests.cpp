@@ -2,6 +2,7 @@
 #include "Render/PixelShaderResourceSnapshot.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
+#include "Render/ShaderInjectionEmbeddedData.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
 #include "Utils/CSSha256.h"
@@ -12,7 +13,9 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -276,6 +279,44 @@ namespace
 			return true;
 		std::cerr << "FAIL: " << a_failure << '\n';
 		return false;
+	}
+
+	std::optional<std::string> ReadBinaryFile(
+		const std::filesystem::path& a_path)
+	{
+		std::ifstream stream(a_path, std::ios::binary);
+		if (!stream)
+			return std::nullopt;
+		return std::string{
+			std::istreambuf_iterator<char>(stream),
+			std::istreambuf_iterator<char>()
+		};
+	}
+
+	bool TestEmbeddedShaderVariantData()
+	{
+		const auto bsdf = ReadBinaryFile(
+			FO4CS_BSDF_SHADER_VARIANT_DATA_FILE);
+		const auto staticFamilies = ReadBinaryFile(
+			FO4CS_STATIC_FAMILY_SHADER_VARIANT_DATA_FILE);
+		bool ok = Check(
+			bsdf.has_value(),
+			"could not read the BSDF shader variant source");
+		ok &= Check(
+			staticFamilies.has_value(),
+			"could not read the static-family shader variant source");
+		if (bsdf) {
+			ok &= Check(
+				*bsdf == embedded::BsdfShaderReplacementVariants(),
+				"embedded BSDF shader variant bytes differ from the source");
+		}
+		if (staticFamilies) {
+			ok &= Check(
+				*staticFamilies
+					== embedded::StaticFamilyShaderReplacementVariants(),
+				"embedded static-family shader variant bytes differ from the source");
+		}
+		return ok;
 	}
 
 	std::pair<std::size_t, std::string> ShaderRouteTableDigest(
@@ -1691,7 +1732,8 @@ int main(int a_argc, char* a_argv[])
 		return 1;
 	}
 
-	bool ok = TestStageScopedContributions();
+	bool ok = TestEmbeddedShaderVariantData();
+	ok &= TestStageScopedContributions();
 	ok &= TestVertexCompileClassPartition();
 	ok &= TestAutomaticSubstrateDefine();
 	ok &= TestInverseSquareLightingDefine();
