@@ -53,7 +53,7 @@ jobs:
 
   build:
     name: Windows Release
-    runs-on: windows-2022
+    runs-on: windows-latest
     permissions:
       contents: read
     outputs:
