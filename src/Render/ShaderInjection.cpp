@@ -220,6 +220,8 @@ namespace cs::engine
 			std::atomic<bool>          slotCollision{ false };
 			std::atomic<std::uint8_t>  requestReasons{ 0 };
 			std::atomic<std::size_t>   contributors{ 0 };
+			std::atomic<std::size_t>   variants{ 0 };
+			std::atomic<std::size_t>   substitutedVariants{ 0 };
 			std::atomic<std::uint64_t> matches{ 0 };
 			std::atomic<std::uint64_t> substitutions{ 0 };
 			std::atomic<std::uint64_t> passthroughCompileFail{ 0 };
@@ -250,6 +252,7 @@ namespace cs::engine
 			std::string                      name;
 			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
 			ShaderInjectionDefines           effectiveDefines;
+			std::shared_ptr<std::atomic_bool> substituted;
 		};
 
 		struct PreparedVariant
@@ -917,6 +920,8 @@ namespace cs::engine
 			prepared.variant.name = a_variant.name;
 			prepared.variant.compilation = std::move(result.handle);
 			prepared.variant.effectiveDefines = std::move(effectiveRequest->defines);
+			prepared.variant.substituted =
+				std::make_shared<std::atomic_bool>(false);
 			prepared.keys = std::move(*keys);
 			prepared.compilationState = result.state;
 			prepared.compiledSha1 = std::move(result.compiledSha1);
@@ -1104,6 +1109,11 @@ namespace cs::engine
 				}
 				(*a_request.output)->Release();
 				*a_request.output = replacement.detach();
+				if (!variant.substituted->exchange(
+						true, std::memory_order_relaxed)) {
+					runtime.substitutedVariants.fetch_add(
+						1, std::memory_order_relaxed);
+				}
 				const auto counts = RecordMatchedShaderOutcome(
 					variant.targetId,
 					MatchedShaderOutcome::kReplaced);
@@ -1618,6 +1628,9 @@ namespace cs::engine
 				runtime.compileOk.store(
 					targetReady > 0,
 					std::memory_order_release);
+				runtime.variants.store(
+					targetPrepared,
+					std::memory_order_release);
 				runtime.compileComplete.store(
 					!frozenTarget.variants.empty()
 						&& targetReady == frozenTarget.variants.size(),
@@ -1705,7 +1718,7 @@ namespace cs::engine
 			return;
 
 		// restore b5/b6 before feature binds
-		render::BindSharedData(a_context);
+		render::BindSharedData(a_context, ShaderStage::kPixel);
 
 		auto& runtime = GetService().runtime[ToIndex(a_target)];
 		for (const auto& bind : target->binds) {
@@ -1813,6 +1826,23 @@ namespace cs::engine
 		return variant && variant->targetId == a_target ?
 			&variant->effectiveDefines :
 			nullptr;
+	}
+
+	ShaderInjectionDeliverySnapshot GetShaderInjectionDeliverySnapshot(
+		ShaderInjectionTarget a_target) noexcept
+	{
+		ShaderInjectionDeliverySnapshot snapshot;
+		if (!IsValidTarget(a_target))
+			return snapshot;
+		const auto& runtime =
+			GetService().runtime[ToIndex(a_target)];
+		snapshot.variants =
+			runtime.variants.load(std::memory_order_acquire);
+		snapshot.substitutedVariants =
+			runtime.substitutedVariants.load(std::memory_order_acquire);
+		snapshot.substitutions =
+			runtime.substitutions.load(std::memory_order_acquire);
+		return snapshot;
 	}
 
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(

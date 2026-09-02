@@ -57,7 +57,8 @@ namespace cs::features
 		void SaveSettings();
 		void PublishSettings() noexcept;
 		void RecordActiveVariant(ID3D11DeviceContext* a_context) noexcept;
-		void SetValidationDetail(std::string a_detail);
+		bool RefreshDeliveryState() const;
+		void SetValidationDetail(std::string a_detail) const;
 		std::string GetValidationDetail() const;
 
 		Settings _settings;
@@ -71,7 +72,10 @@ namespace cs::features
 			DebugVisualization::kOff
 		};
 		std::atomic_bool _registrationsReady{ false };
-		std::atomic_bool _injectionsOperational{ false };
+		std::atomic_bool _injectionsPrepared{ false };
+		mutable std::atomic_bool _injectionsOperational{ false };
+		mutable std::atomic<inverse_square_lighting::DeliveryState>
+			_deliveryState{ inverse_square_lighting::DeliveryState::kAwaiting };
 		mutable std::atomic_bool _inInterior{ false };
 		mutable std::atomic<float> _activeStrength{ 0.0f };
 		std::atomic_uint64_t _deferredBinds{ 0 };
@@ -80,6 +84,6 @@ namespace cs::features
 		std::atomic_uint64_t _unshadowedBinds{ 0 };
 		std::atomic_uint64_t _inertBinds{ 0 };
 		mutable std::mutex _validationMutex;
-		std::string _validationDetail;
+		mutable std::string _validationDetail;
 	};
 }

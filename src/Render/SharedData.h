@@ -5,6 +5,11 @@
 struct ID3D11Device;
 struct ID3D11DeviceContext;
 
+namespace cs::engine
+{
+	enum class ShaderStage : std::uint8_t;
+}
+
 namespace cs::render
 {
 	// reserved on every contributed stage
@@ -18,5 +23,7 @@ namespace cs::render
 	// startup thread only
 	void EnsureSharedDataUpdateInstalled();
 
-	void BindSharedData(ID3D11DeviceContext* a_context) noexcept;
+	void BindSharedData(
+		ID3D11DeviceContext* a_context,
+		engine::ShaderStage a_stage) noexcept;
 }

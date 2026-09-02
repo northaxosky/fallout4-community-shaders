@@ -9,6 +9,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -98,6 +99,36 @@ namespace cs::engine
 			bool _previous;
 		};
 
+		class PostDispatchScope
+		{
+		public:
+			explicit PostDispatchScope(
+				const std::vector<PrioritizedCallback>& a_callbacks) noexcept :
+				_callbacks(a_callbacks)
+			{}
+			~PostDispatchScope() noexcept
+			{
+				for (const auto& entry : _callbacks) {
+					try {
+						entry.cb();
+					} catch (const std::exception& e) {
+						L->error(
+							"Deferred-lights post callback failed: {}",
+							e.what());
+					} catch (...) {
+						L->error(
+							"Deferred-lights post callback failed.");
+					}
+				}
+			}
+
+			PostDispatchScope(const PostDispatchScope&) = delete;
+			PostDispatchScope& operator=(const PostDispatchScope&) = delete;
+
+		private:
+			const std::vector<PrioritizedCallback>& _callbacks;
+		};
+
 		struct DeferredPrePass_Hook
 		{
 			static void thunk()
@@ -114,12 +145,12 @@ namespace cs::engine
 			static void thunk()
 			{
 				MarkRegistrationClosed();
+				const PostDispatchScope post(g_postDeferredLightsImpl);
 				Dispatch(g_preDeferredLightsImpl);
 				{
 					ScopedRenderPhase phase(g_insideDeferredLightsImpl);
 					func();
 				}
-				Dispatch(g_postDeferredLightsImpl);
 			}
 			static inline REL::Relocation<decltype(thunk)> func;
 		};

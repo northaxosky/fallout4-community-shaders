@@ -248,6 +248,21 @@ namespace
 		CHECK(SelectStrength(disabled, true) == 0.0f);
 	}
 
+	void TestDeliveryConsistency()
+	{
+		using namespace cs::features::inverse_square_lighting;
+
+		CHECK(EvaluateDelivery(0, 2, 0) == DeliveryState::kAwaiting);
+		CHECK(!IsOperational(EvaluateDelivery(0, 2, 0)));
+		CHECK(EvaluateDelivery(1, 2, 0) == DeliveryState::kPartial);
+		CHECK(EvaluateDelivery(0, 2, 1) == DeliveryState::kPartial);
+		CHECK(EvaluateDelivery(1, 2, 1) == DeliveryState::kPartial);
+		CHECK(!IsOperational(EvaluateDelivery(1, 2, 1)));
+		CHECK(EvaluateDelivery(1, 2, 2) == DeliveryState::kOperational);
+		CHECK(IsOperational(EvaluateDelivery(1, 2, 2)));
+		CHECK(!IsOperational(EvaluateDelivery(1, 0, 0)));
+	}
+
 	void TestFeatureBlockLayout()
 	{
 		using cs::FeatureDataCB;
@@ -365,6 +380,11 @@ namespace
 			!= std::string::npos);
 		CHECK(source.find("SaveSettings();", changed)
 			!= std::string::npos);
+		CHECK(source.find("const bool operational = RefreshDeliveryState();")
+			!= std::string::npos);
+		CHECK(source.find(
+				  "forcing vanilla until BSDFLight and ")
+			!= std::string::npos);
 	}
 }
 
@@ -375,6 +395,7 @@ int main(int a_argc, char* a_argv[])
 	TestIdentityGuards();
 	TestFalloffAndCutoff();
 	TestLocationSelection();
+	TestDeliveryConsistency();
 	TestFeatureBlockLayout();
 	if (a_argc == 5) {
 		TestShaderContract(a_argv[1], a_argv[2], a_argv[3]);

@@ -5,6 +5,7 @@
 #include "LogThrottle.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
+#include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
 #include "Utils/CSBuffer.h"
 #include "World/Sky.h"
@@ -49,11 +50,14 @@ namespace cs::render
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
 			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
 				savedPixelBuffers;
+			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
+				savedComputeBuffers;
 			// Render thread only.
 			float                        timer = 0.0f;
 			bool                         updateInstalled = false;
 			bool                         updateInstallFailed = false;
 			std::uint32_t                pixelBindingDepth = 0;
+			std::uint32_t                computeBindingDepth = 0;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -208,6 +212,75 @@ namespace cs::render
 			state.pixelBindingDepth = 0;
 		}
 
+		void SaveComputeBindings() noexcept
+		{
+			auto& state = GetSubstrateState();
+			if (state.computeBindingDepth != 0) {
+				++state.computeBindingDepth;
+				CS_LOG_ONCE(
+					L,
+					spdlog::level::err,
+					"Shared substrate compute-binding scopes overlap; preserving the active snapshot.");
+				return;
+			}
+			auto* context = GetImmediateContext();
+			if (!context || !IsSharedDataReady())
+				return;
+
+			for (auto& buffer : state.savedComputeBuffers)
+				buffer = nullptr;
+			ID3D11Buffer* buffers[2]{};
+			context->CSGetConstantBuffers(kSharedDataSlot, 2, buffers);
+			for (std::size_t index = 0;
+				index < state.savedComputeBuffers.size();
+				++index) {
+				state.savedComputeBuffers[index].attach(buffers[index]);
+			}
+			state.computeBindingDepth = 1;
+		}
+
+		void RestoreComputeBindings() noexcept
+		{
+			auto& state = GetSubstrateState();
+			if (state.computeBindingDepth == 0)
+				return;
+			if (state.computeBindingDepth > 1) {
+				--state.computeBindingDepth;
+				return;
+			}
+
+			if (auto* context = GetImmediateContext()) {
+				ID3D11Buffer* buffers[2] = {
+					state.savedComputeBuffers[0].get(),
+					state.savedComputeBuffers[1].get()
+				};
+				context->CSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			}
+			for (auto& buffer : state.savedComputeBuffers)
+				buffer = nullptr;
+			state.computeBindingDepth = 0;
+		}
+
+		void SaveDeferredLightBindings() noexcept
+		{
+			SavePixelBindings();
+			SaveComputeBindings();
+		}
+
+		void BindDeferredLightComputeData() noexcept
+		{
+			// Earlier feature compute scopes clear b5/b6 before tiled lighting runs.
+			BindSharedData(
+				GetImmediateContext(),
+				engine::ShaderStage::kCompute);
+		}
+
+		void RestoreDeferredLightBindings() noexcept
+		{
+			RestoreComputeBindings();
+			RestorePixelBindings();
+		}
+
 		void UpdateSharedData() noexcept
 		{
 			auto& state = GetSubstrateState();
@@ -342,10 +415,13 @@ namespace cs::render
 			return;
 		}
 		engine::RegisterPreDeferredLightsImpl(
-			[] { SavePixelBindings(); },
+			[] { SaveDeferredLightBindings(); },
 			engine::HookPriority::Early);
+		engine::RegisterPreDeferredLightsImpl(
+			[] { BindDeferredLightComputeData(); },
+			engine::HookPriority::Late);
 		engine::RegisterPostDeferredLightsImpl(
-			[] { RestorePixelBindings(); },
+			[] { RestoreDeferredLightBindings(); },
 			engine::HookPriority::Late);
 		// FO4 shadow-caches state; it won't reissue clobbered bindings.
 		const bool compositeScopeInstalled =
@@ -365,7 +441,9 @@ namespace cs::render
 		L->info("Shared substrate update and deferred binding scopes registered.");
 	}
 
-	void BindSharedData(ID3D11DeviceContext* a_context) noexcept
+	void BindSharedData(
+		ID3D11DeviceContext* a_context,
+		engine::ShaderStage a_stage) noexcept
 	{
 		auto& state = GetSubstrateState();
 		if (!a_context || !IsSharedDataReady())
@@ -388,6 +466,18 @@ namespace cs::render
 			state.sharedDataCB.get(),
 			state.featureDataCB.get()
 		};
-		a_context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+		switch (a_stage) {
+		case engine::ShaderStage::kVertex:
+			a_context->VSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			break;
+		case engine::ShaderStage::kPixel:
+			a_context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			break;
+		case engine::ShaderStage::kCompute:
+			a_context->CSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			break;
+		case engine::ShaderStage::kCount:
+			break;
+		}
 	}
 }

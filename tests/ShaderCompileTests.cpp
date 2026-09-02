@@ -75,7 +75,9 @@ namespace cs::render
 		return true;
 	}
 
-	void BindSharedData(ID3D11DeviceContext*) noexcept
+	void BindSharedData(
+		ID3D11DeviceContext*,
+		cs::engine::ShaderStage) noexcept
 	{}
 }
 
@@ -1134,6 +1136,8 @@ namespace
 		if (!a_contributorDefines.empty()) {
 			cs::engine::ShaderReplacementRegistration contribution;
 			contribution.targetId = a_registration.targetId;
+			contribution.stages =
+				cs::engine::ShaderStageBit(a_registration.stage);
 			contribution.contributor = "ShaderCompile";
 			for (const auto& [name, value] : a_contributorDefines)
 				contribution.defines.emplace(name, value);
@@ -1180,7 +1184,8 @@ namespace
 		job.requiredSamplerSlots = std::move(a_slots.requiredSamplers);
 		job.forbiddenSamplerSlots = std::move(a_slots.forbiddenSamplers);
 		job.featureOffIdentity = std::move(a_featureOffIdentity);
-		AttachDfTiledLightingIdentity(a_registration, job);
+		if (a_contributorDefines.empty())
+			AttachDfTiledLightingIdentity(a_registration, job);
 	}
 
 	struct LightingCounts
@@ -1205,6 +1210,7 @@ namespace
 		std::size_t wetnessCompositeVertexRows = 0;
 		std::size_t inverseSquareRows = 0;
 		std::size_t dfTiledLightingRows = 0;
+		std::size_t inverseSquareTiledRows = 0;
 		std::size_t inverseSquareInertRows = 0;
 	};
 
@@ -1429,10 +1435,23 @@ namespace
 		std::set<std::string> uniqueRegistrationInputs;
 		std::size_t lodLandscapeObjectOverlapCases = 0;
 		std::size_t dfTiledLightingRows = 0;
+		std::size_t inverseSquareTiledRows = 0;
 		for (const auto& registration : registrations) {
 			if (registration.targetId
 				== cs::engine::ShaderInjectionTarget::kDfTiledLighting) {
 				++dfTiledLightingRows;
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					{
+						{
+							cs::engine::shader_injection_defines::
+								kInverseSquareLighting,
+							"1"
+						}
+					});
+				++inverseSquareTiledRows;
 			}
 			std::optional<FeatureOffIdentityExpectation> identity;
 			const bool directRow = registration.targetId
@@ -1519,6 +1538,15 @@ namespace
 					+ std::to_string(kDfTiledLightingIdentities.size())
 					+ " final-kernel routes, found "
 					+ std::to_string(dfTiledLightingRows));
+		}
+		if (inverseSquareTiledRows != kDfTiledLightingIdentities.size()) {
+			AddPreparationFailure(
+				a_jobs,
+				"DFTiledLighting inverse-square coverage",
+				"Expected "
+					+ std::to_string(kDfTiledLightingIdentities.size())
+					+ " contributed final-kernel routes, found "
+					+ std::to_string(inverseSquareTiledRows));
 		}
 
 		const std::array<ShaderCase, 3> featureCompositionCases{ {
@@ -2208,6 +2236,7 @@ namespace
 			.wetnessCompositeVertexRows = wetnessCompositeVertexRows,
 			.inverseSquareRows = inverseSquareRows,
 			.dfTiledLightingRows = dfTiledLightingRows,
+			.inverseSquareTiledRows = inverseSquareTiledRows,
 			.inverseSquareInertRows = inverseSquareInertRows
 		};
 	}
@@ -2369,6 +2398,9 @@ int main(int argc, char** argv)
 	std::printf(
 		"ShaderCompile verified %zu byte-identical DFTiledLighting compute routes\n",
 		lightingCounts.dfTiledLightingRows);
+	std::printf(
+		"ShaderCompile checked inverse-square on %zu DFTiledLighting compute routes\n",
+		lightingCounts.inverseSquareTiledRows);
 	std::printf(
 		"ShaderCompile checked %zu TerrainShadows permutations\n",
 		terrainShadowsCount);

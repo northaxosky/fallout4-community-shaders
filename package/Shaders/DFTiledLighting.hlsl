@@ -6,6 +6,10 @@
 #error "DFTILEDLIGHTING_VARIANT must be 1 or 2"
 #endif
 
+#ifdef INVERSE_SQUARE_LIGHTING
+#include "InverseSquareLighting/InverseSquareLighting.hlsli"
+#endif
+
 cbuffer TiledLightingParameters : register(b0)
 {
 #if DFTILEDLIGHTING_VARIANT == 1
@@ -459,6 +463,14 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
                 light.Attenuation.x);
             float attenuation =
                 exp2(log2(1.0 - falloff) * 2.2);
+#ifdef INVERSE_SQUARE_LIGHTING
+            // FO4 forced divergence: tiled lights have no verified per-light eligibility flag.
+            attenuation = InverseSquareLighting::GetAttenuation(
+                attenuation,
+                sqrt(distanceSquared),
+                light.PositionRadius.w,
+                pixel.x);
+#endif
 
             diffuseAccum += diffuse * attenuation;
             specularAccum += specular * attenuation;

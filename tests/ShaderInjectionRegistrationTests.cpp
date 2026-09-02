@@ -205,7 +205,9 @@ namespace cs::render
 		return true;
 	}
 
-	void BindSharedData(ID3D11DeviceContext*) noexcept
+	void BindSharedData(
+		ID3D11DeviceContext*,
+		cs::engine::ShaderStage) noexcept
 	{}
 }
 
@@ -537,6 +539,54 @@ namespace
 			!vertexRequest->defines.contains(
 				shader_injection_defines::kInverseSquareLighting),
 			"inverse-square define leaked into the vertex request");
+
+		const auto* computeTarget = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kDfTiledLighting);
+		if (!Check(
+				computeTarget != nullptr,
+				"inverse-square tiled target metadata is missing")) {
+			return false;
+		}
+		const std::array computeContribution{
+			ShaderReplacementRegistration{
+				.targetId = computeTarget->id,
+				.stages = ShaderStageBit(ShaderStage::kCompute),
+				.contributor = "InverseSquareLighting",
+				.defines = {
+					{
+						shader_injection_defines::
+							kInverseSquareLighting,
+						"1"
+					}
+				}
+			}
+		};
+		std::size_t computeVariants = 0;
+		for (const auto& variant : GetDefaultShaderReplacementVariants()) {
+			if (variant.targetId != computeTarget->id)
+				continue;
+			++computeVariants;
+			const auto request = BuildEffectiveShaderCompileRequest(
+				*computeTarget,
+				variant,
+				computeContribution);
+			ok &= Check(
+				request.has_value(),
+				"inverse-square tiled compute request failed");
+			if (!request)
+				continue;
+			ok &= Check(
+				request->defines.contains(
+					shader_injection_defines::kInverseSquareLighting),
+				"inverse-square define is missing from a tiled compute request");
+			ok &= Check(
+				request->defines.contains(
+					shader_injection_defines::kSubstrate),
+				"inverse-square tiled compute request did not activate the substrate");
+		}
+		ok &= Check(
+			computeVariants == 2,
+			"inverse-square tiled contribution did not cover both compute variants");
 		return ok;
 	}
 
@@ -1497,9 +1547,16 @@ namespace
 		ID3D11DeviceContext* a_context)
 	{
 		FreezeAndCompileShaderInjections(a_device);
-		auto* injected = GetInjectedPixelShader(
+		const auto delivery = GetShaderInjectionDeliverySnapshot(
 			ShaderInjectionTarget::kBsdfComposite);
 		bool ok = Check(
+			delivery.variants != 0
+				&& delivery.substitutedVariants == 0
+				&& delivery.substitutions == 0,
+			"prepared variants were reported as runtime substitutions");
+		auto* injected = GetInjectedPixelShader(
+			ShaderInjectionTarget::kBsdfComposite);
+		ok &= Check(
 			injected != nullptr,
 			"BSDFComposite injected pixel shader was not published");
 		if (!injected)

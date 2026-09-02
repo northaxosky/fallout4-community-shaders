@@ -64,7 +64,9 @@ namespace cs::render
 		return true;
 	}
 
-	void BindSharedData(ID3D11DeviceContext*) noexcept
+	void BindSharedData(
+		ID3D11DeviceContext*,
+		cs::engine::ShaderStage) noexcept
 	{}
 }
 

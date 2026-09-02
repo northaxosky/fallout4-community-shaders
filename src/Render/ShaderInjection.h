@@ -168,6 +168,13 @@ namespace cs::engine
 		std::uint64_t          dispatches = 0;
 	};
 
+	struct ShaderInjectionDeliverySnapshot
+	{
+		std::size_t   variants = 0;
+		std::size_t   substitutedVariants = 0;
+		std::uint64_t substitutions = 0;
+	};
+
 	struct ShaderInjectionSummary
 	{
 		std::size_t requested = 0;
@@ -228,6 +235,8 @@ namespace cs::engine
 	bool ActiveShaderInjectionVariantHasDefine(
 		ShaderInjectionTarget a_target,
 		std::string_view a_define) noexcept;
+	ShaderInjectionDeliverySnapshot GetShaderInjectionDeliverySnapshot(
+		ShaderInjectionTarget a_target) noexcept;
 	ShaderInjectionTargetSnapshot GetShaderInjectionTargetSnapshot(ShaderInjectionTarget a_target);
 	ShaderInjectionSummary GetShaderInjectionSummary() noexcept;
 }
