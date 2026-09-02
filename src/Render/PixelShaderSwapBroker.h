@@ -152,6 +152,10 @@ namespace cs::engine
 
 	using ShaderSwapResolver = ShaderSwapResolverResult (*)(
 		const ShaderSwapRequest& a_request) noexcept;
+	using ShaderSwapObserver = void (*)(
+		ShaderStage a_stage,
+		const sha1::Sha1Result& a_stockSha1,
+		ID3D11DeviceChild* a_finalOutput) noexcept;
 
 	struct PixelShaderSwapResolverRegistration
 	{
@@ -180,7 +184,8 @@ namespace cs::engine
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11DeviceChild** a_output) noexcept;
+		ID3D11DeviceChild** a_output,
+		ShaderSwapObserver a_observer = nullptr) noexcept;
 
 	struct PixelShaderResolverRegistryIdentity
 	{
@@ -211,6 +216,9 @@ namespace cs::engine
 	bool RegisterPixelShaderSwapResolver(ShaderSwapResolver a_resolver);
 	bool RegisterPixelShaderSwapResolver(
 		PixelShaderSwapResolverRegistration a_registration);
+	bool RegisterShaderSwapObserver(
+		ShaderSwapObserver a_observer,
+		ShaderStageMask a_stages);
 	std::uintptr_t PixelShaderSwapBrokerCreateHookAddress() noexcept;
 	bool PixelShaderSwapBrokerHooksInstalled() noexcept;
 	bool PixelShaderBrokerBypassActive() noexcept;

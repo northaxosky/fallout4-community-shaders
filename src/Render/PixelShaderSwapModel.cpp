@@ -137,7 +137,8 @@ namespace cs::engine
 		const void* a_bytecode,
 		SIZE_T a_bytecodeLength,
 		ID3D11ClassLinkage* a_linkage,
-		ID3D11DeviceChild** a_output) noexcept
+		ID3D11DeviceChild** a_output,
+		ShaderSwapObserver a_observer) noexcept
 	{
 		if (!a_original)
 			return E_POINTER;
@@ -197,6 +198,9 @@ namespace cs::engine
 					break;
 				}
 			}
+		}
+		if (canResolve && a_observer && a_output && *a_output) {
+			a_observer(a_stage, postInputSha1, *a_output);
 		}
 
 		return result;

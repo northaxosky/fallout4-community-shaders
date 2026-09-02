@@ -25,6 +25,7 @@ namespace cs::log
 			std::mutex mutex;
 			std::unordered_map<std::string, spdlog::level::level_enum> channelLevels;
 			cs::input::Hotkey dumpHotkey = cs::input::Hotkey::Parse("Ctrl+F12");
+			std::atomic_bool prepassTechniqueInstrumentation{ false };
 		};
 
 		ConfigState& Config()
@@ -184,12 +185,13 @@ namespace cs::log
 	void ApplyConfigFromToml(const toml::table& a_logging)
 	{
 		auto* logger = Get("cs.log");
-		constexpr std::array<std::string_view, 5> knownKeys{
+		constexpr std::array<std::string_view, 6> knownKeys{
 			"level",
 			"channels",
 			"telemetry",
 			"telemetry_interval_seconds",
-			"dump_hotkey"
+			"dump_hotkey",
+			"prepass_technique_instrumentation"
 		};
 		for (const auto& [key, value] : a_logging) {
 			(void)value;
@@ -206,6 +208,9 @@ namespace cs::log
 		SetGlobalLevel(spdlog::level::info);
 		cs::telemetry::pump::SetEnabled(false);
 		cs::telemetry::pump::SetIntervalSeconds(5);
+		config.prepassTechniqueInstrumentation.store(
+			false,
+			std::memory_order_relaxed);
 
 		if (const auto* levelNode = a_logging.get("level")) {
 			if (const auto value = levelNode->value<std::string>()) {
@@ -270,6 +275,18 @@ namespace cs::log
 				logger->warn("logging.dump_hotkey must be a string");
 			}
 		}
+
+		if (const auto* instrumentationNode =
+				a_logging.get("prepass_technique_instrumentation")) {
+			if (const auto enabled = instrumentationNode->value<bool>()) {
+				config.prepassTechniqueInstrumentation.store(
+					*enabled,
+					std::memory_order_relaxed);
+			} else {
+				logger->warn(
+					"logging.prepass_technique_instrumentation must be a boolean");
+			}
+		}
 	}
 
 	toml::table ConfigAsToml()
@@ -280,6 +297,10 @@ namespace cs::log
 		logging.insert_or_assign(
 			"telemetry_interval_seconds",
 			static_cast<std::int64_t>(cs::telemetry::pump::IntervalSeconds()));
+		logging.insert_or_assign(
+			"prepass_technique_instrumentation",
+			Config().prepassTechniqueInstrumentation.load(
+				std::memory_order_relaxed));
 
 		std::vector<std::pair<std::string, spdlog::level::level_enum>> overrides;
 		std::string hotkey;
@@ -318,5 +339,11 @@ namespace cs::log
 		auto& config = Config();
 		std::scoped_lock lock(config.mutex);
 		return config.dumpHotkey;
+	}
+
+	bool PrepassTechniqueInstrumentationEnabled() noexcept
+	{
+		return Config().prepassTechniqueInstrumentation.load(
+			std::memory_order_relaxed);
 	}
 }

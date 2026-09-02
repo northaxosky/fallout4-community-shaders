@@ -32,4 +32,5 @@ namespace cs::log
 	bool SaveConfigToToml();
 	toml::table ConfigAsToml();
 	cs::input::Hotkey GetDumpHotkey();
+	bool PrepassTechniqueInstrumentationEnabled() noexcept;
 }

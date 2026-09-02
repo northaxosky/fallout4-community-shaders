@@ -30,6 +30,8 @@ namespace cs::engine
 		ID3D11Device* g_device = nullptr;
 		ShaderStageMask g_installRequestedStages = 0;
 		std::atomic<ShaderStageMask> g_hookInstalledStages{ 0 };
+		std::atomic<ShaderSwapObserver> g_observer{ nullptr };
+		ShaderStageMask g_observerStages = 0;
 
 		using CreatePixelShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
 			ID3D11Device*,
@@ -84,6 +86,15 @@ namespace cs::engine
 				: std::span<const PixelShaderSwapResolverRegistration>{};
 		}
 
+		ShaderSwapObserver GetObserver(ShaderStage a_stage) noexcept
+		{
+			const auto observer = g_observer.load(std::memory_order_acquire);
+			return observer
+				&& (g_observerStages & ShaderStageBit(a_stage)) != 0
+				? observer
+				: nullptr;
+		}
+
 		struct CreatePixelShaderHook
 		{
 			static HRESULT STDMETHODCALLTYPE CallOriginal(
@@ -121,7 +132,8 @@ namespace cs::engine
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
-					reinterpret_cast<ID3D11DeviceChild**>(a_out));
+					reinterpret_cast<ID3D11DeviceChild**>(a_out),
+					GetObserver(ShaderStage::kPixel));
 			}
 
 			static inline CreatePixelShaderFunction func = nullptr;
@@ -164,7 +176,8 @@ namespace cs::engine
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
-					reinterpret_cast<ID3D11DeviceChild**>(a_out));
+					reinterpret_cast<ID3D11DeviceChild**>(a_out),
+					GetObserver(ShaderStage::kVertex));
 			}
 
 			static inline CreateVertexShaderFunction func = nullptr;
@@ -207,7 +220,8 @@ namespace cs::engine
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
-					reinterpret_cast<ID3D11DeviceChild**>(a_out));
+					reinterpret_cast<ID3D11DeviceChild**>(a_out),
+					GetObserver(ShaderStage::kCompute));
 			}
 
 			static inline CreateComputeShaderFunction func = nullptr;
@@ -331,6 +345,23 @@ namespace cs::engine
 			resolverCount);
 
 		RequestHookInstall(a_registration.stages);
+		return true;
+	}
+
+	bool RegisterShaderSwapObserver(
+		ShaderSwapObserver a_observer,
+		ShaderStageMask a_stages)
+	{
+		if (!a_observer || a_stages == 0)
+			return false;
+
+		std::scoped_lock lock(g_installMutex);
+		if (g_observer.load(std::memory_order_relaxed))
+			return false;
+		g_observerStages = a_stages;
+		g_observer.store(a_observer, std::memory_order_release);
+		g_installRequestedStages |= a_stages;
+		InstallHookIfReady();
 		return true;
 	}
 
