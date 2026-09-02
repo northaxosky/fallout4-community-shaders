@@ -23,7 +23,6 @@ df_tiled_lighting = true
 # Deferred composite lacks native proof; it and VLS lack selectable stock SHA-1 guards.
 
 [menu]
-developer_mode = false
 first_time_setup_completed = false
 auto_hide_feature_list = false
 require_shift_to_dock = true

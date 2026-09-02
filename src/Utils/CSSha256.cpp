@@ -102,20 +102,6 @@ namespace cs::sha256
 				static_cast<ULONG>(a_length),
 				0));
 		}
-
-		bool HexNibble(char a_character, std::uint8_t& a_value) noexcept
-		{
-			if (a_character >= '0' && a_character <= '9') {
-				a_value = static_cast<std::uint8_t>(a_character - '0');
-				return true;
-			}
-			if (a_character >= 'a' && a_character <= 'f') {
-				a_value =
-					static_cast<std::uint8_t>(10 + a_character - 'a');
-				return true;
-			}
-			return false;
-		}
 	}
 
 	void Sha256InitOnce()
@@ -221,27 +207,5 @@ namespace cs::sha256
 				kHex[a_result.bytes[index] & 0x0F];
 		}
 		return result;
-	}
-
-	bool Sha256FromHex(
-		std::string_view a_hex,
-		Sha256Result& a_result) noexcept
-	{
-		a_result = {};
-		if (a_hex.size() != a_result.bytes.size() * 2)
-			return false;
-
-		for (std::size_t index = 0; index < a_result.bytes.size(); ++index) {
-			std::uint8_t high = 0;
-			std::uint8_t low = 0;
-			if (!HexNibble(a_hex[index * 2], high)
-				|| !HexNibble(a_hex[index * 2 + 1], low)) {
-				a_result = {};
-				return false;
-			}
-			a_result.bytes[index] =
-				static_cast<std::uint8_t>((high << 4) | low);
-		}
-		return !Sha256IsZero(a_result);
 	}
 }

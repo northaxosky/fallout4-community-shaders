@@ -63,39 +63,10 @@ namespace cs
 
 		InputDeviceType GetDevice() const { return static_cast<InputDeviceType>(deviceAndKey >> 16); }
 		std::uint32_t GetKey() const { return deviceAndKey & 0xFFFF; }
-		std::uint32_t GetPacked() const { return deviceAndKey; }
 
 		bool IsValid() const
 		{
 			return IsValidDevice(GetDevice()) && GetKey() != 0;
-		}
-
-		static bool MatchesKeyboardCombo(const std::vector<InputCombo>& a_combo, std::uint32_t a_vkKey)
-		{
-			if (a_combo.empty() || a_combo.back().GetKey() != a_vkKey || a_combo.back().GetDevice() != InputDeviceType::Keyboard)
-				return false;
-
-			bool requiresCtrl = false, requiresShift = false, requiresAlt = false;
-			for (std::size_t i = 0; i < a_combo.size() - 1; ++i) {
-				if (a_combo[i].GetDevice() != InputDeviceType::Keyboard)
-					return false;
-				const std::uint32_t modKey = a_combo[i].GetKey();
-				if (modKey == VK_CONTROL || modKey == VK_LCONTROL || modKey == VK_RCONTROL)
-					requiresCtrl = true;
-				else if (modKey == VK_SHIFT || modKey == VK_LSHIFT || modKey == VK_RSHIFT)
-					requiresShift = true;
-				else if (modKey == VK_MENU || modKey == VK_LMENU || modKey == VK_RMENU)
-					requiresAlt = true;
-				else
-					return false;
-			}
-
-			constexpr std::uint16_t kKeyPressed = 0x8000;
-			const bool ctrlHeld = (GetAsyncKeyState(VK_CONTROL) & kKeyPressed) != 0;
-			const bool shiftHeld = (GetAsyncKeyState(VK_SHIFT) & kKeyPressed) != 0;
-			const bool altHeld = (GetAsyncKeyState(VK_MENU) & kKeyPressed) != 0;
-
-			return (requiresCtrl == ctrlHeld) && (requiresShift == shiftHeld) && (requiresAlt == altHeld);
 		}
 
 		bool operator==(const InputCombo& a_other) const { return deviceAndKey == a_other.deviceAndKey; }

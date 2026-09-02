@@ -5,7 +5,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
-#include <string_view>
 
 namespace cs::sha256
 {
@@ -24,5 +23,4 @@ namespace cs::sha256
 		std::uint64_t& a_length) noexcept;
 	bool Sha256IsZero(const Sha256Result& a_result) noexcept;
 	std::string Sha256ToHex(const Sha256Result& a_result);
-	bool Sha256FromHex(std::string_view a_hex, Sha256Result& a_result) noexcept;
 }

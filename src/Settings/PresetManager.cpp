@@ -25,7 +25,6 @@ namespace
 
 	constexpr std::string_view kPresetsRoot      = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
 	constexpr std::string_view kPresetsBuiltin   = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets\\Builtin";
-	constexpr std::string_view kBootMarker       = "Data\\F4SE\\Plugins\\FO4CommunityShaders\\.cs_force_preset";
 
 	class FeatureCallbackPassGuard
 	{
@@ -648,36 +647,6 @@ namespace cs
 			}
 		}
 
-		// Smoke markers override auto-load.
-		std::string markerPayload;
-		if (ReadTextMarker(std::filesystem::path(kBootMarker), markerPayload)) {
-			const PresetMeta* meta = nullptr;
-			if (markerPayload.size() >= 2 && markerPayload[1] == ':' &&
-				(markerPayload[0] == 'B' || markerPayload[0] == 'U' ||
-				 markerPayload[0] == 'b' || markerPayload[0] == 'u'))
-			{
-				meta = FindByIdentity(markerPayload);
-			} else {
-				meta = FindByName(markerPayload, true);
-			}
-			if (meta) {
-				std::string err;
-				if (Apply(*meta, err)) {
-					L->info("boot preset marker honoured: '{}' -> {}", markerPayload, meta->identity);
-				} else {
-					lastError = err;
-					L->warn("boot preset marker '{}' apply failed: {}", markerPayload, err);
-				}
-			} else {
-				L->warn("boot preset marker payload '{}' did not resolve; clearing active identity", markerPayload);
-				activeIdentity.clear();
-				activeName.clear();
-				SaveCoreConfig();
-			}
-			pendingComboIdentity = activeIdentity;
-			return;
-		}
-
 		if (autoLoadOnBoot && !activeIdentity.empty()) {
 			const PresetMeta* meta = FindByIdentity(activeIdentity);
 			if (!meta && !activeName.empty()) {
@@ -732,43 +701,6 @@ namespace cs
 				return false;
 			}
 		}
-		return true;
-	}
-
-	bool ReadTextMarker(const std::filesystem::path& a_path, std::string& a_outPayload)
-	{
-		a_outPayload.clear();
-		std::error_code ec;
-		if (!std::filesystem::exists(a_path, ec)) return false;
-
-		std::ifstream in(a_path, std::ios::binary);
-		if (!in) return false;
-
-		constexpr std::size_t kCap = 512;
-		std::string buf(kCap, '\0');
-		in.read(buf.data(), static_cast<std::streamsize>(kCap));
-		const auto got = static_cast<std::size_t>(in.gcount());
-		buf.resize(got);
-
-		std::string_view view(buf);
-		if (view.size() >= 3 &&
-			static_cast<unsigned char>(view[0]) == 0xEF &&
-			static_cast<unsigned char>(view[1]) == 0xBB &&
-			static_cast<unsigned char>(view[2]) == 0xBF)
-		{
-			view.remove_prefix(3);
-		}
-		if (const auto eol = view.find_first_of("\r\n"); eol != std::string_view::npos) {
-			view = view.substr(0, eol);
-		}
-		while (!view.empty() && (view.front() == ' ' || view.front() == '\t')) view.remove_prefix(1);
-		while (!view.empty() && (view.back()  == ' ' || view.back()  == '\t')) view.remove_suffix(1);
-
-		if (view.empty()) return false;
-		a_outPayload.assign(view);
-		in.close();
-		std::error_code rmEc;
-		std::filesystem::remove(a_path, rmEc);
 		return true;
 	}
 }

@@ -1,7 +1,5 @@
 #include "Env.h"
 
-#include <Windows.h>
-
 #include "ENB/ENBSeriesAPI.h"
 #include "Log.h"
 
@@ -26,10 +24,5 @@ namespace cs::env
 	bool IsENBLoaded() noexcept
 	{
 		return g_enbLoaded;
-	}
-
-	bool IsRenderDocActive() noexcept
-	{
-		return GetModuleHandleW(L"renderdoc.dll") != nullptr;
 	}
 }

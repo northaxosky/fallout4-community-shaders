@@ -80,16 +80,6 @@ namespace cs
 	void AdvancedSettingsRenderer::RenderDeveloperSection()
 	{
 		ImGui::Spacing();
-
-		auto& menu = Menu::Get();
-		auto& settings = menu.GetSettings();
-
-		if (ImGui::Checkbox("Developer mode", &settings.DeveloperMode))
-			menu.Save();
-		if (auto tooltip = ui::HoverTooltipWrapper())
-			ImGui::Text("%s", "Surfaces extra diagnostics across the menu.");
-
-		ImGui::Spacing();
 		ui::DrawSectionHeader("Configuration", true, false);
 
 		ImGui::TextWrapped("%s",

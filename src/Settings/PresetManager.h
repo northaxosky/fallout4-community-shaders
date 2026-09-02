@@ -73,8 +73,5 @@ namespace cs
 							const std::vector<PresetMeta>& a_existing,
 							std::string&                   a_err);
 
-	// Successful reads delete the bounded one-shot marker.
-	bool ReadTextMarker(const std::filesystem::path& a_path, std::string& a_outPayload);
-
 	std::string MakePresetIdentity(char a_scope, std::string_view a_name);
 }

@@ -560,7 +560,7 @@ namespace cs::features
 		};
 
 		compile(_decodeCS, kDecodePath, {}, "decode", "ScreenSpaceGI/Decode.CS");
-		compile(_prefilterCS, kPrefilterPath, { { "LINEAR_FILTER", "1" } }, "depth prefilter", "ScreenSpaceGI/PrefilterDepth.CS");
+		compile(_prefilterCS, kPrefilterPath, {}, "depth prefilter", "ScreenSpaceGI/PrefilterDepth.CS");
 		compile(_prefilterRadianceCS, kPrefilterRadiancePath, {}, "radiance prefilter", "ScreenSpaceGI/PrefilterRadiance.CS");
 		compile(_prefilterNormalCS, kPrefilterNormalPath, {}, "normal prefilter", "ScreenSpaceGI/PrefilterNormal.CS");
 		compile(_radianceDisoccCS, kRadianceDisoccPath, {}, "radiance disocclusion", "ScreenSpaceGI/RadianceDisocclusion.CS");

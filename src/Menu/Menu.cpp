@@ -1436,7 +1436,6 @@ namespace cs
 			return;
 		}
 
-		ReadBoolFromToml(*menu, "developer_mode", settings.DeveloperMode);
 		ReadBoolFromToml(*menu, "first_time_setup_completed", settings.FirstTimeSetupCompleted);
 		ReadBoolFromToml(*menu, "auto_hide_feature_list", settings.AutoHideFeatureList);
 		ReadBoolFromToml(*menu, "require_shift_to_dock", settings.RequireShiftToDock);
@@ -1502,7 +1501,6 @@ namespace cs
 			settings.SelectedThemePreset.clear();
 
 		toml::table menu;
-		menu.insert_or_assign("developer_mode", settings.DeveloperMode);
 		menu.insert_or_assign("first_time_setup_completed", settings.FirstTimeSetupCompleted);
 		menu.insert_or_assign("auto_hide_feature_list", settings.AutoHideFeatureList);
 		menu.insert_or_assign("require_shift_to_dock", settings.RequireShiftToDock);
@@ -1774,8 +1772,7 @@ namespace cs
 			pm.SaveCoreConfig();
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text("%s",
-				"On next plugin load, the active preset is reapplied across every participating feature. "
-				"Overridden by the .cs_force_preset marker.");
+				"On next plugin load, the active preset is reapplied across every participating feature.");
 		}
 
 		if (ui::BeginPopupModalWithRoundedClose("Save As Preset", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {

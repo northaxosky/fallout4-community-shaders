@@ -285,7 +285,6 @@ namespace cs
 		{
 			std::vector<InputCombo> ToggleKey = { InputCombo::Keyboard(VK_END) };
 			std::vector<InputCombo> OverlayToggleKey = { InputCombo::Keyboard(VK_F10) };
-			bool DeveloperMode = false;
 			bool FirstTimeSetupCompleted = false;
 			bool AutoHideFeatureList = false;
 			bool RequireShiftToDock = true;
@@ -324,7 +323,6 @@ namespace cs
 		bool IsOpen() const noexcept;
 		bool IsOverlayVisible() const noexcept { return _overlayVisibleSnapshot.load(std::memory_order_acquire); }
 		void ToggleOverlay() noexcept;
-		auto GetTracyD3D11Ctx() const noexcept { return _tracyD3D11Ctx; }
 		IDXGIAdapter3* GetDXGIAdapter3();
 		ID3D11Device* GetDevice() const noexcept { return _device; }
 		ID3D11DeviceContext* GetContext() const noexcept { return _context; }

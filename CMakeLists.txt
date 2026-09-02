@@ -70,21 +70,6 @@ find_package(magic_enum CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
-find_path(MICROSOFT_DETOURS_INCLUDE_DIR "detours/detours.h" REQUIRED)
-find_library(MICROSOFT_DETOURS_LIBRARY_RELEASE
-	NAMES detours
-	PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
-	PATH_SUFFIXES lib
-	NO_DEFAULT_PATH
-	REQUIRED
-)
-find_library(MICROSOFT_DETOURS_LIBRARY_DEBUG
-	NAMES detours
-	PATHS "${VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}"
-	PATH_SUFFIXES debug/lib
-	NO_DEFAULT_PATH
-	REQUIRED
-)
 if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
 endif()
@@ -105,14 +90,9 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	include(Common)
 	configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
 
-	target_include_directories(FO4CommunityShaders BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
-	)
 	target_link_libraries(FO4CommunityShaders PRIVATE
 		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
 		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
-		debug ${MICROSOFT_DETOURS_LIBRARY_DEBUG}
-		optimized ${MICROSOFT_DETOURS_LIBRARY_RELEASE}
 		Microsoft::DirectXTK
 		Microsoft::DirectXTex
 		Microsoft::DirectX-Headers
@@ -414,7 +394,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		COMMONLIB_RUNTIMECOUNT=3
 	)
 	target_include_directories(UpscalingPublicationTests BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
 		"${CMAKE_SOURCE_DIR}/include"
@@ -564,7 +543,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		COMMONLIB_RUNTIMECOUNT=3
 	)
 	target_include_directories(ShaderCompileTests BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/include"
 		"${CMAKE_SOURCE_DIR}/src"
@@ -619,7 +597,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		COMMONLIB_RUNTIMECOUNT=3
 	)
 	target_include_directories(ShaderCacheBenchmarkTests BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/include"
 		"${CMAKE_SOURCE_DIR}/src"
@@ -731,7 +708,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		COMMONLIB_RUNTIMECOUNT=3
 	)
 	target_include_directories(ShaderInjectionRegistrationTests BEFORE PRIVATE
-		"${MICROSOFT_DETOURS_INCLUDE_DIR}"
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/include"
 		"${CMAKE_SOURCE_DIR}/src"

@@ -36,11 +36,6 @@ namespace
 			a_color.w);
 	}
 
-	ImVec4 WithAlpha(const ImVec4& a_color, float a_alpha)
-	{
-		return ImVec4(a_color.x, a_color.y, a_color.z, a_alpha);
-	}
-
 	float GetPillRounding(const ImVec2& a_min, const ImVec2& a_max)
 	{
 		return ImMin(a_max.x - a_min.x, a_max.y - a_min.y) * 0.5f;

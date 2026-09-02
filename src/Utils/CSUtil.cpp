@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstdio>
 #include <filesystem>
 #include <span>
 #include <string>
@@ -167,29 +166,6 @@ namespace cs::util
 		if (!data || !data->device)
 			return nullptr;
 		return reinterpret_cast<ID3D11Device*>(data->device);
-	}
-
-	bool ReadMarker(const char* a_path, char& a_out)
-	{
-		FILE* f = nullptr;
-		if (fopen_s(&f, a_path, "rb") != 0 || !f)
-			return false;
-		// Accept UTF-8 BOMs from common Windows editors.
-		unsigned char buf[4] = {};
-		size_t        read   = fread(buf, 1, 4, f);
-		size_t        cursor = 0;
-		if (read >= 3 && buf[0] == 0xEF && buf[1] == 0xBB && buf[2] == 0xBF)
-			cursor = 3;
-		bool ok = false;
-		if (read > cursor) {
-			a_out = static_cast<char>(buf[cursor]);
-			ok    = true;
-		}
-		fclose(f);
-		// Delete consumed smoke markers to prevent stale overrides.
-		if (ok)
-			std::remove(a_path);
-		return ok;
 	}
 
 	ID3D11DeviceChild* CompileShader(

@@ -99,7 +99,6 @@ namespace cs
 		static ThemeManager& Get();
 
 		std::size_t DiscoverThemes();
-		const std::vector<ThemeInfo>& GetThemes() const { return themes; }
 		std::vector<std::string> GetThemeNames() const;
 
 		bool LoadTheme(const std::string& a_themeName, toml::table& a_themeSettings);

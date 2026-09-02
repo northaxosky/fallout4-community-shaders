@@ -18,7 +18,6 @@ float ClampDepth(float depth)
 
 float DepthMIPFilter(float depth0, float depth1, float depth2, float depth3)
 {
-#ifdef LINEAR_FILTER
 	float4 depths = float4(depth0, depth1, depth2, depth3);
 	float4 valid = float4(
 		depth0 > FP_Z ? 1.0 : 0.0,
@@ -27,11 +26,6 @@ float DepthMIPFilter(float depth0, float depth1, float depth2, float depth3)
 		depth3 > FP_Z ? 1.0 : 0.0);
 	float validCount = dot(valid, float4(1.0, 1.0, 1.0, 1.0));
 	return dot(depths, valid) / max(validCount, 1.0);
-#elif defined(MAX_FILTER)
-	return max(max(depth0, depth1), max(depth2, depth3));
-#elif defined(MIN_FILTER)
-	return min(min(depth0, depth1), min(depth2, depth3));
-#endif
 }
 
 groupshared float g_scratchDepths[8][8];

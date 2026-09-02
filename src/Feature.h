@@ -84,12 +84,9 @@ namespace cs
 		// Fires once after shader injections freeze, before the first frame.
 		virtual bool ValidateShaderInjections(std::string& ) { return true; }
 
-
 		virtual std::string GetFeatureSummary() const { return {}; }
 
 		virtual std::optional<std::string> GetFeatureModLink() const { return {}; }
-
-		virtual bool IsCore() const { return false; }
 
 		virtual std::string GetCategory() const { return FeatureCategories::kMisc; }
 

@@ -57,9 +57,9 @@ pwsh scripts/fetch-sdks.ps1
 ```
 
 It downloads each pinned archive, verifies its SHA-256 against the manifest, and stages the
-required files into `features\Upscaling\Shaders\Upscaling\Streamline\`, which deploys to
-`Data\Shaders\Upscaling\Streamline\`. FidelityFX FSR 3 needs no staging: its DX11 backend builds
-from the `extern\FidelityFX-SDK` submodule.
+required files into the `Streamline` and `FidelityFX` directories under
+`features\Upscaling\Shaders\Upscaling\`. The FidelityFX DX11 backend builds from the
+`extern\FidelityFX-SDK` submodule, while frame generation requires the two staged AMD DX12 DLLs.
 
 ## Configure and build
 

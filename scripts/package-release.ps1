@@ -103,6 +103,7 @@ $requiredShaderDirectories = @(
 	'Shaders/TerrainShadows',
 	'Shaders/Upscaling',
 	'Shaders/InverseSquareLighting',
+	'Shaders/DynamicCubemaps',
 	'Shaders/WetnessEffects',
 	'Shaders/WaterEffects'
 )

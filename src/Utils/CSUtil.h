@@ -33,7 +33,4 @@ namespace cs::util
 
 	// Returns null before the engine device is ready.
 	[[nodiscard]] ID3D11Device* GetD3DDevice();
-
-	// Successful reads delete BOM-aware one-shot markers.
-	bool ReadMarker(const char* a_path, char& a_out);
 }

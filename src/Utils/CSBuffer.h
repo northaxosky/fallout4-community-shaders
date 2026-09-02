@@ -98,12 +98,6 @@ namespace cs::buffer
 			DX::ThrowIfFailed(device->CreateUnorderedAccessView(resource.get(), &a_desc, uav.put()));
 		}
 
-		void CreateRTV(D3D11_RENDER_TARGET_VIEW_DESC const& a_desc)
-		{
-			auto* device = reinterpret_cast<ID3D11Device*>(RE::BSGraphics::GetRendererData()->device);
-			DX::ThrowIfFailed(device->CreateRenderTargetView(resource.get(), &a_desc, rtv.put()));
-		}
-
 		void Reset()
 		{
 			rtv = nullptr;

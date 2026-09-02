@@ -928,7 +928,7 @@ namespace
 		AddCompile(a_jobs, screenSpaceGiRoot / "decode.cs.hlsl", {});
 
 		const std::array<ShaderCase, 8> xegtaoCases{ {
-			{ "prefilterDepths.cs.hlsl", { { "LINEAR_FILTER", "1" } } },
+			{ "prefilterDepths.cs.hlsl", {} },
 			{ "prefilterRadiance.cs.hlsl", {} },
 			{ "prefilterNormal.cs.hlsl", {} },
 			{ "radianceDisocc.cs.hlsl", {} },
