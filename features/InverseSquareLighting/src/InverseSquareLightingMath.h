@@ -1,8 +1,6 @@
 #pragma once
 
 #include <algorithm>
-#include <cstddef>
-#include <cstdint>
 #include <cmath>
 
 namespace cs::features::inverse_square_lighting
@@ -34,33 +32,6 @@ namespace cs::features::inverse_square_lighting
 		float interiorStrength = 1.0f;
 		float nearFieldDistance = kDefaultNearFieldDistance;
 	};
-
-	enum class DeliveryState : std::uint8_t
-	{
-		kAwaiting,
-		kPartial,
-		kOperational
-	};
-
-	inline DeliveryState EvaluateDelivery(
-		std::uint64_t a_volumeDeliveries,
-		std::size_t a_tiledVariants,
-		std::size_t a_substitutedTiledVariants) noexcept
-	{
-		const bool volumeDelivered = a_volumeDeliveries != 0;
-		const bool tiledDelivered = a_tiledVariants != 0
-			&& a_substitutedTiledVariants == a_tiledVariants;
-		if (volumeDelivered && tiledDelivered)
-			return DeliveryState::kOperational;
-		if (volumeDelivered || a_substitutedTiledVariants != 0)
-			return DeliveryState::kPartial;
-		return DeliveryState::kAwaiting;
-	}
-
-	inline bool IsOperational(DeliveryState a_state) noexcept
-	{
-		return a_state == DeliveryState::kOperational;
-	}
 
 	inline float ClampFinite(
 		float a_value,

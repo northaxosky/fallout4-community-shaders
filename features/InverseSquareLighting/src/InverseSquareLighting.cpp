@@ -1,6 +1,5 @@
 #include "InverseSquareLighting.h"
 
-#include <d3d11.h>
 #include <imgui.h>
 
 #include <array>
@@ -123,15 +122,6 @@ namespace cs::features
 					isl::kNearFieldDistanceMax);
 		}
 
-		bool IsPunctualDeferred(
-			const cs::engine::ShaderInjectionDefines& a_defines)
-		{
-			if (!a_defines.contains("BSDFLIGHT_PS_DEFERRED"))
-				return false;
-			const auto lightType = a_defines.find("LIGHT_TYPE");
-			return lightType != a_defines.end() && lightType->second != "1";
-		}
-
 		std::string_view DebugVisualizationName(
 			InverseSquareLighting::DebugVisualization a_visualization) noexcept
 		{
@@ -141,18 +131,6 @@ namespace cs::features
 				: "off";
 		}
 
-		std::string_view DeliveryStateName(isl::DeliveryState a_state) noexcept
-		{
-			switch (a_state) {
-			case isl::DeliveryState::kAwaiting:
-				return "awaiting";
-			case isl::DeliveryState::kPartial:
-				return "partial_forced_vanilla";
-			case isl::DeliveryState::kOperational:
-				return "operational";
-			}
-			return "unknown";
-		}
 	}
 
 	InverseSquareLighting* InverseSquareLighting::GetSingleton()
@@ -222,8 +200,7 @@ namespace cs::features
 		PublishSettings();
 		const auto registerTarget = [this](
 			cs::engine::ShaderInjectionTarget a_target,
-			cs::engine::ShaderStage a_stage,
-			cs::engine::ShaderInjectionBindCallback a_bind = {}) {
+			cs::engine::ShaderStage a_stage) {
 			return cs::engine::RegisterReplacement({
 				.targetId = a_target,
 				.stages = cs::engine::ShaderStageBit(a_stage),
@@ -238,17 +215,13 @@ namespace cs::features
 				.isReady = [this] {
 					return _registrationsReady.load(std::memory_order_acquire)
 						&& cs::render::IsSharedDataReady();
-				},
-				.bind = std::move(a_bind)
+				}
 			});
 		};
 		const bool registered =
 			registerTarget(
 				cs::engine::ShaderInjectionTarget::kBsdfLight,
-				cs::engine::ShaderStage::kPixel,
-				[this](ID3D11DeviceContext* a_context) {
-					RecordActiveVariant(a_context);
-				})
+				cs::engine::ShaderStage::kPixel)
 			&& registerTarget(
 				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
 				cs::engine::ShaderStage::kCompute);
@@ -285,7 +258,6 @@ namespace cs::features
 	bool InverseSquareLighting::ValidateShaderInjections(
 		std::string& a_error)
 	{
-		_injectionsPrepared.store(false, std::memory_order_release);
 		_injectionsOperational.store(false, std::memory_order_release);
 		if (!_registrationsReady.load(std::memory_order_acquire)) {
 			a_error = "the shader contributions did not all register";
@@ -326,88 +298,10 @@ namespace cs::features
 			}
 		}
 
-		_injectionsPrepared.store(true, std::memory_order_release);
-		SetValidationDetail(
-			"awaiting runtime substitution on BSDF and both tiled routes");
-		L->info(
-			"Inverse-square routes prepared; forcing vanilla until BSDFLight and "
-			"both DFTiledLighting variants positively substitute.");
+		_injectionsOperational.store(true, std::memory_order_release);
+		SetValidationDetail({});
+		L->info("Inverse-square BSDF and tiled routes are ready.");
 		return true;
-	}
-
-	bool InverseSquareLighting::RefreshDeliveryState() const
-	{
-		if (!_injectionsPrepared.load(std::memory_order_acquire)) {
-			_injectionsOperational.store(false, std::memory_order_release);
-			return false;
-		}
-
-		const auto tiled = cs::engine::GetShaderInjectionDeliverySnapshot(
-			cs::engine::ShaderInjectionTarget::kDfTiledLighting);
-		const auto volumeDeliveries =
-			_deferredBinds.load(std::memory_order_relaxed)
-			+ _attenuationOnlyBinds.load(std::memory_order_relaxed)
-			+ _goboBinds.load(std::memory_order_relaxed)
-			+ _unshadowedBinds.load(std::memory_order_relaxed);
-		const auto state = isl::EvaluateDelivery(
-			volumeDeliveries,
-			tiled.variants,
-			tiled.substitutedVariants);
-		const auto previous =
-			_deliveryState.exchange(state, std::memory_order_acq_rel);
-		const bool operational = isl::IsOperational(state);
-		_injectionsOperational.store(operational, std::memory_order_release);
-		if (state == previous)
-			return operational;
-
-		if (operational) {
-			SetValidationDetail({});
-			L->info(
-				"Inverse-square delivery confirmed: BSDF punctual binds={}, "
-				"DFTiledLighting variants={}/{}; enabling the global curve.",
-				volumeDeliveries,
-				tiled.substitutedVariants,
-				tiled.variants);
-		} else {
-			const auto detail = fmt::format(
-				"runtime delivery mismatch: BSDF punctual binds={}, tiled "
-				"variants={}/{}; forcing vanilla on both paths",
-				volumeDeliveries,
-				tiled.substitutedVariants,
-				tiled.variants);
-			SetValidationDetail(detail);
-			L->error("Inverse-square {}.", detail);
-		}
-		return operational;
-	}
-
-	void InverseSquareLighting::RecordActiveVariant(
-		ID3D11DeviceContext*) noexcept
-	{
-		if (!cs::telemetry::pump::Enabled())
-			return;
-		const auto* defines =
-			cs::engine::GetActiveShaderInjectionVariantDefines(
-				cs::engine::ShaderInjectionTarget::kBsdfLight);
-		if (!defines) {
-			_inertBinds.fetch_add(1, std::memory_order_relaxed);
-			return;
-		}
-		if (IsPunctualDeferred(*defines)) {
-			_deferredBinds.fetch_add(1, std::memory_order_relaxed);
-		} else if (defines->contains("BSDFLIGHT_PS_ATTENUATION_ONLY")) {
-			_attenuationOnlyBinds.fetch_add(1, std::memory_order_relaxed);
-		} else if (
-			defines->contains("BSDFLIGHT_PS_GOBO")
-			&& defines->contains("POINTOMNI")) {
-			_goboBinds.fetch_add(1, std::memory_order_relaxed);
-		} else if (
-			defines->contains("BSDFLIGHT_PS_UNSHADOWED")
-			&& defines->contains("POINTOMNI")) {
-			_unshadowedBinds.fetch_add(1, std::memory_order_relaxed);
-		} else {
-			_inertBinds.fetch_add(1, std::memory_order_relaxed);
-		}
 	}
 
 	cs::InverseSquareLightingFeatureData
@@ -418,7 +312,10 @@ namespace cs::features
 		const bool inInterior = cell && !cell->IsExterior();
 		_inInterior.store(inInterior, std::memory_order_relaxed);
 
-		const bool operational = RefreshDeliveryState();
+		const bool operational =
+			_injectionsOperational.load(std::memory_order_acquire);
+		if (operational)
+			ObserveRouteDiagnostics();
 		const bool enabled = _enabled.load(std::memory_order_acquire);
 		const float exteriorStrength =
 			_exteriorStrength.load(std::memory_order_acquire);
@@ -445,6 +342,41 @@ namespace cs::features
 		};
 	}
 
+	void InverseSquareLighting::ObserveRouteDiagnostics() const noexcept
+	{
+		const auto volume =
+			cs::engine::GetShaderInjectionOutcomeSnapshot(
+				cs::engine::ShaderInjectionTarget::kBsdfLight);
+		const auto tiled =
+			cs::engine::GetShaderInjectionOutcomeSnapshot(
+				cs::engine::ShaderInjectionTarget::kDfTiledLighting);
+		const bool mismatch =
+			(volume.matches != 0
+				&& volume.substitutions < volume.matches)
+			|| (tiled.matches != 0
+				&& tiled.substitutions < tiled.matches);
+		const bool previous = _routeSubstitutionMismatch.exchange(
+			mismatch, std::memory_order_acq_rel);
+		if (mismatch && !previous) {
+			L->warn(
+				"Inverse-square route substitution mismatch: BSDF "
+				"substitutions={}/{}, tiled substitutions={}/{}; reporting "
+				"only, rendering remains unchanged.",
+				volume.substitutions,
+				volume.matches,
+				tiled.substitutions,
+				tiled.matches);
+		} else if (!mismatch && previous) {
+			L->info(
+				"Inverse-square route substitutions now agree: BSDF "
+				"substitutions={}/{}, tiled substitutions={}/{}.",
+				volume.substitutions,
+				volume.matches,
+				tiled.substitutions,
+				tiled.matches);
+		}
+	}
+
 	void InverseSquareLighting::CollectTelemetry(
 		cs::telemetry::Sink& a_sink) const
 	{
@@ -453,9 +385,11 @@ namespace cs::features
 		const auto tiledSnapshot =
 			cs::engine::GetShaderInjectionTargetSnapshot(
 				cs::engine::ShaderInjectionTarget::kDfTiledLighting);
-		const auto tiledDelivery =
-			cs::engine::GetShaderInjectionDeliverySnapshot(
-				cs::engine::ShaderInjectionTarget::kDfTiledLighting);
+		const bool routeMismatch =
+			(snapshot.matches != 0
+				&& snapshot.substitutions < snapshot.matches)
+			|| (tiledSnapshot.matches != 0
+				&& tiledSnapshot.substitutions < tiledSnapshot.matches);
 		const auto detail = GetValidationDetail();
 		a_sink
 			.Field(
@@ -492,9 +426,8 @@ namespace cs::features
 				"injection_operational",
 				_injectionsOperational.load(std::memory_order_relaxed))
 			.Field(
-				"delivery_state",
-				DeliveryStateName(
-					_deliveryState.load(std::memory_order_relaxed)))
+				"route_substitution_mismatch",
+				routeMismatch)
 			.Field("injection_requested", snapshot.requested)
 			.Field("injection_compile_attempted", snapshot.compileAttempted)
 			.Field("injection_compile_ok", snapshot.compileOk)
@@ -522,13 +455,6 @@ namespace cs::features
 				"tiled_injection_substitutions",
 				static_cast<std::int64_t>(tiledSnapshot.substitutions))
 			.Field(
-				"tiled_injection_variants",
-				static_cast<std::int64_t>(tiledDelivery.variants))
-			.Field(
-				"tiled_injection_substituted_variants",
-				static_cast<std::int64_t>(
-					tiledDelivery.substitutedVariants))
-			.Field(
 				"injection_passthrough_compile_fail",
 				static_cast<std::int64_t>(snapshot.passthroughCompileFail))
 			.Field(
@@ -539,27 +465,7 @@ namespace cs::features
 				static_cast<std::int64_t>(snapshot.passthroughDisabled))
 			.Field(
 				"validation_detail",
-				detail.empty() ? "operational" : detail)
-			.Field(
-				"deferred_variant_binds",
-				static_cast<std::int64_t>(
-					_deferredBinds.load(std::memory_order_relaxed)))
-			.Field(
-				"attenuation_only_variant_binds",
-				static_cast<std::int64_t>(
-					_attenuationOnlyBinds.load(std::memory_order_relaxed)))
-			.Field(
-				"gobo_variant_binds",
-				static_cast<std::int64_t>(
-					_goboBinds.load(std::memory_order_relaxed)))
-			.Field(
-				"unshadowed_variant_binds",
-				static_cast<std::int64_t>(
-					_unshadowedBinds.load(std::memory_order_relaxed)))
-			.Field(
-				"inert_variant_binds",
-				static_cast<std::int64_t>(
-					_inertBinds.load(std::memory_order_relaxed)));
+				detail.empty() ? "operational" : detail);
 	}
 
 	void InverseSquareLighting::DrawSettings()

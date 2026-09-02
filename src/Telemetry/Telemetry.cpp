@@ -187,6 +187,68 @@ namespace cs::telemetry
 			return result;
 		}
 
+		[[nodiscard]] toml::array TomlVector3(
+			float a_x,
+			float a_y,
+			float a_z)
+		{
+			return toml::array{
+				static_cast<double>(a_x),
+				static_cast<double>(a_y),
+				static_cast<double>(a_z)
+			};
+		}
+
+		void CollectDumpContext(toml::table& a_root)
+		{
+			// DumpAll runs from the post-composite render hook.
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			const auto position = player ? player->GetPosition() : RE::NiPoint3{};
+			const bool positionAvailable = player
+				&& std::isfinite(position.x)
+				&& std::isfinite(position.y)
+				&& std::isfinite(position.z);
+			a_root.insert_or_assign(
+				"player_position_available",
+				positionAvailable);
+			if (positionAvailable) {
+				a_root.insert_or_assign(
+					"player_position",
+					TomlVector3(position.x, position.y, position.z));
+			}
+
+			const auto& camera = cs::engine::GetFrameBuffer();
+			a_root.insert_or_assign("camera_snapshot_valid", camera.valid);
+			a_root.insert_or_assign(
+				"camera_orientation_source",
+				"published_frame_buffer_b12");
+			if (!camera.valid)
+				return;
+
+			const auto origin = cs::engine::CameraWorldOrigin(camera.data);
+			a_root.insert_or_assign(
+				"camera_origin",
+				TomlVector3(origin.x, origin.y, origin.z));
+			a_root.insert_or_assign(
+				"camera_view_to_world_row0",
+				TomlVector3(
+					camera.data.ViewToWorld[0].x,
+					camera.data.ViewToWorld[0].y,
+					camera.data.ViewToWorld[0].z));
+			a_root.insert_or_assign(
+				"camera_view_to_world_row1",
+				TomlVector3(
+					camera.data.ViewToWorld[1].x,
+					camera.data.ViewToWorld[1].y,
+					camera.data.ViewToWorld[1].z));
+			a_root.insert_or_assign(
+				"camera_view_to_world_row2",
+				TomlVector3(
+					camera.data.ViewToWorld[2].x,
+					camera.data.ViewToWorld[2].y,
+					camera.data.ViewToWorld[2].z));
+		}
+
 		[[nodiscard]] bool IsIdentity(const __m128 (&a_matrix)[4]) noexcept
 		{
 			alignas(16) float rows[4][4]{};
@@ -514,6 +576,7 @@ namespace cs::telemetry
 			try {
 				toml::table root;
 				root.insert_or_assign("build", CS_BUILD_DESCRIBE);
+				CollectDumpContext(root);
 				root.insert_or_assign("frame", TomlInteger(CurrentFrame()));
 				root.insert_or_assign("logging", cs::log::ConfigAsToml());
 

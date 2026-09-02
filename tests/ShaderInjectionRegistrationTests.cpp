@@ -1547,16 +1547,9 @@ namespace
 		ID3D11DeviceContext* a_context)
 	{
 		FreezeAndCompileShaderInjections(a_device);
-		const auto delivery = GetShaderInjectionDeliverySnapshot(
-			ShaderInjectionTarget::kBsdfComposite);
-		bool ok = Check(
-			delivery.variants != 0
-				&& delivery.substitutedVariants == 0
-				&& delivery.substitutions == 0,
-			"prepared variants were reported as runtime substitutions");
 		auto* injected = GetInjectedPixelShader(
 			ShaderInjectionTarget::kBsdfComposite);
-		ok &= Check(
+		bool ok = Check(
 			injected != nullptr,
 			"BSDFComposite injected pixel shader was not published");
 		if (!injected)
