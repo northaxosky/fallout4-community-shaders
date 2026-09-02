@@ -32,14 +32,6 @@ namespace cs::engine
 		constexpr std::array<ShaderInjectionTargetMetadata,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> kTargets{ {
 			{
-				ShaderInjectionTarget::kDeferredComposite,
-				"deferred_composite",
-				L"DeferredComposite.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
 				ShaderInjectionTarget::kDeferredPrepass,
 				"deferred_prepass",
 				L"BSDFPrePass.hlsl",
@@ -105,7 +97,7 @@ namespace cs::engine
 			}
 		} };
 
-		// Composite and VLS lack stock hash guards.
+		// VLS lacks stock hash guards.
 		constexpr std::array<ShaderInjectionTarget, 7>
 			kBaselineOwnableTargets{
 				ShaderInjectionTarget::kDeferredPrepass,
@@ -159,11 +151,6 @@ namespace cs::engine
 			using Target = ShaderInjectionTarget;
 			auto variants =
 				std::vector<ShaderReplacementVariantRegistration>{
-				MakeDefaultVariantRegistration(
-					Target::kDeferredComposite,
-					"default",
-					{},
-					{}),
 				MakeDefaultVariantRegistration(
 					Target::kDeferredPrepass,
 					"default",

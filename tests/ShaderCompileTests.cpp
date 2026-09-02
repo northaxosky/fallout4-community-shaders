@@ -1587,8 +1587,7 @@ namespace
 				"ps_5_0"
 			}
 		} };
-		const std::array<ShaderCase, 3> explicitSourceCases{ {
-			{ "DeferredComposite.hlsl", {}, "ps_5_0" },
+		const std::array<ShaderCase, 2> explicitSourceCases{ {
 			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
 			{ "VolumetricLighting.hlsl", {}, "ps_5_0" }
 		} };

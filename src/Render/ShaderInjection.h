@@ -21,7 +21,6 @@ namespace cs::engine
 {
 	enum class ShaderInjectionTarget : std::uint8_t
 	{
-		kDeferredComposite,
 		kDeferredPrepass,
 		kVlsSliceScatter,
 		kBsSky,

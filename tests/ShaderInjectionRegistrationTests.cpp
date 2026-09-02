@@ -254,7 +254,7 @@ namespace
 	{
 		ShaderReplacementVariantRegistration registration;
 		registration.targetId =
-			ShaderInjectionTarget::kDeferredComposite;
+			ShaderInjectionTarget::kDeferredPrepass;
 		registration.name = std::move(a_name);
 		registration.variantKeys.push_back({
 			"RegistrationTestShader",
@@ -784,9 +784,9 @@ namespace
 		}
 		ok &= Check(
 			!SetBaselineShaderOwnership(
-				ShaderInjectionTarget::kDeferredComposite,
+				ShaderInjectionTarget::kCount,
 				true),
-			"deferred composite was accepted for baseline ownership");
+			"sentinel target was accepted for baseline ownership");
 		ok &= Check(
 			!SetBaselineShaderOwnership(
 				ShaderInjectionTarget::kVlsSliceScatter,
@@ -1734,7 +1734,7 @@ int main(int a_argc, char* a_argv[])
 	disabledSsgiAmbient.contributor = "ScreenSpaceGI";
 	disabledSsgiAmbient.bind = [](ID3D11DeviceContext*) {};
 	ShaderReplacementVariantRegistration mismatchedProfile;
-	mismatchedProfile.targetId = ShaderInjectionTarget::kDeferredComposite;
+	mismatchedProfile.targetId = ShaderInjectionTarget::kDeferredPrepass;
 	mismatchedProfile.name = "mismatched-profile";
 	mismatchedProfile.stage = ShaderStage::kVertex;
 	mismatchedProfile.compilation.sourcePath = L"registration-test.hlsl";
@@ -1881,7 +1881,7 @@ int main(int a_argc, char* a_argv[])
 				ShaderInjectionTarget::kDfTiledLighting] == 0,
 		"DFTiledLighting compute registration count mismatch");
 	ok &= Check(
-		staticFamilies.size() == 367,
+		staticFamilies.size() == 366,
 		"default shader replacement variant count mismatch");
 	ok &= Check(
 		stockHashes.size() == 365,
