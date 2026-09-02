@@ -52,17 +52,6 @@
 			"generator": "Visual Studio 18 2026"
 		},
 		{
-			"name": "ci",
-			"inherits": [
-				"common",
-				"vcpkg",
-				"win64",
-				"msvc"
-			],
-			"description": "Hosted-CI configure: same as default but targets the Visual Studio 2022 toolset on the GitHub windows-2022 runner (which has no VS 2026).",
-			"generator": "Visual Studio 17 2022"
-		},
-		{
 			"name": "clangd",
 			"inherits": [
 				"vcpkg",

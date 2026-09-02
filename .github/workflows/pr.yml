@@ -113,7 +113,7 @@ jobs:
           if (-not $env:VCPKG_ROOT) {
             throw 'VCPKG_ROOT was not set'
           }
-          cmake -S . --preset=ci
+          cmake -S . --preset=default
 
       - name: Build
         run: cmake --build build --config Release --parallel
