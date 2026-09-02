@@ -344,6 +344,23 @@ namespace cs::features
 				left.SampleDesc.Quality == right.SampleDesc.Quality;
 		}
 
+		bool HaveSameTextureDescription(
+			const D3D11_TEXTURE2D_DESC& a_left,
+			const D3D11_TEXTURE2D_DESC& a_right) noexcept
+		{
+			return a_left.Width == a_right.Width &&
+				a_left.Height == a_right.Height &&
+				a_left.MipLevels == a_right.MipLevels &&
+				a_left.ArraySize == a_right.ArraySize &&
+				a_left.Format == a_right.Format &&
+				a_left.SampleDesc.Count == a_right.SampleDesc.Count &&
+				a_left.SampleDesc.Quality == a_right.SampleDesc.Quality &&
+				a_left.Usage == a_right.Usage &&
+				a_left.BindFlags == a_right.BindFlags &&
+				a_left.CPUAccessFlags == a_right.CPUAccessFlags &&
+				a_left.MiscFlags == a_right.MiscFlags;
+		}
+
 		bool TryGetFrameBufferTexture(
 			winrt::com_ptr<ID3D11Texture2D>& a_texture,
 			D3D11_TEXTURE2D_DESC& a_desc) noexcept
@@ -586,21 +603,20 @@ namespace cs::features
 			return texture;
 		}
 
-		auto* view = cs::engine::GetRenderTargetSRV(
-			cs::engine::RenderTarget::kFrameBuffer);
 		D3D11_TEXTURE2D_DESC desc{};
-		if (!TryDescribeTextureView(view, desc)) {
+		if (!TryDescribeTextureView(_providerOutputDebugSRV.get(), desc)) {
 			return texture;
 		}
 
 		const auto method = GetUpscaleMethod();
 		const bool published =
 			_srPublishedToFramebuffer.load(std::memory_order_acquire);
-		texture.texture = view;
+		texture.texture = _providerOutputDebugSRV.get();
 		texture.width = desc.Width;
 		texture.height = desc.Height;
 		texture.caption = std::format(
-			"RT0 {}x{}; runtime method {}; provider resolve to RT0: {}",
+			"RT0 preview copy {}x{}; captured after DrawWorld::Imagespace +0xC5 provider resolve; "
+			"runtime method {}; provider resolve to RT0: {}",
 			desc.Width,
 			desc.Height,
 			UpscaleMethodName(method),
@@ -1420,10 +1436,83 @@ namespace cs::features
 
 	void Upscaling::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		// Resource setup waits until the engine has created its render targets.
 		if (!a_device) {
 			FailLoad("Upscaling requires a D3D11 device");
+			return;
 		}
+		RefreshProviderOutputDebugResources(a_device);
+	}
+
+	void Upscaling::RefreshProviderOutputDebugResources(ID3D11Device* a_device)
+	{
+		auto* frameBuffer =
+			cs::engine::GetRenderTargetTexture(cs::engine::RenderTarget::kFrameBuffer);
+		auto* frameBufferSRV =
+			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kFrameBuffer);
+		if (!a_device || !frameBuffer || !frameBufferSRV) {
+			_providerOutputDebugSRV = nullptr;
+			_providerOutputDebugTexture = nullptr;
+			_providerOutputSourceDesc = {};
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC sourceDesc{};
+		frameBuffer->GetDesc(&sourceDesc);
+		if (_providerOutputDebugTexture && _providerOutputDebugSRV &&
+			HaveSameTextureDescription(sourceDesc, _providerOutputSourceDesc)) {
+			return;
+		}
+
+		D3D11_TEXTURE2D_DESC previewDesc = sourceDesc;
+		previewDesc.Usage = D3D11_USAGE_DEFAULT;
+		previewDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		previewDesc.CPUAccessFlags = 0;
+		previewDesc.MiscFlags = 0;
+
+		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+		frameBufferSRV->GetDesc(&srvDesc);
+
+		winrt::com_ptr<ID3D11Texture2D> preview;
+		winrt::com_ptr<ID3D11ShaderResourceView> previewSRV;
+		DX::ThrowIfFailed(a_device->CreateTexture2D(
+			&previewDesc,
+			nullptr,
+			preview.put()));
+		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			preview.get(),
+			&srvDesc,
+			previewSRV.put()));
+		cs::render::annotation::SetName(
+			preview.get(), "Upscaling/ProviderOutputDebugCopy.Texture");
+		cs::render::annotation::SetName(
+			previewSRV.get(), "Upscaling/ProviderOutputDebugCopy.SRV");
+
+		_providerOutputDebugTexture = std::move(preview);
+		_providerOutputDebugSRV = std::move(previewSRV);
+		_providerOutputSourceDesc = sourceDesc;
+	}
+
+	void Upscaling::CaptureProviderOutputDebugTexture()
+	{
+		const bool selected =
+			_debugView.load(std::memory_order_acquire) == DebugView::kProviderOutput;
+		if (!selected) {
+			return;
+		}
+
+		auto* context = cs::engine::GetImmediateContext();
+		auto* frameBuffer =
+			cs::engine::GetRenderTargetTexture(cs::engine::RenderTarget::kFrameBuffer);
+		if (!HaveMatchingCopyContract(_providerOutputDebugTexture.get(), frameBuffer)) {
+			return;
+		}
+
+		cs::render::annotation::ScopedEvent annotationScope(
+			"Upscaling/Debug/CopyProviderOutputAfterImagespaceUpscale");
+		cs::engine::CopyResourcePreservingOM(
+			context,
+			_providerOutputDebugTexture.get(),
+			frameBuffer);
 	}
 
 	void Upscaling::SetupResources()
@@ -2007,9 +2096,10 @@ namespace cs::features
 		GuardedThunkBody("Upscaling resource setup", [&] {
 			if (upscaling->_resourcesReady.load(std::memory_order_acquire)) {
 				upscaling->InvalidateEngineDerivedResources();
-				return;
+			} else {
+				upscaling->SetupResources();
 			}
-			upscaling->SetupResources();
+			upscaling->RefreshProviderOutputDebugResources(cs::engine::GetDevice());
 		});
 	}
 
@@ -2438,8 +2528,11 @@ namespace cs::features
 
 			const auto upscaleMethod = upscaling->GetUpscaleMethod();
 			bool upscaled = true;
-			if (upscaleMethod != UpscaleMethod::kNONE && upscaleMethod != UpscaleMethod::kTAA)
+			if (upscaleMethod != UpscaleMethod::kNONE && upscaleMethod != UpscaleMethod::kTAA) {
 				upscaled = upscaling->PerformUpscaling();
+				// The +0xC5 hook publishes RT0 before the menu can bind it.
+				upscaling->CaptureProviderOutputDebugTexture();
+			}
 
 			// Jitter must not leak into UI regardless of whether the resolve succeeded.
 			if (auto* state = cs::engine::GetGraphicsState()) {

@@ -178,6 +178,8 @@ namespace cs::features
 
 		void SaveSettings();
 		void SetupResources();
+		void RefreshProviderOutputDebugResources(ID3D11Device* a_device);
+		void CaptureProviderOutputDebugTexture();
 		void UpdateResolutionScale(RE::BSGraphics::State* a_state, UpscaleMethod a_method);
 		void PublishDynamicResolution();
 		FeatureDebugTexture GetRenderSubrectDebugTexture() const;
@@ -346,6 +348,9 @@ namespace cs::features
 		std::atomic_uint32_t _upscaleDispatches{ 0 };
 		std::atomic_uint32_t _providerFailures{ 0 };
 		std::atomic_bool _srPublishedToFramebuffer{ false };
+		winrt::com_ptr<ID3D11Texture2D> _providerOutputDebugTexture;
+		winrt::com_ptr<ID3D11ShaderResourceView> _providerOutputDebugSRV;
+		D3D11_TEXTURE2D_DESC _providerOutputSourceDesc{};
 		std::atomic_uint32_t _frameGenerationDispatches{ 0 };
 		std::atomic_uint32_t _frameGenerationFailures{ 0 };
 		std::atomic_uint32_t _frameGenerationAlphaConditionedCaptures{ 0 };
