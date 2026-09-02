@@ -16,6 +16,13 @@ namespace cs::features
 	class DynamicResolution
 	{
 	public:
+		struct ProxyTexture
+		{
+			ID3D11ShaderResourceView* view = nullptr;
+			std::uint32_t             width = 0;
+			std::uint32_t             height = 0;
+		};
+
 		struct UpscalingCB
 		{
 			std::uint32_t ScreenSize[2];
@@ -34,6 +41,7 @@ namespace cs::features
 		void Release();
 
 		[[nodiscard]] bool HasProxies() const noexcept { return _hasProxies; }
+		[[nodiscard]] ProxyTexture GetProxyTexture(int a_index) const noexcept;
 
 	private:
 		void UpdateRenderTarget(int a_index, float a_widthRatio, float a_heightRatio);

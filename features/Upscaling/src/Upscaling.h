@@ -51,6 +51,8 @@ namespace cs::features
 
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
+		void SetDebugView(std::string_view a_view) noexcept override;
 
 		float2 jitter = { 0, 0 };
 
@@ -178,6 +180,10 @@ namespace cs::features
 		void SetupResources();
 		void UpdateResolutionScale(RE::BSGraphics::State* a_state, UpscaleMethod a_method);
 		void PublishDynamicResolution();
+		FeatureDebugTexture GetRenderSubrectDebugTexture() const;
+		FeatureDebugTexture GetProxyDebugTexture() const;
+		FeatureDebugTexture GetMotionVectorsDebugTexture() const;
+		FeatureDebugTexture GetProviderOutputDebugTexture() const;
 
 		DynamicResolution dynamicResolution;
 		SamplerBias samplerBias;
@@ -325,6 +331,17 @@ namespace cs::features
 		std::atomic_bool _resourcesReady{ false };
 		std::atomic_bool _hooksInstalled{ false };
 		std::atomic_bool _quarantined{ false };
+
+		enum class DebugView
+		{
+			kOff,
+			kRenderSubrect,
+			kProxy,
+			kMotionVectors,
+			kProviderOutput
+		};
+
+		std::atomic<DebugView> _debugView{ DebugView::kOff };
 		std::atomic<float> _mipBias{ 0.0f };
 		std::atomic_uint32_t _upscaleDispatches{ 0 };
 		std::atomic_uint32_t _providerFailures{ 0 };

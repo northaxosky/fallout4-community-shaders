@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <iterator>
 
 #include "Log.h"
 #include "Render/Annotation.h"
@@ -51,6 +52,24 @@ namespace cs::features
 		SafeRelease(proxy.rtView);
 		SafeRelease(proxy.texture);
 		proxy = {};
+	}
+
+	DynamicResolution::ProxyTexture DynamicResolution::GetProxyTexture(int a_index) const noexcept
+	{
+		if (a_index < 0 || a_index >= static_cast<int>(std::size(proxyRenderTargets))) {
+			return {};
+		}
+
+		const auto& proxy = proxyRenderTargets[a_index];
+		auto* texture = reinterpret_cast<ID3D11Texture2D*>(proxy.texture);
+		auto* view = reinterpret_cast<ID3D11ShaderResourceView*>(proxy.srView);
+		if (!texture || !view) {
+			return {};
+		}
+
+		D3D11_TEXTURE2D_DESC desc{};
+		texture->GetDesc(&desc);
+		return { view, desc.Width, desc.Height };
 	}
 
 	void DynamicResolution::UpdateRenderTarget(int a_index, float a_widthRatio, float a_heightRatio)

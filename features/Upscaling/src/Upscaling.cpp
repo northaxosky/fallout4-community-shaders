@@ -18,6 +18,7 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Menu/Menu.h"
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
@@ -49,6 +50,91 @@ namespace cs::features
 		constexpr auto kMotionVectorTarget = cs::engine::RenderTarget::kMotionVectors;
 		constexpr auto kNormalsTarget = cs::engine::RenderTarget::kGbufferNormal;
 		constexpr auto kRefractionNormalTarget = cs::engine::RenderTarget::kRefractionNormal;
+
+		std::string_view UpscaleMethodName(Upscaling::UpscaleMethod a_method) noexcept
+		{
+			switch (a_method) {
+			case Upscaling::UpscaleMethod::kNONE:
+				return "None";
+			case Upscaling::UpscaleMethod::kTAA:
+				return "TAA";
+			case Upscaling::UpscaleMethod::kFSR:
+				return "FSR 3";
+			case Upscaling::UpscaleMethod::kDLSS:
+				return "DLSS";
+			}
+			return "Unknown";
+		}
+
+		std::string_view QualityModeName(std::uint32_t a_mode) noexcept
+		{
+			switch (a_mode) {
+			case 0:
+				return "Native AA";
+			case 1:
+				return "Quality";
+			case 2:
+				return "Balanced";
+			case 3:
+				return "Performance";
+			case 4:
+				return "Ultra Performance";
+			default:
+				return "Unknown";
+			}
+		}
+
+		bool TryDescribeTextureView(
+			ID3D11ShaderResourceView* a_view,
+			D3D11_TEXTURE2D_DESC& a_desc) noexcept
+		{
+			if (!a_view) {
+				return false;
+			}
+
+			winrt::com_ptr<ID3D11Resource> resource;
+			a_view->GetResource(resource.put());
+			winrt::com_ptr<ID3D11Texture2D> texture;
+			if (!resource ||
+				FAILED(resource->QueryInterface(IID_PPV_ARGS(texture.put())))) {
+				return false;
+			}
+			texture->GetDesc(&a_desc);
+			return a_desc.Width > 0 && a_desc.Height > 0;
+		}
+
+		std::uint32_t ScaledExtent(std::uint32_t a_extent, float a_ratio) noexcept
+		{
+			if (!std::isfinite(a_ratio) || a_ratio <= 0.0f) {
+				return 0;
+			}
+			return std::min(
+				a_extent,
+				static_cast<std::uint32_t>(
+					static_cast<double>(a_extent) * a_ratio));
+		}
+
+		struct ActiveExtentSnapshot
+		{
+			std::uint32_t width = 0;
+			std::uint32_t height = 0;
+			float         widthRatio = 1.0f;
+			float         heightRatio = 1.0f;
+		};
+
+		ActiveExtentSnapshot GetActiveExtent(
+			std::uint32_t a_fullWidth,
+			std::uint32_t a_fullHeight) noexcept
+		{
+			ActiveExtentSnapshot snapshot;
+			if (const auto* manager = cs::engine::GetRenderTargetManager()) {
+				snapshot.widthRatio = manager->GetDynamicWidthRatio();
+				snapshot.heightRatio = manager->GetDynamicHeightRatio();
+			}
+			snapshot.width = ScaledExtent(a_fullWidth, snapshot.widthRatio);
+			snapshot.height = ScaledExtent(a_fullHeight, snapshot.heightRatio);
+			return snapshot;
+		}
 
 		std::int32_t GetJitterPhaseCount(std::int32_t a_renderWidth, std::int32_t a_displayWidth)
 		{
@@ -329,6 +415,197 @@ namespace cs::features
 	{
 		static Upscaling instance;
 		return &instance;
+	}
+
+	std::span<const FeatureDebugView> Upscaling::GetDebugViews() const noexcept
+	{
+		static constexpr std::array views{
+			FeatureDebugView{
+				.id = "render_subrect",
+				.label = "Active render sub-rect (RT4)",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const Upscaling&>(a_feature)
+						.GetRenderSubrectDebugTexture();
+				}
+			},
+			FeatureDebugView{
+				.id = "render_proxy",
+				.label = "Render-resolution proxy (RT4)",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const Upscaling&>(a_feature)
+						.GetProxyDebugTexture();
+				}
+			},
+			FeatureDebugView{
+				.id = "motion_vectors",
+				.label = "Provider motion-vector input",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const Upscaling&>(a_feature)
+						.GetMotionVectorsDebugTexture();
+				}
+			},
+			FeatureDebugView{
+				.id = "provider_output",
+				.label = "Provider output (RT0)",
+				.kind = FeatureDebugViewKind::kTexturePreview,
+				.textureProvider = [](const Feature& a_feature) {
+					return static_cast<const Upscaling&>(a_feature)
+						.GetProviderOutputDebugTexture();
+				}
+			}
+		};
+		return views;
+	}
+
+	void Upscaling::SetDebugView(std::string_view a_view) noexcept
+	{
+		DebugView view = DebugView::kOff;
+		if (a_view == "render_subrect") {
+			view = DebugView::kRenderSubrect;
+		} else if (a_view == "render_proxy") {
+			view = DebugView::kProxy;
+		} else if (a_view == "motion_vectors") {
+			view = DebugView::kMotionVectors;
+		} else if (a_view == "provider_output") {
+			view = DebugView::kProviderOutput;
+		}
+		_debugView.store(view, std::memory_order_release);
+	}
+
+	FeatureDebugTexture Upscaling::GetRenderSubrectDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "RT4 is unavailable."
+		};
+		if (_debugView.load(std::memory_order_acquire) != DebugView::kRenderSubrect) {
+			return texture;
+		}
+
+		auto* view = cs::engine::GetRenderTargetSRV(kSceneColorTarget);
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!TryDescribeTextureView(view, desc)) {
+			return texture;
+		}
+
+		const auto activeExtent = GetActiveExtent(desc.Width, desc.Height);
+		texture.texture = view;
+		texture.width = desc.Width;
+		texture.height = desc.Height;
+		texture.caption = std::format(
+			"RT4 full {}x{}; active {}x{} ({:.1f}% x {:.1f}%), top-left; raw HDR, outside is undefined",
+			desc.Width,
+			desc.Height,
+			activeExtent.width,
+			activeExtent.height,
+			static_cast<double>(activeExtent.widthRatio) * 100.0,
+			static_cast<double>(activeExtent.heightRatio) * 100.0);
+		return texture;
+	}
+
+	FeatureDebugTexture Upscaling::GetProxyDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "RT4 render-resolution proxy is unavailable."
+		};
+		if (_debugView.load(std::memory_order_acquire) != DebugView::kProxy) {
+			return texture;
+		}
+
+		const auto proxy = dynamicResolution.GetProxyTexture(
+			static_cast<int>(kSceneColorTarget));
+		if (!proxy.view) {
+			return texture;
+		}
+
+		const auto* state = cs::engine::GetGraphicsState();
+		const auto activeExtent = GetActiveExtent(
+			state ? state->screenWidth : 0,
+			state ? state->screenHeight : 0);
+		texture.texture = proxy.view;
+		texture.width = proxy.width;
+		texture.height = proxy.height;
+		texture.caption = std::format(
+			"RT4 proxy actual {}x{}; expected {}x{}; raw HDR, no display transform",
+			proxy.width,
+			proxy.height,
+			activeExtent.width,
+			activeExtent.height);
+		return texture;
+	}
+
+	FeatureDebugTexture Upscaling::GetMotionVectorsDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "Motion-vector provider input is unavailable."
+		};
+		if (_debugView.load(std::memory_order_acquire) != DebugView::kMotionVectors) {
+			return texture;
+		}
+
+		const auto method = GetUpscaleMethod();
+		ID3D11ShaderResourceView* view = nullptr;
+		std::string_view source;
+		if (method == UpscaleMethod::kDLSS && motionVectorCopyTexture) {
+			view = motionVectorCopyTexture->srv.get();
+			source = "DLSS conditioned copy";
+		} else if (method == UpscaleMethod::kFSR) {
+			view = cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
+			source = "FSR RT29";
+		} else {
+			return texture;
+		}
+
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!TryDescribeTextureView(view, desc)) {
+			return texture;
+		}
+
+		const auto activeExtent = GetActiveExtent(desc.Width, desc.Height);
+		texture.texture = view;
+		texture.width = desc.Width;
+		texture.height = desc.Height;
+		texture.caption = std::format(
+			"{} {}x{}; active {}x{} top-left; raw signed RG, negative components clip",
+			source,
+			desc.Width,
+			desc.Height,
+			activeExtent.width,
+			activeExtent.height);
+		return texture;
+	}
+
+	FeatureDebugTexture Upscaling::GetProviderOutputDebugTexture() const
+	{
+		FeatureDebugTexture texture{
+			.unavailableText = "RT0 provider output is unavailable."
+		};
+		if (_debugView.load(std::memory_order_acquire) != DebugView::kProviderOutput) {
+			return texture;
+		}
+
+		auto* view = cs::engine::GetRenderTargetSRV(
+			cs::engine::RenderTarget::kFrameBuffer);
+		D3D11_TEXTURE2D_DESC desc{};
+		if (!TryDescribeTextureView(view, desc)) {
+			return texture;
+		}
+
+		const auto method = GetUpscaleMethod();
+		const bool published =
+			_srPublishedToFramebuffer.load(std::memory_order_acquire);
+		texture.texture = view;
+		texture.width = desc.Width;
+		texture.height = desc.Height;
+		texture.caption = std::format(
+			"RT0 {}x{}; runtime method {}; provider resolve to RT0: {}",
+			desc.Width,
+			desc.Height,
+			UpscaleMethodName(method),
+			published ? "yes" : "no");
+		return texture;
 	}
 
 	bool Upscaling::Configure(const toml::table& a_config, std::string& a_error)
@@ -2480,26 +2757,44 @@ namespace cs::features
 	void Upscaling::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		const auto& camera = fidelityFX.GetFrameGenerationCameraSnapshot();
+		const auto method = GetUpscaleMethod();
+		const auto [renderWidth, renderHeight] = GetRenderSize();
+		const auto* state = cs::engine::GetGraphicsState();
+		const auto* renderTargetManager = cs::engine::GetRenderTargetManager();
+		const std::uint32_t fullWidth = state ? state->screenWidth : 0;
+		const std::uint32_t fullHeight = state ? state->screenHeight : 0;
+		const auto activeExtent = GetActiveExtent(fullWidth, fullHeight);
 		const auto degrees = [](float a_radians) {
 			return static_cast<double>(a_radians) *
 				180.0 / std::numbers::pi_v<double>;
 		};
 		std::int64_t cameraFrameDelta = 0;
-		if (camera.valid) {
-			if (const auto* state = cs::engine::GetGraphicsState()) {
-				cameraFrameDelta =
-					static_cast<std::int64_t>(state->frameCount) -
-					static_cast<std::int64_t>(camera.frameCount);
-			}
+		if (camera.valid && state) {
+			cameraFrameDelta =
+				static_cast<std::int64_t>(state->frameCount) -
+				static_cast<std::int64_t>(camera.frameCount);
 		}
 
 		a_sink
 			.Field("enabled", settings.enabled)
 			.Field("resources_ready", _resourcesReady.load(std::memory_order_acquire))
 			.Field("hooks_installed", _hooksInstalled.load(std::memory_order_acquire))
-			.Field("method", static_cast<std::int64_t>(static_cast<int>(GetUpscaleMethod())))
+			.Field("method", static_cast<std::int64_t>(static_cast<int>(method)))
+			.Field("method_name", UpscaleMethodName(method))
+			.Field("quality_mode", static_cast<std::int64_t>(settings.qualityMode))
+			.Field("quality_mode_name", QualityModeName(settings.qualityMode))
 			.Field("dlss_available", streamline.featureDLSS)
 			.Field("upscaling_active", IsUpscalingActive())
+			.Field("dynamic_resolution_available", renderTargetManager != nullptr)
+			.Field("proxies_ready", dynamicResolution.HasProxies())
+			.Field("full_width", static_cast<std::int64_t>(fullWidth))
+			.Field("full_height", static_cast<std::int64_t>(fullHeight))
+			.Field("render_width", static_cast<std::int64_t>(renderWidth))
+			.Field("render_height", static_cast<std::int64_t>(renderHeight))
+			.Field("active_width", static_cast<std::int64_t>(activeExtent.width))
+			.Field("active_height", static_cast<std::int64_t>(activeExtent.height))
+			.Field("dynamic_width_ratio", static_cast<double>(activeExtent.widthRatio))
+			.Field("dynamic_height_ratio", static_cast<double>(activeExtent.heightRatio))
 			.Field("fg_proxy_active", IsFrameGenerationDx12PathActive())
 			.Field("fg_ready", dx12SwapChain.IsFrameGenerationReady())
 			.Field("fg_active", IsFrameGenerationActive())
@@ -2591,6 +2886,7 @@ namespace cs::features
 			"Render scale: %.0f%% | resources: %s",
 			static_cast<double>(resolutionScale.x) * 100.0,
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
+		Menu::Get().DrawDebugViewSelector(*this);
 	}
 
 	namespace
