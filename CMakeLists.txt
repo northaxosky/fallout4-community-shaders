@@ -417,6 +417,7 @@ set_tests_properties(AnnotationContract PROPERTIES LABELS "render;contract")
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(UpscalingPublicationTests
 		tests/UpscalingPublicationTests.cpp
+		features/Upscaling/src/ProviderOutputPreview.h
 		features/Upscaling/src/UpscalingPublication.h
 		src/Render/Annotation.cpp
 		src/Render/Annotation.h

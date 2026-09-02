@@ -26,6 +26,7 @@
 #include "Render/SwapChainHook.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
+#include "ProviderOutputPreview.h"
 #include "UpscalingAnchors.h"
 #include "UpscalingPublication.h"
 #include "Utils/CSUtil.h"
@@ -361,22 +362,15 @@ namespace cs::features
 				a_left.MiscFlags == a_right.MiscFlags;
 		}
 
-		bool TryGetFrameBufferTexture(
-			winrt::com_ptr<ID3D11Texture2D>& a_texture,
-			D3D11_TEXTURE2D_DESC& a_desc) noexcept
+		enum class FrameBufferTextureFailure : std::uint8_t
 		{
-			auto* rtv = cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kFrameBuffer);
-			if (!rtv) {
-				return false;
-			}
+			kNone,
+			kNoRTV,
+			kNoTexture
+		};
 
-			winrt::com_ptr<ID3D11Resource> resource;
-			rtv->GetResource(resource.put());
-			if (!resource || FAILED(resource->QueryInterface(IID_PPV_ARGS(a_texture.put())))) {
-				return false;
-			}
-
-			a_texture->GetDesc(&a_desc);
+		bool HasSDRUpscalingContract(const D3D11_TEXTURE2D_DESC& a_desc) noexcept
+		{
 			return a_desc.Width > 0 &&
 				a_desc.Height > 0 &&
 				a_desc.MipLevels == 1 &&
@@ -384,6 +378,35 @@ namespace cs::features
 				a_desc.Format == DXGI_FORMAT_R8G8B8A8_UNORM &&
 				a_desc.SampleDesc.Count == 1 &&
 				a_desc.SampleDesc.Quality == 0;
+		}
+
+		bool TryGetFrameBufferTexture(
+			winrt::com_ptr<ID3D11Texture2D>& a_texture,
+			D3D11_TEXTURE2D_DESC& a_desc,
+			FrameBufferTextureFailure* a_failure = nullptr) noexcept
+		{
+			if (a_failure) {
+				*a_failure = FrameBufferTextureFailure::kNone;
+			}
+			auto* rtv = cs::engine::GetRenderTargetRTV(cs::engine::RenderTarget::kFrameBuffer);
+			if (!rtv) {
+				if (a_failure) {
+					*a_failure = FrameBufferTextureFailure::kNoRTV;
+				}
+				return false;
+			}
+
+			winrt::com_ptr<ID3D11Resource> resource;
+			rtv->GetResource(resource.put());
+			if (!resource || FAILED(resource->QueryInterface(IID_PPV_ARGS(a_texture.put())))) {
+				if (a_failure) {
+					*a_failure = FrameBufferTextureFailure::kNoTexture;
+				}
+				return false;
+			}
+
+			a_texture->GetDesc(&a_desc);
+			return true;
 		}
 
 		bool MatchesTextureContract(
@@ -596,10 +619,15 @@ namespace cs::features
 
 	FeatureDebugTexture Upscaling::GetProviderOutputDebugTexture() const
 	{
+		const auto failure =
+			_providerOutputDebugFailure.load(std::memory_order_acquire);
 		FeatureDebugTexture texture{
-			.unavailableText = "RT0 provider output is unavailable."
+			.unavailableText = ProviderOutputDebugUnavailableText(failure)
 		};
 		if (_debugView.load(std::memory_order_acquire) != DebugView::kProviderOutput) {
+			return texture;
+		}
+		if (failure != ProviderOutputDebugFailure::kNone) {
 			return texture;
 		}
 
@@ -1055,7 +1083,8 @@ namespace cs::features
 
 		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
 		D3D11_TEXTURE2D_DESC frameBufferDesc{};
-		if (!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc)) {
+		if (!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
+			!HasSDRUpscalingContract(frameBufferDesc)) {
 			L->error("RT0 is unavailable or incompatible with the SDR upscaling contract");
 			return false;
 		}
@@ -1154,6 +1183,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
 		D3D11_TEXTURE2D_DESC frameBufferDesc{};
 		if (!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
+			!HasSDRUpscalingContract(frameBufferDesc) ||
 			!MatchesTextureContract(
 				upscalingTexture,
 				frameBufferDesc,
@@ -1436,30 +1466,167 @@ namespace cs::features
 
 	void Upscaling::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
+		RefreshProviderOutputDebugResources(a_device);
 		if (!a_device) {
 			FailLoad("Upscaling requires a D3D11 device");
 			return;
 		}
-		RefreshProviderOutputDebugResources(a_device);
+	}
+
+	std::string_view Upscaling::ProviderOutputDebugFailureName(
+		ProviderOutputDebugFailure a_failure) noexcept
+	{
+		switch (a_failure) {
+		case ProviderOutputDebugFailure::kNone:
+			return "none";
+		case ProviderOutputDebugFailure::kNotInitialized:
+			return "not_initialized";
+		case ProviderOutputDebugFailure::kNoDevice:
+			return "no_device";
+		case ProviderOutputDebugFailure::kNoRTV:
+			return "no_rt0_rtv";
+		case ProviderOutputDebugFailure::kNoTexture:
+			return "no_rt0_texture";
+		case ProviderOutputDebugFailure::kUnsupportedFormat:
+			return "unsupported_rt0_format";
+		case ProviderOutputDebugFailure::kTextureCreationFailed:
+			return "preview_texture_creation_failed";
+		case ProviderOutputDebugFailure::kSRVCreationFailed:
+			return "preview_srv_creation_failed";
+		}
+		return "unknown";
+	}
+
+	std::string_view Upscaling::ProviderOutputDebugUnavailableText(
+		ProviderOutputDebugFailure a_failure) noexcept
+	{
+		switch (a_failure) {
+		case ProviderOutputDebugFailure::kNoDevice:
+			return "RT0 provider output preview is unavailable: no D3D11 device.";
+		case ProviderOutputDebugFailure::kNoRTV:
+			return "RT0 provider output preview is unavailable: RT0 has no RTV.";
+		case ProviderOutputDebugFailure::kNoTexture:
+			return "RT0 provider output preview is unavailable: the RT0 RTV has no texture.";
+		case ProviderOutputDebugFailure::kUnsupportedFormat:
+			return "RT0 provider output preview is unavailable: RT0 has no safe SRV format.";
+		case ProviderOutputDebugFailure::kTextureCreationFailed:
+			return "RT0 provider output preview is unavailable: preview texture creation failed.";
+		case ProviderOutputDebugFailure::kSRVCreationFailed:
+			return "RT0 provider output preview is unavailable: preview SRV creation failed.";
+		case ProviderOutputDebugFailure::kNone:
+		case ProviderOutputDebugFailure::kNotInitialized:
+			return "RT0 provider output preview resources are not initialized.";
+		}
+		return "RT0 provider output preview is unavailable for an unknown reason.";
+	}
+
+	void Upscaling::SetProviderOutputDebugFailure(
+		ProviderOutputDebugFailure a_failure,
+		DXGI_FORMAT a_sourceFormat,
+		DXGI_FORMAT a_viewFormat,
+		HRESULT a_result)
+	{
+		_providerOutputDebugAllocated.store(false, std::memory_order_release);
+		_providerOutputDebugSRV = nullptr;
+		_providerOutputDebugTexture = nullptr;
+		_providerOutputSourceDesc = {};
+		_providerOutputDebugWidth.store(0, std::memory_order_relaxed);
+		_providerOutputDebugHeight.store(0, std::memory_order_relaxed);
+		_providerOutputDebugFailure.store(a_failure, std::memory_order_release);
+
+		switch (a_failure) {
+		case ProviderOutputDebugFailure::kNoDevice:
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"RT0 provider output preview allocation failed: no D3D11 device");
+			break;
+		case ProviderOutputDebugFailure::kNoRTV:
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"RT0 provider output preview allocation failed: RT0 has no RTV");
+			break;
+		case ProviderOutputDebugFailure::kNoTexture:
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"RT0 provider output preview allocation failed: the RT0 RTV has no texture resource");
+			break;
+		case ProviderOutputDebugFailure::kUnsupportedFormat:
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"RT0 provider output preview allocation failed: source format {} has no supported "
+				"typed SRV format (candidate {})",
+				static_cast<std::uint32_t>(a_sourceFormat),
+				static_cast<std::uint32_t>(a_viewFormat));
+			break;
+		case ProviderOutputDebugFailure::kTextureCreationFailed:
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"RT0 provider output preview texture creation failed for source format {}, "
+				"view format {} (HRESULT 0x{:08X})",
+				static_cast<std::uint32_t>(a_sourceFormat),
+				static_cast<std::uint32_t>(a_viewFormat),
+				static_cast<std::uint32_t>(a_result));
+			break;
+		case ProviderOutputDebugFailure::kSRVCreationFailed:
+			CS_LOG_ONCE(
+				L,
+				spdlog::level::warn,
+				"RT0 provider output preview SRV creation failed for source format {}, "
+				"view format {} (HRESULT 0x{:08X})",
+				static_cast<std::uint32_t>(a_sourceFormat),
+				static_cast<std::uint32_t>(a_viewFormat),
+				static_cast<std::uint32_t>(a_result));
+			break;
+		case ProviderOutputDebugFailure::kNone:
+		case ProviderOutputDebugFailure::kNotInitialized:
+			break;
+		}
 	}
 
 	void Upscaling::RefreshProviderOutputDebugResources(ID3D11Device* a_device)
 	{
-		auto* frameBuffer =
-			cs::engine::GetRenderTargetTexture(cs::engine::RenderTarget::kFrameBuffer);
-		auto* frameBufferSRV =
-			cs::engine::GetRenderTargetSRV(cs::engine::RenderTarget::kFrameBuffer);
-		if (!a_device || !frameBuffer || !frameBufferSRV) {
-			_providerOutputDebugSRV = nullptr;
-			_providerOutputDebugTexture = nullptr;
-			_providerOutputSourceDesc = {};
+		if (!a_device) {
+			SetProviderOutputDebugFailure(ProviderOutputDebugFailure::kNoDevice);
 			return;
 		}
 
+		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
 		D3D11_TEXTURE2D_DESC sourceDesc{};
-		frameBuffer->GetDesc(&sourceDesc);
+		FrameBufferTextureFailure textureFailure = FrameBufferTextureFailure::kNone;
+		if (!TryGetFrameBufferTexture(frameBuffer, sourceDesc, &textureFailure)) {
+			SetProviderOutputDebugFailure(
+				textureFailure == FrameBufferTextureFailure::kNoRTV
+					? ProviderOutputDebugFailure::kNoRTV
+					: ProviderOutputDebugFailure::kNoTexture);
+			return;
+		}
+
 		if (_providerOutputDebugTexture && _providerOutputDebugSRV &&
 			HaveSameTextureDescription(sourceDesc, _providerOutputSourceDesc)) {
+			_providerOutputDebugAllocated.store(true, std::memory_order_release);
+			_providerOutputDebugWidth.store(sourceDesc.Width, std::memory_order_relaxed);
+			_providerOutputDebugHeight.store(sourceDesc.Height, std::memory_order_relaxed);
+			_providerOutputDebugFailure.store(
+				ProviderOutputDebugFailure::kNone,
+				std::memory_order_release);
+			return;
+		}
+
+		const auto viewFormat = GetProviderOutputPreviewViewFormat(sourceDesc.Format);
+		UINT formatSupport = 0;
+		if (viewFormat == DXGI_FORMAT_UNKNOWN ||
+			FAILED(a_device->CheckFormatSupport(viewFormat, &formatSupport)) ||
+			(formatSupport & D3D11_FORMAT_SUPPORT_TEXTURE2D) == 0 ||
+			(formatSupport & D3D11_FORMAT_SUPPORT_SHADER_SAMPLE) == 0) {
+			SetProviderOutputDebugFailure(
+				ProviderOutputDebugFailure::kUnsupportedFormat,
+				sourceDesc.Format,
+				viewFormat);
 			return;
 		}
 
@@ -1470,18 +1637,54 @@ namespace cs::features
 		previewDesc.MiscFlags = 0;
 
 		D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-		frameBufferSRV->GetDesc(&srvDesc);
+		srvDesc.Format = viewFormat;
+		if (previewDesc.SampleDesc.Count > 1) {
+			if (previewDesc.ArraySize == 1) {
+				srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMS;
+			} else {
+				srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DMSARRAY;
+				srvDesc.Texture2DMSArray.FirstArraySlice = 0;
+				srvDesc.Texture2DMSArray.ArraySize = previewDesc.ArraySize;
+			}
+		} else if (previewDesc.ArraySize == 1) {
+			srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+			srvDesc.Texture2D.MostDetailedMip = 0;
+			srvDesc.Texture2D.MipLevels = previewDesc.MipLevels;
+		} else {
+			srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+			srvDesc.Texture2DArray.MostDetailedMip = 0;
+			srvDesc.Texture2DArray.MipLevels = previewDesc.MipLevels;
+			srvDesc.Texture2DArray.FirstArraySlice = 0;
+			srvDesc.Texture2DArray.ArraySize = previewDesc.ArraySize;
+		}
 
 		winrt::com_ptr<ID3D11Texture2D> preview;
 		winrt::com_ptr<ID3D11ShaderResourceView> previewSRV;
-		DX::ThrowIfFailed(a_device->CreateTexture2D(
+		const auto textureResult = a_device->CreateTexture2D(
 			&previewDesc,
 			nullptr,
-			preview.put()));
-		DX::ThrowIfFailed(a_device->CreateShaderResourceView(
+			preview.put());
+		if (FAILED(textureResult)) {
+			SetProviderOutputDebugFailure(
+				ProviderOutputDebugFailure::kTextureCreationFailed,
+				sourceDesc.Format,
+				viewFormat,
+				textureResult);
+			return;
+		}
+
+		const auto srvResult = a_device->CreateShaderResourceView(
 			preview.get(),
 			&srvDesc,
-			previewSRV.put()));
+			previewSRV.put());
+		if (FAILED(srvResult)) {
+			SetProviderOutputDebugFailure(
+				ProviderOutputDebugFailure::kSRVCreationFailed,
+				sourceDesc.Format,
+				viewFormat,
+				srvResult);
+			return;
+		}
 		cs::render::annotation::SetName(
 			preview.get(), "Upscaling/ProviderOutputDebugCopy.Texture");
 		cs::render::annotation::SetName(
@@ -1490,6 +1693,12 @@ namespace cs::features
 		_providerOutputDebugTexture = std::move(preview);
 		_providerOutputDebugSRV = std::move(previewSRV);
 		_providerOutputSourceDesc = sourceDesc;
+		_providerOutputDebugWidth.store(sourceDesc.Width, std::memory_order_relaxed);
+		_providerOutputDebugHeight.store(sourceDesc.Height, std::memory_order_relaxed);
+		_providerOutputDebugFailure.store(
+			ProviderOutputDebugFailure::kNone,
+			std::memory_order_release);
+		_providerOutputDebugAllocated.store(true, std::memory_order_release);
 	}
 
 	void Upscaling::CaptureProviderOutputDebugTexture()
@@ -1501,9 +1710,11 @@ namespace cs::features
 		}
 
 		auto* context = cs::engine::GetImmediateContext();
-		auto* frameBuffer =
-			cs::engine::GetRenderTargetTexture(cs::engine::RenderTarget::kFrameBuffer);
-		if (!HaveMatchingCopyContract(_providerOutputDebugTexture.get(), frameBuffer)) {
+		winrt::com_ptr<ID3D11Texture2D> frameBuffer;
+		D3D11_TEXTURE2D_DESC frameBufferDesc{};
+		if (!context ||
+			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
+			!HaveMatchingCopyContract(_providerOutputDebugTexture.get(), frameBuffer.get())) {
 			return;
 		}
 
@@ -1512,7 +1723,7 @@ namespace cs::features
 		cs::engine::CopyResourcePreservingOM(
 			context,
 			_providerOutputDebugTexture.get(),
-			frameBuffer);
+			frameBuffer.get());
 	}
 
 	void Upscaling::SetupResources()
@@ -2279,6 +2490,7 @@ namespace cs::features
 		D3D11_TEXTURE2D_DESC frameBufferDesc{};
 		if (!context || !upscalingTexture ||
 			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
+			!HasSDRUpscalingContract(frameBufferDesc) ||
 			!MatchesTextureContract(
 				upscalingTexture,
 				frameBufferDesc,
@@ -2908,6 +3120,13 @@ namespace cs::features
 			.Field("scale_published", _resolutionScalePublished)
 			.Field("provider_failures", static_cast<std::int64_t>(_providerFailures.load(std::memory_order_relaxed)))
 			.Field("sr_published_to_framebuffer", _srPublishedToFramebuffer.load(std::memory_order_acquire))
+			.Field("provider_preview_allocated", _providerOutputDebugAllocated.load(std::memory_order_acquire))
+			.Field("provider_preview_width", static_cast<std::int64_t>(_providerOutputDebugWidth.load(std::memory_order_relaxed)))
+			.Field("provider_preview_height", static_cast<std::int64_t>(_providerOutputDebugHeight.load(std::memory_order_relaxed)))
+			.Field(
+				"provider_preview_failure",
+				ProviderOutputDebugFailureName(
+					_providerOutputDebugFailure.load(std::memory_order_acquire)))
 			.Field("resolution_scale_x", static_cast<double>(resolutionScale.x))
 			.Field("resolution_scale_y", static_cast<double>(resolutionScale.y))
 			.Field("mip_bias", static_cast<double>(_mipBias.load(std::memory_order_relaxed)))

@@ -180,6 +180,26 @@ namespace cs::features
 		void SetupResources();
 		void RefreshProviderOutputDebugResources(ID3D11Device* a_device);
 		void CaptureProviderOutputDebugTexture();
+		enum class ProviderOutputDebugFailure : std::uint8_t
+		{
+			kNone,
+			kNotInitialized,
+			kNoDevice,
+			kNoRTV,
+			kNoTexture,
+			kUnsupportedFormat,
+			kTextureCreationFailed,
+			kSRVCreationFailed
+		};
+		void SetProviderOutputDebugFailure(
+			ProviderOutputDebugFailure a_failure,
+			DXGI_FORMAT a_sourceFormat = DXGI_FORMAT_UNKNOWN,
+			DXGI_FORMAT a_viewFormat = DXGI_FORMAT_UNKNOWN,
+			HRESULT a_result = S_OK);
+		[[nodiscard]] static std::string_view ProviderOutputDebugFailureName(
+			ProviderOutputDebugFailure a_failure) noexcept;
+		[[nodiscard]] static std::string_view ProviderOutputDebugUnavailableText(
+			ProviderOutputDebugFailure a_failure) noexcept;
 		void UpdateResolutionScale(RE::BSGraphics::State* a_state, UpscaleMethod a_method);
 		void PublishDynamicResolution();
 		FeatureDebugTexture GetRenderSubrectDebugTexture() const;
@@ -351,6 +371,12 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Texture2D> _providerOutputDebugTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _providerOutputDebugSRV;
 		D3D11_TEXTURE2D_DESC _providerOutputSourceDesc{};
+		std::atomic_bool _providerOutputDebugAllocated{ false };
+		std::atomic_uint32_t _providerOutputDebugWidth{ 0 };
+		std::atomic_uint32_t _providerOutputDebugHeight{ 0 };
+		std::atomic<ProviderOutputDebugFailure> _providerOutputDebugFailure{
+			ProviderOutputDebugFailure::kNotInitialized
+		};
 		std::atomic_uint32_t _frameGenerationDispatches{ 0 };
 		std::atomic_uint32_t _frameGenerationFailures{ 0 };
 		std::atomic_uint32_t _frameGenerationAlphaConditionedCaptures{ 0 };

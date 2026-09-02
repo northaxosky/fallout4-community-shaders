@@ -7,6 +7,7 @@
 #include <winrt/base.h>
 
 #include "UpscalingPublication.h"
+#include "ProviderOutputPreview.h"
 
 namespace
 {
@@ -122,6 +123,26 @@ int main()
 	context->OMSetRenderTargets(1, renderTargets, nullptr);
 
 	bool ok = true;
+	ok &= Check(
+		cs::features::GetProviderOutputPreviewViewFormat(
+			DXGI_FORMAT_R8G8B8A8_UNORM) == DXGI_FORMAT_R8G8B8A8_UNORM,
+		"typed RT0 format changed");
+	ok &= Check(
+		cs::features::GetProviderOutputPreviewViewFormat(
+			DXGI_FORMAT_R8G8B8A8_TYPELESS) == DXGI_FORMAT_R8G8B8A8_UNORM,
+		"RGBA8 typeless RT0 did not select an UNORM view");
+	ok &= Check(
+		cs::features::GetProviderOutputPreviewViewFormat(
+			DXGI_FORMAT_B8G8R8A8_TYPELESS) == DXGI_FORMAT_B8G8R8A8_UNORM,
+		"BGRA8 typeless RT0 did not select an UNORM view");
+	ok &= Check(
+		cs::features::GetProviderOutputPreviewViewFormat(
+			DXGI_FORMAT_R16G16B16A16_TYPELESS) == DXGI_FORMAT_R16G16B16A16_FLOAT,
+		"RGBA16 typeless RT0 did not select a FLOAT view");
+	ok &= Check(
+		cs::features::GetProviderOutputPreviewViewFormat(
+			DXGI_FORMAT_R8_TYPELESS) == DXGI_FORMAT_UNKNOWN,
+		"ambiguous typeless format was accepted");
 	ok &= Check(
 		!cs::features::PublishUpscalingOutput(
 			context.get(),
