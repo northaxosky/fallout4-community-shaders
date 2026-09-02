@@ -424,13 +424,14 @@ namespace cs::feature_config
 			return result;
 		}
 
-		constexpr std::array<std::string_view, 6> targetKeys{
+		constexpr std::array<std::string_view, 7> targetKeys{
 			"deferred_prepass",
 			"bssky",
 			"bswater",
 			"bslighting",
 			"bsdf_light",
-			"bsdf_composite"
+			"bsdf_composite",
+			"df_tiled_lighting"
 		};
 		for (const auto& [key, node] : *targets) {
 			(void)node;
@@ -456,7 +457,10 @@ namespace cs::feature_config
 			|| !readTarget("bswater", result.config.targets.bsWater)
 			|| !readTarget("bslighting", result.config.targets.bsLighting)
 			|| !readTarget("bsdf_light", result.config.targets.bsdfLight)
-			|| !readTarget("bsdf_composite", result.config.targets.bsdfComposite)) {
+			|| !readTarget("bsdf_composite", result.config.targets.bsdfComposite)
+			|| !readTarget(
+				"df_tiled_lighting",
+				result.config.targets.dfTiledLighting)) {
 			result.valid = false;
 			result.config = {};
 		}

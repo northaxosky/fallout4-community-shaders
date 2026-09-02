@@ -95,29 +95,40 @@ namespace cs::engine
 				"main",
 				"ps_5_0",
 				kNoDefines
+			},
+			{
+				ShaderInjectionTarget::kDfTiledLighting,
+				"df_tiled_lighting",
+				L"DFTiledLighting.hlsl",
+				"main",
+				"cs_5_0",
+				kNoDefines
 			}
 		} };
 
 		// Composite and VLS lack stock hash guards.
-		constexpr std::array<ShaderInjectionTarget, 6>
+		constexpr std::array<ShaderInjectionTarget, 7>
 			kBaselineOwnableTargets{
 				ShaderInjectionTarget::kDeferredPrepass,
 				ShaderInjectionTarget::kBsSky,
 				ShaderInjectionTarget::kBsWater,
 				ShaderInjectionTarget::kBsLighting,
 				ShaderInjectionTarget::kBsdfLight,
-				ShaderInjectionTarget::kBsdfComposite
+				ShaderInjectionTarget::kBsdfComposite,
+				ShaderInjectionTarget::kDfTiledLighting
 			};
 
 		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
 		{
 			static_assert(
-				static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+				static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
 			switch (a_stage) {
 			case ShaderStage::kVertex:
 				return "vertex";
 			case ShaderStage::kPixel:
 				return "pixel";
+			case ShaderStage::kCompute:
+				return "compute";
 			}
 			std::unreachable();
 		}
@@ -126,19 +137,22 @@ namespace cs::engine
 			ShaderStage a_stage) noexcept
 		{
 			static_assert(
-				static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+				static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
 			switch (a_stage) {
 			case ShaderStage::kVertex:
 				return "vs";
 			case ShaderStage::kPixel:
 				return "ps";
+			case ShaderStage::kCompute:
+				return "cs";
 			}
 			std::unreachable();
 		}
 
 		constexpr ShaderStageMask kValidShaderStages =
 			ShaderStageBit(ShaderStage::kVertex)
-			| ShaderStageBit(ShaderStage::kPixel);
+			| ShaderStageBit(ShaderStage::kPixel)
+			| ShaderStageBit(ShaderStage::kCompute);
 
 		std::vector<ShaderReplacementVariantRegistration>
 		MakeDefaultShaderReplacementVariants()
@@ -160,7 +174,25 @@ namespace cs::engine
 					Target::kVlsSliceScatter,
 					"default",
 					{},
-					{})
+					{}),
+				MakeDefaultVariantRegistration(
+					Target::kDfTiledLighting,
+					"dftiledlighting_key1",
+					{},
+					"5d781be54902ee7f84bbd2ce28b9742b753040c8",
+					ShaderInjectionDefines{
+						{ "DFTILEDLIGHTING_VARIANT", "1" }
+					},
+					ShaderStage::kCompute),
+				MakeDefaultVariantRegistration(
+					Target::kDfTiledLighting,
+					"dftiledlighting_key2",
+					{},
+					"66d385a9bb0b2ce6785e94fb64c1d28c7b65467c",
+					ShaderInjectionDefines{
+						{ "DFTILEDLIGHTING_VARIANT", "2" }
+					},
+					ShaderStage::kCompute)
 			};
 			AppendPrepassLodShaderReplacementVariants(variants);
 			AppendStaticFamilyShaderReplacementVariants(variants);

@@ -548,6 +548,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		src/Render/ShaderInjectionVariantFactory.h
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
+		src/Utils/CSSha256.cpp
+		src/Utils/CSSha256.h
 		src/Utils/ShaderCompile.cpp
 		src/Utils/ShaderCompile.h
 	)

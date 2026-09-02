@@ -8,12 +8,14 @@ namespace cs::engine
 		ShaderStage a_stage) noexcept
 	{
 		static_assert(
-			static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+			static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
 		switch (a_stage) {
 		case ShaderStage::kVertex:
 			return "vs_5_0";
 		case ShaderStage::kPixel:
 			return "ps_5_0";
+		case ShaderStage::kCompute:
+			return "cs_5_0";
 		}
 		std::unreachable();
 	}

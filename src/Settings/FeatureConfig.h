@@ -63,6 +63,7 @@ namespace cs::feature_config
 		bool bsLighting{ false };
 		bool bsdfLight{ false };
 		bool bsdfComposite{ false };
+		bool dfTiledLighting{ false };
 	};
 
 	struct ShaderOwnershipConfig

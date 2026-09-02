@@ -29,6 +29,7 @@ namespace cs::engine
 		kBsLighting,
 		kBsdfLight,
 		kBsdfComposite,
+		kDfTiledLighting,
 		kCount
 	};
 

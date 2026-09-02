@@ -379,18 +379,42 @@ namespace
 				.expectedStockSha1 = stock,
 				.replacementIndex = 2,
 				.stage = ShaderStage::kVertex
+			},
+			PixelShaderSwapVariantKey{
+				.variant = std::nullopt,
+				.expectedStockSha1 = stock,
+				.replacementIndex = 3,
+				.stage = ShaderStage::kCompute
 			}
 		};
 
-		const auto selection = SelectPixelShaderSwapVariant(
+		const auto pixelSelection = SelectPixelShaderSwapVariant(
+			variants,
+			std::nullopt,
+			stock,
+			ShaderStage::kPixel);
+		const auto vertexSelection = SelectPixelShaderSwapVariant(
 			variants,
 			std::nullopt,
 			stock,
 			ShaderStage::kVertex);
+		const auto computeSelection = SelectPixelShaderSwapVariant(
+			variants,
+			std::nullopt,
+			stock,
+			ShaderStage::kCompute);
 		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.routeIndex == 1
-				&& selection.replacementIndex == 2,
+			pixelSelection.kind == PixelShaderSwapSelectionKind::kSelected
+				&& pixelSelection.routeIndex == 0
+				&& pixelSelection.replacementIndex == 1
+				&& vertexSelection.kind
+					== PixelShaderSwapSelectionKind::kSelected
+				&& vertexSelection.routeIndex == 1
+				&& vertexSelection.replacementIndex == 2
+				&& computeSelection.kind
+					== PixelShaderSwapSelectionKind::kSelected
+				&& computeSelection.routeIndex == 2
+				&& computeSelection.replacementIndex == 3,
 			"hash fallback crossed shader stages");
 	}
 

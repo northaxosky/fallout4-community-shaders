@@ -672,7 +672,8 @@ namespace
 			ShaderInjectionTarget::kBsWater,
 			ShaderInjectionTarget::kBsLighting,
 			ShaderInjectionTarget::kBsdfLight,
-			ShaderInjectionTarget::kBsdfComposite
+			ShaderInjectionTarget::kBsdfComposite,
+			ShaderInjectionTarget::kDfTiledLighting
 		};
 
 		bool ok = true;
@@ -751,6 +752,7 @@ namespace
 		case ShaderInjectionTarget::kBsLighting:
 		case ShaderInjectionTarget::kBsdfLight:
 		case ShaderInjectionTarget::kBsdfComposite:
+		case ShaderInjectionTarget::kDfTiledLighting:
 			return true;
 		default:
 			return false;
@@ -763,6 +765,186 @@ namespace
 		std::string_view a_hash)
 	{
 		return std::ranges::find(a_hashes, a_hash) != a_hashes.end();
+	}
+
+	bool TestDfTiledLightingRegistrations(
+		std::span<const ShaderReplacementVariantRegistration> a_registrations)
+	{
+		struct RouteExpectation
+		{
+			std::string_view name;
+			std::string_view defineValue;
+			std::string_view stockSha1;
+		};
+		constexpr std::array routes{
+			RouteExpectation{
+				"dftiledlighting_key1",
+				"1",
+				"5d781be54902ee7f84bbd2ce28b9742b753040c8"
+			},
+			RouteExpectation{
+				"dftiledlighting_key2",
+				"2",
+				"66d385a9bb0b2ce6785e94fb64c1d28c7b65467c"
+			}
+		};
+		constexpr std::array<std::string_view, 17> excludedSectionHashes{
+			"37d99f6f2e3038384be006acac6409e56caa0fa3",
+			"e5f6cc91c8d37f7a074f09e533d09da0a529f720",
+			"c5bbd5334f10117beecc71004659ac2457bdf1a2",
+			"005a60f2c08f0b6d062df89562704309ab75b47a",
+			"2d0d73ebbe7be4fcd3ed48d9d83aeb2085ab6774",
+			"708263d3fe8929f4843f7bad832a37bcd90fd506",
+			"aeef47f418c68f0830585c095fdbe0f0380ee38e",
+			"e825bff216fe6595f1ad693d4e3dbf43d27c769d",
+			"f5eca4cb9c4e94ba3cf52f6a24c5927250167e55",
+			"2894c196d78fe984d0d8214329db8ccabad1de23",
+			"fa6a9707d06fbcf82283c26d20ccd3dc31105b35",
+			"9e2715cb5a7a60a08ddf91c7702822124f8b3cbe",
+			"25b0bdb2a48c15fbbeffaa0f3c808984715b6342",
+			"41b5c2fde01e8d62f8e6e30c996d9806656f8df1",
+			"831537d43ed8c03e1ac44b1bc61b908737fb77a6",
+			"66541194e24f3dabad0cc4f87ac42a65ef8b2a5d",
+			"caf797f4a4b3fef5459555ea773b640fa1ec348b"
+		};
+
+		const auto* target = GetShaderInjectionTarget(
+			ShaderInjectionTarget::kDfTiledLighting);
+		if (!Check(
+				target != nullptr,
+				"DFTiledLighting target metadata is missing")) {
+			return false;
+		}
+
+		bool ok = Check(
+			target->name == "df_tiled_lighting"
+				&& target->sourcePath == L"DFTiledLighting.hlsl"
+				&& target->entryPoint == "main"
+				&& target->profile == "cs_5_0"
+				&& target->baseDefines.empty(),
+			"DFTiledLighting target metadata changed");
+		std::array<bool, routes.size()> found{};
+		std::vector<PixelShaderSwapVariantKey> keys;
+		std::size_t registrationCount = 0;
+		std::size_t computeCount = 0;
+		std::size_t pixelCount = 0;
+		std::size_t vertexCount = 0;
+		for (const auto& registration : a_registrations) {
+			if (registration.targetId
+				!= ShaderInjectionTarget::kDfTiledLighting) {
+				continue;
+			}
+
+			++registrationCount;
+			if (registration.stage == ShaderStage::kCompute)
+				++computeCount;
+			else if (registration.stage == ShaderStage::kPixel)
+				++pixelCount;
+			else if (registration.stage == ShaderStage::kVertex)
+				++vertexCount;
+
+			const auto expected = std::ranges::find(
+				routes,
+				registration.name,
+				&RouteExpectation::name);
+			ok &= Check(
+				expected != routes.end(),
+				"unexpected DFTiledLighting registration");
+			if (expected == routes.end())
+				continue;
+
+			const auto routeIndex = static_cast<std::size_t>(
+				expected - routes.begin());
+			ok &= Check(
+				!found[routeIndex],
+				"duplicate DFTiledLighting registration");
+			found[routeIndex] = true;
+			const auto define = registration.compilation.defines.find(
+				"DFTILEDLIGHTING_VARIANT");
+			ok &= Check(
+				registration.variantKeys.empty()
+					&& registration.expectedStockSha1
+						== expected->stockSha1
+					&& registration.stage == ShaderStage::kCompute
+					&& registration.compilation.sourcePath
+						== L"DFTiledLighting.hlsl"
+					&& registration.compilation.entryPoint == "main"
+					&& registration.compilation.profile == "cs_5_0"
+					&& registration.compilation.defines.size() == 1
+					&& define != registration.compilation.defines.end()
+					&& define->second == expected->defineValue,
+				"DFTiledLighting compile vector changed");
+
+			cs::sha1::Sha1Result stockHash{};
+			const bool parsed = cs::sha1::Sha1FromHex(
+				registration.expectedStockSha1,
+				stockHash);
+			ok &= Check(parsed, "DFTiledLighting stock SHA1 is invalid");
+			if (parsed) {
+				keys.push_back({
+					.expectedStockSha1 = stockHash,
+					.routeGroup = static_cast<std::size_t>(target->id),
+					.replacementIndex = routeIndex,
+					.stage = registration.stage
+				});
+			}
+		}
+
+		ok &= Check(
+			registrationCount == routes.size()
+				&& computeCount == routes.size()
+				&& pixelCount == 0
+				&& vertexCount == 0
+				&& std::ranges::all_of(
+					found,
+					[](bool a_found) { return a_found; }),
+			"DFTiledLighting registration partition changed");
+		for (std::size_t index = 0; index < routes.size(); ++index) {
+			cs::sha1::Sha1Result stockHash{};
+			(void)cs::sha1::Sha1FromHex(
+				std::string(routes[index].stockSha1),
+				stockHash);
+			const auto selected = SelectPixelShaderSwapVariant(
+				keys,
+				std::nullopt,
+				stockHash,
+				ShaderStage::kCompute);
+			ok &= Check(
+				selected.kind == PixelShaderSwapSelectionKind::kSelected
+					&& selected.replacementIndex == index
+					&& selected.usedHashFallback,
+				"exact DFTiledLighting hash did not select its compute route");
+			for (const auto stage :
+				{ ShaderStage::kVertex, ShaderStage::kPixel }) {
+				ok &= Check(
+					SelectPixelShaderSwapVariant(
+						keys,
+						std::nullopt,
+						stockHash,
+						stage)
+							.kind
+						== PixelShaderSwapSelectionKind::kNoMatch,
+					"DFTiledLighting hash leaked outside the compute stage");
+			}
+		}
+		for (const auto excludedHash : excludedSectionHashes) {
+			cs::sha1::Sha1Result stockHash{};
+			(void)cs::sha1::Sha1FromHex(
+				std::string(excludedHash),
+				stockHash);
+			const auto selection = SelectPixelShaderSwapVariant(
+				keys,
+				std::nullopt,
+				stockHash,
+				ShaderStage::kCompute);
+			ok &= Check(
+				selection.kind == PixelShaderSwapSelectionKind::kNoMatch
+					&& !ShouldSubstitutePixelShader(
+						selection.kind,
+						true),
+				"excluded section-12 hash selected a DFTiledLighting route");
+		}
+		return ok;
 	}
 
 	bool TestPrepassLodRegistrations(
@@ -1463,14 +1645,22 @@ int main(int a_argc, char* a_argv[])
 	std::map<ShaderInjectionTarget, std::size_t, std::less<>> familyCounts;
 	std::map<ShaderInjectionTarget, std::size_t, std::less<>>
 		vertexFamilyCounts;
+	std::map<ShaderInjectionTarget, std::size_t, std::less<>>
+		computeFamilyCounts;
 	std::set<std::string, std::less<>> stockHashes;
+	ok &= TestDfTiledLightingRegistrations(staticFamilies);
 	for (const auto& registration : staticFamilies) {
-		const auto expectedProfile =
+		const std::string_view expectedProfile =
 			registration.stage == ShaderStage::kVertex
 			? "vs_5_0"
-			: "ps_5_0";
+			: registration.stage == ShaderStage::kCompute
+				? "cs_5_0"
+				: registration.stage == ShaderStage::kPixel
+					? "ps_5_0"
+					: "";
 		ok &= Check(
-			registration.compilation.profile == expectedProfile,
+			!expectedProfile.empty()
+				&& registration.compilation.profile == expectedProfile,
 			"registration profile does not match its shader stage");
 		ok &= Check(
 			std::ranges::all_of(
@@ -1500,10 +1690,15 @@ int main(int a_argc, char* a_argv[])
 		case ShaderInjectionTarget::kBsLighting:
 		case ShaderInjectionTarget::kBsdfLight:
 		case ShaderInjectionTarget::kBsdfComposite:
+		case ShaderInjectionTarget::kDfTiledLighting:
 			if (registration.stage == ShaderStage::kPixel)
 				++familyCounts[registration.targetId];
-			else
+			else if (registration.stage == ShaderStage::kVertex)
 				++vertexFamilyCounts[registration.targetId];
+			else if (registration.stage == ShaderStage::kCompute)
+				++computeFamilyCounts[registration.targetId];
+			else
+				ok &= Check(false, "registration has an invalid shader stage");
 			break;
 		default:
 			break;
@@ -1547,10 +1742,16 @@ int main(int a_argc, char* a_argv[])
 		vertexFamilyCounts[ShaderInjectionTarget::kBsdfComposite] == 4,
 		"BSDFComposite vertex representative count mismatch");
 	ok &= Check(
-		staticFamilies.size() == 365,
+		computeFamilyCounts[ShaderInjectionTarget::kDfTiledLighting] == 2
+			&& familyCounts[ShaderInjectionTarget::kDfTiledLighting] == 0
+			&& vertexFamilyCounts[
+				ShaderInjectionTarget::kDfTiledLighting] == 0,
+		"DFTiledLighting compute registration count mismatch");
+	ok &= Check(
+		staticFamilies.size() == 367,
 		"default shader replacement variant count mismatch");
 	ok &= Check(
-		stockHashes.size() == 363,
+		stockHashes.size() == 365,
 		"default shader replacement variant non-empty stock hash count mismatch");
 
 	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 6>

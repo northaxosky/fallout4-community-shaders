@@ -43,6 +43,12 @@ namespace cs::engine
 			SIZE_T,
 			ID3D11ClassLinkage*,
 			ID3D11VertexShader**);
+		using CreateComputeShaderFunction = HRESULT (STDMETHODCALLTYPE *)(
+			ID3D11Device*,
+			const void*,
+			SIZE_T,
+			ID3D11ClassLinkage*,
+			ID3D11ComputeShader**);
 
 		std::optional<ShaderVariantKeyView> ResolveRuntimeVariant(
 			ShaderStage a_stage)
@@ -164,6 +170,49 @@ namespace cs::engine
 			static inline CreateVertexShaderFunction func = nullptr;
 		};
 
+		struct CreateComputeShaderHook
+		{
+			static HRESULT STDMETHODCALLTYPE CallOriginal(
+				ID3D11Device* a_this,
+				const void* a_bytecode,
+				SIZE_T a_bytecodeLength,
+				ID3D11ClassLinkage* a_linkage,
+				ID3D11DeviceChild** a_out)
+			{
+				if (!func)
+					return E_POINTER;
+				return func(
+					a_this,
+					a_bytecode,
+					a_bytecodeLength,
+					a_linkage,
+					reinterpret_cast<ID3D11ComputeShader**>(a_out));
+			}
+
+			static HRESULT STDMETHODCALLTYPE thunk(
+				ID3D11Device* a_this,
+				const void* a_bytecode,
+				SIZE_T a_bytecodeLength,
+				ID3D11ClassLinkage* a_linkage,
+				ID3D11ComputeShader** a_out)
+			{
+				const auto resolvers = g_resolvers.load(std::memory_order_acquire);
+				return ExecuteShaderSwapPipeline(
+					&CallOriginal,
+					GetResolverSpan(resolvers),
+					ResolveRuntimeVariant(ShaderStage::kCompute),
+					PixelShaderBrokerBypassActive(),
+					ShaderStage::kCompute,
+					a_this,
+					a_bytecode,
+					a_bytecodeLength,
+					a_linkage,
+					reinterpret_cast<ID3D11DeviceChild**>(a_out));
+			}
+
+			static inline CreateComputeShaderFunction func = nullptr;
+		};
+
 		void InstallHookIfReady()
 		{
 			if (!g_device)
@@ -192,6 +241,18 @@ namespace cs::engine
 					L->info("Device-vtable hook installed (slot 12).");
 				} else {
 					L->error("Device-vtable hook slot 12 has no original.");
+				}
+			}
+
+			const auto computeBit = ShaderStageBit(ShaderStage::kCompute);
+			if ((g_installRequestedStages & computeBit) != 0
+				&& (installedStages & computeBit) == 0) {
+				stl::detour_vfunc<18, CreateComputeShaderHook>(g_device);
+				if (CreateComputeShaderHook::func) {
+					installedStages |= computeBit;
+					L->info("Device-vtable hook installed (slot 18).");
+				} else {
+					L->error("Device-vtable hook slot 18 has no original.");
 				}
 			}
 			g_hookInstalledStages.store(

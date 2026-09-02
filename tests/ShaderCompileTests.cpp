@@ -3,6 +3,8 @@
 #include "Render/ShaderInjectionDefines.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
+#include "Utils/CSSha1.h"
+#include "Utils/CSSha256.h"
 #include "Utils/ShaderCompile.h"
 #include "generated/VertexShaderCompilePermutations.h"
 
@@ -116,6 +118,13 @@ namespace
 		bool                   expectInverseSquareVariant = false;
 	};
 
+	struct StrippedShaderIdentityExpectation
+	{
+		std::size_t byteLength = 0;
+		std::string_view sha1;
+		std::string_view sha256;
+	};
+
 	struct ShaderCompileJob
 	{
 		std::filesystem::path path;
@@ -133,6 +142,8 @@ namespace
 		std::vector<UINT>     forbiddenSamplerSlots;
 		std::vector<BYTE>     expectedOutputMasks;
 		std::optional<FeatureOffIdentityExpectation> featureOffIdentity;
+		std::optional<StrippedShaderIdentityExpectation>
+			strippedIdentity;
 	};
 
 	struct ShaderCompileResult
@@ -516,6 +527,43 @@ namespace
 		return {};
 	}
 
+	std::string ValidateStrippedShaderIdentity(
+		ID3DBlob* a_blob,
+		const StrippedShaderIdentityExpectation& a_expected)
+	{
+		Microsoft::WRL::ComPtr<ID3DBlob> stripped;
+		if (FAILED(D3DStripShader(
+				a_blob->GetBufferPointer(),
+				a_blob->GetBufferSize(),
+				D3DCOMPILER_STRIP_REFLECTION_DATA,
+				stripped.GetAddressOf()))
+			|| !stripped) {
+			return "D3DStripShader failed for the exact DXBC identity witness";
+		}
+
+		const auto byteLength =
+			static_cast<std::size_t>(stripped->GetBufferSize());
+		cs::sha1::Sha1InitOnce();
+		const auto sha1 = cs::sha1::Sha1ToHex(cs::sha1::Sha1Compute(
+			stripped->GetBufferPointer(),
+			byteLength));
+		const auto sha256 = cs::sha256::Sha256ToHex(
+			cs::sha256::Sha256Compute(
+				stripped->GetBufferPointer(),
+				byteLength));
+		if (byteLength != a_expected.byteLength
+			|| sha1 != a_expected.sha1
+			|| sha256 != a_expected.sha256) {
+			return "stripped DXBC identity mismatch: expected "
+				+ std::to_string(a_expected.byteLength) + " bytes, sha1="
+				+ std::string(a_expected.sha1) + ", sha256="
+				+ std::string(a_expected.sha256) + "; got "
+				+ std::to_string(byteLength) + " bytes, sha1=" + sha1
+				+ ", sha256=" + sha256;
+		}
+		return {};
+	}
+
 	ShaderCompileResult Compile(const ShaderCompileJob& a_job)
 	{
 		if (!a_job.preparationError.empty())
@@ -563,6 +611,14 @@ namespace
 			if (auto validation = ValidateOutputSignature(
 					blob.Get(),
 					a_job.expectedOutputMasks);
+				!validation.empty()) {
+				return { std::move(validation) };
+			}
+		}
+		if (a_job.strippedIdentity) {
+			if (auto validation = ValidateStrippedShaderIdentity(
+					blob.Get(),
+					*a_job.strippedIdentity);
 				!validation.empty()) {
 				return { std::move(validation) };
 			}
@@ -997,6 +1053,62 @@ namespace
 		std::vector<UINT> forbiddenSamplers;
 	};
 
+	struct DfTiledLightingIdentity
+	{
+		std::string_view defineValue;
+		StrippedShaderIdentityExpectation expected;
+	};
+
+	constexpr std::array kDfTiledLightingIdentities{
+		DfTiledLightingIdentity{
+			"1",
+			{
+				6444,
+				"5d781be54902ee7f84bbd2ce28b9742b753040c8",
+				"cde034ec9c63dde6bdde3838876fc8abb05baa0d9b3caa584d3ce072b3b8a12d"
+			}
+		},
+		DfTiledLightingIdentity{
+			"2",
+			{
+				7144,
+				"66d385a9bb0b2ce6785e94fb64c1d28c7b65467c",
+				"652961dfec581d3a0c0d90f9e573307621be9a9bc20980ed221416cf9ccf8343"
+			}
+		}
+	};
+
+	void AttachDfTiledLightingIdentity(
+		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
+		ShaderCompileJob& a_job)
+	{
+		if (a_registration.targetId
+			!= cs::engine::ShaderInjectionTarget::kDfTiledLighting) {
+			return;
+		}
+
+		const auto define = a_registration.compilation.defines.find(
+			"DFTILEDLIGHTING_VARIANT");
+		const auto expected = define
+			!= a_registration.compilation.defines.end()
+			? std::ranges::find(
+				kDfTiledLightingIdentities,
+				define->second,
+				&DfTiledLightingIdentity::defineValue)
+			: kDfTiledLightingIdentities.end();
+		if (expected == kDfTiledLightingIdentities.end()) {
+			a_job.preparationError =
+				"Unknown DFTILEDLIGHTING_VARIANT compile vector";
+			return;
+		}
+		if (a_registration.expectedStockSha1 != expected->expected.sha1) {
+			a_job.preparationError =
+				"DFTiledLighting stock hash does not match its compile vector";
+			return;
+		}
+		a_job.strippedIdentity = expected->expected;
+	}
+
 	void AddRegistration(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root,
@@ -1068,6 +1180,7 @@ namespace
 		job.requiredSamplerSlots = std::move(a_slots.requiredSamplers);
 		job.forbiddenSamplerSlots = std::move(a_slots.forbiddenSamplers);
 		job.featureOffIdentity = std::move(a_featureOffIdentity);
+		AttachDfTiledLightingIdentity(a_registration, job);
 	}
 
 	struct LightingCounts
@@ -1091,6 +1204,7 @@ namespace
 		std::size_t wetnessCompositeNeutralRows = 0;
 		std::size_t wetnessCompositeVertexRows = 0;
 		std::size_t inverseSquareRows = 0;
+		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareInertRows = 0;
 	};
 
@@ -1314,7 +1428,12 @@ namespace
 		}
 		std::set<std::string> uniqueRegistrationInputs;
 		std::size_t lodLandscapeObjectOverlapCases = 0;
+		std::size_t dfTiledLightingRows = 0;
 		for (const auto& registration : registrations) {
+			if (registration.targetId
+				== cs::engine::ShaderInjectionTarget::kDfTiledLighting) {
+				++dfTiledLightingRows;
+			}
 			std::optional<FeatureOffIdentityExpectation> identity;
 			const bool directRow = registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight;
@@ -1391,6 +1510,15 @@ namespace
 					+ " unique inputs, found "
 					+ std::to_string(
 						uniqueRegistrationInputs.size()));
+		}
+		if (dfTiledLightingRows != kDfTiledLightingIdentities.size()) {
+			AddPreparationFailure(
+				a_jobs,
+				"DFTiledLighting registration coverage",
+				"Expected "
+					+ std::to_string(kDfTiledLightingIdentities.size())
+					+ " final-kernel routes, found "
+					+ std::to_string(dfTiledLightingRows));
 		}
 
 		const std::array<ShaderCase, 3> featureCompositionCases{ {
@@ -2079,6 +2207,7 @@ namespace
 			.wetnessCompositeNeutralRows = wetnessCompositeNeutralRows,
 			.wetnessCompositeVertexRows = wetnessCompositeVertexRows,
 			.inverseSquareRows = inverseSquareRows,
+			.dfTiledLightingRows = dfTiledLightingRows,
 			.inverseSquareInertRows = inverseSquareInertRows
 		};
 	}
@@ -2237,6 +2366,9 @@ int main(int argc, char** argv)
 		"ShaderCompile checked inverse-square on %zu punctual and %zu inert kBsdfLight rows\n",
 		lightingCounts.inverseSquareRows,
 		lightingCounts.inverseSquareInertRows);
+	std::printf(
+		"ShaderCompile verified %zu byte-identical DFTiledLighting compute routes\n",
+		lightingCounts.dfTiledLightingRows);
 	std::printf(
 		"ShaderCompile checked %zu TerrainShadows permutations\n",
 		terrainShadowsCount);

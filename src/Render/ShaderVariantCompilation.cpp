@@ -83,13 +83,15 @@ namespace cs::engine
 				winrt::com_ptr<ID3D11DeviceChild> shader;
 				HRESULT createResult = E_FAIL;
 				const char* createStage = nullptr;
+				const char* shaderSuffix = nullptr;
 				static_assert(
-					static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+					static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
 				{
 					ScopedPixelShaderBrokerBypass bypassBroker;
 					switch (a_request.stage) {
 					case ShaderStage::kVertex: {
 						createStage = "Vertex";
+						shaderSuffix = ".VS";
 						winrt::com_ptr<ID3D11VertexShader> vertexShader;
 						createResult = a_request.device->CreateVertexShader(
 							blob->GetBufferPointer(),
@@ -104,6 +106,7 @@ namespace cs::engine
 					}
 					case ShaderStage::kPixel: {
 						createStage = "Pixel";
+						shaderSuffix = ".PS";
 						winrt::com_ptr<ID3D11PixelShader> pixelShader;
 						createResult = a_request.device->CreatePixelShader(
 							blob->GetBufferPointer(),
@@ -114,6 +117,21 @@ namespace cs::engine
 							pixelShader.get(), "Render/Injected/PixelShader.PS");
 						if (pixelShader)
 							shader.attach(pixelShader.detach());
+						break;
+					}
+					case ShaderStage::kCompute: {
+						createStage = "Compute";
+						shaderSuffix = ".CS";
+						winrt::com_ptr<ID3D11ComputeShader> computeShader;
+						createResult = a_request.device->CreateComputeShader(
+							blob->GetBufferPointer(),
+							blob->GetBufferSize(),
+							nullptr,
+							computeShader.put());
+						render::annotation::SetName(
+							computeShader.get(), "Render/Injected/ComputeShader.CS");
+						if (computeShader)
+							shader.attach(computeShader.detach());
 						break;
 					}
 					}
@@ -131,7 +149,7 @@ namespace cs::engine
 				}
 				const std::string shaderName =
 					"Render/Injected/" + a_request.sourcePath.stem().string()
-					+ (a_request.stage == ShaderStage::kVertex ? ".VS" : ".PS");
+					+ shaderSuffix;
 				render::annotation::SetName(shader.get(), shaderName);
 
 				result.state = ShaderVariantCompilationState::kReady;

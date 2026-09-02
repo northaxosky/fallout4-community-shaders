@@ -153,7 +153,8 @@ namespace
 			"bswater = true\n"
 			"bslighting = true\n"
 			"bsdf_light = true\n"
-			"bsdf_composite = true\n"));
+			"bsdf_composite = true\n"
+			"df_tiled_lighting = true\n"));
 		CHECK(disabled.present);
 		CHECK(disabled.valid);
 		CHECK(!disabled.config.enabled);
@@ -163,6 +164,7 @@ namespace
 		CHECK(disabled.config.targets.bsLighting);
 		CHECK(disabled.config.targets.bsdfLight);
 		CHECK(disabled.config.targets.bsdfComposite);
+		CHECK(disabled.config.targets.dfTiledLighting);
 
 		const auto optedOut = ParseShaderOwnership(Parse(
 			"[shader_ownership]\n"
@@ -173,12 +175,14 @@ namespace
 			"bswater = true\n"
 			"bslighting = true\n"
 			"bsdf_light = false\n"
-			"bsdf_composite = true\n"));
+			"bsdf_composite = true\n"
+			"df_tiled_lighting = false\n"));
 		CHECK(optedOut.present);
 		CHECK(optedOut.valid);
 		CHECK(optedOut.config.enabled);
 		CHECK(!optedOut.config.targets.bsdfLight);
 		CHECK(!optedOut.config.targets.bsSky);
+		CHECK(!optedOut.config.targets.dfTiledLighting);
 
 		const auto missing = ParseShaderOwnership(Parse(""));
 		CHECK(!missing.present);
@@ -200,7 +204,8 @@ namespace
 			"bssky = true\n"
 			"bswater = true\n"
 			"bslighting = true\n"
-			"bsdf_light = true\n"));
+			"bsdf_light = true\n"
+			"df_tiled_lighting = true\n"));
 		CHECK(missingTarget.present);
 		CHECK(!missingTarget.valid);
 		CHECK(!missingTarget.config.enabled);
@@ -215,6 +220,7 @@ namespace
 			"bslighting = true\n"
 			"bsdf_light = true\n"
 			"bsdf_composite = true\n"
+			"df_tiled_lighting = true\n"
 			"deferred_composite = true\n"));
 		CHECK(unsupportedTarget.present);
 		CHECK(!unsupportedTarget.valid);
@@ -544,6 +550,7 @@ namespace
 		CHECK(ownership.config.targets.bsLighting);
 		CHECK(ownership.config.targets.bsdfLight);
 		CHECK(ownership.config.targets.bsdfComposite);
+		CHECK(ownership.config.targets.dfTiledLighting);
 
 		const auto* wetnessSettings =
 			(*features)["WetnessEffects"]["settings"].as_table();

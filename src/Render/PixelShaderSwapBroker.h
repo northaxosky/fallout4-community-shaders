@@ -22,6 +22,7 @@ namespace cs::engine
 	{
 		kVertex,
 		kPixel,
+		kCompute,
 		kCount
 	};
 

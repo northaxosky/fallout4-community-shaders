@@ -53,10 +53,16 @@ namespace cs::engine
 
 		shader_cache::ShaderCacheStage ToCacheStage(ShaderStage a_stage) noexcept
 		{
-			static_assert(static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
-			return a_stage == ShaderStage::kVertex
-				? shader_cache::ShaderCacheStage::kVertex
-				: shader_cache::ShaderCacheStage::kPixel;
+			static_assert(static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
+			switch (a_stage) {
+			case ShaderStage::kVertex:
+				return shader_cache::ShaderCacheStage::kVertex;
+			case ShaderStage::kPixel:
+				return shader_cache::ShaderCacheStage::kPixel;
+			case ShaderStage::kCompute:
+				return shader_cache::ShaderCacheStage::kCompute;
+			}
+			std::unreachable();
 		}
 
 		shader_cache::ShaderRecipe BuildRecipe(
@@ -83,7 +89,7 @@ namespace cs::engine
 			a_shader = nullptr;
 			HRESULT createResult = E_FAIL;
 			const char* createStage = "Unknown";
-			static_assert(static_cast<std::uint8_t>(ShaderStage::kCount) == 2);
+			static_assert(static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
 			{
 				ScopedPixelShaderBrokerBypass bypassBroker;
 				switch (a_stage) {
@@ -115,8 +121,20 @@ namespace cs::engine
 						a_shader.attach(pixelShader.detach());
 					break;
 				}
-				default:
+				case ShaderStage::kCompute: {
+					createStage = "Compute";
+					winrt::com_ptr<ID3D11ComputeShader> computeShader;
+					createResult = a_device.CreateComputeShader(
+						a_bytecode,
+						a_bytecodeLength,
+						nullptr,
+						computeShader.put());
+					render::annotation::SetName(
+						computeShader.get(), "Render/Injected/ComputeShader.CS");
+					if (computeShader)
+						a_shader.attach(computeShader.detach());
 					break;
+				}
 				}
 			}
 
@@ -203,7 +221,11 @@ namespace cs::engine
 				}
 				const std::string shaderName =
 					"Render/Injected/" + a_request.sourcePath.stem().string()
-					+ (a_request.stage == ShaderStage::kVertex ? ".VS" : ".PS");
+					+ (a_request.stage == ShaderStage::kVertex
+						? ".VS"
+						: a_request.stage == ShaderStage::kCompute
+							? ".CS"
+							: ".PS");
 				render::annotation::SetName(shader.get(), shaderName);
 
 				result.state = ShaderVariantCompilationState::kReady;

@@ -117,7 +117,9 @@ namespace
 			recipe.profile    = request->profile;
 			recipe.stage      = variant.stage == cs::engine::ShaderStage::kVertex
 				? cs::shader_cache::ShaderCacheStage::kVertex
-				: cs::shader_cache::ShaderCacheStage::kPixel;
+				: variant.stage == cs::engine::ShaderStage::kCompute
+					? cs::shader_cache::ShaderCacheStage::kCompute
+					: cs::shader_cache::ShaderCacheStage::kPixel;
 			registrations.push_back({ variant.name, std::move(recipe) });
 		}
 		return registrations;

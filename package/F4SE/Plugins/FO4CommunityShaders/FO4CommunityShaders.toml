@@ -19,6 +19,7 @@ bswater = true
 bslighting = true
 bsdf_light = true
 bsdf_composite = true
+df_tiled_lighting = true
 # Deferred composite lacks native proof; it and VLS lack selectable stock SHA-1 guards.
 
 [menu]

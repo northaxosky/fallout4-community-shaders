@@ -138,12 +138,14 @@ namespace cs
 		bool bsLighting = ownership.config.targets.bsLighting;
 		bool bsdfLight = ownership.config.targets.bsdfLight;
 		bool bsdfComposite = ownership.config.targets.bsdfComposite;
+		bool dfTiledLighting = ownership.config.targets.dfTiledLighting;
 		ImGui::Checkbox("Deferred prepass", &deferredPrepass);
 		ImGui::Checkbox("BSSky", &bsSky);
 		ImGui::Checkbox("BSWater", &bsWater);
 		ImGui::Checkbox("BSLighting", &bsLighting);
 		ImGui::Checkbox("BSDF light", &bsdfLight);
 		ImGui::Checkbox("BSDF composite", &bsdfComposite);
+		ImGui::Checkbox("DFTiledLighting", &dfTiledLighting);
 		ImGui::EndDisabled();
 
 		if (auto tooltip = ui::HoverTooltipWrapper())

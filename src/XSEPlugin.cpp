@@ -37,6 +37,9 @@ namespace
 		applied &= cs::engine::SetBaselineShaderOwnership(
 			ShaderInjectionTarget::kBsLighting,
 			a_config.enabled && a_config.targets.bsLighting);
+		applied &= cs::engine::SetBaselineShaderOwnership(
+			ShaderInjectionTarget::kDfTiledLighting,
+			a_config.enabled && a_config.targets.dfTiledLighting);
 		return applied;
 	}
 }
