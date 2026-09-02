@@ -4,8 +4,8 @@
     Analyze a RenderDoc capture without opening the RenderDoc UI.
 
 .DESCRIPTION
-    Resolves a Fallout 4 capture, writes a JSON job, and runs the Python 3.6
-    analyzer embedded in qrenderdoc.exe. Results and image artifacts are written
+    Resolves a Fallout 4 capture, writes a JSON job, and runs the bundled Python
+    analyzer in qrenderdoc.exe. Results and image artifacts are written
     outside the repository.
 
 .PARAMETER Capture
