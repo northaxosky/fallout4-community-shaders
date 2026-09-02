@@ -166,7 +166,12 @@ namespace cs::engine
 		kMainCopy = 3,
 		kMainCopyCopy = 4,
 
-		kShadowMap = 8,
+		// DS5 is the configurable sun shadow depth, sized from iShadowMapResolution:Display.
+		kShadowMap = 5,
+
+		// DS8 is the fixed 512x512 precipitation occlusion depth, pair-mate of RT86.
+		kPrecipitationOcclusion = 8,
+
 		kGodraysDepth = 10,
 
 		kCount = 13
