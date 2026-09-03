@@ -1624,9 +1624,8 @@ namespace
 				"ps_5_0"
 			}
 		} };
-		const std::array<ShaderCase, 2> explicitSourceCases{ {
-			{ "BSDFPrePass.hlsl", {}, "ps_5_0" },
-			{ "VolumetricLighting.hlsl", {}, "ps_5_0" }
+		const std::array<ShaderCase, 1> explicitSourceCases{ {
+			{ "BSDFPrePass.hlsl", {}, "ps_5_0" }
 		} };
 		std::array<ShaderCase, 8> terrainSssDebugCases;
 		std::array<ShaderCase, 8> wetnessSssDebugCases;

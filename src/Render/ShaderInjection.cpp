@@ -40,14 +40,6 @@ namespace cs::engine
 				kNoDefines
 			},
 			{
-				ShaderInjectionTarget::kVlsSliceScatter,
-				"vls_slice_scatter",
-				L"VolumetricLighting.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
 				ShaderInjectionTarget::kBsSky,
 				"bssky",
 				L"BSSkyShader.hlsl",
@@ -97,7 +89,7 @@ namespace cs::engine
 			}
 		} };
 
-		// VLS lacks stock hash guards.
+		// Every target has stock hash guards and is baseline-ownable.
 		constexpr std::array<ShaderInjectionTarget, 7>
 			kBaselineOwnableTargets{
 				ShaderInjectionTarget::kDeferredPrepass,
@@ -156,11 +148,6 @@ namespace cs::engine
 					"default",
 					{},
 					"c493970c042ccd90363c57596ff53f6fdd22ce5f"),
-				MakeDefaultVariantRegistration(
-					Target::kVlsSliceScatter,
-					"default",
-					{},
-					{}),
 				MakeDefaultVariantRegistration(
 					Target::kDfTiledLighting,
 					"dftiledlighting_key1",

@@ -830,9 +830,9 @@ namespace
 			"sentinel target was accepted for baseline ownership");
 		ok &= Check(
 			!SetBaselineShaderOwnership(
-				ShaderInjectionTarget::kVlsSliceScatter,
+				static_cast<ShaderInjectionTarget>(0xFF),
 				true),
-			"VLS slice scatter was accepted for baseline ownership");
+			"out-of-range target was accepted for baseline ownership");
 
 		FreezeAndCompileShaderInjections(nullptr);
 		for (const auto target : ownableTargets) {
@@ -1923,7 +1923,7 @@ int main(int a_argc, char* a_argv[])
 				ShaderInjectionTarget::kDfTiledLighting] == 0,
 		"DFTiledLighting compute registration count mismatch");
 	ok &= Check(
-		staticFamilies.size() == 366,
+		staticFamilies.size() == 365,
 		"default shader replacement variant count mismatch");
 	ok &= Check(
 		stockHashes.size() == 365,
