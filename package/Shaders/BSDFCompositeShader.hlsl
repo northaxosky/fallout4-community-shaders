@@ -461,7 +461,7 @@ cbuffer PerFrame_CB12 : register(b12)
     float4 FogDistanceRamp;
     float4 FogNearLowColorAndPower;
     float4 FogNearHighColorAndClamp;
-    float4 FogFarLowColorAndDensity;
+    float4 FogFarLowColorAndHighDensityScale;
     float4 FogFarHighColor;
     float4 FogHeightRamp;
 };
@@ -912,11 +912,11 @@ PS_OUTPUT main(PS_INPUT input)
     float unfoggedWeight = 1.0 - fogBlend;
     float fogBlendWeight = mad(
         fogBlend,
-        FogFarLowColorAndDensity.w,
+        FogFarLowColorAndHighDensityScale.w,
         unfoggedWeight);
     float3 fogColorLow = lerp(
         FogNearLowColorAndPower.xyz,
-        FogFarLowColorAndDensity.xyz,
+        FogFarLowColorAndHighDensityScale.xyz,
         fogIntensity);
     float3 fogColorHigh = lerp(
         FogNearHighColorAndClamp.xyz,
