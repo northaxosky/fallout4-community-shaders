@@ -55,15 +55,11 @@ namespace cs::render
 			std::array<winrt::com_ptr<ID3D11Buffer>, 3>
 				savedComputeBuffers;
 			winrt::com_ptr<ID3D11ShaderResourceView> savedSkylightingSRV;
-			winrt::com_ptr<ID3D11SamplerState> savedSkylightingSampler;
 			winrt::com_ptr<ID3D11ShaderResourceView>
 				savedComputeSkylightingSRV;
-			winrt::com_ptr<ID3D11SamplerState>
-				savedComputeSkylightingSampler;
 			std::mutex                   skylightingMutex;
 			SkylightingSharedData        skylightingData{};
 			ID3D11ShaderResourceView*    skylightingSRV = nullptr;
-			ID3D11SamplerState*          skylightingSampler = nullptr;
 			std::uint64_t                skylightingGeneration = 0;
 			std::uint64_t                skylightingWrittenGeneration = 0;
 			std::uint64_t                skylightingWrittenCameraSequence = 0;
@@ -82,7 +78,6 @@ namespace cs::render
 			std::atomic_uint64_t         skylightingRejectedNoBuffer{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoData{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoSRV{ 0 };
-			std::atomic_uint64_t         skylightingRejectedNoSampler{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraMissing{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraStale{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraValidation{ 0 };
@@ -221,7 +216,6 @@ namespace cs::render
 
 			SkylightingSharedData data{};
 			ID3D11ShaderResourceView* srv = nullptr;
-			ID3D11SamplerState* sampler = nullptr;
 			std::uint64_t generation = 0;
 			{
 				const std::lock_guard lock(state.skylightingMutex);
@@ -233,7 +227,6 @@ namespace cs::render
 				}
 				data = state.skylightingData;
 				srv = state.skylightingSRV;
-				sampler = state.skylightingSampler;
 				generation = state.skylightingGeneration;
 			}
 
@@ -245,23 +238,10 @@ namespace cs::render
 					L,
 					spdlog::level::warn,
 					"Skylighting consumer bind was called without the t{} "
-					"occlusion SRV; taking the identity path.",
+					"probe SRV; taking the identity path.",
 					a_stage == engine::ShaderStage::kCompute ?
 						kSkylightingComputeTextureSlot :
 						kSkylightingTextureSlot);
-				resourcesAvailable = false;
-			}
-			if (!sampler) {
-				state.skylightingRejectedNoSampler.fetch_add(
-					1, std::memory_order_relaxed);
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::warn,
-					"Skylighting consumer bind was called without the s{} "
-					"comparison sampler; taking the identity path.",
-					a_stage == engine::ShaderStage::kCompute ?
-						kSkylightingComputeSamplerSlot :
-						kSkylightingSamplerSlot);
 				resourcesAvailable = false;
 			}
 
@@ -328,6 +308,9 @@ namespace cs::render
 				for (std::size_t row = 0; row < 3; ++row)
 					data.ViewToWorld[row] = camera->data.ViewToWorld[row];
 				data.CameraPosAdjust = camera->data.CameraPosAdjust;
+				data.ProbeGridOrigin.x -= camera->data.CameraPosAdjust.x;
+				data.ProbeGridOrigin.y -= camera->data.CameraPosAdjust.y;
+				data.ProbeGridOrigin.z -= camera->data.CameraPosAdjust.z;
 				state.skylightingCameraPublishedLastCall.store(
 					true, std::memory_order_relaxed);
 			} else {
@@ -374,8 +357,6 @@ namespace cs::render
 					// A tiled-frame capture must verify this slot and bind timing survive DeferredLightsImpl rebinds.
 					a_context->CSSetShaderResources(
 						kSkylightingComputeTextureSlot, 1, &srv);
-					a_context->CSSetSamplers(
-						kSkylightingComputeSamplerSlot, 1, &sampler);
 				}
 			} else {
 				a_context->PSSetConstantBuffers(
@@ -383,8 +364,6 @@ namespace cs::render
 				if (resourcesAvailable && cameraReady) {
 					a_context->PSSetShaderResources(
 						kSkylightingTextureSlot, 1, &srv);
-					a_context->PSSetSamplers(
-						kSkylightingSamplerSlot, 1, &sampler);
 				}
 			}
 			const bool bound = resourcesAvailable && cameraReady;
@@ -411,7 +390,7 @@ namespace cs::render
 				CS_LOG_ONCE(
 					L,
 					spdlog::level::info,
-					"Skylighting consumer first accepted {} bind: b{} t{} s{} "
+					"Skylighting consumer first accepted {} bind: b{} t{} "
 					"camera_sequence={} frame={}.",
 					a_stage == engine::ShaderStage::kCompute ?
 						"compute" :
@@ -420,9 +399,6 @@ namespace cs::render
 					a_stage == engine::ShaderStage::kCompute ?
 						kSkylightingComputeTextureSlot :
 						kSkylightingTextureSlot,
-					a_stage == engine::ShaderStage::kCompute ?
-						kSkylightingComputeSamplerSlot :
-						kSkylightingSamplerSlot,
 					cameraSequence,
 					currentFrame);
 			}
@@ -460,9 +436,6 @@ namespace cs::render
 			ID3D11ShaderResourceView* srv = nullptr;
 			context->PSGetShaderResources(kSkylightingTextureSlot, 1, &srv);
 			state.savedSkylightingSRV.attach(srv);
-			ID3D11SamplerState* sampler = nullptr;
-			context->PSGetSamplers(kSkylightingSamplerSlot, 1, &sampler);
-			state.savedSkylightingSampler.attach(sampler);
 			state.pixelBindingDepth = 1;
 		}
 
@@ -487,15 +460,10 @@ namespace cs::render
 					state.savedSkylightingSRV.get();
 				context->PSSetShaderResources(
 					kSkylightingTextureSlot, 1, &srv);
-				ID3D11SamplerState* sampler =
-					state.savedSkylightingSampler.get();
-				context->PSSetSamplers(
-					kSkylightingSamplerSlot, 1, &sampler);
 			}
 			for (auto& buffer : state.savedPixelBuffers)
 				buffer = nullptr;
 			state.savedSkylightingSRV = nullptr;
-			state.savedSkylightingSampler = nullptr;
 			state.pixelBindingDepth = 0;
 		}
 
@@ -527,10 +495,6 @@ namespace cs::render
 			context->CSGetShaderResources(
 				kSkylightingComputeTextureSlot, 1, &srv);
 			state.savedComputeSkylightingSRV.attach(srv);
-			ID3D11SamplerState* sampler = nullptr;
-			context->CSGetSamplers(
-				kSkylightingComputeSamplerSlot, 1, &sampler);
-			state.savedComputeSkylightingSampler.attach(sampler);
 			state.computeBindingDepth = 1;
 		}
 
@@ -555,15 +519,10 @@ namespace cs::render
 					state.savedComputeSkylightingSRV.get();
 				context->CSSetShaderResources(
 					kSkylightingComputeTextureSlot, 1, &srv);
-				ID3D11SamplerState* sampler =
-					state.savedComputeSkylightingSampler.get();
-				context->CSSetSamplers(
-					kSkylightingComputeSamplerSlot, 1, &sampler);
 			}
 			for (auto& buffer : state.savedComputeBuffers)
 				buffer = nullptr;
 			state.savedComputeSkylightingSRV = nullptr;
-			state.savedComputeSkylightingSampler = nullptr;
 			state.computeBindingDepth = 0;
 		}
 
@@ -767,16 +726,14 @@ namespace cs::render
 
 	void PublishSkylightingSharedData(
 		const SkylightingSharedData& a_data,
-		ID3D11ShaderResourceView* a_occlusionSRV,
-		ID3D11SamplerState* a_comparisonSampler) noexcept
+		ID3D11ShaderResourceView* a_probeSRV) noexcept
 	{
 		auto& state = GetSubstrateState();
 		state.skylightingPublishCalls.fetch_add(1, std::memory_order_relaxed);
 		{
 			const std::lock_guard lock(state.skylightingMutex);
 			state.skylightingData = a_data;
-			state.skylightingSRV = a_occlusionSRV;
-			state.skylightingSampler = a_comparisonSampler;
+			state.skylightingSRV = a_probeSRV;
 			++state.skylightingGeneration;
 		}
 		state.skylightingDataPublished.store(true, std::memory_order_release);
@@ -821,8 +778,6 @@ namespace cs::render
 				std::memory_order_relaxed),
 			.rejectedNoSrv = state.skylightingRejectedNoSRV.load(
 				std::memory_order_relaxed),
-			.rejectedNoSampler = state.skylightingRejectedNoSampler.load(
-				std::memory_order_relaxed),
 			.rejectedCameraMissing =
 				state.skylightingRejectedCameraMissing.load(
 					std::memory_order_relaxed),
@@ -836,7 +791,6 @@ namespace cs::render
 		{
 			const std::lock_guard lock(state.skylightingMutex);
 			status.srvPublished = state.skylightingSRV != nullptr;
-			status.samplerPublished = state.skylightingSampler != nullptr;
 		}
 		return status;
 	}

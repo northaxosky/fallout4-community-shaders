@@ -432,10 +432,13 @@ namespace
 			ExpectedVariable{ "ViewToWorld_row1", 96, 16 },
 			ExpectedVariable{ "ViewToWorld_row2", 112, 16 },
 			ExpectedVariable{ "CameraPosAdjust", 128, 16 },
-			ExpectedVariable{ "OcclusionExtent", 144, 4 },
-			ExpectedVariable{ "MinDiffuseVisibility", 148, 4 },
-			ExpectedVariable{ "MinSpecularVisibility", 152, 4 },
-			ExpectedVariable{ "Mode", 156, 4 }
+			ExpectedVariable{ "PosOffset", 144, 16 },
+			ExpectedVariable{ "ArrayOrigin", 160, 16 },
+			ExpectedVariable{ "ValidMargin", 176, 16 },
+			ExpectedVariable{ "OcclusionExtent", 192, 4 },
+			ExpectedVariable{ "MinDiffuseVisibility", 196, 4 },
+			ExpectedVariable{ "MinSpecularVisibility", 200, 4 },
+			ExpectedVariable{ "Mode", 204, 4 }
 		};
 		if (shaderDesc.ConstantBuffers != 3
 			|| shaderDesc.BoundResources != 3) {
@@ -463,7 +466,7 @@ namespace
 			reflection.Get(),
 			"SkylightingData",
 			7,
-			160,
+			208,
 			skylightingVariables);
 	}
 
@@ -1073,6 +1076,21 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
+	std::size_t AddSkylighting(
+		std::vector<ShaderCompileJob>& a_jobs,
+		const std::filesystem::path& a_root)
+	{
+		const auto firstJob = a_jobs.size();
+		AddCompile(
+			a_jobs,
+			a_root / "Skylighting" / "UpdateProbesCS.hlsl",
+			{},
+			"cs_5_0",
+			"main",
+			"skylighting probe update");
+		return a_jobs.size() - firstJob;
+	}
+
 	struct SlotExpectations
 	{
 		std::vector<UINT> requiredTextures;
@@ -1248,7 +1266,6 @@ namespace
 	constexpr UINT kGbufferNormalTextureSlot = 25;
 	constexpr std::array kDynamicCubemapTextureSlots{ 16u, 17u };
 	constexpr UINT kSkylightingComputeTextureSlot = 3;
-	constexpr UINT kSkylightingComputeSamplerSlot = 0;
 
 	// only families that can isolate directional ambient carry the composition
 	constexpr std::array kAmbientCompositionFamilies{
@@ -1786,11 +1803,6 @@ namespace
 					skylightingSlots.forbiddenTextures;
 				skylightingTextures.push_back(
 					kSkylightingComputeTextureSlot);
-				auto& skylightingSamplers = ambientKernel ?
-					skylightingSlots.requiredSamplers :
-					skylightingSlots.forbiddenSamplers;
-				skylightingSamplers.push_back(
-					kSkylightingComputeSamplerSlot);
 				AddRegistration(
 					a_jobs,
 					a_root,
@@ -2852,6 +2864,7 @@ int main(int argc, char** argv)
 	}
 	const auto lightingCounts = AddLighting(jobs, argv[1]);
 	const auto terrainShadowsCount = AddTerrainShadows(jobs, argv[1]);
+	const auto skylightingCount = AddSkylighting(jobs, argv[1]);
 	if (terrainShadowsCount != kTerrainShadowsPermutations) {
 		AddPreparationFailure(
 			jobs,
@@ -2906,6 +2919,9 @@ int main(int argc, char** argv)
 		"ShaderCompile checked skylighting on %zu DFTiledLighting compute routes and %zu inverse-square compositions\n",
 		lightingCounts.skylightingTiledRows,
 		lightingCounts.combinedTiledRows);
+	std::printf(
+		"ShaderCompile checked %zu Skylighting probe update shaders\n",
+		skylightingCount);
 	std::printf(
 		"ShaderCompile checked exponential fog on %zu BSDFComposite fog routes\n",
 		lightingCounts.exponentialFogRows);

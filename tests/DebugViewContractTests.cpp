@@ -413,7 +413,7 @@ namespace
 			std::cerr
 				<< "FAIL: Skylighting must expose separate raw and "
 				   "frame-normalized occlusion views plus fullscreen "
-				   "visibility\n";
+				   "directional probe visibility\n";
 			++failures;
 		}
 

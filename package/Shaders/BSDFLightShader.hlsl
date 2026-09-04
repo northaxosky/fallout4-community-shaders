@@ -988,7 +988,7 @@ PS_OUTPUT main(PS_INPUT input)
 #ifdef AMBIENT_IBL_IN_LIGHT
 #ifdef SKYLIGHTING
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(posView);
+        Skylighting::Evaluate(posView, normalView);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif
@@ -2941,7 +2941,7 @@ PS_OUTPUT main(PS_INPUT input)
     float specMix = mad(schlickFres, -0.5, 1.0);
 #if defined(AMBIENT) && defined(SKYLIGHTING)
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(posView);
+        Skylighting::Evaluate(posView, normalView);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif
@@ -3841,7 +3841,7 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 #if defined(AMBIENT) && defined(SKYLIGHTING)
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(posView);
+        Skylighting::Evaluate(posView, normalView);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif
@@ -4886,7 +4886,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if defined(AMBIENT) && defined(SKYLIGHTING)
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(posView);
+        Skylighting::Evaluate(posView, normalView);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif
@@ -6071,7 +6071,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef SKYLIGHTING
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(posView);
+        Skylighting::Evaluate(posView, normal);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif
@@ -6734,7 +6734,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #if defined(AMBIENT) && defined(SKYLIGHTING)
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(posView);
+        Skylighting::Evaluate(posView, normalView);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif
@@ -6952,7 +6952,7 @@ PS_OUTPUT main(PS_INPUT input)
 
 #ifdef SKYLIGHTING
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(positionView);
+        Skylighting::Evaluate(positionView, normalView);
     Skylighting::ApplyAmbient(
         ambientDiffuse, ambientSpecular, skylighting);
 #endif

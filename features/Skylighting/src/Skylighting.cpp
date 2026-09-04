@@ -1,10 +1,13 @@
 #include "Skylighting.h"
+#include "SkylightingMath.h"
 
 #include <d3d11.h>
 #include <imgui.h>
 
 #include <array>
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <exception>
 #include <limits>
@@ -18,6 +21,7 @@
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
+#include "Render/FrameBuffer.h"
 #include "Render/RendererContext.h"
 #include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
@@ -44,7 +48,17 @@ namespace cs::features
 		constexpr std::uint32_t kVisibilityDebugFlag = 1U << 1;
 		constexpr std::uint32_t kOcclusionSize = 512;
 		constexpr std::uint32_t kDebugThreadGroupSize = 8;
+		constexpr std::uint32_t kProbeWidth = 256;
+		constexpr std::uint32_t kProbeHeight = 256;
+		constexpr std::uint32_t kProbeDepth = 128;
+		constexpr std::uint64_t kProbeCellCount =
+			static_cast<std::uint64_t>(kProbeWidth) * kProbeHeight *
+			kProbeDepth;
+		constexpr std::uint64_t kProbeStorageBytes =
+			kProbeCellCount * (sizeof(std::uint16_t) * 4 + sizeof(std::uint8_t));
 		constexpr std::uint32_t kOcclusionRenderMode = 14;
+		constexpr const wchar_t* kProbeUpdateShaderPath =
+			L"Data\\Shaders\\Skylighting\\UpdateProbesCS.hlsl";
 		constexpr const wchar_t* kNormalizedDebugShaderPath =
 			L"Data\\Shaders\\Skylighting\\OcclusionDepthDebug.cs.hlsl";
 
@@ -243,6 +257,15 @@ namespace cs::features
 				accept(
 					   feature_config::ReadFloat(
 						   *settingsTable,
+						   "max_zenith",
+						   a_candidate.maxZenith,
+						   0.0f,
+						   3.1415926f / 2.0f),
+					   "max_zenith",
+					   "number") &&
+				accept(
+					   feature_config::ReadFloat(
+						   *settingsTable,
 						   "min_diffuse_visibility",
 						   a_candidate.minDiffuseVisibility,
 						   kMinConsumerSetting,
@@ -387,7 +410,11 @@ namespace cs::features
 		class DirectionOverride
 		{
 		public:
-			DirectionOverride(float* a_x, float* a_y, float* a_z) :
+			DirectionOverride(
+				float* a_x,
+				float* a_y,
+				float* a_z,
+				const DirectX::XMFLOAT4& a_occlusionDirection) :
 				_x(a_x),
 				_y(a_y),
 				_z(a_z)
@@ -397,10 +424,9 @@ namespace cs::features
 					_originalY = *_y;
 					_originalZ = *_z;
 
-					*_x = 0.0f;
-					*_y = 0.0f;
-					// If the map is inverted or tilted in game, suspect this sign first.
-					*_z = -1.0f;
+					*_x = -a_occlusionDirection.x;
+					*_y = -a_occlusionDirection.y;
+					*_z = -a_occlusionDirection.z;
 				}
 			}
 
@@ -424,6 +450,36 @@ namespace cs::features
 			float _originalY = 0.0f;
 			float _originalZ = 0.0f;
 		};
+
+		DirectX::XMFLOAT4 GenerateOcclusionDirection(float a_maxZenith)
+		{
+			constexpr float reciprocalRandMax = 1.0f / RAND_MAX;
+			static int randomSeed = std::rand();
+			static std::uint32_t randomFrameCount = 0;
+
+			float pointX =
+				randomSeed * reciprocalRandMax +
+				static_cast<float>(randomFrameCount) * 0.245122333753f;
+			float pointY =
+				randomSeed * reciprocalRandMax +
+				static_cast<float>(randomFrameCount) * 0.430159709002f;
+			pointX -= std::floor(pointX);
+			pointY -= std::floor(pointY);
+			++randomFrameCount;
+			if (randomFrameCount == 1000) {
+				randomFrameCount = 0;
+				randomSeed = std::rand();
+			}
+
+			const float radius = std::sqrt(
+				pointX * std::sin(std::clamp(
+					a_maxZenith, 0.0f, 3.1415926f / 2.0f)));
+			const float angle = pointY * 6.28318530718f;
+			const float x = radius * std::cos(angle);
+			const float y = radius * std::sin(angle);
+			const float z = std::sqrt(std::max(0.0f, 1.0f - x * x - y * y));
+			return { x, y, z, 0.0f };
+		}
 
 		bool IsFiniteMatrix(const DirectX::XMFLOAT4X4& a_matrix)
 		{
@@ -525,6 +581,8 @@ namespace cs::features
 			auto* feature = Skylighting::GetSingleton();
 			feature->_producerRanThisFrame.store(
 				false, std::memory_order_release);
+			feature->_probeUpdateRanThisFrame.store(
+				false, std::memory_order_release);
 			feature->PublishConsumerData();
 			feature->_normalizedViewDispatchedLastFrame.store(
 				false, std::memory_order_release);
@@ -568,7 +626,7 @@ namespace cs::features
 			FeatureDebugView{
 				.id = "skylighting_visibility",
 				.label =
-					"Skylighting visibility (world projection, raw greyscale)",
+					"Skylighting probe visibility (directional SH, greyscale)",
 				.kind = FeatureDebugViewKind::kFullscreen
 			}
 		};
@@ -667,6 +725,7 @@ namespace cs::features
 			_settings.forceSceneTraversal, std::memory_order_release);
 		_occlusionExtent.store(
 			_settings.occlusionExtent, std::memory_order_release);
+		_maxZenith.store(_settings.maxZenith, std::memory_order_release);
 		_minDiffuseVisibility.store(
 			_settings.minDiffuseVisibility, std::memory_order_release);
 		_minSpecularVisibility.store(
@@ -685,6 +744,7 @@ namespace cs::features
 			"force_scene_traversal", _settings.forceSceneTraversal);
 		settings.insert_or_assign(
 			"occlusion_extent", _settings.occlusionExtent);
+		settings.insert_or_assign("max_zenith", _settings.maxZenith);
 		settings.insert_or_assign(
 			"min_diffuse_visibility", _settings.minDiffuseVisibility);
 		settings.insert_or_assign(
@@ -717,21 +777,11 @@ namespace cs::features
 					cs::engine::ShaderResourceType::kShaderResource,
 					cs::render::kSkylightingComputeTextureSlot
 				});
-				slotClaims.push_back({
-					a_stage,
-					cs::engine::ShaderResourceType::kSampler,
-					cs::render::kSkylightingComputeSamplerSlot
-				});
 			} else {
 				slotClaims.push_back({
 					a_stage,
 					cs::engine::ShaderResourceType::kShaderResource,
 					cs::render::kSkylightingTextureSlot
-				});
-				slotClaims.push_back({
-					a_stage,
-					cs::engine::ShaderResourceType::kSampler,
-					cs::render::kSkylightingSamplerSlot
 				});
 			}
 			return cs::engine::RegisterReplacement({
@@ -975,14 +1025,11 @@ namespace cs::features
 		SetValidationDetail({});
 		PublishConsumerData();
 		L->info(
-			"Skylighting routes are ready (PS b{}, t{}, s{}; CS b{}, t{}, "
-			"s{}).",
+			"Skylighting routes are ready (PS b{}, t{}; CS b{}, t{}).",
 			cs::render::kSkylightingDataSlot,
 			cs::render::kSkylightingTextureSlot,
-			cs::render::kSkylightingSamplerSlot,
 			cs::render::kSkylightingDataSlot,
-			cs::render::kSkylightingComputeTextureSlot,
-			cs::render::kSkylightingComputeSamplerSlot);
+			cs::render::kSkylightingComputeTextureSlot);
 		return true;
 	}
 
@@ -1034,8 +1081,10 @@ namespace cs::features
 			&& _enabled.load(std::memory_order_acquire)
 			&& _resourcesReady.load(std::memory_order_acquire)
 			&& _producerRanThisFrame.load(std::memory_order_acquire)
-			&& _consumerSamplerReady.load(std::memory_order_acquire)
+			&& _probeUpdateRanThisFrame.load(std::memory_order_acquire)
+			&& _probeResourcesAllocated.load(std::memory_order_acquire)
 			&& occlusion.valid
+			&& occlusion.probeAddressingValid
 			&& exterior;
 
 		std::uint32_t mode = active ? kConsumerEnabledFlag : 0;
@@ -1046,6 +1095,9 @@ namespace cs::features
 		cs::render::SkylightingSharedData data{
 			.OcclusionViewProj = occlusion.transform,
 			.OcclusionDirection = occlusion.direction,
+			.ProbeGridOrigin = occlusion.probeGridOrigin,
+			.ArrayOrigin = occlusion.arrayOrigin,
+			.ValidMargin = occlusion.validMargin,
 			.OcclusionExtent = occlusion.extent,
 			.MinDiffuseVisibility =
 				_minDiffuseVisibility.load(std::memory_order_acquire),
@@ -1054,7 +1106,7 @@ namespace cs::features
 			.Mode = mode
 		};
 		cs::render::PublishSkylightingSharedData(
-			data, _occlusionSRV.get(), _comparisonSampler.get());
+			data, _probeSRV.get());
 	}
 
 	bool Skylighting::EnsureResources() noexcept
@@ -1207,6 +1259,13 @@ namespace cs::features
 			winrt::com_ptr<ID3D11Texture2D> occlusionTexture;
 			winrt::com_ptr<ID3D11ShaderResourceView> occlusionSRV;
 			winrt::com_ptr<ID3D11DepthStencilView> occlusionDSV;
+			winrt::com_ptr<ID3D11Texture3D> probeTexture;
+			winrt::com_ptr<ID3D11ShaderResourceView> probeSRV;
+			winrt::com_ptr<ID3D11UnorderedAccessView> probeUAV;
+			winrt::com_ptr<ID3D11Texture3D> accumFramesTexture;
+			winrt::com_ptr<ID3D11UnorderedAccessView> accumFramesUAV;
+			winrt::com_ptr<ID3D11Buffer> probeUpdateCB;
+			winrt::com_ptr<ID3D11ComputeShader> probeUpdateCS;
 
 			const auto textureResult = device->CreateTexture2D(
 				&textureDesc, nullptr, occlusionTexture.put());
@@ -1263,16 +1322,109 @@ namespace cs::features
 				return false;
 			}
 
+			D3D11_TEXTURE3D_DESC probeDesc{};
+			probeDesc.Width = kProbeWidth;
+			probeDesc.Height = kProbeHeight;
+			probeDesc.Depth = kProbeDepth;
+			probeDesc.MipLevels = 1;
+			probeDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
+			probeDesc.Usage = D3D11_USAGE_DEFAULT;
+			probeDesc.BindFlags =
+				D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+			_resourceFailureReason.store(
+				ResourceFailureReason::kTexture3DCreationFailed,
+				std::memory_order_relaxed);
+			DX::ThrowIfFailed(device->CreateTexture3D(
+				&probeDesc, nullptr, probeTexture.put()));
+			_resourceFailureReason.store(
+				ResourceFailureReason::kShaderResourceViewCreationFailed,
+				std::memory_order_relaxed);
+			DX::ThrowIfFailed(device->CreateShaderResourceView(
+				probeTexture.get(), nullptr, probeSRV.put()));
+			_resourceFailureReason.store(
+				ResourceFailureReason::kUnorderedAccessViewCreationFailed,
+				std::memory_order_relaxed);
+			DX::ThrowIfFailed(device->CreateUnorderedAccessView(
+				probeTexture.get(), nullptr, probeUAV.put()));
+
+			probeDesc.Format = DXGI_FORMAT_R8_UINT;
+			probeDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+			_resourceFailureReason.store(
+				ResourceFailureReason::kTexture3DCreationFailed,
+				std::memory_order_relaxed);
+			DX::ThrowIfFailed(device->CreateTexture3D(
+				&probeDesc, nullptr, accumFramesTexture.put()));
+			_resourceFailureReason.store(
+				ResourceFailureReason::kUnorderedAccessViewCreationFailed,
+				std::memory_order_relaxed);
+			DX::ThrowIfFailed(device->CreateUnorderedAccessView(
+				accumFramesTexture.get(), nullptr, accumFramesUAV.put()));
+
+			D3D11_BUFFER_DESC constantBufferDesc{};
+			constantBufferDesc.ByteWidth = sizeof(ProbeUpdateConstants);
+			constantBufferDesc.Usage = D3D11_USAGE_DYNAMIC;
+			constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+			constantBufferDesc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+			_resourceFailureReason.store(
+				ResourceFailureReason::kConstantBufferCreationFailed,
+				std::memory_order_relaxed);
+			DX::ThrowIfFailed(device->CreateBuffer(
+				&constantBufferDesc, nullptr, probeUpdateCB.put()));
+
+			_resourceFailureReason.store(
+				ResourceFailureReason::kComputeShaderCompilationFailed,
+				std::memory_order_relaxed);
+			probeUpdateCS.attach(reinterpret_cast<ID3D11ComputeShader*>(
+				cs::util::CompileShader(
+					kProbeUpdateShaderPath, {}, "cs_5_0")));
+			if (!probeUpdateCS) {
+				throw std::runtime_error(
+					"probe update compute shader compilation failed");
+			}
+
 			cs::render::annotation::SetName(
 				occlusionTexture.get(), "Skylighting/OcclusionDepth.Texture");
 			cs::render::annotation::SetName(
 				occlusionSRV.get(), "Skylighting/OcclusionDepth.SRV");
 			cs::render::annotation::SetName(
 				occlusionDSV.get(), "Skylighting/OcclusionDepth.DSV");
+			cs::render::annotation::SetName(
+				probeTexture.get(), "Skylighting/ProbeArray.Texture");
+			cs::render::annotation::SetName(
+				probeSRV.get(), "Skylighting/ProbeArray.SRV");
+			cs::render::annotation::SetName(
+				probeUAV.get(), "Skylighting/ProbeArray.UAV");
+			cs::render::annotation::SetName(
+				accumFramesTexture.get(),
+				"Skylighting/AccumFramesArray.Texture");
+			cs::render::annotation::SetName(
+				accumFramesUAV.get(),
+				"Skylighting/AccumFramesArray.UAV");
+			cs::render::annotation::SetName(
+				probeUpdateCB.get(), "Skylighting/ProbeUpdate.CB");
+			cs::render::annotation::SetName(
+				probeUpdateCS.get(), "Skylighting/ProbeUpdate.CS");
+
+			auto* context = cs::engine::GetImmediateContext();
+			if (!context) {
+				throw std::runtime_error(
+					"immediate context unavailable while initializing probes");
+			}
+			const std::array<UINT, 4> clearValue{};
+			context->ClearUnorderedAccessViewUint(
+				accumFramesUAV.get(), clearValue.data());
 
 			_occlusionTexture = std::move(occlusionTexture);
 			_occlusionSRV = std::move(occlusionSRV);
 			_occlusionDSV = std::move(occlusionDSV);
+			_probeTexture = std::move(probeTexture);
+			_probeSRV = std::move(probeSRV);
+			_probeUAV = std::move(probeUAV);
+			_accumFramesTexture = std::move(accumFramesTexture);
+			_accumFramesUAV = std::move(accumFramesUAV);
+			_probeUpdateCB = std::move(probeUpdateCB);
+			_probeUpdateCS = std::move(probeUpdateCS);
+			_probeResourcesAllocated.store(true, std::memory_order_release);
 			_resourceWaitReason.store(
 				ResourceWaitReason::kNone, std::memory_order_relaxed);
 			_resourceFailureReason.store(
@@ -1287,9 +1439,14 @@ namespace cs::features
 					FailureState::kNone, std::memory_order_release);
 			}
 			L->info(
-				"Occlusion depth resource ready ({}x{}).",
+				"Occlusion depth and probe resources ready ({}x{} depth; "
+				"{}x{}x{} RGBA16F + R8_UINT probes, {} bytes).",
 				textureDesc.Width,
-				textureDesc.Height);
+				textureDesc.Height,
+				kProbeWidth,
+				kProbeHeight,
+				kProbeDepth,
+				kProbeStorageBytes);
 			if (_normalizedDebugPreviewEnabled.load(
 					std::memory_order_acquire)) {
 				EnsureNormalizedDebugResources(device);
@@ -1297,9 +1454,12 @@ namespace cs::features
 			return true;
 		} catch (const std::exception& e) {
 			_resourcesReady.store(false, std::memory_order_release);
-			_resourceFailureReason.store(
-				ResourceFailureReason::kUnexpectedException,
-				std::memory_order_relaxed);
+			if (_resourceFailureReason.load(std::memory_order_relaxed) ==
+				ResourceFailureReason::kNone) {
+				_resourceFailureReason.store(
+					ResourceFailureReason::kUnexpectedException,
+					std::memory_order_relaxed);
+			}
 			_resourceState.store(
 				ResourceState::kFailed, std::memory_order_release);
 			_failureState.store(
@@ -1308,9 +1468,12 @@ namespace cs::features
 			L->error("Resource initialization failed: {}", e.what());
 		} catch (...) {
 			_resourcesReady.store(false, std::memory_order_release);
-			_resourceFailureReason.store(
-				ResourceFailureReason::kUnexpectedException,
-				std::memory_order_relaxed);
+			if (_resourceFailureReason.load(std::memory_order_relaxed) ==
+				ResourceFailureReason::kNone) {
+				_resourceFailureReason.store(
+					ResourceFailureReason::kUnexpectedException,
+					std::memory_order_relaxed);
+			}
 			_resourceState.store(
 				ResourceState::kFailed, std::memory_order_release);
 			_failureState.store(
@@ -1522,6 +1685,190 @@ namespace cs::features
 		return true;
 	}
 
+	bool Skylighting::UpdateProbeVolume() noexcept
+	{
+		if (!_probeResourcesAllocated.load(std::memory_order_acquire) ||
+			!_occlusionSRV ||
+			!_probeUAV ||
+			!_accumFramesUAV ||
+			!_comparisonSampler ||
+			!_probeUpdateCB ||
+			!_probeUpdateCS) {
+			return false;
+		}
+
+		auto* graphicsState = cs::engine::GetGraphicsState();
+		const auto& camera = cs::engine::GetFrameBuffer();
+		const std::uint32_t currentFrame =
+			graphicsState ? graphicsState->frameCount : 0;
+		const bool cameraFrameValid =
+			camera.valid &&
+			camera.frameCount <= currentFrame &&
+			currentFrame - camera.frameCount <= 1;
+		if (!cameraFrameValid) {
+			_probeCameraUnavailableCount.fetch_add(
+				1, std::memory_order_relaxed);
+			return false;
+		}
+
+		const auto occlusion = GetOcclusionData();
+		if (!occlusion.valid || !(occlusion.extent > 0.0f)) {
+			return false;
+		}
+
+		const auto cameraOrigin =
+			cs::engine::CameraWorldOrigin(camera.data);
+		const float cellSize =
+			occlusion.extent / static_cast<float>(kProbeWidth);
+		const auto cellCoordinate = [cellSize](float a_value) {
+			const double rounded =
+				std::round(static_cast<double>(a_value) / cellSize);
+			const double clamped = std::clamp(
+				rounded,
+				static_cast<double>(std::numeric_limits<std::int32_t>::min()),
+				static_cast<double>(std::numeric_limits<std::int32_t>::max()));
+			return static_cast<std::int32_t>(clamped);
+		};
+		const DirectX::XMINT3 cellID{
+			cellCoordinate(cameraOrigin.x),
+			cellCoordinate(cameraOrigin.y),
+			cellCoordinate(cameraOrigin.z)
+		};
+		const DirectX::XMFLOAT4 gridOrigin{
+			static_cast<float>(cellID.x) * cellSize,
+			static_cast<float>(cellID.y) * cellSize,
+			static_cast<float>(cellID.z) * cellSize,
+			0.0f
+		};
+		const DirectX::XMUINT4 arrayOrigin{
+			skylighting::NormalizeProbeArrayOrigin(
+				static_cast<std::int64_t>(cellID.x) - kProbeWidth / 2,
+				kProbeWidth),
+			skylighting::NormalizeProbeArrayOrigin(
+				static_cast<std::int64_t>(cellID.y) - kProbeHeight / 2,
+				kProbeHeight),
+			skylighting::NormalizeProbeArrayOrigin(
+				static_cast<std::int64_t>(cellID.z) - kProbeDepth / 2,
+				kProbeDepth),
+			0
+		};
+
+		DirectX::XMINT4 validMargin{
+			static_cast<std::int32_t>(kProbeWidth),
+			static_cast<std::int32_t>(kProbeHeight),
+			static_cast<std::int32_t>(kProbeDepth),
+			0
+		};
+		if (_probeAddressingInitialized) {
+			const auto margin = [](std::int32_t a_previous,
+								   std::int32_t a_current,
+								   std::int32_t a_dimension) {
+				const auto difference =
+					static_cast<std::int64_t>(a_previous) - a_current;
+				return static_cast<std::int32_t>(std::clamp(
+					difference,
+					-static_cast<std::int64_t>(a_dimension),
+					static_cast<std::int64_t>(a_dimension)));
+			};
+			validMargin = {
+				margin(
+					_previousProbeCellID.x,
+					cellID.x,
+					static_cast<std::int32_t>(kProbeWidth)),
+				margin(
+					_previousProbeCellID.y,
+					cellID.y,
+					static_cast<std::int32_t>(kProbeHeight)),
+				margin(
+					_previousProbeCellID.z,
+					cellID.z,
+					static_cast<std::int32_t>(kProbeDepth)),
+				0
+			};
+		}
+
+		const auto validDimension = [](std::uint32_t a_dimension,
+									   std::int32_t a_margin) {
+			return static_cast<std::uint64_t>(
+				a_dimension - std::min(
+					a_dimension,
+					static_cast<std::uint32_t>(std::abs(a_margin))));
+		};
+		const std::uint64_t accumulatedCells =
+			validDimension(kProbeWidth, validMargin.x) *
+			validDimension(kProbeHeight, validMargin.y) *
+			validDimension(kProbeDepth, validMargin.z);
+		const std::uint64_t resetCells =
+			kProbeCellCount - accumulatedCells;
+
+		ProbeUpdateConstants constants{
+			.OcclusionViewProj = occlusion.transform,
+			.OcclusionDirection = occlusion.direction,
+			.PosOffset = {
+				gridOrigin.x - camera.data.CameraPosAdjust.x,
+				gridOrigin.y - camera.data.CameraPosAdjust.y,
+				gridOrigin.z - camera.data.CameraPosAdjust.z,
+				0.0f
+			},
+			.ArrayOrigin = arrayOrigin,
+			.ValidMargin = validMargin,
+			.OcclusionExtent = occlusion.extent
+		};
+		auto* context = cs::engine::GetImmediateContext();
+		if (!context) {
+			return false;
+		}
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		if (FAILED(context->Map(
+				_probeUpdateCB.get(),
+				0,
+				D3D11_MAP_WRITE_DISCARD,
+				0,
+				&mapped))) {
+			return false;
+		}
+		std::memcpy(mapped.pData, &constants, sizeof(constants));
+		context->Unmap(_probeUpdateCB.get(), 0);
+
+		cs::engine::OMScope omScope(context);
+		cs::ComputeScope computeScope(context, 1, 1, 2, 1);
+		cs::render::annotation::ScopedEvent event(
+			"Skylighting/UpdateProbes");
+		ID3D11ShaderResourceView* depthSRV = _occlusionSRV.get();
+		std::array<ID3D11UnorderedAccessView*, 2> uavs{
+			_probeUAV.get(),
+			_accumFramesUAV.get()
+		};
+		ID3D11SamplerState* sampler = _comparisonSampler.get();
+		ID3D11Buffer* constantBuffer = _probeUpdateCB.get();
+		context->CSSetShaderResources(0, 1, &depthSRV);
+		context->CSSetUnorderedAccessViews(
+			0, static_cast<UINT>(uavs.size()), uavs.data(), nullptr);
+		context->CSSetSamplers(0, 1, &sampler);
+		context->CSSetConstantBuffers(0, 1, &constantBuffer);
+		context->CSSetShader(_probeUpdateCS.get(), nullptr, 0);
+		context->Dispatch(
+			(kProbeWidth + 7) / 8,
+			(kProbeHeight + 7) / 8,
+			kProbeDepth);
+
+		_previousProbeCellID = cellID;
+		_probeAddressingInitialized = true;
+		{
+			std::scoped_lock lock(_occlusionDataMutex);
+			_occlusionData.probeGridOrigin = gridOrigin;
+			_occlusionData.arrayOrigin = arrayOrigin;
+			_occlusionData.validMargin = validMargin;
+			_occlusionData.probeAddressingValid = true;
+		}
+		_probeResetCellCount.store(resetCells, std::memory_order_release);
+		_probeAccumulatedCellCount.store(
+			accumulatedCells, std::memory_order_release);
+		_probeUpdateRanThisFrame.store(true, std::memory_order_release);
+		_probeUpdateDispatchCount.fetch_add(1, std::memory_order_relaxed);
+		return true;
+	}
+
 	void Skylighting::RenderProducer() noexcept
 	{
 		if (!_resourcesReady.load(std::memory_order_acquire) ||
@@ -1594,14 +1941,16 @@ namespace cs::features
 				_extentGlobal ? requestedExtent : kEngineDefaultExtent;
 			_effectiveExtent.store(
 				effectiveExtent, std::memory_order_release);
+			const auto occlusionDirection = GenerateOcclusionDirection(
+				_maxZenith.load(std::memory_order_acquire));
 
 			{
 				FloatOverride extentOverride(_extentGlobal, requestedExtent);
-				// Keep the zenith stable until probe accumulation can use jitter.
 				DirectionOverride directionOverride(
 					_directionXGlobal,
 					_directionYGlobal,
-					_directionZGlobal);
+					_directionZGlobal,
+					occlusionDirection);
 				const bool forceSceneTraversal =
 					_forceSceneTraversal.load(std::memory_order_acquire);
 				ByteOverride sceneTraversalOverride(
@@ -1611,9 +1960,6 @@ namespace cs::features
 				producer(precipitation, nullptr);
 			}
 
-			auto* occlusionCamera =
-				precipitation->occlusionData.camera.get();
-
 			DirectX::XMFLOAT4X4 transform{};
 			if (_matrixGlobal) {
 				std::memcpy(
@@ -1622,17 +1968,7 @@ namespace cs::features
 					sizeof(transform));
 			}
 
-			DirectX::XMFLOAT4 direction{};
-			if (occlusionCamera) {
-				const auto& cameraDirection =
-					occlusionCamera->GetLocalRotate()[0];
-				direction = {
-					-cameraDirection.x,
-					-cameraDirection.y,
-					-cameraDirection.z,
-					0.0f
-				};
-			}
+			const DirectX::XMFLOAT4 direction = occlusionDirection;
 			const bool valid =
 				IsFiniteMatrix(transform) && IsFiniteDirection(direction);
 			{
@@ -1668,6 +2004,7 @@ namespace cs::features
 					valid ? FailureState::kNone :
 						FailureState::kProjectionInvalid,
 				std::memory_order_release);
+			UpdateProbeVolume();
 			PublishConsumerData();
 		} catch (...) {
 			_failureState.store(
@@ -1701,8 +2038,16 @@ namespace cs::features
 			ImGui::Text(
 				"%s",
 				"Full ortho width. The map is fixed at 512x512, so more range "
-				"costs resolution one for one: 4096 is 8 units/texel; 10000 is "
-				"about 19.5 units/texel.");
+				"costs resolution one for one: 10000 is about 19.5 "
+				"units/texel.");
+		}
+		changed |= ImGui::SliderAngle(
+			"Max zenith angle", &_settings.maxZenith, 0.0f, 90.0f);
+		if (auto tooltip = ui::HoverTooltipWrapper()) {
+			ImGui::Text(
+				"%s",
+				"Controls the random sky-disc radius accumulated by the "
+				"probe volume. Smaller angles focus occlusion toward zenith.");
 		}
 		changed |= ImGui::SliderFloat(
 			"Diffuse minimum visibility",
@@ -1805,10 +2150,18 @@ namespace cs::features
 			return "unsupported_shader_resource_format";
 		case ResourceFailureReason::kTextureCreationFailed:
 			return "create_texture_2d_failed";
+		case ResourceFailureReason::kTexture3DCreationFailed:
+			return "create_texture_3d_failed";
 		case ResourceFailureReason::kShaderResourceViewCreationFailed:
 			return "create_shader_resource_view_failed";
+		case ResourceFailureReason::kUnorderedAccessViewCreationFailed:
+			return "create_unordered_access_view_failed";
 		case ResourceFailureReason::kDepthStencilViewCreationFailed:
 			return "create_depth_stencil_view_failed";
+		case ResourceFailureReason::kConstantBufferCreationFailed:
+			return "create_constant_buffer_failed";
+		case ResourceFailureReason::kComputeShaderCompilationFailed:
+			return "compile_probe_update_shader_failed";
 		case ResourceFailureReason::kUnexpectedException:
 			return "unexpected_exception";
 		default:
@@ -1837,6 +2190,10 @@ namespace cs::features
 			.Field(
 				"force_scene_traversal",
 				_forceSceneTraversal.load(std::memory_order_acquire))
+			.Field(
+				"max_zenith",
+				static_cast<double>(
+					_maxZenith.load(std::memory_order_acquire)))
 			.Field(
 				"min_diffuse_visibility",
 				static_cast<double>(
@@ -1921,16 +2278,13 @@ namespace cs::features
 						&& tiledInjection.substitutions
 							< tiledInjection.matches))
 			.Field(
-				"consumer_sampler_ready",
+				"comparison_sampler_ready",
 				_consumerSamplerReady.load(std::memory_order_acquire))
 			.Field("shared_data_ready", cs::render::IsSharedDataReady())
 			.Field(
 				"consumer_shared_data_published",
 				sharedStatus.dataPublished)
 			.Field("consumer_srv_published", sharedStatus.srvPublished)
-			.Field(
-				"consumer_sampler_published",
-				sharedStatus.samplerPublished)
 			.Field("consumer_srv_bound_last_call", sharedStatus.boundLastCall)
 			.Field(
 				"consumer_camera_published_last_call",
@@ -1975,10 +2329,6 @@ namespace cs::features
 				"consumer_rejected_no_srv",
 				static_cast<std::int64_t>(sharedStatus.rejectedNoSrv))
 			.Field(
-				"consumer_rejected_no_sampler",
-				static_cast<std::int64_t>(
-					sharedStatus.rejectedNoSampler))
-			.Field(
 				"consumer_rejected_camera_missing",
 				static_cast<std::int64_t>(
 					sharedStatus.rejectedCameraMissing))
@@ -1998,6 +2348,50 @@ namespace cs::features
 			.Field(
 				"resources_ready",
 				_resourcesReady.load(std::memory_order_acquire))
+			.Field(
+				"probe_resources_allocated",
+				_probeResourcesAllocated.load(std::memory_order_acquire))
+			.Field(
+				"probe_width",
+				static_cast<std::int64_t>(kProbeWidth))
+			.Field(
+				"probe_height",
+				static_cast<std::int64_t>(kProbeHeight))
+			.Field(
+				"probe_depth",
+				static_cast<std::int64_t>(kProbeDepth))
+			.Field(
+				"probe_storage_bytes",
+				static_cast<std::int64_t>(kProbeStorageBytes))
+			.Field(
+				"probe_update_ran_this_frame",
+				_probeUpdateRanThisFrame.load(std::memory_order_acquire))
+			.Field(
+				"probe_update_dispatch_count",
+				static_cast<std::int64_t>(
+					_probeUpdateDispatchCount.load(std::memory_order_relaxed)))
+			.Field(
+				"probe_dispatch_groups_x",
+				static_cast<std::int64_t>((kProbeWidth + 7) / 8))
+			.Field(
+				"probe_dispatch_groups_y",
+				static_cast<std::int64_t>((kProbeHeight + 7) / 8))
+			.Field(
+				"probe_dispatch_groups_z",
+				static_cast<std::int64_t>(kProbeDepth))
+			.Field(
+				"probe_reset_cells_last_dispatch",
+				static_cast<std::int64_t>(
+					_probeResetCellCount.load(std::memory_order_acquire)))
+			.Field(
+				"probe_accumulated_cells_last_dispatch",
+				static_cast<std::int64_t>(
+					_probeAccumulatedCellCount.load(std::memory_order_acquire)))
+			.Field(
+				"probe_camera_unavailable_count",
+				static_cast<std::int64_t>(
+					_probeCameraUnavailableCount.load(
+						std::memory_order_relaxed)))
 			.Field(
 				"resource_state",
 				ResourceStateName(
@@ -2086,6 +2480,27 @@ namespace cs::features
 			.Field("occlusion_direction_x", occlusion.direction.x)
 			.Field("occlusion_direction_y", occlusion.direction.y)
 			.Field("occlusion_direction_z", occlusion.direction.z)
+			.Field("probe_grid_origin_x", occlusion.probeGridOrigin.x)
+			.Field("probe_grid_origin_y", occlusion.probeGridOrigin.y)
+			.Field("probe_grid_origin_z", occlusion.probeGridOrigin.z)
+			.Field(
+				"probe_array_origin_x",
+				static_cast<std::int64_t>(occlusion.arrayOrigin.x))
+			.Field(
+				"probe_array_origin_y",
+				static_cast<std::int64_t>(occlusion.arrayOrigin.y))
+			.Field(
+				"probe_array_origin_z",
+				static_cast<std::int64_t>(occlusion.arrayOrigin.z))
+			.Field(
+				"probe_valid_margin_x",
+				static_cast<std::int64_t>(occlusion.validMargin.x))
+			.Field(
+				"probe_valid_margin_y",
+				static_cast<std::int64_t>(occlusion.validMargin.y))
+			.Field(
+				"probe_valid_margin_z",
+				static_cast<std::int64_t>(occlusion.validMargin.z))
 			.Field("occlusion_transform_00", occlusion.transform._11)
 			.Field("occlusion_transform_01", occlusion.transform._12)
 			.Field("occlusion_transform_02", occlusion.transform._13)

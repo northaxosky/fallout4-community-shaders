@@ -154,7 +154,7 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     specularAccum = ambientReflection;
 #ifdef SKYLIGHTING
     Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(positionView);
+        Skylighting::Evaluate(positionView, normalView);
     Skylighting::ApplyAmbient(
         diffuseAccum, specularAccum, skylighting);
 #endif

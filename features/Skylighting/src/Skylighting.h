@@ -19,6 +19,7 @@ struct ID3D11Device;
 struct ID3D11SamplerState;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
+struct ID3D11Texture3D;
 struct ID3D11UnorderedAccessView;
 
 namespace cs::features
@@ -30,7 +31,8 @@ namespace cs::features
 		{
 			bool enabled = true;
 			bool forceSceneTraversal = true;
-			float occlusionExtent = 4096.0f;
+			float occlusionExtent = 10000.0f;
+			float maxZenith = 3.1415926f / 2.0f;
 			float minDiffuseVisibility = 0.1f;
 			float minSpecularVisibility = 0.1f;
 		};
@@ -39,8 +41,12 @@ namespace cs::features
 		{
 			DirectX::XMFLOAT4X4 transform{};
 			DirectX::XMFLOAT4 direction{};
-			float extent = 4096.0f;
+			DirectX::XMFLOAT4 probeGridOrigin{};
+			DirectX::XMUINT4 arrayOrigin{};
+			DirectX::XMINT4 validMargin{};
+			float extent = 10000.0f;
 			bool valid = false;
+			bool probeAddressingValid = false;
 		};
 
 		static Skylighting* GetSingleton();
@@ -109,10 +115,26 @@ namespace cs::features
 			kUnexpectedExtent,
 			kUnsupportedShaderResourceFormat,
 			kTextureCreationFailed,
+			kTexture3DCreationFailed,
 			kShaderResourceViewCreationFailed,
+			kUnorderedAccessViewCreationFailed,
 			kDepthStencilViewCreationFailed,
+			kConstantBufferCreationFailed,
+			kComputeShaderCompilationFailed,
 			kUnexpectedException
 		};
+
+		struct alignas(16) ProbeUpdateConstants
+		{
+			DirectX::XMFLOAT4X4 OcclusionViewProj{};
+			DirectX::XMFLOAT4 OcclusionDirection{};
+			DirectX::XMFLOAT4 PosOffset{};
+			DirectX::XMUINT4 ArrayOrigin{};
+			DirectX::XMINT4 ValidMargin{};
+			float OcclusionExtent = 0.0f;
+			float Padding[3]{};
+		};
+		static_assert(sizeof(ProbeUpdateConstants) == 144);
 
 		Skylighting() = default;
 
@@ -123,6 +145,7 @@ namespace cs::features
 		bool EnsureResources() noexcept;
 		bool EnsureNormalizedDebugResources(ID3D11Device* a_device) noexcept;
 		bool DispatchNormalizedDebugView() noexcept;
+		bool UpdateProbeVolume() noexcept;
 		void RenderProducer() noexcept;
 		void ObserveLightingPath() noexcept;
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
@@ -139,8 +162,9 @@ namespace cs::features
 
 		std::atomic_bool _enabled{ true };
 		std::atomic_bool _forceSceneTraversal{ true };
-		std::atomic<float> _occlusionExtent{ 4096.0f };
-		std::atomic<float> _effectiveExtent{ 4096.0f };
+		std::atomic<float> _occlusionExtent{ 10000.0f };
+		std::atomic<float> _effectiveExtent{ 10000.0f };
+		std::atomic<float> _maxZenith{ 3.1415926f / 2.0f };
 		std::atomic<float> _minDiffuseVisibility{ 0.1f };
 		std::atomic<float> _minSpecularVisibility{ 0.1f };
 		std::atomic_bool _registrationsReady{ false };
@@ -171,6 +195,12 @@ namespace cs::features
 		std::atomic_bool _inOcclusionRender{ false };
 		std::atomic_bool _producerRanThisFrame{ false };
 		std::atomic_bool _projectionValid{ false };
+		std::atomic_bool _probeResourcesAllocated{ false };
+		std::atomic_bool _probeUpdateRanThisFrame{ false };
+		std::atomic_uint64_t _probeUpdateDispatchCount{ 0 };
+		std::atomic_uint64_t _probeResetCellCount{ 0 };
+		std::atomic_uint64_t _probeAccumulatedCellCount{ 0 };
+		std::atomic_uint64_t _probeCameraUnavailableCount{ 0 };
 		std::atomic_bool _debugPreviewEnabled{ false };
 		std::atomic_bool _normalizedDebugPreviewEnabled{ false };
 		std::atomic_bool _normalizedResourcesAttempted{ false };
@@ -205,6 +235,13 @@ namespace cs::features
 		winrt::com_ptr<ID3D11ShaderResourceView> _occlusionSRV;
 		winrt::com_ptr<ID3D11DepthStencilView> _occlusionDSV;
 		winrt::com_ptr<ID3D11SamplerState> _comparisonSampler;
+		winrt::com_ptr<ID3D11Texture3D> _probeTexture;
+		winrt::com_ptr<ID3D11ShaderResourceView> _probeSRV;
+		winrt::com_ptr<ID3D11UnorderedAccessView> _probeUAV;
+		winrt::com_ptr<ID3D11Texture3D> _accumFramesTexture;
+		winrt::com_ptr<ID3D11UnorderedAccessView> _accumFramesUAV;
+		winrt::com_ptr<ID3D11Buffer> _probeUpdateCB;
+		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCS;
 		winrt::com_ptr<ID3D11Texture2D> _normalizedOcclusionTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _normalizedOcclusionSRV;
 		winrt::com_ptr<ID3D11UnorderedAccessView> _normalizedOcclusionUAV;
@@ -213,6 +250,8 @@ namespace cs::features
 		winrt::com_ptr<ID3D11UnorderedAccessView> _normalizedRangeUAV;
 		winrt::com_ptr<ID3D11ComputeShader> _normalizedReduceCS;
 		winrt::com_ptr<ID3D11ComputeShader> _normalizedWriteCS;
+		bool _probeAddressingInitialized = false;
+		DirectX::XMINT3 _previousProbeCellID{};
 
 		mutable std::mutex _occlusionDataMutex;
 		OcclusionData _occlusionData;

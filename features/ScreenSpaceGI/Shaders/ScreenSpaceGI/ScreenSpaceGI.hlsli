@@ -7,7 +7,7 @@
 #include "Common/Shading.hlsli"
 
 #include "Common/Color.hlsli"
-#include "Common/SphericalHarmonics.hlsli"
+#include "../Common/SphericalHarmonics.hlsli"
 
 #ifdef WETNESS_EFFECTS
 #include "WetnessEffects/WetnessEffects.hlsli"

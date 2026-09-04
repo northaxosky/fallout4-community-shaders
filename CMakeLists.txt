@@ -294,6 +294,28 @@ target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
 add_test(NAME ScreenSpaceShadowsMath COMMAND ScreenSpaceShadowsMathTests)
 set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
 
+add_executable(SkylightingProbeMappingTests
+	tests/SkylightingProbeMappingTests.cpp
+	features/Skylighting/src/SkylightingMath.h
+)
+configure_host_test(SkylightingProbeMappingTests)
+target_include_directories(SkylightingProbeMappingTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/Skylighting/src"
+)
+
+add_test(
+	NAME SkylightingProbeMapping
+	COMMAND SkylightingProbeMappingTests
+		"${CMAKE_SOURCE_DIR}/features/Skylighting/Shaders/Skylighting/UpdateProbesCS.hlsl"
+		"${CMAKE_SOURCE_DIR}/features/Skylighting/Shaders/Skylighting/Skylighting.hlsli"
+		"${CMAKE_SOURCE_DIR}/features/Skylighting/src/Skylighting.h"
+		"${CMAKE_SOURCE_DIR}/src/Render/SharedData.h"
+)
+set_tests_properties(
+	SkylightingProbeMapping
+	PROPERTIES LABELS "render;shader;unit"
+)
+
 add_executable(TerrainShadowsMathTests
 	tests/TerrainShadowsMathTests.cpp
 	features/TerrainShadows/src/TerrainShadowsMath.h

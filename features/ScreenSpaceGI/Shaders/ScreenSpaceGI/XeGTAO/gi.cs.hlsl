@@ -5,7 +5,7 @@
 #include "../Common/Math.hlsli"
 #ifdef SSGI_BOUNCE
 #include "../Common/Color.hlsli"
-#include "../Common/SphericalHarmonics.hlsli"
+#include "../../Common/SphericalHarmonics.hlsli"
 #endif
 #include "common.hlsli"
 

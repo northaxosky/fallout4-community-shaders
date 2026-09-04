@@ -72,6 +72,9 @@ float4 main() : SV_Target
 	value += dot(Skylighting::ViewToWorld_row1, 1.0);
 	value += dot(Skylighting::ViewToWorld_row2, 1.0);
 	value += dot(Skylighting::CameraPosAdjust, 1.0);
+	value += dot(Skylighting::PosOffset, 1.0);
+	value += dot((float4)Skylighting::ArrayOrigin, 1.0);
+	value += dot((float4)Skylighting::ValidMargin, 1.0);
 	value += Skylighting::OcclusionExtent;
 	value += Skylighting::MinDiffuseVisibility;
 	value += Skylighting::MinSpecularVisibility;

@@ -104,8 +104,13 @@ enabled = true
 load = false
 
 [features.Skylighting.settings]
-# Runtime toggle for the producer. This increment does not consume the map in lighting.
+# Runtime toggle for the producer, probe update, and both lighting consumers.
 enabled = true
+force_scene_traversal = true
+occlusion_extent = 10000.0
+max_zenith = 1.5707963
+min_diffuse_visibility = 0.1
+min_specular_visibility = 0.1
 
 [features.WetnessEffects]
 load = false

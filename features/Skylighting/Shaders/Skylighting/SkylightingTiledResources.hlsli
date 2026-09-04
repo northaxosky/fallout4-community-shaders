@@ -2,8 +2,9 @@
 // Copyright (c) 2026 northaxosky
 #pragma once
 
+#include "Common/SphericalHarmonics.hlsli"
+
 namespace Skylighting
 {
-	Texture2D<float> OcclusionDepth : register(t3);
-	SamplerComparisonState OcclusionComparisonSampler : register(s0);
+	Texture3D<sh2> ProbeArray : register(t3);
 }
