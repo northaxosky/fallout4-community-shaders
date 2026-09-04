@@ -32,7 +32,6 @@ namespace cs::features
 			bool enabled = true;
 			bool forceSceneTraversal = true;
 			float occlusionExtent = 4096.0f;
-			float strength = 1.0f;
 			float minDiffuseVisibility = 0.1f;
 			float minSpecularVisibility = 0.1f;
 		};
@@ -142,7 +141,6 @@ namespace cs::features
 		std::atomic_bool _forceSceneTraversal{ true };
 		std::atomic<float> _occlusionExtent{ 4096.0f };
 		std::atomic<float> _effectiveExtent{ 4096.0f };
-		std::atomic<float> _strength{ 1.0f };
 		std::atomic<float> _minDiffuseVisibility{ 0.1f };
 		std::atomic<float> _minSpecularVisibility{ 0.1f };
 		std::atomic_bool _registrationsReady{ false };

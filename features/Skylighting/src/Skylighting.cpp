@@ -255,15 +255,6 @@ namespace cs::features
 				accept(
 					   feature_config::ReadFloat(
 						   *settingsTable,
-						   "strength",
-						   a_candidate.strength,
-						   kMinConsumerSetting,
-						   kMaxConsumerSetting),
-					   "strength",
-					   "number") &&
-				accept(
-					   feature_config::ReadFloat(
-						   *settingsTable,
 						   "min_diffuse_visibility",
 						   a_candidate.minDiffuseVisibility,
 						   kMinConsumerSetting,
@@ -694,7 +685,6 @@ namespace cs::features
 			_settings.forceSceneTraversal, std::memory_order_release);
 		_occlusionExtent.store(
 			_settings.occlusionExtent, std::memory_order_release);
-		_strength.store(_settings.strength, std::memory_order_release);
 		_minDiffuseVisibility.store(
 			_settings.minDiffuseVisibility, std::memory_order_release);
 		_minSpecularVisibility.store(
@@ -713,7 +703,6 @@ namespace cs::features
 			"force_scene_traversal", _settings.forceSceneTraversal);
 		settings.insert_or_assign(
 			"occlusion_extent", _settings.occlusionExtent);
-		settings.insert_or_assign("strength", _settings.strength);
 		settings.insert_or_assign(
 			"min_diffuse_visibility", _settings.minDiffuseVisibility);
 		settings.insert_or_assign(
@@ -1000,7 +989,6 @@ namespace cs::features
 			.OcclusionViewProj = occlusion.transform,
 			.OcclusionDirection = occlusion.direction,
 			.OcclusionExtent = occlusion.extent,
-			.Strength = _strength.load(std::memory_order_acquire),
 			.MinDiffuseVisibility =
 				_minDiffuseVisibility.load(std::memory_order_acquire),
 			.MinSpecularVisibility =
@@ -1969,18 +1957,6 @@ namespace cs::features
 				"about 19.5 units/texel.");
 		}
 		changed |= ImGui::SliderFloat(
-			"Strength",
-			&_settings.strength,
-			kMinConsumerSetting,
-			kMaxConsumerSetting,
-			"%.2f");
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
-			ImGui::Text(
-				"%s",
-				"Blends direct occlusion visibility into ambient lighting. "
-				"1.0 is upstream-equivalent; lower values attenuate the effect.");
-		}
-		changed |= ImGui::SliderFloat(
 			"Diffuse minimum visibility",
 			&_settings.minDiffuseVisibility,
 			kMinConsumerSetting,
@@ -2123,9 +2099,6 @@ namespace cs::features
 			.Field(
 				"force_scene_traversal",
 				_forceSceneTraversal.load(std::memory_order_acquire))
-			.Field(
-				"strength",
-				static_cast<double>(_strength.load(std::memory_order_acquire)))
 			.Field(
 				"min_diffuse_visibility",
 				static_cast<double>(

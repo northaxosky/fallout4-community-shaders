@@ -2,6 +2,7 @@
 
 #include <DirectXMath.h>
 
+#include <cstddef>
 #include <cstdint>
 
 struct ID3D11Device;
@@ -34,13 +35,15 @@ namespace cs::render
 		DirectX::XMFLOAT4   ViewToWorld[3]{};
 		DirectX::XMFLOAT4   CameraPosAdjust{};
 		float               OcclusionExtent = 0.0f;
-		float               Strength = 0.0f;
 		float               MinDiffuseVisibility = 1.0f;
 		float               MinSpecularVisibility = 1.0f;
 		std::uint32_t       Mode = 0;
-		std::uint32_t       pad0[3]{};
 	};
-	static_assert(sizeof(SkylightingSharedData) == 176);
+	static_assert(sizeof(SkylightingSharedData) == 160);
+	static_assert(offsetof(SkylightingSharedData, OcclusionExtent) == 144);
+	static_assert(offsetof(SkylightingSharedData, MinDiffuseVisibility) == 148);
+	static_assert(offsetof(SkylightingSharedData, MinSpecularVisibility) == 152);
+	static_assert(offsetof(SkylightingSharedData, Mode) == 156);
 
 	struct SkylightingSharedDataStatus
 	{

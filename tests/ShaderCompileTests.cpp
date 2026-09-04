@@ -425,8 +425,20 @@ namespace
 			ExpectedVariable{ "dynamicCubemapsSettings", 128, 16 },
 			ExpectedVariable{ "exponentialHeightFogSettings", 144, 16 }
 		};
-		if (shaderDesc.ConstantBuffers != 2
-			|| shaderDesc.BoundResources != 2) {
+		constexpr std::array skylightingVariables{
+			ExpectedVariable{ "OcclusionViewProj", 0, 64 },
+			ExpectedVariable{ "OcclusionDirection", 64, 16 },
+			ExpectedVariable{ "ViewToWorld_row0", 80, 16 },
+			ExpectedVariable{ "ViewToWorld_row1", 96, 16 },
+			ExpectedVariable{ "ViewToWorld_row2", 112, 16 },
+			ExpectedVariable{ "CameraPosAdjust", 128, 16 },
+			ExpectedVariable{ "OcclusionExtent", 144, 4 },
+			ExpectedVariable{ "MinDiffuseVisibility", 148, 4 },
+			ExpectedVariable{ "MinSpecularVisibility", 152, 4 },
+			ExpectedVariable{ "Mode", 156, 4 }
+		};
+		if (shaderDesc.ConstantBuffers != 3
+			|| shaderDesc.BoundResources != 3) {
 			return "active shared substrate probe emitted the wrong resource count";
 		}
 		if (auto error = ValidateConstantBuffer(
@@ -438,12 +450,21 @@ namespace
 			!error.empty()) {
 			return error;
 		}
+		if (auto error = ValidateConstantBuffer(
+				reflection.Get(),
+				"FeatureData",
+				6,
+				160,
+				featureVariables);
+			!error.empty()) {
+			return error;
+		}
 		return ValidateConstantBuffer(
 			reflection.Get(),
-			"FeatureData",
-			6,
+			"SkylightingData",
+			7,
 			160,
-			featureVariables);
+			skylightingVariables);
 	}
 
 	std::string ValidateTextureBindings(

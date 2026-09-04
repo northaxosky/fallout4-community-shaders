@@ -16,11 +16,9 @@ namespace Skylighting
 		float4 ViewToWorld_row2;
 		float4 CameraPosAdjust;
 		float OcclusionExtent;
-		float Strength;
 		float MinDiffuseVisibility;
 		float MinSpecularVisibility;
 		uint Mode;
-		uint3 SkylightingDataPad;
 	};
 
 	Texture2D<float> OcclusionDepth : register(t9);
@@ -108,15 +106,14 @@ namespace Skylighting
 		result.visibility = lerp(
 			1.0, saturate(sampledVisibility), footprintFade);
 
-		float strength = saturate(Strength);
 		float diffuseFloor = saturate(MinDiffuseVisibility);
 		float specularFloor = saturate(MinSpecularVisibility);
 		float diffuseVisibility =
 			lerp(diffuseFloor, 1.0, result.visibility);
 		float specularVisibility =
 			lerp(specularFloor, 1.0, result.visibility);
-		result.diffuse = lerp(1.0, diffuseVisibility, strength);
-		result.specular = lerp(1.0, specularVisibility, strength);
+		result.diffuse = diffuseVisibility;
+		result.specular = specularVisibility;
 		return result;
 	}
 
