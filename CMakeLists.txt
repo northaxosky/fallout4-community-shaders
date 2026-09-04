@@ -543,6 +543,10 @@ add_test(
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/radianceDisocc.cs.hlsl"
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src/ScreenSpaceGI.cpp"
 		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/DeferredContracts.hlsli"
+		"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.h"
+		"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.cpp"
+		"${CMAKE_SOURCE_DIR}/src/Render/SharedData.cpp"
+		"${CMAKE_SOURCE_DIR}/features/Skylighting/src/Skylighting.cpp"
 )
 set_tests_properties(FrameBuffer PROPERTIES LABELS "render;shader;unit")
 

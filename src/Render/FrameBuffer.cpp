@@ -348,15 +348,21 @@ namespace cs::engine
 		}
 
 		[[nodiscard]] FrameBufferRejectReason ValidateLatestSnapshot(
-			std::uint32_t a_frame) noexcept
+			std::uint32_t a_frame,
+			bool a_allowPreviousFrame) noexcept
 		{
-			if (!g_latestSnapshot.valid) {
+			if (g_latestSnapshot.sequence == 0) {
 				return FrameBufferRejectReason::kMissingSnapshot;
 			}
-			if (g_latestSnapshot.frameCount != a_frame) {
+			const bool currentFrame = g_latestSnapshot.frameCount == a_frame;
+			const bool previousFrame =
+				g_latestSnapshot.frameCount + 1u == a_frame;
+			if (!currentFrame && (!a_allowPreviousFrame || !previousFrame)) {
 				return FrameBufferRejectReason::kStaleSnapshot;
 			}
-			if (g_byteWidth.load(std::memory_order_relaxed) < kMinimumByteWidth) {
+			if (!g_latestSnapshot.valid
+				|| g_byteWidth.load(std::memory_order_relaxed)
+					< kMinimumByteWidth) {
 				return FrameBufferRejectReason::kBufferTooSmall;
 			}
 			if (!HasUsableCameraBasis(g_latestSnapshot.data)) {
@@ -388,7 +394,7 @@ namespace cs::engine
 			BeginAnchorFrame(frame);
 			g_fullscreenLightAnchorsThisFrame.fetch_add(1, std::memory_order_relaxed);
 
-			const auto rejection = ValidateLatestSnapshot(frame);
+			const auto rejection = ValidateLatestSnapshot(frame, false);
 			if (rejection != FrameBufferRejectReason::kNone) {
 				if (rejection == FrameBufferRejectReason::kNearZeroOrigin) {
 					g_nearZeroOriginRejections.fetch_add(1, std::memory_order_relaxed);
@@ -479,6 +485,24 @@ namespace cs::engine
 	const FrameBufferSnapshot& GetLatestFrameBuffer() noexcept
 	{
 		return g_latestSnapshot;
+	}
+
+	FrameBufferSnapshotQuery GetValidatedLatestFrameBuffer(
+		std::uint32_t a_frame) noexcept
+	{
+		const auto rejection = ValidateLatestSnapshot(a_frame, true);
+		if (rejection != FrameBufferRejectReason::kNone) {
+			return {
+				.snapshot = nullptr,
+				.rejectReason = rejection,
+				.previousFrame = false
+			};
+		}
+		return {
+			.snapshot = &g_latestSnapshot,
+			.rejectReason = FrameBufferRejectReason::kNone,
+			.previousFrame = g_latestSnapshot.frameCount != a_frame
+		};
 	}
 
 	FrameBufferStatus GetFrameBufferStatus() noexcept

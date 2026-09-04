@@ -36,6 +36,14 @@ namespace cs::engine
 		bool                     valid = false;
 	};
 
+	struct FrameBufferSnapshotQuery
+	{
+		const FrameBufferSnapshot* snapshot = nullptr;
+		FrameBufferRejectReason     rejectReason =
+			FrameBufferRejectReason::kMissingSnapshot;
+		bool previousFrame = false;
+	};
+
 	struct FrameBufferStatus
 	{
 		bool          hookInstalled = false;
@@ -83,6 +91,10 @@ namespace cs::engine
 
 	// Render thread only. Raw latest Unmap snapshot for diagnostics.
 	[[nodiscard]] const FrameBufferSnapshot& GetLatestFrameBuffer() noexcept;
+
+	// Render thread only. Validated latest snapshot, allowing one previous frame.
+	[[nodiscard]] FrameBufferSnapshotQuery GetValidatedLatestFrameBuffer(
+		std::uint32_t a_frame) noexcept;
 
 	[[nodiscard]] FrameBufferStatus GetFrameBufferStatus() noexcept;
 	[[nodiscard]] const char* FrameBufferPublishSourceName(

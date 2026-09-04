@@ -1962,6 +1962,10 @@ namespace cs::features
 				static_cast<std::int64_t>(
 					sharedStatus.computeSuccessfulBinds))
 			.Field(
+				"consumer_compute_previous_frame_camera_binds",
+				static_cast<std::int64_t>(
+					sharedStatus.computePreviousFrameCameraBinds))
+			.Field(
 				"consumer_rejected_no_buffer",
 				static_cast<std::int64_t>(sharedStatus.rejectedNoBuffer))
 			.Field(
@@ -1982,6 +1986,10 @@ namespace cs::features
 				"consumer_rejected_camera_stale",
 				static_cast<std::int64_t>(
 					sharedStatus.rejectedCameraStale))
+			.Field(
+				"consumer_rejected_camera_validation",
+				static_cast<std::int64_t>(
+					sharedStatus.rejectedCameraValidation))
 			.Field(
 				"consumer_validation_detail",
 				validationDetail.empty() ?

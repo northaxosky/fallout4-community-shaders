@@ -234,7 +234,11 @@ namespace
 		const std::filesystem::path& a_ssgiCommon,
 		const std::filesystem::path& a_ssgiDisocclusion,
 		const std::filesystem::path& a_ssgiSource,
-		const std::filesystem::path& a_contracts)
+		const std::filesystem::path& a_contracts,
+		const std::filesystem::path& a_frameBufferHeader,
+		const std::filesystem::path& a_frameBufferSource,
+		const std::filesystem::path& a_sharedDataSource,
+		const std::filesystem::path& a_skylightingSource)
 	{
 		const auto common = ReadFile(a_ssgiCommon);
 		Check(
@@ -281,14 +285,58 @@ namespace
 				&& contracts.contains("float4 ViewToWorld_row0;")
 				&& contracts.contains("float4 cb12_pad_15_19[5];"),
 			"the C++ mirror still matches the shared b12 contract block");
+
+		const auto frameBufferHeader = ReadFile(a_frameBufferHeader);
+		const auto frameBufferSource = ReadFile(a_frameBufferSource);
+		Check(
+			frameBufferHeader.contains("GetValidatedLatestFrameBuffer")
+				&& frameBufferHeader.contains("bool previousFrame = false;"),
+			"FrameBuffer exposes the narrow validated latest-snapshot query");
+		Check(
+			frameBufferSource.contains("ValidateLatestSnapshot(frame, false)")
+				&& frameBufferSource.contains(
+					"ValidateLatestSnapshot(a_frame, true)"),
+			"publication stays exact-frame while the compute query allows one validated lag frame");
+		Check(
+			frameBufferSource.contains("g_latestSnapshot.sequence == 0")
+				&& frameBufferSource.contains(
+					"FrameBufferRejectReason::kBufferTooSmall"),
+			"latest-snapshot validation distinguishes absence from invalid captured data");
+
+		const auto sharedData = ReadFile(a_sharedDataSource);
+		Check(
+			sharedData.contains("GetValidatedLatestFrameBuffer(currentFrame)")
+				&& sharedData.contains(
+					"const auto& publishedCamera = engine::GetFrameBuffer();"),
+			"compute uses validated latest b12 while pixel keeps the published draw snapshot");
+		Check(
+			sharedData.contains("skylightingRejectedCameraMissing")
+				&& sharedData.contains("skylightingRejectedCameraStale")
+				&& sharedData.contains(
+					"skylightingRejectedCameraValidation")
+				&& sharedData.contains(
+					"skylightingComputePreviousFrameCameraBinds"),
+			"consumer diagnostics split camera failures and report accepted lag frames");
+
+		const auto skylighting = ReadFile(a_skylightingSource);
+		Check(
+			skylighting.contains("consumer_rejected_camera_missing")
+				&& skylighting.contains("consumer_rejected_camera_stale")
+				&& skylighting.contains(
+					"consumer_rejected_camera_validation")
+				&& skylighting.contains(
+					"consumer_compute_previous_frame_camera_binds"),
+			"Skylighting telemetry exposes the camera rejection and fallback breakdown");
 	}
 }
 
 int main(int argc, char** argv)
 {
-	if (argc < 5) {
+	if (argc < 9) {
 		std::cerr << "usage: FrameBufferTests <ssgi common.hlsli> <radianceDisocc.cs.hlsl>"
-					 " <ScreenSpaceGI.cpp> <DeferredContracts.hlsli>\n";
+					 " <ScreenSpaceGI.cpp> <DeferredContracts.hlsli>"
+					 " <FrameBuffer.h> <FrameBuffer.cpp> <SharedData.cpp>"
+					 " <Skylighting.cpp>\n";
 		return 2;
 	}
 
@@ -298,7 +346,15 @@ int main(int argc, char** argv)
 	TestDirectionReconstruction();
 	TestProjectionClassifier();
 	TestCameraBasisGuard();
-	TestSourceContracts(argv[1], argv[2], argv[3], argv[4]);
+	TestSourceContracts(
+		argv[1],
+		argv[2],
+		argv[3],
+		argv[4],
+		argv[5],
+		argv[6],
+		argv[7],
+		argv[8]);
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

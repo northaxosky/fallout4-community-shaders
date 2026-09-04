@@ -64,12 +64,14 @@ namespace cs::render
 		std::uint64_t pixelSuccessfulBinds = 0;
 		std::uint64_t computeBindCalls = 0;
 		std::uint64_t computeSuccessfulBinds = 0;
+		std::uint64_t computePreviousFrameCameraBinds = 0;
 		std::uint64_t rejectedNoBuffer = 0;
 		std::uint64_t rejectedNoData = 0;
 		std::uint64_t rejectedNoSrv = 0;
 		std::uint64_t rejectedNoSampler = 0;
 		std::uint64_t rejectedCameraMissing = 0;
 		std::uint64_t rejectedCameraStale = 0;
+		std::uint64_t rejectedCameraValidation = 0;
 	};
 
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);

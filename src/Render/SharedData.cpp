@@ -78,12 +78,14 @@ namespace cs::render
 			std::atomic_uint64_t         skylightingPixelSuccessfulBinds{ 0 };
 			std::atomic_uint64_t         skylightingComputeBindCalls{ 0 };
 			std::atomic_uint64_t         skylightingComputeSuccessfulBinds{ 0 };
+			std::atomic_uint64_t         skylightingComputePreviousFrameCameraBinds{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoBuffer{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoData{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoSRV{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoSampler{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraMissing{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraStale{ 0 };
+			std::atomic_uint64_t         skylightingRejectedCameraValidation{ 0 };
 			// Render thread only.
 			float                        timer = 0.0f;
 			bool                         updateInstalled = false;
@@ -263,41 +265,76 @@ namespace cs::render
 				resourcesAvailable = false;
 			}
 
-			const auto& camera = engine::GetFrameBuffer();
 			auto* graphicsState = engine::GetGraphicsState();
 			const auto currentFrame =
 				graphicsState ? graphicsState->frameCount : UINT32_MAX;
-			const bool cameraCurrent =
-				camera.valid && camera.frameCount == currentFrame;
-			if (data.Mode != 0 && !camera.valid) {
-				state.skylightingRejectedCameraMissing.fetch_add(
-					1, std::memory_order_relaxed);
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Skylighting consumer was called without an exact "
-					"fullscreen-light camera snapshot; taking the identity path.");
-			} else if (data.Mode != 0 && !cameraCurrent) {
-				state.skylightingRejectedCameraStale.fetch_add(
-					1, std::memory_order_relaxed);
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Skylighting consumer received a stale fullscreen-light "
-					"camera snapshot; taking the identity path.");
+			engine::FrameBufferSnapshotQuery cameraQuery;
+			if (a_stage == engine::ShaderStage::kCompute) {
+				cameraQuery =
+					engine::GetValidatedLatestFrameBuffer(currentFrame);
+			} else {
+				const auto& publishedCamera = engine::GetFrameBuffer();
+				if (!publishedCamera.valid) {
+					cameraQuery.rejectReason =
+						engine::FrameBufferRejectReason::kMissingSnapshot;
+				} else if (publishedCamera.frameCount != currentFrame) {
+					cameraQuery.rejectReason =
+						engine::FrameBufferRejectReason::kStaleSnapshot;
+				} else {
+					cameraQuery.snapshot = &publishedCamera;
+					cameraQuery.rejectReason =
+						engine::FrameBufferRejectReason::kNone;
+				}
+			}
+			const auto* camera = cameraQuery.snapshot;
+			const bool cameraReady = camera != nullptr;
+			if (data.Mode != 0
+				&& cameraQuery.rejectReason
+					!= engine::FrameBufferRejectReason::kNone) {
+				switch (cameraQuery.rejectReason) {
+				case engine::FrameBufferRejectReason::kMissingSnapshot:
+					state.skylightingRejectedCameraMissing.fetch_add(
+						1, std::memory_order_relaxed);
+					CS_LOG_ONCE(
+						L,
+						spdlog::level::err,
+						"Skylighting consumer has no camera snapshot; taking "
+						"the identity path.");
+					break;
+				case engine::FrameBufferRejectReason::kStaleSnapshot:
+					state.skylightingRejectedCameraStale.fetch_add(
+						1, std::memory_order_relaxed);
+					CS_LOG_ONCE(
+						L,
+						spdlog::level::err,
+						"Skylighting consumer camera snapshot is stale; "
+						"taking the identity path.");
+					break;
+				default:
+					state.skylightingRejectedCameraValidation.fetch_add(
+						1, std::memory_order_relaxed);
+					CS_LOG_ONCE(
+						L,
+						spdlog::level::err,
+						"Skylighting consumer camera snapshot failed "
+						"validation ({}); taking the identity path.",
+						engine::FrameBufferRejectReasonName(
+							cameraQuery.rejectReason));
+					break;
+				}
 			}
 
-			if (resourcesAvailable && cameraCurrent) {
+			if (resourcesAvailable && cameraReady) {
 				for (std::size_t row = 0; row < 3; ++row)
-					data.ViewToWorld[row] = camera.data.ViewToWorld[row];
-				data.CameraPosAdjust = camera.data.CameraPosAdjust;
+					data.ViewToWorld[row] = camera->data.ViewToWorld[row];
+				data.CameraPosAdjust = camera->data.CameraPosAdjust;
 				state.skylightingCameraPublishedLastCall.store(
 					true, std::memory_order_relaxed);
 			} else {
 				data.Mode = 0;
 			}
 
-			const auto cameraSequence = cameraCurrent ? camera.sequence : 0;
+			const auto cameraSequence = cameraReady ? camera->sequence : 0;
 			bool needsWrite = false;
 			{
 				const std::lock_guard lock(state.skylightingMutex);
@@ -333,7 +370,7 @@ namespace cs::render
 			if (a_stage == engine::ShaderStage::kCompute) {
 				a_context->CSSetConstantBuffers(
 					kSkylightingDataSlot, 1, &buffer);
-				if (resourcesAvailable && cameraCurrent) {
+				if (resourcesAvailable && cameraReady) {
 					// A tiled-frame capture must verify this slot and bind timing survive DeferredLightsImpl rebinds.
 					a_context->CSSetShaderResources(
 						kSkylightingComputeTextureSlot, 1, &srv);
@@ -343,14 +380,14 @@ namespace cs::render
 			} else {
 				a_context->PSSetConstantBuffers(
 					kSkylightingDataSlot, 1, &buffer);
-				if (resourcesAvailable && cameraCurrent) {
+				if (resourcesAvailable && cameraReady) {
 					a_context->PSSetShaderResources(
 						kSkylightingTextureSlot, 1, &srv);
 					a_context->PSSetSamplers(
 						kSkylightingSamplerSlot, 1, &sampler);
 				}
 			}
-			const bool bound = resourcesAvailable && cameraCurrent;
+			const bool bound = resourcesAvailable && cameraReady;
 			state.skylightingBoundLastCall.store(
 				bound, std::memory_order_relaxed);
 			if (bound) {
@@ -361,6 +398,16 @@ namespace cs::render
 						state.skylightingComputeSuccessfulBinds :
 						state.skylightingPixelSuccessfulBinds;
 				stageSuccessfulBinds.fetch_add(1, std::memory_order_relaxed);
+				if (a_stage == engine::ShaderStage::kCompute
+						&& cameraQuery.previousFrame) {
+						state.skylightingComputePreviousFrameCameraBinds.fetch_add(
+							1, std::memory_order_relaxed);
+						CS_LOG_ONCE(
+							L,
+							spdlog::level::warn,
+							"Skylighting compute consumer accepted a validated "
+							"one-frame-old camera snapshot.");
+				}
 				CS_LOG_ONCE(
 					L,
 					spdlog::level::info,
@@ -765,6 +812,9 @@ namespace cs::render
 			.computeSuccessfulBinds =
 				state.skylightingComputeSuccessfulBinds.load(
 					std::memory_order_relaxed),
+			.computePreviousFrameCameraBinds =
+				state.skylightingComputePreviousFrameCameraBinds.load(
+					std::memory_order_relaxed),
 			.rejectedNoBuffer = state.skylightingRejectedNoBuffer.load(
 				std::memory_order_relaxed),
 			.rejectedNoData = state.skylightingRejectedNoData.load(
@@ -778,6 +828,9 @@ namespace cs::render
 					std::memory_order_relaxed),
 			.rejectedCameraStale =
 				state.skylightingRejectedCameraStale.load(
+					std::memory_order_relaxed),
+			.rejectedCameraValidation =
+				state.skylightingRejectedCameraValidation.load(
 					std::memory_order_relaxed)
 		};
 		{
