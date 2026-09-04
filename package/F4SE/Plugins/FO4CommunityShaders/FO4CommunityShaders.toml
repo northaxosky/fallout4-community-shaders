@@ -90,6 +90,13 @@ load = false
 # Runtime toggle for capture and deferred-composite consumption.
 enabled = true
 
+[features.Skylighting]
+load = false
+
+[features.Skylighting.settings]
+# Runtime toggle for the producer. This increment does not consume the map in lighting.
+enabled = true
+
 [features.WetnessEffects]
 load = false
 

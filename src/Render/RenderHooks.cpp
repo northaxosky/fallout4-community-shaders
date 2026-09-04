@@ -169,14 +169,14 @@ namespace cs::engine
 					g_insideDeferredLightsImpl,
 					g_insideDeferredComposite,
 					a_residualR9d);
+				if (decision.dispatchFullscreenLightCallbacks) {
+					Dispatch(g_preFullscreenDeferredLightDraw);
+				}
 				if (decision.dispatchInjections) {
 					auto* rendererData = RE::BSGraphics::GetRendererData();
 					DispatchInjectionsForBoundPixelShader(rendererData ?
 						reinterpret_cast<ID3D11DeviceContext*>(rendererData->context) :
 						nullptr);
-				}
-				if (decision.dispatchFullscreenLightCallbacks) {
-					Dispatch(g_preFullscreenDeferredLightDraw);
 				}
 			}
 			static inline REL::Relocation<void(bool, bool)> func;

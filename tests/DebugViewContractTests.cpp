@@ -14,8 +14,9 @@
 namespace
 {
 	int failures = 0;
-	constexpr std::array<std::string_view, 8> kExpectedCatalogs{
+	constexpr std::array<std::string_view, 9> kExpectedCatalogs{
 		"DynamicCubemaps",
+		"Skylighting",
 		"ScreenSpaceShadows",
 		"TerrainShadows",
 		"ScreenSpaceGI",
@@ -357,6 +358,19 @@ namespace
 		return false;
 	}
 
+	std::size_t CountOccurrences(
+		std::string_view a_source, std::string_view a_needle)
+	{
+		std::size_t count = 0;
+		std::size_t search = 0;
+		while ((search = a_source.find(a_needle, search))
+			!= std::string_view::npos) {
+			++count;
+			search += a_needle.size();
+		}
+		return count;
+	}
+
 	void CheckCatalog(
 		const std::vector<SourceFile>& a_sources,
 		const FeatureCatalog& a_catalog,
@@ -389,6 +403,18 @@ namespace
 			return;
 		}
 		++a_catalogCount;
+		if (a_catalog.className == "Skylighting" &&
+			(CountOccurrences(*catalogBody, "FeatureDebugView{") != 3 ||
+			 !catalogBody->contains(
+				 ".GetNormalizedOcclusionDebugTexture();") ||
+			 !catalogBody->contains(
+				 "FeatureDebugViewKind::kFullscreen"))) {
+			std::cerr
+				<< "FAIL: Skylighting must expose separate raw and "
+				   "frame-normalized occlusion views plus fullscreen "
+				   "visibility\n";
+			++failures;
+		}
 
 		auto settingsBody = FindMethodBody(
 			a_sources,

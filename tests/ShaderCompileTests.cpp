@@ -1549,7 +1549,7 @@ namespace
 					+ std::to_string(inverseSquareTiledRows));
 		}
 
-		const std::array<ShaderCase, 3> featureCompositionCases{ {
+		const std::array<ShaderCase, 6> featureCompositionCases{ {
 			{
 				"BSDFLightShader.hlsl",
 				{
@@ -1581,6 +1581,43 @@ namespace
 					{
 						cs::engine::shader_injection_defines::
 							kScreenSpaceShadows,
+						"1"
+					}
+				},
+				"ps_5_0"
+			},
+			{
+				"BSDFLightShader.hlsl",
+				{
+					{ "AMBIENT_IBL_IN_LIGHT", "1" },
+					{ "BSDFLIGHT_PS_DEFERRED", "1" },
+					{ "LIGHT_TYPE", "1" },
+					{
+						cs::engine::shader_injection_defines::kSkylighting,
+						"1"
+					}
+				},
+				"ps_5_0"
+			},
+			{
+				"BSDFLightShader.hlsl",
+				{
+					{ "BSDFLIGHT_PS_AMBIENT", "1" },
+					{
+						cs::engine::shader_injection_defines::kSkylighting,
+						"1"
+					}
+				},
+				"ps_5_0"
+			},
+			{
+				"BSDFLightShader.hlsl",
+				{
+					{ "BSDFLIGHT_PS_DEFERRED", "1" },
+					{ "LIGHT_TYPE", "2" },
+					{ "POINTOMNI", "1" },
+					{
+						cs::engine::shader_injection_defines::kSkylighting,
 						"1"
 					}
 				},
@@ -1787,6 +1824,18 @@ namespace
 					++inverseSquareRows;
 				else
 					++inverseSquareInertRows;
+
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					{
+						{
+							cs::engine::shader_injection_defines::kSkylighting,
+							"1"
+						}
+					});
+				++contributorCompositionCount;
 
 				for (const auto& defines :
 					inverseSquareCompositions) {

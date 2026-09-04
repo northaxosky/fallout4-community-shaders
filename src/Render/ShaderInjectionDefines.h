@@ -10,6 +10,7 @@ namespace cs::engine::shader_injection_defines
 	inline constexpr auto kWetnessEffectsFullscreenDebug =
 		"WETNESS_EFFECTS_FULLSCREEN_DEBUG";
 	inline constexpr auto kInverseSquareLighting = "INVERSE_SQUARE_LIGHTING";
+	inline constexpr auto kSkylighting = "SKYLIGHTING";
 	inline constexpr auto kDynamicCubemaps = "DYNAMIC_CUBEMAPS";
 	inline constexpr auto kDynamicCubemapsFullscreenDebug =
 		"DYNAMIC_CUBEMAPS_FULLSCREEN_DEBUG";

@@ -21,6 +21,14 @@
 #include "WaterEffects/WaterCaustics.hlsli"
 #endif
 
+#ifdef SKYLIGHTING
+#if defined(AMBIENT_IBL_IN_LIGHT) || defined(AMBIENT) \
+    || defined(BSDFLIGHT_PS_AMBIENT)
+#define FO4_SKYLIGHTING_AMBIENT_CONSUMER 1
+#endif
+#include "Skylighting/Skylighting.hlsli"
+#endif
+
 #ifdef BSDFLIGHT_PS_DEFERRED
 
 #define LIGHT_TYPE_DIRECTIONAL 1
@@ -757,6 +765,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -973,6 +984,15 @@ PS_OUTPUT main(PS_INPUT input)
     forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
     finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
+#ifdef AMBIENT_IBL_IN_LIGHT
+#ifdef SKYLIGHTING
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(posView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
+#endif
+
     float specMix = (1.0 - schlickFres * 0.5);
     output.specular.xyz = shadowPcf * specMix * brdfSpecular;
 #ifdef AMBIENT_IBL_IN_LIGHT
@@ -987,6 +1007,12 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse.xyz /= 3.0;
     output.diffuse.w   = 0.0;
 
+#ifdef AMBIENT_IBL_IN_LIGHT
+#ifdef SKYLIGHTING
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
+#endif
+#endif
     return output;
 }
 
@@ -1076,6 +1102,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -1407,6 +1436,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -2292,6 +2324,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -2655,6 +2690,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -2900,6 +2938,12 @@ PS_OUTPUT main(PS_INPUT input)
     finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
     float specMix = mad(schlickFres, -0.5, 1.0);
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(posView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
 #ifdef WETNESS_EFFECTS
     float wetness = WetnessEffects::GetWetness(
         normalView,
@@ -2945,6 +2989,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 #endif
 
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
+#endif
     return output;
 }
 #endif
@@ -3319,6 +3367,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -3787,6 +3838,12 @@ PS_OUTPUT main(PS_INPUT input)
 #else
     float specMix = 1.0 - schlickFres * 0.5;
 #endif
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(posView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
 #ifdef WETNESS_EFFECTS
     float wetness = WetnessEffects::GetWetness(
         normalView,
@@ -3853,6 +3910,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 #endif
 
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
+#endif
     return output;
 }
 
@@ -4454,6 +4515,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -4819,6 +4883,12 @@ PS_OUTPUT main(PS_INPUT input)
     float specMix = 1.0 - schlickFres * 0.5;
 #endif
 
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(posView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
 #ifdef WETNESS_EFFECTS
     float wetness = WetnessEffects::GetWetness(
         normalView,
@@ -4877,6 +4947,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 #endif
 
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
+#endif
     return output;
 }
 #endif
@@ -5021,6 +5095,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -5418,6 +5495,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -5795,6 +5875,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -5985,8 +6068,18 @@ PS_OUTPUT main(PS_INPUT input)
         ambientSpecular = (fresnel * pow(ambientReflected, 2.2)) * material.y;
     }
 
+#ifdef SKYLIGHTING
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(posView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
     output.specular = float4(splitShadow.xxx, 1.0) + float4(ambientSpecular, 0.0);
     output.diffuse = float4(ambientDiffuse, 1.0) + float4(splitShadow.xxx, shadowBlend);
+#endif
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
 #endif
     return output;
 }
@@ -6172,6 +6265,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
 
     float4 uv4 = input.position.xyxy * ScreenSize.xyzw;
@@ -6635,6 +6731,12 @@ PS_OUTPUT main(PS_INPUT input)
     brdfSpecular *= causticsMult;
 #endif
 
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(posView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
 #ifdef WETNESS_EFFECTS
     float wetness = WetnessEffects::GetWetness(
         normalView,
@@ -6720,6 +6822,10 @@ PS_OUTPUT main(PS_INPUT input)
 #endif
 #endif
 
+#if defined(AMBIENT) && defined(SKYLIGHTING)
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
+#endif
     return output;
 }
 
@@ -6780,6 +6886,9 @@ float3 EvaluateAmbientGradient(float3 direction)
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     float4 screen = input.position.xyxy * ScreenSize;
     float2 uv = screen.xy;
     float gradientX = ddx(uv.x);
@@ -6840,11 +6949,21 @@ PS_OUTPUT main(PS_INPUT input)
     bool isMaterial1 = abs(material.z * 255.0 - 1.0) < 0.25;
     ambientSpecular *= isMaterial1 ? 0.0 : material.y;
 
+#ifdef SKYLIGHTING
+    Skylighting::Evaluation skylighting =
+        Skylighting::Evaluate(positionView);
+    Skylighting::ApplyAmbient(
+        ambientDiffuse, ambientSpecular, skylighting);
+#endif
     PS_OUTPUT output;
     output.specular = float4(0.0, 0.0, 0.0, 1.0);
     output.specular += float4(ambientSpecular, 0.0);
     output.diffuse = float4(0.0, 0.0, 0.0, 0.0);
     output.diffuse += float4(ambientDiffuse / 3.0, 0.0);
+#ifdef SKYLIGHTING
+    Skylighting::ApplyFullscreenDebug(
+        output.diffuse, output.specular, skylighting);
+#endif
     return output;
 }
 #endif
@@ -6895,6 +7014,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     float4 screen = input.position.xyxy * ScreenSize;
     float2 uv = screen.xy;
     float gradientX = ddx(uv.x);
@@ -7011,6 +7133,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     float4 screen = input.position.xyxy * ScreenSize;
     float2 uv = screen.xy;
     float gradientX = ddx(uv.x);
@@ -7097,6 +7222,9 @@ struct PS_OUTPUT
 
 PS_OUTPUT main(PS_INPUT input)
 {
+#ifdef SKYLIGHTING
+    Skylighting::DiscardNonConsumerDebug();
+#endif
     PS_OUTPUT output;
     output.overdraw = float4(0.0625, 0.0625, 0.0625, 0.0);
     output.auxiliary = float4(0.0, 0.0, 0.0, 0.0);
