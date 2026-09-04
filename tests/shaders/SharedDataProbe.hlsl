@@ -57,6 +57,10 @@ float4 main() : SV_Target
 	value += SharedData::dynamicCubemapsSettings.Enabled;
 	value += SharedData::dynamicCubemapsSettings.DebugVisualization;
 	value += dot(SharedData::dynamicCubemapsSettings.pad0, 1.0);
+	value += SharedData::exponentialHeightFogSettings.Mode;
+	value += SharedData::exponentialHeightFogSettings.DensityMultiplier;
+	value += SharedData::exponentialHeightFogSettings.HeightFalloffMultiplier;
+	value += SharedData::exponentialHeightFogSettings.pad0;
 	return value.xxxx;
 #else
 	return 0.0;

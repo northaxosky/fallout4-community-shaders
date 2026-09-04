@@ -20,7 +20,7 @@ bslighting = true
 bsdf_light = true
 bsdf_composite = true
 df_tiled_lighting = true
-# Deferred composite lacks native proof; it and VLS lack selectable stock SHA-1 guards.
+# Every listed target has a selectable stock SHA-1 guard.
 
 [menu]
 first_time_setup_completed = false
@@ -82,6 +82,16 @@ exterior_strength = 1.0
 interior_strength = 1.0
 # Upstream's default size sqrt(2) maps to sqrt(3920) game units.
 near_field_distance = 62.6099034
+
+[features.ExponentialHeightFog]
+load = false
+
+[features.ExponentialHeightFog.settings]
+# Runtime toggle. Off executes the stock fog equations in the injected shader.
+enabled = true
+# Multipliers around the baseline fitted from the current weather ramps.
+density_multiplier = 1.0
+height_falloff_multiplier = 1.0
 
 [features.DynamicCubemaps]
 load = false

@@ -58,6 +58,7 @@ injected in place of the stock shaders.
 | **Terrain Shadows** | Long-range worldspace terrain shadowing from an xLODGen heightmap, marched into a shadow-height map and multiplied into the deferred directional light. |
 | **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
 | **Inverse Square Lighting** | Configurable interior/exterior inverse-square attenuation for owned deferred opaque punctual lights, with a softened near field. |
+| **Exponential Height Fog** | Weather-driven exponential distance extinction and height falloff in Fallout 4's deferred exterior fog composite. |
 | **Dynamic Cubemaps** | Scene capture and GGX-prefiltered environment reflections for native deferred IBL, opted-in forward materials, and water. |
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Water Effects** | Animated water caustics projected onto submerged surfaces lit by the sun. |
@@ -120,7 +121,8 @@ and the theme and fonts it draws with. The overlay and RenderDoc hotkeys above a
 Feature settings can expose persisted texture previews and fullscreen debug views. Texture
 previews are independent; one fullscreen view can replace the scene at a time. Terrain Shadows
 provides fullscreen grayscale views of its sampled shadow term and raw heightmap. Inverse Square
-Lighting provides a live left-vanilla/right-configured comparison.
+Lighting provides a live left-vanilla/right-configured comparison. Exponential Height Fog exposes
+the final fog factor as pre-colour-mix greyscale.
 
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:
@@ -181,9 +183,9 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 ## Compatibility notes
 
 - **ENB is not supported.** Features whose effects overlap ENB - Screen Space Shadows, Terrain
-  Shadows, Screen Space GI, Inverse Square Lighting, Dynamic Cubemaps, Wetness Effects, and
-  Upscaling - deactivate themselves when ENB is loaded. The remaining features still run, but the
-  combination is untested.
+  Shadows, Screen Space GI, Inverse Square Lighting, Exponential Height Fog, Dynamic Cubemaps,
+  Wetness Effects, and Upscaling - deactivate themselves when ENB is loaded. The remaining features
+  still run, but the combination is untested.
 - **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
   load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
   needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR

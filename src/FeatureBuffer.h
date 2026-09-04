@@ -70,6 +70,15 @@ namespace cs
 	};
 	static_assert(sizeof(DynamicCubemapsFeatureData) == 16);
 
+	struct alignas(16) ExponentialHeightFogFeatureData
+	{
+		std::uint32_t Mode = 0;
+		float         DensityMultiplier = 0.0f;
+		float         HeightFalloffMultiplier = 0.0f;
+		float         pad0 = 0.0f;
+	};
+	static_assert(sizeof(ExponentialHeightFogFeatureData) == 16);
+
 	struct alignas(16) FeatureDataCB
 	{
 		ScreenSpaceShadowsFeatureData     screenSpaceShadowsSettings;
@@ -79,8 +88,9 @@ namespace cs
 		InverseSquareLightingFeatureData inverseSquareLightingSettings;
 		WaterEffectsFeatureData           waterEffectsSettings;
 		DynamicCubemapsFeatureData        dynamicCubemapsSettings;
+		ExponentialHeightFogFeatureData   exponentialHeightFogSettings;
 	};
-	static_assert(sizeof(FeatureDataCB) == 144);
+	static_assert(sizeof(FeatureDataCB) == 160);
 	static_assert(sizeof(FeatureDataCB) % 16 == 0);
 	static_assert(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
 	static_assert(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
@@ -107,6 +117,11 @@ namespace cs
 	static_assert(offsetof(FeatureDataCB, dynamicCubemapsSettings) == 128);
 	static_assert(offsetof(DynamicCubemapsFeatureData, Enabled) == 0);
 	static_assert(offsetof(DynamicCubemapsFeatureData, DebugVisualization) == 4);
+	static_assert(offsetof(FeatureDataCB, exponentialHeightFogSettings) == 144);
+	static_assert(offsetof(ExponentialHeightFogFeatureData, Mode) == 0);
+	static_assert(offsetof(ExponentialHeightFogFeatureData, DensityMultiplier) == 4);
+	static_assert(
+		offsetof(ExponentialHeightFogFeatureData, HeightFalloffMultiplier) == 8);
 
 	// inactive contributors leave zeroed blocks
 	FeatureDataCB GetFeatureBufferData();

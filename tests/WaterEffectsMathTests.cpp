@@ -269,7 +269,7 @@ namespace
 		static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
 		static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
 		static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 112);
-		static_assert(sizeof(FeatureDataCB) == 144);
+		static_assert(sizeof(FeatureDataCB) == 160);
 
 		const WaterEffectsFeatureData data{};
 		CHECK(data.Mode == 0);
@@ -379,7 +379,10 @@ namespace
 		const auto dynamicMember =
 			sharedData.find("dynamicCubemapsSettings;", member);
 		CHECK(dynamicMember != std::string::npos);
-		CHECK(sharedData.find("Settings ", dynamicMember) == std::string::npos);
+		const auto fogMember =
+			sharedData.find("exponentialHeightFogSettings;", dynamicMember);
+		CHECK(fogMember != std::string::npos);
+		CHECK(sharedData.find("Settings ", fogMember) == std::string::npos);
 	}
 
 	void TestLiveSettingsContract(const std::filesystem::path& a_sourcePath)

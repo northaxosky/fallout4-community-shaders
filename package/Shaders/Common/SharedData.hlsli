@@ -84,6 +84,14 @@ namespace SharedData
 		uint2 pad0;
 	};
 
+	struct ExponentialHeightFogSettings
+	{
+		uint Mode;
+		float DensityMultiplier;
+		float HeightFalloffMultiplier;
+		float pad0;
+	};
+
 	cbuffer FeatureData : register(b6)
 	{
 		ScreenSpaceShadowsSettings screenSpaceShadowsSettings;
@@ -93,6 +101,7 @@ namespace SharedData
 		InverseSquareLightingSettings inverseSquareLightingSettings;
 		WaterEffectsSettings waterEffectsSettings;
 		DynamicCubemapsSettings dynamicCubemapsSettings;
+		ExponentialHeightFogSettings exponentialHeightFogSettings;
 	};
 
 	// standard D3D depth: near = 0, far = 1

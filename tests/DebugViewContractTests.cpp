@@ -14,8 +14,9 @@
 namespace
 {
 	int failures = 0;
-	constexpr std::array<std::string_view, 9> kExpectedCatalogs{
+	constexpr std::array<std::string_view, 10> kExpectedCatalogs{
 		"DynamicCubemaps",
+		"ExponentialHeightFog",
 		"Skylighting",
 		"ScreenSpaceShadows",
 		"TerrainShadows",

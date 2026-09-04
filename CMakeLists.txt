@@ -196,6 +196,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(TerrainShadows)
 	register_feature(ScreenSpaceGI)
 	register_feature(InverseSquareLighting)
+	register_feature(ExponentialHeightFog)
 	register_feature(DynamicCubemaps)
 	register_feature(Skylighting)
 	register_feature(WetnessEffects)
@@ -371,6 +372,27 @@ add_test(
 )
 set_tests_properties(
 	InverseSquareLightingMath
+	PROPERTIES LABELS "render;shader;unit"
+)
+
+add_executable(ExponentialHeightFogMathTests
+	tests/ExponentialHeightFogMathTests.cpp
+	features/ExponentialHeightFog/src/ExponentialHeightFogMath.h
+	src/FeatureBuffer.h
+)
+configure_host_test(ExponentialHeightFogMathTests)
+target_include_directories(ExponentialHeightFogMathTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/src"
+)
+
+add_test(
+	NAME ExponentialHeightFogMath
+	COMMAND ExponentialHeightFogMathTests
+		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFCompositeShader.hlsl"
+		"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/Shaders/ExponentialHeightFog/ExponentialHeightFog.hlsli"
+)
+set_tests_properties(
+	ExponentialHeightFogMath
 	PROPERTIES LABELS "render;shader;unit"
 )
 
@@ -587,6 +609,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/DynamicCubemaps/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Skylighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"

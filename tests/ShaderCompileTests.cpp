@@ -11,11 +11,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 #include <d3d11shader.h>
 #include <d3dcompiler.h>
 #include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
@@ -418,7 +422,8 @@ namespace
 			ExpectedVariable{
 				"inverseSquareLightingSettings", 96, 16 },
 			ExpectedVariable{ "waterEffectsSettings", 112, 16 },
-			ExpectedVariable{ "dynamicCubemapsSettings", 128, 16 }
+			ExpectedVariable{ "dynamicCubemapsSettings", 128, 16 },
+			ExpectedVariable{ "exponentialHeightFogSettings", 144, 16 }
 		};
 		if (shaderDesc.ConstantBuffers != 2
 			|| shaderDesc.BoundResources != 2) {
@@ -437,7 +442,7 @@ namespace
 			reflection.Get(),
 			"FeatureData",
 			6,
-			144,
+			160,
 			featureVariables);
 	}
 
@@ -1212,6 +1217,7 @@ namespace
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
 		std::size_t inverseSquareInertRows = 0;
+		std::size_t exponentialFogRows = 0;
 	};
 
 	// The SSGI composition extends the existing plugin texture block.
@@ -1280,6 +1286,257 @@ namespace
 		return lightType != defines.end() && lightType->second != "1";
 	}
 
+	std::string TrimLeft(std::string_view a_text)
+	{
+		const auto first = a_text.find_first_not_of(" \t\r");
+		return first == std::string_view::npos ?
+			std::string{} :
+			std::string(a_text.substr(first));
+	}
+
+	std::string NormalizeShaderSource(std::string_view a_source)
+	{
+		std::string normalized;
+		normalized.reserve(a_source.size());
+		for (const char character : a_source) {
+			if (!std::isspace(static_cast<unsigned char>(character)))
+				normalized.push_back(character);
+		}
+		return normalized;
+	}
+
+	bool HasVanillaHeightFogSignature(std::string_view a_source)
+	{
+		const auto source = NormalizeShaderSource(a_source);
+		const bool hasHeightRemap =
+			(source.contains("saturate(") && source.contains("[46].xy")
+				&& source.contains("[46].zw"))
+			|| source.contains(
+				"FogHeightRamp.xy-FogHeightRamp.zw")
+			|| source.contains(
+				"FogHeightRampScaleBiasPair.xy-FogHeightRampScaleBiasPair.zw");
+		const bool hasDistanceExtinction =
+			(source.contains("pow(") && source.contains("[42].w"))
+			|| source.contains(
+				"pow(distanceFactor,FogNearLowColorAndPower.w)")
+			|| source.contains(
+				"pow(distanceFactor,FogNearLowColor_and_power.w)");
+		return hasHeightRemap && hasDistanceExtinction;
+	}
+
+	bool IsPositiveExponentialFogGuard(std::string_view a_directive)
+	{
+		const auto directive = NormalizeShaderSource(a_directive);
+		return directive == "#ifdefEXPONENTIAL_HEIGHT_FOG"
+			|| directive == "#ifdefined(EXPONENTIAL_HEIGHT_FOG)"
+			|| directive == "#ifdefinedEXPONENTIAL_HEIGHT_FOG";
+	}
+
+	bool HasGuardedExponentialFogTreatment(std::string_view a_source)
+	{
+		std::vector<bool> guards;
+		bool hasEvaluate = false;
+		bool hasHeightOverride = false;
+		bool hasDistanceOverride = false;
+		std::size_t offset = 0;
+		while (offset <= a_source.size()) {
+			const auto end = a_source.find('\n', offset);
+			const auto line = a_source.substr(
+				offset,
+				end == std::string_view::npos ?
+					a_source.size() - offset :
+					end - offset);
+			const auto trimmed = TrimLeft(line);
+			if (trimmed.starts_with("#ifdef")
+				|| trimmed.starts_with("#ifndef")
+				|| trimmed.starts_with("#if ")) {
+				guards.push_back(IsPositiveExponentialFogGuard(trimmed));
+			} else if (trimmed.starts_with("#else")) {
+				if (!guards.empty())
+					guards.back() = false;
+			} else if (trimmed.starts_with("#elif")) {
+				if (!guards.empty())
+					guards.back() = IsPositiveExponentialFogGuard(trimmed);
+			} else if (trimmed.starts_with("#endif")) {
+				if (!guards.empty())
+					guards.pop_back();
+			} else if (std::ranges::any_of(guards, std::identity{})) {
+				const auto normalized = NormalizeShaderSource(line);
+				hasEvaluate = hasEvaluate
+					|| normalized.contains(
+						"ExponentialHeightFog::TryEvaluate(");
+				hasHeightOverride = hasHeightOverride
+					|| normalized.contains("=exponentialHeight;");
+				hasDistanceOverride = hasDistanceOverride
+					|| normalized.contains("=exponentialDistance;")
+					|| normalized.contains("=min(exponentialDistance,");
+			}
+			if (end == std::string_view::npos)
+				break;
+			offset = end + 1;
+		}
+		return hasEvaluate && hasHeightOverride && hasDistanceOverride;
+	}
+
+	struct FogFamilyBlock
+	{
+		std::string name;
+		std::string source;
+		std::size_t line = 0;
+	};
+
+	std::optional<std::string> ParseCompositeFamily(
+		std::string_view a_directive)
+	{
+		constexpr std::string_view prefix = "BSDFCOMPOSITE_PS_";
+		const auto position = a_directive.find(prefix);
+		if (position == std::string_view::npos)
+			return std::nullopt;
+		const auto end = a_directive.find_first_of(
+			" \t\r\n)", position);
+		return std::string(a_directive.substr(
+			position,
+			end == std::string_view::npos ?
+				a_directive.size() - position :
+				end - position));
+	}
+
+	std::vector<FogFamilyBlock> FindFogFamilyBlocks(
+		std::string_view a_source)
+	{
+		std::vector<std::pair<std::size_t, std::string_view>> lines;
+		std::size_t offset = 0;
+		while (offset <= a_source.size()) {
+			const auto end = a_source.find('\n', offset);
+			lines.emplace_back(
+				offset,
+				a_source.substr(
+					offset,
+					end == std::string_view::npos ?
+						a_source.size() - offset :
+						end - offset));
+			if (end == std::string_view::npos)
+				break;
+			offset = end + 1;
+		}
+
+		std::vector<FogFamilyBlock> blocks;
+		for (std::size_t index = 0; index < lines.size(); ++index) {
+			const auto directive = TrimLeft(lines[index].second);
+			if (!directive.starts_with("#if"))
+				continue;
+			const auto family = ParseCompositeFamily(directive);
+			if (!family)
+				continue;
+
+			std::size_t depth = 1;
+			std::size_t closing = index + 1;
+			for (; closing < lines.size(); ++closing) {
+				const auto nested = TrimLeft(lines[closing].second);
+				if (nested.starts_with("#ifdef")
+					|| nested.starts_with("#ifndef")
+					|| nested.starts_with("#if ")) {
+					++depth;
+				} else if (nested.starts_with("#endif") && --depth == 0) {
+					break;
+				}
+			}
+			if (closing == lines.size())
+				continue;
+			const auto bodyStart = lines[index].first;
+			const auto bodyEnd = lines[closing].first
+				+ lines[closing].second.size();
+			const auto body = a_source.substr(bodyStart, bodyEnd - bodyStart);
+			if (HasVanillaHeightFogSignature(body)) {
+				blocks.push_back({
+					.name = *family,
+					.source = std::string(body),
+					.line = index + 1
+				});
+			}
+			index = closing;
+		}
+		return blocks;
+	}
+
+	std::optional<std::string> ReadShaderSource(
+		const std::filesystem::path& a_path,
+		std::string& a_error)
+	{
+		std::ifstream stream(a_path, std::ios::binary);
+		if (!stream) {
+			a_error = "Could not open " + a_path.string();
+			return std::nullopt;
+		}
+		std::string source{
+			std::istreambuf_iterator<char>(stream),
+			std::istreambuf_iterator<char>()
+		};
+		if (!stream.good() && !stream.eof()) {
+			a_error = "Could not read " + a_path.string();
+			return std::nullopt;
+		}
+		return source;
+	}
+
+	std::string RemoveIncludeDirectives(std::string_view a_source)
+	{
+		std::string result;
+		result.reserve(a_source.size());
+		std::size_t offset = 0;
+		while (offset <= a_source.size()) {
+			const auto end = a_source.find('\n', offset);
+			const auto line = a_source.substr(
+				offset,
+				end == std::string_view::npos ?
+					a_source.size() - offset :
+					end - offset);
+			if (!TrimLeft(line).starts_with("#include"))
+				result.append(line);
+			result.push_back('\n');
+			if (end == std::string_view::npos)
+				break;
+			offset = end + 1;
+		}
+		return result;
+	}
+
+	std::optional<std::string> PreprocessShaderRoute(
+		std::string_view a_source,
+		const std::filesystem::path& a_path,
+		const cs::engine::ShaderInjectionDefines& a_defines,
+		std::string& a_error)
+	{
+		std::vector<D3D_SHADER_MACRO> macros;
+		macros.reserve(a_defines.size() + 1);
+		for (const auto& [name, value] : a_defines)
+			macros.push_back({ name.c_str(), value.c_str() });
+		macros.push_back({ nullptr, nullptr });
+
+		const auto includeFreeSource = RemoveIncludeDirectives(a_source);
+		Microsoft::WRL::ComPtr<ID3DBlob> preprocessed;
+		Microsoft::WRL::ComPtr<ID3DBlob> errors;
+		const auto result = D3DPreprocess(
+			includeFreeSource.data(),
+			includeFreeSource.size(),
+			a_path.string().c_str(),
+			macros.data(),
+			nullptr,
+			preprocessed.GetAddressOf(),
+			errors.GetAddressOf());
+		if (FAILED(result) || !preprocessed) {
+			a_error = errors ?
+				std::string(
+					static_cast<const char*>(errors->GetBufferPointer()),
+					errors->GetBufferSize()) :
+				"D3DPreprocess failed";
+			return std::nullopt;
+		}
+		return std::string(
+			static_cast<const char*>(preprocessed->GetBufferPointer()),
+			preprocessed->GetBufferSize());
+	}
+
 	constexpr UINT kTerrainShadowTextureSlot = 30;
 	constexpr UINT kTerrainSceneDepthTextureSlot = 31;
 	constexpr UINT kTerrainShadowSamplerSlot = 13;
@@ -1305,7 +1562,6 @@ namespace
 	constexpr std::size_t kExpectedWetnessCompositeRows = 58;
 	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
 	constexpr std::size_t kExpectedWetnessCompositeVertexRows = 4;
-
 	bool DeclaresFamily(
 		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
 		std::span<const char* const> a_families)
@@ -1432,10 +1688,49 @@ namespace
 				"shader replacement registrations",
 				"No shader replacement registrations were discovered");
 		}
+		const auto compositePath = a_root / "BSDFCompositeShader.hlsl";
+		std::string compositeSourceError;
+		const auto compositeSource =
+			ReadShaderSource(compositePath, compositeSourceError);
+		std::vector<FogFamilyBlock> fogFamilyBlocks;
+		std::set<std::string, std::less<>> fogFamilies;
+		if (!compositeSource) {
+			AddPreparationFailure(
+				a_jobs,
+				"BSDFComposite fog source inventory",
+				compositeSourceError);
+		} else {
+			fogFamilyBlocks = FindFogFamilyBlocks(*compositeSource);
+			if (fogFamilyBlocks.empty()) {
+				AddPreparationFailure(
+					a_jobs,
+					"BSDFComposite fog source inventory",
+					"No family block contains the vanilla height-remap and "
+					"distance-extinction signature");
+			}
+			for (const auto& block : fogFamilyBlocks) {
+				if (!fogFamilies.insert(block.name).second) {
+					AddPreparationFailure(
+						a_jobs,
+						"BSDFComposite fog source inventory",
+						"Family " + block.name
+							+ " has more than one fog implementation block");
+				}
+				if (!HasGuardedExponentialFogTreatment(block.source)) {
+					AddPreparationFailure(
+						a_jobs,
+						"BSDFComposite exponential fog treatment",
+						"Family " + block.name + " at line "
+							+ std::to_string(block.line)
+							+ " does not guard both vanilla-term overrides");
+				}
+			}
+		}
 		std::set<std::string> uniqueRegistrationInputs;
 		std::size_t lodLandscapeObjectOverlapCases = 0;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
+		std::size_t exponentialFogRows = 0;
 		for (const auto& registration : registrations) {
 			if (registration.targetId
 				== cs::engine::ShaderInjectionTarget::kDfTiledLighting) {
@@ -1452,6 +1747,69 @@ namespace
 						}
 					});
 				++inverseSquareTiledRows;
+			}
+			bool exponentialFogConsumer = false;
+			if (compositeSource
+				&& registration.targetId
+					== cs::engine::ShaderInjectionTarget::kBsdfComposite
+				&& registration.stage == cs::engine::ShaderStage::kPixel) {
+				std::string preprocessError;
+				const auto preprocessed = PreprocessShaderRoute(
+					*compositeSource,
+					compositePath,
+					registration.compilation.defines,
+					preprocessError);
+				if (!preprocessed) {
+					AddPreparationFailure(
+						a_jobs,
+						"BSDFComposite fog route inventory "
+							+ registration.name,
+						preprocessError);
+				} else if (HasVanillaHeightFogSignature(*preprocessed)) {
+					const auto familyCount = std::ranges::count_if(
+						fogFamilies,
+						[&registration](const std::string& a_family) {
+							return registration.compilation.defines.contains(
+								a_family);
+						});
+					if (familyCount != 1) {
+						AddPreparationFailure(
+							a_jobs,
+							"BSDFComposite fog route family "
+								+ registration.name,
+							"An active fog route must select exactly one "
+							"source-derived fog family");
+					} else {
+						exponentialFogConsumer = true;
+					}
+				}
+			}
+			if (exponentialFogConsumer) {
+				const auto previousJobCount = a_jobs.size();
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					{
+						{
+							cs::engine::shader_injection_defines::
+								kExponentialHeightFog,
+							"1"
+						}
+					});
+				if (a_jobs.size() != previousJobCount + 1
+					|| !HasDefine(
+						a_jobs.back().defines,
+						cs::engine::shader_injection_defines::
+							kExponentialHeightFog)) {
+					AddPreparationFailure(
+						a_jobs,
+						"BSDFComposite exponential fog delivery "
+							+ registration.name,
+						"The effective compile request did not receive "
+						"EXPONENTIAL_HEIGHT_FOG");
+				}
+				++exponentialFogRows;
 			}
 			std::optional<FeatureOffIdentityExpectation> identity;
 			const bool directRow = registration.targetId
@@ -1548,7 +1906,6 @@ namespace
 					+ " contributed final-kernel routes, found "
 					+ std::to_string(inverseSquareTiledRows));
 		}
-
 		const std::array<ShaderCase, 6> featureCompositionCases{ {
 			{
 				"BSDFLightShader.hlsl",
@@ -2264,6 +2621,7 @@ namespace
 				featureCompositionCases.size()
 				+ explicitSourceCases.size()
 				+ lodLandscapeObjectOverlapCases
+				+ exponentialFogRows
 				+ contributorCompositionCount,
 			.ambientCompositionRows = ambientCompositionRows,
 			.ambientNonTargetRows = ambientNonTargetRows,
@@ -2284,7 +2642,8 @@ namespace
 			.inverseSquareRows = inverseSquareRows,
 			.dfTiledLightingRows = dfTiledLightingRows,
 			.inverseSquareTiledRows = inverseSquareTiledRows,
-			.inverseSquareInertRows = inverseSquareInertRows
+			.inverseSquareInertRows = inverseSquareInertRows,
+			.exponentialFogRows = exponentialFogRows
 		};
 	}
 
@@ -2448,6 +2807,9 @@ int main(int argc, char** argv)
 	std::printf(
 		"ShaderCompile checked inverse-square on %zu DFTiledLighting compute routes\n",
 		lightingCounts.inverseSquareTiledRows);
+	std::printf(
+		"ShaderCompile checked exponential fog on %zu BSDFComposite fog routes\n",
+		lightingCounts.exponentialFogRows);
 	std::printf(
 		"ShaderCompile checked %zu TerrainShadows permutations\n",
 		terrainShadowsCount);

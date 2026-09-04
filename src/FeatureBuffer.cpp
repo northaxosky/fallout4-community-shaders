@@ -1,6 +1,7 @@
 #include "FeatureBuffer.h"
 
 #include "DynamicCubemaps.h"
+#include "ExponentialHeightFog.h"
 #include "InverseSquareLighting.h"
 #include "ScreenSpaceGI.h"
 #include "ScreenSpaceShadows.h"
@@ -44,7 +45,10 @@ namespace cs
 					features::WaterEffects::GetSingleton()),
 			.dynamicCubemapsSettings =
 				CollectFeatureData<DynamicCubemapsFeatureData>(
-					features::DynamicCubemaps::GetSingleton())
+					features::DynamicCubemaps::GetSingleton()),
+			.exponentialHeightFogSettings =
+				CollectFeatureData<ExponentialHeightFogFeatureData>(
+					features::ExponentialHeightFog::GetSingleton())
 		};
 	}
 }
