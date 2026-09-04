@@ -1,5 +1,6 @@
 #include "Common/SharedData.hlsli"
 #ifdef FO4CS_SUBSTRATE
+#include "Skylighting/SkylightingResources.hlsli"
 #include "Skylighting/Skylighting.hlsli"
 #endif
 

@@ -23,8 +23,13 @@ namespace cs::render
 	inline constexpr std::uint32_t kSkylightingDataSlot = 7;
 	inline constexpr std::uint32_t kSkylightingTextureSlot = 9;
 	inline constexpr std::uint32_t kSkylightingSamplerSlot = 9;
+	inline constexpr std::uint32_t kSkylightingComputeTextureSlot = 3;
+	inline constexpr std::uint32_t kSkylightingComputeSamplerSlot = 0;
 	static_assert(kFeatureDataSlot == kSharedDataSlot + 1);
 	static_assert(kSkylightingDataSlot == kFeatureDataSlot + 1);
+	static_assert(kSkylightingDataSlot < 8);
+	static_assert(kSkylightingComputeTextureSlot < 8);
+	static_assert(kSkylightingComputeSamplerSlot < 8);
 
 	struct alignas(16) SkylightingSharedData
 	{
@@ -55,6 +60,10 @@ namespace cs::render
 		std::uint64_t bufferWrites = 0;
 		std::uint64_t bindCalls = 0;
 		std::uint64_t successfulBinds = 0;
+		std::uint64_t pixelBindCalls = 0;
+		std::uint64_t pixelSuccessfulBinds = 0;
+		std::uint64_t computeBindCalls = 0;
+		std::uint64_t computeSuccessfulBinds = 0;
 		std::uint64_t rejectedNoBuffer = 0;
 		std::uint64_t rejectedNoData = 0;
 		std::uint64_t rejectedNoSrv = 0;

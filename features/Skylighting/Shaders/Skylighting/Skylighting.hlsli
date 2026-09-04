@@ -21,9 +21,6 @@ namespace Skylighting
 		uint Mode;
 	};
 
-	Texture2D<float> OcclusionDepth : register(t9);
-	SamplerComparisonState OcclusionComparisonSampler : register(s9);
-
 	struct Evaluation
 	{
 		float visibility;

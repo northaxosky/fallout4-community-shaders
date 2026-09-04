@@ -52,10 +52,14 @@ namespace cs::render
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
 			std::array<winrt::com_ptr<ID3D11Buffer>, 3>
 				savedPixelBuffers;
-			std::array<winrt::com_ptr<ID3D11Buffer>, 2>
+			std::array<winrt::com_ptr<ID3D11Buffer>, 3>
 				savedComputeBuffers;
 			winrt::com_ptr<ID3D11ShaderResourceView> savedSkylightingSRV;
 			winrt::com_ptr<ID3D11SamplerState> savedSkylightingSampler;
+			winrt::com_ptr<ID3D11ShaderResourceView>
+				savedComputeSkylightingSRV;
+			winrt::com_ptr<ID3D11SamplerState>
+				savedComputeSkylightingSampler;
 			std::mutex                   skylightingMutex;
 			SkylightingSharedData        skylightingData{};
 			ID3D11ShaderResourceView*    skylightingSRV = nullptr;
@@ -70,6 +74,10 @@ namespace cs::render
 			std::atomic_uint64_t         skylightingBufferWrites{ 0 };
 			std::atomic_uint64_t         skylightingBindCalls{ 0 };
 			std::atomic_uint64_t         skylightingSuccessfulBinds{ 0 };
+			std::atomic_uint64_t         skylightingPixelBindCalls{ 0 };
+			std::atomic_uint64_t         skylightingPixelSuccessfulBinds{ 0 };
+			std::atomic_uint64_t         skylightingComputeBindCalls{ 0 };
+			std::atomic_uint64_t         skylightingComputeSuccessfulBinds{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoBuffer{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoData{ 0 };
 			std::atomic_uint64_t         skylightingRejectedNoSRV{ 0 };
@@ -184,10 +192,16 @@ namespace cs::render
 		}
 
 		void RefreshAndBindSkylightingData(
-			ID3D11DeviceContext* a_context) noexcept
+			ID3D11DeviceContext* a_context,
+			engine::ShaderStage a_stage) noexcept
 		{
 			auto& state = GetSubstrateState();
 			state.skylightingBindCalls.fetch_add(1, std::memory_order_relaxed);
+			auto& stageBindCalls =
+				a_stage == engine::ShaderStage::kCompute ?
+				state.skylightingComputeBindCalls :
+				state.skylightingPixelBindCalls;
+			stageBindCalls.fetch_add(1, std::memory_order_relaxed);
 			state.skylightingBoundLastCall.store(false, std::memory_order_relaxed);
 			state.skylightingCameraPublishedLastCall.store(
 				false, std::memory_order_relaxed);
@@ -230,7 +244,9 @@ namespace cs::render
 					spdlog::level::warn,
 					"Skylighting consumer bind was called without the t{} "
 					"occlusion SRV; taking the identity path.",
-					kSkylightingTextureSlot);
+					a_stage == engine::ShaderStage::kCompute ?
+						kSkylightingComputeTextureSlot :
+						kSkylightingTextureSlot);
 				resourcesAvailable = false;
 			}
 			if (!sampler) {
@@ -241,7 +257,9 @@ namespace cs::render
 					spdlog::level::warn,
 					"Skylighting consumer bind was called without the s{} "
 					"comparison sampler; taking the identity path.",
-					kSkylightingSamplerSlot);
+					a_stage == engine::ShaderStage::kCompute ?
+						kSkylightingComputeSamplerSlot :
+						kSkylightingSamplerSlot);
 				resourcesAvailable = false;
 			}
 
@@ -312,13 +330,25 @@ namespace cs::render
 			}
 
 			ID3D11Buffer* buffer = state.skylightingDataCB.get();
-			a_context->PSSetConstantBuffers(
-				kSkylightingDataSlot, 1, &buffer);
-			if (resourcesAvailable && cameraCurrent) {
-				a_context->PSSetShaderResources(
-					kSkylightingTextureSlot, 1, &srv);
-				a_context->PSSetSamplers(
-					kSkylightingSamplerSlot, 1, &sampler);
+			if (a_stage == engine::ShaderStage::kCompute) {
+				a_context->CSSetConstantBuffers(
+					kSkylightingDataSlot, 1, &buffer);
+				if (resourcesAvailable && cameraCurrent) {
+					// A tiled-frame capture must verify this slot and bind timing survive DeferredLightsImpl rebinds.
+					a_context->CSSetShaderResources(
+						kSkylightingComputeTextureSlot, 1, &srv);
+					a_context->CSSetSamplers(
+						kSkylightingComputeSamplerSlot, 1, &sampler);
+				}
+			} else {
+				a_context->PSSetConstantBuffers(
+					kSkylightingDataSlot, 1, &buffer);
+				if (resourcesAvailable && cameraCurrent) {
+					a_context->PSSetShaderResources(
+						kSkylightingTextureSlot, 1, &srv);
+					a_context->PSSetSamplers(
+						kSkylightingSamplerSlot, 1, &sampler);
+				}
 			}
 			const bool bound = resourcesAvailable && cameraCurrent;
 			state.skylightingBoundLastCall.store(
@@ -326,14 +356,26 @@ namespace cs::render
 			if (bound) {
 				state.skylightingSuccessfulBinds.fetch_add(
 					1, std::memory_order_relaxed);
+				auto& stageSuccessfulBinds =
+					a_stage == engine::ShaderStage::kCompute ?
+						state.skylightingComputeSuccessfulBinds :
+						state.skylightingPixelSuccessfulBinds;
+				stageSuccessfulBinds.fetch_add(1, std::memory_order_relaxed);
 				CS_LOG_ONCE(
 					L,
 					spdlog::level::info,
-					"Skylighting consumer first accepted bind: b{} t{} s{} "
+					"Skylighting consumer first accepted {} bind: b{} t{} s{} "
 					"camera_sequence={} frame={}.",
+					a_stage == engine::ShaderStage::kCompute ?
+						"compute" :
+						"pixel",
 					kSkylightingDataSlot,
-					kSkylightingTextureSlot,
-					kSkylightingSamplerSlot,
+					a_stage == engine::ShaderStage::kCompute ?
+						kSkylightingComputeTextureSlot :
+						kSkylightingTextureSlot,
+					a_stage == engine::ShaderStage::kCompute ?
+						kSkylightingComputeSamplerSlot :
+						kSkylightingSamplerSlot,
 					cameraSequence,
 					currentFrame);
 			}
@@ -427,13 +469,21 @@ namespace cs::render
 
 			for (auto& buffer : state.savedComputeBuffers)
 				buffer = nullptr;
-			ID3D11Buffer* buffers[2]{};
-			context->CSGetConstantBuffers(kSharedDataSlot, 2, buffers);
+			ID3D11Buffer* buffers[3]{};
+			context->CSGetConstantBuffers(kSharedDataSlot, 3, buffers);
 			for (std::size_t index = 0;
 				index < state.savedComputeBuffers.size();
 				++index) {
 				state.savedComputeBuffers[index].attach(buffers[index]);
 			}
+			ID3D11ShaderResourceView* srv = nullptr;
+			context->CSGetShaderResources(
+				kSkylightingComputeTextureSlot, 1, &srv);
+			state.savedComputeSkylightingSRV.attach(srv);
+			ID3D11SamplerState* sampler = nullptr;
+			context->CSGetSamplers(
+				kSkylightingComputeSamplerSlot, 1, &sampler);
+			state.savedComputeSkylightingSampler.attach(sampler);
 			state.computeBindingDepth = 1;
 		}
 
@@ -448,14 +498,25 @@ namespace cs::render
 			}
 
 			if (auto* context = GetImmediateContext()) {
-				ID3D11Buffer* buffers[2] = {
+				ID3D11Buffer* buffers[3] = {
 					state.savedComputeBuffers[0].get(),
-					state.savedComputeBuffers[1].get()
+					state.savedComputeBuffers[1].get(),
+					state.savedComputeBuffers[2].get()
 				};
-				context->CSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+				context->CSSetConstantBuffers(kSharedDataSlot, 3, buffers);
+				ID3D11ShaderResourceView* srv =
+					state.savedComputeSkylightingSRV.get();
+				context->CSSetShaderResources(
+					kSkylightingComputeTextureSlot, 1, &srv);
+				ID3D11SamplerState* sampler =
+					state.savedComputeSkylightingSampler.get();
+				context->CSSetSamplers(
+					kSkylightingComputeSamplerSlot, 1, &sampler);
 			}
 			for (auto& buffer : state.savedComputeBuffers)
 				buffer = nullptr;
+			state.savedComputeSkylightingSRV = nullptr;
+			state.savedComputeSkylightingSampler = nullptr;
 			state.computeBindingDepth = 0;
 		}
 
@@ -694,6 +755,16 @@ namespace cs::render
 				std::memory_order_relaxed),
 			.successfulBinds = state.skylightingSuccessfulBinds.load(
 				std::memory_order_relaxed),
+			.pixelBindCalls = state.skylightingPixelBindCalls.load(
+				std::memory_order_relaxed),
+			.pixelSuccessfulBinds =
+				state.skylightingPixelSuccessfulBinds.load(
+					std::memory_order_relaxed),
+			.computeBindCalls = state.skylightingComputeBindCalls.load(
+				std::memory_order_relaxed),
+			.computeSuccessfulBinds =
+				state.skylightingComputeSuccessfulBinds.load(
+					std::memory_order_relaxed),
 			.rejectedNoBuffer = state.skylightingRejectedNoBuffer.load(
 				std::memory_order_relaxed),
 			.rejectedNoData = state.skylightingRejectedNoData.load(
@@ -749,10 +820,14 @@ namespace cs::render
 		case engine::ShaderStage::kPixel:
 			a_context->PSSetConstantBuffers(kSharedDataSlot, 2, buffers);
 			if (state.inDeferredLights)
-				RefreshAndBindSkylightingData(a_context);
+				RefreshAndBindSkylightingData(
+					a_context, engine::ShaderStage::kPixel);
 			break;
 		case engine::ShaderStage::kCompute:
 			a_context->CSSetConstantBuffers(kSharedDataSlot, 2, buffers);
+			if (state.inDeferredLights)
+				RefreshAndBindSkylightingData(
+					a_context, engine::ShaderStage::kCompute);
 			break;
 		case engine::ShaderStage::kCount:
 			break;

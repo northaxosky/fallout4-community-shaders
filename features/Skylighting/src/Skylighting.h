@@ -124,6 +124,7 @@ namespace cs::features
 		bool EnsureNormalizedDebugResources(ID3D11Device* a_device) noexcept;
 		bool DispatchNormalizedDebugView() noexcept;
 		void RenderProducer() noexcept;
+		void ObserveLightingPath() noexcept;
 		FeatureDebugTexture GetOcclusionDebugTexture() const;
 		FeatureDebugTexture GetNormalizedOcclusionDebugTexture() const;
 		void ObserveRouteDiagnostics() const noexcept;
@@ -185,6 +186,9 @@ namespace cs::features
 		std::atomic_uint64_t _lastGeometryCount{ 0 };
 		std::atomic_uint64_t _lastPassCount{ 0 };
 		std::atomic_uint64_t _resourceAttemptCount{ 0 };
+		std::atomic_uint64_t _volumePathCount{ 0 };
+		std::atomic_uint64_t _tiledPathCount{ 0 };
+		std::atomic_uint64_t _unknownPathCount{ 0 };
 		std::atomic<FailureState> _failureState{ FailureState::kNone };
 
 		Settings _settings;

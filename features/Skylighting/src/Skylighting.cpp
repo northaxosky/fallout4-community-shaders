@@ -11,6 +11,7 @@
 #include <memory>
 #include <stdexcept>
 #include <utility>
+#include <vector>
 
 #include "Log.h"
 #include "Menu/Menu.h"
@@ -18,8 +19,10 @@
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
+#include "Render/RenderHooks.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
+#include "Render/ShaderVariantRuntimeResolver.h"
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
@@ -698,30 +701,73 @@ namespace cs::features
 		ResolveOcclusionGlobals();
 		PublishSettings();
 
-		const bool registered = cs::engine::RegisterReplacement({
-			.targetId = cs::engine::ShaderInjectionTarget::kBsdfLight,
-			.stages = cs::engine::ShaderStageBit(
-				cs::engine::ShaderStage::kPixel),
-			.contributor = "Skylighting",
-			.defines = {
+		const auto registerTarget = [this](
+			cs::engine::ShaderInjectionTarget a_target,
+			cs::engine::ShaderStage a_stage) {
+			std::vector<cs::engine::ShaderSlotClaim> slotClaims{
 				{
-					cs::engine::shader_injection_defines::kSkylighting,
-					"1"
+					a_stage,
+					cs::engine::ShaderResourceType::kConstantBuffer,
+					cs::render::kSkylightingDataSlot
 				}
-			},
-			.isReady = [this] {
-				return _registrationsReady.load(std::memory_order_acquire)
-					&& _consumerSamplerReady.load(std::memory_order_acquire)
-					&& cs::render::IsSharedDataReady();
+			};
+			if (a_stage == cs::engine::ShaderStage::kCompute) {
+				slotClaims.push_back({
+					a_stage,
+					cs::engine::ShaderResourceType::kShaderResource,
+					cs::render::kSkylightingComputeTextureSlot
+				});
+				slotClaims.push_back({
+					a_stage,
+					cs::engine::ShaderResourceType::kSampler,
+					cs::render::kSkylightingComputeSamplerSlot
+				});
+			} else {
+				slotClaims.push_back({
+					a_stage,
+					cs::engine::ShaderResourceType::kShaderResource,
+					cs::render::kSkylightingTextureSlot
+				});
+				slotClaims.push_back({
+					a_stage,
+					cs::engine::ShaderResourceType::kSampler,
+					cs::render::kSkylightingSamplerSlot
+				});
 			}
-		});
+			return cs::engine::RegisterReplacement({
+				.targetId = a_target,
+				.stages = cs::engine::ShaderStageBit(a_stage),
+				.contributor = "Skylighting",
+				.defines = {
+					{
+						cs::engine::shader_injection_defines::kSkylighting,
+						"1"
+					}
+				},
+				.isReady = [this] {
+					return _registrationsReady.load(std::memory_order_acquire)
+						&& _consumerSamplerReady.load(std::memory_order_acquire)
+						&& cs::render::IsSharedDataReady();
+				},
+				.slotClaims = std::move(slotClaims)
+			});
+		};
+		const bool registered =
+			registerTarget(
+				cs::engine::ShaderInjectionTarget::kBsdfLight,
+				cs::engine::ShaderStage::kPixel)
+			&& registerTarget(
+				cs::engine::ShaderInjectionTarget::kDfTiledLighting,
+				cs::engine::ShaderStage::kCompute);
 		if (!registered) {
 			FailLoad(
-				"Skylighting requires the reconstructed BSDFLight pixel "
-				"shader; registering that replacement failed");
+				"Skylighting requires reconstructed BSDFLight and "
+				"DFTiledLighting shaders; registering those replacements failed");
 			return;
 		}
 
+		cs::engine::RegisterPreDeferredLightsImpl(
+			[this] { ObserveLightingPath(); });
 		stl::write_vfunc<0x2C, BSLightingShaderProperty_GetOcclusionPasses>(
 			RE::VTABLE::BSLightingShaderProperty[0]);
 		_vfuncHookInstalled.store(true, std::memory_order_release);
@@ -733,7 +779,20 @@ namespace cs::features
 
 		L->info(
 			"Installed precipitation producer and lighting-property occlusion "
-			"hooks; registered the BSDFLight skylighting consumer.");
+			"hooks; registered BSDFLight and DFTiledLighting skylighting "
+			"consumers.");
+	}
+
+	void Skylighting::ObserveLightingPath() noexcept
+	{
+		const auto tiled = cs::engine::QueryTiledLightingEnabled();
+		if (!tiled) {
+			_unknownPathCount.fetch_add(1, std::memory_order_relaxed);
+		} else if (*tiled) {
+			_tiledPathCount.fetch_add(1, std::memory_order_relaxed);
+		} else {
+			_volumePathCount.fetch_add(1, std::memory_order_relaxed);
+		}
 	}
 
 	void Skylighting::ResolveOcclusionGlobals() noexcept
@@ -861,7 +920,7 @@ namespace cs::features
 	{
 		_injectionsOperational.store(false, std::memory_order_release);
 		if (!_registrationsReady.load(std::memory_order_acquire)) {
-			a_error = "the BSDFLight skylighting contribution did not register";
+			a_error = "the skylighting shader contributions did not all register";
 			SetValidationDetail(a_error);
 			PublishConsumerData();
 			return false;
@@ -881,62 +940,82 @@ namespace cs::features
 			return false;
 		}
 
-		const auto snapshot = cs::engine::GetShaderInjectionTargetSnapshot(
-			cs::engine::ShaderInjectionTarget::kBsdfLight);
-		const auto define = snapshot.defines.find(
-			cs::engine::shader_injection_defines::kSkylighting);
-		const bool contributed =
-			define != snapshot.defines.end() && define->second == "1";
-		if (!snapshot.requested
-			|| !snapshot.compileComplete
-			|| !snapshot.swappable
-			|| snapshot.slotCollision
-			|| !contributed) {
-			a_error = "'" + snapshot.name
-				+ "' cannot deliver skylighting (requested="
-				+ std::to_string(snapshot.requested)
-				+ " compile_complete="
-				+ std::to_string(snapshot.compileComplete)
-				+ " swappable=" + std::to_string(snapshot.swappable)
-				+ " slot_collision="
-				+ std::to_string(snapshot.slotCollision)
-				+ " contributed=" + std::to_string(contributed) + ")";
-			SetValidationDetail(a_error);
-			PublishConsumerData();
-			return false;
+		constexpr std::array targets{
+			cs::engine::ShaderInjectionTarget::kBsdfLight,
+			cs::engine::ShaderInjectionTarget::kDfTiledLighting
+		};
+		for (const auto target : targets) {
+			const auto snapshot =
+				cs::engine::GetShaderInjectionTargetSnapshot(target);
+			const auto define = snapshot.defines.find(
+				cs::engine::shader_injection_defines::kSkylighting);
+			const bool contributed =
+				define != snapshot.defines.end() && define->second == "1";
+			if (!snapshot.requested
+				|| !snapshot.compileComplete
+				|| !snapshot.swappable
+				|| snapshot.slotCollision
+				|| !contributed) {
+				a_error = "'" + snapshot.name
+					+ "' cannot deliver skylighting (requested="
+					+ std::to_string(snapshot.requested)
+					+ " compile_complete="
+					+ std::to_string(snapshot.compileComplete)
+					+ " swappable=" + std::to_string(snapshot.swappable)
+					+ " slot_collision="
+					+ std::to_string(snapshot.slotCollision)
+					+ " contributed=" + std::to_string(contributed) + ")";
+				SetValidationDetail(a_error);
+				PublishConsumerData();
+				return false;
+			}
 		}
 
 		_injectionsOperational.store(true, std::memory_order_release);
 		SetValidationDetail({});
 		PublishConsumerData();
 		L->info(
-			"Skylighting BSDFLight route is ready (b{}, t{}, s{}).",
+			"Skylighting routes are ready (PS b{}, t{}, s{}; CS b{}, t{}, "
+			"s{}).",
 			cs::render::kSkylightingDataSlot,
 			cs::render::kSkylightingTextureSlot,
-			cs::render::kSkylightingSamplerSlot);
+			cs::render::kSkylightingSamplerSlot,
+			cs::render::kSkylightingDataSlot,
+			cs::render::kSkylightingComputeTextureSlot,
+			cs::render::kSkylightingComputeSamplerSlot);
 		return true;
 	}
 
 	void Skylighting::ObserveRouteDiagnostics() const noexcept
 	{
-		const auto outcome = cs::engine::GetShaderInjectionOutcomeSnapshot(
+		const auto volume = cs::engine::GetShaderInjectionOutcomeSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfLight);
+		const auto tiled = cs::engine::GetShaderInjectionOutcomeSnapshot(
+			cs::engine::ShaderInjectionTarget::kDfTiledLighting);
 		const bool mismatch =
-			outcome.matches != 0 && outcome.substitutions < outcome.matches;
+			(volume.matches != 0
+				&& volume.substitutions < volume.matches)
+			|| (tiled.matches != 0
+				&& tiled.substitutions < tiled.matches);
 		const bool previous = _routeSubstitutionMismatch.exchange(
 			mismatch, std::memory_order_acq_rel);
 		if (mismatch && !previous) {
 			L->warn(
-				"Skylighting route substitution mismatch: substitutions={}/{}; "
-				"reporting only, rendering remains unchanged.",
-				outcome.substitutions,
-				outcome.matches);
+				"Skylighting route substitution mismatch: BSDF "
+				"substitutions={}/{}, tiled substitutions={}/{}; reporting "
+				"only, rendering remains unchanged.",
+				volume.substitutions,
+				volume.matches,
+				tiled.substitutions,
+				tiled.matches);
 		} else if (!mismatch && previous) {
 			L->info(
-				"Skylighting route substitutions now agree: "
-				"substitutions={}/{}.",
-				outcome.substitutions,
-				outcome.matches);
+				"Skylighting route substitutions now agree: BSDF "
+				"substitutions={}/{}, tiled substitutions={}/{}.",
+				volume.substitutions,
+				volume.matches,
+				tiled.substitutions,
+				tiled.matches);
 		}
 	}
 
@@ -1741,6 +1820,14 @@ namespace cs::features
 	{
 		const auto injection = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfLight);
+		const auto tiledInjection =
+			cs::engine::GetShaderInjectionTargetSnapshot(
+				cs::engine::ShaderInjectionTarget::kDfTiledLighting);
+		const auto hasSkylightingDefine = [](const auto& a_snapshot) {
+			const auto define = a_snapshot.defines.find(
+				cs::engine::shader_injection_defines::kSkylighting);
+			return define != a_snapshot.defines.end() && define->second == "1";
+		};
 		const auto sharedStatus =
 			cs::render::GetSkylightingSharedDataStatus();
 		const auto validationDetail = GetValidationDetail();
@@ -1767,6 +1854,24 @@ namespace cs::features
 			.Field(
 				"injection_operational",
 				_injectionsOperational.load(std::memory_order_acquire))
+			.Field(
+				"bsdf_define_present",
+				hasSkylightingDefine(injection))
+			.Field(
+				"tiled_define_present",
+				hasSkylightingDefine(tiledInjection))
+			.Field(
+				"bsdf_path_count",
+				static_cast<std::int64_t>(
+					_volumePathCount.load(std::memory_order_relaxed)))
+			.Field(
+				"tiled_path_count",
+				static_cast<std::int64_t>(
+					_tiledPathCount.load(std::memory_order_relaxed)))
+			.Field(
+				"unknown_path_count",
+				static_cast<std::int64_t>(
+					_unknownPathCount.load(std::memory_order_relaxed)))
 			.Field("injection_requested", injection.requested)
 			.Field(
 				"injection_compile_attempted",
@@ -1784,13 +1889,37 @@ namespace cs::features
 				"injection_substitutions",
 				static_cast<std::int64_t>(injection.substitutions))
 			.Field(
+				"injection_dispatches",
+				static_cast<std::int64_t>(injection.dispatches))
+			.Field(
+				"tiled_injection_requested",
+				tiledInjection.requested)
+			.Field(
+				"tiled_injection_compile_complete",
+				tiledInjection.compileComplete)
+			.Field(
+				"tiled_injection_swappable",
+				tiledInjection.swappable)
+			.Field(
+				"tiled_injection_slot_collision",
+				tiledInjection.slotCollision)
+			.Field(
+				"tiled_injection_matches",
+				static_cast<std::int64_t>(tiledInjection.matches))
+			.Field(
+				"tiled_injection_substitutions",
+				static_cast<std::int64_t>(tiledInjection.substitutions))
+			.Field(
 				"injection_passthrough_not_ready",
 				static_cast<std::int64_t>(
 					injection.passthroughNotReady))
 			.Field(
 				"route_substitution_mismatch",
-				injection.matches != 0
+				(injection.matches != 0
 					&& injection.substitutions < injection.matches)
+					|| (tiledInjection.matches != 0
+						&& tiledInjection.substitutions
+							< tiledInjection.matches))
 			.Field(
 				"consumer_sampler_ready",
 				_consumerSamplerReady.load(std::memory_order_acquire))
@@ -1818,6 +1947,20 @@ namespace cs::features
 			.Field(
 				"consumer_successful_binds",
 				static_cast<std::int64_t>(sharedStatus.successfulBinds))
+			.Field(
+				"consumer_pixel_bind_calls",
+				static_cast<std::int64_t>(sharedStatus.pixelBindCalls))
+			.Field(
+				"consumer_pixel_successful_binds",
+				static_cast<std::int64_t>(
+					sharedStatus.pixelSuccessfulBinds))
+			.Field(
+				"consumer_compute_bind_calls",
+				static_cast<std::int64_t>(sharedStatus.computeBindCalls))
+			.Field(
+				"consumer_compute_successful_binds",
+				static_cast<std::int64_t>(
+					sharedStatus.computeSuccessfulBinds))
 			.Field(
 				"consumer_rejected_no_buffer",
 				static_cast<std::int64_t>(sharedStatus.rejectedNoBuffer))

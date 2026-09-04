@@ -1237,6 +1237,8 @@ namespace
 		std::size_t inverseSquareRows = 0;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
+		std::size_t skylightingTiledRows = 0;
+		std::size_t combinedTiledRows = 0;
 		std::size_t inverseSquareInertRows = 0;
 		std::size_t exponentialFogRows = 0;
 	};
@@ -1245,6 +1247,8 @@ namespace
 	constexpr std::array kCompositionTextureSlots{ 26u, 27u, 28u, 29u };
 	constexpr UINT kGbufferNormalTextureSlot = 25;
 	constexpr std::array kDynamicCubemapTextureSlots{ 16u, 17u };
+	constexpr UINT kSkylightingComputeTextureSlot = 3;
+	constexpr UINT kSkylightingComputeSamplerSlot = 0;
 
 	// only families that can isolate directional ambient carry the composition
 	constexpr std::array kAmbientCompositionFamilies{
@@ -1751,6 +1755,8 @@ namespace
 		std::size_t lodLandscapeObjectOverlapCases = 0;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
+		std::size_t skylightingTiledRows = 0;
+		std::size_t combinedTiledRows = 0;
 		std::size_t exponentialFogRows = 0;
 		for (const auto& registration : registrations) {
 			if (registration.targetId
@@ -1768,6 +1774,54 @@ namespace
 						}
 					});
 				++inverseSquareTiledRows;
+				SlotExpectations skylightingSlots;
+				const auto variant =
+					registration.compilation.defines.find(
+						"DFTILEDLIGHTING_VARIANT");
+				const bool ambientKernel =
+					variant != registration.compilation.defines.end()
+					&& variant->second == "2";
+				auto& skylightingTextures = ambientKernel ?
+					skylightingSlots.requiredTextures :
+					skylightingSlots.forbiddenTextures;
+				skylightingTextures.push_back(
+					kSkylightingComputeTextureSlot);
+				auto& skylightingSamplers = ambientKernel ?
+					skylightingSlots.requiredSamplers :
+					skylightingSlots.forbiddenSamplers;
+				skylightingSamplers.push_back(
+					kSkylightingComputeSamplerSlot);
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					{
+						{
+							cs::engine::shader_injection_defines::kSkylighting,
+							"1"
+						}
+					},
+					nullptr,
+					skylightingSlots);
+				++skylightingTiledRows;
+				AddRegistration(
+					a_jobs,
+					a_root,
+					registration,
+					{
+						{
+							cs::engine::shader_injection_defines::
+								kInverseSquareLighting,
+							"1"
+						},
+						{
+							cs::engine::shader_injection_defines::kSkylighting,
+							"1"
+						}
+					},
+					nullptr,
+					std::move(skylightingSlots));
+				++combinedTiledRows;
 			}
 			bool exponentialFogConsumer = false;
 			if (compositeSource
@@ -1926,6 +1980,24 @@ namespace
 					+ std::to_string(kDfTiledLightingIdentities.size())
 					+ " contributed final-kernel routes, found "
 					+ std::to_string(inverseSquareTiledRows));
+		}
+		if (skylightingTiledRows != kDfTiledLightingIdentities.size()) {
+			AddPreparationFailure(
+				a_jobs,
+				"DFTiledLighting skylighting coverage",
+				"Expected "
+					+ std::to_string(kDfTiledLightingIdentities.size())
+					+ " contributed final-kernel routes, found "
+					+ std::to_string(skylightingTiledRows));
+		}
+		if (combinedTiledRows != kDfTiledLightingIdentities.size()) {
+			AddPreparationFailure(
+				a_jobs,
+				"DFTiledLighting lighting composition coverage",
+				"Expected "
+					+ std::to_string(kDfTiledLightingIdentities.size())
+					+ " composed final-kernel routes, found "
+					+ std::to_string(combinedTiledRows));
 		}
 		const std::array<ShaderCase, 6> featureCompositionCases{ {
 			{
@@ -2663,6 +2735,8 @@ namespace
 			.inverseSquareRows = inverseSquareRows,
 			.dfTiledLightingRows = dfTiledLightingRows,
 			.inverseSquareTiledRows = inverseSquareTiledRows,
+			.skylightingTiledRows = skylightingTiledRows,
+			.combinedTiledRows = combinedTiledRows,
 			.inverseSquareInertRows = inverseSquareInertRows,
 			.exponentialFogRows = exponentialFogRows
 		};
@@ -2828,6 +2902,10 @@ int main(int argc, char** argv)
 	std::printf(
 		"ShaderCompile checked inverse-square on %zu DFTiledLighting compute routes\n",
 		lightingCounts.inverseSquareTiledRows);
+	std::printf(
+		"ShaderCompile checked skylighting on %zu DFTiledLighting compute routes and %zu inverse-square compositions\n",
+		lightingCounts.skylightingTiledRows,
+		lightingCounts.combinedTiledRows);
 	std::printf(
 		"ShaderCompile checked exponential fog on %zu BSDFComposite fog routes\n",
 		lightingCounts.exponentialFogRows);

@@ -26,6 +26,7 @@
     || defined(BSDFLIGHT_PS_AMBIENT)
 #define FO4_SKYLIGHTING_AMBIENT_CONSUMER 1
 #endif
+#include "Skylighting/SkylightingResources.hlsli"
 #include "Skylighting/Skylighting.hlsli"
 #endif
 
