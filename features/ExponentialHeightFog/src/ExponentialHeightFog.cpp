@@ -12,6 +12,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
+#include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
@@ -328,23 +329,25 @@ namespace cs::features
 	void ExponentialHeightFog::SetObservationStatus(
 		ObservationStatus a_status) noexcept
 	{
-		const auto index = static_cast<std::size_t>(a_status);
-		const auto previousCount =
-			_observationCounts[index].fetch_add(1, std::memory_order_relaxed);
-		const auto previous =
-			_observationStatus.exchange(a_status, std::memory_order_acq_rel);
-		if (a_status == ObservationStatus::kUsingDerived) {
-			if (previousCount == 0) {
-				L->info(
-					"Analytic fog first accepted target bind: density={:.8f}, "
-					"height_falloff=({:.8f}, {:.8f}), near={:.2f}, far={:.2f}.",
-					_derivedDensity.load(std::memory_order_relaxed),
-					_derivedHeightFalloffX.load(std::memory_order_relaxed),
-					_derivedHeightFalloffY.load(std::memory_order_relaxed),
-					_derivedNearDistance.load(std::memory_order_relaxed),
-					_derivedFarDistance.load(std::memory_order_relaxed));
-			}
-		} else if (previous != a_status && previousCount == 0) {
+		_observationStatus.store(a_status, std::memory_order_release);
+		if (a_status == ObservationStatus::kUsingDerived)
+			return;
+
+		_lastFallbackReason.store(a_status, std::memory_order_release);
+		const auto* graphicsState = cs::engine::GetGraphicsState();
+		const auto frame = graphicsState ?
+			static_cast<std::uint64_t>(graphicsState->frameCount) :
+			static_cast<std::uint64_t>(UINT32_MAX);
+		if (_lastFallbackFrame.exchange(frame, std::memory_order_relaxed) !=
+			frame) {
+			_fallbackFrames.fetch_add(1, std::memory_order_relaxed);
+		}
+
+		const auto reasonBit =
+			std::uint32_t{ 1 } << static_cast<std::uint8_t>(a_status);
+		if ((_warnedFallbackReasons.fetch_or(
+				reasonBit, std::memory_order_relaxed) &
+				reasonBit) == 0) {
 			L->warn(
 				"Analytic fog target bind rejected: {}. The shader keeps "
 				"the vanilla fog path.",
@@ -354,7 +357,6 @@ namespace cs::features
 
 	void ExponentialHeightFog::ObserveConsumerBind() noexcept
 	{
-		_targetBindCalls.fetch_add(1, std::memory_order_relaxed);
 		_derivedParametersInUse.store(false, std::memory_order_relaxed);
 
 		if (!_injectionsOperational.load(std::memory_order_acquire)) {
@@ -406,10 +408,7 @@ namespace cs::features
 			derived.distanceNear, std::memory_order_relaxed);
 		_derivedFarDistance.store(
 			derived.distanceFar, std::memory_order_relaxed);
-		_lastObservedFrame.store(
-			snapshot.frameCount, std::memory_order_relaxed);
 		_derivedParametersInUse.store(true, std::memory_order_release);
-		_acceptedBindCalls.fetch_add(1, std::memory_order_relaxed);
 		SetObservationStatus(ObservationStatus::kUsingDerived);
 	}
 
@@ -486,11 +485,6 @@ namespace cs::features
 		const auto detail = GetValidationDetail();
 		const auto status =
 			_observationStatus.load(std::memory_order_acquire);
-		const auto count = [this](ObservationStatus a_status) {
-			return static_cast<std::int64_t>(
-				_observationCounts[static_cast<std::size_t>(a_status)].load(
-					std::memory_order_relaxed));
-		};
 
 		a_sink
 			.Field("enabled", _enabled.load(std::memory_order_relaxed))
@@ -523,49 +517,15 @@ namespace cs::features
 				"shared_data_publish_calls",
 				static_cast<std::int64_t>(
 					_sharedDataPublishCalls.load(std::memory_order_relaxed)))
-			.Field(
-				"target_bind_calls",
-				static_cast<std::int64_t>(
-					_targetBindCalls.load(std::memory_order_relaxed)))
-			.Field(
-				"target_accepted_bind_calls",
-				static_cast<std::int64_t>(
-					_acceptedBindCalls.load(std::memory_order_relaxed)))
 			.Field("consumer_status", ObservationStatusName(status))
 			.Field(
-				"rejected_injection_unavailable",
-				count(ObservationStatus::kInjectionUnavailable))
+				"fallback_frames",
+				static_cast<std::int64_t>(
+					_fallbackFrames.load(std::memory_order_relaxed)))
 			.Field(
-				"rejected_disabled", count(ObservationStatus::kDisabled))
-			.Field(
-				"rejected_location_unavailable",
-				count(ObservationStatus::kLocationUnavailable))
-			.Field(
-				"rejected_interior", count(ObservationStatus::kInterior))
-			.Field(
-				"rejected_frame_buffer_unavailable",
-				count(ObservationStatus::kFrameBufferUnavailable))
-			.Field(
-				"rejected_non_finite_distance_ramp",
-				count(ObservationStatus::kNonFiniteDistanceRamp))
-			.Field(
-				"rejected_distance_slope_near_zero",
-				count(ObservationStatus::kDistanceSlopeNearZero))
-			.Field(
-				"rejected_distance_plane_order",
-				count(ObservationStatus::kDistancePlaneOrder))
-			.Field(
-				"rejected_non_finite_height_ramp",
-				count(ObservationStatus::kNonFiniteHeightRamp))
-			.Field(
-				"rejected_height_slope_x_near_zero",
-				count(ObservationStatus::kHeightSlopeXNearZero))
-			.Field(
-				"rejected_height_slope_y_near_zero",
-				count(ObservationStatus::kHeightSlopeYNearZero))
-			.Field(
-				"rejected_non_finite_derived",
-				count(ObservationStatus::kNonFiniteDerived))
+				"fallback_reason",
+				ObservationStatusName(
+					_lastFallbackReason.load(std::memory_order_acquire)))
 			.Field(
 				"derived_parameters_in_use",
 				_derivedParametersInUse.load(std::memory_order_relaxed))
@@ -589,10 +549,6 @@ namespace cs::features
 				"derived_far_distance",
 				static_cast<double>(
 					_derivedFarDistance.load(std::memory_order_relaxed)))
-			.Field(
-				"last_observed_frame",
-				static_cast<std::int64_t>(
-					_lastObservedFrame.load(std::memory_order_relaxed)))
 			.Field(
 				"registrations_ready",
 				_registrationsReady.load(std::memory_order_relaxed))

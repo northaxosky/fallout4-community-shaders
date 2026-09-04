@@ -14,7 +14,6 @@
 #include <DirectXMath.h>
 #include <array>
 #include <atomic>
-#include <cmath>
 #include <cstring>
 #include <d3d11.h>
 #include <exception>
@@ -27,8 +26,6 @@ namespace cs::render
 	namespace
 	{
 		auto* L = cs::log::Get("cs.render.shareddata");
-		constexpr double kSkylightingWrongSpaceOutsideFraction = 0.99;
-
 		// mirrors HLSL SharedData at b5
 		struct alignas(16) SharedDataCB
 		{
@@ -46,26 +43,12 @@ namespace cs::render
 		static_assert(sizeof(SharedDataCB) == 112);
 		STATIC_ASSERT_ALIGNAS_16(SharedDataCB);
 
-		struct SkylightingFootprintReadback
-		{
-			winrt::com_ptr<ID3D11Buffer> buffer;
-			winrt::com_ptr<ID3D11Query> query;
-			std::uint32_t frame = UINT32_MAX;
-			bool pending = false;
-		};
-
 		struct SubstrateState
 		{
 			winrt::com_ptr<ID3D11Buffer> sharedDataCB;
 			winrt::com_ptr<ID3D11Buffer> featureDataCB;
 			winrt::com_ptr<ID3D11Buffer> skylightingDataCB;
-			winrt::com_ptr<ID3D11Buffer> skylightingFootprintBuffer;
-			winrt::com_ptr<ID3D11UnorderedAccessView>
-				skylightingFootprintUAV;
-			std::array<SkylightingFootprintReadback, 3>
-				skylightingFootprintReadbacks;
 			std::atomic_bool             ready{ false };
-			std::atomic_bool             skylightingFootprintReady{ false };
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
 			std::array<winrt::com_ptr<ID3D11Buffer>, 3>
 				savedPixelBuffers;
@@ -73,8 +56,6 @@ namespace cs::render
 				savedComputeBuffers;
 			winrt::com_ptr<ID3D11ShaderResourceView> savedSkylightingSRV;
 			winrt::com_ptr<ID3D11SamplerState> savedSkylightingSampler;
-			winrt::com_ptr<ID3D11UnorderedAccessView>
-				savedSkylightingFootprintUAV;
 			std::mutex                   skylightingMutex;
 			SkylightingSharedData        skylightingData{};
 			ID3D11ShaderResourceView*    skylightingSRV = nullptr;
@@ -95,17 +76,6 @@ namespace cs::render
 			std::atomic_uint64_t         skylightingRejectedNoSampler{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraMissing{ 0 };
 			std::atomic_uint64_t         skylightingRejectedCameraStale{ 0 };
-			std::atomic_uint32_t         skylightingFootprintFrame{ UINT32_MAX };
-			std::atomic_uint64_t         skylightingFootprintInside{ 0 };
-			std::atomic_uint64_t         skylightingFootprintOutside{ 0 };
-			std::atomic_bool
-				skylightingFootprintWrongSpaceSignature{ false };
-			std::atomic_uint64_t
-				skylightingFootprintReadbacksDropped{ 0 };
-			std::atomic_bool             skylightingCameraOriginCompared{ false };
-			std::atomic<float>            skylightingCameraOriginDeltaMagnitude{
-				kSkylightingCameraOriginDeltaUnavailable
-			};
 			// Render thread only.
 			float                        timer = 0.0f;
 			bool                         updateInstalled = false;
@@ -113,11 +83,6 @@ namespace cs::render
 			bool                         inDeferredLights = false;
 			std::uint32_t                pixelBindingDepth = 0;
 			std::uint32_t                computeBindingDepth = 0;
-			std::uint32_t                skylightingFootprintCounterFrame =
-				UINT32_MAX;
-			std::size_t                  nextSkylightingFootprintReadback = 0;
-			bool                         skylightingCameraOriginComparisonDone =
-				false;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -126,298 +91,9 @@ namespace cs::render
 			return state;
 		}
 
-		void InitializeSkylightingFootprintTelemetry(
-			ID3D11Device* a_device,
-			ID3D11DeviceContext* a_context,
-			SubstrateState& a_state) noexcept
-		{
-			D3D11_BUFFER_DESC counterDesc{};
-			counterDesc.ByteWidth = sizeof(std::uint32_t) * 2;
-			counterDesc.Usage = D3D11_USAGE_DEFAULT;
-			counterDesc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
-			counterDesc.MiscFlags =
-				D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS;
-
-			winrt::com_ptr<ID3D11Buffer> counter;
-			if (FAILED(a_device->CreateBuffer(
-					&counterDesc, nullptr, counter.put()))) {
-				L->warn(
-					"Skylighting footprint telemetry counter creation failed; "
-					"rendering remains available.");
-				return;
-			}
-
-			D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
-			uavDesc.Format = DXGI_FORMAT_R32_TYPELESS;
-			uavDesc.ViewDimension = D3D11_UAV_DIMENSION_BUFFER;
-			uavDesc.Buffer.NumElements = 2;
-			uavDesc.Buffer.Flags = D3D11_BUFFER_UAV_FLAG_RAW;
-			winrt::com_ptr<ID3D11UnorderedAccessView> uav;
-			if (FAILED(a_device->CreateUnorderedAccessView(
-					counter.get(), &uavDesc, uav.put()))) {
-				L->warn(
-					"Skylighting footprint telemetry UAV creation failed; "
-					"rendering remains available.");
-				return;
-			}
-
-			D3D11_BUFFER_DESC stagingDesc = counterDesc;
-			stagingDesc.Usage = D3D11_USAGE_STAGING;
-			stagingDesc.BindFlags = 0;
-			stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-			stagingDesc.MiscFlags = 0;
-			std::array<SkylightingFootprintReadback, 3> readbacks;
-			for (auto& readback : readbacks) {
-				if (FAILED(a_device->CreateBuffer(
-						&stagingDesc, nullptr, readback.buffer.put()))) {
-					L->warn(
-						"Skylighting footprint telemetry staging creation "
-						"failed; rendering remains available.");
-					return;
-				}
-				annotation::SetName(
-					readback.buffer.get(),
-					"Render/SkylightingFootprintTelemetry.Readback.Buffer");
-				const D3D11_QUERY_DESC queryDesc{
-					.Query = D3D11_QUERY_EVENT,
-					.MiscFlags = 0
-				};
-				if (FAILED(a_device->CreateQuery(
-						&queryDesc, readback.query.put()))) {
-					L->warn(
-						"Skylighting footprint telemetry query creation "
-						"failed; rendering remains available.");
-					return;
-				}
-				annotation::SetName(
-					readback.query.get(),
-					"Render/SkylightingFootprintTelemetry.Readback.Query");
-			}
-
-			annotation::SetName(
-				counter.get(), "Render/SkylightingFootprintTelemetry.Buffer");
-			annotation::SetName(
-				uav.get(), "Render/SkylightingFootprintTelemetry.UAV");
-			const std::uint32_t zero[4]{};
-			a_context->ClearUnorderedAccessViewUint(uav.get(), zero);
-			a_state.skylightingFootprintBuffer = std::move(counter);
-			a_state.skylightingFootprintUAV = std::move(uav);
-			a_state.skylightingFootprintReadbacks = std::move(readbacks);
-			a_state.skylightingFootprintReady.store(
-				true, std::memory_order_release);
-		}
-
-		void ProcessSkylightingFootprintReadbacks(
-			ID3D11DeviceContext* a_context,
-			SubstrateState& a_state) noexcept
-		{
-			for (auto& readback : a_state.skylightingFootprintReadbacks) {
-				if (!readback.pending
-					|| a_context->GetData(
-						readback.query.get(),
-						nullptr,
-						0,
-						D3D11_ASYNC_GETDATA_DONOTFLUSH) != S_OK) {
-					continue;
-				}
-
-				D3D11_MAPPED_SUBRESOURCE mapped{};
-				if (SUCCEEDED(a_context->Map(
-						readback.buffer.get(),
-						0,
-						D3D11_MAP_READ,
-						D3D11_MAP_FLAG_DO_NOT_WAIT,
-						&mapped))) {
-					std::array<std::uint32_t, 2> counts{};
-					std::memcpy(
-						counts.data(), mapped.pData, sizeof(counts));
-					a_context->Unmap(readback.buffer.get(), 0);
-					a_state.skylightingFootprintInside.store(
-						counts[0], std::memory_order_relaxed);
-					a_state.skylightingFootprintOutside.store(
-						counts[1], std::memory_order_relaxed);
-					a_state.skylightingFootprintFrame.store(
-						readback.frame, std::memory_order_release);
-					const auto total =
-						static_cast<std::uint64_t>(counts[0]) + counts[1];
-					const double outsideFraction =
-						total == 0 ?
-							0.0 :
-							static_cast<double>(counts[1])
-								/ static_cast<double>(total);
-					const bool wrongSpaceSignature =
-						total != 0
-						&& outsideFraction
-							>= kSkylightingWrongSpaceOutsideFraction;
-					const bool hadWrongSpaceSignature =
-						a_state.skylightingFootprintWrongSpaceSignature.exchange(
-							wrongSpaceSignature, std::memory_order_relaxed);
-					if (wrongSpaceSignature && !hadWrongSpaceSignature) {
-						L->warn(
-							"Skylighting footprint projection is effectively "
-							"all out of bounds at frame {} (inside={}, "
-							"outside={}, outside_fraction={}); verify the "
-							"projection input space.",
-							readback.frame,
-							counts[0],
-							counts[1],
-							outsideFraction);
-					} else if (!wrongSpaceSignature
-						&& hadWrongSpaceSignature) {
-						L->info(
-							"Skylighting footprint projection returned in "
-							"bounds at frame {} (inside={}, outside={}, "
-							"outside_fraction={}).",
-							readback.frame,
-							counts[0],
-							counts[1],
-							outsideFraction);
-					}
-				}
-				readback.pending = false;
-				readback.frame = UINT32_MAX;
-			}
-		}
-
-		void BeginSkylightingFootprintFrame(
-			ID3D11DeviceContext* a_context,
-			std::uint32_t a_frame,
-			SubstrateState& a_state) noexcept
-		{
-			if (!a_state.skylightingFootprintReady.load(
-					std::memory_order_acquire)) {
-				return;
-			}
-			ProcessSkylightingFootprintReadbacks(a_context, a_state);
-			if (a_frame == UINT32_MAX
-				|| a_state.skylightingFootprintCounterFrame == a_frame) {
-				return;
-			}
-
-			if (a_state.skylightingFootprintCounterFrame != UINT32_MAX) {
-				SkylightingFootprintReadback* available = nullptr;
-				for (std::size_t offset = 0;
-					offset < a_state.skylightingFootprintReadbacks.size();
-					++offset) {
-					const auto index =
-						(a_state.nextSkylightingFootprintReadback + offset)
-						% a_state.skylightingFootprintReadbacks.size();
-					auto& candidate =
-						a_state.skylightingFootprintReadbacks[index];
-					if (!candidate.pending) {
-						available = std::addressof(candidate);
-						a_state.nextSkylightingFootprintReadback =
-							(index + 1)
-							% a_state.skylightingFootprintReadbacks.size();
-						break;
-					}
-				}
-				if (available) {
-					a_context->CopyResource(
-						available->buffer.get(),
-						a_state.skylightingFootprintBuffer.get());
-					a_context->End(available->query.get());
-					available->frame =
-						a_state.skylightingFootprintCounterFrame;
-					available->pending = true;
-				} else {
-					a_state.skylightingFootprintReadbacksDropped.fetch_add(
-						1, std::memory_order_relaxed);
-				}
-			}
-
-			const std::uint32_t zero[4]{};
-			a_context->ClearUnorderedAccessViewUint(
-				a_state.skylightingFootprintUAV.get(), zero);
-			a_state.skylightingFootprintCounterFrame = a_frame;
-		}
-
 		float Reciprocal(float a_value)
 		{
 			return a_value > 0.0f ? 1.0f / a_value : 0.0f;
-		}
-
-		void ObserveSkylightingCameraOrigin(
-			const engine::FrameBufferSnapshot& a_camera,
-			bool a_cameraCurrent,
-			SubstrateState& a_state) noexcept
-		{
-			if (a_state.skylightingCameraOriginComparisonDone)
-				return;
-
-			auto* worldRootCamera = engine::GetWorldRootCamera();
-			if (!a_cameraCurrent || !worldRootCamera) {
-				a_state.skylightingCameraOriginDeltaMagnitude.store(
-					kSkylightingCameraOriginDeltaUnavailable,
-					std::memory_order_relaxed);
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::warn,
-					"Skylighting camera-origin comparison unavailable "
-					"(camera_snapshot_current={}, world_root_camera_present={}); "
-					"delta magnitude sentinel={}.",
-					a_cameraCurrent,
-					worldRootCamera != nullptr,
-					kSkylightingCameraOriginDeltaUnavailable);
-				return;
-			}
-
-			a_state.skylightingCameraOriginComparisonDone = true;
-			const auto& shaderOrigin = a_camera.data.CameraPosAdjust;
-			const auto& worldRootOrigin = worldRootCamera->world.translate;
-			const bool finite =
-				std::isfinite(shaderOrigin.x)
-				&& std::isfinite(shaderOrigin.y)
-				&& std::isfinite(shaderOrigin.z)
-				&& std::isfinite(worldRootOrigin.x)
-				&& std::isfinite(worldRootOrigin.y)
-				&& std::isfinite(worldRootOrigin.z);
-			if (!finite) {
-				a_state.skylightingCameraOriginDeltaMagnitude.store(
-					kSkylightingCameraOriginDeltaUnavailable,
-					std::memory_order_relaxed);
-				a_state.skylightingCameraOriginCompared.store(
-					false, std::memory_order_release);
-				L->error(
-					"Skylighting camera-origin comparison rejected non-finite "
-					"data: CameraPosAdjust=({}, {}, {}), "
-					"WorldRootCamera.world.translate=({}, {}, {}), "
-					"delta magnitude sentinel={}.",
-					shaderOrigin.x,
-					shaderOrigin.y,
-					shaderOrigin.z,
-					worldRootOrigin.x,
-					worldRootOrigin.y,
-					worldRootOrigin.z,
-					kSkylightingCameraOriginDeltaUnavailable);
-				return;
-			}
-
-			const double deltaX =
-				static_cast<double>(shaderOrigin.x) - worldRootOrigin.x;
-			const double deltaY =
-				static_cast<double>(shaderOrigin.y) - worldRootOrigin.y;
-			const double deltaZ =
-				static_cast<double>(shaderOrigin.z) - worldRootOrigin.z;
-			const auto deltaMagnitude = static_cast<float>(
-				std::sqrt(
-					deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ));
-			a_state.skylightingCameraOriginDeltaMagnitude.store(
-				deltaMagnitude, std::memory_order_relaxed);
-			a_state.skylightingCameraOriginCompared.store(
-				true, std::memory_order_release);
-			L->info(
-				"Skylighting camera-origin comparison: "
-				"CameraPosAdjust=({}, {}, {}), "
-				"WorldRootCamera.world.translate=({}, {}, {}), "
-				"delta magnitude={}.",
-				shaderOrigin.x,
-				shaderOrigin.y,
-				shaderOrigin.z,
-				worldRootOrigin.x,
-				worldRootOrigin.y,
-				worldRootOrigin.z,
-				deltaMagnitude);
 		}
 
 		float GetRealTimeDelta()
@@ -575,10 +251,6 @@ namespace cs::render
 				graphicsState ? graphicsState->frameCount : UINT32_MAX;
 			const bool cameraCurrent =
 				camera.valid && camera.frameCount == currentFrame;
-			ObserveSkylightingCameraOrigin(
-				camera, cameraCurrent, state);
-			BeginSkylightingFootprintFrame(
-				a_context, currentFrame, state);
 			if (data.Mode != 0 && !camera.valid) {
 				state.skylightingRejectedCameraMissing.fetch_add(
 					1, std::memory_order_relaxed);
@@ -648,20 +320,6 @@ namespace cs::render
 				a_context->PSSetSamplers(
 					kSkylightingSamplerSlot, 1, &sampler);
 			}
-			if (data.Mode != 0
-				&& state.skylightingFootprintReady.load(
-					std::memory_order_acquire)) {
-				ID3D11UnorderedAccessView* uav =
-					state.skylightingFootprintUAV.get();
-				a_context->OMSetRenderTargetsAndUnorderedAccessViews(
-					D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL,
-					nullptr,
-					nullptr,
-					kSkylightingTelemetryUAVSlot,
-					1,
-					&uav,
-					nullptr);
-			}
 			const bool bound = resourcesAvailable && cameraCurrent;
 			state.skylightingBoundLastCall.store(
 				bound, std::memory_order_relaxed);
@@ -716,15 +374,6 @@ namespace cs::render
 			ID3D11SamplerState* sampler = nullptr;
 			context->PSGetSamplers(kSkylightingSamplerSlot, 1, &sampler);
 			state.savedSkylightingSampler.attach(sampler);
-			ID3D11UnorderedAccessView* telemetryUAV = nullptr;
-			context->OMGetRenderTargetsAndUnorderedAccessViews(
-				0,
-				nullptr,
-				nullptr,
-				kSkylightingTelemetryUAVSlot,
-				1,
-				&telemetryUAV);
-			state.savedSkylightingFootprintUAV.attach(telemetryUAV);
 			state.pixelBindingDepth = 1;
 		}
 
@@ -753,22 +402,11 @@ namespace cs::render
 					state.savedSkylightingSampler.get();
 				context->PSSetSamplers(
 					kSkylightingSamplerSlot, 1, &sampler);
-				ID3D11UnorderedAccessView* telemetryUAV =
-					state.savedSkylightingFootprintUAV.get();
-				context->OMSetRenderTargetsAndUnorderedAccessViews(
-					D3D11_KEEP_RENDER_TARGETS_AND_DEPTH_STENCIL,
-					nullptr,
-					nullptr,
-					kSkylightingTelemetryUAVSlot,
-					1,
-					&telemetryUAV,
-					nullptr);
 			}
 			for (auto& buffer : state.savedPixelBuffers)
 				buffer = nullptr;
 			state.savedSkylightingSRV = nullptr;
 			state.savedSkylightingSampler = nullptr;
-			state.savedSkylightingFootprintUAV = nullptr;
 			state.pixelBindingDepth = 0;
 		}
 
@@ -959,8 +597,6 @@ namespace cs::render
 			state.skylightingDataCB = nullptr;
 			throw std::runtime_error("Shared substrate constant-buffer seeding failed.");
 		}
-		InitializeSkylightingFootprintTelemetry(
-			a_device, a_context, state);
 		state.ready.store(true, std::memory_order_release);
 		L->info(
 			"Shared substrate ready: b{} shared_data={} bytes, b{} feature_data={} "
@@ -1071,30 +707,6 @@ namespace cs::render
 					std::memory_order_relaxed),
 			.rejectedCameraStale =
 				state.skylightingRejectedCameraStale.load(
-					std::memory_order_relaxed),
-			.footprintCounterReady =
-				state.skylightingFootprintReady.load(
-					std::memory_order_relaxed),
-			.footprintFrame =
-				state.skylightingFootprintFrame.load(
-					std::memory_order_acquire),
-			.footprintInside =
-				state.skylightingFootprintInside.load(
-					std::memory_order_relaxed),
-			.footprintOutside =
-				state.skylightingFootprintOutside.load(
-					std::memory_order_relaxed),
-			.footprintWrongSpaceSignature =
-				state.skylightingFootprintWrongSpaceSignature.load(
-					std::memory_order_relaxed),
-			.footprintReadbacksDropped =
-				state.skylightingFootprintReadbacksDropped.load(
-					std::memory_order_relaxed),
-			.cameraOriginCompared =
-				state.skylightingCameraOriginCompared.load(
-					std::memory_order_acquire),
-			.cameraOriginDeltaMagnitude =
-				state.skylightingCameraOriginDeltaMagnitude.load(
 					std::memory_order_relaxed)
 		};
 		{

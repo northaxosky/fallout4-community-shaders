@@ -23,7 +23,6 @@ namespace Skylighting
 
 	Texture2D<float> OcclusionDepth : register(t9);
 	SamplerComparisonState OcclusionComparisonSampler : register(s9);
-	RWByteAddressBuffer FootprintTelemetry : register(u7);
 
 	struct Evaluation
 	{
@@ -57,13 +56,6 @@ namespace Skylighting
 			CameraPosAdjust.xyz;
 	}
 
-	void CountFootprintSample(bool insideFootprint)
-	{
-		uint previousCount;
-		FootprintTelemetry.InterlockedAdd(
-			insideFootprint ? 0 : 4, 1, previousCount);
-	}
-
 	Evaluation Evaluate(float3 positionView)
 	{
 		Evaluation result;
@@ -79,23 +71,19 @@ namespace Skylighting
 			OcclusionViewProj, float4(positionCameraRelative, 1.0));
 		if (!all(isfinite(positionOcclusion)) ||
 			abs(positionOcclusion.w) <= 1.0e-6) {
-			CountFootprintSample(false);
 			return result;
 		}
 
 		positionOcclusion.xyz /= positionOcclusion.w;
 		if (!all(isfinite(positionOcclusion.xyz))) {
-			CountFootprintSample(false);
 			return result;
 		}
 		positionOcclusion.y = -positionOcclusion.y;
 		float2 uv = positionOcclusion.xy * 0.5 + 0.5;
 		if (any(uv <= 0.0) || any(uv >= 1.0) ||
 			positionOcclusion.z < 0.0 || positionOcclusion.z > 1.0) {
-			CountFootprintSample(false);
 			return result;
 		}
-		CountFootprintSample(true);
 
 		float sampledVisibility =
 			OcclusionDepth.SampleCmpLevelZero(

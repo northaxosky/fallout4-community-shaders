@@ -7,13 +7,13 @@
 #include <cmath>
 #include <cstring>
 #include <exception>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <utility>
 
 #include "Log.h"
 #include "Menu/Menu.h"
-#include "RE/N/NiNode.h"
 #include "Render/Annotation.h"
 #include "Render/ComputeScope.h"
 #include "Render/Engine.h"
@@ -39,8 +39,6 @@ namespace cs::features
 		constexpr float kMaxConsumerSetting = 1.0f;
 		constexpr std::uint32_t kConsumerEnabledFlag = 1U << 0;
 		constexpr std::uint32_t kVisibilityDebugFlag = 1U << 1;
-		constexpr float kUnavailableDiagnosticFloat =
-			std::numeric_limits<float>::lowest();
 		constexpr std::uint32_t kOcclusionSize = 512;
 		constexpr std::uint32_t kDebugThreadGroupSize = 8;
 		constexpr std::uint32_t kOcclusionRenderMode = 14;
@@ -63,19 +61,6 @@ namespace cs::features
 		};
 		inline constexpr REL::ID kPrecipOcclusionDirZ{
 			568563, 2692290, 4799582
-		};
-		inline constexpr REL::ID kShadowSceneNode{
-			1327069, 2712479, 2712479
-		};
-		inline constexpr REL::ID kPreCulledQEnabled{
-			917969, 2317322, 2317322
-		};
-		inline constexpr REL::ID kPreCulledWantEnabled{
-			493183, 2712638, 2712638
-		};
-		// NG and AE genuinely use different IDs for this Display setting.
-		inline constexpr REL::ID kPreCulledDisplaySetting{
-			1252712, 2677864, 4784532
 		};
 		inline constexpr REL::ID kPreCulledTempDisabled{
 			718924, 2712639, 2712639
@@ -485,17 +470,11 @@ namespace cs::features
 			RE::BSShaderAccumulator* a_accumulator)
 		{
 			auto* feature = Skylighting::GetSingleton();
-			feature->_vfuncCallsTotal.fetch_add(1, std::memory_order_relaxed);
 			if (!feature->_inOcclusionRender.load(std::memory_order_acquire)) {
 				return func(
 					a_property, a_geometry, a_renderMode, a_accumulator);
 			}
 
-			feature->_workingVfuncCallsDuringRender.fetch_add(
-				1, std::memory_order_relaxed);
-			feature->_workingVfuncLastRenderModeDuringRender.store(
-				static_cast<std::int64_t>(a_renderMode),
-				std::memory_order_relaxed);
 			if (a_renderMode != kOcclusionRenderMode) {
 				return func(
 					a_property, a_geometry, a_renderMode, a_accumulator);
@@ -1037,59 +1016,6 @@ namespace cs::features
 					std::memory_order_release);
 				return false;
 			}
-			const auto reportDepthStencilTargets = [&]() noexcept {
-				if (_depthStencilTargetsReported.test_and_set(
-						std::memory_order_acq_rel)) {
-					return;
-				}
-
-				std::int32_t firstMatchingSlot = -1;
-				for (std::uint32_t index = 0;
-					index < static_cast<std::uint32_t>(
-								cs::engine::DepthStencilTarget::kCount);
-					++index) {
-					const auto& target =
-						rendererData->depthStencilTargets[index];
-					auto* texture =
-						reinterpret_cast<ID3D11Texture2D*>(target.texture);
-					const bool srvAvailable = target.srViewDepth != nullptr;
-					const bool dsvAvailable = target.dsView[0] != nullptr;
-					if (!texture) {
-						L->info(
-							"Depth-stencil slot {}: texture=false "
-							"srViewDepth={} dsView[0]={}.",
-							index,
-							srvAvailable,
-							dsvAvailable);
-						continue;
-					}
-
-					D3D11_TEXTURE2D_DESC desc{};
-					texture->GetDesc(&desc);
-					if (firstMatchingSlot < 0 &&
-						desc.Width == kOcclusionSize &&
-						desc.Height == kOcclusionSize &&
-						GetTypelessDepthFormat(desc.Format) !=
-							DXGI_FORMAT_UNKNOWN) {
-						firstMatchingSlot =
-							static_cast<std::int32_t>(index);
-					}
-					L->info(
-						"Depth-stencil slot {}: texture=true "
-						"srViewDepth={} dsView[0]={} width={} height={} "
-						"format={} sample_count={} bind_flags=0x{:08X}.",
-						index,
-						srvAvailable,
-						dsvAvailable,
-						desc.Width,
-						desc.Height,
-						static_cast<std::uint32_t>(desc.Format),
-						desc.SampleDesc.Count,
-						desc.BindFlags);
-				}
-				_first512DepthStencilSlot.store(
-					firstMatchingSlot, std::memory_order_release);
-			};
 			std::int32_t platformID = -1;
 			auto* nativeTarget = ResolvePrecipitationOcclusionTarget(
 				rendererData, platformID);
@@ -1105,7 +1031,6 @@ namespace cs::features
 				_resourceState.store(
 					ResourceState::kWaitingForNativeTarget,
 					std::memory_order_release);
-				reportDepthStencilTargets();
 				return false;
 			}
 			auto* nativeTexture =
@@ -1136,7 +1061,6 @@ namespace cs::features
 				_resourceState.store(
 					ResourceState::kWaitingForNativeTarget,
 					std::memory_order_release);
-				reportDepthStencilTargets();
 				return false;
 			}
 			_resourceWaitReason.store(
@@ -1157,7 +1081,6 @@ namespace cs::features
 				_failureState.store(
 					FailureState::kResourcesUnavailable,
 					std::memory_order_release);
-				reportDepthStencilTargets();
 				L->error(
 					"Resource initialization failed: native precipitation "
 					"texture is {}x{}, expected {}x{}.",
@@ -1184,7 +1107,6 @@ namespace cs::features
 					_failureState.store(
 						FailureState::kResourcesUnavailable,
 						std::memory_order_release);
-					reportDepthStencilTargets();
 					L->error(
 						"Resource initialization failed: native "
 						"srViewDepth is null and texture format {} cannot "
@@ -1218,7 +1140,6 @@ namespace cs::features
 				_failureState.store(
 					FailureState::kResourcesUnavailable,
 					std::memory_order_release);
-				reportDepthStencilTargets();
 				L->error(
 					"Resource initialization failed: CreateTexture2D "
 					"returned HRESULT 0x{:08X}.",
@@ -1238,7 +1159,6 @@ namespace cs::features
 				_failureState.store(
 					FailureState::kResourcesUnavailable,
 					std::memory_order_release);
-				reportDepthStencilTargets();
 				L->error(
 					"Resource initialization failed: "
 					"CreateShaderResourceView returned HRESULT 0x{:08X}.",
@@ -1257,7 +1177,6 @@ namespace cs::features
 				_failureState.store(
 					FailureState::kResourcesUnavailable,
 					std::memory_order_release);
-				reportDepthStencilTargets();
 				L->error(
 					"Resource initialization failed: "
 					"CreateDepthStencilView returned HRESULT 0x{:08X}.",
@@ -1526,8 +1445,6 @@ namespace cs::features
 
 	void Skylighting::RenderProducer() noexcept
 	{
-		_sceneTraversalOverrideAppliedLastRender.store(
-			false, std::memory_order_release);
 		if (!_resourcesReady.load(std::memory_order_acquire) ||
 			!_occlusionTexture ||
 			!_occlusionSRV ||
@@ -1571,9 +1488,6 @@ namespace cs::features
 				_occlusionSRV.get(),
 				_occlusionDSV.get());
 
-			_workingVfuncCallsDuringRender.store(0, std::memory_order_relaxed);
-			_workingVfuncLastRenderModeDuringRender.store(
-				-1, std::memory_order_relaxed);
 			_workingGeometryCount.store(0, std::memory_order_relaxed);
 			_workingPassCount.store(0, std::memory_order_relaxed);
 			OcclusionRenderScope renderScope(_inOcclusionRender);
@@ -1587,36 +1501,13 @@ namespace cs::features
 					"Precipitation occlusion producer is unavailable");
 			}
 
-			auto* accumulator =
-				precipitation->occlusionData.accumulator.get();
-			const bool accumulatorPresent = accumulator != nullptr;
-			const std::int64_t accumulatorRenderMode = accumulator ?
-				static_cast<std::int64_t>(accumulator->renderMode) :
-				-1;
-			_accumulatorPresent.store(
-				accumulatorPresent, std::memory_order_release);
-			_accumulatorRenderMode.store(
-				accumulatorRenderMode, std::memory_order_release);
-
 			auto* player = RE::PlayerCharacter::GetSingleton();
 			const auto* cell = player ? player->GetParentCell() : nullptr;
 			const bool inInteriorResolved = cell != nullptr;
 			const bool inInterior = cell && !cell->IsExterior();
-			const auto* worldspace =
-				cell && cell->IsExterior() ? cell->worldSpace : nullptr;
-			const std::int64_t currentCellFormID = cell ?
-				static_cast<std::int64_t>(cell->GetFormID()) :
-				-1;
-			const std::int64_t currentWorldspaceFormID = worldspace ?
-				static_cast<std::int64_t>(worldspace->GetFormID()) :
-				-1;
 			_inInteriorResolved.store(
 				inInteriorResolved, std::memory_order_release);
 			_inInterior.store(inInterior, std::memory_order_release);
-			_currentCellFormID.store(
-				currentCellFormID, std::memory_order_release);
-			_currentWorldspaceFormID.store(
-				currentWorldspaceFormID, std::memory_order_release);
 
 			const float requestedExtent =
 				_occlusionExtent.load(std::memory_order_acquire);
@@ -1634,10 +1525,6 @@ namespace cs::features
 					_directionZGlobal);
 				const bool forceSceneTraversal =
 					_forceSceneTraversal.load(std::memory_order_acquire);
-				_sceneTraversalOverrideAppliedLastRender.store(
-					forceSceneTraversal &&
-						_preCulledTempDisabledGlobal != nullptr,
-					std::memory_order_release);
 				ByteOverride sceneTraversalOverride(
 					_preCulledTempDisabledGlobal,
 					std::uint8_t{ 1 },
@@ -1647,42 +1534,6 @@ namespace cs::features
 
 			auto* occlusionCamera =
 				precipitation->occlusionData.camera.get();
-			const bool occlusionCameraPresent = occlusionCamera != nullptr;
-			float frustumNear = kUnavailableDiagnosticFloat;
-			float frustumFar = kUnavailableDiagnosticFloat;
-			float frustumLeft = kUnavailableDiagnosticFloat;
-			float frustumRight = kUnavailableDiagnosticFloat;
-			float frustumTop = kUnavailableDiagnosticFloat;
-			float frustumBottom = kUnavailableDiagnosticFloat;
-			std::int64_t frustumOrthographic = -1;
-			if (occlusionCamera) {
-				const auto& frustum = occlusionCamera->viewFrustum;
-				const auto& [left, right, top, bottom, nearZ, farZ, ortho] =
-					frustum;
-				frustumNear = nearZ;
-				frustumFar = farZ;
-				frustumLeft = left;
-				frustumRight = right;
-				frustumTop = top;
-				frustumBottom = bottom;
-				frustumOrthographic = ortho ? 1 : 0;
-			}
-			_occlusionCameraPresent.store(
-				occlusionCameraPresent, std::memory_order_release);
-			_occlusionFrustumNear.store(
-				frustumNear, std::memory_order_release);
-			_occlusionFrustumFar.store(
-				frustumFar, std::memory_order_release);
-			_occlusionFrustumLeft.store(
-				frustumLeft, std::memory_order_release);
-			_occlusionFrustumRight.store(
-				frustumRight, std::memory_order_release);
-			_occlusionFrustumTop.store(
-				frustumTop, std::memory_order_release);
-			_occlusionFrustumBottom.store(
-				frustumBottom, std::memory_order_release);
-			_occlusionFrustumOrthographic.store(
-				frustumOrthographic, std::memory_order_release);
 
 			DirectX::XMFLOAT4X4 transform{};
 			if (_matrixGlobal) {
@@ -1717,197 +1568,15 @@ namespace cs::features
 
 			const auto geometryCount =
 				_workingGeometryCount.load(std::memory_order_relaxed);
-			const auto vfuncCallsDuringRender =
-				_workingVfuncCallsDuringRender.load(
-					std::memory_order_relaxed);
-			const auto vfuncLastRenderModeDuringRender =
-				_workingVfuncLastRenderModeDuringRender.load(
-					std::memory_order_relaxed);
-			_lastVfuncCallsDuringRender.store(
-				vfuncCallsDuringRender, std::memory_order_release);
-			_vfuncLastRenderModeDuringRender.store(
-				vfuncLastRenderModeDuringRender,
-				std::memory_order_release);
+			const auto passCount =
+				_workingPassCount.load(std::memory_order_relaxed);
 			_lastGeometryCount.store(geometryCount, std::memory_order_release);
-			_lastPassCount.store(
-				_workingPassCount.load(std::memory_order_relaxed),
-				std::memory_order_release);
+			_lastPassCount.store(passCount, std::memory_order_release);
 			if (geometryCount == 0 &&
 				!_emptyGeometryReported.test_and_set(
 					std::memory_order_acq_rel)) {
-				const auto resolve = [](REL::ID a_id) noexcept {
-					try {
-						return a_id.address();
-					} catch (...) {
-						return std::uintptr_t{ 0 };
-					}
-				};
-
-				std::uintptr_t shadowSceneNodeGlobal = 0;
-				try {
-					shadowSceneNodeGlobal = kShadowSceneNode.address();
-				} catch (...) {
-				}
-
-				const bool shadowSceneNodeResolved =
-					shadowSceneNodeGlobal != 0;
-				const auto shadowSceneNode = shadowSceneNodeResolved ?
-					*reinterpret_cast<const std::uintptr_t*>(
-						shadowSceneNodeGlobal) :
-					0;
-				const auto preCulledObjects = shadowSceneNode ?
-					*reinterpret_cast<const std::uintptr_t*>(
-						shadowSceneNode + 0x128) :
-					0;
-				const auto* sceneRoot = preCulledObjects ?
-					*reinterpret_cast<RE::NiAVObject* const*>(
-						preCulledObjects + 0x18) :
-					nullptr;
-				const auto* sceneRootNode = sceneRoot ?
-					sceneRoot->IsNode() :
-					nullptr;
-				const std::int64_t sceneRootChildCount = sceneRootNode ?
-					static_cast<std::int64_t>(sceneRootNode->children.size()) :
-					-1;
-				const bool cullingProcessPresent =
-					precipitation->occlusionData.cullingProcess != nullptr;
-				const auto qEnabledAddress = resolve(kPreCulledQEnabled);
-				const auto wantEnabledAddress =
-					resolve(kPreCulledWantEnabled);
-				const auto displaySettingAddress =
-					resolve(kPreCulledDisplaySetting);
-				const auto tempDisabledAddress =
-					resolve(kPreCulledTempDisabled);
-				const bool qEnabledResolved = qEnabledAddress != 0;
-				const bool wantEnabledResolved = wantEnabledAddress != 0;
-				const bool displaySettingResolved =
-					displaySettingAddress != 0;
-				const bool tempDisabledResolved = tempDisabledAddress != 0;
-				bool qEnabled = false;
-				if (qEnabledResolved) {
-					const REL::Relocation<bool()> query{ qEnabledAddress };
-					qEnabled = query();
-				}
-				const bool wantEnabled = wantEnabledResolved &&
-					*reinterpret_cast<const std::uint8_t*>(
-						wantEnabledAddress) != 0;
-				const bool displaySetting = displaySettingResolved &&
-					*reinterpret_cast<const std::uint8_t*>(
-						displaySettingAddress + 0x08) != 0;
-				const bool tempDisabled = tempDisabledResolved &&
-					*reinterpret_cast<const std::uint8_t*>(
-						tempDisabledAddress) != 0;
-				const bool sceneTraversalOverrideApplied =
-					_sceneTraversalOverrideAppliedLastRender.load(
-						std::memory_order_acquire);
-				const char* geometryGatherBranch =
-					sceneTraversalOverrideApplied ?
-					"scene_traversal" :
-					!qEnabledResolved ?
-						"unresolved" :
-						qEnabled ? "pre_culled_cache" : "scene_traversal";
-
-				_shadowSceneNodeGlobalResolved.store(
-					shadowSceneNodeResolved, std::memory_order_release);
-				_shadowSceneNodePresent.store(
-					shadowSceneNode != 0, std::memory_order_release);
-				_preCulledObjectsPresent.store(
-					preCulledObjects != 0, std::memory_order_release);
-				_sceneRootPresent.store(
-					sceneRoot != nullptr, std::memory_order_release);
-				_sceneRootChildCount.store(
-					sceneRootChildCount, std::memory_order_release);
-				_cullingProcessPresent.store(
-					cullingProcessPresent, std::memory_order_release);
-				_accumulatorPresent.store(
-					accumulatorPresent, std::memory_order_release);
-				_preCulledQEnabled.store(
-					qEnabled, std::memory_order_release);
-				_preCulledQEnabledResolved.store(
-					qEnabledResolved, std::memory_order_release);
-				_preCulledWantEnabled.store(
-					wantEnabled, std::memory_order_release);
-				_preCulledWantEnabledResolved.store(
-					wantEnabledResolved, std::memory_order_release);
-				_preCulledDisplaySetting.store(
-					displaySetting, std::memory_order_release);
-				_preCulledDisplaySettingResolved.store(
-					displaySettingResolved, std::memory_order_release);
-				_preCulledTempDisabled.store(
-					tempDisabled, std::memory_order_release);
-				_preCulledTempDisabledResolved.store(
-					tempDisabledResolved, std::memory_order_release);
 				L->error(
-					"Occlusion zero-geometry vfunc diagnostics: "
-					"vfunc_calls_total={} vfunc_calls_during_render={} "
-					"vfunc_calls_mode14={} geometry_count_last_render={} "
-					"vfunc_last_render_mode_during_render={}.",
-					_vfuncCallsTotal.load(std::memory_order_relaxed),
-					vfuncCallsDuringRender,
-					geometryCount,
-					geometryCount,
-					vfuncLastRenderModeDuringRender);
-				L->error(
-					"Occlusion zero-geometry producer diagnostics: "
-					"accumulator_present={} accumulator_render_mode={} "
-					"occlusion_camera_present={} "
-					"occlusion_frustum_near={} occlusion_frustum_far={} "
-					"occlusion_frustum_left={} occlusion_frustum_right={} "
-					"occlusion_frustum_top={} occlusion_frustum_bottom={} "
-					"occlusion_frustum_orthographic={} "
-					"in_interior_resolved={} in_interior={} "
-					"current_worldspace_form_id={} current_cell_form_id={}.",
-					accumulatorPresent,
-					accumulatorRenderMode,
-					occlusionCameraPresent,
-					frustumNear,
-					frustumFar,
-					frustumLeft,
-					frustumRight,
-					frustumTop,
-					frustumBottom,
-					frustumOrthographic,
-					inInteriorResolved,
-					inInterior,
-					currentWorldspaceFormID,
-					currentCellFormID);
-				L->error(
-					"Occlusion producer gathered zero geometry: "
-					"shadow_scene_node_global_resolved={} "
-					"shadow_scene_node_present={} "
-					"pre_culled_objects_present={} scene_root_present={} "
-					"scene_root_child_count={} "
-					"culling_process_present={} accumulator_present={} "
-					"geometry_gather_branch={} "
-					"pre_culled_q_enabled_resolved={} "
-					"pre_culled_q_enabled={} "
-					"pre_culled_want_enabled_resolved={} "
-					"pre_culled_want_enabled={} "
-					"pre_culled_display_setting_resolved={} "
-					"pre_culled_display_setting={} "
-					"pre_culled_temp_disabled_resolved={} "
-					"pre_culled_temp_disabled={} "
-					"scene_traversal_override_resolved={} "
-					"scene_traversal_override_applied_last_render={}.",
-					shadowSceneNodeResolved,
-					shadowSceneNode != 0,
-					preCulledObjects != 0,
-					sceneRoot != nullptr,
-					sceneRootChildCount,
-					cullingProcessPresent,
-					accumulatorPresent,
-					geometryGatherBranch,
-					qEnabledResolved,
-					qEnabled,
-					wantEnabledResolved,
-					wantEnabled,
-					displaySettingResolved,
-					displaySetting,
-					tempDisabledResolved,
-					tempDisabled,
-					_sceneTraversalOverrideResolved.load(
-						std::memory_order_acquire),
-					sceneTraversalOverrideApplied);
+					"Occlusion producer completed with zero gathered geometry.");
 			}
 			_projectionValid.store(valid, std::memory_order_release);
 			_producerRanThisFrame.store(true, std::memory_order_release);
@@ -2070,30 +1739,12 @@ namespace cs::features
 
 	void Skylighting::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		const bool qEnabledResolved =
-			_preCulledQEnabledResolved.load(std::memory_order_acquire);
-		const bool qEnabled =
-			_preCulledQEnabled.load(std::memory_order_acquire);
-		const bool sceneTraversalOverrideApplied =
-			_sceneTraversalOverrideAppliedLastRender.load(
-				std::memory_order_acquire);
 		const auto injection = cs::engine::GetShaderInjectionTargetSnapshot(
 			cs::engine::ShaderInjectionTarget::kBsdfLight);
 		const auto sharedStatus =
 			cs::render::GetSkylightingSharedDataStatus();
 		const auto validationDetail = GetValidationDetail();
 		const auto occlusion = GetOcclusionData();
-		const auto footprintFrame =
-			sharedStatus.footprintFrame == UINT32_MAX ?
-				std::int64_t{ -1 } :
-				static_cast<std::int64_t>(sharedStatus.footprintFrame);
-		const auto footprintTotal =
-			sharedStatus.footprintInside + sharedStatus.footprintOutside;
-		const double footprintOutsideFraction =
-			footprintTotal == 0 ?
-				0.0 :
-				static_cast<double>(sharedStatus.footprintOutside)
-					/ static_cast<double>(footprintTotal);
 		a_sink
 			.Field("enabled", _enabled.load(std::memory_order_acquire))
 			.Field(
@@ -2189,33 +1840,6 @@ namespace cs::features
 				static_cast<std::int64_t>(
 					sharedStatus.rejectedCameraStale))
 			.Field(
-				"consumer_footprint_counter_ready",
-				sharedStatus.footprintCounterReady)
-			.Field("consumer_footprint_frame", footprintFrame)
-			.Field(
-				"consumer_footprint_inside_last_frame",
-				static_cast<std::int64_t>(sharedStatus.footprintInside))
-			.Field(
-				"consumer_footprint_outside_last_frame",
-				static_cast<std::int64_t>(sharedStatus.footprintOutside))
-			.Field(
-				"consumer_footprint_outside_fraction",
-				footprintOutsideFraction)
-			.Field(
-				"consumer_footprint_wrong_space_signature",
-				sharedStatus.footprintWrongSpaceSignature)
-			.Field(
-				"consumer_footprint_readbacks_dropped",
-				static_cast<std::int64_t>(
-					sharedStatus.footprintReadbacksDropped))
-			.Field(
-				"consumer_camera_origin_compared",
-				sharedStatus.cameraOriginCompared)
-			.Field(
-				"consumer_camera_origin_delta_magnitude",
-				static_cast<double>(
-					sharedStatus.cameraOriginDeltaMagnitude))
-			.Field(
 				"consumer_validation_detail",
 				validationDetail.empty() ?
 					"operational" :
@@ -2249,10 +1873,6 @@ namespace cs::features
 				"native_dsv_available",
 				_nativeDSVAvailable.load(std::memory_order_relaxed))
 			.Field(
-				"first_512x512_depth_stencil_slot",
-				static_cast<std::int64_t>(
-					_first512DepthStencilSlot.load(std::memory_order_acquire)))
-			.Field(
 				"precipitation_occlusion_platform_id",
 				static_cast<std::int64_t>(
 					_precipitationOcclusionPlatformID.load(
@@ -2281,23 +1901,6 @@ namespace cs::features
 				static_cast<std::int64_t>(
 					_renderCount.load(std::memory_order_relaxed)))
 			.Field(
-				"vfunc_calls_total",
-				static_cast<std::int64_t>(
-					_vfuncCallsTotal.load(std::memory_order_relaxed)))
-			.Field(
-				"vfunc_calls_during_render",
-				static_cast<std::int64_t>(
-					_lastVfuncCallsDuringRender.load(
-						std::memory_order_acquire)))
-			.Field(
-				"vfunc_calls_mode14",
-				static_cast<std::int64_t>(
-					_lastGeometryCount.load(std::memory_order_acquire)))
-			.Field(
-				"vfunc_last_render_mode_during_render",
-				_vfuncLastRenderModeDuringRender.load(
-					std::memory_order_acquire))
-			.Field(
 				"geometry_count_last_render",
 				static_cast<std::int64_t>(
 					_lastGeometryCount.load(std::memory_order_acquire)))
@@ -2309,113 +1912,9 @@ namespace cs::features
 				"projection_valid",
 				_projectionValid.load(std::memory_order_acquire))
 			.Field(
-				"shadow_scene_node_global_resolved",
-				_shadowSceneNodeGlobalResolved.load(std::memory_order_acquire))
-			.Field(
-				"shadow_scene_node_present",
-				_shadowSceneNodePresent.load(std::memory_order_acquire))
-			.Field(
-				"pre_culled_objects_present",
-				_preCulledObjectsPresent.load(std::memory_order_acquire))
-			.Field(
-				"scene_root_present",
-				_sceneRootPresent.load(std::memory_order_acquire))
-			.Field(
-				"scene_root_child_count",
-				_sceneRootChildCount.load(std::memory_order_acquire))
-			.Field(
-				"culling_process_present",
-				_cullingProcessPresent.load(std::memory_order_acquire))
-			.Field(
-				"accumulator_present",
-				_accumulatorPresent.load(std::memory_order_acquire))
-			.Field(
-				"accumulator_render_mode",
-				_accumulatorRenderMode.load(std::memory_order_acquire))
-			.Field(
-				"occlusion_camera_present",
-				_occlusionCameraPresent.load(std::memory_order_acquire))
-			.Field(
-				"occlusion_frustum_near",
-				static_cast<double>(
-					_occlusionFrustumNear.load(std::memory_order_acquire)))
-			.Field(
-				"occlusion_frustum_far",
-				static_cast<double>(
-					_occlusionFrustumFar.load(std::memory_order_acquire)))
-			.Field(
-				"occlusion_frustum_left",
-				static_cast<double>(
-					_occlusionFrustumLeft.load(std::memory_order_acquire)))
-			.Field(
-				"occlusion_frustum_right",
-				static_cast<double>(
-					_occlusionFrustumRight.load(std::memory_order_acquire)))
-			.Field(
-				"occlusion_frustum_top",
-				static_cast<double>(
-					_occlusionFrustumTop.load(std::memory_order_acquire)))
-			.Field(
-				"occlusion_frustum_bottom",
-				static_cast<double>(
-					_occlusionFrustumBottom.load(std::memory_order_acquire)))
-			.Field(
-				"occlusion_frustum_orthographic",
-				_occlusionFrustumOrthographic.load(
-					std::memory_order_acquire))
-			.Field(
-				"in_interior_resolved",
-				_inInteriorResolved.load(std::memory_order_acquire))
-			.Field(
-				"in_interior",
-				_inInterior.load(std::memory_order_acquire))
-			.Field(
-				"current_worldspace_form_id",
-				_currentWorldspaceFormID.load(std::memory_order_acquire))
-			.Field(
-				"current_cell_form_id",
-				_currentCellFormID.load(std::memory_order_acquire))
-			.Field(
-				"geometry_gather_branch",
-				sceneTraversalOverrideApplied ?
-					"scene_traversal" :
-					!qEnabledResolved ?
-						"unresolved" :
-						qEnabled ? "pre_culled_cache" : "scene_traversal")
-			.Field(
-				"pre_culled_q_enabled_resolved",
-				qEnabledResolved)
-			.Field(
-				"pre_culled_q_enabled",
-				qEnabled)
-			.Field(
-				"pre_culled_want_enabled_resolved",
-				_preCulledWantEnabledResolved.load(
-					std::memory_order_acquire))
-			.Field(
-				"pre_culled_want_enabled",
-				_preCulledWantEnabled.load(std::memory_order_acquire))
-			.Field(
-				"pre_culled_display_setting_resolved",
-				_preCulledDisplaySettingResolved.load(
-					std::memory_order_acquire))
-			.Field(
-				"pre_culled_display_setting",
-				_preCulledDisplaySetting.load(std::memory_order_acquire))
-			.Field(
-				"pre_culled_temp_disabled_resolved",
-				_preCulledTempDisabledResolved.load(
-					std::memory_order_acquire))
-			.Field(
-				"pre_culled_temp_disabled",
-				_preCulledTempDisabled.load(std::memory_order_acquire))
-			.Field(
 				"scene_traversal_override_resolved",
 				_sceneTraversalOverrideResolved.load(
 					std::memory_order_acquire))
-			.Field(
-				"scene_traversal_override_applied_last_render",
-				sceneTraversalOverrideApplied)
 			.Field(
 				"matrix_global_resolved",
 				_matrixGlobalResolved.load(std::memory_order_acquire))

@@ -7,7 +7,6 @@
 
 #include <atomic>
 #include <cstdint>
-#include <limits>
 #include <mutex>
 #include <string>
 
@@ -161,8 +160,6 @@ namespace cs::features
 		std::atomic_bool _nativeTextureAvailable{ false };
 		std::atomic_bool _nativeSRVAvailable{ false };
 		std::atomic_bool _nativeDSVAvailable{ false };
-		std::atomic_flag _depthStencilTargetsReported = ATOMIC_FLAG_INIT;
-		std::atomic<std::int32_t> _first512DepthStencilSlot{ -1 };
 		std::atomic<std::int32_t> _precipitationOcclusionPlatformID{ -1 };
 		std::atomic_bool _synthesizedSRVDescriptor{ false };
 		std::atomic_bool _outerHookInstalled{ false };
@@ -179,54 +176,10 @@ namespace cs::features
 		std::atomic_bool _normalizedResourcesAllocated{ false };
 		std::atomic_bool _normalizedViewDispatchedLastFrame{ false };
 		std::atomic_flag _emptyGeometryReported = ATOMIC_FLAG_INIT;
-		std::atomic_bool _shadowSceneNodeGlobalResolved{ false };
-		std::atomic_bool _shadowSceneNodePresent{ false };
-		std::atomic_bool _preCulledObjectsPresent{ false };
-		std::atomic_bool _sceneRootPresent{ false };
-		std::atomic_int64_t _sceneRootChildCount{ -1 };
-		std::atomic_bool _cullingProcessPresent{ false };
-		std::atomic_bool _accumulatorPresent{ false };
-		std::atomic_int64_t _accumulatorRenderMode{ -1 };
-		std::atomic_bool _occlusionCameraPresent{ false };
-		std::atomic<float> _occlusionFrustumNear{
-			std::numeric_limits<float>::lowest()
-		};
-		std::atomic<float> _occlusionFrustumFar{
-			std::numeric_limits<float>::lowest()
-		};
-		std::atomic<float> _occlusionFrustumLeft{
-			std::numeric_limits<float>::lowest()
-		};
-		std::atomic<float> _occlusionFrustumRight{
-			std::numeric_limits<float>::lowest()
-		};
-		std::atomic<float> _occlusionFrustumTop{
-			std::numeric_limits<float>::lowest()
-		};
-		std::atomic<float> _occlusionFrustumBottom{
-			std::numeric_limits<float>::lowest()
-		};
-		std::atomic_int64_t _occlusionFrustumOrthographic{ -1 };
 		std::atomic_bool _inInteriorResolved{ false };
 		std::atomic_bool _inInterior{ false };
-		std::atomic_int64_t _currentWorldspaceFormID{ -1 };
-		std::atomic_int64_t _currentCellFormID{ -1 };
-		std::atomic_bool _preCulledQEnabledResolved{ false };
-		std::atomic_bool _preCulledQEnabled{ false };
-		std::atomic_bool _preCulledWantEnabledResolved{ false };
-		std::atomic_bool _preCulledWantEnabled{ false };
-		std::atomic_bool _preCulledDisplaySettingResolved{ false };
-		std::atomic_bool _preCulledDisplaySetting{ false };
-		std::atomic_bool _preCulledTempDisabledResolved{ false };
-		std::atomic_bool _preCulledTempDisabled{ false };
 		std::atomic_bool _sceneTraversalOverrideResolved{ false };
-		std::atomic_bool _sceneTraversalOverrideAppliedLastRender{ false };
 		std::atomic_uint64_t _renderCount{ 0 };
-		std::atomic_uint64_t _vfuncCallsTotal{ 0 };
-		std::atomic_uint64_t _workingVfuncCallsDuringRender{ 0 };
-		std::atomic_uint64_t _lastVfuncCallsDuringRender{ 0 };
-		std::atomic_int64_t _workingVfuncLastRenderModeDuringRender{ -1 };
-		std::atomic_int64_t _vfuncLastRenderModeDuringRender{ -1 };
 		std::atomic_uint64_t _workingGeometryCount{ 0 };
 		std::atomic_uint64_t _workingPassCount{ 0 };
 		std::atomic_uint64_t _lastGeometryCount{ 0 };

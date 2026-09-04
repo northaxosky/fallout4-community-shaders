@@ -5,7 +5,6 @@
 #include "FeatureBuffer.h"
 #include "FeatureCategories.h"
 
-#include <array>
 #include <atomic>
 #include <cstdint>
 #include <mutex>
@@ -62,8 +61,7 @@ namespace cs::features
 			kHeightSlopeXNearZero,
 			kHeightSlopeYNearZero,
 			kNonFiniteDerived,
-			kUsingDerived,
-			kCount
+			kUsingDerived
 		};
 
 		ExponentialHeightFog() = default;
@@ -92,22 +90,21 @@ namespace cs::features
 		mutable std::atomic_bool _inInterior{ false };
 		mutable std::atomic_bool _publishedActive{ false };
 		mutable std::atomic_uint64_t _sharedDataPublishCalls{ 0 };
-		std::atomic_uint64_t _targetBindCalls{ 0 };
-		std::atomic_uint64_t _acceptedBindCalls{ 0 };
-		std::array<
-			std::atomic_uint64_t,
-			static_cast<std::size_t>(ObservationStatus::kCount)>
-			_observationCounts{};
 		std::atomic<ObservationStatus> _observationStatus{
 			ObservationStatus::kNeverCalled
 		};
+		std::atomic<ObservationStatus> _lastFallbackReason{
+			ObservationStatus::kNeverCalled
+		};
+		std::atomic_uint64_t _fallbackFrames{ 0 };
+		std::atomic_uint64_t _lastFallbackFrame{ UINT64_MAX };
+		std::atomic_uint32_t _warnedFallbackReasons{ 0 };
 		std::atomic_bool _derivedParametersInUse{ false };
 		std::atomic<float> _derivedDensity{ 0.0f };
 		std::atomic<float> _derivedHeightFalloffX{ 0.0f };
 		std::atomic<float> _derivedHeightFalloffY{ 0.0f };
 		std::atomic<float> _derivedNearDistance{ 0.0f };
 		std::atomic<float> _derivedFarDistance{ 0.0f };
-		std::atomic_uint32_t _lastObservedFrame{ UINT32_MAX };
 		mutable std::mutex _validationMutex;
 		mutable std::string _validationDetail;
 	};

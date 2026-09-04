@@ -23,8 +23,6 @@ namespace cs::render
 	inline constexpr std::uint32_t kSkylightingDataSlot = 7;
 	inline constexpr std::uint32_t kSkylightingTextureSlot = 9;
 	inline constexpr std::uint32_t kSkylightingSamplerSlot = 9;
-	inline constexpr std::uint32_t kSkylightingTelemetryUAVSlot = 7;
-	inline constexpr float kSkylightingCameraOriginDeltaUnavailable = -1.0f;
 	static_assert(kFeatureDataSlot == kSharedDataSlot + 1);
 	static_assert(kSkylightingDataSlot == kFeatureDataSlot + 1);
 
@@ -63,15 +61,6 @@ namespace cs::render
 		std::uint64_t rejectedNoSampler = 0;
 		std::uint64_t rejectedCameraMissing = 0;
 		std::uint64_t rejectedCameraStale = 0;
-		bool          footprintCounterReady = false;
-		std::uint32_t footprintFrame = UINT32_MAX;
-		std::uint64_t footprintInside = 0;
-		std::uint64_t footprintOutside = 0;
-		bool          footprintWrongSpaceSignature = false;
-		std::uint64_t footprintReadbacksDropped = 0;
-		bool          cameraOriginCompared = false;
-		float         cameraOriginDeltaMagnitude =
-			kSkylightingCameraOriginDeltaUnavailable;
 	};
 
 	void InitializeSharedData(ID3D11Device* a_device, ID3D11DeviceContext* a_context);
