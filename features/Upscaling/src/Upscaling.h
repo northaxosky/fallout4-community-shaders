@@ -37,7 +37,6 @@ namespace cs::features
 		{
 			return "DLSS and FSR3 super-resolution with AMD FSR3 frame generation.";
 		}
-		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

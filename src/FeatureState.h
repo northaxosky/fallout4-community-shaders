@@ -6,12 +6,6 @@
 
 namespace cs
 {
-	enum class EnbPolicy
-	{
-		kRunAnyway,
-		kDeactivate
-	};
-
 	enum class FeatureRuntimeState
 	{
 		kPending,

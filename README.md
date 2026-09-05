@@ -182,10 +182,7 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 
 ## Compatibility notes
 
-- **ENB is not supported.** Features whose effects overlap ENB - Screen Space Shadows, Terrain
-  Shadows, Screen Space GI, Inverse Square Lighting, Exponential Height Fog, Dynamic Cubemaps,
-  Wetness Effects, and Upscaling - deactivate themselves when ENB is loaded. The remaining features
-  still run, but the combination is untested.
+- **ENB is not supported.** Every feature deactivates when ENB is loaded.
 - **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
   load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
   needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR

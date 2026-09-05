@@ -293,15 +293,14 @@ namespace cs
 					continue;
 				}
 
-				const bool deactivatedForEnb =
-					feature->GetEnbPolicy() == EnbPolicy::kDeactivate && cs::env::IsENBLoaded();
+				const bool deactivatedForEnb = cs::env::IsENBLoaded();
 				const bool desiredActive = activation.valid && activation.load && !deactivatedForEnb;
 				feature->SetState({
 					.installed = true,
 					.desiredActive = desiredActive,
 					.runtimeState = desiredActive ? FeatureRuntimeState::kPending : FeatureRuntimeState::kInactive,
 					.detail = deactivatedForEnb
-						? "ENB is active; Community Shaders yields its overlapping effects to ENB."
+						? "ENB is loaded; this feature is inactive."
 						: std::string{}
 				});
 			} catch (const std::exception& e) {

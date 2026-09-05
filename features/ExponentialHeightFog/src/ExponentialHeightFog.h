@@ -27,7 +27,6 @@ namespace cs::features
 		{
 			return "Fits exponential distance extinction and height falloff to Fallout 4's weather fog ramps.";
 		}
-		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

@@ -31,7 +31,6 @@ namespace cs::features
 		std::string GetConfigKey() const override { return "WetnessEffects"; }
 		std::string GetCategory() const override { return FeatureCategories::kLighting; }
 		std::string GetFeatureSummary() const override { return "Adds rain wetness to deferred lighting and composition."; }
-		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

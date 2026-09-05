@@ -33,7 +33,6 @@ namespace cs
 		virtual std::string_view GetDisplayName() const { return GetName(); }
 		virtual std::string GetConfigKey() const { return std::string(GetName()); }
 		spdlog::logger* Log() const;
-		virtual EnbPolicy GetEnbPolicy() const { return EnbPolicy::kRunAnyway; }
 		virtual bool IsInstalled() const;
 
 		const FeatureState& GetState() const noexcept { return _state; }

@@ -47,7 +47,6 @@ namespace cs::features
 		{
 			return "Projects animated water caustics onto submerged surfaces lit by the sun.";
 		}
-		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

@@ -47,7 +47,6 @@ namespace cs::features
 		{
 			return "Casts long-range worldspace terrain shadows into directional lighting from an xLODGen heightmap.";
 		}
-		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;

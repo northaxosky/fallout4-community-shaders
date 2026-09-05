@@ -57,7 +57,6 @@ namespace cs::features
 		{
 			return "Captures and prefilters the current scene for deferred environment reflections.";
 		}
-		EnbPolicy GetEnbPolicy() const override { return EnbPolicy::kDeactivate; }
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
