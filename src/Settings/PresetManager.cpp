@@ -472,7 +472,9 @@ namespace cs
 				a_meta.name, a_meta.builtin ? "builtin" : "user", staged.size(), finalizeErrors.size());
 			// Skip saving when any feature leaves disk stale.
 			Menu::ShowToast("Applied '" + a_meta.name + "' with " +
-				std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted", 5.0);
+				std::to_string(finalizeErrors.size()) + " save error(s); active preset NOT persisted",
+				5.0,
+				DMUI_STATUS_SEVERITY_ERROR);
 			return false;
 		}
 

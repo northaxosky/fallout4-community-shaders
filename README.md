@@ -102,21 +102,19 @@ the shipped Default remain available for bring-up opt-outs. Restart after changi
 
 ## Controls
 
-| Key | Action |
-|:---:|---|
-| **End** | Open or close the settings menu |
-| **F10** | Toggle the Performance Overlay when it is enabled |
-| **F11** | Capture one frame when RenderDoc is enabled |
-| **Shift + F11** | Capture multiple frames when RenderDoc is enabled |
+Community Shaders registers its controls with DearModdingUI. The shipped suggestions are **F10**
+for the Performance Overlay, **F11** for one RenderDoc capture, **Shift + F11** for a multi-frame
+capture, and **Ctrl + F12** for a telemetry dump. The host owns binding overrides, conflict
+resolution and key-up pairing. Capture and overlay actions yield while the host owns input;
+the telemetry dump action remains available while the menu is open.
 
-Feature hotkeys are configurable in the unified TOML: `toggle_hotkey` for the overlay,
-`capture_hotkey` and `multi_capture_hotkey` for RenderDoc. Set a key to `"none"` to unbind it.
-The menu's own keys live under `[menu]` as `toggle_key` and `overlay_toggle_key` and are
-rebindable from the menu's Keybindings tab.
-
-When a shared mod menu hosts the settings (see [shared menu](#shared-mod-menu)), **End** is that
-host's key, not this plugin's: the host owns opening and closing the common menu, its own binding,
-and the theme and fonts it draws with. The overlay and RenderDoc hotkeys above are unaffected.
+The feature TOML strings (`toggle_hotkey`, `capture_hotkey`, `multi_capture_hotkey`, and
+`logging.dump_hotkey`) remain suggested defaults. An explicit user
+`features.PerformanceOverlay.settings.toggle_hotkey` wins over the retired menu binding; otherwise
+the legacy integer/keyboard-array `menu.overlay_toggle_key` is converted once into the host's
+suggested chord, including an explicit `0` (unbound). The host's saved override is authoritative
+after registration. With no compatible host, these diagnostic hotkeys are intentionally
+unavailable.
 
 Feature settings can expose persisted texture previews and fullscreen debug views. Texture
 previews are independent; one fullscreen view can replace the scene at a time. Terrain Shadows
@@ -129,30 +127,30 @@ assets live in subdirectories beneath it:
 
 | Directory | Contents |
 |---|---|
-| `Fonts\<Family>\` | Menu fonts, one folder per family; selectable per typography role |
-| `Themes\` | Importable menu theme presets as `<Name>.toml`; the unified User TOML records only your edits to the shipped theme |
-| `Icons\` | Optional action and category icons from [Phosphor](https://github.com/phosphor-icons/core), MIT; see [Icons/LICENSE](package/F4SE/Plugins/FO4CommunityShaders/Icons/LICENSE) |
 | `Presets\` | Cross-feature setting presets |
 
 ---
 
-## Shared mod menu
+## DearModdingUI
 
-Community Shaders can draw its settings inside a shared Dear-Modding mod menu instead of its own
-window. This is entirely optional and needs no configuration: at startup the plugin looks for any
-loaded module exposing the neutral `DearModdingUI` client ABI, and joins the first compatible one.
-[Addictol](https://www.nexusmods.com/fallout4/mods/84214) implements that ABI, but no host is
-required and none is depended on.
+Community Shaders is a forwarding-only DearModdingUI client. At startup it uses the official
+header-only client to discover and preflight a compatible host, then registers Home, General,
+Advanced, Presets, per-feature settings, and Performance Overlay pages. The host owns the window,
+navigation, rendering backend, fonts, theme, input, hotkey editor, dialogs, notifications, and
+overlay placement.
 
-When a host takes over, the home, general, advanced, presets, and per-feature pages appear in the
-common menu under **Community Shaders**, and that menu's own key opens and closes it. The host owns
-the window, theme, and fonts, so this plugin's own interface and menu-key settings do not apply
-while hosted. Feature hotkeys, the performance overlay, and RenderDoc capture keep working exactly
-as they do standalone.
+Community Shaders does not compile or link Dear ImGui and never creates or shares an ImGui context.
+Forwarding avoids shared ImGui layouts, but the official client still verifies the generated
+ImGui forwarding binary version and the required forwarding surface. If the host is
+missing, disabled, incompatible, or cannot provide every required native service, Community
+Shaders continues running its shader features, presets, TOML configuration, telemetry, and
+fullscreen debug selection headless. It deliberately provides no fallback menu, overlay,
+notification UI, or diagnostic hotkeys in that state.
 
-With no compatible host loaded - or if registration or backend initialization fails before
-readiness - Community Shaders opens its own menu with **End**, unchanged. Both sides must be built
-against the same pinned Dear ImGui; a mismatch is refused and the standalone menu is used.
+Settings pages use the host's native section, settings-table, settings-row, reset, search, status
+color, dialog, and link services. Feature widgets remain live and persist with their existing
+per-feature rules inside those native rows.
+
 Developer details live in [`src/Host/README.md`](src/Host/README.md).
 
 ---

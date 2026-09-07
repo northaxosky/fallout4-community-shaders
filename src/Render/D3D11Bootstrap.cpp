@@ -11,6 +11,7 @@
 #include "Menu/Menu.h"
 #include "Render/Annotation.h"
 #include "Render/FrameBuffer.h"
+#include "Render/FrameProfiler.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
@@ -110,6 +111,7 @@ namespace cs::d3d11
 		bool expected = false;
 		if (complete && ready.compare_exchange_strong(expected, true)) {
 			render::annotation::Initialize(*a_immediateContext);
+			render::profiling::InitializeD3D11(*a_device, *a_immediateContext);
 			InvokeOwner("Shader cache initialization", [] {
 				InitializeShaderCache();
 			});
@@ -136,23 +138,15 @@ namespace cs::d3d11
 			InvokeOwner("FeatureManager shader-injection validation", [&] {
 				FeatureManager::Get().ValidateShaderInjectionsAll();
 			});
-			// Defer menu ownership to a registered host.
-			bool standalone = true;
+			InvokeOwner("Debug-view selection", [] {
+				Menu::Get().ApplyDebugViewSelections();
+			});
 			InvokeOwner("Dear-Modding UI bootstrap", [&] {
-				standalone = host::HostClient::Get().OnD3D11Bootstrap(
+				host::HostClient::Get().OnD3D11Bootstrap(
 					*a_device,
-					*a_immediateContext,
 					*a_swapChain,
 					a_swapChainDesc->OutputWindow);
 			});
-			if (standalone) {
-				InvokeOwner("Menu D3D11 initialization", [&] {
-					Menu::Get().OnD3D11Ready(*a_device, *a_immediateContext, a_swapChainDesc->OutputWindow);
-				});
-				InvokeOwner("Menu Present hook", [&] {
-					Menu::Get().HookPresentOn(*a_swapChain);
-				});
-			}
 			InvokeOwner("Shader cache startup summary", [] {
 				LogShaderCacheSummary();
 			});

@@ -5,7 +5,7 @@
 #include <RE/N/NiCamera.h>
 #include <RE/S/Sky.h>
 #include <d3d11.h>
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <algorithm>
 #include <array>
@@ -991,12 +991,40 @@ namespace cs::features
 	void ScreenSpaceShadows::DrawSettings()
 	{
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		changed |= ImGui::SliderFloat("Surface thickness", &_settings.surfaceThickness, 0.005f, 0.05f);
-		changed |= ImGui::SliderFloat("Bilinear threshold", &_settings.bilinearThreshold, 0.02f, 1.0f);
-		changed |= ImGui::SliderFloat("Shadow contrast", &_settings.shadowContrast, 0.0f, 4.0f);
+		const float surfaceThicknessMin = 0.005f;
+		const float surfaceThicknessMax = 0.05f;
+		changed |= ImGui::SliderScalar(
+			"Surface thickness",
+			ImGuiDataType_Float,
+			&_settings.surfaceThickness,
+			&surfaceThicknessMin,
+			&surfaceThicknessMax);
+		const float bilinearThresholdMin = 0.02f;
+		const float bilinearThresholdMax = 1.0f;
+		changed |= ImGui::SliderScalar(
+			"Bilinear threshold",
+			ImGuiDataType_Float,
+			&_settings.bilinearThreshold,
+			&bilinearThresholdMin,
+			&bilinearThresholdMax);
+		const float shadowContrastMin = 0.0f;
+		const float shadowContrastMax = 4.0f;
+		changed |= ImGui::SliderScalar(
+			"Shadow contrast",
+			ImGuiDataType_Float,
+			&_settings.shadowContrast,
+			&shadowContrastMin,
+			&shadowContrastMax);
 
 		auto sampleCount = static_cast<int>(_settings.sampleCount);
-		if (ImGui::SliderInt("Sample count multiplier", &sampleCount, 1, 4)) {
+		const int sampleCountMin = 1;
+		const int sampleCountMax = 4;
+		if (ImGui::SliderScalar(
+				"Sample count multiplier",
+				ImGuiDataType_S32,
+				&sampleCount,
+				&sampleCountMin,
+				&sampleCountMax)) {
 			_settings.sampleCount = static_cast<std::uint32_t>(sampleCount);
 			changed = true;
 		}

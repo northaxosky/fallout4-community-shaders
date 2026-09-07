@@ -418,6 +418,38 @@ namespace
 			std::optional<std::string>{ "C:\\Program Files\\RenderDoc\\renderdoc.dll" });
 	}
 
+	void TestExplicitUserFeatureSetting(const std::filesystem::path& a_root)
+	{
+		const auto defaultPath = a_root / "Explicit.Default.toml";
+		const auto userPath = a_root / "Explicit.User.toml";
+		WriteFile(
+			defaultPath,
+			"[features.PerformanceOverlay]\n"
+			"load = false\n"
+			"[features.PerformanceOverlay.settings]\n"
+			"toggle_hotkey = \"F10\"\n");
+		WriteFile(
+			userPath,
+			"[menu]\n"
+			"overlay_toggle_key = [17, 121]\n");
+
+		(void)cs::feature_config::ReloadFromFiles(defaultPath, userPath);
+		CHECK(!cs::feature_config::HasUserFeatureSetting(
+			"PerformanceOverlay", "toggle_hotkey"));
+
+		WriteFile(
+			userPath,
+			"[menu]\n"
+			"overlay_toggle_key = [17, 121]\n"
+			"[features.PerformanceOverlay.settings]\n"
+			"toggle_hotkey = \"Alt+8\"\n");
+		(void)cs::feature_config::ReloadFromFiles(defaultPath, userPath);
+		CHECK(cs::feature_config::HasUserFeatureSetting(
+			"PerformanceOverlay", "toggle_hotkey"));
+		CHECK(!cs::feature_config::HasUserFeatureSetting(
+			"PerformanceOverlay", "missing"));
+	}
+
 	void TestScalarReaders()
 	{
 		using enum cs::feature_config::ScalarReadStatus;
@@ -711,6 +743,7 @@ int main(int a_argc, char* a_argv[])
 			TestMergedLoadFailureModes(directory.path);
 			TestUnknownFeatureTableIsHarmless(directory.path);
 			TestAtomicWriteRoundTrip(directory.path);
+			TestExplicitUserFeatureSetting(directory.path);
 			TestScalarReaders();
 		} else {
 			throw std::runtime_error("Invalid arguments");

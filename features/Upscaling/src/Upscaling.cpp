@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 #include <REX/TScopeExit.h>
 #include <toml++/toml.hpp>
 
@@ -3136,10 +3136,34 @@ namespace cs::features
 	void Upscaling::DrawSettings()
 	{
 		bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
+		const auto drawChoice = [](const char* a_label,
+								 int& a_value,
+								 const char* const* a_labels,
+								 std::size_t a_count) {
+			const auto selected =
+				a_value >= 0 && static_cast<std::size_t>(a_value) < a_count ?
+				a_value :
+				0;
+			bool choiceChanged = false;
+			if (ImGui::BeginCombo(a_label, a_labels[selected])) {
+				for (std::size_t index = 0; index < a_count; ++index) {
+					if (ImGui::Selectable(
+							a_labels[index],
+							static_cast<int>(index) == selected)) {
+						a_value = static_cast<int>(index);
+						choiceChanged = true;
+					}
+					if (static_cast<int>(index) == selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			return choiceChanged;
+		};
 
 		static const char* methods[] = { "None", "TAA", "FSR 3", "DLSS" };
 		int method = static_cast<int>(streamline.featureDLSS ? settings.upscaleMethod : settings.upscaleMethodNoDLSS);
-		if (ImGui::Combo("Upscaler", &method, methods, IM_ARRAYSIZE(methods))) {
+		if (drawChoice("Upscaler", method, methods, std::size(methods))) {
 			if (streamline.featureDLSS) {
 				settings.upscaleMethod = static_cast<std::uint32_t>(method);
 			} else {
@@ -3153,14 +3177,30 @@ namespace cs::features
 
 		static const char* qualityModes[] = { "Native AA", "Quality", "Balanced", "Performance", "Ultra Performance" };
 		int qualityMode = static_cast<int>(settings.qualityMode);
-		if (ImGui::Combo("Quality mode", &qualityMode, qualityModes, IM_ARRAYSIZE(qualityModes))) {
+		if (drawChoice(
+				"Quality mode",
+				qualityMode,
+				qualityModes,
+				std::size(qualityModes))) {
 			settings.qualityMode = static_cast<std::uint32_t>(qualityMode);
 			changed = true;
 		}
 
-		changed |= ImGui::SliderFloat("FSR sharpness", &settings.sharpnessFSR, 0.0f, 1.0f);
+		const float sharpnessMin = 0.0f;
+		const float sharpnessMax = 1.0f;
+		changed |= ImGui::SliderScalar(
+			"FSR sharpness",
+			ImGuiDataType_Float,
+			&settings.sharpnessFSR,
+			&sharpnessMin,
+			&sharpnessMax);
 		changed |= ImGui::Checkbox("DLSS sharpening", &settings.sharpnessEnabledDLSS);
-		changed |= ImGui::SliderFloat("DLSS sharpness", &settings.sharpnessDLSS, 0.0f, 1.0f);
+		changed |= ImGui::SliderScalar(
+			"DLSS sharpness",
+			ImGuiDataType_Float,
+			&settings.sharpnessDLSS,
+			&sharpnessMin,
+			&sharpnessMax);
 
 		bool frameGenerationEnabled = settings.frameGenerationMode != 0;
 		if (ImGui::Checkbox("FSR 3 frame generation", &frameGenerationEnabled)) {
@@ -3179,14 +3219,18 @@ namespace cs::features
 
 		static const char* presets[] = { "Default", "J", "K", "L", "M" };
 		int preset = static_cast<int>(settings.presetDLSS);
-		if (ImGui::Combo("DLSS preset", &preset, presets, IM_ARRAYSIZE(presets))) {
+		if (drawChoice("DLSS preset", preset, presets, std::size(presets))) {
 			settings.presetDLSS = static_cast<std::uint32_t>(preset);
 			changed = true;
 		}
 
 		static const char* logLevels[] = { "Off", "Default", "Verbose" };
 		int logLevel = static_cast<int>(settings.streamlineLogLevel);
-		if (ImGui::Combo("Streamline log level", &logLevel, logLevels, IM_ARRAYSIZE(logLevels))) {
+		if (drawChoice(
+				"Streamline log level",
+				logLevel,
+				logLevels,
+				std::size(logLevels))) {
 			settings.streamlineLogLevel = static_cast<std::uint32_t>(logLevel);
 			changed = true;
 		}

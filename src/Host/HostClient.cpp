@@ -1,21 +1,27 @@
 #include "Host/HostClient.h"
 
 #include "Feature.h"
-#include "Host/HostDiscovery.h"
-#include "Host/HostFingerprint.h"
-#include "Host/SwapChainHandoff.h"
 #include "Log.h"
-#include "Menu/FeatureListRenderer.h"
-#include "Menu/HomePageRenderer.h"
-#include "Menu/ImGuiRecovery.h"
 #include "Menu/Menu.h"
-#include "Menu/OverlayRenderer.h"
 #include "Plugin.h"
+#include "Settings/FeatureConfig.h"
+#include "Telemetry/Telemetry.h"
+#include "Utils/Hotkey.h"
+#include "Utils/UI.h"
 
+#include "PerformanceOverlay.h"
+#include "RenderDoc.h"
+
+#include <algorithm>
+#include <array>
 #include <exception>
+#include <format>
+#include <string>
+#include <utility>
 
 #include <d3d11.h>
 #include <dxgi.h>
+#include <shellapi.h>
 
 namespace cs::host
 {
@@ -23,89 +29,60 @@ namespace cs::host
 	{
 		auto* L = cs::log::Get("cs.host");
 
-		constexpr std::string_view kClientId = "dearmodding.community-shaders";
-		constexpr std::string_view kClientDisplayName = "Community Shaders";
+		constexpr DMUI_HostServices kRequiredServices =
+			DMUI_HOST_SERVICE_FRAME_CONTROL |
+			DMUI_HOST_SERVICE_EDIT_LIFECYCLE |
+			DMUI_HOST_SERVICE_CONTEXTUAL_HOTKEYS |
+			DMUI_HOST_SERVICE_IMAGE_RESOURCES |
+			DMUI_HOST_SERVICE_MANAGED_OVERLAYS |
+			DMUI_HOST_SERVICE_NOTIFICATIONS |
+			DMUI_HOST_SERVICE_ANNOTATED_PLOTS |
+			DMUI_HOST_SERVICE_DIALOGS;
 
-		std::string_view DescribeResult(DMUI_Result a_result) noexcept
+		FeaturePageInput DescribeFeature(Feature& a_feature)
 		{
-			switch (a_result) {
-			case DMUI_RESULT_OK:
-				return "ok";
-			case DMUI_RESULT_UNSUPPORTED_ABI:
-				return "unsupported ABI";
-			case DMUI_RESULT_INVALID_ARGUMENT:
-				return "invalid argument";
-			case DMUI_RESULT_STRUCT_TOO_SMALL:
-				return "struct too small";
-			case DMUI_RESULT_INVALID_DESCRIPTOR:
-				return "invalid descriptor";
-			case DMUI_RESULT_FINGERPRINT_MISMATCH:
-				return "Dear ImGui fingerprint mismatch";
-			case DMUI_RESULT_DUPLICATE_CLIENT_ID:
-				return "duplicate client id";
-			case DMUI_RESULT_DUPLICATE_PAGE_ID:
-				return "duplicate page id";
-			case DMUI_RESULT_REGISTRATION_CLOSED:
-				return "registration closed";
-			case DMUI_RESULT_HOST_DISABLED:
-				return "host disabled";
-			case DMUI_RESULT_HOST_NOT_INITIALIZED:
-				return "host not initialized";
-			case DMUI_RESULT_HOST_NOT_READY:
-				return "host not ready";
-			case DMUI_RESULT_BACKEND_FAILED:
-				return "host backend failed";
-			case DMUI_RESULT_RESOURCE_EXHAUSTED:
-				return "resource exhausted";
-			case DMUI_RESULT_CLIENT_CAPABILITY_REQUIRED:
-				return "renderer replacement capability required";
-			case DMUI_RESULT_SWAPCHAIN_REJECTED:
-				return "swapchain rejected";
-			case DMUI_RESULT_RENDERER_BUSY:
-				return "host renderer busy";
-			default:
-				return "unknown error";
-			}
+			return {
+				.name = std::string(a_feature.GetName()),
+				.displayName = std::string(a_feature.GetDisplayName()),
+				.category = a_feature.GetCategory(),
+				.summary = a_feature.GetFeatureSummary(),
+				.active = a_feature.IsActive(),
+				.installed = a_feature.IsInstalled()
+			};
 		}
 
-		std::string_view DescribeUnavailable(DMUI_UnavailableReason a_reason) noexcept
+		bool LoadAtBoot(const Feature& a_feature)
 		{
-			switch (a_reason) {
-			case DMUI_UNAVAILABLE_HOST_DISABLED:
-				return "the host is disabled";
-			case DMUI_UNAVAILABLE_BACKEND_FAILED:
-				return "the host renderer failed to initialize";
-			default:
-				return "no reason given";
-			}
+			const auto feature = feature_config::GetFeature(a_feature.GetConfigKey());
+			return feature &&
+				feature->get("load") &&
+				feature->get("load")->value_or(false);
 		}
 
-		bool ReadyInfoIsUsable(const DMUI_HostReadyInfo* a_info) noexcept
+		ImVec4 ThemeColor(
+			dmui::Client& a_client,
+			const DMUI_Vec4 DMUI_ThemeColors::*a_member)
 		{
-			return a_info &&
-			       a_info->structSize >= sizeof(DMUI_HostReadyInfo) &&
-			       a_info->apiVersion == DMUI_API_VERSION_CURRENT &&
-			       a_info->imguiContext &&
-			       a_info->imguiAlloc &&
-			       a_info->imguiFree;
-		}
-
-		FeaturePageInput DescribeFeature(Feature& a_feature) noexcept
-		{
-			FeaturePageInput input;
-			try {
-				input.name = std::string(a_feature.GetName());
-				input.displayName = std::string(a_feature.GetDisplayName());
-				input.category = a_feature.GetCategory();
-				input.summary = a_feature.GetFeatureSummary();
-				input.active = a_feature.IsActive();
-				input.installed = a_feature.IsInstalled();
-			} catch (...) {
-				L->warn("A feature failed to provide Dear-Modding UI page metadata");
-			}
-			return input;
+			if (const auto colors = a_client.GetThemeColors())
+				return ui::ToImVec4(colors.value().*a_member);
+			return ImGui::GetStyleColorVec4(ImGuiCol_Text);
 		}
 	}
+
+	HostClient::HostClient() :
+		_client(
+			"dearmodding.community-shaders",
+			"Community Shaders",
+			{ Plugin::VERSION[0], Plugin::VERSION[1] },
+			dmui::kForwardingClient,
+			{},
+			{},
+			{
+				.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT,
+				.requiredServices = kRequiredServices,
+				.minimumForwardingVersion = DMUI_FORWARDING_VERSION_1_1
+			})
+	{}
 
 	HostClient& HostClient::Get()
 	{
@@ -116,488 +93,1068 @@ namespace cs::host
 	void HostClient::DiscoverAndRegister() noexcept
 	{
 		try {
-			const auto discovered = DiscoverHost(ClientFingerprint());
-			if (!discovered || !discovered->api) {
-				FallBackToStandalone("no compatible Dear-Modding UI host is loaded");
+			_registrationComplete.store(false, std::memory_order_release);
+			if (!_client.Connect()) {
+				if (!_client.HostPresent()) {
+					L->info(
+						"DearModdingUI host not found; Community Shaders is running headless "
+						"(no menu, overlay, or diagnostic hotkeys)");
+				} else {
+					L->warn(
+						"DearModdingUI connection rejected: {}; Community Shaders is running "
+						"headless (no menu, overlay, or diagnostic hotkeys)",
+						DMUI_ResultToString(_client.LastResult()));
+				}
 				return;
 			}
-			if (!Register(*discovered->api, discovered->modulePath))
+			if (!RegisterPages()) {
+				(void)_client.SetStatus(
+					DMUI_STATUS_SEVERITY_ERROR,
+					"Community Shaders page registration is incomplete; callbacks are disabled.");
+				L->error(
+					"DearModdingUI page registration was only partially accepted; "
+					"registered callbacks remain disabled");
 				return;
-			L->info("Registered {} pages with the Dear-Modding UI host {}",
-				_pages.size(), discovered->modulePath);
-		} catch (const std::exception& e) {
-			FallBackToStandalone(e.what());
+			}
+			if (!RegisterActionsAndObservers() || !RegisterHotkeys()) {
+				(void)_client.SetStatus(
+					DMUI_STATUS_SEVERITY_ERROR,
+					"Community Shaders registration is incomplete; callbacks are disabled.");
+				L->error(
+					"DearModdingUI registration was only partially accepted; "
+					"Community Shaders callbacks remain disabled");
+				return;
+			}
+			_registrationComplete.store(true, std::memory_order_release);
+			PublishInitialStatus();
+			L->info(
+				"Registered {} forwarding-only pages with DearModdingUI",
+				_pages.size());
+		} catch (const std::exception& error) {
+			L->error(
+				"DearModdingUI registration failed: {}; registered callbacks remain disabled",
+				error.what());
 		} catch (...) {
-			FallBackToStandalone("non-standard exception during host discovery");
+			L->error(
+				"DearModdingUI registration failed with a non-standard exception; "
+				"registered callbacks remain disabled");
 		}
 	}
 
-	bool HostClient::Register(const DMUI_HostAPI& a_api, const std::string& a_modulePath) noexcept
-	{
-		try {
-			_api = &a_api;
-			_clientId = std::string(kClientId);
-			_clientDisplayName = std::string(kClientDisplayName);
-			_clientDescriptor = DMUI_ClientDescriptor{
-				sizeof(DMUI_ClientDescriptor),
-				DMUI_API_VERSION_CURRENT,
-				_clientId.c_str(),
-				_clientDisplayName.c_str(),
-				DMUI_MAKE_VERSION(Plugin::VERSION[0], Plugin::VERSION[1]),
-				&ClientFingerprint(),
-				&HostClient::ReadyCallback,
-				&HostClient::UnavailableCallback,
-				this,
-				DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT
-			};
-
-			if (!_state.ChooseRegistered()) {
-				_api = nullptr;
-				return false;
-			}
-
-			const auto result = a_api.registerClient(&_clientDescriptor, &_client);
-			if (result != DMUI_RESULT_OK) {
-				_client = DMUI_INVALID_CLIENT_HANDLE;
-				FallBackToStandalone(DescribeResult(result));
-				return false;
-			}
-			if (!RegisterPages())
-				return false;
-
-			L->info("Hosted by {} as '{}'", a_modulePath, _clientId);
-			return true;
-		} catch (...) {
-			FallBackToStandalone("non-standard exception during host registration");
-			return false;
-		}
-	}
-
-	bool HostClient::RegisterPages() noexcept
+	bool HostClient::RegisterPages()
 	{
 		std::vector<FeaturePageInput> inputs;
 		std::vector<Feature*> features;
-		for (Feature* feature : FeatureManager::Get().GetRegisteredFeatures()) {
+		for (auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
 			if (!feature || !feature->IsInMenu())
 				continue;
 			inputs.push_back(DescribeFeature(*feature));
 			features.push_back(feature);
 		}
 
-		for (auto& descriptor : BuildPageCatalog(inputs)) {
+		auto catalog = BuildPageCatalog(inputs);
+		_pages.reserve(catalog.size());
+		for (auto descriptor : catalog) {
 			auto page = std::make_unique<Page>();
 			page->feature = descriptor.kind == HostPageKind::kFeature ?
-			                    features[descriptor.featureIndex] :
-			                    nullptr;
+				features[descriptor.featureIndex] :
+				nullptr;
 			page->descriptor = std::move(descriptor);
-
-			DMUI_PageDescriptor pageDescriptor{
-				sizeof(DMUI_PageDescriptor),
+			const dmui::PageDescriptor pageDescriptor{
 				page->descriptor.id.c_str(),
 				page->descriptor.displayName.c_str(),
 				page->descriptor.category.c_str(),
-				page->descriptor.summary.empty() ? nullptr : page->descriptor.summary.c_str(),
+				page->descriptor.summary.c_str(),
 				page->descriptor.sortKey,
 				page->descriptor.kind == HostPageKind::kOverlay ?
 					DMUI_PAGE_KIND_OVERLAY :
-					DMUI_PAGE_KIND_SETTINGS,
-				&HostClient::DrawCallback,
-				page.get()
+					DMUI_PAGE_KIND_SETTINGS
 			};
-
-			const auto result = _api->registerPage(_client, &pageDescriptor, &page->handle);
-			if (result != DMUI_RESULT_OK) {
-				FallBackToStandalone(DescribeResult(result));
+			_pages.push_back(std::move(page));
+			auto* stored = _pages.back().get();
+			const auto handle = _client.AddPage(
+				pageDescriptor,
+				[this, stored] {
+					if (_registrationComplete.load(std::memory_order_acquire))
+						DrawPage(*stored);
+				});
+			if (!handle) {
+				LogFailure("register page");
 				return false;
 			}
-			if (page->descriptor.kind == HostPageKind::kOverlay)
-				_overlayPage = page.get();
-			_pages.push_back(std::move(page));
+			stored->handle = *handle;
+			if (stored->descriptor.kind == HostPageKind::kOverlay)
+				_overlayPage = stored;
 		}
-
-		_features = std::move(features);
 		return true;
 	}
 
-	void HostClient::FallBackToStandalone(std::string_view a_reason) noexcept
+	bool HostClient::RegisterActionsAndObservers()
 	{
-		FallbackResources resources;
-		bool changed = false;
-		bool bootstrapSeen = false;
-		bool startFallback = false;
-		{
-			const std::scoped_lock lock{ _fallbackMutex };
-			// DMUI v1 cannot unregister an accepted client.
-			changed = _state.ChooseStandalone() || _state.ChooseStandaloneFromRegistered();
-			bootstrapSeen = _fallbackCoordination.BootstrapSeen();
-			if (changed &&
-				_fallbackCoordination.OnStandaloneTransition() ==
-					FallbackAction::kStandaloneFromSavedResources) {
-				resources = TakeFallbackResourcesLocked();
-				startFallback = true;
-			}
-			ReleasePendingSwapChainLocked();
+		bool succeeded = true;
+		if (!_client.AddAction(
+				"clear-shader-cache",
+				"Clear Shader Cache",
+				"trash",
+				"Delete compiled shader records after confirmation.",
+				[this] {
+					if (_registrationComplete.load(std::memory_order_acquire))
+						Menu::Get().RequestClearShaderCache();
+				},
+				100)) {
+			LogFailure("register Clear Shader Cache action");
+			succeeded = false;
 		}
-		if (changed)
-			L->info("Community Shaders owns its menu: {}", a_reason);
-		if (startFallback)
-			StartStandaloneFallback(resources);
-		else if (changed && bootstrapSeen)
-			L->error("No saved renderer resources; the standalone menu cannot start");
-	}
-
-	void DMUI_CALL HostClient::ReadyCallback(const DMUI_HostReadyInfo* a_info, void* a_userData) noexcept
-	{
-		if (auto* client = static_cast<HostClient*>(a_userData))
-			client->OnHostReady(a_info);
-	}
-
-	void DMUI_CALL HostClient::UnavailableCallback(DMUI_UnavailableReason a_reason, void* a_userData) noexcept
-	{
-		if (auto* client = static_cast<HostClient*>(a_userData))
-			client->OnHostUnavailable(a_reason);
-	}
-
-	void DMUI_CALL HostClient::DrawCallback(void* a_userData) noexcept
-	{
-		if (auto* page = static_cast<Page*>(a_userData))
-			Get().DrawPage(*page);
-	}
-
-	void HostClient::OnHostReady(const DMUI_HostReadyInfo* a_info) noexcept
-	{
-		try {
-			if (!ReadyInfoIsUsable(a_info)) {
-				// Never contest a host that claimed ImGui ownership.
-				L->error("The Dear-Modding UI host published unusable ready information");
-				GoUnavailable(DMUI_UNAVAILABLE_BACKEND_FAILED, false);
-				return;
-			}
-
-			FallbackResources resources;
-			{
-				const std::scoped_lock lock{ _fallbackMutex };
-				if (_state.Get() != IntegrationState::kRegisteredWaiting)
-					return;
-
-				ImGui::SetCurrentContext(static_cast<ImGuiContext*>(a_info->imguiContext));
-				ImGui::SetAllocatorFunctions(
-					a_info->imguiAlloc, a_info->imguiFree, a_info->imguiAllocatorUserData);
-				if (!_state.MarkReady())
-					return;
-				if (_fallbackCoordination.ConsumeSavedResources())
-					resources = TakeFallbackResourcesLocked();
-			}
-			ReleaseFallbackResources(resources);
-			L->info("Dear-Modding UI host is ready; Community Shaders is hosted for this session");
-			RetryPendingSwapChain();
-			SyncOverlayDemand();
-		} catch (...) {
-			L->error("The host ready callback failed; Community Shaders has no menu this session");
+		if (!_client.AddFrameObserver([this] {
+				if (_registrationComplete.load(std::memory_order_acquire))
+					ObserveFrame();
+			})) {
+			LogFailure("register frame observer");
+			succeeded = false;
 		}
+		if (!_client.AddPageActivityObserver(
+				[this](const dmui::PageActivity& activity) {
+					if (_registrationComplete.load(std::memory_order_acquire))
+						ObservePageActivity(activity);
+				})) {
+			LogFailure("register page activity observer");
+			succeeded = false;
+		}
+		return succeeded;
 	}
 
-	void HostClient::OnHostUnavailable(DMUI_UnavailableReason a_reason) noexcept
+	bool HostClient::RegisterHotkeys()
 	{
-		GoUnavailable(a_reason, true);
-	}
-
-	void HostClient::GoUnavailable(DMUI_UnavailableReason a_reason, bool a_allowFallback) noexcept
-	{
-		try {
-			FallbackResources resources;
-			bool changed = false;
-			bool bootstrapSeen = false;
-			bool startFallback = false;
-			{
-				const std::scoped_lock lock{ _fallbackMutex };
-				bootstrapSeen = _fallbackCoordination.BootstrapSeen();
-				changed = a_allowFallback && !bootstrapSeen ?
-				              _state.ChooseStandaloneFromRegistered() :
-				              _state.MarkUnavailable();
-				if (!changed)
-					return;
-
-				if (a_allowFallback &&
-					_fallbackCoordination.OnStandaloneTransition() ==
-						FallbackAction::kStandaloneFromSavedResources) {
-					resources = TakeFallbackResourcesLocked();
-					startFallback = true;
-				} else if (!a_allowFallback && _fallbackCoordination.ConsumeSavedResources()) {
-					resources = TakeFallbackResourcesLocked();
+		bool succeeded = true;
+		auto* performance = features::PerformanceOverlay::GetSingleton();
+		const auto& legacyOverlayHotkey =
+			Menu::Get().LegacyOverlayToggleHotkey();
+		const std::string performanceHotkey{ ResolveHotkeySeed(
+			performance->SuggestedToggleHotkey(),
+			performance->HasConfiguredToggleHotkey(),
+			legacyOverlayHotkey) };
+		_overlayHotkey = _client.AddHotkeyAction(
+			"dearmodding.cs.performance-overlay.toggle",
+			"Toggle Performance Overlay",
+			performanceHotkey.c_str(),
+			[this](bool pressed) {
+				auto* feature = features::PerformanceOverlay::GetSingleton();
+				if (pressed &&
+					_registrationComplete.load(std::memory_order_acquire) &&
+					feature->IsHealthy() &&
+					feature->IsOverlayActive()) {
+					_overlayVisible.store(
+						!_overlayVisible.load(std::memory_order_relaxed),
+						std::memory_order_relaxed);
 				}
-				ReleasePendingSwapChainLocked();
+			},
+			DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
+		if (!_overlayHotkey) {
+			LogFailure("register performance overlay hotkey");
+			succeeded = false;
+		} else {
+			std::optional<DMUI_Result> failure;
+			SetHotkeyEnabled(
+				"performance overlay",
+				_overlayHotkey,
+				performance->IsHealthy() && performance->IsOverlayActive(),
+				failure);
+			succeeded &= !failure.has_value();
+		}
+
+		auto* renderDoc = features::RenderDoc::GetSingleton();
+		// Preserve the established policy that multi-frame capture wins when both
+		// suggested chords are the same by registering it first.
+		_multiCaptureHotkey = _client.AddHotkeyAction(
+			"dearmodding.cs.renderdoc.multi-capture",
+			"Capture Multiple Frames",
+			renderDoc->SuggestedMultiCaptureHotkey().c_str(),
+			[this, renderDoc](bool pressed) {
+				if (pressed &&
+					_registrationComplete.load(std::memory_order_acquire) &&
+					renderDoc->IsHealthy() &&
+					renderDoc->CaptureHotkeysEnabled())
+					renderDoc->TriggerMultiFrameCapture();
+			},
+			DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
+		if (!_multiCaptureHotkey) {
+			LogFailure("register RenderDoc multi-capture hotkey");
+			succeeded = false;
+		} else {
+			std::optional<DMUI_Result> failure;
+			SetHotkeyEnabled(
+				"RenderDoc multi-frame capture",
+				_multiCaptureHotkey,
+				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
+				failure);
+			succeeded &= !failure.has_value();
+		}
+
+		_captureHotkey = _client.AddHotkeyAction(
+			"dearmodding.cs.renderdoc.capture",
+			"Capture One Frame",
+			renderDoc->SuggestedCaptureHotkey().c_str(),
+			[this, renderDoc](bool pressed) {
+				if (pressed &&
+					_registrationComplete.load(std::memory_order_acquire) &&
+					renderDoc->IsHealthy() &&
+					renderDoc->CaptureHotkeysEnabled())
+					renderDoc->TriggerCapture();
+			},
+			DMUI_HOTKEY_CONTEXT_HOST_INPUT_INACTIVE);
+		if (!_captureHotkey) {
+			LogFailure("register RenderDoc capture hotkey");
+			succeeded = false;
+		} else {
+			std::optional<DMUI_Result> failure;
+			SetHotkeyEnabled(
+				"RenderDoc single-frame capture",
+				_captureHotkey,
+				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
+				failure);
+			succeeded &= !failure.has_value();
+		}
+
+		if (renderDoc->SuggestedCaptureHotkey() ==
+			renderDoc->SuggestedMultiCaptureHotkey()) {
+			L->warn(
+				"RenderDoc capture hotkeys both suggest '{}'; multi-frame capture "
+				"takes precedence unless the host override changes either binding",
+				renderDoc->SuggestedMultiCaptureHotkey());
+		}
+
+		const auto dump = log::GetDumpHotkey().ToString();
+		_dumpHotkey = _client.AddHotkeyAction(
+			"dearmodding.cs.logging.dump",
+			"Dump Community Shaders Log",
+			dump.c_str(),
+			[this](bool pressed) {
+				if (pressed &&
+					_registrationComplete.load(std::memory_order_acquire))
+					telemetry::pump::RequestDump();
+			},
+			DMUI_HOTKEY_CONTEXT_ALWAYS);
+		if (!_dumpHotkey) {
+			LogFailure("register log dump hotkey");
+			succeeded = false;
+		}
+		return succeeded;
+	}
+
+	void HostClient::PublishInitialStatus() noexcept
+	{
+		std::size_t active{};
+		std::size_t failed{};
+		for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
+			if (!feature)
+				continue;
+			active += feature->IsActive() ? 1u : 0u;
+			if (feature->GetState().runtimeState != FeatureRuntimeState::kFailed)
+				continue;
+			++failed;
+			const auto scope = std::string(feature->GetName());
+			const auto detail = feature->GetState().detail.empty() ?
+				std::string("Feature initialization failed.") :
+				feature->GetState().detail;
+			if (!_client.ReportDiagnostic({
+					DMUI_STATUS_SEVERITY_ERROR,
+					scope.c_str(),
+					"Feature unavailable",
+					detail.c_str() })) {
+				LogFailure("report feature diagnostic");
 			}
+		}
 
-			L->warn("Dear-Modding UI host unavailable ({})", DescribeUnavailable(a_reason));
-			if (!a_allowFallback) {
-				ReleaseFallbackResources(resources);
-				L->error("Community Shaders has no menu this session; the host still owns Dear ImGui");
-				return;
+		const auto status = failed ?
+			std::format(
+				"{} feature{} active; {} failed. See diagnostics.",
+				active,
+				active == 1 ? "" : "s",
+				failed) :
+			std::format(
+				"{} feature{} active.",
+				active,
+				active == 1 ? "" : "s");
+		if (!_client.SetStatus(
+				failed ? DMUI_STATUS_SEVERITY_WARNING : DMUI_STATUS_SEVERITY_INFO,
+				status.c_str())) {
+			LogFailure("publish client status");
+		}
+	}
+
+	void HostClient::DrawPage(Page& a_page)
+	{
+		switch (a_page.descriptor.kind) {
+		case HostPageKind::kHome:
+			Menu::Get().DrawHome(_client);
+			break;
+		case HostPageKind::kGeneral:
+			Menu::Get().DrawGeneral(_client);
+			break;
+		case HostPageKind::kAdvanced:
+			Menu::Get().DrawAdvanced(_client);
+			break;
+		case HostPageKind::kPresets:
+			Menu::Get().DrawPresets(_client);
+			break;
+		case HostPageKind::kFeature:
+			if (a_page.feature)
+				DrawFeaturePage(*a_page.feature);
+			break;
+		case HostPageKind::kOverlay:
+			DrawOverlayPage();
+			break;
+		}
+	}
+
+	void HostClient::DrawFeaturePage(Feature& a_feature)
+	{
+		const auto reportCallbackFailure = [&](const char* a_phase,
+											  const char* a_summary,
+											  const char* a_detail) {
+			FeatureManager::Get().QuarantineRuntimeCallback(
+				a_feature,
+				a_phase,
+				a_detail);
+			FeatureManager::Get().FinishRuntimeCallbackPass();
+			if (!_client.ReportDiagnostic({
+					DMUI_STATUS_SEVERITY_ERROR,
+					a_feature.GetName().data(),
+					a_summary,
+					a_detail })) {
+				LogFailure("report feature callback diagnostic");
 			}
-
-			if (startFallback)
-				StartStandaloneFallback(resources);
-			else if (bootstrapSeen)
-				L->error("No saved renderer resources; the standalone menu cannot start");
-		} catch (...) {
-			L->error("The host unavailable callback failed");
-		}
-	}
-
-	void HostClient::DrawPage(Page& a_page) noexcept
-	{
-		auto recovery = ImGuiRecoverySnapshot::Capture();
-		if (!recovery) {
-			L->error("Hosted page '{}' could not capture ImGui state", a_page.descriptor.id);
-			return;
-		}
-
-		try {
-			if (!_state.IsReady())
-				return;
-
-			auto& menu = Menu::Get();
-			menu.PumpHostedMaintenance();
-
-			switch (a_page.descriptor.kind) {
-			case HostPageKind::kHome:
-				HomePageRenderer::RenderHomePage();
-				break;
-			case HostPageKind::kGeneral:
-				menu.DrawHostedGeneralSettings();
-				break;
-			case HostPageKind::kAdvanced:
-				menu.DrawAdvancedSettings();
-				break;
-			case HostPageKind::kPresets:
-				menu.DrawPresets();
-				break;
-			case HostPageKind::kFeature:
-				if (a_page.feature)
-					FeatureListRenderer::RenderFeatureContent(*a_page.feature);
-				break;
-			case HostPageKind::kOverlay:
-				OverlayRenderer::RenderOverlay();
-				break;
-			}
-
-			SyncOverlayDemand();
-		} catch (...) {
-			recovery->Recover();
-			L->error("Hosted page '{}' failed", a_page.descriptor.id);
-		}
-	}
-
-	bool HostClient::OnD3D11Bootstrap(
-		ID3D11Device* a_device,
-		ID3D11DeviceContext* a_context,
-		IDXGISwapChain* a_swapChain,
-		HWND a_window) noexcept
-	{
-		AttachFinalSwapChain(a_swapChain);
-
-		const std::scoped_lock lock{ _fallbackMutex };
-		const auto state = _state.Get();
-		if (_fallbackCoordination.ObserveBootstrap(state) == BootstrapAction::kStandaloneNow) {
-			_state.ChooseStandalone();
-			return true;
-		}
-
-		if (state == IntegrationState::kRegisteredWaiting) {
-			if (SaveFallbackResources(a_device, a_context, a_swapChain, a_window))
-				_fallbackCoordination.MarkResourcesSaved();
-		}
-		try {
-			Menu::Get().AttachHostedResources(a_device, a_context, a_window);
-		} catch (...) {
-			L->error("Failed to prepare hosted menu state");
-		}
-		return false;
-	}
-
-	bool HostClient::SaveFallbackResources(
-		ID3D11Device* a_device,
-		ID3D11DeviceContext* a_context,
-		IDXGISwapChain* a_swapChain,
-		HWND a_window) noexcept
-	{
-		if (!a_device || !a_context || !a_swapChain || !a_window)
-			return false;
-
-		auto previous = TakeFallbackResourcesLocked();
-		ReleaseFallbackResources(previous);
-		a_device->AddRef();
-		a_context->AddRef();
-		a_swapChain->AddRef();
-		_fallbackDevice = a_device;
-		_fallbackContext = a_context;
-		_fallbackSwapChain = a_swapChain;
-		_fallbackWindow = a_window;
-		return true;
-	}
-
-	HostClient::FallbackResources HostClient::TakeFallbackResourcesLocked() noexcept
-	{
-		FallbackResources resources{
-			.device = _fallbackDevice,
-			.context = _fallbackContext,
-			.swapChain = _fallbackSwapChain,
-			.window = _fallbackWindow
 		};
-		_fallbackDevice = nullptr;
-		_fallbackContext = nullptr;
-		_fallbackSwapChain = nullptr;
-		_fallbackWindow = nullptr;
-		return resources;
-	}
 
-	void HostClient::ReleaseFallbackResources(FallbackResources& a_resources) noexcept
-	{
-		if (a_resources.device) {
-			a_resources.device->Release();
-			a_resources.device = nullptr;
-		}
-		if (a_resources.context) {
-			a_resources.context->Release();
-			a_resources.context = nullptr;
-		}
-		if (a_resources.swapChain) {
-			a_resources.swapChain->Release();
-			a_resources.swapChain = nullptr;
-		}
-		a_resources.window = nullptr;
-	}
-
-	void HostClient::StartStandaloneFallback(FallbackResources a_resources) noexcept
-	{
-		if (!a_resources.IsValid()) {
-			L->error("No saved renderer resources; the standalone menu cannot start");
-			ReleaseFallbackResources(a_resources);
-			return;
-		}
-
-		try {
-			auto& menu = Menu::Get();
-			menu.OnD3D11Ready(a_resources.device, a_resources.context, a_resources.window);
-			// Chain the host's existing Present detour.
-			menu.HookPresentOn(a_resources.swapChain);
-			L->info("Standalone menu started from the saved renderer resources");
-		} catch (...) {
-			L->error("The standalone menu fallback failed to start");
-		}
-		ReleaseFallbackResources(a_resources);
-	}
-
-	void HostClient::AttachFinalSwapChain(IDXGISwapChain* a_swapChain) noexcept
-	{
-		if (!a_swapChain)
+		bool loadAtBoot = LoadAtBoot(a_feature);
+		const auto& state = a_feature.GetState();
+		ui::SettingsTableScope table{
+			_client,
+			std::format("feature-settings-{}", a_feature.GetName()).c_str() };
+		if (!table.Valid() || !table.Visible())
 			return;
 
-		SwapChainHandoffAttempt attempt;
 		{
-			const std::scoped_lock lock{ _fallbackMutex };
-			const auto state = _state.Get();
-			if (state != IntegrationState::kRegisteredWaiting &&
-				state != IntegrationState::kHostedReady)
+			ui::SettingsRowScope row{
+				_client,
+				"load-at-boot",
+				"Load at boot",
+				"Changes feature activation on the next game launch." };
+			if (!row.Valid())
 				return;
-
-			attempt = AttemptSwapChainHandoff(_api, _client, a_swapChain, state);
-			if (attempt.action == SwapChainHandoffAction::kRetry)
-				RetainPendingSwapChainLocked(a_swapChain);
-			else
-				ReleasePendingSwapChainLocked();
+			if (row.Visible() &&
+				ImGui::Checkbox("##load-at-boot", &loadAtBoot)) {
+				const auto result =
+					feature_config::UpdateFeatureLoad(a_feature.GetConfigKey(), loadAtBoot);
+				if (!result) {
+					L->warn(
+						"Failed to save boot state for {}: {}",
+						a_feature.GetName(),
+						result.error);
+					PostNotification(
+						DMUI_STATUS_SEVERITY_ERROR,
+						"Failed to save feature boot state; see log.",
+						4000);
+				} else {
+					(void)feature_config::Reload();
+				}
+			}
 		}
 
-		switch (attempt.action) {
-		case SwapChainHandoffAction::kAccepted:
-			L->info("Attached final swapchain to the Dear-Modding UI host");
+		{
+			ui::SettingsRowScope row{
+				_client,
+				"runtime-state",
+				"Runtime state",
+				"Current process state; boot changes take effect after restart." };
+			if (!row.Valid())
+				return;
+			if (row.Visible()) {
+				const auto stateName = FeatureRuntimeStateName(state.runtimeState);
+				const DMUI_Vec4 DMUI_ThemeColors::*color =
+					state.runtimeState == FeatureRuntimeState::kFailed ?
+					&DMUI_ThemeColors::statusError :
+					state.runtimeState == FeatureRuntimeState::kDegraded ?
+					&DMUI_ThemeColors::statusWarning :
+					state.runtimeState == FeatureRuntimeState::kActive ?
+					&DMUI_ThemeColors::statusSuccess :
+					&DMUI_ThemeColors::statusDisable;
+				ImGui::TextColored(
+					ThemeColor(_client, color),
+					"%.*s",
+					static_cast<int>(stateName.size()),
+					stateName.data());
+			}
+		}
+
+		if (state.runtimeState == FeatureRuntimeState::kFailed ||
+			state.runtimeState == FeatureRuntimeState::kDegraded) {
+			ui::SettingsRowScope row{
+				_client,
+				"feature-failure",
+				state.runtimeState == FeatureRuntimeState::kFailed ?
+					"Error" :
+					"Warning",
+				"",
+				dmui::RowPresentation::Layout::kFullSpan };
+			if (!row.Valid())
+				return;
+			if (row.Visible()) {
+				const auto color =
+					state.runtimeState == FeatureRuntimeState::kFailed ?
+					&DMUI_ThemeColors::statusError :
+					&DMUI_ThemeColors::statusWarning;
+				ImGui::TextColored(
+					ThemeColor(_client, color),
+					"%s",
+					state.detail.empty() ?
+						"See the log for details." :
+						state.detail.c_str());
+				try {
+					a_feature.DrawFailLoadMessage();
+				} catch (const std::exception& error) {
+					reportCallbackFailure(
+						"DearModdingUI::DrawFailLoadMessage",
+						"Feature failure UI callback failed",
+						error.what());
+					throw;
+				} catch (...) {
+					reportCallbackFailure(
+						"DearModdingUI::DrawFailLoadMessage",
+						"Feature failure UI callback failed",
+						"non-standard exception");
+					throw;
+				}
+			}
+			return;
+		}
+
+		if (!a_feature.IsActive()) {
+			ui::SettingsRowScope row{
+				_client,
+				"inactive-feature",
+				"Availability",
+				"",
+				dmui::RowPresentation::Layout::kFullSpan };
+			if (!row.Valid())
+				return;
+			if (!row.Visible())
+				return;
+			if (a_feature.IsInstalled()) {
+				if (loadAtBoot) {
+					ImGui::TextColored(
+						ThemeColor(
+							_client,
+							&DMUI_ThemeColors::statusRestartNeeded),
+						"This feature will be available after restart.");
+				} else {
+					ImGui::TextColored(
+						ThemeColor(_client, &DMUI_ThemeColors::statusDisable),
+						"This feature is disabled at boot.");
+				}
+			} else {
+				try {
+					a_feature.DrawUnloadedUI();
+				} catch (const std::exception& error) {
+					reportCallbackFailure(
+						"DearModdingUI::DrawUnloadedUI",
+						"Feature help callback failed",
+						error.what());
+					throw;
+				} catch (...) {
+					reportCallbackFailure(
+						"DearModdingUI::DrawUnloadedUI",
+						"Feature help callback failed",
+						"non-standard exception");
+					throw;
+				}
+				std::optional<std::string> modLink;
+				try {
+					modLink = a_feature.GetFeatureModLink();
+				} catch (const std::exception& error) {
+					reportCallbackFailure(
+						"DearModdingUI::GetFeatureModLink",
+						"Feature link callback failed",
+						error.what());
+					throw;
+				} catch (...) {
+					reportCallbackFailure(
+						"DearModdingUI::GetFeatureModLink",
+						"Feature link callback failed",
+						"non-standard exception");
+					throw;
+				}
+				if (modLink && !modLink->empty()) {
+					const std::array links{
+						dmui::Link{
+							"Open feature mod page",
+							modLink->c_str(),
+							"Copies the feature download URL.",
+							0,
+							true }
+					};
+					if (!_client.DrawLinkRow("feature-mod-link", links))
+						LogFailure("draw feature mod link");
+				}
+			}
+			return;
+		}
+
+		if (!loadAtBoot) {
+			ui::SettingsRowScope row{
+				_client,
+				"disabled-next-launch",
+				"Next launch",
+				"",
+				dmui::RowPresentation::Layout::kFullSpan };
+			if (!row.Valid())
+				return;
+			if (row.Visible()) {
+				ImGui::TextColored(
+					ThemeColor(
+						_client,
+						&DMUI_ThemeColors::statusRestartNeeded),
+					"Active now; disabled at the next launch.");
+			}
+		}
+
+		bool restoreDefaults{};
+		{
+			ui::SettingsRowScope row{
+				_client,
+				"feature-controls",
+				"Settings",
+				"Live feature controls.",
+				dmui::RowPresentation::Layout::kFullSpan };
+			if (!row.Valid())
+				return;
+			if (row.Visible()) {
+				if (!FeatureManager::Get().PrepareMenuCallback(
+						a_feature, "DearModdingUI::DrawSettings"))
+					return;
+				CS_FEATURE_ZONE(&a_feature, "DrawSettings");
+				try {
+					a_feature.DrawSettings();
+				} catch (const std::exception& error) {
+					FeatureManager::Get().QuarantineRuntimeCallback(
+						a_feature,
+						"DearModdingUI::DrawSettings",
+						error.what());
+					FeatureManager::Get().FinishRuntimeCallbackPass();
+					if (!_client.ReportDiagnostic({
+							DMUI_STATUS_SEVERITY_ERROR,
+							a_feature.GetName().data(),
+							"Feature settings callback failed",
+							error.what() })) {
+						LogFailure("report feature settings callback diagnostic");
+					}
+					throw;
+				} catch (...) {
+					FeatureManager::Get().QuarantineRuntimeCallback(
+						a_feature,
+						"DearModdingUI::DrawSettings",
+						"non-standard exception");
+					FeatureManager::Get().FinishRuntimeCallbackPass();
+					if (!_client.ReportDiagnostic({
+							DMUI_STATUS_SEVERITY_ERROR,
+							a_feature.GetName().data(),
+							"Feature settings callback failed",
+							"non-standard exception" })) {
+						LogFailure("report feature settings callback diagnostic");
+					}
+					throw;
+				}
+				bool resettable{};
+				try {
+					resettable = a_feature.HasResettableSettings();
+				} catch (const std::exception& error) {
+					reportCallbackFailure(
+						"DearModdingUI::HasResettableSettings",
+						"Feature reset metadata callback failed",
+						error.what());
+					throw;
+				} catch (...) {
+					reportCallbackFailure(
+						"DearModdingUI::HasResettableSettings",
+						"Feature reset metadata callback failed",
+						"non-standard exception");
+					throw;
+				}
+				const auto reset = row.End(resettable, resettable);
+				if (!reset)
+					return;
+				restoreDefaults = *reset;
+			}
+		}
+
+		if (restoreDefaults) {
+			try {
+				a_feature.RestoreDefaultSettings();
+			} catch (const std::exception& error) {
+				reportCallbackFailure(
+				"DearModdingUI::RestoreDefaultSettings",
+				"Feature reset callback failed",
+				error.what());
+				throw;
+			} catch (...) {
+				reportCallbackFailure(
+				"DearModdingUI::RestoreDefaultSettings",
+				"Feature reset callback failed",
+				"non-standard exception");
+				throw;
+			}
+		}
+
+		const auto restartSettings = a_feature.GetRestartSettings();
+		for (const auto& field : restartSettings.fields) {
+			if (!restartSettings.IsRestartRequired(field))
+				continue;
+			const auto id =
+				std::format("restart-required-{}", field.label);
+			const auto label = std::string(field.label);
+			ui::SettingsRowScope row{
+				_client,
+				id.c_str(),
+				"Restart required",
+				"This setting differs from its active startup value.",
+				dmui::RowPresentation::Layout::kFullSpan };
+			if (!row.Valid())
+				return;
+			if (row.Visible()) {
+				ImGui::TextColored(
+					ThemeColor(
+						_client,
+						&DMUI_ThemeColors::statusRestartNeeded),
+					"%s",
+					label.c_str());
+			}
+		}
+	}
+
+	void HostClient::DrawOverlayPage()
+	{
+		if (!_overlayVisible.load(std::memory_order_relaxed))
+			return;
+		auto* performance = features::PerformanceOverlay::GetSingleton();
+		if (!FeatureManager::Get().PrepareRuntimeCallback(
+				*performance, "DearModdingUI::DrawOverlay"))
+			return;
+		try {
+			performance->DrawOverlay();
+		} catch (const std::exception& error) {
+			FeatureManager::Get().QuarantineRuntimeCallback(
+				*performance,
+				"DearModdingUI::DrawOverlay",
+				error.what());
+			FeatureManager::Get().FinishRuntimeCallbackPass();
+			throw;
+		} catch (...) {
+			FeatureManager::Get().QuarantineRuntimeCallback(
+				*performance,
+				"DearModdingUI::DrawOverlay",
+				"non-standard exception");
+			FeatureManager::Get().FinishRuntimeCallbackPass();
+			throw;
+		}
+	}
+
+	void HostClient::ObserveFrame() noexcept
+	{
+		try {
+			const auto state = _client.QueryState();
+			if (state && state->state == DMUI_HOST_STATE_READY &&
+				!_readyLogged.exchange(true)) {
+				L->info(
+					"DearModdingUI forwarding backend is ready; hosted pages, overlays, and "
+					"hotkeys are active");
+			} else if (state && state->state == DMUI_HOST_STATE_UNAVAILABLE &&
+				!_unavailableLogged.exchange(true)) {
+				L->warn(
+					"DearModdingUI became unavailable (reason={}); Community Shaders UI is "
+					"disabled for this session",
+					state->unavailableReason);
+			}
+
+			RetrySwapChain();
+			FlushNotification();
+			Menu::Get().ObserveHostFrame(_client);
+
+			auto* performance = features::PerformanceOverlay::GetSingleton();
+			if (FeatureManager::Get().PrepareRuntimeCallback(
+					*performance, "DearModdingUI::TickHostFrame")) {
+				try {
+					const auto videoMemory = _client.QueryVideoMemory();
+					if (videoMemory) {
+						_videoMemoryFailure.reset();
+					} else {
+						LogFailureOnce("video-memory query", _videoMemoryFailure);
+					}
+					performance->TickHostFrame(
+						videoMemory ? videoMemory->used : 0,
+						videoMemory ? videoMemory->budget : 0);
+				} catch (const std::exception& error) {
+					FeatureManager::Get().QuarantineRuntimeCallback(
+						*performance,
+						"DearModdingUI::TickHostFrame",
+						error.what());
+					FeatureManager::Get().FinishRuntimeCallbackPass();
+				} catch (...) {
+					FeatureManager::Get().QuarantineRuntimeCallback(
+						*performance,
+						"DearModdingUI::TickHostFrame",
+						"non-standard exception");
+					FeatureManager::Get().FinishRuntimeCallbackPass();
+				}
+			}
+			auto* renderDoc = features::RenderDoc::GetSingleton();
+			if (FeatureManager::Get().PrepareRuntimeCallback(
+					*renderDoc, "DearModdingUI::TickHostFrame")) {
+				try {
+					renderDoc->TickHostFrame();
+				} catch (const std::exception& error) {
+					FeatureManager::Get().QuarantineRuntimeCallback(
+						*renderDoc,
+						"DearModdingUI::TickHostFrame",
+						error.what());
+					FeatureManager::Get().FinishRuntimeCallbackPass();
+				} catch (...) {
+					FeatureManager::Get().QuarantineRuntimeCallback(
+						*renderDoc,
+						"DearModdingUI::TickHostFrame",
+						"non-standard exception");
+					FeatureManager::Get().FinishRuntimeCallbackPass();
+				}
+			}
+
+			SetHotkeyEnabled(
+				"performance overlay",
+				_overlayHotkey,
+				performance->IsHealthy() && performance->IsOverlayActive(),
+				_hotkeyEnableFailures[0]);
+			SetHotkeyEnabled(
+				"RenderDoc single-frame capture",
+				_captureHotkey,
+				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
+				_hotkeyEnableFailures[1]);
+			SetHotkeyEnabled(
+				"RenderDoc multi-frame capture",
+				_multiCaptureHotkey,
+				renderDoc->IsHealthy() && renderDoc->CaptureHotkeysEnabled(),
+				_hotkeyEnableFailures[2]);
+			ObserveHotkeyBindings();
+			SyncOverlay();
+		} catch (...) {
+			L->error("DearModdingUI frame observer failed");
+		}
+	}
+
+	void HostClient::ObservePageActivity(
+		const dmui::PageActivity& a_activity) noexcept
+	{
+		if (a_activity.kind == dmui::PageActivityKind::kDeactivated)
+			Menu::Get().ReleaseDebugImages();
+	}
+
+	void HostClient::SyncOverlay() noexcept
+	{
+		if (!_overlayPage)
+			return;
+		auto* performance = features::PerformanceOverlay::GetSingleton();
+		const bool wanted =
+			_overlayVisible.load(std::memory_order_relaxed) &&
+			performance->IsHealthy() &&
+			performance->IsOverlayActive();
+		const auto demandAction = _overlayFrameDemand.Next(wanted);
+		if (demandAction == FrameDemandAction::kRelease) {
+			const bool released = _client.ReleaseFrame(_overlayPage->handle);
+			_overlayFrameDemand.Complete(demandAction, released);
+			if (released)
+				_overlayDemandFailure.reset();
+			else
+				LogFailureOnce(
+					"performance overlay frame release",
+					_overlayDemandFailure);
+			return;
+		}
+		if (!wanted)
+			return;
+
+		const auto options = performance->ManagedOverlayOptions();
+		if (_client.ConfigureOverlay(_overlayPage->handle, options))
+			_overlayConfigurationFailure.reset();
+		else
+			LogFailureOnce(
+				"performance overlay configuration",
+				_overlayConfigurationFailure);
+		if (demandAction == FrameDemandAction::kRequest) {
+			const bool requested = _client.RequestFrame(_overlayPage->handle);
+			_overlayFrameDemand.Complete(demandAction, requested);
+			if (requested)
+				_overlayDemandFailure.reset();
+			else
+				LogFailureOnce(
+					"performance overlay frame request",
+					_overlayDemandFailure);
+		}
+		if (const auto placement = _client.QueryOverlay(_overlayPage->handle);
+			placement && placement->arrangementCompleted) {
+			_overlayQueryFailure.reset();
+			performance->CommitOverlayPlacement(*placement);
+		} else if (placement) {
+			_overlayQueryFailure.reset();
+		} else {
+			LogFailureOnce(
+				"performance overlay placement query",
+				_overlayQueryFailure);
+		}
+	}
+
+	void HostClient::ObserveHotkeyBindings() noexcept
+	{
+		ObserveHotkeyBinding(
+			"Performance Overlay",
+			_overlayHotkey,
+			_hotkeyBindingSnapshots[0]);
+		ObserveHotkeyBinding(
+			"RenderDoc multi-frame capture",
+			_multiCaptureHotkey,
+			_hotkeyBindingSnapshots[1]);
+		ObserveHotkeyBinding(
+			"RenderDoc single-frame capture",
+			_captureHotkey,
+			_hotkeyBindingSnapshots[2]);
+		ObserveHotkeyBinding(
+			"telemetry dump",
+			_dumpHotkey,
+			_hotkeyBindingSnapshots[3]);
+	}
+
+	void HostClient::ObserveHotkeyBinding(
+		const char* a_name,
+		const std::optional<DMUI_HotkeyActionHandle>& a_handle,
+		std::string& a_snapshot) noexcept
+	{
+		if (!a_handle)
+			return;
+		const auto binding = _client.QueryHotkeyBinding(*a_handle);
+		if (!binding) {
+			const auto snapshot = std::format(
+				"query-error:{}",
+				_client.LastResult());
+			if (snapshot != a_snapshot) {
+				a_snapshot = snapshot;
+				LogFailure(std::format("query {} hotkey", a_name));
+			}
+			return;
+		}
+
+		const auto snapshot = std::format(
+			"{}:{}",
+			binding->state,
+			binding->chord);
+		if (snapshot == a_snapshot)
+			return;
+		a_snapshot = snapshot;
+		switch (binding->state) {
+		case DMUI_HOTKEY_BINDING_BOUND:
+			L->info("{} hotkey bound to {}", a_name, binding->chord);
 			break;
-		case SwapChainHandoffAction::kRetry:
-			L->warn("Dear-Modding UI swapchain handoff deferred: {}",
-				DescribeResult(attempt.result));
+		case DMUI_HOTKEY_BINDING_UNBOUND_USER:
+			L->info("{} hotkey is unbound by the user", a_name);
 			break;
-		case SwapChainHandoffAction::kFallback:
-			FallBackToStandalone(DescribeResult(attempt.result));
+		case DMUI_HOTKEY_BINDING_UNBOUND_DEFAULT_CONFLICT:
+			L->warn("{} hotkey default conflicts with another action", a_name);
 			break;
-		case SwapChainHandoffAction::kRejectAfterReady:
-			L->error("Dear-Modding UI swapchain handoff failed after readiness: {}",
-				DescribeResult(attempt.result));
+		case DMUI_HOTKEY_BINDING_UNBOUND_OVERRIDE_CONFLICT:
+			L->warn("{} hotkey override conflicts with another action", a_name);
+			break;
+		case DMUI_HOTKEY_BINDING_UNBOUND_INVALID_OVERRIDE:
+			L->warn("{} hotkey override is invalid", a_name);
+			break;
+		case DMUI_HOTKEY_BINDING_UNBOUND_NEVER_SET:
+			L->warn("{} hotkey has no binding", a_name);
+			break;
+		default:
+			L->warn("{} hotkey returned unknown binding state {}", a_name, binding->state);
 			break;
 		}
 	}
 
-	void HostClient::RetryPendingSwapChain() noexcept
+	void HostClient::SetHotkeyEnabled(
+		const char* a_name,
+		const std::optional<DMUI_HotkeyActionHandle>& a_handle,
+		bool a_enabled,
+		std::optional<DMUI_Result>& a_failure) noexcept
 	{
-		IDXGISwapChain* pending = nullptr;
+		if (!a_handle)
+			return;
+		if (_client.SetHotkeyActionEnabled(*a_handle, a_enabled)) {
+			a_failure.reset();
+			return;
+		}
+
+		const auto result = _client.LastResult();
+		if (!a_failure || *a_failure != result) {
+			L->warn(
+				"DearModdingUI failed to update {} hotkey enablement: {}",
+				a_name,
+				DMUI_ResultToString(result));
+			a_failure = result;
+		}
+	}
+
+	void HostClient::OnD3D11Bootstrap(
+		ID3D11Device* a_device,
+		IDXGISwapChain* a_swapChain,
+		HWND a_window) noexcept
+	{
+		auto* renderDoc = features::RenderDoc::GetSingleton();
+		if (renderDoc->IsHealthy()) {
+			try {
+				renderDoc->BindD3D11CaptureTarget(a_device, a_window);
+			} catch (const std::exception& error) {
+				FeatureManager::Get().QuarantineRuntimeCallback(
+					*renderDoc,
+					"DearModdingUI::BindD3D11CaptureTarget",
+					error.what());
+				FeatureManager::Get().FinishRuntimeCallbackPass();
+			} catch (...) {
+				FeatureManager::Get().QuarantineRuntimeCallback(
+					*renderDoc,
+					"DearModdingUI::BindD3D11CaptureTarget",
+					"non-standard exception");
+				FeatureManager::Get().FinishRuntimeCallbackPass();
+			}
+		}
+		Menu::Get().OnHostDeviceReady();
+		if (!_client.IsConnected())
+			return;
+		if (_client.AttachSwapChain(a_swapChain))
+			return;
+		if (_client.LastResult() == DMUI_RESULT_RENDERER_BUSY ||
+			_client.LastResult() == DMUI_RESULT_HOST_NOT_READY ||
+			_client.LastResult() == DMUI_RESULT_HOST_NOT_INITIALIZED) {
+			const std::scoped_lock lock{ _swapChainMutex };
+			if (_pendingSwapChain)
+				_pendingSwapChain->Release();
+			_pendingSwapChain = a_swapChain;
+			_pendingSwapChain->AddRef();
+			L->info("DearModdingUI renderer is busy; final swapchain handoff queued");
+			return;
+		}
+		LogFailure("attach final swapchain");
+	}
+
+	void HostClient::RetrySwapChain() noexcept
+	{
+		IDXGISwapChain* pending{};
 		{
-			const std::scoped_lock lock{ _fallbackMutex };
-			pending = _pendingHostSwapChain;
+			const std::scoped_lock lock{ _swapChainMutex };
+			pending = _pendingSwapChain;
 			if (pending)
 				pending->AddRef();
 		}
 		if (!pending)
 			return;
-
-		AttachFinalSwapChain(pending);
+		const bool attached = _client.AttachSwapChain(pending);
+		const auto result = _client.LastResult();
 		pending->Release();
-	}
-
-	void HostClient::RetainPendingSwapChainLocked(IDXGISwapChain* a_swapChain) noexcept
-	{
-		if (_pendingHostSwapChain == a_swapChain)
+		if (!attached &&
+			(result == DMUI_RESULT_RENDERER_BUSY ||
+				result == DMUI_RESULT_HOST_NOT_READY ||
+				result == DMUI_RESULT_HOST_NOT_INITIALIZED))
 			return;
-		ReleasePendingSwapChainLocked();
-		a_swapChain->AddRef();
-		_pendingHostSwapChain = a_swapChain;
-	}
-
-	void HostClient::ReleasePendingSwapChainLocked() noexcept
-	{
-		if (_pendingHostSwapChain) {
-			_pendingHostSwapChain->Release();
-			_pendingHostSwapChain = nullptr;
-		}
-	}
-
-	bool HostClient::IsHostMenuVisible() const noexcept
-	{
-		if (!_state.IsReady() || !_api || !_api->isMenuVisible)
-			return false;
-		std::uint32_t visible = 0;
-		return _api->isMenuVisible(&visible) == DMUI_RESULT_OK && visible != 0;
-	}
-
-	bool HostClient::OverlayWanted() const noexcept
-	{
-		if (!Menu::Get().IsOverlayVisible())
-			return false;
-		for (const Feature* feature : _features) {
-			try {
-				if (feature && feature->IsHealthy() && feature->IsOverlayActive())
-					return true;
-			} catch (...) {
+		{
+			const std::scoped_lock lock{ _swapChainMutex };
+			if (_pendingSwapChain) {
+				_pendingSwapChain->Release();
+				_pendingSwapChain = nullptr;
 			}
 		}
+		if (!attached)
+			LogFailure("retry final swapchain handoff");
+	}
+
+	void HostClient::PostNotification(
+		DMUI_StatusSeverity a_severity,
+		std::string a_message,
+		std::uint32_t a_durationMilliseconds) noexcept
+	{
+		if (!_client.IsConnected()) {
+			if (a_severity == DMUI_STATUS_SEVERITY_ERROR) {
+				L->error(
+					"DearModdingUI notification unavailable before host readiness/headless: {}",
+					a_message);
+			} else if (a_severity == DMUI_STATUS_SEVERITY_WARNING) {
+				L->warn(
+					"DearModdingUI notification unavailable before host readiness/headless: {}",
+					a_message);
+			} else {
+				L->info(
+					"DearModdingUI notification unavailable before host readiness/headless: {}",
+					a_message);
+			}
+			return;
+		}
+		if (a_message.size() > 1024)
+			a_message.resize(1024);
+		const std::scoped_lock lock{ _notificationMutex };
+		_pendingNotification = PendingNotification{
+			a_severity,
+			std::move(a_message),
+			std::clamp(a_durationMilliseconds, 250u, 30000u)
+		};
+	}
+
+	void HostClient::FlushNotification() noexcept
+	{
+		std::optional<PendingNotification> notification;
+		{
+			const std::scoped_lock lock{ _notificationMutex };
+			notification = std::move(_pendingNotification);
+			_pendingNotification.reset();
+		}
+		if (!notification)
+			return;
+		if (!_client.PostNotification(
+				notification->severity,
+				notification->message.c_str(),
+				notification->durationMilliseconds)) {
+			LogFailure("post notification");
+		}
+	}
+
+	bool HostClient::DrawAnnotatedPlot(
+		const char* a_id,
+		const DMUI_AnnotatedPlotDescriptor& a_descriptor) noexcept
+	{
+		if (_client.DrawAnnotatedPlot(a_id, a_descriptor)) {
+			_annotatedPlotFailure.reset();
+			return true;
+		}
+		LogFailureOnce("annotated plot draw", _annotatedPlotFailure);
 		return false;
 	}
 
-	void HostClient::SyncOverlayDemand() noexcept
+	void HostClient::LogFailure(std::string_view a_operation) const noexcept
 	{
-		if (!_state.IsReady() || !_api || _client == DMUI_INVALID_CLIENT_HANDLE || !_overlayPage)
-			return;
+		L->warn(
+			"DearModdingUI {} failed: {}",
+			a_operation,
+			DMUI_ResultToString(_client.LastResult()));
+	}
 
-		const std::scoped_lock lock{ _demandMutex };
-		const auto action = _overlayDemand.Plan(OverlayWanted());
-		if (action == OverlayDemandModel::Action::kNone)
+	void HostClient::LogFailureOnce(
+		std::string_view a_operation,
+		std::optional<DMUI_Result>& a_lastResult) const noexcept
+	{
+		const auto result = _client.LastResult();
+		if (a_lastResult && *a_lastResult == result)
 			return;
-
-		const auto result = action == OverlayDemandModel::Action::kRequest ?
-		                        _api->requestFrame(_client, _overlayPage->handle) :
-		                        _api->releaseFrame(_client, _overlayPage->handle);
-		if (result == DMUI_RESULT_OK)
-			_overlayDemand.Confirm(action);
-		else
-			L->warn("Overlay frame demand was rejected: {}", DescribeResult(result));
+		L->warn(
+			"DearModdingUI {} failed: {}",
+			a_operation,
+			DMUI_ResultToString(result));
+		a_lastResult = result;
 	}
 }

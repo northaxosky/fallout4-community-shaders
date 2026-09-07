@@ -6,7 +6,7 @@
 #include <cstring>
 #include <unordered_map>
 
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include "Log.h"
 #include "Telemetry/Telemetry.h"

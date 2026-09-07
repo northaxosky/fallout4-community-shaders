@@ -1,7 +1,7 @@
 #include "ScreenSpaceGI.h"
 
 #include <d3d11.h>
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <algorithm>
 #include <cfloat>
@@ -1591,26 +1591,90 @@ namespace cs::features
 	{
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 
-		changed |= ImGui::SliderInt("Slices", &_settings.numSlices, 1, 8);
-		changed |= ImGui::SliderInt("Steps", &_settings.numSteps, 4, 32);
-		changed |= ImGui::SliderFloat("AO radius (game units)", &_settings.aoRadius, 16.0f, 512.0f);
-		changed |= ImGui::SliderFloat("GI radius (game units)", &_settings.giRadius, 16.0f, 512.0f);
-		changed |= ImGui::SliderFloat("AO power", &_settings.aoPower, 0.5f, 5.0f);
-		changed |= ImGui::SliderFloat("Bounce strength", &_settings.bounceStrength, 0.0f, 8.0f);
+		const int slicesMin = 1;
+		const int slicesMax = 8;
+		changed |= ImGui::SliderScalar(
+			"Slices", ImGuiDataType_S32, &_settings.numSlices, &slicesMin, &slicesMax);
+		const int stepsMin = 4;
+		const int stepsMax = 32;
+		changed |= ImGui::SliderScalar(
+			"Steps", ImGuiDataType_S32, &_settings.numSteps, &stepsMin, &stepsMax);
+		const float radiusMin = 16.0f;
+		const float aoRadiusMax = 512.0f;
+		changed |= ImGui::SliderScalar(
+			"AO radius (game units)",
+			ImGuiDataType_Float,
+			&_settings.aoRadius,
+			&radiusMin,
+			&aoRadiusMax);
+		changed |= ImGui::SliderScalar(
+			"GI radius (game units)",
+			ImGuiDataType_Float,
+			&_settings.giRadius,
+			&radiusMin,
+			&aoRadiusMax);
+		const float aoPowerMin = 0.5f;
+		const float aoPowerMax = 5.0f;
+		changed |= ImGui::SliderScalar(
+			"AO power",
+			ImGuiDataType_Float,
+			&_settings.aoPower,
+			&aoPowerMin,
+			&aoPowerMax);
+		const float bounceMin = 0.0f;
+		const float bounceMax = 8.0f;
+		changed |= ImGui::SliderScalar(
+			"Bounce strength",
+			ImGuiDataType_Float,
+			&_settings.bounceStrength,
+			&bounceMin,
+			&bounceMax);
 		changed |= ImGui::Checkbox("Denoise", &_settings.denoiseEnabled);
-		changed |= ImGui::SliderFloat("Denoise radius", &_settings.denoiseRadius, 0.5f, 4.0f);
+		const float denoiseRadiusMin = 0.5f;
+		const float denoiseRadiusMax = 4.0f;
+		changed |= ImGui::SliderScalar(
+			"Denoise radius",
+			ImGuiDataType_Float,
+			&_settings.denoiseRadius,
+			&denoiseRadiusMin,
+			&denoiseRadiusMax);
 		changed |= ImGui::Checkbox("Temporal denoiser", &_settings.enableTemporalDenoiser);
 		float depthDisocclusionPercent = _settings.depthDisocclusion * 100.0f;
-		if (ImGui::SliderFloat(
-				"Depth disocclusion", &depthDisocclusionPercent, 0.0f, 20.0f, "%.1f%%")) {
+		const float depthDisocclusionMin = 0.0f;
+		const float depthDisocclusionMax = 20.0f;
+		if (ImGui::SliderScalar(
+				"Depth disocclusion",
+				ImGuiDataType_Float,
+				&depthDisocclusionPercent,
+				&depthDisocclusionMin,
+				&depthDisocclusionMax,
+				"%.1f%%")) {
 			_settings.depthDisocclusion = depthDisocclusionPercent * 0.01f;
 			changed = true;
 		}
-		changed |= ImGui::SliderInt("Max accumulated frames", &_settings.maxAccumFrames, 1, 64);
-		changed |= ImGui::SliderFloat(
-			"Depth fade start (game units)", &_settings.depthFadeStart, 0.0f, 60000.0f);
-		changed |= ImGui::SliderFloat(
-			"Depth fade end (game units)", &_settings.depthFadeEnd, 0.0f, 80000.0f);
+		const int maxAccumulatedFramesMin = 1;
+		const int maxAccumulatedFramesMax = 64;
+		changed |= ImGui::SliderScalar(
+			"Max accumulated frames",
+			ImGuiDataType_S32,
+			&_settings.maxAccumFrames,
+			&maxAccumulatedFramesMin,
+			&maxAccumulatedFramesMax);
+		const float depthFadeMin = 0.0f;
+		const float depthFadeStartMax = 60000.0f;
+		changed |= ImGui::SliderScalar(
+			"Depth fade start (game units)",
+			ImGuiDataType_Float,
+			&_settings.depthFadeStart,
+			&depthFadeMin,
+			&depthFadeStartMax);
+		const float depthFadeEndMax = 80000.0f;
+		changed |= ImGui::SliderScalar(
+			"Depth fade end (game units)",
+			ImGuiDataType_Float,
+			&_settings.depthFadeEnd,
+			&depthFadeMin,
+			&depthFadeEndMax);
 
 		if (changed) {
 			SaveSettings();

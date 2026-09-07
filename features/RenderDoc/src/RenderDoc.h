@@ -2,7 +2,6 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Utils/Hotkey.h"
 
 #include <array>
 #include <atomic>
@@ -23,7 +22,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "RenderDoc"; }
 		std::string_view GetDisplayName() const override { return "RenderDoc"; }
-		std::string GetFeatureSummary() const override { return "Loads the RenderDoc capture library and bridges F4SE input to its capture hotkey."; }
+		std::string GetFeatureSummary() const override { return "Loads the RenderDoc capture library and registers capture actions with DearModdingUI."; }
 		std::string GetCategory() const override { return FeatureCategories::kDevTools; }
 		bool HasResettableSettings() const override { return true; }
 
@@ -36,6 +35,20 @@ namespace cs::features
 		void RestoreDefaultSettings() override;
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		void TickHostFrame();
+		void BindD3D11CaptureTarget(ID3D11Device* a_device, HWND a_window);
+		[[nodiscard]] bool CaptureHotkeysEnabled() const noexcept
+		{
+			return IsHealthy() && _settings.enabled && _api;
+		}
+		[[nodiscard]] const std::string& SuggestedCaptureHotkey() const noexcept
+		{
+			return _settings.captureHotkey;
+		}
+		[[nodiscard]] const std::string& SuggestedMultiCaptureHotkey() const noexcept
+		{
+			return _settings.multiCaptureHotkey;
+		}
 
 		void TriggerCapture();
 		void TriggerMultiFrameCapture();
@@ -48,7 +61,7 @@ namespace cs::features
 			double      minFreeDiskGiB = 1.0;
 			int         multiFrameCount = 5;
 
-			// "none" unbinds; multi-frame wins shared chords.
+			// Suggested host defaults. Host overrides are authoritative.
 			std::string captureHotkey = "F11";
 			std::string multiCaptureHotkey = "Shift+F11";
 		};
@@ -57,14 +70,12 @@ namespace cs::features
 		RenderDoc() = default;
 
 		void SaveSettings();
-		void RefreshHotkeys();
 		bool TryLoadRuntime();
 		void ApplyCapturePath();
 		bool CheckCaptureDiskSpace() const;
 		void BindCaptureTarget();
 		void QueuePendingComments(std::uint32_t a_expectedCaptures);
 		void ApplyPendingComments();
-		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 
 		Settings              _settings;
 		Settings              _bootSettings;
@@ -82,11 +93,6 @@ namespace cs::features
 		std::string   _pendingComments;
 		std::uint32_t _pendingCaptures = 0;
 		std::uint32_t _lastCaptureCount = 0;
-
-		cs::input::Hotkey _captureHotkey;
-		cs::input::Hotkey _multiCaptureHotkey;
-		// Capture key awaiting release.
-		std::uint32_t _captureReleaseVk = 0;
 
 		std::array<char, 1024> _commentsBuf{};
 	};

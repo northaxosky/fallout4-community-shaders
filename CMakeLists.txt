@@ -67,7 +67,6 @@ find_package(directxtex CONFIG REQUIRED)
 find_package(directx-headers CONFIG REQUIRED)
 find_package(directxmath CONFIG REQUIRED)
 find_package(magic_enum CONFIG REQUIRED)
-find_package(imgui CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(tomlplusplus CONFIG REQUIRED)
 if(TRACY_SUPPORT)
@@ -177,7 +176,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		magic_enum::magic_enum
 		d3dcompiler.lib
 		version.lib
-		imgui::imgui
 		tomlplusplus::tomlplusplus
 		$<$<BOOL:${TRACY_SUPPORT}>:Tracy::TracyClient>
 	)
@@ -211,7 +209,10 @@ enable_testing()
 
 function(configure_host_test TARGET_NAME)
 	target_compile_features(${TARGET_NAME} PRIVATE cxx_std_23)
-	target_include_directories(${TARGET_NAME} PRIVATE "${CMAKE_SOURCE_DIR}/src")
+	target_include_directories(${TARGET_NAME} PRIVATE
+		"${CMAKE_SOURCE_DIR}/src"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/dearmoddingui-api/include"
+	)
 	if(MSVC)
 		target_compile_options(${TARGET_NAME} PRIVATE /W4 /WX /permissive- /utf-8 /Zc:__cplusplus)
 		target_link_options(${TARGET_NAME} PRIVATE /WX)
@@ -265,22 +266,6 @@ configure_host_test(FeatureStateTests)
 
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
-
-add_executable(ThemeDeltaTests
-	tests/ThemeDeltaTests.cpp
-	src/Menu/ThemeDelta.cpp
-	src/Menu/ThemeDelta.h
-	src/Settings/FeatureConfig.cpp
-	src/Settings/FeatureConfig.h
-)
-configure_host_test(ThemeDeltaTests)
-target_link_libraries(ThemeDeltaTests PRIVATE imgui::imgui tomlplusplus::tomlplusplus)
-
-add_test(
-	NAME ThemeDelta
-	COMMAND ThemeDeltaTests "${CMAKE_SOURCE_DIR}/package/F4SE/Plugins/FO4CommunityShaders/FO4CommunityShaders.toml"
-)
-set_tests_properties(ThemeDelta PROPERTIES LABELS "configuration;menu;unit")
 
 add_executable(ScreenSpaceShadowsMathTests
 	tests/ScreenSpaceShadowsMathTests.cpp
@@ -456,18 +441,11 @@ set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
 add_executable(HostIntegrationTests
 	tests/HostIntegrationTests.cpp
-	src/Host/HostDiscoveryModel.cpp
-	src/Host/HostDiscoveryModel.h
 	src/Host/HostPageCatalog.cpp
 	src/Host/HostPageCatalog.h
-	src/Host/IntegrationState.cpp
-	src/Host/IntegrationState.h
-	src/Host/OverlayDemandModel.h
-	src/Host/SwapChainHandoff.cpp
-	src/Host/SwapChainHandoff.h
 )
 configure_host_test(HostIntegrationTests)
-target_include_directories(HostIntegrationTests PRIVATE "${CMAKE_SOURCE_DIR}/include")
+target_link_libraries(HostIntegrationTests PRIVATE tomlplusplus::tomlplusplus)
 
 add_test(NAME HostIntegration COMMAND HostIntegrationTests)
 set_tests_properties(HostIntegration PROPERTIES LABELS "menu;host;unit")
@@ -523,6 +501,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/src"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
+		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/dearmoddingui-api/include"
 	)
 	target_link_libraries(UpscalingPublicationTests PRIVATE
 		CommonLibF4::CommonLibF4
@@ -532,7 +511,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		d3d11.lib
 		d3dcompiler.lib
 		dxguid.lib
-		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog
 		tomlplusplus::tomlplusplus
@@ -686,7 +664,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		Microsoft::DirectX-Headers
 		bcrypt.lib
 		d3dcompiler.lib
-		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog
 		tomlplusplus::tomlplusplus
@@ -742,7 +719,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		bcrypt.lib
 		d3dcompiler.lib
 		version.lib
-		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog
 		tomlplusplus::tomlplusplus
@@ -858,7 +834,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		bcrypt.lib
 		d3d11.lib
 		d3dcompiler.lib
-		imgui::imgui
 		magic_enum::magic_enum
 		spdlog::spdlog
 		tomlplusplus::tomlplusplus

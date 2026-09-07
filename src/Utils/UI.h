@@ -1,201 +1,126 @@
 #pragma once
 
-#include "Menu/ThemeManager.h"
-#include "Utils/Input.h"
+#include <DearModdingUI/Client.h>
 
-#include <algorithm>
-#include <atomic>
-#include <cfloat>
-#include <filesystem>
-#include <functional>
-#include <string>
-#include <string_view>
-#include <vector>
-
-#include <imgui.h>
-#include <windows.h>
-
-struct ID3D11Device;
-struct ID3D11ShaderResourceView;
-struct ImRect;
-
-namespace cs
-{
-	class Feature;
-	class Menu;
-}
+#include <cstdarg>
+#include <cstdio>
 
 namespace cs::ui
 {
-	constexpr float DefaultHeaderTextScale = 1.5f;
-
-	// Layout constants target the 1080p font size.
-	constexpr float kBaselineFontSize = ThemeManager::Constants::DEFAULT_SCREEN_HEIGHT * ThemeManager::Constants::DEFAULT_FONT_RATIO;
-
-	inline float GetUIScaleForBaseline(float a_baselineFontSize) { return ImGui::GetFontSize() / a_baselineFontSize; }
-	inline float GetUIScale() { return GetUIScaleForBaseline(kBaselineFontSize); }
-	inline float GetSearchUIScale() { return GetUIScaleForBaseline(ThemeManager::Constants::SEARCH_BASELINE_SCREEN_HEIGHT * ThemeManager::Constants::DEFAULT_FONT_RATIO); }
-
-	namespace paths
+	inline ImVec4 ToImVec4(const DMUI_Vec4& a_color) noexcept
 	{
-		const std::filesystem::path& GetPluginPath();
-		std::filesystem::path GetFontsPath();
-		std::filesystem::path GetThemesPath();
-		std::filesystem::path GetIconsPath();
-		std::filesystem::path GetImGuiIniPath();
-		bool IsPathWithinDirectory(const std::filesystem::path& a_basePath, const std::filesystem::path& a_testPath);
+		return { a_color.x, a_color.y, a_color.z, a_color.w };
 	}
+
+	class SettingsTableScope
+	{
+	public:
+		SettingsTableScope(dmui::Client& a_client, const char* a_id) noexcept :
+			_client(a_client)
+		{
+			const auto result = _client.BeginSettingsTable(a_id);
+			_valid = result.has_value();
+			_active = result && *result;
+		}
+
+		~SettingsTableScope() noexcept
+		{
+			if (_active)
+				(void)_client.EndSettingsTable();
+		}
+
+		SettingsTableScope(const SettingsTableScope&) = delete;
+		SettingsTableScope& operator=(const SettingsTableScope&) = delete;
+
+		[[nodiscard]] bool Valid() const noexcept { return _valid; }
+		[[nodiscard]] bool Visible() const noexcept { return _active; }
+
+	private:
+		dmui::Client& _client;
+		bool _valid{};
+		bool _active{};
+	};
+
+	class SettingsRowScope
+	{
+	public:
+		SettingsRowScope(
+			dmui::Client& a_client,
+			const char* a_id,
+			const char* a_label,
+			const char* a_description = "",
+			dmui::RowPresentation::Layout a_layout =
+				dmui::RowPresentation::Layout::kLabelValue) noexcept :
+			_client(a_client)
+		{
+			const auto result =
+				_client.BeginSettingsRow(a_id, a_label, a_description, a_layout);
+			_valid = result.has_value();
+			_active = result && *result;
+		}
+
+		~SettingsRowScope() noexcept
+		{
+			if (_active)
+				(void)_client.EndSettingsRow(false, false);
+		}
+
+		SettingsRowScope(const SettingsRowScope&) = delete;
+		SettingsRowScope& operator=(const SettingsRowScope&) = delete;
+
+		[[nodiscard]] bool Valid() const noexcept { return _valid; }
+		[[nodiscard]] bool Visible() const noexcept { return _active; }
+
+		[[nodiscard]] std::optional<bool> End(
+			bool a_resetVisible = false,
+			bool a_resetEnabled = false) noexcept
+		{
+			if (!_active)
+				return false;
+			_active = false;
+			return _client.EndSettingsRow(a_resetVisible, a_resetEnabled);
+		}
+
+	private:
+		dmui::Client& _client;
+		bool _valid{};
+		bool _active{};
+	};
 
 	class HoverTooltipWrapper
 	{
 	public:
-		HoverTooltipWrapper();
-		~HoverTooltipWrapper();
+		HoverTooltipWrapper() noexcept :
+			hovered(ImGui::IsItemHovered())
+		{
+			if (hovered)
+				(void)ImGui::BeginTooltip();
+		}
+
+		~HoverTooltipWrapper() noexcept
+		{
+			if (hovered)
+				ImGui::EndTooltip();
+		}
+
 		HoverTooltipWrapper(const HoverTooltipWrapper&) = delete;
 		HoverTooltipWrapper& operator=(const HoverTooltipWrapper&) = delete;
-		operator bool() const { return hovered; }
+		explicit operator bool() const noexcept { return hovered; }
 
 	private:
-		bool hovered;
+		bool hovered{};
 	};
-
-	class CenteredPopupModal
-	{
-	public:
-		static constexpr ImVec2 kPopupCenter{ -FLT_MAX, -FLT_MAX };
-
-		explicit CenteredPopupModal(const char* a_name,
-			bool* a_open = nullptr,
-			ImGuiWindowFlags a_flags = ImGuiWindowFlags_AlwaysAutoResize,
-			ImVec2 a_pos = kPopupCenter,
-			ImVec2 a_pivot = ImVec2(0.5f, 0.5f));
-		~CenteredPopupModal();
-		operator bool() const { return isOpen; }
-
-		CenteredPopupModal(const CenteredPopupModal&) = delete;
-		CenteredPopupModal& operator=(const CenteredPopupModal&) = delete;
-
-	private:
-		bool isOpen;
-	};
-
-	class DisableGuard
-	{
-	public:
-		explicit DisableGuard(bool a_disable);
-		~DisableGuard();
-		DisableGuard(const DisableGuard&) = delete;
-		DisableGuard& operator=(const DisableGuard&) = delete;
-
-	private:
-		bool disable;
-	};
-
-	class StyledButtonWrapper
-	{
-	public:
-		StyledButtonWrapper(const ImVec4& a_normal, const ImVec4& a_hovered, const ImVec4& a_active);
-		~StyledButtonWrapper();
-		StyledButtonWrapper(StyledButtonWrapper&& a_other) noexcept;
-		StyledButtonWrapper(const StyledButtonWrapper&) = delete;
-		StyledButtonWrapper& operator=(const StyledButtonWrapper&) = delete;
-
-	private:
-		int m_pushedStyles;
-	};
-
-	struct ConfirmationPopup
-	{
-		std::string title;
-		std::string message;
-		std::string confirmLabel = "Confirm";
-		std::string cancelLabel = "Cancel";
-		bool showDontAskAgain = false;
-		bool* dontAskAgainPersist = nullptr;
-
-		ConfirmationPopup() = default;
-		ConfirmationPopup(std::string a_title, std::string a_message,
-			std::string a_confirmLabel = "Confirm", std::string a_cancelLabel = "Cancel") :
-			title(std::move(a_title)),
-			message(std::move(a_message)),
-			confirmLabel(std::move(a_confirmLabel)),
-			cancelLabel(std::move(a_cancelLabel)) {}
-
-		void Request();
-		bool Draw();
-		bool IsOpen() const { return show; }
-
-	private:
-		bool show = false;
-		bool dontAskCheckbox = false;
-	};
-
-	StyledButtonWrapper StatusButtonStyle(const ImVec4& a_color);
-	StyledButtonWrapper DestructiveButtonStyle();
-	ImVec4 GetIconTint();
-
-	bool ButtonWithFlash(const char* a_label, const ImVec2& a_size = ImVec2(0, 0), int a_flashDurationMs = 200);
-	bool ErrorButton(const char* a_label, const ImVec2& a_size = ImVec2(0, 0));
-	bool FeatureToggle(const char* a_label, bool* a_enabled, const ImVec2& a_size = ImVec2(0, 0));
-
-	bool DrawRoundedButtonHighlight(const ImVec2& a_min, const ImVec2& a_max, bool a_hovered, bool a_active, ImDrawList* a_drawList = nullptr);
-	bool DrawRoundedButtonHighlight(const ImVec2& a_min, const ImVec2& a_max, bool a_hovered, bool a_active, float a_rounding, ImDrawList* a_drawList);
-
-	bool BeginWithRoundedClose(const char* a_name, bool* a_open, ImGuiWindowFlags a_flags = 0);
-	bool BeginPopupModalWithRoundedClose(const char* a_name, bool* a_open = nullptr, ImGuiWindowFlags a_flags = 0);
-
-	ImVec2 GetNativeViewportSizeScaled(float a_scale);
-
-	ImVec2 DrawSharpText(const char* a_text, bool a_alignToPixelGrid = true, float a_scale = 1.0f);
-	float GetCenterOffsetForContent(float a_contentWidth);
-
-	bool DrawCategoryHeader(const char* a_categoryKey, const char* a_displayName, bool& a_isExpanded, int a_categoryCount);
-	bool DrawSectionHeader(const char* a_sectionName, bool a_useWhiteText = false, bool a_isCollapsible = true, bool* a_isExpanded = nullptr);
-
-	void DrawSearchIcon(const ImVec2& a_position, float a_size = ThemeManager::Constants::SEARCH_ICON_SIZE, float a_alpha = ThemeManager::Constants::SEARCH_ICON_ALPHA);
-	void DrawFeatureSearchBar(std::string& a_searchString, float a_availableWidth = 0.0f);
-	std::string DrawComboSearchInput(const char* a_id);
-	void ClearComboSearch(const char* a_id);
-
-	bool IEquals(std::string_view a_lhs, std::string_view a_rhs);
-	bool StringMatchesSearch(std::string_view a_text, std::string_view a_searchQuery);
-	bool FeatureMatchesSearch(const Feature* a_feature, const std::string& a_searchQuery);
-	std::string GetFormattedVersion();
-	std::string GetMenuDisplayTitle();
-
-	bool LoadTextureFromFile(ID3D11Device* a_device, const char* a_filename,
-		ID3D11ShaderResourceView** a_outSrv, ImVec2& a_outSize);
-
-	namespace Colors
-	{
-		ImVec4 GetSuccess();
-		ImVec4 GetWarning();
-		ImVec4 GetError();
-		ImVec4 GetInfo();
-	}
 
 	namespace Text
 	{
-		void Warning(const char* a_fmt, ...);
-		void WrappedWarning(const char* a_fmt, ...);
-		void Error(const char* a_fmt, ...);
-		void WrappedError(const char* a_fmt, ...);
-		void Success(const char* a_fmt, ...);
-		void WrappedSuccess(const char* a_fmt, ...);
-		void Info(const char* a_fmt, ...);
-		void WrappedInfo(const char* a_fmt, ...);
+		inline void WrappedWarning(const char* a_format, ...)
+		{
+			char buffer[1024]{};
+			std::va_list args;
+			va_start(args, a_format);
+			std::vsnprintf(buffer, sizeof(buffer), a_format, args);
+			va_end(args);
+			ImGui::TextWrapped("Warning: %s", buffer);
+		}
 	}
-
-	namespace Input
-	{
-		const char* KeyIdToString(std::uint32_t a_key);
-		std::string KeyIdToString(const std::vector<InputCombo>& a_combo);
-	}
-
-	bool InputComboWidget(
-		const char* a_label,
-		std::vector<InputCombo>& a_combo,
-		std::atomic<bool>& a_isRecording,
-		const char* a_recordingLabel,
-		bool a_allowClear = true);
 }

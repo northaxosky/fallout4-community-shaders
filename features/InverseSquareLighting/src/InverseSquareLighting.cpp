@@ -1,6 +1,6 @@
 #include "InverseSquareLighting.h"
 
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <array>
 #include <string>
@@ -473,11 +473,14 @@ namespace cs::features
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 		ImGui::TextDisabled(
 			"Off preserves the exact stock attenuation curve.");
-		changed |= ImGui::SliderFloat(
+		const float strengthMin = isl::kStrengthMin;
+		const float strengthMax = isl::kStrengthMax;
+		changed |= ImGui::SliderScalar(
 			"Exterior strength",
+			ImGuiDataType_Float,
 			&_settings.exteriorStrength,
-			isl::kStrengthMin,
-			isl::kStrengthMax,
+			&strengthMin,
+			&strengthMax,
 			"%.2f");
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text(
@@ -485,11 +488,12 @@ namespace cs::features
 				"1.0 matches upstream's full effect; lower values blend "
 				"exterior punctual lights toward vanilla.");
 		}
-		changed |= ImGui::SliderFloat(
+		changed |= ImGui::SliderScalar(
 			"Interior strength",
+			ImGuiDataType_Float,
 			&_settings.interiorStrength,
-			isl::kStrengthMin,
-			isl::kStrengthMax,
+			&strengthMin,
+			&strengthMax,
 			"%.2f");
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text(
@@ -501,11 +505,14 @@ namespace cs::features
 				"Lower values damp interior punctual lights if authored "
 				"lighting reads too hot.");
 		}
-		changed |= ImGui::SliderFloat(
+		const float nearFieldMin = isl::kNearFieldDistanceMin;
+		const float nearFieldMax = isl::kNearFieldDistanceMax;
+		changed |= ImGui::SliderScalar(
 			"Near-field distance (game units)",
+			ImGuiDataType_Float,
 			&_settings.nearFieldDistance,
-			isl::kNearFieldDistanceMin,
-			isl::kNearFieldDistanceMax,
+			&nearFieldMin,
+			&nearFieldMax,
 			"%.1f",
 			ImGuiSliderFlags_Logarithmic);
 		ImGui::TextDisabled(

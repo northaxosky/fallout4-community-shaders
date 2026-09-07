@@ -2,7 +2,7 @@
 
 #include <renderdoc_app.h>
 
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 #include <toml++/toml.hpp>
 
 #include <algorithm>
@@ -221,7 +221,6 @@ namespace cs::features
 
 		_settings = candidate;
 		_bootSettings = candidate;
-		RefreshHotkeys();
 		return true;
 	}
 
@@ -230,7 +229,7 @@ namespace cs::features
 		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture={} multi_capture={}",
 			_settings.enabled, _settings.dllPath, _settings.captureFolder,
 			_settings.minFreeDiskGiB, _settings.multiFrameCount,
-			_captureHotkey.ToString(), _multiCaptureHotkey.ToString());
+			_settings.captureHotkey, _settings.multiCaptureHotkey);
 
 		if (!_settings.enabled)
 			return;
@@ -240,8 +239,6 @@ namespace cs::features
 				+ "'; verify the path and RenderDoc 1.7 API compatibility");
 			return;
 		}
-
-		cs::Menu::Get().RegisterWndProcCallback(*this, &RenderDoc::HandleWndProc);
 	}
 
 	void RenderDoc::SaveSettings()
@@ -258,24 +255,6 @@ namespace cs::features
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settings); !result) {
 			L->error("Failed to save settings: {}", result.error);
 		}
-	}
-
-	void RenderDoc::RefreshHotkeys()
-	{
-		bool ok = false;
-		_captureHotkey = cs::input::Hotkey::Parse(_settings.captureHotkey, &ok);
-		if (!ok)
-			L->warn("Invalid capture_hotkey '{}', single-frame capture hotkey disabled", _settings.captureHotkey);
-
-		ok = false;
-		_multiCaptureHotkey = cs::input::Hotkey::Parse(_settings.multiCaptureHotkey, &ok);
-		if (!ok)
-			L->warn("Invalid multi_capture_hotkey '{}', multi-frame capture hotkey disabled", _settings.multiCaptureHotkey);
-
-		if (_captureHotkey.IsBound() && _multiCaptureHotkey.IsBound()
-			&& _captureHotkey.ToString() == _multiCaptureHotkey.ToString())
-			L->warn("capture_hotkey and multi_capture_hotkey are both '{}'; multi-frame capture takes precedence",
-				_multiCaptureHotkey.ToString());
 	}
 
 	bool RenderDoc::TryLoadRuntime()
@@ -347,7 +326,10 @@ namespace cs::features
 		if (ec) {
 			L->warn("RenderDoc capture aborted: failed to prepare capture folder {}: {}",
 				captureDir.string(), ec.message());
-			cs::Menu::ShowToast("RenderDoc capture aborted: capture folder unavailable", 4.0);
+			cs::Menu::ShowToast(
+				"RenderDoc capture aborted: capture folder unavailable",
+				4.0,
+				DMUI_STATUS_SEVERITY_ERROR);
 			return false;
 		}
 
@@ -358,13 +340,19 @@ namespace cs::features
 			if (availableGiB < requiredGiB) {
 				L->warn("RenderDoc capture aborted: {:.2f} GiB free in {} below configured {:.2f} GiB",
 					availableGiB, captureDir.string(), requiredGiB);
-				cs::Menu::ShowToast("RenderDoc capture aborted: low disk space", 4.0);
+				cs::Menu::ShowToast(
+					"RenderDoc capture aborted: low disk space",
+					4.0,
+					DMUI_STATUS_SEVERITY_WARNING);
 				return false;
 			}
 		} catch (const std::filesystem::filesystem_error& e) {
 			L->warn("RenderDoc capture aborted: failed to query free disk space for {}: {}",
 				captureDir.string(), e.what());
-			cs::Menu::ShowToast("RenderDoc capture aborted: disk check failed", 4.0);
+			cs::Menu::ShowToast(
+				"RenderDoc capture aborted: disk check failed",
+				4.0,
+				DMUI_STATUS_SEVERITY_ERROR);
 			return false;
 		}
 
@@ -484,40 +472,18 @@ namespace cs::features
 		ApplyPendingComments();
 	}
 
-	bool RenderDoc::HandleWndProc(HWND a_hwnd, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
+	void RenderDoc::TickHostFrame()
 	{
-		auto* self = GetSingleton();
+		ApplyPendingComments();
+	}
 
-		if (a_hwnd && self->_window.load(std::memory_order_relaxed) != a_hwnd) {
-			self->_window.store(a_hwnd, std::memory_order_relaxed);
-			self->BindCaptureTarget();
-		}
-
-		// Consume key-up early to prevent stuck input and F10 beeps.
-		if (self->_captureReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
-			&& a_wparam == self->_captureReleaseVk) {
-			self->_captureReleaseVk = 0;
-			return true;
-		}
-
-		if (!self->_settings.enabled)
-			return false;
-		// Open menus leave keyboard input to ImGui.
-		if (cs::Menu::Get().IsOpen())
-			return false;
-
-		// Multi-frame capture wins shared chords.
-		if (self->_multiCaptureHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
-			self->TriggerMultiFrameCapture();
-			self->_captureReleaseVk = self->_multiCaptureHotkey.vk;
-			return true;
-		}
-		if (self->_captureHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
-			self->TriggerCapture();
-			self->_captureReleaseVk = self->_captureHotkey.vk;
-			return true;
-		}
-		return false;
+	void RenderDoc::BindD3D11CaptureTarget(
+		ID3D11Device* a_device,
+		HWND a_window)
+	{
+		_device = a_device;
+		_window.store(a_window, std::memory_order_relaxed);
+		BindCaptureTarget();
 	}
 
 	void RenderDoc::DrawSettings()
@@ -531,13 +497,10 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		const auto single = _captureHotkey.IsBound() ?
-			std::format("{} captures one frame.", _captureHotkey.ToString()) :
-			std::string{ "Single-frame capture is unbound." };
-		const auto multi = _multiCaptureHotkey.IsBound() ?
-			std::format("{} captures the configured multi-frame count.", _multiCaptureHotkey.ToString()) :
-			std::string{ "Multi-frame capture is unbound." };
-		ImGui::TextDisabled("%s %s", single.c_str(), multi.c_str());
+		ImGui::TextDisabled(
+			"The host owns capture bindings. Suggested defaults: %s and %s.",
+			_settings.captureHotkey.c_str(),
+			_settings.multiCaptureHotkey.c_str());
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
@@ -555,20 +518,35 @@ namespace cs::features
 			ApplyCapturePath();
 		}
 
-		if (ImGui::InputDouble("Minimum free disk (GiB)", &_settings.minFreeDiskGiB, 0.25, 1.0, "%.2f"))
+		const double diskStep = 0.25;
+		const double diskFastStep = 1.0;
+		if (ImGui::InputScalar(
+				"Minimum free disk (GiB)",
+				ImGuiDataType_Double,
+				&_settings.minFreeDiskGiB,
+				&diskStep,
+				&diskFastStep,
+				"%.2f"))
 			_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
 		if (ImGui::IsItemDeactivatedAfterEdit())
 			SaveSettings();
 
-		ImGui::SliderInt("Multi-frame count", &_settings.multiFrameCount, kMinMultiFrameCount, kMaxMultiFrameCount);
+		const int minimumFrames = kMinMultiFrameCount;
+		const int maximumFrames = kMaxMultiFrameCount;
+		(void)ImGui::SliderScalar(
+			"Multi-frame count",
+			ImGuiDataType_S32,
+			&_settings.multiFrameCount,
+			&minimumFrames,
+			&maximumFrames);
 		if (ImGui::IsItemDeactivatedAfterEdit()) {
 			_settings.multiFrameCount = ClampMultiFrameCount(_settings.multiFrameCount);
 			SaveSettings();
 		}
 
-		ImGui::InputTextMultiline("Comments (embedded in next .rdc)",
+		(void)ImGui::InputTextMultiline("Comments (embedded in next .rdc)",
 			_commentsBuf.data(), _commentsBuf.size(),
-			ImVec2(0, ImGui::GetTextLineHeight() * 3));
+			ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 3));
 
 		ImGui::BeginDisabled(!_api);
 		if (ImGui::Button("Trigger Capture"))
@@ -600,7 +578,6 @@ namespace cs::features
 	void RenderDoc::RestoreDefaultSettings()
 	{
 		_settings = Settings{};
-		RefreshHotkeys();
 		SaveSettings();
 		ApplyCapturePath();
 		L->info("Settings reset to defaults");

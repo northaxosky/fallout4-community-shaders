@@ -2,7 +2,7 @@
 #include "SkylightingMath.h"
 
 #include <d3d11.h>
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <array>
 #include <algorithm>
@@ -2027,11 +2027,14 @@ namespace cs::features
 				"is empty outside of rain. Force a real scene traversal for "
 				"the occlusion producer.");
 		}
-		changed |= ImGui::SliderFloat(
+		const float occlusionExtentMin = kMinOcclusionExtent;
+		const float occlusionExtentMax = kMaxOcclusionExtent;
+		changed |= ImGui::SliderScalar(
 			"Occlusion extent",
+			ImGuiDataType_Float,
 			&_settings.occlusionExtent,
-			kMinOcclusionExtent,
-			kMaxOcclusionExtent,
+			&occlusionExtentMin,
+			&occlusionExtentMax,
 			"%.0f",
 			ImGuiSliderFlags_Logarithmic);
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
@@ -2041,25 +2044,42 @@ namespace cs::features
 				"costs resolution one for one: 10000 is about 19.5 "
 				"units/texel.");
 		}
-		changed |= ImGui::SliderAngle(
-			"Max zenith angle", &_settings.maxZenith, 0.0f, 90.0f);
+		float maxZenithDegrees =
+			_settings.maxZenith * (180.0f / 3.14159265358979323846f);
+		const float zenithMin = 0.0f;
+		const float zenithMax = 90.0f;
+		if (ImGui::SliderScalar(
+				"Max zenith angle",
+				ImGuiDataType_Float,
+				&maxZenithDegrees,
+				&zenithMin,
+				&zenithMax,
+				"%.0f deg")) {
+			_settings.maxZenith =
+				maxZenithDegrees * (3.14159265358979323846f / 180.0f);
+			changed = true;
+		}
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text(
 				"%s",
 				"Controls the random sky-disc radius accumulated by the "
 				"probe volume. Smaller angles focus occlusion toward zenith.");
 		}
-		changed |= ImGui::SliderFloat(
+		const float consumerMin = kMinConsumerSetting;
+		const float consumerMax = kMaxConsumerSetting;
+		changed |= ImGui::SliderScalar(
 			"Diffuse minimum visibility",
+			ImGuiDataType_Float,
 			&_settings.minDiffuseVisibility,
-			kMinConsumerSetting,
-			kMaxConsumerSetting,
+			&consumerMin,
+			&consumerMax,
 			"%.2f");
-		changed |= ImGui::SliderFloat(
+		changed |= ImGui::SliderScalar(
 			"Specular minimum visibility",
+			ImGuiDataType_Float,
 			&_settings.minSpecularVisibility,
-			kMinConsumerSetting,
-			kMaxConsumerSetting,
+			&consumerMin,
+			&consumerMax,
 			"%.2f");
 		ImGui::TextDisabled(
 			"Interiors deliberately take the identity path, matching upstream.");

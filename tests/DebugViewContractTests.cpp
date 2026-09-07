@@ -416,7 +416,6 @@ namespace
 				   "directional probe visibility\n";
 			++failures;
 		}
-
 		auto settingsBody = FindMethodBody(
 			a_sources,
 			a_catalog,

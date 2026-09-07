@@ -1,6 +1,6 @@
 #include "ExponentialHeightFog.h"
 
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <array>
 #include <format>
@@ -599,11 +599,14 @@ namespace cs::features
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 		ImGui::TextDisabled(
 			"Off takes the exact vanilla fog math path.");
-		changed |= ImGui::SliderFloat(
+		const float multiplierMin = ehf::kMultiplierMin;
+		const float multiplierMax = ehf::kMultiplierMax;
+		changed |= ImGui::SliderScalar(
 			"Density multiplier",
+			ImGuiDataType_Float,
 			&_settings.densityMultiplier,
-			ehf::kMultiplierMin,
-			ehf::kMultiplierMax,
+			&multiplierMin,
+			&multiplierMax,
 			"%.2f");
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text(
@@ -611,11 +614,12 @@ namespace cs::features
 				"Scales the extinction fitted from the current weather's "
 				"near and far fog distances. 1.0 is neutral.");
 		}
-		changed |= ImGui::SliderFloat(
+		changed |= ImGui::SliderScalar(
 			"Height-falloff multiplier",
+			ImGuiDataType_Float,
 			&_settings.heightFalloffMultiplier,
-			ehf::kMultiplierMin,
-			ehf::kMultiplierMax,
+			&multiplierMin,
+			&multiplierMax,
 			"%.2f");
 		if (auto tooltip = ui::HoverTooltipWrapper()) {
 			ImGui::Text(

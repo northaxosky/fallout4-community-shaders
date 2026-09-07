@@ -7,12 +7,13 @@
 #include <fstream>
 #include <vector>
 
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 #include <toml++/toml.hpp>
 #include <Windows.h>
 #include <dxgi1_4.h>
 
 #include "Log.h"
+#include "Host/HostClient.h"
 #include "Menu/Menu.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
@@ -159,8 +160,9 @@ namespace cs::features
 			return false;
 		}
 
+		_toggleHotkeyConfigured = feature_config::HasUserFeatureSetting(
+			GetConfigKey(), "toggle_hotkey");
 		settings = candidate;
-		RefreshToggleHotkey();
 		return true;
 	}
 
@@ -170,43 +172,8 @@ namespace cs::features
 		QueryPerformanceFrequency(&freq);
 		_qpcFreq = static_cast<double>(freq.QuadPart);
 
-		cs::Menu::Get().RegisterWndProcCallback(*this, &PerformanceOverlay::HandleWndProc);
-
 		L->info("Loaded: enabled={} preset={} corner={} toggle_hotkey={}",
-			settings.enabled, settings.preset, settings.corner, _toggleHotkey.ToString());
-	}
-
-	void PerformanceOverlay::RefreshToggleHotkey()
-	{
-		bool ok = false;
-		_toggleHotkey = cs::input::Hotkey::Parse(settings.toggleHotkey, &ok);
-		if (!ok)
-			L->warn("Invalid toggle_hotkey '{}', overlay toggle disabled", settings.toggleHotkey);
-	}
-
-	bool PerformanceOverlay::HandleWndProc(HWND, UINT a_msg, WPARAM a_wparam, LPARAM a_lparam)
-	{
-		auto* self = GetSingleton();
-
-		// Consume key-up early to prevent stuck input and F10 beeps.
-		if (self->_toggleReleaseVk != 0 && (a_msg == WM_KEYUP || a_msg == WM_SYSKEYUP)
-			&& a_wparam == self->_toggleReleaseVk) {
-			self->_toggleReleaseVk = 0;
-			return true;
-		}
-
-		// Open menus leave keyboard input to ImGui.
-		if (cs::Menu::Get().IsOpen())
-			return false;
-		if (!self->settings.enabled || self->settings.preset == static_cast<int>(Preset::Off))
-			return false;
-
-		if (self->_toggleHotkey.MatchesDown(a_msg, a_wparam, a_lparam)) {
-			cs::Menu::Get().ToggleOverlay();
-			self->_toggleReleaseVk = self->_toggleHotkey.vk;
-			return true;
-		}
-		return false;
+			settings.enabled, settings.preset, settings.corner, settings.toggleHotkey);
 	}
 
 	void PerformanceOverlay::SaveSettings()
@@ -233,7 +200,8 @@ namespace cs::features
 		settingsTable.insert_or_assign("update_interval", static_cast<double>(settings.updateInterval));
 		settingsTable.insert_or_assign("history_size", static_cast<int64_t>(settings.historySize));
 		settingsTable.insert_or_assign("graph_height_px", static_cast<double>(settings.graphHeightPx));
-		settingsTable.insert_or_assign("toggle_hotkey", settings.toggleHotkey);
+		if (_toggleHotkeyConfigured)
+			settingsTable.insert_or_assign("toggle_hotkey", settings.toggleHotkey);
 
 		if (const auto result = feature_config::UpdateFeatureSettings(GetConfigKey(), settingsTable); !result) {
 			L->error("Failed to save settings: {}", result.error);
@@ -378,176 +346,169 @@ namespace cs::features
 			return;
 
 		EnsureRefreshHz();
-		TickFrame();
 
 		const bool wantContent = settings.showFps || settings.showFrameTime ||
 			settings.showGraph || settings.showVram || settings.showStats;
 		if (!wantContent)
 			return;
 
-		ImGuiIO& io = ImGui::GetIO();
-		const ImVec2 viewport = io.DisplaySize;
+		const ImVec4 good{ 0.20f, 1.00f, 0.20f, 1.00f };
+		const ImVec4 warning{ 1.00f, 0.85f, 0.20f, 1.00f };
+		const ImVec4 bad{ 1.00f, 0.30f, 0.30f, 1.00f };
+		const ImVec4 white{ 1.00f, 1.00f, 1.00f, 1.00f };
+		const auto color = settings.highContrast ?
+			white :
+			(_displayedFps >= settings.fpsGood ?
+				good :
+				(_displayedFps >= settings.fpsWarn ? warning : bad));
 
-		// Snap by default; dragging is optional.
-		ImGuiCond posCond = ImGuiCond_Always;
-		ImVec2 pos{ 10.0f, 10.0f };
-		ImVec2 pivot{ 0.0f, 0.0f };
-		const float pad = 10.0f;
-		switch (static_cast<Corner>(settings.corner)) {
-			case Corner::TopLeft:     pos = { pad, pad };                                pivot = { 0.0f, 0.0f }; break;
-			case Corner::TopRight:    pos = { viewport.x - pad, pad };                   pivot = { 1.0f, 0.0f }; break;
-			case Corner::BottomLeft:  pos = { pad, viewport.y - pad };                   pivot = { 0.0f, 1.0f }; break;
-			case Corner::BottomRight: pos = { viewport.x - pad, viewport.y - pad };      pivot = { 1.0f, 1.0f }; break;
+		if (settings.showFps) {
+			ImGui::PushStyleColor(ImGuiCol_Text, color);
+			ImGui::Text("[Engine] %.0f FPS", _displayedFps);
+			ImGui::PopStyleColor();
 		}
-		if (settings.freeDrag) {
-			pos = { settings.dragPosX, settings.dragPosY };
-			pivot = { 0.0f, 0.0f };
-			posCond = ImGuiCond_FirstUseEver;
-		}
+		if (settings.showFrameTime)
+			ImGui::Text("%.2f ms", _displayedFrameMs);
 
-		ImGuiWindowFlags flags = ImGuiWindowFlags_NoNav |
-			ImGuiWindowFlags_NoFocusOnAppearing |
-			ImGuiWindowFlags_AlwaysAutoResize |
-			ImGuiWindowFlags_NoSavedSettings;
-		if (!settings.freeDrag)
-			flags |= ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs;
-		if (!settings.showBorder)
-			flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoBackground;
-		else
-			flags |= ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize;
-
-		// Fixed width keeps optional rows aligned.
-		const float kContentWidth = 440.0f * settings.fontScale;
-		ImGui::SetNextWindowPos(pos, posCond, pivot);
-		ImGui::SetNextWindowBgAlpha(settings.opacity);
-		ImGui::SetNextWindowSizeConstraints(ImVec2(kContentWidth, 0.0f), ImVec2(kContentWidth, FLT_MAX));
-		if (ImGui::Begin("##PerfOverlay", nullptr, flags)) {
-			if (settings.freeDrag) {
-				const ImVec2 cur = ImGui::GetWindowPos();
-				if (cur.x != settings.dragPosX || cur.y != settings.dragPosY) {
-					settings.dragPosX = cur.x;
-					settings.dragPosY = cur.y;
-				}
+		if (settings.showGraph && _frameTimesCount > 1) {
+			static std::array<float, kHistoryCapacity> linear{};
+			for (int i = 0; i < _frameTimesCount; ++i) {
+				int source =
+					(_frameTimesHead - _frameTimesCount + i + settings.historySize) %
+					settings.historySize;
+				if (source < 0)
+					source += settings.historySize;
+				linear[i] = _frameTimesMs[source];
 			}
+			const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
+			const float slowestReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
+			const float target = std::max({
+				refreshMs * 2.0f,
+				_avgMs + 3.0f * _stddevMs,
+				slowestReferenceMs * 1.05f });
+			if (_graphYMaxSmoothed <= 0.0f)
+				_graphYMaxSmoothed = target;
+			else
+				_graphYMaxSmoothed += (target - _graphYMaxSmoothed) * 0.25f;
 
-			ImGui::SetWindowFontScale(settings.fontScale);
-
-				const ImVec4 colGood  = ImVec4(0.20f, 1.00f, 0.20f, 1.00f);
-			const ImVec4 colWarn  = ImVec4(1.00f, 0.85f, 0.20f, 1.00f);
-			const ImVec4 colBad   = ImVec4(1.00f, 0.30f, 0.30f, 1.00f);
-			const ImVec4 colHi    = ImVec4(1.00f, 1.00f, 1.00f, 1.00f);
-
-			auto fpsColor = [&](float fps) -> ImVec4 {
-				if (settings.highContrast) return colHi;
-				if (fps >= settings.fpsGood) return colGood;
-				if (fps >= settings.fpsWarn) return colWarn;
-				return colBad;
+			std::array<DMUI_PlotReferenceLine, 3> references{};
+			for (std::size_t index = 0; index < references.size(); ++index) {
+				references[index] = {
+					1000.0f / kFrameTimeReferenceFps[index],
+					{ 1.0f, 1.0f, 1.0f, settings.highContrast ? 0.35f : 0.18f }
+				};
+			}
+			const DMUI_AnnotatedPlotDescriptor plot{
+				DMUI_ANNOTATED_PLOT_DESCRIPTOR_0_1_SIZE,
+				linear.data(),
+				static_cast<std::uint32_t>(_frameTimesCount),
+				0u,
+				0.0f,
+				_graphYMaxSmoothed,
+				{ 440.0f, std::clamp(settings.graphHeightPx, 40.0f, 160.0f) },
+				"Frame Time",
+				references.data(),
+				static_cast<std::uint32_t>(references.size())
 			};
-
-			auto drawReferenceLinesOverLastPlot = [](float ymin, float ymax, ImU32 color) {
-				const ImVec2 itemMin = ImGui::GetItemRectMin();
-				const ImVec2 itemMax = ImGui::GetItemRectMax();
-				const ImVec2 framePadding = ImGui::GetStyle().FramePadding;
-				const ImVec2 plotMin(itemMin.x + framePadding.x, itemMin.y + framePadding.y);
-				const ImVec2 plotMax(itemMax.x - framePadding.x, itemMax.y - framePadding.y);
-				if (plotMax.x <= plotMin.x || plotMax.y <= plotMin.y)
-					return;
-
-				const float range = std::max(ymax - ymin, 0.001f);
-				ImDrawList* drawList = ImGui::GetWindowDrawList();
-				drawList->PushClipRect(plotMin, plotMax, true);
-				for (float fps : kFrameTimeReferenceFps) {
-					const float ms = 1000.0f / fps;
-					if (ms < ymin || ms > ymax)
-						continue;
-					const float t = std::clamp((ms - ymin) / range, 0.0f, 1.0f);
-					const float y = plotMax.y - t * (plotMax.y - plotMin.y);
-					drawList->AddLine(ImVec2(plotMin.x, y), ImVec2(plotMax.x, y), color, 1.0f);
-				}
-				drawList->PopClipRect();
-			};
-
-			if (settings.showFps) {
-				ImGui::PushStyleColor(ImGuiCol_Text, fpsColor(_displayedFps));
-				ImGui::Text("[Engine] %.0f FPS", _displayedFps);
-				ImGui::PopStyleColor();
-			}
-			if (settings.showFrameTime) {
-				ImGui::Text("%.2f ms", _displayedFrameMs);
-			}
-
-			if (settings.showGraph && _frameTimesCount > 1) {
-				// PlotLines requires contiguous samples.
-				static std::array<float, kHistoryCapacity> linear{};
-				for (int i = 0; i < _frameTimesCount; ++i) {
-					int src = (_frameTimesHead - _frameTimesCount + i + settings.historySize) % settings.historySize;
-					if (src < 0) src += settings.historySize;
-					linear[i] = _frameTimesMs[src];
-				}
-				const float refreshMs = 1000.0f / std::max(_refreshHz, 30.0f);
-				const float maxReferenceMs = 1000.0f / kFrameTimeReferenceFps.front();
-				// Limit outlier influence with average plus three sigma.
-				const float ymaxTarget = std::max({
-					refreshMs * 2.0f,
-					_avgMs + 3.0f * _stddevMs,
-					maxReferenceMs * 1.05f,
-				});
-				// Smooth scaling so hitches fade.
-				if (_graphYMaxSmoothed <= 0.0f) {
-					_graphYMaxSmoothed = ymaxTarget;
-				} else {
-					_graphYMaxSmoothed += (ymaxTarget - _graphYMaxSmoothed) * 0.25f;
-				}
-				const float ymax = _graphYMaxSmoothed;
-				ImGui::TextUnformatted("Frame Time");
-				const float graphHeight = std::clamp(settings.graphHeightPx, 40.0f, 160.0f) * settings.fontScale;
-				ImGui::PlotLines("##frametimegraph", linear.data(), _frameTimesCount, 0,
-					nullptr, 0.0f, ymax, ImVec2(-FLT_MIN, graphHeight));
-				drawReferenceLinesOverLastPlot(0.0f, ymax, ImGui::GetColorU32(ImVec4(1.0f, 1.0f, 1.0f, settings.highContrast ? 0.35f : 0.18f)));
-			}
-
-			if (settings.showStats) {
-				ImGui::Text("avg     %5.2f ms", _avgMs);
-				ImGui::Text("1%% low  %5.2f ms", _onePctLowMs);
-				ImGui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
-			}
-
-			if (settings.showVram) {
-				if (!_adapter)
-					_adapter = cs::Menu::Get().GetDXGIAdapter3();
-				if (_adapter) {
-					DXGI_QUERY_VIDEO_MEMORY_INFO info{};
-					if (SUCCEEDED(_adapter->QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &info))) {
-						_vramUsedBytes   = info.CurrentUsage;
-						_vramBudgetBytes = info.Budget;
-					}
-				}
-				if (_vramBudgetBytes > 0) {
-					const float frac = static_cast<float>(static_cast<double>(_vramUsedBytes) / static_cast<double>(_vramBudgetBytes));
-					char label[64];
-					std::snprintf(label, sizeof(label), "%.1f / %.1f GB",
-						_vramUsedBytes / (1024.0 * 1024.0 * 1024.0),
-						_vramBudgetBytes / (1024.0 * 1024.0 * 1024.0));
-					ImGui::ProgressBar(frac, ImVec2(-FLT_MIN, 0.0f), label);
-				}
-			}
+			(void)host::HostClient::Get().DrawAnnotatedPlot(
+				"performance-frame-time",
+				plot);
 		}
-		// End must pair with Begin even when hidden.
-		ImGui::SetWindowFontScale(1.0f);
-		ImGui::End();
+		if (settings.showStats) {
+			ImGui::Text("avg     %5.2f ms", _avgMs);
+			ImGui::Text("1%% low  %5.2f ms", _onePctLowMs);
+			ImGui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
+		}
+		if (settings.showVram && _vramBudgetBytes > 0) {
+			ImGui::Text(
+				"VRAM %.1f / %.1f GB",
+				_vramUsedBytes / (1024.0 * 1024.0 * 1024.0),
+				_vramBudgetBytes / (1024.0 * 1024.0 * 1024.0));
+		}
+	}
+
+	void PerformanceOverlay::TickHostFrame(
+		std::uint64_t a_vramUsedBytes,
+		std::uint64_t a_vramBudgetBytes)
+	{
+		EnsureRefreshHz();
+		TickFrame();
+		_vramUsedBytes = a_vramUsedBytes;
+		_vramBudgetBytes = a_vramBudgetBytes;
+	}
+
+	DMUI_ManagedOverlayOptions PerformanceOverlay::ManagedOverlayOptions() const noexcept
+	{
+		const auto anchor = settings.freeDrag ?
+			DMUI_OVERLAY_ANCHOR_FREE :
+			static_cast<DMUI_OverlayAnchor>(std::clamp(settings.corner, 0, 3));
+		const DMUI_Vec2 offset = settings.freeDrag ?
+			DMUI_Vec2{ settings.dragPosX, settings.dragPosY } :
+			DMUI_Vec2{ 10.0f, 10.0f };
+		return {
+			DMUI_MANAGED_OVERLAY_OPTIONS_0_1_SIZE,
+			anchor,
+			offset,
+			{ 440.0f, 0.0f },
+			{ 440.0f, 10000.0f },
+			settings.opacity,
+			settings.fontScale,
+			settings.showBorder ? 1u : 0u,
+			settings.showBorder ? 1u : 0u,
+			settings.freeDrag ? 1u : 0u,
+			0u
+		};
+	}
+
+	void PerformanceOverlay::CommitOverlayPlacement(
+		const DMUI_ManagedOverlayPlacement& a_placement)
+	{
+		if (!settings.freeDrag || a_placement.anchor != DMUI_OVERLAY_ANCHOR_FREE)
+			return;
+		if (settings.dragPosX == a_placement.position.x &&
+			settings.dragPosY == a_placement.position.y)
+			return;
+		settings.dragPosX = a_placement.position.x;
+		settings.dragPosY = a_placement.position.y;
+		SaveSettings();
 	}
 
 	void PerformanceOverlay::RestoreDefaultSettings()
 	{
 		settings = Settings{};
-		RefreshToggleHotkey();
 		SaveSettings();
 		cs::Menu::ShowToast("Performance Overlay reset to defaults", 2.5);
 	}
 
 	void PerformanceOverlay::DrawSettings()
 	{
-		ImGui::TextDisabled("%s toggles the overlay in-game.", _toggleHotkey.ToString().c_str());
+		ImGui::TextDisabled(
+			"The host owns the overlay hotkey. Suggested default: %s.",
+			settings.toggleHotkey.c_str());
+		const auto drawChoice = [](const char* a_label,
+								 int& a_value,
+								 const char* const* a_labels,
+								 std::size_t a_count) {
+			const auto selected =
+				a_value >= 0 && static_cast<std::size_t>(a_value) < a_count ?
+				a_value :
+				0;
+			bool choiceChanged = false;
+			if (ImGui::BeginCombo(a_label, a_labels[selected])) {
+				for (std::size_t index = 0; index < a_count; ++index) {
+					if (ImGui::Selectable(
+							a_labels[index],
+							static_cast<int>(index) == selected)) {
+						a_value = static_cast<int>(index);
+						choiceChanged = true;
+					}
+					if (static_cast<int>(index) == selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			return choiceChanged;
+		};
 
 		if (ImGui::Checkbox("Enabled", &settings.enabled))
 			SaveSettings();
@@ -559,7 +520,7 @@ namespace cs::features
 
 		static const char* presetLabels[] = { "Off", "Minimal", "Standard", "Verbose" };
 		int preset = std::clamp(settings.preset, 0, 3);
-		if (ImGui::Combo("Preset", &preset, presetLabels, IM_ARRAYSIZE(presetLabels))) {
+		if (drawChoice("Preset", preset, presetLabels, std::size(presetLabels))) {
 			ApplyPreset(static_cast<Preset>(preset));
 			SaveSettings();
 		}
@@ -577,7 +538,7 @@ namespace cs::features
 		if (ImGui::CollapsingHeader("Position")) {
 			static const char* cornerLabels[] = { "Top-left", "Top-right", "Bottom-left", "Bottom-right" };
 			int corner = std::clamp(settings.corner, 0, 3);
-			if (ImGui::Combo("Corner", &corner, cornerLabels, IM_ARRAYSIZE(cornerLabels))) {
+			if (drawChoice("Corner", corner, cornerLabels, std::size(cornerLabels))) {
 				settings.corner = corner;
 				SaveSettings();
 			}
@@ -587,13 +548,29 @@ namespace cs::features
 
 		if (ImGui::CollapsingHeader("Style")) {
 			bool changed = false;
-			ImGui::SliderFloat("Background opacity", &settings.opacity, 0.0f, 1.0f, "%.2f");
+			const float opacityMin = 0.0f;
+			const float opacityMax = 1.0f;
+			(void)ImGui::SliderScalar(
+				"Background opacity",
+				ImGuiDataType_Float,
+				&settings.opacity,
+				&opacityMin,
+				&opacityMax,
+				"%.2f");
 			if (sliderCommit()) {
 				settings.opacity = std::clamp(settings.opacity, 0.0f, 1.0f);
 				changed = true;
 			}
 			if (ImGui::Checkbox("Show border", &settings.showBorder)) changed = true;
-			ImGui::SliderFloat("Font scale", &settings.fontScale, 0.5f, 3.0f, "%.2fx");
+			const float fontScaleMin = 0.5f;
+			const float fontScaleMax = 3.0f;
+			(void)ImGui::SliderScalar(
+				"Font scale",
+				ImGuiDataType_Float,
+				&settings.fontScale,
+				&fontScaleMin,
+				&fontScaleMax,
+				"%.2fx");
 			if (sliderCommit()) {
 				settings.fontScale = std::clamp(settings.fontScale, 0.5f, 3.0f);
 				changed = true;
@@ -613,21 +590,65 @@ namespace cs::features
 			ImGui::TextDisabled("Detected refresh: %.0f Hz", _refreshHz);
 			ImGui::BeginDisabled(settings.autoThresholds);
 			bool committed = false;
-			ImGui::SliderFloat("Good (>= FPS)", &settings.fpsGood, 30.0f, 360.0f, "%.0f");
+			const float goodFpsMin = 30.0f;
+			const float goodFpsMax = 360.0f;
+			(void)ImGui::SliderScalar(
+				"Good (>= FPS)",
+				ImGuiDataType_Float,
+				&settings.fpsGood,
+				&goodFpsMin,
+				&goodFpsMax,
+				"%.0f");
 			if (sliderCommit()) committed = true;
-			ImGui::SliderFloat("Warn (>= FPS)", &settings.fpsWarn, 15.0f, 240.0f, "%.0f");
+			const float warnFpsMin = 15.0f;
+			const float warnFpsMax = 240.0f;
+			(void)ImGui::SliderScalar(
+				"Warn (>= FPS)",
+				ImGuiDataType_Float,
+				&settings.fpsWarn,
+				&warnFpsMin,
+				&warnFpsMax,
+				"%.0f");
 			if (sliderCommit()) committed = true;
 			ImGui::EndDisabled();
 			if (committed) SaveSettings();
 		}
 
 		if (ImGui::CollapsingHeader("Tracking")) {
-			ImGui::SliderFloat("Update interval (s)", &settings.updateInterval, 0.05f, 2.0f, "%.2f");
-			ImGui::SetItemTooltip("How often the displayed FPS/frametime number refreshes. The history graph updates every frame.");
+			const float updateIntervalMin = 0.05f;
+			const float updateIntervalMax = 2.0f;
+			(void)ImGui::SliderScalar(
+				"Update interval (s)",
+				ImGuiDataType_Float,
+				&settings.updateInterval,
+				&updateIntervalMin,
+				&updateIntervalMax,
+				"%.2f");
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip(
+					"%s",
+					"How often the displayed FPS/frametime number refreshes. "
+					"The history graph updates every frame.");
+			}
 			const bool intervalCommitted = sliderCommit();
-			ImGui::SliderInt("History size (frames)", &settings.historySize, 30, kHistoryCapacity);
+			const int historySizeMin = 30;
+			const int historySizeMax = kHistoryCapacity;
+			(void)ImGui::SliderScalar(
+				"History size (frames)",
+				ImGuiDataType_S32,
+				&settings.historySize,
+				&historySizeMin,
+				&historySizeMax);
 			const bool historyCommitted = sliderCommit();
-			ImGui::SliderFloat("Graph height (px)", &settings.graphHeightPx, 40.0f, 160.0f, "%.0f");
+			const float graphHeightMin = 40.0f;
+			const float graphHeightMax = 160.0f;
+			(void)ImGui::SliderScalar(
+				"Graph height (px)",
+				ImGuiDataType_Float,
+				&settings.graphHeightPx,
+				&graphHeightMin,
+				&graphHeightMax,
+				"%.0f");
 			const bool graphHeightCommitted = sliderCommit();
 			if (intervalCommitted || historyCommitted || graphHeightCommitted) {
 				settings.updateInterval = std::clamp(settings.updateInterval, 0.05f, 5.0f);

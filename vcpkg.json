@@ -8,10 +8,6 @@
     "directx-headers",
     "directxtex",
     "directxtk",
-    {
-      "name": "imgui",
-      "features": [ "dx11-binding", "win32-binding", "docking-experimental" ]
-    },
     "magic-enum",
     {
       "name": "spdlog",

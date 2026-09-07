@@ -2,6 +2,7 @@
 #include "Feature.h"
 #include "Host/HostClient.h"
 #include "Log.h"
+#include "Menu/Menu.h"
 #include "Render/FrameBuffer.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
@@ -132,6 +133,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	auto& featureManager = cs::FeatureManager::Get();
 	featureManager.PrepareAll();
 	featureManager.ActivateAll();
+	cs::Menu::Get().Load();
 	cs::engine::InstallFrameBuffer();
 	cs::telemetry::Install();
 	cs::render::InstallSwapChainHook();

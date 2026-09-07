@@ -1,19 +1,20 @@
 #pragma once
 
 #include "Host/HostPageCatalog.h"
-#include "Host/IntegrationState.h"
-#include "Host/OverlayDemandModel.h"
+#include "Host/HostRuntimeModel.h"
 
+#include <DearModdingUI/Client.h>
+
+#include <array>
+#include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
-#include <string_view>
 #include <vector>
 
-#include <DearModdingUI/API.h>
-
 struct ID3D11Device;
-struct ID3D11DeviceContext;
 struct IDXGISwapChain;
 
 namespace cs
@@ -32,90 +33,87 @@ namespace cs::host
 		HostClient& operator=(const HostClient&) = delete;
 
 		void DiscoverAndRegister() noexcept;
-
-		IntegrationState GetState() const noexcept { return _state.Get(); }
-		bool IsHosted() const noexcept { return _state.IsHosted(); }
-
-		bool OnD3D11Bootstrap(
+		void OnD3D11Bootstrap(
 			ID3D11Device* a_device,
-			ID3D11DeviceContext* a_context,
 			IDXGISwapChain* a_swapChain,
 			HWND a_window) noexcept;
 
-		bool IsHostMenuVisible() const noexcept;
+		[[nodiscard]] dmui::Client& Client() noexcept { return _client; }
 
-		void SyncOverlayDemand() noexcept;
+		void PostNotification(
+			DMUI_StatusSeverity a_severity,
+			std::string a_message,
+			std::uint32_t a_durationMilliseconds) noexcept;
+		bool DrawAnnotatedPlot(
+			const char* a_id,
+			const DMUI_AnnotatedPlotDescriptor& a_descriptor) noexcept;
 
 	private:
-		HostClient() = default;
+		HostClient();
 
 		struct Page
 		{
 			HostPageDescriptor descriptor;
-			Feature* feature{ nullptr };
+			Feature* feature{};
 			DMUI_PageHandle handle{ DMUI_INVALID_PAGE_HANDLE };
 		};
 
-		struct FallbackResources
+		struct PendingNotification
 		{
-			ID3D11Device* device{ nullptr };
-			ID3D11DeviceContext* context{ nullptr };
-			IDXGISwapChain* swapChain{ nullptr };
-			HWND window{ nullptr };
-
-			bool IsValid() const noexcept
-			{
-				return device && context && swapChain && window;
-			}
+			DMUI_StatusSeverity severity{ DMUI_STATUS_SEVERITY_INFO };
+			std::string message;
+			std::uint32_t durationMilliseconds{ 4000 };
 		};
 
-		bool Register(const DMUI_HostAPI& a_api, const std::string& a_modulePath) noexcept;
-		bool RegisterPages() noexcept;
-		void FallBackToStandalone(std::string_view a_reason) noexcept;
+		bool RegisterPages();
+		bool RegisterActionsAndObservers();
+		bool RegisterHotkeys();
+		void PublishInitialStatus() noexcept;
+		void DrawPage(Page& a_page);
+		void DrawFeaturePage(Feature& a_feature);
+		void DrawOverlayPage();
+		void ObserveFrame() noexcept;
+		void ObservePageActivity(const dmui::PageActivity& a_activity) noexcept;
+		void SyncOverlay() noexcept;
+		void ObserveHotkeyBindings() noexcept;
+		void ObserveHotkeyBinding(
+			const char* a_name,
+			const std::optional<DMUI_HotkeyActionHandle>& a_handle,
+			std::string& a_snapshot) noexcept;
+		void SetHotkeyEnabled(
+			const char* a_name,
+			const std::optional<DMUI_HotkeyActionHandle>& a_handle,
+			bool a_enabled,
+			std::optional<DMUI_Result>& a_failure) noexcept;
+		void FlushNotification() noexcept;
+		void RetrySwapChain() noexcept;
+		void LogFailure(std::string_view a_operation) const noexcept;
+		void LogFailureOnce(
+			std::string_view a_operation,
+			std::optional<DMUI_Result>& a_lastResult) const noexcept;
 
-		void OnHostReady(const DMUI_HostReadyInfo* a_info) noexcept;
-		void OnHostUnavailable(DMUI_UnavailableReason a_reason) noexcept;
-		void GoUnavailable(DMUI_UnavailableReason a_reason, bool a_allowFallback) noexcept;
-		void DrawPage(Page& a_page) noexcept;
-		void AttachFinalSwapChain(IDXGISwapChain* a_swapChain) noexcept;
-		void RetryPendingSwapChain() noexcept;
-		void RetainPendingSwapChainLocked(IDXGISwapChain* a_swapChain) noexcept;
-		void ReleasePendingSwapChainLocked() noexcept;
-
-		static void DMUI_CALL ReadyCallback(const DMUI_HostReadyInfo* a_info, void* a_userData) noexcept;
-		static void DMUI_CALL UnavailableCallback(DMUI_UnavailableReason a_reason, void* a_userData) noexcept;
-		static void DMUI_CALL DrawCallback(void* a_userData) noexcept;
-
-		bool SaveFallbackResources(
-			ID3D11Device* a_device,
-			ID3D11DeviceContext* a_context,
-			IDXGISwapChain* a_swapChain,
-			HWND a_window) noexcept;
-		FallbackResources TakeFallbackResourcesLocked() noexcept;
-		static void ReleaseFallbackResources(FallbackResources& a_resources) noexcept;
-		void StartStandaloneFallback(FallbackResources a_resources) noexcept;
-		bool OverlayWanted() const noexcept;
-
-		IntegrationStateMachine _state;
-
-		const DMUI_HostAPI* _api{ nullptr };
-		DMUI_ClientHandle _client{ DMUI_INVALID_CLIENT_HANDLE };
-		Page* _overlayPage{ nullptr };
+		dmui::Client _client;
 		std::vector<std::unique_ptr<Page>> _pages;
-		std::vector<Feature*> _features;
-		DMUI_ClientDescriptor _clientDescriptor{};
-		std::string _clientId;
-		std::string _clientDisplayName;
-
-		mutable std::mutex _demandMutex;
-		OverlayDemandModel _overlayDemand;
-
-		std::mutex _fallbackMutex;
-		ID3D11Device* _fallbackDevice{ nullptr };
-		ID3D11DeviceContext* _fallbackContext{ nullptr };
-		IDXGISwapChain* _fallbackSwapChain{ nullptr };
-		HWND _fallbackWindow{ nullptr };
-		IDXGISwapChain* _pendingHostSwapChain{ nullptr };
-		FallbackCoordination _fallbackCoordination;
+		Page* _overlayPage{};
+		std::optional<DMUI_HotkeyActionHandle> _overlayHotkey;
+		std::optional<DMUI_HotkeyActionHandle> _captureHotkey;
+		std::optional<DMUI_HotkeyActionHandle> _multiCaptureHotkey;
+		std::optional<DMUI_HotkeyActionHandle> _dumpHotkey;
+		std::array<std::string, 4> _hotkeyBindingSnapshots;
+		std::array<std::optional<DMUI_Result>, 3> _hotkeyEnableFailures;
+		std::optional<DMUI_Result> _videoMemoryFailure;
+		std::optional<DMUI_Result> _overlayConfigurationFailure;
+		std::optional<DMUI_Result> _overlayDemandFailure;
+		std::optional<DMUI_Result> _overlayQueryFailure;
+		std::optional<DMUI_Result> _annotatedPlotFailure;
+		std::atomic_bool _overlayVisible{ true };
+		std::atomic_bool _registrationComplete{};
+		FrameDemandTracker _overlayFrameDemand;
+		std::atomic_bool _readyLogged{};
+		std::atomic_bool _unavailableLogged{};
+		std::mutex _notificationMutex;
+		std::optional<PendingNotification> _pendingNotification;
+		std::mutex _swapChainMutex;
+		IDXGISwapChain* _pendingSwapChain{};
 	};
 }

@@ -2,13 +2,12 @@
 
 #include "Feature.h"
 #include "FeatureCategories.h"
-#include "Utils/Hotkey.h"
+
+#include <DearModdingUI/API.h>
 
 #include <array>
 #include <cstdint>
 #include <string>
-
-struct IDXGIAdapter3;
 
 namespace cs::features
 {
@@ -34,6 +33,19 @@ namespace cs::features
 		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
+		void TickHostFrame(
+			std::uint64_t a_vramUsedBytes,
+			std::uint64_t a_vramBudgetBytes);
+		[[nodiscard]] DMUI_ManagedOverlayOptions ManagedOverlayOptions() const noexcept;
+		void CommitOverlayPlacement(const DMUI_ManagedOverlayPlacement& a_placement);
+		[[nodiscard]] const std::string& SuggestedToggleHotkey() const noexcept
+		{
+			return settings.toggleHotkey;
+		}
+		[[nodiscard]] bool HasConfiguredToggleHotkey() const noexcept
+		{
+			return _toggleHotkeyConfigured;
+		}
 
 		enum class Preset : int
 		{
@@ -83,19 +95,18 @@ namespace cs::features
 			// Height at fontScale=1.0.
 			float  graphHeightPx  = 80.0f;
 
-			// "none" unbinds the overlay hotkey.
+			// Suggested host default. Host overrides are authoritative.
 			std::string toggleHotkey = "F10";
 		};
 
 		Settings settings;
+		bool _toggleHotkeyConfigured{};
 
 	private:
 		PerformanceOverlay() = default;
 
 		void SaveSettings();
 		void ApplyPreset(Preset preset);
-		void RefreshToggleHotkey();
-		static bool HandleWndProc(HWND, UINT, WPARAM, LPARAM);
 		void TickFrame();
 		void RecomputeStats();
 		void EnsureRefreshHz();
@@ -121,11 +132,7 @@ namespace cs::features
 		float  _refreshHz         = 60.0f;
 		bool   _refreshKnown      = false;
 
-		IDXGIAdapter3* _adapter      = nullptr;
 		uint64_t _vramUsedBytes   = 0;
 		uint64_t _vramBudgetBytes = 0;
-
-		cs::input::Hotkey _toggleHotkey;
-		std::uint32_t     _toggleReleaseVk = 0;  // Consumed press awaiting key-up.
 	};
 }

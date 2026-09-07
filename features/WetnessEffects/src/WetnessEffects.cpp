@@ -1,7 +1,7 @@
 #include "WetnessEffects.h"
 
 #include <d3d11.h>
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <array>
 #include <string>
@@ -406,18 +406,24 @@ namespace cs::features
 	{
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 		ImGui::TextDisabled("Off publishes zero wetness, which is shader identity.");
-		changed |= ImGui::SliderFloat(
+		const float maxRainWetnessMin = wetness_math::kMaxRainWetnessMin;
+		const float maxRainWetnessMax = wetness_math::kMaxRainWetnessMax;
+		changed |= ImGui::SliderScalar(
 			"Max rain wetness",
+			ImGuiDataType_Float,
 			&_settings.maxRainWetness,
-			wetness_math::kMaxRainWetnessMin,
-			wetness_math::kMaxRainWetnessMax,
+			&maxRainWetnessMin,
+			&maxRainWetnessMax,
 			"%.2f");
 		ImGui::TextDisabled("Wetness of surfaces facing straight up.");
-		changed |= ImGui::SliderFloat(
+		const float minRainWetnessMin = wetness_math::kMinRainWetnessMin;
+		const float minRainWetnessMax = wetness_math::kMinRainWetnessMax;
+		changed |= ImGui::SliderScalar(
 			"Min rain wetness",
+			ImGuiDataType_Float,
 			&_settings.minRainWetness,
-			wetness_math::kMinRainWetnessMin,
-			wetness_math::kMinRainWetnessMax,
+			&minRainWetnessMin,
+			&minRainWetnessMax,
 			"%.2f");
 		ImGui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
 		if (changed) {

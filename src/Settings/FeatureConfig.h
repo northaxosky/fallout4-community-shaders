@@ -53,7 +53,11 @@ namespace cs::feature_config
 		const std::filesystem::path& a_userPath);
 	UnifiedLoadResult Reload();
 	toml::table GetMergedRoot();
+	toml::table GetUserRoot();
 	std::optional<toml::table> GetFeature(std::string_view a_key);
+	bool HasUserFeatureSetting(
+		std::string_view a_featureKey,
+		std::string_view a_settingKey);
 
 	struct ShaderOwnershipTargets
 	{

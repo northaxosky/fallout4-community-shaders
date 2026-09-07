@@ -373,6 +373,12 @@ namespace cs::feature_config
 		return CachedRoot();
 	}
 
+	toml::table GetUserRoot()
+	{
+		std::scoped_lock lock(ConfigMutex());
+		return CachedUserRoot();
+	}
+
 	std::optional<toml::table> GetFeature(std::string_view a_key)
 	{
 		std::scoped_lock lock(ConfigMutex());
@@ -380,11 +386,29 @@ namespace cs::feature_config
 		if (!features) {
 			return std::nullopt;
 		}
+
 		const auto* feature = features->get(a_key);
 		if (!feature || !feature->is_table()) {
 			return std::nullopt;
 		}
 		return *feature->as_table();
+	}
+
+	bool HasUserFeatureSetting(
+		std::string_view a_featureKey,
+		std::string_view a_settingKey)
+	{
+		std::scoped_lock lock(ConfigMutex());
+		const auto* features = CachedUserRoot()["features"].as_table();
+		const auto* feature =
+			features ? features->get(a_featureKey) : nullptr;
+		const auto* featureTable =
+			feature ? feature->as_table() : nullptr;
+		const auto* settings =
+			featureTable ? featureTable->get("settings") : nullptr;
+		return settings &&
+			settings->is_table() &&
+			settings->as_table()->contains(a_settingKey);
 	}
 
 	ShaderOwnershipParseResult ParseShaderOwnership(const toml::table& a_root)

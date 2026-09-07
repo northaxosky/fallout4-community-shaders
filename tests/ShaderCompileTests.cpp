@@ -932,19 +932,6 @@ namespace
 		return 2;
 	}
 
-	std::size_t AddMenuShaders(
-		std::vector<ShaderCompileJob>& a_jobs,
-		const std::filesystem::path& a_root)
-	{
-		const auto menuRoot = a_root / "Menu";
-		AddCompile(a_jobs, menuRoot / "BackgroundBlurDownsample.hlsl", {}, "vs_5_0", "VS_Main");
-		AddCompile(a_jobs, menuRoot / "BackgroundBlurDownsample.hlsl", {}, "ps_5_0", "PS_Main");
-		AddCompile(a_jobs, menuRoot / "BackgroundBlurHorizontal.hlsl", {}, "ps_5_0", "PS_Main");
-		AddCompile(a_jobs, menuRoot / "BackgroundBlurVertical.hlsl", {}, "ps_5_0", "PS_Main");
-		AddCompile(a_jobs, menuRoot / "BackgroundBlurComposite.hlsl", {}, "ps_5_0", "PS_Main");
-		return 5;
-	}
-
 	constexpr std::size_t kScreenSpaceGIPermutations = 9;
 
 	std::size_t AddScreenSpaceGI(
@@ -2844,7 +2831,6 @@ int main(int argc, char** argv)
 
 	std::vector<ShaderCompileJob> jobs;
 	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[1]);
-	const auto menuShaderCount = AddMenuShaders(jobs, argv[1]);
 	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
 	if (screenSpaceGiCount != kScreenSpaceGIPermutations) {
 		AddPreparationFailure(
@@ -2886,9 +2872,6 @@ int main(int argc, char** argv)
 	std::printf(
 		"ShaderCompile checked %zu shared substrate probes\n",
 		sharedDataCount);
-	std::printf(
-		"ShaderCompile checked %zu menu shader entry points\n",
-		menuShaderCount);
 	std::printf(
 		"ShaderCompile checked %zu ScreenSpaceGI permutations\n",
 		screenSpaceGiCount);

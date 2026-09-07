@@ -8,6 +8,7 @@
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
 #include "Render/RenderHooks.h"
+#include "Render/FrameProfiler.h"
 #include "Render/ShaderInjection.h"
 
 #include <atomic>
@@ -676,6 +677,7 @@ namespace cs::telemetry
 			return;
 		g_installed = true;
 		if (!cs::engine::RegisterPostDeferredComposite([] {
+				cs::render::profiling::MarkEngineFrame();
 				pump::Tick();
 			})) {
 			g_compositeSamplingAvailable.store(false, std::memory_order_relaxed);

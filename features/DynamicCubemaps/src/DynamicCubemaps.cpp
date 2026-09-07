@@ -2,7 +2,7 @@
 
 #include <DDSTextureLoader.h>
 #include <d3d11.h>
-#include <imgui.h>
+#include <DearModdingUI/Client.h>
 
 #include <algorithm>
 #include <array>

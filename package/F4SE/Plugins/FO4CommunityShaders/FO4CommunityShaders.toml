@@ -5,6 +5,7 @@ schema_version = 1
 level = "info"
 telemetry = false
 telemetry_interval_seconds = 5
+# Suggested DearModdingUI binding. The host's saved override is authoritative.
 dump_hotkey = "Ctrl+F12"
 
 [logging.channels]
@@ -23,17 +24,11 @@ df_tiled_lighting = true
 # Every listed target has a selectable stock SHA-1 guard.
 
 [menu]
-first_time_setup_completed = false
-auto_hide_feature_list = false
-require_shift_to_dock = true
-use_resolution_font = true
-selected_theme_preset = ""
+# Debug-view selection remains owned by Community Shaders and applies even
+# when no DearModdingUI host is present.
 debug_view_feature = ""
 debug_view = ""
 debug_view_previews = {}
-# Virtual-key codes; an array records a modifier combination.
-toggle_key = 35
-overlay_toggle_key = 121
 
 [preset]
 active = ""
@@ -185,7 +180,7 @@ streamline_log_level = 0
 [features.PerformanceOverlay]
 load = false
 [features.PerformanceOverlay.settings]
-# In-game overlay toggle chord (e.g. "F10", "Shift+F11", "Ctrl+F9"); "none" unbinds it.
+# Suggested DearModdingUI binding. The host's saved override is authoritative.
 toggle_hotkey = "F10"
 
 [features.RenderDoc]
@@ -195,7 +190,8 @@ load = false
 # Capture output folder. Default (unset): <Documents>\My Games\Fallout4\F4SE\FO4CommunityShaders\captures
 # (beside the F4SE log, outside the MO2 virtual file system). Environment variables are expanded.
 # capture_folder = "%USERPROFILE%\\Documents\\My Games\\Fallout4\\F4SE\\FO4CommunityShaders\\captures"
-# Single-frame capture chord; "none" unbinds it.
+# Suggested DearModdingUI binding for a single-frame capture.
 capture_hotkey = "F11"
-# Multi-frame capture chord; takes precedence if identical to capture_hotkey.
+# Suggested DearModdingUI binding for a multi-frame capture; registered first so
+# it takes precedence if both suggestions are identical.
 multi_capture_hotkey = "Shift+F11"

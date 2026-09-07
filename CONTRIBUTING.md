@@ -80,16 +80,16 @@ cmake --build build --config Release --target FO4CommunityShaders --parallel
 The plugin is written to `build\Release\FO4CommunityShaders.dll`. Release builds use
 link-time optimization and treat compiler and linker warnings as errors.
 
-Dear ImGui comes from the overlay vcpkg port in `vcpkg\ports\imgui`, pinned to an exact upstream
-commit rather than a version tag, and `vcpkg-configuration.json` points vcpkg at it. The optional
-shared-menu host contract compares the compiled layout, so re-syncing the port and re-vendoring
-`include\DearModdingUI\API.h` plus `ImGuiFingerprint.h` go together. Both directories carry the
-sync procedure, and `src\Host\HostFingerprint.h` fails the build if they drift apart.
+Community Shaders does not compile or link Dear ImGui. Its UI uses the official forwarding-only
+DearModdingUI headers published through the pinned CommonLibF4 submodule at
+`extern\CommonLibF4\lib\dearmoddingui-api\include`. Update that CommonLibF4 gitlink when adopting a
+new API release; do not vendor a second API copy or add a local ImGui port.
 
 The packaged unified TOML sets every `[features.<Name>].load = false` and baseline shader ownership
 to disabled. Override only the feature being tested, or `enabled` under `[shader_ownership]` for an
 identity replacement test, in `FO4CommunityShaders.User.toml`, then restart Fallout 4. The core
-D3D11 bootstrap and settings menu remain available when every feature is inactive.
+D3D11 bootstrap remains available when every feature is inactive. Settings UI requires a compatible
+DearModdingUI host; without one the plugin deliberately runs headless.
 
 ## Test
 
@@ -118,19 +118,21 @@ deferred shaders and `package\F4SE\` holds plugin configuration and presets.
 Launch the result through MO2/F4SE. Building and deploying does not perform any
 visual comparison; rendering behavior must be checked in game.
 
+When Tracy support is enabled, the renderer-owned profiler marks the completed deferred-composite
+engine frame. It does not claim generated frame-generation presents or every swap-chain present.
+
 ## Project layout
 
 ```text
-src\                Core feature framework, renderer hooks, menu, and presets
-src\Host\           Optional shared mod-menu integration and standalone fallback
+src\                Core feature framework, renderer hooks, forwarded UI, and presets
+src\Host\           Forwarding-only DearModdingUI client integration
 features\<Name>\    Feature source and optional runtime-compiled shaders
 cmake\              Build integration for CommonLibF4
 extern\             Recursive source submodules
-include\            Shared headers and the vendored DearModdingUI client ABI
+include\            Shared project headers
 package\            Mod assets: config, presets, reconstructed shaders
 scripts\            Developer tooling
 tests\              Host and shader tests run by CTest
-vcpkg\ports\        Overlay ports pinning dependencies vcpkg cannot pin exactly
 docs\               Developer documentation
 ```
 
