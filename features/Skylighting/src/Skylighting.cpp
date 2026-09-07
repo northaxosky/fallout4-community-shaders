@@ -604,7 +604,7 @@ namespace cs::features
 		static constexpr std::array views{
 			FeatureDebugView{
 				.id = "occlusion_depth",
-				.label = "Occlusion depth (raw, configurable footprint)",
+				.label = "Occlusion depth (raw snapshot)",
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const Skylighting&>(a_feature)
@@ -624,7 +624,7 @@ namespace cs::features
 			FeatureDebugView{
 				.id = "skylighting_visibility",
 				.label =
-					"Skylighting probe visibility (directional SH, greyscale)",
+					"Skylighting probe visibility (fullscreen, greyscale)",
 				.kind = FeatureDebugViewKind::kFullscreen
 			}
 		};
@@ -633,43 +633,38 @@ namespace cs::features
 
 	void Skylighting::SetDebugView(std::string_view a_view) noexcept
 	{
-		_debugPreviewEnabled.store(
-			a_view == "occlusion_depth", std::memory_order_release);
+		const bool raw = a_view == "occlusion_depth";
+		_debugPreviewEnabled.store(raw, std::memory_order_release);
 		const bool normalized = a_view == "occlusion_depth_normalized";
-		const bool wasNormalized = _normalizedDebugPreviewEnabled.exchange(
-			normalized, std::memory_order_acq_rel);
-		if (normalized && !wasNormalized)
-			_normalizedSnapshot.Refresh();
+		_normalizedDebugPreviewEnabled.store(normalized, std::memory_order_release);
+		_depthSnapshot.Select(raw || normalized);
 		_visibilityDebugEnabled.store(
 			a_view == "skylighting_visibility",
 			std::memory_order_release);
-		if (!normalized)
-			_normalizedSnapshot.Reset();
+		if (!raw && !normalized)
+			_normalizedSnapshotRevision.store(0, std::memory_order_release);
 		PublishConsumerData();
 	}
 
 	FeatureDebugTexture Skylighting::GetOcclusionDebugTexture() const
 	{
 		FeatureDebugTexture texture{
-			.unavailableText = "Occlusion depth is unavailable."
+			.unavailableText = "Waiting for a completed occlusion map to capture. Skylighting must be enabled."
 		};
 		if (!_debugPreviewEnabled.load(std::memory_order_acquire) ||
-			!_enabled.load(std::memory_order_acquire) ||
-			!_resourcesReady.load(std::memory_order_acquire) ||
-			!_producerRanThisFrame.load(std::memory_order_acquire) ||
-			!_occlusionSRV) {
+			!const_cast<Skylighting*>(this)->CaptureDebugSnapshot()) {
 			return texture;
 		}
 
-		texture.texture = _occlusionSRV.get();
+		texture.texture = _depthSnapshotSRV.get();
 		texture.width = kOcclusionSize;
 		texture.height = kOcclusionSize;
-		const auto data = GetOcclusionData();
 		texture.caption = std::format(
-			"Raw D24 hardware depth, no linearization (white = far/clear); "
+			"Raw snapshot, no linearization (white = far/clear). "
+			"Raw and normalized views share this capture; "
 			"{:.0f}-unit full-width footprint ({:.2f} units/texel)",
-			data.extent,
-			data.extent / static_cast<float>(kOcclusionSize));
+			_depthSnapshotExtent,
+			_depthSnapshotExtent / static_cast<float>(kOcclusionSize));
 		return texture;
 	}
 
@@ -684,16 +679,18 @@ namespace cs::features
 		}
 
 		auto* feature = const_cast<Skylighting*>(this);
-		const auto request = _normalizedSnapshot.Pending();
-		if (request &&
-			_enabled.load(std::memory_order_acquire) &&
-			_producerRanThisFrame.load(std::memory_order_acquire) &&
-			feature->EnsureResources() &&
-			feature->DispatchNormalizedDebugView()) {
-			feature->_normalizedSnapshotExtent = GetOcclusionData().extent;
-			feature->_normalizedSnapshot.Captured(request);
+		if (!feature->CaptureDebugSnapshot())
+			return texture;
+		const auto revision = _depthSnapshot.Revision();
+		if (_normalizedSnapshotRevision.load(std::memory_order_acquire) != revision) {
+			if (!feature->EnsureNormalizedDebugResources(_device.load(std::memory_order_acquire)) ||
+				!feature->DispatchNormalizedDebugView()) {
+				texture.unavailableText = "The captured depth snapshot could not be normalized; see log.";
+				return texture;
+			}
+			feature->_normalizedSnapshotRevision.store(revision, std::memory_order_release);
 		}
-		if (!_normalizedSnapshot.Ready() || !_normalizedOcclusionSRV) {
+		if (!_normalizedOcclusionSRV) {
 			return texture;
 		}
 
@@ -701,12 +698,61 @@ namespace cs::features
 		texture.width = kOcclusionSize;
 		texture.height = kOcclusionSize;
 		texture.caption = std::format(
-			"Still snapshot normalized to its captured min/max (not absolute depth). "
-			"Refresh samples another projection without changing Skylighting; "
+			"Same capture as the raw view, normalized to its min/max (not absolute depth); "
 			"{:.0f}-unit full-width footprint ({:.2f} units/texel)",
-			_normalizedSnapshotExtent,
-			_normalizedSnapshotExtent / static_cast<float>(kOcclusionSize));
+			_depthSnapshotExtent,
+			_depthSnapshotExtent / static_cast<float>(kOcclusionSize));
 		return texture;
+	}
+
+	bool Skylighting::CaptureDebugSnapshot()
+	{
+		const auto request = _depthSnapshot.Pending();
+		if (!request ||
+			!_enabled.load(std::memory_order_acquire) ||
+			!_producerRanThisFrame.load(std::memory_order_acquire) ||
+			!EnsureResources())
+			return _depthSnapshot.Ready();
+
+		auto* context = cs::engine::GetImmediateContext();
+		auto* device = _device.load(std::memory_order_acquire);
+		if (!context || !device || !_occlusionTexture || !_occlusionSRV)
+			return _depthSnapshot.Ready();
+
+		if (!_depthSnapshotTexture || !_depthSnapshotSRV) {
+			D3D11_TEXTURE2D_DESC description{};
+			_occlusionTexture->GetDesc(&description);
+			description.Usage = D3D11_USAGE_DEFAULT;
+			description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+			description.CPUAccessFlags = 0;
+			description.MiscFlags = 0;
+			D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
+			_occlusionSRV->GetDesc(&viewDescription);
+			winrt::com_ptr<ID3D11Texture2D> texture;
+			winrt::com_ptr<ID3D11ShaderResourceView> view;
+			auto result = device->CreateTexture2D(&description, nullptr, texture.put());
+			if (SUCCEEDED(result))
+				result = device->CreateShaderResourceView(texture.get(), &viewDescription, view.put());
+			if (FAILED(result)) {
+				if (result != _depthSnapshotResult)
+					L->error("Occlusion snapshot allocation failed: HRESULT {:#010x}", static_cast<std::uint32_t>(result));
+				_depthSnapshotResult = result;
+				return _depthSnapshot.Ready();
+			}
+			cs::render::annotation::SetName(texture.get(), "Skylighting/OcclusionDepthSnapshot.Texture");
+			cs::render::annotation::SetName(view.get(), "Skylighting/OcclusionDepthSnapshot.SRV");
+			_depthSnapshotTexture = std::move(texture);
+			_depthSnapshotSRV = std::move(view);
+		}
+
+		cs::render::annotation::ScopedEvent event("Skylighting/CaptureOcclusionDepthSnapshot");
+		cs::engine::CopyResourcePreservingOM(
+			context, _depthSnapshotTexture.get(), _occlusionTexture.get());
+		_depthSnapshotExtent = GetOcclusionData().extent;
+		_depthSnapshotResult = S_OK;
+		_normalizedSnapshotRevision.store(0, std::memory_order_release);
+		_depthSnapshot.Captured(request);
+		return true;
 	}
 
 	bool Skylighting::Configure(
@@ -1598,7 +1644,7 @@ namespace cs::features
 			_normalizedRangeUAV = std::move(rangeUAV);
 			_normalizedReduceCS = std::move(reduceCS);
 			_normalizedWriteCS = std::move(writeCS);
-			_normalizedSnapshot.Invalidate();
+			_normalizedSnapshotRevision.store(0, std::memory_order_release);
 			_normalizedResourcesAllocated.store(
 				true, std::memory_order_release);
 			L->info(
@@ -1621,7 +1667,7 @@ namespace cs::features
 	{
 		if (!_normalizedDebugPreviewEnabled.load(std::memory_order_acquire) ||
 			!_normalizedResourcesAllocated.load(std::memory_order_acquire) ||
-			!_occlusionSRV ||
+			!_depthSnapshotSRV ||
 			!_normalizedOcclusionUAV ||
 			!_normalizedRangeBuffer ||
 			!_normalizedRangeSRV ||
@@ -1653,7 +1699,7 @@ namespace cs::features
 		cs::render::annotation::ScopedEvent event(
 			"Skylighting/OcclusionDepthNormalized");
 
-		ID3D11ShaderResourceView* depthSRV = _occlusionSRV.get();
+		ID3D11ShaderResourceView* depthSRV = _depthSnapshotSRV.get();
 		ID3D11UnorderedAccessView* rangeUAV = _normalizedRangeUAV.get();
 		context->CSSetShaderResources(0, 1, &depthSRV);
 		context->CSSetUnorderedAccessViews(0, 1, &rangeUAV, nullptr);
@@ -1666,7 +1712,7 @@ namespace cs::features
 		ID3D11UnorderedAccessView* nullUAV = nullptr;
 		context->CSSetUnorderedAccessViews(0, 1, &nullUAV, nullptr);
 		std::array<ID3D11ShaderResourceView*, 2> normalizeSRVs{
-			_occlusionSRV.get(),
+			_depthSnapshotSRV.get(),
 			_normalizedRangeSRV.get()
 		};
 		ID3D11UnorderedAccessView* normalizedUAV =
@@ -2090,11 +2136,21 @@ namespace cs::features
 			SaveSettings();
 		}
 		Menu::Get().DrawDebugViewSelector(*this);
-		if (_normalizedDebugPreviewEnabled.load(std::memory_order_acquire)) {
+		if (_debugPreviewEnabled.load(std::memory_order_acquire) ||
+			_normalizedDebugPreviewEnabled.load(std::memory_order_acquire)) {
 			if (ImGui::Button("Refresh snapshot"))
-				_normalizedSnapshot.Refresh();
-			if (_normalizedSnapshot.Pending())
+				_depthSnapshot.Refresh();
+			if (_depthSnapshot.Pending())
 				ImGui::TextDisabled("Refresh pending; the previous snapshot remains visible.");
+			if (FAILED(_depthSnapshotResult))
+				ImGui::TextDisabled("Snapshot allocation failed; see the Skylighting log.");
+		}
+		if (_visibilityDebugEnabled.load(std::memory_order_acquire) &&
+			_probeUpdateDispatchCount.load(std::memory_order_relaxed) == 0) {
+			ImGui::TextWrapped(
+				_probeCameraUnavailableCount.load(std::memory_order_relaxed) ?
+					"Probe visibility is unavailable: no valid world-camera snapshot has reached the probe update." :
+					"Probe visibility is unavailable: the probe volume has not updated yet.");
 		}
 	}
 
@@ -2471,10 +2527,14 @@ namespace cs::features
 					_normalizedDebugDispatchCount.load(std::memory_order_relaxed)))
 			.Field(
 				"normalized_snapshot_ready",
-				_normalizedSnapshot.Ready())
+				_depthSnapshot.Ready() &&
+					_normalizedSnapshotRevision.load(std::memory_order_acquire) == _depthSnapshot.Revision())
 			.Field(
 				"normalized_snapshot_refresh_pending",
-				_normalizedSnapshot.Pending() != 0)
+				_depthSnapshot.Pending() != 0)
+			.Field(
+				"occlusion_snapshot_revision",
+				static_cast<std::int64_t>(_depthSnapshot.Revision()))
 			.Field(
 				"render_count",
 				static_cast<std::int64_t>(

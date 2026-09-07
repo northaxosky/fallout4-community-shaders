@@ -122,9 +122,10 @@ provides fullscreen grayscale views of its sampled shadow term and raw heightmap
 Lighting provides a live left-vanilla/right-configured comparison. Exponential Height Fog exposes
 the final fog factor as pre-colour-mix greyscale.
 
-Skylighting's normalized depth preview is a still snapshot. **Refresh snapshot** captures another
-completed occlusion map; the lighting algorithm continues sampling normally while the preview stays
-still. This avoids animating a contrast-normalized, randomly reprojected intermediate buffer.
+Skylighting's raw and normalized depth previews share one still snapshot. Switching between them
+does not recapture; **Refresh snapshot** updates both from the next completed occlusion map.
+Normalization reads the saved depth copy, not the live producer. The lighting algorithm continues
+sampling normally while both previews stay still.
 
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:

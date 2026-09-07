@@ -299,6 +299,18 @@ namespace cs::telemetry
 				.Field("cpu_access_flags", static_cast<std::int64_t>(status.cpuAccessFlags))
 				.Field("bind_flags", static_cast<std::int64_t>(status.bindFlags))
 				.Field("snapshots", TomlInteger(status.snapshots))
+				.Field("map_calls", TomlInteger(status.mapCalls))
+				.Field("unmap_calls", TomlInteger(status.unmapCalls))
+				.Field("matching_maps", TomlInteger(status.matchingMaps))
+				.Field(
+					"matching_map_successes",
+					TomlInteger(status.matchingMapSuccesses))
+				.Field(
+					"matching_map_data_pointers",
+					TomlInteger(status.matchingMapDataPointers))
+				.Field("matching_unmaps", TomlInteger(status.matchingUnmaps))
+				.Field("map_hook_current", status.mapHookCurrent)
+				.Field("unmap_hook_current", status.unmapHookCurrent)
 				.Field("maps_last_frame", static_cast<std::int64_t>(status.mapsLastFrame))
 				.Field("maps_max_per_frame", static_cast<std::int64_t>(status.maxMapsPerFrame))
 				.Field("latest_valid", status.latestSnapshotValid)

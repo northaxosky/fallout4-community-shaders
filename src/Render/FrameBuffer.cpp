@@ -22,6 +22,8 @@ namespace cs::engine
 		auto* L = cs::log::Get("cs.render.framebuffer");
 
 		constexpr UINT kPerFrameSlot = 12;
+		constexpr std::size_t kMapVtableSlot = 14;
+		constexpr std::size_t kUnmapVtableSlot = 15;
 		constexpr UINT kMinimumByteWidth = static_cast<UINT>(sizeof(FrameBuffer));
 
 		using MapFunction = HRESULT(STDMETHODCALLTYPE*)(
@@ -47,6 +49,14 @@ namespace cs::engine
 		std::atomic_bool g_hookInstalled{ false };
 		std::atomic<ID3D11DeviceContext*> g_hookedContext{ nullptr };
 		std::atomic_bool g_hookedContextIsCurrent{ false };
+		std::atomic_bool g_mapHookCurrent{ false };
+		std::atomic_bool g_unmapHookCurrent{ false };
+		std::atomic<std::uint64_t> g_mapCalls{ 0 };
+		std::atomic<std::uint64_t> g_unmapCalls{ 0 };
+		std::atomic<std::uint64_t> g_matchingMaps{ 0 };
+		std::atomic<std::uint64_t> g_matchingMapSuccesses{ 0 };
+		std::atomic<std::uint64_t> g_matchingMapDataPointers{ 0 };
+		std::atomic<std::uint64_t> g_matchingUnmaps{ 0 };
 
 		std::atomic<ID3D11Resource*> g_identity{ nullptr };
 		std::atomic<const char*> g_identitySource{ "none" };
@@ -148,6 +158,10 @@ namespace cs::engine
 			return true;
 		}
 
+		void RecheckHookOwnership(
+			ID3D11DeviceContext* a_context,
+			bool a_logInstall) noexcept;
+
 		// Re-resolved every frame so a device reset or resolution change heals itself.
 		void ResolveIdentity()
 		{
@@ -155,9 +169,14 @@ namespace cs::engine
 			if (!context) {
 				return;
 			}
+			auto* hookedContext =
+				g_hookedContext.load(std::memory_order_relaxed);
 			g_hookedContextIsCurrent.store(
-				context == g_hookedContext.load(std::memory_order_relaxed),
+				context == hookedContext,
 				std::memory_order_relaxed);
+			if (context == hookedContext) {
+				RecheckHookOwnership(context, false);
+			}
 
 			auto* bound = BoundAtPixelSlot12(context);
 			auto* fromEngine = EnginePerFrameBuffer();
@@ -227,6 +246,7 @@ namespace cs::engine
 				UINT a_mapFlags,
 				D3D11_MAPPED_SUBRESOURCE* a_mapped)
 			{
+				g_mapCalls.fetch_add(1, std::memory_order_relaxed);
 				if (!func) {
 					return E_POINTER;
 				}
@@ -234,6 +254,12 @@ namespace cs::engine
 					func(a_this, a_resource, a_subresource, a_mapType, a_mapFlags, a_mapped);
 				if (a_resource == g_identity.load(std::memory_order_relaxed)
 					&& a_subresource == 0) {
+					g_matchingMaps.fetch_add(1, std::memory_order_relaxed);
+					if (SUCCEEDED(result)) {
+						g_matchingMapSuccesses.fetch_add(1, std::memory_order_relaxed);
+						if (a_mapped && a_mapped->pData)
+							g_matchingMapDataPointers.fetch_add(1, std::memory_order_relaxed);
+					}
 					g_mapped =
 						result == S_OK && a_mapped ? a_mapped->pData : nullptr;
 				}
@@ -250,11 +276,14 @@ namespace cs::engine
 				ID3D11Resource* a_resource,
 				UINT a_subresource)
 			{
+				g_unmapCalls.fetch_add(1, std::memory_order_relaxed);
 				// The mapped pointer dies at Unmap, so snapshot before handing off.
 				if (a_resource == g_identity.load(std::memory_order_relaxed)
-					&& a_subresource == 0
-					&& g_mapped) {
-					CaptureSnapshot();
+					&& a_subresource == 0) {
+					g_matchingUnmaps.fetch_add(1, std::memory_order_relaxed);
+					if (g_mapped) {
+						CaptureSnapshot();
+					}
 				}
 				if (func) {
 					func(a_this, a_resource, a_subresource);
@@ -263,6 +292,56 @@ namespace cs::engine
 
 			static inline UnmapFunction func = nullptr;
 		};
+
+		void RecheckHookOwnership(
+			ID3D11DeviceContext* a_context,
+			bool a_logInstall) noexcept
+		{
+			const auto* table = *reinterpret_cast<std::uintptr_t**>(a_context);
+			const auto mapEntry = table[kMapVtableSlot];
+			const auto unmapEntry = table[kUnmapVtableSlot];
+			const auto mapThunk =
+				reinterpret_cast<std::uintptr_t>(&FrameBufferMap_Hook::thunk);
+			const auto unmapThunk =
+				reinterpret_cast<std::uintptr_t>(&FrameBufferUnmap_Hook::thunk);
+			const bool mapCurrent = mapEntry == mapThunk;
+			const bool unmapCurrent = unmapEntry == unmapThunk;
+			const bool previousMap =
+				g_mapHookCurrent.exchange(mapCurrent, std::memory_order_relaxed);
+			const bool previousUnmap =
+				g_unmapHookCurrent.exchange(unmapCurrent, std::memory_order_relaxed);
+
+			if (a_logInstall) {
+				L->info(
+					"Context-vtable hooks installed: context {:#x}, vtable {:#x}; "
+					"Map slot {} current {:#x}, thunk {:#x}, original {:#x}, is our thunk {}; "
+					"Unmap slot {} current {:#x}, thunk {:#x}, original {:#x}, is our thunk {}.",
+					reinterpret_cast<std::uintptr_t>(a_context),
+					reinterpret_cast<std::uintptr_t>(table),
+					kMapVtableSlot,
+					mapEntry,
+					mapThunk,
+					reinterpret_cast<std::uintptr_t>(FrameBufferMap_Hook::func),
+					mapCurrent,
+					kUnmapVtableSlot,
+					unmapEntry,
+					unmapThunk,
+					reinterpret_cast<std::uintptr_t>(FrameBufferUnmap_Hook::func),
+					unmapCurrent);
+			} else if (previousMap != mapCurrent || previousUnmap != unmapCurrent) {
+				L->info(
+					"Context-vtable hook ownership changed: "
+					"Map slot {} current {:#x}, is our thunk {}; "
+					"Unmap slot {} current {:#x}, is our thunk {}. "
+					"Another hook may still chain through ours.",
+					kMapVtableSlot,
+					mapEntry,
+					mapCurrent,
+					kUnmapVtableSlot,
+					unmapEntry,
+					unmapCurrent);
+			}
+		}
 
 		[[nodiscard]] std::uint64_t HashCamera(const FrameBuffer& a_frameBuffer) noexcept
 		{
@@ -465,16 +544,16 @@ namespace cs::engine
 		}
 
 		AdoptIdentity(EnginePerFrameBuffer(), "context");
-		stl::detour_vfunc<14, FrameBufferMap_Hook>(a_context);
-		stl::detour_vfunc<15, FrameBufferUnmap_Hook>(a_context);
+		stl::detour_vfunc<kMapVtableSlot, FrameBufferMap_Hook>(a_context);
+		stl::detour_vfunc<kUnmapVtableSlot, FrameBufferUnmap_Hook>(a_context);
+		g_hookedContext.store(a_context, std::memory_order_relaxed);
+		RecheckHookOwnership(a_context, true);
 		if (!FrameBufferMap_Hook::func || !FrameBufferUnmap_Hook::func) {
 			L->error("Context-vtable hooks for Map/Unmap have no original; snapshot disabled.");
 			return;
 		}
 
-		g_hookedContext.store(a_context, std::memory_order_relaxed);
 		g_hookInstalled.store(true, std::memory_order_relaxed);
-		L->info("Context-vtable hooks installed on Map (slot 14) and Unmap (slot 15).");
 	}
 
 	const FrameBufferSnapshot& GetFrameBuffer() noexcept
@@ -521,6 +600,18 @@ namespace cs::engine
 		status.cpuAccessFlags = g_cpuAccessFlags.load(std::memory_order_relaxed);
 		status.bindFlags = g_bindFlags.load(std::memory_order_relaxed);
 		status.snapshots = g_snapshots.load(std::memory_order_relaxed);
+		status.mapCalls = g_mapCalls.load(std::memory_order_relaxed);
+		status.unmapCalls = g_unmapCalls.load(std::memory_order_relaxed);
+		status.matchingMaps = g_matchingMaps.load(std::memory_order_relaxed);
+		status.matchingMapSuccesses =
+			g_matchingMapSuccesses.load(std::memory_order_relaxed);
+		status.matchingMapDataPointers =
+			g_matchingMapDataPointers.load(std::memory_order_relaxed);
+		status.matchingUnmaps = g_matchingUnmaps.load(std::memory_order_relaxed);
+		status.mapHookCurrent =
+			g_mapHookCurrent.load(std::memory_order_relaxed);
+		status.unmapHookCurrent =
+			g_unmapHookCurrent.load(std::memory_order_relaxed);
 		status.mapsLastFrame = g_mapsLastFrame.load(std::memory_order_relaxed);
 		status.maxMapsPerFrame = g_maxMapsPerFrame.load(std::memory_order_relaxed);
 		status.latestSnapshotValid = g_latestSnapshot.valid;

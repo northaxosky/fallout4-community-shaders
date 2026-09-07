@@ -328,9 +328,15 @@ namespace cs
 		const auto views = a_feature.GetDebugViews();
 		const auto selectedId = _debugViews.SelectedView(a_feature.GetName());
 		const auto selected = std::ranges::find(views, selectedId, &FeatureDebugView::id);
-		if (selected == views.end() ||
-			selected->kind != FeatureDebugViewKind::kTexturePreview ||
-			!selected->textureProvider)
+		if (selected == views.end())
+			return;
+		if (selected->kind == FeatureDebugViewKind::kFullscreen) {
+			ImGui::TextWrapped(
+				"Fullscreen visualization: shown over the game scene, not in an image pane. "
+				"Close the menu to inspect it.");
+			return;
+		}
+		if (!selected->textureProvider)
 			return;
 
 		const auto texture = selected->textureProvider(a_feature);

@@ -56,6 +56,14 @@ namespace cs::engine
 		std::uint32_t cpuAccessFlags = 0;
 		std::uint32_t bindFlags = 0;
 		std::uint64_t snapshots = 0;
+		std::uint64_t mapCalls = 0;
+		std::uint64_t unmapCalls = 0;
+		std::uint64_t matchingMaps = 0;
+		std::uint64_t matchingMapSuccesses = 0;
+		std::uint64_t matchingMapDataPointers = 0;
+		std::uint64_t matchingUnmaps = 0;
+		bool          mapHookCurrent = false;
+		bool          unmapHookCurrent = false;
 		std::uint32_t mapsLastFrame = 0;
 		std::uint32_t maxMapsPerFrame = 0;
 		bool          latestSnapshotValid = false;

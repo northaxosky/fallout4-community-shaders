@@ -344,6 +344,31 @@ namespace
 		CHECK(!snapshot.Ready());
 	}
 
+	void TestSharedSnapshotSelection()
+	{
+		cs::DebugSnapshotRequest snapshot;
+		snapshot.Select(true);
+		const auto request = snapshot.Pending();
+		CHECK(request != 0);
+		snapshot.Captured(request);
+		CHECK(snapshot.Revision() == request);
+		snapshot.Select(true);
+		CHECK(snapshot.Pending() == 0);
+		CHECK(snapshot.Revision() == request);
+		snapshot.Refresh();
+		CHECK(snapshot.Ready());
+		CHECK(snapshot.Revision() == request);
+		const auto refreshed = snapshot.Pending();
+		snapshot.Captured(refreshed);
+		snapshot.Select(true);
+		CHECK(snapshot.Revision() == refreshed);
+		CHECK(snapshot.Pending() == 0);
+		snapshot.Select(false);
+		CHECK(!snapshot.Ready());
+		snapshot.Select(true);
+		CHECK(snapshot.Pending() != 0);
+	}
+
 	void TestStartupLoadIntent()
 	{
 		auto root = toml::parse(
@@ -496,6 +521,7 @@ int main()
 	TestPageCatalog();
 	TestPhysicalFileLocation();
 	TestSnapshotRefresh();
+	TestSharedSnapshotSelection();
 	TestStartupLoadIntent();
 	TestDebugSelectionSeparation();
 	TestFrameDemandBalancing();

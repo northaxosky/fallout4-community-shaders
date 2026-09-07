@@ -80,6 +80,58 @@ namespace
 		a_context->OMGetRenderTargets(1, bound.put(), nullptr);
 		return bound.get() == a_expected;
 	}
+
+	bool CheckDepthSnapshot(ID3D11Device* a_device, ID3D11DeviceContext* a_context)
+	{
+		D3D11_TEXTURE2D_DESC description{};
+		description.Width = 1;
+		description.Height = 1;
+		description.MipLevels = 1;
+		description.ArraySize = 1;
+		description.Format = DXGI_FORMAT_R24G8_TYPELESS;
+		description.SampleDesc.Count = 1;
+		description.Usage = D3D11_USAGE_DEFAULT;
+		description.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+		winrt::com_ptr<ID3D11Texture2D> source;
+		winrt::com_ptr<ID3D11Texture2D> snapshot;
+		if (FAILED(a_device->CreateTexture2D(&description, nullptr, source.put())))
+			return Check(false, "could not create source depth map");
+		description.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		if (FAILED(a_device->CreateTexture2D(&description, nullptr, snapshot.put())))
+			return Check(false, "could not create raw depth snapshot");
+
+		D3D11_DEPTH_STENCIL_VIEW_DESC depthDescription{};
+		depthDescription.Format = DXGI_FORMAT_D24_UNORM_S8_UINT;
+		depthDescription.ViewDimension = D3D11_DSV_DIMENSION_TEXTURE2D;
+		winrt::com_ptr<ID3D11DepthStencilView> depth;
+		if (FAILED(a_device->CreateDepthStencilView(source.get(), &depthDescription, depth.put())))
+			return Check(false, "could not create source DSV");
+		D3D11_SHADER_RESOURCE_VIEW_DESC viewDescription{};
+		viewDescription.Format = DXGI_FORMAT_R24_UNORM_X8_TYPELESS;
+		viewDescription.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+		viewDescription.Texture2D.MipLevels = 1;
+		winrt::com_ptr<ID3D11ShaderResourceView> view;
+		if (FAILED(a_device->CreateShaderResourceView(snapshot.get(), &viewDescription, view.put())))
+			return Check(false, "could not create a sampleable raw depth snapshot view");
+
+		a_context->ClearDepthStencilView(depth.get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 0.25f, 0);
+		cs::engine::CopyResourcePreservingOM(a_context, snapshot.get(), source.get());
+		std::array<std::uint8_t, 4> captured{};
+		if (!ReadPixel(a_device, a_context, snapshot.get(), captured))
+			return Check(false, "could not read captured depth");
+		a_context->ClearDepthStencilView(depth.get(), D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 0.75f, 0);
+		std::array<std::uint8_t, 4> live{};
+		std::array<std::uint8_t, 4> unchanged{};
+		if (!ReadPixel(a_device, a_context, source.get(), live) ||
+			!ReadPixel(a_device, a_context, snapshot.get(), unchanged))
+			return Check(false, "could not compare live and captured depth");
+		bool ok = Check(captured != live && unchanged == captured,
+			"producer changes must not alter the raw snapshot");
+		cs::engine::CopyResourcePreservingOM(a_context, snapshot.get(), source.get());
+		ok &= Check(ReadPixel(a_device, a_context, snapshot.get(), unchanged) && unchanged == live,
+			"refresh must update the shared raw snapshot");
+		return ok;
+	}
 }
 
 int main()
@@ -175,5 +227,6 @@ int main()
 		"successful publication changed OM binding");
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);
+	ok &= CheckDepthSnapshot(device.get(), context.get());
 	return ok ? 0 : 1;
 }

@@ -29,7 +29,21 @@ namespace cs
 	class DebugSnapshotRequest
 	{
 	public:
+		void Select(bool a_selected) noexcept
+		{
+			const bool wasSelected = _selected.exchange(a_selected, std::memory_order_acq_rel);
+			if (a_selected && !wasSelected)
+				Refresh();
+			else if (!a_selected)
+				Reset();
+		}
+
 		void Refresh() noexcept { _requested.fetch_add(1, std::memory_order_release); }
+
+		[[nodiscard]] std::uint64_t Revision() const noexcept
+		{
+			return _captured.load(std::memory_order_acquire);
+		}
 
 		[[nodiscard]] std::uint64_t Pending() const noexcept
 		{
@@ -51,11 +65,13 @@ namespace cs
 
 		void Reset() noexcept
 		{
+			_selected.store(false, std::memory_order_release);
 			_requested.store(0, std::memory_order_release);
 			Invalidate();
 		}
 
 	private:
+		std::atomic_bool _selected{};
 		std::atomic_uint64_t _requested{};
 		std::atomic_uint64_t _captured{};
 	};

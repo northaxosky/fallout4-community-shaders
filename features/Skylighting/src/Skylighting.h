@@ -142,6 +142,7 @@ namespace cs::features
 		void PublishConsumerData() noexcept;
 		void ResolveOcclusionGlobals() noexcept;
 		bool EnsureResources() noexcept;
+		bool CaptureDebugSnapshot();
 		bool EnsureNormalizedDebugResources(ID3D11Device* a_device) noexcept;
 		bool DispatchNormalizedDebugView() noexcept;
 		bool UpdateProbeVolume() noexcept;
@@ -204,9 +205,11 @@ namespace cs::features
 		std::atomic_bool _normalizedDebugPreviewEnabled{ false };
 		std::atomic_bool _normalizedResourcesAttempted{ false };
 		std::atomic_bool _normalizedResourcesAllocated{ false };
-		DebugSnapshotRequest _normalizedSnapshot;
+		DebugSnapshotRequest _depthSnapshot;
+		std::atomic_uint64_t _normalizedSnapshotRevision{ 0 };
 		std::atomic_uint64_t _normalizedDebugDispatchCount{ 0 };
-		float _normalizedSnapshotExtent{};
+		float _depthSnapshotExtent{};
+		HRESULT _depthSnapshotResult{ S_OK };
 		std::atomic_flag _emptyGeometryReported = ATOMIC_FLAG_INIT;
 		std::atomic_bool _inInteriorResolved{ false };
 		std::atomic_bool _inInterior{ false };
@@ -243,6 +246,8 @@ namespace cs::features
 		winrt::com_ptr<ID3D11UnorderedAccessView> _accumFramesUAV;
 		winrt::com_ptr<ID3D11Buffer> _probeUpdateCB;
 		winrt::com_ptr<ID3D11ComputeShader> _probeUpdateCS;
+		winrt::com_ptr<ID3D11Texture2D> _depthSnapshotTexture;
+		winrt::com_ptr<ID3D11ShaderResourceView> _depthSnapshotSRV;
 		winrt::com_ptr<ID3D11Texture2D> _normalizedOcclusionTexture;
 		winrt::com_ptr<ID3D11ShaderResourceView> _normalizedOcclusionSRV;
 		winrt::com_ptr<ID3D11UnorderedAccessView> _normalizedOcclusionUAV;
