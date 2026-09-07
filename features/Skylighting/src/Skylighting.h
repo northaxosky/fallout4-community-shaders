@@ -204,7 +204,9 @@ namespace cs::features
 		std::atomic_bool _normalizedDebugPreviewEnabled{ false };
 		std::atomic_bool _normalizedResourcesAttempted{ false };
 		std::atomic_bool _normalizedResourcesAllocated{ false };
-		std::atomic_bool _normalizedViewDispatchedLastFrame{ false };
+		DebugSnapshotRequest _normalizedSnapshot;
+		std::atomic_uint64_t _normalizedDebugDispatchCount{ 0 };
+		float _normalizedSnapshotExtent{};
 		std::atomic_flag _emptyGeometryReported = ATOMIC_FLAG_INIT;
 		std::atomic_bool _inInteriorResolved{ false };
 		std::atomic_bool _inInterior{ false };

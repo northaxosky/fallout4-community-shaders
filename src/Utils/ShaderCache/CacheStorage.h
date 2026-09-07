@@ -13,6 +13,7 @@
 namespace cs::shader_cache
 {
 	inline constexpr std::uint64_t kMaxSourceBytes = 64ull * 1024ull * 1024ull;
+	inline constexpr wchar_t kIdentityFileName[] = L"identity.txt";
 
 	enum class FileReadStatus : std::uint8_t
 	{
@@ -29,6 +30,9 @@ namespace cs::shader_cache
 		std::vector<std::uint8_t>&   a_bytes) noexcept;
 
 	std::filesystem::path DefaultCacheRoot();
+	std::uintmax_t ClearCacheRecords(
+		const std::filesystem::path& a_cacheRoot,
+		std::error_code& a_error);
 
 	struct CacheIdentitySyncResult
 	{

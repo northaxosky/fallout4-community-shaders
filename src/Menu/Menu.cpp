@@ -8,6 +8,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
+#include "Utils/PhysicalFile.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 #include "Utils/UI.h"
 
@@ -29,9 +30,29 @@ namespace
 
 	constexpr std::string_view kPresetRoot =
 		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
-	constexpr std::string_view kConfigRoot =
-		"Data\\F4SE\\Plugins\\FO4CommunityShaders";
 	constexpr std::uint64_t kImageRetryFrames = 60;
+
+	void OpenFileLocation(const std::filesystem::path& a_file)
+	{
+		const auto resolved = cs::files::PhysicalFilePath(a_file);
+		if (!resolved) {
+			L->warn(
+				"Cannot resolve physical location of '{}': {}",
+				a_file.string(), resolved.error().message());
+			cs::Menu::ShowToast(
+				"Could not locate the backing file. Use MO2's virtual folder browser; see log.",
+				4.0,
+				DMUI_STATUS_SEVERITY_ERROR);
+			return;
+		}
+		const auto folder = resolved->parent_path();
+		const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
+			nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+		if (result <= 32) {
+			L->warn("Cannot open folder '{}': shell error {}", folder.string(), result);
+			cs::Menu::ShowToast("Could not open the folder; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
+		}
+	}
 
 	ImVec4 ThemeColor(
 		dmui::Client& a_client,
@@ -156,6 +177,7 @@ namespace cs
 		_debugViews.Clear();
 		_legacyOverlayToggleHotkey.clear();
 		const auto root = feature_config::GetMergedRoot();
+		_startupLoads.Capture(root);
 		const auto* menu = root["menu"].as_table();
 		if (!menu)
 			return;
@@ -379,10 +401,16 @@ namespace cs
 					host::ImageImportFailure::kTransient;
 				cached.retryAfterFrame = _hostFrameSerial + kImageRetryFrames;
 				if (!cached.loggedFailure || *cached.loggedFailure != result) {
+					D3D11_SHADER_RESOURCE_VIEW_DESC descriptor{};
+					texture.texture->GetDesc(&descriptor);
 					L->warn(
-						"Debug image import failed for {}: {}",
+						"Debug image import failed for {} view {}: {} (result={}, format={}, dimension={})",
 						a_feature.GetName(),
-						DMUI_ResultToString(result));
+						selectedId,
+						DMUI_ResultToString(result),
+						result,
+						static_cast<unsigned>(descriptor.Format),
+						static_cast<unsigned>(descriptor.ViewDimension));
 					cached.loggedFailure = result;
 				}
 				ImGui::TextDisabled("The host could not import this D3D11 resource.");
@@ -424,7 +452,8 @@ namespace cs
 		}
 		ImGui::TextWrapped(
 			"Modern rendering features for Fallout 4. Features ship disabled; "
-			"enable their boot setting and restart before using runtime controls.");
+			"choose which features to load in Advanced, then restart. "
+			"Use Enabled on each loaded feature's page to toggle its effect live.");
 
 		std::size_t installed{};
 		std::size_t active{};
@@ -435,10 +464,12 @@ namespace cs
 			active += feature->IsActive() ? 1u : 0u;
 		}
 		ImGui::Text(
-			"Features installed: %zu of %zu (%zu active)",
+			"Features installed: %zu of %zu (%zu loaded)",
 			installed,
 			FeatureManager::Get().GetRegisteredFeatures().size(),
 			active);
+
+		DrawFeatureOverview(a_client);
 
 		if (!CheckHostResult(
 				a_client,
@@ -473,7 +504,7 @@ namespace cs
 		const std::array faq{
 			dmui::FaqEntry{
 				"Why is nothing enabled?",
-				"Every feature ships disabled. Enable a feature's boot setting, then restart." },
+				"Every feature ships disabled. Check it under Advanced > Load on startup, then restart." },
 			dmui::FaqEntry{
 				"Where are settings stored?",
 				"Defaults remain in FO4CommunityShaders.toml. Changes are written to FO4CommunityShaders.User.toml." },
@@ -487,7 +518,59 @@ namespace cs
 			"draw FAQ");
 	}
 
-	void Menu::DrawGeneral(dmui::Client& a_client)
+	void Menu::DrawFeatureOverview(dmui::Client& a_client)
+	{
+		if (!CheckHostResult(
+				a_client,
+				a_client.DrawSectionHeader("Feature status"),
+				"draw feature status section"))
+			return;
+		ImGui::TextWrapped(
+			"Loaded means the feature was loaded at startup. "
+			"Its Enabled setting controls whether the effect is currently applied.");
+		ui::SettingsTableScope table{ a_client, "home-feature-status" };
+		if (!table.Valid() || !table.Visible())
+			return;
+		for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
+			if (!feature || !feature->IsInMenu())
+				continue;
+			const auto& state = feature->GetState();
+			const char* status = "Not loaded";
+			DMUI_StatusSeverity severity = DMUI_STATUS_SEVERITY_INFO;
+			switch (state.runtimeState) {
+			case FeatureRuntimeState::kActive:
+				status = "Loaded";
+				severity = DMUI_STATUS_SEVERITY_SUCCESS;
+				break;
+			case FeatureRuntimeState::kDegraded:
+				status = "Unavailable";
+				severity = DMUI_STATUS_SEVERITY_WARNING;
+				break;
+			case FeatureRuntimeState::kFailed:
+				status = "Failed";
+				severity = DMUI_STATUS_SEVERITY_ERROR;
+				break;
+			default:
+				break;
+			}
+			const auto id = std::format("feature-status-{}", feature->GetName());
+			const auto label = std::string(feature->GetDisplayName());
+			ui::SettingsRowScope row{
+				a_client,
+				id.c_str(),
+				label.c_str(),
+				"Startup loading result; live effect controls are on the feature page." };
+			if (!row.Valid())
+				return;
+			if (row.Visible()) {
+				ImGui::TextColored(ThemeColor(a_client, severity), "%s", status);
+				if (!state.detail.empty())
+					ImGui::TextWrapped("%s", state.detail.c_str());
+			}
+		}
+	}
+
+	void Menu::DrawShaderSettings(dmui::Client& a_client)
 	{
 		const auto ownership =
 			feature_config::ParseShaderOwnership(feature_config::GetMergedRoot());
@@ -497,25 +580,27 @@ namespace cs
 				"draw shader ownership section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "general-shader-ownership" };
+			ui::SettingsTableScope table{ a_client, "advanced-shader-ownership" };
 			if (!table.Valid())
 				return;
 			if (table.Visible()) {
-				ui::SettingsRowScope status{
-					a_client,
-					"shader-ownership-status",
-					"Status",
-					"Applied at boot only when the stock shader hash matches." };
-				if (!status.Valid())
-					return;
-				if (status.Visible()) {
-					const auto severity = ownership.config.enabled ?
-						DMUI_STATUS_SEVERITY_SUCCESS :
-						DMUI_STATUS_SEVERITY_INFO;
-					ImGui::TextColored(
-						ThemeColor(a_client, severity),
-						"%s",
-						ownership.config.enabled ? "Enabled" : "Disabled");
+				{
+					ui::SettingsRowScope status{
+						a_client,
+						"shader-ownership-status",
+						"Status",
+						"Applied at boot only when the stock shader hash matches." };
+					if (!status.Valid())
+						return;
+					if (status.Visible()) {
+						const auto severity = ownership.config.enabled ?
+							DMUI_STATUS_SEVERITY_SUCCESS :
+							DMUI_STATUS_SEVERITY_INFO;
+						ImGui::TextColored(
+							ThemeColor(a_client, severity),
+							"%s",
+							ownership.config.enabled ? "Enabled" : "Disabled");
+					}
 				}
 
 				struct Target
@@ -573,36 +658,39 @@ namespace cs
 				"draw shader cache section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "general-shader-cache" };
+			ui::SettingsTableScope table{ a_client, "advanced-shader-cache" };
 			if (!table.Valid())
 				return;
 			if (table.Visible()) {
 				const auto cacheRoot = shader_cache::DefaultCacheRoot();
-				ui::SettingsRowScope location{
-					a_client,
-					"shader-cache-location",
-					"Cache directory",
-					"Compiled shader records are stored here." };
-				if (!location.Valid())
-					return;
-				if (location.Visible())
-					ImGui::TextWrapped("%s", cacheRoot.string().c_str());
+				{
+					ui::SettingsRowScope location{
+						a_client,
+						"shader-cache-location",
+						"Cache directory",
+						"Compiled shader records are stored here." };
+					if (!location.Valid())
+						return;
+					if (location.Visible())
+						ImGui::TextWrapped("%s", cacheRoot.string().c_str());
+				}
 
 				ui::SettingsRowScope open{
 					a_client,
 					"open-shader-cache",
 					"Open cache folder",
-					"Open the shader cache in Explorer." };
+					"Open the physical cache location. Under MO2 this may be in Overwrite." };
 				if (!open.Valid())
 					return;
-				if (open.Visible() && ImGui::Button("Open"))
-					ShellExecuteW(
-						nullptr,
-						L"open",
-						cacheRoot.c_str(),
-						nullptr,
-						nullptr,
-						SW_SHOWNORMAL);
+				if (open.Visible() && ImGui::Button("Open")) {
+					const auto identity = cacheRoot / shader_cache::kIdentityFileName;
+					std::error_code error;
+					if (!std::filesystem::exists(identity, error) && !error) {
+						ShowToast("The shader cache is not initialized. Restart to initialize it.", 4.0);
+					} else {
+						OpenFileLocation(identity);
+					}
+				}
 			}
 		}
 	}
@@ -622,32 +710,36 @@ namespace cs
 				ui::SettingsRowScope folder{
 					a_client,
 					"open-configuration-folder",
-					"Configuration folder",
-					"Open the folder containing the Default and User TOML files." };
+					"Configuration file location",
+					"Open the physical location of your User TOML, or the Default TOML if no User file exists. MO2 can store them in different folders." };
 				if (!folder.Valid())
 					return;
 				if (folder.Visible() && ImGui::Button("Open")) {
-					const std::filesystem::path path(kConfigRoot);
 					std::error_code error;
-					std::filesystem::create_directories(path, error);
-					ShellExecuteW(
-						nullptr,
-						L"open",
-						path.c_str(),
-						nullptr,
-						nullptr,
-						SW_SHOWNORMAL);
+					const bool userExists = std::filesystem::exists(
+						feature_config::kUserConfigPath, error);
+					if (error) {
+						L->warn("Cannot inspect the User TOML location: {}", error.message());
+						ShowToast("Could not locate the User TOML; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
+					} else {
+						OpenFileLocation(userExists ?
+							feature_config::kUserConfigPath :
+							feature_config::kDefaultConfigPath);
+					}
 				}
 			}
 		}
 
 		if (!CheckHostResult(
 				a_client,
-				a_client.DrawSectionHeader("Disable at Boot"),
+				a_client.DrawSectionHeader("Load on startup"),
 				"draw boot settings section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-disable-at-boot" };
+			ImGui::TextWrapped(
+				"Checked features load when the game starts. Changes require a restart. "
+				"Use Enabled on a feature's page to switch its effect on or off now.");
+			ui::SettingsTableScope table{ a_client, "advanced-startup-loading" };
 			if (!table.Valid())
 				return;
 			if (table.Visible()) {
@@ -663,24 +755,23 @@ namespace cs
 						continue;
 					const auto featureConfig =
 						feature_config::GetFeature(feature->GetConfigKey());
-					const bool loadAtBoot = featureConfig &&
+					bool loadAtBoot = featureConfig &&
 						featureConfig->get("load") &&
 						featureConfig->get("load")->value_or(false);
-					bool disabled = !loadAtBoot;
 					const auto id =
-						std::format("disable-at-boot-{}", feature->GetName());
+						std::format("load-on-startup-{}", feature->GetName());
 					const auto label = std::string(feature->GetDisplayName());
 					ui::SettingsRowScope row{
 						a_client,
 						id.c_str(),
 						label.c_str(),
-						"Changes the next-launch activation state." };
+						"Checked: load this feature on the next launch. Requires restart." };
 					if (!row.Valid())
 						return;
 					if (row.Visible() &&
-						ImGui::Checkbox("##disabled", &disabled)) {
+						ImGui::Checkbox("##load", &loadAtBoot)) {
 						const auto result = feature_config::UpdateFeatureLoad(
-							feature->GetConfigKey(), !disabled);
+							feature->GetConfigKey(), loadAtBoot);
 						if (!result) {
 							L->warn(
 								"Failed to save boot state for {}: {}",
@@ -690,9 +781,18 @@ namespace cs
 							(void)feature_config::Reload();
 						}
 					}
+					if (row.Visible() &&
+						_startupLoads.RequiresRestart(feature->GetConfigKey(), loadAtBoot)) {
+						ImGui::SameLine();
+						ImGui::TextColored(
+							ThemeColor(a_client, DMUI_STATUS_SEVERITY_WARNING),
+							"Restart required");
+					}
 				}
 			}
 		}
+
+		DrawShaderSettings(a_client);
 
 		if (!CheckHostResult(
 				a_client,
@@ -804,18 +904,20 @@ namespace cs
 			if (!table.Valid())
 				return;
 			if (table.Visible()) {
-				ui::SettingsRowScope enabledRow{
-					a_client,
-					"telemetry-enabled",
-					"Emit telemetry",
-					"Collect cached feature and frame diagnostics for log dumps." };
-				if (!enabledRow.Valid())
-					return;
-				if (enabledRow.Visible()) {
-					bool enabled = telemetry::pump::Enabled();
-					if (ImGui::Checkbox("##enabled", &enabled)) {
-						telemetry::pump::SetEnabled(enabled);
-						(void)log::SaveConfigToToml();
+				{
+					ui::SettingsRowScope enabledRow{
+						a_client,
+						"telemetry-enabled",
+						"Emit telemetry",
+						"Collect cached feature and frame diagnostics for log dumps." };
+					if (!enabledRow.Valid())
+						return;
+					if (enabledRow.Visible()) {
+						bool enabled = telemetry::pump::Enabled();
+						if (ImGui::Checkbox("##enabled", &enabled)) {
+							telemetry::pump::SetEnabled(enabled);
+							(void)log::SaveConfigToToml();
+						}
 					}
 				}
 				ui::SettingsRowScope dump{
@@ -857,41 +959,6 @@ namespace cs
 						return;
 					if (row.Visible())
 						ImGui::TextWrapped("%s", values[index].second.c_str());
-				}
-				for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
-					if (!feature)
-						continue;
-					const auto& state = feature->GetState();
-					const auto stateName =
-						FeatureRuntimeStateName(state.runtimeState);
-					DMUI_StatusSeverity severity = DMUI_STATUS_SEVERITY_INFO;
-					if (state.runtimeState == FeatureRuntimeState::kActive)
-						severity = DMUI_STATUS_SEVERITY_SUCCESS;
-					else if (state.runtimeState == FeatureRuntimeState::kDegraded)
-						severity = DMUI_STATUS_SEVERITY_WARNING;
-					else if (state.runtimeState == FeatureRuntimeState::kFailed)
-						severity = DMUI_STATUS_SEVERITY_ERROR;
-					const auto id =
-						std::format("feature-state-{}", feature->GetName());
-					const auto label = std::string(feature->GetDisplayName());
-					ui::SettingsRowScope row{
-						a_client,
-						id.c_str(),
-						label.c_str(),
-						"Current feature runtime state." };
-					if (!row.Valid())
-						return;
-					if (row.Visible()) {
-						ImGui::TextColored(
-							ThemeColor(a_client, severity),
-							"%.*s",
-							static_cast<int>(stateName.size()),
-							stateName.data());
-						if (!state.detail.empty()) {
-							ImGui::SameLine();
-							ImGui::TextWrapped("- %s", state.detail.c_str());
-						}
-					}
 				}
 			}
 		}
@@ -1286,7 +1353,7 @@ namespace cs
 	{
 		const auto root = shader_cache::DefaultCacheRoot();
 		std::error_code error;
-		const auto removed = std::filesystem::remove_all(root, error);
+		const auto removed = shader_cache::ClearCacheRecords(root, error);
 		if (error) {
 			L->warn("Failed to clear shader cache at '{}': {}", root.string(), error.message());
 			ShowToast(

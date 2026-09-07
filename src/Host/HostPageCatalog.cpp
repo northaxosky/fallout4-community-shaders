@@ -19,10 +19,9 @@ namespace cs::host
 			HostPageKind kind;
 		};
 
-		constexpr std::array<BuiltInPage, 4> kBuiltInPages{
-			BuiltInPage{ "home", "Home", "Overview, quick links, and FAQ.", 0, HostPageKind::kHome },
-			BuiltInPage{ "general", "General", "Shader ownership and plugin-wide settings.", 10, HostPageKind::kGeneral },
-			BuiltInPage{ "advanced", "Advanced", "Diagnostics, logging, and feature boot state.", 20, HostPageKind::kAdvanced },
+		constexpr std::array<BuiltInPage, 3> kBuiltInPages{
+			BuiltInPage{ "home", "Home", "Feature status, quick links, and FAQ.", 0, HostPageKind::kHome },
+			BuiltInPage{ "advanced", "Advanced", "Startup loading, shader configuration, and logging.", 20, HostPageKind::kAdvanced },
 			BuiltInPage{ "presets", "Presets", "Cross-feature setting presets.", 30, HostPageKind::kPresets }
 		};
 

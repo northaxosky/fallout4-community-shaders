@@ -626,6 +626,33 @@ float4 Wrapped()
 			"first run records the record and compiler schemas");
 	}
 
+	void TestClearPreservesIdentity()
+	{
+		Workspace workspace("clear-records");
+		const auto root = workspace.CacheRoot();
+		const auto identity = MakeVersionCompilerIdentity(
+			workspace.Root() / "D3DCompiler_47.dll",
+			4'669'440,
+			{ 10, 0, 26'100, 9'278 });
+		const auto initial = SynchronizeCacheIdentity(root, identity, kRecordSchemaVersion);
+		Check(initial.error.empty(), "initialize cache before clearing");
+		const auto identityPath = root / kIdentityFileName;
+		const auto identityBytes = ReadAll(identityPath);
+		const auto record = root / "cs" / "00" / "record.fxc";
+		std::filesystem::create_directories(record.parent_path());
+		WriteAll(record, { 1, 2, 3, 4 });
+		const auto pending = root / "pending.tmp";
+		WriteAll(pending, { 5, 6 });
+		std::error_code error;
+		Check(ClearCacheRecords(root, error) == 1 && !error, "clear compiled records only");
+		Check(!std::filesystem::exists(record), "compiled shader removed");
+		Check(ReadAll(identityPath) == identityBytes, "identity and folder anchor survive clearing");
+		Check(std::filesystem::exists(pending), "in-flight files are left alone");
+		Check(ClearCacheRecords(root, error) == 0 && !error, "repeated clear is harmless");
+		const auto unchanged = SynchronizeCacheIdentity(root, identity, kRecordSchemaVersion);
+		Check(!unchanged.reset && unchanged.error.empty(), "clearing does not invalidate compiler identity");
+	}
+
 	void TestCacheMissIsObservable()
 	{
 		Workspace workspace("observable-miss");
@@ -1655,6 +1682,7 @@ float4 main() : SV_Target
 		{ "compiler-identity-across-processes", &TestCompilerIdentityAcrossProcesses },
 		{ "compiler-identity-reset", &TestCompilerIdentityReset },
 		{ "compiler-identity-first-run", &TestCompilerIdentityFirstRun },
+		{ "clear-preserves-identity", &TestClearPreservesIdentity },
 		{ "cache-miss-observable", &TestCacheMissIsObservable },
 		{ "compiler-identity-hash-fallback", &TestCompilerIdentityHashFallback },
 		{ "cache-root-path", &TestCacheRootPath },

@@ -366,6 +366,28 @@ namespace cs::shader_cache
 		return root;
 	}
 
+	std::uintmax_t ClearCacheRecords(
+		const std::filesystem::path& a_cacheRoot,
+		std::error_code& a_error)
+	{
+		a_error.clear();
+		std::uintmax_t removed{};
+		if (!std::filesystem::exists(a_cacheRoot, a_error))
+			return removed;
+		for (auto entries = std::filesystem::recursive_directory_iterator(a_cacheRoot, a_error);
+			 !a_error && entries != std::filesystem::recursive_directory_iterator{};
+			 entries.increment(a_error)) {
+			if (entries->path().extension() == L".fxc" &&
+				entries->is_regular_file(a_error)) {
+				if (std::filesystem::remove(entries->path(), a_error))
+					++removed;
+			}
+			if (a_error)
+				break;
+		}
+		return removed;
+	}
+
 	CacheIdentitySyncResult SynchronizeCacheIdentity(
 		const std::filesystem::path& a_cacheRoot,
 		const CompilerIdentity&      a_identity,
@@ -385,7 +407,7 @@ namespace cs::shader_cache
 			}
 
 			const auto identityPath =
-				a_cacheRoot / L"identity.txt";
+				a_cacheRoot / kIdentityFileName;
 			std::vector<std::uint8_t> bytes;
 			const auto readStatus =
 				ReadFileBytes(identityPath, kMaxIdentityBytes, bytes);

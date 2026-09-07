@@ -122,6 +122,10 @@ provides fullscreen grayscale views of its sampled shadow term and raw heightmap
 Lighting provides a live left-vanilla/right-configured comparison. Exponential Height Fog exposes
 the final fog factor as pre-colour-mix greyscale.
 
+Skylighting's normalized depth preview is a still snapshot. **Refresh snapshot** captures another
+completed occlusion map; the lighting algorithm continues sampling normally while the preview stays
+still. This avoids animating a contrast-normalized, randomly reprojected intermediate buffer.
+
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:
 
@@ -134,8 +138,8 @@ assets live in subdirectories beneath it:
 ## DearModdingUI
 
 Community Shaders is a forwarding-only DearModdingUI client. At startup it uses the official
-header-only client to discover and preflight a compatible host, then registers Home, General,
-Advanced, Presets, per-feature settings, and Performance Overlay pages. The host owns the window,
+header-only client to discover and preflight a compatible host, then registers Home, Advanced,
+and Presets under General, alongside per-feature settings and the Performance Overlay. The host owns the window,
 navigation, rendering backend, fonts, theme, input, hotkey editor, dialogs, notifications, and
 overlay placement.
 
@@ -150,6 +154,12 @@ notification UI, or diagnostic hotkeys in that state.
 Settings pages use the host's native section, settings-table, settings-row, reset, search, status
 color, dialog, and link services. Feature widgets remain live and persist with their existing
 per-feature rules inside those native rows.
+
+Home shows startup loading results. Advanced has the sole **Load on startup** list, where checked
+means loaded on the next launch; changes require a restart. A loaded feature's **Enabled** control
+toggles its effect live. Shader ownership, cache, and logging settings are also in Advanced.
+Folder actions resolve the backing file before opening Explorer, rather than passing it an
+MO2 USVFS path that exists only inside the game.
 
 Developer details live in [`src/Host/README.md`](src/Host/README.md).
 

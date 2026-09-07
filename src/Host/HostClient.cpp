@@ -75,7 +75,7 @@ namespace cs::host
 			"Community Shaders",
 			{ Plugin::VERSION[0], Plugin::VERSION[1] },
 			dmui::kForwardingClient,
-			{},
+			kClientIconName,
 			{},
 			{
 				.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT,
@@ -388,9 +388,6 @@ namespace cs::host
 		case HostPageKind::kHome:
 			Menu::Get().DrawHome(_client);
 			break;
-		case HostPageKind::kGeneral:
-			Menu::Get().DrawGeneral(_client);
-			break;
 		case HostPageKind::kAdvanced:
 			Menu::Get().DrawAdvanced(_client);
 			break;
@@ -426,66 +423,13 @@ namespace cs::host
 			}
 		};
 
-		bool loadAtBoot = LoadAtBoot(a_feature);
+		const bool loadAtBoot = LoadAtBoot(a_feature);
 		const auto& state = a_feature.GetState();
 		ui::SettingsTableScope table{
 			_client,
 			std::format("feature-settings-{}", a_feature.GetName()).c_str() };
 		if (!table.Valid() || !table.Visible())
 			return;
-
-		{
-			ui::SettingsRowScope row{
-				_client,
-				"load-at-boot",
-				"Load at boot",
-				"Changes feature activation on the next game launch." };
-			if (!row.Valid())
-				return;
-			if (row.Visible() &&
-				ImGui::Checkbox("##load-at-boot", &loadAtBoot)) {
-				const auto result =
-					feature_config::UpdateFeatureLoad(a_feature.GetConfigKey(), loadAtBoot);
-				if (!result) {
-					L->warn(
-						"Failed to save boot state for {}: {}",
-						a_feature.GetName(),
-						result.error);
-					PostNotification(
-						DMUI_STATUS_SEVERITY_ERROR,
-						"Failed to save feature boot state; see log.",
-						4000);
-				} else {
-					(void)feature_config::Reload();
-				}
-			}
-		}
-
-		{
-			ui::SettingsRowScope row{
-				_client,
-				"runtime-state",
-				"Runtime state",
-				"Current process state; boot changes take effect after restart." };
-			if (!row.Valid())
-				return;
-			if (row.Visible()) {
-				const auto stateName = FeatureRuntimeStateName(state.runtimeState);
-				const DMUI_Vec4 DMUI_ThemeColors::*color =
-					state.runtimeState == FeatureRuntimeState::kFailed ?
-					&DMUI_ThemeColors::statusError :
-					state.runtimeState == FeatureRuntimeState::kDegraded ?
-					&DMUI_ThemeColors::statusWarning :
-					state.runtimeState == FeatureRuntimeState::kActive ?
-					&DMUI_ThemeColors::statusSuccess :
-					&DMUI_ThemeColors::statusDisable;
-				ImGui::TextColored(
-					ThemeColor(_client, color),
-					"%.*s",
-					static_cast<int>(stateName.size()),
-					stateName.data());
-			}
-		}
 
 		if (state.runtimeState == FeatureRuntimeState::kFailed ||
 			state.runtimeState == FeatureRuntimeState::kDegraded) {
@@ -550,7 +494,7 @@ namespace cs::host
 				} else {
 					ImGui::TextColored(
 						ThemeColor(_client, &DMUI_ThemeColors::statusDisable),
-						"This feature is disabled at boot.");
+						"Not loaded. Enable it in Advanced > Load on startup, then restart.");
 				}
 			} else {
 				try {
@@ -598,24 +542,6 @@ namespace cs::host
 				}
 			}
 			return;
-		}
-
-		if (!loadAtBoot) {
-			ui::SettingsRowScope row{
-				_client,
-				"disabled-next-launch",
-				"Next launch",
-				"",
-				dmui::RowPresentation::Layout::kFullSpan };
-			if (!row.Valid())
-				return;
-			if (row.Visible()) {
-				ImGui::TextColored(
-					ThemeColor(
-						_client,
-						&DMUI_ThemeColors::statusRestartNeeded),
-					"Active now; disabled at the next launch.");
-			}
 		}
 
 		bool restoreDefaults{};

@@ -584,8 +584,6 @@ namespace cs::features
 			feature->_probeUpdateRanThisFrame.store(
 				false, std::memory_order_release);
 			feature->PublishConsumerData();
-			feature->_normalizedViewDispatchedLastFrame.store(
-				false, std::memory_order_release);
 			if (feature->_enabled.load(std::memory_order_acquire) &&
 				feature->EnsureResources()) {
 				feature->RenderProducer();
@@ -616,7 +614,7 @@ namespace cs::features
 			FeatureDebugView{
 				.id = "occlusion_depth_normalized",
 				.label =
-					"Occlusion depth (frame-normalized readability aid)",
+					"Occlusion depth (normalized snapshot)",
 				.kind = FeatureDebugViewKind::kTexturePreview,
 				.textureProvider = [](const Feature& a_feature) {
 					return static_cast<const Skylighting&>(a_feature)
@@ -637,16 +635,16 @@ namespace cs::features
 	{
 		_debugPreviewEnabled.store(
 			a_view == "occlusion_depth", std::memory_order_release);
-		_normalizedDebugPreviewEnabled.store(
-			a_view == "occlusion_depth_normalized",
-			std::memory_order_release);
+		const bool normalized = a_view == "occlusion_depth_normalized";
+		const bool wasNormalized = _normalizedDebugPreviewEnabled.exchange(
+			normalized, std::memory_order_acq_rel);
+		if (normalized && !wasNormalized)
+			_normalizedSnapshot.Refresh();
 		_visibilityDebugEnabled.store(
 			a_view == "skylighting_visibility",
 			std::memory_order_release);
-		if (a_view != "occlusion_depth_normalized") {
-			_normalizedViewDispatchedLastFrame.store(
-				false, std::memory_order_release);
-		}
+		if (!normalized)
+			_normalizedSnapshot.Reset();
 		PublishConsumerData();
 	}
 
@@ -679,31 +677,35 @@ namespace cs::features
 	{
 		FeatureDebugTexture texture{
 			.unavailableText =
-				"Frame-normalized occlusion depth is unavailable."
+				"Waiting for a completed occlusion map to capture. Skylighting must be enabled."
 		};
-		if (!_normalizedDebugPreviewEnabled.load(std::memory_order_acquire) ||
-			!_enabled.load(std::memory_order_acquire) ||
-			!_producerRanThisFrame.load(std::memory_order_acquire)) {
+		if (!_normalizedDebugPreviewEnabled.load(std::memory_order_acquire)) {
 			return texture;
 		}
 
 		auto* feature = const_cast<Skylighting*>(this);
-		if (!feature->EnsureResources() ||
-			!feature->DispatchNormalizedDebugView() ||
-			!_normalizedOcclusionSRV) {
+		const auto request = _normalizedSnapshot.Pending();
+		if (request &&
+			_enabled.load(std::memory_order_acquire) &&
+			_producerRanThisFrame.load(std::memory_order_acquire) &&
+			feature->EnsureResources() &&
+			feature->DispatchNormalizedDebugView()) {
+			feature->_normalizedSnapshotExtent = GetOcclusionData().extent;
+			feature->_normalizedSnapshot.Captured(request);
+		}
+		if (!_normalizedSnapshot.Ready() || !_normalizedOcclusionSRV) {
 			return texture;
 		}
 
 		texture.texture = _normalizedOcclusionSRV.get();
 		texture.width = kOcclusionSize;
 		texture.height = kOcclusionSize;
-		const auto data = GetOcclusionData();
 		texture.caption = std::format(
-			"Readability aid: depth normalized against this frame's own "
-			"min/max (not absolute depth); orthographic top-down view; "
+			"Still snapshot normalized to its captured min/max (not absolute depth). "
+			"Refresh samples another projection without changing Skylighting; "
 			"{:.0f}-unit full-width footprint ({:.2f} units/texel)",
-			data.extent,
-			data.extent / static_cast<float>(kOcclusionSize));
+			_normalizedSnapshotExtent,
+			_normalizedSnapshotExtent / static_cast<float>(kOcclusionSize));
 		return texture;
 	}
 
@@ -1596,6 +1598,7 @@ namespace cs::features
 			_normalizedRangeUAV = std::move(rangeUAV);
 			_normalizedReduceCS = std::move(reduceCS);
 			_normalizedWriteCS = std::move(writeCS);
+			_normalizedSnapshot.Invalidate();
 			_normalizedResourcesAllocated.store(
 				true, std::memory_order_release);
 			L->info(
@@ -1680,8 +1683,7 @@ namespace cs::features
 			kOcclusionSize / kDebugThreadGroupSize,
 			1);
 
-		_normalizedViewDispatchedLastFrame.store(
-			true, std::memory_order_release);
+		_normalizedDebugDispatchCount.fetch_add(1, std::memory_order_relaxed);
 		return true;
 	}
 
@@ -2088,6 +2090,12 @@ namespace cs::features
 			SaveSettings();
 		}
 		Menu::Get().DrawDebugViewSelector(*this);
+		if (_normalizedDebugPreviewEnabled.load(std::memory_order_acquire)) {
+			if (ImGui::Button("Refresh snapshot"))
+				_normalizedSnapshot.Refresh();
+			if (_normalizedSnapshot.Pending())
+				ImGui::TextDisabled("Refresh pending; the previous snapshot remains visible.");
+		}
 	}
 
 	void Skylighting::RestoreDefaultSettings()
@@ -2458,9 +2466,15 @@ namespace cs::features
 				"normalized_debug_resources_allocated",
 				_normalizedResourcesAllocated.load(std::memory_order_acquire))
 			.Field(
-				"normalized_view_dispatched_last_frame",
-				_normalizedViewDispatchedLastFrame.load(
-					std::memory_order_acquire))
+				"normalized_debug_dispatches",
+				static_cast<std::int64_t>(
+					_normalizedDebugDispatchCount.load(std::memory_order_relaxed)))
+			.Field(
+				"normalized_snapshot_ready",
+				_normalizedSnapshot.Ready())
+			.Field(
+				"normalized_snapshot_refresh_pending",
+				_normalizedSnapshot.Pending() != 0)
 			.Field(
 				"render_count",
 				static_cast<std::int64_t>(

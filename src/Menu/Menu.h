@@ -27,7 +27,6 @@ namespace cs
 		void DrawDebugViewSelector(const Feature& a_feature);
 
 		void DrawHome(dmui::Client& a_client);
-		void DrawGeneral(dmui::Client& a_client);
 		void DrawAdvanced(dmui::Client& a_client);
 		void DrawPresets(dmui::Client& a_client);
 		void ObserveHostFrame(dmui::Client& a_client);
@@ -83,6 +82,8 @@ namespace cs
 		};
 
 		void SetDebugViewSelection(const Feature& a_feature, std::string_view a_view);
+		void DrawFeatureOverview(dmui::Client& a_client);
+		void DrawShaderSettings(dmui::Client& a_client);
 		void DrawDebugTexture(dmui::Client& a_client, const Feature& a_feature);
 		void ProcessDialog(dmui::Client& a_client);
 		void StartDialog(
@@ -106,6 +107,7 @@ namespace cs
 			std::string_view a_operation);
 
 		debug_view::SelectionState _debugViews;
+		host::StartupLoadSnapshot _startupLoads;
 		std::string _legacyOverlayToggleHotkey;
 		std::unordered_map<std::string, DebugImage> _debugImages;
 		std::unordered_map<std::string, DMUI_Result> _hostCallFailures;

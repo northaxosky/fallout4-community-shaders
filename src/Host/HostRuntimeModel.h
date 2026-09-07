@@ -5,12 +5,38 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <unordered_map>
 
 #include <DearModdingUI/API.h>
 #include <toml++/toml.hpp>
 
 namespace cs::host
 {
+	class StartupLoadSnapshot
+	{
+	public:
+		void Capture(const toml::table& a_root)
+		{
+			_loads.clear();
+			if (const auto* features = a_root["features"].as_table()) {
+				for (const auto& [key, node] : *features) {
+					if (const auto* feature = node.as_table())
+						_loads.emplace(std::string(key.str()), (*feature)["load"].value_or(false));
+				}
+			}
+		}
+
+		[[nodiscard]] bool RequiresRestart(std::string_view a_key, bool a_requested) const
+		{
+			const auto found = _loads.find(std::string(a_key));
+			const bool atStartup = found != _loads.end() && found->second;
+			return a_requested != atStartup;
+		}
+
+	private:
+		std::unordered_map<std::string, bool> _loads;
+	};
+
 	enum class FrameDemandAction : std::uint8_t
 	{
 		kNone,

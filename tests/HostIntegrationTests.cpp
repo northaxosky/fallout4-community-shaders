@@ -1,10 +1,13 @@
 #include "Host/HostPageCatalog.h"
 #include "Host/HostRuntimeModel.h"
 #include "Menu/DebugViewSelection.h"
+#include "Utils/PhysicalFile.h"
 
 #include <DearModdingUI/Client.h>
+#include <DearModdingUI/IconGlyphs.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <iostream>
 #include <string_view>
 #include <vector>
@@ -243,8 +246,19 @@ namespace
 			{ "Performance Overlay!", "Performance Overlay", "Performance", "FPS.", true, true }
 		};
 		const auto pages = cs::host::BuildPageCatalog(features);
-		CHECK(pages.size() == features.size() + 5);
+		CHECK(pages.size() == features.size() + 4);
 		CHECK(pages.front().id == "home");
+		CHECK(pages.front().category == "General");
+		CHECK(DearModdingUI::ResolveClientIconGlyph(
+			cs::host::kClientIconName, {}, "Community Shaders") ==
+			DearModdingUI::ResolveNamedIconGlyphOrZero("lightbulb"));
+		CHECK(DearModdingUI::ResolveCategoryIconGlyph(
+			cs::host::kBuiltInCategory, "Community Shaders",
+			"dearmodding.community-shaders", cs::host::kClientIconName) ==
+			DearModdingUI::ResolveNamedIconGlyphOrZero("gear"));
+		CHECK(std::ranges::none_of(pages, [](const auto& page) {
+			return page.id == "general";
+		}));
 		CHECK(pages.back().id == cs::host::kOverlayPageId);
 		CHECK(std::ranges::any_of(pages, [](const auto& page) {
 			return page.id == "feature-renderdoc" &&
@@ -278,6 +292,74 @@ namespace
 			cs::FeatureDebugViewKind::kFullscreen);
 		CHECK(state.Previews().size() == 2);
 		CHECK(state.Fullscreen().feature == "InverseSquareLighting");
+	}
+
+	void TestPhysicalFileLocation()
+	{
+		const auto source = std::filesystem::path(__FILE__);
+		const auto resolved = cs::files::PhysicalFilePath(source);
+		CHECK(resolved.has_value());
+		if (resolved) {
+			CHECK(resolved->is_absolute());
+			CHECK(!resolved->native().starts_with(L"\\Device\\"));
+			std::error_code error;
+			CHECK(std::filesystem::equivalent(*resolved, source, error));
+			CHECK(!error);
+		}
+		const auto missing = cs::files::PhysicalFilePath(
+			source.parent_path() / L"missing-physical-path-test.no-such-file");
+		CHECK(!missing);
+		CHECK(missing.error().value() != 0);
+	}
+
+	void TestSnapshotRefresh()
+	{
+		cs::DebugSnapshotRequest snapshot;
+		CHECK(!snapshot.Ready());
+		CHECK(snapshot.Pending() == 0);
+		snapshot.Refresh();
+		const auto first = snapshot.Pending();
+		CHECK(first != 0);
+		// A failed/unavailable capture leaves the request pending.
+		CHECK(snapshot.Pending() == first);
+		snapshot.Captured(first);
+		CHECK(snapshot.Ready());
+		CHECK(snapshot.Pending() == 0);
+		for (int frame = 0; frame < 100; ++frame)
+			CHECK(snapshot.Pending() == 0);
+		snapshot.Refresh();
+		const auto second = snapshot.Pending();
+		CHECK(second != first);
+		CHECK(snapshot.Ready());
+		snapshot.Refresh();
+		snapshot.Captured(second);
+		CHECK(snapshot.Pending() != 0);
+		snapshot.Captured(snapshot.Pending());
+		CHECK(snapshot.Pending() == 0);
+		snapshot.Invalidate();
+		CHECK(!snapshot.Ready());
+		CHECK(snapshot.Pending() != 0);
+		snapshot.Reset();
+		CHECK(snapshot.Pending() == 0);
+		CHECK(!snapshot.Ready());
+	}
+
+	void TestStartupLoadIntent()
+	{
+		auto root = toml::parse(
+			"[features.loaded]\nload = true\n"
+			"[features.disabled]\nload = false\n");
+		cs::host::StartupLoadSnapshot startup;
+		startup.Capture(root);
+		// Failure or ENB deactivation must not change the recorded startup configuration.
+		CHECK(!startup.RequiresRestart("loaded", true));
+		CHECK(!startup.RequiresRestart("disabled", false));
+		CHECK(startup.RequiresRestart("loaded", false));
+		CHECK(startup.RequiresRestart("disabled", true));
+		root["features"]["loaded"].as_table()->insert_or_assign("load", false);
+		CHECK(startup.RequiresRestart("loaded", false));
+		CHECK(!startup.RequiresRestart("loaded", true));
+		CHECK(!startup.RequiresRestart("missing", false));
 	}
 
 	void TestFrameDemandBalancing()
@@ -412,6 +494,9 @@ int main()
 {
 	TestForwardingPreflight();
 	TestPageCatalog();
+	TestPhysicalFileLocation();
+	TestSnapshotRefresh();
+	TestStartupLoadIntent();
 	TestDebugSelectionSeparation();
 	TestFrameDemandBalancing();
 	TestDialogSubmissionDeduplication();

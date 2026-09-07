@@ -14,7 +14,7 @@ official `dmui::Client::Connect`. The client checks the exact generated ImGui fo
 version separately from the minimum forwarding surface version 1.1, and preflights API structure
 and required services before registering anything. It then registers:
 
-- Home, General, Advanced, and Presets pages;
+- Home, Advanced, and Presets pages under the General category;
 - one settings page for every menu-visible registered feature, including inactive features;
 - the managed Performance Overlay page;
 - the Clear Shader Cache action;
@@ -29,6 +29,14 @@ a fallback menu if discovery, preflight, registration, readiness, or swapchain a
 With no compatible host, shader features, presets, TOML configuration, telemetry, and fullscreen
 debug selections continue headless. There is intentionally no menu, overlay, notification UI, or
 diagnostic hotkey path.
+
+Startup loading is edited only in Advanced with positive checked-to-load controls. Home reports
+startup results; feature pages retain live effect controls and actionable failure/restart notices.
+The client explicitly requests the lighting icon, and General resolves to the host's gear icon.
+
+Explorer runs outside the game's USVFS mapping. Folder actions resolve the backing configuration
+or cache identity file through a read-only mapping before launching Explorer. Ordinary file-name
+queries are insufficient because USVFS deliberately rewrites those names to virtual paths.
 
 ## Native services
 

@@ -10,7 +10,6 @@ namespace cs::host
 	enum class HostPageKind : std::uint8_t
 	{
 		kHome,
-		kGeneral,
 		kAdvanced,
 		kPresets,
 		kFeature,
@@ -38,7 +37,8 @@ namespace cs::host
 		std::size_t featureIndex{ 0 };
 	};
 
-	inline constexpr std::string_view kBuiltInCategory = "Community Shaders";
+	inline constexpr std::string_view kClientIconName = "lightbulb";
+	inline constexpr std::string_view kBuiltInCategory = "General";
 	inline constexpr std::string_view kUnloadedCategory = "Unloaded";
 	inline constexpr std::string_view kUncategorized = "Other";
 	inline constexpr std::string_view kOverlayCategory = "Overlay";
