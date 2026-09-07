@@ -108,6 +108,13 @@ foreach ($package in $manifest.Packages) {
 	foreach ($license in $package.Licenses) {
 		Copy-StagedFile -ExtractRoot $extractRoot -FileName $license -Destination $destination -Required $true
 	}
+	if ($package.ContainsKey('Headers')) {
+		$headerDestination = Join-Path $repoRoot $package.HeaderDestination
+		New-Item -ItemType Directory -Force -Path $headerDestination | Out-Null
+		foreach ($header in $package.Headers) {
+			Copy-StagedFile -ExtractRoot $extractRoot -FileName $header -Destination $headerDestination -Required $true
+		}
+	}
 
 	Remove-Item -LiteralPath $extractRoot -Recurse -Force
 	Write-Host "[$($package.Name)] staged into $($package.Destination)"

@@ -12,8 +12,9 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
-#include <d3d11.h>
+#include <d3d11_4.h>
 #include <limits>
+#include <winrt/base.h>
 
 namespace cs::engine
 {
@@ -51,12 +52,14 @@ namespace cs::engine
 		std::atomic_bool g_hookedContextIsCurrent{ false };
 		std::atomic_bool g_mapHookCurrent{ false };
 		std::atomic_bool g_unmapHookCurrent{ false };
+		winrt::com_ptr<ID3D11Multithread> g_multithread;
 		std::atomic<std::uint64_t> g_mapCalls{ 0 };
 		std::atomic<std::uint64_t> g_unmapCalls{ 0 };
 		std::atomic<std::uint64_t> g_matchingMaps{ 0 };
 		std::atomic<std::uint64_t> g_matchingMapSuccesses{ 0 };
 		std::atomic<std::uint64_t> g_matchingMapDataPointers{ 0 };
 		std::atomic<std::uint64_t> g_matchingUnmaps{ 0 };
+		std::atomic<std::uint64_t> g_contextHookRefreshes{ 0 };
 
 		std::atomic<ID3D11Resource*> g_identity{ nullptr };
 		std::atomic<const char*> g_identitySource{ "none" };
@@ -165,6 +168,7 @@ namespace cs::engine
 		// Re-resolved every frame so a device reset or resolution change heals itself.
 		void ResolveIdentity()
 		{
+			RefreshFrameBufferContextHooks();
 			auto* context = GetImmediateContext();
 			if (!context) {
 				return;
@@ -236,6 +240,11 @@ namespace cs::engine
 			g_latestSnapshot.valid = width >= kMinimumByteWidth;
 		}
 
+		bool RefreshContextAccessHooks(
+			ID3D11DeviceContext* a_context,
+			std::uintptr_t a_beforeMap,
+			std::uintptr_t a_beforeUnmap);
+
 		struct FrameBufferMap_Hook
 		{
 			static HRESULT STDMETHODCALLTYPE thunk(
@@ -247,11 +256,20 @@ namespace cs::engine
 				D3D11_MAPPED_SUBRESOURCE* a_mapped)
 			{
 				g_mapCalls.fetch_add(1, std::memory_order_relaxed);
-				if (!func) {
+				const auto original = func.load(std::memory_order_acquire);
+				if (!original) {
 					return E_POINTER;
 				}
+				const auto* table = *reinterpret_cast<std::uintptr_t**>(a_this);
+				const auto beforeMap = table[kMapVtableSlot];
+				const auto beforeUnmap = table[kUnmapVtableSlot];
 				const HRESULT result =
-					func(a_this, a_resource, a_subresource, a_mapType, a_mapFlags, a_mapped);
+					original(a_this, a_resource, a_subresource, a_mapType, a_mapFlags, a_mapped);
+				RefreshContextAccessHooks(a_this, beforeMap, beforeUnmap);
+				if (a_resource != g_identity.load(std::memory_order_relaxed)
+					&& a_resource == EnginePerFrameBuffer()) {
+					AdoptIdentity(EnginePerFrameBuffer(), "context_map");
+				}
 				if (a_resource == g_identity.load(std::memory_order_relaxed)
 					&& a_subresource == 0) {
 					g_matchingMaps.fetch_add(1, std::memory_order_relaxed);
@@ -266,7 +284,7 @@ namespace cs::engine
 				return result;
 			}
 
-			static inline MapFunction func = nullptr;
+			static inline std::atomic<MapFunction> func{ nullptr };
 		};
 
 		struct FrameBufferUnmap_Hook
@@ -285,12 +303,75 @@ namespace cs::engine
 						CaptureSnapshot();
 					}
 				}
-				if (func) {
-					func(a_this, a_resource, a_subresource);
+				if (const auto original = func.load(std::memory_order_acquire)) {
+					const auto* table = *reinterpret_cast<std::uintptr_t**>(a_this);
+					const auto beforeMap = table[kMapVtableSlot];
+					const auto beforeUnmap = table[kUnmapVtableSlot];
+					original(a_this, a_resource, a_subresource);
+					RefreshContextAccessHooks(a_this, beforeMap, beforeUnmap);
 				}
 			}
 
-			static inline UnmapFunction func = nullptr;
+			static inline std::atomic<UnmapFunction> func{ nullptr };
+		};
+
+		void InstallContextAccessHooks(
+			ID3D11DeviceContext* a_context, bool a_map, bool a_unmap)
+		{
+			auto* table = *reinterpret_cast<std::uintptr_t**>(a_context);
+			if (a_map && table[kMapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferMap_Hook::thunk)) {
+				FrameBufferMap_Hook::func.store(
+					reinterpret_cast<MapFunction>(table[kMapVtableSlot]), std::memory_order_release);
+				Detours::X64::DetourClassVTable(
+					reinterpret_cast<std::uintptr_t>(table), &FrameBufferMap_Hook::thunk, kMapVtableSlot);
+			}
+			if (a_unmap && table[kUnmapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferUnmap_Hook::thunk)) {
+				FrameBufferUnmap_Hook::func.store(
+					reinterpret_cast<UnmapFunction>(table[kUnmapVtableSlot]), std::memory_order_release);
+				Detours::X64::DetourClassVTable(
+					reinterpret_cast<std::uintptr_t>(table), &FrameBufferUnmap_Hook::thunk, kUnmapVtableSlot);
+			}
+		}
+
+		bool RefreshContextAccessHooks(
+			ID3D11DeviceContext* a_context,
+			std::uintptr_t a_beforeMap,
+			std::uintptr_t a_beforeUnmap)
+		{
+			if (a_context != g_hookedContext.load(std::memory_order_acquire)) {
+				return false;
+			}
+			const auto* table = *reinterpret_cast<std::uintptr_t**>(a_context);
+			const bool mapChanged = table[kMapVtableSlot] != a_beforeMap;
+			const bool unmapChanged = table[kUnmapVtableSlot] != a_beforeUnmap;
+			if (mapChanged || unmapChanged) {
+				// Native map fast paths can rewrite Unmap as well as protection changes.
+				InstallContextAccessHooks(a_context, mapChanged, unmapChanged);
+				g_contextHookRefreshes.fetch_add(1, std::memory_order_relaxed);
+			}
+			return mapChanged || unmapChanged;
+		}
+
+		struct FrameBufferMultithread_Hook
+		{
+			static BOOL STDMETHODCALLTYPE thunk(ID3D11Multithread* a_this, BOOL a_protected)
+			{
+				auto* context = g_hookedContext.load(std::memory_order_acquire);
+				if (a_this != g_multithread.get() || !context) {
+					return func(a_this, a_protected);
+				}
+				auto* before = *reinterpret_cast<std::uintptr_t**>(context);
+				const auto beforeMap = before[kMapVtableSlot];
+				const auto beforeUnmap = before[kUnmapVtableSlot];
+				const BOOL previous = func(a_this, a_protected);
+				if (RefreshContextAccessHooks(context, beforeMap, beforeUnmap)) {
+					L->info("Refreshed camera Map/Unmap hooks after multithread protection changed to {}.",
+						a_protected != FALSE);
+				}
+				return previous;
+			}
+
+			static inline BOOL(STDMETHODCALLTYPE* func)(ID3D11Multithread*, BOOL) = nullptr;
 		};
 
 		void RecheckHookOwnership(
@@ -321,12 +402,14 @@ namespace cs::engine
 					kMapVtableSlot,
 					mapEntry,
 					mapThunk,
-					reinterpret_cast<std::uintptr_t>(FrameBufferMap_Hook::func),
+					reinterpret_cast<std::uintptr_t>(
+						FrameBufferMap_Hook::func.load(std::memory_order_acquire)),
 					mapCurrent,
 					kUnmapVtableSlot,
 					unmapEntry,
 					unmapThunk,
-					reinterpret_cast<std::uintptr_t>(FrameBufferUnmap_Hook::func),
+					reinterpret_cast<std::uintptr_t>(
+						FrameBufferUnmap_Hook::func.load(std::memory_order_acquire)),
 					unmapCurrent);
 			} else if (previousMap != mapCurrent || previousUnmap != unmapCurrent) {
 				L->info(
@@ -544,16 +627,54 @@ namespace cs::engine
 		}
 
 		AdoptIdentity(EnginePerFrameBuffer(), "context");
-		stl::detour_vfunc<kMapVtableSlot, FrameBufferMap_Hook>(a_context);
-		stl::detour_vfunc<kUnmapVtableSlot, FrameBufferUnmap_Hook>(a_context);
-		g_hookedContext.store(a_context, std::memory_order_relaxed);
+		InstallContextAccessHooks(a_context, true, true);
 		RecheckHookOwnership(a_context, true);
-		if (!FrameBufferMap_Hook::func || !FrameBufferUnmap_Hook::func) {
+		if (!FrameBufferMap_Hook::func.load(std::memory_order_acquire) ||
+			!FrameBufferUnmap_Hook::func.load(std::memory_order_acquire)) {
 			L->error("Context-vtable hooks for Map/Unmap have no original; snapshot disabled.");
 			return;
 		}
 
+		g_hookedContext.store(a_context, std::memory_order_relaxed);
+		if (SUCCEEDED(a_context->QueryInterface(IID_PPV_ARGS(g_multithread.put())))) {
+			stl::detour_vfunc<5, FrameBufferMultithread_Hook>(g_multithread.get());
+		} else {
+			L->warn("ID3D11Multithread is unavailable; camera hook refresh cannot observe protection changes.");
+		}
 		g_hookInstalled.store(true, std::memory_order_relaxed);
+	}
+
+	void RefreshFrameBufferContextHooks()
+	{
+		if (!g_hookInstalled.load(std::memory_order_acquire)) {
+			return;
+		}
+		auto* context = g_hookedContext.load(std::memory_order_acquire);
+		if (!context || context != GetImmediateContext()) {
+			return;
+		}
+		const auto* table = *reinterpret_cast<std::uintptr_t**>(context);
+		const bool mapMissing = table[kMapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferMap_Hook::thunk);
+		const bool unmapMissing = table[kUnmapVtableSlot] != reinterpret_cast<std::uintptr_t>(&FrameBufferUnmap_Hook::thunk);
+		const auto nativeEntry = [](std::uintptr_t a_entry) {
+			HMODULE owner = nullptr;
+			return GetModuleHandleExW(
+				GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+				reinterpret_cast<LPCWSTR>(a_entry), &owner) &&
+				owner == GetModuleHandleW(L"d3d11.dll");
+		};
+		if ((mapMissing && !nativeEntry(table[kMapVtableSlot])) ||
+			(unmapMissing && !nativeEntry(table[kUnmapVtableSlot]))) {
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::warn,
+				"Camera context dispatch is owned by another hook; not overwriting its Map/Unmap chain.");
+			return;
+		}
+		if (mapMissing || unmapMissing) {
+			InstallContextAccessHooks(context, mapMissing, unmapMissing);
+			g_contextHookRefreshes.fetch_add(1, std::memory_order_relaxed);
+			CS_LOG_EVERY_MS(L, 2000, spdlog::level::info,
+				"Restored camera hooks after the native context replaced its dispatch entries.");
+		}
 	}
 
 	const FrameBufferSnapshot& GetFrameBuffer() noexcept
@@ -608,6 +729,7 @@ namespace cs::engine
 		status.matchingMapDataPointers =
 			g_matchingMapDataPointers.load(std::memory_order_relaxed);
 		status.matchingUnmaps = g_matchingUnmaps.load(std::memory_order_relaxed);
+		status.contextHookRefreshes = g_contextHookRefreshes.load(std::memory_order_relaxed);
 		status.mapHookCurrent =
 			g_mapHookCurrent.load(std::memory_order_relaxed);
 		status.unmapHookCurrent =

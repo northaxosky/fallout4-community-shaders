@@ -1,16 +1,31 @@
 #include <array>
 #include <cstring>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 #include <d3d11.h>
+#include <d3dcompiler.h>
 #include <winrt/base.h>
 
 #include "UpscalingPublication.h"
 #include "ProviderOutputPreview.h"
+#include "Render/RenderUIPathGate.h"
+#include "Render/TemporalRenderSettings.h"
 
 namespace
 {
+	using cs::render::temporal::IsExternalUpscaler;
+	using cs::render::temporal::UpscaleMethod;
+	static_assert(!IsExternalUpscaler(UpscaleMethod::kNONE));
+	static_assert(!IsExternalUpscaler(UpscaleMethod::kTAA));
+	static_assert(IsExternalUpscaler(UpscaleMethod::kFSR));
+	static_assert(IsExternalUpscaler(UpscaleMethod::kDLSS));
+	static_assert(IsExternalUpscaler(UpscaleMethod::kXeSS));
+	static_assert(!IsExternalUpscaler(UpscaleMethod::kCount));
+
 	bool Check(bool a_condition, const char* a_message)
 	{
 		if (!a_condition) {
@@ -132,10 +147,280 @@ namespace
 			"refresh must update the shared raw snapshot");
 		return ok;
 	}
+
+	bool TestRenderUIPathGateDecoder()
+	{
+		std::array<std::uint8_t, 32> image{};
+		constexpr std::size_t gateOffset = 16;
+		image[0] = 0x80;
+		image[1] = 0x3D;
+		const auto displacement =
+			static_cast<std::int32_t>(gateOffset - cs::engine::RenderUIPathGate::kInstructionLength);
+		std::memcpy(image.data() + 2, &displacement, sizeof(displacement));
+		image[6] = 0x00;
+		image[gateOffset] = 1;
+
+		const auto imageAddress =
+			reinterpret_cast<std::uintptr_t>(image.data());
+		const auto expectedTarget = imageAddress + gateOffset;
+		const auto decoded = cs::engine::RenderUIPathGate::Decode(
+			imageAddress,
+			imageAddress,
+			image.size(),
+			expectedTarget);
+		bool ok = Check(
+			decoded && decoded->Address() == expectedTarget &&
+				decoded->TakesFullEffectsPath(),
+			"Render_UI gate decoder accepted the validated RIP-relative byte compare");
+
+		image[gateOffset] = 0;
+		ok &= Check(
+			decoded && !decoded->TakesFullEffectsPath(),
+			"Render_UI gate accessor observes the live Gamma-only selection");
+
+		image[0] = 0x81;
+		ok &= Check(
+			!cs::engine::RenderUIPathGate::Decode(
+				imageAddress, imageAddress, image.size(), expectedTarget),
+			"Render_UI gate decoder rejects an unexpected opcode");
+		image[0] = 0x80;
+		image[6] = 1;
+		ok &= Check(
+			!cs::engine::RenderUIPathGate::Decode(
+				imageAddress, imageAddress, image.size(), expectedTarget),
+			"Render_UI gate decoder rejects a nonzero compare immediate");
+		image[6] = 0;
+		ok &= Check(
+			!cs::engine::RenderUIPathGate::Decode(
+				imageAddress, imageAddress, gateOffset, expectedTarget),
+			"Render_UI gate decoder rejects a target outside the validated data range");
+		ok &= Check(
+			!cs::engine::RenderUIPathGate::Decode(
+				imageAddress, imageAddress, image.size(), expectedTarget + 1),
+			"Render_UI gate decoder rejects an unexpected runtime target");
+		ok &= Check(
+			cs::engine::ClassifyRenderUIOutputExtent(
+				0.0f, 0.0f, 3840.0f, 2160.0f, 2560, 1440, 3840, 2160) ==
+				cs::engine::RenderUIOutputExtent::kFull,
+			"a full-size Gamma output selects passthrough");
+		ok &= Check(
+			cs::engine::ClassifyRenderUIOutputExtent(
+				0.0f, 0.0f, 2560.0f, 1440.0f, 2560, 1440, 3840, 2160) ==
+				cs::engine::RenderUIOutputExtent::kCommitted,
+			"a committed subrect Gamma output selects spatial recovery");
+		ok &= Check(
+			cs::engine::ClassifyRenderUIOutputExtent(
+				0.0f, 0.0f, 3840.0f, 2160.0f, 3840, 2160, 3840, 2160) ==
+				cs::engine::RenderUIOutputExtent::kFull,
+			"native-size output is not double-scaled");
+		ok &= Check(
+			cs::engine::ClassifyRenderUIOutputExtent(
+				1.0f, 0.0f, 2560.0f, 1440.0f, 2560, 1440, 3840, 2160) ==
+				cs::engine::RenderUIOutputExtent::kInvalid,
+			"an offset or unknown output extent is rejected");
+		return ok;
+	}
+
+	std::string ReadFile(const std::filesystem::path& a_path)
+	{
+		std::ifstream stream(a_path, std::ios::binary);
+		std::ostringstream contents;
+		contents << stream.rdbuf();
+		return contents.str();
+	}
+
+	winrt::com_ptr<ID3DBlob> CompileShader(
+		const std::filesystem::path& a_path,
+		const D3D_SHADER_MACRO* a_defines,
+		const char* a_target)
+	{
+		winrt::com_ptr<ID3DBlob> bytecode;
+		winrt::com_ptr<ID3DBlob> errors;
+		if (FAILED(D3DCompileFromFile(
+				a_path.c_str(),
+				a_defines,
+				D3D_COMPILE_STANDARD_FILE_INCLUDE,
+				"main",
+				a_target,
+				0,
+				0,
+				bytecode.put(),
+				errors.put()))) {
+			if (errors) {
+				std::cerr << static_cast<const char*>(errors->GetBufferPointer()) << '\n';
+			}
+			return {};
+		}
+		return bytecode;
+	}
+
+	bool TestSpatialFallback(
+		ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context,
+		const std::filesystem::path& a_pixelShaderPath,
+		const std::filesystem::path& a_vertexShaderPath)
+	{
+		const D3D_SHADER_MACRO vertexDefines[]{
+			{ "VSHADER", "1" },
+			{ nullptr, nullptr }
+		};
+		auto vertexBytecode =
+			CompileShader(a_vertexShaderPath, vertexDefines, "vs_5_0");
+		auto pixelBytecode =
+			CompileShader(a_pixelShaderPath, nullptr, "ps_5_0");
+		if (!vertexBytecode || !pixelBytecode) {
+			return false;
+		}
+
+		winrt::com_ptr<ID3D11VertexShader> vertexShader;
+		winrt::com_ptr<ID3D11PixelShader> pixelShader;
+		if (FAILED(a_device->CreateVertexShader(
+				vertexBytecode->GetBufferPointer(),
+				vertexBytecode->GetBufferSize(),
+				nullptr,
+				vertexShader.put())) ||
+			FAILED(a_device->CreatePixelShader(
+				pixelBytecode->GetBufferPointer(),
+				pixelBytecode->GetBufferSize(),
+				nullptr,
+				pixelShader.put()))) {
+			return false;
+		}
+
+		constexpr UINT width = 4;
+		constexpr UINT height = 4;
+		constexpr std::array<std::uint8_t, 4> active{ 200, 10, 20, 255 };
+		constexpr std::array<std::uint8_t, 4> stale{ 5, 240, 6, 255 };
+		std::array<std::uint8_t, width * height * 4> sourcePixels{};
+		for (UINT y = 0; y < height; ++y) {
+			for (UINT x = 0; x < width; ++x) {
+				const auto& color = x < 2 && y < 2 ? active : stale;
+				std::memcpy(
+					sourcePixels.data() + (y * width + x) * 4,
+					color.data(),
+					color.size());
+			}
+		}
+
+		D3D11_TEXTURE2D_DESC sourceDesc{};
+		sourceDesc.Width = width;
+		sourceDesc.Height = height;
+		sourceDesc.MipLevels = 1;
+		sourceDesc.ArraySize = 1;
+		sourceDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		sourceDesc.SampleDesc.Count = 1;
+		sourceDesc.Usage = D3D11_USAGE_DEFAULT;
+		sourceDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SUBRESOURCE_DATA sourceData{};
+		sourceData.pSysMem = sourcePixels.data();
+		sourceData.SysMemPitch = width * 4;
+		winrt::com_ptr<ID3D11Texture2D> source;
+		winrt::com_ptr<ID3D11ShaderResourceView> sourceView;
+		if (FAILED(a_device->CreateTexture2D(
+				&sourceDesc, &sourceData, source.put())) ||
+			FAILED(a_device->CreateShaderResourceView(
+				source.get(), nullptr, sourceView.put()))) {
+			return false;
+		}
+
+		auto targetDesc = sourceDesc;
+		targetDesc.BindFlags = D3D11_BIND_RENDER_TARGET;
+		winrt::com_ptr<ID3D11Texture2D> target;
+		winrt::com_ptr<ID3D11RenderTargetView> targetView;
+		if (FAILED(a_device->CreateTexture2D(
+				&targetDesc, nullptr, target.put())) ||
+			FAILED(a_device->CreateRenderTargetView(
+				target.get(), nullptr, targetView.put()))) {
+			return false;
+		}
+
+		D3D11_SAMPLER_DESC samplerDesc{};
+		samplerDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+		samplerDesc.AddressU = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.AddressV = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+		samplerDesc.MaxLOD = D3D11_FLOAT32_MAX;
+		winrt::com_ptr<ID3D11SamplerState> sampler;
+		if (FAILED(a_device->CreateSamplerState(&samplerDesc, sampler.put()))) {
+			return false;
+		}
+
+		constexpr std::array<float, 4> constants{ 2.0f, 2.0f, 0.0f, 0.0f };
+		D3D11_BUFFER_DESC bufferDesc{};
+		bufferDesc.ByteWidth = sizeof(constants);
+		bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+		bufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		D3D11_SUBRESOURCE_DATA bufferData{};
+		bufferData.pSysMem = constants.data();
+		winrt::com_ptr<ID3D11Buffer> constantBuffer;
+		if (FAILED(a_device->CreateBuffer(
+				&bufferDesc, &bufferData, constantBuffer.put()))) {
+			return false;
+		}
+
+		const D3D11_VIEWPORT viewport{
+			.TopLeftX = 0.0f,
+			.TopLeftY = 0.0f,
+			.Width = static_cast<float>(width),
+			.Height = static_cast<float>(height),
+			.MinDepth = 0.0f,
+			.MaxDepth = 1.0f
+		};
+		auto* targetViewPointer = targetView.get();
+		auto* sourceViewPointer = sourceView.get();
+		auto* samplerPointer = sampler.get();
+		auto* constantBufferPointer = constantBuffer.get();
+		a_context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+		a_context->VSSetShader(vertexShader.get(), nullptr, 0);
+		a_context->RSSetViewports(1, &viewport);
+		a_context->OMSetRenderTargets(1, &targetViewPointer, nullptr);
+		a_context->PSSetConstantBuffers(0, 1, &constantBufferPointer);
+		a_context->PSSetShaderResources(0, 1, &sourceViewPointer);
+		a_context->PSSetSamplers(0, 1, &samplerPointer);
+		a_context->PSSetShader(pixelShader.get(), nullptr, 0);
+		a_context->Draw(3, 0);
+
+		ID3D11ShaderResourceView* nullView = nullptr;
+		a_context->PSSetShaderResources(0, 1, &nullView);
+		a_context->OMSetRenderTargets(0, nullptr, nullptr);
+
+		auto stagingDesc = targetDesc;
+		stagingDesc.Usage = D3D11_USAGE_STAGING;
+		stagingDesc.BindFlags = 0;
+		stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		winrt::com_ptr<ID3D11Texture2D> staging;
+		if (FAILED(a_device->CreateTexture2D(
+				&stagingDesc, nullptr, staging.put()))) {
+			return false;
+		}
+		a_context->CopyResource(staging.get(), target.get());
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		if (FAILED(a_context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
+			return false;
+		}
+		bool valid = true;
+		for (UINT y = 0; y < height; ++y) {
+			const auto* row =
+				static_cast<const std::uint8_t*>(mapped.pData) + y * mapped.RowPitch;
+			for (UINT x = 0; x < width; ++x) {
+				valid &= std::abs(static_cast<int>(row[x * 4]) - active[0]) <= 1;
+				valid &= std::abs(static_cast<int>(row[x * 4 + 1]) - active[1]) <= 1;
+				valid &= std::abs(static_cast<int>(row[x * 4 + 2]) - active[2]) <= 1;
+			}
+		}
+		a_context->Unmap(staging.get(), 0);
+		return valid;
+	}
 }
 
-int main()
+int main(int argc, char** argv)
 {
+	if (!Check(
+			argc == 6,
+			"expected temporal resolve, spatial fallback PS, fullscreen VS, "
+			"render hooks, and renderer source paths")) {
+		return 1;
+	}
 	constexpr D3D_FEATURE_LEVEL featureLevels[]{ D3D_FEATURE_LEVEL_11_0 };
 	winrt::com_ptr<ID3D11Device> device;
 	winrt::com_ptr<ID3D11DeviceContext> context;
@@ -175,6 +460,7 @@ int main()
 	context->OMSetRenderTargets(1, renderTargets, nullptr);
 
 	bool ok = true;
+	ok &= TestRenderUIPathGateDecoder();
 	ok &= Check(
 		cs::features::GetProviderOutputPreviewViewFormat(
 			DXGI_FORMAT_R8G8B8A8_UNORM) == DXGI_FORMAT_R8G8B8A8_UNORM,
@@ -211,13 +497,21 @@ int main()
 		IsRenderTargetBound(context.get(), frameBufferRTV.get()),
 		"failed publication path changed OM binding");
 
+	auto passthroughOutput = CreateTexture(device.get(), 0, nativePixel);
+	ok &= Check(
+		passthroughOutput &&
+			cs::features::PrepareUpscalingPassthrough(
+				context.get(),
+				passthroughOutput.get(),
+				providerOutput.get()),
+		"full-extent recovery did not prepare its private passthrough output");
 	ok &= Check(
 		cs::features::PublishUpscalingOutput(
 			context.get(),
 			frameBuffer.get(),
-			providerOutput.get(),
+			passthroughOutput.get(),
 			true),
-		"successful provider dispatch was not published");
+		"prepared full-extent passthrough was not published");
 	ok &= Check(
 		ReadPixel(device.get(), context.get(), frameBuffer.get(), observed) &&
 			observed == providerPixel,
@@ -225,6 +519,84 @@ int main()
 	ok &= Check(
 		IsRenderTargetBound(context.get(), frameBufferRTV.get()),
 		"successful publication changed OM binding");
+
+	const auto upscalingSource =
+		ReadFile(argv[1]) + ReadFile(argv[4]) + ReadFile(argv[5]);
+	const auto fallbackShader = ReadFile(argv[2]);
+	const auto fallbackStart =
+		upscalingSource.find("bool TemporalRenderer::ApplySpatialFallback(");
+	const auto fallbackEnd =
+		upscalingSource.find("void TemporalRenderer::UpscaleDepth()", fallbackStart);
+	const auto fallbackBlock =
+		fallbackStart != std::string::npos && fallbackEnd != std::string::npos
+		? std::string_view(upscalingSource).substr(
+			  fallbackStart, fallbackEnd - fallbackStart)
+		: std::string_view{};
+	const auto wrapperStart =
+		upscalingSource.find("void TemporalRenderer::DrawWorldRenderUI::thunk(");
+	const auto wrapperEnd =
+		upscalingSource.find(
+			"void TemporalRenderer::DeferredComposite_RenderPass::thunk(",
+			wrapperStart);
+	const auto wrapperBlock =
+		wrapperStart != std::string::npos && wrapperEnd != std::string::npos
+		? std::string_view(upscalingSource).substr(
+			  wrapperStart, wrapperEnd - wrapperStart)
+		: std::string_view{};
+	const auto publishStart =
+		upscalingSource.find("void TemporalRenderer::PublishDynamicResolution()");
+	const auto publishEnd =
+		upscalingSource.find("void TemporalRenderer::OnD3D11Ready(", publishStart);
+	const auto publishBlock =
+		publishStart != std::string::npos && publishEnd != std::string::npos
+		? std::string_view(upscalingSource).substr(
+			  publishStart, publishEnd - publishStart)
+		: std::string_view{};
+	const auto taaStart =
+		upscalingSource.find("bool TemporalRenderer::ImageSpaceEffectTemporalAA_IsActive::thunk(");
+	const auto taaEnd =
+		upscalingSource.find("void TemporalRenderer::DrawWorldBegin_SetDynamicViewport::thunk(", taaStart);
+	const auto taaBlock =
+		taaStart != std::string::npos && taaEnd != std::string::npos
+		? std::string_view(upscalingSource).substr(taaStart, taaEnd - taaStart)
+		: std::string_view{};
+	ok &= Check(
+		publishBlock.contains("IsExternalUpscaler(method)") &&
+			publishBlock.contains("SetDynamicResolution(") &&
+			publishBlock.contains("widthRatio") &&
+			publishBlock.contains("heightRatio") &&
+			taaBlock.contains("IsExternalUpscaler(method)") &&
+			wrapperBlock.contains("IsExternalUpscaler(method)"),
+		"every external provider shares resolution, TAA exclusion, and resolve recovery policy");
+	ok &= Check(
+		upscalingSource.contains("PreflightExternalResolve(upscaleMethod)") &&
+			upscalingSource.contains("ApplySpatialFallback(") &&
+			upscalingSource.contains("publicationTexture->uav.get()") &&
+			fallbackBlock.contains(
+				"auto* fallbackRTV = publicationTexture->rtv.get();") &&
+			fallbackBlock.contains("publicationTexture->resource.get()") &&
+			fallbackBlock.contains("PublishUpscalingOutput(") &&
+			!upscalingSource.contains(
+				"sharpenerTexture->srv.get(),\n\t\t\t\t\tupscalingTexture->uav.get()"),
+		"spatial recovery retains the original capture and publishes through a private output");
+	ok &= Check(
+		fallbackShader.contains("TrueSamplingDimensions") &&
+			fallbackShader.contains("maxSourceUv") &&
+			fallbackShader.contains("SampleLevel"),
+		"spatial recovery resolves only the committed render subrect to display size");
+	ok &= Check(
+		wrapperBlock.contains("_resolveSeamSeen.store(false") &&
+			upscalingSource.contains("_resolveSeamSeen.store(true") &&
+			wrapperBlock.contains("RecoverMissedResolveAtRenderUIReturn") &&
+			wrapperBlock.contains("Gamma-only Render_UI path bypassed +0xC5") &&
+			upscalingSource.contains("ClassifyRenderUIOutputExtent(") &&
+			upscalingSource.contains("ApplyPassthroughFallback(") &&
+			wrapperBlock.find("TakesFullEffectsPath()") <
+				wrapperBlock.find("func(a_this);"),
+		"the live Render_UI wrapper recovers frames that bypass the +0xC5 resolve seam");
+	ok &= Check(
+		TestSpatialFallback(device.get(), context.get(), argv[2], argv[3]),
+		"spatial recovery sampled stale pixels outside the committed render subrect");
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 	ok &= CheckDepthSnapshot(device.get(), context.get());

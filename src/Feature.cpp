@@ -4,6 +4,7 @@
 #include "Log.h"
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
+#include "Render/TemporalPipeline.h"
 
 #include <toml++/toml.hpp>
 
@@ -138,6 +139,14 @@ namespace cs
 		}
 
 		a_feature.SetRuntimeStateOnly(FeatureRuntimeState::kDegraded);
+		const auto featureName = a_feature.GetName();
+		if (featureName == "FrameGeneration" || featureName == "Upscaling") {
+			render::TemporalPipeline::Get().PostFailure(
+				featureName == "FrameGeneration"
+					? render::temporal::FailureDomain::kFrameGeneration
+					: render::temporal::FailureDomain::kSuperResolution,
+				std::string(a_phase) + ": " + std::string(a_reason));
+		}
 		try {
 			const auto phase = a_phase.empty() ? std::string_view("runtime callback") : a_phase.substr(0, 64);
 			const auto reason = a_reason.empty() ? std::string_view("unknown failure") : a_reason.substr(0, 256);

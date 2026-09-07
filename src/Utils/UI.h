@@ -4,9 +4,48 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <cstdint>
+#include <span>
 
 namespace cs::ui
 {
+	struct ComboOption
+	{
+		std::uint32_t value;
+		const char* label;
+	};
+
+	inline bool DrawCombo(
+		const char* a_label,
+		std::uint32_t& a_value,
+		std::span<const ComboOption> a_options)
+	{
+		if (a_options.empty())
+			return false;
+		auto selected = a_options.begin();
+		for (auto option = a_options.begin(); option != a_options.end(); ++option) {
+			if (option->value == a_value) {
+				selected = option;
+				break;
+			}
+		}
+
+		bool changed = false;
+		if (ImGui::BeginCombo(a_label, selected->label)) {
+			for (const auto& option : a_options) {
+				const bool isSelected = option.value == selected->value;
+				if (ImGui::Selectable(option.label, isSelected)) {
+					a_value = option.value;
+					changed = true;
+				}
+				if (isSelected)
+					ImGui::SetItemDefaultFocus();
+			}
+			ImGui::EndCombo();
+		}
+		return changed;
+	}
+
 	inline ImVec4 ToImVec4(const DMUI_Vec4& a_color) noexcept
 	{
 		return { a_color.x, a_color.y, a_color.z, a_color.w };

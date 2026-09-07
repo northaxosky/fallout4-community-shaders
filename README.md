@@ -63,7 +63,8 @@ injected in place of the stock shaders.
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Water Effects** | Animated water caustics projected onto submerged surfaces lit by the sun. |
 | **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
-| **Upscaling** | DLSS and FSR 3 super-resolution, TAA, and AMD FSR 3 frame generation through a D3D11-facing D3D12 proxy. |
+| **Upscaling** | Native None/TAA policies plus independently selectable FSR 3, DLSS, and XeSS super-resolution. XeSS uses native D3D11 on supported Intel adapters and a same-adapter D3D12 bridge elsewhere. |
+| **Frame Generation** | Independently selectable FSR 3, DLSS-G, and XeSS-FG presentation strategies behind one stable D3D11-facing D3D12 proxy. |
 | **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
 | **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |
 
@@ -126,6 +127,11 @@ Skylighting's raw and normalized depth previews share one still snapshot. Switch
 does not recapture; **Refresh snapshot** updates both from the next completed occlusion map.
 Normalization reads the saved depth copy, not the live producer. The lighting algorithm continues
 sampling normally while both previews stay still.
+
+Upscaling and Frame Generation previews follow the same frozen-snapshot contract. Selecting a
+preview captures the next completed render-stage resource into a plugin-owned texture; **Refresh
+snapshot** requests one later capture while the previous image remains available. DearModdingUI
+never receives a writable engine or vendor-owned temporal resource.
 
 Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
 assets live in subdirectories beneath it:
@@ -192,11 +198,33 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 ## Compatibility notes
 
 - **ENB is not supported.** Every feature deactivates when ENB is loaded.
-- **Upscaling** engine anchors are proven for the NG and AE runtimes only; the feature refuses to
-  load on OG (1.10.163). DLSS needs the staged Streamline runtime DLLs. AMD FSR 3 frame generation
-  needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or borderless SDR
-  `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is independent of the
-  selected super-resolution method and defaults off in pause, main, loading, and Pip-Boy menus.
+- **Upscaling and Frame Generation** engine anchors are proven for the NG and AE runtimes only;
+  both features refuse to load on OG (1.10.163). DLSS super-resolution needs the staged Streamline
+  runtime DLLs. If an admitted external super-resolution evaluation or publication fails after
+  reduced-resolution rendering commits, the plugin performs its own display-sized linear spatial
+  resolve from the retained engine input before continuing to UI. The live `DrawWorld::Render_UI`
+  wrapper also validates and reads its RIP-relative effects-path gate at entry; Gamma-only calls
+  that bypass the normal `+0xC5` seam inspect the resulting viewport, preserve full-size output
+  through a private passthrough, or spatially resolve a committed render subrect before publication.
+  Either recovery switches to native TAA on the next frame. Recovery resources and shaders are
+  preflighted before reduced-resolution state is committed.
+  AMD FSR 3 frame generation needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or
+  borderless SDR `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is
+  independent of the selected super-resolution method and defaults off in pause, main, loading,
+  and Pip-Boy menus. Its current UI strategy captures HUD-less post-imagespace color before the
+  engine composites UI. DLSS-G uses the same Streamline D3D12 session and frame token as
+  DLSS-SR, while XeSS-FG connects XeLL before its swap-chain initialization. Both use the
+  captured HUD-less image with the intercepted final backbuffer; neither fabricates a UI-alpha
+  layer.
+  The validated normal-loop hooks track sleep, simulation, render-submit, and proxy Present
+  attempt ordering without treating worker completion or auxiliary Swap callers as frame boundaries.
+  The active DLSS-G or XeSS-FG provider alone receives the matching Reflex/PCL or XeLL sleep and
+  marker sequence. The observed SR input is post-tonemap gamma-2.2 output with the artistic LUT
+  already applied; XeSS decodes that transfer into FP16 linear color, evaluates at exposure 1.0,
+  and re-encodes gamma-2.2 before publication without reversing the LUT. HDR and ENB are unsupported.
+  The two feature panels own configuration and diagnostics only. Core-owned temporal rendering,
+  input capture, recovery, provider execution, and presentation remain available independently of
+  either panel's lifecycle; an unloaded Upscaling panel does not own Frame Generation's resources.
 - **Motion Vector Fixes** installs its player-transform hook on every runtime, but the
   animation-sequence correction is unproven on OG (1.10.163) and is skipped there.
 - **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries

@@ -190,6 +190,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(PerformanceOverlay)
 	register_feature(MotionVectorFixes)
 	register_feature(Upscaling)
+	register_feature(FrameGeneration)
 	register_feature(ScreenSpaceShadows)
 	register_feature(TerrainShadows)
 	register_feature(ScreenSpaceGI)
@@ -266,6 +267,20 @@ configure_host_test(FeatureStateTests)
 
 add_test(NAME FeatureState COMMAND FeatureStateTests)
 set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
+
+add_executable(TemporalPipelineStateTests
+	tests/TemporalPipelineStateTests.cpp
+	features/Upscaling/src/SuperResolutionContext.h
+	src/Render/TemporalPipelineState.h
+	src/Render/TemporalRenderSizing.h
+)
+configure_host_test(TemporalPipelineStateTests)
+target_include_directories(TemporalPipelineStateTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
+)
+
+add_test(NAME TemporalPipelineState COMMAND TemporalPipelineStateTests)
+set_tests_properties(TemporalPipelineState PROPERTIES LABELS "render;state;unit")
 
 add_executable(ScreenSpaceShadowsMathTests
 	tests/ScreenSpaceShadowsMathTests.cpp
@@ -482,6 +497,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		features/Upscaling/src/UpscalingPublication.h
 		src/Render/Annotation.cpp
 		src/Render/Annotation.h
+		src/Render/RenderUIPathGate.h
 		src/Render/RendererContext.cpp
 		src/Render/RendererContext.h
 	)
@@ -517,7 +533,15 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		tomlplusplus::tomlplusplus
 	)
 
-	add_test(NAME UpscalingPublication COMMAND UpscalingPublicationTests)
+	add_test(
+		NAME UpscalingPublication
+		COMMAND UpscalingPublicationTests
+			"${CMAKE_SOURCE_DIR}/src/Render/TemporalResolve.cpp"
+			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders/Upscaling/SpatialFallbackPS.hlsl"
+			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders/Upscaling/UpscaleVS.hlsl"
+			"${CMAKE_SOURCE_DIR}/src/Render/TemporalRenderHooks.cpp"
+			"${CMAKE_SOURCE_DIR}/src/Render/TemporalRenderer.cpp"
+	)
 	set_tests_properties(UpscalingPublication PROPERTIES LABELS "render;unit")
 
 	add_executable(ProjectionMathTests
@@ -567,7 +591,11 @@ add_test(
 	COMMAND FrameGenerationCameraTests
 		"${CMAKE_SOURCE_DIR}/features/Upscaling/src/FidelityFX.cpp"
 		"${CMAKE_SOURCE_DIR}/src/Render/Engine.h"
-		"${CMAKE_SOURCE_DIR}/features/Upscaling/src/Upscaling.cpp"
+		"${CMAKE_SOURCE_DIR}/src/Render/TemporalResolve.cpp"
+		"${CMAKE_SOURCE_DIR}/src/Render/TemporalPipeline.cpp"
+		"${CMAKE_SOURCE_DIR}/features/FrameGeneration/src/PresentationProviders.cpp"
+		"${CMAKE_SOURCE_DIR}/src/Render/TemporalFrameGenerationInputs.cpp"
+		"${CMAKE_SOURCE_DIR}/features/Upscaling/src/Streamline.cpp"
 )
 set_tests_properties(FrameGenerationCamera PROPERTIES LABELS "render;unit")
 
@@ -613,6 +641,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/Upscaling/Shaders"
+			"${CMAKE_SOURCE_DIR}/features/FrameGeneration/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/DynamicCubemaps/Shaders"

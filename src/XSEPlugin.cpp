@@ -7,6 +7,7 @@
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassHooks.h"
 #include "Render/SwapChainHook.h"
+#include "Render/TemporalPipeline.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 
@@ -75,10 +76,12 @@ static void OnMessage(F4SE::MessagingInterface::Message* a_msg)
 	switch (a_msg->type) {
 	case F4SE::MessagingInterface::kPostPostLoad:
 		cs::FeatureManager::Get().OnPostPostLoadAll();
+		cs::render::TemporalPipeline::Get().FreezeRequest();
 		cs::host::HostClient::Get().DiscoverAndRegister();
 		break;
 	case F4SE::MessagingInterface::kGameDataReady:
 		cs::FeatureManager::Get().OnDataLoadedAll();
+		cs::render::TemporalPipeline::Get().OnDataLoaded();
 		break;
 	default:
 		break;
@@ -101,6 +104,9 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	}
 	if (!config.userWarning.empty()) {
 		L->warn("Ignoring unified user configuration: {}", config.userWarning);
+	}
+	if (!config.migrationNotice.empty()) {
+		L->info("{}", config.migrationNotice);
 	}
 	toml::table loggingConfig;
 	if (const auto* logging = config.root["logging"].as_table()) {
@@ -129,6 +135,7 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	L->info("BUILD_DESCRIBE {}", CS_BUILD_DESCRIBE);
 
 	cs::engine::InstallShaderSubclassHooks();
+	cs::render::TemporalPipeline::Get().RegisterCreationRouter();
 
 	auto& featureManager = cs::FeatureManager::Get();
 	featureManager.PrepareAll();
@@ -136,7 +143,9 @@ extern "C" DLLEXPORT bool F4SEAPI F4SEPlugin_Load(const F4SE::LoadInterface* a_f
 	cs::Menu::Get().Load();
 	cs::engine::InstallFrameBuffer();
 	cs::telemetry::Install();
-	cs::render::InstallSwapChainHook();
+	if (!cs::render::InstallSwapChainHook()) {
+		L->error("D3D11 swap-chain hook installation failed");
+	}
 
 	const auto messaging = F4SE::GetMessagingInterface();
 	messaging->RegisterListener(OnMessage);

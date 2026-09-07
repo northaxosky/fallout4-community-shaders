@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string_view>
 
@@ -11,9 +12,13 @@
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
+#include "SuperResolutionContext.h"
+#include "Render/TemporalProvider.h"
+
 namespace cs::features
 {
-	class FidelityFX;
+	class Streamline;
+	class XeSSSuperResolution;
 
 	struct SharedD3D11D3D12Texture
 	{
@@ -31,6 +36,27 @@ namespace cs::features
 	};
 
 	class DX12SwapChain;
+
+	struct FrameGenerationFrameState
+	{
+		std::uint64_t realFrame = 0;
+		std::uint32_t renderWidth = 0;
+		std::uint32_t renderHeight = 0;
+		float jitterX = 0.0f;
+		float jitterY = 0.0f;
+		float frameTimeMilliseconds = 0.0f;
+		bool enable = false;
+		bool resetHistory = false;
+		ColorMetadata color;
+		render::temporal::FrameGenerationCamera camera;
+	};
+
+	struct TemporalPresentationCallbacks
+	{
+		std::function<void()> clearCapture;
+		std::function<void()> recordFailure;
+		std::function<FrameGenerationFrameState()> queryFrameState;
+	};
 
 	class DXGISwapChainProxy final : public IDXGISwapChain
 	{
@@ -77,15 +103,23 @@ namespace cs::features
 			ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context,
 			const DXGI_SWAP_CHAIN_DESC& a_desc,
-			FidelityFX& a_fidelityFX);
+			render::temporal::IFrameGenerationProvider& a_provider,
+			TemporalPresentationCallbacks a_callbacks);
+		HRESULT InitializeBridge(
+			IDXGIAdapter* a_adapter,
+			ID3D11Device* a_device,
+			ID3D11DeviceContext* a_context,
+			Streamline* a_streamline = nullptr);
 		void Rollback() noexcept;
 
 		[[nodiscard]] IDXGISwapChain* GetProxy() const noexcept;
 		[[nodiscard]] bool Owns(IDXGISwapChain* a_swapChain) const noexcept;
 		[[nodiscard]] bool IsReady() const noexcept;
+		[[nodiscard]] bool IsBridgeReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationReady() const noexcept;
 		[[nodiscard]] UINT GetWidth() const noexcept;
 		[[nodiscard]] UINT GetHeight() const noexcept;
+		[[nodiscard]] UINT GetFrameSlot() const noexcept;
 
 		[[nodiscard]] SharedD3D11D3D12Texture* GetHudlessTexture() const noexcept;
 		[[nodiscard]] SharedD3D11D3D12Texture* GetProxyTexture() const noexcept;
@@ -95,6 +129,13 @@ namespace cs::features
 		[[nodiscard]] ID3D12Device* GetD3D12Device() const noexcept;
 		[[nodiscard]] IDXGISwapChain4* GetInnerSwapChain() const noexcept;
 		[[nodiscard]] ID3D12CommandQueue* GetCommandQueue() const noexcept;
+		[[nodiscard]] bool DrainSuperResolution() noexcept;
+		bool EvaluateD3D12SuperResolution(
+			render::temporal::ISuperResolutionProvider& a_provider,
+			const SuperResolutionExecutionContext& a_context);
+		bool EvaluateD3D12SuperResolution(
+			XeSSSuperResolution& a_xess,
+			const SuperResolutionExecutionContext& a_context);
 
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void SetOutwardD3D11Device(ID3D11Device* a_device) noexcept;
@@ -120,7 +161,11 @@ namespace cs::features
 		HRESULT GetLastPresentCount(UINT* a_count) noexcept;
 
 	private:
-		HRESULT CreateDevices(IDXGIAdapter* a_adapter, ID3D11Device* a_device, ID3D11DeviceContext* a_context);
+		HRESULT CreateDevices(
+			IDXGIAdapter* a_adapter,
+			ID3D11Device* a_device,
+			ID3D11DeviceContext* a_context,
+			Streamline* a_streamline = nullptr);
 		HRESULT CreateSwapChain(IDXGIAdapter* a_adapter, const DXGI_SWAP_CHAIN_DESC& a_desc);
 		HRESULT CreateInteropFence();
 		HRESULT CreateDisplayResources(
@@ -130,8 +175,10 @@ namespace cs::features
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2>& a_hudless);
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);
+		HRESULT RecreateSuperResolutionBridge(
+			const SuperResolutionExecutionContext& a_context);
 		HRESULT RefreshBackBuffers();
-		HRESULT WaitForFrame(UINT a_frameIndex) noexcept;
+		HRESULT WaitForFrame(UINT a_slot) noexcept;
 		HRESULT WaitForGpu() noexcept;
 		HRESULT PresentImpl(UINT a_syncInterval, UINT a_flags);
 		HRESULT ResizeBuffersImpl(
@@ -157,16 +204,30 @@ namespace cs::features
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _hudlessBuffers;
 		std::unique_ptr<SharedD3D11D3D12Texture> _depthBuffer;
 		std::unique_ptr<SharedD3D11D3D12Texture> _motionBuffer;
+		std::unique_ptr<SharedD3D11D3D12Texture> _srColorInput;
+		std::unique_ptr<SharedD3D11D3D12Texture> _srOutput;
+		std::unique_ptr<SharedD3D11D3D12Texture> _srDepth;
+		std::unique_ptr<SharedD3D11D3D12Texture> _srMotion;
+		std::unique_ptr<SharedD3D11D3D12Texture> _srReactive;
+		std::unique_ptr<SharedD3D11D3D12Texture> _srTransparency;
 		std::unique_ptr<DXGISwapChainProxy> _proxy;
-		FidelityFX* _fidelityFX = nullptr;
+		render::temporal::IFrameGenerationProvider* _provider = nullptr;
+		TemporalPresentationCallbacks _callbacks;
 		DXGI_SWAP_CHAIN_DESC _proxyDesc{};
 		DXGI_SWAP_CHAIN_DESC1 _innerDesc{};
 		UINT _frameIndex = 0;
+		UINT _frameSlot = 0;
 		UINT64 _nextFenceValue = 1;
 		UINT64 _allocatorFenceValues[2]{};
+		bool _vendorRetirementPending[2]{};
 		HANDLE _fenceEvent = nullptr;
 		bool _frameGenerationInputsReady = false;
 		bool _frameGenerationDisabled = false;
+		bool _presentPrepared = false;
+		bool _preparedFrameGeneration = false;
+		bool _vendorConsumptionPossible = false;
+		bool _preparedTransaction = false;
 		bool _published = false;
+		bool _bridgeReady = false;
 	};
 }

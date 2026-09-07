@@ -243,7 +243,9 @@ namespace
 		const std::vector<cs::host::FeaturePageInput> features{
 			{ "WetnessEffects", "Wetness Effects", "Lighting", "Rain film.", true, true },
 			{ "RenderDoc", "RenderDoc", "Dev Tools", "Capture.", false, true },
-			{ "Performance Overlay!", "Performance Overlay", "Performance", "FPS.", true, true }
+			{ "Performance Overlay!", "Performance Overlay", "Performance", "FPS.", true, true },
+			{ "Upscaling", "Upscaling", "Performance", "Temporal SR.", true, true },
+			{ "FrameGeneration", "Frame Generation", "Performance", "Temporal FG.", false, true }
 		};
 		const auto pages = cs::host::BuildPageCatalog(features);
 		CHECK(pages.size() == features.size() + 4);
@@ -266,6 +268,14 @@ namespace
 		}));
 		CHECK(std::ranges::any_of(pages, [](const auto& page) {
 			return page.id == "feature-performance-overlay";
+		}));
+		CHECK(std::ranges::any_of(pages, [](const auto& page) {
+			return page.id == "feature-upscaling" &&
+				page.category == "Performance";
+		}));
+		CHECK(std::ranges::any_of(pages, [](const auto& page) {
+			return page.id == "feature-framegeneration" &&
+				page.category == cs::host::kUnloadedCategory;
 		}));
 	}
 

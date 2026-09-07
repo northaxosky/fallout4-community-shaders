@@ -5,6 +5,7 @@
 
 #include <functional>
 #include <optional>
+#include <cstdint>
 #include <vector>
 
 namespace cs::render
@@ -38,10 +39,19 @@ namespace cs::render
 	using ReplacementCreateDeviceCallback =
 		std::function<std::optional<HRESULT>(CreateDeviceAndSwapChainContext&)>;
 
+	enum class SwapChainHookState : std::uint8_t
+	{
+		kUnattempted,
+		kInstalling,
+		kInstalled,
+		kFailed
+	};
+
 	// Register only on the startup thread, before the swap chain is created.
-	void RegisterPreCreateDeviceAndSwapChain(PreCreateDeviceCallback a_callback);
-	void RegisterPostCreateDeviceAndSwapChain(PostCreateDeviceCallback a_callback);
+	bool RegisterPreCreateDeviceAndSwapChain(PreCreateDeviceCallback a_callback);
+	bool RegisterPostCreateDeviceAndSwapChain(PostCreateDeviceCallback a_callback);
 	bool RegisterReplacementCreateDeviceAndSwapChain(ReplacementCreateDeviceCallback a_callback);
 
-	void InstallSwapChainHook();
+	bool InstallSwapChainHook();
+	[[nodiscard]] SwapChainHookState GetSwapChainHookState() noexcept;
 }

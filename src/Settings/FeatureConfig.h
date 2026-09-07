@@ -40,11 +40,20 @@ namespace cs::feature_config
 		FileLoadStatus userStatus{ FileLoadStatus::kMissing };
 		bool defaultLoaded{ false };
 		bool userLoaded{ false };
+		bool userMigrated{ false };
 		std::string defaultError;
 		std::string userWarning;
+		std::string migrationNotice;
+	};
+
+	struct TemporalMigrationResult
+	{
+		bool changed{ false };
+		std::string notice;
 	};
 
 	void DeepMerge(toml::table& a_base, const toml::table& a_override);
+	TemporalMigrationResult NormalizeLegacyTemporalSettings(toml::table& a_userRoot);
 	UnifiedLoadResult LoadMergedFiles(
 		const std::filesystem::path& a_defaultPath,
 		const std::filesystem::path& a_userPath);

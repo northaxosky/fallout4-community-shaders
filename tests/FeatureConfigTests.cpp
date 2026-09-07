@@ -265,6 +265,88 @@ namespace
 		CHECK(base["features"]["Two"]["load"].value<bool>() == std::optional<bool>{ false });
 	}
 
+	void TestLegacyTemporalMigration()
+	{
+		auto user = Parse(
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.Upscaling.settings]\n"
+			"upscale_method = 3\n"
+			"frame_generation_mode = 1\n"
+			"frame_generation_force_enable = 1\n"
+			"frame_generation_allow_in_menus = true\n");
+		const auto migration =
+			cs::feature_config::NormalizeLegacyTemporalSettings(user);
+		CHECK(migration.changed);
+		CHECK(!migration.notice.empty());
+		CHECK(user["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(user["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
+		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_force_enable"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
+		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_allow_in_menus"].value<bool>() == std::optional<bool>{ true });
+		CHECK(!user["features"]["Upscaling"]["settings"].as_table()->contains("frame_generation_mode"));
+
+		auto disabled = Parse(
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.Upscaling.settings]\n"
+			"frame_generation_mode = 0\n");
+		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(disabled).changed);
+		CHECK(disabled["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
+		CHECK(disabled["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
+		CHECK(disabled["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 0 });
+
+		auto anniversaryProfile = Parse(
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.Upscaling.settings]\n"
+			"enabled = true\n"
+			"upscale_method = 3\n"
+			"upscale_method_no_dlss = 2\n"
+			"quality_mode = 1\n"
+			"sharpness_fsr = 0.4\n"
+			"frame_generation_mode = 0\n");
+		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(anniversaryProfile).changed);
+		CHECK(anniversaryProfile["features"]["Upscaling"]["load"].value<bool>() == std::optional<bool>{ true });
+		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
+		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["upscale_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
+		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["upscale_method_no_dlss"].value<std::int64_t>() == std::optional<std::int64_t>{ 2 });
+		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["quality_mode"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
+		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["sharpness_fsr"].value<double>() == std::optional<double>{ 0.4 });
+		CHECK(anniversaryProfile["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
+		CHECK(anniversaryProfile["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
+		CHECK(anniversaryProfile["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 0 });
+
+		auto explicitNew = Parse(
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.Upscaling.settings]\n"
+			"frame_generation_mode = 1\n"
+			"[features.FrameGeneration]\n"
+			"load = false\n"
+			"[features.FrameGeneration.settings]\n"
+			"enabled = false\n"
+			"frame_generation_method = 3\n");
+		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(explicitNew).changed);
+		CHECK(explicitNew["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
+		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
+		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
+
+		auto malformed = Parse(
+			"[features.Upscaling]\n"
+			"load = \"yes\"\n"
+			"[features.Upscaling.settings]\n"
+			"frame_generation_mode = \"fsr3\"\n"
+			"frame_generation_force_enable = true\n"
+			"frame_generation_allow_in_menus = 1\n");
+		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(malformed).changed);
+		CHECK(malformed["features"]["FrameGeneration"]["load"].is_string());
+		CHECK(malformed["features"]["FrameGeneration"]["settings"]["enabled"].is_string());
+		CHECK(malformed["features"]["FrameGeneration"]["settings"]["frame_generation_method"].is_string());
+		CHECK(malformed["features"]["FrameGeneration"]["settings"]["frame_generation_force_enable"].is_boolean());
+		CHECK(malformed["features"]["FrameGeneration"]["settings"]["frame_generation_allow_in_menus"].is_integer());
+	}
+
 	void TestMergedLoadFailureModes(const std::filesystem::path& a_root)
 	{
 		const auto defaultPath = a_root / "Default.toml";
@@ -342,7 +424,7 @@ namespace
 			cs::feature_config::kAllFeatureKeys.end());
 		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "MotionVectorFixes") !=
 			cs::feature_config::kAllFeatureKeys.end());
-		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "FrameGeneration") ==
+		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "FrameGeneration") !=
 			cs::feature_config::kAllFeatureKeys.end());
 		CHECK(std::ranges::find(cs::feature_config::kAllFeatureKeys, "Upscaling") !=
 			cs::feature_config::kAllFeatureKeys.end());
@@ -740,6 +822,7 @@ int main(int a_argc, char* a_argv[])
 			TestActivationParsing();
 			TestShaderOwnershipParsing();
 			TestDeepMerge();
+			TestLegacyTemporalMigration();
 			TestMergedLoadFailureModes(directory.path);
 			TestUnknownFeatureTableIsHarmless(directory.path);
 			TestAtomicWriteRoundTrip(directory.path);

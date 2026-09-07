@@ -14,7 +14,7 @@
 namespace
 {
 	int failures = 0;
-	constexpr std::array<std::string_view, 10> kExpectedCatalogs{
+	constexpr std::array<std::string_view, 11> kExpectedCatalogs{
 		"DynamicCubemaps",
 		"ExponentialHeightFog",
 		"Skylighting",
@@ -24,6 +24,7 @@ namespace
 		"InverseSquareLighting",
 		"WetnessEffects",
 		"WaterEffects",
+		"FrameGeneration",
 		"Upscaling"
 	};
 
@@ -416,6 +417,20 @@ namespace
 				   "directional probe visibility\n";
 			++failures;
 		}
+		if (a_catalog.className == "Upscaling" &&
+			!catalogBody->contains(".Renderer().GetDebugViews()")) {
+			std::cerr
+				<< "FAIL: Upscaling must delegate its four temporal previews "
+				   "to the core renderer\n";
+			++failures;
+		}
+		if (a_catalog.className == "FrameGeneration" &&
+			CountOccurrences(*catalogBody, "FeatureDebugView{") != 4) {
+			std::cerr
+				<< "FAIL: FrameGeneration must expose exactly four temporal "
+				   "texture previews\n";
+			++failures;
+		}
 		auto settingsBody = FindMethodBody(
 			a_sources,
 			a_catalog,
@@ -441,6 +456,35 @@ namespace
 					  << ": " << a_catalog.className
 					  << "::DrawSettings omits the debug-view selector\n";
 			++failures;
+		}
+		if (a_catalog.className == "Upscaling" &&
+			!settingsBody->contains("RefreshDebugSnapshot()")) {
+			std::cerr
+				<< "FAIL: Upscaling must expose explicit frozen-snapshot refresh\n";
+			++failures;
+		}
+		if (a_catalog.className == "FrameGeneration" &&
+			!settingsBody->contains(
+				"RefreshFrameGenerationDebugSnapshot()")) {
+			std::cerr
+				<< "FAIL: FrameGeneration must expose explicit frozen-snapshot refresh\n";
+			++failures;
+		}
+		if (a_catalog.className == "FrameGeneration") {
+			const auto textureBody = FindMethodBody(
+				a_sources,
+				a_catalog,
+				"GetDebugTexture(DebugViewa_view)const",
+				"GetDebugTexture(DebugViewa_view)const");
+			if (!textureBody ||
+				!textureBody->contains(
+					".Renderer().GetFrameGenerationDebugTexture(view)") ||
+				textureBody->contains("result.texture=debug.srv")) {
+				std::cerr
+					<< "FAIL: FrameGeneration previews must use renderer-owned "
+					   "frozen snapshots instead of live shared SRVs\n";
+				++failures;
+			}
 		}
 	}
 

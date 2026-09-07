@@ -15,6 +15,7 @@
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/ShaderInjection.h"
 #include "Render/SharedData.h"
+#include "Render/TemporalPipeline.h"
 #include "Utils/CSUtil.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 #include "Utils/ShaderCache/CompilerIdentity.h"
@@ -123,6 +124,9 @@ namespace cs::d3d11
 			// Register injections before the registry freezes.
 			InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {
 				engine::SetPixelShaderSwapBrokerDevice(*a_device);
+			});
+			InvokeOwner("Temporal pipeline D3D11 readiness", [&] {
+				render::TemporalPipeline::Get().OnD3D11Ready(a_adapter, *a_device);
 			});
 			InvokeOwner("FeatureManager D3D11 readiness", [&] {
 				FeatureManager::Get().OnD3D11ReadyAll(a_adapter, *a_device);

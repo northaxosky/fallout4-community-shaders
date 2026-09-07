@@ -17,7 +17,7 @@
 #include <FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp>
 #include <FidelityFX/framegeneration/include/ffx_framegeneration.hpp>
 
-#include "SuperResolutionFov.h"
+#include "SuperResolutionContext.h"
 
 namespace cs::features
 {
@@ -35,12 +35,8 @@ namespace cs::features
 			float nearPlane = 0.0f;
 			float farPlane = 0.0f;
 			float verticalFov = 0.0f;
-			float frustumVerticalFov = 0.0f;
-			float frustumCameraOffset = 0.0f;
 			float frameTimeDelta = 0.0f;
 			std::uint32_t frameCount = 0;
-			bool frustumAvailable = false;
-			bool frustumOrthographic = false;
 			bool valid = false;
 		};
 
@@ -62,11 +58,21 @@ namespace cs::features
 		void DestroySwapChainContext() noexcept;
 		bool WaitForPresents() noexcept;
 		bool PresentFrameGeneration(
-			DX12SwapChain& a_swapChain,
+			ID3D12GraphicsCommandList* a_commandList,
+			IDXGISwapChain4* a_swapChain,
+			ID3D12Resource* a_hudlessColor,
+			ID3D12Resource* a_depth,
+			ID3D12Resource* a_motionVectors,
 			bool a_enable,
 			std::uint32_t a_renderWidth,
-			std::uint32_t a_renderHeight);
-		bool CacheFrameGenerationCameraData() noexcept;
+			std::uint32_t a_renderHeight,
+			std::uint32_t a_outputWidth,
+			std::uint32_t a_outputHeight,
+			float a_jitterX = 0.0f,
+			float a_jitterY = 0.0f,
+			ColorMetadata a_color = {});
+		bool SetFrameGenerationCameraData(
+			const FrameGenerationCameraSnapshot& a_camera) noexcept;
 		void ResetFrameGenerationCameraData() noexcept;
 		void RequestFrameGenerationReset() noexcept;
 		[[nodiscard]] bool IsFrameGenerationModuleReady() const noexcept;
@@ -78,16 +84,10 @@ namespace cs::features
 			return frameGenerationCameraData;
 		}
 
-		bool CreateFSRResources();
+		bool CreateFSRResources(const SuperResolutionInitContext& a_context);
 		void DestroyFSRResources();
 
-		bool Upscale(
-			ID3D11Resource* a_upscalingTexture,
-			ID3D11Resource* a_reactiveMask,
-			ID3D11Resource* a_transparencyCompositionMask,
-			ID3D11Resource* a_motionVectors,
-			float a_sharpness,
-			bool a_resetHistory);
+		bool Upscale(const SuperResolutionExecutionContext& a_context);
 
 		[[nodiscard]] bool IsReady() const noexcept { return contextCreated; }
 
@@ -104,6 +104,5 @@ namespace cs::features
 		bool frameGenerationActive = false;
 		bool fsrDispatchCrashLogged = false;
 		FrameGenerationCameraSnapshot frameGenerationCameraData{};
-		SuperResolutionFovCache superResolutionFovCache;
 	};
 }

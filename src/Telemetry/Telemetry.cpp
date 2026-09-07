@@ -309,6 +309,7 @@ namespace cs::telemetry
 					"matching_map_data_pointers",
 					TomlInteger(status.matchingMapDataPointers))
 				.Field("matching_unmaps", TomlInteger(status.matchingUnmaps))
+				.Field("context_hook_refreshes", TomlInteger(status.contextHookRefreshes))
 				.Field("map_hook_current", status.mapHookCurrent)
 				.Field("unmap_hook_current", status.unmapHookCurrent)
 				.Field("maps_last_frame", static_cast<std::int64_t>(status.mapsLastFrame))

@@ -62,6 +62,7 @@ namespace cs::engine
 		std::uint64_t matchingMapSuccesses = 0;
 		std::uint64_t matchingMapDataPointers = 0;
 		std::uint64_t matchingUnmaps = 0;
+		std::uint64_t contextHookRefreshes = 0;
 		bool          mapHookCurrent = false;
 		bool          unmapHookCurrent = false;
 		std::uint32_t mapsLastFrame = 0;
@@ -93,6 +94,8 @@ namespace cs::engine
 
 	// Installs the Map/Unmap detours once the immediate context exists.
 	void OnFrameBufferD3D11Ready(ID3D11DeviceContext* a_context);
+	// Native context state changes may replace its inline dispatch table between frames.
+	void RefreshFrameBufferContextHooks();
 
 	// Render thread only. Returns the world-camera snapshot published at an exact draw.
 	[[nodiscard]] const FrameBufferSnapshot& GetFrameBuffer() noexcept;

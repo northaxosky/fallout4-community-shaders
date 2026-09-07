@@ -153,19 +153,13 @@ load = false
 # Runtime toggle for the resolve. The feature itself ships off above.
 enabled = true
 
-# 0 = None, 1 = TAA, 2 = FSR 3, 3 = DLSS. The second key is used when DLSS is unavailable.
+# 0 = None, 1 = TAA, 2 = FSR 3, 3 = DLSS, 4 = XeSS.
+# The second key is used when DLSS is unavailable.
 upscale_method = 3
 upscale_method_no_dlss = 2
 
 # 0 = Native AA, 1 = Quality, 2 = Balanced, 3 = Performance, 4 = Ultra Performance.
 quality_mode = 1
-
-# AMD FSR 3 frame generation uses a startup-only D3D12 proxy independently of the selected upscaler.
-frame_generation_mode = 1
-# Allow proxy startup below 120 Hz. Changing either startup setting requires a game restart.
-frame_generation_force_enable = 0
-# Generated frames are disabled in pause, main, loading, and Pip-Boy menus by default.
-frame_generation_allow_in_menus = false
 
 # 0 = Default, 1 = J, 2 = K, 3 = L, 4 = M.
 preset_dlss = 0
@@ -176,6 +170,20 @@ sharpness_dlss = 0.0
 
 # 0 = Off, 1 = Default, 2 = Verbose. Applied when Streamline initializes at start-up.
 streamline_log_level = 0
+
+[features.FrameGeneration]
+load = false
+
+[features.FrameGeneration.settings]
+enabled = true
+# 0 = Off, 1 = FSR 3, 2 = DLSS-G, 3 = XeSS-FG.
+frame_generation_method = 1
+# Allow proxy startup below 120 Hz. Changing startup topology requires a game restart.
+frame_generation_force_enable = 0
+# Generated frames are disabled in pause, main, loading, and Pip-Boy menus by default.
+frame_generation_allow_in_menus = false
+# Keep a bounded in-memory phase trace and include it in failure logs.
+detailed_diagnostics = false
 
 [features.PerformanceOverlay]
 load = false

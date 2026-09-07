@@ -8,9 +8,7 @@
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Engine.h"
-#include "Render/FrameBuffer.h"
 #include "Render/RendererContext.h"
-#include "Upscaling.h"
 
 ffxFunctions ffxModule{};
 
@@ -186,39 +184,10 @@ namespace cs::features
 		swapChainContextCreated = false;
 	}
 
-	bool FidelityFX::CacheFrameGenerationCameraData() noexcept
+	bool FidelityFX::SetFrameGenerationCameraData(
+		const FrameGenerationCameraSnapshot& a_camera) noexcept
 	{
 		frameGenerationCameraData = {};
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
-		float verticalFov = 0.0f;
-		// Generated frames can be omitted safely; never reuse stale camera data.
-		if (!cs::engine::HasUsableWorldCamera(frameBuffer.data) ||
-			!TryGetPublishedVerticalFov(frameBuffer, verticalFov)) {
-			return false;
-		}
-
-		FrameGenerationCameraSnapshot data{};
-		const auto basis = cs::engine::GetCameraWorldBasis(frameBuffer.data);
-		const auto position = cs::engine::CameraWorldOrigin(frameBuffer.data);
-		data.right[0] = basis.right.x;
-		data.right[1] = basis.right.y;
-		data.right[2] = basis.right.z;
-		data.up[0] = basis.up.x;
-		data.up[1] = basis.up.y;
-		data.up[2] = basis.up.z;
-		data.forward[0] = basis.forward.x;
-		data.forward[1] = basis.forward.y;
-		data.forward[2] = basis.forward.z;
-		data.position[0] = position.x;
-		data.position[1] = position.y;
-		data.position[2] = position.z;
-		data.nearPlane = cs::engine::GetCameraNear();
-		data.farPlane = cs::engine::GetCameraFar();
-		data.verticalFov = verticalFov;
-		data.frameCount = frameBuffer.frameCount;
-		if (auto* timer = RE::BSTimer::GetSingleton()) {
-			data.frameTimeDelta = timer->realTimeDelta * 1000.0f;
-		}
 		const auto finiteVector = [](const float (&a_vector)[3]) {
 			return std::ranges::all_of(a_vector, [](float a_value) {
 				return std::isfinite(a_value);
@@ -236,42 +205,28 @@ namespace cs::features
 			[&](const float (&a_left)[3], const float (&a_right)[3]) {
 				return std::abs(dot(a_left, a_right)) <= 0.05f;
 			};
-		if (auto* camera = cs::engine::GetWorldRootCamera()) {
-			const auto& frustum = camera->viewFrustum;
-			data.frustumAvailable = true;
-			data.frustumOrthographic = frustum.ortho;
-			const float frustumFov = std::atan(frustum.top) - std::atan(frustum.bottom);
-			if (std::isfinite(frustumFov)) {
-				data.frustumVerticalFov = frustumFov;
-			}
-			const auto& frustumPosition = camera->GetWorldTranslate();
-			const float deltaX = frustumPosition.x - position.x;
-			const float deltaY = frustumPosition.y - position.y;
-			const float deltaZ = frustumPosition.z - position.z;
-			data.frustumCameraOffset =
-				std::sqrt(deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ);
-		}
-		data.valid = finiteVector(data.right) &&
-			finiteVector(data.up) &&
-			finiteVector(data.forward) &&
-			finiteVector(data.position) &&
-			approximatelyUnit(data.right) &&
-			approximatelyUnit(data.up) &&
-			approximatelyUnit(data.forward) &&
-			approximatelyOrthogonal(data.right, data.up) &&
-			approximatelyOrthogonal(data.right, data.forward) &&
-			approximatelyOrthogonal(data.up, data.forward) &&
-			std::isfinite(data.nearPlane) &&
-			std::isfinite(data.farPlane) &&
-			std::isfinite(data.verticalFov) &&
-			std::isfinite(data.frameTimeDelta) &&
-			data.nearPlane > 0.0f &&
-			data.farPlane > data.nearPlane &&
-			data.frameTimeDelta >= 0.0f;
-		if (!data.valid) {
+		const bool valid = a_camera.valid &&
+			finiteVector(a_camera.right) &&
+			finiteVector(a_camera.up) &&
+			finiteVector(a_camera.forward) &&
+			finiteVector(a_camera.position) &&
+			approximatelyUnit(a_camera.right) &&
+			approximatelyUnit(a_camera.up) &&
+			approximatelyUnit(a_camera.forward) &&
+			approximatelyOrthogonal(a_camera.right, a_camera.up) &&
+			approximatelyOrthogonal(a_camera.right, a_camera.forward) &&
+			approximatelyOrthogonal(a_camera.up, a_camera.forward) &&
+			std::isfinite(a_camera.nearPlane) &&
+			std::isfinite(a_camera.farPlane) &&
+			std::isfinite(a_camera.verticalFov) &&
+			std::isfinite(a_camera.frameTimeDelta) &&
+			a_camera.nearPlane > 0.0f &&
+			a_camera.farPlane > a_camera.nearPlane &&
+			a_camera.frameTimeDelta >= 0.0f;
+		if (!valid) {
 			return false;
 		}
-		frameGenerationCameraData = data;
+		frameGenerationCameraData = a_camera;
 		return true;
 	}
 
@@ -299,21 +254,32 @@ namespace cs::features
 	}
 
 	bool FidelityFX::PresentFrameGeneration(
-		DX12SwapChain& a_swapChain,
+		ID3D12GraphicsCommandList* a_commandList,
+		IDXGISwapChain4* a_swapChain,
+		ID3D12Resource* a_hudlessColor,
+		ID3D12Resource* a_depth,
+		ID3D12Resource* a_motionVectors,
 		bool a_enable,
 		std::uint32_t a_renderWidth,
-		std::uint32_t a_renderHeight) try
+		std::uint32_t a_renderHeight,
+		std::uint32_t a_outputWidth,
+		std::uint32_t a_outputHeight,
+		float a_jitterX,
+		float a_jitterY,
+		ColorMetadata a_color) try
 	{
 		if (!frameGenerationContextCreated) {
 			frameGenerationActive = false;
 			return false;
 		}
 
+		const bool supportedColor = IsFo4PostTonemapSdr(a_color);
 		const bool useFrameGeneration =
 			a_enable && a_renderWidth > 0 && a_renderHeight > 0 &&
 			frameGenerationCameraData.valid &&
-			a_swapChain.GetHudlessTexture() && a_swapChain.GetDepthTexture() &&
-			a_swapChain.GetMotionTexture() && a_swapChain.GetCommandList();
+			a_swapChain && a_hudlessColor && a_depth &&
+			a_motionVectors && a_commandList &&
+			supportedColor;
 		const auto currentFrameID = frameID.fetch_add(1, std::memory_order_relaxed);
 
 		ffx::ConfigureDescFrameGeneration config{};
@@ -322,6 +288,7 @@ namespace cs::features
 			useFrameGeneration ? &frameGenerationContext : nullptr;
 		config.frameGenerationCallback = useFrameGeneration
 			? [](ffxDispatchDescFrameGeneration* a_params, void* a_context) -> ffxReturnCode_t {
+				// FFX classifies SDR display transfer as sRGB; FO4's LUT-domain source remains intact.
 				a_params->backbufferTransferFunction = FFX_API_BACKBUFFER_TRANSFER_FUNCTION_SRGB;
 				if (callbackReset.exchange(false, std::memory_order_acq_rel)) {
 					a_params->reset = true;
@@ -332,19 +299,19 @@ namespace cs::features
 			}
 			: nullptr;
 		config.HUDLessColor = useFrameGeneration
-			? ffxApiGetResourceDX12(a_swapChain.GetHudlessTexture()->resource12.get())
+			? ffxApiGetResourceDX12(a_hudlessColor)
 			: FfxApiResource({});
 		config.presentCallback = nullptr;
 		config.presentCallbackUserContext = nullptr;
 		config.frameID = currentFrameID;
-		config.swapChain = a_swapChain.GetInnerSwapChain();
+		config.swapChain = a_swapChain;
 		config.onlyPresentGenerated = false;
 		config.flags = 0;
 		config.allowAsyncWorkloads = true;
 		config.generationRect.left = 0;
 		config.generationRect.top = 0;
-		config.generationRect.width = static_cast<std::int32_t>(a_swapChain.GetWidth());
-		config.generationRect.height = static_cast<std::int32_t>(a_swapChain.GetHeight());
+		config.generationRect.width = static_cast<std::int32_t>(a_outputWidth);
+		config.generationRect.height = static_cast<std::int32_t>(a_outputHeight);
 		const auto disableConfiguredGeneration = [&]() {
 			config.frameGenerationEnabled = false;
 			config.frameGenerationCallback = nullptr;
@@ -372,24 +339,23 @@ namespace cs::features
 		}
 
 		if (useFrameGeneration) {
-			auto* upscaling = Upscaling::GetSingleton();
 			ffx::DispatchDescFrameGenerationPrepare prepare{};
-			prepare.commandList = a_swapChain.GetCommandList();
+			prepare.commandList = a_commandList;
 			prepare.motionVectorScale = {
 				static_cast<float>(a_renderWidth),
 				static_cast<float>(a_renderHeight)
 			};
 			prepare.renderSize = { a_renderWidth, a_renderHeight };
-			prepare.jitterOffset = { -upscaling->jitter.x, -upscaling->jitter.y };
+			prepare.jitterOffset = { -a_jitterX, -a_jitterY };
 			prepare.frameTimeDelta = frameGenerationCameraData.frameTimeDelta;
 			prepare.cameraFar = frameGenerationCameraData.farPlane;
 			prepare.cameraNear = frameGenerationCameraData.nearPlane;
 			prepare.cameraFovAngleVertical = frameGenerationCameraData.verticalFov;
 			prepare.viewSpaceToMetersFactor = 0.01428222656f;
 			prepare.frameID = currentFrameID;
-			prepare.depth = ffxApiGetResourceDX12(a_swapChain.GetDepthTexture()->resource12.get());
+			prepare.depth = ffxApiGetResourceDX12(a_depth);
 			prepare.motionVectors =
-				ffxApiGetResourceDX12(a_swapChain.GetMotionTexture()->resource12.get());
+				ffxApiGetResourceDX12(a_motionVectors);
 
 			ffx::DispatchDescFrameGenerationPrepareCameraInfo camera{};
 			std::copy_n(frameGenerationCameraData.right, 3, camera.cameraRight);
@@ -436,21 +402,20 @@ namespace cs::features
 		return frameGenerationActive;
 	}
 
-	bool FidelityFX::CreateFSRResources()
+	bool FidelityFX::CreateFSRResources(const SuperResolutionInitContext& a_context)
 	{
 		if (fsrScratchBuffer) {
 			L->warn("FSR resources already created, skipping allocation");
 			return contextCreated;
 		}
 
-		auto* device = cs::engine::GetDevice();
-		auto* graphicsState = cs::engine::GetGraphicsState();
-		if (!device || !graphicsState) {
+		if (!a_context.device || !a_context.maxRenderWidth || !a_context.maxRenderHeight ||
+			!a_context.outputWidth || !a_context.outputHeight) {
 			L->error("FSR resource creation ran before the renderer was ready");
 			return false;
 		}
 
-		auto fsrDevice = ffxGetDeviceDX11(device);
+		auto fsrDevice = ffxGetDeviceDX11(a_context.device);
 
 		uint32_t numContexts = 1;
 		size_t scratchBufferSize = ffxGetScratchMemorySizeDX11(numContexts);
@@ -470,17 +435,13 @@ namespace cs::features
 			return false;
 		}
 
-		const auto [renderWidth, renderHeight] = Upscaling::GetSingleton()->GetRenderSize();
-		const auto displayWidth = graphicsState->screenWidth;
-		const auto displayHeight = graphicsState->screenHeight;
-
 		FfxFsr3ContextDescription contextDescription{};
-		contextDescription.maxRenderSize.width = renderWidth;
-		contextDescription.maxRenderSize.height = renderHeight;
-		contextDescription.maxUpscaleSize.width = displayWidth;
-		contextDescription.maxUpscaleSize.height = displayHeight;
-		contextDescription.displaySize.width = displayWidth;
-		contextDescription.displaySize.height = displayHeight;
+		contextDescription.maxRenderSize.width = a_context.maxRenderWidth;
+		contextDescription.maxRenderSize.height = a_context.maxRenderHeight;
+		contextDescription.maxUpscaleSize.width = a_context.outputWidth;
+		contextDescription.maxUpscaleSize.height = a_context.outputHeight;
+		contextDescription.displaySize.width = a_context.outputWidth;
+		contextDescription.displaySize.height = a_context.outputHeight;
 		contextDescription.flags = FFX_FSR3_ENABLE_UPSCALING_ONLY | FFX_FSR3_ENABLE_AUTO_EXPOSURE;
 		contextDescription.backBufferFormat = FFX_SURFACE_FORMAT_R8G8B8A8_UNORM;
 		contextDescription.backendInterfaceUpscaling = fsrInterface;
@@ -490,14 +451,20 @@ namespace cs::features
 			L->critical(
 				"Failed to initialize FSR3 context! FfxErrorCode {:#010x} (display {}x{}, render {}x{})",
 				static_cast<std::uint32_t>(createResult),
-				displayWidth, displayHeight, renderWidth, renderHeight);
+				a_context.outputWidth,
+				a_context.outputHeight,
+				a_context.maxRenderWidth,
+				a_context.maxRenderHeight);
 			free(fsrScratchBuffer);
 			fsrScratchBuffer = nullptr;
 			return false;
 		}
 		contextCreated = true;
 		L->info("Created FSR3 context (Display: {}x{}, Render: {}x{})",
-			displayWidth, displayHeight, renderWidth, renderHeight);
+			a_context.outputWidth,
+			a_context.outputHeight,
+			a_context.maxRenderWidth,
+			a_context.maxRenderHeight);
 		return true;
 	}
 
@@ -518,69 +485,47 @@ namespace cs::features
 		fsrDispatchCrashLogged = false;
 	}
 
-	bool FidelityFX::Upscale(
-		ID3D11Resource* a_upscalingTexture,
-		ID3D11Resource* a_reactiveMask,
-		ID3D11Resource* a_transparencyCompositionMask,
-		ID3D11Resource* a_motionVectors,
-		float a_sharpness,
-		bool a_resetHistory)
+	bool FidelityFX::Upscale(const SuperResolutionExecutionContext& a_context)
 	{
-		auto* context = cs::engine::GetImmediateContext();
-		auto* depthTexture = cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
-		if (!context || !depthTexture || !contextCreated)
+		if (!a_context.commandContext || !a_context.depth || !a_context.colorInput ||
+			!a_context.privateOutput || !a_context.motionVectors ||
+			!a_context.reactiveMask || !a_context.transparencyCompositionMask ||
+			!a_context.renderWidth || !a_context.renderHeight || !contextCreated ||
+			!IsFo4PostTonemapSdr(a_context.color) ||
+			a_context.cameraVerticalFov <= 0.0f)
 			return false;
-
-		const auto& frameBuffer = cs::engine::GetFrameBuffer();
-		float verticalFov = 0.0f;
-		// Native TAA may already be suppressed, so a transient miss must not decline the resolve.
-		const auto fovSource = superResolutionFovCache.Resolve(frameBuffer, verticalFov);
-		if (fovSource == SuperResolutionFovSource::kUnavailable) {
-			CS_LOG_ONCE(
-				L,
-				spdlog::level::warn,
-				"FSR3 super-resolution skipped: no current or cached camera projection is available.");
-			return false;
-		}
-		if (fovSource == SuperResolutionFovSource::kCached) {
-			CS_LOG_EVERY_MS(
-				L,
-				2000,
-				spdlog::level::warn,
-				"FSR3 super-resolution is using the last valid camera FOV.");
-		}
-
-		auto* upscaling = Upscaling::GetSingleton();
-		const auto [renderWidth, renderHeight] = upscaling->GetRenderSize();
-		auto jitter = upscaling->jitter;
 
 		FfxFsr3DispatchUpscaleDescription dispatchParameters{};
-		dispatchParameters.commandList = ffxGetCommandListDX11(context);
-		dispatchParameters.color = GetFfxResource(a_upscalingTexture, L"FSR3_Input_OutputColor");
-		dispatchParameters.depth = GetFfxResource(depthTexture, L"FSR3_InputDepth");
-		dispatchParameters.motionVectors = GetFfxResource(a_motionVectors, L"FSR3_InputMotionVectors");
+		dispatchParameters.commandList = ffxGetCommandListDX11(a_context.commandContext);
+		dispatchParameters.color = GetFfxResource(a_context.colorInput, L"FSR3_InputColor");
+		dispatchParameters.depth = GetFfxResource(a_context.depth, L"FSR3_InputDepth");
+		dispatchParameters.motionVectors =
+			GetFfxResource(a_context.motionVectors, L"FSR3_InputMotionVectors");
 		dispatchParameters.exposure = GetFfxResource(nullptr, L"FSR3_InputExposure");
-		dispatchParameters.upscaleOutput = GetFfxResource(a_upscalingTexture, L"FSR3_OutputColor");
-		dispatchParameters.reactive = GetFfxResource(a_reactiveMask, L"FSR3_InputReactiveMap");
-		dispatchParameters.transparencyAndComposition = GetFfxResource(a_transparencyCompositionMask, L"FSR3_TransparencyAndCompositionMap");
+		dispatchParameters.upscaleOutput =
+			GetFfxResource(a_context.privateOutput, L"FSR3_OutputColor");
+		dispatchParameters.reactive =
+			GetFfxResource(a_context.reactiveMask, L"FSR3_InputReactiveMap");
+		dispatchParameters.transparencyAndComposition = GetFfxResource(
+			a_context.transparencyCompositionMask,
+			L"FSR3_TransparencyAndCompositionMap");
 
-		dispatchParameters.motionVectorScale.x = static_cast<float>(renderWidth);
-		dispatchParameters.motionVectorScale.y = static_cast<float>(renderHeight);
-		dispatchParameters.renderSize.width = renderWidth;
-		dispatchParameters.renderSize.height = renderHeight;
+		dispatchParameters.motionVectorScale.x = static_cast<float>(a_context.renderWidth);
+		dispatchParameters.motionVectorScale.y = static_cast<float>(a_context.renderHeight);
+		dispatchParameters.renderSize.width = a_context.renderWidth;
+		dispatchParameters.renderSize.height = a_context.renderHeight;
 
-		dispatchParameters.jitterOffset.x = -jitter.x;
-		dispatchParameters.jitterOffset.y = -jitter.y;
+		dispatchParameters.jitterOffset.x = -a_context.jitterX;
+		dispatchParameters.jitterOffset.y = -a_context.jitterY;
 
-		auto* timer = RE::BSTimer::GetSingleton();
-		dispatchParameters.frameTimeDelta = (timer ? timer->realTimeDelta : 0.0f) * 1000.f;
-		dispatchParameters.cameraFar = cs::engine::GetCameraFar();
-		dispatchParameters.cameraNear = cs::engine::GetCameraNear();
+		dispatchParameters.frameTimeDelta = a_context.frameTimeMilliseconds;
+		dispatchParameters.cameraFar = a_context.cameraFar;
+		dispatchParameters.cameraNear = a_context.cameraNear;
 		dispatchParameters.enableSharpening = true;
-		dispatchParameters.sharpness = a_sharpness;
-		dispatchParameters.cameraFovAngleVertical = verticalFov;
+		dispatchParameters.sharpness = a_context.sharpness;
+		dispatchParameters.cameraFovAngleVertical = a_context.cameraVerticalFov;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
-		dispatchParameters.reset = a_resetHistory;
+		dispatchParameters.reset = a_context.resetHistory;
 		dispatchParameters.preExposure = 1.0f;
 		dispatchParameters.flags = 0;
 

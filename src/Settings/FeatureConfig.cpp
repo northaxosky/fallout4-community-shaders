@@ -313,6 +313,120 @@ namespace cs::feature_config
 		}
 	}
 
+	TemporalMigrationResult NormalizeLegacyTemporalSettings(toml::table& a_userRoot)
+	{
+		TemporalMigrationResult result;
+		auto* features = a_userRoot["features"].as_table();
+		if (!features) {
+			return result;
+		}
+
+		auto* upscaling = (*features)["Upscaling"].as_table();
+		auto* legacySettings = upscaling ? (*upscaling)["settings"].as_table() : nullptr;
+		auto* frameGeneration = (*features)["FrameGeneration"].as_table();
+		const bool legacyLoadPresent = upscaling && upscaling->contains("load");
+		const bool legacySettingsPresent = legacySettings &&
+			(legacySettings->contains("frame_generation_mode") ||
+				legacySettings->contains("frame_generation_force_enable") ||
+				legacySettings->contains("frame_generation_allow_in_menus"));
+		if (!frameGeneration && !legacyLoadPresent && !legacySettingsPresent) {
+			return result;
+		}
+
+		if (!frameGeneration) {
+			features->insert_or_assign("FrameGeneration", toml::table{});
+			frameGeneration = (*features)["FrameGeneration"].as_table();
+		}
+		if (!frameGeneration) {
+			return result;
+		}
+
+		bool legacyLoad = false;
+		const toml::node* legacyLoadNode = nullptr;
+		if (upscaling) {
+			legacyLoadNode = upscaling->get("load");
+			if (const auto value = (*upscaling)["load"].value<bool>()) {
+				legacyLoad = *value;
+			}
+		}
+
+		std::int64_t legacyMode = 1;
+		const toml::node* legacyModeNode = nullptr;
+		const toml::node* legacyForceNode = nullptr;
+		const toml::node* legacyMenusNode = nullptr;
+		if (legacySettings) {
+			legacyModeNode = legacySettings->get("frame_generation_mode");
+			legacyForceNode = legacySettings->get("frame_generation_force_enable");
+			legacyMenusNode = legacySettings->get("frame_generation_allow_in_menus");
+			if (legacyModeNode) {
+				if (const auto value = legacyModeNode->value<std::int64_t>()) {
+					legacyMode = *value;
+				}
+			}
+		}
+
+		if (!frameGeneration->contains("load")) {
+			if (legacyLoadNode && !legacyLoadNode->is_boolean()) {
+				frameGeneration->insert_or_assign("load", *legacyLoadNode);
+			} else {
+				frameGeneration->insert_or_assign(
+					"load",
+					legacyLoad && legacyMode > 0);
+			}
+		}
+		auto* newSettings = (*frameGeneration)["settings"].as_table();
+		if (!newSettings) {
+			frameGeneration->insert_or_assign("settings", toml::table{});
+			newSettings = (*frameGeneration)["settings"].as_table();
+		}
+		if (!newSettings) {
+			return result;
+		}
+		if (!newSettings->contains("enabled")) {
+			if (legacyModeNode && !legacyModeNode->is_integer()) {
+				newSettings->insert_or_assign("enabled", *legacyModeNode);
+			} else {
+				newSettings->insert_or_assign("enabled", legacyMode > 0);
+			}
+		}
+		if (!newSettings->contains("frame_generation_method")) {
+			if (legacyModeNode) {
+				newSettings->insert_or_assign(
+					"frame_generation_method", *legacyModeNode);
+			} else {
+				newSettings->insert_or_assign("frame_generation_method", 1);
+			}
+		}
+		if (!newSettings->contains("frame_generation_force_enable")) {
+			if (legacyForceNode) {
+				newSettings->insert_or_assign(
+					"frame_generation_force_enable", *legacyForceNode);
+			} else {
+				newSettings->insert_or_assign("frame_generation_force_enable", 0);
+			}
+		}
+		if (!newSettings->contains("frame_generation_allow_in_menus")) {
+			if (legacyMenusNode) {
+				newSettings->insert_or_assign(
+					"frame_generation_allow_in_menus", *legacyMenusNode);
+			} else {
+				newSettings->insert_or_assign(
+					"frame_generation_allow_in_menus", false);
+			}
+		}
+
+		if (legacySettings) {
+			legacySettings->erase("frame_generation_mode");
+			legacySettings->erase("frame_generation_force_enable");
+			legacySettings->erase("frame_generation_allow_in_menus");
+		}
+		result.changed = true;
+		result.notice =
+			"Legacy Upscaling frame-generation settings were normalized to features.FrameGeneration; "
+			"the next explicit settings save will persist the migration.";
+		return result;
+	}
+
 	UnifiedLoadResult LoadMergedFiles(
 		const std::filesystem::path& a_defaultPath,
 		const std::filesystem::path& a_userPath)
@@ -334,6 +448,11 @@ namespace cs::feature_config
 			break;
 		case FileLoadStatus::kParsed:
 			result.userRoot = std::move(userLoad.table);
+			if (const auto migration = NormalizeLegacyTemporalSettings(result.userRoot);
+				migration.changed) {
+				result.userMigrated = true;
+				result.migrationNotice = migration.notice;
+			}
 			DeepMerge(result.root, result.userRoot);
 			result.userLoaded = true;
 			break;

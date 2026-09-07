@@ -17,8 +17,8 @@ namespace cs::render
 	{
 		auto* L = cs::log::Get("cs.render.swapchainhook");
 		std::atomic<CreateDeviceAndSwapChain> nextCreateDeviceAndSwapChain{ nullptr };
+		std::atomic<SwapChainHookState> installState{ SwapChainHookState::kUnattempted };
 		std::mutex installMutex;
-		bool installAttempted = false;
 		std::vector<PreCreateDeviceCallback> preCreateCallbacks;
 		std::vector<PostCreateDeviceCallback> postCreateCallbacks;
 		ReplacementCreateDeviceCallback replacementCreateCallback;
@@ -92,9 +92,15 @@ namespace cs::render
 
 			std::optional<HRESULT> replacementResult;
 			if (replacementCreateCallback) {
-				RunGuarded("replacement-create", [&] {
+				try {
 					replacementResult = replacementCreateCallback(context);
-				});
+				} catch (const std::exception& e) {
+					L->error("SwapChainHook replacement-create callback threw: {}", e.what());
+					replacementResult = E_FAIL;
+				} catch (...) {
+					L->error("SwapChainHook replacement-create callback threw");
+					replacementResult = E_FAIL;
+				}
 			}
 
 			const HRESULT result = replacementResult
@@ -132,50 +138,93 @@ namespace cs::render
 		}
 	}
 
-	void RegisterPreCreateDeviceAndSwapChain(PreCreateDeviceCallback a_callback)
+	bool RegisterPreCreateDeviceAndSwapChain(PreCreateDeviceCallback a_callback)
 	{
-		if (a_callback) {
-			preCreateCallbacks.push_back(std::move(a_callback));
+		std::scoped_lock lock(installMutex);
+		if (!a_callback ||
+			installState.load(std::memory_order_acquire) !=
+				SwapChainHookState::kUnattempted) {
+			return false;
 		}
+		preCreateCallbacks.push_back(std::move(a_callback));
+		return true;
 	}
 
-	void RegisterPostCreateDeviceAndSwapChain(PostCreateDeviceCallback a_callback)
+	bool RegisterPostCreateDeviceAndSwapChain(PostCreateDeviceCallback a_callback)
 	{
-		if (a_callback) {
-			postCreateCallbacks.push_back(std::move(a_callback));
+		std::scoped_lock lock(installMutex);
+		if (!a_callback ||
+			installState.load(std::memory_order_acquire) !=
+				SwapChainHookState::kUnattempted) {
+			return false;
 		}
+		postCreateCallbacks.push_back(std::move(a_callback));
+		return true;
 	}
 
 	bool RegisterReplacementCreateDeviceAndSwapChain(ReplacementCreateDeviceCallback a_callback)
 	{
-		if (!a_callback || replacementCreateCallback) {
+		std::scoped_lock lock(installMutex);
+		if (!a_callback || replacementCreateCallback ||
+			installState.load(std::memory_order_acquire) !=
+				SwapChainHookState::kUnattempted) {
 			return false;
 		}
 		replacementCreateCallback = std::move(a_callback);
 		return true;
 	}
 
-	void InstallSwapChainHook()
+	bool InstallSwapChainHook()
 	{
 		std::scoped_lock lock(installMutex);
-		if (installAttempted) {
-			return;
+		if (installState.load(std::memory_order_acquire) !=
+			SwapChainHookState::kUnattempted) {
+			return installState.load(std::memory_order_acquire) ==
+				SwapChainHookState::kInstalled;
 		}
-		installAttempted = true;
+		installState.store(SwapChainHookState::kInstalling, std::memory_order_release);
 
 		const auto module = reinterpret_cast<uintptr_t>(GetModuleHandleW(nullptr));
 		if (!module) {
 			L->error("SwapChainHook: GetModuleHandle failed; hook not installed");
-			return;
+			installState.store(SwapChainHookState::kFailed, std::memory_order_release);
+			return false;
 		}
 		const auto previous = Detours::IATHook(
 			module,
 			"d3d11.dll",
 			"D3D11CreateDeviceAndSwapChain",
 			reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainThunk));
+		if (!previous ||
+			previous == reinterpret_cast<uintptr_t>(&CreateDeviceAndSwapChainThunk)) {
+			const auto existing =
+				nextCreateDeviceAndSwapChain.load(std::memory_order_acquire);
+			auto* d3d11 = GetModuleHandleW(L"d3d11.dll");
+			const auto native = d3d11
+				? reinterpret_cast<CreateDeviceAndSwapChain>(
+					GetProcAddress(d3d11, "D3D11CreateDeviceAndSwapChain"))
+				: nullptr;
+			if (!existing && native &&
+				native != &CreateDeviceAndSwapChainThunk) {
+				nextCreateDeviceAndSwapChain.store(native, std::memory_order_release);
+			}
+			L->error(
+				"SwapChainHook IAT installation returned an invalid predecessor ({:#x}); "
+				"the thunk will pass through to the system entry point if it was installed",
+				previous);
+			installState.store(SwapChainHookState::kFailed, std::memory_order_release);
+			return false;
+		}
 		nextCreateDeviceAndSwapChain.store(
 			reinterpret_cast<CreateDeviceAndSwapChain>(previous),
 			std::memory_order_release);
+		installState.store(SwapChainHookState::kInstalled, std::memory_order_release);
 		L->info("SwapChainHook IAT hook installed (next={:#x})", previous);
+		return true;
+	}
+
+	SwapChainHookState GetSwapChainHookState() noexcept
+	{
+		return installState.load(std::memory_order_acquire);
 	}
 }

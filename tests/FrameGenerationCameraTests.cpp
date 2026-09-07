@@ -173,7 +173,11 @@ namespace
 	void TestSourceContracts(
 		const std::filesystem::path& a_fidelityFxPath,
 		const std::filesystem::path& a_enginePath,
-		const std::filesystem::path& a_upscalingPath)
+		const std::filesystem::path& a_upscalingPath,
+		const std::filesystem::path& a_pipelinePath,
+		const std::filesystem::path& a_presentationPath,
+		const std::filesystem::path& a_capturePath,
+		const std::filesystem::path& a_streamlinePath)
 	{
 		const auto fidelityFx = ReadFile(a_fidelityFxPath);
 		Check(
@@ -181,42 +185,67 @@ namespace
 				!fidelityFx.contains(".invView") &&
 				!fidelityFx.contains("cameraState.posAdjust"),
 			"frame generation does not use timing-dependent camera transforms");
+		const auto upscaling = ReadFile(a_upscalingPath) + ReadFile(a_capturePath);
+		const auto pipeline = ReadFile(a_pipelinePath);
+		const auto presentation = ReadFile(a_presentationPath);
+		const auto streamline = ReadFile(a_streamlinePath);
+		const auto xess = ReadFile(a_fidelityFxPath.parent_path() / "XeSS.cpp");
+		const auto bothXeSSBackendsContain = [&xess](std::string_view a_expression) {
+			const auto first = xess.find(a_expression);
+			return first != std::string::npos &&
+				xess.find(a_expression, first + a_expression.size()) != std::string::npos;
+		};
 		Check(
-			fidelityFx.contains("cs::engine::GetFrameBuffer()") &&
-				fidelityFx.contains("cs::engine::CameraWorldOrigin(frameBuffer.data)") &&
-				fidelityFx.contains("cs::engine::GetCameraWorldBasis(frameBuffer.data)") &&
-				fidelityFx.contains("TryGetPublishedVerticalFov(frameBuffer, verticalFov)"),
-			"frame generation reads position, basis, and FOV from the published b12 snapshot");
+			bothXeSSBackendsContain(".jitterOffsetX = -a_request.jitterX") &&
+				bothXeSSBackendsContain(".jitterOffsetY = -a_request.jitterY") &&
+				presentation.contains("constants.jitterOffsetX = -a_request.jitterX") &&
+				presentation.contains("constants.jitterOffsetY = -a_request.jitterY") &&
+				fidelityFx.contains("dispatchParameters.jitterOffset.x = -a_context.jitterX") &&
+				fidelityFx.contains("dispatchParameters.jitterOffset.y = -a_context.jitterY"),
+			"XeSS SR and FG use the same geometry-jitter sign as the FSR SDK contract");
+		Check(
+			streamline.contains("eUseFrameBasedResourceTagging") &&
+				streamline.contains("slSetTagForFrame(*frameToken, vp,") &&
+				!streamline.contains("slSetTag(vp,"),
+			"native DLSS uses the frame-token tagging API required by its session");
+		const auto constantsCall = streamline.find("slSetConstants(");
+		Check(
+			constantsCall != std::string::npos &&
+				constantsCall == streamline.rfind("slSetConstants(") &&
+				streamline.contains("_constantsFrame == a_frameIndex"),
+			"SR and FG share one frame-keyed common-constants publisher");
+		Check(
+			upscaling.contains("cs::engine::GetFrameBuffer()") &&
+				pipeline.contains("cs::engine::CameraWorldOrigin(snapshot.data)") &&
+				pipeline.contains("cs::engine::GetCameraWorldBasis(snapshot.data)") &&
+				pipeline.contains("camera.engineFrame = snapshot.frameCount") &&
+				presentation.contains("SetFrameGenerationCameraData(camera)") &&
+				!fidelityFx.contains("cs::engine::GetFrameBuffer()"),
+			"engine integration passes canonical b12 camera data through the typed provider boundary");
+		Check(
+			upscaling.contains(".depth = superResolutionDepthTexture->resource.get()") &&
+				upscaling.contains("superResolutionDepthTexture->uav.get()"),
+			"SR passes typed depth-copy output instead of sharing the engine depth-stencil resource");
 		const auto upscaleStart = fidelityFx.find("bool FidelityFX::Upscale(");
 		const auto upscaleDispatch =
 			fidelityFx.find("ffxFsr3ContextDispatchUpscale", upscaleStart);
-		const auto upscaleFrameBuffer =
-			fidelityFx.find("const auto& frameBuffer = cs::engine::GetFrameBuffer();", upscaleStart);
-		const auto upscaleFovSource =
-			fidelityFx.find("superResolutionFovCache.Resolve(frameBuffer, verticalFov)", upscaleStart);
-		const auto unavailableFov =
-			fidelityFx.find("fovSource == SuperResolutionFovSource::kUnavailable", upscaleStart);
-		const auto cachedFov =
-			fidelityFx.find("fovSource == SuperResolutionFovSource::kCached", upscaleStart);
 		const auto upscaleFov =
-			fidelityFx.find("dispatchParameters.cameraFovAngleVertical = verticalFov;", upscaleStart);
+			fidelityFx.find(
+				"dispatchParameters.cameraFovAngleVertical = a_context.cameraVerticalFov;",
+				upscaleStart);
 		Check(
 			upscaleStart != std::string::npos &&
 				upscaleDispatch != std::string::npos &&
-				upscaleFrameBuffer > upscaleStart &&
-				upscaleFrameBuffer < upscaleDispatch &&
-				upscaleFovSource > upscaleFrameBuffer &&
-				upscaleFovSource < upscaleDispatch &&
-				unavailableFov > upscaleFovSource &&
-				unavailableFov < upscaleDispatch &&
-				cachedFov > unavailableFov &&
-				cachedFov < upscaleDispatch &&
-				upscaleFov > upscaleFovSource &&
+				upscaleFov > upscaleStart &&
 				upscaleFov < upscaleDispatch &&
-				!fidelityFx.contains("GetVerticalFOV"),
-			"FSR super-resolution receives current or cached b12 FOV without a transient decline");
+				fidelityFx.contains(
+					"dispatchParameters.frameTimeDelta = a_context.frameTimeMilliseconds;") &&
+				!fidelityFx.contains("superResolutionFovCache") &&
+				upscaling.contains(
+					"superResolutionFovCache.Resolve("),
+			"FSR receives caller-resolved camera and timing values through its typed context");
 		const auto frameGenerationStart =
-			fidelityFx.find("bool FidelityFX::CacheFrameGenerationCameraData()");
+			fidelityFx.find("bool FidelityFX::SetFrameGenerationCameraData(");
 		const auto frameGenerationEnd =
 			fidelityFx.find("void FidelityFX::ResetFrameGenerationCameraData()", frameGenerationStart);
 		const auto frameGenerationBlock =
@@ -226,9 +255,11 @@ namespace
 				  frameGenerationEnd - frameGenerationStart)
 			: std::string_view{};
 		Check(
-			frameGenerationBlock.contains("TryGetPublishedVerticalFov(frameBuffer, verticalFov)") &&
-				!frameGenerationBlock.contains("superResolutionFovCache"),
-			"frame generation remains strictly fail-closed instead of reusing cached camera data");
+			frameGenerationBlock.contains("a_camera.valid") &&
+				!frameGenerationBlock.contains("superResolutionFovCache") &&
+				pipeline.contains(
+					"cs::engine::VerticalFieldOfViewFromWorldToClip("),
+			"frame generation validates a strictly current caller-owned camera snapshot");
 
 		const auto engine = ReadFile(a_enginePath);
 		Check(
@@ -238,9 +269,11 @@ namespace
 				!engine.contains("camViewData"),
 			"Engine.h contains no timing-dependent camera transform accessors");
 
-		const auto upscaling = ReadFile(a_upscalingPath);
 		Check(
-			upscaling.contains("fidelityFX.ResetFrameGenerationCameraData();"),
+			upscaling.contains(
+				"ResetFsrFrameGenerationCamera();") &&
+				pipeline.contains(
+					"_impl->fidelityFX.ResetFrameGenerationCameraData();"),
 			"each capture invalidates the previous frame-generation camera before early exits");
 		Check(
 			!upscaling.contains("fg_camera_state_fov_deg") &&
@@ -256,9 +289,11 @@ namespace
 
 int main(int argc, char** argv)
 {
-	if (argc < 4) {
+	if (argc != 8) {
 		std::cerr <<
-			"usage: FrameGenerationCameraTests <FidelityFX.cpp> <Engine.h> <Upscaling.cpp>\n";
+			"usage: FrameGenerationCameraTests <FidelityFX.cpp> <Engine.h> "
+			"<TemporalResolve.cpp> <TemporalPipeline.cpp> <PresentationProviders.cpp> "
+			"<TemporalFrameGenerationInputs.cpp> <Streamline.cpp>\n";
 		return 2;
 	}
 
@@ -267,7 +302,7 @@ int main(int argc, char** argv)
 	TestFov(0.7f, -0.5f, "asymmetric vertical FOV survives a rotated view");
 	TestFovRejection();
 	TestSuperResolutionFovCache();
-	TestSourceContracts(argv[1], argv[2], argv[3]);
+	TestSourceContracts(argv[1], argv[2], argv[3], argv[4], argv[5], argv[6], argv[7]);
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

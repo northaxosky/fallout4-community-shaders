@@ -77,11 +77,19 @@ $requiredFiles = @(
 	'LICENSE',
 	'EXCEPTIONS.md',
 	'Shaders/Upscaling/Streamline/nvngx_dlss.dll',
+	'Shaders/Upscaling/Streamline/nvngx_dlssg.dll',
 	'Shaders/Upscaling/Streamline/sl.interposer.dll',
 	'Shaders/Upscaling/Streamline/sl.common.dll',
 	'Shaders/Upscaling/Streamline/sl.dlss.dll',
+	'Shaders/Upscaling/Streamline/sl.dlss_g.dll',
+	'Shaders/Upscaling/Streamline/sl.pcl.dll',
+	'Shaders/Upscaling/Streamline/sl.reflex.dll',
 	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_framegeneration_dx12.dll',
-	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll'
+	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll',
+	'Shaders/Upscaling/XeSS/libxess.dll',
+	'Shaders/Upscaling/XeSS/libxess_dx11.dll',
+	'Shaders/Upscaling/XeSS/libxell.dll',
+	'Shaders/Upscaling/XeSS/libxess_fg.dll'
 )
 foreach ($relativePath in $requiredFiles) {
 	Assert-PackageFile $relativePath
@@ -90,7 +98,10 @@ foreach ($relativePath in $requiredFiles) {
 $requiredLicenses = @(
 	'Shaders/Upscaling/Streamline/license.txt',
 	'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
-	'Shaders/Upscaling/FidelityFX/license.md'
+	'Shaders/Upscaling/Streamline/reflex.license.txt',
+	'Shaders/Upscaling/FidelityFX/license.md',
+	'Shaders/Upscaling/XeSS/LICENSE.txt',
+	'Shaders/Upscaling/XeSS/third-party-programs.txt'
 )
 foreach ($relativePath in $requiredLicenses) {
 	Assert-PackageFile $relativePath
@@ -102,6 +113,7 @@ $requiredShaderDirectories = @(
 	'Shaders/ScreenSpaceShadows',
 	'Shaders/TerrainShadows',
 	'Shaders/Upscaling',
+	'Shaders/FrameGeneration',
 	'Shaders/InverseSquareLighting',
 	'Shaders/DynamicCubemaps',
 	'Shaders/WetnessEffects',

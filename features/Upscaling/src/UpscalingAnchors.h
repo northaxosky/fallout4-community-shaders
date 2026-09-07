@@ -21,19 +21,18 @@ namespace cs::features::upscaling_anchors
 	inline constexpr std::ptrdiff_t kFirstPersonAlphaCall[] = { 0x253, 0x53D, 0x53D };
 	inline constexpr std::uint64_t kRenderAlphaGeometry[] = { 0, 2317903, 2317903 };
 
-	// MainDrawWorldAndUI calls DrawWorld::Imagespace; scoping it excludes pause-only rendering.
-	inline constexpr std::uint64_t kMainDrawWorldAndUI = 2228969;
-	inline constexpr std::ptrdiff_t kMainDrawWorldAndUIImagespaceCall = 0x182;
-
-	// DrawWorld::Imagespace runs the post-process effect chain, then hands the viewport back.
-	inline constexpr std::uint64_t kDrawWorldImagespace = 2318322;
+	// DrawWorld::Render_UI is the live post-process and UI wrapper.
+	inline constexpr std::uint64_t kDrawWorldRenderUI = 2318322;
+	// cmp byte ptr [rip+disp32], 0 selects full effects or Gamma-only processing.
+	inline constexpr std::ptrdiff_t kDrawWorldRenderUIEffectsGateCompare = 0x47;
+	inline constexpr std::uint64_t kDrawWorldRenderUIEffectsGateAE = 4784523;
 	// RenderEffectRange (+0x83) splits the effect chain into HDR and LDR passes.
-	inline constexpr std::ptrdiff_t kDrawWorldImagespaceRenderEffectRangeCall = 0x83;
+	inline constexpr std::ptrdiff_t kDrawWorldRenderUIRenderEffectRangeCall = 0x83;
 	inline constexpr std::uint64_t kImageSpaceManagerRenderEffectRange[] = {
 		kUnprovenOnOG, 2316593, 2316593
 	};
 	// SetUseDynamicResolutionViewportAsDefaultViewport (+0xC5) follows the effect chain; the upscale resolves here.
-	inline constexpr std::ptrdiff_t kDrawWorldImagespaceUpscaleCall = 0xC5;
+	inline constexpr std::ptrdiff_t kDrawWorldRenderUIResolveCall = 0xC5;
 
 	// BSDFComposite (deferred lighting composite) samples dynamic-resolution G-buffers.
 	inline constexpr std::uint64_t kDeferredComposite = 2318313;
