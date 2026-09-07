@@ -26,7 +26,7 @@
 
 namespace
 {
-	auto* L = cs::log::Get("menu");
+	auto* L = cs::log::Get("cs.menu");
 
 	constexpr std::string_view kPresetRoot =
 		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
@@ -394,6 +394,7 @@ namespace cs
 				cached.height = texture.height;
 				cached.generation = _debugImageGeneration;
 				const auto result = a_client.LastResult();
+				cached.importResult = result;
 				cached.importFailure =
 					result == DMUI_RESULT_UNSUPPORTED_RESOURCE ||
 						result == DMUI_RESULT_INVALID_ARGUMENT ?
@@ -413,7 +414,10 @@ namespace cs
 						static_cast<unsigned>(descriptor.ViewDimension));
 					cached.loggedFailure = result;
 				}
-				ImGui::TextDisabled("The host could not import this D3D11 resource.");
+				ImGui::TextDisabled(
+					"Image import failed: %s (code %u). See the cs.menu log.",
+					DMUI_ResultToString(cached.importResult),
+					cached.importResult);
 				return;
 			}
 			cached.source = texture.texture;
@@ -423,7 +427,10 @@ namespace cs
 			cached.image = std::move(*imported);
 		}
 		if (cached.importFailure != host::ImageImportFailure::kNone) {
-			ImGui::TextDisabled("The host could not import this D3D11 resource.");
+			ImGui::TextDisabled(
+				"Image import failed: %s (code %u). See the cs.menu log.",
+				DMUI_ResultToString(cached.importResult),
+				cached.importResult);
 			return;
 		}
 

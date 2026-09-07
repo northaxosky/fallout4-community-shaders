@@ -77,6 +77,7 @@ namespace cs
 			std::uint64_t retryAfterFrame{};
 			host::ImageImportFailure importFailure{
 				host::ImageImportFailure::kNone };
+			DMUI_Result importResult{ DMUI_RESULT_OK };
 			std::optional<DMUI_Result> loggedFailure;
 			dmui::ImageResource image;
 		};
