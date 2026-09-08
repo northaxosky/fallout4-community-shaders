@@ -862,10 +862,13 @@ namespace cs::render
 			request = *_impl->topology.StartupRequest();
 		}
 
-		const bool proxyPath = a_swapChain && _impl->swapChain.Owns(*a_swapChain);
+		const bool frameGenerationProxyPath =
+			a_swapChain && _impl->swapChain.Owns(*a_swapChain);
+		if (frameGenerationProxyPath && a_device) {
+			_impl->swapChain.SetOutwardD3D11Device(*a_device);
+		}
 		if (_impl->streamline.initialized &&
 			!_impl->streamline.IsD3D12Session()) {
-			// Native SR owns no presentation hooks; retain the engine's D3D11 interfaces.
 			if (!_impl->streamline.SetDevice(a_device ? *a_device : nullptr)) {
 				_impl->streamline.featureDLSS = false;
 				_impl->streamline.featurePCL = false;
@@ -878,9 +881,6 @@ namespace cs::render
 				_impl->streamline.PostDevice();
 			}
 		}
-		if (proxyPath && a_device) {
-			_impl->swapChain.SetOutwardD3D11Device(*a_device);
-		}
 		const auto srAdmission = temporal::InitializeSelectedSuperResolution(
 			request,
 			[&](temporal::SuperResolutionMethod a_method) -> temporal::ProviderResult {
@@ -891,7 +891,24 @@ namespace cs::render
 				if (a_method == temporal::SuperResolutionMethod::kDLSS) {
 					if (_impl->streamline.IsD3D12Session())
 						init.device = _impl->swapChain.GetD3D12Device();
-					return _impl->dlssProvider.Initialize(init);
+					auto result = _impl->dlssProvider.Initialize(init);
+					if (result.Succeeded() &&
+						!_impl->streamline.IsD3D12Session()) {
+						const auto upgrade =
+							_impl->streamline.UpgradeD3D11SwapChain(
+								a_swapChain, true);
+						if (!upgrade.Succeeded()) {
+							return {
+								.code = temporal::ProviderResultCode::kUnavailable,
+								.sdkResult = static_cast<std::int64_t>(
+									upgrade.sdkResult),
+								.message =
+									"DLSS could not install its required "
+									"D3D11 presentation maintenance proxy."
+							};
+						}
+					}
+					return result;
 				}
 				if (a_method != temporal::SuperResolutionMethod::kXeSS || !a_device || !*a_device) {
 					return {
@@ -937,7 +954,7 @@ namespace cs::render
 			L->warn("{}", srAdmission.detail);
 		_impl->latencySdkActive.store(
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire) &&
-				proxyPath &&
+				frameGenerationProxyPath &&
 				_impl->activePresentation &&
 				request.frameGeneration !=
 					temporal::FrameGenerationMethod::kFSR3 &&
@@ -946,7 +963,7 @@ namespace cs::render
 
 		temporal::SessionTopology session;
 		session.valid = true;
-		session.proxyInstalled = proxyPath;
+		session.proxyInstalled = frameGenerationProxyPath;
 		session.bridgePresent = _impl->swapChain.IsBridgeReady();
 		session.latencyHooksInstalled =
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire);
@@ -955,7 +972,7 @@ namespace cs::render
 			: temporal::GraphicsApi::kD3D11;
 		session.admittedSr = srAdmission.methods;
 		session.rejectionReason = srAdmission.detail;
-		session.admittedFg = proxyPath
+		session.admittedFg = frameGenerationProxyPath
 			? request.frameGeneration
 			: temporal::FrameGenerationMethod::kOff;
 		if (a_adapter) {
@@ -977,6 +994,10 @@ namespace cs::render
 			PostFailure(
 				temporal::FailureDomain::kConfiguration,
 				"The temporal session topology was published more than once.");
+		}
+		if (admitted && !frameGenerationProxyPath) {
+			_impl->creationState.store(
+				TemporalCreationState::kNative, std::memory_order_release);
 		}
 	}
 

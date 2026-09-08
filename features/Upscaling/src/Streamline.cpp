@@ -183,6 +183,8 @@ namespace cs::features
 		slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
 		slSetTagForFrame =
 			(PFun_slSetTagForFrame*)GetProcAddress(interposer, "slSetTagForFrame");
+		slGetNativeInterface =
+			(PFun_slGetNativeInterface*)GetProcAddress(interposer, "slGetNativeInterface");
 		slGetFeatureFunction = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
 		slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
 		slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
@@ -213,6 +215,34 @@ namespace cs::features
 		}
 		deviceRegistered = true;
 		return true;
+	}
+
+	streamline::SwapChainUpgradeResult Streamline::UpgradeD3D11SwapChain(
+		IDXGISwapChain** a_swapChain,
+		bool a_dlssAdmitted) noexcept
+	{
+		if (!streamline::ShouldInstallSwapChainProxy(
+				initialized,
+				deviceRegistered,
+				a_dlssAdmitted,
+				IsD3D12Session())) {
+			return {
+				.status = streamline::SwapChainUpgradeStatus::kIneligible
+			};
+		}
+		const auto result = streamline::UpgradeD3D11SwapChain(
+			slUpgradeInterface, slGetNativeInterface, a_swapChain);
+		if (result.Succeeded()) {
+			L->info(
+				"Installed the Streamline D3D11 swap-chain presentation proxy");
+		} else {
+			L->error(
+				"Failed to install the Streamline D3D11 swap-chain presentation proxy "
+				"(status {}, SDK {})",
+				static_cast<unsigned>(result.status),
+				magic_enum::enum_name(result.sdkResult));
+		}
+		return result;
 	}
 
 	bool Streamline::PrepareD3D12Device(ID3D12Device** a_device)

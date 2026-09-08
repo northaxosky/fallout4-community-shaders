@@ -4,12 +4,11 @@
 	Packages = @(
 		@{
 			Name        = 'Streamline'
-			Version     = 'v2.12.0'
-			Url         = 'https://github.com/NVIDIA-RTX/Streamline/releases/download/v2.12.0/streamline-sdk-v2.12.0.zip'
-			Sha256      = 'f5c0a3d870707dddc3570fb4bcd3655cf48a8a68c3a9d342910cfa21b77dcf48'
+			Version     = 'cs-streamline-v2.12.0-1'
+			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.12.0-1/streamline-sdk-cs-streamline-v2.12.0-1.zip'
+			Sha256      = 'd5db89a7e251a4c9ce599e2318cbada154890aa246ddfcde0ebb0cd779be7e07'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline'
-			# Pinned to the production binaries; the archive also ships watermarked
-			# development builds under bin/x64/development.
+			# The signed manifest binds the patched core and unchanged NVIDIA feature binaries.
 			Files       = @(
 				'bin/x64/sl.interposer.dll',
 				'bin/x64/sl.common.dll',
@@ -18,10 +17,13 @@
 				'bin/x64/sl.pcl.dll',
 				'bin/x64/sl.reflex.dll',
 				'bin/x64/nvngx_dlss.dll',
-				'bin/x64/nvngx_dlssg.dll'
+				'bin/x64/nvngx_dlssg.dll',
+				'bin/x64/sl.project-manifest.bin',
+				'bin/x64/sl.project-manifest.sig'
 			)
 			Licenses    = @(
 				'license.txt',
+				'3rd-party-licenses.md',
 				'bin/x64/nvngx_dlss.license.txt',
 				'bin/x64/reflex.license.txt'
 			)

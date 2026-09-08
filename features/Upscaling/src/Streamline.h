@@ -20,6 +20,7 @@
 #pragma warning(pop)
 
 #include "SuperResolutionContext.h"
+#include "StreamlineInterfaceUpgrade.h"
 
 namespace cs::features
 {
@@ -50,6 +51,7 @@ namespace cs::features
 		PFun_slUpgradeInterface* slUpgradeInterface{};
 		PFun_slSetConstants* slSetConstants{};
 		PFun_slSetTagForFrame* slSetTagForFrame{};
+		PFun_slGetNativeInterface* slGetNativeInterface{};
 		PFun_slGetFeatureFunction* slGetFeatureFunction{};
 		PFun_slGetNewFrameToken* slGetNewFrameToken{};
 		PFun_slSetD3DDevice* slSetD3DDevice{};
@@ -77,6 +79,10 @@ namespace cs::features
 			sl::RenderAPI a_renderApi);
 
 		bool SetDevice(ID3D11Device* a_device);
+		[[nodiscard]] streamline::SwapChainUpgradeResult
+			UpgradeD3D11SwapChain(
+				IDXGISwapChain** a_swapChain,
+				bool a_dlssAdmitted) noexcept;
 		bool PrepareD3D12Device(ID3D12Device** a_device);
 		bool PrepareDXGIFactory(IDXGIFactory4** a_factory);
 		bool SetDevice(ID3D12Device* a_device);

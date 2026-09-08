@@ -183,6 +183,8 @@ per-frame signature checks are involved.
 
 The SDK fork's release workflow builds, authenticates, and publishes its versioned runtime ZIP.
 CS downloads the pinned ZIP through `scripts\fetch-sdks.ps1`; it does not build the SDK DLLs.
+The package includes the fork's patched interposer/common DLLs, unchanged NVIDIA feature DLLs,
+and their signed manifest and detached signature. Both metadata files are required for packaging.
 CMake generates the public trust header from the pinned SDK's
 [`config/project-release.psd1`](extern/Streamline/config/project-release.psd1). No local key file
 or machine-specific signing path is needed to build CS. The private release key belongs only in
@@ -243,6 +245,11 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   DLSS-SR, while XeSS-FG connects XeLL before its swap-chain initialization. Both use the
   captured HUD-less image with the intercepted final backbuffer; neither fabricates a UI-alpha
   layer.
+  Native D3D11 DLSS sessions publish Streamline's documented swap-chain proxy only after device
+  registration and DLSS admission succeed. That proxy remains active while the DLSS effect is
+  temporarily disabled so Streamline receives required Present and resize maintenance. DLSS-G
+  continues using its existing Streamline D3D12 presentation path and is not wrapped again; the
+  frame-generation proxy status still describes only the D3D12 frame-generation bridge.
   The validated normal-loop hooks track sleep, simulation, render-submit, and proxy Present
   attempt ordering without treating worker completion or auxiliary Swap callers as frame boundaries.
   The active DLSS-G or XeSS-FG provider alone receives the matching Reflex/PCL or XeLL sleep and

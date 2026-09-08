@@ -150,7 +150,7 @@ jobs:
           }
           ./scripts/package-release.ps1 -Identifier $identifier -KeepStaging
 
-      - name: Verify packaged SDK licenses
+      - name: Verify packaged SDK metadata
         if: github.event_name == 'push'
         shell: pwsh
         run: |
@@ -163,14 +163,18 @@ jobs:
           $archive = [System.IO.Compression.ZipFile]::OpenRead($archives[0].FullName)
           try {
             $entries = @($archive.Entries.FullName)
-            $licenses = @(
+            $requiredMetadata = @(
               'Shaders/Upscaling/Streamline/license.txt',
+              'Shaders/Upscaling/Streamline/3rd-party-licenses.md',
               'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
+              'Shaders/Upscaling/Streamline/reflex.license.txt',
+              'Shaders/Upscaling/Streamline/sl.project-manifest.bin',
+              'Shaders/Upscaling/Streamline/sl.project-manifest.sig',
               'Shaders/Upscaling/FidelityFX/license.md'
             )
-            foreach ($license in $licenses) {
-              if ($license -notin $entries) {
-                throw "Required SDK license is missing from the archive: $license"
+            foreach ($metadata in $requiredMetadata) {
+              if ($metadata -notin $entries) {
+                throw "Required SDK metadata is missing from the archive: $metadata"
               }
             }
           } finally {

@@ -283,6 +283,26 @@ target_include_directories(TemporalPipelineStateTests PRIVATE
 add_test(NAME TemporalPipelineState COMMAND TemporalPipelineStateTests)
 set_tests_properties(TemporalPipelineState PROPERTIES LABELS "render;state;unit")
 
+add_executable(StreamlinePresentationTests
+	tests/StreamlinePresentationTests.cpp
+	features/Upscaling/src/StreamlineInterfaceUpgrade.cpp
+	features/Upscaling/src/StreamlineInterfaceUpgrade.h
+)
+configure_host_test(StreamlinePresentationTests)
+target_include_directories(StreamlinePresentationTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
+	"${CMAKE_SOURCE_DIR}/extern/Streamline/include"
+)
+
+add_test(
+	NAME StreamlinePresentation
+	COMMAND StreamlinePresentationTests
+		"${CMAKE_SOURCE_DIR}/extern/Streamline/source/core/sl.interposer/dxgi/dxgiPresent.h"
+		"${CMAKE_SOURCE_DIR}/extern/Streamline/source/core/sl.interposer/dxgi/dxgiSwapchain.cpp"
+		"${CMAKE_SOURCE_DIR}/src/Render/TemporalPipeline.cpp"
+)
+set_tests_properties(StreamlinePresentation PROPERTIES LABELS "render;streamline;unit")
+
 add_executable(ScreenSpaceShadowsMathTests
 	tests/ScreenSpaceShadowsMathTests.cpp
 	features/ScreenSpaceShadows/src/ScreenSpaceShadowsMath.h

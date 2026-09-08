@@ -84,6 +84,8 @@ $requiredFiles = @(
 	'Shaders/Upscaling/Streamline/sl.dlss_g.dll',
 	'Shaders/Upscaling/Streamline/sl.pcl.dll',
 	'Shaders/Upscaling/Streamline/sl.reflex.dll',
+	'Shaders/Upscaling/Streamline/sl.project-manifest.bin',
+	'Shaders/Upscaling/Streamline/sl.project-manifest.sig',
 	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_framegeneration_dx12.dll',
 	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll',
 	'Shaders/Upscaling/XeSS/libxess.dll',
@@ -95,15 +97,9 @@ foreach ($relativePath in $requiredFiles) {
 	Assert-PackageFile $relativePath
 }
 
-$streamlineDirectory = Join-Path $stagingRoot 'Shaders\Upscaling\Streamline'
-$hasProjectManifest = Test-Path -LiteralPath (Join-Path $streamlineDirectory 'sl.project-manifest.bin') -PathType Leaf
-$hasProjectSignature = Test-Path -LiteralPath (Join-Path $streamlineDirectory 'sl.project-manifest.sig') -PathType Leaf
-if ($hasProjectManifest -ne $hasProjectSignature) {
-	throw 'The Streamline project manifest and detached signature must be packaged together.'
-}
-
 $requiredLicenses = @(
 	'Shaders/Upscaling/Streamline/license.txt',
+	'Shaders/Upscaling/Streamline/3rd-party-licenses.md',
 	'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
 	'Shaders/Upscaling/Streamline/reflex.license.txt',
 	'Shaders/Upscaling/FidelityFX/license.md',
