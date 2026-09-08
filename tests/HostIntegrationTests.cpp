@@ -37,6 +37,21 @@ namespace
 		return DMUI_RESULT_OK;
 	}
 
+	DMUI_Result DMUI_CALL RegisterPage(
+		DMUI_ClientHandle,
+		const DMUI_PageDescriptor*,
+		DMUI_PageHandle*) noexcept
+	{
+		return DMUI_RESULT_OK;
+	}
+
+	DMUI_Result DMUI_CALL RegisterCategory(
+		DMUI_ClientHandle,
+		const DMUI_CategoryDescriptor*) noexcept
+	{
+		return DMUI_RESULT_OK;
+	}
+
 	DMUI_Result DMUI_CALL QueryServices(DMUI_HostServicesInfo* a_info) noexcept
 	{
 		a_info->forwardingVersion = forwardingVersion;
@@ -185,6 +200,8 @@ namespace
 		api.structSize = sizeof(api);
 		api.apiVersion = DMUI_API_VERSION_CURRENT;
 		api.registerClient = &RegisterClient;
+		api.registerPage = &RegisterPage;
+		api.registerCategory = &RegisterCategory;
 		api.requestFrame = &RequestFrame;
 		api.releaseFrame = &ReleaseFrame;
 		api.registerHotkeyAction = &RegisterHotkey;
@@ -226,6 +243,24 @@ namespace
 			dmui::PreflightHostAPI(&api, options) ==
 			DMUI_RESULT_SERVICE_UNAVAILABLE);
 		supportedServices = options.requiredServices;
+
+		supportedServices &= ~DMUI_HOST_SERVICE_NAVIGATION_ICONS;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_SERVICE_UNAVAILABLE);
+		supportedServices = options.requiredServices;
+
+		api.registerPage = nullptr;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_SERVICE_UNAVAILABLE);
+		api.registerPage = &RegisterPage;
+
+		api.registerCategory = nullptr;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_SERVICE_UNAVAILABLE);
+		api.registerCategory = &RegisterCategory;
 
 		api.openExternal = nullptr;
 		CHECK(
@@ -273,7 +308,7 @@ namespace
 		CHECK(pages.front().categoryId == cs::host::kGeneralCategoryId);
 		CHECK(DearModdingUI::ResolveClientIconGlyph(
 			cs::host::kClientIconName, {}, "Community Shaders") ==
-			DearModdingUI::ResolveNamedIconGlyphOrZero("lightbulb"));
+			DearModdingUI::ResolveNamedIconGlyphOrZero("cloud-sun"));
 		CHECK(DearModdingUI::ResolveCategoryIconGlyph(
 			cs::host::kGeneralCategory, "Community Shaders",
 			"dearmodding.community-shaders", cs::host::kClientIconName) ==
@@ -312,6 +347,23 @@ namespace
 		}
 		CHECK(std::ranges::none_of(categories, [](const auto& category) {
 			return category.displayName == "Dev Tools";
+		}));
+		const auto lighting = std::ranges::find(
+			categories, "lighting", &cs::host::HostCategoryDescriptor::id);
+		CHECK(lighting != categories.end());
+		if (lighting != categories.end()) {
+			CHECK(lighting->displayName == "Lighting");
+			CHECK(lighting->iconName == "sun-horizon");
+			CHECK(DearModdingUI::ResolveCategoryIconGlyph(
+				lighting->displayName,
+				"Community Shaders",
+				"dearmodding.community-shaders",
+				cs::host::kClientIconName,
+				lighting->iconName) ==
+				DearModdingUI::ResolveNamedIconGlyphOrZero("sun-horizon"));
+		}
+		CHECK(std::ranges::all_of(categories, [](const auto& category) {
+			return category.id == "lighting" || category.iconName.empty();
 		}));
 
 		const auto findPage = [&pages](std::string_view a_id) {
@@ -358,6 +410,9 @@ namespace
 			CHECK(
 				reorderedCatalog.categories[index].sortKey ==
 				categories[index].sortKey);
+			CHECK(
+				reorderedCatalog.categories[index].iconName ==
+				categories[index].iconName);
 		}
 		CHECK(reorderedCatalog.pages.size() == pages.size());
 		for (std::size_t index = 0;

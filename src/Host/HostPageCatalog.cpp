@@ -33,11 +33,12 @@ namespace cs::host
 		{
 			std::string_view id;
 			std::string_view displayName;
+			std::string_view iconName{};
 		};
 
 		constexpr std::array kKnownCategories{
 			KnownCategory{ kGeneralCategoryId, kGeneralCategory },
-			KnownCategory{ "lighting", FeatureCategories::kLighting },
+			KnownCategory{ "lighting", FeatureCategories::kLighting, "sun-horizon" },
 			KnownCategory{ "post-process", FeatureCategories::kPostProcess },
 			KnownCategory{ "compatibility", FeatureCategories::kCompatibility },
 			KnownCategory{ "performance", FeatureCategories::kPerformance },
@@ -182,7 +183,8 @@ namespace cs::host
 			categories.push_back(HostCategoryDescriptor{
 				.id = std::move(id),
 				.displayName = displayName,
-				.sortKey = CategorySortKey(displayName) });
+				.sortKey = CategorySortKey(displayName),
+				.iconName = known ? std::string(known->iconName) : std::string{} });
 		}
 		std::ranges::sort(categories, [](const auto& a_lhs, const auto& a_rhs) {
 			return std::tie(a_lhs.sortKey, a_lhs.displayName, a_lhs.id) <

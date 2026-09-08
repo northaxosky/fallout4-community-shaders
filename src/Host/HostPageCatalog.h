@@ -42,6 +42,7 @@ namespace cs::host
 		std::string id;
 		std::string displayName;
 		std::int32_t sortKey{ 0 };
+		std::string iconName;
 	};
 
 	struct HostPageCatalog
@@ -50,7 +51,7 @@ namespace cs::host
 		std::vector<HostPageDescriptor> pages;
 	};
 
-	inline constexpr std::string_view kClientIconName = "lightbulb";
+	inline constexpr std::string_view kClientIconName = "cloud-sun";
 	inline constexpr std::string_view kGeneralCategoryId = "general";
 	inline constexpr std::string_view kGeneralCategory = "General";
 	inline constexpr std::string_view kUnloadedCategoryId = "unloaded";

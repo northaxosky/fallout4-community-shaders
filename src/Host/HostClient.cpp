@@ -143,7 +143,8 @@ namespace cs::host
 			if (!_client.AddCategory({
 					.id = category.id.c_str(),
 					.displayName = category.displayName.c_str(),
-					.sortKey = category.sortKey })) {
+					.sortKey = category.sortKey,
+					.iconName = category.iconName.c_str() })) {
 				LogFailure("register category");
 				return false;
 			}
