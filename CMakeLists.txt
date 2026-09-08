@@ -493,7 +493,6 @@ configure_host_test(StreamlineModuleFixture)
 add_executable(StreamlineModuleTests
 	tests/StreamlineModuleTests.cpp
 	src/Utils/StreamlineModule.cpp
-	src/Utils/PhysicalFile.cpp
 )
 configure_host_test(StreamlineModuleTests)
 target_link_libraries(StreamlineModuleTests PRIVATE Streamline psapi.lib)

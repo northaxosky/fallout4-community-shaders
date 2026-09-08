@@ -3,6 +3,8 @@
 #include <array>
 #include <string>
 
+#include <DearModdingUI/Client.h>
+
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "DX12SwapChain.h"
@@ -10,7 +12,6 @@
 #include "Render/TemporalRenderer.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
-#include "Utils/UI.h"
 
 namespace cs::features
 {
@@ -342,14 +343,20 @@ namespace cs::features
 	void FrameGeneration::DrawSettings()
 	{
 		bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
-		static constexpr std::array methods{
-			ui::ComboOption{ 0, "Off" },
-			ui::ComboOption{ 1, "FSR 3" },
-			ui::ComboOption{ 2, "DLSS-G" },
-			ui::ComboOption{ 3, "XeSS-FG" }
+		static const std::array methods{
+			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
+			dmui::ChoiceOption<std::uint32_t>{ 1, "FSR 3", "fsr-3" },
+			dmui::ChoiceOption<std::uint32_t>{ 2, "DLSS-G", "dlss-g" },
+			dmui::ChoiceOption<std::uint32_t>{ 3, "XeSS-FG", "xess-fg" }
 		};
-		if (ui::DrawCombo(
-				"Provider", settings.frameGenerationMethod, methods)) {
+		const auto method = dmui::DrawChoice<std::uint32_t>(
+			"frame-generation-provider",
+			settings.frameGenerationMethod,
+			std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
+			"Unavailable",
+			"Provider");
+		if (method.changed) {
+			settings.frameGenerationMethod = *method.selected;
 			changed = true;
 		}
 		ImGui::TextDisabled("Method changes take effect after restarting the game.");

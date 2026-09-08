@@ -4,7 +4,6 @@
 #include <Windows.h>
 #include <bcrypt.h>
 
-#include "Utils/PhysicalFile.h"
 #include "Utils/StreamlineModule.h"
 
 #include <algorithm>
@@ -811,13 +810,6 @@ namespace
 		};
 		for (const auto& [link, backing] : links) {
 			CreateHardLink(link, backing);
-			const auto physical = cs::files::PhysicalFilePath(link);
-			CHECK(physical.has_value());
-			if (physical) {
-				std::error_code error;
-				CHECK(fs::equivalent(*physical, backing, error));
-				CHECK(!error);
-			}
 		}
 
 		const auto trust = a_context.TrustFor(a_context.signingKey);

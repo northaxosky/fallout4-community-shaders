@@ -471,6 +471,35 @@ namespace
 					character == '-';
 			}));
 		}
+
+	}
+
+	void TestChoiceActivation()
+	{
+		const dmui::ChoiceOption<int> selected{ 2, "Balanced", "balanced" };
+		const auto noOp =
+			dmui::presentation_detail::ResolveChoiceActivation(2, selected, true);
+		CHECK(!noOp.changed);
+		CHECK(!noOp.completed);
+		CHECK(!noOp.selected.has_value());
+
+		const auto changed =
+			dmui::presentation_detail::ResolveChoiceActivation(1, selected, true);
+		CHECK(changed.changed);
+		CHECK(changed.completed);
+		CHECK(changed.selected == 2);
+
+		auto disabled = selected;
+		disabled.enabled = false;
+		const auto disabledResult =
+			dmui::presentation_detail::ResolveChoiceActivation(1, disabled, true);
+		CHECK(!disabledResult.changed);
+		CHECK(!disabledResult.selected.has_value());
+
+		const auto inactive =
+			dmui::presentation_detail::ResolveChoiceActivation(1, selected, false);
+		CHECK(!inactive.changed);
+		CHECK(!inactive.selected.has_value());
 	}
 
 	void TestEmptyPageCatalog()
@@ -722,6 +751,7 @@ int main()
 {
 	TestForwardingPreflight();
 	TestPageCatalog();
+	TestChoiceActivation();
 	TestCategoryIdValidity();
 	TestEmptyPageCatalog();
 	TestSnapshotRefresh();
