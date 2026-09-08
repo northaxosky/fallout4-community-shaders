@@ -8,7 +8,6 @@
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/Hotkey.h"
-#include "Utils/UI.h"
 
 #include "PerformanceOverlay.h"
 #include "RenderDoc.h"
@@ -49,14 +48,6 @@ namespace cs::host
 				feature->get("load")->value_or(false);
 		}
 
-		ImVec4 ThemeColor(
-			dmui::Client& a_client,
-			const DMUI_Vec4 DMUI_ThemeColors::*a_member)
-		{
-			if (const auto colors = a_client.GetThemeColors())
-				return ui::ToImVec4(colors.value().*a_member);
-			return ImGui::GetStyleColorVec4(ImGuiCol_Text);
-		}
 	}
 
 	HostClient::HostClient() :
@@ -422,15 +413,19 @@ namespace cs::host
 
 		const bool loadAtBoot = LoadAtBoot(a_feature);
 		const auto& state = a_feature.GetState();
-		ui::SettingsTableScope table{
+		dmui::SettingsTableScope table{
 			_client,
 			std::format("feature-settings-{}", a_feature.GetName()).c_str() };
-		if (!table.Valid() || !table.Visible())
+		if (table.Result() != DMUI_RESULT_OK) {
+			LogFailure("begin feature settings table");
+			return;
+		}
+		if (!table.Visible())
 			return;
 
 		if (state.runtimeState == FeatureRuntimeState::kFailed ||
 			state.runtimeState == FeatureRuntimeState::kDegraded) {
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				_client,
 				"feature-failure",
 				state.runtimeState == FeatureRuntimeState::kFailed ?
@@ -438,19 +433,24 @@ namespace cs::host
 					"Warning",
 				"",
 				dmui::RowPresentation::Layout::kFullSpan };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				LogFailure("begin feature failure row");
 				return;
+			}
 			if (row.Visible()) {
-				const auto color =
+				const auto tone =
 					state.runtimeState == FeatureRuntimeState::kFailed ?
-					&DMUI_ThemeColors::statusError :
-					&DMUI_ThemeColors::statusWarning;
-				ImGui::TextColored(
-					ThemeColor(_client, color),
-					"%s",
-					state.detail.empty() ?
-						"See the log for details." :
-						state.detail.c_str());
+					dmui::TextTone::kStatusError :
+					dmui::TextTone::kStatusWarning;
+				if (!dmui::DrawStyledText(
+						_client,
+						state.detail.empty() ?
+							"See the log for details." :
+							state.detail,
+						{ .tone = tone })) {
+					LogFailure("draw feature failure detail");
+					return;
+				}
 				try {
 					a_feature.DrawFailLoadMessage();
 				} catch (const std::exception& error) {
@@ -467,31 +467,48 @@ namespace cs::host
 					throw;
 				}
 			}
+			if (!row.End()) {
+				LogFailure("end feature failure row");
+				return;
+			}
+			if (!table.End())
+				LogFailure("end feature settings table");
 			return;
 		}
 
 		if (!a_feature.IsActive()) {
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				_client,
 				"inactive-feature",
 				"Availability",
 				"",
 				dmui::RowPresentation::Layout::kFullSpan };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				LogFailure("begin inactive feature row");
 				return;
+			}
 			if (!row.Visible())
 				return;
 			if (a_feature.IsInstalled()) {
 				if (loadAtBoot) {
-					ImGui::TextColored(
-						ThemeColor(
+					if (!dmui::DrawStyledText(
 							_client,
-							&DMUI_ThemeColors::statusRestartNeeded),
-						"This feature will be available after restart.");
+							"This feature will be available after restart.",
+							{
+								.tone =
+									dmui::TextTone::kStatusRestartNeeded
+							})) {
+						LogFailure("draw feature restart availability");
+						return;
+					}
 				} else {
-					ImGui::TextColored(
-						ThemeColor(_client, &DMUI_ThemeColors::statusDisable),
-						"Not loaded. Enable it in Advanced > Load on startup, then restart.");
+					if (!dmui::DrawStyledText(
+							_client,
+							"Not loaded. Enable it in Advanced > Load on startup, then restart.",
+							{ .tone = dmui::TextTone::kStatusDisable })) {
+						LogFailure("draw feature disabled availability");
+						return;
+					}
 				}
 			} else {
 				try {
@@ -539,19 +556,27 @@ namespace cs::host
 						LogFailure("draw feature mod link");
 				}
 			}
+			if (!row.End()) {
+				LogFailure("end inactive feature row");
+				return;
+			}
+			if (!table.End())
+				LogFailure("end feature settings table");
 			return;
 		}
 
 		bool restoreDefaults{};
 		{
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				_client,
 				"feature-controls",
 				"Settings",
 				"Live feature controls.",
 				dmui::RowPresentation::Layout::kFullSpan };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				LogFailure("begin feature controls row");
 				return;
+			}
 			if (row.Visible()) {
 				if (!FeatureManager::Get().PrepareMenuCallback(
 						a_feature, "DearModdingUI::DrawSettings"))
@@ -605,8 +630,10 @@ namespace cs::host
 					throw;
 				}
 				const auto reset = row.End(resettable, resettable);
-				if (!reset)
+				if (!reset) {
+					LogFailure("end feature controls row");
 					return;
+				}
 				restoreDefaults = *reset;
 			}
 		}
@@ -636,23 +663,35 @@ namespace cs::host
 			const auto id =
 				std::format("restart-required-{}", field.label);
 			const auto label = std::string(field.label);
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				_client,
 				id.c_str(),
 				"Restart required",
 				"This setting differs from its active startup value.",
 				dmui::RowPresentation::Layout::kFullSpan };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				LogFailure("begin restart required row");
 				return;
+			}
 			if (row.Visible()) {
-				ImGui::TextColored(
-					ThemeColor(
+				if (!dmui::DrawStyledText(
 						_client,
-						&DMUI_ThemeColors::statusRestartNeeded),
-					"%s",
-					label.c_str());
+						label,
+						{
+							.tone =
+								dmui::TextTone::kStatusRestartNeeded
+						})) {
+					LogFailure("draw restart required setting");
+					return;
+				}
+			}
+			if (!row.End()) {
+				LogFailure("end restart required row");
+				return;
 			}
 		}
+		if (!table.End())
+			LogFailure("end feature settings table");
 	}
 
 	void HostClient::DrawOverlayPage()

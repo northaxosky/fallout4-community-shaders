@@ -22,7 +22,6 @@
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
-#include "Utils/UI.h"
 
 namespace cs::features
 {
@@ -605,7 +604,8 @@ namespace cs::features
 		}
 
 		Menu::Get().DrawDebugViewSelector(*this);
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"Debug views fetch the caustics texture manually because the "

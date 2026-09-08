@@ -3136,38 +3136,30 @@ namespace cs::features
 	void Upscaling::DrawSettings()
 	{
 		bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
-		const auto drawChoice = [](const char* a_label,
-								 int& a_value,
-								 const char* const* a_labels,
-								 std::size_t a_count) {
-			const auto selected =
-				a_value >= 0 && static_cast<std::size_t>(a_value) < a_count ?
-				a_value :
-				0;
-			bool choiceChanged = false;
-			if (ImGui::BeginCombo(a_label, a_labels[selected])) {
-				for (std::size_t index = 0; index < a_count; ++index) {
-					if (ImGui::Selectable(
-							a_labels[index],
-							static_cast<int>(index) == selected)) {
-						a_value = static_cast<int>(index);
-						choiceChanged = true;
-					}
-					if (static_cast<int>(index) == selected)
-						ImGui::SetItemDefaultFocus();
-				}
-				ImGui::EndCombo();
-			}
-			return choiceChanged;
-		};
 
-		static const char* methods[] = { "None", "TAA", "FSR 3", "DLSS" };
-		int method = static_cast<int>(streamline.featureDLSS ? settings.upscaleMethod : settings.upscaleMethodNoDLSS);
-		if (drawChoice("Upscaler", method, methods, std::size(methods))) {
+		static const std::array methodOptions{
+			dmui::ChoiceOption<int>{ 0, "None", "none" },
+			dmui::ChoiceOption<int>{ 1, "TAA", "taa" },
+			dmui::ChoiceOption<int>{ 2, "FSR 3", "fsr-3" },
+			dmui::ChoiceOption<int>{ 3, "DLSS", "dlss" }
+		};
+		const int currentMethod = static_cast<int>(
+			streamline.featureDLSS ?
+				settings.upscaleMethod :
+				settings.upscaleMethodNoDLSS);
+		const auto method = dmui::DrawChoice<int>(
+			"upscaling-method",
+			currentMethod,
+			std::span<const dmui::ChoiceOption<int>>{ methodOptions },
+			"Unavailable",
+			"Upscaler");
+		if (method.changed) {
 			if (streamline.featureDLSS) {
-				settings.upscaleMethod = static_cast<std::uint32_t>(method);
+				settings.upscaleMethod =
+				static_cast<std::uint32_t>(*method.selected);
 			} else {
-				settings.upscaleMethodNoDLSS = static_cast<std::uint32_t>(std::min(method, 2));
+				settings.upscaleMethodNoDLSS = static_cast<std::uint32_t>(
+				(std::min)(*method.selected, 2));
 			}
 			changed = true;
 		}
@@ -3175,14 +3167,25 @@ namespace cs::features
 			ImGui::TextDisabled("DLSS is unavailable on this adapter; the no-DLSS selection is used.");
 		}
 
-		static const char* qualityModes[] = { "Native AA", "Quality", "Balanced", "Performance", "Ultra Performance" };
-		int qualityMode = static_cast<int>(settings.qualityMode);
-		if (drawChoice(
-				"Quality mode",
-				qualityMode,
-				qualityModes,
-				std::size(qualityModes))) {
-			settings.qualityMode = static_cast<std::uint32_t>(qualityMode);
+		static const std::array qualityOptions{
+			dmui::ChoiceOption<int>{ 0, "Native AA", "native-aa" },
+			dmui::ChoiceOption<int>{ 1, "Quality", "quality" },
+			dmui::ChoiceOption<int>{ 2, "Balanced", "balanced" },
+			dmui::ChoiceOption<int>{ 3, "Performance", "performance" },
+			dmui::ChoiceOption<int>{
+				4,
+				"Ultra Performance",
+				"ultra-performance" }
+		};
+		const auto qualityMode = dmui::DrawChoice<int>(
+			"upscaling-quality-mode",
+			static_cast<int>(settings.qualityMode),
+			std::span<const dmui::ChoiceOption<int>>{ qualityOptions },
+			"Unavailable",
+			"Quality mode");
+		if (qualityMode.changed) {
+			settings.qualityMode =
+				static_cast<std::uint32_t>(*qualityMode.selected);
 			changed = true;
 		}
 
@@ -3217,21 +3220,39 @@ namespace cs::features
 			&settings.frameGenerationAllowInMenus);
 		ImGui::TextDisabled("Frame generation requires windowed or borderless SDR output.");
 
-		static const char* presets[] = { "Default", "J", "K", "L", "M" };
-		int preset = static_cast<int>(settings.presetDLSS);
-		if (drawChoice("DLSS preset", preset, presets, std::size(presets))) {
-			settings.presetDLSS = static_cast<std::uint32_t>(preset);
+		static const std::array presetOptions{
+			dmui::ChoiceOption<int>{ 0, "Default", "default" },
+			dmui::ChoiceOption<int>{ 1, "J", "j" },
+			dmui::ChoiceOption<int>{ 2, "K", "k" },
+			dmui::ChoiceOption<int>{ 3, "L", "l" },
+			dmui::ChoiceOption<int>{ 4, "M", "m" }
+		};
+		const auto preset = dmui::DrawChoice<int>(
+			"upscaling-dlss-preset",
+			static_cast<int>(settings.presetDLSS),
+			std::span<const dmui::ChoiceOption<int>>{ presetOptions },
+			"Unavailable",
+			"DLSS preset");
+		if (preset.changed) {
+			settings.presetDLSS =
+				static_cast<std::uint32_t>(*preset.selected);
 			changed = true;
 		}
 
-		static const char* logLevels[] = { "Off", "Default", "Verbose" };
-		int logLevel = static_cast<int>(settings.streamlineLogLevel);
-		if (drawChoice(
-				"Streamline log level",
-				logLevel,
-				logLevels,
-				std::size(logLevels))) {
-			settings.streamlineLogLevel = static_cast<std::uint32_t>(logLevel);
+		static const std::array logLevelOptions{
+			dmui::ChoiceOption<int>{ 0, "Off", "off" },
+			dmui::ChoiceOption<int>{ 1, "Default", "default" },
+			dmui::ChoiceOption<int>{ 2, "Verbose", "verbose" }
+		};
+		const auto logLevel = dmui::DrawChoice<int>(
+			"upscaling-streamline-log-level",
+			static_cast<int>(settings.streamlineLogLevel),
+			std::span<const dmui::ChoiceOption<int>>{ logLevelOptions },
+			"Unavailable",
+			"Streamline log level");
+		if (logLevel.changed) {
+			settings.streamlineLogLevel =
+				static_cast<std::uint32_t>(*logLevel.selected);
 			changed = true;
 		}
 		if (changed) {

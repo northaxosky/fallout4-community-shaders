@@ -15,7 +15,6 @@
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
-#include "Utils/UI.h"
 
 namespace cs::features
 {
@@ -482,7 +481,8 @@ namespace cs::features
 			&strengthMin,
 			&strengthMax,
 			"%.2f");
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"1.0 matches upstream's full effect; lower values blend "
@@ -495,7 +495,8 @@ namespace cs::features
 			&strengthMin,
 			&strengthMax,
 			"%.2f");
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"1.0 matches upstream's full effect; it remains a starting "

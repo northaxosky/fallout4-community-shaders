@@ -31,7 +31,6 @@
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
-#include "Utils/UI.h"
 
 namespace cs::features
 {
@@ -2068,7 +2067,8 @@ namespace cs::features
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 		changed |= ImGui::Checkbox(
 			"Force scene traversal", &_settings.forceSceneTraversal);
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"The engine normally replays a precipitation-only cache that "
@@ -2085,7 +2085,8 @@ namespace cs::features
 			&occlusionExtentMax,
 			"%.0f",
 			ImGuiSliderFlags_Logarithmic);
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"Full ortho width. The map is fixed at 512x512, so more range "
@@ -2107,7 +2108,8 @@ namespace cs::features
 				maxZenithDegrees * (3.14159265358979323846f / 180.0f);
 			changed = true;
 		}
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"Controls the random sky-disc radius accumulated by the "

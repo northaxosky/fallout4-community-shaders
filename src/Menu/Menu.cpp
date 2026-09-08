@@ -9,7 +9,6 @@
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/ShaderCache/CacheStorage.h"
-#include "Utils/UI.h"
 
 #include <algorithm>
 #include <array>
@@ -29,6 +28,22 @@ namespace
 	constexpr std::string_view kPresetRoot =
 		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
 	constexpr std::uint64_t kImageRetryFrames = 60;
+	const std::array kLogLevelOptions{
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::trace, "Trace", "trace" },
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::debug, "Debug", "debug" },
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::info, "Info", "info" },
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::warn, "Warn", "warn" },
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::err, "Error", "error" },
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::critical, "Critical", "critical" },
+		dmui::ChoiceOption<spdlog::level::level_enum>{
+			spdlog::level::off, "Off", "off" }
+	};
 
 	void OpenFileLocation(dmui::Client& a_client, const std::filesystem::path& a_file)
 	{
@@ -67,23 +82,18 @@ namespace
 		}
 	}
 
-	ImVec4 ThemeColor(
-		dmui::Client& a_client,
-		DMUI_StatusSeverity a_severity)
+	dmui::TextTone StatusTone(DMUI_StatusSeverity a_severity)
 	{
-		if (const auto colors = a_client.GetThemeColors()) {
-			switch (a_severity) {
-			case DMUI_STATUS_SEVERITY_SUCCESS:
-				return cs::ui::ToImVec4(colors->statusSuccess);
-			case DMUI_STATUS_SEVERITY_WARNING:
-				return cs::ui::ToImVec4(colors->statusWarning);
-			case DMUI_STATUS_SEVERITY_ERROR:
-				return cs::ui::ToImVec4(colors->statusError);
-			default:
-				return cs::ui::ToImVec4(colors->statusInfo);
-			}
+		switch (a_severity) {
+		case DMUI_STATUS_SEVERITY_SUCCESS:
+			return dmui::TextTone::kStatusSuccess;
+		case DMUI_STATUS_SEVERITY_WARNING:
+			return dmui::TextTone::kStatusWarning;
+		case DMUI_STATUS_SEVERITY_ERROR:
+			return dmui::TextTone::kStatusError;
+		default:
+			return dmui::TextTone::kStatusInfo;
 		}
-		return ImGui::GetStyleColorVec4(ImGuiCol_Text);
 	}
 
 	std::string AdapterDescription()
@@ -135,31 +145,6 @@ namespace
 			nullptr,
 			nullptr);
 		return result;
-	}
-
-	template <std::size_t N>
-	bool DrawChoice(
-		const char* a_id,
-		int& a_selected,
-		const std::array<const char*, N>& a_labels)
-	{
-		if (a_selected < 0 || static_cast<std::size_t>(a_selected) >= N)
-			a_selected = 0;
-		bool changed{};
-		if (ImGui::BeginCombo(a_id, a_labels[static_cast<std::size_t>(a_selected)])) {
-			for (std::size_t index = 0; index < N; ++index) {
-				if (ImGui::Selectable(
-						a_labels[index],
-						static_cast<int>(index) == a_selected)) {
-					a_selected = static_cast<int>(index);
-					changed = true;
-				}
-				if (static_cast<int>(index) == a_selected)
-					ImGui::SetItemDefaultFocus();
-			}
-			ImGui::EndCombo();
-		}
-		return changed;
 	}
 
 	const cs::FeatureDebugView* ResolveDebugView(
@@ -315,21 +300,26 @@ namespace cs
 			return;
 
 		const auto selectedId = _debugViews.SelectedView(a_feature.GetName());
-		const auto selected = std::ranges::find(views, selectedId, &FeatureDebugView::id);
-		const std::string preview =
-			selected == views.end() ? "Off" : std::string(selected->label);
-		if (ImGui::BeginCombo("Debug visualization", preview.c_str())) {
-			if (ImGui::Selectable("Off", selected == views.end()))
-				SetDebugViewSelection(a_feature, {});
-			for (const auto& view : views) {
-				const auto label = std::string(view.label);
-				if (ImGui::Selectable(label.c_str(), selectedId == view.id))
-					SetDebugViewSelection(a_feature, view.id);
-			}
-			ImGui::EndCombo();
+		std::vector<dmui::ChoiceOption<std::string>> options;
+		options.reserve(views.size() + 1);
+		options.push_back({ {}, "Off", "off" });
+		for (const auto& view : views) {
+			options.push_back({
+				std::string(view.id),
+				std::string(view.label),
+				std::string(view.id) });
 		}
-		if (ImGui::IsItemHovered()) {
-			ImGui::SetTooltip(
+		const auto selection = dmui::DrawChoice<std::string>(
+			"feature-debug-view",
+			std::string(selectedId),
+			std::span<const dmui::ChoiceOption<std::string>>{ options },
+			"Unavailable",
+			"Debug visualization");
+		if (selection.changed)
+			SetDebugViewSelection(a_feature, *selection.selected);
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
+			ImGui::Text(
 				"%s",
 				"Fullscreen views are exclusive. Texture previews are independent.");
 		}
@@ -472,10 +462,14 @@ namespace cs
 
 	void Menu::DrawHome(dmui::Client& a_client)
 	{
-		{
-			dmui::FontGuard title{ a_client, DMUI_FONT_ROLE_TITLE };
-			ImGui::TextUnformatted("Fallout 4 Community Shaders");
-		}
+		if (!CheckHostResult(
+				a_client,
+				dmui::DrawStyledText(
+					a_client,
+					"Fallout 4 Community Shaders",
+					{ .fontRole = DMUI_FONT_ROLE_TITLE }),
+				"draw home title"))
+			return;
 		ImGui::TextWrapped(
 			"Modern rendering features for Fallout 4. Features ship disabled; "
 			"choose which features to load in Advanced, then restart. "
@@ -554,8 +548,12 @@ namespace cs
 		ImGui::TextWrapped(
 			"Loaded means the feature was loaded at startup. "
 			"Its Enabled setting controls whether the effect is currently applied.");
-		ui::SettingsTableScope table{ a_client, "home-feature-status" };
-		if (!table.Valid() || !table.Visible())
+		dmui::SettingsTableScope table{ a_client, "home-feature-status" };
+		if (table.Result() != DMUI_RESULT_OK) {
+			CheckHostResult(a_client, false, "begin feature status table");
+			return;
+		}
+		if (!table.Visible())
 			return;
 		for (const auto* feature : FeatureManager::Get().GetRegisteredFeatures()) {
 			if (!feature || !feature->IsInMenu())
@@ -581,19 +579,43 @@ namespace cs
 			}
 			const auto id = std::format("feature-status-{}", feature->GetName());
 			const auto label = std::string(feature->GetDisplayName());
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				a_client,
 				id.c_str(),
 				label.c_str(),
 				"Startup loading result; live effect controls are on the feature page." };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin feature status row");
 				return;
+			}
 			if (row.Visible()) {
-				ImGui::TextColored(ThemeColor(a_client, severity), "%s", status);
-				if (!state.detail.empty())
-					ImGui::TextWrapped("%s", state.detail.c_str());
+				if (!CheckHostResult(
+						a_client,
+						dmui::DrawStyledText(
+							a_client,
+							status,
+							{ .tone = StatusTone(severity) }),
+						"draw feature status"))
+					return;
+				if (!state.detail.empty() &&
+					!CheckHostResult(
+						a_client,
+						dmui::DrawStyledText(
+							a_client,
+							state.detail,
+							{ .wrapped = true }),
+						"draw feature status detail"))
+					return;
+			}
+			if (!row.End()) {
+				CheckHostResult(a_client, false, "end feature status row");
+				return;
 			}
 		}
+		(void)CheckHostResult(
+			a_client,
+			table.End(),
+			"end feature status table");
 	}
 
 	void Menu::DrawShaderSettings(dmui::Client& a_client)
@@ -606,26 +628,40 @@ namespace cs
 				"draw shader ownership section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-shader-ownership" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-shader-ownership" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin shader ownership table");
 				return;
+			}
 			if (table.Visible()) {
 				{
-					ui::SettingsRowScope status{
+					dmui::SettingsRowScope status{
 						a_client,
 						"shader-ownership-status",
 						"Status",
 						"Applied at boot only when the stock shader hash matches." };
-					if (!status.Valid())
+					if (status.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin shader ownership status row");
 						return;
+					}
 					if (status.Visible()) {
 						const auto severity = ownership.config.enabled ?
 							DMUI_STATUS_SEVERITY_SUCCESS :
 							DMUI_STATUS_SEVERITY_INFO;
-						ImGui::TextColored(
-							ThemeColor(a_client, severity),
-							"%s",
-							ownership.config.enabled ? "Enabled" : "Disabled");
+						if (!CheckHostResult(
+								a_client,
+								dmui::DrawStyledText(
+									a_client,
+									ownership.config.enabled ?
+										"Enabled" :
+										"Disabled",
+									{ .tone = StatusTone(severity) }),
+								"draw shader ownership status"))
+							return;
+					}
+					if (!status.End()) {
+						CheckHostResult(a_client, false, "end shader ownership status row");
+						return;
 					}
 				}
 
@@ -645,37 +681,57 @@ namespace cs
 					Target{ "df-tiled-lighting", "DFTiledLighting", ownership.config.targets.dfTiledLighting }
 				};
 				for (const auto& target : targets) {
-					ui::SettingsRowScope row{
+					dmui::SettingsRowScope row{
 						a_client,
 						target.id,
 						target.label,
 						"Read-only boot configuration from the unified TOML." };
-					if (!row.Valid())
+					if (row.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin shader ownership target row");
 						return;
+					}
 					if (row.Visible()) {
 						auto enabled = target.enabled;
-						ImGui::BeginDisabled();
+						const dmui::DisabledScope disabled;
 						(void)ImGui::Checkbox("##enabled", &enabled);
-						ImGui::EndDisabled();
+					}
+					if (!row.End()) {
+						CheckHostResult(a_client, false, "end shader ownership target row");
+						return;
 					}
 				}
 				if (!ownership.valid) {
-					ui::SettingsRowScope error{
+					dmui::SettingsRowScope error{
 						a_client,
 						"shader-ownership-error",
 						"Configuration error",
 						"",
 						dmui::RowPresentation::Layout::kFullSpan };
-					if (!error.Valid())
+					if (error.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin shader ownership error row");
 						return;
+					}
 					if (error.Visible()) {
-						ImGui::TextColored(
-							ThemeColor(a_client, DMUI_STATUS_SEVERITY_ERROR),
-							"%s",
-							ownership.error.c_str());
+						if (!CheckHostResult(
+								a_client,
+								dmui::DrawStyledText(
+									a_client,
+									ownership.error,
+									{ .tone = dmui::TextTone::kStatusError }),
+								"draw shader ownership error"))
+							return;
+					}
+					if (!error.End()) {
+						CheckHostResult(a_client, false, "end shader ownership error row");
+						return;
 					}
 				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end shader ownership table"))
+				return;
 		}
 
 		if (!CheckHostResult(
@@ -684,30 +740,47 @@ namespace cs
 				"draw shader cache section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-shader-cache" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-shader-cache" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin shader cache table");
 				return;
+			}
 			if (table.Visible()) {
 				const auto cacheRoot = shader_cache::DefaultCacheRoot();
 				{
-					ui::SettingsRowScope location{
+					dmui::SettingsRowScope location{
 						a_client,
 						"shader-cache-location",
 						"Cache directory",
 						"Compiled shader records are stored here." };
-					if (!location.Valid())
+					if (location.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin shader cache location row");
 						return;
-					if (location.Visible())
-						ImGui::TextWrapped("%s", cacheRoot.string().c_str());
+					}
+					if (location.Visible() &&
+						!CheckHostResult(
+							a_client,
+							dmui::DrawStyledText(
+								a_client,
+								cacheRoot.string(),
+								{ .wrapped = true }),
+							"draw shader cache location"))
+						return;
+					if (!location.End()) {
+						CheckHostResult(a_client, false, "end shader cache location row");
+						return;
+					}
 				}
 
-				ui::SettingsRowScope open{
+				dmui::SettingsRowScope open{
 					a_client,
 					"open-shader-cache",
 					"Open cache folder",
 					"Open the physical cache location. Under MO2 this may be in Overwrite." };
-				if (!open.Valid())
+				if (open.Result() != DMUI_RESULT_OK) {
+					CheckHostResult(a_client, false, "begin open shader cache row");
 					return;
+				}
 				if (open.Visible() && ImGui::Button("Open")) {
 					const auto identity = cacheRoot / shader_cache::kIdentityFileName;
 					std::error_code error;
@@ -717,7 +790,16 @@ namespace cs
 						OpenFileLocation(a_client, identity);
 					}
 				}
+				if (!open.End()) {
+					CheckHostResult(a_client, false, "end open shader cache row");
+					return;
+				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end shader cache table"))
+				return;
 		}
 	}
 
@@ -729,17 +811,21 @@ namespace cs
 				"draw configuration section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-configuration" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-configuration" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin configuration table");
 				return;
+			}
 			if (table.Visible()) {
-				ui::SettingsRowScope folder{
+				dmui::SettingsRowScope folder{
 					a_client,
 					"open-configuration-folder",
 					"Configuration file location",
 					"Open the physical location of your User TOML, or the Default TOML if no User file exists. MO2 can store them in different folders." };
-				if (!folder.Valid())
+				if (folder.Result() != DMUI_RESULT_OK) {
+					CheckHostResult(a_client, false, "begin configuration folder row");
 					return;
+				}
 				if (folder.Visible() && ImGui::Button("Open")) {
 					std::error_code error;
 					const bool userExists = std::filesystem::exists(
@@ -753,7 +839,16 @@ namespace cs
 							feature_config::kDefaultConfigPath);
 					}
 				}
+				if (!folder.End()) {
+					CheckHostResult(a_client, false, "end configuration folder row");
+					return;
+				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end configuration table"))
+				return;
 		}
 
 		if (!CheckHostResult(
@@ -765,9 +860,11 @@ namespace cs
 			ImGui::TextWrapped(
 				"Checked features load when the game starts. Changes require a restart. "
 				"Use Enabled on a feature's page to switch its effect on or off now.");
-			ui::SettingsTableScope table{ a_client, "advanced-startup-loading" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-startup-loading" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin startup loading table");
 				return;
+			}
 			if (table.Visible()) {
 				auto features = FeatureManager::Get().GetRegisteredFeatures();
 				std::ranges::sort(
@@ -787,13 +884,15 @@ namespace cs
 					const auto id =
 						std::format("load-on-startup-{}", feature->GetName());
 					const auto label = std::string(feature->GetDisplayName());
-					ui::SettingsRowScope row{
+					dmui::SettingsRowScope row{
 						a_client,
 						id.c_str(),
 						label.c_str(),
 						"Checked: load this feature on the next launch. Requires restart." };
-					if (!row.Valid())
+					if (row.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin startup loading row");
 						return;
+					}
 					if (row.Visible() &&
 						ImGui::Checkbox("##load", &loadAtBoot)) {
 						const auto result = feature_config::UpdateFeatureLoad(
@@ -810,12 +909,27 @@ namespace cs
 					if (row.Visible() &&
 						_startupLoads.RequiresRestart(feature->GetConfigKey(), loadAtBoot)) {
 						ImGui::SameLine();
-						ImGui::TextColored(
-							ThemeColor(a_client, DMUI_STATUS_SEVERITY_WARNING),
-							"Restart required");
+						if (!CheckHostResult(
+								a_client,
+								dmui::DrawStyledText(
+									a_client,
+									"Restart required",
+									{ .tone =
+											dmui::TextTone::kStatusWarning }),
+								"draw startup restart status"))
+							return;
+					}
+					if (!row.End()) {
+						CheckHostResult(a_client, false, "end startup loading row");
+						return;
 					}
 				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end startup loading table"))
+				return;
 		}
 
 		DrawShaderSettings(a_client);
@@ -826,44 +940,44 @@ namespace cs
 				"draw logging section"))
 			return;
 		{
-			static constexpr std::array<const char*, 7> levelNames{
-				"Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off"
-			};
-			static constexpr std::array levels{
-				spdlog::level::trace,
-				spdlog::level::debug,
-				spdlog::level::info,
-				spdlog::level::warn,
-				spdlog::level::err,
-				spdlog::level::critical,
-				spdlog::level::off
-			};
-			const auto levelIndex = [&](spdlog::level::level_enum a_level) {
-				const auto found = std::ranges::find(levels, a_level);
-				return found == levels.end() ?
-					2 :
-					static_cast<int>(std::distance(levels.begin(), found));
-			};
-
-			ui::SettingsTableScope table{ a_client, "advanced-logging" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-logging" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin global logging table");
 				return;
+			}
 			if (table.Visible()) {
-				ui::SettingsRowScope global{
+				dmui::SettingsRowScope global{
 					a_client,
 					"global-log-level",
 					"Global level",
 					"Default severity threshold for Community Shaders loggers." };
-				if (!global.Valid())
+				if (global.Result() != DMUI_RESULT_OK) {
+					CheckHostResult(a_client, false, "begin global logging row");
 					return;
+				}
 				if (global.Visible()) {
-					auto selected = levelIndex(log::GlobalLevel());
-					if (DrawChoice("##level", selected, levelNames)) {
-						log::SetGlobalLevel(levels[static_cast<std::size_t>(selected)]);
+					const auto selected =
+						dmui::DrawChoice<spdlog::level::level_enum>(
+							"global-log-level-choice",
+							log::GlobalLevel(),
+							std::span<const dmui::ChoiceOption<
+								spdlog::level::level_enum>>{
+								kLogLevelOptions });
+					if (selected.changed) {
+						log::SetGlobalLevel(*selected.selected);
 						(void)log::SaveConfigToToml();
 					}
 				}
+				if (!global.End()) {
+					CheckHostResult(a_client, false, "end global logging row");
+					return;
+				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end global logging table"))
+				return;
 		}
 
 		static std::string loggerSearch;
@@ -875,49 +989,52 @@ namespace cs
 			return;
 		}
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-log-channels" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-log-channels" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin log channels table");
 				return;
+			}
 			if (table.Visible()) {
-				static constexpr std::array<const char*, 7> levelNames{
-					"Trace", "Debug", "Info", "Warn", "Error", "Critical", "Off"
-				};
-				static constexpr std::array levels{
-					spdlog::level::trace,
-					spdlog::level::debug,
-					spdlog::level::info,
-					spdlog::level::warn,
-					spdlog::level::err,
-					spdlog::level::critical,
-					spdlog::level::off
-				};
 				for (const auto& name : log::ListLoggers()) {
 					if (!dmui::ContainsFolded(name, loggerSearch))
 						continue;
 					auto* logger = log::Get(name.c_str());
-					const auto found = std::ranges::find(
-						levels,
-						logger ? logger->level() : log::GlobalLevel());
-					auto selected = found == levels.end() ?
-						2 :
-						static_cast<int>(std::distance(levels.begin(), found));
+					const auto current =
+						logger ? logger->level() : log::GlobalLevel();
 					const auto id = "log-channel-" + name;
-					ui::SettingsRowScope row{
+					dmui::SettingsRowScope row{
 						a_client,
 						id.c_str(),
 						name.c_str(),
 						"Overrides the global logging level for this channel." };
-					if (!row.Valid())
+					if (row.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin log channel row");
 						return;
-					if (row.Visible() &&
-						DrawChoice("##level", selected, levelNames)) {
-						log::SetLevel(
-							name.c_str(),
-							levels[static_cast<std::size_t>(selected)]);
-						(void)log::SaveConfigToToml();
+					}
+					if (row.Visible()) {
+						const auto selected =
+							dmui::DrawChoice<spdlog::level::level_enum>(
+								"log-channel-level-choice",
+								current,
+								std::span<const dmui::ChoiceOption<
+									spdlog::level::level_enum>>{
+									kLogLevelOptions });
+						if (selected.changed) {
+							log::SetLevel(name.c_str(), *selected.selected);
+							(void)log::SaveConfigToToml();
+						}
+					}
+					if (!row.End()) {
+						CheckHostResult(a_client, false, "end log channel row");
+						return;
 					}
 				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end log channels table"))
+				return;
 		}
 
 		if (!CheckHostResult(
@@ -926,18 +1043,22 @@ namespace cs
 				"draw telemetry section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-telemetry" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-telemetry" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin telemetry table");
 				return;
+			}
 			if (table.Visible()) {
 				{
-					ui::SettingsRowScope enabledRow{
+					dmui::SettingsRowScope enabledRow{
 						a_client,
 						"telemetry-enabled",
 						"Emit telemetry",
 						"Collect cached feature and frame diagnostics for log dumps." };
-					if (!enabledRow.Valid())
+					if (enabledRow.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin telemetry enabled row");
 						return;
+					}
 					if (enabledRow.Visible()) {
 						bool enabled = telemetry::pump::Enabled();
 						if (ImGui::Checkbox("##enabled", &enabled)) {
@@ -945,17 +1066,32 @@ namespace cs
 							(void)log::SaveConfigToToml();
 						}
 					}
+					if (!enabledRow.End()) {
+						CheckHostResult(a_client, false, "end telemetry enabled row");
+						return;
+					}
 				}
-				ui::SettingsRowScope dump{
+				dmui::SettingsRowScope dump{
 					a_client,
 					"telemetry-dump",
 					"Dump now",
 					"Write the current diagnostic snapshot to the log." };
-				if (!dump.Valid())
+				if (dump.Result() != DMUI_RESULT_OK) {
+					CheckHostResult(a_client, false, "begin telemetry dump row");
 					return;
+				}
 				if (dump.Visible() && ImGui::Button("Dump"))
 					telemetry::pump::RequestDump();
+				if (!dump.End()) {
+					CheckHostResult(a_client, false, "end telemetry dump row");
+					return;
+				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end telemetry table"))
+				return;
 		}
 
 		if (!CheckHostResult(
@@ -964,9 +1100,11 @@ namespace cs
 				"draw diagnostics section"))
 			return;
 		{
-			ui::SettingsTableScope table{ a_client, "advanced-diagnostics" };
-			if (!table.Valid())
+			dmui::SettingsTableScope table{ a_client, "advanced-diagnostics" };
+			if (table.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin diagnostics table");
 				return;
+			}
 			if (table.Visible()) {
 				const std::array values{
 					std::pair{ "Plugin version", Plugin::VERSION.string(".") },
@@ -976,17 +1114,35 @@ namespace cs
 				};
 				for (std::size_t index = 0; index < values.size(); ++index) {
 					const auto id = std::format("diagnostic-{}", index);
-					ui::SettingsRowScope row{
+					dmui::SettingsRowScope row{
 						a_client,
 						id.c_str(),
 						values[index].first,
 						"" };
-					if (!row.Valid())
+					if (row.Result() != DMUI_RESULT_OK) {
+						CheckHostResult(a_client, false, "begin diagnostic row");
 						return;
-					if (row.Visible())
-						ImGui::TextWrapped("%s", values[index].second.c_str());
+					}
+					if (row.Visible() &&
+						!CheckHostResult(
+							a_client,
+							dmui::DrawStyledText(
+								a_client,
+								values[index].second,
+								{ .wrapped = true }),
+							"draw diagnostic value"))
+						return;
+					if (!row.End()) {
+						CheckHostResult(a_client, false, "end diagnostic row");
+						return;
+					}
 				}
 			}
+			if (!CheckHostResult(
+					a_client,
+					table.End(),
+					"end diagnostics table"))
+				return;
 		}
 	}
 
@@ -999,110 +1155,150 @@ namespace cs
 
 		const auto* pending = presets.FindByIdentity(presets.pendingComboIdentity);
 		const auto* active = presets.FindByIdentity(presets.activeIdentity);
-		ui::SettingsTableScope table{ a_client, "presets" };
-		if (!table.Valid() || !table.Visible())
+		dmui::SettingsTableScope table{ a_client, "presets" };
+		if (table.Result() != DMUI_RESULT_OK) {
+			CheckHostResult(a_client, false, "begin presets table");
+			return;
+		}
+		if (!table.Visible())
 			return;
 		{
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				a_client,
 				"active-preset",
 				"Active preset",
 				"The last preset applied to live feature settings." };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin active preset row");
 				return;
+			}
 			if (row.Visible()) {
-				ImGui::TextUnformatted(
-					presets.activeName.empty() ?
-						"(none)" :
-						presets.activeName.c_str());
+				if (!CheckHostResult(
+						a_client,
+						dmui::DrawStyledText(
+							a_client,
+							presets.activeName.empty() ?
+								"(none)" :
+								presets.activeName),
+						"draw active preset"))
+					return;
+			}
+			if (!row.End()) {
+				CheckHostResult(a_client, false, "end active preset row");
+				return;
 			}
 		}
 		if (!presets.lastError.empty()) {
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				a_client,
 				"preset-error",
 				"Preset error",
 				"",
 				dmui::RowPresentation::Layout::kFullSpan };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin preset error row");
 				return;
+			}
 			if (row.Visible()) {
-				ImGui::TextColored(
-					ThemeColor(a_client, DMUI_STATUS_SEVERITY_ERROR),
-					"%s",
-					presets.lastError.c_str());
+				if (!CheckHostResult(
+						a_client,
+						dmui::DrawStyledText(
+							a_client,
+							presets.lastError,
+							{ .tone = dmui::TextTone::kStatusError }),
+						"draw preset error"))
+					return;
+			}
+			if (!row.End()) {
+				CheckHostResult(a_client, false, "end preset error row");
+				return;
 			}
 		}
 
-		const std::string preview = pending ?
-			std::format("{}: {}", pending->builtin ? "B" : "U", pending->name) :
-			"(no presets found)";
 		{
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				a_client,
 				"preset-selection",
 				"Preset",
 				"Choose a built-in or user preset." };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin preset selection row");
 				return;
+			}
 			if (row.Visible()) {
-				ImGui::BeginDisabled(list.empty());
-				if (ImGui::BeginCombo("##preset", preview.c_str())) {
-					for (const auto& preset : list) {
-						const auto label =
-							std::format("{}: {}", preset.builtin ? "B" : "U", preset.name);
-						if (ImGui::Selectable(
-								label.c_str(),
-								preset.identity == presets.pendingComboIdentity))
-							presets.pendingComboIdentity = preset.identity;
-					}
-					ImGui::EndCombo();
+				std::vector<dmui::ChoiceOption<std::string>> options;
+				options.reserve(list.size());
+				for (const auto& preset : list) {
+					options.push_back({
+						preset.identity,
+						std::format(
+							"{}: {}",
+							preset.builtin ? "B" : "U",
+							preset.name),
+						preset.identity });
 				}
-				ImGui::EndDisabled();
+				const auto selection = dmui::DrawChoice<std::string>(
+					"preset-selection-choice",
+					presets.pendingComboIdentity,
+					std::span<const dmui::ChoiceOption<std::string>>{
+						options },
+					"(no presets found)");
+				if (selection.changed)
+					presets.pendingComboIdentity = *selection.selected;
+			}
+			if (!row.End()) {
+				CheckHostResult(a_client, false, "end preset selection row");
+				return;
 			}
 		}
 
 		pending = presets.FindByIdentity(presets.pendingComboIdentity);
 		active = presets.FindByIdentity(presets.activeIdentity);
-		ui::SettingsRowScope actions{
+		dmui::SettingsRowScope actions{
 			a_client,
 			"preset-actions",
 			"Actions",
 			"Load, save, copy, delete, or rescan presets.",
 			dmui::RowPresentation::Layout::kFullSpan };
-		if (!actions.Valid())
+		if (actions.Result() != DMUI_RESULT_OK) {
+			CheckHostResult(a_client, false, "begin preset actions row");
 			return;
-		if (!actions.Visible())
-			return;
-		ImGui::BeginDisabled(!pending);
-		if (ImGui::Button("Load") && pending) {
-			std::string error;
-			if (!presets.Apply(*pending, error))
-				presets.lastError = "Load failed: " + error;
-			else
-				presets.lastError.clear();
 		}
-		ImGui::EndDisabled();
+		if (!actions.Visible()) {
+			(void)CheckHostResult(a_client, table.End(), "end presets table");
+			return;
+		}
+		{
+			const dmui::DisabledScope disabled{ !pending };
+			if (ImGui::Button("Load") && pending) {
+				std::string error;
+				if (!presets.Apply(*pending, error))
+					presets.lastError = "Load failed: " + error;
+				else
+					presets.lastError.clear();
+			}
+		}
 
 		ImGui::SameLine();
-		ImGui::BeginDisabled(!active || active->builtin);
-		if (ImGui::Button("Save") && active && !active->builtin) {
-			const auto identity = active->identity;
-			const auto name = active->name;
-			const auto path = active->path;
-			std::string error;
-			if (!presets.Save(path, name, error, true)) {
-				presets.lastError = "Save failed: " + error;
-			} else {
-				presets.Refresh();
-				presets.activeIdentity = identity;
-				presets.activeName = name;
-				presets.pendingComboIdentity = identity;
-				presets.lastError.clear();
+		{
+			const dmui::DisabledScope disabled{ !active || active->builtin };
+			if (ImGui::Button("Save") && active && !active->builtin) {
+				const auto identity = active->identity;
+				const auto name = active->name;
+				const auto path = active->path;
+				std::string error;
+				if (!presets.Save(path, name, error, true)) {
+					presets.lastError = "Save failed: " + error;
+				} else {
+					presets.Refresh();
+					presets.activeIdentity = identity;
+					presets.activeName = name;
+					presets.pendingComboIdentity = identity;
+					presets.lastError.clear();
+				}
+				active = presets.FindByIdentity(presets.activeIdentity);
 			}
-			active = presets.FindByIdentity(presets.activeIdentity);
 		}
-		ImGui::EndDisabled();
 
 		ImGui::SameLine();
 		if (ImGui::Button("Save As...") &&
@@ -1122,29 +1318,30 @@ namespace cs
 		}
 
 		ImGui::SameLine();
-		ImGui::BeginDisabled(!active || active->builtin);
-		if (ImGui::Button("Delete") && active && !active->builtin &&
-			_dialog.operation == DialogOperation::kNone) {
-			_dialog.presetIdentity = active->identity;
-			_dialog.presetName = active->name;
-			_dialog.presetPath = active->path;
-			const auto body = std::format(
-				"Delete preset '{}'? File is removed from disk. This cannot be undone.",
-				active->name);
-			const DMUI_DialogDescriptor descriptor{
-				DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
-				DMUI_DIALOG_KIND_CONFIRM,
-				"Delete Preset",
-				body.c_str(),
-				"Delete",
-				"Cancel",
-				nullptr,
-				nullptr,
-				1u
-			};
-			StartDialog(a_client, DialogOperation::kDeletePreset, descriptor);
+		{
+			const dmui::DisabledScope disabled{ !active || active->builtin };
+			if (ImGui::Button("Delete") && active && !active->builtin &&
+				_dialog.operation == DialogOperation::kNone) {
+				_dialog.presetIdentity = active->identity;
+				_dialog.presetName = active->name;
+				_dialog.presetPath = active->path;
+				const auto body = std::format(
+					"Delete preset '{}'? File is removed from disk. This cannot be undone.",
+					active->name);
+				const DMUI_DialogDescriptor descriptor{
+					DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
+					DMUI_DIALOG_KIND_CONFIRM,
+					"Delete Preset",
+					body.c_str(),
+					"Delete",
+					"Cancel",
+					nullptr,
+					nullptr,
+					1u
+				};
+				StartDialog(a_client, DialogOperation::kDeletePreset, descriptor);
+			}
 		}
-		ImGui::EndDisabled();
 
 		ImGui::SameLine();
 		if (ImGui::Button("Refresh")) {
@@ -1153,20 +1350,30 @@ namespace cs
 				presets.pendingComboIdentity.clear();
 			presets.lastError.clear();
 		}
-		(void)actions.End();
+		if (!actions.End()) {
+			CheckHostResult(a_client, false, "end preset actions row");
+			return;
+		}
 
 		{
-			ui::SettingsRowScope row{
+			dmui::SettingsRowScope row{
 				a_client,
 				"preset-auto-load",
 				"Auto-load on boot",
 				"Apply the active preset during startup." };
-			if (!row.Valid())
+			if (row.Result() != DMUI_RESULT_OK) {
+				CheckHostResult(a_client, false, "begin preset auto-load row");
 				return;
+			}
 			if (row.Visible() &&
 				ImGui::Checkbox("##auto-load", &presets.autoLoadOnBoot))
 				(void)presets.SaveCoreConfig();
+			if (!row.End()) {
+				CheckHostResult(a_client, false, "end preset auto-load row");
+				return;
+			}
 		}
+		(void)CheckHostResult(a_client, table.End(), "end presets table");
 	}
 
 	void Menu::ObserveHostFrame(dmui::Client& a_client)

@@ -19,7 +19,6 @@
 #include "Render/SharedData.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
-#include "Utils/UI.h"
 
 namespace cs::features
 {
@@ -608,7 +607,8 @@ namespace cs::features
 			&multiplierMin,
 			&multiplierMax,
 			"%.2f");
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"Scales the extinction fitted from the current weather's "
@@ -621,7 +621,8 @@ namespace cs::features
 			&multiplierMin,
 			&multiplierMax,
 			"%.2f");
-		if (auto tooltip = ui::HoverTooltipWrapper()) {
+		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			tooltip.Visible()) {
 			ImGui::Text(
 				"%s",
 				"Scales both exponential height curves fitted from the "

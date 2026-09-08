@@ -485,30 +485,6 @@ namespace cs::features
 		ImGui::TextDisabled(
 			"The host owns the overlay hotkey. Suggested default: %s.",
 			settings.toggleHotkey.c_str());
-		const auto drawChoice = [](const char* a_label,
-								 int& a_value,
-								 const char* const* a_labels,
-								 std::size_t a_count) {
-			const auto selected =
-				a_value >= 0 && static_cast<std::size_t>(a_value) < a_count ?
-				a_value :
-				0;
-			bool choiceChanged = false;
-			if (ImGui::BeginCombo(a_label, a_labels[selected])) {
-				for (std::size_t index = 0; index < a_count; ++index) {
-					if (ImGui::Selectable(
-							a_labels[index],
-							static_cast<int>(index) == selected)) {
-						a_value = static_cast<int>(index);
-						choiceChanged = true;
-					}
-					if (static_cast<int>(index) == selected)
-						ImGui::SetItemDefaultFocus();
-				}
-				ImGui::EndCombo();
-			}
-			return choiceChanged;
-		};
 
 		if (ImGui::Checkbox("Enabled", &settings.enabled))
 			SaveSettings();
@@ -518,10 +494,20 @@ namespace cs::features
 		// Save sliders only on commit to avoid render-thread writes.
 		auto sliderCommit = [] { return ImGui::IsItemDeactivatedAfterEdit(); };
 
-		static const char* presetLabels[] = { "Off", "Minimal", "Standard", "Verbose" };
-		int preset = std::clamp(settings.preset, 0, 3);
-		if (drawChoice("Preset", preset, presetLabels, std::size(presetLabels))) {
-			ApplyPreset(static_cast<Preset>(preset));
+		static const std::array presetOptions{
+			dmui::ChoiceOption<int>{ 0, "Off", "off" },
+			dmui::ChoiceOption<int>{ 1, "Minimal", "minimal" },
+			dmui::ChoiceOption<int>{ 2, "Standard", "standard" },
+			dmui::ChoiceOption<int>{ 3, "Verbose", "verbose" }
+		};
+		const auto preset = dmui::DrawChoice<int>(
+			"performance-overlay-preset",
+			settings.preset,
+			std::span<const dmui::ChoiceOption<int>>{ presetOptions },
+			"Unavailable",
+			"Preset");
+		if (preset.changed) {
+			ApplyPreset(static_cast<Preset>(*preset.selected));
 			SaveSettings();
 		}
 
@@ -536,10 +522,20 @@ namespace cs::features
 		}
 
 		if (ImGui::CollapsingHeader("Position")) {
-			static const char* cornerLabels[] = { "Top-left", "Top-right", "Bottom-left", "Bottom-right" };
-			int corner = std::clamp(settings.corner, 0, 3);
-			if (drawChoice("Corner", corner, cornerLabels, std::size(cornerLabels))) {
-				settings.corner = corner;
+			static const std::array cornerOptions{
+				dmui::ChoiceOption<int>{ 0, "Top-left", "top-left" },
+				dmui::ChoiceOption<int>{ 1, "Top-right", "top-right" },
+				dmui::ChoiceOption<int>{ 2, "Bottom-left", "bottom-left" },
+				dmui::ChoiceOption<int>{ 3, "Bottom-right", "bottom-right" }
+			};
+			const auto corner = dmui::DrawChoice<int>(
+				"performance-overlay-corner",
+				settings.corner,
+				std::span<const dmui::ChoiceOption<int>>{ cornerOptions },
+				"Unavailable",
+				"Corner");
+			if (corner.changed) {
+				settings.corner = *corner.selected;
 				SaveSettings();
 			}
 			if (ImGui::Checkbox("Free-drag (override corner snap)", &settings.freeDrag))
@@ -624,8 +620,9 @@ namespace cs::features
 				&updateIntervalMin,
 				&updateIntervalMax,
 				"%.2f");
-			if (ImGui::IsItemHovered()) {
-				ImGui::SetTooltip(
+			if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+				tooltip.Visible()) {
+				ImGui::Text(
 					"%s",
 					"How often the displayed FPS/frametime number refreshes. "
 					"The history graph updates every frame.");
