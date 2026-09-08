@@ -2,13 +2,11 @@
 #include "Host/HostClientOptions.h"
 #include "Host/HostRuntimeModel.h"
 #include "Menu/DebugViewSelection.h"
-#include "Utils/PhysicalFile.h"
 
 #include <DearModdingUI/Client.h>
 #include <DearModdingUI/IconGlyphs.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <iostream>
 #include <ranges>
 #include <string_view>
@@ -218,6 +216,12 @@ namespace
 		CHECK(dmui::PreflightHostAPI(&api, options) == DMUI_RESULT_OK);
 
 		supportedServices &= ~DMUI_HOST_SERVICE_EXTERNAL_OPEN;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_SERVICE_UNAVAILABLE);
+		supportedServices = options.requiredServices;
+
+		supportedServices &= ~DMUI_HOST_SERVICE_VIRTUAL_FILE_TARGETS;
 		CHECK(
 			dmui::PreflightHostAPI(&api, options) ==
 			DMUI_RESULT_SERVICE_UNAVAILABLE);
@@ -446,24 +450,6 @@ namespace
 		CHECK(state.Fullscreen().feature == "InverseSquareLighting");
 	}
 
-	void TestPhysicalFileLocation()
-	{
-		const auto source = std::filesystem::path(__FILE__);
-		const auto resolved = cs::files::PhysicalFilePath(source);
-		CHECK(resolved.has_value());
-		if (resolved) {
-			CHECK(resolved->is_absolute());
-			CHECK(!resolved->native().starts_with(L"\\Device\\"));
-			std::error_code error;
-			CHECK(std::filesystem::equivalent(*resolved, source, error));
-			CHECK(!error);
-		}
-		const auto missing = cs::files::PhysicalFilePath(
-			source.parent_path() / L"missing-physical-path-test.no-such-file");
-		CHECK(!missing);
-		CHECK(missing.error().value() != 0);
-	}
-
 	void TestSnapshotRefresh()
 	{
 		cs::DebugSnapshotRequest snapshot;
@@ -673,7 +659,6 @@ int main()
 	TestPageCatalog();
 	TestCategoryIdValidity();
 	TestEmptyPageCatalog();
-	TestPhysicalFileLocation();
 	TestSnapshotRefresh();
 	TestSharedSnapshotSelection();
 	TestStartupLoadIntent();

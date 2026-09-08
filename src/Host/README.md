@@ -12,8 +12,9 @@ Persisted debug-view selections are applied after shader-injection validation wh
 ready. At F4SE `kPostPostLoad`, after feature registration is complete, `HostClient` calls the
 official `dmui::Client::Connect`. The client checks the exact generated ImGui forwarding binary
 version separately from the minimum forwarding surface version 1.1, and preflights API structure
-and required services, including native external opening, before registering anything. The client
-and host must use matching development headers from the CommonLibF4-pinned DearModdingUI API; no
+and required services, including native external opening and virtual-file targets, before
+registering anything. The client and host must use matching development headers from the
+CommonLibF4-pinned DearModdingUI API; no
 compatibility shim is provided for superseded development snapshots. It then registers all category
 descriptors before any page that references their stable IDs:
 
@@ -42,11 +43,17 @@ last. Distinct custom labels receive distinct stable IDs even when ASCII normali
 Only categories referenced by pages are registered. The client explicitly requests the lightbulb
 icon, and General resolves to the host's gear icon.
 
-Explorer runs outside the game's USVFS mapping. Folder actions resolve the backing configuration
-or cache identity file through a read-only mapping before launching Explorer. Ordinary file-name
-queries are insufficient because USVFS deliberately rewrites those names to virtual paths.
-This physical-path and Explorer flow remains intentionally unchanged while the upstream
-DearModdingUI USVFS virtual-file/open-containing-folder API is pending.
+Folder actions pass the absolute UTF-8 path of the configuration or cache identity file to
+`Client::OpenExternal` with `DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT`. The host resolves that
+existing file's physical backing location through MO2/USVFS before opening its containing folder;
+Community Shaders neither resolves the backing path nor launches Explorer itself. Configuration
+actions prefer the User TOML when it exists, otherwise the Default TOML. Cache actions use the
+existing cache identity file and do not guess a future Overwrite destination.
+
+The host supports readable, nonempty loose files. Empty files, directories, archive interiors,
+and unsupported backing namespaces fail explicitly, without opening a guessed or unresolved
+location. Resolution and launch failures surface the DmUI result in a notification and log the
+native Windows error. The service does not promise an unvirtualized child process.
 
 ## Native services
 
@@ -84,8 +91,9 @@ RenderDoc capture hotkeys additionally require a loaded capture API. IDs use the
 ## Tests
 
 `tests/HostIntegrationTests.cpp` exercises forwarding service/version preflight, including the
-external-open function/table requirements, missing-service headless behavior, category/page catalog
-ordering, IDs, references, deduplication and collision handling, and independent fullscreen/texture
+external-open function/table and virtual-file service requirements, missing-service headless
+behavior, category/page catalog ordering, IDs, references, deduplication and collision handling,
+and independent fullscreen/texture
 debug-view selection. It intentionally builds without the plugin or an ImGui library:
 
 ```bash

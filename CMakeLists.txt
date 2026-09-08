@@ -444,10 +444,9 @@ add_executable(HostIntegrationTests
 	src/Host/HostClientOptions.h
 	src/Host/HostPageCatalog.cpp
 	src/Host/HostPageCatalog.h
-	src/Utils/PhysicalFile.cpp
 )
 configure_host_test(HostIntegrationTests)
-target_link_libraries(HostIntegrationTests PRIVATE tomlplusplus::tomlplusplus psapi.lib)
+target_link_libraries(HostIntegrationTests PRIVATE tomlplusplus::tomlplusplus)
 
 add_test(NAME HostIntegration COMMAND HostIntegrationTests)
 set_tests_properties(HostIntegration PROPERTIES LABELS "menu;host;unit")

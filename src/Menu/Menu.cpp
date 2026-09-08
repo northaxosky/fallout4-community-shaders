@@ -8,7 +8,6 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/PresetManager.h"
 #include "Telemetry/Telemetry.h"
-#include "Utils/PhysicalFile.h"
 #include "Utils/ShaderCache/CacheStorage.h"
 #include "Utils/UI.h"
 
@@ -22,7 +21,6 @@
 
 #include <d3d11.h>
 #include <dxgi.h>
-#include <shellapi.h>
 
 namespace
 {
@@ -32,25 +30,40 @@ namespace
 		"Data\\F4SE\\Plugins\\FO4CommunityShaders\\Presets";
 	constexpr std::uint64_t kImageRetryFrames = 60;
 
-	void OpenFileLocation(const std::filesystem::path& a_file)
+	void OpenFileLocation(dmui::Client& a_client, const std::filesystem::path& a_file)
 	{
-		const auto resolved = cs::files::PhysicalFilePath(a_file);
-		if (!resolved) {
+		std::error_code error;
+		const auto absolute = std::filesystem::absolute(a_file, error);
+		if (error) {
 			L->warn(
-				"Cannot resolve physical location of '{}': {}",
-				a_file.string(), resolved.error().message());
+				"Cannot make the folder action's file path absolute: {}",
+				error.message());
 			cs::Menu::ShowToast(
-				"Could not locate the backing file. Use MO2's virtual folder browser; see log.",
+				"Could not prepare the file location; see log.",
 				4.0,
 				DMUI_STATUS_SEVERITY_ERROR);
 			return;
 		}
-		const auto folder = resolved->parent_path();
-		const auto result = reinterpret_cast<INT_PTR>(ShellExecuteW(
-			nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
-		if (result <= 32) {
-			L->warn("Cannot open folder '{}': shell error {}", folder.string(), result);
-			cs::Menu::ShowToast("Could not open the folder; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
+
+		const auto encoded = absolute.u8string();
+		std::string target;
+		target.reserve(encoded.size());
+		for (const char8_t character : encoded)
+			target.push_back(static_cast<char>(character));
+
+		std::uint32_t nativeError{};
+		if (!a_client.OpenExternal({
+				.targetKind = DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT,
+				.target = target.c_str() },
+				&nativeError)) {
+			const auto result = a_client.LastResult();
+			L->warn(
+				"Cannot open the containing folder of '{}': {} (native error {})",
+				target, DMUI_ResultToString(result), nativeError);
+			cs::Menu::ShowToast(
+				std::format("Could not open the folder: {}. See log.", DMUI_ResultToString(result)),
+				4.0,
+				DMUI_STATUS_SEVERITY_ERROR);
 		}
 	}
 
@@ -701,7 +714,7 @@ namespace cs
 					if (!std::filesystem::exists(identity, error) && !error) {
 						ShowToast("The shader cache is not initialized. Restart to initialize it.", 4.0);
 					} else {
-						OpenFileLocation(identity);
+						OpenFileLocation(a_client, identity);
 					}
 				}
 			}
@@ -735,7 +748,7 @@ namespace cs
 						L->warn("Cannot inspect the User TOML location: {}", error.message());
 						ShowToast("Could not locate the User TOML; see log.", 4.0, DMUI_STATUS_SEVERITY_ERROR);
 					} else {
-						OpenFileLocation(userExists ?
+						OpenFileLocation(a_client, userExists ?
 							feature_config::kUserConfigPath :
 							feature_config::kDefaultConfigPath);
 					}

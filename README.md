@@ -159,8 +159,9 @@ per-feature rules inside those native rows.
 Home shows startup loading results. Advanced has the sole **Load on startup** list, where checked
 means loaded on the next launch; changes require a restart. A loaded feature's **Enabled** control
 toggles its effect live. Shader ownership, cache, and logging settings are also in Advanced.
-Folder actions resolve the backing file before opening Explorer, rather than passing it an
-MO2 USVFS path that exists only inside the game.
+Folder actions pass the absolute in-game file path to DearModdingUI, which resolves its physical
+backing location through MO2/USVFS and opens the containing folder. Resolution or launch failures
+are reported without falling back to an unresolved path.
 
 Developer details live in [`src/Host/README.md`](src/Host/README.md).
 
