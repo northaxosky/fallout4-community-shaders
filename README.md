@@ -181,6 +181,11 @@ Incomplete, tampered, or untrusted packages are rejected; the configured startup
 available. Each file is resolved independently through MO2's virtual directory. No UI host or
 per-frame signature checks are involved.
 
+Wine/Proton support is unverified and assumes a trusted prefix. Signature, hash, and file-identity
+checks remain mandatory, but Wine loading does not defend against hostile concurrent path changes
+by other same-user Wine or native processes. See the SDK's
+[`trust model`](extern/Streamline/docs/ProjectSigning.md) for the platform-specific guarantees.
+
 The SDK fork's release workflow builds, authenticates, and publishes its versioned runtime ZIP.
 CS downloads the pinned ZIP through `scripts\fetch-sdks.ps1`; it does not build the SDK DLLs.
 The package includes the fork's patched interposer/common DLLs, unchanged NVIDIA feature DLLs,

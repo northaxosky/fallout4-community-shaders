@@ -4,9 +4,9 @@
 	Packages = @(
 		@{
 			Name        = 'Streamline'
-			Version     = 'cs-streamline-v2.12.0-1'
-			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.12.0-1/streamline-sdk-cs-streamline-v2.12.0-1.zip'
-			Sha256      = 'd5db89a7e251a4c9ce599e2318cbada154890aa246ddfcde0ebb0cd779be7e07'
+			Version     = 'cs-streamline-v2.14.1-1'
+			Url         = 'https://github.com/northaxosky/Streamline/releases/download/cs-streamline-v2.14.1-1/streamline-sdk-cs-streamline-v2.14.1-1.zip'
+			Sha256      = 'e951091da3703546d56cb357e4c27be78c0808e3181c2d0bd9930966f751e4ed'
 			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline'
 			# The signed manifest binds the patched core and unchanged NVIDIA feature binaries.
 			Files       = @(
