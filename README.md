@@ -181,12 +181,12 @@ Incomplete, tampered, or untrusted packages are rejected; the configured startup
 available. Each file is resolved independently through MO2's virtual directory. No UI host or
 per-frame signature checks are involved.
 
-Custom-build maintainers can pass `-DFO4CS_STREAMLINE_TRUST_CONFIG=<absolute-public-header-path>`
-to CMake with the public-only header produced by the SDK's
-[`project-signing.ps1`](extern/Streamline/tools/project-signing.ps1). The default configuration
-does not authorize community-signed binaries. Never put a private signing key in this repository
-or the game installation. See the SDK's [signing guide](extern/Streamline/docs/ProjectSigning.md)
-for the offline release procedure.
+The SDK fork's release workflow builds, authenticates, and publishes its versioned runtime ZIP.
+CS downloads the pinned ZIP through `scripts\fetch-sdks.ps1`; it does not build the SDK DLLs.
+CMake generates the public trust header from the pinned SDK's
+[`config/project-release.psd1`](extern/Streamline/config/project-release.psd1). No local key file
+or machine-specific signing path is needed to build CS. The private release key belongs only in
+the fork's protected release secret or maintainer backup, never in either repository or game.
 Folder actions resolve the backing file before opening Explorer, rather than passing it an
 MO2 USVFS path that exists only inside the game.
 

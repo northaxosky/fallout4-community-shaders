@@ -18,17 +18,24 @@ set_source_files_properties("${STREAMLINE_TRUST_SOURCE}" "${STREAMLINE_PHYSICAL_
 target_link_libraries(Streamline INTERFACE bcrypt.lib psapi.lib)
 target_compile_definitions(Streamline INTERFACE NOMINMAX)
 
-set(FO4CS_STREAMLINE_TRUST_CONFIG "" CACHE FILEPATH
-  "Reviewed public-only Streamline release trust configuration; empty trusts NVIDIA only")
-if(FO4CS_STREAMLINE_TRUST_CONFIG)
-  if(NOT IS_ABSOLUTE "${FO4CS_STREAMLINE_TRUST_CONFIG}" OR
-     NOT EXISTS "${FO4CS_STREAMLINE_TRUST_CONFIG}")
-    message(FATAL_ERROR "FO4CS_STREAMLINE_TRUST_CONFIG must name an existing absolute public configuration path")
-  endif()
-  set_property(SOURCE "${STREAMLINE_TRUST_SOURCE}"
-    DIRECTORY "${CMAKE_SOURCE_DIR}" APPEND PROPERTY COMPILE_DEFINITIONS
-    "SL_PROJECT_TRUST_CONFIG_HEADER=\"${FO4CS_STREAMLINE_TRUST_CONFIG}\"")
-endif()
+unset(FO4CS_STREAMLINE_TRUST_CONFIG CACHE)
+find_program(STREAMLINE_PWSH NAMES pwsh REQUIRED)
+set(STREAMLINE_TRUST_HEADER "${CMAKE_CURRENT_BINARY_DIR}/projectTrust.generated.h")
+add_custom_command(
+  OUTPUT "${STREAMLINE_TRUST_HEADER}"
+  COMMAND "${STREAMLINE_PWSH}" -NoProfile -File
+    "${CMAKE_SOURCE_DIR}/extern/Streamline/tools/project-release.ps1"
+    -Mode GeneratePublicHeader -OutputPath "${STREAMLINE_TRUST_HEADER}"
+  DEPENDS
+    "${CMAKE_SOURCE_DIR}/extern/Streamline/config/project-release.psd1"
+    "${CMAKE_SOURCE_DIR}/extern/Streamline/tools/project-release.ps1"
+  COMMENT "Generating Streamline public release trust configuration"
+  VERBATIM)
+add_custom_target(StreamlineTrustConfig DEPENDS "${STREAMLINE_TRUST_HEADER}")
+add_dependencies(Streamline StreamlineTrustConfig)
+set_property(SOURCE "${STREAMLINE_TRUST_SOURCE}"
+  DIRECTORY "${CMAKE_SOURCE_DIR}" APPEND PROPERTY COMPILE_DEFINITIONS
+  "SL_PROJECT_TRUST_CONFIG_HEADER=\"${STREAMLINE_TRUST_HEADER}\"")
 
 if(MSVC)
   target_compile_options(Streamline INTERFACE /wd5103)
