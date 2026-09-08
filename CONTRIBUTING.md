@@ -85,6 +85,14 @@ DearModdingUI headers published through the pinned CommonLibF4 submodule at
 `extern\CommonLibF4\lib\dearmoddingui-api\include`. Update that CommonLibF4 gitlink when adopting a
 new API release; do not vendor a second API copy or add a local ImGui port.
 
+Use the shared `dmui::DrawStyledText`, `SettingsTableScope`, `SettingsRowScope`,
+`TooltipScope`, and keyed `DrawChoice` helpers for presentation. Keep stable
+choice values and IDs separate from visible labels, and apply changes only when
+the helper reports a different selection. Scope failures are distinct from
+clipping; report failures through the existing host diagnostics. Feature state,
+restart requirements, preset transactions, and persistence remain owned by
+Community Shaders rather than by these helpers.
+
 The packaged unified TOML sets every `[features.<Name>].load = false` and baseline shader ownership
 to disabled. Override only the feature being tested, or `enabled` under `[shader_ownership]` for an
 identity replacement test, in `FO4CommunityShaders.User.toml`, then restart Fallout 4. The core

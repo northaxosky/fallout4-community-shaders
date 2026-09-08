@@ -20,6 +20,7 @@
 #include <toml++/toml.hpp>
 
 #include "HeightMapResize.h"
+#include "Host/HostClient.h"
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Menu/Menu.h"
@@ -33,7 +34,6 @@
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
 #include "Utils/CSUtil.h"
-#include "Utils/UI.h"
 #include "World/Sky.h"
 
 namespace cs::features
@@ -1639,24 +1639,30 @@ namespace cs::features
 		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
 		ImGui::TextDisabled("Off publishes zero terrain shadow, which is shader identity.");
 
-		const auto factorLabel = [](std::uint32_t a_factor) {
-			return a_factor == 1 ? "1 (full resolution)" :
-				a_factor == 2	 ? "2 (quarter memory)" :
-									 "4 (sixteenth memory)";
+		static const std::array factorOptions{
+			dmui::ChoiceOption<std::uint32_t>{
+				1,
+				"1 (full resolution)",
+				"full-resolution" },
+			dmui::ChoiceOption<std::uint32_t>{
+				2,
+				"2 (quarter memory)",
+				"quarter-memory" },
+			dmui::ChoiceOption<std::uint32_t>{
+				4,
+				"4 (sixteenth memory)",
+				"sixteenth-memory" }
 		};
-		if (ImGui::BeginCombo(
-				"Downsample factor", factorLabel(_settings.downsampleFactor))) {
-			for (const auto factor : ts::kDownsampleFactors) {
-				const bool selected = factor == _settings.downsampleFactor;
-				if (ImGui::Selectable(factorLabel(factor), selected)
-					&& !selected) {
-					_settings.downsampleFactor = factor;
-					changed = true;
-				}
-				if (selected)
-					ImGui::SetItemDefaultFocus();
-			}
-			ImGui::EndCombo();
+		const auto factor = dmui::DrawChoice<std::uint32_t>(
+			"terrain-shadows-downsample-factor",
+			_settings.downsampleFactor,
+			std::span<const dmui::ChoiceOption<std::uint32_t>>{
+				factorOptions },
+			"Unavailable",
+			"Downsample factor");
+		if (factor.changed) {
+			_settings.downsampleFactor = *factor.selected;
+			changed = true;
 		}
 		ImGui::TextDisabled(
 			"Factor 4 is the low-VRAM default; the map reloads in place.");
@@ -1677,11 +1683,25 @@ namespace cs::features
 		}
 		ImGui::Separator();
 		if (failed) {
-			ui::Text::WrappedWarning(
-				"Heightmap unavailable for '%s': %s. Terrain shadows are doing "
-				"nothing; try another downsample factor or regenerate the map.",
-				worldspace.empty() ? "none" : worldspace.c_str(),
-				detail.empty() ? "unknown failure" : detail.c_str());
+			auto& client = host::HostClient::Get().Client();
+			const auto warning = std::format(
+				"Warning: Heightmap unavailable for '{}': {}. Terrain shadows "
+				"are doing nothing; try another downsample factor or regenerate "
+				"the map.",
+				worldspace.empty() ? "none" : worldspace,
+				detail.empty() ? "unknown failure" : detail);
+			if (!dmui::DrawStyledText(
+					client,
+					warning,
+					{
+						.tone = dmui::TextTone::kWarning,
+						.wrapped = true
+					})) {
+				L->warn(
+					"DearModdingUI draw terrain warning failed: {}",
+					DMUI_ResultToString(client.LastResult()));
+				return;
+			}
 		} else {
 			ImGui::TextDisabled(
 				"Worldspace: %s | map: %s",
