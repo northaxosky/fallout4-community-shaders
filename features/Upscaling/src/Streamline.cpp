@@ -12,6 +12,7 @@
 #include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
+#include "Utils/StreamlineModule.h"
 
 namespace cs::features
 {
@@ -108,13 +109,16 @@ namespace cs::features
 			}
 		}
 
-		std::wstring interposerPath = std::wstring(Streamline::PluginDir) + L"\\sl.interposer.dll";
-		interposer = LoadLibraryW(interposerPath.c_str());
-		if (interposer == nullptr) {
-			DWORD errorCode = GetLastError();
-			L->info("Failed to load interposer: Error Code {0:x}", errorCode);
+		const auto loaded = cs::files::LoadStreamlineInterposer(Streamline::PluginDir);
+		if (!loaded) {
+			L->error(
+				"Streamline authentication/load rejected: {} (trust {}, Windows {:#010x}).",
+				sl::security::getTrustFailureMessage(loaded.failure),
+				static_cast<std::uint32_t>(loaded.failure),
+				loaded.systemError);
 			return;
 		}
+		interposer = loaded.module;
 		L->info("Interposer loaded at address: {0:p}", static_cast<void*>(interposer));
 
 		L->info("Initializing Streamline");

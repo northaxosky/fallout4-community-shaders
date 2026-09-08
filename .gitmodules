@@ -6,4 +6,4 @@
 	url = https://github.com/MapleHinata/FidelityFX-SDK.git
 [submodule "extern/Streamline"]
 	path = extern/Streamline
-	url = https://github.com/NVIDIA-RTX/Streamline.git
+	url = https://github.com/northaxosky/Streamline.git

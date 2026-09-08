@@ -95,6 +95,13 @@ foreach ($relativePath in $requiredFiles) {
 	Assert-PackageFile $relativePath
 }
 
+$streamlineDirectory = Join-Path $stagingRoot 'Shaders\Upscaling\Streamline'
+$hasProjectManifest = Test-Path -LiteralPath (Join-Path $streamlineDirectory 'sl.project-manifest.bin') -PathType Leaf
+$hasProjectSignature = Test-Path -LiteralPath (Join-Path $streamlineDirectory 'sl.project-manifest.sig') -PathType Leaf
+if ($hasProjectManifest -ne $hasProjectSignature) {
+	throw 'The Streamline project manifest and detached signature must be packaged together.'
+}
+
 $requiredLicenses = @(
 	'Shaders/Upscaling/Streamline/license.txt',
 	'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
@@ -129,6 +136,7 @@ foreach ($relativePath in $requiredShaderDirectories) {
 $forbiddenFiles = @(Get-ChildItem -LiteralPath $stagingRoot -Recurse -File |
 	Where-Object {
 		$_.Extension -ieq '.pdb' -or
+		$_.Extension -in @('.pem', '.key', '.pfx', '.p12', '.pk8') -or
 		$_.Name -like '*.User.toml' -or
 		$_.Name -eq '.gitkeep' -or
 		$_.Name -eq 'SharedDataProbe.hlsl'

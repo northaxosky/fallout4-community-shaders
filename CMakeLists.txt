@@ -49,6 +49,8 @@ if(NOT BUILD_GIT_SHA)
 	set(BUILD_GIT_SHA "unknown")
 endif()
 
+add_subdirectory(cmake/Streamline)
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	# Dear-Modding-FO4/commonlibf4 ships only xmake.lua, so generate a CMake shim in the build tree.
 	set(COMMONLIBF4_SOURCE_DIR "${CMAKE_SOURCE_DIR}/extern/CommonLibF4")
@@ -201,8 +203,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(WetnessEffects)
 	register_feature(WaterEffects)
 
-	# Upscaling backends: Streamline headers are interface-only, FidelityFX builds from source.
-	add_subdirectory(cmake/Streamline)
+	# The Streamline verifier is compiled into the host; FidelityFX builds from source.
 	include(FidelityFX-SDK)
 endif()
 
@@ -465,6 +466,23 @@ target_link_libraries(HostIntegrationTests PRIVATE tomlplusplus::tomlplusplus ps
 
 add_test(NAME HostIntegration COMMAND HostIntegrationTests)
 set_tests_properties(HostIntegration PROPERTIES LABELS "menu;host;unit")
+
+add_library(StreamlineModuleFixture SHARED tests/StreamlineModuleFixture.cpp)
+configure_host_test(StreamlineModuleFixture)
+
+add_executable(StreamlineModuleTests
+	tests/StreamlineModuleTests.cpp
+	src/Utils/StreamlineModule.cpp
+	src/Utils/PhysicalFile.cpp
+)
+configure_host_test(StreamlineModuleTests)
+target_link_libraries(StreamlineModuleTests PRIVATE Streamline psapi.lib)
+add_dependencies(StreamlineModuleTests StreamlineModuleFixture)
+add_test(
+	NAME StreamlineModule
+	COMMAND StreamlineModuleTests "$<TARGET_FILE:StreamlineModuleFixture>"
+)
+set_tests_properties(StreamlineModule PROPERTIES LABELS "streamline;security;unit")
 
 add_executable(DebugViewContractTests
 	tests/DebugViewContractTests.cpp

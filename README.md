@@ -173,6 +173,20 @@ remain pending until restart. Only the selected SDK sessions are initialized, pl
 DLSS fallback if it is actually needed. The plugin does not keep other providers ready in standby.
 Enabled pauses or resumes the selected effect; it does not unload its SDK session or remove an
 installed FG proxy. Use the startup Load or method setting to avoid that session's fixed costs.
+
+Streamline is authenticated before the interposer is loaded. Official NVIDIA packages retain
+NVIDIA signature verification. A community package additionally requires a signed release manifest
+and its matching public trust configuration compiled into both Community Shaders and Streamline.
+Incomplete, tampered, or untrusted packages are rejected; the configured startup fallback remains
+available. Each file is resolved independently through MO2's virtual directory. No UI host or
+per-frame signature checks are involved.
+
+Custom-build maintainers can pass `-DFO4CS_STREAMLINE_TRUST_CONFIG=<absolute-public-header-path>`
+to CMake with the public-only header produced by the SDK's
+[`project-signing.ps1`](extern/Streamline/tools/project-signing.ps1). The default configuration
+does not authorize community-signed binaries. Never put a private signing key in this repository
+or the game installation. See the SDK's [signing guide](extern/Streamline/docs/ProjectSigning.md)
+for the offline release procedure.
 Folder actions resolve the backing file before opening Explorer, rather than passing it an
 MO2 USVFS path that exists only inside the game.
 
