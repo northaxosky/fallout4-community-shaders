@@ -283,6 +283,8 @@ namespace cs::render
 
 	void TemporalRenderer::RestoreNativeFrameState()
 	{
+		_upscaledThisFrame = false;
+		_srPublishedToFramebuffer.store(false, std::memory_order_release);
 		if (auto* state = cs::engine::GetGraphicsState()) {
 			state->offsetX = 0.0f;
 			state->offsetY = 0.0f;

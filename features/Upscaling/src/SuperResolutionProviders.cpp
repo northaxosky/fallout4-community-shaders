@@ -2,6 +2,7 @@
 
 #include "FidelityFX.h"
 #include "Streamline.h"
+#include "Render/TemporalDevicePolicy.h"
 
 namespace cs::features
 {
@@ -84,9 +85,17 @@ namespace cs::features
 	{
 		_sizeCache.Clear();
 		const auto* device = std::get_if<ID3D11Device*>(&a_context.device);
-		return device && *device
-			? Success()
-			: Failure("FSR 3 super resolution requires D3D11 recording.");
+		if (!device || !*device) {
+			return Failure("FSR 3 super resolution requires D3D11 recording.");
+		}
+		if ((*device)->GetFeatureLevel() <
+			render::temporal::kFsrMinimumFeatureLevel) {
+			return {
+				.code = render::temporal::ProviderResultCode::kUnavailable,
+				.message = "FSR 3 requires a D3D11 feature-level 11.1 device."
+			};
+		}
+		return Success();
 	}
 
 	render::temporal::SuperResolutionSizeResult

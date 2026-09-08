@@ -215,10 +215,14 @@ namespace cs::render::temporal
 			_pending = {};
 			_effective.revision = a_revision;
 			_effective.qualityMode = a_qualityMode;
-			_effective.superResolutionEnabled = a_srEnabled && _request->upscalingEligible;
-			_effective.frameGenerationEnabled = a_fgEnabled && _request->frameGenerationEligible;
+			_effective.superResolutionEnabled =
+				a_srEnabled && _request->upscalingEligible && !_quarantined.superResolution;
+			_effective.frameGenerationEnabled =
+				a_fgEnabled && _request->frameGenerationEligible && !_quarantined.frameGeneration;
 
-			if (_superResolutionFailed &&
+			if (_quarantined.superResolution) {
+				_effective.superResolution = SuperResolutionMethod::kNone;
+			} else if (_superResolutionFailed &&
 				a_sr != SuperResolutionMethod::kNone &&
 				a_sr != SuperResolutionMethod::kTAA) {
 				_effective.superResolutionEnabled = true;
@@ -233,20 +237,22 @@ namespace cs::render::temporal
 			}
 
 			if (!_session) {
-				if (!_superResolutionFailed) {
+				if (!_superResolutionFailed && !_quarantined.superResolution) {
 					_effective.superResolution = a_sr;
 				}
-				_effective.frameGeneration = a_fg;
+				_effective.frameGeneration = _quarantined.frameGeneration
+					? FrameGenerationMethod::kOff : a_fg;
+				UpdateQuarantineRestart();
 				return;
 			}
 
 			const auto srIndex = static_cast<std::size_t>(a_sr);
-			if (!_superResolutionFailed &&
+			if (!_superResolutionFailed && !_quarantined.superResolution &&
 				srIndex < _session->admittedSr.size() &&
 				_session->admittedSr[srIndex]) {
 				_effective.superResolution = a_sr;
 			} else if (
-				!_superResolutionFailed &&
+				!_superResolutionFailed && !_quarantined.superResolution &&
 				a_sr != _effective.superResolution) {
 				_pending.required = true;
 				_pending.requestedSr = a_sr;
@@ -254,7 +260,9 @@ namespace cs::render::temporal
 				_pending.reason = "The selected super-resolution provider was not admitted at startup.";
 			}
 
-			if (a_fg == _session->admittedFg) {
+			if (_quarantined.frameGeneration) {
+				_effective.frameGeneration = FrameGenerationMethod::kOff;
+			} else if (a_fg == _session->admittedFg) {
 				_effective.frameGeneration = a_fg;
 			} else if (a_fg != _effective.frameGeneration) {
 				_pending.required = true;
@@ -262,12 +270,40 @@ namespace cs::render::temporal
 				_pending.requestedFg = a_fg;
 				_pending.reason = "Changing the frame-generation provider requires a restart.";
 			}
+			UpdateQuarantineRestart();
+		}
+
+		void Quarantine(
+			FailureImpact a_impact,
+			std::uint64_t a_revision,
+			std::string a_reason)
+		{
+			if (!a_impact.superResolution && !a_impact.frameGeneration) {
+				return;
+			}
+			_quarantined.superResolution |= a_impact.superResolution;
+			_quarantined.frameGeneration |= a_impact.frameGeneration;
+			_quarantineReason = std::move(a_reason);
+			if (_quarantined.superResolution) {
+				_effective.superResolutionEnabled = false;
+				_effective.superResolution = SuperResolutionMethod::kNone;
+			}
+			if (_quarantined.frameGeneration) {
+				_effective.frameGenerationEnabled = false;
+				_effective.frameGeneration = FrameGenerationMethod::kOff;
+			}
+			_effective.revision = a_revision;
+			UpdateQuarantineRestart();
 		}
 
 		void FailSuperResolutionToNative(
 			std::uint64_t a_revision,
 			std::string a_reason)
 		{
+			if (_quarantined.superResolution) {
+				UpdateQuarantineRestart();
+				return;
+			}
 			_superResolutionFailed = true;
 			_effective.superResolutionEnabled = true;
 			_effective.superResolution = SuperResolutionMethod::kTAA;
@@ -286,11 +322,27 @@ namespace cs::render::temporal
 		[[nodiscard]] const PendingRestart& Pending() const noexcept { return _pending; }
 
 	private:
+		void UpdateQuarantineRestart()
+		{
+			if (!_quarantined.superResolution && !_quarantined.frameGeneration) {
+				return;
+			}
+			_pending.required = true;
+			_pending.requestedSr = _request
+				? _request->superResolution : SuperResolutionMethod::kNone;
+			_pending.requestedFg = _request
+				? _request->frameGeneration : FrameGenerationMethod::kOff;
+			_pending.reason = _quarantineReason +
+				" Restart required before the affected temporal processing can resume.";
+		}
+
 		std::optional<RequestedTopology> _request;
 		std::optional<SessionTopology> _session;
 		EffectiveConfiguration _effective;
 		PendingRestart _pending;
 		bool _superResolutionFailed = false;
+		FailureImpact _quarantined;
+		std::string _quarantineReason;
 	};
 
 	enum class FramePhase : std::uint8_t

@@ -1,6 +1,7 @@
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
 #include "Render/TemporalRenderSizing.h"
+#include "Render/TemporalDevicePolicy.h"
 #include "SuperResolutionContext.h"
 
 #include <iostream>
@@ -131,6 +132,128 @@ namespace
 			state.Request()->superResolution == SuperResolutionMethod::kFSR3 &&
 				state.Effective().superResolution == SuperResolutionMethod::kTAA,
 			"requested and effective topology remain distinct after failure");
+	}
+
+	void TestQuarantinedConfiguration()
+	{
+		using namespace cs::render::temporal;
+		for (const auto domain : {
+				 FailureDomain::kSuperResolution,
+				 FailureDomain::kFrameGeneration,
+				 FailureDomain::kEngine,
+				 FailureDomain::kTransport,
+				 FailureDomain::kStreamline }) {
+			TopologyState state;
+			RequestedTopology requested;
+			requested.upscalingEligible = true;
+			requested.frameGenerationEligible = true;
+			requested.superResolution = SuperResolutionMethod::kDLSS;
+			requested.frameGeneration = FrameGenerationMethod::kXeSS;
+			Check(state.Freeze(requested), "failure fixture freezes");
+			SessionTopology session;
+			session.valid = true;
+			session.admittedSr.fill(true);
+			session.admittedFg = FrameGenerationMethod::kXeSS;
+			Check(state.Admit(session), "failure fixture admits");
+
+			const auto impact = ClassifyFailure(
+				domain, requested.superResolution, requested.frameGeneration);
+			state.Quarantine(impact, 11, "provider preflight failed");
+			Check(
+				state.Request()->superResolution == requested.superResolution &&
+					state.Request()->frameGeneration == requested.frameGeneration,
+				"quarantine preserves the user's requested providers");
+			Check(
+				state.Effective().superResolutionEnabled == !impact.superResolution &&
+					state.Effective().frameGenerationEnabled == !impact.frameGeneration,
+				"effective enablement reflects the quarantined consumers");
+			Check(
+				state.Effective().superResolution == (impact.superResolution
+					? SuperResolutionMethod::kNone : requested.superResolution) &&
+					state.Effective().frameGeneration == (impact.frameGeneration
+						? FrameGenerationMethod::kOff : requested.frameGeneration),
+				"quarantined providers are not reported as effective");
+			Check(state.Effective().revision == 11, "quarantine advances the revision");
+			Check(
+				state.Pending().required &&
+					state.Pending().reason.contains("provider preflight failed"),
+				"quarantine exposes its actual cause and restart requirement");
+
+			state.SubmitLive(
+				true, requested.superResolution, 3,
+				true, requested.frameGeneration, 12);
+			Check(
+				state.Effective().superResolutionEnabled == !impact.superResolution &&
+					state.Effective().frameGenerationEnabled == !impact.frameGeneration,
+				"live settings cannot reactivate quarantined consumers");
+			Check(
+				state.Pending().required &&
+					state.Pending().reason.contains("provider preflight failed"),
+				"changing quality does not erase the failure's restart notice");
+
+			if (impact.superResolution) {
+				state.FailSuperResolutionToNative(13, "queued fallback");
+				Check(
+					!state.Effective().superResolutionEnabled &&
+						state.Effective().superResolution == SuperResolutionMethod::kNone,
+					"a queued resolve fallback cannot re-enable a quarantined renderer");
+			}
+		}
+	}
+
+	void TestTemporalFeatureLevels()
+	{
+		using namespace cs::render::temporal;
+		RequestedTopology request;
+		request.upscalingEligible = true;
+		request.superResolution = SuperResolutionMethod::kXeSS;
+		request.frameGenerationEligible = true;
+		request.frameGeneration = FrameGenerationMethod::kXeSS;
+		std::vector<D3D_FEATURE_LEVEL> levels{ D3D_FEATURE_LEVEL_11_0 };
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(
+			levels == std::vector<D3D_FEATURE_LEVEL>{
+				D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 },
+			"XeSS startup requests the feature level needed for live FSR selection");
+		const auto once = levels;
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(levels == once, "feature-level preference is idempotent");
+
+		levels = {
+			D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_11_0,
+			D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_1
+		};
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(
+			levels == std::vector<D3D_FEATURE_LEVEL>{
+				D3D_FEATURE_LEVEL_12_1, D3D_FEATURE_LEVEL_11_1,
+				D3D_FEATURE_LEVEL_11_0 },
+			"higher feature levels retain priority and lower levels remain fallbacks");
+
+		levels.clear();
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(
+			levels.size() == 7 && levels.front() == D3D_FEATURE_LEVEL_11_1 &&
+				levels[1] == D3D_FEATURE_LEVEL_11_0 &&
+				levels.back() == D3D_FEATURE_LEVEL_9_1,
+			"an empty engine list preserves D3D11's default fallback levels");
+
+		request.upscalingEligible = false;
+		levels = { D3D_FEATURE_LEVEL_11_0 };
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(
+			levels == std::vector<D3D_FEATURE_LEVEL>{ D3D_FEATURE_LEVEL_11_0 },
+			"XeSS FG alone does not require an unused FSR device upgrade");
+		request.frameGeneration = FrameGenerationMethod::kDLSSG;
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(
+			levels.front() == D3D_FEATURE_LEVEL_11_1,
+			"DLSS-G preserves its existing D3D11 feature-level preference");
+
+		request.frameGenerationEligible = false;
+		levels.clear();
+		ConfigureTemporalFeatureLevels(request, levels);
+		Check(levels.empty(), "inactive temporal features leave native device creation unchanged");
 	}
 
 	void TestObservedColorContract()
@@ -564,6 +687,8 @@ namespace
 int main()
 {
 	TestRequestedEffectiveAndPending();
+	TestQuarantinedConfiguration();
+	TestTemporalFeatureLevels();
 	TestObservedColorContract();
 	TestFramePhasesAndRetries();
 	TestOnceOnlyAndImmutableExtent();

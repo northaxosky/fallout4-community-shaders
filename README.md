@@ -199,15 +199,20 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
 
 - **ENB is not supported.** Every feature deactivates when ENB is loaded.
 - **Upscaling and Frame Generation** engine anchors are proven for the NG and AE runtimes only;
-  both features refuse to load on OG (1.10.163). DLSS super-resolution needs the staged Streamline
-  runtime DLLs. If an admitted external super-resolution evaluation or publication fails after
+  both features refuse to load on OG (1.10.163). FSR 3 super-resolution requires D3D11 feature
+  level 11.1. Loaded Upscaling sessions request that level regardless of the initial provider,
+  retaining lower-level device fallbacks but not admitting FSR on those devices.
+  DLSS super-resolution needs the staged Streamline runtime DLLs.
+  If an admitted external super-resolution evaluation or publication fails after
   reduced-resolution rendering commits, the plugin performs its own display-sized linear spatial
   resolve from the retained engine input before continuing to UI. The live `DrawWorld::Render_UI`
   wrapper also validates and reads its RIP-relative effects-path gate at entry; Gamma-only calls
   that bypass the normal `+0xC5` seam inspect the resulting viewport, preserve full-size output
   through a private passthrough, or spatially resolve a committed render subrect before publication.
-  Either recovery switches to native TAA on the next frame. Recovery resources and shaders are
-  preflighted before reduced-resolution state is committed.
+  Provider-only recovery switches to native TAA on the next frame. Engine or shared-runtime
+  failures disable the affected temporal consumers until restart; their requested selections remain
+  visible separately from effective state. Recovery resources and shaders are preflighted before
+  reduced-resolution state is committed.
   AMD FSR 3 frame generation needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or
   borderless SDR `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is
   independent of the selected super-resolution method and defaults off in pause, main, loading,

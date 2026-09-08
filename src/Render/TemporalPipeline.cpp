@@ -1,4 +1,5 @@
 #include "Render/TemporalPipeline.h"
+#include "Render/TemporalDevicePolicy.h"
 
 #include <algorithm>
 #include <cstring>
@@ -568,6 +569,7 @@ namespace cs::render
 			 request.superResolution == temporal::SuperResolutionMethod::kDLSS) ||
 			(request.frameGenerationEligible &&
 			 request.frameGeneration == temporal::FrameGenerationMethod::kDLSSG);
+		temporal::ConfigureTemporalFeatureLevels(request, a_featureLevels);
 		if (streamlineRequested) {
 			const bool dlssRequested =
 				request.upscalingEligible &&
@@ -584,10 +586,6 @@ namespace cs::render
 				dlssGRequested
 					? sl::RenderAPI::eD3D12
 					: sl::RenderAPI::eD3D11);
-			if (std::ranges::find(a_featureLevels, D3D_FEATURE_LEVEL_11_1) ==
-				a_featureLevels.end()) {
-				a_featureLevels.insert(a_featureLevels.begin(), D3D_FEATURE_LEVEL_11_1);
-			}
 		}
 		if (request.frameGenerationEligible &&
 			request.frameGeneration == temporal::FrameGenerationMethod::kFSR3) {
@@ -1041,6 +1039,12 @@ namespace cs::render
 					a_domain, effective.superResolution, effective.frameGeneration);
 				const auto& session = _impl->topology.Session();
 				const bool runtimeActive = session && session->valid;
+				if (runtimeActive) {
+					_impl->topology.Quarantine(
+						impact,
+						_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel) + 1,
+						a_message);
+				}
 				if (runtimeActive && impact.superResolution) {
 					_impl->rendererEligible = false;
 					_impl->resetEpochs.RequestSuperResolution();

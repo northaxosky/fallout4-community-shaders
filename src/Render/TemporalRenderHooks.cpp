@@ -427,12 +427,12 @@ namespace cs::render
 				const char* failure = nullptr;
 				if (fullEffectsPath) {
 					failure = recovered
-						? "The full-effects Render_UI path unexpectedly skipped +0xC5; spatial fallback was published and native TAA begins next frame."
-						: "The full-effects Render_UI path unexpectedly skipped +0xC5 and spatial fallback failed; native TAA begins next frame.";
+						? "The full-effects Render_UI path unexpectedly skipped +0xC5; spatial fallback was published and temporal rendering is disabled until restart."
+						: "The full-effects Render_UI path unexpectedly skipped +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
 				} else {
 					failure = recovered
-						? "The Gamma-only Render_UI path bypassed +0xC5; spatial fallback was published and native TAA begins next frame."
-						: "The Gamma-only Render_UI path bypassed +0xC5 and spatial fallback failed; native TAA begins next frame.";
+						? "The Gamma-only Render_UI path bypassed +0xC5; spatial fallback was published and temporal rendering is disabled until restart."
+						: "The Gamma-only Render_UI path bypassed +0xC5 and spatial fallback failed; temporal rendering is disabled until restart.";
 				}
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
