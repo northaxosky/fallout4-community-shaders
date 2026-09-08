@@ -154,7 +154,7 @@ load = false
 enabled = true
 
 # 0 = None, 1 = TAA, 2 = FSR 3, 3 = DLSS, 4 = XeSS.
-# The second key is used when DLSS is unavailable.
+# Both method keys are startup-only. The fallback initializes only if DLSS is unavailable.
 upscale_method = 3
 upscale_method_no_dlss = 2
 
@@ -176,7 +176,7 @@ load = false
 
 [features.FrameGeneration.settings]
 enabled = true
-# 0 = Off, 1 = FSR 3, 2 = DLSS-G, 3 = XeSS-FG.
+# Startup-only: 0 = Off, 1 = FSR 3, 2 = DLSS-G, 3 = XeSS-FG.
 frame_generation_method = 1
 # Allow proxy startup below 120 Hz. Changing startup topology requires a game restart.
 frame_generation_force_enable = 0

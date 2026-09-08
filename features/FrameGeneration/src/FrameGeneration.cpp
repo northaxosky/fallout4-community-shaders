@@ -352,6 +352,7 @@ namespace cs::features
 				"Provider", settings.frameGenerationMethod, methods)) {
 			changed = true;
 		}
+		ImGui::TextDisabled("Method changes take effect after restarting the game.");
 		bool force = settings.frameGenerationForceEnable != 0;
 		if (ImGui::Checkbox("Force below 120 Hz", &force)) {
 			settings.frameGenerationForceEnable = force ? 1u : 0u;

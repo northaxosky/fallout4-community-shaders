@@ -76,7 +76,9 @@ namespace cs::features
 		[[nodiscard]] bool LoadD3D11();
 		[[nodiscard]] bool LoadD3D12();
 		[[nodiscard]] bool IsIntelD3D11Device(ID3D11Device* a_device) const;
-		[[nodiscard]] bool EnsureD3D11ConversionResources(
+		[[nodiscard]] bool EnsureD3D11ConversionShaders(
+			ID3D11Device* a_device);
+		[[nodiscard]] bool EnsureNativeD3D11ConversionResources(
 			ID3D11Device* a_device,
 			std::uint32_t a_renderWidth,
 			std::uint32_t a_renderHeight,

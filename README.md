@@ -165,6 +165,14 @@ per-feature rules inside those native rows.
 Home shows startup loading results. Advanced has the sole **Load on startup** list, where checked
 means loaded on the next launch; changes require a restart. A loaded feature's **Enabled** control
 toggles its effect live. Shader ownership, cache, and logging settings are also in Advanced.
+
+Super-resolution and frame-generation method selections always require a restart, including
+None, TAA, and FG Off. There are no provider-specific live-switch exceptions. Quality, sharpening,
+and Enabled controls remain live and affect the currently effective method; requested methods
+remain pending until restart. Only the selected SDK sessions are initialized, plus a configured
+DLSS fallback if it is actually needed. The plugin does not keep other providers ready in standby.
+Enabled pauses or resumes the selected effect; it does not unload its SDK session or remove an
+installed FG proxy. Use the startup Load or method setting to avoid that session's fixed costs.
 Folder actions resolve the backing file before opening Explorer, rather than passing it an
 MO2 USVFS path that exists only inside the game.
 

@@ -1,5 +1,6 @@
 #include "Render/TemporalPipeline.h"
 #include "Render/TemporalDevicePolicy.h"
+#include "Render/TemporalStartup.h"
 
 #include <algorithm>
 #include <cstring>
@@ -562,7 +563,7 @@ namespace cs::render
 		temporal::RequestedTopology request;
 		{
 			std::scoped_lock lock(_impl->mutex);
-			request = *_impl->topology.Request();
+			request = *_impl->topology.StartupRequest();
 		}
 		const bool streamlineRequested =
 			(request.upscalingEligible &&
@@ -603,7 +604,7 @@ namespace cs::render
 		temporal::RequestedTopology request;
 		{
 			std::scoped_lock lock(_impl->mutex);
-			request = *_impl->topology.Request();
+			request = *_impl->topology.StartupRequest();
 		}
 		if (!request.frameGenerationEligible ||
 			request.frameGeneration == temporal::FrameGenerationMethod::kOff) {
@@ -855,10 +856,10 @@ namespace cs::render
 		temporal::RequestedTopology request;
 		{
 			std::scoped_lock lock(_impl->mutex);
-			if (!_impl->topology.Request()) {
+			if (!_impl->topology.StartupRequest()) {
 				return;
 			}
-			request = *_impl->topology.Request();
+			request = *_impl->topology.StartupRequest();
 		}
 
 		const bool proxyPath = a_swapChain && _impl->swapChain.Owns(*a_swapChain);
@@ -880,54 +881,60 @@ namespace cs::render
 		if (proxyPath && a_device) {
 			_impl->swapChain.SetOutwardD3D11Device(*a_device);
 		}
-		render::temporal::SuperResolutionInitContext d3d11Init{};
-		d3d11Init.device = a_device ? *a_device : nullptr;
-		const auto fsrInit =
-			_impl->fsrProvider.Initialize(d3d11Init);
-		render::temporal::SuperResolutionInitContext dlssInit{};
-		if (_impl->streamline.IsD3D12Session()) {
-			dlssInit.device = _impl->swapChain.GetD3D12Device();
-		} else {
-			dlssInit.device = a_device ? *a_device : nullptr;
-		}
-		const auto dlssInitResult =
-			_impl->dlssProvider.Initialize(dlssInit);
-		bool xessAdmitted = false;
-		std::string xessFailure;
-		if (request.superResolution ==
-			temporal::SuperResolutionMethod::kXeSS) {
-			DXGI_ADAPTER_DESC adapterDesc{};
-			const bool intelAdapter = a_adapter &&
-				SUCCEEDED(a_adapter->GetDesc(&adapterDesc)) &&
-				adapterDesc.VendorId == 0x8086;
-			render::temporal::SuperResolutionInitContext init{};
-			if (!intelAdapter && !proxyPath && a_device && *a_device) {
-				winrt::com_ptr<ID3D11DeviceContext> context;
-				(*a_device)->GetImmediateContext(context.put());
-				const HRESULT bridgeResult =
-					_impl->swapChain.InitializeBridge(
-						a_adapter, *a_device, context.get());
-				if (FAILED(bridgeResult)) {
-					xessFailure = std::format(
-						"XeSS D3D12 bridge initialization failed ({:#010x}).",
-						static_cast<std::uint32_t>(bridgeResult));
+		const auto srAdmission = temporal::InitializeSelectedSuperResolution(
+			request,
+			[&](temporal::SuperResolutionMethod a_method) -> temporal::ProviderResult {
+				temporal::SuperResolutionInitContext init{};
+				init.device = a_device ? *a_device : nullptr;
+				if (a_method == temporal::SuperResolutionMethod::kFSR3)
+					return _impl->fsrProvider.Initialize(init);
+				if (a_method == temporal::SuperResolutionMethod::kDLSS) {
+					if (_impl->streamline.IsD3D12Session())
+						init.device = _impl->swapChain.GetD3D12Device();
+					return _impl->dlssProvider.Initialize(init);
 				}
-			}
-			if (intelAdapter && a_device && *a_device) {
-				init.device = *a_device;
-			} else if (_impl->swapChain.IsBridgeReady() &&
-					   _impl->swapChain.GetD3D12Device()) {
-				init.device = _impl->swapChain.GetD3D12Device();
-			} else {
-				xessFailure =
-					"XeSS requires native Intel D3D11 or the D3D12 bridge.";
-			}
-			if (xessFailure.empty()) {
-				const auto result = _impl->xess.Initialize(init);
-				xessAdmitted = result.Succeeded();
-				xessFailure = result.message;
-			}
-		}
+				if (a_method != temporal::SuperResolutionMethod::kXeSS || !a_device || !*a_device) {
+					return {
+						.code = temporal::ProviderResultCode::kUnavailable,
+						.message = "The selected super-resolution method has no usable device."
+					};
+				}
+
+				winrt::com_ptr<IDXGIDevice> dxgiDevice;
+				winrt::com_ptr<IDXGIAdapter> adapter;
+				DXGI_ADAPTER_DESC adapterDesc{};
+				HRESULT result = (*a_device)->QueryInterface(IID_PPV_ARGS(dxgiDevice.put()));
+				if (SUCCEEDED(result))
+					result = dxgiDevice->GetAdapter(adapter.put());
+				if (SUCCEEDED(result))
+					result = adapter->GetDesc(&adapterDesc);
+				if (FAILED(result)) {
+					return {
+						.code = temporal::ProviderResultCode::kUnavailable,
+						.sdkResult = result,
+						.message = "XeSS could not identify the rendering adapter."
+					};
+				}
+				if (adapterDesc.VendorId != 0x8086) {
+					if (!_impl->swapChain.IsBridgeReady()) {
+						winrt::com_ptr<ID3D11DeviceContext> context;
+						(*a_device)->GetImmediateContext(context.put());
+						result = _impl->swapChain.InitializeBridge(
+							adapter.get(), *a_device, context.get());
+						if (FAILED(result)) {
+							return {
+								.code = temporal::ProviderResultCode::kUnavailable,
+								.sdkResult = result,
+								.message = "XeSS D3D12 bridge initialization failed."
+							};
+						}
+					}
+					init.device = _impl->swapChain.GetD3D12Device();
+				}
+				return _impl->xess.Initialize(init);
+			});
+		if (!srAdmission.detail.empty())
+			L->warn("{}", srAdmission.detail);
 		_impl->latencySdkActive.store(
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire) &&
 				proxyPath &&
@@ -946,16 +953,8 @@ namespace cs::render
 		session.streamlineApi = _impl->streamline.IsD3D12Session()
 			? temporal::GraphicsApi::kD3D12
 			: temporal::GraphicsApi::kD3D11;
-		session.admittedSr[static_cast<std::size_t>(temporal::SuperResolutionMethod::kNone)] =
-			request.upscalingEligible;
-		session.admittedSr[static_cast<std::size_t>(temporal::SuperResolutionMethod::kTAA)] =
-			request.upscalingEligible;
-		session.admittedSr[static_cast<std::size_t>(temporal::SuperResolutionMethod::kFSR3)] =
-			request.upscalingEligible && fsrInit.Succeeded();
-		session.admittedSr[static_cast<std::size_t>(temporal::SuperResolutionMethod::kDLSS)] =
-			request.upscalingEligible && dlssInitResult.Succeeded();
-		session.admittedSr[static_cast<std::size_t>(temporal::SuperResolutionMethod::kXeSS)] =
-			request.upscalingEligible && xessAdmitted;
+		session.admittedSr = srAdmission.methods;
+		session.rejectionReason = srAdmission.detail;
 		session.admittedFg = proxyPath
 			? request.frameGeneration
 			: temporal::FrameGenerationMethod::kOff;
@@ -978,26 +977,6 @@ namespace cs::render
 			PostFailure(
 				temporal::FailureDomain::kConfiguration,
 				"The temporal session topology was published more than once.");
-		} else if (
-			request.superResolution == temporal::SuperResolutionMethod::kXeSS &&
-			!xessAdmitted) {
-			PostFailure(
-				temporal::FailureDomain::kSuperResolution,
-				xessFailure.empty()
-					? "XeSS super-resolution was not admitted."
-					: xessFailure);
-		} else if (
-			request.superResolution == temporal::SuperResolutionMethod::kDLSS &&
-			!dlssInitResult.Succeeded()) {
-			PostFailure(
-				temporal::FailureDomain::kStreamline,
-				dlssInitResult.message);
-		} else if (
-			request.superResolution == temporal::SuperResolutionMethod::kFSR3 &&
-			!fsrInit.Succeeded()) {
-			PostFailure(
-				temporal::FailureDomain::kSuperResolution,
-				fsrInit.message);
 		}
 	}
 
@@ -1297,7 +1276,11 @@ namespace cs::render
 			_impl->resetEpochs.FrameGenerationConsumed();
 		status.traceSequence = _impl->traceSequence;
 		status.traceEntryCount = static_cast<std::uint32_t>(_impl->traceCount);
-		status.failure = _impl->failure;
+		status.failure = _impl->failure.empty()
+			? status.session.rejectionReason : _impl->failure;
+		if (status.failureDomain == temporal::FailureDomain::kNone &&
+			!status.session.rejectionReason.empty())
+			status.failureDomain = temporal::FailureDomain::kSuperResolution;
 		return status;
 	}
 

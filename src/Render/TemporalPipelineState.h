@@ -148,15 +148,13 @@ namespace cs::render::temporal
 			if (_request) {
 				return false;
 			}
+			_startupRequest = a_request;
 			_request = std::move(a_request);
-			_effective.superResolutionEnabled =
-				_request->upscalingEligible && _request->superResolutionEnabled;
-			_effective.frameGenerationEnabled =
-				_request->frameGenerationEligible && _request->frameGenerationEnabled;
 			_effective.superResolution = _request->superResolution;
 			_effective.frameGeneration = _request->frameGeneration;
 			_effective.qualityMode = _request->qualityMode;
 			_effective.revision = _request->revision;
+			UpdateEffectiveEnablement();
 			return true;
 		}
 
@@ -177,11 +175,11 @@ namespace cs::render::temporal
 			const auto srIndex = static_cast<std::size_t>(_effective.superResolution);
 			if (srIndex >= _session->admittedSr.size() || !_session->admittedSr[srIndex]) {
 				const auto fallbackIndex =
-					static_cast<std::size_t>(_request->noDlssFallback);
+					static_cast<std::size_t>(_startupRequest->noDlssFallback);
 				if (_effective.superResolution == SuperResolutionMethod::kDLSS &&
 					fallbackIndex < _session->admittedSr.size() &&
 					_session->admittedSr[fallbackIndex]) {
-					_effective.superResolution = _request->noDlssFallback;
+					_effective.superResolution = _startupRequest->noDlssFallback;
 				} else {
 					_effective.superResolutionEnabled = false;
 					_effective.superResolution = SuperResolutionMethod::kNone;
@@ -191,6 +189,7 @@ namespace cs::render::temporal
 				_effective.frameGenerationEnabled = false;
 				_effective.frameGeneration = FrameGenerationMethod::kOff;
 			}
+			UpdateEffectiveEnablement();
 			return true;
 		}
 
@@ -212,65 +211,10 @@ namespace cs::render::temporal
 			_request->frameGenerationEnabled = a_fgEnabled;
 			_request->frameGeneration = a_fg;
 			_request->revision = a_revision;
-			_pending = {};
 			_effective.revision = a_revision;
 			_effective.qualityMode = a_qualityMode;
-			_effective.superResolutionEnabled =
-				a_srEnabled && _request->upscalingEligible && !_quarantined.superResolution;
-			_effective.frameGenerationEnabled =
-				a_fgEnabled && _request->frameGenerationEligible && !_quarantined.frameGeneration;
-
-			if (_quarantined.superResolution) {
-				_effective.superResolution = SuperResolutionMethod::kNone;
-			} else if (_superResolutionFailed &&
-				a_sr != SuperResolutionMethod::kNone &&
-				a_sr != SuperResolutionMethod::kTAA) {
-				_effective.superResolutionEnabled = true;
-				_effective.superResolution = SuperResolutionMethod::kTAA;
-				_pending.required = true;
-				_pending.requestedSr = a_sr;
-				_pending.requestedFg = a_fg;
-				_pending.reason =
-					"External super resolution failed and is disabled until restart.";
-			} else if (_superResolutionFailed) {
-				_effective.superResolution = a_sr;
-			}
-
-			if (!_session) {
-				if (!_superResolutionFailed && !_quarantined.superResolution) {
-					_effective.superResolution = a_sr;
-				}
-				_effective.frameGeneration = _quarantined.frameGeneration
-					? FrameGenerationMethod::kOff : a_fg;
-				UpdateQuarantineRestart();
-				return;
-			}
-
-			const auto srIndex = static_cast<std::size_t>(a_sr);
-			if (!_superResolutionFailed && !_quarantined.superResolution &&
-				srIndex < _session->admittedSr.size() &&
-				_session->admittedSr[srIndex]) {
-				_effective.superResolution = a_sr;
-			} else if (
-				!_superResolutionFailed && !_quarantined.superResolution &&
-				a_sr != _effective.superResolution) {
-				_pending.required = true;
-				_pending.requestedSr = a_sr;
-				_pending.requestedFg = a_fg;
-				_pending.reason = "The selected super-resolution provider was not admitted at startup.";
-			}
-
-			if (_quarantined.frameGeneration) {
-				_effective.frameGeneration = FrameGenerationMethod::kOff;
-			} else if (a_fg == _session->admittedFg) {
-				_effective.frameGeneration = a_fg;
-			} else if (a_fg != _effective.frameGeneration) {
-				_pending.required = true;
-				_pending.requestedSr = a_sr;
-				_pending.requestedFg = a_fg;
-				_pending.reason = "Changing the frame-generation provider requires a restart.";
-			}
-			UpdateQuarantineRestart();
+			UpdateEffectiveEnablement();
+			UpdatePendingRestart();
 		}
 
 		void Quarantine(
@@ -293,7 +237,7 @@ namespace cs::render::temporal
 				_effective.frameGeneration = FrameGenerationMethod::kOff;
 			}
 			_effective.revision = a_revision;
-			UpdateQuarantineRestart();
+			UpdatePendingRestart();
 		}
 
 		void FailSuperResolutionToNative(
@@ -301,46 +245,71 @@ namespace cs::render::temporal
 			std::string a_reason)
 		{
 			if (_quarantined.superResolution) {
-				UpdateQuarantineRestart();
+				UpdatePendingRestart();
 				return;
 			}
 			_superResolutionFailed = true;
-			_effective.superResolutionEnabled = true;
+			_superResolutionFailureReason = std::move(a_reason);
 			_effective.superResolution = SuperResolutionMethod::kTAA;
 			_effective.revision = a_revision;
-			_pending.required = true;
-			_pending.requestedSr =
-				_request ? _request->superResolution : SuperResolutionMethod::kNone;
-			_pending.requestedFg =
-				_request ? _request->frameGeneration : FrameGenerationMethod::kOff;
-			_pending.reason = std::move(a_reason);
+			UpdateEffectiveEnablement();
+			UpdatePendingRestart();
 		}
 
 		[[nodiscard]] const std::optional<RequestedTopology>& Request() const noexcept { return _request; }
+		[[nodiscard]] const std::optional<RequestedTopology>& StartupRequest() const noexcept { return _startupRequest; }
 		[[nodiscard]] const std::optional<SessionTopology>& Session() const noexcept { return _session; }
 		[[nodiscard]] const EffectiveConfiguration& Effective() const noexcept { return _effective; }
 		[[nodiscard]] const PendingRestart& Pending() const noexcept { return _pending; }
 
 	private:
-		void UpdateQuarantineRestart()
+		void UpdateEffectiveEnablement() noexcept
 		{
-			if (!_quarantined.superResolution && !_quarantined.frameGeneration) {
+			const auto srIndex = static_cast<std::size_t>(_effective.superResolution);
+			const bool srReady = !_session ||
+				(_session->valid && srIndex < _session->admittedSr.size() &&
+					_session->admittedSr[srIndex]);
+			const bool fgReady = !_session ||
+				(_session->valid && _session->proxyInstalled &&
+					_session->admittedFg == _effective.frameGeneration);
+			_effective.superResolutionEnabled =
+				_request && _request->superResolutionEnabled && _startupRequest->upscalingEligible &&
+				_effective.superResolution != SuperResolutionMethod::kNone &&
+				srReady && !_quarantined.superResolution;
+			_effective.frameGenerationEnabled =
+				_request && _request->frameGenerationEnabled && _startupRequest->frameGenerationEligible &&
+				_effective.frameGeneration != FrameGenerationMethod::kOff &&
+				fgReady && !_quarantined.frameGeneration;
+		}
+
+		void UpdatePendingRestart()
+		{
+			_pending = {};
+			if (!_request || !_startupRequest)
 				return;
+			_pending.requestedSr = _request->superResolution;
+			_pending.requestedFg = _request->frameGeneration;
+			if (_quarantined.superResolution || _quarantined.frameGeneration) {
+				_pending.required = true;
+				_pending.reason = _quarantineReason +
+					" Restart required before the affected temporal processing can resume.";
+			} else if (_superResolutionFailed) {
+				_pending.required = true;
+				_pending.reason = _superResolutionFailureReason;
+			} else if (_request->superResolution != _startupRequest->superResolution ||
+				_request->frameGeneration != _startupRequest->frameGeneration) {
+				_pending.required = true;
+				_pending.reason = "Super-resolution and frame-generation methods are applied at startup.";
 			}
-			_pending.required = true;
-			_pending.requestedSr = _request
-				? _request->superResolution : SuperResolutionMethod::kNone;
-			_pending.requestedFg = _request
-				? _request->frameGeneration : FrameGenerationMethod::kOff;
-			_pending.reason = _quarantineReason +
-				" Restart required before the affected temporal processing can resume.";
 		}
 
 		std::optional<RequestedTopology> _request;
+		std::optional<RequestedTopology> _startupRequest;
 		std::optional<SessionTopology> _session;
 		EffectiveConfiguration _effective;
 		PendingRestart _pending;
 		bool _superResolutionFailed = false;
+		std::string _superResolutionFailureReason;
 		FailureImpact _quarantined;
 		std::string _quarantineReason;
 	};

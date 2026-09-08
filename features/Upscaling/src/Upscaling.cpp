@@ -193,6 +193,10 @@ namespace cs::features
 		static constexpr std::array fields{
 			CS_RESTART_FIELD(
 				Settings,
+				upscaleMethod,
+				"Super-resolution method"),
+			CS_RESTART_FIELD(
+				Settings,
 				streamlineLogLevel,
 				"Streamline log level"),
 			CS_RESTART_FIELD(
@@ -218,6 +222,7 @@ namespace cs::features
 				"Super resolution", settings.upscaleMethod, methods)) {
 			changed = true;
 		}
+		ImGui::TextDisabled("Method changes take effect after restarting the game.");
 
 		static constexpr std::array fallbackMethods{
 			ui::ComboOption{ 0, "None" },

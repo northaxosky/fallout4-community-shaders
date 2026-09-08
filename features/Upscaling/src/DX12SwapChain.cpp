@@ -907,12 +907,8 @@ namespace cs::features
 				}
 				if (!_srColorInput || !_srOutput || !_srDepth ||
 					!_srMotion || !_srReactive ||
-					!a_xess.EnsureD3D11ConversionResources(
-						_device11.get(),
-						a_context.renderWidth,
-						a_context.renderHeight,
-						a_context.outputWidth,
-						a_context.outputHeight)) {
+					!a_xess.EnsureD3D11ConversionShaders(
+						_device11.get())) {
 					return false;
 				}
 

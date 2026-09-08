@@ -309,52 +309,72 @@ namespace cs::features
 		if (!contextResult.Succeeded()) {
 			return contextResult;
 		}
-		if (!EnsureD3D11ConversionResources(
-				a_conversionDevice,
-				a_renderWidth,
-				a_renderHeight,
-				a_outputWidth,
-				a_outputHeight)) {
+		if (!EnsureD3D11ConversionShaders(a_conversionDevice) ||
+			(!_d3d12 &&
+				!EnsureNativeD3D11ConversionResources(
+					a_conversionDevice,
+					a_renderWidth,
+					a_renderHeight,
+					a_outputWidth,
+					a_outputHeight))) {
 			return Failure("XeSS color-conversion resource preflight failed.");
 		}
 		return Success();
 	}
 
-	bool XeSSSuperResolution::EnsureD3D11ConversionResources(
+	bool XeSSSuperResolution::EnsureD3D11ConversionShaders(
+		ID3D11Device* a_device)
+	{
+		if (_decodeShader && _encodeShader) {
+			return true;
+		}
+		if (!a_device) {
+			return false;
+		}
+
+		const auto decode = cs::util::CompileShaderToBlob(
+			L"Data\\Shaders\\Upscaling\\XeSSDecodeCS.hlsl",
+			{},
+			"cs_5_0",
+			"main");
+		const auto encode = cs::util::CompileShaderToBlob(
+			L"Data\\Shaders\\Upscaling\\XeSSEncodeCS.hlsl",
+			{},
+			"cs_5_0",
+			"main");
+		winrt::com_ptr<ID3D11ComputeShader> decodeShader;
+		winrt::com_ptr<ID3D11ComputeShader> encodeShader;
+		if (!decode || !encode ||
+			FAILED(a_device->CreateComputeShader(
+				decode->GetBufferPointer(),
+				decode->GetBufferSize(),
+				nullptr,
+				decodeShader.put())) ||
+			FAILED(a_device->CreateComputeShader(
+				encode->GetBufferPointer(),
+				encode->GetBufferSize(),
+				nullptr,
+				encodeShader.put()))) {
+			return false;
+		}
+		cs::render::annotation::SetName(
+			decodeShader.get(), "XeSS/DecodeGamma22.CS");
+		cs::render::annotation::SetName(
+			encodeShader.get(), "XeSS/EncodeGamma22.CS");
+		_decodeShader = std::move(decodeShader);
+		_encodeShader = std::move(encodeShader);
+		return true;
+	}
+
+	bool XeSSSuperResolution::EnsureNativeD3D11ConversionResources(
 		ID3D11Device* a_device,
 		std::uint32_t a_renderWidth,
 		std::uint32_t a_renderHeight,
 		std::uint32_t a_outputWidth,
 		std::uint32_t a_outputHeight)
 	{
-		if (!_decodeShader || !_encodeShader) {
-			const auto decode = cs::util::CompileShaderToBlob(
-				L"Data\\Shaders\\Upscaling\\XeSSDecodeCS.hlsl",
-				{},
-				"cs_5_0",
-				"main");
-			const auto encode = cs::util::CompileShaderToBlob(
-				L"Data\\Shaders\\Upscaling\\XeSSEncodeCS.hlsl",
-				{},
-				"cs_5_0",
-				"main");
-			if (!decode || !encode ||
-				FAILED(a_device->CreateComputeShader(
-					decode->GetBufferPointer(),
-					decode->GetBufferSize(),
-					nullptr,
-					_decodeShader.put())) ||
-				FAILED(a_device->CreateComputeShader(
-					encode->GetBufferPointer(),
-					encode->GetBufferSize(),
-					nullptr,
-					_encodeShader.put()))) {
-				return false;
-			}
-			cs::render::annotation::SetName(
-				_decodeShader.get(), "XeSS/DecodeGamma22.CS");
-			cs::render::annotation::SetName(
-				_encodeShader.get(), "XeSS/EncodeGamma22.CS");
+		if (!EnsureD3D11ConversionShaders(a_device)) {
+			return false;
 		}
 
 		const auto matches = [](const auto& a_texture,
@@ -539,7 +559,7 @@ namespace cs::features
 		const auto* reactive = get(a_request.reactiveMask);
 		if (!recording || !recording->context || !color || !color->resource ||
 			!color->srv || !motion || !depth || !output || !output->uav ||
-			!EnsureD3D11ConversionResources(
+			!EnsureNativeD3D11ConversionResources(
 				_device11.get(),
 				a_request.renderWidth,
 				a_request.renderHeight,

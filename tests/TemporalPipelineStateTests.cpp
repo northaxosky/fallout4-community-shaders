@@ -2,6 +2,7 @@
 #include "Render/TemporalProvider.h"
 #include "Render/TemporalRenderSizing.h"
 #include "Render/TemporalDevicePolicy.h"
+#include "Render/TemporalStartup.h"
 #include "SuperResolutionContext.h"
 
 #include <iostream>
@@ -53,6 +54,7 @@ namespace
 
 		SessionTopology session;
 		session.valid = true;
+		session.proxyInstalled = true;
 		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kNone)] = true;
 		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kTAA)] = true;
 		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kFSR3)] = true;
@@ -69,9 +71,10 @@ namespace
 			false,
 			FrameGenerationMethod::kFSR3,
 			5);
-		Check(state.Effective().superResolution == SuperResolutionMethod::kFSR3, "admitted SR switches live");
+		Check(state.Effective().superResolution == SuperResolutionMethod::kDLSS, "even an admitted SR change waits for restart");
 		Check(!state.Effective().frameGenerationEnabled, "FG enablement switches live");
-		Check(!state.Pending().required, "admitted live changes do not require restart");
+		Check(state.Effective().qualityMode == 2, "quality changes still apply to the effective provider");
+		Check(state.Pending().required, "SR method changes uniformly require restart");
 
 		state.SubmitLive(
 			true,
@@ -80,9 +83,11 @@ namespace
 			true,
 			FrameGenerationMethod::kDLSSG,
 			6);
-		Check(state.Effective().superResolution == SuperResolutionMethod::kFSR3, "unadmitted SR does not replace live provider");
+		Check(state.Effective().superResolution == SuperResolutionMethod::kDLSS, "unadmitted SR does not replace live provider");
 		Check(state.Effective().frameGeneration == FrameGenerationMethod::kFSR3, "unadmitted FG does not replace live provider");
 		Check(state.Pending().required, "unadmitted topology is pending restart");
+		state.SubmitLive(true, SuperResolutionMethod::kDLSS, 2, true, FrameGenerationMethod::kFSR3, 6);
+		Check(!state.Pending().required, "restoring both startup selections clears the pending change");
 
 		state.FailSuperResolutionToNative(
 			7, "external provider failed after render commitment");
@@ -116,11 +121,11 @@ namespace
 			FrameGenerationMethod::kFSR3,
 			9);
 		Check(
-			state.Effective().superResolution == SuperResolutionMethod::kNone,
-			"native policy remains selectable after an external SR failure");
+			state.Effective().superResolution == SuperResolutionMethod::kTAA,
+			"selecting None after failure also waits for restart");
 		Check(
-			!state.Pending().required,
-			"selecting a native policy clears the external-provider restart request");
+			state.Pending().required,
+			"native method selection does not erase the failure's restart request");
 		state.SubmitLive(
 			true,
 			SuperResolutionMethod::kFSR3,
@@ -152,6 +157,7 @@ namespace
 			Check(state.Freeze(requested), "failure fixture freezes");
 			SessionTopology session;
 			session.valid = true;
+			session.proxyInstalled = true;
 			session.admittedSr.fill(true);
 			session.admittedFg = FrameGenerationMethod::kXeSS;
 			Check(state.Admit(session), "failure fixture admits");
@@ -214,7 +220,7 @@ namespace
 		Check(
 			levels == std::vector<D3D_FEATURE_LEVEL>{
 				D3D_FEATURE_LEVEL_11_1, D3D_FEATURE_LEVEL_11_0 },
-			"XeSS startup requests the feature level needed for live FSR selection");
+			"upscaling sessions use a consistent FSR-compatible device preference");
 		const auto once = levels;
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(levels == once, "feature-level preference is idempotent");
@@ -254,6 +260,163 @@ namespace
 		levels.clear();
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(levels.empty(), "inactive temporal features leave native device creation unchanged");
+	}
+
+	void TestUniformStartupSelections()
+	{
+		using namespace cs::render::temporal;
+		for (unsigned sr = 0; sr < static_cast<unsigned>(SuperResolutionMethod::kCount); ++sr) {
+			for (unsigned fg = 0; fg < static_cast<unsigned>(FrameGenerationMethod::kCount); ++fg) {
+				RequestedTopology request;
+				request.upscalingEligible = true;
+				request.frameGenerationEligible = true;
+				request.superResolution = static_cast<SuperResolutionMethod>(sr);
+				request.frameGeneration = static_cast<FrameGenerationMethod>(fg);
+				TopologyState state;
+				Check(state.Freeze(request), "matrix request freezes");
+				SessionTopology session;
+				session.valid = true;
+				session.proxyInstalled = request.frameGeneration != FrameGenerationMethod::kOff;
+				session.admittedSr.fill(true);
+				session.admittedFg = request.frameGeneration;
+				Check(state.Admit(session), "matrix session admits");
+				for (unsigned nextSr = 0; nextSr < static_cast<unsigned>(SuperResolutionMethod::kCount); ++nextSr) {
+					for (unsigned nextFg = 0; nextFg < static_cast<unsigned>(FrameGenerationMethod::kCount); ++nextFg) {
+						const bool enabled = (nextSr + nextFg) % 2 == 0;
+						const unsigned quality = (nextSr + nextFg) % 5;
+						state.SubmitLive(
+							enabled, static_cast<SuperResolutionMethod>(nextSr), quality,
+							enabled, static_cast<FrameGenerationMethod>(nextFg), 10);
+						Check(
+							state.Effective().superResolution == request.superResolution &&
+								state.Effective().frameGeneration == request.frameGeneration,
+							"every SR/FG method combination remains fixed until restart");
+						Check(
+							state.Pending().required == (nextSr != sr || nextFg != fg),
+							"restart policy is uniform, including None, TAA, and FG Off");
+						Check(
+							state.Effective().qualityMode == quality &&
+								state.Effective().superResolutionEnabled == (enabled && sr != 0) &&
+								state.Effective().frameGenerationEnabled == (enabled && fg != 0),
+							"live controls affect the effective methods without changing them");
+						Check(
+							state.StartupRequest()->superResolution == request.superResolution &&
+								state.StartupRequest()->frameGeneration == request.frameGeneration,
+							"pending selections never rewrite the frozen startup request");
+					}
+				}
+			}
+		}
+
+		TopologyState rejected;
+		RequestedTopology request;
+		request.upscalingEligible = true;
+		request.frameGenerationEligible = true;
+		Check(rejected.Freeze(request), "rejected session freezes");
+		Check(rejected.Admit({}), "rejected session records failed admission");
+		rejected.SubmitLive(true, SuperResolutionMethod::kFSR3, 1, true, FrameGenerationMethod::kXeSS, 2);
+		Check(
+			!rejected.Effective().superResolutionEnabled &&
+				!rejected.Effective().frameGenerationEnabled,
+			"live controls cannot activate a rejected startup session");
+
+		TopologyState beforeAdmission;
+		request.superResolution = SuperResolutionMethod::kDLSS;
+		request.frameGeneration = FrameGenerationMethod::kXeSS;
+		Check(beforeAdmission.Freeze(request), "pre-admission request freezes");
+		beforeAdmission.SubmitLive(
+			true, SuperResolutionMethod::kFSR3, 3,
+			true, FrameGenerationMethod::kOff, 2);
+		SessionTopology session;
+		session.valid = true;
+		session.proxyInstalled = true;
+		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kDLSS)] = true;
+		session.admittedFg = FrameGenerationMethod::kXeSS;
+		Check(beforeAdmission.Admit(session), "graphics creation uses the frozen request");
+		Check(
+			beforeAdmission.Effective().superResolution == SuperResolutionMethod::kDLSS &&
+				beforeAdmission.Effective().frameGeneration == FrameGenerationMethod::kXeSS &&
+				beforeAdmission.Pending().required,
+			"UI edits before device creation cannot replace the frozen methods");
+	}
+
+	void TestSelectedStartupInitialization()
+	{
+		using namespace cs::render::temporal;
+		std::vector<SuperResolutionMethod> calls;
+		const auto available = [&](SuperResolutionMethod a_method) {
+			calls.push_back(a_method);
+			return ProviderResult{ .code = ProviderResultCode::kSuccess };
+		};
+		RequestedTopology request;
+		request.upscalingEligible = true;
+		for (unsigned sr = 0; sr < static_cast<unsigned>(SuperResolutionMethod::kCount); ++sr) {
+			request.superResolution = static_cast<SuperResolutionMethod>(sr);
+			calls.clear();
+			const auto admission = InitializeSelectedSuperResolution(request, available);
+			Check(admission.methods[sr] && admission.detail.empty(), "selected startup method is admitted");
+			Check(
+				sr < 2 ? calls.empty() : calls == std::vector{ request.superResolution },
+				"startup initializes only the selected external provider, never standby providers");
+		}
+		request.upscalingEligible = false;
+		calls.clear();
+		const auto inactive = InitializeSelectedSuperResolution(request, available);
+		Check(
+			calls.empty() && std::ranges::none_of(inactive.methods, [](bool a_value) { return a_value; }),
+			"an unloaded Upscaling feature initializes no SR providers");
+
+		request.upscalingEligible = true;
+		request.superResolution = SuperResolutionMethod::kDLSS;
+		const auto dlssUnavailable = [&](SuperResolutionMethod a_method) {
+			calls.push_back(a_method);
+			return ProviderResult{
+				.code = a_method == SuperResolutionMethod::kDLSS
+					? ProviderResultCode::kUnavailable : ProviderResultCode::kSuccess,
+				.message = a_method == SuperResolutionMethod::kDLSS ? "DLSS unavailable" : ""
+			};
+		};
+		for (const auto fallback : {
+				 SuperResolutionMethod::kNone, SuperResolutionMethod::kTAA,
+				 SuperResolutionMethod::kFSR3, SuperResolutionMethod::kXeSS }) {
+			request.noDlssFallback = fallback;
+			calls.clear();
+			const auto admission = InitializeSelectedSuperResolution(request, dlssUnavailable);
+			const auto expected = fallback == SuperResolutionMethod::kNone || fallback == SuperResolutionMethod::kTAA
+				? std::vector{ SuperResolutionMethod::kDLSS }
+				: std::vector{ SuperResolutionMethod::kDLSS, fallback };
+			Check(calls == expected, "a fallback initializes only after the requested DLSS runtime fails");
+			Check(
+				admission.methods[static_cast<std::size_t>(fallback)] &&
+					admission.detail.contains("DLSS unavailable"),
+				"startup fallback preserves an explicit explanation");
+			TopologyState state;
+			Check(state.Freeze(request), "fallback request freezes");
+			SessionTopology session;
+			session.valid = true;
+			session.admittedSr = admission.methods;
+			Check(state.Admit(session), "fallback admission records");
+			state.SubmitLive(true, SuperResolutionMethod::kDLSS, 2, false, FrameGenerationMethod::kOff, 3);
+			Check(
+				state.Effective().superResolution == fallback && !state.Pending().required,
+				"tuning does not replace a startup fallback or request a spurious restart");
+			state.SubmitLive(true, fallback, 2, false, FrameGenerationMethod::kOff, 4);
+			Check(
+				state.Effective().superResolution == fallback && state.Pending().required,
+				"changing the requested startup method is explicit even when it matches the fallback");
+		}
+
+		request.noDlssFallback = SuperResolutionMethod::kXeSS;
+		calls.clear();
+		const auto unavailable = InitializeSelectedSuperResolution(request, [&](SuperResolutionMethod a_method) {
+			calls.push_back(a_method);
+			return ProviderResult{ .code = ProviderResultCode::kUnavailable, .message = "unavailable" };
+		});
+		Check(
+			calls == std::vector{ SuperResolutionMethod::kDLSS, SuperResolutionMethod::kXeSS } &&
+				!unavailable.methods[static_cast<std::size_t>(SuperResolutionMethod::kXeSS)] &&
+				unavailable.detail.contains("fallback is unavailable"),
+			"failed fallback does not silently admit another provider");
 	}
 
 	void TestObservedColorContract()
@@ -689,6 +852,8 @@ int main()
 	TestRequestedEffectiveAndPending();
 	TestQuarantinedConfiguration();
 	TestTemporalFeatureLevels();
+	TestUniformStartupSelections();
+	TestSelectedStartupInitialization();
 	TestObservedColorContract();
 	TestFramePhasesAndRetries();
 	TestOnceOnlyAndImmutableExtent();

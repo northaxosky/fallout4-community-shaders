@@ -48,6 +48,21 @@ namespace
 			std::istreambuf_iterator<char>());
 	}
 
+	std::string_view Between(
+		std::string_view a_source,
+		std::string_view a_startMarker,
+		std::string_view a_endMarker)
+	{
+		const auto start = a_source.find(a_startMarker);
+		if (start == std::string_view::npos) {
+			return {};
+		}
+		const auto end = a_source.find(a_endMarker, start);
+		return end == std::string_view::npos
+			? std::string_view{}
+			: a_source.substr(start, end - start);
+	}
+
 	std::array<DirectX::XMFLOAT4, 4> Rows(
 		const DirectX::XMFLOAT4X4& a_matrix)
 	{
@@ -190,6 +205,8 @@ namespace
 		const auto presentation = ReadFile(a_presentationPath);
 		const auto streamline = ReadFile(a_streamlinePath);
 		const auto xess = ReadFile(a_fidelityFxPath.parent_path() / "XeSS.cpp");
+		const auto dx12SwapChain =
+			ReadFile(a_fidelityFxPath.parent_path() / "DX12SwapChain.cpp");
 		const auto bothXeSSBackendsContain = [&xess](std::string_view a_expression) {
 			const auto first = xess.find(a_expression);
 			return first != std::string::npos &&
@@ -244,6 +261,43 @@ namespace
 				upscaling.contains(
 					"superResolutionFovCache.Resolve("),
 			"FSR receives caller-resolved camera and timing values through its typed context");
+		const auto xessPreflightBlock = Between(
+			xess,
+			"XeSSSuperResolution::Preflight(",
+			"bool XeSSSuperResolution::EnsureD3D11ConversionShaders(");
+		const auto xessD3D12BridgeBlock = Between(
+			dx12SwapChain,
+			"XeSSSuperResolution& a_xess",
+			"render::temporal::ISuperResolutionProvider& a_provider");
+		const auto xessNativeRecordBlock = Between(
+			xess,
+			"const auto result = _executeD3D12(",
+			"void XeSSSuperResolution::DestroyAfterDrain()");
+		Check(
+			xessPreflightBlock.contains(
+				"EnsureD3D11ConversionShaders(a_conversionDevice)") &&
+				xessPreflightBlock.contains("(!_d3d12 &&") &&
+				xessPreflightBlock.contains(
+					"EnsureNativeD3D11ConversionResources(") &&
+				xessD3D12BridgeBlock.contains(
+					"EnsureD3D11ConversionShaders(") &&
+				!xessD3D12BridgeBlock.contains(
+					"EnsureNativeD3D11ConversionResources(") &&
+				!xessD3D12BridgeBlock.contains("_linearInput") &&
+				!xessD3D12BridgeBlock.contains("_linearOutput") &&
+				xessD3D12BridgeBlock.contains(
+					"_srColorInput->uav11.get()") &&
+				xessD3D12BridgeBlock.contains(
+					"_srOutput->srv11.get()") &&
+				xessD3D12BridgeBlock.contains("_decodeShader.get()") &&
+				xessD3D12BridgeBlock.contains("_encodeShader.get()") &&
+				xessNativeRecordBlock.contains(
+					"EnsureNativeD3D11ConversionResources(") &&
+				xessNativeRecordBlock.contains(
+					".pColorTexture = _linearInput.get()") &&
+				xessNativeRecordBlock.contains(
+					".pOutputTexture = _linearOutput.get()"),
+			"XeSS D3D12 bridge requests shaders without native conversion textures while D3D11 retains its private conversion path");
 		const auto frameGenerationStart =
 			fidelityFx.find("bool FidelityFX::SetFrameGenerationCameraData(");
 		const auto frameGenerationEnd =
