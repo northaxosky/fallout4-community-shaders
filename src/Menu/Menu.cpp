@@ -491,17 +491,17 @@ namespace cs
 			return;
 		const std::array links{
 			dmui::Link{
-				"GitHub",
-				"https://github.com/northaxosky/fallout4-community-shaders",
-				"Copies the project URL.",
-				0,
-				true },
+				.label = "GitHub",
+				.external = {
+					.targetKind = DMUI_EXTERNAL_TARGET_URI,
+					.target = "https://github.com/northaxosky/fallout4-community-shaders" },
+				.note = "Opens the project page in your default browser.",
+				.action = dmui::LinkAction::kOpenExternal },
 			dmui::Link{
-				"Nexus Mods",
-				nullptr,
-				"Not available yet.",
-				0,
-				false }
+				.label = "Nexus Mods",
+				.note = "Not available yet.",
+				.enabled = false,
+				.action = dmui::LinkAction::kOpenExternal }
 		};
 		if (!CheckHostResult(
 				a_client,

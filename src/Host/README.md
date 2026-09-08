@@ -12,10 +12,14 @@ Persisted debug-view selections are applied after shader-injection validation wh
 ready. At F4SE `kPostPostLoad`, after feature registration is complete, `HostClient` calls the
 official `dmui::Client::Connect`. The client checks the exact generated ImGui forwarding binary
 version separately from the minimum forwarding surface version 1.1, and preflights API structure
-and required services before registering anything. It then registers:
+and required services, including native external opening, before registering anything. The client
+and host must use matching development headers from the CommonLibF4-pinned DearModdingUI API; no
+compatibility shim is provided for superseded development snapshots. It then registers all category
+descriptors before any page that references their stable IDs:
 
 - Home, Advanced, and Presets pages under the General category;
-- one settings page for every menu-visible registered feature, including inactive features;
+- one settings page for every menu-visible registered feature, including inactive features under
+  Unloaded;
 - the managed Performance Overlay page;
 - the Clear Shader Cache action;
 - frame and page-activity observers;
@@ -32,11 +36,17 @@ diagnostic hotkey path.
 
 Startup loading is edited only in Advanced with positive checked-to-load controls. Home reports
 startup results; feature pages retain live effect controls and actionable failure/restart notices.
-The client explicitly requests the lighting icon, and General resolves to the host's gear icon.
+General sorts first, live feature categories follow the established feature-category order, then
+Misc, Other, and deterministic custom categories, with Unloaded after live features and Overlay
+last. Distinct custom labels receive distinct stable IDs even when ASCII normalization collides.
+Only categories referenced by pages are registered. The client explicitly requests the lightbulb
+icon, and General resolves to the host's gear icon.
 
 Explorer runs outside the game's USVFS mapping. Folder actions resolve the backing configuration
 or cache identity file through a read-only mapping before launching Explorer. Ordinary file-name
 queries are insufficient because USVFS deliberately rewrites those names to virtual paths.
+This physical-path and Explorer flow remains intentionally unchanged while the upstream
+DearModdingUI USVFS virtual-file/open-containing-folder API is pending.
 
 ## Native services
 
@@ -47,6 +57,11 @@ and diagnostics. Texture previews import the feature's same-device single-sample
 owner-scoped handle until the provider changes, the renderer generation changes, the host
 invalidates it, or the page deactivates. Transient host/backend failures retry at a bounded cadence;
 unsupported resources remain suppressed until their source or renderer generation changes.
+
+Project and feature download links use the host's native external-open service with URI targets, so
+successful clicks open the default browser. Host dispatch or launch failures follow the existing
+link-row failure logging path; there is no shell or clipboard fallback. Disabled placeholders remain
+non-actionable.
 
 Performance Overlay placement is stored by Community Shaders in logical coordinates only after
 the host reports an arrangement-completed edge. The host applies content scaling exactly once.
@@ -68,9 +83,10 @@ RenderDoc capture hotkeys additionally require a loaded capture API. IDs use the
 
 ## Tests
 
-`tests/HostIntegrationTests.cpp` exercises forwarding service/version preflight, missing-service
-headless behavior, page catalog ordering and IDs, and independent fullscreen/texture debug-view
-selection. It intentionally builds without the plugin or an ImGui library:
+`tests/HostIntegrationTests.cpp` exercises forwarding service/version preflight, including the
+external-open function/table requirements, missing-service headless behavior, category/page catalog
+ordering, IDs, references, deduplication and collision handling, and independent fullscreen/texture
+debug-view selection. It intentionally builds without the plugin or an ImGui library:
 
 ```bash
 ctest --test-dir build -C Release -R HostIntegration

@@ -441,6 +441,7 @@ set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
 
 add_executable(HostIntegrationTests
 	tests/HostIntegrationTests.cpp
+	src/Host/HostClientOptions.h
 	src/Host/HostPageCatalog.cpp
 	src/Host/HostPageCatalog.h
 	src/Utils/PhysicalFile.cpp

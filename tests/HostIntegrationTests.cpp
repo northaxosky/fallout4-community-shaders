@@ -1,4 +1,5 @@
 #include "Host/HostPageCatalog.h"
+#include "Host/HostClientOptions.h"
 #include "Host/HostRuntimeModel.h"
 #include "Menu/DebugViewSelection.h"
 #include "Utils/PhysicalFile.h"
@@ -9,6 +10,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <iostream>
+#include <ranges>
 #include <string_view>
 #include <vector>
 
@@ -27,17 +29,7 @@ namespace
 
 #define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
 
-	constexpr DMUI_HostServices kRequiredServices =
-		DMUI_HOST_SERVICE_FRAME_CONTROL |
-		DMUI_HOST_SERVICE_EDIT_LIFECYCLE |
-		DMUI_HOST_SERVICE_CONTEXTUAL_HOTKEYS |
-		DMUI_HOST_SERVICE_IMAGE_RESOURCES |
-		DMUI_HOST_SERVICE_MANAGED_OVERLAYS |
-		DMUI_HOST_SERVICE_NOTIFICATIONS |
-		DMUI_HOST_SERVICE_ANNOTATED_PLOTS |
-		DMUI_HOST_SERVICE_DIALOGS;
-
-	DMUI_HostServices supportedServices = kRequiredServices;
+	DMUI_HostServices supportedServices = cs::host::kClientOptions.requiredServices;
 	std::uint32_t forwardingVersion = DMUI_FORWARDING_VERSION_1_1;
 
 	DMUI_Result DMUI_CALL RegisterClient(
@@ -181,6 +173,14 @@ namespace
 		return DMUI_RESULT_OK;
 	}
 
+	DMUI_Result DMUI_CALL OpenExternal(
+		DMUI_ClientHandle,
+		const DMUI_ExternalOpenDescriptor*,
+		std::uint32_t*) noexcept
+	{
+		return DMUI_RESULT_OK;
+	}
+
 	DMUI_HostAPI MakeHost()
 	{
 		DMUI_HostAPI api{};
@@ -204,27 +204,36 @@ namespace
 		api.resolveDialogSubmission = &ResolveDialog;
 		api.cancelDialog = &CancelDialog;
 		api.queryServices = &QueryServices;
+		api.openExternal = &OpenExternal;
 		return api;
 	}
 
 	void TestForwardingPreflight()
 	{
-		const dmui::ClientOptions options{
-			.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT,
-			.requiredServices = kRequiredServices,
-			.minimumForwardingVersion = DMUI_FORWARDING_VERSION_1_1
-		};
+		const auto& options = cs::host::kClientOptions;
 		auto api = MakeHost();
 		CHECK(
 			dmui::PreflightHostAPI(nullptr, options) ==
 			DMUI_RESULT_UNSUPPORTED_ABI);
 		CHECK(dmui::PreflightHostAPI(&api, options) == DMUI_RESULT_OK);
 
-		supportedServices &= ~DMUI_HOST_SERVICE_DIALOGS;
+		supportedServices &= ~DMUI_HOST_SERVICE_EXTERNAL_OPEN;
 		CHECK(
 			dmui::PreflightHostAPI(&api, options) ==
 			DMUI_RESULT_SERVICE_UNAVAILABLE);
-		supportedServices = kRequiredServices;
+		supportedServices = options.requiredServices;
+
+		api.openExternal = nullptr;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_SERVICE_UNAVAILABLE);
+		api.openExternal = &OpenExternal;
+
+		api.structSize = DMUI_HOST_API_REGISTER_CATEGORY_SIZE;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_SERVICE_UNAVAILABLE);
+		api.structSize = sizeof(api);
 
 		forwardingVersion = DMUI_FORWARDING_VERSION_1_0;
 		CHECK(
@@ -243,29 +252,172 @@ namespace
 		const std::vector<cs::host::FeaturePageInput> features{
 			{ "WetnessEffects", "Wetness Effects", "Lighting", "Rain film.", true, true },
 			{ "RenderDoc", "RenderDoc", "Dev Tools", "Capture.", false, true },
-			{ "Performance Overlay!", "Performance Overlay", "Performance", "FPS.", true, true }
+			{ "Performance Overlay!", "Performance Overlay", "Performance", "FPS.", true, true },
+			{ "BlankCategory", "Blank Category", "", "No category.", true, true },
+			{ "MiscFeature", "Misc Feature", "Misc", "Miscellaneous.", true, true },
+			{ "Collision!", "Collision A", "Effects!", "Custom.", true, true },
+			{ "Collision?", "Collision B", "Effects!", "Custom.", true, true },
+			{ "CustomTwo", "Custom Two", "Effects?", "Custom.", true, true },
+			{ "ReservedCollision", "Reserved Collision", "General!", "Custom.", true, true },
+			{ "PostProcess", "Post Process", "Post-process", "Post.", true, true }
 		};
-		const auto pages = cs::host::BuildPageCatalog(features);
+		const auto catalog = cs::host::BuildPageCatalog(features);
+		const auto& pages = catalog.pages;
+		const auto& categories = catalog.categories;
 		CHECK(pages.size() == features.size() + 4);
 		CHECK(pages.front().id == "home");
-		CHECK(pages.front().category == "General");
+		CHECK(pages.front().categoryId == cs::host::kGeneralCategoryId);
 		CHECK(DearModdingUI::ResolveClientIconGlyph(
 			cs::host::kClientIconName, {}, "Community Shaders") ==
 			DearModdingUI::ResolveNamedIconGlyphOrZero("lightbulb"));
 		CHECK(DearModdingUI::ResolveCategoryIconGlyph(
-			cs::host::kBuiltInCategory, "Community Shaders",
+			cs::host::kGeneralCategory, "Community Shaders",
 			"dearmodding.community-shaders", cs::host::kClientIconName) ==
 			DearModdingUI::ResolveNamedIconGlyphOrZero("gear"));
 		CHECK(std::ranges::none_of(pages, [](const auto& page) {
 			return page.id == "general";
 		}));
 		CHECK(pages.back().id == cs::host::kOverlayPageId);
+		CHECK(pages.back().categoryId == cs::host::kOverlayCategoryId);
 		CHECK(std::ranges::any_of(pages, [](const auto& page) {
 			return page.id == "feature-renderdoc" &&
-				page.category == cs::host::kUnloadedCategory;
+				page.categoryId == cs::host::kUnloadedCategoryId;
 		}));
 		CHECK(std::ranges::any_of(pages, [](const auto& page) {
 			return page.id == "feature-performance-overlay";
+		}));
+
+		const std::vector<std::string_view> expectedCategoryIds{
+			"general",
+			"lighting",
+			"post-process",
+			"performance",
+			"misc",
+			"other",
+			"effects",
+			"effects-2",
+			"general-2",
+			"unloaded",
+			"overlay"
+		};
+		CHECK(categories.size() == expectedCategoryIds.size());
+		for (std::size_t index = 0;
+			 index < (std::min)(categories.size(), expectedCategoryIds.size());
+			 ++index) {
+			CHECK(categories[index].id == expectedCategoryIds[index]);
+		}
+		CHECK(std::ranges::none_of(categories, [](const auto& category) {
+			return category.displayName == "Dev Tools";
+		}));
+
+		const auto findPage = [&pages](std::string_view a_id) {
+			return std::ranges::find(pages, a_id, &cs::host::HostPageDescriptor::id);
+		};
+		const auto checkPageCategory =
+			[&pages, &findPage](std::string_view a_id, std::string_view a_categoryId) {
+				const auto page = findPage(a_id);
+				CHECK(page != pages.end());
+				if (page != pages.end())
+					CHECK(page->categoryId == a_categoryId);
+			};
+		checkPageCategory("feature-blankcategory", "other");
+		checkPageCategory("feature-collision", "effects");
+		checkPageCategory("feature-collision-2", "effects");
+		checkPageCategory("feature-customtwo", "effects-2");
+		checkPageCategory("feature-reservedcollision", "general-2");
+		CHECK(std::ranges::all_of(pages, [&categories](const auto& page) {
+			return std::ranges::any_of(
+				categories,
+				[&page](const auto& category) {
+					return category.id == page.categoryId;
+				});
+		}));
+		for (const auto& page : pages) {
+			if (page.kind == cs::host::HostPageKind::kFeature) {
+				CHECK(page.featureIndex < features.size());
+				if (page.featureIndex < features.size())
+					CHECK(features[page.featureIndex].displayName == page.displayName);
+			}
+		}
+
+		auto reordered = features;
+		std::ranges::reverse(reordered);
+		const auto reorderedCatalog = cs::host::BuildPageCatalog(reordered);
+		CHECK(reorderedCatalog.categories.size() == categories.size());
+		for (std::size_t index = 0;
+			 index < (std::min)(categories.size(), reorderedCatalog.categories.size());
+			 ++index) {
+			CHECK(reorderedCatalog.categories[index].id == categories[index].id);
+			CHECK(
+				reorderedCatalog.categories[index].displayName ==
+				categories[index].displayName);
+			CHECK(
+				reorderedCatalog.categories[index].sortKey ==
+				categories[index].sortKey);
+		}
+		CHECK(reorderedCatalog.pages.size() == pages.size());
+		for (std::size_t index = 0;
+			 index < (std::min)(pages.size(), reorderedCatalog.pages.size());
+			 ++index) {
+			CHECK(reorderedCatalog.pages[index].id == pages[index].id);
+			CHECK(
+				reorderedCatalog.pages[index].displayName ==
+				pages[index].displayName);
+			CHECK(
+				reorderedCatalog.pages[index].categoryId ==
+				pages[index].categoryId);
+			if (reorderedCatalog.pages[index].kind ==
+				cs::host::HostPageKind::kFeature) {
+				CHECK(
+					reorderedCatalog.pages[index].featureIndex <
+					reordered.size());
+				if (reorderedCatalog.pages[index].featureIndex <
+					reordered.size()) {
+					CHECK(
+						reordered[reorderedCatalog.pages[index].featureIndex]
+							.displayName ==
+						reorderedCatalog.pages[index].displayName);
+				}
+			}
+		}
+	}
+
+	void TestCategoryIdValidity()
+	{
+		const std::string longCategory(200, 'A');
+		const std::vector<cs::host::FeaturePageInput> features{
+			{ "LongCategory", "Long Category", longCategory, "", true, true },
+			{ "PunctuationCategory", "Punctuation Category", "!!!", "", true, true }
+		};
+		const auto catalog = cs::host::BuildPageCatalog(features);
+		for (const auto& category : catalog.categories) {
+			CHECK(!category.id.empty());
+			CHECK(category.id.size() <= 128);
+			CHECK(std::ranges::all_of(category.id, [](char character) {
+				return
+					(character >= 'a' && character <= 'z') ||
+					(character >= '0' && character <= '9') ||
+					character == '.' ||
+					character == '_' ||
+					character == '-';
+			}));
+		}
+	}
+
+	void TestEmptyPageCatalog()
+	{
+		const auto catalog =
+			cs::host::BuildPageCatalog(std::vector<cs::host::FeaturePageInput>{});
+		CHECK(catalog.categories.size() == 2);
+		CHECK(catalog.categories[0].id == cs::host::kGeneralCategoryId);
+		CHECK(catalog.categories[1].id == cs::host::kOverlayCategoryId);
+		CHECK(catalog.pages.size() == 4);
+		CHECK(std::ranges::all_of(catalog.pages, [&catalog](const auto& page) {
+			return std::ranges::any_of(
+				catalog.categories,
+				[&page](const auto& category) {
+					return category.id == page.categoryId;
+				});
 		}));
 	}
 
@@ -519,6 +671,8 @@ int main()
 {
 	TestForwardingPreflight();
 	TestPageCatalog();
+	TestCategoryIdValidity();
+	TestEmptyPageCatalog();
 	TestPhysicalFileLocation();
 	TestSnapshotRefresh();
 	TestSharedSnapshotSelection();
