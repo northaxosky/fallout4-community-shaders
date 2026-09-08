@@ -194,8 +194,9 @@ CMake generates the public trust header from the pinned SDK's
 [`config/project-release.psd1`](extern/Streamline/config/project-release.psd1). No local key file
 or machine-specific signing path is needed to build CS. The private release key belongs only in
 the fork's protected release secret or maintainer backup, never in either repository or game.
-Folder actions resolve the backing file before opening Explorer, rather than passing it an
-MO2 USVFS path that exists only inside the game.
+Folder actions pass the absolute in-game file path to DearModdingUI, which resolves its physical
+backing location through MO2/USVFS and opens the containing folder. Resolution or launch failures
+are reported without falling back to an unresolved path.
 
 Developer details live in [`src/Host/README.md`](src/Host/README.md).
 

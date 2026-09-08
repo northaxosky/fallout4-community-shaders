@@ -12,10 +12,15 @@ Persisted debug-view selections are applied after shader-injection validation wh
 ready. At F4SE `kPostPostLoad`, after feature registration is complete, `HostClient` calls the
 official `dmui::Client::Connect`. The client checks the exact generated ImGui forwarding binary
 version separately from the minimum forwarding surface version 1.1, and preflights API structure
-and required services before registering anything. It then registers:
+and required services, including native external opening, virtual-file targets, and navigation
+icon overrides, before registering anything. The client and host must use matching development headers from the
+CommonLibF4-pinned DearModdingUI API; no
+compatibility shim is provided for superseded development snapshots. It then registers all category
+descriptors before any page that references their stable IDs:
 
 - Home, Advanced, and Presets pages under the General category;
-- one settings page for every menu-visible registered feature, including inactive features;
+- one settings page for every menu-visible registered feature, including inactive features under
+  Unloaded;
 - the managed Performance Overlay page;
 - the Clear Shader Cache action;
 - frame and page-activity observers;
@@ -32,11 +37,24 @@ diagnostic hotkey path.
 
 Startup loading is edited only in Advanced with positive checked-to-load controls. Home reports
 startup results; feature pages retain live effect controls and actionable failure/restart notices.
-The client explicitly requests the lighting icon, and General resolves to the host's gear icon.
+General sorts first, live feature categories follow the established feature-category order, then
+Misc, Other, and deterministic custom categories, with Unloaded after live features and Overlay
+last. Distinct custom labels receive distinct stable IDs even when ASCII normalization collides.
+Only categories referenced by pages are registered. The client explicitly requests `cloud-sun`,
+and Lighting requests `sun-horizon` without changing its label or ID. Other categories retain
+host-inferred defaults, including the gear icon for General.
 
-Explorer runs outside the game's USVFS mapping. Folder actions resolve the backing configuration
-or cache identity file through a read-only mapping before launching Explorer. Ordinary file-name
-queries are insufficient because USVFS deliberately rewrites those names to virtual paths.
+Folder actions pass the absolute UTF-8 path of the configuration or cache identity file to
+`Client::OpenExternal` with `DMUI_EXTERNAL_TARGET_VIRTUAL_FILE_PARENT`. The host resolves that
+existing file's physical backing location through MO2/USVFS before opening its containing folder;
+Community Shaders neither resolves the backing path nor launches Explorer itself. Configuration
+actions prefer the User TOML when it exists, otherwise the Default TOML. Cache actions use the
+existing cache identity file and do not guess a future Overwrite destination.
+
+The host supports readable, nonempty loose files. Empty files, directories, archive interiors,
+and unsupported backing namespaces fail explicitly, without opening a guessed or unresolved
+location. Resolution and launch failures surface the DmUI result in a notification and log the
+native Windows error. The service does not promise an unvirtualized child process.
 
 ## Native services
 
@@ -47,6 +65,11 @@ and diagnostics. Texture previews import the feature's same-device single-sample
 owner-scoped handle until the provider changes, the renderer generation changes, the host
 invalidates it, or the page deactivates. Transient host/backend failures retry at a bounded cadence;
 unsupported resources remain suppressed until their source or renderer generation changes.
+
+Project and feature download links use the host's native external-open service with URI targets, so
+successful clicks open the default browser. Host dispatch or launch failures follow the existing
+link-row failure logging path; there is no shell or clipboard fallback. Disabled placeholders remain
+non-actionable.
 
 Performance Overlay placement is stored by Community Shaders in logical coordinates only after
 the host reports an arrangement-completed edge. The host applies content scaling exactly once.
@@ -68,9 +91,11 @@ RenderDoc capture hotkeys additionally require a loaded capture API. IDs use the
 
 ## Tests
 
-`tests/HostIntegrationTests.cpp` exercises forwarding service/version preflight, missing-service
-headless behavior, page catalog ordering and IDs, and independent fullscreen/texture debug-view
-selection. It intentionally builds without the plugin or an ImGui library:
+`tests/HostIntegrationTests.cpp` exercises forwarding service/version preflight, including the
+external-open function/table and virtual-file service requirements, missing-service headless
+behavior, category/page catalog ordering, IDs, references, deduplication and collision handling,
+and independent fullscreen/texture
+debug-view selection. It intentionally builds without the plugin or an ImGui library:
 
 ```bash
 ctest --test-dir build -C Release -R HostIntegration

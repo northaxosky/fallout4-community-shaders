@@ -1,6 +1,7 @@
 #include "Host/HostClient.h"
 
 #include "Feature.h"
+#include "Host/HostClientOptions.h"
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Plugin.h"
@@ -21,23 +22,12 @@
 
 #include <d3d11.h>
 #include <dxgi.h>
-#include <shellapi.h>
 
 namespace cs::host
 {
 	namespace
 	{
 		auto* L = cs::log::Get("cs.host");
-
-		constexpr DMUI_HostServices kRequiredServices =
-			DMUI_HOST_SERVICE_FRAME_CONTROL |
-			DMUI_HOST_SERVICE_EDIT_LIFECYCLE |
-			DMUI_HOST_SERVICE_CONTEXTUAL_HOTKEYS |
-			DMUI_HOST_SERVICE_IMAGE_RESOURCES |
-			DMUI_HOST_SERVICE_MANAGED_OVERLAYS |
-			DMUI_HOST_SERVICE_NOTIFICATIONS |
-			DMUI_HOST_SERVICE_ANNOTATED_PLOTS |
-			DMUI_HOST_SERVICE_DIALOGS;
 
 		FeaturePageInput DescribeFeature(Feature& a_feature)
 		{
@@ -77,11 +67,7 @@ namespace cs::host
 			dmui::kForwardingClient,
 			kClientIconName,
 			{},
-			{
-				.capabilities = DMUI_CLIENT_CAPABILITY_RENDERER_REPLACEMENT,
-				.requiredServices = kRequiredServices,
-				.minimumForwardingVersion = DMUI_FORWARDING_VERSION_1_1
-			})
+			kClientOptions)
 	{}
 
 	HostClient& HostClient::Get()
@@ -153,20 +139,31 @@ namespace cs::host
 		}
 
 		auto catalog = BuildPageCatalog(inputs);
-		_pages.reserve(catalog.size());
-		for (auto descriptor : catalog) {
+		for (const auto& category : catalog.categories) {
+			if (!_client.AddCategory({
+					.id = category.id.c_str(),
+					.displayName = category.displayName.c_str(),
+					.sortKey = category.sortKey,
+					.iconName = category.iconName.c_str() })) {
+				LogFailure("register category");
+				return false;
+			}
+		}
+
+		_pages.reserve(catalog.pages.size());
+		for (auto descriptor : catalog.pages) {
 			auto page = std::make_unique<Page>();
 			page->feature = descriptor.kind == HostPageKind::kFeature ?
 				features[descriptor.featureIndex] :
 				nullptr;
 			page->descriptor = std::move(descriptor);
 			const dmui::PageDescriptor pageDescriptor{
-				page->descriptor.id.c_str(),
-				page->descriptor.displayName.c_str(),
-				page->descriptor.category.c_str(),
-				page->descriptor.summary.c_str(),
-				page->descriptor.sortKey,
-				page->descriptor.kind == HostPageKind::kOverlay ?
+				.id = page->descriptor.id.c_str(),
+				.displayName = page->descriptor.displayName.c_str(),
+				.categoryId = page->descriptor.categoryId.c_str(),
+				.summary = page->descriptor.summary.c_str(),
+				.sortKey = page->descriptor.sortKey,
+				.kind = page->descriptor.kind == HostPageKind::kOverlay ?
 					DMUI_PAGE_KIND_OVERLAY :
 					DMUI_PAGE_KIND_SETTINGS
 			};
@@ -531,11 +528,12 @@ namespace cs::host
 				if (modLink && !modLink->empty()) {
 					const std::array links{
 						dmui::Link{
-							"Open feature mod page",
-							modLink->c_str(),
-							"Copies the feature download URL.",
-							0,
-							true }
+							.label = "Open feature mod page",
+							.external = {
+								.targetKind = DMUI_EXTERNAL_TARGET_URI,
+								.target = modLink->c_str() },
+							.note = "Opens the feature download page in your default browser.",
+							.action = dmui::LinkAction::kOpenExternal }
 					};
 					if (!_client.DrawLinkRow("feature-mod-link", links))
 						LogFailure("draw feature mod link");
