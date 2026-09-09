@@ -432,6 +432,33 @@ namespace cs::render::temporal
 		std::uint32_t slot = 0;
 	};
 
+	struct PreUiHandoffPlan
+	{
+		bool captureFrameGenerationInputs = false;
+		bool driveSuperResolution = false;
+
+		[[nodiscard]] bool ShouldCaptureHudlessColor(
+			bool a_superResolutionResolved) const noexcept
+		{
+			return captureFrameGenerationInputs &&
+				(!driveSuperResolution || a_superResolutionResolved);
+		}
+	};
+
+	[[nodiscard]] constexpr PreUiHandoffPlan PlanPreUiHandoff(
+		bool a_fullEffectsPath,
+		bool a_frameGenerationEnabled,
+		bool a_superResolutionDriving) noexcept
+	{
+		if (!a_fullEffectsPath) {
+			return {};
+		}
+		return {
+			.captureFrameGenerationInputs = a_frameGenerationEnabled,
+			.driveSuperResolution = a_superResolutionDriving
+		};
+	}
+
 	class FrameTransaction
 	{
 	public:
@@ -561,6 +588,24 @@ namespace cs::render::temporal
 		[[nodiscard]] SceneResolution Resolution() const noexcept { return _sceneResolution; }
 		[[nodiscard]] bool Published() const noexcept { return _published; }
 		[[nodiscard]] bool FrameGenerationPrepared() const noexcept { return _frameGenerationPrepared; }
+		[[nodiscard]] bool HasRecentFrameGenerationWork(
+			std::uint64_t a_currentRealFrame,
+			std::optional<std::uint64_t> a_currentEngineFrame) const noexcept
+		{
+			if (!_frameGenerationPrepared ||
+				_identity.realFrame > a_currentRealFrame ||
+				!a_currentEngineFrame ||
+				_identity.engineFrame > *a_currentEngineFrame) {
+				return false;
+			}
+			// Composite telemetry runs before this frame's pre-UI capture and Present.
+			if (*a_currentEngineFrame - _identity.engineFrame > 1) {
+				return false;
+			}
+			return _phase == FramePhase::kPresentPrepared ||
+				_phase == FramePhase::kPresentAccepted ||
+				_phase == FramePhase::kRetired;
+		}
 		[[nodiscard]] std::uint32_t PresentAttempts() const noexcept { return _presentAttempts; }
 		[[nodiscard]] std::string_view Failure() const noexcept { return _failure; }
 
@@ -587,6 +632,19 @@ namespace cs::render::temporal
 		std::uint32_t _presentAttempts = 0;
 		std::string_view _failure;
 	};
+
+	[[nodiscard]] inline bool IsFrameGenerationActive(
+		bool a_configured,
+		bool a_effective,
+		bool a_ready,
+		std::uint64_t a_currentRealFrame,
+		std::optional<std::uint64_t> a_currentEngineFrame,
+		const FrameTransaction& a_frame) noexcept
+	{
+		return a_configured && a_effective && a_ready &&
+			a_frame.HasRecentFrameGenerationWork(
+				a_currentRealFrame, a_currentEngineFrame);
+	}
 
 	class ResetEpochs
 	{

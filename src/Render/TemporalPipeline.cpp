@@ -1344,11 +1344,33 @@ namespace cs::render
 			? static_cast<std::int64_t>(state->frameCount) -
 				static_cast<std::int64_t>(camera.frameCount)
 			: 0;
-		const auto effective = GetEffectiveConfiguration();
+		bool ready = false;
+		bool active = false;
+		{
+			std::scoped_lock lock(_impl->mutex);
+			const auto& configuration = _impl->topology.Effective();
+			const bool configured =
+				configuration.frameGeneration !=
+					temporal::FrameGenerationMethod::kOff;
+			const bool effective =
+				configuration.frameGenerationEnabled &&
+				_impl->frameGenerationEnabled.load(
+					std::memory_order_acquire);
+			ready = _impl->swapChain.IsFrameGenerationReady();
+			const auto& frame =
+				_impl->frames[_impl->currentFrameSlot];
+			active = temporal::IsFrameGenerationActive(
+				configured,
+				effective,
+				ready,
+				_impl->latency.Frame(),
+				state ? std::optional<std::uint64_t>{ state->frameCount }
+					  : std::nullopt,
+				frame);
+		}
 		return {
-			.ready = _impl->swapChain.IsFrameGenerationReady(),
-			.active = _impl->swapChain.IsFrameGenerationReady() &&
-				effective.frameGenerationEnabled,
+			.ready = ready,
+			.active = active,
 			.inputsCaptured =
 				_impl->inputsCaptured.load(std::memory_order_relaxed),
 			.hudlessPending =

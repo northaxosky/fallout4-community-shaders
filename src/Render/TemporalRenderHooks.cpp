@@ -299,10 +299,18 @@ namespace cs::render
 				return;
 			}
 			upscaling->_resolveSeamSeen.store(true, std::memory_order_release);
-			if (upscaling->IsFrameGenerationDx12PathActive()) {
+			const auto handoff = temporal::PlanPreUiHandoff(
+				upscaling->_renderUiFullEffectsPath.load(
+					std::memory_order_acquire),
+				upscaling->ShouldUseFrameGenerationThisFrame(),
+				upscaling->IsDrivingFrameState());
+			if (handoff.captureFrameGenerationInputs) {
 				upscaling->CaptureFrameGenerationInputs();
 			}
-			if (!upscaling->IsDrivingFrameState()) {
+			if (!handoff.driveSuperResolution) {
+				if (handoff.ShouldCaptureHudlessColor(true)) {
+					upscaling->CaptureHUDLessColor();
+				}
 				return;
 			}
 
@@ -331,7 +339,9 @@ namespace cs::render
 			}
 			// A false result means both the provider and explicit spatial recovery failed.
 
-			upscaling->CaptureHUDLessColor();
+			if (handoff.ShouldCaptureHudlessColor(upscaled)) {
+				upscaling->CaptureHUDLessColor();
+			}
 
 			SetTemporalEnabled(upscaleMethod == UpscaleMethod::kTAA);
 		});

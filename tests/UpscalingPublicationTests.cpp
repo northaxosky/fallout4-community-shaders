@@ -560,6 +560,17 @@ int main(int argc, char** argv)
 		taaStart != std::string::npos && taaEnd != std::string::npos
 		? std::string_view(upscalingSource).substr(taaStart, taaEnd - taaStart)
 		: std::string_view{};
+	const auto handoffStart =
+		upscalingSource.find("void TemporalRenderer::DrawWorldRenderUI_Resolve::thunk(");
+	const auto handoffEnd =
+		upscalingSource.find(
+			"void TemporalRenderer::DrawWorldRenderUI_RenderEffectRange::thunk(",
+			handoffStart);
+	const auto handoffBlock =
+		handoffStart != std::string::npos && handoffEnd != std::string::npos
+		? std::string_view(upscalingSource).substr(
+			  handoffStart, handoffEnd - handoffStart)
+		: std::string_view{};
 	ok &= Check(
 		publishBlock.contains("IsExternalUpscaler(method)") &&
 			publishBlock.contains("SetDynamicResolution(") &&
@@ -594,6 +605,14 @@ int main(int argc, char** argv)
 			wrapperBlock.find("TakesFullEffectsPath()") <
 				wrapperBlock.find("func(a_this);"),
 		"the live Render_UI wrapper recovers frames that bypass the +0xC5 resolve seam");
+	ok &= Check(
+		handoffBlock.contains("PlanPreUiHandoff(") &&
+			handoffBlock.find("CaptureFrameGenerationInputs();") <
+				handoffBlock.find("if (!handoff.driveSuperResolution)") &&
+			handoffBlock.contains(
+				"if (handoff.ShouldCaptureHudlessColor(true))") &&
+			handoffBlock.contains("ShouldCaptureHudlessColor(upscaled)"),
+		"the pre-UI seam hands FG-only native color around the SR ownership gate");
 	ok &= Check(
 		TestSpatialFallback(device.get(), context.get(), argv[2], argv[3]),
 		"spatial recovery sampled stale pixels outside the committed render subrect");

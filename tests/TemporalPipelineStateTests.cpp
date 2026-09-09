@@ -468,6 +468,146 @@ namespace
 		Check(frame.Phase() == FramePhase::kRetired, "frame reaches retired state");
 	}
 
+	void TestPreUiHandoffPlanning()
+	{
+		using namespace cs::render::temporal;
+
+		const auto fgOnly = PlanPreUiHandoff(true, true, false);
+		Check(
+			fgOnly.captureFrameGenerationInputs,
+			"FG-only captures depth and motion at the pre-UI seam");
+		Check(
+			!fgOnly.driveSuperResolution,
+			"FG-only does not enter SR-owned resolve state");
+		Check(
+			fgOnly.ShouldCaptureHudlessColor(false),
+			"FG-only captures native pre-UI color without an SR publication");
+
+		const auto srOnly = PlanPreUiHandoff(true, false, true);
+		Check(
+			!srOnly.captureFrameGenerationInputs,
+			"SR-only does not capture frame-generation inputs");
+		Check(
+			srOnly.driveSuperResolution,
+			"SR-only retains resolve, jitter, ratio, and TAA ownership");
+		Check(
+			!srOnly.ShouldCaptureHudlessColor(true),
+			"SR-only does not publish an FG input packet");
+
+		const auto combined = PlanPreUiHandoff(true, true, true);
+		Check(
+			combined.captureFrameGenerationInputs &&
+				combined.driveSuperResolution,
+			"combined SR and FG retain both sides of the handoff");
+		Check(
+			combined.ShouldCaptureHudlessColor(true),
+			"combined SR and FG capture the successfully published pre-UI color");
+		Check(
+			!combined.ShouldCaptureHudlessColor(false),
+			"failed SR publication cannot become an FG input packet");
+
+		const auto inactive = PlanPreUiHandoff(true, false, false);
+		Check(
+			!inactive.captureFrameGenerationInputs &&
+				!inactive.driveSuperResolution,
+			"native and disabled temporal modes do no handoff work");
+		const auto gammaOnly = PlanPreUiHandoff(false, true, true);
+		Check(
+			!gammaOnly.captureFrameGenerationInputs &&
+				!gammaOnly.driveSuperResolution,
+			"an unexpected Gamma-only seam cannot publish incomplete inputs");
+	}
+
+	void TestFrameGenerationActivity()
+	{
+		using namespace cs::render::temporal;
+
+		FrameTransaction frame;
+		Check(
+			!IsFrameGenerationActive(true, true, true, 20, 200, frame),
+			"ready configuration is not active before frame work");
+		Check(frame.Begin({ .realFrame = 20, .engineFrame = 200 }), "activity frame begins");
+		Check(frame.Plan({ 1920, 1080 }, { 1920, 1080 }), "activity frame plans");
+		Check(frame.CommitRenderState({ 1920, 1080 }), "activity frame commits");
+		Check(frame.CaptureWorld(true), "activity frame captures");
+		Check(frame.ResolveScene(SceneResolution::kNativeCompleted), "activity frame resolves");
+		Check(frame.CapturePreUi(), "activity frame captures pre-UI color");
+		Check(frame.CaptureFinal(), "activity frame captures final color");
+		Check(frame.PreparePresent(true), "activity frame prepares FG");
+		Check(
+			IsFrameGenerationActive(true, true, true, 20, 200, frame),
+			"valid prepared FG work is active without a generated-frame counter");
+		Check(
+			!IsFrameGenerationActive(false, true, true, 20, 200, frame) &&
+				!IsFrameGenerationActive(true, false, true, 20, 200, frame) &&
+				!IsFrameGenerationActive(true, true, false, 20, 200, frame),
+			"configured, effective, and ready remain independent activity gates");
+		Check(
+			IsFrameGenerationActive(true, true, true, 21, 201, frame) &&
+				IsFrameGenerationActive(true, true, true, 25, 201, frame),
+			"pre-UI telemetry observes the preceding engine frame despite intervening main-loop ticks");
+		Check(
+			!IsFrameGenerationActive(true, true, true, 21, 202, frame) &&
+				!IsFrameGenerationActive(true, true, true, 19, 200, frame) &&
+				!IsFrameGenerationActive(true, true, true, 20, 199, frame) &&
+				!IsFrameGenerationActive(
+					true, true, true, 20, std::nullopt, frame),
+			"stale, future, or unavailable frame identities are inactive");
+		Check(frame.PresentAttempt(false, true, false), "activity Present succeeds");
+		Check(frame.Retire(), "activity frame retires");
+		Check(
+			IsFrameGenerationActive(true, true, true, 20, 200, frame),
+			"accepted FG work remains observable through its frame boundary");
+
+		TopologyState topology;
+		RequestedTopology requested;
+		requested.frameGenerationEligible = true;
+		requested.frameGeneration = FrameGenerationMethod::kXeSS;
+		Check(topology.Freeze(requested), "activity topology freezes");
+		SessionTopology session;
+		session.valid = true;
+		session.proxyInstalled = true;
+		session.admittedFg = FrameGenerationMethod::kXeSS;
+		Check(topology.Admit(session), "activity topology admits");
+		topology.SubmitLive(
+			false, SuperResolutionMethod::kNone, 1,
+			true, FrameGenerationMethod::kOff, 1);
+		const auto& effective = topology.Effective();
+		Check(
+			topology.Pending().required &&
+				IsFrameGenerationActive(
+					effective.frameGeneration != FrameGenerationMethod::kOff,
+					effective.frameGenerationEnabled, true, 20, 200, frame),
+			"a pending Off selection does not hide work by the effective FG provider");
+
+		FrameTransaction disabled;
+		Check(disabled.Begin({ .realFrame = 30 }), "disabled frame begins");
+		Check(disabled.Plan({ 1920, 1080 }, { 1920, 1080 }), "disabled frame plans");
+		Check(disabled.CommitRenderState({ 1920, 1080 }), "disabled frame commits");
+		Check(disabled.CaptureWorld(true), "disabled frame captures");
+		Check(disabled.ResolveScene(SceneResolution::kNativeCompleted), "disabled frame resolves");
+		Check(disabled.CapturePreUi(), "disabled frame captures pre-UI color");
+		Check(disabled.CaptureFinal(), "disabled frame captures final color");
+		Check(disabled.PreparePresent(false), "disabled frame prepares real-frame presentation");
+		Check(
+			!IsFrameGenerationActive(true, true, true, 30, 0, disabled),
+			"a present prepared without FG work is not active");
+
+		FrameTransaction failed;
+		Check(failed.Begin({ .realFrame = 31 }), "failed frame begins");
+		Check(failed.Plan({ 1920, 1080 }, { 1920, 1080 }), "failed frame plans");
+		Check(failed.CommitRenderState({ 1920, 1080 }), "failed frame commits");
+		Check(failed.CaptureWorld(true), "failed frame captures");
+		Check(failed.ResolveScene(SceneResolution::kNativeCompleted), "failed frame resolves");
+		Check(failed.CapturePreUi(), "failed frame captures pre-UI color");
+		Check(failed.CaptureFinal(), "failed frame captures final color");
+		Check(failed.PreparePresent(true), "failed frame prepares FG");
+		Check(!failed.PresentAttempt(false, false, false), "failed Present marks the frame failed");
+		Check(
+			!IsFrameGenerationActive(true, true, true, 31, 0, failed),
+			"failed prepared FG work is not active");
+	}
+
 	void TestOnceOnlyAndImmutableExtent()
 	{
 		using namespace cs::render::temporal;
@@ -856,6 +996,8 @@ int main()
 	TestSelectedStartupInitialization();
 	TestObservedColorContract();
 	TestFramePhasesAndRetries();
+	TestPreUiHandoffPlanning();
+	TestFrameGenerationActivity();
 	TestOnceOnlyAndImmutableExtent();
 	TestPresentTestDoesNotConsumePacket();
 	TestIndependentFrameSlots();
