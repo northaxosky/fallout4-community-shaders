@@ -469,54 +469,51 @@ namespace cs::features
 
 	void InverseSquareLighting::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		ImGui::TextDisabled(
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		dmui::ui::TextDisabled(
 			"Off preserves the exact stock attenuation curve.");
 		const float strengthMin = isl::kStrengthMin;
 		const float strengthMax = isl::kStrengthMax;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Exterior strength",
-			ImGuiDataType_Float,
 			&_settings.exteriorStrength,
 			&strengthMin,
 			&strengthMax,
 			"%.2f");
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"1.0 matches upstream's full effect; lower values blend "
 				"exterior punctual lights toward vanilla.");
 		}
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Interior strength",
-			ImGuiDataType_Float,
 			&_settings.interiorStrength,
 			&strengthMin,
 			&strengthMax,
 			"%.2f");
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"1.0 matches upstream's full effect; it remains a starting "
 				"point pending extended interior playtesting.");
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Lower values damp interior punctual lights if authored "
 				"lighting reads too hot.");
 		}
 		const float nearFieldMin = isl::kNearFieldDistanceMin;
 		const float nearFieldMax = isl::kNearFieldDistanceMax;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Near-field distance (game units)",
-			ImGuiDataType_Float,
 			&_settings.nearFieldDistance,
 			&nearFieldMin,
 			&nearFieldMax,
 			"%.1f",
-			ImGuiSliderFlags_Logarithmic);
-		ImGui::TextDisabled(
+			dmui::ui::SliderFlags::kLogarithmic);
+		dmui::ui::TextDisabled(
 			"Matches upstream's default size sqrt(2); peak attenuation is 1.0.");
 		if (changed) {
 			_settings = isl::Clamp(_settings);
@@ -527,7 +524,7 @@ namespace cs::features
 		const bool operational =
 			_injectionsOperational.load(std::memory_order_relaxed);
 		if (operational) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Current location: %s | active strength: %.2f",
 				_inInterior.load(std::memory_order_relaxed) ?
 					"interior" :
@@ -535,7 +532,7 @@ namespace cs::features
 				_activeStrength.load(std::memory_order_relaxed));
 		} else {
 			const auto detail = GetValidationDetail();
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Inactive: %s",
 				detail.empty() ?
 					"shader delivery path unavailable" :

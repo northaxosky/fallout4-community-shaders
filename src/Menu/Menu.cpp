@@ -317,9 +317,9 @@ namespace cs
 			"Debug visualization");
 		if (selection.changed)
 			SetDebugViewSelection(a_feature, *selection.selected);
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Fullscreen views are exclusive. Texture previews are independent.");
 		}
@@ -334,7 +334,7 @@ namespace cs
 		if (selected == views.end())
 			return;
 		if (selected->kind == FeatureDebugViewKind::kFullscreen) {
-			ImGui::TextWrapped(
+			dmui::ui::TextWrapped(
 				"Fullscreen visualization: shown over the game scene, not in an image pane. "
 				"Close the menu to inspect it.");
 			return;
@@ -344,7 +344,7 @@ namespace cs
 
 		const auto texture = selected->textureProvider(a_feature);
 		if (!texture.texture || texture.width == 0 || texture.height == 0) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"%.*s",
 				static_cast<int>(texture.unavailableText.size()),
 				texture.unavailableText.data());
@@ -352,7 +352,7 @@ namespace cs
 			return;
 		}
 		if (!texture.caption.empty())
-			ImGui::TextDisabled("%s", texture.caption.c_str());
+			dmui::ui::TextDisabled("%s", texture.caption.c_str());
 
 		auto& cached = _debugImages[std::string(a_feature.GetName())];
 		const bool generationChanged =
@@ -366,7 +366,7 @@ namespace cs
 		bool querySucceeded = true;
 		if (cached.image.Handle() && !sourceChanged) {
 			if (_hostFrameSerial < cached.retryAfterFrame) {
-				ImGui::TextDisabled("The host image service is temporarily unavailable.");
+				dmui::ui::TextDisabled("The host image service is temporarily unavailable.");
 				return;
 			}
 			imageInfo = a_client.QueryImage(cached.image.Handle());
@@ -423,7 +423,7 @@ namespace cs
 						static_cast<unsigned>(descriptor.ViewDimension));
 					cached.loggedFailure = result;
 				}
-				ImGui::TextDisabled(
+				dmui::ui::TextDisabled(
 					"Image import failed: %s (code %u). See the cs.menu log.",
 					DMUI_ResultToString(cached.importResult),
 					cached.importResult);
@@ -436,7 +436,7 @@ namespace cs
 			cached.image = std::move(*imported);
 		}
 		if (cached.importFailure != host::ImageImportFailure::kNone) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Image import failed: %s (code %u). See the cs.menu log.",
 				DMUI_ResultToString(cached.importResult),
 				cached.importResult);
@@ -445,7 +445,7 @@ namespace cs
 
 		const DMUI_ImageDrawOptions options{
 			DMUI_IMAGE_DRAW_OPTIONS_0_1_SIZE,
-			{ (std::max)(1.0f, ImGui::GetContentRegionAvail().x), 0.0f },
+			{ (std::max)(1.0f, dmui::ui::GetContentRegionAvail().x), 0.0f },
 			{ 0.0f, 0.0f },
 			{ 1.0f, 1.0f },
 			{ 1.0f, 1.0f, 1.0f, 1.0f },
@@ -470,7 +470,7 @@ namespace cs
 					{ .fontRole = DMUI_FONT_ROLE_TITLE }),
 				"draw home title"))
 			return;
-		ImGui::TextWrapped(
+		dmui::ui::TextWrapped(
 			"Modern rendering features for Fallout 4. Features ship disabled; "
 			"choose which features to load in Advanced, then restart. "
 			"Use Enabled on each loaded feature's page to toggle its effect live.");
@@ -483,7 +483,7 @@ namespace cs
 			installed += feature->IsInstalled() ? 1u : 0u;
 			active += feature->IsActive() ? 1u : 0u;
 		}
-		ImGui::Text(
+		dmui::ui::Text(
 			"Features installed: %zu of %zu (%zu loaded)",
 			installed,
 			FeatureManager::Get().GetRegisteredFeatures().size(),
@@ -545,7 +545,7 @@ namespace cs
 				a_client.DrawSectionHeader("Feature status"),
 				"draw feature status section"))
 			return;
-		ImGui::TextWrapped(
+		dmui::ui::TextWrapped(
 			"Loaded means the feature was loaded at startup. "
 			"Its Enabled setting controls whether the effect is currently applied.");
 		dmui::SettingsTableScope table{ a_client, "home-feature-status" };
@@ -693,7 +693,7 @@ namespace cs
 					if (row.Visible()) {
 						auto enabled = target.enabled;
 						const dmui::DisabledScope disabled;
-						(void)ImGui::Checkbox("##enabled", &enabled);
+						(void)dmui::ui::Checkbox("##enabled", &enabled);
 					}
 					if (!row.End()) {
 						CheckHostResult(a_client, false, "end shader ownership target row");
@@ -781,7 +781,7 @@ namespace cs
 					CheckHostResult(a_client, false, "begin open shader cache row");
 					return;
 				}
-				if (open.Visible() && ImGui::Button("Open")) {
+				if (open.Visible() && dmui::ui::Button("Open")) {
 					const auto identity = cacheRoot / shader_cache::kIdentityFileName;
 					std::error_code error;
 					if (!std::filesystem::exists(identity, error) && !error) {
@@ -826,7 +826,7 @@ namespace cs
 					CheckHostResult(a_client, false, "begin configuration folder row");
 					return;
 				}
-				if (folder.Visible() && ImGui::Button("Open")) {
+				if (folder.Visible() && dmui::ui::Button("Open")) {
 					std::error_code error;
 					const bool userExists = std::filesystem::exists(
 						feature_config::kUserConfigPath, error);
@@ -857,7 +857,7 @@ namespace cs
 				"draw boot settings section"))
 			return;
 		{
-			ImGui::TextWrapped(
+			dmui::ui::TextWrapped(
 				"Checked features load when the game starts. Changes require a restart. "
 				"Use Enabled on a feature's page to switch its effect on or off now.");
 			dmui::SettingsTableScope table{ a_client, "advanced-startup-loading" };
@@ -894,7 +894,7 @@ namespace cs
 						return;
 					}
 					if (row.Visible() &&
-						ImGui::Checkbox("##load", &loadAtBoot)) {
+						dmui::ui::Checkbox("##load", &loadAtBoot)) {
 						const auto result = feature_config::UpdateFeatureLoad(
 							feature->GetConfigKey(), loadAtBoot);
 						if (!result) {
@@ -908,7 +908,7 @@ namespace cs
 					}
 					if (row.Visible() &&
 						_startupLoads.RequiresRestart(feature->GetConfigKey(), loadAtBoot)) {
-						ImGui::SameLine();
+						dmui::ui::SameLine();
 						if (!CheckHostResult(
 								a_client,
 								dmui::DrawStyledText(
@@ -1061,7 +1061,7 @@ namespace cs
 					}
 					if (enabledRow.Visible()) {
 						bool enabled = telemetry::pump::Enabled();
-						if (ImGui::Checkbox("##enabled", &enabled)) {
+						if (dmui::ui::Checkbox("##enabled", &enabled)) {
 							telemetry::pump::SetEnabled(enabled);
 							(void)log::SaveConfigToToml();
 						}
@@ -1080,7 +1080,7 @@ namespace cs
 					CheckHostResult(a_client, false, "begin telemetry dump row");
 					return;
 				}
-				if (dump.Visible() && ImGui::Button("Dump"))
+				if (dump.Visible() && dmui::ui::Button("Dump"))
 					telemetry::pump::RequestDump();
 				if (!dump.End()) {
 					CheckHostResult(a_client, false, "end telemetry dump row");
@@ -1270,7 +1270,7 @@ namespace cs
 		}
 		{
 			const dmui::DisabledScope disabled{ !pending };
-			if (ImGui::Button("Load") && pending) {
+			if (dmui::ui::Button("Load") && pending) {
 				std::string error;
 				if (!presets.Apply(*pending, error))
 					presets.lastError = "Load failed: " + error;
@@ -1279,10 +1279,10 @@ namespace cs
 			}
 		}
 
-		ImGui::SameLine();
+		dmui::ui::SameLine();
 		{
 			const dmui::DisabledScope disabled{ !active || active->builtin };
-			if (ImGui::Button("Save") && active && !active->builtin) {
+			if (dmui::ui::Button("Save") && active && !active->builtin) {
 				const auto identity = active->identity;
 				const auto name = active->name;
 				const auto path = active->path;
@@ -1300,8 +1300,8 @@ namespace cs
 			}
 		}
 
-		ImGui::SameLine();
-		if (ImGui::Button("Save As...") &&
+		dmui::ui::SameLine();
+		if (dmui::ui::Button("Save As...") &&
 			_dialog.operation == DialogOperation::kNone) {
 			const DMUI_DialogDescriptor descriptor{
 				DMUI_DIALOG_DESCRIPTOR_0_1_SIZE,
@@ -1317,10 +1317,10 @@ namespace cs
 			StartDialog(a_client, DialogOperation::kSavePresetAs, descriptor);
 		}
 
-		ImGui::SameLine();
+		dmui::ui::SameLine();
 		{
 			const dmui::DisabledScope disabled{ !active || active->builtin };
-			if (ImGui::Button("Delete") && active && !active->builtin &&
+			if (dmui::ui::Button("Delete") && active && !active->builtin &&
 				_dialog.operation == DialogOperation::kNone) {
 				_dialog.presetIdentity = active->identity;
 				_dialog.presetName = active->name;
@@ -1343,8 +1343,8 @@ namespace cs
 			}
 		}
 
-		ImGui::SameLine();
-		if (ImGui::Button("Refresh")) {
+		dmui::ui::SameLine();
+		if (dmui::ui::Button("Refresh")) {
 			presets.Refresh();
 			if (!presets.FindByIdentity(presets.pendingComboIdentity))
 				presets.pendingComboIdentity.clear();
@@ -1366,7 +1366,7 @@ namespace cs
 				return;
 			}
 			if (row.Visible() &&
-				ImGui::Checkbox("##auto-load", &presets.autoLoadOnBoot))
+				dmui::ui::Checkbox("##auto-load", &presets.autoLoadOnBoot))
 				(void)presets.SaveCoreConfig();
 			if (!row.End()) {
 				CheckHostResult(a_client, false, "end preset auto-load row");

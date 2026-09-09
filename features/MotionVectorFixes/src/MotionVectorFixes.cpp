@@ -205,8 +205,8 @@ namespace cs::features
 
 	void MotionVectorFixes::DrawSettings()
 	{
-		ImGui::TextUnformatted("Active. No user-tunable options.");
-		ImGui::TextDisabled("Corrects player, animated-object, frozen/menu, and LOD previous transforms.");
+		dmui::ui::TextUnformatted("Active. No user-tunable options.");
+		dmui::ui::TextDisabled("Corrects player, animated-object, frozen/menu, and LOD previous transforms.");
 	}
 
 	void MotionVectorFixes::CollectTelemetry(cs::telemetry::Sink& a_sink) const

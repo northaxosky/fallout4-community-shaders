@@ -578,25 +578,25 @@ namespace cs::features
 
 	void WaterEffects::DrawSettings()
 	{
-		if (ImGui::Checkbox("Enabled", &_settings.enabled)) {
+		if (dmui::ui::Checkbox("Enabled", &_settings.enabled)) {
 			_settings = we::Clamp(_settings);
 			PublishSettings();
 			SaveSettings();
 		}
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Upstream ships no caustics tunables; every constant is fixed.");
 
 		if (_injectionsOperational.load(std::memory_order_relaxed)) {
 			if (_hasWater.load(std::memory_order_relaxed)) {
-				ImGui::TextDisabled(
+				dmui::ui::TextDisabled(
 					"Cell water plane: z = %.1f",
 					_waterHeight.load(std::memory_order_relaxed));
 			} else {
-				ImGui::TextDisabled("Current cell has no water plane.");
+				dmui::ui::TextDisabled("Current cell has no water plane.");
 			}
 		} else {
 			const auto detail = GetValidationDetail();
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Inactive: %s",
 				detail.empty() ?
 					"shader delivery path unavailable" :
@@ -604,9 +604,9 @@ namespace cs::features
 		}
 
 		Menu::Get().DrawDebugViewSelector(*this);
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Debug views fetch the caustics texture manually because the "
 				"composite has no free sampler slot, so they do not reproduce "

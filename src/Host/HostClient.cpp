@@ -55,7 +55,6 @@ namespace cs::host
 			"dearmodding.community-shaders",
 			"Community Shaders",
 			{ Plugin::VERSION[0], Plugin::VERSION[1] },
-			dmui::kForwardingClient,
 			kClientIconName,
 			{},
 			kClientOptions)

@@ -3135,7 +3135,7 @@ namespace cs::features
 
 	void Upscaling::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
+		bool changed = dmui::ui::Checkbox("Enabled", &settings.enabled);
 
 		static const std::array methodOptions{
 			dmui::ChoiceOption<int>{ 0, "None", "none" },
@@ -3164,7 +3164,7 @@ namespace cs::features
 			changed = true;
 		}
 		if (!streamline.featureDLSS) {
-			ImGui::TextDisabled("DLSS is unavailable on this adapter; the no-DLSS selection is used.");
+			dmui::ui::TextDisabled("DLSS is unavailable on this adapter; the no-DLSS selection is used.");
 		}
 
 		static const std::array qualityOptions{
@@ -3191,34 +3191,32 @@ namespace cs::features
 
 		const float sharpnessMin = 0.0f;
 		const float sharpnessMax = 1.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"FSR sharpness",
-			ImGuiDataType_Float,
 			&settings.sharpnessFSR,
 			&sharpnessMin,
 			&sharpnessMax);
-		changed |= ImGui::Checkbox("DLSS sharpening", &settings.sharpnessEnabledDLSS);
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::Checkbox("DLSS sharpening", &settings.sharpnessEnabledDLSS);
+		changed |= dmui::ui::SliderScalar(
 			"DLSS sharpness",
-			ImGuiDataType_Float,
 			&settings.sharpnessDLSS,
 			&sharpnessMin,
 			&sharpnessMax);
 
 		bool frameGenerationEnabled = settings.frameGenerationMode != 0;
-		if (ImGui::Checkbox("FSR 3 frame generation", &frameGenerationEnabled)) {
+		if (dmui::ui::Checkbox("FSR 3 frame generation", &frameGenerationEnabled)) {
 			settings.frameGenerationMode = frameGenerationEnabled ? 1u : 0u;
 			changed = true;
 		}
 		bool forceFrameGeneration = settings.frameGenerationForceEnable != 0;
-		if (ImGui::Checkbox("Force frame generation below 120 Hz", &forceFrameGeneration)) {
+		if (dmui::ui::Checkbox("Force frame generation below 120 Hz", &forceFrameGeneration)) {
 			settings.frameGenerationForceEnable = forceFrameGeneration ? 1u : 0u;
 			changed = true;
 		}
-		changed |= ImGui::Checkbox(
+		changed |= dmui::ui::Checkbox(
 			"Allow frame generation in menus",
 			&settings.frameGenerationAllowInMenus);
-		ImGui::TextDisabled("Frame generation requires windowed or borderless SDR output.");
+		dmui::ui::TextDisabled("Frame generation requires windowed or borderless SDR output.");
 
 		static const std::array presetOptions{
 			dmui::ChoiceOption<int>{ 0, "Default", "default" },
@@ -3259,7 +3257,7 @@ namespace cs::features
 			SaveSettings();
 		}
 
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Render scale: %.0f%% | resources: %s",
 			static_cast<double>(resolutionScale.x) * 100.0,
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");

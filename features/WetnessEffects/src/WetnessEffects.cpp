@@ -404,28 +404,26 @@ namespace cs::features
 
 	void WetnessEffects::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		ImGui::TextDisabled("Off publishes zero wetness, which is shader identity.");
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		dmui::ui::TextDisabled("Off publishes zero wetness, which is shader identity.");
 		const float maxRainWetnessMin = wetness_math::kMaxRainWetnessMin;
 		const float maxRainWetnessMax = wetness_math::kMaxRainWetnessMax;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Max rain wetness",
-			ImGuiDataType_Float,
 			&_settings.maxRainWetness,
 			&maxRainWetnessMin,
 			&maxRainWetnessMax,
 			"%.2f");
-		ImGui::TextDisabled("Wetness of surfaces facing straight up.");
+		dmui::ui::TextDisabled("Wetness of surfaces facing straight up.");
 		const float minRainWetnessMin = wetness_math::kMinRainWetnessMin;
 		const float minRainWetnessMax = wetness_math::kMinRainWetnessMax;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Min rain wetness",
-			ImGuiDataType_Float,
 			&_settings.minRainWetness,
 			&minRainWetnessMin,
 			&minRainWetnessMax,
 			"%.2f");
-		ImGui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
+		dmui::ui::TextDisabled("Wetness floor for surfaces facing away from the sky.");
 		if (changed) {
 			_settings = wetness_math::Clamp(_settings);
 			SaveSettings();
@@ -433,16 +431,16 @@ namespace cs::features
 
 		const bool operational = _injectionsOperational.load(std::memory_order_relaxed);
 		if (operational && _settings.enabled) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Weather wetness: %.2f | exterior: %s",
 				_weatherWetness.load(std::memory_order_relaxed),
 				_isExterior.load(std::memory_order_relaxed) ? "yes" : "no");
 		} else if (operational) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Disabled: publishing zero wetness (weather wetness %.2f).",
 				_weatherWetness.load(std::memory_order_relaxed));
 		} else {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Inactive: %s",
 				_validationDetail.empty() ?
 					"shader delivery path unavailable" :

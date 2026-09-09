@@ -145,8 +145,7 @@ navigation, rendering backend, fonts, theme, input, hotkey editor, dialogs, noti
 overlay placement.
 
 Community Shaders does not compile or link Dear ImGui and never creates or shares an ImGui context.
-Forwarding avoids shared ImGui layouts, but the official client still verifies the generated
-ImGui forwarding binary version and the required forwarding surface. If the host is
+The official client negotiates the DearModdingUI host ABI and required stable UI table prefix. If the host is
 missing, disabled, incompatible, or cannot provide every required native service, Community
 Shaders continues running its shader features, presets, TOML configuration, telemetry, and
 fullscreen debug selection headless. It deliberately provides no fallback menu, overlay,

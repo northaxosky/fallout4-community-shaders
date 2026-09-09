@@ -1456,8 +1456,8 @@ namespace cs::features
 
 	void DynamicCubemaps::DrawSettings()
 	{
-		const bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		ImGui::TextDisabled(
+		const bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		dmui::ui::TextDisabled(
 			"Off restores native probe reflections and pauses capture.");
 		if (changed) {
 			PublishSettings();

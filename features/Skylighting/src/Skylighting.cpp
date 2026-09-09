@@ -2064,12 +2064,12 @@ namespace cs::features
 
 	void Skylighting::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		changed |= ImGui::Checkbox(
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		changed |= dmui::ui::Checkbox(
 			"Force scene traversal", &_settings.forceSceneTraversal);
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"The engine normally replays a precipitation-only cache that "
 				"is empty outside of rain. Force a real scene traversal for "
@@ -2077,17 +2077,16 @@ namespace cs::features
 		}
 		const float occlusionExtentMin = kMinOcclusionExtent;
 		const float occlusionExtentMax = kMaxOcclusionExtent;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Occlusion extent",
-			ImGuiDataType_Float,
 			&_settings.occlusionExtent,
 			&occlusionExtentMin,
 			&occlusionExtentMax,
 			"%.0f",
-			ImGuiSliderFlags_Logarithmic);
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			dmui::ui::SliderFlags::kLogarithmic);
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Full ortho width. The map is fixed at 512x512, so more range "
 				"costs resolution one for one: 10000 is about 19.5 "
@@ -2097,9 +2096,8 @@ namespace cs::features
 			_settings.maxZenith * (180.0f / 3.14159265358979323846f);
 		const float zenithMin = 0.0f;
 		const float zenithMax = 90.0f;
-		if (ImGui::SliderScalar(
+		if (dmui::ui::SliderScalar(
 				"Max zenith angle",
-				ImGuiDataType_Float,
 				&maxZenithDegrees,
 				&zenithMin,
 				&zenithMax,
@@ -2108,30 +2106,28 @@ namespace cs::features
 				maxZenithDegrees * (3.14159265358979323846f / 180.0f);
 			changed = true;
 		}
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Controls the random sky-disc radius accumulated by the "
 				"probe volume. Smaller angles focus occlusion toward zenith.");
 		}
 		const float consumerMin = kMinConsumerSetting;
 		const float consumerMax = kMaxConsumerSetting;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Diffuse minimum visibility",
-			ImGuiDataType_Float,
 			&_settings.minDiffuseVisibility,
 			&consumerMin,
 			&consumerMax,
 			"%.2f");
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Specular minimum visibility",
-			ImGuiDataType_Float,
 			&_settings.minSpecularVisibility,
 			&consumerMin,
 			&consumerMax,
 			"%.2f");
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Interiors deliberately take the identity path, matching upstream.");
 		if (changed) {
 			PublishSettings();
@@ -2140,16 +2136,16 @@ namespace cs::features
 		Menu::Get().DrawDebugViewSelector(*this);
 		if (_debugPreviewEnabled.load(std::memory_order_acquire) ||
 			_normalizedDebugPreviewEnabled.load(std::memory_order_acquire)) {
-			if (ImGui::Button("Refresh snapshot"))
+			if (dmui::ui::Button("Refresh snapshot"))
 				_depthSnapshot.Refresh();
 			if (_depthSnapshot.Pending())
-				ImGui::TextDisabled("Refresh pending; the previous snapshot remains visible.");
+				dmui::ui::TextDisabled("Refresh pending; the previous snapshot remains visible.");
 			if (FAILED(_depthSnapshotResult))
-				ImGui::TextDisabled("Snapshot allocation failed; see the Skylighting log.");
+				dmui::ui::TextDisabled("Snapshot allocation failed; see the Skylighting log.");
 		}
 		if (_visibilityDebugEnabled.load(std::memory_order_acquire) &&
 			_probeUpdateDispatchCount.load(std::memory_order_relaxed) == 0) {
-			ImGui::TextWrapped(
+			dmui::ui::TextWrapped(
 				_probeCameraUnavailableCount.load(std::memory_order_relaxed) ?
 					"Probe visibility is unavailable: no valid world-camera snapshot has reached the probe update." :
 					"Probe visibility is unavailable: the probe volume has not updated yet.");

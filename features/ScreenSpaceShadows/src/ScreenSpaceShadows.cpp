@@ -990,28 +990,25 @@ namespace cs::features
 
 	void ScreenSpaceShadows::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
 		const float surfaceThicknessMin = 0.005f;
 		const float surfaceThicknessMax = 0.05f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Surface thickness",
-			ImGuiDataType_Float,
 			&_settings.surfaceThickness,
 			&surfaceThicknessMin,
 			&surfaceThicknessMax);
 		const float bilinearThresholdMin = 0.02f;
 		const float bilinearThresholdMax = 1.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Bilinear threshold",
-			ImGuiDataType_Float,
 			&_settings.bilinearThreshold,
 			&bilinearThresholdMin,
 			&bilinearThresholdMax);
 		const float shadowContrastMin = 0.0f;
 		const float shadowContrastMax = 4.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Shadow contrast",
-			ImGuiDataType_Float,
 			&_settings.shadowContrast,
 			&shadowContrastMin,
 			&shadowContrastMax);
@@ -1019,9 +1016,8 @@ namespace cs::features
 		auto sampleCount = static_cast<int>(_settings.sampleCount);
 		const int sampleCountMin = 1;
 		const int sampleCountMax = 4;
-		if (ImGui::SliderScalar(
+		if (dmui::ui::SliderScalar(
 				"Sample count multiplier",
-				ImGuiDataType_S32,
 				&sampleCount,
 				&sampleCountMin,
 				&sampleCountMax)) {
@@ -1032,7 +1028,7 @@ namespace cs::features
 			SaveSettings();
 		}
 
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Resources: %s | wave dispatches last frame: %u",
 			_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready",
 			_dispatchedLastFrame.load(std::memory_order_relaxed));

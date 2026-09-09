@@ -489,7 +489,7 @@ namespace cs::features
 	void RenderDoc::DrawSettings()
 	{
 		bool prevEnabled = _settings.enabled;
-		if (ImGui::Checkbox("Enabled", &_settings.enabled)) {
+		if (dmui::ui::Checkbox("Enabled", &_settings.enabled)) {
 			SaveSettings();
 			if (_settings.enabled && !_api)
 				L->warn("Enabled at runtime; restart the game to load renderdoc.dll safely");
@@ -497,67 +497,65 @@ namespace cs::features
 				L->info("Disabled; runtime stays loaded until process exit");
 		}
 
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"The host owns capture bindings. Suggested defaults: %s and %s.",
 			_settings.captureHotkey.c_str(),
 			_settings.multiCaptureHotkey.c_str());
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
-		if (ImGui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf)))
+		if (dmui::ui::InputText("DLL path", dllPathBuf, sizeof(dllPathBuf)))
 			_settings.dllPath = dllPathBuf;
-		if (ImGui::IsItemDeactivatedAfterEdit())
+		if (dmui::ui::IsItemDeactivatedAfterEdit())
 			SaveSettings();
 
 		char folderBuf[260];
 		strncpy_s(folderBuf, _settings.captureFolder.c_str(), _TRUNCATE);
-		if (ImGui::InputText("Capture folder", folderBuf, sizeof(folderBuf)))
+		if (dmui::ui::InputText("Capture folder", folderBuf, sizeof(folderBuf)))
 			_settings.captureFolder = folderBuf;
-		if (ImGui::IsItemDeactivatedAfterEdit()) {
+		if (dmui::ui::IsItemDeactivatedAfterEdit()) {
 			SaveSettings();
 			ApplyCapturePath();
 		}
 
 		const double diskStep = 0.25;
 		const double diskFastStep = 1.0;
-		if (ImGui::InputScalar(
+		if (dmui::ui::InputScalar(
 				"Minimum free disk (GiB)",
-				ImGuiDataType_Double,
 				&_settings.minFreeDiskGiB,
 				&diskStep,
 				&diskFastStep,
 				"%.2f"))
 			_settings.minFreeDiskGiB = ClampMinFreeDiskGiB(_settings.minFreeDiskGiB);
-		if (ImGui::IsItemDeactivatedAfterEdit())
+		if (dmui::ui::IsItemDeactivatedAfterEdit())
 			SaveSettings();
 
 		const int minimumFrames = kMinMultiFrameCount;
 		const int maximumFrames = kMaxMultiFrameCount;
-		(void)ImGui::SliderScalar(
+		(void)dmui::ui::SliderScalar(
 			"Multi-frame count",
-			ImGuiDataType_S32,
 			&_settings.multiFrameCount,
 			&minimumFrames,
 			&maximumFrames);
-		if (ImGui::IsItemDeactivatedAfterEdit()) {
+		if (dmui::ui::IsItemDeactivatedAfterEdit()) {
 			_settings.multiFrameCount = ClampMultiFrameCount(_settings.multiFrameCount);
 			SaveSettings();
 		}
 
-		(void)ImGui::InputTextMultiline("Comments (embedded in next .rdc)",
+		(void)dmui::ui::InputTextMultiline("Comments (embedded in next .rdc)",
 			_commentsBuf.data(), _commentsBuf.size(),
-			ImVec2(0, ImGui::GetTextLineHeightWithSpacing() * 3));
+			dmui::ui::Vec2{ 0, dmui::ui::GetTextLineHeightWithSpacing() * 3 });
 
-		ImGui::BeginDisabled(!_api);
-		if (ImGui::Button("Trigger Capture"))
+		dmui::ui::BeginDisabled(!_api);
+		if (dmui::ui::Button("Trigger Capture"))
 			TriggerCapture();
-		ImGui::SameLine();
-		if (ImGui::Button("Trigger Multi-Frame"))
+		dmui::ui::SameLine();
+		if (dmui::ui::Button("Trigger Multi-Frame"))
 			TriggerMultiFrameCapture();
-		ImGui::EndDisabled();
+		dmui::ui::EndDisabled();
 
 		if (!_api && _settings.enabled)
-			ImGui::TextDisabled("Runtime load failed - fix the DLL path then restart the game.");
+			dmui::ui::TextDisabled("Runtime load failed - fix the DLL path then restart the game.");
 	}
 
 	cs::settings::RestartSettingsView RenderDoc::GetRestartSettings() const noexcept

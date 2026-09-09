@@ -10,9 +10,9 @@ window-procedure hook, or enumerate host modules itself.
 The menu-owned TOML state is parsed during core plugin startup, independently of host discovery.
 Persisted debug-view selections are applied after shader-injection validation when D3D11 becomes
 ready. At F4SE `kPostPostLoad`, after feature registration is complete, `HostClient` calls the
-official `dmui::Client::Connect`. The client checks the exact generated ImGui forwarding binary
-version separately from the minimum forwarding surface version 1.1, and preflights API structure
-and required services, including native external opening, virtual-file targets, and navigation
+official `dmui::Client::Connect`. The client negotiates host ABI 1 and the required stable UI
+revision/table prefix, and preflights API structure and required services, including native
+external opening, virtual-file targets, and navigation
 icon overrides, before registering anything. The client and host must use matching development headers from the
 CommonLibF4-pinned DearModdingUI API; no
 compatibility shim is provided for superseded development snapshots. It then registers all category
@@ -91,8 +91,8 @@ RenderDoc capture hotkeys additionally require a loaded capture API. IDs use the
 
 ## Tests
 
-`tests/HostIntegrationTests.cpp` exercises forwarding service/version preflight, including the
-external-open function/table and virtual-file service requirements, missing-service headless
+`tests/HostIntegrationTests.cpp` exercises host ABI, stable UI table, and service preflight,
+including the external-open function/table and virtual-file service requirements, missing-service headless
 behavior, category/page catalog ordering, IDs, references, deduplication and collision handling,
 and independent fullscreen/texture
 debug-view selection. It intentionally builds without the plugin or an ImGui library:
