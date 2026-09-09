@@ -5,9 +5,11 @@
 #include <filesystem>
 
 #include "DX12SwapChain.h"
+#include "FidelityFXFrameGenerationContract.h"
 #include "Log.h"
 #include "LogThrottle.h"
 #include "Render/Engine.h"
+#include "Render/FrameGenerationOrchestration.h"
 #include "Render/RendererContext.h"
 
 ffxFunctions ffxModule{};
@@ -67,7 +69,7 @@ namespace cs::features
 			return false;
 		}
 
-		L->info("Loaded FidelityFX 3.1.4 DX12 frame-generation provider");
+		L->info("Loaded the FidelityFX DX12 frame-generation runtime");
 		return true;
 	}
 	catch (...) {
@@ -102,6 +104,7 @@ namespace cs::features
 			return E_FAIL;
 		}
 		swapChainContextCreated = true;
+		frameGenerationSwapChain = *a_swapChain;
 		return S_OK;
 	}
 	catch (...) {
@@ -116,11 +119,10 @@ namespace cs::features
 		UINT a_height,
 		DXGI_FORMAT a_format) try
 	{
-		if (frameGenerationContextCreated && !WaitForPresents()) {
-			L->error("FidelityFX presents did not quiesce before context recreation");
+		if (!DestroyFrameGenerationContext()) {
+			L->error("FidelityFX context recreation could not safely release the old context");
 			return false;
 		}
-		DestroyFrameGenerationContext();
 		if (!swapChainContextCreated || !a_device || !a_width || !a_height ||
 			a_format != DXGI_FORMAT_R8G8B8A8_UNORM) {
 			return false;
@@ -134,15 +136,42 @@ namespace cs::features
 
 		ffx::CreateBackendDX12Desc backendDesc{};
 		backendDesc.device = a_device;
-		if (ffx::CreateContext(frameGenerationContext, nullptr, createDesc, backendDesc) !=
-			ffx::ReturnCode::Ok) {
-			L->error("FidelityFX failed to create the frame-generation context");
+		const auto createResult =
+			ffx::CreateContext(frameGenerationContext, nullptr, createDesc, backendDesc);
+		if (createResult != ffx::ReturnCode::Ok) {
+			L->error(
+				"FidelityFX failed to create the frame-generation context ({})",
+				static_cast<std::uint32_t>(createResult));
 			return false;
 		}
 		frameGenerationContextCreated = true;
+		frameGenerationOutputWidth = a_width;
+		frameGenerationOutputHeight = a_height;
 		callbackReset.store(true, std::memory_order_release);
 		frameGenerationActive = false;
 		frameID.fetch_add(2, std::memory_order_relaxed);
+
+		const auto version = fidelityfx_fg::QueryProviderVersion(
+			frameGenerationContext,
+			[](ffx::Context& a_context,
+				ffx::QueryGetProviderVersion& a_query) {
+				return ffx::Query(a_context, a_query);
+			});
+		frameGenerationProviderVersionQueryResult =
+			static_cast<std::uint32_t>(version.result);
+		frameGenerationProviderVersionAvailable = version.available;
+		frameGenerationProviderVersionId = version.id;
+		frameGenerationProviderVersionName = version.name;
+		if (frameGenerationProviderVersionAvailable) {
+			L->info(
+				"FidelityFX frame-generation provider: {} ({:#x})",
+				frameGenerationProviderVersionName,
+				frameGenerationProviderVersionId);
+		} else {
+			L->warn(
+				"FidelityFX frame-generation provider version is unavailable (query result {})",
+				frameGenerationProviderVersionQueryResult);
+		}
 		return true;
 	}
 	catch (...) {
@@ -152,36 +181,119 @@ namespace cs::features
 		return false;
 	}
 
-	void FidelityFX::DestroyFrameGenerationContext() noexcept
+	bool FidelityFX::SetFrameGenerationEnabled(bool a_enabled) noexcept
+	{
+		if (a_enabled) {
+			L->error(
+				"FidelityFX frame generation must be enabled with complete frame inputs");
+			return false;
+		}
+		if (!frameGenerationContextCreated) {
+			frameGenerationActive = false;
+			return true;
+		}
+		try {
+			auto config =
+				fidelityfx_fg::BuildDisabledConfiguration(
+					frameGenerationSwapChain,
+					frameID.load(std::memory_order_relaxed),
+					frameGenerationOutputWidth,
+					frameGenerationOutputHeight);
+			const auto result = ffx::Configure(frameGenerationContext, config);
+			if (result != ffx::ReturnCode::Ok) {
+				L->error(
+					"FidelityFX failed to {} frame generation ({})",
+					"disable",
+					static_cast<std::uint32_t>(result));
+				return false;
+			}
+			frameGenerationActive = false;
+			return true;
+		} catch (...) {
+			L->error(
+				"FidelityFX frame-generation {} raised an exception",
+				"disable");
+			return false;
+		}
+	}
+
+	bool FidelityFX::DestroyFrameGenerationContext() noexcept
 	{
 		frameGenerationActive = false;
 		frameGenerationCameraData = {};
 		if (!frameGenerationContextCreated) {
-			return;
+			return true;
 		}
-		try {
-			ffx::DestroyContext(frameGenerationContext);
-		} catch (...) {
+		const auto destruction = render::temporal::DisableDrainAndDestroy(
+			[&]() {
+				return SetFrameGenerationEnabled(false);
+			},
+			[&]() {
+				return WaitForPresents();
+			},
+			[&]() {
+				try {
+					const auto result =
+						ffx::DestroyContext(frameGenerationContext);
+					if (result != ffx::ReturnCode::Ok) {
+						L->error(
+							"FidelityFX failed to destroy the frame-generation context ({})",
+							static_cast<std::uint32_t>(result));
+						return false;
+					}
+					return true;
+				} catch (...) {
+					L->error(
+						"FidelityFX frame-generation context destruction raised an exception");
+					return false;
+				}
+			});
+		if (destruction ==
+			render::temporal::DestructionResult::kDisableFailed) {
+			L->error("FidelityFX context destruction stopped because callback deconfiguration failed");
+			return false;
+		}
+		if (destruction ==
+			render::temporal::DestructionResult::kDrainFailed) {
+			L->error("FidelityFX context destruction stopped because pending presents did not drain");
+			return false;
+		}
+		if (destruction !=
+			render::temporal::DestructionResult::kSuccess) {
+			return false;
 		}
 		frameGenerationContext = {};
 		frameGenerationContextCreated = false;
+		frameGenerationOutputWidth = 0;
+		frameGenerationOutputHeight = 0;
+		return true;
 	}
 
-	void FidelityFX::DestroySwapChainContext() noexcept
+	bool FidelityFX::DestroySwapChainContext() noexcept
 	{
-		if (!WaitForPresents()) {
-			L->warn("FidelityFX presents did not quiesce before shutdown");
+		if (!DestroyFrameGenerationContext()) {
+			return false;
 		}
-		DestroyFrameGenerationContext();
 		if (!swapChainContextCreated) {
-			return;
+			frameGenerationSwapChain = nullptr;
+			return true;
 		}
 		try {
-			ffx::DestroyContext(swapChainContext);
+			const auto result = ffx::DestroyContext(swapChainContext);
+			if (result != ffx::ReturnCode::Ok) {
+				L->error(
+					"FidelityFX failed to destroy the swap-chain context ({})",
+					static_cast<std::uint32_t>(result));
+				return false;
+			}
 		} catch (...) {
+			L->error("FidelityFX swap-chain context destruction raised an exception");
+			return false;
 		}
 		swapChainContext = {};
 		swapChainContextCreated = false;
+		frameGenerationSwapChain = nullptr;
+		return true;
 	}
 
 	bool FidelityFX::SetFrameGenerationCameraData(
@@ -242,8 +354,11 @@ namespace cs::features
 		}
 		try {
 			ffx::DispatchDescFrameGenerationSwapChainWaitForPresentsDX12 wait{};
-			if (ffx::Dispatch(swapChainContext, wait) != ffx::ReturnCode::Ok) {
-				L->error("FidelityFX failed to wait for pending presents");
+			const auto result = ffx::Dispatch(swapChainContext, wait);
+			if (result != ffx::ReturnCode::Ok) {
+				L->error(
+					"FidelityFX failed to wait for pending presents ({})",
+					static_cast<std::uint32_t>(result));
 				return false;
 			}
 			return true;
@@ -281,6 +396,9 @@ namespace cs::features
 			a_motionVectors && a_commandList &&
 			supportedColor;
 		const auto currentFrameID = frameID.fetch_add(1, std::memory_order_relaxed);
+		frameGenerationSwapChain = a_swapChain;
+		frameGenerationOutputWidth = a_outputWidth;
+		frameGenerationOutputHeight = a_outputHeight;
 
 		ffx::ConfigureDescFrameGeneration config{};
 		config.frameGenerationEnabled = useFrameGeneration;
@@ -313,18 +431,27 @@ namespace cs::features
 		config.generationRect.width = static_cast<std::int32_t>(a_outputWidth);
 		config.generationRect.height = static_cast<std::int32_t>(a_outputHeight);
 		const auto disableConfiguredGeneration = [&]() {
-			config.frameGenerationEnabled = false;
-			config.frameGenerationCallback = nullptr;
-			config.frameGenerationCallbackUserContext = nullptr;
-			config.HUDLessColor = FfxApiResource({});
-			ffx::Configure(frameGenerationContext, config);
+			config = fidelityfx_fg::BuildDisabledConfiguration(
+				a_swapChain,
+				currentFrameID,
+				a_outputWidth,
+				a_outputHeight);
+			const auto result = ffx::Configure(frameGenerationContext, config);
+			if (result != ffx::ReturnCode::Ok) {
+				L->error(
+					"FidelityFX failed to cancel frame generation ({})",
+					static_cast<std::uint32_t>(result));
+			}
 			frameGenerationActive = false;
+			return result == ffx::ReturnCode::Ok;
 		};
 
 		const auto configureResult = ffx::Configure(frameGenerationContext, config);
 		if (configureResult != ffx::ReturnCode::Ok) {
-			L->error("FidelityFX failed to configure frame generation; generated frames are disabled");
-			disableConfiguredGeneration();
+			L->error(
+				"FidelityFX failed to configure frame generation ({}); generated frames are disabled",
+				static_cast<std::uint32_t>(configureResult));
+			(void)disableConfiguredGeneration();
 			return false;
 		}
 
@@ -333,8 +460,10 @@ namespace cs::features
 		uiConfig.flags = 0;
 		const auto uiConfigureResult = ffx::Configure(swapChainContext, uiConfig);
 		if (uiConfigureResult != ffx::ReturnCode::Ok) {
-			L->error("FidelityFX failed to clear the registered UI resource");
-			disableConfiguredGeneration();
+			L->error(
+				"FidelityFX failed to clear the registered UI resource ({})",
+				static_cast<std::uint32_t>(uiConfigureResult));
+			(void)disableConfiguredGeneration();
 			return false;
 		}
 
@@ -365,8 +494,10 @@ namespace cs::features
 
 			const auto prepareResult = ffx::Dispatch(frameGenerationContext, prepare, camera);
 			if (prepareResult != ffx::ReturnCode::Ok) {
-				L->error("FidelityFX frame-generation prepare dispatch failed");
-				disableConfiguredGeneration();
+				L->error(
+					"FidelityFX frame-generation prepare dispatch failed ({})",
+					static_cast<std::uint32_t>(prepareResult));
+				(void)disableConfiguredGeneration();
 				return false;
 			}
 		}

@@ -233,7 +233,7 @@ namespace cs::features
 
 	DX12SwapChain::~DX12SwapChain()
 	{
-		Rollback();
+		(void)Rollback();
 	}
 
 	HRESULT DX12SwapChain::Initialize(
@@ -249,7 +249,10 @@ namespace cs::features
 				a_desc.BufferDesc.Format != DXGI_FORMAT_R8G8B8A8_UNORM)) {
 			return E_INVALIDARG;
 		}
-		Rollback();
+		const HRESULT rollbackResult = Rollback();
+		if (FAILED(rollbackResult)) {
+			return rollbackResult;
+		}
 		_provider = &a_provider;
 		_callbacks = std::move(a_callbacks);
 		_proxyDesc = a_desc;
@@ -282,8 +285,8 @@ namespace cs::features
 			result = RefreshBackBuffers();
 		}
 		if (FAILED(result)) {
-			Rollback();
-			return result;
+			const HRESULT cleanupResult = Rollback();
+			return FAILED(cleanupResult) ? cleanupResult : result;
 		}
 
 		_proxy = std::make_unique<DXGISwapChainProxy>(*this);
@@ -306,31 +309,61 @@ namespace cs::features
 		if (!a_device || !a_context) {
 			return E_INVALIDARG;
 		}
-		Rollback();
+		const HRESULT rollbackResult = Rollback();
+		if (FAILED(rollbackResult)) {
+			return rollbackResult;
+		}
 		HRESULT result =
 			CreateDevices(a_adapter, a_device, a_context, a_streamline);
 		if (SUCCEEDED(result)) {
 			result = CreateInteropFence();
 		}
 		if (FAILED(result)) {
-			Rollback();
-			return result;
+			const HRESULT cleanupResult = Rollback();
+			return FAILED(cleanupResult) ? cleanupResult : result;
 		}
 		_bridgeReady = true;
 		L->info("Initialized the same-adapter D3D11/D3D12 temporal bridge");
 		return S_OK;
 	}
 
-	void DX12SwapChain::Rollback() noexcept
+	HRESULT DX12SwapChain::Rollback() noexcept
 	{
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
 		}
 		if (_provider) {
-			if (_queue && _fence12 && _fenceEvent) {
-				(void)WaitForGpu();
+			const auto release = render::temporal::QuiesceDrainAndRelease(
+				*_provider,
+				[&]() {
+					if (!_context11 || !_fence11 || !_queue ||
+						!_fence12 || !_fenceEvent) {
+						return true;
+					}
+					const UINT64 d3d11Idle = _nextFenceValue++;
+					return SUCCEEDED(_context11->Signal(
+							   _fence11.get(), d3d11Idle)) &&
+						SUCCEEDED(_queue->Wait(
+							_fence12.get(), d3d11Idle)) &&
+						SUCCEEDED(WaitForGpu());
+				});
+			if (!release.Succeeded()) {
+				DisableFrameGeneration(
+					release.message.empty()
+						? "Frame-generation display resources could not be released"
+						: release.message.c_str());
+				return E_FAIL;
 			}
-			(void)_provider->Quiesce();
+		}
+		if (_provider) {
+			const auto destroy = _provider->DestroyAfterDrain();
+			if (!destroy.Succeeded()) {
+				DisableFrameGeneration(
+					destroy.message.empty()
+						? "Frame-generation provider destruction failed"
+						: destroy.message.c_str());
+				return E_FAIL;
+			}
 		}
 		if (_fenceEvent) {
 			CloseHandle(_fenceEvent);
@@ -353,9 +386,6 @@ namespace cs::features
 			backBuffer = nullptr;
 		}
 		_swapChain = nullptr;
-		if (_provider) {
-			_provider->DestroyAfterDrain();
-		}
 		_fence11 = nullptr;
 		_fence12 = nullptr;
 		for (auto& commandList : _commandLists) {
@@ -373,17 +403,17 @@ namespace cs::features
 		_callbacks = {};
 		_frameGenerationInputsReady = false;
 		_frameGenerationDisabled = false;
-		_frameSlot = 0;
-		_allocatorFenceValues[0] = 0;
-		_allocatorFenceValues[1] = 0;
-		_vendorRetirementPending[0] = false;
-		_vendorRetirementPending[1] = false;
-		_presentPrepared = false;
-		_preparedFrameGeneration = false;
-		_vendorConsumptionPossible = false;
-		_preparedTransaction = false;
+		render::temporal::ResetPresentationProtocol(
+			_allocatorFenceValues,
+			_inputReuseGate,
+			_frameSlot,
+			_presentPrepared,
+			_preparedFrameGeneration,
+			_vendorConsumptionPossible,
+			_preparedTransaction);
 		_published = false;
 		_bridgeReady = false;
+		return S_OK;
 	}
 
 	HRESULT DX12SwapChain::CreateDevices(
@@ -618,6 +648,17 @@ namespace cs::features
 		desc.Format = DXGI_FORMAT_R16G16_FLOAT;
 		auto motion = SharedD3D11D3D12Texture::Create(
 			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationMotion");
+		if (!depth || !motion) {
+			_depthBuffer.reset();
+			_motionBuffer.reset();
+			_frameGenerationDisabled = true;
+			L->error(
+				"Frame-generation bridge inputs were not recreated after the native resize");
+			return E_OUTOFMEMORY;
+		}
+
+		_depthBuffer = std::move(depth);
+		_motionBuffer = std::move(motion);
 		const auto providerResult = _provider
 			? _provider->CreateDisplayResources(
 				a_width,
@@ -625,16 +666,38 @@ namespace cs::features
 				DXGI_FORMAT_R8G8B8A8_UNORM,
 				_innerDesc.BufferCount)
 			: render::temporal::ProviderResult{};
-		if (!depth || !motion || !providerResult.Succeeded()) {
-			_depthBuffer.reset();
-			_motionBuffer.reset();
+		if (!providerResult.Succeeded()) {
 			_frameGenerationDisabled = true;
-			L->error("Frame-generation resources were not recreated; real-frame presentation remains active");
-			return S_OK;
+			L->error(
+				"Frame-generation provider resources were not recreated; real-frame presentation remains active");
+			return S_FALSE;
 		}
+		return S_OK;
+	}
 
-		_depthBuffer = std::move(depth);
-		_motionBuffer = std::move(motion);
+	HRESULT DX12SwapChain::RestoreFrameGenerationProvider(
+		UINT a_width, UINT a_height)
+	{
+		_frameGenerationInputsReady = false;
+		if (!_provider) {
+			return E_FAIL;
+		}
+		const render::temporal::ProviderDisplayDescription description{
+			.width = a_width,
+			.height = a_height,
+			.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+			.bufferCount = _innerDesc.BufferCount
+		};
+		const auto result = render::temporal::RestoreProviderAfterResize(
+			*_provider, S_OK, description, description);
+		if (!result.Succeeded()) {
+			DisableFrameGeneration(
+				result.message.empty()
+					? "Frame-generation provider restoration failed"
+					: result.message.c_str());
+			return S_FALSE;
+		}
+		_frameGenerationDisabled = false;
 		return S_OK;
 	}
 
@@ -1230,19 +1293,33 @@ namespace cs::features
 		}
 	}
 
+	bool DX12SwapChain::AcquireFrameGenerationInputWrite() noexcept
+	{
+		if (!_provider) {
+			return false;
+		}
+		render::temporal::ProviderResult result{
+			.code = render::temporal::ProviderResultCode::kSuccess
+		};
+		const bool acquired = _inputReuseGate.Acquire(
+			_frameSlot,
+			[&]() {
+				result = _provider->AcquirePresentInputs();
+				return result.Succeeded();
+			});
+		if (!acquired) {
+			DisableFrameGeneration(
+				result.message.empty()
+					? "Frame-generation inputs were not retired before producer reuse"
+					: result.message.c_str());
+		}
+		return acquired;
+	}
+
 	HRESULT DX12SwapChain::WaitForFrame(UINT a_slot) noexcept
 	{
 		if (a_slot >= std::size(_allocatorFenceValues)) {
 			return E_INVALIDARG;
-		}
-		if (_vendorRetirementPending[a_slot]) {
-			if (!_provider ||
-				!_provider->WaitForPresentInputs().Succeeded()) {
-				return E_FAIL;
-			}
-			render::TemporalPipeline::Get().RecordGeneratedFrames(
-				_provider->ConsumeGeneratedFrameCount());
-			_vendorRetirementPending[a_slot] = false;
 		}
 		const auto value = _allocatorFenceValues[a_slot];
 		if (!value || _fence12->GetCompletedValue() >= value) {
@@ -1406,11 +1483,24 @@ namespace cs::features
 					.color = frameState.color,
 					.camera = frameState.camera
 				};
-				frameGenerationPrepared =
-					_provider->PrepareFrame(request).Succeeded();
-				if (!frameGenerationPrepared && requested) {
+				const auto preparation =
+					render::temporal::PrepareFrameSafely(*_provider, request);
+				const auto& prepareResult = preparation.prepare;
+				frameGenerationPrepared = preparation.prepared;
+				if (!frameGenerationPrepared) {
+					_vendorConsumptionPossible = false;
 					DisableFrameGeneration(
-						"frame-generation provider configure or prepare failed");
+						prepareResult.message.empty()
+							? "frame-generation provider configure or prepare failed"
+							: prepareResult.message.c_str());
+					if (!preparation.safeToPresent) {
+						DX::ThrowIfFailed(commandList->Close());
+						_presentPrepared = false;
+						_preparedFrameGeneration = false;
+						_vendorConsumptionPossible = false;
+						_preparedTransaction = false;
+						return E_FAIL;
+					}
 				}
 			}
 
@@ -1436,6 +1526,26 @@ namespace cs::features
 		const HRESULT presentResult = _swapChain->Present(
 			a_syncInterval, a_flags);
 		pipeline.EndPresentAttempt(a_flags, presentResult);
+		const auto status = render::temporal::CollectAcceptedPresentStatus(
+			*_provider, a_flags, presentResult);
+		if (status.observed) {
+			pipeline.RecordGeneratedFrames(
+				status.generatedFrames);
+			pipeline.RecordPresentedFrames(
+				status.presentedFrames);
+			if (!status.result.Succeeded()) {
+				const auto disableResult =
+					_provider->SetGenerationEnabled(false);
+				DisableFrameGeneration(
+					status.result.message.empty()
+						? "frame-generation provider reported a post-Present failure"
+						: status.result.message.c_str());
+				if (!disableResult.Succeeded()) {
+					L->error(
+						"Frame-generation SDK disable also failed after the post-Present error");
+				}
+			}
+		}
 		if (_preparedTransaction) {
 			pipeline.RecordPresentAttempt(
 				_frameSlot, a_flags, presentResult);
@@ -1443,9 +1553,8 @@ namespace cs::features
 		if (presentResult == DXGI_ERROR_WAS_STILL_DRAWING) {
 			return presentResult;
 		}
-		if (_vendorConsumptionPossible) {
-			_vendorRetirementPending[_frameSlot] = true;
-		}
+		_inputReuseGate.MarkSubmitted(
+			_frameSlot, _vendorConsumptionPossible);
 		_presentPrepared = false;
 		_preparedFrameGeneration = false;
 		_vendorConsumptionPossible = false;
@@ -1583,17 +1692,36 @@ namespace cs::features
 			}
 		}
 
-		if (!_provider || !_provider->Quiesce().Succeeded()) {
-			DisableFrameGeneration("Frame-generation provider did not quiesce for resize");
+		if (!_provider) {
+			DisableFrameGeneration("Frame-generation provider is unavailable for resize");
 			return E_FAIL;
 		}
-		_provider->ReleaseDisplayResources();
+		const auto releaseResult = render::temporal::QuiesceDrainAndRelease(
+			*_provider,
+			[&]() {
+				const UINT64 d3d11Idle = _nextFenceValue++;
+				return SUCCEEDED(_context11->Signal(
+						   _fence11.get(), d3d11Idle)) &&
+					SUCCEEDED(_queue->Wait(
+						_fence12.get(), d3d11Idle)) &&
+					SUCCEEDED(WaitForGpu());
+			});
+		if (!releaseResult.Succeeded()) {
+			DisableFrameGeneration(
+				releaseResult.message.empty()
+					? "Frame-generation display resources could not be released for resize"
+					: releaseResult.message.c_str());
+			return E_FAIL;
+		}
 		_frameGenerationInputsReady = false;
-
-		const UINT64 d3d11Idle = _nextFenceValue++;
-		DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Idle));
-		DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Idle));
-		DX::ThrowIfFailed(WaitForGpu());
+		render::temporal::ResetPresentationProtocol(
+			_allocatorFenceValues,
+			_inputReuseGate,
+			_frameSlot,
+			_presentPrepared,
+			_preparedFrameGeneration,
+			_vendorConsumptionPossible,
+			_preparedTransaction);
 		for (auto& backBuffer : _backBuffers) {
 			backBuffer = nullptr;
 		}
@@ -1609,8 +1737,24 @@ namespace cs::features
 			if (FAILED(refreshResult)) {
 				_published = false;
 			}
+			const render::temporal::ProviderDisplayDescription oldDescription{
+				.width = oldWidth,
+				.height = oldHeight,
+				.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+				.bufferCount = _innerDesc.BufferCount
+			};
+			const auto restoration =
+				render::temporal::RestoreProviderAndPreserveResizeResult(
+					*_provider,
+					resizeResult,
+					oldDescription,
+					std::nullopt);
+			if (!restoration.providerResult.Succeeded()) {
+				DisableFrameGeneration(
+					"Frame-generation provider could not be restored after rejected resize");
+			}
 			render::TemporalPipeline::Get().RequestFrameGenerationReset();
-			return resizeResult;
+			return restoration.nativeResizeResult;
 		}
 
 		DXGI_SWAP_CHAIN_DESC1 resizedDesc{};
@@ -1644,32 +1788,43 @@ namespace cs::features
 			return refreshResult;
 		}
 
-		_innerDesc = resizedDesc;
 		if (sizeChanged) {
 			_proxyBuffer = std::move(pendingProxy);
 			_hudlessBuffers = std::move(pendingHudless);
-			RecreateFrameGenerationResources(_innerDesc.Width, _innerDesc.Height);
-		} else {
-			_frameGenerationInputsReady = false;
 		}
-		_proxyDesc.BufferDesc.Width = _innerDesc.Width;
-		_proxyDesc.BufferDesc.Height = _innerDesc.Height;
-		_proxyDesc.BufferDesc.Format = _innerDesc.Format;
-		_proxyDesc.BufferCount = 2;
-		_proxyDesc.Flags = _innerDesc.Flags;
-		_allocatorFenceValues[0] = 0;
-		_allocatorFenceValues[1] = 0;
-		_vendorRetirementPending[0] = false;
-		_vendorRetirementPending[1] = false;
-		_frameSlot = 0;
-		_presentPrepared = false;
-		_preparedFrameGeneration = false;
-		_vendorConsumptionPossible = false;
-		_preparedTransaction = false;
+		render::temporal::CommitResizeBridgeState(
+			resizedDesc,
+			_proxyDesc,
+			_innerDesc,
+			_allocatorFenceValues,
+			_inputReuseGate,
+			_frameSlot,
+			_presentPrepared,
+			_preparedFrameGeneration,
+			_vendorConsumptionPossible,
+			_preparedTransaction);
+
+		const HRESULT providerResult = sizeChanged
+			? RecreateFrameGenerationResources(
+				_innerDesc.Width, _innerDesc.Height)
+			: RestoreFrameGenerationProvider(
+				_innerDesc.Width, _innerDesc.Height);
+		if (FAILED(providerResult)) {
+			_published = false;
+			DisableFrameGeneration(
+				"Frame-generation bridge resources could not be recreated after resize");
+			return render::temporal::CompleteNativeResize(
+				resizeResult, providerResult);
+		}
+		if (providerResult == S_FALSE) {
+			DisableFrameGeneration(
+				"Frame-generation provider could not be restored after resize");
+		}
 		ClearSharedBuffers();
 		render::TemporalPipeline::Get().AdvanceDisplayGeneration(
 			_innerDesc.Width, _innerDesc.Height);
-		return S_OK;
+		return render::temporal::CompleteNativeResize(
+			resizeResult, providerResult);
 	}
 
 	HRESULT DX12SwapChain::SetPrivateData(

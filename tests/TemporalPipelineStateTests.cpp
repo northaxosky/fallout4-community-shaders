@@ -817,12 +817,20 @@ namespace
 			++prepareCount;
 			return Success();
 		}
+		cs::render::temporal::ProviderResult CancelFrame(
+			const cs::render::temporal::FrameGenerationRequest&) override
+		{
+			return Success();
+		}
 		cs::render::temporal::ProviderResult SetGenerationEnabled(bool) override { return Success(); }
-		cs::render::temporal::ProviderResult WaitForPresentInputs() override
+		cs::render::temporal::ProviderResult AcquirePresentInputs() override
 		{
 			++retirementCount;
 			return Success();
 		}
+		cs::render::temporal::ProviderResult CollectPresentStatus(
+			UINT,
+			HRESULT) override { return Success(); }
 		cs::render::temporal::ProviderResult Sleep(std::uint32_t) override { return Success(); }
 		cs::render::temporal::ProviderResult SetLatencyMarker(
 			cs::render::temporal::LatencyMarker,
@@ -835,8 +843,16 @@ namespace
 			quiesced = true;
 			return Success();
 		}
-		void ReleaseDisplayResources() noexcept override { released = true; }
-		void DestroyAfterDrain() noexcept override { destroyed = true; }
+		cs::render::temporal::ProviderResult ReleaseDisplayResources() noexcept override
+		{
+			released = true;
+			return Success();
+		}
+		cs::render::temporal::ProviderResult DestroyAfterDrain() noexcept override
+		{
+			destroyed = true;
+			return Success();
+		}
 		bool IsReady() const noexcept override { return created; }
 
 		static cs::render::temporal::ProviderResult Success()
@@ -975,12 +991,12 @@ namespace
 		Check(fg.PrepareFrame({}).Succeeded(), "mock FG prepares once");
 		Check(fg.prepareCount == 1, "Present retry does not require another preparation");
 		Check(
-			fg.WaitForPresentInputs().Succeeded(),
+			fg.AcquirePresentInputs().Succeeded(),
 			"vendor retirement is explicit before slot reuse");
 		Check(fg.retirementCount == 1, "vendor retirement runs once");
 		Check(fg.Quiesce().Succeeded(), "provider quiesces");
-		fg.ReleaseDisplayResources();
-		fg.DestroyAfterDrain();
+		(void)fg.ReleaseDisplayResources();
+		(void)fg.DestroyAfterDrain();
 		Check(
 			fg.quiesced && fg.released && fg.destroyed,
 			"provider cleanup order remains observable");

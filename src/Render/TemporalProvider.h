@@ -324,10 +324,20 @@ namespace cs::render::temporal
 			std::uint32_t a_bufferCount) = 0;
 		[[nodiscard]] virtual ProviderResult PrepareFrame(
 			const FrameGenerationRequest& a_request) = 0;
+		[[nodiscard]] virtual ProviderResult CancelFrame(
+			const FrameGenerationRequest& a_request) = 0;
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
-		[[nodiscard]] virtual ProviderResult WaitForPresentInputs() = 0;
+		[[nodiscard]] virtual ProviderResult AcquirePresentInputs() = 0;
+		[[nodiscard]] virtual ProviderResult CollectPresentStatus(
+			UINT a_presentFlags,
+			HRESULT a_presentResult) = 0;
 		[[nodiscard]] virtual std::optional<std::uint32_t>
 			ConsumeGeneratedFrameCount() noexcept
+		{
+			return std::nullopt;
+		}
+		[[nodiscard]] virtual std::optional<std::uint32_t>
+			ConsumePresentedFrameCount() noexcept
 		{
 			return std::nullopt;
 		}
@@ -336,8 +346,8 @@ namespace cs::render::temporal
 			LatencyMarker a_marker,
 			std::uint32_t a_frame) = 0;
 		[[nodiscard]] virtual ProviderResult Quiesce() = 0;
-		virtual void ReleaseDisplayResources() noexcept = 0;
-		virtual void DestroyAfterDrain() noexcept = 0;
+		[[nodiscard]] virtual ProviderResult ReleaseDisplayResources() noexcept = 0;
+		[[nodiscard]] virtual ProviderResult DestroyAfterDrain() noexcept = 0;
 		[[nodiscard]] virtual bool IsReady() const noexcept = 0;
 	};
 }

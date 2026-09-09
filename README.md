@@ -243,7 +243,7 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   failures disable the affected temporal consumers until restart; their requested selections remain
   visible separately from effective state. Recovery resources and shaders are preflighted before
   reduced-resolution state is committed.
-  AMD FSR 3 frame generation needs the staged FidelityFX 3.1.4 DX12 DLLs, windowed or
+  AMD frame generation needs the pinned FidelityFX DX12 DLLs, windowed or
   borderless SDR `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is
   independent of the selected super-resolution method and defaults off in pause, main, loading,
   and Pip-Boy menus. Its current UI strategy captures HUD-less post-imagespace color before the
@@ -251,6 +251,12 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   DLSS-SR, while XeSS-FG connects XeLL before its swap-chain initialization. Both use the
   captured HUD-less image with the intercepted final backbuffer; neither fabricates a UI-alpha
   layer.
+  XeSS-FG and DLSS-G copy borrowed inputs on the application command list before DX11 can reuse
+  them. FidelityFX retains a conservative wait for outstanding presents before reusing its
+  borrowed inputs; this protects ownership but can limit overlap.
+  Provider-reported presented-frame totals include real and generated frames and do not prove
+  that every frame reached the display. Generated-frame counts are reported as unavailable
+  when the SDK data cannot distinguish them reliably.
   Native D3D11 DLSS sessions publish Streamline's documented swap-chain proxy only after device
   registration and DLSS admission succeed. That proxy remains active while the DLSS effect is
   temporarily disabled so Streamline receives required Present and resize maintenance. DLSS-G
@@ -258,8 +264,10 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   frame-generation proxy status still describes only the D3D12 frame-generation bridge.
   The validated normal-loop hooks track sleep, simulation, render-submit, and proxy Present
   attempt ordering without treating worker completion or auxiliary Swap callers as frame boundaries.
-  The active DLSS-G or XeSS-FG provider alone receives the matching Reflex/PCL or XeLL sleep and
-  marker sequence. The observed SR input is post-tonemap gamma-2.2 output with the artistic LUT
+  The selected DLSS-G or XeSS-FG session alone receives the matching Reflex/PCL or XeLL sleep and
+  marker sequence, including while its effect is disabled live. SDK file versions and package
+  labels are not guarantees of the selected FidelityFX algorithm version.
+  The observed SR input is post-tonemap gamma-2.2 output with the artistic LUT
   already applied; XeSS decodes that transfer into FP16 linear color, evaluates at exposure 1.0,
   and re-encodes gamma-2.2 before publication without reversing the LUT. HDR and ENB are unsupported.
   The two feature panels own configuration and diagnostics only. Core-owned temporal rendering,

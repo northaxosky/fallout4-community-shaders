@@ -21,6 +21,7 @@
 
 #include "SuperResolutionContext.h"
 #include "StreamlineInterfaceUpgrade.h"
+#include "Render/FrameGenerationOrchestration.h"
 
 namespace cs::features
 {
@@ -121,10 +122,19 @@ namespace cs::features
 			bool a_retainResources);
 		bool TagDLSSGFrame(
 			const render::temporal::FrameGenerationRequest& a_request);
-		bool WaitForDLSSGInputs(ID3D12CommandQueue* a_queue) noexcept;
+		bool ClearDLSSGFrameTags(
+			std::uint32_t a_frameIndex,
+			ID3D12GraphicsCommandList* a_commandList = nullptr) noexcept;
+		bool ClearCurrentDLSSGFrameTags() noexcept;
+		bool PollDLSSGState() noexcept;
 		[[nodiscard]] std::uint32_t
-			ConsumeDLSSGGeneratedFrameCount() noexcept;
-		void DestroyDLSSGResources() noexcept;
+			ConsumeDLSSGPresentedFrameCount() noexcept;
+		[[nodiscard]] render::temporal::ProviderResult
+			DestroyDLSSGResources() noexcept;
+		[[nodiscard]] bool HasDLSSGResources() const noexcept
+		{
+			return _dlssGResourcesConfigured;
+		}
 		void DestroyDLSSResources();
 		[[nodiscard]] bool IsD3D12Session() const noexcept
 		{
@@ -132,6 +142,11 @@ namespace cs::features
 		}
 
 	private:
+		[[nodiscard]] sl::Result ClearDLSSGFrameTagsChecked(
+			std::uint32_t a_frameIndex,
+			ID3D12GraphicsCommandList* a_commandList = nullptr) noexcept;
+		[[nodiscard]] sl::Result
+			ClearCurrentDLSSGFrameTagsChecked() noexcept;
 		std::uint32_t _lastFrameToken = UINT32_MAX;
 		std::optional<std::uint32_t> _constantsFrame;
 		std::uint32_t _constantsViewport = 0;
@@ -141,8 +156,9 @@ namespace cs::features
 		render::temporal::FrameGenerationCamera _constantsCamera{};
 		bool _evaluatedThisDispatch = false;
 		bool _latencyFeaturesRequested = false;
-		std::uint32_t _dlssGGeneratedFrames = 0;
-		std::uint64_t _lastDLSSGCountedFenceValue = 0;
+		render::temporal::PresentedFrameAccumulator _dlssGPresentedFrames;
+		sl::DLSSGStatus _dlssGStatus = sl::DLSSGStatus::eOk;
+		bool _dlssGResourcesConfigured = false;
 		sl::RenderAPI _renderApi = sl::RenderAPI::eD3D11;
 	};
 }

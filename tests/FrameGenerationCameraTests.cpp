@@ -231,6 +231,32 @@ namespace
 				constantsCall == streamline.rfind("slSetConstants(") &&
 				streamline.contains("_constantsFrame == a_frameIndex"),
 			"SR and FG share one frame-keyed common-constants publisher");
+		const auto simulationStart = Between(
+			pipeline,
+			"void TemporalPipeline::BeginSimulation()",
+			"void TemporalPipeline::EndSimulationAndBeginRenderSubmit()");
+		const auto simulationMarker =
+			simulationStart.find("temporal::LatencyMarker::kSimulationStart");
+		const auto inputMarker =
+			simulationStart.find("temporal::LatencyMarker::kInputSample");
+		Check(
+			simulationMarker != std::string::npos &&
+				inputMarker != std::string::npos &&
+				simulationMarker < inputMarker,
+			"simulation start precedes the optional input marker as required by XeLL");
+		const auto presentBlock = Between(
+			dx12SwapChain,
+			"HRESULT DX12SwapChain::PresentImpl(",
+			"void DX12SwapChain::ClearSharedBuffers(");
+		const auto presentCall = presentBlock.find("const HRESULT presentResult =");
+		const auto signal = presentBlock.find("_queue->Signal(");
+		const auto wait = presentBlock.find("_context11->Wait(");
+		const auto clear = presentBlock.find("ClearSharedBuffers(false)");
+		Check(
+			presentCall != std::string::npos && signal != std::string::npos &&
+				wait != std::string::npos && clear != std::string::npos &&
+				signal < wait && wait < presentCall && presentCall < clear,
+			"application-command-list copies are fenced before provider Present");
 		Check(
 			upscaling.contains("cs::engine::GetFrameBuffer()") &&
 				pipeline.contains("cs::engine::CameraWorldOrigin(snapshot.data)") &&

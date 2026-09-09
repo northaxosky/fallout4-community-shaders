@@ -747,6 +747,17 @@ namespace
 			pipeline.find("_impl->dlssProvider.Initialize(init)", outwardDevice);
 		const auto upgrade = pipeline.find(
 			"_impl->streamline.UpgradeD3D11SwapChain", admission);
+		const auto dlssPath = pipeline.find(
+			"if (a_method == temporal::SuperResolutionMethod::kDLSS)",
+			outwardDevice);
+		const auto bridgeGuard = pipeline.find(
+			"if (!_impl->swapChain.IsBridgeReady())", dlssPath);
+		Check(
+			dlssPath != std::string::npos &&
+				bridgeGuard != std::string::npos &&
+				admission != std::string::npos &&
+				dlssPath < bridgeGuard && bridgeGuard < admission,
+			"a retained device from failed cleanup is not admitted as a usable DLSS transport");
 		Check(
 			proxyCapture != std::string::npos &&
 				outwardDevice != std::string::npos &&

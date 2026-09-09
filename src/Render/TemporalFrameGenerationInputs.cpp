@@ -1,4 +1,5 @@
 #include "Render/TemporalRendererInternals.h"
+#include "Render/FrameGenerationOrchestration.h"
 
 namespace cs::render
 {
@@ -147,34 +148,46 @@ namespace cs::render
 			!dimensions.outputWidth || !dimensions.outputHeight) {
 			return;
 		}
-
-		cs::render::annotation::ScopedEvent annotationScope(
-			"FG_CaptureDepthMotion");
-		cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
-		_frameGenerationCopyCB->Update(dimensions);
-		ID3D11Buffer* constantBuffer = _frameGenerationCopyCB->CB();
-		context->CSSetConstantBuffers(0, 1, &constantBuffer);
-		ID3D11ShaderResourceView* srvs[] = {
-			nativeDepthSRV,
-			nativeMotionSRV,
-			preAlphaSRV,
-			postAlphaSRV
-		};
-		context->CSSetShaderResources(0, static_cast<UINT>(std::size(srvs)), srvs);
-		ID3D11UnorderedAccessView* uavs[] = {
-			sharedDepth.uav,
-			sharedMotion.uav
-		};
-		context->CSSetUnorderedAccessViews(
-			0,
-			static_cast<UINT>(std::size(uavs)),
-			uavs,
-			nullptr);
-		context->CSSetShader(_copyDepthForFrameGenerationCS.get(), nullptr, 0);
-		context->Dispatch(
-			(dimensions.outputWidth + 7) / 8,
-			(dimensions.outputHeight + 7) / 8,
-			1);
+		if (!temporal::WriteFrameGenerationInput(
+				[]() {
+					return render::TemporalPipeline::Get()
+						.AcquireFrameGenerationInputWrite();
+				},
+				[&]() {
+					cs::render::annotation::ScopedEvent annotationScope(
+						"FG_CaptureDepthMotion");
+					cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
+					_frameGenerationCopyCB->Update(dimensions);
+					ID3D11Buffer* constantBuffer = _frameGenerationCopyCB->CB();
+					context->CSSetConstantBuffers(0, 1, &constantBuffer);
+					ID3D11ShaderResourceView* srvs[] = {
+						nativeDepthSRV,
+						nativeMotionSRV,
+						preAlphaSRV,
+						postAlphaSRV
+					};
+					context->CSSetShaderResources(
+						0, static_cast<UINT>(std::size(srvs)), srvs);
+					ID3D11UnorderedAccessView* uavs[] = {
+						sharedDepth.uav,
+						sharedMotion.uav
+					};
+					context->CSSetUnorderedAccessViews(
+						0,
+						static_cast<UINT>(std::size(uavs)),
+						uavs,
+						nullptr);
+					context->CSSetShader(
+						_copyDepthForFrameGenerationCS.get(), nullptr, 0);
+					context->Dispatch(
+						(dimensions.outputWidth + 7) / 8,
+						(dimensions.outputHeight + 7) / 8,
+						1);
+				})) {
+			render::TemporalPipeline::Get().FailFrameGenerationFrame(
+				"frame-generation shared inputs were still in provider use");
+			return;
+		}
 
 		_firstPersonAlphaStamp = stamp;
 		_firstPersonAlphaStamp.stage = FirstPersonAlphaStage::kConditioned;
@@ -262,38 +275,59 @@ namespace cs::render
 			sharedMotion.resource,
 			sharedDepth.resource);
 		if (!alphaConditioned) {
-			cs::render::annotation::ScopedEvent annotationScope(
-				"FG_CaptureDepthMotion");
-			cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
-			const FrameGenerationCopyCB dimensions{
-				renderWidth,
-				renderHeight,
-				capture.width,
-				capture.height,
-				0,
-				0,
-				0,
-				0
-			};
-			_frameGenerationCopyCB->Update(dimensions);
-			ID3D11Buffer* constantBuffer = _frameGenerationCopyCB->CB();
-			context->CSSetConstantBuffers(0, 1, &constantBuffer);
-			ID3D11ShaderResourceView* srvs[] = { depthSRV, motionSRV, nullptr, nullptr };
-			context->CSSetShaderResources(0, static_cast<UINT>(std::size(srvs)), srvs);
-			ID3D11UnorderedAccessView* uavs[] = {
-				sharedDepth.uav,
-				sharedMotion.uav
-			};
-			context->CSSetUnorderedAccessViews(
-				0,
-				static_cast<UINT>(std::size(uavs)),
-				uavs,
-				nullptr);
-			context->CSSetShader(_copyDepthForFrameGenerationCS.get(), nullptr, 0);
-			context->Dispatch(
-				(capture.width + 7) / 8,
-				(capture.height + 7) / 8,
-				1);
+			if (!temporal::WriteFrameGenerationInput(
+					[]() {
+						return render::TemporalPipeline::Get()
+							.AcquireFrameGenerationInputWrite();
+					},
+					[&]() {
+						cs::render::annotation::ScopedEvent annotationScope(
+							"FG_CaptureDepthMotion");
+						cs::engine::ComputeOMScope scope(context, 4, 0, 2, 1);
+						const FrameGenerationCopyCB dimensions{
+							renderWidth,
+							renderHeight,
+							capture.width,
+							capture.height,
+							0,
+							0,
+							0,
+							0
+						};
+						_frameGenerationCopyCB->Update(dimensions);
+						ID3D11Buffer* constantBuffer =
+							_frameGenerationCopyCB->CB();
+						context->CSSetConstantBuffers(
+							0, 1, &constantBuffer);
+						ID3D11ShaderResourceView* srvs[] = {
+							depthSRV, motionSRV, nullptr, nullptr
+						};
+						context->CSSetShaderResources(
+							0,
+							static_cast<UINT>(std::size(srvs)),
+							srvs);
+						ID3D11UnorderedAccessView* uavs[] = {
+							sharedDepth.uav,
+							sharedMotion.uav
+						};
+						context->CSSetUnorderedAccessViews(
+							0,
+							static_cast<UINT>(std::size(uavs)),
+							uavs,
+							nullptr);
+						context->CSSetShader(
+							_copyDepthForFrameGenerationCS.get(),
+							nullptr,
+							0);
+						context->Dispatch(
+							(capture.width + 7) / 8,
+							(capture.height + 7) / 8,
+							1);
+					})) {
+				render::TemporalPipeline::Get().FailFrameGenerationFrame(
+					"frame-generation shared inputs were still in provider use");
+				return;
+			}
 		}
 		render::TemporalPipeline::Get().RecordFrameGenerationCapture(
 			alphaConditioned);
@@ -344,13 +378,23 @@ namespace cs::render
 				"pre-UI RT0 is incompatible with SDR HUDLessColor");
 			return;
 		}
-
-		cs::render::annotation::ScopedEvent annotationScope(
-			"FG_CaptureHUDLess_RT0_PostImagespace");
-		cs::engine::CopyResourcePreservingOM(
-			context,
-			hudless.resource,
-			frameBuffer.get());
+		if (!temporal::WriteFrameGenerationInput(
+				[]() {
+					return render::TemporalPipeline::Get()
+						.AcquireFrameGenerationInputWrite();
+				},
+				[&]() {
+					cs::render::annotation::ScopedEvent annotationScope(
+						"FG_CaptureHUDLess_RT0_PostImagespace");
+					cs::engine::CopyResourcePreservingOM(
+						context,
+						hudless.resource,
+						frameBuffer.get());
+				})) {
+			render::TemporalPipeline::Get().FailFrameGenerationFrame(
+				"frame-generation HUD-less input was still in provider use");
+			return;
+		}
 		CaptureFrameGenerationHudlessDebugSnapshot();
 		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(true);
 		const auto [renderWidth, renderHeight] = GetRenderSize();

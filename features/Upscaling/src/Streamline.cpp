@@ -12,6 +12,7 @@
 #include "LogThrottle.h"
 #include "Render/Engine.h"
 #include "Render/RendererContext.h"
+#include "StreamlineFrameGenerationContract.h"
 #include "Utils/StreamlineModule.h"
 
 namespace cs::features
@@ -958,7 +959,7 @@ namespace cs::features
 			}
 			sl::ReflexOptions reflex{};
 			reflex.mode = sl::ReflexMode::eLowLatency;
-			reflex.useMarkersToOptimize = true;
+			reflex.useMarkersToOptimize = false;
 			if (SL_FAILED(result, slReflexSetOptions(reflex))) {
 				L->error(
 					"Could not enable Reflex for DLSS-G: {}",
@@ -990,17 +991,7 @@ namespace cs::features
 				magic_enum::enum_name(result));
 			return false;
 		}
-		if (a_enabled && slDLSSGGetState) {
-			sl::DLSSGState state{};
-			if (SL_FAILED(result, slDLSSGGetState(viewport, state, &options)) ||
-				state.status != sl::DLSSGStatus::eOk) {
-				L->error(
-					"DLSS-G rejected the active configuration: result={} status={:#x}",
-					magic_enum::enum_name(result),
-					static_cast<std::uint32_t>(state.status));
-				return false;
-			}
-		}
+		_dlssGResourcesConfigured = true;
 		return true;
 	}
 
@@ -1052,9 +1043,9 @@ namespace cs::features
 			0, 0, a_request.outputWidth, a_request.outputHeight
 		};
 		const sl::ResourceTag tags[]{
-			{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
-			{ &motion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
-			{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &outputExtent }
+			{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eOnlyValidNow, &renderExtent },
+			{ &motion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &renderExtent },
+			{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eOnlyValidNow, &outputExtent }
 		};
 		if (SL_FAILED(result, slSetTagForFrame(
 			*frameToken,
@@ -1071,53 +1062,137 @@ namespace cs::features
 		return true;
 	}
 
-	bool Streamline::WaitForDLSSGInputs(
-		ID3D12CommandQueue* a_queue) noexcept
+	bool Streamline::ClearDLSSGFrameTags(
+		std::uint32_t a_frameIndex,
+		ID3D12GraphicsCommandList* a_commandList) noexcept
 	{
-		if (!featureDLSSG || !slDLSSGGetState || !a_queue) {
+		return ClearDLSSGFrameTagsChecked(
+			a_frameIndex, a_commandList) == sl::Result::eOk;
+	}
+
+	sl::Result Streamline::ClearDLSSGFrameTagsChecked(
+		std::uint32_t a_frameIndex,
+		ID3D12GraphicsCommandList* a_commandList) noexcept
+	{
+		if (!featureDLSSG || !slSetTagForFrame) {
+			return !featureDLSSG
+				? sl::Result::eOk
+				: sl::Result::eErrorMissingOrInvalidAPI;
+		}
+		if (!EnsureFrameToken(a_frameIndex)) {
+			return sl::Result::eErrorInvalidState;
+		}
+		const sl::ResourceTag tags[]{
+			{ nullptr, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+			{ nullptr, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, nullptr },
+			{ nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, nullptr }
+		};
+		const auto result = slSetTagForFrame(
+			*frameToken,
+			viewport,
+			tags,
+			_countof(tags),
+			reinterpret_cast<sl::CommandBuffer*>(a_commandList));
+		if (result != sl::Result::eOk) {
+			L->error(
+				"Could not invalidate DLSS-G inputs: {}",
+				magic_enum::enum_name(result));
+			return result;
+		}
+		return sl::Result::eOk;
+	}
+
+	bool Streamline::PollDLSSGState() noexcept
+	{
+		if (!featureDLSSG || !slDLSSGGetState) {
 			return !featureDLSSG;
 		}
-		sl::DLSSGState state{};
-		if (slDLSSGGetState(viewport, state, nullptr) != sl::Result::eOk) {
+		const auto result = streamline_fg::PollState(
+			viewport,
+			_dlssGPresentedFrames,
+			_dlssGStatus,
+			slDLSSGGetState);
+		if (result != sl::Result::eOk) {
+			L->error(
+				"Could not query DLSS-G state: {}",
+				magic_enum::enum_name(result));
 			return false;
 		}
-		if (state.lastPresentInputsProcessingCompletionFenceValue &&
-			state.lastPresentInputsProcessingCompletionFenceValue !=
-				_lastDLSSGCountedFenceValue &&
-			state.numFramesActuallyPresented > 1) {
-			_dlssGGeneratedFrames +=
-				state.numFramesActuallyPresented - 1;
-			_lastDLSSGCountedFenceValue =
-				state.lastPresentInputsProcessingCompletionFenceValue;
+		if (_dlssGStatus != sl::DLSSGStatus::eOk) {
+			L->error(
+				"DLSS-G reported status {:#x}",
+				static_cast<std::uint32_t>(_dlssGStatus));
+			return false;
 		}
-		if (!state.inputsProcessingCompletionFence ||
-			!state.lastPresentInputsProcessingCompletionFenceValue) {
-			return true;
-		}
-		auto* fence = static_cast<ID3D12Fence*>(
-			state.inputsProcessingCompletionFence);
-		return SUCCEEDED(a_queue->Wait(
-			fence,
-			state.lastPresentInputsProcessingCompletionFenceValue));
+		return true;
 	}
 
-	std::uint32_t Streamline::ConsumeDLSSGGeneratedFrameCount() noexcept
+	bool Streamline::ClearCurrentDLSSGFrameTags() noexcept
 	{
-		return std::exchange(_dlssGGeneratedFrames, 0);
+		return ClearCurrentDLSSGFrameTagsChecked() == sl::Result::eOk;
 	}
 
-	void Streamline::DestroyDLSSGResources() noexcept
+	sl::Result Streamline::ClearCurrentDLSSGFrameTagsChecked() noexcept
 	{
-		_dlssGGeneratedFrames = 0;
-		_lastDLSSGCountedFenceValue = 0;
-		if (slDLSSGSetOptions) {
-			sl::DLSSGOptions options{};
-			options.mode = sl::DLSSGMode::eOff;
-			(void)slDLSSGSetOptions(viewport, options);
+		return !frameToken || _lastFrameToken == UINT32_MAX
+			? sl::Result::eOk
+			: ClearDLSSGFrameTagsChecked(_lastFrameToken);
+	}
+
+	std::uint32_t Streamline::ConsumeDLSSGPresentedFrameCount() noexcept
+	{
+		return _dlssGPresentedFrames.Consume();
+	}
+
+	render::temporal::ProviderResult
+	Streamline::DestroyDLSSGResources() noexcept
+	{
+		if (!_dlssGResourcesConfigured) {
+			return {
+				.code =
+					render::temporal::ProviderResultCode::kSuccess
+			};
 		}
-		if (slFreeResources) {
-			(void)slFreeResources(sl::kFeatureDLSS_G, viewport);
+		if (!slDLSSGSetOptions || !slFreeResources) {
+			return {
+				.code =
+					render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(
+					sl::Result::eErrorMissingOrInvalidAPI),
+				.message =
+					"Streamline cleanup exports are unavailable."
+			};
 		}
+		const auto cleanup = streamline_fg::DestroyResources(
+			_dlssGResourcesConfigured,
+			viewport,
+			[&]() {
+				return ClearCurrentDLSSGFrameTagsChecked();
+			},
+			slDLSSGSetOptions,
+			slFreeResources);
+		if (!cleanup.succeeded) {
+			L->error(
+				"Could not {}: {}",
+				cleanup.operation,
+				magic_enum::enum_name(cleanup.sdkResult));
+			return {
+				.code =
+					render::temporal::ProviderResultCode::kFailure,
+				.sdkResult =
+					static_cast<std::int64_t>(cleanup.sdkResult),
+				.message =
+					std::string("Streamline could not ") +
+					cleanup.operation + "."
+			};
+		}
+		(void)_dlssGPresentedFrames.Consume();
+		_dlssGStatus = sl::DLSSGStatus::eOk;
+		_dlssGResourcesConfigured = false;
+		return {
+			.code =
+				render::temporal::ProviderResultCode::kSuccess
+		};
 	}
 
 	void Streamline::DestroyDLSSResources()

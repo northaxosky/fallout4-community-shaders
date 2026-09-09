@@ -227,6 +227,26 @@ namespace cs::features
 				"provider_generated_frame_count_available",
 				diagnostics.generatedFrameCountAvailable)
 			.Field(
+				"provider_reported_presented_frames",
+				static_cast<std::int64_t>(diagnostics.providerPresentedFrames))
+			.Field(
+				"provider_presented_frame_count_available",
+				diagnostics.providerPresentedFrameCountAvailable)
+			.Field(
+				"fidelityfx_provider_version_available",
+				diagnostics.fidelityFxProviderVersionAvailable)
+			.Field(
+				"fidelityfx_provider_version_id",
+				static_cast<std::int64_t>(
+					diagnostics.fidelityFxProviderVersionId))
+			.Field(
+				"fidelityfx_provider_version_name",
+				diagnostics.fidelityFxProviderVersionName)
+			.Field(
+				"fidelityfx_provider_version_query_result",
+				static_cast<std::int64_t>(
+					diagnostics.fidelityFxProviderVersionQueryResult))
+			.Field(
 				"failures",
 				static_cast<std::int64_t>(diagnostics.failures))
 			.Field("camera_valid", diagnostics.cameraValid)

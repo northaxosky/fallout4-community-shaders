@@ -636,6 +636,25 @@ add_test(
 )
 set_tests_properties(FrameGenerationCamera PROPERTIES LABELS "render;unit")
 
+add_executable(FrameGenerationContractTests
+	tests/FrameGenerationContractTests.cpp
+	src/Render/FrameGenerationOrchestration.h
+	features/FrameGeneration/src/FidelityFXFrameGenerationContract.h
+	features/FrameGeneration/src/StreamlineFrameGenerationContract.h
+	features/FrameGeneration/src/XeSSFrameGenerationContract.h
+)
+configure_host_test(FrameGenerationContractTests)
+target_include_directories(FrameGenerationContractTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/src"
+	"${CMAKE_SOURCE_DIR}/features/FrameGeneration/src"
+	"${CMAKE_SOURCE_DIR}/include"
+	"${CMAKE_SOURCE_DIR}/.sdk-cache/XeSS-v3.0.2-include"
+	"${CMAKE_SOURCE_DIR}/extern/Streamline/include"
+)
+
+add_test(NAME FrameGenerationContract COMMAND FrameGenerationContractTests)
+set_tests_properties(FrameGenerationContract PROPERTIES LABELS "render;contract;unit")
+
 add_executable(FrustumEmbedTests
 	tests/FrustumEmbedTests.cpp
 	features/ScreenSpaceGI/src/OracleProjectionEmbed.h

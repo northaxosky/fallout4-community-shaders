@@ -104,6 +104,12 @@ namespace cs::render
 		std::uint64_t dispatches = 0;
 		std::uint64_t generatedFrames = 0;
 		bool generatedFrameCountAvailable = false;
+		std::uint64_t providerPresentedFrames = 0;
+		bool providerPresentedFrameCountAvailable = false;
+		bool fidelityFxProviderVersionAvailable = false;
+		std::uint64_t fidelityFxProviderVersionId = 0;
+		std::string fidelityFxProviderVersionName;
+		std::uint32_t fidelityFxProviderVersionQueryResult = 0;
 		std::uint64_t failures = 0;
 		bool cameraValid = false;
 		std::int64_t cameraFrameDelta = 0;
@@ -172,6 +178,7 @@ namespace cs::render
 			UINT a_flags,
 			HRESULT a_result) noexcept;
 		void RecordGeneratedFrames(std::optional<std::uint32_t> a_count) noexcept;
+		void RecordPresentedFrames(std::optional<std::uint32_t> a_count) noexcept;
 
 		[[nodiscard]] TemporalPipelineStatus GetStatus() const;
 		TemporalRenderer& Renderer() noexcept;
@@ -183,6 +190,7 @@ namespace cs::render
 			GetFrameGenerationDiagnostics() const noexcept;
 		[[nodiscard]] FrameGenerationCaptureResources
 			GetFrameGenerationCaptureResources() const noexcept;
+		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void FailFrameGenerationFrame(const char* a_reason) noexcept;
 		void ResetFrameGenerationCaptureDiagnostics() noexcept;

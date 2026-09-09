@@ -54,9 +54,10 @@ namespace cs::features
 			DXGI_SWAP_CHAIN_DESC1& a_desc,
 			IDXGISwapChain4** a_swapChain);
 		bool CreateFrameGenerationContext(ID3D12Device* a_device, UINT a_width, UINT a_height, DXGI_FORMAT a_format);
-		void DestroyFrameGenerationContext() noexcept;
-		void DestroySwapChainContext() noexcept;
+		bool DestroyFrameGenerationContext() noexcept;
+		bool DestroySwapChainContext() noexcept;
 		bool WaitForPresents() noexcept;
+		bool SetFrameGenerationEnabled(bool a_enabled) noexcept;
 		bool PresentFrameGeneration(
 			ID3D12GraphicsCommandList* a_commandList,
 			IDXGISwapChain4* a_swapChain,
@@ -78,6 +79,24 @@ namespace cs::features
 		[[nodiscard]] bool IsFrameGenerationModuleReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationContextReady() const noexcept;
 		[[nodiscard]] bool IsFrameGenerationActive() const noexcept;
+		[[nodiscard]] bool IsFrameGenerationProviderVersionAvailable() const noexcept
+		{
+			return frameGenerationProviderVersionAvailable;
+		}
+		[[nodiscard]] std::uint64_t GetFrameGenerationProviderVersionId() const noexcept
+		{
+			return frameGenerationProviderVersionId;
+		}
+		[[nodiscard]] const std::string&
+			GetFrameGenerationProviderVersionName() const noexcept
+		{
+			return frameGenerationProviderVersionName;
+		}
+		[[nodiscard]] std::uint32_t
+			GetFrameGenerationProviderVersionQueryResult() const noexcept
+		{
+			return frameGenerationProviderVersionQueryResult;
+		}
 		[[nodiscard]] const FrameGenerationCameraSnapshot&
 			GetFrameGenerationCameraSnapshot() const noexcept
 		{
@@ -102,6 +121,13 @@ namespace cs::features
 		bool swapChainContextCreated = false;
 		bool frameGenerationContextCreated = false;
 		bool frameGenerationActive = false;
+		IDXGISwapChain4* frameGenerationSwapChain = nullptr;
+		std::uint32_t frameGenerationOutputWidth = 0;
+		std::uint32_t frameGenerationOutputHeight = 0;
+		bool frameGenerationProviderVersionAvailable = false;
+		std::uint64_t frameGenerationProviderVersionId = 0;
+		std::string frameGenerationProviderVersionName;
+		std::uint32_t frameGenerationProviderVersionQueryResult = 0;
 		bool fsrDispatchCrashLogged = false;
 		FrameGenerationCameraSnapshot frameGenerationCameraData{};
 	};

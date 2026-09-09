@@ -13,6 +13,7 @@
 #include <winrt/base.h>
 
 #include "SuperResolutionContext.h"
+#include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalProvider.h"
 
 namespace cs::features
@@ -110,7 +111,7 @@ namespace cs::features
 			ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context,
 			Streamline* a_streamline = nullptr);
-		void Rollback() noexcept;
+		[[nodiscard]] HRESULT Rollback() noexcept;
 
 		[[nodiscard]] IDXGISwapChain* GetProxy() const noexcept;
 		[[nodiscard]] bool Owns(IDXGISwapChain* a_swapChain) const noexcept;
@@ -140,6 +141,7 @@ namespace cs::features
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void SetOutwardD3D11Device(ID3D11Device* a_device) noexcept;
 		void DisableFrameGeneration(const char* a_reason) noexcept;
+		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 
 		HRESULT Present(UINT a_syncInterval, UINT a_flags) noexcept;
 		HRESULT GetBuffer(UINT a_buffer, REFIID a_iid, void** a_surface) noexcept;
@@ -175,6 +177,7 @@ namespace cs::features
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2>& a_hudless);
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);
+		HRESULT RestoreFrameGenerationProvider(UINT a_width, UINT a_height);
 		HRESULT RecreateSuperResolutionBridge(
 			const SuperResolutionExecutionContext& a_context);
 		HRESULT RefreshBackBuffers();
@@ -218,8 +221,8 @@ namespace cs::features
 		UINT _frameIndex = 0;
 		UINT _frameSlot = 0;
 		UINT64 _nextFenceValue = 1;
-		UINT64 _allocatorFenceValues[2]{};
-		bool _vendorRetirementPending[2]{};
+		std::array<std::uint64_t, 2> _allocatorFenceValues{};
+		render::temporal::PresentInputReuseGate _inputReuseGate;
 		HANDLE _fenceEvent = nullptr;
 		bool _frameGenerationInputsReady = false;
 		bool _frameGenerationDisabled = false;

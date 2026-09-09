@@ -9,7 +9,10 @@
 #include <winrt/base.h>
 
 #include "FidelityFX.h"
+#include "Log.h"
+#include "LogThrottle.h"
 #include "Streamline.h"
+#include "XeSSFrameGenerationContract.h"
 
 namespace cs::features
 {
@@ -17,6 +20,7 @@ namespace cs::features
 	{
 		using render::temporal::ProviderResult;
 		using render::temporal::ProviderResultCode;
+		auto* L = cs::log::Get("cs.feature.frame-generation.providers");
 
 		ProviderResult Success()
 		{
@@ -131,23 +135,46 @@ namespace cs::features
 
 	ProviderResult FidelityFXPresentation::SetGenerationEnabled(bool a_enabled)
 	{
-		_enabled = a_enabled;
+		if (a_enabled) {
+			return Failure(
+				"FidelityFX frame generation can only be enabled by frame preparation.");
+		}
+		if (!_runtime.SetFrameGenerationEnabled(false)) {
+			return Failure("FidelityFX SDK disable failed.");
+		}
+		_enabled = false;
 		return Success();
+	}
+
+	ProviderResult FidelityFXPresentation::CancelFrame(
+		const render::temporal::FrameGenerationRequest&)
+	{
+		return SetGenerationEnabled(false);
 	}
 
 	ProviderResult FidelityFXPresentation::Quiesce()
 	{
-		_enabled = false;
+		const auto disable = SetGenerationEnabled(false);
+		if (!disable.Succeeded()) {
+			return disable;
+		}
 		return _runtime.WaitForPresents()
 			? Success()
 			: Failure("FidelityFX did not drain pending presents.");
 	}
 
-	ProviderResult FidelityFXPresentation::WaitForPresentInputs()
+	ProviderResult FidelityFXPresentation::AcquirePresentInputs()
 	{
 		return _runtime.WaitForPresents()
 			? Success()
 			: Failure("FidelityFX did not retire present inputs.");
+	}
+
+	ProviderResult FidelityFXPresentation::CollectPresentStatus(
+		UINT,
+		HRESULT)
+	{
+		return Success();
 	}
 
 	ProviderResult FidelityFXPresentation::Sleep(std::uint32_t)
@@ -162,18 +189,21 @@ namespace cs::features
 		return Success();
 	}
 
-	void FidelityFXPresentation::ReleaseDisplayResources() noexcept
+	ProviderResult FidelityFXPresentation::ReleaseDisplayResources() noexcept
 	{
-		_runtime.DestroyFrameGenerationContext();
+		return _runtime.DestroyFrameGenerationContext()
+			? Success()
+			: Failure("FidelityFX display resources could not be safely released.");
 	}
 
-	void FidelityFXPresentation::DestroyAfterDrain() noexcept
+	ProviderResult FidelityFXPresentation::DestroyAfterDrain() noexcept
 	{
-		(void)Quiesce();
-		_runtime.DestroyFrameGenerationContext();
-		_runtime.DestroySwapChainContext();
+		if (!_runtime.DestroySwapChainContext()) {
+			return Failure("FidelityFX swap-chain context could not be safely destroyed.");
+		}
 		_swapChain = nullptr;
 		_device = nullptr;
+		return Success();
 	}
 
 	bool FidelityFXPresentation::IsReady() const noexcept
@@ -279,19 +309,53 @@ namespace cs::features
 		}
 		_enabled = a_request.enabled;
 		if (!a_request.enabled) {
-			return Success();
+			return _runtime.ClearDLSSGFrameTags(
+				static_cast<std::uint32_t>(a_request.realFrame),
+				a_request.recording.commandList)
+				? Success()
+				: Failure("DLSS-G invalid input tags could not be cleared.");
 		}
 		return _runtime.TagDLSSGFrame(a_request)
 			? Success()
 			: Failure("DLSS-G input tagging failed.");
 	}
 
+	ProviderResult StreamlinePresentation::CancelFrame(
+		const render::temporal::FrameGenerationRequest& a_request)
+	{
+		const bool tagsCleared = _runtime.ClearDLSSGFrameTags(
+			static_cast<std::uint32_t>(a_request.realFrame),
+			a_request.recording.commandList);
+		const bool disabled = _runtime.ConfigureDLSSG(
+			false,
+			_width,
+			_height,
+			_width,
+			_height,
+			_bufferCount,
+			true);
+		_enabled = false;
+		if (!tagsCleared) {
+			return Failure("DLSS-G cancellation could not invalidate the frame tags.");
+		}
+		return disabled
+			? Success()
+			: Failure("DLSS-G cancellation could not disable the SDK.");
+	}
+
 	ProviderResult StreamlinePresentation::SetGenerationEnabled(bool a_enabled)
 	{
-		if (!_ready) {
+		if (a_enabled && !_ready) {
 			return Failure("DLSS-G presentation is not ready.");
 		}
+		if (!a_enabled && !_runtime.HasDLSSGResources()) {
+			_enabled = false;
+			return Success();
+		}
 		_enabled = a_enabled;
+		if (!a_enabled && !_runtime.ClearCurrentDLSSGFrameTags()) {
+			return Failure("DLSS-G invalid input tags could not be cleared.");
+		}
 		return _runtime.ConfigureDLSSG(
 			a_enabled,
 			_width,
@@ -307,8 +371,13 @@ namespace cs::features
 	ProviderResult StreamlinePresentation::Quiesce()
 	{
 		_enabled = false;
-		if (_ready &&
-			!_runtime.ConfigureDLSSG(
+		if (!_runtime.HasDLSSGResources()) {
+			return Success();
+		}
+		if (!_runtime.ClearCurrentDLSSGFrameTags()) {
+			return Failure("DLSS-G could not invalidate its current input tags.");
+		}
+		if (!_runtime.ConfigureDLSSG(
 				false,
 				_width,
 				_height,
@@ -319,22 +388,38 @@ namespace cs::features
 			return Failure("DLSS-G could not be disabled.");
 		}
 
-		return _runtime.WaitForDLSSGInputs(_queue)
-			? Success()
-			: Failure("DLSS-G inputs did not reach a safe retirement point.");
+		return Success();
 	}
 
-	ProviderResult StreamlinePresentation::WaitForPresentInputs()
+	ProviderResult StreamlinePresentation::AcquirePresentInputs()
 	{
-		return _runtime.WaitForDLSSGInputs(_queue)
-			? Success()
-			: Failure("DLSS-G did not retire present inputs.");
+		return Success();
+	}
+
+	ProviderResult StreamlinePresentation::CollectPresentStatus(
+		UINT a_presentFlags,
+		HRESULT a_presentResult)
+	{
+		if (!render::temporal::ShouldObservePresentStatus(
+				a_presentFlags, a_presentResult)) {
+			return Success();
+		}
+		if (_runtime.PollDLSSGState()) {
+			return Success();
+		}
+		return Failure("DLSS-G reported a post-Present failure.");
 	}
 
 	std::optional<std::uint32_t>
 	StreamlinePresentation::ConsumeGeneratedFrameCount() noexcept
 	{
-		return _runtime.ConsumeDLSSGGeneratedFrameCount();
+		return std::nullopt;
+	}
+
+	std::optional<std::uint32_t>
+	StreamlinePresentation::ConsumePresentedFrameCount() noexcept
+	{
+		return _runtime.ConsumeDLSSGPresentedFrameCount();
 	}
 
 	ProviderResult StreamlinePresentation::Sleep(std::uint32_t a_frame)
@@ -377,19 +462,31 @@ namespace cs::features
 			: Failure("PCL marker failed.");
 	}
 
-	void StreamlinePresentation::ReleaseDisplayResources() noexcept
+	ProviderResult StreamlinePresentation::ReleaseDisplayResources() noexcept
 	{
-		(void)SetGenerationEnabled(false);
-		_runtime.DestroyDLSSGResources();
+		const auto disable = Quiesce();
+		if (!disable.Succeeded()) {
+			return disable;
+		}
+		const auto destroy = _runtime.DestroyDLSSGResources();
+		if (!destroy.Succeeded()) {
+			return destroy;
+		}
 		_ready = false;
+		_enabled = false;
+		return Success();
 	}
 
-	void StreamlinePresentation::DestroyAfterDrain() noexcept
+	ProviderResult StreamlinePresentation::DestroyAfterDrain() noexcept
 	{
-		(void)Quiesce();
-		_runtime.DestroyDLSSGResources();
+		const auto destroy = _runtime.DestroyDLSSGResources();
+		if (!destroy.Succeeded()) {
+			return destroy;
+		}
 		_queue = nullptr;
 		_ready = false;
+		_enabled = false;
+		return Success();
 	}
 
 	bool StreamlinePresentation::IsReady() const noexcept
@@ -400,7 +497,7 @@ namespace cs::features
 
 	XeSSPresentation::~XeSSPresentation()
 	{
-		DestroyAfterDrain();
+		(void)DestroyAfterDrain();
 	}
 
 	const char* XeSSPresentation::Name() const noexcept
@@ -553,57 +650,38 @@ namespace cs::features
 		if (!_ready) {
 			return Failure("XeSS-FG presentation is not ready.");
 		}
+		const auto presentId =
+			static_cast<std::uint32_t>(a_request.realFrame);
+		const auto begin = xess_fg::BeginFrame(
+			_context,
+			presentId,
+			a_request.enabled,
+			_setPresentId,
+			_setEnabled);
+		if (begin.result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+			return Failure(
+				a_request.enabled
+					? "XeSS-FG present ID was rejected."
+					: "XeSS-FG disabled-frame setup failed.",
+				begin.result);
+		}
 		if (!a_request.enabled) {
-			return SetGenerationEnabled(false);
+			_enabled = false;
+			return Success();
 		}
 		if (!a_request.camera.valid ||
+			!a_request.recording.commandList ||
 			!a_request.depth.resource ||
 			!a_request.motionVectors.resource ||
 			!a_request.hudlessColor.resource ||
 			!a_request.finalColor.resource) {
 			return Failure("XeSS-FG frame inputs are incomplete.");
 		}
-		const auto presentId =
-			static_cast<std::uint32_t>(a_request.realFrame);
-		const auto tag = [&](xefg_swapchain_resource_type_t a_type,
-							 const render::temporal::D3D12GpuView& a_view,
-							 std::uint32_t a_width,
-							 std::uint32_t a_height) {
-			const xefg_swapchain_d3d12_resource_data_t resource{
-				.type = a_type,
-				.validity = XEFG_SWAPCHAIN_RV_UNTIL_NEXT_PRESENT,
-				.resourceBase = { 0, 0 },
-				.resourceSize = { a_width, a_height },
-				.pResource = a_view.resource,
-				.incomingState = a_view.state
-			};
-			return _tagResource(
-				_context, nullptr, presentId, &resource);
-		};
-		if (tag(
-				XEFG_SWAPCHAIN_RES_DEPTH,
-				a_request.depth,
-				a_request.renderWidth,
-				a_request.renderHeight) !=
-				XEFG_SWAPCHAIN_RESULT_SUCCESS ||
-			tag(
-				XEFG_SWAPCHAIN_RES_MOTION_VECTOR,
-				a_request.motionVectors,
-				a_request.renderWidth,
-				a_request.renderHeight) !=
-				XEFG_SWAPCHAIN_RESULT_SUCCESS ||
-			tag(
-				XEFG_SWAPCHAIN_RES_HUDLESS_COLOR,
-				a_request.hudlessColor,
-				a_request.outputWidth,
-				a_request.outputHeight) !=
-				XEFG_SWAPCHAIN_RESULT_SUCCESS ||
-			tag(
-				XEFG_SWAPCHAIN_RES_BACKBUFFER,
-				a_request.finalColor,
-				a_request.outputWidth,
-				a_request.outputHeight) !=
-				XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+		const auto tagResult = xess_fg::TagFrameResources(
+			_context,
+			a_request,
+			_tagResource);
+		if (tagResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 			return Failure("XeSS-FG resource tagging failed.");
 		}
 
@@ -649,12 +727,24 @@ namespace cs::features
 		constants.resetHistory = a_request.resetHistory ? 1u : 0u;
 		constants.frameRenderTime = a_request.frameTimeMilliseconds;
 		if (_tagConstants(_context, presentId, &constants) !=
-				XEFG_SWAPCHAIN_RESULT_SUCCESS ||
-			_setPresentId(_context, presentId) !=
 				XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 			return Failure("XeSS-FG frame constants were rejected.");
 		}
 		return SetGenerationEnabled(a_request.enabled);
+	}
+
+	ProviderResult XeSSPresentation::CancelFrame(
+		const render::temporal::FrameGenerationRequest& a_request)
+	{
+		const auto presentIdResult = _setPresentId(
+			_context, static_cast<std::uint32_t>(a_request.realFrame));
+		const auto disabled = SetGenerationEnabled(false);
+		if (presentIdResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+			return Failure(
+				"XeSS-FG cancellation could not set the present ID.",
+				presentIdResult);
+		}
+		return disabled;
 	}
 
 	ProviderResult XeSSPresentation::SetGenerationEnabled(bool a_enabled)
@@ -670,26 +760,79 @@ namespace cs::features
 		return Failure("XeSS-FG enablement change failed.", result);
 	}
 
-	ProviderResult XeSSPresentation::WaitForPresentInputs()
+	ProviderResult XeSSPresentation::AcquirePresentInputs()
 	{
-		if (!_ready) {
+		return Success();
+	}
+
+	ProviderResult XeSSPresentation::CollectPresentStatus(
+		UINT a_presentFlags,
+		HRESULT a_presentResult)
+	{
+		if (!_ready ||
+			!render::temporal::ShouldObservePresentStatus(
+				a_presentFlags, a_presentResult)) {
 			return Success();
 		}
-		xefg_swapchain_present_status_t status{};
-		const auto result = _getPresentStatus(_context, &status);
-		if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
-			status.framesPresented > 1) {
-			_generatedFrames += status.framesPresented - 1;
+		const auto observation = xess_fg::ObservePresentStatus(
+			_context, _enabled, _getPresentStatus);
+		if (observation.classification ==
+			xess_fg::PresentStatusClass::kError) {
+			_generatedCountAvailable = false;
+			_presentedCountAvailable = false;
+			return static_cast<int>(observation.queryResult) < 0
+				? Failure(
+					"XeSS-FG present status query failed.",
+					observation.queryResult)
+				: Failure(
+					"XeSS-FG interpolation failed.",
+					observation.frameResult);
 		}
-		return result == XEFG_SWAPCHAIN_RESULT_SUCCESS ||
-				result == XEFG_SWAPCHAIN_RESULT_WARNING_MISSING_PRESENT_STATUS
-			? Success()
-			: Failure("XeSS-FG present inputs were not retired.", result);
+		if (observation.classification ==
+			xess_fg::PresentStatusClass::kUnavailable) {
+			_generatedCountAvailable = false;
+			_presentedCountAvailable = false;
+			return Success();
+		}
+		_generatedCountAvailable = observation.countAvailable;
+		_presentedCountAvailable = observation.countAvailable;
+		_presentedFrames += observation.presentedFrames;
+		_generatedFrames += observation.generatedFrames;
+		if (observation.classification ==
+			xess_fg::PresentStatusClass::kWarning) {
+			CS_LOG_EVERY_MS(
+				L,
+				1000,
+				spdlog::level::warn,
+				"XeSS-FG present warning: query={} frame={} enabled={}",
+				static_cast<int>(observation.queryResult),
+				static_cast<int>(observation.frameResult),
+				observation.reportedEnabled);
+			return Success();
+		}
+		if (!observation.enablementMatches) {
+			return Failure(
+				"XeSS-FG reported an enablement state different from the submitted frame.");
+		}
+		return Success();
 	}
 
 	std::optional<std::uint32_t> XeSSPresentation::ConsumeGeneratedFrameCount() noexcept
 	{
+		if (!_generatedCountAvailable) {
+			return std::nullopt;
+		}
+		_generatedCountAvailable = false;
 		return std::exchange(_generatedFrames, 0);
+	}
+
+	std::optional<std::uint32_t> XeSSPresentation::ConsumePresentedFrameCount() noexcept
+	{
+		if (!_presentedCountAvailable) {
+			return std::nullopt;
+		}
+		_presentedCountAvailable = false;
+		return std::exchange(_presentedFrames, 0);
 	}
 
 	ProviderResult XeSSPresentation::Sleep(std::uint32_t a_frame)
@@ -745,22 +888,34 @@ namespace cs::features
 		return _ready ? SetGenerationEnabled(false) : Success();
 	}
 
-	void XeSSPresentation::ReleaseDisplayResources() noexcept
+	ProviderResult XeSSPresentation::ReleaseDisplayResources() noexcept
 	{
-		(void)Quiesce();
+		return Quiesce();
 	}
 
-	void XeSSPresentation::DestroyAfterDrain() noexcept
+	ProviderResult XeSSPresentation::DestroyAfterDrain() noexcept
 	{
-		(void)Quiesce();
-		if (_context && _destroyContext) {
-			(void)_destroyContext(_context);
+		const auto quiesce = Quiesce();
+		if (!quiesce.Succeeded()) {
+			return quiesce;
 		}
-		_context = nullptr;
-		if (_latency && _destroyLatency) {
-			(void)_destroyLatency(_latency);
+		if ((_context && !_destroyContext) ||
+			(_latency && !_destroyLatency)) {
+			return Failure(
+				"XeSS-FG or XeLL destruction export is unavailable.");
 		}
-		_latency = nullptr;
+		const auto destruction = xess_fg::DestroyContexts(
+			_context,
+			_latency,
+			_destroyContext,
+			_destroyLatency);
+		_ready = _context != nullptr;
+		_enabled = false;
+		if (!destruction.succeeded) {
+			return Failure(
+				std::string(destruction.operation) + " failed.",
+				destruction.sdkResult);
+		}
 		if (_frameGenerationModule) {
 			FreeLibrary(_frameGenerationModule);
 		}
@@ -770,9 +925,11 @@ namespace cs::features
 		_frameGenerationModule = nullptr;
 		_latencyModule = nullptr;
 		_queue = nullptr;
-		_ready = false;
-		_enabled = false;
 		_generatedFrames = 0;
+		_presentedFrames = 0;
+		_generatedCountAvailable = false;
+		_presentedCountAvailable = false;
+		return Success();
 	}
 
 	bool XeSSPresentation::IsReady() const noexcept

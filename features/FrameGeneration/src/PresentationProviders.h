@@ -33,17 +33,22 @@ namespace cs::features
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
+		[[nodiscard]] render::temporal::ProviderResult CancelFrame(
+			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
 			bool a_enabled) override;
-		[[nodiscard]] render::temporal::ProviderResult WaitForPresentInputs() override;
+		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
+		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
+			UINT a_presentFlags,
+			HRESULT a_presentResult) override;
 		[[nodiscard]] render::temporal::ProviderResult Sleep(
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult SetLatencyMarker(
 			render::temporal::LatencyMarker a_marker,
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult Quiesce() override;
-		void ReleaseDisplayResources() noexcept override;
-		void DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult ReleaseDisplayResources() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult DestroyAfterDrain() noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
@@ -74,18 +79,24 @@ namespace cs::features
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
+		[[nodiscard]] render::temporal::ProviderResult CancelFrame(
+			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
 			bool a_enabled) override;
-		[[nodiscard]] render::temporal::ProviderResult WaitForPresentInputs() override;
+		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
+		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
+			UINT a_presentFlags,
+			HRESULT a_presentResult) override;
 		[[nodiscard]] std::optional<std::uint32_t> ConsumeGeneratedFrameCount() noexcept override;
+		[[nodiscard]] std::optional<std::uint32_t> ConsumePresentedFrameCount() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult Sleep(
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult SetLatencyMarker(
 			render::temporal::LatencyMarker a_marker,
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult Quiesce() override;
-		void ReleaseDisplayResources() noexcept override;
-		void DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult ReleaseDisplayResources() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult DestroyAfterDrain() noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
@@ -96,7 +107,6 @@ namespace cs::features
 		std::uint32_t _bufferCount = 0;
 		bool _enabled = false;
 		bool _ready = false;
-		std::uint32_t _generatedFrames = 0;
 	};
 
 	class XeSSPresentation final :
@@ -120,18 +130,24 @@ namespace cs::features
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
+		[[nodiscard]] render::temporal::ProviderResult CancelFrame(
+			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
 			bool a_enabled) override;
-		[[nodiscard]] render::temporal::ProviderResult WaitForPresentInputs() override;
+		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
+		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
+			UINT a_presentFlags,
+			HRESULT a_presentResult) override;
 		[[nodiscard]] std::optional<std::uint32_t> ConsumeGeneratedFrameCount() noexcept override;
+		[[nodiscard]] std::optional<std::uint32_t> ConsumePresentedFrameCount() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult Sleep(
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult SetLatencyMarker(
 			render::temporal::LatencyMarker a_marker,
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult Quiesce() override;
-		void ReleaseDisplayResources() noexcept override;
-		void DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult ReleaseDisplayResources() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult DestroyAfterDrain() noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
@@ -150,6 +166,9 @@ namespace cs::features
 		bool _ready = false;
 		bool _enabled = false;
 		std::uint32_t _generatedFrames = 0;
+		std::uint32_t _presentedFrames = 0;
+		bool _generatedCountAvailable = false;
+		bool _presentedCountAvailable = false;
 
 		decltype(&xefgSwapChainD3D12CreateContext) _createContext = nullptr;
 		decltype(&xefgSwapChainD3D12InitFromSwapChainDesc) _initialize = nullptr;

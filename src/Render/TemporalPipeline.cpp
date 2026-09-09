@@ -153,8 +153,11 @@ namespace cs::render
 		temporal::LatencyTimeline latency;
 		std::atomic_bool latencyHooksInstalled{ false };
 		std::atomic_bool latencySdkActive{ false };
+		std::atomic_bool latencyFailureReported{ false };
 		std::atomic_uint64_t generatedFrames{ 0 };
 		std::atomic_bool generatedFrameCountAvailable{ false };
+		std::atomic_uint64_t providerPresentedFrames{ 0 };
+		std::atomic_bool providerPresentedFrameCountAvailable{ false };
 		std::atomic_bool inputsCaptured{ false };
 		std::atomic_bool hudlessCapturePending{ false };
 		std::atomic_bool alphaConditioned{ false };
@@ -422,8 +425,17 @@ namespace cs::render
 		_impl->renderer.ApplyConfiguration(renderSettings, eligible);
 		cs::engine::RefreshFrameBufferContextHooks();
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			(void)_impl->activePresentation->Sleep(
+			const auto result = _impl->activePresentation->Sleep(
 				static_cast<std::uint32_t>(frame));
+			if (!result.Succeeded() &&
+				!_impl->latencyFailureReported.exchange(
+					true, std::memory_order_acq_rel)) {
+				PostFailure(
+					temporal::FailureDomain::kFrameGeneration,
+					result.message.empty()
+						? "The selected latency provider rejected Sleep."
+						: result.message);
+			}
 		}
 		cs::render::annotation::SetMarker(
 			"Temporal/Latency/Sleep");
@@ -440,17 +452,29 @@ namespace cs::render
 			frame = _impl->latency.Frame();
 		}
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			(void)_impl->activePresentation->SetLatencyMarker(
-				temporal::LatencyMarker::kInputSample,
-				static_cast<std::uint32_t>(frame));
-			(void)_impl->activePresentation->SetLatencyMarker(
+			// XeLL requires simulation start to be the first marker after sleep.
+			const auto simulationResult = _impl->activePresentation->SetLatencyMarker(
 				temporal::LatencyMarker::kSimulationStart,
 				static_cast<std::uint32_t>(frame));
+			const auto inputResult = _impl->activePresentation->SetLatencyMarker(
+				temporal::LatencyMarker::kInputSample,
+				static_cast<std::uint32_t>(frame));
+			const auto& result =
+				!simulationResult.Succeeded() ? simulationResult : inputResult;
+			if (!result.Succeeded() &&
+				!_impl->latencyFailureReported.exchange(
+					true, std::memory_order_acq_rel)) {
+				PostFailure(
+					temporal::FailureDomain::kFrameGeneration,
+					result.message.empty()
+						? "The selected latency provider rejected a simulation marker."
+						: result.message);
+			}
 		}
 		cs::render::annotation::SetMarker(
-			"Temporal/Latency/InputSample");
-		cs::render::annotation::SetMarker(
 			"Temporal/Latency/SimulationStart");
+		cs::render::annotation::SetMarker(
+			"Temporal/Latency/InputSample");
 	}
 
 	void TemporalPipeline::EndSimulationAndBeginRenderSubmit() noexcept
@@ -464,12 +488,23 @@ namespace cs::render
 			frame = _impl->latency.Frame();
 		}
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			(void)_impl->activePresentation->SetLatencyMarker(
+			const auto simulationResult = _impl->activePresentation->SetLatencyMarker(
 				temporal::LatencyMarker::kSimulationEnd,
 				static_cast<std::uint32_t>(frame));
-			(void)_impl->activePresentation->SetLatencyMarker(
+			const auto submitResult = _impl->activePresentation->SetLatencyMarker(
 				temporal::LatencyMarker::kRenderSubmitStart,
 				static_cast<std::uint32_t>(frame));
+			const auto& result =
+				!simulationResult.Succeeded() ? simulationResult : submitResult;
+			if (!result.Succeeded() &&
+				!_impl->latencyFailureReported.exchange(
+					true, std::memory_order_acq_rel)) {
+				PostFailure(
+					temporal::FailureDomain::kFrameGeneration,
+					result.message.empty()
+						? "The selected latency provider rejected a render-submit marker."
+						: result.message);
+			}
 		}
 		cs::render::annotation::SetMarker(
 			"Temporal/Latency/SimulationEnd");
@@ -493,17 +528,35 @@ namespace cs::render
 		}
 		if (renderSubmitEnd) {
 			if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-				(void)_impl->activePresentation->SetLatencyMarker(
+				const auto result = _impl->activePresentation->SetLatencyMarker(
 					temporal::LatencyMarker::kRenderSubmitEnd,
 					static_cast<std::uint32_t>(frame));
+				if (!result.Succeeded() &&
+					!_impl->latencyFailureReported.exchange(
+						true, std::memory_order_acq_rel)) {
+					PostFailure(
+						temporal::FailureDomain::kFrameGeneration,
+						result.message.empty()
+							? "The selected latency provider rejected the render-submit end marker."
+							: result.message);
+				}
 			}
 			cs::render::annotation::SetMarker(
 				"Temporal/Latency/RenderSubmitEnd");
 		}
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			(void)_impl->activePresentation->SetLatencyMarker(
+			const auto result = _impl->activePresentation->SetLatencyMarker(
 				temporal::LatencyMarker::kPresentStart,
 				static_cast<std::uint32_t>(frame));
+			if (!result.Succeeded() &&
+				!_impl->latencyFailureReported.exchange(
+					true, std::memory_order_acq_rel)) {
+				PostFailure(
+					temporal::FailureDomain::kFrameGeneration,
+					result.message.empty()
+						? "The selected latency provider rejected the present-start marker."
+						: result.message);
+			}
 		}
 		cs::render::annotation::SetMarker(
 			"Temporal/Latency/PresentStart");
@@ -524,9 +577,18 @@ namespace cs::render
 			frame = _impl->latency.Frame();
 		}
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			(void)_impl->activePresentation->SetLatencyMarker(
+			const auto result = _impl->activePresentation->SetLatencyMarker(
 				temporal::LatencyMarker::kPresentEnd,
 				static_cast<std::uint32_t>(frame));
+			if (!result.Succeeded() &&
+				!_impl->latencyFailureReported.exchange(
+					true, std::memory_order_acq_rel)) {
+				PostFailure(
+					temporal::FailureDomain::kFrameGeneration,
+					result.message.empty()
+						? "The selected latency provider rejected the present-end marker."
+						: result.message);
+			}
 		}
 		cs::render::annotation::SetMarker(
 			"Temporal/Latency/PresentEnd");
@@ -812,10 +874,18 @@ namespace cs::render
 				_impl->activePresentation = &provider;
 			}
 		} catch (const std::exception& e) {
-			_impl->swapChain.Rollback();
+			if (FAILED(_impl->swapChain.Rollback())) {
+				PostFailure(
+					temporal::FailureDomain::kTransport,
+					"Frame-generation proxy rollback failed after initialization error.");
+			}
 			PostFailure(temporal::FailureDomain::kTransport, e.what());
 		} catch (...) {
-			_impl->swapChain.Rollback();
+			if (FAILED(_impl->swapChain.Rollback())) {
+				PostFailure(
+					temporal::FailureDomain::kTransport,
+					"Frame-generation proxy rollback failed after initialization error.");
+			}
 			PostFailure(
 				temporal::FailureDomain::kTransport,
 				"Frame-generation proxy construction raised a non-standard exception.");
@@ -889,8 +959,15 @@ namespace cs::render
 				if (a_method == temporal::SuperResolutionMethod::kFSR3)
 					return _impl->fsrProvider.Initialize(init);
 				if (a_method == temporal::SuperResolutionMethod::kDLSS) {
-					if (_impl->streamline.IsD3D12Session())
+					if (_impl->streamline.IsD3D12Session()) {
+						if (!_impl->swapChain.IsBridgeReady()) {
+							return {
+								.code = temporal::ProviderResultCode::kUnavailable,
+								.message = "DLSS has no usable D3D12 transport after presentation initialization."
+							};
+						}
 						init.device = _impl->swapChain.GetD3D12Device();
+					}
 					auto result = _impl->dlssProvider.Initialize(init);
 					if (result.Succeeded() &&
 						!_impl->streamline.IsD3D12Session()) {
@@ -1259,6 +1336,17 @@ namespace cs::render
 			a_count.has_value(), std::memory_order_relaxed);
 	}
 
+	void TemporalPipeline::RecordPresentedFrames(
+		std::optional<std::uint32_t> a_count) noexcept
+	{
+		if (a_count) {
+			_impl->providerPresentedFrames.fetch_add(
+				*a_count, std::memory_order_relaxed);
+		}
+		_impl->providerPresentedFrameCountAvailable.store(
+			a_count.has_value(), std::memory_order_relaxed);
+	}
+
 	TemporalPipelineStatus TemporalPipeline::GetStatus() const
 	{
 		std::scoped_lock lock(_impl->mutex);
@@ -1388,6 +1476,19 @@ namespace cs::render
 				_impl->generatedFrames.load(std::memory_order_relaxed),
 			.generatedFrameCountAvailable =
 				_impl->generatedFrameCountAvailable.load(std::memory_order_relaxed),
+			.providerPresentedFrames =
+				_impl->providerPresentedFrames.load(std::memory_order_relaxed),
+			.providerPresentedFrameCountAvailable =
+				_impl->providerPresentedFrameCountAvailable.load(
+					std::memory_order_relaxed),
+			.fidelityFxProviderVersionAvailable =
+				_impl->fidelityFX.IsFrameGenerationProviderVersionAvailable(),
+			.fidelityFxProviderVersionId =
+				_impl->fidelityFX.GetFrameGenerationProviderVersionId(),
+			.fidelityFxProviderVersionName =
+				_impl->fidelityFX.GetFrameGenerationProviderVersionName(),
+			.fidelityFxProviderVersionQueryResult =
+				_impl->fidelityFX.GetFrameGenerationProviderVersionQueryResult(),
 			.failures =
 				_impl->frameGenerationFailures.load(
 					std::memory_order_relaxed),
@@ -1420,6 +1521,11 @@ namespace cs::render
 			.height = _impl->swapChain.GetHeight(),
 			.frameSlot = _impl->swapChain.GetFrameSlot()
 		};
+	}
+
+	bool TemporalPipeline::AcquireFrameGenerationInputWrite() noexcept
+	{
+		return _impl->swapChain.AcquireFrameGenerationInputWrite();
 	}
 
 	void TemporalPipeline::SetFrameGenerationInputsReady(
