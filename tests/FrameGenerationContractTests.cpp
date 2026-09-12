@@ -572,6 +572,7 @@ namespace
 			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
 			73,
 			false,
+			true,
 			[&](xefg_swapchain_handle_t, std::uint32_t a_id) {
 				events.emplace_back("id:" + std::to_string(a_id));
 				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
@@ -585,33 +586,55 @@ namespace
 			disabled.result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
 				disabled.enablementApplied &&
 				events == std::vector<std::string>{
-					"id:73", "enabled:0" },
-			"XeSS applies the real Present ID before disabling an inactive frame");
+					"enabled:0", "id:73" },
+			"XeSS applies disable transitions and still publishes the real Present ID");
 
 		events.clear();
 		const auto enabled = cs::features::xess_fg::BeginFrame(
 			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
 			74,
 			true,
+			false,
 			[&](xefg_swapchain_handle_t, std::uint32_t a_id) {
 				events.emplace_back("id:" + std::to_string(a_id));
 				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
 			},
-			[&](xefg_swapchain_handle_t, std::uint32_t) {
-				events.emplace_back("unexpected-enable");
+			[&](xefg_swapchain_handle_t, std::uint32_t a_enabled) {
+				events.emplace_back("enabled:" + std::to_string(a_enabled));
 				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
 			});
 		Check(
 			enabled.result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
-				!enabled.enablementApplied &&
-				events == std::vector<std::string>{ "id:74" },
-			"XeSS enabled-frame setup records the ID without premature enablement");
+				enabled.enablementApplied &&
+				events == std::vector<std::string>{ "enabled:1", "id:74" },
+			"XeSS enables and cleans old history before the new frame is tagged");
+
+		for (const bool active : { false, true }) {
+			events.clear();
+			const auto unchanged = cs::features::xess_fg::BeginFrame(
+				reinterpret_cast<xefg_swapchain_handle_t>(0x1),
+				75, active, active,
+				[&](xefg_swapchain_handle_t, std::uint32_t) {
+					events.emplace_back("id");
+					return XEFG_SWAPCHAIN_RESULT_SUCCESS;
+				},
+				[&](xefg_swapchain_handle_t, std::uint32_t) {
+					events.emplace_back("unexpected-enable");
+					return XEFG_SWAPCHAIN_RESULT_SUCCESS;
+				});
+			Check(
+				unchanged.result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
+					!unchanged.enablementApplied &&
+					events == std::vector<std::string>{ "id" },
+				"steady enabled and disabled frames update IDs without changing history state");
+		}
 
 		events.clear();
 		const auto idFailure = cs::features::xess_fg::BeginFrame(
 			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
 			75,
 			false,
+			true,
 			[&](xefg_swapchain_handle_t, std::uint32_t) {
 				events.emplace_back("id");
 				return XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT;
@@ -623,8 +646,27 @@ namespace
 		Check(
 			idFailure.result ==
 					XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT &&
-				events == std::vector<std::string>{ "id" },
-			"XeSS disabled-frame setup short-circuits when the Present ID is rejected");
+				idFailure.enablementApplied &&
+				events == std::vector<std::string>{ "enabled", "id" },
+			"SDK enablement state remains trackable when the subsequent Present ID fails");
+
+		events.clear();
+		const auto enableFailure = cs::features::xess_fg::BeginFrame(
+			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
+			76, true, false,
+			[&](xefg_swapchain_handle_t, std::uint32_t) {
+				events.emplace_back("unexpected-id");
+				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
+			},
+			[&](xefg_swapchain_handle_t, std::uint32_t) {
+				events.emplace_back("enable");
+				return XEFG_SWAPCHAIN_RESULT_ERROR_DEVICE;
+			});
+		Check(
+			enableFailure.result == XEFG_SWAPCHAIN_RESULT_ERROR_DEVICE &&
+				!enableFailure.enablementApplied &&
+				events == std::vector<std::string>{ "enable" },
+			"failed enablement stops before accepting a new frame packet");
 
 		Check(
 			cs::render::temporal::ShouldObservePresentStatus(0, S_OK),

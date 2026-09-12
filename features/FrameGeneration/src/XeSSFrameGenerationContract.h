@@ -23,20 +23,23 @@ namespace cs::features::xess_fg
 		xefg_swapchain_handle_t a_context,
 		std::uint32_t a_presentId,
 		bool a_enabled,
+		bool a_previouslyEnabled,
 		SetPresentId&& a_setPresentId,
 		SetEnabled&& a_setEnabled)
 	{
-		auto result = std::forward<SetPresentId>(a_setPresentId)(
-			a_context, a_presentId);
-		if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS || a_enabled) {
-			return { .result = result };
+		const bool changed = a_enabled != a_previouslyEnabled;
+		if (changed) {
+			// Enabling clears pending history; it must precede the new input tags.
+			const auto result = std::forward<SetEnabled>(a_setEnabled)(
+				a_context, a_enabled ? 1u : 0u);
+			if (result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+				return { .result = result };
+			}
 		}
-		result = std::forward<SetEnabled>(a_setEnabled)(
-			a_context, 0u);
 		return {
-			.result = result,
-			.enablementApplied =
-				result == XEFG_SWAPCHAIN_RESULT_SUCCESS
+			.result = std::forward<SetPresentId>(a_setPresentId)(
+				a_context, a_presentId),
+			.enablementApplied = changed
 		};
 	}
 

@@ -691,17 +691,18 @@ namespace cs::features
 			_context,
 			presentId,
 			a_request.enabled,
+			_enabled,
 			_setPresentId,
 			_setEnabled);
+		if (begin.enablementApplied) {
+			_enabled = a_request.enabled;
+		}
 		if (begin.result != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 			return Failure(
-				a_request.enabled
-					? "XeSS-FG present ID was rejected."
-					: "XeSS-FG disabled-frame setup failed.",
+				"XeSS-FG frame enablement or present ID was rejected.",
 				begin.result);
 		}
 		if (!a_request.enabled) {
-			_enabled = false;
 			return Success();
 		}
 		if (!a_request.camera.valid ||
@@ -765,7 +766,7 @@ namespace cs::features
 				XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 			return Failure("XeSS-FG frame constants were rejected.");
 		}
-		return SetGenerationEnabled(a_request.enabled);
+		return Success();
 	}
 
 	ProviderResult XeSSPresentation::CancelFrame(
@@ -786,6 +787,9 @@ namespace cs::features
 	{
 		if (!_ready || !_setEnabled) {
 			return Failure("XeSS-FG presentation is not ready.");
+		}
+		if (a_enabled == _enabled) {
+			return Success();
 		}
 		const auto result = _setEnabled(_context, a_enabled ? 1u : 0u);
 		if (result == XEFG_SWAPCHAIN_RESULT_SUCCESS) {
