@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Render/FrameGenerationCpuTiming.h"
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
 #include "Render/SwapChainHook.h"
@@ -114,6 +115,12 @@ namespace cs::render
 		bool cameraValid = false;
 		std::int64_t cameraFrameDelta = 0;
 		double cameraFovDegrees = 0.0;
+		bool cpuPhaseTimingsAvailable = false;
+		std::array<CpuPhaseTimingStats,
+			FrameGenerationCpuTimingCollector<>::kPhaseCount>
+			cpuPhaseTimings{};
+		bool frameTimeInputAvailable = false;
+		double lastFrameTimeInputMilliseconds = 0.0;
 	};
 
 	struct FrameGenerationDebugTexture
@@ -179,6 +186,11 @@ namespace cs::render
 			HRESULT a_result) noexcept;
 		void RecordGeneratedFrames(std::optional<std::uint32_t> a_count) noexcept;
 		void RecordPresentedFrames(std::optional<std::uint32_t> a_count) noexcept;
+		[[nodiscard]] FrameGenerationCpuTimingCollector<>::Scope
+			MeasureFrameGenerationCpuPhase(
+				FrameGenerationCpuPhase a_phase) noexcept;
+		void RecordFrameGenerationFrameTimeInput(
+			float a_milliseconds) noexcept;
 
 		[[nodiscard]] TemporalPipelineStatus GetStatus() const;
 		TemporalRenderer& Renderer() noexcept;

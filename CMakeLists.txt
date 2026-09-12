@@ -638,6 +638,7 @@ set_tests_properties(FrameGenerationCamera PROPERTIES LABELS "render;unit")
 
 add_executable(FrameGenerationContractTests
 	tests/FrameGenerationContractTests.cpp
+	src/Render/FrameGenerationCpuTiming.h
 	src/Render/FrameGenerationOrchestration.h
 	features/FrameGeneration/src/FidelityFXFrameGenerationContract.h
 	features/FrameGeneration/src/StreamlineFrameGenerationContract.h
@@ -652,7 +653,12 @@ target_include_directories(FrameGenerationContractTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/extern/Streamline/include"
 )
 
-add_test(NAME FrameGenerationContract COMMAND FrameGenerationContractTests)
+add_test(
+	NAME FrameGenerationContract
+	COMMAND FrameGenerationContractTests
+		"${CMAKE_SOURCE_DIR}/src/Render/TemporalPipeline.cpp"
+		"${CMAKE_SOURCE_DIR}/features/Upscaling/src/DX12SwapChain.cpp"
+)
 set_tests_properties(FrameGenerationContract PROPERTIES LABELS "render;contract;unit")
 
 add_executable(FrustumEmbedTests

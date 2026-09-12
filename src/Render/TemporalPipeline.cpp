@@ -170,7 +170,8 @@ namespace cs::render
 		std::array<TemporalTraceEntry, kTraceCapacity> trace;
 		std::uint64_t traceSequence = 0;
 		std::size_t traceCount = 0;
-		bool detailedTracing = false;
+		std::atomic_bool detailedTracing{ false };
+		FrameGenerationCpuTimingCollector<> frameGenerationCpuTimings;
 		features::Streamline streamline;
 		features::FidelityFX fidelityFX;
 		features::XeSSSuperResolution xess;
@@ -187,7 +188,7 @@ namespace cs::render
 			const temporal::FrameTransaction& a_frame,
 			HRESULT a_result = S_OK) noexcept
 		{
-			if (!detailedTracing) {
+			if (!detailedTracing.load(std::memory_order_relaxed)) {
 				return;
 			}
 			const auto sequence = ++traceSequence;
@@ -403,9 +404,17 @@ namespace cs::render
 
 	void TemporalPipeline::SetDetailedTracing(bool a_enabled) noexcept
 	{
-		std::scoped_lock lock(_impl->mutex);
-		_impl->detailedTracing = a_enabled;
-		if (!a_enabled) {
+		if (a_enabled ==
+			_impl->detailedTracing.load(std::memory_order_acquire)) {
+			return;
+		}
+		if (a_enabled) {
+			_impl->frameGenerationCpuTimings.SetEnabled(true);
+			_impl->detailedTracing.store(true, std::memory_order_release);
+		} else {
+			_impl->detailedTracing.store(false, std::memory_order_release);
+			_impl->frameGenerationCpuTimings.SetEnabled(false);
+			std::scoped_lock lock(_impl->mutex);
 			_impl->traceCount = 0;
 		}
 	}
@@ -425,8 +434,12 @@ namespace cs::render
 		_impl->renderer.ApplyConfiguration(renderSettings, eligible);
 		cs::engine::RefreshFrameBufferContextHooks();
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			const auto result = _impl->activePresentation->Sleep(
-				static_cast<std::uint32_t>(frame));
+			const auto result = [&] {
+				auto timing = MeasureFrameGenerationCpuPhase(
+					FrameGenerationCpuPhase::kLatencySleep);
+				return _impl->activePresentation->Sleep(
+					static_cast<std::uint32_t>(frame));
+			}();
 			if (!result.Succeeded() &&
 				!_impl->latencyFailureReported.exchange(
 					true, std::memory_order_acq_rel)) {
@@ -1349,6 +1362,20 @@ namespace cs::render
 			a_count.has_value(), std::memory_order_relaxed);
 	}
 
+	FrameGenerationCpuTimingCollector<>::Scope
+		TemporalPipeline::MeasureFrameGenerationCpuPhase(
+			FrameGenerationCpuPhase a_phase) noexcept
+	{
+		return _impl->frameGenerationCpuTimings.Measure(a_phase);
+	}
+
+	void TemporalPipeline::RecordFrameGenerationFrameTimeInput(
+		float a_milliseconds) noexcept
+	{
+		_impl->frameGenerationCpuTimings.RecordFrameTimeInput(
+			static_cast<double>(a_milliseconds));
+	}
+
 	TemporalPipelineStatus TemporalPipeline::GetStatus() const
 	{
 		std::scoped_lock lock(_impl->mutex);
@@ -1424,6 +1451,11 @@ namespace cs::render
 	FrameGenerationDiagnostics
 		TemporalPipeline::GetFrameGenerationDiagnostics() const noexcept
 	{
+		auto cpuTimings =
+			_impl->frameGenerationCpuTimings.GetSnapshot();
+		if (!_impl->detailedTracing.load(std::memory_order_acquire)) {
+			cpuTimings = {};
+		}
 		const auto& camera = cs::engine::GetFrameBuffer();
 		const auto* state = cs::engine::GetGraphicsState();
 		const float fov = camera.valid
@@ -1497,7 +1529,16 @@ namespace cs::render
 			.cameraValid = camera.valid && fov > 0.0f,
 			.cameraFrameDelta = frameDelta,
 			.cameraFovDegrees =
-				static_cast<double>(fov) * 180.0 / std::numbers::pi
+				static_cast<double>(fov) * 180.0 / std::numbers::pi,
+			.cpuPhaseTimingsAvailable = cpuTimings.available,
+			.cpuPhaseTimings = cpuTimings.phases,
+			.frameTimeInputAvailable =
+				cpuTimings.available &&
+				cpuTimings.frameTimeInputAvailable,
+			.lastFrameTimeInputMilliseconds =
+				cpuTimings.available
+					? cpuTimings.lastFrameTimeInputMilliseconds
+					: 0.0
 		};
 	}
 

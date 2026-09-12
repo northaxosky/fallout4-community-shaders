@@ -187,6 +187,23 @@ namespace cs::features
 		const auto status = render::TemporalPipeline::Get().GetStatus();
 		const auto diagnostics =
 			render::TemporalPipeline::Get().GetFrameGenerationDiagnostics();
+		const auto publishCpuTiming =
+			[&](render::FrameGenerationCpuPhase a_phase,
+				std::string_view a_name) {
+				const auto& timing = diagnostics.cpuPhaseTimings[
+					static_cast<std::size_t>(a_phase)];
+				const std::string prefix =
+					"cpu_wall_" + std::string(a_name);
+				a_sink
+					.Field(prefix + "_sample_count", static_cast<std::int64_t>(
+						timing.sampleCount))
+					.Field(prefix + "_window_sample_count", static_cast<std::int64_t>(
+						timing.windowSampleCount))
+					.Field(prefix + "_window_mean_ms",
+						timing.windowMeanMilliseconds)
+					.Field(prefix + "_window_max_ms",
+						timing.windowMaxMilliseconds);
+			};
 		a_sink
 			.Field("requested_enabled", settings.enabled)
 			.Field(
@@ -284,6 +301,46 @@ namespace cs::features
 				static_cast<std::int64_t>(status.traceEntryCount))
 			.Field("pending_restart", status.pending.required)
 			.Field("failure", status.failure);
+		a_sink
+			.Field(
+				"cpu_phase_timings_available",
+				diagnostics.cpuPhaseTimingsAvailable)
+			.Field("cpu_phase_timing_units", std::string_view{ "milliseconds" })
+			.Field(
+				"cpu_phase_timing_window_capacity",
+				static_cast<std::int64_t>(
+					render::FrameGenerationCpuTimingCollector<>::kCapacity))
+			.Field("cpu_phase_timings_are_gpu_execution", false)
+			.Field("copy_record_cpu_is_gpu_copy_cost", false)
+			.Field(
+				"last_fg_frame_time_input_available",
+				diagnostics.frameTimeInputAvailable)
+			.Field(
+				"last_fg_frame_time_input_ms",
+				diagnostics.lastFrameTimeInputMilliseconds)
+			.Field("sdk_present_cpu_excludes_test", true)
+			.Field("sdk_present_cpu_includes_retries", true);
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kLatencySleep,
+			"latency_sleep");
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kAcquirePresentInputs,
+			"acquire_present_inputs");
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kAllocatorFenceWait,
+			"allocator_fence_wait");
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kCopyRecord,
+			"copy_record");
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kPrepareFrame,
+			"prepare_frame");
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kSdkPresent,
+			"sdk_present");
+		publishCpuTiming(
+			render::FrameGenerationCpuPhase::kCollectPresentStatus,
+			"collect_present_status");
 	}
 
 	std::span<const FeatureDebugView> FrameGeneration::GetDebugViews() const noexcept

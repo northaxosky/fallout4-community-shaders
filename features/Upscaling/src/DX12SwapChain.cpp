@@ -1313,6 +1313,10 @@ namespace cs::features
 		const bool acquired = _inputReuseGate.Acquire(
 			_frameSlot,
 			[&]() {
+				auto timing = render::TemporalPipeline::Get()
+					.MeasureFrameGenerationCpuPhase(
+						render::FrameGenerationCpuPhase::
+							kAcquirePresentInputs);
 				result = _provider->AcquirePresentInputs();
 				return result.Succeeded();
 			});
@@ -1423,7 +1427,13 @@ namespace cs::features
 			const UINT64 d3d11Ready = _nextFenceValue++;
 			DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
 			DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Ready));
-			DX::ThrowIfFailed(WaitForFrame(_frameSlot));
+			{
+				auto timing = render::TemporalPipeline::Get()
+					.MeasureFrameGenerationCpuPhase(
+						render::FrameGenerationCpuPhase::
+							kAllocatorFenceWait);
+				DX::ThrowIfFailed(WaitForFrame(_frameSlot));
+			}
 			DX::ThrowIfFailed(_allocators[_frameSlot]->Reset());
 			DX::ThrowIfFailed(_commandLists[_frameSlot]->Reset(
 				_allocators[_frameSlot].get(),
@@ -1431,6 +1441,9 @@ namespace cs::features
 
 			auto* commandList = _commandLists[_frameSlot].get();
 			{
+				auto timing = render::TemporalPipeline::Get()
+					.MeasureFrameGenerationCpuPhase(
+						render::FrameGenerationCpuPhase::kCopyRecord);
 				cs::render::annotation::ScopedEvent copyScope(
 					commandList, "FG_CopyRealFrame");
 				const std::array barriersBefore{
@@ -1492,8 +1505,15 @@ namespace cs::features
 					.color = frameState.color,
 					.camera = frameState.camera
 				};
-				const auto preparation =
-					render::temporal::PrepareFrameSafely(*_provider, request);
+				auto& pipeline = render::TemporalPipeline::Get();
+				pipeline.RecordFrameGenerationFrameTimeInput(
+					request.frameTimeMilliseconds);
+				const auto preparation = [&] {
+					auto timing = pipeline.MeasureFrameGenerationCpuPhase(
+						render::FrameGenerationCpuPhase::kPrepareFrame);
+					return render::temporal::PrepareFrameSafely(
+						*_provider, request);
+				}();
 				const auto& prepareResult = preparation.prepare;
 				frameGenerationPrepared = preparation.prepared;
 				if (!frameGenerationPrepared) {
@@ -1532,11 +1552,21 @@ namespace cs::features
 			"Upscaling/FrameGeneration/Present");
 		auto& pipeline = render::TemporalPipeline::Get();
 		pipeline.BeginPresentAttempt(a_flags);
-		const HRESULT presentResult = _swapChain->Present(
-			a_syncInterval, a_flags);
+		HRESULT presentResult = E_FAIL;
+		{
+			auto timing = pipeline.MeasureFrameGenerationCpuPhase(
+				render::FrameGenerationCpuPhase::kSdkPresent);
+			presentResult = _swapChain->Present(a_syncInterval, a_flags);
+		}
 		pipeline.EndPresentAttempt(a_flags, presentResult);
-		const auto status = render::temporal::CollectAcceptedPresentStatus(
-			*_provider, a_flags, presentResult);
+		render::temporal::PresentStatusCollection status;
+		if (render::temporal::ShouldObservePresentStatus(
+				a_flags, presentResult)) {
+			auto timing = pipeline.MeasureFrameGenerationCpuPhase(
+				render::FrameGenerationCpuPhase::kCollectPresentStatus);
+			status = render::temporal::CollectAcceptedPresentStatus(
+				*_provider, a_flags, presentResult);
+		}
 		if (status.observed) {
 			pipeline.RecordGeneratedFrames(
 				status.generatedFrames);

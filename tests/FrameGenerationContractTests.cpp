@@ -1,4 +1,5 @@
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/FrameGenerationCpuTiming.h"
 #include "Render/TemporalPipelineState.h"
 
 #pragma warning(push)
@@ -14,14 +15,24 @@
 #include <FidelityFX/api/include/ffx_api.hpp>
 #pragma warning(pop)
 
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <vector>
 
 namespace
 {
 	int failures = 0;
+	std::array<std::uint64_t, 8> fakeClockValues{};
+	std::size_t fakeClockIndex = 0;
+
+	std::uint64_t FakeClock() noexcept
+	{
+		return fakeClockValues[fakeClockIndex++];
+	}
 
 	void Check(bool a_condition, std::string_view a_message)
 	{
@@ -63,6 +74,156 @@ namespace
 				topology.Request()->frameGeneration == FrameGenerationMethod::kXeSS &&
 				topology.Pending().required && topology.Pending().reason.contains(message),
 			"provider rejection disables effective FG while retaining the request and exact failure reason");
+	}
+
+	void TestCpuPhaseTimingCollector()
+	{
+		using Phase = cs::render::FrameGenerationCpuPhase;
+		cs::render::FrameGenerationCpuTimingCollector<3> collector(&FakeClock);
+
+		fakeClockIndex = 0;
+		{
+			auto scope = collector.Measure(Phase::kLatencySleep);
+		}
+		Check(
+			fakeClockIndex == 0 && !collector.GetSnapshot().available,
+			"disabled CPU phase timing does not invoke the clock");
+
+		collector.SetEnabled(true);
+		collector.RecordNanoseconds(Phase::kLatencySleep, 1'000'000);
+		collector.RecordNanoseconds(Phase::kLatencySleep, 2'000'000);
+		collector.RecordNanoseconds(Phase::kLatencySleep, 3'000'000);
+		collector.RecordNanoseconds(Phase::kLatencySleep, 4'000'000);
+		collector.RecordNanoseconds(Phase::kSdkPresent, 8'000'000);
+		collector.RecordFrameTimeInput(15.5);
+		auto snapshot = collector.GetSnapshot();
+		const auto& sleep = snapshot.phases[
+			static_cast<std::size_t>(Phase::kLatencySleep)];
+		const auto& present = snapshot.phases[
+			static_cast<std::size_t>(Phase::kSdkPresent)];
+		Check(
+			snapshot.available && sleep.sampleCount == 4 &&
+				sleep.windowSampleCount == 3 &&
+				sleep.windowMeanMilliseconds == 3.0 &&
+				sleep.windowMaxMilliseconds == 4.0,
+			"CPU phase timing keeps a deterministic bounded rolling window");
+		Check(
+			present.sampleCount == 1 &&
+				present.windowMeanMilliseconds == 8.0 &&
+				snapshot.frameTimeInputAvailable &&
+				snapshot.lastFrameTimeInputMilliseconds == 15.5 &&
+				snapshot.phases[
+					static_cast<std::size_t>(Phase::kPrepareFrame)]
+						.sampleCount == 0,
+			"CPU phase timing keeps stages independent");
+
+		collector.SetEnabled(false);
+		collector.SetEnabled(true);
+		fakeClockValues = { 10, 2'000'010 };
+		fakeClockIndex = 0;
+		const auto earlyReturn = [&]() {
+			auto scope = collector.Measure(Phase::kPrepareFrame);
+			return;
+		};
+		earlyReturn();
+		snapshot = collector.GetSnapshot();
+		const auto& prepare = snapshot.phases[
+			static_cast<std::size_t>(Phase::kPrepareFrame)];
+		Check(
+			fakeClockIndex == 2 && prepare.sampleCount == 1 &&
+				prepare.windowMeanMilliseconds == 2.0,
+			"CPU phase timing records scopes that leave through an early return");
+
+		fakeClockValues = { 20, 1'000'020 };
+		fakeClockIndex = 0;
+		try {
+			auto scope = collector.Measure(Phase::kPrepareFrame);
+			throw 1;
+		} catch (...) {
+		}
+		snapshot = collector.GetSnapshot();
+		Check(
+			fakeClockIndex == 2 &&
+				snapshot.phases[
+					static_cast<std::size_t>(Phase::kPrepareFrame)]
+						.sampleCount == 2,
+			"CPU phase timing records scopes that leave through an exception");
+
+		collector.SetEnabled(false);
+		fakeClockIndex = 0;
+		{
+			auto scope = collector.Measure(Phase::kSdkPresent);
+		}
+		snapshot = collector.GetSnapshot();
+		Check(
+			fakeClockIndex == 0 && !snapshot.available &&
+				!snapshot.frameTimeInputAvailable &&
+				snapshot.phases[
+					static_cast<std::size_t>(Phase::kSdkPresent)]
+						.sampleCount == 0,
+			"disabling CPU phase timing clears samples and reports unavailable");
+	}
+
+	std::string ReadTextFile(const char* a_path)
+	{
+		std::ifstream stream(a_path, std::ios::binary);
+		std::ostringstream contents;
+		contents << stream.rdbuf();
+		return contents.str();
+	}
+
+	void TestProductionCpuTimingHooks(
+		const char* a_pipelinePath,
+		const char* a_swapChainPath)
+	{
+		const auto pipeline = ReadTextFile(a_pipelinePath);
+		const auto swapChain = ReadTextFile(a_swapChainPath);
+		const auto checkNear =
+			[](const std::string& a_source,
+				std::string_view a_timing,
+				std::string_view a_call,
+				std::size_t a_distance,
+				std::string_view a_message) {
+				const auto timing = a_source.find(a_timing);
+				const auto call = a_source.find(a_call, timing);
+				Check(
+					timing != std::string::npos &&
+						call != std::string::npos &&
+						call - timing <= a_distance,
+					a_message);
+			};
+		checkNear(
+			pipeline,
+			"FrameGenerationCpuPhase::kLatencySleep",
+			"_impl->activePresentation->Sleep(",
+			300,
+			"latency Sleep timing wraps the selected provider call");
+		for (const auto& [timing, call, distance] :
+			std::array{
+				std::tuple{ "kAcquirePresentInputs",
+					"_provider->AcquirePresentInputs()", 300u },
+				std::tuple{ "kAllocatorFenceWait",
+					"WaitForFrame(_frameSlot)", 300u },
+				std::tuple{ "kCopyRecord",
+					"commandList->CopyResource(", 1'200u },
+				std::tuple{ "kPrepareFrame",
+					"PrepareFrameSafely(", 300u },
+				std::tuple{ "kSdkPresent",
+					"_swapChain->Present(a_syncInterval, a_flags)", 300u },
+				std::tuple{ "kCollectPresentStatus",
+					"CollectAcceptedPresentStatus(", 300u } }) {
+			checkNear(
+				swapChain,
+				timing,
+				call,
+				distance,
+				std::string("production timing wraps its intended call: ") +
+					timing);
+		}
+		Check(
+			swapChain.find("if (a_flags & DXGI_PRESENT_TEST)") <
+				swapChain.find("FrameGenerationCpuPhase::kSdkPresent"),
+			"SDK Present timing remains after the TEST-present early return");
 	}
 
 	class RecordingProvider final :
@@ -1106,8 +1267,9 @@ namespace
 	}
 }
 
-int main()
+int main(int a_argc, char** a_argv)
 {
+	TestCpuPhaseTimingCollector();
 	TestFailureReporting();
 	TestLifecycleOrderAndFailures();
 	TestResizeRestoration();
@@ -1121,6 +1283,10 @@ int main()
 	TestFidelityFXBackendContracts();
 	TestProductionInputWriteOrdering();
 	TestDisableDrainDestroyOrder();
+	Check(a_argc == 3, "production source paths are supplied");
+	if (a_argc == 3) {
+		TestProductionCpuTimingHooks(a_argv[1], a_argv[2]);
+	}
 	if (failures) {
 		std::cerr << failures << " check(s) failed\n";
 		return 1;
