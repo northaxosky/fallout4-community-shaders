@@ -1,13 +1,14 @@
 #pragma once
 
 #include <DirectXMath.h>
+#include <d3d11.h>
+#include <winrt/base.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 
 struct ID3D11Device;
-struct ID3D11DeviceContext;
-struct ID3D11ShaderResourceView;
 
 namespace cs::engine
 {
@@ -90,4 +91,32 @@ namespace cs::render
 	void BindSharedData(
 		ID3D11DeviceContext* a_context,
 		engine::ShaderStage a_stage) noexcept;
+
+	// Preserve only b5-b7 and t3 around one engine dispatch.
+	class ScopedComputeSharedDataBinding
+	{
+	public:
+		explicit ScopedComputeSharedDataBinding(
+			ID3D11DeviceContext* a_context) noexcept;
+		~ScopedComputeSharedDataBinding() noexcept;
+
+		ScopedComputeSharedDataBinding(
+			const ScopedComputeSharedDataBinding&) = delete;
+		ScopedComputeSharedDataBinding(
+			ScopedComputeSharedDataBinding&&) = delete;
+		ScopedComputeSharedDataBinding& operator=(
+			const ScopedComputeSharedDataBinding&) = delete;
+		ScopedComputeSharedDataBinding& operator=(
+			ScopedComputeSharedDataBinding&&) = delete;
+
+		[[nodiscard]] bool IsActive() const noexcept { return _active; }
+
+	private:
+		ID3D11DeviceContext* _context = nullptr;
+		std::array<winrt::com_ptr<ID3D11Buffer>, 3> _buffers;
+		winrt::com_ptr<ID3D11ShaderResourceView> _skylightingSRV;
+		bool _active = false;
+	};
+
+	[[nodiscard]] bool IsDeferredLightsActive() noexcept;
 }

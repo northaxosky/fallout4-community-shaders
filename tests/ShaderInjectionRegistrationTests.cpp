@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -32,6 +33,11 @@ namespace
 	bool g_preDrawInstallFails = false;
 	std::uint32_t g_sharedDataInstallRequests = 0;
 	std::uint32_t g_bsdfCompositeBindDispatches = 0;
+	std::uint32_t g_computeBindDispatches = 0;
+	std::uint32_t g_sharedComputeBinds = 0;
+	bool g_deferredLightsActive = true;
+	std::array<winrt::com_ptr<ID3D11Buffer>, 3> g_publishedComputeBuffers;
+	winrt::com_ptr<ID3D11ShaderResourceView> g_publishedComputeSrv;
 	std::optional<bool> g_activeVariantHasOwnFamily;
 	std::optional<bool> g_activeVariantHasUnrelatedDefine;
 
@@ -103,12 +109,31 @@ namespace
 					"float4 main(uint id : SV_VertexID) : SV_Position { "
 					"return float4(id == 2 ? 3.0 : -1.0, "
 					"id == 1 ? 3.0 : -1.0, 0.0, 1.0); }";
-				const auto source = a_request.stage == ShaderStage::kPixel ?
-					(_alternatePixel ? alternatePixelSource : pixelSource) :
-					vertexSource;
-				const auto profile = a_request.stage == ShaderStage::kPixel ?
-					"ps_5_0" :
-					"vs_5_0";
+				constexpr std::string_view computeSource =
+					"cbuffer SharedData : register(b5) { uint SharedValue; };"
+					"cbuffer FeatureData : register(b6) { uint FeatureValue; };"
+					"cbuffer SkylightingData : register(b7) { uint SkylightingValue; };"
+					"Texture2D<uint> Probe : register(t3);"
+					"RWStructuredBuffer<uint> Output : register(u0);"
+					"[numthreads(1, 1, 1)] void main() {"
+					"InterlockedAdd(Output[0], 1);"
+					"Output[1] = SharedValue;"
+					"Output[2] = FeatureValue;"
+					"Output[3] = SkylightingValue;"
+					"Output[4] = Probe.Load(int3(0, 0, 0));"
+					"}";
+				const auto source =
+					a_request.stage == ShaderStage::kPixel ?
+						(_alternatePixel ? alternatePixelSource : pixelSource) :
+					a_request.stage == ShaderStage::kCompute ?
+						computeSource :
+						vertexSource;
+				const auto profile =
+					a_request.stage == ShaderStage::kPixel ?
+						"ps_5_0" :
+					a_request.stage == ShaderStage::kCompute ?
+						"cs_5_0" :
+						"vs_5_0";
 
 				winrt::com_ptr<ID3DBlob> blob;
 				winrt::com_ptr<ID3DBlob> errors;
@@ -144,7 +169,7 @@ namespace
 						pixelShader.put());
 					if (pixelShader)
 						shader.attach(pixelShader.detach());
-				} else {
+				} else if (a_request.stage == ShaderStage::kVertex) {
 					winrt::com_ptr<ID3D11VertexShader> vertexShader;
 					createResult = a_request.device->CreateVertexShader(
 						blob->GetBufferPointer(),
@@ -153,6 +178,15 @@ namespace
 						vertexShader.put());
 					if (vertexShader)
 						shader.attach(vertexShader.detach());
+				} else {
+					winrt::com_ptr<ID3D11ComputeShader> computeShader;
+					createResult = a_request.device->CreateComputeShader(
+						blob->GetBufferPointer(),
+						blob->GetBufferSize(),
+						nullptr,
+						computeShader.put());
+					if (computeShader)
+						shader.attach(computeShader.detach());
 				}
 				if (FAILED(createResult) || !shader) {
 					result.error = "test shader creation failed";
@@ -210,9 +244,28 @@ namespace cs::render
 	}
 
 	void BindSharedData(
-		ID3D11DeviceContext*,
-		cs::engine::ShaderStage) noexcept
-	{}
+		ID3D11DeviceContext* a_context,
+		cs::engine::ShaderStage a_stage) noexcept
+	{
+		if (!a_context || a_stage != cs::engine::ShaderStage::kCompute)
+			return;
+		++g_sharedComputeBinds;
+		ID3D11Buffer* buffers[3]{
+			g_publishedComputeBuffers[0].get(),
+			g_publishedComputeBuffers[1].get(),
+			g_publishedComputeBuffers[2].get()
+		};
+		a_context->CSSetConstantBuffers(
+			cs::render::kSharedDataSlot, 3, buffers);
+		ID3D11ShaderResourceView* srv = g_publishedComputeSrv.get();
+		a_context->CSSetShaderResources(
+			cs::render::kSkylightingComputeTextureSlot, 1, &srv);
+	}
+
+	bool IsDeferredLightsActive() noexcept
+	{
+		return g_deferredLightsActive;
+	}
 }
 
 namespace cs::engine
@@ -1415,6 +1468,192 @@ namespace
 		return srv;
 	}
 
+	winrt::com_ptr<ID3D11Buffer> CreateUintConstantBuffer(
+		ID3D11Device* a_device,
+		std::uint32_t a_value)
+	{
+		const std::array<std::uint32_t, 4> data{ a_value, 0, 0, 0 };
+		D3D11_BUFFER_DESC desc{};
+		desc.ByteWidth = sizeof(data);
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		D3D11_SUBRESOURCE_DATA initial{ data.data() };
+		winrt::com_ptr<ID3D11Buffer> buffer;
+		if (FAILED(a_device->CreateBuffer(&desc, &initial, buffer.put())))
+			return {};
+		return buffer;
+	}
+
+	winrt::com_ptr<ID3D11ShaderResourceView> CreateUintSrv(
+		ID3D11Device* a_device,
+		std::uint32_t a_value)
+	{
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = 1;
+		desc.Height = 1;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = DXGI_FORMAT_R32_UINT;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+		D3D11_SUBRESOURCE_DATA initial{ &a_value, sizeof(a_value) };
+		winrt::com_ptr<ID3D11Texture2D> texture;
+		if (FAILED(a_device->CreateTexture2D(
+				&desc, &initial, texture.put()))) {
+			return {};
+		}
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		if (FAILED(a_device->CreateShaderResourceView(
+				texture.get(), nullptr, srv.put()))) {
+			return {};
+		}
+		return srv;
+	}
+
+	struct ComputeOutput
+	{
+		winrt::com_ptr<ID3D11Buffer> buffer;
+		winrt::com_ptr<ID3D11UnorderedAccessView> uav;
+		winrt::com_ptr<ID3D11Buffer> staging;
+	};
+
+	ComputeOutput CreateComputeOutput(ID3D11Device* a_device)
+	{
+		constexpr std::array<std::uint32_t, 5> zeros{};
+		D3D11_BUFFER_DESC desc{};
+		desc.ByteWidth = sizeof(zeros);
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = D3D11_BIND_UNORDERED_ACCESS;
+		desc.MiscFlags = D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;
+		desc.StructureByteStride = sizeof(std::uint32_t);
+		D3D11_SUBRESOURCE_DATA initial{ zeros.data() };
+
+		ComputeOutput output;
+		if (FAILED(a_device->CreateBuffer(
+				&desc, &initial, output.buffer.put()))) {
+			return {};
+		}
+		if (FAILED(a_device->CreateUnorderedAccessView(
+				output.buffer.get(), nullptr, output.uav.put()))) {
+			return {};
+		}
+		desc.Usage = D3D11_USAGE_STAGING;
+		desc.BindFlags = 0;
+		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		desc.MiscFlags = 0;
+		desc.StructureByteStride = 0;
+		if (FAILED(a_device->CreateBuffer(
+				&desc, nullptr, output.staging.put()))) {
+			return {};
+		}
+		return output;
+	}
+
+	void ResetComputeOutput(
+		ID3D11DeviceContext* a_context,
+		const ComputeOutput& a_output)
+	{
+		constexpr std::array<std::uint32_t, 5> zeros{};
+		a_context->UpdateSubresource(
+			a_output.buffer.get(), 0, nullptr, zeros.data(), 0, 0);
+	}
+
+	std::optional<std::array<std::uint32_t, 5>> ReadComputeOutput(
+		ID3D11DeviceContext* a_context,
+		const ComputeOutput& a_output)
+	{
+		ID3D11UnorderedAccessView* nullUav = nullptr;
+		a_context->CSSetUnorderedAccessViews(0, 1, &nullUav, nullptr);
+		a_context->CopyResource(
+			a_output.staging.get(), a_output.buffer.get());
+		D3D11_MAPPED_SUBRESOURCE mapped{};
+		if (FAILED(a_context->Map(
+				a_output.staging.get(),
+				0,
+				D3D11_MAP_READ,
+				0,
+				&mapped))) {
+			return std::nullopt;
+		}
+		std::array<std::uint32_t, 5> values{};
+		std::memcpy(values.data(), mapped.pData, sizeof(values));
+		a_context->Unmap(a_output.staging.get(), 0);
+		return values;
+	}
+
+	bool ComputeBindingsMatch(
+		ID3D11DeviceContext* a_context,
+		const std::array<winrt::com_ptr<ID3D11Buffer>, 3>& a_buffers,
+		ID3D11ShaderResourceView* a_srv)
+	{
+		ID3D11Buffer* buffers[3]{};
+		a_context->CSGetConstantBuffers(
+			cs::render::kSharedDataSlot, 3, buffers);
+		ID3D11ShaderResourceView* srv = nullptr;
+		a_context->CSGetShaderResources(
+			cs::render::kSkylightingComputeTextureSlot, 1, &srv);
+		const bool matches =
+			buffers[0] == a_buffers[0].get()
+			&& buffers[1] == a_buffers[1].get()
+			&& buffers[2] == a_buffers[2].get()
+			&& srv == a_srv;
+		for (auto* buffer : buffers) {
+			if (buffer)
+				buffer->Release();
+		}
+		if (srv)
+			srv->Release();
+		return matches;
+	}
+
+	void BindComputeInputs(
+		ID3D11DeviceContext* a_context,
+		ID3D11ComputeShader* a_shader,
+		const std::array<winrt::com_ptr<ID3D11Buffer>, 3>& a_buffers,
+		ID3D11ShaderResourceView* a_srv,
+		ID3D11Buffer* a_highBuffer,
+		ID3D11ShaderResourceView* a_highSrv,
+		ID3D11UnorderedAccessView* a_uav)
+	{
+		a_context->CSSetShader(a_shader, nullptr, 0);
+		ID3D11Buffer* buffers[3]{
+			a_buffers[0].get(),
+			a_buffers[1].get(),
+			a_buffers[2].get()
+		};
+		a_context->CSSetConstantBuffers(
+			cs::render::kSharedDataSlot, 3, buffers);
+		a_context->CSSetConstantBuffers(8, 1, &a_highBuffer);
+		a_context->CSSetShaderResources(
+			cs::render::kSkylightingComputeTextureSlot, 1, &a_srv);
+		a_context->CSSetShaderResources(4, 1, &a_highSrv);
+		a_context->CSSetUnorderedAccessViews(0, 1, &a_uav, nullptr);
+	}
+
+	bool HighComputeBindingsMatch(
+		ID3D11DeviceContext* a_context,
+		ID3D11Buffer* a_highBuffer,
+		ID3D11ShaderResourceView* a_highSrv,
+		ID3D11UnorderedAccessView* a_uav)
+	{
+		ID3D11Buffer* buffer = nullptr;
+		ID3D11ShaderResourceView* srv = nullptr;
+		ID3D11UnorderedAccessView* uav = nullptr;
+		a_context->CSGetConstantBuffers(8, 1, &buffer);
+		a_context->CSGetShaderResources(4, 1, &srv);
+		a_context->CSGetUnorderedAccessViews(0, 1, &uav);
+		const bool matches =
+			buffer == a_highBuffer && srv == a_highSrv && uav == a_uav;
+		if (buffer)
+			buffer->Release();
+		if (srv)
+			srv->Release();
+		if (uav)
+			uav->Release();
+		return matches;
+	}
+
 	ULONG ReferenceCount(IUnknown* a_object)
 	{
 		a_object->AddRef();
@@ -1703,6 +1942,408 @@ namespace
 		return ok;
 	}
 
+	bool TestComputeDispatchBindings(
+		ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context)
+	{
+		auto* injected = GetInjectedComputeShader(
+			ShaderInjectionTarget::kDfTiledLighting);
+		bool ok = Check(
+			injected != nullptr
+				&& IsInjectedComputeShader(
+					ShaderInjectionTarget::kDfTiledLighting,
+					injected),
+			"DFTiledLighting injected compute shader was not published");
+		if (!injected)
+			return false;
+
+		for (std::size_t index = 0;
+			index < g_publishedComputeBuffers.size();
+			++index) {
+			g_publishedComputeBuffers[index] =
+				CreateUintConstantBuffer(
+					a_device,
+					static_cast<std::uint32_t>((index + 5) * 10));
+		}
+		g_publishedComputeSrv = CreateUintSrv(a_device, 90);
+
+		std::array<winrt::com_ptr<ID3D11Buffer>, 3> engineBuffers;
+		for (std::size_t index = 0; index < engineBuffers.size(); ++index) {
+			engineBuffers[index] = CreateUintConstantBuffer(
+				a_device,
+				static_cast<std::uint32_t>(index + 5));
+		}
+		auto engineSrv = CreateUintSrv(a_device, 9);
+		auto highBuffer = CreateUintConstantBuffer(a_device, 88);
+		auto highSrv = CreateUintSrv(a_device, 44);
+		auto output = CreateComputeOutput(a_device);
+		ok &= Check(
+			std::ranges::all_of(
+				g_publishedComputeBuffers,
+				[](const auto& a_buffer) { return !!a_buffer; })
+				&& g_publishedComputeSrv
+				&& std::ranges::all_of(
+					engineBuffers,
+					[](const auto& a_buffer) { return !!a_buffer; })
+				&& engineSrv
+				&& highBuffer
+				&& highSrv
+				&& output.buffer
+				&& output.uav
+				&& output.staging,
+			"could not create compute dispatch binding fixtures");
+		if (!ok)
+			return false;
+
+		auto* pixelShader = GetInjectedPixelShader(
+			ShaderInjectionTarget::kBsdfComposite);
+		ID3D11Buffer* pixelBuffer = engineBuffers[0].get();
+		a_context->PSSetShader(pixelShader, nullptr, 0);
+		a_context->PSSetConstantBuffers(5, 1, &pixelBuffer);
+
+		const auto before = GetComputeDispatchHookStatus();
+		BindComputeInputs(
+			a_context,
+			injected,
+			engineBuffers,
+			engineSrv.get(),
+			highBuffer.get(),
+			highSrv.get(),
+			output.uav.get());
+		InvokeComputeDispatchHookForTesting(a_context, 2, 1, 1);
+		ok &= Check(
+			ComputeBindingsMatch(
+				a_context, engineBuffers, engineSrv.get()),
+			"direct dispatch did not restore CS b5-b7/t3");
+		ok &= Check(
+			HighComputeBindingsMatch(
+				a_context,
+				highBuffer.get(),
+				highSrv.get(),
+				output.uav.get()),
+			"direct dispatch disturbed high CS slots or UAV state");
+		ID3D11PixelShader* restoredPixelShader = nullptr;
+		ID3D11Buffer* restoredPixelBuffer = nullptr;
+		a_context->PSGetShader(&restoredPixelShader, nullptr, nullptr);
+		a_context->PSGetConstantBuffers(5, 1, &restoredPixelBuffer);
+		ok &= Check(
+			restoredPixelShader == pixelShader
+				&& restoredPixelBuffer == pixelBuffer,
+			"direct dispatch disturbed pixel shader state");
+		if (restoredPixelShader)
+			restoredPixelShader->Release();
+		if (restoredPixelBuffer)
+			restoredPixelBuffer->Release();
+		auto values = ReadComputeOutput(a_context, output);
+		ok &= Check(
+			values
+				&& *values
+					== std::array<std::uint32_t, 5>{
+						2, 50, 60, 70, 90 },
+			"direct dispatch did not execute once with just-in-time shared data");
+		auto after = GetComputeDispatchHookStatus();
+		ok &= Check(
+			g_sharedComputeBinds == 1
+				&& g_computeBindDispatches == 1
+				&& after.directCalls == before.directCalls + 1
+				&& after.matchingDispatches
+					== before.matchingDispatches + 1,
+			"direct dispatch hook counters did not record one matching scope");
+
+		TestCompilationPolicy independentPolicy;
+		ShaderVariantCompilationRequest stockRequest;
+		stockRequest.device.copy_from(a_device);
+		stockRequest.stage = ShaderStage::kCompute;
+		stockRequest.sourcePath = L"stock-compute.hlsl";
+		const auto stock = independentPolicy.Prepare(
+			std::move(stockRequest));
+		auto* stockShader = stock.handle ?
+			static_cast<ID3D11ComputeShader*>(
+				stock.handle->PeekShader()) :
+			nullptr;
+		ok &= Check(
+			stockShader && stockShader != injected,
+			"nonmatching compute shader fixture was not distinct");
+		ResetComputeOutput(a_context, output);
+		BindComputeInputs(
+			a_context,
+			stockShader,
+			engineBuffers,
+			engineSrv.get(),
+			highBuffer.get(),
+			highSrv.get(),
+			output.uav.get());
+		const auto bindsBeforeStock = g_sharedComputeBinds;
+		InvokeComputeDispatchHookForTesting(a_context, 1, 1, 1);
+		values = ReadComputeOutput(a_context, output);
+		ok &= Check(
+			values
+				&& *values
+					== std::array<std::uint32_t, 5>{
+						1, 5, 6, 7, 9 }
+				&& g_sharedComputeBinds == bindsBeforeStock,
+			"nonmatching compute shader did not remain passthrough");
+
+		const std::array<std::uint32_t, 3> indirectArgs{ 3, 1, 1 };
+		D3D11_BUFFER_DESC indirectDesc{};
+		indirectDesc.ByteWidth = sizeof(indirectArgs);
+		indirectDesc.Usage = D3D11_USAGE_DEFAULT;
+		indirectDesc.MiscFlags =
+			D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
+		D3D11_SUBRESOURCE_DATA indirectInitial{ indirectArgs.data() };
+		winrt::com_ptr<ID3D11Buffer> indirectBuffer;
+		ok &= Check(
+			SUCCEEDED(a_device->CreateBuffer(
+				&indirectDesc,
+				&indirectInitial,
+				indirectBuffer.put())),
+			"could not create indirect dispatch arguments");
+		ResetComputeOutput(a_context, output);
+		BindComputeInputs(
+			a_context,
+			injected,
+			engineBuffers,
+			engineSrv.get(),
+			highBuffer.get(),
+			highSrv.get(),
+			output.uav.get());
+		const auto beforeIndirect = GetComputeDispatchHookStatus();
+		InvokeComputeDispatchIndirectHookForTesting(
+			a_context, indirectBuffer.get(), 0);
+		ok &= Check(
+			ComputeBindingsMatch(
+				a_context, engineBuffers, engineSrv.get())
+				&& HighComputeBindingsMatch(
+					a_context,
+					highBuffer.get(),
+					highSrv.get(),
+					output.uav.get()),
+			"indirect dispatch did not restore exact compute state");
+		values = ReadComputeOutput(a_context, output);
+		after = GetComputeDispatchHookStatus();
+		if (!values
+			|| *values
+				!= std::array<std::uint32_t, 5>{
+					3, 50, 60, 70, 90 }) {
+			std::cerr << "indirect values:";
+			if (values) {
+				for (const auto value : *values)
+					std::cerr << ' ' << value;
+			}
+			std::cerr
+				<< " binds=" << g_sharedComputeBinds
+				<< " callbacks=" << g_computeBindDispatches
+				<< " indirect_delta="
+				<< (after.indirectCalls - beforeIndirect.indirectCalls)
+				<< " matched_delta="
+				<< (after.matchingDispatches
+					- beforeIndirect.matchingDispatches)
+				<< '\n';
+		}
+		ok &= Check(
+			values
+				&& *values
+					== std::array<std::uint32_t, 5>{
+						3, 50, 60, 70, 90 }
+				&& g_sharedComputeBinds == bindsBeforeStock + 1
+				&& after.indirectCalls
+					== beforeIndirect.indirectCalls + 1
+				&& after.matchingDispatches
+					== beforeIndirect.matchingDispatches + 1,
+			"indirect dispatch did not execute once with just-in-time shared data");
+
+		ResetComputeOutput(a_context, output);
+		BindComputeInputs(
+			a_context,
+			injected,
+			engineBuffers,
+			engineSrv.get(),
+			highBuffer.get(),
+			highSrv.get(),
+			output.uav.get());
+		const auto bindsBeforeInactive = g_sharedComputeBinds;
+		const auto beforeInactive = GetComputeDispatchHookStatus();
+		g_deferredLightsActive = false;
+		InvokeComputeDispatchHookForTesting(a_context, 1, 1, 1);
+		g_deferredLightsActive = true;
+		values = ReadComputeOutput(a_context, output);
+		after = GetComputeDispatchHookStatus();
+		ok &= Check(
+			values
+				&& *values
+					== std::array<std::uint32_t, 5>{
+						1, 5, 6, 7, 9 }
+				&& g_sharedComputeBinds == bindsBeforeInactive
+				&& after.matchingDispatches
+					== beforeInactive.matchingDispatches,
+			"matching compute shader bound shared data outside deferred lights");
+
+		winrt::com_ptr<ID3D11DeviceContext> deferredContext;
+		ok &= Check(
+			SUCCEEDED(a_device->CreateDeferredContext(
+				0, deferredContext.put())),
+			"could not create other-context fixture");
+		if (deferredContext) {
+			ResetComputeOutput(a_context, output);
+			BindComputeInputs(
+				deferredContext.get(),
+				injected,
+				engineBuffers,
+				engineSrv.get(),
+				highBuffer.get(),
+				highSrv.get(),
+				output.uav.get());
+			const auto bindsBeforeOther = g_sharedComputeBinds;
+			const auto beforeOther = GetComputeDispatchHookStatus();
+			InvokeComputeDispatchHookForTesting(
+				deferredContext.get(), 1, 1, 1);
+			winrt::com_ptr<ID3D11CommandList> commands;
+			ok &= Check(
+				SUCCEEDED(deferredContext->FinishCommandList(
+					FALSE, commands.put()))
+					&& commands,
+				"other context did not record the original dispatch");
+			if (commands)
+				a_context->ExecuteCommandList(commands.get(), FALSE);
+			values = ReadComputeOutput(a_context, output);
+			after = GetComputeDispatchHookStatus();
+			if (!values
+				|| *values
+					!= std::array<std::uint32_t, 5>{
+						1, 5, 6, 7, 9 }) {
+				std::cerr << "other-context values:";
+				if (values) {
+					for (const auto value : *values)
+						std::cerr << ' ' << value;
+				}
+				std::cerr
+					<< " binds=" << g_sharedComputeBinds
+					<< " rejection_delta="
+					<< (after.contextRejections
+						- beforeOther.contextRejections)
+					<< '\n';
+			}
+			ok &= Check(
+				values
+					&& *values
+						== std::array<std::uint32_t, 5>{
+							1, 5, 6, 7, 9 }
+					&& g_sharedComputeBinds == bindsBeforeOther
+					&& after.contextRejections
+						== beforeOther.contextRejections + 1,
+				"other context did not pass through without shared-data rebinding");
+		}
+
+		g_publishedComputeBuffers = {};
+		g_publishedComputeSrv = nullptr;
+		return ok;
+	}
+
+	int TestComputeBaselineOnlyPassthrough()
+	{
+		using namespace cs::engine;
+
+		bool ok = Check(
+			SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kDfTiledLighting, true),
+			"could not enable baseline-only tiled ownership");
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		ok &= CreateWarpDevice(device, context);
+		if (!device || !context)
+			return 1;
+
+		TestCompilationPolicy warmupPolicy;
+		ShaderVariantCompilationRequest warmupRequest;
+		warmupRequest.device = device;
+		warmupRequest.stage = ShaderStage::kCompute;
+		warmupRequest.sourcePath = L"baseline-warmup.hlsl";
+		const auto warmup = warmupPolicy.Prepare(std::move(warmupRequest));
+		if (warmup.handle) {
+			context->CSSetShader(
+				static_cast<ID3D11ComputeShader*>(
+					warmup.handle->PeekShader()),
+				nullptr,
+				0);
+			context->Dispatch(1, 1, 1);
+		}
+		ok &= Check(
+			EnsureComputeDispatchHooksInstalled(context.get()),
+			"baseline-only compute hooks were not installed");
+		FreezeAndCompileShaderInjections(device.get());
+		auto* injected = GetInjectedComputeShader(
+			ShaderInjectionTarget::kDfTiledLighting);
+		ok &= Check(
+			injected != nullptr,
+			"baseline-only compute replacement was not published");
+
+		std::array<winrt::com_ptr<ID3D11Buffer>, 3> engineBuffers;
+		for (std::size_t index = 0; index < engineBuffers.size(); ++index) {
+			engineBuffers[index] = CreateUintConstantBuffer(
+				device.get(),
+				static_cast<std::uint32_t>(index + 5));
+		}
+		auto engineSrv = CreateUintSrv(device.get(), 9);
+		auto highBuffer = CreateUintConstantBuffer(device.get(), 88);
+		auto highSrv = CreateUintSrv(device.get(), 44);
+		auto output = CreateComputeOutput(device.get());
+		if (injected && output.uav) {
+			BindComputeInputs(
+				context.get(),
+				injected,
+				engineBuffers,
+				engineSrv.get(),
+				highBuffer.get(),
+				highSrv.get(),
+				output.uav.get());
+			const auto before = GetComputeDispatchHookStatus();
+			InvokeComputeDispatchHookForTesting(
+				context.get(), 1, 1, 1);
+			const auto values =
+				ReadComputeOutput(context.get(), output);
+			const auto after = GetComputeDispatchHookStatus();
+			ok &= Check(
+				values
+					&& *values
+						== std::array<std::uint32_t, 5>{
+							1, 5, 6, 7, 9 }
+					&& g_sharedComputeBinds == 0
+					&& after.matchingDispatches
+						== before.matchingDispatches,
+				"baseline-only compute replacement activated contributed data");
+		}
+		return ok ? 0 : 1;
+	}
+
+	int TestComputeHooksMissingFailClosed()
+	{
+		using namespace cs::engine;
+
+		bool ok = Check(
+			SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kDfTiledLighting, true),
+			"could not enable missing-hook tiled ownership");
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		ok &= CreateWarpDevice(device, context);
+		if (!device)
+			return 1;
+
+		FreezeAndCompileShaderInjections(device.get());
+		const auto snapshot = GetShaderInjectionTargetSnapshot(
+			ShaderInjectionTarget::kDfTiledLighting);
+		ok &= Check(
+			snapshot.requested
+				&& snapshot.compileAttempted
+				&& !snapshot.compileComplete
+				&& !snapshot.swappable
+				&& GetInjectedComputeShader(
+					ShaderInjectionTarget::kDfTiledLighting)
+					== nullptr,
+			"compute replacement did not fail closed without dispatch hooks");
+		return ok ? 0 : 1;
+	}
+
 }
 
 int main(int a_argc, char* a_argv[])
@@ -1726,6 +2367,16 @@ int main(int a_argc, char* a_argv[])
 			<< " static_sha256=" << staticDigest
 			<< '\n';
 		return 0;
+	}
+	if (a_argc == 2
+		&& std::string_view(a_argv[1])
+			== "--compute-baseline-only") {
+		return TestComputeBaselineOnlyPassthrough();
+	}
+	if (a_argc == 2
+		&& std::string_view(a_argv[1])
+			== "--compute-hooks-missing") {
+		return TestComputeHooksMissingFailClosed();
 	}
 	if (a_argc != 1) {
 		std::cerr << "FAIL: invalid arguments\n";
@@ -1997,6 +2648,36 @@ int main(int a_argc, char* a_argv[])
 		g_preDrawInstallRequests == 1,
 		"registration with a bind did not install the pre-draw hook");
 
+	ShaderReplacementRegistration computeRegistration;
+	computeRegistration.targetId =
+		ShaderInjectionTarget::kDfTiledLighting;
+	computeRegistration.stages =
+		ShaderStageBit(ShaderStage::kCompute);
+	computeRegistration.contributor = "compute-dispatch-test";
+	computeRegistration.defines = { { "SKYLIGHTING", "1" } };
+	computeRegistration.bind = [](ID3D11DeviceContext*) {
+		++g_computeBindDispatches;
+		throw std::runtime_error("intentional compute bind failure");
+	};
+	computeRegistration.slotClaims = {
+		{
+			.stage = ShaderStage::kCompute,
+			.resourceType = ShaderResourceType::kConstantBuffer,
+			.slot = cs::render::kSkylightingDataSlot
+		},
+		{
+			.stage = ShaderStage::kCompute,
+			.resourceType = ShaderResourceType::kShaderResource,
+			.slot = cs::render::kSkylightingComputeTextureSlot
+		}
+	};
+	ok &= Check(
+		RegisterReplacement(std::move(computeRegistration)),
+		"compute dispatch registration was rejected");
+	ok &= Check(
+		g_preDrawInstallRequests == 1,
+		"compute-only bind installed the pixel pre-draw hook");
+
 	ok &= TestClaimLedger();
 
 	constexpr auto baseSha =
@@ -2028,10 +2709,35 @@ int main(int a_argc, char* a_argv[])
 		winrt::com_ptr<ID3D11DeviceContext> context;
 		ok &= CreateWarpDevice(device, context);
 		if (device && context) {
+			// WARP lazily switches its immediate-context implementation on
+			// first real compute submission. Settle that test-only transition
+			// before patching the production Dispatch slots.
+			TestCompilationPolicy warmupPolicy;
+			ShaderVariantCompilationRequest warmupRequest;
+			warmupRequest.device = device;
+			warmupRequest.stage = ShaderStage::kCompute;
+			warmupRequest.sourcePath = L"warmup-compute.hlsl";
+			const auto warmup = warmupPolicy.Prepare(
+				std::move(warmupRequest));
+			if (warmup.handle) {
+				context->CSSetShader(
+					static_cast<ID3D11ComputeShader*>(
+						warmup.handle->PeekShader()),
+					nullptr,
+					0);
+				context->Dispatch(1, 1, 1);
+				context->CSSetShader(nullptr, nullptr, 0);
+			}
+			ok &= Check(
+				EnsureComputeDispatchHooksInstalled(context.get()),
+				"compute dispatch hooks were not installed");
 			ok &= TestPixelShaderResourceSnapshot(
 				device.get(),
 				context.get());
 			ok &= TestBoundShaderInjectionDispatch(
+				device.get(),
+				context.get());
+			ok &= TestComputeDispatchBindings(
 				device.get(),
 				context.get());
 		}

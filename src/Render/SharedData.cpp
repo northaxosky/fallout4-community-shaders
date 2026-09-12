@@ -52,11 +52,7 @@ namespace cs::render
 			std::atomic_uint32_t         lastFrame{ UINT32_MAX };
 			std::array<winrt::com_ptr<ID3D11Buffer>, 3>
 				savedPixelBuffers;
-			std::array<winrt::com_ptr<ID3D11Buffer>, 3>
-				savedComputeBuffers;
 			winrt::com_ptr<ID3D11ShaderResourceView> savedSkylightingSRV;
-			winrt::com_ptr<ID3D11ShaderResourceView>
-				savedComputeSkylightingSRV;
 			std::mutex                   skylightingMutex;
 			SkylightingSharedData        skylightingData{};
 			ID3D11ShaderResourceView*    skylightingSRV = nullptr;
@@ -87,7 +83,6 @@ namespace cs::render
 			bool                         updateInstallFailed = false;
 			bool                         inDeferredLights = false;
 			std::uint32_t                pixelBindingDepth = 0;
-			std::uint32_t                computeBindingDepth = 0;
 		};
 
 		SubstrateState& GetSubstrateState()
@@ -354,7 +349,6 @@ namespace cs::render
 				a_context->CSSetConstantBuffers(
 					kSkylightingDataSlot, 1, &buffer);
 				if (resourcesAvailable && cameraReady) {
-					// A tiled-frame capture must verify this slot and bind timing survive DeferredLightsImpl rebinds.
 					a_context->CSSetShaderResources(
 						kSkylightingComputeTextureSlot, 1, &srv);
 				}
@@ -467,83 +461,14 @@ namespace cs::render
 			state.pixelBindingDepth = 0;
 		}
 
-		void SaveComputeBindings() noexcept
-		{
-			auto& state = GetSubstrateState();
-			if (state.computeBindingDepth != 0) {
-				++state.computeBindingDepth;
-				CS_LOG_ONCE(
-					L,
-					spdlog::level::err,
-					"Shared substrate compute-binding scopes overlap; preserving the active snapshot.");
-				return;
-			}
-			auto* context = GetImmediateContext();
-			if (!context || !IsSharedDataReady())
-				return;
-
-			for (auto& buffer : state.savedComputeBuffers)
-				buffer = nullptr;
-			ID3D11Buffer* buffers[3]{};
-			context->CSGetConstantBuffers(kSharedDataSlot, 3, buffers);
-			for (std::size_t index = 0;
-				index < state.savedComputeBuffers.size();
-				++index) {
-				state.savedComputeBuffers[index].attach(buffers[index]);
-			}
-			ID3D11ShaderResourceView* srv = nullptr;
-			context->CSGetShaderResources(
-				kSkylightingComputeTextureSlot, 1, &srv);
-			state.savedComputeSkylightingSRV.attach(srv);
-			state.computeBindingDepth = 1;
-		}
-
-		void RestoreComputeBindings() noexcept
-		{
-			auto& state = GetSubstrateState();
-			if (state.computeBindingDepth == 0)
-				return;
-			if (state.computeBindingDepth > 1) {
-				--state.computeBindingDepth;
-				return;
-			}
-
-			if (auto* context = GetImmediateContext()) {
-				ID3D11Buffer* buffers[3] = {
-					state.savedComputeBuffers[0].get(),
-					state.savedComputeBuffers[1].get(),
-					state.savedComputeBuffers[2].get()
-				};
-				context->CSSetConstantBuffers(kSharedDataSlot, 3, buffers);
-				ID3D11ShaderResourceView* srv =
-					state.savedComputeSkylightingSRV.get();
-				context->CSSetShaderResources(
-					kSkylightingComputeTextureSlot, 1, &srv);
-			}
-			for (auto& buffer : state.savedComputeBuffers)
-				buffer = nullptr;
-			state.savedComputeSkylightingSRV = nullptr;
-			state.computeBindingDepth = 0;
-		}
-
 		void SaveDeferredLightBindings() noexcept
 		{
 			GetSubstrateState().inDeferredLights = true;
 			SavePixelBindings();
-			SaveComputeBindings();
-		}
-
-		void BindDeferredLightComputeData() noexcept
-		{
-			// Earlier feature compute scopes clear b5/b6 before tiled lighting runs.
-			BindSharedData(
-				GetImmediateContext(),
-				engine::ShaderStage::kCompute);
 		}
 
 		void RestoreDeferredLightBindings() noexcept
 		{
-			RestoreComputeBindings();
 			RestorePixelBindings();
 			GetSubstrateState().inDeferredLights = false;
 		}
@@ -700,9 +625,6 @@ namespace cs::render
 		engine::RegisterPreDeferredLightsImpl(
 			[] { SaveDeferredLightBindings(); },
 			engine::HookPriority::Early);
-		engine::RegisterPreDeferredLightsImpl(
-			[] { BindDeferredLightComputeData(); },
-			engine::HookPriority::Late);
 		engine::RegisterPostDeferredLightsImpl(
 			[] { RestoreDeferredLightBindings(); },
 			engine::HookPriority::Late);
@@ -722,6 +644,11 @@ namespace cs::render
 		}
 		state.updateInstalled = true;
 		L->info("Shared substrate update and deferred binding scopes registered.");
+	}
+
+	bool IsDeferredLightsActive() noexcept
+	{
+		return GetSubstrateState().inDeferredLights;
 	}
 
 	void PublishSkylightingSharedData(

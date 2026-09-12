@@ -109,8 +109,18 @@ namespace cs::d3d11
 			&& *a_device
 			&& a_immediateContext
 			&& *a_immediateContext;
+		if (!complete)
+			return;
+
 		bool expected = false;
-		if (complete && ready.compare_exchange_strong(expected, true)) {
+		if (!ready.compare_exchange_strong(expected, true)) {
+			InvokeOwner("Compute dispatch hook context recheck", [&] {
+				engine::EnsureComputeDispatchHooksInstalled(
+					*a_immediateContext);
+			});
+			return;
+		}
+		{
 			render::annotation::Initialize(*a_immediateContext);
 			render::profiling::InitializeD3D11(*a_device, *a_immediateContext);
 			InvokeOwner("Shader cache initialization", [] {
@@ -120,6 +130,10 @@ namespace cs::d3d11
 			// The engine b12 snapshot must be live before any feature reads a camera.
 			InvokeOwner("FrameBuffer snapshot hooks", [&] {
 				engine::OnFrameBufferD3D11Ready(*a_immediateContext);
+			});
+			InvokeOwner("Compute dispatch hooks", [&] {
+				engine::EnsureComputeDispatchHooksInstalled(
+					*a_immediateContext);
 			});
 			// Register injections before the registry freezes.
 			InvokeOwner("PixelShaderSwapBroker D3D11 readiness", [&] {

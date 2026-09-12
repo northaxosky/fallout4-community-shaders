@@ -19,6 +19,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace cs::engine
@@ -210,7 +211,12 @@ namespace cs::engine
 			const ShaderInjectionTargetMetadata* metadata = nullptr;
 			ShaderInjectionDefines               defines;
 			std::vector<ShaderReplacementRegistration> contributions;
-			std::vector<ShaderInjectionBindCallback> binds;
+			struct Bind
+			{
+				ShaderStageMask stages = 0;
+				ShaderInjectionBindCallback callback;
+			};
+			std::vector<Bind>                    binds;
 			std::vector<ShaderReplacementVariantRegistration> variants;
 			std::size_t                          contributors = 0;
 			bool                                 slotCollision = false;
@@ -237,7 +243,8 @@ namespace cs::engine
 		struct PublishedTarget
 		{
 			ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
-			std::vector<ShaderInjectionBindCallback> binds;
+			ShaderStageMask contributedStages = 0;
+			std::vector<FrozenTarget::Bind> binds;
 		};
 
 		struct PublishedPlan
@@ -247,6 +254,8 @@ namespace cs::engine
 			std::vector<PublishedTarget> targets;
 			std::vector<PublishedVariant> variants;
 			std::vector<PixelShaderSwapVariantKey> variantKeys;
+			std::unordered_map<ID3D11ComputeShader*, std::size_t>
+				computeVariantIndices;
 		};
 
 		// first claimant wins, in feature-registration order
@@ -280,6 +289,24 @@ namespace cs::engine
 			std::atomic_flag swapCountersLock = ATOMIC_FLAG_INIT;
 			bool resolverRegistered = false;
 		};
+
+		// ID3D11DeviceContext method order from the Windows SDK d3d11.h.
+		constexpr std::size_t kDispatchVtableSlot = 41;
+		constexpr std::size_t kDispatchIndirectVtableSlot = 42;
+
+		using DispatchFunction = void(STDMETHODCALLTYPE*)(
+			ID3D11DeviceContext*, UINT, UINT, UINT);
+		using DispatchIndirectFunction = void(STDMETHODCALLTYPE*)(
+			ID3D11DeviceContext*, ID3D11Buffer*, UINT);
+
+		std::atomic_bool g_computeDispatchHookInstallAttempted{ false };
+		std::atomic_bool g_computeDispatchHooksInstalled{ false };
+		std::atomic<ID3D11DeviceContext*> g_computeDispatchContext{ nullptr };
+		std::atomic_uint64_t g_computeDirectDispatchCalls{ 0 };
+		std::atomic_uint64_t g_computeIndirectDispatchCalls{ 0 };
+		std::atomic_uint64_t g_computeMatchingDispatches{ 0 };
+		std::atomic_uint64_t g_computeContextRejections{ 0 };
+		thread_local bool t_inComputeDispatchHook = false;
 
 		Service& GetService()
 		{
@@ -703,8 +730,12 @@ namespace cs::engine
 						claimedSlots.end(),
 						registration.slotClaims.begin(),
 						registration.slotClaims.end());
-					if (registration.bind)
-						target.binds.push_back(registration.bind);
+					if (registration.bind) {
+						target.binds.push_back({
+							registration.stages,
+							registration.bind
+						});
+					}
 				}
 
 				if (developerOverride == DeveloperShaderOverride::kForceOff) {
@@ -910,19 +941,20 @@ namespace cs::engine
 		const PublishedVariant* FindMatchingPublishedVariant(
 			const PublishedPlan& a_plan,
 			ShaderInjectionTarget a_target,
-			ID3D11PixelShader* a_shader) noexcept
+			ShaderStage a_stage,
+			ID3D11DeviceChild* a_shader) noexcept
 		{
 			if (!a_shader)
 				return nullptr;
 			const auto match = std::ranges::find_if(
 				a_plan.variants,
-				[a_target, a_shader](const PublishedVariant& a_variant) {
+				[a_target, a_stage, a_shader](const PublishedVariant& a_variant) {
 					return a_variant.targetId == a_target
 						&& a_variant.compilation
 						&& a_variant.compilation->GetStage()
-							== ShaderStage::kPixel
+							== a_stage
 						&& a_variant.compilation->PeekShader()
-							== static_cast<ID3D11DeviceChild*>(a_shader);
+							== a_shader;
 				});
 			return match == a_plan.variants.end() ? nullptr : &*match;
 		}
@@ -932,7 +964,11 @@ namespace cs::engine
 			ShaderInjectionTarget a_target,
 			ID3D11PixelShader* a_shader) noexcept
 		{
-			return FindMatchingPublishedVariant(a_plan, a_target, a_shader)
+			return FindMatchingPublishedVariant(
+				a_plan,
+				a_target,
+				ShaderStage::kPixel,
+				a_shader)
 				!= nullptr;
 		}
 
@@ -953,6 +989,172 @@ namespace cs::engine
 
 		private:
 			const PublishedVariant* _previous;
+		};
+
+		void DispatchPublishedTarget(
+			const PublishedTarget& a_target,
+			ShaderStage a_stage,
+			ID3D11DeviceContext* a_context) noexcept
+		{
+			if (a_stage == ShaderStage::kPixel)
+				render::BindSharedData(a_context, a_stage);
+
+			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
+			for (const auto& bind : a_target.binds) {
+				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
+					continue;
+				try {
+					bind.callback(a_context);
+					runtime.dispatches.fetch_add(1, std::memory_order_relaxed);
+				} catch (const std::exception& e) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::warn,
+						"Shader injection for '{}' failed: {}.",
+						kTargets[ToIndex(a_target.id)].name,
+						e.what());
+				} catch (...) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::warn,
+						"Shader injection for '{}' failed.",
+						kTargets[ToIndex(a_target.id)].name);
+				}
+			}
+		}
+
+		template <class Dispatch>
+		void ExecuteComputeDispatch(
+			ID3D11DeviceContext* a_context,
+			Dispatch&& a_dispatch) noexcept
+		{
+			if (t_inComputeDispatchHook) {
+				a_dispatch();
+				return;
+			}
+
+			struct RecursionScope
+			{
+				RecursionScope() noexcept { t_inComputeDispatchHook = true; }
+				~RecursionScope() noexcept { t_inComputeDispatchHook = false; }
+			} recursionScope;
+
+			if (a_context != g_computeDispatchContext.load(
+					std::memory_order_acquire)) {
+				g_computeContextRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_dispatch();
+				return;
+			}
+
+			const auto plan =
+				GetService().published.load(std::memory_order_acquire);
+			if (!plan || !render::IsDeferredLightsActive()) {
+				a_dispatch();
+				return;
+			}
+
+			ID3D11ComputeShader* shader = nullptr;
+			a_context->CSGetShader(&shader, nullptr, nullptr);
+			winrt::com_ptr<ID3D11ComputeShader> boundShader;
+			boundShader.attach(shader);
+			const auto route = plan->computeVariantIndices.find(shader);
+			if (route == plan->computeVariantIndices.end()
+				|| route->second >= plan->variants.size()) {
+				a_dispatch();
+				return;
+			}
+
+			const auto& variant = plan->variants[route->second];
+			if (variant.targetId
+					!= ShaderInjectionTarget::kDfTiledLighting) {
+				a_dispatch();
+				return;
+			}
+			const auto* target =
+				FindPublishedTarget(*plan, variant.targetId);
+			if (!target
+				|| (target->contributedStages
+					& ShaderStageBit(ShaderStage::kCompute))
+					== 0) {
+				a_dispatch();
+				return;
+			}
+
+			render::ScopedComputeSharedDataBinding bindings(a_context);
+			if (!bindings.IsActive()) {
+				a_dispatch();
+				return;
+			}
+
+			g_computeMatchingDispatches.fetch_add(
+				1, std::memory_order_relaxed);
+			const ActiveVariantScope variantScope(&variant);
+			DispatchPublishedTarget(
+				*target,
+				ShaderStage::kCompute,
+				a_context);
+			a_dispatch();
+		}
+
+		struct DispatchHook
+		{
+			static void STDMETHODCALLTYPE thunk(
+				ID3D11DeviceContext* a_context,
+				UINT a_threadGroupCountX,
+				UINT a_threadGroupCountY,
+				UINT a_threadGroupCountZ) noexcept
+			{
+				g_computeDirectDispatchCalls.fetch_add(
+					1, std::memory_order_relaxed);
+				if (!func) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::err,
+						"Compute Dispatch hook has no original; call rejected.");
+					return;
+				}
+				ExecuteComputeDispatch(a_context, [&] {
+					func(
+						a_context,
+						a_threadGroupCountX,
+						a_threadGroupCountY,
+						a_threadGroupCountZ);
+				});
+			}
+
+			static inline DispatchFunction func = nullptr;
+		};
+
+		struct DispatchIndirectHook
+		{
+			static void STDMETHODCALLTYPE thunk(
+				ID3D11DeviceContext* a_context,
+				ID3D11Buffer* a_bufferForArgs,
+				UINT a_alignedByteOffsetForArgs) noexcept
+			{
+				g_computeIndirectDispatchCalls.fetch_add(
+					1, std::memory_order_relaxed);
+				if (!func) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::err,
+						"Compute DispatchIndirect hook has no original; call rejected.");
+					return;
+				}
+				ExecuteComputeDispatch(a_context, [&] {
+					func(
+						a_context,
+						a_bufferForArgs,
+						a_alignedByteOffsetForArgs);
+				});
+			}
+
+			static inline DispatchIndirectFunction func = nullptr;
 		};
 
 		ShaderSwapResolverResult ResolveInjectedShader(
@@ -1147,7 +1349,11 @@ namespace cs::engine
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration)
 	{
 		auto& service = GetService();
-		const bool installsPreDrawHook = static_cast<bool>(a_registration.bind);
+		const bool installsPreDrawHook =
+			static_cast<bool>(a_registration.bind)
+			&& (a_registration.stages
+				& ShaderStageBit(ShaderStage::kPixel))
+				!= 0;
 		const auto admissible = [&service](
 			const ShaderReplacementRegistration& a_candidate) {
 			if (service.lifecycle != Lifecycle::kCollecting) {
@@ -1463,6 +1669,147 @@ namespace cs::engine
 		return true;
 	}
 
+	bool EnsureComputeDispatchHooksInstalled(
+		ID3D11DeviceContext* a_immediateContext) noexcept
+	{
+		if (!a_immediateContext) {
+			L->error(
+				"Compute dispatch hook installation failed: no immediate context.");
+			return false;
+		}
+
+		bool expected = false;
+		if (!g_computeDispatchHookInstallAttempted.compare_exchange_strong(
+				expected, true, std::memory_order_acq_rel)) {
+			const bool sameContext =
+				g_computeDispatchContext.load(std::memory_order_acquire)
+				== a_immediateContext;
+			if (!sameContext) {
+				L->error(
+					"Compute dispatch hooks reject a replacement context; "
+					"device recreation is unsupported for this process.");
+			}
+			return sameContext && ComputeDispatchHooksInstalled();
+		}
+
+		const auto* table =
+			*reinterpret_cast<std::uintptr_t**>(a_immediateContext);
+		if (!table
+			|| table[kDispatchVtableSlot] == 0
+			|| table[kDispatchIndirectVtableSlot] == 0) {
+			L->error(
+				"Compute dispatch hook installation failed: invalid context vtable.");
+			return false;
+		}
+
+		stl::detour_vfunc<kDispatchVtableSlot, DispatchHook>(
+			a_immediateContext);
+		stl::detour_vfunc<
+			kDispatchIndirectVtableSlot,
+			DispatchIndirectHook>(a_immediateContext);
+
+		const auto* hookedTable =
+			*reinterpret_cast<std::uintptr_t**>(a_immediateContext);
+		const bool dispatchCurrent =
+			hookedTable[kDispatchVtableSlot]
+			== reinterpret_cast<std::uintptr_t>(&DispatchHook::thunk);
+		const bool indirectCurrent =
+			hookedTable[kDispatchIndirectVtableSlot]
+			== reinterpret_cast<std::uintptr_t>(
+				&DispatchIndirectHook::thunk);
+		const bool installed =
+			DispatchHook::func
+			&& DispatchIndirectHook::func
+			&& dispatchCurrent
+			&& indirectCurrent;
+		if (!installed) {
+			L->error(
+				"Compute dispatch hook installation failed: "
+				"Dispatch original={} current={}, DispatchIndirect original={} current={}; "
+				"compute replacements will remain disabled.",
+				reinterpret_cast<std::uintptr_t>(DispatchHook::func),
+				dispatchCurrent,
+				reinterpret_cast<std::uintptr_t>(
+					DispatchIndirectHook::func),
+				indirectCurrent);
+			return false;
+		}
+
+		g_computeDispatchContext.store(
+			a_immediateContext, std::memory_order_release);
+		g_computeDispatchHooksInstalled.store(
+			true, std::memory_order_release);
+		L->info(
+			"Compute dispatch hooks installed on immediate context {:#x} "
+			"(Dispatch slot {}, DispatchIndirect slot {}).",
+			reinterpret_cast<std::uintptr_t>(a_immediateContext),
+			kDispatchVtableSlot,
+			kDispatchIndirectVtableSlot);
+		return true;
+	}
+
+	bool ComputeDispatchHooksInstalled() noexcept
+	{
+		if (!g_computeDispatchHooksInstalled.load(
+				std::memory_order_acquire)) {
+			return false;
+		}
+		auto* context =
+			g_computeDispatchContext.load(std::memory_order_acquire);
+		if (!context)
+			return false;
+		const auto* table =
+			*reinterpret_cast<std::uintptr_t**>(context);
+		return table
+			&& table[kDispatchVtableSlot]
+				== reinterpret_cast<std::uintptr_t>(
+					&DispatchHook::thunk)
+			&& table[kDispatchIndirectVtableSlot]
+				== reinterpret_cast<std::uintptr_t>(
+					&DispatchIndirectHook::thunk);
+	}
+
+	ComputeDispatchHookStatus GetComputeDispatchHookStatus() noexcept
+	{
+		return {
+			.installed = ComputeDispatchHooksInstalled(),
+			.directCalls = g_computeDirectDispatchCalls.load(
+				std::memory_order_relaxed),
+			.indirectCalls = g_computeIndirectDispatchCalls.load(
+				std::memory_order_relaxed),
+			.matchingDispatches = g_computeMatchingDispatches.load(
+				std::memory_order_relaxed),
+			.contextRejections = g_computeContextRejections.load(
+				std::memory_order_relaxed)
+		};
+	}
+
+#ifdef FO4CS_SHADER_INJECTION_TESTING
+	void InvokeComputeDispatchHookForTesting(
+		ID3D11DeviceContext* a_context,
+		std::uint32_t a_threadGroupCountX,
+		std::uint32_t a_threadGroupCountY,
+		std::uint32_t a_threadGroupCountZ) noexcept
+	{
+		DispatchHook::thunk(
+			a_context,
+			a_threadGroupCountX,
+			a_threadGroupCountY,
+			a_threadGroupCountZ);
+	}
+
+	void InvokeComputeDispatchIndirectHookForTesting(
+		ID3D11DeviceContext* a_context,
+		ID3D11Buffer* a_bufferForArgs,
+		std::uint32_t a_alignedByteOffsetForArgs) noexcept
+	{
+		DispatchIndirectHook::thunk(
+			a_context,
+			a_bufferForArgs,
+			a_alignedByteOffsetForArgs);
+	}
+#endif
+
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device)
 	{
 		auto& service = GetService();
@@ -1499,6 +1846,8 @@ namespace cs::engine
 		std::size_t compileSucceeded = 0;
 		std::size_t swappableVariants = 0;
 		ShaderStageMask swappableStages = 0;
+		const bool computeHooksReady =
+			ComputeDispatchHooksInstalled();
 		std::vector<FrozenTarget> frozenTargets;
 		if (enabled) {
 			frozenTargets = FreezeTargets(
@@ -1539,6 +1888,18 @@ namespace cs::engine
 				std::string firstError;
 				std::string onlyCompiledSha1;
 				for (const auto& variant : frozenTarget.variants) {
+					if (variant.stage == ShaderStage::kCompute
+						&& !computeHooksReady) {
+						if (firstError.empty()) {
+							firstError =
+								"compute dispatch hooks are unavailable";
+						}
+						L->error(
+							"Compile '{}/{}' rejected: compute dispatch hooks are unavailable.",
+							frozenTarget.metadata->name,
+							variant.name);
+						continue;
+					}
 					std::string compileError;
 					auto prepared = PrepareVariant(
 						*plan->compilationPolicy,
@@ -1612,12 +1973,31 @@ namespace cs::engine
 				}
 
 				if (targetPrepared > 0) {
+					ShaderStageMask contributedStages = 0;
+					for (const auto& contribution :
+						frozenTarget.contributions) {
+						contributedStages |= contribution.stages;
+					}
 					plan->targets.push_back(PublishedTarget{
 						frozenTarget.metadata->id,
+						contributedStages,
 						frozenTarget.binds
 					});
 				}
 			}
+		}
+
+		for (std::size_t index = 0; index < plan->variants.size(); ++index) {
+			const auto& variant = plan->variants[index];
+			if (!variant.compilation
+				|| variant.compilation->GetStage()
+					!= ShaderStage::kCompute) {
+				continue;
+			}
+			auto* shader = static_cast<ID3D11ComputeShader*>(
+				variant.compilation->PeekShader());
+			if (shader)
+				plan->computeVariantIndices.emplace(shader, index);
 		}
 
 		service.published.store(plan, std::memory_order_release);
@@ -1676,32 +2056,7 @@ namespace cs::engine
 		const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr;
 		if (!target)
 			return;
-
-		// restore b5/b6 before feature binds
-		render::BindSharedData(a_context, ShaderStage::kPixel);
-
-		auto& runtime = GetService().runtime[ToIndex(a_target)];
-		for (const auto& bind : target->binds) {
-			try {
-				bind(a_context);
-				runtime.dispatches.fetch_add(1, std::memory_order_relaxed);
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::warn,
-					"Shader injection for '{}' failed: {}.",
-					kTargets[ToIndex(a_target)].name,
-					e.what());
-			} catch (...) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::warn,
-					"Shader injection for '{}' failed.",
-					kTargets[ToIndex(a_target)].name);
-			}
-		}
+		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
 	}
 
 	void DispatchInjectionsForBoundPixelShader(
@@ -1723,6 +2078,7 @@ namespace cs::engine
 			if (const auto* variant = FindMatchingPublishedVariant(
 					*plan,
 					target.id,
+					ShaderStage::kPixel,
 					boundShader)) {
 				const ActiveVariantScope scope(variant);
 				DispatchShaderInjections(target.id, a_context);
@@ -1757,6 +2113,26 @@ namespace cs::engine
 		return nullptr;
 	}
 
+	ID3D11ComputeShader* GetInjectedComputeShader(
+		ShaderInjectionTarget a_target) noexcept
+	{
+		if (!IsValidTarget(a_target))
+			return nullptr;
+		const auto plan = GetService().published.load(std::memory_order_acquire);
+		if (!plan)
+			return nullptr;
+		for (const auto& variant : plan->variants) {
+			if (variant.targetId == a_target
+				&& variant.compilation
+				&& variant.compilation->GetStage()
+					== ShaderStage::kCompute) {
+				return static_cast<ID3D11ComputeShader*>(
+					variant.compilation->PeekShader());
+			}
+		}
+		return nullptr;
+	}
+
 	bool IsInjectedPixelShader(
 		ShaderInjectionTarget a_target,
 		ID3D11PixelShader* a_shader) noexcept
@@ -1769,6 +2145,23 @@ namespace cs::engine
 			*plan,
 			a_target,
 			a_shader);
+	}
+
+	bool IsInjectedComputeShader(
+		ShaderInjectionTarget a_target,
+		ID3D11ComputeShader* a_shader) noexcept
+	{
+		if (!a_shader || !IsValidTarget(a_target))
+			return false;
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		return plan
+			&& FindMatchingPublishedVariant(
+				*plan,
+				a_target,
+				ShaderStage::kCompute,
+				a_shader)
+				!= nullptr;
 	}
 
 	bool ActiveShaderInjectionVariantHasDefine(
