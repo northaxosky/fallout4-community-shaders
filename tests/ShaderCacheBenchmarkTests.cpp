@@ -68,6 +68,11 @@ namespace cs::render
 		ID3D11DeviceContext*,
 		cs::engine::ShaderStage) noexcept
 	{}
+
+	bool IsDeferredLightsActive() noexcept
+	{
+		return false;
+	}
 }
 
 namespace

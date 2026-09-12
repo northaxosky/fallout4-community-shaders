@@ -13,12 +13,15 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstring>
 #include <d3d11.h>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace cs::engine
@@ -210,7 +213,12 @@ namespace cs::engine
 			const ShaderInjectionTargetMetadata* metadata = nullptr;
 			ShaderInjectionDefines               defines;
 			std::vector<ShaderReplacementRegistration> contributions;
-			std::vector<ShaderInjectionBindCallback> binds;
+			struct Bind
+			{
+				ShaderStageMask stages = 0;
+				ShaderInjectionBindCallback callback;
+			};
+			std::vector<Bind>                    binds;
 			std::vector<ShaderReplacementVariantRegistration> variants;
 			std::size_t                          contributors = 0;
 			bool                                 slotCollision = false;
@@ -237,7 +245,8 @@ namespace cs::engine
 		struct PublishedTarget
 		{
 			ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
-			std::vector<ShaderInjectionBindCallback> binds;
+			ShaderStageMask contributedStages = 0;
+			std::vector<FrozenTarget::Bind> binds;
 		};
 
 		struct PublishedPlan
@@ -247,6 +256,8 @@ namespace cs::engine
 			std::vector<PublishedTarget> targets;
 			std::vector<PublishedVariant> variants;
 			std::vector<PixelShaderSwapVariantKey> variantKeys;
+			std::unordered_map<ID3D11ComputeShader*, std::size_t>
+				computeVariantIndices;
 		};
 
 		// first claimant wins, in feature-registration order
@@ -280,6 +291,23 @@ namespace cs::engine
 			std::atomic_flag swapCountersLock = ATOMIC_FLAG_INIT;
 			bool resolverRegistered = false;
 		};
+
+		// The engine tail survives D3D11's lazy dispatch-table replacement.
+		constexpr std::ptrdiff_t kRunComputeShaderDispatchTailOffset = 0xAB;
+		constexpr std::array<std::uint8_t, 7>
+			kRunComputeShaderDispatchTail{
+				0x48, 0xFF, 0xA0, 0x48, 0x01, 0x00, 0x00
+			};
+
+		std::mutex g_computeDispatchBridgeInstallMutex;
+		std::atomic<std::uintptr_t> g_computeDispatchBridgeTail{ 0 };
+		std::atomic<ID3D11DeviceContext*> g_computeDispatchContext{ nullptr };
+		std::array<std::uint8_t, 7> g_computeDispatchBridgePatch{};
+		std::atomic_uint64_t g_computeBridgeCalls{ 0 };
+		std::atomic_uint64_t g_computeMatchingDispatches{ 0 };
+		std::atomic_uint64_t g_computeContextRejections{ 0 };
+		std::atomic_uint64_t g_computePhaseRejections{ 0 };
+		std::atomic_uint64_t g_computeShaderRejections{ 0 };
 
 		Service& GetService()
 		{
@@ -703,8 +731,12 @@ namespace cs::engine
 						claimedSlots.end(),
 						registration.slotClaims.begin(),
 						registration.slotClaims.end());
-					if (registration.bind)
-						target.binds.push_back(registration.bind);
+					if (registration.bind) {
+						target.binds.push_back({
+							registration.stages,
+							registration.bind
+						});
+					}
 				}
 
 				if (developerOverride == DeveloperShaderOverride::kForceOff) {
@@ -910,19 +942,20 @@ namespace cs::engine
 		const PublishedVariant* FindMatchingPublishedVariant(
 			const PublishedPlan& a_plan,
 			ShaderInjectionTarget a_target,
-			ID3D11PixelShader* a_shader) noexcept
+			ShaderStage a_stage,
+			ID3D11DeviceChild* a_shader) noexcept
 		{
 			if (!a_shader)
 				return nullptr;
 			const auto match = std::ranges::find_if(
 				a_plan.variants,
-				[a_target, a_shader](const PublishedVariant& a_variant) {
+				[a_target, a_stage, a_shader](const PublishedVariant& a_variant) {
 					return a_variant.targetId == a_target
 						&& a_variant.compilation
 						&& a_variant.compilation->GetStage()
-							== ShaderStage::kPixel
+							== a_stage
 						&& a_variant.compilation->PeekShader()
-							== static_cast<ID3D11DeviceChild*>(a_shader);
+							== a_shader;
 				});
 			return match == a_plan.variants.end() ? nullptr : &*match;
 		}
@@ -932,7 +965,11 @@ namespace cs::engine
 			ShaderInjectionTarget a_target,
 			ID3D11PixelShader* a_shader) noexcept
 		{
-			return FindMatchingPublishedVariant(a_plan, a_target, a_shader)
+			return FindMatchingPublishedVariant(
+				a_plan,
+				a_target,
+				ShaderStage::kPixel,
+				a_shader)
 				!= nullptr;
 		}
 
@@ -954,6 +991,291 @@ namespace cs::engine
 		private:
 			const PublishedVariant* _previous;
 		};
+
+		void DispatchPublishedTarget(
+			const PublishedTarget& a_target,
+			ShaderStage a_stage,
+			ID3D11DeviceContext* a_context) noexcept
+		{
+			if (a_stage == ShaderStage::kPixel)
+				render::BindSharedData(a_context, a_stage);
+
+			auto& runtime = GetService().runtime[ToIndex(a_target.id)];
+			for (const auto& bind : a_target.binds) {
+				if ((bind.stages & ShaderStageBit(a_stage)) == 0)
+					continue;
+				try {
+					bind.callback(a_context);
+					runtime.dispatches.fetch_add(1, std::memory_order_relaxed);
+				} catch (const std::exception& e) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::warn,
+						"Shader injection for '{}' failed: {}.",
+						kTargets[ToIndex(a_target.id)].name,
+						e.what());
+				} catch (...) {
+					CS_LOG_EVERY_MS(
+						L,
+						2000,
+						spdlog::level::warn,
+						"Shader injection for '{}' failed.",
+						kTargets[ToIndex(a_target.id)].name);
+				}
+			}
+		}
+
+		void ExecuteComputeDispatch(
+			ID3D11DeviceContext* a_context,
+			UINT a_threadGroupCountX,
+			UINT a_threadGroupCountY,
+			UINT a_threadGroupCountZ) noexcept
+		{
+			g_computeBridgeCalls.fetch_add(1, std::memory_order_relaxed);
+			if (!a_context) {
+				g_computeContextRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				return;
+			}
+
+			if (a_context != g_computeDispatchContext.load(
+					std::memory_order_acquire)) {
+				g_computeContextRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+				return;
+			}
+
+			const auto plan =
+				GetService().published.load(std::memory_order_acquire);
+			if (!plan || !render::IsDeferredLightsActive()) {
+				g_computePhaseRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+				return;
+			}
+
+			ID3D11ComputeShader* shader = nullptr;
+			a_context->CSGetShader(&shader, nullptr, nullptr);
+			winrt::com_ptr<ID3D11ComputeShader> boundShader;
+			boundShader.attach(shader);
+			const auto route = plan->computeVariantIndices.find(shader);
+			if (route == plan->computeVariantIndices.end()
+				|| route->second >= plan->variants.size()) {
+				g_computeShaderRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+				return;
+			}
+
+			const auto& variant = plan->variants[route->second];
+			if (variant.targetId
+					!= ShaderInjectionTarget::kDfTiledLighting) {
+				g_computeShaderRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+				return;
+			}
+			const auto* target =
+				FindPublishedTarget(*plan, variant.targetId);
+			if (!target
+				|| (target->contributedStages
+					& ShaderStageBit(ShaderStage::kCompute))
+					== 0) {
+				g_computeShaderRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+				return;
+			}
+
+			render::ScopedComputeSharedDataBinding bindings(a_context);
+			if (!bindings.IsActive()) {
+				g_computePhaseRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+				return;
+			}
+
+			g_computeMatchingDispatches.fetch_add(
+				1, std::memory_order_relaxed);
+			const ActiveVariantScope variantScope(&variant);
+			DispatchPublishedTarget(
+				*target,
+				ShaderStage::kCompute,
+				a_context);
+			a_context->Dispatch(
+				a_threadGroupCountX,
+				a_threadGroupCountY,
+				a_threadGroupCountZ);
+		}
+
+		void STDMETHODCALLTYPE RunComputeShaderDispatchBridge(
+			ID3D11DeviceContext* a_context,
+			UINT a_threadGroupCountX,
+			UINT a_threadGroupCountY,
+			UINT a_threadGroupCountZ) noexcept
+		{
+			ExecuteComputeDispatch(
+				a_context,
+				a_threadGroupCountX,
+				a_threadGroupCountY,
+				a_threadGroupCountZ);
+		}
+
+		bool IsRelativeBranchReachable(
+			std::uintptr_t a_source,
+			std::uintptr_t a_target) noexcept
+		{
+			const auto displacement =
+				static_cast<std::int64_t>(a_target)
+				- static_cast<std::int64_t>(
+					a_source + sizeof(REL::ASM::JMP5));
+			return displacement
+				>= std::numeric_limits<std::int32_t>::min()
+				&& displacement
+				<= std::numeric_limits<std::int32_t>::max();
+		}
+
+		bool InstallComputeDispatchBridgeAt(
+			ID3D11DeviceContext* a_immediateContext,
+			std::uintptr_t a_validatedTail) noexcept
+		{
+			if (!a_immediateContext || !a_validatedTail)
+				return false;
+
+			std::scoped_lock lock(g_computeDispatchBridgeInstallMutex);
+			const auto installedTail =
+				g_computeDispatchBridgeTail.load(
+					std::memory_order_acquire);
+			if (installedTail != 0) {
+				return installedTail == a_validatedTail
+					&& g_computeDispatchContext.load(
+						std::memory_order_acquire)
+						== a_immediateContext
+					&& std::memcmp(
+						reinterpret_cast<const void*>(
+							installedTail),
+						g_computeDispatchBridgePatch.data(),
+						g_computeDispatchBridgePatch.size())
+						== 0;
+			}
+
+			if (std::memcmp(
+					reinterpret_cast<const void*>(a_validatedTail),
+					kRunComputeShaderDispatchTail.data(),
+					kRunComputeShaderDispatchTail.size())
+				!= 0) {
+				L->error(
+					"RunComputeShader dispatch bridge installation refused: "
+					"the 7-byte tail does not match the supported layout.");
+				return false;
+			}
+
+			try {
+				auto& trampoline = REL::GetTrampoline();
+				if (trampoline.free_size() < sizeof(REL::ASM::JMP14)) {
+					L->error(
+						"RunComputeShader dispatch bridge installation failed: "
+						"insufficient trampoline space.");
+					return false;
+				}
+				const auto branch = trampoline.allocate_branch5(
+					reinterpret_cast<std::uintptr_t>(
+						&RunComputeShaderDispatchBridge));
+				if (!IsRelativeBranchReachable(
+						a_validatedTail, branch)) {
+					L->error(
+						"RunComputeShader dispatch bridge installation failed: "
+						"the allocated branch is outside rel32 range.");
+					return false;
+				}
+
+				std::array<std::uint8_t, 7> patch{
+					REL::NOP, REL::NOP, REL::NOP, REL::NOP,
+					REL::NOP, REL::NOP, REL::NOP
+				};
+				const REL::ASM::JMP5 jump(a_validatedTail, branch);
+				std::memcpy(
+					patch.data(), std::addressof(jump), sizeof(jump));
+				const bool protectionRestored = REL::WriteSafe(
+					a_validatedTail,
+					patch.data(),
+					patch.size());
+				const bool patchOwned = std::memcmp(
+						reinterpret_cast<const void*>(
+							a_validatedTail),
+						patch.data(),
+						patch.size())
+					== 0;
+				if (!patchOwned) {
+					const bool restored = REL::WriteSafe(
+						a_validatedTail,
+						kRunComputeShaderDispatchTail.data(),
+						kRunComputeShaderDispatchTail.size())
+						&& std::memcmp(
+							reinterpret_cast<const void*>(
+								a_validatedTail),
+							kRunComputeShaderDispatchTail.data(),
+							kRunComputeShaderDispatchTail.size())
+							== 0;
+					L->error(
+						"RunComputeShader dispatch bridge installation failed: "
+						"the written tail could not be verified (rollback={}).",
+						restored);
+					if (!restored)
+						std::terminate();
+					FlushInstructionCache(
+						GetCurrentProcess(),
+						reinterpret_cast<const void*>(a_validatedTail),
+						kRunComputeShaderDispatchTail.size());
+					return false;
+				}
+				FlushInstructionCache(
+					GetCurrentProcess(),
+					reinterpret_cast<const void*>(a_validatedTail),
+					patch.size());
+				if (!protectionRestored) {
+					L->warn(
+						"RunComputeShader dispatch bridge owns the verified "
+						"tail, but restoring its page protection failed.");
+				}
+
+				g_computeDispatchBridgePatch = patch;
+				g_computeDispatchContext.store(
+					a_immediateContext, std::memory_order_release);
+				g_computeDispatchBridgeTail.store(
+					a_validatedTail, std::memory_order_release);
+				return true;
+			} catch (const std::exception& e) {
+				L->error(
+					"RunComputeShader dispatch bridge installation failed: {}",
+					e.what());
+			} catch (...) {
+				L->error(
+					"RunComputeShader dispatch bridge installation failed: "
+					"unknown exception.");
+			}
+			return false;
+		}
 
 		ShaderSwapResolverResult ResolveInjectedShader(
 			const ShaderSwapRequest& a_request) noexcept
@@ -1147,7 +1469,11 @@ namespace cs::engine
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration)
 	{
 		auto& service = GetService();
-		const bool installsPreDrawHook = static_cast<bool>(a_registration.bind);
+		const bool installsPreDrawHook =
+			static_cast<bool>(a_registration.bind)
+			&& (a_registration.stages
+				& ShaderStageBit(ShaderStage::kPixel))
+				!= 0;
 		const auto admissible = [&service](
 			const ShaderReplacementRegistration& a_candidate) {
 			if (service.lifecycle != Lifecycle::kCollecting) {
@@ -1463,6 +1789,124 @@ namespace cs::engine
 		return true;
 	}
 
+	bool EnsureComputeDispatchBridgeInstalled(
+		ID3D11DeviceContext* a_immediateContext) noexcept
+	{
+		if (!a_immediateContext) {
+			L->error(
+				"RunComputeShader dispatch bridge installation failed: "
+				"no immediate context.");
+			return false;
+		}
+
+		const auto installedTail =
+			g_computeDispatchBridgeTail.load(
+				std::memory_order_acquire);
+		if (installedTail != 0) {
+			const bool sameContext =
+				g_computeDispatchContext.load(
+					std::memory_order_acquire)
+				== a_immediateContext;
+			if (!sameContext) {
+				L->error(
+					"RunComputeShader dispatch bridge rejects a replacement "
+					"context; device recreation is unsupported for this process.");
+			}
+			return sameContext && ComputeDispatchBridgeInstalled();
+		}
+
+		try {
+			const auto function =
+				REL::ID({ 1108829, 2276940, 2276940 }).address();
+			const auto tail =
+				function + kRunComputeShaderDispatchTailOffset;
+			const auto text =
+				REX::FModule::GetExecutingModule().GetSection(
+					".text");
+			const auto textBegin = text.GetAddress();
+			const auto textEnd = textBegin + text.GetSize();
+			if (!function
+				|| !textBegin
+				|| tail < textBegin
+				|| tail > textEnd
+				|| textEnd - tail
+					< kRunComputeShaderDispatchTail.size()) {
+				L->error(
+					"RunComputeShader dispatch bridge installation refused: "
+					"REL target + {:#x} is outside the executable .text section.",
+					kRunComputeShaderDispatchTailOffset);
+				return false;
+			}
+
+			if (!InstallComputeDispatchBridgeAt(
+					a_immediateContext, tail)) {
+				return false;
+			}
+		} catch (const std::exception& e) {
+			L->error(
+				"RunComputeShader dispatch bridge resolution failed: {}",
+				e.what());
+			return false;
+		} catch (...) {
+			L->error(
+				"RunComputeShader dispatch bridge resolution failed: "
+				"unknown exception.");
+			return false;
+		}
+
+		L->info(
+			"RunComputeShader dispatch bridge installed at {:#x} for "
+			"immediate context {:#x}.",
+			g_computeDispatchBridgeTail.load(
+				std::memory_order_acquire),
+			reinterpret_cast<std::uintptr_t>(a_immediateContext));
+		return true;
+	}
+
+	bool ComputeDispatchBridgeInstalled() noexcept
+	{
+		const auto tail =
+			g_computeDispatchBridgeTail.load(
+				std::memory_order_acquire);
+		if (!tail
+			|| !g_computeDispatchContext.load(
+				std::memory_order_acquire)) {
+			return false;
+		}
+		return std::memcmp(
+			reinterpret_cast<const void*>(tail),
+			g_computeDispatchBridgePatch.data(),
+			g_computeDispatchBridgePatch.size())
+			== 0;
+	}
+
+	ComputeDispatchBridgeStatus GetComputeDispatchBridgeStatus() noexcept
+	{
+		return {
+			.installed = ComputeDispatchBridgeInstalled(),
+			.bridgeCalls = g_computeBridgeCalls.load(
+				std::memory_order_relaxed),
+			.matchingDispatches = g_computeMatchingDispatches.load(
+				std::memory_order_relaxed),
+			.contextRejections = g_computeContextRejections.load(
+				std::memory_order_relaxed),
+			.phaseRejections = g_computePhaseRejections.load(
+				std::memory_order_relaxed),
+			.shaderRejections = g_computeShaderRejections.load(
+				std::memory_order_relaxed)
+		};
+	}
+
+#ifdef FO4CS_SHADER_INJECTION_TESTING
+	bool InstallComputeDispatchBridgeForTesting(
+		ID3D11DeviceContext* a_context,
+		std::uintptr_t a_validatedTail) noexcept
+	{
+		return InstallComputeDispatchBridgeAt(
+			a_context, a_validatedTail);
+	}
+#endif
+
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device)
 	{
 		auto& service = GetService();
@@ -1499,6 +1943,8 @@ namespace cs::engine
 		std::size_t compileSucceeded = 0;
 		std::size_t swappableVariants = 0;
 		ShaderStageMask swappableStages = 0;
+		const bool computeBridgeReady =
+			ComputeDispatchBridgeInstalled();
 		std::vector<FrozenTarget> frozenTargets;
 		if (enabled) {
 			frozenTargets = FreezeTargets(
@@ -1539,6 +1985,19 @@ namespace cs::engine
 				std::string firstError;
 				std::string onlyCompiledSha1;
 				for (const auto& variant : frozenTarget.variants) {
+					if (variant.stage == ShaderStage::kCompute
+						&& !computeBridgeReady) {
+						if (firstError.empty()) {
+							firstError =
+								"RunComputeShader dispatch bridge is unavailable";
+						}
+						L->error(
+							"Compile '{}/{}' rejected: "
+							"RunComputeShader dispatch bridge is unavailable.",
+							frozenTarget.metadata->name,
+							variant.name);
+						continue;
+					}
 					std::string compileError;
 					auto prepared = PrepareVariant(
 						*plan->compilationPolicy,
@@ -1612,12 +2071,31 @@ namespace cs::engine
 				}
 
 				if (targetPrepared > 0) {
+					ShaderStageMask contributedStages = 0;
+					for (const auto& contribution :
+						frozenTarget.contributions) {
+						contributedStages |= contribution.stages;
+					}
 					plan->targets.push_back(PublishedTarget{
 						frozenTarget.metadata->id,
+						contributedStages,
 						frozenTarget.binds
 					});
 				}
 			}
+		}
+
+		for (std::size_t index = 0; index < plan->variants.size(); ++index) {
+			const auto& variant = plan->variants[index];
+			if (!variant.compilation
+				|| variant.compilation->GetStage()
+					!= ShaderStage::kCompute) {
+				continue;
+			}
+			auto* shader = static_cast<ID3D11ComputeShader*>(
+				variant.compilation->PeekShader());
+			if (shader)
+				plan->computeVariantIndices.emplace(shader, index);
 		}
 
 		service.published.store(plan, std::memory_order_release);
@@ -1676,32 +2154,7 @@ namespace cs::engine
 		const auto* target = plan ? FindPublishedTarget(*plan, a_target) : nullptr;
 		if (!target)
 			return;
-
-		// restore b5/b6 before feature binds
-		render::BindSharedData(a_context, ShaderStage::kPixel);
-
-		auto& runtime = GetService().runtime[ToIndex(a_target)];
-		for (const auto& bind : target->binds) {
-			try {
-				bind(a_context);
-				runtime.dispatches.fetch_add(1, std::memory_order_relaxed);
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::warn,
-					"Shader injection for '{}' failed: {}.",
-					kTargets[ToIndex(a_target)].name,
-					e.what());
-			} catch (...) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::warn,
-					"Shader injection for '{}' failed.",
-					kTargets[ToIndex(a_target)].name);
-			}
-		}
+		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
 	}
 
 	void DispatchInjectionsForBoundPixelShader(
@@ -1723,6 +2176,7 @@ namespace cs::engine
 			if (const auto* variant = FindMatchingPublishedVariant(
 					*plan,
 					target.id,
+					ShaderStage::kPixel,
 					boundShader)) {
 				const ActiveVariantScope scope(variant);
 				DispatchShaderInjections(target.id, a_context);
@@ -1757,6 +2211,26 @@ namespace cs::engine
 		return nullptr;
 	}
 
+	ID3D11ComputeShader* GetInjectedComputeShader(
+		ShaderInjectionTarget a_target) noexcept
+	{
+		if (!IsValidTarget(a_target))
+			return nullptr;
+		const auto plan = GetService().published.load(std::memory_order_acquire);
+		if (!plan)
+			return nullptr;
+		for (const auto& variant : plan->variants) {
+			if (variant.targetId == a_target
+				&& variant.compilation
+				&& variant.compilation->GetStage()
+					== ShaderStage::kCompute) {
+				return static_cast<ID3D11ComputeShader*>(
+					variant.compilation->PeekShader());
+			}
+		}
+		return nullptr;
+	}
+
 	bool IsInjectedPixelShader(
 		ShaderInjectionTarget a_target,
 		ID3D11PixelShader* a_shader) noexcept
@@ -1769,6 +2243,23 @@ namespace cs::engine
 			*plan,
 			a_target,
 			a_shader);
+	}
+
+	bool IsInjectedComputeShader(
+		ShaderInjectionTarget a_target,
+		ID3D11ComputeShader* a_shader) noexcept
+	{
+		if (!a_shader || !IsValidTarget(a_target))
+			return false;
+		const auto plan =
+			GetService().published.load(std::memory_order_acquire);
+		return plan
+			&& FindMatchingPublishedVariant(
+				*plan,
+				a_target,
+				ShaderStage::kCompute,
+				a_shader)
+				!= nullptr;
 	}
 
 	bool ActiveShaderInjectionVariantHasDefine(
@@ -1901,6 +2392,7 @@ namespace cs::engine
 					std::memory_order_relaxed);
 			summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 		}
+		summary.computeBridge = GetComputeDispatchBridgeStatus();
 		return summary;
 	}
 

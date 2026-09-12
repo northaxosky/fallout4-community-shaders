@@ -154,7 +154,30 @@ namespace cs::telemetry
 				.Field(
 					"passthrough_disabled",
 					TomlInteger(summary.passthroughDisabled))
-				.Field("dispatches", TomlInteger(summary.dispatches));
+				.Field("dispatches", TomlInteger(summary.dispatches))
+				.Field(
+					"compute_bridge_installed",
+					summary.computeBridge.installed)
+				.Field(
+					"compute_bridge_calls",
+					TomlInteger(
+						summary.computeBridge.bridgeCalls))
+				.Field(
+					"compute_bridge_matches",
+					TomlInteger(
+						summary.computeBridge.matchingDispatches))
+				.Field(
+					"compute_bridge_context_mismatch",
+					TomlInteger(
+						summary.computeBridge.contextRejections))
+				.Field(
+					"compute_bridge_phase_rejected",
+					TomlInteger(
+						summary.computeBridge.phaseRejections))
+				.Field(
+					"compute_bridge_shader_rejected",
+					TomlInteger(
+						summary.computeBridge.shaderRejections));
 
 			for (std::uint8_t index = 0;
 				index <

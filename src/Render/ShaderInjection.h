@@ -15,6 +15,7 @@
 
 struct ID3D11Device;
 struct ID3D11DeviceContext;
+struct ID3D11ComputeShader;
 struct ID3D11PixelShader;
 
 namespace cs::engine
@@ -172,6 +173,16 @@ namespace cs::engine
 		std::uint64_t substitutions = 0;
 	};
 
+	struct ComputeDispatchBridgeStatus
+	{
+		bool installed = false;
+		std::uint64_t bridgeCalls = 0;
+		std::uint64_t matchingDispatches = 0;
+		std::uint64_t contextRejections = 0;
+		std::uint64_t phaseRejections = 0;
+		std::uint64_t shaderRejections = 0;
+	};
+
 	struct ShaderInjectionSummary
 	{
 		std::size_t requested = 0;
@@ -188,6 +199,7 @@ namespace cs::engine
 		std::uint64_t passthroughNotReady = 0;
 		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
+		ComputeDispatchBridgeStatus computeBridge;
 	};
 
 	std::span<const ShaderInjectionTargetMetadata> GetShaderInjectionTargets() noexcept;
@@ -217,6 +229,16 @@ namespace cs::engine
 	bool SetShaderInjectionEnabled(bool a_enabled);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
+	bool EnsureComputeDispatchBridgeInstalled(
+		ID3D11DeviceContext* a_immediateContext) noexcept;
+	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
+	[[nodiscard]] ComputeDispatchBridgeStatus
+		GetComputeDispatchBridgeStatus() noexcept;
+#ifdef FO4CS_SHADER_INJECTION_TESTING
+	bool InstallComputeDispatchBridgeForTesting(
+		ID3D11DeviceContext* a_context,
+		std::uintptr_t a_validatedTail) noexcept;
+#endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
 		ID3D11DeviceContext* a_context) noexcept;
@@ -224,9 +246,14 @@ namespace cs::engine
 		ID3D11DeviceContext* a_context) noexcept;
 
 	ID3D11PixelShader* GetInjectedPixelShader(ShaderInjectionTarget a_target) noexcept;
+	ID3D11ComputeShader* GetInjectedComputeShader(
+		ShaderInjectionTarget a_target) noexcept;
 	bool IsInjectedPixelShader(
 		ShaderInjectionTarget a_target,
 		ID3D11PixelShader* a_shader) noexcept;
+	bool IsInjectedComputeShader(
+		ShaderInjectionTarget a_target,
+		ID3D11ComputeShader* a_shader) noexcept;
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;
 	bool ActiveShaderInjectionVariantHasDefine(

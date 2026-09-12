@@ -633,6 +633,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		src/Render/ShaderInjectionVariantData.h
 		src/Render/ShaderInjectionVariantFactory.cpp
 		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/SharedDataDispatchScope.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
 		src/Utils/CSSha256.cpp
@@ -660,6 +661,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)
 	target_link_libraries(ShaderCompileTests PRIVATE
+		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
 		CommonLibF4::CommonLibF4
 		Microsoft::DirectXTK
 		Microsoft::DirectX-Headers
@@ -686,6 +689,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		src/Render/ShaderInjectionVariantData.h
 		src/Render/ShaderInjectionVariantFactory.cpp
 		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/SharedDataDispatchScope.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
 		src/Utils/CSSha256.cpp
@@ -714,6 +718,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)
 	target_link_libraries(ShaderCacheBenchmarkTests PRIVATE
+		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
 		CommonLibF4::CommonLibF4
 		Microsoft::DirectXTK
 		Microsoft::DirectX-Headers
@@ -802,6 +808,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		src/Render/ShaderInjectionVariantData.h
 		src/Render/ShaderInjectionVariantFactory.cpp
 		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/SharedDataDispatchScope.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
 		src/Utils/CSSha256.cpp
@@ -817,6 +824,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		_AMD64_
 		_UNICODE
 		COMMONLIB_RUNTIMECOUNT=3
+		FO4CS_SHADER_INJECTION_TESTING
 		FO4CS_BSDF_SHADER_VARIANT_DATA_FILE="${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/bsdf.toml"
 		FO4CS_STATIC_FAMILY_SHADER_VARIANT_DATA_FILE="${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/static_families.toml"
 	)
@@ -829,6 +837,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)
 	target_link_libraries(ShaderInjectionRegistrationTests PRIVATE
+		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
 		CommonLibF4::CommonLibF4
 		Microsoft::DirectXTK
 		Microsoft::DirectX-Headers
@@ -848,10 +858,24 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		NAME ShaderInjectionBaselineOwnership
 		COMMAND ShaderInjectionRegistrationTests --baseline-ownership
 	)
+	add_test(
+		NAME ShaderInjectionComputeBaselineOnly
+		COMMAND ShaderInjectionRegistrationTests --compute-baseline-only
+	)
+	add_test(
+		NAME ShaderInjectionComputeHooksMissing
+		COMMAND ShaderInjectionRegistrationTests --compute-hooks-missing
+	)
 	set_tests_properties(ShaderInjectionRegistration PROPERTIES
 		LABELS "render;shader;unit"
 	)
 	set_tests_properties(ShaderInjectionBaselineOwnership PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionComputeBaselineOnly PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionComputeHooksMissing PROPERTIES
 		LABELS "render;shader;unit"
 	)
 endif()
