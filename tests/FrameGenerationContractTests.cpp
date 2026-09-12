@@ -8,7 +8,6 @@
 #pragma warning(pop)
 
 #include "StreamlineFrameGenerationContract.h"
-#include "XeSSFrameGenerationContract.h"
 
 #pragma warning(push)
 #pragma warning(disable: 4068 4100)
@@ -47,31 +46,31 @@ namespace
 		using namespace cs::render::temporal;
 		const ProviderResult failure{
 			.code = ProviderResultCode::kFailure,
-			.sdkResult = XEFG_SWAPCHAIN_RESULT_ERROR_MISMATCH_INPUT_RESOURCES,
-			.message = "XeSS-FG interpolation failed."
+			.sdkResult = -12,
+			.message = "Frame interpolation failed."
 		};
 		const auto message = FormatProviderFailure("Collect present status", failure);
 		Check(
-			message == "Collect present status: XeSS-FG interpolation failed. (SDK result -12)",
+			message == "Collect present status: Frame interpolation failed. (SDK result -12)",
 			"failure reason preserves its operation and exact signed SDK code");
 		TopologyState topology;
 		RequestedTopology requested;
 		requested.frameGenerationEligible = true;
-		requested.frameGeneration = FrameGenerationMethod::kXeSS;
+		requested.frameGeneration = FrameGenerationMethod::kFSR3;
 		Check(topology.Freeze(requested), "failure reporting topology freezes");
 		SessionTopology session;
 		session.valid = true;
 		session.proxyInstalled = true;
-		session.admittedFg = FrameGenerationMethod::kXeSS;
+		session.admittedFg = FrameGenerationMethod::kFSR3;
 		Check(topology.Admit(session), "failure reporting topology admits");
 		topology.Quarantine(
 			ClassifyFailure(FailureDomain::kFrameGeneration,
-				SuperResolutionMethod::kNone, FrameGenerationMethod::kXeSS),
+				SuperResolutionMethod::kNone, FrameGenerationMethod::kFSR3),
 			1, message);
 		Check(
 			!topology.Effective().frameGenerationEnabled &&
 				topology.Effective().frameGeneration == FrameGenerationMethod::kOff &&
-				topology.Request()->frameGeneration == FrameGenerationMethod::kXeSS &&
+				topology.Request()->frameGeneration == FrameGenerationMethod::kFSR3 &&
 				topology.Pending().required && topology.Pending().reason.contains(message),
 			"provider rejection disables effective FG while retaining the request and exact failure reason");
 	}
@@ -576,136 +575,8 @@ namespace
 		Check(acquisitions == 2, "successful acquisition runs once for the producer frame");
 	}
 
-	void TestXeSSCopyContract()
-	{
-		cs::render::temporal::FrameGenerationRequest request;
-		request.realFrame = 42;
-		request.renderWidth = 1280;
-		request.renderHeight = 720;
-		request.outputWidth = 1920;
-		request.outputHeight = 1080;
-		request.recording.commandList =
-			reinterpret_cast<ID3D12GraphicsCommandList*>(0x1234);
-		request.depth.resource = reinterpret_cast<ID3D12Resource*>(0x10);
-		request.motionVectors.resource = reinterpret_cast<ID3D12Resource*>(0x20);
-		request.hudlessColor.resource = reinterpret_cast<ID3D12Resource*>(0x30);
-		request.finalColor.resource = reinterpret_cast<ID3D12Resource*>(0x40);
-
-		struct Call
-		{
-			xefg_swapchain_resource_type_t type;
-			xefg_swapchain_resource_validity_t validity;
-			ID3D12GraphicsCommandList* commandList;
-			std::uint32_t frame;
-		};
-		std::vector<Call> calls;
-		const auto result = cs::features::xess_fg::TagFrameResources(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			request,
-			[&](xefg_swapchain_handle_t,
-				ID3D12GraphicsCommandList* a_commandList,
-				std::uint32_t a_frame,
-				const xefg_swapchain_d3d12_resource_data_t* a_resource) {
-				calls.push_back({
-					a_resource->type,
-					a_resource->validity,
-					a_commandList,
-					a_frame
-				});
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(result == XEFG_SWAPCHAIN_RESULT_SUCCESS, "XeSS tags record successfully");
-		Check(calls.size() == 4, "XeSS records all required resource tags");
-		for (std::size_t index = 0; index < 3; ++index) {
-			Check(
-				calls[index].validity == XEFG_SWAPCHAIN_RV_ONLY_NOW &&
-					calls[index].commandList == request.recording.commandList &&
-					calls[index].frame == 42,
-				"XeSS borrowed inputs copy on the same application command list");
-		}
-		Check(
-			calls[3].type == XEFG_SWAPCHAIN_RES_BACKBUFFER &&
-				calls[3].commandList == nullptr,
-			"XeSS backbuffer tag remains region-only");
-
-		for (std::size_t failureIndex = 0;
-			 failureIndex < 4;
-			 ++failureIndex) {
-			calls.clear();
-			const auto failed = cs::features::xess_fg::TagFrameResources(
-				reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-				request,
-				[&](xefg_swapchain_handle_t,
-					ID3D12GraphicsCommandList* a_commandList,
-					std::uint32_t a_frame,
-					const xefg_swapchain_d3d12_resource_data_t*
-						a_resource) {
-					calls.push_back({
-						a_resource->type,
-						a_resource->validity,
-						a_commandList,
-						a_frame
-					});
-					return calls.size() - 1 == failureIndex
-						? XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT
-						: XEFG_SWAPCHAIN_RESULT_SUCCESS;
-				});
-			Check(
-				failed ==
-						XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT &&
-					calls.size() == failureIndex + 1,
-				"XeSS tagging stops at the first failed SDK call");
-		}
-
-		calls.clear();
-		request.recording.commandList = nullptr;
-		const auto missingCommandList =
-			cs::features::xess_fg::TagFrameResources(
-				reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-				request,
-				[&](xefg_swapchain_handle_t,
-					ID3D12GraphicsCommandList*,
-					std::uint32_t,
-					const xefg_swapchain_d3d12_resource_data_t*) {
-					calls.push_back({});
-					return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-				});
-		Check(
-			missingCommandList ==
-					XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT &&
-				calls.empty(),
-			"XeSS rejects ONLY_NOW tags before any SDK call when the app command list is missing");
-	}
-
 	void TestStatusAndAccountingPolicies()
 	{
-		using cs::features::xess_fg::ClassifyPresentStatus;
-		using cs::features::xess_fg::PresentStatusClass;
-		Check(
-			ClassifyPresentStatus(
-				XEFG_SWAPCHAIN_RESULT_SUCCESS,
-				XEFG_SWAPCHAIN_RESULT_SUCCESS) ==
-				PresentStatusClass::kSuccess,
-			"XeSS successful status is accepted");
-		Check(
-			ClassifyPresentStatus(
-				XEFG_SWAPCHAIN_RESULT_WARNING_MISSING_PRESENT_STATUS,
-				XEFG_SWAPCHAIN_RESULT_SUCCESS) ==
-				PresentStatusClass::kUnavailable,
-			"XeSS warmup status is unavailable rather than fatal");
-		Check(
-			ClassifyPresentStatus(
-				XEFG_SWAPCHAIN_RESULT_SUCCESS,
-				XEFG_SWAPCHAIN_RESULT_WARNING_TOO_FEW_FRAMES) ==
-				PresentStatusClass::kWarning,
-			"XeSS history warmup warnings do not quarantine");
-		Check(
-			ClassifyPresentStatus(
-				XEFG_SWAPCHAIN_RESULT_SUCCESS,
-				XEFG_SWAPCHAIN_RESULT_ERROR_MISMATCH_INPUT_RESOURCES) ==
-				PresentStatusClass::kError,
-			"XeSS interpolation errors are fatal");
-
 		cs::render::temporal::PresentedFrameAccumulator counts;
 		counts.Add(0);
 		counts.Add(1);
@@ -726,109 +597,8 @@ namespace
 			"FidelityFX provider-version query uses the compiled descriptor type");
 	}
 
-	void TestXeSSFrameAndStatusOrchestration()
+	void TestPresentStatusOrchestration()
 	{
-		std::vector<std::string> events;
-		const auto disabled = cs::features::xess_fg::BeginFrame(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			73,
-			false,
-			true,
-			[&](xefg_swapchain_handle_t, std::uint32_t a_id) {
-				events.emplace_back("id:" + std::to_string(a_id));
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			},
-			[&](xefg_swapchain_handle_t, std::uint32_t a_enabled) {
-				events.emplace_back(
-					"enabled:" + std::to_string(a_enabled));
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			disabled.result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
-				disabled.enablementApplied &&
-				events == std::vector<std::string>{
-					"enabled:0", "id:73" },
-			"XeSS applies disable transitions and still publishes the real Present ID");
-
-		events.clear();
-		const auto enabled = cs::features::xess_fg::BeginFrame(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			74,
-			true,
-			false,
-			[&](xefg_swapchain_handle_t, std::uint32_t a_id) {
-				events.emplace_back("id:" + std::to_string(a_id));
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			},
-			[&](xefg_swapchain_handle_t, std::uint32_t a_enabled) {
-				events.emplace_back("enabled:" + std::to_string(a_enabled));
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			enabled.result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
-				enabled.enablementApplied &&
-				events == std::vector<std::string>{ "enabled:1", "id:74" },
-			"XeSS enables and cleans old history before the new frame is tagged");
-
-		for (const bool active : { false, true }) {
-			events.clear();
-			const auto unchanged = cs::features::xess_fg::BeginFrame(
-				reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-				75, active, active,
-				[&](xefg_swapchain_handle_t, std::uint32_t) {
-					events.emplace_back("id");
-					return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-				},
-				[&](xefg_swapchain_handle_t, std::uint32_t) {
-					events.emplace_back("unexpected-enable");
-					return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-				});
-			Check(
-				unchanged.result == XEFG_SWAPCHAIN_RESULT_SUCCESS &&
-					!unchanged.enablementApplied &&
-					events == std::vector<std::string>{ "id" },
-				"steady enabled and disabled frames update IDs without changing history state");
-		}
-
-		events.clear();
-		const auto idFailure = cs::features::xess_fg::BeginFrame(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			75,
-			false,
-			true,
-			[&](xefg_swapchain_handle_t, std::uint32_t) {
-				events.emplace_back("id");
-				return XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT;
-			},
-			[&](xefg_swapchain_handle_t, std::uint32_t) {
-				events.emplace_back("enabled");
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			idFailure.result ==
-					XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_ARGUMENT &&
-				idFailure.enablementApplied &&
-				events == std::vector<std::string>{ "enabled", "id" },
-			"SDK enablement state remains trackable when the subsequent Present ID fails");
-
-		events.clear();
-		const auto enableFailure = cs::features::xess_fg::BeginFrame(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			76, true, false,
-			[&](xefg_swapchain_handle_t, std::uint32_t) {
-				events.emplace_back("unexpected-id");
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			},
-			[&](xefg_swapchain_handle_t, std::uint32_t) {
-				events.emplace_back("enable");
-				return XEFG_SWAPCHAIN_RESULT_ERROR_DEVICE;
-			});
-		Check(
-			enableFailure.result == XEFG_SWAPCHAIN_RESULT_ERROR_DEVICE &&
-				!enableFailure.enablementApplied &&
-				events == std::vector<std::string>{ "enable" },
-			"failed enablement stops before accepting a new frame packet");
-
 		Check(
 			cs::render::temporal::ShouldObservePresentStatus(0, S_OK),
 			"accepted real Present observes provider status");
@@ -871,133 +641,6 @@ namespace
 			!collected.observed && provider.statusCalls == 1,
 			"production status orchestration does not poll retry attempts");
 
-		std::uint32_t statusCalls = 0;
-		auto observation = cs::features::xess_fg::ObservePresentStatus(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			true,
-			[&](xefg_swapchain_handle_t,
-				xefg_swapchain_present_status_t*) {
-				++statusCalls;
-				return XEFG_SWAPCHAIN_RESULT_WARNING_MISSING_PRESENT_STATUS;
-			});
-		Check(
-			statusCalls == 1 && !observation.countAvailable &&
-				observation.classification ==
-					cs::features::xess_fg::PresentStatusClass::kUnavailable,
-			"missing XeSS status is explicitly unavailable, not a zero-count sample");
-
-		observation = cs::features::xess_fg::ObservePresentStatus(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			true,
-			[&](xefg_swapchain_handle_t,
-				xefg_swapchain_present_status_t* a_status) {
-				++statusCalls;
-				a_status->frameGenResult =
-					XEFG_SWAPCHAIN_RESULT_SUCCESS;
-				a_status->framesPresented = 3;
-				a_status->isFrameGenEnabled = 1;
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			observation.countAvailable &&
-				observation.presentedFrames == 3 &&
-				observation.generatedFrames == 2 &&
-				observation.enablementMatches,
-			"accepted XeSS status publishes the SDK presentation counts");
-
-		observation = cs::features::xess_fg::ObservePresentStatus(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			true,
-			[&](xefg_swapchain_handle_t,
-				xefg_swapchain_present_status_t* a_status) {
-				++statusCalls;
-				a_status->frameGenResult =
-					XEFG_SWAPCHAIN_RESULT_WARNING_TOO_FEW_FRAMES;
-				a_status->framesPresented = 1;
-				a_status->isFrameGenEnabled = 0;
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			observation.classification ==
-					cs::features::xess_fg::PresentStatusClass::kWarning &&
-				observation.countAvailable &&
-				observation.enablementMatches,
-			"XeSS warmup warning remains nonfatal even before enabled state is reported");
-
-		observation = cs::features::xess_fg::ObservePresentStatus(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			false,
-			[&](xefg_swapchain_handle_t,
-				xefg_swapchain_present_status_t* a_status) {
-				++statusCalls;
-				a_status->frameGenResult =
-					XEFG_SWAPCHAIN_RESULT_SUCCESS;
-				a_status->framesPresented = 1;
-				a_status->isFrameGenEnabled = 0;
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			observation.countAvailable &&
-				observation.presentedFrames == 1 &&
-				observation.generatedFrames == 0 &&
-				observation.enablementMatches,
-			"disabled XeSS Present retains its aligned real-frame status");
-
-		observation = cs::features::xess_fg::ObservePresentStatus(
-			reinterpret_cast<xefg_swapchain_handle_t>(0x1),
-			true,
-			[&](xefg_swapchain_handle_t,
-				xefg_swapchain_present_status_t* a_status) {
-				++statusCalls;
-				a_status->frameGenResult =
-					XEFG_SWAPCHAIN_RESULT_ERROR_MISMATCH_INPUT_RESOURCES;
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			});
-		Check(
-			!observation.countAvailable &&
-				observation.classification ==
-					cs::features::xess_fg::PresentStatusClass::kError,
-			"XeSS interpolation error does not publish success-shaped counts");
-
-		auto fg = reinterpret_cast<xefg_swapchain_handle_t>(0x10);
-		auto latency = reinterpret_cast<xell_context_handle_t>(0x20);
-		std::vector<std::string> destructionEvents;
-		auto destruction = cs::features::xess_fg::DestroyContexts(
-			fg,
-			latency,
-			[&](xefg_swapchain_handle_t) {
-				destructionEvents.emplace_back("fg");
-				return XEFG_SWAPCHAIN_RESULT_ERROR_INVALID_CONTEXT;
-			},
-			[&](xell_context_handle_t) {
-				destructionEvents.emplace_back("latency");
-				return XELL_RESULT_SUCCESS;
-			});
-		Check(
-			!destruction.succeeded && fg != nullptr &&
-				latency != nullptr &&
-				destructionEvents ==
-					std::vector<std::string>{ "fg" },
-			"failed XeSS-FG destruction preserves both handles and skips XeLL teardown");
-
-		destructionEvents.clear();
-		destruction = cs::features::xess_fg::DestroyContexts(
-			fg,
-			latency,
-			[&](xefg_swapchain_handle_t) {
-				destructionEvents.emplace_back("fg");
-				return XEFG_SWAPCHAIN_RESULT_SUCCESS;
-			},
-			[&](xell_context_handle_t) {
-				destructionEvents.emplace_back("latency");
-				return XELL_RESULT_ERROR_DEVICE;
-			});
-		Check(
-			!destruction.succeeded && fg == nullptr &&
-				latency != nullptr &&
-				destructionEvents ==
-					std::vector<std::string>{ "fg", "latency" },
-			"failed XeLL destruction preserves its live handle and prevents module unload");
 	}
 
 	void TestStreamlineBackendContracts()
@@ -1276,9 +919,8 @@ int main(int a_argc, char** a_argv)
 	TestResizeCommitProtocol();
 	TestSafePreparation();
 	TestInputReuseGate();
-	TestXeSSCopyContract();
 	TestStatusAndAccountingPolicies();
-	TestXeSSFrameAndStatusOrchestration();
+	TestPresentStatusOrchestration();
 	TestStreamlineBackendContracts();
 	TestFidelityFXBackendContracts();
 	TestProductionInputWriteOrdering();

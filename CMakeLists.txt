@@ -642,14 +642,12 @@ add_executable(FrameGenerationContractTests
 	src/Render/FrameGenerationOrchestration.h
 	features/FrameGeneration/src/FidelityFXFrameGenerationContract.h
 	features/FrameGeneration/src/StreamlineFrameGenerationContract.h
-	features/FrameGeneration/src/XeSSFrameGenerationContract.h
 )
 configure_host_test(FrameGenerationContractTests)
 target_include_directories(FrameGenerationContractTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/src"
 	"${CMAKE_SOURCE_DIR}/features/FrameGeneration/src"
 	"${CMAKE_SOURCE_DIR}/include"
-	"${CMAKE_SOURCE_DIR}/.sdk-cache/XeSS-v3.0.2-include"
 	"${CMAKE_SOURCE_DIR}/extern/Streamline/include"
 )
 
@@ -697,6 +695,8 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	set(FO4CS_SHADER_STAGE_DIR "${CMAKE_BINARY_DIR}/ShaderStage/Shaders")
 	add_shader_stage(ShaderStage
 		DESTINATION "${FO4CS_SHADER_STAGE_DIR}"
+		EXCLUDE_REGEXES
+			"^Upscaling/XeSS(/|$)"
 		DIRECTORIES
 			"${CMAKE_SOURCE_DIR}/package/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders"

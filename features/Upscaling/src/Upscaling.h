@@ -19,7 +19,7 @@ namespace cs::features
 		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 		std::string GetFeatureSummary() const override
 		{
-			return "DLSS, FSR 3, and XeSS super-resolution with independently selected frame generation.";
+			return "DLSS and FSR 3 super-resolution with independently selected frame generation.";
 		}
 
 		bool Configure(const toml::table& a_config, std::string& a_error) override;

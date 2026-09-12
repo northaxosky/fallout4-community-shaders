@@ -636,9 +636,7 @@ namespace cs::render
 			} else if (IsExternalUpscaler(method)) {
 				view =
 					cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
-				source = method == UpscaleMethod::kXeSS
-					? "XeSS RT29"
-					: "FSR RT29";
+				source = "FSR RT29";
 			}
 			D3D11_TEXTURE2D_DESC desc{};
 			if (!TryDescribeTextureView(view, desc))

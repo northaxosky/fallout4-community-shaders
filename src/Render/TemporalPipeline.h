@@ -212,8 +212,6 @@ namespace cs::render
 		void RecordFrameGenerationFailure() noexcept;
 		[[nodiscard]] bool EvaluateD3D12DLSS(
 			const features::SuperResolutionExecutionContext& a_context);
-		[[nodiscard]] bool EvaluateD3D12XeSS(
-			const features::SuperResolutionExecutionContext& a_context);
 		[[nodiscard]] temporal::ProviderResult EvaluateD3D11SuperResolution(
 			temporal::SuperResolutionMethod a_method,
 			const temporal::SuperResolutionRequest& a_request);
@@ -233,13 +231,6 @@ namespace cs::render
 			std::uint32_t a_outputHeight);
 		void DestroySuperResolutionResources(
 			temporal::SuperResolutionMethod a_method) noexcept;
-		[[nodiscard]] temporal::ProviderResult PreflightXeSS(
-			ID3D11Device* a_conversionDevice,
-			std::uint32_t a_renderWidth,
-			std::uint32_t a_renderHeight,
-			std::uint32_t a_outputWidth,
-			std::uint32_t a_outputHeight,
-			std::uint32_t a_qualityMode);
 		void ResetFsrFrameGenerationCamera() noexcept;
 		void RequestFsrFrameGenerationReset() noexcept;
 		[[nodiscard]] FrameGenerationDebugTexture GetFrameGenerationDebugTexture(

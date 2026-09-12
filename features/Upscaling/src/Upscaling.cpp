@@ -29,8 +29,6 @@ namespace cs::features
 				return "FSR 3";
 			case Upscaling::UpscaleMethod::kDLSS:
 				return "DLSS";
-			case Upscaling::UpscaleMethod::kXeSS:
-				return "XeSS";
 			case Upscaling::UpscaleMethod::kCount:
 				break;
 			}
@@ -49,8 +47,6 @@ namespace cs::features
 				return "FSR 3";
 			case render::temporal::SuperResolutionMethod::kDLSS:
 				return "DLSS";
-			case render::temporal::SuperResolutionMethod::kXeSS:
-				return "XeSS";
 			case render::temporal::SuperResolutionMethod::kCount:
 				break;
 			}
@@ -120,8 +116,10 @@ namespace cs::features
 
 			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
 					"enabled", "boolean", a_error)
-				|| !ReadEnum(*settingsTable, "upscale_method", a_candidate.upscaleMethod, 4, a_error)
-				|| !ReadEnum(*settingsTable, "upscale_method_no_dlss", a_candidate.upscaleMethodNoDLSS, 4, a_error)
+				|| !ReadEnum(*settingsTable, "upscale_method", a_candidate.upscaleMethod,
+					render::temporal::kMaxUpscaleMethodValue, a_error)
+				|| !ReadEnum(*settingsTable, "upscale_method_no_dlss", a_candidate.upscaleMethodNoDLSS,
+					render::temporal::kMaxUpscaleMethodValue, a_error)
 				|| !ReadEnum(*settingsTable, "quality_mode", a_candidate.qualityMode, 4, a_error)
 				|| !ReadEnum(*settingsTable, "streamline_log_level", a_candidate.streamlineLogLevel, 2, a_error)
 				|| !ReadEnum(*settingsTable, "preset_dlss", a_candidate.presetDLSS, 4, a_error)
@@ -216,8 +214,7 @@ namespace cs::features
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "TAA", "taa" },
 			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 3, "DLSS", "dlss" },
-			dmui::ChoiceOption<std::uint32_t>{ 4, "XeSS", "xess" }
+			dmui::ChoiceOption<std::uint32_t>{ 3, "DLSS", "dlss" }
 		};
 		const auto method = dmui::DrawChoice<std::uint32_t>(
 			"upscaling-super-resolution-method",
@@ -234,8 +231,7 @@ namespace cs::features
 		static const std::array fallbackMethods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "TAA", "taa" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 4, "XeSS", "xess" }
+			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" }
 		};
 		const auto fallbackMethod = dmui::DrawChoice<std::uint32_t>(
 			"upscaling-fallback-without-dlss",

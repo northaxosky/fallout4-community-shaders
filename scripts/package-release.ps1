@@ -87,11 +87,7 @@ $requiredFiles = @(
 	'Shaders/Upscaling/Streamline/sl.project-manifest.bin',
 	'Shaders/Upscaling/Streamline/sl.project-manifest.sig',
 	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_framegeneration_dx12.dll',
-	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll',
-	'Shaders/Upscaling/XeSS/libxess.dll',
-	'Shaders/Upscaling/XeSS/libxess_dx11.dll',
-	'Shaders/Upscaling/XeSS/libxell.dll',
-	'Shaders/Upscaling/XeSS/libxess_fg.dll'
+	'Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll'
 )
 foreach ($relativePath in $requiredFiles) {
 	Assert-PackageFile $relativePath
@@ -102,9 +98,7 @@ $requiredLicenses = @(
 	'Shaders/Upscaling/Streamline/3rd-party-licenses.md',
 	'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
 	'Shaders/Upscaling/Streamline/reflex.license.txt',
-	'Shaders/Upscaling/FidelityFX/license.md',
-	'Shaders/Upscaling/XeSS/LICENSE.txt',
-	'Shaders/Upscaling/XeSS/third-party-programs.txt'
+	'Shaders/Upscaling/FidelityFX/license.md'
 )
 foreach ($relativePath in $requiredLicenses) {
 	Assert-PackageFile $relativePath
@@ -135,7 +129,10 @@ $forbiddenFiles = @(Get-ChildItem -LiteralPath $stagingRoot -Recurse -File |
 		$_.Extension -in @('.pem', '.key', '.pfx', '.p12', '.pk8') -or
 		$_.Name -like '*.User.toml' -or
 		$_.Name -eq '.gitkeep' -or
-		$_.Name -eq 'SharedDataProbe.hlsl'
+		$_.Name -eq 'SharedDataProbe.hlsl' -or
+		$_.FullName -like "*\Shaders\Upscaling\XeSS\*" -or
+		$_.Name -match '^(?i:libxess(?:_dx11|_fg)?|libxell)\.dll$' -or
+		$_.Name -match '^(?i:XeSSDecodeCS|XeSSEncodeCS)\.hlsl$'
 	})
 if ($forbiddenFiles.Count -gt 0) {
 	throw "Package contains forbidden files: $($forbiddenFiles.FullName -join ', ')"

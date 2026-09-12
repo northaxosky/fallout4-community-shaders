@@ -63,8 +63,8 @@ injected in place of the stock shaders.
 | **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
 | **Water Effects** | Animated water caustics projected onto submerged surfaces lit by the sun. |
 | **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
-| **Upscaling** | Native None/TAA policies plus independently selectable FSR 3, DLSS, and XeSS super-resolution. XeSS uses native D3D11 on supported Intel adapters and a same-adapter D3D12 bridge elsewhere. |
-| **Frame Generation** | Independently selectable FSR 3, DLSS-G, and XeSS-FG presentation strategies behind one stable D3D11-facing D3D12 proxy. |
+| **Upscaling** | Native None/TAA policies plus independently selectable FSR 3 and DLSS super-resolution. |
+| **Frame Generation** | Independently selectable FSR 3 and DLSS-G presentation strategies behind one stable D3D11-facing D3D12 proxy. |
 | **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
 | **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |
 
@@ -231,6 +231,9 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   both features refuse to load on OG (1.10.163). FSR 3 super-resolution requires D3D11 feature
   level 11.1. Loaded Upscaling sessions request that level regardless of the initial provider,
   retaining lower-level device fallbacks but not admitting FSR on those devices.
+  Saved provider IDs outside the documented ranges are rejected, not reassigned. Update
+  `upscale_method`, `upscale_method_no_dlss`, or `frame_generation_method` to a supported
+  value in the User TOML if configuration validation fails after upgrading.
   DLSS super-resolution needs the staged Streamline runtime DLLs.
   If an admitted external super-resolution evaluation or publication fails after
   reduced-resolution rendering commits, the plugin performs its own display-sized linear spatial
@@ -247,12 +250,11 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   independent of the selected super-resolution method and defaults off in pause, main, loading,
   and Pip-Boy menus. Its current UI strategy captures HUD-less post-imagespace color before the
   engine composites UI. DLSS-G uses the same Streamline D3D12 session and frame token as
-  DLSS-SR, while XeSS-FG connects XeLL before its swap-chain initialization. Both use the
-  captured HUD-less image with the intercepted final backbuffer; neither fabricates a UI-alpha
-  layer.
-  XeSS-FG and DLSS-G copy borrowed inputs on the application command list before DX11 can reuse
-  them. FidelityFX retains a conservative wait for outstanding presents before reusing its
-  borrowed inputs; this protects ownership but can limit overlap.
+  DLSS-SR. It uses the captured HUD-less image with the intercepted final backbuffer and does
+  not fabricate a UI-alpha layer.
+  DLSS-G copies borrowed inputs on the application command list before DX11 can reuse them.
+  FidelityFX retains a conservative wait for outstanding presents before reusing its borrowed
+  inputs; this protects ownership but can limit overlap.
   Provider-reported presented-frame totals include real and generated frames and do not prove
   that every frame reached the display. Generated-frame counts are reported as unavailable
   when the SDK data cannot distinguish them reliably.
@@ -263,12 +265,10 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   frame-generation proxy status still describes only the D3D12 frame-generation bridge.
   The validated normal-loop hooks track sleep, simulation, render-submit, and proxy Present
   attempt ordering without treating worker completion or auxiliary Swap callers as frame boundaries.
-  The selected DLSS-G or XeSS-FG session alone receives the matching Reflex/PCL or XeLL sleep and
-  marker sequence, including while its effect is disabled live. SDK file versions and package
-  labels are not guarantees of the selected FidelityFX algorithm version.
-  The observed SR input is post-tonemap gamma-2.2 output with the artistic LUT
-  already applied; XeSS decodes that transfer into FP16 linear color, evaluates at exposure 1.0,
-  and re-encodes gamma-2.2 before publication without reversing the LUT. HDR and ENB are unsupported.
+  The selected DLSS-G session receives the Reflex/PCL sleep and marker sequence, including while
+  its effect is disabled live. SDK file versions and package labels are not guarantees of the
+  selected FidelityFX algorithm version. The observed SR input is post-tonemap gamma-2.2 output
+  with the artistic LUT already applied. HDR and ENB are unsupported.
   The two feature panels own configuration and diagnostics only. Core-owned temporal rendering,
   input capture, recovery, provider execution, and presentation remain available independently of
   either panel's lifecycle; an unloaded Upscaling panel does not own Frame Generation's resources.

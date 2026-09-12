@@ -15,8 +15,7 @@ namespace cs::features
 		{
 			kOff,
 			kFSR3,
-			kDLSSG,
-			kXeSS
+			kDLSSG
 		};
 
 		struct Settings

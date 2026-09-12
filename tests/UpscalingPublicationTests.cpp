@@ -23,7 +23,6 @@ namespace
 	static_assert(!IsExternalUpscaler(UpscaleMethod::kTAA));
 	static_assert(IsExternalUpscaler(UpscaleMethod::kFSR));
 	static_assert(IsExternalUpscaler(UpscaleMethod::kDLSS));
-	static_assert(IsExternalUpscaler(UpscaleMethod::kXeSS));
 	static_assert(!IsExternalUpscaler(UpscaleMethod::kCount));
 
 	bool Check(bool a_condition, const char* a_message)

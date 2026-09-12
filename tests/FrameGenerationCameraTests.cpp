@@ -204,22 +204,12 @@ namespace
 		const auto pipeline = ReadFile(a_pipelinePath);
 		const auto presentation = ReadFile(a_presentationPath);
 		const auto streamline = ReadFile(a_streamlinePath);
-		const auto xess = ReadFile(a_fidelityFxPath.parent_path() / "XeSS.cpp");
 		const auto dx12SwapChain =
 			ReadFile(a_fidelityFxPath.parent_path() / "DX12SwapChain.cpp");
-		const auto bothXeSSBackendsContain = [&xess](std::string_view a_expression) {
-			const auto first = xess.find(a_expression);
-			return first != std::string::npos &&
-				xess.find(a_expression, first + a_expression.size()) != std::string::npos;
-		};
 		Check(
-			bothXeSSBackendsContain(".jitterOffsetX = -a_request.jitterX") &&
-				bothXeSSBackendsContain(".jitterOffsetY = -a_request.jitterY") &&
-				presentation.contains("constants.jitterOffsetX = -a_request.jitterX") &&
-				presentation.contains("constants.jitterOffsetY = -a_request.jitterY") &&
-				fidelityFx.contains("dispatchParameters.jitterOffset.x = -a_context.jitterX") &&
+			fidelityFx.contains("dispatchParameters.jitterOffset.x = -a_context.jitterX") &&
 				fidelityFx.contains("dispatchParameters.jitterOffset.y = -a_context.jitterY"),
-			"XeSS SR and FG use the same geometry-jitter sign as the FSR SDK contract");
+			"FSR uses the geometry-jitter sign required by its SDK contract");
 		Check(
 			streamline.contains("eUseFrameBasedResourceTagging") &&
 				streamline.contains("slSetTagForFrame(*frameToken, vp,") &&
@@ -243,12 +233,13 @@ namespace
 			simulationMarker != std::string::npos &&
 				inputMarker != std::string::npos &&
 				simulationMarker < inputMarker,
-			"simulation start precedes the optional input marker as required by XeLL");
+			"simulation start precedes the optional input marker");
 		const auto presentBlock = Between(
 			dx12SwapChain,
 			"HRESULT DX12SwapChain::PresentImpl(",
 			"void DX12SwapChain::ClearSharedBuffers(");
-		const auto presentCall = presentBlock.find("const HRESULT presentResult =");
+		const auto presentCall =
+			presentBlock.find("presentResult = _swapChain->Present(");
 		const auto signal = presentBlock.find("_queue->Signal(");
 		const auto wait = presentBlock.find("_context11->Wait(");
 		const auto clear = presentBlock.find("ClearSharedBuffers(false)");
@@ -287,43 +278,6 @@ namespace
 				upscaling.contains(
 					"superResolutionFovCache.Resolve("),
 			"FSR receives caller-resolved camera and timing values through its typed context");
-		const auto xessPreflightBlock = Between(
-			xess,
-			"XeSSSuperResolution::Preflight(",
-			"bool XeSSSuperResolution::EnsureD3D11ConversionShaders(");
-		const auto xessD3D12BridgeBlock = Between(
-			dx12SwapChain,
-			"XeSSSuperResolution& a_xess",
-			"render::temporal::ISuperResolutionProvider& a_provider");
-		const auto xessNativeRecordBlock = Between(
-			xess,
-			"const auto result = _executeD3D12(",
-			"void XeSSSuperResolution::DestroyAfterDrain()");
-		Check(
-			xessPreflightBlock.contains(
-				"EnsureD3D11ConversionShaders(a_conversionDevice)") &&
-				xessPreflightBlock.contains("(!_d3d12 &&") &&
-				xessPreflightBlock.contains(
-					"EnsureNativeD3D11ConversionResources(") &&
-				xessD3D12BridgeBlock.contains(
-					"EnsureD3D11ConversionShaders(") &&
-				!xessD3D12BridgeBlock.contains(
-					"EnsureNativeD3D11ConversionResources(") &&
-				!xessD3D12BridgeBlock.contains("_linearInput") &&
-				!xessD3D12BridgeBlock.contains("_linearOutput") &&
-				xessD3D12BridgeBlock.contains(
-					"_srColorInput->uav11.get()") &&
-				xessD3D12BridgeBlock.contains(
-					"_srOutput->srv11.get()") &&
-				xessD3D12BridgeBlock.contains("_decodeShader.get()") &&
-				xessD3D12BridgeBlock.contains("_encodeShader.get()") &&
-				xessNativeRecordBlock.contains(
-					"EnsureNativeD3D11ConversionResources(") &&
-				xessNativeRecordBlock.contains(
-					".pColorTexture = _linearInput.get()") &&
-				xessNativeRecordBlock.contains(
-					".pOutputTexture = _linearOutput.get()"),
-			"XeSS D3D12 bridge requests shaders without native conversion textures while D3D11 retains its private conversion path");
 		const auto frameGenerationStart =
 			fidelityFx.find("bool FidelityFX::SetFrameGenerationCameraData(");
 		const auto frameGenerationEnd =

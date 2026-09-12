@@ -1,5 +1,7 @@
 #include "Settings/FeatureConfig.h"
 #include "Settings/FeatureKeys.h"
+#include "Render/TemporalPipelineState.h"
+#include "Render/TemporalRenderSettings.h"
 
 #include <algorithm>
 #include <array>
@@ -549,6 +551,8 @@ namespace
 			"float_out_of_range = 0.04\n"
 			"double_value = 2.5\n"
 			"integer_double = 4\n"
+			"removed_sr_method = 4\n"
+			"removed_fg_method = 3\n"
 			"text = \"value\"\n");
 
 		bool boolean = false;
@@ -580,6 +584,22 @@ namespace
 		CHECK(unsignedInteger == 42);
 		CHECK(cs::feature_config::ReadUnsignedInteger(table, "positive", unsignedInteger, 0, 40) == kOutOfRange);
 		CHECK(unsignedInteger == 42);
+		unsignedInteger = cs::render::temporal::kMaxUpscaleMethodValue;
+		CHECK(cs::feature_config::ReadUnsignedInteger(
+			table,
+			"removed_sr_method",
+			unsignedInteger,
+			0,
+			cs::render::temporal::kMaxUpscaleMethodValue) == kOutOfRange);
+		CHECK(unsignedInteger == cs::render::temporal::kMaxUpscaleMethodValue);
+		unsignedInteger = cs::render::temporal::kMaxFrameGenerationMethodValue;
+		CHECK(cs::feature_config::ReadUnsignedInteger(
+			table,
+			"removed_fg_method",
+			unsignedInteger,
+			0,
+			cs::render::temporal::kMaxFrameGenerationMethodValue) == kOutOfRange);
+		CHECK(unsignedInteger == cs::render::temporal::kMaxFrameGenerationMethodValue);
 
 		float floating = 9.0F;
 		CHECK(cs::feature_config::ReadFloat(table, "missing", floating, 0.0F, 5.0F) == kMissing);

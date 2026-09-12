@@ -25,7 +25,6 @@
 #include "SuperResolutionProviders.h"
 #include "Streamline.h"
 #include "Upscaling.h"
-#include "XeSS.h"
 
 namespace cs::render
 {
@@ -105,8 +104,6 @@ namespace cs::render
 				return Target::kFSR3;
 			case Source::kDLSS:
 				return Target::kDLSS;
-			case Source::kXeSS:
-				return Target::kXeSS;
 			}
 			return Target::kNone;
 		}
@@ -123,8 +120,6 @@ namespace cs::render
 				return Target::kFSR3;
 			case Source::kDLSSG:
 				return Target::kDLSSG;
-			case Source::kXeSS:
-				return Target::kXeSS;
 			}
 			return Target::kOff;
 		}
@@ -174,12 +169,10 @@ namespace cs::render
 		FrameGenerationCpuTimingCollector<> frameGenerationCpuTimings;
 		features::Streamline streamline;
 		features::FidelityFX fidelityFX;
-		features::XeSSSuperResolution xess;
 		features::StreamlineSuperResolution dlssProvider{ streamline };
 		features::FidelityFXSuperResolution fsrProvider{ fidelityFX };
 		features::FidelityFXPresentation fidelityFXPresentation{ fidelityFX };
 		features::StreamlinePresentation streamlinePresentation{ streamline };
-		features::XeSSPresentation xessPresentation;
 		temporal::IFrameGenerationProvider* activePresentation = nullptr;
 		features::DX12SwapChain swapChain;
 
@@ -465,7 +458,6 @@ namespace cs::render
 			frame = _impl->latency.Frame();
 		}
 		if (_impl->latencySdkActive.load(std::memory_order_acquire)) {
-			// XeLL requires simulation start to be the first marker after sleep.
 			const auto simulationResult = _impl->activePresentation->SetLatencyMarker(
 				temporal::LatencyMarker::kSimulationStart,
 				static_cast<std::uint32_t>(frame));
@@ -754,9 +746,6 @@ namespace cs::render
 			request.frameGeneration ==
 					temporal::FrameGenerationMethod::kDLSSG
 				? "DLSS-G"
-			: request.frameGeneration ==
-					temporal::FrameGenerationMethod::kXeSS
-				? "XeSS-FG"
 				: "FSR 3";
 		try {
 			auto& provider =
@@ -764,10 +753,6 @@ namespace cs::render
 						temporal::FrameGenerationMethod::kDLSSG
 					? static_cast<temporal::IFrameGenerationProvider&>(
 						_impl->streamlinePresentation)
-				: request.frameGeneration ==
-						temporal::FrameGenerationMethod::kXeSS
-					? static_cast<temporal::IFrameGenerationProvider&>(
-						_impl->xessPresentation)
 					: static_cast<temporal::IFrameGenerationProvider&>(
 						_impl->fidelityFXPresentation);
 			proxyResult = _impl->swapChain.Initialize(
@@ -1002,45 +987,10 @@ namespace cs::render
 					}
 					return result;
 				}
-				if (a_method != temporal::SuperResolutionMethod::kXeSS || !a_device || !*a_device) {
-					return {
-						.code = temporal::ProviderResultCode::kUnavailable,
-						.message = "The selected super-resolution method has no usable device."
-					};
-				}
-
-				winrt::com_ptr<IDXGIDevice> dxgiDevice;
-				winrt::com_ptr<IDXGIAdapter> adapter;
-				DXGI_ADAPTER_DESC adapterDesc{};
-				HRESULT result = (*a_device)->QueryInterface(IID_PPV_ARGS(dxgiDevice.put()));
-				if (SUCCEEDED(result))
-					result = dxgiDevice->GetAdapter(adapter.put());
-				if (SUCCEEDED(result))
-					result = adapter->GetDesc(&adapterDesc);
-				if (FAILED(result)) {
-					return {
-						.code = temporal::ProviderResultCode::kUnavailable,
-						.sdkResult = result,
-						.message = "XeSS could not identify the rendering adapter."
-					};
-				}
-				if (adapterDesc.VendorId != 0x8086) {
-					if (!_impl->swapChain.IsBridgeReady()) {
-						winrt::com_ptr<ID3D11DeviceContext> context;
-						(*a_device)->GetImmediateContext(context.put());
-						result = _impl->swapChain.InitializeBridge(
-							adapter.get(), *a_device, context.get());
-						if (FAILED(result)) {
-							return {
-								.code = temporal::ProviderResultCode::kUnavailable,
-								.sdkResult = result,
-								.message = "XeSS D3D12 bridge initialization failed."
-							};
-						}
-					}
-					init.device = _impl->swapChain.GetD3D12Device();
-				}
-				return _impl->xess.Initialize(init);
+				return {
+					.code = temporal::ProviderResultCode::kUnavailable,
+					.message = "The selected super-resolution method has no usable provider."
+				};
 			});
 		if (!srAdmission.detail.empty())
 			L->warn("{}", srAdmission.detail);
@@ -1637,14 +1587,6 @@ namespace cs::render
 			a_context);
 	}
 
-	bool TemporalPipeline::EvaluateD3D12XeSS(
-		const features::SuperResolutionExecutionContext& a_context)
-	{
-		return _impl->swapChain.EvaluateD3D12SuperResolution(
-			_impl->xess,
-			a_context);
-	}
-
 	temporal::ProviderResult TemporalPipeline::EvaluateD3D11SuperResolution(
 		temporal::SuperResolutionMethod a_method,
 		const temporal::SuperResolutionRequest& a_request)
@@ -1654,8 +1596,6 @@ namespace cs::render
 			return _impl->fsrProvider.Record(a_request);
 		case temporal::SuperResolutionMethod::kDLSS:
 			return _impl->dlssProvider.Record(a_request);
-		case temporal::SuperResolutionMethod::kXeSS:
-			return _impl->xess.Record(a_request);
 		default:
 			return {
 				.code = temporal::ProviderResultCode::kUnavailable,
@@ -1689,8 +1629,6 @@ namespace cs::render
 			return _impl->fsrProvider.QueryRenderSize(a_request);
 		case temporal::SuperResolutionMethod::kDLSS:
 			return _impl->dlssProvider.QueryRenderSize(a_request);
-		case temporal::SuperResolutionMethod::kXeSS:
-			return _impl->xess.QueryRenderSize(a_request);
 		default:
 			return {
 				.result = {
@@ -1710,11 +1648,6 @@ namespace cs::render
 			return _impl->fidelityFX.IsReady();
 		case temporal::SuperResolutionMethod::kDLSS:
 			return _impl->streamline.featureDLSS;
-		case temporal::SuperResolutionMethod::kXeSS:
-			return _impl->xess.IsD3D12() ||
-				GetStatus().session.admittedSr[
-					static_cast<std::size_t>(
-						temporal::SuperResolutionMethod::kXeSS)];
 		default:
 			return true;
 		}
@@ -1723,10 +1656,8 @@ namespace cs::render
 	bool TemporalPipeline::UsesD3D12SuperResolution(
 		temporal::SuperResolutionMethod a_method) const noexcept
 	{
-		return a_method == temporal::SuperResolutionMethod::kDLSS
-			? _impl->streamline.IsD3D12Session()
-			: a_method == temporal::SuperResolutionMethod::kXeSS &&
-				_impl->xess.IsD3D12();
+		return a_method == temporal::SuperResolutionMethod::kDLSS &&
+			_impl->streamline.IsD3D12Session();
 	}
 
 	bool TemporalPipeline::CreateFsrSuperResolutionResources(
@@ -1753,41 +1684,6 @@ namespace cs::render
 		} else if (a_method == temporal::SuperResolutionMethod::kFSR3) {
 			_impl->fidelityFX.DestroyFSRResources();
 		}
-	}
-
-	temporal::ProviderResult TemporalPipeline::PreflightXeSS(
-		ID3D11Device* a_conversionDevice,
-		std::uint32_t a_renderWidth,
-		std::uint32_t a_renderHeight,
-		std::uint32_t a_outputWidth,
-		std::uint32_t a_outputHeight,
-		std::uint32_t a_qualityMode)
-	{
-		bool contextDrained = false;
-		if (_impl->xess.RequiresContextReinitialization(
-				a_outputWidth,
-				a_outputHeight,
-				a_qualityMode)) {
-			contextDrained = _impl->xess.IsD3D12()
-				? _impl->swapChain.DrainSuperResolution()
-				: cs::engine::WaitForGpuIdle(
-					cs::engine::GetImmediateContext());
-			if (!contextDrained) {
-				return {
-					.code = temporal::ProviderResultCode::kFailure,
-					.message =
-						"XeSS context reinitialization could not drain pending GPU work."
-				};
-			}
-		}
-		return _impl->xess.Preflight(
-			a_conversionDevice,
-			a_renderWidth,
-			a_renderHeight,
-			a_outputWidth,
-			a_outputHeight,
-			a_qualityMode,
-			contextDrained);
 	}
 
 	void TemporalPipeline::ResetFsrFrameGenerationCamera() noexcept

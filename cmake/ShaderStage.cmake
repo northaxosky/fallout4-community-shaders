@@ -4,7 +4,7 @@ function(add_shader_stage TARGET_NAME)
 		SHADER_STAGE
 		""
 		"DESTINATION"
-		"DIRECTORIES;FILES"
+		"DIRECTORIES;FILES;EXCLUDE_REGEXES"
 	)
 
 	if(NOT SHADER_STAGE_DESTINATION)
@@ -22,6 +22,10 @@ function(add_shader_stage TARGET_NAME)
 	foreach(SOURCE_FILE IN LISTS SHADER_STAGE_FILES)
 		file(APPEND "${SHADER_STAGE_CONFIG}"
 			"list(APPEND SHADER_STAGE_FILES [==[${SOURCE_FILE}]==])\n")
+	endforeach()
+	foreach(EXCLUDE_REGEX IN LISTS SHADER_STAGE_EXCLUDE_REGEXES)
+		file(APPEND "${SHADER_STAGE_CONFIG}"
+			"list(APPEND SHADER_STAGE_EXCLUDE_REGEXES [==[${EXCLUDE_REGEX}]==])\n")
 	endforeach()
 
 	add_custom_target(${TARGET_NAME}
@@ -63,6 +67,16 @@ if(CMAKE_SCRIPT_MODE_FILE)
 			"${SOURCE_DIRECTORY}/*")
 		list(SORT DIRECTORY_FILES)
 		foreach(RELATIVE_PATH IN LISTS DIRECTORY_FILES)
+			set(EXCLUDED FALSE)
+			foreach(EXCLUDE_REGEX IN LISTS SHADER_STAGE_EXCLUDE_REGEXES)
+				if(RELATIVE_PATH MATCHES "${EXCLUDE_REGEX}")
+					set(EXCLUDED TRUE)
+					break()
+				endif()
+			endforeach()
+			if(EXCLUDED)
+				continue()
+			endif()
 			register_shader(
 				"${SOURCE_DIRECTORY}/${RELATIVE_PATH}"
 				"${RELATIVE_PATH}")

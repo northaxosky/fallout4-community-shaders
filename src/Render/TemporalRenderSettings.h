@@ -10,16 +10,17 @@ namespace cs::render::temporal
 			kTAA,
 			kFSR,
 			kDLSS,
-			kXeSS,
 			kCount
 		};
+
+		inline constexpr std::uint32_t kMaxUpscaleMethodValue =
+			static_cast<std::uint32_t>(UpscaleMethod::kDLSS);
 
 		constexpr bool IsExternalUpscaler(UpscaleMethod a_method) noexcept
 		{
 			switch (a_method) {
 			case UpscaleMethod::kFSR:
 			case UpscaleMethod::kDLSS:
-			case UpscaleMethod::kXeSS:
 				return true;
 			default:
 				return false;

@@ -15,7 +15,6 @@ namespace cs::render::temporal
 		kTAA,
 		kFSR3,
 		kDLSS,
-		kXeSS,
 		kCount
 	};
 
@@ -24,9 +23,11 @@ namespace cs::render::temporal
 		kOff,
 		kFSR3,
 		kDLSSG,
-		kXeSS,
 		kCount
 	};
+
+	inline constexpr std::uint32_t kMaxFrameGenerationMethodValue =
+		static_cast<std::uint32_t>(FrameGenerationMethod::kDLSSG);
 
 	enum class GraphicsApi : std::uint8_t
 	{

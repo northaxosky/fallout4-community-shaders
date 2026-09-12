@@ -32,24 +32,6 @@ namespace cs::render
 			return false;
 		}
 
-		if (a_method == UpscaleMethod::kXeSS) {
-			const auto result = render::TemporalPipeline::Get().PreflightXeSS(
-				cs::engine::GetDevice(),
-				renderWidth,
-				renderHeight,
-				state->screenWidth,
-				state->screenHeight,
-				static_cast<std::uint32_t>(settings.qualityMode));
-			if (!result.Succeeded()) {
-				L->error(
-					"XeSS preflight failed before reduced-resolution commitment: {} "
-					"(SDK {})",
-					result.message,
-					result.sdkResult);
-				return false;
-			}
-		}
-
 		winrt::com_ptr<ID3D11Resource> renderTargetResource;
 		frameBufferRTV->GetResource(renderTargetResource.put());
 		return renderTargetResource.get() == frameBuffer.get() &&
@@ -329,20 +311,6 @@ namespace cs::render
 								   render::temporal::SuperResolutionMethod::kFSR3,
 								   makeProviderRequest())
 							   .Succeeded();
-			} else if (upscaleMethod == UpscaleMethod::kXeSS) {
-				cs::render::annotation::ScopedEvent providerScope(
-					"Upscaling/XeSS");
-				const auto request = makeProviderRequest();
-				upscaled = render::TemporalPipeline::Get()
-								   .UsesD3D12SuperResolution(
-									   render::temporal::SuperResolutionMethod::kXeSS)
-					? render::TemporalPipeline::Get()
-						  .EvaluateD3D12XeSS(execution)
-					: render::TemporalPipeline::Get()
-						  .EvaluateD3D11SuperResolution(
-							  render::temporal::SuperResolutionMethod::kXeSS,
-							  request)
-						  .Succeeded();
 			}
 
 			if (upscaled) {
@@ -428,7 +396,7 @@ namespace cs::render
 
 		const auto method = GetUpscaleMethod();
 		bool published = false;
-		if (method == UpscaleMethod::kFSR || method == UpscaleMethod::kXeSS) {
+		if (method == UpscaleMethod::kFSR) {
 			published = PublishUpscalingOutput(
 				context,
 				frameBuffer.get(),

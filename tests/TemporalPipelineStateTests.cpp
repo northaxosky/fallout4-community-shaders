@@ -1,5 +1,6 @@
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
+#include "Render/TemporalRenderSettings.h"
 #include "Render/TemporalRenderSizing.h"
 #include "Render/TemporalDevicePolicy.h"
 #include "Render/TemporalStartup.h"
@@ -33,11 +34,11 @@ namespace
 		Check(sharedFailure.superResolution && sharedFailure.frameGeneration,
 			"Streamline failure quarantines both dependent consumers");
 		const auto unrelatedFailure = ClassifyFailure(
-			FailureDomain::kStreamline, SuperResolutionMethod::kFSR3, FrameGenerationMethod::kXeSS);
+			FailureDomain::kStreamline, SuperResolutionMethod::kFSR3, FrameGenerationMethod::kFSR3);
 		Check(!unrelatedFailure.superResolution && !unrelatedFailure.frameGeneration,
 			"Streamline failure preserves unrelated vendor consumers");
 		const auto transportFailure = ClassifyFailure(
-			FailureDomain::kTransport, SuperResolutionMethod::kFSR3, FrameGenerationMethod::kXeSS);
+			FailureDomain::kTransport, SuperResolutionMethod::kFSR3, FrameGenerationMethod::kFSR3);
 		Check(transportFailure.superResolution && transportFailure.frameGeneration,
 			"shared transport failure stops both consumers");
 
@@ -78,14 +79,14 @@ namespace
 
 		state.SubmitLive(
 			true,
-			SuperResolutionMethod::kXeSS,
+			SuperResolutionMethod::kFSR3,
 			2,
 			true,
 			FrameGenerationMethod::kDLSSG,
 			6);
-		Check(state.Effective().superResolution == SuperResolutionMethod::kDLSS, "unadmitted SR does not replace live provider");
-		Check(state.Effective().frameGeneration == FrameGenerationMethod::kFSR3, "unadmitted FG does not replace live provider");
-		Check(state.Pending().required, "unadmitted topology is pending restart");
+		Check(state.Effective().superResolution == SuperResolutionMethod::kDLSS, "pending SR does not replace live provider");
+		Check(state.Effective().frameGeneration == FrameGenerationMethod::kFSR3, "pending FG does not replace live provider");
+		Check(state.Pending().required, "changed topology is pending restart");
 		state.SubmitLive(true, SuperResolutionMethod::kDLSS, 2, true, FrameGenerationMethod::kFSR3, 6);
 		Check(!state.Pending().required, "restoring both startup selections clears the pending change");
 
@@ -139,6 +140,56 @@ namespace
 			"requested and effective topology remain distinct after failure");
 	}
 
+	void TestSupportedProviderIdsAndRemovedValues()
+	{
+		using namespace cs::render::temporal;
+
+		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kNone) == 0);
+		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kTAA) == 1);
+		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kFSR3) == 2);
+		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kDLSS) == 3);
+		static_assert(static_cast<std::uint8_t>(FrameGenerationMethod::kOff) == 0);
+		static_assert(static_cast<std::uint8_t>(FrameGenerationMethod::kFSR3) == 1);
+		static_assert(static_cast<std::uint8_t>(FrameGenerationMethod::kDLSSG) == 2);
+		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kNONE) == 0);
+		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kTAA) == 1);
+		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kFSR) == 2);
+		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kDLSS) == 3);
+
+		constexpr auto removedSr =
+			static_cast<SuperResolutionMethod>(kMaxUpscaleMethodValue + 1);
+		constexpr auto removedFg =
+			static_cast<FrameGenerationMethod>(
+				kMaxFrameGenerationMethodValue + 1);
+		SessionTopology session;
+		Check(
+			static_cast<std::size_t>(removedSr) >= session.admittedSr.size(),
+			"removed SR value cannot index the supported provider array");
+
+		RequestedTopology requested;
+		requested.upscalingEligible = true;
+		requested.superResolutionEnabled = true;
+		requested.superResolution = removedSr;
+		requested.frameGenerationEligible = true;
+		requested.frameGenerationEnabled = true;
+		requested.frameGeneration = removedFg;
+		TopologyState state;
+		Check(state.Freeze(requested), "removed-value topology freezes for rejection");
+		session.valid = true;
+		session.proxyInstalled = true;
+		session.admittedSr.fill(true);
+		session.admittedFg = FrameGenerationMethod::kFSR3;
+		Check(state.Admit(session), "removed-value topology reaches safe admission");
+		Check(
+			state.Effective().superResolution == SuperResolutionMethod::kNone &&
+				!state.Effective().superResolutionEnabled,
+			"removed SR value is rejected instead of selecting another provider");
+		Check(
+			state.Effective().frameGeneration == FrameGenerationMethod::kOff &&
+				!state.Effective().frameGenerationEnabled,
+			"removed FG value is rejected instead of selecting another provider");
+	}
+
 	void TestQuarantinedConfiguration()
 	{
 		using namespace cs::render::temporal;
@@ -153,13 +204,13 @@ namespace
 			requested.upscalingEligible = true;
 			requested.frameGenerationEligible = true;
 			requested.superResolution = SuperResolutionMethod::kDLSS;
-			requested.frameGeneration = FrameGenerationMethod::kXeSS;
+			requested.frameGeneration = FrameGenerationMethod::kDLSSG;
 			Check(state.Freeze(requested), "failure fixture freezes");
 			SessionTopology session;
 			session.valid = true;
 			session.proxyInstalled = true;
 			session.admittedSr.fill(true);
-			session.admittedFg = FrameGenerationMethod::kXeSS;
+			session.admittedFg = FrameGenerationMethod::kDLSSG;
 			Check(state.Admit(session), "failure fixture admits");
 
 			const auto impact = ClassifyFailure(
@@ -212,9 +263,9 @@ namespace
 		using namespace cs::render::temporal;
 		RequestedTopology request;
 		request.upscalingEligible = true;
-		request.superResolution = SuperResolutionMethod::kXeSS;
+		request.superResolution = SuperResolutionMethod::kFSR3;
 		request.frameGenerationEligible = true;
-		request.frameGeneration = FrameGenerationMethod::kXeSS;
+		request.frameGeneration = FrameGenerationMethod::kFSR3;
 		std::vector<D3D_FEATURE_LEVEL> levels{ D3D_FEATURE_LEVEL_11_0 };
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(
@@ -249,7 +300,7 @@ namespace
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(
 			levels == std::vector<D3D_FEATURE_LEVEL>{ D3D_FEATURE_LEVEL_11_0 },
-			"XeSS FG alone does not require an unused FSR device upgrade");
+			"FSR frame generation alone does not require an unused SR device upgrade");
 		request.frameGeneration = FrameGenerationMethod::kDLSSG;
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(
@@ -314,7 +365,7 @@ namespace
 		request.frameGenerationEligible = true;
 		Check(rejected.Freeze(request), "rejected session freezes");
 		Check(rejected.Admit({}), "rejected session records failed admission");
-		rejected.SubmitLive(true, SuperResolutionMethod::kFSR3, 1, true, FrameGenerationMethod::kXeSS, 2);
+		rejected.SubmitLive(true, SuperResolutionMethod::kFSR3, 1, true, FrameGenerationMethod::kDLSSG, 2);
 		Check(
 			!rejected.Effective().superResolutionEnabled &&
 				!rejected.Effective().frameGenerationEnabled,
@@ -322,7 +373,7 @@ namespace
 
 		TopologyState beforeAdmission;
 		request.superResolution = SuperResolutionMethod::kDLSS;
-		request.frameGeneration = FrameGenerationMethod::kXeSS;
+		request.frameGeneration = FrameGenerationMethod::kDLSSG;
 		Check(beforeAdmission.Freeze(request), "pre-admission request freezes");
 		beforeAdmission.SubmitLive(
 			true, SuperResolutionMethod::kFSR3, 3,
@@ -331,11 +382,11 @@ namespace
 		session.valid = true;
 		session.proxyInstalled = true;
 		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kDLSS)] = true;
-		session.admittedFg = FrameGenerationMethod::kXeSS;
+		session.admittedFg = FrameGenerationMethod::kDLSSG;
 		Check(beforeAdmission.Admit(session), "graphics creation uses the frozen request");
 		Check(
 			beforeAdmission.Effective().superResolution == SuperResolutionMethod::kDLSS &&
-				beforeAdmission.Effective().frameGeneration == FrameGenerationMethod::kXeSS &&
+				beforeAdmission.Effective().frameGeneration == FrameGenerationMethod::kDLSSG &&
 				beforeAdmission.Pending().required,
 			"UI edits before device creation cannot replace the frozen methods");
 	}
@@ -378,7 +429,7 @@ namespace
 		};
 		for (const auto fallback : {
 				 SuperResolutionMethod::kNone, SuperResolutionMethod::kTAA,
-				 SuperResolutionMethod::kFSR3, SuperResolutionMethod::kXeSS }) {
+				 SuperResolutionMethod::kFSR3 }) {
 			request.noDlssFallback = fallback;
 			calls.clear();
 			const auto admission = InitializeSelectedSuperResolution(request, dlssUnavailable);
@@ -406,15 +457,15 @@ namespace
 				"changing the requested startup method is explicit even when it matches the fallback");
 		}
 
-		request.noDlssFallback = SuperResolutionMethod::kXeSS;
+		request.noDlssFallback = SuperResolutionMethod::kFSR3;
 		calls.clear();
 		const auto unavailable = InitializeSelectedSuperResolution(request, [&](SuperResolutionMethod a_method) {
 			calls.push_back(a_method);
 			return ProviderResult{ .code = ProviderResultCode::kUnavailable, .message = "unavailable" };
 		});
 		Check(
-			calls == std::vector{ SuperResolutionMethod::kDLSS, SuperResolutionMethod::kXeSS } &&
-				!unavailable.methods[static_cast<std::size_t>(SuperResolutionMethod::kXeSS)] &&
+			calls == std::vector{ SuperResolutionMethod::kDLSS, SuperResolutionMethod::kFSR3 } &&
+				!unavailable.methods[static_cast<std::size_t>(SuperResolutionMethod::kFSR3)] &&
 				unavailable.detail.contains("fallback is unavailable"),
 			"failed fallback does not silently admit another provider");
 	}
@@ -562,12 +613,12 @@ namespace
 		TopologyState topology;
 		RequestedTopology requested;
 		requested.frameGenerationEligible = true;
-		requested.frameGeneration = FrameGenerationMethod::kXeSS;
+		requested.frameGeneration = FrameGenerationMethod::kDLSSG;
 		Check(topology.Freeze(requested), "activity topology freezes");
 		SessionTopology session;
 		session.valid = true;
 		session.proxyInstalled = true;
-		session.admittedFg = FrameGenerationMethod::kXeSS;
+		session.admittedFg = FrameGenerationMethod::kDLSSG;
 		Check(topology.Admit(session), "activity topology admits");
 		topology.SubmitLive(
 			false, SuperResolutionMethod::kNone, 1,
@@ -1006,6 +1057,7 @@ namespace
 int main()
 {
 	TestRequestedEffectiveAndPending();
+	TestSupportedProviderIdsAndRemovedValues();
 	TestQuarantinedConfiguration();
 	TestTemporalFeatureLevels();
 	TestUniformStartupSelections();

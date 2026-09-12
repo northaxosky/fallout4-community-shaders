@@ -18,9 +18,6 @@
 
 namespace cs::features
 {
-	class Streamline;
-	class XeSSSuperResolution;
-
 	struct SharedD3D11D3D12Texture
 	{
 		winrt::com_ptr<ID3D11Texture2D> texture11;
@@ -106,11 +103,6 @@ namespace cs::features
 			const DXGI_SWAP_CHAIN_DESC& a_desc,
 			render::temporal::IFrameGenerationProvider& a_provider,
 			TemporalPresentationCallbacks a_callbacks);
-		HRESULT InitializeBridge(
-			IDXGIAdapter* a_adapter,
-			ID3D11Device* a_device,
-			ID3D11DeviceContext* a_context,
-			Streamline* a_streamline = nullptr);
 		[[nodiscard]] HRESULT Rollback() noexcept;
 
 		[[nodiscard]] IDXGISwapChain* GetProxy() const noexcept;
@@ -130,12 +122,8 @@ namespace cs::features
 		[[nodiscard]] ID3D12Device* GetD3D12Device() const noexcept;
 		[[nodiscard]] IDXGISwapChain4* GetInnerSwapChain() const noexcept;
 		[[nodiscard]] ID3D12CommandQueue* GetCommandQueue() const noexcept;
-		[[nodiscard]] bool DrainSuperResolution() noexcept;
 		bool EvaluateD3D12SuperResolution(
 			render::temporal::ISuperResolutionProvider& a_provider,
-			const SuperResolutionExecutionContext& a_context);
-		bool EvaluateD3D12SuperResolution(
-			XeSSSuperResolution& a_xess,
 			const SuperResolutionExecutionContext& a_context);
 
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
@@ -169,8 +157,7 @@ namespace cs::features
 		HRESULT CreateDevices(
 			IDXGIAdapter* a_adapter,
 			ID3D11Device* a_device,
-			ID3D11DeviceContext* a_context,
-			Streamline* a_streamline = nullptr);
+			ID3D11DeviceContext* a_context);
 		HRESULT CreateSwapChain(IDXGIAdapter* a_adapter, const DXGI_SWAP_CHAIN_DESC& a_desc);
 		HRESULT CreateInteropFence();
 		HRESULT CreateDisplayResources(

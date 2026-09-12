@@ -42,32 +42,5 @@
 				'Shaders/Upscaling/FidelityFX/license.md'
 			)
 		}
-		@{
-			Name              = 'XeSS'
-			Version           = 'v3.0.2'
-			Url               = 'https://github.com/intel/xess/releases/download/v3.0.2/XeSS_SDK_3.0.2.zip'
-			Sha256            = '88b8a373f30e33f3558a77a93e634f11b8132fc3047ea1a8edeead32b8471990'
-			Destination       = 'features/Upscaling/Shaders/Upscaling/XeSS'
-			HeaderDestination = '.sdk-cache/XeSS-v3.0.2-include'
-			Files             = @(
-				'bin/libxess.dll',
-				'bin/libxess_dx11.dll',
-				'bin/libxell.dll',
-				'bin/libxess_fg.dll'
-			)
-			Headers           = @(
-				'inc/xess/xess.h',
-				'inc/xess/xess_d3d11.h',
-				'inc/xess/xess_d3d12.h',
-				'inc/xell/xell.h',
-				'inc/xell/xell_d3d12.h',
-				'inc/xess_fg/xefg_swapchain.h',
-				'inc/xess_fg/xefg_swapchain_d3d12.h'
-			)
-			Licenses          = @(
-				'LICENSE.txt',
-				'third-party-programs.txt'
-			)
-		}
 	)
 }

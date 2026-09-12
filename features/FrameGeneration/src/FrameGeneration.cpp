@@ -52,8 +52,6 @@ namespace cs::features
 				return "FSR 3";
 			case FrameGeneration::Method::kDLSSG:
 				return "DLSS-G";
-			case FrameGeneration::Method::kXeSS:
-				return "XeSS-FG";
 			}
 			return "Unknown";
 		}
@@ -89,7 +87,7 @@ namespace cs::features
 						"frame_generation_method",
 						method,
 						0,
-						3),
+						render::temporal::kMaxFrameGenerationMethodValue),
 					"frame_generation_method",
 					"integer",
 					a_error) ||
@@ -423,8 +421,7 @@ namespace cs::features
 		static const std::array methods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "DLSS-G", "dlss-g" },
-			dmui::ChoiceOption<std::uint32_t>{ 3, "XeSS-FG", "xess-fg" }
+			dmui::ChoiceOption<std::uint32_t>{ 2, "DLSS-G", "dlss-g" }
 		};
 		const auto method = dmui::DrawChoice<std::uint32_t>(
 			"frame-generation-provider",
