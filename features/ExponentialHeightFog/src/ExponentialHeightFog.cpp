@@ -595,40 +595,38 @@ namespace cs::features
 
 	void ExponentialHeightFog::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		ImGui::TextDisabled(
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		dmui::ui::TextDisabled(
 			"Off takes the exact vanilla fog math path.");
 		const float multiplierMin = ehf::kMultiplierMin;
 		const float multiplierMax = ehf::kMultiplierMax;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Density multiplier",
-			ImGuiDataType_Float,
 			&_settings.densityMultiplier,
 			&multiplierMin,
 			&multiplierMax,
 			"%.2f");
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Scales the extinction fitted from the current weather's "
 				"near and far fog distances. 1.0 is neutral.");
 		}
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Height-falloff multiplier",
-			ImGuiDataType_Float,
 			&_settings.heightFalloffMultiplier,
 			&multiplierMin,
 			&multiplierMax,
 			"%.2f");
-		if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+		if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 			tooltip.Visible()) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"%s",
 				"Scales both exponential height curves fitted from the "
 				"current weather's height ramps. 1.0 is neutral.");
 		}
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Interiors deliberately retain their separate vanilla fog path.");
 		if (changed) {
 			_settings = ehf::Clamp(_settings);
@@ -637,13 +635,13 @@ namespace cs::features
 		}
 
 		if (_derivedParametersInUse.load(std::memory_order_relaxed)) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Live fit: density %.8f | height %.8f / %.8f",
 				_derivedDensity.load(std::memory_order_relaxed),
 				_derivedHeightFalloffX.load(std::memory_order_relaxed),
 				_derivedHeightFalloffY.load(std::memory_order_relaxed));
 		} else {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Live fit: %s",
 				ObservationStatusName(
 					_observationStatus.load(std::memory_order_relaxed)));

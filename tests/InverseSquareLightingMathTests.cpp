@@ -339,7 +339,7 @@ namespace
 		if (source.empty())
 			return;
 
-		CHECK(source.find("ImGui::Checkbox(\"Enabled\", &_settings.enabled)")
+		CHECK(source.find("dmui::ui::Checkbox(\"Enabled\", &_settings.enabled)")
 			!= std::string::npos);
 		CHECK(source.find("\"Exterior strength\"")
 			!= std::string::npos);

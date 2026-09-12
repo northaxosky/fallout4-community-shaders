@@ -210,7 +210,7 @@ namespace cs::features
 
 	void Upscaling::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
+		bool changed = dmui::ui::Checkbox("Enabled", &settings.enabled);
 
 		static const std::array methods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
@@ -229,7 +229,7 @@ namespace cs::features
 			settings.upscaleMethod = *method.selected;
 			changed = true;
 		}
-		ImGui::TextDisabled("Method changes take effect after restarting the game.");
+		dmui::ui::TextDisabled("Method changes take effect after restarting the game.");
 
 		static const std::array fallbackMethods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
@@ -278,16 +278,14 @@ namespace cs::features
 
 		const float sharpnessMin = 0.0f;
 		const float sharpnessMax = 1.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"FSR sharpness",
-			ImGuiDataType_Float,
 			&settings.sharpnessFSR,
 			&sharpnessMin,
 			&sharpnessMax);
-		changed |= ImGui::Checkbox("DLSS sharpening", &settings.sharpnessEnabledDLSS);
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::Checkbox("DLSS sharpening", &settings.sharpnessEnabledDLSS);
+		changed |= dmui::ui::SliderScalar(
 			"DLSS sharpness",
-			ImGuiDataType_Float,
 			&settings.sharpnessDLSS,
 			&sharpnessMin,
 			&sharpnessMax);
@@ -333,9 +331,9 @@ namespace cs::features
 		auto& pipeline = render::TemporalPipeline::Get();
 		const auto status = pipeline.GetStatus();
 		const auto [scale, ready] = pipeline.Renderer().GetReadiness();
-		ImGui::TextDisabled("Render scale: %.0f%% | resources: %s",
+		dmui::ui::TextDisabled("Render scale: %.0f%% | resources: %s",
 			static_cast<double>(scale) * 100.0, ready ? "ready" : "not ready");
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Requested: %.*s (%s) | effective: %.*s (%s)",
 			static_cast<int>(MethodName(settings.upscaleMethod).size()),
 			MethodName(settings.upscaleMethod).data(),
@@ -349,20 +347,20 @@ namespace cs::features
 			status.requestFrozen && status.d3d11Ready &&
 			!status.session.admittedSr[static_cast<std::size_t>(
 				render::temporal::SuperResolutionMethod::kDLSS)]) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"DLSS was not admitted for this startup; the effective or fallback provider remains active.");
 		}
 		if (status.pending.required)
-			ImGui::TextDisabled("Restart required: %s", status.pending.reason.c_str());
+			dmui::ui::TextDisabled("Restart required: %s", status.pending.reason.c_str());
 		if (!status.failure.empty())
-			ImGui::TextDisabled("%s", status.failure.c_str());
+			dmui::ui::TextDisabled("%s", status.failure.c_str());
 
 		Menu::Get().DrawDebugViewSelector(*this);
 		if (pipeline.Renderer().HasDebugSnapshotSelection()) {
-			if (ImGui::Button("Refresh snapshot"))
+			if (dmui::ui::Button("Refresh snapshot"))
 				pipeline.Renderer().RefreshDebugSnapshot();
 			if (pipeline.Renderer().DebugSnapshotPending())
-				ImGui::TextDisabled(
+				dmui::ui::TextDisabled(
 					"Refresh pending; the previous snapshot remains visible.");
 		}
 	}

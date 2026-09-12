@@ -1636,8 +1636,8 @@ namespace cs::features
 
 	void TerrainShadows::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
-		ImGui::TextDisabled("Off publishes zero terrain shadow, which is shader identity.");
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
+		dmui::ui::TextDisabled("Off publishes zero terrain shadow, which is shader identity.");
 
 		static const std::array factorOptions{
 			dmui::ChoiceOption<std::uint32_t>{
@@ -1664,7 +1664,7 @@ namespace cs::features
 			_settings.downsampleFactor = *factor.selected;
 			changed = true;
 		}
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Factor 4 is the low-VRAM default; the map reloads in place.");
 
 		if (changed) {
@@ -1681,7 +1681,7 @@ namespace cs::features
 			detail = _statusDetail;
 			failed = _statusFailed;
 		}
-		ImGui::Separator();
+		dmui::ui::Separator();
 		if (failed) {
 			auto& client = host::HostClient::Get().Client();
 			const auto warning = std::format(
@@ -1703,7 +1703,7 @@ namespace cs::features
 				return;
 			}
 		} else {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Worldspace: %s | map: %s",
 				worldspace.empty() ? "none" : worldspace.c_str(),
 				detail.empty() ? "unknown" : detail.c_str());
@@ -1713,7 +1713,7 @@ namespace cs::features
 		const auto effectiveWidth = _effectiveWidth.load(std::memory_order_relaxed);
 		const auto effectiveHeight = _effectiveHeight.load(std::memory_order_relaxed);
 		if (effectiveWidth != 0 && effectiveHeight != 0) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Source %ux%u -> effective %ux%u | %.2f MiB",
 				sourceWidth,
 				sourceHeight,
@@ -1721,19 +1721,19 @@ namespace cs::features
 				effectiveHeight,
 				ts::BytesToMiB(_allocatedBytes.load(std::memory_order_relaxed)));
 		} else {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"No heightmap resident (%zu discovered).",
 				_discoveredMaps.load(std::memory_order_relaxed));
 		}
 		if (!_injectionsOperational.load(std::memory_order_relaxed)) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Inactive: %s",
 				_validationDetail.empty() ?
 					"shader delivery path unavailable" :
 					_validationDetail.c_str());
 		}
 		if (effectiveWidth != 0 && effectiveHeight != 0) {
-			ImGui::TextDisabled(
+			dmui::ui::TextDisabled(
 				"Heightmap debug view maps the 1st-99th decoded-height "
 				"percentile (%.0f..%.0f) linearly to black-white; outliers "
 				"saturate.",

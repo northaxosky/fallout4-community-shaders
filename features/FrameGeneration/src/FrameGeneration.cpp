@@ -362,7 +362,7 @@ namespace cs::features
 
 	void FrameGeneration::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &settings.enabled);
+		bool changed = dmui::ui::Checkbox("Enabled", &settings.enabled);
 		static const std::array methods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "FSR 3", "fsr-3" },
@@ -379,16 +379,16 @@ namespace cs::features
 			settings.frameGenerationMethod = *method.selected;
 			changed = true;
 		}
-		ImGui::TextDisabled("Method changes take effect after restarting the game.");
+		dmui::ui::TextDisabled("Method changes take effect after restarting the game.");
 		bool force = settings.frameGenerationForceEnable != 0;
-		if (ImGui::Checkbox("Force below 120 Hz", &force)) {
+		if (dmui::ui::Checkbox("Force below 120 Hz", &force)) {
 			settings.frameGenerationForceEnable = force ? 1u : 0u;
 			changed = true;
 		}
-		changed |= ImGui::Checkbox(
+		changed |= dmui::ui::Checkbox(
 			"Allow in menus",
 			&settings.frameGenerationAllowInMenus);
-		if (ImGui::Checkbox("Detailed diagnostics", &settings.detailedDiagnostics)) {
+		if (dmui::ui::Checkbox("Detailed diagnostics", &settings.detailedDiagnostics)) {
 			render::TemporalPipeline::Get().SetDetailedTracing(
 				settings.detailedDiagnostics);
 			changed = true;
@@ -400,12 +400,12 @@ namespace cs::features
 
 		const auto status = render::TemporalPipeline::Get().GetStatus();
 		if (status.pending.required) {
-			ImGui::TextDisabled("Restart required: %s", status.pending.reason.c_str());
+			dmui::ui::TextDisabled("Restart required: %s", status.pending.reason.c_str());
 		}
 		if (!status.failure.empty()) {
-			ImGui::TextDisabled("%s", status.failure.c_str());
+			dmui::ui::TextDisabled("%s", status.failure.c_str());
 		}
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Requested: %.*s (%s) | effective: %.*s (%s) | proxy: %s",
 			static_cast<int>(MethodName(settings.frameGenerationMethod).size()),
 			MethodName(settings.frameGenerationMethod).data(),
@@ -419,10 +419,10 @@ namespace cs::features
 		Menu::Get().DrawDebugViewSelector(*this);
 		auto& renderer = render::TemporalPipeline::Get().Renderer();
 		if (renderer.HasFrameGenerationDebugSnapshotSelection()) {
-			if (ImGui::Button("Refresh snapshot"))
+			if (dmui::ui::Button("Refresh snapshot"))
 				renderer.RefreshFrameGenerationDebugSnapshot();
 			if (renderer.FrameGenerationDebugSnapshotPending())
-				ImGui::TextDisabled(
+				dmui::ui::TextDisabled(
 					"Refresh pending; the previous snapshot remains visible.");
 		}
 	}

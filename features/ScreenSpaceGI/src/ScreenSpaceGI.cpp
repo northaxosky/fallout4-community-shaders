@@ -1589,62 +1589,56 @@ namespace cs::features
 
 	void ScreenSpaceGI::DrawSettings()
 	{
-		bool changed = ImGui::Checkbox("Enabled", &_settings.enabled);
+		bool changed = dmui::ui::Checkbox("Enabled", &_settings.enabled);
 
 		const int slicesMin = 1;
 		const int slicesMax = 8;
-		changed |= ImGui::SliderScalar(
-			"Slices", ImGuiDataType_S32, &_settings.numSlices, &slicesMin, &slicesMax);
+		changed |= dmui::ui::SliderScalar(
+			"Slices", &_settings.numSlices, &slicesMin, &slicesMax);
 		const int stepsMin = 4;
 		const int stepsMax = 32;
-		changed |= ImGui::SliderScalar(
-			"Steps", ImGuiDataType_S32, &_settings.numSteps, &stepsMin, &stepsMax);
+		changed |= dmui::ui::SliderScalar(
+			"Steps", &_settings.numSteps, &stepsMin, &stepsMax);
 		const float radiusMin = 16.0f;
 		const float aoRadiusMax = 512.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"AO radius (game units)",
-			ImGuiDataType_Float,
 			&_settings.aoRadius,
 			&radiusMin,
 			&aoRadiusMax);
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"GI radius (game units)",
-			ImGuiDataType_Float,
 			&_settings.giRadius,
 			&radiusMin,
 			&aoRadiusMax);
 		const float aoPowerMin = 0.5f;
 		const float aoPowerMax = 5.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"AO power",
-			ImGuiDataType_Float,
 			&_settings.aoPower,
 			&aoPowerMin,
 			&aoPowerMax);
 		const float bounceMin = 0.0f;
 		const float bounceMax = 8.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Bounce strength",
-			ImGuiDataType_Float,
 			&_settings.bounceStrength,
 			&bounceMin,
 			&bounceMax);
-		changed |= ImGui::Checkbox("Denoise", &_settings.denoiseEnabled);
+		changed |= dmui::ui::Checkbox("Denoise", &_settings.denoiseEnabled);
 		const float denoiseRadiusMin = 0.5f;
 		const float denoiseRadiusMax = 4.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Denoise radius",
-			ImGuiDataType_Float,
 			&_settings.denoiseRadius,
 			&denoiseRadiusMin,
 			&denoiseRadiusMax);
-		changed |= ImGui::Checkbox("Temporal denoiser", &_settings.enableTemporalDenoiser);
+		changed |= dmui::ui::Checkbox("Temporal denoiser", &_settings.enableTemporalDenoiser);
 		float depthDisocclusionPercent = _settings.depthDisocclusion * 100.0f;
 		const float depthDisocclusionMin = 0.0f;
 		const float depthDisocclusionMax = 20.0f;
-		if (ImGui::SliderScalar(
+		if (dmui::ui::SliderScalar(
 				"Depth disocclusion",
-				ImGuiDataType_Float,
 				&depthDisocclusionPercent,
 				&depthDisocclusionMin,
 				&depthDisocclusionMax,
@@ -1654,24 +1648,21 @@ namespace cs::features
 		}
 		const int maxAccumulatedFramesMin = 1;
 		const int maxAccumulatedFramesMax = 64;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Max accumulated frames",
-			ImGuiDataType_S32,
 			&_settings.maxAccumFrames,
 			&maxAccumulatedFramesMin,
 			&maxAccumulatedFramesMax);
 		const float depthFadeMin = 0.0f;
 		const float depthFadeStartMax = 60000.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Depth fade start (game units)",
-			ImGuiDataType_Float,
 			&_settings.depthFadeStart,
 			&depthFadeMin,
 			&depthFadeStartMax);
 		const float depthFadeEndMax = 80000.0f;
-		changed |= ImGui::SliderScalar(
+		changed |= dmui::ui::SliderScalar(
 			"Depth fade end (game units)",
-			ImGuiDataType_Float,
 			&_settings.depthFadeEnd,
 			&depthFadeMin,
 			&depthFadeEndMax);
@@ -1682,14 +1673,14 @@ namespace cs::features
 
 		const char* status = _resourceInitFailed.load(std::memory_order_acquire) ? "failed" :
 			(_resourcesReady.load(std::memory_order_acquire) ? "ready" : "not ready");
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"Resources: %s (%ux%u) | composition binds: %u | generation: %u",
 			status,
 			_allocW,
 			_allocH,
 			_compositionBindsLastFrame.load(std::memory_order_relaxed),
 			_generation);
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"History: %s | motion: %s | radiance sources: %u | resets: %u (%s)",
 			_historyValidLastFrame.load(std::memory_order_relaxed) ? "in use" : "seeding",
 			_motionAvailableLastFrame.load(std::memory_order_relaxed) ? "yes" : "no",

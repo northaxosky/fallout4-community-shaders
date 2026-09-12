@@ -269,7 +269,7 @@ namespace
 		CHECK(Contains(source, "ReadBool("));
 		CHECK(Contains(source, "\"enabled\", a_candidate.enabled"));
 		CHECK(Contains(source, "settings.insert_or_assign(\"enabled\", _settings.enabled);"));
-		CHECK(Contains(source, "ImGui::Checkbox(\"Enabled\", &_settings.enabled)"));
+		CHECK(Contains(source, "dmui::ui::Checkbox(\"Enabled\", &_settings.enabled)"));
 		CHECK(Contains(source, "wetness_math::PublishedWetness("));
 		CHECK(Contains(source, ".Field(\"enabled\", _settings.enabled)"));
 		CHECK(Contains(source, "\"weather_wetness\""));

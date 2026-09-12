@@ -352,10 +352,10 @@ namespace cs::features
 		if (!wantContent)
 			return;
 
-		const ImVec4 good{ 0.20f, 1.00f, 0.20f, 1.00f };
-		const ImVec4 warning{ 1.00f, 0.85f, 0.20f, 1.00f };
-		const ImVec4 bad{ 1.00f, 0.30f, 0.30f, 1.00f };
-		const ImVec4 white{ 1.00f, 1.00f, 1.00f, 1.00f };
+		const dmui::ui::Vec4 good{ 0.20f, 1.00f, 0.20f, 1.00f };
+		const dmui::ui::Vec4 warning{ 1.00f, 0.85f, 0.20f, 1.00f };
+		const dmui::ui::Vec4 bad{ 1.00f, 0.30f, 0.30f, 1.00f };
+		const dmui::ui::Vec4 white{ 1.00f, 1.00f, 1.00f, 1.00f };
 		const auto color = settings.highContrast ?
 			white :
 			(_displayedFps >= settings.fpsGood ?
@@ -363,12 +363,12 @@ namespace cs::features
 				(_displayedFps >= settings.fpsWarn ? warning : bad));
 
 		if (settings.showFps) {
-			ImGui::PushStyleColor(ImGuiCol_Text, color);
-			ImGui::Text("[Engine] %.0f FPS", _displayedFps);
-			ImGui::PopStyleColor();
+			dmui::ui::PushStyleColor(dmui::ui::Color::kText, color);
+			dmui::ui::Text("[Engine] %.0f FPS", _displayedFps);
+			dmui::ui::PopStyleColor();
 		}
 		if (settings.showFrameTime)
-			ImGui::Text("%.2f ms", _displayedFrameMs);
+			dmui::ui::Text("%.2f ms", _displayedFrameMs);
 
 		if (settings.showGraph && _frameTimesCount > 1) {
 			static std::array<float, kHistoryCapacity> linear{};
@@ -415,12 +415,12 @@ namespace cs::features
 				plot);
 		}
 		if (settings.showStats) {
-			ImGui::Text("avg     %5.2f ms", _avgMs);
-			ImGui::Text("1%% low  %5.2f ms", _onePctLowMs);
-			ImGui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
+			dmui::ui::Text("avg     %5.2f ms", _avgMs);
+			dmui::ui::Text("1%% low  %5.2f ms", _onePctLowMs);
+			dmui::ui::Text("0.1%% low %5.2f ms", _pointOnePctLowMs);
 		}
 		if (settings.showVram && _vramBudgetBytes > 0) {
-			ImGui::Text(
+			dmui::ui::Text(
 				"VRAM %.1f / %.1f GB",
 				_vramUsedBytes / (1024.0 * 1024.0 * 1024.0),
 				_vramBudgetBytes / (1024.0 * 1024.0 * 1024.0));
@@ -482,17 +482,17 @@ namespace cs::features
 
 	void PerformanceOverlay::DrawSettings()
 	{
-		ImGui::TextDisabled(
+		dmui::ui::TextDisabled(
 			"The host owns the overlay hotkey. Suggested default: %s.",
 			settings.toggleHotkey.c_str());
 
-		if (ImGui::Checkbox("Enabled", &settings.enabled))
+		if (dmui::ui::Checkbox("Enabled", &settings.enabled))
 			SaveSettings();
 
-		ImGui::Separator();
+		dmui::ui::Separator();
 
 		// Save sliders only on commit to avoid render-thread writes.
-		auto sliderCommit = [] { return ImGui::IsItemDeactivatedAfterEdit(); };
+		auto sliderCommit = [] { return dmui::ui::IsItemDeactivatedAfterEdit(); };
 
 		static const std::array presetOptions{
 			dmui::ChoiceOption<int>{ 0, "Off", "off" },
@@ -511,17 +511,17 @@ namespace cs::features
 			SaveSettings();
 		}
 
-		if (ImGui::CollapsingHeader("Sections")) {
+		if (dmui::ui::CollapsingHeader("Sections")) {
 			bool changed = false;
-			changed |= ImGui::Checkbox("FPS", &settings.showFps);
-			changed |= ImGui::Checkbox("Frame time (ms)", &settings.showFrameTime);
-			changed |= ImGui::Checkbox("Frame time graph", &settings.showGraph);
-			changed |= ImGui::Checkbox("VRAM", &settings.showVram);
-			changed |= ImGui::Checkbox("Frame stats (avg / 1%% low / 0.1%% low)", &settings.showStats);
+			changed |= dmui::ui::Checkbox("FPS", &settings.showFps);
+			changed |= dmui::ui::Checkbox("Frame time (ms)", &settings.showFrameTime);
+			changed |= dmui::ui::Checkbox("Frame time graph", &settings.showGraph);
+			changed |= dmui::ui::Checkbox("VRAM", &settings.showVram);
+			changed |= dmui::ui::Checkbox("Frame stats (avg / 1%% low / 0.1%% low)", &settings.showStats);
 			if (changed) SaveSettings();
 		}
 
-		if (ImGui::CollapsingHeader("Position")) {
+		if (dmui::ui::CollapsingHeader("Position")) {
 			static const std::array cornerOptions{
 				dmui::ChoiceOption<int>{ 0, "Top-left", "top-left" },
 				dmui::ChoiceOption<int>{ 1, "Top-right", "top-right" },
@@ -538,17 +538,16 @@ namespace cs::features
 				settings.corner = *corner.selected;
 				SaveSettings();
 			}
-			if (ImGui::Checkbox("Free-drag (override corner snap)", &settings.freeDrag))
+			if (dmui::ui::Checkbox("Free-drag (override corner snap)", &settings.freeDrag))
 				SaveSettings();
 		}
 
-		if (ImGui::CollapsingHeader("Style")) {
+		if (dmui::ui::CollapsingHeader("Style")) {
 			bool changed = false;
 			const float opacityMin = 0.0f;
 			const float opacityMax = 1.0f;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"Background opacity",
-				ImGuiDataType_Float,
 				&settings.opacity,
 				&opacityMin,
 				&opacityMax,
@@ -557,12 +556,11 @@ namespace cs::features
 				settings.opacity = std::clamp(settings.opacity, 0.0f, 1.0f);
 				changed = true;
 			}
-			if (ImGui::Checkbox("Show border", &settings.showBorder)) changed = true;
+			if (dmui::ui::Checkbox("Show border", &settings.showBorder)) changed = true;
 			const float fontScaleMin = 0.5f;
 			const float fontScaleMax = 3.0f;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"Font scale",
-				ImGuiDataType_Float,
 				&settings.fontScale,
 				&fontScaleMin,
 				&fontScaleMax,
@@ -571,26 +569,25 @@ namespace cs::features
 				settings.fontScale = std::clamp(settings.fontScale, 0.5f, 3.0f);
 				changed = true;
 			}
-			if (ImGui::Checkbox("High contrast (force white text)", &settings.highContrast)) changed = true;
+			if (dmui::ui::Checkbox("High contrast (force white text)", &settings.highContrast)) changed = true;
 			if (changed) SaveSettings();
 		}
 
-		if (ImGui::CollapsingHeader("Color thresholds")) {
-			if (ImGui::Checkbox("Auto-seed from monitor refresh rate", &settings.autoThresholds)) {
+		if (dmui::ui::CollapsingHeader("Color thresholds")) {
+			if (dmui::ui::Checkbox("Auto-seed from monitor refresh rate", &settings.autoThresholds)) {
 				if (settings.autoThresholds) {
 					_refreshKnown = false;
 					EnsureRefreshHz();
 				}
 				SaveSettings();
 			}
-			ImGui::TextDisabled("Detected refresh: %.0f Hz", _refreshHz);
-			ImGui::BeginDisabled(settings.autoThresholds);
+			dmui::ui::TextDisabled("Detected refresh: %.0f Hz", _refreshHz);
+			dmui::ui::BeginDisabled(settings.autoThresholds);
 			bool committed = false;
 			const float goodFpsMin = 30.0f;
 			const float goodFpsMax = 360.0f;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"Good (>= FPS)",
-				ImGuiDataType_Float,
 				&settings.fpsGood,
 				&goodFpsMin,
 				&goodFpsMax,
@@ -598,31 +595,29 @@ namespace cs::features
 			if (sliderCommit()) committed = true;
 			const float warnFpsMin = 15.0f;
 			const float warnFpsMax = 240.0f;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"Warn (>= FPS)",
-				ImGuiDataType_Float,
 				&settings.fpsWarn,
 				&warnFpsMin,
 				&warnFpsMax,
 				"%.0f");
 			if (sliderCommit()) committed = true;
-			ImGui::EndDisabled();
+			dmui::ui::EndDisabled();
 			if (committed) SaveSettings();
 		}
 
-		if (ImGui::CollapsingHeader("Tracking")) {
+		if (dmui::ui::CollapsingHeader("Tracking")) {
 			const float updateIntervalMin = 0.05f;
 			const float updateIntervalMax = 2.0f;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"Update interval (s)",
-				ImGuiDataType_Float,
 				&settings.updateInterval,
 				&updateIntervalMin,
 				&updateIntervalMax,
 				"%.2f");
-			if (const dmui::TooltipScope tooltip{ ImGuiHoveredFlags_None };
+			if (const dmui::TooltipScope tooltip{ dmui::ui::HoveredFlags::kNone };
 				tooltip.Visible()) {
-				ImGui::Text(
+				dmui::ui::Text(
 					"%s",
 					"How often the displayed FPS/frametime number refreshes. "
 					"The history graph updates every frame.");
@@ -630,18 +625,16 @@ namespace cs::features
 			const bool intervalCommitted = sliderCommit();
 			const int historySizeMin = 30;
 			const int historySizeMax = kHistoryCapacity;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"History size (frames)",
-				ImGuiDataType_S32,
 				&settings.historySize,
 				&historySizeMin,
 				&historySizeMax);
 			const bool historyCommitted = sliderCommit();
 			const float graphHeightMin = 40.0f;
 			const float graphHeightMax = 160.0f;
-			(void)ImGui::SliderScalar(
+			(void)dmui::ui::SliderScalar(
 				"Graph height (px)",
-				ImGuiDataType_Float,
 				&settings.graphHeightPx,
 				&graphHeightMin,
 				&graphHeightMax,

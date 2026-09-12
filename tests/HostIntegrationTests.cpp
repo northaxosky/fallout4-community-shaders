@@ -28,7 +28,98 @@ namespace
 #define CHECK(a_expression) Check(static_cast<bool>(a_expression), #a_expression, __LINE__)
 
 	DMUI_HostServices supportedServices = cs::host::kClientOptions.requiredServices;
-	std::uint32_t forwardingVersion = DMUI_FORWARDING_VERSION_1_1;
+	std::uint32_t uiRevision = DMUI_UI_REVISION_CURRENT;
+	std::uint32_t uiTableSize = DMUI_UI_API_REQUIRED_SIZE;
+	DMUI_Result uiQueryResult = DMUI_RESULT_OK;
+	bool missingRequiredUIOperation = false;
+	bool missingOptionalPlotLines = false;
+
+	template <class>
+	struct UIStub;
+
+	template <class Result, class... Arguments>
+	struct UIStub<Result (*)(Arguments...) noexcept>
+	{
+		static Result Call(Arguments...) noexcept
+		{
+			return static_cast<Result>(DMUI_RESULT_OK);
+		}
+	};
+
+	DMUI_UIAPI MakeUIAPI()
+	{
+		DMUI_UIAPI api{};
+		api.structSize = DMUI_UI_API_CURRENT_SIZE;
+		api.abiVersion = DMUI_UI_ABI_CURRENT;
+		api.revision = DMUI_UI_REVISION_CURRENT;
+#define CS_UI_STUB(a_member) \
+	api.a_member = &UIStub<decltype(api.a_member)>::Call
+		CS_UI_STUB(getStyleMetrics);
+		CS_UI_STUB(beginCombo);
+		CS_UI_STUB(endCombo);
+		CS_UI_STUB(beginDisabled);
+		CS_UI_STUB(endDisabled);
+		CS_UI_STUB(beginTable);
+		CS_UI_STUB(endTable);
+		CS_UI_STUB(beginTooltip);
+		CS_UI_STUB(endTooltip);
+		CS_UI_STUB(button);
+		CS_UI_STUB(calcTextSize);
+		CS_UI_STUB(checkbox);
+		CS_UI_STUB(collapsingHeader);
+		CS_UI_STUB(collapsingHeaderVisible);
+		CS_UI_STUB(dragScalar);
+		CS_UI_STUB(dummy);
+		CS_UI_STUB(getContentRegionAvail);
+		CS_UI_STUB(getCursorScreenPos);
+		CS_UI_STUB(getFontSize);
+		CS_UI_STUB(getFrameHeight);
+		CS_UI_STUB(getStyleColor);
+		CS_UI_STUB(getTextLineHeightWithSpacing);
+		CS_UI_STUB(indent);
+		CS_UI_STUB(inputScalar);
+		CS_UI_STUB(inputText);
+		CS_UI_STUB(inputTextMultiline);
+		CS_UI_STUB(inputTextWithHint);
+		CS_UI_STUB(isItemDeactivatedAfterEdit);
+		CS_UI_STUB(isItemHovered);
+		CS_UI_STUB(popID);
+		CS_UI_STUB(popStyleColor);
+		CS_UI_STUB(popTextWrapPos);
+		CS_UI_STUB(progressBar);
+		CS_UI_STUB(pushIDString);
+		CS_UI_STUB(pushIDRange);
+		CS_UI_STUB(pushIDValue);
+		CS_UI_STUB(pushStyleColorU32);
+		CS_UI_STUB(pushStyleColor);
+		CS_UI_STUB(pushTextWrapPos);
+		CS_UI_STUB(sameLine);
+		CS_UI_STUB(selectable);
+		CS_UI_STUB(selectableToggle);
+		CS_UI_STUB(separator);
+		CS_UI_STUB(setClipboardText);
+		CS_UI_STUB(setCursorScreenPos);
+		CS_UI_STUB(setItemDefaultFocus);
+		CS_UI_STUB(setNextItemWidth);
+		CS_UI_STUB(setTooltipText);
+		CS_UI_STUB(sliderScalar);
+		CS_UI_STUB(spacing);
+		CS_UI_STUB(tableHeadersRow);
+		CS_UI_STUB(tableNextColumn);
+		CS_UI_STUB(tableNextRow);
+		CS_UI_STUB(tableSetColumnIndex);
+		CS_UI_STUB(tableSetupColumn);
+		CS_UI_STUB(tableSetupScrollFreeze);
+		CS_UI_STUB(text);
+		CS_UI_STUB(textColored);
+		CS_UI_STUB(textDisabled);
+		CS_UI_STUB(textWrapped);
+		CS_UI_STUB(unindent);
+		CS_UI_STUB(newLine);
+		CS_UI_STUB(plotLines);
+#undef CS_UI_STUB
+		return api;
+	}
 
 	DMUI_Result DMUI_CALL RegisterClient(
 		const DMUI_ClientDescriptor*,
@@ -54,8 +145,37 @@ namespace
 
 	DMUI_Result DMUI_CALL QueryServices(DMUI_HostServicesInfo* a_info) noexcept
 	{
-		a_info->forwardingVersion = forwardingVersion;
 		a_info->supportedServices = supportedServices;
+		return DMUI_RESULT_OK;
+	}
+
+	DMUI_Result DMUI_CALL QueryUIAPI(
+		std::uint32_t a_requestedUIAbi,
+		std::uint32_t a_minimumRevision,
+		std::uint32_t a_minimumTableSize,
+		DMUI_UIAPIInfo* a_info) noexcept
+	{
+		static DMUI_UIAPI api = MakeUIAPI();
+		api = MakeUIAPI();
+		api.structSize = uiTableSize;
+		api.revision = uiRevision;
+		if (missingRequiredUIOperation)
+			api.endCombo = nullptr;
+		if (missingOptionalPlotLines)
+			api.plotLines = nullptr;
+		if (!a_info || a_info->structSize < DMUI_UI_API_INFO_1_SIZE)
+			return DMUI_RESULT_STRUCT_TOO_SMALL;
+		a_info->abiVersion = api.abiVersion;
+		a_info->revision = api.revision;
+		a_info->tableSize = api.structSize;
+		a_info->api = nullptr;
+		if (uiQueryResult != DMUI_RESULT_OK)
+			return uiQueryResult;
+		if (a_requestedUIAbi != api.abiVersion ||
+			a_minimumRevision > api.revision ||
+			a_minimumTableSize > api.structSize)
+			return DMUI_RESULT_UNSUPPORTED_ABI;
+		a_info->api = &api;
 		return DMUI_RESULT_OK;
 	}
 
@@ -198,6 +318,7 @@ namespace
 	{
 		DMUI_HostAPI api{};
 		api.structSize = sizeof(api);
+		api.hostAbiVersion = DMUI_HOST_ABI_CURRENT;
 		api.apiVersion = DMUI_API_VERSION_CURRENT;
 		api.registerClient = &RegisterClient;
 		api.registerPage = &RegisterPage;
@@ -220,12 +341,15 @@ namespace
 		api.cancelDialog = &CancelDialog;
 		api.queryServices = &QueryServices;
 		api.openExternal = &OpenExternal;
+		api.queryUIAPI = &QueryUIAPI;
 		return api;
 	}
 
-	void TestForwardingPreflight()
+	void TestUIPreflight()
 	{
 		const auto& options = cs::host::kClientOptions;
+		CHECK(options.minimumUIRevision == DMUI_UI_REVISION_1);
+		CHECK(options.minimumUIAPISize == DMUI_UI_API_REQUIRED_SIZE);
 		auto api = MakeHost();
 		CHECK(
 			dmui::PreflightHostAPI(nullptr, options) ==
@@ -271,14 +395,60 @@ namespace
 		api.structSize = DMUI_HOST_API_REGISTER_CATEGORY_SIZE;
 		CHECK(
 			dmui::PreflightHostAPI(&api, options) ==
-			DMUI_RESULT_SERVICE_UNAVAILABLE);
+			DMUI_RESULT_UNSUPPORTED_ABI);
 		api.structSize = sizeof(api);
 
-		forwardingVersion = DMUI_FORWARDING_VERSION_1_0;
+		api.hostAbiVersion = 0;
 		CHECK(
 			dmui::PreflightHostAPI(&api, options) ==
-			DMUI_RESULT_FORWARDING_VERSION_MISMATCH);
-		forwardingVersion = DMUI_FORWARDING_VERSION_1_1;
+			DMUI_RESULT_UNSUPPORTED_ABI);
+		api.hostAbiVersion = DMUI_HOST_ABI_CURRENT;
+
+		api.apiVersion = 0;
+		CHECK(dmui::PreflightHostAPI(&api, options) == DMUI_RESULT_OK);
+		api.apiVersion = DMUI_API_VERSION_CURRENT;
+
+		uiRevision = 0;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_UNSUPPORTED_ABI);
+		uiRevision = DMUI_UI_REVISION_CURRENT;
+
+		uiTableSize = DMUI_UI_API_REQUIRED_SIZE - sizeof(void*);
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_UNSUPPORTED_ABI);
+		uiTableSize = DMUI_UI_API_REQUIRED_SIZE;
+
+		missingRequiredUIOperation = true;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_UNSUPPORTED_ABI);
+		missingRequiredUIOperation = false;
+
+		uiTableSize = DMUI_UI_API_CURRENT_SIZE;
+		missingOptionalPlotLines = true;
+		CHECK(dmui::PreflightHostAPI(&api, options) == DMUI_RESULT_OK);
+		auto plotOptions = options;
+		plotOptions.minimumUIAPISize = DMUI_UI_API_PLOT_LINES_SIZE;
+		CHECK(
+			dmui::PreflightHostAPI(&api, plotOptions) ==
+			DMUI_RESULT_UNSUPPORTED_ABI);
+		missingOptionalPlotLines = false;
+		CHECK(dmui::PreflightHostAPI(&api, plotOptions) == DMUI_RESULT_OK);
+		uiTableSize = DMUI_UI_API_REQUIRED_SIZE;
+
+		uiQueryResult = DMUI_RESULT_HOST_NOT_READY;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_HOST_NOT_READY);
+		uiQueryResult = DMUI_RESULT_OK;
+
+		api.queryUIAPI = nullptr;
+		CHECK(
+			dmui::PreflightHostAPI(&api, options) ==
+			DMUI_RESULT_UNSUPPORTED_ABI);
+		api.queryUIAPI = &QueryUIAPI;
 
 		api.queryServices = nullptr;
 		CHECK(
@@ -749,7 +919,7 @@ namespace
 
 int main()
 {
-	TestForwardingPreflight();
+	TestUIPreflight();
 	TestPageCatalog();
 	TestChoiceActivation();
 	TestCategoryIdValidity();
