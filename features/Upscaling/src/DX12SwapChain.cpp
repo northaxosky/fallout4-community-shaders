@@ -1284,13 +1284,22 @@ namespace cs::features
 		render::TemporalPipeline::Get().RequestFrameGenerationReset();
 		if (firstFailure) {
 			if (_callbacks.recordFailure) {
-				_callbacks.recordFailure();
+				_callbacks.recordFailure(a_reason ? a_reason : "Unknown frame-generation failure.");
 			}
 		}
 		try {
 			L->error("Frame generation disabled: {}", a_reason ? a_reason : "unknown failure");
 		} catch (...) {
 		}
+	}
+
+	void DX12SwapChain::DisableFrameGeneration(
+		std::string_view a_operation,
+		const render::temporal::ProviderResult& a_result) noexcept
+	{
+		const auto reason =
+			render::temporal::FormatProviderFailure(a_operation, a_result);
+		DisableFrameGeneration(reason.c_str());
 	}
 
 	bool DX12SwapChain::AcquireFrameGenerationInputWrite() noexcept
@@ -1490,10 +1499,10 @@ namespace cs::features
 				if (!frameGenerationPrepared) {
 					_vendorConsumptionPossible = false;
 					DisableFrameGeneration(
-						prepareResult.message.empty()
-							? "frame-generation provider configure or prepare failed"
-							: prepareResult.message.c_str());
+						"Prepare frame", prepareResult);
 					if (!preparation.safeToPresent) {
+						L->error("{}", render::temporal::FormatProviderFailure(
+							"Cancel frame", preparation.cancel));
 						DX::ThrowIfFailed(commandList->Close());
 						_presentPrepared = false;
 						_preparedFrameGeneration = false;
@@ -1537,12 +1546,10 @@ namespace cs::features
 				const auto disableResult =
 					_provider->SetGenerationEnabled(false);
 				DisableFrameGeneration(
-					status.result.message.empty()
-						? "frame-generation provider reported a post-Present failure"
-						: status.result.message.c_str());
+					"Collect present status", status.result);
 				if (!disableResult.Succeeded()) {
-					L->error(
-						"Frame-generation SDK disable also failed after the post-Present error");
+					L->error("{}", render::temporal::FormatProviderFailure(
+						"Disable after present failure", disableResult));
 				}
 			}
 		}

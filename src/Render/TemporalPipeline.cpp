@@ -768,9 +768,11 @@ namespace cs::render
 						TemporalPipeline::Get().Renderer()
 							.ClearFrameGenerationCaptureState();
 					},
-					.recordFailure = [] {
-						TemporalPipeline::Get()
-							.RecordFrameGenerationFailure();
+					.recordFailure = [](const char* a_reason) {
+						auto& pipeline = TemporalPipeline::Get();
+						pipeline.RecordFrameGenerationFailure();
+						pipeline.PostFailure(
+							temporal::FailureDomain::kFrameGeneration, a_reason);
 					},
 					.queryFrameState = [] {
 						const auto* upscaling =

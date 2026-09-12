@@ -55,7 +55,7 @@ namespace cs::features
 	struct TemporalPresentationCallbacks
 	{
 		std::function<void()> clearCapture;
-		std::function<void()> recordFailure;
+		std::function<void(const char*)> recordFailure;
 		std::function<FrameGenerationFrameState()> queryFrameState;
 	};
 
@@ -141,6 +141,9 @@ namespace cs::features
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void SetOutwardD3D11Device(ID3D11Device* a_device) noexcept;
 		void DisableFrameGeneration(const char* a_reason) noexcept;
+		void DisableFrameGeneration(
+			std::string_view a_operation,
+			const render::temporal::ProviderResult& a_result) noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 
 		HRESULT Present(UINT a_syncInterval, UINT a_flags) noexcept;

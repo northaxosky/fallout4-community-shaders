@@ -3,12 +3,31 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <string_view>
 #include <utility>
 
 #include "Render/TemporalProvider.h"
 
 namespace cs::render::temporal
 {
+	[[nodiscard]] inline std::string FormatProviderFailure(
+		std::string_view a_operation,
+		const ProviderResult& a_result)
+	{
+		std::string message{ a_operation };
+		message += ": ";
+		message += a_result.message.empty()
+			? "provider operation failed"
+			: a_result.message;
+		if (a_result.sdkResult != 0) {
+			message += " (SDK result ";
+			message += std::to_string(a_result.sdkResult);
+			message += ")";
+		}
+		return message;
+	}
+
 	struct ProviderDisplayDescription
 	{
 		std::uint32_t width = 0;

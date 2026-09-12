@@ -1,4 +1,5 @@
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/TemporalPipelineState.h"
 
 #pragma warning(push)
 #pragma warning(disable: 4068 4100)
@@ -28,6 +29,40 @@ namespace
 			std::cerr << "FAIL: " << a_message << '\n';
 			++failures;
 		}
+	}
+
+	void TestFailureReporting()
+	{
+		using namespace cs::render::temporal;
+		const ProviderResult failure{
+			.code = ProviderResultCode::kFailure,
+			.sdkResult = XEFG_SWAPCHAIN_RESULT_ERROR_MISMATCH_INPUT_RESOURCES,
+			.message = "XeSS-FG interpolation failed."
+		};
+		const auto message = FormatProviderFailure("Collect present status", failure);
+		Check(
+			message == "Collect present status: XeSS-FG interpolation failed. (SDK result -12)",
+			"failure reason preserves its operation and exact signed SDK code");
+		TopologyState topology;
+		RequestedTopology requested;
+		requested.frameGenerationEligible = true;
+		requested.frameGeneration = FrameGenerationMethod::kXeSS;
+		Check(topology.Freeze(requested), "failure reporting topology freezes");
+		SessionTopology session;
+		session.valid = true;
+		session.proxyInstalled = true;
+		session.admittedFg = FrameGenerationMethod::kXeSS;
+		Check(topology.Admit(session), "failure reporting topology admits");
+		topology.Quarantine(
+			ClassifyFailure(FailureDomain::kFrameGeneration,
+				SuperResolutionMethod::kNone, FrameGenerationMethod::kXeSS),
+			1, message);
+		Check(
+			!topology.Effective().frameGenerationEnabled &&
+				topology.Effective().frameGeneration == FrameGenerationMethod::kOff &&
+				topology.Request()->frameGeneration == FrameGenerationMethod::kXeSS &&
+				topology.Pending().required && topology.Pending().reason.contains(message),
+			"provider rejection disables effective FG while retaining the request and exact failure reason");
 	}
 
 	class RecordingProvider final :
@@ -1031,6 +1066,7 @@ namespace
 
 int main()
 {
+	TestFailureReporting();
 	TestLifecycleOrderAndFailures();
 	TestResizeRestoration();
 	TestResizeCommitProtocol();

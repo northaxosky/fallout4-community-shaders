@@ -180,10 +180,12 @@ namespace cs::features
 		decltype(&xefgSwapChainGetLastPresentStatus) _getPresentStatus = nullptr;
 		decltype(&xefgSwapChainSetLatencyReduction) _setLatencyReduction = nullptr;
 		decltype(&xefgSwapChainDestroy) _destroyContext = nullptr;
+		decltype(&xefgSwapChainSetLoggingCallback) _setLoggingCallback = nullptr;
 		decltype(&xellD3D12CreateContext) _createLatency = nullptr;
 		decltype(&xellSetSleepMode) _setSleepMode = nullptr;
 		decltype(&xellSleep) _sleep = nullptr;
 		decltype(&xellAddMarkerData) _addMarker = nullptr;
 		decltype(&xellDestroyContext) _destroyLatency = nullptr;
+		decltype(&xellSetLoggingCallback) _setLatencyLoggingCallback = nullptr;
 	};
 }

@@ -22,6 +22,27 @@ namespace cs::features
 		using render::temporal::ProviderResultCode;
 		auto* L = cs::log::Get("cs.feature.frame-generation.providers");
 
+		void LogSdkMessage(const char* a_sdk, const char* a_message, unsigned a_level)
+		{
+			static constexpr spdlog::level::level_enum levels[]{
+				spdlog::level::debug, spdlog::level::info,
+				spdlog::level::warn, spdlog::level::err
+			};
+			const auto level = a_level < std::size(levels)
+				? levels[a_level] : spdlog::level::warn;
+			L->log(level, "[{}] {}", a_sdk, a_message ? a_message : "<empty SDK message>");
+		}
+
+		void XeSSLog(const char* a_message, xefg_swapchain_logging_level_t a_level, void*)
+		{
+			LogSdkMessage("XeSS-FG", a_message, static_cast<unsigned>(a_level));
+		}
+
+		void XeLLLog(const char* a_message, xell_logging_level_t a_level)
+		{
+			LogSdkMessage("XeLL", a_message, static_cast<unsigned>(a_level));
+		}
+
 		ProviderResult Success()
 		{
 			return { .code = ProviderResultCode::kSuccess };
@@ -539,6 +560,8 @@ namespace cs::features
 			_frameGenerationModule, "xefgSwapChainSetLatencyReduction");
 		_destroyContext = Load<decltype(_destroyContext)>(
 			_frameGenerationModule, "xefgSwapChainDestroy");
+		_setLoggingCallback = Load<decltype(_setLoggingCallback)>(
+			_frameGenerationModule, "xefgSwapChainSetLoggingCallback");
 		_createLatency = Load<decltype(_createLatency)>(
 			_latencyModule, "xellD3D12CreateContext");
 		_setSleepMode = Load<decltype(_setSleepMode)>(
@@ -548,11 +571,14 @@ namespace cs::features
 			_latencyModule, "xellAddMarkerData");
 		_destroyLatency = Load<decltype(_destroyLatency)>(
 			_latencyModule, "xellDestroyContext");
+		_setLatencyLoggingCallback = Load<decltype(_setLatencyLoggingCallback)>(
+			_latencyModule, "xellSetLoggingCallback");
 		return _createContext && _initialize && _getSwapChain &&
 			_tagResource && _tagConstants && _setPresentId &&
 			_setEnabled && _getPresentStatus && _setLatencyReduction &&
 			_destroyContext && _createLatency && _setSleepMode &&
-			_sleep && _addMarker && _destroyLatency;
+			_sleep && _addMarker && _destroyLatency &&
+			_setLoggingCallback && _setLatencyLoggingCallback;
 	}
 
 	ProviderResult XeSSPresentation::PrepareDevice(ID3D12Device** a_device)
@@ -563,6 +589,10 @@ namespace cs::features
 		auto result = _createLatency(*a_device, &_latency);
 		if (result != XELL_RESULT_SUCCESS) {
 			return Failure("XeLL context creation failed.", result);
+		}
+		result = _setLatencyLoggingCallback(_latency, XELL_LOGGING_LEVEL_INFO, XeLLLog);
+		if (result != XELL_RESULT_SUCCESS) {
+			return Failure("XeLL diagnostic callback registration failed.", result);
 		}
 		const xell_sleep_params_t sleep{
 			.minimumIntervalUs = 0,
@@ -577,6 +607,11 @@ namespace cs::features
 		const auto fgResult = _createContext(*a_device, &_context);
 		if (fgResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
 			return Failure("XeSS-FG context creation failed.", fgResult);
+		}
+		const auto loggingResult = _setLoggingCallback(
+			_context, XEFG_SWAPCHAIN_LOGGING_LEVEL_INFO, XeSSLog, nullptr);
+		if (loggingResult != XEFG_SWAPCHAIN_RESULT_SUCCESS) {
+			return Failure("XeSS-FG diagnostic callback registration failed.", loggingResult);
 		}
 		const auto latencyResult =
 			_setLatencyReduction(_context, _latency);
@@ -780,6 +815,11 @@ namespace cs::features
 			xess_fg::PresentStatusClass::kError) {
 			_generatedCountAvailable = false;
 			_presentedCountAvailable = false;
+			L->error(
+				"XeSS-FG present failed: query={} interpolation={} reported_enabled={} expected_enabled={}",
+				static_cast<int>(observation.queryResult),
+				static_cast<int>(observation.frameResult),
+				observation.reportedEnabled, _enabled);
 			return static_cast<int>(observation.queryResult) < 0
 				? Failure(
 					"XeSS-FG present status query failed.",
