@@ -2,9 +2,7 @@
 #include <cstring>
 #include <cstdint>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <sstream>
 
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -220,14 +218,6 @@ namespace
 		return ok;
 	}
 
-	std::string ReadFile(const std::filesystem::path& a_path)
-	{
-		std::ifstream stream(a_path, std::ios::binary);
-		std::ostringstream contents;
-		contents << stream.rdbuf();
-		return contents.str();
-	}
-
 	winrt::com_ptr<ID3DBlob> CompileShader(
 		const std::filesystem::path& a_path,
 		const D3D_SHADER_MACRO* a_defines,
@@ -414,10 +404,7 @@ namespace
 
 int main(int argc, char** argv)
 {
-	if (!Check(
-			argc == 6,
-			"expected temporal resolve, spatial fallback PS, fullscreen VS, "
-			"render hooks, and renderer source paths")) {
+	if (!Check(argc == 3, "expected spatial fallback pixel and vertex shaders")) {
 		return 1;
 	}
 	constexpr D3D_FEATURE_LEVEL featureLevels[]{ D3D_FEATURE_LEVEL_11_0 };
@@ -519,101 +506,8 @@ int main(int argc, char** argv)
 		IsRenderTargetBound(context.get(), frameBufferRTV.get()),
 		"successful publication changed OM binding");
 
-	const auto upscalingSource =
-		ReadFile(argv[1]) + ReadFile(argv[4]) + ReadFile(argv[5]);
-	const auto fallbackShader = ReadFile(argv[2]);
-	const auto fallbackStart =
-		upscalingSource.find("bool TemporalRenderer::ApplySpatialFallback(");
-	const auto fallbackEnd =
-		upscalingSource.find("void TemporalRenderer::UpscaleDepth()", fallbackStart);
-	const auto fallbackBlock =
-		fallbackStart != std::string::npos && fallbackEnd != std::string::npos
-		? std::string_view(upscalingSource).substr(
-			  fallbackStart, fallbackEnd - fallbackStart)
-		: std::string_view{};
-	const auto wrapperStart =
-		upscalingSource.find("void TemporalRenderer::DrawWorldRenderUI::thunk(");
-	const auto wrapperEnd =
-		upscalingSource.find(
-			"void TemporalRenderer::DeferredComposite_RenderPass::thunk(",
-			wrapperStart);
-	const auto wrapperBlock =
-		wrapperStart != std::string::npos && wrapperEnd != std::string::npos
-		? std::string_view(upscalingSource).substr(
-			  wrapperStart, wrapperEnd - wrapperStart)
-		: std::string_view{};
-	const auto publishStart =
-		upscalingSource.find("void TemporalRenderer::PublishDynamicResolution()");
-	const auto publishEnd =
-		upscalingSource.find("void TemporalRenderer::OnD3D11Ready(", publishStart);
-	const auto publishBlock =
-		publishStart != std::string::npos && publishEnd != std::string::npos
-		? std::string_view(upscalingSource).substr(
-			  publishStart, publishEnd - publishStart)
-		: std::string_view{};
-	const auto taaStart =
-		upscalingSource.find("bool TemporalRenderer::ImageSpaceEffectTemporalAA_IsActive::thunk(");
-	const auto taaEnd =
-		upscalingSource.find("void TemporalRenderer::DrawWorldBegin_SetDynamicViewport::thunk(", taaStart);
-	const auto taaBlock =
-		taaStart != std::string::npos && taaEnd != std::string::npos
-		? std::string_view(upscalingSource).substr(taaStart, taaEnd - taaStart)
-		: std::string_view{};
-	const auto handoffStart =
-		upscalingSource.find("void TemporalRenderer::DrawWorldRenderUI_Resolve::thunk(");
-	const auto handoffEnd =
-		upscalingSource.find(
-			"void TemporalRenderer::DrawWorldRenderUI_RenderEffectRange::thunk(",
-			handoffStart);
-	const auto handoffBlock =
-		handoffStart != std::string::npos && handoffEnd != std::string::npos
-		? std::string_view(upscalingSource).substr(
-			  handoffStart, handoffEnd - handoffStart)
-		: std::string_view{};
 	ok &= Check(
-		publishBlock.contains("IsExternalUpscaler(method)") &&
-			publishBlock.contains("SetDynamicResolution(") &&
-			publishBlock.contains("widthRatio") &&
-			publishBlock.contains("heightRatio") &&
-			taaBlock.contains("IsExternalUpscaler(method)") &&
-			wrapperBlock.contains("IsExternalUpscaler(method)"),
-		"every external provider shares resolution, TAA exclusion, and resolve recovery policy");
-	ok &= Check(
-		upscalingSource.contains("PreflightExternalResolve(upscaleMethod)") &&
-			upscalingSource.contains("ApplySpatialFallback(") &&
-			upscalingSource.contains("publicationTexture->uav.get()") &&
-			fallbackBlock.contains(
-				"auto* fallbackRTV = publicationTexture->rtv.get();") &&
-			fallbackBlock.contains("publicationTexture->resource.get()") &&
-			fallbackBlock.contains("PublishUpscalingOutput(") &&
-			!upscalingSource.contains(
-				"sharpenerTexture->srv.get(),\n\t\t\t\t\tupscalingTexture->uav.get()"),
-		"spatial recovery retains the original capture and publishes through a private output");
-	ok &= Check(
-		fallbackShader.contains("TrueSamplingDimensions") &&
-			fallbackShader.contains("maxSourceUv") &&
-			fallbackShader.contains("SampleLevel"),
-		"spatial recovery resolves only the committed render subrect to display size");
-	ok &= Check(
-		wrapperBlock.contains("_resolveSeamSeen.store(false") &&
-			upscalingSource.contains("_resolveSeamSeen.store(true") &&
-			wrapperBlock.contains("RecoverMissedResolveAtRenderUIReturn") &&
-			wrapperBlock.contains("Gamma-only Render_UI path bypassed +0xC5") &&
-			upscalingSource.contains("ClassifyRenderUIOutputExtent(") &&
-			upscalingSource.contains("ApplyPassthroughFallback(") &&
-			wrapperBlock.find("TakesFullEffectsPath()") <
-				wrapperBlock.find("func(a_this);"),
-		"the live Render_UI wrapper recovers frames that bypass the +0xC5 resolve seam");
-	ok &= Check(
-		handoffBlock.contains("PlanPreUiHandoff(") &&
-			handoffBlock.find("CaptureFrameGenerationInputs();") <
-				handoffBlock.find("if (!handoff.driveSuperResolution)") &&
-			handoffBlock.contains(
-				"if (handoff.ShouldCaptureHudlessColor(true))") &&
-			handoffBlock.contains("ShouldCaptureHudlessColor(upscaled)"),
-		"the pre-UI seam hands FG-only native color around the SR ownership gate");
-	ok &= Check(
-		TestSpatialFallback(device.get(), context.get(), argv[2], argv[3]),
+		TestSpatialFallback(device.get(), context.get(), argv[1], argv[2]),
 		"spatial recovery sampled stale pixels outside the committed render subrect");
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);

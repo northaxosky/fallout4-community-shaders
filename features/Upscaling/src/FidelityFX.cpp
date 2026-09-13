@@ -432,14 +432,14 @@ namespace cs::features
 		std::uint32_t a_outputHeight,
 		float a_jitterX,
 		float a_jitterY,
-		ColorMetadata a_color) try
+		render::temporal::ColorContract a_color) try
 	{
 		if (!frameGenerationContextCreated) {
 			frameGenerationActive = false;
 			return false;
 		}
 
-		const bool supportedColor = IsFo4PostTonemapSdr(a_color);
+		const bool supportedColor = render::temporal::IsFo4PostTonemapSdr(a_color);
 		const bool useFrameGeneration =
 			a_enable && a_renderWidth > 0 && a_renderHeight > 0 &&
 			frameGenerationCameraData.valid &&
@@ -585,20 +585,24 @@ namespace cs::features
 		return frameGenerationActive;
 	}
 
-	bool FidelityFX::CreateFSRResources(const SuperResolutionInitContext& a_context)
+	bool FidelityFX::CreateFSRResources(
+		const render::temporal::SuperResolutionInitContext& a_context)
 	{
 		if (fsrScratchBuffer) {
 			L->warn("FSR resources already created, skipping allocation");
 			return contextCreated;
 		}
 
-		if (!a_context.device || !a_context.maxRenderWidth || !a_context.maxRenderHeight ||
+		const auto* device =
+			std::get_if<ID3D11Device*>(&a_context.device);
+		if (!device || !*device || !a_context.maxRenderWidth ||
+			!a_context.maxRenderHeight ||
 			!a_context.outputWidth || !a_context.outputHeight) {
 			L->error("FSR resource creation ran before the renderer was ready");
 			return false;
 		}
 
-		auto fsrDevice = ffxGetDeviceDX11(a_context.device);
+		auto fsrDevice = ffxGetDeviceDX11(*device);
 
 		uint32_t numContexts = 1;
 		size_t scratchBufferSize = ffxGetScratchMemorySizeDX11(numContexts);
@@ -668,47 +672,64 @@ namespace cs::features
 		fsrDispatchCrashLogged = false;
 	}
 
-	bool FidelityFX::Upscale(const SuperResolutionExecutionContext& a_context)
+	bool FidelityFX::Upscale(
+		const render::temporal::SuperResolutionRequest& a_request)
 	{
-		if (!a_context.commandContext || !a_context.depth || !a_context.colorInput ||
-			!a_context.privateOutput || !a_context.motionVectors ||
-			!a_context.reactiveMask || !a_context.transparencyCompositionMask ||
-			!a_context.renderWidth || !a_context.renderHeight || !contextCreated ||
-			!IsFo4PostTonemapSdr(a_context.color) ||
-			a_context.cameraVerticalFov <= 0.0f)
+		const auto* recording =
+			std::get_if<render::temporal::D3D11RecordingContext>(
+				&a_request.recording);
+		auto* color =
+			render::temporal::GetD3D11Resource(a_request.colorInput);
+		auto* output =
+			render::temporal::GetD3D11Resource(a_request.privateOutput);
+		auto* depth = render::temporal::GetD3D11Resource(a_request.depth);
+		auto* motion =
+			render::temporal::GetD3D11Resource(a_request.motionVectors);
+		auto* reactive =
+			render::temporal::GetD3D11Resource(a_request.reactiveMask);
+		auto* transparency = render::temporal::GetD3D11Resource(
+			a_request.transparencyCompositionMask);
+		if (!recording || !recording->context || !depth || !color || !output ||
+			!motion || !reactive || !transparency ||
+			!a_request.renderWidth || !a_request.renderHeight || !contextCreated ||
+			!render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
+			a_request.cameraVerticalFov <= 0.0f)
 			return false;
 
 		FfxFsr3DispatchUpscaleDescription dispatchParameters{};
-		dispatchParameters.commandList = ffxGetCommandListDX11(a_context.commandContext);
-		dispatchParameters.color = GetFfxResource(a_context.colorInput, L"FSR3_InputColor");
-		dispatchParameters.depth = GetFfxResource(a_context.depth, L"FSR3_InputDepth");
+		dispatchParameters.commandList =
+			ffxGetCommandListDX11(recording->context);
+		dispatchParameters.color =
+			GetFfxResource(color, L"FSR3_InputColor");
+		dispatchParameters.depth =
+			GetFfxResource(depth, L"FSR3_InputDepth");
 		dispatchParameters.motionVectors =
-			GetFfxResource(a_context.motionVectors, L"FSR3_InputMotionVectors");
+			GetFfxResource(motion, L"FSR3_InputMotionVectors");
 		dispatchParameters.exposure = GetFfxResource(nullptr, L"FSR3_InputExposure");
 		dispatchParameters.upscaleOutput =
-			GetFfxResource(a_context.privateOutput, L"FSR3_OutputColor");
+			GetFfxResource(output, L"FSR3_OutputColor");
 		dispatchParameters.reactive =
-			GetFfxResource(a_context.reactiveMask, L"FSR3_InputReactiveMap");
+			GetFfxResource(reactive, L"FSR3_InputReactiveMap");
 		dispatchParameters.transparencyAndComposition = GetFfxResource(
-			a_context.transparencyCompositionMask,
+			transparency,
 			L"FSR3_TransparencyAndCompositionMap");
 
-		dispatchParameters.motionVectorScale.x = static_cast<float>(a_context.renderWidth);
-		dispatchParameters.motionVectorScale.y = static_cast<float>(a_context.renderHeight);
-		dispatchParameters.renderSize.width = a_context.renderWidth;
-		dispatchParameters.renderSize.height = a_context.renderHeight;
+		dispatchParameters.motionVectorScale.x = static_cast<float>(a_request.renderWidth);
+		dispatchParameters.motionVectorScale.y = static_cast<float>(a_request.renderHeight);
+		dispatchParameters.renderSize.width = a_request.renderWidth;
+		dispatchParameters.renderSize.height = a_request.renderHeight;
 
-		dispatchParameters.jitterOffset.x = -a_context.jitterX;
-		dispatchParameters.jitterOffset.y = -a_context.jitterY;
+		dispatchParameters.jitterOffset.x = -a_request.jitterX;
+		dispatchParameters.jitterOffset.y = -a_request.jitterY;
 
-		dispatchParameters.frameTimeDelta = a_context.frameTimeMilliseconds;
-		dispatchParameters.cameraFar = a_context.cameraFar;
-		dispatchParameters.cameraNear = a_context.cameraNear;
+		dispatchParameters.frameTimeDelta = a_request.frameTimeMilliseconds;
+		dispatchParameters.cameraFar = a_request.cameraFar;
+		dispatchParameters.cameraNear = a_request.cameraNear;
 		dispatchParameters.enableSharpening = true;
-		dispatchParameters.sharpness = a_context.sharpness;
-		dispatchParameters.cameraFovAngleVertical = a_context.cameraVerticalFov;
+		dispatchParameters.sharpness = a_request.sharpness;
+		dispatchParameters.cameraFovAngleVertical = a_request.cameraVerticalFov;
 		dispatchParameters.viewSpaceToMetersFactor = 0.01428222656f;
-		dispatchParameters.reset = a_context.resetHistory;
+		dispatchParameters.reset = a_request.resetHistory;
 		dispatchParameters.preExposure = 1.0f;
 		dispatchParameters.flags = 0;
 

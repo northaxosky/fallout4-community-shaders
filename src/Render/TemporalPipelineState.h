@@ -318,13 +318,7 @@ namespace cs::render::temporal
 	enum class FramePhase : std::uint8_t
 	{
 		kIdle,
-		kBegun,
-		kPlanned,
-		kRenderStateCommitted,
-		kWorldCaptured,
-		kSceneResolved,
-		kPreUiCaptured,
-		kFinalCaptured,
+		kCaptured,
 		kPresentPrepared,
 		kPresentAccepted,
 		kRetired,
@@ -415,21 +409,10 @@ namespace cs::render::temporal
 		bool _renderSubmitEnded = false;
 	};
 
-	enum class SceneResolution : std::uint8_t
-	{
-		kExternalPublished,
-		kNativeCompleted,
-		kFailed
-	};
-
 	struct FrameIdentity
 	{
 		std::uint64_t realFrame = 0;
 		std::uint64_t engineFrame = 0;
-		std::uint64_t configurationRevision = 0;
-		std::uint64_t deviceGeneration = 0;
-		std::uint64_t displayGeneration = 0;
-		std::uint64_t engineResourceGeneration = 0;
 		std::uint32_t slot = 0;
 	};
 
@@ -463,93 +446,48 @@ namespace cs::render::temporal
 	class FrameTransaction
 	{
 	public:
-		[[nodiscard]] bool Begin(FrameIdentity a_identity) noexcept
+		[[nodiscard]] bool Capture(
+			FrameIdentity a_identity,
+			Extent a_renderExtent,
+			Extent a_outputExtent) noexcept
 		{
 			if (_phase != FramePhase::kIdle && _phase != FramePhase::kRetired &&
 				_phase != FramePhase::kFailed) {
 				return Fail("frame slot was reused before retirement");
 			}
+			if (!a_renderExtent.IsValid() || !a_outputExtent.IsValid() ||
+				a_renderExtent.width > a_outputExtent.width ||
+				a_renderExtent.height > a_outputExtent.height) {
+				return Fail("invalid frame packet extents");
+			}
 			*this = FrameTransaction{};
 			_identity = a_identity;
-			_phase = FramePhase::kBegun;
+			_phase = FramePhase::kCaptured;
 			return true;
 		}
 
-		[[nodiscard]] bool Plan(Extent a_requested, Extent a_output) noexcept
+		[[nodiscard]] bool PreparePresent() noexcept
 		{
-			if (_phase != FramePhase::kBegun || !a_requested.IsValid() || !a_output.IsValid() ||
-				a_requested.width > a_output.width || a_requested.height > a_output.height) {
-				return Fail("invalid frame plan");
+			if (_phase != FramePhase::kCaptured) {
+				return Fail("Present prepared without a captured frame packet");
 			}
-			_requestedExtent = a_requested;
-			_outputExtent = a_output;
-			_phase = FramePhase::kPlanned;
-			return true;
-		}
-
-		[[nodiscard]] bool CommitRenderState(Extent a_committed) noexcept
-		{
-			if (_phase != FramePhase::kPlanned || a_committed != _requestedExtent) {
-				return Fail("render extent changed after planning");
-			}
-			_committedExtent = a_committed;
-			_phase = FramePhase::kRenderStateCommitted;
-			return true;
-		}
-
-		[[nodiscard]] bool CaptureWorld(bool a_valid) noexcept
-		{
-			if (_phase != FramePhase::kRenderStateCommitted || !a_valid) {
-				return Fail("world inputs are unavailable");
-			}
-			_phase = FramePhase::kWorldCaptured;
-			return true;
-		}
-
-		[[nodiscard]] bool ResolveScene(SceneResolution a_resolution) noexcept
-		{
-			if (_phase != FramePhase::kWorldCaptured || _evaluationAttempted) {
-				return Fail("scene resolve was attempted more than once");
-			}
-			_evaluationAttempted = true;
-			_sceneResolution = a_resolution;
-			if (a_resolution == SceneResolution::kFailed) {
-				return Fail("scene resolve failed");
-			}
-			_published = a_resolution == SceneResolution::kExternalPublished;
-			_phase = FramePhase::kSceneResolved;
-			return true;
-		}
-
-		[[nodiscard]] bool CapturePreUi() noexcept
-		{
-			if (_phase != FramePhase::kSceneResolved || _preUiCaptured) {
-				return Fail("pre-UI capture is out of phase");
-			}
-			_preUiCaptured = true;
-			_phase = FramePhase::kPreUiCaptured;
-			return true;
-		}
-
-		[[nodiscard]] bool CaptureFinal() noexcept
-		{
-			if (_phase != FramePhase::kPreUiCaptured || _finalCaptured) {
-				return Fail("final-color capture is out of phase");
-			}
-			_finalCaptured = true;
-			_phase = FramePhase::kFinalCaptured;
-			return true;
-		}
-
-		[[nodiscard]] bool PreparePresent(bool a_prepareFrameGeneration) noexcept
-		{
-			if (_phase != FramePhase::kFinalCaptured || _presentPrepared) {
-				return Fail("presentation preparation is out of phase");
-			}
-			_presentPrepared = true;
-			_frameGenerationPrepared = a_prepareFrameGeneration;
 			_phase = FramePhase::kPresentPrepared;
 			return true;
+		}
+
+		void SetFrameGenerationPrepared(bool a_prepared) noexcept
+		{
+			if (_phase == FramePhase::kPresentPrepared) {
+				_frameGenerationPrepared = a_prepared;
+			}
+		}
+
+		void Abandon() noexcept
+		{
+			if (_phase == FramePhase::kCaptured ||
+				_phase == FramePhase::kPresentPrepared) {
+				*this = FrameTransaction{};
+			}
 		}
 
 		[[nodiscard]] bool PresentAttempt(bool a_testOnly, bool a_accepted, bool a_retryable) noexcept
@@ -583,11 +521,6 @@ namespace cs::render::temporal
 
 		[[nodiscard]] FramePhase Phase() const noexcept { return _phase; }
 		[[nodiscard]] const FrameIdentity& Identity() const noexcept { return _identity; }
-		[[nodiscard]] Extent RequestedExtent() const noexcept { return _requestedExtent; }
-		[[nodiscard]] Extent CommittedExtent() const noexcept { return _committedExtent; }
-		[[nodiscard]] Extent OutputExtent() const noexcept { return _outputExtent; }
-		[[nodiscard]] SceneResolution Resolution() const noexcept { return _sceneResolution; }
-		[[nodiscard]] bool Published() const noexcept { return _published; }
 		[[nodiscard]] bool FrameGenerationPrepared() const noexcept { return _frameGenerationPrepared; }
 		[[nodiscard]] bool HasRecentFrameGenerationWork(
 			std::uint64_t a_currentRealFrame,
@@ -619,16 +552,7 @@ namespace cs::render::temporal
 		}
 
 		FrameIdentity _identity;
-		Extent _requestedExtent;
-		Extent _committedExtent;
-		Extent _outputExtent;
 		FramePhase _phase = FramePhase::kIdle;
-		SceneResolution _sceneResolution = SceneResolution::kFailed;
-		bool _evaluationAttempted = false;
-		bool _published = false;
-		bool _preUiCaptured = false;
-		bool _finalCaptured = false;
-		bool _presentPrepared = false;
 		bool _frameGenerationPrepared = false;
 		std::uint32_t _presentAttempts = 0;
 		std::string_view _failure;

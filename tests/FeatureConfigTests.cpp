@@ -287,6 +287,8 @@ namespace
 		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_force_enable"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
 		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_allow_in_menus"].value<bool>() == std::optional<bool>{ true });
 		CHECK(!user["features"]["Upscaling"]["settings"].as_table()->contains("frame_generation_mode"));
+		CHECK(
+			!cs::feature_config::NormalizeLegacyTemporalSettings(user).changed);
 
 		auto disabled = Parse(
 			"[features.Upscaling]\n"
@@ -333,6 +335,29 @@ namespace
 		CHECK(explicitNew["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
 		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
 		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
+
+		auto modernPartial = Parse(
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.FrameGeneration.settings]\n"
+			"enabled = true\n");
+		CHECK(
+			!cs::feature_config::NormalizeLegacyTemporalSettings(modernPartial).changed &&
+				!modernPartial["features"]["FrameGeneration"].as_table()->contains("load") &&
+				!modernPartial["features"]["FrameGeneration"]["settings"].as_table()->contains(
+					"frame_generation_method"));
+
+		auto modernFull = Parse(
+			"[features.FrameGeneration]\n"
+			"load = true\n"
+			"[features.FrameGeneration.settings]\n"
+			"enabled = true\n"
+			"frame_generation_method = 2\n");
+		CHECK(
+			!cs::feature_config::NormalizeLegacyTemporalSettings(modernFull).changed &&
+				modernFull["features"]["FrameGeneration"]["settings"]["frame_generation_method"]
+						.value<std::int64_t>() ==
+					std::optional<std::int64_t>{ 2 });
 
 		auto malformed = Parse(
 			"[features.Upscaling]\n"

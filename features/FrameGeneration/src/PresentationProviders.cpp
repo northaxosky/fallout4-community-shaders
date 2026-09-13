@@ -15,43 +15,30 @@ namespace cs::features
 		using render::temporal::ProviderResult;
 		using render::temporal::ProviderResultCode;
 
-		ProviderResult Success()
-		{
-			return { .code = ProviderResultCode::kSuccess };
-		}
+		ProviderResult Success() { return { .code = ProviderResultCode::kSuccess }; }
 
 		ProviderResult Failure(std::string a_message, std::int64_t a_result = 0)
 		{
-			return {
-				.code = ProviderResultCode::kFailure,
+			return { .code = ProviderResultCode::kFailure,
 				.sdkResult = a_result,
-				.message = std::move(a_message)
-			};
+				.message = std::move(a_message) };
 		}
-	}
+	}  // namespace
 
-	FidelityFXPresentation::FidelityFXPresentation(
-		FidelityFX& a_runtime) noexcept :
-		_runtime(a_runtime)
-	{}
+	FidelityFXPresentation::FidelityFXPresentation(FidelityFX& a_runtime) noexcept
+		: _runtime(a_runtime) {}
 
-	const char* FidelityFXPresentation::Name() const noexcept
-	{
-		return "FSR3-FG";
-	}
+	const char* FidelityFXPresentation::Name() const noexcept { return "FSR3-FG"; }
 
 	ProviderResult FidelityFXPresentation::PrepareDevice(ID3D12Device** a_device)
 	{
-		return a_device && *a_device
-			? Success()
-			: Failure("FidelityFX received no D3D12 device.");
+		return a_device && *a_device ? Success() : Failure("FidelityFX received no D3D12 device.");
 	}
 
-	ProviderResult FidelityFXPresentation::PrepareFactory(IDXGIFactory4** a_factory)
+	ProviderResult
+	FidelityFXPresentation::PrepareFactory(IDXGIFactory4** a_factory)
 	{
-		return a_factory && *a_factory
-			? Success()
-			: Failure("FidelityFX received no DXGI factory.");
+		return a_factory && *a_factory ? Success() : Failure("FidelityFX received no DXGI factory.");
 	}
 
 	ProviderResult FidelityFXPresentation::CreatePresentation(
@@ -60,16 +47,13 @@ namespace cs::features
 	{
 		if (!a_context.device || !a_context.queue || !a_context.factory ||
 			!a_context.window || !a_context.description || !a_swapChain) {
-			return Failure("FidelityFX presentation creation received an incomplete context.");
+			return Failure(
+				"FidelityFX presentation creation received an incomplete context.");
 		}
 		_device = a_context.device;
 		const HRESULT result = _runtime.CreateSwapChainContext(
-			a_context.device,
-			a_context.queue,
-			a_context.factory,
-			a_context.window,
-			*a_context.description,
-			a_swapChain);
+			a_context.device, a_context.queue, a_context.factory, a_context.window,
+			*a_context.description, a_swapChain);
 		if (FAILED(result)) {
 			return Failure("FidelityFX swap-chain creation failed.", result);
 		}
@@ -78,15 +62,13 @@ namespace cs::features
 	}
 
 	ProviderResult FidelityFXPresentation::CreateDisplayResources(
-		std::uint32_t a_width,
-		std::uint32_t a_height,
-		DXGI_FORMAT a_format,
+		std::uint32_t a_width, std::uint32_t a_height, DXGI_FORMAT a_format,
 		std::uint32_t)
 	{
-		return _runtime.CreateFrameGenerationContext(
-			_device, a_width, a_height, a_format)
-			? Success()
-			: Failure("FidelityFX frame-generation context creation failed.");
+		return _runtime.CreateFrameGenerationContext(_device, a_width, a_height,
+				   a_format) ?
+		           Success() :
+		           Failure("FidelityFX frame-generation context creation failed.");
 	}
 
 	ProviderResult FidelityFXPresentation::PrepareFrame(
@@ -103,34 +85,25 @@ namespace cs::features
 		camera.frameTimeDelta = a_request.frameTimeMilliseconds;
 		camera.frameCount = a_request.camera.engineFrame;
 		camera.valid = a_request.camera.valid;
-		if (a_request.enabled &&
-			!_runtime.SetFrameGenerationCameraData(camera)) {
+		if (a_request.enabled && !_runtime.SetFrameGenerationCameraData(camera)) {
 			return Failure("FidelityFX rejected the frame camera.");
 		}
 		const bool prepared = _runtime.PresentFrameGeneration(
-			a_request.recording.commandList,
-			_swapChain,
-			a_request.hudlessColor.resource,
-			a_request.depth.resource,
-			a_request.motionVectors.resource,
-			a_request.enabled,
-			a_request.renderWidth,
-			a_request.renderHeight,
-			a_request.outputWidth,
-			a_request.outputHeight,
-			a_request.jitterX,
-			a_request.jitterY,
+			a_request.recording.commandList, _swapChain,
+			a_request.hudlessColor.resource, a_request.depth.resource,
+			a_request.motionVectors.resource, a_request.enabled,
+			a_request.renderWidth, a_request.renderHeight, a_request.outputWidth,
+			a_request.outputHeight, a_request.jitterX, a_request.jitterY,
 			a_request.color);
-		return prepared
-			? Success()
-			: Failure("FidelityFX frame preparation failed.");
+		return prepared ? Success() : Failure("FidelityFX frame preparation failed.");
 	}
 
 	ProviderResult FidelityFXPresentation::SetGenerationEnabled(bool a_enabled)
 	{
 		if (a_enabled) {
 			return Failure(
-				"FidelityFX frame generation can only be enabled by frame preparation.");
+				"FidelityFX frame generation can only be enabled by frame "
+				"preparation.");
 		}
 		if (!_runtime.SetFrameGenerationEnabled(false)) {
 			return Failure("FidelityFX SDK disable failed.");
@@ -150,22 +123,13 @@ namespace cs::features
 		return SetGenerationEnabled(false);
 	}
 
-	ProviderResult FidelityFXPresentation::AcquirePresentInputs()
-	{
-		return Failure(
-			"FidelityFX input retirement requires the host game-queue fence.");
-	}
-
 	render::temporal::PresentInputRetirementMode
-		FidelityFXPresentation::GetPresentInputRetirementMode() const noexcept
+	FidelityFXPresentation::GetPresentInputRetirementMode() const noexcept
 	{
-		return render::temporal::PresentInputRetirementMode::
-			kSynchronousPresentQueue;
+		return render::temporal::PresentInputRetirementMode::kSynchronousPresentQueue;
 	}
 
-	ProviderResult FidelityFXPresentation::CollectPresentStatus(
-		UINT,
-		HRESULT)
+	ProviderResult FidelityFXPresentation::CollectPresentStatus(UINT, HRESULT)
 	{
 		return Success();
 	}
@@ -175,8 +139,8 @@ namespace cs::features
 		return Success();
 	}
 
-	ProviderResult FidelityFXPresentation::SetLatencyMarker(
-		render::temporal::LatencyMarker,
+	ProviderResult
+	FidelityFXPresentation::SetLatencyMarker(render::temporal::LatencyMarker,
 		std::uint32_t)
 	{
 		return Success();
@@ -184,24 +148,20 @@ namespace cs::features
 
 	ProviderResult FidelityFXPresentation::ReleaseDisplayResources() noexcept
 	{
-		const auto release =
-			_runtime.DestroyFrameGenerationContextWithStatus();
-		auto result = release.succeeded
-			? Success()
-			: Failure(
-				  "FidelityFX display resources could not be safely released.",
-				  release.globalDrainSdkResult);
+		const auto release = _runtime.DestroyFrameGenerationContextWithStatus();
+		auto result =
+			release.succeeded ? Success() : Failure("FidelityFX display resources could not be safely released.", release.globalDrainSdkResult);
 		result.globalDrainAttempted = release.globalDrainAttempted;
 		result.globalDrainCompleted = release.globalDrainCompleted;
-		result.globalDrainCpuMicroseconds =
-			release.globalDrainCpuMicroseconds;
+		result.globalDrainCpuMicroseconds = release.globalDrainCpuMicroseconds;
 		return result;
 	}
 
 	ProviderResult FidelityFXPresentation::DestroyAfterDrain() noexcept
 	{
 		if (!_runtime.DestroySwapChainContext()) {
-			return Failure("FidelityFX swap-chain context could not be safely destroyed.");
+			return Failure(
+				"FidelityFX swap-chain context could not be safely destroyed.");
 		}
 		_swapChain = nullptr;
 		_device = nullptr;
@@ -213,28 +173,20 @@ namespace cs::features
 		return _runtime.IsFrameGenerationContextReady();
 	}
 
-	StreamlinePresentation::StreamlinePresentation(
-		Streamline& a_runtime) noexcept :
-		_runtime(a_runtime)
-	{}
+	StreamlinePresentation::StreamlinePresentation(Streamline& a_runtime) noexcept
+		: _runtime(a_runtime) {}
 
-	const char* StreamlinePresentation::Name() const noexcept
-	{
-		return "DLSS-G";
-	}
+	const char* StreamlinePresentation::Name() const noexcept { return "DLSS-G"; }
 
 	ProviderResult StreamlinePresentation::PrepareDevice(ID3D12Device** a_device)
 	{
-		return _runtime.PrepareD3D12Device(a_device)
-			? Success()
-			: Failure("Streamline could not upgrade and bind the D3D12 device.");
+		return _runtime.PrepareD3D12Device(a_device) ? Success() : Failure("Streamline could not upgrade and bind the D3D12 device.");
 	}
 
-	ProviderResult StreamlinePresentation::PrepareFactory(IDXGIFactory4** a_factory)
+	ProviderResult
+	StreamlinePresentation::PrepareFactory(IDXGIFactory4** a_factory)
 	{
-		return _runtime.PrepareDXGIFactory(a_factory)
-			? Success()
-			: Failure("Streamline could not upgrade the DXGI factory.");
+		return _runtime.PrepareDXGIFactory(a_factory) ? Success() : Failure("Streamline could not upgrade the DXGI factory.");
 	}
 
 	ProviderResult StreamlinePresentation::CreatePresentation(
@@ -244,7 +196,8 @@ namespace cs::features
 		if (!a_context.device || !a_context.queue || !a_context.factory ||
 			!a_context.window || !a_context.description || !a_swapChain ||
 			!_runtime.IsD3D12Session()) {
-			return Failure("DLSS-G presentation creation received an incompatible context.");
+			return Failure(
+				"DLSS-G presentation creation received an incompatible context.");
 		}
 		_runtime.CheckFeatures(a_context.adapter);
 		_runtime.PostDevice();
@@ -254,20 +207,15 @@ namespace cs::features
 		}
 		winrt::com_ptr<IDXGISwapChain1> swapChain;
 		const HRESULT result = a_context.factory->CreateSwapChainForHwnd(
-			a_context.queue,
-			a_context.window,
-			a_context.description,
-			nullptr,
-			nullptr,
-			swapChain.put());
+			a_context.queue, a_context.window, a_context.description, nullptr,
+			nullptr, swapChain.put());
 		if (FAILED(result)) {
 			return Failure("Streamline swap-chain creation failed.", result);
 		}
 		const HRESULT queryResult =
 			swapChain->QueryInterface(IID_PPV_ARGS(a_swapChain));
 		if (FAILED(queryResult)) {
-			return Failure(
-				"Streamline swap-chain does not expose IDXGISwapChain4.",
+			return Failure("Streamline swap-chain does not expose IDXGISwapChain4.",
 				queryResult);
 		}
 		_queue = a_context.queue;
@@ -275,9 +223,7 @@ namespace cs::features
 	}
 
 	ProviderResult StreamlinePresentation::CreateDisplayResources(
-		std::uint32_t a_width,
-		std::uint32_t a_height,
-		DXGI_FORMAT a_format,
+		std::uint32_t a_width, std::uint32_t a_height, DXGI_FORMAT a_format,
 		std::uint32_t a_bufferCount)
 	{
 		if (a_format != DXGI_FORMAT_R8G8B8A8_UNORM) {
@@ -286,11 +232,9 @@ namespace cs::features
 		_width = a_width;
 		_height = a_height;
 		_bufferCount = a_bufferCount;
-		_ready = _runtime.ConfigureDLSSG(
-			false, a_width, a_height, a_width, a_height, a_bufferCount, true);
-		return _ready
-			? Success()
-			: Failure("DLSS-G display-resource preflight failed.");
+		_ready = _runtime.ConfigureDLSSG(false, a_width, a_height, a_width, a_height,
+			a_bufferCount, true);
+		return _ready ? Success() : Failure("DLSS-G display-resource preflight failed.");
 	}
 
 	ProviderResult StreamlinePresentation::PrepareFrame(
@@ -299,27 +243,20 @@ namespace cs::features
 		if (!_ready) {
 			return Failure("DLSS-G presentation is not ready.");
 		}
-		if (!_runtime.ConfigureDLSSG(
-			a_request.enabled,
-			a_request.renderWidth,
-			a_request.renderHeight,
-			a_request.outputWidth,
-			a_request.outputHeight,
-			_bufferCount,
-			true)) {
+		if (!_runtime.ConfigureDLSSG(a_request.enabled, a_request.renderWidth,
+				a_request.renderHeight, a_request.outputWidth,
+				a_request.outputHeight, _bufferCount, true)) {
 			return Failure("DLSS-G options were rejected.");
 		}
 		_enabled = a_request.enabled;
 		if (!a_request.enabled) {
 			return _runtime.ClearDLSSGFrameTags(
-				static_cast<std::uint32_t>(a_request.realFrame),
-				a_request.recording.commandList)
-				? Success()
-				: Failure("DLSS-G invalid input tags could not be cleared.");
+					   static_cast<std::uint32_t>(a_request.realFrame),
+					   a_request.recording.commandList) ?
+			           Success() :
+			           Failure("DLSS-G invalid input tags could not be cleared.");
 		}
-		return _runtime.TagDLSSGFrame(a_request)
-			? Success()
-			: Failure("DLSS-G input tagging failed.");
+		return _runtime.TagDLSSGFrame(a_request) ? Success() : Failure("DLSS-G input tagging failed.");
 	}
 
 	ProviderResult StreamlinePresentation::CancelFrame(
@@ -328,21 +265,13 @@ namespace cs::features
 		const bool tagsCleared = _runtime.ClearDLSSGFrameTags(
 			static_cast<std::uint32_t>(a_request.realFrame),
 			a_request.recording.commandList);
-		const bool disabled = _runtime.ConfigureDLSSG(
-			false,
-			_width,
-			_height,
-			_width,
-			_height,
-			_bufferCount,
-			true);
+		const bool disabled = _runtime.ConfigureDLSSG(false, _width, _height, _width,
+			_height, _bufferCount, true);
 		_enabled = false;
 		if (!tagsCleared) {
 			return Failure("DLSS-G cancellation could not invalidate the frame tags.");
 		}
-		return disabled
-			? Success()
-			: Failure("DLSS-G cancellation could not disable the SDK.");
+		return disabled ? Success() : Failure("DLSS-G cancellation could not disable the SDK.");
 	}
 
 	ProviderResult StreamlinePresentation::SetGenerationEnabled(bool a_enabled)
@@ -358,16 +287,10 @@ namespace cs::features
 		if (!a_enabled && !_runtime.ClearCurrentDLSSGFrameTags()) {
 			return Failure("DLSS-G invalid input tags could not be cleared.");
 		}
-		return _runtime.ConfigureDLSSG(
-			a_enabled,
-			_width,
-			_height,
-			_width,
-			_height,
-			_bufferCount,
-			true)
-			? Success()
-			: Failure("DLSS-G enablement change failed.");
+		return _runtime.ConfigureDLSSG(a_enabled, _width, _height, _width, _height,
+				   _bufferCount, true) ?
+		           Success() :
+		           Failure("DLSS-G enablement change failed.");
 	}
 
 	ProviderResult StreamlinePresentation::Quiesce()
@@ -379,38 +302,26 @@ namespace cs::features
 		if (!_runtime.ClearCurrentDLSSGFrameTags()) {
 			return Failure("DLSS-G could not invalidate its current input tags.");
 		}
-		if (!_runtime.ConfigureDLSSG(
-				false,
-				_width,
-				_height,
-				_width,
-				_height,
-				_bufferCount,
-				true)) {
+		if (!_runtime.ConfigureDLSSG(false, _width, _height, _width, _height,
+				_bufferCount, true)) {
 			return Failure("DLSS-G could not be disabled.");
 		}
 
 		return Success();
 	}
 
-	ProviderResult StreamlinePresentation::AcquirePresentInputs()
-	{
-		return Success();
-	}
-
 	render::temporal::PresentInputRetirementMode
-		StreamlinePresentation::GetPresentInputRetirementMode() const noexcept
+	StreamlinePresentation::GetPresentInputRetirementMode() const noexcept
 	{
-		return render::temporal::PresentInputRetirementMode::
-			kRecordedCommandList;
+		return render::temporal::PresentInputRetirementMode::kRecordedCommandList;
 	}
 
-	ProviderResult StreamlinePresentation::CollectPresentStatus(
-		UINT a_presentFlags,
+	ProviderResult
+	StreamlinePresentation::CollectPresentStatus(UINT a_presentFlags,
 		HRESULT a_presentResult)
 	{
-		if (!render::temporal::ShouldObservePresentStatus(
-				a_presentFlags, a_presentResult)) {
+		if (!render::temporal::ShouldObservePresentStatus(a_presentFlags,
+				a_presentResult)) {
 			return Success();
 		}
 		if (_runtime.PollDLSSGState()) {
@@ -433,14 +344,11 @@ namespace cs::features
 
 	ProviderResult StreamlinePresentation::Sleep(std::uint32_t a_frame)
 	{
-		return _runtime.Sleep(a_frame)
-			? Success()
-			: Failure("Reflex sleep failed.");
+		return _runtime.Sleep(a_frame) ? Success() : Failure("Reflex sleep failed.");
 	}
 
 	ProviderResult StreamlinePresentation::SetLatencyMarker(
-		render::temporal::LatencyMarker a_marker,
-		std::uint32_t a_frame)
+		render::temporal::LatencyMarker a_marker, std::uint32_t a_frame)
 	{
 		sl::PCLMarker marker = sl::PCLMarker::eSimulationStart;
 		switch (a_marker) {
@@ -466,9 +374,7 @@ namespace cs::features
 			marker = sl::PCLMarker::ePresentEnd;
 			break;
 		}
-		return _runtime.SetLatencyMarker(marker, a_frame)
-			? Success()
-			: Failure("PCL marker failed.");
+		return _runtime.SetLatencyMarker(marker, a_frame) ? Success() : Failure("PCL marker failed.");
 	}
 
 	ProviderResult StreamlinePresentation::ReleaseDisplayResources() noexcept
@@ -500,8 +406,8 @@ namespace cs::features
 
 	bool StreamlinePresentation::IsReady() const noexcept
 	{
-		return _ready && _runtime.featureDLSSG &&
-			_runtime.featurePCL && _runtime.featureReflex;
+		return _ready && _runtime.featureDLSSG && _runtime.featurePCL &&
+		       _runtime.featureReflex;
 	}
 
-}
+}  // namespace cs::features

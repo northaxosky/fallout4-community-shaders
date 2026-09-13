@@ -9,6 +9,11 @@
 #include <d3d12.h>
 #include <dxgi1_6.h>
 
+namespace cs::engine
+{
+	struct FrameBufferSnapshot;
+}
+
 namespace cs::render::temporal
 {
 	enum class ProviderResultCode : std::uint8_t
@@ -88,16 +93,16 @@ namespace cs::render::temporal
 		float preExposure = 1.0f;
 	};
 
-	[[nodiscard]] inline bool IsFo4PostTonemapSdr(
-		const ColorContract& a_color) noexcept
+	[[nodiscard]] inline bool
+	IsFo4PostTonemapSdr(const ColorContract& a_color) noexcept
 	{
 		return a_color.resourceFormat == DXGI_FORMAT_R8G8B8A8_UNORM &&
-			a_color.range == ColorRange::kFull &&
-			a_color.transfer == TransferFunction::kGamma22 &&
-			a_color.primaries == ColorPrimaries::kUnspecified &&
-			a_color.stage == ColorStage::kPostTonemapLut &&
-			a_color.alpha == AlphaMode::kIgnored &&
-			a_color.exposure == ExposureMode::kAutomatic;
+		       a_color.range == ColorRange::kFull &&
+		       a_color.transfer == TransferFunction::kGamma22 &&
+		       a_color.primaries == ColorPrimaries::kUnspecified &&
+		       a_color.stage == ColorStage::kPostTonemapLut &&
+		       a_color.alpha == AlphaMode::kIgnored &&
+		       a_color.exposure == ExposureMode::kAutomatic;
 	}
 
 	struct D3D11GpuView
@@ -149,6 +154,11 @@ namespace cs::render::temporal
 		bool valid = false;
 	};
 
+	[[nodiscard]] FrameGenerationCamera
+	BuildFrameGenerationCamera(const engine::FrameBufferSnapshot& a_snapshot,
+		std::uint32_t a_outputWidth,
+		std::uint32_t a_outputHeight) noexcept;
+
 	struct SuperResolutionInitContext
 	{
 		std::variant<ID3D11Device*, ID3D12Device*> device;
@@ -164,8 +174,8 @@ namespace cs::render::temporal
 		std::uint32_t outputHeight = 0;
 		std::uint32_t qualityMode = 0;
 
-		[[nodiscard]] bool operator==(
-			const SuperResolutionSizeRequest&) const noexcept = default;
+		[[nodiscard]] bool
+		operator==(const SuperResolutionSizeRequest&) const noexcept = default;
 	};
 
 	struct SuperResolutionSizeResult
@@ -183,14 +193,13 @@ namespace cs::render::temporal
 	class SuperResolutionSizeCache
 	{
 	public:
-		[[nodiscard]] const SuperResolutionSizeResult* Find(
-			const SuperResolutionSizeRequest& a_request) const noexcept
+		[[nodiscard]] const SuperResolutionSizeResult*
+		Find(const SuperResolutionSizeRequest& a_request) const noexcept
 		{
 			return _valid && _request == a_request ? &_result : nullptr;
 		}
 
-		void Store(
-			const SuperResolutionSizeRequest& a_request,
+		void Store(const SuperResolutionSizeRequest& a_request,
 			const SuperResolutionSizeResult& a_result)
 		{
 			if (!a_result.Succeeded()) {
@@ -243,17 +252,30 @@ namespace cs::render::temporal
 		FrameGenerationCamera camera;
 	};
 
+	[[nodiscard]] inline ID3D11Resource*
+	GetD3D11Resource(const GpuView& a_view) noexcept
+	{
+		const auto* view = std::get_if<D3D11GpuView>(&a_view);
+		return view ? view->resource : nullptr;
+	}
+
+	[[nodiscard]] inline const D3D12GpuView*
+	GetD3D12View(const GpuView& a_view) noexcept
+	{
+		return std::get_if<D3D12GpuView>(&a_view);
+	}
+
 	class ISuperResolutionProvider
 	{
 	public:
 		virtual ~ISuperResolutionProvider() = default;
 		[[nodiscard]] virtual const char* Name() const noexcept = 0;
-		[[nodiscard]] virtual ProviderResult Initialize(
-			const SuperResolutionInitContext& a_context) = 0;
-		[[nodiscard]] virtual SuperResolutionSizeResult QueryRenderSize(
-			const SuperResolutionSizeRequest& a_request) = 0;
-		[[nodiscard]] virtual ProviderResult Record(
-			const SuperResolutionRequest& a_request) = 0;
+		[[nodiscard]] virtual ProviderResult
+		Initialize(const SuperResolutionInitContext& a_context) = 0;
+		[[nodiscard]] virtual SuperResolutionSizeResult
+		QueryRenderSize(const SuperResolutionSizeRequest& a_request) = 0;
+		[[nodiscard]] virtual ProviderResult
+		Record(const SuperResolutionRequest& a_request) = 0;
 		virtual void DestroyAfterDrain() noexcept = 0;
 	};
 
@@ -310,11 +332,10 @@ namespace cs::render::temporal
 
 	enum class PresentInputRetirementMode : std::uint8_t
 	{
-		// Provider owns completion and exposes only a conservative drain.
-		kProviderDrain,
 		// Borrowed inputs are consumed by the application's recorded command list.
 		kRecordedCommandList,
-		// Present submits the last reader to the application game queue before returning.
+		// Present submits the last reader to the application game queue before
+		// returning.
 		kSynchronousPresentQueue
 	};
 
@@ -323,49 +344,41 @@ namespace cs::render::temporal
 	public:
 		virtual ~IFrameGenerationProvider() = default;
 		[[nodiscard]] virtual const char* Name() const noexcept = 0;
-		[[nodiscard]] virtual ProviderResult PrepareDevice(
-			ID3D12Device** a_device) = 0;
-		[[nodiscard]] virtual ProviderResult PrepareFactory(
-			IDXGIFactory4** a_factory) = 0;
-		[[nodiscard]] virtual ProviderResult CreatePresentation(
-			const PresentationCreateContext& a_context,
+		[[nodiscard]] virtual ProviderResult
+		PrepareDevice(ID3D12Device** a_device) = 0;
+		[[nodiscard]] virtual ProviderResult
+		PrepareFactory(IDXGIFactory4** a_factory) = 0;
+		[[nodiscard]] virtual ProviderResult
+		CreatePresentation(const PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) = 0;
-		[[nodiscard]] virtual ProviderResult CreateDisplayResources(
-			std::uint32_t a_width,
-			std::uint32_t a_height,
-			DXGI_FORMAT a_format,
-			std::uint32_t a_bufferCount) = 0;
-		[[nodiscard]] virtual ProviderResult PrepareFrame(
-			const FrameGenerationRequest& a_request) = 0;
-		[[nodiscard]] virtual ProviderResult CancelFrame(
-			const FrameGenerationRequest& a_request) = 0;
+		[[nodiscard]] virtual ProviderResult
+		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
+			DXGI_FORMAT a_format, std::uint32_t a_bufferCount) = 0;
+		[[nodiscard]] virtual ProviderResult
+		PrepareFrame(const FrameGenerationRequest& a_request) = 0;
+		[[nodiscard]] virtual ProviderResult
+		CancelFrame(const FrameGenerationRequest& a_request) = 0;
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
 		[[nodiscard]] virtual PresentInputRetirementMode
-			GetPresentInputRetirementMode() const noexcept
-		{
-			return PresentInputRetirementMode::kProviderDrain;
-		}
-		[[nodiscard]] virtual ProviderResult AcquirePresentInputs() = 0;
-		[[nodiscard]] virtual ProviderResult CollectPresentStatus(
-			UINT a_presentFlags,
-			HRESULT a_presentResult) = 0;
+		GetPresentInputRetirementMode() const noexcept = 0;
+		[[nodiscard]] virtual ProviderResult
+		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
 		[[nodiscard]] virtual std::optional<std::uint32_t>
-			ConsumeGeneratedFrameCount() noexcept
+		ConsumeGeneratedFrameCount() noexcept
 		{
 			return std::nullopt;
 		}
 		[[nodiscard]] virtual std::optional<std::uint32_t>
-			ConsumePresentedFrameCount() noexcept
+		ConsumePresentedFrameCount() noexcept
 		{
 			return std::nullopt;
 		}
 		[[nodiscard]] virtual ProviderResult Sleep(std::uint32_t a_frame) = 0;
-		[[nodiscard]] virtual ProviderResult SetLatencyMarker(
-			LatencyMarker a_marker,
-			std::uint32_t a_frame) = 0;
+		[[nodiscard]] virtual ProviderResult
+		SetLatencyMarker(LatencyMarker a_marker, std::uint32_t a_frame) = 0;
 		[[nodiscard]] virtual ProviderResult Quiesce() = 0;
 		[[nodiscard]] virtual ProviderResult ReleaseDisplayResources() noexcept = 0;
 		[[nodiscard]] virtual ProviderResult DestroyAfterDrain() noexcept = 0;
 		[[nodiscard]] virtual bool IsReady() const noexcept = 0;
 	};
-}
+}  // namespace cs::render::temporal

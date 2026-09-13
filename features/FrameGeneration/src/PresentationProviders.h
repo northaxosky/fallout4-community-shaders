@@ -7,45 +7,43 @@ namespace cs::features
 	class FidelityFX;
 	class Streamline;
 
-	class FidelityFXPresentation final :
-		public render::temporal::IFrameGenerationProvider
+	class FidelityFXPresentation final : public render::temporal::IFrameGenerationProvider
 	{
 	public:
 		explicit FidelityFXPresentation(FidelityFX& a_runtime) noexcept;
 
 		[[nodiscard]] const char* Name() const noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult PrepareDevice(
-			ID3D12Device** a_device) override;
-		[[nodiscard]] render::temporal::ProviderResult PrepareFactory(
-			IDXGIFactory4** a_factory) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		PrepareDevice(ID3D12Device** a_device) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		PrepareFactory(IDXGIFactory4** a_factory) override;
 		[[nodiscard]] render::temporal::ProviderResult CreatePresentation(
 			const render::temporal::PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) override;
-		[[nodiscard]] render::temporal::ProviderResult CreateDisplayResources(
-			std::uint32_t a_width,
-			std::uint32_t a_height,
+		[[nodiscard]] render::temporal::ProviderResult
+		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			DXGI_FORMAT a_format,
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult CancelFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
-		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
-			bool a_enabled) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		SetGenerationEnabled(bool a_enabled) override;
 		[[nodiscard]] render::temporal::PresentInputRetirementMode
-			GetPresentInputRetirementMode() const noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
-		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
-			UINT a_presentFlags,
-			HRESULT a_presentResult) override;
-		[[nodiscard]] render::temporal::ProviderResult Sleep(
-			std::uint32_t a_frame) override;
-		[[nodiscard]] render::temporal::ProviderResult SetLatencyMarker(
-			render::temporal::LatencyMarker a_marker,
+		GetPresentInputRetirementMode() const noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		Sleep(std::uint32_t a_frame) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		SetLatencyMarker(render::temporal::LatencyMarker a_marker,
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult Quiesce() override;
-		[[nodiscard]] render::temporal::ProviderResult ReleaseDisplayResources() noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		ReleaseDisplayResources() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		DestroyAfterDrain() noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
@@ -55,47 +53,47 @@ namespace cs::features
 		bool _enabled = false;
 	};
 
-	class StreamlinePresentation final :
-		public render::temporal::IFrameGenerationProvider
+	class StreamlinePresentation final : public render::temporal::IFrameGenerationProvider
 	{
 	public:
 		explicit StreamlinePresentation(Streamline& a_runtime) noexcept;
 
 		[[nodiscard]] const char* Name() const noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult PrepareDevice(
-			ID3D12Device** a_device) override;
-		[[nodiscard]] render::temporal::ProviderResult PrepareFactory(
-			IDXGIFactory4** a_factory) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		PrepareDevice(ID3D12Device** a_device) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		PrepareFactory(IDXGIFactory4** a_factory) override;
 		[[nodiscard]] render::temporal::ProviderResult CreatePresentation(
 			const render::temporal::PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) override;
-		[[nodiscard]] render::temporal::ProviderResult CreateDisplayResources(
-			std::uint32_t a_width,
-			std::uint32_t a_height,
+		[[nodiscard]] render::temporal::ProviderResult
+		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			DXGI_FORMAT a_format,
 			std::uint32_t a_bufferCount) override;
 		[[nodiscard]] render::temporal::ProviderResult PrepareFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult CancelFrame(
 			const render::temporal::FrameGenerationRequest& a_request) override;
-		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
-			bool a_enabled) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		SetGenerationEnabled(bool a_enabled) override;
 		[[nodiscard]] render::temporal::PresentInputRetirementMode
-			GetPresentInputRetirementMode() const noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
-		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
-			UINT a_presentFlags,
-			HRESULT a_presentResult) override;
-		[[nodiscard]] std::optional<std::uint32_t> ConsumeGeneratedFrameCount() noexcept override;
-		[[nodiscard]] std::optional<std::uint32_t> ConsumePresentedFrameCount() noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult Sleep(
-			std::uint32_t a_frame) override;
-		[[nodiscard]] render::temporal::ProviderResult SetLatencyMarker(
-			render::temporal::LatencyMarker a_marker,
+		GetPresentInputRetirementMode() const noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) override;
+		[[nodiscard]] std::optional<std::uint32_t>
+		ConsumeGeneratedFrameCount() noexcept override;
+		[[nodiscard]] std::optional<std::uint32_t>
+		ConsumePresentedFrameCount() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		Sleep(std::uint32_t a_frame) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		SetLatencyMarker(render::temporal::LatencyMarker a_marker,
 			std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult Quiesce() override;
-		[[nodiscard]] render::temporal::ProviderResult ReleaseDisplayResources() noexcept override;
-		[[nodiscard]] render::temporal::ProviderResult DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		ReleaseDisplayResources() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		DestroyAfterDrain() noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
@@ -108,4 +106,4 @@ namespace cs::features
 		bool _ready = false;
 	};
 
-}
+}  // namespace cs::features

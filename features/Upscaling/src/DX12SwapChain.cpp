@@ -1,8 +1,8 @@
 #include "DX12SwapChain.h"
 #include "DXGISwapChainFacadeContract.h"
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <exception>
@@ -22,8 +22,7 @@ namespace cs::features
 	{
 		auto* L = cs::log::Get("cs.feature.upscaling.dx12swapchain");
 
-		D3D12_RESOURCE_BARRIER Transition(
-			ID3D12Resource* a_resource,
+		D3D12_RESOURCE_BARRIER Transition(ID3D12Resource* a_resource,
 			D3D12_RESOURCE_STATES a_before,
 			D3D12_RESOURCE_STATES a_after)
 		{
@@ -35,13 +34,11 @@ namespace cs::features
 			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 			return barrier;
 		}
-	}
+	}  // namespace
 
 	std::unique_ptr<SharedD3D11D3D12Texture> SharedD3D11D3D12Texture::Create(
-		ID3D11Device5* a_device11,
-		ID3D12Device* a_device12,
-		const D3D11_TEXTURE2D_DESC& a_desc,
-		std::string_view a_name)
+		ID3D11Device5* a_device11, ID3D12Device* a_device12,
+		const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name)
 	{
 		if (!a_device11 || !a_device12 || !a_desc.Width || !a_desc.Height) {
 			return nullptr;
@@ -49,69 +46,69 @@ namespace cs::features
 
 		auto result = std::make_unique<SharedD3D11D3D12Texture>();
 		auto desc = a_desc;
-		desc.MiscFlags |= D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
+		desc.MiscFlags |=
+			D3D11_RESOURCE_MISC_SHARED | D3D11_RESOURCE_MISC_SHARED_NTHANDLE;
 		const auto check = [&](HRESULT a_result, const char* a_step) {
 			if (FAILED(a_result)) {
-				L->error("Shared texture {} failed at {}: {}x{} format={} bind={:#x} misc={:#x} hr={:#010x}",
-					a_name, a_step, desc.Width, desc.Height, static_cast<unsigned>(desc.Format),
-					desc.BindFlags, desc.MiscFlags, static_cast<std::uint32_t>(a_result));
+				L->error(
+					"Shared texture {} failed at {}: {}x{} format={} bind={:#x} "
+					"misc={:#x} hr={:#010x}",
+					a_name, a_step, desc.Width, desc.Height,
+					static_cast<unsigned>(desc.Format), desc.BindFlags,
+					desc.MiscFlags, static_cast<std::uint32_t>(a_result));
 			}
 			DX::ThrowIfFailed(a_result);
 		};
-		check(a_device11->CreateTexture2D(&desc, nullptr, result->texture11.put()), "CreateTexture2D");
+		check(a_device11->CreateTexture2D(&desc, nullptr, result->texture11.put()),
+			"CreateTexture2D");
 
 		winrt::com_ptr<IDXGIResource1> dxgiResource;
-		DX::ThrowIfFailed(result->texture11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
+		DX::ThrowIfFailed(
+			result->texture11->QueryInterface(IID_PPV_ARGS(dxgiResource.put())));
 		HANDLE sharedHandle = nullptr;
 		DX::ThrowIfFailed(dxgiResource->CreateSharedHandle(
-			nullptr,
-			DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE,
-			nullptr,
+			nullptr, DXGI_SHARED_RESOURCE_READ | DXGI_SHARED_RESOURCE_WRITE, nullptr,
 			&sharedHandle));
-		const HRESULT openResult =
-			a_device12->OpenSharedHandle(sharedHandle, IID_PPV_ARGS(result->resource12.put()));
+		const HRESULT openResult = a_device12->OpenSharedHandle(
+			sharedHandle, IID_PPV_ARGS(result->resource12.put()));
 		CloseHandle(sharedHandle);
 		check(openResult, "OpenSharedHandle");
 
 		if (desc.BindFlags & D3D11_BIND_SHADER_RESOURCE) {
-			DX::ThrowIfFailed(
-				a_device11->CreateShaderResourceView(result->texture11.get(), nullptr, result->srv11.put()));
+			DX::ThrowIfFailed(a_device11->CreateShaderResourceView(
+				result->texture11.get(), nullptr, result->srv11.put()));
 		}
 		if (desc.BindFlags & D3D11_BIND_UNORDERED_ACCESS) {
-			DX::ThrowIfFailed(
-				a_device11->CreateUnorderedAccessView(result->texture11.get(), nullptr, result->uav11.put()));
+			DX::ThrowIfFailed(a_device11->CreateUnorderedAccessView(
+				result->texture11.get(), nullptr, result->uav11.put()));
 		}
 		if (desc.BindFlags & D3D11_BIND_RENDER_TARGET) {
-			DX::ThrowIfFailed(
-				a_device11->CreateRenderTargetView(result->texture11.get(), nullptr, result->rtv11.put()));
+			DX::ThrowIfFailed(a_device11->CreateRenderTargetView(
+				result->texture11.get(), nullptr, result->rtv11.put()));
 		}
-		cs::render::annotation::SetName(
-			result->texture11.get(), std::string(a_name) + ".Texture11");
-		cs::render::annotation::SetName(
-			result->srv11.get(), std::string(a_name) + ".SRV");
-		cs::render::annotation::SetName(
-			result->uav11.get(), std::string(a_name) + ".UAV");
-		cs::render::annotation::SetName(
-			result->rtv11.get(), std::string(a_name) + ".RTV");
-		cs::render::annotation::SetName(
-			result->resource12.get(), std::string(a_name) + ".Resource12");
+		cs::render::annotation::SetName(result->texture11.get(),
+			std::string(a_name) + ".Texture11");
+		cs::render::annotation::SetName(result->srv11.get(),
+			std::string(a_name) + ".SRV");
+		cs::render::annotation::SetName(result->uav11.get(),
+			std::string(a_name) + ".UAV");
+		cs::render::annotation::SetName(result->rtv11.get(),
+			std::string(a_name) + ".RTV");
+		cs::render::annotation::SetName(result->resource12.get(),
+			std::string(a_name) + ".Resource12");
 		return result;
 	}
 
-	DX12SwapChain::~DX12SwapChain()
-	{
-		(void)Rollback();
-	}
+	DX12SwapChain::~DX12SwapChain() { (void)Rollback(); }
 
 	HRESULT DX12SwapChain::Initialize(
-		IDXGIAdapter* a_adapter,
-		ID3D11Device* a_device,
-		ID3D11DeviceContext* a_context,
-		const DXGI_SWAP_CHAIN_DESC& a_desc,
+		IDXGIAdapter* a_adapter, ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context, const DXGI_SWAP_CHAIN_DESC& a_desc,
 		render::temporal::IFrameGenerationProvider& a_provider,
 		TemporalPresentationCallbacks a_callbacks)
 	{
-		if (_published || !a_device || !a_context || !a_desc.OutputWindow || !a_desc.Windowed ||
+		if (_published || !a_device || !a_context || !a_desc.OutputWindow ||
+			!a_desc.Windowed ||
 			(a_desc.BufferDesc.Format != DXGI_FORMAT_UNKNOWN &&
 				a_desc.BufferDesc.Format != DXGI_FORMAT_R8G8B8A8_UNORM)) {
 			return E_INVALIDARG;
@@ -143,7 +140,8 @@ namespace cs::features
 			result = RecreateDisplayResources(_innerDesc.Width, _innerDesc.Height);
 		}
 		if (SUCCEEDED(result)) {
-			result = RecreateFrameGenerationResources(_innerDesc.Width, _innerDesc.Height);
+			result =
+				RecreateFrameGenerationResources(_innerDesc.Width, _innerDesc.Height);
 		}
 		if (SUCCEEDED(result) && _frameGenerationDisabled) {
 			result = E_FAIL;
@@ -159,11 +157,8 @@ namespace cs::features
 		_proxy.attach(new DXGISwapChainProxy(*this, *_swapChain));
 		_published = true;
 		ClearSharedBuffers();
-		L->info(
-			"Published D3D11-facing {} proxy at {}x{} R8G8B8A8_UNORM",
-			_provider->Name(),
-			_innerDesc.Width,
-			_innerDesc.Height);
+		L->info("Published D3D11-facing {} proxy at {}x{} R8G8B8A8_UNORM",
+			_provider->Name(), _innerDesc.Width, _innerDesc.Height);
 		return S_OK;
 	}
 
@@ -173,26 +168,21 @@ namespace cs::features
 			_callbacks.clearCapture();
 		}
 		if (_provider) {
-			const auto release = render::temporal::QuiesceDrainAndRelease(
-				*_provider,
-				[&]() {
-					if (!_context11 || !_fence11 || !_queue ||
-						!_fence12 || !_fenceEvent) {
+			const auto release =
+				render::temporal::QuiesceDrainAndRelease(*_provider, [&]() {
+					if (!_context11 || !_fence11 || !_queue || !_fence12 ||
+						!_fenceEvent) {
 						return true;
 					}
 					const UINT64 d3d11Idle = _nextFenceValue++;
-					return SUCCEEDED(_context11->Signal(
-							   _fence11.get(), d3d11Idle)) &&
-						SUCCEEDED(_queue->Wait(
-							_fence12.get(), d3d11Idle)) &&
-						SUCCEEDED(WaitForGpu());
+					return SUCCEEDED(_context11->Signal(_fence11.get(), d3d11Idle)) &&
+				           SUCCEEDED(_queue->Wait(_fence12.get(), d3d11Idle)) &&
+				           SUCCEEDED(WaitForGpu());
 				});
 			RecordGlobalDrain("teardown", release);
 			if (!release.Succeeded()) {
 				DisableFrameGeneration(
-					release.message.empty()
-						? "Frame-generation display resources could not be released"
-						: release.message.c_str());
+					release.message.empty() ? "Frame-generation display resources could not be released" : release.message.c_str());
 				return E_FAIL;
 			}
 		}
@@ -200,9 +190,7 @@ namespace cs::features
 			const auto destroy = _provider->DestroyAfterDrain();
 			if (!destroy.Succeeded()) {
 				DisableFrameGeneration(
-					destroy.message.empty()
-						? "Frame-generation provider destruction failed"
-						: destroy.message.c_str());
+					destroy.message.empty() ? "Frame-generation provider destruction failed" : destroy.message.c_str());
 				return E_FAIL;
 			}
 		}
@@ -253,20 +241,15 @@ namespace cs::features
 		_preparedRealFrame = 0;
 		_inputResourceGeneration = 0;
 		render::temporal::ResetPresentationProtocol(
-			_allocatorFenceValues,
-			_inputReuseGate,
-			_frameSlot,
-			_presentPrepared,
-			_preparedFrameGeneration,
-			_vendorConsumptionPossible,
+			_allocatorFenceValues, _inputReuseGate, _frameSlot, _presentPrepared,
+			_preparedFrameGeneration, _vendorConsumptionPossible,
 			_preparedTransaction);
 		_published = false;
 		_bridgeReady = false;
 		return S_OK;
 	}
 
-	HRESULT DX12SwapChain::CreateDevices(
-		IDXGIAdapter* a_adapter,
+	HRESULT DX12SwapChain::CreateDevices(IDXGIAdapter* a_adapter,
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context)
 	{
@@ -282,56 +265,47 @@ namespace cs::features
 			DX::ThrowIfFailed(a_device->QueryInterface(IID_PPV_ARGS(dxgiDevice.put())));
 			DX::ThrowIfFailed(dxgiDevice->GetAdapter(actualAdapter.put()));
 		}
-		DX::ThrowIfFailed(D3D12CreateDevice(
-			actualAdapter.get(),
+		DX::ThrowIfFailed(D3D12CreateDevice(actualAdapter.get(),
 			D3D_FEATURE_LEVEL_12_0,
 			IID_PPV_ARGS(_device12.put())));
 		if (_provider) {
 			ID3D12Device* preparedDevice = _device12.detach();
-			const auto prepareDeviceResult =
-				_provider->PrepareDevice(&preparedDevice);
+			const auto prepareDeviceResult = _provider->PrepareDevice(&preparedDevice);
 			_device12.attach(preparedDevice);
 			if (!prepareDeviceResult.Succeeded() || !_device12) {
-				return prepareDeviceResult.sdkResult
-					? static_cast<HRESULT>(prepareDeviceResult.sdkResult)
-					: E_FAIL;
+				return prepareDeviceResult.sdkResult ? static_cast<HRESULT>(prepareDeviceResult.sdkResult) : E_FAIL;
 			}
 		}
-		cs::render::annotation::SetName(
-			_device12.get(), "Upscaling/FrameGeneration.Device");
+		cs::render::annotation::SetName(_device12.get(),
+			"Upscaling/FrameGeneration.Device");
 
 		D3D12_COMMAND_QUEUE_DESC queueDesc{};
 		queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
-		DX::ThrowIfFailed(_device12->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(_queue.put())));
-		cs::render::annotation::SetName(
-			_queue.get(), "Upscaling/FrameGeneration.CommandQueue");
+		DX::ThrowIfFailed(
+			_device12->CreateCommandQueue(&queueDesc, IID_PPV_ARGS(_queue.put())));
+		cs::render::annotation::SetName(_queue.get(),
+			"Upscaling/FrameGeneration.CommandQueue");
 		for (UINT index = 0; index < 2; ++index) {
 			DX::ThrowIfFailed(_device12->CreateCommandAllocator(
 				D3D12_COMMAND_LIST_TYPE_DIRECT,
 				IID_PPV_ARGS(_allocators[index].put())));
 			DX::ThrowIfFailed(_device12->CreateCommandList(
-				0,
-				D3D12_COMMAND_LIST_TYPE_DIRECT,
-				_allocators[index].get(),
-				nullptr,
+				0, D3D12_COMMAND_LIST_TYPE_DIRECT, _allocators[index].get(), nullptr,
 				IID_PPV_ARGS(_commandLists[index].put())));
 			DX::ThrowIfFailed(_commandLists[index]->Close());
 			cs::render::annotation::SetName(
 				_allocators[index].get(),
-				std::format(
-					"Upscaling/FrameGenerationAllocator[{}].CommandAllocator",
+				std::format("Upscaling/FrameGenerationAllocator[{}].CommandAllocator",
 					index));
 			cs::render::annotation::SetName(
 				_commandLists[index].get(),
-				std::format(
-					"Upscaling/FrameGenerationCommandList[{}].CommandList",
+				std::format("Upscaling/FrameGenerationCommandList[{}].CommandList",
 					index));
 		}
 		return S_OK;
 	}
 
-	HRESULT DX12SwapChain::CreateSwapChain(
-		IDXGIAdapter* a_adapter,
+	HRESULT DX12SwapChain::CreateSwapChain(IDXGIAdapter* a_adapter,
 		const DXGI_SWAP_CHAIN_DESC& a_desc)
 	{
 		if (!a_adapter || !_provider) {
@@ -340,13 +314,10 @@ namespace cs::features
 		winrt::com_ptr<IDXGIFactory4> factory;
 		DX::ThrowIfFailed(a_adapter->GetParent(IID_PPV_ARGS(factory.put())));
 		IDXGIFactory4* preparedFactory = factory.detach();
-		const auto prepareFactoryResult =
-			_provider->PrepareFactory(&preparedFactory);
+		const auto prepareFactoryResult = _provider->PrepareFactory(&preparedFactory);
 		factory.attach(preparedFactory);
 		if (!prepareFactoryResult.Succeeded() || !factory) {
-			return prepareFactoryResult.sdkResult
-				? static_cast<HRESULT>(prepareFactoryResult.sdkResult)
-				: E_FAIL;
+			return prepareFactoryResult.sdkResult ? static_cast<HRESULT>(prepareFactoryResult.sdkResult) : E_FAIL;
 		}
 
 		_innerDesc = {};
@@ -357,8 +328,10 @@ namespace cs::features
 			if (!GetClientRect(a_desc.OutputWindow, &client)) {
 				return HRESULT_FROM_WIN32(GetLastError());
 			}
-			_innerDesc.Width = static_cast<UINT>(std::max<LONG>(client.right - client.left, 1));
-			_innerDesc.Height = static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1));
+			_innerDesc.Width =
+				static_cast<UINT>(std::max<LONG>(client.right - client.left, 1));
+			_innerDesc.Height =
+				static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1));
 		}
 		_innerDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
 		_innerDesc.SampleDesc.Count = 1;
@@ -366,73 +339,55 @@ namespace cs::features
 		_innerDesc.BufferCount = 2;
 		_innerDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
 		_innerDesc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
-		_innerDesc.Flags = a_desc.Flags &
-			(DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING | DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
+		_innerDesc.Flags =
+			a_desc.Flags & (DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING |
+							   DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT);
 
 		IDXGISwapChain4* swapChain = nullptr;
-		const auto providerResult = _provider->CreatePresentation(
-			{
-				.adapter = a_adapter,
-				.device = _device12.get(),
-				.queue = _queue.get(),
-				.factory = factory.get(),
-				.window = a_desc.OutputWindow,
-				.description = &_innerDesc
-			},
-			&swapChain);
-		const HRESULT result = providerResult.Succeeded()
-			? S_OK
-			: providerResult.sdkResult
-				? static_cast<HRESULT>(providerResult.sdkResult)
-				: E_FAIL;
+		const auto providerResult =
+			_provider->CreatePresentation({ .adapter = a_adapter,
+											  .device = _device12.get(),
+											  .queue = _queue.get(),
+											  .factory = factory.get(),
+											  .window = a_desc.OutputWindow,
+											  .description = &_innerDesc },
+				&swapChain);
+		const HRESULT result = providerResult.Succeeded() ? S_OK : providerResult.sdkResult ? static_cast<HRESULT>(providerResult.sdkResult) :
+		                                                                                      E_FAIL;
 		if (SUCCEEDED(result) && swapChain) {
 			_swapChain.attach(swapChain);
 			_frameIndex = _swapChain->GetCurrentBackBufferIndex();
-			_proxyDesc = swap_chain_facade::BuildDescription(
-				a_desc, _innerDesc);
+			_proxyDesc = swap_chain_facade::BuildDescription(a_desc, _innerDesc);
 		}
 		return result;
 	}
 
 	HRESULT DX12SwapChain::CreateInteropFence()
 	{
-		DX::ThrowIfFailed(_device12->CreateFence(
-			0,
-			D3D12_FENCE_FLAG_SHARED,
+		DX::ThrowIfFailed(_device12->CreateFence(0, D3D12_FENCE_FLAG_SHARED,
 			IID_PPV_ARGS(_fence12.put())));
-		cs::render::annotation::SetName(
-			_fence12.get(), "Upscaling/FrameGeneration.Fence12");
+		cs::render::annotation::SetName(_fence12.get(),
+			"Upscaling/FrameGeneration.Fence12");
 		HANDLE sharedHandle = nullptr;
 		DX::ThrowIfFailed(_device12->CreateSharedHandle(
-			_fence12.get(),
-			nullptr,
-			GENERIC_ALL,
-			nullptr,
-			&sharedHandle));
+			_fence12.get(), nullptr, GENERIC_ALL, nullptr, &sharedHandle));
 		const HRESULT openResult =
 			_device11->OpenSharedFence(sharedHandle, IID_PPV_ARGS(_fence11.put()));
 		CloseHandle(sharedHandle);
 		DX::ThrowIfFailed(openResult);
-		cs::render::annotation::SetName(
-			_fence11.get(), "Upscaling/FrameGeneration.Fence11");
+		cs::render::annotation::SetName(_fence11.get(),
+			"Upscaling/FrameGeneration.Fence11");
 		DX::ThrowIfFailed(_device12->CreateFence(
-			0,
-			D3D12_FENCE_FLAG_SHARED,
-			IID_PPV_ARGS(_inputRetirementFence12.put())));
+			0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(_inputRetirementFence12.put())));
 		cs::render::annotation::SetName(
 			_inputRetirementFence12.get(),
 			"Upscaling/FrameGeneration.InputRetirementFence12");
 		sharedHandle = nullptr;
-		DX::ThrowIfFailed(_device12->CreateSharedHandle(
-			_inputRetirementFence12.get(),
-			nullptr,
-			GENERIC_ALL,
-			nullptr,
+		DX::ThrowIfFailed(_device12->CreateSharedHandle(_inputRetirementFence12.get(),
+			nullptr, GENERIC_ALL, nullptr,
 			&sharedHandle));
-		const HRESULT openRetirementResult =
-			_device11->OpenSharedFence(
-				sharedHandle,
-				IID_PPV_ARGS(_inputRetirementFence11.put()));
+		const HRESULT openRetirementResult = _device11->OpenSharedFence(
+			sharedHandle, IID_PPV_ARGS(_inputRetirementFence11.put()));
 		CloseHandle(sharedHandle);
 		DX::ThrowIfFailed(openRetirementResult);
 		cs::render::annotation::SetName(
@@ -443,8 +398,7 @@ namespace cs::features
 	}
 
 	HRESULT DX12SwapChain::CreateDisplayResources(
-		UINT a_width,
-		UINT a_height,
+		UINT a_width, UINT a_height,
 		std::unique_ptr<SharedD3D11D3D12Texture>& a_proxy,
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2>& a_hudless)
 	{
@@ -460,10 +414,10 @@ namespace cs::features
 		auto proxy = SharedD3D11D3D12Texture::Create(
 			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationProxy");
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless{
-			SharedD3D11D3D12Texture::Create(
-				_device11.get(), _device12.get(), desc, "Upscaling/HUDLess[0]"),
-			SharedD3D11D3D12Texture::Create(
-				_device11.get(), _device12.get(), desc, "Upscaling/HUDLess[1]")
+			SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc,
+				"Upscaling/HUDLess[0]"),
+			SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc,
+				"Upscaling/HUDLess[1]")
 		};
 		if (!proxy || !hudless[0] || !hudless[1]) {
 			return E_OUTOFMEMORY;
@@ -477,7 +431,8 @@ namespace cs::features
 	{
 		std::unique_ptr<SharedD3D11D3D12Texture> proxy;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> hudless;
-		const HRESULT result = CreateDisplayResources(a_width, a_height, proxy, hudless);
+		const HRESULT result =
+			CreateDisplayResources(a_width, a_height, proxy, hudless);
 		if (FAILED(result)) {
 			return result;
 		}
@@ -486,7 +441,8 @@ namespace cs::features
 		return S_OK;
 	}
 
-	HRESULT DX12SwapChain::RecreateFrameGenerationResources(UINT a_width, UINT a_height)
+	HRESULT DX12SwapChain::RecreateFrameGenerationResources(UINT a_width,
+		UINT a_height)
 	{
 		_frameGenerationInputsReady = false;
 		_frameGenerationDisabled = false;
@@ -498,44 +454,45 @@ namespace cs::features
 		desc.SampleDesc.Count = 1;
 		desc.Usage = D3D11_USAGE_DEFAULT;
 		desc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS |
-			D3D11_BIND_RENDER_TARGET;
+		                 D3D11_BIND_RENDER_TARGET;
 
 		desc.Format = DXGI_FORMAT_R32_FLOAT;
 		auto depth = SharedD3D11D3D12Texture::Create(
 			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationDepth");
 		desc.Format = DXGI_FORMAT_R16G16_FLOAT;
-		auto motion = SharedD3D11D3D12Texture::Create(
-			_device11.get(), _device12.get(), desc, "Upscaling/FrameGenerationMotion");
+		auto motion =
+			SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(), desc,
+				"Upscaling/FrameGenerationMotion");
 		if (!depth || !motion) {
 			_depthBuffer.reset();
 			_motionBuffer.reset();
 			_frameGenerationDisabled = true;
 			L->error(
-				"Frame-generation bridge inputs were not recreated after the native resize");
+				"Frame-generation bridge inputs were not recreated after the "
+				"native resize");
 			return E_OUTOFMEMORY;
 		}
 
 		_depthBuffer = std::move(depth);
 		_motionBuffer = std::move(motion);
 		++_inputResourceGeneration;
-		const auto providerResult = _provider
-			? _provider->CreateDisplayResources(
-				a_width,
-				a_height,
-				DXGI_FORMAT_R8G8B8A8_UNORM,
-				_innerDesc.BufferCount)
-			: render::temporal::ProviderResult{};
+		const auto providerResult =
+			_provider ? _provider->CreateDisplayResources(a_width, a_height,
+							DXGI_FORMAT_R8G8B8A8_UNORM,
+							_innerDesc.BufferCount) :
+						render::temporal::ProviderResult{};
 		if (!providerResult.Succeeded()) {
 			_frameGenerationDisabled = true;
 			L->error(
-				"Frame-generation provider resources were not recreated; real-frame presentation remains active");
+				"Frame-generation provider resources were not recreated; "
+				"real-frame presentation remains active");
 			return S_FALSE;
 		}
 		return S_OK;
 	}
 
-	HRESULT DX12SwapChain::RestoreFrameGenerationProvider(
-		UINT a_width, UINT a_height)
+	HRESULT DX12SwapChain::RestoreFrameGenerationProvider(UINT a_width,
+		UINT a_height)
 	{
 		_frameGenerationInputsReady = false;
 		if (!_provider) {
@@ -550,10 +507,7 @@ namespace cs::features
 		const auto result = render::temporal::RestoreProviderAfterResize(
 			*_provider, S_OK, description, description);
 		if (!result.Succeeded()) {
-			DisableFrameGeneration(
-				result.message.empty()
-					? "Frame-generation provider restoration failed"
-					: result.message.c_str());
+			DisableFrameGeneration(result.message.empty() ? "Frame-generation provider restoration failed" : result.message.c_str());
 			return S_FALSE;
 		}
 		_frameGenerationDisabled = false;
@@ -561,15 +515,13 @@ namespace cs::features
 	}
 
 	HRESULT DX12SwapChain::RecreateSuperResolutionBridge(
-		const SuperResolutionExecutionContext& a_context)
+		const render::temporal::SuperResolutionRequest& a_request)
 	{
 		try {
-			const auto createLike = [&](ID3D11Resource* a_source,
-									   UINT a_bindFlags,
-									   std::string_view a_name) {
+			const auto createLike = [&](ID3D11Resource* a_source, UINT a_bindFlags,
+										std::string_view a_name) {
 				winrt::com_ptr<ID3D11Texture2D> texture;
-				DX::ThrowIfFailed(a_source->QueryInterface(
-					IID_PPV_ARGS(texture.put())));
+				DX::ThrowIfFailed(a_source->QueryInterface(IID_PPV_ARGS(texture.put())));
 				D3D11_TEXTURE2D_DESC desc{};
 				texture->GetDesc(&desc);
 				desc.Usage = D3D11_USAGE_DEFAULT;
@@ -579,39 +531,44 @@ namespace cs::features
 				desc.ArraySize = 1;
 				desc.MipLevels = 1;
 				desc.SampleDesc = { 1, 0 };
-				return SharedD3D11D3D12Texture::Create(
-					_device11.get(), _device12.get(), desc, a_name);
+				return SharedD3D11D3D12Texture::Create(_device11.get(), _device12.get(),
+					desc, a_name);
 			};
 
-			_srColorInput = createLike(
-				a_context.colorInput, 0, "DLSSBridge.ColorInput");
-			_srOutput = createLike(
-				a_context.privateOutput,
-				D3D11_BIND_UNORDERED_ACCESS,
-				"DLSSBridge.Output");
-			_srDepth = createLike(
-				a_context.depth, 0, "DLSSBridge.Depth");
-			_srMotion = createLike(
-				a_context.motionVectors, 0, "DLSSBridge.Motion");
-			_srReactive = createLike(
-				a_context.reactiveMask, 0, "DLSSBridge.Reactive");
-			_srTransparency = createLike(
-				a_context.transparencyCompositionMask,
-				0,
-				"DLSSBridge.Transparency");
-			if (!_srColorInput || !_srOutput || !_srDepth || !_srMotion ||
-				!_srReactive || !_srTransparency) {
-				return E_FAIL;
-			}
-			return S_OK;
+			auto colorInput =
+				createLike(render::temporal::GetD3D11Resource(a_request.colorInput), 0,
+					"DLSSBridge.ColorInput");
+			auto output =
+				createLike(render::temporal::GetD3D11Resource(a_request.privateOutput),
+					D3D11_BIND_UNORDERED_ACCESS, "DLSSBridge.Output");
+			auto depth = createLike(render::temporal::GetD3D11Resource(a_request.depth),
+				0, "DLSSBridge.Depth");
+			auto motion =
+				createLike(render::temporal::GetD3D11Resource(a_request.motionVectors),
+					0, "DLSSBridge.Motion");
+			auto reactive =
+				createLike(render::temporal::GetD3D11Resource(a_request.reactiveMask),
+					0, "DLSSBridge.Reactive");
+			auto transparency = createLike(render::temporal::GetD3D11Resource(
+											   a_request.transparencyCompositionMask),
+				0, "DLSSBridge.Transparency");
+			return render::temporal::CommitAfterGpuDrain(
+				colorInput && output && depth && motion && reactive && transparency,
+				[this] { return WaitForGpu(); },
+				[&] {
+					_srColorInput = std::move(colorInput);
+					_srOutput = std::move(output);
+					_srDepth = std::move(depth);
+					_srMotion = std::move(motion);
+					_srReactive = std::move(reactive);
+					_srTransparency = std::move(transparency);
+				});
 		} catch (const winrt::hresult_error& e) {
-			L->error(
-				"Could not create D3D12 super-resolution bridge resources: {}",
+			L->error("Could not create D3D12 super-resolution bridge resources: {}",
 				winrt::to_string(e.message()));
 			return e.code();
 		} catch (const std::exception& e) {
-			L->error(
-				"Could not create D3D12 super-resolution bridge resources: {}",
+			L->error("Could not create D3D12 super-resolution bridge resources: {}",
 				e.what());
 			return E_FAIL;
 		}
@@ -656,11 +613,10 @@ namespace cs::features
 	bool DX12SwapChain::IsReady() const noexcept
 	{
 		return _published && _swapChain && _proxyBuffer && _context11 && _queue &&
-			_fence11 && _fence12 && _inputRetirementFence11 &&
-			_inputRetirementFence12 && _fenceEvent &&
-			_allocators[0] && _allocators[1] &&
-			_commandLists[0] && _commandLists[1] &&
-			_backBuffers[0] && _backBuffers[1];
+		       _fence11 && _fence12 && _inputRetirementFence11 &&
+		       _inputRetirementFence12 && _fenceEvent && _allocators[0] &&
+		       _allocators[1] && _commandLists[0] && _commandLists[1] &&
+		       _backBuffers[0] && _backBuffers[1];
 	}
 
 	bool DX12SwapChain::IsBridgeReady() const noexcept
@@ -671,31 +627,19 @@ namespace cs::features
 	bool DX12SwapChain::IsFrameGenerationReady() const noexcept
 	{
 		return IsReady() && !_frameGenerationDisabled && _provider &&
-			_provider->IsReady() &&
-			_hudlessBuffers[0] && _hudlessBuffers[1] &&
-			_depthBuffer && _motionBuffer;
+		       _provider->IsReady() && _hudlessBuffers[0] && _hudlessBuffers[1] &&
+		       _depthBuffer && _motionBuffer;
 	}
 
-	UINT DX12SwapChain::GetWidth() const noexcept
-	{
-		return _innerDesc.Width;
-	}
+	UINT DX12SwapChain::GetWidth() const noexcept { return _innerDesc.Width; }
 
-	UINT DX12SwapChain::GetHeight() const noexcept
-	{
-		return _innerDesc.Height;
-	}
+	UINT DX12SwapChain::GetHeight() const noexcept { return _innerDesc.Height; }
 
-	UINT DX12SwapChain::GetFrameSlot() const noexcept
-	{
-		return _frameSlot;
-	}
+	UINT DX12SwapChain::GetFrameSlot() const noexcept { return _frameSlot; }
 
 	SharedD3D11D3D12Texture* DX12SwapChain::GetHudlessTexture() const noexcept
 	{
-		return _frameSlot < _hudlessBuffers.size()
-			? _hudlessBuffers[_frameSlot].get()
-			: nullptr;
+		return _frameSlot < _hudlessBuffers.size() ? _hudlessBuffers[_frameSlot].get() : nullptr;
 	}
 
 	SharedD3D11D3D12Texture* DX12SwapChain::GetProxyTexture() const noexcept
@@ -733,63 +677,10 @@ namespace cs::features
 		return _queue.get();
 	}
 
-	FrameGenerationInputRetirementDiagnostics
-		DX12SwapChain::GetInputRetirementDiagnostics() const noexcept
+	render::temporal::PresentInputRetirementDiagnostics
+	DX12SwapChain::GetInputRetirementDiagnostics() const noexcept
 	{
-		return {
-			.acquisitions =
-				_retirementAcquisitions.load(std::memory_order_relaxed),
-			.immediateAcquisitions =
-				_retirementImmediateAcquisitions.load(
-					std::memory_order_relaxed),
-			.gpuWaits =
-				_retirementGpuWaits.load(std::memory_order_relaxed),
-			.providerDrains =
-				_retirementProviderDrains.load(std::memory_order_relaxed),
-			.globalDrainAttempts =
-				_retirementGlobalDrainAttempts.load(
-					std::memory_order_relaxed),
-			.globalDrainFailures =
-				_retirementGlobalDrainFailures.load(
-					std::memory_order_relaxed),
-			.waitFailures =
-				_retirementWaitFailures.load(std::memory_order_relaxed),
-			.signals =
-				_retirementSignals.load(std::memory_order_relaxed),
-			.signalFailures =
-				_retirementSignalFailures.load(std::memory_order_relaxed),
-			.violations =
-				_retirementViolations.load(std::memory_order_relaxed),
-			.startupDrains =
-				_retirementStartupDrains.load(std::memory_order_relaxed),
-			.disableDrains =
-				_retirementDisableDrains.load(std::memory_order_relaxed),
-			.resizeDrains =
-				_retirementResizeDrains.load(std::memory_order_relaxed),
-			.teardownDrains =
-				_retirementTeardownDrains.load(std::memory_order_relaxed),
-			.steadyDrains =
-				_retirementSteadyDrains.load(std::memory_order_relaxed),
-			.lastRealFrame =
-				_retirementLastRealFrame.load(std::memory_order_relaxed),
-			.lastResourceGeneration =
-				_retirementLastResourceGeneration.load(
-					std::memory_order_relaxed),
-			.lastRequiredFence =
-				_retirementLastRequiredFence.load(
-					std::memory_order_relaxed),
-			.lastCompletedFence =
-				_retirementLastCompletedFence.load(
-					std::memory_order_relaxed),
-			.waitCpuMicroseconds =
-				_retirementWaitCpuMicroseconds.load(
-					std::memory_order_relaxed),
-			.lastSlot =
-				_retirementLastSlot.load(std::memory_order_relaxed),
-			.lastAcquireQueuedGpuWait =
-				_retirementLastAcquireQueuedGpuWait.load(
-					std::memory_order_relaxed)
-		};
+		return _retirementDiagnostics.Snapshot();
 	}
 
 	void DX12SwapChain::RecordGlobalDrain(
@@ -799,39 +690,42 @@ namespace cs::features
 		if (!a_result.globalDrainAttempted) {
 			return;
 		}
-		_retirementGlobalDrainAttempts.fetch_add(
+		_retirementDiagnostics.globalDrainAttempts.fetch_add(
 			1, std::memory_order_relaxed);
-		auto* counter = &_retirementTeardownDrains;
+		auto* counter = &_retirementDiagnostics.teardownDrains;
 		if (a_reason == "startup") {
-			counter = &_retirementStartupDrains;
+			counter = &_retirementDiagnostics.startupDrains;
 		} else if (a_reason == "disable") {
-			counter = &_retirementDisableDrains;
+			counter = &_retirementDiagnostics.disableDrains;
 		} else if (a_reason == "resize") {
-			counter = &_retirementResizeDrains;
-		} else if (a_reason == "steady") {
-			counter = &_retirementSteadyDrains;
+			counter = &_retirementDiagnostics.resizeDrains;
 		}
 		if (a_result.globalDrainCompleted) {
 			counter->fetch_add(1, std::memory_order_relaxed);
-			_retirementProviderDrains.fetch_add(
-				1, std::memory_order_relaxed);
+			_retirementDiagnostics.providerDrains.fetch_add(1,
+				std::memory_order_relaxed);
 		} else {
-			_retirementGlobalDrainFailures.fetch_add(
+			_retirementDiagnostics.globalDrainFailures.fetch_add(
 				1, std::memory_order_relaxed);
-			_retirementViolations.fetch_add(
-				1, std::memory_order_relaxed);
+			_retirementDiagnostics.violations.fetch_add(1, std::memory_order_relaxed);
 		}
 	}
 
 	bool DX12SwapChain::EvaluateD3D12SuperResolution(
 		render::temporal::ISuperResolutionProvider& a_provider,
-		const SuperResolutionExecutionContext& a_context)
+		const render::temporal::SuperResolutionRequest& a_request)
 	{
-		if (!IsBridgeReady() || !a_context.commandContext ||
-			!a_context.colorInput || !a_context.privateOutput ||
-			!a_context.depth || !a_context.motionVectors ||
-			!a_context.reactiveMask ||
-			!a_context.transparencyCompositionMask) {
+		const auto* recording = std::get_if<render::temporal::D3D11RecordingContext>(
+			&a_request.recording);
+		auto* color = render::temporal::GetD3D11Resource(a_request.colorInput);
+		auto* output = render::temporal::GetD3D11Resource(a_request.privateOutput);
+		auto* depth = render::temporal::GetD3D11Resource(a_request.depth);
+		auto* motion = render::temporal::GetD3D11Resource(a_request.motionVectors);
+		auto* reactive = render::temporal::GetD3D11Resource(a_request.reactiveMask);
+		auto* transparency =
+			render::temporal::GetD3D11Resource(a_request.transparencyCompositionMask);
+		if (!IsBridgeReady() || !recording || !recording->context || !color ||
+			!output || !depth || !motion || !reactive || !transparency) {
 			return false;
 		}
 
@@ -840,8 +734,7 @@ namespace cs::features
 				return false;
 			}
 			winrt::com_ptr<ID3D11Texture2D> source;
-			if (FAILED(a_source->QueryInterface(
-				IID_PPV_ARGS(source.put())))) {
+			if (FAILED(a_source->QueryInterface(IID_PPV_ARGS(source.put())))) {
 				return false;
 			}
 			D3D11_TEXTURE2D_DESC sourceDesc{};
@@ -849,89 +742,53 @@ namespace cs::features
 			source->GetDesc(&sourceDesc);
 			a_shared->texture11->GetDesc(&sharedDesc);
 			return sourceDesc.Width == sharedDesc.Width &&
-				sourceDesc.Height == sharedDesc.Height &&
-				sourceDesc.Format == sharedDesc.Format;
+			       sourceDesc.Height == sharedDesc.Height &&
+			       sourceDesc.Format == sharedDesc.Format;
 		};
-		if (!matches(_srColorInput, a_context.colorInput) ||
-			!matches(_srOutput, a_context.privateOutput) ||
-			!matches(_srDepth, a_context.depth) ||
-			!matches(_srMotion, a_context.motionVectors) ||
-			!matches(_srReactive, a_context.reactiveMask) ||
-			!matches(
-				_srTransparency,
-				a_context.transparencyCompositionMask)) {
-			if (FAILED(RecreateSuperResolutionBridge(a_context))) {
+		if (!matches(_srColorInput, color) || !matches(_srOutput, output) ||
+			!matches(_srDepth, depth) || !matches(_srMotion, motion) ||
+			!matches(_srReactive, reactive) ||
+			!matches(_srTransparency, transparency)) {
+			if (FAILED(RecreateSuperResolutionBridge(a_request))) {
 				return false;
 			}
 		}
 
 		try {
-			_context11->CopyResource(
-				_srColorInput->texture11.get(), a_context.colorInput);
-			_context11->CopyResource(
-				_srDepth->texture11.get(), a_context.depth);
-			_context11->CopyResource(
-				_srMotion->texture11.get(), a_context.motionVectors);
-			_context11->CopyResource(
-				_srReactive->texture11.get(), a_context.reactiveMask);
-			_context11->CopyResource(
-				_srTransparency->texture11.get(),
-				a_context.transparencyCompositionMask);
+			_context11->CopyResource(_srColorInput->texture11.get(), color);
+			_context11->CopyResource(_srDepth->texture11.get(), depth);
+			_context11->CopyResource(_srMotion->texture11.get(), motion);
+			_context11->CopyResource(_srReactive->texture11.get(), reactive);
+			_context11->CopyResource(_srTransparency->texture11.get(), transparency);
 
 			const UINT64 d3d11Ready = _nextFenceValue++;
-			DX::ThrowIfFailed(
-				_context11->Signal(_fence11.get(), d3d11Ready));
-			DX::ThrowIfFailed(
-				_queue->Wait(_fence12.get(), d3d11Ready));
+			DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
+			DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Ready));
 			DX::ThrowIfFailed(WaitForFrame(_frameSlot));
 			DX::ThrowIfFailed(_allocators[_frameSlot]->Reset());
 			DX::ThrowIfFailed(_commandLists[_frameSlot]->Reset(
 				_allocators[_frameSlot].get(), nullptr));
 			auto* commandList = _commandLists[_frameSlot].get();
-			const render::temporal::SuperResolutionRequest request{
-				.recording = render::temporal::D3D12RecordingContext{
-					.commandList = commandList,
-					.queue = _queue.get(),
-					.slot = _frameSlot
-				},
-				.colorInput = render::temporal::D3D12GpuView{
-					.resource = _srColorInput->resource12.get()
-				},
-				.privateOutput = render::temporal::D3D12GpuView{
-					.resource = _srOutput->resource12.get()
-				},
-				.depth = render::temporal::D3D12GpuView{
-					.resource = _srDepth->resource12.get()
-				},
-				.motionVectors = render::temporal::D3D12GpuView{
-					.resource = _srMotion->resource12.get()
-				},
-				.reactiveMask = render::temporal::D3D12GpuView{
-					.resource = _srReactive->resource12.get()
-				},
-				.transparencyCompositionMask =
-					render::temporal::D3D12GpuView{
-						.resource = _srTransparency->resource12.get()
-					},
-				.renderWidth = a_context.renderWidth,
-				.renderHeight = a_context.renderHeight,
-				.outputWidth = a_context.outputWidth,
-				.outputHeight = a_context.outputHeight,
-				.qualityMode = a_context.qualityMode,
-				.providerPreset = a_context.providerPreset,
-				.realFrame = a_context.realFrame,
-				.engineFrame = a_context.engineFrame,
-				.jitterX = a_context.jitterX,
-				.jitterY = a_context.jitterY,
-				.sharpness = a_context.sharpness,
-				.frameTimeMilliseconds =
-					a_context.frameTimeMilliseconds,
-				.cameraNear = a_context.cameraNear,
-				.cameraFar = a_context.cameraFar,
-				.cameraVerticalFov = a_context.cameraVerticalFov,
-				.resetHistory = a_context.resetHistory,
-				.color = a_context.color,
-				.camera = a_context.camera
+			auto request = a_request;
+			request.recording = render::temporal::D3D12RecordingContext{
+				.commandList = commandList,
+				.queue = _queue.get(),
+				.slot = _frameSlot
+			};
+			request.colorInput = render::temporal::D3D12GpuView{
+				.resource = _srColorInput->resource12.get()
+			};
+			request.privateOutput =
+				render::temporal::D3D12GpuView{ .resource = _srOutput->resource12.get() };
+			request.depth =
+				render::temporal::D3D12GpuView{ .resource = _srDepth->resource12.get() };
+			request.motionVectors =
+				render::temporal::D3D12GpuView{ .resource = _srMotion->resource12.get() };
+			request.reactiveMask = render::temporal::D3D12GpuView{
+				.resource = _srReactive->resource12.get()
+			};
+			request.transparencyCompositionMask = render::temporal::D3D12GpuView{
+				.resource = _srTransparency->resource12.get()
 			};
 			if (!a_provider.Record(request).Succeeded()) {
 				DX::ThrowIfFailed(commandList->Close());
@@ -941,17 +798,13 @@ namespace cs::features
 			ID3D12CommandList* lists[]{ commandList };
 			_queue->ExecuteCommandLists(1, lists);
 			const UINT64 d3d12Done = _nextFenceValue++;
-			DX::ThrowIfFailed(
-				_queue->Signal(_fence12.get(), d3d12Done));
+			DX::ThrowIfFailed(_queue->Signal(_fence12.get(), d3d12Done));
 			_allocatorFenceValues[_frameSlot] = d3d12Done;
-			DX::ThrowIfFailed(
-				_context11->Wait(_fence11.get(), d3d12Done));
-			_context11->CopyResource(
-				a_context.privateOutput, _srOutput->texture11.get());
+			DX::ThrowIfFailed(_context11->Wait(_fence11.get(), d3d12Done));
+			_context11->CopyResource(output, _srOutput->texture11.get());
 			return true;
 		} catch (const winrt::hresult_error& e) {
-			L->error(
-				"D3D12 super-resolution bridge failed: {}",
+			L->error("D3D12 super-resolution bridge failed: {}",
 				winrt::to_string(e.message()));
 		} catch (const std::exception& e) {
 			L->error("D3D12 super-resolution bridge failed: {}", e.what());
@@ -986,7 +839,8 @@ namespace cs::features
 			}
 		}
 		try {
-			L->error("Frame generation disabled: {}", a_reason ? a_reason : "unknown failure");
+			L->error("Frame generation disabled: {}",
+				a_reason ? a_reason : "unknown failure");
 		} catch (...) {
 		}
 	}
@@ -1002,110 +856,69 @@ namespace cs::features
 
 	bool DX12SwapChain::AcquireFrameGenerationInputWrite() noexcept
 	{
-		if (!_provider || !_inputRetirementFence12 ||
+		if (_frameGenerationDisabled || !_provider || !_inputRetirementFence12 ||
 			!_inputRetirementFence11 || !_context11 || !_queue) {
 			return false;
 		}
-		render::temporal::ProviderResult result{
-			.code = render::temporal::ProviderResultCode::kSuccess
-		};
-		const auto completed =
-			_inputRetirementFence12->GetCompletedValue();
+		const auto completed = _inputRetirementFence12->GetCompletedValue();
 		const bool detailed =
 			render::TemporalPipeline::Get().DetailedTracingEnabled();
 		std::uint64_t waitMicroseconds = 0;
 		const auto acquired = _inputReuseGate.Acquire(
-			_frameSlot,
-			_inputResourceGeneration,
+			_frameSlot, _inputResourceGeneration,
 			static_cast<std::uint64_t>(
 				reinterpret_cast<std::uintptr_t>(_queue.get())),
 			completed,
-			[&](const render::temporal::PresentInputRetirementToken&
-					a_token) {
-				if (a_token.mode ==
-					render::temporal::PresentInputRetirementMode::
-						kSynchronousPresentQueue) {
-					if (!detailed) {
-						return _context11->Wait(
-							_inputRetirementFence11.get(),
-							a_token.value);
-					}
-					const auto start =
-						std::chrono::steady_clock::now();
-					const HRESULT waitResult = _context11->Wait(
-						_inputRetirementFence11.get(),
-						a_token.value);
-					waitMicroseconds = static_cast<std::uint64_t>(
-						std::chrono::duration_cast<
-							std::chrono::microseconds>(
-							std::chrono::steady_clock::now() - start)
-							.count());
-					return waitResult;
+			[&](const render::temporal::PresentInputRetirementToken& a_token) {
+				if (!detailed) {
+					return _context11->Wait(_inputRetirementFence11.get(), a_token.value);
 				}
-				auto timing = render::TemporalPipeline::Get()
-					.MeasureFrameGenerationCpuPhase(
-						render::FrameGenerationCpuPhase::
-							kAcquirePresentInputs);
-				result = _provider->AcquirePresentInputs();
-				RecordGlobalDrain("steady", result);
-				return result.Succeeded()
-					? S_OK
-					: result.sdkResult
-						? static_cast<HRESULT>(result.sdkResult)
-						: E_FAIL;
+				auto timing =
+					render::TemporalPipeline::Get().MeasureFrameGenerationCpuPhase(
+						render::FrameGenerationCpuPhase::kAcquirePresentInputs);
+				const auto start = std::chrono::steady_clock::now();
+				const HRESULT waitResult =
+					_context11->Wait(_inputRetirementFence11.get(), a_token.value);
+				waitMicroseconds = static_cast<std::uint64_t>(
+					std::chrono::duration_cast<std::chrono::microseconds>(
+						std::chrono::steady_clock::now() - start)
+						.count());
+				return waitResult;
 			});
 		if (acquired.firstAcquire) {
-			_retirementAcquisitions.fetch_add(
-				1, std::memory_order_relaxed);
+			_retirementDiagnostics.acquisitions.fetch_add(1, std::memory_order_relaxed);
 		}
 		if (acquired.Succeeded() && acquired.firstAcquire) {
 			if (acquired.waitRequired) {
-				if (acquired.token.mode ==
-					render::temporal::PresentInputRetirementMode::
-						kSynchronousPresentQueue) {
-					_retirementGpuWaits.fetch_add(
-						1, std::memory_order_relaxed);
-				}
+				_retirementDiagnostics.gpuWaits.fetch_add(1, std::memory_order_relaxed);
 			} else {
-				_retirementImmediateAcquisitions.fetch_add(
+				_retirementDiagnostics.immediateAcquisitions.fetch_add(
 					1, std::memory_order_relaxed);
 			}
 		}
 		if (!acquired.Succeeded()) {
-			_retirementWaitFailures.fetch_add(
-				1, std::memory_order_relaxed);
-			_retirementViolations.fetch_add(
-				1, std::memory_order_relaxed);
+			_retirementDiagnostics.waitFailures.fetch_add(1, std::memory_order_relaxed);
+			_retirementDiagnostics.violations.fetch_add(1, std::memory_order_relaxed);
 		}
-		if (render::temporal::ShouldPublishPresentInputAcquireTelemetry(
-				acquired)) {
-			_retirementLastRealFrame.store(
-				acquired.token.realFrame, std::memory_order_relaxed);
-			_retirementLastResourceGeneration.store(
-				acquired.token.resourceGeneration,
+		if (render::temporal::ShouldPublishPresentInputAcquireTelemetry(acquired)) {
+			_retirementDiagnostics.lastRealFrame.store(acquired.token.realFrame,
 				std::memory_order_relaxed);
-			_retirementLastRequiredFence.store(
-				acquired.token.value, std::memory_order_relaxed);
-			_retirementLastCompletedFence.store(
-				acquired.completedValue, std::memory_order_relaxed);
-			_retirementWaitCpuMicroseconds.fetch_add(
+			_retirementDiagnostics.lastResourceGeneration.store(
+				acquired.token.resourceGeneration, std::memory_order_relaxed);
+			_retirementDiagnostics.lastRequiredFence.store(acquired.token.value,
+				std::memory_order_relaxed);
+			_retirementDiagnostics.lastCompletedFence.store(acquired.completedValue,
+				std::memory_order_relaxed);
+			_retirementDiagnostics.waitCpuMicroseconds.fetch_add(
 				waitMicroseconds, std::memory_order_relaxed);
-			_retirementLastSlot.store(
-				_frameSlot, std::memory_order_relaxed);
-			_retirementLastAcquireQueuedGpuWait.store(
-				acquired.waitRequired &&
-					acquired.token.mode ==
-						render::temporal::PresentInputRetirementMode::
-							kSynchronousPresentQueue,
+			_retirementDiagnostics.lastSlot.store(_frameSlot,
 				std::memory_order_relaxed);
+			_retirementDiagnostics.lastAcquireQueuedGpuWait.store(
+				acquired.waitRequired, std::memory_order_relaxed);
 		}
 		if (!acquired.Succeeded()) {
 			DisableFrameGeneration(
-				result.message.empty()
-					? render::temporal::
-						  PresentInputAcquireFailureMessage(
-							  acquired.code)
-					: result.message.c_str());
+				render::temporal::PresentInputAcquireFailureMessage(acquired.code));
 		}
 		return acquired.Succeeded();
 	}
@@ -1123,9 +936,7 @@ namespace cs::features
 		if (FAILED(result)) {
 			return result;
 		}
-		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0
-			? S_OK
-			: HRESULT_FROM_WIN32(GetLastError());
+		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 	}
 
 	HRESULT DX12SwapChain::WaitForGpu() noexcept
@@ -1142,50 +953,40 @@ namespace cs::features
 		if (FAILED(result)) {
 			return result;
 		}
-		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0
-			? S_OK
-			: HRESULT_FROM_WIN32(GetLastError());
+		return WaitForSingleObject(_fenceEvent, INFINITE) == WAIT_OBJECT_0 ? S_OK : HRESULT_FROM_WIN32(GetLastError());
 	}
 
 	HRESULT DX12SwapChain::Present(UINT a_syncInterval, UINT a_flags) noexcept
 	{
-		return PresentInternal(
-			a_syncInterval, a_flags, nullptr, false);
+		return PresentInternal(a_syncInterval, a_flags, nullptr, false);
 	}
 
-	HRESULT DX12SwapChain::Present1(
-		UINT a_syncInterval,
-		UINT a_flags,
+	HRESULT
+	DX12SwapChain::Present1(UINT a_syncInterval, UINT a_flags,
 		const DXGI_PRESENT_PARAMETERS* a_parameters) noexcept
 	{
-		return PresentInternal(
-			a_syncInterval, a_flags, a_parameters, true);
+		return PresentInternal(a_syncInterval, a_flags, a_parameters, true);
 	}
 
-	HRESULT DX12SwapChain::PresentInternal(
-		UINT a_syncInterval,
-		UINT a_flags,
+	HRESULT
+	DX12SwapChain::PresentInternal(UINT a_syncInterval, UINT a_flags,
 		const DXGI_PRESENT_PARAMETERS* a_parameters,
 		bool a_usePresent1) noexcept
 	{
 		if (a_flags & DXGI_PRESENT_TEST) {
 			auto& pipeline = render::TemporalPipeline::Get();
 			pipeline.BeginPresentAttempt(a_flags);
-			const HRESULT result = InvokeInnerPresent(
-				a_syncInterval, a_flags, a_parameters, a_usePresent1);
+			const HRESULT result = InvokeInnerPresent(a_syncInterval, a_flags,
+				a_parameters, a_usePresent1);
 			pipeline.EndPresentAttempt(a_flags, result);
 			if (_preparedTransaction) {
-				pipeline.RecordPresentAttempt(
-					_frameSlot, a_flags, result);
+				pipeline.RecordPresentAttempt(_frameSlot, a_flags, result);
 			}
 			return result;
 		}
 		try {
-			const HRESULT result = PresentImpl(
-				a_syncInterval,
-				a_flags,
-				a_parameters,
-				a_usePresent1);
+			const HRESULT result =
+				PresentImpl(a_syncInterval, a_flags, a_parameters, a_usePresent1);
 			if (result != DXGI_ERROR_WAS_STILL_DRAWING) {
 				if (_callbacks.clearCapture) {
 					_callbacks.clearCapture();
@@ -1207,40 +1008,32 @@ namespace cs::features
 		}
 	}
 
-	HRESULT DX12SwapChain::InvokeInnerPresent(
-		UINT a_syncInterval,
-		UINT a_flags,
+	HRESULT
+	DX12SwapChain::InvokeInnerPresent(UINT a_syncInterval, UINT a_flags,
 		const DXGI_PRESENT_PARAMETERS* a_parameters,
 		bool a_usePresent1) noexcept
 	{
 		if (!_swapChain) {
 			return DXGI_ERROR_INVALID_CALL;
 		}
-		return a_usePresent1
-			? _swapChain->Present1(
-				a_syncInterval, a_flags, a_parameters)
-			: _swapChain->Present(a_syncInterval, a_flags);
+		return a_usePresent1 ? _swapChain->Present1(a_syncInterval, a_flags, a_parameters) : _swapChain->Present(a_syncInterval, a_flags);
 	}
 
-	HRESULT DX12SwapChain::PresentImpl(
-		UINT a_syncInterval,
-		UINT a_flags,
+	HRESULT DX12SwapChain::PresentImpl(UINT a_syncInterval, UINT a_flags,
 		const DXGI_PRESENT_PARAMETERS* a_parameters,
 		bool a_usePresent1)
 	{
 		if (!IsReady()) {
 			auto& pipeline = render::TemporalPipeline::Get();
 			pipeline.BeginPresentAttempt(a_flags);
-			const HRESULT result = InvokeInnerPresent(
-				a_syncInterval, a_flags, a_parameters, a_usePresent1);
+			const HRESULT result = InvokeInnerPresent(a_syncInterval, a_flags,
+				a_parameters, a_usePresent1);
 			pipeline.EndPresentAttempt(a_flags, result);
 			return result;
 		}
 
 		if (!_presentPrepared) {
-			const auto frameState = _callbacks.queryFrameState
-				? _callbacks.queryFrameState()
-				: FrameGenerationFrameState{};
+			auto request = _callbacks.queryFrameState ? _callbacks.queryFrameState() : render::temporal::FrameGenerationRequest{};
 			render::TemporalPipeline::Get()
 				.Renderer()
 				.CaptureFrameGenerationFinalDebugSnapshot();
@@ -1249,102 +1042,100 @@ namespace cs::features
 			DX::ThrowIfFailed(_context11->Signal(_fence11.get(), d3d11Ready));
 			DX::ThrowIfFailed(_queue->Wait(_fence12.get(), d3d11Ready));
 			{
-				auto timing = render::TemporalPipeline::Get()
-					.MeasureFrameGenerationCpuPhase(
-						render::FrameGenerationCpuPhase::
-							kAllocatorFenceWait);
+				auto timing =
+					render::TemporalPipeline::Get().MeasureFrameGenerationCpuPhase(
+						render::FrameGenerationCpuPhase::kAllocatorFenceWait);
 				DX::ThrowIfFailed(WaitForFrame(_frameSlot));
 			}
 			DX::ThrowIfFailed(_allocators[_frameSlot]->Reset());
 			DX::ThrowIfFailed(_commandLists[_frameSlot]->Reset(
-				_allocators[_frameSlot].get(),
-				nullptr));
+				_allocators[_frameSlot].get(), nullptr));
 
 			auto* commandList = _commandLists[_frameSlot].get();
 			{
-				auto timing = render::TemporalPipeline::Get()
-					.MeasureFrameGenerationCpuPhase(
+				auto timing =
+					render::TemporalPipeline::Get().MeasureFrameGenerationCpuPhase(
 						render::FrameGenerationCpuPhase::kCopyRecord);
-				cs::render::annotation::ScopedEvent copyScope(
-					commandList, "FG_CopyRealFrame");
+				cs::render::annotation::ScopedEvent copyScope(commandList,
+					"FG_CopyRealFrame");
 				const std::array barriersBefore{
-					Transition(_proxyBuffer->resource12.get(), D3D12_RESOURCE_STATE_COMMON, D3D12_RESOURCE_STATE_COPY_SOURCE),
-					Transition(_backBuffers[_frameIndex].get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_COPY_DEST)
+					Transition(_proxyBuffer->resource12.get(),
+						D3D12_RESOURCE_STATE_COMMON,
+						D3D12_RESOURCE_STATE_COPY_SOURCE),
+					Transition(_backBuffers[_frameIndex].get(),
+						D3D12_RESOURCE_STATE_PRESENT,
+						D3D12_RESOURCE_STATE_COPY_DEST)
 				};
-				commandList->ResourceBarrier(static_cast<UINT>(barriersBefore.size()), barriersBefore.data());
-				commandList->CopyResource(_backBuffers[_frameIndex].get(), _proxyBuffer->resource12.get());
+				commandList->ResourceBarrier(static_cast<UINT>(barriersBefore.size()),
+					barriersBefore.data());
+				commandList->CopyResource(_backBuffers[_frameIndex].get(),
+					_proxyBuffer->resource12.get());
 				const std::array barriersAfter{
-					Transition(_proxyBuffer->resource12.get(), D3D12_RESOURCE_STATE_COPY_SOURCE, D3D12_RESOURCE_STATE_COMMON),
-					Transition(_backBuffers[_frameIndex].get(), D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PRESENT)
+					Transition(_proxyBuffer->resource12.get(),
+						D3D12_RESOURCE_STATE_COPY_SOURCE,
+						D3D12_RESOURCE_STATE_COMMON),
+					Transition(_backBuffers[_frameIndex].get(),
+						D3D12_RESOURCE_STATE_COPY_DEST,
+						D3D12_RESOURCE_STATE_PRESENT)
 				};
-				commandList->ResourceBarrier(static_cast<UINT>(barriersAfter.size()), barriersAfter.data());
+				commandList->ResourceBarrier(static_cast<UINT>(barriersAfter.size()),
+					barriersAfter.data());
 			}
 
-			const bool requested =
-				_frameGenerationInputsReady && !_frameGenerationDisabled &&
-				frameState.enable;
-			_preparedRealFrame = frameState.realFrame;
+			bool requested = _frameGenerationInputsReady && !_frameGenerationDisabled &&
+			                 request.enabled;
+			_preparedRealFrame = request.realFrame;
 			_vendorConsumptionPossible = requested;
+			auto& pipeline = render::TemporalPipeline::Get();
+			_preparedTransaction =
+				_frameGenerationInputsReady && pipeline.PreparePresent(_frameSlot);
+			if (!_preparedTransaction) {
+				requested = false;
+				_vendorConsumptionPossible = false;
+			}
 			bool frameGenerationPrepared = false;
 			{
-				cs::render::annotation::ScopedEvent prepareScope(
-					commandList, "FG_ConfigurePrepare");
-				const render::temporal::FrameGenerationRequest request{
-					.recording = {
-						.commandList = commandList,
+				cs::render::annotation::ScopedEvent prepareScope(commandList,
+					"FG_ConfigurePrepare");
+				request.recording =
+					render::temporal::D3D12RecordingContext{ .commandList = commandList,
 						.queue = _queue.get(),
-						.slot = _frameSlot
-					},
-					.depth = {
-						.resource = _depthBuffer->resource12.get(),
-						.state = D3D12_RESOURCE_STATE_COMMON
-					},
-					.motionVectors = {
-						.resource = _motionBuffer->resource12.get(),
-						.state = D3D12_RESOURCE_STATE_COMMON
-					},
-					.hudlessColor = {
-						.resource = _hudlessBuffers[_frameSlot]->resource12.get(),
-						.state = D3D12_RESOURCE_STATE_COMMON
-					},
-					.finalColor = {
-						.resource = _proxyBuffer->resource12.get(),
-						.state = D3D12_RESOURCE_STATE_COMMON
-					},
-					.realFrame = frameState.realFrame,
-					.renderWidth = frameState.renderWidth,
-					.renderHeight = frameState.renderHeight,
-					.outputWidth = _innerDesc.Width,
-					.outputHeight = _innerDesc.Height,
-					.jitterX = frameState.jitterX,
-					.jitterY = frameState.jitterY,
-					.frameTimeMilliseconds =
-						frameState.frameTimeMilliseconds,
-					.enabled = requested,
-					.resetHistory = frameState.resetHistory,
-					.uiMode =
-						render::temporal::UiCompositionMode::kHudlessAndFinal,
-					.color = frameState.color,
-					.camera = frameState.camera
+						.slot = _frameSlot };
+				request.depth = render::temporal::D3D12GpuView{
+					.resource = _depthBuffer->resource12.get(),
+					.state = D3D12_RESOURCE_STATE_COMMON
 				};
-				auto& pipeline = render::TemporalPipeline::Get();
+				request.motionVectors = render::temporal::D3D12GpuView{
+					.resource = _motionBuffer->resource12.get(),
+					.state = D3D12_RESOURCE_STATE_COMMON
+				};
+				request.hudlessColor = render::temporal::D3D12GpuView{
+					.resource = _hudlessBuffers[_frameSlot]->resource12.get(),
+					.state = D3D12_RESOURCE_STATE_COMMON
+				};
+				request.finalColor = render::temporal::D3D12GpuView{
+					.resource = _proxyBuffer->resource12.get(),
+					.state = D3D12_RESOURCE_STATE_COMMON
+				};
+				request.outputWidth = _innerDesc.Width;
+				request.outputHeight = _innerDesc.Height;
+				request.enabled = requested;
+				request.uiMode = render::temporal::UiCompositionMode::kHudlessAndFinal;
 				pipeline.RecordFrameGenerationFrameTimeInput(
 					request.frameTimeMilliseconds);
 				const auto preparation = [&] {
 					auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 						render::FrameGenerationCpuPhase::kPrepareFrame);
-					return render::temporal::PrepareFrameSafely(
-						*_provider, request);
+					return render::temporal::PrepareFrameSafely(*_provider, request);
 				}();
 				const auto& prepareResult = preparation.prepare;
 				frameGenerationPrepared = preparation.prepared;
 				if (!frameGenerationPrepared) {
 					_vendorConsumptionPossible = false;
-					DisableFrameGeneration(
-						"Prepare frame", prepareResult);
+					DisableFrameGeneration("Prepare frame", prepareResult);
 					if (!preparation.safeToPresent) {
 						L->error("{}", render::temporal::FormatProviderFailure(
-							"Cancel frame", preparation.cancel));
+										   "Cancel frame", preparation.cancel));
 						DX::ThrowIfFailed(commandList->Close());
 						_presentPrepared = false;
 						_preparedFrameGeneration = false;
@@ -1361,27 +1152,22 @@ namespace cs::features
 			const UINT64 d3d12Done = _nextFenceValue++;
 			DX::ThrowIfFailed(_queue->Signal(_fence12.get(), d3d12Done));
 			_allocatorFenceValues[_frameSlot] = d3d12Done;
-			const HRESULT producerWait =
-				_context11->Wait(_fence11.get(), d3d12Done);
+			const HRESULT producerWait = _context11->Wait(_fence11.get(), d3d12Done);
 			DX::ThrowIfFailed(producerWait);
 			_preparedFrameGeneration =
 				requested && frameGenerationPrepared && !_frameGenerationDisabled;
-			_preparedTransaction = _frameGenerationInputsReady &&
-				render::TemporalPipeline::Get().PreparePresent(
-					_frameSlot, _preparedFrameGeneration);
+			if (_preparedTransaction) {
+				pipeline.SetFrameGenerationPrepared(_frameSlot, _preparedFrameGeneration);
+			}
 			_presentPrepared = true;
 		}
 
-		cs::render::annotation::SetMarker(
-			"Upscaling/FrameGeneration/Present");
+		cs::render::annotation::SetMarker("Upscaling/FrameGeneration/Present");
 		auto& pipeline = render::TemporalPipeline::Get();
 		pipeline.BeginPresentAttempt(a_flags);
-		const auto retirementMode =
-			_provider->GetPresentInputRetirementMode();
+		const auto retirementMode = _provider->GetPresentInputRetirementMode();
 		const auto retirement = render::temporal::PresentAndRetireInputs(
-			retirementMode,
-			_vendorConsumptionPossible,
-			_preparedRealFrame,
+			retirementMode, _vendorConsumptionPossible, _preparedRealFrame,
 			_inputResourceGeneration,
 			static_cast<std::uint64_t>(
 				reinterpret_cast<std::uintptr_t>(_queue.get())),
@@ -1389,75 +1175,58 @@ namespace cs::features
 			[&]() {
 				auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 					render::FrameGenerationCpuPhase::kSdkPresent);
-				return InvokeInnerPresent(
-					a_syncInterval,
-					a_flags,
-					a_parameters,
+				return InvokeInnerPresent(a_syncInterval, a_flags, a_parameters,
 					a_usePresent1);
 			},
 			[&](std::uint64_t a_value) {
-				return _queue->Signal(
-					_inputRetirementFence12.get(), a_value);
+				return _queue->Signal(_inputRetirementFence12.get(), a_value);
 			});
 		const HRESULT presentResult = retirement.presentResult;
 		pipeline.EndPresentAttempt(a_flags, presentResult);
-		if (retirement.token &&
-			retirementMode ==
-				render::temporal::PresentInputRetirementMode::
-					kSynchronousPresentQueue) {
-			_retirementSignals.fetch_add(1, std::memory_order_relaxed);
+		if (retirement.token) {
+			_retirementDiagnostics.signals.fetch_add(1, std::memory_order_relaxed);
 		} else if (FAILED(retirement.signalResult)) {
-			_retirementSignalFailures.fetch_add(
-				1, std::memory_order_relaxed);
-			_retirementViolations.fetch_add(
-				1, std::memory_order_relaxed);
+			_retirementDiagnostics.signalFailures.fetch_add(1,
+				std::memory_order_relaxed);
+			_retirementDiagnostics.violations.fetch_add(1, std::memory_order_relaxed);
 			const render::temporal::PresentInputRetirementToken failed{
-				.mode = retirementMode,
 				.value = _nextInputRetirementValue - 1,
 				.realFrame = _preparedRealFrame,
 				.resourceGeneration = _inputResourceGeneration,
 				.queueIdentity = static_cast<std::uint64_t>(
 					reinterpret_cast<std::uintptr_t>(_queue.get()))
 			};
-			_inputReuseGate.MarkSubmitted(
-				_frameSlot, failed);
+			_inputReuseGate.MarkSubmitted(_frameSlot, failed);
 			DisableFrameGeneration(
 				"Frame-generation input retirement fence signal failed");
 			return retirement.signalResult;
 		}
 		render::temporal::PresentStatusCollection status;
-		if (render::temporal::ShouldObservePresentStatus(
-				a_flags, presentResult)) {
+		if (render::temporal::ShouldObservePresentStatus(a_flags, presentResult)) {
 			auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 				render::FrameGenerationCpuPhase::kCollectPresentStatus);
-			status = render::temporal::CollectAcceptedPresentStatus(
-				*_provider, a_flags, presentResult);
+			status = render::temporal::CollectAcceptedPresentStatus(*_provider, a_flags,
+				presentResult);
 		}
 		if (status.observed) {
-			pipeline.RecordGeneratedFrames(
-				status.generatedFrames);
-			pipeline.RecordPresentedFrames(
-				status.presentedFrames);
+			pipeline.RecordGeneratedFrames(status.generatedFrames);
+			pipeline.RecordPresentedFrames(status.presentedFrames);
 			if (!status.result.Succeeded()) {
-				const auto disableResult =
-					_provider->SetGenerationEnabled(false);
-				DisableFrameGeneration(
-					"Collect present status", status.result);
+				const auto disableResult = _provider->SetGenerationEnabled(false);
+				DisableFrameGeneration("Collect present status", status.result);
 				if (!disableResult.Succeeded()) {
 					L->error("{}", render::temporal::FormatProviderFailure(
-						"Disable after present failure", disableResult));
+									   "Disable after present failure", disableResult));
 				}
 			}
 		}
 		if (_preparedTransaction) {
-			pipeline.RecordPresentAttempt(
-				_frameSlot, a_flags, presentResult);
+			pipeline.RecordPresentAttempt(_frameSlot, a_flags, presentResult);
 		}
 		if (presentResult == DXGI_ERROR_WAS_STILL_DRAWING) {
 			return presentResult;
 		}
-		_inputReuseGate.MarkSubmitted(
-			_frameSlot, retirement.token);
+		_inputReuseGate.MarkSubmitted(_frameSlot, retirement.token);
 		_presentPrepared = false;
 		_preparedFrameGeneration = false;
 		_vendorConsumptionPossible = false;
@@ -1474,7 +1243,8 @@ namespace cs::features
 		return presentResult;
 	}
 
-	void DX12SwapChain::ClearSharedBuffers(bool a_clearFrameGenerationInputs) noexcept
+	void DX12SwapChain::ClearSharedBuffers(
+		bool a_clearFrameGenerationInputs) noexcept
 	{
 		if (!_context11) {
 			return;
@@ -1500,7 +1270,8 @@ namespace cs::features
 		}
 	}
 
-	HRESULT DX12SwapChain::GetBuffer(UINT a_buffer, REFIID a_iid, void** a_surface) noexcept
+	HRESULT DX12SwapChain::GetBuffer(UINT a_buffer, REFIID a_iid,
+		void** a_surface) noexcept
 	{
 		if (!a_surface) {
 			return E_POINTER;
@@ -1521,17 +1292,13 @@ namespace cs::features
 		return _outwardDevice11 ? _outwardDevice11->QueryInterface(a_iid, a_device) : E_NOINTERFACE;
 	}
 
-	HRESULT DX12SwapChain::SetFullscreenState(
-		BOOL a_fullscreen,
+	HRESULT DX12SwapChain::SetFullscreenState(BOOL a_fullscreen,
 		IDXGIOutput*) noexcept
 	{
-		return a_fullscreen
-			? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
-			: S_OK;
+		return a_fullscreen ? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE : S_OK;
 	}
 
-	HRESULT DX12SwapChain::GetFullscreenState(
-		BOOL* a_fullscreen,
+	HRESULT DX12SwapChain::GetFullscreenState(BOOL* a_fullscreen,
 		IDXGIOutput** a_target) noexcept
 	{
 		if (!a_fullscreen) {
@@ -1556,14 +1323,12 @@ namespace cs::features
 		return S_OK;
 	}
 
-	HRESULT DX12SwapChain::GetDesc1(
-		DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept
+	HRESULT DX12SwapChain::GetDesc1(DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept
 	{
 		if (!a_desc) {
 			return E_POINTER;
 		}
-		*a_desc =
-			swap_chain_facade::BuildDescription1(_proxyDesc);
+		*a_desc = swap_chain_facade::BuildDescription1(_proxyDesc);
 		return S_OK;
 	}
 
@@ -1573,9 +1338,7 @@ namespace cs::features
 		if (!a_desc) {
 			return E_POINTER;
 		}
-		*a_desc =
-			swap_chain_facade::BuildFullscreenDescription(
-				_proxyDesc);
+		*a_desc = swap_chain_facade::BuildFullscreenDescription(_proxyDesc);
 		return S_OK;
 	}
 
@@ -1588,45 +1351,33 @@ namespace cs::features
 		return S_OK;
 	}
 
-	UINT DX12SwapChain::GetCurrentBackBufferIndex() noexcept
-	{
-		return 0;
-	}
+	UINT DX12SwapChain::GetCurrentBackBufferIndex() noexcept { return 0; }
 
-	HRESULT DX12SwapChain::CheckColorSpaceSupport(
-		DXGI_COLOR_SPACE_TYPE a_colorSpace,
+	HRESULT
+	DX12SwapChain::CheckColorSpaceSupport(DXGI_COLOR_SPACE_TYPE a_colorSpace,
 		UINT* a_support) noexcept
 	{
 		if (!a_support) {
 			return E_POINTER;
 		}
 		*a_support = 0;
-		if (a_colorSpace !=
-			DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) {
+		if (a_colorSpace != DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) {
 			return S_OK;
 		}
-		return _swapChain
-			? _swapChain->CheckColorSpaceSupport(
-				a_colorSpace, a_support)
-			: DXGI_ERROR_INVALID_CALL;
+		return _swapChain ? _swapChain->CheckColorSpaceSupport(a_colorSpace, a_support) : DXGI_ERROR_INVALID_CALL;
 	}
 
-	HRESULT DX12SwapChain::SetColorSpace1(
-		DXGI_COLOR_SPACE_TYPE a_colorSpace) noexcept
+	HRESULT
+	DX12SwapChain::SetColorSpace1(DXGI_COLOR_SPACE_TYPE a_colorSpace) noexcept
 	{
-		if (a_colorSpace !=
-			DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) {
+		if (a_colorSpace != DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) {
 			return DXGI_ERROR_UNSUPPORTED;
 		}
-		return _swapChain
-			? _swapChain->SetColorSpace1(a_colorSpace)
-			: DXGI_ERROR_INVALID_CALL;
+		return _swapChain ? _swapChain->SetColorSpace1(a_colorSpace) : DXGI_ERROR_INVALID_CALL;
 	}
 
-	HRESULT DX12SwapChain::SetHDRMetaData(
-		DXGI_HDR_METADATA_TYPE a_type,
-		UINT a_size,
-		void* a_metadata) noexcept
+	HRESULT DX12SwapChain::SetHDRMetaData(DXGI_HDR_METADATA_TYPE a_type,
+		UINT a_size, void* a_metadata) noexcept
 	{
 		if (a_type != DXGI_HDR_METADATA_TYPE_NONE) {
 			return DXGI_ERROR_UNSUPPORTED;
@@ -1634,31 +1385,24 @@ namespace cs::features
 		if (a_size || a_metadata) {
 			return E_INVALIDARG;
 		}
-		return _swapChain
-			? _swapChain->SetHDRMetaData(a_type, 0, nullptr)
-			: DXGI_ERROR_INVALID_CALL;
+		return _swapChain ? _swapChain->SetHDRMetaData(a_type, 0, nullptr) : DXGI_ERROR_INVALID_CALL;
 	}
 
-	HRESULT DX12SwapChain::ResizeTarget(
-		const DXGI_MODE_DESC* a_target) noexcept
+	HRESULT DX12SwapChain::ResizeTarget(const DXGI_MODE_DESC* a_target) noexcept
 	{
-		return a_target
-			? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
-			: E_INVALIDARG;
+		return a_target ? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE : E_INVALIDARG;
 	}
 
-	HRESULT DX12SwapChain::ResizeBuffers(
-		UINT a_bufferCount,
-		UINT a_width,
-		UINT a_height,
-		DXGI_FORMAT a_format,
+	HRESULT DX12SwapChain::ResizeBuffers(UINT a_bufferCount, UINT a_width,
+		UINT a_height, DXGI_FORMAT a_format,
 		UINT a_flags) noexcept
 	{
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
 		}
 		try {
-			return ResizeBuffersImpl(a_bufferCount, a_width, a_height, a_format, a_flags);
+			return ResizeBuffersImpl(a_bufferCount, a_width, a_height, a_format,
+				a_flags);
 		} catch (const std::exception& e) {
 			DisableFrameGeneration(e.what());
 			return E_FAIL;
@@ -1668,38 +1412,32 @@ namespace cs::features
 		}
 	}
 
-	HRESULT DX12SwapChain::ResizeBuffers1(
-		UINT a_bufferCount,
-		UINT a_width,
-		UINT a_height,
-		DXGI_FORMAT a_format,
-		UINT a_flags,
+	HRESULT
+	DX12SwapChain::ResizeBuffers1(UINT a_bufferCount, UINT a_width, UINT a_height,
+		DXGI_FORMAT a_format, UINT a_flags,
 		const UINT* a_creationNodeMask,
 		IUnknown* const* a_presentQueue) noexcept
 	{
 		if (a_creationNodeMask || a_presentQueue) {
 			return DXGI_ERROR_UNSUPPORTED;
 		}
-		return ResizeBuffers(
-			a_bufferCount, a_width, a_height, a_format, a_flags);
+		return ResizeBuffers(a_bufferCount, a_width, a_height, a_format, a_flags);
 	}
 
-	HRESULT DX12SwapChain::ResizeBuffersImpl(
-		UINT a_bufferCount,
-		UINT a_width,
-		UINT a_height,
-		DXGI_FORMAT a_format,
+	HRESULT DX12SwapChain::ResizeBuffersImpl(UINT a_bufferCount, UINT a_width,
+		UINT a_height, DXGI_FORMAT a_format,
 		UINT a_flags)
 	{
 		if (!_swapChain) {
 			return DXGI_ERROR_INVALID_CALL;
 		}
-		if (!swap_chain_facade::SupportsResizeBufferCount(
-				a_bufferCount, _proxyDesc)) {
+		if (!swap_chain_facade::SupportsResizeBufferCount(a_bufferCount,
+				_proxyDesc)) {
 			return DXGI_ERROR_UNSUPPORTED;
 		}
 		constexpr UINT effectiveCount = 2;
-		if (a_format != DXGI_FORMAT_UNKNOWN && a_format != DXGI_FORMAT_R8G8B8A8_UNORM) {
+		if (a_format != DXGI_FORMAT_UNKNOWN &&
+			a_format != DXGI_FORMAT_R8G8B8A8_UNORM) {
 			return DXGI_ERROR_UNSUPPORTED;
 		}
 
@@ -1711,10 +1449,12 @@ namespace cs::features
 				return HRESULT_FROM_WIN32(GetLastError());
 			}
 			if (!targetWidth) {
-				targetWidth = static_cast<UINT>(std::max<LONG>(client.right - client.left, 1));
+				targetWidth =
+					static_cast<UINT>(std::max<LONG>(client.right - client.left, 1));
 			}
 			if (!targetHeight) {
-				targetHeight = static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1));
+				targetHeight =
+					static_cast<UINT>(std::max<LONG>(client.bottom - client.top, 1));
 			}
 		}
 
@@ -1723,55 +1463,44 @@ namespace cs::features
 		std::unique_ptr<SharedD3D11D3D12Texture> pendingProxy;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> pendingHudless;
 		if (targetWidth != oldWidth || targetHeight != oldHeight) {
-			const HRESULT resourceResult =
-				CreateDisplayResources(targetWidth, targetHeight, pendingProxy, pendingHudless);
+			const HRESULT resourceResult = CreateDisplayResources(
+				targetWidth, targetHeight, pendingProxy, pendingHudless);
 			if (FAILED(resourceResult)) {
 				return resourceResult;
 			}
 		}
 
 		if (!_provider) {
-			DisableFrameGeneration("Frame-generation provider is unavailable for resize");
+			DisableFrameGeneration(
+				"Frame-generation provider is unavailable for resize");
 			return E_FAIL;
 		}
-		const auto releaseResult = render::temporal::QuiesceDrainAndRelease(
-			*_provider,
-			[&]() {
+		const auto releaseResult =
+			render::temporal::QuiesceDrainAndRelease(*_provider, [&]() {
 				const UINT64 d3d11Idle = _nextFenceValue++;
-				return SUCCEEDED(_context11->Signal(
-						   _fence11.get(), d3d11Idle)) &&
-					SUCCEEDED(_queue->Wait(
-						_fence12.get(), d3d11Idle)) &&
-					SUCCEEDED(WaitForGpu());
+				return SUCCEEDED(_context11->Signal(_fence11.get(), d3d11Idle)) &&
+			           SUCCEEDED(_queue->Wait(_fence12.get(), d3d11Idle)) &&
+			           SUCCEEDED(WaitForGpu());
 			});
 		RecordGlobalDrain("resize", releaseResult);
 		if (!releaseResult.Succeeded()) {
-			DisableFrameGeneration(
-				releaseResult.message.empty()
-					? "Frame-generation display resources could not be released for resize"
-					: releaseResult.message.c_str());
+			DisableFrameGeneration(releaseResult.message.empty() ? "Frame-generation display resources could not "
+																   "be released for resize" :
+																   releaseResult.message.c_str());
 			return E_FAIL;
 		}
 		_frameGenerationInputsReady = false;
 		render::temporal::ResetPresentationProtocol(
-			_allocatorFenceValues,
-			_inputReuseGate,
-			_frameSlot,
-			_presentPrepared,
-			_preparedFrameGeneration,
-			_vendorConsumptionPossible,
+			_allocatorFenceValues, _inputReuseGate, _frameSlot, _presentPrepared,
+			_preparedFrameGeneration, _vendorConsumptionPossible,
 			_preparedTransaction);
 		for (auto& backBuffer : _backBuffers) {
 			backBuffer = nullptr;
 		}
 
 		const HRESULT resizeResult = _swapChain->ResizeBuffers(
-			effectiveCount,
-			targetWidth,
-			targetHeight,
-			DXGI_FORMAT_R8G8B8A8_UNORM,
-			swap_chain_facade::PreservePrivateResizeFlags(
-				a_flags, _innerDesc));
+			effectiveCount, targetWidth, targetHeight, DXGI_FORMAT_R8G8B8A8_UNORM,
+			swap_chain_facade::PreservePrivateResizeFlags(a_flags, _innerDesc));
 		if (FAILED(resizeResult)) {
 			const HRESULT refreshResult = RefreshBackBuffers();
 			if (FAILED(refreshResult)) {
@@ -1785,13 +1514,11 @@ namespace cs::features
 			};
 			const auto restoration =
 				render::temporal::RestoreProviderAndPreserveResizeResult(
-					*_provider,
-					resizeResult,
-					oldDescription,
-					std::nullopt);
+					*_provider, resizeResult, oldDescription, std::nullopt);
 			if (!restoration.providerResult.Succeeded()) {
 				DisableFrameGeneration(
-					"Frame-generation provider could not be restored after rejected resize");
+					"Frame-generation provider could not be restored "
+					"after rejected resize");
 			}
 			render::TemporalPipeline::Get().RequestFrameGenerationReset();
 			return restoration.nativeResizeResult;
@@ -1806,14 +1533,11 @@ namespace cs::features
 		}
 		const bool sizeChanged =
 			resizedDesc.Width != oldWidth || resizedDesc.Height != oldHeight;
-		if (sizeChanged &&
-			(!pendingProxy || !pendingHudless[0] || !pendingHudless[1] ||
-				targetWidth != resizedDesc.Width || targetHeight != resizedDesc.Height)) {
+		if (sizeChanged && (!pendingProxy || !pendingHudless[0] ||
+							   !pendingHudless[1] || targetWidth != resizedDesc.Width ||
+							   targetHeight != resizedDesc.Height)) {
 			const HRESULT resourceResult = CreateDisplayResources(
-				resizedDesc.Width,
-				resizedDesc.Height,
-				pendingProxy,
-				pendingHudless);
+				resizedDesc.Width, resizedDesc.Height, pendingProxy, pendingHudless);
 			if (FAILED(resourceResult)) {
 				_published = false;
 				DisableFrameGeneration("resized display resources were unavailable");
@@ -1833,58 +1557,45 @@ namespace cs::features
 			_hudlessBuffers = std::move(pendingHudless);
 		}
 		render::temporal::CommitResizeBridgeState(
-			resizedDesc,
-			_proxyDesc,
-			_innerDesc,
-			_allocatorFenceValues,
-			_inputReuseGate,
-			_frameSlot,
-			_presentPrepared,
-			_preparedFrameGeneration,
-			_vendorConsumptionPossible,
-			_preparedTransaction);
+			resizedDesc, _proxyDesc, _innerDesc, _allocatorFenceValues,
+			_inputReuseGate, _frameSlot, _presentPrepared, _preparedFrameGeneration,
+			_vendorConsumptionPossible, _preparedTransaction);
 
-		const HRESULT providerResult = sizeChanged
-			? RecreateFrameGenerationResources(
-				_innerDesc.Width, _innerDesc.Height)
-			: RestoreFrameGenerationProvider(
-				_innerDesc.Width, _innerDesc.Height);
+		const HRESULT providerResult =
+			sizeChanged ? RecreateFrameGenerationResources(_innerDesc.Width,
+							  _innerDesc.Height) :
+						  RestoreFrameGenerationProvider(_innerDesc.Width, _innerDesc.Height);
 		if (FAILED(providerResult)) {
 			_published = false;
 			DisableFrameGeneration(
-				"Frame-generation bridge resources could not be recreated after resize");
-			return render::temporal::CompleteNativeResize(
-				resizeResult, providerResult);
+				"Frame-generation bridge resources could not be "
+				"recreated after resize");
+			return render::temporal::CompleteNativeResize(resizeResult, providerResult);
 		}
 		if (providerResult == S_FALSE) {
 			DisableFrameGeneration(
 				"Frame-generation provider could not be restored after resize");
 		}
 		ClearSharedBuffers();
-		render::TemporalPipeline::Get().AdvanceDisplayGeneration(
-			_innerDesc.Width, _innerDesc.Height);
-		return render::temporal::CompleteNativeResize(
-			resizeResult, providerResult);
+		render::TemporalPipeline::Get().AdvanceDisplayGeneration(_innerDesc.Width,
+			_innerDesc.Height);
+		return render::temporal::CompleteNativeResize(resizeResult, providerResult);
 	}
 
-	HRESULT DX12SwapChain::SetPrivateData(
-		REFGUID a_name,
-		UINT a_size,
+	HRESULT DX12SwapChain::SetPrivateData(REFGUID a_name, UINT a_size,
 		const void* a_data) noexcept
 	{
 		return _swapChain ? _swapChain->SetPrivateData(a_name, a_size, a_data) : E_FAIL;
 	}
 
-	HRESULT DX12SwapChain::SetPrivateDataInterface(
-		REFGUID a_name,
+	HRESULT
+	DX12SwapChain::SetPrivateDataInterface(REFGUID a_name,
 		const IUnknown* a_unknown) noexcept
 	{
 		return _swapChain ? _swapChain->SetPrivateDataInterface(a_name, a_unknown) : E_FAIL;
 	}
 
-	HRESULT DX12SwapChain::GetPrivateData(
-		REFGUID a_name,
-		UINT* a_size,
+	HRESULT DX12SwapChain::GetPrivateData(REFGUID a_name, UINT* a_size,
 		void* a_data) noexcept
 	{
 		return _swapChain ? _swapChain->GetPrivateData(a_name, a_size, a_data) : E_FAIL;
@@ -1900,7 +1611,8 @@ namespace cs::features
 		return _swapChain ? _swapChain->GetContainingOutput(a_output) : E_FAIL;
 	}
 
-	HRESULT DX12SwapChain::GetFrameStatistics(DXGI_FRAME_STATISTICS* a_stats) noexcept
+	HRESULT
+	DX12SwapChain::GetFrameStatistics(DXGI_FRAME_STATISTICS* a_stats) noexcept
 	{
 		return _swapChain ? _swapChain->GetFrameStatistics(a_stats) : E_FAIL;
 	}
@@ -1909,4 +1621,4 @@ namespace cs::features
 	{
 		return _swapChain ? _swapChain->GetLastPresentCount(a_count) : E_FAIL;
 	}
-}
+}  // namespace cs::features

@@ -19,7 +19,6 @@
 #include <sl_version.h>
 #pragma warning(pop)
 
-#include "SuperResolutionContext.h"
 #include "StreamlineInterfaceUpgrade.h"
 #include "Render/FrameGenerationOrchestration.h"
 
@@ -67,12 +66,6 @@ namespace cs::features
 
 		sl::FrameToken* frameToken = nullptr;
 
-		void EvaluateDLSS(
-			sl::ViewportHandle vp,
-			const SuperResolutionExecutionContext& a_context,
-			const sl::Extent& extentIn,
-			const sl::Extent& extentOut);
-
 		void LoadInterposer(
 			std::uint32_t a_logLevel,
 			bool a_loadDlss,
@@ -100,12 +93,13 @@ namespace cs::features
 			const render::temporal::FrameGenerationCamera& a_camera);
 		bool SetDLSSOptions(
 			sl::ViewportHandle p_viewport,
-			const SuperResolutionExecutionContext& a_context);
+			const render::temporal::SuperResolutionRequest& a_request);
 		[[nodiscard]] render::temporal::SuperResolutionSizeResult
 			QueryDLSSRenderSize(
 				const render::temporal::SuperResolutionSizeRequest& a_request);
 
-		bool Upscale(const SuperResolutionExecutionContext& a_context);
+		bool Upscale(
+			const render::temporal::SuperResolutionRequest& a_request);
 		bool UpscaleD3D12(
 			const render::temporal::SuperResolutionRequest& a_request);
 		bool Sleep(std::uint32_t a_frameIndex);
@@ -154,7 +148,6 @@ namespace cs::features
 		float _constantsJitterX = 0.0f;
 		float _constantsJitterY = 0.0f;
 		render::temporal::FrameGenerationCamera _constantsCamera{};
-		bool _evaluatedThisDispatch = false;
 		bool _latencyFeaturesRequested = false;
 		render::temporal::PresentedFrameAccumulator _dlssGPresentedFrames;
 		sl::DLSSGStatus _dlssGStatus = sl::DLSSGStatus::eOk;

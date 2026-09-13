@@ -11,7 +11,6 @@
 #include "DynamicResolution.h"
 #include "RCAS/RCAS.h"
 #include "SamplerBias.h"
-#include "SuperResolutionContext.h"
 #include "SuperResolutionFov.h"
 
 #include <atomic>
@@ -196,6 +195,11 @@ namespace cs::render
 			const char* a_textureName,
 			const char* a_viewName,
 			std::string_view a_logName);
+		[[nodiscard]] FeatureDebugTexture GetFrozenTextureSnapshot(
+			const FrozenTextureSnapshot& a_snapshot,
+			std::uint8_t a_view,
+			bool a_selected,
+			std::string_view a_unavailableText) const;
 		bool CaptureDebugSnapshot(
 			DebugView a_view,
 			ID3D11ShaderResourceView* a_source,

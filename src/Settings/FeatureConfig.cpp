@@ -324,12 +324,11 @@ namespace cs::feature_config
 		auto* upscaling = (*features)["Upscaling"].as_table();
 		auto* legacySettings = upscaling ? (*upscaling)["settings"].as_table() : nullptr;
 		auto* frameGeneration = (*features)["FrameGeneration"].as_table();
-		const bool legacyLoadPresent = upscaling && upscaling->contains("load");
 		const bool legacySettingsPresent = legacySettings &&
 			(legacySettings->contains("frame_generation_mode") ||
 				legacySettings->contains("frame_generation_force_enable") ||
 				legacySettings->contains("frame_generation_allow_in_menus"));
-		if (!frameGeneration && !legacyLoadPresent && !legacySettingsPresent) {
+		if (!legacySettingsPresent) {
 			return result;
 		}
 

@@ -403,8 +403,7 @@ namespace cs::render
 				GetEngineFrame(),
 				{ renderWidth, renderHeight },
 				{ capture.width, capture.height },
-				capture.frameSlot,
-				_srPublishedToFramebuffer.load(std::memory_order_acquire));
+				capture.frameSlot);
 		if (!transactionReady) {
 			render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
 			RecordFrameGenerationFailure();

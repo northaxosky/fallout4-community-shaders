@@ -19,24 +19,21 @@ namespace cs::render
 		D3D11_TEXTURE2D_DESC frameBufferDesc{};
 		if (!state || !context || !frameBufferRTV ||
 			!HasRequiredResources(a_method) ||
-			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
-			!renderWidth || !renderHeight ||
-			renderWidth > frameBufferDesc.Width ||
-			renderHeight > frameBufferDesc.Height ||
-			!upscalingTexture || !upscalingTexture->srv ||
-			!publicationTexture || !publicationTexture->resource ||
-			!publicationTexture->rtv || !linearSampler ||
-			!upscalingDataCB || !upscaleRasterizerState ||
-			!upscaleBlendState || !GetUpscaleVS() ||
-			!GetSpatialFallbackPS()) {
+			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) || !renderWidth ||
+			!renderHeight || renderWidth > frameBufferDesc.Width ||
+			renderHeight > frameBufferDesc.Height || !upscalingTexture ||
+			!upscalingTexture->srv || !publicationTexture ||
+			!publicationTexture->resource || !publicationTexture->rtv ||
+			!linearSampler || !upscalingDataCB || !upscaleRasterizerState ||
+			!upscaleBlendState || !GetUpscaleVS() || !GetSpatialFallbackPS()) {
 			return false;
 		}
 
 		winrt::com_ptr<ID3D11Resource> renderTargetResource;
 		frameBufferRTV->GetResource(renderTargetResource.put());
 		return renderTargetResource.get() == frameBuffer.get() &&
-			frameBufferDesc.Width == state->screenWidth &&
-			frameBufferDesc.Height == state->screenHeight;
+		       frameBufferDesc.Width == state->screenWidth &&
+		       frameBufferDesc.Height == state->screenHeight;
 	}
 
 	bool TemporalRenderer::Upscale()
@@ -48,12 +45,13 @@ namespace cs::render
 
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
-		if (!context || !state || !upscalingTexture || !superResolutionDepthTexture || !reactiveMaskTexture ||
-			!transparencyCompositionMaskTexture) {
+		if (!context || !state || !upscalingTexture || !superResolutionDepthTexture ||
+			!reactiveMaskTexture || !transparencyCompositionMaskTexture) {
 			return false;
 		}
 
-		auto* motionVectorTexture = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
+		auto* motionVectorTexture =
+			cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
 		auto* motionVectorSRV = cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
 		if (!motionVectorTexture || !motionVectorSRV ||
 			(upscaleMethod == UpscaleMethod::kDLSS && !motionVectorCopyTexture)) {
@@ -76,18 +74,21 @@ namespace cs::render
 
 				// Null t0 and RT20's unused channel produce the accepted zero masks.
 				auto* normalsSRV = cs::engine::GetRenderTargetSRV(kNormalsTarget);
-				auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kMain);
+				auto* depthSRV = cs::engine::GetDepthStencilDepthSRV(
+					cs::engine::DepthStencilTarget::kMain);
 				auto* encodeShader = GetEncodeTexturesCS();
 				if (!depthSRV || !encodeShader) {
 					return false;
 				}
 
-				ID3D11ShaderResourceView* views[4] = { nullptr, normalsSRV, motionVectorSRV, depthSRV };
+				ID3D11ShaderResourceView* views[4] = { nullptr, normalsSRV,
+					motionVectorSRV, depthSRV };
 				context->CSSetShaderResources(0, ARRAYSIZE(views), views);
 				context->CSSetShader(encodeShader, nullptr, 0);
 
 				UpscalingDataCB upscalingData;
-				upscalingData.trueSamplingDim = float2((float)renderWidth, (float)renderHeight);
+				upscalingData.trueSamplingDim =
+					float2((float)renderWidth, (float)renderHeight);
 				upscalingData.pad0 = { 0.0f, 0.0f };
 				upscalingDataCB->Update(upscalingData);
 				auto upscalingBuffer = upscalingDataCB->CB();
@@ -103,8 +104,10 @@ namespace cs::render
 
 				context->Dispatch((renderWidth + 7) / 8, (renderHeight + 7) / 8, 1);
 
-				ID3D11UnorderedAccessView* nullUAVs[4] = { nullptr, nullptr, nullptr, nullptr };
-				context->CSSetUnorderedAccessViews(0, ARRAYSIZE(nullUAVs), nullUAVs, nullptr);
+				ID3D11UnorderedAccessView* nullUAVs[4] = { nullptr, nullptr, nullptr,
+					nullptr };
+				context->CSSetUnorderedAccessViews(0, ARRAYSIZE(nullUAVs), nullUAVs,
+					nullptr);
 
 				ID3D11Buffer* nullBuffer = nullptr;
 				context->CSSetConstantBuffers(0, 1, &nullBuffer);
@@ -119,94 +122,50 @@ namespace cs::render
 				render::TemporalPipeline::Get().SuperResolutionResetPending();
 			float verticalFov = 0.0f;
 			if (upscaleMethod == UpscaleMethod::kFSR) {
-				const auto fovSource =
-					superResolutionFovCache.Resolve(
-						cs::engine::GetFrameBuffer(), verticalFov);
+				const auto fovSource = superResolutionFovCache.Resolve(
+					cs::engine::GetFrameBuffer(), verticalFov);
 				if (fovSource == SuperResolutionFovSource::kUnavailable) {
-					CS_LOG_ONCE(
-						L,
-						spdlog::level::warn,
-						"FSR3 super-resolution skipped: no current or cached camera projection is available.");
+					CS_LOG_ONCE(L, spdlog::level::warn,
+						"FSR3 super-resolution skipped: no current or cached "
+						"camera projection is available.");
 					return false;
 				}
 				if (fovSource == SuperResolutionFovSource::kCached) {
 					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::warn,
+						L, 2000, spdlog::level::warn,
 						"FSR3 super-resolution is using the last valid camera FOV.");
 				}
 			}
 			const auto* timer = RE::BSTimer::GetSingleton();
-			const auto realFrame =
-				render::TemporalPipeline::Get().CurrentRealFrame();
-			render::temporal::FrameGenerationCamera camera{};
+			const auto realFrame = render::TemporalPipeline::Get().CurrentRealFrame();
 			const auto& snapshot = cs::engine::GetFrameBuffer();
-			if (snapshot.valid) {
-				std::memcpy(
-					camera.currentWorldToClip,
-					snapshot.data.CurrFrameWorldToClip,
-					sizeof(camera.currentWorldToClip));
-				std::memcpy(
-					camera.previousWorldToClip,
-					snapshot.data.PrevFrameWorldToClip,
-					sizeof(camera.previousWorldToClip));
-				camera.viewToWorld[0] = snapshot.data.ViewToWorld[0].x;
-				camera.viewToWorld[1] = snapshot.data.ViewToWorld[0].y;
-				camera.viewToWorld[2] = snapshot.data.ViewToWorld[0].z;
-				camera.viewToWorld[3] = snapshot.data.ViewToWorld[0].w;
-				camera.viewToWorld[4] = snapshot.data.ViewToWorld[1].x;
-				camera.viewToWorld[5] = snapshot.data.ViewToWorld[1].y;
-				camera.viewToWorld[6] = snapshot.data.ViewToWorld[1].z;
-				camera.viewToWorld[7] = snapshot.data.ViewToWorld[1].w;
-				camera.viewToWorld[8] = snapshot.data.ViewToWorld[2].x;
-				camera.viewToWorld[9] = snapshot.data.ViewToWorld[2].y;
-				camera.viewToWorld[10] = snapshot.data.ViewToWorld[2].z;
-				camera.viewToWorld[11] = snapshot.data.ViewToWorld[2].w;
-				camera.viewToWorld[15] = 1.0f;
-				const auto basis =
-					cs::engine::GetCameraWorldBasis(snapshot.data);
-				const auto position =
-					cs::engine::CameraWorldOrigin(snapshot.data);
-				const auto previousPosition =
-					cs::engine::CameraPreviousWorldOrigin(snapshot.data);
-				std::memcpy(camera.right, &basis.right, sizeof(camera.right));
-				std::memcpy(camera.up, &basis.up, sizeof(camera.up));
-				std::memcpy(
-					camera.forward, &basis.forward, sizeof(camera.forward));
-				std::memcpy(
-					camera.position, &position, sizeof(camera.position));
-				std::memcpy(
-					camera.previousPosition,
-					&previousPosition,
-					sizeof(camera.previousPosition));
-				camera.nearPlane = cs::engine::GetCameraNear();
-				camera.farPlane = cs::engine::GetCameraFar();
-				camera.verticalFov =
-					cs::engine::VerticalFieldOfViewFromWorldToClip(
-						snapshot.data.CurrFrameWorldToClip);
-				camera.aspectRatio = state->screenHeight
-					? static_cast<float>(state->screenWidth) /
-						static_cast<float>(state->screenHeight)
-					: 0.0f;
-				camera.engineFrame = snapshot.frameCount;
-				camera.valid =
-					cs::engine::HasUsableWorldCamera(snapshot.data) &&
-					camera.verticalFov > 0.0f &&
-					camera.nearPlane > 0.0f &&
-					camera.farPlane > camera.nearPlane;
-			}
-			const SuperResolutionExecutionContext execution{
-				.commandContext = context,
-				.colorInput = upscalingTexture->resource.get(),
-				.privateOutput = sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
-				.depth = superResolutionDepthTexture->resource.get(),
-				.motionVectors = upscaleMethod == UpscaleMethod::kDLSS
-					? motionVectorCopyTexture->resource.get()
-					: motionVectorTexture,
-				.reactiveMask = reactiveMaskTexture->resource.get(),
+			const auto camera = render::temporal::BuildFrameGenerationCamera(
+				snapshot, state->screenWidth, state->screenHeight);
+			const render::temporal::SuperResolutionRequest request{
+				.recording =
+					render::temporal::D3D11RecordingContext{ .context = context },
+				.colorInput =
+					render::temporal::D3D11GpuView{ .resource =
+														upscalingTexture->resource.get(),
+						.srv = upscalingTexture->srv.get() },
+				.privateOutput =
+					render::temporal::D3D11GpuView{
+						.resource = sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
+						.srv = sharpenerTexture ? sharpenerTexture->srv.get() : nullptr,
+						.uav =
+							sharpenerTexture ? sharpenerTexture->uav.get() : nullptr },
+				.depth =
+					render::temporal::D3D11GpuView{
+						.resource = superResolutionDepthTexture->resource.get() },
+				.motionVectors =
+					render::temporal::D3D11GpuView{
+						.resource = upscaleMethod == UpscaleMethod::kDLSS ? motionVectorCopyTexture->resource.get() : motionVectorTexture },
+				.reactiveMask =
+					render::temporal::D3D11GpuView{
+						.resource = reactiveMaskTexture->resource.get() },
 				.transparencyCompositionMask =
-					transparencyCompositionMaskTexture->resource.get(),
+					render::temporal::D3D11GpuView{
+						.resource = transparencyCompositionMaskTexture->resource.get() },
 				.renderWidth = renderWidth,
 				.renderHeight = renderHeight,
 				.outputWidth = state->screenWidth,
@@ -224,93 +183,30 @@ namespace cs::render
 				.cameraFar = cs::engine::GetCameraFar(),
 				.cameraVerticalFov = verticalFov,
 				.resetHistory = resetHistory,
-				.color = {
-					.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
-					.range = ColorRange::kFull,
-					.transfer = TransferFunction::kGamma22,
-					.primaries = ColorPrimaries::kUnspecified,
-					.stage = ColorStage::kPostTonemapLut,
-					.alpha = AlphaMode::kIgnored,
-					.exposure = ExposureMode::kAutomatic
-				},
+				.color = { .resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
+					.range = render::temporal::ColorRange::kFull,
+					.transfer = render::temporal::TransferFunction::kGamma22,
+					.primaries = render::temporal::ColorPrimaries::kUnspecified,
+					.stage = render::temporal::ColorStage::kPostTonemapLut,
+					.alpha = render::temporal::AlphaMode::kIgnored,
+					.exposure = render::temporal::ExposureMode::kAutomatic },
 				.camera = camera
-			};
-			const auto makeProviderRequest = [&]() {
-				return render::temporal::SuperResolutionRequest{
-					.recording =
-						render::temporal::D3D11RecordingContext{
-							.context = context
-						},
-					.colorInput = render::temporal::D3D11GpuView{
-						.resource = execution.colorInput,
-						.srv = upscalingTexture->srv.get()
-					},
-					.privateOutput =
-						render::temporal::D3D11GpuView{
-							.resource = execution.privateOutput,
-							.srv = sharpenerTexture->srv.get(),
-							.uav = sharpenerTexture->uav.get()
-						},
-					.depth = render::temporal::D3D11GpuView{
-						.resource = execution.depth
-					},
-					.motionVectors =
-						render::temporal::D3D11GpuView{
-							.resource = execution.motionVectors
-						},
-					.reactiveMask =
-						render::temporal::D3D11GpuView{
-							.resource = execution.reactiveMask
-						},
-					.transparencyCompositionMask =
-						render::temporal::D3D11GpuView{
-							.resource =
-								execution.transparencyCompositionMask
-						},
-					.renderWidth = execution.renderWidth,
-					.renderHeight = execution.renderHeight,
-					.outputWidth = execution.outputWidth,
-					.outputHeight = execution.outputHeight,
-					.qualityMode = execution.qualityMode,
-					.providerPreset = execution.providerPreset,
-					.realFrame = execution.realFrame,
-					.engineFrame = execution.engineFrame,
-					.jitterX = execution.jitterX,
-					.jitterY = execution.jitterY,
-					.sharpness = execution.sharpness,
-					.frameTimeMilliseconds =
-						execution.frameTimeMilliseconds,
-					.cameraNear = execution.cameraNear,
-					.cameraFar = execution.cameraFar,
-					.cameraVerticalFov =
-						execution.cameraVerticalFov,
-					.resetHistory = execution.resetHistory,
-					.color = execution.color,
-					.camera = execution.camera
-				};
 			};
 
 			if (upscaleMethod == UpscaleMethod::kDLSS) {
-				cs::render::annotation::ScopedEvent providerScope(
-					"Upscaling/DLSS");
-				upscaled = render::TemporalPipeline::Get()
-								   .UsesD3D12SuperResolution(
-									   render::temporal::SuperResolutionMethod::kDLSS)
-					? render::TemporalPipeline::Get()
-						  .EvaluateD3D12DLSS(execution)
-					: render::TemporalPipeline::Get()
-						  .EvaluateD3D11SuperResolution(
-							  render::temporal::SuperResolutionMethod::kDLSS,
-							  makeProviderRequest())
-						  .Succeeded();
+				cs::render::annotation::ScopedEvent providerScope("Upscaling/DLSS");
+				upscaled =
+					render::TemporalPipeline::Get()
+						.EvaluateSuperResolution(
+							render::temporal::SuperResolutionMethod::kDLSS, request)
+						.Succeeded();
 			} else if (upscaleMethod == UpscaleMethod::kFSR) {
-				cs::render::annotation::ScopedEvent providerScope(
-					"Upscaling/FSR");
-				upscaled = render::TemporalPipeline::Get()
-							   .EvaluateD3D11SuperResolution(
-								   render::temporal::SuperResolutionMethod::kFSR3,
-								   makeProviderRequest())
-							   .Succeeded();
+				cs::render::annotation::ScopedEvent providerScope("Upscaling/FSR");
+				upscaled =
+					render::TemporalPipeline::Get()
+						.EvaluateSuperResolution(
+							render::temporal::SuperResolutionMethod::kFSR3, request)
+						.Succeeded();
 			}
 
 			if (upscaled) {
@@ -330,15 +226,16 @@ namespace cs::render
 
 	bool TemporalRenderer::PerformUpscaling()
 	{
-		cs::render::annotation::ScopedEvent upscaleScope(
-			"Upscaling/SuperResolution");
+		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution");
 		_upscaledThisFrame = false;
 		_spatialFallbackThisFrame.store(false, std::memory_order_release);
-		// Keep the last completed resolve result stable across vfunc queries within the frame.
-		const auto finish = [this](bool a_resolved, bool a_externalPublished = false) {
+		// Keep the last completed resolve result stable across vfunc queries within
+		// the frame.
+		const auto finish = [this](bool a_resolved,
+								bool a_externalPublished = false) {
 			_upscaledThisFrame = a_externalPublished;
-			_srPublishedToFramebuffer.store(
-				a_externalPublished, std::memory_order_release);
+			_srPublishedToFramebuffer.store(a_externalPublished,
+				std::memory_order_release);
 			return a_resolved;
 		};
 
@@ -348,16 +245,13 @@ namespace cs::render
 		if (!context || !upscalingTexture ||
 			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
 			!HasSDRUpscalingContract(frameBufferDesc) ||
-			!MatchesTextureContract(
-				upscalingTexture,
-				frameBufferDesc,
+			!MatchesTextureContract(upscalingTexture, frameBufferDesc,
 				DXGI_FORMAT_R8G8B8A8_UNORM)) {
 			ScheduleNativeSuperResolutionFallback();
 			return finish(false);
 		}
 		const auto [renderWidth, renderHeight] = GetRenderSize();
-		if (!renderWidth || !renderHeight ||
-			renderWidth > frameBufferDesc.Width ||
+		if (!renderWidth || !renderHeight || renderWidth > frameBufferDesc.Width ||
 			renderHeight > frameBufferDesc.Height) {
 			ScheduleNativeSuperResolutionFallback();
 			return finish(false);
@@ -367,20 +261,16 @@ namespace cs::render
 			cs::render::annotation::ScopedEvent inputScope(
 				"Upscaling/CaptureInputColor");
 			cs::engine::CopyResourcePreservingOM(
-				context,
-				upscalingTexture->resource.get(),
-				frameBuffer.get());
+				context, upscalingTexture->resource.get(), frameBuffer.get());
 		}
 
 		if (!Upscale()) {
-			if (!ApplySpatialFallback(
-					frameBuffer.get(),
-					frameBufferDesc,
-					renderWidth,
+			if (!ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, renderWidth,
 					renderHeight)) {
 				render::TemporalPipeline::Get().PostFailure(
 					render::temporal::FailureDomain::kEngine,
-					"External super resolution and the spatial recovery resolve both failed.");
+					"External super resolution and the spatial recovery resolve both "
+					"failed.");
 				ScheduleNativeSuperResolutionFallback();
 				return finish(false);
 			}
@@ -398,8 +288,7 @@ namespace cs::render
 		bool published = false;
 		if (method == UpscaleMethod::kFSR) {
 			published = PublishUpscalingOutput(
-				context,
-				frameBuffer.get(),
+				context, frameBuffer.get(),
 				sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
 				_upscaledThisFrame);
 		} else if (method == UpscaleMethod::kDLSS) {
@@ -409,14 +298,12 @@ namespace cs::render
 			UpscaleDepth();
 			return finish(true, true);
 		}
-		if (!ApplySpatialFallback(
-				frameBuffer.get(),
-				frameBufferDesc,
-				renderWidth,
+		if (!ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, renderWidth,
 				renderHeight)) {
 			render::TemporalPipeline::Get().PostFailure(
 				render::temporal::FailureDomain::kEngine,
-				"Super-resolution publication and the spatial recovery resolve both failed.");
+				"Super-resolution publication and the spatial recovery resolve both "
+				"failed.");
 			ScheduleNativeSuperResolutionFallback();
 			return finish(false);
 		}
@@ -438,9 +325,7 @@ namespace cs::render
 		if (!context || !upscalingTexture ||
 			!TryGetFrameBufferTexture(frameBuffer, frameBufferDesc) ||
 			!HasSDRUpscalingContract(frameBufferDesc) ||
-			!MatchesTextureContract(
-				upscalingTexture,
-				frameBufferDesc,
+			!MatchesTextureContract(upscalingTexture, frameBufferDesc,
 				DXGI_FORMAT_R8G8B8A8_UNORM)) {
 			ScheduleNativeSuperResolutionFallback();
 			return false;
@@ -449,17 +334,12 @@ namespace cs::render
 		D3D11_VIEWPORT sourceViewport{};
 		context->RSGetViewports(&viewportCount, &sourceViewport);
 		const auto [renderWidth, renderHeight] = GetRenderSize();
-		const auto outputExtent = viewportCount == 1
-			? cs::engine::ClassifyRenderUIOutputExtent(
-				  sourceViewport.TopLeftX,
-				  sourceViewport.TopLeftY,
-				  sourceViewport.Width,
-				  sourceViewport.Height,
-				  renderWidth,
-				  renderHeight,
-				  frameBufferDesc.Width,
-				  frameBufferDesc.Height)
-			: cs::engine::RenderUIOutputExtent::kInvalid;
+		const auto outputExtent =
+			viewportCount == 1 ? cs::engine::ClassifyRenderUIOutputExtent(
+									 sourceViewport.TopLeftX, sourceViewport.TopLeftY,
+									 sourceViewport.Width, sourceViewport.Height, renderWidth,
+									 renderHeight, frameBufferDesc.Width, frameBufferDesc.Height) :
+								 cs::engine::RenderUIOutputExtent::kInvalid;
 		if (outputExtent == cs::engine::RenderUIOutputExtent::kInvalid) {
 			_renderUiRecoverySourceWidth.store(0, std::memory_order_relaxed);
 			_renderUiRecoverySourceHeight.store(0, std::memory_order_relaxed);
@@ -470,33 +350,21 @@ namespace cs::render
 
 		const bool passthrough =
 			outputExtent == cs::engine::RenderUIOutputExtent::kFull;
-		const auto sourceWidth =
-			passthrough ? frameBufferDesc.Width : renderWidth;
-		const auto sourceHeight =
-			passthrough ? frameBufferDesc.Height : renderHeight;
-		_renderUiRecoverySourceWidth.store(
-			sourceWidth, std::memory_order_relaxed);
-		_renderUiRecoverySourceHeight.store(
-			sourceHeight, std::memory_order_relaxed);
-		_renderUiRecoveryPassthrough.store(
-			passthrough, std::memory_order_release);
+		const auto sourceWidth = passthrough ? frameBufferDesc.Width : renderWidth;
+		const auto sourceHeight = passthrough ? frameBufferDesc.Height : renderHeight;
+		_renderUiRecoverySourceWidth.store(sourceWidth, std::memory_order_relaxed);
+		_renderUiRecoverySourceHeight.store(sourceHeight, std::memory_order_relaxed);
+		_renderUiRecoveryPassthrough.store(passthrough, std::memory_order_release);
 
 		{
 			cs::render::annotation::ScopedEvent inputScope(
 				"Upscaling/CaptureMissedResolveInputColor");
 			cs::engine::CopyResourcePreservingOM(
-				context,
-				upscalingTexture->resource.get(),
-				frameBuffer.get());
+				context, upscalingTexture->resource.get(), frameBuffer.get());
 		}
 
-		const bool published = passthrough
-			? ApplyPassthroughFallback(frameBuffer.get(), context)
-			: ApplySpatialFallback(
-				  frameBuffer.get(),
-				  frameBufferDesc,
-				  sourceWidth,
-				  sourceHeight);
+		const bool published =
+			passthrough ? ApplyPassthroughFallback(frameBuffer.get(), context) : ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, sourceWidth, sourceHeight);
 		if (!published) {
 			ScheduleNativeSuperResolutionFallback();
 			return false;
@@ -513,8 +381,7 @@ namespace cs::render
 
 	bool TemporalRenderer::ApplySpatialFallback(
 		ID3D11Texture2D* a_frameBuffer,
-		const D3D11_TEXTURE2D_DESC& a_frameBufferDesc,
-		std::uint32_t a_sourceWidth,
+		const D3D11_TEXTURE2D_DESC& a_frameBufferDesc, std::uint32_t a_sourceWidth,
 		std::uint32_t a_sourceHeight)
 	{
 		auto* context = cs::engine::GetImmediateContext();
@@ -525,10 +392,9 @@ namespace cs::render
 		if (!context || !a_frameBuffer || !frameBufferRTV || !upscalingTexture ||
 			!upscalingTexture->srv || !publicationTexture ||
 			!publicationTexture->resource || !publicationTexture->rtv ||
-			!linearSampler || !upscalingDataCB ||
-			!upscaleRasterizerState || !upscaleBlendState || !vertexShader ||
-			!pixelShader || !a_sourceWidth || !a_sourceHeight ||
-			a_sourceWidth > a_frameBufferDesc.Width ||
+			!linearSampler || !upscalingDataCB || !upscaleRasterizerState ||
+			!upscaleBlendState || !vertexShader || !pixelShader || !a_sourceWidth ||
+			!a_sourceHeight || a_sourceWidth > a_frameBufferDesc.Width ||
 			a_sourceHeight > a_frameBufferDesc.Height) {
 			return false;
 		}
@@ -565,10 +431,8 @@ namespace cs::render
 			context->OMSetRenderTargets(1, &fallbackRTV, nullptr);
 
 			const UpscalingDataCB data{
-				.trueSamplingDim = {
-					static_cast<float>(a_sourceWidth),
-					static_cast<float>(a_sourceHeight)
-				},
+				.trueSamplingDim = { static_cast<float>(a_sourceWidth),
+					static_cast<float>(a_sourceHeight) },
 				.pad0 = { 0.0f, 0.0f }
 			};
 			upscalingDataCB->Update(data);
@@ -588,16 +452,12 @@ namespace cs::render
 			context->PSSetShader(nullptr, nullptr, 0);
 			context->VSSetShader(nullptr, nullptr, 0);
 		}
-		return PublishUpscalingOutput(
-			context,
-			a_frameBuffer,
-			publicationTexture->resource.get(),
-			true);
+		return PublishUpscalingOutput(context, a_frameBuffer,
+			publicationTexture->resource.get(), true);
 	}
 
 	bool TemporalRenderer::ApplyPassthroughFallback(
-		ID3D11Texture2D* a_frameBuffer,
-		ID3D11DeviceContext* a_context)
+		ID3D11Texture2D* a_frameBuffer, ID3D11DeviceContext* a_context)
 	{
 		if (!a_frameBuffer || !a_context || !upscalingTexture ||
 			!upscalingTexture->resource || !publicationTexture ||
@@ -607,17 +467,13 @@ namespace cs::render
 
 		cs::render::annotation::ScopedEvent passthroughScope(
 			"Upscaling/FullExtentPassthrough");
-		if (!PrepareUpscalingPassthrough(
-				a_context,
+		if (!PrepareUpscalingPassthrough(a_context,
 				publicationTexture->resource.get(),
 				upscalingTexture->resource.get())) {
 			return false;
 		}
-		return PublishUpscalingOutput(
-			a_context,
-			a_frameBuffer,
-			publicationTexture->resource.get(),
-			true);
+		return PublishUpscalingOutput(a_context, a_frameBuffer,
+			publicationTexture->resource.get(), true);
 	}
 
 	void TemporalRenderer::UpscaleDepth()
@@ -630,8 +486,9 @@ namespace cs::render
 
 		auto* context = cs::engine::GetImmediateContext();
 		auto* state = cs::engine::GetGraphicsState();
-		if (!context || !state || !linearSampler || !jitterCB || !upscaleRasterizerState ||
-			!upscaleBlendState || !upscaleDepthStencilState) {
+		if (!context || !state || !linearSampler || !jitterCB ||
+			!upscaleRasterizerState || !upscaleBlendState ||
+			!upscaleDepthStencilState) {
 			return;
 		}
 
@@ -640,18 +497,28 @@ namespace cs::render
 			return;
 		}
 
-		auto* depthTexture = cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
-		auto* depthDSV = cs::engine::GetDepthStencilDSV(cs::engine::DepthStencilTarget::kMain);
-		auto* depthCopyTexture = cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMainCopy);
-		auto* depthCopySRV = cs::engine::GetDepthStencilDepthSRV(cs::engine::DepthStencilTarget::kMainCopy);
-		auto* depthCopyStencilSRV = cs::engine::GetDepthStencilStencilSRV(cs::engine::DepthStencilTarget::kMainCopy);
-		auto* refractionNormalsTexture = cs::engine::GetRenderTargetTexture(kRefractionNormalTarget);
-		auto* refractionNormalsCopy = cs::engine::GetRenderTargetCopyTexture(kRefractionNormalTarget);
-		auto* refractionNormalsCopySRV = cs::engine::GetRenderTargetCopySRV(kRefractionNormalTarget);
-		auto* refractionNormalsRTV = cs::engine::GetRenderTargetRTV(kRefractionNormalTarget);
+		auto* depthTexture =
+			cs::engine::GetDepthStencilTexture(cs::engine::DepthStencilTarget::kMain);
+		auto* depthDSV =
+			cs::engine::GetDepthStencilDSV(cs::engine::DepthStencilTarget::kMain);
+		auto* depthCopyTexture = cs::engine::GetDepthStencilTexture(
+			cs::engine::DepthStencilTarget::kMainCopy);
+		auto* depthCopySRV = cs::engine::GetDepthStencilDepthSRV(
+			cs::engine::DepthStencilTarget::kMainCopy);
+		auto* depthCopyStencilSRV = cs::engine::GetDepthStencilStencilSRV(
+			cs::engine::DepthStencilTarget::kMainCopy);
+		auto* refractionNormalsTexture =
+			cs::engine::GetRenderTargetTexture(kRefractionNormalTarget);
+		auto* refractionNormalsCopy =
+			cs::engine::GetRenderTargetCopyTexture(kRefractionNormalTarget);
+		auto* refractionNormalsCopySRV =
+			cs::engine::GetRenderTargetCopySRV(kRefractionNormalTarget);
+		auto* refractionNormalsRTV =
+			cs::engine::GetRenderTargetRTV(kRefractionNormalTarget);
 
 		if (!depthTexture || !depthDSV || !depthCopyTexture || !depthCopySRV ||
-			!refractionNormalsTexture || !refractionNormalsCopy || !refractionNormalsCopySRV || !refractionNormalsRTV) {
+			!refractionNormalsTexture || !refractionNormalsCopy ||
+			!refractionNormalsCopySRV || !refractionNormalsRTV) {
 			return;
 		}
 
@@ -660,8 +527,7 @@ namespace cs::render
 		if (!fullscreenVS || !depthUpscalePS) {
 			return;
 		}
-		cs::render::annotation::ScopedEvent annotationScope(
-			"Upscaling/UpscaleDepth");
+		cs::render::annotation::ScopedEvent annotationScope("Upscaling/UpscaleDepth");
 
 		// Restore the engine's exact OM bindings after the depth pass.
 		cs::engine::OMScope omScope(context);
@@ -707,7 +573,8 @@ namespace cs::render
 
 			copyIfNonAliased(refractionNormalsCopy, refractionNormalsTexture);
 
-			ID3D11ShaderResourceView* srvs[] = { refractionNormalsCopySRV, depthCopySRV, depthCopyStencilSRV };
+			ID3D11ShaderResourceView* srvs[] = { refractionNormalsCopySRV, depthCopySRV,
+				depthCopyStencilSRV };
 			context->PSSetShaderResources(0, ARRAYSIZE(srvs), srvs);
 
 			// Fallout 4's SAO derives camera-Z without a second output.
@@ -743,23 +610,15 @@ namespace cs::render
 			float currentSharpness = (-2.0f * settings.sharpnessDLSS) + 2.0f;
 			currentSharpness = exp2(-currentSharpness);
 
-			if (!rcas.ApplySharpen(
-					sharpenerTexture->srv.get(),
-					publicationTexture->uav.get(),
-					currentSharpness)) {
+			if (!rcas.ApplySharpen(sharpenerTexture->srv.get(),
+					publicationTexture->uav.get(), currentSharpness)) {
 				return false;
 			}
-			return PublishUpscalingOutput(
-				context,
-				a_frameBuffer,
-				publicationTexture->resource.get(),
-				true);
+			return PublishUpscalingOutput(context, a_frameBuffer,
+				publicationTexture->resource.get(), true);
 		}
 
-		return PublishUpscalingOutput(
-			context,
-			a_frameBuffer,
-			sharpenerTexture->resource.get(),
-			true);
+		return PublishUpscalingOutput(context, a_frameBuffer,
+			sharpenerTexture->resource.get(), true);
 	}
-}
+}  // namespace cs::render

@@ -13,6 +13,7 @@ namespace cs::features
 	void DXGISwapChainProxy::DetachOwner() noexcept
 	{
 		_owner = nullptr;
+		_inner = nullptr;
 	}
 
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(
@@ -77,9 +78,13 @@ namespace cs::features
 		UINT* a_size,
 		void* a_data) noexcept
 	{
-		return _inner
-			? _inner->GetPrivateData(a_name, a_size, a_data)
-			: DXGI_ERROR_INVALID_CALL;
+		if (!_inner) {
+			if (a_size) {
+				*a_size = 0;
+			}
+			return DXGI_ERROR_INVALID_CALL;
+		}
+		return _inner->GetPrivateData(a_name, a_size, a_data);
 	}
 
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetParent(
@@ -203,17 +208,25 @@ namespace cs::features
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFrameStatistics(
 		DXGI_FRAME_STATISTICS* a_stats) noexcept
 	{
-		return _inner
-			? _inner->GetFrameStatistics(a_stats)
-			: DXGI_ERROR_INVALID_CALL;
+		if (!_inner) {
+			if (a_stats) {
+				*a_stats = {};
+			}
+			return DXGI_ERROR_INVALID_CALL;
+		}
+		return _inner->GetFrameStatistics(a_stats);
 	}
 
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetLastPresentCount(
 		UINT* a_count) noexcept
 	{
-		return _inner
-			? _inner->GetLastPresentCount(a_count)
-			: DXGI_ERROR_INVALID_CALL;
+		if (!_inner) {
+			if (a_count) {
+				*a_count = 0;
+			}
+			return DXGI_ERROR_INVALID_CALL;
+		}
+		return _inner->GetLastPresentCount(a_count);
 	}
 
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDesc1(

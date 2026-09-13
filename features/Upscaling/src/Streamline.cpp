@@ -604,25 +604,25 @@ namespace cs::features
 
 	bool Streamline::SetDLSSOptions(
 		sl::ViewportHandle p_viewport,
-		const SuperResolutionExecutionContext& a_context)
+		const render::temporal::SuperResolutionRequest& a_request)
 	{
 		if (!slDLSSSetOptions)
 			return false;
 
-		const auto mode = ToDLSSMode(a_context.qualityMode);
+		const auto mode = ToDLSSMode(a_request.qualityMode);
 		if (!mode) {
 			return false;
 		}
 
 		sl::DLSSOptions dlssOptions{};
 		dlssOptions.mode = *mode;
-		dlssOptions.outputWidth = a_context.outputWidth;
-		dlssOptions.outputHeight = a_context.outputHeight;
+		dlssOptions.outputWidth = a_request.outputWidth;
+		dlssOptions.outputHeight = a_request.outputHeight;
 		dlssOptions.colorBuffersHDR = sl::Boolean::eFalse;
 		dlssOptions.useAutoExposure = sl::Boolean::eTrue;
 
 		std::optional<sl::DLSSPreset> customPreset;
-		switch (a_context.providerPreset) {
+		switch (a_request.providerPreset) {
 		case 1:
 			customPreset = sl::DLSSPreset::ePresetJ;
 			break;
@@ -706,43 +706,66 @@ namespace cs::features
 		};
 	}
 
-	void Streamline::EvaluateDLSS(
-		sl::ViewportHandle vp,
-		const SuperResolutionExecutionContext& a_context,
-		const sl::Extent& extentIn,
-		const sl::Extent& extentOut)
+	bool Streamline::Upscale(
+		const render::temporal::SuperResolutionRequest& a_request)
 	{
-		_evaluatedThisDispatch = false;
-
-		auto* context = a_context.commandContext;
-		if (!context || !slSetTagForFrame || !slEvaluateFeature)
-			return;
+		const auto* recording =
+			std::get_if<render::temporal::D3D11RecordingContext>(
+				&a_request.recording);
+		auto* color =
+			render::temporal::GetD3D11Resource(a_request.colorInput);
+		auto* output =
+			render::temporal::GetD3D11Resource(a_request.privateOutput);
+		auto* depth = render::temporal::GetD3D11Resource(a_request.depth);
+		auto* motion =
+			render::temporal::GetD3D11Resource(a_request.motionVectors);
+		auto* reactive =
+			render::temporal::GetD3D11Resource(a_request.reactiveMask);
+		auto* transparency = render::temporal::GetD3D11Resource(
+			a_request.transparencyCompositionMask);
+		if (!recording || !recording->context ||
+			!color || !output || !depth || !motion || !reactive ||
+			!transparency ||
+			!a_request.renderWidth || !a_request.renderHeight ||
+			!a_request.outputWidth || !a_request.outputHeight ||
+			color == output ||
+			!render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
+			!slSetTagForFrame || !slEvaluateFeature) {
+			return false;
+		}
 		if (!deviceRegistered) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
 				"DLSS evaluation skipped: the device was never registered with Streamline");
-			return;
+			return false;
 		}
+		auto* context = recording->context;
+		const sl::Extent extentIn{
+			0, 0, a_request.renderWidth, a_request.renderHeight
+		};
+		const sl::Extent extentOut{
+			0, 0, a_request.outputWidth, a_request.outputHeight
+		};
 
-		sl::Resource colorInRes = { sl::ResourceType::eTex2d, a_context.colorInput, 0 };
-		sl::Resource colorOutRes = { sl::ResourceType::eTex2d, a_context.privateOutput, 0 };
-		sl::Resource depthRes = { sl::ResourceType::eTex2d, a_context.depth, 0 };
-		sl::Resource mvecRes = { sl::ResourceType::eTex2d, a_context.motionVectors, 0 };
-		sl::Resource reactiveMaskRes = { sl::ResourceType::eTex2d, a_context.reactiveMask, 0 };
+		sl::Resource colorInRes = { sl::ResourceType::eTex2d, color, 0 };
+		sl::Resource colorOutRes = { sl::ResourceType::eTex2d, output, 0 };
+		sl::Resource depthRes = { sl::ResourceType::eTex2d, depth, 0 };
+		sl::Resource mvecRes = { sl::ResourceType::eTex2d, motion, 0 };
+		sl::Resource reactiveMaskRes = { sl::ResourceType::eTex2d, reactive, 0 };
 		sl::Resource transparencyMaskRes = {
-			sl::ResourceType::eTex2d, a_context.transparencyCompositionMask, 0
+			sl::ResourceType::eTex2d, transparency, 0
 		};
 
 		if (!CheckFrameConstants(
-				vp,
-				static_cast<std::uint32_t>(a_context.realFrame),
-				a_context.jitterX,
-				a_context.jitterY,
-				a_context.resetHistory,
-				a_context.camera))
-			return;
+				viewport,
+				static_cast<std::uint32_t>(a_request.realFrame),
+				a_request.jitterX,
+				a_request.jitterY,
+				a_request.resetHistory,
+				a_request.camera))
+			return false;
 
-		if (!SetDLSSOptions(vp, a_context))
-			return;
+		if (!SetDLSSOptions(viewport, a_request))
+			return false;
 
 		sl::ResourceTag tags[] = {
 			{ &colorInRes, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn },
@@ -754,14 +777,14 @@ namespace cs::features
 		};
 
 		const sl::Result tagResult =
-			slSetTagForFrame(*frameToken, vp, tags, _countof(tags), context);
+			slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), context);
 		if (tagResult != sl::Result::eOk) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
 				"slSetTagForFrame failed: {}", magic_enum::enum_name(tagResult));
-			return;
+			return false;
 		}
 
-		sl::ViewportHandle view(vp);
+		sl::ViewportHandle view(viewport);
 		const sl::BaseStructure* inputs[] = { &view };
 
 		sl::Result evalResult = slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context);
@@ -769,29 +792,9 @@ namespace cs::features
 		if (evalResult != sl::Result::eOk) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
 				"slEvaluateFeature failed: {}", magic_enum::enum_name(evalResult));
-			return;
-		}
-
-		_evaluatedThisDispatch = true;
-	}
-
-	bool Streamline::Upscale(const SuperResolutionExecutionContext& a_context)
-	{
-		if (!a_context.commandContext || !a_context.depth || !a_context.colorInput ||
-			!a_context.privateOutput || !a_context.reactiveMask ||
-			!a_context.transparencyCompositionMask || !a_context.motionVectors ||
-			!a_context.renderWidth || !a_context.renderHeight ||
-			!a_context.outputWidth || !a_context.outputHeight ||
-			a_context.colorInput == a_context.privateOutput ||
-			!IsFo4PostTonemapSdr(a_context.color))
 			return false;
-
-		sl::Extent extentIn{ 0, 0, a_context.renderWidth, a_context.renderHeight };
-		sl::Extent extentOut{ 0, 0, a_context.outputWidth, a_context.outputHeight };
-
-		EvaluateDLSS(viewport, a_context, extentIn, extentOut);
-
-		return _evaluatedThisDispatch;
+		}
+		return true;
 	}
 
 	bool Streamline::UpscaleD3D12(
@@ -801,23 +804,18 @@ namespace cs::features
 			std::get_if<render::temporal::D3D12RecordingContext>(
 				&a_request.recording);
 		const auto* colorInput =
-			std::get_if<render::temporal::D3D12GpuView>(
-				&a_request.colorInput);
+			render::temporal::GetD3D12View(a_request.colorInput);
 		const auto* privateOutput =
-			std::get_if<render::temporal::D3D12GpuView>(
-				&a_request.privateOutput);
+			render::temporal::GetD3D12View(a_request.privateOutput);
 		const auto* depth =
-			std::get_if<render::temporal::D3D12GpuView>(
-				&a_request.depth);
+			render::temporal::GetD3D12View(a_request.depth);
 		const auto* motion =
-			std::get_if<render::temporal::D3D12GpuView>(
-				&a_request.motionVectors);
+			render::temporal::GetD3D12View(a_request.motionVectors);
 		const auto* reactive =
-			std::get_if<render::temporal::D3D12GpuView>(
-				&a_request.reactiveMask);
+			render::temporal::GetD3D12View(a_request.reactiveMask);
 		const auto* transparency =
-			std::get_if<render::temporal::D3D12GpuView>(
-				&a_request.transparencyCompositionMask);
+			render::temporal::GetD3D12View(
+				a_request.transparencyCompositionMask);
 		if (!recording || !recording->commandList || !colorInput ||
 			!privateOutput || !depth || !motion || !reactive ||
 			!transparency || !colorInput->resource ||
@@ -832,25 +830,6 @@ namespace cs::features
 			return false;
 		}
 
-		const auto legacyContext = SuperResolutionExecutionContext{
-			.renderWidth = a_request.renderWidth,
-			.renderHeight = a_request.renderHeight,
-			.outputWidth = a_request.outputWidth,
-			.outputHeight = a_request.outputHeight,
-			.qualityMode = a_request.qualityMode,
-			.providerPreset = a_request.providerPreset,
-			.realFrame = a_request.realFrame,
-			.engineFrame = a_request.engineFrame,
-			.jitterX = a_request.jitterX,
-			.jitterY = a_request.jitterY,
-			.sharpness = a_request.sharpness,
-			.frameTimeMilliseconds = a_request.frameTimeMilliseconds,
-			.cameraNear = a_request.cameraNear,
-			.cameraFar = a_request.cameraFar,
-			.cameraVerticalFov = a_request.cameraVerticalFov,
-			.resetHistory = a_request.resetHistory,
-			.color = a_request.color
-		};
 		if (!CheckFrameConstants(
 				viewport,
 				static_cast<std::uint32_t>(a_request.realFrame),
@@ -858,7 +837,7 @@ namespace cs::features
 				a_request.jitterY,
 				a_request.resetHistory,
 				a_request.camera) ||
-			!SetDLSSOptions(viewport, legacyContext)) {
+			!SetDLSSOptions(viewport, a_request)) {
 			return false;
 		}
 

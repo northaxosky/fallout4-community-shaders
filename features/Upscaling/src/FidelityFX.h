@@ -17,7 +17,7 @@
 #include <FidelityFX/framegeneration/include/dx12/ffx_api_framegeneration_dx12.hpp>
 #include <FidelityFX/framegeneration/include/ffx_framegeneration.hpp>
 
-#include "SuperResolutionContext.h"
+#include "Render/TemporalProvider.h"
 
 namespace cs::features
 {
@@ -84,7 +84,7 @@ namespace cs::features
 			std::uint32_t a_outputHeight,
 			float a_jitterX = 0.0f,
 			float a_jitterY = 0.0f,
-			ColorMetadata a_color = {});
+			render::temporal::ColorContract a_color = {});
 		bool SetFrameGenerationCameraData(
 			const FrameGenerationCameraSnapshot& a_camera) noexcept;
 		void ResetFrameGenerationCameraData() noexcept;
@@ -116,10 +116,12 @@ namespace cs::features
 			return frameGenerationCameraData;
 		}
 
-		bool CreateFSRResources(const SuperResolutionInitContext& a_context);
+		bool CreateFSRResources(
+			const render::temporal::SuperResolutionInitContext& a_context);
 		void DestroyFSRResources();
 
-		bool Upscale(const SuperResolutionExecutionContext& a_context);
+		bool Upscale(
+			const render::temporal::SuperResolutionRequest& a_request);
 
 		[[nodiscard]] bool IsReady() const noexcept { return contextCreated; }
 

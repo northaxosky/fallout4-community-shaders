@@ -1,7 +1,6 @@
 #pragma once
 
 #include <array>
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -13,7 +12,6 @@
 #include <winrt/base.h>
 
 #include "DXGISwapChainProxy.h"
-#include "SuperResolutionContext.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalProvider.h"
 
@@ -27,60 +25,18 @@ namespace cs::features
 		winrt::com_ptr<ID3D11RenderTargetView> rtv11;
 		winrt::com_ptr<ID3D12Resource> resource12;
 
-		static std::unique_ptr<SharedD3D11D3D12Texture> Create(
-			ID3D11Device5* a_device11,
-			ID3D12Device* a_device12,
-			const D3D11_TEXTURE2D_DESC& a_desc,
-			std::string_view a_name);
+		static std::unique_ptr<SharedD3D11D3D12Texture>
+		Create(ID3D11Device5* a_device11, ID3D12Device* a_device12,
+			const D3D11_TEXTURE2D_DESC& a_desc, std::string_view a_name);
 	};
 
 	class DX12SwapChain;
-
-	struct FrameGenerationFrameState
-	{
-		std::uint64_t realFrame = 0;
-		std::uint32_t renderWidth = 0;
-		std::uint32_t renderHeight = 0;
-		float jitterX = 0.0f;
-		float jitterY = 0.0f;
-		float frameTimeMilliseconds = 0.0f;
-		bool enable = false;
-		bool resetHistory = false;
-		ColorMetadata color;
-		render::temporal::FrameGenerationCamera camera;
-	};
 
 	struct TemporalPresentationCallbacks
 	{
 		std::function<void()> clearCapture;
 		std::function<void(const char*)> recordFailure;
-		std::function<FrameGenerationFrameState()> queryFrameState;
-	};
-
-	struct FrameGenerationInputRetirementDiagnostics
-	{
-		std::uint64_t acquisitions = 0;
-		std::uint64_t immediateAcquisitions = 0;
-		std::uint64_t gpuWaits = 0;
-		std::uint64_t providerDrains = 0;
-		std::uint64_t globalDrainAttempts = 0;
-		std::uint64_t globalDrainFailures = 0;
-		std::uint64_t waitFailures = 0;
-		std::uint64_t signals = 0;
-		std::uint64_t signalFailures = 0;
-		std::uint64_t violations = 0;
-		std::uint64_t startupDrains = 0;
-		std::uint64_t disableDrains = 0;
-		std::uint64_t resizeDrains = 0;
-		std::uint64_t teardownDrains = 0;
-		std::uint64_t steadyDrains = 0;
-		std::uint64_t lastRealFrame = 0;
-		std::uint64_t lastResourceGeneration = 0;
-		std::uint64_t lastRequiredFence = 0;
-		std::uint64_t lastCompletedFence = 0;
-		std::uint64_t waitCpuMicroseconds = 0;
-		std::uint32_t lastSlot = 0;
-		bool lastAcquireQueuedGpuWait = false;
+		std::function<render::temporal::FrameGenerationRequest()> queryFrameState;
 	};
 
 	class DX12SwapChain : public IDXGISwapChainProxyOwner
@@ -89,9 +45,7 @@ namespace cs::features
 		DX12SwapChain() = default;
 		~DX12SwapChain();
 
-		HRESULT Initialize(
-			IDXGIAdapter* a_adapter,
-			ID3D11Device* a_device,
+		HRESULT Initialize(IDXGIAdapter* a_adapter, ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context,
 			const DXGI_SWAP_CHAIN_DESC& a_desc,
 			render::temporal::IFrameGenerationProvider& a_provider,
@@ -116,11 +70,11 @@ namespace cs::features
 		[[nodiscard]] ID3D12Device* GetD3D12Device() const noexcept;
 		[[nodiscard]] IDXGISwapChain4* GetInnerSwapChain() const noexcept;
 		[[nodiscard]] ID3D12CommandQueue* GetCommandQueue() const noexcept;
-		[[nodiscard]] FrameGenerationInputRetirementDiagnostics
-			GetInputRetirementDiagnostics() const noexcept;
+		[[nodiscard]] render::temporal::PresentInputRetirementDiagnostics
+		GetInputRetirementDiagnostics() const noexcept;
 		bool EvaluateD3D12SuperResolution(
 			render::temporal::ISuperResolutionProvider& a_provider,
-			const SuperResolutionExecutionContext& a_context);
+			const render::temporal::SuperResolutionRequest& a_request);
 
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void SetOutwardD3D11Device(ID3D11Device* a_device) noexcept;
@@ -131,53 +85,39 @@ namespace cs::features
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 
 		HRESULT Present(UINT a_syncInterval, UINT a_flags) noexcept override;
-		HRESULT Present1(
-			UINT a_syncInterval,
-			UINT a_flags,
+		HRESULT
+		Present1(UINT a_syncInterval, UINT a_flags,
 			const DXGI_PRESENT_PARAMETERS* a_parameters) noexcept override;
-		HRESULT GetBuffer(
-			UINT a_buffer, REFIID a_iid, void** a_surface) noexcept override;
-		HRESULT GetDevice(
-			REFIID a_iid, void** a_device) noexcept override;
-		HRESULT SetFullscreenState(
-			BOOL a_fullscreen, IDXGIOutput* a_target) noexcept override;
-		HRESULT GetFullscreenState(
-			BOOL* a_fullscreen, IDXGIOutput** a_target) noexcept override;
+		HRESULT GetBuffer(UINT a_buffer, REFIID a_iid,
+			void** a_surface) noexcept override;
+		HRESULT GetDevice(REFIID a_iid, void** a_device) noexcept override;
+		HRESULT SetFullscreenState(BOOL a_fullscreen,
+			IDXGIOutput* a_target) noexcept override;
+		HRESULT GetFullscreenState(BOOL* a_fullscreen,
+			IDXGIOutput** a_target) noexcept override;
 		HRESULT GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept override;
-		HRESULT ResizeBuffers(
-			UINT a_bufferCount,
-			UINT a_width,
-			UINT a_height,
-			DXGI_FORMAT a_format,
-			UINT a_flags) noexcept override;
-		HRESULT ResizeTarget(
-			const DXGI_MODE_DESC* a_target) noexcept override;
-		HRESULT GetDesc1(
-			DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept override;
-		HRESULT GetFullscreenDesc(
-			DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_desc) noexcept override;
+		HRESULT ResizeBuffers(UINT a_bufferCount, UINT a_width, UINT a_height,
+			DXGI_FORMAT a_format, UINT a_flags) noexcept override;
+		HRESULT ResizeTarget(const DXGI_MODE_DESC* a_target) noexcept override;
+		HRESULT GetDesc1(DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept override;
+		HRESULT
+		GetFullscreenDesc(DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_desc) noexcept override;
 		HRESULT GetHwnd(HWND* a_window) noexcept override;
 		UINT GetCurrentBackBufferIndex() noexcept override;
-		HRESULT CheckColorSpaceSupport(
-			DXGI_COLOR_SPACE_TYPE a_colorSpace,
+		HRESULT CheckColorSpaceSupport(DXGI_COLOR_SPACE_TYPE a_colorSpace,
 			UINT* a_support) noexcept override;
-		HRESULT SetColorSpace1(
-			DXGI_COLOR_SPACE_TYPE a_colorSpace) noexcept override;
-		HRESULT ResizeBuffers1(
-			UINT a_bufferCount,
-			UINT a_width,
-			UINT a_height,
-			DXGI_FORMAT a_format,
-			UINT a_flags,
+		HRESULT SetColorSpace1(DXGI_COLOR_SPACE_TYPE a_colorSpace) noexcept override;
+		HRESULT ResizeBuffers1(UINT a_bufferCount, UINT a_width, UINT a_height,
+			DXGI_FORMAT a_format, UINT a_flags,
 			const UINT* a_creationNodeMask,
 			IUnknown* const* a_presentQueue) noexcept override;
-		HRESULT SetHDRMetaData(
-			DXGI_HDR_METADATA_TYPE a_type,
-			UINT a_size,
+		HRESULT SetHDRMetaData(DXGI_HDR_METADATA_TYPE a_type, UINT a_size,
 			void* a_metadata) noexcept override;
 
-		HRESULT SetPrivateData(REFGUID a_name, UINT a_size, const void* a_data) noexcept;
-		HRESULT SetPrivateDataInterface(REFGUID a_name, const IUnknown* a_unknown) noexcept;
+		HRESULT SetPrivateData(REFGUID a_name, UINT a_size,
+			const void* a_data) noexcept;
+		HRESULT SetPrivateDataInterface(REFGUID a_name,
+			const IUnknown* a_unknown) noexcept;
 		HRESULT GetPrivateData(REFGUID a_name, UINT* a_size, void* a_data) noexcept;
 		HRESULT GetParent(REFIID a_iid, void** a_parent) noexcept;
 		HRESULT GetContainingOutput(IDXGIOutput** a_output) noexcept;
@@ -185,49 +125,37 @@ namespace cs::features
 		HRESULT GetLastPresentCount(UINT* a_count) noexcept;
 
 	private:
-		HRESULT CreateDevices(
-			IDXGIAdapter* a_adapter,
-			ID3D11Device* a_device,
+		HRESULT CreateDevices(IDXGIAdapter* a_adapter, ID3D11Device* a_device,
 			ID3D11DeviceContext* a_context);
-		HRESULT CreateSwapChain(IDXGIAdapter* a_adapter, const DXGI_SWAP_CHAIN_DESC& a_desc);
+		HRESULT CreateSwapChain(IDXGIAdapter* a_adapter,
+			const DXGI_SWAP_CHAIN_DESC& a_desc);
 		HRESULT CreateInteropFence();
 		HRESULT CreateDisplayResources(
-			UINT a_width,
-			UINT a_height,
+			UINT a_width, UINT a_height,
 			std::unique_ptr<SharedD3D11D3D12Texture>& a_proxy,
 			std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2>& a_hudless);
 		HRESULT RecreateDisplayResources(UINT a_width, UINT a_height);
 		HRESULT RecreateFrameGenerationResources(UINT a_width, UINT a_height);
 		HRESULT RestoreFrameGenerationProvider(UINT a_width, UINT a_height);
 		HRESULT RecreateSuperResolutionBridge(
-			const SuperResolutionExecutionContext& a_context);
+			const render::temporal::SuperResolutionRequest& a_request);
 		HRESULT RefreshBackBuffers();
 		HRESULT WaitForFrame(UINT a_slot) noexcept;
 		HRESULT WaitForGpu() noexcept;
-		HRESULT PresentImpl(
-			UINT a_syncInterval,
-			UINT a_flags,
+		HRESULT PresentImpl(UINT a_syncInterval, UINT a_flags,
 			const DXGI_PRESENT_PARAMETERS* a_parameters,
 			bool a_usePresent1);
-		HRESULT PresentInternal(
-			UINT a_syncInterval,
-			UINT a_flags,
+		HRESULT PresentInternal(UINT a_syncInterval, UINT a_flags,
 			const DXGI_PRESENT_PARAMETERS* a_parameters,
 			bool a_usePresent1) noexcept;
-		HRESULT InvokeInnerPresent(
-			UINT a_syncInterval,
-			UINT a_flags,
+		HRESULT InvokeInnerPresent(UINT a_syncInterval, UINT a_flags,
 			const DXGI_PRESENT_PARAMETERS* a_parameters,
 			bool a_usePresent1) noexcept;
-		HRESULT ResizeBuffersImpl(
-			UINT a_bufferCount,
-			UINT a_width,
-			UINT a_height,
-			DXGI_FORMAT a_format,
-			UINT a_flags);
+		HRESULT ResizeBuffersImpl(UINT a_bufferCount, UINT a_width, UINT a_height,
+			DXGI_FORMAT a_format, UINT a_flags);
 		void ClearSharedBuffers(bool a_clearFrameGenerationInputs = true) noexcept;
-		void RecordGlobalDrain(
-			std::string_view a_reason,
+		void
+		RecordGlobalDrain(std::string_view a_reason,
 			const render::temporal::ProviderResult& a_result) noexcept;
 
 		winrt::com_ptr<ID3D11Device5> _device11;
@@ -275,27 +203,7 @@ namespace cs::features
 		std::uint64_t _inputResourceGeneration = 0;
 		bool _published = false;
 		bool _bridgeReady = false;
-		std::atomic_uint64_t _retirementAcquisitions{ 0 };
-		std::atomic_uint64_t _retirementImmediateAcquisitions{ 0 };
-		std::atomic_uint64_t _retirementGpuWaits{ 0 };
-		std::atomic_uint64_t _retirementProviderDrains{ 0 };
-		std::atomic_uint64_t _retirementGlobalDrainAttempts{ 0 };
-		std::atomic_uint64_t _retirementGlobalDrainFailures{ 0 };
-		std::atomic_uint64_t _retirementWaitFailures{ 0 };
-		std::atomic_uint64_t _retirementSignals{ 0 };
-		std::atomic_uint64_t _retirementSignalFailures{ 0 };
-		std::atomic_uint64_t _retirementViolations{ 0 };
-		std::atomic_uint64_t _retirementStartupDrains{ 0 };
-		std::atomic_uint64_t _retirementDisableDrains{ 0 };
-		std::atomic_uint64_t _retirementResizeDrains{ 0 };
-		std::atomic_uint64_t _retirementTeardownDrains{ 0 };
-		std::atomic_uint64_t _retirementSteadyDrains{ 0 };
-		std::atomic_uint64_t _retirementLastRealFrame{ 0 };
-		std::atomic_uint64_t _retirementLastResourceGeneration{ 0 };
-		std::atomic_uint64_t _retirementLastRequiredFence{ 0 };
-		std::atomic_uint64_t _retirementLastCompletedFence{ 0 };
-		std::atomic_uint64_t _retirementWaitCpuMicroseconds{ 0 };
-		std::atomic_uint32_t _retirementLastSlot{ 0 };
-		std::atomic_bool _retirementLastAcquireQueuedGpuWait{ false };
+		render::temporal::AtomicPresentInputRetirementDiagnostics
+			_retirementDiagnostics;
 	};
-}
+}  // namespace cs::features

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -11,15 +12,14 @@
 
 namespace cs::render::temporal
 {
-	[[nodiscard]] inline std::string FormatProviderFailure(
-		std::string_view a_operation,
+	[[nodiscard]] inline std::string
+	FormatProviderFailure(std::string_view a_operation,
 		const ProviderResult& a_result)
 	{
 		std::string message{ a_operation };
 		message += ": ";
-		message += a_result.message.empty()
-			? "provider operation failed"
-			: a_result.message;
+		message +=
+			a_result.message.empty() ? "provider operation failed" : a_result.message;
 		if (a_result.sdkResult != 0) {
 			message += " (SDK result ";
 			message += std::to_string(a_result.sdkResult);
@@ -36,77 +36,59 @@ namespace cs::render::temporal
 		std::uint32_t bufferCount = 0;
 	};
 
-	[[nodiscard]] constexpr bool ShouldObservePresentStatus(
-		UINT a_presentFlags,
+	[[nodiscard]] constexpr bool
+	ShouldObservePresentStatus(UINT a_presentFlags,
 		HRESULT a_presentResult) noexcept
 	{
-		return !(a_presentFlags & DXGI_PRESENT_TEST) &&
-			SUCCEEDED(a_presentResult);
+		return !(a_presentFlags & DXGI_PRESENT_TEST) && SUCCEEDED(a_presentResult);
 	}
 
 	struct PresentStatusCollection
 	{
-		ProviderResult result{
-			.code = ProviderResultCode::kSuccess
-		};
+		ProviderResult result{ .code = ProviderResultCode::kSuccess };
 		std::optional<std::uint32_t> generatedFrames;
 		std::optional<std::uint32_t> presentedFrames;
 		bool observed = false;
 	};
 
 	[[nodiscard]] inline PresentStatusCollection
-		CollectAcceptedPresentStatus(
-			IFrameGenerationProvider& a_provider,
-			UINT a_presentFlags,
-			HRESULT a_presentResult)
+	CollectAcceptedPresentStatus(IFrameGenerationProvider& a_provider,
+		UINT a_presentFlags, HRESULT a_presentResult)
 	{
-		if (!ShouldObservePresentStatus(
-				a_presentFlags, a_presentResult)) {
+		if (!ShouldObservePresentStatus(a_presentFlags, a_presentResult)) {
 			return {};
 		}
-		return {
-			.result = a_provider.CollectPresentStatus(
-				a_presentFlags, a_presentResult),
-			.generatedFrames =
-				a_provider.ConsumeGeneratedFrameCount(),
-			.presentedFrames =
-				a_provider.ConsumePresentedFrameCount(),
-			.observed = true
-		};
+		return { .result =
+					 a_provider.CollectPresentStatus(a_presentFlags, a_presentResult),
+			.generatedFrames = a_provider.ConsumeGeneratedFrameCount(),
+			.presentedFrames = a_provider.ConsumePresentedFrameCount(),
+			.observed = true };
 	}
 
 	template <class Drain>
-	[[nodiscard]] ProviderResult QuiesceDrainAndRelease(
-		IFrameGenerationProvider& a_provider,
-		Drain&& a_drain)
+	[[nodiscard]] ProviderResult
+	QuiesceDrainAndRelease(IFrameGenerationProvider& a_provider, Drain&& a_drain)
 	{
 		auto result = a_provider.Quiesce();
 		if (!result.Succeeded()) {
 			return result;
 		}
 		if (!std::forward<Drain>(a_drain)()) {
-			return {
-				.code = ProviderResultCode::kFailure,
-				.message = "GPU work did not drain before provider resource release."
-			};
+			return { .code = ProviderResultCode::kFailure,
+				.message =
+					"GPU work did not drain before provider resource release." };
 		}
 		return a_provider.ReleaseDisplayResources();
 	}
 
 	[[nodiscard]] inline ProviderResult RestoreProviderAfterResize(
-		IFrameGenerationProvider& a_provider,
-		HRESULT a_resizeResult,
+		IFrameGenerationProvider& a_provider, HRESULT a_resizeResult,
 		const ProviderDisplayDescription& a_oldDescription,
 		const std::optional<ProviderDisplayDescription>& a_newDescription)
 	{
-		const auto& description =
-			SUCCEEDED(a_resizeResult) && a_newDescription
-				? *a_newDescription
-				: a_oldDescription;
+		const auto& description = SUCCEEDED(a_resizeResult) && a_newDescription ? *a_newDescription : a_oldDescription;
 		return a_provider.CreateDisplayResources(
-			description.width,
-			description.height,
-			description.format,
+			description.width, description.height, description.format,
 			description.bufferCount);
 	}
 
@@ -117,30 +99,36 @@ namespace cs::render::temporal
 	};
 
 	[[nodiscard]] inline ResizeProviderRestoration
-		RestoreProviderAndPreserveResizeResult(
-			IFrameGenerationProvider& a_provider,
-			HRESULT a_resizeResult,
-			const ProviderDisplayDescription& a_oldDescription,
-			const std::optional<ProviderDisplayDescription>&
-				a_newDescription)
+	RestoreProviderAndPreserveResizeResult(
+		IFrameGenerationProvider& a_provider, HRESULT a_resizeResult,
+		const ProviderDisplayDescription& a_oldDescription,
+		const std::optional<ProviderDisplayDescription>& a_newDescription)
 	{
-		return {
-			.nativeResizeResult = a_resizeResult,
+		return { .nativeResizeResult = a_resizeResult,
 			.providerResult = RestoreProviderAfterResize(
-				a_provider,
-				a_resizeResult,
-				a_oldDescription,
-				a_newDescription)
-		};
+				a_provider, a_resizeResult, a_oldDescription, a_newDescription) };
 	}
 
-	[[nodiscard]] constexpr HRESULT CompleteNativeResize(
-		HRESULT a_nativeResizeResult,
+	[[nodiscard]] constexpr HRESULT
+	CompleteNativeResize(HRESULT a_nativeResizeResult,
 		HRESULT a_bridgeResult) noexcept
 	{
-		return FAILED(a_bridgeResult)
-			? a_bridgeResult
-			: a_nativeResizeResult;
+		return FAILED(a_bridgeResult) ? a_bridgeResult : a_nativeResizeResult;
+	}
+
+	template <class Drain, class Commit>
+	[[nodiscard]] HRESULT CommitAfterGpuDrain(bool a_replacementsReady,
+		Drain&& a_drain, Commit&& a_commit)
+	{
+		if (!a_replacementsReady) {
+			return E_FAIL;
+		}
+		const HRESULT result = a_drain();
+		if (FAILED(result)) {
+			return result;
+		}
+		a_commit();
+		return S_OK;
 	}
 
 	struct SafePreparationResult
@@ -151,17 +139,15 @@ namespace cs::render::temporal
 		bool safeToPresent = false;
 	};
 
-	[[nodiscard]] inline SafePreparationResult PrepareFrameSafely(
-		IFrameGenerationProvider& a_provider,
+	[[nodiscard]] inline SafePreparationResult
+	PrepareFrameSafely(IFrameGenerationProvider& a_provider,
 		const FrameGenerationRequest& a_request)
 	{
 		SafePreparationResult result;
 		result.prepare = a_provider.PrepareFrame(a_request);
 		result.prepared = result.prepare.Succeeded();
 		if (result.prepared) {
-			result.cancel = {
-				.code = ProviderResultCode::kSuccess
-			};
+			result.cancel = { .code = ProviderResultCode::kSuccess };
 			result.safeToPresent = true;
 			return result;
 		}
@@ -172,12 +158,94 @@ namespace cs::render::temporal
 
 	struct PresentInputRetirementToken
 	{
-		PresentInputRetirementMode mode =
-			PresentInputRetirementMode::kRecordedCommandList;
 		std::uint64_t value = 0;
 		std::uint64_t realFrame = 0;
 		std::uint64_t resourceGeneration = 0;
 		std::uint64_t queueIdentity = 0;
+	};
+
+	struct PresentInputRetirementDiagnostics
+	{
+		std::uint64_t acquisitions = 0;
+		std::uint64_t immediateAcquisitions = 0;
+		std::uint64_t gpuWaits = 0;
+		std::uint64_t providerDrains = 0;
+		std::uint64_t globalDrainAttempts = 0;
+		std::uint64_t globalDrainFailures = 0;
+		std::uint64_t waitFailures = 0;
+		std::uint64_t signals = 0;
+		std::uint64_t signalFailures = 0;
+		std::uint64_t violations = 0;
+		std::uint64_t startupDrains = 0;
+		std::uint64_t disableDrains = 0;
+		std::uint64_t resizeDrains = 0;
+		std::uint64_t teardownDrains = 0;
+		std::uint64_t steadyDrains = 0;
+		std::uint64_t lastRealFrame = 0;
+		std::uint64_t lastResourceGeneration = 0;
+		std::uint64_t lastRequiredFence = 0;
+		std::uint64_t lastCompletedFence = 0;
+		std::uint64_t waitCpuMicroseconds = 0;
+		std::uint32_t lastSlot = 0;
+		bool lastAcquireQueuedGpuWait = false;
+	};
+
+	struct AtomicPresentInputRetirementDiagnostics
+	{
+		[[nodiscard]] PresentInputRetirementDiagnostics Snapshot() const noexcept
+		{
+			return { .acquisitions = acquisitions.load(std::memory_order_relaxed),
+				.immediateAcquisitions =
+					immediateAcquisitions.load(std::memory_order_relaxed),
+				.gpuWaits = gpuWaits.load(std::memory_order_relaxed),
+				.providerDrains = providerDrains.load(std::memory_order_relaxed),
+				.globalDrainAttempts =
+					globalDrainAttempts.load(std::memory_order_relaxed),
+				.globalDrainFailures =
+					globalDrainFailures.load(std::memory_order_relaxed),
+				.waitFailures = waitFailures.load(std::memory_order_relaxed),
+				.signals = signals.load(std::memory_order_relaxed),
+				.signalFailures = signalFailures.load(std::memory_order_relaxed),
+				.violations = violations.load(std::memory_order_relaxed),
+				.startupDrains = startupDrains.load(std::memory_order_relaxed),
+				.disableDrains = disableDrains.load(std::memory_order_relaxed),
+				.resizeDrains = resizeDrains.load(std::memory_order_relaxed),
+				.teardownDrains = teardownDrains.load(std::memory_order_relaxed),
+				.lastRealFrame = lastRealFrame.load(std::memory_order_relaxed),
+				.lastResourceGeneration =
+					lastResourceGeneration.load(std::memory_order_relaxed),
+				.lastRequiredFence =
+					lastRequiredFence.load(std::memory_order_relaxed),
+				.lastCompletedFence =
+					lastCompletedFence.load(std::memory_order_relaxed),
+				.waitCpuMicroseconds =
+					waitCpuMicroseconds.load(std::memory_order_relaxed),
+				.lastSlot = lastSlot.load(std::memory_order_relaxed),
+				.lastAcquireQueuedGpuWait =
+					lastAcquireQueuedGpuWait.load(std::memory_order_relaxed) };
+		}
+
+		std::atomic_uint64_t acquisitions{ 0 };
+		std::atomic_uint64_t immediateAcquisitions{ 0 };
+		std::atomic_uint64_t gpuWaits{ 0 };
+		std::atomic_uint64_t providerDrains{ 0 };
+		std::atomic_uint64_t globalDrainAttempts{ 0 };
+		std::atomic_uint64_t globalDrainFailures{ 0 };
+		std::atomic_uint64_t waitFailures{ 0 };
+		std::atomic_uint64_t signals{ 0 };
+		std::atomic_uint64_t signalFailures{ 0 };
+		std::atomic_uint64_t violations{ 0 };
+		std::atomic_uint64_t startupDrains{ 0 };
+		std::atomic_uint64_t disableDrains{ 0 };
+		std::atomic_uint64_t resizeDrains{ 0 };
+		std::atomic_uint64_t teardownDrains{ 0 };
+		std::atomic_uint64_t lastRealFrame{ 0 };
+		std::atomic_uint64_t lastResourceGeneration{ 0 };
+		std::atomic_uint64_t lastRequiredFence{ 0 };
+		std::atomic_uint64_t lastCompletedFence{ 0 };
+		std::atomic_uint64_t waitCpuMicroseconds{ 0 };
+		std::atomic_uint32_t lastSlot{ 0 };
+		std::atomic_bool lastAcquireQueuedGpuWait{ false };
 	};
 
 	enum class PresentInputAcquireCode : std::uint8_t
@@ -205,47 +273,29 @@ namespace cs::render::temporal
 		}
 	};
 
-	[[nodiscard]] inline bool
-		ShouldPublishPresentInputAcquireTelemetry(
-			const PresentInputAcquireResult& a_result) noexcept
+	[[nodiscard]] inline bool ShouldPublishPresentInputAcquireTelemetry(
+		const PresentInputAcquireResult& a_result) noexcept
 	{
 		return a_result.firstAcquire || !a_result.Succeeded();
 	}
 
-	[[nodiscard]] constexpr std::string_view PresentInputAcquireCodeName(
-		PresentInputAcquireCode a_code) noexcept
-	{
-		switch (a_code) {
-		case PresentInputAcquireCode::kAcquired:
-			return "none";
-		case PresentInputAcquireCode::kInvalidSlot:
-			return "invalid_slot";
-		case PresentInputAcquireCode::kGenerationMismatch:
-			return "generation_mismatch";
-		case PresentInputAcquireCode::kQueueMismatch:
-			return "queue_mismatch";
-		case PresentInputAcquireCode::kFenceUnavailable:
-			return "fence_unavailable";
-		case PresentInputAcquireCode::kWaitFailed:
-			return "wait_failed";
-		}
-		return "unknown";
-	}
-
-	[[nodiscard]] constexpr const char* PresentInputAcquireFailureMessage(
-		PresentInputAcquireCode a_code) noexcept
+	[[nodiscard]] constexpr const char*
+	PresentInputAcquireFailureMessage(PresentInputAcquireCode a_code) noexcept
 	{
 		switch (a_code) {
 		case PresentInputAcquireCode::kInvalidSlot:
 			return "Frame-generation input retirement failed: invalid slot";
 		case PresentInputAcquireCode::kGenerationMismatch:
-			return "Frame-generation input retirement failed: resource generation mismatch";
+			return "Frame-generation input retirement failed: resource generation "
+				   "mismatch";
 		case PresentInputAcquireCode::kQueueMismatch:
 			return "Frame-generation input retirement failed: command queue mismatch";
 		case PresentInputAcquireCode::kFenceUnavailable:
-			return "Frame-generation input retirement failed: retirement fence unavailable";
+			return "Frame-generation input retirement failed: retirement fence "
+				   "unavailable";
 		case PresentInputAcquireCode::kWaitFailed:
-			return "Frame-generation input retirement failed: producer queue wait failed";
+			return "Frame-generation input retirement failed: producer queue wait "
+				   "failed";
 		case PresentInputAcquireCode::kAcquired:
 			break;
 		}
@@ -261,14 +311,10 @@ namespace cs::render::temporal
 
 	template <class Present, class Signal>
 	[[nodiscard]] PresentRetirementSubmission PresentAndRetireInputs(
-		PresentInputRetirementMode a_mode,
-		bool a_providerMayConsume,
-		std::uint64_t a_realFrame,
-		std::uint64_t a_resourceGeneration,
-		std::uint64_t a_queueIdentity,
-		std::uint64_t& a_nextFenceValue,
-		Present&& a_present,
-		Signal&& a_signal)
+		PresentInputRetirementMode a_mode, bool a_providerMayConsume,
+		std::uint64_t a_realFrame, std::uint64_t a_resourceGeneration,
+		std::uint64_t a_queueIdentity, std::uint64_t& a_nextFenceValue,
+		Present&& a_present, Signal&& a_signal)
 	{
 		PresentRetirementSubmission result;
 		result.presentResult = std::forward<Present>(a_present)();
@@ -277,17 +323,9 @@ namespace cs::render::temporal
 			return result;
 		}
 
-		PresentInputRetirementToken token{
-			.mode = a_mode,
-			.realFrame = a_realFrame,
+		PresentInputRetirementToken token{ .realFrame = a_realFrame,
 			.resourceGeneration = a_resourceGeneration,
-			.queueIdentity = a_queueIdentity
-		};
-		if (a_mode == PresentInputRetirementMode::kProviderDrain) {
-			result.token = token;
-			return result;
-		}
-
+			.queueIdentity = a_queueIdentity };
 		token.value = a_nextFenceValue++;
 		result.signalResult = std::forward<Signal>(a_signal)(token.value);
 		if (SUCCEEDED(result.signalResult)) {
@@ -300,71 +338,52 @@ namespace cs::render::temporal
 	{
 	public:
 		template <class Wait>
-		[[nodiscard]] PresentInputAcquireResult Acquire(
-			std::uint32_t a_slot,
-			std::uint64_t a_resourceGeneration,
-			std::uint64_t a_queueIdentity,
-			std::uint64_t a_completedValue,
+		[[nodiscard]] PresentInputAcquireResult
+		Acquire(std::uint32_t a_slot, std::uint64_t a_resourceGeneration,
+			std::uint64_t a_queueIdentity, std::uint64_t a_completedValue,
 			Wait&& a_wait)
 		{
 			if (a_slot >= _pending.size()) {
-				return {
-					.code = PresentInputAcquireCode::kInvalidSlot,
+				return { .code = PresentInputAcquireCode::kInvalidSlot,
 					.completedValue = a_completedValue,
-					.result = E_INVALIDARG
-				};
+					.result = E_INVALIDARG };
 			}
 			if (_acquired[a_slot]) {
-				return {
-					.code = PresentInputAcquireCode::kAcquired,
-					.token = _pending[a_slot].value_or(
-						PresentInputRetirementToken{}),
+				return { .code = PresentInputAcquireCode::kAcquired,
+					.token = _pending[a_slot].value_or(PresentInputRetirementToken{}),
 					.completedValue = a_completedValue,
-					.result = S_OK
-				};
+					.result = S_OK };
 			}
 			if (!_pending[a_slot]) {
 				_acquired[a_slot] = true;
-				return {
-					.code = PresentInputAcquireCode::kAcquired,
+				return { .code = PresentInputAcquireCode::kAcquired,
 					.completedValue = a_completedValue,
 					.result = S_OK,
-					.firstAcquire = true
-				};
+					.firstAcquire = true };
 			}
 
 			const auto token = *_pending[a_slot];
-			PresentInputAcquireResult result{
-				.code = PresentInputAcquireCode::kAcquired,
+			PresentInputAcquireResult result{ .code = PresentInputAcquireCode::kAcquired,
 				.token = token,
 				.completedValue = a_completedValue,
 				.result = S_OK,
-				.firstAcquire = true
-			};
+				.firstAcquire = true };
 			if (token.resourceGeneration != a_resourceGeneration) {
-				result.code =
-					PresentInputAcquireCode::kGenerationMismatch;
+				result.code = PresentInputAcquireCode::kGenerationMismatch;
 				result.result = E_INVALIDARG;
 				return result;
 			}
-			if (token.mode ==
-				PresentInputRetirementMode::kSynchronousPresentQueue) {
-				if (token.queueIdentity != a_queueIdentity) {
-					result.code = PresentInputAcquireCode::kQueueMismatch;
-					result.result = E_INVALIDARG;
-					return result;
-				}
-				if (a_completedValue == UINT64_MAX) {
-					result.code =
-						PresentInputAcquireCode::kFenceUnavailable;
-					result.result = DXGI_ERROR_DEVICE_REMOVED;
-					return result;
-				}
-				result.waitRequired = a_completedValue < token.value;
-			} else {
-				result.waitRequired =
-					token.mode == PresentInputRetirementMode::kProviderDrain;
+			if (token.queueIdentity != a_queueIdentity) {
+				result.code = PresentInputAcquireCode::kQueueMismatch;
+				result.result = E_INVALIDARG;
+				return result;
 			}
+			if (a_completedValue == UINT64_MAX) {
+				result.code = PresentInputAcquireCode::kFenceUnavailable;
+				result.result = DXGI_ERROR_DEVICE_REMOVED;
+				return result;
+			}
+			result.waitRequired = a_completedValue < token.value;
 			if (result.waitRequired) {
 				result.result = std::forward<Wait>(a_wait)(token);
 				if (FAILED(result.result)) {
@@ -378,8 +397,8 @@ namespace cs::render::temporal
 			return result;
 		}
 
-		void MarkSubmitted(
-			std::uint32_t a_slot,
+		void
+		MarkSubmitted(std::uint32_t a_slot,
 			std::optional<PresentInputRetirementToken> a_token) noexcept
 		{
 			if (a_slot < _pending.size()) {
@@ -396,8 +415,7 @@ namespace cs::render::temporal
 
 		[[nodiscard]] bool IsPending(std::uint32_t a_slot) const noexcept
 		{
-			return a_slot < _pending.size() &&
-				_pending[a_slot].has_value();
+			return a_slot < _pending.size() && _pending[a_slot].has_value();
 		}
 
 	private:
@@ -407,12 +425,9 @@ namespace cs::render::temporal
 
 	inline void ResetPresentationProtocol(
 		std::array<std::uint64_t, 2>& a_allocatorFenceValues,
-		PresentInputReuseGate& a_inputReuseGate,
-		std::uint32_t& a_frameSlot,
-		bool& a_presentPrepared,
-		bool& a_preparedFrameGeneration,
-		bool& a_vendorConsumptionPossible,
-		bool& a_preparedTransaction) noexcept
+		PresentInputReuseGate& a_inputReuseGate, std::uint32_t& a_frameSlot,
+		bool& a_presentPrepared, bool& a_preparedFrameGeneration,
+		bool& a_vendorConsumptionPossible, bool& a_preparedTransaction) noexcept
 	{
 		a_allocatorFenceValues.fill(0);
 		a_inputReuseGate.Reset();
@@ -428,34 +443,24 @@ namespace cs::render::temporal
 		DXGI_SWAP_CHAIN_DESC& a_proxyDescription,
 		DXGI_SWAP_CHAIN_DESC1& a_publishedInnerDescription,
 		std::array<std::uint64_t, 2>& a_allocatorFenceValues,
-		PresentInputReuseGate& a_inputReuseGate,
-		std::uint32_t& a_frameSlot,
-		bool& a_presentPrepared,
-		bool& a_preparedFrameGeneration,
-		bool& a_vendorConsumptionPossible,
-		bool& a_preparedTransaction) noexcept
+		PresentInputReuseGate& a_inputReuseGate, std::uint32_t& a_frameSlot,
+		bool& a_presentPrepared, bool& a_preparedFrameGeneration,
+		bool& a_vendorConsumptionPossible, bool& a_preparedTransaction) noexcept
 	{
 		a_publishedInnerDescription = a_innerDescription;
 		a_proxyDescription.BufferDesc.Width = a_innerDescription.Width;
 		a_proxyDescription.BufferDesc.Height = a_innerDescription.Height;
 		a_proxyDescription.BufferDesc.Format = a_innerDescription.Format;
-		ResetPresentationProtocol(
-			a_allocatorFenceValues,
-			a_inputReuseGate,
-			a_frameSlot,
-			a_presentPrepared,
+		ResetPresentationProtocol(a_allocatorFenceValues, a_inputReuseGate,
+			a_frameSlot, a_presentPrepared,
 			a_preparedFrameGeneration,
-			a_vendorConsumptionPossible,
-			a_preparedTransaction);
+			a_vendorConsumptionPossible, a_preparedTransaction);
 	}
 
 	class PresentedFrameAccumulator
 	{
 	public:
-		void Add(std::uint32_t a_count) noexcept
-		{
-			_count += a_count;
-		}
+		void Add(std::uint32_t a_count) noexcept { _count += a_count; }
 
 		[[nodiscard]] std::uint32_t Consume() noexcept
 		{
@@ -467,8 +472,7 @@ namespace cs::render::temporal
 	};
 
 	template <class Acquire, class Write>
-	[[nodiscard]] bool WriteFrameGenerationInput(
-		Acquire&& a_acquire,
+	[[nodiscard]] bool WriteFrameGenerationInput(Acquire&& a_acquire,
 		Write&& a_write)
 	{
 		if (!std::forward<Acquire>(a_acquire)()) {
@@ -487,8 +491,7 @@ namespace cs::render::temporal
 	};
 
 	template <class Disable, class Drain, class Destroy>
-	[[nodiscard]] DestructionResult DisableDrainAndDestroy(
-		Disable&& a_disable,
+	[[nodiscard]] DestructionResult DisableDrainAndDestroy(Disable&& a_disable,
 		Drain&& a_drain,
 		Destroy&& a_destroy)
 	{
@@ -498,8 +501,6 @@ namespace cs::render::temporal
 		if (!std::forward<Drain>(a_drain)()) {
 			return DestructionResult::kDrainFailed;
 		}
-		return std::forward<Destroy>(a_destroy)()
-			? DestructionResult::kSuccess
-			: DestructionResult::kDestroyFailed;
+		return std::forward<Destroy>(a_destroy)() ? DestructionResult::kSuccess : DestructionResult::kDestroyFailed;
 	}
-}
+}  // namespace cs::render::temporal

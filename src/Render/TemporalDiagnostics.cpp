@@ -184,6 +184,24 @@ namespace cs::render
 		return true;
 	}
 
+	FeatureDebugTexture TemporalRenderer::GetFrozenTextureSnapshot(
+		const FrozenTextureSnapshot& a_snapshot,
+		std::uint8_t a_view,
+		bool a_selected,
+		std::string_view a_unavailableText) const
+	{
+		FeatureDebugTexture texture{ .unavailableText = a_unavailableText };
+		if (!a_selected || !a_snapshot.request.Ready() ||
+			a_snapshot.capturedView != a_view || !a_snapshot.view) {
+			return texture;
+		}
+		texture.texture = a_snapshot.view.get();
+		texture.width = a_snapshot.sourceDesc.Width;
+		texture.height = a_snapshot.sourceDesc.Height;
+		texture.caption = a_snapshot.caption;
+		return texture;
+	}
+
 	bool TemporalRenderer::CaptureDebugSnapshot(
 		DebugView a_view,
 		ID3D11ShaderResourceView* a_source,
@@ -302,23 +320,12 @@ namespace cs::render
 			view = FrameGenerationDebugView::kMotion;
 		}
 
-		FeatureDebugTexture texture{
-			.unavailableText =
-				"Frozen frame-generation snapshot is pending."
-		};
-		if (view == FrameGenerationDebugView::kOff ||
-			_frameGenerationDebugView.load(std::memory_order_acquire) != view ||
-			!_frameGenerationDebugSnapshot.request.Ready() ||
-			_frameGenerationDebugSnapshot.capturedView !=
-				static_cast<std::uint8_t>(view) ||
-			!_frameGenerationDebugSnapshot.view) {
-			return texture;
-		}
-		texture.texture = _frameGenerationDebugSnapshot.view.get();
-		texture.width = _frameGenerationDebugSnapshot.sourceDesc.Width;
-		texture.height = _frameGenerationDebugSnapshot.sourceDesc.Height;
-		texture.caption = _frameGenerationDebugSnapshot.caption;
-		return texture;
+		return GetFrozenTextureSnapshot(
+			_frameGenerationDebugSnapshot,
+			static_cast<std::uint8_t>(view),
+			view != FrameGenerationDebugView::kOff &&
+				_frameGenerationDebugView.load(std::memory_order_acquire) == view,
+			"Frozen frame-generation snapshot is pending.");
 	}
 
 	void TemporalRenderer::CaptureFrameGenerationInputDebugSnapshot()
@@ -375,86 +382,43 @@ namespace cs::render
 
 	FeatureDebugTexture TemporalRenderer::GetRenderSubrectDebugTexture() const
 	{
-		FeatureDebugTexture texture{
-			.unavailableText = "Frozen RT4 snapshot is pending."
-		};
-		if (_debugView.load(std::memory_order_acquire) != DebugView::kRenderSubrect) {
-			return texture;
-		}
-		if (_superResolutionDebugSnapshot.request.Ready() &&
-			_superResolutionDebugSnapshot.capturedView ==
-				static_cast<std::uint8_t>(DebugView::kRenderSubrect) &&
-			_superResolutionDebugSnapshot.view) {
-			texture.texture = _superResolutionDebugSnapshot.view.get();
-			texture.width = _superResolutionDebugSnapshot.sourceDesc.Width;
-			texture.height = _superResolutionDebugSnapshot.sourceDesc.Height;
-			texture.caption = _superResolutionDebugSnapshot.caption;
-		}
-		return texture;
+		return GetFrozenTextureSnapshot(
+			_superResolutionDebugSnapshot,
+			static_cast<std::uint8_t>(DebugView::kRenderSubrect),
+			_debugView.load(std::memory_order_acquire) ==
+				DebugView::kRenderSubrect,
+			"Frozen RT4 snapshot is pending.");
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetProxyDebugTexture() const
 	{
-		FeatureDebugTexture texture{
-			.unavailableText = "Frozen RT4 proxy snapshot is pending."
-		};
-		if (_debugView.load(std::memory_order_acquire) != DebugView::kProxy) {
-			return texture;
-		}
-		if (_superResolutionDebugSnapshot.request.Ready() &&
-			_superResolutionDebugSnapshot.capturedView ==
-				static_cast<std::uint8_t>(DebugView::kProxy) &&
-			_superResolutionDebugSnapshot.view) {
-			texture.texture = _superResolutionDebugSnapshot.view.get();
-			texture.width = _superResolutionDebugSnapshot.sourceDesc.Width;
-			texture.height = _superResolutionDebugSnapshot.sourceDesc.Height;
-			texture.caption = _superResolutionDebugSnapshot.caption;
-		}
-		return texture;
+		return GetFrozenTextureSnapshot(
+			_superResolutionDebugSnapshot,
+			static_cast<std::uint8_t>(DebugView::kProxy),
+			_debugView.load(std::memory_order_acquire) == DebugView::kProxy,
+			"Frozen RT4 proxy snapshot is pending.");
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetMotionVectorsDebugTexture() const
 	{
-		FeatureDebugTexture texture{
-			.unavailableText = "Frozen motion-vector snapshot is pending."
-		};
-		if (_debugView.load(std::memory_order_acquire) != DebugView::kMotionVectors) {
-			return texture;
-		}
-		if (_superResolutionDebugSnapshot.request.Ready() &&
-			_superResolutionDebugSnapshot.capturedView ==
-				static_cast<std::uint8_t>(DebugView::kMotionVectors) &&
-			_superResolutionDebugSnapshot.view) {
-			texture.texture = _superResolutionDebugSnapshot.view.get();
-			texture.width = _superResolutionDebugSnapshot.sourceDesc.Width;
-			texture.height = _superResolutionDebugSnapshot.sourceDesc.Height;
-			texture.caption = _superResolutionDebugSnapshot.caption;
-		}
-		return texture;
+		return GetFrozenTextureSnapshot(
+			_superResolutionDebugSnapshot,
+			static_cast<std::uint8_t>(DebugView::kMotionVectors),
+			_debugView.load(std::memory_order_acquire) ==
+				DebugView::kMotionVectors,
+			"Frozen motion-vector snapshot is pending.");
 	}
 
 	FeatureDebugTexture TemporalRenderer::GetProviderOutputDebugTexture() const
 	{
 		const auto failure =
 			_providerOutputDebugFailure.load(std::memory_order_acquire);
-		FeatureDebugTexture texture{
-			.unavailableText = ProviderOutputDebugUnavailableText(failure)
-		};
-		if (_debugView.load(std::memory_order_acquire) != DebugView::kProviderOutput) {
-			return texture;
-		}
-		if (!_superResolutionDebugSnapshot.request.Ready() ||
-			_superResolutionDebugSnapshot.capturedView !=
-				static_cast<std::uint8_t>(DebugView::kProviderOutput) ||
-			!_superResolutionDebugSnapshot.view) {
-			return texture;
-		}
-
-		texture.texture = _superResolutionDebugSnapshot.view.get();
-		texture.width = _superResolutionDebugSnapshot.sourceDesc.Width;
-		texture.height = _superResolutionDebugSnapshot.sourceDesc.Height;
-		texture.caption = _superResolutionDebugSnapshot.caption;
-		return texture;
+		return GetFrozenTextureSnapshot(
+			_superResolutionDebugSnapshot,
+			static_cast<std::uint8_t>(DebugView::kProviderOutput),
+			_debugView.load(std::memory_order_acquire) ==
+				DebugView::kProviderOutput,
+			ProviderOutputDebugUnavailableText(failure));
 	}
 
 	std::string_view TemporalRenderer::ProviderOutputDebugFailureName(

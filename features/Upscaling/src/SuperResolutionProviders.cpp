@@ -21,53 +21,6 @@ namespace cs::features
 			};
 		}
 
-		SuperResolutionExecutionContext LegacyContext(
-			const render::temporal::SuperResolutionRequest& a_request)
-		{
-			const auto* recording =
-				std::get_if<render::temporal::D3D11RecordingContext>(
-					&a_request.recording);
-			const auto view = [](const auto& a_resource) {
-				return std::get_if<render::temporal::D3D11GpuView>(
-					&a_resource);
-			};
-			const auto* color = view(a_request.colorInput);
-			const auto* output = view(a_request.privateOutput);
-			const auto* depth = view(a_request.depth);
-			const auto* motion = view(a_request.motionVectors);
-			const auto* reactive = view(a_request.reactiveMask);
-			const auto* transparency =
-				view(a_request.transparencyCompositionMask);
-			return {
-				.commandContext = recording ? recording->context : nullptr,
-				.colorInput = color ? color->resource : nullptr,
-				.privateOutput = output ? output->resource : nullptr,
-				.depth = depth ? depth->resource : nullptr,
-				.motionVectors = motion ? motion->resource : nullptr,
-				.reactiveMask = reactive ? reactive->resource : nullptr,
-				.transparencyCompositionMask =
-					transparency ? transparency->resource : nullptr,
-				.renderWidth = a_request.renderWidth,
-				.renderHeight = a_request.renderHeight,
-				.outputWidth = a_request.outputWidth,
-				.outputHeight = a_request.outputHeight,
-				.qualityMode = a_request.qualityMode,
-				.providerPreset = a_request.providerPreset,
-				.realFrame = a_request.realFrame,
-				.engineFrame = a_request.engineFrame,
-				.jitterX = a_request.jitterX,
-				.jitterY = a_request.jitterY,
-				.sharpness = a_request.sharpness,
-				.frameTimeMilliseconds =
-					a_request.frameTimeMilliseconds,
-				.cameraNear = a_request.cameraNear,
-				.cameraFar = a_request.cameraFar,
-				.cameraVerticalFov = a_request.cameraVerticalFov,
-				.resetHistory = a_request.resetHistory,
-				.color = a_request.color,
-				.camera = a_request.camera
-			};
-		}
 	}
 
 	FidelityFXSuperResolution::FidelityFXSuperResolution(
@@ -138,7 +91,7 @@ namespace cs::features
 	render::temporal::ProviderResult FidelityFXSuperResolution::Record(
 		const render::temporal::SuperResolutionRequest& a_request)
 	{
-		return _runtime.Upscale(LegacyContext(a_request))
+		return _runtime.Upscale(a_request)
 			? Success()
 			: Failure("FSR 3 super-resolution evaluation failed.");
 	}
@@ -197,7 +150,7 @@ namespace cs::features
 	{
 		const bool succeeded = _runtime.IsD3D12Session()
 			? _runtime.UpscaleD3D12(a_request)
-			: _runtime.Upscale(LegacyContext(a_request));
+			: _runtime.Upscale(a_request);
 		return succeeded
 			? Success()
 			: Failure("DLSS super-resolution evaluation failed.");

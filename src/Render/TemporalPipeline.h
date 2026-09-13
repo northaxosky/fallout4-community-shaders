@@ -1,9 +1,10 @@
 #pragma once
 
 #include "Render/FrameGenerationCpuTiming.h"
+#include "Render/FrameGenerationOrchestration.h"
+#include "Render/SwapChainHook.h"
 #include "Render/TemporalPipelineState.h"
 #include "Render/TemporalProvider.h"
-#include "Render/SwapChainHook.h"
 
 #include <atomic>
 #include <cstdint>
@@ -15,11 +16,6 @@ struct ID3D11Device;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
 struct ID3D11UnorderedAccessView;
-
-namespace cs::features
-{
-	struct SuperResolutionExecutionContext;
-}
 
 namespace cs::render
 {
@@ -115,34 +111,8 @@ namespace cs::render
 		bool cameraValid = false;
 		std::int64_t cameraFrameDelta = 0;
 		double cameraFovDegrees = 0.0;
-		bool cpuPhaseTimingsAvailable = false;
-		std::array<CpuPhaseTimingStats,
-			FrameGenerationCpuTimingCollector<>::kPhaseCount>
-			cpuPhaseTimings{};
-		bool frameTimeInputAvailable = false;
-		double lastFrameTimeInputMilliseconds = 0.0;
-		std::uint64_t inputRetirementAcquisitions = 0;
-		std::uint64_t inputRetirementImmediateAcquisitions = 0;
-		std::uint64_t inputRetirementGpuWaits = 0;
-		std::uint64_t inputRetirementProviderDrains = 0;
-		std::uint64_t inputRetirementGlobalDrainAttempts = 0;
-		std::uint64_t inputRetirementGlobalDrainFailures = 0;
-		std::uint64_t inputRetirementWaitFailures = 0;
-		std::uint64_t inputRetirementSignals = 0;
-		std::uint64_t inputRetirementSignalFailures = 0;
-		std::uint64_t inputRetirementViolations = 0;
-		std::uint64_t inputRetirementStartupDrains = 0;
-		std::uint64_t inputRetirementDisableDrains = 0;
-		std::uint64_t inputRetirementResizeDrains = 0;
-		std::uint64_t inputRetirementTeardownDrains = 0;
-		std::uint64_t inputRetirementSteadyDrains = 0;
-		std::uint64_t inputRetirementLastRealFrame = 0;
-		std::uint64_t inputRetirementLastResourceGeneration = 0;
-		std::uint64_t inputRetirementLastRequiredFence = 0;
-		std::uint64_t inputRetirementLastCompletedFence = 0;
-		std::uint64_t inputRetirementWaitCpuMicroseconds = 0;
-		std::uint32_t inputRetirementLastSlot = 0;
-		bool inputRetirementLastAcquireQueuedGpuWait = false;
+		FrameGenerationCpuTimingCollector<>::Snapshot cpuTiming;
+		temporal::PresentInputRetirementDiagnostics inputRetirement;
 	};
 
 	struct FrameGenerationDebugTexture
@@ -187,44 +157,44 @@ namespace cs::render
 		void BeginPresentAttempt(UINT a_flags) noexcept;
 		void EndPresentAttempt(UINT a_flags, HRESULT a_result) noexcept;
 		[[nodiscard]] std::uint64_t CurrentRealFrame() const noexcept;
-		void PostFailure(temporal::FailureDomain a_domain, std::string a_message) noexcept;
+		void PostFailure(temporal::FailureDomain a_domain,
+			std::string a_message) noexcept;
 		void FailSuperResolutionToNative(std::string reason) noexcept;
 		void AdvanceEngineResourceGeneration() noexcept;
-		void AdvanceDisplayGeneration(std::uint32_t a_width, std::uint32_t a_height) noexcept;
+		void AdvanceDisplayGeneration(std::uint32_t a_width,
+			std::uint32_t a_height) noexcept;
 		void RequestSuperResolutionReset() noexcept;
 		void RequestFrameGenerationReset() noexcept;
 		[[nodiscard]] bool SuperResolutionResetPending() const noexcept;
 		[[nodiscard]] bool ArmFrameGenerationReset() noexcept;
 		void ConsumeSuperResolutionReset(bool a_completed) noexcept;
-		bool RecordInputPacket(
-			std::uint64_t a_engineFrame,
+		bool RecordInputPacket(std::uint64_t a_engineFrame,
 			temporal::Extent a_renderExtent,
 			temporal::Extent a_outputExtent,
-			std::uint32_t a_slot,
-			bool a_externalPublished) noexcept;
-		bool PreparePresent(std::uint32_t a_slot, bool a_frameGenerationPrepared) noexcept;
-		void RecordPresentAttempt(
-			std::uint32_t a_slot,
-			UINT a_flags,
+			std::uint32_t a_slot) noexcept;
+		bool PreparePresent(std::uint32_t a_slot) noexcept;
+		void SetFrameGenerationPrepared(std::uint32_t a_slot,
+			bool a_prepared) noexcept;
+		void RecordPresentAttempt(std::uint32_t a_slot, UINT a_flags,
 			HRESULT a_result) noexcept;
 		void RecordGeneratedFrames(std::optional<std::uint32_t> a_count) noexcept;
 		void RecordPresentedFrames(std::optional<std::uint32_t> a_count) noexcept;
 		[[nodiscard]] FrameGenerationCpuTimingCollector<>::Scope
-			MeasureFrameGenerationCpuPhase(
-				FrameGenerationCpuPhase a_phase) noexcept;
-		void RecordFrameGenerationFrameTimeInput(
-			float a_milliseconds) noexcept;
+		MeasureFrameGenerationCpuPhase(FrameGenerationCpuPhase a_phase) noexcept;
+		void RecordFrameGenerationFrameTimeInput(float a_milliseconds) noexcept;
 
 		[[nodiscard]] TemporalPipelineStatus GetStatus() const;
 		TemporalRenderer& Renderer() noexcept;
-		[[nodiscard]] temporal::EffectiveConfiguration GetEffectiveConfiguration() const;
+		[[nodiscard]] temporal::EffectiveConfiguration
+		GetEffectiveConfiguration() const;
 		[[nodiscard]] bool IsFrameGenerationProxyActive() const noexcept;
-		[[nodiscard]] bool IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
+		[[nodiscard]] bool
+		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
 		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;
 		[[nodiscard]] FrameGenerationDiagnostics
-			GetFrameGenerationDiagnostics() const noexcept;
+		GetFrameGenerationDiagnostics() const noexcept;
 		[[nodiscard]] FrameGenerationCaptureResources
-			GetFrameGenerationCaptureResources() const noexcept;
+		GetFrameGenerationCaptureResources() const noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 		void SetFrameGenerationInputsReady(bool a_ready) noexcept;
 		void FailFrameGenerationFrame(const char* a_reason) noexcept;
@@ -233,24 +203,18 @@ namespace cs::render
 		void SetHudlessCapturePending(bool a_pending) noexcept;
 		void RecordFrameGenerationDispatch() noexcept;
 		void RecordFrameGenerationFailure() noexcept;
-		[[nodiscard]] bool EvaluateD3D12DLSS(
-			const features::SuperResolutionExecutionContext& a_context);
-		[[nodiscard]] temporal::ProviderResult EvaluateD3D11SuperResolution(
-			temporal::SuperResolutionMethod a_method,
+		[[nodiscard]] temporal::ProviderResult
+		EvaluateSuperResolution(temporal::SuperResolutionMethod a_method,
 			const temporal::SuperResolutionRequest& a_request);
 		[[nodiscard]] temporal::SuperResolutionSizeResult
-			QuerySuperResolutionRenderSize(
-				temporal::SuperResolutionMethod a_method,
-				const temporal::SuperResolutionSizeRequest& a_request);
+		QuerySuperResolutionRenderSize(
+			temporal::SuperResolutionMethod a_method,
+			const temporal::SuperResolutionSizeRequest& a_request);
 		[[nodiscard]] bool IsSuperResolutionRuntimeReady(
 			temporal::SuperResolutionMethod a_method) const noexcept;
-		[[nodiscard]] bool UsesD3D12SuperResolution(
-			temporal::SuperResolutionMethod a_method) const noexcept;
 		[[nodiscard]] bool CreateFsrSuperResolutionResources(
-			ID3D11Device* a_device,
-			std::uint32_t a_renderWidth,
-			std::uint32_t a_renderHeight,
-			std::uint32_t a_outputWidth,
+			ID3D11Device* a_device, std::uint32_t a_renderWidth,
+			std::uint32_t a_renderHeight, std::uint32_t a_outputWidth,
 			std::uint32_t a_outputHeight);
 		void DestroySuperResolutionResources(
 			temporal::SuperResolutionMethod a_method) noexcept;
@@ -270,8 +234,7 @@ namespace cs::render
 			std::vector<D3D_FEATURE_LEVEL>& a_featureLevels);
 		std::optional<HRESULT> OnReplacementCreateDeviceAndSwapChain(
 			CreateDeviceAndSwapChainContext& a_context);
-		void OnPostCreateDeviceAndSwapChain(
-			IDXGIAdapter* a_adapter,
+		void OnPostCreateDeviceAndSwapChain(IDXGIAdapter* a_adapter,
 			ID3D11Device** a_device,
 			IDXGISwapChain** a_swapChain);
 		bool InstallLatencyHooks() noexcept;
@@ -279,4 +242,4 @@ namespace cs::render
 		struct Impl;
 		std::unique_ptr<Impl> _impl;
 	};
-}
+}  // namespace cs::render
