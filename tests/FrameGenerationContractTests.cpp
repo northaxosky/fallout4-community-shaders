@@ -916,79 +916,6 @@ namespace
 			"device removal records an exact violation and preserves ownership");
 	}
 
-	void TestRetirementLogBudget()
-	{
-		using namespace cs::render::temporal;
-		PresentInputRetirementLogBudget budget;
-		Check(
-			!budget.SetTracingEnabled(false) &&
-				!budget.ShouldLog(
-					PresentInputRetirementLogKind::kStandalone,
-					0,
-					0,
-					false),
-			"disabled diagnostics consume no retirement log budget");
-		Check(
-			budget.SetTracingEnabled(true) && budget.RecordCount() == 0,
-			"enabling diagnostics arms a fresh retirement log epoch");
-		for (std::uint64_t index = 0; index < 62; ++index) {
-			Check(
-				budget.ShouldLog(
-					PresentInputRetirementLogKind::kStandalone,
-					0,
-					0,
-					false),
-				"active epoch admits its bounded standalone records");
-		}
-		Check(
-			budget.ShouldLog(
-				PresentInputRetirementLogKind::kSignal,
-				1,
-				91,
-				false) &&
-				budget.RecordCount() ==
-					PresentInputRetirementLogBudget::
-						kDetailedRecordLimit,
-			"signal reserves the final record for its matching acquisition");
-		Check(
-			budget.ShouldLog(
-				PresentInputRetirementLogKind::kAcquire,
-				1,
-				91,
-				false) &&
-				!budget.ShouldLog(
-					PresentInputRetirementLogKind::kStandalone,
-					0,
-					0,
-					false),
-			"the bounded epoch emits a complete signal/acquire pair");
-		Check(
-			budget.ShouldLog(
-				PresentInputRetirementLogKind::kStandalone,
-				0,
-				0,
-				true),
-			"violations remain observable after the detail budget is exhausted");
-		Check(
-			budget.ShouldLogSummary(256) &&
-				!budget.ShouldLogSummary(256) &&
-				budget.ShouldLogSummary(512),
-			"periodic summaries are emitted once per acquisition boundary");
-		budget.Rearm();
-		Check(
-			budget.RecordCount() == 0 &&
-				budget.ShouldLog(
-					PresentInputRetirementLogKind::kStandalone,
-					0,
-					0,
-					false),
-			"resource or active-state changes rearm the bounded epoch");
-		(void)budget.SetTracingEnabled(false);
-		Check(
-			budget.SetTracingEnabled(true) && budget.RecordCount() == 0,
-			"diagnostic false-to-true transitions rearm the bounded epoch");
-	}
-
 	void TestStatusAndAccountingPolicies()
 	{
 		cs::render::temporal::PresentedFrameAccumulator counts;
@@ -1345,7 +1272,6 @@ int main(int a_argc, char** a_argv)
 	TestInputReuseGate();
 	TestSynchronousPresentRetirement();
 	TestDelayedRetirementAcrossRingCycles();
-	TestRetirementLogBudget();
 	TestStatusAndAccountingPolicies();
 	TestPresentStatusOrchestration();
 	TestStreamlineBackendContracts();

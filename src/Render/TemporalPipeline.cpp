@@ -410,7 +410,6 @@ namespace cs::render
 			std::scoped_lock lock(_impl->mutex);
 			_impl->traceCount = 0;
 		}
-		_impl->swapChain.SetInputRetirementDetailedTracing(a_enabled);
 	}
 
 	bool TemporalPipeline::DetailedTracingEnabled() const noexcept

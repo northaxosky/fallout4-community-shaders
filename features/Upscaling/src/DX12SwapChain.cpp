@@ -35,54 +35,6 @@ namespace cs::features
 			barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;
 			return barrier;
 		}
-
-		void ReportRetirementLogFailure(
-			const char* a_operation,
-			const char* a_detail = nullptr) noexcept
-		{
-			OutputDebugStringA("FG_RETIRE logging failure: ");
-			OutputDebugStringA(a_operation ? a_operation : "unknown");
-			if (a_detail) {
-				OutputDebugStringA(" (");
-				OutputDebugStringA(a_detail);
-				OutputDebugStringA(")");
-			}
-			OutputDebugStringA("\n");
-		}
-
-		std::string_view SwapChainFacadeEventName(
-			SwapChainFacadeEvent a_event) noexcept
-		{
-			switch (a_event) {
-			case SwapChainFacadeEvent::kQuerySwapChain1:
-				return "query_idxgiswapchain1";
-			case SwapChainFacadeEvent::kQuerySwapChain2:
-				return "query_idxgiswapchain2";
-			case SwapChainFacadeEvent::kQuerySwapChain3:
-				return "query_idxgiswapchain3";
-			case SwapChainFacadeEvent::kQuerySwapChain4:
-				return "query_idxgiswapchain4";
-			case SwapChainFacadeEvent::kPresent1:
-				return "present1";
-			case SwapChainFacadeEvent::kPresent1MetadataRejected:
-				return "present1_metadata_rejected";
-			case SwapChainFacadeEvent::kResizeBuffers1:
-				return "resizebuffers1";
-			case SwapChainFacadeEvent::kResizeBuffers1QueuesRejected:
-				return "resizebuffers1_queues_rejected";
-			case SwapChainFacadeEvent::kSourceSizeRejected:
-				return "source_size_rejected";
-			case SwapChainFacadeEvent::kFrameLatencyRejected:
-				return "frame_latency_rejected";
-			case SwapChainFacadeEvent::kMatrixTransformRejected:
-				return "matrix_transform_rejected";
-			case SwapChainFacadeEvent::kRotationRejected:
-				return "rotation_rejected";
-			default:
-				return "unknown";
-			}
-		}
-
 	}
 
 	std::unique_ptr<SharedD3D11D3D12Texture> SharedD3D11D3D12Texture::Create(
@@ -300,10 +252,6 @@ namespace cs::features
 		_nextInputRetirementValue = 1;
 		_preparedRealFrame = 0;
 		_inputResourceGeneration = 0;
-		_retirementEpochActive = false;
-		_retirementLastResetFrame = UINT64_MAX;
-		_facadeEventLogMask.store(0, std::memory_order_relaxed);
-		RearmInputRetirementLogBudget();
 		render::temporal::ResetPresentationProtocol(
 			_allocatorFenceValues,
 			_inputReuseGate,
@@ -570,9 +518,6 @@ namespace cs::features
 		_depthBuffer = std::move(depth);
 		_motionBuffer = std::move(motion);
 		++_inputResourceGeneration;
-		_retirementEpochActive = false;
-		_retirementLastResetFrame = UINT64_MAX;
-		RearmInputRetirementLogBudget();
 		const auto providerResult = _provider
 			? _provider->CreateDisplayResources(
 				a_width,
@@ -847,22 +792,6 @@ namespace cs::features
 		};
 	}
 
-	void DX12SwapChain::SetInputRetirementDetailedTracing(
-		bool a_enabled) noexcept
-	{
-		if (a_enabled) {
-			_retirementLogRearmRequested.store(
-				true, std::memory_order_release);
-		}
-	}
-
-	void DX12SwapChain::RearmInputRetirementLogBudget() noexcept
-	{
-		_retirementLogBudget.Rearm();
-		_retirementLogRearmRequested.store(
-			false, std::memory_order_release);
-	}
-
 	void DX12SwapChain::RecordGlobalDrain(
 		std::string_view a_reason,
 		const render::temporal::ProviderResult& a_result) noexcept
@@ -891,137 +820,6 @@ namespace cs::features
 				1, std::memory_order_relaxed);
 			_retirementViolations.fetch_add(
 				1, std::memory_order_relaxed);
-		}
-		if (!render::TemporalPipeline::Get().DetailedTracingEnabled()) {
-			return;
-		}
-		try {
-			L->info(
-				"FG_RETIRE provider={} real_frame={} slot={} operation=global_drain resource_generation={} token=0 queue_id=0x0 required=0 completed=0 source_queue=sdk point={} resources=all_present_inputs cpu_wait=1 gpu_wait=1 wait_us={} result={} sdk_result={} violation_code={} no_reuse_before_complete={}",
-				_provider ? _provider->Name() : "none",
-				_preparedRealFrame,
-				_frameSlot,
-				_inputResourceGeneration,
-				a_reason,
-				a_result.globalDrainCpuMicroseconds,
-				a_result.globalDrainCompleted ? "completed" : "failed",
-				a_result.sdkResult,
-				a_result.globalDrainCompleted
-					? "none"
-					: "global_drain_failed",
-				a_result.globalDrainCompleted);
-		} catch (const std::exception& e) {
-			ReportRetirementLogFailure("global_drain", e.what());
-		} catch (...) {
-			ReportRetirementLogFailure("global_drain");
-		}
-	}
-
-	void DX12SwapChain::LogInputRetirement(
-		render::temporal::PresentInputRetirementLogKind a_kind,
-		std::string_view a_operation,
-		const render::temporal::PresentInputRetirementToken& a_token,
-		std::uint32_t a_slot,
-		std::uint64_t a_completedValue,
-		bool a_cpuWait,
-		bool a_gpuWait,
-		std::uint64_t a_waitMicroseconds,
-		HRESULT a_result,
-		std::string_view a_violationCode,
-		bool a_violation) noexcept
-	{
-		const bool detailed =
-			render::TemporalPipeline::Get().DetailedTracingEnabled();
-		if (_retirementLogRearmRequested.exchange(
-				false, std::memory_order_acq_rel)) {
-			RearmInputRetirementLogBudget();
-		}
-		if (!_retirementLogBudget.SetTracingEnabled(detailed)) {
-			return;
-		}
-		if (!_retirementLogBudget.ShouldLog(
-				a_kind, a_slot, a_token.value, a_violation)) {
-			const auto acquisitions =
-				_retirementAcquisitions.load(std::memory_order_relaxed);
-			if (!_retirementLogBudget.ShouldLogSummary(acquisitions)) {
-				return;
-			}
-			try {
-				const auto snapshot = GetInputRetirementDiagnostics();
-				L->info(
-					"FG_RETIRE provider={} operation=summary acquisitions={} immediate={} gpu_waits={} provider_drains={} global_drain_attempts={} global_drain_failures={} wait_failures={} signals={} signal_failures={} violations={} startup_drains={} disable_drains={} resize_drains={} teardown_drains={} steady_drains={} wait_us={}",
-					_provider ? _provider->Name() : "none",
-					snapshot.acquisitions,
-					snapshot.immediateAcquisitions,
-					snapshot.gpuWaits,
-					snapshot.providerDrains,
-					snapshot.globalDrainAttempts,
-					snapshot.globalDrainFailures,
-					snapshot.waitFailures,
-					snapshot.signals,
-					snapshot.signalFailures,
-					snapshot.violations,
-					snapshot.startupDrains,
-					snapshot.disableDrains,
-					snapshot.resizeDrains,
-					snapshot.teardownDrains,
-					snapshot.steadyDrains,
-					snapshot.waitCpuMicroseconds);
-			} catch (const std::exception& e) {
-				ReportRetirementLogFailure("summary", e.what());
-			} catch (...) {
-				ReportRetirementLogFailure("summary");
-			}
-			return;
-		}
-		try {
-			L->info(
-				"FG_RETIRE provider={} real_frame={} slot={} operation={} resource_generation={} current_resource_generation={} token={} queue_id={:#x} current_queue_id={:#x} required={} completed={} source_queue={} point={} resources={} cpu_wait={} gpu_wait={} wait_us={} result={:#010x} violation_code={} no_reuse_before_complete={}",
-				_provider ? _provider->Name() : "none",
-				a_token.realFrame,
-				a_slot,
-				a_operation,
-				a_token.resourceGeneration,
-				_inputResourceGeneration,
-				a_token.value,
-				a_token.queueIdentity,
-				static_cast<std::uint64_t>(
-					reinterpret_cast<std::uintptr_t>(_queue.get())),
-				a_token.value,
-				a_completedValue,
-				a_token.mode ==
-						render::temporal::PresentInputRetirementMode::
-							kProviderDrain
-					? "sdk"
-					: "game_direct",
-				a_token.mode ==
-						render::temporal::PresentInputRetirementMode::
-							kSynchronousPresentQueue
-					? "post_present_callback_submission"
-					: a_token.mode ==
-							  render::temporal::PresentInputRetirementMode::
-								  kRecordedCommandList
-						? "prepare_and_final_copy"
-						: "provider_drain",
-				a_token.mode ==
-						render::temporal::PresentInputRetirementMode::
-							kSynchronousPresentQueue
-					? "hudless"
-					: a_token.mode ==
-							  render::temporal::PresentInputRetirementMode::
-								  kRecordedCommandList
-						? "depth,motion,final_copy"
-						: "all_present_inputs",
-				a_cpuWait,
-				a_gpuWait,
-				a_waitMicroseconds,
-				static_cast<std::uint32_t>(a_result),
-				a_violationCode,
-				!a_violation && SUCCEEDED(a_result));
-		} catch (const std::exception& e) {
-			ReportRetirementLogFailure(a_operation.data(), e.what());
-		} catch (...) {
-			ReportRetirementLogFailure(a_operation.data());
 		}
 	}
 
@@ -1177,7 +975,6 @@ namespace cs::features
 	{
 		const bool firstFailure = !_frameGenerationDisabled;
 		_frameGenerationDisabled = true;
-		_retirementEpochActive = false;
 		_frameGenerationInputsReady = false;
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
@@ -1208,10 +1005,6 @@ namespace cs::features
 		if (!_provider || !_inputRetirementFence12 ||
 			!_inputRetirementFence11 || !_context11 || !_queue) {
 			return false;
-		}
-		if (!_retirementEpochActive) {
-			RearmInputRetirementLogBudget();
-			_retirementEpochActive = true;
 		}
 		render::temporal::ProviderResult result{
 			.code = render::temporal::ProviderResultCode::kSuccess
@@ -1305,43 +1098,6 @@ namespace cs::features
 						render::temporal::PresentInputRetirementMode::
 							kSynchronousPresentQueue,
 				std::memory_order_relaxed);
-		}
-		auto logToken = acquired.token;
-		if (logToken.resourceGeneration == 0) {
-			logToken.mode = _provider->GetPresentInputRetirementMode();
-			logToken.realFrame =
-				render::TemporalPipeline::Get().CurrentRealFrame();
-			logToken.resourceGeneration = _inputResourceGeneration;
-			logToken.queueIdentity = static_cast<std::uint64_t>(
-				reinterpret_cast<std::uintptr_t>(_queue.get()));
-		}
-		if (acquired.firstAcquire &&
-			logToken.mode !=
-				render::temporal::PresentInputRetirementMode::
-					kRecordedCommandList) {
-			LogInputRetirement(
-				render::temporal::PresentInputRetirementLogKind::
-					kAcquire,
-				acquired.Succeeded()
-					? acquired.waitRequired
-						? "acquire_wait"
-						: "acquire_immediate"
-					: "acquire_failed",
-				logToken,
-				_frameSlot,
-				acquired.completedValue,
-				acquired.token.mode ==
-					render::temporal::PresentInputRetirementMode::
-						kProviderDrain,
-				acquired.waitRequired &&
-					acquired.token.mode ==
-						render::temporal::PresentInputRetirementMode::
-							kSynchronousPresentQueue,
-				waitMicroseconds,
-				acquired.result,
-				render::temporal::PresentInputAcquireCodeName(
-					acquired.code),
-				!acquired.Succeeded());
 		}
 		if (!acquired.Succeeded()) {
 			DisableFrameGeneration(
@@ -1610,35 +1366,6 @@ namespace cs::features
 			DX::ThrowIfFailed(producerWait);
 			_preparedFrameGeneration =
 				requested && frameGenerationPrepared && !_frameGenerationDisabled;
-			if (_preparedFrameGeneration &&
-				frameState.resetHistory &&
-				_retirementLastResetFrame != frameState.realFrame) {
-				RearmInputRetirementLogBudget();
-				_retirementLastResetFrame = frameState.realFrame;
-			}
-			_retirementEpochActive = _preparedFrameGeneration;
-			if (_preparedFrameGeneration) {
-				LogInputRetirement(
-					render::temporal::PresentInputRetirementLogKind::
-						kStandalone,
-					"prepare_copy",
-					{
-						.mode = render::temporal::
-							PresentInputRetirementMode::
-								kRecordedCommandList,
-						.value = d3d12Done,
-						.realFrame = _preparedRealFrame,
-						.resourceGeneration = _inputResourceGeneration,
-						.queueIdentity = static_cast<std::uint64_t>(
-							reinterpret_cast<std::uintptr_t>(_queue.get()))
-					},
-					_frameSlot,
-					_fence12->GetCompletedValue(),
-					false,
-					true,
-					0,
-					producerWait);
-			}
 			_preparedTransaction = _frameGenerationInputsReady &&
 				render::TemporalPipeline::Get().PreparePresent(
 					_frameSlot, _preparedFrameGeneration);
@@ -1692,19 +1419,6 @@ namespace cs::features
 				.queueIdentity = static_cast<std::uint64_t>(
 					reinterpret_cast<std::uintptr_t>(_queue.get()))
 			};
-			LogInputRetirement(
-				render::temporal::PresentInputRetirementLogKind::
-					kStandalone,
-				"signal_failed",
-				failed,
-				_frameSlot,
-				_inputRetirementFence12->GetCompletedValue(),
-				false,
-				false,
-				0,
-				retirement.signalResult,
-				"signal_failed",
-				true);
 			_inputReuseGate.MarkSubmitted(
 				_frameSlot, failed);
 			DisableFrameGeneration(
@@ -1740,38 +1454,7 @@ namespace cs::features
 				_frameSlot, a_flags, presentResult);
 		}
 		if (presentResult == DXGI_ERROR_WAS_STILL_DRAWING) {
-			if (retirement.token &&
-				retirementMode ==
-					render::temporal::PresentInputRetirementMode::
-						kSynchronousPresentQueue) {
-				LogInputRetirement(
-					render::temporal::PresentInputRetirementLogKind::
-						kStandalone,
-					"signal_retry_uncommitted",
-					*retirement.token,
-					_frameSlot,
-					_inputRetirementFence12->GetCompletedValue(),
-					false,
-					false,
-					0,
-					retirement.signalResult);
-			}
 			return presentResult;
-		}
-		if (retirement.token &&
-			retirementMode ==
-				render::temporal::PresentInputRetirementMode::
-					kSynchronousPresentQueue) {
-			LogInputRetirement(
-				render::temporal::PresentInputRetirementLogKind::kSignal,
-				"signal",
-				*retirement.token,
-				_frameSlot,
-				_inputRetirementFence12->GetCompletedValue(),
-				false,
-				false,
-				0,
-				retirement.signalResult);
 		}
 		_inputReuseGate.MarkSubmitted(
 			_frameSlot, retirement.token);
@@ -1954,38 +1637,6 @@ namespace cs::features
 		return _swapChain
 			? _swapChain->SetHDRMetaData(a_type, 0, nullptr)
 			: DXGI_ERROR_INVALID_CALL;
-	}
-
-	void DX12SwapChain::RecordSwapChainFacadeEvent(
-		SwapChainFacadeEvent a_event) noexcept
-	{
-		const auto index = static_cast<std::uint32_t>(a_event);
-		if (index >= static_cast<std::uint32_t>(
-				SwapChainFacadeEvent::kCount)) {
-			return;
-		}
-		const std::uint32_t bit = 1u << index;
-		if (_facadeEventLogMask.fetch_or(
-				bit, std::memory_order_relaxed) & bit) {
-			return;
-		}
-		const auto name = SwapChainFacadeEventName(a_event);
-		try {
-			if (a_event >=
-				SwapChainFacadeEvent::kPresent1MetadataRejected &&
-				a_event != SwapChainFacadeEvent::kResizeBuffers1) {
-				L->warn(
-					"SWAPCHAIN_FACADE event={} result=unsupported",
-					name);
-			} else {
-				L->info(
-					"SWAPCHAIN_FACADE event={} result=observed",
-					name);
-			}
-		} catch (...) {
-			OutputDebugStringA(
-				"SWAPCHAIN_FACADE logging failure\n");
-		}
 	}
 
 	HRESULT DX12SwapChain::ResizeTarget(

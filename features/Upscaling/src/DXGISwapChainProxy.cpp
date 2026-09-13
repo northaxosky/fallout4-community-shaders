@@ -33,21 +33,6 @@ namespace cs::features
 			a_iid == __uuidof(IDXGISwapChain4)) {
 			*a_object = static_cast<IDXGISwapChain4*>(this);
 			AddRef();
-			if (_owner) {
-				if (a_iid == __uuidof(IDXGISwapChain1)) {
-					_owner->RecordSwapChainFacadeEvent(
-						SwapChainFacadeEvent::kQuerySwapChain1);
-				} else if (a_iid == __uuidof(IDXGISwapChain2)) {
-					_owner->RecordSwapChainFacadeEvent(
-						SwapChainFacadeEvent::kQuerySwapChain2);
-				} else if (a_iid == __uuidof(IDXGISwapChain3)) {
-					_owner->RecordSwapChainFacadeEvent(
-						SwapChainFacadeEvent::kQuerySwapChain3);
-				} else if (a_iid == __uuidof(IDXGISwapChain4)) {
-					_owner->RecordSwapChainFacadeEvent(
-						SwapChainFacadeEvent::kQuerySwapChain4);
-				}
-			}
 			return S_OK;
 		}
 		return E_NOINTERFACE;
@@ -283,16 +268,7 @@ namespace cs::features
 		if (a_parameters->DirtyRectsCount ||
 			a_parameters->pScrollRect ||
 			a_parameters->pScrollOffset) {
-			if (_owner) {
-				_owner->RecordSwapChainFacadeEvent(
-					SwapChainFacadeEvent::
-						kPresent1MetadataRejected);
-			}
 			return DXGI_ERROR_UNSUPPORTED;
-		}
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kPresent1);
 		}
 		return _owner
 			? _owner->Present1(
@@ -338,10 +314,6 @@ namespace cs::features
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetRotation(
 		DXGI_MODE_ROTATION) noexcept
 	{
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kRotationRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
@@ -359,10 +331,6 @@ namespace cs::features
 		UINT,
 		UINT) noexcept
 	{
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kSourceSizeRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
@@ -375,20 +343,12 @@ namespace cs::features
 		}
 		*a_width = 0;
 		*a_height = 0;
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kSourceSizeRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetMaximumFrameLatency(
 		UINT) noexcept
 	{
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kFrameLatencyRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
@@ -399,30 +359,18 @@ namespace cs::features
 			return E_INVALIDARG;
 		}
 		*a_maxLatency = 0;
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kFrameLatencyRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
 	HANDLE STDMETHODCALLTYPE
 		DXGISwapChainProxy::GetFrameLatencyWaitableObject() noexcept
 	{
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kFrameLatencyRejected);
-		}
 		return nullptr;
 	}
 
 	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetMatrixTransform(
 		const DXGI_MATRIX_3X2_F*) noexcept
 	{
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kMatrixTransformRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
@@ -433,10 +381,6 @@ namespace cs::features
 			return E_INVALIDARG;
 		}
 		*a_matrix = {};
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kMatrixTransformRejected);
-		}
 		return DXGI_ERROR_INVALID_CALL;
 	}
 
@@ -475,16 +419,7 @@ namespace cs::features
 		IUnknown* const* a_presentQueue) noexcept
 	{
 		if (a_creationNodeMask || a_presentQueue) {
-			if (_owner) {
-				_owner->RecordSwapChainFacadeEvent(
-					SwapChainFacadeEvent::
-						kResizeBuffers1QueuesRejected);
-			}
 			return DXGI_ERROR_UNSUPPORTED;
-		}
-		if (_owner) {
-			_owner->RecordSwapChainFacadeEvent(
-				SwapChainFacadeEvent::kResizeBuffers1);
 		}
 		return _owner
 			? _owner->ResizeBuffers1(

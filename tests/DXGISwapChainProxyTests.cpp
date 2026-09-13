@@ -561,13 +561,6 @@ namespace
 			return hdrResult;
 		}
 
-		void RecordSwapChainFacadeEvent(
-			cs::features::SwapChainFacadeEvent a_event) noexcept override
-		{
-			++facadeEventCounts[
-				static_cast<std::size_t>(a_event)];
-		}
-
 		winrt::com_ptr<ID3D11Device> device;
 		winrt::com_ptr<ID3D11Texture2D> buffer;
 		DXGI_SWAP_CHAIN_DESC desc{};
@@ -614,11 +607,6 @@ namespace
 		HRESULT colorSpaceResult = S_OK;
 		HRESULT setColorSpaceResult = S_OK;
 		HRESULT hdrResult = S_OK;
-		std::array<
-			UINT,
-			static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::kCount)>
-			facadeEventCounts{};
 	};
 
 	bool CreateWarpResources(RecordingOwner& a_owner)
@@ -724,8 +712,7 @@ namespace
 	}
 
 	void TestInterfacesAndIdentity(
-		cs::features::DXGISwapChainProxy* a_proxy,
-		RecordingOwner& a_owner)
+		cs::features::DXGISwapChainProxy* a_proxy)
 	{
 		IUnknown* canonical = nullptr;
 		Check(
@@ -761,16 +748,6 @@ namespace
 		Check(
 			a_proxy != nullptr,
 			"version queries retain the facade object");
-		for (const auto event : {
-				 cs::features::SwapChainFacadeEvent::kQuerySwapChain1,
-				 cs::features::SwapChainFacadeEvent::kQuerySwapChain2,
-				 cs::features::SwapChainFacadeEvent::kQuerySwapChain3,
-				 cs::features::SwapChainFacadeEvent::kQuerySwapChain4 }) {
-			Check(
-				a_owner.facadeEventCounts[
-					static_cast<std::size_t>(event)] == 1,
-				"each versioned interface query is observable");
-		}
 		const IID unsupported{
 			0x57b53c9f,
 			0x04a5,
@@ -856,10 +833,6 @@ namespace
 				a_owner.lastSyncInterval == 1 &&
 				a_owner.lastPresentFlags == DXGI_PRESENT_TEST,
 			"empty Present1 metadata routes exactly once");
-		Check(
-			a_owner.facadeEventCounts[static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::kPresent1)] == 1,
-			"Present1 emits one bounded route event");
 
 		parameters.DirtyRectsCount = 1;
 		Check(
@@ -873,11 +846,6 @@ namespace
 					DXGI_ERROR_UNSUPPORTED &&
 				a_owner.present1Calls == 1,
 			"Present1 explicitly rejects partial-presentation metadata");
-		Check(
-			a_owner.facadeEventCounts[static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::
-					kPresent1MetadataRejected)] == 1,
-			"partial Present1 metadata emits a rejection event");
 		parameters = {};
 		RECT scroll{ 0, 0, 16, 16 };
 		parameters.pScrollRect = &scroll;
@@ -912,11 +880,6 @@ namespace
 				!a_owner.sawNodeMask &&
 				!a_owner.sawPresentQueue,
 			"ResizeBuffers1 null metadata routes through the owner transaction");
-		Check(
-			a_owner.facadeEventCounts[static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::kResizeBuffers1)] ==
-				1,
-			"ResizeBuffers1 emits one route event");
 		const UINT nodeMask = 1;
 		Check(
 			a_proxy->ResizeBuffers1(
@@ -931,11 +894,6 @@ namespace
 				0, nullptr, &queue) == DXGI_ERROR_UNSUPPORTED &&
 				a_owner.resize1Calls == 1,
 			"ResizeBuffers1 rejects a foreign presentation queue");
-		Check(
-			a_owner.facadeEventCounts[static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::
-					kResizeBuffers1QueuesRejected)] == 2,
-			"each rejected ResizeBuffers1 metadata call is observable");
 	}
 
 	void TestForwardedMethods(
@@ -1049,11 +1007,6 @@ namespace
 		Check(
 			a_proxy->GetFrameLatencyWaitableObject() == nullptr,
 			"facade exposes no waitable handle when its flag is absent");
-		Check(
-			a_owner.facadeEventCounts[static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::
-					kFrameLatencyRejected)] == 3,
-			"latency incompatibility is observable on each tested API route");
 		const DXGI_MATRIX_3X2_F matrix{
 			1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f
 		};
@@ -1068,17 +1021,6 @@ namespace
 					DXGI_ERROR_INVALID_CALL &&
 				observedMatrix._11 == 0.0f,
 			"composition transform query fails with an initialized output");
-		Check(
-			a_owner.facadeEventCounts[static_cast<std::size_t>(
-				cs::features::SwapChainFacadeEvent::
-					kSourceSizeRejected)] == 2 &&
-				a_owner.facadeEventCounts[static_cast<std::size_t>(
-					cs::features::SwapChainFacadeEvent::
-						kMatrixTransformRejected)] == 2 &&
-				a_owner.facadeEventCounts[static_cast<std::size_t>(
-					cs::features::SwapChainFacadeEvent::
-						kRotationRejected)] == 1,
-			"discard-model method rejections emit bounded diagnostic events");
 		DXGI_SWAP_CHAIN_DESC desc{};
 		Check(
 			SUCCEEDED(a_proxy->GetDesc(&desc)) &&
@@ -1153,7 +1095,7 @@ int main()
 	inner.parent = owner.device.get();
 	auto* proxy = new cs::features::DXGISwapChainProxy(owner, inner);
 
-	TestInterfacesAndIdentity(proxy, owner);
+	TestInterfacesAndIdentity(proxy);
 	TestD3D11DeviceAndBufferCoherence(proxy, owner);
 	TestPresentRoutes(proxy, owner);
 	TestResizeRoutes(proxy, owner);

@@ -118,7 +118,6 @@ namespace cs::features
 		[[nodiscard]] ID3D12CommandQueue* GetCommandQueue() const noexcept;
 		[[nodiscard]] FrameGenerationInputRetirementDiagnostics
 			GetInputRetirementDiagnostics() const noexcept;
-		void SetInputRetirementDetailedTracing(bool a_enabled) noexcept;
 		bool EvaluateD3D12SuperResolution(
 			render::temporal::ISuperResolutionProvider& a_provider,
 			const SuperResolutionExecutionContext& a_context);
@@ -176,8 +175,6 @@ namespace cs::features
 			DXGI_HDR_METADATA_TYPE a_type,
 			UINT a_size,
 			void* a_metadata) noexcept override;
-		void RecordSwapChainFacadeEvent(
-			SwapChainFacadeEvent a_event) noexcept override;
 
 		HRESULT SetPrivateData(REFGUID a_name, UINT a_size, const void* a_data) noexcept;
 		HRESULT SetPrivateDataInterface(REFGUID a_name, const IUnknown* a_unknown) noexcept;
@@ -229,22 +226,9 @@ namespace cs::features
 			DXGI_FORMAT a_format,
 			UINT a_flags);
 		void ClearSharedBuffers(bool a_clearFrameGenerationInputs = true) noexcept;
-		void RearmInputRetirementLogBudget() noexcept;
 		void RecordGlobalDrain(
 			std::string_view a_reason,
 			const render::temporal::ProviderResult& a_result) noexcept;
-		void LogInputRetirement(
-			render::temporal::PresentInputRetirementLogKind a_kind,
-			std::string_view a_operation,
-			const render::temporal::PresentInputRetirementToken& a_token,
-			std::uint32_t a_slot,
-			std::uint64_t a_completedValue,
-			bool a_cpuWait,
-			bool a_gpuWait,
-			std::uint64_t a_waitMicroseconds,
-			HRESULT a_result,
-			std::string_view a_violationCode = "none",
-			bool a_violation = false) noexcept;
 
 		winrt::com_ptr<ID3D11Device5> _device11;
 		winrt::com_ptr<ID3D11Device> _outwardDevice11;
@@ -313,11 +297,5 @@ namespace cs::features
 		std::atomic_uint64_t _retirementWaitCpuMicroseconds{ 0 };
 		std::atomic_uint32_t _retirementLastSlot{ 0 };
 		std::atomic_bool _retirementLastAcquireQueuedGpuWait{ false };
-		std::atomic_uint32_t _facadeEventLogMask{ 0 };
-		render::temporal::PresentInputRetirementLogBudget
-			_retirementLogBudget;
-		std::atomic_bool _retirementLogRearmRequested{ false };
-		bool _retirementEpochActive = false;
-		std::uint64_t _retirementLastResetFrame = UINT64_MAX;
 	};
 }

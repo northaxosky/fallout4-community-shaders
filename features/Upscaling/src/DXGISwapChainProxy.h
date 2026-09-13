@@ -1,30 +1,12 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
 
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
 namespace cs::features
 {
-	enum class SwapChainFacadeEvent : std::uint32_t
-	{
-		kQuerySwapChain1,
-		kQuerySwapChain2,
-		kQuerySwapChain3,
-		kQuerySwapChain4,
-		kPresent1,
-		kPresent1MetadataRejected,
-		kResizeBuffers1,
-		kResizeBuffers1QueuesRejected,
-		kSourceSizeRejected,
-		kFrameLatencyRejected,
-		kMatrixTransformRejected,
-		kRotationRejected,
-		kCount
-	};
-
 	class IDXGISwapChainProxyOwner
 	{
 	public:
@@ -77,8 +59,6 @@ namespace cs::features
 			DXGI_HDR_METADATA_TYPE a_type,
 			UINT a_size,
 			void* a_metadata) noexcept = 0;
-		virtual void RecordSwapChainFacadeEvent(
-			SwapChainFacadeEvent a_event) noexcept = 0;
 	};
 
 	class DXGISwapChainProxy final : public IDXGISwapChain4
