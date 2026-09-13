@@ -113,13 +113,8 @@ namespace cs::d3d11
 			return;
 
 		bool expected = false;
-		if (!ready.compare_exchange_strong(expected, true)) {
-			InvokeOwner("Compute dispatch hook context recheck", [&] {
-				engine::EnsureComputeDispatchHooksInstalled(
-					*a_immediateContext);
-			});
+		if (!ready.compare_exchange_strong(expected, true))
 			return;
-		}
 		{
 			render::annotation::Initialize(*a_immediateContext);
 			render::profiling::InitializeD3D11(*a_device, *a_immediateContext);
@@ -131,8 +126,8 @@ namespace cs::d3d11
 			InvokeOwner("FrameBuffer snapshot hooks", [&] {
 				engine::OnFrameBufferD3D11Ready(*a_immediateContext);
 			});
-			InvokeOwner("Compute dispatch hooks", [&] {
-				engine::EnsureComputeDispatchHooksInstalled(
+			InvokeOwner("RunComputeShader dispatch bridge", [&] {
+				engine::EnsureComputeDispatchBridgeInstalled(
 					*a_immediateContext);
 			});
 			// Register injections before the registry freezes.

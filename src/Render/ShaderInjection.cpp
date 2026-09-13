@@ -13,9 +13,11 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstring>
 #include <d3d11.h>
 #include <exception>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -290,23 +292,22 @@ namespace cs::engine
 			bool resolverRegistered = false;
 		};
 
-		// ID3D11DeviceContext method order from the Windows SDK d3d11.h.
-		constexpr std::size_t kDispatchVtableSlot = 41;
-		constexpr std::size_t kDispatchIndirectVtableSlot = 42;
+		// The engine tail survives D3D11's lazy dispatch-table replacement.
+		constexpr std::ptrdiff_t kRunComputeShaderDispatchTailOffset = 0xAB;
+		constexpr std::array<std::uint8_t, 7>
+			kRunComputeShaderDispatchTail{
+				0x48, 0xFF, 0xA0, 0x48, 0x01, 0x00, 0x00
+			};
 
-		using DispatchFunction = void(STDMETHODCALLTYPE*)(
-			ID3D11DeviceContext*, UINT, UINT, UINT);
-		using DispatchIndirectFunction = void(STDMETHODCALLTYPE*)(
-			ID3D11DeviceContext*, ID3D11Buffer*, UINT);
-
-		std::atomic_bool g_computeDispatchHookInstallAttempted{ false };
-		std::atomic_bool g_computeDispatchHooksInstalled{ false };
+		std::mutex g_computeDispatchBridgeInstallMutex;
+		std::atomic<std::uintptr_t> g_computeDispatchBridgeTail{ 0 };
 		std::atomic<ID3D11DeviceContext*> g_computeDispatchContext{ nullptr };
-		std::atomic_uint64_t g_computeDirectDispatchCalls{ 0 };
-		std::atomic_uint64_t g_computeIndirectDispatchCalls{ 0 };
+		std::array<std::uint8_t, 7> g_computeDispatchBridgePatch{};
+		std::atomic_uint64_t g_computeBridgeCalls{ 0 };
 		std::atomic_uint64_t g_computeMatchingDispatches{ 0 };
 		std::atomic_uint64_t g_computeContextRejections{ 0 };
-		thread_local bool t_inComputeDispatchHook = false;
+		std::atomic_uint64_t g_computePhaseRejections{ 0 };
+		std::atomic_uint64_t g_computeShaderRejections{ 0 };
 
 		Service& GetService()
 		{
@@ -1025,34 +1026,39 @@ namespace cs::engine
 			}
 		}
 
-		template <class Dispatch>
 		void ExecuteComputeDispatch(
 			ID3D11DeviceContext* a_context,
-			Dispatch&& a_dispatch) noexcept
+			UINT a_threadGroupCountX,
+			UINT a_threadGroupCountY,
+			UINT a_threadGroupCountZ) noexcept
 		{
-			if (t_inComputeDispatchHook) {
-				a_dispatch();
+			g_computeBridgeCalls.fetch_add(1, std::memory_order_relaxed);
+			if (!a_context) {
+				g_computeContextRejections.fetch_add(
+					1, std::memory_order_relaxed);
 				return;
 			}
-
-			struct RecursionScope
-			{
-				RecursionScope() noexcept { t_inComputeDispatchHook = true; }
-				~RecursionScope() noexcept { t_inComputeDispatchHook = false; }
-			} recursionScope;
 
 			if (a_context != g_computeDispatchContext.load(
 					std::memory_order_acquire)) {
 				g_computeContextRejections.fetch_add(
 					1, std::memory_order_relaxed);
-				a_dispatch();
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
 				return;
 			}
 
 			const auto plan =
 				GetService().published.load(std::memory_order_acquire);
 			if (!plan || !render::IsDeferredLightsActive()) {
-				a_dispatch();
+				g_computePhaseRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
 				return;
 			}
 
@@ -1063,14 +1069,24 @@ namespace cs::engine
 			const auto route = plan->computeVariantIndices.find(shader);
 			if (route == plan->computeVariantIndices.end()
 				|| route->second >= plan->variants.size()) {
-				a_dispatch();
+				g_computeShaderRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
 				return;
 			}
 
 			const auto& variant = plan->variants[route->second];
 			if (variant.targetId
 					!= ShaderInjectionTarget::kDfTiledLighting) {
-				a_dispatch();
+				g_computeShaderRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
 				return;
 			}
 			const auto* target =
@@ -1079,13 +1095,23 @@ namespace cs::engine
 				|| (target->contributedStages
 					& ShaderStageBit(ShaderStage::kCompute))
 					== 0) {
-				a_dispatch();
+				g_computeShaderRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
 				return;
 			}
 
 			render::ScopedComputeSharedDataBinding bindings(a_context);
 			if (!bindings.IsActive()) {
-				a_dispatch();
+				g_computePhaseRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
 				return;
 			}
 
@@ -1096,66 +1122,160 @@ namespace cs::engine
 				*target,
 				ShaderStage::kCompute,
 				a_context);
-			a_dispatch();
+			a_context->Dispatch(
+				a_threadGroupCountX,
+				a_threadGroupCountY,
+				a_threadGroupCountZ);
 		}
 
-		struct DispatchHook
+		void STDMETHODCALLTYPE RunComputeShaderDispatchBridge(
+			ID3D11DeviceContext* a_context,
+			UINT a_threadGroupCountX,
+			UINT a_threadGroupCountY,
+			UINT a_threadGroupCountZ) noexcept
 		{
-			static void STDMETHODCALLTYPE thunk(
-				ID3D11DeviceContext* a_context,
-				UINT a_threadGroupCountX,
-				UINT a_threadGroupCountY,
-				UINT a_threadGroupCountZ) noexcept
-			{
-				g_computeDirectDispatchCalls.fetch_add(
-					1, std::memory_order_relaxed);
-				if (!func) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::err,
-						"Compute Dispatch hook has no original; call rejected.");
-					return;
-				}
-				ExecuteComputeDispatch(a_context, [&] {
-					func(
-						a_context,
-						a_threadGroupCountX,
-						a_threadGroupCountY,
-						a_threadGroupCountZ);
-				});
+			ExecuteComputeDispatch(
+				a_context,
+				a_threadGroupCountX,
+				a_threadGroupCountY,
+				a_threadGroupCountZ);
+		}
+
+		bool IsRelativeBranchReachable(
+			std::uintptr_t a_source,
+			std::uintptr_t a_target) noexcept
+		{
+			const auto displacement =
+				static_cast<std::int64_t>(a_target)
+				- static_cast<std::int64_t>(
+					a_source + sizeof(REL::ASM::JMP5));
+			return displacement
+				>= std::numeric_limits<std::int32_t>::min()
+				&& displacement
+				<= std::numeric_limits<std::int32_t>::max();
+		}
+
+		bool InstallComputeDispatchBridgeAt(
+			ID3D11DeviceContext* a_immediateContext,
+			std::uintptr_t a_validatedTail) noexcept
+		{
+			if (!a_immediateContext || !a_validatedTail)
+				return false;
+
+			std::scoped_lock lock(g_computeDispatchBridgeInstallMutex);
+			const auto installedTail =
+				g_computeDispatchBridgeTail.load(
+					std::memory_order_acquire);
+			if (installedTail != 0) {
+				return installedTail == a_validatedTail
+					&& g_computeDispatchContext.load(
+						std::memory_order_acquire)
+						== a_immediateContext
+					&& std::memcmp(
+						reinterpret_cast<const void*>(
+							installedTail),
+						g_computeDispatchBridgePatch.data(),
+						g_computeDispatchBridgePatch.size())
+						== 0;
 			}
 
-			static inline DispatchFunction func = nullptr;
-		};
-
-		struct DispatchIndirectHook
-		{
-			static void STDMETHODCALLTYPE thunk(
-				ID3D11DeviceContext* a_context,
-				ID3D11Buffer* a_bufferForArgs,
-				UINT a_alignedByteOffsetForArgs) noexcept
-			{
-				g_computeIndirectDispatchCalls.fetch_add(
-					1, std::memory_order_relaxed);
-				if (!func) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::err,
-						"Compute DispatchIndirect hook has no original; call rejected.");
-					return;
-				}
-				ExecuteComputeDispatch(a_context, [&] {
-					func(
-						a_context,
-						a_bufferForArgs,
-						a_alignedByteOffsetForArgs);
-				});
+			if (std::memcmp(
+					reinterpret_cast<const void*>(a_validatedTail),
+					kRunComputeShaderDispatchTail.data(),
+					kRunComputeShaderDispatchTail.size())
+				!= 0) {
+				L->error(
+					"RunComputeShader dispatch bridge installation refused: "
+					"the 7-byte tail does not match the supported layout.");
+				return false;
 			}
 
-			static inline DispatchIndirectFunction func = nullptr;
-		};
+			try {
+				auto& trampoline = REL::GetTrampoline();
+				if (trampoline.free_size() < sizeof(REL::ASM::JMP14)) {
+					L->error(
+						"RunComputeShader dispatch bridge installation failed: "
+						"insufficient trampoline space.");
+					return false;
+				}
+				const auto branch = trampoline.allocate_branch5(
+					reinterpret_cast<std::uintptr_t>(
+						&RunComputeShaderDispatchBridge));
+				if (!IsRelativeBranchReachable(
+						a_validatedTail, branch)) {
+					L->error(
+						"RunComputeShader dispatch bridge installation failed: "
+						"the allocated branch is outside rel32 range.");
+					return false;
+				}
+
+				std::array<std::uint8_t, 7> patch{
+					REL::NOP, REL::NOP, REL::NOP, REL::NOP,
+					REL::NOP, REL::NOP, REL::NOP
+				};
+				const REL::ASM::JMP5 jump(a_validatedTail, branch);
+				std::memcpy(
+					patch.data(), std::addressof(jump), sizeof(jump));
+				const bool protectionRestored = REL::WriteSafe(
+					a_validatedTail,
+					patch.data(),
+					patch.size());
+				const bool patchOwned = std::memcmp(
+						reinterpret_cast<const void*>(
+							a_validatedTail),
+						patch.data(),
+						patch.size())
+					== 0;
+				if (!patchOwned) {
+					const bool restored = REL::WriteSafe(
+						a_validatedTail,
+						kRunComputeShaderDispatchTail.data(),
+						kRunComputeShaderDispatchTail.size())
+						&& std::memcmp(
+							reinterpret_cast<const void*>(
+								a_validatedTail),
+							kRunComputeShaderDispatchTail.data(),
+							kRunComputeShaderDispatchTail.size())
+							== 0;
+					L->error(
+						"RunComputeShader dispatch bridge installation failed: "
+						"the written tail could not be verified (rollback={}).",
+						restored);
+					if (!restored)
+						std::terminate();
+					FlushInstructionCache(
+						GetCurrentProcess(),
+						reinterpret_cast<const void*>(a_validatedTail),
+						kRunComputeShaderDispatchTail.size());
+					return false;
+				}
+				FlushInstructionCache(
+					GetCurrentProcess(),
+					reinterpret_cast<const void*>(a_validatedTail),
+					patch.size());
+				if (!protectionRestored) {
+					L->warn(
+						"RunComputeShader dispatch bridge owns the verified "
+						"tail, but restoring its page protection failed.");
+				}
+
+				g_computeDispatchBridgePatch = patch;
+				g_computeDispatchContext.store(
+					a_immediateContext, std::memory_order_release);
+				g_computeDispatchBridgeTail.store(
+					a_validatedTail, std::memory_order_release);
+				return true;
+			} catch (const std::exception& e) {
+				L->error(
+					"RunComputeShader dispatch bridge installation failed: {}",
+					e.what());
+			} catch (...) {
+				L->error(
+					"RunComputeShader dispatch bridge installation failed: "
+					"unknown exception.");
+			}
+			return false;
+		}
 
 		ShaderSwapResolverResult ResolveInjectedShader(
 			const ShaderSwapRequest& a_request) noexcept
@@ -1669,144 +1789,121 @@ namespace cs::engine
 		return true;
 	}
 
-	bool EnsureComputeDispatchHooksInstalled(
+	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept
 	{
 		if (!a_immediateContext) {
 			L->error(
-				"Compute dispatch hook installation failed: no immediate context.");
+				"RunComputeShader dispatch bridge installation failed: "
+				"no immediate context.");
 			return false;
 		}
 
-		bool expected = false;
-		if (!g_computeDispatchHookInstallAttempted.compare_exchange_strong(
-				expected, true, std::memory_order_acq_rel)) {
+		const auto installedTail =
+			g_computeDispatchBridgeTail.load(
+				std::memory_order_acquire);
+		if (installedTail != 0) {
 			const bool sameContext =
-				g_computeDispatchContext.load(std::memory_order_acquire)
+				g_computeDispatchContext.load(
+					std::memory_order_acquire)
 				== a_immediateContext;
 			if (!sameContext) {
 				L->error(
-					"Compute dispatch hooks reject a replacement context; "
-					"device recreation is unsupported for this process.");
+					"RunComputeShader dispatch bridge rejects a replacement "
+					"context; device recreation is unsupported for this process.");
 			}
-			return sameContext && ComputeDispatchHooksInstalled();
+			return sameContext && ComputeDispatchBridgeInstalled();
 		}
 
-		const auto* table =
-			*reinterpret_cast<std::uintptr_t**>(a_immediateContext);
-		if (!table
-			|| table[kDispatchVtableSlot] == 0
-			|| table[kDispatchIndirectVtableSlot] == 0) {
+		try {
+			const auto function =
+				REL::ID({ 1108829, 2276940, 2276940 }).address();
+			const auto tail =
+				function + kRunComputeShaderDispatchTailOffset;
+			const auto text =
+				REX::FModule::GetExecutingModule().GetSection(
+					".text");
+			const auto textBegin = text.GetAddress();
+			const auto textEnd = textBegin + text.GetSize();
+			if (!function
+				|| !textBegin
+				|| tail < textBegin
+				|| tail > textEnd
+				|| textEnd - tail
+					< kRunComputeShaderDispatchTail.size()) {
+				L->error(
+					"RunComputeShader dispatch bridge installation refused: "
+					"REL target + {:#x} is outside the executable .text section.",
+					kRunComputeShaderDispatchTailOffset);
+				return false;
+			}
+
+			if (!InstallComputeDispatchBridgeAt(
+					a_immediateContext, tail)) {
+				return false;
+			}
+		} catch (const std::exception& e) {
 			L->error(
-				"Compute dispatch hook installation failed: invalid context vtable.");
+				"RunComputeShader dispatch bridge resolution failed: {}",
+				e.what());
+			return false;
+		} catch (...) {
+			L->error(
+				"RunComputeShader dispatch bridge resolution failed: "
+				"unknown exception.");
 			return false;
 		}
 
-		stl::detour_vfunc<kDispatchVtableSlot, DispatchHook>(
-			a_immediateContext);
-		stl::detour_vfunc<
-			kDispatchIndirectVtableSlot,
-			DispatchIndirectHook>(a_immediateContext);
-
-		const auto* hookedTable =
-			*reinterpret_cast<std::uintptr_t**>(a_immediateContext);
-		const bool dispatchCurrent =
-			hookedTable[kDispatchVtableSlot]
-			== reinterpret_cast<std::uintptr_t>(&DispatchHook::thunk);
-		const bool indirectCurrent =
-			hookedTable[kDispatchIndirectVtableSlot]
-			== reinterpret_cast<std::uintptr_t>(
-				&DispatchIndirectHook::thunk);
-		const bool installed =
-			DispatchHook::func
-			&& DispatchIndirectHook::func
-			&& dispatchCurrent
-			&& indirectCurrent;
-		if (!installed) {
-			L->error(
-				"Compute dispatch hook installation failed: "
-				"Dispatch original={} current={}, DispatchIndirect original={} current={}; "
-				"compute replacements will remain disabled.",
-				reinterpret_cast<std::uintptr_t>(DispatchHook::func),
-				dispatchCurrent,
-				reinterpret_cast<std::uintptr_t>(
-					DispatchIndirectHook::func),
-				indirectCurrent);
-			return false;
-		}
-
-		g_computeDispatchContext.store(
-			a_immediateContext, std::memory_order_release);
-		g_computeDispatchHooksInstalled.store(
-			true, std::memory_order_release);
 		L->info(
-			"Compute dispatch hooks installed on immediate context {:#x} "
-			"(Dispatch slot {}, DispatchIndirect slot {}).",
-			reinterpret_cast<std::uintptr_t>(a_immediateContext),
-			kDispatchVtableSlot,
-			kDispatchIndirectVtableSlot);
+			"RunComputeShader dispatch bridge installed at {:#x} for "
+			"immediate context {:#x}.",
+			g_computeDispatchBridgeTail.load(
+				std::memory_order_acquire),
+			reinterpret_cast<std::uintptr_t>(a_immediateContext));
 		return true;
 	}
 
-	bool ComputeDispatchHooksInstalled() noexcept
+	bool ComputeDispatchBridgeInstalled() noexcept
 	{
-		if (!g_computeDispatchHooksInstalled.load(
+		const auto tail =
+			g_computeDispatchBridgeTail.load(
+				std::memory_order_acquire);
+		if (!tail
+			|| !g_computeDispatchContext.load(
 				std::memory_order_acquire)) {
 			return false;
 		}
-		auto* context =
-			g_computeDispatchContext.load(std::memory_order_acquire);
-		if (!context)
-			return false;
-		const auto* table =
-			*reinterpret_cast<std::uintptr_t**>(context);
-		return table
-			&& table[kDispatchVtableSlot]
-				== reinterpret_cast<std::uintptr_t>(
-					&DispatchHook::thunk)
-			&& table[kDispatchIndirectVtableSlot]
-				== reinterpret_cast<std::uintptr_t>(
-					&DispatchIndirectHook::thunk);
+		return std::memcmp(
+			reinterpret_cast<const void*>(tail),
+			g_computeDispatchBridgePatch.data(),
+			g_computeDispatchBridgePatch.size())
+			== 0;
 	}
 
-	ComputeDispatchHookStatus GetComputeDispatchHookStatus() noexcept
+	ComputeDispatchBridgeStatus GetComputeDispatchBridgeStatus() noexcept
 	{
 		return {
-			.installed = ComputeDispatchHooksInstalled(),
-			.directCalls = g_computeDirectDispatchCalls.load(
-				std::memory_order_relaxed),
-			.indirectCalls = g_computeIndirectDispatchCalls.load(
+			.installed = ComputeDispatchBridgeInstalled(),
+			.bridgeCalls = g_computeBridgeCalls.load(
 				std::memory_order_relaxed),
 			.matchingDispatches = g_computeMatchingDispatches.load(
 				std::memory_order_relaxed),
 			.contextRejections = g_computeContextRejections.load(
+				std::memory_order_relaxed),
+			.phaseRejections = g_computePhaseRejections.load(
+				std::memory_order_relaxed),
+			.shaderRejections = g_computeShaderRejections.load(
 				std::memory_order_relaxed)
 		};
 	}
 
 #ifdef FO4CS_SHADER_INJECTION_TESTING
-	void InvokeComputeDispatchHookForTesting(
+	bool InstallComputeDispatchBridgeForTesting(
 		ID3D11DeviceContext* a_context,
-		std::uint32_t a_threadGroupCountX,
-		std::uint32_t a_threadGroupCountY,
-		std::uint32_t a_threadGroupCountZ) noexcept
+		std::uintptr_t a_validatedTail) noexcept
 	{
-		DispatchHook::thunk(
-			a_context,
-			a_threadGroupCountX,
-			a_threadGroupCountY,
-			a_threadGroupCountZ);
-	}
-
-	void InvokeComputeDispatchIndirectHookForTesting(
-		ID3D11DeviceContext* a_context,
-		ID3D11Buffer* a_bufferForArgs,
-		std::uint32_t a_alignedByteOffsetForArgs) noexcept
-	{
-		DispatchIndirectHook::thunk(
-			a_context,
-			a_bufferForArgs,
-			a_alignedByteOffsetForArgs);
+		return InstallComputeDispatchBridgeAt(
+			a_context, a_validatedTail);
 	}
 #endif
 
@@ -1846,8 +1943,8 @@ namespace cs::engine
 		std::size_t compileSucceeded = 0;
 		std::size_t swappableVariants = 0;
 		ShaderStageMask swappableStages = 0;
-		const bool computeHooksReady =
-			ComputeDispatchHooksInstalled();
+		const bool computeBridgeReady =
+			ComputeDispatchBridgeInstalled();
 		std::vector<FrozenTarget> frozenTargets;
 		if (enabled) {
 			frozenTargets = FreezeTargets(
@@ -1889,13 +1986,14 @@ namespace cs::engine
 				std::string onlyCompiledSha1;
 				for (const auto& variant : frozenTarget.variants) {
 					if (variant.stage == ShaderStage::kCompute
-						&& !computeHooksReady) {
+						&& !computeBridgeReady) {
 						if (firstError.empty()) {
 							firstError =
-								"compute dispatch hooks are unavailable";
+								"RunComputeShader dispatch bridge is unavailable";
 						}
 						L->error(
-							"Compile '{}/{}' rejected: compute dispatch hooks are unavailable.",
+							"Compile '{}/{}' rejected: "
+							"RunComputeShader dispatch bridge is unavailable.",
 							frozenTarget.metadata->name,
 							variant.name);
 						continue;
@@ -2294,6 +2392,7 @@ namespace cs::engine
 					std::memory_order_relaxed);
 			summary.dispatches += runtime.dispatches.load(std::memory_order_relaxed);
 		}
+		summary.computeBridge = GetComputeDispatchBridgeStatus();
 		return summary;
 	}
 

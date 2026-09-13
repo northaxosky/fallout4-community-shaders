@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstring>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <filesystem>
@@ -332,6 +333,168 @@ namespace
 			return true;
 		std::cerr << "FAIL: " << a_failure << '\n';
 		return false;
+	}
+
+	class ExecutableDispatchFixture
+	{
+	public:
+		using Function = void(STDMETHODCALLTYPE*)(
+			ID3D11DeviceContext*, UINT, UINT, UINT);
+
+		explicit ExecutableDispatchFixture(bool a_validTail = true)
+		{
+			constexpr std::array<std::uint8_t, 10> code{
+				0x48, 0x8B, 0x01,
+				0x48, 0xFF, 0xA0, 0x48, 0x01, 0x00, 0x00
+			};
+			_memory = VirtualAlloc(
+				nullptr,
+				code.size(),
+				MEM_COMMIT | MEM_RESERVE,
+				PAGE_READWRITE);
+			if (!_memory)
+				return;
+			std::memcpy(_memory, code.data(), code.size());
+			if (!a_validTail) {
+				static_cast<std::uint8_t*>(_memory)[3] = 0xCC;
+			}
+			DWORD oldProtect = 0;
+			if (!VirtualProtect(
+					_memory,
+					code.size(),
+					PAGE_EXECUTE_READ,
+					&oldProtect)) {
+				VirtualFree(_memory, 0, MEM_RELEASE);
+				_memory = nullptr;
+				return;
+			}
+			FlushInstructionCache(
+				GetCurrentProcess(), _memory, code.size());
+		}
+
+		~ExecutableDispatchFixture()
+		{
+			if (_memory)
+				VirtualFree(_memory, 0, MEM_RELEASE);
+		}
+
+		ExecutableDispatchFixture(
+			const ExecutableDispatchFixture&) = delete;
+		ExecutableDispatchFixture& operator=(
+			const ExecutableDispatchFixture&) = delete;
+
+		[[nodiscard]] explicit operator bool() const noexcept
+		{
+			return _memory != nullptr;
+		}
+
+		[[nodiscard]] std::uintptr_t Tail() const noexcept
+		{
+			return reinterpret_cast<std::uintptr_t>(_memory) + 3;
+		}
+
+		void Dispatch(
+			ID3D11DeviceContext* a_context,
+			UINT a_x,
+			UINT a_y,
+			UINT a_z) const noexcept
+		{
+			reinterpret_cast<Function>(_memory)(
+				a_context, a_x, a_y, a_z);
+		}
+
+	private:
+		void* _memory = nullptr;
+	};
+
+	bool PrepareComputeDispatchBridgeFixture(
+		ID3D11DeviceContext* a_context,
+		ExecutableDispatchFixture& a_fixture)
+	{
+		if (!a_context
+			|| !Check(
+				static_cast<bool>(a_fixture),
+				"could not allocate the executable RunComputeShader fixture")) {
+			return false;
+		}
+		auto& trampoline = REL::GetTrampoline();
+		if (trampoline.empty()) {
+			try {
+				trampoline.create(
+					128,
+					reinterpret_cast<void*>(a_fixture.Tail()));
+			} catch (...) {
+				return Check(
+					false,
+					"could not create the test branch trampoline");
+			}
+		}
+		return Check(
+			InstallComputeDispatchBridgeForTesting(
+				a_context, a_fixture.Tail()),
+			"RunComputeShader dispatch bridge was not installed");
+	}
+
+	bool TestComputeDispatchBridgeRejectsInvalidTail(
+		ID3D11DeviceContext* a_context)
+	{
+		ExecutableDispatchFixture fixture(false);
+		if (!Check(
+				static_cast<bool>(fixture),
+				"could not allocate the invalid dispatch fixture")) {
+			return false;
+		}
+		std::array<std::uint8_t, 7> before{};
+		std::memcpy(
+			before.data(),
+			reinterpret_cast<const void*>(fixture.Tail()),
+			before.size());
+		const bool installed =
+			InstallComputeDispatchBridgeForTesting(
+				a_context, fixture.Tail());
+		std::array<std::uint8_t, 7> after{};
+		std::memcpy(
+			after.data(),
+			reinterpret_cast<const void*>(fixture.Tail()),
+			after.size());
+		return Check(
+			!installed && before == after,
+			"invalid RunComputeShader tail bytes were modified");
+	}
+
+	bool TestComputeDispatchBridgeOwnership(
+		const ExecutableDispatchFixture& a_fixture)
+	{
+		std::array<std::uint8_t, 7> patch{};
+		std::memcpy(
+			patch.data(),
+			reinterpret_cast<const void*>(a_fixture.Tail()),
+			patch.size());
+		auto displaced = patch;
+		displaced.back() ^= 0x01;
+		bool ok = Check(
+			REL::WriteSafe(
+				a_fixture.Tail(),
+				displaced.data(),
+				displaced.size()),
+			"could not displace the bridge patch for ownership testing");
+		ok &= Check(
+			!ComputeDispatchBridgeInstalled(),
+			"bridge readiness ignored displaced tail ownership");
+		ok &= Check(
+			REL::WriteSafe(
+				a_fixture.Tail(),
+				patch.data(),
+				patch.size()),
+			"could not restore the bridge patch after ownership testing");
+		ok &= Check(
+			ComputeDispatchBridgeInstalled(),
+			"bridge readiness did not recover after restoring ownership");
+		FlushInstructionCache(
+			GetCurrentProcess(),
+			reinterpret_cast<const void*>(a_fixture.Tail()),
+			patch.size());
+		return ok;
 	}
 
 	std::optional<std::string> ReadBinaryFile(
@@ -1944,7 +2107,8 @@ namespace
 
 	bool TestComputeDispatchBindings(
 		ID3D11Device* a_device,
-		ID3D11DeviceContext* a_context)
+		ID3D11DeviceContext* a_context,
+		const ExecutableDispatchFixture& a_bridge)
 	{
 		auto* injected = GetInjectedComputeShader(
 			ShaderInjectionTarget::kDfTiledLighting);
@@ -2001,7 +2165,8 @@ namespace
 		a_context->PSSetShader(pixelShader, nullptr, 0);
 		a_context->PSSetConstantBuffers(5, 1, &pixelBuffer);
 
-		const auto before = GetComputeDispatchHookStatus();
+		const auto beforeComCalls =
+			GetComputeDispatchBridgeStatus();
 		BindComputeInputs(
 			a_context,
 			injected,
@@ -2010,18 +2175,77 @@ namespace
 			highBuffer.get(),
 			highSrv.get(),
 			output.uav.get());
-		InvokeComputeDispatchHookForTesting(a_context, 2, 1, 1);
+		a_context->Dispatch(2, 1, 1);
+		auto values = ReadComputeOutput(a_context, output);
+		auto after = GetComputeDispatchBridgeStatus();
+		ok &= Check(
+			values
+				&& *values
+					== std::array<std::uint32_t, 5>{
+						2, 5, 6, 7, 9 }
+				&& after.bridgeCalls
+					== beforeComCalls.bridgeCalls
+				&& after.matchingDispatches
+					== beforeComCalls.matchingDispatches,
+			"ordinary Dispatch was modified outside the engine bridge");
+
+		const std::array<std::uint32_t, 3> indirectArgs{ 3, 1, 1 };
+		D3D11_BUFFER_DESC indirectDesc{};
+		indirectDesc.ByteWidth = sizeof(indirectArgs);
+		indirectDesc.Usage = D3D11_USAGE_DEFAULT;
+		indirectDesc.MiscFlags =
+			D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
+		D3D11_SUBRESOURCE_DATA indirectInitial{ indirectArgs.data() };
+		winrt::com_ptr<ID3D11Buffer> indirectBuffer;
+		ok &= Check(
+			SUCCEEDED(a_device->CreateBuffer(
+				&indirectDesc,
+				&indirectInitial,
+				indirectBuffer.put())),
+			"could not create indirect dispatch arguments");
+		ResetComputeOutput(a_context, output);
+		BindComputeInputs(
+			a_context,
+			injected,
+			engineBuffers,
+			engineSrv.get(),
+			highBuffer.get(),
+			highSrv.get(),
+			output.uav.get());
+		a_context->DispatchIndirect(indirectBuffer.get(), 0);
+		values = ReadComputeOutput(a_context, output);
+		after = GetComputeDispatchBridgeStatus();
+		ok &= Check(
+			values
+				&& *values
+					== std::array<std::uint32_t, 5>{
+						3, 5, 6, 7, 9 }
+				&& after.bridgeCalls
+					== beforeComCalls.bridgeCalls,
+			"ordinary DispatchIndirect was modified outside the engine bridge");
+
+		ResetComputeOutput(a_context, output);
+		const auto before = GetComputeDispatchBridgeStatus();
+		BindComputeInputs(
+			a_context,
+			injected,
+			engineBuffers,
+			engineSrv.get(),
+			highBuffer.get(),
+			highSrv.get(),
+			output.uav.get());
+		a_bridge.Dispatch(a_context, 2, 1, 1);
 		ok &= Check(
 			ComputeBindingsMatch(
 				a_context, engineBuffers, engineSrv.get()),
-			"direct dispatch did not restore CS b5-b7/t3");
+			"engine bridge did not restore CS b5-b7/t3");
 		ok &= Check(
 			HighComputeBindingsMatch(
 				a_context,
 				highBuffer.get(),
 				highSrv.get(),
 				output.uav.get()),
-			"direct dispatch disturbed high CS slots or UAV state");
+			"engine bridge disturbed high CS slots or UAV state");
 		ID3D11PixelShader* restoredPixelShader = nullptr;
 		ID3D11Buffer* restoredPixelBuffer = nullptr;
 		a_context->PSGetShader(&restoredPixelShader, nullptr, nullptr);
@@ -2029,26 +2253,26 @@ namespace
 		ok &= Check(
 			restoredPixelShader == pixelShader
 				&& restoredPixelBuffer == pixelBuffer,
-			"direct dispatch disturbed pixel shader state");
+			"engine bridge disturbed pixel shader state");
 		if (restoredPixelShader)
 			restoredPixelShader->Release();
 		if (restoredPixelBuffer)
 			restoredPixelBuffer->Release();
-		auto values = ReadComputeOutput(a_context, output);
+		values = ReadComputeOutput(a_context, output);
 		ok &= Check(
 			values
 				&& *values
 					== std::array<std::uint32_t, 5>{
 						2, 50, 60, 70, 90 },
-			"direct dispatch did not execute once with just-in-time shared data");
-		auto after = GetComputeDispatchHookStatus();
+			"engine bridge did not execute once with just-in-time shared data");
+		after = GetComputeDispatchBridgeStatus();
 		ok &= Check(
 			g_sharedComputeBinds == 1
 				&& g_computeBindDispatches == 1
-				&& after.directCalls == before.directCalls + 1
+				&& after.bridgeCalls == before.bridgeCalls + 1
 				&& after.matchingDispatches
 					== before.matchingDispatches + 1,
-			"direct dispatch hook counters did not record one matching scope");
+			"engine bridge counters did not record one matching scope");
 
 		TestCompilationPolicy independentPolicy;
 		ShaderVariantCompilationRequest stockRequest;
@@ -2074,30 +2298,27 @@ namespace
 			highSrv.get(),
 			output.uav.get());
 		const auto bindsBeforeStock = g_sharedComputeBinds;
-		InvokeComputeDispatchHookForTesting(a_context, 1, 1, 1);
+		const auto beforeStock = GetComputeDispatchBridgeStatus();
+		a_bridge.Dispatch(a_context, 1, 1, 1);
 		values = ReadComputeOutput(a_context, output);
+		after = GetComputeDispatchBridgeStatus();
 		ok &= Check(
 			values
 				&& *values
 					== std::array<std::uint32_t, 5>{
 						1, 5, 6, 7, 9 }
-				&& g_sharedComputeBinds == bindsBeforeStock,
-			"nonmatching compute shader did not remain passthrough");
+				&& g_sharedComputeBinds == bindsBeforeStock
+				&& after.bridgeCalls
+					== beforeStock.bridgeCalls + 1
+				&& after.shaderRejections
+					== beforeStock.shaderRejections + 1,
+			"nonmatching engine compute shader did not remain passthrough");
 
-		const std::array<std::uint32_t, 3> indirectArgs{ 3, 1, 1 };
-		D3D11_BUFFER_DESC indirectDesc{};
-		indirectDesc.ByteWidth = sizeof(indirectArgs);
-		indirectDesc.Usage = D3D11_USAGE_DEFAULT;
-		indirectDesc.MiscFlags =
-			D3D11_RESOURCE_MISC_DRAWINDIRECT_ARGS;
-		D3D11_SUBRESOURCE_DATA indirectInitial{ indirectArgs.data() };
-		winrt::com_ptr<ID3D11Buffer> indirectBuffer;
-		ok &= Check(
-			SUCCEEDED(a_device->CreateBuffer(
-				&indirectDesc,
-				&indirectInitial,
-				indirectBuffer.put())),
-			"could not create indirect dispatch arguments");
+		// Exercise the current COM entry between engine bridge calls. This
+		// models the runtime's lazy vtable initialization without relying on
+		// or modifying the mutable context vtable.
+		a_context->CSSetShader(stockShader, nullptr, 0);
+		a_context->Dispatch(1, 1, 1);
 		ResetComputeOutput(a_context, output);
 		BindComputeInputs(
 			a_context,
@@ -2107,9 +2328,8 @@ namespace
 			highBuffer.get(),
 			highSrv.get(),
 			output.uav.get());
-		const auto beforeIndirect = GetComputeDispatchHookStatus();
-		InvokeComputeDispatchIndirectHookForTesting(
-			a_context, indirectBuffer.get(), 0);
+		const auto beforeRepeated = GetComputeDispatchBridgeStatus();
+		a_bridge.Dispatch(a_context, 3, 1, 1);
 		ok &= Check(
 			ComputeBindingsMatch(
 				a_context, engineBuffers, engineSrv.get())
@@ -2118,39 +2338,20 @@ namespace
 					highBuffer.get(),
 					highSrv.get(),
 					output.uav.get()),
-			"indirect dispatch did not restore exact compute state");
+			"repeated engine bridge call did not restore exact compute state");
 		values = ReadComputeOutput(a_context, output);
-		after = GetComputeDispatchHookStatus();
-		if (!values
-			|| *values
-				!= std::array<std::uint32_t, 5>{
-					3, 50, 60, 70, 90 }) {
-			std::cerr << "indirect values:";
-			if (values) {
-				for (const auto value : *values)
-					std::cerr << ' ' << value;
-			}
-			std::cerr
-				<< " binds=" << g_sharedComputeBinds
-				<< " callbacks=" << g_computeBindDispatches
-				<< " indirect_delta="
-				<< (after.indirectCalls - beforeIndirect.indirectCalls)
-				<< " matched_delta="
-				<< (after.matchingDispatches
-					- beforeIndirect.matchingDispatches)
-				<< '\n';
-		}
+		after = GetComputeDispatchBridgeStatus();
 		ok &= Check(
 			values
 				&& *values
 					== std::array<std::uint32_t, 5>{
 						3, 50, 60, 70, 90 }
 				&& g_sharedComputeBinds == bindsBeforeStock + 1
-				&& after.indirectCalls
-					== beforeIndirect.indirectCalls + 1
+				&& after.bridgeCalls
+					== beforeRepeated.bridgeCalls + 1
 				&& after.matchingDispatches
-					== beforeIndirect.matchingDispatches + 1,
-			"indirect dispatch did not execute once with just-in-time shared data");
+					== beforeRepeated.matchingDispatches + 1,
+			"repeated engine bridge dispatch did not use published inputs");
 
 		ResetComputeOutput(a_context, output);
 		BindComputeInputs(
@@ -2162,12 +2363,12 @@ namespace
 			highSrv.get(),
 			output.uav.get());
 		const auto bindsBeforeInactive = g_sharedComputeBinds;
-		const auto beforeInactive = GetComputeDispatchHookStatus();
+		const auto beforeInactive = GetComputeDispatchBridgeStatus();
 		g_deferredLightsActive = false;
-		InvokeComputeDispatchHookForTesting(a_context, 1, 1, 1);
+		a_bridge.Dispatch(a_context, 1, 1, 1);
 		g_deferredLightsActive = true;
 		values = ReadComputeOutput(a_context, output);
-		after = GetComputeDispatchHookStatus();
+		after = GetComputeDispatchBridgeStatus();
 		ok &= Check(
 			values
 				&& *values
@@ -2175,7 +2376,9 @@ namespace
 						1, 5, 6, 7, 9 }
 				&& g_sharedComputeBinds == bindsBeforeInactive
 				&& after.matchingDispatches
-					== beforeInactive.matchingDispatches,
+					== beforeInactive.matchingDispatches
+				&& after.phaseRejections
+					== beforeInactive.phaseRejections + 1,
 			"matching compute shader bound shared data outside deferred lights");
 
 		winrt::com_ptr<ID3D11DeviceContext> deferredContext;
@@ -2194,9 +2397,8 @@ namespace
 				highSrv.get(),
 				output.uav.get());
 			const auto bindsBeforeOther = g_sharedComputeBinds;
-			const auto beforeOther = GetComputeDispatchHookStatus();
-			InvokeComputeDispatchHookForTesting(
-				deferredContext.get(), 1, 1, 1);
+			const auto beforeOther = GetComputeDispatchBridgeStatus();
+			a_bridge.Dispatch(deferredContext.get(), 1, 1, 1);
 			winrt::com_ptr<ID3D11CommandList> commands;
 			ok &= Check(
 				SUCCEEDED(deferredContext->FinishCommandList(
@@ -2206,29 +2408,15 @@ namespace
 			if (commands)
 				a_context->ExecuteCommandList(commands.get(), FALSE);
 			values = ReadComputeOutput(a_context, output);
-			after = GetComputeDispatchHookStatus();
-			if (!values
-				|| *values
-					!= std::array<std::uint32_t, 5>{
-						1, 5, 6, 7, 9 }) {
-				std::cerr << "other-context values:";
-				if (values) {
-					for (const auto value : *values)
-						std::cerr << ' ' << value;
-				}
-				std::cerr
-					<< " binds=" << g_sharedComputeBinds
-					<< " rejection_delta="
-					<< (after.contextRejections
-						- beforeOther.contextRejections)
-					<< '\n';
-			}
+			after = GetComputeDispatchBridgeStatus();
 			ok &= Check(
 				values
 					&& *values
 						== std::array<std::uint32_t, 5>{
 							1, 5, 6, 7, 9 }
 					&& g_sharedComputeBinds == bindsBeforeOther
+					&& after.bridgeCalls
+						== beforeOther.bridgeCalls + 1
 					&& after.contextRejections
 						== beforeOther.contextRejections + 1,
 				"other context did not pass through without shared-data rebinding");
@@ -2253,23 +2441,9 @@ namespace
 		if (!device || !context)
 			return 1;
 
-		TestCompilationPolicy warmupPolicy;
-		ShaderVariantCompilationRequest warmupRequest;
-		warmupRequest.device = device;
-		warmupRequest.stage = ShaderStage::kCompute;
-		warmupRequest.sourcePath = L"baseline-warmup.hlsl";
-		const auto warmup = warmupPolicy.Prepare(std::move(warmupRequest));
-		if (warmup.handle) {
-			context->CSSetShader(
-				static_cast<ID3D11ComputeShader*>(
-					warmup.handle->PeekShader()),
-				nullptr,
-				0);
-			context->Dispatch(1, 1, 1);
-		}
-		ok &= Check(
-			EnsureComputeDispatchHooksInstalled(context.get()),
-			"baseline-only compute hooks were not installed");
+		ExecutableDispatchFixture bridge;
+		ok &= PrepareComputeDispatchBridgeFixture(
+			context.get(), bridge);
 		FreezeAndCompileShaderInjections(device.get());
 		auto* injected = GetInjectedComputeShader(
 			ShaderInjectionTarget::kDfTiledLighting);
@@ -2296,18 +2470,19 @@ namespace
 				highBuffer.get(),
 				highSrv.get(),
 				output.uav.get());
-			const auto before = GetComputeDispatchHookStatus();
-			InvokeComputeDispatchHookForTesting(
-				context.get(), 1, 1, 1);
+			const auto before = GetComputeDispatchBridgeStatus();
+			bridge.Dispatch(context.get(), 1, 1, 1);
 			const auto values =
 				ReadComputeOutput(context.get(), output);
-			const auto after = GetComputeDispatchHookStatus();
+			const auto after = GetComputeDispatchBridgeStatus();
 			ok &= Check(
 				values
 					&& *values
 						== std::array<std::uint32_t, 5>{
 							1, 5, 6, 7, 9 }
 					&& g_sharedComputeBinds == 0
+					&& after.bridgeCalls
+						== before.bridgeCalls + 1
 					&& after.matchingDispatches
 						== before.matchingDispatches,
 				"baseline-only compute replacement activated contributed data");
@@ -2709,28 +2884,11 @@ int main(int a_argc, char* a_argv[])
 		winrt::com_ptr<ID3D11DeviceContext> context;
 		ok &= CreateWarpDevice(device, context);
 		if (device && context) {
-			// WARP lazily switches its immediate-context implementation on
-			// first real compute submission. Settle that test-only transition
-			// before patching the production Dispatch slots.
-			TestCompilationPolicy warmupPolicy;
-			ShaderVariantCompilationRequest warmupRequest;
-			warmupRequest.device = device;
-			warmupRequest.stage = ShaderStage::kCompute;
-			warmupRequest.sourcePath = L"warmup-compute.hlsl";
-			const auto warmup = warmupPolicy.Prepare(
-				std::move(warmupRequest));
-			if (warmup.handle) {
-				context->CSSetShader(
-					static_cast<ID3D11ComputeShader*>(
-						warmup.handle->PeekShader()),
-					nullptr,
-					0);
-				context->Dispatch(1, 1, 1);
-				context->CSSetShader(nullptr, nullptr, 0);
-			}
-			ok &= Check(
-				EnsureComputeDispatchHooksInstalled(context.get()),
-				"compute dispatch hooks were not installed");
+			ok &= TestComputeDispatchBridgeRejectsInvalidTail(
+				context.get());
+			ExecutableDispatchFixture bridge;
+			ok &= PrepareComputeDispatchBridgeFixture(
+				context.get(), bridge);
 			ok &= TestPixelShaderResourceSnapshot(
 				device.get(),
 				context.get());
@@ -2739,7 +2897,9 @@ int main(int a_argc, char* a_argv[])
 				context.get());
 			ok &= TestComputeDispatchBindings(
 				device.get(),
-				context.get());
+				context.get(),
+				bridge);
+			ok &= TestComputeDispatchBridgeOwnership(bridge);
 		}
 	}
 	if (!ok)

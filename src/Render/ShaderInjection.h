@@ -173,13 +173,14 @@ namespace cs::engine
 		std::uint64_t substitutions = 0;
 	};
 
-	struct ComputeDispatchHookStatus
+	struct ComputeDispatchBridgeStatus
 	{
 		bool installed = false;
-		std::uint64_t directCalls = 0;
-		std::uint64_t indirectCalls = 0;
+		std::uint64_t bridgeCalls = 0;
 		std::uint64_t matchingDispatches = 0;
 		std::uint64_t contextRejections = 0;
+		std::uint64_t phaseRejections = 0;
+		std::uint64_t shaderRejections = 0;
 	};
 
 	struct ShaderInjectionSummary
@@ -198,6 +199,7 @@ namespace cs::engine
 		std::uint64_t passthroughNotReady = 0;
 		std::uint64_t passthroughDisabled = 0;
 		std::uint64_t dispatches = 0;
+		ComputeDispatchBridgeStatus computeBridge;
 	};
 
 	std::span<const ShaderInjectionTargetMetadata> GetShaderInjectionTargets() noexcept;
@@ -227,21 +229,15 @@ namespace cs::engine
 	bool SetShaderInjectionEnabled(bool a_enabled);
 
 	void FreezeAndCompileShaderInjections(ID3D11Device* a_device);
-	bool EnsureComputeDispatchHooksInstalled(
+	bool EnsureComputeDispatchBridgeInstalled(
 		ID3D11DeviceContext* a_immediateContext) noexcept;
-	[[nodiscard]] bool ComputeDispatchHooksInstalled() noexcept;
-	[[nodiscard]] ComputeDispatchHookStatus
-		GetComputeDispatchHookStatus() noexcept;
+	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
+	[[nodiscard]] ComputeDispatchBridgeStatus
+		GetComputeDispatchBridgeStatus() noexcept;
 #ifdef FO4CS_SHADER_INJECTION_TESTING
-	void InvokeComputeDispatchHookForTesting(
+	bool InstallComputeDispatchBridgeForTesting(
 		ID3D11DeviceContext* a_context,
-		std::uint32_t a_threadGroupCountX,
-		std::uint32_t a_threadGroupCountY,
-		std::uint32_t a_threadGroupCountZ) noexcept;
-	void InvokeComputeDispatchIndirectHookForTesting(
-		ID3D11DeviceContext* a_context,
-		ID3D11Buffer* a_bufferForArgs,
-		std::uint32_t a_alignedByteOffsetForArgs) noexcept;
+		std::uintptr_t a_validatedTail) noexcept;
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
