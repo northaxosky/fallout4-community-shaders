@@ -257,6 +257,17 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   slot reuse after GPU consumption without a steady-state CPU wait for presentation. Whole-pipeline
   drains remain for resize and teardown. Detailed diagnostics include slot retirement tokens,
   completion values, GPU waits, and lifecycle drain counts.
+  The D3D11-facing presentation facade exposes `IDXGISwapChain` through `IDXGISwapChain4` with one
+  accessible discard-model fake backbuffer and one COM identity. Its two-buffer descriptor mirrors
+  the private presentation buffering, while discard-model `GetBuffer` access remains limited to
+  index zero. Inner flip-only flags and waitable-latency, source-region, rotation, and composition
+  transform operations are not advertised through the D3D11 facade. `Present1` follows the same
+  capture and provider transaction as `Present`; partial-presentation dirty or scroll metadata is
+  rejected because the bridge publishes a complete frame. `ResizeBuffers1` uses the normal
+  transactional rebuild only without D3D12 node masks or foreign presentation queues. Resize
+  preserves the private swap chain's creation-only flags even though the facade does not expose them.
+  Bounded `SWAPCHAIN_FACADE` records identify versioned interface queries and versioned present or
+  resize routes without adding per-frame logging.
   Provider-reported presented-frame totals include real and generated frames and do not prove
   that every frame reached the display. Generated-frame counts are reported as unavailable
   when the SDK data cannot distinguish them reliably.

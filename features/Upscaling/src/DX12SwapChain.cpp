@@ -1,4 +1,5 @@
 #include "DX12SwapChain.h"
+#include "DXGISwapChainFacadeContract.h"
 
 #include <array>
 #include <algorithm>
@@ -47,6 +48,39 @@ namespace cs::features
 				OutputDebugStringA(")");
 			}
 			OutputDebugStringA("\n");
+		}
+
+		std::string_view SwapChainFacadeEventName(
+			SwapChainFacadeEvent a_event) noexcept
+		{
+			switch (a_event) {
+			case SwapChainFacadeEvent::kQuerySwapChain1:
+				return "query_idxgiswapchain1";
+			case SwapChainFacadeEvent::kQuerySwapChain2:
+				return "query_idxgiswapchain2";
+			case SwapChainFacadeEvent::kQuerySwapChain3:
+				return "query_idxgiswapchain3";
+			case SwapChainFacadeEvent::kQuerySwapChain4:
+				return "query_idxgiswapchain4";
+			case SwapChainFacadeEvent::kPresent1:
+				return "present1";
+			case SwapChainFacadeEvent::kPresent1MetadataRejected:
+				return "present1_metadata_rejected";
+			case SwapChainFacadeEvent::kResizeBuffers1:
+				return "resizebuffers1";
+			case SwapChainFacadeEvent::kResizeBuffers1QueuesRejected:
+				return "resizebuffers1_queues_rejected";
+			case SwapChainFacadeEvent::kSourceSizeRejected:
+				return "source_size_rejected";
+			case SwapChainFacadeEvent::kFrameLatencyRejected:
+				return "frame_latency_rejected";
+			case SwapChainFacadeEvent::kMatrixTransformRejected:
+				return "matrix_transform_rejected";
+			case SwapChainFacadeEvent::kRotationRejected:
+				return "rotation_rejected";
+			default:
+				return "unknown";
+			}
 		}
 
 	}
@@ -112,138 +146,6 @@ namespace cs::features
 		return result;
 	}
 
-	DXGISwapChainProxy::DXGISwapChainProxy(DX12SwapChain& a_owner) noexcept :
-		_owner(a_owner)
-	{}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::QueryInterface(REFIID a_iid, void** a_object) noexcept
-	{
-		if (!a_object) {
-			return E_POINTER;
-		}
-		*a_object = nullptr;
-		if (a_iid == __uuidof(IUnknown) || a_iid == __uuidof(IDXGIObject) ||
-			a_iid == __uuidof(IDXGIDeviceSubObject) || a_iid == __uuidof(IDXGISwapChain)) {
-			*a_object = static_cast<IDXGISwapChain*>(this);
-			AddRef();
-			return S_OK;
-		}
-		return E_NOINTERFACE;
-	}
-
-	ULONG STDMETHODCALLTYPE DXGISwapChainProxy::AddRef() noexcept
-	{
-		return _references.fetch_add(1, std::memory_order_relaxed) + 1;
-	}
-
-	ULONG STDMETHODCALLTYPE DXGISwapChainProxy::Release() noexcept
-	{
-		const auto remaining = _references.fetch_sub(1, std::memory_order_acq_rel) - 1;
-		return remaining;
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetPrivateData(
-		REFGUID a_name,
-		UINT a_size,
-		const void* a_data) noexcept
-	{
-		return _owner.SetPrivateData(a_name, a_size, a_data);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetPrivateDataInterface(
-		REFGUID a_name,
-		const IUnknown* a_unknown) noexcept
-	{
-		return _owner.SetPrivateDataInterface(a_name, a_unknown);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetPrivateData(
-		REFGUID a_name,
-		UINT* a_size,
-		void* a_data) noexcept
-	{
-		return _owner.GetPrivateData(a_name, a_size, a_data);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetParent(REFIID a_iid, void** a_parent) noexcept
-	{
-		return _owner.GetParent(a_iid, a_parent);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDevice(REFIID a_iid, void** a_device) noexcept
-	{
-		return _owner.GetDevice(a_iid, a_device);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::Present(UINT a_syncInterval, UINT a_flags) noexcept
-	{
-		return _owner.Present(a_syncInterval, a_flags);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetBuffer(
-		UINT a_buffer,
-		REFIID a_iid,
-		void** a_surface) noexcept
-	{
-		return _owner.GetBuffer(a_buffer, a_iid, a_surface);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::SetFullscreenState(
-		BOOL a_fullscreen,
-		IDXGIOutput*) noexcept
-	{
-		return a_fullscreen ? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE : S_OK;
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFullscreenState(
-		BOOL* a_fullscreen,
-		IDXGIOutput** a_target) noexcept
-	{
-		if (a_fullscreen) {
-			*a_fullscreen = FALSE;
-		}
-		if (a_target) {
-			*a_target = nullptr;
-		}
-		return S_OK;
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept
-	{
-		return _owner.GetDesc(a_desc);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeBuffers(
-		UINT a_bufferCount,
-		UINT a_width,
-		UINT a_height,
-		DXGI_FORMAT a_format,
-		UINT a_flags) noexcept
-	{
-		return _owner.ResizeBuffers(a_bufferCount, a_width, a_height, a_format, a_flags);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::ResizeTarget(const DXGI_MODE_DESC*) noexcept
-	{
-		return DXGI_ERROR_NOT_CURRENTLY_AVAILABLE;
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetContainingOutput(IDXGIOutput** a_output) noexcept
-	{
-		return _owner.GetContainingOutput(a_output);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetFrameStatistics(
-		DXGI_FRAME_STATISTICS* a_stats) noexcept
-	{
-		return _owner.GetFrameStatistics(a_stats);
-	}
-
-	HRESULT STDMETHODCALLTYPE DXGISwapChainProxy::GetLastPresentCount(UINT* a_count) noexcept
-	{
-		return _owner.GetLastPresentCount(a_count);
-	}
-
 	DX12SwapChain::~DX12SwapChain()
 	{
 		(void)Rollback();
@@ -302,7 +204,7 @@ namespace cs::features
 			return FAILED(cleanupResult) ? cleanupResult : result;
 		}
 
-		_proxy = std::make_unique<DXGISwapChainProxy>(*this);
+		_proxy.attach(new DXGISwapChainProxy(*this, *_swapChain));
 		_published = true;
 		ClearSharedBuffers();
 		L->info(
@@ -356,7 +258,10 @@ namespace cs::features
 			CloseHandle(_fenceEvent);
 			_fenceEvent = nullptr;
 		}
-		_proxy.reset();
+		if (_proxy) {
+			_proxy->DetachOwner();
+			_proxy = nullptr;
+		}
 		_srTransparency.reset();
 		_srReactive.reset();
 		_srMotion.reset();
@@ -397,6 +302,7 @@ namespace cs::features
 		_inputResourceGeneration = 0;
 		_retirementEpochActive = false;
 		_retirementLastResetFrame = UINT64_MAX;
+		_facadeEventLogMask.store(0, std::memory_order_relaxed);
 		RearmInputRetirementLogBudget();
 		render::temporal::ResetPresentationProtocol(
 			_allocatorFenceValues,
@@ -534,13 +440,8 @@ namespace cs::features
 		if (SUCCEEDED(result) && swapChain) {
 			_swapChain.attach(swapChain);
 			_frameIndex = _swapChain->GetCurrentBackBufferIndex();
-			_proxyDesc.BufferDesc.Width = _innerDesc.Width;
-			_proxyDesc.BufferDesc.Height = _innerDesc.Height;
-			_proxyDesc.BufferDesc.Format = _innerDesc.Format;
-			_proxyDesc.BufferCount = 2;
-			_proxyDesc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-			_proxyDesc.Windowed = TRUE;
-			_proxyDesc.Flags = _innerDesc.Flags;
+			_proxyDesc = swap_chain_facade::BuildDescription(
+				a_desc, _innerDesc);
 		}
 		return result;
 	}
@@ -791,6 +692,15 @@ namespace cs::features
 	IDXGISwapChain* DX12SwapChain::GetProxy() const noexcept
 	{
 		return _proxy.get();
+	}
+
+	IDXGISwapChain* DX12SwapChain::AcquireProxy() const noexcept
+	{
+		auto* proxy = _proxy.get();
+		if (proxy) {
+			proxy->AddRef();
+		}
+		return proxy;
 	}
 
 	bool DX12SwapChain::Owns(IDXGISwapChain* a_swapChain) const noexcept
@@ -1374,25 +1284,28 @@ namespace cs::features
 			_retirementViolations.fetch_add(
 				1, std::memory_order_relaxed);
 		}
-		_retirementLastRealFrame.store(
-			acquired.token.realFrame, std::memory_order_relaxed);
-		_retirementLastResourceGeneration.store(
-			acquired.token.resourceGeneration,
-			std::memory_order_relaxed);
-		_retirementLastRequiredFence.store(
-			acquired.token.value, std::memory_order_relaxed);
-		_retirementLastCompletedFence.store(
-			acquired.completedValue, std::memory_order_relaxed);
-		_retirementWaitCpuMicroseconds.fetch_add(
-			waitMicroseconds, std::memory_order_relaxed);
-		_retirementLastSlot.store(
-			_frameSlot, std::memory_order_relaxed);
-		_retirementLastAcquireQueuedGpuWait.store(
-			acquired.waitRequired &&
-				acquired.token.mode ==
-					render::temporal::PresentInputRetirementMode::
-						kSynchronousPresentQueue,
-			std::memory_order_relaxed);
+		if (render::temporal::ShouldPublishPresentInputAcquireTelemetry(
+				acquired)) {
+			_retirementLastRealFrame.store(
+				acquired.token.realFrame, std::memory_order_relaxed);
+			_retirementLastResourceGeneration.store(
+				acquired.token.resourceGeneration,
+				std::memory_order_relaxed);
+			_retirementLastRequiredFence.store(
+				acquired.token.value, std::memory_order_relaxed);
+			_retirementLastCompletedFence.store(
+				acquired.completedValue, std::memory_order_relaxed);
+			_retirementWaitCpuMicroseconds.fetch_add(
+				waitMicroseconds, std::memory_order_relaxed);
+			_retirementLastSlot.store(
+				_frameSlot, std::memory_order_relaxed);
+			_retirementLastAcquireQueuedGpuWait.store(
+				acquired.waitRequired &&
+					acquired.token.mode ==
+						render::temporal::PresentInputRetirementMode::
+							kSynchronousPresentQueue,
+				std::memory_order_relaxed);
+		}
 		auto logToken = acquired.token;
 		if (logToken.resourceGeneration == 0) {
 			logToken.mode = _provider->GetPresentInputRetirementMode();
@@ -1480,12 +1393,30 @@ namespace cs::features
 
 	HRESULT DX12SwapChain::Present(UINT a_syncInterval, UINT a_flags) noexcept
 	{
+		return PresentInternal(
+			a_syncInterval, a_flags, nullptr, false);
+	}
+
+	HRESULT DX12SwapChain::Present1(
+		UINT a_syncInterval,
+		UINT a_flags,
+		const DXGI_PRESENT_PARAMETERS* a_parameters) noexcept
+	{
+		return PresentInternal(
+			a_syncInterval, a_flags, a_parameters, true);
+	}
+
+	HRESULT DX12SwapChain::PresentInternal(
+		UINT a_syncInterval,
+		UINT a_flags,
+		const DXGI_PRESENT_PARAMETERS* a_parameters,
+		bool a_usePresent1) noexcept
+	{
 		if (a_flags & DXGI_PRESENT_TEST) {
 			auto& pipeline = render::TemporalPipeline::Get();
 			pipeline.BeginPresentAttempt(a_flags);
-			const HRESULT result = _swapChain
-				? _swapChain->Present(a_syncInterval, a_flags)
-				: E_FAIL;
+			const HRESULT result = InvokeInnerPresent(
+				a_syncInterval, a_flags, a_parameters, a_usePresent1);
 			pipeline.EndPresentAttempt(a_flags, result);
 			if (_preparedTransaction) {
 				pipeline.RecordPresentAttempt(
@@ -1494,7 +1425,11 @@ namespace cs::features
 			return result;
 		}
 		try {
-			const HRESULT result = PresentImpl(a_syncInterval, a_flags);
+			const HRESULT result = PresentImpl(
+				a_syncInterval,
+				a_flags,
+				a_parameters,
+				a_usePresent1);
 			if (result != DXGI_ERROR_WAS_STILL_DRAWING) {
 				if (_callbacks.clearCapture) {
 					_callbacks.clearCapture();
@@ -1516,14 +1451,32 @@ namespace cs::features
 		}
 	}
 
-	HRESULT DX12SwapChain::PresentImpl(UINT a_syncInterval, UINT a_flags)
+	HRESULT DX12SwapChain::InvokeInnerPresent(
+		UINT a_syncInterval,
+		UINT a_flags,
+		const DXGI_PRESENT_PARAMETERS* a_parameters,
+		bool a_usePresent1) noexcept
+	{
+		if (!_swapChain) {
+			return DXGI_ERROR_INVALID_CALL;
+		}
+		return a_usePresent1
+			? _swapChain->Present1(
+				a_syncInterval, a_flags, a_parameters)
+			: _swapChain->Present(a_syncInterval, a_flags);
+	}
+
+	HRESULT DX12SwapChain::PresentImpl(
+		UINT a_syncInterval,
+		UINT a_flags,
+		const DXGI_PRESENT_PARAMETERS* a_parameters,
+		bool a_usePresent1)
 	{
 		if (!IsReady()) {
 			auto& pipeline = render::TemporalPipeline::Get();
 			pipeline.BeginPresentAttempt(a_flags);
-			const HRESULT result = _swapChain
-				? _swapChain->Present(a_syncInterval, a_flags)
-				: DXGI_ERROR_INVALID_CALL;
+			const HRESULT result = InvokeInnerPresent(
+				a_syncInterval, a_flags, a_parameters, a_usePresent1);
 			pipeline.EndPresentAttempt(a_flags, result);
 			return result;
 		}
@@ -1709,7 +1662,11 @@ namespace cs::features
 			[&]() {
 				auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 					render::FrameGenerationCpuPhase::kSdkPresent);
-				return _swapChain->Present(a_syncInterval, a_flags);
+				return InvokeInnerPresent(
+					a_syncInterval,
+					a_flags,
+					a_parameters,
+					a_usePresent1);
 			},
 			[&](std::uint64_t a_value) {
 				return _queue->Signal(
@@ -1881,6 +1838,32 @@ namespace cs::features
 		return _outwardDevice11 ? _outwardDevice11->QueryInterface(a_iid, a_device) : E_NOINTERFACE;
 	}
 
+	HRESULT DX12SwapChain::SetFullscreenState(
+		BOOL a_fullscreen,
+		IDXGIOutput*) noexcept
+	{
+		return a_fullscreen
+			? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
+			: S_OK;
+	}
+
+	HRESULT DX12SwapChain::GetFullscreenState(
+		BOOL* a_fullscreen,
+		IDXGIOutput** a_target) noexcept
+	{
+		if (!a_fullscreen) {
+			if (a_target) {
+				*a_target = nullptr;
+			}
+			return E_POINTER;
+		}
+		*a_fullscreen = FALSE;
+		if (a_target) {
+			*a_target = nullptr;
+		}
+		return S_OK;
+	}
+
 	HRESULT DX12SwapChain::GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept
 	{
 		if (!a_desc) {
@@ -1888,6 +1871,129 @@ namespace cs::features
 		}
 		*a_desc = _proxyDesc;
 		return S_OK;
+	}
+
+	HRESULT DX12SwapChain::GetDesc1(
+		DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept
+	{
+		if (!a_desc) {
+			return E_POINTER;
+		}
+		*a_desc =
+			swap_chain_facade::BuildDescription1(_proxyDesc);
+		return S_OK;
+	}
+
+	HRESULT DX12SwapChain::GetFullscreenDesc(
+		DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_desc) noexcept
+	{
+		if (!a_desc) {
+			return E_POINTER;
+		}
+		*a_desc =
+			swap_chain_facade::BuildFullscreenDescription(
+				_proxyDesc);
+		return S_OK;
+	}
+
+	HRESULT DX12SwapChain::GetHwnd(HWND* a_window) noexcept
+	{
+		if (!a_window) {
+			return E_POINTER;
+		}
+		*a_window = _proxyDesc.OutputWindow;
+		return S_OK;
+	}
+
+	UINT DX12SwapChain::GetCurrentBackBufferIndex() noexcept
+	{
+		return 0;
+	}
+
+	HRESULT DX12SwapChain::CheckColorSpaceSupport(
+		DXGI_COLOR_SPACE_TYPE a_colorSpace,
+		UINT* a_support) noexcept
+	{
+		if (!a_support) {
+			return E_POINTER;
+		}
+		*a_support = 0;
+		if (a_colorSpace !=
+			DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) {
+			return S_OK;
+		}
+		return _swapChain
+			? _swapChain->CheckColorSpaceSupport(
+				a_colorSpace, a_support)
+			: DXGI_ERROR_INVALID_CALL;
+	}
+
+	HRESULT DX12SwapChain::SetColorSpace1(
+		DXGI_COLOR_SPACE_TYPE a_colorSpace) noexcept
+	{
+		if (a_colorSpace !=
+			DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709) {
+			return DXGI_ERROR_UNSUPPORTED;
+		}
+		return _swapChain
+			? _swapChain->SetColorSpace1(a_colorSpace)
+			: DXGI_ERROR_INVALID_CALL;
+	}
+
+	HRESULT DX12SwapChain::SetHDRMetaData(
+		DXGI_HDR_METADATA_TYPE a_type,
+		UINT a_size,
+		void* a_metadata) noexcept
+	{
+		if (a_type != DXGI_HDR_METADATA_TYPE_NONE) {
+			return DXGI_ERROR_UNSUPPORTED;
+		}
+		if (a_size || a_metadata) {
+			return E_INVALIDARG;
+		}
+		return _swapChain
+			? _swapChain->SetHDRMetaData(a_type, 0, nullptr)
+			: DXGI_ERROR_INVALID_CALL;
+	}
+
+	void DX12SwapChain::RecordSwapChainFacadeEvent(
+		SwapChainFacadeEvent a_event) noexcept
+	{
+		const auto index = static_cast<std::uint32_t>(a_event);
+		if (index >= static_cast<std::uint32_t>(
+				SwapChainFacadeEvent::kCount)) {
+			return;
+		}
+		const std::uint32_t bit = 1u << index;
+		if (_facadeEventLogMask.fetch_or(
+				bit, std::memory_order_relaxed) & bit) {
+			return;
+		}
+		const auto name = SwapChainFacadeEventName(a_event);
+		try {
+			if (a_event >=
+				SwapChainFacadeEvent::kPresent1MetadataRejected &&
+				a_event != SwapChainFacadeEvent::kResizeBuffers1) {
+				L->warn(
+					"SWAPCHAIN_FACADE event={} result=unsupported",
+					name);
+			} else {
+				L->info(
+					"SWAPCHAIN_FACADE event={} result=observed",
+					name);
+			}
+		} catch (...) {
+			OutputDebugStringA(
+				"SWAPCHAIN_FACADE logging failure\n");
+		}
+	}
+
+	HRESULT DX12SwapChain::ResizeTarget(
+		const DXGI_MODE_DESC* a_target) noexcept
+	{
+		return a_target
+			? DXGI_ERROR_NOT_CURRENTLY_AVAILABLE
+			: E_INVALIDARG;
 	}
 
 	HRESULT DX12SwapChain::ResizeBuffers(
@@ -1911,6 +2017,22 @@ namespace cs::features
 		}
 	}
 
+	HRESULT DX12SwapChain::ResizeBuffers1(
+		UINT a_bufferCount,
+		UINT a_width,
+		UINT a_height,
+		DXGI_FORMAT a_format,
+		UINT a_flags,
+		const UINT* a_creationNodeMask,
+		IUnknown* const* a_presentQueue) noexcept
+	{
+		if (a_creationNodeMask || a_presentQueue) {
+			return DXGI_ERROR_UNSUPPORTED;
+		}
+		return ResizeBuffers(
+			a_bufferCount, a_width, a_height, a_format, a_flags);
+	}
+
 	HRESULT DX12SwapChain::ResizeBuffersImpl(
 		UINT a_bufferCount,
 		UINT a_width,
@@ -1921,10 +2043,11 @@ namespace cs::features
 		if (!_swapChain) {
 			return DXGI_ERROR_INVALID_CALL;
 		}
-		const UINT effectiveCount = a_bufferCount ? a_bufferCount : 2;
-		if (effectiveCount != 2) {
+		if (!swap_chain_facade::SupportsResizeBufferCount(
+				a_bufferCount, _proxyDesc)) {
 			return DXGI_ERROR_UNSUPPORTED;
 		}
+		constexpr UINT effectiveCount = 2;
 		if (a_format != DXGI_FORMAT_UNKNOWN && a_format != DXGI_FORMAT_R8G8B8A8_UNORM) {
 			return DXGI_ERROR_UNSUPPORTED;
 		}
@@ -1996,7 +2119,8 @@ namespace cs::features
 			targetWidth,
 			targetHeight,
 			DXGI_FORMAT_R8G8B8A8_UNORM,
-			a_flags);
+			swap_chain_facade::PreservePrivateResizeFlags(
+				a_flags, _innerDesc));
 		if (FAILED(resizeResult)) {
 			const HRESULT refreshResult = RefreshBackBuffers();
 			if (FAILED(refreshResult)) {

@@ -205,6 +205,13 @@ namespace cs::render::temporal
 		}
 	};
 
+	[[nodiscard]] inline bool
+		ShouldPublishPresentInputAcquireTelemetry(
+			const PresentInputAcquireResult& a_result) noexcept
+	{
+		return a_result.firstAcquire || !a_result.Succeeded();
+	}
+
 	[[nodiscard]] constexpr std::string_view PresentInputAcquireCodeName(
 		PresentInputAcquireCode a_code) noexcept
 	{
@@ -518,8 +525,6 @@ namespace cs::render::temporal
 		a_proxyDescription.BufferDesc.Width = a_innerDescription.Width;
 		a_proxyDescription.BufferDesc.Height = a_innerDescription.Height;
 		a_proxyDescription.BufferDesc.Format = a_innerDescription.Format;
-		a_proxyDescription.BufferCount = a_innerDescription.BufferCount;
-		a_proxyDescription.Flags = a_innerDescription.Flags;
 		ResetPresentationProtocol(
 			a_allocatorFenceValues,
 			a_inputReuseGate,

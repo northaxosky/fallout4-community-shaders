@@ -208,7 +208,7 @@ namespace
 				std::tuple{ "kPrepareFrame",
 					"PrepareFrameSafely(", 300u },
 				std::tuple{ "kSdkPresent",
-					"_swapChain->Present(a_syncInterval, a_flags)", 300u },
+					"InvokeInnerPresent(", 300u },
 				std::tuple{ "kCollectPresentStatus",
 					"CollectAcceptedPresentStatus(", 300u } }) {
 			checkNear(
@@ -223,6 +223,32 @@ namespace
 			swapChain.find("if (a_flags & DXGI_PRESENT_TEST)") <
 				swapChain.find("FrameGenerationCpuPhase::kSdkPresent"),
 			"SDK Present timing remains after the TEST-present early return");
+		const auto present1 = swapChain.find(
+			"HRESULT DX12SwapChain::Present1(");
+		const auto present1Route = swapChain.find(
+			"return PresentInternal(", present1);
+		Check(
+			present1 != std::string::npos &&
+				present1Route != std::string::npos &&
+				present1Route - present1 < 400,
+			"Present1 enters the same presentation transaction as Present");
+		const auto resize1 = swapChain.find(
+			"HRESULT DX12SwapChain::ResizeBuffers1(");
+		const auto resizeRoute = swapChain.find(
+			"return ResizeBuffers(", resize1);
+		Check(
+			resize1 != std::string::npos &&
+				resizeRoute != std::string::npos &&
+				resizeRoute - resize1 < 500,
+			"ResizeBuffers1 enters the transactional resize path");
+		Check(
+			swapChain.contains(
+				"ShouldPublishPresentInputAcquireTelemetry("),
+			"repeated no-op input acquisitions preserve latest-token telemetry");
+		Check(
+			pipeline.contains(
+				"*a_context.swapChain = _impl->swapChain.AcquireProxy();"),
+			"published swap-chain ownership includes the caller COM reference");
 	}
 
 	class RecordingProvider final :
@@ -522,9 +548,11 @@ namespace
 		Check(
 			proxy.BufferDesc.Width == 1920 &&
 				proxy.BufferDesc.Height == 1080 &&
+				proxy.BufferCount == 2 &&
+				proxy.Flags == 0 &&
 				inner.Width == 1920 &&
 				inner.Height == 1080,
-			"successful native resize commits the actual bridge descriptor");
+			"successful native resize commits dimensions without leaking inner-only flags");
 		Check(
 			fenceValues == std::array<std::uint64_t, 2>{ 0, 0 } &&
 				frameSlot == 0 && !gate.IsPending(1) &&
@@ -537,6 +565,32 @@ namespace
 				proxy.BufferDesc.Width == 1920 &&
 				inner.Width == 1920,
 			"provider quarantine after commit cannot roll published metadata back to the old native size");
+	}
+
+	void TestAcquireTelemetryPublication()
+	{
+		using namespace cs::render::temporal;
+		Check(
+			ShouldPublishPresentInputAcquireTelemetry(
+				{
+					.code = PresentInputAcquireCode::kAcquired,
+					.firstAcquire = true
+				}),
+			"the first acquisition publishes latest-token telemetry");
+		Check(
+			!ShouldPublishPresentInputAcquireTelemetry(
+				{
+					.code = PresentInputAcquireCode::kAcquired,
+					.firstAcquire = false
+				}),
+			"a repeated no-op acquisition preserves the previous latest token");
+		Check(
+			ShouldPublishPresentInputAcquireTelemetry(
+				{
+					.code = PresentInputAcquireCode::kWaitFailed,
+					.firstAcquire = false
+				}),
+			"an acquisition error always publishes telemetry");
 	}
 
 	void TestSafePreparation()
@@ -1286,6 +1340,7 @@ int main(int a_argc, char** a_argv)
 	TestLifecycleOrderAndFailures();
 	TestResizeRestoration();
 	TestResizeCommitProtocol();
+	TestAcquireTelemetryPublication();
 	TestSafePreparation();
 	TestInputReuseGate();
 	TestSynchronousPresentRetirement();

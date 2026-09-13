@@ -12,6 +12,7 @@
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
+#include "DXGISwapChainProxy.h"
 #include "SuperResolutionContext.h"
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalProvider.h"
@@ -82,41 +83,7 @@ namespace cs::features
 		bool lastAcquireQueuedGpuWait = false;
 	};
 
-	class DXGISwapChainProxy final : public IDXGISwapChain
-	{
-	public:
-		explicit DXGISwapChainProxy(DX12SwapChain& a_owner) noexcept;
-
-		HRESULT STDMETHODCALLTYPE QueryInterface(REFIID a_iid, void** a_object) noexcept override;
-		ULONG STDMETHODCALLTYPE AddRef() noexcept override;
-		ULONG STDMETHODCALLTYPE Release() noexcept override;
-		HRESULT STDMETHODCALLTYPE SetPrivateData(REFGUID a_name, UINT a_size, const void* a_data) noexcept override;
-		HRESULT STDMETHODCALLTYPE SetPrivateDataInterface(REFGUID a_name, const IUnknown* a_unknown) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetPrivateData(REFGUID a_name, UINT* a_size, void* a_data) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetParent(REFIID a_iid, void** a_parent) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetDevice(REFIID a_iid, void** a_device) noexcept override;
-		HRESULT STDMETHODCALLTYPE Present(UINT a_syncInterval, UINT a_flags) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetBuffer(UINT a_buffer, REFIID a_iid, void** a_surface) noexcept override;
-		HRESULT STDMETHODCALLTYPE SetFullscreenState(BOOL a_fullscreen, IDXGIOutput* a_target) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetFullscreenState(BOOL* a_fullscreen, IDXGIOutput** a_target) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept override;
-		HRESULT STDMETHODCALLTYPE ResizeBuffers(
-			UINT a_bufferCount,
-			UINT a_width,
-			UINT a_height,
-			DXGI_FORMAT a_format,
-			UINT a_flags) noexcept override;
-		HRESULT STDMETHODCALLTYPE ResizeTarget(const DXGI_MODE_DESC* a_target) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetContainingOutput(IDXGIOutput** a_output) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetFrameStatistics(DXGI_FRAME_STATISTICS* a_stats) noexcept override;
-		HRESULT STDMETHODCALLTYPE GetLastPresentCount(UINT* a_count) noexcept override;
-
-	private:
-		std::atomic<ULONG> _references{ 1 };
-		DX12SwapChain& _owner;
-	};
-
-	class DX12SwapChain
+	class DX12SwapChain : public IDXGISwapChainProxyOwner
 	{
 	public:
 		DX12SwapChain() = default;
@@ -132,6 +99,7 @@ namespace cs::features
 		[[nodiscard]] HRESULT Rollback() noexcept;
 
 		[[nodiscard]] IDXGISwapChain* GetProxy() const noexcept;
+		[[nodiscard]] IDXGISwapChain* AcquireProxy() const noexcept;
 		[[nodiscard]] bool Owns(IDXGISwapChain* a_swapChain) const noexcept;
 		[[nodiscard]] bool IsReady() const noexcept;
 		[[nodiscard]] bool IsBridgeReady() const noexcept;
@@ -163,16 +131,53 @@ namespace cs::features
 			const render::temporal::ProviderResult& a_result) noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;
 
-		HRESULT Present(UINT a_syncInterval, UINT a_flags) noexcept;
-		HRESULT GetBuffer(UINT a_buffer, REFIID a_iid, void** a_surface) noexcept;
-		HRESULT GetDevice(REFIID a_iid, void** a_device) noexcept;
-		HRESULT GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept;
+		HRESULT Present(UINT a_syncInterval, UINT a_flags) noexcept override;
+		HRESULT Present1(
+			UINT a_syncInterval,
+			UINT a_flags,
+			const DXGI_PRESENT_PARAMETERS* a_parameters) noexcept override;
+		HRESULT GetBuffer(
+			UINT a_buffer, REFIID a_iid, void** a_surface) noexcept override;
+		HRESULT GetDevice(
+			REFIID a_iid, void** a_device) noexcept override;
+		HRESULT SetFullscreenState(
+			BOOL a_fullscreen, IDXGIOutput* a_target) noexcept override;
+		HRESULT GetFullscreenState(
+			BOOL* a_fullscreen, IDXGIOutput** a_target) noexcept override;
+		HRESULT GetDesc(DXGI_SWAP_CHAIN_DESC* a_desc) noexcept override;
 		HRESULT ResizeBuffers(
 			UINT a_bufferCount,
 			UINT a_width,
 			UINT a_height,
 			DXGI_FORMAT a_format,
-			UINT a_flags) noexcept;
+			UINT a_flags) noexcept override;
+		HRESULT ResizeTarget(
+			const DXGI_MODE_DESC* a_target) noexcept override;
+		HRESULT GetDesc1(
+			DXGI_SWAP_CHAIN_DESC1* a_desc) noexcept override;
+		HRESULT GetFullscreenDesc(
+			DXGI_SWAP_CHAIN_FULLSCREEN_DESC* a_desc) noexcept override;
+		HRESULT GetHwnd(HWND* a_window) noexcept override;
+		UINT GetCurrentBackBufferIndex() noexcept override;
+		HRESULT CheckColorSpaceSupport(
+			DXGI_COLOR_SPACE_TYPE a_colorSpace,
+			UINT* a_support) noexcept override;
+		HRESULT SetColorSpace1(
+			DXGI_COLOR_SPACE_TYPE a_colorSpace) noexcept override;
+		HRESULT ResizeBuffers1(
+			UINT a_bufferCount,
+			UINT a_width,
+			UINT a_height,
+			DXGI_FORMAT a_format,
+			UINT a_flags,
+			const UINT* a_creationNodeMask,
+			IUnknown* const* a_presentQueue) noexcept override;
+		HRESULT SetHDRMetaData(
+			DXGI_HDR_METADATA_TYPE a_type,
+			UINT a_size,
+			void* a_metadata) noexcept override;
+		void RecordSwapChainFacadeEvent(
+			SwapChainFacadeEvent a_event) noexcept override;
 
 		HRESULT SetPrivateData(REFGUID a_name, UINT a_size, const void* a_data) noexcept;
 		HRESULT SetPrivateDataInterface(REFGUID a_name, const IUnknown* a_unknown) noexcept;
@@ -202,7 +207,21 @@ namespace cs::features
 		HRESULT RefreshBackBuffers();
 		HRESULT WaitForFrame(UINT a_slot) noexcept;
 		HRESULT WaitForGpu() noexcept;
-		HRESULT PresentImpl(UINT a_syncInterval, UINT a_flags);
+		HRESULT PresentImpl(
+			UINT a_syncInterval,
+			UINT a_flags,
+			const DXGI_PRESENT_PARAMETERS* a_parameters,
+			bool a_usePresent1);
+		HRESULT PresentInternal(
+			UINT a_syncInterval,
+			UINT a_flags,
+			const DXGI_PRESENT_PARAMETERS* a_parameters,
+			bool a_usePresent1) noexcept;
+		HRESULT InvokeInnerPresent(
+			UINT a_syncInterval,
+			UINT a_flags,
+			const DXGI_PRESENT_PARAMETERS* a_parameters,
+			bool a_usePresent1) noexcept;
 		HRESULT ResizeBuffersImpl(
 			UINT a_bufferCount,
 			UINT a_width,
@@ -250,7 +269,7 @@ namespace cs::features
 		std::unique_ptr<SharedD3D11D3D12Texture> _srMotion;
 		std::unique_ptr<SharedD3D11D3D12Texture> _srReactive;
 		std::unique_ptr<SharedD3D11D3D12Texture> _srTransparency;
-		std::unique_ptr<DXGISwapChainProxy> _proxy;
+		winrt::com_ptr<DXGISwapChainProxy> _proxy;
 		render::temporal::IFrameGenerationProvider* _provider = nullptr;
 		TemporalPresentationCallbacks _callbacks;
 		DXGI_SWAP_CHAIN_DESC _proxyDesc{};
@@ -294,6 +313,7 @@ namespace cs::features
 		std::atomic_uint64_t _retirementWaitCpuMicroseconds{ 0 };
 		std::atomic_uint32_t _retirementLastSlot{ 0 };
 		std::atomic_bool _retirementLastAcquireQueuedGpuWait{ false };
+		std::atomic_uint32_t _facadeEventLogMask{ 0 };
 		render::temporal::PresentInputRetirementLogBudget
 			_retirementLogBudget;
 		std::atomic_bool _retirementLogRearmRequested{ false };

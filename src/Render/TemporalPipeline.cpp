@@ -912,7 +912,7 @@ namespace cs::render
 
 		*a_context.device = device;
 		*a_context.immediateContext = immediateContext;
-		*a_context.swapChain = _impl->swapChain.GetProxy();
+		*a_context.swapChain = _impl->swapChain.AcquireProxy();
 		if (a_context.featureLevel) {
 			*a_context.featureLevel = featureLevel;
 		}

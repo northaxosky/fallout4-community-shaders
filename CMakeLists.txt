@@ -659,6 +659,26 @@ add_test(
 )
 set_tests_properties(FrameGenerationContract PROPERTIES LABELS "render;contract;unit")
 
+add_executable(DXGISwapChainProxyTests
+	tests/DXGISwapChainProxyTests.cpp
+	features/Upscaling/src/DXGISwapChainProxy.cpp
+)
+configure_host_test(DXGISwapChainProxyTests)
+target_include_directories(DXGISwapChainProxyTests PRIVATE
+	"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
+)
+target_link_libraries(DXGISwapChainProxyTests PRIVATE
+	d3d11.lib
+	dxgi.lib
+)
+add_test(
+	NAME DXGISwapChainProxy
+	COMMAND DXGISwapChainProxyTests
+)
+set_tests_properties(
+	DXGISwapChainProxy
+	PROPERTIES LABELS "render;contract;unit")
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(FrameGenerationRetirementGpuTests
 		tests/FrameGenerationRetirementGpuTests.cpp
