@@ -238,6 +238,13 @@ namespace
 			return Check(false, "could not create the negative-control fence");
 		}
 
+		winrt::com_ptr<ID3D11Query> producerDone;
+		const D3D11_QUERY_DESC queryDesc{ .Query = D3D11_QUERY_EVENT };
+		winrt::handle consumerDone{ CreateEventW(nullptr, FALSE, FALSE, nullptr) };
+		if (!consumerDone ||
+			FAILED(a_device11->CreateQuery(&queryDesc, producerDone.put()))) {
+			return Check(false, "could not create the completion observers");
+		}
 		if (FAILED(a_context11->Signal(retirement11.get(), 1)) ||
 			FAILED(a_queue->Wait(retirement12.get(), 1))) {
 			return Check(false, "could not publish the initialized producer texture");
@@ -247,47 +254,40 @@ namespace
 		}
 		ID3D12CommandList* lists[]{ commandList.get() };
 		a_queue->ExecuteCommandLists(1, lists);
-		if (FAILED(a_queue->Signal(retirement12.get(), 2))) {
-			return Check(false, "could not signal input retirement");
-		}
-
-		auto* waitFence =
-			a_useCorrectFence ? retirement11.get() : wrong11.get();
-		if (FAILED(a_context11->Wait(waitFence, 2))) {
-			return Check(false, "could not queue the D3D11 producer wait");
-		}
-		a_context11->CopyResource(texture11.get(), updateTexture.get());
-		D3D11_QUERY_DESC queryDesc{
-			.Query = D3D11_QUERY_EVENT
-		};
-		winrt::com_ptr<ID3D11Query> producerDone;
-		if (FAILED(a_device11->CreateQuery(
-				&queryDesc, producerDone.put()))) {
-			return Check(false, "could not create the producer completion query");
-		}
-		a_context11->End(producerDone.get());
-		a_context11->Flush();
-
-		const bool completedWhileConsumerBlocked =
-			WaitForD3D11(
-				a_context11,
-				producerDone.get(),
-				std::chrono::milliseconds(100));
-		if (a_useCorrectFence &&
-			!Check(
-				!completedWhileConsumerBlocked,
-				"producer overwrite completed before the consumer retirement signal")) {
-			return false;
-		}
-		if (!a_useCorrectFence &&
-			!Check(
-				completedWhileConsumerBlocked,
-				"wrong-fence negative control did not bypass the real consumer")) {
-			return false;
-		}
+		const bool ordered = [&] {
+			if (FAILED(a_queue->Signal(retirement12.get(), 2))) {
+				return Check(false, "could not signal input retirement");
+			}
+			auto* waitFence =
+				a_useCorrectFence ? retirement11.get() : wrong11.get();
+			if (FAILED(a_context11->Wait(waitFence, 2))) {
+				return Check(false, "could not queue the D3D11 producer wait");
+			}
+			a_context11->CopyResource(texture11.get(), updateTexture.get());
+			a_context11->End(producerDone.get());
+			a_context11->Flush();
+			const bool completedWhileConsumerBlocked = WaitForD3D11(
+				a_context11, producerDone.get(),
+				std::chrono::milliseconds(a_useCorrectFence ? 100 : 5000));
+			return Check(
+				completedWhileConsumerBlocked != a_useCorrectFence,
+				a_useCorrectFence
+					? "producer overwrite completed before the consumer retirement signal"
+					: "wrong-fence negative control did not bypass the real consumer");
+		}();
 
 		if (FAILED(blocker->Signal(1))) {
 			return Check(false, "could not release the delayed consumer");
+		}
+		a_context11->Flush();
+		// The negative control's producer query does not depend on consumer completion.
+		if (FAILED(a_queue->Signal(retirement12.get(), 3)) ||
+			FAILED(retirement12->SetEventOnCompletion(3, consumerDone.get())) ||
+			WaitForSingleObject(consumerDone.get(), 5000) != WAIT_OBJECT_0) {
+			return Check(false, "consumer did not retire before readback and resource release");
+		}
+		if (!ordered) {
+			return false;
 		}
 		if (!WaitForD3D11(
 				a_context11,
