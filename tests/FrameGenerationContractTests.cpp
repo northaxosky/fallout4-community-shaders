@@ -314,7 +314,13 @@ namespace
 		cs::render::temporal::ProviderResult ReleaseDisplayResources() noexcept override
 		{
 			events.emplace_back("release");
-			return releaseSucceeds ? Success() : Failure("release");
+			auto result =
+				releaseSucceeds ? Success() : Failure("release");
+			result.globalDrainAttempted =
+				releaseGlobalDrainAttempted;
+			result.globalDrainCompleted =
+				releaseGlobalDrainCompleted;
+			return result;
 		}
 		cs::render::temporal::ProviderResult DestroyAfterDrain() noexcept override
 		{
@@ -345,6 +351,8 @@ namespace
 		bool acquireSucceeds = true;
 		bool quiesceSucceeds = true;
 		bool releaseSucceeds = true;
+		bool releaseGlobalDrainAttempted = true;
+		bool releaseGlobalDrainCompleted = true;
 		bool createSucceeds = true;
 		std::uint32_t statusCalls = 0;
 		UINT lastStatusFlags = 0;
@@ -363,6 +371,10 @@ namespace
 				return true;
 			});
 		Check(result.Succeeded(), "successful lifecycle completes");
+		Check(
+			result.globalDrainAttempted &&
+				result.globalDrainCompleted,
+			"successful lifecycle reports the provider drain that completed");
 		Check(
 			provider.events ==
 				std::vector<std::string>{ "quiesce", "drain", "release" },
@@ -468,7 +480,17 @@ namespace
 		inner.BufferCount = 2;
 		std::array<std::uint64_t, 2> fenceValues{ 7, 9 };
 		cs::render::temporal::PresentInputReuseGate gate;
-		gate.MarkSubmitted(1, true);
+		gate.MarkSubmitted(
+			1,
+			cs::render::temporal::PresentInputRetirementToken{
+				.mode = cs::render::temporal::
+					PresentInputRetirementMode::
+						kSynchronousPresentQueue,
+				.value = 5,
+				.realFrame = 4,
+				.resourceGeneration = 2,
+				.queueIdentity = 9
+			});
 		std::uint32_t frameSlot = 1;
 		bool presentPrepared = true;
 		bool preparedGeneration = true;
@@ -547,32 +569,370 @@ namespace
 
 	void TestInputReuseGate()
 	{
+		using namespace cs::render::temporal;
 		cs::render::temporal::PresentInputReuseGate gate;
-		gate.MarkSubmitted(0, true);
+		gate.MarkSubmitted(
+			0,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 7,
+				.realFrame = 19,
+				.resourceGeneration = 3,
+				.queueIdentity = 11
+			});
 		std::uint32_t acquisitions = 0;
-		bool complete = false;
-		Check(
-			!gate.Acquire(0, [&]() {
+		auto acquired = gate.Acquire(
+			0, 3, 11, 4,
+			[&](const PresentInputRetirementToken&) {
 				++acquisitions;
-				return complete;
-			}),
-			"delayed provider completion blocks borrowed-input reuse");
-		Check(gate.IsPending(0), "failed acquisition keeps the slot pending");
+				return S_OK;
+			});
+		Check(
+			acquired.Succeeded() && acquired.waitRequired &&
+				acquisitions == 1,
+			"delayed completion queues a producer-side GPU wait");
+		Check(!gate.IsPending(0), "queued GPU wait retires slot ownership");
 
-		complete = true;
-		Check(
-			gate.Acquire(0, [&]() {
+		acquired = gate.Acquire(
+			0, 3, 11, 4,
+			[&](const PresentInputRetirementToken&) {
 				++acquisitions;
-				return complete;
-			}),
-			"completed provider use permits the first shared write");
+				return S_OK;
+			});
 		Check(
-			gate.Acquire(0, [&]() {
-				++acquisitions;
-				return complete;
-			}),
+			acquired.Succeeded() && !acquired.firstAcquire &&
+				acquisitions == 1,
 			"alpha, raw, and HUD-less writes share one acquisition");
-		Check(acquisitions == 2, "successful acquisition runs once for the producer frame");
+
+		gate.MarkSubmitted(
+			1,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 12,
+				.realFrame = 20,
+				.resourceGeneration = 3,
+				.queueIdentity = 11
+			});
+		acquired = gate.Acquire(
+			1, 3, 11, 12,
+			[&](const PresentInputRetirementToken&) {
+				++acquisitions;
+				return S_OK;
+			});
+		Check(
+			acquired.Succeeded() && !acquired.waitRequired &&
+				acquisitions == 1,
+			"already completed retirement acquires without a queue wait");
+
+		gate.MarkSubmitted(
+			0,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 15,
+				.realFrame = 21,
+				.resourceGeneration = 3,
+				.queueIdentity = 11
+			});
+		acquired = gate.Acquire(
+			0, 3, 99, 100,
+			[](const PresentInputRetirementToken&) {
+				return S_OK;
+			});
+		Check(
+			acquired.code == PresentInputAcquireCode::kQueueMismatch &&
+				acquired.result == E_INVALIDARG &&
+				gate.IsPending(0),
+			"a fence from the wrong queue cannot retire borrowed inputs");
+	}
+
+	void TestSynchronousPresentRetirement()
+	{
+		using namespace cs::render::temporal;
+		std::vector<std::string> events;
+		std::uint64_t nextFence = 4;
+		const auto submission = PresentAndRetireInputs(
+			PresentInputRetirementMode::kSynchronousPresentQueue,
+			true,
+			90,
+			7,
+			13,
+			nextFence,
+			[&]() {
+				events.emplace_back("sdk-last-read-submit");
+				events.emplace_back("present-return");
+				return S_OK;
+			},
+			[&](std::uint64_t a_value) {
+				events.emplace_back("signal:" + std::to_string(a_value));
+				return S_OK;
+			});
+		Check(
+			submission.presentResult == S_OK &&
+				submission.signalResult == S_OK &&
+				submission.token &&
+				submission.token->value == 4 &&
+				submission.token->realFrame == 90 &&
+				submission.token->resourceGeneration == 7 &&
+				submission.token->queueIdentity == 13 &&
+				nextFence == 5,
+			"synchronous Present emits an exact same-queue retirement token");
+		Check(
+			events == std::vector<std::string>{
+				"sdk-last-read-submit", "present-return", "signal:4" },
+			"retirement signal is submitted after the SDK last reader");
+
+		events.clear();
+		const auto failed = PresentAndRetireInputs(
+			PresentInputRetirementMode::kSynchronousPresentQueue,
+			true,
+			91,
+			7,
+			13,
+			nextFence,
+			[&]() {
+				events.emplace_back("present-return");
+				return DXGI_ERROR_DEVICE_REMOVED;
+			},
+			[&](std::uint64_t) {
+				events.emplace_back("signal-failed");
+				return DXGI_ERROR_DEVICE_REMOVED;
+			});
+		Check(
+			FAILED(failed.presentResult) &&
+				FAILED(failed.signalResult) &&
+				!failed.token &&
+				events == std::vector<std::string>{
+					"present-return", "signal-failed" },
+			"device removal never publishes an unproven retirement token");
+
+		events.clear();
+		const auto disabled = PresentAndRetireInputs(
+			PresentInputRetirementMode::kSynchronousPresentQueue,
+			false,
+			92,
+			7,
+			13,
+			nextFence,
+			[&]() {
+				events.emplace_back("present");
+				return S_OK;
+			},
+			[&](std::uint64_t) {
+				events.emplace_back("unexpected-signal");
+				return S_OK;
+			});
+		Check(
+			!disabled.token &&
+				events == std::vector<std::string>{ "present" },
+			"disabled frames do not create borrowed-input ownership");
+	}
+
+	void TestDelayedRetirementAcrossRingCycles()
+	{
+		using namespace cs::render::temporal;
+		PresentInputReuseGate gate;
+		std::vector<std::string> events;
+		std::uint64_t completed = 0;
+		for (std::uint64_t frame = 0; frame < 8; ++frame) {
+			const auto slot = static_cast<std::uint32_t>(frame % 2);
+			const auto acquired = gate.Acquire(
+				slot,
+				4,
+				77,
+				completed,
+				[&](const PresentInputRetirementToken& a_token) {
+					events.emplace_back(
+						"wait:" + std::to_string(a_token.value));
+					return S_OK;
+				});
+			Check(
+				acquired.Succeeded(),
+				"ring slot acquires after its exact retirement dependency");
+			events.emplace_back("write:" + std::to_string(frame));
+			gate.MarkSubmitted(
+				slot,
+				PresentInputRetirementToken{
+					.mode = PresentInputRetirementMode::
+						kSynchronousPresentQueue,
+					.value = frame + 1,
+					.realFrame = frame,
+					.resourceGeneration = 4,
+					.queueIdentity = 77
+				});
+			completed = frame > 2 ? frame - 2 : 0;
+		}
+		Check(
+			events == std::vector<std::string>{
+				"write:0",
+				"write:1",
+				"wait:1",
+				"write:2",
+				"wait:2",
+				"write:3",
+				"wait:3",
+				"write:4",
+				"wait:4",
+				"write:5",
+				"wait:5",
+				"write:6",
+				"wait:6",
+				"write:7" },
+			"multiple ring cycles always queue the prior slot token before overwrite");
+
+		PresentInputReuseGate failedWaitGate;
+		failedWaitGate.MarkSubmitted(
+			0,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 30,
+				.realFrame = 12,
+				.resourceGeneration = 4,
+				.queueIdentity = 77
+			});
+		const auto failedWait = failedWaitGate.Acquire(
+			0,
+			4,
+			77,
+			10,
+			[](const PresentInputRetirementToken&) {
+				return E_ACCESSDENIED;
+			});
+		Check(
+			failedWait.code == PresentInputAcquireCode::kWaitFailed &&
+				failedWait.result == E_ACCESSDENIED &&
+				failedWaitGate.IsPending(0),
+			"failed producer-queue wait preserves its HRESULT and keeps ownership");
+
+		PresentInputReuseGate staleGenerationGate;
+		staleGenerationGate.MarkSubmitted(
+			0,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 1,
+				.realFrame = 1,
+				.resourceGeneration = 3,
+				.queueIdentity = 77
+			});
+		const auto stale = staleGenerationGate.Acquire(
+			0,
+			4,
+			77,
+			1,
+			[](const PresentInputRetirementToken&) {
+				return S_OK;
+			});
+		Check(
+			stale.code ==
+					PresentInputAcquireCode::kGenerationMismatch &&
+				stale.result == E_INVALIDARG &&
+				staleGenerationGate.IsPending(0),
+			"resource recreation cannot silently accept a stale token");
+
+		PresentInputReuseGate removedDeviceGate;
+		removedDeviceGate.MarkSubmitted(
+			0,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 2,
+				.realFrame = 2,
+				.resourceGeneration = 4,
+				.queueIdentity = 77
+			});
+		const auto removed = removedDeviceGate.Acquire(
+			0,
+			4,
+			77,
+			UINT64_MAX,
+			[](const PresentInputRetirementToken&) {
+				return S_OK;
+			});
+		Check(
+			removed.code ==
+					PresentInputAcquireCode::kFenceUnavailable &&
+				removed.result == DXGI_ERROR_DEVICE_REMOVED &&
+				PresentInputAcquireCodeName(removed.code) ==
+					"fence_unavailable" &&
+				removedDeviceGate.IsPending(0),
+			"device removal records an exact violation and preserves ownership");
+	}
+
+	void TestRetirementLogBudget()
+	{
+		using namespace cs::render::temporal;
+		PresentInputRetirementLogBudget budget;
+		Check(
+			!budget.SetTracingEnabled(false) &&
+				!budget.ShouldLog(
+					PresentInputRetirementLogKind::kStandalone,
+					0,
+					0,
+					false),
+			"disabled diagnostics consume no retirement log budget");
+		Check(
+			budget.SetTracingEnabled(true) && budget.RecordCount() == 0,
+			"enabling diagnostics arms a fresh retirement log epoch");
+		for (std::uint64_t index = 0; index < 62; ++index) {
+			Check(
+				budget.ShouldLog(
+					PresentInputRetirementLogKind::kStandalone,
+					0,
+					0,
+					false),
+				"active epoch admits its bounded standalone records");
+		}
+		Check(
+			budget.ShouldLog(
+				PresentInputRetirementLogKind::kSignal,
+				1,
+				91,
+				false) &&
+				budget.RecordCount() ==
+					PresentInputRetirementLogBudget::
+						kDetailedRecordLimit,
+			"signal reserves the final record for its matching acquisition");
+		Check(
+			budget.ShouldLog(
+				PresentInputRetirementLogKind::kAcquire,
+				1,
+				91,
+				false) &&
+				!budget.ShouldLog(
+					PresentInputRetirementLogKind::kStandalone,
+					0,
+					0,
+					false),
+			"the bounded epoch emits a complete signal/acquire pair");
+		Check(
+			budget.ShouldLog(
+				PresentInputRetirementLogKind::kStandalone,
+				0,
+				0,
+				true),
+			"violations remain observable after the detail budget is exhausted");
+		Check(
+			budget.ShouldLogSummary(256) &&
+				!budget.ShouldLogSummary(256) &&
+				budget.ShouldLogSummary(512),
+			"periodic summaries are emitted once per acquisition boundary");
+		budget.Rearm();
+		Check(
+			budget.RecordCount() == 0 &&
+				budget.ShouldLog(
+					PresentInputRetirementLogKind::kStandalone,
+					0,
+					0,
+					false),
+			"resource or active-state changes rearm the bounded epoch");
+		(void)budget.SetTracingEnabled(false);
+		Check(
+			budget.SetTracingEnabled(true) && budget.RecordCount() == 0,
+			"diagnostic false-to-true transitions rearm the bounded epoch");
 	}
 
 	void TestStatusAndAccountingPolicies()
@@ -806,6 +1166,7 @@ namespace
 				config.swapChain == swapChain &&
 				config.frameID == 88 &&
 				config.flags == 0 &&
+				!config.allowAsyncWorkloads &&
 				config.generationRect.width == 1920 &&
 				config.generationRect.height == 1080,
 			"FSR deconfiguration detaches callbacks, user context, and HUD-less input before destruction");
@@ -830,35 +1191,43 @@ namespace
 
 	void TestProductionInputWriteOrdering()
 	{
+		using namespace cs::render::temporal;
 		cs::render::temporal::PresentInputReuseGate gate;
-		gate.MarkSubmitted(1, true);
-		bool providerComplete = false;
+		gate.MarkSubmitted(
+			1,
+			PresentInputRetirementToken{
+				.mode =
+					PresentInputRetirementMode::kSynchronousPresentQueue,
+				.value = 22,
+				.realFrame = 55,
+				.resourceGeneration = 8,
+				.queueIdentity = 6
+			});
 		std::vector<std::string> events;
 		auto write = [&](std::string a_name) {
 			return cs::render::temporal::WriteFrameGenerationInput(
 				[&]() {
-					return gate.Acquire(1, [&]() {
-						events.emplace_back("provider-wait");
-						return providerComplete;
-					});
+					const auto result = gate.Acquire(
+						1, 8, 6, 10,
+						[&](const PresentInputRetirementToken& a_token) {
+							events.emplace_back(
+								"gpu-wait:" +
+								std::to_string(a_token.value));
+							return S_OK;
+						});
+					return result.Succeeded();
 				},
 				[&]() {
 					events.emplace_back(std::move(a_name));
 				});
 		};
-		Check(
-			!write("alpha") &&
-				events == std::vector<std::string>{ "provider-wait" },
-			"delayed completion prevents the first shared write");
-		providerComplete = true;
-		Check(write("alpha"), "completed slot permits alpha input write");
+		Check(write("alpha"), "queued GPU wait permits ordered alpha input write");
 		Check(write("raw"), "same slot permits raw input write");
 		Check(write("hudless"), "same slot permits HUD-less input write");
 		Check(
 			events == std::vector<std::string>{
-				"provider-wait", "provider-wait", "alpha", "raw",
-				"hudless" },
-			"production write wrapper waits before the first write and only once after completion across alpha, raw, and HUD-less inputs");
+				"gpu-wait:22", "alpha", "raw", "hudless" },
+			"producer queue wait is ordered before the first write and runs once across all captures");
 	}
 
 	void TestDisableDrainDestroyOrder()
@@ -919,6 +1288,9 @@ int main(int a_argc, char** a_argv)
 	TestResizeCommitProtocol();
 	TestSafePreparation();
 	TestInputReuseGate();
+	TestSynchronousPresentRetirement();
+	TestDelayedRetirementAcrossRingCycles();
+	TestRetirementLogBudget();
 	TestStatusAndAccountingPolicies();
 	TestPresentStatusOrchestration();
 	TestStreamlineBackendContracts();

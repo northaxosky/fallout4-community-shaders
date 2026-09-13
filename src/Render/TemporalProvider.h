@@ -24,6 +24,9 @@ namespace cs::render::temporal
 		ProviderResultCode code = ProviderResultCode::kFailure;
 		std::int64_t sdkResult = 0;
 		std::string message;
+		bool globalDrainAttempted = false;
+		bool globalDrainCompleted = false;
+		std::uint64_t globalDrainCpuMicroseconds = 0;
 
 		[[nodiscard]] bool Succeeded() const noexcept
 		{
@@ -305,6 +308,16 @@ namespace cs::render::temporal
 		FrameGenerationCamera camera;
 	};
 
+	enum class PresentInputRetirementMode : std::uint8_t
+	{
+		// Provider owns completion and exposes only a conservative drain.
+		kProviderDrain,
+		// Borrowed inputs are consumed by the application's recorded command list.
+		kRecordedCommandList,
+		// Present submits the last reader to the application game queue before returning.
+		kSynchronousPresentQueue
+	};
+
 	class IFrameGenerationProvider
 	{
 	public:
@@ -327,6 +340,11 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult CancelFrame(
 			const FrameGenerationRequest& a_request) = 0;
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
+		[[nodiscard]] virtual PresentInputRetirementMode
+			GetPresentInputRetirementMode() const noexcept
+		{
+			return PresentInputRetirementMode::kProviderDrain;
+		}
 		[[nodiscard]] virtual ProviderResult AcquirePresentInputs() = 0;
 		[[nodiscard]] virtual ProviderResult CollectPresentStatus(
 			UINT a_presentFlags,

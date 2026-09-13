@@ -121,6 +121,28 @@ namespace cs::render
 			cpuPhaseTimings{};
 		bool frameTimeInputAvailable = false;
 		double lastFrameTimeInputMilliseconds = 0.0;
+		std::uint64_t inputRetirementAcquisitions = 0;
+		std::uint64_t inputRetirementImmediateAcquisitions = 0;
+		std::uint64_t inputRetirementGpuWaits = 0;
+		std::uint64_t inputRetirementProviderDrains = 0;
+		std::uint64_t inputRetirementGlobalDrainAttempts = 0;
+		std::uint64_t inputRetirementGlobalDrainFailures = 0;
+		std::uint64_t inputRetirementWaitFailures = 0;
+		std::uint64_t inputRetirementSignals = 0;
+		std::uint64_t inputRetirementSignalFailures = 0;
+		std::uint64_t inputRetirementViolations = 0;
+		std::uint64_t inputRetirementStartupDrains = 0;
+		std::uint64_t inputRetirementDisableDrains = 0;
+		std::uint64_t inputRetirementResizeDrains = 0;
+		std::uint64_t inputRetirementTeardownDrains = 0;
+		std::uint64_t inputRetirementSteadyDrains = 0;
+		std::uint64_t inputRetirementLastRealFrame = 0;
+		std::uint64_t inputRetirementLastResourceGeneration = 0;
+		std::uint64_t inputRetirementLastRequiredFence = 0;
+		std::uint64_t inputRetirementLastCompletedFence = 0;
+		std::uint64_t inputRetirementWaitCpuMicroseconds = 0;
+		std::uint32_t inputRetirementLastSlot = 0;
+		bool inputRetirementLastAcquireQueuedGpuWait = false;
 	};
 
 	struct FrameGenerationDebugTexture
@@ -158,6 +180,7 @@ namespace cs::render
 		void OnD3D11Ready(IDXGIAdapter* a_adapter, ID3D11Device* a_device);
 		void SubmitLiveConfiguration();
 		void SetDetailedTracing(bool a_enabled) noexcept;
+		[[nodiscard]] bool DetailedTracingEnabled() const noexcept;
 		void BeginMainLoopFrame() noexcept;
 		void BeginSimulation() noexcept;
 		void EndSimulationAndBeginRenderSubmit() noexcept;

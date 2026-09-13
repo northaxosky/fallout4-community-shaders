@@ -147,20 +147,20 @@ namespace cs::features
 
 	ProviderResult FidelityFXPresentation::Quiesce()
 	{
-		const auto disable = SetGenerationEnabled(false);
-		if (!disable.Succeeded()) {
-			return disable;
-		}
-		return _runtime.WaitForPresents()
-			? Success()
-			: Failure("FidelityFX did not drain pending presents.");
+		return SetGenerationEnabled(false);
 	}
 
 	ProviderResult FidelityFXPresentation::AcquirePresentInputs()
 	{
-		return _runtime.WaitForPresents()
-			? Success()
-			: Failure("FidelityFX did not retire present inputs.");
+		return Failure(
+			"FidelityFX input retirement requires the host game-queue fence.");
+	}
+
+	render::temporal::PresentInputRetirementMode
+		FidelityFXPresentation::GetPresentInputRetirementMode() const noexcept
+	{
+		return render::temporal::PresentInputRetirementMode::
+			kSynchronousPresentQueue;
 	}
 
 	ProviderResult FidelityFXPresentation::CollectPresentStatus(
@@ -184,9 +184,18 @@ namespace cs::features
 
 	ProviderResult FidelityFXPresentation::ReleaseDisplayResources() noexcept
 	{
-		return _runtime.DestroyFrameGenerationContext()
+		const auto release =
+			_runtime.DestroyFrameGenerationContextWithStatus();
+		auto result = release.succeeded
 			? Success()
-			: Failure("FidelityFX display resources could not be safely released.");
+			: Failure(
+				  "FidelityFX display resources could not be safely released.",
+				  release.globalDrainSdkResult);
+		result.globalDrainAttempted = release.globalDrainAttempted;
+		result.globalDrainCompleted = release.globalDrainCompleted;
+		result.globalDrainCpuMicroseconds =
+			release.globalDrainCpuMicroseconds;
+		return result;
 	}
 
 	ProviderResult FidelityFXPresentation::DestroyAfterDrain() noexcept
@@ -387,6 +396,13 @@ namespace cs::features
 	ProviderResult StreamlinePresentation::AcquirePresentInputs()
 	{
 		return Success();
+	}
+
+	render::temporal::PresentInputRetirementMode
+		StreamlinePresentation::GetPresentInputRetirementMode() const noexcept
+	{
+		return render::temporal::PresentInputRetirementMode::
+			kRecordedCommandList;
 	}
 
 	ProviderResult StreamlinePresentation::CollectPresentStatus(

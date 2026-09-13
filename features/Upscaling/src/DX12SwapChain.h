@@ -56,6 +56,32 @@ namespace cs::features
 		std::function<FrameGenerationFrameState()> queryFrameState;
 	};
 
+	struct FrameGenerationInputRetirementDiagnostics
+	{
+		std::uint64_t acquisitions = 0;
+		std::uint64_t immediateAcquisitions = 0;
+		std::uint64_t gpuWaits = 0;
+		std::uint64_t providerDrains = 0;
+		std::uint64_t globalDrainAttempts = 0;
+		std::uint64_t globalDrainFailures = 0;
+		std::uint64_t waitFailures = 0;
+		std::uint64_t signals = 0;
+		std::uint64_t signalFailures = 0;
+		std::uint64_t violations = 0;
+		std::uint64_t startupDrains = 0;
+		std::uint64_t disableDrains = 0;
+		std::uint64_t resizeDrains = 0;
+		std::uint64_t teardownDrains = 0;
+		std::uint64_t steadyDrains = 0;
+		std::uint64_t lastRealFrame = 0;
+		std::uint64_t lastResourceGeneration = 0;
+		std::uint64_t lastRequiredFence = 0;
+		std::uint64_t lastCompletedFence = 0;
+		std::uint64_t waitCpuMicroseconds = 0;
+		std::uint32_t lastSlot = 0;
+		bool lastAcquireQueuedGpuWait = false;
+	};
+
 	class DXGISwapChainProxy final : public IDXGISwapChain
 	{
 	public:
@@ -122,6 +148,9 @@ namespace cs::features
 		[[nodiscard]] ID3D12Device* GetD3D12Device() const noexcept;
 		[[nodiscard]] IDXGISwapChain4* GetInnerSwapChain() const noexcept;
 		[[nodiscard]] ID3D12CommandQueue* GetCommandQueue() const noexcept;
+		[[nodiscard]] FrameGenerationInputRetirementDiagnostics
+			GetInputRetirementDiagnostics() const noexcept;
+		void SetInputRetirementDetailedTracing(bool a_enabled) noexcept;
 		bool EvaluateD3D12SuperResolution(
 			render::temporal::ISuperResolutionProvider& a_provider,
 			const SuperResolutionExecutionContext& a_context);
@@ -181,6 +210,22 @@ namespace cs::features
 			DXGI_FORMAT a_format,
 			UINT a_flags);
 		void ClearSharedBuffers(bool a_clearFrameGenerationInputs = true) noexcept;
+		void RearmInputRetirementLogBudget() noexcept;
+		void RecordGlobalDrain(
+			std::string_view a_reason,
+			const render::temporal::ProviderResult& a_result) noexcept;
+		void LogInputRetirement(
+			render::temporal::PresentInputRetirementLogKind a_kind,
+			std::string_view a_operation,
+			const render::temporal::PresentInputRetirementToken& a_token,
+			std::uint32_t a_slot,
+			std::uint64_t a_completedValue,
+			bool a_cpuWait,
+			bool a_gpuWait,
+			std::uint64_t a_waitMicroseconds,
+			HRESULT a_result,
+			std::string_view a_violationCode = "none",
+			bool a_violation = false) noexcept;
 
 		winrt::com_ptr<ID3D11Device5> _device11;
 		winrt::com_ptr<ID3D11Device> _outwardDevice11;
@@ -192,6 +237,8 @@ namespace cs::features
 		winrt::com_ptr<ID3D12Resource> _backBuffers[2];
 		winrt::com_ptr<ID3D12Fence> _fence12;
 		winrt::com_ptr<ID3D11Fence> _fence11;
+		winrt::com_ptr<ID3D12Fence> _inputRetirementFence12;
+		winrt::com_ptr<ID3D11Fence> _inputRetirementFence11;
 		winrt::com_ptr<IDXGISwapChain4> _swapChain;
 		std::unique_ptr<SharedD3D11D3D12Texture> _proxyBuffer;
 		std::array<std::unique_ptr<SharedD3D11D3D12Texture>, 2> _hudlessBuffers;
@@ -211,6 +258,7 @@ namespace cs::features
 		UINT _frameIndex = 0;
 		UINT _frameSlot = 0;
 		UINT64 _nextFenceValue = 1;
+		UINT64 _nextInputRetirementValue = 1;
 		std::array<std::uint64_t, 2> _allocatorFenceValues{};
 		render::temporal::PresentInputReuseGate _inputReuseGate;
 		HANDLE _fenceEvent = nullptr;
@@ -220,7 +268,36 @@ namespace cs::features
 		bool _preparedFrameGeneration = false;
 		bool _vendorConsumptionPossible = false;
 		bool _preparedTransaction = false;
+		std::uint64_t _preparedRealFrame = 0;
+		std::uint64_t _inputResourceGeneration = 0;
 		bool _published = false;
 		bool _bridgeReady = false;
+		std::atomic_uint64_t _retirementAcquisitions{ 0 };
+		std::atomic_uint64_t _retirementImmediateAcquisitions{ 0 };
+		std::atomic_uint64_t _retirementGpuWaits{ 0 };
+		std::atomic_uint64_t _retirementProviderDrains{ 0 };
+		std::atomic_uint64_t _retirementGlobalDrainAttempts{ 0 };
+		std::atomic_uint64_t _retirementGlobalDrainFailures{ 0 };
+		std::atomic_uint64_t _retirementWaitFailures{ 0 };
+		std::atomic_uint64_t _retirementSignals{ 0 };
+		std::atomic_uint64_t _retirementSignalFailures{ 0 };
+		std::atomic_uint64_t _retirementViolations{ 0 };
+		std::atomic_uint64_t _retirementStartupDrains{ 0 };
+		std::atomic_uint64_t _retirementDisableDrains{ 0 };
+		std::atomic_uint64_t _retirementResizeDrains{ 0 };
+		std::atomic_uint64_t _retirementTeardownDrains{ 0 };
+		std::atomic_uint64_t _retirementSteadyDrains{ 0 };
+		std::atomic_uint64_t _retirementLastRealFrame{ 0 };
+		std::atomic_uint64_t _retirementLastResourceGeneration{ 0 };
+		std::atomic_uint64_t _retirementLastRequiredFence{ 0 };
+		std::atomic_uint64_t _retirementLastCompletedFence{ 0 };
+		std::atomic_uint64_t _retirementWaitCpuMicroseconds{ 0 };
+		std::atomic_uint32_t _retirementLastSlot{ 0 };
+		std::atomic_bool _retirementLastAcquireQueuedGpuWait{ false };
+		render::temporal::PresentInputRetirementLogBudget
+			_retirementLogBudget;
+		std::atomic_bool _retirementLogRearmRequested{ false };
+		bool _retirementEpochActive = false;
+		std::uint64_t _retirementLastResetFrame = UINT64_MAX;
 	};
 }

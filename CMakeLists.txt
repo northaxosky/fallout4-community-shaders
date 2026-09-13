@@ -659,6 +659,30 @@ add_test(
 )
 set_tests_properties(FrameGenerationContract PROPERTIES LABELS "render;contract;unit")
 
+if(NOT FO4CS_HOST_TESTS_ONLY)
+	add_executable(FrameGenerationRetirementGpuTests
+		tests/FrameGenerationRetirementGpuTests.cpp
+	)
+	configure_host_test(FrameGenerationRetirementGpuTests)
+	target_include_directories(FrameGenerationRetirementGpuTests BEFORE PRIVATE
+		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
+		"${CMAKE_SOURCE_DIR}/include"
+	)
+	target_link_libraries(FrameGenerationRetirementGpuTests PRIVATE
+		Microsoft::DirectX-Headers
+		d3d11.lib
+		d3d12.lib
+		dxgi.lib
+	)
+	add_test(
+		NAME FrameGenerationRetirementGpu
+		COMMAND FrameGenerationRetirementGpuTests
+	)
+	set_tests_properties(
+		FrameGenerationRetirementGpu
+		PROPERTIES LABELS "render;gpu;contract")
+endif()
+
 add_executable(FrustumEmbedTests
 	tests/FrustumEmbedTests.cpp
 	features/ScreenSpaceGI/src/OracleProjectionEmbed.h

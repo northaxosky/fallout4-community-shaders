@@ -40,6 +40,15 @@ namespace cs::features
 			bool valid = false;
 		};
 
+		struct FrameGenerationContextReleaseStatus
+		{
+			bool succeeded = false;
+			bool globalDrainAttempted = false;
+			bool globalDrainCompleted = false;
+			std::int64_t globalDrainSdkResult = 0;
+			std::uint64_t globalDrainCpuMicroseconds = 0;
+		};
+
 		static constexpr const wchar_t* PluginDir = L"Data\\Shaders\\Upscaling\\FidelityFX";
 		static inline std::atomic_bool callbackReset{ true };
 
@@ -55,8 +64,12 @@ namespace cs::features
 			IDXGISwapChain4** a_swapChain);
 		bool CreateFrameGenerationContext(ID3D12Device* a_device, UINT a_width, UINT a_height, DXGI_FORMAT a_format);
 		bool DestroyFrameGenerationContext() noexcept;
+		[[nodiscard]] FrameGenerationContextReleaseStatus
+			DestroyFrameGenerationContextWithStatus() noexcept;
 		bool DestroySwapChainContext() noexcept;
-		bool WaitForPresents() noexcept;
+		bool WaitForPresents(
+			std::int64_t* a_sdkResult = nullptr,
+			std::uint64_t* a_cpuMicroseconds = nullptr) noexcept;
 		bool SetFrameGenerationEnabled(bool a_enabled) noexcept;
 		bool PresentFrameGeneration(
 			ID3D12GraphicsCommandList* a_commandList,

@@ -185,6 +185,9 @@ namespace cs::features
 		const auto status = render::TemporalPipeline::Get().GetStatus();
 		const auto diagnostics =
 			render::TemporalPipeline::Get().GetFrameGenerationDiagnostics();
+		const bool usesSynchronousPresentRetirement =
+			status.effective.frameGeneration ==
+			render::temporal::FrameGenerationMethod::kFSR3;
 		const auto publishCpuTiming =
 			[&](render::FrameGenerationCpuPhase a_phase,
 				std::string_view a_name) {
@@ -317,7 +320,116 @@ namespace cs::features
 				"last_fg_frame_time_input_ms",
 				diagnostics.lastFrameTimeInputMilliseconds)
 			.Field("sdk_present_cpu_excludes_test", true)
-			.Field("sdk_present_cpu_includes_retries", true);
+			.Field("sdk_present_cpu_includes_retries", true)
+			.Field(
+				"input_retirement_mode",
+				usesSynchronousPresentRetirement
+					? std::string_view{
+						  "synchronous_present_game_queue_fence" }
+					: std::string_view{ "recorded_command_list" })
+			.Field(
+				"input_retirement_source_queue",
+				usesSynchronousPresentRetirement
+					? std::string_view{ "game_direct" }
+					: std::string_view{ "provider_recording" })
+			.Field(
+				"input_retirement_signal_point",
+				usesSynchronousPresentRetirement
+					? std::string_view{
+						  "post_present_callback_submission" }
+					: std::string_view{ "prepare_command_list" })
+			.Field(
+				"input_retirement_acquisitions",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementAcquisitions))
+			.Field(
+				"input_retirement_immediate_acquisitions",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementImmediateAcquisitions))
+			.Field(
+				"input_retirement_gpu_waits",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementGpuWaits))
+			.Field(
+				"input_retirement_provider_drains",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementProviderDrains))
+			.Field(
+				"input_retirement_global_drain_attempts",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementGlobalDrainAttempts))
+			.Field(
+				"input_retirement_global_drain_failures",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementGlobalDrainFailures))
+			.Field(
+				"input_retirement_wait_failures",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementWaitFailures))
+			.Field(
+				"input_retirement_signals",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementSignals))
+			.Field(
+				"input_retirement_signal_failures",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementSignalFailures))
+			.Field(
+				"input_retirement_violations",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementViolations))
+			.Field(
+				"input_retirement_startup_global_drains",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementStartupDrains))
+			.Field(
+				"input_retirement_disable_global_drains",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementDisableDrains))
+			.Field(
+				"input_retirement_resize_global_drains",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementResizeDrains))
+			.Field(
+				"input_retirement_teardown_global_drains",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementTeardownDrains))
+			.Field(
+				"input_retirement_steady_global_drains",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementSteadyDrains))
+			.Field(
+				"input_retirement_last_real_frame",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementLastRealFrame))
+			.Field(
+				"input_retirement_last_resource_generation",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementLastResourceGeneration))
+			.Field(
+				"input_retirement_last_required_fence",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementLastRequiredFence))
+			.Field(
+				"input_retirement_last_completed_fence",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementLastCompletedFence))
+			.Field(
+				"input_retirement_wait_cpu_us",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementWaitCpuMicroseconds))
+			.Field(
+				"input_retirement_last_slot",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementLastSlot))
+			.Field(
+				"input_retirement_last_acquire_queued_gpu_wait",
+				diagnostics.inputRetirementLastAcquireQueuedGpuWait)
+			.Field("input_retirement_cpu_waits",
+				static_cast<std::int64_t>(
+					diagnostics.inputRetirementGlobalDrainAttempts))
+			.Field("input_retirement_no_reuse_before_complete",
+				diagnostics.inputRetirementViolations == 0);
 		publishCpuTiming(
 			render::FrameGenerationCpuPhase::kLatencySleep,
 			"latency_sleep");

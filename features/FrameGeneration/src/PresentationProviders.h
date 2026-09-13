@@ -32,6 +32,8 @@ namespace cs::features
 			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
 			bool a_enabled) override;
+		[[nodiscard]] render::temporal::PresentInputRetirementMode
+			GetPresentInputRetirementMode() const noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
 		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
 			UINT a_presentFlags,
@@ -78,6 +80,8 @@ namespace cs::features
 			const render::temporal::FrameGenerationRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult SetGenerationEnabled(
 			bool a_enabled) override;
+		[[nodiscard]] render::temporal::PresentInputRetirementMode
+			GetPresentInputRetirementMode() const noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult AcquirePresentInputs() override;
 		[[nodiscard]] render::temporal::ProviderResult CollectPresentStatus(
 			UINT a_presentFlags,

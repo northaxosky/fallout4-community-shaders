@@ -170,47 +170,317 @@ namespace cs::render::temporal
 		return result;
 	}
 
-	class PresentInputReuseGate
+	struct PresentInputRetirementToken
+	{
+		PresentInputRetirementMode mode =
+			PresentInputRetirementMode::kRecordedCommandList;
+		std::uint64_t value = 0;
+		std::uint64_t realFrame = 0;
+		std::uint64_t resourceGeneration = 0;
+		std::uint64_t queueIdentity = 0;
+	};
+
+	enum class PresentInputAcquireCode : std::uint8_t
+	{
+		kAcquired,
+		kInvalidSlot,
+		kGenerationMismatch,
+		kQueueMismatch,
+		kFenceUnavailable,
+		kWaitFailed
+	};
+
+	struct PresentInputAcquireResult
+	{
+		PresentInputAcquireCode code = PresentInputAcquireCode::kInvalidSlot;
+		PresentInputRetirementToken token;
+		std::uint64_t completedValue = 0;
+		HRESULT result = E_INVALIDARG;
+		bool firstAcquire = false;
+		bool waitRequired = false;
+
+		[[nodiscard]] bool Succeeded() const noexcept
+		{
+			return code == PresentInputAcquireCode::kAcquired;
+		}
+	};
+
+	[[nodiscard]] constexpr std::string_view PresentInputAcquireCodeName(
+		PresentInputAcquireCode a_code) noexcept
+	{
+		switch (a_code) {
+		case PresentInputAcquireCode::kAcquired:
+			return "none";
+		case PresentInputAcquireCode::kInvalidSlot:
+			return "invalid_slot";
+		case PresentInputAcquireCode::kGenerationMismatch:
+			return "generation_mismatch";
+		case PresentInputAcquireCode::kQueueMismatch:
+			return "queue_mismatch";
+		case PresentInputAcquireCode::kFenceUnavailable:
+			return "fence_unavailable";
+		case PresentInputAcquireCode::kWaitFailed:
+			return "wait_failed";
+		}
+		return "unknown";
+	}
+
+	[[nodiscard]] constexpr const char* PresentInputAcquireFailureMessage(
+		PresentInputAcquireCode a_code) noexcept
+	{
+		switch (a_code) {
+		case PresentInputAcquireCode::kInvalidSlot:
+			return "Frame-generation input retirement failed: invalid slot";
+		case PresentInputAcquireCode::kGenerationMismatch:
+			return "Frame-generation input retirement failed: resource generation mismatch";
+		case PresentInputAcquireCode::kQueueMismatch:
+			return "Frame-generation input retirement failed: command queue mismatch";
+		case PresentInputAcquireCode::kFenceUnavailable:
+			return "Frame-generation input retirement failed: retirement fence unavailable";
+		case PresentInputAcquireCode::kWaitFailed:
+			return "Frame-generation input retirement failed: producer queue wait failed";
+		case PresentInputAcquireCode::kAcquired:
+			break;
+		}
+		return "Frame-generation input retirement failed";
+	}
+
+	enum class PresentInputRetirementLogKind : std::uint8_t
+	{
+		kStandalone,
+		kSignal,
+		kAcquire
+	};
+
+	class PresentInputRetirementLogBudget
 	{
 	public:
-		template <class Acquire>
-		[[nodiscard]] bool Acquire(std::uint32_t a_slot, Acquire&& a_acquire)
+		static constexpr std::uint64_t kDetailedRecordLimit = 64;
+
+		void Rearm() noexcept
 		{
-			if (a_slot >= _pending.size()) {
+			_records = 0;
+			_lastSummaryAcquisition = 0;
+			_reservedTokens = {};
+		}
+
+		[[nodiscard]] bool SetTracingEnabled(bool a_enabled) noexcept
+		{
+			if (a_enabled && !_tracingEnabled) {
+				Rearm();
+			}
+			_tracingEnabled = a_enabled;
+			return _tracingEnabled;
+		}
+
+		[[nodiscard]] bool ShouldLog(
+			PresentInputRetirementLogKind a_kind,
+			std::uint32_t a_slot,
+			std::uint64_t a_token,
+			bool a_violation) noexcept
+		{
+			if (!_tracingEnabled) {
 				return false;
 			}
-			if (_acquired[a_slot]) {
+			if (a_violation) {
 				return true;
 			}
-			if (_pending[a_slot] && !std::forward<Acquire>(a_acquire)()) {
+			if (a_kind == PresentInputRetirementLogKind::kAcquire &&
+				a_slot < _reservedTokens.size() &&
+				_reservedTokens[a_slot] == a_token && a_token != 0) {
+				_reservedTokens[a_slot] = 0;
+				return true;
+			}
+			if (a_kind == PresentInputRetirementLogKind::kSignal &&
+				a_slot < _reservedTokens.size() && a_token != 0) {
+				if (_records + 2 > kDetailedRecordLimit) {
+					return false;
+				}
+				_records += 2;
+				_reservedTokens[a_slot] = a_token;
+				return true;
+			}
+			if (_records >= kDetailedRecordLimit) {
 				return false;
 			}
-			_pending[a_slot] = false;
-			_acquired[a_slot] = true;
+			++_records;
 			return true;
 		}
 
-		void MarkSubmitted(std::uint32_t a_slot, bool a_providerMayConsume) noexcept
+		[[nodiscard]] bool ShouldLogSummary(
+			std::uint64_t a_acquisitions) noexcept
+		{
+			if (!_tracingEnabled || !a_acquisitions ||
+				a_acquisitions % 256 != 0 ||
+				_lastSummaryAcquisition == a_acquisitions) {
+				return false;
+			}
+			_lastSummaryAcquisition = a_acquisitions;
+			return true;
+		}
+
+		[[nodiscard]] std::uint64_t RecordCount() const noexcept
+		{
+			return _records;
+		}
+
+	private:
+		std::array<std::uint64_t, 2> _reservedTokens{};
+		std::uint64_t _records = 0;
+		std::uint64_t _lastSummaryAcquisition = 0;
+		bool _tracingEnabled = false;
+	};
+
+	struct PresentRetirementSubmission
+	{
+		HRESULT presentResult = E_FAIL;
+		HRESULT signalResult = S_OK;
+		std::optional<PresentInputRetirementToken> token;
+	};
+
+	template <class Present, class Signal>
+	[[nodiscard]] PresentRetirementSubmission PresentAndRetireInputs(
+		PresentInputRetirementMode a_mode,
+		bool a_providerMayConsume,
+		std::uint64_t a_realFrame,
+		std::uint64_t a_resourceGeneration,
+		std::uint64_t a_queueIdentity,
+		std::uint64_t& a_nextFenceValue,
+		Present&& a_present,
+		Signal&& a_signal)
+	{
+		PresentRetirementSubmission result;
+		result.presentResult = std::forward<Present>(a_present)();
+		if (!a_providerMayConsume ||
+			a_mode == PresentInputRetirementMode::kRecordedCommandList) {
+			return result;
+		}
+
+		PresentInputRetirementToken token{
+			.mode = a_mode,
+			.realFrame = a_realFrame,
+			.resourceGeneration = a_resourceGeneration,
+			.queueIdentity = a_queueIdentity
+		};
+		if (a_mode == PresentInputRetirementMode::kProviderDrain) {
+			result.token = token;
+			return result;
+		}
+
+		token.value = a_nextFenceValue++;
+		result.signalResult = std::forward<Signal>(a_signal)(token.value);
+		if (SUCCEEDED(result.signalResult)) {
+			result.token = token;
+		}
+		return result;
+	}
+
+	class PresentInputReuseGate
+	{
+	public:
+		template <class Wait>
+		[[nodiscard]] PresentInputAcquireResult Acquire(
+			std::uint32_t a_slot,
+			std::uint64_t a_resourceGeneration,
+			std::uint64_t a_queueIdentity,
+			std::uint64_t a_completedValue,
+			Wait&& a_wait)
+		{
+			if (a_slot >= _pending.size()) {
+				return {
+					.code = PresentInputAcquireCode::kInvalidSlot,
+					.completedValue = a_completedValue,
+					.result = E_INVALIDARG
+				};
+			}
+			if (_acquired[a_slot]) {
+				return {
+					.code = PresentInputAcquireCode::kAcquired,
+					.token = _pending[a_slot].value_or(
+						PresentInputRetirementToken{}),
+					.completedValue = a_completedValue,
+					.result = S_OK
+				};
+			}
+			if (!_pending[a_slot]) {
+				_acquired[a_slot] = true;
+				return {
+					.code = PresentInputAcquireCode::kAcquired,
+					.completedValue = a_completedValue,
+					.result = S_OK,
+					.firstAcquire = true
+				};
+			}
+
+			const auto token = *_pending[a_slot];
+			PresentInputAcquireResult result{
+				.code = PresentInputAcquireCode::kAcquired,
+				.token = token,
+				.completedValue = a_completedValue,
+				.result = S_OK,
+				.firstAcquire = true
+			};
+			if (token.resourceGeneration != a_resourceGeneration) {
+				result.code =
+					PresentInputAcquireCode::kGenerationMismatch;
+				result.result = E_INVALIDARG;
+				return result;
+			}
+			if (token.mode ==
+				PresentInputRetirementMode::kSynchronousPresentQueue) {
+				if (token.queueIdentity != a_queueIdentity) {
+					result.code = PresentInputAcquireCode::kQueueMismatch;
+					result.result = E_INVALIDARG;
+					return result;
+				}
+				if (a_completedValue == UINT64_MAX) {
+					result.code =
+						PresentInputAcquireCode::kFenceUnavailable;
+					result.result = DXGI_ERROR_DEVICE_REMOVED;
+					return result;
+				}
+				result.waitRequired = a_completedValue < token.value;
+			} else {
+				result.waitRequired =
+					token.mode == PresentInputRetirementMode::kProviderDrain;
+			}
+			if (result.waitRequired) {
+				result.result = std::forward<Wait>(a_wait)(token);
+				if (FAILED(result.result)) {
+					result.code = PresentInputAcquireCode::kWaitFailed;
+					return result;
+				}
+			}
+
+			_pending[a_slot].reset();
+			_acquired[a_slot] = true;
+			return result;
+		}
+
+		void MarkSubmitted(
+			std::uint32_t a_slot,
+			std::optional<PresentInputRetirementToken> a_token) noexcept
 		{
 			if (a_slot < _pending.size()) {
-				_pending[a_slot] = a_providerMayConsume;
+				_pending[a_slot] = std::move(a_token);
 				_acquired[a_slot] = false;
 			}
 		}
 
 		void Reset() noexcept
 		{
-			_pending.fill(false);
+			_pending.fill(std::nullopt);
 			_acquired.fill(false);
 		}
 
 		[[nodiscard]] bool IsPending(std::uint32_t a_slot) const noexcept
 		{
-			return a_slot < _pending.size() && _pending[a_slot];
+			return a_slot < _pending.size() &&
+				_pending[a_slot].has_value();
 		}
 
 	private:
-		std::array<bool, 2> _pending{};
+		std::array<std::optional<PresentInputRetirementToken>, 2> _pending{};
 		std::array<bool, 2> _acquired{};
 	};
 

@@ -28,7 +28,7 @@ namespace cs::features::fidelityfx_fg
 		config.swapChain = a_swapChain;
 		config.onlyPresentGenerated = false;
 		config.flags = 0;
-		config.allowAsyncWorkloads = true;
+		config.allowAsyncWorkloads = false;
 		config.generationRect = {
 			.left = 0,
 			.top = 0,

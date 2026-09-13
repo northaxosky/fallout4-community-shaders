@@ -253,8 +253,10 @@ Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, 
   DLSS-SR. It uses the captured HUD-less image with the intercepted final backbuffer and does
   not fabricate a UI-alpha layer.
   DLSS-G copies borrowed inputs on the application command list before DX11 can reuse them.
-  FidelityFX retains a conservative wait for outstanding presents before reusing its borrowed
-  inputs; this protects ownership but can limit overlap.
+  FidelityFX submits interpolation on the game queue. A dedicated shared fence orders HUD-less
+  slot reuse after GPU consumption without a steady-state CPU wait for presentation. Whole-pipeline
+  drains remain for resize and teardown. Detailed diagnostics include slot retirement tokens,
+  completion values, GPU waits, and lifecycle drain counts.
   Provider-reported presented-frame totals include real and generated frames and do not prove
   that every frame reached the display. Generated-frame counts are reported as unavailable
   when the SDK data cannot distinguish them reliably.

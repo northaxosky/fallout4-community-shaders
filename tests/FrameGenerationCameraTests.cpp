@@ -239,7 +239,7 @@ namespace
 			"HRESULT DX12SwapChain::PresentImpl(",
 			"void DX12SwapChain::ClearSharedBuffers(");
 		const auto presentCall =
-			presentBlock.find("presentResult = _swapChain->Present(");
+			presentBlock.find("return _swapChain->Present(");
 		const auto signal = presentBlock.find("_queue->Signal(");
 		const auto wait = presentBlock.find("_context11->Wait(");
 		const auto clear = presentBlock.find("ClearSharedBuffers(false)");

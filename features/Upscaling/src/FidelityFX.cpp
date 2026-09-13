@@ -1,6 +1,7 @@
 #include "FidelityFX.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 
@@ -131,7 +132,7 @@ namespace cs::features
 		ffx::CreateContextDescFrameGeneration createDesc{};
 		createDesc.displaySize = { a_width, a_height };
 		createDesc.maxRenderSize = createDesc.displaySize;
-		createDesc.flags = FFX_FRAMEGENERATION_ENABLE_ASYNC_WORKLOAD_SUPPORT;
+		createDesc.flags = 0;
 		createDesc.backBufferFormat = ffxApiGetSurfaceFormatDX12(a_format);
 
 		ffx::CreateBackendDX12Desc backendDesc{};
@@ -219,17 +220,27 @@ namespace cs::features
 
 	bool FidelityFX::DestroyFrameGenerationContext() noexcept
 	{
+		return DestroyFrameGenerationContextWithStatus().succeeded;
+	}
+
+	FidelityFX::FrameGenerationContextReleaseStatus
+		FidelityFX::DestroyFrameGenerationContextWithStatus() noexcept
+	{
 		frameGenerationActive = false;
 		frameGenerationCameraData = {};
 		if (!frameGenerationContextCreated) {
-			return true;
+			return { .succeeded = true };
 		}
+		const bool canDrainPresents = swapChainContextCreated;
+		std::int64_t drainSdkResult = 0;
+		std::uint64_t drainCpuMicroseconds = 0;
 		const auto destruction = render::temporal::DisableDrainAndDestroy(
 			[&]() {
 				return SetFrameGenerationEnabled(false);
 			},
 			[&]() {
-				return WaitForPresents();
+				return WaitForPresents(
+					&drainSdkResult, &drainCpuMicroseconds);
 			},
 			[&]() {
 				try {
@@ -251,22 +262,39 @@ namespace cs::features
 		if (destruction ==
 			render::temporal::DestructionResult::kDisableFailed) {
 			L->error("FidelityFX context destruction stopped because callback deconfiguration failed");
-			return false;
+			return {};
 		}
 		if (destruction ==
 			render::temporal::DestructionResult::kDrainFailed) {
 			L->error("FidelityFX context destruction stopped because pending presents did not drain");
-			return false;
+			return {
+				.globalDrainAttempted = canDrainPresents,
+				.globalDrainSdkResult = drainSdkResult,
+				.globalDrainCpuMicroseconds =
+					drainCpuMicroseconds
+			};
 		}
 		if (destruction !=
 			render::temporal::DestructionResult::kSuccess) {
-			return false;
+			return {
+				.globalDrainAttempted = canDrainPresents,
+				.globalDrainCompleted = canDrainPresents,
+				.globalDrainSdkResult = drainSdkResult,
+				.globalDrainCpuMicroseconds =
+					drainCpuMicroseconds
+			};
 		}
 		frameGenerationContext = {};
 		frameGenerationContextCreated = false;
 		frameGenerationOutputWidth = 0;
 		frameGenerationOutputHeight = 0;
-		return true;
+		return {
+			.succeeded = true,
+			.globalDrainAttempted = canDrainPresents,
+			.globalDrainCompleted = canDrainPresents,
+			.globalDrainSdkResult = drainSdkResult,
+			.globalDrainCpuMicroseconds = drainCpuMicroseconds
+		};
 	}
 
 	bool FidelityFX::DestroySwapChainContext() noexcept
@@ -347,15 +375,34 @@ namespace cs::features
 		frameGenerationCameraData = {};
 	}
 
-	bool FidelityFX::WaitForPresents() noexcept
+	bool FidelityFX::WaitForPresents(
+		std::int64_t* a_sdkResult,
+		std::uint64_t* a_cpuMicroseconds) noexcept
 	{
+		if (a_sdkResult) {
+			*a_sdkResult = 0;
+		}
+		if (a_cpuMicroseconds) {
+			*a_cpuMicroseconds = 0;
+		}
 		if (!swapChainContextCreated) {
 			return true;
 		}
 		try {
+			const auto start = std::chrono::steady_clock::now();
 			ffx::DispatchDescFrameGenerationSwapChainWaitForPresentsDX12 wait{};
 			const auto result = ffx::Dispatch(swapChainContext, wait);
+			if (a_cpuMicroseconds) {
+				*a_cpuMicroseconds = static_cast<std::uint64_t>(
+					std::chrono::duration_cast<
+						std::chrono::microseconds>(
+						std::chrono::steady_clock::now() - start)
+						.count());
+			}
 			if (result != ffx::ReturnCode::Ok) {
+				if (a_sdkResult) {
+					*a_sdkResult = static_cast<std::int64_t>(result);
+				}
 				L->error(
 					"FidelityFX failed to wait for pending presents ({})",
 					static_cast<std::uint32_t>(result));
@@ -363,6 +410,10 @@ namespace cs::features
 			}
 			return true;
 		} catch (...) {
+			if (a_sdkResult) {
+				*a_sdkResult = static_cast<std::int64_t>(
+					ffx::ReturnCode::ErrorRuntimeError);
+			}
 			L->error("FidelityFX present wait raised an exception");
 			return false;
 		}
@@ -425,7 +476,8 @@ namespace cs::features
 		config.swapChain = a_swapChain;
 		config.onlyPresentGenerated = false;
 		config.flags = 0;
-		config.allowAsyncWorkloads = true;
+		// The swap-chain callback submits to the game queue before Present returns.
+		config.allowAsyncWorkloads = false;
 		config.generationRect.left = 0;
 		config.generationRect.top = 0;
 		config.generationRect.width = static_cast<std::int32_t>(a_outputWidth);

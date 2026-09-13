@@ -410,6 +410,12 @@ namespace cs::render
 			std::scoped_lock lock(_impl->mutex);
 			_impl->traceCount = 0;
 		}
+		_impl->swapChain.SetInputRetirementDetailedTracing(a_enabled);
+	}
+
+	bool TemporalPipeline::DetailedTracingEnabled() const noexcept
+	{
+		return _impl->detailedTracing.load(std::memory_order_acquire);
 	}
 
 	void TemporalPipeline::BeginMainLoopFrame() noexcept
@@ -1418,6 +1424,8 @@ namespace cs::render
 			: 0;
 		bool ready = false;
 		bool active = false;
+		features::FrameGenerationInputRetirementDiagnostics
+			retirementDiagnostics;
 		{
 			std::scoped_lock lock(_impl->mutex);
 			const auto& configuration = _impl->topology.Effective();
@@ -1429,6 +1437,8 @@ namespace cs::render
 				_impl->frameGenerationEnabled.load(
 					std::memory_order_acquire);
 			ready = _impl->swapChain.IsFrameGenerationReady();
+			retirementDiagnostics =
+				_impl->swapChain.GetInputRetirementDiagnostics();
 			const auto& frame =
 				_impl->frames[_impl->currentFrameSlot];
 			active = temporal::IsFrameGenerationActive(
@@ -1488,7 +1498,51 @@ namespace cs::render
 			.lastFrameTimeInputMilliseconds =
 				cpuTimings.available
 					? cpuTimings.lastFrameTimeInputMilliseconds
-					: 0.0
+					: 0.0,
+			.inputRetirementAcquisitions =
+				retirementDiagnostics.acquisitions,
+			.inputRetirementImmediateAcquisitions =
+				retirementDiagnostics.immediateAcquisitions,
+			.inputRetirementGpuWaits =
+				retirementDiagnostics.gpuWaits,
+			.inputRetirementProviderDrains =
+				retirementDiagnostics.providerDrains,
+			.inputRetirementGlobalDrainAttempts =
+				retirementDiagnostics.globalDrainAttempts,
+			.inputRetirementGlobalDrainFailures =
+				retirementDiagnostics.globalDrainFailures,
+			.inputRetirementWaitFailures =
+				retirementDiagnostics.waitFailures,
+			.inputRetirementSignals =
+				retirementDiagnostics.signals,
+			.inputRetirementSignalFailures =
+				retirementDiagnostics.signalFailures,
+			.inputRetirementViolations =
+				retirementDiagnostics.violations,
+			.inputRetirementStartupDrains =
+				retirementDiagnostics.startupDrains,
+			.inputRetirementDisableDrains =
+				retirementDiagnostics.disableDrains,
+			.inputRetirementResizeDrains =
+				retirementDiagnostics.resizeDrains,
+			.inputRetirementTeardownDrains =
+				retirementDiagnostics.teardownDrains,
+			.inputRetirementSteadyDrains =
+				retirementDiagnostics.steadyDrains,
+			.inputRetirementLastRealFrame =
+				retirementDiagnostics.lastRealFrame,
+			.inputRetirementLastResourceGeneration =
+				retirementDiagnostics.lastResourceGeneration,
+			.inputRetirementLastRequiredFence =
+				retirementDiagnostics.lastRequiredFence,
+			.inputRetirementLastCompletedFence =
+				retirementDiagnostics.lastCompletedFence,
+			.inputRetirementWaitCpuMicroseconds =
+				retirementDiagnostics.waitCpuMicroseconds,
+			.inputRetirementLastSlot =
+				retirementDiagnostics.lastSlot,
+			.inputRetirementLastAcquireQueuedGpuWait =
+				retirementDiagnostics.lastAcquireQueuedGpuWait
 		};
 	}
 
