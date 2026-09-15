@@ -23,7 +23,7 @@ injected in place of the stock shaders.
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](CMakeLists.txt)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
-<sub>[Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [Shared menu](#shared-mod-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
+<sub>[Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
 
 </div>
 
@@ -50,7 +50,7 @@ injected in place of the stock shaders.
 
 > Being listed here means the feature is **compiled into the plugin**, not that it has been
 > fully validated in game. Every feature ships **inactive** and is opt-in - see
-> [activation](#-feature-activation).
+> [activation](#feature-activation).
 
 | Feature | Implementation |
 |---|---|
@@ -75,233 +75,76 @@ path separately conditions first-person alpha pixels.
 
 ## Feature activation
 
-Every feature is opt-in. Add its exact key to
-`Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml`:
+Every feature ships inactive and is opt-in. Enable features in `Data\F4SE\Plugins\FO4CommunityShaders\FO4CommunityShaders.User.toml` or through the in-game menu:
 
 ```toml
 [features.ScreenSpaceShadows]
 load = true
 ```
 
-Activation is evaluated **once during startup**, so restart the game after changing it. The
-shipped `FO4CommunityShaders.toml` holds documented defaults and is never modified by the
-plugin; user and in-game changes are written atomically to `FO4CommunityShaders.User.toml`. The
-in-game menu can update a feature's requested load state for the next launch and shows its
-runtime state, but it does **not** hot-load or unload features.
+Feature loading is evaluated **at startup**—restart the game after enabling or disabling features. Settings for already-loaded features can be adjusted live in-game.
 
-A feature loads only when its `[features.<Name>].load` value is `true`. A malformed Default file
-disables all features; a malformed User file is ignored. Presets configure only features that
-are already activated - they cannot activate any feature.
-
-Baseline shader ownership is separately opt-in and does not load a feature. Loaded features may
-request the reconstructed routes they need independently. Every replacement still requires the
-stock shader's SHA-1 match. Set `enabled = true` under `[shader_ownership]` in the User TOML to
-replace the remaining deferred targets with their stock-equivalent HLSL; the per-target switches in
-the shipped Default remain available for bring-up opt-outs. Restart after changing ownership.
+Baseline shader ownership can be enabled under `[shader_ownership]` (`enabled = true`) to replace remaining stock deferred shaders with reconstructed HLSL.
 
 ---
 
 ## Controls
 
-Community Shaders registers its controls with DearModdingUI. The shipped suggestions are **F10**
-for the Performance Overlay, **F11** for one RenderDoc capture, **Shift + F11** for a multi-frame
-capture, and **Ctrl + F12** for a telemetry dump. The host owns binding overrides, conflict
-resolution and key-up pairing. Capture and overlay actions yield while the host owns input;
-the telemetry dump action remains available while the menu is open.
+Default hotkeys registered with DearModdingUI:
 
-The feature TOML strings (`toggle_hotkey`, `capture_hotkey`, `multi_capture_hotkey`, and
-`logging.dump_hotkey`) remain suggested defaults. An explicit user
-`features.PerformanceOverlay.settings.toggle_hotkey` wins over the retired menu binding; otherwise
-the legacy integer/keyboard-array `menu.overlay_toggle_key` is converted once into the host's
-suggested chord, including an explicit `0` (unbound). The host's saved override is authoritative
-after registration. With no compatible host, these diagnostic hotkeys are intentionally
-unavailable.
-
-Feature settings can expose persisted texture previews and fullscreen debug views. Texture
-previews are independent; one fullscreen view can replace the scene at a time. Terrain Shadows
-provides fullscreen grayscale views of its sampled shadow term and raw heightmap. Inverse Square
-Lighting provides a live left-vanilla/right-configured comparison. Exponential Height Fog exposes
-the final fog factor as pre-colour-mix greyscale.
-
-Skylighting's raw and normalized depth previews share one still snapshot. Switching between them
-does not recapture; **Refresh snapshot** updates both from the next completed occlusion map.
-Normalization reads the saved depth copy, not the live producer. The lighting algorithm continues
-sampling normally while both previews stay still.
-
-Upscaling and Frame Generation previews follow the same frozen-snapshot contract. Selecting a
-preview captures the next completed render-stage resource into a plugin-owned texture; **Refresh
-snapshot** requests one later capture while the previous image remains available. DearModdingUI
-never receives a writable engine or vendor-owned temporal resource.
-
-Feature configuration lives directly under `Data\F4SE\Plugins\FO4CommunityShaders\`; supporting
-assets live in subdirectories beneath it:
-
-| Directory | Contents |
+| Hotkey | Action |
 |---|---|
-| `Presets\` | Cross-feature setting presets |
+| **F10** | Toggle Performance Overlay |
+| **F11** | RenderDoc frame capture |
+| **Shift + F11** | RenderDoc multi-frame capture |
+| **Ctrl + F12** | Telemetry and diagnostic dump |
+
+Key bindings can be customized through the DearModdingUI menu.
 
 ---
 
-## DearModdingUI
+## In-game Menu
 
-Community Shaders is a forwarding-only DearModdingUI client. At startup it uses the official
-header-only client to discover and preflight a compatible host, then registers Home, Advanced,
-and Presets under General, alongside per-feature settings and the Performance Overlay. The host owns the window,
-navigation, rendering backend, fonts, theme, input, hotkey editor, dialogs, notifications, and
-overlay placement.
+Community Shaders uses [DearModdingUI](https://github.com/Dear-Modding-FO4/dearmoddingui) for in-game configuration, feature toggles, and the performance overlay.
 
-Community Shaders does not compile or link Dear ImGui and never creates or shares an ImGui context.
-The official client negotiates the DearModdingUI host ABI and required stable UI table prefix. If the host is
-missing, disabled, incompatible, or cannot provide every required native service, Community
-Shaders continues running its shader features, presets, TOML configuration, telemetry, and
-fullscreen debug selection headless. It deliberately provides no fallback menu, overlay,
-notification UI, or diagnostic hotkeys in that state.
-
-Settings pages use the host's native section, settings-table, settings-row, reset, search, status
-color, dialog, and link services. Feature widgets remain live and persist with their existing
-per-feature rules inside those native rows.
-
-Home shows startup loading results. Advanced has the sole **Load on startup** list, where checked
-means loaded on the next launch; changes require a restart. A loaded feature's **Enabled** control
-toggles its effect live. Shader ownership, cache, and logging settings are also in Advanced.
-
-Super-resolution and frame-generation method selections always require a restart, including
-None, TAA, and FG Off. There are no provider-specific live-switch exceptions. Quality, sharpening,
-and Enabled controls remain live and affect the currently effective method; requested methods
-remain pending until restart. Only the selected SDK sessions are initialized, plus a configured
-DLSS fallback if it is actually needed. The plugin does not keep other providers ready in standby.
-Enabled pauses or resumes the selected effect; it does not unload its SDK session or remove an
-installed FG proxy. Use the startup Load or method setting to avoid that session's fixed costs.
-
-Streamline is authenticated before the interposer is loaded. Official NVIDIA packages retain
-NVIDIA signature verification. A community package additionally requires a signed release manifest
-and its matching public trust configuration compiled into both Community Shaders and Streamline.
-Incomplete, tampered, or untrusted packages are rejected; the configured startup fallback remains
-available. Each file is resolved independently through MO2's virtual directory. No UI host or
-per-frame signature checks are involved.
-
-Wine/Proton support is unverified and assumes a trusted prefix. Signature, hash, and file-identity
-checks remain mandatory, but Wine loading does not defend against hostile concurrent path changes
-by other same-user Wine or native processes. See the SDK's
-[`trust model`](extern/Streamline/docs/ProjectSigning.md) for the platform-specific guarantees.
-
-The SDK fork's release workflow builds, authenticates, and publishes its versioned runtime ZIP.
-CS downloads the pinned ZIP through `scripts\fetch-sdks.ps1`; it does not build the SDK DLLs.
-The package includes the fork's patched interposer/common DLLs, unchanged NVIDIA feature DLLs,
-and their signed manifest and detached signature. Both metadata files are required for packaging.
-CMake generates the public trust header from the pinned SDK's
-[`config/project-release.psd1`](extern/Streamline/config/project-release.psd1). No local key file
-or machine-specific signing path is needed to build CS. The private release key belongs only in
-the fork's protected release secret or maintainer backup, never in either repository or game.
-Folder actions pass the absolute in-game file path to DearModdingUI, which resolves its physical
-backing location through MO2/USVFS and opens the containing folder. Resolution or launch failures
-are reported without falling back to an unresolved path.
-
-Developer details live in [`src/Host/README.md`](src/Host/README.md).
+If DearModdingUI is not installed, Community Shaders operates headless and reads settings directly from the TOML configuration files. See [`src/Host/README.md`](src/Host/README.md) for architecture and integration details.
 
 ---
 
 ## Building from source
 
-**Prerequisites:** Visual Studio 2026 (Desktop C++), CMake ≥ 4.2, [vcpkg](https://vcpkg.io)
-with `VCPKG_ROOT` set, and Git.
+**Prerequisites:** Visual Studio 2026 (Desktop C++), CMake ≥ 4.2, [vcpkg](https://vcpkg.io) with `VCPKG_ROOT` set, and Git.
 
 ```bash
-# Clone with submodules (CommonLibF4, FidelityFX-SDK, Streamline)
 git clone --recursive https://github.com/northaxosky/fallout4-community-shaders
 cd fallout4-community-shaders
 
-# Stage the pinned Streamline, DLSS, and FidelityFX frame-generation runtime DLLs
+# Download vendor SDK runtimes (Streamline, DLSS, FidelityFX)
 pwsh scripts/fetch-sdks.ps1
 
-# Configure + build (Release)
+# Configure and build (Release)
 cmake -S . --preset=default
-cmake --build build --config Release        # -> build/Release/FO4CommunityShaders.dll
+cmake --build build --config Release
 ```
 
-Built on [CommonLibF4](https://github.com/Dear-Modding-FO4/commonlibf4). C++23, `/W4 /WX`
-(warnings are errors). Run the tests with `ctest --test-dir build -C Release`.
+Tests can be run with `ctest --test-dir build -C Release`. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for full setup and deployment details.
 
 ---
 
 ## Compatibility notes
 
-- **ENB is not supported.** Every feature deactivates when ENB is loaded.
-- **Upscaling and Frame Generation** engine anchors are proven for the NG and AE runtimes only;
-  both features refuse to load on OG (1.10.163). FSR 3 super-resolution requires D3D11 feature
-  level 11.1. Loaded Upscaling sessions request that level regardless of the initial provider,
-  retaining lower-level device fallbacks but not admitting FSR on those devices.
-  Saved provider IDs outside the documented ranges are rejected, not reassigned. Update
-  `upscale_method`, `upscale_method_no_dlss`, or `frame_generation_method` to a supported
-  value in the User TOML if configuration validation fails after upgrading.
-  DLSS super-resolution needs the staged Streamline runtime DLLs.
-  If an admitted external super-resolution evaluation or publication fails after
-  reduced-resolution rendering commits, the plugin performs its own display-sized linear spatial
-  resolve from the retained engine input before continuing to UI. The live `DrawWorld::Render_UI`
-  wrapper also validates and reads its RIP-relative effects-path gate at entry; Gamma-only calls
-  that bypass the normal `+0xC5` seam inspect the resulting viewport, preserve full-size output
-  through a private passthrough, or spatially resolve a committed render subrect before publication.
-  Provider-only recovery switches to native TAA on the next frame. Engine or shared-runtime
-  failures disable the affected temporal consumers until restart; their requested selections remain
-  visible separately from effective state. Recovery resources and shaders are preflighted before
-  reduced-resolution state is committed.
-  AMD frame generation needs the pinned FidelityFX DX12 DLLs, windowed or
-  borderless SDR `R8G8B8A8_UNORM` output, and a restart after startup-policy changes. It is
-  independent of the selected super-resolution method and defaults off in pause, main, loading,
-  and Pip-Boy menus. Its current UI strategy captures HUD-less post-imagespace color before the
-  engine composites UI. DLSS-G uses the same Streamline D3D12 session and frame token as
-  DLSS-SR. It uses the captured HUD-less image with the intercepted final backbuffer and does
-  not fabricate a UI-alpha layer.
-  DLSS-G copies borrowed inputs on the application command list before DX11 can reuse them.
-  FidelityFX submits interpolation on the game queue. A dedicated shared fence orders HUD-less
-  slot reuse after GPU consumption without a steady-state CPU wait for presentation. Whole-pipeline
-  drains remain for resize and teardown. Telemetry includes compact retirement counters, the latest
-  slot token and completion values, GPU waits, failures, and lifecycle drain counts.
-  The D3D11-facing presentation facade exposes `IDXGISwapChain` through `IDXGISwapChain4` with one
-  accessible discard-model fake backbuffer and one COM identity. Its two-buffer descriptor mirrors
-  the private presentation buffering, while discard-model `GetBuffer` access remains limited to
-  index zero. Inner flip-only flags and waitable-latency, source-region, rotation, and composition
-  transform operations are not advertised through the D3D11 facade. `Present1` follows the same
-  capture and provider transaction as `Present`; partial-presentation dirty or scroll metadata is
-  rejected because the bridge publishes a complete frame. `ResizeBuffers1` uses the normal
-  transactional rebuild only without D3D12 node masks or foreign presentation queues. Resize
-  preserves the private swap chain's creation-only flags even though the facade does not expose them.
-  Provider-reported presented-frame totals include real and generated frames and do not prove
-  that every frame reached the display. Generated-frame counts are reported as unavailable
-  when the SDK data cannot distinguish them reliably.
-  Native D3D11 DLSS sessions publish Streamline's documented swap-chain proxy only after device
-  registration and DLSS admission succeed. That proxy remains active while the DLSS effect is
-  temporarily disabled so Streamline receives required Present and resize maintenance. DLSS-G
-  continues using its existing Streamline D3D12 presentation path and is not wrapped again; the
-  frame-generation proxy status still describes only the D3D12 frame-generation bridge.
-  The validated normal-loop hooks track sleep, simulation, render-submit, and proxy Present
-  attempt ordering without treating worker completion or auxiliary Swap callers as frame boundaries.
-  The selected DLSS-G session receives the Reflex/PCL sleep and marker sequence, including while
-  its effect is disabled live. SDK file versions and package labels are not guarantees of the
-  selected FidelityFX algorithm version. The observed SR input is post-tonemap gamma-2.2 output
-  with the artistic LUT already applied. HDR and ENB are unsupported.
-  The two feature panels own configuration and diagnostics only. Core-owned temporal rendering,
-  input capture, recovery, provider execution, and presentation remain available independently of
-  either panel's lifecycle; an unloaded Upscaling panel does not own Frame Generation's resources.
-- **Motion Vector Fixes** installs its player-transform hook on every runtime, but the
-  animation-sequence correction is unproven on OG (1.10.163) and is skipped there.
-- **Screen Space GI** temporal reprojection reads the RT 29 motion-vector target, which carries
-  render-resolution motion in the upper-left sub-rect while upscaling is active.
-- **Terrain Shadows** needs a worldspace heightmap on disk; the plugin generates none. Drop an
-  FO4 xLODGen beta 132 export at
-  `Data\Textures\Terrain\<Worldspace>\<Worldspace>.Terrain.HeightMap.<W>.<S>.<E>.<N>.<minZ>.<maxZ>.dds`,
-  or an upstream-style custom map at
-  `Data\Textures\HeightMaps\<Worldspace>.HeightMap.<W>.<S>.<E>.<N>.<zBlack>.<zWhite>.<minZ>.<maxZ>.dds`,
-  which takes precedence. Worldspaces without a map render unchanged.
-- **RenderDoc** requires an external `renderdoc.dll` exposing API 1.7.0. It initializes at startup,
-  so enabling it requires a restart. Capturing an FSR3 dispatch can destabilise that dispatch;
-  disable capture before diagnosing FSR3 crashes.
-- A successful build or launch does **not** prove a rendering path is visually correct - in-game
-  validation is still required.
+- **ENB**: Incompatible. Community Shaders automatically disables itself when ENB is detected.
+- **Upscaling & Frame Generation**: Supported on runtime 1.11.240 (NG/AE). Not supported on 1.10.163 (OG).
+  - DLSS requires an NVIDIA RTX GPU and the staged Streamline DLLs.
+  - FSR 3 requires D3D11 Feature Level 11.1.
+  - Frame Generation requires DX12 support and borderless windowed mode.
+  - Switching upscaling or frame generation methods requires a game restart.
+  - HDR is currently unsupported.
+- **Terrain Shadows**: Requires an xLODGen terrain heightmap export placed in `Data\Textures\Terrain\` or `Data\Textures\HeightMaps\`.
+- **RenderDoc**: Requires an external `renderdoc.dll` (API 1.7.0). Enabling frame capture requires a restart.
 
 ---
 
 ## License
 
-Licensed under **GPL-3.0-or-later** with the project
-[Modding and Linking Exceptions](EXCEPTIONS.md). See [LICENSE](LICENSE) for the full text.
+Licensed under **GPL-3.0-or-later** with the project [Modding and Linking Exceptions](EXCEPTIONS.md). See [LICENSE](LICENSE) for the full text.
