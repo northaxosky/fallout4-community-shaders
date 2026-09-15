@@ -30,7 +30,7 @@ namespace cs::features
 		void SetUseDynamicResolutionViewport(RE::BSGraphics::RenderTargetManager* a_manager, bool a_enabled)
 		{
 			using func_t = void (*)(RE::BSGraphics::RenderTargetManager*, bool);
-			static REL::Relocation<func_t> func{ REL::ID({ 0, 2277194, 2277194 }) };
+			static REL::Relocation<func_t> func{ REL::ID({ 676851, 2277194, 2277194 }) };
 			func(a_manager, a_enabled);
 		}
 

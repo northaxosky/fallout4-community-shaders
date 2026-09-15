@@ -8,37 +8,31 @@ namespace cs::render
 	{
 		using namespace upscaling_anchors;
 
-		if (REX::FModule::IsRuntimeOG()) {
-			RejectInitialization(
-				"DrawWorld::Render_UI and its effects-path gate are unproven on the OG runtime");
-			return;
-		}
-
-		const auto anchor = [](std::uint64_t a_id) {
-			return REL::ID({ kUnprovenOnOG, a_id, a_id });
+		const auto tupleId = [](const std::uint64_t (&a_ids)[3]) {
+			return REL::ID({ a_ids[0], a_ids[1], a_ids[2] });
 		};
-		const auto tupleTarget = [](const std::uint64_t (&a_ids)[3]) {
-			return REL::ID({ a_ids[0], a_ids[1], a_ids[2] }).address();
+		const auto tupleAddress = [&](const std::uint64_t (&a_ids)[3]) {
+			return tupleId(a_ids).address();
 		};
 
+		const auto runtimeIndex =
+			static_cast<std::size_t>(REX::FModule::GetRuntimeIndex());
 		const auto viewportSite =
-			anchor(kDrawWorldBegin).address() + kDrawWorldBeginSetDynamicViewportCall;
-		const auto viewportTarget = anchor(kSetDynamicViewportAsDefault).address();
-		const auto renderUiTarget = anchor(kDrawWorldRenderUI).address();
+			tupleAddress(kDrawWorldBegin) + kDrawWorldBeginSetDynamicViewportCall;
+		const auto viewportTarget = tupleAddress(kSetDynamicViewportAsDefault);
+		const auto renderUiTarget = tupleAddress(kDrawWorldRenderUI);
 		const auto imagespaceUpscaleSite =
-			renderUiTarget + kDrawWorldRenderUIResolveCall;
+			renderUiTarget + kDrawWorldRenderUIResolveCall[runtimeIndex];
 		const auto effectsGateCompareSite =
-			renderUiTarget + kDrawWorldRenderUIEffectsGateCompare;
+			renderUiTarget + kDrawWorldRenderUIEffectsGateCompare[runtimeIndex];
 		const auto dynamicResolutionSite =
-			anchor(kRenderPreUI).address() + kRenderPreUIUpdateDynamicResolutionCall;
-		const auto dynamicResolutionTarget = anchor(kUpdateDynamicResolution).address();
-		const auto samplerStateTable = anchor(kSamplerStateTable).address();
+			tupleAddress(kRenderPreUI) + kRenderPreUIUpdateDynamicResolutionCall[runtimeIndex];
+		const auto dynamicResolutionTarget = tupleAddress(kUpdateDynamicResolution);
+		const auto samplerStateTable = tupleAddress(kSamplerStateTable);
 		if (!samplerBias.Initialize(samplerStateTable)) {
 			RejectInitialization("The sampler-state table address did not resolve");
 			return;
 		}
-		const auto runtimeIndex =
-			static_cast<std::size_t>(REX::FModule::GetRuntimeIndex());
 		const auto firstPersonAlphaSite =
 			REL::ID({
 				kFirstPersonAlphaAnchor[0],
@@ -54,19 +48,19 @@ namespace cs::render
 				  .address()
 			: 0;
 		const auto renderEffectRangeSite =
-			renderUiTarget + kDrawWorldRenderUIRenderEffectRangeCall;
+			renderUiTarget + kDrawWorldRenderUIRenderEffectRangeCall[runtimeIndex];
 		const auto deferredCompositeSite =
-			anchor(kDeferredComposite).address() + kDeferredCompositeRenderPassCall;
+			tupleAddress(kDeferredComposite) + kDeferredCompositeRenderPassCall[runtimeIndex];
 		const auto sslrSite =
-			anchor(kSSLRRaytracingSetupTechnique).address() + kSSLRRaytracingBeginTechniqueCall;
+			tupleAddress(kSSLRRaytracingSetupTechnique) + kSSLRRaytracingBeginTechniqueCall;
 		const auto vatsSite =
-			anchor(kVatsUpdateParams).address() + kVatsSetPixelConstantCall;
+			tupleAddress(kVatsUpdateParams) + kVatsSetPixelConstantCall[runtimeIndex];
 		const auto loadingMenuSite =
-			anchor(kLoadingMenuUpdateTemporalData).address() + kLoadingMenuUpdateTemporalDataCall;
+			tupleAddress(kLoadingMenuUpdateTemporalData) + kLoadingMenuUpdateTemporalDataCall[runtimeIndex];
 		const auto deferredPrePassSite =
-			anchor(kRenderPreUI).address() + kRenderPreUIDeferredPrePassCall;
+			tupleAddress(kRenderPreUI) + kRenderPreUIDeferredPrePassCall[runtimeIndex];
 		const auto forwardSite =
-			anchor(kRenderPreUI).address() + kRenderPreUIForwardCall;
+			tupleAddress(kRenderPreUI) + kRenderPreUIForwardCall[runtimeIndex];
 		if (!IsCallSiteTargeting(viewportSite, viewportTarget)) {
 			RejectInitialization("World viewport selection site did not contain the expected call");
 			return;
@@ -77,9 +71,8 @@ namespace cs::render
 		}
 		const auto dataSection =
 			REX::FModule::GetExecutingModule().GetSection(".data");
-		const auto expectedEffectsGate = REX::FModule::IsRuntimeAE()
-			? REL::ID({ 0, 0, kDrawWorldRenderUIEffectsGateAE }).address()
-			: 0;
+		const auto expectedEffectsGate =
+			tupleAddress(kDrawWorldRenderUIEffectsGate);
 		_renderUiPathGate = cs::engine::RenderUIPathGate::Decode(
 			effectsGateCompareSite,
 			dataSection.GetAddress(),
@@ -101,44 +94,44 @@ namespace cs::render
 		}
 		if (!IsCallSiteTargeting(
 				renderEffectRangeSite,
-				tupleTarget(kImageSpaceManagerRenderEffectRange))) {
+				tupleAddress(kImageSpaceManagerRenderEffectRange))) {
 			RejectInitialization("Imagespace effect-range site did not contain the expected RenderEffectRange call");
 			return;
 		}
 		if (!IsCallSiteTargeting(
 				deferredCompositeSite,
-				tupleTarget(kBSBatchRendererRenderPassImmediately))) {
+				tupleAddress(kBSBatchRendererRenderPassImmediately))) {
 			RejectInitialization("Deferred composite site did not contain the expected RenderPassImmediately call");
 			return;
 		}
-		if (!IsCallSiteTargeting(sslrSite, tupleTarget(kBSShaderBeginTechnique))) {
+		if (!IsCallSiteTargeting(sslrSite, tupleAddress(kBSShaderBeginTechnique))) {
 			RejectInitialization("SSLR raytracing site did not contain the expected BeginTechnique call");
 			return;
 		}
-		if (!IsCallSiteTargeting(vatsSite, tupleTarget(kImageSpaceShaderParamSetPixelConstant))) {
+		if (!IsCallSiteTargeting(vatsSite, tupleAddress(kImageSpaceShaderParamSetPixelConstant))) {
 			RejectInitialization("VATS parameter site did not contain the expected SetPixelConstant call");
 			return;
 		}
 		if (!IsCallSiteTargeting(
 				loadingMenuSite,
-				tupleTarget(kBSGraphicsStateUpdateTemporalData))) {
+				tupleAddress(kBSGraphicsStateUpdateTemporalData))) {
 			RejectInitialization("Loading-menu site did not contain the expected UpdateTemporalData call");
 			return;
 		}
 		if (!IsCallSiteTargeting(
 				deferredPrePassSite,
-				tupleTarget(kDrawWorldDeferredPrePass))) {
+				tupleAddress(kDrawWorldDeferredPrePass))) {
 			RejectInitialization("Render_PreUI site did not contain the expected DeferredPrePass call");
 			return;
 		}
-		if (!IsCallSiteTargeting(forwardSite, tupleTarget(kRenderPreUIForwardTarget))) {
+		if (!IsCallSiteTargeting(forwardSite, tupleAddress(kRenderPreUIForwardTarget))) {
 			RejectInitialization("Render_PreUI site did not contain the expected Forward call");
 			return;
 		}
 
 		stl::write_thunk_call<DrawWorldBegin_SetDynamicViewport>(viewportSite);
 		stl::write_thunk_call<Main_UpdateJitter>(
-			anchor(kDrawWorldBegin).address() + kDrawWorldBeginUpdateTemporalDataCall);
+			tupleAddress(kDrawWorldBegin) + kDrawWorldBeginUpdateTemporalDataCall[runtimeIndex]);
 		stl::write_thunk_call<DrawWorld_FirstPersonAlpha>(firstPersonAlphaSite);
 		stl::write_thunk_call<DrawWorldRenderUI_Resolve>(imagespaceUpscaleSite);
 		// Split the imagespace effect chain so HDR effects stay at render resolution.
@@ -155,13 +148,13 @@ namespace cs::render
 		stl::write_thunk_call<RenderPreUI_DeferredPrePass>(deferredPrePassSite);
 		stl::write_thunk_call<RenderPreUI_Forward>(forwardSite);
 
-		stl::detour_thunk<LensFlare_RenderLensFlare>(anchor(kLensFlareRenderLensFlare));
-		stl::detour_thunk<BSImageSpace_Init_FXAA>(anchor(kImageSpaceInitEffects));
+		stl::detour_thunk<LensFlare_RenderLensFlare>(tupleId(kLensFlareRenderLensFlare));
+		stl::detour_thunk<BSImageSpace_Init_FXAA>(tupleId(kImageSpaceInitEffects));
 		// ResetWindow can run without the render-target create callback.
-		stl::detour_thunk<Renderer_ResetWindow>(anchor(kRendererResetWindow));
-		stl::detour_thunk<BSShaderRenderTargets_Create>(anchor(kBSShaderRenderTargetsCreate));
+		stl::detour_thunk<Renderer_ResetWindow>(tupleId(kRendererResetWindow));
+		stl::detour_thunk<BSShaderRenderTargets_Create>(tupleId(kBSShaderRenderTargetsCreate));
 		// Own both the normal and pause-only Render_UI paths.
-		stl::detour_thunk<DrawWorldRenderUI>(anchor(kDrawWorldRenderUI));
+		stl::detour_thunk<DrawWorldRenderUI>(tupleId(kDrawWorldRenderUI));
 		// Publish the scale and refresh proxies after the native dynamic-resolution update.
 		stl::write_thunk_call<Main_UpdateDynamicResolution>(dynamicResolutionSite);
 		stl::write_vfunc<0x8, ImageSpaceEffectTemporalAA_IsActive>(

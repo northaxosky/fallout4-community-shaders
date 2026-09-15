@@ -193,9 +193,10 @@ namespace cs::render::renderer_detail
 		inline void ForceViewportToRenderTargetDimensions()
 		{
 			using func_t = void (*)();
-			static REL::Relocation<func_t> func{ REL::ID({ upscaling_anchors::kUnprovenOnOG,
-				upscaling_anchors::kForceViewportToRenderTargetDimensions,
-				upscaling_anchors::kForceViewportToRenderTargetDimensions }) };
+			static REL::Relocation<func_t> func{ REL::ID({
+				upscaling_anchors::kForceViewportToRenderTargetDimensions[0],
+				upscaling_anchors::kForceViewportToRenderTargetDimensions[1],
+				upscaling_anchors::kForceViewportToRenderTargetDimensions[2] }) };
 			func();
 		}
 

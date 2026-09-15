@@ -232,11 +232,6 @@ namespace cs::features
 
 	void FrameGeneration::Load()
 	{
-		if (REX::FModule::IsRuntimeOG()) {
-			FailLoad(
-				"Frame-generation engine anchors are proven for NG/AE only; the "
-				"OG runtime is unsupported");
-		}
 		render::TemporalPipeline::Get().SetDetailedTracing(
 			settings.detailedDiagnostics);
 	}

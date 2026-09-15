@@ -50,7 +50,7 @@ namespace cs::engine
 	// Master enable read by ImageSpaceEffectTemporalAA::IsActive; FO4 has no bUseTAA INI literal.
 	[[nodiscard]] inline std::uint32_t* GetTemporalAAEnableGlobal()
 	{
-		static REL::Relocation<std::uint32_t*> global{ REL::ID({ 0, 2704658, 2704658 }) };
+		static REL::Relocation<std::uint32_t*> global{ REL::ID({ 460417, 2704658, 2704658 }) };
 		return global.get();
 	}
 

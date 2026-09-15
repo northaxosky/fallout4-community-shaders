@@ -182,9 +182,6 @@ namespace cs::features
 
 	void Upscaling::Load()
 	{
-		if (REX::FModule::IsRuntimeOG()) {
-			FailLoad("Upscaling engine anchors are proven for NG/AE only; the OG runtime is unsupported");
-		}
 	}
 
 	cs::settings::RestartSettingsView Upscaling::GetRestartSettings() const noexcept

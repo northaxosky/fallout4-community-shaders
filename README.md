@@ -134,7 +134,7 @@ Tests can be run with `ctest --test-dir build -C Release`. See [`CONTRIBUTING.md
 ## Compatibility notes
 
 - **ENB**: Incompatible. Community Shaders automatically disables itself when ENB is detected.
-- **Upscaling & Frame Generation**: Supported on runtime 1.11.240 (NG/AE). Not supported on 1.10.163 (OG).
+- **Upscaling & Frame Generation**: Supported on OG (1.10.163), NG (1.10.984), and AE (1.11.240).
   - DLSS requires an NVIDIA RTX GPU and the staged Streamline DLLs.
   - FSR 3 requires D3D11 Feature Level 11.1.
   - Frame Generation requires DX12 support and borderless windowed mode.
