@@ -1,7 +1,5 @@
 #pragma once
 
-#include "Utils/CSSha1.h"
-
 #ifndef NOMINMAX
 #  define NOMINMAX
 #endif
@@ -68,59 +66,6 @@ namespace cs::engine
 		auto operator<=>(const ShaderVariantKeyView&) const = default;
 	};
 
-	inline ShaderVariantKeyView ViewShaderVariantKey(
-		const ShaderVariantKey& a_key) noexcept
-	{
-		return { a_key.subclass, a_key.stage, a_key.id };
-	}
-
-	inline ShaderVariantKey OwnShaderVariantKey(ShaderVariantKeyView a_key)
-	{
-		return {
-			std::string(a_key.subclass),
-			a_key.stage,
-			a_key.id
-		};
-	}
-
-	struct PixelShaderSwapVariantKey
-	{
-		std::optional<ShaderVariantKey> variant;
-		std::optional<sha1::Sha1Result> expectedStockSha1;
-		std::size_t routeGroup = 0;
-		std::size_t replacementIndex = 0;
-		ShaderStage stage = ShaderStage::kPixel;
-	};
-
-	enum class PixelShaderSwapSelectionKind : std::uint8_t
-	{
-		kNoMatch,
-		kUnmappedVariant,
-		kSelected,
-		kHashMismatch
-	};
-
-	struct PixelShaderSwapSelection
-	{
-		PixelShaderSwapSelectionKind kind =
-			PixelShaderSwapSelectionKind::kNoMatch;
-		std::size_t routeIndex = 0;
-		std::size_t replacementIndex = 0;
-		bool usedHashFallback = false;
-	};
-
-	PixelShaderSwapSelection SelectPixelShaderSwapVariant(
-		std::span<const PixelShaderSwapVariantKey> a_variants,
-		std::optional<ShaderVariantKeyView> a_variant,
-		const sha1::Sha1Result& a_stockSha1,
-		ShaderStage a_stage = ShaderStage::kPixel) noexcept;
-	bool ShaderVariantKeysConflict(
-		ShaderVariantKeyView a_left,
-		ShaderVariantKeyView a_right) noexcept;
-	bool ShouldSubstitutePixelShader(
-		PixelShaderSwapSelectionKind a_selection,
-		bool a_replacementReady) noexcept;
-
 	struct ShaderSwapRequest
 	{
 		ID3D11Device* device = nullptr;
@@ -129,7 +74,6 @@ namespace cs::engine
 		std::size_t bytecodeLength = 0;
 		ShaderStage stage = ShaderStage::kPixel;
 		std::optional<ShaderVariantKeyView> variant;
-		sha1::Sha1Result stockSha1;
 		ID3D11DeviceChild* stockOutput = nullptr;
 		ID3D11DeviceChild** output = nullptr;
 	};

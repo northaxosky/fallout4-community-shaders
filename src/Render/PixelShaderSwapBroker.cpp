@@ -3,6 +3,7 @@
 #include "Log.h"
 #include "PCH.h"
 #include "Render/ShaderSubclassContext.h"
+#include "Render/ShaderInjection.h"
 #include "Render/ShaderVariantRuntimeResolver.h"
 
 #include <atomic>
@@ -95,12 +96,21 @@ namespace cs::engine
 			{
 				if (!func)
 					return E_POINTER;
-				return func(
+				const auto result = func(
 					a_this,
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
 					reinterpret_cast<ID3D11PixelShader**>(a_out));
+				if (SUCCEEDED(result) && a_out && *a_out
+					&& !PixelShaderBrokerBypassActive()) {
+					ObserveNativeShaderBytecode(
+						ShaderStage::kPixel,
+						a_bytecode,
+						a_bytecodeLength,
+						*a_out);
+				}
+				return result;
 			}
 
 			static HRESULT STDMETHODCALLTYPE thunk(
@@ -138,12 +148,21 @@ namespace cs::engine
 			{
 				if (!func)
 					return E_POINTER;
-				return func(
+				const auto result = func(
 					a_this,
 					a_bytecode,
 					a_bytecodeLength,
 					a_linkage,
 					reinterpret_cast<ID3D11VertexShader**>(a_out));
+				if (SUCCEEDED(result) && a_out && *a_out
+					&& !PixelShaderBrokerBypassActive()) {
+					ObserveNativeShaderBytecode(
+						ShaderStage::kVertex,
+						a_bytecode,
+						a_bytecodeLength,
+						*a_out);
+				}
+				return result;
 			}
 
 			static HRESULT STDMETHODCALLTYPE thunk(
@@ -262,7 +281,6 @@ namespace cs::engine
 
 		void RequestHookInstall(ShaderStageMask a_stages)
 		{
-			sha1::Sha1InitOnce();
 			std::scoped_lock lock(g_installMutex);
 			g_installRequestedStages |= a_stages;
 			InstallHookIfReady();
@@ -277,6 +295,9 @@ namespace cs::engine
 		std::scoped_lock lock(g_installMutex);
 		if (!g_device)
 			g_device = a_device;
+		g_installRequestedStages |=
+			ShaderStageBit(ShaderStage::kVertex)
+			| ShaderStageBit(ShaderStage::kPixel);
 		InstallHookIfReady();
 	}
 

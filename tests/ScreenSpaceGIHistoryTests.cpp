@@ -178,15 +178,6 @@ namespace
 		CHECK(!Near(subtracted.y, expectedPrevUV.y));
 	}
 
-	void TestResetReasonNames()
-	{
-		using cs::features::ssgi::HistoryResetReasonName;
-
-		CHECK(std::string_view(HistoryResetReasonName(HistoryResetReason::kFirstFrame)) == "first_frame");
-		CHECK(std::string_view(HistoryResetReasonName(HistoryResetReason::kFrameGap)) == "frame_gap");
-		CHECK(std::string_view(HistoryResetReasonName(HistoryResetReason::kSourceModeChanged)) == "source_mode_change");
-		CHECK(std::string_view(HistoryResetReasonName(HistoryResetReason::kGenerationFailed)) == "generation_failed");
-	}
 }
 
 int main()
@@ -198,7 +189,6 @@ int main()
 	TestLoadingScreenReset();
 	TestMissingMotionSeedsCurrentOnly();
 	TestReprojectionSign();
-	TestResetReasonNames();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

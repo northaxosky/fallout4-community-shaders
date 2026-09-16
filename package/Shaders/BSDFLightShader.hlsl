@@ -974,9 +974,6 @@ PS_OUTPUT main(PS_INPUT input)
     forwardBlend = max(forwardBlend - NdotL_clamped, 0.0);
     finalDiffuse += (forwardBlend * SunColor_HDR.xyz) * albedoSample.xyz;
 
-#ifdef AMBIENT_IBL_IN_LIGHT
-#endif
-
     float specMix = (1.0 - schlickFres * 0.5);
     output.specular.xyz = shadowPcf * specMix * brdfSpecular;
 #ifdef AMBIENT_IBL_IN_LIGHT
@@ -991,8 +988,6 @@ PS_OUTPUT main(PS_INPUT input)
     output.diffuse.xyz /= 3.0;
     output.diffuse.w   = 0.0;
 
-#ifdef AMBIENT_IBL_IN_LIGHT
-#endif
     return output;
 }
 

@@ -75,80 +75,6 @@ if(TRACY_SUPPORT)
 	find_package(Tracy CONFIG REQUIRED)
 endif()
 
-set(FO4CS_GENERATED_SHADER_VARIANT_DIR
-	"${CMAKE_BINARY_DIR}/generated/Render"
-)
-file(MAKE_DIRECTORY "${FO4CS_GENERATED_SHADER_VARIANT_DIR}")
-
-function(embed_shader_variant_data OUTPUT_VAR SYMBOL DATA_FILE)
-	set_property(DIRECTORY APPEND PROPERTY
-		CMAKE_CONFIGURE_DEPENDS "${DATA_FILE}"
-	)
-	file(READ "${DATA_FILE}" EMBEDDED_SHADER_VARIANT_DATA_HEX HEX)
-	string(LENGTH "${EMBEDDED_SHADER_VARIANT_DATA_HEX}"
-		EMBEDDED_SHADER_VARIANT_DATA_HEX_LENGTH
-	)
-	set(EMBEDDED_SHADER_VARIANT_DATA "")
-	set(EMBEDDED_SHADER_VARIANT_DATA_OFFSET 0)
-	set(EMBEDDED_SHADER_VARIANT_DATA_CHUNK_LENGTH 2048)
-	while(EMBEDDED_SHADER_VARIANT_DATA_OFFSET
-			LESS EMBEDDED_SHADER_VARIANT_DATA_HEX_LENGTH)
-		math(EXPR EMBEDDED_SHADER_VARIANT_DATA_REMAINING
-			"${EMBEDDED_SHADER_VARIANT_DATA_HEX_LENGTH} - ${EMBEDDED_SHADER_VARIANT_DATA_OFFSET}"
-		)
-		if(EMBEDDED_SHADER_VARIANT_DATA_REMAINING
-				LESS EMBEDDED_SHADER_VARIANT_DATA_CHUNK_LENGTH)
-			set(EMBEDDED_SHADER_VARIANT_DATA_CURRENT_LENGTH
-				"${EMBEDDED_SHADER_VARIANT_DATA_REMAINING}"
-			)
-		else()
-			set(EMBEDDED_SHADER_VARIANT_DATA_CURRENT_LENGTH
-				"${EMBEDDED_SHADER_VARIANT_DATA_CHUNK_LENGTH}"
-			)
-		endif()
-		string(SUBSTRING "${EMBEDDED_SHADER_VARIANT_DATA_HEX}"
-			"${EMBEDDED_SHADER_VARIANT_DATA_OFFSET}"
-			"${EMBEDDED_SHADER_VARIANT_DATA_CURRENT_LENGTH}"
-			EMBEDDED_SHADER_VARIANT_DATA_CHUNK
-		)
-		string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1,"
-			EMBEDDED_SHADER_VARIANT_DATA_CHUNK
-			"${EMBEDDED_SHADER_VARIANT_DATA_CHUNK}"
-		)
-		string(APPEND EMBEDDED_SHADER_VARIANT_DATA
-			"\t\t${EMBEDDED_SHADER_VARIANT_DATA_CHUNK}\n"
-		)
-		math(EXPR EMBEDDED_SHADER_VARIANT_DATA_OFFSET
-			"${EMBEDDED_SHADER_VARIANT_DATA_OFFSET} + ${EMBEDDED_SHADER_VARIANT_DATA_CURRENT_LENGTH}"
-		)
-	endwhile()
-	set(EMBEDDED_SHADER_VARIANT_SYMBOL "${SYMBOL}")
-	set(GENERATED_SOURCE
-		"${FO4CS_GENERATED_SHADER_VARIANT_DIR}/${SYMBOL}.cpp"
-	)
-	configure_file(
-		"${CMAKE_SOURCE_DIR}/cmake/EmbeddedShaderVariantData.cpp.in"
-		"${GENERATED_SOURCE}"
-		@ONLY
-	)
-	set(${OUTPUT_VAR} "${GENERATED_SOURCE}" PARENT_SCOPE)
-endfunction()
-
-embed_shader_variant_data(
-	FO4CS_BSDF_SHADER_VARIANT_SOURCE
-	BsdfShaderReplacementVariants
-	"${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/bsdf.toml"
-)
-embed_shader_variant_data(
-	FO4CS_STATIC_FAMILY_SHADER_VARIANT_SOURCE
-	StaticFamilyShaderReplacementVariants
-	"${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/static_families.toml"
-)
-set(FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES
-	"${FO4CS_BSDF_SHADER_VARIANT_SOURCE}"
-	"${FO4CS_STATIC_FAMILY_SHADER_VARIANT_SOURCE}"
-)
-
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	# Single unified DLL target.
 	add_library(FO4CommunityShaders SHARED)
@@ -162,7 +88,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	target_sources(FO4CommunityShaders PRIVATE
 		${CORE_SOURCES}
-		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
 	)
 
 	include(Common)
@@ -280,13 +205,7 @@ target_include_directories(StreamlinePresentationTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/extern/Streamline/include"
 )
 
-add_test(
-	NAME StreamlinePresentation
-	COMMAND StreamlinePresentationTests
-		"${CMAKE_SOURCE_DIR}/extern/Streamline/source/core/sl.interposer/dxgi/dxgiPresent.h"
-		"${CMAKE_SOURCE_DIR}/extern/Streamline/source/core/sl.interposer/dxgi/dxgiSwapchain.cpp"
-		"${CMAKE_SOURCE_DIR}/src/Render/TemporalPipeline.cpp"
-)
+add_test(NAME StreamlinePresentation COMMAND StreamlinePresentationTests)
 set_tests_properties(StreamlinePresentation PROPERTIES LABELS "render;streamline;unit")
 
 add_executable(ScreenSpaceShadowsMathTests
@@ -304,25 +223,13 @@ set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
 add_executable(TerrainShadowsMathTests
 	tests/TerrainShadowsMathTests.cpp
 	features/TerrainShadows/src/TerrainShadowsMath.h
-	src/FeatureBuffer.h
 )
 configure_host_test(TerrainShadowsMathTests)
 target_include_directories(TerrainShadowsMathTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/features/TerrainShadows/src"
-	"${CMAKE_SOURCE_DIR}/src"
 )
 
-add_test(
-	NAME TerrainShadowsMath
-	COMMAND TerrainShadowsMathTests
-		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
-		"${CMAKE_SOURCE_DIR}/src/Render/SharedData.cpp"
-		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders/TerrainShadows/TerrainShadows.hlsli"
-		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/Shaders/TerrainShadows/ShadowUpdate.cs.hlsl"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFCompositeShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/features/TerrainShadows/src/TerrainShadows.cpp"
-)
+add_test(NAME TerrainShadowsMath COMMAND TerrainShadowsMathTests)
 set_tests_properties(TerrainShadowsMath PROPERTIES LABELS "render;shader;unit")
 
 add_executable(TerrainShadowsResizeTests
@@ -342,41 +249,25 @@ set_tests_properties(TerrainShadowsResize PROPERTIES LABELS "render;unit")
 add_executable(WetnessEffectsMathTests
 	tests/WetnessEffectsMathTests.cpp
 	features/WetnessEffects/src/WetnessMath.h
-	src/FeatureBuffer.h
 )
 configure_host_test(WetnessEffectsMathTests)
 target_include_directories(WetnessEffectsMathTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/features/WetnessEffects/src"
-	"${CMAKE_SOURCE_DIR}/src"
 )
 
-add_test(
-	NAME WetnessEffectsMath
-	COMMAND WetnessEffectsMathTests
-		"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
-		"${CMAKE_SOURCE_DIR}/features/WetnessEffects/src/WetnessEffects.cpp"
-)
+add_test(NAME WetnessEffectsMath COMMAND WetnessEffectsMathTests)
 set_tests_properties(WetnessEffectsMath PROPERTIES LABELS "render;shader;unit")
 
 add_executable(InverseSquareLightingMathTests
 	tests/InverseSquareLightingMathTests.cpp
 	features/InverseSquareLighting/src/InverseSquareLightingMath.h
-	src/FeatureBuffer.h
 )
 configure_host_test(InverseSquareLightingMathTests)
 target_include_directories(InverseSquareLightingMathTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/src"
-	"${CMAKE_SOURCE_DIR}/src"
 )
 
-add_test(
-	NAME InverseSquareLightingMath
-	COMMAND InverseSquareLightingMathTests
-		"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
-		"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/src/InverseSquareLighting.cpp"
-)
+add_test(NAME InverseSquareLightingMath COMMAND InverseSquareLightingMathTests)
 set_tests_properties(
 	InverseSquareLightingMath
 	PROPERTIES LABELS "render;shader;unit"
@@ -385,19 +276,13 @@ set_tests_properties(
 add_executable(ExponentialHeightFogMathTests
 	tests/ExponentialHeightFogMathTests.cpp
 	features/ExponentialHeightFog/src/ExponentialHeightFogMath.h
-	src/FeatureBuffer.h
 )
 configure_host_test(ExponentialHeightFogMathTests)
 target_include_directories(ExponentialHeightFogMathTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/src"
 )
 
-add_test(
-	NAME ExponentialHeightFogMath
-	COMMAND ExponentialHeightFogMathTests
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFCompositeShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/Shaders/ExponentialHeightFog/ExponentialHeightFog.hlsli"
-)
+add_test(NAME ExponentialHeightFogMath COMMAND ExponentialHeightFogMathTests)
 set_tests_properties(
 	ExponentialHeightFogMath
 	PROPERTIES LABELS "render;shader;unit"
@@ -406,23 +291,13 @@ set_tests_properties(
 add_executable(WaterEffectsMathTests
 	tests/WaterEffectsMathTests.cpp
 	features/WaterEffects/src/WaterEffectsMath.h
-	src/FeatureBuffer.h
 )
 configure_host_test(WaterEffectsMathTests)
 target_include_directories(WaterEffectsMathTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/features/WaterEffects/src"
-	"${CMAKE_SOURCE_DIR}/src"
 )
 
-add_test(
-	NAME WaterEffectsMath
-	COMMAND WaterEffectsMathTests
-		"${CMAKE_SOURCE_DIR}/features/WaterEffects/Shaders/WaterEffects/WaterCaustics.hlsli"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFLightShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/BSDFCompositeShader.hlsl"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/SharedData.hlsli"
-		"${CMAKE_SOURCE_DIR}/features/WaterEffects/src/WaterEffects.cpp"
-)
+add_test(NAME WaterEffectsMath COMMAND WaterEffectsMathTests)
 set_tests_properties(
 	WaterEffectsMath
 	PROPERTIES LABELS "render;shader;unit"
@@ -496,7 +371,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		dxguid.lib
 		magic_enum::magic_enum
 		spdlog::spdlog
-		tomlplusplus::tomlplusplus
 	)
 
 	add_test(
@@ -524,16 +398,7 @@ add_executable(FrameBufferTests
 configure_host_test(FrameBufferTests)
 target_link_libraries(FrameBufferTests PRIVATE Microsoft::DirectXMath)
 
-add_test(
-	NAME FrameBuffer
-	COMMAND FrameBufferTests
-		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/common.hlsli"
-		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/radianceDisocc.cs.hlsl"
-		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src/ScreenSpaceGI.cpp"
-	"${CMAKE_SOURCE_DIR}/package/Shaders/Common/DeferredContracts.hlsli"
-	"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.h"
-	"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.cpp"
-)
+add_test(NAME FrameBuffer COMMAND FrameBufferTests)
 set_tests_properties(FrameBuffer PROPERTIES LABELS "render;shader;unit")
 
 add_executable(FrameGenerationCameraTests
@@ -663,12 +528,13 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 
 	add_executable(ShaderCompileTests
 		tests/ShaderCompileTests.cpp
+		tests/ShaderCompileIdentityWitnesses.inl
 		src/Render/ShaderInjection.cpp
 		src/Render/ShaderInjectionCompileRequest.cpp
-		src/Render/ShaderInjectionVariantData.cpp
-		src/Render/ShaderInjectionVariantData.h
-		src/Render/ShaderInjectionVariantFactory.cpp
-		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/ShaderFamilyDescriptor.cpp
+		src/Render/ShaderFamilyDescriptor.h
+		src/Render/ShaderSubclassContext.cpp
+		src/Render/ShaderSubclassContext.h
 		src/Render/SharedDataDispatchScope.cpp
 		src/Render/PixelShaderSwapModel.cpp
 		src/Utils/CSSha1.cpp
@@ -706,7 +572,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		d3dcompiler.lib
 		magic_enum::magic_enum
 		spdlog::spdlog
-		tomlplusplus::tomlplusplus
 	)
 	add_dependencies(ShaderCompileTests ShaderStage)
 
@@ -725,16 +590,8 @@ add_executable(PixelShaderSwapTests
 	src/Render/PixelShaderSwapBroker.h
 	src/Render/ShaderVariantResolver.cpp
 	src/Render/ShaderVariantResolver.h
-	src/Utils/CSSha1.cpp
-	src/Utils/CSSha1.h
 )
 configure_host_test(PixelShaderSwapTests)
-target_compile_definitions(
-	PixelShaderSwapTests PRIVATE
-		FO4CS_CURRENT_PIXEL_SHADER_TESTING=1
-		FO4CS_ENGINE_LOOKUP_TESTING=1
-)
-target_link_libraries(PixelShaderSwapTests PRIVATE bcrypt.lib)
 
 add_test(NAME PixelShaderSwap COMMAND PixelShaderSwapTests)
 set_tests_properties(PixelShaderSwap PROPERTIES LABELS "render;shader;unit")
@@ -760,16 +617,14 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		tests/ShaderInjectionRegistrationTests.cpp
 		src/Render/ShaderInjection.cpp
 		src/Render/ShaderInjectionCompileRequest.cpp
-		src/Render/ShaderInjectionVariantData.cpp
-		src/Render/ShaderInjectionVariantData.h
-		src/Render/ShaderInjectionVariantFactory.cpp
-		src/Render/ShaderInjectionVariantFactory.h
+		src/Render/ShaderFamilyDescriptor.cpp
+		src/Render/ShaderFamilyDescriptor.h
 		src/Render/SharedDataDispatchScope.cpp
+		src/Render/PixelShaderSwapBroker.cpp
 		src/Render/PixelShaderSwapModel.cpp
-		src/Utils/CSSha1.cpp
-		src/Utils/CSSha256.cpp
-		src/Utils/CSSha256.h
-		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
+		src/Render/ShaderSubclassContext.cpp
+		src/Render/ShaderVariantResolver.cpp
+		src/Render/ShaderVariantRuntimeResolver.cpp
 	)
 	configure_host_test(ShaderInjectionRegistrationTests)
 	target_precompile_headers(ShaderInjectionRegistrationTests PRIVATE
@@ -781,8 +636,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		_UNICODE
 		COMMONLIB_RUNTIMECOUNT=3
 		FO4CS_SHADER_INJECTION_TESTING
-		FO4CS_BSDF_SHADER_VARIANT_DATA_FILE="${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/bsdf.toml"
-		FO4CS_STATIC_FAMILY_SHADER_VARIANT_DATA_FILE="${CMAKE_SOURCE_DIR}/src/Render/ShaderReplacementVariants/static_families.toml"
 	)
 	target_include_directories(ShaderInjectionRegistrationTests BEFORE PRIVATE
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
@@ -803,35 +656,77 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		d3dcompiler.lib
 		magic_enum::magic_enum
 		spdlog::spdlog
-		tomlplusplus::tomlplusplus
 	)
 
 	add_test(
-		NAME ShaderInjectionRegistration
-		COMMAND ShaderInjectionRegistrationTests
+		NAME ShaderInjectionDescriptorSelection
+		COMMAND ShaderInjectionRegistrationTests --baseline-ownership
 	)
 	add_test(
-		NAME ShaderInjectionBaselineOwnership
-		COMMAND ShaderInjectionRegistrationTests --baseline-ownership
+		NAME ShaderInjectionClaimLedger
+		COMMAND ShaderInjectionRegistrationTests --claim-ledger
+	)
+	add_test(
+		NAME ShaderInjectionNativeObserver
+		COMMAND ShaderInjectionRegistrationTests --native-observer
+	)
+	add_test(
+		NAME ShaderInjectionLazyPreparation
+		COMMAND ShaderInjectionRegistrationTests --lazy-preparation
+	)
+	add_test(
+		NAME ShaderInjectionComputeDispatchBridge
+		COMMAND ShaderInjectionRegistrationTests --dispatch-bridge
+	)
+	add_test(
+		NAME ShaderInjectionComputeHooksMissing
+		COMMAND ShaderInjectionRegistrationTests --compute-hooks-missing
 	)
 	add_test(
 		NAME ShaderInjectionComputeBaselineOnly
 		COMMAND ShaderInjectionRegistrationTests --compute-baseline-only
 	)
 	add_test(
-		NAME ShaderInjectionComputeHooksMissing
-		COMMAND ShaderInjectionRegistrationTests --compute-hooks-missing
+		NAME ShaderInjectionComputePhase
+		COMMAND ShaderInjectionRegistrationTests --compute-phase
 	)
-	set_tests_properties(ShaderInjectionRegistration PROPERTIES
+	add_test(
+		NAME ShaderInjectionComputeDescriptor
+		COMMAND ShaderInjectionRegistrationTests --compute-descriptor
+	)
+	add_test(
+		NAME ShaderInjectionContributorConflict
+		COMMAND ShaderInjectionRegistrationTests --contributor-conflict
+	)
+	set_tests_properties(ShaderInjectionDescriptorSelection PROPERTIES
 		LABELS "render;shader;unit"
 	)
-	set_tests_properties(ShaderInjectionBaselineOwnership PROPERTIES
+	set_tests_properties(ShaderInjectionClaimLedger PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionNativeObserver PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionLazyPreparation PROPERTIES
+		LABELS "render;shader;unit"
+		TIMEOUT 30
+	)
+	set_tests_properties(ShaderInjectionComputeDispatchBridge PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionComputeHooksMissing PROPERTIES
 		LABELS "render;shader;unit"
 	)
 	set_tests_properties(ShaderInjectionComputeBaselineOnly PROPERTIES
 		LABELS "render;shader;unit"
 	)
-	set_tests_properties(ShaderInjectionComputeHooksMissing PROPERTIES
+	set_tests_properties(ShaderInjectionComputePhase PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionComputeDescriptor PROPERTIES
+		LABELS "render;shader;unit"
+	)
+	set_tests_properties(ShaderInjectionContributorConflict PROPERTIES
 		LABELS "render;shader;unit"
 	)
 endif()

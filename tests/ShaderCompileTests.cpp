@@ -1,6 +1,7 @@
 #include "Log.h"
 #include "Render/ShaderInjection.h"
 #include "Render/ShaderInjectionDefines.h"
+#include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
 #include "Utils/CSSha1.h"
@@ -135,6 +136,97 @@ namespace
 		std::string_view sha256;
 	};
 
+	struct ShaderIdentityWitness
+	{
+		cs::engine::ShaderInjectionTarget target =
+			cs::engine::ShaderInjectionTarget::kCount;
+		cs::engine::ShaderStage stage =
+			cs::engine::ShaderStage::kCompute;
+		std::uint32_t descriptor = 0;
+		std::string_view nativeName;
+		std::string_view nativeClassName;
+		bool forceEarlyDepthStencil = false;
+		bool runtimeReachable = true;
+		std::string_view nativeSourceGroup;
+		std::string_view nativeMacro1;
+		std::string_view nativeMacroValue1;
+		std::string_view nativeMacro2;
+		std::string_view nativeMacroValue2;
+		std::string_view stockSha1;
+		StrippedShaderIdentityExpectation expected;
+	};
+
+	constexpr ShaderIdentityWitness kShaderIdentityWitnesses[]{
+#include "ShaderCompileIdentityWitnesses.inl"
+	};
+
+	struct BaselineShaderCase
+	{
+		cs::engine::ShaderInjectionTarget targetId =
+			cs::engine::ShaderInjectionTarget::kCount;
+		std::string name;
+		std::string expectedStockSha1;
+		cs::engine::ShaderStage stage =
+			cs::engine::ShaderStage::kCompute;
+		cs::engine::ShaderVariantCompilationDescriptor compilation;
+		StrippedShaderIdentityExpectation expected;
+		std::string preparationError;
+	};
+
+	std::vector<BaselineShaderCase> GetBaselineShaderCases()
+	{
+		std::vector<BaselineShaderCase> cases;
+		cases.reserve(std::size(kShaderIdentityWitnesses));
+		for (const auto& witness : kShaderIdentityWitnesses) {
+			BaselineShaderCase shaderCase{
+				.targetId = witness.target,
+				.name = std::string(
+					witness.runtimeReachable ?
+						witness.stockSha1 :
+						std::string_view("archive-unreachable:"))
+					+ (witness.runtimeReachable ?
+						"" :
+						std::string(witness.stockSha1)),
+				.expectedStockSha1 = std::string(witness.stockSha1),
+				.stage = witness.stage,
+				.expected = witness.expected
+			};
+			const auto descriptor =
+				cs::engine::BuildShaderFamilyCompilationDescriptor({
+					.target = witness.target,
+					.stage = witness.stage,
+					.descriptor = witness.descriptor,
+					.nativeName = witness.nativeName,
+					.nativeClassName = witness.nativeClassName,
+					.nativeSourceGroup = witness.nativeSourceGroup,
+					.forceEarlyDepthStencil =
+						witness.forceEarlyDepthStencil,
+					.nativeMacros = [&] {
+						cs::engine::ShaderInjectionDefines macros;
+						if (!witness.nativeMacro1.empty()) {
+							macros.emplace(
+								witness.nativeMacro1,
+								witness.nativeMacroValue1);
+						}
+						if (!witness.nativeMacro2.empty()) {
+							macros.emplace(
+								witness.nativeMacro2,
+								witness.nativeMacroValue2);
+						}
+						return macros;
+					}()
+				});
+			if (descriptor) {
+				shaderCase.compilation = *descriptor;
+			} else {
+				shaderCase.preparationError =
+					"Native family descriptor was not admitted";
+			}
+			cases.push_back(std::move(shaderCase));
+		}
+		return cases;
+	}
+
 	struct ShaderCompileJob
 	{
 		std::filesystem::path path;
@@ -150,7 +242,6 @@ namespace
 		std::vector<UINT>     forbiddenTextureSlots;
 		std::vector<UINT>     requiredSamplerSlots;
 		std::vector<UINT>     forbiddenSamplerSlots;
-		std::vector<BYTE>     expectedOutputMasks;
 		std::optional<FeatureOffIdentityExpectation> featureOffIdentity;
 		std::optional<StrippedShaderIdentityExpectation>
 			strippedIdentity;
@@ -501,43 +592,6 @@ namespace
 		return {};
 	}
 
-	std::string ValidateOutputSignature(
-		ID3DBlob* a_blob,
-		std::span<const BYTE> a_expectedMasks)
-	{
-		Microsoft::WRL::ComPtr<ID3D11ShaderReflection> reflection;
-		if (FAILED(D3DReflect(
-				a_blob->GetBufferPointer(),
-				a_blob->GetBufferSize(),
-				__uuidof(ID3D11ShaderReflection),
-				reinterpret_cast<void**>(reflection.GetAddressOf())))) {
-			return "D3DReflect failed for the output signature witness";
-		}
-
-		D3D11_SHADER_DESC shaderDesc{};
-		if (FAILED(reflection->GetDesc(&shaderDesc)))
-			return "output signature reflection description failed";
-		if (shaderDesc.OutputParameters != a_expectedMasks.size()) {
-			return "unexpected output parameter count "
-				+ std::to_string(shaderDesc.OutputParameters);
-		}
-
-		for (UINT index = 0; index < shaderDesc.OutputParameters; ++index) {
-			D3D11_SIGNATURE_PARAMETER_DESC parameter{};
-			if (FAILED(reflection->GetOutputParameterDesc(index, &parameter))) {
-				return "missing reflected output parameter "
-					+ std::to_string(index);
-			}
-			if (parameter.SystemValueType != D3D_NAME_TARGET
-				|| parameter.SemanticIndex != index
-				|| parameter.Mask != a_expectedMasks[index]) {
-				return "unexpected reflected output parameter "
-					+ std::to_string(index);
-			}
-		}
-		return {};
-	}
-
 	std::string ValidateStrippedShaderIdentity(
 		ID3DBlob* a_blob,
 		const StrippedShaderIdentityExpectation& a_expected)
@@ -614,14 +668,6 @@ namespace
 			|| !a_job.requiredSamplerSlots.empty()
 			|| !a_job.forbiddenSamplerSlots.empty()) {
 			if (auto validation = ValidateTextureBindings(blob.Get(), a_job);
-				!validation.empty()) {
-				return { std::move(validation) };
-			}
-		}
-		if (!a_job.expectedOutputMasks.empty()) {
-			if (auto validation = ValidateOutputSignature(
-					blob.Get(),
-					a_job.expectedOutputMasks);
 				!validation.empty()) {
 				return { std::move(validation) };
 			}
@@ -1051,71 +1097,29 @@ namespace
 		std::vector<UINT> forbiddenSamplers;
 	};
 
-	struct DfTiledLightingIdentity
-	{
-		std::string_view defineValue;
-		StrippedShaderIdentityExpectation expected;
-	};
-
-	constexpr std::array kDfTiledLightingIdentities{
-		DfTiledLightingIdentity{
-			"1",
-			{
-				6444,
-				"5d781be54902ee7f84bbd2ce28b9742b753040c8",
-				"cde034ec9c63dde6bdde3838876fc8abb05baa0d9b3caa584d3ce072b3b8a12d"
-			}
-		},
-		DfTiledLightingIdentity{
-			"2",
-			{
-				7144,
-				"66d385a9bb0b2ce6785e94fb64c1d28c7b65467c",
-				"652961dfec581d3a0c0d90f9e573307621be9a9bc20980ed221416cf9ccf8343"
-			}
-		}
-	};
-
-	void AttachDfTiledLightingIdentity(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
+	void AttachBaselineIdentity(
+		const BaselineShaderCase& a_registration,
 		ShaderCompileJob& a_job)
 	{
-		if (a_registration.targetId
-			!= cs::engine::ShaderInjectionTarget::kDfTiledLighting) {
-			return;
-		}
-
-		const auto define = a_registration.compilation.defines.find(
-			"DFTILEDLIGHTING_VARIANT");
-		const auto expected = define
-			!= a_registration.compilation.defines.end()
-			? std::ranges::find(
-				kDfTiledLightingIdentities,
-				define->second,
-				&DfTiledLightingIdentity::defineValue)
-			: kDfTiledLightingIdentities.end();
-		if (expected == kDfTiledLightingIdentities.end()) {
-			a_job.preparationError =
-				"Unknown DFTILEDLIGHTING_VARIANT compile vector";
-			return;
-		}
-		if (a_registration.expectedStockSha1 != expected->expected.sha1) {
-			a_job.preparationError =
-				"DFTiledLighting stock hash does not match its compile vector";
-			return;
-		}
-		a_job.strippedIdentity = expected->expected;
+		a_job.strippedIdentity = a_registration.expected;
 	}
 
 	void AddRegistration(
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root,
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
+		const BaselineShaderCase& a_registration,
 		const ShaderDefines& a_contributorDefines,
 		std::set<std::string>* a_uniqueInputs = nullptr,
 		SlotExpectations a_slots = {},
 		std::optional<FeatureOffIdentityExpectation> a_featureOffIdentity = {})
 	{
+		if (!a_registration.preparationError.empty()) {
+			AddPreparationFailure(
+				a_jobs,
+				"registration " + a_registration.name,
+				a_registration.preparationError);
+			return;
+		}
 		const auto* target =
 			cs::engine::GetShaderInjectionTarget(
 				a_registration.targetId);
@@ -1144,7 +1148,8 @@ namespace
 		const auto compileTestRequest =
 			cs::engine::BuildEffectiveShaderCompileRequest(
 				*target,
-				a_registration,
+				a_registration.stage,
+				a_registration.compilation,
 				contributions,
 				&compileTestError);
 		if (!compileTestRequest) {
@@ -1181,7 +1186,7 @@ namespace
 		job.forbiddenSamplerSlots = std::move(a_slots.forbiddenSamplers);
 		job.featureOffIdentity = std::move(a_featureOffIdentity);
 		if (a_contributorDefines.empty())
-			AttachDfTiledLightingIdentity(a_registration, job);
+			AttachBaselineIdentity(a_registration, job);
 	}
 
 	struct LightingCounts
@@ -1256,7 +1261,7 @@ namespace
 	};
 
 	bool IsInverseSquareConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration&
+		const BaselineShaderCase&
 			a_registration)
 	{
 		if (a_registration.targetId
@@ -1554,7 +1559,7 @@ namespace
 	constexpr std::size_t kExpectedWetnessCompositeNeutralRows = 12;
 	constexpr std::size_t kExpectedWetnessCompositeVertexRows = 4;
 	bool DeclaresFamily(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration,
+		const BaselineShaderCase& a_registration,
 		std::span<const char* const> a_families)
 	{
 		return std::ranges::any_of(
@@ -1572,7 +1577,7 @@ namespace
 	}
 
 	bool IsWetnessDirectConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight
@@ -1582,7 +1587,7 @@ namespace
 	}
 
 	bool IsWetnessCompositeConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfComposite
@@ -1591,7 +1596,7 @@ namespace
 	}
 
 	bool IsDynamicCubemapCompositeConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration&
+		const BaselineShaderCase&
 			a_registration)
 	{
 		return a_registration.targetId
@@ -1602,7 +1607,7 @@ namespace
 	}
 
 	bool IsDynamicCubemapForwardConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration&
+		const BaselineShaderCase&
 			a_registration)
 	{
 		return a_registration.targetId
@@ -1612,7 +1617,7 @@ namespace
 	}
 
 	bool IsDynamicCubemapWaterConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration&
+		const BaselineShaderCase&
 			a_registration)
 	{
 		return a_registration.targetId
@@ -1627,14 +1632,14 @@ namespace
 	}
 
 	bool IsWetnessConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return IsWetnessDirectConsumer(a_registration)
 			|| IsWetnessCompositeConsumer(a_registration);
 	}
 
 	bool IsTerrainShadowConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfLight
@@ -1643,7 +1648,7 @@ namespace
 	}
 
 	bool IsTerrainDebugCompositeConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfComposite
@@ -1651,7 +1656,7 @@ namespace
 	}
 
 	bool IsWetnessDebugCompositeConsumer(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return a_registration.targetId
 				== cs::engine::ShaderInjectionTarget::kBsdfComposite
@@ -1659,7 +1664,7 @@ namespace
 	}
 
 	bool UsesTerrainDebugDepthFallback(
-		const cs::engine::ShaderReplacementVariantRegistration& a_registration)
+		const BaselineShaderCase& a_registration)
 	{
 		return IsTerrainDebugCompositeConsumer(a_registration)
 			&& DeclaresFamily(
@@ -1671,13 +1676,22 @@ namespace
 		std::vector<ShaderCompileJob>& a_jobs,
 		const std::filesystem::path& a_root)
 	{
-		const auto registrations =
-			cs::engine::GetDefaultShaderReplacementVariants();
+		const auto registrations = GetBaselineShaderCases();
 		if (registrations.empty()) {
 			AddPreparationFailure(
 				a_jobs,
 				"shader replacement registrations",
 				"No shader replacement registrations were discovered");
+		}
+		if (registrations.size() != std::size(kShaderIdentityWitnesses)) {
+			AddPreparationFailure(
+				a_jobs,
+				"baseline identity witness coverage",
+				"Expected one witness for each of "
+					+ std::to_string(registrations.size())
+					+ " registrations, found "
+					+ std::to_string(
+						std::size(kShaderIdentityWitnesses)));
 		}
 		const auto compositePath = a_root / "BSDFCompositeShader.hlsl";
 		std::string compositeSourceError;
@@ -1718,7 +1732,6 @@ namespace
 			}
 		}
 		std::set<std::string> uniqueRegistrationInputs;
-		std::size_t lodLandscapeObjectOverlapCases = 0;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
 		std::size_t exponentialFogRows = 0;
@@ -1821,7 +1834,6 @@ namespace
 					.expectInverseSquareVariant = directRow
 				};
 			}
-			const auto previousJobCount = a_jobs.size();
 			AddRegistration(
 				a_jobs,
 				a_root,
@@ -1830,45 +1842,6 @@ namespace
 				&uniqueRegistrationInputs,
 				{},
 				std::move(identity));
-			if (a_jobs.size() == previousJobCount + 1
-				&& registration.stage
-					== cs::engine::ShaderStage::kPixel
-				&& registration.name.starts_with(
-					"bsdfprepass_lod_landscape_")) {
-				const auto blend =
-					registration.compilation.defines.find("BLEND");
-				a_jobs.back().expectedOutputMasks =
-					blend != registration.compilation.defines.end()
-						&& blend->second == "1"
-					? std::vector<BYTE>{ 0xF, 0xF, 0xF, 0xF, 0xF }
-					: std::vector<BYTE>{ 0xF, 0x3, 0xF, 0xF, 0x7, 0x3 };
-			} else if (a_jobs.size() == previousJobCount + 1
-				&& registration.stage
-					== cs::engine::ShaderStage::kPixel
-				&& registration.name.starts_with(
-					"bsdfprepass_land_lod_blend_")) {
-				a_jobs.back().expectedOutputMasks =
-					{ 0xF, 0x3, 0xF, 0xF, 0x7, 0x3 };
-			}
-
-			const auto lodLandscape =
-				registration.compilation.defines.find("LOD_LANDSCAPE");
-			if (registration.name.starts_with(
-					"bsdfprepass_lod_object_")
-				&& lodLandscape
-					!= registration.compilation.defines.end()
-				&& lodLandscape->second == "1") {
-				auto landscapeSource = registration;
-				landscapeSource.name += "_landscape_source";
-				landscapeSource.compilation.sourcePath =
-					L"BSDFPrePass\\LodLandscapeVertex.hlsli";
-				AddRegistration(
-					a_jobs,
-					a_root,
-					landscapeSource,
-					{});
-				++lodLandscapeObjectOverlapCases;
-			}
 		}
 		if (uniqueRegistrationInputs.size() != registrations.size()) {
 			AddPreparationFailure(
@@ -1879,21 +1852,21 @@ namespace
 					+ std::to_string(
 						uniqueRegistrationInputs.size()));
 		}
-		if (dfTiledLightingRows != kDfTiledLightingIdentities.size()) {
+		if (dfTiledLightingRows != 2) {
 			AddPreparationFailure(
 				a_jobs,
 				"DFTiledLighting registration coverage",
 				"Expected "
-					+ std::to_string(kDfTiledLightingIdentities.size())
+					+ std::to_string(2)
 					+ " final-kernel routes, found "
 					+ std::to_string(dfTiledLightingRows));
 		}
-		if (inverseSquareTiledRows != kDfTiledLightingIdentities.size()) {
+		if (inverseSquareTiledRows != 2) {
 			AddPreparationFailure(
 				a_jobs,
 				"DFTiledLighting inverse-square coverage",
 				"Expected "
-					+ std::to_string(kDfTiledLightingIdentities.size())
+					+ std::to_string(2)
 					+ " contributed final-kernel routes, found "
 					+ std::to_string(inverseSquareTiledRows));
 		}
@@ -2557,7 +2530,6 @@ namespace
 				uniqueRegistrationInputs.size(),
 			.explicitPermutations =
 				featureCompositionCases.size()
-				+ lodLandscapeObjectOverlapCases
 				+ exponentialFogRows
 				+ contributorCompositionCount,
 			.ambientCompositionRows = ambientCompositionRows,
@@ -2640,7 +2612,7 @@ int main(int argc, char** argv)
 		"ShaderCompile checked %zu ScreenSpaceGI permutations\n",
 		screenSpaceGiCount);
 	std::printf(
-		"ShaderCompile checked %zu base registration permutations (%zu unique inputs) and %zu lighting explicit/composed permutations\n",
+		"ShaderCompile verified %zu baseline identities (%zu unique inputs) and checked %zu lighting explicit/composed permutations\n",
 		lightingCounts.registrationDerived,
 		lightingCounts.uniqueRegistrationInputs,
 		lightingCounts.explicitPermutations);
@@ -2657,7 +2629,7 @@ int main(int argc, char** argv)
 		lightingCounts.inverseSquareRows,
 		lightingCounts.inverseSquareInertRows);
 	std::printf(
-		"ShaderCompile verified %zu byte-identical DFTiledLighting compute routes\n",
+		"ShaderCompile included %zu DFTiledLighting compute routes in the baseline identity set\n",
 		lightingCounts.dfTiledLightingRows);
 	std::printf(
 		"ShaderCompile checked inverse-square on %zu DFTiledLighting compute routes\n",

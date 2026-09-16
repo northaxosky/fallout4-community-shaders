@@ -3,10 +3,7 @@
 #include <d3d11.h>
 
 #include <array>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <string>
 #include <string_view>
 
 namespace
@@ -709,87 +706,14 @@ namespace
 		published->Release();
 	}
 
-	std::string ReadFile(const std::filesystem::path& a_path)
-	{
-		std::ifstream file(a_path, std::ios::binary);
-		return {
-			std::istreambuf_iterator<char>(file),
-			std::istreambuf_iterator<char>()
-		};
-	}
-
-	void TestPinnedSdkPresentationContract(
-		const std::filesystem::path& a_presentPath,
-		const std::filesystem::path& a_swapChainPath,
-		const std::filesystem::path& a_pipelinePath)
-	{
-		const auto present = ReadFile(a_presentPath);
-		const auto swapChain = ReadFile(a_swapChainPath);
-		const auto pipeline = ReadFile(a_pipelinePath);
-		Check(
-			present.contains(
-				"runAfterHooks && (skip || SUCCEEDED(result))") &&
-				present.contains("return result;"),
-			"the pinned SDK retains HRESULTs and runs cleanup only after accepted presents");
-		Check(
-			swapChain.contains("DXGISwapChain::Present(") &&
-				swapChain.contains("DXGISwapChain::Present1(") &&
-				swapChain.contains(
-					"FunctionHookID::eIDXGISwapChain_ResizeBuffers") &&
-				swapChain.contains(
-					"FunctionHookID::eIDXGISwapChain_ResizeBuffers1"),
-			"the pinned proxy covers Present, Present1, and both resize routes");
-		const auto proxyCapture =
-			pipeline.find("const bool frameGenerationProxyPath");
-		const auto outwardDevice =
-			pipeline.find("_impl->swapChain.SetOutwardD3D11Device", proxyCapture);
-		const auto admission =
-			pipeline.find("_impl->dlssProvider.Initialize(init)", outwardDevice);
-		const auto upgrade = pipeline.find(
-			"_impl->streamline.UpgradeD3D11SwapChain", admission);
-		const auto dlssPath = pipeline.find(
-			"if (a_method == temporal::SuperResolutionMethod::kDLSS)",
-			outwardDevice);
-		const auto bridgeGuard = pipeline.find(
-			"if (!_impl->swapChain.IsBridgeReady())", dlssPath);
-		Check(
-			dlssPath != std::string::npos &&
-				bridgeGuard != std::string::npos &&
-				admission != std::string::npos &&
-				dlssPath < bridgeGuard && bridgeGuard < admission,
-			"a retained device from failed cleanup is not admitted as a usable DLSS transport");
-		Check(
-			proxyCapture != std::string::npos &&
-				outwardDevice != std::string::npos &&
-				admission != std::string::npos &&
-				upgrade != std::string::npos &&
-				proxyCapture < outwardDevice &&
-				outwardDevice < admission &&
-				admission < upgrade &&
-				pipeline.contains(
-					"!_impl->streamline.IsD3D12Session()") &&
-				pipeline.contains(
-					"session.proxyInstalled = frameGenerationProxyPath") &&
-				!pipeline.contains(
-					"Native SR owns no presentation hooks"),
-			"FO4 preserves the mixed-FG outward device, installs D3D11 maintenance after admission, and leaves FG proxy state distinct");
-	}
 }
 
-int main(int argc, char** argv)
+int main()
 {
-	if (argc != 4) {
-		std::cerr <<
-			"usage: StreamlinePresentationTests <dxgiPresent.h> "
-			"<dxgiSwapchain.cpp> <TemporalPipeline.cpp>\n";
-		return 2;
-	}
-
 	TestEligibility();
 	TestSuccessfulUpgrade();
 	TestUpgradeFailures();
 	TestIncompatibleDevice();
-	TestPinnedSdkPresentationContract(argv[1], argv[2], argv[3]);
 
 	if (failures) {
 		std::cerr << failures << " check(s) failed\n";

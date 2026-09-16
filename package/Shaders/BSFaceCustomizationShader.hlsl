@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// AE 1.11.221, shaders011.fxp ordinal 3581.
+// AE 1.11.240, shaders011.fxp ordinal 3581.
 
 cbuffer FaceVertexConstants : register(b2)
 {

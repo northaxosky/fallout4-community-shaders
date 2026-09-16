@@ -1,19 +1,26 @@
-# Shader replacement variants
+# Shader replacement selection
 
-These TOML files contain stock shader routes measured from Fallout 4. Each route maps a stock
-SHA-1, source, and define set to a reconstructed shader target. A route can omit `source` to use
-the target's default source. The hashes are inputs from the shipping executable; they cannot be
-derived from the reconstructed shader sources.
+Runtime selection uses the native family, stage, and resolved shader ID, following the upstream
+family/descriptor model at `aebf01c2efa0a1926d676dc66d2623aaf58cc866`. The existing shader cache
+prepares variants lazily. There is no runtime recipe catalogue or stock-hash admission.
 
-CMake embeds the files in generated C++ sources under the build tree. The plugin has no runtime
-dependency on the TOML files. File order is registration order. Target metadata also supplies the
-canonical ownership configuration keys used by startup and the in-game menu.
+ImageSpace uses its native source prefix and `GetImagespaceFXMacros` (virtual slot 17).
+PrePass uses normalized stage IDs; `TEXTURE` comes from bit `0x2`, while early-depth comes from
+the native bytecode. `Engine.h` isolates the AE/NG `BSShader` layout: VS/PS/CS maps at
+`0x98/0x128/0x158` and `fxpFilename` at `0x188`, verified from constructor ID `2318862`.
 
-Pixel replacement contributors bind at the matching draw anchor. Tiled-lighting compute
-replacements are matched by their published shader identity at the stable tail of the engine's
-`Renderer::RunComputeShader` helper, after its native shader and b0 setup. Contributed shared data
-is bound immediately around the helper's direct `ID3D11DeviceContext::Dispatch`, with only CS
-b5-b6 preserved and restored. Native SDK or third-party dispatches outside that engine
-helper, including `DispatchIndirect`, are intentionally untouched. Contributor callbacks are
-filtered by their registered shader stages. Baseline-only compute replacements do not activate
-the shared-data scope.
+| AE 1.11.240 boundary | Address Library ID |
+|---|---:|
+| `BSShader::BeginTechnique` | 2318876 |
+| `BSShader::ReloadShaders(BSIStream*)` | 2318873 |
+| `Renderer::SetShaders` | 2276942 |
+| `Renderer::RunComputeShader` | 2276940 |
+| `BSComputeShader::ReloadShaders(BSIStream*)` | 2319682 |
+
+Graphics and compute substitution use metadata-preserving wrappers at the native setter
+boundaries, preserving the engine's shader cache and constant tables. HS/DS remain native.
+The compute dispatch tail scopes only shared `b5-b6` bindings and stage-filtered contributor
+callbacks; baseline-only compute does not activate that scope.
+
+`ShaderCompile` verifies the generated descriptors against the pinned AE 1.11.240 bytecode
+fingerprints. Those fingerprints are offline proof evidence only.

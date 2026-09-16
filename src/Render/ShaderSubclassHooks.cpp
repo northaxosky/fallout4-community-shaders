@@ -2,8 +2,9 @@
 
 #include "Log.h"
 #include "PCH.h"
+#include "Render/Engine.h"
+#include "Render/ShaderInjection.h"
 #include "Render/ShaderSubclassContext.h"
-#include "Render/ShaderVariantRuntimeResolver.h"
 
 #include <Windows.h>
 
@@ -30,20 +31,156 @@ namespace cs::engine
 	{
 		auto* L = cs::log::Get("cs.render.shadersubclass");
 
-		ShaderSubclassHookInstallStats g_reloadStats{};
 		ShaderSubclassHookInstallStats g_setupStats{};
 		std::once_flag g_installOnce;
 
-		template <class Tag>
-		struct ReloadHook
+		struct ActiveBeginTechnique
 		{
-			static constexpr std::size_t size = 0x0B;
+			RE::BSShader* shader = nullptr;
+			std::uint32_t vertexShaderId = 0;
+			std::uint32_t pixelShaderId = 0;
+		};
 
-			static void thunk(void* a_self, bool a_clear)
+		thread_local const ActiveBeginTechnique* t_activeBeginTechnique =
+			nullptr;
+
+		class ActiveBeginTechniqueScope
+		{
+		public:
+			explicit ActiveBeginTechniqueScope(
+				const ActiveBeginTechnique& a_active) noexcept :
+				_previous(t_activeBeginTechnique)
 			{
-				shader_context::Scope scope(
-					a_self, Tag::Name(), std::nullopt);
-				func(a_self, a_clear);
+				t_activeBeginTechnique = &a_active;
+			}
+
+			~ActiveBeginTechniqueScope() noexcept
+			{
+				t_activeBeginTechnique = _previous;
+			}
+
+		private:
+			const ActiveBeginTechnique* _previous;
+		};
+
+		struct BeginTechniqueHook
+		{
+			static bool thunk(
+				RE::BSShader* a_shader,
+				std::uint32_t a_vertexShaderId,
+				std::uint32_t a_hullShaderId,
+				std::uint32_t a_domainShaderId,
+				std::uint32_t a_pixelShaderId)
+			{
+				const ActiveBeginTechnique active{
+					.shader = a_shader,
+					.vertexShaderId = a_vertexShaderId,
+					.pixelShaderId = a_pixelShaderId
+				};
+				const ActiveBeginTechniqueScope scope(active);
+				return func(
+					a_shader,
+					a_vertexShaderId,
+					a_hullShaderId,
+					a_domainShaderId,
+					a_pixelShaderId);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct SetShadersHook
+		{
+			static void thunk(
+				void* a_renderer,
+				RE::BSGraphics::VertexShader* a_vertex,
+				RE::BSGraphics::HullShader* a_hull,
+				RE::BSGraphics::DomainShader* a_domain,
+				RE::BSGraphics::PixelShader* a_pixel)
+			{
+				if (!t_activeBeginTechnique) {
+					func(
+						a_renderer,
+						a_vertex,
+						a_hull,
+						a_domain,
+						a_pixel);
+					return;
+				}
+				const auto replacement =
+					ResolveNativeGraphicsShaderBinding(
+						t_activeBeginTechnique->shader,
+						t_activeBeginTechnique->vertexShaderId,
+						t_activeBeginTechnique->pixelShaderId,
+						a_vertex,
+						a_pixel);
+				func(
+					a_renderer,
+					replacement.vertex,
+					a_hull,
+					a_domain,
+					replacement.pixel);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct RunComputeShaderHook
+		{
+			static void thunk(
+				void* a_renderer,
+				RE::BSGraphics::ComputeShader* a_compute,
+				std::uint32_t a_threadGroupCountX,
+				std::uint32_t a_threadGroupCountY,
+				std::uint32_t a_threadGroupCountZ)
+			{
+				func(
+					a_renderer,
+					ResolveNativeComputeShaderBinding(a_compute),
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct ReloadStandaloneComputeHook
+		{
+			static std::uint32_t thunk(
+				void* a_owner,
+				RE::BSIStream* a_stream)
+			{
+				const auto result = func(a_owner, a_stream);
+				const std::string_view name =
+					native::StandaloneComputeOwnerName(a_owner) ?
+						native::StandaloneComputeOwnerName(a_owner) : "";
+				if (name == "DFTiledLighting") {
+					ObserveNativeComputeOwner(
+						a_owner,
+						ShaderInjectionTarget::kDfTiledLighting,
+						name);
+				} else if (name == "IndexBufferOffsetCS") {
+					ObserveNativeComputeOwner(
+						a_owner,
+						ShaderInjectionTarget::kImageSpace,
+						name);
+				}
+				return result;
+			}
+
+			static inline REL::Relocation<decltype(thunk)> func;
+		};
+
+		struct ReloadFromStreamHook
+		{
+			static std::uint32_t thunk(
+				RE::BSShader* a_shader,
+				RE::BSIStream* a_stream)
+			{
+				const auto result = func(a_shader, a_stream);
+				ObserveNativeShader(a_shader);
+				return result;
 			}
 
 			static inline REL::Relocation<decltype(thunk)> func;
@@ -67,28 +204,6 @@ namespace cs::engine
 		};
 
 		template <class Subclass, class Tag>
-		void TryInstallReload()
-		{
-			++g_reloadStats.attempted;
-			try {
-				stl::write_vfunc<Subclass, 0, ReloadHook<Tag>>();
-				++g_reloadStats.succeeded;
-				L->info("Patched ReloadShaders for {}", Tag::Name());
-			} catch (const std::exception& e) {
-				++g_reloadStats.failed;
-				L->warn(
-					"Failed to patch ReloadShaders for {}: {}",
-					Tag::Name(),
-					e.what());
-			} catch (...) {
-				++g_reloadStats.failed;
-				L->warn(
-					"Failed to patch ReloadShaders for {}: unknown exception",
-					Tag::Name());
-			}
-		}
-
-		template <class Subclass, class Tag>
 		void TryInstallSetupTechnique()
 		{
 			++g_setupStats.attempted;
@@ -110,51 +225,109 @@ namespace cs::engine
 			}
 		}
 
-#define CS_HOOK_SHADER_SUBCLASS(klass)                                      \
-	struct Tag_##klass { static const char* Name() { return #klass; } };    \
-	TryInstallReload<RE::klass, Tag_##klass>();                             \
+#define CS_HOOK_SHADER_SUBCLASS(klass, target)                              \
+	struct Tag_##klass {                                                    \
+		static const char* Name() { return #klass; }                         \
+	};                                                                      \
 	TryInstallSetupTechnique<RE::klass, Tag_##klass>()
 	}
 
 	void InstallShaderSubclassHooks()
 	{
 		std::call_once(g_installOnce, [] {
-			CS_HOOK_SHADER_SUBCLASS(BSBloodSplatterShader);
-			CS_HOOK_SHADER_SUBCLASS(BSDFCompositeShader);
-			CS_HOOK_SHADER_SUBCLASS(BSDFLightShader);
-			CS_HOOK_SHADER_SUBCLASS(BSDFPrePassShader);
-			CS_HOOK_SHADER_SUBCLASS(BSDistantTreeShader);
-			CS_HOOK_SHADER_SUBCLASS(BSEffectShader);
-			CS_HOOK_SHADER_SUBCLASS(BSFaceCustomizationShader);
-			CS_HOOK_SHADER_SUBCLASS(BSLightingShader);
-			CS_HOOK_SHADER_SUBCLASS(BSParticleShader);
-			CS_HOOK_SHADER_SUBCLASS(BSSkyShader);
-			CS_HOOK_SHADER_SUBCLASS(BSUtilityShader);
-			CS_HOOK_SHADER_SUBCLASS(BSWaterShader);
+			if (!REX::FModule::IsRuntimeAE()) {
+				L->warn(
+					"Native shader subclass hooks require Fallout 4 AE 1.11.240; "
+					"baseline shader ownership remains inactive.");
+				return;
+			}
+			CS_HOOK_SHADER_SUBCLASS(BSBloodSplatterShader, kBloodSplatter);
+			CS_HOOK_SHADER_SUBCLASS(BSDFCompositeShader, kBsdfComposite);
+			CS_HOOK_SHADER_SUBCLASS(BSDFLightShader, kBsdfLight);
+			CS_HOOK_SHADER_SUBCLASS(BSDFPrePassShader, kDeferredPrepass);
+			CS_HOOK_SHADER_SUBCLASS(BSDistantTreeShader, kDistantTree);
+			CS_HOOK_SHADER_SUBCLASS(BSEffectShader, kEffect);
+			CS_HOOK_SHADER_SUBCLASS(BSFaceCustomizationShader, kFaceCustomization);
+			CS_HOOK_SHADER_SUBCLASS(BSLightingShader, kBsLighting);
+			CS_HOOK_SHADER_SUBCLASS(BSParticleShader, kParticle);
+			CS_HOOK_SHADER_SUBCLASS(BSSkyShader, kBsSky);
+			CS_HOOK_SHADER_SUBCLASS(BSUtilityShader, kUtility);
+			CS_HOOK_SHADER_SUBCLASS(BSWaterShader, kBsWater);
+			try {
+				stl::detour_thunk<ReloadFromStreamHook>(
+					REL::ID(2318873));
+				L->info("Patched BSShader archive loader observer");
+			} catch (const std::exception& e) {
+				L->error(
+					"Failed to patch BSShader archive loader observer: {}",
+					e.what());
+			} catch (...) {
+				L->error(
+					"Failed to patch BSShader archive loader observer.");
+			}
+			try {
+				stl::detour_thunk<SetShadersHook>(
+					REL::ID(2276942));
+				L->info("Patched native graphics shader-set boundary");
+			} catch (const std::exception& e) {
+				L->error(
+					"Failed to patch native graphics shader-set boundary: {}",
+					e.what());
+			} catch (...) {
+				L->error(
+					"Failed to patch native graphics shader-set boundary.");
+			}
+			try {
+				stl::detour_thunk<RunComputeShaderHook>(
+					REL::ID(2276940));
+				L->info("Patched native compute shader-run boundary");
+			} catch (const std::exception& e) {
+				L->error(
+					"Failed to patch native compute shader-run boundary: {}",
+					e.what());
+			} catch (...) {
+				L->error(
+					"Failed to patch native compute shader-run boundary.");
+			}
+			try {
+				stl::detour_thunk<ReloadStandaloneComputeHook>(
+					REL::ID(2319682));
+				L->info("Patched standalone compute shader observers");
+			} catch (const std::exception& e) {
+				L->error(
+					"Failed to patch standalone compute shader observers: {}",
+					e.what());
+			} catch (...) {
+				L->error(
+					"Failed to patch standalone compute shader observers.");
+			}
+			++g_setupStats.attempted;
+			try {
+				stl::detour_thunk<BeginTechniqueHook>(
+					REL::ID(2318876));
+				++g_setupStats.succeeded;
+				L->info("Patched BSShader native technique binder");
+			} catch (const std::exception& e) {
+				++g_setupStats.failed;
+				L->error(
+					"Failed to patch BSShader native technique binder: {}",
+					e.what());
+			} catch (...) {
+				++g_setupStats.failed;
+				L->error(
+					"Failed to patch BSShader native technique binder.");
+			}
 
-			L->info(
-				"Subclass ReloadShaders hooks: {}/{} patched ({} failed)",
-				g_reloadStats.succeeded,
-				g_reloadStats.attempted,
-				g_reloadStats.failed);
 			L->info(
 				"Subclass SetupTechnique hooks: {}/{} patched ({} failed)",
 				g_setupStats.succeeded,
 				g_setupStats.attempted,
 				g_setupStats.failed);
-			if (g_setupStats.succeeded == 0) {
-				L->error(
-					"Shader injection dispatch mode: exact-hash fallback "
-					"(no SetupTechnique hooks installed).");
-			} else if (!IsPixelShaderVariantResolutionAvailable()) {
+			if (g_setupStats.succeeded == 0)
+				L->error("Native shader descriptor routing unavailable.");
+			else
 				L->info(
-					"Shader injection dispatch mode: exact-hash fallback "
-					"(resolved variant keys unavailable for this runtime).");
-			} else {
-				L->info(
-					"Shader injection dispatch mode: resolved variant key "
-					"with exact-hash fallback.");
-			}
+					"Shader injection dispatch mode: native family/stage descriptor.");
 		});
 	}
 }

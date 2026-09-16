@@ -22,22 +22,6 @@ namespace
 			throw Failure(std::string(a_message));
 	}
 
-	cs::sha1::Sha1Result Sha(std::uint8_t a_value)
-	{
-		cs::sha1::Sha1Result result{};
-		result.bytes[0] = a_value;
-		return result;
-	}
-
-	cs::sha1::Sha1Result Sha(std::string_view a_hex)
-	{
-		cs::sha1::Sha1Result result{};
-		Check(
-			cs::sha1::Sha1FromHex(std::string(a_hex), result),
-			"invalid SHA1 fixture");
-		return result;
-	}
-
 	void TestDeferredDrawAnchorTruthTable()
 	{
 		using cs::engine::DeferredDrawAnchorDecision;
@@ -124,11 +108,7 @@ namespace
 			&& a_request.stockOutput == fixture.stock
 			&& a_request.output
 			&& *a_request.output == fixture.stock
-			&& a_request.stage == fixture.expectedStage
-			&& a_request.stockSha1.bytes
-				== cs::sha1::Sha1Compute(
-					a_request.bytecode,
-					a_request.bytecodeLength).bytes;
+			&& a_request.stage == fixture.expectedStage;
 		if (a_request.output)
 			*a_request.output = fixture.replacement;
 		return cs::engine::ShaderSwapResolverResult::kReplaced;
@@ -147,328 +127,6 @@ namespace
 		if (a_request.output)
 			*a_request.output = g_pipelineFixture->replacement;
 		return cs::engine::ShaderSwapResolverResult::kReplaced;
-	}
-
-	void TestVariantKeySelectsVariant()
-	{
-		using namespace cs::engine;
-		const auto stock = Sha(0x31);
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::kBsdfCompositeAmbientIbl),
-				stock,
-				0,
-				0
-			},
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::
-						kBsdfCompositeAmbientIblTilelight),
-				stock,
-				0,
-				1
-			}
-		};
-
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants,
-			shader_variants::kBsdfCompositeAmbientIblTilelight,
-			stock);
-		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.routeIndex == 1
-				&& selection.replacementIndex == 1,
-			"variant key did not select the matching variant");
-	}
-
-	void TestMultipleKeysShareReplacement()
-	{
-		using namespace cs::engine;
-		const auto stock = Sha(
-			"9969e800683c8a7c8afc25f41582415d79cbe47e");
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::
-						kBsdfLightDeferredPoint[0]),
-				stock,
-				2,
-				4
-			},
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::
-						kBsdfLightDeferredPoint[1]),
-				stock,
-				2,
-				4
-			}
-		};
-
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants,
-			shader_variants::kBsdfLightDeferredPoint[1],
-			stock);
-		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.routeIndex == 1
-				&& selection.replacementIndex == 4,
-			"alias route did not select the shared replacement");
-	}
-
-	void TestVariantHashMismatchRefused()
-	{
-		using namespace cs::engine;
-		const auto tilelight = Sha(
-			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
-		const auto noTilelight = Sha(
-			"6d726d0fe6b6c474da30edbffcecfa067c795873");
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::kBsdfCompositeAmbientIbl),
-				tilelight
-			},
-			PixelShaderSwapVariantKey{
-				std::nullopt,
-				noTilelight,
-				1
-			}
-		};
-
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants,
-			shader_variants::kBsdfCompositeAmbientIbl,
-			noTilelight);
-		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch
-				&& selection.routeIndex == 0,
-			"variant hash mismatch did not refuse hash fallback");
-	}
-
-	void TestCrossSubclassKeyCollisionStaysGuarded()
-	{
-		using namespace cs::engine;
-		const ShaderVariantKeyView composite{
-			"BSDFCompositeShader",
-			ShaderStage::kPixel,
-			ShaderVariantId{ 0x00100048 }
-		};
-		const ShaderVariantKeyView light{
-			"BSDFLightShader",
-			ShaderStage::kPixel,
-			ShaderVariantId{ 0x00100048 }
-		};
-		const auto compositeHash = Sha(
-			"3c1355737e77d36cdbc37d6b76015b8eb2a15b53");
-		const auto lightHash = Sha(
-			"9969e800683c8a7c8afc25f41582415d79cbe47e");
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(composite),
-				compositeHash
-			},
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(light),
-				lightHash,
-				0,
-				1
-			}
-		};
-
-		const auto lightSelection = SelectPixelShaderSwapVariant(
-			variants, light, lightHash);
-		Check(
-			lightSelection.kind
-					== PixelShaderSwapSelectionKind::kSelected
-				&& lightSelection.routeIndex == 1
-				&& lightSelection.replacementIndex == 1,
-			"cross-subclass archive key selected the wrong row");
-
-		const auto mismatch = SelectPixelShaderSwapVariant(
-			variants, composite, lightHash);
-		Check(
-			mismatch.kind
-					== PixelShaderSwapSelectionKind::kHashMismatch
-				&& mismatch.routeIndex == 0,
-			"cross-block key collision bypassed the stock SHA1 guard");
-	}
-
-	void TestHashlessVariantRefused()
-	{
-		using namespace cs::engine;
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::kBsdfCompositeAmbientIbl)
-			}
-		};
-
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants,
-			shader_variants::kBsdfCompositeAmbientIbl,
-			Sha("6d726d0fe6b6c474da30edbffcecfa067c795873"));
-		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kHashMismatch,
-			"hashless keyed variant bypassed the stock SHA1 guard");
-	}
-
-	void TestUnmappedVariantRemainsStock()
-	{
-		using namespace cs::engine;
-		const auto tilelight = Sha(
-			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
-		const auto noTilelight = Sha(
-			"6d726d0fe6b6c474da30edbffcecfa067c795873");
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::
-						kBsdfCompositeAmbientIblTilelight),
-				tilelight
-			}
-		};
-
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants,
-			shader_variants::kBsdfCompositeAmbientIbl,
-			noTilelight);
-		Check(
-			selection.kind
-				== PixelShaderSwapSelectionKind::kUnmappedVariant,
-			"known unmapped variant did not remain stock");
-	}
-
-	void TestUnavailableResolutionFallsBackToHash()
-	{
-		using namespace cs::engine;
-		const auto tilelight = Sha(
-			"2b6e36c08aca7ff0a3bd10da326e00b3b0367383");
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				OwnShaderVariantKey(
-					shader_variants::
-						kBsdfCompositeAmbientIblTilelight),
-				tilelight
-			}
-		};
-
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants, std::nullopt, tilelight);
-		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.routeIndex == 0
-				&& selection.usedHashFallback,
-			"unresolved variant did not fall back to exact hash");
-	}
-
-	void TestHashFallbackIsStageScoped()
-	{
-		using namespace cs::engine;
-		const auto stock = Sha(0x41);
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				.variant = std::nullopt,
-				.expectedStockSha1 = stock,
-				.replacementIndex = 1,
-				.stage = ShaderStage::kPixel
-			},
-			PixelShaderSwapVariantKey{
-				.variant = std::nullopt,
-				.expectedStockSha1 = stock,
-				.replacementIndex = 2,
-				.stage = ShaderStage::kVertex
-			},
-			PixelShaderSwapVariantKey{
-				.variant = std::nullopt,
-				.expectedStockSha1 = stock,
-				.replacementIndex = 3,
-				.stage = ShaderStage::kCompute
-			}
-		};
-
-		const auto pixelSelection = SelectPixelShaderSwapVariant(
-			variants,
-			std::nullopt,
-			stock,
-			ShaderStage::kPixel);
-		const auto vertexSelection = SelectPixelShaderSwapVariant(
-			variants,
-			std::nullopt,
-			stock,
-			ShaderStage::kVertex);
-		const auto computeSelection = SelectPixelShaderSwapVariant(
-			variants,
-			std::nullopt,
-			stock,
-			ShaderStage::kCompute);
-		Check(
-			pixelSelection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& pixelSelection.routeIndex == 0
-				&& pixelSelection.replacementIndex == 1
-				&& vertexSelection.kind
-					== PixelShaderSwapSelectionKind::kSelected
-				&& vertexSelection.routeIndex == 1
-				&& vertexSelection.replacementIndex == 2
-				&& computeSelection.kind
-					== PixelShaderSwapSelectionKind::kSelected
-				&& computeSelection.routeIndex == 2
-				&& computeSelection.replacementIndex == 3,
-			"hash fallback crossed shader stages");
-	}
-
-	void TestVariantKeyScopeIncludesStage()
-	{
-		using namespace cs::engine;
-		const ShaderVariantKeyView pixel{
-			"BSDFCompositeShader",
-			ShaderStage::kPixel,
-			ShaderVariantId{ 0 }
-		};
-		const ShaderVariantKeyView vertex{
-			"BSDFCompositeShader",
-			ShaderStage::kVertex,
-			ShaderVariantId{ 0 }
-		};
-		const ShaderVariantKeyView otherSubclass{
-			"BSDFLightShader",
-			ShaderStage::kPixel,
-			ShaderVariantId{ 0 }
-		};
-		Check(
-			!ShaderVariantKeysConflict(pixel, vertex),
-			"different shader stages collided");
-		Check(
-			!ShaderVariantKeysConflict(pixel, otherSubclass),
-			"different shader subclasses collided");
-		Check(
-			ShaderVariantKeysConflict(pixel, pixel),
-			"identical scoped keys did not conflict");
-
-		const auto stock = Sha(0x51);
-		const std::vector variants{
-			PixelShaderSwapVariantKey{
-				.variant = OwnShaderVariantKey(vertex),
-				.expectedStockSha1 = stock,
-				.routeGroup = 7,
-				.stage = ShaderStage::kVertex
-			},
-			PixelShaderSwapVariantKey{
-				std::nullopt,
-				stock,
-				7,
-				1
-			}
-		};
-		const auto selection = SelectPixelShaderSwapVariant(
-			variants, pixel, stock);
-		Check(
-			selection.kind == PixelShaderSwapSelectionKind::kSelected
-				&& selection.routeIndex == 1
-				&& selection.replacementIndex == 1
-				&& selection.usedHashFallback,
-			"vertex route blocked pixel hash fallback");
 	}
 
 	void TestCompositeResolutionStaysUnavailable()
@@ -511,12 +169,6 @@ namespace
 				collapsed && noTilelight
 					&& *collapsed == *noTilelight,
 				"Composite resolver did not collapse discarded technique bits");
-			Check(
-				collapsed && noTilelight
-					&& ShaderVariantKeysConflict(
-						*collapsed,
-						*noTilelight),
-				"collapsed Composite PSIDs did not conflict");
 		}
 
 		const auto unknownBits = ResolvePixelShaderVariant(
@@ -576,23 +228,6 @@ namespace
 			"Light stencil technique resolved incorrectly");
 	}
 
-	void TestNotReadyReplacementKeepsStock()
-	{
-		using namespace cs::engine;
-		Check(
-			!ShouldSubstitutePixelShader(
-				PixelShaderSwapSelectionKind::kSelected, false),
-			"selected but not-ready replacement did not retain stock");
-		Check(
-			ShouldSubstitutePixelShader(
-				PixelShaderSwapSelectionKind::kSelected, true),
-			"ready selected replacement did not substitute");
-		Check(
-			!ShouldSubstitutePixelShader(
-				PixelShaderSwapSelectionKind::kHashMismatch, true),
-			"guard mismatch allowed substitution");
-	}
-
 	void TestBrokerPipelineForwarding()
 	{
 		using namespace cs::engine;
@@ -623,7 +258,6 @@ namespace
 			std::byte{ 4 }
 		};
 		ID3D11DeviceChild* output = nullptr;
-		cs::sha1::Sha1InitOnce();
 		const auto result = ExecuteShaderSwapPipeline(
 			&PipelineOriginal,
 			resolvers,
@@ -858,19 +492,9 @@ int main()
 	};
 	const Test tests[]{
 		{ "deferred draw anchor truth table", &TestDeferredDrawAnchorTruthTable },
-		{ "variant key selects variant", &TestVariantKeySelectsVariant },
-		{ "multiple keys share replacement", &TestMultipleKeysShareReplacement },
-		{ "variant hash mismatch refused", &TestVariantHashMismatchRefused },
-		{ "cross-subclass key collision guarded", &TestCrossSubclassKeyCollisionStaysGuarded },
-		{ "hashless variant refused", &TestHashlessVariantRefused },
-		{ "unmapped variant remains stock", &TestUnmappedVariantRemainsStock },
-		{ "unavailable resolution falls back", &TestUnavailableResolutionFallsBackToHash },
-		{ "hash fallback is stage scoped", &TestHashFallbackIsStageScoped },
-		{ "variant key scope includes stage", &TestVariantKeyScopeIncludesStage },
 		{ "composite unresolved state unavailable", &TestCompositeResolutionStaysUnavailable },
 		{ "composite resolver masks technique", &TestCompositeResolverMasksAndForcesTilelight },
 		{ "Light resolver masks technique", &TestBsdfLightResolverMasksTechnique },
-		{ "not-ready replacement keeps stock", &TestNotReadyReplacementKeepsStock },
 		{ "broker pipeline forwarding", &TestBrokerPipelineForwarding },
 		{ "resolver claim stops lower priority", &TestResolverClaimStopsLowerPriority },
 		{ "resolver stage mask", &TestResolverStageMask },

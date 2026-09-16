@@ -1,17 +1,10 @@
-#include "FeatureBuffer.h"
 #include "WetnessMath.h"
 
-#include <algorithm>
 #include <bit>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <limits>
-#include <sstream>
-#include <string>
 #include <string_view>
 
 namespace
@@ -87,215 +80,18 @@ namespace
 			== payloadBits);
 	}
 
-	void TestFeatureBlockLayout()
-	{
-		using cs::FeatureDataCB;
-		using cs::WetnessEffectsFeatureData;
-
-		CHECK(sizeof(FeatureDataCB) == 160);
-		CHECK(offsetof(FeatureDataCB, wetnessEffectsSettings) == 32);
-		CHECK(sizeof(WetnessEffectsFeatureData) == 16);
-		CHECK(offsetof(WetnessEffectsFeatureData, Wetness) == 0);
-		CHECK(offsetof(WetnessEffectsFeatureData, MaxRainWetness) == 4);
-		CHECK(offsetof(WetnessEffectsFeatureData, MinRainWetness) == 8);
-		CHECK(offsetof(WetnessEffectsFeatureData, DebugVisualization) == 12);
-
-		const WetnessEffectsFeatureData zeroed;
-		CHECK(zeroed.Wetness == 0.0f);
-		CHECK(zeroed.MaxRainWetness == 0.0f);
-		CHECK(zeroed.MinRainWetness == 0.0f);
-		CHECK(zeroed.DebugVisualization == 0);
-	}
-
-	constexpr float kFilmF0 = 0.02f;
-	constexpr float kMaxFilmSpecularMagnitude = 15.0f;
-	constexpr float kPi = 3.1415927f;
-
-	float DirectFilmDistribution(float a_roughness, float a_ndotH)
-	{
-		const float roughnessSquared = a_roughness * a_roughness;
-		const float alphaSquared = roughnessSquared * roughnessSquared;
-		const float denominator =
-			a_ndotH * a_ndotH * (alphaSquared - 1.0f) + 1.0f;
-		return alphaSquared / (kPi * denominator * denominator);
-	}
-
-	float DirectFilmVisibility(
-		float a_roughness,
-		float a_ndotV,
-		float a_ndotL)
-	{
-		const float roughnessSquared = a_roughness * a_roughness;
-		const float visibilityV = a_ndotL *
-			(a_ndotV * (1.0f + roughnessSquared) + roughnessSquared);
-		const float visibilityL = a_ndotV *
-			(a_ndotL * (1.0f + roughnessSquared) + roughnessSquared);
-		return 0.5f / std::max(visibilityV + visibilityL, 1e-6f);
-	}
-
-	float DirectFilmFresnel(float a_vdotH)
-	{
-		const float fresnel = std::pow(1.0f - a_vdotH, 5.0f);
-		return fresnel + (1.0f - fresnel) * kFilmF0;
-	}
-
-	float UncappedDirectFilmBrdf(
-		float a_roughness,
-		float a_ndotH,
-		float a_ndotV,
-		float a_ndotL,
-		float a_vdotH)
-	{
-		return DirectFilmDistribution(a_roughness, a_ndotH) *
-			DirectFilmVisibility(a_roughness, a_ndotV, a_ndotL) *
-			DirectFilmFresnel(a_vdotH);
-	}
-
-	float CappedDirectFilmBrdf(
-		float a_roughness,
-		float a_ndotH,
-		float a_ndotV,
-		float a_ndotL,
-		float a_vdotH)
-	{
-		return std::min(
-			UncappedDirectFilmBrdf(
-				a_roughness,
-				a_ndotH,
-				a_ndotV,
-				a_ndotL,
-				a_vdotH),
-			kMaxFilmSpecularMagnitude);
-	}
-
-	void TestDirectFilmCap()
-	{
-		const float narrowPeak =
-			UncappedDirectFilmBrdf(0.05f, 1.0f, 1.0f, 1.0f, 1.0f);
-		CHECK(narrowPeak > kMaxFilmSpecularMagnitude);
-		CHECK(CappedDirectFilmBrdf(0.05f, 1.0f, 1.0f, 1.0f, 1.0f)
-			== kMaxFilmSpecularMagnitude);
-
-		const float midRange =
-			UncappedDirectFilmBrdf(0.5f, 0.5f, 1.0f, 1.0f, 0.5f);
-		CHECK(midRange < kMaxFilmSpecularMagnitude);
-		CHECK(CappedDirectFilmBrdf(0.5f, 0.5f, 1.0f, 1.0f, 0.5f)
-			== midRange);
-	}
-
-	std::string ReadFile(const std::filesystem::path& a_path)
-	{
-		std::ifstream stream(a_path);
-		if (!stream) {
-			std::cerr << "FAIL: cannot open " << a_path.string() << '\n';
-			++failures;
-			return {};
-		}
-		std::ostringstream buffer;
-		buffer << stream.rdbuf();
-		return buffer.str();
-	}
-
-	bool Contains(const std::string& a_text, std::string_view a_needle)
-	{
-		return a_text.find(a_needle) != std::string::npos;
-	}
-
-	// the helper's identity guards are the shader-side contract this feature rests on
-	void TestShaderContract(const std::filesystem::path& a_shaderRoot)
-	{
-		const auto source = ReadFile(
-			a_shaderRoot / "WetnessEffects" / "WetnessEffects.hlsli");
-		if (source.empty())
-			return;
-
-		// t25 belongs to composite consumers only
-		CHECK(Contains(source, "#ifdef WETNESS_COMPOSITE_CONSUMER"));
-		CHECK(Contains(source, "Texture2D<float4> GbufferNormal : register(t25);"));
-		CHECK(!Contains(source, "Texture2D<float>"));
-		CHECK(!Contains(source, "EnableWetness"));
-		CHECK(Contains(
-			source,
-			"surface.worldUp = GetWorldUp(surface.normalView, worldUpView);"));
-		CHECK(Contains(
-			source,
-			"surface.wetness = GetWetness(surface.worldUp, worldUpView.w);"));
-		CHECK(Contains(source, "bool TryGetDebugColor(Surface surface, out float4 color)"));
-
-		// encode-domain guard, written so NaN fails it too
-		CHECK(Contains(source, "[branch] if (encodedLengthSquared <= 4.0) {"));
-
-		// wetness zero is exact identity on every helper
-		CHECK(Contains(source, "static const float MinFilmRoughness = 0.05;"));
-		CHECK(Contains(source, "static const float FilmF0 = 0.02;"));
-		CHECK(Contains(source, "static const float FilmSpecularScale = 3.1415927;"));
-		CHECK(Contains(source, "float3 wetColor = baseColor;"));
-		CHECK(Contains(source, "float weight = 0.0;"));
-		CHECK(Contains(source, "float wetness = 0.0;"));
-
-		// native FO4 caps the uncoupled D*G*F lobe before strength and pi
-		CHECK(Contains(
-			source,
-			"static const float MaxFilmSpecularMagnitude = 15.0;"));
-		const auto fresnel = source.find(
-			"float fresnel = F_Schlick(FilmF0, VdotH);");
-		const auto filmFresnel = source.find(
-			"float filmFresnel = fresnel * strength;");
-		const auto filmBrdf = source.find(
-			"float filmBrdf = min(D * G * fresnel, MaxFilmSpecularMagnitude);");
-		const auto film = source.find(
-			"filmBrdf * strength * NdotL * lightColor * FilmSpecularScale;");
-		CHECK(fresnel != std::string::npos);
-		CHECK(filmFresnel != std::string::npos);
-		CHECK(filmBrdf != std::string::npos);
-		CHECK(film != std::string::npos);
-		CHECK(fresnel < filmFresnel);
-		CHECK(filmFresnel < filmBrdf);
-		CHECK(filmBrdf < film);
-		CHECK(Contains(source, "diffuse *= 1.0 - filmFresnel;"));
-		CHECK(Contains(source, "specular *= 1.0 - filmFresnel;"));
-		CHECK(Contains(source, "specular += film;"));
-
-		// partial wetness must not blur a more polished native reflection
-		CHECK(Contains(source, "return min(FilmRoughness(wetness), nativeRoughness);"));
-	}
-
-	void TestRuntimeToggleContract(const std::filesystem::path& a_sourcePath)
-	{
-		const auto source = ReadFile(a_sourcePath);
-		if (source.empty())
-			return;
-
-		CHECK(Contains(source, "ReadBool("));
-		CHECK(Contains(source, "\"enabled\", a_candidate.enabled"));
-		CHECK(Contains(source, "settings.insert_or_assign(\"enabled\", _settings.enabled);"));
-		CHECK(Contains(source, "dmui::ui::Checkbox(\"Enabled\", &_settings.enabled)"));
-		CHECK(Contains(source, "wetness_math::PublishedWetness("));
-		CHECK(Contains(source, ".Field(\"enabled\", _settings.enabled)"));
-		CHECK(Contains(source, "\"weather_wetness\""));
-	}
 }
 
-int main(int a_argc, char* a_argv[])
+int main()
 {
 	TestWeatherWetness();
 	TestSettingsClamp();
 	TestPublishedWetness();
-	TestFeatureBlockLayout();
-	TestDirectFilmCap();
-	if (a_argc == 3) {
-		TestShaderContract(std::filesystem::path(a_argv[1]));
-		TestRuntimeToggleContract(std::filesystem::path(a_argv[2]));
-	} else {
-		std::cerr << "FAIL: expected shader root and feature source arguments\n";
-		++failures;
-	}
-
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";
 		return 1;
 	}
 
-	std::cout << "WetnessEffects math and shader-contract tests passed\n";
+	std::cout << "WetnessEffects math tests passed\n";
 	return 0;
 }

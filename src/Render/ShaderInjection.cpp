@@ -2,25 +2,27 @@
 
 #include "Log.h"
 #include "LogThrottle.h"
+#include "Render/Engine.h"
 #include "Render/PixelShaderSwapBroker.h"
 #include "Render/RenderHooks.h"
-#include "Render/ShaderInjectionVariantData.h"
-#include "Render/ShaderInjectionVariantFactory.h"
+#include "Render/ShaderFamilyDescriptor.h"
 #include "Render/ShaderVariantCompilation.h"
 #include "Render/SharedData.h"
-#include "Utils/CSSha1.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
 #include <d3d11.h>
+#include <d3dcompiler.h>
 #include <exception>
 #include <filesystem>
 #include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string_view>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -61,40 +63,25 @@ namespace cs::engine
 			std::unreachable();
 		}
 
+		constexpr std::string_view ProfileForStage(
+			ShaderStage a_stage) noexcept
+		{
+			switch (a_stage) {
+			case ShaderStage::kVertex:
+				return "vs_5_0";
+			case ShaderStage::kPixel:
+				return "ps_5_0";
+			case ShaderStage::kCompute:
+				return "cs_5_0";
+			default:
+				return {};
+			}
+		}
+
 		constexpr ShaderStageMask kValidShaderStages =
 			ShaderStageBit(ShaderStage::kVertex)
 			| ShaderStageBit(ShaderStage::kPixel)
 			| ShaderStageBit(ShaderStage::kCompute);
-
-		std::vector<ShaderReplacementVariantRegistration>
-		MakeDefaultShaderReplacementVariants()
-		{
-			using Target = ShaderInjectionTarget;
-			auto variants =
-				std::vector<ShaderReplacementVariantRegistration>{
-				MakeDefaultVariantRegistration(
-					Target::kDfTiledLighting,
-					"dftiledlighting_key1",
-					{},
-					"5d781be54902ee7f84bbd2ce28b9742b753040c8",
-					ShaderInjectionDefines{
-						{ "DFTILEDLIGHTING_VARIANT", "1" }
-					},
-					ShaderStage::kCompute),
-				MakeDefaultVariantRegistration(
-					Target::kDfTiledLighting,
-					"dftiledlighting_key2",
-					{},
-					"66d385a9bb0b2ce6785e94fb64c1d28c7b65467c",
-					ShaderInjectionDefines{
-						{ "DFTILEDLIGHTING_VARIANT", "2" }
-					},
-					ShaderStage::kCompute)
-			};
-			AppendStaticFamilyShaderReplacementVariants(variants);
-			AppendBsdfFamilyShaderReplacementVariants(variants);
-			return variants;
-		}
 
 		constexpr auto kDefaultShaderRoot = L"Data\\Shaders";
 		auto* L = cs::log::Get("cs.render.shaderinjection");
@@ -139,27 +126,8 @@ namespace cs::engine
 				ShaderInjectionBindCallback callback;
 			};
 			std::vector<Bind>                    binds;
-			std::vector<ShaderReplacementVariantRegistration> variants;
 			std::size_t                          contributors = 0;
 			bool                                 slotCollision = false;
-		};
-
-		struct PublishedVariant
-		{
-			ShaderInjectionTarget            targetId =
-				ShaderInjectionTarget::kCount;
-			std::string                      name;
-			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
-			ShaderInjectionDefines           effectiveDefines;
-		};
-
-		struct PreparedVariant
-		{
-			PublishedVariant variant;
-			std::vector<PixelShaderSwapVariantKey> keys;
-			ShaderVariantCompilationState compilationState =
-				ShaderVariantCompilationState::kFailed;
-			std::string compiledSha1;
 		};
 
 		struct PublishedTarget
@@ -167,17 +135,91 @@ namespace cs::engine
 			ShaderInjectionTarget id = ShaderInjectionTarget::kCount;
 			ShaderStageMask contributedStages = 0;
 			std::vector<FrozenTarget::Bind> binds;
+			std::vector<ShaderReplacementRegistration> contributions;
 		};
 
 		struct PublishedPlan
 		{
 			std::shared_ptr<ShaderVariantCompilationPolicy>
 				compilationPolicy;
+			winrt::com_ptr<ID3D11Device> device;
+			std::wstring developerSourceRoot;
 			std::vector<PublishedTarget> targets;
-			std::vector<PublishedVariant> variants;
-			std::vector<PixelShaderSwapVariantKey> variantKeys;
-			std::unordered_map<ID3D11ComputeShader*, std::size_t>
-				computeVariantIndices;
+		};
+
+		struct NativeVariantKey
+		{
+			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
+			ShaderStage stage = ShaderStage::kPixel;
+			std::uint32_t descriptor = 0;
+			std::string nativeName;
+			std::string nativeClassName;
+			std::string nativeSourceGroup;
+			bool forceEarlyDepthStencil = false;
+			ShaderInjectionDefines nativeMacros;
+
+			bool operator==(const NativeVariantKey&) const = default;
+		};
+
+		struct NativeVariantKeyHash
+		{
+			std::size_t operator()(const NativeVariantKey& a_key) const noexcept
+			{
+				auto value = static_cast<std::size_t>(a_key.target);
+				value = value * 131U + static_cast<std::size_t>(a_key.stage);
+				value = value * 131U + a_key.descriptor;
+				value = value * 131U +
+					std::hash<std::string>{}(a_key.nativeName);
+				value = value * 131U +
+					std::hash<std::string>{}(a_key.nativeClassName);
+				value = value * 131U +
+					std::hash<std::string>{}(a_key.nativeSourceGroup);
+				value = value * 131U + a_key.forceEarlyDepthStencil;
+				for (const auto& [name, macroValue] : a_key.nativeMacros) {
+					value = value * 131U
+						+ std::hash<std::string>{}(name);
+					value = value * 131U
+						+ std::hash<std::string>{}(macroValue);
+				}
+				return value;
+			}
+		};
+
+		struct NativeVariant
+		{
+			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
+			ShaderInjectionDefines effectiveDefines;
+			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
+			ShaderStage stage = ShaderStage::kPixel;
+		};
+
+		struct NativeReplacementWrapperKey
+		{
+			const void* nativeWrapper = nullptr;
+			const void* replacementShader = nullptr;
+
+			bool operator==(
+				const NativeReplacementWrapperKey&) const = default;
+		};
+
+		struct NativeReplacementWrapperKeyHash
+		{
+			std::size_t operator()(
+				const NativeReplacementWrapperKey& a_key) const noexcept
+			{
+				auto value = std::hash<const void*>{}(
+					a_key.nativeWrapper);
+				value = value * 131U
+					+ std::hash<const void*>{}(
+						a_key.replacementShader);
+				return value;
+			}
+		};
+
+		struct NativeReplacementWrapper
+		{
+			std::unique_ptr<std::byte[]> storage;
+			winrt::com_ptr<ID3D11DeviceChild> shader;
 		};
 
 		// first claimant wins, in feature-registration order
@@ -202,14 +244,28 @@ namespace cs::engine
 			std::vector<ShaderReplacementRegistration> registrations;
 			std::array<TargetClaimLedger,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> ledgers;
-			std::vector<ShaderReplacementVariantRegistration>
-				variantRegistrations =
-					GetDefaultShaderReplacementVariants();
 			std::array<TargetRuntimeState,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
+			std::mutex nativeVariantMutex;
+			std::unordered_map<NativeVariantKey, NativeVariant,
+				NativeVariantKeyHash> nativeVariants;
+			std::unordered_map<ID3D11DeviceChild*, NativeVariantKey>
+				nativeShaderIdentities;
+			struct NativeShaderMetadata
+			{
+				bool forceEarlyDepthStencil = false;
+			};
+			std::unordered_map<ID3D11DeviceChild*, NativeShaderMetadata>
+				nativeShaderMetadata;
+			std::unordered_map<ID3D11ComputeShader*, NativeVariantKey>
+				nativeComputeOwners;
+			std::unordered_map<
+				NativeReplacementWrapperKey,
+				NativeReplacementWrapper,
+				NativeReplacementWrapperKeyHash>
+				nativeReplacementWrappers;
 			std::atomic_flag swapCountersLock = ATOMIC_FLAG_INIT;
-			bool resolverRegistered = false;
 		};
 
 		// The engine tail survives D3D11's lazy dispatch-table replacement.
@@ -268,9 +324,114 @@ namespace cs::engine
 			return ToIndex(a_target) < kTargets.size();
 		}
 
-		bool IsBaselineOwnableTarget(ShaderInjectionTarget a_target)
+		std::optional<ShaderInjectionTarget> ResolveNativeShaderTarget(
+			const RE::BSShader& a_shader)
 		{
-			return IsValidTarget(a_target);
+			if (native::ShaderType(&a_shader) == 0xC)
+				return ShaderInjectionTarget::kImageSpace;
+			const auto filename = native::FxpFilename(&a_shader);
+			if (!filename)
+				return std::nullopt;
+			std::string name(filename);
+			std::ranges::transform(
+				name, name.begin(), [](unsigned char a_character) {
+					return static_cast<char>(std::tolower(a_character));
+				});
+
+			if (name.contains("prepass"))
+				return ShaderInjectionTarget::kDeferredPrepass;
+			if (name.contains("tiledlighting"))
+				return ShaderInjectionTarget::kDfTiledLighting;
+			if (name.contains("composite"))
+				return ShaderInjectionTarget::kBsdfComposite;
+			if (name.contains("bsdflight") || name == "dflight")
+				return ShaderInjectionTarget::kBsdfLight;
+			if (name.contains("utility"))
+				return ShaderInjectionTarget::kUtility;
+			if (name.contains("particle"))
+				return ShaderInjectionTarget::kParticle;
+			if (name.contains("effect"))
+				return ShaderInjectionTarget::kEffect;
+			if (name.contains("blood"))
+				return ShaderInjectionTarget::kBloodSplatter;
+			if (name.contains("distanttree"))
+				return ShaderInjectionTarget::kDistantTree;
+			if (name.contains("facecustom"))
+				return ShaderInjectionTarget::kFaceCustomization;
+			if (name.starts_with("is") || name.contains("imagespace"))
+				return ShaderInjectionTarget::kImageSpace;
+			if (name.contains("sky"))
+				return ShaderInjectionTarget::kBsSky;
+			if (name.contains("water"))
+				return ShaderInjectionTarget::kBsWater;
+			if (name.contains("lighting"))
+				return ShaderInjectionTarget::kBsLighting;
+			return std::nullopt;
+		}
+
+		struct NativeShaderFamilyContext
+		{
+			ShaderInjectionTarget target =
+				ShaderInjectionTarget::kCount;
+			std::string_view nativeName;
+			std::string_view nativeClassName;
+			std::string_view nativeSourceGroup;
+			ShaderInjectionDefines nativeMacros;
+		};
+
+		std::optional<NativeShaderFamilyContext>
+			ResolveNativeShaderFamilyContext(RE::BSShader* a_shader)
+		{
+			if (!a_shader)
+				return std::nullopt;
+			const auto target = ResolveNativeShaderTarget(*a_shader);
+			if (!target)
+				return std::nullopt;
+
+			NativeShaderFamilyContext result{
+				.target = *target,
+				.nativeName = native::FxpFilename(a_shader) ?
+					native::FxpFilename(a_shader) : ""
+			};
+			if (*target != ShaderInjectionTarget::kImageSpace)
+				return result;
+
+			const auto sourceGroup =
+				native::ImageSpaceShaderPrefix(a_shader);
+			const auto className =
+				native::ImageSpaceShaderClassName(a_shader);
+			const auto emitted =
+				native::GetImageSpaceMacros(a_shader);
+			if (!sourceGroup || !className || !emitted)
+				return std::nullopt;
+			result.nativeClassName = className;
+			result.nativeSourceGroup = sourceGroup;
+			for (std::size_t index = 0;
+				index < emitted->count;
+				++index) {
+				result.nativeMacros.insert_or_assign(
+					emitted->values[index].first,
+					emitted->values[index].second);
+			}
+			return result;
+		}
+
+		constexpr ShaderStageMask SupportedStages(
+			ShaderInjectionTarget a_target) noexcept
+		{
+			constexpr auto graphics =
+				ShaderStageBit(ShaderStage::kVertex)
+				| ShaderStageBit(ShaderStage::kPixel);
+			switch (a_target) {
+			case ShaderInjectionTarget::kFaceCustomization:
+				return ShaderStageBit(ShaderStage::kVertex);
+			case ShaderInjectionTarget::kImageSpace:
+				return graphics | ShaderStageBit(ShaderStage::kCompute);
+			case ShaderInjectionTarget::kDfTiledLighting:
+				return ShaderStageBit(ShaderStage::kCompute);
+			default:
+				return graphics;
+			}
 		}
 
 		enum class MatchedShaderOutcome : std::uint8_t
@@ -540,8 +701,6 @@ namespace cs::engine
 
 		std::vector<FrozenTarget> FreezeTargets(
 			const std::vector<ShaderReplacementRegistration>& a_registrations,
-			const std::vector<ShaderReplacementVariantRegistration>&
-				a_variantRegistrations,
 			bool a_developerForceOffEnabled,
 			const std::array<bool,
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)>&
@@ -664,19 +823,11 @@ namespace cs::engine
 				const bool requested =
 					requestReasons != ShaderInjectionRequestReason::kNone;
 
-				for (const auto& variant : a_variantRegistrations) {
-					if (variant.targetId == metadata.id)
-						target.variants.push_back(variant);
-				}
 				for (const auto& contribution : target.contributions) {
-					const bool stageMatched = std::ranges::any_of(
-						target.variants,
-						[&contribution](const auto& a_variant) {
-							return (
-								contribution.stages
-								& ShaderStageBit(a_variant.stage))
-								!= 0;
-						});
+					const bool stageMatched =
+						(contribution.stages
+							& SupportedStages(metadata.id))
+						!= 0;
 					if (!stageMatched) {
 						L->warn(
 							"Contributor '{}' for '{}' targets no registered shader stages; defines ignored.",
@@ -716,137 +867,6 @@ namespace cs::engine
 			return root / a_sourcePath;
 		}
 
-		std::optional<std::vector<PixelShaderSwapVariantKey>>
-			BuildVariantKeys(
-			const ShaderReplacementVariantRegistration& a_variant)
-		{
-			std::optional<sha1::Sha1Result> expected;
-			if (!a_variant.expectedStockSha1.empty()) {
-				sha1::Sha1Result parsed;
-				if (!sha1::Sha1FromHex(
-						a_variant.expectedStockSha1,
-						parsed)) {
-					return std::nullopt;
-				}
-				expected = parsed;
-			}
-
-			std::vector<PixelShaderSwapVariantKey> keys;
-			keys.reserve(
-				std::max<std::size_t>(
-					1,
-					a_variant.variantKeys.size()));
-			if (a_variant.variantKeys.empty()) {
-				keys.push_back({
-					.variant = std::nullopt,
-					.expectedStockSha1 = expected,
-					.routeGroup = ToIndex(a_variant.targetId),
-					.stage = a_variant.stage
-				});
-				return keys;
-			}
-			for (const auto& variantKey : a_variant.variantKeys) {
-				keys.push_back({
-					.variant = variantKey,
-					.expectedStockSha1 = expected,
-					.routeGroup = ToIndex(a_variant.targetId),
-					.stage = a_variant.stage
-				});
-			}
-			return keys;
-		}
-
-		std::optional<PreparedVariant> PrepareVariant(
-			ShaderVariantCompilationPolicy& a_policy,
-			ID3D11Device* a_device,
-			const FrozenTarget& a_target,
-			const ShaderReplacementVariantRegistration& a_variant,
-			const std::wstring& a_developerSourceRoot,
-			std::string& a_error)
-		{
-			const auto targetIndex = ToIndex(a_target.metadata->id);
-			auto& runtime = GetService().runtime[targetIndex];
-			auto keys = BuildVariantKeys(a_variant);
-			if (!keys) {
-				a_error = "invalid expected stock SHA1";
-				L->error(
-					"Compile '{}/{}' rejected: {}",
-					a_target.metadata->name,
-					a_variant.name,
-					a_error);
-				return std::nullopt;
-			}
-
-			auto effectiveRequest = BuildEffectiveShaderCompileRequest(
-				*a_target.metadata,
-				a_variant,
-				a_target.contributions,
-				&a_error);
-			if (!effectiveRequest) {
-				L->error(
-					"Compile '{}/{}' rejected: {}",
-					a_target.metadata->name,
-					a_variant.name,
-					a_error);
-				return std::nullopt;
-			}
-
-			const auto sourcePath = ResolveSourcePath(
-				effectiveRequest->sourcePath,
-				runtime.developerOverride,
-				a_developerSourceRoot);
-
-			ShaderVariantCompilationRequest request;
-			request.device.copy_from(a_device);
-			request.sourcePath = sourcePath;
-			request.entryPoint = std::move(effectiveRequest->entryPoint);
-			request.profile = std::move(effectiveRequest->profile);
-			request.stage = a_variant.stage;
-			request.defines.reserve(effectiveRequest->defines.size());
-			for (auto& define : effectiveRequest->defines)
-				request.defines.push_back(define);
-
-			auto result = a_policy.Prepare(std::move(request));
-			if (result.state == ShaderVariantCompilationState::kFailed
-				|| !result.handle) {
-				a_error = result.error.empty()
-					? "compilation policy failed"
-					: std::move(result.error);
-				L->error(
-					"Compile '{}/{}' failed ({}): {}",
-					a_target.metadata->name,
-					a_variant.name,
-					sourcePath.string(),
-					a_error);
-				return std::nullopt;
-			}
-
-			if (result.state == ShaderVariantCompilationState::kReady) {
-				L->info(
-					"Compile '{}/{}' ok: {} bytes, dxbc-sha1={}, source={}",
-					a_target.metadata->name,
-					a_variant.name,
-					result.bytecodeSize,
-					result.compiledSha1,
-					result.sourceDescription);
-			} else {
-				L->info(
-					"Compile '{}/{}' pending.",
-					a_target.metadata->name,
-					a_variant.name);
-			}
-
-			PreparedVariant prepared;
-			prepared.variant.targetId = a_target.metadata->id;
-			prepared.variant.name = a_variant.name;
-			prepared.variant.compilation = std::move(result.handle);
-			prepared.variant.effectiveDefines = std::move(effectiveRequest->defines);
-			prepared.keys = std::move(*keys);
-			prepared.compilationState = result.state;
-			prepared.compiledSha1 = std::move(result.compiledSha1);
-			return prepared;
-		}
-
 		const PublishedTarget* FindPublishedTarget(
 			const PublishedPlan& a_plan,
 			ShaderInjectionTarget a_target)
@@ -858,57 +878,278 @@ namespace cs::engine
 			return target == a_plan.targets.end() ? nullptr : &*target;
 		}
 
-		const PublishedVariant* FindMatchingPublishedVariant(
-			const PublishedPlan& a_plan,
+		void RecordNativeComputeShader(
 			ShaderInjectionTarget a_target,
-			ShaderStage a_stage,
-			ID3D11DeviceChild* a_shader) noexcept
+			std::uint32_t a_descriptor,
+			std::string_view a_nativeName,
+			ID3D11ComputeShader* a_shader,
+			std::string_view a_nativeSourceGroup = {},
+			ShaderInjectionDefines a_nativeMacros = {}) noexcept
 		{
-			if (!a_shader)
-				return nullptr;
-			const auto match = std::ranges::find_if(
-				a_plan.variants,
-				[a_target, a_stage, a_shader](const PublishedVariant& a_variant) {
-					return a_variant.targetId == a_target
-						&& a_variant.compilation
-						&& a_variant.compilation->GetStage()
-							== a_stage
-						&& a_variant.compilation->PeekShader()
-							== a_shader;
+			if (!IsValidTarget(a_target) || !a_shader)
+				return;
+			auto& service = GetService();
+			std::scoped_lock lock(service.nativeVariantMutex);
+			service.nativeComputeOwners.insert_or_assign(
+				a_shader,
+				NativeVariantKey{
+					.target = a_target,
+					.stage = ShaderStage::kCompute,
+					.descriptor = a_descriptor,
+					.nativeName = std::string(a_nativeName),
+					.nativeSourceGroup =
+						std::string(a_nativeSourceGroup),
+					.nativeMacros = std::move(a_nativeMacros)
 				});
-			return match == a_plan.variants.end() ? nullptr : &*match;
 		}
 
-		bool MatchesHlslInjectedPixelShader(
+		NativeVariant* FindOrPrepareNativeVariant(
 			const PublishedPlan& a_plan,
-			ShaderInjectionTarget a_target,
-			ID3D11PixelShader* a_shader) noexcept
+			const PublishedTarget& a_target,
+			const ShaderFamilyDescriptor& a_descriptor)
 		{
-			return FindMatchingPublishedVariant(
-				a_plan,
-				a_target,
-				ShaderStage::kPixel,
-				a_shader)
-				!= nullptr;
+			auto& service = GetService();
+			NativeVariantKey key{
+				.target = a_descriptor.target,
+				.stage = a_descriptor.stage,
+				.descriptor = a_descriptor.descriptor,
+				.nativeName = std::string(a_descriptor.nativeName),
+				.nativeClassName =
+					std::string(a_descriptor.nativeClassName),
+				.nativeSourceGroup =
+					std::string(a_descriptor.nativeSourceGroup),
+				.forceEarlyDepthStencil =
+					a_descriptor.forceEarlyDepthStencil,
+				.nativeMacros = a_descriptor.nativeMacros
+			};
+
+			{
+				std::scoped_lock lock(service.nativeVariantMutex);
+				if (const auto existing = service.nativeVariants.find(key);
+					existing != service.nativeVariants.end()) {
+					return &existing->second;
+				}
+			}
+
+			auto family =
+				BuildShaderFamilyCompilationDescriptor(a_descriptor);
+			if (!family)
+				return nullptr;
+
+			std::string error;
+			const auto* metadata =
+				GetShaderInjectionTarget(a_descriptor.target);
+			if (!metadata)
+				return nullptr;
+			auto effective = BuildEffectiveShaderCompileRequest(
+				*metadata,
+				a_descriptor.stage,
+				*family,
+				a_target.contributions,
+				&error);
+			if (!effective) {
+				L->error(
+					"Native descriptor compile request rejected for '{}/{}': {}",
+					metadata->name,
+					a_descriptor.descriptor,
+					error);
+				return nullptr;
+			}
+
+			ShaderVariantCompilationRequest request;
+			request.device = a_plan.device;
+			request.sourcePath = ResolveSourcePath(
+				effective->sourcePath,
+				service.runtime[ToIndex(a_descriptor.target)]
+					.developerOverride,
+				a_plan.developerSourceRoot);
+			request.entryPoint = effective->entryPoint;
+			request.profile = effective->profile;
+			request.stage = a_descriptor.stage;
+			request.defines.reserve(effective->defines.size());
+			for (const auto& define : effective->defines)
+				request.defines.push_back(define);
+
+			auto prepared =
+				a_plan.compilationPolicy->Prepare(std::move(request));
+			if (!prepared.handle ||
+				prepared.state == ShaderVariantCompilationState::kFailed) {
+				L->error(
+					"Native descriptor compile failed for '{}/{}': {}",
+					metadata->name,
+					a_descriptor.descriptor,
+					prepared.error.empty() ?
+						"compilation policy failed" :
+						prepared.error);
+				auto& runtime =
+					service.runtime[ToIndex(a_descriptor.target)];
+				runtime.passthroughCompileFail.fetch_add(
+					1, std::memory_order_relaxed);
+				return nullptr;
+			}
+
+			NativeVariant variant{
+				.compilation = std::move(prepared.handle),
+				.effectiveDefines = std::move(effective->defines),
+				.target = a_descriptor.target,
+				.stage = a_descriptor.stage
+			};
+			std::scoped_lock lock(service.nativeVariantMutex);
+			const auto [inserted, unused] =
+				service.nativeVariants.emplace(std::move(key), std::move(variant));
+			return &inserted->second;
 		}
 
-		thread_local const PublishedVariant* t_activeVariant = nullptr;
+		template <class TShader>
+		TShader* AcquireNativeReplacement(
+			const PublishedPlan& a_plan,
+			const PublishedTarget& a_target,
+			const ShaderFamilyDescriptor& a_descriptor)
+		{
+			auto* variant = FindOrPrepareNativeVariant(
+				a_plan, a_target, a_descriptor);
+			if (!variant || !variant->compilation)
+				return nullptr;
+			auto shader = variant->compilation->AcquireOrRequest();
+			if (!shader) {
+				GetService().runtime[ToIndex(a_descriptor.target)]
+					.passthroughNotReady.fetch_add(
+						1, std::memory_order_relaxed);
+				return nullptr;
+			}
+
+			{
+				auto& service = GetService();
+				std::scoped_lock lock(service.nativeVariantMutex);
+				service.nativeShaderIdentities.insert_or_assign(
+					shader.get(),
+					NativeVariantKey{
+						.target = a_descriptor.target,
+						.stage = a_descriptor.stage,
+						.descriptor = a_descriptor.descriptor,
+						.nativeName = std::string(a_descriptor.nativeName),
+						.nativeClassName =
+							std::string(a_descriptor.nativeClassName),
+						.nativeSourceGroup =
+							std::string(a_descriptor.nativeSourceGroup),
+						.forceEarlyDepthStencil =
+							a_descriptor.forceEarlyDepthStencil,
+						.nativeMacros = a_descriptor.nativeMacros
+					});
+			}
+			return static_cast<TShader*>(shader.detach());
+		}
+
+		template <class TWrapper, class TD3DShader>
+		TWrapper* CacheNativeReplacementWrapper(
+			TWrapper* a_nativeWrapper,
+			TD3DShader* a_replacement)
+		{
+			if (!a_nativeWrapper || !a_replacement)
+				return nullptr;
+
+			auto& service = GetService();
+			std::scoped_lock lock(service.nativeVariantMutex);
+			const NativeReplacementWrapperKey key{
+				.nativeWrapper = a_nativeWrapper,
+				.replacementShader = a_replacement
+			};
+			if (const auto existing =
+					service.nativeReplacementWrappers.find(key);
+				existing != service.nativeReplacementWrappers.end()) {
+				return reinterpret_cast<TWrapper*>(
+					existing->second.storage.get());
+			}
+
+			std::size_t trailingBytecodeSize = 0;
+			if constexpr (
+				std::is_same_v<TWrapper, RE::BSGraphics::VertexShader>
+				|| std::is_same_v<
+					TWrapper,
+					RE::BSGraphics::ComputeShader>) {
+				trailingBytecodeSize = a_nativeWrapper->byteCodeSize;
+			}
+			if (trailingBytecodeSize
+				> std::numeric_limits<std::size_t>::max()
+					- sizeof(TWrapper)) {
+				return nullptr;
+			}
+			auto storage = std::make_unique<std::byte[]>(
+				sizeof(TWrapper) + trailingBytecodeSize);
+			std::memcpy(
+				storage.get(),
+				a_nativeWrapper,
+				sizeof(TWrapper) + trailingBytecodeSize);
+			auto* wrapper =
+				reinterpret_cast<TWrapper*>(storage.get());
+			wrapper->shader =
+				reinterpret_cast<decltype(wrapper->shader)>(
+					a_replacement);
+			winrt::com_ptr<ID3D11DeviceChild> shaderLifetime;
+			if (FAILED(a_replacement->QueryInterface(
+					IID_PPV_ARGS(shaderLifetime.put())))) {
+				return nullptr;
+			}
+			const auto [inserted, unused] =
+				service.nativeReplacementWrappers.emplace(
+					key,
+					NativeReplacementWrapper{
+						.storage = std::move(storage),
+						.shader = std::move(shaderLifetime)
+					});
+			return reinterpret_cast<TWrapper*>(
+				inserted->second.storage.get());
+		}
+
+		template <class TWrapper, class TD3DShader>
+		TWrapper* AcquireNativeReplacementWrapper(
+			const PublishedPlan& a_plan,
+			const PublishedTarget& a_target,
+			const ShaderFamilyDescriptor& a_descriptor,
+			TWrapper* a_nativeWrapper)
+		{
+			if (!a_nativeWrapper)
+				return nullptr;
+			auto* replacement = AcquireNativeReplacement<TD3DShader>(
+				a_plan, a_target, a_descriptor);
+			if (!replacement)
+				return nullptr;
+			winrt::com_ptr<TD3DShader> replacementReference;
+			replacementReference.attach(replacement);
+			return CacheNativeReplacementWrapper(
+				a_nativeWrapper, replacementReference.get());
+		}
+
+		thread_local const ShaderInjectionDefines* t_activeDefines = nullptr;
+		thread_local ShaderInjectionTarget t_activeTarget =
+			ShaderInjectionTarget::kCount;
 
 		class ActiveVariantScope
 		{
 		public:
-			explicit ActiveVariantScope(const PublishedVariant* a_variant) noexcept :
-				_previous(t_activeVariant)
+			explicit ActiveVariantScope(const NativeVariant* a_variant) noexcept :
+				_previousDefines(t_activeDefines),
+				_previousTarget(t_activeTarget)
 			{
-				t_activeVariant = a_variant;
+				t_activeDefines = a_variant ?
+					&a_variant->effectiveDefines :
+					nullptr;
+				t_activeTarget = a_variant ?
+					a_variant->target :
+					ShaderInjectionTarget::kCount;
 			}
-			~ActiveVariantScope() noexcept { t_activeVariant = _previous; }
+			~ActiveVariantScope() noexcept
+			{
+				t_activeDefines = _previousDefines;
+				t_activeTarget = _previousTarget;
+			}
 
 			ActiveVariantScope(const ActiveVariantScope&) = delete;
 			ActiveVariantScope& operator=(const ActiveVariantScope&) = delete;
 
 		private:
-			const PublishedVariant* _previous;
+			const ShaderInjectionDefines* _previousDefines;
+			ShaderInjectionTarget _previousTarget;
 		};
 
 		void DispatchPublishedTarget(
@@ -971,8 +1212,8 @@ namespace cs::engine
 
 			const auto plan =
 				GetService().published.load(std::memory_order_acquire);
-			if (!plan || !render::IsDeferredLightsActive()) {
-				g_computePhaseRejections.fetch_add(
+			if (!plan) {
+				g_computeShaderRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				a_context->Dispatch(
 					a_threadGroupCountX,
@@ -985,9 +1226,7 @@ namespace cs::engine
 			a_context->CSGetShader(&shader, nullptr, nullptr);
 			winrt::com_ptr<ID3D11ComputeShader> boundShader;
 			boundShader.attach(shader);
-			const auto route = plan->computeVariantIndices.find(shader);
-			if (route == plan->computeVariantIndices.end()
-				|| route->second >= plan->variants.size()) {
+			if (!shader) {
 				g_computeShaderRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				a_context->Dispatch(
@@ -997,9 +1236,22 @@ namespace cs::engine
 				return;
 			}
 
-			const auto& variant = plan->variants[route->second];
-			if (variant.targetId
-					!= ShaderInjectionTarget::kDfTiledLighting) {
+			std::optional<NativeVariantKey> owner;
+			NativeVariant* variant = nullptr;
+			{
+				auto& service = GetService();
+				std::scoped_lock lock(service.nativeVariantMutex);
+				const auto identity =
+					service.nativeShaderIdentities.find(shader);
+				if (identity != service.nativeShaderIdentities.end()) {
+					owner = identity->second;
+					const auto found =
+						service.nativeVariants.find(identity->second);
+					if (found != service.nativeVariants.end())
+						variant = &found->second;
+				}
+			}
+			if (!owner) {
 				g_computeShaderRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				a_context->Dispatch(
@@ -1009,23 +1261,9 @@ namespace cs::engine
 				return;
 			}
 			const auto* target =
-				FindPublishedTarget(*plan, variant.targetId);
-			if (!target
-				|| (target->contributedStages
-					& ShaderStageBit(ShaderStage::kCompute))
-					== 0) {
+				FindPublishedTarget(*plan, owner->target);
+			if (!target) {
 				g_computeShaderRejections.fetch_add(
-					1, std::memory_order_relaxed);
-				a_context->Dispatch(
-					a_threadGroupCountX,
-					a_threadGroupCountY,
-					a_threadGroupCountZ);
-				return;
-			}
-
-			render::ScopedComputeSharedDataBinding bindings(a_context);
-			if (!bindings.IsActive()) {
-				g_computePhaseRejections.fetch_add(
 					1, std::memory_order_relaxed);
 				a_context->Dispatch(
 					a_threadGroupCountX,
@@ -1036,15 +1274,47 @@ namespace cs::engine
 
 			g_computeMatchingDispatches.fetch_add(
 				1, std::memory_order_relaxed);
-			const ActiveVariantScope variantScope(&variant);
-			DispatchPublishedTarget(
-				*target,
-				ShaderStage::kCompute,
-				a_context);
-			a_context->Dispatch(
-				a_threadGroupCountX,
-				a_threadGroupCountY,
-				a_threadGroupCountZ);
+			const bool hasFeatureBindings =
+				(target->contributedStages
+					& ShaderStageBit(ShaderStage::kCompute))
+				!= 0;
+			if (hasFeatureBindings) {
+				if (owner->target !=
+						ShaderInjectionTarget::kDfTiledLighting ||
+					!render::IsDeferredLightsActive()) {
+					g_computePhaseRejections.fetch_add(
+						1, std::memory_order_relaxed);
+					a_context->Dispatch(
+						a_threadGroupCountX,
+						a_threadGroupCountY,
+						a_threadGroupCountZ);
+					return;
+				}
+				render::ScopedComputeSharedDataBinding bindings(a_context);
+				if (!bindings.IsActive()) {
+					g_computePhaseRejections.fetch_add(
+						1, std::memory_order_relaxed);
+					a_context->Dispatch(
+						a_threadGroupCountX,
+						a_threadGroupCountY,
+						a_threadGroupCountZ);
+					return;
+				}
+				const ActiveVariantScope variantScope(variant);
+				DispatchPublishedTarget(
+					*target,
+					ShaderStage::kCompute,
+					a_context);
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+			} else {
+				a_context->Dispatch(
+					a_threadGroupCountX,
+					a_threadGroupCountY,
+					a_threadGroupCountZ);
+			}
 		}
 
 		void STDMETHODCALLTYPE RunComputeShaderDispatchBridge(
@@ -1195,176 +1465,6 @@ namespace cs::engine
 			}
 			return false;
 		}
-
-		ShaderSwapResolverResult ResolveInjectedShader(
-			const ShaderSwapRequest& a_request) noexcept
-		{
-			try {
-				const auto& a_resolvedVariant = a_request.variant;
-				const auto& a_sha = a_request.stockSha1;
-				const auto plan =
-					GetService().published.load(std::memory_order_acquire);
-				if (!plan)
-					return ShaderSwapResolverResult::kNoMatch;
-
-				const auto selection = SelectPixelShaderSwapVariant(
-					plan->variantKeys,
-					a_resolvedVariant,
-					a_sha,
-					a_request.stage);
-				if (selection.kind
-					== PixelShaderSwapSelectionKind::kNoMatch) {
-					return ShaderSwapResolverResult::kNoMatch;
-				}
-				if (selection.kind
-					== PixelShaderSwapSelectionKind::kUnmappedVariant) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::warn,
-						"Kept stock {} shader sha={}: no replacement registered "
-						"for variant {}:{}+0x{:X}.",
-						StageName(a_request.stage),
-						sha1::Sha1ToHex(a_sha),
-						a_resolvedVariant
-							? a_resolvedVariant->subclass
-							: "<none>",
-						a_resolvedVariant
-							? StageAbbreviation(
-								a_resolvedVariant->stage)
-							: "--",
-						a_resolvedVariant
-							? a_resolvedVariant->id.Value()
-							: 0);
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-				if (selection.routeIndex
-					>= plan->variantKeys.size()
-					|| selection.replacementIndex
-						>= plan->variants.size()) {
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-
-				const auto& variant =
-					plan->variants[selection.replacementIndex];
-				auto& runtime =
-					GetService().runtime[ToIndex(variant.targetId)];
-				if (selection.kind
-					== PixelShaderSwapSelectionKind::kHashMismatch) {
-					const auto& key =
-						plan->variantKeys[selection.routeIndex];
-					const auto expected = key.expectedStockSha1
-						? sha1::Sha1ToHex(*key.expectedStockSha1)
-						: std::string("<unknown>");
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::err,
-						"Refused {} shader replacement '{}/{}': "
-						"variant {}:{}+0x{:X} expected sha={} but received {}.",
-						StageName(a_request.stage),
-						kTargets[ToIndex(variant.targetId)].name,
-						variant.name,
-						a_resolvedVariant
-							? a_resolvedVariant->subclass
-							: "<none>",
-						a_resolvedVariant
-							? StageAbbreviation(
-								a_resolvedVariant->stage)
-							: "--",
-						a_resolvedVariant
-							? a_resolvedVariant->id.Value()
-							: 0,
-						expected,
-						sha1::Sha1ToHex(a_sha));
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-
-				if (!runtime.requested.load(std::memory_order_relaxed)) {
-					RecordMatchedShaderOutcome(
-						variant.targetId,
-						MatchedShaderOutcome::kDisabled);
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-				if (!variant.compilation
-					|| variant.compilation->GetStage()
-						!= a_request.stage) {
-					RecordMatchedShaderOutcome(
-						variant.targetId,
-						MatchedShaderOutcome::kKeptStock);
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-				auto replacement = variant.compilation
-					->AcquireOrRequest();
-				if (!ShouldSubstitutePixelShader(
-						selection.kind,
-						static_cast<bool>(replacement))) {
-					const auto state = variant.compilation
-						? variant.compilation->GetState()
-						: ShaderVariantCompilationState::kFailed;
-					RecordMatchedShaderOutcome(
-						variant.targetId,
-						state == ShaderVariantCompilationState::kFailed
-							? MatchedShaderOutcome::kCompileFailed
-							: MatchedShaderOutcome::kNotReady);
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-
-				if (!a_request.output || !*a_request.output) {
-					RecordMatchedShaderOutcome(
-						variant.targetId,
-						MatchedShaderOutcome::kKeptStock);
-					return ShaderSwapResolverResult::kKeepStock;
-				}
-				(*a_request.output)->Release();
-				*a_request.output = replacement.detach();
-				const auto counts = RecordMatchedShaderOutcome(
-					variant.targetId,
-					MatchedShaderOutcome::kReplaced);
-				if (counts.targetSubstitutions == 1) {
-					L->info(
-						"Replaced {} shader sha={} -> {}/{} (target_replacements=1, total_replacements={})",
-						StageName(a_request.stage),
-						sha1::Sha1ToHex(a_sha),
-						kTargets[ToIndex(variant.targetId)].name,
-						variant.name,
-						counts.totalSubstitutions);
-				} else if (L->should_log(spdlog::level::debug)) {
-					CS_LOG_EVERY_MS(
-						L,
-						2000,
-						spdlog::level::debug,
-						"Shader replacements: stage={} target={}/{} target_total={} total={}.",
-						StageName(a_request.stage),
-						kTargets[ToIndex(variant.targetId)].name,
-						variant.name,
-						counts.targetSubstitutions,
-						counts.totalSubstitutions);
-				}
-				return ShaderSwapResolverResult::kReplaced;
-			} catch (const std::exception& e) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::err,
-					"Shader replacement resolution failed: {}.",
-					e.what());
-				return ShaderSwapResolverResult::kKeepStock;
-			} catch (...) {
-				CS_LOG_EVERY_MS(
-					L,
-					2000,
-					spdlog::level::err,
-					"Shader replacement resolution failed.");
-				return ShaderSwapResolverResult::kKeepStock;
-			}
-		}
-	}
-
-	std::vector<ShaderReplacementVariantRegistration>
-		GetDefaultShaderReplacementVariants()
-	{
-		return MakeDefaultShaderReplacementVariants();
 	}
 
 	bool RegisterReplacement(ShaderReplacementRegistration a_registration)
@@ -1442,186 +1542,11 @@ namespace cs::engine
 		return !a_enabled || RegisterReplacement(std::move(a_registration));
 	}
 
-	bool RegisterReplacementVariant(
-		ShaderReplacementVariantRegistration a_registration)
-	{
-		auto& service = GetService();
-		std::scoped_lock lock(service.mutex);
-		if (service.lifecycle != Lifecycle::kCollecting) {
-			LogLateMutation("Replacement variant registration");
-			return false;
-		}
-		if (!IsValidTarget(a_registration.targetId)) {
-			L->error(
-				"Replacement variant registration rejected: "
-				"unknown target.");
-			return false;
-		}
-		if (a_registration.name.empty()) {
-			L->error(
-				"Replacement variant registration for '{}' rejected: "
-				"empty name.",
-				kTargets[ToIndex(a_registration.targetId)].name);
-			return false;
-		}
-		if (a_registration.stage != ShaderStage::kPixel
-			&& !a_registration.variantKeys.empty()) {
-			L->error(
-				"Replacement variant '{}/{}' rejected: "
-				"non-pixel variant keys require a runtime variant resolver.",
-				kTargets[ToIndex(a_registration.targetId)].name,
-				a_registration.name);
-			return false;
-		}
-		for (const auto& key : a_registration.variantKeys) {
-			if (key.subclass.empty()) {
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"empty shader subclass.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name);
-				return false;
-			}
-			if (key.stage != a_registration.stage) {
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"variant key stage does not match compilation stage.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name);
-				return false;
-			}
-		}
-		if (!a_registration.variantKeys.empty()
-			&& a_registration.expectedStockSha1.empty()) {
-			L->error(
-				"Replacement variant '{}/{}' rejected: "
-				"missing expected stock SHA1 guard.",
-				kTargets[ToIndex(a_registration.targetId)].name,
-				a_registration.name);
-			return false;
-		}
-		if (a_registration.compilation.sourcePath.empty()) {
-			L->error(
-				"Replacement variant '{}/{}' rejected: "
-				"empty source path.",
-				kTargets[ToIndex(a_registration.targetId)].name,
-				a_registration.name);
-			return false;
-		}
-		if (a_registration.compilation.entryPoint.empty()) {
-			L->error(
-				"Replacement variant '{}/{}' rejected: "
-				"empty entry point.",
-				kTargets[ToIndex(a_registration.targetId)].name,
-				a_registration.name);
-			return false;
-		}
-		if (a_registration.compilation.profile
-			!= ProfileForStage(a_registration.stage)) {
-			L->error(
-				"Replacement variant '{}/{}' rejected: "
-				"shader profile does not match its stage.",
-				kTargets[ToIndex(a_registration.targetId)].name,
-				a_registration.name);
-			return false;
-		}
-		if (!a_registration.expectedStockSha1.empty()) {
-			sha1::Sha1Result expected;
-			if (!sha1::Sha1FromHex(
-					a_registration.expectedStockSha1, expected)) {
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"invalid expected stock SHA1.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name);
-				return false;
-			}
-			a_registration.expectedStockSha1 =
-				sha1::Sha1ToHex(expected);
-		}
-
-		for (std::size_t i = 0;
-			i < a_registration.variantKeys.size();
-			++i) {
-			for (std::size_t j = i + 1;
-				j < a_registration.variantKeys.size();
-				++j) {
-				if (!ShaderVariantKeysConflict(
-						ViewShaderVariantKey(
-							a_registration.variantKeys[i]),
-						ViewShaderVariantKey(
-							a_registration.variantKeys[j]))) {
-					continue;
-				}
-				const auto& duplicate =
-					a_registration.variantKeys[j];
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"duplicate variant key {}:{}+0x{:X}.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name,
-					duplicate.subclass,
-					StageAbbreviation(duplicate.stage),
-					duplicate.id.Value());
-				return false;
-			}
-		}
-
-		for (const auto& existing : service.variantRegistrations) {
-			if (existing.targetId == a_registration.targetId
-				&& existing.name == a_registration.name) {
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"duplicate name.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name);
-				return false;
-			}
-			for (const auto& existingKey : existing.variantKeys) {
-				for (const auto& newKey :
-					a_registration.variantKeys) {
-					if (!ShaderVariantKeysConflict(
-							ViewShaderVariantKey(existingKey),
-							ViewShaderVariantKey(newKey))) {
-						continue;
-					}
-					L->error(
-						"Replacement variant '{}/{}' rejected: "
-						"duplicate variant key {}:{}+0x{:X}.",
-						kTargets[ToIndex(
-							a_registration.targetId)].name,
-						a_registration.name,
-						newKey.subclass,
-						StageAbbreviation(newKey.stage),
-						newKey.id.Value());
-					return false;
-				}
-			}
-			if (!existing.expectedStockSha1.empty()
-				&& !a_registration.expectedStockSha1.empty()
-				&& existing.expectedStockSha1
-					== a_registration.expectedStockSha1) {
-				L->error(
-					"Replacement variant '{}/{}' rejected: "
-					"stock SHA1 already maps to '{}/{}'.",
-					kTargets[ToIndex(a_registration.targetId)].name,
-					a_registration.name,
-					kTargets[ToIndex(existing.targetId)].name,
-					existing.name);
-				return false;
-			}
-		}
-
-		service.variantRegistrations.push_back(
-			std::move(a_registration));
-		return true;
-	}
-
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled)
 	{
-		if (!IsValidTarget(a_target) || !IsBaselineOwnableTarget(a_target)) {
+		if (!IsValidTarget(a_target)) {
 			L->error(
 				"Baseline shader ownership rejected: target is not ownable.");
 			return false;
@@ -1812,8 +1737,6 @@ namespace cs::engine
 	{
 		auto& service = GetService();
 		std::vector<ShaderReplacementRegistration> registrations;
-		std::vector<ShaderReplacementVariantRegistration>
-			variantRegistrations;
 		std::array<DeveloperShaderOverride,
 			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> developerOverrides{};
 		std::array<bool,
@@ -1833,24 +1756,18 @@ namespace cs::engine
 			developerOverrides = service.developerOverrides;
 			developerSourceRoot = service.developerSourceRoot;
 			registrations = service.registrations;
-			variantRegistrations = service.variantRegistrations;
 		}
 
-		sha1::Sha1InitOnce();
 		auto plan = std::make_shared<PublishedPlan>();
 		plan->compilationPolicy =
 			CreateCachingShaderVariantCompilationPolicy();
+		plan->device.copy_from(a_device);
+		plan->developerSourceRoot = developerSourceRoot;
 		std::size_t compileRequested = 0;
-		std::size_t compileSucceeded = 0;
-		std::size_t swappableVariants = 0;
-		ShaderStageMask swappableStages = 0;
-		const bool computeBridgeReady =
-			ComputeDispatchBridgeInstalled();
 		std::vector<FrozenTarget> frozenTargets;
 		if (enabled) {
 			frozenTargets = FreezeTargets(
 				registrations,
-				variantRegistrations,
 				developerForceOffEnabled,
 				baselineOwnership,
 				developerOverrides);
@@ -1862,166 +1779,53 @@ namespace cs::engine
 			L->error("Shader injection freeze failed: no D3D11 device.");
 		} else {
 			plan->targets.reserve(frozenTargets.size());
-			plan->variants.reserve(variantRegistrations.size());
-			std::size_t routeCount = 0;
-			for (const auto& registration :
-				variantRegistrations) {
-				routeCount += std::max<std::size_t>(
-					1,
-					registration.variantKeys.size());
-			}
-			plan->variantKeys.reserve(routeCount);
 			for (const auto& frozenTarget : frozenTargets) {
 				const auto targetIndex =
 					ToIndex(frozenTarget.metadata->id);
 				auto& runtime = service.runtime[targetIndex];
 				runtime.compileAttempted.store(
-					!frozenTarget.variants.empty(),
+					true,
 					std::memory_order_relaxed);
-				compileRequested += frozenTarget.variants.size();
-
-				std::size_t targetPrepared = 0;
-				std::size_t targetReady = 0;
-				bool targetSwappable = false;
-				std::string firstError;
-				std::string onlyCompiledSha1;
-				for (const auto& variant : frozenTarget.variants) {
-					if (variant.stage == ShaderStage::kCompute
-						&& !computeBridgeReady) {
-						if (firstError.empty()) {
-							firstError =
-								"RunComputeShader dispatch bridge is unavailable";
-						}
-						L->error(
-							"Compile '{}/{}' rejected: "
-							"RunComputeShader dispatch bridge is unavailable.",
-							frozenTarget.metadata->name,
-							variant.name);
-						continue;
-					}
-					std::string compileError;
-					auto prepared = PrepareVariant(
-						*plan->compilationPolicy,
-						a_device,
-						frozenTarget,
-						variant,
-						developerSourceRoot,
-						compileError);
-					if (!prepared) {
-						if (firstError.empty())
-							firstError = std::move(compileError);
-						continue;
-					}
-
-					++targetPrepared;
-					if (prepared->compilationState
-						== ShaderVariantCompilationState::kReady) {
-						++compileSucceeded;
-						++targetReady;
-						onlyCompiledSha1 = prepared->compiledSha1;
-					}
-					const bool variantSwappable =
-						std::ranges::any_of(
-							prepared->keys,
-							[](const auto& a_key) {
-								return a_key.variant.has_value()
-									|| a_key.expectedStockSha1
-										.has_value();
-							});
-					targetSwappable =
-						targetSwappable || variantSwappable;
-					if (variantSwappable)
-						++swappableVariants;
-					if (variantSwappable) {
-						for (const auto& key : prepared->keys)
-							swappableStages |= ShaderStageBit(key.stage);
-					}
-					const auto replacementIndex =
-						plan->variants.size();
-					for (auto& key : prepared->keys) {
-						key.replacementIndex =
-							replacementIndex;
-						plan->variantKeys.push_back(
-							std::move(key));
-					}
-					plan->variants.push_back(
-						std::move(prepared->variant));
+				if (frozenTarget.metadata->id
+						== ShaderInjectionTarget::kDfTiledLighting
+					&& !ComputeDispatchBridgeInstalled()) {
+					runtime.compileOk.store(false, std::memory_order_release);
+					runtime.compileComplete.store(
+						false, std::memory_order_release);
+					runtime.swappable.store(false, std::memory_order_release);
+					runtime.compileError =
+						"RunComputeShader dispatch bridge is unavailable";
+					L->error(
+						"Shader injection target '{}' remains native: {}.",
+						frozenTarget.metadata->name,
+						runtime.compileError);
+					continue;
 				}
+				runtime.compileOk.store(true, std::memory_order_release);
+				runtime.compileComplete.store(false, std::memory_order_release);
+				runtime.swappable.store(true, std::memory_order_release);
+				runtime.compileError.clear();
+				runtime.compiledSha1.clear();
 
-				runtime.compileOk.store(
-					targetReady > 0,
-					std::memory_order_release);
-				runtime.compileComplete.store(
-					!frozenTarget.variants.empty()
-						&& targetReady == frozenTarget.variants.size(),
-					std::memory_order_release);
-				runtime.swappable.store(
-					targetSwappable,
-					std::memory_order_release);
-				runtime.compileError =
-					targetPrepared == frozenTarget.variants.size()
-					? std::string{}
-					: std::move(firstError);
-				if (targetReady == 1) {
-					runtime.compiledSha1 =
-						std::move(onlyCompiledSha1);
-				} else if (targetReady > 1) {
-					runtime.compiledSha1 =
-						std::to_string(targetReady)
-						+ " variants";
+				ShaderStageMask contributedStages = 0;
+				for (const auto& contribution :
+					frozenTarget.contributions) {
+					contributedStages |= contribution.stages;
 				}
-
-				if (targetPrepared > 0) {
-					ShaderStageMask contributedStages = 0;
-					for (const auto& contribution :
-						frozenTarget.contributions) {
-						contributedStages |= contribution.stages;
-					}
-					plan->targets.push_back(PublishedTarget{
-						frozenTarget.metadata->id,
-						contributedStages,
-						frozenTarget.binds
-					});
-				}
+				plan->targets.push_back(PublishedTarget{
+					.id = frozenTarget.metadata->id,
+					.contributedStages = contributedStages,
+					.binds = frozenTarget.binds,
+					.contributions = frozenTarget.contributions
+				});
+				++compileRequested;
 			}
-		}
-
-		for (std::size_t index = 0; index < plan->variants.size(); ++index) {
-			const auto& variant = plan->variants[index];
-			if (!variant.compilation
-				|| variant.compilation->GetStage()
-					!= ShaderStage::kCompute) {
-				continue;
-			}
-			auto* shader = static_cast<ID3D11ComputeShader*>(
-				variant.compilation->PeekShader());
-			if (shader)
-				plan->computeVariantIndices.emplace(shader, index);
 		}
 
 		service.published.store(plan, std::memory_order_release);
 		{
 			std::scoped_lock lock(service.mutex);
 			service.lifecycle = Lifecycle::kPublished;
-			if (swappableStages != 0 && !service.resolverRegistered) {
-				service.resolverRegistered =
-					RegisterPixelShaderSwapResolver({
-						.resolver = &ResolveInjectedShader,
-						.priority = kHlslReplacementResolverPriority,
-						.stages = swappableStages
-					});
-				if (service.resolverRegistered) {
-					L->info(
-						"Registered HLSL shader swap resolver (broker hooks={}).",
-						PixelShaderSwapBrokerHooksInstalled() ? "present" : "absent");
-				} else {
-					// no resolver means no target can ever swap
-					for (auto& runtime : service.runtime)
-						runtime.swappable.store(false, std::memory_order_release);
-					L->error(
-						"Shader swap resolver registration failed; all targets remain stock.");
-				}
-			}
 		}
 		if (compileRequested == 0 && !registrations.empty()) {
 			L->warn(
@@ -2030,7 +1834,7 @@ namespace cs::engine
 		}
 		const auto summary = GetShaderInjectionSummary();
 		L->info(
-			"Shader injection freeze: targets requested={} compile_attempted={} compiled_ok={} compile_complete={} swappable={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); replacement_variants attempted={} compiled_ok={} swappable={}.",
+			"Shader injection freeze: targets requested={} compile_attempted={} compiled_ok={} compile_complete={} swappable={} reasons(feature_contributor={}, baseline_ownership={}, developer_force_on={}); native variants compile lazily from observed descriptors.",
 			summary.requested,
 			summary.compileAttempted,
 			summary.compiled,
@@ -2038,10 +1842,7 @@ namespace cs::engine
 			summary.swappable,
 			summary.requestedByFeatureContributor,
 			summary.requestedByBaselineOwnership,
-			summary.requestedByDeveloperForceOn,
-			compileRequested,
-			compileSucceeded,
-			swappableVariants);
+			summary.requestedByDeveloperForceOn);
 	}
 
 	void DispatchShaderInjections(
@@ -2058,6 +1859,394 @@ namespace cs::engine
 		DispatchPublishedTarget(*target, ShaderStage::kPixel, a_context);
 	}
 
+	namespace
+	{
+		NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBindingImpl(
+		const NativeShaderFamilyContext& a_family,
+		std::uint32_t a_vertexShaderId,
+		std::uint32_t a_pixelShaderId,
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+	{
+		NativeGraphicsShaderBinding result{
+			.vertex = a_nativeVertex,
+			.pixel = a_nativePixel
+		};
+		if (!IsValidTarget(a_family.target))
+			return result;
+
+		try {
+			const auto plan =
+				GetService().published.load(std::memory_order_acquire);
+			const auto* target =
+				plan ? FindPublishedTarget(*plan, a_family.target) : nullptr;
+			if (!target)
+				return result;
+
+			auto& runtime =
+				GetService().runtime[ToIndex(a_family.target)];
+			if (a_nativeVertex
+				&& a_nativeVertex->id == a_vertexShaderId) {
+				runtime.matches.fetch_add(1, std::memory_order_relaxed);
+				if (auto* replacement =
+						AcquireNativeReplacementWrapper<
+							RE::BSGraphics::VertexShader,
+							ID3D11VertexShader>(
+							*plan,
+							*target,
+							{
+								.target = a_family.target,
+								.stage = ShaderStage::kVertex,
+								.descriptor = a_vertexShaderId,
+								.nativeName = a_family.nativeName,
+								.nativeClassName =
+									a_family.nativeClassName,
+								.nativeSourceGroup =
+									a_family.nativeSourceGroup,
+								.nativeMacros = a_family.nativeMacros
+							},
+							a_nativeVertex)) {
+					result.vertex = replacement;
+					runtime.substitutions.fetch_add(
+						1, std::memory_order_relaxed);
+				}
+			}
+
+			if (a_nativePixel
+				&& a_nativePixel->id == a_pixelShaderId) {
+				bool forceEarlyDepthStencil = false;
+				{
+					auto& service = GetService();
+					std::scoped_lock lock(service.nativeVariantMutex);
+					const auto metadata =
+						service.nativeShaderMetadata.find(
+							reinterpret_cast<ID3D11DeviceChild*>(
+								a_nativePixel->shader));
+					forceEarlyDepthStencil =
+						metadata != service.nativeShaderMetadata.end()
+						&& metadata->second.forceEarlyDepthStencil;
+				}
+				runtime.matches.fetch_add(1, std::memory_order_relaxed);
+				if (auto* replacement =
+						AcquireNativeReplacementWrapper<
+							RE::BSGraphics::PixelShader,
+							ID3D11PixelShader>(
+							*plan,
+							*target,
+							{
+								.target = a_family.target,
+								.stage = ShaderStage::kPixel,
+								.descriptor = a_pixelShaderId,
+								.nativeName = a_family.nativeName,
+								.nativeClassName =
+									a_family.nativeClassName,
+								.nativeSourceGroup =
+									a_family.nativeSourceGroup,
+								.forceEarlyDepthStencil =
+									forceEarlyDepthStencil,
+								.nativeMacros = a_family.nativeMacros
+							},
+							a_nativePixel)) {
+					result.pixel = replacement;
+					runtime.substitutions.fetch_add(
+						1, std::memory_order_relaxed);
+				}
+			}
+		} catch (const std::exception& e) {
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::warn,
+				"Native shader descriptor routing failed: {}.",
+				e.what());
+		} catch (...) {
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::warn,
+				"Native shader descriptor routing failed.");
+		}
+		return result;
+	}
+	}
+
+	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
+		RE::BSShader* a_shader,
+		std::uint32_t a_vertexShaderId,
+		std::uint32_t a_pixelShaderId,
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+	{
+		const auto family = ResolveNativeShaderFamilyContext(a_shader);
+		if (!family) {
+			return {
+				.vertex = a_nativeVertex,
+				.pixel = a_nativePixel
+			};
+		}
+		return ResolveNativeGraphicsShaderBindingImpl(
+			*family,
+			a_vertexShaderId,
+			a_pixelShaderId,
+			a_nativeVertex,
+			a_nativePixel);
+	}
+
+	RE::BSGraphics::ComputeShader* ResolveNativeComputeShaderBinding(
+		RE::BSGraphics::ComputeShader* a_nativeCompute) noexcept
+	{
+		if (!a_nativeCompute || !a_nativeCompute->shader)
+			return a_nativeCompute;
+		try {
+			const auto plan =
+				GetService().published.load(std::memory_order_acquire);
+			if (!plan)
+				return a_nativeCompute;
+
+			std::optional<NativeVariantKey> owner;
+			{
+				auto& service = GetService();
+				std::scoped_lock lock(service.nativeVariantMutex);
+				const auto found = service.nativeComputeOwners.find(
+					reinterpret_cast<ID3D11ComputeShader*>(
+						a_nativeCompute->shader));
+				if (found != service.nativeComputeOwners.end())
+					owner = found->second;
+			}
+			if (!owner)
+				return a_nativeCompute;
+			const auto* target =
+				FindPublishedTarget(*plan, owner->target);
+			if (!target)
+				return a_nativeCompute;
+
+			const bool hasFeatureBindings =
+				(target->contributedStages
+					& ShaderStageBit(ShaderStage::kCompute))
+				!= 0;
+			if (hasFeatureBindings
+				&& (owner->target
+						!= ShaderInjectionTarget::kDfTiledLighting
+					|| !render::IsDeferredLightsActive()
+					|| !ComputeDispatchBridgeInstalled())) {
+				g_computePhaseRejections.fetch_add(
+					1, std::memory_order_relaxed);
+				return a_nativeCompute;
+			}
+
+			auto& runtime =
+				GetService().runtime[ToIndex(owner->target)];
+			runtime.matches.fetch_add(1, std::memory_order_relaxed);
+			auto* replacement =
+				AcquireNativeReplacementWrapper<
+					RE::BSGraphics::ComputeShader,
+					ID3D11ComputeShader>(
+					*plan,
+					*target,
+					{
+						.target = owner->target,
+						.stage = ShaderStage::kCompute,
+						.descriptor = owner->descriptor,
+						.nativeName = owner->nativeName,
+						.nativeSourceGroup =
+							owner->nativeSourceGroup,
+						.nativeMacros = owner->nativeMacros
+					},
+					a_nativeCompute);
+			if (!replacement)
+				return a_nativeCompute;
+			runtime.substitutions.fetch_add(
+				1, std::memory_order_relaxed);
+			return replacement;
+		} catch (const std::exception& e) {
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::warn,
+				"Native compute descriptor routing failed: {}.",
+				e.what());
+		} catch (...) {
+			CS_LOG_EVERY_MS(
+				L,
+				2000,
+				spdlog::level::warn,
+				"Native compute descriptor routing failed.");
+		}
+		return a_nativeCompute;
+	}
+
+	void ObserveNativeShader(RE::BSShader* a_shader) noexcept
+	{
+		if (!a_shader)
+			return;
+		const auto target = ResolveNativeShaderTarget(*a_shader);
+		if (!target)
+			return;
+		const std::string_view nativeName =
+			native::FxpFilename(a_shader) ?
+				native::FxpFilename(a_shader) : "";
+		std::string_view nativeSourceGroup;
+		ShaderInjectionDefines nativeMacros;
+		if (*target == ShaderInjectionTarget::kImageSpace) {
+			const auto sourceGroup =
+				native::ImageSpaceShaderPrefix(a_shader);
+			const auto emitted =
+				native::GetImageSpaceMacros(a_shader);
+			if (!sourceGroup || !emitted)
+				return;
+			nativeSourceGroup = sourceGroup;
+			for (std::size_t index = 0;
+				index < emitted->count;
+				++index) {
+				nativeMacros.insert_or_assign(
+					emitted->values[index].first,
+					emitted->values[index].second);
+			}
+		}
+		for (auto* entry : native::ComputeShaders(a_shader)) {
+			if (!entry || !entry->shader)
+				continue;
+			RecordNativeComputeShader(
+				*target,
+				entry->id,
+				nativeName,
+				reinterpret_cast<ID3D11ComputeShader*>(entry->shader),
+				nativeSourceGroup,
+				nativeMacros);
+		}
+	}
+
+	void ObserveNativeComputeOwner(
+		const void* a_owner,
+		ShaderInjectionTarget a_target,
+		std::string_view a_nativeName) noexcept
+	{
+		if (!a_owner || !IsValidTarget(a_target))
+			return;
+		for (auto* entry : native::StandaloneComputeShaders(a_owner)) {
+			if (!entry || !entry->shader)
+				continue;
+			RecordNativeComputeShader(
+				a_target,
+				entry->id,
+				a_nativeName,
+				reinterpret_cast<ID3D11ComputeShader*>(entry->shader));
+		}
+	}
+
+	void ObserveNativeShaderBytecode(
+		ShaderStage a_stage,
+		const void* a_bytecode,
+		std::size_t a_bytecodeLength,
+		ID3D11DeviceChild* a_shader) noexcept
+	{
+		if (a_stage != ShaderStage::kPixel
+			|| !a_bytecode || a_bytecodeLength == 0 || !a_shader) {
+			return;
+		}
+		winrt::com_ptr<ID3D11ShaderReflection> reflection;
+		if (FAILED(D3DReflect(
+				a_bytecode,
+				a_bytecodeLength,
+				IID_PPV_ARGS(reflection.put())))) {
+			return;
+		}
+		Service::NativeShaderMetadata metadata;
+		metadata.forceEarlyDepthStencil =
+			(reflection->GetRequiresFlags()
+				& D3D_SHADER_REQUIRES_EARLY_DEPTH_STENCIL)
+			!= 0;
+		auto& service = GetService();
+		std::scoped_lock lock(service.nativeVariantMutex);
+		service.nativeShaderMetadata.insert_or_assign(a_shader, metadata);
+	}
+
+#ifdef FO4CS_SHADER_INJECTION_TESTING
+	std::optional<NativeShaderMetadataForTesting>
+		GetObservedNativeShaderMetadataForTesting(
+			ID3D11DeviceChild* a_shader) noexcept
+	{
+		if (!a_shader)
+			return std::nullopt;
+		auto& service = GetService();
+		std::scoped_lock lock(service.nativeVariantMutex);
+		const auto metadata = service.nativeShaderMetadata.find(a_shader);
+		if (metadata == service.nativeShaderMetadata.end())
+			return std::nullopt;
+		return NativeShaderMetadataForTesting{
+			.forceEarlyDepthStencil =
+				metadata->second.forceEarlyDepthStencil
+		};
+	}
+
+	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
+		const ShaderFamilyDescriptor& a_descriptor) noexcept
+	{
+		try {
+			const auto plan =
+				GetService().published.load(std::memory_order_acquire);
+			const auto* target =
+				plan ? FindPublishedTarget(*plan, a_descriptor.target) : nullptr;
+			if (!target)
+				return nullptr;
+			switch (a_descriptor.stage) {
+			case ShaderStage::kVertex:
+				return AcquireNativeReplacement<ID3D11VertexShader>(
+					*plan, *target, a_descriptor);
+			case ShaderStage::kPixel:
+				return AcquireNativeReplacement<ID3D11PixelShader>(
+					*plan, *target, a_descriptor);
+			case ShaderStage::kCompute:
+				return AcquireNativeReplacement<ID3D11ComputeShader>(
+					*plan, *target, a_descriptor);
+			default:
+				return nullptr;
+			}
+		} catch (...) {
+			return nullptr;
+		}
+	}
+
+	NativeGraphicsShaderBinding
+		ResolveNativeGraphicsShaderBindingForTesting(
+			ShaderInjectionTarget a_target,
+			std::string_view a_nativeName,
+			std::uint32_t a_vertexShaderId,
+			std::uint32_t a_pixelShaderId,
+			RE::BSGraphics::VertexShader* a_nativeVertex,
+			RE::BSGraphics::PixelShader* a_nativePixel) noexcept
+	{
+		return ResolveNativeGraphicsShaderBindingImpl(
+			{
+				.target = a_target,
+				.nativeName = a_nativeName
+			},
+			a_vertexShaderId,
+			a_pixelShaderId,
+			a_nativeVertex,
+			a_nativePixel);
+	}
+
+	RE::BSGraphics::VertexShader*
+		CacheNativeVertexReplacementWrapperForTesting(
+			RE::BSGraphics::VertexShader* a_nativeVertex,
+			ID3D11VertexShader* a_replacement) noexcept
+	{
+		return CacheNativeReplacementWrapper(
+			a_nativeVertex, a_replacement);
+	}
+
+	void ObserveNativeComputeShaderForTesting(
+		ShaderInjectionTarget a_target,
+		std::uint32_t a_descriptor,
+		std::string_view a_nativeName,
+		ID3D11ComputeShader* a_shader) noexcept
+	{
+		RecordNativeComputeShader(
+			a_target, a_descriptor, a_nativeName, a_shader);
+	}
+#endif
+
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept
 	{
@@ -2073,94 +2262,24 @@ namespace cs::engine
 		if (!boundShader)
 			return;
 
-		for (const auto& target : plan->targets) {
-			if (const auto* variant = FindMatchingPublishedVariant(
-					*plan,
-					target.id,
-					ShaderStage::kPixel,
-					boundShader)) {
-				const ActiveVariantScope scope(variant);
-				DispatchShaderInjections(target.id, a_context);
-				break;
+		auto& service = GetService();
+		const NativeVariant* activeVariant = nullptr;
+		{
+			std::scoped_lock lock(service.nativeVariantMutex);
+			const auto identity =
+				service.nativeShaderIdentities.find(boundShader);
+			if (identity != service.nativeShaderIdentities.end()) {
+				const auto variant =
+					service.nativeVariants.find(identity->second);
+				if (variant != service.nativeVariants.end())
+					activeVariant = &variant->second;
 			}
+		}
+		if (activeVariant) {
+			const ActiveVariantScope scope(activeVariant);
+			DispatchShaderInjections(activeVariant->target, a_context);
 		}
 		boundShader->Release();
-	}
-
-	ID3D11PixelShader* GetInjectedPixelShader(ShaderInjectionTarget a_target) noexcept
-	{
-		if (!IsValidTarget(a_target))
-			return nullptr;
-		const auto plan = GetService().published.load(std::memory_order_acquire);
-		if (!plan)
-			return nullptr;
-		const auto variant = std::ranges::find(
-			plan->variants,
-			a_target,
-			&PublishedVariant::targetId);
-		for (auto current = variant;
-			current != plan->variants.end()
-				&& current->targetId == a_target;
-			++current) {
-			if (current->compilation
-				&& current->compilation->GetStage()
-					== ShaderStage::kPixel) {
-				return static_cast<ID3D11PixelShader*>(
-					current->compilation->PeekShader());
-			}
-		}
-		return nullptr;
-	}
-
-	ID3D11ComputeShader* GetInjectedComputeShader(
-		ShaderInjectionTarget a_target) noexcept
-	{
-		if (!IsValidTarget(a_target))
-			return nullptr;
-		const auto plan = GetService().published.load(std::memory_order_acquire);
-		if (!plan)
-			return nullptr;
-		for (const auto& variant : plan->variants) {
-			if (variant.targetId == a_target
-				&& variant.compilation
-				&& variant.compilation->GetStage()
-					== ShaderStage::kCompute) {
-				return static_cast<ID3D11ComputeShader*>(
-					variant.compilation->PeekShader());
-			}
-		}
-		return nullptr;
-	}
-
-	bool IsInjectedPixelShader(
-		ShaderInjectionTarget a_target,
-		ID3D11PixelShader* a_shader) noexcept
-	{
-		if (!a_shader || !IsValidTarget(a_target))
-			return false;
-		const auto plan =
-			GetService().published.load(std::memory_order_acquire);
-		return plan && MatchesHlslInjectedPixelShader(
-			*plan,
-			a_target,
-			a_shader);
-	}
-
-	bool IsInjectedComputeShader(
-		ShaderInjectionTarget a_target,
-		ID3D11ComputeShader* a_shader) noexcept
-	{
-		if (!a_shader || !IsValidTarget(a_target))
-			return false;
-		const auto plan =
-			GetService().published.load(std::memory_order_acquire);
-		return plan
-			&& FindMatchingPublishedVariant(
-				*plan,
-				a_target,
-				ShaderStage::kCompute,
-				a_shader)
-				!= nullptr;
 	}
 
 	bool ActiveShaderInjectionVariantHasDefine(
@@ -2174,10 +2293,7 @@ namespace cs::engine
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept
 	{
-		const auto* variant = t_activeVariant;
-		return variant && variant->targetId == a_target ?
-			&variant->effectiveDefines :
-			nullptr;
+		return t_activeTarget == a_target ? t_activeDefines : nullptr;
 	}
 
 	ShaderInjectionOutcomeSnapshot GetShaderInjectionOutcomeSnapshot(

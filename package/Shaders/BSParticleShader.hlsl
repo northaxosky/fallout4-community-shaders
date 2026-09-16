@@ -1,6 +1,6 @@
 #ifdef PARTICLE_PS_SOURCE
 // SPDX-License-Identifier: GPL-3.0-or-later
-// AE 1.11.221, shaders011.fxp ordinals 14-19.
+// AE 1.11.240, shaders011.fxp ordinals 14-19.
 
 Texture2D<float4> SourceTexture : register(t0);
 SamplerState SourceSampler : register(s0);
@@ -45,7 +45,7 @@ float4 main(PS_INPUT input) : SV_Target
 
 #ifdef PARTICLE_VS_SOURCE
 // SPDX-License-Identifier: GPL-3.0-or-later
-// AE 1.11.221, shaders011.fxp ordinals 8-13.
+// AE 1.11.240, shaders011.fxp ordinals 8-13.
 
 cbuffer PerFrame : register(b0)
 {

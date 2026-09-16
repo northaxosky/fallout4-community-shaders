@@ -12,7 +12,7 @@ namespace cs::engine
 	inline constexpr float kMinimumWorldCameraOriginMagnitude = 1.0f;
 
 	// Field names and padding mirror package/Shaders/Common/DeferredContracts.hlsli and
-	// Stock/prepass_ps.hlsl one-for-one, so the layout can be audited against the HLSL by eye.
+	// BSDFPrePass.hlsl one-for-one, so the layout can be audited against the HLSL by eye.
 	// The trailing comment on each member is its b12 float4 register index.
 	struct alignas(16) FrameBuffer
 	{

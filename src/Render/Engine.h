@@ -1,17 +1,312 @@
 #pragma once
 
+#include "RE/B/BSShader.h"
 #include "RE/S/SceneGraph.h"
 
 #include <DirectXMath.h>
 #include <d3d11.h>
 
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <optional>
+#include <string>
+#include <tuple>
+#include <utility>
 
 namespace cs::engine
 {
+	namespace native
+	{
+		namespace detail
+		{
+			enum class ShaderRuntimeLayout
+			{
+				kOriginal,
+				kModern
+			};
+
+			[[nodiscard]] inline ShaderRuntimeLayout CurrentShaderRuntimeLayout()
+				noexcept
+			{
+				return REX::FModule::IsRuntimeOG() ?
+					ShaderRuntimeLayout::kOriginal :
+					ShaderRuntimeLayout::kModern;
+			}
+
+			template <class T>
+			[[nodiscard]] inline T& RuntimeMember(
+				RE::BSShader* a_shader,
+				std::ptrdiff_t a_ogOffset,
+				std::ptrdiff_t a_modernOffset,
+				ShaderRuntimeLayout a_layout =
+					CurrentShaderRuntimeLayout()) noexcept
+			{
+				const auto offset =
+					a_layout == ShaderRuntimeLayout::kOriginal ?
+					a_ogOffset :
+					a_modernOffset;
+				return *reinterpret_cast<T*>(
+					reinterpret_cast<std::byte*>(a_shader) + offset);
+			}
+
+			template <class T>
+			[[nodiscard]] inline const T& RuntimeMember(
+				const RE::BSShader* a_shader,
+				std::ptrdiff_t a_ogOffset,
+				std::ptrdiff_t a_modernOffset,
+				ShaderRuntimeLayout a_layout =
+					CurrentShaderRuntimeLayout()) noexcept
+			{
+				return RuntimeMember<T>(
+					const_cast<RE::BSShader*>(a_shader),
+					a_ogOffset,
+					a_modernOffset,
+					a_layout);
+			}
+		}
+
+		using VertexShaderMap =
+			RE::BSShaderTechniqueIDMap::MapType<
+				RE::BSGraphics::VertexShader*>;
+		using PixelShaderMap =
+			RE::BSShaderTechniqueIDMap::MapType<
+				RE::BSGraphics::PixelShader*>;
+		using ComputeShaderMap =
+			RE::BSShaderTechniqueIDMap::MapType<
+				RE::BSGraphics::ComputeShader*>;
+
+		[[nodiscard]] inline const VertexShaderMap& VertexShaders(
+			const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<VertexShaderMap>(
+				a_shader, 0x20, 0x98);
+		}
+
+		[[nodiscard]] inline const PixelShaderMap& PixelShaders(
+			const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<PixelShaderMap>(
+				a_shader, 0xB0, 0x128);
+		}
+
+		[[nodiscard]] inline const ComputeShaderMap& ComputeShaders(
+			const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<ComputeShaderMap>(
+				a_shader, 0xE0, 0x158);
+		}
+
+		[[nodiscard]] inline const ComputeShaderMap&
+			StandaloneComputeShaders(const void* a_owner) noexcept
+		{
+			return *reinterpret_cast<const ComputeShaderMap*>(
+				static_cast<const std::byte*>(a_owner) + 0x20);
+		}
+
+		[[nodiscard]] inline const char*
+			StandaloneComputeOwnerName(const void* a_owner) noexcept
+		{
+			return *reinterpret_cast<const char* const*>(
+				static_cast<const std::byte*>(a_owner) + 0x18);
+		}
+
+		[[nodiscard]] inline const char* FxpFilename(
+			const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<const char*>(
+				a_shader, 0x110, 0x188);
+		}
+
+		[[nodiscard]] inline std::int32_t ShaderType(
+			const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<std::int32_t>(
+				a_shader,
+				0x18,
+				0x18,
+				detail::ShaderRuntimeLayout::kOriginal);
+		}
+
+		[[nodiscard]] inline const char* ImageSpaceShaderPrefix(
+			const RE::BSShader* a_shader) noexcept
+		{
+			if (!a_shader
+				|| !REX::FModule::IsRuntimeAE()
+				|| ShaderType(a_shader) != 0xC) {
+				return nullptr;
+			}
+			return detail::RuntimeMember<const char*>(
+				a_shader,
+				0x248,
+				0x248,
+				detail::ShaderRuntimeLayout::kModern);
+		}
+
+		[[nodiscard]] inline const char* ImageSpaceShaderClassName(
+			const RE::BSShader* a_shader) noexcept
+		{
+			if (!a_shader
+				|| !REX::FModule::IsRuntimeAE()
+				|| ShaderType(a_shader) != 0xC) {
+				return nullptr;
+			}
+			return detail::RuntimeMember<const char*>(
+				a_shader,
+				0x240,
+				0x240,
+				detail::ShaderRuntimeLayout::kModern);
+		}
+
+		struct ImageSpaceMacroSet
+		{
+			std::array<std::pair<std::string, std::string>, 7> values;
+			std::size_t count = 0;
+		};
+
+		namespace detail
+		{
+			template <bool RequireAeRuntime>
+			[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
+				GetImageSpaceMacrosImpl(RE::BSShader* a_shader) noexcept
+			{
+				if (!a_shader || ShaderType(a_shader) != 0xC)
+					return std::nullopt;
+				if constexpr (RequireAeRuntime) {
+					if (!REX::FModule::IsRuntimeAE())
+						return std::nullopt;
+				}
+
+				struct NativeMacro
+				{
+					const char* name = nullptr;
+					const char* value = nullptr;
+				};
+				using GetMacros = NativeMacro* (*)(
+					RE::BSShader*, NativeMacro*);
+				const auto vtable =
+					*reinterpret_cast<std::uintptr_t**>(a_shader);
+				if (!vtable || !vtable[17])
+					return std::nullopt;
+
+				std::array<NativeMacro, 8> nativeMacros{};
+				const auto emitter =
+					reinterpret_cast<GetMacros>(vtable[17]);
+				std::ignore = emitter(a_shader, nativeMacros.data());
+
+				ImageSpaceMacroSet result;
+				for (const auto& macro : nativeMacros) {
+					if (!macro.name) {
+						if (macro.value)
+							return std::nullopt;
+						return result;
+					}
+					if (!macro.value
+						|| result.count >= result.values.size()) {
+						return std::nullopt;
+					}
+					result.values[result.count++] = {
+						macro.name, macro.value
+					};
+				}
+				return std::nullopt;
+			}
+		}
+
+		[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
+			GetImageSpaceMacros(RE::BSShader* a_shader) noexcept
+		{
+			return detail::GetImageSpaceMacrosImpl<true>(a_shader);
+		}
+
+#ifdef FO4CS_SHADER_INJECTION_TESTING
+		[[nodiscard]] inline const VertexShaderMap&
+			VertexShadersForTesting(
+				const RE::BSShader* a_shader,
+				bool a_modern) noexcept
+		{
+			return detail::RuntimeMember<VertexShaderMap>(
+				a_shader,
+				0x20,
+				0x98,
+				a_modern ?
+					detail::ShaderRuntimeLayout::kModern :
+					detail::ShaderRuntimeLayout::kOriginal);
+		}
+
+		[[nodiscard]] inline const PixelShaderMap&
+			PixelShadersForTesting(
+				const RE::BSShader* a_shader,
+				bool a_modern) noexcept
+		{
+			return detail::RuntimeMember<PixelShaderMap>(
+				a_shader,
+				0xB0,
+				0x128,
+				a_modern ?
+					detail::ShaderRuntimeLayout::kModern :
+					detail::ShaderRuntimeLayout::kOriginal);
+		}
+
+		[[nodiscard]] inline const ComputeShaderMap&
+			ComputeShadersForTesting(
+				const RE::BSShader* a_shader,
+				bool a_modern) noexcept
+		{
+			return detail::RuntimeMember<ComputeShaderMap>(
+				a_shader,
+				0xE0,
+				0x158,
+				a_modern ?
+					detail::ShaderRuntimeLayout::kModern :
+					detail::ShaderRuntimeLayout::kOriginal);
+		}
+
+		[[nodiscard]] inline const char* FxpFilenameForTesting(
+			const RE::BSShader* a_shader,
+			bool a_modern) noexcept
+		{
+			return detail::RuntimeMember<const char*>(
+				a_shader,
+				0x110,
+				0x188,
+				a_modern ?
+					detail::ShaderRuntimeLayout::kModern :
+					detail::ShaderRuntimeLayout::kOriginal);
+		}
+
+		[[nodiscard]] inline std::optional<ImageSpaceMacroSet>
+			GetImageSpaceMacrosForTesting(RE::BSShader* a_shader) noexcept
+		{
+			return detail::GetImageSpaceMacrosImpl<false>(a_shader);
+		}
+
+		[[nodiscard]] inline const char*
+			ImageSpaceShaderPrefixForTesting(
+				const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<const char*>(
+				a_shader,
+				0x248,
+				0x248,
+				detail::ShaderRuntimeLayout::kModern);
+		}
+
+		[[nodiscard]] inline const char*
+			ImageSpaceShaderClassNameForTesting(
+				const RE::BSShader* a_shader) noexcept
+		{
+			return detail::RuntimeMember<const char*>(
+				a_shader,
+				0x240,
+				0x240,
+				detail::ShaderRuntimeLayout::kModern);
+		}
+#endif
+	}
+
 	[[nodiscard]] inline RE::BSGraphics::State* GetGraphicsState()
 	{
 		static REL::Relocation<RE::BSGraphics::State*> singleton{ REL::ID({ 600795, 2704621, 2704621 }) };

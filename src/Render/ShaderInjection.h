@@ -15,12 +15,24 @@
 #include <vector>
 
 struct ID3D11Device;
+struct ID3D11DeviceChild;
 struct ID3D11DeviceContext;
 struct ID3D11ComputeShader;
 struct ID3D11PixelShader;
+namespace RE
+{
+	class BSShader;
+	namespace BSGraphics
+	{
+		class ComputeShader;
+		class PixelShader;
+		class VertexShader;
+	}
+}
 
 namespace cs::engine
 {
+	struct ShaderFamilyDescriptor;
 	enum class ShaderResourceType : std::uint8_t
 	{
 		kConstantBuffer,
@@ -59,17 +71,6 @@ namespace cs::engine
 		std::string             entryPoint;
 		std::string             profile;
 		ShaderInjectionDefines  defines;
-	};
-
-	struct ShaderReplacementVariantRegistration
-	{
-		ShaderInjectionTarget                targetId =
-			ShaderInjectionTarget::kCount;
-		std::string                          name;
-		std::vector<ShaderVariantKey>        variantKeys;
-		std::string                          expectedStockSha1;
-		ShaderStage                          stage = ShaderStage::kPixel;
-		ShaderVariantCompilationDescriptor   compilation;
 	};
 
 	enum class DeveloperShaderOverride : std::uint8_t
@@ -175,11 +176,11 @@ namespace cs::engine
 		ComputeDispatchBridgeStatus computeBridge;
 	};
 
-	std::vector<ShaderReplacementVariantRegistration> GetDefaultShaderReplacementVariants();
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(
 			const ShaderInjectionTargetMetadata& a_target,
-			const ShaderReplacementVariantRegistration& a_variant,
+			ShaderStage a_stage,
+			const ShaderVariantCompilationDescriptor& a_family,
 			std::span<const ShaderReplacementRegistration> a_contributions,
 			std::string* a_error = nullptr);
 
@@ -187,9 +188,6 @@ namespace cs::engine
 	bool RegisterReplacementIfEnabled(
 		bool a_enabled,
 		ShaderReplacementRegistration a_registration);
-	bool RegisterReplacementVariant(
-		ShaderReplacementVariantRegistration a_registration);
-
 	bool SetBaselineShaderOwnership(
 		ShaderInjectionTarget a_target,
 		bool a_enabled);
@@ -204,26 +202,66 @@ namespace cs::engine
 	[[nodiscard]] bool ComputeDispatchBridgeInstalled() noexcept;
 	[[nodiscard]] ComputeDispatchBridgeStatus
 		GetComputeDispatchBridgeStatus() noexcept;
+	struct NativeGraphicsShaderBinding
+	{
+		RE::BSGraphics::VertexShader* vertex = nullptr;
+		RE::BSGraphics::PixelShader* pixel = nullptr;
+	};
 #ifdef FO4CS_SHADER_INJECTION_TESTING
 	bool InstallComputeDispatchBridgeForTesting(
 		ID3D11DeviceContext* a_context,
 		std::uintptr_t a_validatedTail) noexcept;
+	struct NativeShaderMetadataForTesting
+	{
+		bool forceEarlyDepthStencil = false;
+	};
+	std::optional<NativeShaderMetadataForTesting>
+		GetObservedNativeShaderMetadataForTesting(
+			ID3D11DeviceChild* a_shader) noexcept;
+	ID3D11DeviceChild* PrepareNativeShaderVariantForTesting(
+		const ShaderFamilyDescriptor& a_descriptor) noexcept;
+	NativeGraphicsShaderBinding
+		ResolveNativeGraphicsShaderBindingForTesting(
+			ShaderInjectionTarget a_target,
+			std::string_view a_nativeName,
+			std::uint32_t a_vertexShaderId,
+			std::uint32_t a_pixelShaderId,
+			RE::BSGraphics::VertexShader* a_nativeVertex,
+			RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
+	RE::BSGraphics::VertexShader*
+		CacheNativeVertexReplacementWrapperForTesting(
+			RE::BSGraphics::VertexShader* a_nativeVertex,
+			ID3D11VertexShader* a_replacement) noexcept;
+	void ObserveNativeComputeShaderForTesting(
+		ShaderInjectionTarget a_target,
+		std::uint32_t a_descriptor,
+		std::string_view a_nativeName,
+		ID3D11ComputeShader* a_shader) noexcept;
 #endif
 	void DispatchShaderInjections(
 		ShaderInjectionTarget a_target,
 		ID3D11DeviceContext* a_context) noexcept;
 	void DispatchInjectionsForBoundPixelShader(
 		ID3D11DeviceContext* a_context) noexcept;
+	NativeGraphicsShaderBinding ResolveNativeGraphicsShaderBinding(
+		RE::BSShader* a_shader,
+		std::uint32_t a_vertexShaderId,
+		std::uint32_t a_pixelShaderId,
+		RE::BSGraphics::VertexShader* a_nativeVertex,
+		RE::BSGraphics::PixelShader* a_nativePixel) noexcept;
+	RE::BSGraphics::ComputeShader* ResolveNativeComputeShaderBinding(
+		RE::BSGraphics::ComputeShader* a_nativeCompute) noexcept;
+	void ObserveNativeShader(RE::BSShader* a_shader) noexcept;
+	void ObserveNativeComputeOwner(
+		const void* a_owner,
+		ShaderInjectionTarget a_target,
+		std::string_view a_nativeName) noexcept;
+	void ObserveNativeShaderBytecode(
+		ShaderStage a_stage,
+		const void* a_bytecode,
+		std::size_t a_bytecodeLength,
+		ID3D11DeviceChild* a_shader) noexcept;
 
-	ID3D11PixelShader* GetInjectedPixelShader(ShaderInjectionTarget a_target) noexcept;
-	ID3D11ComputeShader* GetInjectedComputeShader(
-		ShaderInjectionTarget a_target) noexcept;
-	bool IsInjectedPixelShader(
-		ShaderInjectionTarget a_target,
-		ID3D11PixelShader* a_shader) noexcept;
-	bool IsInjectedComputeShader(
-		ShaderInjectionTarget a_target,
-		ID3D11ComputeShader* a_shader) noexcept;
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;
 	bool ActiveShaderInjectionVariantHasDefine(

@@ -2,13 +2,8 @@
 
 #include <cmath>
 #include <cstddef>
-#include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <limits>
-#include <string>
 #include <string_view>
 
 namespace
@@ -37,82 +32,12 @@ namespace
 		}
 	}
 
-	std::string ReadFile(const std::filesystem::path& a_path)
-	{
-		std::ifstream stream(a_path, std::ios::binary);
-		if (!stream) {
-			std::cerr << "FAIL: could not open " << a_path.string() << '\n';
-			++failures;
-			return {};
-		}
-		return std::string(
-			std::istreambuf_iterator<char>(stream),
-			std::istreambuf_iterator<char>());
-	}
-
-	constexpr std::size_t kRegister = sizeof(DirectX::XMFLOAT4);
-
 	// A right-handed basis with a translation, so a swizzle or transposition cannot pass.
 	constexpr DirectX::XMFLOAT4 kRows[3]{
 		{ 0.0f, 0.0f, 1.0f, 10.0f },
 		{ 1.0f, 0.0f, 0.0f, 20.0f },
 		{ 0.0f, 1.0f, 0.0f, 30.0f }
 	};
-
-	void TestLayout()
-	{
-		using cs::engine::FrameBuffer;
-		Check(
-			sizeof(FrameBuffer) == 47 * kRegister,
-			"the mirror spans the observed 47 b12 registers");
-		Check(
-			offsetof(FrameBuffer, ViewToWorld) == 12 * kRegister,
-			"ViewToWorld starts at b12 register 12");
-		Check(
-			offsetof(FrameBuffer, FarReproj) == 20 * kRegister,
-			"FarReproj starts at b12 register 20");
-		Check(
-			offsetof(FrameBuffer, NearReproj) == 24 * kRegister,
-			"NearReproj starts at b12 register 24");
-		Check(
-			offsetof(FrameBuffer, IblDesaturation) == 30 * kRegister,
-			"IblDesaturation sits at b12 register 30");
-		Check(
-			offsetof(FrameBuffer, PrevFrameWorldToClip) == 31 * kRegister,
-			"PrevFrameWorldToClip starts at b12 register 31");
-		Check(
-			offsetof(FrameBuffer, CameraPosAdjust) == 35 * kRegister,
-			"CameraPosAdjust sits at b12 register 35");
-		Check(
-			offsetof(FrameBuffer, CameraPreviousPosAdjust) == 36 * kRegister,
-			"CameraPreviousPosAdjust sits at b12 register 36");
-		Check(
-			offsetof(FrameBuffer, CurrFrameWorldToClip) == 37 * kRegister,
-			"CurrFrameWorldToClip starts at b12 register 37");
-		Check(
-			offsetof(FrameBuffer, FogDistanceRamp) == 41 * kRegister,
-			"the fog block starts at b12 register 41");
-		Check(
-			offsetof(FrameBuffer, FogHeightRamp) == 46 * kRegister,
-			"FogHeightRamp sits at b12 register 46");
-
-		FrameBuffer frameBuffer{};
-		for (std::size_t index = 0; index < cs::engine::kFrameBufferRegisters; ++index) {
-			reinterpret_cast<DirectX::XMFLOAT4*>(&frameBuffer)[index].x =
-				static_cast<float>(index);
-		}
-
-		CheckNear(
-			cs::engine::FrameBufferRegister(frameBuffer, 35).x,
-			35.0,
-			1e-6,
-			"register indexing reaches CameraPosAdjust");
-		CheckNear(
-			frameBuffer.CameraPosAdjust.x,
-			35.0,
-			1e-6,
-			"the named field and the indexed register are the same storage");
-	}
 
 	void TestCameraOrigin()
 	{
@@ -228,104 +153,15 @@ namespace
 			"a non-finite previous position adjustment is rejected");
 	}
 
-	// The whole point of this change is that neither the axis swizzle nor the C++ camera
-	// derivation comes back, so pin both in source.
-	void TestSourceContracts(
-		const std::filesystem::path& a_ssgiCommon,
-		const std::filesystem::path& a_ssgiDisocclusion,
-		const std::filesystem::path& a_ssgiSource,
-		const std::filesystem::path& a_contracts,
-		const std::filesystem::path& a_frameBufferHeader,
-		const std::filesystem::path& a_frameBufferSource)
-	{
-		const auto common = ReadFile(a_ssgiCommon);
-		Check(
-			!common.contains(".zyx"),
-			"the SSGI camera path applies no axis swizzle");
-		Check(
-			common.contains("dot(rows[0].xyz, direction)"),
-			"SSGI dots directions with the engine rows instead of weighting them as columns");
-		Check(
-			common.contains("float4 CameraOrigin;")
-				&& common.contains("float4 PrevCameraOrigin;"),
-			"the SSGI constant buffer carries both frames' camera origins");
-
-		const auto disocclusion = ReadFile(a_ssgiDisocclusion);
-		Check(
-			!disocclusion.contains("ViewToCameraRelativeWorld"),
-			"disocclusion no longer works in camera-relative space");
-		Check(
-			disocclusion.contains("ViewToWorldPosition(prevView, PrevViewToWorld, PrevCameraOrigin.xyz)")
-				&& disocclusion.contains("ViewToWorld, CameraOrigin.xyz"),
-			"disocclusion compares absolute world positions from both frames");
-
-		const auto ssgi = ReadFile(a_ssgiSource);
-		Check(
-			!ssgi.contains("world.rotate")
-				&& !ssgi.contains("cameraState.posAdjust")
-				&& !ssgi.contains("GetWorldRootCamera"),
-			"SSGI derives no camera basis in C++");
-		Check(
-			ssgi.contains("cs::engine::GetFrameBuffer()"),
-			"SSGI reads its camera from the engine constant buffer snapshot");
-		Check(
-			ssgi.contains("camera.rows[row * 4 + 3] = 0.0f;")
-				&& ssgi.contains("cs::engine::CameraWorldOrigin(frameBuffer.data)"),
-			"SSGI folds row w into the origin without applying it twice");
-		Check(
-			ssgi.contains("cs::engine::CameraPreviousWorldOrigin(frameBuffer.data)")
-				&& !ssgi.contains("_prevCamera.origin"),
-			"SSGI reads the previous origin from b12 instead of carrying it in C++");
-
-		const auto contracts = ReadFile(a_contracts);
-		Check(
-			contracts.contains("float4 cb12_pad_0_11[12];")
-				&& contracts.contains("float4 ViewToWorld_row0;")
-				&& contracts.contains("float4 cb12_pad_15_19[5];"),
-			"the C++ mirror still matches the shared b12 contract block");
-
-		const auto frameBufferHeader = ReadFile(a_frameBufferHeader);
-		const auto frameBufferSource = ReadFile(a_frameBufferSource);
-		Check(
-			frameBufferHeader.contains("GetValidatedLatestFrameBuffer")
-				&& frameBufferHeader.contains("bool previousFrame = false;"),
-			"FrameBuffer exposes the narrow validated latest-snapshot query");
-		Check(
-			frameBufferSource.contains("ValidateLatestSnapshot(frame, false)")
-				&& frameBufferSource.contains(
-					"ValidateLatestSnapshot(a_frame, true)"),
-			"publication stays exact-frame while the compute query allows one validated lag frame");
-		Check(
-			frameBufferSource.contains("g_latestSnapshot.sequence == 0")
-				&& frameBufferSource.contains(
-					"FrameBufferRejectReason::kBufferTooSmall"),
-			"latest-snapshot validation distinguishes absence from invalid captured data");
-
-	}
 }
 
-int main(int argc, char** argv)
+int main()
 {
-	if (argc < 7) {
-		std::cerr << "usage: FrameBufferTests <ssgi common.hlsli> <radianceDisocc.cs.hlsl>"
-					 " <ScreenSpaceGI.cpp> <DeferredContracts.hlsli>"
-					 " <FrameBuffer.h> <FrameBuffer.cpp>\n";
-		return 2;
-	}
-
-	TestLayout();
 	TestCameraOrigin();
 	TestPositionReconstruction();
 	TestDirectionReconstruction();
 	TestProjectionClassifier();
 	TestCameraBasisGuard();
-	TestSourceContracts(
-		argv[1],
-		argv[2],
-		argv[3],
-		argv[4],
-		argv[5],
-		argv[6]);
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

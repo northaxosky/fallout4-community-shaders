@@ -22,54 +22,66 @@ namespace cs::engine
 			}
 			return true;
 		}
+
+		std::optional<ShaderVariantCompilationDescriptor>
+			BuildEffectiveShaderCompileRequestImpl(
+				const ShaderInjectionTargetMetadata& a_target,
+				ShaderStage a_stage,
+				const ShaderVariantCompilationDescriptor& a_family,
+				std::span<const ShaderReplacementRegistration> a_contributions,
+				std::string* a_error)
+		{
+			ShaderVariantCompilationDescriptor request{
+				.sourcePath = a_family.sourcePath,
+				.entryPoint = a_family.entryPoint,
+				.profile = a_family.profile
+			};
+			for (const auto& define : a_target.baseDefines)
+				request.defines.emplace(define.name, define.value);
+
+			const auto stage = ShaderStageBit(a_stage);
+			bool substrateActive = false;
+			for (const auto& contribution : a_contributions) {
+				if (contribution.targetId != a_target.id
+					|| (contribution.stages & stage) == 0) {
+					continue;
+				}
+				substrateActive = true;
+				if (!MergeDefines(
+						request.defines,
+						contribution.defines,
+						a_error)) {
+					return std::nullopt;
+				}
+			}
+			if (substrateActive
+				&& !MergeDefines(
+					request.defines,
+					{ { shader_injection_defines::kSubstrate, "1" } },
+					a_error)) {
+				return std::nullopt;
+			}
+			if (!MergeDefines(request.defines, a_family.defines, a_error))
+				return std::nullopt;
+			if (a_error)
+				a_error->clear();
+			return request;
+		}
 	}
 
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(
 			const ShaderInjectionTargetMetadata& a_target,
-			const ShaderReplacementVariantRegistration& a_variant,
+			ShaderStage a_stage,
+			const ShaderVariantCompilationDescriptor& a_family,
 			std::span<const ShaderReplacementRegistration> a_contributions,
 			std::string* a_error)
 	{
-		ShaderVariantCompilationDescriptor request{
-			.sourcePath = a_variant.compilation.sourcePath,
-			.entryPoint = a_variant.compilation.entryPoint,
-			.profile = a_variant.compilation.profile
-		};
-		for (const auto& define : a_target.baseDefines)
-			request.defines.emplace(define.name, define.value);
-
-		const auto stage = ShaderStageBit(a_variant.stage);
-		bool substrateActive = false;
-		for (const auto& contribution : a_contributions) {
-			if (contribution.targetId != a_target.id
-				|| (contribution.stages & stage) == 0) {
-				continue;
-			}
-			// bind-only contributions still activate the substrate
-			substrateActive = true;
-			if (!MergeDefines(
-					request.defines,
-					contribution.defines,
-					a_error)) {
-				return std::nullopt;
-			}
-		}
-		if (substrateActive
-			&& !MergeDefines(
-				request.defines,
-				{ { shader_injection_defines::kSubstrate, "1" } },
-				a_error)) {
-			return std::nullopt;
-		}
-		if (!MergeDefines(
-				request.defines,
-				a_variant.compilation.defines,
-				a_error)) {
-			return std::nullopt;
-		}
-		if (a_error)
-			a_error->clear();
-		return request;
+		return BuildEffectiveShaderCompileRequestImpl(
+			a_target,
+			a_stage,
+			a_family,
+			a_contributions,
+			a_error);
 	}
 }

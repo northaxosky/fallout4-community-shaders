@@ -85,8 +85,8 @@ load = true
 Feature loading is evaluated **at startup**—restart the game after enabling or disabling features. Settings for already-loaded features can be adjusted live in-game.
 
 Baseline shader ownership can be enabled under `[shader_ownership]` (`enabled = true`). Its
-per-target flags select reconstructed stock shader families; replacement is admitted only for
-the measured stock hashes registered for each target.
+per-family flags select which reconstructed stock shaders Community Shaders owns. Unsupported
+variants continue using the game's native shaders.
 
 ---
 

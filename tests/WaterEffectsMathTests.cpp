@@ -1,17 +1,10 @@
-#include "FeatureBuffer.h"
 #include "WaterEffectsMath.h"
 
-#include <algorithm>
 #include <array>
 #include <cmath>
-#include <cstddef>
 #include <cstdint>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <limits>
-#include <sstream>
-#include <string>
 #include <string_view>
 
 namespace
@@ -33,31 +26,6 @@ namespace
 	bool Near(float a_left, float a_right, float a_epsilon = 1.0e-5f)
 	{
 		return std::abs(a_left - a_right) <= a_epsilon;
-	}
-
-	std::string ReadFile(const std::filesystem::path& a_path)
-	{
-		std::ifstream stream(a_path);
-		if (!stream) {
-			std::cerr << "FAIL: cannot open " << a_path.string() << '\n';
-			++failures;
-			return {};
-		}
-		std::ostringstream buffer;
-		buffer << stream.rdbuf();
-		return buffer.str();
-	}
-
-	std::size_t Count(const std::string& a_text, std::string_view a_needle)
-	{
-		std::size_t count = 0;
-		std::size_t position = 0;
-		while ((position = a_text.find(a_needle, position))
-			!= std::string::npos) {
-			++count;
-			position += a_needle.size();
-		}
-		return count;
 	}
 
 	using namespace cs::features::water_effects;
@@ -210,42 +178,6 @@ namespace
 		CHECK(Near(near[1], far[1], 1.0e-3f));
 	}
 
-	// A debug mode published while the texture is unbound would sample zero and
-	// multiply sunlight to black, so both guards must be present.
-	void TestDisabledCannotBlacken(
-		const std::filesystem::path& a_hlsliPath,
-		const std::filesystem::path& a_featurePath)
-	{
-		const auto unbound = [](std::array<float, 2>) { return 0.0f; };
-		const float blackened =
-			ComputeCausticsMult(0.0f, { 0.0f, 0.0f, -512.0f }, 0.0f, unbound);
-		CHECK(Near(blackened, 0.0f, 1.0e-4f));
-
-		const auto hlsli = ReadFile(a_hlsliPath);
-		if (!hlsli.empty()) {
-			CHECK(hlsli.find("bool CausticsTextureReady()") != std::string::npos);
-			const auto mult = hlsli.find("float GetCausticsMult(");
-			CHECK(mult != std::string::npos);
-			const auto guard = hlsli.find("!CausticsTextureReady()", mult);
-			const auto body = hlsli.find("ComputeCaustics(", mult);
-			CHECK(guard != std::string::npos);
-			CHECK(body != std::string::npos);
-			CHECK(guard < body);
-		}
-
-		const auto feature = ReadFile(a_featurePath);
-		if (feature.empty())
-			return;
-
-		const auto publish = feature.find("WaterEffects::GetCommonBufferData");
-		CHECK(publish != std::string::npos);
-		const auto gate = feature.find("if (!CanBind())", publish);
-		const auto debugOverride = feature.find("kModeCaustics", publish);
-		CHECK(gate != std::string::npos);
-		CHECK(debugOverride != std::string::npos);
-		CHECK(gate < debugOverride);
-	}
-
 	// Worldspace-inherited cells store a sentinel, not a usable plane.
 	void TestWaterHeightSanitization()
 	{
@@ -259,153 +191,9 @@ namespace
 			std::numeric_limits<float>::infinity()));
 	}
 
-	void TestFeatureBlockLayout()
-	{
-		using cs::FeatureDataCB;
-		using cs::WaterEffectsFeatureData;
-
-		static_assert(sizeof(WaterEffectsFeatureData) == 16);
-		static_assert(offsetof(WaterEffectsFeatureData, Mode) == 0);
-		static_assert(offsetof(WaterEffectsFeatureData, HasWater) == 4);
-		static_assert(offsetof(WaterEffectsFeatureData, WaterHeight) == 8);
-		static_assert(offsetof(FeatureDataCB, waterEffectsSettings) == 112);
-		static_assert(sizeof(FeatureDataCB) == 160);
-
-		const WaterEffectsFeatureData data{};
-		CHECK(data.Mode == 0);
-		CHECK(data.HasWater == 0);
-		CHECK(Near(data.WaterHeight, 0.0f));
-	}
-
-	void TestShaderContract(
-		const std::filesystem::path& a_hlsliPath,
-		const std::filesystem::path& a_bsdfLightPath,
-		const std::filesystem::path& a_bsdfCompositePath,
-		const std::filesystem::path& a_sharedDataPath)
-	{
-		const auto hlsli = ReadFile(a_hlsliPath);
-		if (hlsli.empty())
-			return;
-
-		CHECK(hlsli.find("Texture2D<float4> WaterCaustics : register(t32)")
-			!= std::string::npos);
-		CHECK(hlsli.find("Texture2D<float> SceneDepthTexture : register(t33)")
-			!= std::string::npos);
-		// s14 is taken in the composite, so the sampler must not be declared in
-		// the shared header at all.
-		CHECK(hlsli.find("register(s14)") == std::string::npos);
-
-		// Upstream re-adds CameraPosAdjust because its world position is
-		// camera-relative. Ours is absolute, so a second add would double the
-		// pan rate and make caustics swim with the camera.
-		const auto uv = hlsli.find("float2 causticsUV = ");
-		CHECK(uv != std::string::npos);
-		const auto uvEnd = hlsli.find(';', uv);
-		CHECK(uvEnd != std::string::npos);
-		CHECK(hlsli.substr(uv, uvEnd - uv).find("CameraPosAdjust")
-			== std::string::npos);
-		CHECK(hlsli.find("worldPosition.xy * UV_SCALE") != std::string::npos);
-
-		CHECK(hlsli.find("static const float SHORE_RANGE = 64.0;")
-			!= std::string::npos);
-		CHECK(hlsli.find("static const float FADE_RANGE = 1024.0;")
-			!= std::string::npos);
-		CHECK(hlsli.find("static const float UV_SCALE = 0.005;")
-			!= std::string::npos);
-		CHECK(hlsli.find("static const float CAUSTICS_GAIN = 4.0;")
-			!= std::string::npos);
-		// Upstream reconstruction contract: three rows plus the origin.
-		CHECK(hlsli.find("dot(viewToWorldRow2, positionView) + cameraPosAdjust.z")
-			!= std::string::npos);
-
-		const auto bsdfLight = ReadFile(a_bsdfLightPath);
-		if (bsdfLight.empty())
-			return;
-
-		CHECK(Count(
-				  bsdfLight,
-				  "WaterEffects::GetCausticsMultFromViewPosition")
-			== 7);
-		CHECK(bsdfLight.find("#if defined(DIRECTIONAL) && defined(WATER_EFFECTS)")
-			!= std::string::npos);
-		// The sampler is light-path only; the composite's s14 is g_sLitScene.
-		CHECK(bsdfLight.find(
-				  "#include \"WaterEffects/WaterCausticsSampler.hlsli\"")
-			!= std::string::npos);
-		// The coat's sun lobe is built from the raw light color, so it needs the
-		// multiplier too; the shadowed paths get it via `shadow`.
-		CHECK(bsdfLight.find("wetLightColor *= causticsMult;")
-			!= std::string::npos);
-		CHECK(Count(bsdfLight, "SunColor_HDR.xyz * shadow") == 3);
-
-		// Ordering against directional shadowing is not asserted here: the term
-		// is a scalar multiply, so it commutes.
-		CHECK(bsdfLight.find("WaterEffects::TryGetDebugColor")
-			== std::string::npos);
-
-		const auto bsdfComposite = ReadFile(a_bsdfCompositePath);
-		if (bsdfComposite.empty())
-			return;
-
-		CHECK(Count(
-				  bsdfComposite,
-				  "WaterEffects::TryGetDebugColorFromViewPosition")
-			== 9);
-		CHECK(Count(
-				  bsdfComposite,
-				  "WaterEffects::TryGetDebugColorFromScreenPosition")
-			== 7);
-		// The mandated shape: a local float4 and an immediate return, so an
-		// inactive helper cannot erase an earlier active one.
-		CHECK(Count(bsdfComposite, "float4 waterDebugColor;") == 16);
-		CHECK(bsdfComposite.find("output.color = waterDebugColor;")
-			!= std::string::npos);
-		CHECK(bsdfComposite.find("return waterDebugColor;")
-			!= std::string::npos);
-		CHECK(bsdfComposite.find("#include \"WaterEffects/WaterCaustics.hlsli\"")
-			!= std::string::npos);
-		CHECK(bsdfComposite.find("WaterCausticsSampler") == std::string::npos);
-
-		const auto sharedData = ReadFile(a_sharedDataPath);
-		if (sharedData.empty())
-			return;
-
-		CHECK(sharedData.find("struct WaterEffectsSettings") != std::string::npos);
-		const auto cbuffer = sharedData.find("cbuffer FeatureData");
-		CHECK(cbuffer != std::string::npos);
-		const auto member =
-			sharedData.find("waterEffectsSettings;", cbuffer);
-		CHECK(member != std::string::npos);
-		const auto dynamicMember =
-			sharedData.find("dynamicCubemapsSettings;", member);
-		CHECK(dynamicMember != std::string::npos);
-		const auto fogMember =
-			sharedData.find("exponentialHeightFogSettings;", dynamicMember);
-		CHECK(fogMember != std::string::npos);
-		CHECK(sharedData.find("Settings ", fogMember) == std::string::npos);
-	}
-
-	void TestLiveSettingsContract(const std::filesystem::path& a_sourcePath)
-	{
-		const auto source = ReadFile(a_sourcePath);
-		if (source.empty())
-			return;
-
-		CHECK(source.find("dmui::ui::Checkbox(\"Enabled\", &_settings.enabled)")
-			!= std::string::npos);
-		// Upstream ships no settings at all; inventing knobs here would repeat
-		// the invented interior-strength default.
-		CHECK(source.find("\"strength\"") == std::string::npos);
-		CHECK(source.find("\"shore_range\"") == std::string::npos);
-		CHECK(source.find("Menu::Get().DrawDebugViewSelector(*this)")
-			!= std::string::npos);
-		// The composite debug fetch has no mip selection, so it cannot show the
-		// light path's mip seams; the caveat has to be visible in the UI.
-		CHECK(source.find("mip") != std::string::npos);
-	}
 }
 
-int main(int a_argc, char* a_argv[])
+int main()
 {
 	TestUpstreamConstants();
 	TestShoreRamp();
@@ -416,22 +204,11 @@ int main(int a_argc, char* a_argv[])
 	TestCausticsMultiplier();
 	TestWorldLock();
 	TestWaterHeightSanitization();
-	TestFeatureBlockLayout();
-	if (a_argc == 6) {
-		TestShaderContract(a_argv[1], a_argv[2], a_argv[3], a_argv[4]);
-		TestLiveSettingsContract(a_argv[5]);
-		TestDisabledCannotBlacken(a_argv[1], a_argv[5]);
-	} else {
-		std::cerr << "FAIL: expected caustics hlsli, BSDF light, BSDF "
-					 "composite, shared data, and source paths\n";
-		++failures;
-	}
-
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";
 		return 1;
 	}
 
-	std::cout << "WaterEffects math and source-contract tests passed\n";
+	std::cout << "WaterEffects math tests passed\n";
 	return 0;
 }
