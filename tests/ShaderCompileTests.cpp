@@ -6,7 +6,6 @@
 #include "Utils/CSSha1.h"
 #include "Utils/CSSha256.h"
 #include "Utils/ShaderCompile.h"
-#include "generated/VertexShaderCompilePermutations.h"
 
 #include <algorithm>
 #include <array>
@@ -430,23 +429,8 @@ namespace
 			ExpectedVariable{ "dynamicCubemapsSettings", 128, 16 },
 			ExpectedVariable{ "exponentialHeightFogSettings", 144, 16 }
 		};
-		constexpr std::array skylightingVariables{
-			ExpectedVariable{ "OcclusionViewProj", 0, 64 },
-			ExpectedVariable{ "OcclusionDirection", 64, 16 },
-			ExpectedVariable{ "ViewToWorld_row0", 80, 16 },
-			ExpectedVariable{ "ViewToWorld_row1", 96, 16 },
-			ExpectedVariable{ "ViewToWorld_row2", 112, 16 },
-			ExpectedVariable{ "CameraPosAdjust", 128, 16 },
-			ExpectedVariable{ "PosOffset", 144, 16 },
-			ExpectedVariable{ "ArrayOrigin", 160, 16 },
-			ExpectedVariable{ "ValidMargin", 176, 16 },
-			ExpectedVariable{ "OcclusionExtent", 192, 4 },
-			ExpectedVariable{ "MinDiffuseVisibility", 196, 4 },
-			ExpectedVariable{ "MinSpecularVisibility", 200, 4 },
-			ExpectedVariable{ "Mode", 204, 4 }
-		};
-		if (shaderDesc.ConstantBuffers != 3
-			|| shaderDesc.BoundResources != 3) {
+		if (shaderDesc.ConstantBuffers != 2
+			|| shaderDesc.BoundResources != 2) {
 			return "active shared substrate probe emitted the wrong resource count";
 		}
 		if (auto error = ValidateConstantBuffer(
@@ -458,21 +442,12 @@ namespace
 			!error.empty()) {
 			return error;
 		}
-		if (auto error = ValidateConstantBuffer(
+		return ValidateConstantBuffer(
 				reflection.Get(),
 				"FeatureData",
 				6,
 				160,
 				featureVariables);
-			!error.empty()) {
-			return error;
-		}
-		return ValidateConstantBuffer(
-			reflection.Get(),
-			"SkylightingData",
-			7,
-			208,
-			skylightingVariables);
 	}
 
 	std::string ValidateTextureBindings(
@@ -1068,21 +1043,6 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
-	std::size_t AddSkylighting(
-		std::vector<ShaderCompileJob>& a_jobs,
-		const std::filesystem::path& a_root)
-	{
-		const auto firstJob = a_jobs.size();
-		AddCompile(
-			a_jobs,
-			a_root / "Skylighting" / "UpdateProbesCS.hlsl",
-			{},
-			"cs_5_0",
-			"main",
-			"skylighting probe update");
-		return a_jobs.size() - firstJob;
-	}
-
 	struct SlotExpectations
 	{
 		std::vector<UINT> requiredTextures;
@@ -1247,8 +1207,6 @@ namespace
 		std::size_t inverseSquareRows = 0;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
-		std::size_t skylightingTiledRows = 0;
-		std::size_t combinedTiledRows = 0;
 		std::size_t inverseSquareInertRows = 0;
 		std::size_t exponentialFogRows = 0;
 	};
@@ -1257,7 +1215,6 @@ namespace
 	constexpr std::array kCompositionTextureSlots{ 26u, 27u, 28u, 29u };
 	constexpr UINT kGbufferNormalTextureSlot = 25;
 	constexpr std::array kDynamicCubemapTextureSlots{ 16u, 17u };
-	constexpr UINT kSkylightingComputeTextureSlot = 3;
 
 	// only families that can isolate directional ambient carry the composition
 	constexpr std::array kAmbientCompositionFamilies{
@@ -1764,8 +1721,6 @@ namespace
 		std::size_t lodLandscapeObjectOverlapCases = 0;
 		std::size_t dfTiledLightingRows = 0;
 		std::size_t inverseSquareTiledRows = 0;
-		std::size_t skylightingTiledRows = 0;
-		std::size_t combinedTiledRows = 0;
 		std::size_t exponentialFogRows = 0;
 		for (const auto& registration : registrations) {
 			if (registration.targetId
@@ -1783,49 +1738,6 @@ namespace
 						}
 					});
 				++inverseSquareTiledRows;
-				SlotExpectations skylightingSlots;
-				const auto variant =
-					registration.compilation.defines.find(
-						"DFTILEDLIGHTING_VARIANT");
-				const bool ambientKernel =
-					variant != registration.compilation.defines.end()
-					&& variant->second == "2";
-				auto& skylightingTextures = ambientKernel ?
-					skylightingSlots.requiredTextures :
-					skylightingSlots.forbiddenTextures;
-				skylightingTextures.push_back(
-					kSkylightingComputeTextureSlot);
-				AddRegistration(
-					a_jobs,
-					a_root,
-					registration,
-					{
-						{
-							cs::engine::shader_injection_defines::kSkylighting,
-							"1"
-						}
-					},
-					nullptr,
-					skylightingSlots);
-				++skylightingTiledRows;
-				AddRegistration(
-					a_jobs,
-					a_root,
-					registration,
-					{
-						{
-							cs::engine::shader_injection_defines::
-								kInverseSquareLighting,
-							"1"
-						},
-						{
-							cs::engine::shader_injection_defines::kSkylighting,
-							"1"
-						}
-					},
-					nullptr,
-					std::move(skylightingSlots));
-				++combinedTiledRows;
 			}
 			bool exponentialFogConsumer = false;
 			if (compositeSource
@@ -1985,25 +1897,7 @@ namespace
 					+ " contributed final-kernel routes, found "
 					+ std::to_string(inverseSquareTiledRows));
 		}
-		if (skylightingTiledRows != kDfTiledLightingIdentities.size()) {
-			AddPreparationFailure(
-				a_jobs,
-				"DFTiledLighting skylighting coverage",
-				"Expected "
-					+ std::to_string(kDfTiledLightingIdentities.size())
-					+ " contributed final-kernel routes, found "
-					+ std::to_string(skylightingTiledRows));
-		}
-		if (combinedTiledRows != kDfTiledLightingIdentities.size()) {
-			AddPreparationFailure(
-				a_jobs,
-				"DFTiledLighting lighting composition coverage",
-				"Expected "
-					+ std::to_string(kDfTiledLightingIdentities.size())
-					+ " composed final-kernel routes, found "
-					+ std::to_string(combinedTiledRows));
-		}
-		const std::array<ShaderCase, 6> featureCompositionCases{ {
+		const std::array<ShaderCase, 3> featureCompositionCases{ {
 			{
 				"BSDFLightShader.hlsl",
 				{
@@ -2039,47 +1933,7 @@ namespace
 					}
 				},
 				"ps_5_0"
-			},
-			{
-				"BSDFLightShader.hlsl",
-				{
-					{ "AMBIENT_IBL_IN_LIGHT", "1" },
-					{ "BSDFLIGHT_PS_DEFERRED", "1" },
-					{ "LIGHT_TYPE", "1" },
-					{
-						cs::engine::shader_injection_defines::kSkylighting,
-						"1"
-					}
-				},
-				"ps_5_0"
-			},
-			{
-				"BSDFLightShader.hlsl",
-				{
-					{ "BSDFLIGHT_PS_AMBIENT", "1" },
-					{
-						cs::engine::shader_injection_defines::kSkylighting,
-						"1"
-					}
-				},
-				"ps_5_0"
-			},
-			{
-				"BSDFLightShader.hlsl",
-				{
-					{ "BSDFLIGHT_PS_DEFERRED", "1" },
-					{ "LIGHT_TYPE", "2" },
-					{ "POINTOMNI", "1" },
-					{
-						cs::engine::shader_injection_defines::kSkylighting,
-						"1"
-					}
-				},
-				"ps_5_0"
 			}
-		} };
-		const std::array<ShaderCase, 1> explicitSourceCases{ {
-			{ "BSDFPrePass.hlsl", {}, "ps_5_0" }
 		} };
 		std::array<ShaderCase, 8> terrainSssDebugCases;
 		std::array<ShaderCase, 8> wetnessSssDebugCases;
@@ -2142,7 +1996,6 @@ namespace
 			}
 		};
 		compileCases(featureCompositionCases);
-		compileCases(explicitSourceCases);
 		for (const auto& shader : terrainSssDebugCases) {
 			auto& job = AddCompile(
 				a_jobs,
@@ -2277,18 +2130,6 @@ namespace
 					++inverseSquareRows;
 				else
 					++inverseSquareInertRows;
-
-				AddRegistration(
-					a_jobs,
-					a_root,
-					registration,
-					{
-						{
-							cs::engine::shader_injection_defines::kSkylighting,
-							"1"
-						}
-					});
-				++contributorCompositionCount;
 
 				for (const auto& defines :
 					inverseSquareCompositions) {
@@ -2716,7 +2557,6 @@ namespace
 				uniqueRegistrationInputs.size(),
 			.explicitPermutations =
 				featureCompositionCases.size()
-				+ explicitSourceCases.size()
 				+ lodLandscapeObjectOverlapCases
 				+ exponentialFogRows
 				+ contributorCompositionCount,
@@ -2739,90 +2579,11 @@ namespace
 			.inverseSquareRows = inverseSquareRows,
 			.dfTiledLightingRows = dfTiledLightingRows,
 			.inverseSquareTiledRows = inverseSquareTiledRows,
-			.skylightingTiledRows = skylightingTiledRows,
-			.combinedTiledRows = combinedTiledRows,
 			.inverseSquareInertRows = inverseSquareInertRows,
 			.exponentialFogRows = exponentialFogRows
 		};
 	}
 
-	struct VertexFamilySource
-	{
-		std::string_view family;
-		const char* source;
-	};
-
-	constexpr std::array kVertexFamilySources{
-		VertexFamilySource{ "BSSky", "BSSkyShader.hlsl" },
-		VertexFamilySource{ "BSWater", "BSWaterShader.hlsl" },
-		VertexFamilySource{ "BSLighting", "BSLightingShader.hlsl" }
-	};
-
-	const VertexFamilySource* SourceForVertexFamily(
-		std::string_view a_family)
-	{
-		const auto family = std::ranges::find(
-			kVertexFamilySources,
-			a_family,
-			&VertexFamilySource::family);
-		return family == kVertexFamilySources.end() ?
-			nullptr :
-			&*family;
-	}
-
-	std::size_t AddVertexPermutations(
-		std::vector<ShaderCompileJob>& a_jobs,
-		const std::filesystem::path& a_root)
-	{
-		const auto permutations =
-			cs::test::shader_compile::GetVertexShaderCompilePermutations();
-		if (permutations.empty()) {
-			AddPreparationFailure(
-				a_jobs,
-				"vertex shader permutations",
-				"No vertex shader permutations were discovered");
-		}
-		std::array<bool, kVertexFamilySources.size()> represented{};
-		for (const auto& permutation : permutations) {
-			const auto* family =
-				SourceForVertexFamily(permutation.family);
-			if (!family) {
-				AddPreparationFailure(
-					a_jobs,
-					"vertex " + std::string(permutation.label),
-					"Unknown vertex permutation family '"
-						+ std::string(permutation.family) + "'");
-				continue;
-			}
-			const auto familyIndex = static_cast<std::size_t>(
-				family - kVertexFamilySources.data());
-			represented[familyIndex] = true;
-			ShaderDefines defines;
-			defines.reserve(permutation.defines.size());
-			for (const auto& [name, value] : permutation.defines)
-				defines.emplace_back(name, value);
-			AddCompile(
-				a_jobs,
-				a_root / family->source,
-				std::move(defines),
-				"vs_5_0",
-				"main",
-				"vertex " + std::string(permutation.family)
-					+ "/" + permutation.label);
-		}
-		for (std::size_t index = 0;
-			index < kVertexFamilySources.size();
-			++index) {
-			if (represented[index])
-				continue;
-			AddPreparationFailure(
-				a_jobs,
-				"vertex family "
-					+ std::string(kVertexFamilySources[index].family),
-				"No vertex shader permutations were discovered for this family");
-		}
-		return permutations.size();
-	}
 }
 
 int main(int argc, char** argv)
@@ -2855,7 +2616,6 @@ int main(int argc, char** argv)
 	}
 	const auto lightingCounts = AddLighting(jobs, argv[1]);
 	const auto terrainShadowsCount = AddTerrainShadows(jobs, argv[1]);
-	const auto skylightingCount = AddSkylighting(jobs, argv[1]);
 	if (terrainShadowsCount != kTerrainShadowsPermutations) {
 		AddPreparationFailure(
 			jobs,
@@ -2864,7 +2624,6 @@ int main(int argc, char** argv)
 				+ " permutations, prepared "
 				+ std::to_string(terrainShadowsCount));
 	}
-	const auto vertexCount = AddVertexPermutations(jobs, argv[1]);
 	const auto upscalingCount = AddUpscaling(jobs, argv[1]);
 	if (upscalingCount != kUpscalingPermutations) {
 		AddPreparationFailure(
@@ -2904,21 +2663,11 @@ int main(int argc, char** argv)
 		"ShaderCompile checked inverse-square on %zu DFTiledLighting compute routes\n",
 		lightingCounts.inverseSquareTiledRows);
 	std::printf(
-		"ShaderCompile checked skylighting on %zu DFTiledLighting compute routes and %zu inverse-square compositions\n",
-		lightingCounts.skylightingTiledRows,
-		lightingCounts.combinedTiledRows);
-	std::printf(
-		"ShaderCompile checked %zu Skylighting probe update shaders\n",
-		skylightingCount);
-	std::printf(
 		"ShaderCompile checked exponential fog on %zu BSDFComposite fog routes\n",
 		lightingCounts.exponentialFogRows);
 	std::printf(
 		"ShaderCompile checked %zu TerrainShadows permutations\n",
 		terrainShadowsCount);
-	std::printf(
-		"ShaderCompile checked %zu vertex permutations\n",
-		vertexCount);
 	std::printf(
 		"ShaderCompile checked %zu Upscaling permutations\n",
 		upscalingCount);

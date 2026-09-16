@@ -18,30 +18,12 @@ namespace
 	bool ApplyShaderOwnershipConfig(
 		const cs::feature_config::ShaderOwnershipConfig& a_config)
 	{
-		using cs::engine::ShaderInjectionTarget;
-
 		bool applied = true;
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kDeferredPrepass,
-			a_config.enabled && a_config.targets.deferredPrepass);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsdfLight,
-			a_config.enabled && a_config.targets.bsdfLight);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsdfComposite,
-			a_config.enabled && a_config.targets.bsdfComposite);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsSky,
-			a_config.enabled && a_config.targets.bsSky);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsWater,
-			a_config.enabled && a_config.targets.bsWater);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kBsLighting,
-			a_config.enabled && a_config.targets.bsLighting);
-		applied &= cs::engine::SetBaselineShaderOwnership(
-			ShaderInjectionTarget::kDfTiledLighting,
-			a_config.enabled && a_config.targets.dfTiledLighting);
+		for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
+			applied &= cs::engine::SetBaselineShaderOwnership(
+				target.id,
+				a_config.enabled && a_config.targets[target.id]);
+		}
 		return applied;
 	}
 }

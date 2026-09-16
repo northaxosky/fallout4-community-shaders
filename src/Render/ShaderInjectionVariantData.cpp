@@ -3,6 +3,7 @@
 #include "Render/ShaderInjectionEmbeddedData.h"
 #include "Render/ShaderInjectionVariantFactory.h"
 
+#include <filesystem>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -63,6 +64,7 @@ namespace cs::engine
 					&& name != "name"
 					&& name != "stock_sha1"
 					&& name != "stage"
+					&& name != "source"
 					&& name != "defines") {
 					ThrowDataError(a_source, "unknown field", a_index);
 				}
@@ -131,13 +133,19 @@ namespace cs::engine
 					ReadString(*row, "stage", a_source, index),
 					a_source,
 					index);
-				a_variants.push_back(MakeDefaultVariantRegistration(
+				auto registration = MakeDefaultVariantRegistration(
 					target->id,
 					ReadString(*row, "name", a_source, index),
 					{},
 					ReadString(*row, "stock_sha1", a_source, index),
 					ParseDefines(*row, a_source, index),
-					stage));
+					stage);
+				if (const auto source =
+						(*row)["source"].value<std::string>()) {
+					registration.compilation.sourcePath =
+						std::filesystem::path(*source).wstring();
+				}
+				a_variants.push_back(std::move(registration));
 			}
 		}
 	}
@@ -159,6 +167,6 @@ namespace cs::engine
 			a_variants,
 			embedded::StaticFamilyShaderReplacementVariants(),
 			"static_families.toml",
-			90);
+			1566);
 	}
 }

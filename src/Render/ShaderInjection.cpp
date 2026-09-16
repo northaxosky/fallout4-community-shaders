@@ -26,83 +26,9 @@
 
 namespace cs::engine
 {
-#include "Render/ShaderInjectionPrepassLodVariants.inl"
-
 	namespace
 	{
-		constexpr std::array<ShaderInjectionDefineMetadata, 0> kNoDefines{};
-
-		constexpr std::array<ShaderInjectionTargetMetadata,
-			static_cast<std::size_t>(ShaderInjectionTarget::kCount)> kTargets{ {
-			{
-				ShaderInjectionTarget::kDeferredPrepass,
-				"deferred_prepass",
-				L"BSDFPrePass.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kBsSky,
-				"bssky",
-				L"BSSkyShader.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kBsWater,
-				"bswater",
-				L"BSWaterShader.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kBsLighting,
-				"bslighting",
-				L"BSLightingShader.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kBsdfLight,
-				"bsdf_light",
-				L"BSDFLightShader.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kBsdfComposite,
-				"bsdf_composite",
-				L"BSDFCompositeShader.hlsl",
-				"main",
-				"ps_5_0",
-				kNoDefines
-			},
-			{
-				ShaderInjectionTarget::kDfTiledLighting,
-				"df_tiled_lighting",
-				L"DFTiledLighting.hlsl",
-				"main",
-				"cs_5_0",
-				kNoDefines
-			}
-		} };
-
-		// Every target has stock hash guards and is baseline-ownable.
-		constexpr std::array<ShaderInjectionTarget, 7>
-			kBaselineOwnableTargets{
-				ShaderInjectionTarget::kDeferredPrepass,
-				ShaderInjectionTarget::kBsSky,
-				ShaderInjectionTarget::kBsWater,
-				ShaderInjectionTarget::kBsLighting,
-				ShaderInjectionTarget::kBsdfLight,
-				ShaderInjectionTarget::kBsdfComposite,
-				ShaderInjectionTarget::kDfTiledLighting
-			};
+		constexpr auto& kTargets = kShaderInjectionTargets;
 
 		constexpr std::string_view StageName(ShaderStage a_stage) noexcept
 		{
@@ -147,11 +73,6 @@ namespace cs::engine
 			auto variants =
 				std::vector<ShaderReplacementVariantRegistration>{
 				MakeDefaultVariantRegistration(
-					Target::kDeferredPrepass,
-					"default",
-					{},
-					"c493970c042ccd90363c57596ff53f6fdd22ce5f"),
-				MakeDefaultVariantRegistration(
 					Target::kDfTiledLighting,
 					"dftiledlighting_key1",
 					{},
@@ -170,7 +91,6 @@ namespace cs::engine
 					},
 					ShaderStage::kCompute)
 			};
-			AppendPrepassLodShaderReplacementVariants(variants);
 			AppendStaticFamilyShaderReplacementVariants(variants);
 			AppendBsdfFamilyShaderReplacementVariants(variants);
 			return variants;
@@ -350,8 +270,7 @@ namespace cs::engine
 
 		bool IsBaselineOwnableTarget(ShaderInjectionTarget a_target)
 		{
-			return std::ranges::find(kBaselineOwnableTargets, a_target)
-				!= kBaselineOwnableTargets.end();
+			return IsValidTarget(a_target);
 		}
 
 		enum class MatchedShaderOutcome : std::uint8_t
@@ -1440,24 +1359,6 @@ namespace cs::engine
 				return ShaderSwapResolverResult::kKeepStock;
 			}
 		}
-	}
-
-	std::span<const ShaderInjectionTargetMetadata> GetShaderInjectionTargets() noexcept
-	{
-		return kTargets;
-	}
-
-	const ShaderInjectionTargetMetadata* GetShaderInjectionTarget(
-		ShaderInjectionTarget a_target) noexcept
-	{
-		return IsValidTarget(a_target) ? &kTargets[ToIndex(a_target)] : nullptr;
-	}
-
-	const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(
-		std::string_view a_name) noexcept
-	{
-		const auto target = std::ranges::find(kTargets, a_name, &ShaderInjectionTargetMetadata::name);
-		return target == kTargets.end() ? nullptr : &*target;
 	}
 
 	std::vector<ShaderReplacementVariantRegistration>

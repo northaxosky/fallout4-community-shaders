@@ -1,8 +1,4 @@
 #include "Common/SharedData.hlsli"
-#ifdef FO4CS_SUBSTRATE
-#include "Skylighting/SkylightingResources.hlsli"
-#include "Skylighting/Skylighting.hlsli"
-#endif
 
 float BoolValue(bool value)
 {
@@ -66,19 +62,6 @@ float4 main() : SV_Target
 	value += SharedData::exponentialHeightFogSettings.HeightFalloffMultiplier;
 	value += SharedData::exponentialHeightFogSettings.pad0;
 
-	value += Skylighting::OcclusionViewProj[0][0];
-	value += dot(Skylighting::OcclusionDirection, 1.0);
-	value += dot(Skylighting::ViewToWorld_row0, 1.0);
-	value += dot(Skylighting::ViewToWorld_row1, 1.0);
-	value += dot(Skylighting::ViewToWorld_row2, 1.0);
-	value += dot(Skylighting::CameraPosAdjust, 1.0);
-	value += dot(Skylighting::PosOffset, 1.0);
-	value += dot((float4)Skylighting::ArrayOrigin, 1.0);
-	value += dot((float4)Skylighting::ValidMargin, 1.0);
-	value += Skylighting::OcclusionExtent;
-	value += Skylighting::MinDiffuseVisibility;
-	value += Skylighting::MinSpecularVisibility;
-	value += Skylighting::Mode;
 	return value.xxxx;
 #else
 	return 0.0;

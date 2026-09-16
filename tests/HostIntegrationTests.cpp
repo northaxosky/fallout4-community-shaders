@@ -697,8 +697,8 @@ namespace
 			"radiance",
 			cs::FeatureDebugViewKind::kTexturePreview);
 		state.Select(
-			"Skylighting",
-			"occlusion",
+			"DynamicCubemaps",
+			"environment",
 			cs::FeatureDebugViewKind::kTexturePreview);
 		state.Select(
 			"WetnessEffects",

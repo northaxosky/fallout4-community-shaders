@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderInjectionTargets.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -20,18 +21,6 @@ struct ID3D11PixelShader;
 
 namespace cs::engine
 {
-	enum class ShaderInjectionTarget : std::uint8_t
-	{
-		kDeferredPrepass,
-		kBsSky,
-		kBsWater,
-		kBsLighting,
-		kBsdfLight,
-		kBsdfComposite,
-		kDfTiledLighting,
-		kCount
-	};
-
 	enum class ShaderResourceType : std::uint8_t
 	{
 		kConstantBuffer,
@@ -125,22 +114,6 @@ namespace cs::engine
 			!= 0;
 	}
 
-	struct ShaderInjectionDefineMetadata
-	{
-		std::string_view name;
-		std::string_view value;
-	};
-
-	struct ShaderInjectionTargetMetadata
-	{
-		ShaderInjectionTarget                         id = ShaderInjectionTarget::kCount;
-		std::string_view                              name;
-		std::wstring_view                             sourcePath;
-		std::string_view                              entryPoint;
-		std::string_view                              profile;
-		std::span<const ShaderInjectionDefineMetadata> baseDefines;
-	};
-
 	struct ShaderInjectionTargetSnapshot
 	{
 		ShaderInjectionTarget  id = ShaderInjectionTarget::kCount;
@@ -202,9 +175,6 @@ namespace cs::engine
 		ComputeDispatchBridgeStatus computeBridge;
 	};
 
-	std::span<const ShaderInjectionTargetMetadata> GetShaderInjectionTargets() noexcept;
-	const ShaderInjectionTargetMetadata* GetShaderInjectionTarget(ShaderInjectionTarget a_target) noexcept;
-	const ShaderInjectionTargetMetadata* FindShaderInjectionTarget(std::string_view a_name) noexcept;
 	std::vector<ShaderReplacementVariantRegistration> GetDefaultShaderReplacementVariants();
 	std::optional<ShaderVariantCompilationDescriptor>
 		BuildEffectiveShaderCompileRequest(

@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <initializer_list>
 #include <optional>
 #include <random>
 #include <set>
@@ -73,6 +74,32 @@ namespace
 	toml::table Parse(std::string_view a_document)
 	{
 		return toml::parse(a_document);
+	}
+
+	using OwnershipOverride =
+		std::pair<cs::engine::ShaderInjectionTarget, bool>;
+
+	std::string OwnershipDocument(
+		bool a_enabled,
+		std::initializer_list<OwnershipOverride> a_overrides = {},
+		std::string_view a_omitted = {})
+	{
+		std::string document =
+			"[shader_ownership]\nenabled = "
+			+ std::string(a_enabled ? "true" : "false")
+			+ "\n[shader_ownership.targets]\n";
+		for (const auto& target : cs::engine::GetShaderInjectionTargets()) {
+			if (target.name == a_omitted)
+				continue;
+			bool enabled = true;
+			for (const auto& [id, value] : a_overrides) {
+				if (id == target.id)
+					enabled = value;
+			}
+			document += std::string(target.name)
+				+ " = " + (enabled ? "true\n" : "false\n");
+		}
+		return document;
 	}
 
 	void TestFileLoading(const std::filesystem::path& a_root)
@@ -145,46 +172,27 @@ namespace
 	void TestShaderOwnershipParsing()
 	{
 		using cs::feature_config::ParseShaderOwnership;
+		using enum cs::engine::ShaderInjectionTarget;
 
-		const auto disabled = ParseShaderOwnership(Parse(
-			"[shader_ownership]\n"
-			"enabled = false\n"
-			"[shader_ownership.targets]\n"
-			"deferred_prepass = true\n"
-			"bssky = true\n"
-			"bswater = true\n"
-			"bslighting = true\n"
-			"bsdf_light = true\n"
-			"bsdf_composite = true\n"
-			"df_tiled_lighting = true\n"));
+		const auto disabled =
+			ParseShaderOwnership(Parse(OwnershipDocument(false)));
 		CHECK(disabled.present);
 		CHECK(disabled.valid);
 		CHECK(!disabled.config.enabled);
-		CHECK(disabled.config.targets.deferredPrepass);
-		CHECK(disabled.config.targets.bsSky);
-		CHECK(disabled.config.targets.bsWater);
-		CHECK(disabled.config.targets.bsLighting);
-		CHECK(disabled.config.targets.bsdfLight);
-		CHECK(disabled.config.targets.bsdfComposite);
-		CHECK(disabled.config.targets.dfTiledLighting);
+		for (const auto& target : cs::engine::GetShaderInjectionTargets())
+			CHECK(disabled.config.targets[target.id]);
 
-		const auto optedOut = ParseShaderOwnership(Parse(
-			"[shader_ownership]\n"
-			"enabled = true\n"
-			"[shader_ownership.targets]\n"
-			"deferred_prepass = true\n"
-			"bssky = false\n"
-			"bswater = true\n"
-			"bslighting = true\n"
-			"bsdf_light = false\n"
-			"bsdf_composite = true\n"
-			"df_tiled_lighting = false\n"));
+		const auto optedOut = ParseShaderOwnership(Parse(OwnershipDocument(
+			true,
+			{ { kBsdfLight, false },
+				{ kBsSky, false },
+				{ kDfTiledLighting, false } })));
 		CHECK(optedOut.present);
 		CHECK(optedOut.valid);
 		CHECK(optedOut.config.enabled);
-		CHECK(!optedOut.config.targets.bsdfLight);
-		CHECK(!optedOut.config.targets.bsSky);
-		CHECK(!optedOut.config.targets.dfTiledLighting);
+		CHECK(!optedOut.config.targets[kBsdfLight]);
+		CHECK(!optedOut.config.targets[kBsSky]);
+		CHECK(!optedOut.config.targets[kDfTiledLighting]);
 
 		const auto missing = ParseShaderOwnership(Parse(""));
 		CHECK(!missing.present);
@@ -198,32 +206,14 @@ namespace
 		CHECK(!wrongEnabled.valid);
 		CHECK(!wrongEnabled.config.enabled);
 
-		const auto missingTarget = ParseShaderOwnership(Parse(
-			"[shader_ownership]\n"
-			"enabled = true\n"
-			"[shader_ownership.targets]\n"
-			"deferred_prepass = true\n"
-			"bssky = true\n"
-			"bswater = true\n"
-			"bslighting = true\n"
-			"bsdf_light = true\n"
-			"df_tiled_lighting = true\n"));
+		const auto missingTarget = ParseShaderOwnership(
+			Parse(OwnershipDocument(true, {}, "bsdf_composite")));
 		CHECK(missingTarget.present);
 		CHECK(!missingTarget.valid);
 		CHECK(!missingTarget.config.enabled);
 
 		const auto unsupportedTarget = ParseShaderOwnership(Parse(
-			"[shader_ownership]\n"
-			"enabled = true\n"
-			"[shader_ownership.targets]\n"
-			"deferred_prepass = true\n"
-			"bssky = true\n"
-			"bswater = true\n"
-			"bslighting = true\n"
-			"bsdf_light = true\n"
-			"bsdf_composite = true\n"
-			"df_tiled_lighting = true\n"
-			"deferred_composite = true\n"));
+			OwnershipDocument(true) + "deferred_composite = true\n"));
 		CHECK(unsupportedTarget.present);
 		CHECK(!unsupportedTarget.valid);
 		CHECK(!unsupportedTarget.config.enabled);
@@ -703,13 +693,8 @@ namespace
 		CHECK(ownership.present);
 		CHECK(ownership.valid);
 		CHECK(!ownership.config.enabled);
-		CHECK(ownership.config.targets.deferredPrepass);
-		CHECK(ownership.config.targets.bsSky);
-		CHECK(ownership.config.targets.bsWater);
-		CHECK(ownership.config.targets.bsLighting);
-		CHECK(ownership.config.targets.bsdfLight);
-		CHECK(ownership.config.targets.bsdfComposite);
-		CHECK(ownership.config.targets.dfTiledLighting);
+		for (const auto& target : cs::engine::GetShaderInjectionTargets())
+			CHECK(ownership.config.targets[target.id]);
 
 		const auto* wetnessSettings =
 			(*features)["WetnessEffects"]["settings"].as_table();

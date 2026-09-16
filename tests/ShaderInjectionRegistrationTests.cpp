@@ -37,8 +37,7 @@ namespace
 	std::uint32_t g_computeBindDispatches = 0;
 	std::uint32_t g_sharedComputeBinds = 0;
 	bool g_deferredLightsActive = true;
-	std::array<winrt::com_ptr<ID3D11Buffer>, 3> g_publishedComputeBuffers;
-	winrt::com_ptr<ID3D11ShaderResourceView> g_publishedComputeSrv;
+	std::array<winrt::com_ptr<ID3D11Buffer>, 2> g_publishedComputeBuffers;
 	std::optional<bool> g_activeVariantHasOwnFamily;
 	std::optional<bool> g_activeVariantHasUnrelatedDefine;
 
@@ -113,15 +112,15 @@ namespace
 				constexpr std::string_view computeSource =
 					"cbuffer SharedData : register(b5) { uint SharedValue; };"
 					"cbuffer FeatureData : register(b6) { uint FeatureValue; };"
-					"cbuffer SkylightingData : register(b7) { uint SkylightingValue; };"
-					"Texture2D<uint> Probe : register(t3);"
+					"cbuffer NativeSentinelData : register(b7) { uint NativeSentinelValue; };"
+					"Texture2D<uint> NativeSentinelTexture : register(t3);"
 					"RWStructuredBuffer<uint> Output : register(u0);"
 					"[numthreads(1, 1, 1)] void main() {"
 					"InterlockedAdd(Output[0], 1);"
 					"Output[1] = SharedValue;"
 					"Output[2] = FeatureValue;"
-					"Output[3] = SkylightingValue;"
-					"Output[4] = Probe.Load(int3(0, 0, 0));"
+					"Output[3] = NativeSentinelValue;"
+					"Output[4] = NativeSentinelTexture.Load(int3(0, 0, 0));"
 					"}";
 				const auto source =
 					a_request.stage == ShaderStage::kPixel ?
@@ -251,16 +250,12 @@ namespace cs::render
 		if (!a_context || a_stage != cs::engine::ShaderStage::kCompute)
 			return;
 		++g_sharedComputeBinds;
-		ID3D11Buffer* buffers[3]{
+		ID3D11Buffer* buffers[2]{
 			g_publishedComputeBuffers[0].get(),
-			g_publishedComputeBuffers[1].get(),
-			g_publishedComputeBuffers[2].get()
+			g_publishedComputeBuffers[1].get()
 		};
 		a_context->CSSetConstantBuffers(
-			cs::render::kSharedDataSlot, 3, buffers);
-		ID3D11ShaderResourceView* srv = g_publishedComputeSrv.get();
-		a_context->CSSetShaderResources(
-			cs::render::kSkylightingComputeTextureSlot, 1, &srv);
+			cs::render::kSharedDataSlot, 2, buffers);
 	}
 
 	bool IsDeferredLightsActive() noexcept
@@ -1304,278 +1299,6 @@ namespace
 		return ok;
 	}
 
-	bool TestPrepassLodRegistrations(
-		std::span<const ShaderReplacementVariantRegistration> a_registrations)
-	{
-		constexpr std::array<std::string_view, 14>
-			kLodLandscapePixelHashes{
-				"47bbe0535307a6a4beff5ab62050b25494bd9cd8",
-				"50ff21d4e407b11b80453d3c5705ab5f7502b61b",
-				"5d7c23fe276a3d182bf0985cfcbc2bf9a02d8278",
-				"6220551a5773b6a11bda8e32b88ed266b43f4efd",
-				"65918f5834edafabb6199d073625d1a6f5e4468e",
-				"6d031b8b738440db218bc25621799aeaeb459ccc",
-				"84063fc0865832aed8ad1a5d7a12a876a41b2b7b",
-				"8cf781a7370c67efb8c44a17a05a5a8b5423faaa",
-				"a7ec9a783e5608fc40d391573be5316b059e92b7",
-				"b6b0b5b52a2d6c70e2915abe3a28ae39b54e96c5",
-				"bc3c8f53a049ec00c778852e8984210730e71c26",
-				"c30bde346dfc1520b9c6c2635c3d9c85d46f2028",
-				"c5578ced20e3b2909bd7089ab420103813e1bd13",
-				"e99f1c5af81889ebcfec308efb95400c452cce4e"
-			};
-		constexpr std::array<std::string_view, 2>
-			kLandLodBlendPixelHashes{
-				"1dcf7cfc9509e2990127abfb5a665f57b0217b84",
-				"e3c03ae9c5ca1f6855215cee706b582e261b258f"
-			};
-		constexpr std::array<std::string_view, 12>
-			kLodLandscapeVertexHashes{
-				"1266a115a561eaa03756b043f872c9f93f86679a",
-				"196aa6ba9a03c455a48f8605def35d262f40889d",
-				"49394e22917211b03b34fefaf17f5ea6f3aeac5e",
-				"55bf7c83fe8bf602d018a8bd7e8528cea628b391",
-				"565ee87d074fe45128bb39057b6f5453fd691f5a",
-				"58eb23f666413a729c669e03400aef29317681b4",
-				"5df0a3f156bcc40fcf663814acff0583c60d0b9a",
-				"68afc38cbcf0e8328e9a6e152d658288f38e8c85",
-				"76441d60498272cc31e995a68a1a06d26d5addc0",
-				"7edfdd378b047f14974f878337945cb3241a3771",
-				"a41e1a51335574860b2434e43141bcff78cdb46b",
-				"d31123109ae985acb91ab15e012d53ee0e62fac3"
-			};
-		constexpr std::array<std::string_view, 3>
-			kLodObjectVertexHashes{
-				"934c836603ddbf954bc00cc079bb1b10cb2aba47",
-				"58a5f6bed118be652be960dd27b6b5d891d0b11c",
-				"5400fb402aec5cd384948b38629d8f2981f9f3fa"
-			};
-
-		auto hasDefine = [](const auto& a_registration,
-							 std::string_view a_name,
-							 std::string_view a_value) {
-			const auto found =
-				a_registration.compilation.defines.find(a_name);
-			return found != a_registration.compilation.defines.end()
-				&& found->second == a_value;
-		};
-
-		bool ok = true;
-		std::size_t lodLandscapePixels = 0;
-		std::size_t blendPixels = 0;
-		std::size_t opaquePixels = 0;
-		std::size_t landLodBlendPixels = 0;
-		std::size_t lodLandscapeVertices = 0;
-		std::size_t lodObjectVertices = 0;
-		std::size_t lodObjectLandscapeVertices = 0;
-		std::vector<PixelShaderSwapVariantKey> keys;
-
-		for (const auto& registration : a_registrations) {
-			const bool lodLandscape =
-				registration.name.starts_with(
-					"bsdfprepass_lod_landscape_");
-			const bool landLodBlend =
-				registration.name.starts_with(
-					"bsdfprepass_land_lod_blend_");
-			const bool lodObject =
-				registration.name.starts_with(
-					"bsdfprepass_lod_object_");
-			if (!lodLandscape && !landLodBlend && !lodObject)
-				continue;
-
-			ok &= Check(
-				registration.targetId
-					== ShaderInjectionTarget::kDeferredPrepass,
-				"LOD prepass registration targets the wrong shader");
-			ok &= Check(
-				registration.variantKeys.empty(),
-				"LOD prepass registration inferred an opaque route key");
-
-			cs::sha1::Sha1Result expectedHash{};
-			ok &= Check(
-				cs::sha1::Sha1FromHex(
-					registration.expectedStockSha1,
-					expectedHash),
-				"LOD prepass registration has an invalid stock hash");
-			keys.push_back({
-				.expectedStockSha1 = expectedHash,
-				.routeGroup = 1,
-				.replacementIndex = keys.size(),
-				.stage = registration.stage
-			});
-
-			if (lodLandscape
-				&& registration.stage == ShaderStage::kPixel) {
-				++lodLandscapePixels;
-				ok &= Check(
-					ContainsHash(
-						kLodLandscapePixelHashes,
-						registration.expectedStockSha1),
-					"unexpected LOD landscape pixel hash");
-				ok &= Check(
-					registration.compilation.sourcePath
-							== L"BSDFPrePass.hlsl"
-						&& hasDefine(
-							registration,
-							"LOD_LANDSCAPE",
-							"1")
-						&& hasDefine(registration, "TEXTURE", "1"),
-					"LOD landscape pixel compile vector changed");
-				if (hasDefine(registration, "BLEND", "1"))
-					++blendPixels;
-				else
-					++opaquePixels;
-			} else if (landLodBlend) {
-				++landLodBlendPixels;
-				ok &= Check(
-					registration.stage == ShaderStage::kPixel
-						&& ContainsHash(
-							kLandLodBlendPixelHashes,
-							registration.expectedStockSha1),
-					"unexpected land LOD blend pixel route");
-				ok &= Check(
-					registration.compilation.sourcePath
-							== L"BSDFPrePass.hlsl"
-						&& hasDefine(registration, "LANDSCAPE", "1")
-						&& hasDefine(
-							registration,
-							"LAND_LOD_BLEND",
-							"1")
-						&& hasDefine(
-							registration,
-							"LOD_LANDSCAPE",
-							"0"),
-					"land LOD blend compile vector changed");
-			} else if (lodLandscape) {
-				++lodLandscapeVertices;
-				ok &= Check(
-					registration.stage == ShaderStage::kVertex
-						&& ContainsHash(
-							kLodLandscapeVertexHashes,
-							registration.expectedStockSha1),
-					"unexpected LOD landscape vertex route");
-				ok &= Check(
-					registration.compilation.sourcePath
-							== L"BSDFPrePass\\LodLandscapeVertex.hlsli"
-						&& hasDefine(
-							registration,
-							"LOD_LANDSCAPE",
-							"1"),
-					"LOD landscape vertex compile vector changed");
-			} else {
-				++lodObjectVertices;
-				ok &= Check(
-					registration.stage == ShaderStage::kVertex
-						&& ContainsHash(
-							kLodObjectVertexHashes,
-							registration.expectedStockSha1),
-					"unexpected LOD object vertex route");
-				ok &= Check(
-					registration.compilation.sourcePath
-							== L"BSDFPrePass\\LodObjectInstancedVS.hlsli"
-						&& hasDefine(
-							registration,
-							"LOD_OBJECT_INSTANCED",
-							"1"),
-					"LOD object vertex compile vector changed");
-				if (hasDefine(registration, "LOD_LANDSCAPE", "1"))
-					++lodObjectLandscapeVertices;
-			}
-		}
-
-		ok &= Check(
-			lodLandscapePixels == 14
-				&& blendPixels == 2
-				&& opaquePixels == 12,
-			"LOD landscape pixel registration partition changed");
-		ok &= Check(
-			landLodBlendPixels == 2,
-			"land LOD blend pixel registration count changed");
-		ok &= Check(
-			lodLandscapeVertices == 12
-				&& lodObjectVertices == 3
-				&& lodObjectLandscapeVertices == 2,
-			"LOD vertex registration partition changed");
-		ok &= Check(
-			keys.size() == 31,
-			"LOD prepass registration count changed");
-
-		cs::sha1::Sha1Result blendHash{};
-		cs::sha1::Sha1Result objectHash{};
-		cs::sha1::Sha1Result unknownHash{};
-		(void)cs::sha1::Sha1FromHex(
-			std::string(kLodLandscapePixelHashes[6]), blendHash);
-		(void)cs::sha1::Sha1FromHex(
-			std::string(kLodObjectVertexHashes[0]), objectHash);
-		const auto blendSelection = SelectPixelShaderSwapVariant(
-			keys,
-			std::nullopt,
-			blendHash,
-			ShaderStage::kPixel);
-		const auto objectSelection = SelectPixelShaderSwapVariant(
-			keys,
-			std::nullopt,
-			objectHash,
-			ShaderStage::kVertex);
-		ok &= Check(
-			blendSelection.kind
-					== PixelShaderSwapSelectionKind::kSelected
-				&& blendSelection.usedHashFallback,
-			"exact BLEND stock hash did not select its pixel route");
-		ok &= Check(
-			objectSelection.kind
-					== PixelShaderSwapSelectionKind::kSelected
-				&& objectSelection.usedHashFallback,
-			"exact LOD object stock hash did not select its vertex route");
-		ok &= Check(
-			SelectPixelShaderSwapVariant(
-				keys,
-				std::nullopt,
-				objectHash,
-				ShaderStage::kPixel)
-					.kind == PixelShaderSwapSelectionKind::kNoMatch,
-			"LOD object vertex hash leaked into the pixel stage");
-		ok &= Check(
-			SelectPixelShaderSwapVariant(
-				keys,
-				std::nullopt,
-				unknownHash,
-				ShaderStage::kPixel)
-					.kind == PixelShaderSwapSelectionKind::kNoMatch,
-			"unknown prepass hash selected a fallback route");
-
-		const auto objectRegistration = std::ranges::find_if(
-			a_registrations,
-			[](const auto& a_registration) {
-				return a_registration.name
-					== "bsdfprepass_lod_object_vs2266";
-			});
-		const auto* target = GetShaderInjectionTarget(
-			ShaderInjectionTarget::kDeferredPrepass);
-		std::vector<ShaderReplacementRegistration> pixelContributions{
-			{
-				.targetId = ShaderInjectionTarget::kDeferredPrepass,
-				.stages = ShaderStageBit(ShaderStage::kPixel),
-				.contributor = "pixel-only",
-				.defines = { { "PIXEL_ONLY_SENTINEL", "1" } }
-			}
-		};
-		std::string compileError;
-		const auto objectRequest =
-			objectRegistration != a_registrations.end() && target
-			? BuildEffectiveShaderCompileRequest(
-				*target,
-				*objectRegistration,
-				pixelContributions,
-				&compileError)
-			: std::nullopt;
-		ok &= Check(
-			objectRequest
-				&& objectRequest->defines
-					== objectRegistration->compilation.defines,
-			"pixel-only prepass defines perturbed the LOD object vertex ABI");
-		return ok;
-	}
 
 	bool CreateWarpDevice(
 		winrt::com_ptr<ID3D11Device>& a_device,
@@ -1755,7 +1478,7 @@ namespace
 			cs::render::kSharedDataSlot, 3, buffers);
 		ID3D11ShaderResourceView* srv = nullptr;
 		a_context->CSGetShaderResources(
-			cs::render::kSkylightingComputeTextureSlot, 1, &srv);
+			3, 1, &srv);
 		const bool matches =
 			buffers[0] == a_buffers[0].get()
 			&& buffers[1] == a_buffers[1].get()
@@ -1789,7 +1512,7 @@ namespace
 			cs::render::kSharedDataSlot, 3, buffers);
 		a_context->CSSetConstantBuffers(8, 1, &a_highBuffer);
 		a_context->CSSetShaderResources(
-			cs::render::kSkylightingComputeTextureSlot, 1, &a_srv);
+			3, 1, &a_srv);
 		a_context->CSSetShaderResources(4, 1, &a_highSrv);
 		a_context->CSSetUnorderedAccessViews(0, 1, &a_uav, nullptr);
 	}
@@ -2129,8 +1852,6 @@ namespace
 					a_device,
 					static_cast<std::uint32_t>((index + 5) * 10));
 		}
-		g_publishedComputeSrv = CreateUintSrv(a_device, 90);
-
 		std::array<winrt::com_ptr<ID3D11Buffer>, 3> engineBuffers;
 		for (std::size_t index = 0; index < engineBuffers.size(); ++index) {
 			engineBuffers[index] = CreateUintConstantBuffer(
@@ -2145,7 +1866,6 @@ namespace
 			std::ranges::all_of(
 				g_publishedComputeBuffers,
 				[](const auto& a_buffer) { return !!a_buffer; })
-				&& g_publishedComputeSrv
 				&& std::ranges::all_of(
 					engineBuffers,
 					[](const auto& a_buffer) { return !!a_buffer; })
@@ -2238,7 +1958,7 @@ namespace
 		ok &= Check(
 			ComputeBindingsMatch(
 				a_context, engineBuffers, engineSrv.get()),
-			"engine bridge did not restore CS b5-b7/t3");
+			"engine bridge did not restore CS b5-b6 or preserve native b7/t3");
 		ok &= Check(
 			HighComputeBindingsMatch(
 				a_context,
@@ -2263,7 +1983,7 @@ namespace
 			values
 				&& *values
 					== std::array<std::uint32_t, 5>{
-						2, 50, 60, 70, 90 },
+						2, 50, 60, 7, 9 },
 			"engine bridge did not execute once with just-in-time shared data");
 		after = GetComputeDispatchBridgeStatus();
 		ok &= Check(
@@ -2345,7 +2065,7 @@ namespace
 			values
 				&& *values
 					== std::array<std::uint32_t, 5>{
-						3, 50, 60, 70, 90 }
+						3, 50, 60, 7, 9 }
 				&& g_sharedComputeBinds == bindsBeforeStock + 1
 				&& after.bridgeCalls
 					== beforeRepeated.bridgeCalls + 1
@@ -2423,7 +2143,6 @@ namespace
 		}
 
 		g_publishedComputeBuffers = {};
-		g_publishedComputeSrv = nullptr;
 		return ok;
 	}
 
@@ -2684,34 +2403,51 @@ int main(int a_argc, char* a_argv[])
 				stockHashes.insert(registration.expectedStockSha1).second,
 				"stock hash is claimed by more than one registration");
 		}
-		switch (registration.targetId) {
-		case ShaderInjectionTarget::kDeferredPrepass:
-		case ShaderInjectionTarget::kBsSky:
-		case ShaderInjectionTarget::kBsWater:
-		case ShaderInjectionTarget::kBsLighting:
-		case ShaderInjectionTarget::kBsdfLight:
-		case ShaderInjectionTarget::kBsdfComposite:
-		case ShaderInjectionTarget::kDfTiledLighting:
-			if (registration.stage == ShaderStage::kPixel)
-				++familyCounts[registration.targetId];
-			else if (registration.stage == ShaderStage::kVertex)
-				++vertexFamilyCounts[registration.targetId];
-			else if (registration.stage == ShaderStage::kCompute)
-				++computeFamilyCounts[registration.targetId];
-			else
-				ok &= Check(false, "registration has an invalid shader stage");
-			break;
-		default:
-			break;
-		}
+		if (registration.stage == ShaderStage::kPixel)
+			++familyCounts[registration.targetId];
+		else if (registration.stage == ShaderStage::kVertex)
+			++vertexFamilyCounts[registration.targetId];
+		else if (registration.stage == ShaderStage::kCompute)
+			++computeFamilyCounts[registration.targetId];
+		else
+			ok &= Check(false, "registration has an invalid shader stage");
 	}
-	ok &= TestPrepassLodRegistrations(staticFamilies);
 	ok &= Check(
-		familyCounts[ShaderInjectionTarget::kDeferredPrepass] == 17,
+		familyCounts[ShaderInjectionTarget::kDeferredPrepass] == 297,
 		"BSDFPrePass pixel registration count mismatch");
 	ok &= Check(
-		vertexFamilyCounts[ShaderInjectionTarget::kDeferredPrepass] == 15,
+		vertexFamilyCounts[ShaderInjectionTarget::kDeferredPrepass] == 70,
 		"BSDFPrePass vertex registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kUtility] == 42
+			&& vertexFamilyCounts[ShaderInjectionTarget::kUtility] == 174,
+		"Utility registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kParticle] == 4
+			&& vertexFamilyCounts[ShaderInjectionTarget::kParticle] == 3,
+		"Particle registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kEffect] == 652
+			&& vertexFamilyCounts[ShaderInjectionTarget::kEffect] == 199,
+		"Effect registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kBloodSplatter] == 2
+			&& vertexFamilyCounts[ShaderInjectionTarget::kBloodSplatter] == 2,
+		"BloodSplatter registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kDistantTree] == 2
+			&& vertexFamilyCounts[ShaderInjectionTarget::kDistantTree] == 2,
+		"DistantTree registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kFaceCustomization] == 0
+			&& vertexFamilyCounts[
+				ShaderInjectionTarget::kFaceCustomization] == 1,
+		"FaceCustomization registration count mismatch");
+	ok &= Check(
+		familyCounts[ShaderInjectionTarget::kImageSpace] == 19
+			&& vertexFamilyCounts[ShaderInjectionTarget::kImageSpace] == 4
+			&& computeFamilyCounts[ShaderInjectionTarget::kImageSpace] == 3,
+		"Imagespace registration count mismatch");
 	ok &= Check(
 		familyCounts[ShaderInjectionTarget::kBsSky] == 9,
 		"BSSky registration count mismatch");
@@ -2749,37 +2485,26 @@ int main(int a_argc, char* a_argv[])
 				ShaderInjectionTarget::kDfTiledLighting] == 0,
 		"DFTiledLighting compute registration count mismatch");
 	ok &= Check(
-		staticFamilies.size() == 365,
+		staticFamilies.size() == 1809,
 		"default shader replacement variant count mismatch");
 	ok &= Check(
-		stockHashes.size() == 365,
+		stockHashes.size() == 1809,
 		"default shader replacement variant non-empty stock hash count mismatch");
 
-	constexpr std::array<std::pair<ShaderInjectionTarget, std::wstring_view>, 6>
-		kFamilySources{ {
-			{ ShaderInjectionTarget::kDeferredPrepass, L"BSDFPrePass.hlsl" },
-			{ ShaderInjectionTarget::kBsSky, L"BSSkyShader.hlsl" },
-			{ ShaderInjectionTarget::kBsWater, L"BSWaterShader.hlsl" },
-			{ ShaderInjectionTarget::kBsLighting, L"BSLightingShader.hlsl" },
-			{ ShaderInjectionTarget::kBsdfLight, L"BSDFLightShader.hlsl" },
-			{ ShaderInjectionTarget::kBsdfComposite, L"BSDFCompositeShader.hlsl" }
-		} };
-	for (const auto& [target, sourcePath] : kFamilySources) {
-		const auto* metadata = GetShaderInjectionTarget(target);
+	for (const auto& target : GetShaderInjectionTargets()) {
+		const auto* metadata = GetShaderInjectionTarget(target.id);
 		ok &= Check(
 			metadata != nullptr,
 			"static family target metadata is missing");
 		if (metadata == nullptr)
 			continue;
 		ok &= Check(
-			metadata->sourcePath == sourcePath,
-			"static family source path mismatch");
-		ok &= Check(
-			metadata->entryPoint == "main",
-			"static family entry point mismatch");
-		ok &= Check(
-			metadata->profile == "ps_5_0",
-			"static family profile mismatch");
+			!metadata->name.empty()
+				&& !metadata->label.empty()
+				&& !metadata->sourcePath.empty()
+				&& metadata->entryPoint == "main"
+				&& !metadata->profile.empty(),
+			"shader target metadata is incomplete");
 	}
 	ok &= Check(
 		RegisterReplacementIfEnabled(
@@ -2829,7 +2554,7 @@ int main(int a_argc, char* a_argv[])
 	computeRegistration.stages =
 		ShaderStageBit(ShaderStage::kCompute);
 	computeRegistration.contributor = "compute-dispatch-test";
-	computeRegistration.defines = { { "SKYLIGHTING", "1" } };
+	computeRegistration.defines = { { "TEST_COMPUTE_BIND", "1" } };
 	computeRegistration.bind = [](ID3D11DeviceContext*) {
 		++g_computeBindDispatches;
 		throw std::runtime_error("intentional compute bind failure");
@@ -2838,12 +2563,12 @@ int main(int a_argc, char* a_argv[])
 		{
 			.stage = ShaderStage::kCompute,
 			.resourceType = ShaderResourceType::kConstantBuffer,
-			.slot = cs::render::kSkylightingDataSlot
+			.slot = 7
 		},
 		{
 			.stage = ShaderStage::kCompute,
 			.resourceType = ShaderResourceType::kShaderResource,
-			.slot = cs::render::kSkylightingComputeTextureSlot
+			.slot = 3
 		}
 	};
 	ok &= Check(

@@ -10,10 +10,6 @@
 #include "InverseSquareLighting/InverseSquareLighting.hlsli"
 #endif
 
-#ifdef SKYLIGHTING
-#include "Skylighting/SkylightingTiledResources.hlsli"
-#include "Skylighting/Skylighting.hlsli"
-#endif
 
 cbuffer TiledLightingParameters : register(b0)
 {
@@ -152,12 +148,6 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     ambientReflection *= ambientSpecularFactor;
     ambientReflection *= materialSpecular;
     specularAccum = ambientReflection;
-#ifdef SKYLIGHTING
-    Skylighting::Evaluation skylighting =
-        Skylighting::Evaluate(positionView, normalView);
-    Skylighting::ApplyAmbient(
-        diffuseAccum, specularAccum, skylighting);
-#endif
 #endif
 
     uint lightCount = TileLists[tileIndex].Count;
@@ -491,10 +481,6 @@ void main(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
     diffuseAccum *= TiledParams[2].y * 0.333333343;
     float4 diffuseOutput = float4(diffuseAccum, 0.0);
     float4 specularOutput = float4(specularAccum, 0.0);
-#if DFTILEDLIGHTING_VARIANT == 2 && defined(SKYLIGHTING)
-    Skylighting::ApplyFullscreenDebug(
-        diffuseOutput, specularOutput, skylighting);
-#endif
     DiffuseOutput[pixel] = diffuseOutput;
     SpecularOutput[pixel] = specularOutput;
 }

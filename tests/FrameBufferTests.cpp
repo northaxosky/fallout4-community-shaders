@@ -236,9 +236,7 @@ namespace
 		const std::filesystem::path& a_ssgiSource,
 		const std::filesystem::path& a_contracts,
 		const std::filesystem::path& a_frameBufferHeader,
-		const std::filesystem::path& a_frameBufferSource,
-		const std::filesystem::path& a_sharedDataSource,
-		const std::filesystem::path& a_skylightingSource)
+		const std::filesystem::path& a_frameBufferSource)
 	{
 		const auto common = ReadFile(a_ssgiCommon);
 		Check(
@@ -303,40 +301,15 @@ namespace
 					"FrameBufferRejectReason::kBufferTooSmall"),
 			"latest-snapshot validation distinguishes absence from invalid captured data");
 
-		const auto sharedData = ReadFile(a_sharedDataSource);
-		Check(
-			sharedData.contains("GetValidatedLatestFrameBuffer(currentFrame)")
-				&& sharedData.contains(
-					"const auto& publishedCamera = engine::GetFrameBuffer();"),
-			"compute uses validated latest b12 while pixel keeps the published draw snapshot");
-		Check(
-			sharedData.contains("skylightingRejectedCameraMissing")
-				&& sharedData.contains("skylightingRejectedCameraStale")
-				&& sharedData.contains(
-					"skylightingRejectedCameraValidation")
-				&& sharedData.contains(
-					"skylightingComputePreviousFrameCameraBinds"),
-			"consumer diagnostics split camera failures and report accepted lag frames");
-
-		const auto skylighting = ReadFile(a_skylightingSource);
-		Check(
-			skylighting.contains("consumer_rejected_camera_missing")
-				&& skylighting.contains("consumer_rejected_camera_stale")
-				&& skylighting.contains(
-					"consumer_rejected_camera_validation")
-				&& skylighting.contains(
-					"consumer_compute_previous_frame_camera_binds"),
-			"Skylighting telemetry exposes the camera rejection and fallback breakdown");
 	}
 }
 
 int main(int argc, char** argv)
 {
-	if (argc < 9) {
+	if (argc < 7) {
 		std::cerr << "usage: FrameBufferTests <ssgi common.hlsli> <radianceDisocc.cs.hlsl>"
 					 " <ScreenSpaceGI.cpp> <DeferredContracts.hlsli>"
-					 " <FrameBuffer.h> <FrameBuffer.cpp> <SharedData.cpp>"
-					 " <Skylighting.cpp>\n";
+					 " <FrameBuffer.h> <FrameBuffer.cpp>\n";
 		return 2;
 	}
 
@@ -352,9 +325,7 @@ int main(int argc, char** argv)
 		argv[3],
 		argv[4],
 		argv[5],
-		argv[6],
-		argv[7],
-		argv[8]);
+		argv[6]);
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

@@ -199,7 +199,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	register_feature(InverseSquareLighting)
 	register_feature(ExponentialHeightFog)
 	register_feature(DynamicCubemaps)
-	register_feature(Skylighting)
 	register_feature(WetnessEffects)
 	register_feature(WaterEffects)
 
@@ -260,15 +259,6 @@ add_test(
 )
 set_tests_properties(FeatureConfigSeeds PROPERTIES LABELS "configuration;package")
 
-add_executable(FeatureStateTests
-	tests/FeatureStateTests.cpp
-	src/FeatureState.h
-)
-configure_host_test(FeatureStateTests)
-
-add_test(NAME FeatureState COMMAND FeatureStateTests)
-set_tests_properties(FeatureState PROPERTIES LABELS "state;unit")
-
 add_executable(TemporalPipelineStateTests
 	tests/TemporalPipelineStateTests.cpp
 	src/Render/TemporalPipelineState.h
@@ -310,28 +300,6 @@ target_include_directories(ScreenSpaceShadowsMathTests PRIVATE
 
 add_test(NAME ScreenSpaceShadowsMath COMMAND ScreenSpaceShadowsMathTests)
 set_tests_properties(ScreenSpaceShadowsMath PROPERTIES LABELS "render;unit")
-
-add_executable(SkylightingProbeMappingTests
-	tests/SkylightingProbeMappingTests.cpp
-	features/Skylighting/src/SkylightingMath.h
-)
-configure_host_test(SkylightingProbeMappingTests)
-target_include_directories(SkylightingProbeMappingTests PRIVATE
-	"${CMAKE_SOURCE_DIR}/features/Skylighting/src"
-)
-
-add_test(
-	NAME SkylightingProbeMapping
-	COMMAND SkylightingProbeMappingTests
-		"${CMAKE_SOURCE_DIR}/features/Skylighting/Shaders/Skylighting/UpdateProbesCS.hlsl"
-		"${CMAKE_SOURCE_DIR}/features/Skylighting/Shaders/Skylighting/Skylighting.hlsli"
-		"${CMAKE_SOURCE_DIR}/features/Skylighting/src/Skylighting.h"
-		"${CMAKE_SOURCE_DIR}/src/Render/SharedData.h"
-)
-set_tests_properties(
-	SkylightingProbeMapping
-	PROPERTIES LABELS "render;shader;unit"
-)
 
 add_executable(TerrainShadowsMathTests
 	tests/TerrainShadowsMathTests.cpp
@@ -460,17 +428,6 @@ set_tests_properties(
 	PROPERTIES LABELS "render;shader;unit"
 )
 
-add_executable(LogThrottleTests
-	tests/LogThrottleTests.cpp
-	include/LogThrottle.h
-)
-configure_host_test(LogThrottleTests)
-target_include_directories(LogThrottleTests PRIVATE "${CMAKE_SOURCE_DIR}/include")
-target_link_libraries(LogThrottleTests PRIVATE spdlog::spdlog)
-
-add_test(NAME LogThrottle COMMAND LogThrottleTests)
-set_tests_properties(LogThrottle PROPERTIES LABELS "logging;unit")
-
 add_executable(HostIntegrationTests
 	tests/HostIntegrationTests.cpp
 	src/Host/HostClientOptions.h
@@ -498,30 +455,6 @@ add_test(
 	COMMAND StreamlineModuleTests "$<TARGET_FILE:StreamlineModuleFixture>"
 )
 set_tests_properties(StreamlineModule PROPERTIES LABELS "streamline;security;unit")
-
-add_executable(DebugViewContractTests
-	tests/DebugViewContractTests.cpp
-)
-configure_host_test(DebugViewContractTests)
-
-add_test(
-	NAME DebugViewContract
-	COMMAND DebugViewContractTests "${CMAKE_SOURCE_DIR}/features"
-)
-set_tests_properties(DebugViewContract PROPERTIES LABELS "menu;unit")
-
-add_executable(AnnotationContractTests
-	tests/AnnotationContractTests.cpp
-)
-configure_host_test(AnnotationContractTests)
-
-add_test(
-	NAME AnnotationContract
-	COMMAND AnnotationContractTests
-		"${CMAKE_SOURCE_DIR}/features"
-		"${CMAKE_SOURCE_DIR}/src"
-)
-set_tests_properties(AnnotationContract PROPERTIES LABELS "render;contract")
 
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(UpscalingPublicationTests
@@ -597,11 +530,9 @@ add_test(
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/common.hlsli"
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/Shaders/ScreenSpaceGI/XeGTAO/radianceDisocc.cs.hlsl"
 		"${CMAKE_SOURCE_DIR}/features/ScreenSpaceGI/src/ScreenSpaceGI.cpp"
-		"${CMAKE_SOURCE_DIR}/package/Shaders/Common/DeferredContracts.hlsli"
-		"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.h"
-		"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.cpp"
-		"${CMAKE_SOURCE_DIR}/src/Render/SharedData.cpp"
-		"${CMAKE_SOURCE_DIR}/features/Skylighting/src/Skylighting.cpp"
+	"${CMAKE_SOURCE_DIR}/package/Shaders/Common/DeferredContracts.hlsli"
+	"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.h"
+	"${CMAKE_SOURCE_DIR}/src/Render/FrameBuffer.cpp"
 )
 set_tests_properties(FrameBuffer PROPERTIES LABELS "render;shader;unit")
 
@@ -707,17 +638,6 @@ target_include_directories(ScreenSpaceGIHistoryTests PRIVATE "${CMAKE_SOURCE_DIR
 add_test(NAME ScreenSpaceGIHistory COMMAND ScreenSpaceGIHistoryTests)
 set_tests_properties(ScreenSpaceGIHistory PROPERTIES LABELS "render;unit")
 
-add_executable(SharedDataDeclarationTests
-	tests/SharedDataDeclarationTests.cpp
-)
-configure_host_test(SharedDataDeclarationTests)
-
-add_test(
-	NAME SharedDataDeclaration
-	COMMAND SharedDataDeclarationTests "${CMAKE_SOURCE_DIR}/package/Shaders"
-)
-set_tests_properties(SharedDataDeclaration PROPERTIES LABELS "render;shader;unit")
-
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	include(ShaderStage)
 	set(FO4CS_SHADER_STAGE_DIR "${CMAKE_BINARY_DIR}/ShaderStage/Shaders")
@@ -735,7 +655,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 			"${CMAKE_SOURCE_DIR}/features/InverseSquareLighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/ExponentialHeightFog/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/DynamicCubemaps/Shaders"
-			"${CMAKE_SOURCE_DIR}/features/Skylighting/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WetnessEffects/Shaders"
 			"${CMAKE_SOURCE_DIR}/features/WaterEffects/Shaders"
 		FILES
@@ -744,8 +663,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 
 	add_executable(ShaderCompileTests
 		tests/ShaderCompileTests.cpp
-		tests/generated/VertexShaderCompilePermutations.cpp
-		tests/generated/VertexShaderCompilePermutations.h
 		src/Render/ShaderInjection.cpp
 		src/Render/ShaderInjectionCompileRequest.cpp
 		src/Render/ShaderInjectionVariantData.cpp
@@ -800,62 +717,6 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	set_tests_properties(ShaderCompile PROPERTIES LABELS "shader;unit")
 
-	add_executable(ShaderCacheBenchmarkTests
-		tests/ShaderCacheBenchmarkTests.cpp
-		src/Render/ShaderInjection.cpp
-		src/Render/ShaderInjectionCompileRequest.cpp
-		src/Render/ShaderInjectionVariantData.cpp
-		src/Render/ShaderInjectionVariantData.h
-		src/Render/ShaderInjectionVariantFactory.cpp
-		src/Render/ShaderInjectionVariantFactory.h
-		src/Render/SharedDataDispatchScope.cpp
-		src/Render/PixelShaderSwapModel.cpp
-		src/Utils/CSSha1.cpp
-		src/Utils/CSSha256.cpp
-		src/Utils/CSSha256.h
-		src/Utils/ShaderCompile.cpp
-		src/Utils/ShaderCompile.h
-		${FO4CS_SHADER_CACHE_SOURCES}
-		${FO4CS_EMBEDDED_SHADER_VARIANT_SOURCES}
-	)
-	configure_host_test(ShaderCacheBenchmarkTests)
-	target_precompile_headers(ShaderCacheBenchmarkTests PRIVATE
-		"${CMAKE_SOURCE_DIR}/include/PCH.h"
-	)
-	target_compile_definitions(ShaderCacheBenchmarkTests PRIVATE
-		_WINDOWS
-		_AMD64_
-		_UNICODE
-		COMMONLIB_RUNTIMECOUNT=3
-	)
-	target_include_directories(ShaderCacheBenchmarkTests BEFORE PRIVATE
-		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
-		"${CMAKE_SOURCE_DIR}/include"
-		"${CMAKE_SOURCE_DIR}/src"
-		"${CMAKE_SOURCE_DIR}/tests"
-		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
-		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
-	)
-	target_link_libraries(ShaderCacheBenchmarkTests PRIVATE
-		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
-		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
-		CommonLibF4::CommonLibF4
-		Microsoft::DirectXTK
-		Microsoft::DirectX-Headers
-		bcrypt.lib
-		d3dcompiler.lib
-		version.lib
-		magic_enum::magic_enum
-		spdlog::spdlog
-		tomlplusplus::tomlplusplus
-	)
-	add_dependencies(ShaderCacheBenchmarkTests ShaderStage)
-
-	add_test(
-		NAME ShaderCacheBenchmark
-		COMMAND ShaderCacheBenchmarkTests "${FO4CS_SHADER_STAGE_DIR}"
-	)
-	set_tests_properties(ShaderCacheBenchmark PROPERTIES LABELS "shader;cache;benchmark")
 endif()
 
 add_executable(PixelShaderSwapTests
@@ -893,30 +754,6 @@ target_link_libraries(
 
 add_test(NAME ShaderCache COMMAND ShaderCacheTests)
 set_tests_properties(ShaderCache PROPERTIES LABELS "shader;cache;unit")
-
-add_test(
-	NAME ShaderCacheIdentityReset
-	COMMAND ShaderCacheTests --test compiler-identity-reset
-)
-add_test(
-	NAME ShaderCacheIdentityFirstRun
-	COMMAND ShaderCacheTests --test compiler-identity-first-run
-)
-add_test(
-	NAME ShaderCacheMissObservable
-	COMMAND ShaderCacheTests --test cache-miss-observable
-)
-add_test(
-	NAME ShaderCacheIdentityHashFallback
-	COMMAND ShaderCacheTests --test compiler-identity-hash-fallback
-)
-set_tests_properties(
-	ShaderCacheIdentityReset
-	ShaderCacheIdentityFirstRun
-	ShaderCacheMissObservable
-	ShaderCacheIdentityHashFallback
-	PROPERTIES LABELS "shader;cache;unit"
-)
 
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests

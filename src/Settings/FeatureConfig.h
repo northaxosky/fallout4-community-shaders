@@ -1,5 +1,8 @@
 #pragma once
 
+#include "Render/ShaderInjectionTargets.h"
+
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <limits>
@@ -70,13 +73,19 @@ namespace cs::feature_config
 
 	struct ShaderOwnershipTargets
 	{
-		bool deferredPrepass{ false };
-		bool bsSky{ false };
-		bool bsWater{ false };
-		bool bsLighting{ false };
-		bool bsdfLight{ false };
-		bool bsdfComposite{ false };
-		bool dfTiledLighting{ false };
+		std::array<bool,
+			static_cast<std::size_t>(engine::ShaderInjectionTarget::kCount)>
+			enabled{};
+
+		bool& operator[](engine::ShaderInjectionTarget a_target) noexcept
+		{
+			return enabled[static_cast<std::size_t>(a_target)];
+		}
+
+		bool operator[](engine::ShaderInjectionTarget a_target) const noexcept
+		{
+			return enabled[static_cast<std::size_t>(a_target)];
+		}
 	};
 
 	struct ShaderOwnershipConfig

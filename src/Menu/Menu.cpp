@@ -665,33 +665,18 @@ namespace cs
 					}
 				}
 
-				struct Target
-				{
-					const char* id;
-					const char* label;
-					bool enabled;
-				};
-				const std::array targets{
-					Target{ "deferred-prepass", "Deferred prepass", ownership.config.targets.deferredPrepass },
-					Target{ "bssky", "BSSky", ownership.config.targets.bsSky },
-					Target{ "bswater", "BSWater", ownership.config.targets.bsWater },
-					Target{ "bslighting", "BSLighting", ownership.config.targets.bsLighting },
-					Target{ "bsdf-light", "BSDF light", ownership.config.targets.bsdfLight },
-					Target{ "bsdf-composite", "BSDF composite", ownership.config.targets.bsdfComposite },
-					Target{ "df-tiled-lighting", "DFTiledLighting", ownership.config.targets.dfTiledLighting }
-				};
-				for (const auto& target : targets) {
+				for (const auto& target : engine::GetShaderInjectionTargets()) {
 					dmui::SettingsRowScope row{
 						a_client,
-						target.id,
-						target.label,
+						target.name.data(),
+						target.label.data(),
 						"Read-only boot configuration from the unified TOML." };
 					if (row.Result() != DMUI_RESULT_OK) {
 						CheckHostResult(a_client, false, "begin shader ownership target row");
 						return;
 					}
 					if (row.Visible()) {
-						auto enabled = target.enabled;
+						auto enabled = ownership.config.targets[target.id];
 						const dmui::DisabledScope disabled;
 						(void)dmui::ui::Checkbox("##enabled", &enabled);
 					}

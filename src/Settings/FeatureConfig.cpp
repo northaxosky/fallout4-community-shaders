@@ -566,18 +566,9 @@ namespace cs::feature_config
 			return result;
 		}
 
-		constexpr std::array<std::string_view, 7> targetKeys{
-			"deferred_prepass",
-			"bssky",
-			"bswater",
-			"bslighting",
-			"bsdf_light",
-			"bsdf_composite",
-			"df_tiled_lighting"
-		};
 		for (const auto& [key, node] : *targets) {
 			(void)node;
-			if (std::ranges::find(targetKeys, key.str()) == targetKeys.end()) {
+			if (!engine::FindShaderInjectionTarget(key.str())) {
 				result.valid = false;
 				result.config = {};
 				result.error = "shader_ownership.targets contains unknown target '"
@@ -594,17 +585,12 @@ namespace cs::feature_config
 				a_value,
 				result.error);
 		};
-		if (!readTarget("deferred_prepass", result.config.targets.deferredPrepass)
-			|| !readTarget("bssky", result.config.targets.bsSky)
-			|| !readTarget("bswater", result.config.targets.bsWater)
-			|| !readTarget("bslighting", result.config.targets.bsLighting)
-			|| !readTarget("bsdf_light", result.config.targets.bsdfLight)
-			|| !readTarget("bsdf_composite", result.config.targets.bsdfComposite)
-			|| !readTarget(
-				"df_tiled_lighting",
-				result.config.targets.dfTiledLighting)) {
-			result.valid = false;
-			result.config = {};
+		for (const auto& target : engine::GetShaderInjectionTargets()) {
+			if (!readTarget(target.name, result.config.targets[target.id])) {
+				result.valid = false;
+				result.config = {};
+				break;
+			}
 		}
 		return result;
 	}

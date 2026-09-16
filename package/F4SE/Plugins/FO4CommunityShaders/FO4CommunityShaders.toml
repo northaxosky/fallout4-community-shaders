@@ -15,6 +15,13 @@ enabled = false
 
 [shader_ownership.targets]
 deferred_prepass = true
+utility = true
+particle = true
+effect = true
+blood_splatter = true
+distant_tree = true
+face_customization = true
+imagespace = true
 bssky = true
 bswater = true
 bslighting = true
@@ -94,18 +101,6 @@ load = false
 [features.DynamicCubemaps.settings]
 # Runtime toggle for capture and deferred-composite consumption.
 enabled = true
-
-[features.Skylighting]
-load = false
-
-[features.Skylighting.settings]
-# Runtime toggle for the producer, probe update, and both lighting consumers.
-enabled = true
-force_scene_traversal = true
-occlusion_extent = 10000.0
-max_zenith = 1.5707963
-min_diffuse_visibility = 0.1
-min_specular_visibility = 0.1
 
 [features.WetnessEffects]
 load = false
