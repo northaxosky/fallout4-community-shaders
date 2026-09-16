@@ -2,11 +2,18 @@
 
 #include "Log.h"
 #include "Render/Annotation.h"
-#include "Utils/CSSha1.h"
+#include "Render/PixelShaderSwapBroker.h"
 #include "Utils/ShaderCache/ShaderCache.h"
 
+#include <algorithm>
+#include <atomic>
+#include <bit>
 #include <cstdio>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
 #include <utility>
+#include <vector>
 
 namespace cs::engine
 {
@@ -14,44 +21,8 @@ namespace cs::engine
 	{
 		auto* L = cs::log::Get("cs.render.shadercache");
 
-		class CachingShaderVariantCompilationHandle final :
-			public ShaderVariantCompilationHandle
-		{
-		public:
-			explicit CachingShaderVariantCompilationHandle(
-				ShaderStage a_stage,
-				winrt::com_ptr<ID3D11DeviceChild> a_shader) noexcept :
-				_stage(a_stage),
-				_shader(std::move(a_shader))
-			{}
-
-			ShaderVariantCompilationState GetState() const noexcept override
-			{
-				return ShaderVariantCompilationState::kReady;
-			}
-
-			winrt::com_ptr<ID3D11DeviceChild>
-				AcquireOrRequest() noexcept override
-			{
-				return _shader;
-			}
-
-			ID3D11DeviceChild* PeekShader() const noexcept override
-			{
-				return _shader.get();
-			}
-
-			ShaderStage GetStage() const noexcept override
-			{
-				return _stage;
-			}
-
-		private:
-			ShaderStage _stage;
-			winrt::com_ptr<ID3D11DeviceChild> _shader;
-		};
-
-		shader_cache::ShaderCacheStage ToCacheStage(ShaderStage a_stage) noexcept
+		shader_cache::ShaderCacheStage ToCacheStage(
+			ShaderStage a_stage) noexcept
 		{
 			static_assert(static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
 			switch (a_stage) {
@@ -101,8 +72,6 @@ namespace cs::engine
 						a_bytecodeLength,
 						nullptr,
 						vertexShader.put());
-					render::annotation::SetName(
-						vertexShader.get(), "Render/Injected/VertexShader.VS");
 					if (vertexShader)
 						a_shader.attach(vertexShader.detach());
 					break;
@@ -115,8 +84,6 @@ namespace cs::engine
 						a_bytecodeLength,
 						nullptr,
 						pixelShader.put());
-					render::annotation::SetName(
-						pixelShader.get(), "Render/Injected/PixelShader.PS");
 					if (pixelShader)
 						a_shader.attach(pixelShader.detach());
 					break;
@@ -129,8 +96,6 @@ namespace cs::engine
 						a_bytecodeLength,
 						nullptr,
 						computeShader.put());
-					render::annotation::SetName(
-						computeShader.get(), "Render/Injected/ComputeShader.CS");
 					if (computeShader)
 						a_shader.attach(computeShader.detach());
 					break;
@@ -153,105 +118,183 @@ namespace cs::engine
 			return true;
 		}
 
-		class CachingShaderVariantCompilationPolicy final :
-			public ShaderVariantCompilationPolicy
+		class GenerationRevalidationContexts
 		{
 		public:
-			ShaderVariantCompilationResult Prepare(
-				ShaderVariantCompilationRequest a_request) override
+			std::shared_ptr<shader_cache::RevalidationContext> Get(
+				std::uint64_t a_generation)
 			{
-				ShaderVariantCompilationResult result;
-				if (!a_request.device) {
-					result.error = "no D3D11 device";
-					return result;
+				std::scoped_lock lock(_mutex);
+				auto& context = _contexts[a_generation];
+				if (!context) {
+					context = std::make_shared<
+						shader_cache::RevalidationContext>();
 				}
+				return context;
+			}
 
-				const auto recipe = BuildRecipe(a_request);
-				shader_cache::ShaderCacheOptions options;
-				options.revalidation = &_revalidation;
+		private:
+			std::mutex _mutex;
+			std::unordered_map<
+				std::uint64_t,
+				std::shared_ptr<shader_cache::RevalidationContext>>
+				_contexts;
+		};
 
-				auto outcome = shader_cache::LoadOrCompileShader(recipe, options);
+		ShaderVariantCompilationOutput CompileShaderVariant(
+			ShaderVariantCompilationRequest a_request,
+			shader_cache::RevalidationContext* a_revalidation,
+			std::atomic<bool>& a_reportedCacheFailure)
+		{
+			ShaderVariantCompilationOutput result;
+			if (!a_request.device) {
+				result.error = "no D3D11 device";
+				return result;
+			}
+
+			const auto recipe = BuildRecipe(a_request);
+			shader_cache::ShaderCacheOptions options;
+			options.revalidation = a_revalidation;
+
+			auto outcome = shader_cache::LoadOrCompileShader(recipe, options);
+			if (!outcome.succeeded) {
+				result.error = outcome.error.empty() ?
+					"shader compilation failed" :
+					std::move(outcome.error);
+				return result;
+			}
+			if (!outcome.recordWritten
+				&& !outcome.cacheNote.empty()
+				&& !a_reportedCacheFailure.exchange(
+					true, std::memory_order_relaxed)) {
+				L->warn("Shader cache unavailable: {}", outcome.cacheNote);
+			}
+
+			winrt::com_ptr<ID3D11DeviceChild> shader;
+			std::string createError;
+			bool created = CreateShaderChild(
+				*a_request.device,
+				a_request.stage,
+				outcome.bytecode.data(),
+				outcome.bytecode.size(),
+				shader,
+				createError);
+
+			if (!created
+				&& outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
+				outcome = shader_cache::LoadOrCompileShader(
+					recipe,
+					options,
+					shader_cache::CacheMode::kRecompile);
 				if (!outcome.succeeded) {
-					result.error = outcome.error.empty()
-						? "shader compilation failed"
-						: std::move(outcome.error);
+					result.error = outcome.error.empty() ?
+						createError :
+						std::move(outcome.error);
 					return result;
 				}
-				if (!outcome.recordWritten && !outcome.cacheNote.empty()
-					&& !_reportedCacheFailure) {
-					L->warn("Shader cache unavailable: {}", outcome.cacheNote);
-					_reportedCacheFailure = true;
-				}
-
-				winrt::com_ptr<ID3D11DeviceChild> shader;
-				std::string createError;
-				bool created = CreateShaderChild(
+				created = CreateShaderChild(
 					*a_request.device,
 					a_request.stage,
 					outcome.bytecode.data(),
 					outcome.bytecode.size(),
 					shader,
 					createError);
-
-				// heal rejected cache hits with fresh FXC bytecode
-				if (!created
-					&& outcome.origin == shader_cache::CompileOrigin::kCacheHit) {
-					outcome = shader_cache::LoadOrCompileShader(
-						recipe,
-						options,
-						shader_cache::CacheMode::kRecompile);
-					if (!outcome.succeeded) {
-						result.error = outcome.error.empty()
-							? createError
-							: std::move(outcome.error);
-						return result;
-					}
-					created = CreateShaderChild(
-						*a_request.device,
-						a_request.stage,
-						outcome.bytecode.data(),
-						outcome.bytecode.size(),
-						shader,
-						createError);
-				}
-
-				if (!created) {
-					result.error = std::move(createError);
-					return result;
-				}
-				const std::string shaderName =
-					"Render/Injected/" + a_request.sourcePath.stem().string()
-					+ (a_request.stage == ShaderStage::kVertex
-						? ".VS"
-						: a_request.stage == ShaderStage::kCompute
-							? ".CS"
-							: ".PS");
-				render::annotation::SetName(shader.get(), shaderName);
-
-				result.state = ShaderVariantCompilationState::kReady;
-				result.bytecodeSize = outcome.bytecode.size();
-				result.compiledSha1 = sha1::Sha1ToHex(sha1::Sha1Compute(
-					outcome.bytecode.data(),
-					outcome.bytecode.size()));
-				result.sourceDescription =
-					shader_cache::DescribeCacheOutcome(outcome);
-				result.handle =
-					std::make_shared<CachingShaderVariantCompilationHandle>(
-						a_request.stage,
-						std::move(shader));
-				return result;
 			}
 
-		private:
-			// memo lifetime = one freeze batch
-			shader_cache::RevalidationContext _revalidation;
-			bool                              _reportedCacheFailure = false;
-		};
+			if (!created) {
+				result.error = std::move(createError);
+				return result;
+			}
+			const std::string shaderName =
+				"Render/Injected/" + a_request.sourcePath.stem().string()
+				+ (a_request.stage == ShaderStage::kVertex ?
+						".VS" :
+						a_request.stage == ShaderStage::kCompute ?
+							".CS" :
+							".PS");
+			render::annotation::SetName(shader.get(), shaderName);
+
+			result.shader = std::move(shader);
+			return result;
+		}
+
+		std::size_t DefaultWorkerCount() noexcept
+		{
+			static const auto performanceThreads = [] {
+				const auto fallback =
+					std::max(1U, std::thread::hardware_concurrency());
+				DWORD size = 0;
+				GetLogicalProcessorInformationEx(
+					RelationProcessorCore, nullptr, &size);
+				if (GetLastError() != ERROR_INSUFFICIENT_BUFFER
+					|| size == 0) {
+					return fallback;
+				}
+
+				std::vector<std::uint8_t> storage(size);
+				auto* information = reinterpret_cast<
+					PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(
+					storage.data());
+				if (!GetLogicalProcessorInformationEx(
+						RelationProcessorCore,
+						information,
+						&size)) {
+					return fallback;
+				}
+
+				BYTE highestEfficiencyClass = 0;
+				for (DWORD offset = 0; offset < size;) {
+					const auto* entry = reinterpret_cast<
+						const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(
+						storage.data() + offset);
+					highestEfficiencyClass = std::max(
+						highestEfficiencyClass,
+						entry->Processor.EfficiencyClass);
+					offset += entry->Size;
+				}
+
+				std::uint32_t count = 0;
+				for (DWORD offset = 0; offset < size;) {
+					const auto* entry = reinterpret_cast<
+						const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(
+						storage.data() + offset);
+					if (entry->Processor.EfficiencyClass
+						== highestEfficiencyClass) {
+						for (WORD group = 0;
+							group < entry->Processor.GroupCount;
+							++group) {
+							count += static_cast<std::uint32_t>(
+								std::popcount(
+									entry->Processor
+										.GroupMask[group].Mask));
+						}
+					}
+					offset += entry->Size;
+				}
+				return count > 0 ? count : fallback;
+			}();
+			return std::max<std::size_t>(
+				performanceThreads / 2, 1);
+		}
 	}
 
-	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateCachingShaderVariantCompilationPolicy()
+	std::shared_ptr<ShaderVariantCompilationCache>
+		CreateCachingShaderVariantCompilationCache()
 	{
-		return std::make_shared<CachingShaderVariantCompilationPolicy>();
+		auto contexts =
+			std::make_shared<GenerationRevalidationContexts>();
+		auto reportedCacheFailure =
+			std::make_shared<std::atomic<bool>>(false);
+		return CreateAsyncShaderVariantCompilationCache(
+			[contexts, reportedCacheFailure](
+				ShaderVariantCompilationRequest a_request) {
+				const auto revalidation =
+					contexts->Get(a_request.sourceGeneration);
+				return CompileShaderVariant(
+					std::move(a_request),
+					revalidation.get(),
+					*reportedCacheFailure);
+			},
+			DefaultWorkerCount());
 	}
 }

@@ -152,6 +152,7 @@ namespace cs::engine
 				RE::BSIStream* a_stream)
 			{
 				const auto result = func(a_owner, a_stream);
+				InvalidateNativeShaderVariantCompilations();
 				const std::string_view name =
 					native::StandaloneComputeOwnerName(a_owner) ?
 						native::StandaloneComputeOwnerName(a_owner) : "";
@@ -179,6 +180,7 @@ namespace cs::engine
 				RE::BSIStream* a_stream)
 			{
 				const auto result = func(a_shader, a_stream);
+				InvalidateNativeShaderVariantCompilations();
 				ObserveNativeShader(a_shader);
 				return result;
 			}

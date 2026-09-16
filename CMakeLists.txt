@@ -612,6 +612,21 @@ target_link_libraries(
 add_test(NAME ShaderCache COMMAND ShaderCacheTests)
 set_tests_properties(ShaderCache PROPERTIES LABELS "shader;cache;unit")
 
+add_executable(ShaderVariantCompilationTests
+	tests/ShaderVariantCompilationTests.cpp
+	src/Render/ShaderVariantCompilation.cpp
+)
+configure_host_test(ShaderVariantCompilationTests)
+target_link_libraries(ShaderVariantCompilationTests PRIVATE d3d11.lib)
+
+add_test(
+	NAME ShaderVariantCompilation
+	COMMAND ShaderVariantCompilationTests
+)
+set_tests_properties(ShaderVariantCompilation PROPERTIES
+	LABELS "render;shader;cache;unit"
+)
+
 if(NOT FO4CS_HOST_TESTS_ONLY)
 	add_executable(ShaderInjectionRegistrationTests
 		tests/ShaderInjectionRegistrationTests.cpp
@@ -675,6 +690,10 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 		COMMAND ShaderInjectionRegistrationTests --lazy-preparation
 	)
 	add_test(
+		NAME ShaderInjectionNativeOutcomeCache
+		COMMAND ShaderInjectionRegistrationTests --native-outcome-cache
+	)
+	add_test(
 		NAME ShaderInjectionComputeDispatchBridge
 		COMMAND ShaderInjectionRegistrationTests --dispatch-bridge
 	)
@@ -709,6 +728,10 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	set_tests_properties(ShaderInjectionLazyPreparation PROPERTIES
 		LABELS "render;shader;unit"
+		TIMEOUT 30
+	)
+	set_tests_properties(ShaderInjectionNativeOutcomeCache PROPERTIES
+		LABELS "render;shader;cache;unit"
 		TIMEOUT 30
 	)
 	set_tests_properties(ShaderInjectionComputeDispatchBridge PROPERTIES

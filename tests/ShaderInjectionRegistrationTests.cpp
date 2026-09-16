@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstring>
 #include <d3d11.h>
 #include <d3dcompiler.h>
@@ -29,6 +30,8 @@ namespace
 	std::uint32_t computeContributionBindCount = 0;
 	std::optional<bool> activeComputeVariantDefine;
 	std::array<winrt::com_ptr<ID3D11Buffer>, 2> publishedComputeBuffers;
+	std::atomic<std::uint32_t> compilationAttempts{ 0 };
+	bool forceCompilationFailure = false;
 
 	struct TestNativeMacro
 	{
@@ -51,51 +54,57 @@ namespace
 	{
 	public:
 		TestCompilationHandle(
-			cs::engine::ShaderStage a_stage,
-			winrt::com_ptr<ID3D11DeviceChild> a_shader) :
-			stage(a_stage),
-			shader(std::move(a_shader))
+			winrt::com_ptr<ID3D11DeviceChild> a_shader,
+			cs::engine::ShaderVariantCompilationState a_state =
+				cs::engine::ShaderVariantCompilationState::kReady,
+			std::string a_error = {}) :
+			shader(std::move(a_shader)),
+			state(a_state),
+			error(std::move(a_error))
 		{}
 
 		cs::engine::ShaderVariantCompilationState
 			GetState() const noexcept override
 		{
-			return cs::engine::ShaderVariantCompilationState::kReady;
+			return state;
 		}
 
-		winrt::com_ptr<ID3D11DeviceChild>
-			AcquireOrRequest() noexcept override
+		winrt::com_ptr<ID3D11DeviceChild> Acquire() noexcept override
 		{
 			return shader;
 		}
 
-		ID3D11DeviceChild* PeekShader() const noexcept override
+		std::string GetError() const override
 		{
-			return shader.get();
-		}
-
-		cs::engine::ShaderStage GetStage() const noexcept override
-		{
-			return stage;
+			return error;
 		}
 
 	private:
-		cs::engine::ShaderStage stage;
 		winrt::com_ptr<ID3D11DeviceChild> shader;
+		cs::engine::ShaderVariantCompilationState state;
+		std::string error;
 	};
 
-	class TestCompilationPolicy final :
-		public cs::engine::ShaderVariantCompilationPolicy
+	class TestCompilationCache final :
+		public cs::engine::ShaderVariantCompilationCache
 	{
 	public:
-		cs::engine::ShaderVariantCompilationResult Prepare(
+		std::shared_ptr<cs::engine::ShaderVariantCompilationHandle> Request(
 			cs::engine::ShaderVariantCompilationRequest a_request) override
 		{
 			using namespace cs::engine;
-			ShaderVariantCompilationResult result;
+			compilationAttempts.fetch_add(1, std::memory_order_relaxed);
 			if (!a_request.device) {
-				result.error = "missing test device";
-				return result;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					"missing test device");
+			}
+			if (forceCompilationFailure) {
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					"controlled native compilation failure");
 			}
 
 			const auto profile =
@@ -136,12 +145,15 @@ namespace
 				bytecode.put(),
 				errors.put());
 			if (FAILED(compileResult) || !bytecode) {
-				result.error = errors ?
+				const auto error = errors ?
 					std::string(
 						static_cast<const char*>(errors->GetBufferPointer()),
 						errors->GetBufferSize()) :
 					"test shader compilation failed";
-				return result;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					error);
 			}
 
 			winrt::com_ptr<ID3D11DeviceChild> shader;
@@ -175,16 +187,19 @@ namespace
 					shader.attach(typed.detach());
 			}
 			if (FAILED(createResult) || !shader) {
-				result.error = "test shader creation failed";
-				return result;
+				return std::make_shared<TestCompilationHandle>(
+					nullptr,
+					ShaderVariantCompilationState::kFailed,
+					"test shader creation failed");
 			}
 
-			result.state = ShaderVariantCompilationState::kReady;
-			result.handle = std::make_shared<TestCompilationHandle>(
-				a_request.stage, std::move(shader));
-			result.bytecodeSize = bytecode->GetBufferSize();
-			return result;
+			return std::make_shared<TestCompilationHandle>(
+				std::move(shader));
 		}
+
+		void Invalidate() override {}
+
+		void Stop() noexcept override {}
 	};
 }
 
@@ -229,10 +244,10 @@ namespace cs::render
 
 namespace cs::engine
 {
-	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateCachingShaderVariantCompilationPolicy()
+	std::shared_ptr<ShaderVariantCompilationCache>
+		CreateCachingShaderVariantCompilationCache()
 	{
-		return std::make_shared<TestCompilationPolicy>();
+		return std::make_shared<TestCompilationCache>();
 	}
 
 	bool EnsureDeferredDrawAnchorInstalled()
@@ -1041,6 +1056,77 @@ namespace
 				false,
 				"could not construct vertex replacement cache-transition fixture");
 		}
+	}
+
+	void CheckNativeVariantOutcomeCaching()
+	{
+		using namespace cs::engine;
+		winrt::com_ptr<ID3D11Device> device;
+		winrt::com_ptr<ID3D11DeviceContext> context;
+		Expect(
+			CreateWarpDevice(device, context),
+			"could not create native outcome cache WARP device");
+		if (!device)
+			return;
+
+		compilationAttempts.store(0, std::memory_order_relaxed);
+		forceCompilationFailure = true;
+		Expect(
+			SetBaselineShaderOwnership(
+				ShaderInjectionTarget::kBsLighting, true)
+				&& SetBaselineShaderOwnership(
+					ShaderInjectionTarget::kImageSpace, true),
+			"could not enable native outcome cache targets");
+		FreezeAndCompileShaderInjections(device.get());
+
+		const ShaderFamilyDescriptor failed{
+			.target = ShaderInjectionTarget::kBsLighting,
+			.stage = ShaderStage::kPixel,
+			.descriptor = 0,
+			.nativeName = "BSLightingShader"
+		};
+		for (std::size_t index = 0; index < 8; ++index) {
+			Expect(
+				PrepareNativeShaderVariantForTesting(failed) == nullptr,
+				"failed native compilation published a shader");
+		}
+		const auto failedSnapshot =
+			GetShaderInjectionTargetSnapshot(
+				ShaderInjectionTarget::kBsLighting);
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 1
+				&& failedSnapshot.passthroughCompileFail == 1,
+			"repeated failed native requests retried or diagnosed more than once");
+
+		const ShaderFamilyDescriptor unsupported{
+			.target = ShaderInjectionTarget::kImageSpace,
+			.stage = ShaderStage::kVertex,
+			.nativeClassName = "BSImagespaceShaderUnproved"
+		};
+		for (std::size_t index = 0; index < 8; ++index) {
+			Expect(
+				PrepareNativeShaderVariantForTesting(unsupported)
+					== nullptr,
+				"unsupported native descriptor published a shader");
+		}
+		const auto stats = GetNativeVariantCacheStatsForTesting();
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 1
+				&& stats.entries == 2
+				&& stats.compilation == 1
+				&& stats.unsupported == 1,
+			"unsupported native requests were not retained as one terminal cache outcome");
+
+		InvalidateNativeShaderVariantCompilations();
+		for (std::size_t index = 0; index < 4; ++index)
+			std::ignore = PrepareNativeShaderVariantForTesting(failed);
+		Expect(
+			compilationAttempts.load(std::memory_order_relaxed) == 2
+				&& GetShaderInjectionTargetSnapshot(
+					ShaderInjectionTarget::kBsLighting)
+					.passthroughCompileFail
+					== 2,
+			"native invalidation did not permit exactly one fresh failed attempt");
 	}
 
 	class ExecutableDispatchFixture
@@ -1877,6 +1963,8 @@ int main(int argc, char** argv)
 		CheckObservedNativeBytecode();
 	if (mode == "--lazy-preparation")
 		CheckLazyPreparationDoesNotDeadlock();
+	if (mode == "--native-outcome-cache")
+		CheckNativeVariantOutcomeCaching();
 	if (mode == "--dispatch-bridge")
 		CheckComputeDispatchBridge();
 	if (mode == "--compute-hooks-missing")

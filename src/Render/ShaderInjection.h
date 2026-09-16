@@ -232,6 +232,14 @@ namespace cs::engine
 		CacheNativeVertexReplacementWrapperForTesting(
 			RE::BSGraphics::VertexShader* a_nativeVertex,
 			ID3D11VertexShader* a_replacement) noexcept;
+	struct NativeVariantCacheStatsForTesting
+	{
+		std::size_t entries = 0;
+		std::size_t unsupported = 0;
+		std::size_t compilation = 0;
+	};
+	NativeVariantCacheStatsForTesting
+		GetNativeVariantCacheStatsForTesting() noexcept;
 	void ObserveNativeComputeShaderForTesting(
 		ShaderInjectionTarget a_target,
 		std::uint32_t a_descriptor,
@@ -261,6 +269,7 @@ namespace cs::engine
 		const void* a_bytecode,
 		std::size_t a_bytecodeLength,
 		ID3D11DeviceChild* a_shader) noexcept;
+	void InvalidateNativeShaderVariantCompilations() noexcept;
 
 	const ShaderInjectionDefines* GetActiveShaderInjectionVariantDefines(
 		ShaderInjectionTarget a_target) noexcept;

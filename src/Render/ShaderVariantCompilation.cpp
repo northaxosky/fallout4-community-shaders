@@ -1,175 +1,303 @@
 #include "Render/ShaderVariantCompilation.h"
 
-#include "Render/PixelShaderSwapBroker.h"
-#include "Render/Annotation.h"
-#include "Utils/CSSha1.h"
-#include "Utils/ShaderCompile.h"
-
-#include <cstdio>
+#include <algorithm>
+#include <condition_variable>
+#include <deque>
+#include <exception>
+#include <mutex>
+#include <thread>
+#include <unordered_map>
+#include <utility>
 
 namespace cs::engine
 {
 	namespace
 	{
-		class EagerShaderVariantCompilationHandle final :
+		class AsyncShaderVariantCompilationHandle final :
 			public ShaderVariantCompilationHandle
 		{
 		public:
-			explicit EagerShaderVariantCompilationHandle(
-				ShaderStage a_stage,
-				winrt::com_ptr<ID3D11DeviceChild> a_shader) noexcept :
-				_stage(a_stage),
-				_shader(std::move(a_shader))
-			{}
+			AsyncShaderVariantCompilationHandle() = default;
 
 			ShaderVariantCompilationState GetState() const noexcept override
 			{
-				return ShaderVariantCompilationState::kReady;
+				return _state.load(std::memory_order_acquire);
 			}
 
-			winrt::com_ptr<ID3D11DeviceChild>
-				AcquireOrRequest() noexcept override
+			winrt::com_ptr<ID3D11DeviceChild> Acquire() noexcept override
 			{
+				if (GetState() != ShaderVariantCompilationState::kReady)
+					return {};
+				std::scoped_lock lock(_mutex);
 				return _shader;
 			}
 
-			ID3D11DeviceChild* PeekShader() const noexcept override
+			std::string GetError() const override
 			{
-				return _shader.get();
+				if (GetState() != ShaderVariantCompilationState::kFailed)
+					return {};
+				std::scoped_lock lock(_mutex);
+				return _error;
 			}
 
-			ShaderStage GetStage() const noexcept override
+			void Complete(ShaderVariantCompilationOutput a_output)
 			{
-				return _stage;
+				const bool ready = !!a_output.shader;
+				{
+					std::scoped_lock lock(_mutex);
+					if (ready) {
+						_shader = std::move(a_output.shader);
+						_error.clear();
+					} else {
+						_shader = nullptr;
+						_error = a_output.error.empty() ?
+							"shader compilation failed" :
+							std::move(a_output.error);
+					}
+				}
+				_state.store(
+					ready ?
+						ShaderVariantCompilationState::kReady :
+						ShaderVariantCompilationState::kFailed,
+					std::memory_order_release);
+			}
+
+			void Fail(std::string a_error)
+			{
+				{
+					std::scoped_lock lock(_mutex);
+					_shader = nullptr;
+					_error = std::move(a_error);
+				}
+				_state.store(
+					ShaderVariantCompilationState::kFailed,
+					std::memory_order_release);
 			}
 
 		private:
-			ShaderStage _stage;
+			std::atomic<ShaderVariantCompilationState> _state{
+				ShaderVariantCompilationState::kPending
+			};
+			mutable std::mutex _mutex;
 			winrt::com_ptr<ID3D11DeviceChild> _shader;
+			std::string _error;
 		};
 
-		class EagerShaderVariantCompilationPolicy final :
-			public ShaderVariantCompilationPolicy
+		struct CompilationKey
+		{
+			std::uint64_t generation = 0;
+			std::filesystem::path sourcePath;
+			std::string entryPoint;
+			std::string profile;
+			ShaderStage stage = ShaderStage::kPixel;
+			std::vector<std::pair<std::string, std::string>> defines;
+			std::uint32_t familyId = 0xFFFFFFFFU;
+			std::uint32_t descriptor = 0;
+			std::string owner;
+
+			bool operator==(const CompilationKey&) const = default;
+		};
+
+		struct CompilationKeyHash
+		{
+			std::size_t operator()(const CompilationKey& a_key) const noexcept
+			{
+				auto value = std::hash<std::uint64_t>{}(a_key.generation);
+				value = value * 131U
+					+ std::filesystem::hash_value(a_key.sourcePath);
+				value = value * 131U
+					+ std::hash<std::string>{}(a_key.entryPoint);
+				value = value * 131U
+					+ std::hash<std::string>{}(a_key.profile);
+				value = value * 131U
+					+ static_cast<std::size_t>(a_key.stage);
+				value = value * 131U + a_key.familyId;
+				value = value * 131U + a_key.descriptor;
+				value = value * 131U
+					+ std::hash<std::string>{}(a_key.owner);
+				for (const auto& [name, defineValue] : a_key.defines) {
+					value = value * 131U
+						+ std::hash<std::string>{}(name);
+					value = value * 131U
+						+ std::hash<std::string>{}(defineValue);
+				}
+				return value;
+			}
+		};
+
+		struct CompilationTask
+		{
+			std::uint64_t generation = 0;
+			ShaderVariantCompilationRequest request;
+			std::shared_ptr<AsyncShaderVariantCompilationHandle> handle;
+		};
+
+		class AsyncShaderVariantCompilationCache final :
+			public ShaderVariantCompilationCache
 		{
 		public:
-			ShaderVariantCompilationResult Prepare(
+			AsyncShaderVariantCompilationCache(
+				ShaderVariantCompiler a_compiler,
+				std::size_t a_workerCount) :
+				_compiler(std::move(a_compiler))
+			{
+				a_workerCount = std::max<std::size_t>(a_workerCount, 1);
+				_workers.reserve(a_workerCount);
+				for (std::size_t index = 0;
+					index < a_workerCount;
+					++index) {
+					_workers.emplace_back(
+						[this](std::stop_token a_stopToken) {
+							RunWorker(a_stopToken);
+						});
+				}
+			}
+
+			~AsyncShaderVariantCompilationCache() override
+			{
+				Stop();
+			}
+
+			std::shared_ptr<ShaderVariantCompilationHandle> Request(
 				ShaderVariantCompilationRequest a_request) override
 			{
-				ShaderVariantCompilationResult result;
-				if (!a_request.device) {
-					result.error = "no D3D11 device";
-					return result;
-				}
-
-				std::vector<std::pair<const char*, const char*>> defines;
-				defines.reserve(a_request.defines.size());
-				for (const auto& [name, value] : a_request.defines)
-					defines.emplace_back(name.c_str(), value.c_str());
-
-				std::string compileError;
-				const auto blob = util::CompileShaderToBlob(
-					a_request.sourcePath.c_str(),
-					defines,
-					a_request.profile.c_str(),
-					a_request.entryPoint.c_str(),
-					&compileError);
-				if (!blob) {
-					result.error = compileError.empty()
-						? "shader compilation failed"
-						: std::move(compileError);
-					return result;
-				}
-
-				winrt::com_ptr<ID3D11DeviceChild> shader;
-				HRESULT createResult = E_FAIL;
-				const char* createStage = nullptr;
-				const char* shaderSuffix = nullptr;
-				static_assert(
-					static_cast<std::uint8_t>(ShaderStage::kCount) == 3);
+				std::shared_ptr<AsyncShaderVariantCompilationHandle> handle;
 				{
-					ScopedPixelShaderBrokerBypass bypassBroker;
-					switch (a_request.stage) {
-					case ShaderStage::kVertex: {
-						createStage = "Vertex";
-						shaderSuffix = ".VS";
-						winrt::com_ptr<ID3D11VertexShader> vertexShader;
-						createResult = a_request.device->CreateVertexShader(
-							blob->GetBufferPointer(),
-							blob->GetBufferSize(),
-							nullptr,
-							vertexShader.put());
-						render::annotation::SetName(
-							vertexShader.get(), "Render/Injected/VertexShader.VS");
-						if (vertexShader)
-							shader.attach(vertexShader.detach());
-						break;
+					std::scoped_lock lock(_mutex);
+					a_request.sourceGeneration = _generation;
+					CompilationKey key{
+						.generation = _generation,
+						.sourcePath =
+							a_request.sourcePath.lexically_normal(),
+						.entryPoint = a_request.entryPoint,
+						.profile = a_request.profile,
+						.stage = a_request.stage,
+						.defines = a_request.defines,
+						.familyId = a_request.familyId,
+						.descriptor = a_request.descriptor,
+						.owner = a_request.owner
+					};
+					if (const auto existing = _entries.find(key);
+						existing != _entries.end()) {
+						return existing->second;
 					}
-					case ShaderStage::kPixel: {
-						createStage = "Pixel";
-						shaderSuffix = ".PS";
-						winrt::com_ptr<ID3D11PixelShader> pixelShader;
-						createResult = a_request.device->CreatePixelShader(
-							blob->GetBufferPointer(),
-							blob->GetBufferSize(),
-							nullptr,
-							pixelShader.put());
-						render::annotation::SetName(
-							pixelShader.get(), "Render/Injected/PixelShader.PS");
-						if (pixelShader)
-							shader.attach(pixelShader.detach());
-						break;
-					}
-					case ShaderStage::kCompute: {
-						createStage = "Compute";
-						shaderSuffix = ".CS";
-						winrt::com_ptr<ID3D11ComputeShader> computeShader;
-						createResult = a_request.device->CreateComputeShader(
-							blob->GetBufferPointer(),
-							blob->GetBufferSize(),
-							nullptr,
-							computeShader.put());
-						render::annotation::SetName(
-							computeShader.get(), "Render/Injected/ComputeShader.CS");
-						if (computeShader)
-							shader.attach(computeShader.detach());
-						break;
-					}
-					}
-				}
-				if (FAILED(createResult) || !shader) {
-					char buffer[64]{};
-					std::snprintf(
-						buffer,
-						sizeof(buffer),
-						"Create%sShader hr=0x%08x",
-						createStage,
-						static_cast<unsigned>(createResult));
-					result.error = buffer;
-					return result;
-				}
-				const std::string shaderName =
-					"Render/Injected/" + a_request.sourcePath.stem().string()
-					+ shaderSuffix;
-				render::annotation::SetName(shader.get(), shaderName);
 
-				result.state = ShaderVariantCompilationState::kReady;
-				result.bytecodeSize =
-					static_cast<std::size_t>(blob->GetBufferSize());
-				result.compiledSha1 = sha1::Sha1ToHex(sha1::Sha1Compute(
-					blob->GetBufferPointer(),
-					blob->GetBufferSize()));
-				result.handle =
-					std::make_shared<EagerShaderVariantCompilationHandle>(
-						a_request.stage,
-						std::move(shader));
-				return result;
+					handle =
+						std::make_shared<
+							AsyncShaderVariantCompilationHandle>();
+					if (_stopped) {
+						handle->Fail("shader compilation stopped");
+						return handle;
+					}
+					_entries.emplace(std::move(key), handle);
+					_queue.push_back({
+						.generation = _generation,
+						.request = std::move(a_request),
+						.handle = handle
+					});
+				}
+				_condition.notify_one();
+				return handle;
 			}
+
+			void Invalidate() override
+			{
+				std::deque<CompilationTask> invalidated;
+				{
+					std::scoped_lock lock(_mutex);
+					if (_stopped)
+						return;
+					++_generation;
+					_entries.clear();
+					invalidated.swap(_queue);
+				}
+				for (auto& task : invalidated)
+					task.handle->Fail("shader compilation invalidated");
+			}
+
+			void Stop() noexcept override
+			{
+				std::deque<CompilationTask> stopped;
+				{
+					std::scoped_lock lock(_mutex);
+					if (_stopped)
+						return;
+					_stopped = true;
+					_entries.clear();
+					stopped.swap(_queue);
+				}
+				for (auto& task : stopped)
+					task.handle->Fail("shader compilation stopped");
+				for (auto& worker : _workers)
+					worker.request_stop();
+				_condition.notify_all();
+				_workers.clear();
+			}
+
+		private:
+			void RunWorker(std::stop_token a_stopToken)
+			{
+				for (;;) {
+					CompilationTask task;
+					{
+						std::unique_lock lock(_mutex);
+						_condition.wait(
+							lock,
+							a_stopToken,
+							[this] {
+								return _stopped || !_queue.empty();
+							});
+						if (a_stopToken.stop_requested() || _stopped)
+							return;
+						task = std::move(_queue.front());
+						_queue.pop_front();
+					}
+
+					ShaderVariantCompilationOutput output;
+					try {
+						output = _compiler(std::move(task.request));
+					} catch (const std::exception& error) {
+						output.error = error.what();
+					} catch (...) {
+						output.error = "shader compiler raised an unknown exception";
+					}
+					bool publish = false;
+					{
+						std::scoped_lock lock(_mutex);
+						publish =
+							!_stopped
+							&& task.generation == _generation;
+					}
+					if (publish)
+						task.handle->Complete(std::move(output));
+					else
+						task.handle->Fail(
+							"shader compilation invalidated");
+				}
+			}
+
+			std::mutex _mutex;
+			std::condition_variable_any _condition;
+			std::uint64_t _generation = 1;
+			bool _stopped = false;
+			std::deque<CompilationTask> _queue;
+			std::unordered_map<
+				CompilationKey,
+				std::shared_ptr<AsyncShaderVariantCompilationHandle>,
+				CompilationKeyHash>
+				_entries;
+			ShaderVariantCompiler _compiler;
+			std::vector<std::jthread> _workers;
 		};
 	}
 
-	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateEagerShaderVariantCompilationPolicy()
+	std::shared_ptr<ShaderVariantCompilationCache>
+		CreateAsyncShaderVariantCompilationCache(
+			ShaderVariantCompiler a_compiler,
+			std::size_t a_workerCount)
 	{
-		return std::make_shared<EagerShaderVariantCompilationPolicy>();
+		return std::make_shared<AsyncShaderVariantCompilationCache>(
+			std::move(a_compiler),
+			a_workerCount);
 	}
 }

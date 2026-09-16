@@ -140,8 +140,8 @@ namespace cs::engine
 
 		struct PublishedPlan
 		{
-			std::shared_ptr<ShaderVariantCompilationPolicy>
-				compilationPolicy;
+			std::shared_ptr<ShaderVariantCompilationCache>
+				compilationCache;
 			winrt::com_ptr<ID3D11Device> device;
 			std::wstring developerSourceRoot;
 			std::vector<PublishedTarget> targets;
@@ -187,10 +187,21 @@ namespace cs::engine
 
 		struct NativeVariant
 		{
+			enum class State : std::uint8_t
+			{
+				kResolving,
+				kUnsupported,
+				kCompilation
+			};
+
+			mutable std::mutex mutex;
 			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
 			ShaderInjectionDefines effectiveDefines;
 			ShaderInjectionTarget target = ShaderInjectionTarget::kCount;
 			ShaderStage stage = ShaderStage::kPixel;
+			std::atomic<State> state{ State::kResolving };
+			std::atomic<bool> failureDiagnosed{ false };
+			std::atomic<bool> pendingObserved{ false };
 		};
 
 		struct NativeReplacementWrapperKey
@@ -248,7 +259,7 @@ namespace cs::engine
 				static_cast<std::size_t>(ShaderInjectionTarget::kCount)> runtime;
 			std::atomic<std::shared_ptr<const PublishedPlan>> published;
 			std::mutex nativeVariantMutex;
-			std::unordered_map<NativeVariantKey, NativeVariant,
+			std::unordered_map<NativeVariantKey, std::shared_ptr<NativeVariant>,
 				NativeVariantKeyHash> nativeVariants;
 			std::unordered_map<ID3D11DeviceChild*, NativeVariantKey>
 				nativeShaderIdentities;
@@ -903,7 +914,7 @@ namespace cs::engine
 				});
 		}
 
-		NativeVariant* FindOrPrepareNativeVariant(
+		std::shared_ptr<NativeVariant> FindOrPrepareNativeVariant(
 			const PublishedPlan& a_plan,
 			const PublishedTarget& a_target,
 			const ShaderFamilyDescriptor& a_descriptor)
@@ -923,24 +934,35 @@ namespace cs::engine
 				.nativeMacros = a_descriptor.nativeMacros
 			};
 
+			auto candidate = std::make_shared<NativeVariant>();
+			candidate->target = a_descriptor.target;
+			candidate->stage = a_descriptor.stage;
 			{
 				std::scoped_lock lock(service.nativeVariantMutex);
-				if (const auto existing = service.nativeVariants.find(key);
-					existing != service.nativeVariants.end()) {
-					return &existing->second;
-				}
+				const auto [entry, inserted] =
+					service.nativeVariants.emplace(key, candidate);
+				if (!inserted)
+					return entry->second;
 			}
 
 			auto family =
 				BuildShaderFamilyCompilationDescriptor(a_descriptor);
-			if (!family)
-				return nullptr;
+			if (!family) {
+				candidate->state.store(
+					NativeVariant::State::kUnsupported,
+					std::memory_order_release);
+				return candidate;
+			}
 
 			std::string error;
 			const auto* metadata =
 				GetShaderInjectionTarget(a_descriptor.target);
-			if (!metadata)
-				return nullptr;
+			if (!metadata) {
+				candidate->state.store(
+					NativeVariant::State::kUnsupported,
+					std::memory_order_release);
+				return candidate;
+			}
 			auto effective = BuildEffectiveShaderCompileRequest(
 				*metadata,
 				a_descriptor.stage,
@@ -948,12 +970,15 @@ namespace cs::engine
 				a_target.contributions,
 				&error);
 			if (!effective) {
+				candidate->state.store(
+					NativeVariant::State::kUnsupported,
+					std::memory_order_release);
 				L->error(
 					"Native descriptor compile request rejected for '{}/{}': {}",
 					metadata->name,
 					a_descriptor.descriptor,
 					error);
-				return nullptr;
+				return candidate;
 			}
 
 			ShaderVariantCompilationRequest request;
@@ -966,38 +991,50 @@ namespace cs::engine
 			request.entryPoint = effective->entryPoint;
 			request.profile = effective->profile;
 			request.stage = a_descriptor.stage;
+			request.familyId =
+				static_cast<std::uint32_t>(a_descriptor.target);
+			request.descriptor = a_descriptor.descriptor;
+			request.owner =
+				!a_descriptor.nativeClassName.empty() ?
+					std::string(a_descriptor.nativeClassName) :
+					std::string(a_descriptor.nativeName);
+			if (!a_descriptor.nativeSourceGroup.empty()) {
+				request.owner += "|";
+				request.owner +=
+					a_descriptor.nativeSourceGroup;
+			}
 			request.defines.reserve(effective->defines.size());
 			for (const auto& define : effective->defines)
 				request.defines.push_back(define);
 
-			auto prepared =
-				a_plan.compilationPolicy->Prepare(std::move(request));
-			if (!prepared.handle ||
-				prepared.state == ShaderVariantCompilationState::kFailed) {
+			auto compilation =
+				a_plan.compilationCache->Request(std::move(request));
+			if (!compilation) {
+				candidate->state.store(
+					NativeVariant::State::kUnsupported,
+					std::memory_order_release);
 				L->error(
 					"Native descriptor compile failed for '{}/{}': {}",
 					metadata->name,
 					a_descriptor.descriptor,
-					prepared.error.empty() ?
-						"compilation policy failed" :
-						prepared.error);
+					"compilation cache rejected request");
 				auto& runtime =
 					service.runtime[ToIndex(a_descriptor.target)];
 				runtime.passthroughCompileFail.fetch_add(
 					1, std::memory_order_relaxed);
-				return nullptr;
+				return candidate;
 			}
 
-			NativeVariant variant{
-				.compilation = std::move(prepared.handle),
-				.effectiveDefines = std::move(effective->defines),
-				.target = a_descriptor.target,
-				.stage = a_descriptor.stage
-			};
-			std::scoped_lock lock(service.nativeVariantMutex);
-			const auto [inserted, unused] =
-				service.nativeVariants.emplace(std::move(key), std::move(variant));
-			return &inserted->second;
+			{
+				std::scoped_lock lock(candidate->mutex);
+				candidate->compilation = std::move(compilation);
+				candidate->effectiveDefines =
+					std::move(effective->defines);
+			}
+			candidate->state.store(
+				NativeVariant::State::kCompilation,
+				std::memory_order_release);
+			return candidate;
 		}
 
 		template <class TShader>
@@ -1006,15 +1043,43 @@ namespace cs::engine
 			const PublishedTarget& a_target,
 			const ShaderFamilyDescriptor& a_descriptor)
 		{
-			auto* variant = FindOrPrepareNativeVariant(
+			auto variant = FindOrPrepareNativeVariant(
 				a_plan, a_target, a_descriptor);
-			if (!variant || !variant->compilation)
+			if (!variant)
 				return nullptr;
-			auto shader = variant->compilation->AcquireOrRequest();
+			std::shared_ptr<ShaderVariantCompilationHandle> compilation;
+			{
+				std::scoped_lock lock(variant->mutex);
+				compilation = variant->compilation;
+			}
+			if (!compilation)
+				return nullptr;
+			auto shader = compilation->Acquire();
 			if (!shader) {
-				GetService().runtime[ToIndex(a_descriptor.target)]
-					.passthroughNotReady.fetch_add(
+				auto& runtime =
+					GetService().runtime[ToIndex(a_descriptor.target)];
+				if (compilation->GetState()
+					== ShaderVariantCompilationState::kFailed) {
+					if (!variant->failureDiagnosed.exchange(
+							true, std::memory_order_relaxed)) {
+						const auto* metadata =
+							GetShaderInjectionTarget(a_descriptor.target);
+						const auto error = compilation->GetError();
+						L->error(
+							"Native descriptor compile failed for '{}/{}': {}",
+							metadata ? metadata->name : "unknown",
+							a_descriptor.descriptor,
+							error.empty() ?
+								"shader compilation failed" :
+								error);
+						runtime.passthroughCompileFail.fetch_add(
+							1, std::memory_order_relaxed);
+					}
+				} else if (!variant->pendingObserved.exchange(
+						true, std::memory_order_relaxed)) {
+					runtime.passthroughNotReady.fetch_add(
 						1, std::memory_order_relaxed);
+				}
 				return nullptr;
 			}
 
@@ -1237,7 +1302,7 @@ namespace cs::engine
 			}
 
 			std::optional<NativeVariantKey> owner;
-			NativeVariant* variant = nullptr;
+			std::shared_ptr<NativeVariant> variant;
 			{
 				auto& service = GetService();
 				std::scoped_lock lock(service.nativeVariantMutex);
@@ -1248,7 +1313,7 @@ namespace cs::engine
 					const auto found =
 						service.nativeVariants.find(identity->second);
 					if (found != service.nativeVariants.end())
-						variant = &found->second;
+						variant = found->second;
 				}
 			}
 			if (!owner) {
@@ -1300,7 +1365,7 @@ namespace cs::engine
 						a_threadGroupCountZ);
 					return;
 				}
-				const ActiveVariantScope variantScope(variant);
+				const ActiveVariantScope variantScope(variant.get());
 				DispatchPublishedTarget(
 					*target,
 					ShaderStage::kCompute,
@@ -1759,8 +1824,8 @@ namespace cs::engine
 		}
 
 		auto plan = std::make_shared<PublishedPlan>();
-		plan->compilationPolicy =
-			CreateCachingShaderVariantCompilationPolicy();
+		plan->compilationCache =
+			CreateCachingShaderVariantCompilationCache();
 		plan->device.copy_from(a_device);
 		plan->developerSourceRoot = developerSourceRoot;
 		std::size_t compileRequested = 0;
@@ -1843,6 +1908,20 @@ namespace cs::engine
 			summary.requestedByFeatureContributor,
 			summary.requestedByBaselineOwnership,
 			summary.requestedByDeveloperForceOn);
+	}
+
+	void InvalidateNativeShaderVariantCompilations() noexcept
+	{
+		auto& service = GetService();
+		const auto plan =
+			service.published.load(std::memory_order_acquire);
+		if (!plan || !plan->compilationCache)
+			return;
+
+		plan->compilationCache->Invalidate();
+		std::scoped_lock lock(service.nativeVariantMutex);
+		service.nativeVariants.clear();
+		service.nativeShaderIdentities.clear();
 	}
 
 	void DispatchShaderInjections(
@@ -2236,6 +2315,31 @@ namespace cs::engine
 			a_nativeVertex, a_replacement);
 	}
 
+	NativeVariantCacheStatsForTesting
+		GetNativeVariantCacheStatsForTesting() noexcept
+	{
+		NativeVariantCacheStatsForTesting result;
+		auto& service = GetService();
+		std::scoped_lock lock(service.nativeVariantMutex);
+		result.entries = service.nativeVariants.size();
+		for (const auto& [key, variant] : service.nativeVariants) {
+			(void)key;
+			if (!variant)
+				continue;
+			switch (variant->state.load(std::memory_order_acquire)) {
+			case NativeVariant::State::kUnsupported:
+				++result.unsupported;
+				break;
+			case NativeVariant::State::kCompilation:
+				++result.compilation;
+				break;
+			case NativeVariant::State::kResolving:
+				break;
+			}
+		}
+		return result;
+	}
+
 	void ObserveNativeComputeShaderForTesting(
 		ShaderInjectionTarget a_target,
 		std::uint32_t a_descriptor,
@@ -2263,7 +2367,7 @@ namespace cs::engine
 			return;
 
 		auto& service = GetService();
-		const NativeVariant* activeVariant = nullptr;
+		std::shared_ptr<NativeVariant> activeVariant;
 		{
 			std::scoped_lock lock(service.nativeVariantMutex);
 			const auto identity =
@@ -2272,11 +2376,11 @@ namespace cs::engine
 				const auto variant =
 					service.nativeVariants.find(identity->second);
 				if (variant != service.nativeVariants.end())
-					activeVariant = &variant->second;
+					activeVariant = variant->second;
 			}
 		}
 		if (activeVariant) {
-			const ActiveVariantScope scope(activeVariant);
+			const ActiveVariantScope scope(activeVariant.get());
 			DispatchShaderInjections(activeVariant->target, a_context);
 		}
 		boundShader->Release();

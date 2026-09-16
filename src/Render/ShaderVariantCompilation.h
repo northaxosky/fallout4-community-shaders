@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Render/PixelShaderSwapBroker.h"
+#include "Render/ShaderStage.h"
 
 #include <d3d11.h>
 #include <winrt/base.h>
@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -30,6 +31,10 @@ namespace cs::engine
 		std::string profile;
 		ShaderStage stage = ShaderStage::kPixel;
 		std::vector<std::pair<std::string, std::string>> defines;
+		std::uint32_t familyId = 0xFFFFFFFFU;
+		std::uint32_t descriptor = 0;
+		std::string owner;
+		std::uint64_t sourceGeneration = 0;
 	};
 
 	class ShaderVariantCompilationHandle
@@ -38,35 +43,36 @@ namespace cs::engine
 		virtual ~ShaderVariantCompilationHandle() = default;
 
 		virtual ShaderVariantCompilationState GetState() const noexcept = 0;
-		virtual winrt::com_ptr<ID3D11DeviceChild>
-			AcquireOrRequest() noexcept = 0;
-		virtual ID3D11DeviceChild* PeekShader() const noexcept = 0;
-		virtual ShaderStage GetStage() const noexcept = 0;
+		virtual winrt::com_ptr<ID3D11DeviceChild> Acquire() noexcept = 0;
+		virtual std::string GetError() const = 0;
 	};
 
-	struct ShaderVariantCompilationResult
+	struct ShaderVariantCompilationOutput
 	{
-		ShaderVariantCompilationState state =
-			ShaderVariantCompilationState::kFailed;
-		std::shared_ptr<ShaderVariantCompilationHandle> handle;
-		std::size_t bytecodeSize = 0;
-		std::string compiledSha1;
-		std::string sourceDescription = "compiler";
+		winrt::com_ptr<ID3D11DeviceChild> shader;
 		std::string error;
 	};
 
-	class ShaderVariantCompilationPolicy
+	using ShaderVariantCompiler =
+		std::function<ShaderVariantCompilationOutput(
+			ShaderVariantCompilationRequest)>;
+
+	class ShaderVariantCompilationCache
 	{
 	public:
-		virtual ~ShaderVariantCompilationPolicy() = default;
+		virtual ~ShaderVariantCompilationCache() = default;
 
-		virtual ShaderVariantCompilationResult Prepare(
+		virtual std::shared_ptr<ShaderVariantCompilationHandle> Request(
 			ShaderVariantCompilationRequest a_request) = 0;
+		virtual void Invalidate() = 0;
+		virtual void Stop() noexcept = 0;
 	};
 
-	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateEagerShaderVariantCompilationPolicy();
+	std::shared_ptr<ShaderVariantCompilationCache>
+		CreateAsyncShaderVariantCompilationCache(
+			ShaderVariantCompiler a_compiler,
+			std::size_t a_workerCount = 1);
 
-	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateCachingShaderVariantCompilationPolicy();
+	std::shared_ptr<ShaderVariantCompilationCache>
+		CreateCachingShaderVariantCompilationCache();
 }

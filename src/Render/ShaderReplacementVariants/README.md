@@ -2,7 +2,9 @@
 
 Runtime selection uses the native family, stage, and resolved shader ID, following the upstream
 family/descriptor model at `aebf01c2efa0a1926d676dc66d2623aaf58cc866`. The existing shader cache
-prepares variants lazily. There is no runtime recipe catalogue or stock-hash admission.
+prepares variants asynchronously; rendering retains native shaders while work is pending.
+Failed and unsupported variants remain cached until native shader reload invalidates their
+generation. There is no runtime recipe catalogue or stock-hash admission.
 
 ImageSpace uses its native source prefix and `GetImagespaceFXMacros` (virtual slot 17).
 PrePass uses normalized stage IDs; `TEXTURE` comes from bit `0x2`, while early-depth comes from
