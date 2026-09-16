@@ -374,6 +374,21 @@ namespace cs::engine
 				return false;
 
 			const auto lightKind = d & 0x7FU;
+			if ((d & 0x140U) != 0) {
+				Define(a_defines, "BSDFLIGHT_PS_OVERDRAW");
+				Define(a_defines, "OVERDRAW");
+				Define(a_defines, "RGBSPEC");
+				Define(a_defines, "DIRSPLITS", "2");
+				return true;
+			}
+			if (lightKind == 4U && (d & 0x800U) != 0) {
+				Define(a_defines, "BSDFLIGHT_PS_ATTENUATION_ONLY");
+				Define(a_defines, "POINTOMNI");
+				Define(a_defines, "ATTENUATION_ONLY");
+				Define(a_defines, "RGBSPEC");
+				Define(a_defines, "DIRSPLITS", "2");
+				return true;
+			}
 			enum class Family
 			{
 				kDeferred,
@@ -384,23 +399,17 @@ namespace cs::engine
 				kGobo,
 				kShadowOnly,
 				kShadowOnlyBlendSplit,
-				kOverdraw,
 				kCharacter,
 				kCharacterC26,
-				kAttenuationOnly,
 				kAmbient
 			};
 			Family family = Family::kDeferred;
-			if (d == 0x440U)
-				family = Family::kOverdraw;
-			else if (d == 0x0C400282U)
+			if (d == 0x0C400282U)
 				family = Family::kCharacterC26;
 			else if (d == 0x04000000U)
 				family = Family::kCharacter;
 			else if (d == 0x20000U)
 				family = Family::kAmbient;
-			else if (d == 0x4804U)
-				family = Family::kAttenuationOnly;
 			else if (lightKind == 4U && (d & 0x1000U) != 0)
 				family = Family::kGobo;
 			else if ((lightKind & 0x2U) != 0) {
@@ -424,9 +433,6 @@ namespace cs::engine
 			}
 
 			switch (family) {
-			case Family::kOverdraw:
-				Define(a_defines, "BSDFLIGHT_PS_OVERDRAW");
-				break;
 			case Family::kCharacterC26:
 				Define(a_defines, "BSDFLIGHT_PS_CHARACTER_LIGHT_C26");
 				break;
@@ -435,9 +441,6 @@ namespace cs::engine
 				break;
 			case Family::kAmbient:
 				Define(a_defines, "BSDFLIGHT_PS_AMBIENT");
-				break;
-			case Family::kAttenuationOnly:
-				Define(a_defines, "BSDFLIGHT_PS_ATTENUATION_ONLY");
 				break;
 			case Family::kGobo:
 				Define(a_defines, "BSDFLIGHT_PS_GOBO");
@@ -469,8 +472,7 @@ namespace cs::engine
 
 			DefineBit(a_defines, d, 0x200U, "SPECULAR");
 			DefineBit(a_defines, d, 0x1000U, "GOBOPROJECTION");
-			if (family != Family::kAttenuationOnly)
-				DefineBit(a_defines, d, 0x4000U, "IGNOREROUGHNESS");
+			DefineBit(a_defines, d, 0x4000U, "IGNOREROUGHNESS");
 			DefineBit(a_defines, d, 0x8000U, "IGNORERIM");
 			if (family != Family::kCharacterC26)
 				Define(a_defines, "RGBSPEC");
@@ -500,8 +502,6 @@ namespace cs::engine
 				Define(a_defines, "POINTSPOT");
 			if (lightKind == 0U && (d & 0x400U) != 0)
 				Define(a_defines, "SPOT");
-			if (family == Family::kOverdraw)
-				Define(a_defines, "OVERDRAW");
 			if ((d & 0x20000U) != 0)
 				Define(a_defines, "AMBIENT");
 			if ((d & 0x20000U) != 0 && family == Family::kDirSplits2)
@@ -545,6 +545,9 @@ namespace cs::engine
 			}
 			if (a_stage != ShaderStage::kPixel)
 				return false;
+			// The native SSS MRT families still lack stock-faithful reconstructions.
+			if ((d & 0x1000U) != 0)
+				return false;
 
 			enum class Family
 			{
@@ -577,7 +580,7 @@ namespace cs::engine
 				family = Family::kNoTextureAccumulator;
 			else if ((d & ~0x10280U) == 0x4048U)
 				family = Family::kNoTextureFog;
-			else if ((d & ~0x10280U) == 0x20008U)
+			else if ((d & ~0x230280U) == 0x8U)
 				family = Family::kAccumulator2D;
 			else if ((d & 0x7FU) == 0x40U ||
 				(d & 0x7FU) == 0x48U)

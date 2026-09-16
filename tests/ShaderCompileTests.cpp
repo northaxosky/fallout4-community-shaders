@@ -41,8 +41,8 @@ namespace cs::log
 
 namespace cs::engine
 {
-	std::shared_ptr<ShaderVariantCompilationPolicy>
-		CreateCachingShaderVariantCompilationPolicy()
+	std::shared_ptr<ShaderVariantCompilationCache>
+		CreateCachingShaderVariantCompilationCache()
 	{
 		return {};
 	}
@@ -307,6 +307,77 @@ namespace
 			.description = std::move(a_description),
 			.preparationError = std::move(a_error)
 		});
+	}
+
+	void CheckNativeDescriptorAliases(std::vector<ShaderCompileJob>& a_jobs)
+	{
+		using namespace cs::engine;
+		const auto check = [&a_jobs](
+			ShaderInjectionTarget a_target,
+			std::uint32_t a_canonical,
+			std::span<const std::uint32_t> a_aliases) {
+			const auto build = [a_target](std::uint32_t a_descriptor) {
+				return BuildShaderFamilyCompilationDescriptor({
+					.target = a_target,
+					.stage = ShaderStage::kPixel,
+					.descriptor = a_descriptor
+				});
+			};
+			const auto canonical = build(a_canonical);
+			for (const auto alias : a_aliases) {
+				const auto actual = build(alias);
+				if (!canonical || !actual
+					|| actual->sourcePath != canonical->sourcePath
+					|| actual->profile != canonical->profile
+					|| actual->entryPoint != canonical->entryPoint
+					|| actual->defines != canonical->defines) {
+					AddPreparationFailure(
+						a_jobs,
+						"native descriptor alias " + std::to_string(alias),
+						"Alias must use the same verified recipe as "
+							+ std::to_string(a_canonical));
+				}
+			}
+		};
+
+		check(ShaderInjectionTarget::kBsdfLight, 0x440U, std::array{
+			0x500U, 0x8010102U, 0x100U, 0x101U, 0x104U, 0x108U,
+			0x10000100U, 0x10000101U, 0x10000104U, 0x10000108U,
+			0x10000120U, 0x10000500U, 0x110U, 0x120U, 0x40U,
+			0x10102U, 0x44U, 0x48U, 0x60U });
+		check(ShaderInjectionTarget::kBsdfLight, 0x4804U,
+			std::array{ 0x804U, 0xC804U, 0x1804U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x30008U,
+			std::array{ 0x210008U, 0x10008U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x20088U,
+			std::array{ 0x88U, 0x200088U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x30208U,
+			std::array{ 0x10208U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x20008U,
+			std::array{ 0x200008U, 0x8U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x20208U,
+			std::array{ 0x208U });
+		check(ShaderInjectionTarget::kBsdfComposite, 0x30088U,
+			std::array{ 0x210088U, 0x10088U });
+
+		for (const auto descriptor : std::array{
+				 0x1000U, 0x11000U, 0x181000U, 0x191000U, 0x81000U, 0x91000U,
+				 0x3000U, 0x1020U, 0x11020U, 0x13000U,
+				 0x21020U, 0x23000U, 0x31020U, 0x33000U,
+				 0x61000U, 0x63000U, 0x71000U, 0x73000U,
+				 0xC1000U, 0xD1000U, 0xE1000U, 0xF1000U,
+				 0x41000U, 0x43000U, 0x51000U, 0x53000U,
+				 0x21000U, 0x1A1000U, 0x1B1000U, 0x31000U, 0xA1000U, 0xB1000U }) {
+			if (BuildShaderFamilyCompilationDescriptor({
+					.target = ShaderInjectionTarget::kBsdfComposite,
+					.stage = ShaderStage::kPixel,
+					.descriptor = descriptor })) {
+				AddPreparationFailure(
+					a_jobs,
+					"unsupported native SSS descriptor " + std::to_string(descriptor),
+					"Unreconstructed SSS MRT variants must remain native");
+			}
+		}
 	}
 
 	struct ExpectedVariable
@@ -2568,6 +2639,7 @@ int main(int argc, char** argv)
 	}
 
 	std::vector<ShaderCompileJob> jobs;
+	CheckNativeDescriptorAliases(jobs);
 	const auto sharedDataCount = AddSharedDataProbes(jobs, argv[1]);
 	const auto screenSpaceGiCount = AddScreenSpaceGI(jobs, argv[1]);
 	if (screenSpaceGiCount != kScreenSpaceGIPermutations) {
