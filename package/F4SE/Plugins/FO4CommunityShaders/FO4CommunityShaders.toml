@@ -28,7 +28,6 @@ bslighting = true
 bsdf_light = true
 bsdf_composite = true
 df_tiled_lighting = true
-# Every listed target has a selectable stock SHA-1 guard.
 
 [menu]
 # Debug-view selection remains owned by Community Shaders and applies even
