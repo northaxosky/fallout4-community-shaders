@@ -29,14 +29,6 @@ features/Upscaling/Shaders/Upscaling/FidelityFX/
 !extern/detours/**/*.lib
 !extern/detours/**/*.pdb
 
-# CMake
-CMakeCache.txt
-CMakeFiles/
-CMakeUserPresets.json
-cmake_install.cmake
-Makefile
-*.cmake.in
-!vcpkg/ports/**/*.cmake.in
 compile_commands.json
 
 # Visual Studio

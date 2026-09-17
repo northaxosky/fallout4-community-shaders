@@ -136,9 +136,8 @@ xmake package FO4CommunityShaders
 ```
 
 Set `XSE_FO4_MODS_PATH` or `XSE_FO4_GAME_PATH` before `xmake install` to
-deploy through the CommonLibF4 install rule. The existing CMake build remains
-available during the migration. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for
-full setup and deployment details.
+deploy through the CommonLibF4 install rule. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for full setup and deployment details.
 
 ---
 

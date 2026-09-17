@@ -6,7 +6,6 @@ set_config("commonlib_xbyak", true)
 includes("extern/CommonLibF4")
 
 local plugin_name = "FO4CommunityShaders"
--- Keep aligned with project(VERSION ...) in CMakeLists.txt during migration.
 local plugin_version = "0.1.0"
 local plugin_version_major, plugin_version_minor, plugin_version_patch =
     plugin_version:match("^(%d+)%.(%d+)%.(%d+)$")
@@ -131,7 +130,7 @@ target(plugin_name .. "Version", function()
             ):trim()
             sha = os.iorunv("git", { "rev-parse", "HEAD" }):trim()
         end
-        local content = io.readfile("cmake/Plugin.h.in")
+        local content = io.readfile("xmake/Plugin.h.in")
         local variables = {
             BUILD_DESCRIBE = describe,
             BUILD_GIT_SHA = sha,

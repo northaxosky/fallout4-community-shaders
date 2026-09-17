@@ -68,11 +68,8 @@ xmake
 
 Use `-m release` for an optimized build without debug information. The plugin is
 written below `build\windows\x64\<mode>\`. Release configurations use link-time
-optimization and treat project compiler and linker warnings as errors. The
-version in `xmake.lua` follows the existing CMake project version; Git identifies
-development builds.
-
-The existing CMake presets remain available during the migration.
+optimization and treat project compiler and linker warnings as errors. Git
+identifies development builds.
 
 For clangd-based editors, `pwsh scripts\gen-compile-commands.ps1` generates the compile database.
 
@@ -143,7 +140,6 @@ engine frame. It does not claim generated frame-generation presents or every swa
 src\                Private source/headers, renderer hooks, forwarded UI, and presets
 src\Host\           Forwarding-only DearModdingUI client integration
 features\<Name>\    Feature source and optional runtime-compiled shaders
-cmake\              Build integration for CommonLibF4
 extern\             Third-party submodules, headers, and libraries
 package\            Mod assets: config, presets, reconstructed shaders
 scripts\            Developer tooling

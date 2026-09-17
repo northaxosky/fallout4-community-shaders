@@ -98,5 +98,5 @@ and independent fullscreen/texture
 debug-view selection. It intentionally builds without the plugin or an ImGui library:
 
 ```bash
-ctest --test-dir build -C Release -R HostIntegration
+xmake test HostIntegrationTests/HostIntegration
 ```

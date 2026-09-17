@@ -1,8 +1,8 @@
-# Generate the compile database first (from a plain shell):
-#   pwsh scripts/gen-compile-commands.ps1     (or: cmake --preset=clangd from a VS dev prompt)
-# That writes build/clangd/compile_commands.json (gitignored); clangd reads it via the pointer below.
+# Generate the compile database first:
+#   pwsh scripts/gen-compile-commands.ps1     (or: xmake project -k compile_commands)
+# That writes compile_commands.json at the repository root.
 CompileFlags:
-  CompilationDatabase: build/clangd
+  CompilationDatabase: .
   # Drop MSVC precompiled-header flags: clangd cannot load a cl.exe-produced .pch and builds its
   # own preamble. The /FI force-include of the pch wrapper header is kept (clangd parses it fine).
   Remove:
