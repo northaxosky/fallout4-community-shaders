@@ -14,7 +14,6 @@ bin/
 *.log
 
 # Generated tool output, do not commit
-docs/shader-buffers.md
 __pycache__/
 
 # Shader validation scratch + corpus cache
@@ -26,8 +25,8 @@ features/Upscaling/Shaders/Upscaling/Streamline/
 features/Upscaling/Shaders/Upscaling/FidelityFX/
 
 # Vendored Detours static libs are NOT build output, track them.
-!include/detours/**/*.lib
-!include/detours/**/*.pdb
+!extern/detours/**/*.lib
+!extern/detours/**/*.pdb
 
 # CMake
 CMakeCache.txt

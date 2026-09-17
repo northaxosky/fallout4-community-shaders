@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.21)
 
 project(
 	FO4CommunityShaders
+	VERSION 0.1.0
 	LANGUAGES CXX
 )
 
@@ -17,15 +18,6 @@ set(Boost_USE_STATIC_RUNTIME ON)
 
 option(TRACY_SUPPORT "Enable Tracy profiler instrumentation" OFF)
 option(FO4CS_HOST_TESTS_ONLY "Configure host tests without the plugin target" OFF)
-
-file(STRINGS "${CMAKE_SOURCE_DIR}/version.txt" FO4CS_VERSION LIMIT_COUNT 1)
-string(STRIP "${FO4CS_VERSION}" FO4CS_VERSION)
-if(NOT FO4CS_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
-	message(FATAL_ERROR "version.txt must contain MAJOR.MINOR.PATCH")
-endif()
-set(FO4CS_VERSION_MAJOR "${CMAKE_MATCH_1}")
-set(FO4CS_VERSION_MINOR "${CMAKE_MATCH_2}")
-set(FO4CS_VERSION_PATCH "${CMAKE_MATCH_3}")
 
 execute_process(
 	COMMAND git describe --tags --dirty --always
@@ -91,11 +83,11 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 
 	include(Common)
-	configure_xse_plugin(FO4CommunityShaders ${FO4CS_VERSION_MAJOR} ${FO4CS_VERSION_MINOR} ${FO4CS_VERSION_PATCH})
+	configure_xse_plugin(FO4CommunityShaders)
 
 	target_link_libraries(FO4CommunityShaders PRIVATE
-		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
-		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
+		debug ${CMAKE_SOURCE_DIR}/extern/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/extern/detours/Release/detours.lib
 		Microsoft::DirectXTK
 		Microsoft::DirectXTex
 		Microsoft::DirectX-Headers
@@ -344,7 +336,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	configure_host_test(UpscalingPublicationTests)
 	target_precompile_headers(UpscalingPublicationTests PRIVATE
-		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+		"${CMAKE_SOURCE_DIR}/src/PCH.h"
 	)
 	target_compile_definitions(UpscalingPublicationTests PRIVATE
 		_WINDOWS
@@ -355,7 +347,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	target_include_directories(UpscalingPublicationTests BEFORE PRIVATE
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
 		"${CMAKE_SOURCE_DIR}/features/Upscaling/src"
-		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/extern"
 		"${CMAKE_SOURCE_DIR}/src"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
@@ -429,7 +421,7 @@ configure_host_test(FrameGenerationContractTests)
 target_include_directories(FrameGenerationContractTests PRIVATE
 	"${CMAKE_SOURCE_DIR}/src"
 	"${CMAKE_SOURCE_DIR}/features/FrameGeneration/src"
-	"${CMAKE_SOURCE_DIR}/include"
+	"${CMAKE_SOURCE_DIR}/extern"
 	"${CMAKE_SOURCE_DIR}/extern/Streamline/include"
 )
 
@@ -466,7 +458,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	configure_host_test(FrameGenerationRetirementGpuTests)
 	target_include_directories(FrameGenerationRetirementGpuTests BEFORE PRIVATE
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
-		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/extern"
 	)
 	target_link_libraries(FrameGenerationRetirementGpuTests PRIVATE
 		Microsoft::DirectX-Headers
@@ -546,7 +538,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	configure_host_test(ShaderCompileTests)
 	target_precompile_headers(ShaderCompileTests PRIVATE
-		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+		"${CMAKE_SOURCE_DIR}/src/PCH.h"
 	)
 	target_compile_definitions(ShaderCompileTests PRIVATE
 		_WINDOWS
@@ -556,15 +548,15 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	target_include_directories(ShaderCompileTests BEFORE PRIVATE
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
-		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/extern"
 		"${CMAKE_SOURCE_DIR}/src"
 		"${CMAKE_SOURCE_DIR}/tests"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)
 	target_link_libraries(ShaderCompileTests PRIVATE
-		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
-		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
+		debug ${CMAKE_SOURCE_DIR}/extern/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/extern/detours/Release/detours.lib
 		CommonLibF4::CommonLibF4
 		Microsoft::DirectXTK
 		Microsoft::DirectX-Headers
@@ -643,7 +635,7 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	configure_host_test(ShaderInjectionRegistrationTests)
 	target_precompile_headers(ShaderInjectionRegistrationTests PRIVATE
-		"${CMAKE_SOURCE_DIR}/include/PCH.h"
+		"${CMAKE_SOURCE_DIR}/src/PCH.h"
 	)
 	target_compile_definitions(ShaderInjectionRegistrationTests PRIVATE
 		_WINDOWS
@@ -654,15 +646,15 @@ if(NOT FO4CS_HOST_TESTS_ONLY)
 	)
 	target_include_directories(ShaderInjectionRegistrationTests BEFORE PRIVATE
 		"${CMAKE_BINARY_DIR}/FO4CommunityShaders"
-		"${CMAKE_SOURCE_DIR}/include"
+		"${CMAKE_SOURCE_DIR}/extern"
 		"${CMAKE_SOURCE_DIR}/src"
 		"${CMAKE_SOURCE_DIR}/tests"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/include"
 		"${CMAKE_SOURCE_DIR}/extern/CommonLibF4/lib/commonlib-shared/include"
 	)
 	target_link_libraries(ShaderInjectionRegistrationTests PRIVATE
-		debug ${CMAKE_SOURCE_DIR}/include/detours/Debug/detours.lib
-		optimized ${CMAKE_SOURCE_DIR}/include/detours/Release/detours.lib
+		debug ${CMAKE_SOURCE_DIR}/extern/detours/Debug/detours.lib
+		optimized ${CMAKE_SOURCE_DIR}/extern/detours/Release/detours.lib
 		CommonLibF4::CommonLibF4
 		Microsoft::DirectXTK
 		Microsoft::DirectX-Headers

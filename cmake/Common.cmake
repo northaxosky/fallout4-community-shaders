@@ -1,12 +1,8 @@
-function(configure_xse_plugin TARGET_NAME MAJOR MINOR PATCH)
+function(configure_xse_plugin TARGET_NAME)
 
 	target_compile_features(${TARGET_NAME} PRIVATE cxx_std_23)
 
 	set(PROJECT_NAME ${TARGET_NAME})
-	set(PROJECT_VERSION_MAJOR ${MAJOR})
-	set(PROJECT_VERSION_MINOR ${MINOR})
-	set(PROJECT_VERSION_PATCH ${PATCH})
-	set(PROJECT_VERSION "${MAJOR}.${MINOR}.${PATCH}")
 
 	configure_file(
 		${CMAKE_SOURCE_DIR}/cmake/Plugin.h.in
@@ -43,7 +39,7 @@ function(configure_xse_plugin TARGET_NAME MAJOR MINOR PATCH)
 	)
 
 	target_precompile_headers(${TARGET_NAME} PRIVATE
-		${CMAKE_SOURCE_DIR}/include/PCH.h
+		${CMAKE_SOURCE_DIR}/src/PCH.h
 	)
 
 	target_compile_definitions(${TARGET_NAME} PRIVATE
@@ -103,8 +99,8 @@ function(configure_xse_plugin TARGET_NAME MAJOR MINOR PATCH)
 
 	target_include_directories(${TARGET_NAME} PRIVATE
 		${CMAKE_CURRENT_BINARY_DIR}/${TARGET_NAME}
-		${CMAKE_SOURCE_DIR}/include
 		${CMAKE_SOURCE_DIR}/src
+		${CMAKE_SOURCE_DIR}/extern
 	)
 
 	target_link_libraries(${TARGET_NAME} PUBLIC

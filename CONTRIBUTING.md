@@ -14,10 +14,6 @@ The default local toolchain is:
 - [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set
 - [Git](https://git-scm.com/) and [Git LFS](https://git-lfs.com/)
 
-Visual Studio 2022 is also supported through the `ci` preset and requires CMake 3.21
-or newer. The two presets share the `build` directory, so use a clean build directory
-when switching generators.
-
 CTest additionally requires PowerShell 7 (`pwsh`) and `fxc.exe` from the Windows SDK.
 Set `FXC_PATH` to use a compiler outside the default Windows SDK location.
 
@@ -70,15 +66,11 @@ cmake -S . --preset=default
 cmake --build build --config Release --target FO4CommunityShaders --parallel
 ```
 
-Visual Studio 2022:
-
-```bash
-cmake -S . --preset=ci
-cmake --build build --config Release --target FO4CommunityShaders --parallel
-```
-
 The plugin is written to `build\Release\FO4CommunityShaders.dll`. Release builds use
 link-time optimization and treat compiler and linker warnings as errors.
+`project(VERSION ...)` in `CMakeLists.txt` defines the plugin version; Git identifies development builds.
+
+For clangd-based editors, `pwsh scripts\gen-compile-commands.ps1` generates the compile database.
 
 Community Shaders does not compile or link Dear ImGui. Its UI uses the official forwarding-only
 DearModdingUI headers published through the pinned CommonLibF4 submodule at
@@ -113,9 +105,15 @@ plugin uses at runtime. Editing those shaders must keep it green.
 
 ## Install or deploy
 
-The repository does not have a CMake install target or package-generation target. For
-a manual source installation, mirror `package\` into the mod's `Data\`, then add the
-build output and feature shaders:
+After a full Release build, create the package with:
+
+```powershell
+pwsh scripts\package-release.ps1 -Identifier <commit-or-tag>
+```
+
+The script takes the version from the built DLL and merges the staged shaders and configuration.
+There is no CMake install target. For a manual installation, mirror `package\` into the mod's
+`Data\`, then add the build output and feature shaders:
 
 - `build\Release\FO4CommunityShaders.dll` (and `.pdb`) -> `Data\F4SE\Plugins\`
 - `features\<Name>\Shaders\<Name>\` -> `Data\Shaders\<Name>\`
@@ -132,16 +130,14 @@ engine frame. It does not claim generated frame-generation presents or every swa
 ## Project layout
 
 ```text
-src\                Core feature framework, renderer hooks, forwarded UI, and presets
+src\                Private source/headers, renderer hooks, forwarded UI, and presets
 src\Host\           Forwarding-only DearModdingUI client integration
 features\<Name>\    Feature source and optional runtime-compiled shaders
 cmake\              Build integration for CommonLibF4
-extern\             Recursive source submodules
-include\            Shared project headers
+extern\             Third-party submodules, headers, and libraries
 package\            Mod assets: config, presets, reconstructed shaders
 scripts\            Developer tooling
 tests\              Host and shader tests run by CTest
-docs\               Developer documentation
 ```
 
 Before submitting a change, build the affected configuration, run CTest, and perform

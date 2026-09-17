@@ -16,7 +16,6 @@ injected in place of the stock shaders.
 <br>
 
 [![CI](https://img.shields.io/github/actions/workflow/status/northaxosky/fallout4-community-shaders/pr.yml?branch=main&style=for-the-badge&label=CI&logo=githubactions&logoColor=white)](https://github.com/northaxosky/fallout4-community-shaders/actions/workflows/pr.yml)
-[![Version](https://img.shields.io/badge/version-0.2.0%20·%20WIP-orange?style=for-the-badge)](version.txt)
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 
 [![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.240-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
@@ -28,7 +27,7 @@ injected in place of the stock shaders.
 </div>
 
 > [!WARNING]
-> **`0.2.0` is active work in progress.** Features are incomplete, unstable, unavailable on
+> **Active work in progress.** Features are incomplete, unstable, unavailable on
 > some systems, or have startup-only options that require a restart. Ordinary enabled and settings
 > changes apply live unless a control says otherwise. There is no packaged release yet; source
 > builds are intended for development and testing.

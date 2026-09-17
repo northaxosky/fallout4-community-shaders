@@ -4,8 +4,6 @@ param(
 	[ValidateNotNullOrEmpty()]
 	[string]$Identifier,
 
-	[string]$Version,
-
 	[string]$OutputDirectory,
 
 	[switch]$KeepStaging
@@ -15,9 +13,6 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-if (-not $Version) {
-	$Version = (Get-Content -LiteralPath (Join-Path $repoRoot 'version.txt') -Raw).Trim()
-}
 if (-not $OutputDirectory) {
 	$OutputDirectory = Join-Path $repoRoot 'build/dist'
 }
@@ -37,7 +32,24 @@ function Assert-PackageFile {
 	}
 }
 
-$safeVersion = $Version -replace '[^A-Za-z0-9._-]', '-'
+$f4seSource = Join-Path $repoRoot 'package/F4SE'
+$shaderSource = Join-Path $repoRoot 'build/ShaderStage/Shaders'
+$pluginSource = Join-Path $repoRoot 'build/Release/FO4CommunityShaders.dll'
+
+Assert-SourcePath $f4seSource
+Assert-SourcePath $shaderSource
+Assert-SourcePath $pluginSource
+
+$versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($pluginSource)
+if ([string]::IsNullOrWhiteSpace($versionInfo.FileVersion)) {
+	throw "Built plugin is missing FileVersion metadata: $pluginSource"
+}
+$version = '{0}.{1}.{2}' -f
+	$versionInfo.FileMajorPart,
+	$versionInfo.FileMinorPart,
+	$versionInfo.FileBuildPart
+
+$safeVersion = $version -replace '[^A-Za-z0-9._-]', '-'
 $safeIdentifier = $Identifier -replace '[^A-Za-z0-9._-]', '-'
 if (-not $safeVersion -or -not $safeIdentifier) {
 	throw 'Version and identifier must contain at least one file-name-safe character.'
@@ -46,13 +58,6 @@ if (-not $safeVersion -or -not $safeIdentifier) {
 $packageName = "FO4CommunityShaders-$safeVersion-$safeIdentifier"
 $stagingRoot = Join-Path $OutputDirectory $packageName
 $archivePath = Join-Path $OutputDirectory "$packageName.zip"
-$f4seSource = Join-Path $repoRoot 'package/F4SE'
-$shaderSource = Join-Path $repoRoot 'build/ShaderStage/Shaders'
-$pluginSource = Join-Path $repoRoot 'build/Release/FO4CommunityShaders.dll'
-
-Assert-SourcePath $f4seSource
-Assert-SourcePath $shaderSource
-Assert-SourcePath $pluginSource
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 Remove-Item -LiteralPath $stagingRoot -Recurse -Force -ErrorAction SilentlyContinue

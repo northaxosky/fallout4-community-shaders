@@ -123,32 +123,26 @@ jobs:
         run: |
           ctest --test-dir build -C Release --output-on-failure --no-tests=error
 
-      - name: Prepare package metadata
+      - name: Assemble package and prepare metadata
         if: github.event_name == 'push'
         id: package-metadata
         shell: pwsh
         run: |
-          $version = (Get-Content version.txt -Raw).Trim()
           $identifier = if ($env:GITHUB_REF_TYPE -eq 'tag') {
             $env:GITHUB_REF_NAME
           } else {
             $env:GITHUB_SHA.Substring(0, 7)
           }
-          $safeVersion = $version -replace '[^A-Za-z0-9._-]', '-'
-          $safeIdentifier = $identifier -replace '[^A-Za-z0-9._-]', '-'
-          "package-name=FO4CommunityShaders-$safeVersion-$safeIdentifier" |
+          $archivePath = ./scripts/package-release.ps1 `
+            -Identifier $identifier `
+            -KeepStaging |
+            Select-Object -Last 1
+          if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+            throw "Package script did not return a valid archive path: $archivePath"
+          }
+          $packageName = [System.IO.Path]::GetFileNameWithoutExtension($archivePath)
+          "package-name=$packageName" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Assemble and verify release package
-        if: github.event_name == 'push'
-        shell: pwsh
-        run: |
-          $identifier = if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $env:GITHUB_REF_NAME
-          } else {
-            $env:GITHUB_SHA.Substring(0, 7)
-          }
-          ./scripts/package-release.ps1 -Identifier $identifier -KeepStaging
 
       - name: Verify packaged SDK metadata
         if: github.event_name == 'push'
