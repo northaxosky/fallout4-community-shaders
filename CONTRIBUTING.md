@@ -106,6 +106,10 @@ permutation of the reconstructed deferred shaders through `D3DCompile`, the
 same compiler the plugin uses at runtime. Editing those shaders must keep it
 green.
 
+The GPU interop test defaults to WARP. Run
+`build\windows\x64\releasedbg\FrameGenerationRetirementGpuTests.exe --hardware`
+to check bidirectional shared-texture handoff and retirement on a hardware adapter.
+
 ## Install or deploy
 
 After building, create the CommonLibF4 package with:
