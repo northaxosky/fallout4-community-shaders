@@ -19,7 +19,7 @@ injected in place of the stock shaders.
 [![License](https://img.shields.io/badge/license-GPL--3.0--or--later-blue?style=for-the-badge)](LICENSE)
 
 [![Fallout 4](https://img.shields.io/badge/Fallout%204-1.11.240-3a7d44?style=for-the-badge)](https://www.nexusmods.com/fallout4)
-[![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](CMakeLists.txt)
+[![C++23](https://img.shields.io/badge/C%2B%2B-23-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)](xmake.lua)
 [![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#-building-from-source)
 
 <sub>[Features](#features) · [Activation](#feature-activation) · [Controls](#controls) · [In-game Menu](#in-game-menu) · [Building](#building-from-source) · [Compatibility](#compatibility-notes) · [License](#license)</sub>
@@ -114,7 +114,8 @@ If DearModdingUI is not installed, Community Shaders operates headless and reads
 
 ## Building from source
 
-**Prerequisites:** Visual Studio 2026 (Desktop C++), CMake ≥ 4.2, [vcpkg](https://vcpkg.io) with `VCPKG_ROOT` set, and Git.
+**Prerequisites:** Visual Studio 2026 (Desktop C++), [xmake](https://xmake.io),
+CMake (for the FidelityFX SDK adapter), and Git.
 
 ```bash
 git clone --recursive https://github.com/northaxosky/fallout4-community-shaders
@@ -123,12 +124,21 @@ cd fallout4-community-shaders
 # Download vendor SDK runtimes (Streamline, DLSS, FidelityFX)
 pwsh scripts/fetch-sdks.ps1
 
-# Configure and build (Release)
-cmake -S . --preset=default
-cmake --build build --config Release
+# Configure and build
+xmake f -m releasedbg -y
+xmake
+
+# Run all host and shader tests
+xmake test
+
+# Create build/packages/FO4CommunityShaders-0.1.0.zip
+xmake package FO4CommunityShaders
 ```
 
-Tests can be run with `ctest --test-dir build -C Release`. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for full setup and deployment details.
+Set `XSE_FO4_MODS_PATH` or `XSE_FO4_GAME_PATH` before `xmake install` to
+deploy through the CommonLibF4 install rule. The existing CMake build remains
+available during the migration. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for
+full setup and deployment details.
 
 ---
 

@@ -73,27 +73,8 @@ jobs:
           git lfs pull
           git submodule foreach --recursive "git lfs install --local && git lfs pull"
 
-      - name: Resolve vcpkg root
-        shell: pwsh
-        run: |
-          $candidates = @($env:VCPKG_ROOT, $env:VCPKG_INSTALLATION_ROOT, 'C:\vcpkg') |
-            Where-Object { $_ } |
-            Select-Object -Unique
-
-          $root = $null
-          foreach ($candidate in $candidates) {
-            $toolchain = Join-Path $candidate 'scripts\buildsystems\vcpkg.cmake'
-            if (Test-Path $toolchain) {
-              $root = $candidate
-              break
-            }
-          }
-
-          if (-not $root) {
-            throw "Could not find a vcpkg toolchain. Tried: $($candidates -join ', ')"
-          }
-
-          "VCPKG_ROOT=$root" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Set up xmake
+        uses: xmake-io/github-action-setup-xmake@v1
 
       - name: Restore SDK archive cache
         if: github.event_name == 'push'
@@ -108,90 +89,37 @@ jobs:
         run: ./scripts/fetch-sdks.ps1
 
       - name: Configure
-        shell: pwsh
-        run: |
-          if (-not $env:VCPKG_ROOT) {
-            throw 'VCPKG_ROOT was not set'
-          }
-          cmake -S . --preset=default
+        run: xmake f -m releasedbg -y
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: xmake -y FO4CommunityShaders
 
       - name: Run tests
-        shell: pwsh
-        run: |
-          ctest --test-dir build -C Release --output-on-failure --no-tests=error
+        run: xmake test
 
-      - name: Assemble package and prepare metadata
+      - name: Assemble package
+        if: github.event_name == 'push'
+        run: xmake package FO4CommunityShaders
+
+      - name: Prepare package metadata
         if: github.event_name == 'push'
         id: package-metadata
         shell: pwsh
         run: |
-          $identifier = if ($env:GITHUB_REF_TYPE -eq 'tag') {
-            $env:GITHUB_REF_NAME
-          } else {
-            $env:GITHUB_SHA.Substring(0, 7)
+          $archives = @(Get-ChildItem build/packages -File -Filter '*.zip')
+          if ($archives.Count -ne 1) {
+            throw "Expected one xmake package archive, found $($archives.Count)"
           }
-          $archivePath = ./scripts/package-release.ps1 `
-            -Identifier $identifier `
-            -KeepStaging |
-            Select-Object -Last 1
-          if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
-            throw "Package script did not return a valid archive path: $archivePath"
-          }
-          $packageName = [System.IO.Path]::GetFileNameWithoutExtension($archivePath)
+          $packageName = [System.IO.Path]::GetFileNameWithoutExtension($archives[0].Name)
           "package-name=$packageName" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Verify packaged SDK metadata
-        if: github.event_name == 'push'
-        shell: pwsh
-        run: |
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $archives = @(Get-ChildItem build/dist -File -Filter '*.zip')
-          if ($archives.Count -ne 1) {
-            throw "Expected one release archive, found $($archives.Count)"
-          }
-
-          $archive = [System.IO.Compression.ZipFile]::OpenRead($archives[0].FullName)
-          try {
-            $entries = @($archive.Entries.FullName)
-            $requiredMetadata = @(
-              'Shaders/Upscaling/Streamline/license.txt',
-              'Shaders/Upscaling/Streamline/3rd-party-licenses.md',
-              'Shaders/Upscaling/Streamline/nvngx_dlss.license.txt',
-              'Shaders/Upscaling/Streamline/reflex.license.txt',
-              'Shaders/Upscaling/Streamline/sl.project-manifest.bin',
-              'Shaders/Upscaling/Streamline/sl.project-manifest.sig',
-              'Shaders/Upscaling/FidelityFX/license.md'
-            )
-            foreach ($metadata in $requiredMetadata) {
-              if ($metadata -notin $entries) {
-                throw "Required SDK metadata is missing from the archive: $metadata"
-              }
-            }
-          } finally {
-            $archive.Dispose()
-          }
-
-      # Upload the staged tree, not the archive: upload-artifact always zips its input.
       - name: Upload release package
         if: github.event_name == 'push'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.package-metadata.outputs.package-name }}
-          path: build/dist/${{ steps.package-metadata.outputs.package-name }}/
-          if-no-files-found: error
-          retention-days: 14
-
-      # Releases ship the deterministic archive rather than a re-zipped tree.
-      - name: Upload release archive
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
-        with:
           name: ${{ steps.package-metadata.outputs.package-name }}-archive
-          path: build/dist/*.zip
+          path: build/packages/*.zip
           if-no-files-found: error
           retention-days: 14
 

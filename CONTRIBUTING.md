@@ -10,12 +10,12 @@ The default local toolchain is:
 
 - Windows x64
 - Visual Studio 2026 with the Desktop development with C++ workload
-- CMake 4.2 or newer
-- [vcpkg](https://github.com/microsoft/vcpkg) with `VCPKG_ROOT` set
+- [xmake](https://xmake.io)
+- CMake, used by xmake only to build the FidelityFX SDK submodule
 - [Git](https://git-scm.com/) and [Git LFS](https://git-lfs.com/)
 
-CTest additionally requires PowerShell 7 (`pwsh`) and `fxc.exe` from the Windows SDK.
-Set `FXC_PATH` to use a compiler outside the default Windows SDK location.
+PowerShell 7 (`pwsh`) is required for Streamline's vendor-provided trust-header
+generator and the SDK staging script.
 
 Optional tooling:
 
@@ -59,16 +59,20 @@ required files into the `Streamline` and `FidelityFX` directories under
 
 ## Configure and build
 
-Visual Studio 2026:
+Configure a release-with-debug-information build, then build the plugin:
 
 ```bash
-cmake -S . --preset=default
-cmake --build build --config Release --target FO4CommunityShaders --parallel
+xmake f -m releasedbg -y
+xmake
 ```
 
-The plugin is written to `build\Release\FO4CommunityShaders.dll`. Release builds use
-link-time optimization and treat compiler and linker warnings as errors.
-`project(VERSION ...)` in `CMakeLists.txt` defines the plugin version; Git identifies development builds.
+Use `-m release` for an optimized build without debug information. The plugin is
+written below `build\windows\x64\<mode>\`. Release configurations use link-time
+optimization and treat project compiler and linker warnings as errors. The
+version in `xmake.lua` follows the existing CMake project version; Git identifies
+development builds.
+
+The existing CMake presets remain available during the migration.
 
 For clangd-based editors, `pwsh scripts\gen-compile-commands.ps1` generates the compile database.
 
@@ -93,33 +97,39 @@ DearModdingUI host; without one the plugin deliberately runs headless.
 
 ## Test
 
-Run the registered CTest suite against the Release build:
+Build the non-default C++ test executables and run all 37 xmake-native
+registrations:
 
 ```bash
-ctest --test-dir build -C Release --output-on-failure
+xmake test
 ```
 
-`ShaderCompile` compiles every shipping permutation of the reconstructed deferred shaders under
-`package\Shaders\` through `D3DCompile`, the same compiler the
-plugin uses at runtime. Editing those shaders must keep it green.
+`ShaderCompile` stages the merged shipping shader tree and compiles every
+permutation of the reconstructed deferred shaders through `D3DCompile`, the
+same compiler the plugin uses at runtime. Editing those shaders must keep it
+green.
 
 ## Install or deploy
 
-After a full Release build, create the package with:
+After building, create the CommonLibF4 package with:
 
-```powershell
-pwsh scripts\package-release.ps1 -Identifier <commit-or-tag>
+```bash
+xmake package FO4CommunityShaders
 ```
 
-The script takes the version from the built DLL and merges the staged shaders and configuration.
-There is no CMake install target. For a manual installation, mirror `package\` into the mod's
-`Data\`, then add the build output and feature shaders:
+The archive is written to `build\packages\` and contains the plugin,
+configuration, SDK runtimes, and merged feature shader layout under `Data\`.
 
-- `build\Release\FO4CommunityShaders.dll` (and `.pdb`) -> `Data\F4SE\Plugins\`
-- `features\<Name>\Shaders\<Name>\` -> `Data\Shaders\<Name>\`
+To deploy with CommonLibF4, set one of these environment variables before
+running `xmake install`:
 
-`package\` mirrors the mod's `Data\` directly: `package\Shaders\` holds the reconstructed
-deferred shaders and `package\F4SE\` holds plugin configuration and presets.
+- `XSE_FO4_MODS_PATH` installs to
+  `%XSE_FO4_MODS_PATH%\FO4CommunityShaders`.
+- `XSE_FO4_GAME_PATH` installs to `%XSE_FO4_GAME_PATH%\Data`.
+
+```bash
+xmake install
+```
 
 Launch the result through MO2/F4SE. Building and deploying does not perform any
 visual comparison; rendering behavior must be checked in game.
@@ -137,8 +147,9 @@ cmake\              Build integration for CommonLibF4
 extern\             Third-party submodules, headers, and libraries
 package\            Mod assets: config, presets, reconstructed shaders
 scripts\            Developer tooling
-tests\              Host and shader tests run by CTest
+tests\              Host and shader tests run by xmake test
+xmake\              Focused xmake package, SDK, and shader-staging modules
 ```
 
-Before submitting a change, build the affected configuration, run CTest, and perform
+Before submitting a change, build the affected configuration, run `xmake test`, and perform
 an in-game check for rendering or hook changes.

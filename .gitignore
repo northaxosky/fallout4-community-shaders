@@ -15,6 +15,7 @@ bin/
 
 # Generated tool output, do not commit
 __pycache__/
+.xmake/
 
 # Shader validation scratch + corpus cache
 .shader-cache/
