@@ -34,7 +34,12 @@ namespace cs::render
 		const auto createTexture = [device](
 			const D3D11_TEXTURE2D_DESC& a_desc,
 			std::string_view a_name) {
-			auto texture = std::make_unique<cs::buffer::Texture2D>(a_desc);
+			auto texture =
+				render::TemporalPipeline::Get().CreateSuperResolutionTexture(
+					a_desc, a_name);
+			if (!texture) {
+				return static_cast<cs::buffer::Texture2D*>(nullptr);
+			}
 
 			D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
 			srvDesc.Format = a_desc.Format;
@@ -90,25 +95,10 @@ namespace cs::render
 					D3D11_TEXTURE2D_DESC motionTexDesc{};
 					motionVector->GetDesc(&motionTexDesc);
 					motionTexDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-
-					D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
-					srvDesc.Format = motionTexDesc.Format;
-					srvDesc.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-					srvDesc.Texture2D.MostDetailedMip = 0;
-					srvDesc.Texture2D.MipLevels = 1;
-
-					D3D11_UNORDERED_ACCESS_VIEW_DESC uavDesc{};
-					uavDesc.Format = motionTexDesc.Format;
-					uavDesc.ViewDimension = D3D11_UAV_DIMENSION_TEXTURE2D;
-					uavDesc.Texture2D.MipSlice = 0;
-
-					motionVectorCopyTexture = new cs::buffer::Texture2D(motionTexDesc);
-					motionVectorCopyTexture->CreateSRV(srvDesc);
-					motionVectorCopyTexture->CreateUAV(uavDesc);
-					motionVectorCopyTexture->SetName(
-						"Upscaling/MotionVectorCopy.Texture",
-						"Upscaling/MotionVectorCopy.SRV",
-						"Upscaling/MotionVectorCopy.UAV");
+					motionTexDesc.CPUAccessFlags = 0;
+					motionTexDesc.MiscFlags = 0;
+					motionVectorCopyTexture = createTexture(
+						motionTexDesc, "Upscaling/MotionVectorCopy");
 				}
 			}
 		}
@@ -243,12 +233,28 @@ namespace cs::render
 			static_cast<int>(a_upscalemethod), magic_enum::enum_name(a_upscalemethod),
 			previousQualityMode, settings.qualityMode);
 
+		render::temporal::ProviderResult release{
+			.code = render::temporal::ProviderResultCode::kSuccess
+		};
 		if (previousUpscaleMode == UpscaleMethod::kDLSS) {
-			render::TemporalPipeline::Get().DestroySuperResolutionResources(
-				render::temporal::SuperResolutionMethod::kDLSS);
+			release =
+				render::TemporalPipeline::Get().DestroySuperResolutionResources(
+					render::temporal::SuperResolutionMethod::kDLSS);
 		} else if (previousUpscaleMode == UpscaleMethod::kFSR) {
-			render::TemporalPipeline::Get().DestroySuperResolutionResources(
-				render::temporal::SuperResolutionMethod::kFSR3);
+			release =
+				render::TemporalPipeline::Get().DestroySuperResolutionResources(
+					render::temporal::SuperResolutionMethod::kFSR3);
+		}
+		if (!release.Succeeded()) {
+			render::TemporalPipeline::Get().PostFailure(
+				release.failureDomain ==
+						render::temporal::FailureDomain::kNone
+					? render::temporal::FailureDomain::kSuperResolution
+					: release.failureDomain,
+				release.message.empty()
+					? "Super-resolution resources could not be retired."
+					: release.message);
+			return false;
 		}
 
 		DestroyUpscalingTextureResources(a_upscalemethod);
@@ -524,12 +530,28 @@ namespace cs::render
 		_spatialFallbackPreflightReady.store(false, std::memory_order_release);
 
 		const auto method = GetUpscaleMethod();
+		render::temporal::ProviderResult release{
+			.code = render::temporal::ProviderResultCode::kSuccess
+		};
 		if (method == UpscaleMethod::kDLSS) {
-			render::TemporalPipeline::Get().DestroySuperResolutionResources(
+			release =
+				render::TemporalPipeline::Get().DestroySuperResolutionResources(
 				render::temporal::SuperResolutionMethod::kDLSS);
 		} else if (method == UpscaleMethod::kFSR) {
-			render::TemporalPipeline::Get().DestroySuperResolutionResources(
+			release =
+				render::TemporalPipeline::Get().DestroySuperResolutionResources(
 				render::temporal::SuperResolutionMethod::kFSR3);
+		}
+		if (!release.Succeeded()) {
+			render::TemporalPipeline::Get().PostFailure(
+				release.failureDomain ==
+						render::temporal::FailureDomain::kNone
+					? render::temporal::FailureDomain::kSuperResolution
+					: release.failureDomain,
+				release.message.empty()
+					? "Super-resolution resources could not be retired."
+					: release.message);
+			return;
 		}
 
 		DestroyUpscalingTextureResources(method);

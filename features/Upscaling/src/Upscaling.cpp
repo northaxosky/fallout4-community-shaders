@@ -189,10 +189,6 @@ namespace cs::features
 		static constexpr std::array fields{
 			CS_RESTART_FIELD(
 				Settings,
-				upscaleMethod,
-				"Super-resolution method"),
-			CS_RESTART_FIELD(
-				Settings,
 				streamlineLogLevel,
 				"Streamline log level"),
 			CS_RESTART_FIELD(
@@ -223,7 +219,9 @@ namespace cs::features
 			settings.upscaleMethod = *method.selected;
 			changed = true;
 		}
-		dmui::ui::TextDisabled("Method changes take effect after restarting the game.");
+		dmui::ui::TextDisabled(
+			"Quality and None/TAA/FSR/DLSS method changes apply at a frame "
+			"boundary when the selected provider was admitted at startup.");
 
 		static const std::array fallbackMethods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
@@ -342,6 +340,15 @@ namespace cs::features
 				render::temporal::SuperResolutionMethod::kDLSS)]) {
 			dmui::ui::TextDisabled(
 				"DLSS was not admitted for this startup; the effective or fallback provider remains active.");
+		}
+		if (settings.enabled &&
+			settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kFSR) &&
+			status.requestFrozen && status.d3d11Ready &&
+			!status.session.admittedSr[static_cast<std::size_t>(
+				render::temporal::SuperResolutionMethod::kFSR3)]) {
+			dmui::ui::TextDisabled(
+				"FSR was not admitted for this startup; the effective native method remains active.");
 		}
 		if (status.pending.required)
 			dmui::ui::TextDisabled("Restart required: %s", status.pending.reason.c_str());

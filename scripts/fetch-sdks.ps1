@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-	Downloads and stages the proprietary runtime DLLs that are not vendored in this repository.
+	Verifies and stages the SDK runtime DLLs that are not vendored in this repository.
 
 .DESCRIPTION
 	Reads scripts/sdk-manifest.psd1, downloads each pinned archive, verifies its SHA-256 against
@@ -12,11 +12,16 @@
 
 .PARAMETER Force
 	Re-download archives even when a verified cached copy exists.
+
+.PARAMETER StreamlineCandidateDirectory
+	Stage a signed candidate from the pinned Streamline fork instead of downloading its release.
+	Requires the production-key verifier built by the fork's release workflow.
 #>
 [CmdletBinding()]
 param(
 	[string]$CacheDirectory,
-	[switch]$Force
+	[switch]$Force,
+	[string]$StreamlineCandidateDirectory
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,6 +50,9 @@ function Test-Digest {
 function Get-Archive {
 	param([hashtable]$Package)
 
+	if (-not $Package.Url -or -not $Package.Sha256) {
+		throw "[$($Package.Name)] $($Package.Version) has no published archive pin. Supply -StreamlineCandidateDirectory with its signed local candidate."
+	}
 	$archivePath = Join-Path $CacheDirectory ("{0}-{1}.zip" -f $Package.Name, $Package.Version)
 
 	if (-not $Force -and (Test-Digest -Path $archivePath -Expected $Package.Sha256)) {
@@ -62,6 +70,39 @@ function Get-Archive {
 
 	Write-Host "[$($Package.Name)] digest verified."
 	return $archivePath
+}
+
+function Get-StreamlineCandidate {
+	param([hashtable]$Package)
+
+	$fork = Join-Path $repoRoot 'extern\Streamline'
+	$config = Import-PowerShellDataFile -LiteralPath (Join-Path $fork 'config\project-release.psd1')
+	if ($Package.Version -cne $config.ReleaseTag) {
+		throw "Streamline package version does not match the pinned fork release configuration."
+	}
+	$candidate = (Resolve-Path -LiteralPath $StreamlineCandidateDirectory).Path
+	$packageRoot = Join-Path $candidate 'package'
+	$runtime = Join-Path $packageRoot 'bin\x64'
+	foreach ($name in @('sl.project-manifest.bin', 'sl.project-manifest.sig')) {
+		if (-not (Test-Path -LiteralPath (Join-Path $runtime $name) -PathType Leaf)) {
+			throw "Signed Streamline candidate is incomplete: $name is missing."
+		}
+	}
+	$verifier = Join-Path $fork '_artifacts\project-release\verifier\project-release-verifier.exe'
+	if (-not (Test-Path -LiteralPath $verifier -PathType Leaf)) {
+		throw "Build the pinned Streamline release workflow's production-key verifier before staging a local candidate."
+	}
+	$sourceCommit = & git -C $fork rev-parse HEAD
+	if ($LASTEXITCODE -ne 0) {
+		throw "Cannot determine the pinned Streamline source commit."
+	}
+	& (Join-Path $fork 'tools\project-release.ps1') -Mode Validate `
+		-CandidateDirectory $candidate -SourceCommit $sourceCommit.Trim() | Out-Host
+	& $verifier $runtime | Out-Host
+	if ($LASTEXITCODE -ne 0) {
+		throw "Streamline candidate failed production signature and payload verification."
+	}
+	return $packageRoot
 }
 
 function Copy-StagedFile {
@@ -91,13 +132,17 @@ function Copy-StagedFile {
 }
 
 foreach ($package in $manifest.Packages) {
-	$archivePath = Get-Archive -Package $package
-
-	$extractRoot = Join-Path $CacheDirectory ("{0}-{1}-extracted" -f $package.Name, $package.Version)
-	if (Test-Path -LiteralPath $extractRoot) {
-		Remove-Item -LiteralPath $extractRoot -Recurse -Force
+	$localCandidate = $package.Name -eq 'Streamline' -and $StreamlineCandidateDirectory
+	if ($localCandidate) {
+		$extractRoot = Get-StreamlineCandidate -Package $package
+	} else {
+		$archivePath = Get-Archive -Package $package
+		$extractRoot = Join-Path $CacheDirectory ("{0}-{1}-extracted" -f $package.Name, $package.Version)
+		if (Test-Path -LiteralPath $extractRoot) {
+			Remove-Item -LiteralPath $extractRoot -Recurse -Force
+		}
+		Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
 	}
-	Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
 
 	$destination = Join-Path $repoRoot $package.Destination
 	New-Item -ItemType Directory -Force -Path $destination | Out-Null
@@ -116,7 +161,15 @@ foreach ($package in $manifest.Packages) {
 		}
 	}
 
-	Remove-Item -LiteralPath $extractRoot -Recurse -Force
+	if ($localCandidate) {
+		$verifier = Join-Path $repoRoot 'extern\Streamline\_artifacts\project-release\verifier\project-release-verifier.exe'
+		& $verifier $destination
+		if ($LASTEXITCODE -ne 0) {
+			throw "Staged Streamline runtime failed production verification."
+		}
+	} else {
+		Remove-Item -LiteralPath $extractRoot -Recurse -Force
+	}
 	Write-Host "[$($package.Name)] staged into $($package.Destination)"
 }
 

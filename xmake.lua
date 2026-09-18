@@ -87,17 +87,21 @@ local required_sdk_assets = {
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.common.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.dlss.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.dlss_g.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/sl.fsr.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/sl.fsr_g.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.pcl.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.reflex.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/amd_fidelityfx_framegeneration_dx12.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/amd_fidelityfx_loader_dx12.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/amd_fidelityfx_upscaler_dx12.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.project-manifest.bin",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.project-manifest.sig",
     "features/Upscaling/Shaders/Upscaling/Streamline/license.txt",
     "features/Upscaling/Shaders/Upscaling/Streamline/3rd-party-licenses.md",
+    "features/Upscaling/Shaders/Upscaling/Streamline/amd-fidelityfx-license.md",
+    "features/Upscaling/Shaders/Upscaling/Streamline/amd-fidelityfx-third-party-notices.md",
     "features/Upscaling/Shaders/Upscaling/Streamline/nvngx_dlss.license.txt",
-    "features/Upscaling/Shaders/Upscaling/Streamline/reflex.license.txt",
-    "features/Upscaling/Shaders/Upscaling/FidelityFX/amd_fidelityfx_framegeneration_dx12.dll",
-    "features/Upscaling/Shaders/Upscaling/FidelityFX/amd_fidelityfx_loader_dx12.dll",
-    "features/Upscaling/Shaders/Upscaling/FidelityFX/license.md"
+    "features/Upscaling/Shaders/Upscaling/Streamline/reflex.license.txt"
 }
 
 rule("fo4cs.sdk-assets", function()
@@ -223,10 +227,19 @@ target(plugin_name, function()
     add_installfiles("package/(F4SE/**)", { prefixdir = "." })
     add_installfiles("package/(Shaders/**)", { prefixdir = "." })
     for _, feature in ipairs(features) do
-        add_installfiles(
-            path.join("features", feature, "(Shaders/**)"),
-            { prefixdir = "." }
-        )
+        if feature == "Upscaling" then
+            add_installfiles(
+                "features/Upscaling/(Shaders/Upscaling/*.hlsl)",
+                "features/Upscaling/(Shaders/Upscaling/RCAS/**)",
+                "features/Upscaling/(Shaders/Upscaling/Streamline/**)",
+                { prefixdir = "." }
+            )
+        else
+            add_installfiles(
+                path.join("features", feature, "(Shaders/**)"),
+                { prefixdir = "." }
+            )
+        end
     end
     add_installfiles("LICENSE", "EXCEPTIONS.md", { prefixdir = "." })
 end)

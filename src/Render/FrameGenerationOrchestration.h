@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -23,6 +24,12 @@ namespace cs::render::temporal
 		if (a_result.sdkResult != 0) {
 			message += " (SDK result ";
 			message += std::to_string(a_result.sdkResult);
+			message += ")";
+		}
+		if (FAILED(a_result.hresult)) {
+			message += " (HRESULT ";
+			message += std::to_string(
+				static_cast<std::uint32_t>(a_result.hresult));
 			message += ")";
 		}
 		return message;
@@ -73,12 +80,58 @@ namespace cs::render::temporal
 		if (!result.Succeeded()) {
 			return result;
 		}
-		if (!std::forward<Drain>(a_drain)()) {
+		const auto drainStart = std::chrono::steady_clock::now();
+		const bool drained = std::forward<Drain>(a_drain)();
+		const auto drainMicroseconds =
+			static_cast<std::uint64_t>(
+				std::chrono::duration_cast<std::chrono::microseconds>(
+					std::chrono::steady_clock::now() - drainStart)
+					.count());
+		if (!drained) {
 			return { .code = ProviderResultCode::kFailure,
+				.hresult = E_FAIL,
 				.message =
-					"GPU work did not drain before provider resource release." };
+					"GPU work did not drain before provider resource release.",
+				.failureDomain = FailureDomain::kTransport,
+				.globalDrainAttempted = true,
+				.globalDrainCompleted = false,
+				.globalDrainCpuMicroseconds = drainMicroseconds };
 		}
-		return a_provider.ReleaseDisplayResources();
+		result = a_provider.ReleaseDisplayResources();
+		const bool providerDrainAttempted = result.globalDrainAttempted;
+		const bool providerDrainCompleted = result.globalDrainCompleted;
+		result.globalDrainAttempted = true;
+		result.globalDrainCompleted =
+			!providerDrainAttempted || providerDrainCompleted;
+		result.globalDrainCpuMicroseconds += drainMicroseconds;
+		return result;
+	}
+
+	template <class Drain>
+	[[nodiscard]] ProviderResult
+	RetirePresentationProvider(
+		IFrameGenerationProvider& a_provider, Drain&& a_drain)
+	{
+		auto result = QuiesceDrainAndRelease(
+			a_provider, std::forward<Drain>(a_drain));
+		if (!result.Succeeded()) {
+			return result;
+		}
+		const auto drainAttempted = result.globalDrainAttempted;
+		const auto drainCompleted = result.globalDrainCompleted;
+		const auto drainMicroseconds = result.globalDrainCpuMicroseconds;
+		result = a_provider.DestroyAfterDrain();
+		result.globalDrainAttempted = drainAttempted;
+		result.globalDrainCompleted = drainCompleted;
+		result.globalDrainCpuMicroseconds = drainMicroseconds;
+		if (!result.Succeeded()) {
+			return result;
+		}
+		result = a_provider.SetPresentationActive(false);
+		result.globalDrainAttempted = drainAttempted;
+		result.globalDrainCompleted = drainCompleted;
+		result.globalDrainCpuMicroseconds = drainMicroseconds;
+		return result;
 	}
 
 	[[nodiscard]] inline ProviderResult RestoreProviderAfterResize(
@@ -320,6 +373,17 @@ namespace cs::render::temporal
 		result.presentResult = std::forward<Present>(a_present)();
 		if (!a_providerMayConsume ||
 			a_mode == PresentInputRetirementMode::kRecordedCommandList) {
+			return result;
+		}
+		if (FAILED(result.presentResult)) {
+			result.signalResult = result.presentResult;
+			return result;
+		}
+		if (a_mode == PresentInputRetirementMode::kVendorCompletionFence) {
+			// The generic helper has no vendor dependency to join. Callers using
+			// this mode must wait that dependency explicitly before signaling the
+			// shared retirement fence.
+			result.signalResult = E_FAIL;
 			return result;
 		}
 

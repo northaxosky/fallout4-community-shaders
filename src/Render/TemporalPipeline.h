@@ -10,12 +10,18 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <string_view>
 
 struct IDXGIAdapter;
 struct ID3D11Device;
 struct ID3D11ShaderResourceView;
 struct ID3D11Texture2D;
 struct ID3D11UnorderedAccessView;
+
+namespace cs::buffer
+{
+	class Texture2D;
+}
 
 namespace cs::render
 {
@@ -166,8 +172,14 @@ namespace cs::render
 		void RequestSuperResolutionReset() noexcept;
 		void RequestFrameGenerationReset() noexcept;
 		[[nodiscard]] bool SuperResolutionResetPending() const noexcept;
+		[[nodiscard]] bool FrameGenerationResetPending() const noexcept;
 		[[nodiscard]] bool ArmFrameGenerationReset() noexcept;
 		void ConsumeSuperResolutionReset(bool a_completed) noexcept;
+		void FreezeFrameConstants(
+			std::uint32_t a_slot,
+			const temporal::FrameGenerationRequest& a_request) noexcept;
+		[[nodiscard]] bool ApplyFrozenFrameConstants(
+			temporal::SuperResolutionRequest& a_request) const noexcept;
 		bool RecordInputPacket(std::uint64_t a_engineFrame,
 			temporal::Extent a_renderExtent,
 			temporal::Extent a_outputExtent,
@@ -216,7 +228,11 @@ namespace cs::render
 			ID3D11Device* a_device, std::uint32_t a_renderWidth,
 			std::uint32_t a_renderHeight, std::uint32_t a_outputWidth,
 			std::uint32_t a_outputHeight);
-		void DestroySuperResolutionResources(
+		[[nodiscard]] std::unique_ptr<cs::buffer::Texture2D>
+		CreateSuperResolutionTexture(
+			const D3D11_TEXTURE2D_DESC& a_desc,
+			std::string_view a_name);
+		[[nodiscard]] temporal::ProviderResult DestroySuperResolutionResources(
 			temporal::SuperResolutionMethod a_method) noexcept;
 		void ResetFsrFrameGenerationCamera() noexcept;
 		void RequestFsrFrameGenerationReset() noexcept;
@@ -238,6 +254,7 @@ namespace cs::render
 			ID3D11Device** a_device,
 			IDXGISwapChain** a_swapChain);
 		bool InstallLatencyHooks() noexcept;
+		void ApplyPendingConfiguration();
 
 		struct Impl;
 		std::unique_ptr<Impl> _impl;

@@ -581,6 +581,34 @@ namespace
 			"ResizeBuffers1 rejects foreign queue metadata");
 	}
 
+	void TestInnerReplacement(cs::features::DXGISwapChainProxy& a_proxy,
+		InnerSwapChain& a_original,
+		InnerSwapChain& a_replacement)
+	{
+		IUnknown* before = nullptr;
+		IUnknown* after = nullptr;
+		Check(SUCCEEDED(a_proxy.QueryInterface(IID_PPV_ARGS(&before))) &&
+				  a_proxy.SetPrivateData(
+					  __uuidof(IDXGISwapChain4), 11, nullptr) == S_FALSE &&
+				  a_original.privateDataSize == 11,
+			"the original private chain receives direct forwarding");
+		a_proxy.ReplaceInner(&a_replacement);
+		Check(SUCCEEDED(a_proxy.QueryInterface(IID_PPV_ARGS(&after))) &&
+				  before == after &&
+				  a_proxy.SetPrivateData(
+					  __uuidof(IDXGISwapChain4), 23, nullptr) == S_FALSE &&
+				  a_original.privateDataSize == 11 &&
+				  a_replacement.privateDataSize == 23,
+			"private-chain replacement preserves facade identity and redirects "
+			"direct forwarding");
+		if (after) {
+			after->Release();
+		}
+		if (before) {
+			before->Release();
+		}
+	}
+
 	void TestFacadeAndDetach(cs::features::DXGISwapChainProxy& a_proxy,
 		InnerSwapChain& a_inner,
 		const RecordingOwner& a_owner)
@@ -655,11 +683,14 @@ int main()
 	auto inner = winrt::make_self<InnerSwapChain>();
 	inner->parent = owner.device.get();
 	auto* proxy = new cs::features::DXGISwapChainProxy(owner, *inner.get());
+	auto replacement = winrt::make_self<InnerSwapChain>();
+	replacement->parent = owner.device.get();
 
 	TestInterfacesAndIdentity(*proxy);
 	TestDeviceAndBuffer(*proxy, owner);
 	TestPresentAndResize(*proxy, owner);
-	TestFacadeAndDetach(*proxy, *inner.get(), owner);
+	TestInnerReplacement(*proxy, *inner.get(), *replacement.get());
+	TestFacadeAndDetach(*proxy, *replacement.get(), owner);
 	proxy->Release();
 
 	if (failures) {

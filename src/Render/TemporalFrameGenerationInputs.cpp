@@ -228,17 +228,48 @@ namespace cs::render
 	void TemporalRenderer::CaptureFrameGenerationInputs()
 	{
 		BeginFrameGenerationCaptureState();
-		if (render::TemporalPipeline::Get().ArmFrameGenerationReset()) {
+		auto& pipeline = render::TemporalPipeline::Get();
+		const bool resetHistory =
+			pipeline.FrameGenerationResetPending();
+		if (pipeline.ArmFrameGenerationReset()) {
 			InvalidateFirstPersonAlphaState();
-			render::TemporalPipeline::Get().RequestFsrFrameGenerationReset();
+			pipeline.RequestFsrFrameGenerationReset();
 		}
 		const auto capture =
-			render::TemporalPipeline::Get()
-				.GetFrameGenerationCaptureResources();
+			pipeline.GetFrameGenerationCaptureResources();
 		if (!capture.ready || !_copyDepthForFrameGenerationCS ||
 			!_frameGenerationCopyCB) {
 			return;
 		}
+		const auto [renderWidth, renderHeight] = GetRenderSize();
+		const auto* timer = RE::BSTimer::GetSingleton();
+		const auto& frameBuffer = cs::engine::GetFrameBuffer();
+		pipeline.FreezeFrameConstants(
+			capture.frameSlot,
+			{
+				.realFrame =
+					render::TemporalPipeline::Get().CurrentRealFrame(),
+				.renderWidth = renderWidth,
+				.renderHeight = renderHeight,
+				.outputWidth = capture.width,
+				.outputHeight = capture.height,
+				.jitterX = jitter.x,
+				.jitterY = jitter.y,
+				.frameTimeMilliseconds =
+					(timer ? timer->realTimeDelta : 0.0f) * 1000.0f,
+				.resetHistory = resetHistory,
+				.color = {
+					.resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
+					.viewFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
+					.range = temporal::ColorRange::kFull,
+					.transfer = temporal::TransferFunction::kGamma22,
+					.primaries = temporal::ColorPrimaries::kUnspecified,
+					.stage = temporal::ColorStage::kPostTonemapLut,
+					.alpha = temporal::AlphaMode::kIgnored,
+					.exposure = temporal::ExposureMode::kAutomatic },
+				.camera = temporal::BuildFrameGenerationCamera(
+					frameBuffer, capture.width, capture.height)
+			});
 
 		auto* context = cs::engine::GetImmediateContext();
 		auto* motion = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
@@ -254,7 +285,6 @@ namespace cs::render
 			!sharedDepth.resource || !sharedDepth.uav) {
 			return;
 		}
-		const auto [renderWidth, renderHeight] = GetRenderSize();
 		D3D11_TEXTURE2D_DESC sourceMotionDesc{};
 		D3D11_TEXTURE2D_DESC targetMotionDesc{};
 		motion->GetDesc(&sourceMotionDesc);

@@ -67,6 +67,7 @@ namespace cs::features
 		DXGISwapChainProxy(
 			IDXGISwapChainProxyOwner& a_owner,
 			IDXGISwapChain4& a_inner) noexcept;
+		void ReplaceInner(IDXGISwapChain4* a_inner) noexcept;
 		void DetachOwner() noexcept;
 
 		HRESULT STDMETHODCALLTYPE QueryInterface(

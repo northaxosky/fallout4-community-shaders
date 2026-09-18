@@ -8,6 +8,7 @@
 #include <d3d11.h>
 #include <d3d12.h>
 #include <dxgi1_6.h>
+#include <winrt/base.h>
 
 namespace cs::engine
 {
@@ -16,6 +17,18 @@ namespace cs::engine
 
 namespace cs::render::temporal
 {
+	enum class FailureDomain : std::uint8_t
+	{
+		kNone,
+		kConfiguration,
+		kEngine,
+		kSuperResolution,
+		kFrameGeneration,
+		kStreamline,
+		kTransport,
+		kPresentation
+	};
+
 	enum class ProviderResultCode : std::uint8_t
 	{
 		kSuccess,
@@ -24,11 +37,24 @@ namespace cs::render::temporal
 		kFailure
 	};
 
+	enum class ProviderWorkState : std::uint8_t
+	{
+		kNone,
+		kRecorded,
+		kSubmitted,
+		kOutputReady
+	};
+
 	struct ProviderResult
 	{
 		ProviderResultCode code = ProviderResultCode::kFailure;
 		std::int64_t sdkResult = 0;
+		HRESULT hresult = S_OK;
 		std::string message;
+		FailureDomain failureDomain = FailureDomain::kNone;
+		ProviderWorkState workState = ProviderWorkState::kNone;
+		bool outputDependencyEstablished = false;
+		bool publicationOutputReady = false;
 		bool globalDrainAttempted = false;
 		bool globalDrainCompleted = false;
 		std::uint64_t globalDrainCpuMicroseconds = 0;
@@ -36,6 +62,12 @@ namespace cs::render::temporal
 		[[nodiscard]] bool Succeeded() const noexcept
 		{
 			return code == ProviderResultCode::kSuccess;
+		}
+
+		[[nodiscard]] bool CanPublishOutput() const noexcept
+		{
+			return Succeeded() && workState == ProviderWorkState::kOutputReady &&
+			       outputDependencyEstablished;
 		}
 	};
 
@@ -111,6 +143,8 @@ namespace cs::render::temporal
 		ID3D11ShaderResourceView* srv = nullptr;
 		ID3D11UnorderedAccessView* uav = nullptr;
 		ID3D11RenderTargetView* rtv = nullptr;
+		ID3D12Resource* alias12 = nullptr;
+		D3D12_RESOURCE_STATES alias12State = D3D12_RESOURCE_STATE_COMMON;
 	};
 
 	struct D3D12GpuView
@@ -228,6 +262,7 @@ namespace cs::render::temporal
 		RecordingContext recording;
 		GpuView colorInput;
 		GpuView privateOutput;
+		GpuView publicationOutput;
 		GpuView depth;
 		GpuView motionVectors;
 		GpuView reactiveMask;
@@ -243,11 +278,13 @@ namespace cs::render::temporal
 		float jitterX = 0.0f;
 		float jitterY = 0.0f;
 		float sharpness = 0.0f;
+		float postProcessSharpness = 0.0f;
 		float frameTimeMilliseconds = 0.0f;
 		float cameraNear = 0.0f;
 		float cameraFar = 1.0f;
 		float cameraVerticalFov = 0.0f;
 		bool resetHistory = false;
+		bool postProcessSharpening = false;
 		ColorContract color;
 		FrameGenerationCamera camera;
 	};
@@ -276,7 +313,7 @@ namespace cs::render::temporal
 		QueryRenderSize(const SuperResolutionSizeRequest& a_request) = 0;
 		[[nodiscard]] virtual ProviderResult
 		Record(const SuperResolutionRequest& a_request) = 0;
-		virtual void DestroyAfterDrain() noexcept = 0;
+		[[nodiscard]] virtual ProviderResult DestroyAfterDrain() noexcept = 0;
 	};
 
 	enum class UiCompositionMode : std::uint8_t
@@ -336,7 +373,21 @@ namespace cs::render::temporal
 		kRecordedCommandList,
 		// Present submits the last reader to the application game queue before
 		// returning.
-		kSynchronousPresentQueue
+		kSynchronousPresentQueue,
+		// Present exposes a vendor fence/value that the application queue must join
+		// before publishing the shared retirement fence.
+		kVendorCompletionFence
+	};
+
+	struct GpuCompletionDependency
+	{
+		winrt::com_ptr<ID3D12Fence> fence;
+		std::uint64_t value = 0;
+
+		[[nodiscard]] bool IsValid() const noexcept
+		{
+			return fence && value != 0;
+		}
 	};
 
 	class IFrameGenerationProvider
@@ -351,6 +402,11 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult
 		CreatePresentation(const PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) = 0;
+		[[nodiscard]] virtual ProviderResult
+		SetPresentationActive(bool)
+		{
+			return { .code = ProviderResultCode::kSuccess };
+		}
 		[[nodiscard]] virtual ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			DXGI_FORMAT a_format, std::uint32_t a_bufferCount) = 0;
@@ -373,12 +429,21 @@ namespace cs::render::temporal
 		{
 			return std::nullopt;
 		}
+		[[nodiscard]] virtual std::optional<GpuCompletionDependency>
+		ConsumePresentInputCompletionDependency() noexcept
+		{
+			return std::nullopt;
+		}
 		[[nodiscard]] virtual ProviderResult Sleep(std::uint32_t a_frame) = 0;
 		[[nodiscard]] virtual ProviderResult
 		SetLatencyMarker(LatencyMarker a_marker, std::uint32_t a_frame) = 0;
 		[[nodiscard]] virtual ProviderResult Quiesce() = 0;
 		[[nodiscard]] virtual ProviderResult ReleaseDisplayResources() noexcept = 0;
 		[[nodiscard]] virtual ProviderResult DestroyAfterDrain() noexcept = 0;
+		[[nodiscard]] virtual bool IsAvailable() const noexcept
+		{
+			return true;
+		}
 		[[nodiscard]] virtual bool IsReady() const noexcept = 0;
 	};
 }  // namespace cs::render::temporal

@@ -7,6 +7,8 @@
 #include <string_view>
 #include <utility>
 
+#include "Render/TemporalProvider.h"
+
 namespace cs::render::temporal
 {
 	enum class SuperResolutionMethod : std::uint8_t
@@ -35,18 +37,6 @@ namespace cs::render::temporal
 		kD3D12
 	};
 
-	enum class FailureDomain : std::uint8_t
-	{
-		kNone,
-		kConfiguration,
-		kEngine,
-		kSuperResolution,
-		kFrameGeneration,
-		kStreamline,
-		kTransport,
-		kPresentation
-	};
-
 	struct FailureImpact
 	{
 		bool superResolution = false;
@@ -63,13 +53,15 @@ namespace cs::render::temporal
 				a_domain == FailureDomain::kSuperResolution ||
 				a_domain == FailureDomain::kEngine ||
 				a_domain == FailureDomain::kTransport ||
-				(a_domain == FailureDomain::kStreamline && a_sr == SuperResolutionMethod::kDLSS),
+				(a_domain == FailureDomain::kStreamline &&
+					a_sr == SuperResolutionMethod::kDLSS),
 			.frameGeneration =
 				a_domain == FailureDomain::kFrameGeneration ||
 				a_domain == FailureDomain::kEngine ||
 				a_domain == FailureDomain::kTransport ||
 				a_domain == FailureDomain::kPresentation ||
-				(a_domain == FailureDomain::kStreamline && a_fg == FrameGenerationMethod::kDLSSG)
+				(a_domain == FailureDomain::kStreamline &&
+					a_fg == FrameGenerationMethod::kDLSSG)
 		};
 	}
 
@@ -89,7 +81,7 @@ namespace cs::render::temporal
 		bool superResolutionEnabled = true;
 		bool frameGenerationEnabled = true;
 		SuperResolutionMethod superResolution = SuperResolutionMethod::kDLSS;
-		SuperResolutionMethod noDlssFallback = SuperResolutionMethod::kFSR3;
+		SuperResolutionMethod noDlssFallback = SuperResolutionMethod::kTAA;
 		FrameGenerationMethod frameGeneration = FrameGenerationMethod::kOff;
 		std::uint32_t qualityMode = 1;
 		std::uint32_t streamlineLogLevel = 0;
@@ -107,8 +99,12 @@ namespace cs::render::temporal
 		bool bridgePresent = false;
 		bool proxyInstalled = false;
 		bool latencyHooksInstalled = false;
+		bool nativeFsrSuperResolution = false;
+		bool nativeFsrFrameGeneration = false;
 		std::array<bool, static_cast<std::size_t>(SuperResolutionMethod::kCount)> admittedSr{};
-		FrameGenerationMethod admittedFg = FrameGenerationMethod::kOff;
+		std::array<bool, static_cast<std::size_t>(FrameGenerationMethod::kCount)>
+			admittedFg{};
+		FrameGenerationMethod activeFg = FrameGenerationMethod::kOff;
 		std::uint64_t adapterLuid = 0;
 		std::string rejectionReason;
 	};
@@ -131,6 +127,8 @@ namespace cs::render::temporal
 		FrameGenerationMethod frameGeneration = FrameGenerationMethod::kOff;
 		std::uint32_t qualityMode = 1;
 		std::uint64_t revision = 0;
+
+		auto operator<=>(const EffectiveConfiguration&) const = default;
 	};
 
 	struct PendingRestart
@@ -186,7 +184,10 @@ namespace cs::render::temporal
 					_effective.superResolution = SuperResolutionMethod::kNone;
 				}
 			}
-			if (_effective.frameGeneration != _session->admittedFg) {
+			const auto fgIndex =
+				static_cast<std::size_t>(_effective.frameGeneration);
+			if (fgIndex >= _session->admittedFg.size() ||
+				!_session->admittedFg[fgIndex]) {
 				_effective.frameGenerationEnabled = false;
 				_effective.frameGeneration = FrameGenerationMethod::kOff;
 			}
@@ -212,10 +213,207 @@ namespace cs::render::temporal
 			_request->frameGenerationEnabled = a_fgEnabled;
 			_request->frameGeneration = a_fg;
 			_request->revision = a_revision;
-			_effective.revision = a_revision;
-			_effective.qualityMode = a_qualityMode;
+			if (!_session) {
+				_restartForSuperResolutionMethod =
+					a_sr != _startupRequest->superResolution;
+				_restartForFrameGenerationMethod =
+					a_fg != _startupRequest->frameGeneration;
+				UpdatePendingRestart();
+				return;
+			}
+
+			const auto& transitionBase =
+				_transitionInFlight ? *_transitionInFlight : _effective;
+			auto target = transitionBase;
+			const auto srIndex = static_cast<std::size_t>(a_sr);
+			const auto fgIndex = static_cast<std::size_t>(a_fg);
+			const bool srAdmitted =
+				srIndex < _session->admittedSr.size() &&
+				_session->admittedSr[srIndex];
+			const bool fgAdmitted =
+				fgIndex < _session->admittedFg.size() &&
+				_session->admittedFg[fgIndex];
+			_restartForSuperResolutionMethod =
+				srAdmitted && a_sr != transitionBase.superResolution &&
+				(a_sr == SuperResolutionMethod::kFSR3 ||
+					transitionBase.superResolution ==
+						SuperResolutionMethod::kFSR3) &&
+				!_session->nativeFsrSuperResolution;
+			_restartForFrameGenerationMethod =
+				a_fgEnabled && a_fg != FrameGenerationMethod::kOff &&
+				!fgAdmitted;
+			const bool externalSrRequested =
+				a_sr == SuperResolutionMethod::kFSR3 ||
+				a_sr == SuperResolutionMethod::kDLSS;
+			if (!_quarantined.superResolution &&
+				(!_superResolutionFailed || !externalSrRequested)) {
+				if (!a_srEnabled) {
+					target.superResolutionEnabled = false;
+				} else if (srAdmitted &&
+					!_restartForSuperResolutionMethod) {
+					target.superResolution = a_sr;
+					target.qualityMode = a_qualityMode;
+					target.superResolutionEnabled =
+						_startupRequest->upscalingEligible &&
+						a_sr != SuperResolutionMethod::kNone;
+				}
+			}
+			if (!_quarantined.frameGeneration &&
+				!_frameGenerationFailed) {
+				if (!a_fgEnabled ||
+					a_fg == FrameGenerationMethod::kOff) {
+					target.frameGenerationEnabled = false;
+					if (a_fg != FrameGenerationMethod::kOff &&
+						fgAdmitted) {
+						target.frameGeneration = a_fg;
+					}
+				} else if (fgAdmitted &&
+					!_restartForFrameGenerationMethod) {
+					target.frameGeneration = a_fg;
+					target.frameGenerationEnabled =
+						_startupRequest->frameGenerationEligible &&
+						a_fg != FrameGenerationMethod::kOff &&
+						_session->proxyInstalled;
+				}
+			}
+			const bool changed =
+				target.superResolutionEnabled !=
+					transitionBase.superResolutionEnabled ||
+				target.frameGenerationEnabled !=
+					transitionBase.frameGenerationEnabled ||
+				target.superResolution != transitionBase.superResolution ||
+				target.frameGeneration != transitionBase.frameGeneration ||
+				target.qualityMode != transitionBase.qualityMode;
+			if (!changed) {
+				_pendingTransition.reset();
+			} else {
+				target.revision = a_revision;
+				_pendingTransition = target;
+			}
+			UpdatePendingRestart();
+		}
+
+		[[nodiscard]] const std::optional<EffectiveConfiguration>&
+		PendingTransition() const noexcept
+		{
+			return _pendingTransition;
+		}
+
+		[[nodiscard]] std::optional<EffectiveConfiguration>
+		BeginPendingTransition() noexcept
+		{
+			if (_transitionInFlight || !_pendingTransition) {
+				return std::nullopt;
+			}
+			_transitionInFlight = _pendingTransition;
+			_pendingTransition.reset();
+			return _transitionInFlight;
+		}
+
+		void DeferTransition(std::uint64_t a_revision) noexcept
+		{
+			if (!_transitionInFlight ||
+				_transitionInFlight->revision != a_revision) {
+				return;
+			}
+			if (!_pendingTransition ||
+				_pendingTransition->revision < a_revision) {
+				_pendingTransition = _transitionInFlight;
+			}
+			_transitionInFlight.reset();
+		}
+
+		[[nodiscard]] bool CommitPendingTransition(
+			std::uint64_t a_revision) noexcept
+		{
+			return CommitPendingTransition(
+				a_revision,
+				_pendingTransition &&
+						_pendingTransition->frameGenerationEnabled
+					? _pendingTransition->frameGeneration
+					: FrameGenerationMethod::kOff);
+		}
+
+		[[nodiscard]] bool CommitPendingTransition(
+			std::uint64_t a_revision,
+			FrameGenerationMethod a_activeFrameGeneration) noexcept
+		{
+			const EffectiveConfiguration* completed = nullptr;
+			if (_transitionInFlight &&
+				_transitionInFlight->revision == a_revision) {
+				completed = &*_transitionInFlight;
+			} else if (_pendingTransition &&
+				_pendingTransition->revision == a_revision) {
+				completed = &*_pendingTransition;
+			}
+			if (!completed) {
+				return false;
+			}
+			if (_session) {
+				_session->activeFg = a_activeFrameGeneration;
+			}
+			_effective = *completed;
+			if (_transitionInFlight &&
+				_transitionInFlight->revision == a_revision) {
+				_transitionInFlight.reset();
+			} else {
+				_pendingTransition.reset();
+			}
+			_frameGenerationFailed = false;
+			_frameGenerationFailureReason.clear();
 			UpdateEffectiveEnablement();
 			UpdatePendingRestart();
+			return true;
+		}
+
+		[[nodiscard]] bool
+		CommitPendingFrameGenerationFallback(
+			std::uint64_t a_revision,
+			std::string a_reason) noexcept
+		{
+			const EffectiveConfiguration* completed = nullptr;
+			if (_transitionInFlight &&
+				_transitionInFlight->revision == a_revision) {
+				completed = &*_transitionInFlight;
+			} else if (_pendingTransition &&
+				_pendingTransition->revision == a_revision) {
+				completed = &*_pendingTransition;
+			}
+			if (!completed) {
+				return false;
+			}
+			_effective = *completed;
+			_effective.frameGenerationEnabled = false;
+			_effective.frameGeneration = FrameGenerationMethod::kOff;
+			if (_session) {
+				_session->activeFg = FrameGenerationMethod::kOff;
+			}
+			if (_transitionInFlight &&
+				_transitionInFlight->revision == a_revision) {
+				_transitionInFlight.reset();
+			} else {
+				_pendingTransition.reset();
+			}
+			if (_pendingTransition &&
+				_pendingTransition->frameGenerationEnabled) {
+				_pendingTransition.reset();
+			}
+			_frameGenerationFailed = true;
+			_frameGenerationFailureReason = std::move(a_reason);
+			UpdateEffectiveEnablement();
+			UpdatePendingRestart();
+			return true;
+		}
+
+		void RejectPendingTransition(std::uint64_t a_revision) noexcept
+		{
+			if (_transitionInFlight &&
+				_transitionInFlight->revision == a_revision) {
+				_transitionInFlight.reset();
+			} else if (_pendingTransition &&
+				_pendingTransition->revision == a_revision) {
+				_pendingTransition.reset();
+			}
 		}
 
 		void Quarantine(
@@ -236,7 +434,12 @@ namespace cs::render::temporal
 			if (_quarantined.frameGeneration) {
 				_effective.frameGenerationEnabled = false;
 				_effective.frameGeneration = FrameGenerationMethod::kOff;
+				if (_session) {
+					_session->activeFg = FrameGenerationMethod::kOff;
+				}
 			}
+			_pendingTransition.reset();
+			_transitionInFlight.reset();
 			_effective.revision = a_revision;
 			UpdatePendingRestart();
 		}
@@ -253,6 +456,7 @@ namespace cs::render::temporal
 			_superResolutionFailureReason = std::move(a_reason);
 			_effective.superResolution = SuperResolutionMethod::kTAA;
 			_effective.revision = a_revision;
+			_pendingTransition.reset();
 			UpdateEffectiveEnablement();
 			UpdatePendingRestart();
 		}
@@ -272,7 +476,14 @@ namespace cs::render::temporal
 					_session->admittedSr[srIndex]);
 			const bool fgReady = !_session ||
 				(_session->valid && _session->proxyInstalled &&
-					_session->admittedFg == _effective.frameGeneration);
+					static_cast<std::size_t>(_effective.frameGeneration) <
+						_session->admittedFg.size() &&
+					_session->admittedFg[static_cast<std::size_t>(
+						_effective.frameGeneration)] &&
+					(_effective.frameGeneration ==
+							FrameGenerationMethod::kOff ||
+						_session->activeFg ==
+							_effective.frameGeneration));
 			_effective.superResolutionEnabled =
 				_request && _request->superResolutionEnabled && _startupRequest->upscalingEligible &&
 				_effective.superResolution != SuperResolutionMethod::kNone &&
@@ -297,20 +508,35 @@ namespace cs::render::temporal
 			} else if (_superResolutionFailed) {
 				_pending.required = true;
 				_pending.reason = _superResolutionFailureReason;
-			} else if (_request->superResolution != _startupRequest->superResolution ||
-				_request->frameGeneration != _startupRequest->frameGeneration) {
+			} else if (_frameGenerationFailed) {
 				_pending.required = true;
-				_pending.reason = "Super-resolution and frame-generation methods are applied at startup.";
+				_pending.reason = _frameGenerationFailureReason;
+			} else if (_restartForSuperResolutionMethod ||
+				_restartForFrameGenerationMethod) {
+				_pending.required = true;
+				_pending.reason =
+					_restartForSuperResolutionMethod
+						? "Legacy FSR 3 super-resolution transitions remain "
+						  "restart-bound until the native Streamline provider is "
+						  "available."
+						: "The requested frame-generation provider is unavailable "
+						  "in the current session.";
 			}
 		}
 
 		std::optional<RequestedTopology> _request;
 		std::optional<RequestedTopology> _startupRequest;
 		std::optional<SessionTopology> _session;
+		std::optional<EffectiveConfiguration> _pendingTransition;
+		std::optional<EffectiveConfiguration> _transitionInFlight;
 		EffectiveConfiguration _effective;
 		PendingRestart _pending;
 		bool _superResolutionFailed = false;
 		std::string _superResolutionFailureReason;
+		bool _frameGenerationFailed = false;
+		std::string _frameGenerationFailureReason;
+		bool _restartForSuperResolutionMethod = false;
+		bool _restartForFrameGenerationMethod = false;
 		FailureImpact _quarantined;
 		std::string _quarantineReason;
 	};

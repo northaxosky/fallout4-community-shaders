@@ -31,7 +31,7 @@ namespace cs::render::temporal
 		{
 			bool enabled = true;
 			std::uint32_t upscaleMethod = (std::uint32_t)UpscaleMethod::kDLSS;
-			std::uint32_t upscaleMethodNoDLSS = (std::uint32_t)UpscaleMethod::kFSR;
+			std::uint32_t upscaleMethodNoDLSS = (std::uint32_t)UpscaleMethod::kTAA;
 			std::uint32_t qualityMode = 1;  // 1=Quality, 2=Balanced, 3=Performance, 4=Ultra Performance, 0=Native AA
 			std::uint32_t streamlineLogLevel = 0;
 			float sharpnessFSR = 0.0f;

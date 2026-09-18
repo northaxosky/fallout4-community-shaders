@@ -138,17 +138,21 @@ xmake package FO4CommunityShaders
 Set `XSE_FO4_MODS_PATH` or `XSE_FO4_GAME_PATH` before `xmake install` to
 deploy through the CommonLibF4 install rule. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for full setup and deployment details.
+Unpublished Streamline builds require a signed local candidate; the contributing
+guide documents staging it without publishing a release.
 
 ---
 
 ## Compatibility notes
 
 - **ENB**: Incompatible. Community Shaders automatically disables itself when ENB is detected.
-- **Upscaling & Frame Generation**: Supported on OG (1.10.163), NG (1.10.984), and AE (1.11.240).
+- **Upscaling & Frame Generation**: Target runtime is AE (1.11.240); retained older-runtime paths are not qualified.
+  - Loading either feature retains DX12 presentation, including native engine TAA/None. Modern D3D11/D3D12 shared-fence support is required.
   - DLSS requires an NVIDIA RTX GPU and the staged Streamline DLLs.
-  - FSR 3 requires D3D11 Feature Level 11.1.
+  - Native Streamline FSR 3 requires the staged FSR plugins and matched AMD runtime DLLs. The legacy D3D11 implementation remains in source for comparison pending native runtime qualification.
   - Frame Generation requires DX12 support and borderless windowed mode.
-  - Switching upscaling or frame generation methods requires a game restart.
+  - Super-resolution and frame-generation methods can be switched at a frame boundary when the target provider was admitted at startup.
+  - Feature loading and SDK bootstrap settings still require a restart. Method switches may briefly pause rendering.
   - HDR is currently unsupported.
 - **Terrain Shadows**: Requires an xLODGen terrain heightmap export placed in `Data\Textures\Terrain\` or `Data\Textures\HeightMaps\`.
 - **RenderDoc**: Requires an external `renderdoc.dll` (API 1.7.0). Enabling frame capture requires a restart.

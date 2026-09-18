@@ -2,6 +2,7 @@
 
 #include <DirectXMath.h>
 #include <d3d11.h>
+#include <d3d12.h>
 
 #include <cstdint>
 #include <cstring>
@@ -103,6 +104,7 @@ namespace cs::buffer
 			rtv = nullptr;
 			uav = nullptr;
 			srv = nullptr;
+			resource12 = nullptr;
 			resource = nullptr;
 		}
 
@@ -123,5 +125,6 @@ namespace cs::buffer
 		winrt::com_ptr<ID3D11ShaderResourceView> srv;
 		winrt::com_ptr<ID3D11UnorderedAccessView> uav;
 		winrt::com_ptr<ID3D11RenderTargetView> rtv;
+		winrt::com_ptr<ID3D12Resource> resource12;
 	};
 }

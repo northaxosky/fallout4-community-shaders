@@ -47,6 +47,16 @@ namespace
 				  "Collect present status: Frame interpolation failed. (SDK "
 				  "result -12)",
 			"failure reason preserves its operation and exact signed SDK code");
+		const ProviderResult transport{
+			.code = ProviderResultCode::kFailure,
+			.hresult = DXGI_ERROR_DEVICE_REMOVED,
+			.message = "Presentation transport failed."
+		};
+		const auto transportMessage =
+			FormatProviderFailure("Present", transport);
+		Check(transportMessage.contains(std::to_string(
+				  static_cast<std::uint32_t>(DXGI_ERROR_DEVICE_REMOVED))),
+			"failure reporting preserves the original HRESULT");
 	}
 
 	void TestCpuPhaseTimingCollector()
@@ -134,6 +144,14 @@ namespace
 			return Success();
 		}
 		cs::render::temporal::ProviderResult
+		SetPresentationActive(bool a_active) override
+		{
+			events.emplace_back(a_active ? "activate" : "deactivate");
+			return presentationActivationSucceeds
+				? Success()
+				: Failure("presentation activation");
+		}
+		cs::render::temporal::ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			DXGI_FORMAT, std::uint32_t) override
 		{
@@ -208,7 +226,7 @@ namespace
 		cs::render::temporal::ProviderResult DestroyAfterDrain() noexcept override
 		{
 			events.emplace_back("destroy");
-			return Success();
+			return destroySucceeds ? Success() : Failure("destroy");
 		}
 		bool IsReady() const noexcept override { return true; }
 
@@ -230,6 +248,8 @@ namespace
 		bool releaseGlobalDrainAttempted = true;
 		bool releaseGlobalDrainCompleted = true;
 		bool createSucceeds = true;
+		bool destroySucceeds = true;
+		bool presentationActivationSucceeds = true;
 		std::uint32_t statusCalls = 0;
 		UINT lastStatusFlags = 0;
 		HRESULT lastPresentResult = E_FAIL;
@@ -259,6 +279,9 @@ namespace
 				return false;
 			});
 		Check(!drainFailure.Succeeded(), "drain failure is visible");
+		Check(drainFailure.globalDrainAttempted &&
+				  !drainFailure.globalDrainCompleted,
+			"failed application-queue drain remains observable");
 		Check(provider.events == std::vector<std::string>{ "quiesce", "drain" },
 			"drain failure never frees provider resources");
 
@@ -272,6 +295,55 @@ namespace
 		Check(!quiesceFailure.Succeeded(), "quiesce failure is visible");
 		Check(provider.events == std::vector<std::string>{ "quiesce" },
 			"quiesce failure performs neither drain nor release");
+
+		provider = {};
+		const auto retirement =
+			cs::render::temporal::RetirePresentationProvider(
+				provider, [&]() {
+					provider.events.emplace_back("drain");
+					return true;
+				});
+		Check(retirement.Succeeded(),
+			"presentation retirement completes after a proven queue drain");
+		Check(provider.events ==
+				  std::vector<std::string>{ "quiesce", "drain", "release",
+					  "destroy", "deactivate" },
+			"presentation hooks are disabled only after provider resources and "
+			"their readers are retired");
+
+		provider = {};
+		provider.destroySucceeds = false;
+		const auto destroyFailure =
+			cs::render::temporal::RetirePresentationProvider(
+				provider, [&]() {
+					provider.events.emplace_back("drain");
+					return true;
+				});
+		Check(!destroyFailure.Succeeded() &&
+				  destroyFailure.globalDrainAttempted &&
+				  destroyFailure.globalDrainCompleted &&
+				  provider.events ==
+					  std::vector<std::string>{ "quiesce", "drain",
+						  "release", "destroy" },
+			"failed destruction leaves presentation hooks active for "
+			"quarantine");
+
+		provider = {};
+		provider.presentationActivationSucceeds = false;
+		const auto deactivateFailure =
+			cs::render::temporal::RetirePresentationProvider(
+				provider, [&]() {
+					provider.events.emplace_back("drain");
+					return true;
+				});
+		Check(!deactivateFailure.Succeeded() &&
+				  deactivateFailure.globalDrainAttempted &&
+				  deactivateFailure.globalDrainCompleted &&
+				  provider.events ==
+					  std::vector<std::string>{ "quiesce", "drain",
+						  "release", "destroy", "deactivate" },
+			"hook-disable failure is visible only after safe provider "
+			"retirement");
 	}
 
 	void TestResizeRestoration()
@@ -534,13 +606,31 @@ namespace
 			});
 		Check(FAILED(failed.presentResult) && FAILED(failed.signalResult) &&
 				  !failed.token &&
-				  events ==
-					  std::vector<std::string>{ "present-return", "signal-failed" },
-			"device removal never publishes an unproven retirement token");
+				  events == std::vector<std::string>{ "present-return" },
+			"device removal never signals or publishes an unproven retirement "
+			"token");
+
+		events.clear();
+		const auto vendor = PresentAndRetireInputs(
+			PresentInputRetirementMode::kVendorCompletionFence, true, 92, 7, 13,
+			nextFence,
+			[&]() {
+				events.emplace_back("present");
+				return S_OK;
+			},
+			[&](std::uint64_t) {
+				events.emplace_back("unexpected-signal");
+				return S_OK;
+			});
+		Check(SUCCEEDED(vendor.presentResult) && FAILED(vendor.signalResult) &&
+				  !vendor.token &&
+				  events == std::vector<std::string>{ "present" },
+			"vendor-fence retirement requires an explicit dependency join before "
+			"the shared signal");
 
 		events.clear();
 		const auto disabled = PresentAndRetireInputs(
-			PresentInputRetirementMode::kSynchronousPresentQueue, false, 92, 7, 13,
+			PresentInputRetirementMode::kSynchronousPresentQueue, false, 93, 7, 13,
 			nextFence,
 			[&]() {
 				events.emplace_back("present");

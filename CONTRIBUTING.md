@@ -45,19 +45,35 @@ git submodule update --init --recursive --checkout
 
 ## Stage the SDK runtime DLLs
 
-Streamline's interposer, DLSS plugin and `nvngx_dlss.dll` are proprietary and are not vendored.
-Run the staging script once after cloning, and again whenever `scripts\sdk-manifest.psd1` changes:
+SDK runtime binaries are staged, not committed. Run the staging script after cloning
+and whenever `scripts\sdk-manifest.psd1` changes:
 
 ```bash
 pwsh scripts/fetch-sdks.ps1
 ```
 
-It downloads each pinned archive, verifies its SHA-256 against the manifest, and stages the
-required files into the `Streamline` and `FidelityFX` directories under
-`features\Upscaling\Shaders\Upscaling\`. The FidelityFX DX11 backend builds from the
-`extern\FidelityFX-SDK` submodule, while frame generation requires the two staged AMD DX12 DLLs.
+It verifies published archive SHA-256 pins and stages the runtime files under
+`features\Upscaling\Shaders\Upscaling\Streamline\`. The retained FidelityFX DX11
+comparison backend still builds from `extern\FidelityFX-SDK`; it is not the native
+DX12 runtime distribution.
+
+The native DX12 backend requires signed fork release `cs-streamline-v2.14.1-3`.
+Until its archive is published and pinned, build and sign a candidate using
+`extern\Streamline`'s release workflow, including its production-key verifier, then stage it with:
+
+```powershell
+pwsh scripts\fetch-sdks.ps1 -StreamlineCandidateDirectory <signed-candidate-directory>
+```
+
+The candidate must match the checked-out fork commit. Unsigned candidates are rejected.
+Native AMD and NVIDIA runtimes are staged together under `Streamline`; do not mix in
+the legacy sibling FidelityFX runtime.
 
 ## Configure and build
+
+CommonLib may run its install rule after a build. For isolated validation, clear
+`XSE_FO4_MODS_PATH` and `XSE_FO4_GAME_PATH`, then set process-local `INSTALLDIR` to
+the absolute worktree path `build\isolated-install`.
 
 Configure a release-with-debug-information build, then build the plugin:
 

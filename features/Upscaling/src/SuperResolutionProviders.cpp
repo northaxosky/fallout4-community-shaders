@@ -8,16 +8,25 @@ namespace cs::features
 {
 	namespace
 	{
-		render::temporal::ProviderResult Success()
+		render::temporal::ProviderResult Success(
+			render::temporal::ProviderWorkState a_workState =
+				render::temporal::ProviderWorkState::kNone,
+			bool a_outputDependencyEstablished = false)
 		{
-			return { .code = render::temporal::ProviderResultCode::kSuccess };
+			return { .code = render::temporal::ProviderResultCode::kSuccess,
+				.workState = a_workState,
+				.outputDependencyEstablished = a_outputDependencyEstablished };
 		}
 
-		render::temporal::ProviderResult Failure(std::string a_message)
+		render::temporal::ProviderResult Failure(
+			std::string a_message,
+			render::temporal::FailureDomain a_domain =
+				render::temporal::FailureDomain::kSuperResolution)
 		{
 			return {
 				.code = render::temporal::ProviderResultCode::kFailure,
-				.message = std::move(a_message)
+				.message = std::move(a_message),
+				.failureDomain = a_domain
 			};
 		}
 
@@ -39,7 +48,8 @@ namespace cs::features
 		_sizeCache.Clear();
 		const auto* device = std::get_if<ID3D11Device*>(&a_context.device);
 		if (!device || !*device) {
-			return Failure("FSR 3 super resolution requires D3D11 recording.");
+			return Failure("FSR 3 super resolution requires D3D11 recording.",
+				render::temporal::FailureDomain::kTransport);
 		}
 		if ((*device)->GetFeatureLevel() <
 			render::temporal::kFsrMinimumFeatureLevel) {
@@ -92,24 +102,29 @@ namespace cs::features
 		const render::temporal::SuperResolutionRequest& a_request)
 	{
 		return _runtime.Upscale(a_request)
-			? Success()
+			? Success(render::temporal::ProviderWorkState::kOutputReady, true)
 			: Failure("FSR 3 super-resolution evaluation failed.");
 	}
 
-	void FidelityFXSuperResolution::DestroyAfterDrain() noexcept
+	render::temporal::ProviderResult
+	FidelityFXSuperResolution::DestroyAfterDrain() noexcept
 	{
 		_sizeCache.Clear();
 		_runtime.DestroyFSRResources();
+		return Success();
 	}
 
 	StreamlineSuperResolution::StreamlineSuperResolution(
-		Streamline& a_runtime) noexcept :
-		_runtime(a_runtime)
+		Streamline& a_runtime, Method a_method) noexcept :
+		_runtime(a_runtime),
+		_method(a_method)
 	{}
 
 	const char* StreamlineSuperResolution::Name() const noexcept
 	{
-		return "DLSS Super Resolution";
+		return _method == Method::kDLSS ?
+			"DLSS Super Resolution" :
+			"FSR 3 Super Resolution (Streamline)";
 	}
 
 	render::temporal::ProviderResult StreamlineSuperResolution::Initialize(
@@ -123,14 +138,27 @@ namespace cs::features
 		const bool d3d12 = device12 != nullptr;
 		const bool deviceValid =
 			(d3d12 && *device12) || (!d3d12 && device11 && *device11);
-		return _runtime.featureDLSS &&
-				_runtime.slDLSSGetOptimalSettings &&
-				deviceValid &&
-				d3d12 == _runtime.IsD3D12Session()
+		if (!deviceValid || d3d12 != _runtime.IsD3D12Session()) {
+			return Failure(
+				"Streamline super-resolution is unavailable for the requested "
+				"graphics API.",
+				render::temporal::FailureDomain::kStreamline);
+		}
+		if (_method == Method::kDLSS) {
+			return _runtime.featureDLSS &&
+					_runtime.slDLSSGetOptimalSettings
+				? Success()
+				: Failure(
+					"DLSS super-resolution is unavailable in this Streamline "
+					"session.",
+					render::temporal::FailureDomain::kStreamline);
+		}
+		return d3d12 && _runtime.featureFSR &&
+				_runtime.slFSRGetOptimalSettings
 			? Success()
 			: Failure(
-				"DLSS super-resolution session is unavailable for the "
-				"requested graphics API.");
+				"Native FSR 3 super-resolution is unavailable.",
+				render::temporal::FailureDomain::kStreamline);
 	}
 
 	render::temporal::SuperResolutionSizeResult
@@ -140,7 +168,9 @@ namespace cs::features
 		if (const auto* cached = _sizeCache.Find(a_request)) {
 			return *cached;
 		}
-		auto result = _runtime.QueryDLSSRenderSize(a_request);
+		auto result = _method == Method::kDLSS
+			? _runtime.QueryDLSSRenderSize(a_request)
+			: _runtime.QueryFSRRenderSize(a_request);
 		_sizeCache.Store(a_request, result);
 		return result;
 	}
@@ -148,17 +178,20 @@ namespace cs::features
 	render::temporal::ProviderResult StreamlineSuperResolution::Record(
 		const render::temporal::SuperResolutionRequest& a_request)
 	{
-		const bool succeeded = _runtime.IsD3D12Session()
-			? _runtime.UpscaleD3D12(a_request)
-			: _runtime.Upscale(a_request);
-		return succeeded
-			? Success()
-			: Failure("DLSS super-resolution evaluation failed.");
+		if (_method == Method::kFSR3) {
+			return _runtime.UpscaleFSRD3D12(a_request);
+		}
+		return _runtime.IsD3D12Session() ?
+			_runtime.UpscaleD3D12(a_request) :
+			_runtime.Upscale(a_request);
 	}
 
-	void StreamlineSuperResolution::DestroyAfterDrain() noexcept
+	render::temporal::ProviderResult
+	StreamlineSuperResolution::DestroyAfterDrain() noexcept
 	{
 		_sizeCache.Clear();
-		_runtime.DestroyDLSSResources();
+		return _method == Method::kDLSS ?
+			_runtime.DestroyDLSSResources() :
+			_runtime.DestroyFSRResources();
 	}
 }

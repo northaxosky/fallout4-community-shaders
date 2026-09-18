@@ -21,6 +21,8 @@ namespace cs::features
 			const render::temporal::PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) override;
 		[[nodiscard]] render::temporal::ProviderResult
+		SetPresentationActive(bool a_active) override;
+		[[nodiscard]] render::temporal::ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			DXGI_FORMAT a_format,
 			std::uint32_t a_bufferCount) override;
@@ -44,6 +46,7 @@ namespace cs::features
 		ReleaseDisplayResources() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		DestroyAfterDrain() noexcept override;
+		[[nodiscard]] bool IsAvailable() const noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
@@ -56,7 +59,14 @@ namespace cs::features
 	class StreamlinePresentation final : public render::temporal::IFrameGenerationProvider
 	{
 	public:
-		explicit StreamlinePresentation(Streamline& a_runtime) noexcept;
+		enum class Method
+		{
+			kDLSSG,
+			kFSRG
+		};
+
+		StreamlinePresentation(
+			Streamline& a_runtime, Method a_method) noexcept;
 
 		[[nodiscard]] const char* Name() const noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -66,6 +76,8 @@ namespace cs::features
 		[[nodiscard]] render::temporal::ProviderResult CreatePresentation(
 			const render::temporal::PresentationCreateContext& a_context,
 			IDXGISwapChain4** a_swapChain) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		SetPresentationActive(bool a_active) override;
 		[[nodiscard]] render::temporal::ProviderResult
 		CreateDisplayResources(std::uint32_t a_width, std::uint32_t a_height,
 			DXGI_FORMAT a_format,
@@ -84,6 +96,8 @@ namespace cs::features
 		ConsumeGeneratedFrameCount() noexcept override;
 		[[nodiscard]] std::optional<std::uint32_t>
 		ConsumePresentedFrameCount() noexcept override;
+		[[nodiscard]] std::optional<render::temporal::GpuCompletionDependency>
+		ConsumePresentInputCompletionDependency() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		Sleep(std::uint32_t a_frame) override;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -94,16 +108,19 @@ namespace cs::features
 		ReleaseDisplayResources() noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult
 		DestroyAfterDrain() noexcept override;
+		[[nodiscard]] bool IsAvailable() const noexcept override;
 		[[nodiscard]] bool IsReady() const noexcept override;
 
 	private:
 		Streamline& _runtime;
+		Method _method;
 		ID3D12CommandQueue* _queue = nullptr;
 		std::uint32_t _width = 0;
 		std::uint32_t _height = 0;
 		std::uint32_t _bufferCount = 0;
 		bool _enabled = false;
 		bool _ready = false;
+		bool _presentationActive = false;
 	};
 
 }  // namespace cs::features

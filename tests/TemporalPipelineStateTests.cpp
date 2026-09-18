@@ -46,8 +46,10 @@ namespace
 		const auto unrelatedFailure =
 			ClassifyFailure(FailureDomain::kStreamline, SuperResolutionMethod::kFSR3,
 				FrameGenerationMethod::kFSR3);
-		Check(!unrelatedFailure.superResolution && !unrelatedFailure.frameGeneration,
-			"Streamline failure preserves unrelated vendor consumers");
+		Check(!unrelatedFailure.superResolution &&
+				  !unrelatedFailure.frameGeneration,
+			"Streamline failure preserves the temporary independent FSR "
+			"baseline");
 		const auto transportFailure =
 			ClassifyFailure(FailureDomain::kTransport, SuperResolutionMethod::kFSR3,
 				FrameGenerationMethod::kFSR3);
@@ -76,7 +78,11 @@ namespace
 			true;
 		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kDLSS)] =
 			true;
-		session.admittedFg = FrameGenerationMethod::kFSR3;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kOff)] = true;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kFSR3)] = true;
+		session.activeFg = FrameGenerationMethod::kFSR3;
 		Check(state.Admit(session), "session admits after request");
 		Check(state.Effective().superResolution == SuperResolutionMethod::kDLSS,
 			"requested DLSS is effective");
@@ -147,7 +153,10 @@ namespace
 		session.valid = true;
 		session.proxyInstalled = true;
 		session.admittedSr.fill(true);
-		session.admittedFg = FrameGenerationMethod::kFSR3;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kOff)] = true;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kFSR3)] = true;
 		Check(state.Admit(session), "removed-value topology reaches safe admission");
 		Check(state.Effective().superResolution == SuperResolutionMethod::kNone &&
 				  !state.Effective().superResolutionEnabled,
@@ -175,7 +184,11 @@ namespace
 			session.valid = true;
 			session.proxyInstalled = true;
 			session.admittedSr.fill(true);
-			session.admittedFg = FrameGenerationMethod::kDLSSG;
+			session.admittedFg[static_cast<std::size_t>(
+				FrameGenerationMethod::kOff)] = true;
+			session.admittedFg[static_cast<std::size_t>(
+				FrameGenerationMethod::kDLSSG)] = true;
+			session.activeFg = FrameGenerationMethod::kDLSSG;
 			Check(state.Admit(session), "failure fixture admits");
 
 			const auto impact = ClassifyFailure(domain, requested.superResolution,
@@ -285,44 +298,241 @@ namespace
 				Check(state.Freeze(request), "matrix request freezes");
 				SessionTopology session;
 				session.valid = true;
-				session.proxyInstalled =
-					request.frameGeneration != FrameGenerationMethod::kOff;
+				session.proxyInstalled = true;
 				session.admittedSr.fill(true);
-				session.admittedFg = request.frameGeneration;
+				session.admittedFg[static_cast<std::size_t>(
+					FrameGenerationMethod::kOff)] = true;
+				session.admittedFg[static_cast<std::size_t>(
+					request.frameGeneration)] = true;
+				session.activeFg = request.frameGeneration;
 				Check(state.Admit(session), "matrix session admits");
-				for (unsigned nextSr = 0;
-					nextSr < static_cast<unsigned>(SuperResolutionMethod::kCount);
-					++nextSr) {
-					for (unsigned nextFg = 0;
-						nextFg < static_cast<unsigned>(FrameGenerationMethod::kCount);
-						++nextFg) {
-						const bool enabled = (nextSr + nextFg) % 2 == 0;
-						const unsigned quality = (nextSr + nextFg) % 5;
-						state.SubmitLive(enabled, static_cast<SuperResolutionMethod>(nextSr),
-							quality, enabled,
-							static_cast<FrameGenerationMethod>(nextFg), 10);
-						Check(state.Effective().superResolution == request.superResolution &&
-								  state.Effective().frameGeneration ==
-									  request.frameGeneration,
-							"every SR/FG method combination remains fixed until restart");
-						Check(state.Pending().required == (nextSr != sr || nextFg != fg),
-							"restart policy is uniform, including None, TAA, and FG Off");
-						Check(state.Effective().qualityMode == quality &&
-								  state.Effective().superResolutionEnabled ==
-									  (enabled && sr != 0) &&
-								  state.Effective().frameGenerationEnabled ==
-									  (enabled && fg != 0),
-							"live controls affect the effective methods without changing "
-							"them");
-						Check(state.StartupRequest()->superResolution ==
-									  request.superResolution &&
-								  state.StartupRequest()->frameGeneration ==
-									  request.frameGeneration,
-							"pending selections never rewrite the frozen startup request");
-					}
-				}
+				Check(state.Effective().superResolution ==
+						  request.superResolution &&
+						  state.Effective().frameGeneration ==
+							  request.frameGeneration,
+					"every startup SR/FG combination retains its admitted selection");
 			}
 		}
+
+		RequestedTopology liveRequest;
+		liveRequest.upscalingEligible = true;
+		liveRequest.frameGenerationEligible = true;
+		liveRequest.superResolution = SuperResolutionMethod::kTAA;
+		liveRequest.frameGeneration = FrameGenerationMethod::kOff;
+		TopologyState live;
+		Check(live.Freeze(liveRequest), "live transition fixture freezes");
+		SessionTopology liveSession;
+		liveSession.valid = true;
+		liveSession.proxyInstalled = true;
+		liveSession.nativeFsrSuperResolution = true;
+		liveSession.nativeFsrFrameGeneration = true;
+		liveSession.admittedSr.fill(true);
+		liveSession.admittedFg.fill(true);
+		Check(live.Admit(liveSession), "live transition fixture admits");
+		live.SubmitLive(true, SuperResolutionMethod::kDLSS, 2, false,
+			FrameGenerationMethod::kOff, 10);
+		Check(live.PendingTransition() &&
+				  live.PendingTransition()->superResolution ==
+					  SuperResolutionMethod::kDLSS &&
+				  live.Effective().superResolution ==
+					  SuperResolutionMethod::kTAA &&
+				  !live.Pending().required,
+			"native-to-DLSS queues an atomic live transition without changing "
+			"the effective method early");
+		Check(live.CommitPendingTransition(10) &&
+				  live.Effective().superResolution ==
+					  SuperResolutionMethod::kDLSS &&
+				  live.Effective().qualityMode == 2,
+			"successful live transition commits method and quality together");
+		live.SubmitLive(true, SuperResolutionMethod::kNone, 2, false,
+			FrameGenerationMethod::kOff, 11);
+		Check(live.CommitPendingTransition(11) &&
+				  live.Effective().superResolution ==
+					  SuperResolutionMethod::kNone,
+			"DLSS-to-native bypass commits without replacing presentation");
+		live.SubmitLive(true, SuperResolutionMethod::kFSR3, 2, false,
+			FrameGenerationMethod::kOff, 12);
+		Check(live.PendingTransition() &&
+				  live.PendingTransition()->superResolution ==
+					  SuperResolutionMethod::kFSR3 &&
+				  !live.Pending().required,
+			"native FSR queues through the existing frame-boundary SR "
+			"transition");
+		Check(live.CommitPendingTransition(12) &&
+				  live.Effective().superResolution ==
+					  SuperResolutionMethod::kFSR3,
+			"native FSR commits without replacing presentation");
+		live.SubmitLive(
+			true, SuperResolutionMethod::kDLSS, 1, false,
+			FrameGenerationMethod::kOff, 13);
+		Check(live.PendingTransition() &&
+				  !live.Pending().required &&
+				  live.CommitPendingTransition(13) &&
+				  live.Effective().superResolution ==
+					  SuperResolutionMethod::kDLSS,
+			"native FSR and DLSS switch through one admitted SR seam");
+
+		live.SubmitLive(true, SuperResolutionMethod::kNone, 2, true,
+			FrameGenerationMethod::kDLSSG, 14);
+		Check(live.PendingTransition() &&
+				  live.PendingTransition()->frameGeneration ==
+					  FrameGenerationMethod::kDLSSG &&
+				  live.PendingTransition()->frameGenerationEnabled &&
+				  !live.Pending().required,
+			"an admitted frame-generation provider queues a live chain "
+			"replacement");
+		Check(live.CommitPendingTransition(
+				  14, FrameGenerationMethod::kDLSSG) &&
+				  live.Effective().frameGeneration ==
+					  FrameGenerationMethod::kDLSSG &&
+				  live.Effective().frameGenerationEnabled &&
+				  live.Session()->activeFg ==
+					  FrameGenerationMethod::kDLSSG,
+			"provider activation commits with the actual private-chain owner");
+		live.SubmitLive(true, SuperResolutionMethod::kNone, 2, true,
+			FrameGenerationMethod::kFSR3, 15);
+		Check(live.PendingTransition() &&
+				  !live.Pending().required &&
+				  live.CommitPendingTransition(
+					  15, FrameGenerationMethod::kFSR3) &&
+				  live.Effective().frameGeneration ==
+					  FrameGenerationMethod::kFSR3 &&
+				  live.Session()->activeFg ==
+					  FrameGenerationMethod::kFSR3,
+			"an admitted vendor switch commits atomically");
+		live.SubmitLive(true, SuperResolutionMethod::kNone, 2, false,
+			FrameGenerationMethod::kFSR3, 16);
+		Check(live.PendingTransition() &&
+				  live.CommitPendingTransition(
+					  16, FrameGenerationMethod::kOff) &&
+				  !live.Effective().frameGenerationEnabled &&
+				  live.Effective().frameGeneration ==
+					  FrameGenerationMethod::kFSR3 &&
+				  live.Session()->activeFg ==
+					  FrameGenerationMethod::kOff &&
+				  !live.Pending().required,
+			"explicit disable retains the selected vendor while committing a "
+			"plain private chain");
+		live.SubmitLive(true, SuperResolutionMethod::kNone, 2, true,
+			FrameGenerationMethod::kFSR3, 17);
+		Check(live.PendingTransition() &&
+				  live.CommitPendingTransition(
+					  17, FrameGenerationMethod::kFSR3) &&
+				  live.Effective().frameGenerationEnabled,
+			"re-enable recreates the retained admitted provider");
+
+		TopologyState coalesced;
+		Check(coalesced.Freeze(liveRequest),
+			"coalesced transition fixture freezes");
+		Check(coalesced.Admit(liveSession),
+			"coalesced transition fixture admits");
+		coalesced.SubmitLive(
+			true, SuperResolutionMethod::kDLSS, 2, true,
+			FrameGenerationMethod::kFSR3, 17);
+		const auto firstTransition = coalesced.BeginPendingTransition();
+		Check(firstTransition &&
+				  firstTransition->frameGeneration ==
+					  FrameGenerationMethod::kFSR3,
+			"the frame boundary owns one immutable transition revision");
+		coalesced.SubmitLive(
+			true, SuperResolutionMethod::kTAA, 1, false,
+			FrameGenerationMethod::kFSR3, 18);
+		Check(coalesced.PendingTransition() &&
+				  coalesced.PendingTransition()->revision == 18 &&
+				  coalesced.PendingTransition()->superResolution ==
+					  SuperResolutionMethod::kTAA &&
+				  !coalesced.PendingTransition()->frameGenerationEnabled,
+			"a newer request is compared with the in-flight target and retained");
+		Check(coalesced.CommitPendingTransition(
+				  17, FrameGenerationMethod::kFSR3) &&
+				  coalesced.Effective().superResolution ==
+					  SuperResolutionMethod::kDLSS &&
+				  !coalesced.Effective().frameGenerationEnabled &&
+				  coalesced.Session()->activeFg ==
+					  FrameGenerationMethod::kFSR3 &&
+				  coalesced.PendingTransition() &&
+				  coalesced.PendingTransition()->revision == 18,
+			"committing completed GPU work preserves a newer coalesced request");
+		const auto secondTransition = coalesced.BeginPendingTransition();
+		Check(secondTransition &&
+				  coalesced.CommitPendingTransition(
+					  18, FrameGenerationMethod::kOff) &&
+				  coalesced.Effective().superResolution ==
+					  SuperResolutionMethod::kTAA &&
+				  !coalesced.Effective().frameGenerationEnabled &&
+				  coalesced.Session()->activeFg ==
+					  FrameGenerationMethod::kOff,
+			"the newer coalesced request commits on the next frame boundary");
+
+		TopologyState deferred;
+		Check(deferred.Freeze(liveRequest),
+			"deferred transition fixture freezes");
+		Check(deferred.Admit(liveSession),
+			"deferred transition fixture admits");
+		deferred.SubmitLive(
+			true, SuperResolutionMethod::kDLSS, 2, true,
+			FrameGenerationMethod::kDLSSG, 19);
+		Check(deferred.BeginPendingTransition().has_value(),
+			"retryable presentation work claims the pending revision");
+		deferred.DeferTransition(19);
+		Check(deferred.PendingTransition() &&
+				  deferred.PendingTransition()->revision == 19 &&
+				  deferred.Effective().superResolution ==
+					  SuperResolutionMethod::kTAA,
+			"retry deferral restores the same transaction without an early "
+			"effective-state change");
+		Check(deferred.BeginPendingTransition().has_value(),
+			"deferred transaction can be retried");
+		deferred.SubmitLive(
+			true, SuperResolutionMethod::kFSR3, 2, false,
+			FrameGenerationMethod::kOff, 20);
+		deferred.DeferTransition(19);
+		Check(deferred.PendingTransition() &&
+				  deferred.PendingTransition()->revision == 20 &&
+				  deferred.PendingTransition()->superResolution ==
+					  SuperResolutionMethod::kFSR3,
+			"a retry deferral never overwrites a newer coalesced request");
+
+		TopologyState fallback;
+		Check(fallback.Freeze(liveRequest),
+			"frame-generation fallback fixture freezes");
+		Check(fallback.Admit(liveSession),
+			"frame-generation fallback fixture admits");
+		fallback.SubmitLive(
+			true, SuperResolutionMethod::kTAA, 1, true,
+			FrameGenerationMethod::kDLSSG, 20);
+		Check(fallback.CommitPendingFrameGenerationFallback(
+				  20, "target chain creation failed") &&
+				  fallback.Effective().superResolution ==
+					  SuperResolutionMethod::kTAA &&
+				  fallback.Effective().frameGeneration ==
+					  FrameGenerationMethod::kOff &&
+				  !fallback.Effective().frameGenerationEnabled &&
+				  fallback.Session()->activeFg ==
+					  FrameGenerationMethod::kOff &&
+				  fallback.Pending().required &&
+				  fallback.Pending().reason.contains(
+					  "target chain creation failed"),
+			"post-teardown target failure commits the safe plain fallback "
+			"without discarding the valid SR selection");
+
+		TopologyState unavailableFg;
+		Check(unavailableFg.Freeze(liveRequest),
+			"unavailable FG fixture freezes");
+		SessionTopology oneProvider = liveSession;
+		oneProvider.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kFSR3)] = false;
+		Check(unavailableFg.Admit(oneProvider),
+			"unavailable FG fixture admits its supported provider");
+		unavailableFg.SubmitLive(
+			true, SuperResolutionMethod::kTAA, 1, true,
+			FrameGenerationMethod::kFSR3, 21);
+		Check(!unavailableFg.PendingTransition() &&
+				  unavailableFg.Pending().required &&
+				  unavailableFg.Effective().frameGeneration ==
+					  FrameGenerationMethod::kOff,
+			"an unavailable provider is rejected before private-chain "
+			"teardown");
 
 		TopologyState rejected;
 		RequestedTopology request;
@@ -347,7 +557,11 @@ namespace
 		session.proxyInstalled = true;
 		session.admittedSr[static_cast<std::size_t>(SuperResolutionMethod::kDLSS)] =
 			true;
-		session.admittedFg = FrameGenerationMethod::kDLSSG;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kOff)] = true;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kDLSSG)] = true;
+		session.activeFg = FrameGenerationMethod::kDLSSG;
 		Check(beforeAdmission.Admit(session),
 			"graphics creation uses the frozen request");
 		Check(beforeAdmission.Effective().superResolution ==
@@ -395,6 +609,19 @@ namespace
 			return ProviderResult{ .code = a_method == SuperResolutionMethod::kDLSS ? ProviderResultCode::kUnavailable : ProviderResultCode::kSuccess,
 				.message = a_method == SuperResolutionMethod::kDLSS ? "DLSS unavailable" : "" };
 		};
+		calls.clear();
+		const auto defaultAdmission =
+			InitializeSelectedSuperResolution(request, dlssUnavailable);
+		TopologyState defaultFallback;
+		Check(defaultFallback.Freeze(request), "default fallback request freezes");
+		SessionTopology defaultSession;
+		defaultSession.valid = true;
+		defaultSession.admittedSr = defaultAdmission.methods;
+		Check(defaultFallback.Admit(defaultSession), "default fallback admits");
+		Check(defaultFallback.Effective().superResolution == SuperResolutionMethod::kTAA &&
+				  calls == std::vector{ SuperResolutionMethod::kDLSS } &&
+				  !defaultAdmission.methods[static_cast<std::size_t>(SuperResolutionMethod::kFSR3)],
+			"unavailable DLSS defaults to native TAA without initializing standby FSR");
 		for (const auto fallback :
 			{ SuperResolutionMethod::kNone, SuperResolutionMethod::kTAA,
 				SuperResolutionMethod::kFSR3 }) {
@@ -425,10 +652,12 @@ namespace
 				"tuning does not replace a startup fallback or request a spurious "
 				"restart");
 			state.SubmitLive(true, fallback, 2, false, FrameGenerationMethod::kOff, 4);
-			Check(state.Effective().superResolution == fallback &&
-					  state.Pending().required,
-				"changing the requested startup method is explicit even when it "
-				"matches the fallback");
+			Check(state.PendingTransition() &&
+					  !state.Pending().required &&
+					  state.CommitPendingTransition(4) &&
+					  state.Effective().superResolution == fallback &&
+					  state.Effective().qualityMode == 2,
+				"the already-effective fallback accepts a live quality update");
 		}
 
 		request.noDlssFallback = SuperResolutionMethod::kFSR3;
@@ -526,17 +755,31 @@ namespace
 		SessionTopology session;
 		session.valid = true;
 		session.proxyInstalled = true;
-		session.admittedFg = FrameGenerationMethod::kDLSSG;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kOff)] = true;
+		session.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kDLSSG)] = true;
+		session.activeFg = FrameGenerationMethod::kDLSSG;
 		Check(topology.Admit(session), "activity topology admits");
 		topology.SubmitLive(false, SuperResolutionMethod::kNone, 1, true,
 			FrameGenerationMethod::kOff, 1);
 		const auto& effective = topology.Effective();
-		Check(topology.Pending().required &&
+		Check(!topology.Pending().required &&
 				  IsFrameGenerationActive(
 					  effective.frameGeneration != FrameGenerationMethod::kOff,
 					  effective.frameGenerationEnabled, true, 20, 200, frame),
 			"a pending Off selection does not hide work by the effective FG "
 			"provider");
+		Check(topology.CommitPendingTransition(
+				  1, FrameGenerationMethod::kOff) &&
+				  topology.Effective().frameGeneration ==
+					  FrameGenerationMethod::kDLSSG &&
+				  !topology.Effective().frameGenerationEnabled &&
+				  topology.Session()->activeFg ==
+					  FrameGenerationMethod::kOff &&
+				  !topology.Pending().required,
+			"explicit Off disables host FG work and commits the plain private "
+			"chain at the frame boundary");
 
 		FrameTransaction disabled;
 		Check(Capture(disabled, 30) && disabled.PreparePresent(),
@@ -688,7 +931,15 @@ namespace
 					a_request.recording);
 			return { .code = cs::render::temporal::ProviderResultCode::kSuccess };
 		}
-		void DestroyAfterDrain() noexcept override { initialized = false; }
+		cs::render::temporal::ProviderResult
+		DestroyAfterDrain() noexcept override
+		{
+			initialized = false;
+			return {
+				.code =
+					cs::render::temporal::ProviderResultCode::kSuccess
+			};
+		}
 
 		bool initialized = false;
 		bool recordedD3D12 = false;
@@ -873,6 +1124,18 @@ namespace
 		SuperResolutionRequest request{ .recording = D3D12RecordingContext{} };
 		Check(sr.Record(request).Succeeded(), "mock SR records");
 		Check(sr.recordedD3D12, "typed SR request preserves D3D12 ownership");
+		ProviderResult recorded{ .code = ProviderResultCode::kSuccess,
+			.workState = ProviderWorkState::kRecorded,
+			.outputDependencyEstablished = true };
+		Check(!recorded.CanPublishOutput(),
+			"recording success alone cannot authorize output publication");
+		recorded.workState = ProviderWorkState::kOutputReady;
+		Check(recorded.CanPublishOutput(),
+			"output publication requires completed work and an established GPU "
+			"dependency");
+		recorded.outputDependencyEstablished = false;
+		Check(!recorded.CanPublishOutput(),
+			"missing synchronization dependency denies publication");
 
 		MockFrameGeneration fg;
 		Check(fg.CreatePresentation({}, nullptr).Succeeded(),

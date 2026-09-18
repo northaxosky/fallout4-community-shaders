@@ -269,8 +269,6 @@ namespace cs::features
 	FrameGeneration::GetRestartSettings() const noexcept
 	{
 		static constexpr std::array fields{
-			CS_RESTART_FIELD(Settings, frameGenerationMethod,
-				"Frame-generation provider"),
 			CS_RESTART_FIELD(Settings, frameGenerationForceEnable,
 				"Force frame generation below 120 Hz")
 		};
@@ -284,7 +282,8 @@ namespace cs::features
 			render::TemporalPipeline::Get().GetFrameGenerationDiagnostics();
 		const bool synchronousRetirement =
 			status.effective.frameGeneration ==
-			render::temporal::FrameGenerationMethod::kFSR3;
+				render::temporal::FrameGenerationMethod::kFSR3 &&
+			!status.session.nativeFsrFrameGeneration;
 		a_sink.Field("requested_enabled", settings.enabled)
 			.Field("requested_method", settings.frameGenerationMethod)
 			.Field("requested_method_name",
@@ -292,6 +291,8 @@ namespace cs::features
 			.Field("effective_enabled", status.effective.frameGenerationEnabled)
 			.Field("effective_method",
 				static_cast<std::uint8_t>(status.effective.frameGeneration))
+			.Field("native_streamline_fsr",
+				status.session.nativeFsrFrameGeneration)
 			.Field("proxy_installed", status.session.proxyInstalled)
 			.Field("ready", diagnostics.ready)
 			.Field("active", diagnostics.active)
@@ -302,7 +303,10 @@ namespace cs::features
 			.Field("input_transfer", std::string_view{ "gamma_2_2" })
 			.Field("input_color_stage", std::string_view{ "post_tonemap_lut" })
 			.Field("input_lut_baked", true)
-			.Field("ffx_transfer_classification", std::string_view{ "srgb" })
+			.Field("ffx_transfer_classification",
+				status.session.nativeFsrFrameGeneration
+					? std::string_view{ "gamma_2_2" }
+					: std::string_view{ "srgb" })
 			.Field("last_alpha_conditioned", diagnostics.alphaConditioned)
 			.Field("alpha_conditioned_captures", diagnostics.conditionedCaptures)
 			.Field("raw_captures", diagnostics.rawCaptures)
@@ -446,7 +450,7 @@ namespace cs::features
 			changed = true;
 		}
 		dmui::ui::TextDisabled(
-			"Method changes take effect after restarting the game.");
+			"Provider changes take effect at the next frame boundary.");
 		bool force = settings.frameGenerationForceEnable != 0;
 		if (dmui::ui::Checkbox("Force below 120 Hz", &force)) {
 			settings.frameGenerationForceEnable = force ? 1u : 0u;

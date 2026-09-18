@@ -141,31 +141,51 @@ namespace cs::render
 			const auto& snapshot = cs::engine::GetFrameBuffer();
 			const auto camera = render::temporal::BuildFrameGenerationCamera(
 				snapshot, state->screenWidth, state->screenHeight);
-			const render::temporal::SuperResolutionRequest request{
+			render::temporal::SuperResolutionRequest request{
 				.recording =
 					render::temporal::D3D11RecordingContext{ .context = context },
 				.colorInput =
 					render::temporal::D3D11GpuView{ .resource =
 														upscalingTexture->resource.get(),
-						.srv = upscalingTexture->srv.get() },
+						.srv = upscalingTexture->srv.get(),
+						.alias12 = upscalingTexture->resource12.get() },
 				.privateOutput =
 					render::temporal::D3D11GpuView{
 						.resource = sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
 						.srv = sharpenerTexture ? sharpenerTexture->srv.get() : nullptr,
 						.uav =
-							sharpenerTexture ? sharpenerTexture->uav.get() : nullptr },
+							sharpenerTexture ? sharpenerTexture->uav.get() : nullptr,
+						.alias12 =
+							sharpenerTexture ? sharpenerTexture->resource12.get() : nullptr },
+				.publicationOutput =
+					render::temporal::D3D11GpuView{
+						.resource = publicationTexture ? publicationTexture->resource.get() : nullptr,
+						.srv = publicationTexture ? publicationTexture->srv.get() : nullptr,
+						.uav =
+							publicationTexture ? publicationTexture->uav.get() : nullptr,
+						.alias12 =
+							publicationTexture ? publicationTexture->resource12.get() : nullptr },
 				.depth =
 					render::temporal::D3D11GpuView{
-						.resource = superResolutionDepthTexture->resource.get() },
+						.resource = superResolutionDepthTexture->resource.get(),
+						.alias12 =
+							superResolutionDepthTexture->resource12.get() },
 				.motionVectors =
 					render::temporal::D3D11GpuView{
-						.resource = upscaleMethod == UpscaleMethod::kDLSS ? motionVectorCopyTexture->resource.get() : motionVectorTexture },
+						.resource = upscaleMethod == UpscaleMethod::kDLSS ? motionVectorCopyTexture->resource.get() : motionVectorTexture,
+						.alias12 =
+							upscaleMethod == UpscaleMethod::kDLSS && motionVectorCopyTexture
+								? motionVectorCopyTexture->resource12.get()
+								: nullptr },
 				.reactiveMask =
 					render::temporal::D3D11GpuView{
-						.resource = reactiveMaskTexture->resource.get() },
+						.resource = reactiveMaskTexture->resource.get(),
+						.alias12 = reactiveMaskTexture->resource12.get() },
 				.transparencyCompositionMask =
 					render::temporal::D3D11GpuView{
-						.resource = transparencyCompositionMaskTexture->resource.get() },
+						.resource = transparencyCompositionMaskTexture->resource.get(),
+						.alias12 =
+							transparencyCompositionMaskTexture->resource12.get() },
 				.renderWidth = renderWidth,
 				.renderHeight = renderHeight,
 				.outputWidth = state->screenWidth,
@@ -177,12 +197,17 @@ namespace cs::render
 				.jitterX = jitter.x,
 				.jitterY = jitter.y,
 				.sharpness = settings.sharpnessFSR,
+				.postProcessSharpness = settings.sharpnessDLSS,
 				.frameTimeMilliseconds =
 					(timer ? timer->realTimeDelta : 0.0f) * 1000.0f,
 				.cameraNear = cs::engine::GetCameraNear(),
 				.cameraFar = cs::engine::GetCameraFar(),
 				.cameraVerticalFov = verticalFov,
 				.resetHistory = resetHistory,
+				.postProcessSharpening =
+					upscaleMethod == UpscaleMethod::kDLSS &&
+					settings.sharpnessEnabledDLSS &&
+					settings.sharpnessDLSS > 0.0f,
 				.color = { .resourceFormat = DXGI_FORMAT_R8G8B8A8_UNORM,
 					.range = render::temporal::ColorRange::kFull,
 					.transfer = render::temporal::TransferFunction::kGamma22,
@@ -192,27 +217,43 @@ namespace cs::render
 					.exposure = render::temporal::ExposureMode::kAutomatic },
 				.camera = camera
 			};
+			(void)render::TemporalPipeline::Get().ApplyFrozenFrameConstants(
+				request);
 
+			render::temporal::ProviderResult providerResult;
 			if (upscaleMethod == UpscaleMethod::kDLSS) {
 				cs::render::annotation::ScopedEvent providerScope("Upscaling/DLSS");
-				upscaled =
-					render::TemporalPipeline::Get()
-						.EvaluateSuperResolution(
-							render::temporal::SuperResolutionMethod::kDLSS, request)
-						.Succeeded();
+				providerResult =
+					render::TemporalPipeline::Get().EvaluateSuperResolution(
+						render::temporal::SuperResolutionMethod::kDLSS, request);
 			} else if (upscaleMethod == UpscaleMethod::kFSR) {
 				cs::render::annotation::ScopedEvent providerScope("Upscaling/FSR");
-				upscaled =
-					render::TemporalPipeline::Get()
-						.EvaluateSuperResolution(
-							render::temporal::SuperResolutionMethod::kFSR3, request)
-						.Succeeded();
+				providerResult =
+					render::TemporalPipeline::Get().EvaluateSuperResolution(
+						render::temporal::SuperResolutionMethod::kFSR3, request);
+			}
+			upscaled = providerResult.CanPublishOutput();
+			_providerPublicationOutputReady =
+				providerResult.publicationOutputReady;
+			_superResolutionSubmissionUnsafe =
+				providerResult.failureDomain ==
+					render::temporal::FailureDomain::kTransport ||
+				(providerResult.workState ==
+						render::temporal::ProviderWorkState::kSubmitted &&
+					!providerResult.outputDependencyEstablished);
+			if (!upscaled &&
+				providerResult.failureDomain ==
+					render::temporal::FailureDomain::kTransport) {
+				render::TemporalPipeline::Get().PostFailure(
+					providerResult.failureDomain,
+					providerResult.message.empty()
+						? "Super-resolution transport did not establish a safe output dependency."
+						: providerResult.message);
 			}
 
 			if (upscaled) {
 				_lastDispatchedFrame = frameCount;
 			}
-			render::TemporalPipeline::Get().ConsumeSuperResolutionReset(upscaled);
 		}
 
 		if (upscaled) {
@@ -229,6 +270,8 @@ namespace cs::render
 		cs::render::annotation::ScopedEvent upscaleScope("Upscaling/SuperResolution");
 		_upscaledThisFrame = false;
 		_spatialFallbackThisFrame.store(false, std::memory_order_release);
+		_superResolutionSubmissionUnsafe = false;
+		_providerPublicationOutputReady = false;
 		// Keep the last completed resolve result stable across vfunc queries within
 		// the frame.
 		const auto finish = [this](bool a_resolved,
@@ -265,6 +308,9 @@ namespace cs::render
 		}
 
 		if (!Upscale()) {
+			if (_superResolutionSubmissionUnsafe) {
+				return finish(false);
+			}
 			if (!ApplySpatialFallback(frameBuffer.get(), frameBufferDesc, renderWidth,
 					renderHeight)) {
 				render::TemporalPipeline::Get().PostFailure(
@@ -292,9 +338,17 @@ namespace cs::render
 				sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
 				_upscaledThisFrame);
 		} else if (method == UpscaleMethod::kDLSS) {
-			published = ApplySharpening(frameBuffer.get());
+			published = _providerPublicationOutputReady
+				? PublishUpscalingOutput(
+					  context, frameBuffer.get(),
+					  publicationTexture
+						  ? publicationTexture->resource.get()
+						  : nullptr,
+					  _upscaledThisFrame)
+				: ApplySharpening(frameBuffer.get());
 		}
 		if (published) {
+			render::TemporalPipeline::Get().ConsumeSuperResolutionReset(true);
 			UpscaleDepth();
 			return finish(true, true);
 		}
@@ -606,12 +660,8 @@ namespace cs::render
 
 		cs::engine::ComputeOMScope scope(context, 1, 0, 1, 1);
 		if (settings.sharpnessEnabledDLSS && settings.sharpnessDLSS > 0.0f) {
-			// Match FSR3's slider-to-RCAS attenuation.
-			float currentSharpness = (-2.0f * settings.sharpnessDLSS) + 2.0f;
-			currentSharpness = exp2(-currentSharpness);
-
 			if (!rcas.ApplySharpen(sharpenerTexture->srv.get(),
-					publicationTexture->uav.get(), currentSharpness)) {
+					publicationTexture->uav.get(), settings.sharpnessDLSS)) {
 				return false;
 			}
 			return PublishUpscalingOutput(context, a_frameBuffer,

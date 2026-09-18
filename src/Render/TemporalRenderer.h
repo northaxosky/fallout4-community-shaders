@@ -422,6 +422,8 @@ namespace cs::render
 		std::atomic_bool _renderUiRecoveryPassthrough{ false };
 		std::atomic_bool _spatialFallbackThisFrame{ false };
 		std::atomic_bool _srPublishedToFramebuffer{ false };
+		bool _superResolutionSubmissionUnsafe = false;
+		bool _providerPublicationOutputReady = false;
 		std::atomic_bool _providerOutputDebugAllocated{ false };
 		std::atomic_uint32_t _providerOutputDebugWidth{ 0 };
 		std::atomic_uint32_t _providerOutputDebugHeight{ 0 };

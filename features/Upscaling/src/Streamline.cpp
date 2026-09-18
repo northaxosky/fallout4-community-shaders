@@ -40,6 +40,25 @@ namespace cs::features
 			}
 		}
 
+		std::optional<sl::FSRMode> ToFSRMode(
+			std::uint32_t a_qualityMode) noexcept
+		{
+			switch (a_qualityMode) {
+			case 0:
+				return sl::FSRMode::eNativeAA;
+			case 1:
+				return sl::FSRMode::eQuality;
+			case 2:
+				return sl::FSRMode::eBalanced;
+			case 3:
+				return sl::FSRMode::ePerformance;
+			case 4:
+				return sl::FSRMode::eUltraPerformance;
+			default:
+				return std::nullopt;
+			}
+		}
+
 		constexpr UINT NVIDIA_VENDOR_ID = 0x10DE;
 
 		void LoggingCallback(sl::LogType type, const char* msg)
@@ -93,22 +112,16 @@ namespace cs::features
 	void Streamline::LoadInterposer(
 		std::uint32_t a_logLevel,
 		bool a_loadDlss,
+		bool a_loadFsr,
 		bool a_loadDlssG,
+		bool a_loadFsrG,
 		sl::RenderAPI a_renderApi)
 	{
 		triedInitialization = true;
 		_latencyFeaturesRequested = a_loadDlssG;
+		_fsrFeatureRequested = a_loadFsr;
+		_fsrGFeatureRequested = a_loadFsrG;
 		_renderApi = a_renderApi;
-
-		if (a_loadDlssG) {
-			const auto runtimePath =
-				std::wstring(PluginDir) + L"\\nvngx_dlssg.dll";
-			if (GetFileAttributesW(runtimePath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-				L->error("DLSS-G requires the shipped nvngx_dlssg.dll; restore the complete SDK package (error {}).",
-					GetLastError());
-				return;
-			}
-		}
 
 		const auto loaded = cs::files::LoadStreamlineInterposer(Streamline::PluginDir);
 		if (!loaded) {
@@ -126,15 +139,21 @@ namespace cs::features
 
 		sl::Preferences pref;
 
-		sl::Feature featuresToLoad[4]{};
+		sl::Feature featuresToLoad[6]{};
 		std::uint32_t featureCount = 0;
 		if (a_loadDlss) {
 			featuresToLoad[featureCount++] = sl::kFeatureDLSS;
+		}
+		if (a_loadFsr) {
+			featuresToLoad[featureCount++] = sl::kFeatureFSR;
 		}
 		if (a_loadDlssG) {
 			featuresToLoad[featureCount++] = sl::kFeatureDLSS_G;
 			featuresToLoad[featureCount++] = sl::kFeaturePCL;
 			featuresToLoad[featureCount++] = sl::kFeatureReflex;
+		}
+		if (a_loadFsrG) {
+			featuresToLoad[featureCount++] = sl::kFeatureFSR_G;
 		}
 
 		pref.featuresToLoad = featuresToLoad;
@@ -177,6 +196,7 @@ namespace cs::features
 		slInit = (PFun_slInit*)GetProcAddress(interposer, "slInit");
 		slIsFeatureSupported = (PFun_slIsFeatureSupported*)GetProcAddress(interposer, "slIsFeatureSupported");
 		slIsFeatureLoaded = (PFun_slIsFeatureLoaded*)GetProcAddress(interposer, "slIsFeatureLoaded");
+		slSetFeatureLoaded = (PFun_slSetFeatureLoaded*)GetProcAddress(interposer, "slSetFeatureLoaded");
 		slEvaluateFeature = (PFun_slEvaluateFeature*)GetProcAddress(interposer, "slEvaluateFeature");
 		slFreeResources = (PFun_slFreeResources*)GetProcAddress(interposer, "slFreeResources");
 		slGetFeatureRequirements = (PFun_slGetFeatureRequirements*)GetProcAddress(interposer, "slGetFeatureRequirements");
@@ -200,6 +220,7 @@ namespace cs::features
 		} else {
 			initialized = true;
 			featureDLSS = false;
+			featureFSR = false;
 			deviceRegistered = false;
 			L->info("Successfully initialized Streamline");
 		}
@@ -296,8 +317,17 @@ namespace cs::features
 
 	void Streamline::CheckFeatures(IDXGIAdapter* a_adapter)
 	{
-		if (!initialized || !deviceRegistered || !a_adapter)
+		if (!initialized || !deviceRegistered || !a_adapter ||
+			!slIsFeatureLoaded || !slIsFeatureSupported ||
+			!slGetFeatureRequirements) {
+			featureDLSS = false;
+			featureDLSSG = false;
+			featureFSR = false;
+			featureFSRG = false;
+			featurePCL = false;
+			featureReflex = false;
 			return;
+		}
 
 		L->info("Checking features");
 		DXGI_ADAPTER_DESC adapterDesc;
@@ -309,30 +339,41 @@ namespace cs::features
 
 		auto checkFeatureAvailability = [&](sl::Feature feature, const char* featureName, bool& outAvailable) {
 			outAvailable = false;
-			bool loaded = false;
-			if (SL_FAILED(result, slIsFeatureLoaded(feature, loaded))) {
-				L->warn("{} load-state query failed: {}", featureName, magic_enum::enum_name(result));
-				return;
-			}
-			if (!loaded) {
-				L->info("{} feature is not loaded", featureName);
+			bool active = false;
+			if (SL_FAILED(result, slIsFeatureLoaded(feature, active))) {
+				L->info(
+					"{} feature is not resident: {}",
+					featureName,
+					magic_enum::enum_name(result));
 				sl::FeatureRequirements featureRequirements;
-				sl::Result requirementsResult = slGetFeatureRequirements(feature, featureRequirements);
+				const auto requirementsResult =
+					slGetFeatureRequirements(feature, featureRequirements);
 				if (requirementsResult != sl::Result::eOk) {
-					L->info("{} feature failed to load due to: {}", featureName, magic_enum::enum_name(requirementsResult));
+					L->info(
+						"{} feature failed to load due to: {}",
+						featureName,
+						magic_enum::enum_name(requirementsResult));
 				}
 				return;
 			}
-
-			L->info("{} feature is loaded", featureName);
+			L->info(
+				"{} feature is resident and {}",
+				featureName,
+				active ? "active" : "inactive");
 			outAvailable = slIsFeatureSupported(feature, adapterInfo) == sl::Result::eOk;
 		};
 
 		checkFeatureAvailability(sl::kFeatureDLSS, "DLSS", featureDLSS);
+		if (_fsrFeatureRequested) {
+			checkFeatureAvailability(sl::kFeatureFSR, "FSR", featureFSR);
+		}
 		if (_latencyFeaturesRequested) {
 			checkFeatureAvailability(sl::kFeatureDLSS_G, "DLSS-G", featureDLSSG);
 			checkFeatureAvailability(sl::kFeaturePCL, "PCL", featurePCL);
 			checkFeatureAvailability(sl::kFeatureReflex, "Reflex", featureReflex);
+		}
+		if (_fsrGFeatureRequested) {
+			checkFeatureAvailability(sl::kFeatureFSR_G, "FSR-G", featureFSRG);
 		}
 
 		if (featureDLSS) {
@@ -341,8 +382,15 @@ namespace cs::features
 		if (featureDLSSG) {
 			L->info("DLSS-G is supported on the selected adapter");
 		}
+		if (featureFSR) {
+			L->info("FSR super-resolution is supported on the selected adapter");
+		}
+		if (featureFSRG) {
+			L->info("FSR frame generation is supported on the selected adapter");
+		}
 
 		L->info("DLSS {} available", featureDLSS ? "is" : "is not");
+		L->info("FSR {} available", featureFSR ? "is" : "is not");
 	}
 
 	void Streamline::PostDevice()
@@ -366,6 +414,34 @@ namespace cs::features
 				sl::kFeatureDLSS_G,
 				"slDLSSGGetState",
 				(void*&)slDLSSGGetState);
+		}
+		if (featureFSR) {
+			slGetFeatureFunction(
+				sl::kFeatureFSR,
+				"slFSRSetOptions",
+				(void*&)slFSRSetOptions);
+			slGetFeatureFunction(
+				sl::kFeatureFSR,
+				"slFSRGetOptimalSettings",
+				(void*&)slFSRGetOptimalSettings);
+			slGetFeatureFunction(
+				sl::kFeatureFSR,
+				"slFSRGetState",
+				(void*&)slFSRGetState);
+		}
+		if (featureFSRG) {
+			slGetFeatureFunction(
+				sl::kFeatureFSR_G,
+				"slFSRGSetOptions",
+				(void*&)slFSRGSetOptions);
+			slGetFeatureFunction(
+				sl::kFeatureFSR_G,
+				"slFSRGGetState",
+				(void*&)slFSRGGetState);
+			slGetFeatureFunction(
+				sl::kFeatureFSR_G,
+				"slFSRGQuiesce",
+				(void*&)slFSRGQuiesce);
 		}
 		if (featurePCL) {
 			slGetFeatureFunction(
@@ -477,10 +553,25 @@ namespace cs::features
 				_constantsCamera.farPlane == a_camera.farPlane &&
 				_constantsCamera.verticalFov == a_camera.verticalFov &&
 				_constantsCamera.aspectRatio == a_camera.aspectRatio &&
+				std::equal(std::begin(a_camera.position),
+					std::end(a_camera.position), _constantsCamera.position) &&
+				std::equal(std::begin(a_camera.right),
+					std::end(a_camera.right), _constantsCamera.right) &&
+				std::equal(std::begin(a_camera.up),
+					std::end(a_camera.up), _constantsCamera.up) &&
+				std::equal(std::begin(a_camera.forward),
+					std::end(a_camera.forward), _constantsCamera.forward) &&
 				std::equal(std::begin(a_camera.currentWorldToClip),
 					std::end(a_camera.currentWorldToClip), _constantsCamera.currentWorldToClip) &&
 				std::equal(std::begin(a_camera.previousWorldToClip),
-					std::end(a_camera.previousWorldToClip), _constantsCamera.previousWorldToClip);
+					std::end(a_camera.previousWorldToClip),
+					_constantsCamera.previousWorldToClip) &&
+				std::equal(std::begin(a_camera.viewToWorld),
+					std::end(a_camera.viewToWorld),
+					_constantsCamera.viewToWorld) &&
+				std::equal(std::begin(a_camera.previousPosition),
+					std::end(a_camera.previousPosition),
+					_constantsCamera.previousPosition);
 			if (!sameCamera || (a_resetHistory && !_constantsReset)) {
 				L->error("Shared Streamline constants changed after submission for frame {}; rejecting the later consumer.",
 					a_frameIndex);
@@ -656,6 +747,7 @@ namespace cs::features
 			L->critical("Could not enable DLSS: {}", magic_enum::enum_name(result));
 			return false;
 		}
+		_dlssResourcesConfigured = true;
 		return true;
 	}
 
@@ -706,7 +798,89 @@ namespace cs::features
 		};
 	}
 
-	bool Streamline::Upscale(
+	bool Streamline::SetFSROptions(
+		sl::ViewportHandle p_viewport,
+		const render::temporal::SuperResolutionRequest& a_request)
+	{
+		const auto mode = ToFSRMode(a_request.qualityMode);
+		if (!slFSRSetOptions || !mode ||
+			!render::temporal::IsFo4PostTonemapSdr(a_request.color)) {
+			return false;
+		}
+
+		sl::FSROptions options{};
+		options.mode = *mode;
+		options.outputWidth = a_request.outputWidth;
+		options.outputHeight = a_request.outputHeight;
+		options.maxRenderWidth = a_request.outputWidth;
+		options.maxRenderHeight = a_request.outputHeight;
+		options.sharpness = a_request.sharpness;
+		options.preExposure = a_request.color.preExposure;
+		options.frameTimeDeltaMilliseconds =
+			a_request.frameTimeMilliseconds;
+		options.viewSpaceToMetersFactor = 0.01428222656f;
+		options.colorSpace = sl::FSRColorSpace::eGamma22;
+		options.useAutoExposure = sl::Boolean::eTrue;
+		options.dynamicResolutionEnabled = sl::Boolean::eFalse;
+		if (SL_FAILED(result, slFSRSetOptions(p_viewport, options))) {
+			L->error("Could not enable FSR: {}",
+				magic_enum::enum_name(result));
+			return false;
+		}
+		_fsrResourcesConfigured = true;
+		return true;
+	}
+
+	render::temporal::SuperResolutionSizeResult
+		Streamline::QueryFSRRenderSize(
+			const render::temporal::SuperResolutionSizeRequest& a_request)
+	{
+		const auto mode = ToFSRMode(a_request.qualityMode);
+		if (!featureFSR || !slFSRGetOptimalSettings || !mode ||
+			!a_request.outputWidth || !a_request.outputHeight) {
+			return {
+				.result = {
+					.code =
+						render::temporal::ProviderResultCode::kUnavailable,
+					.message =
+						"Native FSR render-size query is unavailable."
+				}
+			};
+		}
+
+		sl::FSROptions options{};
+		options.mode = *mode;
+		options.outputWidth = a_request.outputWidth;
+		options.outputHeight = a_request.outputHeight;
+		sl::FSROptimalSettings settings{};
+		const auto sdkResult =
+			slFSRGetOptimalSettings(options, settings);
+		if (sdkResult != sl::Result::eOk ||
+			!settings.optimalRenderWidth ||
+			!settings.optimalRenderHeight) {
+			return {
+				.result = {
+					.code =
+						render::temporal::ProviderResultCode::kFailure,
+					.sdkResult = static_cast<std::int64_t>(sdkResult),
+					.message = "FSR optimal-settings query failed.",
+					.failureDomain =
+						render::temporal::FailureDomain::kStreamline
+				}
+			};
+		}
+		return {
+			.result = {
+				.code =
+					render::temporal::ProviderResultCode::kSuccess,
+				.sdkResult = static_cast<std::int64_t>(sdkResult)
+			},
+			.renderWidth = settings.optimalRenderWidth,
+			.renderHeight = settings.optimalRenderHeight
+		};
+	}
+
+	render::temporal::ProviderResult Streamline::Upscale(
 		const render::temporal::SuperResolutionRequest& a_request)
 	{
 		const auto* recording =
@@ -731,12 +905,20 @@ namespace cs::features
 			color == output ||
 			!render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
 			!slSetTagForFrame || !slEvaluateFeature) {
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.message = "DLSS received incomplete or incompatible D3D11 inputs.",
+				.failureDomain = render::temporal::FailureDomain::kTransport
+			};
 		}
 		if (!deviceRegistered) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
 				"DLSS evaluation skipped: the device was never registered with Streamline");
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.message = "The D3D11 device was not registered with Streamline.",
+				.failureDomain = render::temporal::FailureDomain::kStreamline
+			};
 		}
 		auto* context = recording->context;
 		const sl::Extent extentIn{
@@ -762,10 +944,20 @@ namespace cs::features
 				a_request.jitterY,
 				a_request.resetHistory,
 				a_request.camera))
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.message = "DLSS frame constants were rejected.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 
 		if (!SetDLSSOptions(viewport, a_request))
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.message = "DLSS options were rejected.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 
 		sl::ResourceTag tags[] = {
 			{ &colorInRes, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn },
@@ -781,7 +973,13 @@ namespace cs::features
 		if (tagResult != sl::Result::eOk) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
 				"slSetTagForFrame failed: {}", magic_enum::enum_name(tagResult));
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(tagResult),
+				.message = "DLSS input tagging failed.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 		}
 
 		sl::ViewportHandle view(viewport);
@@ -792,13 +990,36 @@ namespace cs::features
 		if (evalResult != sl::Result::eOk) {
 			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
 				"slEvaluateFeature failed: {}", magic_enum::enum_name(evalResult));
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(evalResult),
+				.message = "DLSS evaluation failed.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 		}
-		return true;
+		return {
+			.code = render::temporal::ProviderResultCode::kSuccess,
+			.workState = render::temporal::ProviderWorkState::kOutputReady,
+			.outputDependencyEstablished = true
+		};
 	}
 
-	bool Streamline::UpscaleD3D12(
+	render::temporal::ProviderResult Streamline::UpscaleD3D12(
 		const render::temporal::SuperResolutionRequest& a_request)
+	{
+		return UpscaleD3D12Feature(a_request, false);
+	}
+
+	render::temporal::ProviderResult Streamline::UpscaleFSRD3D12(
+		const render::temporal::SuperResolutionRequest& a_request)
+	{
+		return UpscaleD3D12Feature(a_request, true);
+	}
+
+	render::temporal::ProviderResult Streamline::UpscaleD3D12Feature(
+		const render::temporal::SuperResolutionRequest& a_request,
+		bool a_fsr)
 	{
 		const auto* recording =
 			std::get_if<render::temporal::D3D12RecordingContext>(
@@ -824,10 +1045,21 @@ namespace cs::features
 			!transparency->resource || !a_request.renderWidth ||
 			!a_request.renderHeight || !a_request.outputWidth ||
 			!a_request.outputHeight ||
+			colorInput->resource == privateOutput->resource ||
 			!render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
 			!slSetTagForFrame || !slEvaluateFeature ||
-			!deviceRegistered) {
-			return false;
+			!deviceRegistered ||
+			(a_fsr && !featureFSR)) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.message = a_fsr
+					? "FSR received incomplete or incompatible D3D12 inputs."
+					: "DLSS received incomplete or incompatible D3D12 inputs.",
+				.failureDomain =
+					a_fsr && !featureFSR
+						? render::temporal::FailureDomain::kStreamline
+						: render::temporal::FailureDomain::kTransport
+			};
 		}
 
 		if (!CheckFrameConstants(
@@ -837,8 +1069,16 @@ namespace cs::features
 				a_request.jitterY,
 				a_request.resetHistory,
 				a_request.camera) ||
-			!SetDLSSOptions(viewport, a_request)) {
-			return false;
+			!(a_fsr ? SetFSROptions(viewport, a_request) :
+					   SetDLSSOptions(viewport, a_request))) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.message = a_fsr
+					? "FSR constants or options were rejected."
+					: "DLSS constants or options were rejected.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 		}
 
 		sl::Resource colorIn(
@@ -883,13 +1123,19 @@ namespace cs::features
 		const sl::Extent outputExtent{
 			0, 0, a_request.outputWidth, a_request.outputHeight
 		};
+		const sl::BufferType reactiveType = a_fsr
+			? sl::kBufferTypeReactiveMaskHint
+			: sl::kBufferTypeBiasCurrentColorHint;
+		const sl::BufferType transparencyType = a_fsr
+			? sl::kBufferTypeTransparencyAndCompositionMaskHint
+			: sl::kBufferTypeTransparencyHint;
 		const sl::ResourceTag tags[]{
-			{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eOnlyValidNow, &inputExtent },
-			{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eOnlyValidNow, &outputExtent },
-			{ &depthResource, sl::kBufferTypeDepth, sl::ResourceLifecycle::eOnlyValidNow, &inputExtent },
-			{ &motionResource, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &inputExtent },
-			{ &reactiveResource, sl::kBufferTypeBiasCurrentColorHint, sl::ResourceLifecycle::eOnlyValidNow, &inputExtent },
-			{ &transparencyResource, sl::kBufferTypeTransparencyHint, sl::ResourceLifecycle::eOnlyValidNow, &inputExtent }
+			{ &colorIn, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent },
+			{ &colorOut, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &outputExtent },
+			{ &depthResource, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent },
+			{ &motionResource, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent },
+			{ &reactiveResource, reactiveType, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent },
+			{ &transparencyResource, transparencyType, sl::ResourceLifecycle::eValidUntilEvaluate, &inputExtent }
 		};
 		if (SL_FAILED(result, slSetTagForFrame(
 			*frameToken,
@@ -898,25 +1144,46 @@ namespace cs::features
 			_countof(tags),
 			recording->commandList))) {
 			L->error(
-				"Could not tag D3D12 DLSS-SR inputs: {}",
+				"Could not tag D3D12 {} inputs: {}",
+				a_fsr ? "FSR" : "DLSS-SR",
 				magic_enum::enum_name(result));
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(result),
+				.message = a_fsr
+					? "D3D12 FSR input tagging failed."
+					: "D3D12 DLSS input tagging failed.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 		}
 
 		const sl::ViewportHandle view(viewport);
 		const sl::BaseStructure* inputs[]{ &view };
 		if (SL_FAILED(result, slEvaluateFeature(
-			sl::kFeatureDLSS,
+			a_fsr ? sl::kFeatureFSR : sl::kFeatureDLSS,
 			*frameToken,
 			inputs,
 			_countof(inputs),
 			recording->commandList))) {
 			L->error(
-				"D3D12 DLSS-SR evaluation failed: {}",
+				"D3D12 {} evaluation failed: {}",
+				a_fsr ? "FSR" : "DLSS-SR",
 				magic_enum::enum_name(result));
-			return false;
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(result),
+				.message = a_fsr
+					? "D3D12 FSR evaluation failed."
+					: "D3D12 DLSS evaluation failed.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
 		}
-		return true;
+		return {
+			.code = render::temporal::ProviderResultCode::kSuccess,
+			.workState = render::temporal::ProviderWorkState::kRecorded
+		};
 	}
 
 	bool Streamline::ConfigureDLSSG(
@@ -974,10 +1241,61 @@ namespace cs::features
 		return true;
 	}
 
+	bool Streamline::ConfigureFSRG(
+		bool a_enabled,
+		const render::temporal::FrameGenerationRequest& a_request)
+	{
+		if (!featureFSRG || !slFSRGSetOptions ||
+			!a_request.outputWidth || !a_request.outputHeight ||
+			!render::temporal::IsFo4PostTonemapSdr(a_request.color)) {
+			return false;
+		}
+		sl::FSRGOptions options{};
+		options.mode =
+			a_enabled ? sl::FSRGMode::eOn : sl::FSRGMode::eOff;
+		options.displayWidth = a_request.outputWidth;
+		options.displayHeight = a_request.outputHeight;
+		options.maxRenderWidth = a_request.outputWidth;
+		options.maxRenderHeight = a_request.outputHeight;
+		options.backBufferFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
+		options.colorSpace = sl::FSRColorSpace::eGamma22;
+		options.frameTimeDeltaMilliseconds =
+			a_request.frameTimeMilliseconds;
+		options.viewSpaceToMetersFactor = 0.01428222656f;
+		options.onlyPresentGenerated = sl::Boolean::eFalse;
+		if (SL_FAILED(result, slFSRGSetOptions(viewport, options))) {
+			L->error(
+				"Could not configure FSR-G: {}",
+				magic_enum::enum_name(result));
+			return false;
+		}
+		_fsrGResourcesConfigured = true;
+		return true;
+	}
+
 	bool Streamline::TagDLSSGFrame(
 		const render::temporal::FrameGenerationRequest& a_request)
 	{
-		if (!featureDLSSG || !slSetTagForFrame || !slSetConstants ||
+		return TagFrameGenerationFrame(
+			a_request, sl::kFeatureDLSS_G, false);
+	}
+
+	bool Streamline::TagFSRGFrame(
+		const render::temporal::FrameGenerationRequest& a_request)
+	{
+		return TagFrameGenerationFrame(
+			a_request, sl::kFeatureFSR_G, true);
+	}
+
+	bool Streamline::TagFrameGenerationFrame(
+		const render::temporal::FrameGenerationRequest& a_request,
+		sl::Feature a_feature,
+		bool a_evaluate)
+	{
+		const bool featureAvailable =
+			a_feature == sl::kFeatureDLSS_G ? featureDLSSG : featureFSRG;
+		if (!featureAvailable || !slSetTagForFrame || !slSetConstants ||
+			(a_evaluate && !slEvaluateFeature) ||
 			!EnsureFrameToken(static_cast<std::uint32_t>(a_request.realFrame)) ||
 			!a_request.recording.commandList || !a_request.depth.resource ||
 			!a_request.motionVectors.resource ||
@@ -1022,9 +1340,9 @@ namespace cs::features
 			0, 0, a_request.outputWidth, a_request.outputHeight
 		};
 		const sl::ResourceTag tags[]{
-			{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eOnlyValidNow, &renderExtent },
-			{ &motion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eOnlyValidNow, &renderExtent },
-			{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eOnlyValidNow, &outputExtent }
+			{ &depth, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+			{ &motion, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilPresent, &renderExtent },
+			{ &hudless, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &outputExtent }
 		};
 		if (SL_FAILED(result, slSetTagForFrame(
 			*frameToken,
@@ -1034,29 +1352,44 @@ namespace cs::features
 			reinterpret_cast<sl::CommandBuffer*>(
 				a_request.recording.commandList)))) {
 			L->error(
-				"Could not tag DLSS-G inputs: {}",
+				"Could not tag {} inputs: {}",
+				a_feature == sl::kFeatureDLSS_G ? "DLSS-G" : "FSR-G",
 				magic_enum::enum_name(result));
 			return false;
+		}
+		if (a_evaluate) {
+			const sl::ViewportHandle view(viewport);
+			const sl::BaseStructure* inputs[]{ &view };
+			if (SL_FAILED(result, slEvaluateFeature(
+				a_feature,
+				*frameToken,
+				inputs,
+				_countof(inputs),
+				reinterpret_cast<sl::CommandBuffer*>(
+					a_request.recording.commandList)))) {
+				L->error(
+					"Could not evaluate FSR-G preparation: {}",
+					magic_enum::enum_name(result));
+				return false;
+			}
 		}
 		return true;
 	}
 
-	bool Streamline::ClearDLSSGFrameTags(
+	bool Streamline::ClearFrameGenerationTags(
 		std::uint32_t a_frameIndex,
 		ID3D12GraphicsCommandList* a_commandList) noexcept
 	{
-		return ClearDLSSGFrameTagsChecked(
+		return ClearFrameGenerationTagsChecked(
 			a_frameIndex, a_commandList) == sl::Result::eOk;
 	}
 
-	sl::Result Streamline::ClearDLSSGFrameTagsChecked(
+	sl::Result Streamline::ClearFrameGenerationTagsChecked(
 		std::uint32_t a_frameIndex,
 		ID3D12GraphicsCommandList* a_commandList) noexcept
 	{
-		if (!featureDLSSG || !slSetTagForFrame) {
-			return !featureDLSSG
-				? sl::Result::eOk
-				: sl::Result::eErrorMissingOrInvalidAPI;
+		if (!slSetTagForFrame) {
+			return sl::Result::eErrorMissingOrInvalidAPI;
 		}
 		if (!EnsureFrameToken(a_frameIndex)) {
 			return sl::Result::eErrorInvalidState;
@@ -1074,7 +1407,7 @@ namespace cs::features
 			reinterpret_cast<sl::CommandBuffer*>(a_commandList));
 		if (result != sl::Result::eOk) {
 			L->error(
-				"Could not invalidate DLSS-G inputs: {}",
+				"Could not invalidate frame-generation inputs: {}",
 				magic_enum::enum_name(result));
 			return result;
 		}
@@ -1083,19 +1416,30 @@ namespace cs::features
 
 	bool Streamline::PollDLSSGState() noexcept
 	{
+		_dlssGInputCompletionDependency.reset();
 		if (!featureDLSSG || !slDLSSGGetState) {
 			return !featureDLSSG;
 		}
-		const auto result = streamline_fg::PollState(
-			viewport,
-			_dlssGPresentedFrames,
-			_dlssGStatus,
-			slDLSSGGetState);
+		sl::DLSSGState state{};
+		const auto result = slDLSSGGetState(viewport, state, nullptr);
 		if (result != sl::Result::eOk) {
 			L->error(
 				"Could not query DLSS-G state: {}",
 				magic_enum::enum_name(result));
 			return false;
+		}
+		_dlssGPresentedFrames.Add(state.numFramesActuallyPresented);
+		_dlssGStatus = state.status;
+		if (state.inputsProcessingCompletionFence &&
+			state.lastPresentInputsProcessingCompletionFenceValue) {
+			render::temporal::GpuCompletionDependency dependency{
+				.value =
+					state.lastPresentInputsProcessingCompletionFenceValue
+			};
+			dependency.fence.copy_from(
+				static_cast<ID3D12Fence*>(
+					state.inputsProcessingCompletionFence));
+			_dlssGInputCompletionDependency = std::move(dependency);
 		}
 		if (_dlssGStatus != sl::DLSSGStatus::eOk) {
 			L->error(
@@ -1106,21 +1450,86 @@ namespace cs::features
 		return true;
 	}
 
-	bool Streamline::ClearCurrentDLSSGFrameTags() noexcept
+	bool Streamline::CheckFSRGCompletionCapability() noexcept
 	{
-		return ClearCurrentDLSSGFrameTagsChecked() == sl::Result::eOk;
+		return PollFSRGState(false);
 	}
 
-	sl::Result Streamline::ClearCurrentDLSSGFrameTagsChecked() noexcept
+	bool Streamline::PollFSRGState() noexcept
+	{
+		return PollFSRGState(true);
+	}
+
+	bool Streamline::PollFSRGState(
+		bool a_requireSubmittedDependency) noexcept
+	{
+		_fsrGInputCompletionDependency.reset();
+		if (!featureFSRG || !slFSRGGetState) {
+			return false;
+		}
+		sl::FSRGState state{};
+		const auto result = slFSRGGetState(viewport, state);
+		if (result != sl::Result::eOk) {
+			L->error(
+				"Could not query FSR-G state: {}",
+				magic_enum::enum_name(result));
+			return false;
+		}
+		winrt::com_ptr<ID3D12Fence> completionFence;
+		completionFence.attach(
+			static_cast<ID3D12Fence*>(state.completionFence));
+		if (state.completionMode !=
+				sl::FSRGCompletionMode::eFence ||
+			!completionFence) {
+			L->error(
+				"FSR-G does not expose the required host-input completion "
+				"fence");
+			return false;
+		}
+		if (state.completionFenceValue) {
+			_fsrGInputCompletionDependency =
+				render::temporal::GpuCompletionDependency{
+					.fence = std::move(completionFence),
+					.value = state.completionFenceValue
+				};
+		} else if (a_requireSubmittedDependency) {
+			L->error(
+				"FSR-G did not expose a submitted host-input completion "
+				"value after Present");
+			return false;
+		}
+		return true;
+	}
+
+	bool Streamline::ClearCurrentFrameGenerationTags() noexcept
+	{
+		return ClearCurrentFrameGenerationTagsChecked() ==
+		       sl::Result::eOk;
+	}
+
+	sl::Result Streamline::ClearCurrentFrameGenerationTagsChecked() noexcept
 	{
 		return !frameToken || _lastFrameToken == UINT32_MAX
 			? sl::Result::eOk
-			: ClearDLSSGFrameTagsChecked(_lastFrameToken);
+			: ClearFrameGenerationTagsChecked(_lastFrameToken);
 	}
 
 	std::uint32_t Streamline::ConsumeDLSSGPresentedFrameCount() noexcept
 	{
 		return _dlssGPresentedFrames.Consume();
+	}
+
+	std::optional<render::temporal::GpuCompletionDependency>
+	Streamline::ConsumeDLSSGInputCompletionDependency() noexcept
+	{
+		return std::exchange(_dlssGInputCompletionDependency, std::nullopt);
+	}
+
+	std::optional<render::temporal::GpuCompletionDependency>
+	Streamline::ConsumeFSRGInputCompletionDependency() noexcept
+	{
+		return std::exchange(
+			_fsrGInputCompletionDependency, std::nullopt);
 	}
 
 	render::temporal::ProviderResult
@@ -1146,7 +1555,7 @@ namespace cs::features
 			_dlssGResourcesConfigured,
 			viewport,
 			[&]() {
-				return ClearCurrentDLSSGFrameTagsChecked();
+				return ClearCurrentFrameGenerationTagsChecked();
 			},
 			slDLSSGSetOptions,
 			slFreeResources);
@@ -1166,6 +1575,7 @@ namespace cs::features
 			};
 		}
 		(void)_dlssGPresentedFrames.Consume();
+		_dlssGInputCompletionDependency.reset();
 		_dlssGStatus = sl::DLSSGStatus::eOk;
 		_dlssGResourcesConfigured = false;
 		return {
@@ -1174,17 +1584,198 @@ namespace cs::features
 		};
 	}
 
-	void Streamline::DestroyDLSSResources()
+	render::temporal::ProviderResult
+	Streamline::SetDLSSGPresentationActive(bool a_active) noexcept
 	{
-		cs::engine::WaitForGpuIdle(cs::engine::GetImmediateContext());
+		return SetPresentationFeatureActive(
+			sl::kFeatureDLSS_G, a_active, "DLSS-G");
+	}
 
-		if (!slDLSSSetOptions || !slFreeResources)
-			return;
+	render::temporal::ProviderResult
+	Streamline::DestroyFSRGResources() noexcept
+	{
+		if (!_fsrGResourcesConfigured) {
+			return {
+				.code =
+					render::temporal::ProviderResultCode::kSuccess
+			};
+		}
+		if (!slFSRGSetOptions || !slFSRGQuiesce || !slFreeResources) {
+			return {
+				.code =
+					render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(
+					sl::Result::eErrorMissingOrInvalidAPI),
+				.message =
+					"Streamline FSR-G cleanup exports are unavailable.",
+				.failureDomain =
+					render::temporal::FailureDomain::kStreamline
+			};
+		}
+		sl::FSRGOptions options{};
+		options.mode = sl::FSRGMode::eOff;
+		auto result = ClearCurrentFrameGenerationTagsChecked();
+		if (result == sl::Result::eOk) {
+			result = slFSRGSetOptions(viewport, options);
+		}
+		if (result == sl::Result::eOk) {
+			result = slFSRGQuiesce();
+		}
+		if (result == sl::Result::eOk) {
+			result = slFreeResources(sl::kFeatureFSR_G, viewport);
+		}
+		if (result != sl::Result::eOk) {
+			return {
+				.code =
+					render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(result),
+				.message =
+					"Streamline could not retire FSR-G resources.",
+				.failureDomain =
+					render::temporal::FailureDomain::kStreamline
+			};
+		}
+		_fsrGInputCompletionDependency.reset();
+		_fsrGResourcesConfigured = false;
+		return {
+			.code =
+				render::temporal::ProviderResultCode::kSuccess
+		};
+	}
+
+	render::temporal::ProviderResult
+	Streamline::SetFSRGPresentationActive(bool a_active) noexcept
+	{
+		return SetPresentationFeatureActive(
+			sl::kFeatureFSR_G, a_active, "FSR-G");
+	}
+
+	render::temporal::ProviderResult
+	Streamline::SetPresentationFeatureActive(
+		sl::Feature a_feature,
+		bool a_active,
+		const char* a_name) noexcept
+	{
+		if (!initialized || !slSetFeatureLoaded) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(
+					sl::Result::eErrorMissingOrInvalidAPI),
+				.message =
+					"Streamline presentation-hook control is unavailable.",
+				.failureDomain =
+					render::temporal::FailureDomain::kStreamline
+			};
+		}
+		const auto result =
+			slSetFeatureLoaded(a_feature, a_active);
+		if (result != sl::Result::eOk) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(result),
+				.message = std::string("Streamline could not ") +
+					(a_active ? "enable " : "disable ") + a_name +
+					" presentation hooks.",
+				.failureDomain =
+					render::temporal::FailureDomain::kStreamline
+			};
+		}
+		return {
+			.code = render::temporal::ProviderResultCode::kSuccess
+		};
+	}
+
+	render::temporal::ProviderResult
+	Streamline::DestroyDLSSResources() noexcept
+	{
+		if (!_dlssResourcesConfigured) {
+			return {
+				.code = render::temporal::ProviderResultCode::kSuccess
+			};
+		}
+		if (!slDLSSSetOptions || !slFreeResources) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(
+					sl::Result::eErrorMissingOrInvalidAPI),
+				.message = "Streamline DLSS cleanup exports are unavailable.",
+				.failureDomain = render::temporal::FailureDomain::kStreamline
+			};
+		}
 
 		sl::DLSSOptions dlssOptions{};
 		dlssOptions.mode = sl::DLSSMode::eOff;
 
-		slDLSSSetOptions(viewport, dlssOptions);
-		slFreeResources(sl::kFeatureDLSS, viewport);
+		const auto disable = slDLSSSetOptions(viewport, dlssOptions);
+		if (disable != sl::Result::eOk) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(disable),
+				.message = "Streamline could not disable DLSS.",
+				.failureDomain = render::temporal::FailureDomain::kStreamline
+			};
+		}
+		const auto release = slFreeResources(sl::kFeatureDLSS, viewport);
+		if (release != sl::Result::eOk) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(release),
+				.message = "Streamline could not release DLSS resources.",
+				.failureDomain = render::temporal::FailureDomain::kStreamline
+			};
+		}
+		_dlssResourcesConfigured = false;
+		_constantsFrame.reset();
+		return {
+			.code = render::temporal::ProviderResultCode::kSuccess
+		};
+	}
+
+	render::temporal::ProviderResult
+	Streamline::DestroyFSRResources() noexcept
+	{
+		if (!_fsrResourcesConfigured) {
+			return {
+				.code = render::temporal::ProviderResultCode::kSuccess
+			};
+		}
+		if (!slFSRSetOptions || !slFreeResources) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(
+					sl::Result::eErrorMissingOrInvalidAPI),
+				.message = "Streamline FSR cleanup exports are unavailable.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
+		}
+
+		sl::FSROptions options{};
+		options.mode = sl::FSRMode::eOff;
+		const auto disable = slFSRSetOptions(viewport, options);
+		if (disable != sl::Result::eOk) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(disable),
+				.message = "Streamline could not disable FSR.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
+		}
+		const auto release = slFreeResources(sl::kFeatureFSR, viewport);
+		if (release != sl::Result::eOk) {
+			return {
+				.code = render::temporal::ProviderResultCode::kFailure,
+				.sdkResult = static_cast<std::int64_t>(release),
+				.message = "Streamline could not release FSR resources.",
+				.failureDomain =
+					render::temporal::FailureDomain::kSuperResolution
+			};
+		}
+		_fsrResourcesConfigured = false;
+		_constantsFrame.reset();
+		return {
+			.code = render::temporal::ProviderResultCode::kSuccess
+		};
 	}
 }

@@ -20,7 +20,8 @@ namespace cs::features
 			const render::temporal::SuperResolutionSizeRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult Record(
 			const render::temporal::SuperResolutionRequest& a_request) override;
-		void DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		DestroyAfterDrain() noexcept override;
 
 	private:
 		FidelityFX& _runtime;
@@ -31,7 +32,14 @@ namespace cs::features
 		public render::temporal::ISuperResolutionProvider
 	{
 	public:
-		explicit StreamlineSuperResolution(Streamline& a_runtime) noexcept;
+		enum class Method : std::uint8_t
+		{
+			kDLSS,
+			kFSR3
+		};
+
+		StreamlineSuperResolution(
+			Streamline& a_runtime, Method a_method) noexcept;
 
 		[[nodiscard]] const char* Name() const noexcept override;
 		[[nodiscard]] render::temporal::ProviderResult Initialize(
@@ -40,10 +48,12 @@ namespace cs::features
 			const render::temporal::SuperResolutionSizeRequest& a_request) override;
 		[[nodiscard]] render::temporal::ProviderResult Record(
 			const render::temporal::SuperResolutionRequest& a_request) override;
-		void DestroyAfterDrain() noexcept override;
+		[[nodiscard]] render::temporal::ProviderResult
+		DestroyAfterDrain() noexcept override;
 
 	private:
 		Streamline& _runtime;
+		Method _method;
 		render::temporal::SuperResolutionSizeCache _sizeCache;
 	};
 }
