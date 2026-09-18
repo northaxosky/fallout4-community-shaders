@@ -91,8 +91,11 @@ local required_sdk_assets = {
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.pcl.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.reflex.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/amd_fidelityfx_framegeneration_dx12.dll",
-    "features/Upscaling/Shaders/Upscaling/Streamline/amd_fidelityfx_loader_dx12.dll",
     "features/Upscaling/Shaders/Upscaling/Streamline/amd_fidelityfx_upscaler_dx12.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/cs_fidelityfx_framegeneration_dx12.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/cs_fidelityfx_upscaler_dx12.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/D3D12/D3D12Core.dll",
+    "features/Upscaling/Shaders/Upscaling/Streamline/D3D12/LICENSE.txt",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.project-manifest.bin",
     "features/Upscaling/Shaders/Upscaling/Streamline/sl.project-manifest.sig",
     "features/Upscaling/Shaders/Upscaling/Streamline/license.txt",
@@ -442,10 +445,12 @@ target("FrameGenerationContractTests", function()
     add_headerfiles(
         "src/Render/FrameGenerationCpuTiming.h",
         "src/Render/FrameGenerationOrchestration.h",
-        "features/FrameGeneration/src/StreamlineFrameGenerationContract.h"
+        "features/FrameGeneration/src/StreamlineFrameGenerationContract.h",
+        "features/Upscaling/src/StreamlineFidelityFXContract.h"
     )
     add_includedirs(
         "features/FrameGeneration/src",
+        "features/Upscaling/src",
         "extern",
         "extern/Streamline/include"
     )
@@ -465,10 +470,18 @@ end)
 target("FrameGenerationRetirementGpuTests", function()
     set_kind("binary")
     set_default(false)
-    add_files("tests/FrameGenerationRetirementGpuTests.cpp")
-    add_includedirs(generated_include, "extern")
+    add_files(
+        "tests/FrameGenerationRetirementGpuTests.cpp",
+        "features/Upscaling/src/AgilityBootstrap.cpp"
+    )
+    add_headerfiles("features/Upscaling/src/AgilityBootstrap.h")
+    add_includedirs(
+        generated_include,
+        "extern",
+        "features/Upscaling/src"
+    )
     add_packages("vcpkg::directx-headers")
-    add_syslinks("d3d11", "d3d12", "dxgi", "ole32")
+    add_syslinks("d3d11", "d3d12", "dxgi", "ole32", "version")
 end)
 
 target("FrustumEmbedTests", function()
@@ -734,6 +747,15 @@ end)
 
 target("FrameGenerationRetirementGpuTests", function()
     add_tests("FrameGenerationRetirementGpu")
+    add_tests("AgilityBootstrapGpu", {
+        runargs = {
+            "--agility",
+            path.join(
+                os.projectdir(),
+                "features/Upscaling/Shaders/Upscaling/Streamline/D3D12"
+            )
+        }
+    })
 end)
 
 target("FrustumEmbedTests", function()

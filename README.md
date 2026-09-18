@@ -53,8 +53,8 @@ Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-
 | **Wetness Effects** | Rain-darkened surfaces and wet reflections. |
 | **Water Effects** | Sunlight caustics on submerged surfaces. |
 | **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
-| **Upscaling** | TAA, FSR 3, and DLSS. |
-| **Frame Generation** | FSR 3 and DLSS frame generation. |
+| **Upscaling** | TAA, FSR 3/4, and DLSS. |
+| **Frame Generation** | FSR 3/4, DLSS, and supported Multi Frame Generation modes. |
 | **Performance Overlay** | FPS, frame-time, and latency graphs. |
 | **RenderDoc** | In-game frame capture for debugging. |
 
@@ -106,6 +106,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deploym
 
 - ENB and HDR are unsupported.
 - Upscaling requires a DX12-capable GPU. DLSS requires compatible NVIDIA RTX hardware.
+- FSR 4 requires compatible AMD Radeon hardware.
 - Frame generation requires borderless windowed mode.
 - Supported upscaling and frame-generation methods can change while playing; switching may briefly pause rendering.
 - Terrain Shadows requires an xLODGen terrain heightmap export.

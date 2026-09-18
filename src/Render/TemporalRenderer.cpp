@@ -27,6 +27,8 @@ namespace cs::render
 			return UpscaleMethod::kFSR;
 		case render::temporal::SuperResolutionMethod::kDLSS:
 			return UpscaleMethod::kDLSS;
+		case render::temporal::SuperResolutionMethod::kFSR4:
+			return UpscaleMethod::kFSR4;
 		case render::temporal::SuperResolutionMethod::kCount:
 			break;
 		}

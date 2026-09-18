@@ -109,6 +109,7 @@ namespace cs::render
 		bool generatedFrameCountAvailable = false;
 		std::uint64_t providerPresentedFrames = 0;
 		bool providerPresentedFrameCountAvailable = false;
+		temporal::FrameGenerationCapabilities capabilities;
 		std::uint64_t failures = 0;
 		bool cameraValid = false;
 		std::int64_t cameraFrameDelta = 0;
@@ -201,6 +202,8 @@ namespace cs::render
 		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;
 		[[nodiscard]] FrameGenerationDiagnostics
 		GetFrameGenerationDiagnostics() const noexcept;
+		[[nodiscard]] temporal::FidelityFXCapabilities
+		GetFidelityFXCapabilities() const noexcept;
 		[[nodiscard]] FrameGenerationCaptureResources
 		GetFrameGenerationCaptureResources() const noexcept;
 		[[nodiscard]] bool AcquireFrameGenerationInputWrite() noexcept;

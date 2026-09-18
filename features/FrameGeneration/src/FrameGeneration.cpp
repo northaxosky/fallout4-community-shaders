@@ -1,8 +1,12 @@
 #include "FrameGeneration.h"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
+#include <limits>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <DearModdingUI/Client.h>
 
@@ -49,6 +53,8 @@ namespace cs::features
 				return "FSR 3";
 			case FrameGeneration::Method::kDLSSG:
 				return "DLSS-G";
+			case FrameGeneration::Method::kFSR4:
+				return "FSR 4 MLFG";
 			}
 			return "Unknown";
 		}
@@ -202,6 +208,9 @@ namespace cs::features
 			}
 			std::uint64_t method = candidate.frameGenerationMethod;
 			std::uint64_t force = candidate.frameGenerationForceEnable;
+			std::uint64_t dlssgMode = candidate.dlssgMode;
+			std::uint64_t dlssgFixedMultiplier =
+				candidate.dlssgFixedMultiplier;
 			if (!Accept(feature_config::ReadBool(*table, "enabled", candidate.enabled),
 					"enabled", "boolean", a_error) ||
 				!Accept(feature_config::ReadUnsignedInteger(
@@ -215,6 +224,19 @@ namespace cs::features
 							"frame_generation_allow_in_menus",
 							candidate.frameGenerationAllowInMenus),
 					"frame_generation_allow_in_menus", "boolean", a_error) ||
+				!Accept(feature_config::ReadUnsignedInteger(
+							*table, "dlssg_mode", dlssgMode, 0, 1),
+					"dlssg_mode", "integer", a_error) ||
+				!Accept(feature_config::ReadUnsignedInteger(
+							*table, "dlssg_fixed_multiplier",
+							dlssgFixedMultiplier, 2,
+							std::numeric_limits<std::uint32_t>::max()),
+					"dlssg_fixed_multiplier", "integer", a_error) ||
+				!Accept(feature_config::ReadFloat(*table,
+							"dlssg_dynamic_target_fps",
+							candidate.dlssgDynamicTargetFps, 0.0f,
+							std::numeric_limits<float>::max()),
+					"dlssg_dynamic_target_fps", "number", a_error) ||
 				!Accept(feature_config::ReadBool(*table, "detailed_diagnostics",
 							candidate.detailedDiagnostics),
 					"detailed_diagnostics", "boolean", a_error)) {
@@ -222,6 +244,9 @@ namespace cs::features
 			}
 			candidate.frameGenerationMethod = static_cast<std::uint32_t>(method);
 			candidate.frameGenerationForceEnable = static_cast<std::uint32_t>(force);
+			candidate.dlssgMode = static_cast<std::uint32_t>(dlssgMode);
+			candidate.dlssgFixedMultiplier =
+				static_cast<std::uint32_t>(dlssgFixedMultiplier);
 		}
 
 		settings = candidate;
@@ -247,6 +272,12 @@ namespace cs::features
 			static_cast<std::int64_t>(settings.frameGenerationForceEnable));
 		table.insert_or_assign("frame_generation_allow_in_menus",
 			settings.frameGenerationAllowInMenus);
+		table.insert_or_assign(
+			"dlssg_mode", static_cast<std::int64_t>(settings.dlssgMode));
+		table.insert_or_assign("dlssg_fixed_multiplier",
+			static_cast<std::int64_t>(settings.dlssgFixedMultiplier));
+		table.insert_or_assign(
+			"dlssg_dynamic_target_fps", settings.dlssgDynamicTargetFps);
 		table.insert_or_assign("detailed_diagnostics", settings.detailedDiagnostics);
 		if (const auto result =
 				feature_config::UpdateFeatureSettings(GetConfigKey(), table);
@@ -276,16 +307,32 @@ namespace cs::features
 
 	void FrameGeneration::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
-		const auto status = render::TemporalPipeline::Get().GetStatus();
+		auto& pipeline = render::TemporalPipeline::Get();
+		const auto status = pipeline.GetStatus();
 		const auto diagnostics =
-			render::TemporalPipeline::Get().GetFrameGenerationDiagnostics();
+			pipeline.GetFrameGenerationDiagnostics();
+		const auto fidelityFxCapabilities =
+			pipeline.GetFidelityFXCapabilities();
 		a_sink.Field("requested_enabled", settings.enabled)
 			.Field("requested_method", settings.frameGenerationMethod)
 			.Field("requested_method_name",
 				MethodName(settings.frameGenerationMethod))
+			.Field("requested_dlssg_mode", settings.dlssgMode)
+			.Field("requested_dlssg_fixed_multiplier",
+				settings.dlssgFixedMultiplier)
+			.Field("requested_dlssg_dynamic_target_fps",
+				settings.dlssgDynamicTargetFps)
 			.Field("effective_enabled", status.effective.frameGenerationEnabled)
 			.Field("effective_method",
 				static_cast<std::uint8_t>(status.effective.frameGeneration))
+			.Field("effective_dlssg_mode",
+				static_cast<std::uint8_t>(
+					status.effective.frameGenerationConfiguration.mode))
+			.Field("effective_dlssg_fixed_multiplier",
+				status.effective.frameGenerationConfiguration.fixedMultiplier)
+			.Field("effective_dlssg_dynamic_target_fps",
+				status.effective.frameGenerationConfiguration
+					.dynamicTargetFrameRate)
 			.Field("provider_transport",
 				std::string_view{ "streamline_d3d12" })
 			.Field("proxy_installed", status.session.proxyInstalled)
@@ -309,6 +356,107 @@ namespace cs::features
 				diagnostics.providerPresentedFrames)
 			.Field("provider_presented_frame_count_available",
 				diagnostics.providerPresentedFrameCountAvailable)
+			.Field("dlssg_capability_availability",
+				static_cast<std::uint8_t>(
+					diagnostics.capabilities.availability))
+			.Field("dlssg_capability_current",
+				diagnostics.capabilities.IsCurrent())
+			.Field("dlssg_capability_query_failed",
+				diagnostics.capabilities.configurationQueryFailed)
+			.Field("dlssg_max_generated_frames",
+				diagnostics.capabilities.maxGeneratedFrames)
+			.Field("dlssg_max_multiplier",
+				diagnostics.capabilities.maxGeneratedFrames
+					? diagnostics.capabilities.maxGeneratedFrames + 1
+					: 0)
+			.Field("dlssg_dynamic_supported",
+				diagnostics.capabilities.dynamicModeSupported)
+			.Field("dlssg_vsync_support_available",
+				diagnostics.capabilities.vsyncSupportAvailable)
+			.Field("dlssg_vsync_enabled",
+				diagnostics.capabilities.vsyncEnabled)
+			.Field("dlssg_hardware_scheduling_required",
+				diagnostics.capabilities.hardwareSchedulingRequired)
+			.Field("dlssg_detected_driver_major",
+				diagnostics.capabilities.detectedDriverMajor)
+			.Field("dlssg_detected_driver_minor",
+				diagnostics.capabilities.detectedDriverMinor)
+			.Field("dlssg_detected_driver_build",
+				diagnostics.capabilities.detectedDriverBuild)
+			.Field("dlssg_required_driver_major",
+				diagnostics.capabilities.requiredDriverMajor)
+			.Field("dlssg_required_driver_minor",
+				diagnostics.capabilities.requiredDriverMinor)
+			.Field("dlssg_required_driver_build",
+				diagnostics.capabilities.requiredDriverBuild)
+			.Field("dlssg_custom_dynamic_target_ignored_by_vsync",
+				status.effective.frameGenerationConfiguration.mode ==
+						render::temporal::FrameGenerationMode::kDynamic &&
+					status.effective.frameGenerationConfiguration
+							.dynamicTargetFrameRate > 0.0f &&
+					diagnostics.capabilities.vsyncEnabled)
+			.Field("fsr4_mlfg_capability",
+				static_cast<std::uint8_t>(
+					fidelityFxCapabilities.fsr4FrameGeneration
+						.availability))
+			.Field("fsr4_mlfg_unavailable_reason",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.unavailableReason)
+			.Field("fsr4_mlfg_provider_version_major",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.versionMajor)
+			.Field("fsr4_mlfg_provider_version_minor",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.versionMinor)
+			.Field("fsr4_mlfg_provider_version_patch",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.versionPatch)
+			.Field("fsr4_mlfg_swapchain_version_major",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.transportVersionMajor)
+			.Field("fsr4_mlfg_swapchain_version_minor",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.transportVersionMinor)
+			.Field("fsr4_mlfg_swapchain_version_patch",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.transportVersionPatch)
+			.Field("fsr4_mlfg_windows_11_or_greater",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.windows11OrGreater)
+			.Field("fsr4_mlfg_shader_model_major",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.shaderModelMajor)
+			.Field("fsr4_mlfg_shader_model_minor",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.shaderModelMinor)
+			.Field("fsr4_mlfg_d3d12_runtime_source",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.d3d12RuntimeSource)
+			.Field("fsr4_mlfg_d3d12_core_version_major",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.d3d12CoreVersionMajor)
+			.Field("fsr4_mlfg_d3d12_core_version_minor",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.d3d12CoreVersionMinor)
+			.Field("fsr4_mlfg_d3d12_core_version_patch",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.d3d12CoreVersionPatch)
+			.Field("fsr4_mlfg_d3d12_core_version_revision",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.d3d12CoreVersionRevision)
+			.Field("fsr4_mlfg_requested_d3d12_sdk_version",
+				fidelityFxCapabilities.fsr4FrameGeneration
+					.requestedD3D12SDKVersion)
+			.Field("dlssg_provider_status",
+				diagnostics.capabilities.providerStatus)
+			.Field("dlssg_device_generation",
+				diagnostics.capabilities.deviceGeneration)
+			.Field("dlssg_display_generation",
+				diagnostics.capabilities.displayGeneration)
+			.Field("dlssg_sampled_device_generation",
+				diagnostics.capabilities.sampledDeviceGeneration)
+			.Field("dlssg_sampled_display_generation",
+				diagnostics.capabilities.sampledDisplayGeneration)
 			.Field("failures", diagnostics.failures)
 			.Field("camera_valid", diagnostics.cameraValid)
 			.Field("camera_frame_delta", diagnostics.cameraFrameDelta)
@@ -421,7 +569,9 @@ namespace cs::features
 		static const std::array methods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "DLSS-G", "dlss-g" }
+			dmui::ChoiceOption<std::uint32_t>{ 2, "DLSS-G", "dlss-g" },
+			dmui::ChoiceOption<std::uint32_t>{
+				3, "FSR 4 MLFG", "fsr-4-mlfg" }
 		};
 		const auto method = dmui::DrawChoice<std::uint32_t>(
 			"frame-generation-provider", settings.frameGenerationMethod,
@@ -433,6 +583,153 @@ namespace cs::features
 		}
 		dmui::ui::TextDisabled(
 			"Provider changes take effect at the next frame boundary.");
+		if (settings.frameGenerationMethod ==
+			static_cast<std::uint32_t>(Method::kDLSSG)) {
+			static const std::array dlssgModes{
+				dmui::ChoiceOption<std::uint32_t>{
+					0, "Fixed multiplier", "fixed" },
+				dmui::ChoiceOption<std::uint32_t>{
+					1, "Dynamic", "dynamic" }
+			};
+			const auto mode = dmui::DrawChoice<std::uint32_t>(
+				"dlssg-generation-mode", settings.dlssgMode,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{
+					dlssgModes },
+				"Unavailable", "DLSS-G mode");
+			if (mode.changed) {
+				settings.dlssgMode = *mode.selected;
+				changed = true;
+			}
+
+			const auto diagnostics =
+				render::TemporalPipeline::Get()
+					.GetFrameGenerationDiagnostics();
+			const auto& capabilities = diagnostics.capabilities;
+			if (settings.dlssgMode == 0) {
+				if (capabilities.availability ==
+						render::temporal::CapabilityAvailability::kSupported &&
+					capabilities.IsCurrent() &&
+					capabilities.maxGeneratedFrames > 0) {
+					std::vector<dmui::ChoiceOption<std::uint32_t>>
+						multipliers;
+					const auto maxGeneratedFrames = std::min(
+						capabilities.maxGeneratedFrames,
+						std::numeric_limits<std::uint32_t>::max() -
+							1);
+					multipliers.reserve(
+						maxGeneratedFrames);
+					for (std::uint32_t generated = 1;
+						 generated <= maxGeneratedFrames;
+						 ++generated) {
+						const auto multiplier = generated + 1;
+						multipliers.push_back(
+							{ multiplier,
+								std::to_string(multiplier) + "x",
+								std::to_string(multiplier) + "x" });
+					}
+					const auto multiplier =
+						dmui::DrawChoice<std::uint32_t>(
+							"dlssg-fixed-multiplier",
+							settings.dlssgFixedMultiplier,
+							std::span<const
+								dmui::ChoiceOption<std::uint32_t>>{
+								multipliers },
+							"Unavailable", "Multiplier");
+					if (multiplier.changed) {
+						settings.dlssgFixedMultiplier =
+							*multiplier.selected;
+						changed = true;
+					}
+				} else {
+					dmui::ui::TextDisabled(
+						"Fixed multiplier choices are unavailable until "
+						"the runtime reports current device/display "
+						"capabilities.");
+				}
+			} else {
+				float target = settings.dlssgDynamicTargetFps;
+				if (dmui::ui::InputScalar(
+						"Dynamic target FPS (0 = auto)", &target)) {
+					if (std::isfinite(target) && target >= 0.0f) {
+						settings.dlssgDynamicTargetFps = target;
+						changed = true;
+					}
+				}
+				if (capabilities.availability ==
+					render::temporal::CapabilityAvailability::kUnsupported) {
+					dmui::ui::TextDisabled(
+						"DLSS-G is unavailable on the current runtime "
+						"configuration.");
+				} else if (!capabilities.IsCurrent()) {
+					dmui::ui::TextDisabled(capabilities
+							.configurationQueryFailed
+						? "The current present-thread DLSS-G capability "
+						  "query failed."
+						: "Dynamic MFG capability is pending a current "
+						  "present-thread runtime query.");
+				} else if (!capabilities.dynamicModeSupported) {
+					dmui::ui::TextDisabled(
+						"Dynamic MFG is not supported by the current "
+						"runtime and device.");
+				} else if (
+					settings.dlssgDynamicTargetFps > 0.0f &&
+					capabilities.vsyncEnabled) {
+					dmui::ui::TextDisabled(
+						"VSync is enabled; the custom dynamic target is "
+						"ignored by DLSS-G.");
+				}
+			}
+			dmui::ui::TextDisabled(
+				"Runtime capability queries are authoritative. MFG "
+				"has an SDK baseline of NVIDIA driver 595.41 on Windows "
+				"10 with hardware-accelerated GPU scheduling; reported "
+				"runtime requirements take precedence.");
+		} else if (settings.frameGenerationMethod ==
+			static_cast<std::uint32_t>(Method::kFSR4)) {
+			const auto capabilities =
+				render::TemporalPipeline::Get()
+					.GetFidelityFXCapabilities();
+			if (capabilities.fsr4FrameGeneration.availability ==
+				render::temporal::CapabilityAvailability::kUnknown) {
+				dmui::ui::TextDisabled(
+					"FSR 4 ML frame-generation capability is not known "
+					"for the current device; the previous effective "
+					"provider remains active.");
+			} else if (!capabilities.fsr4FrameGeneration.IsAvailable()) {
+				dmui::ui::TextDisabled(
+					"FSR 4 ML frame generation is unavailable "
+					"(runtime reason %u); the previous effective "
+					"provider remains active.",
+					capabilities.fsr4FrameGeneration
+						.unavailableReason);
+			} else {
+				dmui::ui::TextDisabled(
+					"FSR 4 ML frame generation is available. "
+					"Runtime hardware support remains authoritative.");
+			}
+			if (capabilities.fsr4FrameGeneration.availability !=
+				render::temporal::CapabilityAvailability::kUnknown) {
+				const auto& runtime =
+					capabilities.fsr4FrameGeneration;
+				const auto runtimeSource =
+					render::temporal::
+						FidelityFXD3D12RuntimeSourceName(
+							runtime.d3d12RuntimeSource);
+				dmui::ui::TextDisabled(
+					"Runtime proof: Windows 11 %s | SM %u.%u | D3D12 %.*s "
+					"%u.%u.%u.%u | EXE SDK request %u",
+					runtime.windows11OrGreater ? "yes" : "no",
+					runtime.shaderModelMajor,
+					runtime.shaderModelMinor,
+					static_cast<int>(runtimeSource.size()),
+					runtimeSource.data(),
+					runtime.d3d12CoreVersionMajor,
+					runtime.d3d12CoreVersionMinor,
+					runtime.d3d12CoreVersionPatch,
+					runtime.d3d12CoreVersionRevision,
+					runtime.requestedD3D12SDKVersion);
+			}
+		}
 		bool force = settings.frameGenerationForceEnable != 0;
 		if (dmui::ui::Checkbox("Force below 120 Hz", &force)) {
 			settings.frameGenerationForceEnable = force ? 1u : 0u;

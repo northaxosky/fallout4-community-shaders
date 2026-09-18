@@ -29,6 +29,8 @@ namespace cs::features
 				return "FSR 3";
 			case Upscaling::UpscaleMethod::kDLSS:
 				return "DLSS";
+			case Upscaling::UpscaleMethod::kFSR4:
+				return "FSR 4";
 			case Upscaling::UpscaleMethod::kCount:
 				break;
 			}
@@ -47,6 +49,8 @@ namespace cs::features
 				return "FSR 3";
 			case render::temporal::SuperResolutionMethod::kDLSS:
 				return "DLSS";
+			case render::temporal::SuperResolutionMethod::kFSR4:
+				return "FSR 4";
 			case render::temporal::SuperResolutionMethod::kCount:
 				break;
 			}
@@ -207,7 +211,8 @@ namespace cs::features
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "TAA", "taa" },
 			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 3, "DLSS", "dlss" }
+			dmui::ChoiceOption<std::uint32_t>{ 3, "DLSS", "dlss" },
+			dmui::ChoiceOption<std::uint32_t>{ 4, "FSR 4", "fsr-4" }
 		};
 		const auto method = dmui::DrawChoice<std::uint32_t>(
 			"upscaling-super-resolution-method",
@@ -226,7 +231,8 @@ namespace cs::features
 		static const std::array fallbackMethods{
 			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
 			dmui::ChoiceOption<std::uint32_t>{ 1, "TAA", "taa" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" }
+			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" },
+			dmui::ChoiceOption<std::uint32_t>{ 4, "FSR 4", "fsr-4" }
 		};
 		const auto fallbackMethod = dmui::DrawChoice<std::uint32_t>(
 			"upscaling-fallback-without-dlss",
@@ -350,6 +356,46 @@ namespace cs::features
 			dmui::ui::TextDisabled(
 				"FSR was not admitted for this startup; the effective native method remains active.");
 		}
+		if (settings.enabled &&
+			settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kFSR4)) {
+			const auto capabilities =
+				pipeline.GetFidelityFXCapabilities();
+			if (capabilities.fsr4SuperResolution.availability ==
+				render::temporal::CapabilityAvailability::kUnknown) {
+				dmui::ui::TextDisabled(
+					"FSR 4 capability is not known for the current device; "
+					"the previous effective method remains active.");
+			} else if (!capabilities.fsr4SuperResolution.IsAvailable()) {
+				dmui::ui::TextDisabled(
+					"FSR 4 is unavailable (runtime reason %u); the "
+					"previous effective method remains active.",
+					capabilities.fsr4SuperResolution
+						.unavailableReason);
+			}
+			if (capabilities.fsr4SuperResolution.availability !=
+				render::temporal::CapabilityAvailability::kUnknown) {
+				const auto& runtime =
+					capabilities.fsr4SuperResolution;
+				const auto runtimeSource =
+					render::temporal::
+						FidelityFXD3D12RuntimeSourceName(
+							runtime.d3d12RuntimeSource);
+				dmui::ui::TextDisabled(
+					"Runtime proof: Windows 11 %s | SM %u.%u | D3D12 %.*s "
+					"%u.%u.%u.%u | EXE SDK request %u",
+					runtime.windows11OrGreater ? "yes" : "no",
+					runtime.shaderModelMajor,
+					runtime.shaderModelMinor,
+					static_cast<int>(runtimeSource.size()),
+					runtimeSource.data(),
+					runtime.d3d12CoreVersionMajor,
+					runtime.d3d12CoreVersionMinor,
+					runtime.d3d12CoreVersionPatch,
+					runtime.d3d12CoreVersionRevision,
+					runtime.requestedD3D12SDKVersion);
+			}
+		}
 		if (status.pending.required)
 			dmui::ui::TextDisabled("Restart required: %s", status.pending.reason.c_str());
 		if (!status.failure.empty())
@@ -368,6 +414,48 @@ namespace cs::features
 	void Upscaling::CollectTelemetry(cs::telemetry::Sink& a_sink) const
 	{
 		render::TemporalPipeline::Get().Renderer().CollectTelemetry(a_sink);
+		const auto capabilities =
+			render::TemporalPipeline::Get()
+				.GetFidelityFXCapabilities();
+		a_sink
+			.Field("fsr4_capability",
+				static_cast<std::uint8_t>(
+					capabilities.fsr4SuperResolution
+						.availability))
+			.Field("fsr4_unavailable_reason",
+				capabilities.fsr4SuperResolution
+					.unavailableReason)
+			.Field("fsr4_provider_version_major",
+				capabilities.fsr4SuperResolution.versionMajor)
+			.Field("fsr4_provider_version_minor",
+				capabilities.fsr4SuperResolution.versionMinor)
+			.Field("fsr4_provider_version_patch",
+				capabilities.fsr4SuperResolution.versionPatch)
+			.Field("fsr4_windows_11_or_greater",
+				capabilities.fsr4SuperResolution
+					.windows11OrGreater)
+			.Field("fsr4_shader_model_major",
+				capabilities.fsr4SuperResolution.shaderModelMajor)
+			.Field("fsr4_shader_model_minor",
+				capabilities.fsr4SuperResolution.shaderModelMinor)
+			.Field("fsr4_d3d12_runtime_source",
+				capabilities.fsr4SuperResolution
+					.d3d12RuntimeSource)
+			.Field("fsr4_d3d12_core_version_major",
+				capabilities.fsr4SuperResolution
+					.d3d12CoreVersionMajor)
+			.Field("fsr4_d3d12_core_version_minor",
+				capabilities.fsr4SuperResolution
+					.d3d12CoreVersionMinor)
+			.Field("fsr4_d3d12_core_version_patch",
+				capabilities.fsr4SuperResolution
+					.d3d12CoreVersionPatch)
+			.Field("fsr4_d3d12_core_version_revision",
+				capabilities.fsr4SuperResolution
+					.d3d12CoreVersionRevision)
+			.Field("fsr4_requested_d3d12_sdk_version",
+				capabilities.fsr4SuperResolution
+					.requestedD3D12SDKVersion);
 	}
 	std::span<const FeatureDebugView> Upscaling::GetDebugViews() const noexcept
 	{

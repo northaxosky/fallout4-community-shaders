@@ -1,12 +1,15 @@
 #include "DX12SwapChain.h"
 #include "DXGISwapChainFacadeContract.h"
 
+#include "AgilityBootstrap.h"
+
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstring>
 #include <exception>
 #include <format>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -375,6 +378,7 @@ namespace cs::features
 		_rcas.ResetD3D12();
 		_queue = nullptr;
 		_device12 = nullptr;
+		_deviceFactory = nullptr;
 		_adapter = nullptr;
 		_outwardDevice11 = nullptr;
 		_context11 = nullptr;
@@ -451,10 +455,43 @@ namespace cs::features
 			DX::ThrowIfFailed(dxgiDevice->GetAdapter(actualAdapter.put()));
 		}
 		_adapter = actualAdapter;
-		DX::ThrowIfFailed(D3D12CreateDevice(actualAdapter.get(),
-			D3D_FEATURE_LEVEL_12_0,
-			IID_PPV_ARGS(_device12.put())));
+		AgilityBootstrapDiagnostics agilityDiagnostics;
+		DX::ThrowIfFailed(CreatePrivateD3D12Device(
+			actualAdapter.get(),
+			std::filesystem::path(Streamline::PluginDir) / L"D3D12",
+			_deviceFactory, _device12.put(), &agilityDiagnostics));
+		if (agilityDiagnostics.UsedSdkFactory()) {
+			const auto& version = agilityDiagnostics.loadedVersion;
+			L->info(
+				"Created the private D3D12 device through SDK factory {} "
+				"at {}; the factory selected {} core {} version "
+				"{}.{}.{}.{}",
+				kPrivateD3D12SdkVersion,
+				agilityDiagnostics.sdkDirectory.string(),
+				agilityDiagnostics.LoadedPackagedCore()
+					? "packaged"
+					: "system/other",
+				agilityDiagnostics.loadedD3D12Core.string(),
+				version.major, version.minor, version.patch,
+				version.revision);
+		} else {
+			const auto level = agilityDiagnostics.status ==
+					AgilityBootstrapStatus::kRuntimeMissing
+				? spdlog::level::info
+				: spdlog::level::warn;
+			L->log(
+				level,
+				"Agility SDK factory {} was not activated "
+				"(status={}, activation={:#010x}); using the system "
+				"D3D12 runtime",
+				kPrivateD3D12SdkVersion,
+				AgilityBootstrapStatusName(
+					agilityDiagnostics.status),
+				static_cast<std::uint32_t>(
+					agilityDiagnostics.activationResult));
+		}
 		if (_streamline && _streamline->initialized) {
+			_streamline->NotifyD3D12DeviceChange();
 			auto rawDevice = _device12;
 			ID3D12Device* preparedDevice = _device12.detach();
 			const bool prepared =
@@ -768,6 +805,10 @@ namespace cs::features
 		}
 		_proxyBuffer = std::move(proxy);
 		_hudlessBuffers = std::move(hudless);
+		if (_streamline) {
+			_streamline->NotifyDLSSGDisplayChange(
+				a_width, a_height);
+		}
 		return S_OK;
 	}
 
@@ -1748,6 +1789,12 @@ namespace cs::features
 			const HRESULT result = InvokeInnerPresent(a_syncInterval, a_flags,
 				a_parameters, a_usePresent1);
 			pipeline.EndPresentAttempt(a_flags, result);
+			if (_streamline &&
+				render::temporal::ShouldObservePresentStatus(
+					a_flags, result)) {
+				_streamline->ObserveDLSSGPresent(
+					a_syncInterval);
+			}
 			return result;
 		}
 
@@ -1816,6 +1863,22 @@ namespace cs::features
 			bool requested = frameGenerationRequested &&
 				_frameGenerationInputsReady && !_frameGenerationDisabled &&
 				request.enabled;
+			if (_provider && requested) {
+				const auto validation =
+					_provider->ValidateConfiguration(
+						request.configuration);
+				if (validation.code ==
+					render::temporal::ProviderResultCode::kSkipped) {
+					requested = false;
+					_vendorConsumptionPossible = false;
+				} else if (!validation.Succeeded()) {
+					requested = false;
+					_vendorConsumptionPossible = false;
+					DisableFrameGeneration(
+						"Frame-generation option validation",
+						validation);
+				}
+			}
 			_preparedRealFrame = request.realFrame;
 			_vendorConsumptionPossible = requested;
 			_preparedTransaction =
@@ -1921,6 +1984,11 @@ namespace cs::features
 				a_usePresent1);
 		}();
 		pipeline.EndPresentAttempt(a_flags, presentResult);
+		if (_streamline &&
+			render::temporal::ShouldObservePresentStatus(
+				a_flags, presentResult)) {
+			_streamline->ObserveDLSSGPresent(a_syncInterval);
+		}
 		render::temporal::PresentStatusCollection status;
 		if (_provider &&
 			(_vendorConsumptionPossible || _providerGenerationEnabled) &&
@@ -2407,6 +2475,10 @@ namespace cs::features
 			resizedDesc, _proxyDesc, _innerDesc, _allocatorFenceValues,
 			_inputReuseGate, _frameSlot, _presentPrepared, _preparedFrameGeneration,
 			_vendorConsumptionPossible, _preparedTransaction);
+		if (_streamline) {
+			_streamline->NotifyDLSSGDisplayChange(
+				_innerDesc.Width, _innerDesc.Height);
+		}
 		_creationDesc.BufferDesc.Width = _innerDesc.Width;
 		_creationDesc.BufferDesc.Height = _innerDesc.Height;
 		_creationDesc.BufferDesc.Format = _proxyDesc.BufferDesc.Format;

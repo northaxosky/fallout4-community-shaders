@@ -65,6 +65,8 @@ namespace cs::render::renderer_detail
 				return "FSR 3";
 			case TemporalRenderer::UpscaleMethod::kDLSS:
 				return "DLSS";
+			case TemporalRenderer::UpscaleMethod::kFSR4:
+				return "FSR 4";
 			}
 			return "Unknown";
 		}
@@ -79,6 +81,8 @@ namespace cs::render::renderer_detail
 				return render::temporal::SuperResolutionMethod::kFSR3;
 			case TemporalRenderer::UpscaleMethod::kDLSS:
 				return render::temporal::SuperResolutionMethod::kDLSS;
+			case TemporalRenderer::UpscaleMethod::kFSR4:
+				return render::temporal::SuperResolutionMethod::kFSR4;
 			default:
 				return render::temporal::SuperResolutionMethod::kNone;
 			}

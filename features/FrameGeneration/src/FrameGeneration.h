@@ -15,7 +15,8 @@ namespace cs::features
 		{
 			kOff,
 			kFSR3,
-			kDLSSG
+			kDLSSG,
+			kFSR4
 		};
 
 		struct Settings
@@ -25,6 +26,9 @@ namespace cs::features
 				static_cast<std::uint32_t>(Method::kFSR3);
 			std::uint32_t frameGenerationForceEnable = 0;
 			bool frameGenerationAllowInMenus = false;
+			std::uint32_t dlssgMode = 0;
+			std::uint32_t dlssgFixedMultiplier = 2;
+			float dlssgDynamicTargetFps = 0.0f;
 			bool detailedDiagnostics = false;
 		};
 

@@ -12,7 +12,8 @@ namespace cs::features
 		enum class Method
 		{
 			kDLSSG,
-			kFSRG
+			kFSRG,
+			kFSR4
 		};
 
 		StreamlinePresentation(
@@ -40,6 +41,12 @@ namespace cs::features
 		SetGenerationEnabled(bool a_enabled) override;
 		[[nodiscard]] render::temporal::ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) override;
+		[[nodiscard]] render::temporal::ProviderResult
+		ValidateConfiguration(
+			const render::temporal::FrameGenerationConfiguration&
+				a_configuration) const override;
+		[[nodiscard]] render::temporal::FrameGenerationCapabilities
+		GetCapabilities() const noexcept override;
 		[[nodiscard]] std::optional<std::uint32_t>
 		ConsumeGeneratedFrameCount() noexcept override;
 		[[nodiscard]] std::optional<std::uint32_t>
@@ -68,6 +75,7 @@ namespace cs::features
 		bool _enabled = false;
 		bool _ready = false;
 		bool _presentationActive = false;
+		render::temporal::FrameGenerationConfiguration _configuration;
 	};
 
 }  // namespace cs::features

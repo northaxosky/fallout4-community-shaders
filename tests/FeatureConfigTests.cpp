@@ -566,8 +566,8 @@ namespace
 			"float_out_of_range = 0.04\n"
 			"double_value = 2.5\n"
 			"integer_double = 4\n"
-			"removed_sr_method = 4\n"
-			"removed_fg_method = 3\n"
+			"removed_sr_method = 5\n"
+			"removed_fg_method = 4\n"
 			"text = \"value\"\n");
 
 		bool boolean = false;

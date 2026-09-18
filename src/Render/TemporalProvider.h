@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <variant>
 
 #include <d3d11.h>
@@ -324,6 +325,105 @@ namespace cs::render::temporal
 		kPresentEnd
 	};
 
+	enum class FrameGenerationMode : std::uint8_t
+	{
+		kFixed,
+		kDynamic
+	};
+
+	struct FrameGenerationConfiguration
+	{
+		FrameGenerationMode mode = FrameGenerationMode::kFixed;
+		std::uint32_t fixedMultiplier = 2;
+		float dynamicTargetFrameRate = 0.0f;
+
+		auto operator<=>(const FrameGenerationConfiguration&) const = default;
+	};
+
+	enum class CapabilityAvailability : std::uint8_t
+	{
+		kUnknown,
+		kUnsupported,
+		kSupported
+	};
+
+	struct FrameGenerationCapabilities
+	{
+		CapabilityAvailability availability = CapabilityAvailability::kUnknown;
+		bool configurationKnown = false;
+		bool configurationQueryFailed = false;
+		std::uint32_t maxGeneratedFrames = 0;
+		bool dynamicModeSupported = false;
+		bool vsyncSupportAvailable = false;
+		bool vsyncEnabled = false;
+		bool hardwareSchedulingRequired = false;
+		std::uint32_t detectedDriverMajor = 0;
+		std::uint32_t detectedDriverMinor = 0;
+		std::uint32_t detectedDriverBuild = 0;
+		std::uint32_t requiredDriverMajor = 0;
+		std::uint32_t requiredDriverMinor = 0;
+		std::uint32_t requiredDriverBuild = 0;
+		std::uint64_t deviceGeneration = 0;
+		std::uint64_t displayGeneration = 0;
+		std::uint64_t sampledDeviceGeneration = 0;
+		std::uint64_t sampledDisplayGeneration = 0;
+		std::uint32_t providerStatus = 0;
+
+		[[nodiscard]] bool IsCurrent() const noexcept
+		{
+			return configurationKnown && !configurationQueryFailed &&
+			       sampledDeviceGeneration == deviceGeneration &&
+			       sampledDisplayGeneration == displayGeneration;
+		}
+	};
+
+	struct FidelityFXAlgorithmCapability
+	{
+		CapabilityAvailability availability =
+			CapabilityAvailability::kUnknown;
+		std::uint32_t unavailableReason = 0;
+		std::uint32_t versionMajor = 0;
+		std::uint32_t versionMinor = 0;
+		std::uint32_t versionPatch = 0;
+		std::uint32_t transportVersionMajor = 0;
+		std::uint32_t transportVersionMinor = 0;
+		std::uint32_t transportVersionPatch = 0;
+		bool windows11OrGreater = false;
+		std::uint32_t shaderModelMajor = 0;
+		std::uint32_t shaderModelMinor = 0;
+		std::uint32_t d3d12RuntimeSource = 0;
+		std::uint32_t d3d12CoreVersionMajor = 0;
+		std::uint32_t d3d12CoreVersionMinor = 0;
+		std::uint32_t d3d12CoreVersionPatch = 0;
+		std::uint32_t d3d12CoreVersionRevision = 0;
+		std::uint32_t requestedD3D12SDKVersion = 0;
+
+		[[nodiscard]] bool IsAvailable() const noexcept
+		{
+			return availability == CapabilityAvailability::kSupported;
+		}
+	};
+
+	struct FidelityFXCapabilities
+	{
+		FidelityFXAlgorithmCapability fsr4SuperResolution;
+		FidelityFXAlgorithmCapability fsr4FrameGeneration;
+	};
+
+	[[nodiscard]] constexpr std::string_view
+	FidelityFXD3D12RuntimeSourceName(
+		std::uint32_t a_source) noexcept
+	{
+		switch (a_source) {
+		case 1:
+			return "system";
+		case 2:
+			return "Agility SDK";
+		default:
+			return "unknown";
+		}
+	}
+
 	struct PresentationCreateContext
 	{
 		IDXGIAdapter* adapter = nullptr;
@@ -353,6 +453,7 @@ namespace cs::render::temporal
 		bool enabled = false;
 		bool resetHistory = false;
 		UiCompositionMode uiMode = UiCompositionMode::kFinalColorOnly;
+		FrameGenerationConfiguration configuration;
 		ColorContract color;
 		FrameGenerationCamera camera;
 	};
@@ -395,6 +496,20 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
 		[[nodiscard]] virtual ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
+		[[nodiscard]] virtual ProviderResult ValidateConfiguration(
+			const FrameGenerationConfiguration&) const
+		{
+			return { .code = ProviderResultCode::kSuccess };
+		}
+		[[nodiscard]] virtual FrameGenerationCapabilities
+		GetCapabilities() const noexcept
+		{
+			return {
+				.availability = CapabilityAvailability::kSupported,
+				.configurationKnown = true,
+				.maxGeneratedFrames = 1
+			};
+		}
 		[[nodiscard]] virtual std::optional<std::uint32_t>
 		ConsumeGeneratedFrameCount() noexcept
 		{

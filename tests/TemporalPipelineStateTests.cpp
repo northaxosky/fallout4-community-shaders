@@ -323,6 +323,36 @@ namespace
 					  SuperResolutionMethod::kDLSS,
 			"native FSR and DLSS switch through one admitted SR seam");
 
+		TopologyState mixedFsr4;
+		Check(mixedFsr4.Freeze(liveRequest),
+			"mixed FSR 4 fixture freezes");
+		Check(mixedFsr4.Admit(liveSession),
+			"mixed FSR 4 fixture admits");
+		mixedFsr4.SubmitLive(
+			true, SuperResolutionMethod::kDLSS, 1, true,
+			FrameGenerationMethod::kFSR4, 130);
+		Check(mixedFsr4.PendingTransition() &&
+				  mixedFsr4.CommitPendingTransition(
+					  130, FrameGenerationMethod::kFSR4) &&
+				  mixedFsr4.Effective().superResolution ==
+					  SuperResolutionMethod::kDLSS &&
+				  mixedFsr4.Effective().frameGeneration ==
+					  FrameGenerationMethod::kFSR4,
+			"FSR 4 ML frame generation can be selected independently with "
+			"DLSS super resolution");
+		mixedFsr4.SubmitLive(
+			true, SuperResolutionMethod::kFSR4, 1, true,
+			FrameGenerationMethod::kDLSSG, 131);
+		Check(mixedFsr4.PendingTransition() &&
+				  mixedFsr4.CommitPendingTransition(
+					  131, FrameGenerationMethod::kDLSSG) &&
+				  mixedFsr4.Effective().superResolution ==
+					  SuperResolutionMethod::kFSR4 &&
+				  mixedFsr4.Effective().frameGeneration ==
+					  FrameGenerationMethod::kDLSSG,
+			"FSR 4 super resolution can be selected independently with "
+			"DLSS-G");
+
 		live.SubmitLive(true, SuperResolutionMethod::kNone, 2, true,
 			FrameGenerationMethod::kDLSSG, 14);
 		Check(live.PendingTransition() &&
@@ -485,6 +515,23 @@ namespace
 			"an unavailable provider is rejected before private-chain "
 			"teardown");
 
+		TopologyState unavailableFsr4Fg;
+		Check(unavailableFsr4Fg.Freeze(liveRequest),
+			"unavailable FSR 4 FG fixture freezes");
+		oneProvider.admittedFg[static_cast<std::size_t>(
+			FrameGenerationMethod::kFSR4)] = false;
+		Check(unavailableFsr4Fg.Admit(oneProvider),
+			"unavailable FSR 4 FG fixture admits its working providers");
+		unavailableFsr4Fg.SubmitLive(
+			true, SuperResolutionMethod::kTAA, 1, true,
+			FrameGenerationMethod::kFSR4, 211);
+		Check(!unavailableFsr4Fg.PendingTransition() &&
+				  unavailableFsr4Fg.Pending().required &&
+				  unavailableFsr4Fg.Effective().frameGeneration ==
+					  FrameGenerationMethod::kOff,
+			"an unavailable FSR 4 MLFG request preserves the working plain "
+			"presentation chain");
+
 		TopologyState unavailableSr;
 		Check(unavailableSr.Freeze(liveRequest),
 			"unavailable SR fixture freezes");
@@ -500,6 +547,23 @@ namespace
 				  unavailableSr.Effective().superResolution ==
 					  SuperResolutionMethod::kTAA,
 			"an unavailable external SR provider is rejected before teardown");
+
+		TopologyState unavailableFsr4Sr;
+		Check(unavailableFsr4Sr.Freeze(liveRequest),
+			"unavailable FSR 4 SR fixture freezes");
+		oneProvider.admittedSr[static_cast<std::size_t>(
+			SuperResolutionMethod::kFSR4)] = false;
+		Check(unavailableFsr4Sr.Admit(oneProvider),
+			"unavailable FSR 4 SR fixture admits its working providers");
+		unavailableFsr4Sr.SubmitLive(
+			true, SuperResolutionMethod::kFSR4, 1, false,
+			FrameGenerationMethod::kOff, 221);
+		Check(!unavailableFsr4Sr.PendingTransition() &&
+				  unavailableFsr4Sr.Pending().required &&
+				  unavailableFsr4Sr.Effective().superResolution ==
+					  SuperResolutionMethod::kTAA,
+			"an unavailable FSR 4 SR request preserves the previous working "
+			"super-resolution method");
 
 		TopologyState rejected;
 		RequestedTopology request;
@@ -591,7 +655,8 @@ namespace
 			"unavailable DLSS defaults to native TAA without initializing standby FSR");
 		for (const auto fallback :
 			{ SuperResolutionMethod::kNone, SuperResolutionMethod::kTAA,
-				SuperResolutionMethod::kFSR3 }) {
+				SuperResolutionMethod::kFSR3,
+				SuperResolutionMethod::kFSR4 }) {
 			request.noDlssFallback = fallback;
 			calls.clear();
 			const auto admission =
@@ -747,6 +812,41 @@ namespace
 				  !topology.Pending().required,
 			"explicit Off disables host FG work and commits the plain private "
 			"chain at the frame boundary");
+
+		TopologyState optionsTopology;
+		RequestedTopology optionRequest;
+		optionRequest.frameGenerationEligible = true;
+		optionRequest.frameGenerationEnabled = true;
+		optionRequest.frameGeneration =
+			FrameGenerationMethod::kDLSSG;
+		optionRequest.frameGenerationConfiguration = {
+			.mode = FrameGenerationMode::kFixed,
+			.fixedMultiplier = 2
+		};
+		Check(optionsTopology.Freeze(optionRequest),
+			"DLSS-G option topology freezes");
+		Check(optionsTopology.Admit(session),
+			"DLSS-G option topology admits");
+		optionsTopology.SubmitLive(false,
+			SuperResolutionMethod::kNone, 1, true,
+			FrameGenerationMethod::kDLSSG, 2,
+			{ .mode = FrameGenerationMode::kDynamic,
+				.fixedMultiplier = 2,
+				.dynamicTargetFrameRate = 144.0f });
+		Check(optionsTopology.PendingTransition().has_value() &&
+				optionsTopology.Effective()
+						.frameGenerationConfiguration.mode ==
+					FrameGenerationMode::kFixed,
+			"DLSS-G tuning waits for the existing frame-boundary transaction");
+		Check(optionsTopology.CommitPendingTransition(
+				  2, FrameGenerationMethod::kDLSSG) &&
+				optionsTopology.Effective()
+						.frameGenerationConfiguration.mode ==
+					FrameGenerationMode::kDynamic &&
+				optionsTopology.Effective()
+						.frameGenerationConfiguration
+						.dynamicTargetFrameRate == 144.0f,
+			"a supported DLSS-G tuning change commits without changing the active provider");
 
 		FrameTransaction disabled;
 		Check(Capture(disabled, 30) && disabled.PreparePresent(),

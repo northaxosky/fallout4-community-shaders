@@ -147,7 +147,7 @@ load = false
 # Runtime toggle for the resolve. The feature itself ships off above.
 enabled = true
 
-# 0 = None, 1 = TAA, 2 = FSR 3, 3 = DLSS.
+# 0 = None, 1 = TAA, 2 = FSR 3, 3 = DLSS, 4 = FSR 4.
 # Method changes apply at a frame boundary when the selected provider was
 # admitted at startup.
 upscale_method = 3
@@ -171,8 +171,18 @@ load = false
 
 [features.FrameGeneration.settings]
 enabled = true
-# 0 = Off, 1 = FSR 3, 2 = DLSS-G. Admitted providers switch at a frame boundary.
+# 0 = Off, 1 = FSR 3, 2 = DLSS-G, 3 = FSR 4 MLFG.
+# Admitted providers switch at a frame boundary.
 frame_generation_method = 1
+# DLSS-G generation mode: 0 = fixed multiplier, 1 = dynamic MFG.
+dlssg_mode = 0
+# Fixed multiplier includes the real frame. The runtime-reported maximum is
+# authoritative; unsupported requests are rejected rather than clamped.
+dlssg_fixed_multiplier = 2
+# Dynamic MFG target in frames per second. 0 uses the SDK's automatic display
+# target; any positive finite value requests that target. VSync causes the SDK
+# to ignore a custom target.
+dlssg_dynamic_target_fps = 0.0
 # Allow proxy startup below 120 Hz. Changing startup topology requires a game restart.
 frame_generation_force_enable = 0
 # Generated frames are disabled in pause, main, loading, and Pip-Boy menus by default.

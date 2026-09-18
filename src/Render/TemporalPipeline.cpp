@@ -145,6 +145,8 @@ namespace cs::render
 				return Target::kFSR3;
 			case Source::kDLSS:
 				return Target::kDLSS;
+			case Source::kFSR4:
+				return Target::kFSR4;
 			}
 			return Target::kNone;
 		}
@@ -161,8 +163,25 @@ namespace cs::render
 				return Target::kFSR3;
 			case Source::kDLSSG:
 				return Target::kDLSSG;
+			case Source::kFSR4:
+				return Target::kFSR4;
 			}
 			return Target::kOff;
+		}
+
+		temporal::FrameGenerationConfiguration
+		ToCoreFrameGenerationConfiguration(
+			const features::FrameGeneration::Settings& a_settings) noexcept
+		{
+			return {
+				.mode = a_settings.dlssgMode == 1
+					? temporal::FrameGenerationMode::kDynamic
+					: temporal::FrameGenerationMode::kFixed,
+				.fixedMultiplier =
+					a_settings.dlssgFixedMultiplier,
+				.dynamicTargetFrameRate =
+					a_settings.dlssgDynamicTargetFps
+			};
 		}
 
 		features::Upscaling::UpscaleMethod
@@ -179,6 +198,8 @@ namespace cs::render
 				return Target::kFSR;
 			case Source::kDLSS:
 				return Target::kDLSS;
+			case Source::kFSR4:
+				return Target::kFSR4;
 			case Source::kCount:
 				break;
 			}
@@ -192,13 +213,17 @@ namespace cs::render
 				a_effective.superResolution ==
 					temporal::SuperResolutionMethod::kDLSS ||
 				a_effective.superResolution ==
-					temporal::SuperResolutionMethod::kFSR3;
+					temporal::SuperResolutionMethod::kFSR3 ||
+				a_effective.superResolution ==
+					temporal::SuperResolutionMethod::kFSR4;
 			const bool streamlineFrameGeneration =
 				a_effective.frameGenerationEnabled &&
 				(a_effective.frameGeneration ==
 						temporal::FrameGenerationMethod::kDLSSG ||
 					a_effective.frameGeneration ==
-						temporal::FrameGenerationMethod::kFSR3);
+							temporal::FrameGenerationMethod::kFSR3 ||
+						a_effective.frameGeneration ==
+							temporal::FrameGenerationMethod::kFSR4);
 			return streamlineSuperResolution &&
 			       streamlineFrameGeneration;
 		}
@@ -260,6 +285,10 @@ namespace cs::render
 			streamline,
 			features::StreamlineSuperResolution::Method::kFSR3
 		};
+		features::StreamlineSuperResolution fsr4Provider{
+			streamline,
+			features::StreamlineSuperResolution::Method::kFSR4
+		};
 		features::StreamlinePresentation streamlineFsrPresentation{
 			streamline,
 			features::StreamlinePresentation::Method::kFSRG
@@ -267,6 +296,10 @@ namespace cs::render
 		features::StreamlinePresentation streamlinePresentation{
 			streamline,
 			features::StreamlinePresentation::Method::kDLSSG
+		};
+		features::StreamlinePresentation streamlineFsr4Presentation{
+			streamline,
+			features::StreamlinePresentation::Method::kFSR4
 		};
 		temporal::IFrameGenerationProvider* activePresentation = nullptr;
 		features::DX12SwapChain swapChain;
@@ -279,6 +312,8 @@ namespace cs::render
 				return &fsrProvider;
 			case temporal::SuperResolutionMethod::kDLSS:
 				return &dlssProvider;
+			case temporal::SuperResolutionMethod::kFSR4:
+				return &fsr4Provider;
 			default:
 				return nullptr;
 			}
@@ -293,6 +328,8 @@ namespace cs::render
 				return &streamlineFsrPresentation;
 			case temporal::FrameGenerationMethod::kDLSSG:
 				return &streamlinePresentation;
+			case temporal::FrameGenerationMethod::kFSR4:
+				return &streamlineFsr4Presentation;
 			default:
 				return nullptr;
 			}
@@ -440,6 +477,9 @@ namespace cs::render
 				frameGeneration->settings.frameGenerationForceEnable != 0;
 			requested.allowFrameGenerationInMenus =
 				frameGeneration->settings.frameGenerationAllowInMenus;
+			requested.frameGenerationConfiguration =
+				ToCoreFrameGenerationConfiguration(
+					frameGeneration->settings);
 		}
 		requested.revision =
 			_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel);
@@ -494,7 +534,9 @@ namespace cs::render
 			upscaling->settings.qualityMode, frameGeneration->settings.enabled,
 			ToCore(static_cast<features::FrameGeneration::Method>(
 				frameGeneration->settings.frameGenerationMethod)),
-			revision);
+			revision,
+			ToCoreFrameGenerationConfiguration(
+				frameGeneration->settings));
 		_impl->frameGenerationEnabled.store(
 			_impl->topology.Effective().frameGenerationEnabled &&
 				!_impl->frameGenerationQuarantined,
@@ -544,8 +586,38 @@ namespace cs::render
 				: temporal::FrameGenerationMethod::kOff;
 		auto* targetPresentation =
 			_impl->FrameGenerationProvider(targetFrameGenerationMethod);
+		if (targetPresentation &&
+			pending->frameGenerationEnabled) {
+			const auto validation =
+				targetPresentation->ValidateConfiguration(
+					pending->frameGenerationConfiguration);
+			if (validation.code ==
+				temporal::ProviderResultCode::kSkipped) {
+				std::scoped_lock lock(_impl->mutex);
+				_impl->topology.DeferTransition(
+					pending->revision);
+				return;
+			}
+			if (!validation.Succeeded()) {
+				std::scoped_lock lock(_impl->mutex);
+				_impl->topology.RejectPendingTransition(
+					pending->revision);
+				_impl->failureDomain =
+					validation.failureDomain ==
+							temporal::FailureDomain::kNone
+						? temporal::FailureDomain::kFrameGeneration
+						: validation.failureDomain;
+				_impl->failure = validation.message.empty()
+					? "The requested frame-generation options are unavailable."
+					: validation.message;
+				return;
+			}
+		}
 		const bool presentationChange =
 			targetPresentation != _impl->activePresentation;
+		const bool frameGenerationConfigurationChange =
+			pending->frameGenerationConfiguration !=
+			current.frameGenerationConfiguration;
 		if (presentationChange) {
 			const auto preflight =
 				_impl->swapChain.CanReplacePresentationProvider(
@@ -580,7 +652,9 @@ namespace cs::render
 				return a_method ==
 						temporal::SuperResolutionMethod::kDLSS ||
 					a_method ==
-						temporal::SuperResolutionMethod::kFSR3;
+						temporal::SuperResolutionMethod::kFSR3 ||
+					a_method ==
+						temporal::SuperResolutionMethod::kFSR4;
 			};
 		if (srResourcesChange &&
 			usesLiveD3D12SuperResolution(
@@ -688,7 +762,9 @@ namespace cs::render
 								(pending->superResolution ==
 										temporal::SuperResolutionMethod::kDLSS ||
 									pending->superResolution ==
-										temporal::SuperResolutionMethod::kFSR3) &&
+										temporal::SuperResolutionMethod::kFSR3 ||
+									pending->superResolution ==
+										temporal::SuperResolutionMethod::kFSR4) &&
 								!_impl->streamline.deviceRegistered;
 							if (streamlineSrInvalidated) {
 								_impl->topology
@@ -782,7 +858,8 @@ namespace cs::render
 				if (srResourcesChange) {
 					_impl->resetEpochs.RequestSuperResolution();
 					_impl->resetEpochs.RequestFrameGeneration();
-				} else if (presentationChange) {
+				} else if (presentationChange ||
+					frameGenerationConfigurationChange) {
 					_impl->resetEpochs.RequestFrameGeneration();
 				}
 			}
@@ -1143,6 +1220,9 @@ namespace cs::render
 										*_impl->frozenFrameConstants[slot];
 									frozen = true;
 								}
+								result.configuration =
+									_impl->topology.Effective()
+										.frameGenerationConfiguration;
 							}
 							result.realFrame =
 								TemporalPipeline::Get().CurrentRealFrame();
@@ -1275,6 +1355,7 @@ namespace cs::render
 				temporal::SuperResolutionInitContext init{};
 				init.device = a_device ? *a_device : nullptr;
 				if (a_method == temporal::SuperResolutionMethod::kFSR3 ||
+					a_method == temporal::SuperResolutionMethod::kFSR4 ||
 					a_method == temporal::SuperResolutionMethod::kDLSS) {
 					if (!_impl->swapChain.IsBridgeReady()) {
 						return {
@@ -1307,6 +1388,12 @@ namespace cs::render
 			_impl->streamline.slFSRGetOptimalSettings) {
 			srAdmission.methods[static_cast<std::size_t>(
 				temporal::SuperResolutionMethod::kFSR3)] = true;
+			srAdmission.methods[static_cast<std::size_t>(
+				temporal::SuperResolutionMethod::kFSR4)] =
+				_impl->streamline
+					.ValidateFSRAlgorithm(
+						sl::FSRAlgorithm::eFSR4)
+					.Succeeded();
 		}
 		_impl->latencySdkActive.store(
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire) &&
@@ -1348,6 +1435,10 @@ namespace cs::render
 			temporal::FrameGenerationMethod::kDLSSG)] =
 			request.frameGenerationEligible && fgDisplayEligible &&
 			_impl->streamlinePresentation.IsAvailable();
+		session.admittedFg[static_cast<std::size_t>(
+			temporal::FrameGenerationMethod::kFSR4)] =
+			request.frameGenerationEligible && fgDisplayEligible &&
+			_impl->streamlineFsr4Presentation.IsAvailable();
 		if (request.frameGenerationEnabled &&
 			request.frameGeneration != temporal::FrameGenerationMethod::kOff &&
 			!_impl->swapChain.IsFrameGenerationReady()) {
@@ -1868,6 +1959,8 @@ namespace cs::render
 			.providerPresentedFrameCountAvailable =
 				_impl->providerPresentedFrameCountAvailable.load(
 					std::memory_order_relaxed),
+			.capabilities =
+				_impl->streamline.GetDLSSGCapabilities(),
 			.failures =
 				_impl->frameGenerationFailures.load(std::memory_order_relaxed),
 			.cameraValid = camera.valid && fov > 0.0f,
@@ -2002,6 +2095,10 @@ namespace cs::render
 		case temporal::SuperResolutionMethod::kFSR3:
 			return _impl->streamline.featureFSR &&
 				_impl->streamline.slFSRGetOptimalSettings;
+		case temporal::SuperResolutionMethod::kFSR4:
+			return _impl->streamline
+				.ValidateFSRAlgorithm(sl::FSRAlgorithm::eFSR4)
+				.Succeeded();
 		case temporal::SuperResolutionMethod::kDLSS:
 			return _impl->streamline.featureDLSS;
 		default:
@@ -2030,7 +2127,8 @@ namespace cs::render
 					.code = temporal::ProviderResultCode::kSuccess
 				};
 			}
-			if (a_method == temporal::SuperResolutionMethod::kFSR3) {
+			if (a_method == temporal::SuperResolutionMethod::kFSR3 ||
+				a_method == temporal::SuperResolutionMethod::kFSR4) {
 				if (!_impl->streamline.HasFSRResources()) {
 					return {
 						.code = temporal::ProviderResultCode::kSuccess
@@ -2051,6 +2149,12 @@ namespace cs::render
 			return provider->DestroyAfterDrain();
 		}
 		return { .code = temporal::ProviderResultCode::kSuccess };
+	}
+
+	temporal::FidelityFXCapabilities
+	TemporalPipeline::GetFidelityFXCapabilities() const noexcept
+	{
+		return _impl->streamline.GetFidelityFXCapabilities();
 	}
 
 	FrameGenerationDebugTexture TemporalPipeline::GetFrameGenerationDebugTexture(

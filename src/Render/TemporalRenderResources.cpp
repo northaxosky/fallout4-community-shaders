@@ -146,10 +146,13 @@ namespace cs::render
 			return false;
 		}
 
-		if (a_upscalemethod == UpscaleMethod::kFSR) {
+		if (a_upscalemethod == UpscaleMethod::kFSR ||
+			a_upscalemethod == UpscaleMethod::kFSR4) {
 			return render::TemporalPipeline::Get()
 					   .IsSuperResolutionRuntimeReady(
-						   render::temporal::SuperResolutionMethod::kFSR3) &&
+						   a_upscalemethod == UpscaleMethod::kFSR4
+							   ? render::temporal::SuperResolutionMethod::kFSR4
+							   : render::temporal::SuperResolutionMethod::kFSR3) &&
 				sharpenerTexture &&
 				publicationTexture &&
 				sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
@@ -240,10 +243,13 @@ namespace cs::render
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
 					render::temporal::SuperResolutionMethod::kDLSS);
-		} else if (previousUpscaleMode == UpscaleMethod::kFSR) {
+		} else if (previousUpscaleMode == UpscaleMethod::kFSR ||
+			previousUpscaleMode == UpscaleMethod::kFSR4) {
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-					render::temporal::SuperResolutionMethod::kFSR3);
+					previousUpscaleMode == UpscaleMethod::kFSR4
+						? render::temporal::SuperResolutionMethod::kFSR4
+						: render::temporal::SuperResolutionMethod::kFSR3);
 		}
 		if (!release.Succeeded()) {
 			render::TemporalPipeline::Get().PostFailure(
@@ -289,6 +295,7 @@ namespace cs::render
 				defines.push_back({ "DLSS", "" });
 				break;
 			case UpscaleMethod::kFSR:
+			case UpscaleMethod::kFSR4:
 				defines.push_back({ "FSR", "" });
 				break;
 			default:
@@ -521,10 +528,13 @@ namespace cs::render
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
 				render::temporal::SuperResolutionMethod::kDLSS);
-		} else if (method == UpscaleMethod::kFSR) {
+		} else if (method == UpscaleMethod::kFSR ||
+			method == UpscaleMethod::kFSR4) {
 			release =
 				render::TemporalPipeline::Get().DestroySuperResolutionResources(
-				render::temporal::SuperResolutionMethod::kFSR3);
+				method == UpscaleMethod::kFSR4
+					? render::temporal::SuperResolutionMethod::kFSR4
+					: render::temporal::SuperResolutionMethod::kFSR3);
 		}
 		if (!release.Succeeded()) {
 			render::TemporalPipeline::Get().PostFailure(

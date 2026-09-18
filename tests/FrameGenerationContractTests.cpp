@@ -3,6 +3,7 @@
 #include "Render/TemporalPipelineState.h"
 
 #include "StreamlineFrameGenerationContract.h"
+#include "StreamlineFidelityFXContract.h"
 
 #include <iostream>
 #include <memory>
@@ -653,23 +654,183 @@ namespace
 
 	void TestStreamlineBackendContracts()
 	{
-		cs::render::temporal::PresentedFrameAccumulator counts;
+		using namespace cs::render::temporal;
+		PresentedFrameAccumulator generated;
+		PresentedFrameAccumulator presented;
 		sl::DLSSGStatus status = sl::DLSSGStatus::eOk;
 		std::uint32_t calls = 0;
+		FrameGenerationCapabilities observed{};
 		for (const std::uint32_t count : { 0u, 1u, 4u }) {
 			const auto result = cs::features::streamline_fg::PollState(
-				sl::ViewportHandle{ 1 }, counts, status,
+				sl::ViewportHandle{ 1 }, generated, presented, status,
 				[&](sl::ViewportHandle, sl::DLSSGState& a_state,
 					const sl::DLSSGOptions*) {
 					++calls;
 					a_state.numFramesActuallyPresented = count;
+					a_state.numFramesToGenerateMax = 5;
+					a_state.bIsDynamicMFGSupported =
+						sl::Boolean::eTrue;
 					a_state.status = sl::DLSSGStatus::eOk;
 					return sl::Result::eOk;
+				},
+				[&](const sl::DLSSGState& a_state) {
+					observed.configurationKnown = true;
+					observed.maxGeneratedFrames =
+						a_state.numFramesToGenerateMax;
+					observed.dynamicModeSupported =
+						a_state.bIsDynamicMFGSupported ==
+						sl::Boolean::eTrue;
 				});
 			Check(result == sl::Result::eOk, "DLSS-G state query succeeds");
 		}
-		Check(calls == 3 && counts.Consume() == 5,
-			"the one DLSS-G state owner retains 0, 1, and multiple presentations");
+		Check(calls == 3 && generated.Consume() == 5 &&
+				presented.Consume() == 5 &&
+				observed.maxGeneratedFrames == 5 &&
+				observed.dynamicModeSupported,
+			"the one DLSS-G state query retains counts and capabilities");
+
+		FrameGenerationConfiguration configuration{};
+		FrameGenerationCapabilities capabilities{
+			.availability = CapabilityAvailability::kSupported,
+			.configurationKnown = false,
+			.maxGeneratedFrames = 1,
+			.deviceGeneration = 4,
+			.displayGeneration = 7,
+			.sampledDeviceGeneration = 4,
+			.sampledDisplayGeneration = 7
+		};
+		Check(cs::features::streamline_fg::ValidateConfiguration(
+				  configuration, capabilities) ==
+				  cs::features::streamline_fg::ConfigurationSupport::
+					  kPendingCapabilities,
+			"unknown current capabilities are not treated as unsupported");
+		capabilities.configurationQueryFailed = true;
+		Check(cs::features::streamline_fg::ValidateConfiguration(
+				  configuration, capabilities) ==
+				  cs::features::streamline_fg::ConfigurationSupport::
+					  kUnsupported,
+			"a failed runtime capability query is an explicit unavailable result");
+		capabilities.configurationQueryFailed = false;
+		capabilities.configurationKnown = true;
+		Check(cs::features::streamline_fg::ValidateConfiguration(
+				  configuration, capabilities) ==
+				  cs::features::streamline_fg::ConfigurationSupport::
+					  kSupported,
+			"the ordinary fixed 2x request uses the reported one generated-frame capability");
+		configuration.fixedMultiplier = 3;
+		Check(cs::features::streamline_fg::ValidateConfiguration(
+				  configuration, capabilities) ==
+				  cs::features::streamline_fg::ConfigurationSupport::
+					  kUnsupported,
+			"a fixed multiplier above the reported maximum is rejected rather than clamped");
+		configuration.mode = FrameGenerationMode::kDynamic;
+		configuration.dynamicTargetFrameRate = 144.0f;
+		Check(cs::features::streamline_fg::ValidateConfiguration(
+				  configuration, capabilities) ==
+				  cs::features::streamline_fg::ConfigurationSupport::
+					  kUnsupported,
+			"dynamic MFG remains unavailable until the runtime reports support");
+		capabilities.dynamicModeSupported = true;
+		Check(cs::features::streamline_fg::ValidateConfiguration(
+				  configuration, capabilities) ==
+				  cs::features::streamline_fg::ConfigurationSupport::
+					  kSupported,
+			"a finite positive dynamic target is accepted only with runtime support");
+
+		configuration.mode = FrameGenerationMode::kFixed;
+		configuration.fixedMultiplier = 4;
+		auto configuredOptions =
+			cs::features::streamline_fg::BuildOptions(
+			true, configuration, 1280, 720, 2560, 1440, 3, true);
+		Check(configuredOptions.mode == sl::DLSSGMode::eOn &&
+				configuredOptions.numFramesToGenerate == 3 &&
+				configuredOptions.colorWidth == 2560 &&
+				configuredOptions.flags ==
+					sl::DLSSGFlags::eRetainResourcesWhenOff,
+			"fixed UI multiplier maps to SDK-generated frames without an arbitrary host cap");
+		configuration.mode = FrameGenerationMode::kDynamic;
+		configuration.dynamicTargetFrameRate = 0.0f;
+		configuredOptions =
+			cs::features::streamline_fg::BuildOptions(
+			true, configuration, 1280, 720, 2560, 1440, 3, true);
+		Check(configuredOptions.mode == sl::DLSSGMode::eDynamic &&
+				configuredOptions.dynamicTargetFrameRate == 0.0f,
+			"dynamic zero target preserves the SDK automatic display target");
+
+		sl::FSROptions fsrOptions{};
+		sl::FSRAlgorithmOptions fsrAlgorithm{};
+		Check(cs::features::streamline_fidelityfx::ClassifyCapability(
+				  sl::Result::eErrorInvalidState,
+				  sl::Boolean::eFalse) ==
+				  CapabilityAvailability::kUnknown &&
+				cs::features::streamline_fidelityfx::ClassifyCapability(
+					sl::Result::eOk, sl::Boolean::eFalse) ==
+					CapabilityAvailability::kUnsupported &&
+				cs::features::streamline_fidelityfx::ClassifyCapability(
+					sl::Result::eOk, sl::Boolean::eTrue) ==
+					CapabilityAvailability::kSupported,
+			"FSR 4 keeps a failed capability query distinct from an "
+			"authoritative unsupported result");
+		cs::features::streamline_fidelityfx::SelectAlgorithm(
+			fsrOptions, fsrAlgorithm, sl::FSRAlgorithm::eFSR3);
+		Check(fsrOptions.next == nullptr,
+			"FSR 3 retains the established provider contract without an "
+			"algorithm extension");
+		cs::features::streamline_fidelityfx::SelectAlgorithm(
+			fsrOptions, fsrAlgorithm, sl::FSRAlgorithm::eFSR4);
+		Check(fsrOptions.next == &fsrAlgorithm &&
+				fsrAlgorithm.algorithm == sl::FSRAlgorithm::eFSR4,
+			"FSR 4 super resolution is selected by the explicit production "
+			"algorithm chain");
+
+		sl::FSRGOptions fsrgOptions{};
+		sl::FSRGAlgorithmOptions fsrgAlgorithm{};
+		cs::features::streamline_fidelityfx::SelectAlgorithm(
+			fsrgOptions, fsrgAlgorithm, sl::FSRGAlgorithm::eFSR3);
+		Check(fsrgOptions.next == nullptr,
+			"FSR 3 frame generation retains the established provider contract");
+		cs::features::streamline_fidelityfx::SelectAlgorithm(
+			fsrgOptions, fsrgAlgorithm, sl::FSRGAlgorithm::eFSR4);
+		Check(fsrgOptions.next == &fsrgAlgorithm &&
+				fsrgAlgorithm.algorithm == sl::FSRGAlgorithm::eFSR4,
+			"FSR 4 ML frame generation is selected by the explicit production "
+			"algorithm chain");
+
+		sl::FSRGState fsrgState{};
+		fsrgState.completionMode = sl::FSRGCompletionMode::eFence;
+		fsrgState.completionFence = reinterpret_cast<void*>(1);
+		fsrgState.algorithm = sl::FSRGAlgorithm::eFSR4;
+		fsrgState.available = sl::Boolean::eTrue;
+		using FSRGValidation =
+			cs::features::streamline_fidelityfx::FSRGStateValidation;
+		Check(cs::features::streamline_fidelityfx::ValidateState(
+				  fsrgState, sl::FSRGAlgorithm::eFSR4, false) ==
+				  FSRGValidation::kValid,
+			"MLFG preflight accepts the asynchronous fence capability before "
+			"a Present submits a fence value");
+		Check(cs::features::streamline_fidelityfx::ValidateState(
+				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
+				  FSRGValidation::kSubmittedDependencyMissing,
+			"MLFG requires a real last-reader fence value after Present");
+		fsrgState.completionFenceValue = 7;
+		Check(cs::features::streamline_fidelityfx::ValidateState(
+				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
+				  FSRGValidation::kValid,
+			"MLFG accepts the selected algorithm's asynchronous last-reader "
+			"dependency");
+		fsrgState.algorithm = sl::FSRGAlgorithm::eFSR3;
+		Check(cs::features::streamline_fidelityfx::ValidateState(
+				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
+				  FSRGValidation::kAlgorithmUnavailable,
+			"an FSR 3 state cannot masquerade as active FSR 4 MLFG");
+		fsrgState.algorithm = sl::FSRGAlgorithm::eFSR4;
+		fsrgState.completionMode =
+			sl::FSRGCompletionMode::eVendorCompletionUnavailable;
+		Check(cs::features::streamline_fidelityfx::ValidateState(
+				  fsrgState, sl::FSRGAlgorithm::eFSR4, true) ==
+				  FSRGValidation::kCompletionFenceUnavailable,
+			"MLFG rejects a provider without the required asynchronous "
+			"completion fence");
 
 		struct CleanupCase
 		{

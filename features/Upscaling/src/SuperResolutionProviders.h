@@ -13,7 +13,8 @@ namespace cs::features
 		enum class Method : std::uint8_t
 		{
 			kDLSS,
-			kFSR3
+			kFSR3,
+			kFSR4
 		};
 
 		StreamlineSuperResolution(

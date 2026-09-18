@@ -208,11 +208,18 @@ namespace cs::render
 				providerResult =
 					render::TemporalPipeline::Get().EvaluateSuperResolution(
 						render::temporal::SuperResolutionMethod::kDLSS, request);
-			} else if (upscaleMethod == UpscaleMethod::kFSR) {
-				cs::render::annotation::ScopedEvent providerScope("Upscaling/FSR");
+			} else if (upscaleMethod == UpscaleMethod::kFSR ||
+				upscaleMethod == UpscaleMethod::kFSR4) {
+				cs::render::annotation::ScopedEvent providerScope(
+					upscaleMethod == UpscaleMethod::kFSR4
+						? "Upscaling/FSR4"
+						: "Upscaling/FSR3");
 				providerResult =
 					render::TemporalPipeline::Get().EvaluateSuperResolution(
-						render::temporal::SuperResolutionMethod::kFSR3, request);
+						upscaleMethod == UpscaleMethod::kFSR4
+							? render::temporal::SuperResolutionMethod::kFSR4
+							: render::temporal::SuperResolutionMethod::kFSR3,
+						request);
 			}
 			upscaled = providerResult.CanPublishOutput();
 			_providerPublicationOutputReady =
@@ -314,7 +321,8 @@ namespace cs::render
 
 		const auto method = GetUpscaleMethod();
 		bool published = false;
-		if (method == UpscaleMethod::kFSR) {
+		if (method == UpscaleMethod::kFSR ||
+			method == UpscaleMethod::kFSR4) {
 			published = PublishUpscalingOutput(
 				context, frameBuffer.get(),
 				sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,

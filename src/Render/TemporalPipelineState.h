@@ -17,6 +17,7 @@ namespace cs::render::temporal
 		kTAA,
 		kFSR3,
 		kDLSS,
+		kFSR4,
 		kCount
 	};
 
@@ -25,11 +26,12 @@ namespace cs::render::temporal
 		kOff,
 		kFSR3,
 		kDLSSG,
+		kFSR4,
 		kCount
 	};
 
 	inline constexpr std::uint32_t kMaxFrameGenerationMethodValue =
-		static_cast<std::uint32_t>(FrameGenerationMethod::kDLSSG);
+		static_cast<std::uint32_t>(FrameGenerationMethod::kFSR4);
 
 	struct FailureImpact
 	{
@@ -49,6 +51,7 @@ namespace cs::render::temporal
 				a_domain == FailureDomain::kTransport ||
 				(a_domain == FailureDomain::kStreamline &&
 					(a_sr == SuperResolutionMethod::kFSR3 ||
+						a_sr == SuperResolutionMethod::kFSR4 ||
 						a_sr == SuperResolutionMethod::kDLSS)),
 			.frameGeneration =
 				a_domain == FailureDomain::kFrameGeneration ||
@@ -57,6 +60,7 @@ namespace cs::render::temporal
 				a_domain == FailureDomain::kPresentation ||
 				(a_domain == FailureDomain::kStreamline &&
 					(a_fg == FrameGenerationMethod::kFSR3 ||
+						a_fg == FrameGenerationMethod::kFSR4 ||
 						a_fg == FrameGenerationMethod::kDLSSG))
 		};
 	}
@@ -83,6 +87,7 @@ namespace cs::render::temporal
 		std::uint32_t streamlineLogLevel = 0;
 		bool forceFrameGeneration = false;
 		bool allowFrameGenerationInMenus = false;
+		FrameGenerationConfiguration frameGenerationConfiguration;
 		std::uint64_t revision = 0;
 
 		auto operator<=>(const RequestedTopology&) const = default;
@@ -119,6 +124,7 @@ namespace cs::render::temporal
 		SuperResolutionMethod superResolution = SuperResolutionMethod::kNone;
 		FrameGenerationMethod frameGeneration = FrameGenerationMethod::kOff;
 		std::uint32_t qualityMode = 1;
+		FrameGenerationConfiguration frameGenerationConfiguration;
 		std::uint64_t revision = 0;
 
 		auto operator<=>(const EffectiveConfiguration&) const = default;
@@ -145,6 +151,8 @@ namespace cs::render::temporal
 			_effective.superResolution = _request->superResolution;
 			_effective.frameGeneration = _request->frameGeneration;
 			_effective.qualityMode = _request->qualityMode;
+			_effective.frameGenerationConfiguration =
+				_request->frameGenerationConfiguration;
 			_effective.revision = _request->revision;
 			UpdateEffectiveEnablement();
 			return true;
@@ -194,7 +202,8 @@ namespace cs::render::temporal
 			std::uint32_t a_qualityMode,
 			bool a_fgEnabled,
 			FrameGenerationMethod a_fg,
-			std::uint64_t a_revision)
+			std::uint64_t a_revision,
+			FrameGenerationConfiguration a_fgConfiguration = {})
 		{
 			if (!_request) {
 				return;
@@ -205,6 +214,7 @@ namespace cs::render::temporal
 			_request->qualityMode = a_qualityMode;
 			_request->frameGenerationEnabled = a_fgEnabled;
 			_request->frameGeneration = a_fg;
+			_request->frameGenerationConfiguration = a_fgConfiguration;
 			_request->revision = a_revision;
 			if (!_session) {
 				_restartForSuperResolutionMethod =
@@ -228,6 +238,7 @@ namespace cs::render::temporal
 				_session->admittedFg[fgIndex];
 			const bool externalSrRequested =
 				a_sr == SuperResolutionMethod::kFSR3 ||
+				a_sr == SuperResolutionMethod::kFSR4 ||
 				a_sr == SuperResolutionMethod::kDLSS;
 			_restartForSuperResolutionMethod =
 				a_srEnabled && externalSrRequested &&
@@ -260,6 +271,10 @@ namespace cs::render::temporal
 				} else if (fgAdmitted &&
 					!_restartForFrameGenerationMethod) {
 					target.frameGeneration = a_fg;
+					if (a_fg == FrameGenerationMethod::kDLSSG) {
+						target.frameGenerationConfiguration =
+							a_fgConfiguration;
+					}
 					target.frameGenerationEnabled =
 						_startupRequest->frameGenerationEligible &&
 						a_fg != FrameGenerationMethod::kOff &&
@@ -273,6 +288,8 @@ namespace cs::render::temporal
 					transitionBase.frameGenerationEnabled ||
 				target.superResolution != transitionBase.superResolution ||
 				target.frameGeneration != transitionBase.frameGeneration ||
+				target.frameGenerationConfiguration !=
+					transitionBase.frameGenerationConfiguration ||
 				target.qualityMode != transitionBase.qualityMode;
 			if (!changed) {
 				_pendingTransition.reset();

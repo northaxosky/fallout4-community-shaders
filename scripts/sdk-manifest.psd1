@@ -1,10 +1,10 @@
 @{
 	# Pinned third-party runtime binaries that are not vendored in this repository.
-	# Digests are the ones GitHub publishes for the release asset.
+	# SHA-256 pins bind the exact vendor archives.
 	Packages = @(
 		@{
 			Name        = 'Streamline'
-			Version     = 'cs-streamline-v2.14.1-3'
+			Version     = 'cs-streamline-v2.14.1-4'
 			# Populate only from the published signed release; local signed candidates can be staged meanwhile.
 			Url         = ''
 			Sha256      = ''
@@ -21,9 +21,10 @@
 				'bin/x64/sl.reflex.dll',
 				'bin/x64/nvngx_dlss.dll',
 				'bin/x64/nvngx_dlssg.dll',
-				'bin/x64/amd_fidelityfx_loader_dx12.dll',
 				'bin/x64/amd_fidelityfx_upscaler_dx12.dll',
 				'bin/x64/amd_fidelityfx_framegeneration_dx12.dll',
+				'bin/x64/cs_fidelityfx_upscaler_dx12.dll',
+				'bin/x64/cs_fidelityfx_framegeneration_dx12.dll',
 				'bin/x64/sl.project-manifest.bin',
 				'bin/x64/sl.project-manifest.sig'
 			)
@@ -34,6 +35,19 @@
 				'bin/x64/reflex.license.txt',
 				'amd-fidelityfx-license.md',
 				'amd-fidelityfx-third-party-notices.md'
+			)
+		}
+		@{
+			Name        = 'AgilitySDK'
+			Version     = '1.616.1'
+			Url         = 'https://api.nuget.org/v3-flatcontainer/microsoft.direct3d.d3d12/1.616.1/microsoft.direct3d.d3d12.1.616.1.nupkg'
+			Sha256      = '3d8f4af714947c8b64b5656f48deb08661d6a5f743d97c63766065bd633ad52e'
+			Destination = 'features/Upscaling/Shaders/Upscaling/Streamline/D3D12'
+			Files       = @(
+				'build/native/bin/x64/D3D12Core.dll'
+			)
+			Licenses    = @(
+				'LICENSE.txt'
 			)
 		}
 	)

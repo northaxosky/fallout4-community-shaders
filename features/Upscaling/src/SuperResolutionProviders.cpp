@@ -38,9 +38,15 @@ namespace cs::features
 
 	const char* StreamlineSuperResolution::Name() const noexcept
 	{
-		return _method == Method::kDLSS ?
-			"DLSS Super Resolution" :
-			"FSR 3 Super Resolution (Streamline)";
+		switch (_method) {
+		case Method::kDLSS:
+			return "DLSS Super Resolution";
+		case Method::kFSR3:
+			return "FSR 3 Super Resolution (Streamline)";
+		case Method::kFSR4:
+			return "FSR 4 Super Resolution (Streamline)";
+		}
+		return "Unknown Super Resolution";
 	}
 
 	render::temporal::ProviderResult StreamlineSuperResolution::Initialize(
@@ -64,12 +70,10 @@ namespace cs::features
 					"session.",
 					render::temporal::FailureDomain::kStreamline);
 		}
-		return _runtime.featureFSR &&
-				_runtime.slFSRGetOptimalSettings
-			? Success()
-			: Failure(
-				"Native FSR 3 super-resolution is unavailable.",
-				render::temporal::FailureDomain::kStreamline);
+		return _runtime.ValidateFSRAlgorithm(
+			_method == Method::kFSR4
+				? sl::FSRAlgorithm::eFSR4
+				: sl::FSRAlgorithm::eFSR3);
 	}
 
 	render::temporal::SuperResolutionSizeResult
@@ -81,7 +85,11 @@ namespace cs::features
 		}
 		auto result = _method == Method::kDLSS
 			? _runtime.QueryDLSSRenderSize(a_request)
-			: _runtime.QueryFSRRenderSize(a_request);
+			: _runtime.QueryFSRRenderSize(
+				  a_request,
+				  _method == Method::kFSR4
+					  ? sl::FSRAlgorithm::eFSR4
+					  : sl::FSRAlgorithm::eFSR3);
 		_sizeCache.Store(a_request, result);
 		return result;
 	}
@@ -89,8 +97,12 @@ namespace cs::features
 	render::temporal::ProviderResult StreamlineSuperResolution::Record(
 		const render::temporal::SuperResolutionRequest& a_request)
 	{
-		if (_method == Method::kFSR3) {
-			return _runtime.UpscaleFSRD3D12(a_request);
+		if (_method != Method::kDLSS) {
+			return _runtime.UpscaleFSRD3D12(
+				a_request,
+				_method == Method::kFSR4
+					? sl::FSRAlgorithm::eFSR4
+					: sl::FSRAlgorithm::eFSR3);
 		}
 		return _runtime.UpscaleD3D12(a_request);
 	}
@@ -101,6 +113,9 @@ namespace cs::features
 		_sizeCache.Clear();
 		return _method == Method::kDLSS ?
 			_runtime.DestroyDLSSResources() :
-			_runtime.DestroyFSRResources();
+			_runtime.DestroyFSRResources(
+				_method == Method::kFSR4
+					? sl::FSRAlgorithm::eFSR4
+					: sl::FSRAlgorithm::eFSR3);
 	}
 }

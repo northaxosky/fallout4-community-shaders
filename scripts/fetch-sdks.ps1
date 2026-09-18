@@ -16,12 +16,16 @@
 .PARAMETER StreamlineCandidateDirectory
 	Stage a signed candidate from the pinned Streamline fork instead of downloading its release.
 	Requires the production-key verifier built by the fork's release workflow.
+
+.PARAMETER PackageName
+	Stage only the named manifest packages. Defaults to all packages.
 #>
 [CmdletBinding()]
 param(
 	[string]$CacheDirectory,
 	[switch]$Force,
-	[string]$StreamlineCandidateDirectory
+	[string]$StreamlineCandidateDirectory,
+	[string[]]$PackageName
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,6 +43,15 @@ if (-not $CacheDirectory) {
 New-Item -ItemType Directory -Force -Path $CacheDirectory | Out-Null
 
 $manifest = Import-PowerShellDataFile -LiteralPath $manifestPath
+$packages = @($manifest.Packages)
+if ($PackageName) {
+	foreach ($name in $PackageName) {
+		if ($name -notin $packages.Name) {
+			throw "Unknown SDK package '$name'. Available packages: $($packages.Name -join ', ')."
+		}
+	}
+	$packages = @($packages | Where-Object { $_.Name -in $PackageName })
+}
 
 function Test-Digest {
 	param([string]$Path, [string]$Expected)
@@ -131,7 +144,7 @@ function Copy-StagedFile {
 	Write-Host "  staged $leaf"
 }
 
-foreach ($package in $manifest.Packages) {
+foreach ($package in $packages) {
 	$localCandidate = $package.Name -eq 'Streamline' -and $StreamlineCandidateDirectory
 	if ($localCandidate) {
 		$extractRoot = Get-StreamlineCandidate -Package $package

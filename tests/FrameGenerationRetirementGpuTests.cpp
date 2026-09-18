@@ -4,8 +4,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
+#include <optional>
 #include <string_view>
 #include <thread>
 #include <vector>
@@ -15,6 +17,8 @@
 #include <d3d12sdklayers.h>
 #include <dxgi1_6.h>
 #include <winrt/base.h>
+
+#include "AgilityBootstrap.h"
 
 namespace
 {
@@ -32,6 +36,8 @@ namespace
 		winrt::com_ptr<ID3D12CommandQueue> queue;
 		winrt::com_ptr<ID3D11Device5> device11;
 		winrt::com_ptr<ID3D11DeviceContext4> context11;
+		winrt::com_ptr<ID3D12DeviceFactory> deviceFactory;
+		cs::features::AgilityBootstrapDiagnostics agility;
 		D3D_FEATURE_LEVEL featureLevel11{ D3D_FEATURE_LEVEL_11_0 };
 		D3D_FEATURE_LEVEL featureLevel12{ D3D_FEATURE_LEVEL_11_0 };
 	};
@@ -61,6 +67,33 @@ namespace
 		DXGI_FORMAT format;
 		std::array<float, 4> producerValue;
 		std::array<float, 4> consumerValue;
+	};
+
+	constexpr std::array kFormatCases{
+		FormatCase{
+			.name = "R8G8B8A8_UNORM",
+			.format = DXGI_FORMAT_R8G8B8A8_UNORM,
+			.producerValue = { 0.0F, 1.0F, 0.0F, 1.0F },
+			.consumerValue = { 1.0F, 0.0F, 1.0F, 1.0F }
+		},
+		FormatCase{
+			.name = "R32_FLOAT",
+			.format = DXGI_FORMAT_R32_FLOAT,
+			.producerValue = { 0.25F, 0.0F, 0.0F, 0.0F },
+			.consumerValue = { 0.75F, 0.0F, 0.0F, 0.0F }
+		},
+		FormatCase{
+			.name = "R16G16_FLOAT",
+			.format = DXGI_FORMAT_R16G16_FLOAT,
+			.producerValue = { 0.25F, 0.5F, 0.0F, 0.0F },
+			.consumerValue = { 0.75F, 0.125F, 0.0F, 0.0F }
+		},
+		FormatCase{
+			.name = "R8_UNORM",
+			.format = DXGI_FORMAT_R8_UNORM,
+			.producerValue = { 1.0F / 255.0F, 0.0F, 0.0F, 0.0F },
+			.consumerValue = { 2.0F / 255.0F, 0.0F, 0.0F, 0.0F }
+		}
 	};
 
 	bool Check(bool a_condition, const char* a_message)
@@ -874,17 +907,60 @@ namespace
 	bool TryCreateDevices(
 		IDXGIAdapter1* a_adapter,
 		bool a_reportFailure,
+		const std::filesystem::path* a_agilitySdkDirectory,
 		DeviceBundle& a_devices)
 	{
 		DeviceBundle candidate;
 		candidate.adapter.copy_from(a_adapter);
-		HRESULT result = D3D12CreateDevice(
-			a_adapter,
-			D3D_FEATURE_LEVEL_11_0,
-			IID_PPV_ARGS(candidate.device12.put()));
+		HRESULT result = a_agilitySdkDirectory
+			? cs::features::CreatePrivateD3D12Device(
+				  a_adapter,
+				  *a_agilitySdkDirectory,
+				  candidate.deviceFactory,
+				  candidate.device12.put(),
+				  &candidate.agility)
+			: D3D12CreateDevice(
+				  a_adapter,
+				  D3D_FEATURE_LEVEL_11_0,
+				  IID_PPV_ARGS(candidate.device12.put()));
 		if (FAILED(result)) {
 			if (a_reportFailure) {
-				CheckHr(result, "D3D12CreateDevice");
+				CheckHr(result,
+					a_agilitySdkDirectory
+						? "CreatePrivateD3D12Device"
+						: "D3D12CreateDevice");
+			}
+			return false;
+		}
+		if (a_agilitySdkDirectory &&
+			!candidate.agility.UsedSdkFactory()) {
+			if (a_reportFailure) {
+				std::cerr <<
+					"FAIL: Agility SDK factory fell back to the "
+					"system runtime status=" <<
+					cs::features::AgilityBootstrapStatusName(
+						candidate.agility.status) <<
+					" activation=0x" << std::hex <<
+					std::uppercase <<
+					static_cast<std::uint32_t>(
+						candidate.agility.activationResult) <<
+					std::dec << '\n';
+			}
+			return false;
+		}
+		if (a_agilitySdkDirectory &&
+			(candidate.agility.sdkDirectory.empty() ||
+				!candidate.agility.sdkDirectory.is_absolute() ||
+				candidate.agility.loadedD3D12Core.empty() ||
+				candidate.agility.packagedVersion.major != 1 ||
+				candidate.agility.packagedVersion.minor != 616 ||
+				candidate.agility.packagedVersion.patch != 1 ||
+				candidate.agility.loadedVersion.major == 0 ||
+				!candidate.deviceFactory)) {
+			if (a_reportFailure) {
+				Check(false,
+					"SDK device factory did not report an absolute SDK "
+					"path and an actual loaded D3D12Core identity");
 			}
 			return false;
 		}
@@ -968,6 +1044,8 @@ namespace
 	bool SelectDevices(
 		IDXGIFactory6* a_factory,
 		bool a_hardware,
+		const std::filesystem::path* a_agilitySdkDirectory,
+		bool a_reportHardwareUnavailable,
 		DeviceBundle& a_devices)
 	{
 		if (!a_hardware) {
@@ -977,7 +1055,8 @@ namespace
 				"IDXGIFactory::EnumWarpAdapter")) {
 				return false;
 			}
-			return TryCreateDevices(warp.get(), true, a_devices);
+			return TryCreateDevices(
+				warp.get(), true, a_agilitySdkDirectory, a_devices);
 		}
 
 		for (UINT index = 0;; ++index) {
@@ -997,11 +1076,17 @@ namespace
 				(desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0) {
 				continue;
 			}
-			if (TryCreateDevices(adapter.get(), false, a_devices)) {
+			if (TryCreateDevices(
+					adapter.get(), false, a_agilitySdkDirectory,
+					a_devices)) {
 				return true;
 			}
 		}
-		return Check(false, "no hardware adapter supports the required same-LUID D3D11/D3D12 devices");
+		return !a_reportHardwareUnavailable
+			? false
+			: Check(false,
+				  "no hardware adapter supports the required same-LUID "
+				  "D3D11/D3D12 devices");
 	}
 
 	void PrintDeviceIdentity(
@@ -1019,6 +1104,26 @@ namespace
 		std::cout << "Feature levels: D3D11=" <<
 			FeatureLevelName(a_devices.featureLevel11) <<
 			" D3D12=" << FeatureLevelName(a_devices.featureLevel12) << '\n';
+		if (a_devices.agility.UsedSdkFactory()) {
+			const auto& version = a_devices.agility.loadedVersion;
+			const auto& packaged =
+				a_devices.agility.packagedVersion;
+			std::wcout << L"SDK " <<
+				cs::features::kPrivateD3D12SdkVersion <<
+				L" device factory active; requested path=\"" <<
+				a_devices.agility.sdkDirectory.wstring() <<
+				L"\" package version=" << packaged.major << L'.' <<
+				packaged.minor << L'.' << packaged.patch << L'.' <<
+				packaged.revision << L"; selected core source=" <<
+				(a_devices.agility.LoadedPackagedCore()
+					? L"packaged"
+					: L"system/other") <<
+				L" path=\"" <<
+				a_devices.agility.loadedD3D12Core.wstring() <<
+				L"\" version=" << version.major << L'.' <<
+				version.minor << L'.' << version.patch << L'.' <<
+				version.revision << L'\n';
+		}
 	}
 
 	bool EnableDebugLayerIfAvailable()
@@ -1072,14 +1177,26 @@ namespace
 int main(int a_argc, char** a_argv)
 {
 	bool hardware = false;
+	std::optional<std::filesystem::path> agilitySdkDirectory;
 	if (a_argc == 2 && std::strcmp(a_argv[1], "--hardware") == 0) {
 		hardware = true;
+	} else if (a_argc == 3 &&
+		(std::strcmp(a_argv[1], "--agility") == 0 ||
+			std::strcmp(a_argv[1], "--agility-hardware") == 0)) {
+		hardware =
+			std::strcmp(a_argv[1], "--agility-hardware") == 0;
+		agilitySdkDirectory =
+			std::filesystem::path(a_argv[2]);
 	} else if (a_argc != 1) {
-		std::cerr << "Usage: FrameGenerationRetirementGpuTests.exe [--hardware]\n";
+		std::cerr <<
+			"Usage: FrameGenerationRetirementGpuTests.exe "
+			"[--hardware | --agility <sdk-directory> | "
+			"--agility-hardware <sdk-directory>]\n";
 		return 1;
 	}
 
-	const bool debugLayerEnabled = EnableDebugLayerIfAvailable();
+	const bool debugLayerEnabled =
+		!agilitySdkDirectory && EnableDebugLayerIfAvailable();
 	winrt::com_ptr<IDXGIFactory6> factory;
 	if (!CheckHr(
 			CreateDXGIFactory2(0, IID_PPV_ARGS(factory.put())),
@@ -1087,40 +1204,18 @@ int main(int a_argc, char** a_argv)
 		return 1;
 	}
 	DeviceBundle devices;
-	if (!SelectDevices(factory.get(), hardware, devices)) {
+	if (!SelectDevices(
+			factory.get(),
+			hardware,
+			agilitySdkDirectory ? &*agilitySdkDirectory : nullptr,
+			true,
+			devices)) {
 		return 1;
 	}
 	PrintDeviceIdentity(devices, hardware);
 
-	constexpr std::array formatCases{
-		FormatCase{
-			.name = "R8G8B8A8_UNORM",
-			.format = DXGI_FORMAT_R8G8B8A8_UNORM,
-			.producerValue = { 0.0F, 1.0F, 0.0F, 1.0F },
-			.consumerValue = { 1.0F, 0.0F, 1.0F, 1.0F }
-		},
-		FormatCase{
-			.name = "R32_FLOAT",
-			.format = DXGI_FORMAT_R32_FLOAT,
-			.producerValue = { 0.25F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 0.75F, 0.0F, 0.0F, 0.0F }
-		},
-		FormatCase{
-			.name = "R16G16_FLOAT",
-			.format = DXGI_FORMAT_R16G16_FLOAT,
-			.producerValue = { 0.25F, 0.5F, 0.0F, 0.0F },
-			.consumerValue = { 0.75F, 0.125F, 0.0F, 0.0F }
-		},
-		FormatCase{
-			.name = "R8_UNORM",
-			.format = DXGI_FORMAT_R8_UNORM,
-			.producerValue = { 1.0F / 255.0F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 2.0F / 255.0F, 0.0F, 0.0F, 0.0F }
-		}
-	};
-
 	bool ok = true;
-	for (const auto& formatCase : formatCases) {
+	for (const auto& formatCase : kFormatCases) {
 		ok &= RunBidirectionalAliasScenario(
 			devices.device11.get(),
 			devices.context11.get(),

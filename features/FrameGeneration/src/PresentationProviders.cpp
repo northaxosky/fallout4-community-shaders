@@ -42,7 +42,15 @@ namespace cs::features
 
 	const char* StreamlinePresentation::Name() const noexcept
 	{
-		return _method == Method::kDLSSG ? "DLSS-G" : "FSR-G";
+		switch (_method) {
+		case Method::kDLSSG:
+			return "DLSS-G";
+		case Method::kFSRG:
+			return "FSR 3 Frame Generation";
+		case Method::kFSR4:
+			return "FSR 4 ML Frame Generation";
+		}
+		return "Unknown Frame Generation";
 	}
 
 	ProviderResult StreamlinePresentation::PrepareDevice(ID3D12Device** a_device)
@@ -116,8 +124,9 @@ namespace cs::features
 		_height = a_height;
 		_bufferCount = a_bufferCount;
 		if (_method == Method::kDLSSG) {
-			_ready = _runtime.ConfigureDLSSG(false, a_width, a_height, a_width,
-				a_height, a_bufferCount, true);
+			_ready = _runtime.ConfigureDLSSG(
+				false, _configuration, a_width, a_height,
+				a_width, a_height, a_bufferCount, true);
 		} else {
 			render::temporal::FrameGenerationRequest request;
 			request.renderWidth = a_width;
@@ -136,8 +145,13 @@ namespace cs::features
 				.exposure =
 					render::temporal::ExposureMode::kAutomatic
 			};
-			_ready = _runtime.ConfigureFSRG(false, request) &&
-				_runtime.CheckFSRGCompletionCapability();
+			const auto algorithm = _method == Method::kFSR4
+				? sl::FSRGAlgorithm::eFSR4
+				: sl::FSRGAlgorithm::eFSR3;
+			_ready =
+				_runtime.ValidateFSRGAlgorithm(algorithm).Succeeded() &&
+				_runtime.ConfigureFSRG(false, request, algorithm) &&
+				_runtime.CheckFSRGCompletionCapability(algorithm);
 		}
 		return _ready
 			? Success()
@@ -153,10 +167,15 @@ namespace cs::features
 				std::string(Name()) + " presentation is not ready.");
 		}
 		const bool configured = _method == Method::kDLSSG
-			? _runtime.ConfigureDLSSG(a_request.enabled, a_request.renderWidth,
-				  a_request.renderHeight, a_request.outputWidth,
-				  a_request.outputHeight, _bufferCount, true)
-			: _runtime.ConfigureFSRG(a_request.enabled, a_request);
+			? (_configuration = a_request.configuration,
+				  _runtime.ConfigureDLSSG(a_request.enabled,
+					  _configuration, a_request.renderWidth,
+					  a_request.renderHeight, a_request.outputWidth,
+					  a_request.outputHeight, _bufferCount, true))
+			: _runtime.ConfigureFSRG(a_request.enabled, a_request,
+				  _method == Method::kFSR4
+					  ? sl::FSRGAlgorithm::eFSR4
+					  : sl::FSRGAlgorithm::eFSR3);
 		if (!configured) {
 			return Failure(std::string(Name()) + " options were rejected.");
 		}
@@ -186,12 +205,16 @@ namespace cs::features
 			a_request.recording.commandList);
 		bool disabled = false;
 		if (_method == Method::kDLSSG) {
-			disabled = _runtime.ConfigureDLSSG(false, _width, _height, _width,
-				_height, _bufferCount, true);
+			_configuration = a_request.configuration;
+			disabled = _runtime.ConfigureDLSSG(false, _configuration,
+				_width, _height, _width, _height, _bufferCount, true);
 		} else {
 			auto request = a_request;
 			request.enabled = false;
-			disabled = _runtime.ConfigureFSRG(false, request);
+			disabled = _runtime.ConfigureFSRG(false, request,
+				_method == Method::kFSR4
+					? sl::FSRGAlgorithm::eFSR4
+					: sl::FSRGAlgorithm::eFSR3);
 		}
 		_enabled = false;
 		if (!tagsCleared) {
@@ -213,7 +236,7 @@ namespace cs::features
 		if (!a_enabled &&
 			((_method == Method::kDLSSG &&
 				 !_runtime.HasDLSSGResources()) ||
-				(_method == Method::kFSRG && !_ready))) {
+				(_method != Method::kDLSSG && !_ready))) {
 			_enabled = false;
 			return Success();
 		}
@@ -223,8 +246,8 @@ namespace cs::features
 				" invalid input tags could not be cleared.");
 		}
 		if (_method == Method::kDLSSG) {
-			return _runtime.ConfigureDLSSG(a_enabled, _width, _height, _width,
-					   _height, _bufferCount, true) ?
+			return _runtime.ConfigureDLSSG(a_enabled, _configuration,
+					   _width, _height, _width, _height, _bufferCount, true) ?
 			           Success() :
 			           Failure("DLSS-G enablement change failed.");
 		}
@@ -245,9 +268,13 @@ namespace cs::features
 			.alpha = render::temporal::AlphaMode::kIgnored,
 			.exposure = render::temporal::ExposureMode::kAutomatic
 		};
-		return _runtime.ConfigureFSRG(a_enabled, request)
+		return _runtime.ConfigureFSRG(a_enabled, request,
+				   _method == Method::kFSR4
+					   ? sl::FSRGAlgorithm::eFSR4
+					   : sl::FSRGAlgorithm::eFSR3)
 			? Success()
-			: Failure("FSR-G enablement change failed.");
+			: Failure(std::string(Name()) +
+				  " enablement change failed.");
 	}
 
 	ProviderResult StreamlinePresentation::Quiesce()
@@ -262,8 +289,8 @@ namespace cs::features
 			if (!_runtime.HasDLSSGResources()) {
 				return Success();
 			}
-			if (!_runtime.ConfigureDLSSG(false, _width, _height, _width, _height,
-					_bufferCount, true)) {
+			if (!_runtime.ConfigureDLSSG(false, _configuration,
+					_width, _height, _width, _height, _bufferCount, true)) {
 				return Failure("DLSS-G could not be disabled.");
 			}
 		} else {
@@ -284,8 +311,12 @@ namespace cs::features
 				.exposure =
 					render::temporal::ExposureMode::kAutomatic
 			};
-			if (!_runtime.ConfigureFSRG(false, request)) {
-				return Failure("FSR-G could not be disabled.");
+			if (!_runtime.ConfigureFSRG(false, request,
+					_method == Method::kFSR4
+						? sl::FSRGAlgorithm::eFSR4
+						: sl::FSRGAlgorithm::eFSR3)) {
+				return Failure(std::string(Name()) +
+					" could not be disabled.");
 			}
 		}
 
@@ -301,18 +332,47 @@ namespace cs::features
 			return Success();
 		}
 		if (_method == Method::kDLSSG
-				? _runtime.PollDLSSGState()
-				: _runtime.PollFSRGState()) {
+				? _runtime.LastDLSSGStateSucceeded()
+				: _runtime.PollFSRGState(
+					  _method == Method::kFSR4
+						  ? sl::FSRGAlgorithm::eFSR4
+						  : sl::FSRGAlgorithm::eFSR3)) {
 			return Success();
 		}
 		return Failure(
 			std::string(Name()) + " reported a post-Present failure.");
 	}
 
+	ProviderResult StreamlinePresentation::ValidateConfiguration(
+		const render::temporal::FrameGenerationConfiguration&
+			a_configuration) const
+	{
+		return _method == Method::kDLSSG
+			? _runtime.ValidateDLSSGConfiguration(
+				  a_configuration)
+			: _method == Method::kFSR4
+				? _runtime.ValidateFSRGAlgorithm(
+					  sl::FSRGAlgorithm::eFSR4)
+				: Success();
+	}
+
+	render::temporal::FrameGenerationCapabilities
+	StreamlinePresentation::GetCapabilities() const noexcept
+	{
+		return _method == Method::kDLSSG
+			? _runtime.GetDLSSGCapabilities()
+			: render::temporal::IFrameGenerationProvider::
+				  GetCapabilities();
+	}
+
 	std::optional<std::uint32_t>
 	StreamlinePresentation::ConsumeGeneratedFrameCount() noexcept
 	{
-		return std::nullopt;
+		return _method == Method::kDLSSG
+			? std::optional<std::uint32_t>{
+				  _runtime.ConsumeDLSSGGeneratedFrameCount()
+			  }
+			: std::nullopt;
 	}
 
 	std::optional<std::uint32_t>
@@ -335,7 +395,7 @@ namespace cs::features
 
 	ProviderResult StreamlinePresentation::Sleep(std::uint32_t a_frame)
 	{
-		return _method == Method::kFSRG || _runtime.Sleep(a_frame)
+		return _method != Method::kDLSSG || _runtime.Sleep(a_frame)
 			? Success()
 			: Failure("Reflex sleep failed.");
 	}
@@ -343,7 +403,7 @@ namespace cs::features
 	ProviderResult StreamlinePresentation::SetLatencyMarker(
 		render::temporal::LatencyMarker a_marker, std::uint32_t a_frame)
 	{
-		if (_method == Method::kFSRG) {
+		if (_method != Method::kDLSSG) {
 			return Success();
 		}
 		sl::PCLMarker marker = sl::PCLMarker::eSimulationStart;
@@ -409,6 +469,10 @@ namespace cs::features
 				  _runtime.slDLSSGGetState
 			: _runtime.featureFSRG && _runtime.slFSRGSetOptions &&
 				  _runtime.slFSRGGetState && _runtime.slFSRGQuiesce &&
+				  (_method != Method::kFSR4 ||
+					  _runtime.ValidateFSRGAlgorithm(
+						  sl::FSRGAlgorithm::eFSR4)
+						  .Succeeded()) &&
 				  _runtime.slSetFeatureLoaded &&
 				  _runtime.slSetTagForFrame &&
 				  _runtime.slSetConstants &&

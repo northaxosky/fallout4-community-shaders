@@ -202,6 +202,7 @@ namespace cs::features
 		winrt::com_ptr<ID3D11Device> _outwardDevice11;
 		winrt::com_ptr<ID3D11DeviceContext4> _context11;
 		winrt::com_ptr<IDXGIAdapter> _adapter;
+		winrt::com_ptr<ID3D12DeviceFactory> _deviceFactory;
 		winrt::com_ptr<ID3D12Device> _device12;
 		winrt::com_ptr<ID3D12CommandQueue> _queue;
 		std::array<SubmissionRecord, 2> _srSubmissions;
