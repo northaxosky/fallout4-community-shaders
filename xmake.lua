@@ -56,7 +56,6 @@ end)
 
 add_repositories("fo4cs-repository xmake")
 
-add_requires("fidelityfx-sdk")
 add_requires("vcpkg::directx-headers 1.619.1")
 add_requires("vcpkg::directxmath")
 add_requires("vcpkg::directxtex 2025-10-27")
@@ -170,11 +169,8 @@ target(plugin_name, function()
 
     add_files(
         "src/**.cpp",
-        "features/*/src/**.cpp|features/Upscaling/src/FidelityFX.cpp"
+        "features/*/src/**.cpp"
     )
-    add_files("features/Upscaling/src/FidelityFX.cpp", {
-        force = { cxxflags = { "/EHa", "/wd4652" } }
-    })
 
     add_headerfiles("src/**.h", "features/*/src/**.h")
     add_includedirs(generated_include, "src", "extern")
@@ -191,7 +187,6 @@ target(plugin_name, function()
         "vcpkg::directxmath",
         "vcpkg::directxtex",
         "vcpkg::directxtk",
-        "fidelityfx-sdk",
         "vcpkg::magic-enum",
         "vcpkg::tomlplusplus"
     )
@@ -271,22 +266,6 @@ target("TemporalPipelineStateTests", function()
     add_headerfiles(
         "src/Render/TemporalPipelineState.h",
         "src/Render/TemporalRenderSizing.h"
-    )
-end)
-
-target("StreamlinePresentationTests", function()
-    set_kind("binary")
-    set_default(false)
-    add_files(
-        "tests/StreamlinePresentationTests.cpp",
-        "features/Upscaling/src/StreamlineInterfaceUpgrade.cpp"
-    )
-    add_headerfiles(
-        "features/Upscaling/src/StreamlineInterfaceUpgrade.h"
-    )
-    add_includedirs(
-        "features/Upscaling/src",
-        "extern/Streamline/include"
     )
 end)
 
@@ -452,11 +431,7 @@ target("FrameGenerationCameraTests", function()
     set_kind("binary")
     set_default(false)
     add_files("tests/FrameGenerationCameraTests.cpp")
-    add_headerfiles(
-        "features/Upscaling/src/SuperResolutionFov.h",
-        "src/Render/FrameBufferMath.h"
-    )
-    add_includedirs("features/Upscaling/src")
+    add_headerfiles("src/Render/FrameBufferMath.h")
     add_packages("vcpkg::directxmath")
 end)
 
@@ -467,7 +442,6 @@ target("FrameGenerationContractTests", function()
     add_headerfiles(
         "src/Render/FrameGenerationCpuTiming.h",
         "src/Render/FrameGenerationOrchestration.h",
-        "features/FrameGeneration/src/FidelityFXFrameGenerationContract.h",
         "features/FrameGeneration/src/StreamlineFrameGenerationContract.h"
     )
     add_includedirs(
@@ -680,10 +654,6 @@ end)
 
 target("TemporalPipelineStateTests", function()
     add_tests("TemporalPipelineState")
-end)
-
-target("StreamlinePresentationTests", function()
-    add_tests("StreamlinePresentation")
 end)
 
 target("ScreenSpaceShadowsMathTests", function()

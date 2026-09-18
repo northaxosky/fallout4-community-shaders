@@ -9,7 +9,7 @@
 
 namespace cs::render::temporal
 {
-	inline constexpr D3D_FEATURE_LEVEL kFsrMinimumFeatureLevel =
+	inline constexpr D3D_FEATURE_LEVEL kTemporalInteropMinimumFeatureLevel =
 		D3D_FEATURE_LEVEL_11_1;
 
 	inline void ConfigureTemporalFeatureLevels(
@@ -17,8 +17,7 @@ namespace cs::render::temporal
 		std::vector<D3D_FEATURE_LEVEL>& a_levels)
 	{
 		if (!a_request.upscalingEligible &&
-			!(a_request.frameGenerationEligible &&
-				a_request.frameGeneration == FrameGenerationMethod::kDLSSG)) {
+			!a_request.frameGenerationEligible) {
 			return;
 		}
 		if (a_levels.empty()) {
@@ -32,10 +31,10 @@ namespace cs::render::temporal
 				D3D_FEATURE_LEVEL_9_1
 			};
 		}
-		std::erase(a_levels, kFsrMinimumFeatureLevel);
+		std::erase(a_levels, kTemporalInteropMinimumFeatureLevel);
 		const auto lower = std::ranges::find_if(a_levels, [](auto a_level) {
-			return a_level < kFsrMinimumFeatureLevel;
+			return a_level < kTemporalInteropMinimumFeatureLevel;
 		});
-		a_levels.insert(lower, kFsrMinimumFeatureLevel);
+		a_levels.insert(lower, kTemporalInteropMinimumFeatureLevel);
 	}
 }

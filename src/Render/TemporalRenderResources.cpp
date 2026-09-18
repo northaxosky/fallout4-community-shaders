@@ -259,21 +259,7 @@ namespace cs::render
 
 		DestroyUpscalingTextureResources(a_upscalemethod);
 
-		bool ok = true;
-		if (a_upscalemethod == UpscaleMethod::kFSR) {
-			const auto* state = cs::engine::GetGraphicsState();
-			const auto [renderWidth, renderHeight] = GetRenderSize();
-			ok = state &&
-				render::TemporalPipeline::Get()
-					.CreateFsrSuperResolutionResources(
-						cs::engine::GetDevice(),
-						renderWidth,
-						renderHeight,
-						state->screenWidth,
-						state->screenHeight);
-		}
-
-		ok = CreateUpscalingTextureResources(a_upscalemethod) && ok;
+		const bool ok = CreateUpscalingTextureResources(a_upscalemethod);
 
 		previousUpscaleMode = a_upscalemethod;
 		previousQualityMode = settings.qualityMode;
@@ -466,8 +452,6 @@ namespace cs::render
 			resourcesReady && PreflightExternalResolve(method);
 		_spatialFallbackPreflightReady.store(ok, std::memory_order_release);
 
-		rcas.Initialize();
-
 		if (IsFrameGenerationDx12PathActive() && !_copyDepthForFrameGenerationCS) {
 			_copyDepthForFrameGenerationCS.attach(
 				static_cast<ID3D11ComputeShader*>(cs::util::CompileShader(
@@ -562,17 +546,6 @@ namespace cs::render
 		auto* state = cs::engine::GetGraphicsState();
 		const auto sizeResult = PrepareRenderSize(state, method);
 		bool recreated = sizeResult.Succeeded();
-		if (method == UpscaleMethod::kFSR) {
-			const auto [renderWidth, renderHeight] = GetRenderSize();
-			recreated = recreated && state &&
-				render::TemporalPipeline::Get()
-					.CreateFsrSuperResolutionResources(
-						cs::engine::GetDevice(),
-						renderWidth,
-						renderHeight,
-						state->screenWidth,
-						state->screenHeight);
-		}
 		recreated = recreated &&
 			CreateUpscalingTextureResources(method);
 		recreated = recreated && PreflightExternalResolve(method);

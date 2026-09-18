@@ -162,16 +162,15 @@ namespace cs::features
 
 		void PublishRetirementDiagnostics(
 			cs::telemetry::Sink& a_sink,
-			const render::temporal::PresentInputRetirementDiagnostics& a_diagnostics,
-			bool a_synchronous)
+			const render::temporal::PresentInputRetirementDiagnostics& a_diagnostics)
 		{
 			a_sink
 				.Field("input_retirement_mode",
-					a_synchronous ? std::string_view{ "synchronous_present_game_queue_fence" } : std::string_view{ "recorded_command_list" })
+					std::string_view{ "vendor_completion_fence" })
 				.Field("input_retirement_source_queue",
-					a_synchronous ? std::string_view{ "game_direct" } : std::string_view{ "provider_recording" })
+					std::string_view{ "streamline_provider" })
 				.Field("input_retirement_signal_point",
-					a_synchronous ? std::string_view{ "post_present_callback_submission" } : std::string_view{ "prepare_command_list" });
+					std::string_view{ "post_vendor_fence_join" });
 			for (const auto& field : kRetirementCounterFields) {
 				a_sink.Field(field.name, a_diagnostics.*field.value);
 			}
@@ -280,10 +279,6 @@ namespace cs::features
 		const auto status = render::TemporalPipeline::Get().GetStatus();
 		const auto diagnostics =
 			render::TemporalPipeline::Get().GetFrameGenerationDiagnostics();
-		const bool synchronousRetirement =
-			status.effective.frameGeneration ==
-				render::temporal::FrameGenerationMethod::kFSR3 &&
-			!status.session.nativeFsrFrameGeneration;
 		a_sink.Field("requested_enabled", settings.enabled)
 			.Field("requested_method", settings.frameGenerationMethod)
 			.Field("requested_method_name",
@@ -291,8 +286,8 @@ namespace cs::features
 			.Field("effective_enabled", status.effective.frameGenerationEnabled)
 			.Field("effective_method",
 				static_cast<std::uint8_t>(status.effective.frameGeneration))
-			.Field("native_streamline_fsr",
-				status.session.nativeFsrFrameGeneration)
+			.Field("provider_transport",
+				std::string_view{ "streamline_d3d12" })
 			.Field("proxy_installed", status.session.proxyInstalled)
 			.Field("ready", diagnostics.ready)
 			.Field("active", diagnostics.active)
@@ -303,10 +298,6 @@ namespace cs::features
 			.Field("input_transfer", std::string_view{ "gamma_2_2" })
 			.Field("input_color_stage", std::string_view{ "post_tonemap_lut" })
 			.Field("input_lut_baked", true)
-			.Field("ffx_transfer_classification",
-				status.session.nativeFsrFrameGeneration
-					? std::string_view{ "gamma_2_2" }
-					: std::string_view{ "srgb" })
 			.Field("last_alpha_conditioned", diagnostics.alphaConditioned)
 			.Field("alpha_conditioned_captures", diagnostics.conditionedCaptures)
 			.Field("raw_captures", diagnostics.rawCaptures)
@@ -318,14 +309,6 @@ namespace cs::features
 				diagnostics.providerPresentedFrames)
 			.Field("provider_presented_frame_count_available",
 				diagnostics.providerPresentedFrameCountAvailable)
-			.Field("fidelityfx_provider_version_available",
-				diagnostics.fidelityFxProviderVersionAvailable)
-			.Field("fidelityfx_provider_version_id",
-				static_cast<std::int64_t>(diagnostics.fidelityFxProviderVersionId))
-			.Field("fidelityfx_provider_version_name",
-				diagnostics.fidelityFxProviderVersionName)
-			.Field("fidelityfx_provider_version_query_result",
-				diagnostics.fidelityFxProviderVersionQueryResult)
 			.Field("failures", diagnostics.failures)
 			.Field("camera_valid", diagnostics.cameraValid)
 			.Field("camera_frame_delta", diagnostics.cameraFrameDelta)
@@ -356,8 +339,7 @@ namespace cs::features
 				diagnostics.cpuTiming.lastFrameTimeInputMilliseconds)
 			.Field("sdk_present_cpu_excludes_test", true)
 			.Field("sdk_present_cpu_includes_retries", true);
-		PublishRetirementDiagnostics(a_sink, diagnostics.inputRetirement,
-			synchronousRetirement);
+		PublishRetirementDiagnostics(a_sink, diagnostics.inputRetirement);
 		PublishCpuTimings(a_sink, diagnostics.cpuTiming);
 	}
 

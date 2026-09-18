@@ -1,5 +1,6 @@
 #include "Render/TemporalRendererInternals.h"
 #include "Render/FrameGenerationOrchestration.h"
+#include "Render/FrameBuffer.h"
 
 namespace cs::render
 {
@@ -199,7 +200,6 @@ namespace cs::render
 		_hudlessCapturePending = false;
 		render::TemporalPipeline::Get()
 			.ResetFrameGenerationCaptureDiagnostics();
-		render::TemporalPipeline::Get().ResetFsrFrameGenerationCamera();
 		render::TemporalPipeline::Get().SetFrameGenerationInputsReady(false);
 	}
 
@@ -233,7 +233,6 @@ namespace cs::render
 			pipeline.FrameGenerationResetPending();
 		if (pipeline.ArmFrameGenerationReset()) {
 			InvalidateFirstPersonAlphaState();
-			pipeline.RequestFsrFrameGenerationReset();
 		}
 		const auto capture =
 			pipeline.GetFrameGenerationCaptureResources();

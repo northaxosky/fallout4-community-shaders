@@ -11,7 +11,6 @@
 #include "DynamicResolution.h"
 #include "RCAS/RCAS.h"
 #include "SamplerBias.h"
-#include "SuperResolutionFov.h"
 
 #include <atomic>
 #include <cstdint>
@@ -151,7 +150,6 @@ namespace cs::render
 		void ScheduleNativeSuperResolutionFallback() noexcept;
 		void UpscaleDepth();
 		bool Upscale();
-		bool ApplySharpening(ID3D11Texture2D* a_frameBuffer);
 
 		void CaptureFrameGenerationInputs();
 		void CaptureHUDLessColor();
@@ -242,7 +240,6 @@ namespace cs::render
 
 		features::DynamicResolution dynamicResolution;
 		features::SamplerBias samplerBias;
-		features::SuperResolutionFovCache superResolutionFovCache;
 
 		bool IsDrivingFrameState() const noexcept;
 

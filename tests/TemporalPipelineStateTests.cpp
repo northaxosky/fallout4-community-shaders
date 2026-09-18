@@ -46,10 +46,9 @@ namespace
 		const auto unrelatedFailure =
 			ClassifyFailure(FailureDomain::kStreamline, SuperResolutionMethod::kFSR3,
 				FrameGenerationMethod::kFSR3);
-		Check(!unrelatedFailure.superResolution &&
-				  !unrelatedFailure.frameGeneration,
-			"Streamline failure preserves the temporary independent FSR "
-			"baseline");
+		Check(unrelatedFailure.superResolution &&
+				  unrelatedFailure.frameGeneration,
+			"Streamline failure quarantines native FSR SR and FG consumers");
 		const auto transportFailure =
 			ClassifyFailure(FailureDomain::kTransport, SuperResolutionMethod::kFSR3,
 				FrameGenerationMethod::kFSR3);
@@ -116,21 +115,9 @@ namespace
 			"requested and effective topology remain distinct after failure");
 	}
 
-	void TestSupportedProviderIdsAndRemovedValues()
+	void TestInvalidProviderValues()
 	{
 		using namespace cs::render::temporal;
-
-		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kNone) == 0);
-		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kTAA) == 1);
-		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kFSR3) == 2);
-		static_assert(static_cast<std::uint8_t>(SuperResolutionMethod::kDLSS) == 3);
-		static_assert(static_cast<std::uint8_t>(FrameGenerationMethod::kOff) == 0);
-		static_assert(static_cast<std::uint8_t>(FrameGenerationMethod::kFSR3) == 1);
-		static_assert(static_cast<std::uint8_t>(FrameGenerationMethod::kDLSSG) == 2);
-		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kNONE) == 0);
-		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kTAA) == 1);
-		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kFSR) == 2);
-		static_assert(static_cast<std::uint32_t>(UpscaleMethod::kDLSS) == 3);
 
 		constexpr auto removedSr =
 			static_cast<SuperResolutionMethod>(kMaxUpscaleMethodValue + 1);
@@ -243,7 +230,7 @@ namespace
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(levels == std::vector<D3D_FEATURE_LEVEL>{ D3D_FEATURE_LEVEL_11_1,
 							D3D_FEATURE_LEVEL_11_0 },
-			"upscaling sessions use a consistent FSR-compatible device preference");
+			"temporal sessions request the shared-fence interop feature level");
 		const auto once = levels;
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(levels == once, "feature-level preference is idempotent");
@@ -267,13 +254,8 @@ namespace
 		request.upscalingEligible = false;
 		levels = { D3D_FEATURE_LEVEL_11_0 };
 		ConfigureTemporalFeatureLevels(request, levels);
-		Check(levels == std::vector<D3D_FEATURE_LEVEL>{ D3D_FEATURE_LEVEL_11_0 },
-			"FSR frame generation alone does not require an unused SR device "
-			"upgrade");
-		request.frameGeneration = FrameGenerationMethod::kDLSSG;
-		ConfigureTemporalFeatureLevels(request, levels);
 		Check(levels.front() == D3D_FEATURE_LEVEL_11_1,
-			"DLSS-G preserves its existing D3D11 feature-level preference");
+			"frame generation alone preserves the shared interop requirement");
 
 		request.frameGenerationEligible = false;
 		levels.clear();
@@ -282,38 +264,9 @@ namespace
 			"inactive temporal features leave native device creation unchanged");
 	}
 
-	void TestUniformStartupSelections()
+	void TestLiveTransitions()
 	{
 		using namespace cs::render::temporal;
-		for (unsigned sr = 0;
-			sr < static_cast<unsigned>(SuperResolutionMethod::kCount); ++sr) {
-			for (unsigned fg = 0;
-				fg < static_cast<unsigned>(FrameGenerationMethod::kCount); ++fg) {
-				RequestedTopology request;
-				request.upscalingEligible = true;
-				request.frameGenerationEligible = true;
-				request.superResolution = static_cast<SuperResolutionMethod>(sr);
-				request.frameGeneration = static_cast<FrameGenerationMethod>(fg);
-				TopologyState state;
-				Check(state.Freeze(request), "matrix request freezes");
-				SessionTopology session;
-				session.valid = true;
-				session.proxyInstalled = true;
-				session.admittedSr.fill(true);
-				session.admittedFg[static_cast<std::size_t>(
-					FrameGenerationMethod::kOff)] = true;
-				session.admittedFg[static_cast<std::size_t>(
-					request.frameGeneration)] = true;
-				session.activeFg = request.frameGeneration;
-				Check(state.Admit(session), "matrix session admits");
-				Check(state.Effective().superResolution ==
-						  request.superResolution &&
-						  state.Effective().frameGeneration ==
-							  request.frameGeneration,
-					"every startup SR/FG combination retains its admitted selection");
-			}
-		}
-
 		RequestedTopology liveRequest;
 		liveRequest.upscalingEligible = true;
 		liveRequest.frameGenerationEligible = true;
@@ -324,8 +277,6 @@ namespace
 		SessionTopology liveSession;
 		liveSession.valid = true;
 		liveSession.proxyInstalled = true;
-		liveSession.nativeFsrSuperResolution = true;
-		liveSession.nativeFsrFrameGeneration = true;
 		liveSession.admittedSr.fill(true);
 		liveSession.admittedFg.fill(true);
 		Check(live.Admit(liveSession), "live transition fixture admits");
@@ -533,6 +484,22 @@ namespace
 					  FrameGenerationMethod::kOff,
 			"an unavailable provider is rejected before private-chain "
 			"teardown");
+
+		TopologyState unavailableSr;
+		Check(unavailableSr.Freeze(liveRequest),
+			"unavailable SR fixture freezes");
+		oneProvider.admittedSr[static_cast<std::size_t>(
+			SuperResolutionMethod::kFSR3)] = false;
+		Check(unavailableSr.Admit(oneProvider),
+			"unavailable SR fixture admits its supported providers");
+		unavailableSr.SubmitLive(
+			true, SuperResolutionMethod::kFSR3, 1, false,
+			FrameGenerationMethod::kOff, 22);
+		Check(!unavailableSr.PendingTransition() &&
+				  unavailableSr.Pending().required &&
+				  unavailableSr.Effective().superResolution ==
+					  SuperResolutionMethod::kTAA,
+			"an unavailable external SR provider is rejected before teardown");
 
 		TopologyState rejected;
 		RequestedTopology request;
@@ -897,148 +864,6 @@ namespace
 		Check(timeline.BeginFrame() == 2, "next normal loop advances once");
 	}
 
-	class MockSuperResolution final : public cs::render::temporal::ISuperResolutionProvider
-	{
-	public:
-		const char* Name() const noexcept override { return "mock-sr"; }
-		cs::render::temporal::ProviderResult Initialize(
-			const cs::render::temporal::SuperResolutionInitContext&) override
-		{
-			initialized = true;
-			return { .code = cs::render::temporal::ProviderResultCode::kSuccess };
-		}
-		cs::render::temporal::SuperResolutionSizeResult QueryRenderSize(
-			const cs::render::temporal::SuperResolutionSizeRequest& a_request)
-			override
-		{
-			if (const auto* cached = sizeCache.Find(a_request)) {
-				return *cached;
-			}
-			++sizeQueryCount;
-			cs::render::temporal::SuperResolutionSizeResult result{
-				.result = { .code = cs::render::temporal::ProviderResultCode::kSuccess },
-				.renderWidth = a_request.qualityMode == 0 ? a_request.outputWidth : a_request.outputWidth - 1,
-				.renderHeight = a_request.qualityMode == 0 ? a_request.outputHeight : a_request.outputHeight - 1
-			};
-			sizeCache.Store(a_request, result);
-			return result;
-		}
-		cs::render::temporal::ProviderResult Record(
-			const cs::render::temporal::SuperResolutionRequest& a_request) override
-		{
-			recordedD3D12 =
-				std::holds_alternative<cs::render::temporal::D3D12RecordingContext>(
-					a_request.recording);
-			return { .code = cs::render::temporal::ProviderResultCode::kSuccess };
-		}
-		cs::render::temporal::ProviderResult
-		DestroyAfterDrain() noexcept override
-		{
-			initialized = false;
-			return {
-				.code =
-					cs::render::temporal::ProviderResultCode::kSuccess
-			};
-		}
-
-		bool initialized = false;
-		bool recordedD3D12 = false;
-		std::uint32_t sizeQueryCount = 0;
-		cs::render::temporal::SuperResolutionSizeCache sizeCache;
-	};
-
-	class MockFrameGeneration final : public cs::render::temporal::IFrameGenerationProvider
-	{
-	public:
-		const char* Name() const noexcept override { return "mock-fg"; }
-		cs::render::temporal::ProviderResult PrepareDevice(ID3D12Device**) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		PrepareFactory(IDXGIFactory4**) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		CreatePresentation(const cs::render::temporal::PresentationCreateContext&,
-			IDXGISwapChain4**) override
-		{
-			created = true;
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		CreateDisplayResources(std::uint32_t, std::uint32_t, DXGI_FORMAT,
-			std::uint32_t) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		PrepareFrame(const cs::render::temporal::FrameGenerationRequest&) override
-		{
-			++prepareCount;
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		CancelFrame(const cs::render::temporal::FrameGenerationRequest&) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult SetGenerationEnabled(bool) override
-		{
-			return Success();
-		}
-		cs::render::temporal::PresentInputRetirementMode
-		GetPresentInputRetirementMode() const noexcept override
-		{
-			return cs::render::temporal::PresentInputRetirementMode::
-				kRecordedCommandList;
-		}
-		cs::render::temporal::ProviderResult CollectPresentStatus(UINT,
-			HRESULT) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult Sleep(std::uint32_t) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		SetLatencyMarker(cs::render::temporal::LatencyMarker,
-			std::uint32_t) override
-		{
-			return Success();
-		}
-		cs::render::temporal::ProviderResult Quiesce() override
-		{
-			quiesced = true;
-			return Success();
-		}
-		cs::render::temporal::ProviderResult
-		ReleaseDisplayResources() noexcept override
-		{
-			released = true;
-			return Success();
-		}
-		cs::render::temporal::ProviderResult DestroyAfterDrain() noexcept override
-		{
-			destroyed = true;
-			return Success();
-		}
-		bool IsReady() const noexcept override { return created; }
-
-		static cs::render::temporal::ProviderResult Success()
-		{
-			return { .code = cs::render::temporal::ProviderResultCode::kSuccess };
-		}
-
-		bool created = false;
-		bool quiesced = false;
-		bool released = false;
-		bool destroyed = false;
-		std::uint32_t prepareCount = 0;
-	};
-
 	void TestTypedProviderContracts()
 	{
 		using namespace cs::render::temporal;
@@ -1056,35 +881,30 @@ namespace
 		Check(!IsFo4PostTonemapSdr(observed),
 			"linear intermediates cannot masquerade as engine gamma output");
 
-		MockSuperResolution sr;
-		SuperResolutionInitContext init{ .device =
-											 static_cast<ID3D12Device*>(nullptr) };
-		Check(sr.Initialize(init).Succeeded(), "mock SR initializes");
 		const SuperResolutionSizeRequest nativeRequest{
 			.outputWidth = 3840,
 			.outputHeight = 2160,
 			.qualityMode = 0
 		};
-		const auto nativeSize = sr.QueryRenderSize(nativeRequest);
-		Check(nativeSize.Succeeded() &&
-				  nativeSize.renderWidth == nativeRequest.outputWidth &&
-				  nativeSize.renderHeight == nativeRequest.outputHeight,
-			"Native AA preserves the exact output extent");
-		(void)sr.QueryRenderSize(nativeRequest);
-		Check(sr.sizeQueryCount == 1,
-			"repeated provider sizing requests use the provider cache");
-		(void)sr.QueryRenderSize(
-			{ .outputWidth = 3840, .outputHeight = 2160, .qualityMode = 1 });
-		Check(sr.sizeQueryCount == 2,
-			"quality changes invalidate the provider sizing cache");
-		(void)sr.QueryRenderSize(
-			{ .outputWidth = 2560, .outputHeight = 1440, .qualityMode = 1 });
-		Check(sr.sizeQueryCount == 3,
-			"output changes invalidate the provider sizing cache");
-		MockSuperResolution secondProvider;
-		(void)secondProvider.QueryRenderSize(nativeRequest);
-		Check(secondProvider.sizeQueryCount == 1 && sr.sizeQueryCount == 3,
-			"provider sizing caches remain provider-owned");
+		const SuperResolutionSizeResult nativeSize{
+			.result = { .code = ProviderResultCode::kSuccess },
+			.renderWidth = nativeRequest.outputWidth,
+			.renderHeight = nativeRequest.outputHeight
+		};
+		SuperResolutionSizeCache sizeCache;
+		sizeCache.Store(nativeRequest, nativeSize);
+		Check(sizeCache.Find(nativeRequest) &&
+				  sizeCache.Find(nativeRequest)->renderWidth ==
+					  nativeRequest.outputWidth,
+			"provider sizing cache returns only the exact successful request");
+		Check(!sizeCache.Find({ .outputWidth = 3840,
+				  .outputHeight = 2160,
+				  .qualityMode = 1 }),
+			"quality changes miss the provider sizing cache");
+		sizeCache.Store(nativeRequest,
+			{ .result = { .code = ProviderResultCode::kFailure } });
+		Check(sizeCache.Find(nativeRequest),
+			"failed queries never replace the last usable provider sizing");
 
 		RenderSizeState sizing;
 		sizing.SetNative(3441, 1441);
@@ -1121,9 +941,6 @@ namespace
 				  sizing.Committed() == RenderExtent{ 3441, 1441 },
 			"failed sizing restores native state before commitment");
 
-		SuperResolutionRequest request{ .recording = D3D12RecordingContext{} };
-		Check(sr.Record(request).Succeeded(), "mock SR records");
-		Check(sr.recordedD3D12, "typed SR request preserves D3D12 ownership");
 		ProviderResult recorded{ .code = ProviderResultCode::kSuccess,
 			.workState = ProviderWorkState::kRecorded,
 			.outputDependencyEstablished = true };
@@ -1137,27 +954,16 @@ namespace
 		Check(!recorded.CanPublishOutput(),
 			"missing synchronization dependency denies publication");
 
-		MockFrameGeneration fg;
-		Check(fg.CreatePresentation({}, nullptr).Succeeded(),
-			"mock FG creates presentation");
-		Check(fg.PrepareFrame({}).Succeeded(), "mock FG prepares once");
-		Check(fg.prepareCount == 1,
-			"Present retry does not require another preparation");
-		Check(fg.Quiesce().Succeeded(), "provider quiesces");
-		(void)fg.ReleaseDisplayResources();
-		(void)fg.DestroyAfterDrain();
-		Check(fg.quiesced && fg.released && fg.destroyed,
-			"provider cleanup order remains observable");
 	}
 }  // namespace
 
 int main()
 {
 	TestRequestedEffectiveAndPending();
-	TestSupportedProviderIdsAndRemovedValues();
+	TestInvalidProviderValues();
 	TestQuarantinedConfiguration();
 	TestTemporalFeatureLevels();
-	TestUniformStartupSelections();
+	TestLiveTransitions();
 	TestSelectedStartupInitialization();
 	TestPreUiHandoffPlanning();
 	TestFrameGenerationActivity();

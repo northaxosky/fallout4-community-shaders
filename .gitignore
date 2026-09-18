@@ -22,6 +22,7 @@ __pycache__/
 
 # Downloaded SDK archives and the staged proprietary runtime DLLs
 .sdk-cache/
+extern/FidelityFX-SDK/
 features/Upscaling/Shaders/Upscaling/Streamline/
 features/Upscaling/Shaders/Upscaling/FidelityFX/
 

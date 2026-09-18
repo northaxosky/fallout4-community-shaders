@@ -1084,7 +1084,7 @@ namespace
 		return a_jobs.size() - firstJob;
 	}
 
-	constexpr std::size_t kUpscalingPermutations = 8;
+	constexpr std::size_t kUpscalingPermutations = 7;
 
 	std::size_t AddUpscaling(
 		std::vector<ShaderCompileJob>& a_jobs,
@@ -1125,13 +1125,6 @@ namespace
 			"main",
 			"upscaling fullscreen");
 
-		AddCompile(
-			a_jobs,
-			upscalingRoot / "RCAS" / "RCAS.hlsl",
-			{},
-			"cs_5_0",
-			"main",
-			"upscaling D3D11 sharpening");
 		AddCompile(
 			a_jobs,
 			upscalingRoot / "RCAS" / "RCAS.hlsl",

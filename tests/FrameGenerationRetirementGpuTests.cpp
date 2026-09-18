@@ -12,6 +12,7 @@
 
 #include <d3d11_4.h>
 #include <d3d12.h>
+#include <d3d12sdklayers.h>
 #include <dxgi1_6.h>
 #include <winrt/base.h>
 
@@ -304,7 +305,7 @@ namespace
 			AppendBytes<std::uint16_t>(bytes, a_producer ? 0x3800 : 0x3000);
 			return bytes;
 		case DXGI_FORMAT_R8_UNORM:
-			return { a_producer ? std::byte{ 0 } : std::byte{ 255 } };
+			return { a_producer ? std::byte{ 1 } : std::byte{ 2 } };
 		default:
 			return {};
 		}
@@ -1020,17 +1021,51 @@ namespace
 			" D3D12=" << FeatureLevelName(a_devices.featureLevel12) << '\n';
 	}
 
-	void EnableDebugLayerIfAvailable()
+	bool EnableDebugLayerIfAvailable()
 	{
 		winrt::com_ptr<ID3D12Debug> debug;
 		const HRESULT result = D3D12GetDebugInterface(
 			IID_PPV_ARGS(debug.put()));
 		if (FAILED(result)) {
 			std::cout << "D3D12 debug layer unavailable\n";
-			return;
+			return false;
 		}
 		debug->EnableDebugLayer();
 		std::cout << "D3D12 debug layer enabled\n";
+		return true;
+	}
+
+	bool CheckDebugMessages(ID3D12Device* a_device)
+	{
+		winrt::com_ptr<ID3D12InfoQueue> messages;
+		if (!CheckHr(a_device->QueryInterface(IID_PPV_ARGS(messages.put())),
+				"QueryInterface(ID3D12InfoQueue)")) {
+			return false;
+		}
+
+		bool ok = true;
+		const auto count = messages->GetNumStoredMessagesAllowedByRetrievalFilter();
+		for (UINT64 index = 0; index < count; ++index) {
+			SIZE_T size = 0;
+			if (!CheckHr(messages->GetMessage(index, nullptr, &size),
+					"GetMessage(size)")) {
+				return false;
+			}
+			std::vector<std::byte> storage(size);
+			auto* message = reinterpret_cast<D3D12_MESSAGE*>(storage.data());
+			if (!CheckHr(messages->GetMessage(index, message, &size),
+					"GetMessage")) {
+				return false;
+			}
+			if (message->Severity == D3D12_MESSAGE_SEVERITY_CORRUPTION ||
+				message->Severity == D3D12_MESSAGE_SEVERITY_ERROR) {
+				std::cerr << "FAIL: D3D12 validation " <<
+					static_cast<unsigned>(message->ID) << ": " <<
+					message->pDescription << '\n';
+				ok = false;
+			}
+		}
+		return ok;
 	}
 }
 
@@ -1044,7 +1079,7 @@ int main(int a_argc, char** a_argv)
 		return 1;
 	}
 
-	EnableDebugLayerIfAvailable();
+	const bool debugLayerEnabled = EnableDebugLayerIfAvailable();
 	winrt::com_ptr<IDXGIFactory6> factory;
 	if (!CheckHr(
 			CreateDXGIFactory2(0, IID_PPV_ARGS(factory.put())),
@@ -1079,8 +1114,8 @@ int main(int a_argc, char** a_argv)
 		FormatCase{
 			.name = "R8_UNORM",
 			.format = DXGI_FORMAT_R8_UNORM,
-			.producerValue = { 0.0F, 0.0F, 0.0F, 0.0F },
-			.consumerValue = { 1.0F, 0.0F, 0.0F, 0.0F }
+			.producerValue = { 1.0F / 255.0F, 0.0F, 0.0F, 0.0F },
+			.consumerValue = { 2.0F / 255.0F, 0.0F, 0.0F, 0.0F }
 		}
 	};
 
@@ -1105,6 +1140,9 @@ int main(int a_argc, char** a_argv)
 		devices.device12.get(),
 		devices.queue.get(),
 		false);
+	if (debugLayerEnabled) {
+		ok &= CheckDebugMessages(devices.device12.get());
+	}
 	if (!ok) {
 		return 1;
 	}

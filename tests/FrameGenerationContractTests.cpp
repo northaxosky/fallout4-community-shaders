@@ -2,17 +2,7 @@
 #include "Render/FrameGenerationOrchestration.h"
 #include "Render/TemporalPipelineState.h"
 
-#pragma warning(push)
-#pragma warning(disable: 4068 4100)
-#include "FidelityFXFrameGenerationContract.h"
-#pragma warning(pop)
-
 #include "StreamlineFrameGenerationContract.h"
-
-#pragma warning(push)
-#pragma warning(disable: 4068 4100)
-#include <FidelityFX/api/include/ffx_api.hpp>
-#pragma warning(pop)
 
 #include <iostream>
 #include <memory>
@@ -176,12 +166,6 @@ namespace
 		{
 			events.emplace_back(a_enabled ? "enable" : "disable");
 			return Success();
-		}
-		cs::render::temporal::PresentInputRetirementMode
-		GetPresentInputRetirementMode() const noexcept override
-		{
-			return cs::render::temporal::PresentInputRetirementMode::
-				kRecordedCommandList;
 		}
 		cs::render::temporal::ProviderResult
 		CollectPresentStatus(UINT a_flags, HRESULT a_result) override
@@ -565,85 +549,6 @@ namespace
 			"already completed retirement acquires without a queue wait");
 	}
 
-	void TestSynchronousPresentRetirement()
-	{
-		using namespace cs::render::temporal;
-		std::vector<std::string> events;
-		std::uint64_t nextFence = 4;
-		const auto submission = PresentAndRetireInputs(
-			PresentInputRetirementMode::kSynchronousPresentQueue, true, 90, 7, 13,
-			nextFence,
-			[&]() {
-				events.emplace_back("sdk-last-read-submit");
-				events.emplace_back("present-return");
-				return S_OK;
-			},
-			[&](std::uint64_t a_value) {
-				events.emplace_back("signal:" + std::to_string(a_value));
-				return S_OK;
-			});
-		Check(submission.presentResult == S_OK && submission.signalResult == S_OK &&
-				  submission.token && submission.token->value == 4 &&
-				  submission.token->realFrame == 90 &&
-				  submission.token->resourceGeneration == 7 &&
-				  submission.token->queueIdentity == 13 && nextFence == 5,
-			"synchronous Present emits an exact same-queue retirement token");
-		Check(events == std::vector<std::string>{ "sdk-last-read-submit",
-							"present-return", "signal:4" },
-			"retirement signal is submitted after the SDK last reader");
-
-		events.clear();
-		const auto failed = PresentAndRetireInputs(
-			PresentInputRetirementMode::kSynchronousPresentQueue, true, 91, 7, 13,
-			nextFence,
-			[&]() {
-				events.emplace_back("present-return");
-				return DXGI_ERROR_DEVICE_REMOVED;
-			},
-			[&](std::uint64_t) {
-				events.emplace_back("signal-failed");
-				return DXGI_ERROR_DEVICE_REMOVED;
-			});
-		Check(FAILED(failed.presentResult) && FAILED(failed.signalResult) &&
-				  !failed.token &&
-				  events == std::vector<std::string>{ "present-return" },
-			"device removal never signals or publishes an unproven retirement "
-			"token");
-
-		events.clear();
-		const auto vendor = PresentAndRetireInputs(
-			PresentInputRetirementMode::kVendorCompletionFence, true, 92, 7, 13,
-			nextFence,
-			[&]() {
-				events.emplace_back("present");
-				return S_OK;
-			},
-			[&](std::uint64_t) {
-				events.emplace_back("unexpected-signal");
-				return S_OK;
-			});
-		Check(SUCCEEDED(vendor.presentResult) && FAILED(vendor.signalResult) &&
-				  !vendor.token &&
-				  events == std::vector<std::string>{ "present" },
-			"vendor-fence retirement requires an explicit dependency join before "
-			"the shared signal");
-
-		events.clear();
-		const auto disabled = PresentAndRetireInputs(
-			PresentInputRetirementMode::kSynchronousPresentQueue, false, 93, 7, 13,
-			nextFence,
-			[&]() {
-				events.emplace_back("present");
-				return S_OK;
-			},
-			[&](std::uint64_t) {
-				events.emplace_back("unexpected-signal");
-				return S_OK;
-			});
-		Check(!disabled.token && events == std::vector<std::string>{ "present" },
-			"disabled frames do not create borrowed-input ownership");
-	}
-
 	void TestDelayedRetirementAcrossRingCycles()
 	{
 		using namespace cs::render::temporal;
@@ -810,43 +715,6 @@ namespace
 		}
 	}
 
-	void TestFidelityFXBackendContracts()
-	{
-		Check(static_cast<std::uint32_t>(
-				  ffx::ReturnCode::ErrorProviderNoSupportNewDesctype) == 7,
-			"FidelityFX return code 7 remains named and numerically intact");
-		ffx::QueryGetProviderVersion version;
-		Check(version.header.type == FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION,
-			"FidelityFX provider-version query uses the compiled descriptor type");
-
-		auto* swapChain = reinterpret_cast<IDXGISwapChain4*>(0x1234);
-		const auto config = cs::features::fidelityfx_fg::BuildDisabledConfiguration(
-			swapChain, 88, 1920, 1080);
-		Check(!config.frameGenerationEnabled &&
-				  config.frameGenerationCallback == nullptr &&
-				  config.frameGenerationCallbackUserContext == nullptr &&
-				  config.HUDLessColor.resource == nullptr &&
-				  config.presentCallback == nullptr &&
-				  config.presentCallbackUserContext == nullptr &&
-				  config.swapChain == swapChain && config.frameID == 88 &&
-				  config.flags == 0 && !config.allowAsyncWorkloads &&
-				  config.generationRect.width == 1920 &&
-				  config.generationRect.height == 1080,
-			"FSR deconfiguration detaches callbacks, user context, and HUD-less "
-			"input before destruction");
-
-		ffx::Context context{};
-		const auto unsupported = cs::features::fidelityfx_fg::QueryProviderVersion(
-			context, [](ffx::Context&, ffx::QueryGetProviderVersion&) {
-				return ffx::ReturnCode::ErrorProviderNoSupportNewDesctype;
-			});
-		Check(!unsupported.available && unsupported.id == 0 &&
-				  unsupported.name.empty() &&
-				  unsupported.result ==
-					  ffx::ReturnCode::ErrorProviderNoSupportNewDesctype,
-			"unsupported FSR provider-version query is explicit and non-fatal");
-	}
-
 	void TestProductionInputWriteOrdering()
 	{
 		using namespace cs::render::temporal;
@@ -878,47 +746,6 @@ namespace
 			"across all captures");
 	}
 
-	void TestDisableDrainDestroyOrder()
-	{
-		std::vector<std::string> events;
-		const auto result = cs::render::temporal::DisableDrainAndDestroy(
-			[&]() {
-				events.emplace_back("disable-null-callbacks");
-				return true;
-			},
-			[&]() {
-				events.emplace_back("drain");
-				return true;
-			},
-			[&]() {
-				events.emplace_back("destroy-context");
-				return true;
-			});
-		Check(result == cs::render::temporal::DestructionResult::kSuccess,
-			"callback deconfiguration lifecycle succeeds");
-		Check(events == std::vector<std::string>{ "disable-null-callbacks", "drain",
-							"destroy-context" },
-			"callbacks are detached before drain and context destruction");
-
-		events.clear();
-		const auto disableFailure = cs::render::temporal::DisableDrainAndDestroy(
-			[&]() {
-				events.emplace_back("disable-null-callbacks");
-				return false;
-			},
-			[&]() {
-				events.emplace_back("drain");
-				return true;
-			},
-			[&]() {
-				events.emplace_back("destroy-context");
-				return true;
-			});
-		Check(disableFailure ==
-					  cs::render::temporal::DestructionResult::kDisableFailed &&
-				  events == std::vector<std::string>{ "disable-null-callbacks" },
-			"failed callback deconfiguration prevents drain and destruction");
-	}
 }  // namespace
 
 int main()
@@ -931,13 +758,10 @@ int main()
 	TestResizeCommitProtocol();
 	TestSafePreparation();
 	TestInputReuseGate();
-	TestSynchronousPresentRetirement();
 	TestDelayedRetirementAcrossRingCycles();
 	TestPresentStatusOrchestration();
 	TestStreamlineBackendContracts();
-	TestFidelityFXBackendContracts();
 	TestProductionInputWriteOrdering();
-	TestDisableDrainDestroyOrder();
 	if (failures) {
 		std::cerr << failures << " check(s) failed\n";
 		return 1;

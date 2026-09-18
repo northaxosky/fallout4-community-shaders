@@ -109,10 +109,6 @@ namespace cs::render
 		bool generatedFrameCountAvailable = false;
 		std::uint64_t providerPresentedFrames = 0;
 		bool providerPresentedFrameCountAvailable = false;
-		bool fidelityFxProviderVersionAvailable = false;
-		std::uint64_t fidelityFxProviderVersionId = 0;
-		std::string fidelityFxProviderVersionName;
-		std::uint32_t fidelityFxProviderVersionQueryResult = 0;
 		std::uint64_t failures = 0;
 		bool cameraValid = false;
 		std::int64_t cameraFrameDelta = 0;
@@ -224,18 +220,12 @@ namespace cs::render
 			const temporal::SuperResolutionSizeRequest& a_request);
 		[[nodiscard]] bool IsSuperResolutionRuntimeReady(
 			temporal::SuperResolutionMethod a_method) const noexcept;
-		[[nodiscard]] bool CreateFsrSuperResolutionResources(
-			ID3D11Device* a_device, std::uint32_t a_renderWidth,
-			std::uint32_t a_renderHeight, std::uint32_t a_outputWidth,
-			std::uint32_t a_outputHeight);
 		[[nodiscard]] std::unique_ptr<cs::buffer::Texture2D>
 		CreateSuperResolutionTexture(
 			const D3D11_TEXTURE2D_DESC& a_desc,
 			std::string_view a_name);
 		[[nodiscard]] temporal::ProviderResult DestroySuperResolutionResources(
 			temporal::SuperResolutionMethod a_method) noexcept;
-		void ResetFsrFrameGenerationCamera() noexcept;
-		void RequestFsrFrameGenerationReset() noexcept;
 		[[nodiscard]] FrameGenerationDebugTexture GetFrameGenerationDebugTexture(
 			FrameGenerationDebugResource a_resource) const noexcept;
 

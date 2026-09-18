@@ -774,9 +774,7 @@ namespace cs::render
 				render::TemporalPipeline::Get()
 					.IsSuperResolutionRuntimeReady(
 						render::temporal::SuperResolutionMethod::kFSR3))
-			.Field(
-				"fsr_native_streamline",
-				topology.session.nativeFsrSuperResolution)
+			.Field("fsr_provider", std::string_view{ "streamline_d3d12" })
 			.Field("upscaling_active", IsUpscalingActive())
 			.Field("dynamic_resolution_available", renderTargetManager != nullptr)
 			.Field("proxies_ready", dynamicResolution.HasProxies())

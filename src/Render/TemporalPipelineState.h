@@ -31,12 +31,6 @@ namespace cs::render::temporal
 	inline constexpr std::uint32_t kMaxFrameGenerationMethodValue =
 		static_cast<std::uint32_t>(FrameGenerationMethod::kDLSSG);
 
-	enum class GraphicsApi : std::uint8_t
-	{
-		kD3D11,
-		kD3D12
-	};
-
 	struct FailureImpact
 	{
 		bool superResolution = false;
@@ -54,14 +48,16 @@ namespace cs::render::temporal
 				a_domain == FailureDomain::kEngine ||
 				a_domain == FailureDomain::kTransport ||
 				(a_domain == FailureDomain::kStreamline &&
-					a_sr == SuperResolutionMethod::kDLSS),
+					(a_sr == SuperResolutionMethod::kFSR3 ||
+						a_sr == SuperResolutionMethod::kDLSS)),
 			.frameGeneration =
 				a_domain == FailureDomain::kFrameGeneration ||
 				a_domain == FailureDomain::kEngine ||
 				a_domain == FailureDomain::kTransport ||
 				a_domain == FailureDomain::kPresentation ||
 				(a_domain == FailureDomain::kStreamline &&
-					a_fg == FrameGenerationMethod::kDLSSG)
+					(a_fg == FrameGenerationMethod::kFSR3 ||
+						a_fg == FrameGenerationMethod::kDLSSG))
 		};
 	}
 
@@ -95,12 +91,9 @@ namespace cs::render::temporal
 	struct SessionTopology
 	{
 		bool valid = false;
-		GraphicsApi streamlineApi = GraphicsApi::kD3D11;
 		bool bridgePresent = false;
 		bool proxyInstalled = false;
 		bool latencyHooksInstalled = false;
-		bool nativeFsrSuperResolution = false;
-		bool nativeFsrFrameGeneration = false;
 		std::array<bool, static_cast<std::size_t>(SuperResolutionMethod::kCount)> admittedSr{};
 		std::array<bool, static_cast<std::size_t>(FrameGenerationMethod::kCount)>
 			admittedFg{};
@@ -233,18 +226,15 @@ namespace cs::render::temporal
 			const bool fgAdmitted =
 				fgIndex < _session->admittedFg.size() &&
 				_session->admittedFg[fgIndex];
-			_restartForSuperResolutionMethod =
-				srAdmitted && a_sr != transitionBase.superResolution &&
-				(a_sr == SuperResolutionMethod::kFSR3 ||
-					transitionBase.superResolution ==
-						SuperResolutionMethod::kFSR3) &&
-				!_session->nativeFsrSuperResolution;
-			_restartForFrameGenerationMethod =
-				a_fgEnabled && a_fg != FrameGenerationMethod::kOff &&
-				!fgAdmitted;
 			const bool externalSrRequested =
 				a_sr == SuperResolutionMethod::kFSR3 ||
 				a_sr == SuperResolutionMethod::kDLSS;
+			_restartForSuperResolutionMethod =
+				a_srEnabled && externalSrRequested &&
+				a_sr != _startupRequest->superResolution && !srAdmitted;
+			_restartForFrameGenerationMethod =
+				a_fgEnabled && a_fg != FrameGenerationMethod::kOff &&
+				!fgAdmitted;
 			if (!_quarantined.superResolution &&
 				(!_superResolutionFailed || !externalSrRequested)) {
 				if (!a_srEnabled) {
@@ -516,9 +506,11 @@ namespace cs::render::temporal
 				_pending.required = true;
 				_pending.reason =
 					_restartForSuperResolutionMethod
-						? "Legacy FSR 3 super-resolution transitions remain "
-						  "restart-bound until the native Streamline provider is "
-						  "available."
+						? (_session
+								  ? "The requested super-resolution provider is "
+									"unavailable in the current session."
+								  : "The requested super-resolution method differs "
+									"from the frozen startup request.")
 						: "The requested frame-generation provider is unavailable "
 						  "in the current session.";
 			}

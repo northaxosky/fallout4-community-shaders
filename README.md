@@ -2,16 +2,10 @@
 
 # FO4 Community Shaders
 
-**Modern rendering features for Fallout 4 - screen-space lighting - as an open
+**Modern rendering features for Fallout 4, built as an open
 [F4SE](https://f4se.silverlock.org/) plugin.**
 
-A Fallout 4 port of the ideas in
-[Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders),
-hooking the DirectX renderer directly.
-
-Like upstream, it **owns the game's deferred shaders** rather than patching them: the deferred
-lighting and composite permutations are reconstructed as readable HLSL, compiled at runtime, and
-injected in place of the stock shaders.
+Based on [Skyrim Community Shaders](https://github.com/community-shaders/skyrim-community-shaders).
 
 <br>
 
@@ -27,10 +21,8 @@ injected in place of the stock shaders.
 </div>
 
 > [!WARNING]
-> **Active work in progress.** Features are incomplete, unstable, unavailable on
-> some systems, or have startup-only options that require a restart. Ordinary enabled and settings
-> changes apply live unless a control says otherwise. There is no packaged release yet; source
-> builds are intended for development and testing.
+> **Experimental.** Features are still being developed and tested. There is no
+> packaged release yet; source builds are intended for development and playtesting.
 
 ---
 
@@ -38,7 +30,7 @@ injected in place of the stock shaders.
 
 | | |
 |---|---|
-| **Game** | Fallout 4 runtime **1.11.240**. Older `1.10.x` code paths remain in the project but are not currently advertised or validated. |
+| **Game** | Fallout 4 runtime **1.11.240**. |
 | **[Fallout 4 Script Extender (F4SE)](https://f4se.silverlock.org/)** | Required. |
 | **[Address Library for F4SE](https://www.nexusmods.com/fallout4/mods/47327)** | Required. |
 | **[Addictol](https://www.nexusmods.com/fallout4/mods/84214)** | Recommended. All-in-one engine patch (stability, performance, bug fixes) by Dear-Modding-FO4 (includes me), the maintainers of the CommonLibF4 fork this plugin builds on. |
@@ -47,28 +39,24 @@ injected in place of the stock shaders.
 
 ## Features
 
-> Being listed here means the feature is **compiled into the plugin**, not that it has been
-> fully validated in game. Every feature ships **inactive** and is opt-in - see
+> Features ship **inactive** and are not all fully validated. See
 > [activation](#feature-activation).
 
-| Feature | Implementation |
+| Feature | Purpose |
 |---|---|
-| **Screen Space Shadows** | Bend screen-space contact/sun shadows via depth raymarch, multiplied into the deferred directional light. |
-| **Terrain Shadows** | Long-range worldspace terrain shadowing from an xLODGen heightmap, marched into a shadow-height map and multiplied into the deferred directional light. |
-| **Screen Space GI** | XeGTAO screen-space ambient occlusion plus a spherical-harmonic indirect diffuse bounce injected into the ambient/IBL pass. |
-| **Inverse Square Lighting** | Configurable interior/exterior inverse-square attenuation for owned deferred opaque punctual lights, with a softened near field. |
-| **Exponential Height Fog** | Weather-driven exponential distance extinction and height falloff in Fallout 4's deferred exterior fog composite. |
-| **Dynamic Cubemaps** | Scene capture and GGX-prefiltered environment reflections for native deferred IBL, opted-in forward materials, and water. |
-| **Wetness Effects** | Rain-driven water film: per-light Fresnel coat, darkened wet albedo, and a wet environment reflection in the deferred lighting and composition passes. |
-| **Water Effects** | Animated water caustics projected onto submerged surfaces lit by the sun. |
-| **Motion Vector Fixes** | Corrects player and animated-object previous transforms plus frozen/menu or LOD geometry motion. |
-| **Upscaling** | Native None/TAA policies plus independently selectable FSR 3 and DLSS super-resolution. |
-| **Frame Generation** | Independently selectable FSR 3 and DLSS-G presentation strategies behind one stable D3D11-facing D3D12 proxy. |
-| **Performance Overlay** | FPS, frame-time, latency, and backend metrics with configurable layout and graphs. |
-| **RenderDoc** | In-game frame-capture controls for an external RenderDoc runtime. |
-
-Motion Vector Fixes does not synthesize first-person weapon motion; the FSR 3 frame-generation
-path separately conditions first-person alpha pixels.
+| **Screen Space Shadows** | Contact shadows and finer shadow detail. |
+| **Terrain Shadows** | Long-range shadows from terrain. |
+| **Screen Space GI** | Ambient occlusion and indirect lighting. |
+| **Inverse Square Lighting** | More natural light falloff. |
+| **Exponential Height Fog** | Weather-driven fog with height falloff. |
+| **Dynamic Cubemaps** | Reflections that respond to the surrounding scene. |
+| **Wetness Effects** | Rain-darkened surfaces and wet reflections. |
+| **Water Effects** | Sunlight caustics on submerged surfaces. |
+| **Motion Vector Fixes** | Motion-data corrections for temporal rendering. |
+| **Upscaling** | TAA, FSR 3, and DLSS. |
+| **Frame Generation** | FSR 3 and DLSS frame generation. |
+| **Performance Overlay** | FPS, frame-time, and latency graphs. |
+| **RenderDoc** | In-game frame capture for debugging. |
 
 ---
 
@@ -82,10 +70,6 @@ load = true
 ```
 
 Feature loading is evaluated **at startup**—restart the game after enabling or disabling features. Settings for already-loaded features can be adjusted live in-game.
-
-Baseline shader ownership can be enabled under `[shader_ownership]` (`enabled = true`). Its
-per-family flags select which reconstructed stock shaders Community Shaders owns. Unsupported
-variants continue using the game's native shaders.
 
 ---
 
@@ -108,54 +92,24 @@ Key bindings can be customized through the DearModdingUI menu.
 
 Community Shaders uses [DearModdingUI](https://github.com/Dear-Modding-FO4/dearmoddingui) for in-game configuration, feature toggles, and the performance overlay.
 
-If DearModdingUI is not installed, Community Shaders operates headless and reads settings directly from the TOML configuration files. See [`src/Host/README.md`](src/Host/README.md) for architecture and integration details.
+Without DearModdingUI, settings can be changed through the TOML configuration files.
 
 ---
 
 ## Building from source
 
-**Prerequisites:** Visual Studio 2026 (Desktop C++), [xmake](https://xmake.io),
-CMake (for the FidelityFX SDK adapter), and Git.
-
-```bash
-git clone --recursive https://github.com/northaxosky/fallout4-community-shaders
-cd fallout4-community-shaders
-
-# Download vendor SDK runtimes (Streamline, DLSS, FidelityFX)
-pwsh scripts/fetch-sdks.ps1
-
-# Configure and build
-xmake f -m releasedbg -y
-xmake
-
-# Run all host and shader tests
-xmake test
-
-# Create build/packages/FO4CommunityShaders-0.1.0.zip
-xmake package FO4CommunityShaders
-```
-
-Set `XSE_FO4_MODS_PATH` or `XSE_FO4_GAME_PATH` before `xmake install` to
-deploy through the CommonLibF4 install rule. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for full setup and deployment details.
-Unpublished Streamline builds require a signed local candidate; the contributing
-guide documents staging it without publishing a release.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, building, testing, and deployment.
 
 ---
 
 ## Compatibility notes
 
-- **ENB**: Incompatible. Community Shaders automatically disables itself when ENB is detected.
-- **Upscaling & Frame Generation**: Target runtime is AE (1.11.240); retained older-runtime paths are not qualified.
-  - Loading either feature retains DX12 presentation, including native engine TAA/None. Modern D3D11/D3D12 shared-fence support is required.
-  - DLSS requires an NVIDIA RTX GPU and the staged Streamline DLLs.
-  - Native Streamline FSR 3 requires the staged FSR plugins and matched AMD runtime DLLs. The legacy D3D11 implementation remains in source for comparison pending native runtime qualification.
-  - Frame Generation requires DX12 support and borderless windowed mode.
-  - Super-resolution and frame-generation methods can be switched at a frame boundary when the target provider was admitted at startup.
-  - Feature loading and SDK bootstrap settings still require a restart. Method switches may briefly pause rendering.
-  - HDR is currently unsupported.
-- **Terrain Shadows**: Requires an xLODGen terrain heightmap export placed in `Data\Textures\Terrain\` or `Data\Textures\HeightMaps\`.
-- **RenderDoc**: Requires an external `renderdoc.dll` (API 1.7.0). Enabling frame capture requires a restart.
+- ENB and HDR are unsupported.
+- Upscaling requires a DX12-capable GPU. DLSS requires compatible NVIDIA RTX hardware.
+- Frame generation requires borderless windowed mode.
+- Supported upscaling and frame-generation methods can change while playing; switching may briefly pause rendering.
+- Terrain Shadows requires an xLODGen terrain heightmap export.
+- RenderDoc capture requires an external RenderDoc runtime.
 
 ---
 

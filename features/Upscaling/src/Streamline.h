@@ -3,8 +3,6 @@
 #include <cstdint>
 #include <optional>
 
-#include <d3d11_4.h>
-
 #define NV_WINDOWS
 
 #pragma warning(push)
@@ -21,7 +19,6 @@
 #include <sl_version.h>
 #pragma warning(pop)
 
-#include "StreamlineInterfaceUpgrade.h"
 #include "Render/FrameGenerationOrchestration.h"
 
 namespace cs::features
@@ -56,7 +53,6 @@ namespace cs::features
 		PFun_slUpgradeInterface* slUpgradeInterface{};
 		PFun_slSetConstants* slSetConstants{};
 		PFun_slSetTagForFrame* slSetTagForFrame{};
-		PFun_slGetNativeInterface* slGetNativeInterface{};
 		PFun_slGetFeatureFunction* slGetFeatureFunction{};
 		PFun_slGetNewFrameToken* slGetNewFrameToken{};
 		PFun_slSetD3DDevice* slSetD3DDevice{};
@@ -82,14 +78,8 @@ namespace cs::features
 			bool a_loadDlss,
 			bool a_loadFsr,
 			bool a_loadDlssG,
-			bool a_loadFsrG,
-			sl::RenderAPI a_renderApi);
+			bool a_loadFsrG);
 
-		bool SetDevice(ID3D11Device* a_device);
-		[[nodiscard]] streamline::SwapChainUpgradeResult
-			UpgradeD3D11SwapChain(
-				IDXGISwapChain** a_swapChain,
-				bool a_dlssAdmitted) noexcept;
 		bool PrepareD3D12Device(ID3D12Device** a_device);
 		bool PrepareDXGIFactory(IDXGIFactory4** a_factory);
 		bool SetDevice(ID3D12Device* a_device);
@@ -117,8 +107,6 @@ namespace cs::features
 			QueryFSRRenderSize(
 				const render::temporal::SuperResolutionSizeRequest& a_request);
 
-		[[nodiscard]] render::temporal::ProviderResult Upscale(
-			const render::temporal::SuperResolutionRequest& a_request);
 		[[nodiscard]] render::temporal::ProviderResult UpscaleD3D12(
 			const render::temporal::SuperResolutionRequest& a_request);
 		[[nodiscard]] render::temporal::ProviderResult UpscaleFSRD3D12(
@@ -179,11 +167,6 @@ namespace cs::features
 		{
 			return _fsrResourcesConfigured;
 		}
-		[[nodiscard]] bool IsD3D12Session() const noexcept
-		{
-			return _renderApi == sl::RenderAPI::eD3D12;
-		}
-
 	private:
 		[[nodiscard]] render::temporal::ProviderResult
 			UpscaleD3D12Feature(
@@ -224,6 +207,5 @@ namespace cs::features
 		bool _fsrFeatureRequested = false;
 		bool _fsrGResourcesConfigured = false;
 		bool _fsrGFeatureRequested = false;
-		sl::RenderAPI _renderApi = sl::RenderAPI::eD3D11;
 	};
 }

@@ -1,5 +1,4 @@
 #include "Render/FrameBufferMath.h"
-#include "SuperResolutionFov.h"
 
 #include <array>
 #include <cmath>
@@ -110,49 +109,6 @@ namespace
 			"a degenerate projection has no vertical FOV");
 	}
 
-	cs::engine::FrameBufferSnapshot MakeFovSnapshot(float a_verticalFov)
-	{
-		const float yScale = 1.0f / std::tan(a_verticalFov * 0.5f);
-		cs::engine::FrameBufferSnapshot snapshot{};
-		snapshot.valid = true;
-		snapshot.data.CurrFrameWorldToClip[0] = { 1.0f, 0.0f, 0.0f, 0.0f };
-		snapshot.data.CurrFrameWorldToClip[1] = { 0.0f, yScale, 0.0f, 0.0f };
-		snapshot.data.CurrFrameWorldToClip[2] = { 0.0f, 0.0f, 1.0f, -0.1f };
-		snapshot.data.CurrFrameWorldToClip[3] = { 0.0f, 0.0f, 1.0f, 0.0f };
-		return snapshot;
-	}
-
-	void TestSuperResolutionFovCache()
-	{
-		cs::features::SuperResolutionFovCache cache;
-		float resolvedFov = 0.0f;
-		const cs::engine::FrameBufferSnapshot missing{};
-		Check(
-			cache.Resolve(missing, resolvedFov) ==
-				cs::features::SuperResolutionFovSource::kUnavailable,
-			"super-resolution declines before any valid FOV is published");
-
-		constexpr float firstFov = 0.9f;
-		Check(
-			cache.Resolve(MakeFovSnapshot(firstFov), resolvedFov) ==
-				cs::features::SuperResolutionFovSource::kPublished,
-			"super-resolution accepts a published FOV");
-		CheckNear(resolvedFov, firstFov, 1e-5f, "published FOV is passed through");
-
-		Check(
-			cache.Resolve(missing, resolvedFov) ==
-				cs::features::SuperResolutionFovSource::kCached,
-			"super-resolution uses its last valid FOV across a transient miss");
-		CheckNear(resolvedFov, firstFov, 1e-5f, "transient miss preserves the last valid FOV");
-
-		constexpr float secondFov = 1.1f;
-		Check(
-			cache.Resolve(MakeFovSnapshot(secondFov), resolvedFov) ==
-				cs::features::SuperResolutionFovSource::kPublished,
-			"super-resolution refreshes the cached FOV");
-		CheckNear(resolvedFov, secondFov, 1e-5f, "new published FOV replaces the cached value");
-	}
-
 }
 
 int main()
@@ -161,7 +117,6 @@ int main()
 	TestFov(0.5f, -0.5f, "symmetric vertical FOV survives a rotated view");
 	TestFov(0.7f, -0.5f, "asymmetric vertical FOV survives a rotated view");
 	TestFovRejection();
-	TestSuperResolutionFovCache();
 
 	if (failures != 0) {
 		std::cerr << failures << " check(s) failed\n";

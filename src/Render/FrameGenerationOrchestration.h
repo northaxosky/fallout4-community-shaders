@@ -355,49 +355,6 @@ namespace cs::render::temporal
 		return "Frame-generation input retirement failed";
 	}
 
-	struct PresentRetirementSubmission
-	{
-		HRESULT presentResult = E_FAIL;
-		HRESULT signalResult = S_OK;
-		std::optional<PresentInputRetirementToken> token;
-	};
-
-	template <class Present, class Signal>
-	[[nodiscard]] PresentRetirementSubmission PresentAndRetireInputs(
-		PresentInputRetirementMode a_mode, bool a_providerMayConsume,
-		std::uint64_t a_realFrame, std::uint64_t a_resourceGeneration,
-		std::uint64_t a_queueIdentity, std::uint64_t& a_nextFenceValue,
-		Present&& a_present, Signal&& a_signal)
-	{
-		PresentRetirementSubmission result;
-		result.presentResult = std::forward<Present>(a_present)();
-		if (!a_providerMayConsume ||
-			a_mode == PresentInputRetirementMode::kRecordedCommandList) {
-			return result;
-		}
-		if (FAILED(result.presentResult)) {
-			result.signalResult = result.presentResult;
-			return result;
-		}
-		if (a_mode == PresentInputRetirementMode::kVendorCompletionFence) {
-			// The generic helper has no vendor dependency to join. Callers using
-			// this mode must wait that dependency explicitly before signaling the
-			// shared retirement fence.
-			result.signalResult = E_FAIL;
-			return result;
-		}
-
-		PresentInputRetirementToken token{ .realFrame = a_realFrame,
-			.resourceGeneration = a_resourceGeneration,
-			.queueIdentity = a_queueIdentity };
-		token.value = a_nextFenceValue++;
-		result.signalResult = std::forward<Signal>(a_signal)(token.value);
-		if (SUCCEEDED(result.signalResult)) {
-			result.token = token;
-		}
-		return result;
-	}
-
 	class PresentInputReuseGate
 	{
 	public:
@@ -546,25 +503,4 @@ namespace cs::render::temporal
 		return true;
 	}
 
-	enum class DestructionResult : std::uint8_t
-	{
-		kSuccess,
-		kDisableFailed,
-		kDrainFailed,
-		kDestroyFailed
-	};
-
-	template <class Disable, class Drain, class Destroy>
-	[[nodiscard]] DestructionResult DisableDrainAndDestroy(Disable&& a_disable,
-		Drain&& a_drain,
-		Destroy&& a_destroy)
-	{
-		if (!std::forward<Disable>(a_disable)()) {
-			return DestructionResult::kDisableFailed;
-		}
-		if (!std::forward<Drain>(a_drain)()) {
-			return DestructionResult::kDrainFailed;
-		}
-		return std::forward<Destroy>(a_destroy)() ? DestructionResult::kSuccess : DestructionResult::kDestroyFailed;
-	}
 }  // namespace cs::render::temporal

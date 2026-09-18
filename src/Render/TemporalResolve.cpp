@@ -1,4 +1,5 @@
 #include "Render/TemporalRendererInternals.h"
+#include "Render/FrameBuffer.h"
 
 namespace cs::render
 {
@@ -120,22 +121,6 @@ namespace cs::render
 			}
 			const bool resetHistory =
 				render::TemporalPipeline::Get().SuperResolutionResetPending();
-			float verticalFov = 0.0f;
-			if (upscaleMethod == UpscaleMethod::kFSR) {
-				const auto fovSource = superResolutionFovCache.Resolve(
-					cs::engine::GetFrameBuffer(), verticalFov);
-				if (fovSource == SuperResolutionFovSource::kUnavailable) {
-					CS_LOG_ONCE(L, spdlog::level::warn,
-						"FSR3 super-resolution skipped: no current or cached "
-						"camera projection is available.");
-					return false;
-				}
-				if (fovSource == SuperResolutionFovSource::kCached) {
-					CS_LOG_EVERY_MS(
-						L, 2000, spdlog::level::warn,
-						"FSR3 super-resolution is using the last valid camera FOV.");
-				}
-			}
 			const auto* timer = RE::BSTimer::GetSingleton();
 			const auto realFrame = render::TemporalPipeline::Get().CurrentRealFrame();
 			const auto& snapshot = cs::engine::GetFrameBuffer();
@@ -200,9 +185,6 @@ namespace cs::render
 				.postProcessSharpness = settings.sharpnessDLSS,
 				.frameTimeMilliseconds =
 					(timer ? timer->realTimeDelta : 0.0f) * 1000.0f,
-				.cameraNear = cs::engine::GetCameraNear(),
-				.cameraFar = cs::engine::GetCameraFar(),
-				.cameraVerticalFov = verticalFov,
 				.resetHistory = resetHistory,
 				.postProcessSharpening =
 					upscaleMethod == UpscaleMethod::kDLSS &&
@@ -338,14 +320,13 @@ namespace cs::render
 				sharpenerTexture ? sharpenerTexture->resource.get() : nullptr,
 				_upscaledThisFrame);
 		} else if (method == UpscaleMethod::kDLSS) {
-			published = _providerPublicationOutputReady
-				? PublishUpscalingOutput(
-					  context, frameBuffer.get(),
-					  publicationTexture
-						  ? publicationTexture->resource.get()
-						  : nullptr,
-					  _upscaledThisFrame)
-				: ApplySharpening(frameBuffer.get());
+			auto* output = _providerPublicationOutputReady
+				? publicationTexture
+				: sharpenerTexture;
+			published = PublishUpscalingOutput(
+				context, frameBuffer.get(),
+				output ? output->resource.get() : nullptr,
+				_upscaledThisFrame);
 		}
 		if (published) {
 			render::TemporalPipeline::Get().ConsumeSuperResolutionReset(true);
@@ -646,29 +627,4 @@ namespace cs::render
 		context->VSSetShader(nullptr, nullptr, 0);
 	}
 
-	bool TemporalRenderer::ApplySharpening(ID3D11Texture2D* a_frameBuffer)
-	{
-		if (!a_frameBuffer || !upscalingTexture || !sharpenerTexture ||
-			!publicationTexture || !_upscaledThisFrame) {
-			return false;
-		}
-
-		auto* context = cs::engine::GetImmediateContext();
-		if (!context) {
-			return false;
-		}
-
-		cs::engine::ComputeOMScope scope(context, 1, 0, 1, 1);
-		if (settings.sharpnessEnabledDLSS && settings.sharpnessDLSS > 0.0f) {
-			if (!rcas.ApplySharpen(sharpenerTexture->srv.get(),
-					publicationTexture->uav.get(), settings.sharpnessDLSS)) {
-				return false;
-			}
-			return PublishUpscalingOutput(context, a_frameBuffer,
-				publicationTexture->resource.get(), true);
-		}
-
-		return PublishUpscalingOutput(context, a_frameBuffer,
-			sharpenerTexture->resource.get(), true);
-	}
 }  // namespace cs::render

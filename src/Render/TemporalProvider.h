@@ -280,21 +280,11 @@ namespace cs::render::temporal
 		float sharpness = 0.0f;
 		float postProcessSharpness = 0.0f;
 		float frameTimeMilliseconds = 0.0f;
-		float cameraNear = 0.0f;
-		float cameraFar = 1.0f;
-		float cameraVerticalFov = 0.0f;
 		bool resetHistory = false;
 		bool postProcessSharpening = false;
 		ColorContract color;
 		FrameGenerationCamera camera;
 	};
-
-	[[nodiscard]] inline ID3D11Resource*
-	GetD3D11Resource(const GpuView& a_view) noexcept
-	{
-		const auto* view = std::get_if<D3D11GpuView>(&a_view);
-		return view ? view->resource : nullptr;
-	}
 
 	[[nodiscard]] inline const D3D12GpuView*
 	GetD3D12View(const GpuView& a_view) noexcept
@@ -367,18 +357,6 @@ namespace cs::render::temporal
 		FrameGenerationCamera camera;
 	};
 
-	enum class PresentInputRetirementMode : std::uint8_t
-	{
-		// Borrowed inputs are consumed by the application's recorded command list.
-		kRecordedCommandList,
-		// Present submits the last reader to the application game queue before
-		// returning.
-		kSynchronousPresentQueue,
-		// Present exposes a vendor fence/value that the application queue must join
-		// before publishing the shared retirement fence.
-		kVendorCompletionFence
-	};
-
 	struct GpuCompletionDependency
 	{
 		winrt::com_ptr<ID3D12Fence> fence;
@@ -415,8 +393,6 @@ namespace cs::render::temporal
 		[[nodiscard]] virtual ProviderResult
 		CancelFrame(const FrameGenerationRequest& a_request) = 0;
 		[[nodiscard]] virtual ProviderResult SetGenerationEnabled(bool a_enabled) = 0;
-		[[nodiscard]] virtual PresentInputRetirementMode
-		GetPresentInputRetirementMode() const noexcept = 0;
 		[[nodiscard]] virtual ProviderResult
 		CollectPresentStatus(UINT a_presentFlags, HRESULT a_presentResult) = 0;
 		[[nodiscard]] virtual std::optional<std::uint32_t>

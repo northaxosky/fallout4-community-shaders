@@ -114,14 +114,12 @@ namespace cs::features
 		bool a_loadDlss,
 		bool a_loadFsr,
 		bool a_loadDlssG,
-		bool a_loadFsrG,
-		sl::RenderAPI a_renderApi)
+		bool a_loadFsrG)
 	{
 		triedInitialization = true;
 		_latencyFeaturesRequested = a_loadDlssG;
 		_fsrFeatureRequested = a_loadFsr;
 		_fsrGFeatureRequested = a_loadFsrG;
-		_renderApi = a_renderApi;
 
 		const auto loaded = cs::files::LoadStreamlineInterposer(Streamline::PluginDir);
 		if (!loaded) {
@@ -189,7 +187,7 @@ namespace cs::features
 		pref.engineVersion = "1.0.0";
 		pref.projectId = "f8776929-c969-43bd-ac2b-294b4de58aac";
 
-		pref.renderAPI = a_renderApi;
+		pref.renderAPI = sl::RenderAPI::eD3D12;
 		pref.flags = sl::PreferenceFlags::eUseManualHooking |
 			sl::PreferenceFlags::eUseFrameBasedResourceTagging;
 
@@ -204,8 +202,6 @@ namespace cs::features
 		slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
 		slSetTagForFrame =
 			(PFun_slSetTagForFrame*)GetProcAddress(interposer, "slSetTagForFrame");
-		slGetNativeInterface =
-			(PFun_slGetNativeInterface*)GetProcAddress(interposer, "slGetNativeInterface");
 		slGetFeatureFunction = (PFun_slGetFeatureFunction*)GetProcAddress(interposer, "slGetFeatureFunction");
 		slGetNewFrameToken = (PFun_slGetNewFrameToken*)GetProcAddress(interposer, "slGetNewFrameToken");
 		slSetD3DDevice = (PFun_slSetD3DDevice*)GetProcAddress(interposer, "slSetD3DDevice");
@@ -226,51 +222,9 @@ namespace cs::features
 		}
 	}
 
-	bool Streamline::SetDevice(ID3D11Device* a_device)
-	{
-		if (!initialized || !slSetD3DDevice || !a_device) {
-			return false;
-		}
-		if (SL_FAILED(result, slSetD3DDevice(a_device))) {
-			L->error("Failed to register the D3D11 device with Streamline: {}", magic_enum::enum_name(result));
-			return false;
-		}
-		deviceRegistered = true;
-		return true;
-	}
-
-	streamline::SwapChainUpgradeResult Streamline::UpgradeD3D11SwapChain(
-		IDXGISwapChain** a_swapChain,
-		bool a_dlssAdmitted) noexcept
-	{
-		if (!streamline::ShouldInstallSwapChainProxy(
-				initialized,
-				deviceRegistered,
-				a_dlssAdmitted,
-				IsD3D12Session())) {
-			return {
-				.status = streamline::SwapChainUpgradeStatus::kIneligible
-			};
-		}
-		const auto result = streamline::UpgradeD3D11SwapChain(
-			slUpgradeInterface, slGetNativeInterface, a_swapChain);
-		if (result.Succeeded()) {
-			L->info(
-				"Installed the Streamline D3D11 swap-chain presentation proxy");
-		} else {
-			L->error(
-				"Failed to install the Streamline D3D11 swap-chain presentation proxy "
-				"(status {}, SDK {})",
-				static_cast<unsigned>(result.status),
-				magic_enum::enum_name(result.sdkResult));
-		}
-		return result;
-	}
-
 	bool Streamline::PrepareD3D12Device(ID3D12Device** a_device)
 	{
-		if (!initialized || _renderApi != sl::RenderAPI::eD3D12 ||
-			!slUpgradeInterface || !a_device || !*a_device) {
+		if (!initialized || !slUpgradeInterface || !a_device || !*a_device) {
 			return false;
 		}
 		if (SL_FAILED(result, slUpgradeInterface(
@@ -285,8 +239,7 @@ namespace cs::features
 
 	bool Streamline::PrepareDXGIFactory(IDXGIFactory4** a_factory)
 	{
-		if (!initialized || _renderApi != sl::RenderAPI::eD3D12 ||
-			!slUpgradeInterface || !a_factory || !*a_factory) {
+		if (!initialized || !slUpgradeInterface || !a_factory || !*a_factory) {
 			return false;
 		}
 		if (SL_FAILED(result, slUpgradeInterface(
@@ -301,8 +254,7 @@ namespace cs::features
 
 	bool Streamline::SetDevice(ID3D12Device* a_device)
 	{
-		if (!initialized || _renderApi != sl::RenderAPI::eD3D12 ||
-			!slSetD3DDevice || !a_device) {
+		if (!initialized || !slSetD3DDevice || !a_device) {
 			return false;
 		}
 		if (SL_FAILED(result, slSetD3DDevice(a_device))) {
@@ -877,131 +829,6 @@ namespace cs::features
 			},
 			.renderWidth = settings.optimalRenderWidth,
 			.renderHeight = settings.optimalRenderHeight
-		};
-	}
-
-	render::temporal::ProviderResult Streamline::Upscale(
-		const render::temporal::SuperResolutionRequest& a_request)
-	{
-		const auto* recording =
-			std::get_if<render::temporal::D3D11RecordingContext>(
-				&a_request.recording);
-		auto* color =
-			render::temporal::GetD3D11Resource(a_request.colorInput);
-		auto* output =
-			render::temporal::GetD3D11Resource(a_request.privateOutput);
-		auto* depth = render::temporal::GetD3D11Resource(a_request.depth);
-		auto* motion =
-			render::temporal::GetD3D11Resource(a_request.motionVectors);
-		auto* reactive =
-			render::temporal::GetD3D11Resource(a_request.reactiveMask);
-		auto* transparency = render::temporal::GetD3D11Resource(
-			a_request.transparencyCompositionMask);
-		if (!recording || !recording->context ||
-			!color || !output || !depth || !motion || !reactive ||
-			!transparency ||
-			!a_request.renderWidth || !a_request.renderHeight ||
-			!a_request.outputWidth || !a_request.outputHeight ||
-			color == output ||
-			!render::temporal::IsFo4PostTonemapSdr(a_request.color) ||
-			!slSetTagForFrame || !slEvaluateFeature) {
-			return {
-				.code = render::temporal::ProviderResultCode::kFailure,
-				.message = "DLSS received incomplete or incompatible D3D11 inputs.",
-				.failureDomain = render::temporal::FailureDomain::kTransport
-			};
-		}
-		if (!deviceRegistered) {
-			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
-				"DLSS evaluation skipped: the device was never registered with Streamline");
-			return {
-				.code = render::temporal::ProviderResultCode::kFailure,
-				.message = "The D3D11 device was not registered with Streamline.",
-				.failureDomain = render::temporal::FailureDomain::kStreamline
-			};
-		}
-		auto* context = recording->context;
-		const sl::Extent extentIn{
-			0, 0, a_request.renderWidth, a_request.renderHeight
-		};
-		const sl::Extent extentOut{
-			0, 0, a_request.outputWidth, a_request.outputHeight
-		};
-
-		sl::Resource colorInRes = { sl::ResourceType::eTex2d, color, 0 };
-		sl::Resource colorOutRes = { sl::ResourceType::eTex2d, output, 0 };
-		sl::Resource depthRes = { sl::ResourceType::eTex2d, depth, 0 };
-		sl::Resource mvecRes = { sl::ResourceType::eTex2d, motion, 0 };
-		sl::Resource reactiveMaskRes = { sl::ResourceType::eTex2d, reactive, 0 };
-		sl::Resource transparencyMaskRes = {
-			sl::ResourceType::eTex2d, transparency, 0
-		};
-
-		if (!CheckFrameConstants(
-				viewport,
-				static_cast<std::uint32_t>(a_request.realFrame),
-				a_request.jitterX,
-				a_request.jitterY,
-				a_request.resetHistory,
-				a_request.camera))
-			return {
-				.code = render::temporal::ProviderResultCode::kFailure,
-				.message = "DLSS frame constants were rejected.",
-				.failureDomain =
-					render::temporal::FailureDomain::kSuperResolution
-			};
-
-		if (!SetDLSSOptions(viewport, a_request))
-			return {
-				.code = render::temporal::ProviderResultCode::kFailure,
-				.message = "DLSS options were rejected.",
-				.failureDomain =
-					render::temporal::FailureDomain::kSuperResolution
-			};
-
-		sl::ResourceTag tags[] = {
-			{ &colorInRes, sl::kBufferTypeScalingInputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn },
-			{ &colorOutRes, sl::kBufferTypeScalingOutputColor, sl::ResourceLifecycle::eValidUntilEvaluate, &extentOut },
-			{ &depthRes, sl::kBufferTypeDepth, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn },
-			{ &mvecRes, sl::kBufferTypeMotionVectors, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn },
-			{ &reactiveMaskRes, sl::kBufferTypeBiasCurrentColorHint, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn },
-			{ &transparencyMaskRes, sl::kBufferTypeTransparencyHint, sl::ResourceLifecycle::eValidUntilEvaluate, &extentIn }
-		};
-
-		const sl::Result tagResult =
-			slSetTagForFrame(*frameToken, viewport, tags, _countof(tags), context);
-		if (tagResult != sl::Result::eOk) {
-			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
-				"slSetTagForFrame failed: {}", magic_enum::enum_name(tagResult));
-			return {
-				.code = render::temporal::ProviderResultCode::kFailure,
-				.sdkResult = static_cast<std::int64_t>(tagResult),
-				.message = "DLSS input tagging failed.",
-				.failureDomain =
-					render::temporal::FailureDomain::kSuperResolution
-			};
-		}
-
-		sl::ViewportHandle view(viewport);
-		const sl::BaseStructure* inputs[] = { &view };
-
-		sl::Result evalResult = slEvaluateFeature(sl::kFeatureDLSS, *frameToken, inputs, _countof(inputs), context);
-
-		if (evalResult != sl::Result::eOk) {
-			CS_LOG_EVERY_MS(L, 2000, spdlog::level::err,
-				"slEvaluateFeature failed: {}", magic_enum::enum_name(evalResult));
-			return {
-				.code = render::temporal::ProviderResultCode::kFailure,
-				.sdkResult = static_cast<std::int64_t>(evalResult),
-				.message = "DLSS evaluation failed.",
-				.failureDomain =
-					render::temporal::FailureDomain::kSuperResolution
-			};
-		}
-		return {
-			.code = render::temporal::ProviderResultCode::kSuccess,
-			.workState = render::temporal::ProviderWorkState::kOutputReady,
-			.outputDependencyEstablished = true
 		};
 	}
 

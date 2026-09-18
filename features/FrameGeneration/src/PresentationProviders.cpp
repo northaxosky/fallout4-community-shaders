@@ -1,11 +1,9 @@
 #include "PresentationProviders.h"
 
-#include <algorithm>
 #include <utility>
 
 #include <winrt/base.h>
 
-#include "FidelityFX.h"
 #include "Streamline.h"
 
 namespace cs::features
@@ -38,165 +36,6 @@ namespace cs::features
 		}
 	}  // namespace
 
-	FidelityFXPresentation::FidelityFXPresentation(FidelityFX& a_runtime) noexcept
-		: _runtime(a_runtime) {}
-
-	const char* FidelityFXPresentation::Name() const noexcept { return "FSR3-FG"; }
-
-	ProviderResult FidelityFXPresentation::PrepareDevice(ID3D12Device** a_device)
-	{
-		return a_device && *a_device ? Success() : Failure("FidelityFX received no D3D12 device.");
-	}
-
-	ProviderResult
-	FidelityFXPresentation::PrepareFactory(IDXGIFactory4** a_factory)
-	{
-		return a_factory && *a_factory ? Success() : Failure("FidelityFX received no DXGI factory.");
-	}
-
-	ProviderResult FidelityFXPresentation::CreatePresentation(
-		const render::temporal::PresentationCreateContext& a_context,
-		IDXGISwapChain4** a_swapChain)
-	{
-		if (!a_context.device || !a_context.queue || !a_context.factory ||
-			!a_context.window || !a_context.description || !a_swapChain) {
-			return Failure(
-				"FidelityFX presentation creation received an incomplete context.");
-		}
-		_device = a_context.device;
-		const HRESULT result = _runtime.CreateSwapChainContext(
-			a_context.device, a_context.queue, a_context.factory, a_context.window,
-			*a_context.description, a_swapChain);
-		if (FAILED(result)) {
-			return FailureHresult(
-				"FidelityFX swap-chain creation failed.", result);
-		}
-		_swapChain = *a_swapChain;
-		return Success();
-	}
-
-	ProviderResult FidelityFXPresentation::SetPresentationActive(bool)
-	{
-		return Success();
-	}
-
-	ProviderResult FidelityFXPresentation::CreateDisplayResources(
-		std::uint32_t a_width, std::uint32_t a_height, DXGI_FORMAT a_format,
-		std::uint32_t)
-	{
-		return _runtime.CreateFrameGenerationContext(_device, a_width, a_height,
-				   a_format) ?
-		           Success() :
-		           Failure("FidelityFX frame-generation context creation failed.");
-	}
-
-	ProviderResult FidelityFXPresentation::PrepareFrame(
-		const render::temporal::FrameGenerationRequest& a_request)
-	{
-		FidelityFX::FrameGenerationCameraSnapshot camera{};
-		std::copy_n(a_request.camera.right, 3, camera.right);
-		std::copy_n(a_request.camera.up, 3, camera.up);
-		std::copy_n(a_request.camera.forward, 3, camera.forward);
-		std::copy_n(a_request.camera.position, 3, camera.position);
-		camera.nearPlane = a_request.camera.nearPlane;
-		camera.farPlane = a_request.camera.farPlane;
-		camera.verticalFov = a_request.camera.verticalFov;
-		camera.frameTimeDelta = a_request.frameTimeMilliseconds;
-		camera.frameCount = a_request.camera.engineFrame;
-		camera.valid = a_request.camera.valid;
-		if (a_request.enabled && !_runtime.SetFrameGenerationCameraData(camera)) {
-			return Failure("FidelityFX rejected the frame camera.");
-		}
-		const bool prepared = _runtime.PresentFrameGeneration(
-			a_request.recording.commandList, _swapChain,
-			a_request.hudlessColor.resource, a_request.depth.resource,
-			a_request.motionVectors.resource, a_request.enabled,
-			a_request.renderWidth, a_request.renderHeight, a_request.outputWidth,
-			a_request.outputHeight, a_request.jitterX, a_request.jitterY,
-			a_request.color);
-		return prepared ? Success() : Failure("FidelityFX frame preparation failed.");
-	}
-
-	ProviderResult FidelityFXPresentation::SetGenerationEnabled(bool a_enabled)
-	{
-		if (a_enabled) {
-			return Failure(
-				"FidelityFX frame generation can only be enabled by frame "
-				"preparation.");
-		}
-		if (!_runtime.SetFrameGenerationEnabled(false)) {
-			return Failure("FidelityFX SDK disable failed.");
-		}
-		_enabled = false;
-		return Success();
-	}
-
-	ProviderResult FidelityFXPresentation::CancelFrame(
-		const render::temporal::FrameGenerationRequest&)
-	{
-		return SetGenerationEnabled(false);
-	}
-
-	ProviderResult FidelityFXPresentation::Quiesce()
-	{
-		return SetGenerationEnabled(false);
-	}
-
-	render::temporal::PresentInputRetirementMode
-	FidelityFXPresentation::GetPresentInputRetirementMode() const noexcept
-	{
-		return render::temporal::PresentInputRetirementMode::kSynchronousPresentQueue;
-	}
-
-	ProviderResult FidelityFXPresentation::CollectPresentStatus(UINT, HRESULT)
-	{
-		return Success();
-	}
-
-	ProviderResult FidelityFXPresentation::Sleep(std::uint32_t)
-	{
-		return Success();
-	}
-
-	ProviderResult
-	FidelityFXPresentation::SetLatencyMarker(render::temporal::LatencyMarker,
-		std::uint32_t)
-	{
-		return Success();
-	}
-
-	ProviderResult FidelityFXPresentation::ReleaseDisplayResources() noexcept
-	{
-		const auto release = _runtime.DestroyFrameGenerationContextWithStatus();
-		auto result =
-			release.succeeded ? Success() : Failure("FidelityFX display resources could not be safely released.", release.globalDrainSdkResult);
-		result.globalDrainAttempted = release.globalDrainAttempted;
-		result.globalDrainCompleted = release.globalDrainCompleted;
-		result.globalDrainCpuMicroseconds = release.globalDrainCpuMicroseconds;
-		return result;
-	}
-
-	ProviderResult FidelityFXPresentation::DestroyAfterDrain() noexcept
-	{
-		if (!_runtime.DestroySwapChainContext()) {
-			return Failure(
-				"FidelityFX swap-chain context could not be safely destroyed.");
-		}
-		_swapChain = nullptr;
-		_device = nullptr;
-		return Success();
-	}
-
-	bool FidelityFXPresentation::IsAvailable() const noexcept
-	{
-		return _runtime.IsFrameGenerationModuleReady();
-	}
-
-	bool FidelityFXPresentation::IsReady() const noexcept
-	{
-		return _runtime.IsFrameGenerationContextReady();
-	}
-
 	StreamlinePresentation::StreamlinePresentation(
 		Streamline& a_runtime, Method a_method) noexcept
 		: _runtime(a_runtime), _method(a_method) {}
@@ -222,8 +61,7 @@ namespace cs::features
 		IDXGISwapChain4** a_swapChain)
 	{
 		if (!a_context.device || !a_context.queue || !a_context.factory ||
-			!a_context.window || !a_context.description || !a_swapChain ||
-			!_runtime.IsD3D12Session()) {
+			!a_context.window || !a_context.description || !a_swapChain) {
 			return Failure(
 				std::string(Name()) +
 				" presentation creation received an incompatible context.");
@@ -249,7 +87,6 @@ namespace cs::features
 				"Streamline swap-chain does not expose IDXGISwapChain4.",
 				queryResult);
 		}
-		_queue = a_context.queue;
 		_presentationActive = true;
 		return Success();
 	}
@@ -455,13 +292,6 @@ namespace cs::features
 		return Success();
 	}
 
-	render::temporal::PresentInputRetirementMode
-	StreamlinePresentation::GetPresentInputRetirementMode() const noexcept
-	{
-		return render::temporal::PresentInputRetirementMode::
-			kVendorCompletionFence;
-	}
-
 	ProviderResult
 	StreamlinePresentation::CollectPresentStatus(UINT a_presentFlags,
 		HRESULT a_presentResult)
@@ -564,7 +394,6 @@ namespace cs::features
 		if (!destroy.Succeeded()) {
 			return destroy;
 		}
-		_queue = nullptr;
 		_ready = false;
 		_enabled = false;
 		return Success();

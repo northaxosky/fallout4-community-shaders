@@ -1914,9 +1914,6 @@ namespace cs::features
 		cs::render::annotation::SetMarker("Upscaling/FrameGeneration/Present");
 		auto& pipeline = render::TemporalPipeline::Get();
 		pipeline.BeginPresentAttempt(a_flags);
-		const auto retirementMode = _provider
-			? _provider->GetPresentInputRetirementMode()
-			: render::temporal::PresentInputRetirementMode::kRecordedCommandList;
 		const HRESULT presentResult = [&] {
 			auto timing = pipeline.MeasureFrameGenerationCpuPhase(
 				render::FrameGenerationCpuPhase::kSdkPresent);
@@ -1944,10 +1941,7 @@ namespace cs::features
 		if (_vendorConsumptionPossible &&
 			presentResult != DXGI_ERROR_WAS_STILL_DRAWING) {
 			HRESULT retirementResult = S_OK;
-			if (SUCCEEDED(presentResult) &&
-				retirementMode ==
-					render::temporal::PresentInputRetirementMode::
-						kVendorCompletionFence) {
+			if (SUCCEEDED(presentResult)) {
 				const auto dependency =
 					_provider->ConsumePresentInputCompletionDependency();
 				retirementResult = dependency && dependency->IsValid()
@@ -1962,10 +1956,7 @@ namespace cs::features
 				.queueIdentity = static_cast<std::uint64_t>(
 					reinterpret_cast<std::uintptr_t>(_queue.get()))
 			};
-			if (SUCCEEDED(retirementResult) && SUCCEEDED(presentResult) &&
-				retirementMode !=
-					render::temporal::PresentInputRetirementMode::
-						kRecordedCommandList) {
+			if (SUCCEEDED(retirementResult) && SUCCEEDED(presentResult)) {
 				retirementResult =
 					_queue->Signal(_inputRetirementFence12.get(), token.value);
 				if (SUCCEEDED(retirementResult)) {

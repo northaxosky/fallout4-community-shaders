@@ -12,7 +12,6 @@
 
 #include "DX12SwapChain.h"
 #include "Feature.h"
-#include "FidelityFX.h"
 #include "FrameGeneration.h"
 #include "Log.h"
 #include "PresentationProviders.h"
@@ -187,24 +186,19 @@ namespace cs::render
 		}
 
 		bool UsesSharedStreamlineConstants(
-			const temporal::EffectiveConfiguration& a_effective,
-			const std::optional<temporal::SessionTopology>& a_session) noexcept
+			const temporal::EffectiveConfiguration& a_effective) noexcept
 		{
 			const bool streamlineSuperResolution =
 				a_effective.superResolution ==
 					temporal::SuperResolutionMethod::kDLSS ||
-				(a_effective.superResolution ==
-						temporal::SuperResolutionMethod::kFSR3 &&
-					a_session &&
-					a_session->nativeFsrSuperResolution);
+				a_effective.superResolution ==
+					temporal::SuperResolutionMethod::kFSR3;
 			const bool streamlineFrameGeneration =
 				a_effective.frameGenerationEnabled &&
 				(a_effective.frameGeneration ==
 						temporal::FrameGenerationMethod::kDLSSG ||
-					(a_effective.frameGeneration ==
-							temporal::FrameGenerationMethod::kFSR3 &&
-						a_session &&
-						a_session->nativeFsrFrameGeneration));
+					a_effective.frameGeneration ==
+						temporal::FrameGenerationMethod::kFSR3);
 			return streamlineSuperResolution &&
 			       streamlineFrameGeneration;
 		}
@@ -258,17 +252,14 @@ namespace cs::render
 		std::atomic_bool detailedTracing{ false };
 		FrameGenerationCpuTimingCollector<> frameGenerationCpuTimings;
 		features::Streamline streamline;
-		features::FidelityFX fidelityFX;
 		features::StreamlineSuperResolution dlssProvider{
 			streamline,
 			features::StreamlineSuperResolution::Method::kDLSS
 		};
-		features::StreamlineSuperResolution nativeFsrProvider{
+		features::StreamlineSuperResolution fsrProvider{
 			streamline,
 			features::StreamlineSuperResolution::Method::kFSR3
 		};
-		features::FidelityFXSuperResolution legacyFsrProvider{ fidelityFX };
-		features::FidelityFXPresentation fidelityFXPresentation{ fidelityFX };
 		features::StreamlinePresentation streamlineFsrPresentation{
 			streamline,
 			features::StreamlinePresentation::Method::kFSRG
@@ -279,19 +270,13 @@ namespace cs::render
 		};
 		temporal::IFrameGenerationProvider* activePresentation = nullptr;
 		features::DX12SwapChain swapChain;
-		bool nativeFsrSession = false;
-		bool nativeFsrFrameGenerationSession = false;
 
 		temporal::ISuperResolutionProvider*
 		SuperResolutionProvider(temporal::SuperResolutionMethod a_method) noexcept
 		{
 			switch (a_method) {
 			case temporal::SuperResolutionMethod::kFSR3:
-				return nativeFsrSession
-					? static_cast<temporal::ISuperResolutionProvider*>(
-						  &nativeFsrProvider)
-					: static_cast<temporal::ISuperResolutionProvider*>(
-						  &legacyFsrProvider);
+				return &fsrProvider;
 			case temporal::SuperResolutionMethod::kDLSS:
 				return &dlssProvider;
 			default:
@@ -305,11 +290,7 @@ namespace cs::render
 		{
 			switch (a_method) {
 			case temporal::FrameGenerationMethod::kFSR3:
-				return nativeFsrFrameGenerationSession
-					? static_cast<temporal::IFrameGenerationProvider*>(
-						  &streamlineFsrPresentation)
-					: static_cast<temporal::IFrameGenerationProvider*>(
-						  &fidelityFXPresentation);
+				return &streamlineFsrPresentation;
 			case temporal::FrameGenerationMethod::kDLSSG:
 				return &streamlinePresentation;
 			default:
@@ -481,9 +462,6 @@ namespace cs::render
 		_impl->creationState.store(TemporalCreationState::kFrozen,
 			std::memory_order_release);
 		_impl->rendererEligible = requested.upscalingEligible;
-		_impl->nativeFsrSession = requested.upscalingEligible;
-		_impl->nativeFsrFrameGenerationSession =
-			requested.frameGenerationEligible;
 		_impl->effectiveRenderSettings = _impl->requestedRenderSettings;
 		_impl->renderer.ApplyConfiguration(_impl->effectiveRenderSettings,
 			_impl->rendererEligible);
@@ -606,10 +584,7 @@ namespace cs::render
 			};
 		if (srResourcesChange &&
 			usesLiveD3D12SuperResolution(
-				pending->superResolution) &&
-			(pending->superResolution !=
-					temporal::SuperResolutionMethod::kFSR3 ||
-				_impl->nativeFsrSession)) {
+				pending->superResolution)) {
 			temporal::SuperResolutionInitContext init{};
 			init.device = _impl->swapChain.GetD3D12Device();
 			auto* provider =
@@ -657,10 +632,7 @@ namespace cs::render
 
 		if (srResourcesChange &&
 			usesLiveD3D12SuperResolution(
-				current.superResolution) &&
-			(current.superResolution !=
-					temporal::SuperResolutionMethod::kFSR3 ||
-				_impl->nativeFsrSession)) {
+				current.superResolution)) {
 			const auto destroy = DestroySuperResolutionResources(
 				current.superResolution);
 			if (!destroy.Succeeded()) {
@@ -715,9 +687,8 @@ namespace cs::render
 								pending->superResolutionEnabled &&
 								(pending->superResolution ==
 										temporal::SuperResolutionMethod::kDLSS ||
-									(pending->superResolution ==
-											temporal::SuperResolutionMethod::kFSR3 &&
-										_impl->nativeFsrSession)) &&
+									pending->superResolution ==
+										temporal::SuperResolutionMethod::kFSR3) &&
 								!_impl->streamline.deviceRegistered;
 							if (streamlineSrInvalidated) {
 								_impl->topology
@@ -1046,10 +1017,9 @@ namespace cs::render
 				request.frameGenerationEligible;
 			_impl->streamline.LoadInterposer(
 				request.streamlineLogLevel, request.upscalingEligible,
-				_impl->nativeFsrSession,
+				request.upscalingEligible,
 				loadDlssFrameGeneration,
-				_impl->nativeFsrFrameGenerationSession,
-				sl::RenderAPI::eD3D12);
+				request.frameGenerationEligible);
 		}
 	}
 
@@ -1298,65 +1268,26 @@ namespace cs::render
 		if (temporalProxyPath && a_device) {
 			_impl->swapChain.SetOutwardD3D11Device(*a_device);
 		}
-		if (_impl->streamline.initialized && !_impl->streamline.IsD3D12Session()) {
-			if (!_impl->streamline.SetDevice(a_device ? *a_device : nullptr)) {
-				_impl->streamline.featureDLSS = false;
-				_impl->streamline.featureFSR = false;
-				_impl->streamline.featurePCL = false;
-				_impl->streamline.featureReflex = false;
-				PostFailure(temporal::FailureDomain::kStreamline,
-					"Streamline D3D11 device registration failed; native device "
-					"and swapchain retained.");
-			} else {
-				_impl->streamline.CheckFeatures(a_adapter);
-				_impl->streamline.PostDevice();
-			}
-		}
 		auto srAdmission = temporal::InitializeSelectedSuperResolution(
 			request,
 			[&](temporal::SuperResolutionMethod a_method)
 				-> temporal::ProviderResult {
 				temporal::SuperResolutionInitContext init{};
 				init.device = a_device ? *a_device : nullptr;
-				if (a_method == temporal::SuperResolutionMethod::kFSR3) {
-					if (_impl->nativeFsrSession) {
-						if (!_impl->swapChain.IsBridgeReady()) {
-							return {
-								.code =
-									temporal::ProviderResultCode::kUnavailable,
-								.message =
-									"Native FSR has no usable D3D12 transport "
-									"after presentation initialization."
-							};
-						}
-						init.device = _impl->swapChain.GetD3D12Device();
+				if (a_method == temporal::SuperResolutionMethod::kFSR3 ||
+					a_method == temporal::SuperResolutionMethod::kDLSS) {
+					if (!_impl->swapChain.IsBridgeReady()) {
+						return {
+							.code =
+								temporal::ProviderResultCode::kUnavailable,
+							.message =
+								"Native super resolution has no usable D3D12 "
+								"transport after presentation initialization."
+						};
 					}
+					init.device = _impl->swapChain.GetD3D12Device();
 					return _impl->SuperResolutionProvider(a_method)
 						->Initialize(init);
-				}
-				if (a_method == temporal::SuperResolutionMethod::kDLSS) {
-					if (_impl->streamline.IsD3D12Session()) {
-						if (!_impl->swapChain.IsBridgeReady()) {
-							return { .code = temporal::ProviderResultCode::kUnavailable,
-								.message =
-									"DLSS has no usable D3D12 transport after "
-									"presentation initialization." };
-						}
-						init.device = _impl->swapChain.GetD3D12Device();
-					}
-					auto result = _impl->dlssProvider.Initialize(init);
-					if (result.Succeeded() && !_impl->streamline.IsD3D12Session()) {
-						const auto upgrade =
-							_impl->streamline.UpgradeD3D11SwapChain(a_swapChain, true);
-						if (!upgrade.Succeeded()) {
-							return { .code = temporal::ProviderResultCode::kUnavailable,
-								.sdkResult = static_cast<std::int64_t>(upgrade.sdkResult),
-								.message =
-									"DLSS could not install its required "
-									"D3D11 presentation maintenance proxy." };
-						}
-					}
-					return result;
 				}
 				return {
 					.code = temporal::ProviderResultCode::kUnavailable,
@@ -1366,20 +1297,12 @@ namespace cs::render
 			});
 		if (!srAdmission.detail.empty())
 			L->warn("{}", srAdmission.detail);
-		if (!_impl->nativeFsrSession &&
-			request.upscalingEligible && a_device && *a_device &&
-			(*a_device)->GetFeatureLevel() >=
-				temporal::kFsrMinimumFeatureLevel) {
-			srAdmission.methods[static_cast<std::size_t>(
-				temporal::SuperResolutionMethod::kFSR3)] = true;
-		}
 		if (request.upscalingEligible && _impl->streamline.featureDLSS &&
 			_impl->streamline.slDLSSGetOptimalSettings) {
 			srAdmission.methods[static_cast<std::size_t>(
 				temporal::SuperResolutionMethod::kDLSS)] = true;
 		}
-		if (_impl->nativeFsrSession &&
-			request.upscalingEligible && temporalProxyPath &&
+		if (request.upscalingEligible && temporalProxyPath &&
 			_impl->streamline.featureFSR &&
 			_impl->streamline.slFSRGetOptimalSettings) {
 			srAdmission.methods[static_cast<std::size_t>(
@@ -1399,10 +1322,6 @@ namespace cs::render
 		session.bridgePresent = _impl->swapChain.IsBridgeReady();
 		session.latencyHooksInstalled =
 			_impl->latencyHooksInstalled.load(std::memory_order_acquire);
-		session.nativeFsrSuperResolution = _impl->nativeFsrSession &&
-			srAdmission.methods[static_cast<std::size_t>(
-				temporal::SuperResolutionMethod::kFSR3)];
-		session.streamlineApi = _impl->streamline.IsD3D12Session() ? temporal::GraphicsApi::kD3D12 : temporal::GraphicsApi::kD3D11;
 		session.admittedSr = srAdmission.methods;
 		session.rejectionReason = srAdmission.detail;
 		session.admittedFg[static_cast<std::size_t>(
@@ -1435,10 +1354,6 @@ namespace cs::render
 			session.admittedFg[static_cast<std::size_t>(
 				request.frameGeneration)] = false;
 		}
-		session.nativeFsrFrameGeneration =
-			_impl->nativeFsrFrameGenerationSession &&
-			session.admittedFg[static_cast<std::size_t>(
-				temporal::FrameGenerationMethod::kFSR3)];
 		session.activeFg =
 			_impl->swapChain.IsFrameGenerationReady()
 				? request.frameGeneration
@@ -1527,16 +1442,6 @@ namespace cs::render
 				const auto& effective = _impl->topology.Effective();
 				auto impact = temporal::ClassifyFailure(
 					a_domain, effective.superResolution, effective.frameGeneration);
-				if (a_domain == temporal::FailureDomain::kStreamline) {
-					impact.superResolution |=
-						_impl->nativeFsrSession &&
-						effective.superResolution ==
-							temporal::SuperResolutionMethod::kFSR3;
-					impact.frameGeneration |=
-						_impl->nativeFsrFrameGenerationSession &&
-						effective.frameGeneration ==
-							temporal::FrameGenerationMethod::kFSR3;
-				}
 				const auto& session = _impl->topology.Session();
 				const bool runtimeActive = session && session->valid;
 				if (runtimeActive) {
@@ -1631,9 +1536,8 @@ namespace cs::render
 	{
 		std::scoped_lock lock(_impl->mutex);
 		const auto& effective = _impl->topology.Effective();
-		const auto& session = _impl->topology.Session();
 		return _impl->resetEpochs.SuperResolutionPending() ||
-		       (UsesSharedStreamlineConstants(effective, session) &&
+		       (UsesSharedStreamlineConstants(effective) &&
 				   _impl->resetEpochs.FrameGenerationPending());
 	}
 
@@ -1647,9 +1551,8 @@ namespace cs::render
 	{
 		std::scoped_lock lock(_impl->mutex);
 		const auto& effective = _impl->topology.Effective();
-		const auto& session = _impl->topology.Session();
 		return _impl->resetEpochs.FrameGenerationPending() ||
-		       (UsesSharedStreamlineConstants(effective, session) &&
+		       (UsesSharedStreamlineConstants(effective) &&
 				   _impl->resetEpochs.SuperResolutionPending());
 	}
 
@@ -1965,14 +1868,6 @@ namespace cs::render
 			.providerPresentedFrameCountAvailable =
 				_impl->providerPresentedFrameCountAvailable.load(
 					std::memory_order_relaxed),
-			.fidelityFxProviderVersionAvailable =
-				_impl->fidelityFX.IsFrameGenerationProviderVersionAvailable(),
-			.fidelityFxProviderVersionId =
-				_impl->fidelityFX.GetFrameGenerationProviderVersionId(),
-			.fidelityFxProviderVersionName =
-				_impl->fidelityFX.GetFrameGenerationProviderVersionName(),
-			.fidelityFxProviderVersionQueryResult =
-				_impl->fidelityFX.GetFrameGenerationProviderVersionQueryResult(),
 			.failures =
 				_impl->frameGenerationFailures.load(std::memory_order_relaxed),
 			.cameraValid = camera.valid && fov > 0.0f,
@@ -2070,16 +1965,8 @@ namespace cs::render
 			return { .code = temporal::ProviderResultCode::kUnavailable,
 				.message = "No external super-resolution provider is active." };
 		}
-		const bool nativeD3D12Provider =
-			a_method == temporal::SuperResolutionMethod::kDLSS ||
-			(a_method == temporal::SuperResolutionMethod::kFSR3 &&
-				_impl->nativeFsrSession);
-		if (nativeD3D12Provider &&
-			_impl->streamline.IsD3D12Session()) {
-			return _impl->swapChain.EvaluateD3D12SuperResolution(
-				*provider, a_request);
-		}
-		return provider->Record(a_request);
+		return _impl->swapChain.EvaluateD3D12SuperResolution(
+			*provider, a_request);
 	}
 
 	temporal::SuperResolutionSizeResult
@@ -2113,10 +2000,8 @@ namespace cs::render
 	{
 		switch (a_method) {
 		case temporal::SuperResolutionMethod::kFSR3:
-			return _impl->nativeFsrSession
-				? _impl->streamline.featureFSR &&
-					  _impl->streamline.slFSRGetOptimalSettings
-				: _impl->fidelityFX.IsReady();
+			return _impl->streamline.featureFSR &&
+				_impl->streamline.slFSRGetOptimalSettings;
 		case temporal::SuperResolutionMethod::kDLSS:
 			return _impl->streamline.featureDLSS;
 		default:
@@ -2124,30 +2009,12 @@ namespace cs::render
 		}
 	}
 
-	bool TemporalPipeline::CreateFsrSuperResolutionResources(
-		ID3D11Device* a_device, std::uint32_t a_renderWidth,
-		std::uint32_t a_renderHeight, std::uint32_t a_outputWidth,
-		std::uint32_t a_outputHeight)
-	{
-		if (_impl->nativeFsrSession) {
-			return _impl->streamline.featureFSR &&
-				_impl->streamline.slFSRGetOptimalSettings;
-		}
-		return _impl->fidelityFX.CreateFSRResources(
-			{ .device = a_device,
-				.maxRenderWidth = a_renderWidth,
-				.maxRenderHeight = a_renderHeight,
-				.outputWidth = a_outputWidth,
-				.outputHeight = a_outputHeight });
-	}
-
 	std::unique_ptr<cs::buffer::Texture2D>
 	TemporalPipeline::CreateSuperResolutionTexture(
 		const D3D11_TEXTURE2D_DESC& a_desc,
 		std::string_view a_name)
 	{
-		if (_impl->streamline.IsD3D12Session() &&
-			_impl->swapChain.IsBridgeReady()) {
+		if (_impl->swapChain.IsBridgeReady()) {
 			return _impl->swapChain.CreateSharedTexture(a_desc, a_name);
 		}
 		return std::make_unique<cs::buffer::Texture2D>(a_desc);
@@ -2164,45 +2031,26 @@ namespace cs::render
 				};
 			}
 			if (a_method == temporal::SuperResolutionMethod::kFSR3) {
-				if (_impl->nativeFsrSession &&
-					!_impl->streamline.HasFSRResources()) {
-					return {
-						.code = temporal::ProviderResultCode::kSuccess
-					};
-				}
-				if (!_impl->nativeFsrSession &&
-					!_impl->fidelityFX.IsReady()) {
+				if (!_impl->streamline.HasFSRResources()) {
 					return {
 						.code = temporal::ProviderResultCode::kSuccess
 					};
 				}
 			}
-			if (_impl->streamline.IsD3D12Session()) {
-				const HRESULT drainResult = _impl->swapChain.Drain();
-				if (FAILED(drainResult)) {
-					return {
-						.code = temporal::ProviderResultCode::kFailure,
-						.hresult = drainResult,
-						.message =
-							"The D3D12 queue did not drain before super-resolution "
-							"resource destruction.",
-						.failureDomain = temporal::FailureDomain::kTransport
-					};
-				}
+			const HRESULT drainResult = _impl->swapChain.Drain();
+			if (FAILED(drainResult)) {
+				return {
+					.code = temporal::ProviderResultCode::kFailure,
+					.hresult = drainResult,
+					.message =
+						"The D3D12 queue did not drain before super-resolution "
+						"resource destruction.",
+					.failureDomain = temporal::FailureDomain::kTransport
+				};
 			}
 			return provider->DestroyAfterDrain();
 		}
 		return { .code = temporal::ProviderResultCode::kSuccess };
-	}
-
-	void TemporalPipeline::ResetFsrFrameGenerationCamera() noexcept
-	{
-		_impl->fidelityFX.ResetFrameGenerationCameraData();
-	}
-
-	void TemporalPipeline::RequestFsrFrameGenerationReset() noexcept
-	{
-		_impl->fidelityFX.RequestFrameGenerationReset();
 	}
 
 	FrameGenerationDebugTexture TemporalPipeline::GetFrameGenerationDebugTexture(
