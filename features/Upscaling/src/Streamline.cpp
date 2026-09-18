@@ -1406,7 +1406,6 @@ namespace cs::features
 
 	bool Streamline::PollDLSSGState() noexcept
 	{
-		_dlssGInputCompletionDependency.reset();
 		if (!featureDLSSG || !slDLSSGGetState) {
 			_dlssGLastStateQuerySucceeded = false;
 			return false;
@@ -1446,22 +1445,6 @@ namespace cs::features
 					std::memory_order_relaxed);
 				_dlssGConfigurationKnown.store(
 					true, std::memory_order_release);
-				if (a_state.inputsProcessingCompletionFence &&
-					a_state
-						.lastPresentInputsProcessingCompletionFenceValue) {
-					render::temporal::GpuCompletionDependency
-						dependency{
-							.value =
-								a_state
-									.lastPresentInputsProcessingCompletionFenceValue
-						};
-					dependency.fence.copy_from(
-						static_cast<ID3D12Fence*>(
-							a_state
-								.inputsProcessingCompletionFence));
-					_dlssGInputCompletionDependency =
-						std::move(dependency);
-				}
 			});
 		if (result != sl::Result::eOk) {
 			_dlssGLastStateQuerySucceeded = false;
@@ -1895,12 +1878,6 @@ namespace cs::features
 	}
 
 	std::optional<render::temporal::GpuCompletionDependency>
-	Streamline::ConsumeDLSSGInputCompletionDependency() noexcept
-	{
-		return std::exchange(_dlssGInputCompletionDependency, std::nullopt);
-	}
-
-	std::optional<render::temporal::GpuCompletionDependency>
 	Streamline::ConsumeFSRGInputCompletionDependency() noexcept
 	{
 		return std::exchange(
@@ -1953,7 +1930,6 @@ namespace cs::features
 		(void)_dlssGGeneratedFrames.Consume();
 		_dlssGGenerationEnabled.store(
 			false, std::memory_order_relaxed);
-		_dlssGInputCompletionDependency.reset();
 		_dlssGStatus = sl::DLSSGStatus::eOk;
 		_dlssGResourcesConfigured = false;
 		return {

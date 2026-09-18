@@ -223,15 +223,22 @@ namespace cs::features
 
 		void PublishRetirementDiagnostics(
 			cs::telemetry::Sink& a_sink,
-			const render::temporal::PresentInputRetirementDiagnostics& a_diagnostics)
+			const render::temporal::PresentInputRetirementDiagnostics& a_diagnostics,
+			render::temporal::FrameGenerationMethod a_method)
 		{
+			using render::temporal::FrameGenerationMethod;
+			const std::string_view mode = a_method == FrameGenerationMethod::kDLSSG
+				? "presenting_queue_order"
+				: a_method == FrameGenerationMethod::kFSR3 ||
+						  a_method == FrameGenerationMethod::kFSR4
+					? "vendor_completion_fence"
+					: "none";
 			a_sink
-				.Field("input_retirement_mode",
-					std::string_view{ "vendor_completion_fence" })
+				.Field("input_retirement_mode", mode)
 				.Field("input_retirement_source_queue",
-					std::string_view{ "streamline_provider" })
+					std::string_view{ "application_present_queue" })
 				.Field("input_retirement_signal_point",
-					std::string_view{ "post_vendor_fence_join" });
+					std::string_view{ "post_provider_completion" });
 			for (const auto& field : kRetirementCounterFields) {
 				a_sink.Field(field.name, a_diagnostics.*field.value);
 			}
@@ -543,7 +550,8 @@ namespace cs::features
 				diagnostics.cpuTiming.lastFrameTimeInputMilliseconds)
 			.Field("sdk_present_cpu_excludes_test", true)
 			.Field("sdk_present_cpu_includes_retries", true);
-		PublishRetirementDiagnostics(a_sink, diagnostics.inputRetirement);
+		PublishRetirementDiagnostics(
+			a_sink, diagnostics.inputRetirement, status.effective.frameGeneration);
 		PublishCpuTimings(a_sink, diagnostics.cpuTiming);
 	}
 

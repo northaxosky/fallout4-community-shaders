@@ -72,6 +72,19 @@ namespace cs::render::temporal
 			.observed = true };
 	}
 
+	[[nodiscard]] inline HRESULT JoinPresentInputCompletion(
+		ID3D12CommandQueue* a_queue,
+		const GpuCompletionDependency& a_dependency) noexcept
+	{
+		if (!a_queue || !a_dependency.IsValid()) {
+			return E_INVALIDARG;
+		}
+		if (a_dependency.orderedQueue) {
+			return a_dependency.orderedQueue.get() == a_queue ? S_OK : E_INVALIDARG;
+		}
+		return a_queue->Wait(a_dependency.fence.get(), a_dependency.value);
+	}
+
 	template <class Drain>
 	[[nodiscard]] ProviderResult
 	QuiesceDrainAndRelease(IFrameGenerationProvider& a_provider, Drain&& a_drain)

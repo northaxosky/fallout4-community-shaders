@@ -462,10 +462,12 @@ namespace cs::render::temporal
 	{
 		winrt::com_ptr<ID3D12Fence> fence;
 		std::uint64_t value = 0;
+		// Provider reads are ordered before later submissions on this exact queue.
+		winrt::com_ptr<ID3D12CommandQueue> orderedQueue;
 
 		[[nodiscard]] bool IsValid() const noexcept
 		{
-			return fence && value != 0;
+			return orderedQueue ? !fence && value == 0 : fence && value != 0;
 		}
 	};
 

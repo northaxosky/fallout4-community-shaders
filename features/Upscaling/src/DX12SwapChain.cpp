@@ -2009,12 +2009,14 @@ namespace cs::features
 		if (_vendorConsumptionPossible &&
 			presentResult != DXGI_ERROR_WAS_STILL_DRAWING) {
 			HRESULT retirementResult = S_OK;
+			const char* retirementOperation = "join provider completion";
+			std::optional<render::temporal::GpuCompletionDependency> dependency;
 			if (SUCCEEDED(presentResult)) {
-				const auto dependency =
+				dependency =
 					_provider->ConsumePresentInputCompletionDependency();
-				retirementResult = dependency && dependency->IsValid()
-					? _queue->Wait(
-						  dependency->fence.get(), dependency->value)
+				retirementResult = dependency
+					? render::temporal::JoinPresentInputCompletion(
+						  _queue.get(), *dependency)
 					: E_FAIL;
 			}
 			render::temporal::PresentInputRetirementToken token{
@@ -2025,6 +2027,7 @@ namespace cs::features
 					reinterpret_cast<std::uintptr_t>(_queue.get()))
 			};
 			if (SUCCEEDED(retirementResult) && SUCCEEDED(presentResult)) {
+				retirementOperation = "signal shared retirement fence";
 				retirementResult =
 					_queue->Signal(_inputRetirementFence12.get(), token.value);
 				if (SUCCEEDED(retirementResult)) {
@@ -2034,6 +2037,14 @@ namespace cs::features
 				}
 			}
 			if (FAILED(retirementResult)) {
+				L->error(
+					"{} input retirement failed to {}: HRESULT {:#010x}, "
+					"dependency={}, queue-ordered={}, vendor fence value={}, "
+					"retirement value={}",
+					_provider->Name(), retirementOperation,
+					static_cast<std::uint32_t>(retirementResult),
+					dependency.has_value(), dependency && dependency->orderedQueue,
+					dependency ? dependency->value : 0, token.value);
 				_retirementDiagnostics.signalFailures.fetch_add(
 					1, std::memory_order_relaxed);
 				_retirementDiagnostics.violations.fetch_add(

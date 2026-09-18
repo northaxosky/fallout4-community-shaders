@@ -69,6 +69,7 @@ namespace cs::features
 	private:
 		Streamline& _runtime;
 		Method _method;
+		winrt::com_ptr<ID3D12CommandQueue> _presentQueue;
 		std::uint32_t _width = 0;
 		std::uint32_t _height = 0;
 		std::uint32_t _bufferCount = 0;

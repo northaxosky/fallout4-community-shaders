@@ -75,6 +75,8 @@ namespace cs::features::streamline_fg
 					render::temporal::FrameGenerationMode::kFixed
 				? a_configuration.fixedMultiplier - 1
 				: 1;
+		options.queueParallelismMode =
+			sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue;
 		options.dynamicTargetFrameRate =
 			a_configuration.dynamicTargetFrameRate;
 		options.mvecDepthWidth = a_renderWidth;

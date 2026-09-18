@@ -95,6 +95,7 @@ namespace cs::features
 				"Streamline swap-chain does not expose IDXGISwapChain4.",
 				queryResult);
 		}
+		_presentQueue.copy_from(a_context.queue);
 		_presentationActive = true;
 		return Success();
 	}
@@ -388,9 +389,16 @@ namespace cs::features
 	std::optional<render::temporal::GpuCompletionDependency>
 	StreamlinePresentation::ConsumePresentInputCompletionDependency() noexcept
 	{
-		return _method == Method::kDLSSG
-			? _runtime.ConsumeDLSSGInputCompletionDependency()
-			: _runtime.ConsumeFSRGInputCompletionDependency();
+		if (_method == Method::kDLSSG) {
+			if (!_presentationActive || !_presentQueue) {
+				return std::nullopt;
+			}
+			// D3D12 DLSS-G orders its readers on the queue used to create presentation.
+			render::temporal::GpuCompletionDependency dependency;
+			dependency.orderedQueue = _presentQueue;
+			return dependency;
+		}
+		return _runtime.ConsumeFSRGInputCompletionDependency();
 	}
 
 	ProviderResult StreamlinePresentation::Sleep(std::uint32_t a_frame)
@@ -456,6 +464,7 @@ namespace cs::features
 		}
 		_ready = false;
 		_enabled = false;
+		_presentQueue = nullptr;
 		return Success();
 	}
 

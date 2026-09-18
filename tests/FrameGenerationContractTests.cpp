@@ -745,9 +745,12 @@ namespace
 		Check(configuredOptions.mode == sl::DLSSGMode::eOn &&
 				configuredOptions.numFramesToGenerate == 3 &&
 				configuredOptions.colorWidth == 2560 &&
+				configuredOptions.queueParallelismMode ==
+					sl::DLSSGQueueParallelismMode::eBlockPresentingClientQueue &&
 				configuredOptions.flags ==
 					sl::DLSSGFlags::eRetainResourcesWhenOff,
-			"fixed UI multiplier maps to SDK-generated frames without an arbitrary host cap");
+			"fixed UI multiplier and presenting-queue ordering map to the "
+			"documented SDK contract");
 		configuration.mode = FrameGenerationMode::kDynamic;
 		configuration.dynamicTargetFrameRate = 0.0f;
 		configuredOptions =

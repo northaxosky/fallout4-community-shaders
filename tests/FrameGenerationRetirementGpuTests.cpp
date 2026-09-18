@@ -19,6 +19,7 @@
 #include <winrt/base.h>
 
 #include "AgilityBootstrap.h"
+#include "Render/FrameGenerationOrchestration.h"
 
 namespace
 {
@@ -67,6 +68,13 @@ namespace
 		DXGI_FORMAT format;
 		std::array<float, 4> producerValue;
 		std::array<float, 4> consumerValue;
+	};
+
+	enum class CompletionStrategy
+	{
+		kVendorFence,
+		kQueueOrdered,
+		kWrongFence
 	};
 
 	constexpr std::array kFormatCases{
@@ -701,8 +709,8 @@ namespace
 		ID3D11Device5* a_device11,
 		ID3D11DeviceContext4* a_context11,
 		ID3D12Device* a_device12,
-		ID3D12CommandQueue* a_queue,
-		bool a_useCorrectFence)
+		ID3D12CommandQueue* a_presentingQueue,
+		CompletionStrategy a_strategy)
 	{
 		constexpr std::array<std::uint8_t, 4> oldPixel{
 			17, 31, 47, 255
@@ -780,6 +788,16 @@ namespace
 			return Check(false, "could not close the D3D12 copy command list");
 		}
 
+		D3D12_COMMAND_QUEUE_DESC queueDesc{};
+		queueDesc.Type = D3D12_COMMAND_LIST_TYPE_DIRECT;
+		winrt::com_ptr<ID3D12CommandQueue> consumerQueue;
+		if (!CheckHr(
+				a_device12->CreateCommandQueue(
+					&queueDesc, IID_PPV_ARGS(consumerQueue.put())),
+				"ID3D12Device::CreateCommandQueue",
+				"delayed retirement consumer")) {
+			return false;
+		}
 		winrt::com_ptr<ID3D12Fence> blocker;
 		if (FAILED(a_device12->CreateFence(
 				0, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(blocker.put())))) {
@@ -795,14 +813,16 @@ namespace
 				retirement11)) {
 			return Check(false, "could not create the retirement fence");
 		}
-		winrt::com_ptr<ID3D12Fence> wrong12;
-		winrt::com_ptr<ID3D11Fence> wrong11;
-		if (!OpenFence(
-				a_device12,
-				a_device11,
-				2,
-				wrong12,
-				wrong11)) {
+		winrt::com_ptr<ID3D12Fence> consumerCompletion;
+		if (FAILED(a_device12->CreateFence(
+				0,
+				D3D12_FENCE_FLAG_NONE,
+				IID_PPV_ARGS(consumerCompletion.put())))) {
+			return Check(false, "could not create the consumer completion fence");
+		}
+		winrt::com_ptr<ID3D12Fence> wrongFence;
+		if (FAILED(a_device12->CreateFence(
+				2, D3D12_FENCE_FLAG_NONE, IID_PPV_ARGS(wrongFence.put())))) {
 			return Check(false, "could not create the negative-control fence");
 		}
 
@@ -814,33 +834,90 @@ namespace
 			return Check(false, "could not create the completion observers");
 		}
 		if (FAILED(a_context11->Signal(retirement11.get(), 1)) ||
-			FAILED(a_queue->Wait(retirement12.get(), 1))) {
+			FAILED(consumerQueue->Wait(retirement12.get(), 1))) {
 			return Check(false, "could not publish the initialized producer texture");
 		}
 		a_context11->Flush();
-		if (FAILED(a_queue->Wait(blocker.get(), 1))) {
+		if (FAILED(consumerQueue->Wait(blocker.get(), 1))) {
 			return Check(false, "could not delay the consumer queue");
 		}
 		ID3D12CommandList* lists[]{ recording.list.get() };
-		a_queue->ExecuteCommandLists(1, lists);
+		consumerQueue->ExecuteCommandLists(1, lists);
+		if (FAILED(consumerQueue->Signal(consumerCompletion.get(), 1))) {
+			return Check(false, "could not publish delayed consumer completion");
+		}
+
+		using cs::render::temporal::GpuCompletionDependency;
+		using cs::render::temporal::JoinPresentInputCompletion;
+		if (a_strategy == CompletionStrategy::kQueueOrdered) {
+			GpuCompletionDependency noDependency;
+			GpuCompletionDependency zeroVendorValue{
+				.fence = consumerCompletion
+			};
+			GpuCompletionDependency foreignPresentingQueue;
+			foreignPresentingQueue.orderedQueue.copy_from(a_presentingQueue);
+			if (!Check(
+					JoinPresentInputCompletion(
+						a_presentingQueue, noDependency) == E_INVALIDARG,
+					"missing input completion dependency was accepted") ||
+				!Check(
+					JoinPresentInputCompletion(
+						a_presentingQueue, zeroVendorValue) == E_INVALIDARG,
+					"zero-valued vendor completion dependency was accepted") ||
+				!Check(
+					JoinPresentInputCompletion(
+						consumerQueue.get(), foreignPresentingQueue) ==
+						E_INVALIDARG,
+					"queue-ordered dependency accepted the wrong presenting queue")) {
+				return false;
+			}
+		}
+
 		const bool ordered = [&] {
-			if (FAILED(a_queue->Signal(retirement12.get(), 2))) {
+			GpuCompletionDependency dependency;
+			switch (a_strategy) {
+			case CompletionStrategy::kVendorFence:
+				dependency.fence = consumerCompletion;
+				dependency.value = 1;
+				break;
+			case CompletionStrategy::kQueueOrdered:
+				// Model DLSS-G placing its last reader ahead of subsequent work
+				// on the queue used to create presentation.
+				if (FAILED(a_presentingQueue->Wait(
+						consumerCompletion.get(), 1))) {
+					return Check(
+						false,
+						"could not order the delayed reader onto the presenting queue");
+				}
+				dependency.orderedQueue.copy_from(a_presentingQueue);
+				break;
+			case CompletionStrategy::kWrongFence:
+				dependency.fence = wrongFence;
+				dependency.value = 2;
+				break;
+			}
+			if (FAILED(JoinPresentInputCompletion(
+					a_presentingQueue, dependency))) {
+				return Check(false, "could not join input completion");
+			}
+			if (FAILED(a_presentingQueue->Signal(retirement12.get(), 2))) {
 				return Check(false, "could not signal input retirement");
 			}
-			auto* waitFence =
-				a_useCorrectFence ? retirement11.get() : wrong11.get();
-			if (FAILED(a_context11->Wait(waitFence, 2))) {
+			if (FAILED(a_context11->Wait(retirement11.get(), 2))) {
 				return Check(false, "could not queue the D3D11 producer wait");
 			}
 			a_context11->CopyResource(texture.texture11.get(), updateTexture.get());
 			a_context11->End(producerDone.get());
 			a_context11->Flush();
+			const bool shouldPreserveOldInput =
+				a_strategy != CompletionStrategy::kWrongFence;
 			const bool completedWhileConsumerBlocked = WaitForD3D11(
 				a_context11, producerDone.get(),
-				std::chrono::milliseconds(a_useCorrectFence ? 100 : 5000));
+				std::chrono::milliseconds(
+					shouldPreserveOldInput ? 100 : 5000));
 			return Check(
-				completedWhileConsumerBlocked != a_useCorrectFence,
-				a_useCorrectFence
+				completedWhileConsumerBlocked != shouldPreserveOldInput,
+				shouldPreserveOldInput
 					? "producer overwrite completed before the consumer retirement signal"
 					: "wrong-fence negative control did not bypass the real consumer");
 		}();
@@ -849,9 +926,8 @@ namespace
 			return Check(false, "could not release the delayed consumer");
 		}
 		a_context11->Flush();
-		// The negative control's producer query does not depend on consumer completion.
-		if (FAILED(a_queue->Signal(retirement12.get(), 3)) ||
-			FAILED(retirement12->SetEventOnCompletion(3, consumerDone.get())) ||
+		if (FAILED(consumerCompletion->SetEventOnCompletion(
+				1, consumerDone.get())) ||
 			WaitForSingleObject(consumerDone.get(), 5000) != WAIT_OBJECT_0) {
 			return Check(false, "consumer did not retire before readback and resource release");
 		}
@@ -881,7 +957,9 @@ namespace
 			consumed.size());
 		const D3D12_RANGE emptyRange{};
 		readback.resource->Unmap(0, &emptyRange);
-		const bool expectedResult = a_useCorrectFence
+		const bool shouldPreserveOldInput =
+			a_strategy != CompletionStrategy::kWrongFence;
+		const bool expectedResult = shouldPreserveOldInput
 			? consumed == oldPixel
 			: consumed != oldPixel;
 		if (!expectedResult) {
@@ -893,7 +971,7 @@ namespace
 		}
 		return Check(
 			expectedResult,
-			a_useCorrectFence
+			shouldPreserveOldInput
 				? "retired reuse did not preserve the consumer's old input"
 				: "wrong-fence negative control unexpectedly preserved the old input");
 	}
@@ -1228,13 +1306,19 @@ int main(int a_argc, char** a_argv)
 		devices.context11.get(),
 		devices.device12.get(),
 		devices.queue.get(),
-		true);
+		CompletionStrategy::kVendorFence);
 	ok &= RunRetirementScenario(
 		devices.device11.get(),
 		devices.context11.get(),
 		devices.device12.get(),
 		devices.queue.get(),
-		false);
+		CompletionStrategy::kQueueOrdered);
+	ok &= RunRetirementScenario(
+		devices.device11.get(),
+		devices.context11.get(),
+		devices.device12.get(),
+		devices.queue.get(),
+		CompletionStrategy::kWrongFence);
 	if (debugLayerEnabled) {
 		ok &= CheckDebugMessages(devices.device12.get());
 	}

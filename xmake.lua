@@ -477,6 +477,7 @@ target("FrameGenerationRetirementGpuTests", function()
     add_headerfiles("features/Upscaling/src/AgilityBootstrap.h")
     add_includedirs(
         generated_include,
+        "src",
         "extern",
         "features/Upscaling/src"
     )

@@ -163,8 +163,6 @@ namespace cs::features
 			ConsumeDLSSGGeneratedFrameCount() noexcept;
 		[[nodiscard]] std::uint32_t
 			ConsumeDLSSGPresentedFrameCount() noexcept;
-		[[nodiscard]] std::optional<render::temporal::GpuCompletionDependency>
-			ConsumeDLSSGInputCompletionDependency() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
 			DestroyDLSSGResources() noexcept;
 		[[nodiscard]] render::temporal::ProviderResult
@@ -235,8 +233,6 @@ namespace cs::features
 		bool _latencyFeaturesRequested = false;
 		render::temporal::PresentedFrameAccumulator _dlssGPresentedFrames;
 		render::temporal::PresentedFrameAccumulator _dlssGGeneratedFrames;
-		std::optional<render::temporal::GpuCompletionDependency>
-			_dlssGInputCompletionDependency;
 		std::optional<render::temporal::GpuCompletionDependency>
 			_fsrGInputCompletionDependency;
 		sl::DLSSGStatus _dlssGStatus = sl::DLSSGStatus::eOk;
