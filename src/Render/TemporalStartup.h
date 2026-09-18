@@ -46,16 +46,13 @@ namespace cs::render::temporal
 		admission.detail = std::format(
 			"Requested super resolution is unavailable: {} (SDK {}).",
 			requested.message, requested.sdkResult);
-		if (a_request.superResolution == SuperResolutionMethod::kDLSS &&
-			a_request.noDlssFallback != SuperResolutionMethod::kDLSS) {
-			const auto fallback = initialize(a_request.noDlssFallback);
-			if (fallback.Succeeded()) {
-				admission.detail += " The configured startup fallback is active.";
-			} else {
-				admission.detail += std::format(
-					" The configured fallback is unavailable: {} (SDK {}).",
-					fallback.message, fallback.sdkResult);
-			}
+		const bool externalRequested =
+			a_request.superResolution == SuperResolutionMethod::kFSR3 ||
+			a_request.superResolution == SuperResolutionMethod::kDLSS ||
+			a_request.superResolution == SuperResolutionMethod::kFSR4;
+		if (externalRequested) {
+			admission.detail +=
+				" Native TAA remains active for this startup.";
 		}
 		return admission;
 	}

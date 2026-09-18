@@ -57,6 +57,9 @@ namespace cs::feature_config
 
 	void DeepMerge(toml::table& a_base, const toml::table& a_override);
 	TemporalMigrationResult NormalizeLegacyTemporalSettings(toml::table& a_userRoot);
+	TemporalMigrationResult NormalizeLegacyTemporalFeatureSettings(
+		std::string_view a_featureKey,
+		toml::table& a_settings);
 	UnifiedLoadResult LoadMergedFiles(
 		const std::filesystem::path& a_defaultPath,
 		const std::filesystem::path& a_userPath);

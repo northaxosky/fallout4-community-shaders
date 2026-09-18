@@ -458,23 +458,22 @@ namespace cs::render
 			frameGeneration && frameGeneration->GetState().IsActive();
 		if (upscaling) {
 			_impl->requestedRenderSettings = upscaling->settings;
-			requested.superResolutionEnabled = upscaling->settings.enabled;
 			requested.superResolution =
 				ToCore(static_cast<features::Upscaling::UpscaleMethod>(
 					upscaling->settings.upscaleMethod));
-			requested.noDlssFallback =
-				ToCore(static_cast<features::Upscaling::UpscaleMethod>(
-					upscaling->settings.upscaleMethodNoDLSS));
+			requested.superResolutionEnabled =
+				requested.superResolution !=
+				temporal::SuperResolutionMethod::kNone;
 			requested.qualityMode = upscaling->settings.qualityMode;
 			requested.streamlineLogLevel = upscaling->settings.streamlineLogLevel;
 		}
 		if (frameGeneration) {
-			requested.frameGenerationEnabled = frameGeneration->settings.enabled;
 			requested.frameGeneration =
 				ToCore(static_cast<features::FrameGeneration::Method>(
 					frameGeneration->settings.frameGenerationMethod));
-			requested.forceFrameGeneration =
-				frameGeneration->settings.frameGenerationForceEnable != 0;
+			requested.frameGenerationEnabled =
+				requested.frameGeneration !=
+				temporal::FrameGenerationMethod::kOff;
 			requested.allowFrameGenerationInMenus =
 				frameGeneration->settings.frameGenerationAllowInMenus;
 			requested.frameGenerationConfiguration =
@@ -527,13 +526,18 @@ namespace cs::render
 			_impl->configurationRevision.fetch_add(1, std::memory_order_acq_rel);
 		std::scoped_lock lock(_impl->mutex);
 		_impl->requestedRenderSettings = upscaling->settings;
-		_impl->topology.SubmitLive(
-			upscaling->settings.enabled,
+		const auto superResolution =
 			ToCore(static_cast<features::Upscaling::UpscaleMethod>(
-				upscaling->settings.upscaleMethod)),
-			upscaling->settings.qualityMode, frameGeneration->settings.enabled,
+				upscaling->settings.upscaleMethod));
+		const auto frameGenerationMethod =
 			ToCore(static_cast<features::FrameGeneration::Method>(
-				frameGeneration->settings.frameGenerationMethod)),
+				frameGeneration->settings.frameGenerationMethod));
+		_impl->topology.SubmitLive(
+			superResolution != temporal::SuperResolutionMethod::kNone,
+			superResolution,
+			upscaling->settings.qualityMode,
+			frameGenerationMethod != temporal::FrameGenerationMethod::kOff,
+			frameGenerationMethod,
 			revision,
 			ToCoreFrameGenerationConfiguration(
 				frameGeneration->settings));
@@ -1138,16 +1142,6 @@ namespace cs::render
 				"Frame generation requires windowed or borderless presentation; "
 				"plain D3D12 presentation remains available.");
 		}
-		if (frameGenerationEligible &&
-			refreshRate < 120.0 && !request.forceFrameGeneration) {
-			frameGenerationEligible = false;
-			PostFailure(temporal::FailureDomain::kFrameGeneration,
-				std::format("Frame generation requires 120 Hz or the explicit "
-							"force policy; observed {:.2f} Hz. Plain D3D12 "
-							"presentation remains available.",
-					refreshRate));
-		}
-
 		_impl->creationState.store(TemporalCreationState::kCreating,
 			std::memory_order_release);
 		ID3D11Device* device = nullptr;
@@ -1413,18 +1407,7 @@ namespace cs::render
 		session.rejectionReason = srAdmission.detail;
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kOff)] = temporalProxyPath;
-		const double refreshRate = GetRefreshRate(
-			_impl->swapChain.GetProxy()
-				? [&] {
-					  DXGI_SWAP_CHAIN_DESC desc{};
-					  return SUCCEEDED(_impl->swapChain.GetDesc(&desc))
-						  ? desc.OutputWindow
-						  : static_cast<HWND>(nullptr);
-				  }()
-				: nullptr);
-		const bool fgDisplayEligible =
-			temporalProxyPath &&
-			(request.forceFrameGeneration || refreshRate >= 120.0);
+		const bool fgDisplayEligible = temporalProxyPath;
 		session.admittedFg[static_cast<std::size_t>(
 			temporal::FrameGenerationMethod::kFSR3)] =
 			request.frameGenerationEligible && fgDisplayEligible &&
@@ -1868,6 +1851,7 @@ namespace cs::render
 			_impl->resetEpochs.FrameGenerationConsumed();
 		status.traceSequence = _impl->traceSequence;
 		status.traceEntryCount = static_cast<std::uint32_t>(_impl->traceCount);
+		status.transitionInFlight = _impl->topology.TransitionInFlight();
 		status.failure =
 			_impl->failure.empty() ? status.session.rejectionReason : _impl->failure;
 		if (status.failureDomain == temporal::FailureDomain::kNone &&
@@ -1904,21 +1888,29 @@ namespace cs::render
 	}
 
 	FrameGenerationDiagnostics
-	TemporalPipeline::GetFrameGenerationDiagnostics() const noexcept
+	TemporalPipeline::GetFrameGenerationDiagnostics(
+		bool a_includeLiveEngineState) const noexcept
 	{
 		auto cpuTimings = _impl->frameGenerationCpuTimings.GetSnapshot();
 		if (!_impl->detailedTracing.load(std::memory_order_acquire)) {
 			cpuTimings = {};
 		}
-		const auto& camera = cs::engine::GetFrameBuffer();
-		const auto* state = cs::engine::GetGraphicsState();
-		const float fov = camera.valid ? cs::engine::VerticalFieldOfViewFromWorldToClip(
-											 camera.data.CurrFrameWorldToClip) :
-		                                 0.0f;
+		const auto* state = a_includeLiveEngineState
+			? cs::engine::GetGraphicsState()
+			: nullptr;
+		const auto& camera = a_includeLiveEngineState
+			? cs::engine::GetFrameBuffer()
+			: engine::FrameBufferSnapshot{};
+		const float fov =
+			camera.valid
+				? cs::engine::VerticalFieldOfViewFromWorldToClip(
+					  camera.data.CurrFrameWorldToClip)
+				: 0.0f;
 		const std::int64_t frameDelta =
-			camera.valid && state ? static_cast<std::int64_t>(state->frameCount) -
-										static_cast<std::int64_t>(camera.frameCount) :
-									0;
+			camera.valid && state
+				? static_cast<std::int64_t>(state->frameCount) -
+					  static_cast<std::int64_t>(camera.frameCount)
+				: 0;
 		bool ready = false;
 		bool active = false;
 		temporal::PresentInputRetirementDiagnostics retirementDiagnostics;
@@ -1935,7 +1927,12 @@ namespace cs::render
 			const auto& frame = _impl->frames[_impl->currentFrameSlot];
 			active = temporal::IsFrameGenerationActive(
 				configured, effective, ready, _impl->latency.Frame(),
-				state ? std::optional<std::uint64_t>{ state->frameCount } : std::nullopt,
+				state
+					? std::optional<std::uint64_t>{ state->frameCount }
+					: frame.Identity().engineFrame
+					? std::optional<std::uint64_t>{
+						  frame.Identity().engineFrame }
+					: std::nullopt,
 				frame);
 		}
 		return {
@@ -1965,10 +1962,18 @@ namespace cs::render
 				_impl->frameGenerationFailures.load(std::memory_order_relaxed),
 			.cameraValid = camera.valid && fov > 0.0f,
 			.cameraFrameDelta = frameDelta,
-			.cameraFovDegrees = static_cast<double>(fov) * 180.0 / std::numbers::pi,
+			.cameraFovDegrees =
+				static_cast<double>(fov) * 180.0 /
+				std::numbers::pi,
 			.cpuTiming = cpuTimings,
 			.inputRetirement = retirementDiagnostics
 		};
+	}
+
+	temporal::FrameGenerationCapabilities
+	TemporalPipeline::GetFrameGenerationCapabilities() const noexcept
+	{
+		return _impl->streamline.GetDLSSGCapabilities();
 	}
 
 	TemporalPipeline::FrameGenerationCaptureResources

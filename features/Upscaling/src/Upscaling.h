@@ -4,6 +4,8 @@
 #include "FeatureCategories.h"
 #include "Render/TemporalRenderSettings.h"
 
+#include <optional>
+
 namespace cs::features
 {
 	class Upscaling : public Feature
@@ -32,6 +34,13 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		bool ParticipatesInPresets() const override { return true; }
+		bool StageFromPreset(const toml::table& a_table,
+			const PresetApplyContext& a_context,
+			std::string& a_error) override;
+		void CommitStagedSwap() noexcept override;
+		void CommitStagedFinalize() override;
+		void ExportToPreset(toml::table& a_out) override;
 
 		Settings settings;
 
@@ -39,5 +48,6 @@ namespace cs::features
 		Upscaling() = default;
 		void SaveSettings();
 		Settings _bootSettings;
+		std::optional<Settings> _stagedSettings;
 	};
 }

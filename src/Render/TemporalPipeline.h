@@ -84,6 +84,7 @@ namespace cs::render
 		std::uint64_t frameGenerationResetConsumed = 0;
 		std::uint64_t traceSequence = 0;
 		std::uint32_t traceEntryCount = 0;
+		bool transitionInFlight = false;
 		std::string failure;
 	};
 
@@ -201,7 +202,10 @@ namespace cs::render
 		IsFrameGenerationEnabledForFrame(bool a_inExcludedMenu) const noexcept;
 		[[nodiscard]] bool AllowFrameGenerationInMenus() const noexcept;
 		[[nodiscard]] FrameGenerationDiagnostics
-		GetFrameGenerationDiagnostics() const noexcept;
+		GetFrameGenerationDiagnostics(
+			bool a_includeLiveEngineState = true) const noexcept;
+		[[nodiscard]] temporal::FrameGenerationCapabilities
+		GetFrameGenerationCapabilities() const noexcept;
 		[[nodiscard]] temporal::FidelityFXCapabilities
 		GetFidelityFXCapabilities() const noexcept;
 		[[nodiscard]] FrameGenerationCaptureResources

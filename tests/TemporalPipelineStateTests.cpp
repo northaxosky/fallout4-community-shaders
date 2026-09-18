@@ -1,9 +1,12 @@
 #include "Render/TemporalDevicePolicy.h"
 #include "Render/TemporalPipelineState.h"
+#include "Render/TemporalPresentation.h"
 #include "Render/TemporalProvider.h"
 #include "Render/TemporalRenderSettings.h"
 #include "Render/TemporalRenderSizing.h"
 #include "Render/TemporalStartup.h"
+
+#include <DearModdingUI/PresentationCore.h>
 
 #include <iostream>
 #include <string_view>
@@ -60,7 +63,6 @@ namespace
 		requested.upscalingEligible = true;
 		requested.frameGenerationEligible = true;
 		requested.superResolution = SuperResolutionMethod::kDLSS;
-		requested.noDlssFallback = SuperResolutionMethod::kFSR3;
 		requested.frameGeneration = FrameGenerationMethod::kFSR3;
 		requested.revision = 4;
 		Check(state.Freeze(requested), "first request freezes");
@@ -262,6 +264,55 @@ namespace
 		ConfigureTemporalFeatureLevels(request, levels);
 		Check(levels.empty(),
 			"inactive temporal features leave native device creation unchanged");
+	}
+
+	void TestTemporalAvailabilityPresentation()
+	{
+		using namespace cs::render;
+		using namespace cs::render::temporal;
+
+		TemporalPipelineStatus status;
+		auto checking = presentation::Describe(
+			SuperResolutionMethod::kFSR4,
+			status,
+			{});
+		Check(
+			checking.kind ==
+					presentation::AvailabilityKind::kChecking &&
+				checking.reason == "Checking availability",
+			"unknown capability state is presented as checking rather than unsupported");
+
+		status.requestFrozen = true;
+		status.d3d11Ready = true;
+		status.session.valid = true;
+		FidelityFXCapabilities fidelityFx;
+		fidelityFx.fsr4SuperResolution.availability =
+			CapabilityAvailability::kUnsupported;
+		fidelityFx.fsr4SuperResolution.unavailableReason = 2;
+		const auto unavailable = presentation::Describe(
+			SuperResolutionMethod::kFSR4,
+			status,
+			fidelityFx);
+		Check(
+			unavailable.kind ==
+					presentation::AvailabilityKind::kUnavailable &&
+				unavailable.reason.contains("operating system"),
+			"cached provider reasons are translated to plain language");
+
+		const dmui::ChoiceOption<std::uint32_t> disabled{
+			4,
+			presentation::OptionLabel("FSR 4", unavailable),
+			"fsr-4",
+			unavailable.Selectable()
+		};
+		const auto activation =
+			dmui::presentation_detail::ResolveChoiceActivation(
+				1u,
+				disabled,
+				true);
+		Check(
+			!activation.changed && !activation.selected,
+			"a capability-disabled temporal choice cannot activate");
 	}
 
 	void TestLiveTransitions()
@@ -634,78 +685,56 @@ namespace
 			"an unloaded Upscaling feature initializes no SR providers");
 
 		request.upscalingEligible = true;
-		request.superResolution = SuperResolutionMethod::kDLSS;
-		const auto dlssUnavailable = [&](SuperResolutionMethod a_method) {
-			calls.push_back(a_method);
-			return ProviderResult{ .code = a_method == SuperResolutionMethod::kDLSS ? ProviderResultCode::kUnavailable : ProviderResultCode::kSuccess,
-				.message = a_method == SuperResolutionMethod::kDLSS ? "DLSS unavailable" : "" };
-		};
-		calls.clear();
-		const auto defaultAdmission =
-			InitializeSelectedSuperResolution(request, dlssUnavailable);
-		TopologyState defaultFallback;
-		Check(defaultFallback.Freeze(request), "default fallback request freezes");
-		SessionTopology defaultSession;
-		defaultSession.valid = true;
-		defaultSession.admittedSr = defaultAdmission.methods;
-		Check(defaultFallback.Admit(defaultSession), "default fallback admits");
-		Check(defaultFallback.Effective().superResolution == SuperResolutionMethod::kTAA &&
-				  calls == std::vector{ SuperResolutionMethod::kDLSS } &&
-				  !defaultAdmission.methods[static_cast<std::size_t>(SuperResolutionMethod::kFSR3)],
-			"unavailable DLSS defaults to native TAA without initializing standby FSR");
-		for (const auto fallback :
-			{ SuperResolutionMethod::kNone, SuperResolutionMethod::kTAA,
+		for (const auto unavailableMethod :
+			{ SuperResolutionMethod::kDLSS,
 				SuperResolutionMethod::kFSR3,
 				SuperResolutionMethod::kFSR4 }) {
-			request.noDlssFallback = fallback;
+			request.superResolution = unavailableMethod;
 			calls.clear();
-			const auto admission =
-				InitializeSelectedSuperResolution(request, dlssUnavailable);
-			const auto expected =
-				fallback == SuperResolutionMethod::kNone ||
-						fallback == SuperResolutionMethod::kTAA ?
-					std::vector{ SuperResolutionMethod::kDLSS } :
-					std::vector{ SuperResolutionMethod::kDLSS, fallback };
-			Check(calls == expected,
-				"a fallback initializes only after the requested DLSS runtime fails");
-			Check(admission.methods[static_cast<std::size_t>(fallback)] &&
-					  admission.detail.contains("DLSS unavailable"),
-				"startup fallback preserves an explicit explanation");
-			TopologyState state;
-			Check(state.Freeze(request), "fallback request freezes");
+			const auto admission = InitializeSelectedSuperResolution(
+				request,
+				[&](SuperResolutionMethod a_method) {
+					calls.push_back(a_method);
+					return ProviderResult{
+						.code = ProviderResultCode::kUnavailable,
+						.message = "provider unavailable"
+					};
+				});
+			Check(
+				calls == std::vector{ unavailableMethod } &&
+					admission.methods[static_cast<std::size_t>(
+						SuperResolutionMethod::kTAA)] &&
+					admission.detail.contains("Native TAA"),
+				"an unavailable external startup method falls back only to native TAA");
+			TopologyState fallback;
+			Check(fallback.Freeze(request), "native startup fallback request freezes");
 			SessionTopology session;
 			session.valid = true;
 			session.admittedSr = admission.methods;
-			Check(state.Admit(session), "fallback admission records");
-			state.SubmitLive(true, SuperResolutionMethod::kDLSS, 2, false,
-				FrameGenerationMethod::kOff, 3);
-			Check(state.Effective().superResolution == fallback &&
-					  !state.Pending().required,
-				"tuning does not replace a startup fallback or request a spurious "
-				"restart");
-			state.SubmitLive(true, fallback, 2, false, FrameGenerationMethod::kOff, 4);
-			Check(state.PendingTransition() &&
-					  !state.Pending().required &&
-					  state.CommitPendingTransition(4) &&
-					  state.Effective().superResolution == fallback &&
-					  state.Effective().qualityMode == 2,
-				"the already-effective fallback accepts a live quality update");
+			Check(fallback.Admit(session), "native startup fallback admits");
+			Check(
+				fallback.Effective().superResolution ==
+						SuperResolutionMethod::kTAA &&
+					fallback.Effective().superResolutionEnabled,
+				"every unavailable external startup provider resolves to native TAA");
 		}
 
-		request.noDlssFallback = SuperResolutionMethod::kFSR3;
+		request.superResolution = SuperResolutionMethod::kNone;
 		calls.clear();
-		const auto unavailable = InitializeSelectedSuperResolution(
-			request, [&](SuperResolutionMethod a_method) {
-				calls.push_back(a_method);
-				return ProviderResult{ .code = ProviderResultCode::kUnavailable,
-					.message = "unavailable" };
-			});
-		Check(calls == std::vector{ SuperResolutionMethod::kDLSS,
-						   SuperResolutionMethod::kFSR3 } &&
-				  !unavailable.methods[static_cast<std::size_t>(
-					  SuperResolutionMethod::kFSR3)] &&
-				  unavailable.detail.contains("fallback is unavailable"),
-			"failed fallback does not silently admit another provider");
+		const auto nativeOff =
+			InitializeSelectedSuperResolution(request, available);
+		TopologyState off;
+		Check(off.Freeze(request), "native Off request freezes");
+		SessionTopology offSession;
+		offSession.valid = true;
+		offSession.admittedSr = nativeOff.methods;
+		Check(off.Admit(offSession), "native Off request admits");
+		Check(
+			calls.empty() &&
+				off.Effective().superResolution ==
+					SuperResolutionMethod::kNone &&
+				!off.Effective().superResolutionEnabled,
+			"native Off remains Off without initializing or selecting a fallback");
 	}
 
 	void TestPreUiHandoffPlanning()
@@ -1063,6 +1092,7 @@ int main()
 	TestInvalidProviderValues();
 	TestQuarantinedConfiguration();
 	TestTemporalFeatureLevels();
+	TestTemporalAvailabilityPresentation();
 	TestLiveTransitions();
 	TestSelectedStartupInitialization();
 	TestPreUiHandoffPlanning();

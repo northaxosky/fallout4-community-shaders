@@ -4,6 +4,7 @@
 #include "FeatureCategories.h"
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 namespace cs::features
@@ -21,10 +22,8 @@ namespace cs::features
 
 		struct Settings
 		{
-			bool enabled = true;
 			std::uint32_t frameGenerationMethod =
 				static_cast<std::uint32_t>(Method::kFSR3);
-			std::uint32_t frameGenerationForceEnable = 0;
 			bool frameGenerationAllowInMenus = false;
 			std::uint32_t dlssgMode = 0;
 			std::uint32_t dlssgFixedMultiplier = 2;
@@ -36,6 +35,7 @@ namespace cs::features
 
 		std::string_view GetName() const override { return "FrameGeneration"; }
 		std::string_view GetDisplayName() const override { return "Frame Generation"; }
+		std::string GetPresetKey() const override { return "frame_generation"; }
 		std::string GetCategory() const override { return FeatureCategories::kPerformance; }
 		std::string GetFeatureSummary() const override
 		{
@@ -44,13 +44,19 @@ namespace cs::features
 		bool Configure(const toml::table& a_config, std::string& a_error) override;
 		void Load() override;
 		void DrawSettings() override;
-		settings::RestartSettingsView GetRestartSettings() const noexcept override;
 		void RestoreDefaultSettings() override;
 		bool HasResettableSettings() const override { return true; }
 		bool ProducesTelemetry() const override { return true; }
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		std::span<const FeatureDebugView> GetDebugViews() const noexcept override;
 		void SetDebugView(std::string_view a_view) noexcept override;
+		bool ParticipatesInPresets() const override { return true; }
+		bool StageFromPreset(const toml::table& a_table,
+			const PresetApplyContext& a_context,
+			std::string& a_error) override;
+		void CommitStagedSwap() noexcept override;
+		void CommitStagedFinalize() override;
+		void ExportToPreset(toml::table& a_out) override;
 
 		Settings settings;
 
@@ -67,6 +73,6 @@ namespace cs::features
 		void SaveSettings();
 		FeatureDebugTexture GetDebugTexture(DebugView a_view) const;
 
-		Settings _bootSettings;
+		std::optional<Settings> _stagedSettings;
 	};
 }

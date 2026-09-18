@@ -326,103 +326,150 @@ namespace cs::feature_config
 		auto* frameGeneration = (*features)["FrameGeneration"].as_table();
 		const bool legacySettingsPresent = legacySettings &&
 			(legacySettings->contains("frame_generation_mode") ||
-				legacySettings->contains("frame_generation_force_enable") ||
 				legacySettings->contains("frame_generation_allow_in_menus"));
-		if (!legacySettingsPresent) {
-			return result;
-		}
 
-		if (!frameGeneration) {
-			features->insert_or_assign("FrameGeneration", toml::table{});
-			frameGeneration = (*features)["FrameGeneration"].as_table();
-		}
-		if (!frameGeneration) {
-			return result;
-		}
-
-		bool legacyLoad = false;
-		const toml::node* legacyLoadNode = nullptr;
-		if (upscaling) {
-			legacyLoadNode = upscaling->get("load");
-			if (const auto value = (*upscaling)["load"].value<bool>()) {
-				legacyLoad = *value;
+		if (legacySettingsPresent) {
+			if (!frameGeneration) {
+				features->insert_or_assign("FrameGeneration", toml::table{});
+				frameGeneration = (*features)["FrameGeneration"].as_table();
 			}
-		}
+			if (!frameGeneration) {
+				return result;
+			}
 
-		std::int64_t legacyMode = 1;
-		const toml::node* legacyModeNode = nullptr;
-		const toml::node* legacyForceNode = nullptr;
-		const toml::node* legacyMenusNode = nullptr;
-		if (legacySettings) {
-			legacyModeNode = legacySettings->get("frame_generation_mode");
-			legacyForceNode = legacySettings->get("frame_generation_force_enable");
-			legacyMenusNode = legacySettings->get("frame_generation_allow_in_menus");
+			bool legacyLoad = false;
+			const toml::node* legacyLoadNode = nullptr;
+			if (upscaling) {
+				legacyLoadNode = upscaling->get("load");
+				if (const auto value = (*upscaling)["load"].value<bool>()) {
+					legacyLoad = *value;
+				}
+			}
+
+			std::int64_t legacyMode = 1;
+			const toml::node* legacyModeNode =
+				legacySettings->get("frame_generation_mode");
+			const toml::node* legacyMenusNode =
+				legacySettings->get("frame_generation_allow_in_menus");
 			if (legacyModeNode) {
 				if (const auto value = legacyModeNode->value<std::int64_t>()) {
 					legacyMode = *value;
 				}
 			}
-		}
 
-		if (!frameGeneration->contains("load")) {
-			if (legacyLoadNode && !legacyLoadNode->is_boolean()) {
-				frameGeneration->insert_or_assign("load", *legacyLoadNode);
-			} else {
-				frameGeneration->insert_or_assign(
-					"load",
-					legacyLoad && legacyMode > 0);
+			if (!frameGeneration->contains("load")) {
+				if (legacyLoadNode && !legacyLoadNode->is_boolean()) {
+					frameGeneration->insert_or_assign("load", *legacyLoadNode);
+				} else {
+					frameGeneration->insert_or_assign(
+						"load",
+						legacyLoad && legacyMode > 0);
+				}
 			}
-		}
-		auto* newSettings = (*frameGeneration)["settings"].as_table();
-		if (!newSettings) {
-			frameGeneration->insert_or_assign("settings", toml::table{});
-			newSettings = (*frameGeneration)["settings"].as_table();
-		}
-		if (!newSettings) {
-			return result;
-		}
-		if (!newSettings->contains("enabled")) {
-			if (legacyModeNode && !legacyModeNode->is_integer()) {
-				newSettings->insert_or_assign("enabled", *legacyModeNode);
-			} else {
-				newSettings->insert_or_assign("enabled", legacyMode > 0);
+			auto* newSettings = (*frameGeneration)["settings"].as_table();
+			if (!newSettings) {
+				frameGeneration->insert_or_assign("settings", toml::table{});
+				newSettings = (*frameGeneration)["settings"].as_table();
 			}
-		}
-		if (!newSettings->contains("frame_generation_method")) {
-			if (legacyModeNode) {
-				newSettings->insert_or_assign(
-					"frame_generation_method", *legacyModeNode);
-			} else {
-				newSettings->insert_or_assign("frame_generation_method", 1);
+			if (!newSettings) {
+				return result;
 			}
-		}
-		if (!newSettings->contains("frame_generation_force_enable")) {
-			if (legacyForceNode) {
-				newSettings->insert_or_assign(
-					"frame_generation_force_enable", *legacyForceNode);
-			} else {
-				newSettings->insert_or_assign("frame_generation_force_enable", 0);
+			if (!newSettings->contains("frame_generation_method")) {
+				if (legacyModeNode) {
+					newSettings->insert_or_assign(
+						"frame_generation_method", *legacyModeNode);
+				} else {
+					newSettings->insert_or_assign("frame_generation_method", 1);
+				}
 			}
-		}
-		if (!newSettings->contains("frame_generation_allow_in_menus")) {
-			if (legacyMenusNode) {
-				newSettings->insert_or_assign(
-					"frame_generation_allow_in_menus", *legacyMenusNode);
-			} else {
-				newSettings->insert_or_assign(
-					"frame_generation_allow_in_menus", false);
+			if (!newSettings->contains("frame_generation_allow_in_menus")) {
+				if (legacyMenusNode) {
+					newSettings->insert_or_assign(
+						"frame_generation_allow_in_menus", *legacyMenusNode);
+				} else {
+					newSettings->insert_or_assign(
+						"frame_generation_allow_in_menus", false);
+				}
 			}
-		}
 
-		if (legacySettings) {
 			legacySettings->erase("frame_generation_mode");
-			legacySettings->erase("frame_generation_force_enable");
 			legacySettings->erase("frame_generation_allow_in_menus");
+			result.changed = true;
 		}
-		result.changed = true;
-		result.notice =
-			"Legacy Upscaling frame-generation settings were normalized to features.FrameGeneration; "
-			"the next explicit settings save will persist the migration.";
+
+		const auto normalizeMethodEnablement =
+			[&result](toml::table* a_settings,
+				std::string_view a_methodKey) {
+				if (!a_settings) {
+					return;
+				}
+				const auto* enabledNode = a_settings->get("enabled");
+				if (!enabledNode) {
+					return;
+				}
+				if (const auto enabled = enabledNode->value<bool>()) {
+					if (!*enabled) {
+						a_settings->insert_or_assign(a_methodKey, 0);
+					}
+				} else if (!a_settings->contains(a_methodKey)) {
+					// Preserve the established explicit parse error instead of
+					// allowing a malformed legacy toggle to enable a default.
+					a_settings->insert_or_assign(a_methodKey, *enabledNode);
+				}
+				a_settings->erase("enabled");
+				result.changed = true;
+			};
+
+		auto* upscalingSettings =
+			upscaling ? (*upscaling)["settings"].as_table() : nullptr;
+		normalizeMethodEnablement(upscalingSettings, "upscale_method");
+		if (upscalingSettings) {
+			result.changed =
+				upscalingSettings->erase("upscale_method_no_dlss") != 0 ||
+				result.changed;
+			result.changed =
+				upscalingSettings->erase(
+					"frame_generation_force_enable") != 0 ||
+				result.changed;
+		}
+
+		frameGeneration = (*features)["FrameGeneration"].as_table();
+		auto* frameGenerationSettings =
+			frameGeneration ? (*frameGeneration)["settings"].as_table() : nullptr;
+		normalizeMethodEnablement(
+			frameGenerationSettings, "frame_generation_method");
+		if (frameGenerationSettings) {
+			result.changed =
+				frameGenerationSettings->erase(
+					"frame_generation_force_enable") != 0 ||
+				result.changed;
+		}
+
+		if (result.changed) {
+			result.notice =
+				"Legacy temporal settings were normalized to method-based "
+				"enablement and retired policy keys; the next explicit settings "
+				"save will persist the migration.";
+		}
+		return result;
+	}
+
+	TemporalMigrationResult NormalizeLegacyTemporalFeatureSettings(
+		std::string_view a_featureKey,
+		toml::table& a_settings)
+	{
+		toml::table root;
+		toml::table feature;
+		feature.insert_or_assign("settings", a_settings);
+		toml::table features;
+		features.insert_or_assign(a_featureKey, std::move(feature));
+		root.insert_or_assign("features", std::move(features));
+		auto result = NormalizeLegacyTemporalSettings(root);
+		const auto* normalized =
+			root["features"][a_featureKey]["settings"].as_table();
+		if (normalized) {
+			a_settings = *normalized;
+		}
 		return result;
 	}
 
@@ -439,6 +486,7 @@ namespace cs::feature_config
 
 		result.root = std::move(defaultLoad.table);
 		result.defaultLoaded = true;
+		(void)NormalizeLegacyTemporalSettings(result.root);
 
 		auto userLoad = LoadFile(a_userPath);
 		result.userStatus = userLoad.status;

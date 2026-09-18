@@ -1,6 +1,7 @@
 #include "Upscaling.h"
 
 #include <array>
+#include <format>
 #include <string>
 
 #include <DearModdingUI/Client.h>
@@ -8,6 +9,7 @@
 #include "Log.h"
 #include "Menu/Menu.h"
 #include "Render/TemporalPipeline.h"
+#include "Render/TemporalPresentation.h"
 #include "Render/TemporalRenderer.h"
 #include "Settings/FeatureConfig.h"
 #include "Telemetry/Telemetry.h"
@@ -22,7 +24,7 @@ namespace cs::features
 		{
 			switch (static_cast<Upscaling::UpscaleMethod>(a_method)) {
 			case Upscaling::UpscaleMethod::kNONE:
-				return "None";
+				return "Off";
 			case Upscaling::UpscaleMethod::kTAA:
 				return "TAA";
 			case Upscaling::UpscaleMethod::kFSR:
@@ -42,7 +44,7 @@ namespace cs::features
 		{
 			switch (a_method) {
 			case render::temporal::SuperResolutionMethod::kNone:
-				return "None";
+				return "Off";
 			case render::temporal::SuperResolutionMethod::kTAA:
 				return "TAA";
 			case render::temporal::SuperResolutionMethod::kFSR3:
@@ -118,11 +120,7 @@ namespace cs::features
 				return false;
 			}
 
-			if (!AcceptSetting(feature_config::ReadBool(*settingsTable, "enabled", a_candidate.enabled),
-					"enabled", "boolean", a_error)
-				|| !ReadEnum(*settingsTable, "upscale_method", a_candidate.upscaleMethod,
-					render::temporal::kMaxUpscaleMethodValue, a_error)
-				|| !ReadEnum(*settingsTable, "upscale_method_no_dlss", a_candidate.upscaleMethodNoDLSS,
+			if (!ReadEnum(*settingsTable, "upscale_method", a_candidate.upscaleMethod,
 					render::temporal::kMaxUpscaleMethodValue, a_error)
 				|| !ReadEnum(*settingsTable, "quality_mode", a_candidate.qualityMode, 4, a_error)
 				|| !ReadEnum(*settingsTable, "streamline_log_level", a_candidate.streamlineLogLevel, 2, a_error)
@@ -154,6 +152,9 @@ namespace cs::features
 			return false;
 		}
 
+		candidate.enabled =
+			candidate.upscaleMethod !=
+			static_cast<std::uint32_t>(UpscaleMethod::kNONE);
 		settings = candidate;
 		_bootSettings = candidate;
 		return true;
@@ -162,9 +163,7 @@ namespace cs::features
 	void Upscaling::SaveSettings()
 	{
 		toml::table table;
-		table.insert_or_assign("enabled", settings.enabled);
 		table.insert_or_assign("upscale_method", static_cast<std::int64_t>(settings.upscaleMethod));
-		table.insert_or_assign("upscale_method_no_dlss", static_cast<std::int64_t>(settings.upscaleMethodNoDLSS));
 		table.insert_or_assign("quality_mode", static_cast<std::int64_t>(settings.qualityMode));
 		table.insert_or_assign("streamline_log_level", static_cast<std::int64_t>(settings.streamlineLogLevel));
 		table.insert_or_assign("preset_dlss", static_cast<std::int64_t>(settings.presetDLSS));
@@ -188,195 +187,304 @@ namespace cs::features
 	{
 	}
 
+	bool Upscaling::StageFromPreset(
+		const toml::table& a_table,
+		const PresetApplyContext&,
+		std::string& a_error)
+	{
+		auto normalized = a_table;
+		(void)feature_config::NormalizeLegacyTemporalFeatureSettings(
+			GetConfigKey(),
+			normalized);
+		toml::table config;
+		config.insert_or_assign("settings", std::move(normalized));
+		auto candidate = settings;
+		if (!ParseSettingsTable(config, candidate, a_error)) {
+			return false;
+		}
+		candidate.enabled =
+			candidate.upscaleMethod !=
+			static_cast<std::uint32_t>(UpscaleMethod::kNONE);
+		_stagedSettings = candidate;
+		return true;
+	}
+
+	void Upscaling::CommitStagedSwap() noexcept
+	{
+		if (_stagedSettings) {
+			settings = *_stagedSettings;
+		}
+	}
+
+	void Upscaling::CommitStagedFinalize()
+	{
+		if (!_stagedSettings) {
+			return;
+		}
+		_stagedSettings.reset();
+		SaveSettings();
+		render::TemporalPipeline::Get().SubmitLiveConfiguration();
+	}
+
+	void Upscaling::ExportToPreset(toml::table& a_out)
+	{
+		a_out.insert_or_assign(
+			"upscale_method",
+			static_cast<std::int64_t>(settings.upscaleMethod));
+		a_out.insert_or_assign(
+			"quality_mode",
+			static_cast<std::int64_t>(settings.qualityMode));
+		a_out.insert_or_assign(
+			"streamline_log_level",
+			static_cast<std::int64_t>(settings.streamlineLogLevel));
+		a_out.insert_or_assign(
+			"preset_dlss",
+			static_cast<std::int64_t>(settings.presetDLSS));
+		a_out.insert_or_assign("sharpness_fsr", settings.sharpnessFSR);
+		a_out.insert_or_assign(
+			"sharpness_enabled_dlss",
+			settings.sharpnessEnabledDLSS);
+		a_out.insert_or_assign(
+			"sharpness_dlss",
+			settings.sharpnessDLSS);
+	}
+
 	cs::settings::RestartSettingsView Upscaling::GetRestartSettings() const noexcept
 	{
 		static constexpr std::array fields{
 			CS_RESTART_FIELD(
 				Settings,
 				streamlineLogLevel,
-				"Streamline log level"),
-			CS_RESTART_FIELD(
-				Settings,
-				upscaleMethodNoDLSS,
-				"Fallback when DLSS is unavailable")
+				"Streamline log level")
 		};
 		return cs::settings::MakeRestartSettingsView(fields, _bootSettings, settings);
 	}
 
 	void Upscaling::DrawSettings()
 	{
-		bool changed = dmui::ui::Checkbox("Enabled", &settings.enabled);
-
-		static const std::array methods{
-			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
-			dmui::ChoiceOption<std::uint32_t>{ 1, "TAA", "taa" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 3, "DLSS", "dlss" },
-			dmui::ChoiceOption<std::uint32_t>{ 4, "FSR 4", "fsr-4" }
+		auto& pipeline = render::TemporalPipeline::Get();
+		const auto status = pipeline.GetStatus();
+		const auto fidelityFx = pipeline.GetFidelityFXCapabilities();
+		const auto availability = [&](std::uint32_t a_method) {
+			return render::temporal::presentation::Describe(
+				static_cast<render::temporal::SuperResolutionMethod>(a_method),
+				status,
+				fidelityFx);
 		};
+		const auto methodOption = [&](std::uint32_t a_method,
+			std::string_view a_key) {
+			const auto methodAvailability = availability(a_method);
+			return dmui::ChoiceOption<std::uint32_t>{
+				a_method,
+				render::temporal::presentation::OptionLabel(
+					MethodName(a_method), methodAvailability),
+				std::string(a_key),
+				methodAvailability.Selectable()
+			};
+		};
+		const std::array methods{
+			methodOption(0, "off"),
+			methodOption(1, "taa"),
+			methodOption(2, "fsr-3"),
+			methodOption(3, "dlss"),
+			methodOption(4, "fsr-4")
+		};
+		bool changed = false;
 		const auto method = dmui::DrawChoice<std::uint32_t>(
 			"upscaling-super-resolution-method",
 			settings.upscaleMethod,
 			std::span<const dmui::ChoiceOption<std::uint32_t>>{ methods },
 			"Unavailable",
-			"Super resolution");
+			"Method");
 		if (method.changed) {
 			settings.upscaleMethod = *method.selected;
-			changed = true;
-		}
-		dmui::ui::TextDisabled(
-			"Quality and None/TAA/FSR/DLSS method changes apply at a frame "
-			"boundary when the selected provider was admitted at startup.");
-
-		static const std::array fallbackMethods{
-			dmui::ChoiceOption<std::uint32_t>{ 0, "None", "none" },
-			dmui::ChoiceOption<std::uint32_t>{ 1, "TAA", "taa" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "FSR 3", "fsr-3" },
-			dmui::ChoiceOption<std::uint32_t>{ 4, "FSR 4", "fsr-4" }
-		};
-		const auto fallbackMethod = dmui::DrawChoice<std::uint32_t>(
-			"upscaling-fallback-without-dlss",
-			settings.upscaleMethodNoDLSS,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{
-				fallbackMethods },
-			"Unavailable",
-			"Fallback without DLSS");
-		if (fallbackMethod.changed) {
-			settings.upscaleMethodNoDLSS = *fallbackMethod.selected;
+			settings.enabled =
+				settings.upscaleMethod !=
+				static_cast<std::uint32_t>(UpscaleMethod::kNONE);
 			changed = true;
 		}
 
-		static const std::array qualityModes{
-			dmui::ChoiceOption<std::uint32_t>{
-				0,
-				"Native AA",
-				"native-aa" },
-			dmui::ChoiceOption<std::uint32_t>{ 1, "Quality", "quality" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "Balanced", "balanced" },
-			dmui::ChoiceOption<std::uint32_t>{
-				3,
-				"Performance",
-				"performance" },
-			dmui::ChoiceOption<std::uint32_t>{
-				4,
-				"Ultra Performance",
-				"ultra-performance" }
-		};
-		const auto qualityMode = dmui::DrawChoice<std::uint32_t>(
-			"upscaling-quality-mode",
-			settings.qualityMode,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{ qualityModes },
-			"Unavailable",
-			"Quality mode");
-		if (qualityMode.changed) {
-			settings.qualityMode = *qualityMode.selected;
-			changed = true;
+		const bool externalMethod =
+			settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kFSR) ||
+			settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kDLSS) ||
+			settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kFSR4);
+		if (externalMethod) {
+			const std::array qualityModes{
+				dmui::ChoiceOption<std::uint32_t>{
+					0,
+					settings.upscaleMethod ==
+							static_cast<std::uint32_t>(
+								UpscaleMethod::kDLSS)
+						? "DLAA"
+						: "Native AA",
+					"native-aa" },
+				dmui::ChoiceOption<std::uint32_t>{ 1, "Quality", "quality" },
+				dmui::ChoiceOption<std::uint32_t>{ 2, "Balanced", "balanced" },
+				dmui::ChoiceOption<std::uint32_t>{
+					3, "Performance", "performance" },
+				dmui::ChoiceOption<std::uint32_t>{
+					4, "Ultra Performance", "ultra-performance" }
+			};
+			const auto qualityMode = dmui::DrawChoice<std::uint32_t>(
+				"upscaling-quality-mode",
+				settings.qualityMode,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{
+					qualityModes },
+				"Unavailable",
+				"Quality");
+			if (qualityMode.changed) {
+				settings.qualityMode = *qualityMode.selected;
+				changed = true;
+			}
+
+			const float sharpnessMin = 0.0f;
+			const float sharpnessMax = 1.0f;
+			if (settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
+				auto sharpness = settings.sharpnessEnabledDLSS
+					? settings.sharpnessDLSS
+					: 0.0f;
+				if (dmui::ui::SliderScalar(
+						"Sharpening",
+						&sharpness,
+						&sharpnessMin,
+						&sharpnessMax)) {
+					settings.sharpnessEnabledDLSS = sharpness > 0.0f;
+					if (settings.sharpnessEnabledDLSS) {
+						settings.sharpnessDLSS = sharpness;
+					}
+					changed = true;
+				}
+			} else {
+				changed |= dmui::ui::SliderScalar(
+					"Sharpening",
+					&settings.sharpnessFSR,
+					&sharpnessMin,
+					&sharpnessMax);
+			}
 		}
 
-		const float sharpnessMin = 0.0f;
-		const float sharpnessMax = 1.0f;
-		changed |= dmui::ui::SliderScalar(
-			"FSR sharpness",
-			&settings.sharpnessFSR,
-			&sharpnessMin,
-			&sharpnessMax);
-		changed |= dmui::ui::Checkbox("DLSS sharpening", &settings.sharpnessEnabledDLSS);
-		changed |= dmui::ui::SliderScalar(
-			"DLSS sharpness",
-			&settings.sharpnessDLSS,
-			&sharpnessMin,
-			&sharpnessMax);
-
-		static const std::array presets{
-			dmui::ChoiceOption<std::uint32_t>{ 0, "Default", "default" },
-			dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
-			dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
-			dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
-		};
-		const auto preset = dmui::DrawChoice<std::uint32_t>(
-			"upscaling-dlss-preset",
-			settings.presetDLSS,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{ presets },
-			"Unavailable",
-			"DLSS preset");
-		if (preset.changed) {
-			settings.presetDLSS = *preset.selected;
-			changed = true;
+		if (dmui::ui::CollapsingHeader("Advanced")) {
+			if (settings.upscaleMethod ==
+				static_cast<std::uint32_t>(UpscaleMethod::kDLSS)) {
+				static const std::array presets{
+					dmui::ChoiceOption<std::uint32_t>{
+						0, "Default", "default" },
+					dmui::ChoiceOption<std::uint32_t>{ 1, "J", "j" },
+					dmui::ChoiceOption<std::uint32_t>{ 2, "K", "k" },
+					dmui::ChoiceOption<std::uint32_t>{ 3, "L", "l" },
+					dmui::ChoiceOption<std::uint32_t>{ 4, "M", "m" }
+				};
+				const auto preset = dmui::DrawChoice<std::uint32_t>(
+					"upscaling-dlss-preset",
+					settings.presetDLSS,
+					std::span<const dmui::ChoiceOption<std::uint32_t>>{
+						presets },
+					"Unavailable",
+					"DLSS preset");
+				if (preset.changed) {
+					settings.presetDLSS = *preset.selected;
+					changed = true;
+				}
+			}
 		}
 
-		static const std::array logLevels{
-			dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
-			dmui::ChoiceOption<std::uint32_t>{ 1, "Default", "default" },
-			dmui::ChoiceOption<std::uint32_t>{ 2, "Verbose", "verbose" }
-		};
-		const auto logLevel = dmui::DrawChoice<std::uint32_t>(
-			"upscaling-streamline-log-level",
-			settings.streamlineLogLevel,
-			std::span<const dmui::ChoiceOption<std::uint32_t>>{ logLevels },
-			"Unavailable",
-			"Streamline log level");
-		if (logLevel.changed) {
-			settings.streamlineLogLevel = *logLevel.selected;
-			changed = true;
-		}
 		if (changed) {
 			SaveSettings();
-			render::TemporalPipeline::Get().SubmitLiveConfiguration();
+			pipeline.SubmitLiveConfiguration();
 		}
 
-		auto& pipeline = render::TemporalPipeline::Get();
-		const auto status = pipeline.GetStatus();
-		const auto [scale, ready] = pipeline.Renderer().GetReadiness();
-		dmui::ui::TextDisabled("Render scale: %.0f%% | resources: %s",
-			static_cast<double>(scale) * 100.0, ready ? "ready" : "not ready");
-		dmui::ui::TextDisabled(
-			"Requested: %.*s (%s) | effective: %.*s (%s)",
-			static_cast<int>(MethodName(settings.upscaleMethod).size()),
-			MethodName(settings.upscaleMethod).data(),
-			settings.enabled ? "enabled" : "disabled",
-			static_cast<int>(MethodName(status.effective.superResolution).size()),
-			MethodName(status.effective.superResolution).data(),
-			status.effective.superResolutionEnabled ? "enabled" : "disabled");
-		if (settings.enabled &&
-			settings.upscaleMethod ==
-				static_cast<std::uint32_t>(UpscaleMethod::kDLSS) &&
-			status.requestFrozen && status.d3d11Ready &&
-			!status.session.admittedSr[static_cast<std::size_t>(
-				render::temporal::SuperResolutionMethod::kDLSS)]) {
+		const auto currentStatus = pipeline.GetStatus();
+		const auto [renderWidth, renderHeight] =
+			pipeline.Renderer().GetRenderSize();
+		const auto effectiveName =
+			render::temporal::presentation::Name(
+				currentStatus.effective.superResolution);
+		if (currentStatus.transitionInFlight) {
 			dmui::ui::TextDisabled(
-				"DLSS was not admitted for this startup; the effective or fallback provider remains active.");
-		}
-		if (settings.enabled &&
-			settings.upscaleMethod ==
-				static_cast<std::uint32_t>(UpscaleMethod::kFSR) &&
-			status.requestFrozen && status.d3d11Ready &&
-			!status.session.admittedSr[static_cast<std::size_t>(
-				render::temporal::SuperResolutionMethod::kFSR3)]) {
+				"Switching to %.*s...",
+				static_cast<int>(MethodName(settings.upscaleMethod).size()),
+				MethodName(settings.upscaleMethod).data());
+		} else if (!currentStatus.effective.superResolutionEnabled) {
+			dmui::ui::TextDisabled("Active: Off");
+		} else if (renderWidth && renderHeight &&
+			currentStatus.display.output.IsValid()) {
 			dmui::ui::TextDisabled(
-				"FSR was not admitted for this startup; the effective native method remains active.");
+				"Active: %.*s | %ux%u -> %ux%u",
+				static_cast<int>(effectiveName.size()),
+				effectiveName.data(),
+				renderWidth,
+				renderHeight,
+				currentStatus.display.output.width,
+				currentStatus.display.output.height);
+		} else {
+			dmui::ui::TextDisabled(
+				"Active: %.*s",
+				static_cast<int>(effectiveName.size()),
+				effectiveName.data());
 		}
-		if (settings.enabled &&
-			settings.upscaleMethod ==
-				static_cast<std::uint32_t>(UpscaleMethod::kFSR4)) {
-			const auto capabilities =
-				pipeline.GetFidelityFXCapabilities();
-			if (capabilities.fsr4SuperResolution.availability ==
-				render::temporal::CapabilityAvailability::kUnknown) {
-				dmui::ui::TextDisabled(
-					"FSR 4 capability is not known for the current device; "
-					"the previous effective method remains active.");
-			} else if (!capabilities.fsr4SuperResolution.IsAvailable()) {
-				dmui::ui::TextDisabled(
-					"FSR 4 is unavailable (runtime reason %u); the "
-					"previous effective method remains active.",
-					capabilities.fsr4SuperResolution
-						.unavailableReason);
+		const auto selectedAvailability = render::temporal::presentation::Describe(
+			static_cast<render::temporal::SuperResolutionMethod>(
+				settings.upscaleMethod),
+			currentStatus,
+			fidelityFx);
+		if (selectedAvailability.kind !=
+			render::temporal::presentation::AvailabilityKind::kAvailable) {
+			dmui::ui::TextWrapped(
+				"%s. %.*s remains active.",
+				selectedAvailability.reason.c_str(),
+				static_cast<int>(effectiveName.size()),
+				effectiveName.data());
+		} else if (
+			!currentStatus.transitionInFlight &&
+			currentStatus.effective.superResolution !=
+				static_cast<render::temporal::SuperResolutionMethod>(
+					settings.upscaleMethod) &&
+			!currentStatus.failure.empty()) {
+			dmui::ui::TextWrapped(
+				"Could not activate %.*s. %.*s remains active; see Diagnostics.",
+				static_cast<int>(MethodName(settings.upscaleMethod).size()),
+				MethodName(settings.upscaleMethod).data(),
+				static_cast<int>(effectiveName.size()),
+				effectiveName.data());
+		}
+
+		if (dmui::ui::CollapsingHeader("Diagnostics")) {
+			static const std::array logLevels{
+				dmui::ChoiceOption<std::uint32_t>{ 0, "Off", "off" },
+				dmui::ChoiceOption<std::uint32_t>{
+					1, "Default", "default" },
+				dmui::ChoiceOption<std::uint32_t>{
+					2, "Verbose", "verbose" }
+			};
+			const auto logLevel = dmui::DrawChoice<std::uint32_t>(
+				"upscaling-streamline-log-level",
+				settings.streamlineLogLevel,
+				std::span<const dmui::ChoiceOption<std::uint32_t>>{
+					logLevels },
+				"Unavailable",
+				"Streamline logging");
+			if (logLevel.changed) {
+				settings.streamlineLogLevel = *logLevel.selected;
+				SaveSettings();
 			}
-			if (capabilities.fsr4SuperResolution.availability !=
+			const auto [scale, ready] = pipeline.Renderer().GetReadiness();
+			dmui::ui::TextDisabled(
+				"Render scale: %.0f%% | resources: %s",
+				static_cast<double>(scale) * 100.0,
+				ready ? "ready" : "not ready");
+			dmui::ui::TextDisabled(
+				"Requested: %.*s | effective: %.*s",
+				static_cast<int>(MethodName(settings.upscaleMethod).size()),
+				MethodName(settings.upscaleMethod).data(),
+				static_cast<int>(effectiveName.size()),
+				effectiveName.data());
+			if (fidelityFx.fsr4SuperResolution.availability !=
 				render::temporal::CapabilityAvailability::kUnknown) {
-				const auto& runtime =
-					capabilities.fsr4SuperResolution;
+				const auto& runtime = fidelityFx.fsr4SuperResolution;
 				const auto runtimeSource =
 					render::temporal::
 						FidelityFXD3D12RuntimeSourceName(
@@ -395,19 +503,23 @@ namespace cs::features
 					runtime.d3d12CoreVersionRevision,
 					runtime.requestedD3D12SDKVersion);
 			}
-		}
-		if (status.pending.required)
-			dmui::ui::TextDisabled("Restart required: %s", status.pending.reason.c_str());
-		if (!status.failure.empty())
-			dmui::ui::TextDisabled("%s", status.failure.c_str());
-
-		Menu::Get().DrawDebugViewSelector(*this);
-		if (pipeline.Renderer().HasDebugSnapshotSelection()) {
-			if (dmui::ui::Button("Refresh snapshot"))
-				pipeline.Renderer().RefreshDebugSnapshot();
-			if (pipeline.Renderer().DebugSnapshotPending())
+			if (currentStatus.pending.required)
 				dmui::ui::TextDisabled(
-					"Refresh pending; the previous snapshot remains visible.");
+					"Restart required: %s",
+					currentStatus.pending.reason.c_str());
+			if (!currentStatus.failure.empty())
+				dmui::ui::TextDisabled(
+					"%s",
+					currentStatus.failure.c_str());
+
+			Menu::Get().DrawDebugViewSelector(*this);
+			if (pipeline.Renderer().HasDebugSnapshotSelection()) {
+				if (dmui::ui::Button("Refresh snapshot"))
+					pipeline.Renderer().RefreshDebugSnapshot();
+				if (pipeline.Renderer().DebugSnapshotPending())
+					dmui::ui::TextDisabled(
+						"Refresh pending; the previous snapshot remains visible.");
+			}
 		}
 	}
 

@@ -81,11 +81,9 @@ namespace cs::render::temporal
 		bool superResolutionEnabled = true;
 		bool frameGenerationEnabled = true;
 		SuperResolutionMethod superResolution = SuperResolutionMethod::kDLSS;
-		SuperResolutionMethod noDlssFallback = SuperResolutionMethod::kTAA;
 		FrameGenerationMethod frameGeneration = FrameGenerationMethod::kOff;
 		std::uint32_t qualityMode = 1;
 		std::uint32_t streamlineLogLevel = 0;
-		bool forceFrameGeneration = false;
 		bool allowFrameGenerationInMenus = false;
 		FrameGenerationConfiguration frameGenerationConfiguration;
 		std::uint64_t revision = 0;
@@ -174,12 +172,16 @@ namespace cs::render::temporal
 
 			const auto srIndex = static_cast<std::size_t>(_effective.superResolution);
 			if (srIndex >= _session->admittedSr.size() || !_session->admittedSr[srIndex]) {
-				const auto fallbackIndex =
-					static_cast<std::size_t>(_startupRequest->noDlssFallback);
-				if (_effective.superResolution == SuperResolutionMethod::kDLSS &&
-					fallbackIndex < _session->admittedSr.size() &&
-					_session->admittedSr[fallbackIndex]) {
-					_effective.superResolution = _startupRequest->noDlssFallback;
+				const auto nativeTaaIndex =
+					static_cast<std::size_t>(SuperResolutionMethod::kTAA);
+				const bool externalRequested =
+					_effective.superResolution == SuperResolutionMethod::kFSR3 ||
+					_effective.superResolution == SuperResolutionMethod::kDLSS ||
+					_effective.superResolution == SuperResolutionMethod::kFSR4;
+				if (externalRequested &&
+					nativeTaaIndex < _session->admittedSr.size() &&
+					_session->admittedSr[nativeTaaIndex]) {
+					_effective.superResolution = SuperResolutionMethod::kTAA;
 				} else {
 					_effective.superResolutionEnabled = false;
 					_effective.superResolution = SuperResolutionMethod::kNone;
@@ -473,6 +475,10 @@ namespace cs::render::temporal
 		[[nodiscard]] const std::optional<SessionTopology>& Session() const noexcept { return _session; }
 		[[nodiscard]] const EffectiveConfiguration& Effective() const noexcept { return _effective; }
 		[[nodiscard]] const PendingRestart& Pending() const noexcept { return _pending; }
+		[[nodiscard]] bool TransitionInFlight() const noexcept
+		{
+			return _transitionInFlight.has_value();
+		}
 
 	private:
 		void UpdateEffectiveEnablement() noexcept

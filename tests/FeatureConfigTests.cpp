@@ -272,11 +272,12 @@ namespace
 		CHECK(migration.changed);
 		CHECK(!migration.notice.empty());
 		CHECK(user["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ true });
-		CHECK(user["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
 		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
-		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_force_enable"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
 		CHECK(user["features"]["FrameGeneration"]["settings"]["frame_generation_allow_in_menus"].value<bool>() == std::optional<bool>{ true });
 		CHECK(!user["features"]["Upscaling"]["settings"].as_table()->contains("frame_generation_mode"));
+		CHECK(!user["features"]["Upscaling"]["settings"].as_table()->contains("frame_generation_force_enable"));
+		CHECK(!user["features"]["FrameGeneration"]["settings"].as_table()->contains("enabled"));
+		CHECK(!user["features"]["FrameGeneration"]["settings"].as_table()->contains("frame_generation_force_enable"));
 		CHECK(
 			!cs::feature_config::NormalizeLegacyTemporalSettings(user).changed);
 
@@ -287,14 +288,13 @@ namespace
 			"frame_generation_mode = 0\n");
 		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(disabled).changed);
 		CHECK(disabled["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
-		CHECK(disabled["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
 		CHECK(disabled["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 0 });
 
 		auto anniversaryProfile = Parse(
 			"[features.Upscaling]\n"
 			"load = true\n"
 			"[features.Upscaling.settings]\n"
-			"enabled = true\n"
+			"enabled = false\n"
 			"upscale_method = 3\n"
 			"upscale_method_no_dlss = 2\n"
 			"quality_mode = 1\n"
@@ -302,13 +302,12 @@ namespace
 			"frame_generation_mode = 0\n");
 		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(anniversaryProfile).changed);
 		CHECK(anniversaryProfile["features"]["Upscaling"]["load"].value<bool>() == std::optional<bool>{ true });
-		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ true });
-		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["upscale_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
-		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["upscale_method_no_dlss"].value<std::int64_t>() == std::optional<std::int64_t>{ 2 });
+		CHECK(!anniversaryProfile["features"]["Upscaling"]["settings"].as_table()->contains("enabled"));
+		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["upscale_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 0 });
+		CHECK(!anniversaryProfile["features"]["Upscaling"]["settings"].as_table()->contains("upscale_method_no_dlss"));
 		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["quality_mode"].value<std::int64_t>() == std::optional<std::int64_t>{ 1 });
 		CHECK(anniversaryProfile["features"]["Upscaling"]["settings"]["sharpness_fsr"].value<double>() == std::optional<double>{ 0.4 });
 		CHECK(anniversaryProfile["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
-		CHECK(anniversaryProfile["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
 		CHECK(anniversaryProfile["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 0 });
 
 		auto explicitNew = Parse(
@@ -323,14 +322,14 @@ namespace
 			"frame_generation_method = 3\n");
 		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(explicitNew).changed);
 		CHECK(explicitNew["features"]["FrameGeneration"]["load"].value<bool>() == std::optional<bool>{ false });
-		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["enabled"].value<bool>() == std::optional<bool>{ false });
-		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 3 });
+		CHECK(!explicitNew["features"]["FrameGeneration"]["settings"].as_table()->contains("enabled"));
+		CHECK(explicitNew["features"]["FrameGeneration"]["settings"]["frame_generation_method"].value<std::int64_t>() == std::optional<std::int64_t>{ 0 });
 
 		auto modernPartial = Parse(
 			"[features.Upscaling]\n"
 			"load = true\n"
 			"[features.FrameGeneration.settings]\n"
-			"enabled = true\n");
+			"frame_generation_allow_in_menus = true\n");
 		CHECK(
 			!cs::feature_config::NormalizeLegacyTemporalSettings(modernPartial).changed &&
 				!modernPartial["features"]["FrameGeneration"].as_table()->contains("load") &&
@@ -344,7 +343,9 @@ namespace
 			"enabled = true\n"
 			"frame_generation_method = 2\n");
 		CHECK(
-			!cs::feature_config::NormalizeLegacyTemporalSettings(modernFull).changed &&
+			cs::feature_config::NormalizeLegacyTemporalSettings(modernFull).changed &&
+				!modernFull["features"]["FrameGeneration"]["settings"].as_table()
+					 ->contains("enabled") &&
 				modernFull["features"]["FrameGeneration"]["settings"]["frame_generation_method"]
 						.value<std::int64_t>() ==
 					std::optional<std::int64_t>{ 2 });
@@ -353,15 +354,242 @@ namespace
 			"[features.Upscaling]\n"
 			"load = \"yes\"\n"
 			"[features.Upscaling.settings]\n"
+			"enabled = \"yes\"\n"
 			"frame_generation_mode = \"fsr3\"\n"
 			"frame_generation_force_enable = true\n"
 			"frame_generation_allow_in_menus = 1\n");
 		CHECK(cs::feature_config::NormalizeLegacyTemporalSettings(malformed).changed);
 		CHECK(malformed["features"]["FrameGeneration"]["load"].is_string());
-		CHECK(malformed["features"]["FrameGeneration"]["settings"]["enabled"].is_string());
 		CHECK(malformed["features"]["FrameGeneration"]["settings"]["frame_generation_method"].is_string());
-		CHECK(malformed["features"]["FrameGeneration"]["settings"]["frame_generation_force_enable"].is_boolean());
 		CHECK(malformed["features"]["FrameGeneration"]["settings"]["frame_generation_allow_in_menus"].is_integer());
+		CHECK(malformed["features"]["Upscaling"]["settings"]["upscale_method"].is_string());
+		CHECK(!malformed["features"]["Upscaling"]["settings"].as_table()->contains("enabled"));
+		CHECK(!malformed["features"]["Upscaling"]["settings"].as_table()->contains("frame_generation_force_enable"));
+
+		auto presetSettings = Parse(
+			"enabled = false\n"
+			"upscale_method = 4\n"
+			"upscale_method_no_dlss = 2\n");
+		CHECK(cs::feature_config::NormalizeLegacyTemporalFeatureSettings(
+			"Upscaling", presetSettings).changed);
+		CHECK(presetSettings["upscale_method"].value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+		CHECK(!presetSettings.contains("enabled"));
+		CHECK(!presetSettings.contains("upscale_method_no_dlss"));
+	}
+
+	void TestTemporalMigrationRoundTrip(const std::filesystem::path& a_root)
+	{
+		const auto defaultPath = a_root / "Temporal.Default.toml";
+		const auto userPath = a_root / "Temporal.User.toml";
+		WriteFile(
+			defaultPath,
+			"[features.Upscaling]\n"
+			"load = false\n"
+			"[features.Upscaling.settings]\n"
+			"upscale_method = 3\n"
+			"quality_mode = 1\n"
+			"[features.FrameGeneration]\n"
+			"load = false\n"
+			"[features.FrameGeneration.settings]\n"
+			"frame_generation_method = 1\n"
+			"frame_generation_allow_in_menus = false\n");
+		WriteFile(
+			userPath,
+			"[features.Upscaling]\n"
+			"load = false\n"
+			"[features.Upscaling.settings]\n"
+			"enabled = false\n"
+			"upscale_method_no_dlss = 2\n"
+			"[features.FrameGeneration]\n"
+			"load = false\n"
+			"[features.FrameGeneration.settings]\n"
+			"enabled = false\n"
+			"frame_generation_force_enable = 1\n");
+
+		const auto loaded =
+			cs::feature_config::ReloadFromFiles(defaultPath, userPath);
+		CHECK(loaded.defaultLoaded);
+		CHECK(loaded.userLoaded);
+		CHECK(loaded.userMigrated);
+		CHECK(loaded.userRoot["features"]["Upscaling"]["settings"]
+				["upscale_method"]
+					.value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+		CHECK(loaded.userRoot["features"]["FrameGeneration"]["settings"]
+				["frame_generation_method"]
+					.value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+		CHECK(loaded.root["features"]["Upscaling"]["load"].value<bool>() ==
+			std::optional<bool>{ false });
+		CHECK(loaded.root["features"]["Upscaling"]["settings"]["upscale_method"]
+				.value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+		CHECK(loaded.root["features"]["FrameGeneration"]["load"].value<bool>() ==
+			std::optional<bool>{ false });
+		CHECK(loaded.root["features"]["FrameGeneration"]["settings"]
+				["frame_generation_method"]
+					.value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+
+		const std::array upscalingPath{
+			std::string_view("features"),
+			std::string_view("Upscaling"),
+			std::string_view("settings")
+		};
+		const std::array frameGenerationPath{
+			std::string_view("features"),
+			std::string_view("FrameGeneration"),
+			std::string_view("settings")
+		};
+		CHECK(cs::feature_config::UpdateUserTableAt(
+			userPath,
+			upscalingPath,
+			Parse(
+				"upscale_method = 0\n"
+				"quality_mode = 1\n")));
+		CHECK(cs::feature_config::UpdateUserTableAt(
+			userPath,
+			frameGenerationPath,
+			Parse(
+				"frame_generation_method = 0\n"
+				"frame_generation_allow_in_menus = false\n")));
+
+		const auto saved = cs::feature_config::LoadFile(userPath);
+		CHECK(saved.status == cs::feature_config::FileLoadStatus::kParsed);
+		CHECK(!saved.table["features"]["Upscaling"]["settings"].as_table()
+				->contains("enabled"));
+		CHECK(!saved.table["features"]["Upscaling"]["settings"].as_table()
+				->contains("upscale_method_no_dlss"));
+		CHECK(!saved.table["features"]["FrameGeneration"]["settings"].as_table()
+				->contains("enabled"));
+		CHECK(!saved.table["features"]["FrameGeneration"]["settings"].as_table()
+				->contains("frame_generation_force_enable"));
+
+		const auto reloaded =
+			cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		CHECK(reloaded.defaultLoaded);
+		CHECK(reloaded.userLoaded);
+		CHECK(!reloaded.userMigrated);
+		CHECK(reloaded.root["features"]["Upscaling"]["settings"]["upscale_method"]
+				.value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+		CHECK(reloaded.root["features"]["FrameGeneration"]["settings"]
+				["frame_generation_method"]
+					.value<std::int64_t>() ==
+			std::optional<std::int64_t>{ 0 });
+	}
+
+	void TestDeployedTemporalMigrationIntent(
+		const std::filesystem::path& a_root)
+	{
+		const auto defaultPath = a_root / "DeployedTemporal.Default.toml";
+		const auto userPath = a_root / "DeployedTemporal.User.toml";
+		WriteFile(
+			defaultPath,
+			"[features.Upscaling]\n"
+			"load = false\n"
+			"[features.Upscaling.settings]\n"
+			"upscale_method = 1\n"
+			"quality_mode = 3\n"
+			"preset_dlss = 4\n"
+			"sharpness_dlss = 0.75\n"
+			"sharpness_enabled_dlss = true\n"
+			"sharpness_fsr = 0.5\n"
+			"streamline_log_level = 0\n"
+			"[features.FrameGeneration]\n"
+			"load = false\n"
+			"[features.FrameGeneration.settings]\n"
+			"frame_generation_method = 1\n"
+			"frame_generation_allow_in_menus = true\n"
+			"dlssg_mode = 1\n"
+			"dlssg_fixed_multiplier = 4\n"
+			"dlssg_dynamic_target_fps = 120.0\n"
+			"detailed_diagnostics = false\n");
+		WriteFile(
+			userPath,
+			"[features.Upscaling]\n"
+			"load = true\n"
+			"[features.Upscaling.settings]\n"
+			"enabled = true\n"
+			"upscale_method = 3\n"
+			"upscale_method_no_dlss = 2\n"
+			"quality_mode = 1\n"
+			"preset_dlss = 0\n"
+			"sharpness_dlss = 0.0\n"
+			"sharpness_enabled_dlss = false\n"
+			"sharpness_fsr = 0.0\n"
+			"streamline_log_level = 1\n"
+			"[features.FrameGeneration]\n"
+			"load = true\n"
+			"[features.FrameGeneration.settings]\n"
+			"enabled = true\n"
+			"frame_generation_method = 2\n"
+			"frame_generation_force_enable = 0\n"
+			"frame_generation_allow_in_menus = false\n"
+			"dlssg_mode = 0\n"
+			"dlssg_fixed_multiplier = 2\n"
+			"dlssg_dynamic_target_fps = 0.0\n"
+			"detailed_diagnostics = true\n");
+
+		const auto loaded =
+			cs::feature_config::LoadMergedFiles(defaultPath, userPath);
+		CHECK(loaded.defaultLoaded);
+		CHECK(loaded.userLoaded);
+		CHECK(loaded.userMigrated);
+		const auto* upscaling =
+			loaded.root["features"]["Upscaling"]["settings"].as_table();
+		const auto* frameGeneration =
+			loaded.root["features"]["FrameGeneration"]["settings"].as_table();
+		CHECK(upscaling != nullptr);
+		CHECK(frameGeneration != nullptr);
+		CHECK(loaded.root["features"]["Upscaling"]["load"].value<bool>() ==
+			std::optional<bool>{ true });
+		CHECK(upscaling &&
+			upscaling->get("upscale_method")->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 3 });
+		CHECK(upscaling &&
+			upscaling->get("quality_mode")->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 1 });
+		CHECK(upscaling &&
+			upscaling->get("preset_dlss")->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 0 });
+		CHECK(upscaling &&
+			upscaling->get("streamline_log_level")->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 1 });
+		CHECK(upscaling &&
+			upscaling->get("sharpness_enabled_dlss")->value<bool>() ==
+				std::optional<bool>{ false });
+		CHECK(upscaling && !upscaling->contains("enabled"));
+		CHECK(upscaling && !upscaling->contains("upscale_method_no_dlss"));
+
+		CHECK(loaded.root["features"]["FrameGeneration"]["load"].value<bool>() ==
+			std::optional<bool>{ true });
+		CHECK(frameGeneration &&
+			frameGeneration->get("frame_generation_method")
+					->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 2 });
+		CHECK(frameGeneration &&
+			frameGeneration->get("dlssg_mode")->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 0 });
+		CHECK(frameGeneration &&
+			frameGeneration->get("dlssg_fixed_multiplier")
+					->value<std::int64_t>() ==
+				std::optional<std::int64_t>{ 2 });
+		CHECK(frameGeneration &&
+			frameGeneration->get("dlssg_dynamic_target_fps")
+					->value<double>() ==
+				std::optional<double>{ 0.0 });
+		CHECK(frameGeneration &&
+			frameGeneration->get("frame_generation_allow_in_menus")
+					->value<bool>() ==
+				std::optional<bool>{ false });
+		CHECK(frameGeneration &&
+			frameGeneration->get("detailed_diagnostics")->value<bool>() ==
+				std::optional<bool>{ true });
+		CHECK(frameGeneration && !frameGeneration->contains("enabled"));
+		CHECK(frameGeneration &&
+			!frameGeneration->contains("frame_generation_force_enable"));
 	}
 
 	void TestMergedLoadFailureModes(const std::filesystem::path& a_root)
@@ -853,6 +1081,8 @@ int main(int a_argc, char* a_argv[])
 			TestShaderOwnershipParsing();
 			TestDeepMerge();
 			TestLegacyTemporalMigration();
+			TestTemporalMigrationRoundTrip(directory.path);
+			TestDeployedTemporalMigrationIntent(directory.path);
 			TestMergedLoadFailureModes(directory.path);
 			TestUnknownFeatureTableIsHarmless(directory.path);
 			TestAtomicWriteRoundTrip(directory.path);
