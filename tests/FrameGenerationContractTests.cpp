@@ -282,19 +282,22 @@ namespace
 			"quiesce failure performs neither drain nor release");
 
 		provider = {};
+		const auto releasePresentation = [&]() {
+			provider.events.emplace_back("release-presentation");
+		};
 		const auto retirement =
 			cs::render::temporal::RetirePresentationProvider(
 				provider, [&]() {
 					provider.events.emplace_back("drain");
 					return true;
-				});
+				}, releasePresentation);
 		Check(retirement.Succeeded(),
 			"presentation retirement completes after a proven queue drain");
 		Check(provider.events ==
 				  std::vector<std::string>{ "quiesce", "drain", "release",
-					  "destroy", "deactivate" },
-			"presentation hooks are disabled only after provider resources and "
-			"their readers are retired");
+					  "destroy", "release-presentation", "deactivate" },
+			"swap-chain destruction reaches active provider hooks before "
+			"unloading them");
 
 		provider = {};
 		provider.destroySucceeds = false;
@@ -303,7 +306,7 @@ namespace
 				provider, [&]() {
 					provider.events.emplace_back("drain");
 					return true;
-				});
+				}, releasePresentation);
 		Check(!destroyFailure.Succeeded() &&
 				  destroyFailure.globalDrainAttempted &&
 				  destroyFailure.globalDrainCompleted &&
@@ -320,13 +323,13 @@ namespace
 				provider, [&]() {
 					provider.events.emplace_back("drain");
 					return true;
-				});
+				}, releasePresentation);
 		Check(!deactivateFailure.Succeeded() &&
 				  deactivateFailure.globalDrainAttempted &&
 				  deactivateFailure.globalDrainCompleted &&
 				  provider.events ==
 					  std::vector<std::string>{ "quiesce", "drain",
-						  "release", "destroy", "deactivate" },
+						  "release", "destroy", "release-presentation", "deactivate" },
 			"hook-disable failure is visible only after safe provider "
 			"retirement");
 	}

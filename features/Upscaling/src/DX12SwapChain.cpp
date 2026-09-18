@@ -268,7 +268,8 @@ namespace cs::features
 				const auto release =
 					render::temporal::RetirePresentationProvider(
 						*failedProvider,
-						[this]() { return SUCCEEDED(Drain()); });
+						[this]() { return SUCCEEDED(Drain()); },
+						[this]() { ReleasePrivatePresentationResources(); });
 				RecordGlobalDrain("startup", release);
 				if (!release.Succeeded()) {
 					_quarantined = true;
@@ -276,16 +277,6 @@ namespace cs::features
 				} else {
 					_providerPresentationActive = false;
 					_provider = nullptr;
-					_swapChain = nullptr;
-					for (auto& hudless : _hudlessBuffers) {
-						hudless.reset();
-					}
-					for (auto& depth : _depthBuffers) {
-						depth.reset();
-					}
-					for (auto& motion : _motionBuffers) {
-						motion.reset();
-					}
 					result = CreateSwapChain(actualAdapter.get(), a_desc);
 					if (SUCCEEDED(result)) {
 						result = RecreateDisplayResources(
@@ -328,7 +319,8 @@ namespace cs::features
 		if (_provider && _providerPresentationActive) {
 			const auto release =
 				render::temporal::RetirePresentationProvider(
-					*_provider, [this]() { return SUCCEEDED(Drain()); });
+					*_provider, [this]() { return SUCCEEDED(Drain()); },
+					[this]() { ReleasePrivatePresentationResources(); });
 			RecordGlobalDrain("teardown", release);
 			if (!release.Succeeded()) {
 				_quarantined = true;
@@ -1036,11 +1028,15 @@ namespace cs::features
 						std::chrono::steady_clock::now() - start)
 						.count());
 			RecordGlobalDrain("presentation switch", result);
+			if (result.Succeeded()) {
+				ReleasePrivatePresentationResources();
+			}
 			return result;
 		}
 		const auto result =
 			render::temporal::RetirePresentationProvider(
-				*_provider, [this]() { return SUCCEEDED(Drain()); });
+				*_provider, [this]() { return SUCCEEDED(Drain()); },
+				[this]() { ReleasePrivatePresentationResources(); });
 		RecordGlobalDrain("presentation switch", result);
 		if (result.Succeeded()) {
 			_providerPresentationActive = false;
@@ -1182,7 +1178,6 @@ namespace cs::features
 			return retirement;
 		}
 
-		ReleasePrivatePresentationResources();
 		_provider = nullptr;
 		const auto targetResult =
 			CreateReplacementPresentation(a_provider);
@@ -1199,6 +1194,8 @@ namespace cs::features
 			};
 		}
 
+		L->error("{}", render::temporal::FormatProviderFailure(
+						  "Create requested presentation chain", targetResult));
 		auto targetFailure = targetResult;
 		if (_provider && _providerPresentationActive) {
 			const auto cleanup = RetireCurrentPresentationProvider();
@@ -1214,6 +1211,8 @@ namespace cs::features
 		const auto recovery =
 			CreateReplacementPresentation(nullptr, true);
 		if (!recovery.Succeeded()) {
+			L->error("{}", render::temporal::FormatProviderFailure(
+							  "Recover plain D3D12 presentation", recovery));
 			targetFailure.hresult = recovery.hresult;
 			targetFailure.sdkResult = recovery.sdkResult;
 			targetFailure.message =

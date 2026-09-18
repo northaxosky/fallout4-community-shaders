@@ -120,10 +120,11 @@ namespace cs::render::temporal
 		return result;
 	}
 
-	template <class Drain>
+	template <class Drain, class ReleasePresentation>
 	[[nodiscard]] ProviderResult
 	RetirePresentationProvider(
-		IFrameGenerationProvider& a_provider, Drain&& a_drain)
+		IFrameGenerationProvider& a_provider, Drain&& a_drain,
+		ReleasePresentation&& a_releasePresentation)
 	{
 		auto result = QuiesceDrainAndRelease(
 			a_provider, std::forward<Drain>(a_drain));
@@ -140,6 +141,8 @@ namespace cs::render::temporal
 		if (!result.Succeeded()) {
 			return result;
 		}
+		// Swap-chain destruction must still reach the provider's registered hooks.
+		std::forward<ReleasePresentation>(a_releasePresentation)();
 		result = a_provider.SetPresentationActive(false);
 		result.globalDrainAttempted = drainAttempted;
 		result.globalDrainCompleted = drainCompleted;
