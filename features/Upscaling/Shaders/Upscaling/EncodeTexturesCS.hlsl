@@ -67,11 +67,12 @@ RWTexture2D<float> DepthOutput : register(u3);
 	}
 
 	MotionVectorOutput[dispatchID.xy] = lerp(longestMotionVector, motionVector, nearFactor);
+#elif defined(FSR)
+	MotionVectorOutput[dispatchID.xy] = MotionVectorMask[dispatchID.xy];
 #endif
 
 #if defined(DEPTH_OUTPUT)
-	// Copy depth as R32_FLOAT so FSR DX11 backend receives a typed format.
-	// The raw depth resource is R24G8_TYPELESS which maps to FFX_SURFACE_FORMAT_UNKNOWN.
+	// Providers need typed R32_FLOAT depth rather than the engine's typeless depth resource.
 	DepthOutput[dispatchID.xy] = DepthMask[dispatchID.xy];
 #endif
 

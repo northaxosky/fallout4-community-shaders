@@ -1095,8 +1095,8 @@ namespace
 
 		const std::array<ShaderCase, 4> encodeCases{ {
 			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" } } },
-			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "DLSS", "" } } },
-			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "FSR", "" } } },
+			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "DLSS", "" }, { "DEPTH_OUTPUT", "1" } } },
+			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "FSR", "" }, { "DEPTH_OUTPUT", "1" } } },
 			{ "EncodeTexturesCS.hlsl", { { "FO4CS_SUBSTRATE", "1" }, { "DEPTH_OUTPUT", "" } } }
 		} };
 		for (const auto& shaderCase : encodeCases) {

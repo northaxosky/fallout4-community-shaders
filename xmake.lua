@@ -374,7 +374,7 @@ end)
 target("UpscalingPublicationTests", function()
     set_kind("binary")
     set_default(false)
-    add_rules("fo4cs.directxtk")
+    add_rules("fo4cs.directxtk", "fo4cs.shader-stage")
     add_deps(plugin_name .. "Version", "commonlibf4")
     add_files(
         "tests/UpscalingPublicationTests.cpp",
@@ -721,6 +721,10 @@ target("UpscalingPublicationTests", function()
             path.join(
                 os.projectdir(),
                 "features/Upscaling/Shaders/Upscaling/UpscaleVS.hlsl"
+            ),
+            path.join(
+                os.projectdir(),
+                "build/ShaderStage/Shaders/Upscaling/EncodeTexturesCS.hlsl"
             )
         }
     })

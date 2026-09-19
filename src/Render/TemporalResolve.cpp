@@ -54,8 +54,7 @@ namespace cs::render
 		auto* motionVectorTexture =
 			cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
 		auto* motionVectorSRV = cs::engine::GetRenderTargetSRV(kMotionVectorTarget);
-		if (!motionVectorTexture || !motionVectorSRV ||
-			(upscaleMethod == UpscaleMethod::kDLSS && !motionVectorCopyTexture)) {
+		if (!motionVectorTexture || !motionVectorSRV || !motionVectorCopyTexture) {
 			return false;
 		}
 
@@ -98,7 +97,7 @@ namespace cs::render
 				ID3D11UnorderedAccessView* uavs[4] = {
 					reactiveMaskTexture->uav.get(),
 					transparencyCompositionMaskTexture->uav.get(),
-					(upscaleMethod == UpscaleMethod::kDLSS) ? motionVectorCopyTexture->uav.get() : nullptr,
+					motionVectorCopyTexture->uav.get(),
 					superResolutionDepthTexture->uav.get()
 				};
 				context->CSSetUnorderedAccessViews(0, ARRAYSIZE(uavs), uavs, nullptr);
@@ -157,11 +156,8 @@ namespace cs::render
 							superResolutionDepthTexture->resource12.get() },
 				.motionVectors =
 					render::temporal::D3D11GpuView{
-						.resource = upscaleMethod == UpscaleMethod::kDLSS ? motionVectorCopyTexture->resource.get() : motionVectorTexture,
-						.alias12 =
-							upscaleMethod == UpscaleMethod::kDLSS && motionVectorCopyTexture
-								? motionVectorCopyTexture->resource12.get()
-								: nullptr },
+						.resource = motionVectorCopyTexture->resource.get(),
+						.alias12 = motionVectorCopyTexture->resource12.get() },
 				.reactiveMask =
 					render::temporal::D3D11GpuView{
 						.resource = reactiveMaskTexture->resource.get(),

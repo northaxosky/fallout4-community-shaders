@@ -88,18 +88,16 @@ namespace cs::render
 				maskDesc, "Upscaling/TransparencyCompositionMask");
 		}
 
-		if (a_upscalemethod == UpscaleMethod::kDLSS) {
-			if (!motionVectorCopyTexture) {
-				auto* motionVector = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
-				if (motionVector) {
-					D3D11_TEXTURE2D_DESC motionTexDesc{};
-					motionVector->GetDesc(&motionTexDesc);
-					motionTexDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
-					motionTexDesc.CPUAccessFlags = 0;
-					motionTexDesc.MiscFlags = 0;
-					motionVectorCopyTexture = createTexture(
-						motionTexDesc, "Upscaling/MotionVectorCopy");
-				}
+		if (!motionVectorCopyTexture) {
+			auto* motionVector = cs::engine::GetRenderTargetTexture(kMotionVectorTarget);
+			if (motionVector) {
+				D3D11_TEXTURE2D_DESC motionTexDesc{};
+				motionVector->GetDesc(&motionTexDesc);
+				motionTexDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_UNORDERED_ACCESS;
+				motionTexDesc.CPUAccessFlags = 0;
+				motionTexDesc.MiscFlags = 0;
+				motionVectorCopyTexture = createTexture(
+					motionTexDesc, "Upscaling/MotionVectorCopy");
 			}
 		}
 
@@ -136,6 +134,10 @@ namespace cs::render
 				frameBufferDesc,
 				DXGI_FORMAT_R32_FLOAT) ||
 			!MatchesTextureContract(
+				motionVectorCopyTexture,
+				frameBufferDesc,
+				DXGI_FORMAT_R16G16_FLOAT) ||
+			!MatchesTextureContract(
 				reactiveMaskTexture,
 				frameBufferDesc,
 				DXGI_FORMAT_R8_UNORM) ||
@@ -166,9 +168,7 @@ namespace cs::render
 					frameBufferDesc,
 					DXGI_FORMAT_R8G8B8A8_UNORM);
 		}
-		return (a_upscalemethod != UpscaleMethod::kDLSS ||
-				motionVectorCopyTexture) &&
-			sharpenerTexture &&
+		return sharpenerTexture &&
 			publicationTexture &&
 			sharpenerTexture->resource.get() != upscalingTexture->resource.get() &&
 			publicationTexture->resource.get() != upscalingTexture->resource.get() &&

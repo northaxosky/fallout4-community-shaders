@@ -1,9 +1,11 @@
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
 
+#include <DirectXPackedVector.h>
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <winrt/base.h>
@@ -57,17 +59,73 @@ namespace
 		return texture;
 	}
 
-	bool ReadPixel(
+	struct ShaderTexture
+	{
+		winrt::com_ptr<ID3D11Texture2D> resource;
+		winrt::com_ptr<ID3D11ShaderResourceView> srv;
+		winrt::com_ptr<ID3D11UnorderedAccessView> uav;
+	};
+
+	ShaderTexture CreateShaderTexture(
+		ID3D11Device* a_device,
+		UINT a_width,
+		UINT a_height,
+		DXGI_FORMAT a_format,
+		UINT a_bindFlags,
+		const void* a_pixels = nullptr,
+		UINT a_rowPitch = 0)
+	{
+		D3D11_TEXTURE2D_DESC desc{};
+		desc.Width = a_width;
+		desc.Height = a_height;
+		desc.MipLevels = 1;
+		desc.ArraySize = 1;
+		desc.Format = a_format;
+		desc.SampleDesc.Count = 1;
+		desc.Usage = D3D11_USAGE_DEFAULT;
+		desc.BindFlags = a_bindFlags;
+
+		D3D11_SUBRESOURCE_DATA initialData{};
+		initialData.pSysMem = a_pixels;
+		initialData.SysMemPitch = a_rowPitch;
+
+		ShaderTexture texture;
+		if (FAILED(a_device->CreateTexture2D(
+				&desc,
+				a_pixels ? &initialData : nullptr,
+				texture.resource.put()))) {
+			return {};
+		}
+		if ((a_bindFlags & D3D11_BIND_SHADER_RESOURCE) != 0 &&
+			FAILED(a_device->CreateShaderResourceView(
+				texture.resource.get(), nullptr, texture.srv.put()))) {
+			return {};
+		}
+		if ((a_bindFlags & D3D11_BIND_UNORDERED_ACCESS) != 0 &&
+			FAILED(a_device->CreateUnorderedAccessView(
+				texture.resource.get(), nullptr, texture.uav.put()))) {
+			return {};
+		}
+		return texture;
+	}
+
+	bool ReadTextureData(
 		ID3D11Device* a_device,
 		ID3D11DeviceContext* a_context,
 		ID3D11Texture2D* a_source,
-		std::array<std::uint8_t, 4>& a_pixel)
+		void* a_destination,
+		std::size_t a_destinationSize,
+		std::size_t a_rowSize)
 	{
 		D3D11_TEXTURE2D_DESC desc{};
 		a_source->GetDesc(&desc);
+		if (a_destinationSize != a_rowSize * desc.Height) {
+			return false;
+		}
 		desc.Usage = D3D11_USAGE_STAGING;
 		desc.BindFlags = 0;
 		desc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+		desc.MiscFlags = 0;
 
 		winrt::com_ptr<ID3D11Texture2D> staging;
 		if (FAILED(a_device->CreateTexture2D(&desc, nullptr, staging.put()))) {
@@ -79,9 +137,34 @@ namespace
 		if (FAILED(a_context->Map(staging.get(), 0, D3D11_MAP_READ, 0, &mapped))) {
 			return false;
 		}
-		std::memcpy(a_pixel.data(), mapped.pData, a_pixel.size());
+		if (a_rowSize > mapped.RowPitch) {
+			a_context->Unmap(staging.get(), 0);
+			return false;
+		}
+		auto* destination = static_cast<std::byte*>(a_destination);
+		for (UINT y = 0; y < desc.Height; ++y) {
+			std::memcpy(
+				destination + y * a_rowSize,
+				static_cast<const std::byte*>(mapped.pData) + y * mapped.RowPitch,
+				a_rowSize);
+		}
 		a_context->Unmap(staging.get(), 0);
 		return true;
+	}
+
+	bool ReadPixel(
+		ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context,
+		ID3D11Texture2D* a_source,
+		std::array<std::uint8_t, 4>& a_pixel)
+	{
+		return ReadTextureData(
+			a_device,
+			a_context,
+			a_source,
+			a_pixel.data(),
+			a_pixel.size(),
+			a_pixel.size());
 	}
 
 	bool IsRenderTargetBound(
@@ -241,6 +324,228 @@ namespace
 			return {};
 		}
 		return bytecode;
+	}
+
+	bool TestFsrEncodeShader(
+		ID3D11Device* a_device,
+		ID3D11DeviceContext* a_context,
+		const std::filesystem::path& a_computeShaderPath)
+	{
+		const D3D_SHADER_MACRO defines[]{
+			{ "FO4CS_SUBSTRATE", "1" },
+			{ "FSR", "1" },
+			{ "DEPTH_OUTPUT", "1" },
+			{ nullptr, nullptr }
+		};
+		auto bytecode = CompileShader(a_computeShaderPath, defines, "cs_5_0");
+		if (!Check(
+				bytecode.get() != nullptr,
+				"could not compile the production FSR encode shader")) {
+			return false;
+		}
+
+		winrt::com_ptr<ID3D11ComputeShader> shader;
+		if (!Check(
+				SUCCEEDED(a_device->CreateComputeShader(
+					bytecode->GetBufferPointer(),
+					bytecode->GetBufferSize(),
+					nullptr,
+					shader.put())),
+				"could not create the production FSR encode compute shader")) {
+			return false;
+		}
+
+		using DirectX::PackedVector::XMHALF2;
+		constexpr UINT width = 3;
+		constexpr UINT height = 2;
+		constexpr std::size_t pixelCount = width * height;
+		const std::array<XMHALF2, pixelCount> motionInput{
+			XMHALF2(0.25f, -0.5f),
+			XMHALF2(-0.75f, 0.125f),
+			XMHALF2(0.375f, 0.625f),
+			XMHALF2(-0.25f, -0.375f),
+			XMHALF2(0.5f, -0.125f),
+			XMHALF2(-0.625f, 0.25f)
+		};
+		const std::array<float, pixelCount> depthInput{
+			0.75f, 0.25f, 0.5f, 0.125f, 0.625f, 0.875f
+		};
+		const XMHALF2 motionSentinel(0.0625f, -0.0625f);
+		std::array<XMHALF2, pixelCount> initialMotionOutput;
+		initialMotionOutput.fill(motionSentinel);
+		constexpr float depthSentinel = -1.0f;
+		std::array<float, pixelCount> initialDepthOutput;
+		initialDepthOutput.fill(depthSentinel);
+		const std::array<std::uint16_t, pixelCount> taaInput{};
+		const std::array<std::uint32_t, pixelCount> normalsInput{};
+
+		const auto taa = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R8G8_UNORM,
+			D3D11_BIND_SHADER_RESOURCE,
+			taaInput.data(),
+			static_cast<UINT>(width * sizeof(taaInput[0])));
+		const auto normals = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			D3D11_BIND_SHADER_RESOURCE,
+			normalsInput.data(),
+			static_cast<UINT>(width * sizeof(normalsInput[0])));
+		const auto motionSource = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R16G16_FLOAT,
+			D3D11_BIND_SHADER_RESOURCE,
+			motionInput.data(),
+			static_cast<UINT>(width * sizeof(motionInput[0])));
+		const auto depthSource = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R32_FLOAT,
+			D3D11_BIND_SHADER_RESOURCE,
+			depthInput.data(),
+			static_cast<UINT>(width * sizeof(depthInput[0])));
+		const auto reactiveOutput = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R8_UNORM,
+			D3D11_BIND_UNORDERED_ACCESS);
+		const auto transparencyOutput = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R8_UNORM,
+			D3D11_BIND_UNORDERED_ACCESS);
+		const auto motionOutput = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R16G16_FLOAT,
+			D3D11_BIND_UNORDERED_ACCESS,
+			initialMotionOutput.data(),
+			static_cast<UINT>(width * sizeof(initialMotionOutput[0])));
+		const auto depthOutput = CreateShaderTexture(
+			a_device,
+			width,
+			height,
+			DXGI_FORMAT_R32_FLOAT,
+			D3D11_BIND_UNORDERED_ACCESS,
+			initialDepthOutput.data(),
+			static_cast<UINT>(width * sizeof(initialDepthOutput[0])));
+		if (!Check(
+				taa.resource && taa.srv &&
+					normals.resource && normals.srv &&
+					motionSource.resource && motionSource.srv &&
+					depthSource.resource && depthSource.srv &&
+					reactiveOutput.resource && reactiveOutput.uav &&
+					transparencyOutput.resource && transparencyOutput.uav &&
+					motionOutput.resource && motionOutput.uav &&
+					depthOutput.resource && depthOutput.uav,
+				"could not create real D3D11 FSR encode resources")) {
+			return false;
+		}
+
+		constexpr std::array<float, 4> constants{ 2.0f, 1.0f, 0.0f, 0.0f };
+		D3D11_BUFFER_DESC bufferDesc{};
+		bufferDesc.ByteWidth = static_cast<UINT>(sizeof(constants));
+		bufferDesc.Usage = D3D11_USAGE_DEFAULT;
+		bufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+		D3D11_SUBRESOURCE_DATA bufferData{};
+		bufferData.pSysMem = constants.data();
+		winrt::com_ptr<ID3D11Buffer> constantBuffer;
+		if (!Check(
+				SUCCEEDED(a_device->CreateBuffer(
+					&bufferDesc, &bufferData, constantBuffer.put())),
+				"could not create the FSR encode TrueSamplingDim buffer")) {
+			return false;
+		}
+
+		ID3D11ShaderResourceView* views[]{
+			taa.srv.get(),
+			normals.srv.get(),
+			motionSource.srv.get(),
+			depthSource.srv.get()
+		};
+		ID3D11UnorderedAccessView* outputs[]{
+			reactiveOutput.uav.get(),
+			transparencyOutput.uav.get(),
+			motionOutput.uav.get(),
+			depthOutput.uav.get()
+		};
+		auto* constantBufferPointer = constantBuffer.get();
+		a_context->CSSetShaderResources(0, static_cast<UINT>(std::size(views)), views);
+		a_context->CSSetUnorderedAccessViews(
+			0, static_cast<UINT>(std::size(outputs)), outputs, nullptr);
+		a_context->CSSetConstantBuffers(0, 1, &constantBufferPointer);
+		a_context->CSSetShader(shader.get(), nullptr, 0);
+		a_context->Dispatch(1, 1, 1);
+
+		ID3D11ShaderResourceView* nullViews[std::size(views)]{};
+		ID3D11UnorderedAccessView* nullOutputs[std::size(outputs)]{};
+		ID3D11Buffer* nullBuffer = nullptr;
+		a_context->CSSetShaderResources(
+			0, static_cast<UINT>(std::size(nullViews)), nullViews);
+		a_context->CSSetUnorderedAccessViews(
+			0, static_cast<UINT>(std::size(nullOutputs)), nullOutputs, nullptr);
+		a_context->CSSetConstantBuffers(0, 1, &nullBuffer);
+		a_context->CSSetShader(nullptr, nullptr, 0);
+
+		std::array<XMHALF2, pixelCount> observedMotion{};
+		std::array<float, pixelCount> observedDepth{};
+		if (!Check(
+				ReadTextureData(
+					a_device,
+					a_context,
+					motionOutput.resource.get(),
+					observedMotion.data(),
+					sizeof(observedMotion),
+					width * sizeof(observedMotion[0])),
+				"could not read the FSR encoded motion output") ||
+			!Check(
+				ReadTextureData(
+					a_device,
+					a_context,
+					depthOutput.resource.get(),
+					observedDepth.data(),
+					sizeof(observedDepth),
+					width * sizeof(observedDepth[0])),
+				"could not read the FSR typed depth output")) {
+			return false;
+		}
+
+		bool ok = true;
+		ok &= Check(
+			observedMotion[0].v == motionInput[0].v,
+			"FSR encode changed the signed +X/-Y motion sample");
+		ok &= Check(
+			observedMotion[1].v == motionInput[1].v,
+			"FSR encode changed the signed -X/+Y motion sample");
+		ok &= Check(
+			observedDepth[0] == depthInput[0] &&
+				observedDepth[1] == depthInput[1],
+			"FSR encode did not publish the typed depth snapshot");
+
+		bool motionBoundsPreserved = true;
+		bool depthBoundsPreserved = true;
+		for (std::size_t index = 2; index < pixelCount; ++index) {
+			motionBoundsPreserved &=
+				observedMotion[index].v == motionSentinel.v;
+			depthBoundsPreserved &= observedDepth[index] == depthSentinel;
+		}
+		ok &= Check(
+			motionBoundsPreserved,
+			"FSR encode wrote motion outside TrueSamplingDim");
+		ok &= Check(
+			depthBoundsPreserved,
+			"FSR encode wrote depth outside TrueSamplingDim");
+		return ok;
 	}
 
 	bool TestSpatialFallback(
@@ -404,7 +709,9 @@ namespace
 
 int main(int argc, char** argv)
 {
-	if (!Check(argc == 3, "expected spatial fallback pixel and vertex shaders")) {
+	if (!Check(
+			argc == 4,
+			"expected spatial fallback pixel/vertex and FSR encode shaders")) {
 		return 1;
 	}
 	constexpr D3D_FEATURE_LEVEL featureLevels[]{ D3D_FEATURE_LEVEL_11_0 };
@@ -509,6 +816,7 @@ int main(int argc, char** argv)
 	ok &= Check(
 		TestSpatialFallback(device.get(), context.get(), argv[1], argv[2]),
 		"spatial recovery sampled stale pixels outside the committed render subrect");
+	ok &= TestFsrEncodeShader(device.get(), context.get(), argv[3]);
 
 	context->OMSetRenderTargets(0, nullptr, nullptr);
 	ok &= CheckDepthSnapshot(device.get(), context.get());
