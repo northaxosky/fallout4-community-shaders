@@ -3,7 +3,7 @@ import os
 
 import renderdoc as rd
 
-from bindings import descriptor_bindings, output_targets
+from bindings import descriptor_bindings, output_targets, pipeline_state
 from common import enum_name, finite, format_name, resource_id, result_message, result_ok, sanitize_filename, safe_get, vector
 
 
@@ -11,6 +11,8 @@ WRITE_USAGES = (
     "CopyDst", "ResolveDst", "ColorTarget", "DepthStencil", "StreamOut",
     "RWResource", "GenMips", "CPUWrite",
 )
+
+NON_ACCESS_USAGES = ("Unused", "Barrier", "Discard")
 
 
 def usage_name(value):
@@ -30,7 +32,7 @@ def is_producer_usage(name):
 
 
 def is_read_usage(name):
-    return not is_write_usage(name) and name != "Discard"
+    return not is_write_usage(name) and name not in NON_ACCESS_USAGES
 
 
 def usage_records(session, actions, rid):
@@ -169,11 +171,10 @@ def _auto_range(session, rid, mip, slice_index):
 
 
 def dump_bound_textures(session, event_id, out_dir):
-    session.controller.SetFrameEvent(event_id, True)
-    state = session.controller.GetD3D11PipelineState()
+    state = pipeline_state(session, event_id, True)
     bindings = output_targets(session, state)
     bindings.extend(item for item in descriptor_bindings(session, state)
-                    if item["type"] in ("Image", "ReadWriteImage"))
+                    if item["category"] in ("Image", "ReadWriteImage"))
     manifest = []
     occurrence = {}
     for binding in bindings:

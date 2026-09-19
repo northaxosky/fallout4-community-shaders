@@ -1,7 +1,7 @@
 import json
 import os
 
-from bindings import decode_cbuffer, stage_shader, state_record
+from bindings import decode_cbuffer, pipeline_state, stage_shader, state_record
 from common import enum_name, resource_id, safe_get, sanitize_filename
 from resources import dump_bound_textures, is_write_usage, texture_stats, usage_name, usage_records
 from triage import run_triage
@@ -20,7 +20,7 @@ def _option(args, name, default=None, cast=str):
 def _positionals(args):
     values = []
     skip = False
-    options = ("--eid", "--mip", "--slice", "--slot", "--outdir")
+    options = ("--eid", "--mip", "--slice", "--slot", "--space", "--outdir")
     for value in args:
         if skip:
             skip = False
@@ -127,7 +127,16 @@ def state(session, actions, args, out_dir):
     values = _require(args, 1, "state <eid>")
     event_id = int(values[0], 0)
     result = state_record(session, event_id)
-    result["action"] = actions.action_record(actions.by_event[event_id])
+    action = actions.action_record(actions.by_event[event_id])
+    result["action"] = action
+    if action["kind"] == "dispatch":
+        result["pipelineKind"] = "compute"
+        result["activePipelineObjectId"] = result["computePipelineObjectId"]
+    elif action["kind"] == "drawcall":
+        result["pipelineKind"] = "graphics"
+        result["activePipelineObjectId"] = result["graphicsPipelineObjectId"]
+    else:
+        result["activePipelineObjectId"] = None
     return result
 
 
@@ -170,21 +179,22 @@ def dump(session, actions, args, out_dir):
 
 
 def cbuffer(session, actions, args, out_dir):
-    values = _require(args, 2, "cbuffer <eid> <stage> [--slot N]")
+    values = _require(
+        args, 2, "cbuffer <eid> <stage> [--slot N] [--space N]")
     return decode_cbuffer(
         session, int(values[0], 0), values[1],
-        _option(args, "slot", 0, int))
+        _option(args, "slot", 0, int),
+        _option(args, "space", 0, int))
 
 
 def disasm(session, actions, args, out_dir):
     values = _require(args, 2, "disasm <eid> <stage>")
     event_id = int(values[0], 0)
-    session.controller.SetFrameEvent(event_id, True)
-    state = session.controller.GetD3D11PipelineState()
+    state = pipeline_state(session, event_id, True)
     stage_name, shader = stage_shader(state, values[1])
     if resource_id(shader.resourceId) == 0 or shader.reflection is None:
         raise ValueError("No {} shader is bound at event {}".format(stage_name, event_id))
-    pipeline = session.controller.GetPipelineState().GetGraphicsPipelineObject()
+    pipeline = state.pipeline_object(stage_name)
     targets = list(session.controller.GetDisassemblyTargets(True))
     target = targets[0] if targets else ""
     text = session.controller.DisassembleShader(pipeline, shader.reflection, target)
@@ -198,6 +208,9 @@ def disasm(session, actions, args, out_dir):
         "stage": stage_name,
         "shaderId": resource_id(shader.resourceId),
         "shaderName": session.name(shader.resourceId),
+        "pipelineKind": (
+            "compute" if stage_name == "compute" else "graphics"),
+        "pipelineObjectId": resource_id(pipeline),
         "target": target,
         "artifact": path,
         "characters": len(text),

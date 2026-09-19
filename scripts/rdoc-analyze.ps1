@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Analyze a RenderDoc capture without opening the RenderDoc UI.
+    Analyze a D3D11 or D3D12 RenderDoc capture without opening the RenderDoc UI.
 
 .DESCRIPTION
     Resolves a Fallout 4 capture, writes a JSON job, and runs the bundled Python
@@ -37,6 +37,9 @@
 
 .EXAMPLE
     pwsh scripts\rdoc-analyze.ps1 FO4_frame67748 stats ScreenSpaceShadows/Mask.Texture
+
+.EXAMPLE
+    pwsh scripts\rdoc-analyze.ps1 FO4_frame67748 cbuffer 110 compute --slot 0 --space 0
 #>
 [CmdletBinding()]
 param(

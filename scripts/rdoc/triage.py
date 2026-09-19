@@ -1,4 +1,4 @@
-from bindings import decode_cbuffer, output_targets, rasterizer_record
+from bindings import decode_cbuffer, output_targets, pipeline_state, rasterizer_record, stage_shader
 from common import resource_id
 from resources import texture_stats, usage_name, usage_records
 
@@ -89,10 +89,6 @@ def _texture_findings(session, actions):
                     {"firstReadEventId": first_read["eventId"],
                      "usages": timeline[:12], "uniform": stats["uniform"]},
                     first_read["eventId"], resource, first_read["marker"]))
-                marker = first_read["marker"] or output_marker
-                if marker is not None:
-                    anomaly_outputs.append((first_read["eventId"], resource,
-                                            stats, marker))
             else:
                 unused_resources.append(resource.name)
         elif stats["uniform"] and stats["lifetime_verdict_available"]:
@@ -145,8 +141,7 @@ def _resolution_observations(session, actions, upscale_size, expected_scale):
     groups = {}
     matching_samples = 0
     for event_id in sorted(candidate_events, reverse=True)[:24]:
-        session.controller.SetFrameEvent(event_id, False)
-        state = session.controller.GetD3D11PipelineState()
+        state = pipeline_state(session, event_id, False)
         targets = output_targets(session, state)
         rasterizer = rasterizer_record(state)
         if not targets or not rasterizer["viewports"]:
@@ -198,26 +193,44 @@ def _resolution_observations(session, actions, upscale_size, expected_scale):
 
 
 def _find_resolution_constants(session, actions):
-    candidates = [action for action in actions.actions
-                  if action["kind"] == "dispatch"
-                  and actions.marker_name_for_event(action["eventId"])
-                  == "Upscaling/FSR"]
-    for action in candidates[:8]:
-        if (action["kind"] != "dispatch"
-                or actions.marker_name_for_event(action["eventId"]) != "Upscaling/FSR"):
-            continue
-        session.controller.SetFrameEvent(action["eventId"], False)
-        shader = session.controller.GetD3D11PipelineState().computeShader
-        if session.name(shader.resourceId) == "FSR3-PREPARE-INPUTS":
-            decoded = decode_cbuffer(session, action["eventId"], "compute", 0)
-            return decoded
-    return None
+    dispatches = [action for action in actions.actions
+                  if action["kind"] == "dispatch"]
+    candidates = sorted(
+        dispatches,
+        key=lambda action: (
+            actions.marker_name_for_event(action["eventId"])
+            != "Upscaling/FSR",
+            action["eventId"]))
+    for action in candidates:
+        state = pipeline_state(session, action["eventId"], False)
+        _, shader = stage_shader(state, "compute")
+        shader_name = session.name(shader.resourceId)
+        pipeline = state.pipeline_object("compute")
+        pipeline_name = session.name(pipeline)
+        if (shader_name == "FSR3-PREPARE-INPUTS"
+                or pipeline_name == "FSR3-PREPARE-INPUTS"):
+            try:
+                return (
+                    decode_cbuffer(
+                        session, action["eventId"], "compute", 0), None)
+            except Exception as error:
+                return None, (
+                    "FSR3-PREPARE-INPUTS was found at event {} via {} but "
+                    "its constants were unavailable: {}".format(
+                        action["eventId"],
+                        "compute PSO" if pipeline_name
+                        == "FSR3-PREPARE-INPUTS" else "compute shader",
+                        error))
+    return None, (
+        "FSR3-PREPARE-INPUTS dispatch was not found by compute shader or "
+        "D3D12 compute PSO name")
 
 
 def _resolution_contract(session, actions):
-    decoded = _find_resolution_constants(session, actions)
+    decoded, unavailable_reason = _find_resolution_constants(session, actions)
     result = {
         "status": "unavailable",
+        "reason": unavailable_reason,
         "observedScales": [],
         "constantBuffer": None,
     }
@@ -239,7 +252,11 @@ def _resolution_contract(session, actions):
         "downscaleFactor": downscale,
     }
     result["constantBuffer"] = evidence
+    result["reason"] = None
     if len(render_size) < 2 or len(upscale_size) < 2 or len(downscale) < 2:
+        result["reason"] = (
+            "Required FSR resolution constants were not present in the "
+            "decoded constant buffer")
         return result, []
     expected_x = float(render_size[0]) / float(upscale_size[0])
     expected_y = float(render_size[1]) / float(upscale_size[1])
@@ -265,6 +282,13 @@ def _resolution_contract(session, actions):
         allocation_matches = True
     evidence["expectedScale"] = [expected_x, expected_y]
     evidence["dominantObservation"] = dominant
+    if not observations and expected_x < 0.99 and expected_y < 0.99:
+        if expected_matches_cbuffer:
+            result["reason"] = (
+                "The D3D12 constant-buffer scale contract is internally "
+                "consistent, but no qualifying graphics viewport/target "
+                "samples were available to verify the allocation contract")
+            return result, []
     if expected_matches_cbuffer and allocation_matches:
         result["status"] = "holding"
         return result, []
