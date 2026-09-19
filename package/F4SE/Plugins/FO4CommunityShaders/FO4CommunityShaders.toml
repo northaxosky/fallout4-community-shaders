@@ -195,6 +195,8 @@ toggle_hotkey = "F10"
 load = false
 
 [features.RenderDoc.settings]
+# Capture API: "engine_d3d11" or "temporal_d3d12".
+capture_target = "engine_d3d11"
 # Capture output folder. Default (unset): <Documents>\My Games\Fallout4\F4SE\FO4CommunityShaders\captures
 # (beside the F4SE log, outside the MO2 virtual file system). Environment variables are expanded.
 # capture_folder = "%USERPROFILE%\\Documents\\My Games\\Fallout4\\F4SE\\FO4CommunityShaders\\captures"

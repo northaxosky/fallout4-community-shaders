@@ -52,6 +52,7 @@ namespace cs::features
 		PFun_slFreeResources* slFreeResources{};
 		PFun_slGetFeatureRequirements* slGetFeatureRequirements{};
 		PFun_slUpgradeInterface* slUpgradeInterface{};
+		PFun_slGetNativeInterface* slGetNativeInterface{};
 		PFun_slSetConstants* slSetConstants{};
 		PFun_slSetTagForFrame* slSetTagForFrame{};
 		PFun_slGetFeatureFunction* slGetFeatureFunction{};
@@ -84,6 +85,9 @@ namespace cs::features
 			bool a_loadFsrG);
 
 		bool PrepareD3D12Device(ID3D12Device** a_device);
+		bool GetNativeD3D12Device(
+			ID3D12Device* a_device,
+			ID3D12Device** a_nativeDevice) const;
 		bool PrepareDXGIFactory(IDXGIFactory4** a_factory);
 		bool SetDevice(ID3D12Device* a_device);
 		void NotifyD3D12DeviceChange() noexcept;

@@ -15,6 +15,7 @@
 #include "FrameGeneration.h"
 #include "Log.h"
 #include "PresentationProviders.h"
+#include "RenderDoc.h"
 #include "Render/Annotation.h"
 #include "Render/Engine.h"
 #include "Render/FrameBuffer.h"
@@ -1269,6 +1270,21 @@ namespace cs::render
 										graphics ? graphics->screenHeight : 0);
 							}
 							return result;
+						},
+					.bindD3D12CaptureTarget =
+						[](ID3D12Device* a_device, HWND a_window) {
+							auto* renderDoc =
+								features::RenderDoc::GetSingleton();
+							if (renderDoc->IsHealthy()) {
+								renderDoc->BindD3D12CaptureTarget(
+									a_device,
+									a_window);
+							}
+						},
+					.unbindD3D12CaptureTarget =
+						[](ID3D12Device* a_device) {
+							features::RenderDoc::GetSingleton()
+								->UnbindD3D12CaptureTarget(a_device);
 						} });
 			if (SUCCEEDED(proxyResult) && provider &&
 				_impl->swapChain.IsFrameGenerationReady()) {

@@ -221,6 +221,7 @@ namespace cs::features
 		slFreeResources = (PFun_slFreeResources*)GetProcAddress(interposer, "slFreeResources");
 		slGetFeatureRequirements = (PFun_slGetFeatureRequirements*)GetProcAddress(interposer, "slGetFeatureRequirements");
 		slUpgradeInterface = (PFun_slUpgradeInterface*)GetProcAddress(interposer, "slUpgradeInterface");
+		slGetNativeInterface = (PFun_slGetNativeInterface*)GetProcAddress(interposer, "slGetNativeInterface");
 		slSetConstants = (PFun_slSetConstants*)GetProcAddress(interposer, "slSetConstants");
 		slSetTagForFrame =
 			(PFun_slSetTagForFrame*)GetProcAddress(interposer, "slSetTagForFrame");
@@ -257,6 +258,39 @@ namespace cs::features
 			return false;
 		}
 		return SetDevice(*a_device);
+	}
+
+	bool Streamline::GetNativeD3D12Device(
+		ID3D12Device* a_device,
+		ID3D12Device** a_nativeDevice) const
+	{
+		if (!a_nativeDevice) {
+			return false;
+		}
+		*a_nativeDevice = nullptr;
+		if (!a_device) {
+			return false;
+		}
+		if (!initialized) {
+			a_device->AddRef();
+			*a_nativeDevice = a_device;
+			return true;
+		}
+		if (!slGetNativeInterface) {
+			L->error("Streamline interposer is missing slGetNativeInterface");
+			return false;
+		}
+
+		void* nativeInterface = nullptr;
+		if (SL_FAILED(result, slGetNativeInterface(a_device, &nativeInterface)) ||
+			!nativeInterface) {
+			L->error(
+				"Failed to unwrap the native D3D12 device: {}",
+				magic_enum::enum_name(result));
+			return false;
+		}
+		*a_nativeDevice = static_cast<ID3D12Device*>(nativeInterface);
+		return true;
 	}
 
 	bool Streamline::PrepareDXGIFactory(IDXGIFactory4** a_factory)

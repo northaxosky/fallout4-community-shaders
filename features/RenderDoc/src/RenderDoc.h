@@ -7,9 +7,13 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <mutex>
 #include <string>
 
 #include <Windows.h>
+#include <d3d11.h>
+#include <d3d12.h>
+#include <winrt/base.h>
 
 struct RENDERDOC_API_1_7_0;
 
@@ -18,6 +22,12 @@ namespace cs::features
 	class RenderDoc : public Feature
 	{
 	public:
+		enum class CaptureTarget : std::uint8_t
+		{
+			kEngineD3D11,
+			kTemporalD3D12
+		};
+
 		static RenderDoc* GetSingleton();
 
 		std::string_view GetName() const override { return "RenderDoc"; }
@@ -37,6 +47,8 @@ namespace cs::features
 		void CollectTelemetry(cs::telemetry::Sink& a_sink) const override;
 		void TickHostFrame();
 		void BindD3D11CaptureTarget(ID3D11Device* a_device, HWND a_window);
+		void BindD3D12CaptureTarget(ID3D12Device* a_device, HWND a_window);
+		void UnbindD3D12CaptureTarget(ID3D12Device* a_device);
 		[[nodiscard]] bool CaptureHotkeysEnabled() const noexcept
 		{
 			return IsHealthy() && _settings.enabled && _api;
@@ -60,6 +72,7 @@ namespace cs::features
 			std::string captureFolder = "";
 			double      minFreeDiskGiB = 1.0;
 			int         multiFrameCount = 5;
+			CaptureTarget captureTarget = CaptureTarget::kEngineD3D11;
 
 			// Suggested host defaults. Host overrides are authoritative.
 			std::string captureHotkey = "F11";
@@ -73,9 +86,18 @@ namespace cs::features
 		bool TryLoadRuntime();
 		void ApplyCapturePath();
 		bool CheckCaptureDiskSpace() const;
-		void BindCaptureTarget();
+		[[nodiscard]] bool BindCaptureTarget(bool a_reportUnavailable);
+		[[nodiscard]] bool CaptureTargetAvailable() const noexcept;
 		void QueuePendingComments(std::uint32_t a_expectedCaptures);
 		void ApplyPendingComments();
+
+		struct CaptureBinding
+		{
+			winrt::com_ptr<IUnknown> device;
+			HWND window = nullptr;
+		};
+
+		[[nodiscard]] CaptureBinding GetCaptureBinding() const;
 
 		Settings              _settings;
 		Settings              _bootSettings;
@@ -86,8 +108,13 @@ namespace cs::features
 		bool _attemptedLoad = false;
 		std::atomic<std::uint32_t> _captureCount{ 0 };
 
-		ID3D11Device*      _device = nullptr;
-		std::atomic<HWND>  _window{ nullptr };
+		mutable std::mutex             _captureTargetMutex;
+		winrt::com_ptr<ID3D11Device>   _device11;
+		winrt::com_ptr<ID3D12Device>   _device12;
+		HWND                           _window11 = nullptr;
+		HWND                           _window12 = nullptr;
+		std::atomic_bool               _d3d11TargetAvailable{ false };
+		std::atomic_bool               _d3d12TargetAvailable{ false };
 
 		// Comments apply to a completed capture, so they wait for the file to appear.
 		std::string   _pendingComments;

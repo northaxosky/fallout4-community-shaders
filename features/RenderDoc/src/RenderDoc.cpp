@@ -29,6 +29,8 @@ namespace cs::features
 	constexpr int         kMinMultiFrameCount = 2;
 	constexpr int         kMaxMultiFrameCount = 60;
 	constexpr std::string_view kLegacyCaptureFolder = "Data\\F4SE\\Plugins\\RenderDoc\\captures";
+	constexpr std::string_view kEngineD3D11Target = "engine_d3d11";
+	constexpr std::string_view kTemporalD3D12Target = "temporal_d3d12";
 
 	RenderDoc* RenderDoc::GetSingleton()
 	{
@@ -48,6 +50,28 @@ namespace cs::features
 		double ClampMinFreeDiskGiB(double a_value)
 		{
 			return a_value >= 0.0 ? a_value : RenderDoc::Settings{}.minFreeDiskGiB;
+		}
+
+		std::string_view CaptureTargetConfigName(RenderDoc::CaptureTarget a_target)
+		{
+			switch (a_target) {
+			case RenderDoc::CaptureTarget::kTemporalD3D12:
+				return kTemporalD3D12Target;
+			case RenderDoc::CaptureTarget::kEngineD3D11:
+			default:
+				return kEngineD3D11Target;
+			}
+		}
+
+		const char* CaptureTargetDisplayName(RenderDoc::CaptureTarget a_target)
+		{
+			switch (a_target) {
+			case RenderDoc::CaptureTarget::kTemporalD3D12:
+				return "Temporal D3D12";
+			case RenderDoc::CaptureTarget::kEngineD3D11:
+			default:
+				return "Engine D3D11";
+			}
 		}
 
 		std::string PathToUtf8(const std::filesystem::path& a_path)
@@ -162,6 +186,39 @@ namespace cs::features
 			return true;
 		}
 
+		bool ReadCaptureTargetSetting(
+			const toml::table& a_table,
+			RenderDoc::CaptureTarget& a_value,
+			std::string& a_error)
+		{
+			auto configured = std::string(CaptureTargetConfigName(a_value));
+			const auto status = feature_config::ReadString(
+				a_table, "capture_target", configured);
+			if (!AcceptSetting(
+					status,
+					"capture_target",
+					"string",
+					"string value is out of range",
+					a_error)) {
+				return false;
+			}
+			if (status != feature_config::ScalarReadStatus::kValid) {
+				return true;
+			}
+			if (configured == kEngineD3D11Target) {
+				a_value = RenderDoc::CaptureTarget::kEngineD3D11;
+				return true;
+			}
+			if (configured == kTemporalD3D12Target) {
+				a_value = RenderDoc::CaptureTarget::kTemporalD3D12;
+				return true;
+			}
+			a_error = SettingError(
+				"capture_target",
+				"expected \"engine_d3d11\" or \"temporal_d3d12\"");
+			return false;
+		}
+
 		bool ParseSettingsTable(
 			const toml::table& a_config,
 			RenderDoc::Settings& a_candidate,
@@ -203,6 +260,10 @@ namespace cs::features
 					kMaxMultiFrameCount,
 					a_candidate.multiFrameCount,
 					a_error)
+				&& ReadCaptureTargetSetting(
+					*settingsTable,
+					a_candidate.captureTarget,
+					a_error)
 				&& AcceptSetting(
 					feature_config::ReadString(*settingsTable, "capture_hotkey", a_candidate.captureHotkey),
 					"capture_hotkey", "string", "string value is out of range", a_error)
@@ -226,9 +287,10 @@ namespace cs::features
 
 	void RenderDoc::Load()
 	{
-		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture={} multi_capture={}",
+		L->info("Settings: enabled={} dll={} folder={} min_free_disk_gib={:.2f} multi_frame_count={} capture_target={} capture={} multi_capture={}",
 			_settings.enabled, _settings.dllPath, _settings.captureFolder,
 			_settings.minFreeDiskGiB, _settings.multiFrameCount,
+			CaptureTargetConfigName(_settings.captureTarget),
 			_settings.captureHotkey, _settings.multiCaptureHotkey);
 
 		if (!_settings.enabled)
@@ -249,6 +311,9 @@ namespace cs::features
 		settings.insert_or_assign("capture_folder", _settings.captureFolder);
 		settings.insert_or_assign("min_free_disk_gib", _settings.minFreeDiskGiB);
 		settings.insert_or_assign("multi_frame_count", static_cast<int64_t>(_settings.multiFrameCount));
+		settings.insert_or_assign(
+			"capture_target",
+			std::string(CaptureTargetConfigName(_settings.captureTarget)));
 		settings.insert_or_assign("capture_hotkey", _settings.captureHotkey);
 		settings.insert_or_assign("multi_capture_hotkey", _settings.multiCaptureHotkey);
 
@@ -359,13 +424,70 @@ namespace cs::features
 		return true;
 	}
 
-	void RenderDoc::BindCaptureTarget()
+	RenderDoc::CaptureBinding RenderDoc::GetCaptureBinding() const
 	{
-		// Frame generation presents through a D3D12 swapchain on the same window, so an
-		// unscoped trigger can capture that instead of the game's D3D11 draws.
-		auto* window = _window.load(std::memory_order_relaxed);
-		if (_api && _api->SetActiveWindow && _device && window)
-			_api->SetActiveWindow(_device, window);
+		std::scoped_lock lock(_captureTargetMutex);
+		CaptureBinding binding;
+		switch (_settings.captureTarget) {
+		case CaptureTarget::kTemporalD3D12:
+			binding.device.copy_from(_device12.get());
+			binding.window = _window12;
+			break;
+		case CaptureTarget::kEngineD3D11:
+		default:
+			binding.device.copy_from(_device11.get());
+			binding.window = _window11;
+			break;
+		}
+		return binding;
+	}
+
+	bool RenderDoc::CaptureTargetAvailable() const noexcept
+	{
+		switch (_settings.captureTarget) {
+		case CaptureTarget::kTemporalD3D12:
+			return _d3d12TargetAvailable.load(std::memory_order_acquire);
+		case CaptureTarget::kEngineD3D11:
+		default:
+			return _d3d11TargetAvailable.load(std::memory_order_acquire);
+		}
+	}
+
+	bool RenderDoc::BindCaptureTarget(bool a_reportUnavailable)
+	{
+		if (!_api || !_api->SetActiveWindow) {
+			if (a_reportUnavailable) {
+				L->warn(
+					"RenderDoc capture aborted: the runtime does not expose "
+					"SetActiveWindow");
+				cs::Menu::ShowToast(
+					"RenderDoc capture target binding is unavailable",
+					4.0,
+					DMUI_STATUS_SEVERITY_ERROR);
+			}
+			return false;
+		}
+
+		const auto binding = GetCaptureBinding();
+		if (!binding.device || !binding.window) {
+			if (a_reportUnavailable) {
+				const auto* name =
+					CaptureTargetDisplayName(_settings.captureTarget);
+				L->warn(
+					"RenderDoc capture aborted: selected target {} is unavailable",
+					name);
+				cs::Menu::ShowToast(
+					std::format(
+						"RenderDoc capture target unavailable: {}",
+						name),
+					4.0,
+					DMUI_STATUS_SEVERITY_ERROR);
+			}
+			return false;
+		}
+
+		_api->SetActiveWindow(binding.device.get(), binding.window);
+		return true;
 	}
 
 	void RenderDoc::QueuePendingComments(std::uint32_t a_expectedCaptures)
@@ -408,6 +530,16 @@ namespace cs::features
 			.Field("enabled", _settings.enabled)
 			.Field("loaded", _api != nullptr)
 			.Field("attempted", _attemptedLoad)
+			.Field(
+				"capture_target",
+				CaptureTargetConfigName(_settings.captureTarget))
+			.Field("capture_target_available", CaptureTargetAvailable())
+			.Field(
+				"engine_d3d11_available",
+				_d3d11TargetAvailable.load(std::memory_order_relaxed))
+			.Field(
+				"temporal_d3d12_available",
+				_d3d12TargetAvailable.load(std::memory_order_relaxed))
 			.Field("captures", static_cast<std::int64_t>(_captureCount.load(std::memory_order_relaxed)))
 			.Field("multi_frames", static_cast<std::int64_t>(_settings.multiFrameCount))
 			.Field("folder", _resolvedCaptureFolderUtf8);
@@ -424,15 +556,18 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
 			return;
 		}
+		if (!BindCaptureTarget(true))
+			return;
 		if (!CheckCaptureDiskSpace())
 			return;
 
-		BindCaptureTarget();
 		_api->TriggerCapture();
 		QueuePendingComments(1);
 		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
-		L->info("Single-frame capture triggered");
+		L->info(
+			"Single-frame capture triggered for {}",
+			CaptureTargetDisplayName(_settings.captureTarget));
 	}
 
 	void RenderDoc::TriggerMultiFrameCapture()
@@ -445,6 +580,8 @@ namespace cs::features
 			L->warn("RenderDoc runtime not loaded; restart the game with RenderDoc enabled to capture");
 			return;
 		}
+		if (!BindCaptureTarget(true))
+			return;
 		if (!CheckCaptureDiskSpace())
 			return;
 		if (!_api->TriggerMultiFrameCapture) {
@@ -453,18 +590,25 @@ namespace cs::features
 		}
 
 		const auto frameCount = static_cast<uint32_t>(ClampMultiFrameCount(_settings.multiFrameCount));
-		BindCaptureTarget();
 		_api->TriggerMultiFrameCapture(frameCount);
 		QueuePendingComments(frameCount);
 		_captureCount.fetch_add(1, std::memory_order_relaxed);
 
-		L->info("Multi-frame capture triggered: {} frames", frameCount);
+		L->info(
+			"Multi-frame capture triggered for {}: {} frames",
+			CaptureTargetDisplayName(_settings.captureTarget),
+			frameCount);
 	}
 
 	void RenderDoc::OnD3D11Ready(IDXGIAdapter*, ID3D11Device* a_device)
 	{
-		_device = a_device;
-		BindCaptureTarget();
+		{
+			std::scoped_lock lock(_captureTargetMutex);
+			_device11.copy_from(a_device);
+			_d3d11TargetAvailable.store(
+				_device11 && _window11,
+				std::memory_order_release);
+		}
 	}
 
 	void RenderDoc::DrawOverlay()
@@ -481,9 +625,38 @@ namespace cs::features
 		ID3D11Device* a_device,
 		HWND a_window)
 	{
-		_device = a_device;
-		_window.store(a_window, std::memory_order_relaxed);
-		BindCaptureTarget();
+		{
+			std::scoped_lock lock(_captureTargetMutex);
+			_device11.copy_from(a_device);
+			_window11 = a_window;
+			_d3d11TargetAvailable.store(
+				_device11 && _window11,
+				std::memory_order_release);
+		}
+	}
+
+	void RenderDoc::BindD3D12CaptureTarget(
+		ID3D12Device* a_device,
+		HWND a_window)
+	{
+		{
+			std::scoped_lock lock(_captureTargetMutex);
+			_device12.copy_from(a_device);
+			_window12 = a_window;
+			_d3d12TargetAvailable.store(
+				_device12 && _window12,
+				std::memory_order_release);
+		}
+	}
+
+	void RenderDoc::UnbindD3D12CaptureTarget(ID3D12Device* a_device)
+	{
+		std::scoped_lock lock(_captureTargetMutex);
+		if (a_device && _device12.get() != a_device)
+			return;
+		_d3d12TargetAvailable.store(false, std::memory_order_release);
+		_window12 = nullptr;
+		_device12 = nullptr;
 	}
 
 	void RenderDoc::DrawSettings()
@@ -501,6 +674,42 @@ namespace cs::features
 			"The host owns capture bindings. Suggested defaults: %s and %s.",
 			_settings.captureHotkey.c_str(),
 			_settings.multiCaptureHotkey.c_str());
+
+		const bool d3d11Available =
+			_d3d11TargetAvailable.load(std::memory_order_acquire);
+		const bool d3d12Available =
+			_d3d12TargetAvailable.load(std::memory_order_acquire);
+		const std::array captureTargets{
+			dmui::ChoiceOption<CaptureTarget>{
+				CaptureTarget::kEngineD3D11,
+				d3d11Available
+					? "Engine D3D11"
+					: "Engine D3D11 - unavailable",
+				"engine-d3d11",
+				d3d11Available },
+			dmui::ChoiceOption<CaptureTarget>{
+				CaptureTarget::kTemporalD3D12,
+				d3d12Available
+					? "Temporal D3D12"
+					: "Temporal D3D12 - unavailable",
+				"temporal-d3d12",
+				d3d12Available }
+		};
+		const auto captureTarget = dmui::DrawChoice<CaptureTarget>(
+			"renderdoc-capture-target",
+			_settings.captureTarget,
+			std::span<const dmui::ChoiceOption<CaptureTarget>>{ captureTargets },
+			"Unavailable",
+			"Capture target");
+		if (captureTarget.changed) {
+			_settings.captureTarget = *captureTarget.selected;
+			SaveSettings();
+		}
+		if (!CaptureTargetAvailable()) {
+			dmui::ui::TextDisabled(
+				"Selected target is unavailable. Temporal D3D12 is registered "
+				"only while native temporal presentation is active.");
+		}
 
 		char dllPathBuf[260];
 		strncpy_s(dllPathBuf, _settings.dllPath.c_str(), _TRUNCATE);
@@ -546,7 +755,7 @@ namespace cs::features
 			_commentsBuf.data(), _commentsBuf.size(),
 			dmui::ui::Vec2{ 0, dmui::ui::GetTextLineHeightWithSpacing() * 3 });
 
-		dmui::ui::BeginDisabled(!_api);
+		dmui::ui::BeginDisabled(!_api || !CaptureTargetAvailable());
 		if (dmui::ui::Button("Trigger Capture"))
 			TriggerCapture();
 		dmui::ui::SameLine();

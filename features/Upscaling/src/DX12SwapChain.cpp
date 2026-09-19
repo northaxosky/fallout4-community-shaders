@@ -295,6 +295,11 @@ namespace cs::features
 
 		_proxy.attach(new DXGISwapChainProxy(*this, *_swapChain));
 		_published = true;
+		if (_captureDevice12 && _callbacks.bindD3D12CaptureTarget) {
+			_callbacks.bindD3D12CaptureTarget(
+				_captureDevice12.get(),
+				a_desc.OutputWindow);
+		}
 		ClearSharedBuffers();
 		L->info("Published D3D11-facing {} proxy at {}x{} R8G8B8A8_UNORM",
 			_provider ? _provider->Name() : "plain D3D12", _innerDesc.Width,
@@ -304,6 +309,10 @@ namespace cs::features
 
 	HRESULT DX12SwapChain::Rollback() noexcept
 	{
+		if (_captureDevice12 && _callbacks.unbindD3D12CaptureTarget) {
+			_callbacks.unbindD3D12CaptureTarget(_captureDevice12.get());
+		}
+		_captureDevice12 = nullptr;
 		if (_callbacks.clearCapture) {
 			_callbacks.clearCapture();
 		}
@@ -507,6 +516,18 @@ namespace cs::features
 					"Streamline D3D12 device preparation failed; retaining raw "
 					"D3D12 presentation without Streamline consumers");
 			}
+		}
+		if (_streamline) {
+			(void)_streamline->GetNativeD3D12Device(
+				_device12.get(),
+				_captureDevice12.put());
+		} else {
+			_captureDevice12.copy_from(_device12.get());
+		}
+		if (!_captureDevice12) {
+			L->warn(
+				"Native D3D12 capture target is unavailable; RenderDoc temporal "
+				"captures will remain disabled");
 		}
 		cs::render::annotation::SetName(_device12.get(),
 			"Upscaling/FrameGeneration.Device");

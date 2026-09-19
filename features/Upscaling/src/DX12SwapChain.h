@@ -44,6 +44,8 @@ namespace cs::features
 		std::function<void()> clearCapture;
 		std::function<void(const char*)> recordFailure;
 		std::function<render::temporal::FrameGenerationRequest()> queryFrameState;
+		std::function<void(ID3D12Device*, HWND)> bindD3D12CaptureTarget;
+		std::function<void(ID3D12Device*)> unbindD3D12CaptureTarget;
 	};
 
 	class DX12SwapChain : public IDXGISwapChainProxyOwner
@@ -204,6 +206,7 @@ namespace cs::features
 		winrt::com_ptr<IDXGIAdapter> _adapter;
 		winrt::com_ptr<ID3D12DeviceFactory> _deviceFactory;
 		winrt::com_ptr<ID3D12Device> _device12;
+		winrt::com_ptr<ID3D12Device> _captureDevice12;
 		winrt::com_ptr<ID3D12CommandQueue> _queue;
 		std::array<SubmissionRecord, 2> _srSubmissions;
 		std::array<SubmissionRecord, 2> _presentSubmissions;
